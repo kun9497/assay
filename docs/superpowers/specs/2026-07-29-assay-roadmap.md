@@ -71,6 +71,12 @@ second one, without committing to hand-rolling every upstream feed.
 A finding matched through OSV picks up its Korean description, KISA severity, and KNVD link
 by joining on CVE ID. KVE entries do not produce findings of their own.
 
+**The join must read both `aliases` and `upstream`.** OSV schema 1.7 records carry the CVE
+link in `upstream`, not `aliases` — a sampled Alpine record has
+`"upstream":["CVE-2006-20001"]` and no `aliases` at all. Reading only one field makes the
+join fail silently, which is the worst kind of failure for enrichment: findings simply
+appear without Korean data and nothing reports an error.
+
 Many KNVD advisories describe domestic commercial software in prose with no ecosystem, no
 purl, and no package name — CPE-style *product* matching rather than package matching. It
 is also a poor fit for the current targets: container images and source trees do not
@@ -110,8 +116,8 @@ An *image* is Alpine 3.19; its packages are not. `Target.Distro` is read from
 
 ### D8 — `Package.Source` carries the source package
 
-Debian and RHEL advisories are written against **source** packages, while what is installed
-are **binary** packages:
+Distro advisories are written against **source** packages, while what is installed are
+**binary** packages:
 
 ```
 advisory:  source package  openssl     < 1.1.1n-0+deb11u3   vulnerable
@@ -120,8 +126,15 @@ installed: binary package  libssl1.1     1.1.1n-0+deb11u1
 
 Looking up `libssl1.1` finds nothing. Matching requires knowing its source is `openssl`.
 Without this the failure is a **false negative**, not a false positive — silent and far more
-dangerous. `/var/lib/dpkg/status` exposes a `Source:` field, so it is populated at catalog
-time. Borrowed from grype's dpkg matcher.
+dangerous. Borrowed from grype's dpkg matcher.
+
+**This applies to Alpine, not only Debian and RHEL.** A sampled OSV record carries
+`"purl":"pkg:apk/alpine/apache2?arch=source"` — Alpine advisories are source-keyed too.
+Since Alpine is the first distro (slice 2), indirect matching is needed there rather than
+being deferrable to later distro work.
+
+Population is per-cataloger: dpkg exposes `Source:` in `/var/lib/dpkg/status`, apk exposes
+`o:` (origin) in `/lib/apk/db/installed`.
 
 ### D9 — Version comparison stays per-ecosystem
 
@@ -172,9 +185,80 @@ database" situations. Storage size is not a constraint at this scale.
 schema-mismatched database produces exit code 2 with instructions — never an automatic
 download, and never a silently empty result.
 
+### D15 — Malicious-package reports are excluded, but `Advisory.Kind` is not
+
+OSV carries `MAL-*` records — reports that a package *is* malware, rather than that it
+contains a vulnerability. Measured against the real dumps (§3.1), they are the overwhelming
+majority of the data (see *Measured data volumes* in §3).
+
+Excluding them takes the slice 1 database from ~430 MB to ~86 MB.
+
+They are excluded for now because they are a **different finding class**, not because they
+are unimportant. They carry no CVSS severity, so `--fail-on` has no meaning for them, and
+the correct report is "remove this immediately" rather than a severity band. Supporting
+them properly means designing a second finding class, which is not slice 1 work.
+
+`Advisory.Kind` is added now regardless, because adding a field later means rebuilding the
+database. Providers set it; the current filter drops everything that is not
+`KindVulnerability`.
+
+**Note that this saves storage, not bandwidth.** OSV publishes one archive per ecosystem
+with no server-side filtering, so `db update` still downloads ~244 MB for slice 1 and
+discards most of it after parsing.
+
+### D16 — Withdrawn advisories are filtered at ingestion
+
+OSV records carry an optional `withdrawn` timestamp marking a retracted advisory. In the
+measured Go dump, 107 of 8,617 records (1.2%) are withdrawn; in a 4,000-record `MAL-*`
+sample, 52. Ingesting them produces findings for advisories that no longer stand — plain
+false positives.
+
+Providers drop them at ingestion rather than the matcher skipping them at query time, so a
+withdrawn advisory cannot leak through a code path that forgets to check.
+
+### D17 — "Unknown" is a first-class severity band
+
+**4,335 of 8,617 Go records (50.3%) carry no `severity` field at all.** This is not an edge
+case to paper over; it is half the data.
+
+Absent severity must never be silently coerced to `low` or `none`, because that turns a gap
+in the data into a passing build. `--fail-on` treats unknown as its own band, and findings
+with unknown severity are always reported, never filtered away by a threshold.
+
+Where severity is present it is a CVSS vector. The Go dump contains `CVSS_V3` (3,688) and
+`CVSS_V4` (1,100), so the parser handles both from the start — and per D13, vectors are
+stored and banded at query time rather than banded at build time.
+
 ---
 
 ## 3. Architecture
+
+### Measured data volumes
+
+Measured 2026-07-29 against the live OSV dumps. These numbers are what D4 (bbolt),
+D15 (excluding `MAL-*`), and D17 (unknown severity) rest on — re-measure before revisiting
+any of them.
+
+| Ecosystem | Vulnerability records | Size | `MAL-*` records | Size |
+|---|---:|---:|---:|---:|
+| Go | 8,599 | 22.1 MB | 18 | 0.0 MB |
+| npm | 7,004 | 19.2 MB | 216,865 | 323.2 MB |
+| PyPI | 13,010 | 44.9 MB | 11,579 | 20.1 MB |
+| **Slice 1 total** | **28,613** | **86.2 MB** | **228,462** | **343.3 MB** |
+
+Sizes are uncompressed JSON. Compressed download for slice 1 is ~244 MB regardless of
+filtering.
+
+For later slices: Alpine 4,401 records (3.8 MB compressed), Debian 64 MB compressed,
+Ubuntu 570 MB compressed. All 46 ecosystems total roughly 1.5 GB compressed.
+
+At 28,613 advisories and 86 MB, bbolt with JSON values is comfortably within range. Even
+the unfiltered 257,075 records at 430 MB would work — the decision has substantial headroom
+either way.
+
+**Red Hat data does exist in OSV** (25 MB compressed), contradicting an earlier assumption
+that it was absent or negligible. Whether it is backport-aware enough for accurate RHEL
+matching is a separate question, open until that work starts.
 
 ### Pipeline
 
@@ -245,9 +329,11 @@ type Package struct {
 }
 
 type Advisory struct {                // OSV shape  (D1)
-    ID       string                   // CVE-… | GHSA-… | KVE-…
-    Aliases  []string                 // carries the CVE↔KVE join
+    ID       string                   // CVE-… | GHSA-… | GO-… | ALPINE-… | KVE-…
+    Aliases  []string                 // OSV `aliases`  ─┬─ both carry the CVE↔KVE join (D3)
+    Upstream []string                 // OSV `upstream` ─┘
     Source   string                   // "osv" | "kisa" — provider provenance
+    Kind     Kind                     // vulnerability | malicious  (D15)
     Affected []Affected
     Severity []Severity               // stored as CVSS vectors, banded at query time (D13)
 }

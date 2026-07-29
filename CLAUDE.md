@@ -70,10 +70,25 @@ needed yet — adding one later means rebuilding the database.
 the fixed version differs per release. The distro itself lives on `Target`, not `Package`
 (D7): an image is Alpine 3.19, its packages are not.
 
-**`Package.Source` is load-bearing** (D8). Debian and RHEL advisories are written against
-*source* packages while installed packages are *binary* packages, so an advisory for source
-`openssl` is unreachable by looking up `libssl1.1`. Dropping this produces false
-**negatives**, which are silent. Populate it at catalog time from dpkg's `Source:` field.
+**`Package.Source` is load-bearing** (D8). Distro advisories are written against *source*
+packages while installed packages are *binary* packages, so an advisory for source `openssl`
+is unreachable by looking up `libssl1.1`. Dropping this produces false **negatives**, which
+are silent. It applies to Alpine too — its OSV purls carry `?arch=source` — so it is needed
+from slice 2. Populate at catalog time from dpkg's `Source:` or apk's `o:` field.
+
+**Drop withdrawn advisories at ingestion** (D16), not at query time, so no code path can
+forget the check. ~1% of records carry a `withdrawn` timestamp.
+
+**`MAL-*` records are excluded** (D15) — a different finding class with no severity and no
+fixed version. `Advisory.Kind` is stored anyway so enabling them later is a filter change,
+not a schema change.
+
+**Unknown severity is a band, not a default** (D17). Half of all advisories carry no
+`severity` field. Never coerce absent severity to `low` — findings with unknown severity are
+always reported and never filtered by `--fail-on`. Severity vectors may be CVSS v3 or v4.
+
+**Read both `aliases` and `upstream`** when joining on CVE ID (D3). OSV 1.7 puts the CVE
+link in `upstream`; records exist with `upstream` and no `aliases`.
 
 **Version comparison stays per-ecosystem** (D9). Debian epochs, RPM release ordering, semver
 pre-release precedence, and Maven ordering genuinely disagree. Never collapse `Comparer`

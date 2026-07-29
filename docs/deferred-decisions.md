@@ -30,6 +30,48 @@ server-side and open-source software proves substantial enough to matter on its 
 
 ---
 
+### Malicious-package reports (`MAL-*`)
+
+OSV carries `MAL-*` records — reports that a package **is** malware, not that it contains a
+vulnerability. They are dropped at ingestion (D15).
+
+**Why deferred.** Not because they are unimportant — an actively malicious dependency is
+more urgent than most CVEs — but because they are a **different finding class** and slice 1
+is not the place to design a second one. Measured against 4,000 sampled records:
+
+- **No severity, ever.** Zero of 4,000 carried a `severity` field, so `--fail-on high` has
+  nothing to compare against.
+- **No fix, ever.** One of 4,000 had a `fixed` event; the rest are `{"introduced": "0"}`
+  with no upper bound, meaning *every* version is malicious. There is no "upgrade to 1.2.4"
+  to report.
+- **Volume.** 216,865 of npm's 223,869 records. Ingesting them takes the slice 1 database
+  from ~86 MB to ~430 MB.
+
+**What supporting them properly would mean.** The verdict is categorically different — not
+"a vulnerable version is installed, upgrade it" but "this package is malware, remove it and
+assume compromise." That implies:
+
+- A separate finding class with its own presentation, not a severity row in the CVE table
+- Its own gating, since severity-based `--fail-on` cannot express it. A malicious package
+  arguably fails the build unconditionally
+- Surfacing `database_specific.iocs` where present — indicators such as attacker-controlled
+  domains. This is incident-response data with no analogue in a CVE finding: it tells you
+  what to search your egress logs for. Note it is sparse; a `MAL-2024-*` sample carried none
+- Handling `withdrawn` records, which appear here at a higher rate than in vulnerability
+  data (52 of 4,000 sampled)
+
+**Revisit when.** Slice 4 has established how findings are reported, so a second class has
+something to slot into. Worth pairing with the design work rather than bolting on.
+
+**Groundwork.** `Advisory.Kind` is stored from slice 1 onward, so enabling this is a
+provider filter change rather than a schema change. `withdrawn` filtering (D16) already
+applies to both classes.
+
+*Note: the upstream source is `ossf/malicious-packages`, aggregating findings from vendors
+such as Checkmarx. Provenance is in `credits`.*
+
+---
+
 ### Debian and Ubuntu package support
 
 First container slice covers Alpine only.
@@ -192,20 +234,38 @@ OS packages unmatchable. Scanning images directly avoids this — `/etc/os-relea
 first-hand — but the SBOM ingestion path must degrade honestly: report the packages as
 skipped, never silently treat them as clean.
 
-**Severity normalization.** OSV carries severity as CVSS vectors, which may be v2, v3.x,
-or v4, and some records carry none. `--fail-on` needs a single band from that. Absent
-severity must not silently become "low".
+**Severity normalization.** OSV carries severity as CVSS vectors — the Go dump contains both
+`CVSS_V3` and `CVSS_V4` — and **half of all records carry none at all** (4,335 of 8,617).
+`--fail-on` needs a single band from that, and absent severity must never become "low". See
+D17; this is common enough that it is a main path, not error handling.
+
+**Redundant `versions[]` arrays.** OSV records often enumerate every affected version
+alongside the `ranges` that already describe them, repeated per distro release. A sampled
+Alpine record spent most of its 4 KB on four copies of a ~90-entry version list. Storing
+them losslessly (D13) is the default, but they may dominate database size once distro data
+lands. Where `ranges` is present the enumeration is derivable; where it is absent it is the
+only matching data, so any pruning must be conditional. Measure during slice 2 before
+deciding.
 
 ---
 
-## Unverified assumptions
+## Assumptions
 
-Recorded because design decisions rest on them. Each was reasoned from memory rather than
-checked, and should be confirmed before the dependent work starts.
+Recorded because design decisions rest on them.
+
+### Resolved — measured 2026-07-29
+
+| Assumption | Outcome |
+|---|---|
+| OSV record volumes are in the hundreds of thousands, not millions | **Confirmed.** 257,075 records across slice 1 ecosystems, 28,613 after excluding `MAL-*`. bbolt and JSON hold, with headroom either way. Full numbers in the roadmap's *Measured data volumes*. |
+| OSV's RHEL-family coverage is thinner than Alpine/Debian | **Wrong as stated.** A `Red Hat` ecosystem exists (25 MB compressed). Whether it is backport-aware enough for accurate matching is still open — but the data is not absent. |
+| Distro advisories are source-keyed for Debian and RHEL | **True but understated.** Alpine is source-keyed too (`purl` carries `?arch=source`), so indirect matching is needed from slice 2 rather than later (D8). |
+| The CVE link for the KISA join lives in `aliases` | **Wrong.** OSV 1.7 records use `upstream`; a sampled Alpine record had `upstream` and no `aliases`. Both fields must be read (D3). |
+
+### Still open
 
 | Assumption | What depends on it |
 |---|---|
-| OSV per-ecosystem record volumes are in the hundreds of thousands, not millions | Choice of bbolt and JSON value encoding |
 | KNVD offers a machine-readable API, and its terms permit redistribution | The entire KISA provider; scraping would change its difficulty completely |
-| OSV's RHEL-family coverage is thinner than its Alpine/Debian coverage | Ordering of distro support |
+| OSV's Red Hat data is backport-aware enough for accurate RHEL matching | Whether RHEL support is viable through OSV at all, or needs Red Hat's own feed |
 | grype's default database-age behaviour is a warning, with enforcement opt-in | Only referenced as prior art, not depended on |

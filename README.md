@@ -149,6 +149,19 @@ bands come from stored CVSS vectors rather than being baked in at build time. Fi
 are not needed yet are stored anyway, because adding one later means rebuilding the
 database.
 
+Two things are dropped at ingestion. **Withdrawn advisories**, because a retracted advisory
+that still produces findings is a plain false positive. And **malicious-package reports**
+(`MAL-*`) — not because they matter less, but because they are a different finding class:
+they carry no severity, name no fixed version, and call for "remove this and assume
+compromise" rather than a severity band. They also account for roughly 80% of the raw data.
+See [`docs/deferred-decisions.md`](docs/deferred-decisions.md) for what supporting them
+properly would involve.
+
+**Around half of all advisories carry no severity at all.** `--fail-on` therefore treats
+unknown as its own band rather than coercing it to "low" — findings with unknown severity
+are always reported, never filtered out by a threshold. Turning a gap in the data into a
+passing build is exactly the failure mode the exit codes exist to prevent.
+
 ### Three things that are easy to get wrong later
 
 - **Distro packages carry their release in the ecosystem key** — `Alpine:v3.19`, not
@@ -156,10 +169,11 @@ database.
 - **The distro belongs to the target, not the package.** An *image* is Alpine 3.19; its
   packages are not. `Target.Distro` is read from `/etc/os-release` once and applies to every
   OS package inside.
-- **Packages carry their source package.** Debian and RHEL advisories are written against
-  *source* packages, but what is installed are *binary* packages — an advisory for source
-  `openssl` will never be found by looking up `libssl1.1`. Missing this produces false
-  *negatives*, which are silent. `Package.Source` exists for that lookup.
+- **Packages carry their source package.** Distro advisories are written against *source*
+  packages, but what is installed are *binary* packages — an advisory for source `openssl`
+  will never be found by looking up `libssl1.1`. Missing this produces false *negatives*,
+  which are silent. `Package.Source` exists for that lookup. This applies to Alpine as well
+  as Debian and RHEL: Alpine's OSV records carry `?arch=source` in their purl.
 
 ### Why per-ecosystem version comparison
 
