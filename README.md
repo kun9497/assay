@@ -14,8 +14,13 @@ affecting it.
 
 ## Status
 
-🚧 **Early development.** The interfaces below are the design target, not a shipped feature set.
-See [Roadmap](#roadmap) for what actually works today.
+🚧 **Early development. Nothing scans yet.** The CLI is scaffolding: `assay version` and
+`assay help` work, and `assay scan` deliberately exits 2 rather than reporting a clean
+result it has not earned.
+
+Everything below is the agreed design target. [Roadmap](#roadmap) tracks what is actually
+built; [`docs/superpowers/specs/2026-07-29-assay-roadmap.md`](docs/superpowers/specs/2026-07-29-assay-roadmap.md)
+carries the full design and the reasoning behind each decision.
 
 ## Scope
 
@@ -23,8 +28,8 @@ See [Roadmap](#roadmap) for what actually works today.
 vulnerability database, and matching the two. In the anchore ecosystem those are three
 separate projects — `syft`, `vunnel` + `grype-db`, and `grype`.
 
-Existing scanners are excellent and battle-tested; use them in production. Two things
-shape this one:
+Existing scanners are excellent and battle-tested; use them in production. Two things shape
+this one:
 
 - **Korean advisory data.** KISA/KNVD publishes advisories and KVE identifiers covering
   software that NVD and OSV pick up late or not at all. Mainstream scanners do not ingest it.
@@ -34,8 +39,12 @@ shape this one:
 Design goals, in order:
 
 1. **Explainable** — every finding says *why* it matched, not just *that* it did.
-2. **Offline-capable** — no network required at scan time once the DB is local.
+2. **Offline-capable** — no network at scan time; `assay db update` is the only command
+   that reaches out.
 3. **Boring output** — deterministic, diffable, CI-friendly.
+
+Configuration scanning, secret scanning, IaC, and Kubernetes posture are explicit
+non-goals. They share almost no code with vulnerability matching.
 
 ## Install
 
@@ -54,20 +63,23 @@ make build
 ## Usage
 
 ```bash
-# Refresh the local vulnerability database (the only command that needs network)
+# Build the local vulnerability database — the only command that needs network
 assay db update
+
+# What is in the database, and how current is it
+assay db status
 
 # Scan an existing SBOM
 assay scan sbom.cdx.json
-
-# Scan a directory
-assay scan dir:./my-project
 
 # Scan a container image
 assay scan alpine:3.19
 
 # Scan a binary
 assay scan ./bin/assay
+
+# Scan a directory
+assay scan dir:./my-project
 
 # Fail the build on high-severity findings
 assay scan alpine:3.19 --fail-on high
@@ -76,16 +88,40 @@ assay scan alpine:3.19 --fail-on high
 assay scan sbom.cdx.json --output json
 ```
 
+### The database
+
+Advisories are stored locally and refreshed out of band. A scan never downloads anything:
+if the database is missing or its schema does not match, `assay` exits 2 and tells you to
+run `assay db update` rather than silently fetching or silently reporting nothing.
+
+| OS | Location |
+|---|---|
+| Windows | `%LocalAppData%\assay\db\v1\` |
+| macOS | `~/Library/Caches/assay/db/v1/` |
+| Linux | `~/.cache/assay/db/v1/` |
+
+Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v1` component
+is the schema version — a schema change rebuilds into a new directory rather than migrating
+in place.
+
+`assay db status` reports, per provider, when the **upstream data** was current — not when
+you happened to download it. A mirror serving a three-month-old snapshot should not look
+fresh just because it was fetched this morning.
+
 ### Exit codes
 
 | Code | Meaning |
 |-----:|---------|
 | `0` | Scan completed; nothing at or above `--fail-on` |
 | `1` | Scan completed; findings at or above `--fail-on` |
-| `2` | Scan could not complete (bad input, DB error, etc.) |
+| `2` | Scan could not complete, or its result cannot be trusted |
 
-Separating "found something" from "could not run" matters in CI — a broken scanner
-should never look like a clean build.
+When more than one applies, **the highest wins**: `2` outranks `1` outranks `0`. An
+untrustworthy result outranks the content of the result.
+
+Separating "found something" from "could not run" matters in CI — a broken scanner should
+never look like a clean build. Packages `assay` cannot evaluate are reported as skipped
+with a count, never folded silently into a clean verdict.
 
 ## Architecture
 
@@ -95,9 +131,9 @@ ecosystem means writing one `Cataloger` and one `Comparer` — nothing else chan
 | Interface | Responsibility | Implementations |
 |---|---|---|
 | `Source` | Open a target for file access; carries layer provenance | image, dir, file, binary |
-| `Cataloger` | Files → `[]Package` | apk, dpkg, go-mod, go-binary, npm, jar |
-| `Store` | `Lookup(ecosystem, name) []Advisory` | local vulnerability database |
-| `Comparer` | `Compare(a, b string) int` | semver, PEP 440, apk, deb, rpm |
+| `Cataloger` | Files → `[]Package` | apk, dpkg, cyclonedx, go-mod, go-binary, npm, jar |
+| `Store` | Advisory lookup | bbolt |
+| `Comparer` | `Compare(a, b string) (int, error)` within one ecosystem | semver, PEP 440, apk, deb, rpm |
 | `Provider` | Upstream feed → `[]Advisory` | OSV, KISA |
 
 The database is orthogonal to the scan. `Provider`s populate it through `assay db update`;
@@ -105,57 +141,93 @@ a scan only ever reads. That is what makes offline operation the default rather 
 
 Advisories are stored in **OSV shape** — `affected[].ranges[]` carrying `introduced` /
 `fixed` events. OSV is the primary provider and passes through nearly unchanged; other
-sources normalize into the same form. Choosing a proven normalization target beats
-inventing one.
+sources normalize into the same form. Reusing a proven normalization target beats inventing
+one, and owning the schema is what lets KISA data in at all.
 
-Two consequences worth stating up front, because both are easy to get wrong later:
+Records are stored **losslessly**, with derived values computed at query time — severity
+bands come from stored CVSS vectors rather than being baked in at build time. Fields that
+are not needed yet are stored anyway, because adding one later means rebuilding the
+database.
+
+### Three things that are easy to get wrong later
 
 - **Distro packages carry their release in the ecosystem key** — `Alpine:v3.19`, not
-  `Alpine`. The fixed version of a package differs per release, so the release is part of
-  the lookup key.
+  `Alpine`. The fixed version differs per release, so the release is part of the lookup key.
 - **The distro belongs to the target, not the package.** An *image* is Alpine 3.19; its
-  packages are not. `Target.Distro` is read from `/etc/os-release` once and applies to
-  every OS package found inside.
+  packages are not. `Target.Distro` is read from `/etc/os-release` once and applies to every
+  OS package inside.
+- **Packages carry their source package.** Debian and RHEL advisories are written against
+  *source* packages, but what is installed are *binary* packages — an advisory for source
+  `openssl` will never be found by looking up `libssl1.1`. Missing this produces false
+  *negatives*, which are silent. `Package.Source` exists for that lookup.
 
 ### Why per-ecosystem version comparison
 
 Version comparison is not universal — Debian epochs, RPM release ordering, semver
 pre-release precedence, and Maven's ordering rules all disagree with each other. A single
-`compareVersions` function is the bug factory this design avoids, and the reason
-`Comparer` is per-ecosystem.
+`compareVersions` function is the bug factory this design avoids, and the reason `Comparer`
+is per-ecosystem.
+
+`Comparer` returns an error rather than only an ordering, because version strings from real
+systems are sometimes malformed and treating an unparseable version as "not vulnerable"
+would be a miss.
 
 ## Roadmap
 
-Ordered by dependency — everything below builds on the core types and `Store`.
+Cut along working paths rather than architectural layers — a layer on its own cannot run,
+and a design that cannot run cannot be validated.
 
-| | Stage | Contents |
-|---|---|---|
-| ① | **Core** | `Target` / `Package` / `Advisory` types, `Store`, `Matcher`, per-ecosystem `Comparer` |
-| ② | **Database** | OSV ingestion, local store, `assay db update`, KISA enrichment |
-| ③ | **Containers** | Registry pull, layer extraction, apk / dpkg catalogers |
-| ④ | **Binaries** | Go `debug/buildinfo` first; other languages judged individually |
-| ⑤ | **Reporting** | table / JSON / SARIF, `--fail-on`, explain mode |
+**① Matching core** — CycloneDX SBOM → OSV-backed store → matcher → table output, for Go,
+npm, and PyPI. Fixes the core types and interfaces.
 
+- [ ] Core types, `Store` / `Comparer` / `Provider` interfaces
+- [ ] OSV provider and local bbolt store
+- [ ] `assay db update`, `assay db status`
 - [ ] CycloneDX SBOM ingestion
-- [ ] OSV provider and local vulnerability store
 - [ ] Per-ecosystem version comparison and range matching
-- [ ] KISA/KNVD enrichment — Korean descriptions, KVE aliases, severity
-- [ ] Container image scanning (Alpine first, then Debian/Ubuntu)
+- [ ] Table output
+
+**② Containers** — registry pull, layer extraction, `/etc/os-release`, apk cataloging.
+Highest design risk, so it comes early rather than late.
+
+- [ ] Container image scanning (Alpine first)
+
+**③ Filesystem and binary targets** — depends on neither ② nor ④, so it can slot in
+anywhere.
+
 - [ ] Go binary scanning via `debug/buildinfo`
-- [ ] Directory scanning (Go modules, npm, PyPI)
+- [ ] Directory scanning (Go modules)
+
+**④ Verdicts and output** — where exit code 1 first becomes reachable.
+
 - [ ] `--fail-on` severity gating
-- [ ] JSON / SARIF / table output
+- [ ] JSON / SARIF output
 - [ ] Explain mode — show the matching evidence for a single finding
-- [ ] SPDX SBOM ingestion
+
+**⑤ KISA enrichment** — Korean descriptions, KVE aliases, and severity joined onto matched
+findings.
+
+- [ ] KNVD provider and enrichment join
+
+Correctness is checked by **differential testing against grype** at every stage. Exact
+agreement is not expected — the data sources differ — but a large divergence means the
+matcher is wrong.
 
 Binary scanning depends entirely on what the language leaves behind. Go and Java embed
 enough metadata to recover a dependency list; Rust does only when built with
 `cargo-auditable`; stripped C/C++ leaves nothing reliable. Support is decided per language
 rather than promised as a category.
 
+Notable absences — Debian and RHEL support, VEX suppression, prebuilt database artifacts,
+database age enforcement — are deliberate.
+[`docs/deferred-decisions.md`](docs/deferred-decisions.md) records what was postponed, why,
+what should trigger revisiting it, and which groundwork is already in place.
+
 ## Contributing
 
-Issues and PRs are welcome.
+Issues and PRs are welcome. Before proposing a feature, check
+[`docs/deferred-decisions.md`](docs/deferred-decisions.md) — the obvious gaps are mostly
+deliberate, and it records what would change the decision.
 
 ## Disclaimer
 

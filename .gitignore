@@ -16,6 +16,8 @@ coverage.*
 *.sbom.json
 *.cdx.json
 *.spdx.json
+# ...but SBOM fixtures under testdata/ are committed on purpose.
+!testdata/**/*.json
 
 # Editors
 .idea/
