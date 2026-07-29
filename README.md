@@ -112,6 +112,12 @@ Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v1`
 is the schema version — a schema change rebuilds into a new directory rather than migrating
 in place.
 
+Expect roughly **86 MB on disk** for the first set of ecosystems (Go, npm, PyPI) — 28,613
+advisories, measured against the live OSV dumps. The initial `db update` downloads about
+244 MB to produce that: OSV publishes one archive per ecosystem with no server-side
+filtering, and most of npm's archive is malicious-package reports that are discarded on
+ingestion.
+
 `assay db status` reports, per provider, when the **upstream data** was current — not when
 you happened to download it. A mirror serving a three-month-old snapshot should not look
 fresh just because it was fetched this morning.
@@ -120,8 +126,8 @@ fresh just because it was fetched this morning.
 
 | Code | Meaning |
 |-----:|---------|
-| `0` | Scan completed; nothing at or above `--fail-on` |
-| `1` | Scan completed; findings at or above `--fail-on` |
+| `0` | Scan completed; nothing tripped a gate |
+| `1` | Scan completed; findings at or above `--fail-on`, or unrated findings with `--fail-on-unknown` |
 | `2` | Scan could not complete, or its result cannot be trusted |
 
 When more than one applies, **the highest wins**: `2` outranks `1` outranks `0`. An
@@ -229,7 +235,7 @@ anywhere.
 
 **④ Verdicts and output** — where exit code 1 first becomes reachable.
 
-- [ ] `--fail-on` severity gating
+- [ ] `--fail-on` severity gating, plus `--fail-on-unknown` for unrated findings
 - [ ] JSON / SARIF output
 - [ ] Explain mode — show the matching evidence for a single finding
 
