@@ -84,8 +84,15 @@ fixed version. `Advisory.Kind` is stored anyway so enabling them later is a filt
 not a schema change.
 
 **Unknown severity is a band, not a default** (D17). Half of all advisories carry no
-`severity` field. Never coerce absent severity to `low` — findings with unknown severity are
-always reported and never filtered by `--fail-on`. Severity vectors may be CVSS v3 or v4.
+`severity` field. Never coerce absent severity to `low`; `unknown` sits outside the
+`low < medium < high < critical` ordering rather than below it. Unknown findings are always
+reported and always counted in the summary, do not trip `--fail-on <band>` on their own, and
+are gated only by the explicit `--fail-on-unknown`. Severity vectors may be CVSS v3 or v4.
+
+**Flag names follow grype where semantics match** (D18) — it aids migration and makes the
+differential testing scriptable. When a shared name gains different behaviour, add a row to
+the divergence table in the roadmap. A silently divergent flag is worse than a differently
+named one.
 
 **Read both `aliases` and `upstream`** when joining on CVE ID (D3). OSV 1.7 puts the CVE
 link in `upstream`; records exist with `upstream` and no `aliases`.

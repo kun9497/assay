@@ -84,9 +84,17 @@ assay scan dir:./my-project
 # Fail the build on high-severity findings
 assay scan alpine:3.19 --fail-on high
 
+# ...and on findings whose severity is unrated (see below)
+assay scan alpine:3.19 --fail-on high --fail-on-unknown
+
 # Machine-readable output
 assay scan sbom.cdx.json --output json
 ```
+
+Flag names follow grype where the semantics match, so anything you already run against
+grype should mean the same thing here. Where behaviour diverges it is documented rather than
+left to be discovered — `--fail-on-unknown` is currently the only addition with no grype
+equivalent.
 
 ### The database
 
@@ -157,10 +165,17 @@ compromise" rather than a severity band. They also account for roughly 80% of th
 See [`docs/deferred-decisions.md`](docs/deferred-decisions.md) for what supporting them
 properly would involve.
 
-**Around half of all advisories carry no severity at all.** `--fail-on` therefore treats
-unknown as its own band rather than coercing it to "low" — findings with unknown severity
-are always reported, never filtered out by a threshold. Turning a gap in the data into a
-passing build is exactly the failure mode the exit codes exist to prevent.
+**Around half of all advisories carry no severity at all.** Coercing those to "low" would
+turn a gap in the data into a passing build — exactly the failure the exit codes exist to
+prevent. So `unknown` is its own band, outside the `low < medium < high < critical`
+ordering rather than at the bottom of it:
+
+- Unknown findings are **always reported**. A threshold decides what fails the build, never
+  what appears in the output, and the unknown count is always in the summary.
+- Unknown does **not** trip `--fail-on <band>` by itself. With half of all advisories
+  unrated, the alternative would fire on every scan.
+- `--fail-on-unknown` gates them **explicitly**, because the two rules above still let an
+  unrated critical vulnerability exit 0 — printed, but passing.
 
 ### Three things that are easy to get wrong later
 

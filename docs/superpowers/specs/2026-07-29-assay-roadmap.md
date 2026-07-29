@@ -222,12 +222,52 @@ withdrawn advisory cannot leak through a code path that forgets to check.
 case to paper over; it is half the data.
 
 Absent severity must never be silently coerced to `low` or `none`, because that turns a gap
-in the data into a passing build. `--fail-on` treats unknown as its own band, and findings
-with unknown severity are always reported, never filtered away by a threshold.
+in the data into a passing build. `unknown` is its own band, outside the
+`low < medium < high < critical` ordering rather than at the bottom of it.
+
+Three behaviours follow, and the third exists because the first two are not enough:
+
+1. **Unknown findings are always reported.** A severity threshold filters what fails the
+   build, never what appears in the output.
+2. **Unknown does not trip `--fail-on <band>` by itself.** With half of all advisories
+   unrated, the alternative makes the flag fire on every scan and therefore useless.
+3. **`--fail-on-unknown` gates them explicitly.** Without it, (1) and (2) together still let
+   an unrated critical vulnerability exit 0 — printed, but passing. That is the same failure
+   as coercing to `low`, just louder. The flag is opt-in because defaulting it on would
+   reproduce the problem in (2).
+
+```bash
+assay scan img --fail-on high                      # unknown passes; count shown in summary
+assay scan img --fail-on high --fail-on-unknown    # unknown also exits 1
+```
+
+The unknown count belongs in the summary unconditionally, on both output paths — a
+threshold that hides how much it could not judge is not a threshold.
 
 Where severity is present it is a CVSS vector. The Go dump contains `CVSS_V3` (3,688) and
 `CVSS_V4` (1,100), so the parser handles both from the start — and per D13, vectors are
 stored and banded at query time rather than banded at build time.
+
+**The 50% figure may not be permanent.** Records without a CVSS vector frequently alias a
+CVE that NVD does score. Joining NVD severity as an enrichment source — the same mechanism
+as KISA (D3) — could fill much of the gap. Recorded as a possibility, not a plan.
+
+### D18 — CLI flag names follow grype where the semantics match
+
+`--fail-on`, `--output`, and similar names are shared with grype deliberately. Flag naming
+is close to genre convention, familiarity carries over for anyone migrating, and the
+differential testing that serves as the primary correctness check (§5) is simpler to script
+when both tools take the same arguments.
+
+The risk this creates is not the shared name but **divergent behaviour under a shared name**.
+Where assay differs, the difference is documented rather than left to be discovered:
+
+| Flag | Difference from grype |
+|---|---|
+| `--fail-on-unknown` | No grype equivalent. Exists because unknown is not in assay's severity ordering (D17). |
+
+Add a row here whenever a shared name gains different semantics. A silently divergent flag
+is worse than a differently named one.
 
 ---
 
@@ -430,9 +470,9 @@ stalls, this is the detour.
 
 ### Slice 4 — Verdicts and output
 
-`--fail-on`, JSON / SARIF, explain mode. **Exit code 1 first becomes reachable here.**
-Severity banding from stored CVSS vectors lands here (D13), which is why slice 1 stores
-vectors it does not yet use.
+`--fail-on`, `--fail-on-unknown`, JSON / SARIF, explain mode. **Exit code 1 first becomes
+reachable here.** Severity banding from stored CVSS vectors lands here (D13), which is why
+slice 1 stores vectors it does not yet use.
 
 **Done when** output is deterministic and diffable, and explain mode prints a single
 finding's `Evidence`.
