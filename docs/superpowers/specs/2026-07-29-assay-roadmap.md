@@ -1,5 +1,7 @@
 # assay — architecture and roadmap
 
+*English · [한국어](2026-07-29-assay-roadmap.ko.md)*
+
 **Date:** 2026-07-29
 **Status:** Agreed. Supersedes the scaffold's original framing.
 

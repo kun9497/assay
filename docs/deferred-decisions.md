@@ -1,5 +1,7 @@
 # Deferred decisions
 
+*English · [한국어](deferred-decisions.ko.md)*
+
 Everything here was considered and postponed on purpose — none of it was overlooked.
 Each entry records why it was deferred, what should trigger revisiting it, and any
 groundwork already in place so that picking it up later stays cheap.
@@ -26,7 +28,9 @@ for the current targets: container images and source trees do not contain 한컴
 server-side and open-source software proves substantial enough to matter on its own.
 
 **Groundwork.** `Advisory.Source` records which provider supplied a record, and
-`Advisory.Aliases` already carries the CVE↔KVE mapping the join relies on.
+`Advisory.Aliases` plus `Advisory.Upstream` carry the CVE↔KVE mapping the join relies on —
+both, because OSV 1.7 puts the CVE link in `upstream` and reading only one field makes the
+join fail silently (D3).
 
 ---
 

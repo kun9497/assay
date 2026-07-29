@@ -2,6 +2,8 @@
 
 > **SBOM-driven vulnerability scanner for containers, binaries, and filesystems.**
 
+*English · [한국어](README.ko.md)*
+
 `assay` generates a software bill of materials from a container image, binary, or
 directory — or ingests one you already have — and reports the known vulnerabilities
 affecting it.

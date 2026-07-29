@@ -144,6 +144,58 @@ differ); a large divergence means the matcher is wrong.
 epochs, apk `-rN` suffixes, semver pre-release precedence, PEP 440 `.post` / `.dev`. That is
 where false negatives originate.
 
+## Documentation is bilingual
+
+Every document ships as a pair: `X.md` (English) and `X.ko.md` (Korean). Currently
+`README`, `docs/deferred-decisions`, and the roadmap spec.
+
+**English is canonical.** Decisions are written there first; the Korean version follows.
+When they disagree, English is correct and the Korean copy is stale.
+
+**Update both in the same commit.** A translation that lags is worse than no translation —
+it reads as authoritative while being wrong. If you change a decision in the roadmap, the
+`.ko.md` change belongs in that same commit, not a follow-up.
+
+Keep identifiers, flags, and file paths in English on both sides (`Package.Source`,
+`--fail-on-unknown`, `/etc/os-release`). Translate the prose around them.
+
+## Delegating to subagents
+
+Run the main loop on the work that needs full context; delegate work that is bounded,
+independently verifiable, and parallel. The rule of thumb: **if the task's output is a
+conclusion or an artifact you can check, delegate it. If it requires knowing why D1–D18 were
+decided, keep it.**
+
+**Delegate**
+
+| Work | Why it fits | Model |
+|---|---|---|
+| Per-ecosystem version-comparison research — extract the ordering rules from a spec and produce a table-driven test case list | Bounded, one agent per ecosystem, fully parallel, output is checkable against the spec | Opus |
+| Differential runs against grype — scan the same target with both, report divergences | Mechanical to run, and the output is a diff someone still has to judge | Sonnet |
+| Data measurement against upstream dumps — record counts, size splits, field-presence surveys | Exactly the shape of the 2026-07-29 OSV measurement; produces numbers | Sonnet |
+| Korean translation of a finished English document | Bounded, verifiable side by side | Sonnet |
+| Codebase search across many files | Read-heavy, only the conclusion matters | Haiku or `Explore` |
+| Bulk mechanical edits with a stated pattern | No judgement involved | Haiku |
+
+**Do not delegate**
+
+- **`Comparer` implementations.** Researching the rules parallelizes; writing the comparison
+  does not. A subtle ordering bug is a **false negative** — silent, and the exact failure the
+  per-ecosystem design exists to prevent (D9). Write these in the main loop and review the
+  test table line by line.
+- **`Matcher` and `Evidence`.** Explainability is goal #1, and the reasoning that makes a
+  finding explainable is the thing being built.
+- **Core types and interfaces.** They are cross-cutting; an agent seeing one slice will
+  optimize for that slice.
+- **Anything that would add or revise a `D` decision.** Those come from conversation with the
+  user, not from an agent's judgement.
+
+**Model assignment.** Match the model to the failure mode, not the task size. Use the
+stronger model where a wrong answer is *quiet* — version-ordering rules, severity
+normalization, anything that turns into a missed vulnerability. Use a cheaper model where a
+wrong answer is *loud* — a failed build, a diff that obviously does not apply, a search that
+returns nothing.
+
 ## Conventions
 
 - No third-party dependencies yet (`go.mod` has no `require` block). Adding one is a real
