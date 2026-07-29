@@ -1,0 +1,23 @@
+# Normalize line endings to LF in the repository.
+# Contributors on Windows would otherwise commit CRLF, which breaks the
+# Makefile and any shell script executed by CI on Linux.
+* text=auto eol=lf
+
+*.go   text eol=lf
+*.mod  text eol=lf
+*.sum  text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.md   text eol=lf
+*.sh   text eol=lf
+Makefile text eol=lf
+
+# Batch files genuinely need CRLF.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# Never touch binaries.
+*.png  binary
+*.jpg  binary
+*.gz   binary
+*.zip  binary

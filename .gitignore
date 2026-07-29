@@ -1,0 +1,33 @@
+# Build output.
+# Leading slash matters: a bare "assay" would also ignore the cmd/assay/ source
+# directory, since gitignore patterns without a slash match at any depth.
+/bin/
+/dist/
+/assay
+/assay.exe
+
+# Test / coverage
+*.test
+*.out
+coverage.*
+
+# Local vulnerability DB and scan artifacts
+/.assay/
+*.sbom.json
+*.cdx.json
+*.spdx.json
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Never commit credentials or signing keys
+*.pem
+*.key
+!testdata/**/*.key
+.env
