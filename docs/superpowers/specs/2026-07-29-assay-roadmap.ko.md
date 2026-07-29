@@ -147,7 +147,7 @@ Debian의 epoch, RPM의 release 순서, semver의 pre-release 우선순위, Mave
 ### D11 — 종료 코드 우선순위는 계약이다
 
 ```
-2 (돌지 못함 / 신뢰 불가)  >  1 (--fail-on 이상의 finding)  >  0 (클린)
+2 (could not run / cannot be trusted)  >  1 (findings at or above --fail-on)  >  0 (clean)
 ```
 
 **신뢰할 수 없는 결과가 결과의 내용보다 우선합니다.** 종료 코드는 CLI 계약이라 나중에 바꾸면 남의
@@ -178,9 +178,9 @@ CI가 깨집니다. 그래서 이를 필요로 하는 강제 기능이 미뤄져
 
 ### D15 — 악성 패키지 신고는 제외하되, `Advisory.Kind`는 제외하지 않는다
 
-OSV에는 `MAL-*` 레코드가 있습니다. 패키지가 취약점을 포함한다가 아니라 패키지 자체가 악성코드라는
-신고입니다. 실제 덤프로 측정한 결과 데이터의 압도적 다수를 차지합니다(§3의 *측정된 데이터 규모*
-참조).
+OSV에는 `MAL-*` 레코드가 있습니다. 패키지가 취약점을 포함한다가 아니라 패키지 자체가
+**악성코드**라는 신고입니다. 실제 덤프로 측정한 결과 데이터의 압도적 다수를 차지합니다
+(§3의 *측정된 데이터 규모* 참조).
 
 제외하면 슬라이스 1 데이터베이스가 약 430 MB에서 약 86 MB로 줄어듭니다.
 
@@ -226,8 +226,8 @@ OSV 레코드에는 철회를 표시하는 선택적 `withdrawn` 타임스탬프
    재현하므로 옵트인입니다.
 
 ```bash
-assay scan img --fail-on high                      # unknown 통과, 요약에 개수 표시
-assay scan img --fail-on high --fail-on-unknown    # unknown도 exit 1
+assay scan img --fail-on high                      # unknown passes; count shown in summary
+assay scan img --fail-on high --fail-on-unknown    # unknown also exits 1
 ```
 
 unknown 개수는 두 출력 경로 모두에 **조건 없이** 들어갑니다. **판단하지 못한 양을 숨기는 임계값은
@@ -382,12 +382,18 @@ type Finding struct {
 <os.UserCacheDir()>/assay/db/v1/vulnerability.db      override: ASSAY_DB_DIR
 
 buckets:
-  advisories   "<ecosystem>\x00<name>"     → []Advisory    primary lookup
-  by-source    "<ecosystem>\x00<source>"   → []Advisory    indirect matching (D8)
-  by-id        "<advisory-id>"             → Advisory      explain, alias resolution
+  advisories   "<ecosystem>\x00<name>"     → []AdvisoryID  primary lookup
+  by-source    "<ecosystem>\x00<source>"   → []AdvisoryID  indirect matching (D8)
+  by-id        "<advisory-id>"             → Advisory      the record itself, stored once
   enrichment   "<cve-id>"                  → Enrichment    KISA (D3)
   meta         "schema" | "built-at" | "providers"
 ```
+
+**조회 버킷은 레코드가 아니라 권고 ID를 담습니다.** 한 권고가 여러 패키지에 영향을 주는 일이
+흔합니다 — Go 덤프 측정 결과 8,510건 중 1,452건이 둘 이상의 패키지를 지목하고, 최대 22개입니다 —
+그래서 패키지를 키로 레코드를 직접 저장하면 같은 것이 반복 저장됩니다. 측정된 증가율은 1.44배이고,
+`by-id`가 자체 사본을 갖는 것까지 합치면 순진한 레이아웃은 21.9 MB 데이터를 53.6 MB로 만듭니다.
+ID를 `by-id`로 해석하는 데 점 조회가 한 번 더 들지만 마이크로초 단위입니다.
 
 | OS | 경로 |
 |---|---|
@@ -519,6 +525,6 @@ KNVD provider → `enrichment` 버킷 → CVE ID 조인 → 리포트의 한국�
 ## 7. 관련 문서
 
 - [`README.ko.md`](../../../README.ko.md) — 사용자 대상 설명
-- [`CLAUDE.md`](../../../CLAUDE.md) — Claude Code 세션용 작업 제약 (영문만)
+- [`CLAUDE.md`](../../../CLAUDE.md) — Claude Code 세션용 작업 제약
 - [`docs/deferred-decisions.ko.md`](../../deferred-decisions.ko.md) — 미룬 작업, 알려진 함정,
   미검증 가정
