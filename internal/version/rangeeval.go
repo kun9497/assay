@@ -2,6 +2,7 @@ package version
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/kun9497/assay/internal/advisory"
 )
@@ -40,7 +41,12 @@ func AffectsVersion(c Comparer, v string, a advisory.Affected) (bool, Evidence, 
 	for _, known := range a.Versions {
 		cmp, err := c.Compare(v, known)
 		if err != nil {
-			continue // an unorderable entry in the list is not a reason to fail the whole check
+			// Surface it. The left operand is the installed version and is
+			// identical on every iteration, so an unparseable one fails every
+			// entry — skipping would turn a 100% failure rate into a silent
+			// clean verdict, which is the exact false negative this package
+			// exists to prevent.
+			return false, Evidence{}, fmt.Errorf("compare %q to listed version %q: %w", v, known, err)
 		}
 		if cmp == 0 {
 			return true, Evidence{
@@ -51,14 +57,23 @@ func AffectsVersion(c Comparer, v string, a advisory.Affected) (bool, Evidence, 
 	return false, Evidence{}, nil
 }
 
-// InRange walks an OSV range's events in order, tracking whether v is currently
-// inside an open window. Events are half-open [introduced, fixed) with the
-// exception of last_affected, which is inclusive.
+// InRange walks an OSV range's events in ascending version order, tracking
+// whether v is currently inside an open window. Windows are half-open
+// [introduced, fixed), with the exception of last_affected, which is inclusive.
 func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 	// GIT ranges carry commit SHAs, not versions. Skipping is correct; parsing
 	// would error on data that was never meant for a Comparer.
 	if r.Type == advisory.RangeGit {
 		return false, Evidence{}, nil
+	}
+
+	// OSV only *recommends* that events arrive sorted, and its reference
+	// algorithm sorts before walking. An advisory that lists a later window
+	// first is well-formed, and walking it in file order returns "not
+	// vulnerable" with no error — a silent miss on valid input.
+	events, err := sortEvents(c, r.Events)
+	if err != nil {
+		return false, Evidence{}, err
 	}
 
 	var (
@@ -67,7 +82,7 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 	)
 	ev.RangeType = r.Type
 
-	for _, e := range r.Events {
+	for _, e := range events {
 		switch {
 		case e.Introduced != "":
 			ge, err := atLeast(c, v, e.Introduced)
@@ -87,7 +102,10 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 			}
 			if inside && cmp >= 0 {
 				inside = false // exclusive upper bound
-			} else if inside {
+			} else if inside && ev.Fixed == "" && ev.LastAffected == "" {
+				// Only the bound closing the window v actually sits in. A
+				// later window's bound would name the wrong fix version, and
+				// wrong remediation advice is worse than none.
 				ev.Fixed = e.Fixed
 			}
 
@@ -98,7 +116,7 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 			}
 			if inside && cmp > 0 {
 				inside = false // inclusive upper bound: equal is still affected
-			} else if inside {
+			} else if inside && ev.Fixed == "" && ev.LastAffected == "" {
 				ev.LastAffected = e.LastAffected
 			}
 		}
@@ -108,6 +126,53 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 		ev.Reason = describe(v, ev)
 	}
 	return inside, ev, nil
+}
+
+// eventVersion returns whichever bound an event carries, or "" for an event
+// this slice does not act on (a bare `limit`, or a malformed empty event).
+func eventVersion(e advisory.Event) string {
+	switch {
+	case e.Introduced != "":
+		return e.Introduced
+	case e.Fixed != "":
+		return e.Fixed
+	case e.LastAffected != "":
+		return e.LastAffected
+	}
+	return ""
+}
+
+// sortEvents orders events by the version each carries, with the introduced
+// sentinel first.
+//
+// Every bound is validated before sorting so the comparator cannot fail. A
+// comparator that swallowed errors would silently produce an arbitrary order,
+// and an arbitrary order here is a wrong verdict with no error attached —
+// strictly worse than refusing to evaluate the range.
+func sortEvents(c Comparer, in []advisory.Event) ([]advisory.Event, error) {
+	out := append([]advisory.Event(nil), in...)
+	for _, e := range out {
+		ver := eventVersion(e)
+		if ver == "" || ver == introducedSentinel {
+			continue
+		}
+		if _, err := c.Compare(ver, ver); err != nil {
+			return nil, fmt.Errorf("range event bound %q: %w", ver, err)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		vi, vj := eventVersion(out[i]), eventVersion(out[j])
+		// The sentinel is negative infinity, so it sorts before everything.
+		if vi == introducedSentinel {
+			return vj != introducedSentinel
+		}
+		if vj == introducedSentinel {
+			return false
+		}
+		cmp, _ := c.Compare(vi, vj) // cannot fail: validated above
+		return cmp < 0
+	})
+	return out, nil
 }
 
 // atLeast reports whether v >= bound, resolving the OSV sentinel first.

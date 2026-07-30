@@ -107,6 +107,78 @@ func TestInRange_InvalidVersionErrors(t *testing.T) {
 	}
 }
 
+func TestInRange_UnsortedEvents(t *testing.T) {
+	// OSV only recommends sorted events, so a later window listed first is
+	// well-formed. Walking in file order returns false with no error — a
+	// silent miss on valid input.
+	r := rng(advisory.RangeSemver,
+		intro("2.0.0"), fixed("3.0.0"),
+		intro("1.0.0"), fixed("1.5.0"))
+	for _, tc := range []struct {
+		v    string
+		want bool
+	}{
+		{"2.5.0", true},  // inside the window that was listed first
+		{"1.2.0", true},  // inside the window that was listed second
+		{"1.7.0", false}, // between the two windows
+		{"3.0.0", false}, // at the upper fix, exclusive
+	} {
+		got, _, err := InRange(SemVer{}, tc.v, r)
+		if err != nil {
+			t.Fatalf("InRange(%q) error: %v", tc.v, err)
+		}
+		if got != tc.want {
+			t.Errorf("InRange(%q) over unsorted events = %v, want %v", tc.v, got, tc.want)
+		}
+	}
+}
+
+func TestInRange_MalformedBoundErrors(t *testing.T) {
+	// A bound that cannot be ordered must surface. Sorting on an unorderable
+	// bound would otherwise pick an arbitrary order and return a confident
+	// wrong verdict.
+	_, _, err := InRange(SemVer{}, "1.2.3",
+		rng(advisory.RangeSemver, intro("1.0.0"), fixed("not-a-version")))
+	if !errors.Is(err, ErrInvalid) {
+		t.Errorf("InRange with a malformed bound err = %v, want ErrInvalid", err)
+	}
+}
+
+func TestInRange_EvidenceNamesTheContainingWindow(t *testing.T) {
+	// With several maintenance branches, evidence must cite the fix for the
+	// window the version is actually in. Naming a later window's fix sends the
+	// user to the wrong upgrade.
+	r := rng(advisory.RangeSemver,
+		intro("1.0.0"), fixed("1.5.0"),
+		intro("2.0.0"), fixed("3.0.0"))
+	got, ev, err := InRange(SemVer{}, "1.2.0", r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got {
+		t.Fatal("InRange = false, want true")
+	}
+	if ev.Introduced != "1.0.0" || ev.Fixed != "1.5.0" {
+		t.Errorf("Evidence = introduced %q fixed %q, want 1.0.0 / 1.5.0",
+			ev.Introduced, ev.Fixed)
+	}
+}
+
+func TestAffectsVersion_EnumeratedPropagatesCompareError(t *testing.T) {
+	// The installed version is the left operand on every iteration, so an
+	// unparseable one fails every entry. Skipping would turn a total failure
+	// into a silent clean verdict.
+	a := advisory.Affected{
+		Ecosystem: "Go",
+		Name:      "x",
+		Versions:  []string{"1.0.0", "2.0.0"},
+	}
+	_, _, err := AffectsVersion(SemVer{}, "not-a-version", a)
+	if !errors.Is(err, ErrInvalid) {
+		t.Errorf("AffectsVersion err = %v, want ErrInvalid", err)
+	}
+}
+
 func TestInRange_Evidence(t *testing.T) {
 	_, ev, err := InRange(SemVer{}, "1.2.3",
 		rng(advisory.RangeSemver, intro("1.0.0"), fixed("2.0.0")))
