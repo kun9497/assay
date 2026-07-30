@@ -43,8 +43,8 @@ func buildTestDB(t *testing.T, advs ...advisory.Advisory) string {
 	if err != nil {
 		t.Fatalf("SetMeta: %v", err)
 	}
-	if err := w.Commit(); err != nil {
-		t.Fatalf("Commit: %v", err)
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
 	}
 	return path
 }
@@ -136,7 +136,7 @@ func TestLookupBySource(t *testing.T) {
 	if err := w.Put(a); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Commit(); err != nil {
+	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -189,6 +189,26 @@ func TestOpenMissing(t *testing.T) {
 	}
 }
 
+func TestOpenIncomplete(t *testing.T) {
+	// A build interrupted after Create and some Puts, before SetMeta. Its
+	// buckets exist and its lookups would succeed with empty results, which is
+	// indistinguishable from a clean scan — so Open must refuse it.
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Put(sample("GHSA-partial", "Go", "x")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil { // no SetMeta: the build never finished
+		t.Fatal(err)
+	}
+	if _, err := Open(path); !errors.Is(err, ErrIncomplete) {
+		t.Errorf("Open(interrupted build) err = %v, want ErrIncomplete", err)
+	}
+}
+
 func TestOpenSchemaMismatch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v.db")
 	w, err := Create(path)
@@ -198,7 +218,7 @@ func TestOpenSchemaMismatch(t *testing.T) {
 	if err := w.setSchemaForTest(SchemaVersion + 1); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Commit(); err != nil {
+	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Open(path); !errors.Is(err, ErrSchemaMismatch) {

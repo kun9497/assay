@@ -22,6 +22,11 @@ const SchemaVersion = 1
 var (
 	ErrNotFound       = errors.New("vulnerability database not found")
 	ErrSchemaMismatch = errors.New("vulnerability database schema mismatch")
+	// ErrIncomplete marks a database whose build was interrupted. It exists
+	// because the alternative is worse than an error: a half-built database
+	// answers lookups with empty results and no error, which is
+	// indistinguishable from a clean scan.
+	ErrIncomplete = errors.New("vulnerability database is incomplete")
 )
 
 type Store interface {
@@ -31,6 +36,15 @@ type Store interface {
 	// the interface does not change under its first real consumer.
 	LookupBySource(ecosystem, sourceName string) ([]advisory.Advisory, error)
 	Meta() (Meta, error)
+	Close() error
+}
+
+// Writer is the build-side half. Separate from Store so a scan cannot be
+// handed something it could write through.
+type Writer interface {
+	Put(a advisory.Advisory) error
+	PutSourceIndex(ecosystem, sourceName, id string) error
+	SetMeta(m Meta) error
 	Close() error
 }
 

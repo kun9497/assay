@@ -2057,6 +2057,12 @@ func TestLookupBySource(t *testing.T) {
 	if err := w.Put(a); err != nil {
 		t.Fatal(err)
 	}
+	// A writer that never calls SetMeta has not finished building, and Open
+	// refuses such a database. Before ErrIncomplete existed this test passed
+	// by relying on exactly the defect that check now closes.
+	if err := w.SetMeta(Meta{BuiltAt: time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC)}); err != nil {
+		t.Fatal(err)
+	}
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -2267,6 +2273,9 @@ var (
 
 var allBuckets = [][]byte{bucketAdvisories, bucketBySource, bucketByID, bucketMeta}
 
+// keySep is NUL because no real ecosystem or package identifier can contain
+// one. A printable separator would collide: distro ecosystem keys already
+// carry a colon internally (Alpine:v3.19).
 const keySep = "\x00"
 
 type Bolt struct {

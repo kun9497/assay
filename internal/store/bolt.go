@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 
 	bolt "go.etcd.io/bbolt"
 
@@ -27,6 +26,13 @@ type Bolt struct {
 	db *bolt.DB
 }
 
+// Drift in either interface should fail the build here, not at the first
+// caller that happens to assign one.
+var (
+	_ Store  = (*Bolt)(nil)
+	_ Writer = (*Bolt)(nil)
+)
+
 // Open opens an existing database read-only. A missing or schema-mismatched
 // database is an error, never an empty result: the scan path must exit 2 with
 // instructions rather than reporting a clean scan it did not perform (D14).
@@ -43,6 +49,15 @@ func Open(path string) (*Bolt, error) {
 	if err != nil {
 		db.Close()
 		return nil, err
+	}
+	// The metadata record is written once, last, by SetMeta. Its absence means
+	// the build did not finish — and an unfinished database is the dangerous
+	// case, because its buckets exist and its lookups succeed with empty
+	// results. Requiring the record makes "complete" structural rather than
+	// something an external temp-file-and-rename discipline has to guarantee.
+	if m.Schema == 0 {
+		db.Close()
+		return nil, fmt.Errorf("%w at %s: no metadata record, so `assay db update` did not finish", ErrIncomplete, path)
 	}
 	if m.Schema != SchemaVersion {
 		db.Close()
@@ -62,14 +77,16 @@ func Create(path string) (*Bolt, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create %s: %w", path, err)
 	}
+	// Only the bucket structure is created here. The schema is deliberately
+	// NOT stamped now: it is written by SetMeta, so its presence is proof the
+	// build ran to completion rather than proof that Create was called.
 	err = db.Update(func(tx *bolt.Tx) error {
 		for _, name := range allBuckets {
 			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 				return err
 			}
 		}
-		return tx.Bucket(bucketMeta).Put([]byte("schema"),
-			[]byte(strconv.Itoa(SchemaVersion)))
+		return nil
 	})
 	if err != nil {
 		db.Close()
@@ -143,9 +160,6 @@ func (b *Bolt) SetMeta(m Meta) error {
 	})
 }
 
-// Commit flushes and closes the write handle.
-func (b *Bolt) Commit() error { return b.db.Close() }
-
 func (b *Bolt) setSchemaForTest(v int) error {
 	return b.db.Update(func(tx *bolt.Tx) error {
 		blob, err := json.Marshal(Meta{Schema: v})
@@ -202,15 +216,11 @@ func (b *Bolt) Meta() (Meta, error) {
 		if bk == nil {
 			return ErrNotFound
 		}
+		// A zero Meta when the record is absent is the signal Open relies on:
+		// there is deliberately no fallback that could report a schema for a
+		// database that never finished building.
 		if raw := bk.Get([]byte("meta")); raw != nil {
 			return json.Unmarshal(raw, &m)
-		}
-		if raw := bk.Get([]byte("schema")); raw != nil {
-			v, err := strconv.Atoi(string(raw))
-			if err != nil {
-				return err
-			}
-			m.Schema = v
 		}
 		return nil
 	})
