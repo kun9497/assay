@@ -4236,7 +4236,11 @@ type fakeStore struct {
 }
 
 func (f fakeStore) Lookup(ecosystem, name string) ([]advisory.Advisory, error) {
-	return f.byKey[ecosystem+"\x00"+name], nil
+	// Normalizes like the real store, so a test can hand the matcher a raw
+	// package name and still get a hit. A double that skipped this would model
+	// a store that does not exist, and the matcher would be tested against the
+	// wrong contract.
+	return f.byKey[ecosystem+"\x00"+pkgmeta.NormalizeName(ecosystem, name)], nil
 }
 func (f fakeStore) LookupBySource(ecosystem, name string) ([]advisory.Advisory, error) {
 	return nil, nil
