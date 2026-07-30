@@ -19,6 +19,10 @@ coverage.*
 # ...but SBOM fixtures under testdata/ are committed on purpose.
 !testdata/**/*.json
 
+# Scratch state for plan execution: ledgers, briefs, review packages.
+# Git history is the durable record; this is working memory.
+/.superpowers/
+
 # Editors
 .idea/
 .vscode/
