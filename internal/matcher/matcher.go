@@ -5,6 +5,7 @@ package matcher
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/pkgmeta"
@@ -157,7 +158,7 @@ func sortFindings(fs []Finding) {
 		// Two installs of one package at one version share a purl and differ
 		// only in where they were found — nested node_modules produce exactly
 		// that. Location is the last thing that tells them apart.
-		return firstPath(a.Package) < firstPath(b.Package)
+		return locationKey(a.Package) < locationKey(b.Package)
 	})
 }
 
@@ -182,15 +183,27 @@ func sortSkipped(ss []Skipped) {
 		if a.Package.PURL != b.Package.PURL {
 			return a.Package.PURL < b.Package.PURL
 		}
-		return firstPath(a.Package) < firstPath(b.Package)
+		return locationKey(a.Package) < locationKey(b.Package)
 	})
 }
 
-// firstPath returns where a package was found, for use as a final sort key.
-// Empty when the source did not record one.
-func firstPath(p pkgmeta.Package) string {
-	if len(p.Locations) == 0 {
-		return ""
+// locationKey renders every location a package was found at into one
+// comparable string, so the comparators above are genuinely total orders.
+//
+// Reading only Locations[0] would leave two installs that agree on their first
+// location but differ later comparing equal, and their order would then depend
+// on input order surviving unchanged. LayerDigest is included because image
+// scanning will populate it, and two copies of a package in different layers
+// are different findings.
+func locationKey(p pkgmeta.Package) string {
+	var b strings.Builder
+	for i, l := range p.Locations {
+		if i > 0 {
+			b.WriteString("\x00")
+		}
+		b.WriteString(l.Path)
+		b.WriteString("\x00")
+		b.WriteString(l.LayerDigest)
 	}
-	return p.Locations[0].Path
+	return b.String()
 }
