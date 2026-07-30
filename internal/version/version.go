@@ -28,8 +28,3 @@ func For(ecosystem string) (Comparer, bool) {
 	c, ok := registry[ecosystem]
 	return c, ok
 }
-
-// Replaced in Task 3.
-type PEP440 struct{}
-
-func (PEP440) Compare(a, b string) (int, error) { return 0, ErrInvalid }
