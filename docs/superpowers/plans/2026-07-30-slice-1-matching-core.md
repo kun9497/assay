@@ -4305,14 +4305,24 @@ func TestMatch_AliasedAdvisoriesReportOnce(t *testing.T) {
 			len(res.Findings), res.Findings)
 	}
 
-	// A second package must still get its own finding for the same advisory.
+	// A second package must still get its own finding for the same advisory:
+	// the dedup is per package, not scan-wide. Built as its own value rather
+	// than by mutating ghsa, because a struct copied into a map before its
+	// fields are reassigned keeps the old ones — a trap that made an earlier
+	// version of this test unpassable regardless of the implementation.
+	shared := advisory.Advisory{
+		ID:      "GHSA-shared",
+		Aliases: []string{"GO-shared"},
+		Kind:    advisory.KindVulnerability,
+		Affected: []advisory.Affected{
+			{Ecosystem: "Go", Name: "a", Ranges: ghsa.Affected[0].Ranges},
+			{Ecosystem: "Go", Name: "b", Ranges: ghsa.Affected[0].Ranges},
+		},
+	}
 	s2 := fakeStore{byKey: map[string][]advisory.Advisory{
-		"Go\x00a": {ghsa},
-		"Go\x00b": {ghsa},
+		"Go\x00a": {shared},
+		"Go\x00b": {shared},
 	}}
-	affA := advisory.Affected{Ecosystem: "Go", Name: "a", Ranges: ghsa.Affected[0].Ranges}
-	affB := advisory.Affected{Ecosystem: "Go", Name: "b", Ranges: ghsa.Affected[0].Ranges}
-	ghsa.Affected = []advisory.Affected{affA, affB}
 	res2, err := New(s2).Match(pkgmeta.Target{Packages: []pkgmeta.Package{
 		pkg("a", "1.0.0", "Go"), pkg("b", "1.0.0", "Go"),
 	}})
