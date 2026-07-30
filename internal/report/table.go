@@ -79,6 +79,12 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 			return Summary{}, err
 		}
 
+	case cat.Components == 0:
+		// Distinct from "nothing could be evaluated": there was nothing to
+		// evaluate. Trustworthy() treats this as vacuously fine, and the
+		// wording has to agree with the exit code.
+		fmt.Fprintln(w, "The document contained no components.")
+
 	case evaluated == 0:
 		// Nothing was actually judged. "No known vulnerabilities found" would be
 		// true and useless here — the same sentence a genuinely clean scan

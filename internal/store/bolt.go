@@ -130,7 +130,8 @@ func (b *Bolt) Put(a advisory.Advisory) error {
 // PutSourceIndex records that an advisory is keyed on a source package (D8).
 func (b *Bolt) PutSourceIndex(ecosystem, sourceName, id string) error {
 	return b.db.Update(func(tx *bolt.Tx) error {
-		return appendID(tx.Bucket(bucketBySource), ecosystem+keySep+sourceName, id)
+		key := ecosystem + keySep + pkgmeta.NormalizeName(ecosystem, sourceName)
+		return appendID(tx.Bucket(bucketBySource), key, id)
 	})
 }
 

@@ -116,6 +116,46 @@ func TestLookupDoesNotDuplicateRecords(t *testing.T) {
 	}
 }
 
+func TestLookupNormalizesPyPINames(t *testing.T) {
+	// The advisory name is stored non-normalized and the lookup arrives in the
+	// form syft emits, so this fails if EITHER the index write or the lookup
+	// stops normalizing. Testing NormalizeName in isolation does not: the bug
+	// was never in the function, it was in whether the two sides agreed.
+	path := buildTestDB(t, advisory.Advisory{
+		ID:       "PYSEC-1",
+		Source:   "osv",
+		Kind:     advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "PyPI", Name: "Zope.Interface"}},
+	})
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	for _, name := range []string{"zope.interface", "Zope.Interface", "zope_interface", "zope-interface"} {
+		got, err := db.Lookup("PyPI", name)
+		if err != nil {
+			t.Fatalf("Lookup(%q): %v", name, err)
+		}
+		if len(got) != 1 {
+			t.Errorf("Lookup(PyPI, %q) returned %d advisories, want 1 — every PEP 503 "+
+				"spelling names the same package", name, len(got))
+		}
+	}
+
+	// Go names are case-sensitive and must NOT be folded together.
+	goPath := buildTestDB(t, sample("GHSA-go", "Go", "github.com/Foo/Bar"))
+	gdb, err := Open(goPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gdb.Close()
+	if got, _ := gdb.Lookup("Go", "github.com/foo/bar"); len(got) != 0 {
+		t.Errorf("Lookup(Go, lowercased) returned %d, want 0 — Go names are case-sensitive", len(got))
+	}
+}
+
 func TestLookupBySource(t *testing.T) {
 	a := advisory.Advisory{
 		ID:     "ALPINE-CVE-1",

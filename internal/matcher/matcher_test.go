@@ -15,7 +15,10 @@ type fakeStore struct {
 }
 
 func (f fakeStore) Lookup(ecosystem, name string) ([]advisory.Advisory, error) {
-	return f.byKey[ecosystem+"\x00"+name], nil
+	// Normalizes like the real store does, so a test can hand the matcher a
+	// raw (un-normalized) package name and still get a hit — matching the
+	// contract Bolt.Lookup actually implements.
+	return f.byKey[ecosystem+"\x00"+pkgmeta.NormalizeName(ecosystem, name)], nil
 }
 func (f fakeStore) LookupBySource(ecosystem, name string) ([]advisory.Advisory, error) {
 	return nil, nil
@@ -272,9 +275,14 @@ func TestMatch_ForeignEcosystemEntryNeverReachesTheComparer(t *testing.T) {
 		ID:   "GHSA-mixed",
 		Kind: advisory.KindVulnerability,
 		Affected: []advisory.Affected{
+			// Fixed high enough that the installed 3.2 falls INSIDE this range
+			// under PEP 440. An npm-shaped bound that merely fails to match would
+			// leave the test green with the guard deleted — and v1.16.3 does not
+			// fail: this repo's PEP 440 grammar begins with v?, so Compare("3.2",
+			// "v1.16.3") is a clean 1 and the entry is silently judged unaffected.
 			{Ecosystem: "npm", Name: "django", Ranges: []advisory.Range{{
 				Type:   advisory.RangeSemver,
-				Events: []advisory.Event{{Introduced: "0"}, {Fixed: "v1.16.3"}},
+				Events: []advisory.Event{{Introduced: "0"}, {Fixed: "9.0.0"}},
 			}}},
 			{Ecosystem: "PyPI", Name: "django", Ranges: []advisory.Range{{
 				Type:   advisory.RangeEcosystem,
@@ -294,11 +302,34 @@ func TestMatch_ForeignEcosystemEntryNeverReachesTheComparer(t *testing.T) {
 		t.Fatalf("Findings = %d, want 1 from the PyPI entry only; got %+v",
 			len(res.Findings), res.Findings)
 	}
+	// This is the assertion that kills the guard: with the ecosystem filter
+	// removed the npm entry is reached first, matches, and breaks out with its
+	// own fixed version.
 	if f := res.Findings[0].Evidence.Fixed; f != "3.2.1" {
-		t.Errorf("Evidence.Fixed = %q, want 3.2.1 — the npm entry decided this", f)
+		t.Errorf("Evidence.Fixed = %q, want 3.2.1 — a foreign entry decided this finding", f)
 	}
 	if len(res.Skipped) != 0 {
 		t.Errorf("Skipped = %+v, want none: a foreign entry is filtered, not skipped", res.Skipped)
+	}
+}
+
+func TestMatch_PyPINameIsNormalizedBeforeFiltering(t *testing.T) {
+	// syft emits pkg:pypi/Jinja2 while OSV stores jinja2. The store hands back
+	// the advisory either way, so the last thing that can drop it is the
+	// matcher's own affected filter — this fails if that filter stops
+	// normalizing, which no other test covers.
+	adv := advWithRange("GHSA-jinja", "PyPI", "jinja2", "0", "3.1.6", advisory.RangeEcosystem)
+	s := fakeStore{byKey: map[string][]advisory.Advisory{"PyPI\x00jinja2": {adv}}}
+
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("Jinja2", "2.11.2", "PyPI")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1: the mixed-case name must reach the "+
+			"lowercase advisory; got %+v", len(res.Findings), res.Findings)
 	}
 }
 

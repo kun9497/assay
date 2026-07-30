@@ -87,6 +87,52 @@ func TestTable_CountsAddUp(t *testing.T) {
 	}
 }
 
+func TestTable_SummaryDrivesTheExitCode(t *testing.T) {
+	// Trustworthy() is what scancmd turns into an exit code, so a mutation that
+	// always returns true has to fail here. Nothing else covers it.
+	var buf bytes.Buffer
+	sum, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{
+		Components: 5, Cataloged: 0, SkippedUnsupportedEcosystem: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.Trustworthy() {
+		t.Error("a scan that evaluated nothing reported itself trustworthy; CI would read exit 0")
+	}
+
+	// An empty document is vacuously fine, and the wording must agree with that.
+	buf.Reset()
+	sum, err = Table(&buf, matcher.Result{}, cyclonedx.Stats{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sum.Trustworthy() {
+		t.Error("an empty document is not untrustworthy, there was simply nothing to do")
+	}
+	if strings.Contains(buf.String(), "NOT a clean result") {
+		t.Errorf("wording contradicts the exit code for an empty document:\n%s", buf.String())
+	}
+}
+
+func TestTable_FindingCarriesItsAliases(t *testing.T) {
+	// Dedup keeps one record per vulnerability, so a CVE matched under a GHSA
+	// record is only reachable through the alias column. Dropping the column
+	// makes `assay scan | grep CVE-...` silently find nothing.
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "Jinja2", Version: "2.11.2", Ecosystem: "PyPI"},
+		Advisory: advisory.Advisory{ID: "GHSA-g3rq-g295-4j3m", Aliases: []string{"CVE-2020-28493"}},
+		Evidence: version.Evidence{Fixed: "2.11.3"},
+	}}}
+	var buf bytes.Buffer
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "CVE-2020-28493") {
+		t.Errorf("the CVE this finding was matched under is absent from the report:\n%s", buf.String())
+	}
+}
+
 func TestTable_AdvisoryScopedSkipIsAlwaysShown(t *testing.T) {
 	// Everything evaluated, nothing found, but one advisory could not be judged.
 	// Gating the detail block on the unevaluated count alone hid this entirely,
