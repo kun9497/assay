@@ -2684,3 +2684,880 @@ Expected: PASS, all nine test functions.
 git add internal/provider
 git commit -m "feat: convert OSV records, filtering withdrawn, malicious, and foreign ecosystems"
 ```
+
+---
+
+## Task 7: OSV fetch and the `db` commands
+
+**Files:**
+- Create: `internal/provider/osv/fetch.go`
+- Create: `internal/provider/osv/fetch_test.go`
+- Create: `internal/dbcmd/dbcmd.go`
+- Create: `internal/dbcmd/dbcmd_test.go`
+- Modify: `cmd/assay/main.go` — route `db update` and `db status`
+- Modify: `cmd/assay/main_test.go` — extend the exit-code table
+
+**Interfaces:**
+- Consumes: `osv.Convert`, `provider.Provider`, `store.Create`, `store.Open`, `store.DefaultPath`, `store.Meta`, `store.Provenance`.
+- Produces: `osv.New(ecosystems []string, baseURL string) *Provider`; `osv.Ecosystems` default slice; `dbcmd.Update(ctx, dbPath string, providers []provider.Provider, stdout, stderr io.Writer) int`; `dbcmd.Status(dbPath string, stdout, stderr io.Writer) int`.
+
+Two behaviours the tests pin down:
+
+- **`db update` builds into a temporary file and renames over the live database**, so a concurrent scan never observes a partial write. **On Windows, rename fails if the target is open** — close every handle before renaming, and do not assume POSIX semantics.
+- **`db status` prints each provider's `DataAsOf`, not `BuiltAt`** (D12). It reports facts and does not judge staleness; age enforcement is deferred.
+
+Expect roughly 244 MB of download for Go, npm, and PyPI. OSV has no server-side filtering, so most of npm's archive is discarded after parsing (D15).
+
+- [ ] **Step 1: Write the failing test**
+
+```go
+package osv
+
+import (
+	"archive/zip"
+	"bytes"
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/kun9497/assay/internal/advisory"
+)
+
+func zipWith(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, body := range files {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestFetch(t *testing.T) {
+	body := zipWith(t, map[string]string{
+		"GHSA-keep.json": `{"id":"GHSA-keep","affected":[{"package":{"name":"x","ecosystem":"Go"},
+			"ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"1.0.0"}]}]}]}`,
+		"GHSA-gone.json": `{"id":"GHSA-gone","withdrawn":"2024-01-01T00:00:00Z",
+			"affected":[{"package":{"name":"y","ecosystem":"Go"},
+			"ranges":[{"type":"SEMVER","events":[{"introduced":"0"}]}]}]}`,
+		"MAL-2024-1.json": `{"id":"MAL-2024-1","affected":[{"package":{"name":"z","ecosystem":"Go"},
+			"ranges":[{"type":"SEMVER","events":[{"introduced":"0"}]}]}]}`,
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/Go/all.zip" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Last-Modified", "Tue, 29 Jul 2026 00:00:00 GMT")
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	p := New([]string{"Go"}, srv.URL)
+	var got []advisory.Advisory
+	prov, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
+		got = append(got, a)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "GHSA-keep" {
+		t.Fatalf("Fetch emitted %d advisories (%v), want only GHSA-keep", len(got), got)
+	}
+	if prov.Records != 1 {
+		t.Errorf("Provenance.Records = %d, want 1", prov.Records)
+	}
+	// DataAsOf must come from the upstream response, not from time.Now (D12).
+	if prov.DataAsOf.Year() != 2026 || prov.DataAsOf.Month() != 7 || prov.DataAsOf.Day() != 29 {
+		t.Errorf("Provenance.DataAsOf = %v, want 2026-07-29 from Last-Modified", prov.DataAsOf)
+	}
+	if prov.Source == "" {
+		t.Error("Provenance.Source is empty; the URL actually fetched must be recorded")
+	}
+}
+
+func TestFetch_HTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "nope", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	p := New([]string{"Go"}, srv.URL)
+	_, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil })
+	if err == nil {
+		t.Error("Fetch over a failing server = nil error, want error")
+	}
+}
+```
+
+```go
+package dbcmd
+
+import (
+	"bytes"
+	"context"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/store"
+)
+
+type fakeProvider struct {
+	name string
+	advs []advisory.Advisory
+}
+
+func (f fakeProvider) Name() string { return f.name }
+
+func (f fakeProvider) Fetch(_ context.Context, emit func(advisory.Advisory) error) (store.Provenance, error) {
+	for _, a := range f.advs {
+		if err := emit(a); err != nil {
+			return store.Provenance{}, err
+		}
+	}
+	return store.Provenance{
+		Source:   "https://example.test/all.zip",
+		DataAsOf: time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC),
+		Records:  len(f.advs),
+	}, nil
+}
+
+func TestUpdateThenStatus(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	p := fakeProvider{name: "osv", advs: []advisory.Advisory{{
+		ID: "GHSA-x", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
+	}}}
+
+	var out, errOut bytes.Buffer
+	if code := Update(context.Background(), path, []provider.Provider{p}, &out, &errOut); code != 0 {
+		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := Status(path, &out, &errOut); code != 0 {
+		t.Fatalf("Status = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	s := out.String()
+	// Status reports upstream data time, which is the number that tells you
+	// whether the data is stale (D12).
+	if !strings.Contains(s, "2026-07-29") {
+		t.Errorf("Status output missing DataAsOf:\n%s", s)
+	}
+	if !strings.Contains(s, "osv") {
+		t.Errorf("Status output missing provider name:\n%s", s)
+	}
+}
+
+func TestUpdateReplacesAtomically(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vulnerability.db")
+	mk := func(id string) provider.Provider {
+		return fakeProvider{name: "osv", advs: []advisory.Advisory{{
+			ID: id, Source: "osv", Kind: advisory.KindVulnerability,
+			Affected: []advisory.Affected{{Ecosystem: "Go", Name: "pkg"}},
+		}}}
+	}
+	var out, errOut bytes.Buffer
+	if code := Update(context.Background(), path, []provider.Provider{mk("first")}, &out, &errOut); code != 0 {
+		t.Fatalf("first Update = %d: %s", code, errOut.String())
+	}
+	if code := Update(context.Background(), path, []provider.Provider{mk("second")}, &out, &errOut); code != 0 {
+		t.Fatalf("second Update = %d: %s", code, errOut.String())
+	}
+
+	db, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	got, err := db.Lookup("Go", "pkg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "second" {
+		t.Errorf("Lookup = %+v, want only the second build's advisory", got)
+	}
+	// No temporary file may survive a successful update.
+	matches, _ := filepath.Glob(filepath.Join(dir, "*.tmp"))
+	if len(matches) != 0 {
+		t.Errorf("leftover temp files: %v", matches)
+	}
+}
+
+func TestStatusWithoutDatabase(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := Status(filepath.Join(t.TempDir(), "absent.db"), &out, &errOut)
+	if code != 2 {
+		t.Errorf("Status(absent) = %d, want 2", code)
+	}
+	if !strings.Contains(errOut.String(), "db update") {
+		t.Errorf("stderr should tell the user how to fix it:\n%s", errOut.String())
+	}
+	if out.Len() != 0 {
+		t.Errorf("error path polluted stdout: %q", out.String())
+	}
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `go test ./internal/provider/osv/ ./internal/dbcmd/ -v`
+Expected: FAIL — `New`, `Update`, `Status` undefined.
+
+- [ ] **Step 3: Write the implementation**
+
+`internal/provider/osv/fetch.go`:
+
+```go
+package osv
+
+import (
+	"archive/zip"
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/store"
+)
+
+// DefaultBaseURL is where OSV publishes one archive per ecosystem.
+const DefaultBaseURL = "https://osv-vulnerabilities.storage.googleapis.com"
+
+// Ecosystems is slice 1's scope. Distro ecosystems arrive in slice 2, where
+// their keys carry a release (D6).
+var Ecosystems = []string{"Go", "npm", "PyPI"}
+
+type Provider struct {
+	ecosystems []string
+	baseURL    string
+	client     *http.Client
+}
+
+func New(ecosystems []string, baseURL string) *Provider {
+	if baseURL == "" {
+		baseURL = DefaultBaseURL
+	}
+	return &Provider{
+		ecosystems: ecosystems,
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		// A generous timeout: npm's archive alone is ~203 MB.
+		client: &http.Client{Timeout: 30 * time.Minute},
+	}
+}
+
+func (p *Provider) Name() string { return SourceName }
+
+func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error) (store.Provenance, error) {
+	prov := store.Provenance{Source: p.baseURL}
+	for _, eco := range p.ecosystems {
+		u := fmt.Sprintf("%s/%s/all.zip", p.baseURL, url.PathEscape(eco))
+		n, asOf, err := p.fetchOne(ctx, u, eco, emit)
+		if err != nil {
+			return store.Provenance{}, fmt.Errorf("fetch %s: %w", eco, err)
+		}
+		prov.Records += n
+		// The oldest upstream timestamp wins: a database is only as fresh as
+		// its stalest provider, and reporting the newest would hide that.
+		if prov.DataAsOf.IsZero() || (!asOf.IsZero() && asOf.Before(prov.DataAsOf)) {
+			prov.DataAsOf = asOf
+		}
+	}
+	return prov, nil
+}
+
+func (p *Provider) fetchOne(ctx context.Context, u, ecosystem string, emit func(advisory.Advisory) error) (int, time.Time, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, time.Time{}, fmt.Errorf("GET %s: %s", u, resp.Status)
+	}
+
+	// DataAsOf comes from the server, not from the local clock (D12): a mirror
+	// serving a stale snapshot must not look fresh because we fetched it today.
+	var asOf time.Time
+	if lm := resp.Header.Get("Last-Modified"); lm != "" {
+		if t, err := http.ParseTime(lm); err == nil {
+			asOf = t.UTC()
+		}
+	}
+
+	// archive/zip needs a ReaderAt, so the archive is buffered. Records are
+	// still streamed to emit one at a time.
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	if err != nil {
+		return 0, time.Time{}, fmt.Errorf("open zip: %w", err)
+	}
+
+	var kept int
+	for _, f := range zr.File {
+		if !strings.HasSuffix(f.Name, ".json") {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return kept, asOf, fmt.Errorf("open %s: %w", f.Name, err)
+		}
+		data, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			return kept, asOf, fmt.Errorf("read %s: %w", f.Name, err)
+		}
+		a, ok, err := Convert(data, ecosystem)
+		if err != nil {
+			return kept, asOf, fmt.Errorf("convert %s: %w", f.Name, err)
+		}
+		if !ok {
+			continue
+		}
+		if err := emit(a); err != nil {
+			return kept, asOf, err
+		}
+		kept++
+	}
+	return kept, asOf, nil
+}
+```
+
+`internal/dbcmd/dbcmd.go`:
+
+```go
+// Package dbcmd implements `assay db update` and `assay db status`.
+package dbcmd
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"text/tabwriter"
+	"time"
+
+	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/provider"
+	"github.com/kun9497/assay/internal/store"
+)
+
+// Update rebuilds the database from every provider. It builds into a temporary
+// file and renames over the live database, so a concurrent scan never observes
+// a partial write.
+func Update(ctx context.Context, dbPath string, providers []provider.Provider, stdout, stderr io.Writer) int {
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		fmt.Fprintf(stderr, "error: create database directory: %v\n", err)
+		return 2
+	}
+	tmp := dbPath + ".tmp"
+	_ = os.Remove(tmp)
+
+	w, err := store.Create(tmp)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: create database: %v\n", err)
+		return 2
+	}
+
+	meta := store.Meta{BuiltAt: time.Now().UTC(), Providers: map[string]store.Provenance{}}
+	for _, p := range providers {
+		fmt.Fprintf(stderr, "fetching %s…\n", p.Name())
+		prov, err := p.Fetch(ctx, func(a advisory.Advisory) error { return w.Put(a) })
+		if err != nil {
+			w.Commit()
+			os.Remove(tmp)
+			fmt.Fprintf(stderr, "error: provider %s: %v\n", p.Name(), err)
+			return 2
+		}
+		meta.Providers[p.Name()] = prov
+	}
+	if err := w.SetMeta(meta); err != nil {
+		w.Commit()
+		os.Remove(tmp)
+		fmt.Fprintf(stderr, "error: write metadata: %v\n", err)
+		return 2
+	}
+	// Close before renaming: on Windows a rename over an open file fails, and
+	// assuming POSIX semantics here leaves a half-built database in place.
+	if err := w.Commit(); err != nil {
+		os.Remove(tmp)
+		fmt.Fprintf(stderr, "error: close database: %v\n", err)
+		return 2
+	}
+	if err := os.Rename(tmp, dbPath); err != nil {
+		os.Remove(tmp)
+		fmt.Fprintf(stderr, "error: replace database: %v\n", err)
+		return 2
+	}
+
+	total := 0
+	for _, p := range meta.Providers {
+		total += p.Records
+	}
+	fmt.Fprintf(stdout, "database updated: %d advisories at %s\n", total, dbPath)
+	return 0
+}
+
+// Status reports what is in the database and how current it is. It states
+// facts and does not judge staleness — age enforcement is deferred, and the
+// metadata it would need is already recorded.
+func Status(dbPath string, stdout, stderr io.Writer) int {
+	db, err := store.Open(dbPath)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrSchemaMismatch) {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			fmt.Fprintln(stderr, "run `assay db update` to build it")
+			return 2
+		}
+		fmt.Fprintf(stderr, "error: open database: %v\n", err)
+		return 2
+	}
+	defer db.Close()
+
+	m, err := db.Meta()
+	if err != nil {
+		fmt.Fprintf(stderr, "error: read metadata: %v\n", err)
+		return 2
+	}
+
+	fmt.Fprintf(stdout, "database: %s\n", dbPath)
+	fmt.Fprintf(stdout, "schema:   v%d\n", m.Schema)
+	fmt.Fprintf(stdout, "built:    %s\n", m.BuiltAt.Format(time.RFC3339))
+	fmt.Fprintln(stdout)
+
+	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "PROVIDER\tDATA AS OF\tRECORDS\tSOURCE")
+	// Sorted so the output is diffable across runs — map order is not.
+	names := make([]string, 0, len(m.Providers))
+	for name := range m.Providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		p := m.Providers[name]
+		asOf := "unknown"
+		if !p.DataAsOf.IsZero() {
+			asOf = p.DataAsOf.Format("2006-01-02")
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%d\t%s\n", name, asOf, p.Records, p.Source)
+	}
+	if err := tw.Flush(); err != nil {
+		fmt.Fprintf(stderr, "error: write status: %v\n", err)
+		return 2
+	}
+	return 0
+}
+```
+
+The import block for this file is:
+
+```go
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"text/tabwriter"
+	"time"
+
+	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/provider"
+	"github.com/kun9497/assay/internal/store"
+)
+```
+
+In `cmd/assay/main.go`, add a `db` case to the `run` switch:
+
+```go
+	case "db":
+		if len(args) < 2 {
+			fmt.Fprintln(stderr, "error: db requires a subcommand (update, status)")
+			return exitError
+		}
+		path, err := store.DefaultPath()
+		if err != nil {
+			fmt.Fprintf(stderr, "error: locate database: %v\n", err)
+			return exitError
+		}
+		switch args[1] {
+		case "update":
+			return dbcmd.Update(context.Background(), path,
+				[]provider.Provider{osv.New(osv.Ecosystems, "")}, stdout, stderr)
+		case "status":
+			return dbcmd.Status(path, stdout, stderr)
+		default:
+			fmt.Fprintf(stderr, "error: unknown db subcommand %q\n", args[1])
+			return exitError
+		}
+```
+
+and extend the usage string:
+
+```
+Commands:
+  scan <target>   Scan an SBOM file, directory, or container image
+  db update       Build or refresh the local vulnerability database
+  db status       Show what is in the database and how current it is
+  version         Print version information
+  help            Show this help
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Add to `cmd/assay/main_test.go`'s existing table:
+
+```go
+		{"db without subcommand", []string{"db"}, exitError},
+		{"db unknown subcommand", []string{"db", "bogus"}, exitError},
+```
+
+Run: `go test ./... -v`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/provider/osv/fetch.go internal/provider/osv/fetch_test.go internal/dbcmd cmd/assay
+git commit -m "feat: add OSV fetch and the db update/status commands"
+```
+
+---
+
+## Task 8: CycloneDX cataloger
+
+**Files:**
+- Create: `internal/cataloger/cyclonedx/cyclonedx.go`
+- Create: `internal/cataloger/cyclonedx/testdata/small.cdx.json`
+- Test: `internal/cataloger/cyclonedx/cyclonedx_test.go`
+
+**Interfaces:**
+- Consumes: `pkgmeta.Target`, `pkgmeta.Package`, `pkgmeta.Distro`, `pkgmeta.ParsePURL`, `pkgmeta.EcosystemForPURLType`.
+- Produces: `cyclonedx.Parse(r io.Reader) (pkgmeta.Target, Stats, error)`; `cyclonedx.Stats{Components, Cataloged, SkippedNoPURL, SkippedUnsupportedEcosystem}`.
+
+`Stats` exists because packages this stage cannot evaluate must be counted and reported, never folded silently into a clean result. In slice 1 every OS package in a container SBOM lands in `SkippedUnsupportedEcosystem`, and the report must say so.
+
+The distro-release hazard applies here: matching an OS package needs `Alpine:v3.19`, which a purl does not carry. syft records it in CycloneDX properties (`syft:distro:id`, `syft:distro:versionID`), but that is a syft extension, not part of the CycloneDX specification. This task reads those properties when present and leaves `Target.Distro` nil when absent — it does not guess.
+
+- [ ] **Step 1: Write the failing test**
+
+`testdata/small.cdx.json`:
+
+```json
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "container",
+      "name": "alpine",
+      "properties": [
+        {"name": "syft:distro:id", "value": "alpine"},
+        {"name": "syft:distro:versionID", "value": "3.19"}
+      ]
+    }
+  },
+  "components": [
+    {"type": "library", "name": "github.com/foo/bar", "version": "v1.2.3",
+     "purl": "pkg:golang/github.com/foo/bar@v1.2.3"},
+    {"type": "library", "name": "lodash", "version": "4.17.20",
+     "purl": "pkg:npm/lodash@4.17.20"},
+    {"type": "library", "name": "django", "version": "3.2",
+     "purl": "pkg:pypi/django@3.2"},
+    {"type": "library", "name": "apache2", "version": "2.4.54-r0",
+     "purl": "pkg:apk/alpine/apache2@2.4.54-r0?arch=x86_64"},
+    {"type": "library", "name": "mystery", "version": "1.0"}
+  ]
+}
+```
+
+```go
+package cyclonedx
+
+import (
+	"os"
+	"testing"
+)
+
+func TestParse(t *testing.T) {
+	f, err := os.Open("testdata/small.cdx.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	target, stats, err := Parse(f)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	if stats.Components != 5 {
+		t.Errorf("Components = %d, want 5", stats.Components)
+	}
+	// Go, npm, PyPI are supported in slice 1; apk is not (its ecosystem key
+	// needs a release), and the last component has no purl at all.
+	if stats.Cataloged != 3 {
+		t.Errorf("Cataloged = %d, want 3", stats.Cataloged)
+	}
+	if stats.SkippedUnsupportedEcosystem != 1 {
+		t.Errorf("SkippedUnsupportedEcosystem = %d, want 1", stats.SkippedUnsupportedEcosystem)
+	}
+	if stats.SkippedNoPURL != 1 {
+		t.Errorf("SkippedNoPURL = %d, want 1", stats.SkippedNoPURL)
+	}
+
+	if len(target.Packages) != 3 {
+		t.Fatalf("Packages = %d, want 3", len(target.Packages))
+	}
+	byName := map[string]int{}
+	for i, p := range target.Packages {
+		byName[p.Name] = i
+	}
+	gp := target.Packages[byName["github.com/foo/bar"]]
+	if gp.Ecosystem != "Go" {
+		t.Errorf("Go package ecosystem = %q, want Go", gp.Ecosystem)
+	}
+	if gp.Version != "v1.2.3" {
+		t.Errorf("Go package version = %q, want v1.2.3 (verbatim, v intact)", gp.Version)
+	}
+	if target.Packages[byName["django"]].Ecosystem != "PyPI" {
+		t.Errorf("django ecosystem = %q, want PyPI", target.Packages[byName["django"]].Ecosystem)
+	}
+}
+
+func TestParse_DistroFromSyftProperties(t *testing.T) {
+	f, err := os.Open("testdata/small.cdx.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	target, _, err := Parse(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.Distro == nil {
+		t.Fatal("Distro = nil, want it read from syft properties")
+	}
+	if target.Distro.ID != "alpine" || target.Distro.VersionID != "3.19" {
+		t.Errorf("Distro = %+v, want alpine 3.19", *target.Distro)
+	}
+}
+
+func TestParse_NoDistroPropertiesLeavesNil(t *testing.T) {
+	// syft:distro:* is a syft extension, not part of CycloneDX. An SBOM from
+	// another tool may omit it, and guessing would be worse than admitting it.
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5",
+	  "components":[{"type":"library","name":"lodash","version":"1.0",
+	                 "purl":"pkg:npm/lodash@1.0"}]}`
+	target, _, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.Distro != nil {
+		t.Errorf("Distro = %+v, want nil when the properties are absent", *target.Distro)
+	}
+}
+
+func TestParse_VersionFallsBackToComponentField(t *testing.T) {
+	// A purl without a version is legal; the component's version field is the
+	// fallback rather than treating the package as unversioned.
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5",
+	  "components":[{"type":"library","name":"lodash","version":"4.17.20",
+	                 "purl":"pkg:npm/lodash"}]}`
+	target, _, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(target.Packages) != 1 || target.Packages[0].Version != "4.17.20" {
+		t.Errorf("Packages = %+v, want version 4.17.20 from the component field", target.Packages)
+	}
+}
+
+func TestParse_NotCycloneDX(t *testing.T) {
+	if _, _, err := Parse(strings.NewReader(`{"spdxVersion":"SPDX-2.3"}`)); err == nil {
+		t.Error("Parse(SPDX) = nil error, want error")
+	}
+	if _, _, err := Parse(strings.NewReader("{not json")); err == nil {
+		t.Error("Parse(malformed) = nil error, want error")
+	}
+}
+```
+
+Add `"strings"` to the test file's imports.
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `go test ./internal/cataloger/cyclonedx/ -v`
+Expected: FAIL — `Parse` and `Stats` undefined.
+
+- [ ] **Step 3: Write the implementation**
+
+```go
+// Package cyclonedx turns a CycloneDX SBOM into the normalized inventory.
+//
+// This is a Cataloger like any other: later slices add image and binary
+// catalogers that produce the same pkgmeta.Target, so nothing downstream
+// changes when they arrive.
+package cyclonedx
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+
+	"github.com/kun9497/assay/internal/pkgmeta"
+)
+
+// Stats records what the cataloger could not use. Reported rather than
+// discarded: a package silently dropped here is indistinguishable from a
+// package with no vulnerabilities.
+type Stats struct {
+	Components                  int
+	Cataloged                   int
+	SkippedNoPURL               int
+	SkippedUnsupportedEcosystem int
+}
+
+type bom struct {
+	BOMFormat string `json:"bomFormat"`
+	Metadata  struct {
+		Component struct {
+			Properties []property `json:"properties"`
+		} `json:"component"`
+	} `json:"metadata"`
+	Components []component `json:"components"`
+}
+
+type component struct {
+	Type       string     `json:"type"`
+	Name       string     `json:"name"`
+	Version    string     `json:"version"`
+	PURL       string     `json:"purl"`
+	Properties []property `json:"properties"`
+}
+
+type property struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+func Parse(r io.Reader) (pkgmeta.Target, Stats, error) {
+	var doc bom
+	if err := json.NewDecoder(r).Decode(&doc); err != nil {
+		return pkgmeta.Target{}, Stats{}, fmt.Errorf("decode CycloneDX: %w", err)
+	}
+	if doc.BOMFormat != "CycloneDX" {
+		return pkgmeta.Target{}, Stats{}, fmt.Errorf("not a CycloneDX document (bomFormat=%q)", doc.BOMFormat)
+	}
+
+	var (
+		target pkgmeta.Target
+		stats  Stats
+	)
+	target.Distro = distroFrom(doc.Metadata.Component.Properties)
+
+	for _, c := range doc.Components {
+		stats.Components++
+		if c.PURL == "" {
+			stats.SkippedNoPURL++
+			continue
+		}
+		p, err := pkgmeta.ParsePURL(c.PURL)
+		if err != nil {
+			stats.SkippedNoPURL++
+			continue
+		}
+		eco, ok := pkgmeta.EcosystemForPURLType(p.Type)
+		if !ok {
+			// Distro packages land here in slice 1: their ecosystem key needs
+			// a release (D6) that a purl does not carry.
+			stats.SkippedUnsupportedEcosystem++
+			continue
+		}
+		version := p.Version
+		if version == "" {
+			version = c.Version
+		}
+		name := p.Name
+		if p.Namespace != "" {
+			name = p.Namespace + "/" + p.Name
+		}
+		target.Packages = append(target.Packages, pkgmeta.Package{
+			Name:      name,
+			Version:   version,
+			Type:      p.Type,
+			Ecosystem: eco,
+			PURL:      c.PURL,
+			Locations: []pkgmeta.Location{{Path: "sbom"}},
+		})
+		stats.Cataloged++
+	}
+	return target, stats, nil
+}
+
+// distroFrom reads syft's CycloneDX properties. These are a syft extension,
+// not part of the CycloneDX specification, so an SBOM from another tool may
+// omit them — in which case Distro stays nil rather than being guessed.
+func distroFrom(props []property) *pkgmeta.Distro {
+	var d pkgmeta.Distro
+	for _, p := range props {
+		switch p.Name {
+		case "syft:distro:id":
+			d.ID = p.Value
+		case "syft:distro:versionID":
+			d.VersionID = p.Value
+		}
+	}
+	if d.ID == "" {
+		return nil
+	}
+	return &d
+}
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `go test ./internal/cataloger/... -v`
+Expected: PASS, all five test functions.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/cataloger
+git commit -m "feat: catalog CycloneDX SBOMs, counting what cannot be evaluated"
+```
