@@ -4279,6 +4279,51 @@ func TestMatch_SkipsAreDeduplicatedPerAdvisory(t *testing.T) {
 	}
 }
 
+func TestMatch_AliasedAdvisoriesReportOnce(t *testing.T) {
+	// OSV's Go ecosystem carries the same vulnerability under both a GHSA and
+	// a GO- identifier, each declaring the other as an alias. Reporting both
+	// doubled every Go finding in a real scan against grype without adding any
+	// information.
+	ghsa := advWithRange("GHSA-c3h9-896r-86jm", "Go", "github.com/gogo/protobuf",
+		"0", "1.3.2", advisory.RangeSemver)
+	ghsa.Aliases = []string{"GO-2021-0053"}
+	go1 := advWithRange("GO-2021-0053", "Go", "github.com/gogo/protobuf",
+		"0", "1.3.2", advisory.RangeSemver)
+	go1.Aliases = []string{"GHSA-c3h9-896r-86jm"}
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Go\x00github.com/gogo/protobuf": {ghsa, go1},
+	}}
+
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("github.com/gogo/protobuf", "v1.3.1", "Go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Errorf("Findings = %d, want 1: the two records are the same vulnerability; got %+v",
+			len(res.Findings), res.Findings)
+	}
+
+	// A second package must still get its own finding for the same advisory.
+	s2 := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Go\x00a": {ghsa},
+		"Go\x00b": {ghsa},
+	}}
+	affA := advisory.Affected{Ecosystem: "Go", Name: "a", Ranges: ghsa.Affected[0].Ranges}
+	affB := advisory.Affected{Ecosystem: "Go", Name: "b", Ranges: ghsa.Affected[0].Ranges}
+	ghsa.Affected = []advisory.Affected{affA, affB}
+	res2, err := New(s2).Match(pkgmeta.Target{Packages: []pkgmeta.Package{
+		pkg("a", "1.0.0", "Go"), pkg("b", "1.0.0", "Go"),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res2.Findings) != 2 {
+		t.Errorf("Findings = %d, want 2: dedup must be per package, not scan-wide", len(res2.Findings))
+	}
+}
+
 func TestMatch_UnsupportedEcosystemIsSkipped(t *testing.T) {
 	res, err := New(fakeStore{}).Match(pkgmeta.Target{
 		Packages: []pkgmeta.Package{pkg("apache2", "2.4.54-r0", "Alpine:v3.19")},
@@ -4436,6 +4481,12 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 		// twice in a lookup result, so without this a single bad bound emits
 		// byte-identical skips and buries the rest of the report.
 		skipped := make(map[string]bool, len(candidates))
+		// One vulnerability commonly has records under several IDs. OSV's Go
+		// ecosystem carries both the GHSA and the GO- identifier for the same
+		// issue, which doubled every Go finding in a real scan against grype.
+		// The first record to match wins; the rest are recognized through the
+		// aliases they declare.
+		reported := make(map[string]bool, len(candidates))
 
 		for _, a := range candidates {
 			if seen[a.ID] {
@@ -4472,6 +4523,12 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 				}
 				if hit {
 					seen[a.ID] = true
+					if reported[a.ID] {
+						break // already reported under another identifier
+					}
+					for _, id := range identifiers(a) {
+						reported[id] = true
+					}
 					res.Findings = append(res.Findings, Finding{Package: p, Advisory: a, Evidence: ev})
 					break
 				}
@@ -4482,6 +4539,18 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 	sortFindings(res.Findings)
 	sortSkipped(res.Skipped)
 	return res, nil
+}
+
+// identifiers returns every ID an advisory is known by: its own, plus the
+// aliases and upstream links OSV records for it. Both fields are read because
+// OSV 1.7 puts the CVE link in upstream while other records use aliases (D3),
+// and a record can carry one without the other.
+func identifiers(a advisory.Advisory) []string {
+	ids := make([]string, 0, 1+len(a.Aliases)+len(a.Upstream))
+	ids = append(ids, a.ID)
+	ids = append(ids, a.Aliases...)
+	ids = append(ids, a.Upstream...)
+	return ids
 }
 
 // Sorting keeps output deterministic and diffable, which is design goal #3.
@@ -4750,9 +4819,20 @@ import (
 )
 
 func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) error {
-	if len(res.Findings) == 0 {
-		fmt.Fprintln(w, "No known vulnerabilities found.")
-	} else {
+	// A package counts as evaluated only if it was cataloged AND the matcher
+	// could judge it. A whole-package matcher skip (empty AdvisoryID) was
+	// cataloged but never checked, so counting it as scanned would inflate the
+	// number a reader trusts most.
+	var unevaluated int
+	for _, s := range res.Skipped {
+		if s.AdvisoryID == "" {
+			unevaluated++
+		}
+	}
+	evaluated := cat.Cataloged - unevaluated
+
+	switch {
+	case len(res.Findings) > 0:
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(tw, "PACKAGE\tVERSION\tECOSYSTEM\tADVISORY\tFIXED IN")
 		for _, f := range res.Findings {
@@ -4766,16 +4846,27 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) error {
 		if err := tw.Flush(); err != nil {
 			return err
 		}
+
+	case evaluated == 0:
+		// Nothing was actually judged. "No known vulnerabilities found" would be
+		// true and useless here — the same sentence a genuinely clean scan
+		// prints, from a run that checked nothing. A reader who greps the first
+		// line, or whose output is truncated, must not read this as safety.
+		fmt.Fprintln(w, "No packages could be evaluated - this is NOT a clean result.")
+
+	default:
+		fmt.Fprintf(w, "No known vulnerabilities found in %d package(s).\n", evaluated)
 	}
 
-	// The summary is what keeps a partial scan from reading as a clean one.
-	skipped := cat.SkippedNoPURL + cat.SkippedNoVersion +
-		cat.SkippedUnsupportedEcosystem + len(res.Skipped)
-	fmt.Fprintf(w, "\n%d package(s) scanned, %d finding(s), %d skipped\n",
-		cat.Cataloged, len(res.Findings), skipped)
+	// The summary keeps a partial scan from reading as a clean one, so its
+	// parts must add up: every component the document contained is either
+	// evaluated or not, and no package is counted in both.
+	notEvaluated := cat.Components - evaluated
+	fmt.Fprintf(w, "\n%d component(s) seen, %d evaluated, %d finding(s), %d not evaluated\n",
+		cat.Components, evaluated, len(res.Findings), notEvaluated)
 
-	if skipped > 0 {
-		fmt.Fprintln(w, "\nSkipped:")
+	if notEvaluated > 0 {
+		fmt.Fprintln(w, "\nNot evaluated:")
 		if cat.SkippedUnsupportedEcosystem > 0 {
 			fmt.Fprintf(w, "  %d package(s) in an unsupported ecosystem\n",
 				cat.SkippedUnsupportedEcosystem)
