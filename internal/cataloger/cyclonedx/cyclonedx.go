@@ -20,6 +20,7 @@ type Stats struct {
 	Components                  int
 	Cataloged                   int
 	SkippedNoPURL               int
+	SkippedNoVersion            int
 	SkippedUnsupportedEcosystem int
 }
 
@@ -34,11 +35,16 @@ type bom struct {
 }
 
 type component struct {
-	Type       string     `json:"type"`
-	Name       string     `json:"name"`
-	Version    string     `json:"version"`
-	PURL       string     `json:"purl"`
-	Properties []property `json:"properties"`
+	Type    string `json:"type"`
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	PURL    string `json:"purl"`
+	// CycloneDX lets a component carry its own components array. Reading only
+	// the top level would make those packages invisible — not skipped, but
+	// absent from every counter, which is worse than a counted skip because
+	// nothing in the report hints they existed.
+	Components []component `json:"components"`
+	Properties []property  `json:"properties"`
 }
 
 type property struct {
@@ -60,44 +66,61 @@ func Parse(r io.Reader) (pkgmeta.Target, Stats, error) {
 		stats  Stats
 	)
 	target.Distro = distroFrom(doc.Metadata.Component.Properties)
-
-	for _, c := range doc.Components {
-		stats.Components++
-		if c.PURL == "" {
-			stats.SkippedNoPURL++
-			continue
-		}
-		p, err := pkgmeta.ParsePURL(c.PURL)
-		if err != nil {
-			stats.SkippedNoPURL++
-			continue
-		}
-		eco, ok := pkgmeta.EcosystemForPURLType(p.Type)
-		if !ok {
-			// Distro packages land here in slice 1: their ecosystem key needs
-			// a release (D6) that a purl does not carry.
-			stats.SkippedUnsupportedEcosystem++
-			continue
-		}
-		version := p.Version
-		if version == "" {
-			version = c.Version
-		}
-		name := p.Name
-		if p.Namespace != "" {
-			name = p.Namespace + "/" + p.Name
-		}
-		target.Packages = append(target.Packages, pkgmeta.Package{
-			Name:      name,
-			Version:   version,
-			Type:      p.Type,
-			Ecosystem: eco,
-			PURL:      c.PURL,
-			Locations: []pkgmeta.Location{{Path: "sbom"}},
-		})
-		stats.Cataloged++
-	}
+	catalog(doc.Components, &target, &stats)
 	return target, stats, nil
+}
+
+// catalog walks components depth-first so nested ones are seen. Every path out
+// of catalogOne increments exactly one counter, which is what lets the report's
+// summary account for every component the document contained.
+func catalog(components []component, target *pkgmeta.Target, stats *Stats) {
+	for _, c := range components {
+		catalogOne(c, target, stats)
+		catalog(c.Components, target, stats)
+	}
+}
+
+func catalogOne(c component, target *pkgmeta.Target, stats *Stats) {
+	stats.Components++
+	if c.PURL == "" {
+		stats.SkippedNoPURL++
+		return
+	}
+	p, err := pkgmeta.ParsePURL(c.PURL)
+	if err != nil {
+		stats.SkippedNoPURL++
+		return
+	}
+	eco, ok := pkgmeta.EcosystemForPURLType(p.Type)
+	if !ok {
+		// Distro packages land here in slice 1: their ecosystem key needs
+		// a release (D6) that a purl does not carry.
+		stats.SkippedUnsupportedEcosystem++
+		return
+	}
+	version := p.Version
+	if version == "" {
+		version = c.Version
+	}
+	if version == "" {
+		// Nothing for a comparer to place inside a range. Counting it as
+		// cataloged would claim the package was evaluated when it was not.
+		stats.SkippedNoVersion++
+		return
+	}
+	name := p.Name
+	if p.Namespace != "" {
+		name = p.Namespace + "/" + p.Name
+	}
+	target.Packages = append(target.Packages, pkgmeta.Package{
+		Name:      name,
+		Version:   version,
+		Type:      p.Type,
+		Ecosystem: eco,
+		PURL:      c.PURL,
+		Locations: []pkgmeta.Location{{Path: "sbom"}},
+	})
+	stats.Cataloged++
 }
 
 // distroFrom reads syft's CycloneDX properties. These are a syft extension,
@@ -113,7 +136,11 @@ func distroFrom(props []property) *pkgmeta.Distro {
 			d.VersionID = p.Value
 		}
 	}
-	if d.ID == "" {
+	// Both halves are required. An ID without a version would build the
+	// ecosystem key "Alpine:" (D6), which matches nothing — and would do so
+	// without any error, since a lookup miss is indistinguishable from a
+	// package having no advisories.
+	if d.ID == "" || d.VersionID == "" {
 		return nil
 	}
 	return &d
