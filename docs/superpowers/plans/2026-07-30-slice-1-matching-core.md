@@ -2756,30 +2756,6 @@ func TestConvert_DropsMalicious(t *testing.T) {
 	}
 }
 
-func TestConvert_FiltersForeignEcosystems(t *testing.T) {
-	// Live OSV data mixes ecosystems inside one advisory. Without this filter
-	// the npm SEMVER value reaches the PEP 440 comparer.
-	const rec = `{
-	  "id": "GHSA-mixed",
-	  "affected": [
-	    {"package": {"name": "django", "ecosystem": "PyPI"},
-	     "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "3.2.1"}]}]},
-	    {"package": {"name": "some-js-lib", "ecosystem": "npm"},
-	     "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "v1.16.3"}]}]}
-	  ]
-	}`
-	got, ok, err := Convert([]byte(rec), "PyPI")
-	if err != nil || !ok {
-		t.Fatalf("Convert: ok=%v err=%v", ok, err)
-	}
-	if len(got.Affected) != 1 {
-		t.Fatalf("Affected = %d entries, want 1 (npm entry must be dropped)", len(got.Affected))
-	}
-	if got.Affected[0].Ecosystem != "PyPI" || got.Affected[0].Name != "django" {
-		t.Errorf("Affected[0] = %+v, want the PyPI django entry", got.Affected[0])
-	}
-}
-
 func TestConvert_DropsGitRanges(t *testing.T) {
 	const rec = `{
 	  "id": "PYSEC-git",
@@ -4463,6 +4439,46 @@ func TestMatch_AliasedAdvisoriesReportOnce(t *testing.T) {
 	}
 	if len(res2.Findings) != 2 {
 		t.Errorf("Findings = %d, want 2: dedup must be per package, not scan-wide", len(res2.Findings))
+	}
+}
+
+func TestMatch_ForeignEcosystemEntryNeverReachesTheComparer(t *testing.T) {
+	// Records are now stored whole, so one advisory can carry entries for
+	// several ecosystems and a PyPI lookup can return a record holding npm
+	// ranges. Feeding an npm version string to the PEP 440 comparer would be a
+	// wrong answer, not an error. Convert used to strip these; the guard now
+	// lives here, so the test does too.
+	mixed := advisory.Advisory{
+		ID:   "GHSA-mixed",
+		Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{
+			{Ecosystem: "npm", Name: "django", Ranges: []advisory.Range{{
+				Type:   advisory.RangeSemver,
+				Events: []advisory.Event{{Introduced: "0"}, {Fixed: "v1.16.3"}},
+			}}},
+			{Ecosystem: "PyPI", Name: "django", Ranges: []advisory.Range{{
+				Type:   advisory.RangeEcosystem,
+				Events: []advisory.Event{{Introduced: "0"}, {Fixed: "3.2.1"}},
+			}}},
+		},
+	}
+	s := fakeStore{byKey: map[string][]advisory.Advisory{"PyPI\x00django": {mixed}}}
+
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("django", "3.2", "PyPI")},
+	})
+	if err != nil {
+		t.Fatalf("the npm range reached the PyPI comparer: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1 from the PyPI entry only; got %+v",
+			len(res.Findings), res.Findings)
+	}
+	if f := res.Findings[0].Evidence.Fixed; f != "3.2.1" {
+		t.Errorf("Evidence.Fixed = %q, want 3.2.1 — the npm entry decided this", f)
+	}
+	if len(res.Skipped) != 0 {
+		t.Errorf("Skipped = %+v, want none: a foreign entry is filtered, not skipped", res.Skipped)
 	}
 }
 
