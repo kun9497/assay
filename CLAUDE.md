@@ -201,6 +201,29 @@ normalization, anything that turns into a missed vulnerability. Use a cheaper mo
 wrong answer is *loud* — a failed build, a diff that obviously does not apply, a search that
 returns nothing.
 
+## Writing escape sequences into files
+
+**Never type an escape sequence as a literal inside a script that generates a file.**
+Assemble it instead — `chr(92) + "x00"`, `chr(92) + "u212a"` — and verify by scanning the
+written file for the raw byte, not by trusting the tool's exit code.
+
+A literal `\x00` or `K` in a heredoc, an editor buffer, or a tool argument loses a
+backslash somewhere in transit and becomes **the byte it was meant to denote**. This has
+happened three times on this branch: a KELVIN SIGN flattened to ASCII `K` (turning a test
+that guarded Unicode case folding into one asserting a valid version was invalid), a raw NUL
+in a Go map key (a hard `invalid NUL character` compile error), and a raw NUL inside the
+comment that warned about the first two.
+
+The failure is silent in prose and only sometimes loud in code, so grep for the codepoint
+after writing:
+
+```python
+python -c "t=open('f','r',encoding='utf-8').read(); print(t.count(chr(0x212a)), t.count(chr(0)))"
+```
+
+Do not write the character literally in the checking script either — that is how the third
+occurrence happened.
+
 ## Conventions
 
 - No third-party dependencies yet (`go.mod` has no `require` block). Adding one is a real
