@@ -1710,3 +1710,977 @@ Expected: PASS, all range and comparer tests.
 git add internal/version/rangeeval.go internal/version/rangeeval_test.go
 git commit -m "feat: evaluate OSV ranges with sentinel and last_affected handling"
 ```
+
+---
+
+## Task 5: bbolt store
+
+**Files:**
+- Create: `internal/store/store.go`
+- Create: `internal/store/bolt.go`
+- Test: `internal/store/bolt_test.go`
+- Modify: `go.mod`, `go.sum` — add `go.etcd.io/bbolt v1.5.0`
+
+**Interfaces:**
+- Consumes: `advisory.Advisory`.
+- Produces: `store.Store` interface (`Lookup`, `LookupBySource`, `Meta`, `Close`); `store.Writer` interface (`Put`, `SetMeta`, `Commit`); `store.Meta{Schema, BuiltAt, Providers}`; `store.Provenance{Source, DataAsOf, Records}`; `store.Open(path string) (*Bolt, error)`; `store.Create(path string) (*Bolt, error)`; `store.DefaultPath() (string, error)`; sentinel errors `store.ErrNotFound`, `store.ErrSchemaMismatch`.
+
+Two design points from the roadmap that the implementation must honor:
+
+- **Lookup buckets hold advisory IDs, not records.** One advisory routinely affects several packages — 1,452 of 8,510 in the Go dump, up to 22 — so keying records by package stores them repeatedly. Measured blowup is 1.44x, and with `by-id` keeping its own copy the naive layout turns 21.9 MB into 53.6 MB.
+- **`Provenance.DataAsOf` is upstream data time, not local build time** (D12). A mirror serving a three-month-old snapshot fetched today must not report as fresh.
+
+- [ ] **Step 1: Write the failing test**
+
+```go
+package store
+
+import (
+	"errors"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/kun9497/assay/internal/advisory"
+)
+
+func sample(id, ecosystem, name string) advisory.Advisory {
+	return advisory.Advisory{
+		ID:       id,
+		Source:   "osv",
+		Kind:     advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: ecosystem, Name: name}},
+	}
+}
+
+func buildTestDB(t *testing.T, advs ...advisory.Advisory) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	for _, a := range advs {
+		if err := w.Put(a); err != nil {
+			t.Fatalf("Put(%s): %v", a.ID, err)
+		}
+	}
+	err = w.SetMeta(Meta{
+		BuiltAt: time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC),
+		Providers: map[string]Provenance{
+			"osv": {
+				Source:   "https://osv-vulnerabilities.storage.googleapis.com/Go/all.zip",
+				DataAsOf: time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC),
+				Records:  len(advs),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SetMeta: %v", err)
+	}
+	if err := w.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	return path
+}
+
+func TestLookup(t *testing.T) {
+	path := buildTestDB(t,
+		sample("GHSA-aaa", "Go", "github.com/foo/bar"),
+		sample("GHSA-bbb", "Go", "github.com/foo/bar"),
+		sample("GHSA-ccc", "npm", "lodash"),
+	)
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	got, err := db.Lookup("Go", "github.com/foo/bar")
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("Lookup returned %d advisories, want 2", len(got))
+	}
+	ids := map[string]bool{got[0].ID: true, got[1].ID: true}
+	if !ids["GHSA-aaa"] || !ids["GHSA-bbb"] {
+		t.Errorf("Lookup returned %v, want GHSA-aaa and GHSA-bbb", ids)
+	}
+
+	none, err := db.Lookup("Go", "github.com/nobody/nothing")
+	if err != nil {
+		t.Fatalf("Lookup miss: %v", err)
+	}
+	if len(none) != 0 {
+		t.Errorf("Lookup miss returned %d advisories, want 0", len(none))
+	}
+}
+
+func TestLookupDoesNotDuplicateRecords(t *testing.T) {
+	// One advisory affecting three packages must be stored once and returned
+	// under each key. This is the property that keeps the database from
+	// growing 1.44x.
+	multi := advisory.Advisory{
+		ID:     "GHSA-multi",
+		Source: "osv",
+		Kind:   advisory.KindVulnerability,
+		Affected: []advisory.Affected{
+			{Ecosystem: "Go", Name: "a"},
+			{Ecosystem: "Go", Name: "b"},
+			{Ecosystem: "Go", Name: "c"},
+		},
+	}
+	db, err := Open(buildTestDB(t, multi))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	for _, name := range []string{"a", "b", "c"} {
+		got, err := db.Lookup("Go", name)
+		if err != nil {
+			t.Fatalf("Lookup(%q): %v", name, err)
+		}
+		if len(got) != 1 || got[0].ID != "GHSA-multi" {
+			t.Errorf("Lookup(%q) = %+v, want one GHSA-multi", name, got)
+		}
+	}
+	if n := db.RecordCount(); n != 1 {
+		t.Errorf("RecordCount = %d, want 1 (record stored once, not per package)", n)
+	}
+}
+
+func TestLookupBySource(t *testing.T) {
+	a := advisory.Advisory{
+		ID:     "ALPINE-CVE-1",
+		Source: "osv",
+		Kind:   advisory.KindVulnerability,
+		Affected: []advisory.Affected{
+			{Ecosystem: "Alpine:v3.19", Name: "apache2"},
+		},
+	}
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.PutSourceIndex("Alpine:v3.19", "apache2", a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Put(a); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	got, err := db.LookupBySource("Alpine:v3.19", "apache2")
+	if err != nil {
+		t.Fatalf("LookupBySource: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "ALPINE-CVE-1" {
+		t.Errorf("LookupBySource = %+v, want ALPINE-CVE-1", got)
+	}
+}
+
+func TestMeta(t *testing.T) {
+	db, err := Open(buildTestDB(t, sample("GHSA-aaa", "Go", "x")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	m, err := db.Meta()
+	if err != nil {
+		t.Fatalf("Meta: %v", err)
+	}
+	if m.Schema != SchemaVersion {
+		t.Errorf("Meta.Schema = %d, want %d", m.Schema, SchemaVersion)
+	}
+	p, ok := m.Providers["osv"]
+	if !ok {
+		t.Fatal("Meta.Providers missing osv")
+	}
+	// DataAsOf must survive as upstream data time, distinct from BuiltAt (D12).
+	if !p.DataAsOf.Equal(time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("DataAsOf = %v, want 2026-07-29", p.DataAsOf)
+	}
+	if !m.BuiltAt.After(p.DataAsOf) {
+		t.Error("BuiltAt should be distinct from and later than DataAsOf in this fixture")
+	}
+}
+
+func TestOpenMissing(t *testing.T) {
+	_, err := Open(filepath.Join(t.TempDir(), "absent.db"))
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("Open(absent) err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestOpenSchemaMismatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.setSchemaForTest(SchemaVersion + 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(path); !errors.Is(err, ErrSchemaMismatch) {
+		t.Errorf("Open(mismatched) err = %v, want ErrSchemaMismatch", err)
+	}
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `go test ./internal/store/ -v`
+Expected: FAIL — package does not compile.
+
+- [ ] **Step 3: Add the dependency and write the implementation**
+
+```bash
+go get go.etcd.io/bbolt@v1.5.0
+```
+
+`internal/store/store.go`:
+
+```go
+// Package store holds the local advisory database.
+//
+// The database is orthogonal to a scan (D14): providers write it through
+// `assay db update` and a scan only ever reads. That is what makes offline
+// operation the default rather than a flag.
+package store
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/kun9497/assay/internal/advisory"
+)
+
+// SchemaVersion is part of the on-disk path (D5). A schema change rebuilds
+// into a new directory rather than migrating in place, because migration code
+// is a liability for a project with one user.
+const SchemaVersion = 1
+
+var (
+	ErrNotFound       = errors.New("vulnerability database not found")
+	ErrSchemaMismatch = errors.New("vulnerability database schema mismatch")
+)
+
+type Store interface {
+	Lookup(ecosystem, name string) ([]advisory.Advisory, error)
+	// LookupBySource resolves advisories keyed on a source package (D8).
+	// Unused in slice 1 — distro packages arrive in slice 2 — but present so
+	// the interface does not change under its first real consumer.
+	LookupBySource(ecosystem, sourceName string) ([]advisory.Advisory, error)
+	Meta() (Meta, error)
+	Close() error
+}
+
+type Meta struct {
+	Schema    int                   `json:"schema"`
+	BuiltAt   time.Time             `json:"built_at"` // when this database was assembled locally
+	Providers map[string]Provenance `json:"providers"`
+}
+
+type Provenance struct {
+	Source string `json:"source"` // the URL actually fetched
+	// DataAsOf is when the UPSTREAM data was current, which is not the same as
+	// BuiltAt (D12). A mirror serving a stale snapshot fetched today has a
+	// recent BuiltAt and an old DataAsOf; judging freshness by the former
+	// reports quarter-old data as fresh.
+	DataAsOf time.Time `json:"data_as_of"`
+	Records  int       `json:"records"`
+}
+
+// DefaultPath returns <user cache>/assay/db/v<schema>/vulnerability.db,
+// honouring ASSAY_DB_DIR for CI caching and air-gapped environments.
+func DefaultPath() (string, error) {
+	if dir := os.Getenv("ASSAY_DB_DIR"); dir != "" {
+		return filepath.Join(dir, "vulnerability.db"), nil
+	}
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cache, "assay", "db", "v1", "vulnerability.db"), nil
+}
+```
+
+`internal/store/bolt.go`:
+
+```go
+package store
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+
+	bolt "go.etcd.io/bbolt"
+
+	"github.com/kun9497/assay/internal/advisory"
+)
+
+var (
+	bucketAdvisories = []byte("advisories") // "<ecosystem>\x00<name>"   -> []advisory ID
+	bucketBySource   = []byte("by-source")  // "<ecosystem>\x00<source>" -> []advisory ID
+	bucketByID       = []byte("by-id")      // "<advisory ID>"           -> the record, once
+	bucketMeta       = []byte("meta")
+)
+
+var allBuckets = [][]byte{bucketAdvisories, bucketBySource, bucketByID, bucketMeta}
+
+const keySep = "\x00"
+
+type Bolt struct {
+	db *bolt.DB
+}
+
+// Open opens an existing database read-only. A missing or schema-mismatched
+// database is an error, never an empty result: the scan path must exit 2 with
+// instructions rather than reporting a clean scan it did not perform (D14).
+func Open(path string) (*Bolt, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("%w at %s", ErrNotFound, path)
+	}
+	db, err := bolt.Open(path, 0o600, &bolt.Options{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	b := &Bolt{db: db}
+	m, err := b.Meta()
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	if m.Schema != SchemaVersion {
+		db.Close()
+		return nil, fmt.Errorf("%w: found v%d, want v%d", ErrSchemaMismatch, m.Schema, SchemaVersion)
+	}
+	return b, nil
+}
+
+// Create makes a fresh database for writing. Callers build into a temporary
+// path and rename over the live database so a concurrent scan never observes a
+// partial write.
+func Create(path string) (*Bolt, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	db, err := bolt.Open(path, 0o600, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create %s: %w", path, err)
+	}
+	err = db.Update(func(tx *bolt.Tx) error {
+		for _, name := range allBuckets {
+			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
+				return err
+			}
+		}
+		return tx.Bucket(bucketMeta).Put([]byte("schema"),
+			[]byte(strconv.Itoa(SchemaVersion)))
+	})
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	return &Bolt{db: db}, nil
+}
+
+func (b *Bolt) Close() error { return b.db.Close() }
+
+// Put stores one advisory once in by-id and appends its ID to the lookup key of
+// every package it affects. Storing IDs rather than records is what keeps the
+// database from growing by the 1.44x measured duplication factor.
+func (b *Bolt) Put(a advisory.Advisory) error {
+	blob, err := json.Marshal(a)
+	if err != nil {
+		return fmt.Errorf("marshal %s: %w", a.ID, err)
+	}
+	return b.db.Update(func(tx *bolt.Tx) error {
+		if err := tx.Bucket(bucketByID).Put([]byte(a.ID), blob); err != nil {
+			return err
+		}
+		idx := tx.Bucket(bucketAdvisories)
+		for _, aff := range a.Affected {
+			if aff.Ecosystem == "" || aff.Name == "" {
+				continue
+			}
+			if err := appendID(idx, aff.Ecosystem+keySep+aff.Name, a.ID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// PutSourceIndex records that an advisory is keyed on a source package (D8).
+func (b *Bolt) PutSourceIndex(ecosystem, sourceName, id string) error {
+	return b.db.Update(func(tx *bolt.Tx) error {
+		return appendID(tx.Bucket(bucketBySource), ecosystem+keySep+sourceName, id)
+	})
+}
+
+func appendID(bk *bolt.Bucket, key, id string) error {
+	var ids []string
+	if raw := bk.Get([]byte(key)); raw != nil {
+		if err := json.Unmarshal(raw, &ids); err != nil {
+			return fmt.Errorf("decode index %q: %w", key, err)
+		}
+		for _, existing := range ids {
+			if existing == id {
+				return nil
+			}
+		}
+	}
+	ids = append(ids, id)
+	blob, err := json.Marshal(ids)
+	if err != nil {
+		return err
+	}
+	return bk.Put([]byte(key), blob)
+}
+
+func (b *Bolt) SetMeta(m Meta) error {
+	m.Schema = SchemaVersion
+	blob, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	return b.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketMeta).Put([]byte("meta"), blob)
+	})
+}
+
+// Commit flushes and closes the write handle.
+func (b *Bolt) Commit() error { return b.db.Close() }
+
+func (b *Bolt) setSchemaForTest(v int) error {
+	return b.db.Update(func(tx *bolt.Tx) error {
+		blob, err := json.Marshal(Meta{Schema: v})
+		if err != nil {
+			return err
+		}
+		return tx.Bucket(bucketMeta).Put([]byte("meta"), blob)
+	})
+}
+
+func (b *Bolt) Lookup(ecosystem, name string) ([]advisory.Advisory, error) {
+	return b.resolve(bucketAdvisories, ecosystem+keySep+name)
+}
+
+func (b *Bolt) LookupBySource(ecosystem, sourceName string) ([]advisory.Advisory, error) {
+	return b.resolve(bucketBySource, ecosystem+keySep+sourceName)
+}
+
+func (b *Bolt) resolve(index []byte, key string) ([]advisory.Advisory, error) {
+	var out []advisory.Advisory
+	err := b.db.View(func(tx *bolt.Tx) error {
+		raw := tx.Bucket(index).Get([]byte(key))
+		if raw == nil {
+			return nil
+		}
+		var ids []string
+		if err := json.Unmarshal(raw, &ids); err != nil {
+			return fmt.Errorf("decode index %q: %w", key, err)
+		}
+		byID := tx.Bucket(bucketByID)
+		for _, id := range ids {
+			blob := byID.Get([]byte(id))
+			if blob == nil {
+				// A dangling index entry means the database is inconsistent.
+				// Fail loudly rather than returning a short list that reads as
+				// "fewer vulnerabilities".
+				return fmt.Errorf("index %q references missing advisory %q", key, id)
+			}
+			var a advisory.Advisory
+			if err := json.Unmarshal(blob, &a); err != nil {
+				return fmt.Errorf("decode advisory %q: %w", id, err)
+			}
+			out = append(out, a)
+		}
+		return nil
+	})
+	return out, err
+}
+
+func (b *Bolt) Meta() (Meta, error) {
+	var m Meta
+	err := b.db.View(func(tx *bolt.Tx) error {
+		bk := tx.Bucket(bucketMeta)
+		if bk == nil {
+			return ErrNotFound
+		}
+		if raw := bk.Get([]byte("meta")); raw != nil {
+			return json.Unmarshal(raw, &m)
+		}
+		if raw := bk.Get([]byte("schema")); raw != nil {
+			v, err := strconv.Atoi(string(raw))
+			if err != nil {
+				return err
+			}
+			m.Schema = v
+		}
+		return nil
+	})
+	return m, err
+}
+
+// RecordCount reports how many advisories are stored, independent of how many
+// index entries point at them.
+func (b *Bolt) RecordCount() int {
+	var n int
+	_ = b.db.View(func(tx *bolt.Tx) error {
+		n = tx.Bucket(bucketByID).Stats().KeyN
+		return nil
+	})
+	return n
+}
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `go test ./internal/store/ -v`
+Expected: PASS, all six test functions.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add go.mod go.sum internal/store
+git commit -m "feat: add bbolt advisory store keyed by ID to avoid duplication"
+```
+
+---
+
+## Task 6: OSV record parser
+
+**Files:**
+- Create: `internal/provider/provider.go`
+- Create: `internal/provider/osv/record.go`
+- Test: `internal/provider/osv/record_test.go`
+
+**Interfaces:**
+- Consumes: `advisory.Advisory` and friends; `store.Provenance`.
+- Produces: `provider.Provider` interface with `Name() string` and `Fetch(ctx, func(advisory.Advisory) error) (store.Provenance, error)`; `osv.Convert(raw []byte, wantEcosystem string) (advisory.Advisory, bool, error)` returning `ok=false` for records that are filtered rather than broken.
+
+Four filters, each protecting against a specific silent failure:
+
+- **Withdrawn records are dropped** (D16). 107 of 8,617 Go records carry a `withdrawn` timestamp; ingesting them produces findings for retracted advisories, which are plain false positives. Filtering here rather than at query time means no lookup path can forget the check.
+- **`MAL-*` records are dropped** (D15), keeping `Kind` on the record so enabling them later is a filter change rather than a schema change.
+- **Affected entries for other ecosystems are dropped.** A single advisory can carry entries for several ecosystems — a django advisory in live OSV data contained an npm entry whose ranges were `SEMVER`, inside a record otherwise full of PyPI `ECOSYSTEM` ranges. Without this filter, npm version strings reach the PEP 440 comparer.
+- **`GIT` ranges are dropped at conversion.** They carry commit SHAs; `PYSEC-*` records are full of them.
+
+Range endpoints are stored verbatim, not normalized. OSV publishes non-canonical forms — `1.7c3`, `1.8c1`, `4.0.0.beta1` all appear in live PyPI data — and normalization is the comparer's job (D13: store losslessly, derive at query time). A string comparison against `1.8rc1` would fail silently.
+
+- [ ] **Step 1: Write the failing test**
+
+```go
+package osv
+
+import (
+	"testing"
+
+	"github.com/kun9497/assay/internal/advisory"
+)
+
+const goRecord = `{
+  "schema_version": "1.7.3",
+  "id": "GHSA-227x-7mh8-3cf6",
+  "modified": "2025-10-23T20:12:12Z",
+  "aliases": ["CVE-2025-59823", "GO-2025-3981"],
+  "summary": "Code injection in Gardener provider extensions",
+  "affected": [
+    {
+      "package": {"name": "github.com/gardener/a", "ecosystem": "Go"},
+      "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "1.64.0"}]}]
+    },
+    {
+      "package": {"name": "github.com/gardener/b", "ecosystem": "Go"},
+      "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "1.46.0"}]}]
+    }
+  ],
+  "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"}]
+}`
+
+func TestConvert_Go(t *testing.T) {
+	got, ok, err := Convert([]byte(goRecord), "Go")
+	if err != nil {
+		t.Fatalf("Convert: %v", err)
+	}
+	if !ok {
+		t.Fatal("Convert returned ok=false, want a converted advisory")
+	}
+	if got.ID != "GHSA-227x-7mh8-3cf6" {
+		t.Errorf("ID = %q", got.ID)
+	}
+	if got.Source != "osv" {
+		t.Errorf("Source = %q, want osv", got.Source)
+	}
+	if got.Kind != advisory.KindVulnerability {
+		t.Errorf("Kind = %q, want vulnerability", got.Kind)
+	}
+	if len(got.Affected) != 2 {
+		t.Fatalf("Affected = %d entries, want 2", len(got.Affected))
+	}
+	if got.Affected[0].Ranges[0].Events[0].Introduced != "0" {
+		t.Error("the introduced sentinel must survive conversion verbatim")
+	}
+	if len(got.Severity) != 1 || got.Severity[0].Type != "CVSS_V3" {
+		t.Errorf("Severity = %+v, want one CVSS_V3 vector", got.Severity)
+	}
+	// Both alias fields feed the KISA join (D3); this record uses aliases.
+	if len(got.Aliases) != 2 {
+		t.Errorf("Aliases = %v, want 2", got.Aliases)
+	}
+}
+
+func TestConvert_UpstreamFieldIsCarried(t *testing.T) {
+	// OSV 1.7 puts the CVE link in `upstream`. A record can have upstream and
+	// no aliases at all; reading only one field makes the KISA join fail
+	// silently (D3).
+	const rec = `{
+	  "id": "ALPINE-CVE-2006-20001",
+	  "upstream": ["CVE-2006-20001"],
+	  "affected": [{"package": {"name": "apache2", "ecosystem": "Alpine:v3.19"},
+	                "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "2.4.55-r0"}]}]}]
+	}`
+	got, ok, err := Convert([]byte(rec), "Alpine:v3.19")
+	if err != nil || !ok {
+		t.Fatalf("Convert: ok=%v err=%v", ok, err)
+	}
+	if len(got.Upstream) != 1 || got.Upstream[0] != "CVE-2006-20001" {
+		t.Errorf("Upstream = %v, want [CVE-2006-20001]", got.Upstream)
+	}
+	if len(got.Aliases) != 0 {
+		t.Errorf("Aliases = %v, want empty", got.Aliases)
+	}
+}
+
+func TestConvert_DropsWithdrawn(t *testing.T) {
+	const rec = `{
+	  "id": "GHSA-withdrawn",
+	  "withdrawn": "2024-01-01T00:00:00Z",
+	  "affected": [{"package": {"name": "x", "ecosystem": "Go"},
+	                "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}]}]}]
+	}`
+	_, ok, err := Convert([]byte(rec), "Go")
+	if err != nil {
+		t.Fatalf("Convert: %v", err)
+	}
+	if ok {
+		t.Error("withdrawn record was converted; it must be dropped (D16)")
+	}
+}
+
+func TestConvert_DropsMalicious(t *testing.T) {
+	const rec = `{
+	  "id": "MAL-2021-1",
+	  "summary": "Malicious code in cxp-jquery (npm)",
+	  "affected": [{"package": {"name": "cxp-jquery", "ecosystem": "npm"},
+	                "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}]}]}]
+	}`
+	_, ok, err := Convert([]byte(rec), "npm")
+	if err != nil {
+		t.Fatalf("Convert: %v", err)
+	}
+	if ok {
+		t.Error("MAL record was converted; it must be dropped in slice 1 (D15)")
+	}
+}
+
+func TestConvert_FiltersForeignEcosystems(t *testing.T) {
+	// Live OSV data mixes ecosystems inside one advisory. Without this filter
+	// the npm SEMVER value reaches the PEP 440 comparer.
+	const rec = `{
+	  "id": "GHSA-mixed",
+	  "affected": [
+	    {"package": {"name": "django", "ecosystem": "PyPI"},
+	     "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "3.2.1"}]}]},
+	    {"package": {"name": "some-js-lib", "ecosystem": "npm"},
+	     "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "v1.16.3"}]}]}
+	  ]
+	}`
+	got, ok, err := Convert([]byte(rec), "PyPI")
+	if err != nil || !ok {
+		t.Fatalf("Convert: ok=%v err=%v", ok, err)
+	}
+	if len(got.Affected) != 1 {
+		t.Fatalf("Affected = %d entries, want 1 (npm entry must be dropped)", len(got.Affected))
+	}
+	if got.Affected[0].Ecosystem != "PyPI" || got.Affected[0].Name != "django" {
+		t.Errorf("Affected[0] = %+v, want the PyPI django entry", got.Affected[0])
+	}
+}
+
+func TestConvert_DropsGitRanges(t *testing.T) {
+	const rec = `{
+	  "id": "PYSEC-git",
+	  "affected": [{"package": {"name": "django", "ecosystem": "PyPI"},
+	    "ranges": [
+	      {"type": "GIT", "repo": "https://github.com/django/django",
+	       "events": [{"introduced": "9305c0e12d43c4df999c3301a1f0c742264a657e"}]},
+	      {"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "3.2.1"}]}
+	    ]}]
+	}`
+	got, ok, err := Convert([]byte(rec), "PyPI")
+	if err != nil || !ok {
+		t.Fatalf("Convert: ok=%v err=%v", ok, err)
+	}
+	rs := got.Affected[0].Ranges
+	if len(rs) != 1 || rs[0].Type != advisory.RangeEcosystem {
+		t.Errorf("Ranges = %+v, want only the ECOSYSTEM range", rs)
+	}
+}
+
+func TestConvert_KeepsNonCanonicalEndpointsVerbatim(t *testing.T) {
+	// OSV publishes non-normalized PyPI endpoints. Normalizing here would be
+	// lossy (D13); the comparer handles it.
+	const rec = `{
+	  "id": "PYSEC-noncanon",
+	  "affected": [{"package": {"name": "django", "ecosystem": "PyPI"},
+	    "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "1.8c1"}]}],
+	    "versions": ["1.5c1", "4.0.0.beta1"]}]
+	}`
+	got, _, err := Convert([]byte(rec), "PyPI")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := got.Affected[0].Ranges[0].Events[1].Fixed; f != "1.8c1" {
+		t.Errorf("fixed = %q, want the verbatim 1.8c1", f)
+	}
+	if got.Affected[0].Versions[1] != "4.0.0.beta1" {
+		t.Errorf("versions = %v, want verbatim", got.Affected[0].Versions)
+	}
+}
+
+func TestConvert_DropsRecordWithNoMatchingAffected(t *testing.T) {
+	const rec = `{
+	  "id": "GHSA-elsewhere",
+	  "affected": [{"package": {"name": "lodash", "ecosystem": "npm"},
+	                "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}]}]}]
+	}`
+	_, ok, err := Convert([]byte(rec), "Go")
+	if err != nil {
+		t.Fatalf("Convert: %v", err)
+	}
+	if ok {
+		t.Error("record with no Go entries was converted; it must be dropped")
+	}
+}
+
+func TestConvert_Malformed(t *testing.T) {
+	if _, _, err := Convert([]byte("{not json"), "Go"); err == nil {
+		t.Error("Convert(malformed) = nil error, want error")
+	}
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `go test ./internal/provider/osv/ -v`
+Expected: FAIL — package does not compile, `Convert` undefined.
+
+- [ ] **Step 3: Write the implementation**
+
+`internal/provider/provider.go`:
+
+```go
+// Package provider defines how upstream advisory data enters the store.
+//
+// The abstraction exists from day one (D2) because KISA/KNVD data will not
+// arrive in OSV format, so some collection and normalization is unavoidable —
+// but committing to hand-rolling every upstream feed is not.
+package provider
+
+import (
+	"context"
+
+	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/store"
+)
+
+type Provider interface {
+	Name() string
+	// Fetch streams advisories to emit rather than returning a slice: the
+	// unfiltered OSV download is ~244 MB for slice 1's ecosystems, most of
+	// which is discarded, and holding it all in memory buys nothing.
+	Fetch(ctx context.Context, emit func(advisory.Advisory) error) (store.Provenance, error)
+}
+```
+
+`internal/provider/osv/record.go`:
+
+```go
+// Package osv converts OSV records into the internal advisory shape.
+//
+// OSV is the primary provider and passes through nearly unchanged (D1) — the
+// internal type IS the OSV shape. What this package does is filter.
+package osv
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/kun9497/assay/internal/advisory"
+)
+
+// SourceName identifies records this provider supplied (D15's groundwork for
+// splitting data by provider later).
+const SourceName = "osv"
+
+type rawRecord struct {
+	ID        string        `json:"id"`
+	Summary   string        `json:"summary"`
+	Modified  time.Time     `json:"modified"`
+	Withdrawn *time.Time    `json:"withdrawn"`
+	Aliases   []string      `json:"aliases"`
+	Upstream  []string      `json:"upstream"`
+	Affected  []rawAffected `json:"affected"`
+	Severity  []rawSeverity `json:"severity"`
+}
+
+type rawAffected struct {
+	Package struct {
+		Name      string `json:"name"`
+		Ecosystem string `json:"ecosystem"`
+		PURL      string `json:"purl"`
+	} `json:"package"`
+	Ranges   []rawRange `json:"ranges"`
+	Versions []string   `json:"versions"`
+}
+
+type rawRange struct {
+	Type   string     `json:"type"`
+	Events []rawEvent `json:"events"`
+}
+
+type rawEvent struct {
+	Introduced   string `json:"introduced"`
+	Fixed        string `json:"fixed"`
+	LastAffected string `json:"last_affected"`
+	Limit        string `json:"limit"`
+}
+
+type rawSeverity struct {
+	Type  string `json:"type"`
+	Score string `json:"score"`
+}
+
+// Convert parses one OSV record and keeps only the parts relevant to
+// wantEcosystem. ok is false when the record is deliberately filtered out;
+// err is non-nil only when the record is malformed. Distinguishing the two
+// keeps "we chose to skip this" from looking like "the database is broken".
+func Convert(data []byte, wantEcosystem string) (advisory.Advisory, bool, error) {
+	var r rawRecord
+	if err := json.Unmarshal(data, &r); err != nil {
+		return advisory.Advisory{}, false, fmt.Errorf("decode osv record: %w", err)
+	}
+	if r.ID == "" {
+		return advisory.Advisory{}, false, fmt.Errorf("osv record has no id")
+	}
+
+	// Withdrawn advisories were retracted upstream; reporting them is a plain
+	// false positive. Dropped here rather than at query time so no lookup path
+	// can forget the check (D16).
+	if r.Withdrawn != nil {
+		return advisory.Advisory{}, false, nil
+	}
+
+	kind := advisory.KindVulnerability
+	if strings.HasPrefix(r.ID, "MAL-") {
+		kind = advisory.KindMalicious
+	}
+	// Malicious-package reports are a different finding class with no severity
+	// and no fixed version (D15). Kind is computed above and would be stored
+	// faithfully; the filter is what changes when they are enabled.
+	if kind != advisory.KindVulnerability {
+		return advisory.Advisory{}, false, nil
+	}
+
+	out := advisory.Advisory{
+		ID:       r.ID,
+		Aliases:  r.Aliases,
+		Upstream: r.Upstream,
+		Source:   SourceName,
+		Kind:     kind,
+		Summary:  r.Summary,
+		Modified: r.Modified,
+	}
+	for _, sev := range r.Severity {
+		out.Severity = append(out.Severity, advisory.Severity{Type: sev.Type, Score: sev.Score})
+	}
+
+	for _, ra := range r.Affected {
+		// One advisory can carry entries for several ecosystems. Keeping a
+		// foreign entry would feed its version strings to the wrong comparer.
+		if ra.Package.Ecosystem != wantEcosystem || ra.Package.Name == "" {
+			continue
+		}
+		aff := advisory.Affected{
+			Ecosystem: ra.Package.Ecosystem,
+			Name:      ra.Package.Name,
+			Versions:  ra.Versions, // verbatim: OSV publishes non-canonical forms (D13)
+		}
+		for _, rr := range ra.Ranges {
+			typ := advisory.RangeType(strings.ToUpper(rr.Type))
+			// GIT ranges carry commit SHAs, not versions.
+			if typ == advisory.RangeGit {
+				continue
+			}
+			rng := advisory.Range{Type: typ}
+			for _, re := range rr.Events {
+				rng.Events = append(rng.Events, advisory.Event{
+					Introduced:   re.Introduced,
+					Fixed:        re.Fixed,
+					LastAffected: re.LastAffected,
+					Limit:        re.Limit,
+				})
+			}
+			if len(rng.Events) > 0 {
+				aff.Ranges = append(aff.Ranges, rng)
+			}
+		}
+		if len(aff.Ranges) == 0 && len(aff.Versions) == 0 {
+			continue // nothing left to match on
+		}
+		out.Affected = append(out.Affected, aff)
+	}
+
+	if len(out.Affected) == 0 {
+		return advisory.Advisory{}, false, nil
+	}
+	return out, true, nil
+}
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `go test ./internal/provider/... -v`
+Expected: PASS, all nine test functions.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/provider
+git commit -m "feat: convert OSV records, filtering withdrawn, malicious, and foreign ecosystems"
+```
