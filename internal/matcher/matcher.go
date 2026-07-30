@@ -20,11 +20,20 @@ type Finding struct {
 	Evidence version.Evidence
 }
 
-// Skipped is a package the matcher could not evaluate. It exists so that
-// "we could not tell" never renders as "nothing found".
+// Skipped is something the matcher could not evaluate. It exists so that "we
+// could not tell" never renders as "nothing found".
+//
+// It is per (package, advisory), not per package. A package can produce a
+// finding from one advisory and be unevaluable against another, and the second
+// fact must survive the first — the unevaluated advisory may carry the higher
+// severity or a higher fix floor, which would make the remediation shown next
+// to the visible finding actively wrong.
 type Skipped struct {
 	Package pkgmeta.Package
-	Reason  string
+	// AdvisoryID is empty when the whole package was skipped, e.g. because no
+	// comparer is registered for its ecosystem.
+	AdvisoryID string
+	Reason     string
 }
 
 type Result struct {
@@ -42,6 +51,12 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 	var res Result
 
 	for _, p := range t.Packages {
+		// NOTE for whoever adds a distro comparer to version.registry: distro
+		// advisories are keyed on SOURCE packages while installed packages are
+		// binary packages (D8), so this loop must also consult
+		// store.LookupBySource with p.Source. Until then a distro package exits
+		// here as Skipped, which is safe. Registering the comparer without
+		// adding that lookup flips it from safe to silently under-reporting.
 		cmp, ok := version.For(p.Ecosystem)
 		if !ok {
 			res.Skipped = append(res.Skipped, Skipped{
@@ -59,23 +74,35 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 		}
 
 		seen := make(map[string]bool, len(candidates))
-		var skipReason string
 
 		for _, a := range candidates {
 			if seen[a.ID] {
 				continue
 			}
 			for _, aff := range a.Affected {
+				// The store is keyed on (ecosystem, name), so a returned
+				// advisory can still carry entries for sibling packages — a Go
+				// advisory naming both github.com/foo/bar and .../bar/v2, for
+				// instance. Evaluating a v1 version against a v2 range would be
+				// wrong, so entries that are not this package are skipped.
+				//
+				// This mirrors the store's key equality exactly. If either side
+				// ever starts normalizing names, the two must change together
+				// or this filter will silently discard real advisories.
 				if aff.Ecosystem != p.Ecosystem || aff.Name != p.Name {
 					continue
 				}
 				hit, ev, err := version.AffectsVersion(cmp, p.Version, aff)
 				if err != nil {
-					// Record the first reason and keep going: one malformed
-					// advisory bound must not hide the rest.
-					if skipReason == "" {
-						skipReason = fmt.Sprintf("comparing %s: %v", p.Version, err)
-					}
+					// One advisory this package cannot be evaluated against.
+					// Recorded against that advisory and the loop continues, so
+					// a single malformed bound hides neither the other
+					// advisories nor the fact that this one was unevaluable.
+					res.Skipped = append(res.Skipped, Skipped{
+						Package:    p,
+						AdvisoryID: a.ID,
+						Reason:     fmt.Sprintf("comparing %s: %v", p.Version, err),
+					})
 					continue
 				}
 				if hit {
@@ -85,10 +112,6 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 				}
 			}
 		}
-
-		if skipReason != "" && !anyFindingFor(res.Findings, p) {
-			res.Skipped = append(res.Skipped, Skipped{Package: p, Reason: skipReason})
-		}
 	}
 
 	sortFindings(res.Findings)
@@ -96,18 +119,15 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 	return res, nil
 }
 
-func anyFindingFor(fs []Finding, p pkgmeta.Package) bool {
-	for _, f := range fs {
-		if f.Package.Name == p.Name && f.Package.Ecosystem == p.Ecosystem {
-			return true
-		}
-	}
-	return false
-}
-
 // Sorting keeps output deterministic and diffable, which is design goal #3.
+//
+// Both comparators key all the way down to something that distinguishes any
+// two distinct entries. A partial key would leave ties to sort.Slice, which is
+// not stable, so two runs over identical input could order them differently —
+// the exact churn the goal forbids. SliceStable is used as well, so that even
+// a genuine tie resolves the same way every time.
 func sortFindings(fs []Finding) {
-	sort.Slice(fs, func(i, j int) bool {
+	sort.SliceStable(fs, func(i, j int) bool {
 		a, b := fs[i], fs[j]
 		if a.Package.Ecosystem != b.Package.Ecosystem {
 			return a.Package.Ecosystem < b.Package.Ecosystem
@@ -115,16 +135,31 @@ func sortFindings(fs []Finding) {
 		if a.Package.Name != b.Package.Name {
 			return a.Package.Name < b.Package.Name
 		}
-		return a.Advisory.ID < b.Advisory.ID
+		if a.Package.Version != b.Package.Version {
+			return a.Package.Version < b.Package.Version
+		}
+		if a.Advisory.ID != b.Advisory.ID {
+			return a.Advisory.ID < b.Advisory.ID
+		}
+		return a.Package.PURL < b.Package.PURL
 	})
 }
 
 func sortSkipped(ss []Skipped) {
-	sort.Slice(ss, func(i, j int) bool {
+	sort.SliceStable(ss, func(i, j int) bool {
 		a, b := ss[i], ss[j]
 		if a.Package.Ecosystem != b.Package.Ecosystem {
 			return a.Package.Ecosystem < b.Package.Ecosystem
 		}
-		return a.Package.Name < b.Package.Name
+		if a.Package.Name != b.Package.Name {
+			return a.Package.Name < b.Package.Name
+		}
+		if a.Package.Version != b.Package.Version {
+			return a.Package.Version < b.Package.Version
+		}
+		if a.AdvisoryID != b.AdvisoryID {
+			return a.AdvisoryID < b.AdvisoryID
+		}
+		return a.Reason < b.Reason
 	})
 }

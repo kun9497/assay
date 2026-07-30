@@ -116,6 +116,75 @@ func TestMatch_UnparseableVersionIsSkippedNotClean(t *testing.T) {
 	}
 }
 
+func TestMatch_FindingOnOneVersionDoesNotEraseSkipOnAnother(t *testing.T) {
+	// Two installed versions of the same package. One matches; the other
+	// cannot be evaluated. Identifying packages by name alone would let the
+	// first one's finding suppress the second one's skip, reporting an
+	// unevaluated package as clean. Nested node_modules produce this shape
+	// routinely.
+	broken := advWithRange("GHSA-broken", "npm", "lodash", "0", "not-a-version", advisory.RangeSemver)
+	old := advWithRange("GHSA-old", "npm", "lodash", "0", "4.17.21", advisory.RangeSemver)
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"npm\x00lodash": {old, broken},
+	}}
+	target := pkgmeta.Target{Packages: []pkgmeta.Package{
+		pkg("lodash", "4.17.20", "npm"), // inside old's range
+		pkg("lodash", "4.17.21", "npm"), // at the fix, so only broken applies
+	}}
+
+	res, err := New(s).Match(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var skippedFor2021 bool
+	for _, sk := range res.Skipped {
+		if sk.Package.Version == "4.17.21" {
+			skippedFor2021 = true
+		}
+	}
+	if !skippedFor2021 {
+		t.Errorf("4.17.21 could not be evaluated but produced no Skipped entry; got %+v", res.Skipped)
+	}
+
+	// Reversing the input must not change the outcome.
+	target.Packages[0], target.Packages[1] = target.Packages[1], target.Packages[0]
+	rev, err := New(s).Match(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rev.Skipped) != len(res.Skipped) || len(rev.Findings) != len(res.Findings) {
+		t.Errorf("result depends on package order: %d/%d vs %d/%d",
+			len(res.Findings), len(res.Skipped), len(rev.Findings), len(rev.Skipped))
+	}
+}
+
+func TestMatch_UnevaluableAdvisorySurvivesAlongsideAFinding(t *testing.T) {
+	// One package, two advisories: one matches, one has a malformed bound. The
+	// user must learn about both. The unevaluated one may carry the higher
+	// severity or a higher fix floor, which would make the remediation shown
+	// next to the visible finding wrong.
+	hit := advWithRange("GHSA-hit", "Go", "x", "0", "2.0.0", advisory.RangeSemver)
+	bad := advWithRange("GHSA-unevaluable", "Go", "x", "0", "not-a-version", advisory.RangeSemver)
+	s := fakeStore{byKey: map[string][]advisory.Advisory{"Go\x00x": {hit, bad}}}
+
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("x", "1.0.0", "Go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 || res.Findings[0].Advisory.ID != "GHSA-hit" {
+		t.Errorf("Findings = %+v, want one GHSA-hit", res.Findings)
+	}
+	if len(res.Skipped) != 1 {
+		t.Fatalf("Skipped = %+v, want one entry for GHSA-unevaluable", res.Skipped)
+	}
+	if res.Skipped[0].AdvisoryID != "GHSA-unevaluable" {
+		t.Errorf("Skipped.AdvisoryID = %q, want GHSA-unevaluable — a reason that does not "+
+			"name the advisory leaves the user nothing to investigate", res.Skipped[0].AdvisoryID)
+	}
+}
+
 func TestMatch_UnsupportedEcosystemIsSkipped(t *testing.T) {
 	res, err := New(fakeStore{}).Match(pkgmeta.Target{
 		Packages: []pkgmeta.Package{pkg("apache2", "2.4.54-r0", "Alpine:v3.19")},
