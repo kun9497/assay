@@ -12,6 +12,7 @@ import (
 	"github.com/kun9497/assay/internal/dbcmd"
 	"github.com/kun9497/assay/internal/provider"
 	"github.com/kun9497/assay/internal/provider/osv"
+	"github.com/kun9497/assay/internal/scancmd"
 	"github.com/kun9497/assay/internal/store"
 )
 
@@ -100,12 +101,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-// scan is the pipeline entry point: resolve target -> catalog packages ->
-// match against the vulnerability DB -> report.
-//
-// TODO: implement. Returning exitError is deliberate — an unimplemented
-// scanner must never report a clean result.
+// scan is the pipeline entry point: parse the target into an inventory, match
+// it against the local database, and report.
 func scan(target string, stdout, stderr io.Writer) int {
-	fmt.Fprintf(stderr, "error: scanning is not implemented yet (target %q)\n", target)
-	return exitError
+	path, err := store.DefaultPath()
+	if err != nil {
+		fmt.Fprintf(stderr, "error: locate database: %v\n", err)
+		return exitError
+	}
+	return scancmd.Run(path, target, stdout, stderr)
 }
