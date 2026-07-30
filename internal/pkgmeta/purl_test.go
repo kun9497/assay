@@ -11,9 +11,13 @@ func TestParsePURL(t *testing.T) {
 		{"pkg:golang/github.com/foo/bar", "golang", "github.com/foo", "bar", ""},
 		{"pkg:npm/lodash@4.17.20", "npm", "", "lodash", "4.17.20"},
 		{"pkg:npm/%40angular/core@12.0.0", "npm", "@angular", "core", "12.0.0"},
+		{"pkg:npm/@angular/common@12.0.0", "npm", "@angular", "common", "12.0.0"}, // raw @ in namespace
 		{"pkg:pypi/django@3.2", "pypi", "", "django", "3.2"},
 		{"pkg:apk/alpine/apache2@2.4.54-r0?arch=source", "apk", "alpine", "apache2", "2.4.54-r0"},
-		{"pkg:PyPI/Django@3.2", "pypi", "", "Django", "3.2"}, // type lowercases, name does not
+		{"pkg:PyPI/Django@3.2", "pypi", "", "Django", "3.2"},                                           // type lowercases, name does not
+		{"pkg:golang/github.com/foo/bar@v1.2.3#sub/path", "golang", "github.com/foo", "bar", "v1.2.3"}, // subpath discarded
+		{"pkg:golang/example.com/a/b/c@v1.0.0", "golang", "example.com/a/b", "c", "v1.0.0"},            // 3+ segment namespace
+		{"pkg:npm/lodash@", "npm", "", "lodash", ""},                                                   // empty version
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
