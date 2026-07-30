@@ -185,6 +185,28 @@ func TestMatch_UnevaluableAdvisorySurvivesAlongsideAFinding(t *testing.T) {
 	}
 }
 
+func TestMatch_SkipsAreDeduplicatedPerAdvisory(t *testing.T) {
+	// One advisory carrying two Affected entries for the same package, both
+	// with malformed bounds. Measured across real data, 145 of 313 Django
+	// records repeat affected entries for one package, so this shape is
+	// routine rather than pathological — and a skip per entry would bury the
+	// rest of the report in identical lines.
+	bad := advWithRange("GHSA-twice", "Go", "x", "0", "not-a-version", advisory.RangeSemver)
+	bad.Affected = append(bad.Affected, bad.Affected[0])
+	s := fakeStore{byKey: map[string][]advisory.Advisory{"Go\x00x": {bad, bad}}}
+
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("x", "1.0.0", "Go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Skipped) != 1 {
+		t.Errorf("Skipped = %d entries, want 1 per (package, advisory); got %+v",
+			len(res.Skipped), res.Skipped)
+	}
+}
+
 func TestMatch_UnsupportedEcosystemIsSkipped(t *testing.T) {
 	res, err := New(fakeStore{}).Match(pkgmeta.Target{
 		Packages: []pkgmeta.Package{pkg("apache2", "2.4.54-r0", "Alpine:v3.19")},
