@@ -16,8 +16,12 @@ coverage.*
 *.sbom.json
 *.cdx.json
 *.spdx.json
-# ...but SBOM fixtures under testdata/ are committed on purpose.
-!testdata/**/*.json
+# ...but SBOM fixtures under any testdata/ are committed on purpose.
+# The leading **/ matters: a pattern containing a mid-string slash is anchored
+# to the repo root, so "!testdata/**/*.json" would only rescue a root-level
+# testdata/ and silently keep ignoring internal/<pkg>/testdata/ — where the
+# fixtures actually live.
+!**/testdata/**/*.json
 
 # Scratch state for plan execution: ledgers, briefs, review packages.
 # Git history is the durable record; this is working memory.
