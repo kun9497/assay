@@ -1514,6 +1514,78 @@ func TestInRange_InvalidVersionErrors(t *testing.T) {
 	}
 }
 
+func TestInRange_UnsortedEvents(t *testing.T) {
+	// OSV only recommends sorted events, so a later window listed first is
+	// well-formed. Walking in file order returns false with no error — a
+	// silent miss on valid input.
+	r := rng(advisory.RangeSemver,
+		intro("2.0.0"), fixed("3.0.0"),
+		intro("1.0.0"), fixed("1.5.0"))
+	for _, tc := range []struct {
+		v    string
+		want bool
+	}{
+		{"2.5.0", true},  // inside the window that was listed first
+		{"1.2.0", true},  // inside the window that was listed second
+		{"1.7.0", false}, // between the two windows
+		{"3.0.0", false}, // at the upper fix, exclusive
+	} {
+		got, _, err := InRange(SemVer{}, tc.v, r)
+		if err != nil {
+			t.Fatalf("InRange(%q) error: %v", tc.v, err)
+		}
+		if got != tc.want {
+			t.Errorf("InRange(%q) over unsorted events = %v, want %v", tc.v, got, tc.want)
+		}
+	}
+}
+
+func TestInRange_MalformedBoundErrors(t *testing.T) {
+	// A bound that cannot be ordered must surface. Sorting on an unorderable
+	// bound would otherwise pick an arbitrary order and return a confident
+	// wrong verdict.
+	_, _, err := InRange(SemVer{}, "1.2.3",
+		rng(advisory.RangeSemver, intro("1.0.0"), fixed("not-a-version")))
+	if !errors.Is(err, ErrInvalid) {
+		t.Errorf("InRange with a malformed bound err = %v, want ErrInvalid", err)
+	}
+}
+
+func TestInRange_EvidenceNamesTheContainingWindow(t *testing.T) {
+	// With several maintenance branches, evidence must cite the fix for the
+	// window the version is actually in. Naming a later window's fix sends the
+	// user to the wrong upgrade.
+	r := rng(advisory.RangeSemver,
+		intro("1.0.0"), fixed("1.5.0"),
+		intro("2.0.0"), fixed("3.0.0"))
+	got, ev, err := InRange(SemVer{}, "1.2.0", r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got {
+		t.Fatal("InRange = false, want true")
+	}
+	if ev.Introduced != "1.0.0" || ev.Fixed != "1.5.0" {
+		t.Errorf("Evidence = introduced %q fixed %q, want 1.0.0 / 1.5.0",
+			ev.Introduced, ev.Fixed)
+	}
+}
+
+func TestAffectsVersion_EnumeratedPropagatesCompareError(t *testing.T) {
+	// The installed version is the left operand on every iteration, so an
+	// unparseable one fails every entry. Skipping would turn a total failure
+	// into a silent clean verdict.
+	a := advisory.Affected{
+		Ecosystem: "Go",
+		Name:      "x",
+		Versions:  []string{"1.0.0", "2.0.0"},
+	}
+	_, _, err := AffectsVersion(SemVer{}, "not-a-version", a)
+	if !errors.Is(err, ErrInvalid) {
+		t.Errorf("AffectsVersion err = %v, want ErrInvalid", err)
+	}
+}
+
 func TestInRange_Evidence(t *testing.T) {
 	_, ev, err := InRange(SemVer{}, "1.2.3",
 		rng(advisory.RangeSemver, intro("1.0.0"), fixed("2.0.0")))
@@ -1570,6 +1642,7 @@ package version
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/kun9497/assay/internal/advisory"
 )
@@ -1608,7 +1681,12 @@ func AffectsVersion(c Comparer, v string, a advisory.Affected) (bool, Evidence, 
 	for _, known := range a.Versions {
 		cmp, err := c.Compare(v, known)
 		if err != nil {
-			continue // an unorderable entry in the list is not a reason to fail the whole check
+			// Surface it. The left operand is the installed version and is
+			// identical on every iteration, so an unparseable one fails every
+			// entry — skipping would turn a 100% failure rate into a silent
+			// clean verdict, which is the exact false negative this package
+			// exists to prevent.
+			return false, Evidence{}, fmt.Errorf("compare %q to listed version %q: %w", v, known, err)
 		}
 		if cmp == 0 {
 			return true, Evidence{
@@ -1619,14 +1697,23 @@ func AffectsVersion(c Comparer, v string, a advisory.Affected) (bool, Evidence, 
 	return false, Evidence{}, nil
 }
 
-// InRange walks an OSV range's events in order, tracking whether v is currently
-// inside an open window. Events are half-open [introduced, fixed) with the
-// exception of last_affected, which is inclusive.
+// InRange walks an OSV range's events in ascending version order, tracking
+// whether v is currently inside an open window. Windows are half-open
+// [introduced, fixed), with the exception of last_affected, which is inclusive.
 func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 	// GIT ranges carry commit SHAs, not versions. Skipping is correct; parsing
 	// would error on data that was never meant for a Comparer.
 	if r.Type == advisory.RangeGit {
 		return false, Evidence{}, nil
+	}
+
+	// OSV only *recommends* that events arrive sorted, and its reference
+	// algorithm sorts before walking. An advisory that lists a later window
+	// first is well-formed, and walking it in file order returns "not
+	// vulnerable" with no error — a silent miss on valid input.
+	events, err := sortEvents(c, r.Events)
+	if err != nil {
+		return false, Evidence{}, err
 	}
 
 	var (
@@ -1635,7 +1722,7 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 	)
 	ev.RangeType = r.Type
 
-	for _, e := range r.Events {
+	for _, e := range events {
 		switch {
 		case e.Introduced != "":
 			ge, err := atLeast(c, v, e.Introduced)
@@ -1655,7 +1742,10 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 			}
 			if inside && cmp >= 0 {
 				inside = false // exclusive upper bound
-			} else if inside {
+			} else if inside && ev.Fixed == "" && ev.LastAffected == "" {
+				// Only the bound closing the window v actually sits in. A
+				// later window's bound would name the wrong fix version, and
+				// wrong remediation advice is worse than none.
 				ev.Fixed = e.Fixed
 			}
 
@@ -1666,7 +1756,7 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 			}
 			if inside && cmp > 0 {
 				inside = false // inclusive upper bound: equal is still affected
-			} else if inside {
+			} else if inside && ev.Fixed == "" && ev.LastAffected == "" {
 				ev.LastAffected = e.LastAffected
 			}
 		}
@@ -1676,6 +1766,53 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 		ev.Reason = describe(v, ev)
 	}
 	return inside, ev, nil
+}
+
+// eventVersion returns whichever bound an event carries, or "" for an event
+// this slice does not act on (a bare `limit`, or a malformed empty event).
+func eventVersion(e advisory.Event) string {
+	switch {
+	case e.Introduced != "":
+		return e.Introduced
+	case e.Fixed != "":
+		return e.Fixed
+	case e.LastAffected != "":
+		return e.LastAffected
+	}
+	return ""
+}
+
+// sortEvents orders events by the version each carries, with the introduced
+// sentinel first.
+//
+// Every bound is validated before sorting so the comparator cannot fail. A
+// comparator that swallowed errors would silently produce an arbitrary order,
+// and an arbitrary order here is a wrong verdict with no error attached —
+// strictly worse than refusing to evaluate the range.
+func sortEvents(c Comparer, in []advisory.Event) ([]advisory.Event, error) {
+	out := append([]advisory.Event(nil), in...)
+	for _, e := range out {
+		ver := eventVersion(e)
+		if ver == "" || ver == introducedSentinel {
+			continue
+		}
+		if _, err := c.Compare(ver, ver); err != nil {
+			return nil, fmt.Errorf("range event bound %q: %w", ver, err)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		vi, vj := eventVersion(out[i]), eventVersion(out[j])
+		// The sentinel is negative infinity, so it sorts before everything.
+		if vi == introducedSentinel {
+			return vj != introducedSentinel
+		}
+		if vj == introducedSentinel {
+			return false
+		}
+		cmp, _ := c.Compare(vi, vj) // cannot fail: validated above
+		return cmp < 0
+	})
+	return out, nil
 }
 
 // atLeast reports whether v >= bound, resolving the OSV sentinel first.
