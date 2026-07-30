@@ -1,3 +1,3 @@
 module github.com/kun9497/assay
 
-go 1.24
+go 1.26

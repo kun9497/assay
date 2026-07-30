@@ -38,7 +38,7 @@ Run a single test: `go test -race -run TestRun_ExitCodes ./cmd/assay`
 
 The Makefile shells out to `date` and `rm`, so on Windows either run it under Git Bash or
 call the underlying `go` commands directly. CI (`.github/workflows/ci.yml`) runs
-gofmt-check → vet → test -race → build on Go 1.24; a non-empty `gofmt -l .` fails the build.
+gofmt-check → vet → test -race → build on Go 1.26; a non-empty `gofmt -l .` fails the build.
 
 **`make test` fails on a machine without a C toolchain**: `-race` requires cgo, and Go
 defaults `CGO_ENABLED` to 0 when it finds no C compiler. Fall back to `go test ./...`
