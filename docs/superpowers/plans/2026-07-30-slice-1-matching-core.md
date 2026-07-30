@@ -4265,7 +4265,7 @@ func TestMatch_SkipsAreDeduplicatedPerAdvisory(t *testing.T) {
 	// rest of the report in identical lines.
 	bad := advWithRange("GHSA-twice", "Go", "x", "0", "not-a-version", advisory.RangeSemver)
 	bad.Affected = append(bad.Affected, bad.Affected[0])
-	s := fakeStore{byKey: map[string][]advisory.Advisory{"Go x": {bad, bad}}}
+	s := fakeStore{byKey: map[string][]advisory.Advisory{"Go\x00x": {bad, bad}}}
 
 	res, err := New(s).Match(pkgmeta.Target{
 		Packages: []pkgmeta.Package{pkg("x", "1.0.0", "Go")},
