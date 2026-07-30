@@ -1,0 +1,67 @@
+package pkgmeta
+
+import "testing"
+
+func TestParsePURL(t *testing.T) {
+	cases := []struct {
+		in                            string
+		typ, namespace, name, version string
+	}{
+		{"pkg:golang/github.com/foo/bar@v1.2.3", "golang", "github.com/foo", "bar", "v1.2.3"},
+		{"pkg:golang/github.com/foo/bar", "golang", "github.com/foo", "bar", ""},
+		{"pkg:npm/lodash@4.17.20", "npm", "", "lodash", "4.17.20"},
+		{"pkg:npm/%40angular/core@12.0.0", "npm", "@angular", "core", "12.0.0"},
+		{"pkg:pypi/django@3.2", "pypi", "", "django", "3.2"},
+		{"pkg:apk/alpine/apache2@2.4.54-r0?arch=source", "apk", "alpine", "apache2", "2.4.54-r0"},
+		{"pkg:PyPI/Django@3.2", "pypi", "", "Django", "3.2"}, // type lowercases, name does not
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			got, err := ParsePURL(tc.in)
+			if err != nil {
+				t.Fatalf("ParsePURL(%q) error: %v", tc.in, err)
+			}
+			if got.Type != tc.typ || got.Namespace != tc.namespace ||
+				got.Name != tc.name || got.Version != tc.version {
+				t.Errorf("ParsePURL(%q) = %+v, want type=%q ns=%q name=%q ver=%q",
+					tc.in, got, tc.typ, tc.namespace, tc.name, tc.version)
+			}
+		})
+	}
+}
+
+func TestParsePURL_Qualifiers(t *testing.T) {
+	got, err := ParsePURL("pkg:apk/alpine/apache2@2.4.54-r0?arch=source&distro=alpine-3.19")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Qualifiers["arch"] != "source" {
+		t.Errorf("arch qualifier = %q, want source", got.Qualifiers["arch"])
+	}
+	if got.Qualifiers["distro"] != "alpine-3.19" {
+		t.Errorf("distro qualifier = %q, want alpine-3.19", got.Qualifiers["distro"])
+	}
+}
+
+func TestParsePURL_Invalid(t *testing.T) {
+	for _, in := range []string{"", "golang/foo@v1", "pkg:", "pkg:golang", "pkg:/foo@v1"} {
+		if _, err := ParsePURL(in); err == nil {
+			t.Errorf("ParsePURL(%q) = nil error, want error", in)
+		}
+	}
+}
+
+func TestEcosystemForPURLType(t *testing.T) {
+	cases := map[string]string{"golang": "Go", "npm": "npm", "pypi": "PyPI"}
+	for typ, want := range cases {
+		got, ok := EcosystemForPURLType(typ)
+		if !ok || got != want {
+			t.Errorf("EcosystemForPURLType(%q) = %q,%v want %q,true", typ, got, ok, want)
+		}
+	}
+	// apk maps to a distro ecosystem whose key needs a release (D6), which a
+	// purl does not carry. Left unmapped rather than mapped to a wrong key.
+	if _, ok := EcosystemForPURLType("apk"); ok {
+		t.Error("EcosystemForPURLType(apk) = ok, want not ok in slice 1")
+	}
+}
