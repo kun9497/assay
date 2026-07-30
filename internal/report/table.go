@@ -12,9 +12,20 @@ import (
 )
 
 func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) error {
-	if len(res.Findings) == 0 {
-		fmt.Fprintln(w, "No known vulnerabilities found.")
-	} else {
+	// A package counts as evaluated only if it was cataloged AND the matcher
+	// could judge it. A whole-package matcher skip (empty AdvisoryID) was
+	// cataloged but never checked, so counting it as scanned would inflate the
+	// number a reader trusts most.
+	var unevaluated int
+	for _, s := range res.Skipped {
+		if s.AdvisoryID == "" {
+			unevaluated++
+		}
+	}
+	evaluated := cat.Cataloged - unevaluated
+
+	switch {
+	case len(res.Findings) > 0:
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(tw, "PACKAGE\tVERSION\tECOSYSTEM\tADVISORY\tFIXED IN")
 		for _, f := range res.Findings {
@@ -28,16 +39,27 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) error {
 		if err := tw.Flush(); err != nil {
 			return err
 		}
+
+	case evaluated == 0:
+		// Nothing was actually judged. "No known vulnerabilities found" would be
+		// true and useless here — the same sentence a genuinely clean scan
+		// prints, from a run that checked nothing. A reader who greps the first
+		// line, or whose output is truncated, must not read this as safety.
+		fmt.Fprintln(w, "No packages could be evaluated - this is NOT a clean result.")
+
+	default:
+		fmt.Fprintf(w, "No known vulnerabilities found in %d package(s).\n", evaluated)
 	}
 
-	// The summary is what keeps a partial scan from reading as a clean one.
-	skipped := cat.SkippedNoPURL + cat.SkippedNoVersion +
-		cat.SkippedUnsupportedEcosystem + len(res.Skipped)
-	fmt.Fprintf(w, "\n%d package(s) scanned, %d finding(s), %d skipped\n",
-		cat.Cataloged, len(res.Findings), skipped)
+	// The summary keeps a partial scan from reading as a clean one, so its
+	// parts must add up: every component the document contained is either
+	// evaluated or not, and no package is counted in both.
+	notEvaluated := cat.Components - evaluated
+	fmt.Fprintf(w, "\n%d component(s) seen, %d evaluated, %d finding(s), %d not evaluated\n",
+		cat.Components, evaluated, len(res.Findings), notEvaluated)
 
-	if skipped > 0 {
-		fmt.Fprintln(w, "\nSkipped:")
+	if notEvaluated > 0 {
+		fmt.Fprintln(w, "\nNot evaluated:")
 		if cat.SkippedUnsupportedEcosystem > 0 {
 			fmt.Fprintf(w, "  %d package(s) in an unsupported ecosystem\n",
 				cat.SkippedUnsupportedEcosystem)

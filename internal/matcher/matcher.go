@@ -82,6 +82,12 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 		// twice in a lookup result, so without this a single bad bound emits
 		// byte-identical skips and buries the rest of the report.
 		skipped := make(map[string]bool, len(candidates))
+		// One vulnerability commonly has records under several IDs. OSV's Go
+		// ecosystem carries both the GHSA and the GO- identifier for the same
+		// issue, which doubled every Go finding in a real scan against grype.
+		// The first record to match wins; the rest are recognized through the
+		// aliases they declare.
+		reported := make(map[string]bool, len(candidates))
 
 		for _, a := range candidates {
 			if seen[a.ID] {
@@ -118,6 +124,12 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 				}
 				if hit {
 					seen[a.ID] = true
+					if reported[a.ID] {
+						break // already reported under another identifier
+					}
+					for _, id := range identifiers(a) {
+						reported[id] = true
+					}
 					res.Findings = append(res.Findings, Finding{Package: p, Advisory: a, Evidence: ev})
 					break
 				}
@@ -128,6 +140,18 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 	sortFindings(res.Findings)
 	sortSkipped(res.Skipped)
 	return res, nil
+}
+
+// identifiers returns every ID an advisory is known by: its own, plus the
+// aliases and upstream links OSV records for it. Both fields are read because
+// OSV 1.7 puts the CVE link in upstream while other records use aliases (D3),
+// and a record can carry one without the other.
+func identifiers(a advisory.Advisory) []string {
+	ids := make([]string, 0, 1+len(a.Aliases)+len(a.Upstream))
+	ids = append(ids, a.ID)
+	ids = append(ids, a.Aliases...)
+	ids = append(ids, a.Upstream...)
+	return ids
 }
 
 // Sorting keeps output deterministic and diffable, which is design goal #3.

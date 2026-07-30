@@ -207,6 +207,61 @@ func TestMatch_SkipsAreDeduplicatedPerAdvisory(t *testing.T) {
 	}
 }
 
+func TestMatch_AliasedAdvisoriesReportOnce(t *testing.T) {
+	// OSV's Go ecosystem carries the same vulnerability under both a GHSA and
+	// a GO- identifier, each declaring the other as an alias. Reporting both
+	// doubled every Go finding in a real scan against grype without adding any
+	// information.
+	ghsa := advWithRange("GHSA-c3h9-896r-86jm", "Go", "github.com/gogo/protobuf",
+		"0", "1.3.2", advisory.RangeSemver)
+	ghsa.Aliases = []string{"GO-2021-0053"}
+	go1 := advWithRange("GO-2021-0053", "Go", "github.com/gogo/protobuf",
+		"0", "1.3.2", advisory.RangeSemver)
+	go1.Aliases = []string{"GHSA-c3h9-896r-86jm"}
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Go\x00github.com/gogo/protobuf": {ghsa, go1},
+	}}
+
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("github.com/gogo/protobuf", "v1.3.1", "Go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Errorf("Findings = %d, want 1: the two records are the same vulnerability; got %+v",
+			len(res.Findings), res.Findings)
+	}
+
+	// A second package must still get its own finding for the same advisory:
+	// the dedup is per package, not scan-wide. Built as its own value rather
+	// than by mutating ghsa, because a struct copied into a map before its
+	// fields are reassigned keeps the old ones — a trap that made an earlier
+	// version of this test unpassable regardless of the implementation.
+	shared := advisory.Advisory{
+		ID:      "GHSA-shared",
+		Aliases: []string{"GO-shared"},
+		Kind:    advisory.KindVulnerability,
+		Affected: []advisory.Affected{
+			{Ecosystem: "Go", Name: "a", Ranges: ghsa.Affected[0].Ranges},
+			{Ecosystem: "Go", Name: "b", Ranges: ghsa.Affected[0].Ranges},
+		},
+	}
+	s2 := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Go\x00a": {shared},
+		"Go\x00b": {shared},
+	}}
+	res2, err := New(s2).Match(pkgmeta.Target{Packages: []pkgmeta.Package{
+		pkg("a", "1.0.0", "Go"), pkg("b", "1.0.0", "Go"),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res2.Findings) != 2 {
+		t.Errorf("Findings = %d, want 2: dedup must be per package, not scan-wide", len(res2.Findings))
+	}
+}
+
 func TestMatch_UnsupportedEcosystemIsSkipped(t *testing.T) {
 	res, err := New(fakeStore{}).Match(pkgmeta.Target{
 		Packages: []pkgmeta.Package{pkg("apache2", "2.4.54-r0", "Alpine:v3.19")},

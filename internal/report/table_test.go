@@ -46,8 +46,44 @@ func TestTable_SkippedCountsAreVisible(t *testing.T) {
 	if !strings.Contains(out, "40") {
 		t.Errorf("cataloger skip count missing from summary:\n%s", out)
 	}
-	if !strings.Contains(strings.ToLower(out), "skipped") {
-		t.Errorf("summary never uses the word skipped:\n%s", out)
+	if !strings.Contains(strings.ToLower(out), "not evaluated") {
+		t.Errorf("summary never says anything was left unevaluated:\n%s", out)
+	}
+}
+
+func TestTable_NothingEvaluatedIsNotReportedAsClean(t *testing.T) {
+	// Every component skipped, nothing judged. "No known vulnerabilities found"
+	// is the sentence a genuinely clean scan prints, and a reader who greps the
+	// first line cannot tell the two apart.
+	var buf bytes.Buffer
+	if err := Table(&buf, matcher.Result{}, cyclonedx.Stats{
+		Components: 42, Cataloged: 0, SkippedUnsupportedEcosystem: 42,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if strings.Contains(strings.ToLower(out), "no known vulnerabilities") {
+		t.Errorf("a scan that evaluated nothing must not use the clean wording:\n%s", out)
+	}
+	if !strings.Contains(out, "NOT a clean result") {
+		t.Errorf("output must say plainly this is not a clean result:\n%s", out)
+	}
+}
+
+func TestTable_CountsAddUp(t *testing.T) {
+	// evaluated + not evaluated must equal components seen. A package that was
+	// cataloged and then wholly skipped by the matcher used to land in both.
+	res := matcher.Result{Skipped: []matcher.Skipped{{
+		Package: pkgmeta.Package{Name: "x", Version: "1.0.0", Ecosystem: "Go"},
+		Reason:  "no version comparer",
+	}}}
+	var buf bytes.Buffer
+	if err := Table(&buf, res, cyclonedx.Stats{Components: 3, Cataloged: 1, SkippedNoPURL: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(),
+		"3 component(s) seen, 0 evaluated, 0 finding(s), 3 not evaluated") {
+		t.Errorf("summary does not account for every component:\n%s", buf.String())
 	}
 }
 
