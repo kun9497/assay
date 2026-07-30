@@ -44,6 +44,7 @@ func (p *Provider) Name() string { return SourceName }
 
 func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error) (store.Provenance, error) {
 	prov := store.Provenance{Source: p.baseURL}
+	var known int
 	for _, eco := range p.ecosystems {
 		u := fmt.Sprintf("%s/%s/all.zip", p.baseURL, url.PathEscape(eco))
 		n, asOf, err := p.fetchOne(ctx, u, eco, emit)
@@ -51,11 +52,23 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 			return store.Provenance{}, fmt.Errorf("fetch %s: %w", eco, err)
 		}
 		prov.Records += n
+		if asOf.IsZero() {
+			continue
+		}
+		known++
 		// The oldest upstream timestamp wins: a database is only as fresh as
 		// its stalest provider, and reporting the newest would hide that.
-		if prov.DataAsOf.IsZero() || (!asOf.IsZero() && asOf.Before(prov.DataAsOf)) {
+		if prov.DataAsOf.IsZero() || asOf.Before(prov.DataAsOf) {
 			prov.DataAsOf = asOf
 		}
+	}
+	// If any ecosystem gave no timestamp, the aggregate is unknown rather than
+	// the minimum of the rest. Reporting min(known) would claim a floor on
+	// staleness we cannot establish — the one we could not date may be the
+	// oldest. `db status` renders the zero value as "unknown", which is the
+	// honest answer.
+	if known != len(p.ecosystems) {
+		prov.DataAsOf = time.Time{}
 	}
 	return prov, nil
 }

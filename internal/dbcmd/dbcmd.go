@@ -30,6 +30,9 @@ func Update(ctx context.Context, dbPath string, providers []provider.Provider, s
 
 	w, err := store.Create(tmp)
 	if err != nil {
+		// bolt.Open can create the file before a later step fails, so clean up
+		// here too rather than relying on the next run to sweep it.
+		os.Remove(tmp)
 		fmt.Fprintf(stderr, "error: create database: %v\n", err)
 		return 2
 	}
@@ -59,9 +62,14 @@ func Update(ctx context.Context, dbPath string, providers []provider.Provider, s
 		fmt.Fprintf(stderr, "error: close database: %v\n", err)
 		return 2
 	}
-	if err := os.Rename(tmp, dbPath); err != nil {
-		os.Remove(tmp)
+	if err := replace(tmp, dbPath); err != nil {
+		// Deliberately NOT removed. It is a complete database that cost a
+		// ~244 MB download, and losing that because a scan happened to be
+		// running is a worse outcome than leaving a file behind. The live
+		// database is untouched either way — a rename never half-applies.
 		fmt.Fprintf(stderr, "error: replace database: %v\n", err)
+		fmt.Fprintf(stderr, "the new database is complete and left at %s\n", tmp)
+		fmt.Fprintln(stderr, "close any running scan and move it into place, or re-run `assay db update`")
 		return 2
 	}
 
@@ -73,13 +81,33 @@ func Update(ctx context.Context, dbPath string, providers []provider.Provider, s
 	return 0
 }
 
+// replace renames src over dst, retrying briefly first.
+//
+// On Windows a rename over a file another process holds open fails outright,
+// and a scan reading the database is exactly the case the temp-file dance
+// exists to support. Readers are short-lived, so a few hundred milliseconds
+// turns the common collision into a non-event.
+func replace(src, dst string) error {
+	var err error
+	for _, wait := range []time.Duration{0, 100 * time.Millisecond, 250 * time.Millisecond, 500 * time.Millisecond} {
+		if wait > 0 {
+			time.Sleep(wait)
+		}
+		if err = os.Rename(src, dst); err == nil {
+			return nil
+		}
+	}
+	return err
+}
+
 // Status reports what is in the database and how current it is. It states
 // facts and does not judge staleness — age enforcement is deferred, and the
 // metadata it would need is already recorded.
 func Status(dbPath string, stdout, stderr io.Writer) int {
 	db, err := store.Open(dbPath)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrSchemaMismatch) {
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrSchemaMismatch) ||
+			errors.Is(err, store.ErrIncomplete) {
 			fmt.Fprintf(stderr, "error: %v\n", err)
 			fmt.Fprintln(stderr, "run `assay db update` to build it")
 			return 2

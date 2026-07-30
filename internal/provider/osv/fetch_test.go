@@ -75,6 +75,33 @@ func TestFetch(t *testing.T) {
 	}
 }
 
+func TestFetch_UnknownTimestampMakesAggregateUnknown(t *testing.T) {
+	// One ecosystem without Last-Modified makes the whole aggregate unknown.
+	// Reporting min(the ones we could date) would claim a floor on staleness
+	// that the undated one may well be below.
+	body := zipWith(t, map[string]string{
+		"GHSA-a.json": `{"id":"GHSA-a","affected":[{"package":{"name":"x","ecosystem":"Go"},
+			"ranges":[{"type":"SEMVER","events":[{"introduced":"0"}]}]}]}`,
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/Go/all.zip" {
+			w.Header().Set("Last-Modified", "Tue, 29 Jul 2026 00:00:00 GMT")
+		}
+		// The npm response deliberately carries no Last-Modified.
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	p := New([]string{"Go", "npm"}, srv.URL)
+	prov, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil })
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if !prov.DataAsOf.IsZero() {
+		t.Errorf("DataAsOf = %v, want zero: one ecosystem could not be dated", prov.DataAsOf)
+	}
+}
+
 func TestFetch_HTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "nope", http.StatusInternalServerError)
