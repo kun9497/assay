@@ -2146,6 +2146,46 @@ func TestLookupDoesNotDuplicateRecords(t *testing.T) {
 	}
 }
 
+func TestLookupNormalizesPyPINames(t *testing.T) {
+	// The advisory name is stored non-normalized and the lookup arrives in the
+	// form syft emits, so this fails if EITHER the index write or the lookup
+	// stops normalizing. Testing NormalizeName in isolation does not: the bug
+	// was never in the function, it was in whether the two sides agreed.
+	path := buildTestDB(t, advisory.Advisory{
+		ID:       "PYSEC-1",
+		Source:   "osv",
+		Kind:     advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "PyPI", Name: "Zope.Interface"}},
+	})
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	for _, name := range []string{"zope.interface", "Zope.Interface", "zope_interface", "zope-interface"} {
+		got, err := db.Lookup("PyPI", name)
+		if err != nil {
+			t.Fatalf("Lookup(%q): %v", name, err)
+		}
+		if len(got) != 1 {
+			t.Errorf("Lookup(PyPI, %q) returned %d advisories, want 1 — every PEP 503 "+
+				"spelling names the same package", name, len(got))
+		}
+	}
+
+	// Go names are case-sensitive and must NOT be folded together.
+	goPath := buildTestDB(t, sample("GHSA-go", "Go", "github.com/Foo/Bar"))
+	gdb, err := Open(goPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gdb.Close()
+	if got, _ := gdb.Lookup("Go", "github.com/foo/bar"); len(got) != 0 {
+		t.Errorf("Lookup(Go, lowercased) returned %d, want 0 — Go names are case-sensitive", len(got))
+	}
+}
+
 func TestLookupBySource(t *testing.T) {
 	a := advisory.Advisory{
 		ID:     "ALPINE-CVE-1",
@@ -2492,7 +2532,8 @@ func (b *Bolt) Put(a advisory.Advisory) error {
 // PutSourceIndex records that an advisory is keyed on a source package (D8).
 func (b *Bolt) PutSourceIndex(ecosystem, sourceName, id string) error {
 	return b.db.Update(func(tx *bolt.Tx) error {
-		return appendID(tx.Bucket(bucketBySource), ecosystem+keySep+sourceName, id)
+		key := ecosystem + keySep + pkgmeta.NormalizeName(ecosystem, sourceName)
+		return appendID(tx.Bucket(bucketBySource), key, id)
 	})
 }
 
@@ -4452,9 +4493,14 @@ func TestMatch_ForeignEcosystemEntryNeverReachesTheComparer(t *testing.T) {
 		ID:   "GHSA-mixed",
 		Kind: advisory.KindVulnerability,
 		Affected: []advisory.Affected{
+			// Fixed high enough that the installed 3.2 falls INSIDE this range
+			// under PEP 440. An npm-shaped bound that merely fails to match would
+			// leave the test green with the guard deleted — and v1.16.3 does not
+			// fail: this repo's PEP 440 grammar begins with v?, so Compare("3.2",
+			// "v1.16.3") is a clean 1 and the entry is silently judged unaffected.
 			{Ecosystem: "npm", Name: "django", Ranges: []advisory.Range{{
 				Type:   advisory.RangeSemver,
-				Events: []advisory.Event{{Introduced: "0"}, {Fixed: "v1.16.3"}},
+				Events: []advisory.Event{{Introduced: "0"}, {Fixed: "9.0.0"}},
 			}}},
 			{Ecosystem: "PyPI", Name: "django", Ranges: []advisory.Range{{
 				Type:   advisory.RangeEcosystem,
@@ -4474,11 +4520,34 @@ func TestMatch_ForeignEcosystemEntryNeverReachesTheComparer(t *testing.T) {
 		t.Fatalf("Findings = %d, want 1 from the PyPI entry only; got %+v",
 			len(res.Findings), res.Findings)
 	}
+	// This is the assertion that kills the guard: with the ecosystem filter
+	// removed the npm entry is reached first, matches, and breaks out with its
+	// own fixed version.
 	if f := res.Findings[0].Evidence.Fixed; f != "3.2.1" {
-		t.Errorf("Evidence.Fixed = %q, want 3.2.1 — the npm entry decided this", f)
+		t.Errorf("Evidence.Fixed = %q, want 3.2.1 — a foreign entry decided this finding", f)
 	}
 	if len(res.Skipped) != 0 {
 		t.Errorf("Skipped = %+v, want none: a foreign entry is filtered, not skipped", res.Skipped)
+	}
+}
+
+func TestMatch_PyPINameIsNormalizedBeforeFiltering(t *testing.T) {
+	// syft emits pkg:pypi/Jinja2 while OSV stores jinja2. The store hands back
+	// the advisory either way, so the last thing that can drop it is the
+	// matcher's own affected filter — this fails if that filter stops
+	// normalizing, which no other test covers.
+	adv := advWithRange("GHSA-jinja", "PyPI", "jinja2", "0", "3.1.6", advisory.RangeEcosystem)
+	s := fakeStore{byKey: map[string][]advisory.Advisory{"PyPI\x00jinja2": {adv}}}
+
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("Jinja2", "2.11.2", "PyPI")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1: the mixed-case name must reach the "+
+			"lowercase advisory; got %+v", len(res.Findings), res.Findings)
 	}
 }
 
@@ -4933,6 +5002,52 @@ func TestTable_CountsAddUp(t *testing.T) {
 	}
 }
 
+func TestTable_SummaryDrivesTheExitCode(t *testing.T) {
+	// Trustworthy() is what scancmd turns into an exit code, so a mutation that
+	// always returns true has to fail here. Nothing else covers it.
+	var buf bytes.Buffer
+	sum, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{
+		Components: 5, Cataloged: 0, SkippedUnsupportedEcosystem: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.Trustworthy() {
+		t.Error("a scan that evaluated nothing reported itself trustworthy; CI would read exit 0")
+	}
+
+	// An empty document is vacuously fine, and the wording must agree with that.
+	buf.Reset()
+	sum, err = Table(&buf, matcher.Result{}, cyclonedx.Stats{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sum.Trustworthy() {
+		t.Error("an empty document is not untrustworthy, there was simply nothing to do")
+	}
+	if strings.Contains(buf.String(), "NOT a clean result") {
+		t.Errorf("wording contradicts the exit code for an empty document:\n%s", buf.String())
+	}
+}
+
+func TestTable_FindingCarriesItsAliases(t *testing.T) {
+	// Dedup keeps one record per vulnerability, so a CVE matched under a GHSA
+	// record is only reachable through the alias column. Dropping the column
+	// makes `assay scan | grep CVE-...` silently find nothing.
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "Jinja2", Version: "2.11.2", Ecosystem: "PyPI"},
+		Advisory: advisory.Advisory{ID: "GHSA-g3rq-g295-4j3m", Aliases: []string{"CVE-2020-28493"}},
+		Evidence: version.Evidence{Fixed: "2.11.3"},
+	}}}
+	var buf bytes.Buffer
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "CVE-2020-28493") {
+		t.Errorf("the CVE this finding was matched under is absent from the report:\n%s", buf.String())
+	}
+}
+
 func TestTable_AdvisoryScopedSkipIsAlwaysShown(t *testing.T) {
 	// Everything evaluated, nothing found, but one advisory could not be judged.
 	// Gating the detail block on the unevaluated count alone hid this entirely,
@@ -5114,6 +5229,12 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 		if err := tw.Flush(); err != nil {
 			return Summary{}, err
 		}
+
+	case cat.Components == 0:
+		// Distinct from "nothing could be evaluated": there was nothing to
+		// evaluate. Trustworthy() treats this as vacuously fine, and the
+		// wording has to agree with the exit code.
+		fmt.Fprintln(w, "The document contained no components.")
 
 	case evaluated == 0:
 		// Nothing was actually judged. "No known vulnerabilities found" would be
