@@ -4,9 +4,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/kun9497/assay/internal/dbcmd"
+	"github.com/kun9497/assay/internal/provider"
+	"github.com/kun9497/assay/internal/provider/osv"
+	"github.com/kun9497/assay/internal/scancmd"
+	"github.com/kun9497/assay/internal/store"
 )
 
 // Build-time metadata, injected via -ldflags. See the Makefile.
@@ -30,7 +37,9 @@ Usage:
   assay <command> [arguments]
 
 Commands:
-  scan <target>   Scan an SBOM file, directory, or container image
+  scan <sbom>     Scan a CycloneDX SBOM file (Go, npm, PyPI)
+  db update       Build or refresh the local vulnerability database
+  db status       Show what is in the database and how current it is
   version         Print version information
   help            Show this help
 `
@@ -64,6 +73,27 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		return scan(args[1], stdout, stderr)
 
+	case "db":
+		if len(args) < 2 {
+			fmt.Fprintln(stderr, "error: db requires a subcommand (update, status)")
+			return exitError
+		}
+		path, err := store.DefaultPath()
+		if err != nil {
+			fmt.Fprintf(stderr, "error: locate database: %v\n", err)
+			return exitError
+		}
+		switch args[1] {
+		case "update":
+			return dbcmd.Update(context.Background(), path,
+				[]provider.Provider{osv.New(osv.Ecosystems, "")}, stdout, stderr)
+		case "status":
+			return dbcmd.Status(path, stdout, stderr)
+		default:
+			fmt.Fprintf(stderr, "error: unknown db subcommand %q\n", args[1])
+			return exitError
+		}
+
 	default:
 		fmt.Fprintf(stderr, "error: unknown command %q\n", args[0])
 		fmt.Fprint(stderr, usage)
@@ -71,12 +101,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-// scan is the pipeline entry point: resolve target -> catalog packages ->
-// match against the vulnerability DB -> report.
-//
-// TODO: implement. Returning exitError is deliberate — an unimplemented
-// scanner must never report a clean result.
+// scan is the pipeline entry point: parse the target into an inventory, match
+// it against the local database, and report.
 func scan(target string, stdout, stderr io.Writer) int {
-	fmt.Fprintf(stderr, "error: scanning is not implemented yet (target %q)\n", target)
-	return exitError
+	path, err := store.DefaultPath()
+	if err != nil {
+		fmt.Fprintf(stderr, "error: locate database: %v\n", err)
+		return exitError
+	}
+	return scancmd.Run(path, target, stdout, stderr)
 }

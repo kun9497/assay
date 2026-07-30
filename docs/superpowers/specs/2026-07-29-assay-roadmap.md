@@ -399,12 +399,19 @@ type Finding struct {
 <os.UserCacheDir()>/assay/db/v1/vulnerability.db      override: ASSAY_DB_DIR
 
 buckets:
-  advisories   "<ecosystem>\x00<name>"     → []Advisory    primary lookup
-  by-source    "<ecosystem>\x00<source>"   → []Advisory    indirect matching (D8)
-  by-id        "<advisory-id>"             → Advisory      explain, alias resolution
+  advisories   "<ecosystem>\x00<name>"     → []AdvisoryID  primary lookup
+  by-source    "<ecosystem>\x00<source>"   → []AdvisoryID  indirect matching (D8)
+  by-id        "<advisory-id>"             → Advisory      the record itself, stored once
   enrichment   "<cve-id>"                  → Enrichment    KISA (D3)
   meta         "schema" | "built-at" | "providers"
 ```
+
+**The lookup buckets hold advisory IDs, not records.** One advisory routinely affects
+several packages — measured across the Go dump, 1,452 of 8,510 advisories name more than one
+package, up to 22 — so keying records directly by package stores them repeatedly. Measured
+blowup is 1.44×, and combined with `by-id` holding its own copy the naive layout turns
+21.9 MB of data into 53.6 MB. Resolving an ID through `by-id` costs a second point lookup,
+which is microseconds.
 
 | OS | Path |
 |---|---|

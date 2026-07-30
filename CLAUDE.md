@@ -38,7 +38,7 @@ Run a single test: `go test -race -run TestRun_ExitCodes ./cmd/assay`
 
 The Makefile shells out to `date` and `rm`, so on Windows either run it under Git Bash or
 call the underlying `go` commands directly. CI (`.github/workflows/ci.yml`) runs
-gofmt-check → vet → test -race → build on Go 1.24; a non-empty `gofmt -l .` fails the build.
+gofmt-check → vet → test -race → build on Go 1.26; a non-empty `gofmt -l .` fails the build.
 
 **`make test` fails on a machine without a C toolchain**: `-race` requires cgo, and Go
 defaults `CGO_ENABLED` to 0 when it finds no C compiler. Fall back to `go test ./...`
@@ -159,6 +159,11 @@ it reads as authoritative while being wrong. If you change a decision in the roa
 Keep identifiers, flags, and file paths in English on both sides (`Package.Source`,
 `--fail-on-unknown`, `/etc/os-release`). Translate the prose around them.
 
+**Implementation plans under `docs/superpowers/plans/` are exempt — English only.** They
+are working documents that change while being executed, so a translation would spend most
+of its life stale, and they are mostly Go code blocks, which are never translated anyway.
+Specs and user-facing documentation stay bilingual; plans do not.
+
 ## Delegating to subagents
 
 Run the main loop on the work that needs full context; delegate work that is bounded,
@@ -195,6 +200,29 @@ stronger model where a wrong answer is *quiet* — version-ordering rules, sever
 normalization, anything that turns into a missed vulnerability. Use a cheaper model where a
 wrong answer is *loud* — a failed build, a diff that obviously does not apply, a search that
 returns nothing.
+
+## Writing escape sequences into files
+
+**Never type an escape sequence as a literal inside a script that generates a file.**
+Assemble it instead — `chr(92) + "x00"`, `chr(92) + "u212a"` — and verify by scanning the
+written file for the raw byte, not by trusting the tool's exit code.
+
+A literal `\x00`, or a KELVIN SIGN typed as itself, in a heredoc, an editor buffer, or a tool argument loses a
+backslash somewhere in transit and becomes **the byte it was meant to denote**. This has
+happened three times on this branch: a KELVIN SIGN flattened to ASCII `K` (turning a test
+that guarded Unicode case folding into one asserting a valid version was invalid), a raw NUL
+in a Go map key (a hard `invalid NUL character` compile error), and a raw NUL inside the
+comment that warned about the first two.
+
+The failure is silent in prose and only sometimes loud in code, so grep for the codepoint
+after writing:
+
+```python
+python -c "t=open('f','r',encoding='utf-8').read(); print(t.count(chr(0x212a)), t.count(chr(0)))"
+```
+
+Do not write the character literally in the checking script either — that is how the third
+occurrence happened.
 
 ## Conventions
 
