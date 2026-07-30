@@ -1,0 +1,198 @@
+package osv
+
+import (
+	"testing"
+
+	"github.com/kun9497/assay/internal/advisory"
+)
+
+const goRecord = `{
+  "schema_version": "1.7.3",
+  "id": "GHSA-227x-7mh8-3cf6",
+  "modified": "2025-10-23T20:12:12Z",
+  "aliases": ["CVE-2025-59823", "GO-2025-3981"],
+  "summary": "Code injection in Gardener provider extensions",
+  "affected": [
+    {
+      "package": {"name": "github.com/gardener/a", "ecosystem": "Go"},
+      "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "1.64.0"}]}]
+    },
+    {
+      "package": {"name": "github.com/gardener/b", "ecosystem": "Go"},
+      "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "1.46.0"}]}]
+    }
+  ],
+  "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"}]
+}`
+
+func TestConvert_Go(t *testing.T) {
+	got, ok, err := Convert([]byte(goRecord), "Go")
+	if err != nil {
+		t.Fatalf("Convert: %v", err)
+	}
+	if !ok {
+		t.Fatal("Convert returned ok=false, want a converted advisory")
+	}
+	if got.ID != "GHSA-227x-7mh8-3cf6" {
+		t.Errorf("ID = %q", got.ID)
+	}
+	if got.Source != "osv" {
+		t.Errorf("Source = %q, want osv", got.Source)
+	}
+	if got.Kind != advisory.KindVulnerability {
+		t.Errorf("Kind = %q, want vulnerability", got.Kind)
+	}
+	if len(got.Affected) != 2 {
+		t.Fatalf("Affected = %d entries, want 2", len(got.Affected))
+	}
+	if got.Affected[0].Ranges[0].Events[0].Introduced != "0" {
+		t.Error("the introduced sentinel must survive conversion verbatim")
+	}
+	if len(got.Severity) != 1 || got.Severity[0].Type != "CVSS_V3" {
+		t.Errorf("Severity = %+v, want one CVSS_V3 vector", got.Severity)
+	}
+	// Both alias fields feed the KISA join (D3); this record uses aliases.
+	if len(got.Aliases) != 2 {
+		t.Errorf("Aliases = %v, want 2", got.Aliases)
+	}
+}
+
+func TestConvert_UpstreamFieldIsCarried(t *testing.T) {
+	// OSV 1.7 puts the CVE link in `upstream`. A record can have upstream and
+	// no aliases at all; reading only one field makes the KISA join fail
+	// silently (D3).
+	const rec = `{
+	  "id": "ALPINE-CVE-2006-20001",
+	  "upstream": ["CVE-2006-20001"],
+	  "affected": [{"package": {"name": "apache2", "ecosystem": "Alpine:v3.19"},
+	                "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "2.4.55-r0"}]}]}]
+	}`
+	got, ok, err := Convert([]byte(rec), "Alpine:v3.19")
+	if err != nil || !ok {
+		t.Fatalf("Convert: ok=%v err=%v", ok, err)
+	}
+	if len(got.Upstream) != 1 || got.Upstream[0] != "CVE-2006-20001" {
+		t.Errorf("Upstream = %v, want [CVE-2006-20001]", got.Upstream)
+	}
+	if len(got.Aliases) != 0 {
+		t.Errorf("Aliases = %v, want empty", got.Aliases)
+	}
+}
+
+func TestConvert_DropsWithdrawn(t *testing.T) {
+	const rec = `{
+	  "id": "GHSA-withdrawn",
+	  "withdrawn": "2024-01-01T00:00:00Z",
+	  "affected": [{"package": {"name": "x", "ecosystem": "Go"},
+	                "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}]}]}]
+	}`
+	_, ok, err := Convert([]byte(rec), "Go")
+	if err != nil {
+		t.Fatalf("Convert: %v", err)
+	}
+	if ok {
+		t.Error("withdrawn record was converted; it must be dropped (D16)")
+	}
+}
+
+func TestConvert_DropsMalicious(t *testing.T) {
+	const rec = `{
+	  "id": "MAL-2021-1",
+	  "summary": "Malicious code in cxp-jquery (npm)",
+	  "affected": [{"package": {"name": "cxp-jquery", "ecosystem": "npm"},
+	                "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}]}]}]
+	}`
+	_, ok, err := Convert([]byte(rec), "npm")
+	if err != nil {
+		t.Fatalf("Convert: %v", err)
+	}
+	if ok {
+		t.Error("MAL record was converted; it must be dropped in slice 1 (D15)")
+	}
+}
+
+func TestConvert_FiltersForeignEcosystems(t *testing.T) {
+	// Live OSV data mixes ecosystems inside one advisory. Without this filter
+	// the npm SEMVER value reaches the PEP 440 comparer.
+	const rec = `{
+	  "id": "GHSA-mixed",
+	  "affected": [
+	    {"package": {"name": "django", "ecosystem": "PyPI"},
+	     "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "3.2.1"}]}]},
+	    {"package": {"name": "some-js-lib", "ecosystem": "npm"},
+	     "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "v1.16.3"}]}]}
+	  ]
+	}`
+	got, ok, err := Convert([]byte(rec), "PyPI")
+	if err != nil || !ok {
+		t.Fatalf("Convert: ok=%v err=%v", ok, err)
+	}
+	if len(got.Affected) != 1 {
+		t.Fatalf("Affected = %d entries, want 1 (npm entry must be dropped)", len(got.Affected))
+	}
+	if got.Affected[0].Ecosystem != "PyPI" || got.Affected[0].Name != "django" {
+		t.Errorf("Affected[0] = %+v, want the PyPI django entry", got.Affected[0])
+	}
+}
+
+func TestConvert_DropsGitRanges(t *testing.T) {
+	const rec = `{
+	  "id": "PYSEC-git",
+	  "affected": [{"package": {"name": "django", "ecosystem": "PyPI"},
+	    "ranges": [
+	      {"type": "GIT", "repo": "https://github.com/django/django",
+	       "events": [{"introduced": "9305c0e12d43c4df999c3301a1f0c742264a657e"}]},
+	      {"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "3.2.1"}]}
+	    ]}]
+	}`
+	got, ok, err := Convert([]byte(rec), "PyPI")
+	if err != nil || !ok {
+		t.Fatalf("Convert: ok=%v err=%v", ok, err)
+	}
+	rs := got.Affected[0].Ranges
+	if len(rs) != 1 || rs[0].Type != advisory.RangeEcosystem {
+		t.Errorf("Ranges = %+v, want only the ECOSYSTEM range", rs)
+	}
+}
+
+func TestConvert_KeepsNonCanonicalEndpointsVerbatim(t *testing.T) {
+	// OSV publishes non-normalized PyPI endpoints. Normalizing here would be
+	// lossy (D13); the comparer handles it.
+	const rec = `{
+	  "id": "PYSEC-noncanon",
+	  "affected": [{"package": {"name": "django", "ecosystem": "PyPI"},
+	    "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "1.8c1"}]}],
+	    "versions": ["1.5c1", "4.0.0.beta1"]}]
+	}`
+	got, _, err := Convert([]byte(rec), "PyPI")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := got.Affected[0].Ranges[0].Events[1].Fixed; f != "1.8c1" {
+		t.Errorf("fixed = %q, want the verbatim 1.8c1", f)
+	}
+	if got.Affected[0].Versions[1] != "4.0.0.beta1" {
+		t.Errorf("versions = %v, want verbatim", got.Affected[0].Versions)
+	}
+}
+
+func TestConvert_DropsRecordWithNoMatchingAffected(t *testing.T) {
+	const rec = `{
+	  "id": "GHSA-elsewhere",
+	  "affected": [{"package": {"name": "lodash", "ecosystem": "npm"},
+	                "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}]}]}]
+	}`
+	_, ok, err := Convert([]byte(rec), "Go")
+	if err != nil {
+		t.Fatalf("Convert: %v", err)
+	}
+	if ok {
+		t.Error("record with no Go entries was converted; it must be dropped")
+	}
+}
+
+func TestConvert_Malformed(t *testing.T) {
+	if _, _, err := Convert([]byte("{not json"), "Go"); err == nil {
+		t.Error("Convert(malformed) = nil error, want error")
+	}
+}
