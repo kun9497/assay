@@ -3561,3 +3561,698 @@ Expected: PASS, all five test functions.
 git add internal/cataloger
 git commit -m "feat: catalog CycloneDX SBOMs, counting what cannot be evaluated"
 ```
+
+---
+
+## Task 9: Matcher
+
+**Files:**
+- Create: `internal/matcher/matcher.go`
+- Test: `internal/matcher/matcher_test.go`
+
+**Interfaces:**
+- Consumes: `store.Store`, `pkgmeta.Target`, `pkgmeta.Package`, `version.For`, `version.AffectsVersion`, `version.Evidence`, `version.ErrInvalid`, `advisory.Advisory`.
+- Produces: `matcher.Finding{Package, Advisory, Evidence}`; `matcher.Skipped{Package, Reason}`; `matcher.Result{Findings, Skipped}`; `matcher.New(s store.Store) *Matcher`; `(*Matcher).Match(t pkgmeta.Target) (Result, error)`.
+
+`Finding` carries `Evidence` because explainability is goal #1 (D10), and evidence that is not in the type ends up in log lines and effectively does not exist.
+
+`Skipped` is the other half of the same idea. Every package the matcher cannot evaluate — no comparer for its ecosystem, an unparseable version, a malformed advisory bound — becomes a `Skipped` entry with a reason. **A comparison that errors must never become "not vulnerable".**
+
+Findings are sorted before returning so output is deterministic and diffable.
+
+- [ ] **Step 1: Write the failing test**
+
+```go
+package matcher
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/pkgmeta"
+)
+
+// fakeStore keeps the matcher testable without a database.
+type fakeStore struct {
+	byKey map[string][]advisory.Advisory
+}
+
+func (f fakeStore) Lookup(ecosystem, name string) ([]advisory.Advisory, error) {
+	return f.byKey[ecosystem+"\x00"+name], nil
+}
+func (f fakeStore) LookupBySource(ecosystem, name string) ([]advisory.Advisory, error) {
+	return nil, nil
+}
+func (f fakeStore) Meta() (store.Meta, error) { return store.Meta{}, nil }
+func (f fakeStore) Close() error              { return nil }
+
+func advWithRange(id, eco, name, introduced, fixed string, rt advisory.RangeType) advisory.Advisory {
+	return advisory.Advisory{
+		ID:   id,
+		Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{
+			Ecosystem: eco,
+			Name:      name,
+			Ranges: []advisory.Range{{
+				Type: rt,
+				Events: []advisory.Event{
+					{Introduced: introduced},
+					{Fixed: fixed},
+				},
+			}},
+		}},
+	}
+}
+
+func pkg(name, version, eco string) pkgmeta.Package {
+	return pkgmeta.Package{Name: name, Version: version, Ecosystem: eco}
+}
+
+func TestMatch_Hit(t *testing.T) {
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Go\x00github.com/foo/bar": {
+			advWithRange("GHSA-hit", "Go", "github.com/foo/bar", "0", "1.5.0", advisory.RangeSemver),
+		},
+	}}
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("github.com/foo/bar", "v1.2.3", "Go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1", len(res.Findings))
+	}
+	f := res.Findings[0]
+	if f.Advisory.ID != "GHSA-hit" {
+		t.Errorf("Advisory.ID = %q", f.Advisory.ID)
+	}
+	// Evidence must explain the match, not merely assert it (D10).
+	if f.Evidence.Fixed != "1.5.0" {
+		t.Errorf("Evidence.Fixed = %q, want 1.5.0", f.Evidence.Fixed)
+	}
+	if !strings.Contains(f.Evidence.Reason, "1.5.0") {
+		t.Errorf("Evidence.Reason = %q, should name the boundary that decided it", f.Evidence.Reason)
+	}
+}
+
+func TestMatch_Miss(t *testing.T) {
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Go\x00github.com/foo/bar": {
+			advWithRange("GHSA-fixed", "Go", "github.com/foo/bar", "0", "1.5.0", advisory.RangeSemver),
+		},
+	}}
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("github.com/foo/bar", "v1.5.0", "Go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 0 {
+		t.Errorf("Findings = %+v, want none: the fixed version is not affected", res.Findings)
+	}
+	if len(res.Skipped) != 0 {
+		t.Errorf("Skipped = %+v, want none: a clean miss is not a skip", res.Skipped)
+	}
+}
+
+func TestMatch_UnparseableVersionIsSkippedNotClean(t *testing.T) {
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Go\x00github.com/foo/bar": {
+			advWithRange("GHSA-x", "Go", "github.com/foo/bar", "0", "1.5.0", advisory.RangeSemver),
+		},
+	}}
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("github.com/foo/bar", "not-a-version", "Go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 0 {
+		t.Errorf("Findings = %+v, want none", res.Findings)
+	}
+	if len(res.Skipped) != 1 {
+		t.Fatalf("Skipped = %d, want 1: an unparseable version must surface, not vanish", len(res.Skipped))
+	}
+	if res.Skipped[0].Reason == "" {
+		t.Error("Skipped.Reason is empty")
+	}
+}
+
+func TestMatch_UnsupportedEcosystemIsSkipped(t *testing.T) {
+	res, err := New(fakeStore{}).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("apache2", "2.4.54-r0", "Alpine:v3.19")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Skipped) != 1 {
+		t.Fatalf("Skipped = %d, want 1", len(res.Skipped))
+	}
+	if !strings.Contains(res.Skipped[0].Reason, "Alpine:v3.19") {
+		t.Errorf("Skipped.Reason = %q, should name the ecosystem", res.Skipped[0].Reason)
+	}
+}
+
+func TestMatch_DeduplicatesAdvisoryPerPackage(t *testing.T) {
+	// The same advisory can be reachable more than once. One package plus one
+	// advisory is one finding.
+	a := advWithRange("GHSA-dupe", "Go", "x", "0", "2.0.0", advisory.RangeSemver)
+	a.Affected = append(a.Affected, a.Affected[0])
+	s := fakeStore{byKey: map[string][]advisory.Advisory{"Go\x00x": {a, a}}}
+
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("x", "1.0.0", "Go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Errorf("Findings = %d, want 1", len(res.Findings))
+	}
+}
+
+func TestMatch_Deterministic(t *testing.T) {
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Go\x00b": {advWithRange("GHSA-2", "Go", "b", "0", "9.0.0", advisory.RangeSemver)},
+		"Go\x00a": {advWithRange("GHSA-1", "Go", "a", "0", "9.0.0", advisory.RangeSemver)},
+	}}
+	target := pkgmeta.Target{Packages: []pkgmeta.Package{
+		pkg("b", "1.0.0", "Go"), pkg("a", "1.0.0", "Go"),
+	}}
+	first, err := New(s).Match(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := New(s).Match(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Findings) != 2 {
+		t.Fatalf("Findings = %d, want 2", len(first.Findings))
+	}
+	for i := range first.Findings {
+		if first.Findings[i].Advisory.ID != second.Findings[i].Advisory.ID {
+			t.Fatal("Match is not deterministic across runs")
+		}
+	}
+	if first.Findings[0].Package.Name != "a" {
+		t.Errorf("Findings[0].Package = %q, want a (sorted)", first.Findings[0].Package.Name)
+	}
+}
+```
+
+Add `"github.com/kun9497/assay/internal/store"` to the test imports.
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `go test ./internal/matcher/ -v`
+Expected: FAIL — `New`, `Match`, `Finding` undefined.
+
+- [ ] **Step 3: Write the implementation**
+
+```go
+// Package matcher decides whether an installed package is affected by a stored
+// advisory, and records why.
+package matcher
+
+import (
+	"fmt"
+	"sort"
+
+	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/pkgmeta"
+	"github.com/kun9497/assay/internal/store"
+	"github.com/kun9497/assay/internal/version"
+)
+
+type Finding struct {
+	Package  pkgmeta.Package
+	Advisory advisory.Advisory
+	// Evidence is on the type, not in a log line, because explainability is
+	// goal #1 and anything left to logging effectively does not exist (D10).
+	Evidence version.Evidence
+}
+
+// Skipped is a package the matcher could not evaluate. It exists so that
+// "we could not tell" never renders as "nothing found".
+type Skipped struct {
+	Package pkgmeta.Package
+	Reason  string
+}
+
+type Result struct {
+	Findings []Finding
+	Skipped  []Skipped
+}
+
+type Matcher struct {
+	store store.Store
+}
+
+func New(s store.Store) *Matcher { return &Matcher{store: s} }
+
+func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
+	var res Result
+
+	for _, p := range t.Packages {
+		cmp, ok := version.For(p.Ecosystem)
+		if !ok {
+			res.Skipped = append(res.Skipped, Skipped{
+				Package: p,
+				Reason:  fmt.Sprintf("no version comparer for ecosystem %q", p.Ecosystem),
+			})
+			continue
+		}
+
+		candidates, err := m.store.Lookup(p.Ecosystem, p.Name)
+		if err != nil {
+			// A store error is not a clean result. Fail the whole scan rather
+			// than reporting a subset that reads as "fewer vulnerabilities".
+			return Result{}, fmt.Errorf("lookup %s/%s: %w", p.Ecosystem, p.Name, err)
+		}
+
+		seen := make(map[string]bool, len(candidates))
+		var skipReason string
+
+		for _, a := range candidates {
+			if seen[a.ID] {
+				continue
+			}
+			for _, aff := range a.Affected {
+				if aff.Ecosystem != p.Ecosystem || aff.Name != p.Name {
+					continue
+				}
+				hit, ev, err := version.AffectsVersion(cmp, p.Version, aff)
+				if err != nil {
+					// Record the first reason and keep going: one malformed
+					// advisory bound must not hide the rest.
+					if skipReason == "" {
+						skipReason = fmt.Sprintf("comparing %s: %v", p.Version, err)
+					}
+					continue
+				}
+				if hit {
+					seen[a.ID] = true
+					res.Findings = append(res.Findings, Finding{Package: p, Advisory: a, Evidence: ev})
+					break
+				}
+			}
+		}
+
+		if skipReason != "" && !anyFindingFor(res.Findings, p) {
+			res.Skipped = append(res.Skipped, Skipped{Package: p, Reason: skipReason})
+		}
+	}
+
+	sortFindings(res.Findings)
+	sortSkipped(res.Skipped)
+	return res, nil
+}
+
+func anyFindingFor(fs []Finding, p pkgmeta.Package) bool {
+	for _, f := range fs {
+		if f.Package.Name == p.Name && f.Package.Ecosystem == p.Ecosystem {
+			return true
+		}
+	}
+	return false
+}
+
+// Sorting keeps output deterministic and diffable, which is design goal #3.
+func sortFindings(fs []Finding) {
+	sort.Slice(fs, func(i, j int) bool {
+		a, b := fs[i], fs[j]
+		if a.Package.Ecosystem != b.Package.Ecosystem {
+			return a.Package.Ecosystem < b.Package.Ecosystem
+		}
+		if a.Package.Name != b.Package.Name {
+			return a.Package.Name < b.Package.Name
+		}
+		return a.Advisory.ID < b.Advisory.ID
+	})
+}
+
+func sortSkipped(ss []Skipped) {
+	sort.Slice(ss, func(i, j int) bool {
+		a, b := ss[i], ss[j]
+		if a.Package.Ecosystem != b.Package.Ecosystem {
+			return a.Package.Ecosystem < b.Package.Ecosystem
+		}
+		return a.Package.Name < b.Package.Name
+	})
+}
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `go test ./internal/matcher/ -v`
+Expected: PASS, all six test functions.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/matcher
+git commit -m "feat: match packages against advisories, recording evidence and skips"
+```
+
+---
+
+## Task 10: Table report and `scan` wiring
+
+**Files:**
+- Create: `internal/report/table.go`
+- Test: `internal/report/table_test.go`
+- Create: `internal/scancmd/scancmd.go`
+- Test: `internal/scancmd/scancmd_test.go`
+- Modify: `cmd/assay/main.go` — replace the unimplemented `scan` stub
+- Modify: `cmd/assay/main_test.go` — the "scan not implemented" row changes meaning
+
+**Interfaces:**
+- Consumes: `matcher.Result`, `matcher.Finding`, `matcher.Skipped`, `cyclonedx.Parse`, `cyclonedx.Stats`, `store.Open`, `store.DefaultPath`.
+- Produces: `report.Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) error`; `scancmd.Run(dbPath, target string, stdout, stderr io.Writer) int`.
+
+Scope note: `--fail-on` is slice 4. Slice 1 therefore exits **0** even when findings are printed — there is no gate yet for anything to be "at or above". The exit-2 paths are the ones that matter here: a missing database, an unreadable SBOM, a store error.
+
+The summary line is not decoration. It carries the counts that keep a partial scan from reading as a clean one: how many packages were cataloged, how many were skipped by the cataloger, and how many were skipped by the matcher.
+
+- [ ] **Step 1: Write the failing test**
+
+```go
+package report
+
+import (
+	"bytes"
+	"strings"
+	"testing"
+
+	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
+	"github.com/kun9497/assay/internal/matcher"
+	"github.com/kun9497/assay/internal/pkgmeta"
+	"github.com/kun9497/assay/internal/version"
+)
+
+func TestTable_Findings(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "github.com/foo/bar", Version: "v1.2.3", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{ID: "GHSA-hit", Summary: "Code injection"},
+		Evidence: version.Evidence{Introduced: "0", Fixed: "1.5.0", Reason: "below the fix 1.5.0"},
+	}}}
+	var buf bytes.Buffer
+	if err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{"github.com/foo/bar", "v1.2.3", "GHSA-hit", "1.5.0"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTable_SkippedCountsAreVisible(t *testing.T) {
+	// A scan that could not evaluate 40 packages must not read as clean.
+	res := matcher.Result{Skipped: []matcher.Skipped{{
+		Package: pkgmeta.Package{Name: "apache2", Version: "2.4.54-r0", Ecosystem: "Alpine:v3.19"},
+		Reason:  "no version comparer for ecosystem \"Alpine:v3.19\"",
+	}}}
+	var buf bytes.Buffer
+	if err := Table(&buf, res, cyclonedx.Stats{
+		Components: 42, Cataloged: 1, SkippedUnsupportedEcosystem: 40, SkippedNoPURL: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "40") {
+		t.Errorf("cataloger skip count missing from summary:\n%s", out)
+	}
+	if !strings.Contains(strings.ToLower(out), "skipped") {
+		t.Errorf("summary never uses the word skipped:\n%s", out)
+	}
+}
+
+func TestTable_NoFindings(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Table(&buf, matcher.Result{}, cyclonedx.Stats{Components: 3, Cataloged: 3}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(strings.ToLower(out), "no known vulnerabilities") {
+		t.Errorf("clean scan should say so plainly:\n%s", out)
+	}
+}
+
+func TestTable_Deterministic(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{
+		{Package: pkgmeta.Package{Name: "a", Version: "1", Ecosystem: "Go"},
+			Advisory: advisory.Advisory{ID: "GHSA-1"}},
+		{Package: pkgmeta.Package{Name: "b", Version: "1", Ecosystem: "Go"},
+			Advisory: advisory.Advisory{ID: "GHSA-2"}},
+	}}
+	var first, second bytes.Buffer
+	if err := Table(&first, res, cyclonedx.Stats{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Table(&second, res, cyclonedx.Stats{}); err != nil {
+		t.Fatal(err)
+	}
+	if first.String() != second.String() {
+		t.Error("Table output is not deterministic")
+	}
+}
+```
+
+```go
+package scancmd
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestRun_MissingDatabase(t *testing.T) {
+	sbom := filepath.Join(t.TempDir(), "s.cdx.json")
+	os.WriteFile(sbom, []byte(`{"bomFormat":"CycloneDX","components":[]}`), 0o600)
+
+	var out, errOut bytes.Buffer
+	code := Run(filepath.Join(t.TempDir(), "absent.db"), sbom, &out, &errOut)
+	if code != 2 {
+		t.Errorf("Run without a database = %d, want 2", code)
+	}
+	if !strings.Contains(errOut.String(), "db update") {
+		t.Errorf("stderr should point at the fix:\n%s", errOut.String())
+	}
+	if out.Len() != 0 {
+		t.Errorf("error path polluted stdout: %q", out.String())
+	}
+}
+
+func TestRun_MissingSBOM(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := Run(filepath.Join(t.TempDir(), "absent.db"),
+		filepath.Join(t.TempDir(), "absent.cdx.json"), &out, &errOut)
+	if code != 2 {
+		t.Errorf("Run with a missing SBOM = %d, want 2", code)
+	}
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `go test ./internal/report/ ./internal/scancmd/ -v`
+Expected: FAIL — `Table` and `Run` undefined.
+
+- [ ] **Step 3: Write the implementation**
+
+`internal/report/table.go`:
+
+```go
+// Package report renders findings. Output is deterministic and diffable, which
+// is design goal #3 — a scanner whose output churns cannot be used in CI.
+package report
+
+import (
+	"fmt"
+	"io"
+	"text/tabwriter"
+
+	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
+	"github.com/kun9497/assay/internal/matcher"
+)
+
+func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) error {
+	if len(res.Findings) == 0 {
+		fmt.Fprintln(w, "No known vulnerabilities found.")
+	} else {
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(tw, "PACKAGE\tVERSION\tECOSYSTEM\tADVISORY\tFIXED IN")
+		for _, f := range res.Findings {
+			fixed := f.Evidence.Fixed
+			if fixed == "" {
+				fixed = "-"
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+				f.Package.Name, f.Package.Version, f.Package.Ecosystem, f.Advisory.ID, fixed)
+		}
+		if err := tw.Flush(); err != nil {
+			return err
+		}
+	}
+
+	// The summary is what keeps a partial scan from reading as a clean one.
+	skipped := cat.SkippedNoPURL + cat.SkippedUnsupportedEcosystem + len(res.Skipped)
+	fmt.Fprintf(w, "\n%d package(s) scanned, %d finding(s), %d skipped\n",
+		cat.Cataloged, len(res.Findings), skipped)
+
+	if skipped > 0 {
+		fmt.Fprintln(w, "\nSkipped:")
+		if cat.SkippedUnsupportedEcosystem > 0 {
+			fmt.Fprintf(w, "  %d package(s) in an unsupported ecosystem\n",
+				cat.SkippedUnsupportedEcosystem)
+		}
+		if cat.SkippedNoPURL > 0 {
+			fmt.Fprintf(w, "  %d component(s) without a usable purl\n", cat.SkippedNoPURL)
+		}
+		for _, s := range res.Skipped {
+			fmt.Fprintf(w, "  %s %s: %s\n", s.Package.Name, s.Package.Version, s.Reason)
+		}
+	}
+	return nil
+}
+```
+
+`internal/scancmd/scancmd.go`:
+
+```go
+// Package scancmd implements `assay scan`.
+package scancmd
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"os"
+
+	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
+	"github.com/kun9497/assay/internal/matcher"
+	"github.com/kun9497/assay/internal/report"
+	"github.com/kun9497/assay/internal/store"
+)
+
+// Run scans an SBOM file. Slice 1 has no --fail-on, so a completed scan exits
+// 0 even with findings; the exit-2 paths are what matter here.
+func Run(dbPath, target string, stdout, stderr io.Writer) int {
+	f, err := os.Open(target)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: open %s: %v\n", target, err)
+		return 2
+	}
+	defer f.Close()
+
+	inventory, cat, err := cyclonedx.Parse(f)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: parse %s: %v\n", target, err)
+		return 2
+	}
+
+	db, err := store.Open(dbPath)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrSchemaMismatch) {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			fmt.Fprintln(stderr, "run `assay db update` to build it")
+			return 2
+		}
+		fmt.Fprintf(stderr, "error: open database: %v\n", err)
+		return 2
+	}
+	defer db.Close()
+
+	res, err := matcher.New(db).Match(inventory)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: match: %v\n", err)
+		return 2
+	}
+	if err := report.Table(stdout, res, cat); err != nil {
+		fmt.Fprintf(stderr, "error: write report: %v\n", err)
+		return 2
+	}
+	return 0
+}
+```
+
+In `cmd/assay/main.go`, replace the `scan` stub:
+
+```go
+// scan is the pipeline entry point: parse the target into an inventory, match
+// it against the local database, and report.
+func scan(target string, stdout, stderr io.Writer) int {
+	path, err := store.DefaultPath()
+	if err != nil {
+		fmt.Fprintf(stderr, "error: locate database: %v\n", err)
+		return exitError
+	}
+	return scancmd.Run(path, target, stdout, stderr)
+}
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+The existing `main_test.go` row `{"scan not implemented", []string{"scan", "alpine:3.19"}, exitError}` still expects 2, and still gets it — `alpine:3.19` is not a readable file. Rename it so the assertion matches its new reason:
+
+```go
+		{"scan of an unreadable target", []string{"scan", "alpine:3.19"}, exitError},
+```
+
+Run: `go test ./... -v`
+Expected: PASS across every package.
+
+- [ ] **Step 5: End-to-end check against real data**
+
+This is the point of the slice. Run it for real:
+
+```bash
+make build
+./bin/assay db update
+./bin/assay db status
+syft alpine:3.19 -o cyclonedx-json > /tmp/alpine.cdx.json
+./bin/assay scan /tmp/alpine.cdx.json
+```
+
+Expected: `db status` lists `osv` with a `DATA AS OF` date and a five-figure record count. The alpine scan reports **0 findings and a large skipped count** — every apk package lands in the unsupported-ecosystem bucket in slice 1, which is the honest answer, not a clean bill of health.
+
+For a scan that should actually find something, generate an SBOM from a Go project with known-vulnerable dependencies:
+
+```bash
+syft dir:/path/to/some/go/project -o cyclonedx-json > /tmp/go.cdx.json
+./bin/assay scan /tmp/go.cdx.json
+grype /tmp/go.cdx.json
+```
+
+Compare the two outputs. Exact agreement is not expected — the data sources differ — but **a large divergence means the matcher is wrong**. Investigate before committing.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add internal/report internal/scancmd cmd/assay
+git commit -m "feat: render findings as a table and wire up assay scan"
+```
+
+---
+
+## Self-review
+
+Run before handing the plan off.
+
+**Spec coverage.** Every slice 1 completion criterion in the roadmap maps to a task: `db update` and `db status` (Task 7), CycloneDX ingestion (Task 8), OSV provider and bbolt store (Tasks 5–7), per-ecosystem comparison and range matching (Tasks 2–4), table output (Task 10), missing-database exit 2 (Tasks 7 and 10), comparer table tests (Tasks 2–3), grype differential (Task 10 Step 5).
+
+**Deferred, deliberately.** `--fail-on` and `--fail-on-unknown`, severity banding, JSON/SARIF, and explain mode are slice 4. Severity vectors are stored from Task 6 so slice 4 needs no rebuild (D13). `LookupBySource` and `Package.Source` exist but have no producer until slice 2 — the interface is fixed now so its first real consumer does not change it.
+
+**Type consistency.** `Comparer.Compare(a, b string) (int, error)` is used identically in Tasks 2, 3, 4, and 9. `store.Store` as consumed by the matcher matches what `Bolt` implements. `version.Evidence` is produced in Task 4, carried through Task 9, and rendered in Task 10. `cyclonedx.Stats` is produced in Task 8 and consumed in Task 10.
+
+**Known gap.** `Advisory.Kind` is written by the OSV provider and read by nothing in slice 1. That is intended (D15): storing it now makes enabling malicious-package reports a filter change rather than a database rebuild.
+
