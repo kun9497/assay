@@ -4257,6 +4257,28 @@ func TestMatch_UnevaluableAdvisorySurvivesAlongsideAFinding(t *testing.T) {
 	}
 }
 
+func TestMatch_SkipsAreDeduplicatedPerAdvisory(t *testing.T) {
+	// One advisory carrying two Affected entries for the same package, both
+	// with malformed bounds. Measured across real data, 145 of 313 Django
+	// records repeat affected entries for one package, so this shape is
+	// routine rather than pathological — and a skip per entry would bury the
+	// rest of the report in identical lines.
+	bad := advWithRange("GHSA-twice", "Go", "x", "0", "not-a-version", advisory.RangeSemver)
+	bad.Affected = append(bad.Affected, bad.Affected[0])
+	s := fakeStore{byKey: map[string][]advisory.Advisory{"Go x": {bad, bad}}}
+
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("x", "1.0.0", "Go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Skipped) != 1 {
+		t.Errorf("Skipped = %d entries, want 1 per (package, advisory); got %+v",
+			len(res.Skipped), res.Skipped)
+	}
+}
+
 func TestMatch_UnsupportedEcosystemIsSkipped(t *testing.T) {
 	res, err := New(fakeStore{}).Match(pkgmeta.Target{
 		Packages: []pkgmeta.Package{pkg("apache2", "2.4.54-r0", "Alpine:v3.19")},
@@ -4406,6 +4428,13 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 		}
 
 		seen := make(map[string]bool, len(candidates))
+		// Skips are deduplicated separately from findings: `seen` is only set
+		// on a hit, and the error path must not rely on it. One advisory can
+		// carry several Affected entries for the same package — measured at
+		// 145 of 313 real Django records — and the same advisory can appear
+		// twice in a lookup result, so without this a single bad bound emits
+		// byte-identical skips and buries the rest of the report.
+		skipped := make(map[string]bool, len(candidates))
 
 		for _, a := range candidates {
 			if seen[a.ID] {
@@ -4430,11 +4459,14 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 					// Recorded against that advisory and the loop continues, so
 					// a single malformed bound hides neither the other
 					// advisories nor the fact that this one was unevaluable.
-					res.Skipped = append(res.Skipped, Skipped{
-						Package:    p,
-						AdvisoryID: a.ID,
-						Reason:     fmt.Sprintf("comparing %s: %v", p.Version, err),
-					})
+					if !skipped[a.ID] {
+						skipped[a.ID] = true
+						res.Skipped = append(res.Skipped, Skipped{
+							Package:    p,
+							AdvisoryID: a.ID,
+							Reason:     fmt.Sprintf("comparing %s: %v", p.Version, err),
+						})
+					}
 					continue
 				}
 				if hit {
@@ -4473,7 +4505,13 @@ func sortFindings(fs []Finding) {
 		if a.Advisory.ID != b.Advisory.ID {
 			return a.Advisory.ID < b.Advisory.ID
 		}
-		return a.Package.PURL < b.Package.PURL
+		if a.Package.PURL != b.Package.PURL {
+			return a.Package.PURL < b.Package.PURL
+		}
+		// Two installs of one package at one version share a purl and differ
+		// only in where they were found — nested node_modules produce exactly
+		// that. Location is the last thing that tells them apart.
+		return firstPath(a.Package) < firstPath(b.Package)
 	})
 }
 
@@ -4492,8 +4530,23 @@ func sortSkipped(ss []Skipped) {
 		if a.AdvisoryID != b.AdvisoryID {
 			return a.AdvisoryID < b.AdvisoryID
 		}
-		return a.Reason < b.Reason
+		if a.Reason != b.Reason {
+			return a.Reason < b.Reason
+		}
+		if a.Package.PURL != b.Package.PURL {
+			return a.Package.PURL < b.Package.PURL
+		}
+		return firstPath(a.Package) < firstPath(b.Package)
 	})
+}
+
+// firstPath returns where a package was found, for use as a final sort key.
+// Empty when the source did not record one.
+func firstPath(p pkgmeta.Package) string {
+	if len(p.Locations) == 0 {
+		return ""
+	}
+	return p.Locations[0].Path
 }
 ```
 
