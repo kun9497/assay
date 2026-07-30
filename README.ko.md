@@ -15,11 +15,17 @@
 
 ## 현재 상태
 
-🚧 **초기 개발 단계. 아직 스캔되지 않습니다.** CLI는 뼈대만 있습니다. `assay version`과
-`assay help`는 동작하고, `assay scan`은 **얻지 않은 클린 판정을 내리는 대신 의도적으로 2를
-반환합니다.**
+🚧 **초기 개발 단계. 매칭 코어는 동작하고, 나머지는 아직입니다.**
 
-아래 내용은 합의된 설계 목표입니다. [로드맵](#로드맵)이 실제 구현 상태를 추적하고,
+`assay db update`가 OSV로부터 로컬 데이터베이스를 만들고, `assay scan <파일>.cdx.json`이
+CycloneDX SBOM 안의 Go, npm, PyPI 패키지를 거기에 매칭합니다. 실제 SBOM에서 grype와 동일한
+finding을 보고합니다 — 개수만 같은 것이 아니라 CVE 집합이 같습니다. [로드맵](#로드맵) 참조.
+
+그 아래 내용은 여전히 구현이 아니라 설계 목표입니다. 구체적으로, `scan`은 CycloneDX 파일 경로
+하나만 받고 **플래그를 전혀 받지 않습니다.** 컨테이너 이미지, 바이너리, 디렉터리는 구현되어 있지
+않고 `--fail-on`, `--fail-on-unknown`, `--output json`도 마찬가지입니다. 따라서 종료 코드 1은
+현재 도달 불가능합니다 — 완료된 스캔은 finding을 보고하더라도 0을 반환합니다.
+
 [`docs/superpowers/specs/2026-07-29-assay-roadmap.ko.md`](docs/superpowers/specs/2026-07-29-assay-roadmap.ko.md)에
 전체 설계와 각 결정의 근거가 담겨 있습니다.
 
@@ -63,6 +69,8 @@ make build
 
 ## 사용법
 
+현재 동작하는 것:
+
 ```bash
 # 로컬 취약점 데이터베이스 구축 — 네트워크가 필요한 유일한 명령
 assay db update
@@ -70,26 +78,19 @@ assay db update
 # 데이터베이스에 무엇이 들어 있고 얼마나 최신인지
 assay db status
 
-# 기존 SBOM 스캔
+# CycloneDX SBOM 스캔 (Go, npm, PyPI)
 assay scan sbom.cdx.json
+```
 
-# 컨테이너 이미지 스캔
-assay scan alpine:3.19
+아직 구현되지 않은 것 — 동작해서가 아니라 목표를 분명히 하기 위해 적어둡니다:
 
-# 바이너리 스캔
-assay scan ./bin/assay
-
-# 디렉터리 스캔
-assay scan dir:./my-project
-
-# 심각도 high 이상이면 빌드 실패
-assay scan alpine:3.19 --fail-on high
-
-# ...심각도가 평가되지 않은 finding에도 실패 (아래 참조)
-assay scan alpine:3.19 --fail-on high --fail-on-unknown
-
-# 기계 판독 가능한 출력
-assay scan sbom.cdx.json --output json
+```bash
+assay scan alpine:3.19                       # ② 컨테이너 이미지
+assay scan ./bin/assay                       # ③ 바이너리
+assay scan dir:./my-project                  # ③ 디렉터리
+assay scan sbom.cdx.json --fail-on high      # ④ 심각도 게이팅
+assay scan sbom.cdx.json --fail-on-unknown   # ④ 미평가 finding
+assay scan sbom.cdx.json --output json       # ④ 기계 판독 출력
 ```
 
 플래그 이름은 의미가 같은 한 grype를 따릅니다. grype에서 쓰던 것이 여기서도 같은 뜻이라는
@@ -111,10 +112,10 @@ assay scan sbom.cdx.json --output json
 CI 캐시나 에어갭 환경에서는 `ASSAY_DB_DIR`로 재정의합니다. 경로의 `v1`은 스키마 버전입니다 —
 스키마가 바뀌면 제자리에서 마이그레이션하는 대신 새 디렉터리에 다시 빌드합니다.
 
-첫 대상 생태계(Go, npm, PyPI) 기준으로 디스크에 **약 86 MB**를 예상하십시오. 실제 OSV 덤프로
-측정한 권고 28,613건입니다. 이를 만들기 위한 최초 `db update`는 약 244 MB를 받습니다. OSV는
-생태계별로 아카이브 하나씩을 제공할 뿐 서버 측 필터링이 없어서, npm 아카이브의 대부분을 차지하는
-악성 패키지 신고는 수집 단계에서 버려지기 때문입니다.
+첫 대상 생태계(Go, npm, PyPI)로 빌드하면 **디스크 64 MB에 권고 27,702건**이 담깁니다 —
+추정치가 아니라 실제 `db update`를 돌려 측정한 값입니다. 여기까지 오는 데 약 244 MB를 내려받습니다.
+OSV는 생태계별로 아카이브 하나씩을 제공할 뿐 서버 측 필터링이 없어서, npm 아카이브의 대부분을
+차지하는 악성 패키지 신고는 수집 단계에서 버려지기 때문입니다.
 
 `assay db status`는 provider별로 **업스트림 데이터가 언제 기준인지**를 보고합니다 — 여러분이
 언제 내려받았는지가 아닙니다. 3개월 된 스냅샷을 서빙하는 미러가 오늘 아침에 받았다는 이유로
@@ -205,15 +206,15 @@ KISA 데이터를 넣을 수 있게 합니다.**
 아키텍처 계층이 아니라 **동작하는 경로**를 따라 잘랐습니다 — 계층 하나만으로는 실행할 수 없고,
 실행할 수 없는 설계는 검증할 수 없습니다.
 
-**① 매칭 코어** — CycloneDX SBOM → OSV 기반 store → matcher → table 출력. Go, npm, PyPI 대상.
+**① 매칭 코어** ✅ — CycloneDX SBOM → OSV 기반 store → matcher → table 출력. Go, npm, PyPI 대상.
 핵심 타입과 인터페이스가 여기서 확정됩니다.
 
-- [ ] 핵심 타입, `Store` / `Comparer` / `Provider` 인터페이스
-- [ ] OSV provider와 로컬 bbolt store
-- [ ] `assay db update`, `assay db status`
-- [ ] CycloneDX SBOM 수용
-- [ ] 생태계별 버전 비교와 범위 매칭
-- [ ] table 출력
+- [x] 핵심 타입, `Store` / `Comparer` / `Provider` 인터페이스
+- [x] OSV provider와 로컬 bbolt store
+- [x] `assay db update`, `assay db status`
+- [x] CycloneDX SBOM 수용
+- [x] 생태계별 버전 비교와 범위 매칭
+- [x] table 출력
 
 **② 컨테이너** — 레지스트리 pull, 레이어 추출, `/etc/os-release`, apk 카탈로깅.
 **설계 리스크가 가장 크므로** 늦추지 않고 앞에 둡니다.
@@ -236,7 +237,17 @@ KISA 데이터를 넣을 수 있게 합니다.**
 - [ ] KNVD provider와 보강 조인
 
 정확성은 매 단계 **grype와의 대조 테스트**로 검증합니다. 데이터 소스가 다르므로 완전한 일치는
-기대하지 않지만, **큰 차이가 나면 우리 매처가 틀린 것입니다.**
+기대하지 않지만, **큰 차이가 나면 우리 매처가 틀린 것입니다.** 슬라이스 ①은 대조한 두 SBOM 모두에서
+집합이 정확히 일치했습니다:
+
+| 대상 | assay | grype | 미탐 | 오탐 |
+|---|---:|---:|---:|---:|
+| PyPI SBOM (대소문자 혼용 이름) | 32 | 32 | 0 | 0 |
+| Go 모듈 SBOM | 4 | 4 | 0 | 0 |
+
+`alpine:3.19` SBOM은 0이 아니라 **2**를 반환합니다. 슬라이스 ①에는 distro 생태계가 없어서 17개
+패키지 전부가 평가 불가이고, 리포트가 그 사실을 말합니다. **아무것도 평가하지 못한 스캐너가 클린
+빌드처럼 보여서는 안 됩니다.**
 
 바이너리 스캔은 해당 언어가 무엇을 남기느냐에 전적으로 달려 있습니다. Go와 Java는 의존성 목록을
 복원할 만큼의 메타데이터를 담고, Rust는 `cargo-auditable`로 빌드된 경우에만 가능하며, 스트립된

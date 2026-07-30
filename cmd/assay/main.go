@@ -37,7 +37,7 @@ Usage:
   assay <command> [arguments]
 
 Commands:
-  scan <target>   Scan an SBOM file, directory, or container image
+  scan <sbom>     Scan a CycloneDX SBOM file (Go, npm, PyPI)
   db update       Build or refresh the local vulnerability database
   db status       Show what is in the database and how current it is
   version         Print version information

@@ -16,12 +16,19 @@ affecting it.
 
 ## Status
 
-🚧 **Early development. Nothing scans yet.** The CLI is scaffolding: `assay version` and
-`assay help` work, and `assay scan` deliberately exits 2 rather than reporting a clean
-result it has not earned.
+🚧 **Early development. The matching core works; nothing else does yet.**
 
-Everything below is the agreed design target. [Roadmap](#roadmap) tracks what is actually
-built; [`docs/superpowers/specs/2026-07-29-assay-roadmap.md`](docs/superpowers/specs/2026-07-29-assay-roadmap.md)
+`assay db update` builds a local database from OSV, and `assay scan <file>.cdx.json` matches
+the Go, npm, and PyPI packages in a CycloneDX SBOM against it. On real SBOMs it reports the
+same findings as grype — same CVEs, not just the same count. See [Roadmap](#roadmap).
+
+Everything else below is still the design target, not the build. Concretely, `scan` takes
+one CycloneDX file path and **accepts no flags**: container images, binaries, and
+directories are not implemented, and neither are `--fail-on`, `--fail-on-unknown`, or
+`--output json`. Exit code 1 is therefore unreachable today — a completed scan exits 0 even
+when it reports findings.
+
+[`docs/superpowers/specs/2026-07-29-assay-roadmap.md`](docs/superpowers/specs/2026-07-29-assay-roadmap.md)
 carries the full design and the reasoning behind each decision.
 
 ## Scope
@@ -64,6 +71,8 @@ make build
 
 ## Usage
 
+Working today:
+
 ```bash
 # Build the local vulnerability database — the only command that needs network
 assay db update
@@ -71,26 +80,19 @@ assay db update
 # What is in the database, and how current is it
 assay db status
 
-# Scan an existing SBOM
+# Scan a CycloneDX SBOM (Go, npm, PyPI)
 assay scan sbom.cdx.json
+```
 
-# Scan a container image
-assay scan alpine:3.19
+Not implemented yet — listed so the target is unambiguous, not because it runs:
 
-# Scan a binary
-assay scan ./bin/assay
-
-# Scan a directory
-assay scan dir:./my-project
-
-# Fail the build on high-severity findings
-assay scan alpine:3.19 --fail-on high
-
-# ...and on findings whose severity is unrated (see below)
-assay scan alpine:3.19 --fail-on high --fail-on-unknown
-
-# Machine-readable output
-assay scan sbom.cdx.json --output json
+```bash
+assay scan alpine:3.19                       # ② container images
+assay scan ./bin/assay                       # ③ binaries
+assay scan dir:./my-project                  # ③ directories
+assay scan sbom.cdx.json --fail-on high      # ④ severity gating
+assay scan sbom.cdx.json --fail-on-unknown   # ④ unrated findings
+assay scan sbom.cdx.json --output json       # ④ machine-readable output
 ```
 
 Flag names follow grype where the semantics match, so anything you already run against
@@ -114,9 +116,9 @@ Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v1`
 is the schema version — a schema change rebuilds into a new directory rather than migrating
 in place.
 
-Expect roughly **86 MB on disk** for the first set of ecosystems (Go, npm, PyPI) — 28,613
-advisories, measured against the live OSV dumps. The initial `db update` downloads about
-244 MB to produce that: OSV publishes one archive per ecosystem with no server-side
+A build over the first set of ecosystems (Go, npm, PyPI) produces **64 MB on disk holding
+27,702 advisories** — measured from an actual `db update`, not estimated. Getting there
+downloads roughly 244 MB: OSV publishes one archive per ecosystem with no server-side
 filtering, and most of npm's archive is malicious-package reports that are discarded on
 ingestion.
 
@@ -214,15 +216,15 @@ would be a miss.
 Cut along working paths rather than architectural layers — a layer on its own cannot run,
 and a design that cannot run cannot be validated.
 
-**① Matching core** — CycloneDX SBOM → OSV-backed store → matcher → table output, for Go,
+**① Matching core** ✅ — CycloneDX SBOM → OSV-backed store → matcher → table output, for Go,
 npm, and PyPI. Fixes the core types and interfaces.
 
-- [ ] Core types, `Store` / `Comparer` / `Provider` interfaces
-- [ ] OSV provider and local bbolt store
-- [ ] `assay db update`, `assay db status`
-- [ ] CycloneDX SBOM ingestion
-- [ ] Per-ecosystem version comparison and range matching
-- [ ] Table output
+- [x] Core types, `Store` / `Comparer` / `Provider` interfaces
+- [x] OSV provider and local bbolt store
+- [x] `assay db update`, `assay db status`
+- [x] CycloneDX SBOM ingestion
+- [x] Per-ecosystem version comparison and range matching
+- [x] Table output
 
 **② Containers** — registry pull, layer extraction, `/etc/os-release`, apk cataloging.
 Highest design risk, so it comes early rather than late.
@@ -248,7 +250,16 @@ findings.
 
 Correctness is checked by **differential testing against grype** at every stage. Exact
 agreement is not expected — the data sources differ — but a large divergence means the
-matcher is wrong.
+matcher is wrong. Slice ① came out set-identical on both SBOMs it was run against:
+
+| Target | assay | grype | missed | extra |
+|---|---:|---:|---:|---:|
+| PyPI SBOM (mixed-case names) | 32 | 32 | 0 | 0 |
+| Go module SBOM | 4 | 4 | 0 | 0 |
+
+An `alpine:3.19` SBOM exits **2** rather than 0: slice ① has no distro ecosystem, so all 17
+packages are unevaluable, and the report says so. A scanner that cannot evaluate anything
+must not look like a clean build.
 
 Binary scanning depends entirely on what the language leaves behind. Go and Java embed
 enough metadata to recover a dependency list; Rust does only when built with
