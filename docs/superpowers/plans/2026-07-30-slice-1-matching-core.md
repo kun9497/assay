@@ -1567,6 +1567,16 @@ func TestInRange_BoundlessEventDoesNotBreakSorting(t *testing.T) {
 	}
 }
 
+func TestInRange_RangeWithNoBoundsErrors(t *testing.T) {
+	// Every event carries only a limit, so no window can open. Returning "not
+	// affected" would be indistinguishable from a real miss.
+	r := rng(advisory.RangeSemver, advisory.Event{Limit: "1.0.0"})
+	_, _, err := InRange(SemVer{}, "1.2.3", r)
+	if !errors.Is(err, ErrInvalid) {
+		t.Errorf("InRange over a boundless range err = %v, want ErrInvalid", err)
+	}
+}
+
 func TestInRange_MalformedBoundErrors(t *testing.T) {
 	// A bound that cannot be ordered must surface. Sorting on an unorderable
 	// bound would otherwise pick an arbitrary order and return a confident
@@ -1732,6 +1742,23 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 	// would error on data that was never meant for a Comparer.
 	if r.Type == advisory.RangeGit {
 		return false, Evidence{}, nil
+	}
+
+	// A range whose events carry no bound at all cannot be evaluated. Walking
+	// it opens no window and returns "not affected" — indistinguishable from a
+	// real miss, so the caller has no signal that anything went wrong. Malformed
+	// input must surface.
+	var actionable bool
+	for _, e := range r.Events {
+		if eventVersion(e) != "" {
+			actionable = true
+			break
+		}
+	}
+	if !actionable {
+		return false, Evidence{}, fmt.Errorf(
+			"range of type %q carries no introduced, fixed, or last_affected event: %w",
+			r.Type, ErrInvalid)
 	}
 
 	// OSV only *recommends* that events arrive sorted, and its reference
@@ -4161,6 +4188,75 @@ func TestMatch_UnparseableVersionIsSkippedNotClean(t *testing.T) {
 	}
 }
 
+func TestMatch_FindingOnOneVersionDoesNotEraseSkipOnAnother(t *testing.T) {
+	// Two installed versions of the same package. One matches; the other
+	// cannot be evaluated. Identifying packages by name alone would let the
+	// first one's finding suppress the second one's skip, reporting an
+	// unevaluated package as clean. Nested node_modules produce this shape
+	// routinely.
+	broken := advWithRange("GHSA-broken", "npm", "lodash", "0", "not-a-version", advisory.RangeSemver)
+	old := advWithRange("GHSA-old", "npm", "lodash", "0", "4.17.21", advisory.RangeSemver)
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"npm\x00lodash": {old, broken},
+	}}
+	target := pkgmeta.Target{Packages: []pkgmeta.Package{
+		pkg("lodash", "4.17.20", "npm"), // inside old's range
+		pkg("lodash", "4.17.21", "npm"), // at the fix, so only broken applies
+	}}
+
+	res, err := New(s).Match(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var skippedFor2021 bool
+	for _, sk := range res.Skipped {
+		if sk.Package.Version == "4.17.21" {
+			skippedFor2021 = true
+		}
+	}
+	if !skippedFor2021 {
+		t.Errorf("4.17.21 could not be evaluated but produced no Skipped entry; got %+v", res.Skipped)
+	}
+
+	// Reversing the input must not change the outcome.
+	target.Packages[0], target.Packages[1] = target.Packages[1], target.Packages[0]
+	rev, err := New(s).Match(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rev.Skipped) != len(res.Skipped) || len(rev.Findings) != len(res.Findings) {
+		t.Errorf("result depends on package order: %d/%d vs %d/%d",
+			len(res.Findings), len(res.Skipped), len(rev.Findings), len(rev.Skipped))
+	}
+}
+
+func TestMatch_UnevaluableAdvisorySurvivesAlongsideAFinding(t *testing.T) {
+	// One package, two advisories: one matches, one has a malformed bound. The
+	// user must learn about both. The unevaluated one may carry the higher
+	// severity or a higher fix floor, which would make the remediation shown
+	// next to the visible finding wrong.
+	hit := advWithRange("GHSA-hit", "Go", "x", "0", "2.0.0", advisory.RangeSemver)
+	bad := advWithRange("GHSA-unevaluable", "Go", "x", "0", "not-a-version", advisory.RangeSemver)
+	s := fakeStore{byKey: map[string][]advisory.Advisory{"Go\x00x": {hit, bad}}}
+
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("x", "1.0.0", "Go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 || res.Findings[0].Advisory.ID != "GHSA-hit" {
+		t.Errorf("Findings = %+v, want one GHSA-hit", res.Findings)
+	}
+	if len(res.Skipped) != 1 {
+		t.Fatalf("Skipped = %+v, want one entry for GHSA-unevaluable", res.Skipped)
+	}
+	if res.Skipped[0].AdvisoryID != "GHSA-unevaluable" {
+		t.Errorf("Skipped.AdvisoryID = %q, want GHSA-unevaluable — a reason that does not "+
+			"name the advisory leaves the user nothing to investigate", res.Skipped[0].AdvisoryID)
+	}
+}
+
 func TestMatch_UnsupportedEcosystemIsSkipped(t *testing.T) {
 	res, err := New(fakeStore{}).Match(pkgmeta.Target{
 		Packages: []pkgmeta.Package{pkg("apache2", "2.4.54-r0", "Alpine:v3.19")},
@@ -4256,11 +4352,20 @@ type Finding struct {
 	Evidence version.Evidence
 }
 
-// Skipped is a package the matcher could not evaluate. It exists so that
-// "we could not tell" never renders as "nothing found".
+// Skipped is something the matcher could not evaluate. It exists so that "we
+// could not tell" never renders as "nothing found".
+//
+// It is per (package, advisory), not per package. A package can produce a
+// finding from one advisory and be unevaluable against another, and the second
+// fact must survive the first — the unevaluated advisory may carry the higher
+// severity or a higher fix floor, which would make the remediation shown next
+// to the visible finding actively wrong.
 type Skipped struct {
 	Package pkgmeta.Package
-	Reason  string
+	// AdvisoryID is empty when the whole package was skipped, e.g. because no
+	// comparer is registered for its ecosystem.
+	AdvisoryID string
+	Reason     string
 }
 
 type Result struct {
@@ -4278,6 +4383,12 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 	var res Result
 
 	for _, p := range t.Packages {
+		// NOTE for whoever adds a distro comparer to version.registry: distro
+		// advisories are keyed on SOURCE packages while installed packages are
+		// binary packages (D8), so this loop must also consult
+		// store.LookupBySource with p.Source. Until then a distro package exits
+		// here as Skipped, which is safe. Registering the comparer without
+		// adding that lookup flips it from safe to silently under-reporting.
 		cmp, ok := version.For(p.Ecosystem)
 		if !ok {
 			res.Skipped = append(res.Skipped, Skipped{
@@ -4295,23 +4406,35 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 		}
 
 		seen := make(map[string]bool, len(candidates))
-		var skipReason string
 
 		for _, a := range candidates {
 			if seen[a.ID] {
 				continue
 			}
 			for _, aff := range a.Affected {
+				// The store is keyed on (ecosystem, name), so a returned
+				// advisory can still carry entries for sibling packages — a Go
+				// advisory naming both github.com/foo/bar and .../bar/v2, for
+				// instance. Evaluating a v1 version against a v2 range would be
+				// wrong, so entries that are not this package are skipped.
+				//
+				// This mirrors the store's key equality exactly. If either side
+				// ever starts normalizing names, the two must change together
+				// or this filter will silently discard real advisories.
 				if aff.Ecosystem != p.Ecosystem || aff.Name != p.Name {
 					continue
 				}
 				hit, ev, err := version.AffectsVersion(cmp, p.Version, aff)
 				if err != nil {
-					// Record the first reason and keep going: one malformed
-					// advisory bound must not hide the rest.
-					if skipReason == "" {
-						skipReason = fmt.Sprintf("comparing %s: %v", p.Version, err)
-					}
+					// One advisory this package cannot be evaluated against.
+					// Recorded against that advisory and the loop continues, so
+					// a single malformed bound hides neither the other
+					// advisories nor the fact that this one was unevaluable.
+					res.Skipped = append(res.Skipped, Skipped{
+						Package:    p,
+						AdvisoryID: a.ID,
+						Reason:     fmt.Sprintf("comparing %s: %v", p.Version, err),
+					})
 					continue
 				}
 				if hit {
@@ -4321,10 +4444,6 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 				}
 			}
 		}
-
-		if skipReason != "" && !anyFindingFor(res.Findings, p) {
-			res.Skipped = append(res.Skipped, Skipped{Package: p, Reason: skipReason})
-		}
 	}
 
 	sortFindings(res.Findings)
@@ -4332,18 +4451,15 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 	return res, nil
 }
 
-func anyFindingFor(fs []Finding, p pkgmeta.Package) bool {
-	for _, f := range fs {
-		if f.Package.Name == p.Name && f.Package.Ecosystem == p.Ecosystem {
-			return true
-		}
-	}
-	return false
-}
-
 // Sorting keeps output deterministic and diffable, which is design goal #3.
+//
+// Both comparators key all the way down to something that distinguishes any
+// two distinct entries. A partial key would leave ties to sort.Slice, which is
+// not stable, so two runs over identical input could order them differently —
+// the exact churn the goal forbids. SliceStable is used as well, so that even
+// a genuine tie resolves the same way every time.
 func sortFindings(fs []Finding) {
-	sort.Slice(fs, func(i, j int) bool {
+	sort.SliceStable(fs, func(i, j int) bool {
 		a, b := fs[i], fs[j]
 		if a.Package.Ecosystem != b.Package.Ecosystem {
 			return a.Package.Ecosystem < b.Package.Ecosystem
@@ -4351,17 +4467,32 @@ func sortFindings(fs []Finding) {
 		if a.Package.Name != b.Package.Name {
 			return a.Package.Name < b.Package.Name
 		}
-		return a.Advisory.ID < b.Advisory.ID
+		if a.Package.Version != b.Package.Version {
+			return a.Package.Version < b.Package.Version
+		}
+		if a.Advisory.ID != b.Advisory.ID {
+			return a.Advisory.ID < b.Advisory.ID
+		}
+		return a.Package.PURL < b.Package.PURL
 	})
 }
 
 func sortSkipped(ss []Skipped) {
-	sort.Slice(ss, func(i, j int) bool {
+	sort.SliceStable(ss, func(i, j int) bool {
 		a, b := ss[i], ss[j]
 		if a.Package.Ecosystem != b.Package.Ecosystem {
 			return a.Package.Ecosystem < b.Package.Ecosystem
 		}
-		return a.Package.Name < b.Package.Name
+		if a.Package.Name != b.Package.Name {
+			return a.Package.Name < b.Package.Name
+		}
+		if a.Package.Version != b.Package.Version {
+			return a.Package.Version < b.Package.Version
+		}
+		if a.AdvisoryID != b.AdvisoryID {
+			return a.AdvisoryID < b.AdvisoryID
+		}
+		return a.Reason < b.Reason
 	})
 }
 ```
@@ -4584,6 +4715,11 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) error {
 			fmt.Fprintf(w, "  %d package(s) with no version to compare\n", cat.SkippedNoVersion)
 		}
 		for _, s := range res.Skipped {
+			if s.AdvisoryID != "" {
+				fmt.Fprintf(w, "  %s %s (%s): %s\n",
+					s.Package.Name, s.Package.Version, s.AdvisoryID, s.Reason)
+				continue
+			}
 			fmt.Fprintf(w, "  %s %s: %s\n", s.Package.Name, s.Package.Version, s.Reason)
 		}
 	}
