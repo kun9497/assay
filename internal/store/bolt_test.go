@@ -176,6 +176,23 @@ func TestLookupBySource(t *testing.T) {
 	if err := w.Put(a); err != nil {
 		t.Fatal(err)
 	}
+	// A PyPI source name, so the write and the read must agree on normalization.
+	// The Alpine case above cannot see that: NormalizeName is a no-op for it, so
+	// either side could stop normalizing and this test would still pass.
+	pypiAdv := advisory.Advisory{
+		ID:     "PYSEC-src",
+		Source: "osv",
+		Kind:   advisory.KindVulnerability,
+		Affected: []advisory.Affected{
+			{Ecosystem: "PyPI", Name: "zope-interface"},
+		},
+	}
+	if err := w.PutSourceIndex("PyPI", "Zope.Interface", pypiAdv.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Put(pypiAdv); err != nil {
+		t.Fatal(err)
+	}
 	// A writer that never calls SetMeta has not finished building, and Open
 	// refuses such a database. Before ErrIncomplete existed this test passed
 	// by relying on exactly the defect that check now closes.
@@ -198,6 +215,16 @@ func TestLookupBySource(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].ID != "ALPINE-CVE-1" {
 		t.Errorf("LookupBySource = %+v, want ALPINE-CVE-1", got)
+	}
+
+	for _, spelling := range []string{"zope.interface", "Zope_Interface", "zope-interface"} {
+		got, err := db.LookupBySource("PyPI", spelling)
+		if err != nil {
+			t.Fatalf("LookupBySource(PyPI, %q): %v", spelling, err)
+		}
+		if len(got) != 1 {
+			t.Errorf("LookupBySource(PyPI, %q) returned %d, want 1", spelling, len(got))
+		}
 	}
 }
 

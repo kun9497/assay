@@ -296,7 +296,7 @@ func TestMatch_ForeignEcosystemEntryNeverReachesTheComparer(t *testing.T) {
 		Packages: []pkgmeta.Package{pkg("django", "3.2", "PyPI")},
 	})
 	if err != nil {
-		t.Fatalf("the npm range reached the PyPI comparer: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(res.Findings) != 1 {
 		t.Fatalf("Findings = %d, want 1 from the PyPI entry only; got %+v",
@@ -318,18 +318,22 @@ func TestMatch_PyPINameIsNormalizedBeforeFiltering(t *testing.T) {
 	// the advisory either way, so the last thing that can drop it is the
 	// matcher's own affected filter — this fails if that filter stops
 	// normalizing, which no other test covers.
-	adv := advWithRange("GHSA-jinja", "PyPI", "jinja2", "0", "3.1.6", advisory.RangeEcosystem)
-	s := fakeStore{byKey: map[string][]advisory.Advisory{"PyPI\x00jinja2": {adv}}}
+	// The advisory name is deliberately NOT already normalized and the package
+	// name is spelled differently again. The filter normalizes both sides, so a
+	// fixture that pre-normalized either one would leave that half a no-op and
+	// mutate green.
+	adv := advWithRange("GHSA-zope", "PyPI", "Zope.Interface", "0", "5.5.0", advisory.RangeEcosystem)
+	s := fakeStore{byKey: map[string][]advisory.Advisory{"PyPI\x00zope-interface": {adv}}}
 
 	res, err := New(s).Match(pkgmeta.Target{
-		Packages: []pkgmeta.Package{pkg("Jinja2", "2.11.2", "PyPI")},
+		Packages: []pkgmeta.Package{pkg("Zope_Interface", "5.4.0", "PyPI")},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(res.Findings) != 1 {
-		t.Fatalf("Findings = %d, want 1: the mixed-case name must reach the "+
-			"lowercase advisory; got %+v", len(res.Findings), res.Findings)
+		t.Fatalf("Findings = %d, want 1: every PEP 503 spelling names one package, "+
+			"and the filter must normalize BOTH sides; got %+v", len(res.Findings), res.Findings)
 	}
 }
 
