@@ -207,7 +207,7 @@ returns nothing.
 Assemble it instead — `chr(92) + "x00"`, `chr(92) + "u212a"` — and verify by scanning the
 written file for the raw byte, not by trusting the tool's exit code.
 
-A literal `\x00` or `K` in a heredoc, an editor buffer, or a tool argument loses a
+A literal `\x00`, or a KELVIN SIGN typed as itself, in a heredoc, an editor buffer, or a tool argument loses a
 backslash somewhere in transit and becomes **the byte it was meant to denote**. This has
 happened three times on this branch: a KELVIN SIGN flattened to ASCII `K` (turning a test
 that guarded Unicode case folding into one asserting a valid version was invalid), a raw NUL
