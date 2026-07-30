@@ -137,6 +137,30 @@ func TestParsePURL_Invalid(t *testing.T) {
 	}
 }
 
+func TestNormalizeName(t *testing.T) {
+	// syft emits installed metadata verbatim, so mixed-case PyPI names reach us
+	// while OSV publishes only PEP 503 forms. Every one of the 1,586 distinct
+	// PyPI names in the live dump is normalized, so without this the lookup key
+	// never matches and the package is reported clean with no error at all.
+	cases := []struct{ eco, in, want string }{
+		{"PyPI", "Jinja2", "jinja2"},
+		{"PyPI", "PyYAML", "pyyaml"},
+		{"PyPI", "zope.interface", "zope-interface"},
+		{"PyPI", "backports_abc", "backports-abc"},
+		{"PyPI", "a.-_b", "a-b"},
+		{"PyPI", "django", "django"},
+		// Go and npm are case-sensitive in their registries and OSV keeps them.
+		{"Go", "github.com/Masterminds/semver/v3", "github.com/Masterminds/semver/v3"},
+		{"npm", "@jupyterlab/help-extension", "@jupyterlab/help-extension"},
+		{"npm", "JSONStream", "JSONStream"},
+	}
+	for _, tc := range cases {
+		if got := NormalizeName(tc.eco, tc.in); got != tc.want {
+			t.Errorf("NormalizeName(%q, %q) = %q, want %q", tc.eco, tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestEcosystemForPURLType(t *testing.T) {
 	cases := map[string]string{"golang": "Go", "npm": "npm", "pypi": "PyPI"}
 	for typ, want := range cases {
@@ -367,6 +391,43 @@ func EcosystemForPURLType(typ string) (string, bool) {
 	e, ok := purlTypeToEcosystem[strings.ToLower(typ)]
 	return e, ok
 }
+
+// NormalizeName renders a package name in the form its ecosystem's advisory
+// database is keyed on. It is the single definition of that mapping: the store
+// applies it when indexing and when looking up, and the matcher applies it when
+// filtering affected entries. If any of those three stopped agreeing, the
+// mismatch would surface as a lookup that returns nothing — no error, no skip,
+// just a package silently reported as clean.
+//
+// PyPI is the case that matters. PEP 503 lowercases and folds runs of "-", "_"
+// and "." into a single "-", and OSV publishes only normalized names: all 1,586
+// distinct PyPI names in the live dump are already in that form. syft is not —
+// it emits pkg:pypi/Jinja2 and pkg:pypi/PyYAML verbatim from the installed
+// metadata, so without this every mixed-case PyPI package missed every advisory
+// it had.
+//
+// Go and npm names are case-sensitive in their own registries and OSV preserves
+// them, so they are returned unchanged.
+func NormalizeName(ecosystem, name string) string {
+	if ecosystem != "PyPI" {
+		return name
+	}
+	var b strings.Builder
+	b.Grow(len(name))
+	var lastSep bool
+	for _, r := range strings.ToLower(name) {
+		if r == '-' || r == '_' || r == '.' {
+			if !lastSep {
+				b.WriteByte('-')
+				lastSep = true
+			}
+			continue
+		}
+		lastSep = false
+		b.WriteRune(r)
+	}
+	return b.String()
+}
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -579,6 +640,27 @@ func TestForEcosystem(t *testing.T) {
 	}
 	if _, ok := For("Nonesuch"); ok {
 		t.Error("For(Nonesuch) = ok, want not ok")
+	}
+}
+
+// TestRegistryHasNoDistroComparer is a tripwire, not a behaviour test.
+//
+// Registering a distro comparer makes the matcher believe it can evaluate
+// distro packages, but distro advisories are keyed on source packages (D8) and
+// nothing in production populates Package.Source or the by-source index yet.
+// The comparer alone turns a safe, counted skip into a silent under-report, so
+// this fails the build until the rest of the D8 path lands with it.
+func TestRegistryHasNoDistroComparer(t *testing.T) {
+	want := map[string]bool{"Go": true, "npm": true, "PyPI": true}
+	for eco := range registry {
+		if !want[eco] {
+			t.Errorf("comparer registered for %q: see the D8 note in internal/matcher — "+
+				"LookupBySource, a Source-populating cataloger, and PutSourceIndex must land too",
+				eco)
+		}
+	}
+	if len(registry) != len(want) {
+		t.Errorf("registry has %d entries, want %d", len(registry), len(want))
 	}
 }
 ```
@@ -2289,6 +2371,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 
 	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/pkgmeta"
 )
 
 var (
@@ -2397,7 +2480,8 @@ func (b *Bolt) Put(a advisory.Advisory) error {
 			if aff.Ecosystem == "" || aff.Name == "" {
 				continue
 			}
-			if err := appendID(idx, aff.Ecosystem+keySep+aff.Name, a.ID); err != nil {
+			key := aff.Ecosystem + keySep + pkgmeta.NormalizeName(aff.Ecosystem, aff.Name)
+			if err := appendID(idx, key, a.ID); err != nil {
 				return err
 			}
 		}
@@ -2454,11 +2538,11 @@ func (b *Bolt) setSchemaForTest(v int) error {
 }
 
 func (b *Bolt) Lookup(ecosystem, name string) ([]advisory.Advisory, error) {
-	return b.resolve(bucketAdvisories, ecosystem+keySep+name)
+	return b.resolve(bucketAdvisories, ecosystem+keySep+pkgmeta.NormalizeName(ecosystem, name))
 }
 
 func (b *Bolt) LookupBySource(ecosystem, sourceName string) ([]advisory.Advisory, error) {
-	return b.resolve(bucketBySource, ecosystem+keySep+sourceName)
+	return b.resolve(bucketBySource, ecosystem+keySep+pkgmeta.NormalizeName(ecosystem, sourceName))
 }
 
 func (b *Bolt) resolve(index []byte, key string) ([]advisory.Advisory, error) {
@@ -2737,6 +2821,39 @@ func TestConvert_KeepsNonCanonicalEndpointsVerbatim(t *testing.T) {
 	}
 }
 
+func TestConvert_KeepsForeignEcosystemEntries(t *testing.T) {
+	// Fetch emits one advisory per ecosystem it covers and Put overwrites by ID,
+	// so stripping foreign entries here left the last pass's record holding only
+	// its own ecosystem while the earlier ecosystem's index still pointed at it.
+	// The matcher then discarded every entry: no hit, no skip, no error. Measured
+	// on the live Go dump, 15 of 8,497 records were clobbered this way.
+	const rec = `{
+	  "id": "GHSA-mixed",
+	  "affected": [
+	    {"package": {"name": "github.com/protocolbuffers/protobuf", "ecosystem": "Go"},
+	     "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "1.0.0"}]}]},
+	    {"package": {"name": "protobuf", "ecosystem": "PyPI"},
+	     "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "3.18.3"}]}]}
+	  ]
+	}`
+	for _, want := range []string{"Go", "PyPI"} {
+		got, ok, err := Convert([]byte(rec), want)
+		if err != nil || !ok {
+			t.Fatalf("Convert(_, %q): ok=%v err=%v", want, ok, err)
+		}
+		if len(got.Affected) != 2 {
+			t.Errorf("Convert(_, %q) kept %d affected entries, want both: a later pass "+
+				"would otherwise overwrite the record and orphan the other index",
+				want, len(got.Affected))
+		}
+	}
+
+	// A record naming neither ingested ecosystem is still dropped.
+	if _, ok, err := Convert([]byte(rec), "crates.io"); err != nil || ok {
+		t.Errorf("Convert(_, crates.io) = ok %v err %v, want dropped", ok, err)
+	}
+}
+
 func TestConvert_DropsGitOnlyAffected(t *testing.T) {
 	// An in-ecosystem entry whose only ranges are GIT, with no enumerated
 	// versions, has nothing a version comparer could act on. Dropping it is
@@ -2937,11 +3054,24 @@ func Convert(data []byte, wantEcosystem string) (advisory.Advisory, bool, error)
 		out.Severity = append(out.Severity, advisory.Severity{Type: sev.Type, Score: sev.Score})
 	}
 
+	var matchesWanted bool
 	for _, ra := range r.Affected {
-		// One advisory can carry entries for several ecosystems. Keeping a
-		// foreign entry would feed its version strings to the wrong comparer.
-		if ra.Package.Ecosystem != wantEcosystem || ra.Package.Name == "" {
+		// Every entry is kept, including other ecosystems'. Stripping them made
+		// the record lossy in a way that destroyed data: Fetch emits the same
+		// advisory once per ecosystem, Put overwrites by ID, and the last pass
+		// left a record holding only its own ecosystem's entries while the
+		// earlier ecosystem's index still pointed at it. The matcher then
+		// discarded every entry and reported nothing — no error, no skip.
+		// Measured on the live Go dump: 15 of 8,497 records clobbered, 3 with
+		// no GO- twin to rescue them.
+		//
+		// Selecting the right entries is the matcher's job, and it already
+		// filters on ecosystem and name. This also restores D13.
+		if ra.Package.Name == "" {
 			continue
+		}
+		if ra.Package.Ecosystem == wantEcosystem {
+			matchesWanted = true
 		}
 		aff := advisory.Affected{
 			Ecosystem: ra.Package.Ecosystem,
@@ -2973,7 +3103,9 @@ func Convert(data []byte, wantEcosystem string) (advisory.Advisory, bool, error)
 		out.Affected = append(out.Affected, aff)
 	}
 
-	if len(out.Affected) == 0 {
+	// The record is dropped only when it says nothing about the ecosystem being
+	// ingested. It is stored whole when it does.
+	if len(out.Affected) == 0 || !matchesWanted {
 		return advisory.Advisory{}, false, nil
 	}
 	return out, true, nil
@@ -4461,12 +4593,18 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 	var res Result
 
 	for _, p := range t.Packages {
-		// NOTE for whoever adds a distro comparer to version.registry: distro
+		// NOTE for whoever adds a distro comparer to version.registry. Distro
 		// advisories are keyed on SOURCE packages while installed packages are
-		// binary packages (D8), so this loop must also consult
-		// store.LookupBySource with p.Source. Until then a distro package exits
-		// here as Skipped, which is safe. Registering the comparer without
-		// adding that lookup flips it from safe to silently under-reporting.
+		// binary packages (D8), and THREE things must land together or the
+		// result is a silent under-report rather than a safe skip:
+		//   1. this loop must consult store.LookupBySource with p.Source;
+		//   2. a cataloger must populate p.Source (apk's o:, dpkg's Source:);
+		//   3. ingestion must call store.PutSourceIndex — nothing in production
+		//      writes the by-source bucket today, so even a correct lookup
+		//      would read an empty index.
+		// Until all three exist a distro package exits here as Skipped, which
+		// is safe. TestRegistryHasNoDistroComparer fails the build if the
+		// comparer is registered on its own.
 		cmp, ok := version.For(p.Ecosystem)
 		if !ok {
 			res.Skipped = append(res.Skipped, Skipped{
@@ -4476,6 +4614,7 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 			continue
 		}
 
+		wantName := pkgmeta.NormalizeName(p.Ecosystem, p.Name)
 		candidates, err := m.store.Lookup(p.Ecosystem, p.Name)
 		if err != nil {
 			// A store error is not a clean result. Fail the whole scan rather
@@ -4512,7 +4651,8 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 				// This mirrors the store's key equality exactly. If either side
 				// ever starts normalizing names, the two must change together
 				// or this filter will silently discard real advisories.
-				if aff.Ecosystem != p.Ecosystem || aff.Name != p.Name {
+				if aff.Ecosystem != p.Ecosystem ||
+					pkgmeta.NormalizeName(aff.Ecosystem, aff.Name) != wantName {
 					continue
 				}
 				hit, ev, err := version.AffectsVersion(cmp, p.Version, aff)
@@ -4551,15 +4691,20 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 	return res, nil
 }
 
-// identifiers returns every ID an advisory is known by: its own, plus the
-// aliases and upstream links OSV records for it. Both fields are read because
-// OSV 1.7 puts the CVE link in upstream while other records use aliases (D3),
-// and a record can carry one without the other.
+// identifiers returns the IDs that denote the same vulnerability as a: its own
+// and its aliases.
+//
+// Upstream is deliberately excluded. OSV defines it as "derived from", not as
+// identity, so treating it as one would suppress a genuinely distinct advisory
+// — a false negative, where an extra alias line is only noise. It is still read
+// for the KISA join (D3), which is a different question: which records describe
+// the same CVE, not which are the same finding. Measured on the live Go dump,
+// upstream is empty on all 8,510 records while aliases already carry the CVE,
+// GO- and BIT- identifiers, so nothing is lost by leaving it out.
 func identifiers(a advisory.Advisory) []string {
-	ids := make([]string, 0, 1+len(a.Aliases)+len(a.Upstream))
+	ids := make([]string, 0, 1+len(a.Aliases))
 	ids = append(ids, a.ID)
 	ids = append(ids, a.Aliases...)
-	ids = append(ids, a.Upstream...)
 	return ids
 }
 
@@ -4880,13 +5025,34 @@ package report
 import (
 	"fmt"
 	"io"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"github.com/kun9497/assay/internal/matcher"
 )
 
-func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) error {
+// Summary is what the report concluded. It is returned rather than kept private
+// because the renderer is the only place that knows how much of the scan
+// actually ran, and the exit code is the part CI reads — a verdict printed in
+// prose that the process contradicts with a 0 is not a verdict.
+type Summary struct {
+	Components       int
+	Evaluated        int
+	NotEvaluated     int
+	IncompleteChecks int
+	Findings         int
+}
+
+// Trustworthy reports whether the run produced a result worth acting on. A scan
+// that evaluated nothing carries no information about the target, and D11
+// reserves exit 2 for exactly that — a result that cannot be trusted, as
+// distinct from a clean one. An empty document is vacuously fine.
+func (s Summary) Trustworthy() bool {
+	return s.Components == 0 || s.Evaluated > 0
+}
+
+func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error) {
 	// A package counts as evaluated only if it was cataloged AND the matcher
 	// could judge it. A whole-package matcher skip (empty AdvisoryID) was
 	// cataloged but never checked, so counting it as scanned would inflate the
@@ -4910,17 +5076,27 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) error {
 	switch {
 	case len(res.Findings) > 0:
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "PACKAGE\tVERSION\tECOSYSTEM\tADVISORY\tFIXED IN")
+		fmt.Fprintln(tw, "PACKAGE\tVERSION\tECOSYSTEM\tADVISORY\tALIASES\tFIXED IN")
 		for _, f := range res.Findings {
 			fixed := f.Evidence.Fixed
 			if fixed == "" {
 				fixed = "-"
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
-				f.Package.Name, f.Package.Version, f.Package.Ecosystem, f.Advisory.ID, fixed)
+			// Aliases are printed because dedup keeps only one record per
+			// vulnerability, and the one that wins is whichever the index
+			// returned first. Without this, a CVE that assay matched correctly
+			// is absent from the output whenever the GHSA record won, and
+			// `assay scan … | grep CVE-…` finds nothing.
+			aliases := strings.Join(f.Advisory.Aliases, ",")
+			if aliases == "" {
+				aliases = "-"
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+				f.Package.Name, f.Package.Version, f.Package.Ecosystem,
+				f.Advisory.ID, aliases, fixed)
 		}
 		if err := tw.Flush(); err != nil {
-			return err
+			return Summary{}, err
 		}
 
 	case evaluated == 0:
@@ -4973,7 +5149,13 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) error {
 			fmt.Fprintf(w, "  %s %s: %s\n", s.Package.Name, s.Package.Version, s.Reason)
 		}
 	}
-	return nil
+	return Summary{
+		Components:       cat.Components,
+		Evaluated:        evaluated,
+		NotEvaluated:     notEvaluated,
+		IncompleteChecks: incompleteChecks,
+		Findings:         len(res.Findings),
+	}, nil
 }
 ```
 
@@ -5029,8 +5211,17 @@ func Run(dbPath, target string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "error: match: %v\n", err)
 		return 2
 	}
-	if err := report.Table(stdout, res, cat); err != nil {
+	sum, err := report.Table(stdout, res, cat)
+	if err != nil {
 		fmt.Fprintf(stderr, "error: write report: %v\n", err)
+		return 2
+	}
+	// The report already said so in prose; exiting 0 anyway would let CI read a
+	// scan that evaluated nothing as a pass (D11).
+	if !sum.Trustworthy() {
+		fmt.Fprintf(stderr,
+			"error: none of the %d component(s) could be evaluated; this result cannot be trusted\n",
+			sum.Components)
 		return 2
 	}
 	return 0
