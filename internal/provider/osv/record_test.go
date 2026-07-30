@@ -176,6 +176,47 @@ func TestConvert_KeepsNonCanonicalEndpointsVerbatim(t *testing.T) {
 	}
 }
 
+func TestConvert_DropsGitOnlyAffected(t *testing.T) {
+	// An in-ecosystem entry whose only ranges are GIT, with no enumerated
+	// versions, has nothing a version comparer could act on. Dropping it is
+	// correct — a commit SHA cannot be matched against a package version —
+	// but the path is distinct from the foreign-ecosystem drop and needs its
+	// own coverage. Measured across live data this is rare (2 of 12,524 PyPI
+	// records, 0 of 8,492 Go), and both are OSS-Fuzz records that are
+	// commit-scoped by nature.
+	const rec = `{
+	  "id": "OSV-2021-449",
+	  "affected": [{"package": {"name": "django", "ecosystem": "PyPI"},
+	    "ranges": [{"type": "GIT", "repo": "https://github.com/django/django",
+	                "events": [{"introduced": "9305c0e12d43c4df999c3301a1f0c742264a657e"}]}]}]
+	}`
+	_, ok, err := Convert([]byte(rec), "PyPI")
+	if err != nil {
+		t.Fatalf("Convert: %v", err)
+	}
+	if ok {
+		t.Error("a GIT-only entry left nothing to match on; the record must be dropped")
+	}
+}
+
+func TestConvert_AbsentSeverityStaysAbsent(t *testing.T) {
+	// Roughly half of all advisories carry no severity. It must arrive as an
+	// empty slice, never as a fabricated default, because slice 4 bands from
+	// these vectors and a default would band as a real rating.
+	const rec = `{
+	  "id": "GHSA-nosev",
+	  "affected": [{"package": {"name": "x", "ecosystem": "Go"},
+	                "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}]}]}]
+	}`
+	got, ok, err := Convert([]byte(rec), "Go")
+	if err != nil || !ok {
+		t.Fatalf("Convert: ok=%v err=%v", ok, err)
+	}
+	if len(got.Severity) != 0 {
+		t.Errorf("Severity = %+v, want empty", got.Severity)
+	}
+}
+
 func TestConvert_DropsRecordWithNoMatchingAffected(t *testing.T) {
 	const rec = `{
 	  "id": "GHSA-elsewhere",
