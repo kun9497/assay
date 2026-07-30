@@ -159,6 +159,11 @@ it reads as authoritative while being wrong. If you change a decision in the roa
 Keep identifiers, flags, and file paths in English on both sides (`Package.Source`,
 `--fail-on-unknown`, `/etc/os-release`). Translate the prose around them.
 
+**Implementation plans under `docs/superpowers/plans/` are exempt — English only.** They
+are working documents that change while being executed, so a translation would spend most
+of its life stale, and they are mostly Go code blocks, which are never translated anyway.
+Specs and user-facing documentation stay bilingual; plans do not.
+
 ## Delegating to subagents
 
 Run the main loop on the work that needs full context; delegate work that is bounded,
