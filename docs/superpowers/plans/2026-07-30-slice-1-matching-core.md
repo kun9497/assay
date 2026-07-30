@@ -4542,7 +4542,13 @@ func sortSkipped(ss []Skipped) {
 }
 
 // locationKey renders every location a package was found at into one
-// comparable string, so the comparators above are genuinely total orders.
+// comparable string, making the comparators above total orders for every input
+// a real producer can emit.
+//
+// The encoding joins fields with NUL and is injective only because neither a
+// filesystem path nor a hex layer digest can contain one. A NUL inside either
+// field would make {"x", "y\x00z"} and {"x\x00y", "z"} encode identically —
+// constructible by hand, unreachable from any cataloger.
 //
 // Reading only Locations[0] would leave two installs that agree on their first
 // location but differ later comparing equal, and their order would then depend
