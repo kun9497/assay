@@ -4772,6 +4772,28 @@ func TestTable_CountsAddUp(t *testing.T) {
 	}
 }
 
+func TestTable_AdvisoryScopedSkipIsAlwaysShown(t *testing.T) {
+	// Everything evaluated, nothing found, but one advisory could not be judged.
+	// Gating the detail block on the unevaluated count alone hid this entirely,
+	// reintroducing one advisory at a time the silence the block exists to break.
+	res := matcher.Result{Skipped: []matcher.Skipped{{
+		Package:    pkgmeta.Package{Name: "x", Version: "1.0.0", Ecosystem: "Go"},
+		AdvisoryID: "GHSA-unevaluable",
+		Reason:     "comparing 1.0.0: invalid version",
+	}}}
+	var buf bytes.Buffer
+	if err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "GHSA-unevaluable") {
+		t.Errorf("the advisory that could not be judged is missing from the report:\n%s", out)
+	}
+	if !strings.Contains(out, "NOT a clean result") {
+		t.Errorf("an incomplete check must not read as a clean scan:\n%s", out)
+	}
+}
+
 func TestTable_NoFindings(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Table(&buf, matcher.Result{}, cyclonedx.Stats{Components: 3, Cataloged: 3}); err != nil {
@@ -4869,11 +4891,19 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) error {
 	// could judge it. A whole-package matcher skip (empty AdvisoryID) was
 	// cataloged but never checked, so counting it as scanned would inflate the
 	// number a reader trusts most.
-	var unevaluated int
+	// Two different kinds of "could not tell" live in res.Skipped. A
+	// whole-package skip means the package was never checked at all; an
+	// advisory-scoped one means the package was checked but one advisory could
+	// not be judged. They must be counted apart, because only the first one
+	// changes how many packages were evaluated — and only the second one used
+	// to disappear from the report entirely.
+	var unevaluated, incompleteChecks int
 	for _, s := range res.Skipped {
 		if s.AdvisoryID == "" {
 			unevaluated++
+			continue
 		}
+		incompleteChecks++
 	}
 	evaluated := cat.Cataloged - unevaluated
 
@@ -4900,6 +4930,13 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) error {
 		// line, or whose output is truncated, must not read this as safety.
 		fmt.Fprintln(w, "No packages could be evaluated - this is NOT a clean result.")
 
+	case incompleteChecks > 0:
+		// Nothing found, but not every check ran. Saying "no known
+		// vulnerabilities" would claim a completeness the run did not have.
+		fmt.Fprintf(w,
+			"No vulnerabilities found in %d package(s), but %d check(s) could not be completed - this is NOT a clean result.\n",
+			evaluated, incompleteChecks)
+
 	default:
 		fmt.Fprintf(w, "No known vulnerabilities found in %d package(s).\n", evaluated)
 	}
@@ -4911,7 +4948,11 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) error {
 	fmt.Fprintf(w, "\n%d component(s) seen, %d evaluated, %d finding(s), %d not evaluated\n",
 		cat.Components, evaluated, len(res.Findings), notEvaluated)
 
-	if notEvaluated > 0 {
+	// Gated on both counts. Keying only on notEvaluated hid every
+	// advisory-scoped skip whenever the rest of the document was fully
+	// evaluated — reintroducing, one advisory at a time, the silence this
+	// block exists to break.
+	if notEvaluated > 0 || incompleteChecks > 0 {
 		fmt.Fprintln(w, "\nNot evaluated:")
 		if cat.SkippedUnsupportedEcosystem > 0 {
 			fmt.Fprintf(w, "  %d package(s) in an unsupported ecosystem\n",
