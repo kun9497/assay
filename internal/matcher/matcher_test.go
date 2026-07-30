@@ -262,6 +262,46 @@ func TestMatch_AliasedAdvisoriesReportOnce(t *testing.T) {
 	}
 }
 
+func TestMatch_ForeignEcosystemEntryNeverReachesTheComparer(t *testing.T) {
+	// Records are now stored whole, so one advisory can carry entries for
+	// several ecosystems and a PyPI lookup can return a record holding npm
+	// ranges. Feeding an npm version string to the PEP 440 comparer would be a
+	// wrong answer, not an error. Convert used to strip these; the guard now
+	// lives here, so the test does too.
+	mixed := advisory.Advisory{
+		ID:   "GHSA-mixed",
+		Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{
+			{Ecosystem: "npm", Name: "django", Ranges: []advisory.Range{{
+				Type:   advisory.RangeSemver,
+				Events: []advisory.Event{{Introduced: "0"}, {Fixed: "v1.16.3"}},
+			}}},
+			{Ecosystem: "PyPI", Name: "django", Ranges: []advisory.Range{{
+				Type:   advisory.RangeEcosystem,
+				Events: []advisory.Event{{Introduced: "0"}, {Fixed: "3.2.1"}},
+			}}},
+		},
+	}
+	s := fakeStore{byKey: map[string][]advisory.Advisory{"PyPI\x00django": {mixed}}}
+
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("django", "3.2", "PyPI")},
+	})
+	if err != nil {
+		t.Fatalf("the npm range reached the PyPI comparer: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1 from the PyPI entry only; got %+v",
+			len(res.Findings), res.Findings)
+	}
+	if f := res.Findings[0].Evidence.Fixed; f != "3.2.1" {
+		t.Errorf("Evidence.Fixed = %q, want 3.2.1 — the npm entry decided this", f)
+	}
+	if len(res.Skipped) != 0 {
+		t.Errorf("Skipped = %+v, want none: a foreign entry is filtered, not skipped", res.Skipped)
+	}
+}
+
 func TestMatch_UnsupportedEcosystemIsSkipped(t *testing.T) {
 	res, err := New(fakeStore{}).Match(pkgmeta.Target{
 		Packages: []pkgmeta.Package{pkg("apache2", "2.4.54-r0", "Alpine:v3.19")},
