@@ -20,6 +20,9 @@ var (
 
 var allBuckets = [][]byte{bucketAdvisories, bucketBySource, bucketByID, bucketMeta}
 
+// keySep is NUL because no real ecosystem or package identifier can contain
+// one. A printable separator would collide: distro ecosystem keys already
+// carry a colon internally (Alpine:v3.19).
 const keySep = "\x00"
 
 type Bolt struct {
