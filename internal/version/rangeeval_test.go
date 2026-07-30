@@ -160,6 +160,16 @@ func TestInRange_BoundlessEventDoesNotBreakSorting(t *testing.T) {
 	}
 }
 
+func TestInRange_RangeWithNoBoundsErrors(t *testing.T) {
+	// Every event carries only a limit, so no window can open. Returning "not
+	// affected" would be indistinguishable from a real miss.
+	r := rng(advisory.RangeSemver, advisory.Event{Limit: "1.0.0"})
+	_, _, err := InRange(SemVer{}, "1.2.3", r)
+	if !errors.Is(err, ErrInvalid) {
+		t.Errorf("InRange over a boundless range err = %v, want ErrInvalid", err)
+	}
+}
+
 func TestInRange_MalformedBoundErrors(t *testing.T) {
 	// A bound that cannot be ordered must surface. Sorting on an unorderable
 	// bound would otherwise pick an arbitrary order and return a confident

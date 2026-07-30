@@ -67,6 +67,23 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 		return false, Evidence{}, nil
 	}
 
+	// A range whose events carry no bound at all cannot be evaluated. Walking
+	// it opens no window and returns "not affected" — indistinguishable from a
+	// real miss, so the caller has no signal that anything went wrong. Malformed
+	// input must surface.
+	var actionable bool
+	for _, e := range r.Events {
+		if eventVersion(e) != "" {
+			actionable = true
+			break
+		}
+	}
+	if !actionable {
+		return false, Evidence{}, fmt.Errorf(
+			"range of type %q carries no introduced, fixed, or last_affected event: %w",
+			r.Type, ErrInvalid)
+	}
+
 	// OSV only *recommends* that events arrive sorted, and its reference
 	// algorithm sorts before walking. An advisory that lists a later window
 	// first is well-formed, and walking it in file order returns "not
