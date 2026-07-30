@@ -1418,8 +1418,8 @@ func rng(t advisory.RangeType, events ...advisory.Event) advisory.Range {
 	return advisory.Range{Type: t, Events: events}
 }
 
-func intro(v string) advisory.Event  { return advisory.Event{Introduced: v} }
-func fixed(v string) advisory.Event  { return advisory.Event{Fixed: v} }
+func intro(v string) advisory.Event   { return advisory.Event{Introduced: v} }
+func fixed(v string) advisory.Event   { return advisory.Event{Fixed: v} }
 func lastAff(v string) advisory.Event { return advisory.Event{LastAffected: v} }
 
 func TestInRange_Semver(t *testing.T) {
