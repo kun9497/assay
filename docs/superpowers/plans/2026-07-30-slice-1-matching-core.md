@@ -1080,10 +1080,13 @@ func TestPEP440Invalid(t *testing.T) {
 		"1.0+", "1.0+.", "1.0+abc.", "1.0.0+abc-", "1.0+abc..1",
 		"1.0.0++abc", "1.0+abc+def", "1.0.0+local!", "1.0.0+lo cal",
 		// Non-ASCII: Go's (?i) would fold these into ASCII if not rejected first.
-		// K is KELVIN SIGN, which Go's Unicode case folding maps to "k" —
-		// written as an escape because a literal one gets flattened to ASCII "K"
-		// by editors and tooling, and ASCII "1.0+k" is a perfectly valid local
-		// version. The escape is the test; a literal character is a liability.
+		// The third entry is U+212A KELVIN SIGN, which Go's Unicode case folding
+		// maps onto lowercase ASCII "k" — so an unguarded (?i) regex would accept
+		// it as a valid local version. It is written as an escape, and named here
+		// rather than shown, because a literal character on either line gets
+		// flattened to plain ASCII by editors and tooling. When that happens the
+		// row silently starts asserting that a perfectly valid version is invalid,
+		// and the comment explaining why stops being true. The escape cannot flatten.
 		"１.０", "٣.٤", "1.0+\u212a",
 		// Legacy PyPI shapes that cannot be ordered at all
 		"1.0dev-r1234", "1.0.0-SNAPSHOT", "linux-2.6",
