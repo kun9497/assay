@@ -20,6 +20,8 @@ func TestRun_ExitCodes(t *testing.T) {
 		// Until the pipeline exists, scan must not report success — a scanner
 		// that silently returns 0 is worse than one that fails loudly.
 		{"scan not implemented", []string{"scan", "alpine:3.19"}, exitError},
+		{"db without subcommand", []string{"db"}, exitError},
+		{"db unknown subcommand", []string{"db", "bogus"}, exitError},
 	}
 
 	for _, tc := range cases {

@@ -4,9 +4,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/kun9497/assay/internal/dbcmd"
+	"github.com/kun9497/assay/internal/provider"
+	"github.com/kun9497/assay/internal/provider/osv"
+	"github.com/kun9497/assay/internal/store"
 )
 
 // Build-time metadata, injected via -ldflags. See the Makefile.
@@ -31,6 +37,8 @@ Usage:
 
 Commands:
   scan <target>   Scan an SBOM file, directory, or container image
+  db update       Build or refresh the local vulnerability database
+  db status       Show what is in the database and how current it is
   version         Print version information
   help            Show this help
 `
@@ -63,6 +71,27 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return exitError
 		}
 		return scan(args[1], stdout, stderr)
+
+	case "db":
+		if len(args) < 2 {
+			fmt.Fprintln(stderr, "error: db requires a subcommand (update, status)")
+			return exitError
+		}
+		path, err := store.DefaultPath()
+		if err != nil {
+			fmt.Fprintf(stderr, "error: locate database: %v\n", err)
+			return exitError
+		}
+		switch args[1] {
+		case "update":
+			return dbcmd.Update(context.Background(), path,
+				[]provider.Provider{osv.New(osv.Ecosystems, "")}, stdout, stderr)
+		case "status":
+			return dbcmd.Status(path, stdout, stderr)
+		default:
+			fmt.Fprintf(stderr, "error: unknown db subcommand %q\n", args[1])
+			return exitError
+		}
 
 	default:
 		fmt.Fprintf(stderr, "error: unknown command %q\n", args[0])
