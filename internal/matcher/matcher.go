@@ -52,12 +52,18 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 	var res Result
 
 	for _, p := range t.Packages {
-		// NOTE for whoever adds a distro comparer to version.registry: distro
+		// NOTE for whoever adds a distro comparer to version.registry. Distro
 		// advisories are keyed on SOURCE packages while installed packages are
-		// binary packages (D8), so this loop must also consult
-		// store.LookupBySource with p.Source. Until then a distro package exits
-		// here as Skipped, which is safe. Registering the comparer without
-		// adding that lookup flips it from safe to silently under-reporting.
+		// binary packages (D8), and THREE things must land together or the
+		// result is a silent under-report rather than a safe skip:
+		//   1. this loop must consult store.LookupBySource with p.Source;
+		//   2. a cataloger must populate p.Source (apk's o:, dpkg's Source:);
+		//   3. ingestion must call store.PutSourceIndex — nothing in production
+		//      writes the by-source bucket today, so even a correct lookup
+		//      would read an empty index.
+		// Until all three exist a distro package exits here as Skipped, which
+		// is safe. TestRegistryHasNoDistroComparer fails the build if the
+		// comparer is registered on its own.
 		cmp, ok := version.For(p.Ecosystem)
 		if !ok {
 			res.Skipped = append(res.Skipped, Skipped{
@@ -67,6 +73,7 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 			continue
 		}
 
+		wantName := pkgmeta.NormalizeName(p.Ecosystem, p.Name)
 		candidates, err := m.store.Lookup(p.Ecosystem, p.Name)
 		if err != nil {
 			// A store error is not a clean result. Fail the whole scan rather
@@ -103,7 +110,8 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 				// This mirrors the store's key equality exactly. If either side
 				// ever starts normalizing names, the two must change together
 				// or this filter will silently discard real advisories.
-				if aff.Ecosystem != p.Ecosystem || aff.Name != p.Name {
+				if aff.Ecosystem != p.Ecosystem ||
+					pkgmeta.NormalizeName(aff.Ecosystem, aff.Name) != wantName {
 					continue
 				}
 				hit, ev, err := version.AffectsVersion(cmp, p.Version, aff)
@@ -142,15 +150,20 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 	return res, nil
 }
 
-// identifiers returns every ID an advisory is known by: its own, plus the
-// aliases and upstream links OSV records for it. Both fields are read because
-// OSV 1.7 puts the CVE link in upstream while other records use aliases (D3),
-// and a record can carry one without the other.
+// identifiers returns the IDs that denote the same vulnerability as a: its own
+// and its aliases.
+//
+// Upstream is deliberately excluded. OSV defines it as "derived from", not as
+// identity, so treating it as one would suppress a genuinely distinct advisory
+// — a false negative, where an extra alias line is only noise. It is still read
+// for the KISA join (D3), which is a different question: which records describe
+// the same CVE, not which are the same finding. Measured on the live Go dump,
+// upstream is empty on all 8,510 records while aliases already carry the CVE,
+// GO- and BIT- identifiers, so nothing is lost by leaving it out.
 func identifiers(a advisory.Advisory) []string {
-	ids := make([]string, 0, 1+len(a.Aliases)+len(a.Upstream))
+	ids := make([]string, 0, 1+len(a.Aliases))
 	ids = append(ids, a.ID)
 	ids = append(ids, a.Aliases...)
-	ids = append(ids, a.Upstream...)
 	return ids
 }
 

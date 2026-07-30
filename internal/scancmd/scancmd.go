@@ -47,8 +47,17 @@ func Run(dbPath, target string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "error: match: %v\n", err)
 		return 2
 	}
-	if err := report.Table(stdout, res, cat); err != nil {
+	sum, err := report.Table(stdout, res, cat)
+	if err != nil {
 		fmt.Fprintf(stderr, "error: write report: %v\n", err)
+		return 2
+	}
+	// The report already said so in prose; exiting 0 anyway would let CI read a
+	// scan that evaluated nothing as a pass (D11).
+	if !sum.Trustworthy() {
+		fmt.Fprintf(stderr,
+			"error: none of the %d component(s) could be evaluated; this result cannot be trusted\n",
+			sum.Components)
 		return 2
 	}
 	return 0

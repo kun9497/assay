@@ -5,13 +5,34 @@ package report
 import (
 	"fmt"
 	"io"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"github.com/kun9497/assay/internal/matcher"
 )
 
-func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) error {
+// Summary is what the report concluded. It is returned rather than kept private
+// because the renderer is the only place that knows how much of the scan
+// actually ran, and the exit code is the part CI reads — a verdict printed in
+// prose that the process contradicts with a 0 is not a verdict.
+type Summary struct {
+	Components       int
+	Evaluated        int
+	NotEvaluated     int
+	IncompleteChecks int
+	Findings         int
+}
+
+// Trustworthy reports whether the run produced a result worth acting on. A scan
+// that evaluated nothing carries no information about the target, and D11
+// reserves exit 2 for exactly that — a result that cannot be trusted, as
+// distinct from a clean one. An empty document is vacuously fine.
+func (s Summary) Trustworthy() bool {
+	return s.Components == 0 || s.Evaluated > 0
+}
+
+func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error) {
 	// A package counts as evaluated only if it was cataloged AND the matcher
 	// could judge it. A whole-package matcher skip (empty AdvisoryID) was
 	// cataloged but never checked, so counting it as scanned would inflate the
@@ -35,17 +56,27 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) error {
 	switch {
 	case len(res.Findings) > 0:
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "PACKAGE\tVERSION\tECOSYSTEM\tADVISORY\tFIXED IN")
+		fmt.Fprintln(tw, "PACKAGE\tVERSION\tECOSYSTEM\tADVISORY\tALIASES\tFIXED IN")
 		for _, f := range res.Findings {
 			fixed := f.Evidence.Fixed
 			if fixed == "" {
 				fixed = "-"
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
-				f.Package.Name, f.Package.Version, f.Package.Ecosystem, f.Advisory.ID, fixed)
+			// Aliases are printed because dedup keeps only one record per
+			// vulnerability, and the one that wins is whichever the index
+			// returned first. Without this, a CVE that assay matched correctly
+			// is absent from the output whenever the GHSA record won, and
+			// `assay scan … | grep CVE-…` finds nothing.
+			aliases := strings.Join(f.Advisory.Aliases, ",")
+			if aliases == "" {
+				aliases = "-"
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+				f.Package.Name, f.Package.Version, f.Package.Ecosystem,
+				f.Advisory.ID, aliases, fixed)
 		}
 		if err := tw.Flush(); err != nil {
-			return err
+			return Summary{}, err
 		}
 
 	case evaluated == 0:
@@ -98,5 +129,11 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) error {
 			fmt.Fprintf(w, "  %s %s: %s\n", s.Package.Name, s.Package.Version, s.Reason)
 		}
 	}
-	return nil
+	return Summary{
+		Components:       cat.Components,
+		Evaluated:        evaluated,
+		NotEvaluated:     notEvaluated,
+		IncompleteChecks: incompleteChecks,
+		Findings:         len(res.Findings),
+	}, nil
 }

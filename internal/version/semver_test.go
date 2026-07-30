@@ -180,3 +180,24 @@ func TestForEcosystem(t *testing.T) {
 		t.Error("For(Nonesuch) = ok, want not ok")
 	}
 }
+
+// TestRegistryHasNoDistroComparer is a tripwire, not a behaviour test.
+//
+// Registering a distro comparer makes the matcher believe it can evaluate
+// distro packages, but distro advisories are keyed on source packages (D8) and
+// nothing in production populates Package.Source or the by-source index yet.
+// The comparer alone turns a safe, counted skip into a silent under-report, so
+// this fails the build until the rest of the D8 path lands with it.
+func TestRegistryHasNoDistroComparer(t *testing.T) {
+	want := map[string]bool{"Go": true, "npm": true, "PyPI": true}
+	for eco := range registry {
+		if !want[eco] {
+			t.Errorf("comparer registered for %q: see the D8 note in internal/matcher — "+
+				"LookupBySource, a Source-populating cataloger, and PutSourceIndex must land too",
+				eco)
+		}
+	}
+	if len(registry) != len(want) {
+		t.Errorf("registry has %d entries, want %d", len(registry), len(want))
+	}
+}

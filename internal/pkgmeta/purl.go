@@ -89,3 +89,40 @@ func EcosystemForPURLType(typ string) (string, bool) {
 	e, ok := purlTypeToEcosystem[strings.ToLower(typ)]
 	return e, ok
 }
+
+// NormalizeName renders a package name in the form its ecosystem's advisory
+// database is keyed on. It is the single definition of that mapping: the store
+// applies it when indexing and when looking up, and the matcher applies it when
+// filtering affected entries. If any of those three stopped agreeing, the
+// mismatch would surface as a lookup that returns nothing — no error, no skip,
+// just a package silently reported as clean.
+//
+// PyPI is the case that matters. PEP 503 lowercases and folds runs of "-", "_"
+// and "." into a single "-", and OSV publishes only normalized names: all 1,586
+// distinct PyPI names in the live dump are already in that form. syft is not —
+// it emits pkg:pypi/Jinja2 and pkg:pypi/PyYAML verbatim from the installed
+// metadata, so without this every mixed-case PyPI package missed every advisory
+// it had.
+//
+// Go and npm names are case-sensitive in their own registries and OSV preserves
+// them, so they are returned unchanged.
+func NormalizeName(ecosystem, name string) string {
+	if ecosystem != "PyPI" {
+		return name
+	}
+	var b strings.Builder
+	b.Grow(len(name))
+	var lastSep bool
+	for _, r := range strings.ToLower(name) {
+		if r == '-' || r == '_' || r == '.' {
+			if !lastSep {
+				b.WriteByte('-')
+				lastSep = true
+			}
+			continue
+		}
+		lastSep = false
+		b.WriteRune(r)
+	}
+	return b.String()
+}

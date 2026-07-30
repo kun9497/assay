@@ -111,27 +111,36 @@ func TestConvert_DropsMalicious(t *testing.T) {
 	}
 }
 
-func TestConvert_FiltersForeignEcosystems(t *testing.T) {
-	// Live OSV data mixes ecosystems inside one advisory. Without this filter
-	// the npm SEMVER value reaches the PEP 440 comparer.
+func TestConvert_KeepsForeignEcosystemEntries(t *testing.T) {
+	// Fetch emits one advisory per ecosystem it covers and Put overwrites by ID,
+	// so stripping foreign entries here left the last pass's record holding only
+	// its own ecosystem while the earlier ecosystem's index still pointed at it.
+	// The matcher then discarded every entry: no hit, no skip, no error. Measured
+	// on the live Go dump, 15 of 8,497 records were clobbered this way.
 	const rec = `{
 	  "id": "GHSA-mixed",
 	  "affected": [
-	    {"package": {"name": "django", "ecosystem": "PyPI"},
-	     "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "3.2.1"}]}]},
-	    {"package": {"name": "some-js-lib", "ecosystem": "npm"},
-	     "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "v1.16.3"}]}]}
+	    {"package": {"name": "github.com/protocolbuffers/protobuf", "ecosystem": "Go"},
+	     "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "1.0.0"}]}]},
+	    {"package": {"name": "protobuf", "ecosystem": "PyPI"},
+	     "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "3.18.3"}]}]}
 	  ]
 	}`
-	got, ok, err := Convert([]byte(rec), "PyPI")
-	if err != nil || !ok {
-		t.Fatalf("Convert: ok=%v err=%v", ok, err)
+	for _, want := range []string{"Go", "PyPI"} {
+		got, ok, err := Convert([]byte(rec), want)
+		if err != nil || !ok {
+			t.Fatalf("Convert(_, %q): ok=%v err=%v", want, ok, err)
+		}
+		if len(got.Affected) != 2 {
+			t.Errorf("Convert(_, %q) kept %d affected entries, want both: a later pass "+
+				"would otherwise overwrite the record and orphan the other index",
+				want, len(got.Affected))
+		}
 	}
-	if len(got.Affected) != 1 {
-		t.Fatalf("Affected = %d entries, want 1 (npm entry must be dropped)", len(got.Affected))
-	}
-	if got.Affected[0].Ecosystem != "PyPI" || got.Affected[0].Name != "django" {
-		t.Errorf("Affected[0] = %+v, want the PyPI django entry", got.Affected[0])
+
+	// A record naming neither ingested ecosystem is still dropped.
+	if _, ok, err := Convert([]byte(rec), "crates.io"); err != nil || ok {
+		t.Errorf("Convert(_, crates.io) = ok %v err %v, want dropped", ok, err)
 	}
 }
 

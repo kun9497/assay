@@ -9,6 +9,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 
 	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/pkgmeta"
 )
 
 var (
@@ -117,7 +118,8 @@ func (b *Bolt) Put(a advisory.Advisory) error {
 			if aff.Ecosystem == "" || aff.Name == "" {
 				continue
 			}
-			if err := appendID(idx, aff.Ecosystem+keySep+aff.Name, a.ID); err != nil {
+			key := aff.Ecosystem + keySep + pkgmeta.NormalizeName(aff.Ecosystem, aff.Name)
+			if err := appendID(idx, key, a.ID); err != nil {
 				return err
 			}
 		}
@@ -174,11 +176,11 @@ func (b *Bolt) setSchemaForTest(v int) error {
 }
 
 func (b *Bolt) Lookup(ecosystem, name string) ([]advisory.Advisory, error) {
-	return b.resolve(bucketAdvisories, ecosystem+keySep+name)
+	return b.resolve(bucketAdvisories, ecosystem+keySep+pkgmeta.NormalizeName(ecosystem, name))
 }
 
 func (b *Bolt) LookupBySource(ecosystem, sourceName string) ([]advisory.Advisory, error) {
-	return b.resolve(bucketBySource, ecosystem+keySep+sourceName)
+	return b.resolve(bucketBySource, ecosystem+keySep+pkgmeta.NormalizeName(ecosystem, sourceName))
 }
 
 func (b *Bolt) resolve(index []byte, key string) ([]advisory.Advisory, error) {

@@ -99,11 +99,24 @@ func Convert(data []byte, wantEcosystem string) (advisory.Advisory, bool, error)
 		out.Severity = append(out.Severity, advisory.Severity{Type: sev.Type, Score: sev.Score})
 	}
 
+	var matchesWanted bool
 	for _, ra := range r.Affected {
-		// One advisory can carry entries for several ecosystems. Keeping a
-		// foreign entry would feed its version strings to the wrong comparer.
-		if ra.Package.Ecosystem != wantEcosystem || ra.Package.Name == "" {
+		// Every entry is kept, including other ecosystems'. Stripping them made
+		// the record lossy in a way that destroyed data: Fetch emits the same
+		// advisory once per ecosystem, Put overwrites by ID, and the last pass
+		// left a record holding only its own ecosystem's entries while the
+		// earlier ecosystem's index still pointed at it. The matcher then
+		// discarded every entry and reported nothing — no error, no skip.
+		// Measured on the live Go dump: 15 of 8,497 records clobbered, 3 with
+		// no GO- twin to rescue them.
+		//
+		// Selecting the right entries is the matcher's job, and it already
+		// filters on ecosystem and name. This also restores D13.
+		if ra.Package.Name == "" {
 			continue
+		}
+		if ra.Package.Ecosystem == wantEcosystem {
+			matchesWanted = true
 		}
 		aff := advisory.Affected{
 			Ecosystem: ra.Package.Ecosystem,
@@ -135,7 +148,9 @@ func Convert(data []byte, wantEcosystem string) (advisory.Advisory, bool, error)
 		out.Affected = append(out.Affected, aff)
 	}
 
-	if len(out.Affected) == 0 {
+	// The record is dropped only when it says nothing about the ecosystem being
+	// ingested. It is stored whole when it does.
+	if len(out.Affected) == 0 || !matchesWanted {
 		return advisory.Advisory{}, false, nil
 	}
 	return out, true, nil

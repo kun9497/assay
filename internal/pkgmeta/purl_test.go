@@ -55,6 +55,30 @@ func TestParsePURL_Invalid(t *testing.T) {
 	}
 }
 
+func TestNormalizeName(t *testing.T) {
+	// syft emits installed metadata verbatim, so mixed-case PyPI names reach us
+	// while OSV publishes only PEP 503 forms. Every one of the 1,586 distinct
+	// PyPI names in the live dump is normalized, so without this the lookup key
+	// never matches and the package is reported clean with no error at all.
+	cases := []struct{ eco, in, want string }{
+		{"PyPI", "Jinja2", "jinja2"},
+		{"PyPI", "PyYAML", "pyyaml"},
+		{"PyPI", "zope.interface", "zope-interface"},
+		{"PyPI", "backports_abc", "backports-abc"},
+		{"PyPI", "a.-_b", "a-b"},
+		{"PyPI", "django", "django"},
+		// Go and npm are case-sensitive in their registries and OSV keeps them.
+		{"Go", "github.com/Masterminds/semver/v3", "github.com/Masterminds/semver/v3"},
+		{"npm", "@jupyterlab/help-extension", "@jupyterlab/help-extension"},
+		{"npm", "JSONStream", "JSONStream"},
+	}
+	for _, tc := range cases {
+		if got := NormalizeName(tc.eco, tc.in); got != tc.want {
+			t.Errorf("NormalizeName(%q, %q) = %q, want %q", tc.eco, tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestEcosystemForPURLType(t *testing.T) {
 	cases := map[string]string{"golang": "Go", "npm": "npm", "pypi": "PyPI"}
 	for typ, want := range cases {

@@ -19,7 +19,7 @@ func TestTable_Findings(t *testing.T) {
 		Evidence: version.Evidence{Introduced: "0", Fixed: "1.5.0", Reason: "below the fix 1.5.0"},
 	}}}
 	var buf bytes.Buffer
-	if err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -37,7 +37,7 @@ func TestTable_SkippedCountsAreVisible(t *testing.T) {
 		Reason:  "no version comparer for ecosystem \"Alpine:v3.19\"",
 	}}}
 	var buf bytes.Buffer
-	if err := Table(&buf, res, cyclonedx.Stats{
+	if _, err := Table(&buf, res, cyclonedx.Stats{
 		Components: 42, Cataloged: 1, SkippedUnsupportedEcosystem: 40, SkippedNoPURL: 1,
 	}); err != nil {
 		t.Fatal(err)
@@ -56,7 +56,7 @@ func TestTable_NothingEvaluatedIsNotReportedAsClean(t *testing.T) {
 	// is the sentence a genuinely clean scan prints, and a reader who greps the
 	// first line cannot tell the two apart.
 	var buf bytes.Buffer
-	if err := Table(&buf, matcher.Result{}, cyclonedx.Stats{
+	if _, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{
 		Components: 42, Cataloged: 0, SkippedUnsupportedEcosystem: 42,
 	}); err != nil {
 		t.Fatal(err)
@@ -78,7 +78,7 @@ func TestTable_CountsAddUp(t *testing.T) {
 		Reason:  "no version comparer",
 	}}}
 	var buf bytes.Buffer
-	if err := Table(&buf, res, cyclonedx.Stats{Components: 3, Cataloged: 1, SkippedNoPURL: 2}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 3, Cataloged: 1, SkippedNoPURL: 2}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(buf.String(),
@@ -97,7 +97,7 @@ func TestTable_AdvisoryScopedSkipIsAlwaysShown(t *testing.T) {
 		Reason:     "comparing 1.0.0: invalid version",
 	}}}
 	var buf bytes.Buffer
-	if err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -111,7 +111,7 @@ func TestTable_AdvisoryScopedSkipIsAlwaysShown(t *testing.T) {
 
 func TestTable_NoFindings(t *testing.T) {
 	var buf bytes.Buffer
-	if err := Table(&buf, matcher.Result{}, cyclonedx.Stats{Components: 3, Cataloged: 3}); err != nil {
+	if _, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{Components: 3, Cataloged: 3}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -128,10 +128,10 @@ func TestTable_Deterministic(t *testing.T) {
 			Advisory: advisory.Advisory{ID: "GHSA-2"}},
 	}}
 	var first, second bytes.Buffer
-	if err := Table(&first, res, cyclonedx.Stats{}); err != nil {
+	if _, err := Table(&first, res, cyclonedx.Stats{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := Table(&second, res, cyclonedx.Stats{}); err != nil {
+	if _, err := Table(&second, res, cyclonedx.Stats{}); err != nil {
 		t.Fatal(err)
 	}
 	if first.String() != second.String() {
