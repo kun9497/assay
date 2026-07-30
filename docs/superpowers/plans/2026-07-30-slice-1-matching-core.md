@@ -1907,7 +1907,9 @@ git commit -m "feat: evaluate OSV ranges with sentinel and last_affected handlin
 
 **Interfaces:**
 - Consumes: `advisory.Advisory`.
-- Produces: `store.Store` interface (`Lookup`, `LookupBySource`, `Meta`, `Close`); `store.Writer` interface (`Put`, `SetMeta`, `Commit`); `store.Meta{Schema, BuiltAt, Providers}`; `store.Provenance{Source, DataAsOf, Records}`; `store.Open(path string) (*Bolt, error)`; `store.Create(path string) (*Bolt, error)`; `store.DefaultPath() (string, error)`; sentinel errors `store.ErrNotFound`, `store.ErrSchemaMismatch`.
+- Produces: `store.Store` interface (`Lookup`, `LookupBySource`, `Meta`, `Close`); `store.Writer` interface (`Put`, `PutSourceIndex`, `SetMeta`, `Close`); `store.Meta{Schema, BuiltAt, Providers}`; `store.Provenance{Source, DataAsOf, Records}`; `store.Open(path string) (*Bolt, error)`; `store.Create(path string) (*Bolt, error)`; `store.DefaultPath() (string, error)`; sentinel errors `store.ErrNotFound`, `store.ErrSchemaMismatch`, `store.ErrIncomplete`.
+
+There is no `Commit`. bbolt fsyncs each `Update` as it completes, so a method named `Commit` that only closed the handle would invite a caller to skip per-write error checks, trusting a durability step that already happened.
 
 Two design points from the roadmap that the implementation must honor:
 
@@ -1962,8 +1964,8 @@ func buildTestDB(t *testing.T, advs ...advisory.Advisory) string {
 	if err != nil {
 		t.Fatalf("SetMeta: %v", err)
 	}
-	if err := w.Commit(); err != nil {
-		t.Fatalf("Commit: %v", err)
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
 	}
 	return path
 }
@@ -2055,7 +2057,7 @@ func TestLookupBySource(t *testing.T) {
 	if err := w.Put(a); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Commit(); err != nil {
+	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2108,6 +2110,26 @@ func TestOpenMissing(t *testing.T) {
 	}
 }
 
+func TestOpenIncomplete(t *testing.T) {
+	// A build interrupted after Create and some Puts, before SetMeta. Its
+	// buckets exist and its lookups would succeed with empty results, which is
+	// indistinguishable from a clean scan — so Open must refuse it.
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Put(sample("GHSA-partial", "Go", "x")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil { // no SetMeta: the build never finished
+		t.Fatal(err)
+	}
+	if _, err := Open(path); !errors.Is(err, ErrIncomplete) {
+		t.Errorf("Open(interrupted build) err = %v, want ErrIncomplete", err)
+	}
+}
+
 func TestOpenSchemaMismatch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v.db")
 	w, err := Create(path)
@@ -2117,7 +2139,7 @@ func TestOpenSchemaMismatch(t *testing.T) {
 	if err := w.setSchemaForTest(SchemaVersion + 1); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Commit(); err != nil {
+	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Open(path); !errors.Is(err, ErrSchemaMismatch) {
@@ -2164,6 +2186,11 @@ const SchemaVersion = 1
 var (
 	ErrNotFound       = errors.New("vulnerability database not found")
 	ErrSchemaMismatch = errors.New("vulnerability database schema mismatch")
+	// ErrIncomplete marks a database whose build was interrupted. It exists
+	// because the alternative is worse than an error: a half-built database
+	// answers lookups with empty results and no error, which is
+	// indistinguishable from a clean scan.
+	ErrIncomplete = errors.New("vulnerability database is incomplete")
 )
 
 type Store interface {
@@ -2173,6 +2200,15 @@ type Store interface {
 	// the interface does not change under its first real consumer.
 	LookupBySource(ecosystem, sourceName string) ([]advisory.Advisory, error)
 	Meta() (Meta, error)
+	Close() error
+}
+
+// Writer is the build-side half. Separate from Store so a scan cannot be
+// handed something it could write through.
+type Writer interface {
+	Put(a advisory.Advisory) error
+	PutSourceIndex(ecosystem, sourceName, id string) error
+	SetMeta(m Meta) error
 	Close() error
 }
 
@@ -2216,7 +2252,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 
 	bolt "go.etcd.io/bbolt"
 
@@ -2238,6 +2273,13 @@ type Bolt struct {
 	db *bolt.DB
 }
 
+// Drift in either interface should fail the build here, not at the first
+// caller that happens to assign one.
+var (
+	_ Store  = (*Bolt)(nil)
+	_ Writer = (*Bolt)(nil)
+)
+
 // Open opens an existing database read-only. A missing or schema-mismatched
 // database is an error, never an empty result: the scan path must exit 2 with
 // instructions rather than reporting a clean scan it did not perform (D14).
@@ -2254,6 +2296,15 @@ func Open(path string) (*Bolt, error) {
 	if err != nil {
 		db.Close()
 		return nil, err
+	}
+	// The metadata record is written once, last, by SetMeta. Its absence means
+	// the build did not finish — and an unfinished database is the dangerous
+	// case, because its buckets exist and its lookups succeed with empty
+	// results. Requiring the record makes "complete" structural rather than
+	// something an external temp-file-and-rename discipline has to guarantee.
+	if m.Schema == 0 {
+		db.Close()
+		return nil, fmt.Errorf("%w at %s: no metadata record, so `assay db update` did not finish", ErrIncomplete, path)
 	}
 	if m.Schema != SchemaVersion {
 		db.Close()
@@ -2273,14 +2324,16 @@ func Create(path string) (*Bolt, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create %s: %w", path, err)
 	}
+	// Only the bucket structure is created here. The schema is deliberately
+	// NOT stamped now: it is written by SetMeta, so its presence is proof the
+	// build ran to completion rather than proof that Create was called.
 	err = db.Update(func(tx *bolt.Tx) error {
 		for _, name := range allBuckets {
 			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 				return err
 			}
 		}
-		return tx.Bucket(bucketMeta).Put([]byte("schema"),
-			[]byte(strconv.Itoa(SchemaVersion)))
+		return nil
 	})
 	if err != nil {
 		db.Close()
@@ -2354,9 +2407,6 @@ func (b *Bolt) SetMeta(m Meta) error {
 	})
 }
 
-// Commit flushes and closes the write handle.
-func (b *Bolt) Commit() error { return b.db.Close() }
-
 func (b *Bolt) setSchemaForTest(v int) error {
 	return b.db.Update(func(tx *bolt.Tx) error {
 		blob, err := json.Marshal(Meta{Schema: v})
@@ -2413,15 +2463,11 @@ func (b *Bolt) Meta() (Meta, error) {
 		if bk == nil {
 			return ErrNotFound
 		}
+		// A zero Meta when the record is absent is the signal Open relies on:
+		// there is deliberately no fallback that could report a schema for a
+		// database that never finished building.
 		if raw := bk.Get([]byte("meta")); raw != nil {
 			return json.Unmarshal(raw, &m)
-		}
-		if raw := bk.Get([]byte("schema")); raw != nil {
-			v, err := strconv.Atoi(string(raw))
-			if err != nil {
-				return err
-			}
-			m.Schema = v
 		}
 		return nil
 	})
@@ -3279,7 +3325,7 @@ func Update(ctx context.Context, dbPath string, providers []provider.Provider, s
 		fmt.Fprintf(stderr, "fetching %s…\n", p.Name())
 		prov, err := p.Fetch(ctx, func(a advisory.Advisory) error { return w.Put(a) })
 		if err != nil {
-			w.Commit()
+			w.Close()
 			os.Remove(tmp)
 			fmt.Fprintf(stderr, "error: provider %s: %v\n", p.Name(), err)
 			return 2
@@ -3287,14 +3333,14 @@ func Update(ctx context.Context, dbPath string, providers []provider.Provider, s
 		meta.Providers[p.Name()] = prov
 	}
 	if err := w.SetMeta(meta); err != nil {
-		w.Commit()
+		w.Close()
 		os.Remove(tmp)
 		fmt.Fprintf(stderr, "error: write metadata: %v\n", err)
 		return 2
 	}
 	// Close before renaming: on Windows a rename over an open file fails, and
 	// assuming POSIX semantics here leaves a half-built database in place.
-	if err := w.Commit(); err != nil {
+	if err := w.Close(); err != nil {
 		os.Remove(tmp)
 		fmt.Fprintf(stderr, "error: close database: %v\n", err)
 		return 2
