@@ -133,6 +133,33 @@ func TestInRange_UnsortedEvents(t *testing.T) {
 	}
 }
 
+func TestInRange_BoundlessEventDoesNotBreakSorting(t *testing.T) {
+	// An event carrying no bound must not reach the comparer. If it did, the
+	// failed comparison would be discarded and the event would report as equal
+	// to everything — a violated ordering that can leave the slice unsorted,
+	// silently undoing the sort and restoring the original false negative.
+	r := rng(advisory.RangeSemver,
+		intro("2.0.0"), fixed("3.0.0"),
+		advisory.Event{Limit: "1.0.0"},
+		intro("1.0.0"), fixed("1.5.0"))
+	for _, tc := range []struct {
+		v    string
+		want bool
+	}{
+		{"1.2.0", true},
+		{"2.5.0", true},
+		{"1.7.0", false},
+	} {
+		got, _, err := InRange(SemVer{}, tc.v, r)
+		if err != nil {
+			t.Fatalf("InRange(%q) error: %v", tc.v, err)
+		}
+		if got != tc.want {
+			t.Errorf("InRange(%q) with a boundless event = %v, want %v", tc.v, got, tc.want)
+		}
+	}
+}
+
 func TestInRange_MalformedBoundErrors(t *testing.T) {
 	// A bound that cannot be ordered must surface. Sorting on an unorderable
 	// bound would otherwise pick an arbitrary order and return a confident

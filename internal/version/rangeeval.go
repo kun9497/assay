@@ -162,14 +162,27 @@ func sortEvents(c Comparer, in []advisory.Event) ([]advisory.Event, error) {
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		vi, vj := eventVersion(out[i]), eventVersion(out[j])
+		// Events carrying no bound at all — a bare `limit`, or a malformed
+		// empty event — are parked at the end. They must not reach Compare:
+		// it would error, the error would be discarded, and every such event
+		// would report as equal to everything. That is a violated strict weak
+		// ordering, which can leave the whole slice unsorted and silently
+		// undo the sort this function exists to perform.
+		if vi == "" || vj == "" {
+			return vi != "" && vj == ""
+		}
 		// The sentinel is negative infinity, so it sorts before everything.
+		// Decided by string identity rather than by Compare, because PEP 440
+		// parses "0" as a real version that would otherwise sort above 0.dev0
+		// and 0a1 — reintroducing the bug the sentinel exists to prevent.
 		if vi == introducedSentinel {
 			return vj != introducedSentinel
 		}
 		if vj == introducedSentinel {
 			return false
 		}
-		cmp, _ := c.Compare(vi, vj) // cannot fail: validated above
+		// Cannot fail: every non-empty, non-sentinel bound was validated above.
+		cmp, _ := c.Compare(vi, vj)
 		return cmp < 0
 	})
 	return out, nil
