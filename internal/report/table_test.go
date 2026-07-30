@@ -87,6 +87,28 @@ func TestTable_CountsAddUp(t *testing.T) {
 	}
 }
 
+func TestTable_AdvisoryScopedSkipIsAlwaysShown(t *testing.T) {
+	// Everything evaluated, nothing found, but one advisory could not be judged.
+	// Gating the detail block on the unevaluated count alone hid this entirely,
+	// reintroducing one advisory at a time the silence the block exists to break.
+	res := matcher.Result{Skipped: []matcher.Skipped{{
+		Package:    pkgmeta.Package{Name: "x", Version: "1.0.0", Ecosystem: "Go"},
+		AdvisoryID: "GHSA-unevaluable",
+		Reason:     "comparing 1.0.0: invalid version",
+	}}}
+	var buf bytes.Buffer
+	if err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "GHSA-unevaluable") {
+		t.Errorf("the advisory that could not be judged is missing from the report:\n%s", out)
+	}
+	if !strings.Contains(out, "NOT a clean result") {
+		t.Errorf("an incomplete check must not read as a clean scan:\n%s", out)
+	}
+}
+
 func TestTable_NoFindings(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Table(&buf, matcher.Result{}, cyclonedx.Stats{Components: 3, Cataloged: 3}); err != nil {

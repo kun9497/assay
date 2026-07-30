@@ -16,11 +16,19 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) error {
 	// could judge it. A whole-package matcher skip (empty AdvisoryID) was
 	// cataloged but never checked, so counting it as scanned would inflate the
 	// number a reader trusts most.
-	var unevaluated int
+	// Two different kinds of "could not tell" live in res.Skipped. A
+	// whole-package skip means the package was never checked at all; an
+	// advisory-scoped one means the package was checked but one advisory could
+	// not be judged. They must be counted apart, because only the first one
+	// changes how many packages were evaluated — and only the second one used
+	// to disappear from the report entirely.
+	var unevaluated, incompleteChecks int
 	for _, s := range res.Skipped {
 		if s.AdvisoryID == "" {
 			unevaluated++
+			continue
 		}
+		incompleteChecks++
 	}
 	evaluated := cat.Cataloged - unevaluated
 
@@ -47,6 +55,13 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) error {
 		// line, or whose output is truncated, must not read this as safety.
 		fmt.Fprintln(w, "No packages could be evaluated - this is NOT a clean result.")
 
+	case incompleteChecks > 0:
+		// Nothing found, but not every check ran. Saying "no known
+		// vulnerabilities" would claim a completeness the run did not have.
+		fmt.Fprintf(w,
+			"No vulnerabilities found in %d package(s), but %d check(s) could not be completed - this is NOT a clean result.\n",
+			evaluated, incompleteChecks)
+
 	default:
 		fmt.Fprintf(w, "No known vulnerabilities found in %d package(s).\n", evaluated)
 	}
@@ -58,7 +73,11 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) error {
 	fmt.Fprintf(w, "\n%d component(s) seen, %d evaluated, %d finding(s), %d not evaluated\n",
 		cat.Components, evaluated, len(res.Findings), notEvaluated)
 
-	if notEvaluated > 0 {
+	// Gated on both counts. Keying only on notEvaluated hid every
+	// advisory-scoped skip whenever the rest of the document was fully
+	// evaluated — reintroducing, one advisory at a time, the silence this
+	// block exists to break.
+	if notEvaluated > 0 || incompleteChecks > 0 {
 		fmt.Fprintln(w, "\nNot evaluated:")
 		if cat.SkippedUnsupportedEcosystem > 0 {
 			fmt.Fprintf(w, "  %d package(s) in an unsupported ecosystem\n",
