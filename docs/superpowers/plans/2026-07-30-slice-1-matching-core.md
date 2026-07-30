@@ -3094,6 +3094,7 @@ import (
 	"time"
 
 	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/provider"
 	"github.com/kun9497/assay/internal/store"
 )
 
