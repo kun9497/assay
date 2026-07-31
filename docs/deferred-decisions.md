@@ -40,10 +40,18 @@ Docker daemon, OCI layout directory, and registry pull. Each produces the same t
 layer list and a config — and everything downstream of `Source` is shared. Which one lands
 first is a scheduling question, not a scope question.
 
-**Open decision, deliberately not pre-made.** Whether registry pull is written against the
-OCI Distribution API with `net/http`, or delegated to `go-containerregistry`. That is a
-dependency decision — the second in the project's history — and belongs in conversation.
-It blocks neither the tarball nor the OCI layout path, since neither needs auth.
+**The dependency decision is settled: `go-containerregistry` (D19).** Measured both sides —
+a stdlib anonymous pull is 93 lines and handles one registry's happy path, while three
+registries already differ three ways, and credential helpers are separate executables rather
+than a config file. The library links 9 modules and 46 packages for 0.5 MB of binary, and
+brings private-registry credentials with it rather than as later work. Layer walking,
+whiteouts, and both catalogers stay ours.
+
+**The Docker daemon source is excluded.** Importing `pkg/v1/daemon` alone takes the linked
+module count from 9 to 27 and packages from 46 to 114. It is also the least necessary of the
+four: an image already present locally reaches us through `docker save`, which the tarball
+source reads. **Revisit when** someone has an image they cannot `docker save` — a large one
+where the round trip through disk is the bottleneck is the realistic case.
 
 ---
 

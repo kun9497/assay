@@ -273,6 +273,48 @@ is worse than a differently named one.
 
 ---
 
+
+### D19 — Registry access uses `go-containerregistry`; layer contents stay ours
+
+The second third-party dependency, taken deliberately after measuring both sides.
+
+**What the transport actually costs to write.** An anonymous pull from Docker Hub is three
+requests — `401` carrying a `WWW-Authenticate` challenge, a token fetch against the realm it
+names, then the manifest with a bearer header — and a working stdlib version of exactly that
+is 93 lines. That number is what made writing it look cheap, and it is misleading: it is one
+registry, anonymous, happy path. Measured across three registries the flow already differs
+three ways — Docker Hub issues a 2,658-character token from `auth.docker.io`, GHCR issues a
+52-character one from its own host, and Quay serves public manifests with no challenge at
+all. Retries, blob redirects to CDNs that reject the registry's own `Authorization` header,
+per-registry error taxonomies, and credential helpers — which are separate executables
+spoken to over stdio, not a config file — are all still absent from those 93 lines.
+
+**What it costs to adopt.** Nine modules are linked, 46 packages, and the binary grows from
+6.3 MB to 6.8 MB. `go.sum` gains 47 entries, but 38 of those are test and tooling
+dependencies of dependencies — `cobra`, `blackfriday`, `opentelemetry`, `testify` — that
+compile into nothing. The distinction matters: they are build-time supply-chain surface, not
+running code.
+
+`docker/cli` and `docker-credential-helpers` link in even for anonymous-only use, so private
+registry credentials arrive with the dependency rather than as later work. That is the
+decisive point: the expensive half of writing this ourselves would have been credential
+resolution, and adopting the library skips it entirely.
+
+**The boundary.** The dependency buys the registry protocol and authentication and nothing
+else. Layer walking, whiteout application, `/etc/os-release`, and `/lib/apk/db/installed`
+parsing stay ours — that is the part this project exists to own, and no library does it for
+us anyway.
+
+**Layer contents are never written to disk.** A scan needs two files out of each layer, so
+layers are streamed and the wanted entries read in passing. Path traversal, symlink escape,
+and archive bombs are extraction vulnerabilities; not extracting removes the class rather
+than defending against it.
+
+**The Docker daemon source is excluded** (see `docs/deferred-decisions.md`). It alone takes
+the linked module count from 9 to 27 and packages from 46 to 114, and it is the least
+necessary of the four sources: an image already present locally can be handed over with
+`docker save`, which the tarball source reads.
+
 ## 3. Architecture
 
 ### Measured data volumes
