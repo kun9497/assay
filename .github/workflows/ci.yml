@@ -40,6 +40,11 @@ jobs:
       # runs it — CI is the only place it happens. A silent false negative in
       # version ordering is the failure this project most needs to catch.
       - name: Upstream apk version vectors
+        env:
+          # Raises the contents-API limit from 60/hour per shared runner IP to
+          # 5,000. Without it a rate-limited fetch is indistinguishable from a
+          # working one that found nothing.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: go test -tags upstreamvectors -run TestAPKAgainstUpstreamVectors ./internal/version/ -v
 
       - name: Build

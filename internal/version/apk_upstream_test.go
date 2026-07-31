@@ -134,14 +134,37 @@ func loadAPKVectors(t *testing.T) string {
 		return string(b)
 	}
 
-	c := &http.Client{Timeout: 60 * time.Second}
-	resp, err := c.Get(apkVectorsURL)
+	// Skipping is right for a developer running offline and wrong for CI, which
+	// is the only place this test runs at all: a skip there turns the strongest
+	// check in this package into a no-op and still reports green. Unauthenticated
+	// api.github.com calls from Actions runners share an IP and are limited to 60
+	// per hour, so this is a real event, not a hypothetical one.
+	unreachable := func(format string, args ...any) {
+		if os.Getenv("CI") != "" {
+			t.Fatalf(format+" -- refusing to pass by skipping in CI", args...)
+		}
+		t.Skipf(format+"; set APK_VECTORS to a local copy", args...)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, apkVectorsURL, nil)
 	if err != nil {
-		t.Skipf("cannot reach the upstream vectors (%v); set APK_VECTORS to a local copy", err)
+		t.Fatal(err)
+	}
+	// The contents API allows 60 unauthenticated requests per hour per IP, which
+	// an Actions runner shares with everyone else on that host. A token raises it
+	// to 5,000 and costs nothing; CI passes the one it already has.
+	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+
+	c := &http.Client{Timeout: 60 * time.Second}
+	resp, err := c.Do(req)
+	if err != nil {
+		unreachable("cannot reach the upstream vectors (%v)", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Skipf("upstream vectors returned %s; set APK_VECTORS to a local copy", resp.Status)
+		unreachable("upstream vectors returned %s", resp.Status)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
