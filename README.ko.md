@@ -165,13 +165,15 @@ CI에서는 "뭔가 찾았다"와 "돌지 못했다"를 구분하는 것이 중�
 파이프라인은 다섯 개의 인터페이스입니다. 각각 독립적으로 테스트 가능하며, 새 생태계를 지원한다는
 것은 `Cataloger` 하나와 `Comparer` 하나를 쓰는 것을 뜻합니다. 나머지는 바뀌지 않습니다.
 
+**굵은 것이 구현된 것이고, 나머지는 설계 목표입니다.**
+
 | 인터페이스 | 책임 | 구현체 |
 |---|---|---|
-| `Source` | 타깃을 열어 파일 접근 제공, 레이어 출처를 담음 | image, dir, file, binary |
-| `Cataloger` | 파일 → `[]Package` | apk, dpkg, cyclonedx, go-mod, go-binary, npm, jar |
-| `Store` | 권고 조회 | bbolt |
-| `Comparer` | 한 생태계 안에서 `Compare(a, b string) (int, error)` | semver, PEP 440, apk, deb, rpm |
-| `Provider` | 업스트림 피드 → `[]Advisory` | OSV, KISA |
+| `Source` | 타깃을 열어 파일 접근 제공, 레이어 출처를 담음 | **레지스트리**, **`docker save` tarball**, **OCI layout**, dir, binary |
+| `Cataloger` | 파일 → `[]Package` | **apk**, **os-release**, **cyclonedx**, dpkg, go-mod, go-binary, npm, jar |
+| `Store` | 권고 조회 | **bbolt** |
+| `Comparer` | 한 생태계 안에서 `Compare(a, b string) (int, error)` | **semver**, **PEP 440**, **apk**, deb, rpm |
+| `Provider` | 업스트림 피드 → `[]Advisory` | **OSV**, KISA |
 
 데이터베이스는 스캔과 직교합니다. `Provider`가 `assay db update`를 통해 채우고, 스캔은 읽기만
 하며, 오래되었거나 없는 데이터베이스를 뒤에서 고쳐주지 않습니다. 오프라인 동작이 플래그가 아니라

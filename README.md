@@ -168,13 +168,15 @@ with a count, never folded silently into a clean verdict.
 The pipeline is five interfaces. Each is independently testable, and supporting a new
 ecosystem means writing one `Cataloger` and one `Comparer` — nothing else changes.
 
+**Bold is built; the rest is the design target.**
+
 | Interface | Responsibility | Implementations |
 |---|---|---|
-| `Source` | Open a target for file access; carries layer provenance | image, dir, file, binary |
-| `Cataloger` | Files → `[]Package` | apk, dpkg, cyclonedx, go-mod, go-binary, npm, jar |
-| `Store` | Advisory lookup | bbolt |
-| `Comparer` | `Compare(a, b string) (int, error)` within one ecosystem | semver, PEP 440, apk, deb, rpm |
-| `Provider` | Upstream feed → `[]Advisory` | OSV, KISA |
+| `Source` | Open a target for file access; carries layer provenance | **registry**, **`docker save` tarball**, **OCI layout**, dir, binary |
+| `Cataloger` | Files → `[]Package` | **apk**, **os-release**, **cyclonedx**, dpkg, go-mod, go-binary, npm, jar |
+| `Store` | Advisory lookup | **bbolt** |
+| `Comparer` | `Compare(a, b string) (int, error)` within one ecosystem | **semver**, **PEP 440**, **apk**, deb, rpm |
+| `Provider` | Upstream feed → `[]Advisory` | **OSV**, KISA |
 
 The database is orthogonal to the scan. `Provider`s populate it through `assay db update`;
 a scan only ever reads, and never repairs a stale or missing one behind your back. That is
