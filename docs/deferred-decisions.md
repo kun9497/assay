@@ -32,48 +32,30 @@ package's dependency tree shrinks.
 more case is the whole change. Nothing downstream of `source.Image` knows where layers came
 from.
 
-### Making database coverage visible
+### Failing a scan when coverage is partial
 
-`Meta.Providers` records `{Source, DataAsOf, Records}` per provider and nothing about
-*which ecosystems* were ingested. A database built before Alpine support existed is
-still schema v1, so `store.Open` accepts it unchanged.
+`Meta` now records which ecosystems ingestion indexed, and a package whose ecosystem is
+absent is skipped rather than evaluated (D20). That closed the silent clean scan: an Alpine
+release the database has never held now exits 2 and says `run \`assay db update\``.
 
-**The failure.** Upgrade to a build with Alpine support, do not re-run `assay db update`,
-then scan an Alpine SBOM. The matcher finds an apk comparer, evaluates every package,
-looks each one up in an ecosystem the database never ingested, finds nothing, and
-`Trustworthy()` is true because packages *were* evaluated. Output: "No known
-vulnerabilities found", exit **0**. That is the silent false negative this project is
-built to prevent, arriving through the one door the ingestion-side checks cannot cover —
-they guarantee a *fresh* build contains Alpine, not that the build you are reading is
-fresh.
+What is still open is the *partial* case. If a target holds twenty packages and five are in
+an uncovered ecosystem, the five are counted and named under "Not evaluated" and the exit
+code is unchanged — a CI job reading only the exit code sees green while a quarter of the
+target went unchecked.
 
-**Three doors, not one.** A database built before Alpine support is the obvious one, and
-`SchemaVersion` was bumped to 2 in slice 2a so that door is now shut — such a database is
-a schema mismatch and exits 2. Two remain open:
+**Why deferred.** Making any unevaluated package fail the run is a bigger decision than it
+looks: a single unparseable version string would break a build, and roughly half of all
+advisories carry no severity (D17), so the same argument recurs for every "we could not
+tell" case. The right place to settle it is alongside `--fail-on` in slice 4, where the
+question "what makes a build fail" is being answered anyway — `--fail-on-incomplete`, or
+folding it into `--fail-on-unknown`, are both plausible shapes.
 
-- **An Alpine release OSV does not carry.** A *correct, freshly built* database still
-  reports clean for one. Verified against a real build: an `alpine 3.25.0` SBOM produces
-  "No known vulnerabilities found in 15 package(s)" and exit 0.
-- **`ASSAY_DB_DIR`.** The path this README recommends for CI caching carries no schema
-  component, so a cache restored across an assay upgrade is exactly the stale case —
-  through a pattern the project advertises.
+**Revisit when** slice 4 lands `--fail-on`. Not before: adding a second gating rule while
+the first does not exist would fix the ordering of a decision that has not been made.
 
-**Why still deferred.** The tool is unreleased and its only user is its author. Both
-remaining doors need the covered-ecosystem set described below; neither is closable by a
-one-line change the way the schema bump was.
-
-**Revisit when** anyone other than the author runs `assay`, or before the first tagged
-release — whichever comes first. Shipping this to a second user means shipping a scanner
-that reports clean on an image it never checked.
-
-**Groundwork.** The fix is a covered-ecosystem set on `store.Meta`, written by
-`db update` and read by the matcher: a package whose ecosystem is absent from that set
-becomes a counted `Skipped` with a reason naming the gap, rather than an evaluated
-package with no findings. `Skipped` already carries a `Reason` for exactly this, and
-`Summary.Trustworthy()` already turns "nothing evaluated" into exit 2 — only the
-plumbing between them is missing. It is a `Meta` field, so it forces a rebuild, which
-is the correct outcome anyway.
-
+**Groundwork.** `Summary` already separates `NotEvaluated` from `IncompleteChecks`, and
+`Skipped` already distinguishes a whole-package skip from an advisory-scoped one, so the
+counts a gate would key on are in hand.
 ### KISA/KNVD as an independent matching source
 
 Currently scoped as **enrichment only**: a finding already matched through OSV picks up

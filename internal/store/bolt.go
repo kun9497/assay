@@ -3,8 +3,10 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 
 	bolt "go.etcd.io/bbolt"
 
@@ -27,6 +29,9 @@ const keySep = "\x00"
 
 type Bolt struct {
 	db *bolt.DB
+	// seen accumulates the ecosystem keys Put has indexed, for SetMeta to
+	// persist (D20). Build-side only; a read-only Bolt never touches it.
+	seen map[string]struct{}
 }
 
 // Drift in either interface should fail the build here, not at the first
@@ -103,6 +108,19 @@ func (b *Bolt) Close() error { return b.db.Close() }
 // Put stores one advisory once in by-id and appends its ID to the lookup key of
 // every package it affects. Storing IDs rather than records is what keeps the
 // database from growing by the 1.44x measured duplication factor.
+// Covers reports the ecosystem keys this database holds (D20).
+func (b *Bolt) Covers() (map[string]bool, error) {
+	m, err := b.Meta()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(m.Ecosystems))
+	for _, e := range m.Ecosystems {
+		out[e] = true
+	}
+	return out, nil
+}
+
 func (b *Bolt) Put(a advisory.Advisory) error {
 	blob, err := json.Marshal(a)
 	if err != nil {
@@ -117,6 +135,12 @@ func (b *Bolt) Put(a advisory.Advisory) error {
 			if aff.Ecosystem == "" || aff.Name == "" {
 				continue
 			}
+			// Recorded here rather than at the end, so the set can only ever
+			// name keys that were really written (D20).
+			if b.seen == nil {
+				b.seen = map[string]struct{}{}
+			}
+			b.seen[aff.Ecosystem] = struct{}{}
 			key := aff.Ecosystem + keySep + pkgmeta.NormalizeName(aff.Ecosystem, aff.Name)
 			if err := appendID(idx, key, a.ID); err != nil {
 				return err
@@ -148,6 +172,10 @@ func appendID(bk *bolt.Bucket, key, id string) error {
 
 func (b *Bolt) SetMeta(m Meta) error {
 	m.Schema = SchemaVersion
+	// Taken from what Put indexed, not from the caller (D20). Only the write
+	// path knows which keys actually landed: the Alpine archive alone yields 23
+	// of them, and no caller is in a position to enumerate that correctly.
+	m.Ecosystems = slices.Sorted(maps.Keys(b.seen))
 	blob, err := json.Marshal(m)
 	if err != nil {
 		return err

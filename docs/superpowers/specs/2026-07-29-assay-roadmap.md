@@ -330,6 +330,43 @@ the linked module count from 9 to 27 and packages from 46 to 114, and it is the 
 necessary of the four sources: an image already present locally can be handed over with
 `docker save`, which the tarball source reads.
 
+
+### D20 — The database records which ecosystems it covers
+
+`Meta` carries the set of ecosystem keys that ingestion actually indexed, and a package
+whose ecosystem is absent from that set is **skipped**, never evaluated.
+
+**The failure this closes.** Without it the matcher cannot tell two situations apart: an
+ecosystem was ingested and this package has no advisories, or the ecosystem was never
+ingested at all. Both look like an empty lookup. Measured on a database holding
+`Alpine:v3.19` and scanning the same package twice, changing only the distro release:
+
+```
+VERSION_ID=3.19.9  ->  1 finding                                     exit 0
+VERSION_ID=3.25.0  ->  "No known vulnerabilities found in 1 package"  exit 0
+```
+
+The second is a confident wrong answer. It is not hypothetical: OSV's Alpine data stops at
+the newest release it has seen, so the next Alpine minor triggers this the day it ships.
+
+**Not an Alpine problem.** A database built over Go alone answers a PyPI scan the same way.
+The set is checked for every ecosystem, so the guarantee is uniform.
+
+**The store collects it, not the caller.** For Alpine, `db update` fetches one archive named
+`Alpine` whose records carry `Alpine:v3.2` through `Alpine:v3.24` — what was *fetched* and
+what is *covered* are different things, and only the write path knows the second. `SetMeta`
+therefore fills the field from what `Put` actually indexed, overwriting whatever the caller
+passed.
+
+**Partial coverage keeps the existing exit semantics.** If nothing could be evaluated the
+scan exits 2, as it already did; if some packages were covered and others were not, the
+uncovered ones are counted and named under "Not evaluated" and the exit code is unchanged.
+Making any unevaluated package fail the run is a bigger decision — a single unparseable
+version would break a build — and belongs with `--fail-on` in slice 4.
+
+**Schema version 3.** The field is part of the on-disk shape, so a database built before it
+is refused with instructions rather than read as covering nothing (D5).
+
 ## 3. Architecture
 
 ### Measured data volumes

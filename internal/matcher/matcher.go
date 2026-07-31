@@ -60,12 +60,36 @@ func New(s store.Store) *Matcher { return &Matcher{store: s} }
 func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 	var res Result
 
+	// Which ecosystems this database actually holds (D20). Read once, before
+	// any lookup, because a lookup cannot answer the question: an ecosystem
+	// that was never ingested returns exactly what a package with no advisories
+	// returns, and calling that clean is the failure this whole tool exists to
+	// avoid. Measured before this check existed — same package, same version,
+	// only the Alpine release changed:
+	//
+	//	3.19.9 -> 1 finding
+	//	3.25.0 -> "No known vulnerabilities found", exit 0
+	covered, err := m.store.Covers()
+	if err != nil {
+		return Result{}, fmt.Errorf("read database coverage: %w", err)
+	}
+
 	for _, p := range t.Packages {
 		cmp, ok := version.For(p.Ecosystem)
 		if !ok {
 			res.Skipped = append(res.Skipped, Skipped{
 				Package: p,
 				Reason:  fmt.Sprintf("no version comparer for ecosystem %q", p.Ecosystem),
+			})
+			continue
+		}
+		if !covered[p.Ecosystem] {
+			// A whole-package skip, so the report counts it as not evaluated
+			// and a scan where nothing else was checked exits 2 (D11).
+			res.Skipped = append(res.Skipped, Skipped{
+				Package: p,
+				Reason: fmt.Sprintf("ecosystem %q is not in this database; "+
+					"run `assay db update`", p.Ecosystem),
 			})
 			continue
 		}

@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 
+	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/source"
 	"github.com/kun9497/assay/internal/store"
 )
@@ -148,12 +150,34 @@ func writeImageTar(t *testing.T, path string, files map[string]string) {
 // testDB builds an empty but complete database: SetMeta is what marks a build
 // finished (store.ErrIncomplete otherwise), so the image-path tests below
 // reach the matcher and report rather than tripping the missing-database exit.
+// testDB holds one advisory per ecosystem these tests scan, so those
+// ecosystems are COVERED (D20).
+//
+// An empty database used to serve here, because a lookup that found nothing
+// counted as a clean evaluation. That is exactly the silent false negative
+// D20 closes: every package now lands in "not evaluated" instead, and a test
+// asserting a package was evaluated would be asserting the old bug.
 func testDB(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "vulnerability.db")
 	w, err := store.Create(path)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
+	}
+	for i, eco := range []string{"Alpine:v3.19", "Go", "npm", "PyPI"} {
+		// A real record under a name nothing in these fixtures uses: it makes
+		// the ecosystem covered without making any package match it.
+		if err := w.Put(advisory.Advisory{
+			ID:     fmt.Sprintf("COVERAGE-%d", i),
+			Source: "osv",
+			Kind:   advisory.KindVulnerability,
+			Affected: []advisory.Affected{{
+				Ecosystem: eco,
+				Name:      "nothing-these-tests-scan",
+			}},
+		}); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
 	}
 	if err := w.SetMeta(store.Meta{}); err != nil {
 		t.Fatalf("SetMeta: %v", err)

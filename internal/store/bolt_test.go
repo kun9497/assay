@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -299,5 +300,104 @@ func TestOpenSchemaMismatch(t *testing.T) {
 	}
 	if _, err := Open(path); !errors.Is(err, ErrSchemaMismatch) {
 		t.Errorf("Open(mismatched) err = %v, want ErrSchemaMismatch", err)
+	}
+}
+
+// D20: the database records what it covers, and the store collects that from
+// what Put actually indexed rather than from what the caller believes.
+//
+// The distinction is not academic. `db update` fetches one archive named
+// "Alpine" whose records carry Alpine:v3.2 through Alpine:v3.24, so a caller
+// passing its fetch list would claim coverage of "Alpine" — a key nothing is
+// ever looked up under — while the 23 real ones went unrecorded.
+func TestMetaRecordsTheEcosystemsActuallyIndexed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	put := func(id, eco, name string) {
+		t.Helper()
+		if err := w.Put(advisory.Advisory{
+			ID: id, Source: "osv", Kind: advisory.KindVulnerability,
+			Affected: []advisory.Affected{{Ecosystem: eco, Name: name}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put("A-1", "Alpine:v3.19", "busybox")
+	put("A-2", "Alpine:v3.20", "busybox")
+	put("A-3", "Alpine:v3.19", "musl") // a repeat must not appear twice
+	put("G-1", "Go", "github.com/x/y")
+
+	// The caller's Ecosystems is deliberately wrong; the store must not trust it.
+	if err := w.SetMeta(Meta{
+		BuiltAt:    time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC),
+		Ecosystems: []string{"Alpine", "npm", "this-was-never-ingested"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	m, err := db.Meta()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"Alpine:v3.19", "Alpine:v3.20", "Go"}
+	if !slices.Equal(m.Ecosystems, want) {
+		t.Errorf("Meta.Ecosystems = %v, want %v (sorted, deduped, and taken from "+
+			"what was indexed rather than from the caller)", m.Ecosystems, want)
+	}
+}
+
+// Covers reports whether a lookup under this key can mean anything. Without it
+// the matcher cannot tell "ingested, no advisories" from "never ingested", and
+// the second reads as a clean scan.
+func TestCovers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Put(advisory.Advisory{
+		ID: "A-1", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Alpine:v3.19", Name: "busybox"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(Meta{BuiltAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	covered, err := db.Covers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !covered["Alpine:v3.19"] {
+		t.Error("Alpine:v3.19 was indexed but is not reported as covered")
+	}
+	// The release that ships next year, which this database has never seen.
+	if covered["Alpine:v3.25"] {
+		t.Error("Alpine:v3.25 reported as covered; nothing was ever stored under it")
+	}
+	if covered["PyPI"] {
+		t.Error("PyPI reported as covered; this database holds only Alpine")
 	}
 }

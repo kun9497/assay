@@ -27,7 +27,7 @@ import (
 // data it never ingested, and reports "no known vulnerabilities found" at exit
 // 0. That is the silent false negative, arriving through a stale cache rather
 // than a bug.
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 var (
 	ErrNotFound       = errors.New("vulnerability database not found")
@@ -44,6 +44,10 @@ type Store interface {
 	// no separate method: OSV writes the source name into Affected[].Name, so
 	// the caller queries this with the source name as a second key.
 	Lookup(ecosystem, name string) ([]advisory.Advisory, error)
+	// Covers reports which ecosystem keys this database actually holds (D20).
+	// A caller that skips this cannot distinguish "no advisories for this
+	// package" from "this ecosystem was never ingested".
+	Covers() (map[string]bool, error)
 	Meta() (Meta, error)
 	Close() error
 }
@@ -60,6 +64,18 @@ type Meta struct {
 	Schema    int                   `json:"schema"`
 	BuiltAt   time.Time             `json:"built_at"` // when this database was assembled locally
 	Providers map[string]Provenance `json:"providers"`
+	// Ecosystems is every key ingestion actually indexed, sorted (D20).
+	//
+	// It exists so a lookup that finds nothing can be told apart from a lookup
+	// in an ecosystem this database never held. Both return zero advisories,
+	// and without this the second reads as a clean scan.
+	//
+	// SetMeta fills it from what Put indexed and ignores whatever the caller
+	// passed. For Alpine those differ: db update fetches one archive named
+	// "Alpine" whose records carry Alpine:v3.2 through Alpine:v3.24, so a
+	// caller reporting its fetch list would claim a key nothing is looked up
+	// under and omit the 23 that are.
+	Ecosystems []string `json:"ecosystems"`
 }
 
 type Provenance struct {
