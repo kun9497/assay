@@ -184,3 +184,51 @@ func TestTable_Deterministic(t *testing.T) {
 		t.Error("Table output is not deterministic")
 	}
 }
+
+// D8/D10: when the advisory was written against the source package, the report
+// must name it. Otherwise the reader looks up the advisory, finds no mention of
+// the package the table blamed, and cannot tell a real finding from a bug.
+func TestTable_ShowsTheSourcePackageWhenItIsWhatMatched(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package: pkgmeta.Package{
+			Name: "libssl3", Version: "3.1.4-r5", Ecosystem: "Alpine:v3.19",
+			Source: &pkgmeta.SourcePackage{Name: "openssl"},
+		},
+		// The ID deliberately does not contain "openssl". An ID like
+		// CVE-2024-openssl satisfies the substring check below on its own, so
+		// the assertion passed with the source package unprinted.
+		Advisory:    advisory.Advisory{ID: "CVE-2024-12345"},
+		MatchedName: "openssl",
+	}}}
+
+	var buf bytes.Buffer
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "libssl3") {
+		t.Errorf("output does not name the installed package:\n%s", out)
+	}
+	if !strings.Contains(out, "libssl3 (openssl)") {
+		t.Errorf("output does not name the source package the advisory was written "+
+			"against, so the finding cannot be checked:\n%s", out)
+	}
+}
+
+// A package that matched under its own name must not gain a redundant
+// parenthetical — noise in the common case buries the case that matters.
+func TestTable_DoesNotRepeatTheNameWhenItMatchedDirectly(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:     pkgmeta.Package{Name: "busybox", Version: "1.36.1-r15", Ecosystem: "Alpine:v3.19"},
+		Advisory:    advisory.Advisory{ID: "CVE-2024-busybox"},
+		MatchedName: "busybox",
+	}}}
+
+	var buf bytes.Buffer
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "busybox (busybox)") {
+		t.Errorf("direct match printed a redundant source package:\n%s", buf.String())
+	}
+}

@@ -30,11 +30,10 @@ var (
 )
 
 type Store interface {
+	// Lookup answers for a package name. Source-package advisories (D8) need
+	// no separate method: OSV writes the source name into Affected[].Name, so
+	// the caller queries this with the source name as a second key.
 	Lookup(ecosystem, name string) ([]advisory.Advisory, error)
-	// LookupBySource resolves advisories keyed on a source package (D8).
-	// Unused in slice 1 — distro packages arrive in slice 2 — but present so
-	// the interface does not change under its first real consumer.
-	LookupBySource(ecosystem, sourceName string) ([]advisory.Advisory, error)
 	Meta() (Meta, error)
 	Close() error
 }
@@ -43,7 +42,6 @@ type Store interface {
 // handed something it could write through.
 type Writer interface {
 	Put(a advisory.Advisory) error
-	PutSourceIndex(ecosystem, sourceName, id string) error
 	SetMeta(m Meta) error
 	Close() error
 }

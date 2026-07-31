@@ -71,8 +71,17 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 			if aliases == "" {
 				aliases = "-"
 			}
+			// When the advisory was written against a different package than
+			// the one installed — the source package (D8) — the report has to
+			// say so. "libssl3 is vulnerable to CVE-x" is unverifiable when the
+			// advisory that says so names openssl; the reader looks it up, sees
+			// no mention of libssl3, and cannot tell a real finding from a bug.
+			name := f.Package.Name
+			if f.MatchedName != "" && f.MatchedName != f.Package.Name {
+				name = f.Package.Name + " (" + f.MatchedName + ")"
+			}
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
-				f.Package.Name, f.Package.Version, f.Package.Ecosystem,
+				name, f.Package.Version, f.Package.Ecosystem,
 				f.Advisory.ID, aliases, fixed)
 		}
 		if err := tw.Flush(); err != nil {

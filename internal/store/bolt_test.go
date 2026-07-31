@@ -156,38 +156,40 @@ func TestLookupNormalizesPyPINames(t *testing.T) {
 	}
 }
 
-func TestLookupBySource(t *testing.T) {
+func TestLookupFindsSourceKeyedAdvisories(t *testing.T) {
+	// D8 through the ordinary index. OSV writes the SOURCE package name into
+	// Affected[].Name for distro advisories -- 32,069 of 33,589 Alpine affected
+	// entries carry ?arch=source -- so Put already indexes it and the matcher
+	// reaches it by calling Lookup a second time with the source name. There is
+	// no separate by-source bucket; slice 1 reserved one before the data was
+	// measured.
 	a := advisory.Advisory{
 		ID:     "ALPINE-CVE-1",
 		Source: "osv",
 		Kind:   advisory.KindVulnerability,
 		Affected: []advisory.Affected{
-			{Ecosystem: "Alpine:v3.19", Name: "apache2"},
+			// openssl is the source package; libssl3 is what is installed.
+			{Ecosystem: "Alpine:v3.19", Name: "openssl"},
 		},
 	}
-	path := filepath.Join(t.TempDir(), "v.db")
-	w, err := Create(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := w.PutSourceIndex("Alpine:v3.19", "apache2", a.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := w.Put(a); err != nil {
-		t.Fatal(err)
-	}
-	// A PyPI source name, so the write and the read must agree on normalization.
-	// The Alpine case above cannot see that: NormalizeName is a no-op for it, so
-	// either side could stop normalizing and this test would still pass.
+	// A PyPI name too, so the write and the read must agree on normalization.
+	// The Alpine case cannot see that: NormalizeName is a no-op for it, so
+	// either side could stop normalizing and the test would still pass.
 	pypiAdv := advisory.Advisory{
 		ID:     "PYSEC-src",
 		Source: "osv",
 		Kind:   advisory.KindVulnerability,
 		Affected: []advisory.Affected{
-			{Ecosystem: "PyPI", Name: "zope-interface"},
+			{Ecosystem: "PyPI", Name: "Zope.Interface"},
 		},
 	}
-	if err := w.PutSourceIndex("PyPI", "Zope.Interface", pypiAdv.ID); err != nil {
+
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Put(a); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.Put(pypiAdv); err != nil {
@@ -209,21 +211,22 @@ func TestLookupBySource(t *testing.T) {
 	}
 	defer db.Close()
 
-	got, err := db.LookupBySource("Alpine:v3.19", "apache2")
+	got, err := db.Lookup("Alpine:v3.19", "openssl")
 	if err != nil {
-		t.Fatalf("LookupBySource: %v", err)
+		t.Fatalf("Lookup: %v", err)
 	}
 	if len(got) != 1 || got[0].ID != "ALPINE-CVE-1" {
-		t.Errorf("LookupBySource = %+v, want ALPINE-CVE-1", got)
+		t.Errorf("Lookup(Alpine:v3.19, openssl) = %+v, want ALPINE-CVE-1", got)
 	}
 
 	for _, spelling := range []string{"zope.interface", "Zope_Interface", "zope-interface"} {
-		got, err := db.LookupBySource("PyPI", spelling)
+		got, err := db.Lookup("PyPI", spelling)
 		if err != nil {
-			t.Fatalf("LookupBySource(PyPI, %q): %v", spelling, err)
+			t.Fatalf("Lookup(PyPI, %q): %v", spelling, err)
 		}
 		if len(got) != 1 {
-			t.Errorf("LookupBySource(PyPI, %q) returned %d, want 1", spelling, len(got))
+			t.Errorf("Lookup(PyPI, %q) returned %d, want 1: Put and Lookup must "+
+				"agree on normalization", spelling, len(got))
 		}
 	}
 }
