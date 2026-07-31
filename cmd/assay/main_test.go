@@ -17,11 +17,13 @@ func TestRun_ExitCodes(t *testing.T) {
 		{"help", []string{"help"}, exitOK},
 		{"unknown command", []string{"bogus"}, exitError},
 		{"scan without target", []string{"scan"}, exitError},
-		// An image reference is not a path, and images are not read directly
-		// until slice 2b. It must fail loudly rather than be interpreted as a
-		// filename that happens not to exist — a scanner that returns 0 on a
-		// target it never opened is worse than one that fails.
-		{"scan of an image reference, which is not a path", []string{"scan", "alpine:3.19"}, exitError},
+		// An explicit image reference that cannot be read must fail loudly
+		// rather than be interpreted as a clean, empty scan (D11). This uses a
+		// docker-archive: prefix pointing at a file that does not exist, rather
+		// than a bare registry reference like "alpine:3.19": the prefix makes
+		// classification unambiguous and the load fails locally, so the test
+		// never reaches an actual registry over the network.
+		{"scan of an image target that cannot be read", []string{"scan", "docker-archive:/does/not/exist.tar"}, exitError},
 		{"db without subcommand", []string{"db"}, exitError},
 		{"db unknown subcommand", []string{"db", "bogus"}, exitError},
 	}
