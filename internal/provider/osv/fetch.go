@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,9 +19,28 @@ import (
 // DefaultBaseURL is where OSV publishes one archive per ecosystem.
 const DefaultBaseURL = "https://osv-vulnerabilities.storage.googleapis.com"
 
-// Ecosystems is slice 1's scope. Distro ecosystems arrive in slice 2, where
-// their keys carry a release (D6).
+// Ecosystems is the language-ecosystem scope. It is a fixed list because these
+// keys never change. Distro ecosystems cannot be: they carry a release (D6)
+// and Alpine publishes a new one every six months, so a hardcoded list would
+// not fail — it would quietly stop covering new images.
 var Ecosystems = []string{"Go", "npm", "PyPI"}
+
+// AllEcosystems is what `assay db update` fetches: the fixed language list
+// plus whatever Alpine releases the bucket currently publishes. Discovery is
+// a network call, so callers on the scan path must never reach for this —
+// only `db update` should.
+func AllEcosystems(ctx context.Context) ([]string, error) {
+	c := &http.Client{Timeout: 2 * time.Minute}
+	alpine, err := AlpineEcosystems(ctx, c)
+	if err != nil {
+		// Do not fall back to the language list. Building a database that
+		// silently contains no Alpine data, then scanning an Alpine image
+		// against it, reports "no known vulnerabilities" — the exact failure
+		// exit code 2 exists to prevent (D11).
+		return nil, err
+	}
+	return append(slices.Clone(Ecosystems), alpine...), nil
+}
 
 type Provider struct {
 	ecosystems []string

@@ -85,8 +85,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		switch args[1] {
 		case "update":
-			return dbcmd.Update(context.Background(), path,
-				[]provider.Provider{osv.New(osv.Ecosystems, "")}, stdout, stderr)
+			ctx := context.Background()
+			// Alpine's ecosystem keys carry a release (D6) and there is no
+			// fixed list to compile in (a new Alpine release every six
+			// months would silently stop being covered), so the list is
+			// resolved here, on the update path, never on the scan path.
+			ecosystems, err := osv.AllEcosystems(ctx)
+			if err != nil {
+				fmt.Fprintf(stderr, "error: resolve ecosystems: %v\n", err)
+				return exitError
+			}
+			return dbcmd.Update(ctx, path,
+				[]provider.Provider{osv.New(ecosystems, "")}, stdout, stderr)
 		case "status":
 			return dbcmd.Status(path, stdout, stderr)
 		default:
