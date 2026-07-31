@@ -1,6 +1,7 @@
 package source
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -71,15 +72,19 @@ func classify(ref string) kind {
 
 // Open resolves a target to its layers. A registry reference reaches the
 // network; the other two never do (D14).
-func Open(ref string) (*Image, error) {
-	img, err := load(ref)
+//
+// The context is honoured on the registry path. go-containerregistry's default
+// transport sets no overall deadline, so without one a black-holed registry
+// hangs the scan with nothing to cancel it.
+func Open(ctx context.Context, ref string) (*Image, error) {
+	img, err := load(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
 	return fromV1(img)
 }
 
-func load(ref string) (v1.Image, error) {
+func load(ctx context.Context, ref string) (v1.Image, error) {
 	switch classify(ref) {
 	case kindTarball:
 		p := strings.TrimPrefix(ref, schemeTarball)
@@ -95,14 +100,21 @@ func load(ref string) (v1.Image, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read oci layout %s: %w", p, err)
 		}
-		return imageFromIndex(idx, p)
+		return imageFromIndex(v1Index{idx}, p)
 
 	default:
 		r, err := name.ParseReference(ref)
 		if err != nil {
 			return nil, fmt.Errorf("parse reference %q: %w", ref, err)
 		}
-		img, err := remote.Image(r)
+		// remote.Image defaults to linux/amd64 and never consults the host, so
+		// on an arm64 machine `assay scan alpine:3.19` would quietly scan the
+		// amd64 image: a full package list, just not the one that runs. The
+		// platform is stated rather than defaulted.
+		img, err := remote.Image(r,
+			remote.WithContext(ctx),
+			remote.WithPlatform(hostPlatform()),
+		)
 		if err != nil {
 			return nil, fmt.Errorf("pull %s: %w", ref, err)
 		}
@@ -117,6 +129,32 @@ func load(ref string) (v1.Image, error) {
 type indexReader interface {
 	IndexManifest() (*v1.IndexManifest, error)
 	Image(v1.Hash) (v1.Image, error)
+	// ImageIndex returns indexReader rather than v1.ImageIndex so a test double
+	// can satisfy it. Go has no covariant returns, so the real type is adapted
+	// by v1Index below rather than used directly.
+	ImageIndex(v1.Hash) (indexReader, error)
+}
+
+// hostPlatform is a variable so a test can ask for a platform this machine is
+// not. Hard-coding runtime.GOARCH makes the "we forgot to state the platform"
+// bug invisible on an amd64 host, because the library's default happens to be
+// the right answer there — and amd64 is where it will be tested.
+var hostPlatform = func() v1.Platform {
+	return v1.Platform{OS: "linux", Architecture: runtime.GOARCH}
+}
+
+// v1Index adapts go-containerregistry's index to indexReader, narrowing the
+// recursive method's return type as it goes.
+type v1Index struct{ idx v1.ImageIndex }
+
+func (w v1Index) IndexManifest() (*v1.IndexManifest, error) { return w.idx.IndexManifest() }
+func (w v1Index) Image(h v1.Hash) (v1.Image, error)         { return w.idx.Image(h) }
+func (w v1Index) ImageIndex(h v1.Hash) (indexReader, error) {
+	c, err := w.idx.ImageIndex(h)
+	if err != nil {
+		return nil, err
+	}
+	return v1Index{c}, nil
 }
 
 // imageFromIndex picks this host's platform out of a multi-platform index.
@@ -126,29 +164,95 @@ type indexReader interface {
 // running — so a miss is an error naming what was on offer, never a fallback
 // to the first entry.
 func imageFromIndex(idx indexReader, what string) (v1.Image, error) {
-	m, err := idx.IndexManifest()
+	img, offered, err := searchIndex(idx, what, 0)
 	if err != nil {
 		return nil, err
 	}
+	if img != nil {
+		return img, nil
+	}
+	if len(offered) == 0 {
+		return nil, fmt.Errorf("%s contains no image for any platform; wanted linux/%s",
+			what, runtime.GOARCH)
+	}
+	return nil, fmt.Errorf("%s has no linux/%s image; it offers %s",
+		what, runtime.GOARCH, strings.Join(offered, ", "))
+}
+
+// maxIndexDepth bounds nesting. `skopeo copy --all` writes an index whose
+// children are themselves indexes, and a malformed one could cycle.
+const maxIndexDepth = 4
+
+// searchIndex walks an index, descending into nested ones, and returns the
+// image for this host if it finds one along with the platforms it saw.
+//
+// Two shapes appear in real layouts and neither has a usable Platform on the
+// descriptor: a nested index (a manifest-list export), and a single image whose
+// descriptor carries only a ref-name annotation. Both used to fail with "it
+// offers " and an empty list — an error naming nothing, which tells an operator
+// only that something went wrong.
+func searchIndex(idx indexReader, what string, depth int) (v1.Image, []string, error) {
+	if depth >= maxIndexDepth {
+		return nil, nil, fmt.Errorf("%s nests indexes more than %d deep", what, maxIndexDepth)
+	}
+	m, err := idx.IndexManifest()
+	if err != nil {
+		return nil, nil, err
+	}
+
 	var offered []string
 	for _, d := range m.Manifests {
+		if d.MediaType.IsIndex() {
+			child, err := idx.ImageIndex(d.Digest)
+			if err != nil {
+				return nil, nil, err
+			}
+			img, childOffered, err := searchIndex(child, what, depth+1)
+			if err != nil {
+				return nil, nil, err
+			}
+			offered = append(offered, childOffered...)
+			if img != nil {
+				return img, offered, nil
+			}
+			continue
+		}
+
 		p := d.Platform
 		if p == nil {
+			// No platform on the descriptor. The image's own config still
+			// carries one, so ask it rather than discarding the entry — a
+			// single-image layout written by layout.Write lands here.
+			img, err := idx.Image(d.Digest)
+			if err != nil {
+				continue
+			}
+			cf, err := img.ConfigFile()
+			if err != nil {
+				continue
+			}
+			if cf.OS == "linux" && cf.Architecture == runtime.GOARCH {
+				return img, offered, nil
+			}
+			if cf.OS != "" && cf.Architecture != "" && cf.OS != "unknown" {
+				offered = append(offered, cf.OS+"/"+cf.Architecture)
+			}
 			continue
 		}
 		// Attestation and SBOM manifests are carried in the same index with
 		// platform unknown/unknown — alpine:3.19 has several among its 14.
-		// They contain no filesystem, so selecting one yields an empty scan.
+		// They contain no filesystem, so selecting one yields an empty scan,
+		// and listing them as options tells an operator nothing.
 		if p.OS == "unknown" || p.Architecture == "unknown" {
 			continue
 		}
 		offered = append(offered, p.OS+"/"+p.Architecture)
 		if p.OS == "linux" && p.Architecture == runtime.GOARCH {
-			return idx.Image(d.Digest)
+			img, err := idx.Image(d.Digest)
+			return img, offered, err
 		}
 	}
-	return nil, fmt.Errorf("%s has no linux/%s image; it offers %s",
-		what, runtime.GOARCH, strings.Join(offered, ", "))
+	return nil, offered, nil
 }
 
 func fromV1(img v1.Image) (*Image, error) {

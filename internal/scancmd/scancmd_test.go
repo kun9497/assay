@@ -3,6 +3,7 @@ package scancmd
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -23,7 +24,7 @@ func TestRun_MissingDatabase(t *testing.T) {
 	os.WriteFile(sbom, []byte(`{"bomFormat":"CycloneDX","components":[]}`), 0o600)
 
 	var out, errOut bytes.Buffer
-	code := Run(filepath.Join(t.TempDir(), "absent.db"), sbom, &out, &errOut)
+	code := Run(context.Background(), filepath.Join(t.TempDir(), "absent.db"), sbom, &out, &errOut)
 	if code != 2 {
 		t.Errorf("Run without a database = %d, want 2", code)
 	}
@@ -37,7 +38,7 @@ func TestRun_MissingDatabase(t *testing.T) {
 
 func TestRun_MissingSBOM(t *testing.T) {
 	var out, errOut bytes.Buffer
-	code := Run(filepath.Join(t.TempDir(), "absent.db"),
+	code := Run(context.Background(), filepath.Join(t.TempDir(), "absent.db"),
 		filepath.Join(t.TempDir(), "absent.cdx.json"), &out, &errOut)
 	if code != 2 {
 		t.Errorf("Run with a missing SBOM = %d, want 2", code)
@@ -153,8 +154,8 @@ func TestRun_TargetKinds(t *testing.T) {
 			t.Fatal(err)
 		}
 		var out, errOut bytes.Buffer
-		if code := Run(dbPath, sbom, &out, &errOut); code != 0 {
-			t.Errorf("Run(sbom) = %d, want 0 (stderr: %s)", code, errOut.String())
+		if code := Run(context.Background(), dbPath, sbom, &out, &errOut); code != 0 {
+			t.Errorf("Run(context.Background(), sbom) = %d, want 0 (stderr: %s)", code, errOut.String())
 		}
 		if !strings.Contains(out.String(), "no components") {
 			t.Errorf("stdout = %q, want the empty-document message", out.String())
@@ -168,8 +169,8 @@ func TestRun_TargetKinds(t *testing.T) {
 			apkDBPath:     apkOneRecord,
 		})
 		var out, errOut bytes.Buffer
-		if code := Run(dbPath, "docker-archive:"+tarPath, &out, &errOut); code != 0 {
-			t.Errorf("Run(docker-archive) = %d, want 0 (stderr: %s)", code, errOut.String())
+		if code := Run(context.Background(), dbPath, "docker-archive:"+tarPath, &out, &errOut); code != 0 {
+			t.Errorf("Run(context.Background(), docker-archive) = %d, want 0 (stderr: %s)", code, errOut.String())
 		}
 		if !strings.Contains(out.String(), "1 package") {
 			t.Errorf("stdout = %q, want the one apk package to have been evaluated", out.String())
@@ -184,9 +185,9 @@ func TestRun_TargetKinds(t *testing.T) {
 		// proof of which loader it reached, without ever touching the
 		// network.
 		var out, errOut bytes.Buffer
-		code := Run(dbPath, "NOT a valid ref!!", &out, &errOut)
+		code := Run(context.Background(), dbPath, "NOT a valid ref!!", &out, &errOut)
 		if code != 2 {
-			t.Errorf("Run(invalid ref) = %d, want 2", code)
+			t.Errorf("Run(context.Background(), invalid ref) = %d, want 2", code)
 		}
 		if !strings.Contains(errOut.String(), "parse reference") {
 			t.Errorf("stderr = %q, want it to name reference parsing, proving "+
@@ -202,9 +203,9 @@ func TestRun_UnreadableTargetExits2(t *testing.T) {
 	target := "docker-archive:" + filepath.Join(t.TempDir(), "absent.tar")
 
 	var out, errOut bytes.Buffer
-	code := Run(dbPath, target, &out, &errOut)
+	code := Run(context.Background(), dbPath, target, &out, &errOut)
 	if code != 2 {
-		t.Errorf("Run(unreadable image) = %d, want 2", code)
+		t.Errorf("Run(context.Background(), unreadable image) = %d, want 2", code)
 	}
 	if out.Len() != 0 {
 		t.Errorf("error path polluted stdout: %q", out.String())
@@ -225,9 +226,9 @@ func TestRun_ImageWithoutOSReleaseIsNotClean(t *testing.T) {
 	})
 
 	var out, errOut bytes.Buffer
-	code := Run(dbPath, "docker-archive:"+tarPath, &out, &errOut)
+	code := Run(context.Background(), dbPath, "docker-archive:"+tarPath, &out, &errOut)
 	if code != 2 {
-		t.Errorf("Run(image without os-release) = %d, want 2 (stdout: %s, stderr: %s)",
+		t.Errorf("Run(context.Background(), image without os-release) = %d, want 2 (stdout: %s, stderr: %s)",
 			code, out.String(), errOut.String())
 	}
 	if !strings.Contains(out.String(), "NOT a clean result") {
@@ -246,9 +247,9 @@ func TestRun_ImageWithoutApkDBIsNotClean(t *testing.T) {
 	})
 
 	var out, errOut bytes.Buffer
-	code := Run(dbPath, "docker-archive:"+tarPath, &out, &errOut)
+	code := Run(context.Background(), dbPath, "docker-archive:"+tarPath, &out, &errOut)
 	if code != 2 {
-		t.Errorf("Run(image without apk db) = %d, want 2 (stdout: %s, stderr: %s)",
+		t.Errorf("Run(context.Background(), image without apk db) = %d, want 2 (stdout: %s, stderr: %s)",
 			code, out.String(), errOut.String())
 	}
 }

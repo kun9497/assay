@@ -1,10 +1,16 @@
 package source
 
 import (
+	"context"
+	"fmt"
 	"io"
+	"net/http"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	v1 "github.com/google/go-containerregistry/pkg/v1"
 )
 
 func TestClassify(t *testing.T) {
@@ -111,5 +117,104 @@ func TestImageFromIndex_RefusesUnknownPlatformOnly(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), runtime.GOARCH) {
 		t.Errorf("error %q does not say which platform was wanted", err)
+	}
+	// The positive match already excludes unknown/unknown, so the error above
+	// fires with or without the skip. What the skip is FOR is the message: an
+	// operator reading "it offers unknown/unknown" learns nothing, and the
+	// entries are not images at all. Assert the message the skip produces.
+	if strings.Contains(err.Error(), "unknown") {
+		t.Errorf("error %q offers unknown/unknown as if it were a choice; "+
+			"attestation manifests are not images", err)
+	}
+}
+
+// An index carrying a real platform alongside attestations must still list the
+// real one, so the operator learns what the image actually has.
+func TestImageFromIndex_ErrorNamesTheRealPlatformsOnly(t *testing.T) {
+	_, err := imageFromIndex(fakeIndex{platforms: []string{
+		"unknown/unknown", "linux/riscv64", "unknown/unknown",
+	}}, "test")
+	if err == nil {
+		t.Fatal("selected a riscv64 image on this host")
+	}
+	if !strings.Contains(err.Error(), "linux/riscv64") {
+		t.Errorf("error %q does not name the platform that was on offer", err)
+	}
+	if strings.Contains(err.Error(), "unknown") {
+		t.Errorf("error %q lists attestation manifests as platforms", err)
+	}
+}
+
+// D14, as narrowed for this slice: a scan of a local target makes no network
+// call at all. That is the air-gapped path, and it is a property of the code
+// rather than of anyone's intention — nothing else here would notice a
+// remote. call added to the tarball or layout branch.
+//
+// The check is a transport that fails any request, installed on the default
+// client. A local load must not touch it; only the registry branch may.
+func TestOpen_LocalTargetsMakeNoNetworkCall(t *testing.T) {
+	var reached int
+	restore := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		reached++
+		return nil, fmt.Errorf("network call to %s on a local target", r.URL)
+	})
+	t.Cleanup(func() { http.DefaultTransport = restore })
+
+	for _, ref := range []string{
+		"docker-archive:" + filepath.Join(t.TempDir(), "absent.tar"),
+		"oci-dir:" + filepath.Join(t.TempDir(), "absent"),
+	} {
+		// The load fails — the paths do not exist — but the point is where it
+		// fails. A network call would be counted before the error surfaced.
+		_, _ = Open(context.Background(), ref)
+	}
+	if reached != 0 {
+		t.Errorf("a local target made %d network call(s); D14 forbids any", reached)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// `skopeo copy --all` writes a layout whose child is itself an index. The
+// first version failed on it with "it offers " and an empty list — an error
+// naming nothing at all.
+func TestImageFromIndex_DescendsIntoNestedIndexes(t *testing.T) {
+	inner := fakeIndex{platforms: []string{"linux/" + runtime.GOARCH}}
+	outer := fakeIndex{children: map[string]fakeIndex{strings.Repeat("a", 64): inner}}
+	if _, err := imageFromIndex(outer, "nested"); err != nil {
+		t.Errorf("imageFromIndex on a nested index: %v", err)
+	}
+}
+
+// A single-image layout carries a descriptor with no platform; the image's own
+// config still says what it is. Discarding those entries made oci-dir: fail on
+// the shape layout.Write produces.
+func TestImageFromIndex_ReadsPlatformFromTheConfigWhenTheDescriptorHasNone(t *testing.T) {
+	hex := strings.Repeat("b", 64)
+	idx := fakeIndex{
+		noPlatform: []string{hex},
+		images:     map[string]v1.Image{hex: configImage{os: "linux", arch: runtime.GOARCH}},
+	}
+	if _, err := imageFromIndex(idx, "single"); err != nil {
+		t.Errorf("imageFromIndex on a platform-less descriptor: %v", err)
+	}
+}
+
+// ...and it must still refuse the wrong architecture rather than take it.
+func TestImageFromIndex_ConfigPlatformIsStillChecked(t *testing.T) {
+	hex := strings.Repeat("c", 64)
+	idx := fakeIndex{
+		noPlatform: []string{hex},
+		images:     map[string]v1.Image{hex: configImage{os: "linux", arch: "riscv64"}},
+	}
+	_, err := imageFromIndex(idx, "single")
+	if err == nil {
+		t.Fatal("accepted a riscv64 image on this host")
+	}
+	if !strings.Contains(err.Error(), "linux/riscv64") {
+		t.Errorf("error %q does not name what the layout actually holds", err)
 	}
 }

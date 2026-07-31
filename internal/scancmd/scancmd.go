@@ -3,6 +3,7 @@ package scancmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -31,14 +32,14 @@ const (
 // source.ClassifyTarget so one argument reaches the right loader. Slice 1 has
 // no --fail-on, so a completed scan exits 0 even with findings; the exit-2
 // paths are what matter here.
-func Run(dbPath, target string, stdout, stderr io.Writer) int {
+func Run(ctx context.Context, dbPath, target string, stdout, stderr io.Writer) int {
 	var (
 		inventory pkgmeta.Target
 		cat       cyclonedx.Stats
 	)
 
 	if source.ClassifyTarget(target) == source.TargetImage {
-		t, stats, err := catalogImage(target)
+		t, stats, err := catalogImage(ctx, target)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: open %s: %v\n", target, err)
 			return 2
@@ -98,8 +99,8 @@ func Run(dbPath, target string, stdout, stderr io.Writer) int {
 // around catalogFromImage so tests can drive the cataloging logic directly,
 // against a hand-built *source.Image, without going through a real registry,
 // tarball, or layout.
-func catalogImage(ref string) (pkgmeta.Target, cyclonedx.Stats, error) {
-	img, err := source.Open(ref)
+func catalogImage(ctx context.Context, ref string) (pkgmeta.Target, cyclonedx.Stats, error) {
+	img, err := source.Open(ctx, ref)
 	if err != nil {
 		return pkgmeta.Target{}, cyclonedx.Stats{}, err
 	}
