@@ -16,21 +16,23 @@ affecting it.
 
 ## Status
 
-🚧 **Early development. Matching works; reading images does not yet.**
+🚧 **Early development. Alpine containers scan end to end; other distros do not.**
 
-`assay db update` builds a local database from OSV, and `assay scan <file>.cdx.json` matches
-a CycloneDX SBOM against it — Go, npm, PyPI, and **Alpine**. On real SBOMs it reports the
-same findings as grype: same CVEs, not just the same count. See [Roadmap](#roadmap).
+`assay db update` builds a local database from OSV, and `assay scan` matches against it —
+Go, npm, PyPI, and **Alpine**. It reads container images directly, so syft is no longer in
+the loop. On real targets it reports the same findings as grype: same CVEs, not just the
+same count. See [Roadmap](#roadmap).
 
 Alpine packages match through their *source* package, so an `openssl` advisory reaches the
 installed `libssl3`, and the report names both. That indirection is where distro scanners
 silently miss things.
 
-Everything else below is still the design target, not the build. Concretely, `scan` takes
-one CycloneDX file path and **accepts no flags**: container images, binaries, and
-directories are not read directly — produce an SBOM with syft first — and neither
-`--fail-on`, `--fail-on-unknown`, nor `--output json` exists. Exit code 1 is therefore
-unreachable today: a completed scan exits 0 even when it reports findings.
+Everything else below is still the design target, not the build. `scan` **accepts no
+flags**: neither `--fail-on`, `--fail-on-unknown`, nor `--output json` exists, so exit
+code 1 is unreachable — a completed scan exits 0 even when it reports findings. Binaries
+and directories are not read either. Non-Alpine images are read, but their packages cannot
+be matched: `assay scan debian:12` reports that it found no supported package database and
+exits 2, rather than reporting a clean image it never checked.
 
 [`docs/superpowers/specs/2026-07-29-assay-roadmap.md`](docs/superpowers/specs/2026-07-29-assay-roadmap.md)
 carries the full design and the reasoning behind each decision.
@@ -78,18 +80,25 @@ make build
 Working today:
 
 ```bash
-# Build the local vulnerability database — the only command that needs network
+# Build the local vulnerability database — the only command that fetches advisories
 assay db update
 
 # What is in the database, and how current is it
 assay db status
 
+# Scan a container image from a registry
+assay scan alpine:3.19
+
+# ...or one you already have on disk. Neither of these touches the network.
+docker save alpine:3.19 -o alpine.tar && assay scan docker-archive:alpine.tar
+skopeo copy docker://alpine:3.19 oci:layout && assay scan oci-dir:layout
+
 # Scan a CycloneDX SBOM (Go, npm, PyPI, Alpine)
 assay scan sbom.cdx.json
-
-# Container images are not read directly yet; produce the SBOM first
-syft alpine:3.19 -o cyclonedx-json > alpine.cdx.json && assay scan alpine.cdx.json
 ```
+
+An argument is read as an image when it carries a `docker-archive:` or `oci-dir:` prefix,
+as an SBOM when it names a file that exists, and as a registry reference otherwise.
 
 Not implemented yet — listed so the target is unambiguous, not because it runs:
 
@@ -245,11 +254,16 @@ keys, source-package indirection, apk version ordering.
 - [x] `Package.Source` indirect matching
 - [x] Alpine advisory ingestion
 
-**②b Containers** — registry pull, layer extraction, whiteouts, `/etc/os-release`,
-`/lib/apk/db/installed`. Everything above is a prerequisite: an image read perfectly but
-matched against no distro ecosystem yields nothing.
+**②b Containers** ✅ — registry pull, layer extraction, whiteouts, `/etc/os-release`,
+`/lib/apk/db/installed`.
 
-- [ ] Container image scanning (Alpine first)
+- [x] Images from a registry, a `docker save` tarball, or an OCI layout
+- [x] Layer walking with whiteout and symlink resolution
+- [x] `/etc/os-release` and `/lib/apk/db/installed` catalogers
+
+The Docker daemon is deliberately not a source: importing it takes the linked dependency
+count from 9 modules to 27, and an image already present locally reaches `assay` through
+`docker save`.
 
 **③ Filesystem and binary targets** — depends on neither ② nor ④, so it can slot in
 anywhere.
@@ -277,6 +291,21 @@ matcher is wrong. Slice ① came out set-identical on both SBOMs it was run agai
 | PyPI SBOM (mixed-case names) | 32 | 32 | 0 | 0 |
 | Go module SBOM | 4 | 4 | 0 | 0 |
 | `alpine:3.19` SBOM | 10 | 10 | 0 | 0 |
+
+Reading the image directly is checked against the SBOM path rather than against grype,
+because that comparison holds the database, matcher, and comparer fixed — any divergence is
+ours alone. All four routes to the same image agree exactly:
+
+| Route | findings |
+|---|---:|
+| syft SBOM | 10 |
+| registry pull | 10 |
+| `docker save` tarball | 10 |
+| OCI layout directory | 10 |
+
+The component totals differ by one, legitimately: syft emits an `operating-system`
+component that the SBOM path counts and excludes, and reading the image directly produces
+no such entry.
 
 Compared against grype's **distro-namespace** findings. Its `nvd:cpe` matches — 11 more on
 the same image — come from CPE heuristics that `assay` does not implement, so folding them

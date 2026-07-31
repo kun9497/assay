@@ -15,20 +15,22 @@
 
 ## 현재 상태
 
-🚧 **초기 개발 단계. 매칭은 동작하고, 이미지를 직접 읽는 것은 아직입니다.**
+🚧 **초기 개발 단계. Alpine 컨테이너는 끝에서 끝까지 스캔되고, 다른 배포판은 아직입니다.**
 
-`assay db update`가 OSV로부터 로컬 데이터베이스를 만들고, `assay scan <파일>.cdx.json`이
-CycloneDX SBOM을 거기에 매칭합니다 — Go, npm, PyPI, 그리고 **Alpine**. 실제 SBOM에서 grype와
-동일한 finding을 보고합니다: 개수만 같은 것이 아니라 CVE 집합이 같습니다. [로드맵](#로드맵) 참조.
+`assay db update`가 OSV로부터 로컬 데이터베이스를 만들고, `assay scan`이 거기에 매칭합니다 —
+Go, npm, PyPI, 그리고 **Alpine**. **컨테이너 이미지를 직접 읽으므로 syft가 더 이상 필요하지
+않습니다.** 실제 대상에서 grype와 동일한 finding을 보고합니다: 개수만 같은 것이 아니라 CVE
+집합이 같습니다. [로드맵](#로드맵) 참조.
 
 Alpine 패키지는 **소스 패키지를 거쳐** 매칭됩니다. `openssl` 권고가 설치된 `libssl3`에
 도달하고, 리포트가 둘 다 표시합니다. distro 스캐너가 조용히 놓치는 지점이 바로 이 간접 참조입니다.
 
-그 아래 내용은 여전히 구현이 아니라 설계 목표입니다. 구체적으로, `scan`은 CycloneDX 파일 경로
-하나만 받고 **플래그를 전혀 받지 않습니다.** 컨테이너 이미지·바이너리·디렉터리를 직접 읽지
-못하므로 syft로 SBOM을 먼저 만들어야 하고, `--fail-on`, `--fail-on-unknown`, `--output json`도
-없습니다. 따라서 종료 코드 1은 현재 도달 불가능합니다 — 완료된 스캔은 finding을 보고하더라도
-0을 반환합니다.
+그 아래 내용은 여전히 구현이 아니라 설계 목표입니다. `scan`은 **플래그를 전혀 받지 않습니다** —
+`--fail-on`, `--fail-on-unknown`, `--output json` 모두 없어서 종료 코드 1은 도달 불가능합니다.
+완료된 스캔은 finding을 보고하더라도 0을 반환합니다. 바이너리와 디렉터리도 아직 읽지 못합니다.
+Alpine이 아닌 이미지는 **읽기는 하지만 매칭할 수 없습니다** — `assay scan debian:12`는 지원하는
+패키지 데이터베이스를 찾지 못했다고 말하고 2를 반환합니다. 검사한 적 없는 이미지를 깨끗하다고
+보고하지 않습니다.
 
 [`docs/superpowers/specs/2026-07-29-assay-roadmap.ko.md`](docs/superpowers/specs/2026-07-29-assay-roadmap.ko.md)에
 전체 설계와 각 결정의 근거가 담겨 있습니다.
@@ -76,18 +78,25 @@ make build
 현재 동작하는 것:
 
 ```bash
-# 로컬 취약점 데이터베이스 구축 — 네트워크가 필요한 유일한 명령
+# 로컬 취약점 데이터베이스 구축 — 권고 데이터를 받아오는 유일한 명령
 assay db update
 
 # 데이터베이스에 무엇이 들어 있고 얼마나 최신인지
 assay db status
 
+# 레지스트리에서 컨테이너 이미지 스캔
+assay scan alpine:3.19
+
+# ...또는 이미 디스크에 있는 것. 둘 다 네트워크를 쓰지 않습니다.
+docker save alpine:3.19 -o alpine.tar && assay scan docker-archive:alpine.tar
+skopeo copy docker://alpine:3.19 oci:layout && assay scan oci-dir:layout
+
 # CycloneDX SBOM 스캔 (Go, npm, PyPI, Alpine)
 assay scan sbom.cdx.json
-
-# 컨테이너 이미지는 아직 직접 읽지 못합니다. SBOM을 먼저 만드십시오
-syft alpine:3.19 -o cyclonedx-json > alpine.cdx.json && assay scan alpine.cdx.json
 ```
+
+인자는 `docker-archive:` 또는 `oci-dir:` 접두사가 있으면 이미지로, 존재하는 파일을 가리키면
+SBOM으로, 그 외에는 레지스트리 참조로 읽습니다.
 
 아직 구현되지 않은 것 — 동작해서가 아니라 목표를 분명히 하기 위해 적어둡니다:
 
@@ -237,11 +246,15 @@ KISA 데이터를 넣을 수 있게 합니다.**
 - [x] `Package.Source` 간접 매칭
 - [x] Alpine 권고 수집
 
-**②b 컨테이너** — 레지스트리 pull, 레이어 추출, whiteout, `/etc/os-release`,
-`/lib/apk/db/installed`. 위의 것들이 전부 전제 조건입니다. 이미지를 완벽하게 읽어도 매칭할
-distro 생태계가 없으면 결과가 나오지 않습니다.
+**②b 컨테이너** ✅ — 레지스트리 pull, 레이어 추출, whiteout, `/etc/os-release`,
+`/lib/apk/db/installed`.
 
-- [ ] 컨테이너 이미지 스캔 (Alpine 우선)
+- [x] 레지스트리·`docker save` tarball·OCI layout에서 이미지 읽기
+- [x] whiteout과 심볼릭 링크를 처리하는 레이어 순회
+- [x] `/etc/os-release`와 `/lib/apk/db/installed` 카탈로거
+
+Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 링크되는 의존성이 모듈 9개에서
+27개로 늘어나고, 로컬에 이미 있는 이미지는 `docker save`로 `assay`에 넘길 수 있습니다.
 
 **③ 파일시스템과 바이너리 타깃** — ②에도 ④에도 의존하지 않으므로 어디든 끼워 넣을 수 있습니다.
 
@@ -267,6 +280,20 @@ distro 생태계가 없으면 결과가 나오지 않습니다.
 | PyPI SBOM (대소문자 혼용 이름) | 32 | 32 | 0 | 0 |
 | Go 모듈 SBOM | 4 | 4 | 0 | 0 |
 | `alpine:3.19` SBOM | 10 | 10 | 0 | 0 |
+
+이미지를 직접 읽는 경로는 grype가 아니라 **SBOM 경로와 대조**합니다. 그래야 데이터베이스·매처·
+비교기가 고정되고, 차이가 나면 그것이 전적으로 우리 것이기 때문입니다. 같은 이미지에 이르는 네
+경로가 정확히 일치합니다:
+
+| 경로 | findings |
+|---|---:|
+| syft SBOM | 10 |
+| 레지스트리 pull | 10 |
+| `docker save` tarball | 10 |
+| OCI layout 디렉터리 | 10 |
+
+컴포넌트 총계는 1 차이 나는 것이 정상입니다. syft가 `operating-system` 컴포넌트를 하나 더
+내보내고 SBOM 경로가 그것을 세었다가 제외하는데, 이미지를 직접 읽으면 그런 항목이 없습니다.
 
 grype의 **distro 네임스페이스** 발견과 비교한 것입니다. grype의 `nvd:cpe` 매칭은 같은
 이미지에서 11건 더 나오지만 `assay`가 구현하지 않는 CPE 휴리스틱에서 오므로, 합쳐서 세면
