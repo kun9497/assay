@@ -338,8 +338,13 @@ func TestMatch_PyPINameIsNormalizedBeforeFiltering(t *testing.T) {
 }
 
 func TestMatch_UnsupportedEcosystemIsSkipped(t *testing.T) {
+	// Debian, not Alpine: Alpine gained a comparer in slice 2a, and an example
+	// that quietly becomes supported stops testing what it claims to. Debian is
+	// a recorded deferral, so it stays unsupported until someone decides
+	// otherwise — and if they do, this test is where they will find out it needs
+	// a new example.
 	res, err := New(fakeStore{}).Match(pkgmeta.Target{
-		Packages: []pkgmeta.Package{pkg("apache2", "2.4.54-r0", "Alpine:v3.19")},
+		Packages: []pkgmeta.Package{pkg("openssl", "3.0.11-1~deb12u2", "Debian:12")},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -347,7 +352,7 @@ func TestMatch_UnsupportedEcosystemIsSkipped(t *testing.T) {
 	if len(res.Skipped) != 1 {
 		t.Fatalf("Skipped = %d, want 1", len(res.Skipped))
 	}
-	if !strings.Contains(res.Skipped[0].Reason, "Alpine:v3.19") {
+	if !strings.Contains(res.Skipped[0].Reason, "Debian:12") {
 		t.Errorf("Skipped.Reason = %q, should name the ecosystem", res.Skipped[0].Reason)
 	}
 }

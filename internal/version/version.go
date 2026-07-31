@@ -5,7 +5,10 @@
 // and a single function that tries to serve them is the bug this design avoids.
 package version
 
-import "errors"
+import (
+	"errors"
+	"strings"
+)
 
 // ErrInvalid marks a version string that cannot be ordered. Callers must treat
 // it as "unknown", never as "not vulnerable" — a swallowed error here is a
@@ -25,6 +28,14 @@ var registry = map[string]Comparer{
 }
 
 func For(ecosystem string) (Comparer, bool) {
+	// Distro ecosystems carry their release (D6), so "Alpine:v3.19" cannot be a
+	// map key — the map would need one entry per release, forever. The bare
+	// "Alpine" must NOT resolve: it is not a key we ever build, and letting it
+	// through would make a bug that drops the release look like it worked, every
+	// lookup landing in an empty bucket and reporting clean.
+	if rel, ok := strings.CutPrefix(ecosystem, "Alpine:"); ok && rel != "" {
+		return APK{}, true
+	}
 	c, ok := registry[ecosystem]
 	return c, ok
 }
