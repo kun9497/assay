@@ -15,16 +15,20 @@
 
 ## 현재 상태
 
-🚧 **초기 개발 단계. 매칭 코어는 동작하고, 나머지는 아직입니다.**
+🚧 **초기 개발 단계. 매칭은 동작하고, 이미지를 직접 읽는 것은 아직입니다.**
 
 `assay db update`가 OSV로부터 로컬 데이터베이스를 만들고, `assay scan <파일>.cdx.json`이
-CycloneDX SBOM 안의 Go, npm, PyPI 패키지를 거기에 매칭합니다. 실제 SBOM에서 grype와 동일한
-finding을 보고합니다 — 개수만 같은 것이 아니라 CVE 집합이 같습니다. [로드맵](#로드맵) 참조.
+CycloneDX SBOM을 거기에 매칭합니다 — Go, npm, PyPI, 그리고 **Alpine**. 실제 SBOM에서 grype와
+동일한 finding을 보고합니다: 개수만 같은 것이 아니라 CVE 집합이 같습니다. [로드맵](#로드맵) 참조.
+
+Alpine 패키지는 **소스 패키지를 거쳐** 매칭됩니다. `openssl` 권고가 설치된 `libssl3`에
+도달하고, 리포트가 둘 다 표시합니다. distro 스캐너가 조용히 놓치는 지점이 바로 이 간접 참조입니다.
 
 그 아래 내용은 여전히 구현이 아니라 설계 목표입니다. 구체적으로, `scan`은 CycloneDX 파일 경로
-하나만 받고 **플래그를 전혀 받지 않습니다.** 컨테이너 이미지, 바이너리, 디렉터리는 구현되어 있지
-않고 `--fail-on`, `--fail-on-unknown`, `--output json`도 마찬가지입니다. 따라서 종료 코드 1은
-현재 도달 불가능합니다 — 완료된 스캔은 finding을 보고하더라도 0을 반환합니다.
+하나만 받고 **플래그를 전혀 받지 않습니다.** 컨테이너 이미지·바이너리·디렉터리를 직접 읽지
+못하므로 syft로 SBOM을 먼저 만들어야 하고, `--fail-on`, `--fail-on-unknown`, `--output json`도
+없습니다. 따라서 종료 코드 1은 현재 도달 불가능합니다 — 완료된 스캔은 finding을 보고하더라도
+0을 반환합니다.
 
 [`docs/superpowers/specs/2026-07-29-assay-roadmap.ko.md`](docs/superpowers/specs/2026-07-29-assay-roadmap.ko.md)에
 전체 설계와 각 결정의 근거가 담겨 있습니다.
@@ -78,8 +82,11 @@ assay db update
 # 데이터베이스에 무엇이 들어 있고 얼마나 최신인지
 assay db status
 
-# CycloneDX SBOM 스캔 (Go, npm, PyPI)
+# CycloneDX SBOM 스캔 (Go, npm, PyPI, Alpine)
 assay scan sbom.cdx.json
+
+# 컨테이너 이미지는 아직 직접 읽지 못합니다. SBOM을 먼저 만드십시오
+syft alpine:3.19 -o cyclonedx-json > alpine.cdx.json && assay scan alpine.cdx.json
 ```
 
 아직 구현되지 않은 것 — 동작해서가 아니라 목표를 분명히 하기 위해 적어둡니다:
@@ -112,10 +119,13 @@ assay scan sbom.cdx.json --output json       # ④ 기계 판독 출력
 CI 캐시나 에어갭 환경에서는 `ASSAY_DB_DIR`로 재정의합니다. 경로의 `v1`은 스키마 버전입니다 —
 스키마가 바뀌면 제자리에서 마이그레이션하는 대신 새 디렉터리에 다시 빌드합니다.
 
-첫 대상 생태계(Go, npm, PyPI)로 빌드하면 **디스크 64 MB에 권고 27,702건**이 담깁니다 —
-추정치가 아니라 실제 `db update`를 돌려 측정한 값입니다. 여기까지 오는 데 약 244 MB를 내려받습니다.
+Go, npm, PyPI, Alpine으로 빌드하면 **디스크 64 MB에 권고 32,050건**이 담깁니다 — 추정치가
+아니라 실제 `db update`를 돌려 측정한 값입니다. 여기까지 오는 데 약 248 MB를 내려받습니다.
 OSV는 생태계별로 아카이브 하나씩을 제공할 뿐 서버 측 필터링이 없어서, npm 아카이브의 대부분을
 차지하는 악성 패키지 신고는 수집 단계에서 버려지기 때문입니다.
+
+Alpine은 그중 4 MB뿐입니다. OSV가 Alpine을 아카이브 하나로 배포하고 그 안의 레코드가 릴리스를
+포함한 생태계 키를 담고 있어서, 한 번 받으면 3.2부터 3.24까지 전부 커버됩니다.
 
 `assay db status`는 provider별로 **업스트림 데이터가 언제 기준인지**를 보고합니다 — 여러분이
 언제 내려받았는지가 아닙니다. 3개월 된 스냅샷을 서빙하는 미러가 오늘 아침에 받았다는 이유로
@@ -216,8 +226,17 @@ KISA 데이터를 넣을 수 있게 합니다.**
 - [x] 생태계별 버전 비교와 범위 매칭
 - [x] table 출력
 
-**② 컨테이너** — 레지스트리 pull, 레이어 추출, `/etc/os-release`, apk 카탈로깅.
-**설계 리스크가 가장 크므로** 늦추지 않고 앞에 둡니다.
+**②a distro 매칭** ✅ — SBOM에서 Alpine 패키지 매칭: 릴리스 포함 생태계 키, 소스 패키지
+간접 참조, apk 버전 정렬.
+
+- [x] apk `Comparer` — apk-tools 자체 테스트 벡터 738건으로 검증
+- [x] `Target.Distro`와 `Alpine:vX.Y` 생태계 키
+- [x] `Package.Source` 간접 매칭
+- [x] Alpine 권고 수집
+
+**②b 컨테이너** — 레지스트리 pull, 레이어 추출, whiteout, `/etc/os-release`,
+`/lib/apk/db/installed`. 위의 것들이 전부 전제 조건입니다. 이미지를 완벽하게 읽어도 매칭할
+distro 생태계가 없으면 결과가 나오지 않습니다.
 
 - [ ] 컨테이너 이미지 스캔 (Alpine 우선)
 
@@ -244,10 +263,15 @@ KISA 데이터를 넣을 수 있게 합니다.**
 |---|---:|---:|---:|---:|
 | PyPI SBOM (대소문자 혼용 이름) | 32 | 32 | 0 | 0 |
 | Go 모듈 SBOM | 4 | 4 | 0 | 0 |
+| `alpine:3.19` SBOM | 10 | 10 | 0 | 0 |
 
-`alpine:3.19` SBOM은 0이 아니라 **2**를 반환합니다. 슬라이스 ①에는 distro 생태계가 없어서 17개
-패키지 전부가 평가 불가이고, 리포트가 그 사실을 말합니다. **아무것도 평가하지 못한 스캐너가 클린
-빌드처럼 보여서는 안 됩니다.**
+grype의 **distro 네임스페이스** 발견과 비교한 것입니다. grype의 `nvd:cpe` 매칭은 같은
+이미지에서 11건 더 나오지만 `assay`가 구현하지 않는 CPE 휴리스틱에서 오므로, 합쳐서 세면
+비교가 아니라 어느 한쪽을 좋아 보이게 만드는 일이 됩니다.
+
+Alpine 발견 10건 중 5건은 **소스 패키지를 거쳐야만 도달합니다.** `busybox-binsh`,
+`ssl_client`, `musl-utils`는 각각 `busybox`와 `musl`에 대해 작성된 권고를 지고 있습니다. 그
+간접 참조가 없으면 조용한 미탐이 되고, 그래서 이것이 D8입니다.
 
 바이너리 스캔은 해당 언어가 무엇을 남기느냐에 전적으로 달려 있습니다. Go와 Java는 의존성 목록을
 복원할 만큼의 메타데이터를 담고, Rust는 `cargo-auditable`로 빌드된 경우에만 가능하며, 스트립된

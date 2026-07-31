@@ -16,17 +16,21 @@ affecting it.
 
 ## Status
 
-🚧 **Early development. The matching core works; nothing else does yet.**
+🚧 **Early development. Matching works; reading images does not yet.**
 
 `assay db update` builds a local database from OSV, and `assay scan <file>.cdx.json` matches
-the Go, npm, and PyPI packages in a CycloneDX SBOM against it. On real SBOMs it reports the
-same findings as grype — same CVEs, not just the same count. See [Roadmap](#roadmap).
+a CycloneDX SBOM against it — Go, npm, PyPI, and **Alpine**. On real SBOMs it reports the
+same findings as grype: same CVEs, not just the same count. See [Roadmap](#roadmap).
+
+Alpine packages match through their *source* package, so an `openssl` advisory reaches the
+installed `libssl3`, and the report names both. That indirection is where distro scanners
+silently miss things.
 
 Everything else below is still the design target, not the build. Concretely, `scan` takes
 one CycloneDX file path and **accepts no flags**: container images, binaries, and
-directories are not implemented, and neither are `--fail-on`, `--fail-on-unknown`, or
-`--output json`. Exit code 1 is therefore unreachable today — a completed scan exits 0 even
-when it reports findings.
+directories are not read directly — produce an SBOM with syft first — and neither
+`--fail-on`, `--fail-on-unknown`, nor `--output json` exists. Exit code 1 is therefore
+unreachable today: a completed scan exits 0 even when it reports findings.
 
 [`docs/superpowers/specs/2026-07-29-assay-roadmap.md`](docs/superpowers/specs/2026-07-29-assay-roadmap.md)
 carries the full design and the reasoning behind each decision.
@@ -80,8 +84,11 @@ assay db update
 # What is in the database, and how current is it
 assay db status
 
-# Scan a CycloneDX SBOM (Go, npm, PyPI)
+# Scan a CycloneDX SBOM (Go, npm, PyPI, Alpine)
 assay scan sbom.cdx.json
+
+# Container images are not read directly yet; produce the SBOM first
+syft alpine:3.19 -o cyclonedx-json > alpine.cdx.json && assay scan alpine.cdx.json
 ```
 
 Not implemented yet — listed so the target is unambiguous, not because it runs:
@@ -116,11 +123,13 @@ Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v1`
 is the schema version — a schema change rebuilds into a new directory rather than migrating
 in place.
 
-A build over the first set of ecosystems (Go, npm, PyPI) produces **64 MB on disk holding
-27,702 advisories** — measured from an actual `db update`, not estimated. Getting there
-downloads roughly 244 MB: OSV publishes one archive per ecosystem with no server-side
-filtering, and most of npm's archive is malicious-package reports that are discarded on
-ingestion.
+A build over Go, npm, PyPI, and Alpine produces **64 MB on disk holding 32,050
+advisories** — measured from an actual `db update`, not estimated. Getting there downloads
+roughly 248 MB: OSV publishes one archive per ecosystem with no server-side filtering, and
+most of npm's archive is malicious-package reports that are discarded on ingestion.
+
+Alpine costs only 4 MB of that. OSV publishes it as one archive whose records carry
+release-qualified ecosystem keys, so a single fetch covers every release from 3.2 to 3.24.
 
 `assay db status` reports, per provider, when the **upstream data** was current — not when
 you happened to download it. A mirror serving a three-month-old snapshot should not look
@@ -226,8 +235,17 @@ npm, and PyPI. Fixes the core types and interfaces.
 - [x] Per-ecosystem version comparison and range matching
 - [x] Table output
 
-**② Containers** — registry pull, layer extraction, `/etc/os-release`, apk cataloging.
-Highest design risk, so it comes early rather than late.
+**②a Distro matching** ✅ — Alpine packages from an SBOM: release-qualified ecosystem
+keys, source-package indirection, apk version ordering.
+
+- [x] apk `Comparer`, checked against apk-tools' own 738-comparison test vectors
+- [x] `Target.Distro` and the `Alpine:vX.Y` ecosystem key
+- [x] `Package.Source` indirect matching
+- [x] Alpine advisory ingestion
+
+**②b Containers** — registry pull, layer extraction, whiteouts, `/etc/os-release`,
+`/lib/apk/db/installed`. Everything above is a prerequisite: an image read perfectly but
+matched against no distro ecosystem yields nothing.
 
 - [ ] Container image scanning (Alpine first)
 
@@ -256,10 +274,15 @@ matcher is wrong. Slice ① came out set-identical on both SBOMs it was run agai
 |---|---:|---:|---:|---:|
 | PyPI SBOM (mixed-case names) | 32 | 32 | 0 | 0 |
 | Go module SBOM | 4 | 4 | 0 | 0 |
+| `alpine:3.19` SBOM | 10 | 10 | 0 | 0 |
 
-An `alpine:3.19` SBOM exits **2** rather than 0: slice ① has no distro ecosystem, so all 17
-packages are unevaluable, and the report says so. A scanner that cannot evaluate anything
-must not look like a clean build.
+Compared against grype's **distro-namespace** findings. Its `nvd:cpe` matches — 11 more on
+the same image — come from CPE heuristics that `assay` does not implement, so folding them
+in would flatter one tool or the other rather than compare them.
+
+Five of the ten Alpine findings are only reachable through the source package:
+`busybox-binsh`, `ssl_client`, and `musl-utils` carry advisories written against `busybox`
+and `musl`. Without that indirection they are silent misses, which is why it is [D8].
 
 Binary scanning depends entirely on what the language leaves behind. Go and Java embed
 enough metadata to recover a dependency list; Rust does only when built with
