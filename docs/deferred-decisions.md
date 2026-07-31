@@ -49,6 +49,38 @@ It blocks neither the tarball nor the OCI layout path, since neither needs auth.
 
 ## Deferred work
 
+### Making database coverage visible
+
+`Meta.Providers` records `{Source, DataAsOf, Records}` per provider and nothing about
+*which ecosystems* were ingested. A database built before Alpine support existed is
+still schema v1, so `store.Open` accepts it unchanged.
+
+**The failure.** Upgrade to a build with Alpine support, do not re-run `assay db update`,
+then scan an Alpine SBOM. The matcher finds an apk comparer, evaluates every package,
+looks each one up in an ecosystem the database never ingested, finds nothing, and
+`Trustworthy()` is true because packages *were* evaluated. Output: "No known
+vulnerabilities found", exit **0**. That is the silent false negative this project is
+built to prevent, arriving through the one door the ingestion-side checks cannot cover —
+they guarantee a *fresh* build contains Alpine, not that the build you are reading is
+fresh.
+
+**Why deferred.** The tool is unreleased and has one user. Every other path to an
+Alpine scan already fails loudly: a missing database exits 2, a schema mismatch exits 2,
+an interrupted build exits 2. This one requires a database built by an earlier revision
+of an unreleased branch.
+
+**Revisit when** anyone other than the author runs `assay`, or before the first tagged
+release — whichever comes first. Shipping this to a second user means shipping a scanner
+that reports clean on an image it never checked.
+
+**Groundwork.** The fix is a covered-ecosystem set on `store.Meta`, written by
+`db update` and read by the matcher: a package whose ecosystem is absent from that set
+becomes a counted `Skipped` with a reason naming the gap, rather than an evaluated
+package with no findings. `Skipped` already carries a `Reason` for exactly this, and
+`Summary.Trustworthy()` already turns "nothing evaluated" into exit 2 — only the
+plumbing between them is missing. It is a `Meta` field, so it forces a rebuild, which
+is the correct outcome anyway.
+
 ### KISA/KNVD as an independent matching source
 
 Currently scoped as **enrichment only**: a finding already matched through OSV picks up
