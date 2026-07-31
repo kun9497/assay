@@ -10,44 +10,27 @@ Read alongside the Architecture section of the [README](../README.md).
 
 ---
 
-## Next work — committed, not deferred
-
-Everything in this section is scheduled. It appears here so the split is recorded next to
-the deferrals rather than only in a plan file, but it is not postponed and needs no
-revisit trigger.
-
-### Slice 2b — reading container images directly
-
-Slice 2 was split. **2a** matches Alpine packages from a CycloneDX SBOM someone else
-produced; **2b** produces that inventory ourselves. 2b starts when 2a merges.
-
-**Why the split.** The roadmap called slice 2 "highest design risk", and the risk is
-`Target.Distro` (D7), release-qualified ecosystem keys (D6), `Package.Source` indirect
-matching (D8), and the apk `Comparer` (D9). A syft SBOM of an Alpine image already carries
-every input those need — the `operating-system` component holds `syft:distro:*`, and
-`syft:metadata:originPackage` holds the source package. So 2a validates all of the design
-risk and none of the plumbing validates any of it.
-
-**Ordering is a dependency, not a preference.** 2a is a prerequisite for 2b: an image read
-perfectly but matched against no distro ecosystem produces zero findings.
-
-**What 2b contains.** An image `Source` — layer fetch, gzip, tar extraction, whiteout
-(`.wh.`) handling — plus `/etc/os-release` and `/lib/apk/db/installed` catalogers, and one
-or more fetchers.
-
-**The fetchers are interchangeable and all are wanted**: `docker-archive` tarball, local
-Docker daemon, OCI layout directory, and registry pull. Each produces the same thing — a
-layer list and a config — and everything downstream of `Source` is shared. Which one lands
-first is a scheduling question, not a scope question.
-
-**Open decision, deliberately not pre-made.** Whether registry pull is written against the
-OCI Distribution API with `net/http`, or delegated to `go-containerregistry`. That is a
-dependency decision — the second in the project's history — and belongs in conversation.
-It blocks neither the tarball nor the OCI layout path, since neither needs auth.
-
----
-
 ## Deferred work
+
+### The Docker daemon as an image source
+
+`assay` reads images from a registry, a `docker save` tarball, and an OCI layout directory.
+It does not talk to the Docker daemon.
+
+**Why deferred.** Measured: importing `go-containerregistry/pkg/v1/daemon` takes the linked
+dependency count from **9 modules and 46 packages to 27 and 114** — it pulls in the moby
+client and its transitive tree. That is a large increase for a vulnerability scanner, whose
+own dependency graph is part of what it asks users to trust, in exchange for the one source
+that has a workaround: an image already present locally reaches `assay` through
+`docker save`, which the tarball source reads.
+
+**Revisit when** someone has an image they cannot `docker save` — a large one where the
+round trip through disk is the bottleneck is the realistic case — or when the daemon
+package's dependency tree shrinks.
+
+**Groundwork.** `source.Open` dispatches on a scheme prefix, so a `docker:` prefix and one
+more case is the whole change. Nothing downstream of `source.Image` knows where layers came
+from.
 
 ### Making database coverage visible
 

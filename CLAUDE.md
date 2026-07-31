@@ -54,9 +54,14 @@ Five interfaces carry the design; keep changes inside these boundaries.
 `Comparer`) → `Reporter`. `Provider` populates the `Store` out of band.
 
 **The database is orthogonal to the scan** (D14). `Provider`s write it via `assay db
-update`; a scan only reads. Offline operation is the default, not a flag — never introduce
-a network call on the scan path, and never auto-download on a missing database. Exit 2 with
-instructions instead.
+update`; a scan only reads. **A scan never fetches vulnerability data** — never
+auto-download on a missing database; exit 2 with instructions instead.
+
+Narrowed in slice 2b from "never a network call on the scan path", which
+`assay scan alpine:3.19` cannot honour. Only the *target* may be fetched, and only when the
+user names a remote one. A scan of an SBOM, a `docker-archive:` tarball, or an `oci-dir:`
+layout still makes no network call at all — that is the air-gapped path, and it must stay
+that way.
 
 **Advisories are stored in OSV shape** (D1) — `affected[].ranges[]` with `introduced` /
 `fixed` events. Every provider normalizes into that form rather than the store growing

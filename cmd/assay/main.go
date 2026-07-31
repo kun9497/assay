@@ -37,7 +37,8 @@ Usage:
   assay <command> [arguments]
 
 Commands:
-  scan <sbom>     Scan a CycloneDX SBOM file (Go, npm, PyPI, Alpine)
+  scan <target>   Scan a CycloneDX SBOM, an image reference, a docker-archive:
+                  tarball, or an oci-dir: layout (Go, npm, PyPI, Alpine)
   db update       Build or refresh the local vulnerability database
   db status       Show what is in the database and how current it is
   version         Print version information
@@ -71,7 +72,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprint(stderr, usage)
 			return exitError
 		}
-		return scan(args[1], stdout, stderr)
+		return scan(context.Background(), args[1], stdout, stderr)
 
 	case "db":
 		if len(args) < 2 {
@@ -103,11 +104,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 // scan is the pipeline entry point: parse the target into an inventory, match
 // it against the local database, and report.
-func scan(target string, stdout, stderr io.Writer) int {
+func scan(ctx context.Context, target string, stdout, stderr io.Writer) int {
 	path, err := store.DefaultPath()
 	if err != nil {
 		fmt.Fprintf(stderr, "error: locate database: %v\n", err)
 		return exitError
 	}
-	return scancmd.Run(path, target, stdout, stderr)
+	return scancmd.Run(ctx, path, target, stdout, stderr)
 }

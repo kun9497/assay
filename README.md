@@ -1,6 +1,6 @@
 # assay
 
-> **SBOM-driven vulnerability scanner for containers, binaries, and filesystems.**
+> **Vulnerability scanner for containers, binaries, and filesystems.**
 
 *English · [한국어](README.ko.md)*
 
@@ -16,21 +16,23 @@ affecting it.
 
 ## Status
 
-🚧 **Early development. Matching works; reading images does not yet.**
+🚧 **Early development. Alpine containers scan end to end; other distros do not.**
 
-`assay db update` builds a local database from OSV, and `assay scan <file>.cdx.json` matches
-a CycloneDX SBOM against it — Go, npm, PyPI, and **Alpine**. On real SBOMs it reports the
-same findings as grype: same CVEs, not just the same count. See [Roadmap](#roadmap).
+`assay db update` builds a local database from OSV, and `assay scan` matches against it —
+Go, npm, PyPI, and **Alpine**. It reads container images directly, so syft is no longer in
+the loop. On real targets it reports the same findings as grype: same CVEs, not just the
+same count. See [Roadmap](#roadmap).
 
 Alpine packages match through their *source* package, so an `openssl` advisory reaches the
 installed `libssl3`, and the report names both. That indirection is where distro scanners
 silently miss things.
 
-Everything else below is still the design target, not the build. Concretely, `scan` takes
-one CycloneDX file path and **accepts no flags**: container images, binaries, and
-directories are not read directly — produce an SBOM with syft first — and neither
-`--fail-on`, `--fail-on-unknown`, nor `--output json` exists. Exit code 1 is therefore
-unreachable today: a completed scan exits 0 even when it reports findings.
+Everything else below is still the design target, not the build. `scan` **accepts no
+flags**: neither `--fail-on`, `--fail-on-unknown`, nor `--output json` exists, so exit
+code 1 is unreachable — a completed scan exits 0 even when it reports findings. Binaries
+and directories are not read either. Non-Alpine images are read, but their packages cannot
+be matched: `assay scan debian:12` reports that it found no supported package database and
+exits 2, rather than reporting a clean image it never checked.
 
 [`docs/superpowers/specs/2026-07-29-assay-roadmap.md`](docs/superpowers/specs/2026-07-29-assay-roadmap.md)
 carries the full design and the reasoning behind each decision.
@@ -52,8 +54,10 @@ this one:
 Design goals, in order:
 
 1. **Explainable** — every finding says *why* it matched, not just *that* it did.
-2. **Offline-capable** — no network at scan time; `assay db update` is the only command
-   that reaches out.
+2. **Offline-capable** — a scan never fetches vulnerability data, and a scan of anything
+   already on disk makes no network call at all. Only a remote *target* is fetched, and
+   only when you name one: `assay scan alpine:3.19` reaches out, `assay scan
+   docker-archive:alpine.tar` does not.
 3. **Boring output** — deterministic, diffable, CI-friendly.
 
 Configuration scanning, secret scanning, IaC, and Kubernetes posture are explicit
@@ -78,18 +82,25 @@ make build
 Working today:
 
 ```bash
-# Build the local vulnerability database — the only command that needs network
+# Build the local vulnerability database — the only command that fetches advisories
 assay db update
 
 # What is in the database, and how current is it
 assay db status
 
+# Scan a container image from a registry
+assay scan alpine:3.19
+
+# ...or one you already have on disk. Neither of these touches the network.
+docker save alpine:3.19 -o alpine.tar && assay scan docker-archive:alpine.tar
+skopeo copy docker://alpine:3.19 oci:layout && assay scan oci-dir:layout
+
 # Scan a CycloneDX SBOM (Go, npm, PyPI, Alpine)
 assay scan sbom.cdx.json
-
-# Container images are not read directly yet; produce the SBOM first
-syft alpine:3.19 -o cyclonedx-json > alpine.cdx.json && assay scan alpine.cdx.json
 ```
+
+An argument is read as an image when it carries a `docker-archive:` or `oci-dir:` prefix,
+as an SBOM when it names a file that exists, and as a registry reference otherwise.
 
 Not implemented yet — listed so the target is unambiguous, not because it runs:
 
@@ -157,16 +168,20 @@ with a count, never folded silently into a clean verdict.
 The pipeline is five interfaces. Each is independently testable, and supporting a new
 ecosystem means writing one `Cataloger` and one `Comparer` — nothing else changes.
 
+**Bold is built; the rest is the design target.**
+
 | Interface | Responsibility | Implementations |
 |---|---|---|
-| `Source` | Open a target for file access; carries layer provenance | image, dir, file, binary |
-| `Cataloger` | Files → `[]Package` | apk, dpkg, cyclonedx, go-mod, go-binary, npm, jar |
-| `Store` | Advisory lookup | bbolt |
-| `Comparer` | `Compare(a, b string) (int, error)` within one ecosystem | semver, PEP 440, apk, deb, rpm |
-| `Provider` | Upstream feed → `[]Advisory` | OSV, KISA |
+| `Source` | Open a target for file access; carries layer provenance | **registry**, **`docker save` tarball**, **OCI layout**, dir, binary |
+| `Cataloger` | Files → `[]Package` | **apk**, **os-release**, **cyclonedx**, dpkg, go-mod, go-binary, npm, jar |
+| `Store` | Advisory lookup | **bbolt** |
+| `Comparer` | `Compare(a, b string) (int, error)` within one ecosystem | **semver**, **PEP 440**, **apk**, deb, rpm |
+| `Provider` | Upstream feed → `[]Advisory` | **OSV**, KISA |
 
 The database is orthogonal to the scan. `Provider`s populate it through `assay db update`;
-a scan only ever reads. That is what makes offline operation the default rather than a flag.
+a scan only ever reads, and never repairs a stale or missing one behind your back. That is
+what makes offline operation the default rather than a flag — a scanner that quietly
+downloads advisories produces results you cannot reproduce or audit.
 
 Advisories are stored in **OSV shape** — `affected[].ranges[]` carrying `introduced` /
 `fixed` events. OSV is the primary provider and passes through nearly unchanged; other
@@ -245,11 +260,16 @@ keys, source-package indirection, apk version ordering.
 - [x] `Package.Source` indirect matching
 - [x] Alpine advisory ingestion
 
-**②b Containers** — registry pull, layer extraction, whiteouts, `/etc/os-release`,
-`/lib/apk/db/installed`. Everything above is a prerequisite: an image read perfectly but
-matched against no distro ecosystem yields nothing.
+**②b Containers** ✅ — registry pull, layer extraction, whiteouts, `/etc/os-release`,
+`/lib/apk/db/installed`.
 
-- [ ] Container image scanning (Alpine first)
+- [x] Images from a registry, a `docker save` tarball, or an OCI layout
+- [x] Layer walking with whiteout and symlink resolution
+- [x] `/etc/os-release` and `/lib/apk/db/installed` catalogers
+
+The Docker daemon is deliberately not a source: importing it takes the linked dependency
+count from 9 modules to 27, and an image already present locally reaches `assay` through
+`docker save`.
 
 **③ Filesystem and binary targets** — depends on neither ② nor ④, so it can slot in
 anywhere.
@@ -277,6 +297,21 @@ matcher is wrong. Slice ① came out set-identical on both SBOMs it was run agai
 | PyPI SBOM (mixed-case names) | 32 | 32 | 0 | 0 |
 | Go module SBOM | 4 | 4 | 0 | 0 |
 | `alpine:3.19` SBOM | 10 | 10 | 0 | 0 |
+
+Reading the image directly is checked against the SBOM path rather than against grype,
+because that comparison holds the database, matcher, and comparer fixed — any divergence is
+ours alone. All four routes to the same image agree exactly:
+
+| Route | findings |
+|---|---:|
+| syft SBOM | 10 |
+| registry pull | 10 |
+| `docker save` tarball | 10 |
+| OCI layout directory | 10 |
+
+The component totals differ by one, legitimately: syft emits an `operating-system`
+component that the SBOM path counts and excludes, and reading the image directly produces
+no such entry.
 
 Compared against grype's **distro-namespace** findings. Its `nvd:cpe` matches — 11 more on
 the same image — come from CPE heuristics that `assay` does not implement, so folding them
