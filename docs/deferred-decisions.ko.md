@@ -50,6 +50,7 @@ skip됩니다(D20). 조용한 클린 스캔은 이것으로 닫혔습니다 — 
 
 **해둔 대비.** `Summary`가 이미 `NotEvaluated`와 `IncompleteChecks`를 구분하고, `Skipped`가
 패키지 전체 skip과 advisory 단위 skip을 구분하므로, 게이트가 볼 숫자는 이미 손에 있습니다.
+
 ### KISA/KNVD를 독립 매칭 소스로 쓰기
 
 현재 범위는 **보강 전용**입니다. OSV로 이미 매칭된 finding이 CVE ID 조인을 통해 한국어 설명,

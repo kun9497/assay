@@ -648,3 +648,31 @@ func TestMatch_CoveredEcosystemWithNoAdvisoryIsClean(t *testing.T) {
 			"package simply has no advisories", res.Skipped)
 	}
 }
+
+// A database that declares no coverage covers nothing, and every package must
+// be skipped.
+//
+// This exists because the natural back-compat edit — `if len(covered) > 0 &&
+// !covered[p.Ecosystem]`, "be lenient when we have no record" — restores the
+// original defect wholesale and, without this test, leaves the suite green.
+// An empty set is not missing information; it is the answer.
+func TestMatch_DatabaseDeclaringNoCoverageSkipsEverything(t *testing.T) {
+	adv := advWithRange("GHSA-x", "Go", "github.com/x/y", "0", "2.0.0", advisory.RangeSemver)
+	s := fakeStore{
+		byKey:  map[string][]advisory.Advisory{"Go\x00github.com/x/y": {adv}},
+		covers: []string{}, // declared, and empty
+	}
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("github.com/x/y", "v1.0.0", "Go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 0 {
+		t.Errorf("Findings = %+v; a database covering nothing cannot produce one", res.Findings)
+	}
+	if len(res.Skipped) != 1 {
+		t.Fatalf("Skipped = %d, want 1: an empty coverage set means nothing was "+
+			"ingested, not that coverage is unknown", len(res.Skipped))
+	}
+}

@@ -101,7 +101,7 @@ mode anyway. trivy made the same call for the same access pattern.
 
 ### D5 — Schema version in the path
 
-`<cache>/assay/db/v2/vulnerability.db`. A schema change means rebuilding into a new
+`<cache>/assay/db/v3/vulnerability.db`. A schema change means rebuilding into a new
 directory rather than writing migration code. Migration code is a liability for a project
 with one user.
 
@@ -330,7 +330,6 @@ the linked module count from 9 to 27 and packages from 46 to 114, and it is the 
 necessary of the four sources: an image already present locally can be handed over with
 `docker save`, which the tarball source reads.
 
-
 ### D20 — The database records which ecosystems it covers
 
 `Meta` carries the set of ecosystem keys that ingestion actually indexed, and a package
@@ -346,17 +345,33 @@ VERSION_ID=3.19.9  ->  1 finding                                     exit 0
 VERSION_ID=3.25.0  ->  "No known vulnerabilities found in 1 package"  exit 0
 ```
 
-The second is a confident wrong answer. It is not hypothetical: OSV's Alpine data stops at
-the newest release it has seen, so the next Alpine minor triggers this the day it ships.
+The second is a confident wrong answer, and not hypothetical: OSV's Alpine data stops at
+the newest release it has seen, so a release it has not begun publishing hits this.
 
 **Not an Alpine problem.** A database built over Go alone answers a PyPI scan the same way.
 The set is checked for every ecosystem, so the guarantee is uniform.
 
-**The store collects it, not the caller.** For Alpine, `db update` fetches one archive named
-`Alpine` whose records carry `Alpine:v3.2` through `Alpine:v3.24` — what was *fetched* and
-what is *covered* are different things, and only the write path knows the second. `SetMeta`
-therefore fills the field from what `Put` actually indexed, overwriting whatever the caller
-passed.
+**The provider reports it, because only the provider knows both halves.** Neither obvious
+source is right:
+
+- *What the store indexed* over-claims. Records deliberately keep affected entries for
+  ecosystems that were not fetched (the cross-ecosystem fix in slice 1), so a store-side set
+  built from `Put` certified `Maven`, `NuGet`, `crates.io` and five others on a real database
+  that fetched none of them — 9 of 35 keys. The day a Maven comparer lands, that set would
+  vouch for a database holding 91 stray Maven keys and every Maven scan would report clean.
+  This was written that way first and caught in review.
+- *What was fetched* under-claims. `db update` fetches one archive named `Alpine` whose
+  records carry `Alpine:v3.2` through `Alpine:v3.24`, so the fetch list names a key nothing
+  is ever looked up under and omits the 23 that are.
+
+The provider has both: it knows the family it asked for and sees which release-qualified
+keys came back under it. It records the intersection, using the same predicate `Convert`
+already filters on, and `SetMeta` unions what the providers reported.
+
+**Coverage is presence, not completeness.** The check answers "was this ecosystem
+ingested", not "is the data for it current". A release OSV has only begun populating passes
+it. That is the right boundary — freshness is `DataAsOf`'s job (D12) — but it means the
+guarantee is "we fetched this", not "we know everything about this".
 
 **Partial coverage keeps the existing exit semantics.** If nothing could be evaluated the
 scan exits 2, as it already did; if some packages were covered and others were not, the
@@ -490,7 +505,7 @@ type Finding struct {
 ### Storage layout
 
 ```
-<os.UserCacheDir()>/assay/db/v2/vulnerability.db      override: ASSAY_DB_DIR
+<os.UserCacheDir()>/assay/db/v3/vulnerability.db      override: ASSAY_DB_DIR
 
 buckets:
   advisories   "<ecosystem>\x00<name>"     → []AdvisoryID  primary lookup
@@ -509,9 +524,9 @@ which is microseconds.
 
 | OS | Path |
 |---|---|
-| Windows | `%LocalAppData%\assay\db\v1\` |
-| macOS | `~/Library/Caches/assay/db/v2/` |
-| Linux | `~/.cache/assay/db/v2/` (honours `XDG_CACHE_HOME`) |
+| Windows | `%LocalAppData%\assay\db\v3\` |
+| macOS | `~/Library/Caches/assay/db/v3/` |
+| Linux | `~/.cache/assay/db/v3/` (honours `XDG_CACHE_HOME`) |
 
 Values are JSON to start. At a few hundred lookups per scan, bbolt reads are microseconds
 and decoding dominates — still tens of milliseconds. Encoding is hidden behind `Store`

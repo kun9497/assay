@@ -2,13 +2,18 @@
 package dbcmd
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
+	"strconv"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -126,6 +131,10 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "database: %s\n", dbPath)
 	fmt.Fprintf(stdout, "schema:   v%d\n", m.Schema)
 	fmt.Fprintf(stdout, "built:    %s\n", m.BuiltAt.Format(time.RFC3339))
+	// What this database covers decides which packages can be evaluated at
+	// all (D20). Without it here, coverage is discoverable only by running a
+	// scan and reading why it refused.
+	fmt.Fprintf(stdout, "covers:   %s\n", coverageSummary(m.Ecosystems))
 	fmt.Fprintln(stdout)
 
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
@@ -149,4 +158,74 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	return 0
+}
+
+// coverageSummary keeps 23 Alpine releases from burying the three language
+// ecosystems, while still naming the range so an operator can see whether the
+// release they are about to scan falls inside it.
+func coverageSummary(ecos []string) string {
+	if len(ecos) == 0 {
+		return "nothing - every scan will report its packages as unevaluated"
+	}
+	var plain []string
+	byFamily := map[string][]string{}
+	for _, e := range ecos {
+		fam, rel, ok := strings.Cut(e, ":")
+		if !ok {
+			plain = append(plain, e)
+			continue
+		}
+		byFamily[fam] = append(byFamily[fam], rel)
+	}
+	out := append([]string{}, plain...)
+	for _, f := range slices.Sorted(maps.Keys(byFamily)) {
+		rs := byFamily[f]
+		if len(rs) == 1 {
+			out = append(out, f+":"+rs[0])
+			continue
+		}
+		// Numeric, not lexical. Meta.Ecosystems is sorted as whole strings, so
+		// taking its first and last here printed "Alpine:v3.10..v3.9" — a range
+		// that reads as covering nothing and answers the operator's actual
+		// question ("is 3.25 inside?") backwards.
+		slices.SortFunc(rs, compareRelease)
+		out = append(out, fmt.Sprintf("%s:%s..%s (%d releases)", f, rs[0], rs[len(rs)-1], len(rs)))
+	}
+	return strings.Join(out, ", ")
+}
+
+// compareRelease orders "v3.9" below "v3.10". Anything it cannot parse sorts
+// last rather than panicking: an unexpected key shape should be visible in the
+// output, not fatal to `db status`.
+func compareRelease(a, b string) int {
+	am, an, aok := releaseParts(a)
+	bm, bn, bok := releaseParts(b)
+	switch {
+	case !aok && !bok:
+		return strings.Compare(a, b)
+	case !aok:
+		return 1
+	case !bok:
+		return -1
+	}
+	if am != bm {
+		return cmp.Compare(am, bm)
+	}
+	return cmp.Compare(an, bn)
+}
+
+func releaseParts(rel string) (major, minor int, ok bool) {
+	maj, min, found := strings.Cut(strings.TrimPrefix(rel, "v"), ".")
+	if !found {
+		return 0, 0, false
+	}
+	major, err := strconv.Atoi(maj)
+	if err != nil {
+		return 0, 0, false
+	}
+	minor, err = strconv.Atoi(min)
+	if err != nil {
+		return 0, 0, false
+	}
+	return major, minor, true
 }

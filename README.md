@@ -126,11 +126,11 @@ run `assay db update` rather than silently fetching or silently reporting nothin
 
 | OS | Location |
 |---|---|
-| Windows | `%LocalAppData%\assay\db\v1\` |
-| macOS | `~/Library/Caches/assay/db/v2/` |
-| Linux | `~/.cache/assay/db/v2/` |
+| Windows | `%LocalAppData%\assay\db\v3\` |
+| macOS | `~/Library/Caches/assay/db/v3/` |
+| Linux | `~/.cache/assay/db/v3/` |
 
-Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v2` component
+Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v3` component
 is the schema version — a schema change rebuilds into a new directory rather than migrating
 in place. Note that `ASSAY_DB_DIR` carries no such component, so a CI cache keyed on that
 path survives an upgrade that should have invalidated it. Rebuild after upgrading, or key

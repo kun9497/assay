@@ -305,3 +305,34 @@ func TestTable_OtherIdentifiersAreDeduplicated(t *testing.T) {
 		t.Errorf("CVE-2025-46394 appears %d times, want 2:\n%s", n, buf.String())
 	}
 }
+
+// A scan where most packages were never checked must not print the clean
+// headline. Gating only on advisory-scoped skips warned loudly about one
+// unevaluable advisory and said nothing when 15 of 17 packages went unchecked.
+func TestTable_UncheckedPackagesBreakTheCleanHeadline(t *testing.T) {
+	res := matcher.Result{Skipped: []matcher.Skipped{
+		{Package: pkgmeta.Package{Name: "a", Version: "1", Ecosystem: "Alpine:v3.99"},
+			Reason: `ecosystem "Alpine:v3.99" is not in this database`},
+		{Package: pkgmeta.Package{Name: "b", Version: "1", Ecosystem: "Alpine:v3.99"},
+			Reason: `ecosystem "Alpine:v3.99" is not in this database`},
+	}}
+	var buf bytes.Buffer
+	// Three cataloged; two the matcher never checked, so one was evaluated.
+	sum, err := Table(&buf, res, cyclonedx.Stats{Components: 3, Cataloged: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "No known vulnerabilities") {
+		t.Errorf("clean headline printed while 2 of 3 packages went unchecked:\n%s", out)
+	}
+	if !strings.Contains(out, "NOT a clean result") {
+		t.Errorf("output must say plainly this is not a clean result:\n%s", out)
+	}
+	// The exit code is deliberately unchanged: one evaluated package means the
+	// run is still trustworthy by D11's rule, and widening that is a separate
+	// decision recorded for slice 4.
+	if !sum.Trustworthy() {
+		t.Error("Trustworthy() changed; this fix is about the wording, not the gate")
+	}
+}

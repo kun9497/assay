@@ -96,7 +96,7 @@ inspect`로 회수할 수 있고, 어차피 계획된 explain 모드와 겹칩�
 
 ### D5 — 경로에 스키마 버전을 둔다
 
-`<cache>/assay/db/v2/vulnerability.db`. 스키마가 바뀌면 마이그레이션 코드를 쓰는 대신 새
+`<cache>/assay/db/v3/vulnerability.db`. 스키마가 바뀌면 마이그레이션 코드를 쓰는 대신 새
 디렉터리에 다시 빌드합니다. **사용자가 한 명인 프로젝트에서 마이그레이션 코드는 부채입니다.**
 
 ### D6 — 배포판 패키지는 릴리스를 키에 포함한다
@@ -311,7 +311,6 @@ alias로 갖는 경우가 흔합니다. NVD 심각도를 보강 소스로 조인
 모듈을 9 → 27개, 패키지를 46 → 114개로 만듭니다. 그리고 네 소스 중 가장 덜 필요합니다 —
 로컬에 이미 있는 이미지는 `docker save`로 넘기면 tarball 소스가 읽습니다.
 
-
 ### D20 — 데이터베이스는 자신이 무엇을 커버하는지 기록한다
 
 `Meta`가 수집이 실제로 색인한 생태계 키 집합을 담고, 그 집합에 없는 생태계의 패키지는
@@ -326,16 +325,33 @@ VERSION_ID=3.19.9  ->  finding 1건                                    exit 0
 VERSION_ID=3.25.0  ->  "No known vulnerabilities found in 1 package"  exit 0
 ```
 
-두 번째는 **확신에 찬 오답**입니다. 가정이 아닙니다. OSV의 Alpine 데이터는 자신이 본 최신
-릴리스에서 멈추므로, 다음 Alpine 마이너 릴리스가 나오는 날 바로 발생합니다.
+두 번째는 **확신에 찬 오답**이고 가정이 아닙니다. OSV의 Alpine 데이터는 자신이 본 최신
+릴리스에서 멈추므로, OSV가 아직 채우기 시작하지 않은 릴리스가 여기 걸립니다.
 
 **Alpine만의 문제가 아닙니다.** Go만 담은 데이터베이스는 PyPI 스캔에도 똑같이 답합니다. 집합은
 모든 생태계에 대해 검사하므로 보장이 균일합니다.
 
-**호출자가 아니라 store가 모읍니다.** Alpine의 경우 `db update`는 `Alpine`이라는 아카이브
-하나를 받는데 그 레코드가 `Alpine:v3.2`부터 `Alpine:v3.24`까지를 담습니다 — **받은 것과
-커버되는 것이 다르고**, 두 번째를 아는 것은 쓰기 경로뿐입니다. 따라서 `SetMeta`가 `Put`이 실제로
-색인한 것으로 이 필드를 채우며, 호출자가 넘긴 값은 덮어씁니다.
+**provider가 보고합니다. 양쪽을 다 아는 것은 provider뿐이기 때문입니다.** 뻔해 보이는 두 출처는
+둘 다 틀립니다:
+
+- *store가 색인한 것*은 **과잉 주장**합니다. 레코드는 받지 않은 생태계의 affected 항목을
+  의도적으로 보존하므로(슬라이스 1의 교차 생태계 수정), `Put`에서 만든 store 쪽 집합은 실제
+  데이터베이스에서 `Maven`, `NuGet`, `crates.io` 등 **35개 중 9개**를 받은 적도 없이 커버한다고
+  주장했습니다. Maven comparer가 들어오는 날 그 집합은 떠돌이 Maven 키 91개를 가진
+  데이터베이스를 보증하고, 모든 Maven 스캔이 clean으로 나옵니다. 처음에 그렇게 썼고 리뷰에서
+  잡혔습니다.
+- *받은 것*은 **과소 주장**합니다. `db update`는 `Alpine` 아카이브 하나를 받는데 그 레코드가
+  `Alpine:v3.2`부터 `Alpine:v3.24`까지를 담으므로, fetch 목록은 아무도 조회하지 않는 키 하나를
+  대고 실제 23개를 빠뜨립니다.
+
+provider는 둘 다 압니다 — 어떤 가족을 요청했는지, 그 아래로 어떤 릴리스 키가 돌아왔는지.
+`Convert`가 이미 필터에 쓰는 같은 술어로 교집합을 기록하고, `SetMeta`가 provider들이 보고한
+것을 합칩니다.
+
+**커버는 존재이지 완전성이 아닙니다.** 이 검사는 "이 생태계를 수집했는가"에 답하지 "그 데이터가
+최신인가"에 답하지 않습니다. OSV가 이제 막 채우기 시작한 릴리스는 통과합니다. 그 경계가
+맞습니다 — 신선도는 `DataAsOf`의 몫입니다(D12) — 다만 보장은 "이것을 받았다"이지 "이것에 대해
+전부 안다"가 아닙니다.
 
 **부분 커버는 기존 종료 코드 의미를 유지합니다.** 아무것도 평가하지 못했으면 이전처럼 2를
 반환하고, 일부만 커버되었으면 커버되지 않은 것들이 "Not evaluated"에 개수와 함께 표시되며 종료
@@ -465,7 +481,7 @@ type Finding struct {
 ### 저장소 레이아웃
 
 ```
-<os.UserCacheDir()>/assay/db/v2/vulnerability.db      override: ASSAY_DB_DIR
+<os.UserCacheDir()>/assay/db/v3/vulnerability.db      override: ASSAY_DB_DIR
 
 buckets:
   advisories   "<ecosystem>\x00<name>"     → []AdvisoryID  primary lookup
@@ -483,9 +499,9 @@ ID를 `by-id`로 해석하는 데 점 조회가 한 번 더 들지만 마이크�
 
 | OS | 경로 |
 |---|---|
-| Windows | `%LocalAppData%\assay\db\v1\` |
-| macOS | `~/Library/Caches/assay/db/v2/` |
-| Linux | `~/.cache/assay/db/v2/` (`XDG_CACHE_HOME` 존중) |
+| Windows | `%LocalAppData%\assay\db\v3\` |
+| macOS | `~/Library/Caches/assay/db/v3/` |
+| Linux | `~/.cache/assay/db/v3/` (`XDG_CACHE_HOME` 존중) |
 
 값은 JSON으로 시작합니다. 스캔당 수백 번 조회 기준으로 bbolt 읽기는 마이크로초이고 디코딩이
 지배적이지만 그래도 수십 밀리초 수준입니다. 인코딩은 `Store` 뒤에 가려져 있어 호출자를 건드리지

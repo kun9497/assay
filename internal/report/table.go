@@ -102,12 +102,29 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 		// line, or whose output is truncated, must not read this as safety.
 		fmt.Fprintln(w, "No packages could be evaluated - this is NOT a clean result.")
 
-	case incompleteChecks > 0:
+	case incompleteChecks > 0 || unevaluated > 0:
 		// Nothing found, but not every check ran. Saying "no known
 		// vulnerabilities" would claim a completeness the run did not have.
-		fmt.Fprintf(w,
-			"No vulnerabilities found in %d package(s), but %d check(s) could not be completed - this is NOT a clean result.\n",
-			evaluated, incompleteChecks)
+		//
+		// Both counts gate this, not incompleteChecks alone. Keyed on that
+		// one, a scan where a single advisory could not be judged warned
+		// loudly, while a scan where 15 of 17 packages were never checked
+		// at all printed the clean sentence — the louder warning for the
+		// smaller gap.
+		switch {
+		case incompleteChecks > 0 && unevaluated > 0:
+			fmt.Fprintf(w,
+				"No vulnerabilities found in %d package(s), but %d package(s) were not checked and %d check(s) could not be completed - this is NOT a clean result.\n",
+				evaluated, unevaluated, incompleteChecks)
+		case unevaluated > 0:
+			fmt.Fprintf(w,
+				"No vulnerabilities found in %d package(s), but %d package(s) were not checked at all - this is NOT a clean result.\n",
+				evaluated, unevaluated)
+		default:
+			fmt.Fprintf(w,
+				"No vulnerabilities found in %d package(s), but %d check(s) could not be completed - this is NOT a clean result.\n",
+				evaluated, incompleteChecks)
+		}
 
 	default:
 		fmt.Fprintf(w, "No known vulnerabilities found in %d package(s).\n", evaluated)

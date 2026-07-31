@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -16,7 +15,6 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 
-	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/source"
 	"github.com/kun9497/assay/internal/store"
 )
@@ -150,13 +148,12 @@ func writeImageTar(t *testing.T, path string, files map[string]string) {
 // testDB builds an empty but complete database: SetMeta is what marks a build
 // finished (store.ErrIncomplete otherwise), so the image-path tests below
 // reach the matcher and report rather than tripping the missing-database exit.
-// testDB holds one advisory per ecosystem these tests scan, so those
-// ecosystems are COVERED (D20).
+// testDB declares coverage of the ecosystems these tests scan (D20).
 //
-// An empty database used to serve here, because a lookup that found nothing
-// counted as a clean evaluation. That is exactly the silent false negative
-// D20 closes: every package now lands in "not evaluated" instead, and a test
-// asserting a package was evaluated would be asserting the old bug.
+// A database declaring none used to serve here, because a lookup that found
+// nothing counted as a clean evaluation. That is exactly the silent false
+// negative D20 closes: every package now lands in "not evaluated" instead, and
+// a test asserting a package was evaluated would be asserting the old bug.
 func testDB(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "vulnerability.db")
@@ -164,22 +161,12 @@ func testDB(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	for i, eco := range []string{"Alpine:v3.19", "Go", "npm", "PyPI"} {
-		// A real record under a name nothing in these fixtures uses: it makes
-		// the ecosystem covered without making any package match it.
-		if err := w.Put(advisory.Advisory{
-			ID:     fmt.Sprintf("COVERAGE-%d", i),
-			Source: "osv",
-			Kind:   advisory.KindVulnerability,
-			Affected: []advisory.Affected{{
-				Ecosystem: eco,
-				Name:      "nothing-these-tests-scan",
-			}},
-		}); err != nil {
-			t.Fatalf("Put: %v", err)
-		}
-	}
-	if err := w.SetMeta(store.Meta{}); err != nil {
+	// Coverage is declared the way a provider declares it (D20), not inferred
+	// from stored records.
+	covered := []string{"Alpine:v3.19", "Go", "npm", "PyPI"}
+	if err := w.SetMeta(store.Meta{
+		Providers: map[string]store.Provenance{"osv": {Ecosystems: covered}},
+	}); err != nil {
 		t.Fatalf("SetMeta: %v", err)
 	}
 	if err := w.Close(); err != nil {
@@ -415,5 +402,41 @@ func TestCatalogFromImage_NoApkDBReturnsError(t *testing.T) {
 	}
 	if len(target.Packages) != 0 || stats.Components != 0 || stats.Cataloged != 0 {
 		t.Errorf("got target=%+v stats=%+v on error, want zero values", target, stats)
+	}
+}
+
+// The CLI contract, end to end: a target whose ecosystem this database never
+// held exits 2 and says which one and what to do (D20, D11).
+//
+// The matcher test covers the decision; nothing covered the consequence.
+// Disabling the coverage check entirely used to fail only in internal/matcher,
+// so the behaviour the command line actually promises was unasserted.
+func TestRun_UncoveredEcosystemExits2WithInstructions(t *testing.T) {
+	dbPath := testDB(t) // covers Alpine:v3.19, Go, npm, PyPI — not v3.99
+
+	sbom := filepath.Join(t.TempDir(), "future.cdx.json")
+	if err := os.WriteFile(sbom, []byte(`{"bomFormat":"CycloneDX","specVersion":"1.5","version":1,
+	 "components":[
+	  {"type":"operating-system","name":"alpine","version":"3.99.0",
+	   "properties":[{"name":"syft:distro:id","value":"alpine"},
+	                 {"name":"syft:distro:versionID","value":"3.99.0"}]},
+	  {"type":"library","name":"busybox","version":"1.36.1-r20",
+	   "purl":"pkg:apk/alpine/busybox@1.36.1-r20?arch=x86_64"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), dbPath, sbom, &out, &errOut); code != 2 {
+		t.Fatalf("Run = %d, want 2 (stdout: %s)", code, out.String())
+	}
+	if strings.Contains(out.String(), "No known vulnerabilities") {
+		t.Errorf("clean wording for an ecosystem the database never held:\n%s", out.String())
+	}
+	// The user's next action has to be in the output; nothing else says it.
+	if !strings.Contains(out.String(), "Alpine:v3.99") {
+		t.Errorf("output does not name the missing ecosystem:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "db update") {
+		t.Errorf("output does not say how to fix it:\n%s", out.String())
 	}
 }

@@ -64,17 +64,11 @@ type Meta struct {
 	Schema    int                   `json:"schema"`
 	BuiltAt   time.Time             `json:"built_at"` // when this database was assembled locally
 	Providers map[string]Provenance `json:"providers"`
-	// Ecosystems is every key ingestion actually indexed, sorted (D20).
+	// Ecosystems is the union of every provider's coverage, sorted (D20).
 	//
 	// It exists so a lookup that finds nothing can be told apart from a lookup
 	// in an ecosystem this database never held. Both return zero advisories,
 	// and without this the second reads as a clean scan.
-	//
-	// SetMeta fills it from what Put indexed and ignores whatever the caller
-	// passed. For Alpine those differ: db update fetches one archive named
-	// "Alpine" whose records carry Alpine:v3.2 through Alpine:v3.24, so a
-	// caller reporting its fetch list would claim a key nothing is looked up
-	// under and omit the 23 that are.
 	Ecosystems []string `json:"ecosystems"`
 }
 
@@ -86,6 +80,20 @@ type Provenance struct {
 	// reports quarter-old data as fresh.
 	DataAsOf time.Time `json:"data_as_of"`
 	Records  int       `json:"records"`
+	// Ecosystems is what this provider actually covers (D20): the keys it
+	// fetched, expanded to the release-qualified ones a fetched family
+	// contains.
+	//
+	// The provider reports it because only the provider knows both halves.
+	// The store cannot: it sees every ecosystem named in every record, and
+	// records deliberately keep entries for ecosystems that were NOT fetched
+	// (slice 1's cross-ecosystem fix), so a store-side set silently claims
+	// coverage of Maven, NuGet and crates.io on a database that fetched none
+	// of them. Nor can a naive caller: db update fetches one archive named
+	// "Alpine" whose records carry Alpine:v3.2 through Alpine:v3.24, so the
+	// fetch list alone names a key nothing is looked up under and omits the 23
+	// that are.
+	Ecosystems []string `json:"ecosystems"`
 }
 
 // DefaultPath returns <user cache>/assay/db/v<schema>/vulnerability.db,

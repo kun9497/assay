@@ -36,7 +36,7 @@ from.
 
 `Meta` now records which ecosystems ingestion indexed, and a package whose ecosystem is
 absent is skipped rather than evaluated (D20). That closed the silent clean scan: an Alpine
-release the database has never held now exits 2 and says `run \`assay db update\``.
+release the database has never held now exits 2 and says `run `assay db update``.
 
 What is still open is the *partial* case. If a target holds twenty packages and five are in
 an uncovered ecosystem, the five are counted and named under "Not evaluated" and the exit
@@ -56,6 +56,7 @@ the first does not exist would fix the ordering of a decision that has not been 
 **Groundwork.** `Summary` already separates `NotEvaluated` from `IncompleteChecks`, and
 `Skipped` already distinguishes a whole-package skip from an advisory-scoped one, so the
 counts a gate would key on are in hand.
+
 ### KISA/KNVD as an independent matching source
 
 Currently scoped as **enrichment only**: a finding already matched through OSV picks up
