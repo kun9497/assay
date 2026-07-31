@@ -104,7 +104,7 @@ func catalogImage(ctx context.Context, ref string) (pkgmeta.Target, cyclonedx.St
 	if err != nil {
 		return pkgmeta.Target{}, cyclonedx.Stats{}, err
 	}
-	return catalogFromImage(img)
+	return catalogFromImage(ref, img)
 }
 
 // catalogFromImage builds a Target the way syft does for the same image: the
@@ -119,7 +119,17 @@ func catalogImage(ctx context.Context, ref string) (pkgmeta.Target, cyclonedx.St
 // early here with a nil error and an empty Target would instead print "no
 // known vulnerabilities found" — a clean result for a scan that checked
 // nothing.
-func catalogFromImage(img *source.Image) (pkgmeta.Target, cyclonedx.Stats, error) {
+//
+// Zero cataloged packages IS an error, though, unlike an empty Ecosystem — an
+// empty database (no /lib/apk/db/installed at all, or none of it readable)
+// has no package to attach an empty Ecosystem to for the matcher/report to
+// mark not-evaluated the way an unkeyed one is. Inventing a placeholder
+// component to route around that would fabricate the exact thing
+// cyclonedx.Stats' own contract forbids: a package that was never there
+// becomes indistinguishable from one with no vulnerabilities. An explicit
+// error naming what was looked for is the honest answer, and Run already maps
+// a catalog error to exit 2 with stdout untouched.
+func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.Stats, error) {
 	files, err := img.Files([]string{osReleasePath, apkDBPath})
 	if err != nil {
 		return pkgmeta.Target{}, cyclonedx.Stats{}, err
@@ -144,32 +154,25 @@ func catalogFromImage(img *source.Image) (pkgmeta.Target, cyclonedx.Stats, error
 		// clean" — exactly the false negative D11 exists to prevent.
 	}
 
-	var stats cyclonedx.Stats
+	var pkgs []pkgmeta.Package
+	var diffID string
 	if f, ok := files[apkDBPath]; ok {
-		pkgs, err := apkdb.Parse(bytes.NewReader(f.Data), ecosystem)
+		p, err := apkdb.Parse(bytes.NewReader(f.Data), ecosystem)
 		if err != nil {
 			return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("parse %s: %w", apkDBPath, err)
 		}
-		for i := range pkgs {
-			for j := range pkgs[i].Locations {
-				pkgs[i].Locations[j].LayerDigest = f.DiffID
-			}
+		pkgs, diffID = p, f.DiffID
+	}
+	if len(pkgs) == 0 {
+		return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf(
+			"no supported package database found in %s (looked for %s)", ref, apkDBPath)
+	}
+	for i := range pkgs {
+		for j := range pkgs[i].Locations {
+			pkgs[i].Locations[j].LayerDigest = diffID
 		}
-		target.Packages = pkgs
-		stats.Cataloged = len(pkgs)
 	}
+	target.Packages = pkgs
 
-	stats.Components = stats.Cataloged
-	if stats.Components == 0 {
-		// Unlike a CycloneDX document, which can legitimately list zero
-		// components, an image is real filesystem content: there is no such
-		// thing as a vacuously empty one. Leaving Components at 0 here would
-		// let report.Table's "nothing to evaluate" branch — meant for a
-		// genuinely empty SBOM — read a missing or empty package database, or
-		// a distro this build does not support, as a clean scan instead of one
-		// that evaluated nothing (D11).
-		stats.Components = 1
-	}
-
-	return target, stats, nil
+	return target, cyclonedx.Stats{Cataloged: len(pkgs), Components: len(pkgs)}, nil
 }

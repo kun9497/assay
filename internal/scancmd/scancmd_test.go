@@ -36,10 +36,20 @@ func TestRun_MissingDatabase(t *testing.T) {
 	}
 }
 
+// A target with no scheme prefix and no file on disk is, by ClassifyTarget's
+// own contract, a registry reference — never an "SBOM that happens to be
+// missing". A bare unprefixed path here would only fail locally by accident:
+// on Windows because backslashes do not parse as a reference, and even on
+// POSIX only because t.TempDir() happens to embed this test's own (capitalized)
+// name, which is not a stable property to depend on — a lowercase test name,
+// or a differently-shaped temp path, parses fine and reaches a real registry.
+// An explicit docker-archive: prefix makes the classification unambiguous and
+// keeps the failure local, the same fix applied to the sibling in
+// cmd/assay/main_test.go.
 func TestRun_MissingSBOM(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := Run(context.Background(), filepath.Join(t.TempDir(), "absent.db"),
-		filepath.Join(t.TempDir(), "absent.cdx.json"), &out, &errOut)
+		"docker-archive:"+filepath.Join(t.TempDir(), "absent.cdx.json"), &out, &errOut)
 	if code != 2 {
 		t.Errorf("Run with a missing SBOM = %d, want 2", code)
 	}
@@ -53,9 +63,12 @@ PRETTY_NAME="Alpine Linux v3.19"
 `
 
 // One apk record, minimal but real-shaped: name, version, architecture, and
-// origin (D8). The trailing blank line matches the real file's own record
-// separator.
-const apkOneRecord = `P:busybox
+// origin (D8). The name deliberately differs from the origin — busybox-binsh
+// -> busybox is one of the six real alpine:3.19 packages that diverge from
+// their source (task 4) — so any assertion that Source.Name survived cannot
+// pass by coincidence of the two strings being equal. The trailing blank line
+// matches the real file's own record separator.
+const apkOneRecord = `P:busybox-binsh
 V:1.36.1-r15
 A:x86_64
 o:busybox
@@ -65,6 +78,14 @@ o:busybox
 // buildTar packs files into one uncompressed tar, matching how a layer's
 // contents look on the wire — real image tests do not need compression to
 // exercise the code under test.
+//
+// Iterating a map has no defined order, which is fine here because nothing in
+// this package's tests depends on entry order within one layer. It would not
+// be fine for a whiteout and the file it names: internal/source/walk_test.go
+// hit exactly that trap (a whiteout's position within its own layer decides
+// whether a correct reader ignores it) and had to split its builder into an
+// unordered layerOf and an order-preserving layerOfOrdered. Do not put a
+// whiteout in this map without doing the same here.
 func buildTar(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -155,7 +176,7 @@ func TestRun_TargetKinds(t *testing.T) {
 		}
 		var out, errOut bytes.Buffer
 		if code := Run(context.Background(), dbPath, sbom, &out, &errOut); code != 0 {
-			t.Errorf("Run(context.Background(), sbom) = %d, want 0 (stderr: %s)", code, errOut.String())
+			t.Errorf("Run(sbom) = %d, want 0 (stderr: %s)", code, errOut.String())
 		}
 		if !strings.Contains(out.String(), "no components") {
 			t.Errorf("stdout = %q, want the empty-document message", out.String())
@@ -170,7 +191,7 @@ func TestRun_TargetKinds(t *testing.T) {
 		})
 		var out, errOut bytes.Buffer
 		if code := Run(context.Background(), dbPath, "docker-archive:"+tarPath, &out, &errOut); code != 0 {
-			t.Errorf("Run(context.Background(), docker-archive) = %d, want 0 (stderr: %s)", code, errOut.String())
+			t.Errorf("Run(docker-archive) = %d, want 0 (stderr: %s)", code, errOut.String())
 		}
 		if !strings.Contains(out.String(), "1 package") {
 			t.Errorf("stdout = %q, want the one apk package to have been evaluated", out.String())
@@ -187,7 +208,7 @@ func TestRun_TargetKinds(t *testing.T) {
 		var out, errOut bytes.Buffer
 		code := Run(context.Background(), dbPath, "NOT a valid ref!!", &out, &errOut)
 		if code != 2 {
-			t.Errorf("Run(context.Background(), invalid ref) = %d, want 2", code)
+			t.Errorf("Run(invalid ref) = %d, want 2", code)
 		}
 		if !strings.Contains(errOut.String(), "parse reference") {
 			t.Errorf("stderr = %q, want it to name reference parsing, proving "+
@@ -205,7 +226,7 @@ func TestRun_UnreadableTargetExits2(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := Run(context.Background(), dbPath, target, &out, &errOut)
 	if code != 2 {
-		t.Errorf("Run(context.Background(), unreadable image) = %d, want 2", code)
+		t.Errorf("Run(unreadable image) = %d, want 2", code)
 	}
 	if out.Len() != 0 {
 		t.Errorf("error path polluted stdout: %q", out.String())
@@ -228,7 +249,7 @@ func TestRun_ImageWithoutOSReleaseIsNotClean(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := Run(context.Background(), dbPath, "docker-archive:"+tarPath, &out, &errOut)
 	if code != 2 {
-		t.Errorf("Run(context.Background(), image without os-release) = %d, want 2 (stdout: %s, stderr: %s)",
+		t.Errorf("Run(image without os-release) = %d, want 2 (stdout: %s, stderr: %s)",
 			code, out.String(), errOut.String())
 	}
 	if !strings.Contains(out.String(), "NOT a clean result") {
@@ -236,9 +257,10 @@ func TestRun_ImageWithoutOSReleaseIsNotClean(t *testing.T) {
 	}
 }
 
-// The same holds for an image with no /lib/apk/db/installed at all: zero
-// packages against a distro that DID resolve is a scan that evaluated
-// nothing, not a vacuously empty one (D11).
+// The same holds for an image with no /lib/apk/db/installed at all: this is
+// now a catalog error (I1), not a fabricated component count, but Run must
+// still map it to exit 2 the same way. This test asserts only the exit code —
+// TestCatalogFromImage_NoApkDBReturnsError below is what pins the error text.
 func TestRun_ImageWithoutApkDBIsNotClean(t *testing.T) {
 	dbPath := testDB(t)
 	tarPath := filepath.Join(t.TempDir(), "image.tar")
@@ -249,31 +271,51 @@ func TestRun_ImageWithoutApkDBIsNotClean(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := Run(context.Background(), dbPath, "docker-archive:"+tarPath, &out, &errOut)
 	if code != 2 {
-		t.Errorf("Run(context.Background(), image without apk db) = %d, want 2 (stdout: %s, stderr: %s)",
+		t.Errorf("Run(image without apk db) = %d, want 2 (stdout: %s, stderr: %s)",
 			code, out.String(), errOut.String())
 	}
 }
 
 // Location.LayerDigest must name the layer the apk database was actually read
-// from. apkdb.Parse leaves it empty on purpose (Task 4); catalogFromImage is
-// what fills it in.
+// from, not just any layer in the image. Two layers with different digests
+// pin that: os-release lives in the base layer and the apk database in the
+// upper one, so a mutation that hardcodes img.Layers[0]'s digest reports the
+// wrong one. This also carries D8 (Package.Source, load-bearing per the
+// brief) and D7 (Distro belongs to the Target) through the one place that
+// mutates what apkdb and osrelease returned — apkdb's own tests and
+// matcher_test.go guard their own ends of this seam, but neither asserts what
+// catalogFromImage does to the result in between.
 func TestCatalogFromImage_SetsLayerDigestFromTheLayer(t *testing.T) {
 	img := &source.Image{Layers: []source.Layer{
-		imageLayer(t, "sha256:layer1", map[string]string{
+		imageLayer(t, "sha256:base", map[string]string{
 			osReleasePath: osReleaseAlpine319,
-			apkDBPath:     apkOneRecord,
+		}),
+		imageLayer(t, "sha256:top", map[string]string{
+			apkDBPath: apkOneRecord,
 		}),
 	}}
-	target, _, err := catalogFromImage(img)
+	target, _, err := catalogFromImage("test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	if target.Distro == nil || target.Distro.ID != "alpine" || target.Distro.VersionID != "3.19.9" {
+		t.Errorf("Distro = %+v, want alpine 3.19.9 (D7: the distro belongs to the Target)", target.Distro)
+	}
+
 	if len(target.Packages) != 1 {
 		t.Fatalf("Packages = %d, want 1", len(target.Packages))
 	}
 	p := target.Packages[0]
-	if len(p.Locations) != 1 || p.Locations[0].LayerDigest != "sha256:layer1" {
-		t.Errorf("Locations = %+v, want LayerDigest sha256:layer1", p.Locations)
+	if len(p.Locations) != 1 || p.Locations[0].LayerDigest != "sha256:top" {
+		t.Errorf("Locations = %+v, want LayerDigest sha256:top (the layer the apk "+
+			"database actually came from, not sha256:base)", p.Locations)
+	}
+	// apkOneRecord's origin differs from its own name (busybox-binsh -> busybox,
+	// as in the real alpine:3.19 image) specifically so this cannot pass by
+	// coincidence of source and binary sharing a name.
+	if p.Source == nil || p.Source.Name != "busybox" {
+		t.Errorf("Source = %+v, want Name busybox (D8, through catalogFromImage)", p.Source)
 	}
 }
 
@@ -286,7 +328,7 @@ func TestCatalogFromImage_NoOSReleaseStillCatalogsPackages(t *testing.T) {
 			apkDBPath: apkOneRecord,
 		}),
 	}}
-	target, stats, err := catalogFromImage(img)
+	target, stats, err := catalogFromImage("test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +355,7 @@ func TestCatalogFromImage_UnsupportedEcosystemIsNotGuessed(t *testing.T) {
 			apkDBPath:     apkOneRecord,
 		}),
 	}}
-	target, _, err := catalogFromImage(img)
+	target, _, err := catalogFromImage("test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,26 +367,29 @@ func TestCatalogFromImage_UnsupportedEcosystemIsNotGuessed(t *testing.T) {
 	}
 }
 
-// No /lib/apk/db/installed at all, with a distro that DID resolve, must still
-// force a non-zero Components: an image is never "nothing to see" the way an
-// empty SBOM legitimately can be (D11).
-func TestCatalogFromImage_NoApkDBForcesNonZeroComponents(t *testing.T) {
+// No /lib/apk/db/installed at all, with a distro that DID resolve, must be an
+// error naming what was looked for (I1) — not a fabricated non-zero component
+// count. An image is never "nothing to see" the way an empty SBOM legitimately
+// can be, but inventing a component to say so would fabricate the exact thing
+// cyclonedx.Stats' own contract forbids: a package that was never cataloged
+// becomes indistinguishable from one with no vulnerabilities.
+func TestCatalogFromImage_NoApkDBReturnsError(t *testing.T) {
 	img := &source.Image{Layers: []source.Layer{
 		imageLayer(t, "sha256:layer1", map[string]string{
 			osReleasePath: osReleaseAlpine319,
 		}),
 	}}
-	target, stats, err := catalogFromImage(img)
-	if err != nil {
-		t.Fatal(err)
+	target, stats, err := catalogFromImage("test-image", img)
+	if err == nil {
+		t.Fatal("catalogFromImage succeeded with no apk database; want an error")
 	}
-	if len(target.Packages) != 0 {
-		t.Fatalf("Packages = %d, want 0", len(target.Packages))
+	if !strings.Contains(err.Error(), apkDBPath) {
+		t.Errorf("err = %q, want it to name %q — what was looked for", err, apkDBPath)
 	}
-	if stats.Components == 0 {
-		t.Error("Components = 0: a missing package database must not read as a vacuously empty scan")
+	if !strings.Contains(err.Error(), "test-image") {
+		t.Errorf("err = %q, want it to name the image", err)
 	}
-	if stats.Cataloged != 0 {
-		t.Errorf("Cataloged = %d, want 0", stats.Cataloged)
+	if len(target.Packages) != 0 || stats.Components != 0 || stats.Cataloged != 0 {
+		t.Errorf("got target=%+v stats=%+v on error, want zero values", target, stats)
 	}
 }

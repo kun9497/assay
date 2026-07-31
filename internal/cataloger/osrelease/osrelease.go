@@ -29,6 +29,16 @@ import (
 // is skipped rather than treated as a parse failure, for the same reason: the
 // shape of one stray line says nothing about whether the rest of the file is
 // trustworthy.
+//
+// The comment-line check and the exact key match below are mutually
+// redundant: a "#"-prefixed line can never produce a key equal to ID,
+// VERSION_ID, or PRETTY_NAME, since the "#" is always part of the substring
+// strings.Cut returns as the key. Neither guard is individually observable by
+// a black-box test of Parse, so a later refactor that "simplifies" one away
+// will not be caught by one — keep both anyway, since removing either changes
+// nothing about correctness today but removes a safety margin against a
+// future change to the key match (e.g. a case-insensitive or prefix match)
+// that would make the missing guard observable again.
 func Parse(r io.Reader) (pkgmeta.Distro, error) {
 	var d pkgmeta.Distro
 

@@ -55,6 +55,11 @@ func TestParse_RealDatabase(t *testing.T) {
 	if bl.Type != "apk" {
 		t.Errorf("alpine-baselayout Type = %q, want apk", bl.Type)
 	}
+	// Location.Path is part of Evidence (D10): a finding that cannot point back
+	// at the file it came from is not explainable.
+	if len(bl.Locations) != 1 || bl.Locations[0].Path != "/lib/apk/db/installed" {
+		t.Errorf("alpine-baselayout Locations = %+v, want Path /lib/apk/db/installed", bl.Locations)
+	}
 
 	// Every one of the 15 real records carries an o: line, so every package
 	// must carry a non-nil Source. A single missed one would silently drop
