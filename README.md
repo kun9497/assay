@@ -1,6 +1,6 @@
 # assay
 
-> **SBOM-driven vulnerability scanner for containers, binaries, and filesystems.**
+> **Vulnerability scanner for containers, binaries, and filesystems.**
 
 *English · [한국어](README.ko.md)*
 
@@ -54,8 +54,10 @@ this one:
 Design goals, in order:
 
 1. **Explainable** — every finding says *why* it matched, not just *that* it did.
-2. **Offline-capable** — no network at scan time; `assay db update` is the only command
-   that reaches out.
+2. **Offline-capable** — a scan never fetches vulnerability data, and a scan of anything
+   already on disk makes no network call at all. Only a remote *target* is fetched, and
+   only when you name one: `assay scan alpine:3.19` reaches out, `assay scan
+   docker-archive:alpine.tar` does not.
 3. **Boring output** — deterministic, diffable, CI-friendly.
 
 Configuration scanning, secret scanning, IaC, and Kubernetes posture are explicit
@@ -175,7 +177,9 @@ ecosystem means writing one `Cataloger` and one `Comparer` — nothing else chan
 | `Provider` | Upstream feed → `[]Advisory` | OSV, KISA |
 
 The database is orthogonal to the scan. `Provider`s populate it through `assay db update`;
-a scan only ever reads. That is what makes offline operation the default rather than a flag.
+a scan only ever reads, and never repairs a stale or missing one behind your back. That is
+what makes offline operation the default rather than a flag — a scanner that quietly
+downloads advisories produces results you cannot reproduce or audit.
 
 Advisories are stored in **OSV shape** — `affected[].ranges[]` carrying `introduced` /
 `fixed` events. OSV is the primary provider and passes through nearly unchanged; other

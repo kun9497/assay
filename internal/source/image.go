@@ -73,9 +73,11 @@ func classify(ref string) kind {
 // Open resolves a target to its layers. A registry reference reaches the
 // network; the other two never do (D14).
 //
-// The context is honoured on the registry path. go-containerregistry's default
-// transport sets no overall deadline, so without one a black-holed registry
-// hangs the scan with nothing to cancel it.
+// The context is honoured on the registry path, so a caller that sets a
+// deadline gets one. Note that nothing in this program sets one today:
+// go-containerregistry's default transport has no overall deadline either, so
+// a black-holed registry can still hang a scan. The plumbing is here; the
+// policy is not.
 func Open(ctx context.Context, ref string) (*Image, error) {
 	img, err := load(ctx, ref)
 	if err != nil {

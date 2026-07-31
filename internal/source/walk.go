@@ -73,8 +73,7 @@ func (img *Image) Files(want []string) (map[string]FileFromLayer, error) {
 		}
 		// Whatever is still pending either does not exist or was a symlink.
 		next := make(map[string]bool, len(links))
-		for from, to := range links {
-			target := resolveLink(from, to)
+		for from, target := range links {
 			if _, done := out[requested[from]]; done {
 				continue
 			}
@@ -125,7 +124,13 @@ func (img *Image) resolvePass(
 			case tar.TypeSymlink, tar.TypeLink:
 				// Record the link and stop looking for this path: a lower
 				// layer's copy is shadowed by the link that replaced it.
-				links[name] = h.Linkname
+				//
+				// The two kinds resolve differently. A symlink's target is
+				// relative to the link's own directory; a hardlink's is
+				// relative to the archive root. Treating a hardlink like a
+				// symlink turns "usr/lib/os-release" into
+				// "etc/usr/lib/os-release" and finds nothing.
+				links[name] = resolveLink(name, h.Linkname, h.Typeflag == tar.TypeLink)
 				resolved[name] = true
 				return nil
 			case tar.TypeReg:
@@ -151,11 +156,14 @@ func (img *Image) resolvePass(
 	return links, nil
 }
 
-// resolveLink turns a link target into a path from the image root. A relative
-// target is relative to the directory holding the link, which is why the
-// symlink's own path is needed and not just its target.
-func resolveLink(from, target string) string {
-	if strings.HasPrefix(target, "/") {
+// resolveLink turns a link target into a path from the image root.
+//
+// A SYMLINK's relative target is relative to the directory holding the link,
+// which is why the link's own path is needed and not just its target. A
+// HARDLINK's Linkname is always relative to the archive root instead, so
+// joining it to the link's directory would invent a path that does not exist.
+func resolveLink(from, target string, hard bool) string {
+	if hard || strings.HasPrefix(target, "/") {
 		return normaliseEntry(target)
 	}
 	return normaliseEntry(path.Join(path.Dir(from), target))

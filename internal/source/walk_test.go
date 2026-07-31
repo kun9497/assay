@@ -9,10 +9,15 @@ import (
 
 type entry struct {
 	name, body string
-	link       string // non-empty makes this a symlink entry, as tar carries it
+	link       string // non-empty makes this a link entry, as tar carries it
+	hardlink   bool   // a hardlink rather than a symlink; targets resolve differently
 }
 
 func sym(name, target string) entry { return entry{name: name, link: target} }
+
+func hard(name, target string) entry {
+	return entry{name: name, link: target, hardlink: true}
+}
 
 // layerOf builds a one-layer tar from path -> contents. Entry order is
 // unspecified because Go map iteration is random; tests whose subject is
@@ -37,8 +42,12 @@ func layerOfOrdered(t *testing.T, diffID string, files ...entry) Layer {
 		if e.link != "" {
 			// A symlink header carries no payload: reading it yields zero bytes,
 			// which is exactly how a reader that ignores Typeflag goes wrong.
+			kind := byte(tar.TypeSymlink)
+			if e.hardlink {
+				kind = tar.TypeLink
+			}
 			if err := tw.WriteHeader(&tar.Header{
-				Name: e.name, Mode: 0o777, Typeflag: tar.TypeSymlink, Linkname: e.link,
+				Name: e.name, Mode: 0o777, Typeflag: kind, Linkname: e.link,
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -373,5 +382,26 @@ func TestFiles_RelativeSymlinkIsJoinedToTheLinksDirectory(t *testing.T) {
 	if string(f.Data) != "3.19.9" {
 		t.Errorf("Data = %q, want etc/alpine-release; a relative target is "+
 			"relative to the link, not to the image root", f.Data)
+	}
+}
+
+// A hardlink's Linkname is relative to the archive root, not to the link's
+// directory — the opposite of a symlink. Resolving one like the other turns
+// "usr/lib/os-release" into "etc/usr/lib/os-release" and finds nothing.
+func TestFiles_HardlinkTargetIsRootRelative(t *testing.T) {
+	img := imageOf(layerOfOrdered(t, "sha256:one",
+		hard("etc/os-release", "usr/lib/os-release"),
+		entry{name: "usr/lib/os-release", body: "ID=alpine"},
+	))
+	got, err := img.Files([]string{"etc/os-release"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, ok := got["etc/os-release"]
+	if !ok {
+		t.Fatal("etc/os-release not resolved through its hardlink")
+	}
+	if string(f.Data) != "ID=alpine" {
+		t.Errorf("Data = %q, want the root-relative target's contents", f.Data)
 	}
 }

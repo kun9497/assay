@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 )
 
 func TestClassify(t *testing.T) {
@@ -154,12 +155,22 @@ func TestImageFromIndex_ErrorNamesTheRealPlatformsOnly(t *testing.T) {
 // client. A local load must not touch it; only the registry branch may.
 func TestOpen_LocalTargetsMakeNoNetworkCall(t *testing.T) {
 	var reached int
-	restore := http.DefaultTransport
-	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+	trap := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		reached++
 		return nil, fmt.Errorf("network call to %s on a local target", r.URL)
 	})
-	t.Cleanup(func() { http.DefaultTransport = restore })
+
+	// BOTH transports. go-containerregistry's remote package does not use
+	// http.DefaultTransport — it has its own remote.DefaultTransport — so
+	// trapping only the standard one leaves the single path that can actually
+	// reach a registry uninstrumented. The first version of this test did
+	// exactly that and passed with a live remote.Image() call smuggled into the
+	// oci-dir branch, which is the case it exists to forbid.
+	restoreStd, restoreRemote := http.DefaultTransport, remote.DefaultTransport
+	http.DefaultTransport, remote.DefaultTransport = trap, trap
+	t.Cleanup(func() {
+		http.DefaultTransport, remote.DefaultTransport = restoreStd, restoreRemote
+	})
 
 	for _, ref := range []string{
 		"docker-archive:" + filepath.Join(t.TempDir(), "absent.tar"),
