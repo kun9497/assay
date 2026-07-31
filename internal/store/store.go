@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/kun9497/assay/internal/advisory"
@@ -17,7 +18,16 @@ import (
 // SchemaVersion is part of the on-disk path (D5). A schema change rebuilds
 // into a new directory rather than migrating in place, because migration code
 // is a liability for a project with one user.
-const SchemaVersion = 1
+//
+// Bumped to 2 in slice 2a: the by-source bucket was removed once measurement
+// showed OSV writes the source package name straight into Affected[].Name.
+// The bucket set is the on-disk shape, so that is a schema change even though
+// no record's encoding moved — and without the bump a database built before
+// Alpine support is accepted unchanged, evaluates every Alpine package against
+// data it never ingested, and reports "no known vulnerabilities found" at exit
+// 0. That is the silent false negative, arriving through a stale cache rather
+// than a bug.
+const SchemaVersion = 2
 
 var (
 	ErrNotFound       = errors.New("vulnerability database not found")
@@ -30,11 +40,10 @@ var (
 )
 
 type Store interface {
+	// Lookup answers for a package name. Source-package advisories (D8) need
+	// no separate method: OSV writes the source name into Affected[].Name, so
+	// the caller queries this with the source name as a second key.
 	Lookup(ecosystem, name string) ([]advisory.Advisory, error)
-	// LookupBySource resolves advisories keyed on a source package (D8).
-	// Unused in slice 1 — distro packages arrive in slice 2 — but present so
-	// the interface does not change under its first real consumer.
-	LookupBySource(ecosystem, sourceName string) ([]advisory.Advisory, error)
 	Meta() (Meta, error)
 	Close() error
 }
@@ -43,7 +52,6 @@ type Store interface {
 // handed something it could write through.
 type Writer interface {
 	Put(a advisory.Advisory) error
-	PutSourceIndex(ecosystem, sourceName, id string) error
 	SetMeta(m Meta) error
 	Close() error
 }
@@ -74,5 +82,10 @@ func DefaultPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(cache, "assay", "db", "v1", "vulnerability.db"), nil
+	// Derived from the constant rather than written out, so the comment above
+	// stays true. Hardcoding "v1" here meant a schema bump produced a mismatch
+	// error against the old file instead of a clean rebuild into a new
+	// directory, which is what D5 actually asks for.
+	return filepath.Join(cache, "assay", "db",
+		"v"+strconv.Itoa(SchemaVersion), "vulnerability.db"), nil
 }

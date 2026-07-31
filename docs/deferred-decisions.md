@@ -10,7 +10,86 @@ Read alongside the Architecture section of the [README](../README.md).
 
 ---
 
+## Next work — committed, not deferred
+
+Everything in this section is scheduled. It appears here so the split is recorded next to
+the deferrals rather than only in a plan file, but it is not postponed and needs no
+revisit trigger.
+
+### Slice 2b — reading container images directly
+
+Slice 2 was split. **2a** matches Alpine packages from a CycloneDX SBOM someone else
+produced; **2b** produces that inventory ourselves. 2b starts when 2a merges.
+
+**Why the split.** The roadmap called slice 2 "highest design risk", and the risk is
+`Target.Distro` (D7), release-qualified ecosystem keys (D6), `Package.Source` indirect
+matching (D8), and the apk `Comparer` (D9). A syft SBOM of an Alpine image already carries
+every input those need — the `operating-system` component holds `syft:distro:*`, and
+`syft:metadata:originPackage` holds the source package. So 2a validates all of the design
+risk and none of the plumbing validates any of it.
+
+**Ordering is a dependency, not a preference.** 2a is a prerequisite for 2b: an image read
+perfectly but matched against no distro ecosystem produces zero findings.
+
+**What 2b contains.** An image `Source` — layer fetch, gzip, tar extraction, whiteout
+(`.wh.`) handling — plus `/etc/os-release` and `/lib/apk/db/installed` catalogers, and one
+or more fetchers.
+
+**The fetchers are interchangeable and all are wanted**: `docker-archive` tarball, local
+Docker daemon, OCI layout directory, and registry pull. Each produces the same thing — a
+layer list and a config — and everything downstream of `Source` is shared. Which one lands
+first is a scheduling question, not a scope question.
+
+**Open decision, deliberately not pre-made.** Whether registry pull is written against the
+OCI Distribution API with `net/http`, or delegated to `go-containerregistry`. That is a
+dependency decision — the second in the project's history — and belongs in conversation.
+It blocks neither the tarball nor the OCI layout path, since neither needs auth.
+
+---
+
 ## Deferred work
+
+### Making database coverage visible
+
+`Meta.Providers` records `{Source, DataAsOf, Records}` per provider and nothing about
+*which ecosystems* were ingested. A database built before Alpine support existed is
+still schema v1, so `store.Open` accepts it unchanged.
+
+**The failure.** Upgrade to a build with Alpine support, do not re-run `assay db update`,
+then scan an Alpine SBOM. The matcher finds an apk comparer, evaluates every package,
+looks each one up in an ecosystem the database never ingested, finds nothing, and
+`Trustworthy()` is true because packages *were* evaluated. Output: "No known
+vulnerabilities found", exit **0**. That is the silent false negative this project is
+built to prevent, arriving through the one door the ingestion-side checks cannot cover —
+they guarantee a *fresh* build contains Alpine, not that the build you are reading is
+fresh.
+
+**Three doors, not one.** A database built before Alpine support is the obvious one, and
+`SchemaVersion` was bumped to 2 in slice 2a so that door is now shut — such a database is
+a schema mismatch and exits 2. Two remain open:
+
+- **An Alpine release OSV does not carry.** A *correct, freshly built* database still
+  reports clean for one. Verified against a real build: an `alpine 3.25.0` SBOM produces
+  "No known vulnerabilities found in 15 package(s)" and exit 0.
+- **`ASSAY_DB_DIR`.** The path this README recommends for CI caching carries no schema
+  component, so a cache restored across an assay upgrade is exactly the stale case —
+  through a pattern the project advertises.
+
+**Why still deferred.** The tool is unreleased and its only user is its author. Both
+remaining doors need the covered-ecosystem set described below; neither is closable by a
+one-line change the way the schema bump was.
+
+**Revisit when** anyone other than the author runs `assay`, or before the first tagged
+release — whichever comes first. Shipping this to a second user means shipping a scanner
+that reports clean on an image it never checked.
+
+**Groundwork.** The fix is a covered-ecosystem set on `store.Meta`, written by
+`db update` and read by the matcher: a package whose ecosystem is absent from that set
+becomes a counted `Skipped` with a reason naming the gap, rather than an evaluated
+package with no findings. `Skipped` already carries a `Reason` for exactly this, and
+`Summary.Trustworthy()` already turns "nothing evaluated" into exit 2 — only the
+plumbing between them is missing. It is a `Meta` field, so it forces a rebuild, which
+is the correct outcome anyway.
 
 ### KISA/KNVD as an independent matching source
 

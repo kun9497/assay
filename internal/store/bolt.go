@@ -14,12 +14,11 @@ import (
 
 var (
 	bucketAdvisories = []byte("advisories") // "<ecosystem>\x00<name>"   -> []advisory ID
-	bucketBySource   = []byte("by-source")  // "<ecosystem>\x00<source>" -> []advisory ID
 	bucketByID       = []byte("by-id")      // "<advisory ID>"           -> the record, once
 	bucketMeta       = []byte("meta")
 )
 
-var allBuckets = [][]byte{bucketAdvisories, bucketBySource, bucketByID, bucketMeta}
+var allBuckets = [][]byte{bucketAdvisories, bucketByID, bucketMeta}
 
 // keySep is NUL because no real ecosystem or package identifier can contain
 // one. A printable separator would collide: distro ecosystem keys already
@@ -127,14 +126,6 @@ func (b *Bolt) Put(a advisory.Advisory) error {
 	})
 }
 
-// PutSourceIndex records that an advisory is keyed on a source package (D8).
-func (b *Bolt) PutSourceIndex(ecosystem, sourceName, id string) error {
-	return b.db.Update(func(tx *bolt.Tx) error {
-		key := ecosystem + keySep + pkgmeta.NormalizeName(ecosystem, sourceName)
-		return appendID(tx.Bucket(bucketBySource), key, id)
-	})
-}
-
 func appendID(bk *bolt.Bucket, key, id string) error {
 	var ids []string
 	if raw := bk.Get([]byte(key)); raw != nil {
@@ -176,12 +167,11 @@ func (b *Bolt) setSchemaForTest(v int) error {
 	})
 }
 
+// Lookup answers for one name. A caller matching a distro package calls this
+// twice -- once with the binary name, once with the source name (D8) -- because
+// OSV writes the source name into Affected[].Name, which Put already indexes.
 func (b *Bolt) Lookup(ecosystem, name string) ([]advisory.Advisory, error) {
 	return b.resolve(bucketAdvisories, ecosystem+keySep+pkgmeta.NormalizeName(ecosystem, name))
-}
-
-func (b *Bolt) LookupBySource(ecosystem, sourceName string) ([]advisory.Advisory, error) {
-	return b.resolve(bucketBySource, ecosystem+keySep+pkgmeta.NormalizeName(ecosystem, sourceName))
 }
 
 func (b *Bolt) resolve(index []byte, key string) ([]advisory.Advisory, error) {

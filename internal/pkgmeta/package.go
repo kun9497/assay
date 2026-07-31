@@ -9,11 +9,6 @@ type Target struct {
 	Packages []Package
 }
 
-type Distro struct {
-	ID        string // os-release ID, e.g. "alpine"
-	VersionID string // os-release VERSION_ID, e.g. "3.19"
-}
-
 type Package struct {
 	Name      string
 	Version   string

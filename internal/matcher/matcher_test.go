@@ -20,9 +20,6 @@ func (f fakeStore) Lookup(ecosystem, name string) ([]advisory.Advisory, error) {
 	// contract Bolt.Lookup actually implements.
 	return f.byKey[ecosystem+"\x00"+pkgmeta.NormalizeName(ecosystem, name)], nil
 }
-func (f fakeStore) LookupBySource(ecosystem, name string) ([]advisory.Advisory, error) {
-	return nil, nil
-}
 func (f fakeStore) Meta() (store.Meta, error) { return store.Meta{}, nil }
 func (f fakeStore) Close() error              { return nil }
 
@@ -338,8 +335,13 @@ func TestMatch_PyPINameIsNormalizedBeforeFiltering(t *testing.T) {
 }
 
 func TestMatch_UnsupportedEcosystemIsSkipped(t *testing.T) {
+	// Debian, not Alpine: Alpine gained a comparer in slice 2a, and an example
+	// that quietly becomes supported stops testing what it claims to. Debian is
+	// a recorded deferral, so it stays unsupported until someone decides
+	// otherwise — and if they do, this test is where they will find out it needs
+	// a new example.
 	res, err := New(fakeStore{}).Match(pkgmeta.Target{
-		Packages: []pkgmeta.Package{pkg("apache2", "2.4.54-r0", "Alpine:v3.19")},
+		Packages: []pkgmeta.Package{pkg("openssl", "3.0.11-1~deb12u2", "Debian:12")},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -347,7 +349,7 @@ func TestMatch_UnsupportedEcosystemIsSkipped(t *testing.T) {
 	if len(res.Skipped) != 1 {
 		t.Fatalf("Skipped = %d, want 1", len(res.Skipped))
 	}
-	if !strings.Contains(res.Skipped[0].Reason, "Alpine:v3.19") {
+	if !strings.Contains(res.Skipped[0].Reason, "Debian:12") {
 		t.Errorf("Skipped.Reason = %q, should name the ecosystem", res.Skipped[0].Reason)
 	}
 }
@@ -396,5 +398,157 @@ func TestMatch_Deterministic(t *testing.T) {
 	}
 	if first.Findings[0].Package.Name != "a" {
 		t.Errorf("Findings[0].Package = %q, want a (sorted)", first.Findings[0].Package.Name)
+	}
+}
+
+// D8: the advisory names the source package; the installed package is a binary
+// one. Nine of the fifteen packages in alpine:3.19 have an origin package that
+// differs, including libssl3 and libcrypto3 both sourced from openssl. Losing
+// this produces false NEGATIVES, which are silent.
+func TestMatch_SourcePackageReachesTheAdvisory(t *testing.T) {
+	adv := advWithRange("CVE-2024-openssl", "Alpine:v3.19", "openssl",
+		"0", "3.1.4-r6", advisory.RangeEcosystem)
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Alpine:v3.19\x00openssl": {adv},
+	}}
+
+	p := pkg("libssl3", "3.1.4-r5", "Alpine:v3.19")
+	p.Source = &pkgmeta.SourcePackage{Name: "openssl"}
+
+	res, err := New(s).Match(pkgmeta.Target{Packages: []pkgmeta.Package{p}})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1: an openssl advisory must reach libssl3 "+
+			"through Package.Source; got %+v", len(res.Findings), res.Findings)
+	}
+	// Explainability (D10): "libssl3 is vulnerable" is not checkable without
+	// naming the package the advisory was actually written against.
+	if got := res.Findings[0].MatchedName; got != "openssl" {
+		t.Errorf("MatchedName = %q, want %q", got, "openssl")
+	}
+}
+
+// The binary name still matches when it is the one the advisory names, and
+// MatchedName must then be the package's own name rather than empty.
+func TestMatch_BinaryNameStillMatchesDirectly(t *testing.T) {
+	adv := advWithRange("CVE-2024-busybox", "Alpine:v3.19", "busybox",
+		"0", "1.36.1-r16", advisory.RangeEcosystem)
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Alpine:v3.19\x00busybox": {adv},
+	}}
+
+	p := pkg("busybox", "1.36.1-r15", "Alpine:v3.19")
+	p.Source = &pkgmeta.SourcePackage{Name: "busybox"}
+
+	res, err := New(s).Match(pkgmeta.Target{Packages: []pkgmeta.Package{p}})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1: one advisory reached through two names "+
+			"is still one finding; got %+v", len(res.Findings), res.Findings)
+	}
+	if got := res.Findings[0].MatchedName; got != "busybox" {
+		t.Errorf("MatchedName = %q, want %q", got, "busybox")
+	}
+}
+
+// An advisory reachable under BOTH names is one finding, not two.
+func TestMatch_SourceAndBinaryNameDoNotDoubleReport(t *testing.T) {
+	adv := advWithRange("CVE-2024-both", "Alpine:v3.19", "openssl",
+		"0", "3.1.4-r6", advisory.RangeEcosystem)
+	// The same advisory is reachable under the binary name too.
+	adv.Affected = append(adv.Affected, advisory.Affected{
+		Ecosystem: "Alpine:v3.19",
+		Name:      "libssl3",
+		Ranges:    adv.Affected[0].Ranges,
+	})
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Alpine:v3.19\x00openssl": {adv},
+		"Alpine:v3.19\x00libssl3": {adv},
+	}}
+
+	p := pkg("libssl3", "3.1.4-r5", "Alpine:v3.19")
+	p.Source = &pkgmeta.SourcePackage{Name: "openssl"}
+
+	res, err := New(s).Match(pkgmeta.Target{Packages: []pkgmeta.Package{p}})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Errorf("Findings = %d, want 1: the same advisory reached under two "+
+			"names is one finding; got %+v", len(res.Findings), res.Findings)
+	}
+}
+
+// A source-named advisory must NOT match a package whose source is different,
+// or D8 turns a false negative into a false positive.
+func TestMatch_SourceNameDoesNotMatchAcrossPackages(t *testing.T) {
+	adv := advWithRange("CVE-2024-openssl", "Alpine:v3.19", "openssl",
+		"0", "3.1.4-r6", advisory.RangeEcosystem)
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Alpine:v3.19\x00openssl": {adv},
+	}}
+
+	p := pkg("busybox", "1.36.1-r15", "Alpine:v3.19")
+	p.Source = &pkgmeta.SourcePackage{Name: "busybox"}
+
+	res, err := New(s).Match(pkgmeta.Target{Packages: []pkgmeta.Package{p}})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(res.Findings) != 0 {
+		t.Errorf("Findings = %d, want 0: an openssl advisory must not reach "+
+			"busybox; got %+v", len(res.Findings), res.Findings)
+	}
+}
+
+// A package with no ecosystem — the distro had no OSV key — is reported as
+// skipped with a reason, never folded into a clean verdict (D11).
+func TestMatch_UnkeyablePackageIsSkippedNotClean(t *testing.T) {
+	p := pkg("libssl3", "3.1.4-r5", "")
+	res, err := New(fakeStore{}).Match(pkgmeta.Target{Packages: []pkgmeta.Package{p}})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(res.Skipped) != 1 {
+		t.Fatalf("Skipped = %d, want 1", len(res.Skipped))
+	}
+	if res.Skipped[0].Reason == "" {
+		t.Error("skip carries no reason; the count alone tells nobody what to fix")
+	}
+	if len(res.Findings) != 0 {
+		t.Errorf("Findings = %d, want 0", len(res.Findings))
+	}
+}
+
+// identifiers() feeds the dedup map, and it must NOT include Upstream. OSV
+// defines upstream as "derived from", not "the same as", so collapsing on it
+// suppresses a genuinely distinct advisory — a false negative, where an extra
+// line is only noise. The distinction is easy to lose: D3 made upstream
+// prominent for the report (which SHOULD show it), and "unify these two" is a
+// plausible future edit. This is the tripwire for that edit.
+func TestIdentifiers_ExcludesUpstream(t *testing.T) {
+	a := advisory.Advisory{
+		ID:       "ALPINE-CVE-2025-46394",
+		Aliases:  []string{"GHSA-alias"},
+		Upstream: []string{"CVE-2025-46394"},
+	}
+	for _, got := range identifiers(a) {
+		if got == "CVE-2025-46394" {
+			t.Fatalf("identifiers() returned the upstream ID %q. Dedup keyed on it "+
+				"would suppress a distinct advisory that merely derives from the "+
+				"same CVE. The report shows upstream (D3); identity must not.", got)
+		}
+	}
+	// The ones it must carry, so the test cannot pass by returning nothing.
+	want := map[string]bool{"ALPINE-CVE-2025-46394": true, "GHSA-alias": true}
+	for _, got := range identifiers(a) {
+		delete(want, got)
+	}
+	if len(want) != 0 {
+		t.Errorf("identifiers() dropped %v", want)
 	}
 }

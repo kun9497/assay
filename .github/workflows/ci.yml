@@ -34,5 +34,18 @@ jobs:
       - name: Test
         run: go test -race ./...
 
+      # The apk comparer is checked against apk-tools' own vectors. It is behind
+      # a build tag because it needs the network and because vendoring the file
+      # would pull GPL-2.0 data into an Apache-2.0 repo, so `go test ./...` never
+      # runs it — CI is the only place it happens. A silent false negative in
+      # version ordering is the failure this project most needs to catch.
+      - name: Upstream apk version vectors
+        env:
+          # Raises the contents-API limit from 60/hour per shared runner IP to
+          # 5,000. Without it a rate-limited fetch is indistinguishable from a
+          # working one that found nothing.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: go test -tags upstreamvectors -run TestAPKAgainstUpstreamVectors ./internal/version/ -v
+
       - name: Build
         run: go build ./...

@@ -224,6 +224,23 @@ python -c "t=open('f','r',encoding='utf-8').read(); print(t.count(chr(0x212a)), 
 Do not write the character literally in the checking script either — that is how the third
 occurrence happened.
 
+## Substring assertions that pass on the wrong column
+
+**Never assert `strings.Contains(output, x)` when some other field in that output
+already contains `x` as a substring.** Real identifiers nest: `ALPINE-CVE-2025-46394`
+contains `CVE-2025-46394`, and an advisory ID of `CVE-2024-openssl` contains `openssl`.
+The assertion then passes from the column you were not testing, and deleting the feature
+entirely leaves the suite green.
+
+This has happened twice on this branch — once checking that the report prints a source
+package, once checking that it prints an identifier drawn from `upstream`. Both tests
+looked correct, both were vacuous, and only mutation testing found them.
+
+Pick fixture values that cannot collide (`ALPINE-2025-0001` with upstream
+`CVE-2025-46394`), or assert the rendered pair (`libssl3 (openssl)`) rather than either
+half. Then delete the code the test covers and confirm the suite goes red — a report test
+that never fails is worse than no test, because it is counted as coverage.
+
 ## Conventions
 
 - No third-party dependencies yet (`go.mod` has no `require` block). Adding one is a real

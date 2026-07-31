@@ -17,9 +17,11 @@ func TestRun_ExitCodes(t *testing.T) {
 		{"help", []string{"help"}, exitOK},
 		{"unknown command", []string{"bogus"}, exitError},
 		{"scan without target", []string{"scan"}, exitError},
-		// Until the pipeline exists, scan must not report success — a scanner
-		// that silently returns 0 is worse than one that fails loudly.
-		{"scan of an unreadable target", []string{"scan", "alpine:3.19"}, exitError},
+		// An image reference is not a path, and images are not read directly
+		// until slice 2b. It must fail loudly rather than be interpreted as a
+		// filename that happens not to exist — a scanner that returns 0 on a
+		// target it never opened is worse than one that fails.
+		{"scan of an image reference, which is not a path", []string{"scan", "alpine:3.19"}, exitError},
 		{"db without subcommand", []string{"db"}, exitError},
 		{"db unknown subcommand", []string{"db", "bogus"}, exitError},
 	}

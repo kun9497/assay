@@ -19,6 +19,15 @@ type Finding struct {
 	// Evidence is on the type, not in a log line, because explainability is
 	// goal #1 and anything left to logging effectively does not exist (D10).
 	Evidence version.Evidence
+	// MatchedName is the package name that reached the advisory. It differs
+	// from Package.Name when the advisory was written against the source
+	// package (D8) — an openssl advisory matching libssl3. Without it the
+	// report claims a package is vulnerable and gives the reader no way to
+	// check the claim against the advisory they look up.
+	//
+	// It lives here rather than on version.Evidence because the version package
+	// compares versions; which name reached the advisory is a matcher fact.
+	MatchedName string
 }
 
 // Skipped is something the matcher could not evaluate. It exists so that "we
@@ -52,18 +61,6 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 	var res Result
 
 	for _, p := range t.Packages {
-		// NOTE for whoever adds a distro comparer to version.registry. Distro
-		// advisories are keyed on SOURCE packages while installed packages are
-		// binary packages (D8), and THREE things must land together or the
-		// result is a silent under-report rather than a safe skip:
-		//   1. this loop must consult store.LookupBySource with p.Source;
-		//   2. a cataloger must populate p.Source (apk's o:, dpkg's Source:);
-		//   3. ingestion must call store.PutSourceIndex — nothing in production
-		//      writes the by-source bucket today, so even a correct lookup
-		//      would read an empty index.
-		// Until all three exist a distro package exits here as Skipped, which
-		// is safe. TestRegistryHasNoDistroComparer fails the build if the
-		// comparer is registered on its own.
 		cmp, ok := version.For(p.Ecosystem)
 		if !ok {
 			res.Skipped = append(res.Skipped, Skipped{
@@ -73,73 +70,103 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 			continue
 		}
 
-		wantName := pkgmeta.NormalizeName(p.Ecosystem, p.Name)
-		candidates, err := m.store.Lookup(p.Ecosystem, p.Name)
-		if err != nil {
-			// A store error is not a clean result. Fail the whole scan rather
-			// than reporting a subset that reads as "fewer vulnerabilities".
-			return Result{}, fmt.Errorf("lookup %s/%s: %w", p.Ecosystem, p.Name, err)
+		// Distro advisories are written against SOURCE packages while what is
+		// installed are binary packages (D8), so the source name is a second
+		// lookup key. Both are queried because they coincide for most packages
+		// and diverge for the ones that matter: alpine:3.19 has nine of fifteen
+		// diverging, with libssl3 and libcrypto3 both sourced from openssl, so a
+		// single openssl advisory is unreachable from either without this.
+		//
+		// No separate by-source index is needed. OSV puts the source name
+		// directly in Affected[].Name — 32,069 of 33,589 Alpine affected entries
+		// carry ?arch=source — which the ordinary advisory index already covers.
+		// Slice 1 reserved a by-source bucket on the assumption it would be
+		// required; measuring the data retired it.
+		//
+		// The version needs no adjustment: an Alpine binary package carries its
+		// source package's version, which is what makes indirect matching sound.
+		names := []string{p.Name}
+		if p.Source != nil && p.Source.Name != "" && p.Source.Name != p.Name {
+			names = append(names, p.Source.Name)
 		}
 
-		seen := make(map[string]bool, len(candidates))
+		// The dedup maps below are per package, not per lookup name, so an
+		// advisory reachable under both names is still one finding.
+		seen := make(map[string]bool)
 		// Skips are deduplicated separately from findings: `seen` is only set
 		// on a hit, and the error path must not rely on it. One advisory can
 		// carry several Affected entries for the same package — measured at
 		// 145 of 313 real Django records — and the same advisory can appear
 		// twice in a lookup result, so without this a single bad bound emits
 		// byte-identical skips and buries the rest of the report.
-		skipped := make(map[string]bool, len(candidates))
+		skipped := make(map[string]bool)
 		// One vulnerability commonly has records under several IDs. OSV's Go
 		// ecosystem carries both the GHSA and the GO- identifier for the same
 		// issue, which doubled every Go finding in a real scan against grype.
 		// The first record to match wins; the rest are recognized through the
 		// aliases they declare.
-		reported := make(map[string]bool, len(candidates))
+		reported := make(map[string]bool)
 
-		for _, a := range candidates {
-			if seen[a.ID] {
-				continue
+		for _, lookupName := range names {
+			wantName := pkgmeta.NormalizeName(p.Ecosystem, lookupName)
+			candidates, err := m.store.Lookup(p.Ecosystem, lookupName)
+			if err != nil {
+				// A store error is not a clean result. Fail the whole scan
+				// rather than reporting a subset that reads as "fewer
+				// vulnerabilities".
+				return Result{}, fmt.Errorf("lookup %s/%s: %w", p.Ecosystem, lookupName, err)
 			}
-			for _, aff := range a.Affected {
-				// The store is keyed on (ecosystem, name), so a returned
-				// advisory can still carry entries for sibling packages — a Go
-				// advisory naming both github.com/foo/bar and .../bar/v2, for
-				// instance. Evaluating a v1 version against a v2 range would be
-				// wrong, so entries that are not this package are skipped.
-				//
-				// This mirrors the store's key equality exactly. If either side
-				// ever starts normalizing names, the two must change together
-				// or this filter will silently discard real advisories.
-				if aff.Ecosystem != p.Ecosystem ||
-					pkgmeta.NormalizeName(aff.Ecosystem, aff.Name) != wantName {
+
+			for _, a := range candidates {
+				if seen[a.ID] {
 					continue
 				}
-				hit, ev, err := version.AffectsVersion(cmp, p.Version, aff)
-				if err != nil {
-					// One advisory this package cannot be evaluated against.
-					// Recorded against that advisory and the loop continues, so
-					// a single malformed bound hides neither the other
-					// advisories nor the fact that this one was unevaluable.
-					if !skipped[a.ID] {
-						skipped[a.ID] = true
-						res.Skipped = append(res.Skipped, Skipped{
-							Package:    p,
-							AdvisoryID: a.ID,
-							Reason:     fmt.Sprintf("comparing %s: %v", p.Version, err),
+				for _, aff := range a.Affected {
+					// The store is keyed on (ecosystem, name), so a returned
+					// advisory can still carry entries for sibling packages — a Go
+					// advisory naming both github.com/foo/bar and .../bar/v2, for
+					// instance. Evaluating a v1 version against a v2 range would be
+					// wrong, so entries that are not this package are skipped.
+					//
+					// This mirrors the store's key equality exactly. If either side
+					// ever starts normalizing names, the two must change together
+					// or this filter will silently discard real advisories.
+					if aff.Ecosystem != p.Ecosystem ||
+						pkgmeta.NormalizeName(aff.Ecosystem, aff.Name) != wantName {
+						continue
+					}
+					hit, ev, err := version.AffectsVersion(cmp, p.Version, aff)
+					if err != nil {
+						// One advisory this package cannot be evaluated against.
+						// Recorded against that advisory and the loop continues, so
+						// a single malformed bound hides neither the other
+						// advisories nor the fact that this one was unevaluable.
+						if !skipped[a.ID] {
+							skipped[a.ID] = true
+							res.Skipped = append(res.Skipped, Skipped{
+								Package:    p,
+								AdvisoryID: a.ID,
+								Reason:     fmt.Sprintf("comparing %s: %v", p.Version, err),
+							})
+						}
+						continue
+					}
+					if hit {
+						seen[a.ID] = true
+						if reported[a.ID] {
+							break // already reported under another identifier
+						}
+						for _, id := range identifiers(a) {
+							reported[id] = true
+						}
+						res.Findings = append(res.Findings, Finding{
+							Package:     p,
+							Advisory:    a,
+							Evidence:    ev,
+							MatchedName: lookupName,
 						})
+						break
 					}
-					continue
-				}
-				if hit {
-					seen[a.ID] = true
-					if reported[a.ID] {
-						break // already reported under another identifier
-					}
-					for _, id := range identifiers(a) {
-						reported[id] = true
-					}
-					res.Findings = append(res.Findings, Finding{Package: p, Advisory: a, Evidence: ev})
-					break
 				}
 			}
 		}

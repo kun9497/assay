@@ -184,17 +184,37 @@ func TestForEcosystem(t *testing.T) {
 // TestRegistryHasNoDistroComparer is a tripwire, not a behaviour test.
 //
 // Registering a distro comparer makes the matcher believe it can evaluate
-// distro packages, but distro advisories are keyed on source packages (D8) and
-// nothing in production populates Package.Source or the by-source index yet.
+// distro packages, but distro advisories are keyed on SOURCE packages (D8).
 // The comparer alone turns a safe, counted skip into a silent under-report, so
-// this fails the build until the rest of the D8 path lands with it.
-func TestRegistryHasNoDistroComparer(t *testing.T) {
+// a comparer may only be reachable once a cataloger populates Package.Source
+// and the matcher looks the source name up.
+//
+// Alpine completed that path in slice 2a and is the one permitted exception.
+// This guards the next distro: dpkg and rpm need their own Source population,
+// and registering their comparer first would reintroduce exactly the miss this
+// test was written for. It checks For() rather than the registry map, because
+// distro keys carry a release (D6) and resolve by prefix rather than by entry —
+// guarding the map alone let Alpine through unnoticed.
+func TestNoUnbackedDistroComparer(t *testing.T) {
+	for _, eco := range []string{
+		"Debian:11", "Debian:12", "Debian:13",
+		"Ubuntu:22.04", "Red Hat:9", "Rocky Linux:9", "AlmaLinux:9",
+		"Alpine", // unversioned: not a key we ever build (D6)
+	} {
+		if _, ok := For(eco); ok {
+			t.Errorf("For(%q) resolves, but nothing populates Package.Source for it. "+
+				"See the D8 comment in internal/matcher: the cataloger and the "+
+				"matcher's source-name lookup must land in the same change, or "+
+				"every package of that distro reports clean.", eco)
+		}
+	}
+
+	// The language ecosystems are exactly these; a new one should be a
+	// deliberate edit here rather than an accident.
 	want := map[string]bool{"Go": true, "npm": true, "PyPI": true}
 	for eco := range registry {
 		if !want[eco] {
-			t.Errorf("comparer registered for %q: see the D8 note in internal/matcher — "+
-				"LookupBySource, a Source-populating cataloger, and PutSourceIndex must land too",
-				eco)
+			t.Errorf("comparer registered for %q, which is not a known language ecosystem", eco)
 		}
 	}
 	if len(registry) != len(want) {

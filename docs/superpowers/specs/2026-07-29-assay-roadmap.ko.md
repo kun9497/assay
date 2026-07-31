@@ -96,7 +96,7 @@ inspect`로 회수할 수 있고, 어차피 계획된 explain 모드와 겹칩�
 
 ### D5 — 경로에 스키마 버전을 둔다
 
-`<cache>/assay/db/v1/vulnerability.db`. 스키마가 바뀌면 마이그레이션 코드를 쓰는 대신 새
+`<cache>/assay/db/v2/vulnerability.db`. 스키마가 바뀌면 마이그레이션 코드를 쓰는 대신 새
 디렉터리에 다시 빌드합니다. **사용자가 한 명인 프로젝트에서 마이그레이션 코드는 부채입니다.**
 
 ### D6 — 배포판 패키지는 릴리스를 키에 포함한다
@@ -379,7 +379,7 @@ type Finding struct {
 ### 저장소 레이아웃
 
 ```
-<os.UserCacheDir()>/assay/db/v1/vulnerability.db      override: ASSAY_DB_DIR
+<os.UserCacheDir()>/assay/db/v2/vulnerability.db      override: ASSAY_DB_DIR
 
 buckets:
   advisories   "<ecosystem>\x00<name>"     → []AdvisoryID  primary lookup
@@ -398,8 +398,8 @@ ID를 `by-id`로 해석하는 데 점 조회가 한 번 더 들지만 마이크�
 | OS | 경로 |
 |---|---|
 | Windows | `%LocalAppData%\assay\db\v1\` |
-| macOS | `~/Library/Caches/assay/db/v1/` |
-| Linux | `~/.cache/assay/db/v1/` (`XDG_CACHE_HOME` 존중) |
+| macOS | `~/Library/Caches/assay/db/v2/` |
+| Linux | `~/.cache/assay/db/v2/` (`XDG_CACHE_HOME` 존중) |
 
 값은 JSON으로 시작합니다. 스캔당 수백 번 조회 기준으로 bbolt 읽기는 마이크로초이고 디코딩이
 지배적이지만 그래도 수십 밀리초 수준입니다. 인코딩은 `Store` 뒤에 가려져 있어 호출자를 건드리지
