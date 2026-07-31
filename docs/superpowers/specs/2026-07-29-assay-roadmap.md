@@ -101,7 +101,7 @@ mode anyway. trivy made the same call for the same access pattern.
 
 ### D5 — Schema version in the path
 
-`<cache>/assay/db/v3/vulnerability.db`. A schema change means rebuilding into a new
+`<cache>/assay/db/v4/vulnerability.db`. A schema change means rebuilding into a new
 directory rather than writing migration code. Migration code is a liability for a project
 with one user.
 
@@ -332,7 +332,7 @@ necessary of the four sources: an image already present locally can be handed ov
 
 ### D20 — The database records which ecosystems it covers
 
-`Meta` carries the set of ecosystem keys that ingestion actually indexed, and a package
+`Meta` carries the set of ecosystem keys the providers report having fetched, and a package
 whose ecosystem is absent from that set is **skipped**, never evaluated.
 
 **The failure this closes.** Without it the matcher cannot tell two situations apart: an
@@ -505,7 +505,7 @@ type Finding struct {
 ### Storage layout
 
 ```
-<os.UserCacheDir()>/assay/db/v3/vulnerability.db      override: ASSAY_DB_DIR
+<os.UserCacheDir()>/assay/db/v4/vulnerability.db      override: ASSAY_DB_DIR
 
 buckets:
   advisories   "<ecosystem>\x00<name>"     → []AdvisoryID  primary lookup
@@ -524,9 +524,9 @@ which is microseconds.
 
 | OS | Path |
 |---|---|
-| Windows | `%LocalAppData%\assay\db\v3\` |
-| macOS | `~/Library/Caches/assay/db/v3/` |
-| Linux | `~/.cache/assay/db/v3/` (honours `XDG_CACHE_HOME`) |
+| Windows | `%LocalAppData%\assay\db\v4\` |
+| macOS | `~/Library/Caches/assay/db/v4/` |
+| Linux | `~/.cache/assay/db/v4/` (honours `XDG_CACHE_HOME`) |
 
 Values are JSON to start. At a few hundred lookups per scan, bbolt reads are microseconds
 and decoding dominates — still tens of milliseconds. Encoding is hidden behind `Store`

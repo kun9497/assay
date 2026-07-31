@@ -422,3 +422,37 @@ func TestCovers(t *testing.T) {
 		t.Error("PyPI reported as covered; this database holds only Alpine")
 	}
 }
+
+// SetMeta must not take the caller's word for coverage. The field is derived
+// from Providers, and a caller that fills it in directly is ignored — that is
+// what keeps a wrong caller from re-opening the hole D20 closed.
+func TestSetMetaIgnoresACallerSuppliedEcosystems(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(Meta{
+		BuiltAt:    time.Now(),
+		Ecosystems: []string{"Maven", "NuGet", "everything-really"},
+		Providers:  map[string]Provenance{"osv": {Ecosystems: []string{"Go"}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	m, err := db.Meta()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(m.Ecosystems, []string{"Go"}) {
+		t.Errorf("Meta.Ecosystems = %v, want [Go]: the caller's list must be "+
+			"ignored in favour of what the providers reported", m.Ecosystems)
+	}
+}

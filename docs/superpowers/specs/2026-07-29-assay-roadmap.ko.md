@@ -96,7 +96,7 @@ inspect`로 회수할 수 있고, 어차피 계획된 explain 모드와 겹칩�
 
 ### D5 — 경로에 스키마 버전을 둔다
 
-`<cache>/assay/db/v3/vulnerability.db`. 스키마가 바뀌면 마이그레이션 코드를 쓰는 대신 새
+`<cache>/assay/db/v4/vulnerability.db`. 스키마가 바뀌면 마이그레이션 코드를 쓰는 대신 새
 디렉터리에 다시 빌드합니다. **사용자가 한 명인 프로젝트에서 마이그레이션 코드는 부채입니다.**
 
 ### D6 — 배포판 패키지는 릴리스를 키에 포함한다
@@ -313,7 +313,7 @@ alias로 갖는 경우가 흔합니다. NVD 심각도를 보강 소스로 조인
 
 ### D20 — 데이터베이스는 자신이 무엇을 커버하는지 기록한다
 
-`Meta`가 수집이 실제로 색인한 생태계 키 집합을 담고, 그 집합에 없는 생태계의 패키지는
+`Meta`가 provider들이 받았다고 보고한 생태계 키 집합을 담고, 그 집합에 없는 생태계의 패키지는
 **평가하지 않고 skip**합니다.
 
 **막으려는 실패.** 이것이 없으면 매처는 두 상황을 구분하지 못합니다 — 생태계를 수집했고 이
@@ -481,7 +481,7 @@ type Finding struct {
 ### 저장소 레이아웃
 
 ```
-<os.UserCacheDir()>/assay/db/v3/vulnerability.db      override: ASSAY_DB_DIR
+<os.UserCacheDir()>/assay/db/v4/vulnerability.db      override: ASSAY_DB_DIR
 
 buckets:
   advisories   "<ecosystem>\x00<name>"     → []AdvisoryID  primary lookup
@@ -499,9 +499,9 @@ ID를 `by-id`로 해석하는 데 점 조회가 한 번 더 들지만 마이크�
 
 | OS | 경로 |
 |---|---|
-| Windows | `%LocalAppData%\assay\db\v3\` |
-| macOS | `~/Library/Caches/assay/db/v3/` |
-| Linux | `~/.cache/assay/db/v3/` (`XDG_CACHE_HOME` 존중) |
+| Windows | `%LocalAppData%\assay\db\v4\` |
+| macOS | `~/Library/Caches/assay/db/v4/` |
+| Linux | `~/.cache/assay/db/v4/` (`XDG_CACHE_HOME` 존중) |
 
 값은 JSON으로 시작합니다. 스캔당 수백 번 조회 기준으로 bbolt 읽기는 마이크로초이고 디코딩이
 지배적이지만 그래도 수십 밀리초 수준입니다. 인코딩은 `Store` 뒤에 가려져 있어 호출자를 건드리지

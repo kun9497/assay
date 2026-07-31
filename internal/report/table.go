@@ -53,6 +53,10 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 		incompleteChecks++
 	}
 	evaluated := cat.Cataloged - unevaluated
+	// Computed before the switch because the wording depends on it: this is
+	// every component the document held that was not evaluated, whether the
+	// matcher skipped it or the cataloger never produced a package for it.
+	notEvaluated := cat.Components - evaluated
 
 	switch {
 	case len(res.Findings) > 0:
@@ -102,7 +106,7 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 		// line, or whose output is truncated, must not read this as safety.
 		fmt.Fprintln(w, "No packages could be evaluated - this is NOT a clean result.")
 
-	case incompleteChecks > 0 || unevaluated > 0:
+	case incompleteChecks > 0 || notEvaluated > 0:
 		// Nothing found, but not every check ran. Saying "no known
 		// vulnerabilities" would claim a completeness the run did not have.
 		//
@@ -111,15 +115,19 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 		// loudly, while a scan where 15 of 17 packages were never checked
 		// at all printed the clean sentence — the louder warning for the
 		// smaller gap.
+		//
+		// notEvaluated, not the matcher's skip count: a component the
+		// CATALOGER dropped never reaches the matcher, so keying on matcher
+		// skips alone left the same hole open through the other door.
 		switch {
-		case incompleteChecks > 0 && unevaluated > 0:
+		case incompleteChecks > 0 && notEvaluated > 0:
 			fmt.Fprintf(w,
 				"No vulnerabilities found in %d package(s), but %d package(s) were not checked and %d check(s) could not be completed - this is NOT a clean result.\n",
-				evaluated, unevaluated, incompleteChecks)
-		case unevaluated > 0:
+				evaluated, notEvaluated, incompleteChecks)
+		case notEvaluated > 0:
 			fmt.Fprintf(w,
 				"No vulnerabilities found in %d package(s), but %d package(s) were not checked at all - this is NOT a clean result.\n",
-				evaluated, unevaluated)
+				evaluated, notEvaluated)
 		default:
 			fmt.Fprintf(w,
 				"No vulnerabilities found in %d package(s), but %d check(s) could not be completed - this is NOT a clean result.\n",
@@ -133,7 +141,6 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 	// The summary keeps a partial scan from reading as a clean one, so its
 	// parts must add up: every component the document contained is either
 	// evaluated or not, and no package is counted in both.
-	notEvaluated := cat.Components - evaluated
 	fmt.Fprintf(w, "\n%d component(s) seen, %d evaluated, %d finding(s), %d not evaluated\n",
 		cat.Components, evaluated, len(res.Findings), notEvaluated)
 

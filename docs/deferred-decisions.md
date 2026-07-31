@@ -34,9 +34,9 @@ from.
 
 ### Failing a scan when coverage is partial
 
-`Meta` now records which ecosystems ingestion indexed, and a package whose ecosystem is
+`Meta` now records which ecosystems the providers fetched, and a package whose ecosystem is
 absent is skipped rather than evaluated (D20). That closed the silent clean scan: an Alpine
-release the database has never held now exits 2 and says `run `assay db update``.
+release the database has never held now exits 2 and tells you to run `assay db update`.
 
 What is still open is the *partial* case. If a target holds twenty packages and five are in
 an uncovered ecosystem, the five are counted and named under "Not evaluated" and the exit

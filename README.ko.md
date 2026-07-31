@@ -123,11 +123,11 @@ assay scan sbom.cdx.json --output json       # ④ 기계 판독 출력
 
 | OS | 위치 |
 |---|---|
-| Windows | `%LocalAppData%\assay\db\v3\` |
-| macOS | `~/Library/Caches/assay/db/v3/` |
-| Linux | `~/.cache/assay/db/v3/` |
+| Windows | `%LocalAppData%\assay\db\v4\` |
+| macOS | `~/Library/Caches/assay/db/v4/` |
+| Linux | `~/.cache/assay/db/v4/` |
 
-CI 캐시나 에어갭 환경에서는 `ASSAY_DB_DIR`로 재정의합니다. 경로의 `v3`은 스키마 버전입니다 —
+CI 캐시나 에어갭 환경에서는 `ASSAY_DB_DIR`로 재정의합니다. 경로의 `v4`는 스키마 버전입니다 —
 스키마가 바뀌면 제자리에서 마이그레이션하는 대신 새 디렉터리에 다시 빌드합니다. 다만
 `ASSAY_DB_DIR`에는 그 성분이 없으므로, 그 경로를 키로 삼은 CI 캐시는 무효화되었어야 할
 업그레이드를 넘어 살아남습니다. 업그레이드 후에는 다시 빌드하거나 캐시 키에 assay 버전을

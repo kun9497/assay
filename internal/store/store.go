@@ -27,7 +27,15 @@ import (
 // data it never ingested, and reports "no known vulnerabilities found" at exit
 // 0. That is the silent false negative, arriving through a stale cache rather
 // than a bug.
-const SchemaVersion = 3
+//
+// Bumped to 3 to add Meta.Ecosystems (D20), and to 4 immediately after: the
+// first version of that field was derived from what Put indexed, which
+// over-claims, so a v3 database built by that revision declares coverage of
+// ecosystems it never fetched. Reading such a database is exactly the failure
+// D20 closes, and nothing else would prompt a rebuild — the field is present
+// and well-formed, only wrong. A schema change is the only signal that reaches
+// a database already on disk.
+const SchemaVersion = 4
 
 var (
 	ErrNotFound       = errors.New("vulnerability database not found")

@@ -336,3 +336,30 @@ func TestTable_UncheckedPackagesBreakTheCleanHeadline(t *testing.T) {
 		t.Error("Trustworthy() changed; this fix is about the wording, not the gate")
 	}
 }
+
+// The cataloger's drops reach the headline too. Keying the wording on the
+// matcher's skip count alone left the same hole open through the other door:
+// 15 of 17 components never producing a package printed the clean sentence
+// because the matcher, having seen only 2, had nothing to skip.
+func TestTable_ComponentsTheCatalogerDroppedBreakTheCleanHeadline(t *testing.T) {
+	var buf bytes.Buffer
+	sum, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{
+		Components: 17, Cataloged: 2, SkippedNoPURL: 15,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "No known vulnerabilities") {
+		t.Errorf("clean headline printed while 15 of 17 components were dropped "+
+			"before the matcher ever saw them:\n%s", out)
+	}
+	if !strings.Contains(out, "NOT a clean result") {
+		t.Errorf("output must say plainly this is not a clean result:\n%s", out)
+	}
+	// Still trustworthy: two packages were genuinely evaluated. This is about
+	// the sentence, not the gate.
+	if !sum.Trustworthy() {
+		t.Error("Trustworthy() changed; this is a wording fix")
+	}
+}
