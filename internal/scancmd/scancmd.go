@@ -41,7 +41,12 @@ func Run(ctx context.Context, dbPath, target string, stdout, stderr io.Writer) i
 	if source.ClassifyTarget(target) == source.TargetImage {
 		t, stats, err := catalogImage(ctx, target)
 		if err != nil {
-			fmt.Fprintf(stderr, "error: open %s: %v\n", target, err)
+			// No "open %s:" wrapper. Every error reaching here already names
+			// the target, and the one that matters most is not an open failure
+			// at all — "no supported package database found" comes from an
+			// image that opened perfectly well, and saying "open" first sends
+			// the reader looking for the wrong problem.
+			fmt.Fprintf(stderr, "error: %v\n", err)
 			return 2
 		}
 		inventory, cat = t, stats

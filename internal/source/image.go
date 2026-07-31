@@ -85,12 +85,15 @@ func Open(ctx context.Context, ref string) (*Image, error) {
 }
 
 func load(ctx context.Context, ref string) (v1.Image, error) {
+	// Errors below name `ref`, not the path trimmed out of it: a user who typed
+	// docker-archive:x.tar should see that back, not a bare x.tar they never
+	// wrote.
 	switch classify(ref) {
 	case kindTarball:
 		p := strings.TrimPrefix(ref, schemeTarball)
 		img, err := tarball.ImageFromPath(p, nil)
 		if err != nil {
-			return nil, fmt.Errorf("read docker archive %s: %w", p, err)
+			return nil, fmt.Errorf("read docker archive %s: %w", ref, err)
 		}
 		return img, nil
 
@@ -98,7 +101,7 @@ func load(ctx context.Context, ref string) (v1.Image, error) {
 		p := strings.TrimPrefix(ref, schemeLayout)
 		idx, err := layout.ImageIndexFromPath(p)
 		if err != nil {
-			return nil, fmt.Errorf("read oci layout %s: %w", p, err)
+			return nil, fmt.Errorf("read oci layout %s: %w", ref, err)
 		}
 		return imageFromIndex(v1Index{idx}, p)
 
