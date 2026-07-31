@@ -33,9 +33,11 @@ func TestAlpineEcosystems(t *testing.T) {
 
 // An unversioned key cannot match a release-qualified package (D6). Ingesting it
 // would put records under a key no lookup ever uses — invisible dead weight.
+// The listing also carries one real release, so this test isolates the drop
+// from the "nothing survived" failure case below.
 func TestAlpineEcosystems_DropsUnversioned(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, `{"prefixes":["Alpine/"]}`)
+		io.WriteString(w, `{"prefixes":["Alpine/","Alpine:v3.19/"]}`)
 	}))
 	defer srv.Close()
 
@@ -43,8 +45,30 @@ func TestAlpineEcosystems_DropsUnversioned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("alpineEcosystemsFrom: %v", err)
 	}
-	if len(got) != 0 {
-		t.Errorf("got %v, want none", got)
+	want := []string{"Alpine:v3.19"}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// A listing that is well-formed 200 JSON but contains only the unversioned
+// "Alpine/" prefix must still fail: filtering leaves nothing to fetch, and
+// this is exactly the shape OSV renaming its key scheme would produce (say to
+// "Alpine-3.19/" instead of "Alpine:v3.19/") — a readable response with zero
+// usable releases in it. Silently returning an empty list here means `db
+// update` succeeds having fetched no Alpine data, and every subsequent Alpine
+// scan reports "no known vulnerabilities found": a false negative with no
+// error anywhere in the chain.
+func TestAlpineEcosystems_AllUnversionedIsAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"prefixes":["Alpine/"]}`)
+	}))
+	defer srv.Close()
+
+	_, err := alpineEcosystemsFrom(context.Background(), srv.Client(), srv.URL)
+	if err == nil {
+		t.Error("listing with only the unversioned prefix returned nil error; " +
+			"a database built from this silently has zero Alpine records")
 	}
 }
 
@@ -71,6 +95,29 @@ func TestAlpineEcosystems_HTTPError(t *testing.T) {
 
 	if _, err := alpineEcosystemsFrom(context.Background(), srv.Client(), srv.URL); err == nil {
 		t.Error("HTTP error returned nil error, want error")
+	}
+}
+
+// AllEcosystems is what `db update` actually calls. A discovery failure must
+// come back as an error here too, not get swallowed into "just the language
+// list" — that swallow point is where the damage becomes invisible: main.go
+// only sees a nil error and proceeds to build a database with no Alpine data.
+func TestAllEcosystems_DiscoveryErrorPropagates(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "nope", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	orig := alpineListingURL
+	alpineListingURL = srv.URL
+	defer func() { alpineListingURL = orig }()
+
+	got, err := AllEcosystems(context.Background())
+	if err == nil {
+		t.Fatalf("AllEcosystems = %v, nil error; a discovery failure must not degrade to the language-only list", got)
+	}
+	if got != nil {
+		t.Errorf("AllEcosystems returned %v on error, want nil", got)
 	}
 }
 

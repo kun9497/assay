@@ -17,7 +17,10 @@ import (
 	"strings"
 )
 
-const alpineListingURL = "https://storage.googleapis.com/storage/v1/b/" +
+// var, not const: tests need to point AllEcosystems at an httptest server
+// rather than the real bucket, and AllEcosystems has no parameter for it
+// (its signature is fixed by fetch.go's db-update call site).
+var alpineListingURL = "https://storage.googleapis.com/storage/v1/b/" +
 	"osv-vulnerabilities/o?delimiter=/&prefix=Alpine&fields=prefixes"
 
 func AlpineEcosystems(ctx context.Context, c *http.Client) ([]string, error) {
@@ -44,15 +47,6 @@ func alpineEcosystemsFrom(ctx context.Context, c *http.Client, url string) ([]st
 	if err := json.NewDecoder(resp.Body).Decode(&listing); err != nil {
 		return nil, fmt.Errorf("decode Alpine ecosystem listing: %w", err)
 	}
-	// An empty (or absent) "prefixes" field means the listing shape changed or
-	// the bucket moved — the request itself came back well-formed but hollow.
-	// Checked on the RAW listing, before filtering: a listing that legitimately
-	// contains only the unversioned "Alpine/" prefix is a real, if narrow,
-	// response (nothing to fetch, nothing broken), and must not be conflated
-	// with a broken listing that never had any prefixes at all.
-	if len(listing.Prefixes) == 0 {
-		return nil, fmt.Errorf("Alpine ecosystem listing yielded no releases: %s", url)
-	}
 
 	var out []string
 	for _, p := range listing.Prefixes {
@@ -64,6 +58,18 @@ func alpineEcosystemsFrom(ctx context.Context, c *http.Client, url string) ([]st
 			continue
 		}
 		out = append(out, eco)
+	}
+	// Checked AFTER filtering, not before: a listing that is well-formed JSON
+	// and returns 200 can still contain zero release-qualified keys — e.g. OSV
+	// renaming the scheme from "Alpine:vX.Y" to something else, or the bucket
+	// keeping only the bare "Alpine" prefix. A pre-filter check on
+	// len(listing.Prefixes) cannot catch that: the response is non-empty, just
+	// useless. Missing this would let `db update` succeed with zero Alpine
+	// records, and every subsequent Alpine scan would report "no known
+	// vulnerabilities found" — the exact silent false negative this slice
+	// exists to prevent.
+	if len(out) == 0 {
+		return nil, fmt.Errorf("Alpine ecosystem listing had no release-qualified prefix (scheme may have changed): %s", url)
 	}
 
 	// Sort by release, not lexically: "Alpine:v3.2" sorts ABOVE "Alpine:v3.19"
