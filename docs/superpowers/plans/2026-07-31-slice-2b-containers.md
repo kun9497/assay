@@ -139,9 +139,10 @@ through `docker save`, which the tarball source reads.
   (D19). A third is a decision to raise, not to make inside a task.
 - `CGO_ENABLED=0`. `make test` fails without a C toolchain; use `go test ./...`.
 - **Do not import `pkg/v1/daemon`.** It triples the linked module count (D19).
-- **No network on the scan path is now impossible to state absolutely** — a registry scan
-  fetches by definition. What still holds: the *advisory database* is never fetched during a
-  scan (D14). A tarball or OCI-layout scan must make no network call at all.
+- **D14 was narrowed for this slice** and now reads "a scan never fetches vulnerability
+  data". Only the target may be fetched, and only when the user names a remote one. A scan
+  of an SBOM, a `docker-archive:` tarball, or an `oci-dir:` layout must make **no network
+  call at all** — that is the air-gapped path and a test must hold it there.
 - **Layer contents are never written to disk.** Stream each layer and read the wanted
   entries in passing (D19).
 - **`Location.LayerDigest` carries the diff ID**, not the manifest layer digest.

@@ -181,11 +181,26 @@ Severity bands, for instance, are derived from stored CVSS vectors rather than b
 build time. This removes most future "we did not store the field we now need, rebuild the
 database" situations. Storage size is not a constraint at this scale.
 
-### D14 — The scan path never touches the network
+### D14 — A scan never fetches vulnerability data
 
-`assay db update` is the only command that needs network access. A missing or
+`assay db update` is the only command that fetches advisories. A missing or
 schema-mismatched database produces exit code 2 with instructions — never an automatic
 download, and never a silently empty result.
+
+**Narrowed in slice 2b, deliberately.** This was originally written as "the scan path never
+touches the network", which `assay scan alpine:3.19` cannot honour: pulling the image is a
+network call on the scan path. The rule it was protecting is about the *database*, not about
+sockets — a scanner that quietly downloads advisories is one whose results you cannot
+reproduce or audit, and that remains forbidden.
+
+What the narrowed rule still guarantees:
+
+- **No advisory data is ever fetched during a scan.** A stale or absent database is an
+  error, not something a scan repairs behind your back.
+- **A scan of a local target makes no network call at all.** SBOM files, `docker-archive:`
+  tarballs, and `oci-dir:` layouts are fully offline, which is the air-gapped path.
+- **Only the target is fetched, and only when the target is remote.** That is visible in the
+  argument the user typed: `alpine:3.19` reaches out, `docker-archive:alpine.tar` does not.
 
 ### D15 — Malicious-package reports are excluded, but `Advisory.Kind` is not
 
