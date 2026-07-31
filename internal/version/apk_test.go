@@ -1,6 +1,9 @@
 package version
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 // The ordering rules come from apk-tools/src/version.c. Cases are grouped by the
 // rule they exercise, so a failure names the rule rather than just a pair.
@@ -74,6 +77,19 @@ func TestAPKCompare(t *testing.T) {
 		{"2.2.3-r2", "013", -1, "initial digit numeric: 2 < 13"},
 		{"014-r1", "1.3.1-r1", 1, "initial digit numeric: 14 > 1"},
 
+		// Commit-hash versions (1.0~abc123). Rare in Alpine's own packages but
+		// legal syntax, and every one of these pairs kills a mutation the rest
+		// of the table missed: the hash's position in the kind order, hash
+		// comparison existing at all, and the parse branch existing at all.
+		{"1.0~abc", "1.0~abd", -1, "hashes compare as strings"},
+		{"1.0~abc", "1.0-r1", 1, "commit hash outranks a revision: END-ward kinds sort lower"},
+		{"1.0~abc", "1.0", 1, "a hash outranks nothing"},
+		{"1.0~aaa-r1", "1.0~aaa-r2", -1, "revision still breaks the tie after a hash"},
+
+		// Kind-order boundaries that only these shapes reach.
+		{"1.1.1w", "1.1.1_p1", 1, "a letter outranks a post-release suffix"},
+		{"1.0_p_git", "1.0_p1", 1, "a further suffix outranks a suffix number"},
+
 		// Real pairs lifted from Alpine:v3.19 advisories.
 		{"2.1.23-r0", "2.1.26-r7", -1, "cyrus-sasl, CVE-2013-4122"},
 		{"3.1.4-r5", "3.1.4-r6", -1, "openssl revision bump"},
@@ -127,14 +143,22 @@ func TestAPKCompare_Invalid(t *testing.T) {
 		"1.0-1",     // '-' that is not '-r'
 		"1.0 ",      // trailing space
 		"v1.0",      // apk versions carry no v prefix
+		"1.0A",      // apk's suffix class is [a-z]; uppercase is not a letter
+		"1.0ab",     // one trailing letter only
+		"1.0~",      // commit-hash marker with no hash
+		"1.0~ABC",   // apk's hex class is [0-9a-f]; uppercase is not hex
+		"1.0~xyz",   // not hex at all
 	}
 	var c APK
 	for _, v := range bad {
-		if _, err := c.Compare(v, "1.0-r0"); err == nil {
-			t.Errorf("Compare(%q, %q) = nil error, want ErrInvalid", v, "1.0-r0")
+		// Comparer's contract is an error *wrapping* ErrInvalid, not merely a
+		// non-nil error: callers distinguish "cannot evaluate" from a genuine
+		// failure by matching on it, and the two lead to different exit codes.
+		if _, err := c.Compare(v, "1.0-r0"); !errors.Is(err, ErrInvalid) {
+			t.Errorf("Compare(%q, %q) err = %v, want one wrapping ErrInvalid", v, "1.0-r0", err)
 		}
-		if _, err := c.Compare("1.0-r0", v); err == nil {
-			t.Errorf("Compare(%q, %q) = nil error, want ErrInvalid", "1.0-r0", v)
+		if _, err := c.Compare("1.0-r0", v); !errors.Is(err, ErrInvalid) {
+			t.Errorf("Compare(%q, %q) err = %v, want one wrapping ErrInvalid", "1.0-r0", v, err)
 		}
 	}
 }
@@ -154,8 +178,11 @@ func TestForAlpine(t *testing.T) {
 	}
 	// Unversioned "Alpine" is not a key we ever build (D6) and must not resolve,
 	// or a bug that drops the release would look like it worked.
-	if _, ok := For("Alpine"); ok {
-		t.Error(`For("Alpine") resolved; D6 requires the release in the key`)
+	for _, eco := range []string{"Alpine", "Alpine:"} {
+		if _, ok := For(eco); ok {
+			t.Errorf("For(%q) resolved; D6 requires a release in the key, and a "+
+				"bug that drops it must not look like it worked", eco)
+		}
 	}
 	// The language ecosystems must keep their own comparers.
 	if c, ok := For("PyPI"); !ok {
