@@ -116,12 +116,14 @@ run `assay db update` rather than silently fetching or silently reporting nothin
 | OS | Location |
 |---|---|
 | Windows | `%LocalAppData%\assay\db\v1\` |
-| macOS | `~/Library/Caches/assay/db/v1/` |
-| Linux | `~/.cache/assay/db/v1/` |
+| macOS | `~/Library/Caches/assay/db/v2/` |
+| Linux | `~/.cache/assay/db/v2/` |
 
-Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v1` component
+Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v2` component
 is the schema version — a schema change rebuilds into a new directory rather than migrating
-in place.
+in place. Note that `ASSAY_DB_DIR` carries no such component, so a CI cache keyed on that
+path survives an upgrade that should have invalidated it. Rebuild after upgrading, or key
+the cache on the assay version.
 
 A build over Go, npm, PyPI, and Alpine produces **64 MB on disk holding 32,050
 advisories** — measured from an actual `db update`, not estimated. Getting there downloads
@@ -280,9 +282,10 @@ Compared against grype's **distro-namespace** findings. Its `nvd:cpe` matches �
 the same image — come from CPE heuristics that `assay` does not implement, so folding them
 in would flatter one tool or the other rather than compare them.
 
-Five of the ten Alpine findings are only reachable through the source package:
+Six of the ten Alpine findings are only reachable through the source package:
 `busybox-binsh`, `ssl_client`, and `musl-utils` carry advisories written against `busybox`
-and `musl`. Without that indirection they are silent misses, which is why it is [D8].
+and `musl`. Without that indirection more than half the findings are silent misses, which
+is why it is [D8].
 
 Binary scanning depends entirely on what the language leaves behind. Go and Java embed
 enough metadata to recover a dependency list; Rust does only when built with

@@ -523,3 +523,32 @@ func TestMatch_UnkeyablePackageIsSkippedNotClean(t *testing.T) {
 		t.Errorf("Findings = %d, want 0", len(res.Findings))
 	}
 }
+
+// identifiers() feeds the dedup map, and it must NOT include Upstream. OSV
+// defines upstream as "derived from", not "the same as", so collapsing on it
+// suppresses a genuinely distinct advisory — a false negative, where an extra
+// line is only noise. The distinction is easy to lose: D3 made upstream
+// prominent for the report (which SHOULD show it), and "unify these two" is a
+// plausible future edit. This is the tripwire for that edit.
+func TestIdentifiers_ExcludesUpstream(t *testing.T) {
+	a := advisory.Advisory{
+		ID:       "ALPINE-CVE-2025-46394",
+		Aliases:  []string{"GHSA-alias"},
+		Upstream: []string{"CVE-2025-46394"},
+	}
+	for _, got := range identifiers(a) {
+		if got == "CVE-2025-46394" {
+			t.Fatalf("identifiers() returned the upstream ID %q. Dedup keyed on it "+
+				"would suppress a distinct advisory that merely derives from the "+
+				"same CVE. The report shows upstream (D3); identity must not.", got)
+		}
+	}
+	// The ones it must carry, so the test cannot pass by returning nothing.
+	want := map[string]bool{"ALPINE-CVE-2025-46394": true, "GHSA-alias": true}
+	for _, got := range identifiers(a) {
+		delete(want, got)
+	}
+	if len(want) != 0 {
+		t.Errorf("identifiers() dropped %v", want)
+	}
+}

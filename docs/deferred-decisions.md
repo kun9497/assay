@@ -64,10 +64,20 @@ built to prevent, arriving through the one door the ingestion-side checks cannot
 they guarantee a *fresh* build contains Alpine, not that the build you are reading is
 fresh.
 
-**Why deferred.** The tool is unreleased and has one user. Every other path to an
-Alpine scan already fails loudly: a missing database exits 2, a schema mismatch exits 2,
-an interrupted build exits 2. This one requires a database built by an earlier revision
-of an unreleased branch.
+**Three doors, not one.** A database built before Alpine support is the obvious one, and
+`SchemaVersion` was bumped to 2 in slice 2a so that door is now shut — such a database is
+a schema mismatch and exits 2. Two remain open:
+
+- **An Alpine release OSV does not carry.** A *correct, freshly built* database still
+  reports clean for one. Verified against a real build: an `alpine 3.25.0` SBOM produces
+  "No known vulnerabilities found in 15 package(s)" and exit 0.
+- **`ASSAY_DB_DIR`.** The path this README recommends for CI caching carries no schema
+  component, so a cache restored across an assay upgrade is exactly the stale case —
+  through a pattern the project advertises.
+
+**Why still deferred.** The tool is unreleased and its only user is its author. Both
+remaining doors need the covered-ecosystem set described below; neither is closable by a
+one-line change the way the schema bump was.
 
 **Revisit when** anyone other than the author runs `assay`, or before the first tagged
 release — whichever comes first. Shipping this to a second user means shipping a scanner

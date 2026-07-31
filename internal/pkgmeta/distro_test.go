@@ -42,7 +42,13 @@ func TestDistroEcosystem_Unsupported(t *testing.T) {
 		{"no version at all", Distro{ID: "alpine", VersionID: ""}},
 		{"major only", Distro{ID: "alpine", VersionID: "3"}},
 		{"trailing dot", Distro{ID: "alpine", VersionID: "3."}},
+		// "12" has no dot, so it fails on the X.Y check before the ID check is
+		// ever reached — the ID guard needs a version that WOULD parse. Without
+		// these, deleting `d.ID != "alpine"` leaves the suite green and
+		// Distro{ID: "ubuntu", VersionID: "22.04"} yields "Alpine:v22.04".
 		{"unsupported distro", Distro{ID: "debian", VersionID: "12"}},
+		{"unsupported distro with a parseable version", Distro{ID: "debian", VersionID: "12.5"}},
+		{"another unsupported distro", Distro{ID: "ubuntu", VersionID: "22.04"}},
 		{"no id", Distro{ID: "", VersionID: "3.19"}},
 	}
 	for _, tt := range tests {

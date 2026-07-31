@@ -113,11 +113,14 @@ assay scan sbom.cdx.json --output json       # ④ 기계 판독 출력
 | OS | 위치 |
 |---|---|
 | Windows | `%LocalAppData%\assay\db\v1\` |
-| macOS | `~/Library/Caches/assay/db/v1/` |
-| Linux | `~/.cache/assay/db/v1/` |
+| macOS | `~/Library/Caches/assay/db/v2/` |
+| Linux | `~/.cache/assay/db/v2/` |
 
-CI 캐시나 에어갭 환경에서는 `ASSAY_DB_DIR`로 재정의합니다. 경로의 `v1`은 스키마 버전입니다 —
-스키마가 바뀌면 제자리에서 마이그레이션하는 대신 새 디렉터리에 다시 빌드합니다.
+CI 캐시나 에어갭 환경에서는 `ASSAY_DB_DIR`로 재정의합니다. 경로의 `v2`는 스키마 버전입니다 —
+스키마가 바뀌면 제자리에서 마이그레이션하는 대신 새 디렉터리에 다시 빌드합니다. 다만
+`ASSAY_DB_DIR`에는 그 성분이 없으므로, 그 경로를 키로 삼은 CI 캐시는 무효화되었어야 할
+업그레이드를 넘어 살아남습니다. 업그레이드 후에는 다시 빌드하거나 캐시 키에 assay 버전을
+넣으십시오.
 
 Go, npm, PyPI, Alpine으로 빌드하면 **디스크 64 MB에 권고 32,050건**이 담깁니다 — 추정치가
 아니라 실제 `db update`를 돌려 측정한 값입니다. 여기까지 오는 데 약 248 MB를 내려받습니다.
@@ -269,9 +272,9 @@ grype의 **distro 네임스페이스** 발견과 비교한 것입니다. grype�
 이미지에서 11건 더 나오지만 `assay`가 구현하지 않는 CPE 휴리스틱에서 오므로, 합쳐서 세면
 비교가 아니라 어느 한쪽을 좋아 보이게 만드는 일이 됩니다.
 
-Alpine 발견 10건 중 5건은 **소스 패키지를 거쳐야만 도달합니다.** `busybox-binsh`,
+Alpine 발견 10건 중 **6건**은 소스 패키지를 거쳐야만 도달합니다. `busybox-binsh`,
 `ssl_client`, `musl-utils`는 각각 `busybox`와 `musl`에 대해 작성된 권고를 지고 있습니다. 그
-간접 참조가 없으면 조용한 미탐이 되고, 그래서 이것이 D8입니다.
+간접 참조가 없으면 **발견의 절반 이상이** 조용한 미탐이 되고, 그래서 이것이 D8입니다.
 
 바이너리 스캔은 해당 언어가 무엇을 남기느냐에 전적으로 달려 있습니다. Go와 Java는 의존성 목록을
 복원할 만큼의 메타데이터를 담고, Rust는 `cargo-auditable`로 빌드된 경우에만 가능하며, 스트립된
