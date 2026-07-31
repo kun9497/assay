@@ -140,14 +140,14 @@ func catalogOne(c component, distroEcosystem string, target *pkgmeta.Target, sta
 		return
 	}
 
-	name := p.Name
-	if p.Type != "apk" && p.Namespace != "" {
-		name = p.Namespace + "/" + p.Name
-	}
 	// apk purls carry the distro name as their namespace (pkg:apk/alpine/...),
 	// which is not part of the package identity: OSV's Alpine advisories name
 	// the bare package ("openssl", not "alpine/openssl"). Prefixing it here
 	// would make every apk lookup miss its advisory.
+	name := p.Name
+	if p.Type != "apk" && p.Namespace != "" {
+		name = p.Namespace + "/" + p.Name
+	}
 
 	loc := pkgmeta.Location{Path: "sbom"}
 	if path := propValue(c, "syft:location:0:path"); path != "" {

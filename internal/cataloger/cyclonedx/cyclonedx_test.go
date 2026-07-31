@@ -45,17 +45,29 @@ func TestParse(t *testing.T) {
 	for i, p := range target.Packages {
 		byName[p.Name] = i
 	}
-	gp := target.Packages[byName["github.com/foo/bar"]]
+	// A plain map lookup on a missing key silently returns the zero value (0),
+	// which would read Packages[0] under a wrong name and still pass every
+	// assertion below — exactly the bug the apk namespace fix corrected for
+	// apk, undetectable here without checking `ok`. This is what makes the
+	// test actually fail if namespace prefixing regresses for Go/npm/PyPI.
+	mustPkg := func(name string) pkgmeta.Package {
+		i, ok := byName[name]
+		if !ok {
+			t.Fatalf("package %q not cataloged; have %+v", name, target.Packages)
+		}
+		return target.Packages[i]
+	}
+	gp := mustPkg("github.com/foo/bar")
 	if gp.Ecosystem != "Go" {
 		t.Errorf("Go package ecosystem = %q, want Go", gp.Ecosystem)
 	}
 	if gp.Version != "v1.2.3" {
 		t.Errorf("Go package version = %q, want v1.2.3 (verbatim, v intact)", gp.Version)
 	}
-	if target.Packages[byName["django"]].Ecosystem != "PyPI" {
-		t.Errorf("django ecosystem = %q, want PyPI", target.Packages[byName["django"]].Ecosystem)
+	if eco := mustPkg("django").Ecosystem; eco != "PyPI" {
+		t.Errorf("django ecosystem = %q, want PyPI", eco)
 	}
-	if eco := target.Packages[byName["apache2"]].Ecosystem; eco != "" {
+	if eco := mustPkg("apache2").Ecosystem; eco != "" {
 		t.Errorf("apache2 ecosystem = %q, want empty: no distro component to key it", eco)
 	}
 }
@@ -241,7 +253,7 @@ func TestParse_AlpineDistroAndSource(t *testing.T) {
 	}
 	defer f.Close()
 
-	target, _, err := Parse(f)
+	target, stats, err := Parse(f)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -251,6 +263,23 @@ func TestParse_AlpineDistroAndSource(t *testing.T) {
 	}
 	if target.Distro.ID != "alpine" || target.Distro.VersionID != "3.19.9" {
 		t.Errorf("Distro = %+v, want alpine/3.19.9", *target.Distro)
+	}
+
+	// The operating-system component must land in neither Components nor any
+	// skip bucket. Checking only that "alpine" is absent from the packages is
+	// not enough: the component has no purl either way, so it would land in
+	// SkippedNoPURL and inflate Components to 5 if the exclusion guard were
+	// ever removed, and byName["alpine"] would still be absent either way.
+	if stats.Components != 4 {
+		t.Errorf("Components = %d, want 4 (the operating-system component must not be counted)",
+			stats.Components)
+	}
+	if stats.SkippedNoPURL != 1 {
+		t.Errorf("SkippedNoPURL = %d, want 1 (only the no-purl busybox application component)",
+			stats.SkippedNoPURL)
+	}
+	if stats.Cataloged != 3 {
+		t.Errorf("Cataloged = %d, want 3", stats.Cataloged)
 	}
 
 	byName := map[string]pkgmeta.Package{}
@@ -277,11 +306,91 @@ func TestParse_AlpineDistroAndSource(t *testing.T) {
 	if len(libssl.Locations) == 0 || libssl.Locations[0].LayerDigest == "" {
 		t.Error("libssl3 carries no layer provenance")
 	}
+	if len(libssl.Locations) == 0 || libssl.Locations[0].Path != "/lib/apk/db/installed" {
+		t.Errorf("libssl3 Locations = %+v, want Path /lib/apk/db/installed from syft:location:0:path",
+			libssl.Locations)
+	}
 
 	// The operating-system component describes the target; it is not a package
 	// to scan, and counting it would inflate the component total.
 	if _, ok := byName["alpine"]; ok {
 		t.Error("the operating-system component was cataloged as a package")
+	}
+}
+
+// Alpine edge has no OSV ecosystem (Distro.Ecosystem() errors on it). The
+// naive key "Alpine:v" + VersionID would still build "Alpine:vedge", which
+// looks valid and matches nothing — every package on an edge image would
+// silently report clean. The apk package must land unkeyed instead.
+func TestParse_EdgeDistroLeavesPackagesUnkeyed(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+	  {"type":"library","name":"libssl3","version":"3.1.4-r5",
+	   "purl":"pkg:apk/alpine/libssl3@3.1.4-r5?arch=x86_64"},
+	  {"type":"operating-system","name":"alpine","version":"edge",
+	   "properties":[
+	     {"name":"syft:distro:id","value":"alpine"},
+	     {"name":"syft:distro:versionID","value":"edge"}
+	   ]}]}`
+	target, _, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if target.Distro == nil || target.Distro.VersionID != "edge" {
+		t.Fatalf("Distro = %+v, want a Distro carrying VersionID \"edge\"", target.Distro)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1", len(target.Packages))
+	}
+	if eco := target.Packages[0].Ecosystem; eco != "" {
+		t.Errorf("Ecosystem = %q, want empty: edge has no OSV ecosystem to key on "+
+			"(a naive \"Alpine:v\"+VersionID would wrongly produce %q)", eco, "Alpine:vedge")
+	}
+}
+
+// syft omits syft:metadata:originPackage on nothing in the real fixture, but
+// the field is documented as present only when it differs from — or the
+// property set is simply absent for — the package. Package.Source is now a
+// matcher lookup key (D8), so a component with no origin property must leave
+// Source nil, never a SourcePackage with an empty Name that would drive a
+// live lookup on "".
+func TestParse_APKWithNoOriginPackageHasNilSource(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+	  {"type":"library","name":"libssl3","version":"3.1.4-r5",
+	   "purl":"pkg:apk/alpine/libssl3@3.1.4-r5?arch=x86_64",
+	   "properties":[{"name":"syft:package:type","value":"apk"}]}]}`
+	target, _, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1", len(target.Packages))
+	}
+	if s := target.Packages[0].Source; s != nil {
+		t.Errorf("Source = %+v, want nil when syft:metadata:originPackage is absent", *s)
+	}
+}
+
+// distroFrom's fallback to the component's own name/version fields is the
+// load-bearing half of retiring the metadata.component path: a tool that
+// emits an operating-system component without syft:* properties — the
+// CycloneDX spec fields are all it has — must still resolve to a usable
+// Distro.
+func TestParse_DistroFallsBackToComponentFieldsWithoutSyftProperties(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+	  {"type":"operating-system","name":"alpine","version":"3.19.9"}]}`
+	target, _, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if target.Distro == nil {
+		t.Fatal("Distro = nil, want one built from the component's own name/version fields")
+	}
+	eco, err := target.Distro.Ecosystem()
+	if err != nil {
+		t.Fatalf("Ecosystem() error: %v", err)
+	}
+	if eco != "Alpine:v3.19" {
+		t.Errorf("Ecosystem() = %q, want Alpine:v3.19", eco)
 	}
 }
 
