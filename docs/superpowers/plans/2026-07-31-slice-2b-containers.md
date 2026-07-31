@@ -119,6 +119,13 @@ outnumber the package-level ones roughly 5:1, so this is the common case, not th
 - Whiteouts apply only to lower layers, and the whiteout entry itself must not appear in the
   result.
 
+**Docker Hub rate-limits anonymous pulls, and it will bite during this slice.** A live
+pull of `alpine:3.19` returned `TOOMANYREQUESTS: You have reached your unauthenticated pull
+rate limit` partway through development — the same limit slice 1 hit. Use
+`mirror.gcr.io/library/alpine:3.19` for every live check and for the end-to-end. It serves
+the identical image (diff ID `sha256:0b44b2151d78…`, one layer, 526 entries) and requires no
+token. Do not paper over the limit with retries: it is measured in hours, not seconds.
+
 **Dependency cost** (D19), measured by linking each combination:
 
 | Imports | Linked modules | Packages | Binary |
