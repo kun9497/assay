@@ -232,3 +232,76 @@ func TestTable_DoesNotRepeatTheNameWhenItMatchedDirectly(t *testing.T) {
 		t.Errorf("direct match printed a redundant source package:\n%s", buf.String())
 	}
 }
+
+// D3: which field carries the CVE depends on the ecosystem, and the two measured
+// dumps are exact mirror images — Go puts it in aliases with upstream empty on
+// all 8,510 records, Alpine puts it in upstream with aliases empty on all 4,405.
+// Reading either field alone makes `assay scan | grep CVE-…` find nothing for
+// half the ecosystems.
+func TestTable_FindingCarriesIdentifiersFromAliasesAndUpstream(t *testing.T) {
+	tests := []struct {
+		name string
+		adv  advisory.Advisory
+		want string
+	}{
+		{
+			name: "Go shape: the CVE is in aliases",
+			adv: advisory.Advisory{
+				ID:      "GHSA-xxxx-yyyy-zzzz",
+				Aliases: []string{"CVE-2024-11111"},
+			},
+			want: "CVE-2024-11111",
+		},
+		{
+			// The advisory ID deliberately does NOT contain the CVE. Alpine's
+			// real IDs are "ALPINE-CVE-2025-46394", which has the bare CVE as a
+			// substring, so asserting Contains against the real shape passes
+			// from the ADVISORY column alone and never tests upstream at all.
+			name: "Alpine shape: the CVE is in upstream, aliases empty",
+			adv: advisory.Advisory{
+				ID:       "ALPINE-2025-0001",
+				Upstream: []string{"CVE-2025-46394"},
+			},
+			want: "CVE-2025-46394",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := matcher.Result{Findings: []matcher.Finding{{
+				Package:  pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "e"},
+				Advisory: tt.adv,
+			}}}
+			var buf bytes.Buffer
+			if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(buf.String(), tt.want) {
+				t.Errorf("output does not carry %q, so `assay scan | grep %s` finds "+
+					"nothing:\n%s", tt.want, tt.want, buf.String())
+			}
+		})
+	}
+}
+
+// The advisory's own ID is already its own column; repeating it under other
+// identifiers is noise, and a duplicate between the two fields must collapse.
+func TestTable_OtherIdentifiersAreDeduplicated(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package: pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "e"},
+		Advisory: advisory.Advisory{
+			ID:       "ALPINE-CVE-2025-46394",
+			Aliases:  []string{"CVE-2025-46394"},
+			Upstream: []string{"CVE-2025-46394", "ALPINE-CVE-2025-46394"},
+		},
+	}}}
+	var buf bytes.Buffer
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(buf.String(), "CVE-2025-46394"); n != 2 {
+		// Twice: once inside the ADVISORY column's ALPINE-CVE-… and once as the
+		// bare CVE. A third occurrence means the two fields were concatenated
+		// without dedup.
+		t.Errorf("CVE-2025-46394 appears %d times, want 2:\n%s", n, buf.String())
+	}
+}

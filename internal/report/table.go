@@ -8,6 +8,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"github.com/kun9497/assay/internal/matcher"
 )
@@ -62,12 +63,12 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 			if fixed == "" {
 				fixed = "-"
 			}
-			// Aliases are printed because dedup keeps only one record per
-			// vulnerability, and the one that wins is whichever the index
+			// Other identifiers are printed because dedup keeps only one record
+			// per vulnerability, and the one that wins is whichever the index
 			// returned first. Without this, a CVE that assay matched correctly
 			// is absent from the output whenever the GHSA record won, and
 			// `assay scan … | grep CVE-…` finds nothing.
-			aliases := strings.Join(f.Advisory.Aliases, ",")
+			aliases := strings.Join(otherIDs(f.Advisory), ",")
 			if aliases == "" {
 				aliases = "-"
 			}
@@ -151,4 +152,39 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 		IncompleteChecks: incompleteChecks,
 		Findings:         len(res.Findings),
 	}, nil
+}
+
+// otherIDs returns the identifiers a reader might grep for besides the one the
+// finding is filed under, drawn from BOTH aliases and upstream (D3).
+//
+// Which field carries the CVE depends entirely on the ecosystem, and the two
+// measured cases are exact mirror images: on the live Go dump all 8,510 records
+// have an empty upstream and carry the CVE in aliases, while on the live Alpine
+// dump all 4,405 records have an empty aliases and carry it in upstream. Reading
+// either field alone makes `assay scan … | grep CVE-…` silently find nothing for
+// half the ecosystems — which is the failure this column exists to prevent.
+//
+// This is display, not identity. The matcher deliberately does NOT treat
+// upstream as an identifier when deduplicating, because OSV defines it as
+// "derived from" rather than "the same as", and collapsing on it would suppress
+// a genuinely distinct advisory. Showing a reader one extra identifier is noise;
+// hiding a finding is a false negative.
+func otherIDs(a advisory.Advisory) []string {
+	out := make([]string, 0, len(a.Aliases)+len(a.Upstream))
+	seen := map[string]bool{a.ID: true}
+	for _, id := range a.Aliases {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	for _, id := range a.Upstream {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
 }
