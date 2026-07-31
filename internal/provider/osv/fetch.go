@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
 	"time"
 
@@ -19,28 +18,21 @@ import (
 // DefaultBaseURL is where OSV publishes one archive per ecosystem.
 const DefaultBaseURL = "https://osv-vulnerabilities.storage.googleapis.com"
 
-// Ecosystems is the language-ecosystem scope. It is a fixed list because these
-// keys never change. Distro ecosystems cannot be: they carry a release (D6)
-// and Alpine publishes a new one every six months, so a hardcoded list would
-// not fail — it would quietly stop covering new images.
-var Ecosystems = []string{"Go", "npm", "PyPI"}
-
-// AllEcosystems is what `assay db update` fetches: the fixed language list
-// plus whatever Alpine releases the bucket currently publishes. Discovery is
-// a network call, so callers on the scan path must never reach for this —
-// only `db update` should.
-func AllEcosystems(ctx context.Context) ([]string, error) {
-	c := &http.Client{Timeout: 2 * time.Minute}
-	alpine, err := AlpineEcosystems(ctx, c)
-	if err != nil {
-		// Do not fall back to the language list. Building a database that
-		// silently contains no Alpine data, then scanning an Alpine image
-		// against it, reports "no known vulnerabilities" — the exact failure
-		// exit code 2 exists to prevent (D11).
-		return nil, err
-	}
-	return append(slices.Clone(Ecosystems), alpine...), nil
-}
+// Ecosystems is what `assay db update` fetches. Distro coverage was briefly
+// per-release-archive discovery (19 archives under "Alpine:vX.Y/", each a
+// separate GCS prefix) before measurement against a real end-to-end scan
+// showed those archives are a frozen 2024-10-09 export: the live, current
+// data lives entirely under the single unversioned "Alpine/" prefix, which
+// covers every release (v3.2 - v3.24 and growing) in one archive. The
+// per-release archives are a superset of nothing current and are not
+// fetched. "Alpine" is a fixed list entry like the language ecosystems
+// because it is a fixed archive path — unlike a release list, it does not
+// grow every six months; only the records inside it do. D6 still holds: the
+// ecosystem KEYS the archive contains stay release-qualified
+// ("Alpine:v3.19"), only the archive PATH is not. See familyMatches in
+// record.go for how Convert reconciles a bare "Alpine" want against those
+// release-qualified keys.
+var Ecosystems = []string{"Go", "npm", "PyPI", "Alpine"}
 
 type Provider struct {
 	ecosystems []string
@@ -70,6 +62,17 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		n, asOf, err := p.fetchOne(ctx, u, eco, emit)
 		if err != nil {
 			return store.Provenance{}, fmt.Errorf("fetch %s: %w", eco, err)
+		}
+		// There is no discovery step left to fail instead (release discovery
+		// was removed once the per-release archives turned out to be a frozen
+		// 2024-10-09 export): "Alpine" is now the sole source for every
+		// release, so zero matching records here means Convert's family match
+		// broke or the archive's shape changed, not that Alpine has no
+		// advisories. Building a database that silently has none turns every
+		// later Alpine scan into a clean report at exit 0 — the same failure
+		// discovery's hard-fail existed to prevent, one layer further in.
+		if eco == "Alpine" && n == 0 {
+			return store.Provenance{}, fmt.Errorf("fetch %s: archive yielded no Alpine:* records", eco)
 		}
 		prov.Records += n
 		if asOf.IsZero() {

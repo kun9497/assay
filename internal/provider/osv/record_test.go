@@ -246,3 +246,45 @@ func TestConvert_Malformed(t *testing.T) {
 		t.Error("Convert(malformed) = nil error, want error")
 	}
 }
+
+// Alpine ships one archive for every release rather than one archive per
+// release, so wantEcosystem "Alpine" has to match any "Alpine:vX.Y" entry the
+// archive contains (familyMatches), not the exact-but-never-occurring bare
+// "Alpine". Narrowing this back to exact equality matches nothing and
+// silently ingests zero Alpine records — the failure this test guards.
+func TestConvert_AlpineFamilyMatchesAnyRelease(t *testing.T) {
+	const rec = `{
+	  "id": "CVE-multi-release",
+	  "affected": [
+	    {"package": {"name": "libssl3", "ecosystem": "Alpine:v3.19"},
+	     "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "3.1.4-r0"}]}]},
+	    {"package": {"name": "libssl3", "ecosystem": "Alpine:v3.24"},
+	     "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "3.3.0-r0"}]}]}
+	  ]
+	}`
+	got, ok, err := Convert([]byte(rec), "Alpine")
+	if err != nil || !ok {
+		t.Fatalf("Convert(_, \"Alpine\"): ok=%v err=%v, want a converted advisory", ok, err)
+	}
+	// Both releases must survive: the family match decides whether the RECORD
+	// is kept, not which of its entries are. Stripping the non-"want" release
+	// here would repeat the slice-1 cross-ecosystem bug in a new place.
+	if len(got.Affected) != 2 {
+		t.Errorf("Affected = %d entries, want both releases kept (v3.19 and v3.24): %+v",
+			len(got.Affected), got.Affected)
+	}
+}
+
+// Widening the family match beyond Alpine would be a silent scope expansion:
+// "Go" must never start matching "GoFoo" or any other prefixed ecosystem.
+func TestConvert_LanguageEcosystemsStayExactMatch(t *testing.T) {
+	const rec = `{
+	  "id": "GHSA-gofoo",
+	  "affected": [{"package": {"name": "x", "ecosystem": "GoFoo"},
+	                "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}]}]}]
+	}`
+	if _, ok, err := Convert([]byte(rec), "Go"); err != nil || ok {
+		t.Errorf("Convert(_, \"Go\") on a GoFoo-only record = ok %v err %v, want dropped: "+
+			"exact match must not degrade to a prefix match outside Alpine", ok, err)
+	}
+}

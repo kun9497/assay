@@ -55,6 +55,24 @@ type rawSeverity struct {
 	Score string `json:"score"`
 }
 
+// familyMatches reports whether a record's affected ecosystem key belongs to
+// the family being fetched. Every ecosystem but Alpine matches by exact
+// equality: "Go" must not start matching "GoFoo".
+//
+// Alpine is the one exception. There is a single archive ("Alpine/all.zip")
+// for every release rather than one archive per release — unlike its
+// ecosystem KEYS, which stay release-qualified (D6: "Alpine:v3.19", never a
+// bare "Alpine"). wantEcosystem "Alpine" therefore has to match any
+// "Alpine:vX.Y" entry the archive contains, not just an exact "Alpine" that
+// never appears in real data. Narrowing this back to exact equality would
+// match nothing at all and silently ingest zero Alpine records.
+func familyMatches(ecosystem, want string) bool {
+	if want == "Alpine" {
+		return ecosystem == "Alpine" || strings.HasPrefix(ecosystem, "Alpine:")
+	}
+	return ecosystem == want
+}
+
 // Convert parses one OSV record and keeps only the parts relevant to
 // wantEcosystem. ok is false when the record is deliberately filtered out;
 // err is non-nil only when the record is malformed. Distinguishing the two
@@ -115,7 +133,7 @@ func Convert(data []byte, wantEcosystem string) (advisory.Advisory, bool, error)
 		if ra.Package.Name == "" {
 			continue
 		}
-		if ra.Package.Ecosystem == wantEcosystem {
+		if familyMatches(ra.Package.Ecosystem, wantEcosystem) {
 			matchesWanted = true
 		}
 		aff := advisory.Affected{
