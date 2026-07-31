@@ -60,6 +60,47 @@ alpine SBOM. Do not re-derive; do not replace with estimates.
 | Affected entries carrying `?arch=source` | 32,069 of 33,589 (95%) |
 | Alpine affected entries with `ranges` | 2,436 of 2,436 — **none are `versions`-only** |
 
+> ### CORRECTION (2026-07-31, found by Task 6's end-to-end run)
+>
+> **Everything in this subsection about fetching per-release prefixes is wrong.**
+> The versioned `Alpine:vX.Y/` prefixes are a **frozen legacy export**: every one
+> carries `Last-Modified: 2024-10-09`, the newest record inside is `modified`
+> 2024-10-09, and they stop at v3.20.
+>
+> The unversioned **`Alpine/` prefix is the current export** — `Last-Modified`
+> 2026-07-30, 3.98 MB, 4,405 records — and the ecosystem keys *inside* it are
+> still release-qualified (`Alpine:v3.2` … `Alpine:v3.24`, 23 releases), so D6
+> holds. The prefix is a file path, not an ecosystem key. This plan conflated
+> the two and therefore filtered out the only archive worth fetching.
+>
+> Measured consequence: an `alpine:3.19` scan against a database built from the
+> versioned prefixes reports **0 findings** where grype reports 10 distro
+> findings. None of `CVE-2024-58251`, `CVE-2025-46394`, `CVE-2026-40200`,
+> `CVE-2026-6042` exists in the frozen export; all are in `Alpine/`. The matcher
+> was right — busybox `1.36.1-r20` genuinely postdates every fixed version the
+> frozen data knows about (newest `1.36.1-r19`). The data was 21 months stale.
+>
+> `Alpine/` is effectively a superset: 43,145 affected entries against the
+> frozen v3.16+v3.19 union's 25,922, with only **74** entries (0.29%, all
+> 2019-era, e.g. `CVE-2019-16062` elfutils) present in the frozen export and
+> absent from the current one. Those are treated as upstream corrections, not
+> as coverage to preserve — a stale export does not outrank a live one.
+>
+> **Also wrong: the ID and alias shape.** Alpine records are `ALPINE-CVE-*`, and
+> on all 4,405 of them `aliases` is **empty** while `upstream` carries the plain
+> CVE. Slice 1's measurement was the mirror image (Go: `upstream` empty on all
+> 8,510, `aliases` carries the CVE), which is why D3 requires reading both. The
+> report's ALIASES column reads only `Advisory.Aliases`, so
+> `assay scan … | grep CVE-2025-46394` finds nothing — the exact failure that
+> column was added to prevent.
+>
+> **Revised design.** Fetch the single `Alpine/` archive; drop release
+> discovery entirely, since one archive carries every release. That is 3.98 MB
+> rather than 64.7 MB, current rather than frozen, and covers four releases the
+> per-release path cannot reach. What replaces the discovery hard-failure is a
+> check that the archive yielded at least one `Alpine:*` ecosystem — the same
+> guarantee, one layer in.
+
 **Fetch all 19, and say what it costs.** `assay` builds its own database rather than
 downloading a prebuilt one (D14, and "Publishing the database as an OCI artifact" is a
 recorded deferral), so this 64.7 MB is a real cost paid by every user on every `db update` —
