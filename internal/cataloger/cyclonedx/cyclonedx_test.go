@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/kun9497/assay/internal/pkgmeta"
 )
 
 func TestParse(t *testing.T) {
@@ -21,20 +23,23 @@ func TestParse(t *testing.T) {
 	if stats.Components != 5 {
 		t.Errorf("Components = %d, want 5", stats.Components)
 	}
-	// Go, npm, PyPI are supported in slice 1; apk is not (its ecosystem key
-	// needs a release), and the last component has no purl at all.
-	if stats.Cataloged != 3 {
-		t.Errorf("Cataloged = %d, want 3", stats.Cataloged)
+	// Go, npm, PyPI are supported in slice 1. apk is cataloged too, but this
+	// document carries no operating-system component, so it lands unkeyed
+	// (empty Ecosystem) rather than skipped — D6/D7 need the release, not the
+	// existence of an ecosystem mapping, to key it. The last component has no
+	// purl at all.
+	if stats.Cataloged != 4 {
+		t.Errorf("Cataloged = %d, want 4", stats.Cataloged)
 	}
-	if stats.SkippedUnsupportedEcosystem != 1 {
-		t.Errorf("SkippedUnsupportedEcosystem = %d, want 1", stats.SkippedUnsupportedEcosystem)
+	if stats.SkippedUnsupportedEcosystem != 0 {
+		t.Errorf("SkippedUnsupportedEcosystem = %d, want 0", stats.SkippedUnsupportedEcosystem)
 	}
 	if stats.SkippedNoPURL != 1 {
 		t.Errorf("SkippedNoPURL = %d, want 1", stats.SkippedNoPURL)
 	}
 
-	if len(target.Packages) != 3 {
-		t.Fatalf("Packages = %d, want 3", len(target.Packages))
+	if len(target.Packages) != 4 {
+		t.Fatalf("Packages = %d, want 4", len(target.Packages))
 	}
 	byName := map[string]int{}
 	for i, p := range target.Packages {
@@ -50,30 +55,41 @@ func TestParse(t *testing.T) {
 	if target.Packages[byName["django"]].Ecosystem != "PyPI" {
 		t.Errorf("django ecosystem = %q, want PyPI", target.Packages[byName["django"]].Ecosystem)
 	}
+	if eco := target.Packages[byName["apache2"]].Ecosystem; eco != "" {
+		t.Errorf("apache2 ecosystem = %q, want empty: no distro component to key it", eco)
+	}
 }
 
 func TestParse_DistroFromSyftProperties(t *testing.T) {
-	f, err := os.Open("testdata/small.cdx.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-
-	target, _, err := Parse(f)
+	// syft emits the distro as a component of type "operating-system" inside
+	// components, not on metadata.component — confirmed against the real
+	// mirror.gcr.io/library/alpine:3.19 SBOM, where it is components[16] of 17.
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5",
+	  "components":[
+	    {"type":"library","name":"lodash","version":"1.0","purl":"pkg:npm/lodash@1.0"},
+	    {"type":"operating-system","name":"alpine","version":"3.19.9",
+	     "properties":[
+	       {"name":"syft:distro:id","value":"alpine"},
+	       {"name":"syft:distro:versionID","value":"3.19"},
+	       {"name":"syft:distro:prettyName","value":"Alpine Linux v3.19"}
+	     ]}]}`
+	target, _, err := Parse(strings.NewReader(bom))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if target.Distro == nil {
-		t.Fatal("Distro = nil, want it read from syft properties")
+		t.Fatal("Distro = nil, want it read from the operating-system component's syft properties")
 	}
-	if target.Distro.ID != "alpine" || target.Distro.VersionID != "3.19" {
-		t.Errorf("Distro = %+v, want alpine 3.19", *target.Distro)
+	if target.Distro.ID != "alpine" || target.Distro.VersionID != "3.19" ||
+		target.Distro.PrettyName != "Alpine Linux v3.19" {
+		t.Errorf("Distro = %+v, want alpine/3.19/Alpine Linux v3.19", *target.Distro)
 	}
 }
 
 func TestParse_NoDistroPropertiesLeavesNil(t *testing.T) {
-	// syft:distro:* is a syft extension, not part of CycloneDX. An SBOM from
-	// another tool may omit it, and guessing would be worse than admitting it.
+	// syft:distro:* is a syft extension, not part of CycloneDX, and there is no
+	// operating-system component at all here. An SBOM from another tool may
+	// omit it, and guessing would be worse than admitting it.
 	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5",
 	  "components":[{"type":"library","name":"lodash","version":"1.0",
 	                 "purl":"pkg:npm/lodash@1.0"}]}`
@@ -170,19 +186,42 @@ func TestParse_EveryComponentLandsInExactlyOneCounter(t *testing.T) {
 	}
 }
 
-func TestParse_HalfPopulatedDistroIsNil(t *testing.T) {
-	// An ID with no version would build the ecosystem key "Alpine:", which
-	// matches nothing and reports no error while doing it.
+// An operating-system component with neither a syft:distro:id property nor a
+// component name has nothing to build even a partial Distro from.
+func TestParse_OperatingSystemComponentWithNoIDIsNil(t *testing.T) {
 	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5",
-	  "metadata":{"component":{"type":"container","name":"x",
-	    "properties":[{"name":"syft:distro:id","value":"alpine"}]}},
-	  "components":[]}`
+	  "components":[{"type":"operating-system",
+	    "properties":[{"name":"syft:distro:versionID","value":"3.19"}]}]}`
 	target, _, err := Parse(strings.NewReader(bom))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if target.Distro != nil {
-		t.Errorf("Distro = %+v, want nil when only half the properties are present", *target.Distro)
+		t.Errorf("Distro = %+v, want nil: no id property and no component name to fall back to",
+			*target.Distro)
+	}
+}
+
+// An ID with no version builds a Distro carrying only ID — Ecosystem() then
+// errors on the missing release (D6) rather than the cataloger guessing one.
+// The Distro itself is not nil: PrettyName and ID are still worth reporting
+// even when the release cannot be resolved.
+func TestParse_DistroWithIDButNoVersionIsNotNil(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5",
+	  "components":[{"type":"operating-system","name":"alpine",
+	    "properties":[{"name":"syft:distro:id","value":"alpine"}]}]}`
+	target, _, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.Distro == nil {
+		t.Fatal("Distro = nil, want a Distro carrying the ID even without a version")
+	}
+	if target.Distro.VersionID != "" {
+		t.Errorf("VersionID = %q, want empty: this document never supplied one", target.Distro.VersionID)
+	}
+	if _, err := target.Distro.Ecosystem(); err == nil {
+		t.Error("Ecosystem() = nil error, want ErrNoEcosystem: no version to key a release on")
 	}
 }
 
@@ -192,5 +231,83 @@ func TestParse_NotCycloneDX(t *testing.T) {
 	}
 	if _, _, err := Parse(strings.NewReader("{not json")); err == nil {
 		t.Error("Parse(malformed) = nil error, want error")
+	}
+}
+
+func TestParse_AlpineDistroAndSource(t *testing.T) {
+	f, err := os.Open("testdata/alpine.cdx.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	target, _, err := Parse(f)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	if target.Distro == nil {
+		t.Fatal("Distro is nil; the operating-system component carries syft:distro:*")
+	}
+	if target.Distro.ID != "alpine" || target.Distro.VersionID != "3.19.9" {
+		t.Errorf("Distro = %+v, want alpine/3.19.9", *target.Distro)
+	}
+
+	byName := map[string]pkgmeta.Package{}
+	for _, p := range target.Packages {
+		byName[p.Name] = p
+	}
+
+	// D8: the advisory is written against the source package. Without Source,
+	// an openssl advisory is unreachable from libssl3 — a silent false negative.
+	libssl, ok := byName["libssl3"]
+	if !ok {
+		t.Fatal("libssl3 not cataloged")
+	}
+	if libssl.Source == nil {
+		t.Fatal("libssl3 has no Source; syft reports syft:metadata:originPackage")
+	}
+	if libssl.Source.Name != "openssl" {
+		t.Errorf("libssl3 Source.Name = %q, want %q", libssl.Source.Name, "openssl")
+	}
+	if libssl.Ecosystem != "Alpine:v3.19" {
+		t.Errorf("libssl3 Ecosystem = %q, want Alpine:v3.19 (D6 needs the release)",
+			libssl.Ecosystem)
+	}
+	if len(libssl.Locations) == 0 || libssl.Locations[0].LayerDigest == "" {
+		t.Error("libssl3 carries no layer provenance")
+	}
+
+	// The operating-system component describes the target; it is not a package
+	// to scan, and counting it would inflate the component total.
+	if _, ok := byName["alpine"]; ok {
+		t.Error("the operating-system component was cataloged as a package")
+	}
+}
+
+// An SBOM with apk packages but no distro cannot be keyed. The packages must
+// still be cataloged so they are counted and reported as skipped — dropping
+// them would shrink the denominator and make the scan look complete.
+func TestParse_APKWithoutDistroIsKeptUnkeyed(t *testing.T) {
+	const doc = `{
+	  "bomFormat": "CycloneDX", "specVersion": "1.5", "version": 1,
+	  "components": [{
+	    "type": "library", "name": "libssl3", "version": "3.1.4-r5",
+	    "purl": "pkg:apk/alpine/libssl3@3.1.4-r5?arch=x86_64"
+	  }]
+	}`
+	target, cat, err := Parse(strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cat.Components != 1 {
+		t.Errorf("Components = %d, want 1", cat.Components)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1: an unkeyable package is still a package",
+			len(target.Packages))
+	}
+	if eco := target.Packages[0].Ecosystem; eco != "" {
+		t.Errorf("Ecosystem = %q, want empty: there is no distro to derive a release from", eco)
 	}
 }
