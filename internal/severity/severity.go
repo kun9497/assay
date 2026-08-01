@@ -36,6 +36,8 @@ func Of(vector string) (Band, float64, error) {
 	switch {
 	case strings.HasPrefix(vector, "CVSS:3."):
 		score, err = scoreV3(vector)
+	case strings.HasPrefix(vector, "CVSS:4."):
+		score, err = scoreV4(vector)
 	default:
 		return Unknown, 0, fmt.Errorf("%w: %q is not a version this scores", ErrUnscorable, vector)
 	}
