@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -41,7 +42,7 @@ func TestRun_MissingDatabase(t *testing.T) {
 	}
 }
 
-// A target with no scheme prefix and no file on disk is, by ClassifyTarget's
+// A target with no scheme prefix and no file on disk is, by Classify's
 // own contract, a registry reference — never an "SBOM that happens to be
 // missing". A bare unprefixed path here would only fail locally by accident:
 // on Windows because backslashes do not parse as a reference, and even on
@@ -212,11 +213,21 @@ func TestRun_TargetKinds(t *testing.T) {
 		if !strings.Contains(out.String(), "1 package") {
 			t.Errorf("stdout = %q, want the one apk package to have been evaluated", out.String())
 		}
+		// Pins article()'s TargetImage branch specifically: "a image" is the
+		// literal grammar bug an unpinned image kind would let through, and
+		// this is the only test in the package that reaches TargetImage
+		// through Run with a real, valid, cataloged image - every other
+		// image-path test here either errors before the disclosure (proving
+		// nothing about article()) or is the SBOM/go-binary/directory kinds.
+		if !strings.Contains(errOut.String(), "as an image") {
+			t.Errorf("stderr = %q, want it to disclose the target as an image (grammar: "+
+				"\"an\", not \"a\")", errOut.String())
+		}
 	})
 
 	t.Run("registry reference path", func(t *testing.T) {
 		// A string with no scheme prefix and no file on disk falls through to
-		// the registry loader (source.ClassifyTarget). This one is
+		// the registry loader (source.Classify). This one is
 		// syntactically invalid, so it fails while being parsed AS a
 		// reference rather than while being opened as a file or a socket —
 		// proof of which loader it reached, without ever touching the
@@ -468,8 +479,11 @@ var (
 	bandCritical = severity.Critical
 )
 
-// matrixAdv is one advisory for the exit-code matrix below, always affecting
-// Go package "example.com/<pkg>" at versions [0, fixed). Leaving fixed empty
+// matrixAdv is one advisory for the exit-code matrix below, affecting Go
+// package "example.com/<pkg>" at versions [0, fixed) - UNLESS pkg already
+// contains "/", in which case it is a real module path (go.etcd.io/bbolt)
+// used verbatim, so a go-binary target can be matched against a genuine
+// dependency instead of a name nothing ever imports. Leaving fixed empty
 // asks for a malformed bound ("not-a-version") instead: version.SemVer
 // rejects it, so the matcher records an advisory-scoped skip
 // (report.Summary.IncompleteChecks) for the package rather than a finding —
@@ -501,12 +515,28 @@ func buildMatrixDB(t *testing.T, advisories []matrixAdv) string {
 		for _, v := range adv.vectors {
 			sev = append(sev, advisory.Severity{Type: "CVSS_V3", Score: v})
 		}
+		// Every fixture pkg so far has been a bare synthetic name
+		// ("critical", "medium", ...), which is why prefixing it under
+		// "example.com/" is safe. A pkg that already contains "/" is a real
+		// module path handed in on purpose - go.etcd.io/bbolt, a genuine
+		// dependency, so a go-binary or directory target can be matched
+		// against a real finding rather than a fixture-shaped one - and
+		// prefixing that would produce a name nothing ever imports.
+		//
+		// Named "affected", not "name": this package already imports
+		// go-containerregistry's "name" package above, and shadowing it here
+		// compiles cleanly today only because nothing in this function
+		// happens to need that import.
+		affected := "example.com/" + adv.pkg
+		if strings.Contains(adv.pkg, "/") {
+			affected = adv.pkg
+		}
 		a := advisory.Advisory{
 			ID:   adv.id,
 			Kind: advisory.KindVulnerability,
 			Affected: []advisory.Affected{{
 				Ecosystem: "Go",
-				Name:      "example.com/" + adv.pkg,
+				Name:      affected,
 				Ranges: []advisory.Range{{
 					Type:   advisory.RangeSemver,
 					Events: []advisory.Event{{Introduced: "0"}, {Fixed: fixed}},
@@ -916,6 +946,376 @@ func TestRun_ExplainIsQuietWhenTheScanIsComplete(t *testing.T) {
 	if strings.Contains(errOut.String(), "NOT complete") {
 		t.Errorf("a complete scan warned about incompleteness:\n%s", errOut.String())
 	}
+}
+
+// buildRoutingDB writes one advisory per name, each affecting Go ecosystem
+// package name (verbatim, no "example.com/" prefixing - unlike buildMatrixDB,
+// this needs real, unprefixed names: "stdlib" itself, and a real module
+// path), at versions [0, 99.0.0). Used by TestRun_RoutesEachTargetKind so
+// each row's scan produces exactly one real finding naming the package that
+// row's OWN cataloger reached — buildMatrixDB(t, nil) (no advisories at all)
+// cannot distinguish "the right cataloger ran" from "any cataloger returned
+// any non-empty component count", since Summary.Components is nonzero the
+// moment a single package is cataloged, wrong package or not.
+func buildRoutingDB(t *testing.T, names ...string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	for i, n := range names {
+		if err := w.Put(advisory.Advisory{
+			ID:   fmt.Sprintf("GHSA-routing-%d", i),
+			Kind: advisory.KindVulnerability,
+			Affected: []advisory.Affected{{
+				Ecosystem: "Go",
+				Name:      n,
+				Ranges: []advisory.Range{{
+					Type:   advisory.RangeSemver,
+					Events: []advisory.Event{{Introduced: "0"}, {Fixed: "99.0.0"}},
+				}},
+			}},
+			Severity: []advisory.Severity{{Type: "CVSS_V3", Score: vecCritical}},
+		}); err != nil {
+			t.Fatalf("Put(%s): %v", n, err)
+		}
+	}
+	if err := w.SetMeta(store.Meta{
+		Providers: map[string]store.Provenance{"osv": {Ecosystems: []string{"Go"}}},
+	}); err != nil {
+		t.Fatalf("SetMeta: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	return path
+}
+
+// Each of the four kinds reaches its own cataloger. A kind routed to the
+// wrong parser is the failure D22 exists to prevent, and the error it then
+// produces names the wrong problem - a binary handed to the CycloneDX parser
+// reports a malformed document.
+//
+// The assertion is on what each scan FOUND - the exact package named in the
+// finding, read back out of tt.wantPkg - not merely that some cataloger
+// returned a nonzero component count: every one of these exits 0 and, with
+// no seeded advisory naming its package, would also report a nonzero
+// Components count if routed to the WRONG cataloger, as long as that wrong
+// cataloger found anything at all to catalog. buildRoutingDB seeds one
+// advisory per row's own real package name so each row's finding can be
+// checked against tt.wantPkg specifically.
+func TestRun_RoutesEachTargetKind(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"),
+		[]byte("module example.test/app\n\nrequire github.com/routed/dep v1.0.0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sbom := filepath.Join(t.TempDir(), "s.cdx.json")
+	if err := os.WriteFile(sbom, []byte(`{"bomFormat":"CycloneDX","specVersion":"1.5",`+
+		`"version":1,"components":[{"type":"library","name":"sbomonly","version":"1.0.0",`+
+		`"purl":"pkg:golang/example.com/sbomonly@1.0.0"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	db := buildRoutingDB(t, "stdlib", "github.com/routed/dep", "example.com/sbomonly")
+
+	for _, tt := range []struct {
+		name   string
+		target string
+		// The exact substring the disclosure line must contain for this
+		// kind, article and all - source.TargetKind.String() itself, so a
+		// row can only pass by naming its OWN kind (unlike a bare "as a
+		// go-binary" fallback disjunct, which is satisfied by any row's
+		// stderr and would let a directory or sbom row silently pass
+		// through the go-binary check).
+		wantDisclosure string
+		// A package name that appears ONLY when this kind's cataloger ran.
+		// Distinct strings with no substring relationship between them, so a
+		// row cannot pass from another row's output.
+		wantPkg string
+	}{
+		{"go binary", "file:" + self, "as a go-binary", "stdlib"},
+		{"directory", "dir:" + dir, "as a directory", "github.com/routed/dep"},
+		{"sbom", "sbom:" + sbom, "as an sbom", "example.com/sbomonly"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			if code := Run(context.Background(), db, tt.target,
+				Options{Output: "json"}, &out, &errOut); code != 0 {
+				t.Fatalf("Run = %d, want 0; stderr:\n%s", code, errOut.String())
+			}
+			var doc struct {
+				Findings []struct {
+					Package struct {
+						Name string `json:"name"`
+					} `json:"package"`
+				} `json:"findings"`
+				Summary struct {
+					Components int `json:"components"`
+				} `json:"summary"`
+			}
+			if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+				t.Fatalf("stdout is not one JSON document: %v\n%s", err, out.String())
+			}
+			if doc.Summary.Components == 0 {
+				t.Fatalf("%s produced no components; it was routed to the wrong cataloger\n%s",
+					tt.name, out.String())
+			}
+			// The real assertion: not just "a cataloger ran", but "THIS
+			// row's own cataloger ran" - read back via the package name the
+			// seeded advisory actually matched.
+			if len(doc.Findings) != 1 {
+				t.Fatalf("%s produced %d finding(s), want exactly 1 (the seeded advisory "+
+					"against %q)\n%s", tt.name, len(doc.Findings), tt.wantPkg, out.String())
+			}
+			if got := doc.Findings[0].Package.Name; got != tt.wantPkg {
+				t.Errorf("%s cataloged package %q, want %q - routed to the wrong cataloger",
+					tt.name, got, tt.wantPkg)
+			}
+			// The scan reports how it classified the target, so assert on
+			// that too: it is the thing D22 promises is visible.
+			if !strings.Contains(errOut.String(), tt.wantDisclosure) {
+				t.Errorf("stderr does not contain %q:\n%s", tt.wantDisclosure, errOut.String())
+			}
+		})
+	}
+}
+
+// The kind is disclosed, on stderr, so stdout stays a clean document and
+// `--output json | jq` is unaffected. A wrong guess must be visible in the
+// output rather than inferred from a confusing downstream error.
+func TestRun_ReportsHowTheTargetWasClassified(t *testing.T) {
+	db := buildMatrixDB(t, nil)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"),
+		[]byte("module example.test/app\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), db, dir, Options{}, &out, &errOut); code != 0 {
+		t.Fatalf("Run = %d, want 0; stderr:\n%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "as a directory") {
+		t.Errorf("stderr does not say how the target was classified:\n%s", errOut.String())
+	}
+	// Not on stdout: that belongs to the report.
+	if strings.Contains(out.String(), "as a directory") {
+		t.Errorf("the classification went to stdout:\n%s", out.String())
+	}
+}
+
+// A directory scan says what go.mod is and is not. Without it the 11-of-52
+// gap is invisible and a clean directory scan reads as a clean project - the
+// silent partial coverage D20 and D21 exist to prevent, arriving through a
+// new door.
+func TestRun_ADirectoryScanStatesItsLimitation(t *testing.T) {
+	db := buildMatrixDB(t, nil)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"),
+		[]byte("module example.test/app\n\nrequire github.com/a/b v1.0.0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	Run(context.Background(), db, dir, Options{}, &out, &errOut)
+	for _, want := range []string{"go.mod", "not what a build links", "binary"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("stderr missing %q - the limitation is not stated:\n%s", want, errOut.String())
+		}
+	}
+}
+
+// ...and a binary scan does not carry that warning, because it has no such
+// gap. A caveat printed on every scan is a caveat readers learn to skip.
+func TestRun_ABinaryScanDoesNotWarnAboutGoMod(t *testing.T) {
+	db := buildMatrixDB(t, nil)
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	Run(context.Background(), db, "file:"+self, Options{}, &out, &errOut)
+	if strings.Contains(errOut.String(), "not what a build links") {
+		t.Errorf("a binary scan carried the go.mod caveat:\n%s", errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "as a go-binary") {
+		t.Errorf("stderr does not say the target was read as a binary:\n%s", errOut.String())
+	}
+}
+
+// The classification must be visible even when the cataloger THEN fails -
+// that is precisely when a reader most needs it: a typo'd path or a
+// directory missing its go.mod otherwise reports only a confusing
+// downstream error ("dial tcp: lookup .: no such host" for a mistyped path
+// that fell through to the registry loader; "read go.mod: ... no such file"
+// for an empty directory) with no hint of what assay guessed the target
+// was. Printing the disclosure only after the cataloger succeeds means every
+// error path returns 2 before it is ever reached - this is that gap, closed.
+func TestRun_DisclosesTheKindEvenWhenTheCatalogerFails(t *testing.T) {
+	db := buildMatrixDB(t, nil)
+
+	t.Run("go-binary target that cannot be read", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		target := "file:" + filepath.Join(t.TempDir(), "absent.bin")
+		if code := Run(context.Background(), db, target, Options{}, &out, &errOut); code != 2 {
+			t.Fatalf("Run = %d, want 2", code)
+		}
+		assertDisclosurePrecedesError(t, errOut.String(), "as a go-binary")
+	})
+
+	t.Run("directory target with no go.mod", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		target := "dir:" + t.TempDir() // an empty directory: no go.mod at all
+		if code := Run(context.Background(), db, target, Options{}, &out, &errOut); code != 2 {
+			t.Fatalf("Run = %d, want 2", code)
+		}
+		assertDisclosurePrecedesError(t, errOut.String(), "as a directory")
+	})
+}
+
+// assertDisclosurePrecedesError asserts both that want (the disclosure
+// substring) appears in stderr AND that it appears strictly BEFORE the
+// "error:" line - not merely that both are present somewhere in the stream.
+// Ordering is the entire point of this test: a `defer` around the
+// disclosure's Fprintf would make it print at function return, after the
+// error line, and a presence-only check ("stderr contains X" and, in a
+// second assertion, "stderr contains error:") would not catch that at all,
+// since both substrings would still be present - just in the wrong order,
+// which is exactly the "confusing downstream error" shape F1 exists to fix.
+func assertDisclosurePrecedesError(t *testing.T, stderr, want string) {
+	t.Helper()
+	di := strings.Index(stderr, want)
+	if di < 0 {
+		t.Fatalf("stderr does not disclose the classification despite the failure:\n%s", stderr)
+	}
+	ei := strings.Index(stderr, "error:")
+	if ei < 0 {
+		t.Fatalf("stderr does not contain an error line at all:\n%s", stderr)
+	}
+	if di >= ei {
+		t.Errorf("disclosure (%q at byte %d) did not precede the error line (at byte %d):\n%s",
+			want, di, ei, stderr)
+	}
+}
+
+// buildBBoltBinary compiles a tiny throwaway program that imports
+// go.etcd.io/bbolt - a real dependency already in this repository's module
+// cache (internal/store's own choice, D4), so no network fetch - and returns
+// the resulting binary's path.
+//
+// This deliberately does NOT scan os.Executable() (this package's own `go
+// test` binary), unlike the sibling routing tests above. Measured: this
+// package's own compiled test binary's build info reports zero dependencies
+// - only the main module and stdlib - even though the binary is genuinely
+// linked against go.etcd.io/bbolt through internal/store. Reproduced on an
+// unrelated, throwaway module with no connection to this repository, so it
+// is a property of `go test`-built binaries for a package that is not
+// itself `package main` on this toolchain, not something scancmd.Run or
+// gobinary.Parse get wrong - a real `go build` binary does not have this
+// gap, which is exactly what internal/cataloger/gobinary's own
+// TestParse_ReportsLinkedDependencies fixture already relies on. Building
+// one here the same way is what makes a genuine, non-fixture-shaped finding
+// observable through Run for a go-binary target, in an environment where
+// self-scanning cannot.
+func buildBBoltBinary(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go is not on PATH; this test needs a toolchain to build its fixture")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"),
+		[]byte("module example.test/scanned\n\ngo 1.26\n\nrequire go.etcd.io/bbolt v1.5.0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"),
+		[]byte("package main\n\nimport _ \"go.etcd.io/bbolt\"\n\nfunc main() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := filepath.Join(dir, "app.bin.exe")
+	cmd := exec.Command("go", "build", "-buildvcs=false", "-o", bin, ".")
+	cmd.Dir = dir
+	// GOFLAGS=-mod=mod lets the build resolve from the module cache without
+	// its own go.sum; GOPROXY=off makes a cache miss an honest skip rather
+	// than a silent network fetch (matching
+	// internal/cataloger/gobinary/gobinary_test.go's runGoBuild).
+	cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod", "GOPROXY=off", "GOSUMDB=off")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "module lookup disabled by GOPROXY=off") {
+			t.Skipf("go build failed (%v); fixture needs a module not in the local cache:\n%s", err, out)
+		}
+		t.Fatalf("go build failed (%v):\n%s", err, out)
+	}
+	return bin
+}
+
+// The gates are the contract, and a new target kind that reaches a different
+// verdict path would break them silently. Both target kinds this test's own
+// name promises genuinely reach go.etcd.io/bbolt: the binary links it for
+// real (buildBBoltBinary), and the directory's go.mod requires it directly -
+// gomod.Parse needs no toolchain to see that, so no `go build` is needed for
+// this half.
+func TestRun_GatesApplyToBinaryAndDirectoryTargets(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"),
+		[]byte("module example.test/gated\n\ngo 1.26\n\nrequire go.etcd.io/bbolt v1.5.0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// An advisory against a module both target kinds below genuinely reach.
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-binary-hit", pkg: "go.etcd.io/bbolt", fixed: "99.0.0", vectors: []string{vecCritical}},
+	})
+
+	none := severity.None
+	gates := []struct {
+		name string
+		opts Options
+		want int
+	}{
+		{"no flags", Options{}, 0},
+		{"--fail-on none trips on a critical finding", Options{FailOn: &none}, 1},
+	}
+	runGates := func(t *testing.T, target string) {
+		t.Helper()
+		for _, tt := range gates {
+			t.Run(tt.name, func(t *testing.T) {
+				var out, errOut bytes.Buffer
+				if got := Run(context.Background(), db, target, tt.opts, &out, &errOut); got != tt.want {
+					t.Errorf("Run = %d, want %d; stdout:\n%s\nstderr:\n%s",
+						got, tt.want, out.String(), errOut.String())
+				}
+			})
+		}
+	}
+
+	// buildBBoltBinary is called INSIDE the go-binary branch's own t.Run,
+	// not once at the top of the function shared by both branches: it calls
+	// t.Skip when `go` is not on PATH, and a Skip on the parent *testing.T
+	// aborts everything that follows in the same function - including the
+	// directory branch below, whose own comment already says it needs no
+	// toolchain at all. Scoping the skip to its own subtest is what lets a
+	// toolchain-less runner still exercise the directory half; the previous
+	// shape silently lost exactly that coverage in exactly the environment
+	// where nobody would notice. Same shape as Task 2's F3 (a git-availability
+	// skip erasing an unrelated sibling case's coverage).
+	t.Run("go-binary target", func(t *testing.T) {
+		bin := buildBBoltBinary(t)
+		runGates(t, "file:"+bin)
+	})
+
+	t.Run("directory target", func(t *testing.T) {
+		runGates(t, "dir:"+dir)
+	})
 }
 
 func TestRun_FailOnIncompleteAndUnknownAgreeAcrossRenderers(t *testing.T) {

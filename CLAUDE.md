@@ -252,6 +252,41 @@ Pick fixture values that cannot collide (`ALPINE-2025-0001` with upstream
 half. Then delete the code the test covers and confirm the suite goes red — a report test
 that never fails is worse than no test, because it is counted as coverage.
 
+## Guards that exist but are not held
+
+**A guard is not covered by the test that mentions it.** The recurring defect in slice 3 was
+not a missing test — it was a test that named the right thing and could not fail on it. Four
+shapes, all found by mutation and none by reading:
+
+- **A field declared, documented as the thing that prevents the defect, and never read.**
+  `wantPkg` was populated in all three routing rows with a comment saying it stops a row
+  passing on another row's output. Nothing referenced it. Discarding the cataloger's result
+  entirely and fabricating an inventory left the whole repo green.
+- **`continue` or `t.Skip` where the subject of the test lives.** `if !ok { continue }` in a
+  loop asserting "everything this accepts is comparable" turns a *rejection* into a pass, and
+  four inputs had no other coverage. A `t.Skip` at the top of a test skipped a second subtest
+  that did not need the skipped-for tool at all — seven of eight mutations survived in that
+  environment.
+- **Asserting presence when order is the point.** The disclosure test checked that both the
+  classification line and the error appeared. Making the disclosure a `defer` printed it
+  *after* the error — the exact defect the test was added for — and stayed green.
+- **A wrapper satisfying the assertion.** `Contains(err, "go.mod")` against
+  `fmt.Errorf("read go.mod: %w", err)` passes on the hard-coded prefix, so an error that
+  dropped both the filename and the cause was green. Same family as the substring rule above,
+  but the colliding text is in the format string rather than a neighbouring column.
+
+Before believing a test, ask what one-line change to the code it would **not** catch, then
+make that change and watch it. If the suite stays green the test is documentation, not
+coverage.
+
+**A surviving mutation is not automatically a gap.** Several were true equivalents — a later
+guard reaching the same answer, a level table entering only as a difference so a constant
+shift cancels, two content sniffs that cannot both match one file. Verify which it is, then
+say so in the code. An unexplained survivor reads as an untested branch forever; a documented
+one reads as a decision. And check your mutation actually mutates: two "survivors" in this
+slice turned out to be no-ops, and one needed edits in two places because the switch it
+targeted is a whitelist.
+
 ## Conventions
 
 - No third-party dependencies yet (`go.mod` has no `require` block). Adding one is a real

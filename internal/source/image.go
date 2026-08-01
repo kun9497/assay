@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"runtime"
 	"strings"
 
@@ -15,31 +14,37 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 )
 
-// TargetKind says whether a scan argument names an SBOM to read or an image to
-// pull apart. It exists because `assay scan X` has to mean both, and the wrong
-// guess produces an error about the wrong subject.
+// TargetKind says what a scan argument names. It exists because `assay scan X`
+// has to mean all of these, and the wrong guess produces an error about the
+// wrong subject — a Go binary read as an SBOM reports a malformed document.
+//
+// Classify (classify.go) is what decides, and it prints the answer, so a wrong
+// guess is visible in the scan's output rather than inferred from a confusing
+// downstream error.
 type TargetKind int
 
 const (
 	TargetSBOM TargetKind = iota
 	TargetImage
+	TargetDirectory
+	TargetGoBinary
 )
 
-// ClassifyTarget decides in a fixed order: an explicit scheme prefix, then an
-// existing file, then a registry reference.
-//
-// The order is the point. Deciding "registry" first makes `assay scan
-// ./alpine.cdx.json` try to pull a repository of that name, and the user is
-// told about registries when their actual problem is a path. Deciding "file"
-// first would make an explicit docker-archive: prefix unreachable.
-func ClassifyTarget(ref string) TargetKind {
-	if classify(ref) != kindRegistry {
-		return TargetImage
+func (k TargetKind) String() string {
+	switch k {
+	case TargetSBOM:
+		return "sbom"
+	case TargetImage:
+		return "image"
+	case TargetDirectory:
+		return "directory"
+	case TargetGoBinary:
+		return "go-binary"
 	}
-	if _, err := os.Stat(ref); err == nil {
-		return TargetSBOM
-	}
-	return TargetImage
+	// Not reachable through Classify, but a kind rendered as "" turns
+	// "scanned X as a " into what reads as a rendering bug rather than an
+	// unknown classification.
+	return fmt.Sprintf("TargetKind(%d)", int(k))
 }
 
 type kind int

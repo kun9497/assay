@@ -48,23 +48,28 @@ func TestClassify_HostPortIsNotAScheme(t *testing.T) {
 	}
 }
 
-// An unprefixed argument naming a file that exists is an SBOM, which is how
-// slice 2a's behaviour survives. Deciding registry-first would make
-// `assay scan ./alpine.cdx.json` try to pull a repository by that name.
-func TestClassifyTarget_ExistingFileIsAnSBOM(t *testing.T) {
+// This used to assert that ANY existing file is an SBOM, which is the exact
+// behaviour D22 replaces: it is why `assay scan ./bin/assay` reported a
+// malformed JSON document. What survives from it is the part that is still
+// true — a path is not a registry reference, and an explicit scheme wins over
+// the file on disk. The content-sniffing cases live in classify_test.go.
+func TestClassify_APathIsNotARegistryReference(t *testing.T) {
 	f := t.TempDir() + "/sbom.cdx.json"
-	if err := writeFile(f, "{}"); err != nil {
+	if err := writeFile(f, `{"bomFormat":"CycloneDX","specVersion":"1.5"}`); err != nil {
 		t.Fatal(err)
 	}
-	if got := ClassifyTarget(f); got != TargetSBOM {
-		t.Errorf("ClassifyTarget(existing file) = %v, want TargetSBOM", got)
+	// Deciding registry-first would make `assay scan ./alpine.cdx.json` try to
+	// pull a repository by that name and report a registry error for a path
+	// problem.
+	if got, _, err := Classify(f); err != nil || got != TargetSBOM {
+		t.Errorf("Classify(a CycloneDX file) = %v/%v, want sbom", got, err)
 	}
-	if got := ClassifyTarget("alpine:3.19"); got != TargetImage {
-		t.Errorf("ClassifyTarget(image ref) = %v, want TargetImage", got)
+	if got, _, err := Classify("alpine:3.19"); err != nil || got != TargetImage {
+		t.Errorf("Classify(image ref) = %v/%v, want image", got, err)
 	}
-	// An explicit prefix wins even if a file of that name happens to exist.
-	if got := ClassifyTarget("docker-archive:" + f); got != TargetImage {
-		t.Errorf("ClassifyTarget(prefixed) = %v, want TargetImage", got)
+	// An explicit scheme wins even when a file of that name exists.
+	if got, _, err := Classify("docker-archive:" + f); err != nil || got != TargetImage {
+		t.Errorf("Classify(prefixed) = %v/%v, want image", got, err)
 	}
 }
 

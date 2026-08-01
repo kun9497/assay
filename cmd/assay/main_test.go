@@ -707,6 +707,95 @@ func TestRun_ScanExplainReachesRealExitCode(t *testing.T) {
 	})
 }
 
+// buildGoBinaryRunSeamDB writes a real database (at
+// ASSAY_DB_DIR/vulnerability.db) holding one advisory against
+// go.etcd.io/bbolt - a real dependency this test binary genuinely links
+// (through internal/store, D4), so a "file:"+os.Executable() target produces
+// a real finding rather than a fixture-shaped one. Unlike
+// internal/scancmd's own TestRun_GatesApplyToBinaryAndDirectoryTargets, this
+// can scan os.Executable() directly: cmd/assay's own test binary IS built
+// from `package main`, and only a `go test` binary for a package that is NOT
+// itself package main was measured to omit its module dependency list on
+// this toolchain (internal/scancmd's own test binary is not package main;
+// this one is).
+func buildGoBinaryRunSeamDB(t *testing.T, dir string) {
+	t.Helper()
+	dbPath := filepath.Join(dir, "vulnerability.db")
+	w, err := store.Create(dbPath)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := w.Put(advisory.Advisory{
+		ID:   "GHSA-binary-seam",
+		Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{
+			Ecosystem: "Go",
+			Name:      "go.etcd.io/bbolt",
+			Ranges: []advisory.Range{{
+				Type:   advisory.RangeSemver,
+				Events: []advisory.Event{{Introduced: "0"}, {Fixed: "99.0.0"}},
+			}},
+		}},
+		Severity: []advisory.Severity{
+			// critical, 9.8 - the same vector pinned against its exact band
+			// and score in internal/matcher/matcher_test.go.
+			{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"},
+		},
+	}); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if err := w.SetMeta(store.Meta{
+		Providers: map[string]store.Provenance{"osv": {Ecosystems: []string{"Go"}}},
+	}); err != nil {
+		t.Fatalf("SetMeta: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+// TestRun_ScanGoBinaryTargetReachesRealExitCode is the run()-seam wiring
+// check for a go-binary target - the counterpart of
+// TestRun_ScanFlagsReachRealExitCode for the SBOM path. parseScanArgs proves
+// --fail-on parses (TestParseScanArgs); scancmd's own
+// TestRun_GatesApplyToBinaryAndDirectoryTargets proves scancmd.Run honours it
+// for a go-binary target; neither one catches main.go silently dropping
+// opts.FailOn, or routing the wrong string, on the way between them - e.g.
+// `scancmd.Run(ctx, path, target, scancmd.Options{}, stdout, stderr)`,
+// dropping opts entirely, type-checks and leaves both of those suites green.
+// This drives run() itself, with a real "file:" target and a real finding, so
+// a dropped field turns this exact case red rather than passing by
+// coincidence.
+func TestRun_ScanGoBinaryTargetReachesRealExitCode(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ASSAY_DB_DIR", dir)
+	buildGoBinaryRunSeamDB(t, dir)
+
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := "file:" + self
+
+	t.Run("no flags: a real finding is present but does not change the exit code alone", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		args := []string{"scan", target}
+		if code := run(args, &stdout, &stderr); code != exitOK {
+			t.Errorf("run(%v) = %d, want %d\nstdout:\n%s\nstderr:\n%s",
+				args, code, exitOK, stdout.String(), stderr.String())
+		}
+	})
+
+	t.Run("--fail-on critical reaches scancmd.Run through run() for a go-binary target", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		args := []string{"scan", target, "--fail-on", "critical"}
+		if code := run(args, &stdout, &stderr); code != exitFindings {
+			t.Errorf("run(%v) = %d, want %d (exitFindings)\nstdout:\n%s\nstderr:\n%s",
+				args, code, exitFindings, stdout.String(), stderr.String())
+		}
+	})
+}
+
 // TestRun_ScanExplainConflictsWithOutputJSONExits2 is the run()-level
 // version of TestParseScanArgs' "cannot be combined" case: the CLI contract
 // end to end, exit 2 with stdout untouched, not just a non-nil error from

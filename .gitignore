@@ -41,3 +41,6 @@ Thumbs.db
 *.key
 !testdata/**/*.key
 .env
+
+# Windows shell crash dumps, which land in the working directory
+*.stackdump

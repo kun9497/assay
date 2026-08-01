@@ -434,6 +434,74 @@ whole database it is 74.9%, and per ecosystem: Alpine 98.9%, npm 89.7%, PyPI 75.
 container scan therefore has almost no unknowns, so `--fail-on-unknown` is far less noisy
 there than D17's framing suggests — and correspondingly more useful.
 
+### D22 — Target classification: sniff the content, and let the user override
+
+`assay scan ./bin/assay` is a path that exists, and until now an existing path meant an
+SBOM. A binary handed to the CycloneDX parser fails with a JSON error, which sends the
+reader to look for a malformed document rather than a misread target.
+
+**Bare paths are classified by content**, in a fixed order: is it a directory, then
+`debug/buildinfo`, then CycloneDX. Each test is cheap — buildinfo reads a header and fails
+immediately on anything that is not a Go binary — so the order is about determinism, not
+cost. In fact the three are mutually exclusive on any real input, so the order is not
+observable today; it is fixed anyway, because the day a fourth format is added the
+exclusivity stops holding and an unordered sniff would change behaviour silently. A path
+that matches nothing is an error naming all three, never a silent fallthrough to one of
+them.
+
+**Explicit prefixes override the sniff**: `file:`, `dir:`, `sbom:`, alongside the existing
+`docker-archive:` and `oci-dir:`. Sniffing is a heuristic, and a heuristic with no override
+is a wall. It also keeps one shape for the whole argument: the target already carries
+prefixes for two image forms, and "some kinds are prefixed and some are guessed" is harder
+to explain than "guessed unless you say otherwise".
+
+The classifier returns what it decided, and the scan reports it, so a wrong guess is visible
+in the output rather than inferred from a confusing error.
+
+### D23 — A directory scan reads `go.mod`, and does not shell out to `go`
+
+Three different answers to "what does this project depend on", measured on this repository:
+
+| Source | Modules | What it is |
+|---|---|---|
+| the binary, via `debug/buildinfo` | **10** + main | what was actually linked |
+| `go.mod` require blocks | **11** | what was requested |
+| `go list -m all` | **52** | the whole module graph |
+
+`go list -m all` is the accurate build list, and it is the one we will not use. It requires
+the Go toolchain at scan time and, on a cache miss, the network. A scanner that needs a
+build toolchain to read a directory cannot run in the environments this is for, and D14
+promises an SBOM or archive scan makes no network call at all. Adding a toolchain dependency
+to the *filesystem* path would break that promise from a new direction.
+
+So the directory cataloger parses `go.mod` itself, with the standard library. That is
+**11 of the 52**, and it is wrong in both directions: it misses transitive modules the graph
+would name, and it includes test-only ones the binary does not link — `gotest.tools/v3` is in
+this repo's own indirect requires and in no built artifact.
+
+**This is a documented limitation, not a hidden one.** A directory scan says what it read,
+and the report recommends scanning the built binary when one exists, because that is the
+inventory of the thing that actually ships. Getting a build list without a toolchain means
+reimplementing minimal version selection over the module cache, which is a different project.
+
+### D24 — The Go toolchain is a package named `stdlib`
+
+The live database holds **159 advisories against `stdlib`** in the Go ecosystem, with
+ordinary version ranges (`introduced="1.16.0-0"`, `fixed="1.16.1"`). A binary built with a
+vulnerable toolchain is vulnerable, and `debug/buildinfo` reports the toolchain version, so
+declining to match it would be a silent false negative on data we already hold.
+
+`GoVersion` is reported as `go1.26.4` and the advisories use `1.26.4`, so the prefix is
+stripped at catalog time. That normalization is load-bearing: the semver comparer rejects
+`go1.26.4` outright — measured — so getting it wrong produces a skipped package rather than a
+wrong answer, which is at least loud. The pre-release forms are not: `go1.21rc1` and `go1.26`
+must normalize to something the comparer orders correctly against `1.21.0-0` and `1.26.0`,
+and that is where a quiet ordering bug would live.
+
+Directory scans do not get this. `go.mod`'s `go` directive is a language-version floor, not
+the toolchain that will build it, and treating it as one would report a version nothing was
+ever built with.
+
 ## 3. Architecture
 
 ### Measured data volumes

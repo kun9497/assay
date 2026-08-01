@@ -11,6 +11,8 @@ import (
 
 	"github.com/kun9497/assay/internal/cataloger/apkdb"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
+	"github.com/kun9497/assay/internal/cataloger/gobinary"
+	"github.com/kun9497/assay/internal/cataloger/gomod"
 	"github.com/kun9497/assay/internal/cataloger/osrelease"
 	"github.com/kun9497/assay/internal/matcher"
 	"github.com/kun9497/assay/internal/pkgmeta"
@@ -83,9 +85,10 @@ const (
 	apkDBPath     = "lib/apk/db/installed"
 )
 
-// Run scans an SBOM file or a container image — a registry reference, a
-// docker-archive: tarball, or an oci-dir: layout — chosen by
-// source.ClassifyTarget so one argument reaches the right loader. Once the
+// Run scans whatever one target argument names — an SBOM, a container image
+// (a registry reference, a docker-archive: tarball, or an oci-dir: layout), a
+// Go binary, or a directory with a go.mod — chosen by source.Classify so one
+// argument reaches the right loader (D22). Once the
 // scan completes and the result is judged trustworthy (D11), opts decides
 // the exit code; Options{} reproduces the pre-slice-4 behaviour of always
 // exiting 0 on a trustworthy scan, findings or not.
@@ -95,7 +98,34 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		cat       cyclonedx.Stats
 	)
 
-	if source.ClassifyTarget(target) == source.TargetImage {
+	kind, path, err := source.Classify(target)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 2
+	}
+
+	// D22: the classifier's decision is reported IMMEDIATELY — before the
+	// cataloger below ever runs, not after it succeeds — so a wrong guess is
+	// visible in the scan's own output even when the cataloger then fails.
+	// Printing this after the switch instead meant every error path returned
+	// 2 before it was ever reached: a typo'd path that fell through to the
+	// registry loader reported "dial tcp: lookup .: no such host" with no
+	// hint that assay had read it as an image reference at all, and a
+	// directory with no go.mod reported "read go.mod: ... no such file"
+	// with no hint it had been read as a directory — exactly the
+	// "confusing downstream error" TargetKind's own doc comment
+	// (internal/source/image.go) says Classify exists to prevent. stderr,
+	// never stdout, so `--output json | jq` stays clean.
+	fmt.Fprintf(stderr, "scanned %s as %s %s\n", target, article(kind), kind)
+
+	// path has any file:/dir:/sbom: prefix stripped (source.Classify's own
+	// contract); target does not. The three filesystem catalogers below must
+	// get path — handing gobinary.Parse or gomod.Parse the raw target would
+	// make "dir:./x" the directory name itself. catalogImage is the one
+	// exception: it re-parses target itself (docker-archive:/oci-dir: are
+	// image-loader syntax, not a stripped prefix), so it keeps getting target.
+	switch kind {
+	case source.TargetImage:
 		t, stats, err := catalogImage(ctx, target)
 		if err != nil {
 			// No "open %s:" wrapper. Every error reaching here already names
@@ -107,20 +137,55 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 			return 2
 		}
 		inventory, cat = t, stats
-	} else {
-		f, err := os.Open(target)
+
+	case source.TargetGoBinary:
+		t, stats, err := gobinary.Parse(path)
 		if err != nil {
-			fmt.Fprintf(stderr, "error: open %s: %v\n", target, err)
+			// gobinary.Parse's own error already names path (buildinfo's own
+			// message does), so no extra wrapper here either.
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 2
+		}
+		inventory, cat = t, stats
+
+	case source.TargetDirectory:
+		t, stats, err := gomod.Parse(path)
+		if err != nil {
+			// Same reasoning as the go-binary case: gomod.Parse's own error
+			// already names the go.mod path (os.ReadFile's message does).
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 2
+		}
+		inventory, cat = t, stats
+
+	default: // source.TargetSBOM
+		f, err := os.Open(path)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: open %s: %v\n", path, err)
 			return 2
 		}
 		defer f.Close()
 
 		t, stats, err := cyclonedx.Parse(f)
 		if err != nil {
-			fmt.Fprintf(stderr, "error: parse %s: %v\n", target, err)
+			fmt.Fprintf(stderr, "error: parse %s: %v\n", path, err)
 			return 2
 		}
 		inventory, cat = t, stats
+	}
+
+	if kind == source.TargetDirectory {
+		// D23: go.mod names what the module REQUIRES, not what a build
+		// actually links — no toolchain is invoked, so replace/exclude/retract
+		// resolution against the wider build graph never happens. Stated on
+		// every SUCCESSFUL directory scan, not just when packages are
+		// dropped, so the gap cannot be mistaken for a clean, complete result
+		// (D20/D21's silent-partial-coverage failure, arriving through a new
+		// door). This one genuinely needs cat.Components, which is only known
+		// once gomod.Parse above has succeeded — unlike the kind-only line,
+		// it cannot move any earlier than this.
+		fmt.Fprintf(stderr, "go.mod names %d module(s); this is what was requested, "+
+			"not what a build links - scan the built binary for that\n", cat.Components)
 	}
 
 	db, err := store.Open(dbPath)
@@ -207,6 +272,20 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		return 2
 	}
 	return verdict(opts, sum, res.Findings)
+}
+
+// article returns the indefinite article to pair with kind.String() so the
+// disclosure line reads as English rather than always defaulting to "a" —
+// "a sbom" and "a image" are the two spellings that read wrong (an SBOM is
+// pronounced as its own letters; "image" starts on a vowel sound).
+// "directory" and "go-binary" both take "a".
+func article(kind source.TargetKind) string {
+	switch kind {
+	case source.TargetImage, source.TargetSBOM:
+		return "an"
+	default:
+		return "a"
+	}
 }
 
 // verdict turns a completed, trustworthy scan into an exit code under the

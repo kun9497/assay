@@ -261,6 +261,44 @@ skip it, and reject a repeat rather than take the last.
 
 ---
 
+### What a directory scan does not read
+
+`vendor/`, `go.sum`, and the module cache. A directory scan reads `go.mod` and stops (D23).
+
+**Why deferred.** Each answers a different question and none is free. `vendor/` is the most
+tempting — `vendor/modules.txt` lists the exact modules a vendored build uses, which is
+closer to the truth than `go.mod` — but it exists only in vendored repositories, so it would
+make the accuracy of a directory scan depend on a project layout the user did not choose for
+our benefit. `go.sum` holds every version ever *considered*, not the ones selected, so it
+over-reports by a wide margin. Reading the module cache to compute a real build list means
+reimplementing minimal version selection, which is a different project.
+
+**Revisit when** someone scans a vendored repository and finds the answer thinner than they
+expected. `vendor/modules.txt` is the cheap one of the three: exact when present, and the
+honest shape is "use it when it is there, say so when it is not".
+
+**Groundwork.** `gomod.Parse` takes a directory, not a file, so a second source inside that
+directory is an addition rather than a signature change.
+
+---
+
+### npm and PyPI directory scanning
+
+`package-lock.json` and `poetry.lock` / `requirements.txt`, the same way `go.mod` is read now.
+
+**Why deferred.** The matcher, the comparers and the database already cover npm and PyPI —
+slice 1 shipped them — so this is one `Cataloger` per ecosystem and nothing else. It is
+deferred only because nothing has asked for it: the Go path exercises the abstraction, and a
+second one proves less than the first did.
+
+**Revisit when** someone scans a JavaScript or Python project. There is no design question
+left to answer, only work.
+
+**Groundwork.** The lockfile formats carry resolved versions, so unlike `go.mod` they do not
+inherit D23's requested-versus-linked gap.
+
+---
+
 ### SARIF output
 
 `--output json` is assay's own schema, versioned and golden-tested. SARIF is the format
@@ -275,9 +313,15 @@ database path plus the layer digest) is already carried in the JSON output but i
 code-scanning UI expects to highlight. Getting that wrong produces findings pinned to the
 wrong line of the wrong file, which is worse than no SARIF at all.
 
-**Revisit when** someone wants assay's results in GitHub code scanning, or when directory
-and binary scanning (slice ③) land — a finding in a checked-out source tree has a real file
-path, which removes the hard part of the mapping.
+**The revisit trigger has fired, and it did not help as much as expected.** Slice ③ landed,
+so a directory scan is now possible — but it reads `go.mod` and reports modules, not source
+locations. The finding's location is still `<dir>/go.mod`, a single file, and a binary scan's
+is the binary. Neither is the "line of code that introduced this dependency" a code-scanning
+UI wants to highlight. What actually removes the obstacle is a cataloger that knows where in
+the tree a dependency is declared, which nothing here needs yet.
+
+**Revisit when** someone wants assay's results in GitHub code scanning. That is now the only
+trigger; the filesystem one has been discharged.
 
 **Groundwork.** `internal/report/json.go` already assembles every field SARIF needs
 (advisory ID, aliases, severity band and score, package name and version, purl, the source
