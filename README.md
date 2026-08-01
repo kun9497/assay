@@ -27,10 +27,13 @@ Alpine packages match through their *source* package, so an `openssl` advisory r
 installed `libssl3`, and the report names both. That indirection is where distro scanners
 silently miss things.
 
-Everything else below is still the design target, not the build. `scan` **accepts no
-flags**: neither `--fail-on`, `--fail-on-unknown`, nor `--output json` exists, so exit
-code 1 is unreachable — a completed scan exits 0 even when it reports findings. Binaries
-and directories are not read either. Non-Alpine images are read, but their packages cannot
+Findings carry a severity band derived from the stored CVSS vector, and `--fail-on`,
+`--fail-on-unknown` and `--fail-on-incomplete` turn that into an exit code CI can gate on.
+`--output json` gives a stable machine-readable document and `--explain <id>` prints why a
+single finding matched.
+
+Everything else below is still the design target, not the build. Binaries
+and directories are not read. Non-Alpine images are read, but their packages cannot
 be matched: `assay scan debian:12` reports that it found no supported package database and
 exits 2, rather than reporting a clean image it never checked.
 
@@ -105,18 +108,45 @@ as an SBOM when it names a file that exists, and as a registry reference otherwi
 Not implemented yet — listed so the target is unambiguous, not because it runs:
 
 ```bash
-assay scan alpine:3.19                       # ② container images
 assay scan ./bin/assay                       # ③ binaries
 assay scan dir:./my-project                  # ③ directories
-assay scan sbom.cdx.json --fail-on high      # ④ severity gating
-assay scan sbom.cdx.json --fail-on-unknown   # ④ unrated findings
-assay scan sbom.cdx.json --output json       # ④ machine-readable output
 ```
+
+### Verdicts
+
+```bash
+assay scan alpine:3.19 --fail-on high         # exit 1 on a high or critical finding
+assay scan alpine:3.19 --fail-on-unknown      # exit 1 on an unrated finding
+assay scan alpine:3.19 --fail-on-incomplete   # exit 2 if anything went unevaluated
+assay scan alpine:3.19 --output json          # one JSON document on stdout
+assay scan alpine:3.19 --explain CVE-2025-46394
+```
+
+`--fail-on` takes `none`, `low`, `medium`, `high` or `critical`. Bands come from the stored
+CVSS vector at query time, so a scoring correction ships as a code change rather than a
+database rebuild. Both CVSS v3.1 and v4.0 are scored; v4 needs a 270-entry lookup table and
+an interpolation step rather than a formula, and both scorers are checked against every
+vector in the live database.
+
+`--fail-on-incomplete` exits **2**, not 1, and it beats `--fail-on` when both apply: a
+result that cannot be trusted outranks the content of the result. It fires when packages
+were never checked *or* when a check could not be completed — the same condition under
+which the report itself says "this is NOT a clean result", so the verdict and the prose
+cannot disagree.
 
 Flag names follow grype where the semantics match, so anything you already run against
 grype should mean the same thing here. Where behaviour diverges it is documented rather than
-left to be discovered — `--fail-on-unknown` is currently the only addition with no grype
-equivalent.
+left to be discovered:
+
+| | grype | assay |
+|---|---|---|
+| lowest band | `negligible` | `none` |
+| unrated findings | fold into the ordering | `unknown`, outside it — `--fail-on-unknown` only |
+| partial coverage | no gate | `--fail-on-incomplete`, exit 2 |
+| explain | `grype explain` subcommand | `--explain <id>` flag on `scan` |
+
+`--explain` matches on the advisory's own ID or any alias, so the CVE you were given
+resolves even when the record is filed under a GHSA or a distro-prefixed ID.
 
 ### The database
 
@@ -130,7 +160,7 @@ run `assay db update` rather than silently fetching or silently reporting nothin
 | macOS | `~/Library/Caches/assay/db/v4/` |
 | Linux | `~/.cache/assay/db/v4/` |
 
-Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v3` component
+Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v4` component
 is the schema version — a schema change rebuilds into a new directory rather than migrating
 in place. Note that `ASSAY_DB_DIR` carries no such component, so a CI cache keyed on that
 path survives an upgrade that should have invalidated it. Rebuild after upgrading, or key
@@ -154,7 +184,7 @@ fresh just because it was fetched this morning.
 |-----:|---------|
 | `0` | Scan completed; nothing tripped a gate |
 | `1` | Scan completed; findings at or above `--fail-on`, or unrated findings with `--fail-on-unknown` |
-| `2` | Scan could not complete, or its result cannot be trusted |
+| `2` | Scan could not complete, or its result cannot be trusted — including `--fail-on-incomplete` |
 
 When more than one applies, **the highest wins**: `2` outranks `1` outranks `0`. An
 untrustworthy result outranks the content of the result.
@@ -277,11 +307,13 @@ anywhere.
 - [ ] Go binary scanning via `debug/buildinfo`
 - [ ] Directory scanning (Go modules)
 
-**④ Verdicts and output** — where exit code 1 first becomes reachable.
+**④ Verdicts and output** — where exit code 1 first becomes reachable. **Done.**
 
-- [ ] `--fail-on` severity gating, plus `--fail-on-unknown` for unrated findings
-- [ ] JSON / SARIF output
-- [ ] Explain mode — show the matching evidence for a single finding
+- [x] `--fail-on` severity gating, plus `--fail-on-unknown` and `--fail-on-incomplete`
+- [x] CVSS v3.1 and v4.0 scoring, checked against every vector in the live database
+- [x] JSON output with a schema version and a golden-file test
+- [x] Explain mode — show the matching evidence for a single finding
+- [ ] SARIF output (see `docs/deferred-decisions.md`)
 
 **⑤ KISA enrichment** — Korean descriptions, KVE aliases, and severity joined onto matched
 findings.

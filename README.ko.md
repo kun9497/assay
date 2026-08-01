@@ -25,9 +25,11 @@ Go, npm, PyPI, 그리고 **Alpine**. **컨테이너 이미지를 직접 읽으�
 Alpine 패키지는 **소스 패키지를 거쳐** 매칭됩니다. `openssl` 권고가 설치된 `libssl3`에
 도달하고, 리포트가 둘 다 표시합니다. distro 스캐너가 조용히 놓치는 지점이 바로 이 간접 참조입니다.
 
-그 아래 내용은 여전히 구현이 아니라 설계 목표입니다. `scan`은 **플래그를 전혀 받지 않습니다** —
-`--fail-on`, `--fail-on-unknown`, `--output json` 모두 없어서 종료 코드 1은 도달 불가능합니다.
-완료된 스캔은 finding을 보고하더라도 0을 반환합니다. 바이너리와 디렉터리도 아직 읽지 못합니다.
+finding은 저장된 CVSS 벡터에서 뽑은 심각도 밴드를 갖고, `--fail-on`, `--fail-on-unknown`,
+`--fail-on-incomplete`가 그것을 CI가 게이팅할 수 있는 종료 코드로 바꿉니다. `--output json`은
+안정된 기계 판독 문서를, `--explain <id>`는 특정 finding이 왜 매칭됐는지를 출력합니다.
+
+그 아래 내용은 여전히 구현이 아니라 설계 목표입니다. 바이너리와 디렉터리는 아직 읽지 못합니다.
 Alpine이 아닌 이미지는 **읽기는 하지만 매칭할 수 없습니다** — `assay scan debian:12`는 지원하는
 패키지 데이터베이스를 찾지 못했다고 말하고 2를 반환합니다. 검사한 적 없는 이미지를 깨끗하다고
 보고하지 않습니다.
@@ -103,17 +105,42 @@ SBOM으로, 그 외에는 레지스트리 참조로 읽습니다.
 아직 구현되지 않은 것 — 동작해서가 아니라 목표를 분명히 하기 위해 적어둡니다:
 
 ```bash
-assay scan alpine:3.19                       # ② 컨테이너 이미지
 assay scan ./bin/assay                       # ③ 바이너리
 assay scan dir:./my-project                  # ③ 디렉터리
-assay scan sbom.cdx.json --fail-on high      # ④ 심각도 게이팅
-assay scan sbom.cdx.json --fail-on-unknown   # ④ 미평가 finding
-assay scan sbom.cdx.json --output json       # ④ 기계 판독 출력
 ```
 
+### 판정
+
+```bash
+assay scan alpine:3.19 --fail-on high         # high 이상 finding이면 1
+assay scan alpine:3.19 --fail-on-unknown      # 미평가 finding이 있으면 1
+assay scan alpine:3.19 --fail-on-incomplete   # 평가하지 못한 것이 있으면 2
+assay scan alpine:3.19 --output json          # stdout에 JSON 문서 하나
+assay scan alpine:3.19 --explain CVE-2025-46394
+```
+
+`--fail-on`은 `none`, `low`, `medium`, `high`, `critical`을 받습니다. 밴드는 저장된 CVSS
+벡터에서 질의 시점에 뽑으므로, 점수 계산이 틀렸을 때 데이터베이스를 다시 만드는 대신 코드만
+고치면 됩니다. CVSS v3.1과 v4.0을 모두 채점합니다. v4는 공식이 아니라 270개짜리 룩업 표와 보간
+단계를 거치며, 두 채점기 모두 실제 데이터베이스에 있는 모든 벡터로 검증했습니다.
+
+`--fail-on-incomplete`는 1이 아니라 **2**를 반환하고, `--fail-on`과 함께 걸리면 2가 이깁니다.
+신뢰할 수 없는 결과가 결과의 내용보다 앞섭니다. 이 플래그는 패키지를 아예 검사하지 못했을 때
+*또는* 검사를 끝내지 못했을 때 발동합니다 — 리포트가 스스로 "this is NOT a clean result"라고
+찍는 조건과 같으므로, 판정과 문구가 어긋날 수 없습니다.
+
 플래그 이름은 의미가 같은 한 grype를 따릅니다. grype에서 쓰던 것이 여기서도 같은 뜻이라는
-의미입니다. 동작이 다른 부분은 발견하도록 방치하지 않고 문서에 명시합니다 — 현재 grype에 대응물이
-없는 것은 `--fail-on-unknown` 하나뿐입니다.
+의미입니다. 동작이 다른 부분은 발견하도록 방치하지 않고 문서에 명시합니다:
+
+| | grype | assay |
+|---|---|---|
+| 최하위 밴드 | `negligible` | `none` |
+| 미평가 finding | 순서 안에 접어 넣음 | 순서 밖의 `unknown` — `--fail-on-unknown`으로만 |
+| 부분 커버리지 | 게이트 없음 | `--fail-on-incomplete`, 종료 코드 2 |
+| explain | `grype explain` 서브커맨드 | `scan`의 `--explain <id>` 플래그 |
+
+`--explain`은 권고 자체의 ID뿐 아니라 모든 alias로도 찾습니다. 받은 CVE 번호가 GHSA나 배포판
+접두사가 붙은 ID로 기록된 레코드에도 도달합니다.
 
 ### 데이터베이스
 
@@ -151,7 +178,7 @@ Alpine은 그중 4 MB뿐입니다. OSV가 Alpine을 아카이브 하나로 배�
 |-----:|---------|
 | `0` | 스캔 완료, 게이트에 걸린 것 없음 |
 | `1` | 스캔 완료, `--fail-on` 이상의 finding 또는 `--fail-on-unknown` 사용 시 미평가 finding |
-| `2` | 스캔을 완료할 수 없었거나, 결과를 신뢰할 수 없음 |
+| `2` | 스캔을 완료할 수 없었거나, 결과를 신뢰할 수 없음 — `--fail-on-incomplete` 포함 |
 
 둘 이상이 해당되면 **높은 쪽이 이깁니다**: `2` > `1` > `0`. 신뢰할 수 없는 결과가 결과의 내용보다
 우선합니다.
@@ -267,11 +294,13 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [ ] `debug/buildinfo`를 통한 Go 바이너리 스캔
 - [ ] 디렉터리 스캔 (Go 모듈)
 
-**④ 판정과 출력** — 종료 코드 1이 처음으로 도달 가능해지는 지점입니다.
+**④ 판정과 출력** — 종료 코드 1이 처음으로 도달 가능해지는 지점입니다. **완료.**
 
-- [ ] `--fail-on` 심각도 게이팅과 미평가 finding용 `--fail-on-unknown`
-- [ ] JSON / SARIF 출력
-- [ ] explain 모드 — 특정 finding의 매칭 근거 출력
+- [x] `--fail-on` 심각도 게이팅, `--fail-on-unknown`과 `--fail-on-incomplete`
+- [x] CVSS v3.1과 v4.0 채점, 실제 데이터베이스의 모든 벡터로 검증
+- [x] 스키마 버전과 골든 파일 테스트를 갖춘 JSON 출력
+- [x] explain 모드 — 특정 finding의 매칭 근거 출력
+- [ ] SARIF 출력 (`docs/deferred-decisions.md` 참조)
 
 **⑤ KISA 보강** — 매칭된 finding에 한국어 설명, KVE alias, 심각도를 결합합니다.
 
