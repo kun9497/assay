@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 
 	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/report"
 	"github.com/kun9497/assay/internal/severity"
 	"github.com/kun9497/assay/internal/source"
 	"github.com/kun9497/assay/internal/store"
@@ -702,4 +704,109 @@ func TestRun_ExitCodeMatrix(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRun_OutputJSON is the wiring test for Options.Output == "json": Run
+// must call report.JSON instead of report.Table, and --output json must not
+// merely add JSON alongside the table — `assay scan ... --output json | jq`
+// requires the JSON document to be the ONLY thing on stdout.
+func TestRun_OutputJSON(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-json-medium", pkg: "jsonmedium", fixed: "2.0.0", vectors: []string{vecMedium}},
+	})
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "jsonmedium", purlType: "golang"}})
+
+	t.Run("plain --output json exits 0 and writes only the document", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		code := Run(context.Background(), db, sbom, Options{Output: "json"}, &out, &errOut)
+		if code != 0 {
+			t.Fatalf("Run() = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, out.String(), errOut.String())
+		}
+		var doc report.Document
+		if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+			t.Fatalf("stdout is not valid JSON: %v\n%s", err, out.String())
+		}
+		if doc.SchemaVersion != 1 {
+			t.Errorf("SchemaVersion = %d, want 1", doc.SchemaVersion)
+		}
+		if len(doc.Findings) != 1 || doc.Findings[0].Advisory.ID != "GHSA-json-medium" {
+			t.Errorf("Findings = %+v, want the one medium finding", doc.Findings)
+		}
+		// The table's own header would prove Run fell back to Table instead
+		// of replacing it, silently defeating the "ONLY thing on stdout"
+		// contract --output json exists to uphold.
+		if strings.Contains(out.String(), "PACKAGE") {
+			t.Errorf("stdout contains the table header; --output json must replace "+
+				"Table entirely:\n%s", out.String())
+		}
+	})
+
+	// A dropped Output field on the way into Run would silently fall back to
+	// Table while still honouring FailOn — this pins that --output json and
+	// --fail-on compose, not just that each works alone.
+	t.Run("--output json still honours --fail-on", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		code := Run(context.Background(), db, sbom, Options{Output: "json", FailOn: &bandMedium}, &out, &errOut)
+		if code != 1 {
+			t.Fatalf("Run() = %d, want 1 (exitFindings)\nstdout:\n%s\nstderr:\n%s",
+				code, out.String(), errOut.String())
+		}
+		var doc report.Document
+		if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+			t.Fatalf("stdout is not valid JSON even though --fail-on tripped: %v\n%s", err, out.String())
+		}
+	})
+}
+
+// TestRun_Explain is the wiring test for Options.Explain: Run must call
+// report.Explain instead of report.Table/JSON, the verdict (--fail-on* gates,
+// D11) must still apply on top of it, and an identifier matching nothing
+// must be exit 2 with stdout untouched rather than a quiet, empty success.
+func TestRun_Explain(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-explain-wired", pkg: "explainwired", fixed: "2.0.0", vectors: []string{vecCritical}},
+	})
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "explainwired", purlType: "golang"}})
+
+	t.Run("matching id: writes the explanation, table replaced entirely", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		code := Run(context.Background(), db, sbom, Options{Explain: "GHSA-explain-wired"}, &out, &errOut)
+		if code != 0 {
+			t.Fatalf("Run() = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, out.String(), errOut.String())
+		}
+		if !strings.Contains(out.String(), "GHSA-explain-wired") {
+			t.Errorf("stdout does not contain the explanation:\n%s", out.String())
+		}
+		if strings.Contains(out.String(), "PACKAGE") {
+			t.Errorf("stdout contains the table header; --explain must replace "+
+				"Table entirely:\n%s", out.String())
+		}
+	})
+
+	// Explain mode is a different renderer, not a different verdict: a
+	// dropped opts.FailOn on the way into the explain branch of Run would
+	// silently pass this test's baseline row but fail here.
+	t.Run("--explain plus --fail-on still trips the gate", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		code := Run(context.Background(), db, sbom,
+			Options{Explain: "GHSA-explain-wired", FailOn: &bandCritical}, &out, &errOut)
+		if code != 1 {
+			t.Fatalf("Run() = %d, want 1 (exitFindings): --explain must not bypass "+
+				"the verdict\nstdout:\n%s\nstderr:\n%s", code, out.String(), errOut.String())
+		}
+	})
+
+	t.Run("no finding matches the given id: exit 2, stdout untouched", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		code := Run(context.Background(), db, sbom, Options{Explain: "GHSA-does-not-exist"}, &out, &errOut)
+		if code != 2 {
+			t.Fatalf("Run() = %d, want 2\nstdout:\n%s\nstderr:\n%s", code, out.String(), errOut.String())
+		}
+		if out.Len() != 0 {
+			t.Errorf("stdout polluted on a no-match explain: %q", out.String())
+		}
+		if !strings.Contains(errOut.String(), "GHSA-does-not-exist") {
+			t.Errorf("stderr = %q, want it to name the identifier that matched nothing", errOut.String())
+		}
+	})
 }

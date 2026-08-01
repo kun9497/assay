@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/report"
 	"github.com/kun9497/assay/internal/scancmd"
 	"github.com/kun9497/assay/internal/severity"
 	"github.com/kun9497/assay/internal/store"
@@ -241,6 +243,136 @@ func TestParseScanArgs(t *testing.T) {
 			t.Fatal("err = nil, want an error: scan takes exactly one target")
 		}
 	})
+
+	// --output: D18, the flag name follows grype's own --output.
+	t.Run("--output json after the target", func(t *testing.T) {
+		target, opts, err := parseScanArgs([]string{"alpine:3.19", "--output", "json"})
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if target != "alpine:3.19" {
+			t.Errorf("target = %q, want %q", target, "alpine:3.19")
+		}
+		if opts.Output != "json" {
+			t.Errorf("opts.Output = %q, want %q", opts.Output, "json")
+		}
+	})
+
+	t.Run("--output=json form", func(t *testing.T) {
+		target, opts, err := parseScanArgs([]string{"alpine:3.19", "--output=json"})
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if target != "alpine:3.19" {
+			t.Errorf("target = %q, want %q", target, "alpine:3.19")
+		}
+		if opts.Output != "json" {
+			t.Errorf("opts.Output = %q, want %q", opts.Output, "json")
+		}
+	})
+
+	t.Run("--output table is accepted explicitly", func(t *testing.T) {
+		_, opts, err := parseScanArgs([]string{"alpine:3.19", "--output", "table"})
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if opts.Output != "table" {
+			t.Errorf("opts.Output = %q, want %q", opts.Output, "table")
+		}
+	})
+
+	t.Run("an invalid --output value is an error naming what is accepted", func(t *testing.T) {
+		_, _, err := parseScanArgs([]string{"alpine:3.19", "--output", "sarif"})
+		if err == nil {
+			t.Fatal("err = nil, want an error for an unsupported output format")
+		}
+		for _, want := range []string{"sarif", "table", "json"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("err = %q, missing %q", err, want)
+			}
+		}
+	})
+
+	t.Run("a repeated --output is rejected, not silently last-wins", func(t *testing.T) {
+		_, _, err := parseScanArgs([]string{"alpine:3.19", "--output", "json", "--output", "table"})
+		if err == nil {
+			t.Fatal("err = nil, want an error: a repeated --output must not silently change the renderer")
+		}
+	})
+
+	// --explain: D10/D8 made visible. Chosen as a scan flag rather than a
+	// grype-style separate `explain` subcommand — see task-6-report.md for
+	// the reasoning — but the word itself still follows grype's own naming
+	// for the same feature (D18).
+	t.Run("--explain <id> after the target", func(t *testing.T) {
+		target, opts, err := parseScanArgs([]string{"alpine:3.19", "--explain", "CVE-2024-12345"})
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if target != "alpine:3.19" {
+			t.Errorf("target = %q, want %q", target, "alpine:3.19")
+		}
+		if opts.Explain != "CVE-2024-12345" {
+			t.Errorf("opts.Explain = %q, want %q", opts.Explain, "CVE-2024-12345")
+		}
+	})
+
+	t.Run("--explain=<id> form", func(t *testing.T) {
+		_, opts, err := parseScanArgs([]string{"alpine:3.19", "--explain=GHSA-abcd"})
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if opts.Explain != "GHSA-abcd" {
+			t.Errorf("opts.Explain = %q, want %q", opts.Explain, "GHSA-abcd")
+		}
+	})
+
+	t.Run("--explain before the target", func(t *testing.T) {
+		target, opts, err := parseScanArgs([]string{"--explain", "GHSA-abcd", "alpine:3.19"})
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if target != "alpine:3.19" {
+			t.Errorf("target = %q, want %q", target, "alpine:3.19")
+		}
+		if opts.Explain != "GHSA-abcd" {
+			t.Errorf("opts.Explain = %q, want %q", opts.Explain, "GHSA-abcd")
+		}
+	})
+
+	t.Run("--explain with no value is an error, not a silently-ignored flag", func(t *testing.T) {
+		_, _, err := parseScanArgs([]string{"alpine:3.19", "--explain"})
+		if err == nil {
+			t.Fatal("err = nil, want an error naming the missing value")
+		}
+		if !strings.Contains(err.Error(), "--explain") {
+			t.Errorf("err = %q, want it to name --explain", err)
+		}
+	})
+
+	t.Run("a repeated --explain is rejected, not silently last-wins", func(t *testing.T) {
+		_, _, err := parseScanArgs([]string{"alpine:3.19", "--explain", "GHSA-1", "--explain", "GHSA-2"})
+		if err == nil {
+			t.Fatal("err = nil, want an error: a repeated --explain must not silently change which advisory is explained")
+		}
+	})
+
+	t.Run("--explain cannot be combined with --output json", func(t *testing.T) {
+		_, _, err := parseScanArgs([]string{"alpine:3.19", "--explain", "GHSA-1", "--output", "json"})
+		if err == nil {
+			t.Fatal("err = nil, want an error: the two renderers cannot both be requested")
+		}
+		if !strings.Contains(err.Error(), "--explain") || !strings.Contains(err.Error(), "--output") {
+			t.Errorf("err = %q, want it to name both conflicting flags", err)
+		}
+	})
+
+	t.Run("--explain cannot be combined with --output=json (the other spelling)", func(t *testing.T) {
+		_, _, err := parseScanArgs([]string{"alpine:3.19", "--output=json", "--explain", "GHSA-1"})
+		if err == nil {
+			t.Fatal("err = nil, want an error regardless of flag order or --output spelling")
+		}
+	})
 }
 
 // The CLI contract end to end: a bad --fail-on value reaches run() as exit 2
@@ -438,5 +570,128 @@ func TestRun_ScanRepeatedFailOnExits2(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "more than once") {
 		t.Errorf("stderr = %q, want it to say --fail-on was given more than once", stderr.String())
+	}
+}
+
+// TestRun_ScanOutputJSONReachesRealExitCode is the run()-seam wiring check
+// for --output json: TestParseScanArgs proves the flag parses correctly, and
+// scancmd's own TestRun_OutputJSON proves scancmd.Run honours a given
+// Options.Output correctly. Neither catches main.go silently dropping the
+// field on the way between them (the same class of bug
+// TestRun_ScanFlagsReachRealExitCode exists to catch for the --fail-on*
+// gates) — e.g. `return scancmd.Run(ctx, path, target, scancmd.Options{
+// FailOn: opts.FailOn}, stdout, stderr)` type-checks and leaves both of
+// those suites green.
+func TestRun_ScanOutputJSONReachesRealExitCode(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ASSAY_DB_DIR", dir)
+	sbom := buildRunSeamFixture(t, dir)
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"scan", sbom, "--output", "json"}
+	if code := run(args, &stdout, &stderr); code != exitOK {
+		t.Fatalf("run(%v) = %d, want %d\nstdout:\n%s\nstderr:\n%s",
+			args, code, exitOK, stdout.String(), stderr.String())
+	}
+	var doc report.Document
+	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if doc.SchemaVersion != 1 {
+		t.Errorf("SchemaVersion = %d, want 1", doc.SchemaVersion)
+	}
+	// buildRunSeamFixture's critical + unrated findings; somecrate is
+	// dropped by the cataloger and never reaches a Finding at all.
+	if len(doc.Findings) != 2 {
+		t.Errorf("Findings = %d, want 2\nstdout:\n%s", len(doc.Findings), stdout.String())
+	}
+	if strings.Contains(stdout.String(), "PACKAGE") {
+		t.Errorf("stdout contains the table header; --output json must reach scancmd "+
+			"and replace Table entirely, not silently fall back to it:\n%s", stdout.String())
+	}
+
+	// Composing with --fail-on proves Output was not the only field that
+	// survived the trip through run() — a mutation dropping FailOn while
+	// keeping Output would pass the case above and fail only this one.
+	stdout.Reset()
+	stderr.Reset()
+	args = []string{"scan", sbom, "--output", "json", "--fail-on", "critical"}
+	if code := run(args, &stdout, &stderr); code != exitFindings {
+		t.Errorf("run(%v) = %d, want %d (exitFindings)\nstdout:\n%s\nstderr:\n%s",
+			args, code, exitFindings, stdout.String(), stderr.String())
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
+		t.Errorf("stdout is not valid JSON even with --fail-on tripped: %v\n%s", err, stdout.String())
+	}
+}
+
+// TestRun_ScanExplainReachesRealExitCode is the equivalent run()-seam wiring
+// check for --explain: proves the identifier parsed by parseScanArgs reaches
+// scancmd.Run rather than being dropped on the way, that it composes with
+// --fail-on (a different field surviving the same trip), and that an
+// identifier matching nothing is a loud exit 2 with stdout untouched, not a
+// silent empty success.
+func TestRun_ScanExplainReachesRealExitCode(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ASSAY_DB_DIR", dir)
+	sbom := buildRunSeamFixture(t, dir)
+
+	t.Run("matching id reaches scancmd.Run and replaces the table", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		args := []string{"scan", sbom, "--explain", "GHSA-critical"}
+		if code := run(args, &stdout, &stderr); code != exitOK {
+			t.Fatalf("run(%v) = %d, want %d\nstdout:\n%s\nstderr:\n%s",
+				args, code, exitOK, stdout.String(), stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "GHSA-critical") {
+			t.Errorf("stdout does not contain the explanation:\n%s", stdout.String())
+		}
+		if strings.Contains(stdout.String(), "PACKAGE") {
+			t.Errorf("stdout contains the table header; --explain must reach scancmd "+
+				"and replace Table entirely:\n%s", stdout.String())
+		}
+	})
+
+	t.Run("--explain composes with --fail-on (both fields survive the trip)", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		args := []string{"scan", sbom, "--explain", "GHSA-critical", "--fail-on", "critical"}
+		if code := run(args, &stdout, &stderr); code != exitFindings {
+			t.Errorf("run(%v) = %d, want %d (exitFindings)\nstdout:\n%s\nstderr:\n%s",
+				args, code, exitFindings, stdout.String(), stderr.String())
+		}
+	})
+
+	t.Run("an id matching nothing is exit 2 with stdout untouched", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		args := []string{"scan", sbom, "--explain", "GHSA-does-not-exist"}
+		if code := run(args, &stdout, &stderr); code != exitError {
+			t.Errorf("run(%v) = %d, want %d\nstdout:\n%s\nstderr:\n%s",
+				args, code, exitError, stdout.String(), stderr.String())
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("error path polluted stdout: %q", stdout.String())
+		}
+		if !strings.Contains(stderr.String(), "GHSA-does-not-exist") {
+			t.Errorf("stderr = %q, want it to name the identifier that matched nothing", stderr.String())
+		}
+	})
+}
+
+// TestRun_ScanExplainConflictsWithOutputJSONExits2 is the run()-level
+// version of TestParseScanArgs' "cannot be combined" case: the CLI contract
+// end to end, exit 2 with stdout untouched, not just a non-nil error from
+// parseScanArgs in isolation.
+func TestRun_ScanExplainConflictsWithOutputJSONExits2(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"scan", "docker-archive:/does/not/exist.tar",
+		"--explain", "GHSA-1", "--output", "json"}, &stdout, &stderr)
+	if code != exitError {
+		t.Errorf("run() = %d, want exitError (%d)\nstderr:\n%s", code, exitError, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("error path polluted stdout: %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "--explain") || !strings.Contains(stderr.String(), "--output") {
+		t.Errorf("stderr = %q, want it to name both conflicting flags", stderr.String())
 	}
 }

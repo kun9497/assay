@@ -19,16 +19,16 @@ import (
 // actually ran, and the exit code is the part CI reads — a verdict printed in
 // prose that the process contradicts with a 0 is not a verdict.
 type Summary struct {
-	Components       int
-	Evaluated        int
-	NotEvaluated     int
-	IncompleteChecks int
-	Findings         int
+	Components       int `json:"components"`
+	Evaluated        int `json:"evaluated"`
+	NotEvaluated     int `json:"notEvaluated"`
+	IncompleteChecks int `json:"incompleteChecks"`
+	Findings         int `json:"findings"`
 	// UnknownSeverity is the number of findings whose severity could not be
 	// rated — no vector scored (D17). It is populated whether or not it is
 	// zero, because a --fail-on-unknown gate reads it directly and a count
 	// that only appears when non-zero is not one a caller can rely on.
-	UnknownSeverity int
+	UnknownSeverity int `json:"unknownSeverity"`
 }
 
 // Trustworthy reports whether the run produced a result worth acting on. A scan
@@ -40,39 +40,11 @@ func (s Summary) Trustworthy() bool {
 }
 
 func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error) {
-	// A package counts as evaluated only if it was cataloged AND the matcher
-	// could judge it. A whole-package matcher skip (empty AdvisoryID) was
-	// cataloged but never checked, so counting it as scanned would inflate the
-	// number a reader trusts most.
-	// Two different kinds of "could not tell" live in res.Skipped. A
-	// whole-package skip means the package was never checked at all; an
-	// advisory-scoped one means the package was checked but one advisory could
-	// not be judged. They must be counted apart, because only the first one
-	// changes how many packages were evaluated — and only the second one used
-	// to disappear from the report entirely.
-	var unevaluated, incompleteChecks int
-	for _, s := range res.Skipped {
-		if s.AdvisoryID == "" {
-			unevaluated++
-			continue
-		}
-		incompleteChecks++
-	}
-	evaluated := cat.Cataloged - unevaluated
-	// Computed before the switch because the wording depends on it: this is
-	// every component the document held that was not evaluated, whether the
-	// matcher skipped it or the cataloger never produced a package for it.
-	notEvaluated := cat.Components - evaluated
-
-	// Counted unconditionally (D17): a threshold that hides how much it could
-	// not judge is not a threshold, and this feeds the summary line below
-	// whether or not it is zero.
-	var unknownSeverity int
-	for _, f := range res.Findings {
-		if f.Severity == severity.Unknown {
-			unknownSeverity++
-		}
-	}
+	sum := Summarize(res, cat)
+	evaluated := sum.Evaluated
+	notEvaluated := sum.NotEvaluated
+	incompleteChecks := sum.IncompleteChecks
+	unknownSeverity := sum.UnknownSeverity
 
 	switch {
 	case len(res.Findings) > 0:
@@ -189,6 +161,57 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 			fmt.Fprintf(w, "  %s %s: %s\n", s.Package.Name, s.Package.Version, s.Reason)
 		}
 	}
+	return sum, nil
+}
+
+// Summarize computes exactly the counts Table's own summary line prints,
+// pulled out so a second renderer (JSON) — and scancmd's exit-code verdict
+// under --explain, which runs neither Table nor JSON — derive them the same
+// way Table does rather than re-deriving them and risking the two silently
+// disagreeing. That is the identical two-computations-of-one-fact hazard
+// verdict() already avoids by reading Summary.UnknownSeverity directly
+// instead of re-deriving it from res.Findings; this is the same fix one
+// level up, so Table, JSON, and --explain's own exit code cannot drift apart
+// on what "evaluated" or "unknown severity" means.
+//
+// Table's own printed wording, counts, and headline selection are UNCHANGED
+// by this: this function is the exact code that used to sit inline at the
+// top of Table, moved verbatim, and the existing table_test.go suite (which
+// asserts on Table's output, never on this function directly) passes
+// unmodified after the move — the proof that nothing observable shifted.
+func Summarize(res matcher.Result, cat cyclonedx.Stats) Summary {
+	// A package counts as evaluated only if it was cataloged AND the matcher
+	// could judge it. A whole-package matcher skip (empty AdvisoryID) was
+	// cataloged but never checked, so counting it as scanned would inflate the
+	// number a reader trusts most.
+	// Two different kinds of "could not tell" live in res.Skipped. A
+	// whole-package skip means the package was never checked at all; an
+	// advisory-scoped one means the package was checked but one advisory could
+	// not be judged. They must be counted apart, because only the first one
+	// changes how many packages were evaluated — and only the second one used
+	// to disappear from the report entirely.
+	var unevaluated, incompleteChecks int
+	for _, s := range res.Skipped {
+		if s.AdvisoryID == "" {
+			unevaluated++
+			continue
+		}
+		incompleteChecks++
+	}
+	evaluated := cat.Cataloged - unevaluated
+	// Every component the document held that was not evaluated, whether the
+	// matcher skipped it or the cataloger never produced a package for it.
+	notEvaluated := cat.Components - evaluated
+
+	// Counted unconditionally (D17): a threshold that hides how much it could
+	// not judge is not a threshold.
+	var unknownSeverity int
+	for _, f := range res.Findings {
+		if f.Severity == severity.Unknown {
+			unknownSeverity++
+		}
+	}
+
 	return Summary{
 		Components:       cat.Components,
 		Evaluated:        evaluated,
@@ -196,7 +219,7 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 		IncompleteChecks: incompleteChecks,
 		Findings:         len(res.Findings),
 		UnknownSeverity:  unknownSeverity,
-	}, nil
+	}
 }
 
 // formatSeverity renders a finding's band together with the score behind it.

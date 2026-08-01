@@ -55,6 +55,24 @@ type Options struct {
 	// this exits 2 rather than 1, and why it outranks FailOn/FailOnUnknown
 	// under D11's 2 > 1 > 0 precedence.
 	FailOnIncomplete bool
+	// Output selects the renderer: "" and "table" both mean the human table
+	// (Options{}'s zero value must reproduce today's behaviour exactly, the
+	// same rule Options.FailOn* already follows), "json" means the stable
+	// document report.JSON writes (D18: the flag name follows grype's own
+	// --output). The CLI layer (cmd/assay) rejects any other value before
+	// Run ever sees it — an invalid value here would be a silently wrong
+	// renderer choice, not a silently-ignored flag, but the earlier a typo
+	// surfaces the better.
+	Output string
+	// Explain, when non-empty, selects one advisory to explain instead of
+	// rendering the table or JSON: its own ID, or any alias/upstream
+	// identifier it carries (D3) — whatever a reader would have grepped the
+	// table's ALIASES column for. This is D10 made visible: which range
+	// matched, which comparer decided it, and which name reached the
+	// advisory (D8), the exact fields Evidence and MatchedName exist to
+	// carry. It does not change the --fail-on* verdict below: explain mode
+	// picks the renderer, not the exit code.
+	Explain string
 }
 
 // The two files an image cataloger reads, named as they appear as tar entries
@@ -123,10 +141,47 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		fmt.Fprintf(stderr, "error: match: %v\n", err)
 		return 2
 	}
-	sum, err := report.Table(stdout, res, cat)
-	if err != nil {
-		fmt.Fprintf(stderr, "error: write report: %v\n", err)
-		return 2
+
+	// Three renderers, exactly one chosen: --explain replaces the report
+	// with one advisory's evidence, --output json replaces it with the
+	// stable document, and the default remains the human table. None of the
+	// three changes what happens below — sum still decides Trustworthy() and
+	// verdict() the same way regardless of which renderer produced it,
+	// because explain/json pick a RENDERER, not a different notion of
+	// what the scan found (D11's precedence is a property of the scan, not
+	// of how it is displayed).
+	var sum report.Summary
+	switch {
+	case opts.Explain != "":
+		// Summarize, not Table: Table would also print to stdout, and
+		// --explain must be the ONLY thing written there, the same
+		// discipline --output json owes `| jq`.
+		sum = report.Summarize(res, cat)
+		n, werr := report.Explain(stdout, res, opts.Explain)
+		if werr != nil {
+			fmt.Fprintf(stderr, "error: write report: %v\n", werr)
+			return 2
+		}
+		if n == 0 {
+			// A typo'd or unmatched identifier is a request that could not
+			// be honoured, not a vacuously successful empty report — the
+			// same "loud, not silent" rule every other CLI input mistake in
+			// this package already follows.
+			fmt.Fprintf(stderr, "error: no finding matches advisory or alias %q\n", opts.Explain)
+			return 2
+		}
+	case opts.Output == "json":
+		sum, err = report.JSON(stdout, res, cat)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: write report: %v\n", err)
+			return 2
+		}
+	default:
+		sum, err = report.Table(stdout, res, cat)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: write report: %v\n", err)
+			return 2
+		}
 	}
 	// The report already said so in prose; exiting 0 anyway would let CI read a
 	// scan that evaluated nothing as a pass (D11).

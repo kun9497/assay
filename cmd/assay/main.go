@@ -51,6 +51,9 @@ Scan flags (any order, before or after the target):
                         (none, low, medium, high, critical)
   --fail-on-unknown     Exit 1 if a finding's severity could not be rated
   --fail-on-incomplete  Exit 2 if any package's evaluation was incomplete
+  --output <format>     table (default) or json
+  --explain <id>        Print one advisory's full Evidence (its own ID, or
+                        any alias/upstream identifier) instead of the report
 `
 
 func main() {
@@ -172,6 +175,34 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 		case a == "--fail-on-incomplete":
 			opts.FailOnIncomplete = true
 
+		case a == "--output":
+			i++
+			if i >= len(args) {
+				return "", scancmd.Options{}, fmt.Errorf("--output requires a value")
+			}
+			if err := setOutput(&opts, args[i]); err != nil {
+				return "", scancmd.Options{}, err
+			}
+
+		case strings.HasPrefix(a, "--output="):
+			if err := setOutput(&opts, strings.TrimPrefix(a, "--output=")); err != nil {
+				return "", scancmd.Options{}, err
+			}
+
+		case a == "--explain":
+			i++
+			if i >= len(args) {
+				return "", scancmd.Options{}, fmt.Errorf("--explain requires a value")
+			}
+			if err := setExplain(&opts, args[i]); err != nil {
+				return "", scancmd.Options{}, err
+			}
+
+		case strings.HasPrefix(a, "--explain="):
+			if err := setExplain(&opts, strings.TrimPrefix(a, "--explain=")); err != nil {
+				return "", scancmd.Options{}, err
+			}
+
 		case strings.HasPrefix(a, "-"):
 			return "", scancmd.Options{}, fmt.Errorf("unknown flag %q", a)
 
@@ -183,7 +214,48 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 			target = a
 		}
 	}
+
+	// The two renderers are mutually exclusive, not last-one-wins: silently
+	// picking one would either drop the explanation the user asked for or
+	// silently give them prose instead of the JSON their pipeline expects.
+	if opts.Explain != "" && opts.Output == "json" {
+		return "", scancmd.Options{}, fmt.Errorf(
+			"--explain cannot be combined with --output json: pick one renderer")
+	}
 	return target, opts, nil
+}
+
+// setOutput validates value and stores it on opts.Output, the same
+// once-only, both-spellings-shared shape as setFailOn: a repeat is rejected
+// rather than silently switching renderers mid-flag-list, and an
+// unsupported format names what IS accepted rather than leaving the flag
+// silently inert.
+func setOutput(opts *scancmd.Options, value string) error {
+	if opts.Output != "" {
+		return fmt.Errorf("--output given more than once (already %q)", opts.Output)
+	}
+	switch strings.ToLower(value) {
+	case "table", "json":
+		opts.Output = strings.ToLower(value)
+		return nil
+	default:
+		return fmt.Errorf("invalid output format %q: want one of table, json", value)
+	}
+}
+
+// setExplain validates value and stores it on opts.Explain. A repeat is
+// rejected for the same reason a repeated --fail-on is: a second
+// `--explain` silently overriding the first would explain a different
+// advisory than the one the user thought they asked for.
+func setExplain(opts *scancmd.Options, value string) error {
+	if opts.Explain != "" {
+		return fmt.Errorf("--explain given more than once (already %q)", opts.Explain)
+	}
+	if value == "" {
+		return fmt.Errorf("--explain requires a non-empty advisory id")
+	}
+	opts.Explain = value
+	return nil
 }
 
 // setFailOn validates value and stores it on opts.FailOn, shared by both the
