@@ -213,6 +213,16 @@ func TestRun_TargetKinds(t *testing.T) {
 		if !strings.Contains(out.String(), "1 package") {
 			t.Errorf("stdout = %q, want the one apk package to have been evaluated", out.String())
 		}
+		// Pins article()'s TargetImage branch specifically: "a image" is the
+		// literal grammar bug an unpinned image kind would let through, and
+		// this is the only test in the package that reaches TargetImage
+		// through Run with a real, valid, cataloged image - every other
+		// image-path test here either errors before the disclosure (proving
+		// nothing about article()) or is the SBOM/go-binary/directory kinds.
+		if !strings.Contains(errOut.String(), "as an image") {
+			t.Errorf("stderr = %q, want it to disclose the target as an image (grammar: "+
+				"\"an\", not \"a\")", errOut.String())
+		}
 	})
 
 	t.Run("registry reference path", func(t *testing.T) {
@@ -1158,10 +1168,7 @@ func TestRun_DisclosesTheKindEvenWhenTheCatalogerFails(t *testing.T) {
 		if code := Run(context.Background(), db, target, Options{}, &out, &errOut); code != 2 {
 			t.Fatalf("Run = %d, want 2", code)
 		}
-		if !strings.Contains(errOut.String(), "as a go-binary") {
-			t.Errorf("stderr does not disclose the classification despite the failure:\n%s",
-				errOut.String())
-		}
+		assertDisclosurePrecedesError(t, errOut.String(), "as a go-binary")
 	})
 
 	t.Run("directory target with no go.mod", func(t *testing.T) {
@@ -1170,11 +1177,33 @@ func TestRun_DisclosesTheKindEvenWhenTheCatalogerFails(t *testing.T) {
 		if code := Run(context.Background(), db, target, Options{}, &out, &errOut); code != 2 {
 			t.Fatalf("Run = %d, want 2", code)
 		}
-		if !strings.Contains(errOut.String(), "as a directory") {
-			t.Errorf("stderr does not disclose the classification despite the failure:\n%s",
-				errOut.String())
-		}
+		assertDisclosurePrecedesError(t, errOut.String(), "as a directory")
 	})
+}
+
+// assertDisclosurePrecedesError asserts both that want (the disclosure
+// substring) appears in stderr AND that it appears strictly BEFORE the
+// "error:" line - not merely that both are present somewhere in the stream.
+// Ordering is the entire point of this test: a `defer` around the
+// disclosure's Fprintf would make it print at function return, after the
+// error line, and a presence-only check ("stderr contains X" and, in a
+// second assertion, "stderr contains error:") would not catch that at all,
+// since both substrings would still be present - just in the wrong order,
+// which is exactly the "confusing downstream error" shape F1 exists to fix.
+func assertDisclosurePrecedesError(t *testing.T, stderr, want string) {
+	t.Helper()
+	di := strings.Index(stderr, want)
+	if di < 0 {
+		t.Fatalf("stderr does not disclose the classification despite the failure:\n%s", stderr)
+	}
+	ei := strings.Index(stderr, "error:")
+	if ei < 0 {
+		t.Fatalf("stderr does not contain an error line at all:\n%s", stderr)
+	}
+	if di >= ei {
+		t.Errorf("disclosure (%q at byte %d) did not precede the error line (at byte %d):\n%s",
+			want, di, ei, stderr)
+	}
 }
 
 // buildBBoltBinary compiles a tiny throwaway program that imports
@@ -1236,44 +1265,57 @@ func buildBBoltBinary(t *testing.T) string {
 // gomod.Parse needs no toolchain to see that, so no `go build` is needed for
 // this half.
 func TestRun_GatesApplyToBinaryAndDirectoryTargets(t *testing.T) {
-	bin := buildBBoltBinary(t)
-
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"),
 		[]byte("module example.test/gated\n\ngo 1.26\n\nrequire go.etcd.io/bbolt v1.5.0\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	// An advisory against a module both target kinds above genuinely reach.
+	// An advisory against a module both target kinds below genuinely reach.
 	db := buildMatrixDB(t, []matrixAdv{
 		{id: "GHSA-binary-hit", pkg: "go.etcd.io/bbolt", fixed: "99.0.0", vectors: []string{vecCritical}},
 	})
 
 	none := severity.None
-	for _, target := range []struct {
-		name   string
-		target string
+	gates := []struct {
+		name string
+		opts Options
+		want int
 	}{
-		{"go-binary target", "file:" + bin},
-		{"directory target", "dir:" + dir},
-	} {
-		for _, tt := range []struct {
-			name string
-			opts Options
-			want int
-		}{
-			{"no flags", Options{}, 0},
-			{"--fail-on none trips on a critical finding", Options{FailOn: &none}, 1},
-		} {
-			t.Run(target.name+"/"+tt.name, func(t *testing.T) {
+		{"no flags", Options{}, 0},
+		{"--fail-on none trips on a critical finding", Options{FailOn: &none}, 1},
+	}
+	runGates := func(t *testing.T, target string) {
+		t.Helper()
+		for _, tt := range gates {
+			t.Run(tt.name, func(t *testing.T) {
 				var out, errOut bytes.Buffer
-				if got := Run(context.Background(), db, target.target, tt.opts, &out, &errOut); got != tt.want {
+				if got := Run(context.Background(), db, target, tt.opts, &out, &errOut); got != tt.want {
 					t.Errorf("Run = %d, want %d; stdout:\n%s\nstderr:\n%s",
 						got, tt.want, out.String(), errOut.String())
 				}
 			})
 		}
 	}
+
+	// buildBBoltBinary is called INSIDE the go-binary branch's own t.Run,
+	// not once at the top of the function shared by both branches: it calls
+	// t.Skip when `go` is not on PATH, and a Skip on the parent *testing.T
+	// aborts everything that follows in the same function - including the
+	// directory branch below, whose own comment already says it needs no
+	// toolchain at all. Scoping the skip to its own subtest is what lets a
+	// toolchain-less runner still exercise the directory half; the previous
+	// shape silently lost exactly that coverage in exactly the environment
+	// where nobody would notice. Same shape as Task 2's F3 (a git-availability
+	// skip erasing an unrelated sibling case's coverage).
+	t.Run("go-binary target", func(t *testing.T) {
+		bin := buildBBoltBinary(t)
+		runGates(t, "file:"+bin)
+	})
+
+	t.Run("directory target", func(t *testing.T) {
+		runGates(t, "dir:"+dir)
+	})
 }
 
 func TestRun_FailOnIncompleteAndUnknownAgreeAcrossRenderers(t *testing.T) {
