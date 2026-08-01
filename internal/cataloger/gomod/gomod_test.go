@@ -56,6 +56,9 @@ func TestParse_ReadsBothRequireForms(t *testing.T) {
 	if len(tgt.Packages) != 3 {
 		t.Fatalf("got %d packages, want 3: %+v", len(tgt.Packages), tgt.Packages)
 	}
+	if tgt.Distro != nil {
+		t.Errorf("Distro = %+v, want nil - a Go module is not a distro (D7)", tgt.Distro)
+	}
 	for _, tt := range []struct{ name, version string }{
 		{"github.com/single/dep", "v1.0.0"},
 		{"github.com/block/direct", "v2.3.4"},
@@ -67,6 +70,12 @@ func TestParse_ReadsBothRequireForms(t *testing.T) {
 		}
 		if got.Ecosystem != "Go" || got.Type != "golang" {
 			t.Errorf("%s = %q/%q, want Go/golang", tt.name, got.Ecosystem, got.Type)
+		}
+		if want := "pkg:golang/" + tt.name + "@" + tt.version; got.PURL != want {
+			t.Errorf("%s PURL = %q, want %q", tt.name, got.PURL, want)
+		}
+		if got.Source != nil {
+			t.Errorf("%s Source = %+v, want nil - D8's source/binary split is a distro concern and Go has none", tt.name, got.Source)
 		}
 		if want := filepath.Join(dir, "go.mod"); len(got.Locations) != 1 ||
 			got.Locations[0].Path != want {
@@ -314,5 +323,294 @@ func TestParse_QuotedModulePathIsUnquoted(t *testing.T) {
 	}
 	if got := find(t, tgt, "github.com/quoted/dep"); got.Version != "v1.0.0" {
 		t.Errorf("version = %q, want v1.0.0", got.Version)
+	}
+}
+
+// `require(` with no space before the paren is valid go.mod - confirmed
+// against the real toolchain with `go mod edit -json`. Splitting the
+// directive keyword on whitespace alone reads "require(" as one
+// unrecognized token, silently ignoring the entire block: an entire
+// dependency list disappearing into a scan that reports no error and no
+// components, which report.Table and Summary.Trustworthy both read as a
+// clean, complete scan.
+func TestParse_RequireBlockWithNoSpaceBeforeParen(t *testing.T) {
+	dir := write(t, "module example.test/app\n"+
+		"\nrequire(\n"+
+		"\tgithub.com/x/y v1.0.0\n"+
+		")\n")
+
+	tgt, stats, err := Parse(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := find(t, tgt, "github.com/x/y"); got.Version != "v1.0.0" {
+		t.Errorf("version = %q, want v1.0.0", got.Version)
+	}
+	if stats.Cataloged != 1 || stats.Components != 1 {
+		t.Errorf("stats = %+v, want 1 cataloged of 1 component", stats)
+	}
+}
+
+// The same hole, one space further along: extra whitespace between the
+// keyword and "(" must not stop the block from being recognized either.
+// This specifically exercises the strings.TrimSpace(rest) call that turns
+// " (" into "(" for comparison - removing it silently loses the block the
+// same way the no-space case does.
+func TestParse_RequireBlockWithExtraSpaceBeforeParen(t *testing.T) {
+	dir := write(t, "module example.test/app\n"+
+		"\nrequire  (\n"+
+		"\tgithub.com/x/y v1.0.0\n"+
+		")\n")
+
+	tgt, _, err := Parse(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := find(t, tgt, "github.com/x/y"); got.Version != "v1.0.0" {
+		t.Errorf("version = %q, want v1.0.0", got.Version)
+	}
+}
+
+// The no-space-before-paren hole is not require-specific: replace, exclude
+// and retract all accept the same block form, so the keyword/paren split
+// has to work for all of them, not just the one directive the brief's own
+// fixtures happen to exercise.
+func TestParse_ReplaceBlockWithNoSpaceBeforeParen(t *testing.T) {
+	dir := write(t, "module example.test/app\n"+
+		"\nrequire github.com/old/mod v1.0.0\n"+
+		"\nreplace(\n"+
+		"\tgithub.com/old/mod => github.com/new/mod v2.0.0\n"+
+		")\n")
+
+	tgt, _, err := Parse(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := find(t, tgt, "github.com/new/mod"); got.Version != "v2.0.0" {
+		t.Errorf("version = %q, want v2.0.0", got.Version)
+	}
+}
+
+// A require line missing its version field is malformed but names a real
+// path, so it degrades the same way a filesystem replace does: a counted
+// skip, not a silent drop that leaves no trace in Components.
+func TestParse_MalformedRequireMissingVersionIsACountedSkip(t *testing.T) {
+	dir := write(t, "module example.test/app\n"+
+		"\nrequire github.com/good/dep v1.0.0\n"+
+		"\nrequire github.com/bad/dep\n")
+
+	tgt, stats, err := Parse(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tgt.Packages) != 1 {
+		t.Fatalf("got %+v, want only github.com/good/dep", tgt.Packages)
+	}
+	find(t, tgt, "github.com/good/dep")
+	for _, p := range tgt.Packages {
+		if p.Name == "github.com/bad/dep" {
+			t.Errorf("a require with no version was cataloged: %+v", p)
+		}
+	}
+	if stats.Components != 2 {
+		t.Errorf("Components = %d, want 2 - both requires were seen", stats.Components)
+	}
+	if stats.Cataloged != 1 {
+		t.Errorf("Cataloged = %d, want 1", stats.Cataloged)
+	}
+	if stats.SkippedNoVersion != 1 {
+		t.Errorf("SkippedNoVersion = %d, want 1 - the malformed require must be counted", stats.SkippedNoVersion)
+	}
+}
+
+// A replace directive with no "=>" at all cannot be told apart from a
+// require-like line by field count, and cannot safely be dropped either:
+// doing so leaves the original requirement reporting as itself, unreplaced -
+// a false positive on code that is not there (whatever the replace intended
+// to redirect away from) paired with a silent miss of the code that is
+// (whatever it intended to redirect to). Unlike a plain missing version,
+// there is no single requirement to attach a skip to, so this is an error.
+func TestParse_MalformedReplaceMissingArrowIsAnError(t *testing.T) {
+	dir := write(t, "module example.test/app\n"+
+		"\nrequire github.com/a/b v1.0.0\n"+
+		"\nreplace github.com/a/b v1.0.0 github.com/c/d v2.0.0\n")
+
+	_, _, err := Parse(dir)
+	if err == nil {
+		t.Fatal("a replace directive with no => scanned clean")
+	}
+}
+
+// A replace directive whose right-hand side has three fields instead of one
+// or two is equally unparseable, for the same reason: silently dropping it
+// leaves the original requirement standing in for a module that was
+// supposed to be redirected away.
+func TestParse_ReplaceWithTooManyRightHandFieldsIsAnError(t *testing.T) {
+	dir := write(t, "module example.test/app\n"+
+		"\nrequire github.com/a/b v1.0.0\n"+
+		"\nreplace github.com/a/b => github.com/c/d v2.0.0 extra\n")
+
+	_, _, err := Parse(dir)
+	if err == nil {
+		t.Fatal("a replace directive with a malformed right-hand side scanned clean")
+	}
+}
+
+// An unterminated `require ( ... )` block - truncated, or mangled by an
+// unresolved merge conflict - must not swallow the directives that follow
+// it as body lines. Left unchecked, they get parsed as `path version` pairs:
+// exactly the D24 mistake (`go` reported as a package) reproduced by a
+// broken file instead of a code bug.
+func TestParse_UnterminatedBlockIsAnError(t *testing.T) {
+	dir := write(t, "module example.test/app\n"+
+		"\nrequire (\n"+
+		"\tgithub.com/a/b v1.0.0\n")
+
+	_, _, err := Parse(dir)
+	if err == nil {
+		t.Fatal("an unterminated require block scanned clean")
+	}
+}
+
+// go.mod directive blocks do not nest. A line inside an open require block
+// that itself looks like it is opening another block must not be read as an
+// ordinary require entry (which would fabricate a package named after the
+// inner keyword) or silently close the outer block early.
+func TestParse_NestedBlockIsAnError(t *testing.T) {
+	dir := write(t, "module example.test/app\n"+
+		"\nrequire (\n"+
+		"\tgithub.com/a/b v1.0.0\n"+
+		"\texclude (\n"+
+		"\tgithub.com/c/d v1.0.0\n"+
+		")\n"+
+		")\n")
+
+	_, _, err := Parse(dir)
+	if err == nil {
+		t.Fatal("a nested block scanned clean")
+	}
+}
+
+// A quoted module path containing an internal space is split apart by this
+// scan's whitespace-based field splitting before the quote is ever seen as
+// one token - it is not just unsupported, it is misread. Reporting a name
+// with a stray leading quote and whatever field happened to land next as
+// the version would catalog it as evaluated when it is not; the right
+// degradation is the same counted skip a missing version gets.
+func TestParse_QuotedPathWithInternalSpaceIsACountedSkip(t *testing.T) {
+	dir := write(t, "module example.test/app\n"+
+		"\nrequire github.com/good/dep v1.0.0\n"+
+		"\nrequire \"github.com/a b\" v1.0.0\n")
+
+	tgt, stats, err := Parse(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tgt.Packages) != 1 {
+		t.Fatalf("got %+v, want only github.com/good/dep", tgt.Packages)
+	}
+	for _, p := range tgt.Packages {
+		if strings.Contains(p.Name, `"`) {
+			t.Errorf("a stray quote leaked into a package name: %+v", p)
+		}
+	}
+	if stats.Components != 2 || stats.Cataloged != 1 || stats.SkippedNoVersion != 1 {
+		t.Errorf("stats = %+v, want Components=2 Cataloged=1 SkippedNoVersion=1", stats)
+	}
+}
+
+// When both an unqualified and a version-qualified replace target the same
+// module, the qualified one - being the more specific directive - takes
+// precedence for the version it names. Reversing that precedence would
+// apply the generic redirect even where a specific one was given.
+func TestParse_QualifiedReplaceTakesPrecedenceOverUnqualified(t *testing.T) {
+	dir := write(t, "module example.test/app\n"+
+		"\nrequire github.com/m/n v1.0.0\n"+
+		"\nreplace github.com/m/n => github.com/other/any v9.9.9\n"+
+		"\nreplace github.com/m/n v1.0.0 => github.com/m/n v1.0.1\n")
+
+	tgt, _, err := Parse(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := find(t, tgt, "github.com/m/n"); got.Version != "v1.0.1" {
+		t.Errorf("version = %q, want v1.0.1 - the qualified replace should win", got.Version)
+	}
+	for _, p := range tgt.Packages {
+		if p.Name == "github.com/other/any" {
+			t.Errorf("the unqualified replace fired even though a qualified one matched: %+v", p)
+		}
+	}
+}
+
+// Quoting is not require-only: both sides of a replace directive may be
+// quoted, and both must be unquoted the same way.
+func TestParse_ReplaceUnquotesBothSides(t *testing.T) {
+	dir := write(t, "module example.test/app\n"+
+		"\nrequire \"github.com/quoted/old\" v1.0.0\n"+
+		"\nreplace \"github.com/quoted/old\" => \"github.com/quoted/new\" v2.0.0\n")
+
+	tgt, _, err := Parse(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := find(t, tgt, "github.com/quoted/new"); got.Version != "v2.0.0" {
+		t.Errorf("version = %q, want v2.0.0", got.Version)
+	}
+	for _, p := range tgt.Packages {
+		if strings.Contains(p.Name, `"`) {
+			t.Errorf("a stray quote leaked into a package name: %+v", p)
+		}
+	}
+}
+
+// bufio.Scanner's default token buffer is 64KB; a single go.mod line longer
+// than that makes Scan() stop with a wrapped bufio.ErrTooLong instead of
+// reaching EOF cleanly. That error path is otherwise never exercised by any
+// fixture in this file, so a mutation silencing it (`&& false`) would
+// survive undetected.
+func TestParse_ScannerErrorPropagates(t *testing.T) {
+	dir := write(t, "module example.test/app\n"+
+		"\nrequire github.com/good/dep v1.0.0\n"+
+		"\n// "+strings.Repeat("x", 70000)+"\n")
+
+	_, _, err := Parse(dir)
+	if err == nil {
+		t.Fatal("a go.mod with a line over the scanner's token limit scanned clean")
+	}
+}
+
+// This parser does not deduplicate a module required twice - by two
+// separate require lines, possibly at different versions, most plausibly
+// from a hand-edited or merge-conflicted go.mod. Deciding which version
+// "wins" would require guessing on the user's behalf and silently dropping
+// evidence of the other; reporting both, each counted, is what the
+// never-drop-silently rule this cataloger otherwise follows calls for. This
+// pins that choice so a future change to it is deliberate, not incidental.
+func TestParse_DuplicateRequireReportsBothEntries(t *testing.T) {
+	dir := write(t, "module example.test/app\n"+
+		"\nrequire github.com/dup/mod v1.0.0\n"+
+		"\nrequire github.com/dup/mod v2.0.0\n")
+
+	tgt, stats, err := Parse(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tgt.Packages) != 2 {
+		t.Fatalf("got %+v, want both duplicate requires reported", tgt.Packages)
+	}
+	var versions []string
+	for _, p := range tgt.Packages {
+		if p.Name != "github.com/dup/mod" {
+			t.Errorf("unexpected package: %+v", p)
+		}
+		versions = append(versions, p.Version)
+	}
+	if !((versions[0] == "v1.0.0" && versions[1] == "v2.0.0") ||
+		(versions[0] == "v2.0.0" && versions[1] == "v1.0.0")) {
+		t.Errorf("versions = %v, want v1.0.0 and v2.0.0", versions)
+	}
+	if stats.Components != 2 || stats.Cataloged != 2 {
+		t.Errorf("stats = %+v, want 2 cataloged of 2 components", stats)
 	}
 }

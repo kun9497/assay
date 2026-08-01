@@ -20,7 +20,9 @@ import (
 )
 
 // requirement is one `require` entry: a module path and the version go.mod
-// asked for.
+// asked for. Either field may be empty - path when a quoted path could not be
+// resolved, version when the line was missing it - and an empty version is
+// what routes the entry to a counted skip rather than a fabricated package.
 type requirement struct {
 	path    string
 	version string
@@ -66,15 +68,23 @@ func Parse(dir string) (pkgmeta.Target, cyclonedx.Stats, error) {
 		name, version := r.path, r.version
 		if rep, ok := lookupReplace(r, replaceAny, replaceExact); ok {
 			if rep.filesystem {
-				// Not a version any comparer can place inside a range.
-				// Counting it as cataloged would claim the module was
-				// evaluated when it was not; dropping it silently would
-				// remove it from the inventory without removing it from the
-				// count of what was seen.
-				stats.SkippedNoVersion++
-				continue
+				name, version = "", ""
+			} else {
+				name, version = rep.path, rep.version
 			}
-			name, version = rep.path, rep.version
+		}
+
+		if version == "" {
+			// Not a version any comparer can place inside a range - a
+			// filesystem replace's right-hand side, a require line missing
+			// its version field, or a module path this scan could not
+			// resolve (a quoted path split apart by an internal space, most
+			// likely). Counting it as cataloged would claim it was
+			// evaluated when it was not; dropping it silently would remove
+			// it from the inventory without removing it from the count of
+			// what was seen.
+			stats.SkippedNoVersion++
+			continue
 		}
 
 		stats.Cataloged++
@@ -103,10 +113,28 @@ func lookupReplace(r requirement, replaceAny, replaceExact map[string]replacemen
 	return rep, ok
 }
 
+// isBlockDirective reports whether keyword is one of the four directives
+// that accept a `keyword ( ... )` block form.
+func isBlockDirective(keyword string) bool {
+	switch keyword {
+	case "require", "replace", "exclude", "retract":
+		return true
+	default:
+		return false
+	}
+}
+
 // directives scans go.mod line by line and collects every require and
 // replace directive. go.mod is line-oriented: require, replace, exclude and
 // retract each have a single-line form and a `keyword ( ... )` block form, so
 // blockKind tracks which directive - if any - the current line is inside.
+//
+// A malformed replace directive, an unterminated block, or a block opened
+// while another is already open are all reported as an error rather than
+// guessed at: each would otherwise either fabricate a package (a directive
+// keyword misread as a module path) or silently redirect nothing while the
+// replaced-away module keeps reporting as itself - a false positive on code
+// that is not there, paired with a silent false negative on the code that is.
 func directives(data []byte) (requires []requirement, replaceAny, replaceExact map[string]replacement, err error) {
 	replaceAny = map[string]replacement{}
 	replaceExact = map[string]replacement{}
@@ -124,7 +152,18 @@ func directives(data []byte) (requires []requirement, replaceAny, replaceExact m
 				blockKind = ""
 				continue
 			}
-			apply(blockKind, line, &requires, replaceAny, replaceExact)
+			// Blocks do not nest in go.mod. A line that itself looks like it
+			// is opening another directive block would otherwise be parsed
+			// as an ordinary body line - fabricating a package named after
+			// the keyword (e.g. "exclude"@"(") - and then close the OUTER
+			// block early on the next ")". Neither degradation is safe, so
+			// this is reported rather than guessed at.
+			if k, r := splitKeyword(line); isBlockDirective(k) && strings.TrimSpace(r) == "(" {
+				return nil, nil, nil, fmt.Errorf("go.mod: %q opens a block while a %s block is still open", line, blockKind)
+			}
+			if aerr := apply(blockKind, line, &requires, replaceAny, replaceExact); aerr != nil {
+				return nil, nil, nil, aerr
+			}
 			continue
 		}
 
@@ -136,7 +175,9 @@ func directives(data []byte) (requires []requirement, replaceAny, replaceExact m
 				blockKind = keyword
 				continue
 			}
-			apply(keyword, rest, &requires, replaceAny, replaceExact)
+			if aerr := apply(keyword, rest, &requires, replaceAny, replaceExact); aerr != nil {
+				return nil, nil, nil, aerr
+			}
 		default:
 			// module, go, toolchain, and anything else this parser does not
 			// recognize (godebug, tool, ...) name no package. In particular
@@ -149,25 +190,51 @@ func directives(data []byte) (requires []requirement, replaceAny, replaceExact m
 	if serr := scanner.Err(); serr != nil {
 		return nil, nil, nil, serr
 	}
+	if blockKind != "" {
+		// EOF with a block still open - a truncated or conflict-mangled
+		// go.mod. Left unchecked, every directive that follows (a module
+		// line, `go`, `toolchain`, another require) would be swallowed as a
+		// body line of the still-open block and parsed as a `path version`
+		// pair - reproducing the D24 mistake (`go` reported as a package)
+		// from a broken file rather than a code bug.
+		return nil, nil, nil, fmt.Errorf("go.mod: unterminated %s ( ... ) block", blockKind)
+	}
 	return requires, replaceAny, replaceExact, nil
 }
 
 // apply processes one directive body: either the remainder of a single-line
 // directive, or one line inside a `keyword ( ... )` block. A block line
 // carries no keyword of its own, so both forms share this parsing.
-func apply(keyword, body string, requires *[]requirement, replaceAny, replaceExact map[string]replacement) {
+func apply(keyword, body string, requires *[]requirement, replaceAny, replaceExact map[string]replacement) error {
 	switch keyword {
 	case "require":
 		fields := strings.Fields(body)
-		if len(fields) < 2 {
-			return
+		var path, version string
+		if len(fields) >= 1 {
+			if p, ok := parseModulePath(fields[0]); ok {
+				path = p
+				if len(fields) >= 2 {
+					version = fields[1]
+				}
+			}
+			// If the path itself could not be resolved - most likely a
+			// quoted path split apart by an internal space this
+			// whitespace-based scan cannot see across - version is left
+			// empty too, so the entry is skipped uniformly by Parse rather
+			// than cataloged under a name with a stray leading quote.
 		}
-		*requires = append(*requires, requirement{path: unquote(fields[0]), version: fields[1]})
+		*requires = append(*requires, requirement{path: path, version: version})
 
 	case "replace":
 		oldPath, oldVersion, rep, ok := parseReplace(body)
 		if !ok {
-			return
+			// A replace directive whose shape cannot be recognized (no
+			// "=>", or a right-hand side that is neither one field nor two)
+			// is not a case this scan can degrade safely from: the require
+			// entry it was meant to redirect would otherwise keep reporting
+			// as itself, unreplaced - a false positive on code that is not
+			// there, paired with a silent miss of the code that is.
+			return fmt.Errorf("go.mod: malformed replace directive: %q", body)
 		}
 		if oldVersion == "" {
 			replaceAny[oldPath] = rep
@@ -181,6 +248,7 @@ func apply(keyword, body string, requires *[]requirement, replaceAny, replaceExa
 		// module author's advisory against its own past release. Nothing to
 		// report from either.
 	}
+	return nil
 }
 
 // parseReplace splits a replace directive body on "=>". The right-hand
@@ -197,7 +265,10 @@ func parseReplace(body string) (oldPath, oldVersion string, rep replacement, ok 
 	if len(left) == 0 {
 		return "", "", replacement{}, false
 	}
-	oldPath = unquote(left[0])
+	oldPath, pathOK := parseModulePath(left[0])
+	if !pathOK {
+		return "", "", replacement{}, false
+	}
 	if len(left) >= 2 {
 		oldVersion = left[1]
 	}
@@ -207,20 +278,30 @@ func parseReplace(body string) (oldPath, oldVersion string, rep replacement, ok 
 	case 1:
 		rep = replacement{filesystem: true}
 	case 2:
-		rep = replacement{path: unquote(right[0]), version: right[1]}
+		newPath, newPathOK := parseModulePath(right[0])
+		if !newPathOK {
+			return "", "", replacement{}, false
+		}
+		rep = replacement{path: newPath, version: right[1]}
 	default:
 		return "", "", replacement{}, false
 	}
 	return oldPath, oldVersion, rep, true
 }
 
-// splitKeyword returns the first whitespace-separated token of line and
-// everything after it, unsplit. line has already had comments stripped and
-// been trimmed, so the first token is the directive keyword.
+// splitKeyword returns the first token of line and everything after it,
+// unsplit. line has already had comments stripped and been trimmed, so the
+// first token is the directive keyword. A token ends at whitespace OR at an
+// unspaced "(" - `require(` opens a block exactly as `require (` does, and
+// splitting on whitespace alone would read "require(" as one unrecognized
+// keyword and silently ignore the entire block.
 func splitKeyword(line string) (keyword, rest string) {
-	i := strings.IndexAny(line, " \t")
+	i := strings.IndexAny(line, " \t(")
 	if i < 0 {
 		return line, ""
+	}
+	if line[i] == '(' {
+		return line[:i], line[i:]
 	}
 	return line[:i], line[i+1:]
 }
@@ -260,15 +341,27 @@ func stripComment(line string) string {
 	return out.String()
 }
 
-// unquote strips go.mod's quoted-string form for a module path, e.g.
-// `"github.com/a/b"`. Most paths are bare; strconv.Unquote handles the rare
-// quoted ones the same way the go.mod grammar does. A field that is not a
-// valid quoted string (or is not quoted at all) is returned unchanged.
-func unquote(field string) string {
-	if len(field) >= 2 && field[0] == '"' && field[len(field)-1] == '"' {
-		if u, err := strconv.Unquote(field); err == nil {
-			return u
-		}
+// parseModulePath resolves one module-path field, honoring go.mod's quoted
+// string form (e.g. `"github.com/a/b"`). A field that starts with `"` but
+// does not end with one in the SAME field is not a bare token that happens to
+// start with a quote - it is a quoted string this whitespace-based scan
+// cannot see across, most likely one containing an internal space - and
+// reporting it as a path with a stray leading quote would catalog unusable
+// data as though it were real. ok is false in that case, and in the case of
+// an invalid escape inside an otherwise well-formed quoted field.
+func parseModulePath(field string) (path string, ok bool) {
+	if field == "" {
+		return "", false
 	}
-	return field
+	if field[0] != '"' {
+		return field, true
+	}
+	if len(field) < 2 || field[len(field)-1] != '"' {
+		return "", false
+	}
+	u, err := strconv.Unquote(field)
+	if err != nil {
+		return "", false
+	}
+	return u, true
 }
