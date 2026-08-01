@@ -12,6 +12,26 @@ import (
 // fakeStore keeps the matcher testable without a database.
 type fakeStore struct {
 	byKey map[string][]advisory.Advisory
+	// covers models what the real store records (D20). When unset it is
+	// derived from byKey, so a test that does not care about coverage gets the
+	// honest answer for the data it supplied rather than an empty set that
+	// would skip everything.
+	covers []string
+}
+
+func (f fakeStore) Covers() (map[string]bool, error) {
+	out := map[string]bool{}
+	if f.covers != nil {
+		for _, e := range f.covers {
+			out[e] = true
+		}
+		return out, nil
+	}
+	for k := range f.byKey {
+		eco, _, _ := strings.Cut(k, "\x00")
+		out[eco] = true
+	}
+	return out, nil
 }
 
 func (f fakeStore) Lookup(ecosystem, name string) ([]advisory.Advisory, error) {
@@ -550,5 +570,109 @@ func TestIdentifiers_ExcludesUpstream(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Errorf("identifiers() dropped %v", want)
+	}
+}
+
+// D20: an ecosystem the database never ingested must be SKIPPED, not evaluated.
+//
+// This is the whole point. A lookup in an uningested ecosystem returns nothing,
+// exactly like a lookup for a package with no advisories, and without the
+// coverage check the matcher calls that clean. Measured before the fix: the
+// same busybox at the same version, changing only the distro release from
+// 3.19.9 to 3.25.0, went from one finding to "No known vulnerabilities found"
+// at exit 0. The next Alpine minor release triggers it the day it ships.
+func TestMatch_UncoveredEcosystemIsSkippedNotClean(t *testing.T) {
+	adv := advWithRange("ALPINE-CVE-X", "Alpine:v3.19", "busybox",
+		"0", "1.36.1-r21", advisory.RangeEcosystem)
+	s := fakeStore{
+		byKey:  map[string][]advisory.Advisory{"Alpine:v3.19\x00busybox": {adv}},
+		covers: []string{"Alpine:v3.19"},
+	}
+
+	// Covered: the finding appears.
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("busybox", "1.36.1-r20", "Alpine:v3.19")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("covered release: Findings = %d, want 1", len(res.Findings))
+	}
+
+	// Uncovered: the same package, the same version, a release this database
+	// has never held.
+	res, err = New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("busybox", "1.36.1-r20", "Alpine:v3.25")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 0 {
+		t.Errorf("uncovered release produced findings: %+v", res.Findings)
+	}
+	if len(res.Skipped) != 1 {
+		t.Fatalf("uncovered release: Skipped = %d, want 1 — an ecosystem the "+
+			"database never held is not an ecosystem with no vulnerabilities",
+			len(res.Skipped))
+	}
+	// The reason has to name the gap, because the fix is `assay db update` and
+	// nothing else in the output says so.
+	if r := res.Skipped[0].Reason; !strings.Contains(r, "Alpine:v3.25") {
+		t.Errorf("Skipped.Reason = %q, should name the ecosystem that is missing", r)
+	}
+	// A whole-package skip, so the report counts it as not evaluated and the
+	// scan cannot read as clean (D11).
+	if res.Skipped[0].AdvisoryID != "" {
+		t.Errorf("Skipped.AdvisoryID = %q, want empty: the package was never "+
+			"checked at all, not checked against one bad advisory",
+			res.Skipped[0].AdvisoryID)
+	}
+}
+
+// The coverage check must not fire for an ecosystem that IS held but happens to
+// have no advisory for this package. That is a genuine clean result.
+func TestMatch_CoveredEcosystemWithNoAdvisoryIsClean(t *testing.T) {
+	s := fakeStore{
+		byKey:  map[string][]advisory.Advisory{},
+		covers: []string{"Alpine:v3.19"},
+	}
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("busybox", "1.36.1-r20", "Alpine:v3.19")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Skipped) != 0 {
+		t.Errorf("Skipped = %+v, want none: the ecosystem was ingested and this "+
+			"package simply has no advisories", res.Skipped)
+	}
+}
+
+// A database that declares no coverage covers nothing, and every package must
+// be skipped.
+//
+// This exists because the natural back-compat edit — `if len(covered) > 0 &&
+// !covered[p.Ecosystem]`, "be lenient when we have no record" — restores the
+// original defect wholesale and, without this test, leaves the suite green.
+// An empty set is not missing information; it is the answer.
+func TestMatch_DatabaseDeclaringNoCoverageSkipsEverything(t *testing.T) {
+	adv := advWithRange("GHSA-x", "Go", "github.com/x/y", "0", "2.0.0", advisory.RangeSemver)
+	s := fakeStore{
+		byKey:  map[string][]advisory.Advisory{"Go\x00github.com/x/y": {adv}},
+		covers: []string{}, // declared, and empty
+	}
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("github.com/x/y", "v1.0.0", "Go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 0 {
+		t.Errorf("Findings = %+v; a database covering nothing cannot produce one", res.Findings)
+	}
+	if len(res.Skipped) != 1 {
+		t.Fatalf("Skipped = %d, want 1: an empty coverage set means nothing was "+
+			"ingested, not that coverage is unknown", len(res.Skipped))
 	}
 }

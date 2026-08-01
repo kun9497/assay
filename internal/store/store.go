@@ -27,7 +27,15 @@ import (
 // data it never ingested, and reports "no known vulnerabilities found" at exit
 // 0. That is the silent false negative, arriving through a stale cache rather
 // than a bug.
-const SchemaVersion = 2
+//
+// Bumped to 3 to add Meta.Ecosystems (D20), and to 4 immediately after: the
+// first version of that field was derived from what Put indexed, which
+// over-claims, so a v3 database built by that revision declares coverage of
+// ecosystems it never fetched. Reading such a database is exactly the failure
+// D20 closes, and nothing else would prompt a rebuild — the field is present
+// and well-formed, only wrong. A schema change is the only signal that reaches
+// a database already on disk.
+const SchemaVersion = 4
 
 var (
 	ErrNotFound       = errors.New("vulnerability database not found")
@@ -44,6 +52,10 @@ type Store interface {
 	// no separate method: OSV writes the source name into Affected[].Name, so
 	// the caller queries this with the source name as a second key.
 	Lookup(ecosystem, name string) ([]advisory.Advisory, error)
+	// Covers reports which ecosystem keys this database actually holds (D20).
+	// A caller that skips this cannot distinguish "no advisories for this
+	// package" from "this ecosystem was never ingested".
+	Covers() (map[string]bool, error)
 	Meta() (Meta, error)
 	Close() error
 }
@@ -60,6 +72,12 @@ type Meta struct {
 	Schema    int                   `json:"schema"`
 	BuiltAt   time.Time             `json:"built_at"` // when this database was assembled locally
 	Providers map[string]Provenance `json:"providers"`
+	// Ecosystems is the union of every provider's coverage, sorted (D20).
+	//
+	// It exists so a lookup that finds nothing can be told apart from a lookup
+	// in an ecosystem this database never held. Both return zero advisories,
+	// and without this the second reads as a clean scan.
+	Ecosystems []string `json:"ecosystems"`
 }
 
 type Provenance struct {
@@ -70,6 +88,20 @@ type Provenance struct {
 	// reports quarter-old data as fresh.
 	DataAsOf time.Time `json:"data_as_of"`
 	Records  int       `json:"records"`
+	// Ecosystems is what this provider actually covers (D20): the keys it
+	// fetched, expanded to the release-qualified ones a fetched family
+	// contains.
+	//
+	// The provider reports it because only the provider knows both halves.
+	// The store cannot: it sees every ecosystem named in every record, and
+	// records deliberately keep entries for ecosystems that were NOT fetched
+	// (slice 1's cross-ecosystem fix), so a store-side set silently claims
+	// coverage of Maven, NuGet and crates.io on a database that fetched none
+	// of them. Nor can a naive caller: db update fetches one archive named
+	// "Alpine" whose records carry Alpine:v3.2 through Alpine:v3.24, so the
+	// fetch list alone names a key nothing is looked up under and omits the 23
+	// that are.
+	Ecosystems []string `json:"ecosystems"`
 }
 
 // DefaultPath returns <user cache>/assay/db/v<schema>/vulnerability.db,

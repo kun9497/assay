@@ -3,8 +3,10 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 
 	bolt "go.etcd.io/bbolt"
 
@@ -100,6 +102,24 @@ func Create(path string) (*Bolt, error) {
 
 func (b *Bolt) Close() error { return b.db.Close() }
 
+// Covers reports the ecosystem keys this database holds (D20).
+//
+// It reads the persisted set rather than scanning the index, because "has at
+// least one record" is not the question: records keep affected entries for
+// ecosystems that were never fetched, so an index scan says yes for archives
+// nobody downloaded.
+func (b *Bolt) Covers() (map[string]bool, error) {
+	m, err := b.Meta()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(m.Ecosystems))
+	for _, e := range m.Ecosystems {
+		out[e] = true
+	}
+	return out, nil
+}
+
 // Put stores one advisory once in by-id and appends its ID to the lookup key of
 // every package it affects. Storing IDs rather than records is what keeps the
 // database from growing by the 1.44x measured duplication factor.
@@ -148,6 +168,16 @@ func appendID(bk *bolt.Bucket, key, id string) error {
 
 func (b *Bolt) SetMeta(m Meta) error {
 	m.Schema = SchemaVersion
+	// Coverage is the union of what each provider reported (D20). It is not
+	// derived from what Put indexed: records keep affected entries for
+	// ecosystems that were never fetched, so that set over-claims.
+	seen := map[string]struct{}{}
+	for _, prov := range m.Providers {
+		for _, e := range prov.Ecosystems {
+			seen[e] = struct{}{}
+		}
+	}
+	m.Ecosystems = slices.Sorted(maps.Keys(seen))
 	blob, err := json.Marshal(m)
 	if err != nil {
 		return err

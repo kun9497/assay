@@ -221,3 +221,69 @@ func TestFetch_AlpineZeroRecordsIsAnError(t *testing.T) {
 			"a database built from this silently has no Alpine coverage")
 	}
 }
+
+// D20's coverage set is built here, and this is the only test that holds it.
+//
+// The two obvious wrong versions both leave the rest of the suite green:
+// recording every affected ecosystem restores the over-claim this fix existed
+// to remove (a Go archive would declare Maven), and recording only the fetched
+// name makes an Alpine database declare a bare "Alpine" and omit all 23 release
+// keys, so every Alpine scan exits 2.
+func TestFetch_CoverageIsTheFamilyFetchedNotEveryEcosystemNamed(t *testing.T) {
+	goArchive := zipWith(t, map[string]string{
+		"GHSA-go.json": `{"id":"GHSA-go","affected":[
+			{"package":{"name":"github.com/x/y","ecosystem":"Go"},
+			 "ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"2.0.0"}]}]},
+			{"package":{"name":"org.x:y","ecosystem":"Maven"},
+			 "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"3.0"}]}]}]}`,
+	})
+	alpineArchive := zipWith(t, map[string]string{
+		"ALPINE-CVE-1.json": `{"id":"ALPINE-CVE-1","affected":[
+			{"package":{"name":"busybox","ecosystem":"Alpine:v3.19"},
+			 "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1.36.1-r21"}]}]},
+			{"package":{"name":"busybox","ecosystem":"Alpine:v3.24"},
+			 "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1.37.0-r1"}]}]},
+			{"package":{"name":"github.com/x/y","ecosystem":"Go"},
+			 "ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"2.0.0"}]}]}]}`,
+	})
+
+	tests := []struct {
+		name    string
+		fetch   string
+		archive []byte
+		want    []string
+	}{
+		{
+			// Maven is named by the record and is NOT fetched. Declaring it
+			// would certify a database holding stray Maven keys, and every
+			// Maven scan would report clean once a Maven comparer exists.
+			name:  "a foreign entry does not become coverage",
+			fetch: "Go", archive: goArchive, want: []string{"Go"},
+		},
+		{
+			// The Alpine archive is fetched under one name and covers many
+			// release keys. Recording only the fetched name would declare a key
+			// nothing is ever looked up under (D6) and omit the ones that are.
+			name:  "a family fetch covers the release keys it contains",
+			fetch: "Alpine", archive: alpineArchive,
+			want: []string{"Alpine:v3.19", "Alpine:v3.24"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Write(tt.archive)
+			}))
+			defer srv.Close()
+
+			prov, err := New([]string{tt.fetch}, srv.URL).Fetch(
+				context.Background(), func(advisory.Advisory) error { return nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(prov.Ecosystems, tt.want) {
+				t.Errorf("Provenance.Ecosystems = %v, want %v", prov.Ecosystems, tt.want)
+			}
+		})
+	}
+}

@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -299,5 +300,159 @@ func TestOpenSchemaMismatch(t *testing.T) {
 	}
 	if _, err := Open(path); !errors.Is(err, ErrSchemaMismatch) {
 		t.Errorf("Open(mismatched) err = %v, want ErrSchemaMismatch", err)
+	}
+}
+
+// D20: coverage is what the PROVIDERS reported, and specifically NOT every
+// ecosystem named in a stored record.
+//
+// The distinction is the whole finding. Records deliberately keep affected
+// entries for ecosystems that were never fetched (slice 1's cross-ecosystem
+// fix), so deriving coverage from what Put indexed over-claims: on a real
+// database built from Go, npm, PyPI and Alpine it certified Maven, NuGet,
+// crates.io and five others. The day a Maven comparer lands, that set would
+// vouch for a database holding 91 stray Maven keys and every Maven scan would
+// report clean.
+func TestMetaCoverageComesFromProvidersNotFromRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One advisory naming two ecosystems. Only Go was fetched.
+	if err := w.Put(advisory.Advisory{
+		ID: "GHSA-both", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{
+			{Ecosystem: "Go", Name: "github.com/x/y"},
+			{Ecosystem: "Maven", Name: "org.x:y"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(Meta{
+		BuiltAt: time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC),
+		Providers: map[string]Provenance{
+			// Deliberately unsorted, and long enough that insertion order
+			// cannot pass for sorted order by luck: against a 3-element map a
+			// slices.Collect-instead-of-Sorted mutation survived 29 runs in 40.
+			"osv": {Ecosystems: []string{
+				"npm", "Go", "Alpine:v3.20", "PyPI", "Alpine:v3.19",
+				"Alpine:v3.2", "Alpine:v3.9", "Alpine:v3.18",
+			}},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	m, err := db.Meta()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"Alpine:v3.18", "Alpine:v3.19", "Alpine:v3.2", "Alpine:v3.20",
+		"Alpine:v3.9", "Go", "PyPI", "npm",
+	}
+	if !slices.Equal(m.Ecosystems, want) {
+		t.Errorf("Meta.Ecosystems = %v, want %v (the providers' union, sorted)",
+			m.Ecosystems, want)
+	}
+	covered, err := db.Covers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if covered["Maven"] {
+		t.Error("Maven reported as covered. A record mentioning it was stored, " +
+			"but no Maven archive was ever fetched, so a Maven lookup finding " +
+			"nothing means nothing.")
+	}
+}
+
+// Covers reports whether a lookup under this key can mean anything. Without it
+// the matcher cannot tell "ingested, no advisories" from "never ingested", and
+// the second reads as a clean scan.
+func TestCovers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Put(advisory.Advisory{
+		ID: "A-1", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Alpine:v3.19", Name: "busybox"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(Meta{
+		BuiltAt:   time.Now(),
+		Providers: map[string]Provenance{"osv": {Ecosystems: []string{"Alpine:v3.19"}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	covered, err := db.Covers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !covered["Alpine:v3.19"] {
+		t.Error("Alpine:v3.19 was indexed but is not reported as covered")
+	}
+	// The release that ships next year, which this database has never seen.
+	if covered["Alpine:v3.25"] {
+		t.Error("Alpine:v3.25 reported as covered; nothing was ever stored under it")
+	}
+	if covered["PyPI"] {
+		t.Error("PyPI reported as covered; this database holds only Alpine")
+	}
+}
+
+// SetMeta must not take the caller's word for coverage. The field is derived
+// from Providers, and a caller that fills it in directly is ignored — that is
+// what keeps a wrong caller from re-opening the hole D20 closed.
+func TestSetMetaIgnoresACallerSuppliedEcosystems(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(Meta{
+		BuiltAt:    time.Now(),
+		Ecosystems: []string{"Maven", "NuGet", "everything-really"},
+		Providers:  map[string]Provenance{"osv": {Ecosystems: []string{"Go"}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	m, err := db.Meta()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(m.Ecosystems, []string{"Go"}) {
+		t.Errorf("Meta.Ecosystems = %v, want [Go]: the caller's list must be "+
+			"ignored in favour of what the providers reported", m.Ecosystems)
 	}
 }

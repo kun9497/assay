@@ -6,8 +6,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -56,10 +58,11 @@ func (p *Provider) Name() string { return SourceName }
 
 func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error) (store.Provenance, error) {
 	prov := store.Provenance{Source: p.baseURL}
+	allCovered := map[string]struct{}{}
 	var known int
 	for _, eco := range p.ecosystems {
 		u := fmt.Sprintf("%s/%s/all.zip", p.baseURL, url.PathEscape(eco))
-		n, asOf, err := p.fetchOne(ctx, u, eco, emit)
+		n, asOf, covered, err := p.fetchOne(ctx, u, eco, emit)
 		if err != nil {
 			return store.Provenance{}, fmt.Errorf("fetch %s: %w", eco, err)
 		}
@@ -75,6 +78,9 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 			return store.Provenance{}, fmt.Errorf("fetch %s: archive yielded no Alpine:* records", eco)
 		}
 		prov.Records += n
+		for e := range covered {
+			allCovered[e] = struct{}{}
+		}
 		if asOf.IsZero() {
 			continue
 		}
@@ -93,21 +99,26 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 	if known != len(p.ecosystems) {
 		prov.DataAsOf = time.Time{}
 	}
+	prov.Ecosystems = slices.Sorted(maps.Keys(allCovered))
 	return prov, nil
 }
 
-func (p *Provider) fetchOne(ctx context.Context, u, ecosystem string, emit func(advisory.Advisory) error) (int, time.Time, error) {
+// fetchOne returns the records kept, the upstream timestamp, and the ecosystem
+// keys this archive actually covered. The third is not the same as `ecosystem`:
+// the Alpine archive is fetched as "Alpine" and covers Alpine:v3.2 through
+// Alpine:v3.24 (D20).
+func (p *Provider) fetchOne(ctx context.Context, u, ecosystem string, emit func(advisory.Advisory) error) (int, time.Time, map[string]struct{}, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return 0, time.Time{}, err
+		return 0, time.Time{}, nil, err
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return 0, time.Time{}, err
+		return 0, time.Time{}, nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return 0, time.Time{}, fmt.Errorf("GET %s: %s", u, resp.Status)
+		return 0, time.Time{}, nil, fmt.Errorf("GET %s: %s", u, resp.Status)
 	}
 
 	// DataAsOf comes from the server, not from the local clock (D12): a mirror
@@ -123,38 +134,48 @@ func (p *Provider) fetchOne(ctx context.Context, u, ecosystem string, emit func(
 	// still streamed to emit one at a time.
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, time.Time{}, err
+		return 0, time.Time{}, nil, err
 	}
 	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
 	if err != nil {
-		return 0, time.Time{}, fmt.Errorf("open zip: %w", err)
+		return 0, time.Time{}, nil, fmt.Errorf("open zip: %w", err)
 	}
 
 	var kept int
+	covered := map[string]struct{}{}
 	for _, f := range zr.File {
 		if !strings.HasSuffix(f.Name, ".json") {
 			continue
 		}
 		rc, err := f.Open()
 		if err != nil {
-			return kept, asOf, fmt.Errorf("open %s: %w", f.Name, err)
+			return kept, asOf, covered, fmt.Errorf("open %s: %w", f.Name, err)
 		}
 		data, err := io.ReadAll(rc)
 		rc.Close()
 		if err != nil {
-			return kept, asOf, fmt.Errorf("read %s: %w", f.Name, err)
+			return kept, asOf, covered, fmt.Errorf("read %s: %w", f.Name, err)
 		}
 		a, ok, err := Convert(data, ecosystem)
 		if err != nil {
-			return kept, asOf, fmt.Errorf("convert %s: %w", f.Name, err)
+			return kept, asOf, covered, fmt.Errorf("convert %s: %w", f.Name, err)
 		}
 		if !ok {
 			continue
 		}
 		if err := emit(a); err != nil {
-			return kept, asOf, err
+			return kept, asOf, covered, err
+		}
+		// Coverage is the keys this archive is authoritative for, which is NOT
+		// every ecosystem the record names: a Go advisory that also carries npm
+		// entries does not make the npm archive fetched. The same predicate
+		// Convert filters on decides it (D20).
+		for _, aff := range a.Affected {
+			if familyMatches(aff.Ecosystem, ecosystem) {
+				covered[aff.Ecosystem] = struct{}{}
+			}
 		}
 		kept++
 	}
-	return kept, asOf, nil
+	return kept, asOf, covered, nil
 }

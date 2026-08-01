@@ -16,6 +16,10 @@ import (
 type fakeProvider struct {
 	name string
 	advs []advisory.Advisory
+	// covers is what this provider reports having fetched (D20). A provider
+	// reporting none builds a database that refuses every scan, so a test
+	// leaving it empty is testing that rather than what it means to.
+	covers []string
 }
 
 func (f fakeProvider) Name() string { return f.name }
@@ -27,15 +31,16 @@ func (f fakeProvider) Fetch(_ context.Context, emit func(advisory.Advisory) erro
 		}
 	}
 	return store.Provenance{
-		Source:   "https://example.test/all.zip",
-		DataAsOf: time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC),
-		Records:  len(f.advs),
+		Ecosystems: f.covers,
+		Source:     "https://example.test/all.zip",
+		DataAsOf:   time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC),
+		Records:    len(f.advs),
 	}, nil
 }
 
 func TestUpdateThenStatus(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vulnerability.db")
-	p := fakeProvider{name: "osv", advs: []advisory.Advisory{{
+	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
 		ID: "GHSA-x", Source: "osv", Kind: advisory.KindVulnerability,
 		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
 	}}}
@@ -51,6 +56,12 @@ func TestUpdateThenStatus(t *testing.T) {
 		t.Fatalf("Status = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	s := out.String()
+	// Coverage decides which packages can be evaluated at all (D20), and this
+	// is the only place it is visible without running a scan and reading why
+	// it refused.
+	if !strings.Contains(s, "covers:") || !strings.Contains(s, "Go") {
+		t.Errorf("status does not report what the database covers:\n%s", s)
+	}
 	// Status reports upstream data time, which is the number that tells you
 	// whether the data is stale (D12).
 	if !strings.Contains(s, "2026-07-29") {
@@ -108,5 +119,65 @@ func TestStatusWithoutDatabase(t *testing.T) {
 	}
 	if out.Len() != 0 {
 		t.Errorf("error path polluted stdout: %q", out.String())
+	}
+}
+
+// `covers:` is the only place coverage is visible without running a scan and
+// reading why it refused, so its shape is part of the contract.
+func TestCoverageSummary(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want string
+	}{
+		{
+			// The whole point of collapsing: 23 releases must not bury the
+			// three language ecosystems an operator also needs to see.
+			name: "a family collapses to a range",
+			in: []string{
+				"Alpine:v3.19", "Alpine:v3.2", "Alpine:v3.24", "Alpine:v3.9",
+				"Go", "PyPI", "npm",
+			},
+			want: "Go, PyPI, npm, Alpine:v3.2..v3.24 (4 releases)",
+		},
+		{
+			// Numeric, not lexical. Sorted as whole strings this printed
+			// "v3.10..v3.9" — a range that reads as covering nothing and
+			// answers "is 3.25 inside?" backwards.
+			name: "releases order numerically",
+			in:   []string{"Alpine:v3.9", "Alpine:v3.10", "Alpine:v3.2"},
+			want: "Alpine:v3.2..v3.10 (3 releases)",
+		},
+		{
+			name: "a single release is not a range",
+			in:   []string{"Alpine:v3.19"},
+			want: "Alpine:v3.19",
+		},
+		{
+			// A database covering nothing is the state D20 exists to make
+			// visible, so it must not render as an empty string.
+			name: "nothing covered says so",
+			in:   nil,
+			want: "nothing - every scan will report its packages as unevaluated",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := coverageSummary(tt.in); got != tt.want {
+				t.Errorf("coverageSummary(%v) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// An unparseable release must not panic or vanish: an unexpected key shape
+// should be visible in `db status`, not fatal to it.
+func TestCoverageSummary_UnparseableReleaseSortsLast(t *testing.T) {
+	got := coverageSummary([]string{"Alpine:v3.19", "Alpine:edge", "Alpine:v3.2"})
+	if !strings.Contains(got, "3 releases") {
+		t.Errorf("coverageSummary = %q; the unparseable release was dropped", got)
+	}
+	if !strings.Contains(got, "v3.2..edge") {
+		t.Errorf("coverageSummary = %q; want the unparseable one sorted last", got)
 	}
 }
