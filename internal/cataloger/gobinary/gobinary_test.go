@@ -10,7 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"github.com/kun9497/assay/internal/pkgmeta"
+	"github.com/kun9497/assay/internal/version"
 )
 
 // find returns the package with the given name, or fails. Never assert with
@@ -213,6 +215,108 @@ func buildFixtureNoVCS(t *testing.T, gomod, mainGo string) string {
 	return runGoBuild(t, dir, ".", "-buildvcs=false")
 }
 
+// The toolchain that built the binary is a package named exactly "stdlib",
+// because that is the name the 159 live advisories are filed under. Any other
+// spelling looks up an empty bucket and reports clean (D24).
+//
+// This uses the no-VCS fixture on purpose: stdlib does not depend on the main
+// module being stamped, so the test that covers it should not need git.
+func TestParse_AddsTheToolchainAsStdlib(t *testing.T) {
+	bin := buildFixtureNoVCS(t, "module example.test/app\n\ngo 1.26\n",
+		"package main\n\nfunc main() {}\n")
+
+	tgt, _, err := Parse(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	std := find(t, tgt, "stdlib")
+	if std.Ecosystem != "Go" || std.Type != "golang" {
+		t.Errorf("stdlib = %q/%q, want Go/golang", std.Ecosystem, std.Type)
+	}
+	if std.Source != nil {
+		t.Errorf("stdlib Source = %+v, want nil (D8: Go has no source package)", std.Source)
+	}
+	if len(std.Locations) != 1 || std.Locations[0].Path != bin {
+		t.Errorf("stdlib locations = %+v, want one naming %s", std.Locations, bin)
+	}
+	// The version must be the NORMALIZED form, not what build info reported:
+	// the comparer rejects the go-prefixed shape outright, so an unnormalized
+	// value would make every stdlib advisory unreachable.
+	if strings.HasPrefix(std.Version, "go") {
+		t.Errorf("stdlib version = %q, still carries the go prefix the comparer rejects", std.Version)
+	}
+	if want := "pkg:golang/stdlib@" + std.Version; std.PURL != want {
+		t.Errorf("stdlib purl = %q, want %q", std.PURL, want)
+	}
+	// And it must actually compare. Asserting the string shape alone would
+	// pass for a form that parses but orders wrongly.
+	c, ok := version.For("Go")
+	if !ok {
+		t.Fatal("no Go comparer")
+	}
+	if _, err := c.Compare(std.Version, "1.16.1"); err != nil {
+		t.Errorf("the reported stdlib version %q does not compare: %v", std.Version, err)
+	}
+}
+
+// A toolchain version that cannot be normalized is a COUNTED skip, never a
+// missing package. Dropping it silently would remove stdlib from the
+// inventory without removing it from what the scan claims to have evaluated,
+// and an unevaluated stdlib has to stay visible in the summary.
+//
+// Driven through addStdlib rather than a built binary, because no toolchain
+// reports a development version on demand.
+func TestAddStdlib_AnUnparseableToolchainIsACountedSkip(t *testing.T) {
+	var pkgs []pkgmeta.Package
+	var stats cyclonedx.Stats
+	addStdlib(&pkgs, &stats, "devel go1.27-abc123 2026-01-01", "/tmp/app")
+
+	for _, p := range pkgs {
+		if p.Name == "stdlib" {
+			t.Fatalf("an unparseable toolchain was reported as a package: %+v", p)
+		}
+	}
+	if stats.Components != 1 {
+		t.Errorf("Components = %d, want 1 - the toolchain was seen", stats.Components)
+	}
+	if stats.SkippedNoVersion != 1 {
+		t.Errorf("SkippedNoVersion = %d, want 1 - the skip must be counted", stats.SkippedNoVersion)
+	}
+	if stats.Cataloged != 0 {
+		t.Errorf("Cataloged = %d, want 0", stats.Cataloged)
+	}
+}
+
+// The counts have to add up, because the report subtracts them to decide
+// whether a scan was complete. addStdlib touches two of them and a wrong
+// increment there turns a partial scan into a clean-looking one.
+func TestAddStdlib_CountsAddUp(t *testing.T) {
+	for _, tt := range []struct {
+		goVersion string
+		cataloged int
+		skipped   int
+	}{
+		{"go1.26.4", 1, 0},
+		{"go1.20", 1, 0},
+		{"devel go1.27-abc 2026-01-01", 0, 1},
+		{"", 0, 1},
+	} {
+		var pkgs []pkgmeta.Package
+		var stats cyclonedx.Stats
+		addStdlib(&pkgs, &stats, tt.goVersion, "/tmp/app")
+		if stats.Components != stats.Cataloged+stats.SkippedNoVersion {
+			t.Errorf("%q: %+v does not add up", tt.goVersion, stats)
+		}
+		if stats.Cataloged != tt.cataloged || stats.SkippedNoVersion != tt.skipped {
+			t.Errorf("%q: cataloged=%d skipped=%d, want %d/%d",
+				tt.goVersion, stats.Cataloged, stats.SkippedNoVersion, tt.cataloged, tt.skipped)
+		}
+		if len(pkgs) != tt.cataloged {
+			t.Errorf("%q: %d packages, want %d", tt.goVersion, len(pkgs), tt.cataloged)
+		}
+	}
+}
+
 // A main module built with no VCS stamp reports "(devel)", which is not a
 // version any comparer can place in a range. Cataloging it as a package would
 // claim it was evaluated when it was not; it must be a counted skip instead.
@@ -232,8 +336,12 @@ func TestParse_SkipsUnstampedMainModule(t *testing.T) {
 	if stats.SkippedNoVersion != 1 {
 		t.Errorf("SkippedNoVersion = %d, want 1", stats.SkippedNoVersion)
 	}
-	if stats.Components != 1 || stats.Cataloged != 0 {
-		t.Errorf("stats = %+v, want 1 component seen and 0 cataloged", stats)
+	// Two components: the main module, which is skipped, and stdlib, which is
+	// not. The counts are asserted rather than the packages alone because the
+	// report subtracts them to decide whether a scan was complete — a skip
+	// that is not counted turns a partial scan into a clean-looking one.
+	if stats.Components != 2 || stats.Cataloged != 1 {
+		t.Errorf("stats = %+v, want 2 components seen and 1 cataloged (stdlib)", stats)
 	}
 }
 

@@ -73,7 +73,43 @@ func Parse(path string) (pkgmeta.Target, cyclonedx.Stats, error) {
 		}
 		add(d.Path, d.Version)
 	}
-	// stdlib is added in Task 3, together with the version normalization it
-	// needs (D24).
+	addStdlib(&pkgs, &stats, bi.GoVersion, path)
 	return pkgmeta.Target{Packages: pkgs}, stats, nil
+}
+
+// stdlibName is the name the Go vulnerability database files standard-library
+// advisories under. The live database holds 159 of them. Any other spelling —
+// "go", "golang", "std" — looks up an empty bucket and reports clean, which is
+// a silent false negative on data already in hand (D24).
+const stdlibName = "stdlib"
+
+// addStdlib records the toolchain that built the binary as a package.
+//
+// A binary built by a vulnerable toolchain is vulnerable, and build info
+// carries the toolchain version, so declining to match it would leave 159
+// advisories unusable.
+//
+// It is a function rather than inline in Parse so the cannot-normalize path is
+// reachable from a test: no toolchain reports a development version on demand,
+// and a branch that can only be exercised by luck is a branch with no test.
+func addStdlib(pkgs *[]pkgmeta.Package, stats *cyclonedx.Stats, goVersion, path string) {
+	stats.Components++
+	v, ok := normalizeGoVersion(goVersion)
+	if !ok {
+		// A development toolchain names no released version. Counting the
+		// skip keeps an unevaluated stdlib visible in the summary; dropping
+		// it silently would remove it from the inventory without removing it
+		// from what the scan claims to have evaluated.
+		stats.SkippedNoVersion++
+		return
+	}
+	stats.Cataloged++
+	*pkgs = append(*pkgs, pkgmeta.Package{
+		Name:      stdlibName,
+		Version:   v,
+		Type:      "golang",
+		Ecosystem: "Go",
+		PURL:      "pkg:golang/" + stdlibName + "@" + v,
+		Locations: []pkgmeta.Location{{Path: path}},
+	})
 }
