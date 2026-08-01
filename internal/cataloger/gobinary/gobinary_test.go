@@ -3,6 +3,7 @@ package gobinary
 import (
 	"archive/zip"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"os/exec"
@@ -156,7 +157,54 @@ func runGoBuild(t *testing.T, dir, pkg, extraGoflags string, extraEnv ...string)
 // GOPROXY=off means an isolated empty cache could not fetch them either.
 func modCacheEnv(t *testing.T) string {
 	t.Helper()
-	return "GOMODCACHE=" + filepath.Join(t.TempDir(), "modcache")
+	return "GOMODCACHE=" + modCacheDir(t)
+}
+
+// modCacheDir returns a scratch directory safe to use as a GOMODCACHE.
+//
+// A module cache cannot be removed by an ordinary RemoveAll on Unix: the go
+// command writes entries read-only, 0444 files inside 0555 directories, and
+// unlinking a file needs write permission on its DIRECTORY. `t.TempDir()`'s
+// cleanup is a plain RemoveAll, so a temp dir holding a module cache fails to
+// clean up with "permission denied" and the test binary exits 1 - which is
+// what broke this branch's first CI run.
+//
+// It is invisible on Windows, where os.Remove clears the readonly attribute
+// and retries, and where the go command's chmods are largely no-ops: measured
+// here, all 7 entries in a redirected cache come back writable. So the whole
+// class of bug can only be caught by running on Linux, which is why CI is the
+// only place it showed up.
+//
+// The directory deliberately does NOT come from t.TempDir(). Widening the
+// permissions first and letting t.TempDir() remove it would work only if this
+// walk is exhaustive, and a walk that misses one entry fails the TEST rather
+// than leaking a directory - reporting the wrong thing as broken, in teardown,
+// where it is hardest to read. Owning the cleanup means the worst case is a
+// leaked scratch directory under the OS temp dir, which is what that directory
+// is for.
+func modCacheDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "assay-modcache")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		// WalkDir visits a directory before its children, so widening the
+		// directory is what makes descending into it possible at all.
+		_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() {
+				_ = os.Chmod(p, 0o700)
+			} else {
+				_ = os.Chmod(p, 0o600)
+			}
+			return nil
+		})
+		_ = os.RemoveAll(dir)
+	})
+	return dir
 }
 
 // buildFixture compiles a module with the given go.mod and main.go into
@@ -574,7 +622,7 @@ func TestParse_FollowsReplaceDirectives_DifferentModulePath(t *testing.T) {
 		"GOFLAGS=-mod=mod -buildvcs=false",
 		"GOPROXY="+fileProxyURL(proxyRoot)+",off",
 		"GOSUMDB=off",
-		"GOMODCACHE="+filepath.Join(t.TempDir(), "modcache"),
+		"GOMODCACHE="+modCacheDir(t),
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
