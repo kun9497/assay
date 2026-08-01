@@ -99,14 +99,59 @@ skopeo copy docker://alpine:3.19 oci:layout && assay scan oci-dir:layout
 assay scan sbom.cdx.json
 ```
 
-인자는 `docker-archive:` 또는 `oci-dir:` 접두사가 있으면 이미지로, 존재하는 파일을 가리키면
-SBOM으로, 그 외에는 레지스트리 참조로 읽습니다.
+### 타깃이 될 수 있는 것
+
+```bash
+assay scan alpine:3.19                # 레지스트리 참조
+assay scan docker-archive:app.tar     # `docker save` 타르볼
+assay scan oci-dir:./layout           # OCI 레이아웃 디렉터리
+assay scan sbom.cdx.json              # CycloneDX SBOM
+assay scan ./bin/assay                # Go 바이너리
+assay scan ./my-project               # go.mod이 있는 디렉터리
+```
+
+접두사 없는 경로는 **내용으로** 분류합니다. `debug/buildinfo`가 읽을 수 있으면 Go 바이너리,
+CycloneDX 문서처럼 열리면 SBOM, 디렉터리면 디렉터리입니다. 셋 중 무엇도 아닌 파일은 셋을 모두
+이름 붙인 오류이지 조용한 추측이 아닙니다. 애초에 경로가 아니면 레지스트리 참조입니다.
+
+`file:`, `dir:`, `sbom:` 접두사가 감지를 재정의합니다 — 기존 `docker-archive:`, `oci-dir:`와
+나란히 씁니다. 모든 스캔은 타깃을 무엇으로 분류했는지 stderr에 찍으므로, 잘못된 추측은 헷갈리는
+파싱 오류에서 유추하는 것이 아니라 출력에 그대로 보입니다.
+
+*Windows의 Git Bash에서는 접두사가 붙은 절대 경로가 변환되지 않습니다.* `dir:/c/project`*는*
+`\c\project`*로 전달됩니다. 상대 경로나 네이티브 경로를 쓰세요:* `dir:C:/project`.
+
+### 바이너리와 디렉터리
+
+**바이너리** 스캔은 `debug/buildinfo`를 읽습니다. 메인 모듈, 링커가 실제로 남긴 모든 의존성,
+그리고 툴체인 — 툴체인은 `stdlib`이라는 패키지로 매칭되며 Go 취약점 데이터베이스에 159건의
+권고가 있습니다.
+
+**디렉터리** 스캔은 표준 라이브러리로 `go.mod`를 파싱하고 `go`를 호출하지 않으므로, 오프라인에서
+툴체인 없이 동작합니다. 대신 모듈이 *요구하는* 것을 보고하며, 그것은 빌드가 링크하는 것과
+다릅니다. 이 저장소 기준:
+
+| | 패키지 수 |
+|---|---|
+| 빌드된 바이너리 | **12** — 메인 모듈, 링크된 의존성 10개, `stdlib` |
+| `go.mod` | **11** — 어떤 빌드도 링크하지 않는 `gotest.tools/v3` 포함 |
+| `go list -m all` | **52** — 모듈 그래프 전체 |
+
+이 차이는 스캔이 스스로 출력에 밝힙니다:
+
+```
+$ assay scan dir:.
+scanned dir:. as a directory
+go.mod names 11 module(s); this is what was requested, not what a build links
+  - scan the built binary for that
+```
+
+배포되는 것을 알고 싶으면 바이너리를 스캔하세요. 근거는 D23에 기록되어 있습니다.
 
 아직 구현되지 않은 것 — 동작해서가 아니라 목표를 분명히 하기 위해 적어둡니다:
 
 ```bash
-assay scan ./bin/assay                       # ③ 바이너리
-assay scan dir:./my-project                  # ③ 디렉터리
+assay scan dir:./node-project                # ③ npm과 PyPI 디렉터리
 ```
 
 ### 판정
@@ -138,6 +183,15 @@ assay scan alpine:3.19 --explain CVE-2025-46394
 | 미평가 finding | 순서 안에 접어 넣음 | 순서 밖의 `unknown` — `--fail-on-unknown`으로만 |
 | 부분 커버리지 | 게이트 없음 | `--fail-on-incomplete`, 종료 코드 2 |
 | explain | `grype explain` 서브커맨드 | `scan`의 `--explain <id>` 플래그 |
+| 심각도 출처 | CVE alias를 통해 NVD에서 보강 | 저장된 CVSS 벡터만 (D13) |
+
+알아둘 만한 것은 심각도 차이입니다. 이 저장소의 바이너리로 실측했습니다. assay와 grype는
+**같은 finding 세 건**을 찾습니다 — 패키지도, 권고 ID도, 수정 버전도 같습니다. 그런데 grype는
+그중 둘을 High와 Medium으로 매기고 assay는 `unknown`이라고 합니다. 어느 쪽도 틀리지 않았습니다.
+세 권고 모두 OSV 데이터에 심각도 항목이 **하나도 없고**, 그러면 `unknown`이 D13과 D17이 요구하는
+답입니다. grype는 각 권고의 CVE alias를 통해 NVD에 닿아 점수를 찾습니다. NVD 보강은 D17에
+가능성으로 적혀 있을 뿐 계획은 아닙니다.
+
 
 `--explain`은 권고 자체의 ID뿐 아니라 모든 alias로도 찾습니다. 받은 CVE 번호가 GHSA나 배포판
 접두사가 붙은 ID로 기록된 레코드에도 도달합니다.
@@ -291,8 +345,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 
 **③ 파일시스템과 바이너리 타깃** — ②에도 ④에도 의존하지 않으므로 어디든 끼워 넣을 수 있습니다.
 
-- [ ] `debug/buildinfo`를 통한 Go 바이너리 스캔
-- [ ] 디렉터리 스캔 (Go 모듈)
+- [x] `debug/buildinfo`를 통한 Go 바이너리 스캔, 툴체인을 `stdlib`으로 포함
+- [x] 디렉터리 스캔 (Go 모듈, `go.mod`만 — 툴체인도 네트워크도 쓰지 않음)
+- [ ] npm과 PyPI 디렉터리 스캔
 
 **④ 판정과 출력** — 종료 코드 1이 처음으로 도달 가능해지는 지점입니다. **완료.**
 

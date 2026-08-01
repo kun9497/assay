@@ -102,14 +102,61 @@ skopeo copy docker://alpine:3.19 oci:layout && assay scan oci-dir:layout
 assay scan sbom.cdx.json
 ```
 
-An argument is read as an image when it carries a `docker-archive:` or `oci-dir:` prefix,
-as an SBOM when it names a file that exists, and as a registry reference otherwise.
+### What a target can be
+
+```bash
+assay scan alpine:3.19                # a registry reference
+assay scan docker-archive:app.tar     # a `docker save` tarball
+assay scan oci-dir:./layout           # an OCI layout directory
+assay scan sbom.cdx.json              # a CycloneDX SBOM
+assay scan ./bin/assay                # a Go binary
+assay scan ./my-project               # a directory with a go.mod
+```
+
+A bare path is classified by **content**: a Go binary if `debug/buildinfo` can read it, a
+CycloneDX document if it opens like one, a directory if it is one. A file that is none of
+those is an error naming all three, never a silent guess. Anything that is not a path at all
+is a registry reference.
+
+The prefixes `file:`, `dir:` and `sbom:` override the sniff, alongside `docker-archive:` and
+`oci-dir:`. Every scan prints how it classified the target on stderr, so a wrong guess is
+visible in the output rather than inferred from a confusing parse error.
+
+*On Git Bash for Windows, a prefixed absolute path is not translated —* `dir:/c/project`
+*reaches the program as* `\c\project`. *Use a relative path, or a native one:*
+`dir:C:/project`.
+
+### Binaries and directories
+
+A **binary** scan reads `debug/buildinfo`: the main module, every dependency the linker
+actually kept, and the toolchain — matched as the package `stdlib`, which the Go
+vulnerability database holds 159 advisories against.
+
+A **directory** scan parses `go.mod`, with the standard library and no `go` invocation, so it
+works offline and needs no toolchain. That means it reports what the module *requires*, which
+is not what a build links. On this repository:
+
+| | packages |
+|---|---|
+| the built binary | **12** — main module, 10 linked dependencies, `stdlib` |
+| `go.mod` | **11** — including `gotest.tools/v3`, which no build links |
+| `go list -m all` | **52** — the whole module graph |
+
+The difference is named in the scan's own output, and it is why a directory scan says so:
+
+```
+$ assay scan dir:.
+scanned dir:. as a directory
+go.mod names 11 module(s); this is what was requested, not what a build links
+  - scan the built binary for that
+```
+
+Scan the binary for what ships. The reasoning is recorded as D23.
 
 Not implemented yet — listed so the target is unambiguous, not because it runs:
 
 ```bash
-assay scan ./bin/assay                       # ③ binaries
-assay scan dir:./my-project                  # ③ directories
+assay scan dir:./node-project                # ③ npm and PyPI directories
 ```
 
 ### Verdicts
@@ -144,6 +191,15 @@ left to be discovered:
 | unrated findings | fold into the ordering | `unknown`, outside it — `--fail-on-unknown` only |
 | partial coverage | no gate | `--fail-on-incomplete`, exit 2 |
 | explain | `grype explain` subcommand | `--explain <id>` flag on `scan` |
+| severity source | enriched from NVD via the CVE alias | the stored CVSS vector only (D13) |
+
+The severity divergence is the one worth knowing about. Measured on this repository's own
+binary: assay and grype find **the same three findings** — same packages, same advisory IDs,
+same fixed versions — but grype rates two of them High and Medium where assay says `unknown`.
+Neither is wrong. All three advisories carry **zero** severity entries in the OSV data, so
+`unknown` is what D13 and D17 require; grype reaches NVD through each advisory's CVE alias
+and finds a score there. Enriching from NVD is named in D17 as a possibility, not a plan.
+
 
 `--explain` matches on the advisory's own ID or any alias, so the CVE you were given
 resolves even when the record is filed under a GHSA or a distro-prefixed ID.
@@ -304,8 +360,9 @@ count from 9 modules to 27, and an image already present locally reaches `assay`
 **③ Filesystem and binary targets** — depends on neither ② nor ④, so it can slot in
 anywhere.
 
-- [ ] Go binary scanning via `debug/buildinfo`
-- [ ] Directory scanning (Go modules)
+- [x] Go binary scanning via `debug/buildinfo`, including the toolchain as `stdlib`
+- [x] Directory scanning (Go modules, `go.mod` only — no toolchain, no network)
+- [ ] npm and PyPI directory scanning
 
 **④ Verdicts and output** — where exit code 1 first becomes reachable. **Done.**
 

@@ -275,9 +275,15 @@ database path plus the layer digest) is already carried in the JSON output but i
 code-scanning UI expects to highlight. Getting that wrong produces findings pinned to the
 wrong line of the wrong file, which is worse than no SARIF at all.
 
-**Revisit when** someone wants assay's results in GitHub code scanning, or when directory
-and binary scanning (slice ③) land — a finding in a checked-out source tree has a real file
-path, which removes the hard part of the mapping.
+**The revisit trigger has fired, and it did not help as much as expected.** Slice ③ landed,
+so a directory scan is now possible — but it reads `go.mod` and reports modules, not source
+locations. The finding's location is still `<dir>/go.mod`, a single file, and a binary scan's
+is the binary. Neither is the "line of code that introduced this dependency" a code-scanning
+UI wants to highlight. What actually removes the obstacle is a cataloger that knows where in
+the tree a dependency is declared, which nothing here needs yet.
+
+**Revisit when** someone wants assay's results in GitHub code scanning. That is now the only
+trigger; the filesystem one has been discharged.
 
 **Groundwork.** `internal/report/json.go` already assembles every field SARIF needs
 (advisory ID, aliases, severity band and score, package name and version, purl, the source
