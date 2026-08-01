@@ -2,6 +2,7 @@ package report
 
 import (
 	"bytes"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -13,11 +14,62 @@ import (
 	"github.com/kun9497/assay/internal/version"
 )
 
+// columnSep splits a tabwriter-rendered line into its columns. The writer
+// (padding 2) guarantees at least two spaces between adjacent columns, and no
+// cell value used in these tests contains two consecutive spaces internally
+// ("critical (9.8)" has exactly one), so splitting on runs of 2+ spaces
+// recovers the columns without depending on their width.
+var columnSep = regexp.MustCompile(`\s{2,}`)
+
+// cellAt resolves a column by its header NAME rather than a hardcoded index,
+// then returns that column's value in the row naming advisoryID. Resolving by
+// name means the test still pins the right thing if an unrelated column is
+// ever inserted or reordered elsewhere; it only fails when the column asked
+// for stops lining up with the value it is supposed to hold — e.g. SEVERITY
+// and ALIASES swapped while the header row was left alone.
+func cellAt(t *testing.T, out, advisoryID, column string) string {
+	t.Helper()
+	lines := strings.Split(out, "\n")
+	if len(lines) == 0 {
+		t.Fatalf("empty output")
+	}
+	header := columnSep.Split(lines[0], -1)
+	idx := -1
+	for i, h := range header {
+		if h == column {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		t.Fatalf("no %q column in header %v:\n%s", column, header, out)
+	}
+	for _, l := range lines[1:] {
+		if !strings.Contains(l, advisoryID) {
+			continue
+		}
+		cols := columnSep.Split(l, -1)
+		if idx >= len(cols) {
+			t.Fatalf("row naming %s has %d columns, header put %q at index %d:\nrow=%v\nheader=%v",
+				advisoryID, len(cols), column, idx, cols, header)
+		}
+		return cols[idx]
+	}
+	t.Fatalf("no row names advisory %q in:\n%s", advisoryID, out)
+	return ""
+}
+
 func TestTable_Findings(t *testing.T) {
 	res := matcher.Result{Findings: []matcher.Finding{{
 		Package:  pkgmeta.Package{Name: "github.com/foo/bar", Version: "v1.2.3", Ecosystem: "Go"},
 		Advisory: advisory.Advisory{ID: "GHSA-hit", Summary: "Code injection"},
 		Evidence: version.Evidence{Introduced: "0", Fixed: "1.5.0", Reason: "below the fix 1.5.0"},
+		// A real band is given explicitly. Match always sets one; leaving it
+		// at the zero value here would render "none (0.0)" for a finding that
+		// was simply never asked about severity, which is the same coercion
+		// D17 forbids, reached through a fixture instead of a code path.
+		Severity: severity.High,
+		Score:    7.5,
 	}}}
 	var buf bytes.Buffer
 	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
@@ -124,6 +176,8 @@ func TestTable_FindingCarriesItsAliases(t *testing.T) {
 		Package:  pkgmeta.Package{Name: "Jinja2", Version: "2.11.2", Ecosystem: "PyPI"},
 		Advisory: advisory.Advisory{ID: "GHSA-g3rq-g295-4j3m", Aliases: []string{"CVE-2020-28493"}},
 		Evidence: version.Evidence{Fixed: "2.11.3"},
+		Severity: severity.High,
+		Score:    7.5,
 	}}}
 	var buf bytes.Buffer
 	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
@@ -170,9 +224,9 @@ func TestTable_NoFindings(t *testing.T) {
 func TestTable_Deterministic(t *testing.T) {
 	res := matcher.Result{Findings: []matcher.Finding{
 		{Package: pkgmeta.Package{Name: "a", Version: "1", Ecosystem: "Go"},
-			Advisory: advisory.Advisory{ID: "GHSA-1"}},
+			Advisory: advisory.Advisory{ID: "GHSA-1"}, Severity: severity.High, Score: 7.5},
 		{Package: pkgmeta.Package{Name: "b", Version: "1", Ecosystem: "Go"},
-			Advisory: advisory.Advisory{ID: "GHSA-2"}},
+			Advisory: advisory.Advisory{ID: "GHSA-2"}, Severity: severity.Medium, Score: 5.0},
 	}}
 	var first, second bytes.Buffer
 	if _, err := Table(&first, res, cyclonedx.Stats{}); err != nil {
@@ -200,6 +254,8 @@ func TestTable_ShowsTheSourcePackageWhenItIsWhatMatched(t *testing.T) {
 		// the assertion passed with the source package unprinted.
 		Advisory:    advisory.Advisory{ID: "CVE-2024-12345"},
 		MatchedName: "openssl",
+		Severity:    severity.High,
+		Score:       7.5,
 	}}}
 
 	var buf bytes.Buffer
@@ -223,6 +279,8 @@ func TestTable_DoesNotRepeatTheNameWhenItMatchedDirectly(t *testing.T) {
 		Package:     pkgmeta.Package{Name: "busybox", Version: "1.36.1-r15", Ecosystem: "Alpine:v3.19"},
 		Advisory:    advisory.Advisory{ID: "CVE-2024-busybox"},
 		MatchedName: "busybox",
+		Severity:    severity.High,
+		Score:       7.5,
 	}}}
 
 	var buf bytes.Buffer
@@ -271,6 +329,8 @@ func TestTable_FindingCarriesIdentifiersFromAliasesAndUpstream(t *testing.T) {
 			res := matcher.Result{Findings: []matcher.Finding{{
 				Package:  pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "e"},
 				Advisory: tt.adv,
+				Severity: severity.High,
+				Score:    7.5,
 			}}}
 			var buf bytes.Buffer
 			if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
@@ -294,6 +354,8 @@ func TestTable_OtherIdentifiersAreDeduplicated(t *testing.T) {
 			Aliases:  []string{"CVE-2025-46394"},
 			Upstream: []string{"CVE-2025-46394", "ALPINE-CVE-2025-46394"},
 		},
+		Severity: severity.High,
+		Score:    7.5,
 	}}}
 	var buf bytes.Buffer
 	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
@@ -400,6 +462,44 @@ func TestTable_SeverityColumn(t *testing.T) {
 	}
 }
 
+// Neither assertion in TestTable_SeverityColumn pins WHERE the severity cell
+// sits, only that it exists somewhere in the output. A reorder of the
+// Fprintf args that left the header alone — SEVERITY and ALIASES swapped,
+// say — would pass it: "SEVERITY" is still in the header text and
+// "critical (9.8)" is still in the row text, just under the wrong column.
+// Readers triage by column position, so that swap is a real failure, not a
+// cosmetic one. This resolves every column by its header name and checks the
+// value landed where the header claims.
+func TestTable_ColumnOrderMatchesHeader(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "svc", Version: "1.0.0", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{ID: "GHSA-sev", Aliases: []string{"CVE-2024-00001"}},
+		Evidence: version.Evidence{Fixed: "2.0.0"},
+		Severity: severity.Critical,
+		Score:    9.8,
+	}}}
+	var buf bytes.Buffer
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	want := map[string]string{
+		"PACKAGE":   "svc",
+		"VERSION":   "1.0.0",
+		"ECOSYSTEM": "Go",
+		"ADVISORY":  "GHSA-sev",
+		"SEVERITY":  "critical (9.8)",
+		"ALIASES":   "CVE-2024-00001",
+		"FIXED IN":  "2.0.0",
+	}
+	for column, wantVal := range want {
+		if got := cellAt(t, out, "GHSA-sev", column); got != wantVal {
+			t.Errorf("column %q = %q, want %q — SEVERITY and ALIASES must not be "+
+				"swapped:\n%s", column, got, wantVal, out)
+		}
+	}
+}
+
 // D17: the unknown-severity count belongs in the summary on every run, not
 // only when it is non-zero. A count that appears conditionally teaches
 // readers not to look for it, which is the same failure as a threshold that
@@ -439,5 +539,13 @@ func TestTable_UnknownSeverityCountReflectsFindings(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "1 unknown severity") {
 		t.Errorf("summary line does not carry the unknown-severity count:\n%s", buf.String())
+	}
+	// The row itself must say "unknown", not a coerced real band. A mutation
+	// that forced Unknown to Low before formatting would leave the summary
+	// line above untouched (it is driven from Finding.Severity directly, not
+	// from the rendered row) while the table quietly claimed a 0.0-adjacent
+	// rating for a finding nothing rated — the report contradicting itself.
+	if got := cellAt(t, buf.String(), "GHSA-1", "SEVERITY"); got != "unknown" {
+		t.Errorf("GHSA-1's SEVERITY column = %q, want \"unknown\"", got)
 	}
 }

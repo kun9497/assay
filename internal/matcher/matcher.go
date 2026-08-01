@@ -37,6 +37,13 @@ type Finding struct {
 	// OSV's serialization order rather than on the vulnerability. Advisories
 	// with no scorable vector — roughly a quarter of the live database —
 	// carry Severity == severity.Unknown, never a coerced low band (D17).
+	//
+	// Match is the only legitimate constructor of Finding, and it always sets
+	// both fields. Building one any other way (tests included) must set them
+	// explicitly: the zero value of Band is None, a real rating of 0.0, so an
+	// unset Severity silently claims "rated harmless" rather than "unrated" —
+	// and unlike Unknown, None sits inside the --fail-on ordering and escapes
+	// Summary.UnknownSeverity, so the omission would be invisible to both.
 	Severity severity.Band
 	Score    float64
 }
