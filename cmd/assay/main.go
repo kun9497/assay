@@ -222,10 +222,9 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 	// over an explicitly requested table would be the same "flag parsed,
 	// then ignored" shape --fail-on's repeat-rejection already guards
 	// against, one level over. Checking only for "json" here previously let
-	// `--output table --explain X` through silently — scancmd.Run's own
-	// comment claims the three renderers are "mutually exclusive by
-	// construction from the CLI parser", so the parser has to actually make
-	// that true rather than the comment merely asserting it.
+	// `--output table --explain X` through silently — scancmd.Run's dispatch
+	// says "Three renderers, exactly one chosen", and the parser is the only
+	// place that can make that true rather than merely asserted.
 	if opts.Explain != "" && opts.Output != "" {
 		return "", scancmd.Options{}, fmt.Errorf(
 			"--explain cannot be combined with --output %s: pick one renderer", opts.Output)

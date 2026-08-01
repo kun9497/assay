@@ -52,7 +52,18 @@ type FindingRecord struct {
 	// none/low/medium/high/critical/unknown), never the numeric iota — a
 	// numeric band would make the document depend on Band's declaration
 	// order, which is an implementation detail, not part of the schema.
-	Severity string         `json:"severity"`
+	Severity string `json:"severity"`
+	// Score is meaningful only when Severity is a rated band. An unrated
+	// finding serializes as {"severity":"unknown","score":0}, and that 0 is
+	// an absence, not a rating of zero — a real 0.0 is {"severity":"none"}.
+	//
+	// The table deliberately prints "unknown" with no parenthetical for the
+	// same finding, because "unknown (0.0)" reads as a measured zero and
+	// that is D17's coercion arriving through formatting. JSON keeps the
+	// field rather than omitting it so the shape does not vary per finding,
+	// which is what a schema is for; the band is the authoritative one of
+	// the pair, and a consumer that gates on score alone should read
+	// severity first.
 	Score    float64        `json:"score"`
 	Evidence EvidenceRecord `json:"evidence"`
 }

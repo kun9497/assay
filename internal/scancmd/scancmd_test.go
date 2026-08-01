@@ -837,6 +837,87 @@ func TestRun_Explain(t *testing.T) {
 // targets the unrated finding's own advisory, so the explain path finds a
 // real match (n > 0) rather than short-circuiting on "nothing matched"
 // before verdict() is ever reached.
+// Explain shows one finding, so on its own it says nothing about the rest of
+// the scan. The table prints the counts and the "Not evaluated" block and the
+// JSON document carries them in `summary`; explain had neither, on either
+// stream, so `--explain X` against a partially-evaluated target printed a
+// confident explanation and exited 0 with the gap disclosed nowhere. CLAUDE.md:
+// packages that cannot be evaluated are "never folded silently into a clean
+// verdict".
+func TestRun_ExplainDisclosesAnIncompleteScan(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-explain-partial", pkg: "explainpartial", fixed: "2.0.0", vectors: []string{vecCritical}},
+	})
+	// One package the database covers, one in an ecosystem it does not - so
+	// the scan produces a finding AND leaves a package unevaluated.
+	sbom := buildMatrixSBOM(t, []matrixPkg{
+		{name: "explainpartial", purlType: "golang"},
+		{name: "somecrate", purlType: "cargo"},
+	})
+
+	var out, errOut bytes.Buffer
+	code := Run(context.Background(), db, sbom, Options{Explain: "GHSA-explain-partial"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("Run = %d, want 0 (no gate was asked for); stderr:\n%s", code, errOut.String())
+	}
+	// The explanation itself still owns stdout alone.
+	if !strings.Contains(out.String(), "GHSA-explain-partial") {
+		t.Errorf("stdout is missing the explanation:\n%s", out.String())
+	}
+	// ...and the warning is on stderr, so `--explain X > file` still yields a
+	// clean explanation while a human at a terminal sees the caveat.
+	if strings.Contains(out.String(), "NOT complete") {
+		t.Errorf("the incompleteness warning went to stdout:\n%s", out.String())
+	}
+	if !strings.Contains(errOut.String(), "NOT complete") {
+		t.Errorf("stderr does not disclose that the scan was incomplete:\n%s", errOut.String())
+	}
+	// The count itself, not just the word: a warning that always says the same
+	// thing regardless of how much went unchecked is not a disclosure.
+	if !strings.Contains(errOut.String(), "1 package(s) not evaluated") {
+		t.Errorf("stderr does not say HOW MUCH went unevaluated:\n%s", errOut.String())
+	}
+}
+
+// The other half of the gate. The fixture above produces NotEvaluated only, so
+// keying the warning on that count alone survives it - the same shape that hid
+// half of --fail-on-incomplete's condition one task earlier. Here every package
+// IS evaluated and one advisory cannot be judged, so only IncompleteChecks is
+// non-zero.
+func TestRun_ExplainDisclosesAnIncompleteCheck(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-explain-check", pkg: "explaincheck", fixed: "2.0.0", vectors: []string{vecCritical}},
+		{id: "GHSA-explain-bad", pkg: "explaincheck"}, // fixed == "" -> malformed -> IncompleteChecks
+	})
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "explaincheck", purlType: "golang"}})
+
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), db, sbom,
+		Options{Explain: "GHSA-explain-check"}, &out, &errOut); code != 0 {
+		t.Fatalf("Run = %d, want 0; stderr:\n%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "1 check(s) incomplete") {
+		t.Errorf("stderr does not disclose the incomplete check:\n%s", errOut.String())
+	}
+}
+
+// The mirror: a fully-evaluated scan must not print the warning, or it becomes
+// noise every reader learns to skip.
+func TestRun_ExplainIsQuietWhenTheScanIsComplete(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-explain-full", pkg: "explainfull", fixed: "2.0.0", vectors: []string{vecCritical}},
+	})
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "explainfull", purlType: "golang"}})
+
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), db, sbom, Options{Explain: "GHSA-explain-full"}, &out, &errOut); code != 0 {
+		t.Fatalf("Run = %d, want 0; stderr:\n%s", code, errOut.String())
+	}
+	if strings.Contains(errOut.String(), "NOT complete") {
+		t.Errorf("a complete scan warned about incompleteness:\n%s", errOut.String())
+	}
+}
+
 func TestRun_FailOnIncompleteAndUnknownAgreeAcrossRenderers(t *testing.T) {
 	db := buildMatrixDB(t, []matrixAdv{
 		{id: "GHSA-renderer-unknownsev", pkg: "rendererunknownsev", fixed: "2.0.0"}, // no vectors -> Unknown

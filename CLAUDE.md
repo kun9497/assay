@@ -10,13 +10,15 @@ the vulnerability database, and match the two. In the anchore ecosystem those ar
 separate projects (`syft`, `vunnel` + `grype-db`, `grype`). KISA/KNVD advisory data is a
 first-class provider — that is the main reason this exists rather than using grype.
 
-It is currently a **scaffold**: `cmd/assay/main.go` is the only source file and `scan` is
-unimplemented. Nothing below exists as code yet — do not assume those packages are present.
+Slices ①, ②, ④ are built: `assay db update` builds a database from OSV (Go, npm, PyPI,
+Alpine), `assay scan` reads SBOMs and container images, matches them, and returns a verdict
+CI can gate on. Not built: binary and directory scanning (③), the KISA provider (⑤), and
+non-Alpine distros. Check what exists before assuming — this paragraph has been wrong before.
 
 **Read these before proposing anything structural:**
 
 - `docs/superpowers/specs/2026-07-29-assay-roadmap.md` — the reference design. Every
-  decision is recorded as `D1`…`D14` with its reasoning. Cite the decision ID when
+  decision is recorded as `D1`…`D21` with its reasoning. Cite the decision ID when
   discussing one.
 - `docs/deferred-decisions.md` — **required before suggesting a feature.** Most obvious
   gaps (Debian support, RHEL support, VEX, prebuilt database artifacts, database age
@@ -126,10 +128,14 @@ result cannot be trusted.
 outranks the content of the result. This is fixed contract — changing it later breaks other
 people's CI.
 
-CI must never confuse "found nothing" with "was broken". This is why the unimplemented
-`scan` returns `exitError` and a test asserts it — preserve that property in any partial
-implementation. Packages that cannot be evaluated are reported as skipped with a count,
-never folded silently into a clean verdict.
+CI must never confuse "found nothing" with "was broken". Packages that cannot be evaluated
+are reported as skipped with a count, never folded silently into a clean verdict — and that
+obligation is on every renderer, not just the table: `--explain` shows one finding, so it
+warns on stderr when the rest of the scan was incomplete, because otherwise it prints a
+confident answer about a scan that did not finish.
+
+`--fail-on <band>` reaches exit 1, `--fail-on-unknown` reaches exit 1, and
+`--fail-on-incomplete` reaches exit 2 (D21). Unrated findings never trip `--fail-on` (D17).
 
 **Stream discipline**: results to stdout, diagnostics to stderr, so
 `assay scan ... --output json | jq` stays clean. `main_test.go` enforces both directions.

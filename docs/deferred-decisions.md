@@ -141,7 +141,7 @@ which needs a pure-Go rpmdb parser. Separately, Red Hat backports fixes, so upst
 version comparison produces false positives without Red Hat's own fixed-version data.
 
 **Revisit when.** Debian/Ubuntu are working, and OSV's RHEL-family coverage has been
-verified as sufficient (see Unverified assumptions).
+verified as sufficient (see Assumptions).
 
 ---
 
@@ -236,6 +236,28 @@ the encoding is fully hidden behind it.
 
 CycloneDX first. SPDX is a second parser against an already-proven pipeline, adding no new
 architecture.
+
+---
+
+### Flags on the `db` subcommands
+
+`assay db status --output json` exits 0 and prints the human table; `assay db status
+--bogus` does the same. The `db` arm has never parsed flags, so anything after the
+subcommand is ignored.
+
+**Why deferred.** It is pre-existing rather than new, but `--output json` now exists as a
+real concept on `scan`, so "typed a flag, flag ignored" became reachable by someone
+reasonably assuming it is global — the exact shape `parseScanArgs` rejects on the scan side.
+The fix is not just rejecting unknown arguments: it is deciding whether `--output json`
+should mean something for `db status` (a machine-readable coverage and freshness report is
+plausibly useful in CI) before making it an error to ask for it.
+
+**Revisit when** anything needs `db status` output in a pipeline, or sooner if a second
+subcommand grows a flag — two arms silently ignoring arguments is a pattern rather than an
+oversight.
+
+**Groundwork.** `parseScanArgs` already shows the shape: reject the unrecognised rather than
+skip it, and reject a repeat rather than take the last.
 
 ---
 

@@ -388,12 +388,11 @@ func TestParseScanArgs(t *testing.T) {
 		}
 	})
 
-	// F6: the conflict is not specific to --output json. scancmd.Run's own
-	// dispatch comment describes the three renderers as "mutually exclusive
-	// by construction from the CLI parser" — that has to be true for BOTH
-	// values of --output, not just "json", or an explicitly requested table
-	// silently loses to --explain instead of the two being flagged as the
-	// contradictory request they are.
+	// The conflict is not specific to --output json. scancmd.Run's dispatch
+	// says "Three renderers, exactly one chosen", and that has to hold for
+	// BOTH values of --output, not just "json" — otherwise an explicitly
+	// requested table silently loses to --explain instead of the two being
+	// flagged as the contradictory request they are.
 	t.Run("--explain cannot be combined with --output table either", func(t *testing.T) {
 		_, _, err := parseScanArgs([]string{"alpine:3.19", "--explain", "GHSA-1", "--output", "table"})
 		if err == nil {

@@ -319,6 +319,17 @@ func TestHighest(t *testing.T) {
 	}); b != Critical || score != 9.8 {
 		t.Errorf("Highest(reversed) = %v/%.1f, want critical/9.8", b, score)
 	}
+	// The other side of that difference, and the one no test covered: a
+	// record whose only vector genuinely rates 0.0 is None - "rated
+	// harmless" - not Unknown. Ten of the 1180 live v3 vectors score 0.0, so
+	// this is a real input, and the `best == Unknown ||` half of Highest's
+	// comparison is the only thing that records the first of them. Without
+	// this case, dropping that half leaves the whole suite green while
+	// `--fail-on none` stops firing and `--fail-on-unknown` starts.
+	if b, score := Highest([]string{"CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:N"}); b != None || score != 0 {
+		t.Errorf("Highest(a vector that rates 0.0) = %v/%.1f, want none/0", b, score)
+	}
+
 	// Nothing scorable is unknown, not none: "we could not tell" is not the
 	// same claim as "rated zero", and D17 turns on the difference.
 	for _, in := range [][]string{nil, {}, {"garbage", ""}} {

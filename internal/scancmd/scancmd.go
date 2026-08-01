@@ -170,6 +170,21 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 			fmt.Fprintf(stderr, "error: no finding matches advisory or alias %q\n", opts.Explain)
 			return 2
 		}
+		// Explain is the one renderer that shows a single finding, so on its
+		// own it discloses nothing about the rest of the scan. The table
+		// prints the counts and the "Not evaluated" block; the JSON document
+		// carries them in `summary`. Without this, `--explain X` on a target
+		// where a third of the packages were never checked printed a
+		// confident explanation, exited 0, and said so nowhere — a partial
+		// scan folded silently into a clean verdict, which is the one thing
+		// this project's CLI contract forbids outright.
+		//
+		// stderr, not stdout: stdout belongs to the explanation alone.
+		if sum.NotEvaluated > 0 || sum.IncompleteChecks > 0 {
+			fmt.Fprintf(stderr,
+				"warning: %d package(s) not evaluated and %d check(s) incomplete - this scan is NOT complete\n",
+				sum.NotEvaluated, sum.IncompleteChecks)
+		}
 	case opts.Output == "json":
 		sum, err = report.JSON(stdout, res, cat)
 		if err != nil {
