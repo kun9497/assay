@@ -305,7 +305,7 @@ func TestOf_UnparseableIsUnknown(t *testing.T) {
 // the first would make the band depend on OSV's ordering within the record.
 func TestHighest(t *testing.T) {
 	b, score := Highest([]string{
-		"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N", // 6.4 medium
+		"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N", // 6.5 medium
 		"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", // 9.8 critical
 		"garbage",
 	})
