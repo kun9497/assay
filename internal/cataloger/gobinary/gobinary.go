@@ -11,19 +11,31 @@ import (
 	"github.com/kun9497/assay/internal/pkgmeta"
 )
 
+// isUnversioned reports whether version is not a real, comparable version:
+// either empty, or "(devel)" - what an un-stamped main module reports. Split
+// out as its own function so both halves can be tested directly against
+// values debug/buildinfo has never been observed to produce from a fixture
+// this package can build (an empty string in particular - every reachable
+// build shape reports either "(devel)" or a real version, never ""), rather
+// than leaving one arm of the check exercised only by luck.
+func isUnversioned(version string) bool {
+	return version == "" || version == "(devel)"
+}
+
 // Parse reads path as a Go executable and returns its module inventory: the
 // main module plus every dependency the linker actually kept. Distro stays
 // nil — a binary is not a distro (D7).
 func Parse(path string) (pkgmeta.Target, cyclonedx.Stats, error) {
 	bi, err := buildinfo.ReadFile(path)
 	if err != nil {
-		// path is interpolated directly rather than left to ride along on
-		// err alone: buildinfo.ReadFile's own message happens to name it
-		// today, but that is the standard library's wording to change, not
-		// a contract this cataloger can depend on. "not a Go binary" / "a
-		// directory" / "does not exist" all need to say which file, because
-		// the user's next step differs for each.
-		return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("read build info from %s: %w", path, err)
+		// No %s for path here: buildinfo.ReadFile's own message already
+		// names it in every rejection shape this cataloger cares about (not
+		// a Go binary, a directory, a missing file - verified directly
+		// against each), so adding our own would only double it up ("read
+		// build info from X: ...from X: ..."). TestParse_Rejects still
+		// fails if a future standard library version ever stops mentioning
+		// the path in its own error.
+		return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("read Go build info: %w", err)
 	}
 
 	var (
@@ -32,11 +44,10 @@ func Parse(path string) (pkgmeta.Target, cyclonedx.Stats, error) {
 	)
 	add := func(name, version string) {
 		stats.Components++
-		if version == "" || version == "(devel)" {
-			// "(devel)" is what an un-stamped main module reports. It is not
-			// a version any advisory range can be compared against, so it is
-			// a counted skip rather than a package with a version that looks
-			// real.
+		if isUnversioned(version) {
+			// Not a version any advisory range can be compared against, so
+			// it is a counted skip rather than a package with a version
+			// that looks real.
 			stats.SkippedNoVersion++
 			return
 		}
