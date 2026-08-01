@@ -176,7 +176,7 @@ func TestParse_IgnoresNonRequireDirectives(t *testing.T) {
 		"\nretract v1.0.1\n"+
 		"\nrequire github.com/real/dep v1.0.0\n")
 
-	tgt, _, err := Parse(dir)
+	tgt, stats, err := Parse(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,6 +185,22 @@ func TestParse_IgnoresNonRequireDirectives(t *testing.T) {
 	}
 	if tgt.Packages[0].Name != "github.com/real/dep" {
 		t.Errorf("package = %q, want github.com/real/dep", tgt.Packages[0].Name)
+	}
+	// The counters, not just the package list. Handing `go 1.26` or
+	// `module example.test/app` to the require parser does not fabricate a
+	// package - each is a single field, so it lands in the missing-version
+	// skip - but it DOES fabricate a counted skip. Asserting only the package
+	// count leaves that invisible, and the consequence is user-facing: a
+	// directory scan that evaluated everything would report packages it could
+	// not evaluate, and `--fail-on-incomplete` would exit 2 on a complete
+	// scan. Both mutations survived the suite until this assertion existed.
+	if stats.Components != 1 || stats.Cataloged != 1 {
+		t.Errorf("stats = %+v, want exactly 1 component and 1 cataloged - a directive "+
+			"read as a require inflates Components without adding a package", stats)
+	}
+	if stats.SkippedNoVersion != 0 {
+		t.Errorf("SkippedNoVersion = %d, want 0 - no directive here is a package that "+
+			"could not be versioned", stats.SkippedNoVersion)
 	}
 }
 
