@@ -273,9 +273,9 @@ our benefit. `go.sum` holds every version ever *considered*, not the ones select
 over-reports by a wide margin. Reading the module cache to compute a real build list means
 reimplementing minimal version selection, which is a different project.
 
-**Revisit when** `vendor/modules.txt` — it is the cheap one, it is exact when present, and
-the honest shape is "use it when it is there, say so when it is not". That is worth doing
-the day someone scans a vendored repository and finds the answer thinner than they expected.
+**Revisit when** someone scans a vendored repository and finds the answer thinner than they
+expected. `vendor/modules.txt` is the cheap one of the three: exact when present, and the
+honest shape is "use it when it is there, say so when it is not".
 
 **Groundwork.** `gomod.Parse` takes a directory, not a file, so a second source inside that
 directory is an addition rather than a signature change.

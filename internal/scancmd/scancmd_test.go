@@ -42,7 +42,7 @@ func TestRun_MissingDatabase(t *testing.T) {
 	}
 }
 
-// A target with no scheme prefix and no file on disk is, by ClassifyTarget's
+// A target with no scheme prefix and no file on disk is, by Classify's
 // own contract, a registry reference — never an "SBOM that happens to be
 // missing". A bare unprefixed path here would only fail locally by accident:
 // on Windows because backslashes do not parse as a reference, and even on
@@ -227,7 +227,7 @@ func TestRun_TargetKinds(t *testing.T) {
 
 	t.Run("registry reference path", func(t *testing.T) {
 		// A string with no scheme prefix and no file on disk falls through to
-		// the registry loader (source.ClassifyTarget). This one is
+		// the registry loader (source.Classify). This one is
 		// syntactically invalid, so it fails while being parsed AS a
 		// reference rather than while being opened as a file or a socket —
 		// proof of which loader it reached, without ever touching the
