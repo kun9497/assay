@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/kun9497/assay/internal/dbcmd"
 	"github.com/kun9497/assay/internal/provider"
 	"github.com/kun9497/assay/internal/provider/osv"
 	"github.com/kun9497/assay/internal/scancmd"
+	"github.com/kun9497/assay/internal/severity"
 	"github.com/kun9497/assay/internal/store"
 )
 
@@ -43,6 +45,12 @@ Commands:
   db status       Show what is in the database and how current it is
   version         Print version information
   help            Show this help
+
+Scan flags (any order, before or after the target):
+  --fail-on <band>      Exit 1 if a finding is at or above <band>
+                        (none, low, medium, high, critical)
+  --fail-on-unknown     Exit 1 if a finding's severity could not be rated
+  --fail-on-incomplete  Exit 2 if any package's evaluation was incomplete
 `
 
 func main() {
@@ -72,7 +80,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprint(stderr, usage)
 			return exitError
 		}
-		return scan(context.Background(), args[1], stdout, stderr)
+		target, opts, err := parseScanArgs(args[1:])
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return exitError
+		}
+		if target == "" {
+			fmt.Fprintln(stderr, "error: scan requires a target")
+			fmt.Fprint(stderr, usage)
+			return exitError
+		}
+		return scan(context.Background(), target, opts, stdout, stderr)
 
 	case "db":
 		if len(args) < 2 {
@@ -104,11 +122,69 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 // scan is the pipeline entry point: parse the target into an inventory, match
 // it against the local database, and report.
-func scan(ctx context.Context, target string, stdout, stderr io.Writer) int {
+func scan(ctx context.Context, target string, opts scancmd.Options, stdout, stderr io.Writer) int {
 	path, err := store.DefaultPath()
 	if err != nil {
 		fmt.Fprintf(stderr, "error: locate database: %v\n", err)
 		return exitError
 	}
-	return scancmd.Run(ctx, path, target, stdout, stderr)
+	return scancmd.Run(ctx, path, target, opts, stdout, stderr)
+}
+
+// parseScanArgs splits a scan command's arguments into the target and the
+// --fail-on* gates, in any order relative to each other.
+//
+// The stdlib flag package will not do here: it stops parsing at the first
+// non-flag argument, and the target — a bare positional argument such as
+// alpine:3.19 — IS that first non-flag argument whenever it comes before the
+// flags, which is how every example in the roadmap and the plan writes it
+// (`assay scan alpine:3.19 --fail-on high`). A flag package that stopped
+// there would silently hand "--fail-on" and "high" back as unparsed
+// arguments instead of an error, which is exactly the "typo becomes no gate"
+// failure the brief calls out.
+//
+// An empty target with a nil error is a valid result — the caller checks for
+// it, the same way it already did before this flag parsing existed — so that
+// "scan --fail-on high" with no target reads as "no target", not as an
+// unrelated parse failure.
+func parseScanArgs(args []string) (target string, opts scancmd.Options, err error) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--fail-on":
+			i++
+			if i >= len(args) {
+				return "", scancmd.Options{}, fmt.Errorf("--fail-on requires a value")
+			}
+			b, perr := severity.ParseBand(args[i])
+			if perr != nil {
+				return "", scancmd.Options{}, perr
+			}
+			opts.FailOn = &b
+
+		case strings.HasPrefix(a, "--fail-on="):
+			b, perr := severity.ParseBand(strings.TrimPrefix(a, "--fail-on="))
+			if perr != nil {
+				return "", scancmd.Options{}, perr
+			}
+			opts.FailOn = &b
+
+		case a == "--fail-on-unknown":
+			opts.FailOnUnknown = true
+
+		case a == "--fail-on-incomplete":
+			opts.FailOnIncomplete = true
+
+		case strings.HasPrefix(a, "-"):
+			return "", scancmd.Options{}, fmt.Errorf("unknown flag %q", a)
+
+		default:
+			if target != "" {
+				return "", scancmd.Options{}, fmt.Errorf(
+					"unexpected argument %q: scan takes exactly one target (already have %q)", a, target)
+			}
+			target = a
+		}
+	}
+	return target, opts, nil
 }

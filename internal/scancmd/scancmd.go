@@ -15,9 +15,47 @@ import (
 	"github.com/kun9497/assay/internal/matcher"
 	"github.com/kun9497/assay/internal/pkgmeta"
 	"github.com/kun9497/assay/internal/report"
+	"github.com/kun9497/assay/internal/severity"
 	"github.com/kun9497/assay/internal/source"
 	"github.com/kun9497/assay/internal/store"
 )
+
+// Options are the --fail-on* gates that turn a completed, trustworthy scan's
+// results into an exit code (D21). They are entirely separate from whether
+// the scan could run at all: Run's existing exit-2 paths — a target that
+// could not be opened, a missing or incomplete database, a store error, and
+// the unconditional !sum.Trustworthy() check (D11) — all fire before Options
+// is even consulted. Options{}, the zero value produced when no flag is
+// given, must reproduce today's behaviour exactly: a completed, trustworthy
+// scan exits 0 no matter what it found.
+type Options struct {
+	// FailOn is the --fail-on threshold, or nil if the flag was not given.
+	// A pointer, not a bare severity.Band, because severity.None is a real,
+	// requestable threshold (and Band's zero value), so it cannot also mean
+	// "not set" without being ambiguous with an explicit `--fail-on none`.
+	//
+	// A finding trips this via Finding.Severity.AtOrAbove(*FailOn) alone.
+	// There is deliberately no extra "unless the finding is unknown" check
+	// here: AtOrAbove already guarantees severity.Unknown never satisfies any
+	// threshold, including None (D17) — a second check reaching the same
+	// answer would just be a second place for it to drift from AtOrAbove.
+	FailOn *severity.Band
+	// FailOnUnknown makes a finding with an unrated severity (severity.Unknown)
+	// trip the scan on its own, exit 1. It has to be a separate flag rather
+	// than folded into FailOn precisely because AtOrAbove refuses to let
+	// Unknown satisfy any threshold — this is the deliberate, opt-in way to
+	// ask for that anyway.
+	FailOnUnknown bool
+	// FailOnIncomplete makes the scan exit 2 when any package's evaluation
+	// was not complete: either a whole package the cataloger or matcher never
+	// reached (report.Summary.NotEvaluated), or one advisory check on an
+	// otherwise-evaluated package that could not be judged
+	// (report.Summary.IncompleteChecks). Both mean the same thing to a
+	// caller — there could be a finding this run did not see — which is why
+	// this exits 2 rather than 1, and why it outranks FailOn/FailOnUnknown
+	// under D11's 2 > 1 > 0 precedence.
+	FailOnIncomplete bool
+}
 
 // The two files an image cataloger reads, named as they appear as tar entries
 // (no leading slash) — which is also the form Image.Files normalises its own
@@ -29,10 +67,11 @@ const (
 
 // Run scans an SBOM file or a container image — a registry reference, a
 // docker-archive: tarball, or an oci-dir: layout — chosen by
-// source.ClassifyTarget so one argument reaches the right loader. Slice 1 has
-// no --fail-on, so a completed scan exits 0 even with findings; the exit-2
-// paths are what matter here.
-func Run(ctx context.Context, dbPath, target string, stdout, stderr io.Writer) int {
+// source.ClassifyTarget so one argument reaches the right loader. Once the
+// scan completes and the result is judged trustworthy (D11), opts decides
+// the exit code; Options{} reproduces the pre-slice-4 behaviour of always
+// exiting 0 on a trustworthy scan, findings or not.
+func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stderr io.Writer) int {
 	var (
 		inventory pkgmeta.Target
 		cat       cyclonedx.Stats
@@ -96,6 +135,31 @@ func Run(ctx context.Context, dbPath, target string, stdout, stderr io.Writer) i
 			"error: none of the %d component(s) could be evaluated; this result cannot be trusted\n",
 			sum.Components)
 		return 2
+	}
+	return verdict(opts, sum, res.Findings)
+}
+
+// verdict turns a completed, trustworthy scan into an exit code under the
+// three --fail-on* gates and D11's 2 > 1 > 0 precedence: an untrustworthy —
+// here, incomplete — result outranks its content, so FailOnIncomplete is
+// checked first and, if it fires, the findings below are never even
+// consulted. Options{} (no flags at all) always returns 0, which is what
+// keeps a scan with no flags set exiting exactly as it did before this gate
+// existed.
+func verdict(opts Options, sum report.Summary, findings []matcher.Finding) int {
+	if opts.FailOnIncomplete && (sum.NotEvaluated > 0 || sum.IncompleteChecks > 0) {
+		return 2
+	}
+	for _, f := range findings {
+		if opts.FailOnUnknown && f.Severity == severity.Unknown {
+			return 1
+		}
+		// No separate "unless f.Severity is Unknown" guard: AtOrAbove already
+		// returns false whenever the finding's band is Unknown, against any
+		// threshold including None (D17). See the Options.FailOn doc comment.
+		if opts.FailOn != nil && f.Severity.AtOrAbove(*opts.FailOn) {
+			return 1
+		}
 	}
 	return 0
 }
