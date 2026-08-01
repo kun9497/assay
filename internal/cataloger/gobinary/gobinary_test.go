@@ -74,11 +74,14 @@ func writeModule(t *testing.T, dir, gomod, mainGo string) {
 // optional). A subsequent `go build -buildvcs=true` in dir then stamps a
 // real pseudo-version instead of "(devel)" - see buildFixture's comment for
 // why a bare .git directory with no commit does not get you that.
+//
+// Callers must check for git themselves, with a message naming what THEIR
+// test loses without it: "the main module gets a real version" reads
+// differently for a test that inspects the version itself
+// (TestParse_IncludesTheMainModule) than for one that needs it only so
+// find() can see the module at all (TestParse_ReportsModulePathNotPackagePath).
 func commitFixture(t *testing.T, dir string) {
 	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git is not on PATH; this test needs a commit so the main module gets a real version instead of (devel)")
-	}
 	for _, args := range [][]string{
 		{"init", "-q"},
 		{"config", "user.email", "fixture@example.test"},
@@ -100,7 +103,9 @@ func commitFixture(t *testing.T, dir string) {
 }
 
 // runGoBuild runs `go build -o <dir>/app.bin <pkg>` in dir, with
-// extraGoflags appended to GOFLAGS, and returns the binary's path.
+// extraGoflags appended to GOFLAGS and extraEnv appended to the environment
+// (used to redirect GOMODCACHE - see modCacheEnv), and returns the binary's
+// path.
 //
 // GOFLAGS=-mod=mod lets the build resolve from the module cache without a
 // go.sum; GOPROXY=off makes a cache miss an error rather than a silent
@@ -110,8 +115,12 @@ func commitFixture(t *testing.T, dir string) {
 // hide a fixture that is simply broken (bad Go syntax, a future Go version
 // rejecting `go 1.26`, a real -buildvcs failure) behind the wrong
 // explanation, so only that specific, matched failure skips; anything else
-// fails the test.
-func runGoBuild(t *testing.T, dir, pkg, extraGoflags string) string {
+// fails the test. This shared-cache skip only makes sense for the fixtures
+// in this file that actually depend on a real, previously-downloaded module
+// (go.etcd.io/bbolt, golang.org/x/sync) - TestParse_FollowsReplaceDirectives_DifferentModulePath
+// builds its own private proxy instead and must not use this helper's skip
+// for that reason (see its own comment).
+func runGoBuild(t *testing.T, dir, pkg, extraGoflags string, extraEnv ...string) string {
 	t.Helper()
 	bin := filepath.Join(dir, "app.bin")
 	cmd := exec.Command("go", "build", "-o", bin, pkg)
@@ -121,6 +130,7 @@ func runGoBuild(t *testing.T, dir, pkg, extraGoflags string) string {
 		"GOPROXY=off",
 		"GOSUMDB=off",
 	)
+	cmd.Env = append(cmd.Env, extraEnv...)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return bin
@@ -130,6 +140,21 @@ func runGoBuild(t *testing.T, dir, pkg, extraGoflags string) string {
 	}
 	t.Fatalf("go build failed (%v):\n%s", err, out)
 	return ""
+}
+
+// modCacheEnv returns a GOMODCACHE override pointed at a fresh scratch
+// directory, for fixtures with no real external dependency (nothing to miss
+// by not using the shared cache). Without this, `go build -buildvcs=true`
+// writes a VCS-derived pseudo-version cache entry for the *main* module
+// itself into the shared, machine-wide module cache - one
+// $GOMODCACHE/cache/download/example.test/app/@v/<version>.info per run,
+// never cleaned, since module cache entries are read-only. The dependency-
+// backed fixtures (buildFixtureNoVCS's callers) must NOT use this: they need
+// the real bbolt/x-sync modules that only exist in the shared cache, and
+// GOPROXY=off means an isolated empty cache could not fetch them either.
+func modCacheEnv(t *testing.T) string {
+	t.Helper()
+	return "GOMODCACHE=" + filepath.Join(t.TempDir(), "modcache")
 }
 
 // buildFixture compiles a module with the given go.mod and main.go into
@@ -162,10 +187,16 @@ func buildFixture(t *testing.T, gomod, mainGo string) string {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go is not on PATH; this test needs a toolchain to build its fixture")
 	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not on PATH; this test needs a commit so the main module carries a real version instead of (devel)")
+	}
 	dir := t.TempDir()
 	writeModule(t, dir, gomod, mainGo)
 	commitFixture(t, dir)
-	return runGoBuild(t, dir, ".", "-buildvcs=true")
+	// This fixture never has a real dependency (see modCacheEnv), so an
+	// isolated GOMODCACHE costs nothing and keeps every VCS-stamped build out
+	// of the shared, machine-wide module cache.
+	return runGoBuild(t, dir, ".", "-buildvcs=true", modCacheEnv(t))
 }
 
 // buildFixtureNoVCS forces -buildvcs=false, which guarantees the main
@@ -439,9 +470,17 @@ func TestParse_FollowsReplaceDirectives_DifferentModulePath(t *testing.T) {
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		if strings.Contains(string(out), "module lookup disabled by GOPROXY=off") {
-			t.Skipf("go build failed (%v); fixture needs modules not in the local cache:\n%s", err, out)
-		}
+		// Unlike runGoBuild's shared-cache fixtures, this test's only
+		// non-stdlib module comes from the file:// proxy built above into
+		// its own private, empty GOMODCACHE. A cache miss here can never be
+		// environmental - it can only mean the proxy this test built is
+		// itself wrong (bad layout, bad version, a path-escaping mistake, or
+		// a file:// URL go rejects, which has already happened once on
+		// Windows while developing this fixture). Skipping on that message,
+		// the way runGoBuild does for the shared cache, would silently
+		// delete this test's entire reason to exist - the one place F1's
+		// path-vs-version distinction is checked - the moment its own setup
+		// broke. So any failure here is fatal, never a skip.
 		t.Fatalf("go build failed (%v):\n%s", err, out)
 	}
 
@@ -474,6 +513,14 @@ func TestParse_ReportsModulePathNotPackagePath(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go is not on PATH; this test needs a toolchain to build its fixture")
 	}
+	// Needs a real version, same as TestParse_IncludesTheMainModule: with no
+	// commit the main module is "(devel)" and Parse skips it, and find()
+	// below fails to locate the module at all, regardless of which path
+	// would have been reported - this is specifically what this skip gives
+	// up, not just "a real version" in the abstract.
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not on PATH; without a commit the main module is \"(devel)\" and Parse skips it, so this test cannot check whether the module path or the package path was reported")
+	}
 
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "cmd", "foo"), 0o755); err != nil {
@@ -487,11 +534,11 @@ func TestParse_ReportsModulePathNotPackagePath(t *testing.T) {
 		[]byte("package main\n\nfunc main() {}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// Needs a real version, same as TestParse_IncludesTheMainModule: with no
-	// commit the main module is "(devel)" and Parse skips it, and find()
-	// below would fail to locate it regardless of which path was reported.
 	commitFixture(t, dir)
-	bin := runGoBuild(t, dir, "./cmd/foo", "-buildvcs=true")
+	// No real dependency here either (see modCacheEnv): isolate GOMODCACHE
+	// so this VCS-stamped build does not leave a pseudo-version cache entry
+	// in the shared module cache either.
+	bin := runGoBuild(t, dir, "./cmd/foo", "-buildvcs=true", modCacheEnv(t))
 
 	tgt, _, err := Parse(bin)
 	if err != nil {
