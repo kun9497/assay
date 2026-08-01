@@ -417,12 +417,21 @@ func TestRun_ScanFlagsReachRealExitCode(t *testing.T) {
 // error actually reaches run()'s exit code and stream discipline rather than
 // being swallowed or misrouted between parseScanArgs and run()'s own error
 // handling.
+// The target is a real, scannable SBOM rather than a path that does not
+// exist. Against a missing target the exit code is 2 whether or not the flag
+// was rejected, so that assertion proved nothing — verified: deleting the
+// repeat check left it green, and only the stderr line carried the test. This
+// fixture exits 0 on its own, so exit 2 here can only come from the rejection.
 func TestRun_ScanRepeatedFailOnExits2(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ASSAY_DB_DIR", dir)
+	sbom := buildRunSeamFixture(t, dir)
+
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"scan", "docker-archive:/does/not/exist.tar",
+	code := run([]string{"scan", sbom,
 		"--fail-on", "critical", "--fail-on", "low"}, &stdout, &stderr)
 	if code != exitError {
-		t.Errorf("run() = %d, want exitError (%d)", code, exitError)
+		t.Errorf("run() = %d, want exitError (%d)\nstderr:\n%s", code, exitError, stderr.String())
 	}
 	if stdout.Len() != 0 {
 		t.Errorf("error path polluted stdout: %q", stdout.String())
