@@ -1101,7 +1101,7 @@ func TestRun_RoutesEachTargetKind(t *testing.T) {
 	sbom := filepath.Join(t.TempDir(), "s.cdx.json")
 	if err := os.WriteFile(sbom, []byte(`{"bomFormat":"CycloneDX","specVersion":"1.5",`+
 		`"version":1,"components":[{"type":"library","name":"sbomonly","version":"1.0.0",`+
-		`"purl":"pkg:golang/example.com/sbomonly\n1.0.0"}]}`), 0o600); err != nil {
+		`"purl":"pkg:golang/example.com/sbomonly@1.0.0"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
