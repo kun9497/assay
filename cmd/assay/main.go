@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/kun9497/assay/internal/dbcmd"
 	"github.com/kun9497/assay/internal/provider"
 	"github.com/kun9497/assay/internal/provider/osv"
 	"github.com/kun9497/assay/internal/scancmd"
+	"github.com/kun9497/assay/internal/severity"
 	"github.com/kun9497/assay/internal/store"
 )
 
@@ -43,6 +45,15 @@ Commands:
   db status       Show what is in the database and how current it is
   version         Print version information
   help            Show this help
+
+Scan flags (any order, before or after the target):
+  --fail-on <band>      Exit 1 if a finding is at or above <band>
+                        (none, low, medium, high, critical)
+  --fail-on-unknown     Exit 1 if a finding's severity could not be rated
+  --fail-on-incomplete  Exit 2 if any package's evaluation was incomplete
+  --output <format>     table (default) or json
+  --explain <id>        Print one advisory's full Evidence (its own ID, or
+                        any alias/upstream identifier) instead of the report
 `
 
 func main() {
@@ -67,12 +78,23 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return exitOK
 
 	case "scan":
-		if len(args) < 2 {
+		// args[1:] on a length-1 slice (just "scan") is a valid empty slice,
+		// not a panic, and parseScanArgs of an empty slice returns target ==
+		// "" with a nil error — so the target == "" check below already
+		// covers "no target" without a separate len(args) < 2 guard ahead of
+		// it. Two sites emitting the identical message was one more place for
+		// them to drift apart, for no behavioural difference.
+		target, opts, err := parseScanArgs(args[1:])
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return exitError
+		}
+		if target == "" {
 			fmt.Fprintln(stderr, "error: scan requires a target")
 			fmt.Fprint(stderr, usage)
 			return exitError
 		}
-		return scan(context.Background(), args[1], stdout, stderr)
+		return scan(context.Background(), target, opts, stdout, stderr)
 
 	case "db":
 		if len(args) < 2 {
@@ -104,11 +126,164 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 // scan is the pipeline entry point: parse the target into an inventory, match
 // it against the local database, and report.
-func scan(ctx context.Context, target string, stdout, stderr io.Writer) int {
+func scan(ctx context.Context, target string, opts scancmd.Options, stdout, stderr io.Writer) int {
 	path, err := store.DefaultPath()
 	if err != nil {
 		fmt.Fprintf(stderr, "error: locate database: %v\n", err)
 		return exitError
 	}
-	return scancmd.Run(ctx, path, target, stdout, stderr)
+	return scancmd.Run(ctx, path, target, opts, stdout, stderr)
+}
+
+// parseScanArgs splits a scan command's arguments into the target and the
+// --fail-on* gates, in any order relative to each other.
+//
+// The stdlib flag package will not do here: it stops parsing at the first
+// non-flag argument, and the target — a bare positional argument such as
+// alpine:3.19 — IS that first non-flag argument whenever it comes before the
+// flags, which is how every example in the roadmap and the plan writes it
+// (`assay scan alpine:3.19 --fail-on high`). A flag package that stopped
+// there would silently hand "--fail-on" and "high" back as unparsed
+// arguments instead of an error, which is exactly the "typo becomes no gate"
+// failure the brief calls out.
+//
+// An empty target with a nil error is a valid result — the caller checks for
+// it, the same way it already did before this flag parsing existed — so that
+// "scan --fail-on high" with no target reads as "no target", not as an
+// unrelated parse failure.
+func parseScanArgs(args []string) (target string, opts scancmd.Options, err error) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--fail-on":
+			i++
+			if i >= len(args) {
+				return "", scancmd.Options{}, fmt.Errorf("--fail-on requires a value")
+			}
+			if err := setFailOn(&opts, args[i]); err != nil {
+				return "", scancmd.Options{}, err
+			}
+
+		case strings.HasPrefix(a, "--fail-on="):
+			if err := setFailOn(&opts, strings.TrimPrefix(a, "--fail-on=")); err != nil {
+				return "", scancmd.Options{}, err
+			}
+
+		case a == "--fail-on-unknown":
+			opts.FailOnUnknown = true
+
+		case a == "--fail-on-incomplete":
+			opts.FailOnIncomplete = true
+
+		case a == "--output":
+			i++
+			if i >= len(args) {
+				return "", scancmd.Options{}, fmt.Errorf("--output requires a value")
+			}
+			if err := setOutput(&opts, args[i]); err != nil {
+				return "", scancmd.Options{}, err
+			}
+
+		case strings.HasPrefix(a, "--output="):
+			if err := setOutput(&opts, strings.TrimPrefix(a, "--output=")); err != nil {
+				return "", scancmd.Options{}, err
+			}
+
+		case a == "--explain":
+			i++
+			if i >= len(args) {
+				return "", scancmd.Options{}, fmt.Errorf("--explain requires a value")
+			}
+			if err := setExplain(&opts, args[i]); err != nil {
+				return "", scancmd.Options{}, err
+			}
+
+		case strings.HasPrefix(a, "--explain="):
+			if err := setExplain(&opts, strings.TrimPrefix(a, "--explain=")); err != nil {
+				return "", scancmd.Options{}, err
+			}
+
+		case strings.HasPrefix(a, "-"):
+			return "", scancmd.Options{}, fmt.Errorf("unknown flag %q", a)
+
+		default:
+			if target != "" {
+				return "", scancmd.Options{}, fmt.Errorf(
+					"unexpected argument %q: scan takes exactly one target (already have %q)", a, target)
+			}
+			target = a
+		}
+	}
+
+	// The two renderers are mutually exclusive, not last-one-wins, and that
+	// holds for EITHER value of --output: an explicit `--output table
+	// --explain X` is just as much a request for two renderers at once as
+	// `--output json --explain X` is, and letting --explain silently win
+	// over an explicitly requested table would be the same "flag parsed,
+	// then ignored" shape --fail-on's repeat-rejection already guards
+	// against, one level over. Checking only for "json" here previously let
+	// `--output table --explain X` through silently — scancmd.Run's dispatch
+	// says "Three renderers, exactly one chosen", and the parser is the only
+	// place that can make that true rather than merely asserted.
+	if opts.Explain != "" && opts.Output != "" {
+		return "", scancmd.Options{}, fmt.Errorf(
+			"--explain cannot be combined with --output %s: pick one renderer", opts.Output)
+	}
+	return target, opts, nil
+}
+
+// setOutput validates value and stores it on opts.Output, the same
+// once-only, both-spellings-shared shape as setFailOn: a repeat is rejected
+// rather than silently switching renderers mid-flag-list, and an
+// unsupported format names what IS accepted rather than leaving the flag
+// silently inert.
+func setOutput(opts *scancmd.Options, value string) error {
+	if opts.Output != "" {
+		return fmt.Errorf("--output given more than once (already %q)", opts.Output)
+	}
+	switch strings.ToLower(value) {
+	case "table", "json":
+		opts.Output = strings.ToLower(value)
+		return nil
+	default:
+		return fmt.Errorf("invalid output format %q: want one of table, json", value)
+	}
+}
+
+// setExplain validates value and stores it on opts.Explain. A repeat is
+// rejected for the same reason a repeated --fail-on is: a second
+// `--explain` silently overriding the first would explain a different
+// advisory than the one the user thought they asked for.
+func setExplain(opts *scancmd.Options, value string) error {
+	if opts.Explain != "" {
+		return fmt.Errorf("--explain given more than once (already %q)", opts.Explain)
+	}
+	if value == "" {
+		return fmt.Errorf("--explain requires a non-empty advisory id")
+	}
+	opts.Explain = value
+	return nil
+}
+
+// setFailOn validates value and stores it on opts.FailOn, shared by both the
+// "--fail-on value" and "--fail-on=value" spellings so the repeat-rejection
+// and parsing logic exist in exactly one place rather than copy-pasted
+// across both — two copies being "one more place for them to drift apart"
+// is the same reasoning that removed the redundant len(args) < 2 guard
+// above.
+//
+// A repeat is rejected rather than silently taking the last value:
+// `--fail-on critical --fail-on low` quietly loosening the gate is the same
+// "the user thought they set a threshold but did not" shape ParseBand's own
+// error exists to prevent.
+func setFailOn(opts *scancmd.Options, value string) error {
+	if opts.FailOn != nil {
+		return fmt.Errorf("--fail-on given more than once (already %q)", opts.FailOn.String())
+	}
+	b, err := severity.ParseBand(value)
+	if err != nil {
+		return err
+	}
+	opts.FailOn = &b
+	return nil
 }

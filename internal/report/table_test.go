@@ -9,14 +9,178 @@ import (
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"github.com/kun9497/assay/internal/matcher"
 	"github.com/kun9497/assay/internal/pkgmeta"
+	"github.com/kun9497/assay/internal/severity"
 	"github.com/kun9497/assay/internal/version"
 )
+
+// columnStarts returns the offset at which each column's text begins, read off
+// the tabwriter-rendered header.
+//
+// Offsets, not a split on runs of whitespace. tabwriter aligns every row to the
+// same column offsets, so reading them once from the header and slicing each
+// row at the same places survives an EMPTY cell — which a split does not: with
+// no version to print, "svc  Go  GHSA-1  critical (9.8)  -  -" collapses by one
+// column and every field after the gap answers for its neighbour. That is the
+// wrong-column pass this helper exists to prevent, reintroduced inside the
+// helper, and it would be quiet: "-" is the printed filler for two different
+// columns, so the wrong cell can hold the value the test expects.
+//
+// A single space does not separate columns; the header holds "FIXED IN".
+func columnStarts(header string) []int {
+	var starts []int
+	for i := 0; i < len(header); {
+		if header[i] != ' ' {
+			if len(starts) == 0 {
+				starts = append(starts, i)
+			}
+			i++
+			continue
+		}
+		j := i
+		for j < len(header) && header[j] == ' ' {
+			j++
+		}
+		if j-i >= 2 && j < len(header) {
+			starts = append(starts, j)
+		}
+		i = j
+	}
+	return starts
+}
+
+// cellAt resolves a column by its header NAME rather than a hardcoded index,
+// then returns that column's value in the row whose ADVISORY cell is exactly
+// advisoryID. Resolving by name means the test still pins the right thing if an
+// unrelated column is inserted or reordered; it fails when the column asked for
+// stops lining up with the value it is supposed to hold — SEVERITY and ALIASES
+// swapped while the header row was left alone, say.
+//
+// The row is matched on the ADVISORY cell, not on the line containing the ID
+// anywhere. Advisory IDs nest (GHSA-1 is inside GHSA-10) and the same ID
+// appears again in the "Not evaluated" block, so a substring match over the
+// whole output can select a line that is not the finding's row at all.
+func cellAt(t *testing.T, out, advisoryID, column string) string {
+	t.Helper()
+	lines := strings.Split(out, "\n")
+	starts := columnStarts(lines[0])
+	names := make([]string, len(starts))
+	for i := range starts {
+		names[i] = sliceColumn(lines[0], starts, i)
+	}
+
+	idx, advisoryIdx := -1, -1
+	for i, h := range names {
+		if h == column {
+			idx = i
+		}
+		if h == "ADVISORY" {
+			advisoryIdx = i
+		}
+	}
+	if idx == -1 {
+		t.Fatalf("no %q column in header %v:\n%s", column, names, out)
+	}
+	if advisoryIdx == -1 {
+		t.Fatalf("no ADVISORY column to identify rows by, header %v:\n%s", names, out)
+	}
+
+	for _, l := range lines[1:] {
+		if sliceColumn(l, starts, advisoryIdx) != advisoryID {
+			continue
+		}
+		return sliceColumn(l, starts, idx)
+	}
+	t.Fatalf("no row has advisory %q in its ADVISORY column:\n%s", advisoryID, out)
+	return ""
+}
+
+// sliceColumn cuts column i out of a rendered line using the header's offsets.
+func sliceColumn(line string, starts []int, i int) string {
+	if i >= len(starts) || starts[i] >= len(line) {
+		// Past the end of this line: tabwriter does not pad the final cell,
+		// so a trailing empty column simply is not there.
+		return ""
+	}
+	end := len(line)
+	if i+1 < len(starts) && starts[i+1] < end {
+		end = starts[i+1]
+	}
+	return strings.TrimSpace(line[starts[i]:end])
+}
+
+// The helper's own regression test. An empty cell used to collapse the split
+// and hand back a neighbouring column's value with no error — the wrong-column
+// pass, inside the thing built to catch it. A package with no version renders
+// an empty VERSION cell, which is also a real state: the cataloger reports
+// packages it could not version.
+func TestCellAt_AnEmptyCellDoesNotShiftTheColumns(t *testing.T) {
+	var buf bytes.Buffer
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "svc", Version: "", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{ID: "GHSA-empty"},
+		Severity: severity.Critical,
+		Score:    9.8,
+	}}}
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, tt := range []struct{ column, want string }{
+		{"PACKAGE", "svc"},
+		{"VERSION", ""},
+		{"ECOSYSTEM", "Go"},
+		{"ADVISORY", "GHSA-empty"},
+		{"SEVERITY", "critical (9.8)"},
+		{"ALIASES", "-"},
+		{"FIXED IN", "-"},
+	} {
+		if got := cellAt(t, out, "GHSA-empty", tt.column); got != tt.want {
+			t.Errorf("cellAt(%s) = %q, want %q\nrendered:\n%s", tt.column, got, tt.want, out)
+		}
+	}
+}
+
+// Advisory IDs nest, and the row has to be found by its ADVISORY cell rather
+// than by the ID appearing anywhere on the line.
+func TestCellAt_PicksTheRowByItsAdvisoryCell(t *testing.T) {
+	var buf bytes.Buffer
+	res := matcher.Result{Findings: []matcher.Finding{
+		{
+			Package:  pkgmeta.Package{Name: "a", Version: "1", Ecosystem: "Go"},
+			Advisory: advisory.Advisory{ID: "GHSA-10"},
+			Severity: severity.Low, Score: 2.0,
+		},
+		{
+			Package:  pkgmeta.Package{Name: "b", Version: "1", Ecosystem: "Go"},
+			Advisory: advisory.Advisory{ID: "GHSA-1"},
+			Severity: severity.High, Score: 7.5,
+		},
+	}}
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 2, Cataloged: 2}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	// GHSA-1 is a substring of GHSA-10, which is rendered first. A substring
+	// match over the line would answer with GHSA-10's severity.
+	if got := cellAt(t, out, "GHSA-1", "SEVERITY"); got != "high (7.5)" {
+		t.Errorf("cellAt(GHSA-1, SEVERITY) = %q, want high (7.5) - it matched the GHSA-10 row", got)
+	}
+	if got := cellAt(t, out, "GHSA-10", "SEVERITY"); got != "low (2.0)" {
+		t.Errorf("cellAt(GHSA-10, SEVERITY) = %q, want low (2.0)", got)
+	}
+}
 
 func TestTable_Findings(t *testing.T) {
 	res := matcher.Result{Findings: []matcher.Finding{{
 		Package:  pkgmeta.Package{Name: "github.com/foo/bar", Version: "v1.2.3", Ecosystem: "Go"},
 		Advisory: advisory.Advisory{ID: "GHSA-hit", Summary: "Code injection"},
 		Evidence: version.Evidence{Introduced: "0", Fixed: "1.5.0", Reason: "below the fix 1.5.0"},
+		// A real band is given explicitly. Match always sets one; leaving it
+		// at the zero value here would render "none (0.0)" for a finding that
+		// was simply never asked about severity, which is the same coercion
+		// D17 forbids, reached through a fixture instead of a code path.
+		Severity: severity.High,
+		Score:    7.5,
 	}}}
 	var buf bytes.Buffer
 	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
@@ -123,6 +287,8 @@ func TestTable_FindingCarriesItsAliases(t *testing.T) {
 		Package:  pkgmeta.Package{Name: "Jinja2", Version: "2.11.2", Ecosystem: "PyPI"},
 		Advisory: advisory.Advisory{ID: "GHSA-g3rq-g295-4j3m", Aliases: []string{"CVE-2020-28493"}},
 		Evidence: version.Evidence{Fixed: "2.11.3"},
+		Severity: severity.High,
+		Score:    7.5,
 	}}}
 	var buf bytes.Buffer
 	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
@@ -169,9 +335,9 @@ func TestTable_NoFindings(t *testing.T) {
 func TestTable_Deterministic(t *testing.T) {
 	res := matcher.Result{Findings: []matcher.Finding{
 		{Package: pkgmeta.Package{Name: "a", Version: "1", Ecosystem: "Go"},
-			Advisory: advisory.Advisory{ID: "GHSA-1"}},
+			Advisory: advisory.Advisory{ID: "GHSA-1"}, Severity: severity.High, Score: 7.5},
 		{Package: pkgmeta.Package{Name: "b", Version: "1", Ecosystem: "Go"},
-			Advisory: advisory.Advisory{ID: "GHSA-2"}},
+			Advisory: advisory.Advisory{ID: "GHSA-2"}, Severity: severity.Medium, Score: 5.0},
 	}}
 	var first, second bytes.Buffer
 	if _, err := Table(&first, res, cyclonedx.Stats{}); err != nil {
@@ -199,6 +365,8 @@ func TestTable_ShowsTheSourcePackageWhenItIsWhatMatched(t *testing.T) {
 		// the assertion passed with the source package unprinted.
 		Advisory:    advisory.Advisory{ID: "CVE-2024-12345"},
 		MatchedName: "openssl",
+		Severity:    severity.High,
+		Score:       7.5,
 	}}}
 
 	var buf bytes.Buffer
@@ -222,6 +390,8 @@ func TestTable_DoesNotRepeatTheNameWhenItMatchedDirectly(t *testing.T) {
 		Package:     pkgmeta.Package{Name: "busybox", Version: "1.36.1-r15", Ecosystem: "Alpine:v3.19"},
 		Advisory:    advisory.Advisory{ID: "CVE-2024-busybox"},
 		MatchedName: "busybox",
+		Severity:    severity.High,
+		Score:       7.5,
 	}}}
 
 	var buf bytes.Buffer
@@ -270,6 +440,8 @@ func TestTable_FindingCarriesIdentifiersFromAliasesAndUpstream(t *testing.T) {
 			res := matcher.Result{Findings: []matcher.Finding{{
 				Package:  pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "e"},
 				Advisory: tt.adv,
+				Severity: severity.High,
+				Score:    7.5,
 			}}}
 			var buf bytes.Buffer
 			if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
@@ -293,6 +465,8 @@ func TestTable_OtherIdentifiersAreDeduplicated(t *testing.T) {
 			Aliases:  []string{"CVE-2025-46394"},
 			Upstream: []string{"CVE-2025-46394", "ALPINE-CVE-2025-46394"},
 		},
+		Severity: severity.High,
+		Score:    7.5,
 	}}}
 	var buf bytes.Buffer
 	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
@@ -361,5 +535,128 @@ func TestTable_ComponentsTheCatalogerDroppedBreakTheCleanHeadline(t *testing.T) 
 	// the sentence, not the gate.
 	if !sum.Trustworthy() {
 		t.Error("Trustworthy() changed; this is a wording fix")
+	}
+}
+
+// D13: the band and its score are rendered together, and Unknown must not
+// print a fabricated score. "unknown (0.0)" would read as a real rating of
+// zero — the exact coercion D17 exists to forbid — so Unknown gets no
+// parenthetical at all.
+func TestFormatSeverity(t *testing.T) {
+	if got := formatSeverity(severity.Critical, 9.8); got != "critical (9.8)" {
+		t.Errorf("formatSeverity(critical, 9.8) = %q, want %q", got, "critical (9.8)")
+	}
+	if got := formatSeverity(severity.Unknown, 0); got != "unknown" {
+		t.Errorf("formatSeverity(unknown, 0) = %q, want %q", got, "unknown")
+	}
+}
+
+// The findings table must show the severity a reader would use to triage —
+// the band together with the score behind it, not just one or the other.
+func TestTable_SeverityColumn(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "svc", Version: "1.0.0", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{ID: "GHSA-sev"},
+		Severity: severity.Critical,
+		Score:    9.8,
+	}}}
+	var buf bytes.Buffer
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "SEVERITY") {
+		t.Errorf("header is missing the SEVERITY column:\n%s", out)
+	}
+	if !strings.Contains(out, "critical (9.8)") {
+		t.Errorf("row does not show the band and score together:\n%s", out)
+	}
+}
+
+// Neither assertion in TestTable_SeverityColumn pins WHERE the severity cell
+// sits, only that it exists somewhere in the output. A reorder of the
+// Fprintf args that left the header alone — SEVERITY and ALIASES swapped,
+// say — would pass it: "SEVERITY" is still in the header text and
+// "critical (9.8)" is still in the row text, just under the wrong column.
+// Readers triage by column position, so that swap is a real failure, not a
+// cosmetic one. This resolves every column by its header name and checks the
+// value landed where the header claims.
+func TestTable_ColumnOrderMatchesHeader(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "svc", Version: "1.0.0", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{ID: "GHSA-sev", Aliases: []string{"CVE-2024-00001"}},
+		Evidence: version.Evidence{Fixed: "2.0.0"},
+		Severity: severity.Critical,
+		Score:    9.8,
+	}}}
+	var buf bytes.Buffer
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	want := map[string]string{
+		"PACKAGE":   "svc",
+		"VERSION":   "1.0.0",
+		"ECOSYSTEM": "Go",
+		"ADVISORY":  "GHSA-sev",
+		"SEVERITY":  "critical (9.8)",
+		"ALIASES":   "CVE-2024-00001",
+		"FIXED IN":  "2.0.0",
+	}
+	for column, wantVal := range want {
+		if got := cellAt(t, out, "GHSA-sev", column); got != wantVal {
+			t.Errorf("column %q = %q, want %q — SEVERITY and ALIASES must not be "+
+				"swapped:\n%s", column, got, wantVal, out)
+		}
+	}
+}
+
+// D17: the unknown-severity count belongs in the summary on every run, not
+// only when it is non-zero. A count that appears conditionally teaches
+// readers not to look for it, which is the same failure as a threshold that
+// silently excludes what it could not judge.
+func TestTable_UnknownSeverityCountIsAlwaysPrinted(t *testing.T) {
+	var buf bytes.Buffer
+	sum, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{Components: 1, Cataloged: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "0 unknown severity") {
+		t.Errorf("summary omits the unknown-severity count when it is zero:\n%s", buf.String())
+	}
+	if sum.UnknownSeverity != 0 {
+		t.Errorf("Summary.UnknownSeverity = %d, want 0", sum.UnknownSeverity)
+	}
+}
+
+// The count must actually track findings whose severity could not be rated,
+// not just be present. Task 5's --fail-on-unknown reads Summary.UnknownSeverity
+// directly, so a Summary that always reports 0 would pass the test above while
+// making that flag inert.
+func TestTable_UnknownSeverityCountReflectsFindings(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{
+		{Package: pkgmeta.Package{Name: "a", Version: "1", Ecosystem: "Go"},
+			Advisory: advisory.Advisory{ID: "GHSA-1"}, Severity: severity.Unknown},
+		{Package: pkgmeta.Package{Name: "b", Version: "1", Ecosystem: "Go"},
+			Advisory: advisory.Advisory{ID: "GHSA-2"}, Severity: severity.Critical, Score: 9.8},
+	}}
+	var buf bytes.Buffer
+	sum, err := Table(&buf, res, cyclonedx.Stats{Components: 2, Cataloged: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.UnknownSeverity != 1 {
+		t.Errorf("Summary.UnknownSeverity = %d, want 1", sum.UnknownSeverity)
+	}
+	if !strings.Contains(buf.String(), "1 unknown severity") {
+		t.Errorf("summary line does not carry the unknown-severity count:\n%s", buf.String())
+	}
+	// The row itself must say "unknown", not a coerced real band. A mutation
+	// that forced Unknown to Low before formatting would leave the summary
+	// line above untouched (it is driven from Finding.Severity directly, not
+	// from the rendered row) while the table quietly claimed a 0.0-adjacent
+	// rating for a finding nothing rated — the report contradicting itself.
+	if got := cellAt(t, buf.String(), "GHSA-1", "SEVERITY"); got != "unknown" {
+		t.Errorf("GHSA-1's SEVERITY column = %q, want \"unknown\"", got)
 	}
 }

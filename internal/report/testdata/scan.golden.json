@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "findings": [
+    {
+      "package": {
+        "name": "libssl3",
+        "version": "3.1.4-r5",
+        "ecosystem": "Alpine:v3.19",
+        "purl": "pkg:apk/alpine/libssl3@3.1.4-r5?arch=x86_64",
+        "source": {
+          "name": "openssl",
+          "version": "3.1.4-r5"
+        },
+        "locations": [
+          {
+            "path": "lib/apk/db/installed",
+            "layerDigest": "sha256:abc123"
+          }
+        ]
+      },
+      "matchedName": "openssl",
+      "advisory": {
+        "id": "CVE-2024-12345",
+        "aliases": [
+          "GHSA-xxxx-yyyy-zzzz"
+        ],
+        "summary": "OpenSSL heap overflow"
+      },
+      "severity": "critical",
+      "score": 9.8,
+      "evidence": {
+        "rangeType": "ECOSYSTEM",
+        "introduced": "0",
+        "fixed": "3.1.4-r6",
+        "reason": "3.1.4-r5 is at or above any earlier version and below the fix 3.1.4-r6"
+      }
+    },
+    {
+      "package": {
+        "name": "example.com/bar",
+        "version": "v1.2.3",
+        "ecosystem": "Go",
+        "purl": "pkg:golang/example.com/bar@v1.2.3"
+      },
+      "matchedName": "example.com/bar",
+      "advisory": {
+        "id": "GHSA-abcd",
+        "upstream": [
+          "CVE-2023-99999"
+        ]
+      },
+      "severity": "unknown",
+      "score": 0,
+      "evidence": {
+        "rangeType": "SEMVER",
+        "introduced": "0",
+        "lastAffected": "2.0.0",
+        "reason": "v1.2.3 is at or above any earlier version and at or below 2.0.0"
+      }
+    }
+  ],
+  "skipped": [
+    {
+      "package": {
+        "name": "x",
+        "version": "1.0.0",
+        "ecosystem": "Go"
+      },
+      "reason": "no version comparer for ecosystem \"bogus\""
+    },
+    {
+      "package": {
+        "name": "y",
+        "version": "2.0.0",
+        "ecosystem": "Go"
+      },
+      "advisoryId": "GHSA-bad",
+      "reason": "comparing 2.0.0: invalid version"
+    }
+  ],
+  "summary": {
+    "components": 5,
+    "evaluated": 3,
+    "notEvaluated": 2,
+    "incompleteChecks": 1,
+    "findings": 2,
+    "unknownSeverity": 1
+  }
+}

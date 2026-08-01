@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,6 +17,9 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 
+	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/report"
+	"github.com/kun9497/assay/internal/severity"
 	"github.com/kun9497/assay/internal/source"
 	"github.com/kun9497/assay/internal/store"
 )
@@ -24,7 +29,7 @@ func TestRun_MissingDatabase(t *testing.T) {
 	os.WriteFile(sbom, []byte(`{"bomFormat":"CycloneDX","components":[]}`), 0o600)
 
 	var out, errOut bytes.Buffer
-	code := Run(context.Background(), filepath.Join(t.TempDir(), "absent.db"), sbom, &out, &errOut)
+	code := Run(context.Background(), filepath.Join(t.TempDir(), "absent.db"), sbom, Options{}, &out, &errOut)
 	if code != 2 {
 		t.Errorf("Run without a database = %d, want 2", code)
 	}
@@ -49,7 +54,7 @@ func TestRun_MissingDatabase(t *testing.T) {
 func TestRun_MissingSBOM(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := Run(context.Background(), filepath.Join(t.TempDir(), "absent.db"),
-		"docker-archive:"+filepath.Join(t.TempDir(), "absent.cdx.json"), &out, &errOut)
+		"docker-archive:"+filepath.Join(t.TempDir(), "absent.cdx.json"), Options{}, &out, &errOut)
 	if code != 2 {
 		t.Errorf("Run with a missing SBOM = %d, want 2", code)
 	}
@@ -186,7 +191,7 @@ func TestRun_TargetKinds(t *testing.T) {
 			t.Fatal(err)
 		}
 		var out, errOut bytes.Buffer
-		if code := Run(context.Background(), dbPath, sbom, &out, &errOut); code != 0 {
+		if code := Run(context.Background(), dbPath, sbom, Options{}, &out, &errOut); code != 0 {
 			t.Errorf("Run(sbom) = %d, want 0 (stderr: %s)", code, errOut.String())
 		}
 		if !strings.Contains(out.String(), "no components") {
@@ -201,7 +206,7 @@ func TestRun_TargetKinds(t *testing.T) {
 			apkDBPath:     apkOneRecord,
 		})
 		var out, errOut bytes.Buffer
-		if code := Run(context.Background(), dbPath, "docker-archive:"+tarPath, &out, &errOut); code != 0 {
+		if code := Run(context.Background(), dbPath, "docker-archive:"+tarPath, Options{}, &out, &errOut); code != 0 {
 			t.Errorf("Run(docker-archive) = %d, want 0 (stderr: %s)", code, errOut.String())
 		}
 		if !strings.Contains(out.String(), "1 package") {
@@ -217,7 +222,7 @@ func TestRun_TargetKinds(t *testing.T) {
 		// proof of which loader it reached, without ever touching the
 		// network.
 		var out, errOut bytes.Buffer
-		code := Run(context.Background(), dbPath, "NOT a valid ref!!", &out, &errOut)
+		code := Run(context.Background(), dbPath, "NOT a valid ref!!", Options{}, &out, &errOut)
 		if code != 2 {
 			t.Errorf("Run(invalid ref) = %d, want 2", code)
 		}
@@ -235,7 +240,7 @@ func TestRun_UnreadableTargetExits2(t *testing.T) {
 	target := "docker-archive:" + filepath.Join(t.TempDir(), "absent.tar")
 
 	var out, errOut bytes.Buffer
-	code := Run(context.Background(), dbPath, target, &out, &errOut)
+	code := Run(context.Background(), dbPath, target, Options{}, &out, &errOut)
 	if code != 2 {
 		t.Errorf("Run(unreadable image) = %d, want 2", code)
 	}
@@ -258,7 +263,7 @@ func TestRun_ImageWithoutOSReleaseIsNotClean(t *testing.T) {
 	})
 
 	var out, errOut bytes.Buffer
-	code := Run(context.Background(), dbPath, "docker-archive:"+tarPath, &out, &errOut)
+	code := Run(context.Background(), dbPath, "docker-archive:"+tarPath, Options{}, &out, &errOut)
 	if code != 2 {
 		t.Errorf("Run(image without os-release) = %d, want 2 (stdout: %s, stderr: %s)",
 			code, out.String(), errOut.String())
@@ -280,7 +285,7 @@ func TestRun_ImageWithoutApkDBIsNotClean(t *testing.T) {
 	})
 
 	var out, errOut bytes.Buffer
-	code := Run(context.Background(), dbPath, "docker-archive:"+tarPath, &out, &errOut)
+	code := Run(context.Background(), dbPath, "docker-archive:"+tarPath, Options{}, &out, &errOut)
 	if code != 2 {
 		t.Errorf("Run(image without apk db) = %d, want 2 (stdout: %s, stderr: %s)",
 			code, out.String(), errOut.String())
@@ -426,7 +431,7 @@ func TestRun_UncoveredEcosystemExits2WithInstructions(t *testing.T) {
 	}
 
 	var out, errOut bytes.Buffer
-	if code := Run(context.Background(), dbPath, sbom, &out, &errOut); code != 2 {
+	if code := Run(context.Background(), dbPath, sbom, Options{}, &out, &errOut); code != 2 {
 		t.Fatalf("Run = %d, want 2 (stdout: %s)", code, out.String())
 	}
 	if strings.Contains(out.String(), "No known vulnerabilities") {
@@ -438,5 +443,521 @@ func TestRun_UncoveredEcosystemExits2WithInstructions(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "db update") {
 		t.Errorf("output does not say how to fix it:\n%s", out.String())
+	}
+}
+
+// --- fixtures for TestRun_ExitCodeMatrix ---
+
+// vecCritical and vecMedium are real vectors already pinned elsewhere in this
+// repository (internal/matcher/matcher_test.go) against their exact bands and
+// scores ("critical, 9.8" and "medium, 6.5"), so reusing them here does not
+// depend on this package re-deriving what internal/severity already owns.
+const (
+	vecCritical = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+	vecMedium   = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N"
+)
+
+// Addressable severity.Band values for Options.FailOn, which takes a pointer
+// so "not requested" (nil) is distinguishable from severity.None, a real,
+// requestable threshold and also Band's zero value.
+var (
+	bandNone     = severity.None
+	bandLow      = severity.Low
+	bandMedium   = severity.Medium
+	bandHigh     = severity.High
+	bandCritical = severity.Critical
+)
+
+// matrixAdv is one advisory for the exit-code matrix below, always affecting
+// Go package "example.com/<pkg>" at versions [0, fixed). Leaving fixed empty
+// asks for a malformed bound ("not-a-version") instead: version.SemVer
+// rejects it, so the matcher records an advisory-scoped skip
+// (report.Summary.IncompleteChecks) for the package rather than a finding —
+// a package that WAS evaluated, just not completely.
+type matrixAdv struct {
+	id      string
+	pkg     string
+	fixed   string
+	vectors []string // CVSS vectors; nil -> the finding's severity is Unknown
+}
+
+// buildMatrixDB writes advisories into a fresh database that covers "Go"
+// only. That is enough for every fixture below: the one unsupported-ecosystem
+// package in the "full" fixture never reaches the matcher at all, so its
+// ecosystem never needs to be covered.
+func buildMatrixDB(t *testing.T, advisories []matrixAdv) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	for _, adv := range advisories {
+		fixed := adv.fixed
+		if fixed == "" {
+			fixed = "not-a-version"
+		}
+		var sev []advisory.Severity
+		for _, v := range adv.vectors {
+			sev = append(sev, advisory.Severity{Type: "CVSS_V3", Score: v})
+		}
+		a := advisory.Advisory{
+			ID:   adv.id,
+			Kind: advisory.KindVulnerability,
+			Affected: []advisory.Affected{{
+				Ecosystem: "Go",
+				Name:      "example.com/" + adv.pkg,
+				Ranges: []advisory.Range{{
+					Type:   advisory.RangeSemver,
+					Events: []advisory.Event{{Introduced: "0"}, {Fixed: fixed}},
+				}},
+			}},
+			Severity: sev,
+		}
+		if err := w.Put(a); err != nil {
+			t.Fatalf("Put(%s): %v", adv.id, err)
+		}
+	}
+	if err := w.SetMeta(store.Meta{
+		Providers: map[string]store.Provenance{"osv": {Ecosystems: []string{"Go"}}},
+	}); err != nil {
+		t.Fatalf("SetMeta: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	return path
+}
+
+// matrixPkg is one SBOM component for the exit-code matrix below. purlType
+// "cargo" is deliberately unsupported (pkgmeta.EcosystemForPURLType has no
+// entry for it): the cataloger drops it before the matcher ever sees it,
+// which is the simplest way to produce a component the report counts as not
+// evaluated, without a second database-coverage scenario.
+type matrixPkg struct {
+	name, purlType string
+}
+
+// buildMatrixSBOM writes a CycloneDX document naming each package at version
+// 1.0.0 — inside every matrixAdv range above, which all open at "0".
+func buildMatrixSBOM(t *testing.T, pkgs []matrixPkg) string {
+	t.Helper()
+	comps := make([]string, 0, len(pkgs))
+	for _, p := range pkgs {
+		purl := fmt.Sprintf("pkg:cargo/%s@1.0.0", p.name)
+		if p.purlType != "cargo" {
+			purl = fmt.Sprintf("pkg:%s/example.com/%s@1.0.0", p.purlType, p.name)
+		}
+		comps = append(comps, fmt.Sprintf(
+			`{"type":"library","name":%q,"version":"1.0.0","purl":%q}`, p.name, purl))
+	}
+	doc := fmt.Sprintf(`{"bomFormat":"CycloneDX","specVersion":"1.5","version":1,"components":[%s]}`,
+		strings.Join(comps, ","))
+	path := filepath.Join(t.TempDir(), "s.cdx.json")
+	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	return path
+}
+
+// TestRun_ExitCodeMatrix states, once and in one place, every combination of
+// the three --fail-on* gates that changes the exit code: findings at and
+// below a threshold, an unrated finding, an unevaluated package, an
+// incompletely-checked one, each flag on and off, and D11's 2 > 1 > 0
+// precedence between them. This is the contract CI depends on.
+func TestRun_ExitCodeMatrix(t *testing.T) {
+	// "full": a critical finding, a medium finding, an unrated finding, one
+	// package the cataloger dropped (unsupported ecosystem -> NotEvaluated),
+	// and one advisory this database cannot evaluate ("badcompare", a
+	// malformed fixed version -> IncompleteChecks). Every gate has something
+	// to fire on at once, which is what the precedence cases need.
+	full := func(t *testing.T) (db, sbom string) {
+		db = buildMatrixDB(t, []matrixAdv{
+			{id: "GHSA-critical", pkg: "critical", fixed: "2.0.0", vectors: []string{vecCritical}},
+			{id: "GHSA-medium", pkg: "medium", fixed: "2.0.0", vectors: []string{vecMedium}},
+			{id: "GHSA-unknownsev", pkg: "unknownsev", fixed: "2.0.0"}, // no vectors -> Unknown
+			{id: "GHSA-badcompare", pkg: "badcompare"},                 // fixed == "" -> malformed
+		})
+		sbom = buildMatrixSBOM(t, []matrixPkg{
+			{name: "critical", purlType: "golang"},
+			{name: "medium", purlType: "golang"},
+			{name: "unknownsev", purlType: "golang"},
+			{name: "badcompare", purlType: "golang"},
+			{name: "somecrate", purlType: "cargo"}, // dropped by the cataloger
+		})
+		return db, sbom
+	}
+
+	// "belowThreshold": one medium finding, nothing incomplete. Isolates
+	// "does not trip" from full's always-present critical finding.
+	belowThreshold := func(t *testing.T) (db, sbom string) {
+		db = buildMatrixDB(t, []matrixAdv{
+			{id: "GHSA-medium", pkg: "medium", fixed: "2.0.0", vectors: []string{vecMedium}},
+		})
+		sbom = buildMatrixSBOM(t, []matrixPkg{{name: "medium", purlType: "golang"}})
+		return db, sbom
+	}
+
+	// "unknownOnly": one unrated finding, nothing else. Isolates D17's "not
+	// even --fail-on none" guarantee from full's critical/medium findings.
+	unknownOnly := func(t *testing.T) (db, sbom string) {
+		db = buildMatrixDB(t, []matrixAdv{
+			{id: "GHSA-unknownsev", pkg: "unknownsev", fixed: "2.0.0"},
+		})
+		sbom = buildMatrixSBOM(t, []matrixPkg{{name: "unknownsev", purlType: "golang"}})
+		return db, sbom
+	}
+
+	// "clean": fully evaluated, nothing found, nothing incomplete.
+	clean := func(t *testing.T) (db, sbom string) {
+		db = buildMatrixDB(t, nil)
+		sbom = buildMatrixSBOM(t, []matrixPkg{{name: "notvulnerable", purlType: "golang"}})
+		return db, sbom
+	}
+
+	// "incompleteOnly": IncompleteChecks > 0, NotEvaluated == 0 - the package
+	// itself IS evaluated (Go, covered, a comparer exists); only the one
+	// advisory naming it has a bound the comparer rejects. Isolates the
+	// IncompleteChecks half of FailOnIncomplete's OR from full's
+	// always-present cataloger-dropped package.
+	incompleteOnly := func(t *testing.T) (db, sbom string) {
+		db = buildMatrixDB(t, []matrixAdv{
+			{id: "GHSA-badcompare", pkg: "badcompare"}, // fixed == "" -> malformed
+		})
+		sbom = buildMatrixSBOM(t, []matrixPkg{{name: "badcompare", purlType: "golang"}})
+		return db, sbom
+	}
+
+	// "notEvaluatedOnly": NotEvaluated > 0, IncompleteChecks == 0 - a second,
+	// unrelated package the cataloger drops (unsupported purl type), with no
+	// advisory anywhere that could produce an advisory-scoped skip. Isolates
+	// the NotEvaluated half of FailOnIncomplete's OR from full's
+	// always-present badcompare advisory.
+	notEvaluatedOnly := func(t *testing.T) (db, sbom string) {
+		db = buildMatrixDB(t, nil)
+		sbom = buildMatrixSBOM(t, []matrixPkg{
+			{name: "notvulnerable", purlType: "golang"},
+			{name: "somecrate", purlType: "cargo"}, // dropped by the cataloger
+		})
+		return db, sbom
+	}
+
+	cases := []struct {
+		name    string
+		fixture func(t *testing.T) (db, sbom string)
+		opts    Options
+		want    int
+	}{
+		{"no flags: exit 0 is unchanged even with findings present", full, Options{}, 0},
+		{"--fail-on high trips on the critical finding", full, Options{FailOn: &bandHigh}, 1},
+		{"--fail-on critical trips exactly at the threshold", full, Options{FailOn: &bandCritical}, 1},
+		{"--fail-on-unknown trips on its own", full, Options{FailOnUnknown: true}, 1},
+		{"--fail-on-incomplete trips on its own", full, Options{FailOnIncomplete: true}, 2},
+		{"precedence: incomplete beats fail-on (D11, 2 > 1)", full,
+			Options{FailOn: &bandCritical, FailOnIncomplete: true}, 2},
+		{"precedence: incomplete beats fail-on-unknown (D11, 2 > 1)", full,
+			Options{FailOnUnknown: true, FailOnIncomplete: true}, 2},
+		{"precedence: all three gates set together still exits 2, not 1", full,
+			Options{FailOn: &bandLow, FailOnUnknown: true, FailOnIncomplete: true}, 2},
+
+		{"--fail-on critical does not trip on a below-threshold finding", belowThreshold,
+			Options{FailOn: &bandCritical}, 0},
+		{"--fail-on medium trips exactly at the boundary", belowThreshold,
+			Options{FailOn: &bandMedium}, 1},
+
+		{"an unknown finding never trips --fail-on none (D17) - the opposite reading is intuitive",
+			unknownOnly, Options{FailOn: &bandNone}, 0},
+		{"an unknown finding never trips when --fail-on is not set at all", unknownOnly, Options{}, 0},
+		{"--fail-on-unknown is the flag that catches what --fail-on none does not",
+			unknownOnly, Options{FailOnUnknown: true}, 1},
+
+		{"--fail-on-incomplete does not fire when nothing is incomplete", clean,
+			Options{FailOnIncomplete: true}, 0},
+		{"a clean scan with every gate on still exits 0", clean,
+			Options{FailOn: &bandNone, FailOnUnknown: true, FailOnIncomplete: true}, 0},
+
+		// Both halves of FailOnIncomplete's OR, each pinned on its own so a
+		// mutation that drops either one - "simplifying" to just NotEvaluated,
+		// or just IncompleteChecks - cannot pass by only ever being exercised
+		// alongside the other half in the "full" fixture.
+		{"--fail-on-incomplete fires on IncompleteChecks alone, no NotEvaluated", incompleteOnly,
+			Options{FailOnIncomplete: true}, 2},
+		{"--fail-on-incomplete fires on NotEvaluated alone, no IncompleteChecks", notEvaluatedOnly,
+			Options{FailOnIncomplete: true}, 2},
+
+		// --fail-on-unknown must not degenerate into "fail on any rated
+		// finding": every other row either has an unrated finding present
+		// (fires under the correct behaviour and a broken one alike) or no
+		// findings at all. belowThreshold has only a rated (medium) finding.
+		{"--fail-on-unknown does not trip when every finding is rated", belowThreshold,
+			Options{FailOnUnknown: true}, 0},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db, sbom := tc.fixture(t)
+			var out, errOut bytes.Buffer
+			got := Run(context.Background(), db, sbom, tc.opts, &out, &errOut)
+			if got != tc.want {
+				t.Errorf("Run() = %d, want %d\nstdout:\n%s\nstderr:\n%s",
+					got, tc.want, out.String(), errOut.String())
+			}
+		})
+	}
+}
+
+// TestRun_OutputJSON is the wiring test for Options.Output == "json": Run
+// must call report.JSON instead of report.Table, and --output json must not
+// merely add JSON alongside the table — `assay scan ... --output json | jq`
+// requires the JSON document to be the ONLY thing on stdout.
+func TestRun_OutputJSON(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-json-medium", pkg: "jsonmedium", fixed: "2.0.0", vectors: []string{vecMedium}},
+	})
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "jsonmedium", purlType: "golang"}})
+
+	t.Run("plain --output json exits 0 and writes only the document", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		code := Run(context.Background(), db, sbom, Options{Output: "json"}, &out, &errOut)
+		if code != 0 {
+			t.Fatalf("Run() = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, out.String(), errOut.String())
+		}
+		var doc report.Document
+		if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+			t.Fatalf("stdout is not valid JSON: %v\n%s", err, out.String())
+		}
+		if doc.SchemaVersion != 1 {
+			t.Errorf("SchemaVersion = %d, want 1", doc.SchemaVersion)
+		}
+		if len(doc.Findings) != 1 || doc.Findings[0].Advisory.ID != "GHSA-json-medium" {
+			t.Errorf("Findings = %+v, want the one medium finding", doc.Findings)
+		}
+		// The table's own header would prove Run fell back to Table instead
+		// of replacing it, silently defeating the "ONLY thing on stdout"
+		// contract --output json exists to uphold.
+		if strings.Contains(out.String(), "PACKAGE") {
+			t.Errorf("stdout contains the table header; --output json must replace "+
+				"Table entirely:\n%s", out.String())
+		}
+	})
+
+	// A dropped Output field on the way into Run would silently fall back to
+	// Table while still honouring FailOn — this pins that --output json and
+	// --fail-on compose, not just that each works alone.
+	t.Run("--output json still honours --fail-on", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		code := Run(context.Background(), db, sbom, Options{Output: "json", FailOn: &bandMedium}, &out, &errOut)
+		if code != 1 {
+			t.Fatalf("Run() = %d, want 1 (exitFindings)\nstdout:\n%s\nstderr:\n%s",
+				code, out.String(), errOut.String())
+		}
+		var doc report.Document
+		if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+			t.Fatalf("stdout is not valid JSON even though --fail-on tripped: %v\n%s", err, out.String())
+		}
+	})
+}
+
+// TestRun_Explain is the wiring test for Options.Explain: Run must call
+// report.Explain instead of report.Table/JSON, the verdict (--fail-on* gates,
+// D11) must still apply on top of it, and an identifier matching nothing
+// must be exit 2 with stdout untouched rather than a quiet, empty success.
+func TestRun_Explain(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-explain-wired", pkg: "explainwired", fixed: "2.0.0", vectors: []string{vecCritical}},
+	})
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "explainwired", purlType: "golang"}})
+
+	t.Run("matching id: writes the explanation, table replaced entirely", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		code := Run(context.Background(), db, sbom, Options{Explain: "GHSA-explain-wired"}, &out, &errOut)
+		if code != 0 {
+			t.Fatalf("Run() = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, out.String(), errOut.String())
+		}
+		if !strings.Contains(out.String(), "GHSA-explain-wired") {
+			t.Errorf("stdout does not contain the explanation:\n%s", out.String())
+		}
+		if strings.Contains(out.String(), "PACKAGE") {
+			t.Errorf("stdout contains the table header; --explain must replace "+
+				"Table entirely:\n%s", out.String())
+		}
+	})
+
+	// Explain mode is a different renderer, not a different verdict: a
+	// dropped opts.FailOn on the way into the explain branch of Run would
+	// silently pass this test's baseline row but fail here.
+	t.Run("--explain plus --fail-on still trips the gate", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		code := Run(context.Background(), db, sbom,
+			Options{Explain: "GHSA-explain-wired", FailOn: &bandCritical}, &out, &errOut)
+		if code != 1 {
+			t.Fatalf("Run() = %d, want 1 (exitFindings): --explain must not bypass "+
+				"the verdict\nstdout:\n%s\nstderr:\n%s", code, out.String(), errOut.String())
+		}
+	})
+
+	t.Run("no finding matches the given id: exit 2, stdout untouched", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		code := Run(context.Background(), db, sbom, Options{Explain: "GHSA-does-not-exist"}, &out, &errOut)
+		if code != 2 {
+			t.Fatalf("Run() = %d, want 2\nstdout:\n%s\nstderr:\n%s", code, out.String(), errOut.String())
+		}
+		if out.Len() != 0 {
+			t.Errorf("stdout polluted on a no-match explain: %q", out.String())
+		}
+		if !strings.Contains(errOut.String(), "GHSA-does-not-exist") {
+			t.Errorf("stderr = %q, want it to name the identifier that matched nothing", errOut.String())
+		}
+	})
+}
+
+// TestRun_FailOnIncompleteAndUnknownAgreeAcrossRenderers is the drift guard
+// for F3: Run picks exactly one of report.Table / report.JSON /
+// report.Explain, but whichever it picks, the Summary that reaches verdict()
+// has to be the SAME Summary that renderer actually computed (via
+// report.Summarize, directly or through Table/JSON's own call to it) —
+// never a second, independently-derived Summary that could silently drift
+// from what the renderer itself found.
+//
+// The refactor that pulled Summarize out of Table was justified by exactly
+// this "one computation, not two" reasoning; this test is that guarantee
+// checked one level up, at the exit code. --fail-on is deliberately NOT one
+// of the gates exercised here: verdict()'s FailOn arm reads res.Findings
+// directly and never touches sum at all, so a composition test built only
+// on --fail-on would stay green even if a renderer's sum were replaced by
+// nonsense — it would give false confidence rather than real coverage.
+// --fail-on-incomplete and --fail-on-unknown are the two gates that read sum
+// (NotEvaluated/IncompleteChecks and UnknownSeverity respectively), so they
+// are the ones that can actually observe the drift.
+//
+// The fixture carries all three conditions the exit-code matrix cares about
+// at once: an unrated finding (UnknownSeverity), a package whose one
+// advisory has an unparsable bound (IncompleteChecks), and a package the
+// cataloger drops before the matcher ever sees it (NotEvaluated). --explain
+// targets the unrated finding's own advisory, so the explain path finds a
+// real match (n > 0) rather than short-circuiting on "nothing matched"
+// before verdict() is ever reached.
+// Explain shows one finding, so on its own it says nothing about the rest of
+// the scan. The table prints the counts and the "Not evaluated" block and the
+// JSON document carries them in `summary`; explain had neither, on either
+// stream, so `--explain X` against a partially-evaluated target printed a
+// confident explanation and exited 0 with the gap disclosed nowhere. CLAUDE.md:
+// packages that cannot be evaluated are "never folded silently into a clean
+// verdict".
+func TestRun_ExplainDisclosesAnIncompleteScan(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-explain-partial", pkg: "explainpartial", fixed: "2.0.0", vectors: []string{vecCritical}},
+	})
+	// One package the database covers, one in an ecosystem it does not - so
+	// the scan produces a finding AND leaves a package unevaluated.
+	sbom := buildMatrixSBOM(t, []matrixPkg{
+		{name: "explainpartial", purlType: "golang"},
+		{name: "somecrate", purlType: "cargo"},
+	})
+
+	var out, errOut bytes.Buffer
+	code := Run(context.Background(), db, sbom, Options{Explain: "GHSA-explain-partial"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("Run = %d, want 0 (no gate was asked for); stderr:\n%s", code, errOut.String())
+	}
+	// The explanation itself still owns stdout alone.
+	if !strings.Contains(out.String(), "GHSA-explain-partial") {
+		t.Errorf("stdout is missing the explanation:\n%s", out.String())
+	}
+	// ...and the warning is on stderr, so `--explain X > file` still yields a
+	// clean explanation while a human at a terminal sees the caveat.
+	if strings.Contains(out.String(), "NOT complete") {
+		t.Errorf("the incompleteness warning went to stdout:\n%s", out.String())
+	}
+	if !strings.Contains(errOut.String(), "NOT complete") {
+		t.Errorf("stderr does not disclose that the scan was incomplete:\n%s", errOut.String())
+	}
+	// The count itself, not just the word: a warning that always says the same
+	// thing regardless of how much went unchecked is not a disclosure.
+	if !strings.Contains(errOut.String(), "1 package(s) not evaluated") {
+		t.Errorf("stderr does not say HOW MUCH went unevaluated:\n%s", errOut.String())
+	}
+}
+
+// The other half of the gate. The fixture above produces NotEvaluated only, so
+// keying the warning on that count alone survives it - the same shape that hid
+// half of --fail-on-incomplete's condition one task earlier. Here every package
+// IS evaluated and one advisory cannot be judged, so only IncompleteChecks is
+// non-zero.
+func TestRun_ExplainDisclosesAnIncompleteCheck(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-explain-check", pkg: "explaincheck", fixed: "2.0.0", vectors: []string{vecCritical}},
+		{id: "GHSA-explain-bad", pkg: "explaincheck"}, // fixed == "" -> malformed -> IncompleteChecks
+	})
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "explaincheck", purlType: "golang"}})
+
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), db, sbom,
+		Options{Explain: "GHSA-explain-check"}, &out, &errOut); code != 0 {
+		t.Fatalf("Run = %d, want 0; stderr:\n%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "1 check(s) incomplete") {
+		t.Errorf("stderr does not disclose the incomplete check:\n%s", errOut.String())
+	}
+}
+
+// The mirror: a fully-evaluated scan must not print the warning, or it becomes
+// noise every reader learns to skip.
+func TestRun_ExplainIsQuietWhenTheScanIsComplete(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-explain-full", pkg: "explainfull", fixed: "2.0.0", vectors: []string{vecCritical}},
+	})
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "explainfull", purlType: "golang"}})
+
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), db, sbom, Options{Explain: "GHSA-explain-full"}, &out, &errOut); code != 0 {
+		t.Fatalf("Run = %d, want 0; stderr:\n%s", code, errOut.String())
+	}
+	if strings.Contains(errOut.String(), "NOT complete") {
+		t.Errorf("a complete scan warned about incompleteness:\n%s", errOut.String())
+	}
+}
+
+func TestRun_FailOnIncompleteAndUnknownAgreeAcrossRenderers(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-renderer-unknownsev", pkg: "rendererunknownsev", fixed: "2.0.0"}, // no vectors -> Unknown
+		{id: "GHSA-renderer-badcompare", pkg: "rendererbadcompare"},                 // fixed == "" -> malformed -> IncompleteChecks
+	})
+	sbom := buildMatrixSBOM(t, []matrixPkg{
+		{name: "rendererunknownsev", purlType: "golang"},
+		{name: "rendererbadcompare", purlType: "golang"},
+		{name: "renderersomecrate", purlType: "cargo"}, // dropped by the cataloger -> NotEvaluated
+	})
+
+	renderers := []struct {
+		name string
+		opts Options // Output/Explain only; the gate under test is merged in below
+	}{
+		{"table", Options{}},
+		{"json", Options{Output: "json"}},
+		{"explain", Options{Explain: "GHSA-renderer-unknownsev"}},
+	}
+	gates := []struct {
+		name string
+		set  func(*Options)
+		want int
+	}{
+		{"--fail-on-incomplete", func(o *Options) { o.FailOnIncomplete = true }, 2},
+		{"--fail-on-unknown", func(o *Options) { o.FailOnUnknown = true }, 1},
+	}
+
+	for _, r := range renderers {
+		for _, g := range gates {
+			t.Run(r.name+"/"+g.name, func(t *testing.T) {
+				opts := r.opts // copy: Options is a plain value type
+				g.set(&opts)
+				var out, errOut bytes.Buffer
+				got := Run(context.Background(), db, sbom, opts, &out, &errOut)
+				if got != g.want {
+					t.Errorf("renderer=%s gate=%s: Run() = %d, want %d\nstdout:\n%s\nstderr:\n%s",
+						r.name, g.name, got, g.want, out.String(), errOut.String())
+				}
+			})
+		}
 	}
 }

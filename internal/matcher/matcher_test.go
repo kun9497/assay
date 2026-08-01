@@ -6,6 +6,7 @@ import (
 
 	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/pkgmeta"
+	"github.com/kun9497/assay/internal/severity"
 	"github.com/kun9497/assay/internal/store"
 )
 
@@ -674,5 +675,118 @@ func TestMatch_DatabaseDeclaringNoCoverageSkipsEverything(t *testing.T) {
 	if len(res.Skipped) != 1 {
 		t.Fatalf("Skipped = %d, want 1: an empty coverage set means nothing was "+
 			"ingested, not that coverage is unknown", len(res.Skipped))
+	}
+}
+
+// D13: severity is derived at match time from the advisory's own vectors, not
+// read from a stored value. A record carrying several vectors takes the
+// HIGHEST band — a finding is as severe as its worst rating, and taking the
+// first OR the last vector would make the result depend on OSV's
+// serialization order rather than on the vulnerability.
+//
+// Both orderings are exercised, not just one. A fixture ordered
+// medium-then-critical only pins "don't just take the first" — a mutation
+// that instead keeps only the LAST vector (`vectors[len(vectors)-1:]`, or
+// equivalently `vectors[1:]` on a two-element slice) passes it by
+// coincidence, because the last vector happens to already be the highest.
+// The reversed fixture below makes the last vector the lower one, so that
+// mutation is caught too.
+func TestMatch_FindingCarriesTheHighestSeverity(t *testing.T) {
+	adv := advWithRange("GHSA-sev", "Go", "x", "0", "2.0.0", advisory.RangeSemver)
+	adv.Severity = []advisory.Severity{
+		{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N"}, // medium, 6.5
+		{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}, // critical, 9.8
+	}
+	s := fakeStore{byKey: map[string][]advisory.Advisory{"Go\x00x": {adv}}}
+
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("x", "1.0.0", "Go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1", len(res.Findings))
+	}
+	f := res.Findings[0]
+	if f.Severity != severity.Critical || f.Score != 9.8 {
+		t.Errorf("Severity/Score = %v/%.1f, want critical/9.8 — the finding must "+
+			"take the worst of its several vectors, not the first", f.Severity, f.Score)
+	}
+
+	// Same two vectors, critical serialized FIRST this time and medium last.
+	// A "keep only the last vector" mutation would pass the case above by
+	// coincidence and only fail here.
+	rev := advWithRange("GHSA-sev-rev", "Go", "w", "0", "2.0.0", advisory.RangeSemver)
+	rev.Severity = []advisory.Severity{
+		{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}, // critical, 9.8
+		{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N"}, // medium, 6.5
+	}
+	s2 := fakeStore{byKey: map[string][]advisory.Advisory{"Go\x00w": {rev}}}
+	res2, err := New(s2).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("w", "1.0.0", "Go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res2.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1", len(res2.Findings))
+	}
+	f2 := res2.Findings[0]
+	if f2.Severity != severity.Critical || f2.Score != 9.8 {
+		t.Errorf("Severity/Score = %v/%.1f, want critical/9.8 (vectors reversed) — "+
+			"the finding must take the worst vector regardless of which end of the "+
+			"slice it is serialized on", f2.Severity, f2.Score)
+	}
+}
+
+// Half of all advisories carry no severity vector at all (D17). That must
+// come out as Unknown, not as the zero value of Band, which is None — a real
+// band meaning "rated zero". Coercing an absent rating to a low band is
+// exactly the failure D17 exists to prevent.
+func TestMatch_FindingWithNoSeverityVectorsIsUnknown(t *testing.T) {
+	adv := advWithRange("GHSA-unrated", "Go", "y", "0", "2.0.0", advisory.RangeSemver)
+	s := fakeStore{byKey: map[string][]advisory.Advisory{"Go\x00y": {adv}}}
+
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("y", "1.0.0", "Go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1", len(res.Findings))
+	}
+	if f := res.Findings[0]; f.Severity != severity.Unknown || f.Score != 0 {
+		t.Errorf("Severity/Score = %v/%.1f, want unknown/0.0", f.Severity, f.Score)
+	}
+}
+
+// D17 again, but the common real shape: a record that DOES carry a severity
+// entry, just not one severity.Of can score — a bare CVSS_V2 vector, which
+// severity.Of does not understand (it dispatches on "CVSS:3." / "CVSS:4."
+// prefixes only). The zero-entries case above never exercises this path, and
+// it is the one that matters most: a coercion bug here is invisible, because
+// None sits inside the --fail-on ordering and is not counted by
+// Summary.UnknownSeverity, so --fail-on-unknown would not see it either.
+func TestMatch_UnscorableSeverityVectorIsUnknownNotNone(t *testing.T) {
+	adv := advWithRange("GHSA-v2only", "Go", "z", "0", "2.0.0", advisory.RangeSemver)
+	adv.Severity = []advisory.Severity{
+		{Type: "CVSS_V2", Score: "AV:N/AC:L/Au:N/C:P/I:P/A:P"},
+	}
+	s := fakeStore{byKey: map[string][]advisory.Advisory{"Go\x00z": {adv}}}
+
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("z", "1.0.0", "Go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1", len(res.Findings))
+	}
+	if f := res.Findings[0]; f.Severity != severity.Unknown || f.Score != 0 {
+		t.Errorf("Severity/Score = %v/%.1f, want unknown/0.0 — a PRESENT but "+
+			"unscorable vector must not be coerced to none", f.Severity, f.Score)
 	}
 }

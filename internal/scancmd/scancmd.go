@@ -15,9 +15,65 @@ import (
 	"github.com/kun9497/assay/internal/matcher"
 	"github.com/kun9497/assay/internal/pkgmeta"
 	"github.com/kun9497/assay/internal/report"
+	"github.com/kun9497/assay/internal/severity"
 	"github.com/kun9497/assay/internal/source"
 	"github.com/kun9497/assay/internal/store"
 )
+
+// Options are the --fail-on* gates that turn a completed, trustworthy scan's
+// results into an exit code (D21). They are entirely separate from whether
+// the scan could run at all: Run's existing exit-2 paths — a target that
+// could not be opened, a missing or incomplete database, a store error, and
+// the unconditional !sum.Trustworthy() check (D11) — all fire before Options
+// is even consulted. Options{}, the zero value produced when no flag is
+// given, must reproduce today's behaviour exactly: a completed, trustworthy
+// scan exits 0 no matter what it found.
+type Options struct {
+	// FailOn is the --fail-on threshold, or nil if the flag was not given.
+	// A pointer, not a bare severity.Band, because severity.None is a real,
+	// requestable threshold (and Band's zero value), so it cannot also mean
+	// "not set" without being ambiguous with an explicit `--fail-on none`.
+	//
+	// A finding trips this via Finding.Severity.AtOrAbove(*FailOn) alone.
+	// There is deliberately no extra "unless the finding is unknown" check
+	// here: AtOrAbove already guarantees severity.Unknown never satisfies any
+	// threshold, including None (D17) — a second check reaching the same
+	// answer would just be a second place for it to drift from AtOrAbove.
+	FailOn *severity.Band
+	// FailOnUnknown makes a finding with an unrated severity (severity.Unknown)
+	// trip the scan on its own, exit 1. It has to be a separate flag rather
+	// than folded into FailOn precisely because AtOrAbove refuses to let
+	// Unknown satisfy any threshold — this is the deliberate, opt-in way to
+	// ask for that anyway.
+	FailOnUnknown bool
+	// FailOnIncomplete makes the scan exit 2 when any package's evaluation
+	// was not complete: either a whole package the cataloger or matcher never
+	// reached (report.Summary.NotEvaluated), or one advisory check on an
+	// otherwise-evaluated package that could not be judged
+	// (report.Summary.IncompleteChecks). Both mean the same thing to a
+	// caller — there could be a finding this run did not see — which is why
+	// this exits 2 rather than 1, and why it outranks FailOn/FailOnUnknown
+	// under D11's 2 > 1 > 0 precedence.
+	FailOnIncomplete bool
+	// Output selects the renderer: "" and "table" both mean the human table
+	// (Options{}'s zero value must reproduce today's behaviour exactly, the
+	// same rule Options.FailOn* already follows), "json" means the stable
+	// document report.JSON writes (D18: the flag name follows grype's own
+	// --output). The CLI layer (cmd/assay) rejects any other value before
+	// Run ever sees it — an invalid value here would be a silently wrong
+	// renderer choice, not a silently-ignored flag, but the earlier a typo
+	// surfaces the better.
+	Output string
+	// Explain, when non-empty, selects one advisory to explain instead of
+	// rendering the table or JSON: its own ID, or any alias/upstream
+	// identifier it carries (D3) — whatever a reader would have grepped the
+	// table's ALIASES column for. This is D10 made visible: which range
+	// matched, which comparer decided it, and which name reached the
+	// advisory (D8), the exact fields Evidence and MatchedName exist to
+	// carry. It does not change the --fail-on* verdict below: explain mode
+	// picks the renderer, not the exit code.
+	Explain string
+}
 
 // The two files an image cataloger reads, named as they appear as tar entries
 // (no leading slash) — which is also the form Image.Files normalises its own
@@ -29,10 +85,11 @@ const (
 
 // Run scans an SBOM file or a container image — a registry reference, a
 // docker-archive: tarball, or an oci-dir: layout — chosen by
-// source.ClassifyTarget so one argument reaches the right loader. Slice 1 has
-// no --fail-on, so a completed scan exits 0 even with findings; the exit-2
-// paths are what matter here.
-func Run(ctx context.Context, dbPath, target string, stdout, stderr io.Writer) int {
+// source.ClassifyTarget so one argument reaches the right loader. Once the
+// scan completes and the result is judged trustworthy (D11), opts decides
+// the exit code; Options{} reproduces the pre-slice-4 behaviour of always
+// exiting 0 on a trustworthy scan, findings or not.
+func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stderr io.Writer) int {
 	var (
 		inventory pkgmeta.Target
 		cat       cyclonedx.Stats
@@ -84,10 +141,62 @@ func Run(ctx context.Context, dbPath, target string, stdout, stderr io.Writer) i
 		fmt.Fprintf(stderr, "error: match: %v\n", err)
 		return 2
 	}
-	sum, err := report.Table(stdout, res, cat)
-	if err != nil {
-		fmt.Fprintf(stderr, "error: write report: %v\n", err)
-		return 2
+
+	// Three renderers, exactly one chosen: --explain replaces the report
+	// with one advisory's evidence, --output json replaces it with the
+	// stable document, and the default remains the human table. None of the
+	// three changes what happens below — sum still decides Trustworthy() and
+	// verdict() the same way regardless of which renderer produced it,
+	// because explain/json pick a RENDERER, not a different notion of
+	// what the scan found (D11's precedence is a property of the scan, not
+	// of how it is displayed).
+	var sum report.Summary
+	switch {
+	case opts.Explain != "":
+		// Summarize, not Table: Table would also print to stdout, and
+		// --explain must be the ONLY thing written there, the same
+		// discipline --output json owes `| jq`.
+		sum = report.Summarize(res, cat)
+		n, werr := report.Explain(stdout, res, opts.Explain)
+		if werr != nil {
+			fmt.Fprintf(stderr, "error: write report: %v\n", werr)
+			return 2
+		}
+		if n == 0 {
+			// A typo'd or unmatched identifier is a request that could not
+			// be honoured, not a vacuously successful empty report — the
+			// same "loud, not silent" rule every other CLI input mistake in
+			// this package already follows.
+			fmt.Fprintf(stderr, "error: no finding matches advisory or alias %q\n", opts.Explain)
+			return 2
+		}
+		// Explain is the one renderer that shows a single finding, so on its
+		// own it discloses nothing about the rest of the scan. The table
+		// prints the counts and the "Not evaluated" block; the JSON document
+		// carries them in `summary`. Without this, `--explain X` on a target
+		// where a third of the packages were never checked printed a
+		// confident explanation, exited 0, and said so nowhere — a partial
+		// scan folded silently into a clean verdict, which is the one thing
+		// this project's CLI contract forbids outright.
+		//
+		// stderr, not stdout: stdout belongs to the explanation alone.
+		if sum.NotEvaluated > 0 || sum.IncompleteChecks > 0 {
+			fmt.Fprintf(stderr,
+				"warning: %d package(s) not evaluated and %d check(s) incomplete - this scan is NOT complete\n",
+				sum.NotEvaluated, sum.IncompleteChecks)
+		}
+	case opts.Output == "json":
+		sum, err = report.JSON(stdout, res, cat)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: write report: %v\n", err)
+			return 2
+		}
+	default:
+		sum, err = report.Table(stdout, res, cat)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: write report: %v\n", err)
+			return 2
+		}
 	}
 	// The report already said so in prose; exiting 0 anyway would let CI read a
 	// scan that evaluated nothing as a pass (D11).
@@ -96,6 +205,38 @@ func Run(ctx context.Context, dbPath, target string, stdout, stderr io.Writer) i
 			"error: none of the %d component(s) could be evaluated; this result cannot be trusted\n",
 			sum.Components)
 		return 2
+	}
+	return verdict(opts, sum, res.Findings)
+}
+
+// verdict turns a completed, trustworthy scan into an exit code under the
+// three --fail-on* gates and D11's 2 > 1 > 0 precedence: an untrustworthy —
+// here, incomplete — result outranks its content, so FailOnIncomplete is
+// checked first and, if it fires, the findings below are never even
+// consulted. Options{} (no flags at all) always returns 0, which is what
+// keeps a scan with no flags set exiting exactly as it did before this gate
+// existed.
+//
+// FailOnUnknown reads sum.UnknownSeverity rather than re-deriving "is there
+// an unrated finding" by looping findings itself: report.Table already
+// counts exactly that, and its own doc comment says a --fail-on-unknown gate
+// is meant to read it directly. Re-deriving the same fact a second way here
+// would be the identical two-paths-can-drift hazard the brief calls out for
+// AtOrAbove, one field over — so the loop below exists only for FailOn.
+func verdict(opts Options, sum report.Summary, findings []matcher.Finding) int {
+	if opts.FailOnIncomplete && (sum.NotEvaluated > 0 || sum.IncompleteChecks > 0) {
+		return 2
+	}
+	if opts.FailOnUnknown && sum.UnknownSeverity > 0 {
+		return 1
+	}
+	for _, f := range findings {
+		// No separate "unless f.Severity is Unknown" guard: AtOrAbove already
+		// returns false whenever the finding's band is Unknown, against any
+		// threshold including None (D17). See the Options.FailOn doc comment.
+		if opts.FailOn != nil && f.Severity.AtOrAbove(*opts.FailOn) {
+			return 1
+		}
 	}
 	return 0
 }

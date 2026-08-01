@@ -32,30 +32,25 @@ package's dependency tree shrinks.
 more case is the whole change. Nothing downstream of `source.Image` knows where layers came
 from.
 
-### Failing a scan when coverage is partial
+### ~~Failing a scan when coverage is partial~~ — resolved in slice 4
 
-`Meta` now records which ecosystems the providers fetched, and a package whose ecosystem is
-absent is skipped rather than evaluated (D20). That closed the silent clean scan: an Alpine
-release the database has never held now exits 2 and tells you to run `assay db update`.
+`--fail-on-incomplete` exits **2** when any package went unevaluated or any check could not
+be completed. Exit 2 rather than 1 because D11 already reserves it for a result that cannot
+be trusted, and that is exactly what partial coverage produces; it therefore also beats
+`--fail-on` when both apply.
 
-What is still open is the *partial* case. If a target holds twenty packages and five are in
-an uncovered ecosystem, the five are counted and named under "Not evaluated" and the exit
-code is unchanged — a CI job reading only the exit code sees green while a quarter of the
-target went unchecked.
+It fires on `NotEvaluated > 0 || IncompleteChecks > 0` rather than on the first count alone.
+The narrow reading was tried and rejected on a built case: a scan where every package is
+checked but one advisory cannot be judged prints "this is NOT a clean result" and would have
+exited 0 with the flag set — the report contradicting the verdict, which `Summary`'s own doc
+comment forbids.
 
-**Why deferred.** Making any unevaluated package fail the run is a bigger decision than it
-looks: a single unparseable version string would break a build, and roughly half of all
-advisories carry no severity (D17), so the same argument recurs for every "we could not
-tell" case. The right place to settle it is alongside `--fail-on` in slice 4, where the
-question "what makes a build fail" is being answered anyway — `--fail-on-incomplete`, or
-folding it into `--fail-on-unknown`, are both plausible shapes.
+The gate is opt-in, so the default behaviour is unchanged: uncovered packages are still
+counted and named under "Not evaluated" and a scan that does not ask for the gate still
+exits on findings alone. The objection that deferred this — one unparseable version breaking
+a build — is answered by making it a flag rather than the default.
 
-**Revisit when** slice 4 lands `--fail-on`. Not before: adding a second gating rule while
-the first does not exist would fix the ordering of a decision that has not been made.
-
-**Groundwork.** `Summary` already separates `NotEvaluated` from `IncompleteChecks`, and
-`Skipped` already distinguishes a whole-package skip from an advisory-scoped one, so the
-counts a gate would key on are in hand.
+---
 
 ### KISA/KNVD as an independent matching source
 
@@ -146,7 +141,7 @@ which needs a pure-Go rpmdb parser. Separately, Red Hat backports fixes, so upst
 version comparison produces false positives without Red Hat's own fixed-version data.
 
 **Revisit when.** Debian/Ubuntu are working, and OSV's RHEL-family coverage has been
-verified as sufficient (see Unverified assumptions).
+verified as sufficient (see Assumptions).
 
 ---
 
@@ -241,6 +236,53 @@ the encoding is fully hidden behind it.
 
 CycloneDX first. SPDX is a second parser against an already-proven pipeline, adding no new
 architecture.
+
+---
+
+### Flags on the `db` subcommands
+
+`assay db status --output json` exits 0 and prints the human table; `assay db status
+--bogus` does the same. The `db` arm has never parsed flags, so anything after the
+subcommand is ignored.
+
+**Why deferred.** It is pre-existing rather than new, but `--output json` now exists as a
+real concept on `scan`, so "typed a flag, flag ignored" became reachable by someone
+reasonably assuming it is global — the exact shape `parseScanArgs` rejects on the scan side.
+The fix is not just rejecting unknown arguments: it is deciding whether `--output json`
+should mean something for `db status` (a machine-readable coverage and freshness report is
+plausibly useful in CI) before making it an error to ask for it.
+
+**Revisit when** anything needs `db status` output in a pipeline, or sooner if a second
+subcommand grows a flag — two arms silently ignoring arguments is a pattern rather than an
+oversight.
+
+**Groundwork.** `parseScanArgs` already shows the shape: reject the unrecognised rather than
+skip it, and reject a repeat rather than take the last.
+
+---
+
+### SARIF output
+
+`--output json` is assay's own schema, versioned and golden-tested. SARIF is the format
+GitHub code scanning and most CI dashboards ingest, so it is what makes findings show up
+next to the code rather than in a log.
+
+**Why deferred.** SARIF is a large specification and only a narrow slice of it is relevant
+here — `runs[].results[]` with a rule per advisory and a physical location per package. The
+work is not the mapping, it is deciding what a "location" means for a package that came out
+of a container layer: a purl is not a file range, and the natural answer (the package
+database path plus the layer digest) is already carried in the JSON output but is not what a
+code-scanning UI expects to highlight. Getting that wrong produces findings pinned to the
+wrong line of the wrong file, which is worse than no SARIF at all.
+
+**Revisit when** someone wants assay's results in GitHub code scanning, or when directory
+and binary scanning (slice ③) land — a finding in a checked-out source tree has a real file
+path, which removes the hard part of the mapping.
+
+**Groundwork.** `internal/report/json.go` already assembles every field SARIF needs
+(advisory ID, aliases, severity band and score, package name and version, purl, the source
+package, and the layer digest and path of every location) from a single `Summarize` call, so
+a SARIF renderer is a third `Reporter` over the same data rather than a new traversal.
 
 ---
 
