@@ -95,7 +95,13 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		cat       cyclonedx.Stats
 	)
 
-	if source.ClassifyTarget(target) == source.TargetImage {
+	kind, path, err := source.Classify(target)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 2
+	}
+	_ = path // routed in a later task; classification alone changes nothing yet.
+	if kind == source.TargetImage {
 		t, stats, err := catalogImage(ctx, target)
 		if err != nil {
 			// No "open %s:" wrapper. Every error reaching here already names
