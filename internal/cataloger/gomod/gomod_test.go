@@ -569,6 +569,15 @@ func TestParse_ReplaceUnquotesBothSides(t *testing.T) {
 // reaching EOF cleanly. That error path is otherwise never exercised by any
 // fixture in this file, so a mutation silencing it (`&& false`) would
 // survive undetected.
+//
+// This is a real, accepted divergence from `go mod edit -json`, which has no
+// such per-line limit - not a deliberately chosen behaviour, just an
+// unraised default this scan has never needed to widen. No real go.mod line
+// is remotely this long (the longest directive here is a few dozen
+// characters), so the divergence is not expected to matter in practice; this
+// test exists to confirm the error path is reachable and surfaced as an
+// error rather than silently truncating or panicking, not to bless 64KB as
+// a correct or intended limit.
 func TestParse_ScannerErrorPropagates(t *testing.T) {
 	dir := write(t, "module example.test/app\n"+
 		"\nrequire github.com/good/dep v1.0.0\n"+
@@ -612,5 +621,114 @@ func TestParse_DuplicateRequireReportsBothEntries(t *testing.T) {
 	}
 	if stats.Components != 2 || stats.Cataloged != 2 {
 		t.Errorf("stats = %+v, want 2 cataloged of 2 components", stats)
+	}
+}
+
+// A quoted replace target containing an internal space - an ordinary local
+// path on Windows, where this repo is developed - is split into two fields
+// by this scan's whitespace-based splitting before the quote is ever seen as
+// one token. `go mod edit -json` accepts this file; routing the split
+// pieces to the "module + version" branch made the whole scan fail instead.
+// Indefensible on top of being overly strict: the correct parse is a
+// filesystem replacement, and Parse discards a filesystem RHS's value
+// regardless (name, version = "", "") - the scan was dying over a token it
+// never uses. Same table as the review that found this.
+func TestParse_ReplaceWithQuotedWhitespacePathIsACountedSkip(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		gomod string
+	}{
+		{
+			name: "unqualified, unix-style path",
+			gomod: "module example.test/app\n" +
+				"\nrequire example.com/a v1.0.0\n" +
+				"\nreplace example.com/a => \"../my dir\"\n",
+		},
+		{
+			name: "unqualified, windows-style path",
+			gomod: "module example.test/app\n" +
+				"\nrequire example.com/a v1.0.0\n" +
+				"\nreplace example.com/a => \"C:\\Users\\John Doe\\a\"\n",
+		},
+		{
+			name: "version-qualified",
+			gomod: "module example.test/app\n" +
+				"\nrequire example.com/a v1.0.0\n" +
+				"\nreplace example.com/a v1.0.0 => \"../a dir\"\n",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := write(t, tt.gomod)
+
+			tgt, stats, err := Parse(dir)
+			if err != nil {
+				t.Fatalf("scanned with an error, want a counted skip: %v", err)
+			}
+			if len(tgt.Packages) != 0 {
+				t.Errorf("got %+v, want no packages - the replacement target has no version", tgt.Packages)
+			}
+			if stats.Components != 1 || stats.Cataloged != 0 || stats.SkippedNoVersion != 1 {
+				t.Errorf("stats = %+v, want Components=1 Cataloged=0 SkippedNoVersion=1", stats)
+			}
+		})
+	}
+}
+
+// The same malformation on the LEFT-hand side - the module being replaced,
+// rather than its target - leaves no key to register a replacement under.
+// `go mod edit -json` accepts this file too; the fix must not turn a
+// left-side quoted-with-space path into a scan-ending error, and must not
+// let the unregistered replace directive fabricate a package either.
+func TestParse_ReplaceWithQuotedWhitespaceOldPathDoesNotCrash(t *testing.T) {
+	dir := write(t, "module example.test/app\n"+
+		"\nrequire github.com/good/dep v1.0.0\n"+
+		"\nreplace \"example.com/a b\" => example.com/c v2.0.0\n")
+
+	tgt, _, err := Parse(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	find(t, tgt, "github.com/good/dep")
+	for _, p := range tgt.Packages {
+		if p.Name == "example.com/c" {
+			t.Errorf("an unkeyed replace directive fabricated a package: %+v", p)
+		}
+	}
+}
+
+// `require(path version)` crammed onto one line - no space anywhere - is not
+// valid go.mod; go itself rejects it. Before the F1 fix, splitKeyword's
+// whitespace-only split read "require(path" as one unrecognized token and
+// silently dropped the whole line. Widening splitKeyword to treat "(" as a
+// token boundary (so `require(` can open a block) introduced a NEW failure
+// mode for this shape instead: the keyword now splits off cleanly, but the
+// remainder ("(path version)") is neither exactly "(" (a block open) nor a
+// clean single-line body - and was falling through to ordinary parsing,
+// fabricating a package with a stray "(" stuck to its name and a stray ")"
+// stuck to its version. Rejected instead: a block's opening line is always
+// the keyword alone followed by "(" and nothing else.
+func TestParse_RequireWithContentCrammedAfterUnspacedParenIsAnError(t *testing.T) {
+	dir := write(t, "module example.test/app\n"+
+		"\nrequire(example.com/a v1.0.0)\n")
+
+	_, _, err := Parse(dir)
+	if err == nil {
+		t.Fatal("require(path version) on one line scanned clean")
+	}
+}
+
+// The sibling shape with spaces around the parenthesis - `require ( x
+// v1.0.0 )` all on one line - is the same malformation and was already
+// fabricating a package (named "(", the stray open-paren token) before this
+// round. Rejecting the unspaced form and not this one would leave an
+// equivalent hole standing right next to the fix; both are rejected the same
+// way, for the same reason: a block's opening line names nothing else.
+func TestParse_RequireBlockOpenWithContentOnSameLineIsAnError(t *testing.T) {
+	dir := write(t, "module example.test/app\n"+
+		"\nrequire ( example.com/a v1.0.0 )\n")
+
+	_, _, err := Parse(dir)
+	if err == nil {
+		t.Fatal("require ( x v1.0.0 ) on one line scanned clean")
 	}
 }

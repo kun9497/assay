@@ -175,6 +175,18 @@ func directives(data []byte) (requires []requirement, replaceAny, replaceExact m
 				blockKind = keyword
 				continue
 			}
+			if strings.HasPrefix(rest, "(") {
+				// A block's opening line is always the keyword alone
+				// followed by "(" and nothing else (a trailing comment
+				// aside, already stripped by now). Content crammed onto
+				// the same line - `require(path version)` - is not valid
+				// go.mod; go itself rejects it. Falling through to
+				// ordinary single-line parsing would fabricate a package
+				// from the mangled remainder (a leading "(" stuck to the
+				// path, a trailing ")" stuck to the version) instead of
+				// refusing it.
+				return nil, nil, nil, fmt.Errorf("go.mod: malformed %s directive: %q", keyword, line)
+			}
 			if aerr := apply(keyword, rest, &requires, replaceAny, replaceExact); aerr != nil {
 				return nil, nil, nil, aerr
 			}
@@ -226,20 +238,31 @@ func apply(keyword, body string, requires *[]requirement, replaceAny, replaceExa
 		*requires = append(*requires, requirement{path: path, version: version})
 
 	case "replace":
-		oldPath, oldVersion, rep, ok := parseReplace(body)
-		if !ok {
+		oldPath, oldVersion, rep, outcome := parseReplace(body)
+		switch outcome {
+		case replaceMalformed:
 			// A replace directive whose shape cannot be recognized (no
-			// "=>", or a right-hand side that is neither one field nor two)
-			// is not a case this scan can degrade safely from: the require
-			// entry it was meant to redirect would otherwise keep reporting
-			// as itself, unreplaced - a false positive on code that is not
+			// "=>", or a right-hand side that is neither one field nor two,
+			// and not a quoted value split apart by whitespace) is not a
+			// case this scan can degrade safely from: the require entry it
+			// was meant to redirect would otherwise keep reporting as
+			// itself, unreplaced - a false positive on code that is not
 			// there, paired with a silent miss of the code that is.
 			return fmt.Errorf("go.mod: malformed replace directive: %q", body)
-		}
-		if oldVersion == "" {
-			replaceAny[oldPath] = rep
-		} else {
-			replaceExact[oldPath+"@"+oldVersion] = rep
+		case replaceUnkeyed:
+			// The left-hand module path itself could not be resolved, so
+			// there is no key to register a replacement under. Not an
+			// error - the real go tool accepts a quoted path containing a
+			// space - and not a false positive either: the require line
+			// (if any) for that same malformed path already degrades to
+			// its own counted skip independently, the same way F4 handles
+			// an unresolvable require path.
+		case replaceOK:
+			if oldVersion == "" {
+				replaceAny[oldPath] = rep
+			} else {
+				replaceExact[oldPath+"@"+oldVersion] = rep
+			}
 		}
 
 	case "exclude", "retract":
@@ -251,42 +274,90 @@ func apply(keyword, body string, requires *[]requirement, replaceAny, replaceExa
 	return nil
 }
 
+// replaceOutcome classifies what parseReplace determined about one replace
+// directive body.
+type replaceOutcome int
+
+const (
+	// replaceMalformed: the directive's shape could not be recognized at
+	// all - no "=>", or a right-hand side that is neither one field nor
+	// two, with no quoted value split by whitespace to blame it on. Not
+	// safe to fall through: the require entry it was meant to redirect
+	// would otherwise keep reporting as itself, unreplaced.
+	replaceMalformed replaceOutcome = iota
+	// replaceUnkeyed: the left-hand module path itself could not be
+	// resolved - almost always a quoted path containing an internal space,
+	// split apart by this scan's whitespace-based field splitting before
+	// the quote is ever seen as one token. There is no key to register a
+	// replacement under, so this directive contributes nothing - not an
+	// error, since the real go tool accepts this file.
+	replaceUnkeyed
+	// replaceOK: oldPath/oldVersion/rep are valid and should be registered.
+	replaceOK
+)
+
 // parseReplace splits a replace directive body on "=>". The right-hand
 // side's field count decides its shape: two fields is a module and a
 // version, one field is a filesystem path with no version. oldVersion is
 // empty when the left-hand side named no version (an unqualified replace).
-func parseReplace(body string) (oldPath, oldVersion string, rep replacement, ok bool) {
+//
+// A quoted value containing an internal space - most often a filesystem
+// path like "../my dir" or "C:\Users\John Doe" - is split apart by this
+// scan's whitespace-based field splitting before the quote is ever seen as
+// one token, on either side of "=>". The real go tool accepts such a file
+// (a local replace into a path containing a space is ordinary on Windows),
+// so this is deliberately NOT folded into replaceMalformed: the affected
+// side degrades to replaceUnkeyed (left) or a filesystem replacement
+// (right, since its value is discarded either way - Parse never uses it).
+func parseReplace(body string) (oldPath, oldVersion string, rep replacement, outcome replaceOutcome) {
 	parts := strings.SplitN(body, "=>", 2)
 	if len(parts) != 2 {
-		return "", "", replacement{}, false
+		return "", "", replacement{}, replaceMalformed
 	}
 
 	left := strings.Fields(parts[0])
 	if len(left) == 0 {
-		return "", "", replacement{}, false
+		return "", "", replacement{}, replaceMalformed
 	}
 	oldPath, pathOK := parseModulePath(left[0])
 	if !pathOK {
-		return "", "", replacement{}, false
+		return "", "", replacement{}, replaceUnkeyed
 	}
 	if len(left) >= 2 {
 		oldVersion = left[1]
 	}
 
 	right := strings.Fields(parts[1])
+	if len(right) == 0 {
+		return "", "", replacement{}, replaceMalformed
+	}
+	if looksQuoted(right[0]) {
+		return oldPath, oldVersion, replacement{filesystem: true}, replaceOK
+	}
 	switch len(right) {
 	case 1:
-		rep = replacement{filesystem: true}
+		return oldPath, oldVersion, replacement{filesystem: true}, replaceOK
 	case 2:
 		newPath, newPathOK := parseModulePath(right[0])
 		if !newPathOK {
-			return "", "", replacement{}, false
+			return "", "", replacement{}, replaceMalformed
 		}
-		rep = replacement{path: newPath, version: right[1]}
+		return oldPath, oldVersion, replacement{path: newPath, version: right[1]}, replaceOK
 	default:
-		return "", "", replacement{}, false
+		return "", "", replacement{}, replaceMalformed
 	}
-	return oldPath, oldVersion, rep, true
+}
+
+// looksQuoted reports whether field opens a go.mod quoted string but does
+// not close within the same whitespace-delimited token - the signature of a
+// value containing an internal space, split apart by this scan's naive
+// field splitting before the quote is ever seen as one token. Checked
+// separately from parseModulePath's own failure so a replace's right-hand
+// side can tell "split by whitespace" (recoverable as a filesystem
+// replacement - the value is discarded anyway) apart from "closes cleanly
+// but is otherwise unusable" (a genuine malformation).
+func looksQuoted(field string) bool {
+	return len(field) > 0 && field[0] == '"' && (len(field) < 2 || field[len(field)-1] != '"')
 }
 
 // splitKeyword returns the first token of line and everything after it,
