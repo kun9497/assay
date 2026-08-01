@@ -12,23 +12,50 @@ import (
 	"github.com/kun9497/assay/internal/version"
 )
 
+// explainLine returns the line in out that starts with prefix (e.g.
+// "range:"), or fails the test if no such line exists. Explain's output is
+// one label-prefixed line per fact, so resolving a line by its own label and
+// asserting the WHOLE line — not just a value that might also appear
+// elsewhere — pins the label and its value together. This is the fix for
+// the exact hazard CLAUDE.md's "substring assertions" note warns about:
+// Evidence.Reason routinely restates the same version numbers that also
+// belong to the "range:" line, so a bare Contains(out, "1.5.0") check can
+// pass entirely from the result: line while the range: line itself is
+// missing, empty, or has its fields swapped.
+func explainLine(t *testing.T, out, prefix string) string {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return line
+		}
+	}
+	t.Fatalf("no line starting with %q in output:\n%s", prefix, out)
+	return ""
+}
+
 // TestExplain_PrintsTheFindingsEvidence is D10 made visible: which range
 // matched, what the comparison actually returned, and which name reached the
-// advisory (D8). Every value here is deliberately unique so a check for the
-// rendered pair ("label: value") cannot pass from an unrelated part of the
-// output — the exact hazard CLAUDE.md's "substring assertions" note warns
-// about.
+// advisory (D8). Every rendered line is asserted exactly, by its own label,
+// rather than checked with a loose Contains over the whole output — a bare
+// substring check here previously passed even with the "range:" line deleted
+// entirely, because Evidence.Reason (built by hand in this fixture, exactly
+// as version.describe() would build it from a real match) restates the same
+// introduced/fixed values the range: line prints. This fixture's Reason
+// deliberately does NOT restate Introduced, Fixed, or Package.Version, so
+// each line's own assertion can only be satisfied by that line itself, and a
+// swap of the Introduced/Fixed format arguments cannot hide inside a
+// Contains match on either value alone.
 func TestExplain_PrintsTheFindingsEvidence(t *testing.T) {
 	res := matcher.Result{Findings: []matcher.Finding{{
 		Package: pkgmeta.Package{
-			Name: "github.com/foo/bar-explain", Version: "v1.2.3", Ecosystem: "Go",
+			Name: "github.com/foo/bar-explain", Version: "v1.2.3-explain-pkgver", Ecosystem: "Go",
 		},
-		Advisory: advisory.Advisory{ID: "GHSA-explain-hit", Summary: "Code injection"},
+		Advisory: advisory.Advisory{ID: "GHSA-explain-hit", Summary: "explain-summary-code-injection"},
 		Evidence: version.Evidence{
 			RangeType:  advisory.RangeSemver,
-			Introduced: "0",
-			Fixed:      "1.5.0-explain-fix",
-			Reason:     "v1.2.3 is at or above any earlier version and below the fix 1.5.0-explain-fix",
+			Introduced: "1.0.0-explain-introduced",
+			Fixed:      "1.5.0-explain-fixed",
+			Reason:     "the installed release falls inside the vulnerable window (explain-reason-text)",
 		},
 		MatchedName: "github.com/foo/bar-explain",
 		Severity:    severity.High,
@@ -44,18 +71,27 @@ func TestExplain_PrintsTheFindingsEvidence(t *testing.T) {
 		t.Fatalf("n = %d, want 1", n)
 	}
 	out := buf.String()
-	for _, want := range []string{
-		"github.com/foo/bar-explain",
-		"v1.2.3",
-		"GHSA-explain-hit",
-		"1.5.0-explain-fix",
-		"high (7.5)",
-		"semver", // the comparer that decided this: Go uses SemVer (D9/D10)
-		"v1.2.3 is at or above any earlier version and below the fix 1.5.0-explain-fix",
+
+	for _, tt := range []struct{ prefix, want string }{
+		{"package:", "package:  github.com/foo/bar-explain v1.2.3-explain-pkgver [Go]"},
+		{"matched:", "matched:  github.com/foo/bar-explain (direct match)"},
+		{"advisory:", "advisory: GHSA-explain-hit"},
+		{"summary:", "summary:  explain-summary-code-injection"},
+		{"severity:", "severity: high (7.5)"},
+		{"comparer:", "comparer: semver"}, // Go -> SemVer (D9/D10)
+		{"range:", `range:    type=SEMVER introduced="1.0.0-explain-introduced" ` +
+			`fixed="1.5.0-explain-fixed" lastAffected=""`},
+		{"result:", "result:   the installed release falls inside the vulnerable window (explain-reason-text)"},
 	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output missing %q:\n%s", want, out)
+		if got := explainLine(t, out, tt.prefix); got != tt.want {
+			t.Errorf("line %q = %q, want %q\nfull output:\n%s", tt.prefix, got, tt.want, out)
 		}
+	}
+
+	// No aliases/upstream on this advisory, so the "also known as:" line
+	// must not appear at all.
+	if strings.Contains(out, "also known as:") {
+		t.Errorf("output has an \"also known as:\" line for an advisory with no aliases/upstream:\n%s", out)
 	}
 }
 
@@ -63,6 +99,12 @@ func TestExplain_PrintsTheFindingsEvidence(t *testing.T) {
 // when joining on an identifier, because which field carries the CVE
 // depends on the ecosystem. A reader who grepped the table's ALIASES column
 // for a CVE must be able to hand that same CVE to --explain.
+//
+// Each subtest also asserts the exact "also known as:" line, not just the
+// returned count: a mutation that dropped that whole line (F7) still found
+// the finding (the identifier match happens in identifiesAdvisory, a
+// different function from the line that prints it) and so left a
+// count-only assertion green.
 func TestExplain_MatchesByAliasOrUpstream(t *testing.T) {
 	t.Run("alias (Go shape)", func(t *testing.T) {
 		res := matcher.Result{Findings: []matcher.Finding{{
@@ -77,6 +119,9 @@ func TestExplain_MatchesByAliasOrUpstream(t *testing.T) {
 		}
 		if n != 1 {
 			t.Errorf("n = %d, want 1 (lookup by alias must find the finding)", n)
+		}
+		if got, want := explainLine(t, buf.String(), "also known as:"), "also known as: CVE-2024-11111"; got != want {
+			t.Errorf("also known as line = %q, want %q", got, want)
 		}
 	})
 
@@ -96,6 +141,9 @@ func TestExplain_MatchesByAliasOrUpstream(t *testing.T) {
 		}
 		if n != 1 {
 			t.Errorf("n = %d, want 1 (lookup by upstream must find the finding)", n)
+		}
+		if got, want := explainLine(t, buf.String(), "also known as:"), "also known as: CVE-2025-46394"; got != want {
+			t.Errorf("also known as line = %q, want %q", got, want)
 		}
 	})
 }
@@ -265,6 +313,32 @@ func TestExplain_AliasLookupIsExactNotSubstring(t *testing.T) {
 	if strings.Contains(buf.String(), "has-cve-10") {
 		t.Errorf("explained the wrong finding (aliased CVE-2024-10) for a lookup of "+
 			"\"CVE-2024-1\":\n%s", buf.String())
+	}
+}
+
+// TestComparerName_ExactNamePerEcosystem pins the exact name comparerName
+// returns per ecosystem, not just "some real name versus unknown".
+// TestComparerName_AgreesWithVersionFor below only ever checks presence
+// against version.For's ok bool, so "PyPI" -> "semver" (the wrong comparer
+// entirely — PEP 440 and SemVer disagree on precedence, D9) and
+// "Alpine:v3.19" -> "semver" both survived it: version.For also reports ok
+// for those ecosystems, so the presence check alone is satisfied regardless
+// of which name comes back. A reader debugging a suspected false negative
+// who is told "semver" for a PyPI package would go check the wrong
+// comparer's rules — the opposite of what explain mode exists for.
+func TestComparerName_ExactNamePerEcosystem(t *testing.T) {
+	for _, tt := range []struct{ ecosystem, want string }{
+		{"Go", "semver"},
+		{"npm", "semver"},
+		{"PyPI", "pep440"},
+		{"Alpine:v3.19", "apk"},
+		{"Alpine:v3.99", "apk"},
+		{"Alpine:", "unknown"}, // no release -> not a key version.For ever builds
+		{"bogus-eco", "unknown"},
+	} {
+		if got := comparerName(tt.ecosystem); got != tt.want {
+			t.Errorf("comparerName(%q) = %q, want %q", tt.ecosystem, got, tt.want)
+		}
 	}
 }
 

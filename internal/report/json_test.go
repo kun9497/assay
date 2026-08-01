@@ -6,6 +6,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kun9497/assay/internal/advisory"
@@ -265,5 +266,28 @@ func TestJSON_UnknownSeverityIsNotCoerced(t *testing.T) {
 	}
 	if doc.Findings[1].Severity != "unknown" {
 		t.Errorf("Findings[1].Severity = %q, want %q", doc.Findings[1].Severity, "unknown")
+	}
+}
+
+// TestJSON_EmptyResultHasEmptyArraysNotNull: a clean scan (no findings, no
+// skips) must still render "findings": [] and "skipped": [], never null.
+// `jq '.findings | length'` errors out on null, and a clean scan piped into
+// jq is the stated use case for --output json — the one fixture the golden
+// test exercises always has two of each, so a nil-slice regression there
+// would go unnoticed without a dedicated empty-input case.
+func TestJSON_EmptyResultHasEmptyArraysNotNull(t *testing.T) {
+	var buf bytes.Buffer
+	if _, err := JSON(&buf, matcher.Result{}, cyclonedx.Stats{}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `"findings": []`) {
+		t.Errorf(`output does not contain "findings": [] for an empty result:%s`, out)
+	}
+	if !strings.Contains(out, `"skipped": []`) {
+		t.Errorf(`output does not contain "skipped": [] for an empty result:%s`, out)
+	}
+	if strings.Contains(out, "null") {
+		t.Errorf("output contains a null where jq expects an array:\n%s", out)
 	}
 }

@@ -215,12 +215,20 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 		}
 	}
 
-	// The two renderers are mutually exclusive, not last-one-wins: silently
-	// picking one would either drop the explanation the user asked for or
-	// silently give them prose instead of the JSON their pipeline expects.
-	if opts.Explain != "" && opts.Output == "json" {
+	// The two renderers are mutually exclusive, not last-one-wins, and that
+	// holds for EITHER value of --output: an explicit `--output table
+	// --explain X` is just as much a request for two renderers at once as
+	// `--output json --explain X` is, and letting --explain silently win
+	// over an explicitly requested table would be the same "flag parsed,
+	// then ignored" shape --fail-on's repeat-rejection already guards
+	// against, one level over. Checking only for "json" here previously let
+	// `--output table --explain X` through silently — scancmd.Run's own
+	// comment claims the three renderers are "mutually exclusive by
+	// construction from the CLI parser", so the parser has to actually make
+	// that true rather than the comment merely asserting it.
+	if opts.Explain != "" && opts.Output != "" {
 		return "", scancmd.Options{}, fmt.Errorf(
-			"--explain cannot be combined with --output json: pick one renderer")
+			"--explain cannot be combined with --output %s: pick one renderer", opts.Output)
 	}
 	return target, opts, nil
 }

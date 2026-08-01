@@ -810,3 +810,73 @@ func TestRun_Explain(t *testing.T) {
 		}
 	})
 }
+
+// TestRun_FailOnIncompleteAndUnknownAgreeAcrossRenderers is the drift guard
+// for F3: Run picks exactly one of report.Table / report.JSON /
+// report.Explain, but whichever it picks, the Summary that reaches verdict()
+// has to be the SAME Summary that renderer actually computed (via
+// report.Summarize, directly or through Table/JSON's own call to it) —
+// never a second, independently-derived Summary that could silently drift
+// from what the renderer itself found.
+//
+// The refactor that pulled Summarize out of Table was justified by exactly
+// this "one computation, not two" reasoning; this test is that guarantee
+// checked one level up, at the exit code. --fail-on is deliberately NOT one
+// of the gates exercised here: verdict()'s FailOn arm reads res.Findings
+// directly and never touches sum at all, so a composition test built only
+// on --fail-on would stay green even if a renderer's sum were replaced by
+// nonsense — it would give false confidence rather than real coverage.
+// --fail-on-incomplete and --fail-on-unknown are the two gates that read sum
+// (NotEvaluated/IncompleteChecks and UnknownSeverity respectively), so they
+// are the ones that can actually observe the drift.
+//
+// The fixture carries all three conditions the exit-code matrix cares about
+// at once: an unrated finding (UnknownSeverity), a package whose one
+// advisory has an unparsable bound (IncompleteChecks), and a package the
+// cataloger drops before the matcher ever sees it (NotEvaluated). --explain
+// targets the unrated finding's own advisory, so the explain path finds a
+// real match (n > 0) rather than short-circuiting on "nothing matched"
+// before verdict() is ever reached.
+func TestRun_FailOnIncompleteAndUnknownAgreeAcrossRenderers(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-renderer-unknownsev", pkg: "rendererunknownsev", fixed: "2.0.0"}, // no vectors -> Unknown
+		{id: "GHSA-renderer-badcompare", pkg: "rendererbadcompare"},                 // fixed == "" -> malformed -> IncompleteChecks
+	})
+	sbom := buildMatrixSBOM(t, []matrixPkg{
+		{name: "rendererunknownsev", purlType: "golang"},
+		{name: "rendererbadcompare", purlType: "golang"},
+		{name: "renderersomecrate", purlType: "cargo"}, // dropped by the cataloger -> NotEvaluated
+	})
+
+	renderers := []struct {
+		name string
+		opts Options // Output/Explain only; the gate under test is merged in below
+	}{
+		{"table", Options{}},
+		{"json", Options{Output: "json"}},
+		{"explain", Options{Explain: "GHSA-renderer-unknownsev"}},
+	}
+	gates := []struct {
+		name string
+		set  func(*Options)
+		want int
+	}{
+		{"--fail-on-incomplete", func(o *Options) { o.FailOnIncomplete = true }, 2},
+		{"--fail-on-unknown", func(o *Options) { o.FailOnUnknown = true }, 1},
+	}
+
+	for _, r := range renderers {
+		for _, g := range gates {
+			t.Run(r.name+"/"+g.name, func(t *testing.T) {
+				opts := r.opts // copy: Options is a plain value type
+				g.set(&opts)
+				var out, errOut bytes.Buffer
+				got := Run(context.Background(), db, sbom, opts, &out, &errOut)
+				if got != g.want {
+					t.Errorf("renderer=%s gate=%s: Run() = %d, want %d\nstdout:\n%s\nstderr:\n%s",
+						r.name, g.name, got, g.want, out.String(), errOut.String())
+				}
+			})
+		}
+	}
+}

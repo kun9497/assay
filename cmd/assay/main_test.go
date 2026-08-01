@@ -350,6 +350,20 @@ func TestParseScanArgs(t *testing.T) {
 		}
 	})
 
+	// F5: "--explain=" (the = form with nothing after it) must be rejected
+	// the same way, not silently leave opts.Explain empty. An empty
+	// opts.Explain is indistinguishable from the flag never having been
+	// given at all (scancmd.Run's own dispatch is `case opts.Explain !=
+	// "":`), so an unguarded empty value would make Run silently fall back
+	// to the table and exit 0 — the "flag parsed, then inert" shape this
+	// branch has already been burned by once for --fail-on-incomplete.
+	t.Run("--explain= with an empty value is rejected, not silently disabled", func(t *testing.T) {
+		_, _, err := parseScanArgs([]string{"alpine:3.19", "--explain="})
+		if err == nil {
+			t.Fatal("err = nil, want an error: an empty --explain value must not silently disable the flag")
+		}
+	})
+
 	t.Run("a repeated --explain is rejected, not silently last-wins", func(t *testing.T) {
 		_, _, err := parseScanArgs([]string{"alpine:3.19", "--explain", "GHSA-1", "--explain", "GHSA-2"})
 		if err == nil {
@@ -371,6 +385,23 @@ func TestParseScanArgs(t *testing.T) {
 		_, _, err := parseScanArgs([]string{"alpine:3.19", "--output=json", "--explain", "GHSA-1"})
 		if err == nil {
 			t.Fatal("err = nil, want an error regardless of flag order or --output spelling")
+		}
+	})
+
+	// F6: the conflict is not specific to --output json. scancmd.Run's own
+	// dispatch comment describes the three renderers as "mutually exclusive
+	// by construction from the CLI parser" — that has to be true for BOTH
+	// values of --output, not just "json", or an explicitly requested table
+	// silently loses to --explain instead of the two being flagged as the
+	// contradictory request they are.
+	t.Run("--explain cannot be combined with --output table either", func(t *testing.T) {
+		_, _, err := parseScanArgs([]string{"alpine:3.19", "--explain", "GHSA-1", "--output", "table"})
+		if err == nil {
+			t.Fatal("err = nil, want an error: an explicit --output table must not silently " +
+				"lose to --explain")
+		}
+		if !strings.Contains(err.Error(), "--explain") || !strings.Contains(err.Error(), "--output") {
+			t.Errorf("err = %q, want it to name both conflicting flags", err)
 		}
 	})
 }
