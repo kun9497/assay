@@ -2,7 +2,6 @@ package report
 
 import (
 	"bytes"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -14,49 +13,161 @@ import (
 	"github.com/kun9497/assay/internal/version"
 )
 
-// columnSep splits a tabwriter-rendered line into its columns. The writer
-// (padding 2) guarantees at least two spaces between adjacent columns, and no
-// cell value used in these tests contains two consecutive spaces internally
-// ("critical (9.8)" has exactly one), so splitting on runs of 2+ spaces
-// recovers the columns without depending on their width.
-var columnSep = regexp.MustCompile(`\s{2,}`)
+// columnStarts returns the offset at which each column's text begins, read off
+// the tabwriter-rendered header.
+//
+// Offsets, not a split on runs of whitespace. tabwriter aligns every row to the
+// same column offsets, so reading them once from the header and slicing each
+// row at the same places survives an EMPTY cell — which a split does not: with
+// no version to print, "svc  Go  GHSA-1  critical (9.8)  -  -" collapses by one
+// column and every field after the gap answers for its neighbour. That is the
+// wrong-column pass this helper exists to prevent, reintroduced inside the
+// helper, and it would be quiet: "-" is the printed filler for two different
+// columns, so the wrong cell can hold the value the test expects.
+//
+// A single space does not separate columns; the header holds "FIXED IN".
+func columnStarts(header string) []int {
+	var starts []int
+	for i := 0; i < len(header); {
+		if header[i] != ' ' {
+			if len(starts) == 0 {
+				starts = append(starts, i)
+			}
+			i++
+			continue
+		}
+		j := i
+		for j < len(header) && header[j] == ' ' {
+			j++
+		}
+		if j-i >= 2 && j < len(header) {
+			starts = append(starts, j)
+		}
+		i = j
+	}
+	return starts
+}
 
 // cellAt resolves a column by its header NAME rather than a hardcoded index,
-// then returns that column's value in the row naming advisoryID. Resolving by
-// name means the test still pins the right thing if an unrelated column is
-// ever inserted or reordered elsewhere; it only fails when the column asked
-// for stops lining up with the value it is supposed to hold — e.g. SEVERITY
-// and ALIASES swapped while the header row was left alone.
+// then returns that column's value in the row whose ADVISORY cell is exactly
+// advisoryID. Resolving by name means the test still pins the right thing if an
+// unrelated column is inserted or reordered; it fails when the column asked for
+// stops lining up with the value it is supposed to hold — SEVERITY and ALIASES
+// swapped while the header row was left alone, say.
+//
+// The row is matched on the ADVISORY cell, not on the line containing the ID
+// anywhere. Advisory IDs nest (GHSA-1 is inside GHSA-10) and the same ID
+// appears again in the "Not evaluated" block, so a substring match over the
+// whole output can select a line that is not the finding's row at all.
 func cellAt(t *testing.T, out, advisoryID, column string) string {
 	t.Helper()
 	lines := strings.Split(out, "\n")
-	if len(lines) == 0 {
-		t.Fatalf("empty output")
+	starts := columnStarts(lines[0])
+	names := make([]string, len(starts))
+	for i := range starts {
+		names[i] = sliceColumn(lines[0], starts, i)
 	}
-	header := columnSep.Split(lines[0], -1)
-	idx := -1
-	for i, h := range header {
+
+	idx, advisoryIdx := -1, -1
+	for i, h := range names {
 		if h == column {
 			idx = i
-			break
+		}
+		if h == "ADVISORY" {
+			advisoryIdx = i
 		}
 	}
 	if idx == -1 {
-		t.Fatalf("no %q column in header %v:\n%s", column, header, out)
+		t.Fatalf("no %q column in header %v:\n%s", column, names, out)
 	}
+	if advisoryIdx == -1 {
+		t.Fatalf("no ADVISORY column to identify rows by, header %v:\n%s", names, out)
+	}
+
 	for _, l := range lines[1:] {
-		if !strings.Contains(l, advisoryID) {
+		if sliceColumn(l, starts, advisoryIdx) != advisoryID {
 			continue
 		}
-		cols := columnSep.Split(l, -1)
-		if idx >= len(cols) {
-			t.Fatalf("row naming %s has %d columns, header put %q at index %d:\nrow=%v\nheader=%v",
-				advisoryID, len(cols), column, idx, cols, header)
-		}
-		return cols[idx]
+		return sliceColumn(l, starts, idx)
 	}
-	t.Fatalf("no row names advisory %q in:\n%s", advisoryID, out)
+	t.Fatalf("no row has advisory %q in its ADVISORY column:\n%s", advisoryID, out)
 	return ""
+}
+
+// sliceColumn cuts column i out of a rendered line using the header's offsets.
+func sliceColumn(line string, starts []int, i int) string {
+	if i >= len(starts) || starts[i] >= len(line) {
+		// Past the end of this line: tabwriter does not pad the final cell,
+		// so a trailing empty column simply is not there.
+		return ""
+	}
+	end := len(line)
+	if i+1 < len(starts) && starts[i+1] < end {
+		end = starts[i+1]
+	}
+	return strings.TrimSpace(line[starts[i]:end])
+}
+
+// The helper's own regression test. An empty cell used to collapse the split
+// and hand back a neighbouring column's value with no error — the wrong-column
+// pass, inside the thing built to catch it. A package with no version renders
+// an empty VERSION cell, which is also a real state: the cataloger reports
+// packages it could not version.
+func TestCellAt_AnEmptyCellDoesNotShiftTheColumns(t *testing.T) {
+	var buf bytes.Buffer
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "svc", Version: "", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{ID: "GHSA-empty"},
+		Severity: severity.Critical,
+		Score:    9.8,
+	}}}
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, tt := range []struct{ column, want string }{
+		{"PACKAGE", "svc"},
+		{"VERSION", ""},
+		{"ECOSYSTEM", "Go"},
+		{"ADVISORY", "GHSA-empty"},
+		{"SEVERITY", "critical (9.8)"},
+		{"ALIASES", "-"},
+		{"FIXED IN", "-"},
+	} {
+		if got := cellAt(t, out, "GHSA-empty", tt.column); got != tt.want {
+			t.Errorf("cellAt(%s) = %q, want %q\nrendered:\n%s", tt.column, got, tt.want, out)
+		}
+	}
+}
+
+// Advisory IDs nest, and the row has to be found by its ADVISORY cell rather
+// than by the ID appearing anywhere on the line.
+func TestCellAt_PicksTheRowByItsAdvisoryCell(t *testing.T) {
+	var buf bytes.Buffer
+	res := matcher.Result{Findings: []matcher.Finding{
+		{
+			Package:  pkgmeta.Package{Name: "a", Version: "1", Ecosystem: "Go"},
+			Advisory: advisory.Advisory{ID: "GHSA-10"},
+			Severity: severity.Low, Score: 2.0,
+		},
+		{
+			Package:  pkgmeta.Package{Name: "b", Version: "1", Ecosystem: "Go"},
+			Advisory: advisory.Advisory{ID: "GHSA-1"},
+			Severity: severity.High, Score: 7.5,
+		},
+	}}
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 2, Cataloged: 2}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	// GHSA-1 is a substring of GHSA-10, which is rendered first. A substring
+	// match over the line would answer with GHSA-10's severity.
+	if got := cellAt(t, out, "GHSA-1", "SEVERITY"); got != "high (7.5)" {
+		t.Errorf("cellAt(GHSA-1, SEVERITY) = %q, want high (7.5) - it matched the GHSA-10 row", got)
+	}
+	if got := cellAt(t, out, "GHSA-10", "SEVERITY"); got != "low (2.0)" {
+		t.Errorf("cellAt(GHSA-10, SEVERITY) = %q, want low (2.0)", got)
+	}
 }
 
 func TestTable_Findings(t *testing.T) {
