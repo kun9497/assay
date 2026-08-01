@@ -157,30 +157,14 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 			if i >= len(args) {
 				return "", scancmd.Options{}, fmt.Errorf("--fail-on requires a value")
 			}
-			// A repeat must be rejected, not silently take the last value:
-			// `--fail-on critical --fail-on low` quietly loosening the gate
-			// is the same "the user thought they set a threshold but did
-			// not" shape ParseBand's own error exists to prevent.
-			if opts.FailOn != nil {
-				return "", scancmd.Options{}, fmt.Errorf(
-					"--fail-on given more than once (already %q)", opts.FailOn.String())
+			if err := setFailOn(&opts, args[i]); err != nil {
+				return "", scancmd.Options{}, err
 			}
-			b, perr := severity.ParseBand(args[i])
-			if perr != nil {
-				return "", scancmd.Options{}, perr
-			}
-			opts.FailOn = &b
 
 		case strings.HasPrefix(a, "--fail-on="):
-			if opts.FailOn != nil {
-				return "", scancmd.Options{}, fmt.Errorf(
-					"--fail-on given more than once (already %q)", opts.FailOn.String())
+			if err := setFailOn(&opts, strings.TrimPrefix(a, "--fail-on=")); err != nil {
+				return "", scancmd.Options{}, err
 			}
-			b, perr := severity.ParseBand(strings.TrimPrefix(a, "--fail-on="))
-			if perr != nil {
-				return "", scancmd.Options{}, perr
-			}
-			opts.FailOn = &b
 
 		case a == "--fail-on-unknown":
 			opts.FailOnUnknown = true
@@ -200,4 +184,27 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 		}
 	}
 	return target, opts, nil
+}
+
+// setFailOn validates value and stores it on opts.FailOn, shared by both the
+// "--fail-on value" and "--fail-on=value" spellings so the repeat-rejection
+// and parsing logic exist in exactly one place rather than copy-pasted
+// across both — two copies being "one more place for them to drift apart"
+// is the same reasoning that removed the redundant len(args) < 2 guard
+// above.
+//
+// A repeat is rejected rather than silently taking the last value:
+// `--fail-on critical --fail-on low` quietly loosening the gate is the same
+// "the user thought they set a threshold but did not" shape ParseBand's own
+// error exists to prevent.
+func setFailOn(opts *scancmd.Options, value string) error {
+	if opts.FailOn != nil {
+		return fmt.Errorf("--fail-on given more than once (already %q)", opts.FailOn.String())
+	}
+	b, err := severity.ParseBand(value)
+	if err != nil {
+		return err
+	}
+	opts.FailOn = &b
+	return nil
 }

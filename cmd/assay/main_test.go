@@ -274,51 +274,66 @@ func TestRun_ScanFlagsWithNoTargetExits2(t *testing.T) {
 	}
 }
 
-// TestRun_ScanFailOnReachesRealExitCode is the critical wiring check.
-// TestParseScanArgs proves parseScanArgs returns the right Options;
-// scancmd's own TestRun_ExitCodeMatrix proves scancmd.Run honours Options
-// correctly. Neither one can catch main.go silently discarding the parsed
-// value on the way between them — e.g.
+// buildRunSeamFixture writes a real database (at ASSAY_DB_DIR/vulnerability.db
+// — the caller must have already pointed ASSAY_DB_DIR at dir) and a matching
+// CycloneDX SBOM naming three packages, so that all three --fail-on* gates
+// have something to fire on simultaneously:
 //
-//	return scancmd.Run(ctx, path, target, scancmd.Options{}, stdout, stderr)
+//   - "critical": a critical-severity finding (for --fail-on).
+//   - "unknownsev": a finding whose advisory carries no CVSS vector at all,
+//     so severity.Highest reports it Unknown (for --fail-on-unknown).
+//   - "somecrate": a cargo purl, an unsupported ecosystem type the cataloger
+//     drops before the matcher ever sees it, so report.Summary.NotEvaluated
+//     is > 0 (for --fail-on-incomplete).
 //
-// type-checks, compiles, and leaves both of those suites green, because
-// each only ever exercises its own half in isolation. This drives run()
-// itself, through a real (temporary) database and SBOM built the same way
-// scancmd_test.go's fixtures are, and asserts an actual exit 1 — the one
-// thing that requires the whole path, flag string to process exit code, to
-// be wired together.
-//
-// store.DefaultPath honours ASSAY_DB_DIR (internal/store/store.go), which is
-// what lets this test point the real lookup path at a temp dir without a
-// database-path parameter on run() itself.
-func TestRun_ScanFailOnReachesRealExitCode(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("ASSAY_DB_DIR", dir)
+// All three conditions are present unconditionally; only which flag is set
+// decides whether any of them changes the exit code, which is exactly what
+// TestRun_ScanFlagsReachRealExitCode needs to isolate one flag at a time
+// against one shared fixture.
+func buildRunSeamFixture(t *testing.T, dir string) string {
+	t.Helper()
 
 	dbPath := filepath.Join(dir, "vulnerability.db")
 	w, err := store.Create(dbPath)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if err := w.Put(advisory.Advisory{
-		ID:   "GHSA-critical",
-		Kind: advisory.KindVulnerability,
-		Affected: []advisory.Affected{{
-			Ecosystem: "Go",
-			Name:      "example.com/critical",
-			Ranges: []advisory.Range{{
-				Type:   advisory.RangeSemver,
-				Events: []advisory.Event{{Introduced: "0"}, {Fixed: "2.0.0"}},
+	advisories := []advisory.Advisory{
+		{
+			ID:   "GHSA-critical",
+			Kind: advisory.KindVulnerability,
+			Affected: []advisory.Affected{{
+				Ecosystem: "Go",
+				Name:      "example.com/critical",
+				Ranges: []advisory.Range{{
+					Type:   advisory.RangeSemver,
+					Events: []advisory.Event{{Introduced: "0"}, {Fixed: "2.0.0"}},
+				}},
 			}},
-		}},
-		Severity: []advisory.Severity{
-			// critical, 9.8 - the same vector pinned against its exact band
-			// and score in internal/matcher/matcher_test.go.
-			{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"},
+			Severity: []advisory.Severity{
+				// critical, 9.8 - the same vector pinned against its exact
+				// band and score in internal/matcher/matcher_test.go.
+				{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"},
+			},
 		},
-	}); err != nil {
-		t.Fatalf("Put: %v", err)
+		{
+			ID:   "GHSA-unknownsev",
+			Kind: advisory.KindVulnerability,
+			Affected: []advisory.Affected{{
+				Ecosystem: "Go",
+				Name:      "example.com/unknownsev",
+				Ranges: []advisory.Range{{
+					Type:   advisory.RangeSemver,
+					Events: []advisory.Event{{Introduced: "0"}, {Fixed: "2.0.0"}},
+				}},
+			}},
+			// No Severity entries at all -> severity.Highest returns Unknown.
+		},
+	}
+	for _, a := range advisories {
+		if err := w.Put(a); err != nil {
+			t.Fatalf("Put(%s): %v", a.ID, err)
+		}
 	}
 	if err := w.SetMeta(store.Meta{
 		Providers: map[string]store.Provenance{"osv": {Ecosystems: []string{"Go"}}},
@@ -331,26 +346,88 @@ func TestRun_ScanFailOnReachesRealExitCode(t *testing.T) {
 
 	sbom := filepath.Join(dir, "s.cdx.json")
 	doc := `{"bomFormat":"CycloneDX","specVersion":"1.5","version":1,"components":[` +
-		`{"type":"library","name":"critical","version":"1.0.0",` +
-		`"purl":"pkg:golang/example.com/critical@1.0.0"}]}`
+		`{"type":"library","name":"critical","version":"1.0.0","purl":"pkg:golang/example.com/critical@1.0.0"},` +
+		`{"type":"library","name":"unknownsev","version":"1.0.0","purl":"pkg:golang/example.com/unknownsev@1.0.0"},` +
+		`{"type":"library","name":"somecrate","version":"1.0.0","purl":"pkg:cargo/somecrate@1.0.0"}` +
+		`]}`
 	if err := os.WriteFile(sbom, []byte(doc), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
+	return sbom
+}
 
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"scan", sbom, "--fail-on", "critical"}, &stdout, &stderr); code != exitFindings {
-		t.Errorf("run(scan --fail-on critical) = %d, want exitFindings (%d)\nstdout:\n%s\nstderr:\n%s",
-			code, exitFindings, stdout.String(), stderr.String())
+// TestRun_ScanFlagsReachRealExitCode is the run()-seam wiring check for all
+// three --fail-on* flags, not just --fail-on. TestParseScanArgs proves each
+// field is parsed correctly; scancmd's own TestRun_ExitCodeMatrix proves
+// scancmd.Run honours a given Options value correctly. Neither one can catch
+// main.go silently dropping a field on the way between them — e.g.
+//
+//	opts.FailOnUnknown = false
+//	opts.FailOnIncomplete = false
+//	return scancmd.Run(ctx, path, target, opts, stdout, stderr)
+//
+// type-checks and leaves both of those suites green, since each only ever
+// exercises its own half in isolation. This drives run() itself against one
+// fixture (buildRunSeamFixture) that has all three conditions present at
+// once, so the shared "no flags" row proves none of them changes the exit
+// code alone, and each flag's own row proves that flag — and only that flag
+// — does. A single dropped field (or all three) must turn exactly its own
+// row red; a table reads that contract in one place rather than three
+// near-identical test functions.
+//
+// store.DefaultPath honours ASSAY_DB_DIR (internal/store/store.go), which is
+// what lets this test point the real lookup path at a temp dir without a
+// database-path parameter on run() itself — no network, no real registry.
+func TestRun_ScanFlagsReachRealExitCode(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ASSAY_DB_DIR", dir)
+	sbom := buildRunSeamFixture(t, dir)
+
+	cases := []struct {
+		name string
+		args []string
+		want int
+	}{
+		{"no flags: a critical finding, an unrated finding, and an unevaluated " +
+			"package are all present, and none of them changes the exit code alone",
+			nil, exitOK},
+		{"--fail-on critical reaches scancmd.Run through run()",
+			[]string{"--fail-on", "critical"}, exitFindings},
+		{"--fail-on-unknown reaches scancmd.Run through run()",
+			[]string{"--fail-on-unknown"}, exitFindings},
+		{"--fail-on-incomplete reaches scancmd.Run through run()",
+			[]string{"--fail-on-incomplete"}, exitError},
 	}
 
-	// Mirror case: the identical scan with no flag must still exit 0. This
-	// pins the flag as the cause of the exit-1 above, not some property of
-	// the fixture that would make it exit 1 regardless of what run() does
-	// with opts.
-	stdout.Reset()
-	stderr.Reset()
-	if code := run([]string{"scan", sbom}, &stdout, &stderr); code != exitOK {
-		t.Errorf("run(scan) without the flag = %d, want exitOK (%d)\nstdout:\n%s\nstderr:\n%s",
-			code, exitOK, stdout.String(), stderr.String())
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append([]string{"scan", sbom}, tc.args...)
+			var stdout, stderr bytes.Buffer
+			if code := run(args, &stdout, &stderr); code != tc.want {
+				t.Errorf("run(%v) = %d, want %d\nstdout:\n%s\nstderr:\n%s",
+					args, code, tc.want, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
+// The CLI contract end to end for the repeated-flag rejection: exit 2, the
+// diagnostic on stderr, and stdout untouched. TestParseScanArgs already
+// proves parseScanArgs returns a non-nil error for a repeat; this proves the
+// error actually reaches run()'s exit code and stream discipline rather than
+// being swallowed or misrouted between parseScanArgs and run()'s own error
+// handling.
+func TestRun_ScanRepeatedFailOnExits2(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"scan", "docker-archive:/does/not/exist.tar",
+		"--fail-on", "critical", "--fail-on", "low"}, &stdout, &stderr)
+	if code != exitError {
+		t.Errorf("run() = %d, want exitError (%d)", code, exitError)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("error path polluted stdout: %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "more than once") {
+		t.Errorf("stderr = %q, want it to say --fail-on was given more than once", stderr.String())
 	}
 }
