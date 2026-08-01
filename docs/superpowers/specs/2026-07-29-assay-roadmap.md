@@ -281,7 +281,10 @@ Where assay differs, the difference is documented rather than left to be discove
 
 | Flag | Difference from grype |
 |---|---|
+| `--fail-on` | Same name, same comparison, **different exit code**: 1 here, 2 in grype. grype folds "found something" together with "could not run"; D11 keeps them apart and every unevaluable path in assay already relies on that (D21). |
+| `--fail-on <band>` | Band names are `none low medium high critical`; grype's are `negligible low medium high critical`. Same ordering, same positions — assay takes the name CVSS uses for 0.0 rather than the one grype invented (D21). |
 | `--fail-on-unknown` | No grype equivalent. Exists because unknown is not in assay's severity ordering (D17). |
+| `--fail-on-incomplete` | No grype equivalent. Exits **2**, not 1: a package that was never checked is a statement about coverage, not a finding (D21). |
 
 Add a row here whenever a shared name gains different semantics. A silently divergent flag
 is worse than a differently named one.
@@ -381,6 +384,55 @@ version would break a build — and belongs with `--fail-on` in slice 4.
 
 **Schema version 3.** The field is part of the on-disk shape, so a database built before it
 is refused with instructions rather than read as covering nothing (D5).
+
+
+### D21 — Verdicts: what fails a build, and what the exit code means
+
+Slice 4 makes exit code 1 reachable. Four decisions settle what reaches it.
+
+**`--fail-on <band>` exits 1, not 2.** grype's flag of the same name returns 2, folding
+"vulnerabilities were found" together with "the scan could not run". Separating those is
+what D11 exists for, and the whole project leans on it — every "we could not tell" path
+built so far reaches exit 2 precisely so CI can tell the two apart. Matching grype here
+would surrender that to save a line of migration notes. Recorded in the divergence table
+(D18).
+
+**`--fail-on-incomplete` exits 2, not 1.** A package that was never checked is not a
+finding; it is a statement about how much of the target the scan actually covered, and D11
+reserves 2 for a result that cannot be trusted. It also lines up with what already happens
+when *nothing* could be evaluated — that is exit 2 today, with no flag — so the flag
+extends an existing rule to the partial case rather than inventing a second one.
+
+Opt-in, for the same reason `--fail-on-unknown` is (D17): skips are routine. An unparseable
+version string, one advisory with a malformed bound, a package in an ecosystem this build
+does not support — all of these produce skips on scans that are otherwise fine, and
+defaulting the gate on would fire constantly and be turned off.
+
+**Five bands, with `none` at the bottom:** `none < low < medium < high < critical`, plus
+`unknown` outside the ordering (D17). CVSS maps 0.0 to None explicitly, and banding derives
+from the vector (D13), so the band set follows the specification rather than a tool. grype
+calls the same position `negligible`; that is a naming divergence, recorded in D18's table.
+
+Coercing 0.0 up to `low` would be the same distortion D17 forbids in the other direction —
+reporting a severity the data does not support.
+
+**CVSS v4 is in scope, and is not a formula.** 6,531 of 27,891 stored vectors are v4 (23%),
+and every recent Alpine advisory uses it, so deferring v4 would drop the newest findings
+into `unknown` where `--fail-on` cannot see them. But v4 scoring is not a transliteration:
+after a macrovector lookup it interpolates using severity distance, macrovector depth, and
+a proportional distance averaged across the equivalence classes, with the reference
+implementation — not the prose — as the authority.
+
+That makes it the same shape as the apk comparer (D9): an algorithm where a wrong answer is
+quiet and a hand-written test table proves little. It must be cross-checked against
+published expected scores before it is trusted, and the check must live in the repository
+rather than in a commit message.
+
+**Measured, because D17's figure was ecosystem-specific.** D17 says half of all advisories
+carry no severity; that is true of the Go dump (49.7%) and of nothing else. Across the
+whole database it is 74.9%, and per ecosystem: Alpine 98.9%, npm 89.7%, PyPI 75.9%. A
+container scan therefore has almost no unknowns, so `--fail-on-unknown` is far less noisy
+there than D17's framing suggests — and correspondingly more useful.
 
 ## 3. Architecture
 
