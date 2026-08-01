@@ -535,7 +535,7 @@ func buildFixture(t *testing.T, gomod, mainGo string) string {
 	// a go.sum; GOPROXY=off makes a cache miss an error rather than a silent
 	// network fetch, so a fixture that would need the network fails loudly
 	// here instead of making the suite depend on it.
-	cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod", "GOPROXY=off", "GONOSUMDB=*", "GONOSUMCHECK=1", "GOFLAGS=-mod=mod")
+	cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod", "GOPROXY=off", "GOSUMDB=off")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Skipf("go build failed (%v); fixture needs modules not in the local cache:\n%s", err, out)
 	}
