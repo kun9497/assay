@@ -113,10 +113,10 @@ assay scan ./bin/assay                # a Go binary
 assay scan ./my-project               # a directory with a go.mod
 ```
 
-A bare path is classified by **content**: a Go binary if `debug/buildinfo` can read it, a
-CycloneDX document if it opens like one, a directory if it is one. A file that is none of
-those is an error naming all three, never a silent guess. Anything that is not a path at all
-is a registry reference.
+A bare path is classified by **content**: a directory if it is one, a Go binary if
+`debug/buildinfo` can read it, a CycloneDX document if it has a top-level `bomFormat`. A file
+that is none of those is an error naming all three, never a silent guess. Anything that is
+not a path at all is a registry reference.
 
 The prefixes `file:`, `dir:` and `sbom:` override the sniff, alongside `docker-archive:` and
 `oci-dir:`. Every scan prints how it classified the target on stderr, so a wrong guess is

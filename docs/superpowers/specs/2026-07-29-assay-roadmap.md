@@ -440,11 +440,14 @@ there than D17's framing suggests — and correspondingly more useful.
 SBOM. A binary handed to the CycloneDX parser fails with a JSON error, which sends the
 reader to look for a malformed document rather than a misread target.
 
-**Bare paths are classified by content**, in a fixed order: `debug/buildinfo` first, then
-CycloneDX, then "is it a directory". Each test is cheap and unambiguous — buildinfo reads a
-header and fails immediately on anything that is not a Go binary — so the order is about
-determinism, not cost. A path that matches nothing is an error naming all three, never a
-silent fallthrough to one of them.
+**Bare paths are classified by content**, in a fixed order: is it a directory, then
+`debug/buildinfo`, then CycloneDX. Each test is cheap — buildinfo reads a header and fails
+immediately on anything that is not a Go binary — so the order is about determinism, not
+cost. In fact the three are mutually exclusive on any real input, so the order is not
+observable today; it is fixed anyway, because the day a fourth format is added the
+exclusivity stops holding and an unordered sniff would change behaviour silently. A path
+that matches nothing is an error naming all three, never a silent fallthrough to one of
+them.
 
 **Explicit prefixes override the sniff**: `file:`, `dir:`, `sbom:`, alongside the existing
 `docker-archive:` and `oci-dir:`. Sniffing is a heuristic, and a heuristic with no override

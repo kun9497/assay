@@ -171,6 +171,77 @@ func TestClassify_AnEmptyFileIsUnrecognised(t *testing.T) {
 	}
 }
 
+// JSON member order is arbitrary, so a valid CycloneDX document can put
+// bomFormat past any fixed prefix. An 880-byte 1.6 document leading with a
+// metadata block did exactly that and was rejected as "not a CycloneDX
+// document" - a regression against the pre-sniff behaviour, where every
+// existing file went to the order-independent parser.
+func TestClassify_ACycloneDXDocumentWithALateBomFormat(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "late.cdx.json")
+	// Padding pushes bomFormat well past the 512-byte fast path.
+	pad := strings.Repeat("x", 900)
+	body := `{"metadata":{"tools":[{"vendor":"` + pad + `","name":"syft"}]},` +
+		`"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[]}`
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := Classify(p)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	if got != TargetSBOM {
+		t.Errorf("Classify = %v, want sbom", got)
+	}
+}
+
+// ...but the marker has to be a top-level KEY. A document whose only
+// occurrence of the word is a value, or a nested property name - and
+// CycloneDX property names come from whatever tool wrote the file - is not an
+// SBOM, and calling it one sends a stranger's document to the wrong parser.
+func TestClassify_BomFormatMustBeATopLevelKey(t *testing.T) {
+	dir := t.TempDir()
+	for _, tt := range []struct{ name, body string }{
+		{"as a value", `{"note":"bomFormat","x":1}`},
+		{"nested one level down", `{"metadata":{"bomFormat":"CycloneDX"}}`},
+		{"as a property name inside an array", `{"a":[{"properties":[{"name":"bomFormat"}]}]}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			p := filepath.Join(dir, strings.ReplaceAll(tt.name, " ", "_")+".json")
+			// The padding keeps the fast prefix scan from seeing it, so this
+			// exercises the streaming fallback rather than the shortcut.
+			body := `{"pad":"` + strings.Repeat("y", 900) + `",` + tt.body[1:]
+			if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if got, _, err := Classify(p); err == nil {
+				t.Errorf("Classify(%s) = %v, want an error - the marker is not a top-level key",
+					tt.name, got)
+			}
+		})
+	}
+}
+
+// A truncated or non-object document must not hang or panic the fallback.
+func TestClassify_MalformedJSONIsNotAnSBOM(t *testing.T) {
+	dir := t.TempDir()
+	for _, tt := range []struct{ name, body string }{
+		{"truncated object", `{"pad":"` + strings.Repeat("z", 900) + `","a":`},
+		{"a bare array", `[` + strings.Repeat(`"x",`, 300) + `"y"]`},
+		{"not json at all", strings.Repeat("q", 900)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			p := filepath.Join(dir, strings.ReplaceAll(tt.name, " ", "_")+".json")
+			if err := os.WriteFile(p, []byte(tt.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if got, _, err := Classify(p); err == nil {
+				t.Errorf("Classify(%s) = %v, want an error", tt.name, got)
+			}
+		})
+	}
+}
+
 // The kind is printed in the scan's own output so a wrong guess is visible
 // rather than inferred from a confusing downstream error, which makes these
 // names contract.

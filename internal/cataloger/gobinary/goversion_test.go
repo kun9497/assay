@@ -140,6 +140,13 @@ func TestNormalizeGoVersion_EverythingItAcceptsIsComparable(t *testing.T) {
 	} {
 		norm, ok := normalizeGoVersion(in)
 		if !ok {
+			// A `continue` here would make a REJECTION silently pass, and
+			// four of these inputs have no other coverage - dropping "alpha"
+			// from the pre-release list left the whole suite green until this
+			// was a failure. Every shape listed is one Go has stamped or
+			// could stamp, so refusing one is the D24 failure: stdlib lands
+			// in SkippedNoVersion and 159 advisories become unreachable.
+			t.Errorf("normalizeGoVersion(%q) refused a real toolchain version", in)
 			continue
 		}
 		if _, err := c.Compare(norm, "1.16.1"); err != nil {

@@ -204,6 +204,55 @@ func TestParse_IgnoresNonRequireDirectives(t *testing.T) {
 	}
 }
 
+// A block body carries no keyword of its own, so any line shaped like
+// `word word` inside `require ( ... )` becomes a path/version pair. A
+// merge-conflicted go.mod is the case that matters: it cataloged
+// "<<<<<<<"\n"HEAD" and ">>>>>>>"\n"other" and counted them as EVALUATED - a
+// scan claiming to have checked two things that do not exist, on a file the
+// merge left broken.
+func TestParse_ConflictMarkersAreNotPackages(t *testing.T) {
+	dir := write(t, "module m\n"+
+		"\nrequire (\n"+
+		"<<<<<<< HEAD\n"+
+		"\tgithub.com/a/b v1.0.0\n"+
+		"=======\n"+
+		"\tgithub.com/a/b v2.0.0\n"+
+		">>>>>>> other\n"+
+		")\n")
+
+	_, _, err := Parse(dir)
+	if err == nil {
+		t.Fatal("a merge-conflicted go.mod parsed cleanly")
+	}
+	// `go mod edit -json` rejects this same file with `require <<<<<<<:
+	// version "HEAD" invalid`, so an error is what the real toolchain says
+	// too. Counting the markers as skips instead would inflate Components
+	// with phantom packages and describe a broken FILE as a scan with three
+	// packages it could not evaluate - a different and less actionable claim.
+	if !strings.Contains(err.Error(), "<<<<<<<") {
+		t.Errorf("error %q does not name the line it could not parse", err)
+	}
+}
+
+// A directive keyword indented inside a require block is not a module either.
+// "replace" is spelled with perfectly legal module-path characters, so the
+// character check alone does not catch it.
+func TestParse_ADirectiveInsideABlockIsNotAPackage(t *testing.T) {
+	dir := write(t, "module m\n"+
+		"\nrequire (\n"+
+		"\tgithub.com/real/dep v1.0.0\n"+
+		"\treplace github.com/c/d v2.0.0\n"+
+		")\n")
+
+	_, _, err := Parse(dir)
+	if err == nil {
+		t.Fatal("a directive keyword inside a require block parsed cleanly")
+	}
+	if !strings.Contains(err.Error(), "replace") {
+		t.Errorf("error %q does not name the keyword it could not parse", err)
+	}
+}
+
 // A go.mod with no require block is a valid module with no dependencies:
 // zero packages and no error. This repository had exactly that shape until
 // slice 2b, so it is not hypothetical.
@@ -231,11 +280,15 @@ func TestParse_NoGoModIsAnError(t *testing.T) {
 	if err == nil {
 		t.Fatal("a directory with no go.mod scanned clean")
 	}
-	if !strings.Contains(err.Error(), "go.mod") {
-		t.Errorf("error %q does not mention go.mod", err)
-	}
-	if !strings.Contains(err.Error(), dir) {
-		t.Errorf("error %q does not name the directory", err)
+	// The full path, as one substring. Asserting "go.mod" and the directory
+	// separately is satisfied by the hard-coded wrapper `read go.mod: %w`
+	// plus the directory alone — verified: replacing the body with
+	// fmt.Errorf("read go.mod: %s is unusable", dir), which drops the
+	// filename AND the cause, left both of those assertions green. That is
+	// the wrong-column pass CLAUDE.md names, from a wrapper rather than from
+	// a neighbouring field.
+	if want := filepath.Join(dir, "go.mod"); !strings.Contains(err.Error(), want) {
+		t.Errorf("error %q does not name the file it could not read (%s)", err, want)
 	}
 }
 

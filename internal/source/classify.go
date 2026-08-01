@@ -3,6 +3,7 @@ package source
 import (
 	"bytes"
 	"debug/buildinfo"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -18,7 +19,8 @@ import (
 // A bare path is now decided by CONTENT: directory, then Go binary, then
 // CycloneDX. Each test is cheap — buildinfo reads a header and fails
 // immediately on anything that is not a Go binary, and the CycloneDX test
-// reads 512 bytes.
+// reads a 512-byte prefix before falling back to a streaming scan for the
+// top-level key.
 //
 // The three are mutually exclusive on any real input, so their order is not
 // observable today: a Go binary's header cannot contain `"bomFormat"`, and a
@@ -77,11 +79,23 @@ func Classify(target string) (TargetKind, string, error) {
 
 // looksLikeCycloneDX reports whether a file opens like a CycloneDX document.
 //
-// It reads a prefix rather than parsing, and deliberately does not validate:
-// the classifier's job is to pick a parser, and the parser it picks reports
-// the real errors. Parsing here would read a 40 MB SBOM twice and would make
-// a document that is CycloneDX-but-malformed look like "not an SBOM", which
-// is a worse message than the one cyclonedx.Parse already gives.
+// It deliberately does not validate: the classifier's job is to pick a parser,
+// and the parser it picks reports the real errors. Deciding "not an SBOM" for
+// a document that is CycloneDX-but-malformed would be a worse message than the
+// one cyclonedx.Parse already gives.
+//
+// Two passes. The cheap one looks for the marker in the first 512 bytes, which
+// is where every SBOM this project has seen puts it. The fallback exists
+// because JSON member order is arbitrary: a document leading with a large
+// `metadata` block is perfectly legal and pushes `bomFormat` past any fixed
+// prefix — an 880-byte CycloneDX 1.6 file from a real generator did exactly
+// that and was rejected outright. Before target sniffing existed, every file
+// went to the order-independent parser, so a fixed prefix was a regression for
+// valid input.
+//
+// The fallback walks top-level keys with a streaming decoder rather than
+// unmarshalling, and stops at the first one that matches, so it reads no more
+// of a 40 MB SBOM than it has to.
 func looksLikeCycloneDX(path string) bool {
 	f, err := os.Open(path)
 	if err != nil {
@@ -94,5 +108,66 @@ func looksLikeCycloneDX(path string) bool {
 	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
 		return false
 	}
-	return bytes.Contains(head[:n], []byte(`"bomFormat"`))
+	if bytes.Contains(head[:n], []byte(`"bomFormat"`)) {
+		return true
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return false
+	}
+	return hasTopLevelKey(f, "bomFormat")
+}
+
+// hasTopLevelKey reports whether a JSON object has the given key at depth 1.
+//
+// Depth matters: a `components[].properties[].name` of "bomFormat" would
+// otherwise classify an arbitrary document as an SBOM, and CycloneDX property
+// names are attacker-controlled in the sense that they come from whatever tool
+// produced the file.
+func hasTopLevelKey(r io.Reader, key string) bool {
+	dec := json.NewDecoder(r)
+	tok, err := dec.Token()
+	if err != nil {
+		return false
+	}
+	if d, ok := tok.(json.Delim); !ok || d != '{' {
+		return false
+	}
+	depth := 1
+	// Token() yields a key and then its value, with no marker between them, so
+	// key position has to be tracked. Without this, {"note":"bomFormat"} would
+	// match on the VALUE and classify an arbitrary document as an SBOM.
+	expectKey := true
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return false
+		}
+		switch t := tok.(type) {
+		case json.Delim:
+			if t == '{' || t == '[' {
+				depth++
+			} else {
+				depth--
+				if depth == 0 {
+					return false
+				}
+			}
+			// A nested value has just ended, so the next token at depth 1 is
+			// a key again.
+			expectKey = depth == 1
+		default:
+			if depth != 1 {
+				continue
+			}
+			if expectKey {
+				if s, ok := t.(string); ok && s == key {
+					return true
+				}
+				expectKey = false
+				continue
+			}
+			// That was the value; the next depth-1 token is a key.
+			expectKey = true
+		}
+	}
 }

@@ -85,9 +85,10 @@ const (
 	apkDBPath     = "lib/apk/db/installed"
 )
 
-// Run scans an SBOM file or a container image — a registry reference, a
-// docker-archive: tarball, or an oci-dir: layout — chosen by
-// source.ClassifyTarget so one argument reaches the right loader. Once the
+// Run scans whatever one target argument names — an SBOM, a container image
+// (a registry reference, a docker-archive: tarball, or an oci-dir: layout), a
+// Go binary, or a directory with a go.mod — chosen by source.Classify so one
+// argument reaches the right loader (D22). Once the
 // scan completes and the result is judged trustworthy (D11), opts decides
 // the exit code; Options{} reproduces the pre-slice-4 behaviour of always
 // exiting 0 on a trustworthy scan, findings or not.

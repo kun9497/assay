@@ -223,17 +223,33 @@ func apply(keyword, body string, requires *[]requirement, replaceAny, replaceExa
 		fields := strings.Fields(body)
 		var path, version string
 		if len(fields) >= 1 {
-			if p, ok := parseModulePath(fields[0]); ok {
+			p, ok := parseModulePath(fields[0])
+			if !ok {
+				// Not a module path at all. Two shapes reach here and they
+				// want opposite answers.
+				//
+				// A quoted path this whitespace-based scan split apart is a
+				// path we cannot READ - the file is fine, the parser is not -
+				// so it falls through as a counted skip below.
+				//
+				// A first field that could never be a module path means the
+				// FILE is broken: conflict markers, or a directive keyword
+				// indented inside a block. `go mod edit -json` rejects both
+				// ("require <<<<<<<: version "HEAD" invalid"), and so does
+				// this. Counting them as skips instead would inflate
+				// Components with phantom packages and make a merge-broken
+				// go.mod look like a scan with three things it could not
+				// evaluate, which is a different and less actionable claim
+				// than "this file is not valid".
+				if !strings.HasPrefix(fields[0], `"`) {
+					return fmt.Errorf("require %s: not a module path", fields[0])
+				}
+			} else {
 				path = p
 				if len(fields) >= 2 {
 					version = fields[1]
 				}
 			}
-			// If the path itself could not be resolved - most likely a
-			// quoted path split apart by an internal space this
-			// whitespace-based scan cannot see across - version is left
-			// empty too, so the entry is skipped uniformly by Parse rather
-			// than cataloged under a name with a stray leading quote.
 		}
 		*requires = append(*requires, requirement{path: path, version: version})
 
@@ -425,7 +441,7 @@ func parseModulePath(field string) (path string, ok bool) {
 		return "", false
 	}
 	if field[0] != '"' {
-		return field, true
+		return field, looksLikeModulePath(field)
 	}
 	if len(field) < 2 || field[len(field)-1] != '"' {
 		return "", false
@@ -434,5 +450,51 @@ func parseModulePath(field string) (path string, ok bool) {
 	if err != nil {
 		return "", false
 	}
-	return u, true
+	return u, looksLikeModulePath(u)
+}
+
+// looksLikeModulePath reports whether a field could be a module path at all.
+//
+// It exists because a block body carries no keyword of its own, so ANY line
+// shaped like `word word` inside `require ( ... )` becomes a path/version
+// pair. A merge-conflicted go.mod is the case that matters:
+//
+//	require (
+//	<<<<<<< HEAD
+//	        github.com/a/b v1.0.0
+//	=======
+//	        github.com/a/b v2.0.0
+//	>>>>>>> other
+//	)
+//
+// Without this, "<<<<<<<"@"HEAD" and ">>>>>>>"@"other" are cataloged and
+// counted as EVALUATED — two fabricated packages reported as cleanly checked,
+// on a file the merge left broken. The real requires are still evaluated, so
+// it is not a false negative; it is a scan claiming to have checked things
+// that do not exist.
+//
+// The rule is the module-path grammar's character set: ASCII letters, digits,
+// and -._~+/ (golang.org/x/mod/module). Conflict markers fail on < > =, and a
+// bare directive keyword accidentally reaching here is rejected separately
+// below, since "replace" is spelled with perfectly legal characters.
+func looksLikeModulePath(s string) bool {
+	if s == "" {
+		return false
+	}
+	switch s {
+	case "require", "replace", "exclude", "retract", "module", "go", "toolchain", "godebug", "tool":
+		// `replace A => B v2.0.0` indented inside a require block would
+		// otherwise catalog "replace"@"A".
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '-' || c == '.' || c == '_' || c == '~' || c == '+' || c == '/':
+		default:
+			return false
+		}
+	}
+	return true
 }
