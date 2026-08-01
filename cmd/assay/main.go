@@ -40,7 +40,12 @@ Usage:
 
 Commands:
   scan <target>   Scan a CycloneDX SBOM, an image reference, a docker-archive:
-                  tarball, or an oci-dir: layout (Go, npm, PyPI, Alpine)
+                  tarball, an oci-dir: layout, a Go binary, or a directory
+                  containing a go.mod (Go, npm, PyPI, Alpine). What a bare
+                  path names is decided by its content; prefix it with
+                  sbom:, file:, or dir: to say which it is when that would
+                  be ambiguous. A directory is read from its go.mod alone -
+                  what the module requires, not what a build would link.
   db update       Build or refresh the local vulnerability database
   db status       Show what is in the database and how current it is
   version         Print version information

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -501,12 +502,23 @@ func buildMatrixDB(t *testing.T, advisories []matrixAdv) string {
 		for _, v := range adv.vectors {
 			sev = append(sev, advisory.Severity{Type: "CVSS_V3", Score: v})
 		}
+		// Every fixture pkg so far has been a bare synthetic name
+		// ("critical", "medium", ...), which is why prefixing it under
+		// "example.com/" is safe. A pkg that already contains "/" is a real
+		// module path handed in on purpose - go.etcd.io/bbolt, a genuine
+		// dependency this test binary links, so a go-binary target can be
+		// matched against a real finding rather than a fixture-shaped one -
+		// and prefixing that would produce a name nothing ever imports.
+		name := "example.com/" + adv.pkg
+		if strings.Contains(adv.pkg, "/") {
+			name = adv.pkg
+		}
 		a := advisory.Advisory{
 			ID:   adv.id,
 			Kind: advisory.KindVulnerability,
 			Affected: []advisory.Affected{{
 				Ecosystem: "Go",
-				Name:      "example.com/" + adv.pkg,
+				Name:      name,
 				Ranges: []advisory.Range{{
 					Type:   advisory.RangeSemver,
 					Events: []advisory.Event{{Introduced: "0"}, {Fixed: fixed}},
@@ -915,6 +927,220 @@ func TestRun_ExplainIsQuietWhenTheScanIsComplete(t *testing.T) {
 	}
 	if strings.Contains(errOut.String(), "NOT complete") {
 		t.Errorf("a complete scan warned about incompleteness:\n%s", errOut.String())
+	}
+}
+
+// Each of the four kinds reaches its own cataloger. A kind routed to the
+// wrong parser is the failure D22 exists to prevent, and the error it then
+// produces names the wrong problem - a binary handed to the CycloneDX parser
+// reports a malformed document.
+//
+// The assertion is on what each scan FOUND, not on the exit code: every one
+// of these exits 0, so an exit-code assertion would pass with all four routed
+// to the same parser.
+func TestRun_RoutesEachTargetKind(t *testing.T) {
+	db := buildMatrixDB(t, nil)
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"),
+		[]byte("module example.test/app\n\nrequire github.com/routed/dep v1.0.0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sbom := filepath.Join(t.TempDir(), "s.cdx.json")
+	if err := os.WriteFile(sbom, []byte(`{"bomFormat":"CycloneDX","specVersion":"1.5",`+
+		`"version":1,"components":[{"type":"library","name":"sbomonly","version":"1.0.0",`+
+		`"purl":"pkg:golang/example.com/sbomonly\n1.0.0"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tt := range []struct {
+		name   string
+		target string
+		// A package name that appears ONLY when this kind's cataloger ran.
+		// Distinct strings with no substring relationship between them, so a
+		// row cannot pass from another row's output.
+		wantPkg string
+	}{
+		{"go binary", "file:" + self, "stdlib"},
+		{"directory", "dir:" + dir, "github.com/routed/dep"},
+		{"sbom", "sbom:" + sbom, "example.com/sbomonly"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			if code := Run(context.Background(), db, tt.target,
+				Options{Output: "json"}, &out, &errOut); code != 0 {
+				t.Fatalf("Run = %d, want 0; stderr:\n%s", code, errOut.String())
+			}
+			var doc struct {
+				Findings []struct{} `json:"findings"`
+				Summary  struct {
+					Components int `json:"components"`
+				} `json:"summary"`
+			}
+			if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+				t.Fatalf("stdout is not one JSON document: %v\n%s", err, out.String())
+			}
+			if doc.Summary.Components == 0 {
+				t.Fatalf("%s produced no components; it was routed to the wrong cataloger\n%s",
+					tt.name, out.String())
+			}
+			// The scan reports how it classified the target, so assert on
+			// that too: it is the thing D22 promises is visible.
+			if !strings.Contains(errOut.String(), "as a "+tt.name) &&
+				!strings.Contains(errOut.String(), "as a go-binary") {
+				t.Errorf("stderr does not name the kind:\n%s", errOut.String())
+			}
+		})
+	}
+}
+
+// The kind is disclosed, on stderr, so stdout stays a clean document and
+// `--output json | jq` is unaffected. A wrong guess must be visible in the
+// output rather than inferred from a confusing downstream error.
+func TestRun_ReportsHowTheTargetWasClassified(t *testing.T) {
+	db := buildMatrixDB(t, nil)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"),
+		[]byte("module example.test/app\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), db, dir, Options{}, &out, &errOut); code != 0 {
+		t.Fatalf("Run = %d, want 0; stderr:\n%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "as a directory") {
+		t.Errorf("stderr does not say how the target was classified:\n%s", errOut.String())
+	}
+	// Not on stdout: that belongs to the report.
+	if strings.Contains(out.String(), "as a directory") {
+		t.Errorf("the classification went to stdout:\n%s", out.String())
+	}
+}
+
+// A directory scan says what go.mod is and is not. Without it the 11-of-52
+// gap is invisible and a clean directory scan reads as a clean project - the
+// silent partial coverage D20 and D21 exist to prevent, arriving through a
+// new door.
+func TestRun_ADirectoryScanStatesItsLimitation(t *testing.T) {
+	db := buildMatrixDB(t, nil)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"),
+		[]byte("module example.test/app\n\nrequire github.com/a/b v1.0.0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	Run(context.Background(), db, dir, Options{}, &out, &errOut)
+	for _, want := range []string{"go.mod", "not what a build links", "binary"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("stderr missing %q - the limitation is not stated:\n%s", want, errOut.String())
+		}
+	}
+}
+
+// ...and a binary scan does not carry that warning, because it has no such
+// gap. A caveat printed on every scan is a caveat readers learn to skip.
+func TestRun_ABinaryScanDoesNotWarnAboutGoMod(t *testing.T) {
+	db := buildMatrixDB(t, nil)
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	Run(context.Background(), db, "file:"+self, Options{}, &out, &errOut)
+	if strings.Contains(errOut.String(), "not what a build links") {
+		t.Errorf("a binary scan carried the go.mod caveat:\n%s", errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "as a go-binary") {
+		t.Errorf("stderr does not say the target was read as a binary:\n%s", errOut.String())
+	}
+}
+
+// buildBBoltBinary compiles a tiny throwaway program that imports
+// go.etcd.io/bbolt - a real dependency already in this repository's module
+// cache (internal/store's own choice, D4), so no network fetch - and returns
+// the resulting binary's path.
+//
+// This deliberately does NOT scan os.Executable() (this package's own `go
+// test` binary), unlike the sibling routing tests above. Measured: this
+// package's own compiled test binary's build info reports zero dependencies
+// - only the main module and stdlib - even though the binary is genuinely
+// linked against go.etcd.io/bbolt through internal/store. Reproduced on an
+// unrelated, throwaway module with no connection to this repository, so it
+// is a property of `go test`-built binaries for a package that is not
+// itself `package main` on this toolchain, not something scancmd.Run or
+// gobinary.Parse get wrong - a real `go build` binary does not have this
+// gap, which is exactly what internal/cataloger/gobinary's own
+// TestParse_ReportsLinkedDependencies fixture already relies on. Building
+// one here the same way is what makes a genuine, non-fixture-shaped finding
+// observable through Run for a go-binary target, in an environment where
+// self-scanning cannot.
+func buildBBoltBinary(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go is not on PATH; this test needs a toolchain to build its fixture")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"),
+		[]byte("module example.test/scanned\n\ngo 1.26\n\nrequire go.etcd.io/bbolt v1.5.0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"),
+		[]byte("package main\n\nimport _ \"go.etcd.io/bbolt\"\n\nfunc main() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := filepath.Join(dir, "app.bin.exe")
+	cmd := exec.Command("go", "build", "-buildvcs=false", "-o", bin, ".")
+	cmd.Dir = dir
+	// GOFLAGS=-mod=mod lets the build resolve from the module cache without
+	// its own go.sum; GOPROXY=off makes a cache miss an honest skip rather
+	// than a silent network fetch (matching
+	// internal/cataloger/gobinary/gobinary_test.go's runGoBuild).
+	cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod", "GOPROXY=off", "GOSUMDB=off")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "module lookup disabled by GOPROXY=off") {
+			t.Skipf("go build failed (%v); fixture needs a module not in the local cache:\n%s", err, out)
+		}
+		t.Fatalf("go build failed (%v):\n%s", err, out)
+	}
+	return bin
+}
+
+// The gates are the contract, and a new target kind that reaches a different
+// verdict path would break them silently. The binary scanned genuinely links
+// go.etcd.io/bbolt (buildBBoltBinary), so the finding is real rather than
+// fixture-shaped.
+func TestRun_GatesApplyToBinaryAndDirectoryTargets(t *testing.T) {
+	bin := buildBBoltBinary(t)
+	// An advisory against a module this binary genuinely links.
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-binary-hit", pkg: "go.etcd.io/bbolt", fixed: "99.0.0", vectors: []string{vecCritical}},
+	})
+
+	none := severity.None
+	for _, tt := range []struct {
+		name string
+		opts Options
+		want int
+	}{
+		{"no flags", Options{}, 0},
+		{"--fail-on none trips on a critical finding", Options{FailOn: &none}, 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			if got := Run(context.Background(), db, "file:"+bin, tt.opts, &out, &errOut); got != tt.want {
+				t.Errorf("Run = %d, want %d; stdout:\n%s\nstderr:\n%s",
+					got, tt.want, out.String(), errOut.String())
+			}
+		})
 	}
 }
 

@@ -11,6 +11,8 @@ import (
 
 	"github.com/kun9497/assay/internal/cataloger/apkdb"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
+	"github.com/kun9497/assay/internal/cataloger/gobinary"
+	"github.com/kun9497/assay/internal/cataloger/gomod"
 	"github.com/kun9497/assay/internal/cataloger/osrelease"
 	"github.com/kun9497/assay/internal/matcher"
 	"github.com/kun9497/assay/internal/pkgmeta"
@@ -100,8 +102,15 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 2
 	}
-	_ = path // routed in a later task; classification alone changes nothing yet.
-	if kind == source.TargetImage {
+
+	// path has any file:/dir:/sbom: prefix stripped (source.Classify's own
+	// contract); target does not. The three filesystem catalogers below must
+	// get path — handing gobinary.Parse or gomod.Parse the raw target would
+	// make "dir:./x" the directory name itself. catalogImage is the one
+	// exception: it re-parses target itself (docker-archive:/oci-dir: are
+	// image-loader syntax, not a stripped prefix), so it keeps getting target.
+	switch kind {
+	case source.TargetImage:
 		t, stats, err := catalogImage(ctx, target)
 		if err != nil {
 			// No "open %s:" wrapper. Every error reaching here already names
@@ -113,20 +122,60 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 			return 2
 		}
 		inventory, cat = t, stats
-	} else {
-		f, err := os.Open(target)
+
+	case source.TargetGoBinary:
+		t, stats, err := gobinary.Parse(path)
 		if err != nil {
-			fmt.Fprintf(stderr, "error: open %s: %v\n", target, err)
+			// gobinary.Parse's own error already names path (buildinfo's own
+			// message does), so no extra wrapper here either.
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 2
+		}
+		inventory, cat = t, stats
+
+	case source.TargetDirectory:
+		t, stats, err := gomod.Parse(path)
+		if err != nil {
+			// Same reasoning as the go-binary case: gomod.Parse's own error
+			// already names the go.mod path (os.ReadFile's message does).
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 2
+		}
+		inventory, cat = t, stats
+
+	default: // source.TargetSBOM
+		f, err := os.Open(path)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: open %s: %v\n", path, err)
 			return 2
 		}
 		defer f.Close()
 
 		t, stats, err := cyclonedx.Parse(f)
 		if err != nil {
-			fmt.Fprintf(stderr, "error: parse %s: %v\n", target, err)
+			fmt.Fprintf(stderr, "error: parse %s: %v\n", path, err)
 			return 2
 		}
 		inventory, cat = t, stats
+	}
+
+	// D22: the classifier's decision is reported, so a wrong guess is visible
+	// as a named kind rather than only as a confusing downstream parse error
+	// (a binary handed to the wrong parser reports "malformed document", not
+	// "this is a binary"). stderr, never stdout, so `--output json | jq`
+	// stays clean — the same discipline --explain's own warning below follows.
+	if kind == source.TargetDirectory {
+		// D23: go.mod names what the module REQUIRES, not what a build
+		// actually links — no toolchain is invoked, so replace/exclude/retract
+		// resolution against the wider build graph never happens. Stated on
+		// every directory scan, not just when packages are dropped, so the
+		// gap cannot be mistaken for a clean, complete result (D20/D21's
+		// silent-partial-coverage failure, arriving through a new door).
+		fmt.Fprintf(stderr, "scanned %s as a %s: go.mod names %d module(s); this is "+
+			"what was requested, not what a build links - scan the built binary for "+
+			"that\n", target, kind, cat.Components)
+	} else {
+		fmt.Fprintf(stderr, "scanned %s as a %s\n", target, kind)
 	}
 
 	db, err := store.Open(dbPath)
