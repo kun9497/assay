@@ -5,9 +5,70 @@
 package severity
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
+
+// ErrUnscorable marks a vector this package cannot turn into a score. It is a
+// sentinel so a caller can tell "we could not rate this" from a real failure
+// and count it, rather than treating an unrated finding as an absent one.
+var ErrUnscorable = errors.New("unscorable severity vector")
+
+// Of scores one CVSS vector and returns its band.
+//
+// It takes the vector and nothing else. The record's own declared type is not
+// a parameter because it is not reliable: one advisory in the live database
+// files a `CVSS:3.1/...` vector under `CVSS_V4`. Dispatching on the label
+// would hand that vector to the wrong scorer, and there is no arrangement of
+// the two scorers under which that produces an error rather than a plausible
+// wrong number. The version inside the vector is the only trustworthy source,
+// so it is the only one consulted.
+//
+// An unscorable vector is (Unknown, 0, error). It is never a band: guessing
+// is the same failure as coercing absent severity to low (D17), and the
+// caller needs to count it, which it cannot do if the guess looks like data.
+func Of(vector string) (Band, float64, error) {
+	var (
+		score float64
+		err   error
+	)
+	switch {
+	case strings.HasPrefix(vector, "CVSS:3."):
+		score, err = scoreV3(vector)
+	default:
+		return Unknown, 0, fmt.Errorf("%w: %q is not a version this scores", ErrUnscorable, vector)
+	}
+	if err != nil {
+		return Unknown, 0, err
+	}
+	return bandOf(score), score, nil
+}
+
+// Highest returns the worst band across a record's vectors, and that band's
+// score.
+//
+// A finding is as severe as its worst rating. Taking the first vector instead
+// would make the band depend on the order OSV happens to serialize them in,
+// which is not a property of the vulnerability.
+//
+// Vectors that cannot be scored are skipped rather than allowed to suppress
+// their scorable siblings; only when nothing at all scores is the result
+// Unknown. That is a different claim from None — "we could not tell" versus
+// "rated zero" — and D17 turns on the difference.
+func Highest(vectors []string) (Band, float64) {
+	best, bestScore := Unknown, 0.0
+	for _, v := range vectors {
+		band, score, err := Of(v)
+		if err != nil {
+			continue
+		}
+		if best == Unknown || score > bestScore {
+			best, bestScore = band, score
+		}
+	}
+	return best, bestScore
+}
 
 // Band is a severity class. The ordering is None < Low < Medium < High <
 // Critical, with Unknown deliberately outside it (D17).

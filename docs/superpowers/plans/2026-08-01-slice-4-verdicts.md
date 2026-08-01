@@ -219,8 +219,8 @@ func TestOf_DispatchesOnTheVectorNotTheLabel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b != Medium || score != 6.4 {
-		t.Errorf("Of = %v/%.1f, want Medium/6.4", b, score)
+	if b != Medium || score != 6.5 {
+		t.Errorf("Of = %v/%.1f, want Medium/6.5", b, score)
 	}
 }
 
@@ -268,7 +268,7 @@ open('internal/severity/testdata/v3-expected.tsv', 'w', encoding='utf-8', newlin
 PY
 ```
 
-1,180 vectors. Commit the file — it is expected scores for our own data, not someone's
+1,180 distinct vectors. Commit the file — it is expected scores for our own data, not someone's
 implementation.
 
 ### What the transliteration must handle
