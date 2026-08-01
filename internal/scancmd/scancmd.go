@@ -103,6 +103,20 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		return 2
 	}
 
+	// D22: the classifier's decision is reported IMMEDIATELY — before the
+	// cataloger below ever runs, not after it succeeds — so a wrong guess is
+	// visible in the scan's own output even when the cataloger then fails.
+	// Printing this after the switch instead meant every error path returned
+	// 2 before it was ever reached: a typo'd path that fell through to the
+	// registry loader reported "dial tcp: lookup .: no such host" with no
+	// hint that assay had read it as an image reference at all, and a
+	// directory with no go.mod reported "read go.mod: ... no such file"
+	// with no hint it had been read as a directory — exactly the
+	// "confusing downstream error" TargetKind's own doc comment
+	// (internal/source/image.go) says Classify exists to prevent. stderr,
+	// never stdout, so `--output json | jq` stays clean.
+	fmt.Fprintf(stderr, "scanned %s as %s %s\n", target, article(kind), kind)
+
 	// path has any file:/dir:/sbom: prefix stripped (source.Classify's own
 	// contract); target does not. The three filesystem catalogers below must
 	// get path — handing gobinary.Parse or gomod.Parse the raw target would
@@ -159,23 +173,18 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		inventory, cat = t, stats
 	}
 
-	// D22: the classifier's decision is reported, so a wrong guess is visible
-	// as a named kind rather than only as a confusing downstream parse error
-	// (a binary handed to the wrong parser reports "malformed document", not
-	// "this is a binary"). stderr, never stdout, so `--output json | jq`
-	// stays clean — the same discipline --explain's own warning below follows.
 	if kind == source.TargetDirectory {
 		// D23: go.mod names what the module REQUIRES, not what a build
 		// actually links — no toolchain is invoked, so replace/exclude/retract
 		// resolution against the wider build graph never happens. Stated on
-		// every directory scan, not just when packages are dropped, so the
-		// gap cannot be mistaken for a clean, complete result (D20/D21's
-		// silent-partial-coverage failure, arriving through a new door).
-		fmt.Fprintf(stderr, "scanned %s as a %s: go.mod names %d module(s); this is "+
-			"what was requested, not what a build links - scan the built binary for "+
-			"that\n", target, kind, cat.Components)
-	} else {
-		fmt.Fprintf(stderr, "scanned %s as a %s\n", target, kind)
+		// every SUCCESSFUL directory scan, not just when packages are
+		// dropped, so the gap cannot be mistaken for a clean, complete result
+		// (D20/D21's silent-partial-coverage failure, arriving through a new
+		// door). This one genuinely needs cat.Components, which is only known
+		// once gomod.Parse above has succeeded — unlike the kind-only line,
+		// it cannot move any earlier than this.
+		fmt.Fprintf(stderr, "go.mod names %d module(s); this is what was requested, "+
+			"not what a build links - scan the built binary for that\n", cat.Components)
 	}
 
 	db, err := store.Open(dbPath)
@@ -262,6 +271,20 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		return 2
 	}
 	return verdict(opts, sum, res.Findings)
+}
+
+// article returns the indefinite article to pair with kind.String() so the
+// disclosure line reads as English rather than always defaulting to "a" —
+// "a sbom" and "a image" are the two spellings that read wrong (an SBOM is
+// pronounced as its own letters; "image" starts on a vowel sound).
+// "directory" and "go-binary" both take "a".
+func article(kind source.TargetKind) string {
+	switch kind {
+	case source.TargetImage, source.TargetSBOM:
+		return "an"
+	default:
+		return "a"
+	}
 }
 
 // verdict turns a completed, trustworthy scan into an exit code under the
