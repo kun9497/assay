@@ -146,14 +146,21 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 // consulted. Options{} (no flags at all) always returns 0, which is what
 // keeps a scan with no flags set exiting exactly as it did before this gate
 // existed.
+//
+// FailOnUnknown reads sum.UnknownSeverity rather than re-deriving "is there
+// an unrated finding" by looping findings itself: report.Table already
+// counts exactly that, and its own doc comment says a --fail-on-unknown gate
+// is meant to read it directly. Re-deriving the same fact a second way here
+// would be the identical two-paths-can-drift hazard the brief calls out for
+// AtOrAbove, one field over — so the loop below exists only for FailOn.
 func verdict(opts Options, sum report.Summary, findings []matcher.Finding) int {
 	if opts.FailOnIncomplete && (sum.NotEvaluated > 0 || sum.IncompleteChecks > 0) {
 		return 2
 	}
+	if opts.FailOnUnknown && sum.UnknownSeverity > 0 {
+		return 1
+	}
 	for _, f := range findings {
-		if opts.FailOnUnknown && f.Severity == severity.Unknown {
-			return 1
-		}
 		// No separate "unless f.Severity is Unknown" guard: AtOrAbove already
 		// returns false whenever the finding's band is Unknown, against any
 		// threshold including None (D17). See the Options.FailOn doc comment.

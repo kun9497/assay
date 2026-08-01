@@ -613,6 +613,33 @@ func TestRun_ExitCodeMatrix(t *testing.T) {
 		return db, sbom
 	}
 
+	// "incompleteOnly": IncompleteChecks > 0, NotEvaluated == 0 - the package
+	// itself IS evaluated (Go, covered, a comparer exists); only the one
+	// advisory naming it has a bound the comparer rejects. Isolates the
+	// IncompleteChecks half of FailOnIncomplete's OR from full's
+	// always-present cataloger-dropped package.
+	incompleteOnly := func(t *testing.T) (db, sbom string) {
+		db = buildMatrixDB(t, []matrixAdv{
+			{id: "GHSA-badcompare", pkg: "badcompare"}, // fixed == "" -> malformed
+		})
+		sbom = buildMatrixSBOM(t, []matrixPkg{{name: "badcompare", purlType: "golang"}})
+		return db, sbom
+	}
+
+	// "notEvaluatedOnly": NotEvaluated > 0, IncompleteChecks == 0 - a second,
+	// unrelated package the cataloger drops (unsupported purl type), with no
+	// advisory anywhere that could produce an advisory-scoped skip. Isolates
+	// the NotEvaluated half of FailOnIncomplete's OR from full's
+	// always-present badcompare advisory.
+	notEvaluatedOnly := func(t *testing.T) (db, sbom string) {
+		db = buildMatrixDB(t, nil)
+		sbom = buildMatrixSBOM(t, []matrixPkg{
+			{name: "notvulnerable", purlType: "golang"},
+			{name: "somecrate", purlType: "cargo"}, // dropped by the cataloger
+		})
+		return db, sbom
+	}
+
 	cases := []struct {
 		name    string
 		fixture func(t *testing.T) (db, sbom string)
@@ -646,6 +673,22 @@ func TestRun_ExitCodeMatrix(t *testing.T) {
 			Options{FailOnIncomplete: true}, 0},
 		{"a clean scan with every gate on still exits 0", clean,
 			Options{FailOn: &bandNone, FailOnUnknown: true, FailOnIncomplete: true}, 0},
+
+		// Both halves of FailOnIncomplete's OR, each pinned on its own so a
+		// mutation that drops either one - "simplifying" to just NotEvaluated,
+		// or just IncompleteChecks - cannot pass by only ever being exercised
+		// alongside the other half in the "full" fixture.
+		{"--fail-on-incomplete fires on IncompleteChecks alone, no NotEvaluated", incompleteOnly,
+			Options{FailOnIncomplete: true}, 2},
+		{"--fail-on-incomplete fires on NotEvaluated alone, no IncompleteChecks", notEvaluatedOnly,
+			Options{FailOnIncomplete: true}, 2},
+
+		// --fail-on-unknown must not degenerate into "fail on any rated
+		// finding": every other row either has an unrated finding present
+		// (fires under the correct behaviour and a broken one alike) or no
+		// findings at all. belowThreshold has only a rated (medium) finding.
+		{"--fail-on-unknown does not trip when every finding is rated", belowThreshold,
+			Options{FailOnUnknown: true}, 0},
 	}
 
 	for _, tc := range cases {

@@ -2,11 +2,15 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/scancmd"
 	"github.com/kun9497/assay/internal/severity"
+	"github.com/kun9497/assay/internal/store"
 )
 
 func TestRun_ExitCodes(t *testing.T) {
@@ -187,6 +191,26 @@ func TestParseScanArgs(t *testing.T) {
 		}
 	})
 
+	// `--fail-on critical --fail-on low` must not silently loosen the gate to
+	// whichever value came last - the same "the user thought they set a
+	// threshold but did not" shape an invalid value already guards against.
+	t.Run("a repeated --fail-on is rejected, not silently last-wins", func(t *testing.T) {
+		_, _, err := parseScanArgs([]string{"alpine:3.19", "--fail-on", "critical", "--fail-on", "low"})
+		if err == nil {
+			t.Fatal("err = nil, want an error: a repeated --fail-on must not silently loosen the gate")
+		}
+	})
+
+	// The mixed-spelling case: "--fail-on=x" the second time must be caught
+	// too, since the check is on whether FailOn is already set, not on which
+	// spelling set it.
+	t.Run("a repeated --fail-on is rejected even across the two spellings", func(t *testing.T) {
+		_, _, err := parseScanArgs([]string{"alpine:3.19", "--fail-on", "critical", "--fail-on=low"})
+		if err == nil {
+			t.Fatal("err = nil, want an error for the second --fail-on")
+		}
+	})
+
 	// D17/the brief: a threshold the user thought they set but did not is
 	// worse than no threshold, so a typo must be an error, not "no gate".
 	t.Run("an invalid --fail-on value is an error naming what is accepted", func(t *testing.T) {
@@ -247,5 +271,86 @@ func TestRun_ScanFlagsWithNoTargetExits2(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "requires a target") {
 		t.Errorf("stderr = %q, want it to say a target is required", stderr.String())
+	}
+}
+
+// TestRun_ScanFailOnReachesRealExitCode is the critical wiring check.
+// TestParseScanArgs proves parseScanArgs returns the right Options;
+// scancmd's own TestRun_ExitCodeMatrix proves scancmd.Run honours Options
+// correctly. Neither one can catch main.go silently discarding the parsed
+// value on the way between them — e.g.
+//
+//	return scancmd.Run(ctx, path, target, scancmd.Options{}, stdout, stderr)
+//
+// type-checks, compiles, and leaves both of those suites green, because
+// each only ever exercises its own half in isolation. This drives run()
+// itself, through a real (temporary) database and SBOM built the same way
+// scancmd_test.go's fixtures are, and asserts an actual exit 1 — the one
+// thing that requires the whole path, flag string to process exit code, to
+// be wired together.
+//
+// store.DefaultPath honours ASSAY_DB_DIR (internal/store/store.go), which is
+// what lets this test point the real lookup path at a temp dir without a
+// database-path parameter on run() itself.
+func TestRun_ScanFailOnReachesRealExitCode(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ASSAY_DB_DIR", dir)
+
+	dbPath := filepath.Join(dir, "vulnerability.db")
+	w, err := store.Create(dbPath)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := w.Put(advisory.Advisory{
+		ID:   "GHSA-critical",
+		Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{
+			Ecosystem: "Go",
+			Name:      "example.com/critical",
+			Ranges: []advisory.Range{{
+				Type:   advisory.RangeSemver,
+				Events: []advisory.Event{{Introduced: "0"}, {Fixed: "2.0.0"}},
+			}},
+		}},
+		Severity: []advisory.Severity{
+			// critical, 9.8 - the same vector pinned against its exact band
+			// and score in internal/matcher/matcher_test.go.
+			{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"},
+		},
+	}); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if err := w.SetMeta(store.Meta{
+		Providers: map[string]store.Provenance{"osv": {Ecosystems: []string{"Go"}}},
+	}); err != nil {
+		t.Fatalf("SetMeta: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	sbom := filepath.Join(dir, "s.cdx.json")
+	doc := `{"bomFormat":"CycloneDX","specVersion":"1.5","version":1,"components":[` +
+		`{"type":"library","name":"critical","version":"1.0.0",` +
+		`"purl":"pkg:golang/example.com/critical@1.0.0"}]}`
+	if err := os.WriteFile(sbom, []byte(doc), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"scan", sbom, "--fail-on", "critical"}, &stdout, &stderr); code != exitFindings {
+		t.Errorf("run(scan --fail-on critical) = %d, want exitFindings (%d)\nstdout:\n%s\nstderr:\n%s",
+			code, exitFindings, stdout.String(), stderr.String())
+	}
+
+	// Mirror case: the identical scan with no flag must still exit 0. This
+	// pins the flag as the cause of the exit-1 above, not some property of
+	// the fixture that would make it exit 1 regardless of what run() does
+	// with opts.
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"scan", sbom}, &stdout, &stderr); code != exitOK {
+		t.Errorf("run(scan) without the flag = %d, want exitOK (%d)\nstdout:\n%s\nstderr:\n%s",
+			code, exitOK, stdout.String(), stderr.String())
 	}
 }

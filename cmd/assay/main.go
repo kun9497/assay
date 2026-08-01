@@ -75,11 +75,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return exitOK
 
 	case "scan":
-		if len(args) < 2 {
-			fmt.Fprintln(stderr, "error: scan requires a target")
-			fmt.Fprint(stderr, usage)
-			return exitError
-		}
+		// args[1:] on a length-1 slice (just "scan") is a valid empty slice,
+		// not a panic, and parseScanArgs of an empty slice returns target ==
+		// "" with a nil error — so the target == "" check below already
+		// covers "no target" without a separate len(args) < 2 guard ahead of
+		// it. Two sites emitting the identical message was one more place for
+		// them to drift apart, for no behavioural difference.
 		target, opts, err := parseScanArgs(args[1:])
 		if err != nil {
 			fmt.Fprintf(stderr, "error: %v\n", err)
@@ -156,6 +157,14 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 			if i >= len(args) {
 				return "", scancmd.Options{}, fmt.Errorf("--fail-on requires a value")
 			}
+			// A repeat must be rejected, not silently take the last value:
+			// `--fail-on critical --fail-on low` quietly loosening the gate
+			// is the same "the user thought they set a threshold but did
+			// not" shape ParseBand's own error exists to prevent.
+			if opts.FailOn != nil {
+				return "", scancmd.Options{}, fmt.Errorf(
+					"--fail-on given more than once (already %q)", opts.FailOn.String())
+			}
 			b, perr := severity.ParseBand(args[i])
 			if perr != nil {
 				return "", scancmd.Options{}, perr
@@ -163,6 +172,10 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 			opts.FailOn = &b
 
 		case strings.HasPrefix(a, "--fail-on="):
+			if opts.FailOn != nil {
+				return "", scancmd.Options{}, fmt.Errorf(
+					"--fail-on given more than once (already %q)", opts.FailOn.String())
+			}
 			b, perr := severity.ParseBand(strings.TrimPrefix(a, "--fail-on="))
 			if perr != nil {
 				return "", scancmd.Options{}, perr
