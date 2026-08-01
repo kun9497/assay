@@ -11,6 +11,7 @@ import (
 	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"github.com/kun9497/assay/internal/matcher"
+	"github.com/kun9497/assay/internal/severity"
 )
 
 // Summary is what the report concluded. It is returned rather than kept private
@@ -23,6 +24,11 @@ type Summary struct {
 	NotEvaluated     int
 	IncompleteChecks int
 	Findings         int
+	// UnknownSeverity is the number of findings whose severity could not be
+	// rated — no vector scored (D17). It is populated whether or not it is
+	// zero, because a --fail-on-unknown gate reads it directly and a count
+	// that only appears when non-zero is not one a caller can rely on.
+	UnknownSeverity int
 }
 
 // Trustworthy reports whether the run produced a result worth acting on. A scan
@@ -58,10 +64,20 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 	// matcher skipped it or the cataloger never produced a package for it.
 	notEvaluated := cat.Components - evaluated
 
+	// Counted unconditionally (D17): a threshold that hides how much it could
+	// not judge is not a threshold, and this feeds the summary line below
+	// whether or not it is zero.
+	var unknownSeverity int
+	for _, f := range res.Findings {
+		if f.Severity == severity.Unknown {
+			unknownSeverity++
+		}
+	}
+
 	switch {
 	case len(res.Findings) > 0:
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "PACKAGE\tVERSION\tECOSYSTEM\tADVISORY\tALIASES\tFIXED IN")
+		fmt.Fprintln(tw, "PACKAGE\tVERSION\tECOSYSTEM\tADVISORY\tSEVERITY\tALIASES\tFIXED IN")
 		for _, f := range res.Findings {
 			fixed := f.Evidence.Fixed
 			if fixed == "" {
@@ -85,9 +101,9 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 			if f.MatchedName != "" && f.MatchedName != f.Package.Name {
 				name = f.Package.Name + " (" + f.MatchedName + ")"
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				name, f.Package.Version, f.Package.Ecosystem,
-				f.Advisory.ID, aliases, fixed)
+				f.Advisory.ID, formatSeverity(f.Severity, f.Score), aliases, fixed)
 		}
 		if err := tw.Flush(); err != nil {
 			return Summary{}, err
@@ -141,8 +157,12 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 	// The summary keeps a partial scan from reading as a clean one, so its
 	// parts must add up: every component the document contained is either
 	// evaluated or not, and no package is counted in both.
-	fmt.Fprintf(w, "\n%d component(s) seen, %d evaluated, %d finding(s), %d not evaluated\n",
-		cat.Components, evaluated, len(res.Findings), notEvaluated)
+	//
+	// The unknown-severity count is appended unconditionally (D17): printed
+	// even at zero, because a count that only shows up when non-zero is one
+	// readers learn to stop checking for.
+	fmt.Fprintf(w, "\n%d component(s) seen, %d evaluated, %d finding(s), %d not evaluated, %d unknown severity\n",
+		cat.Components, evaluated, len(res.Findings), notEvaluated, unknownSeverity)
 
 	// Gated on both counts. Keying only on notEvaluated hid every
 	// advisory-scoped skip whenever the rest of the document was fully
@@ -175,7 +195,19 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 		NotEvaluated:     notEvaluated,
 		IncompleteChecks: incompleteChecks,
 		Findings:         len(res.Findings),
+		UnknownSeverity:  unknownSeverity,
 	}, nil
+}
+
+// formatSeverity renders a finding's band together with the score behind it.
+// Unknown gets no parenthetical score: a finding that could not be rated has
+// no number to show, and printing "unknown (0.0)" would read as a real score
+// of zero — the exact coercion D17 forbids, back in through formatting.
+func formatSeverity(b severity.Band, score float64) string {
+	if b == severity.Unknown {
+		return b.String()
+	}
+	return fmt.Sprintf("%s (%.1f)", b.String(), score)
 }
 
 // otherIDs returns the identifiers a reader might grep for besides the one the

@@ -9,6 +9,7 @@ import (
 
 	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/pkgmeta"
+	"github.com/kun9497/assay/internal/severity"
 	"github.com/kun9497/assay/internal/store"
 	"github.com/kun9497/assay/internal/version"
 )
@@ -28,6 +29,16 @@ type Finding struct {
 	// It lives here rather than on version.Evidence because the version package
 	// compares versions; which name reached the advisory is a matcher fact.
 	MatchedName string
+	// Severity and Score are derived from the advisory's own CVSS vectors at
+	// match time (D13), never read from a value baked in when the database
+	// was built. A record carrying several vectors is banded by the highest
+	// of them (severity.Highest) — a finding is as severe as its worst
+	// rating, and taking the first vector would make the result depend on
+	// OSV's serialization order rather than on the vulnerability. Advisories
+	// with no scorable vector — roughly a quarter of the live database —
+	// carry Severity == severity.Unknown, never a coerced low band (D17).
+	Severity severity.Band
+	Score    float64
 }
 
 // Skipped is something the matcher could not evaluate. It exists so that "we
@@ -183,11 +194,14 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 						for _, id := range identifiers(a) {
 							reported[id] = true
 						}
+						band, score := severity.Highest(vectorsOf(a))
 						res.Findings = append(res.Findings, Finding{
 							Package:     p,
 							Advisory:    a,
 							Evidence:    ev,
 							MatchedName: lookupName,
+							Severity:    band,
+							Score:       score,
 						})
 						break
 					}
@@ -199,6 +213,18 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 	sortFindings(res.Findings)
 	sortSkipped(res.Skipped)
 	return res, nil
+}
+
+// vectorsOf unwraps the CVSS vector strings carried on an advisory. It does
+// no picking of its own — severity.Highest already skips what does not score
+// and takes the worst of what does — this only exists because Advisory.Severity
+// is a slice of (type, vector) pairs and Highest wants the vectors alone.
+func vectorsOf(a advisory.Advisory) []string {
+	vectors := make([]string, 0, len(a.Severity))
+	for _, s := range a.Severity {
+		vectors = append(vectors, s.Score)
+	}
+	return vectors
 }
 
 // identifiers returns the IDs that denote the same vulnerability as a: its own

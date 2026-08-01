@@ -9,6 +9,7 @@ import (
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"github.com/kun9497/assay/internal/matcher"
 	"github.com/kun9497/assay/internal/pkgmeta"
+	"github.com/kun9497/assay/internal/severity"
 	"github.com/kun9497/assay/internal/version"
 )
 
@@ -361,5 +362,82 @@ func TestTable_ComponentsTheCatalogerDroppedBreakTheCleanHeadline(t *testing.T) 
 	// the sentence, not the gate.
 	if !sum.Trustworthy() {
 		t.Error("Trustworthy() changed; this is a wording fix")
+	}
+}
+
+// D13: the band and its score are rendered together, and Unknown must not
+// print a fabricated score. "unknown (0.0)" would read as a real rating of
+// zero — the exact coercion D17 exists to forbid — so Unknown gets no
+// parenthetical at all.
+func TestFormatSeverity(t *testing.T) {
+	if got := formatSeverity(severity.Critical, 9.8); got != "critical (9.8)" {
+		t.Errorf("formatSeverity(critical, 9.8) = %q, want %q", got, "critical (9.8)")
+	}
+	if got := formatSeverity(severity.Unknown, 0); got != "unknown" {
+		t.Errorf("formatSeverity(unknown, 0) = %q, want %q", got, "unknown")
+	}
+}
+
+// The findings table must show the severity a reader would use to triage —
+// the band together with the score behind it, not just one or the other.
+func TestTable_SeverityColumn(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "svc", Version: "1.0.0", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{ID: "GHSA-sev"},
+		Severity: severity.Critical,
+		Score:    9.8,
+	}}}
+	var buf bytes.Buffer
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "SEVERITY") {
+		t.Errorf("header is missing the SEVERITY column:\n%s", out)
+	}
+	if !strings.Contains(out, "critical (9.8)") {
+		t.Errorf("row does not show the band and score together:\n%s", out)
+	}
+}
+
+// D17: the unknown-severity count belongs in the summary on every run, not
+// only when it is non-zero. A count that appears conditionally teaches
+// readers not to look for it, which is the same failure as a threshold that
+// silently excludes what it could not judge.
+func TestTable_UnknownSeverityCountIsAlwaysPrinted(t *testing.T) {
+	var buf bytes.Buffer
+	sum, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{Components: 1, Cataloged: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "0 unknown severity") {
+		t.Errorf("summary omits the unknown-severity count when it is zero:\n%s", buf.String())
+	}
+	if sum.UnknownSeverity != 0 {
+		t.Errorf("Summary.UnknownSeverity = %d, want 0", sum.UnknownSeverity)
+	}
+}
+
+// The count must actually track findings whose severity could not be rated,
+// not just be present. Task 5's --fail-on-unknown reads Summary.UnknownSeverity
+// directly, so a Summary that always reports 0 would pass the test above while
+// making that flag inert.
+func TestTable_UnknownSeverityCountReflectsFindings(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{
+		{Package: pkgmeta.Package{Name: "a", Version: "1", Ecosystem: "Go"},
+			Advisory: advisory.Advisory{ID: "GHSA-1"}, Severity: severity.Unknown},
+		{Package: pkgmeta.Package{Name: "b", Version: "1", Ecosystem: "Go"},
+			Advisory: advisory.Advisory{ID: "GHSA-2"}, Severity: severity.Critical, Score: 9.8},
+	}}
+	var buf bytes.Buffer
+	sum, err := Table(&buf, res, cyclonedx.Stats{Components: 2, Cataloged: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.UnknownSeverity != 1 {
+		t.Errorf("Summary.UnknownSeverity = %d, want 1", sum.UnknownSeverity)
+	}
+	if !strings.Contains(buf.String(), "1 unknown severity") {
+		t.Errorf("summary line does not carry the unknown-severity count:\n%s", buf.String())
 	}
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/pkgmeta"
+	"github.com/kun9497/assay/internal/severity"
 	"github.com/kun9497/assay/internal/store"
 )
 
@@ -674,5 +675,58 @@ func TestMatch_DatabaseDeclaringNoCoverageSkipsEverything(t *testing.T) {
 	if len(res.Skipped) != 1 {
 		t.Fatalf("Skipped = %d, want 1: an empty coverage set means nothing was "+
 			"ingested, not that coverage is unknown", len(res.Skipped))
+	}
+}
+
+// D13: severity is derived at match time from the advisory's own vectors, not
+// read from a stored value. A record carrying several vectors takes the
+// HIGHEST band — a finding is as severe as its worst rating, and taking the
+// first vector would make the result depend on OSV's serialization order
+// rather than on the vulnerability. The two vectors below are ordered
+// medium-then-critical specifically so that "take the first" and "take the
+// highest" disagree.
+func TestMatch_FindingCarriesTheHighestSeverity(t *testing.T) {
+	adv := advWithRange("GHSA-sev", "Go", "x", "0", "2.0.0", advisory.RangeSemver)
+	adv.Severity = []advisory.Severity{
+		{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N"}, // medium, 6.4
+		{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}, // critical, 9.8
+	}
+	s := fakeStore{byKey: map[string][]advisory.Advisory{"Go\x00x": {adv}}}
+
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("x", "1.0.0", "Go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1", len(res.Findings))
+	}
+	f := res.Findings[0]
+	if f.Severity != severity.Critical || f.Score != 9.8 {
+		t.Errorf("Severity/Score = %v/%.1f, want critical/9.8 — the finding must "+
+			"take the worst of its several vectors, not the first", f.Severity, f.Score)
+	}
+}
+
+// Half of all advisories carry no severity vector at all (D17). That must
+// come out as Unknown, not as the zero value of Band, which is None — a real
+// band meaning "rated zero". Coercing an absent rating to a low band is
+// exactly the failure D17 exists to prevent.
+func TestMatch_FindingWithNoSeverityVectorsIsUnknown(t *testing.T) {
+	adv := advWithRange("GHSA-unrated", "Go", "y", "0", "2.0.0", advisory.RangeSemver)
+	s := fakeStore{byKey: map[string][]advisory.Advisory{"Go\x00y": {adv}}}
+
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("y", "1.0.0", "Go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1", len(res.Findings))
+	}
+	if f := res.Findings[0]; f.Severity != severity.Unknown || f.Score != 0 {
+		t.Errorf("Severity/Score = %v/%.1f, want unknown/0.0", f.Severity, f.Score)
 	}
 }
