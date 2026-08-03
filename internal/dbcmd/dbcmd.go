@@ -228,30 +228,56 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 	// "advisory providers", and Provider/Ecosystems (D20) is genuinely a
 	// different claim than an annotator's CVE opinions ever make.
 	//
-	// DATA AS OF and SOURCE come from Meta.Ratings (self-report: neither is
-	// derivable from a stored Rating, D12). RECORDS comes from
-	// Meta.RatingCounts (derived, trustworthy) instead of the self-reported
-	// Provenance.Records on the same entry — an annotator that ran and rated
-	// fewer than it claims (or nothing at all) must not have this table
-	// repeat the claim either. A name present in Ratings but absent from
-	// RatingCounts (an annotator that genuinely rated nothing) prints 0, the
-	// honest answer, rather than being silently dropped from the table.
-	if len(m.Ratings) > 0 {
+	// Driven from the UNION of the derived set (Meta.RatingCounts, ground
+	// truth for "did this authority rate anything") and the self-reported
+	// set (Meta.Ratings, the only source for DATA AS OF and SOURCE, D12) —
+	// not from Meta.Ratings alone. Under normal operation every derived name
+	// is also a self-reported one (only an annotator dbcmd.Update recorded
+	// in Ratings ever gets to call PutRating at all), so the union costs
+	// nothing today; it is here so a future divergence fails toward showing
+	// an extra row rather than toward silently dropping one.
+	//
+	// A name present in Ratings but absent from RatingCounts is an
+	// annotator that ran and rated NOTHING — a state D20/D26 already treat
+	// as one that must stay visible rather than being silently dropped
+	// (hiding it would trade an over-claim for a silence), but it must not
+	// read as "this source rated something" either: that was the exact
+	// defect a review caught, one column over from the ratings: line fixed
+	// earlier. So its RECORDS cell is words, not a bare 0 — a 0 rendered
+	// here can ONLY mean this (RatingCounts never stores an explicit zero:
+	// counts[source]++ only ever runs for a key that exists, so a present
+	// entry is always >= 1) — spelling out plainly that the sync ran and
+	// produced nothing, which is the thing worth investigating. A name
+	// absent from BOTH sets never appears as a row at all: that is how "this
+	// authority never ran against this database" reads, as opposed to a row
+	// that says it ran and got nothing.
+	ratingNameSet := make(map[string]struct{}, len(m.Ratings)+len(m.RatingCounts))
+	for name := range m.Ratings {
+		ratingNameSet[name] = struct{}{}
+	}
+	for name := range m.RatingCounts {
+		ratingNameSet[name] = struct{}{}
+	}
+	if len(ratingNameSet) > 0 {
 		fmt.Fprintln(stdout)
 		rtw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(rtw, "RATING SOURCE\tDATA AS OF\tRECORDS\tSOURCE")
-		ratingNames := make([]string, 0, len(m.Ratings))
-		for name := range m.Ratings {
+		ratingNames := make([]string, 0, len(ratingNameSet))
+		for name := range ratingNameSet {
 			ratingNames = append(ratingNames, name)
 		}
 		sort.Strings(ratingNames)
 		for _, name := range ratingNames {
-			p := m.Ratings[name]
+			p := m.Ratings[name] // self-report; zero value if this name is derived-only
 			asOf := "unknown"
 			if !p.DataAsOf.IsZero() {
 				asOf = p.DataAsOf.Format("2006-01-02")
 			}
-			fmt.Fprintf(rtw, "%s\t%s\t%d\t%s\n", name, asOf, m.RatingCounts[name], p.Source)
+			records := "ran, rated nothing - investigate the sync"
+			if n, ok := m.RatingCounts[name]; ok {
+				records = fmt.Sprintf("%d", n)
+			}
+			fmt.Fprintf(rtw, "%s\t%s\t%s\t%s\n", name, asOf, records, p.Source)
 		}
 		if err := rtw.Flush(); err != nil {
 			fmt.Fprintf(stderr, "error: write status: %v\n", err)

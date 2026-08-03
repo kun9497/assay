@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,22 @@ import (
 	"github.com/kun9497/assay/internal/provider"
 	"github.com/kun9497/assay/internal/store"
 )
+
+// ratingSourceLine returns the RATING SOURCE table's row for name: the
+// first line whose FIRST whitespace-separated field is exactly name, not a
+// substring match — the same nesting hazard CLAUDE.md calls out (a longer
+// name that merely starts with name must not match).
+func ratingSourceLine(t *testing.T, out, name string) string {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && fields[0] == name {
+			return line
+		}
+	}
+	t.Fatalf("no RATING SOURCE row for %q in:\n%s", name, out)
+	return ""
+}
 
 // errBoom is a fixed sentinel a fakeAnnotator/fakeProvider can return, so a
 // failure test asserts on a specific, known error rather than "any error".
@@ -457,11 +474,24 @@ func TestStatus_ShowsRatingSources(t *testing.T) {
 	}
 	// The RATING SOURCE table is where DataAsOf lives (D12) - the "ratings:"
 	// line alone cannot answer "how fresh is the NVD data in this database".
-	if !strings.Contains(s, "RATING SOURCE") {
-		t.Errorf("status does not print a RATING SOURCE table:\n%s", s)
+	// The row is resolved by its own first field, then checked field by
+	// field (not by a bare Contains(s, "2"), which "2026-08-03" alone would
+	// satisfy): this is the "NVD ran and rated 240,132 CVEs" case - a real,
+	// positive count, not the "ran, rated nothing" wording the sibling test
+	// checks for the opposite case.
+	row := ratingSourceLine(t, s, "NVD")
+	fields := strings.Fields(row)
+	if !slices.Contains(fields, "2026-08-03") {
+		t.Errorf("RATING SOURCE row for NVD is missing its DataAsOf:\n%q", row)
 	}
-	if !strings.Contains(s, "2026-08-03") {
-		t.Errorf("status does not report the rating source's DataAsOf:\n%s", s)
+	if !slices.Contains(fields, "2") {
+		t.Errorf("RATING SOURCE row for NVD does not show its actual count (2):\n%q", row)
+	}
+	if strings.Contains(row, "rated nothing") {
+		t.Errorf("RATING SOURCE row for NVD reads as having rated nothing, but it rated 2:\n%q", row)
+	}
+	if !strings.Contains(row, "https://example.test/nvd") {
+		t.Errorf("RATING SOURCE row for NVD is missing its fetch URL:\n%q", row)
 	}
 }
 
@@ -473,6 +503,16 @@ func TestStatus_ShowsRatingSources(t *testing.T) {
 // show for itself simply is not in it - unlike the earlier, self-report-based
 // design, where Records: 0 still left the name in the map and the line
 // printed "ratings:   NVD" over an empty bucket.
+//
+// A re-review of this same fix caught a second occurrence one table down:
+// the RATING SOURCE table still iterated Meta.Ratings (self-report) and only
+// took RECORDS from RatingCounts, so a name present in Ratings but absent
+// from RatingCounts still printed a named row with RECORDS 0 - the identical
+// over-claim, one column over, that the summary line had just stopped
+// making. D20/D26 forbid the opposite fix too (silently dropping the row),
+// since "ran and got nothing" is itself worth surfacing - so this checks for
+// the third rendering: present, named, and in words that cannot be read as
+// "this source rated something".
 func TestStatus_AnAnnotatorThatRatesNothingIsNotClaimedAsASource(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vulnerability.db")
 	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
@@ -499,6 +539,62 @@ func TestStatus_AnAnnotatorThatRatesNothingIsNotClaimedAsASource(t *testing.T) {
 	}
 	if !strings.Contains(s, "ratings:   nothing") {
 		t.Errorf("status does not say plainly that nothing was rated:\n%s", s)
+	}
+
+	// The RATING SOURCE table: NVD ran (it is self-reported, DataAsOf and
+	// SOURCE both present) but rated nothing (absent from RatingCounts). The
+	// row must exist - D20/D26 forbid silently dropping "we looked and got
+	// nothing" - but its RECORDS cell must read as a warning, not a count.
+	row := ratingSourceLine(t, s, "NVD")
+	if !strings.Contains(row, "rated nothing") {
+		t.Errorf("RATING SOURCE row for NVD does not say it rated nothing:\n%q", row)
+	}
+	// The exact hazard: a bare "0" reads as "zero problems", not "something
+	// may be wrong with the sync". RatingCounts can never itself store an
+	// explicit zero (a key only exists once counts[source]++ has run at
+	// least once), so a literal "0" token anywhere in this row could only
+	// come from the old, reverted fallback (m.RatingCounts[name] defaulting
+	// to 0 for a missing key) - checked as an exact field, not a substring,
+	// since "2026-08-03" contains "0" several times over.
+	if slices.Contains(strings.Fields(row), "0") {
+		t.Errorf("RATING SOURCE row for NVD shows a bare 0, which reads as \"rated things\" "+
+			"rather than \"ran and rated nothing\":\n%q", row)
+	}
+	if !slices.Contains(strings.Fields(row), "2026-08-03") {
+		t.Errorf("RATING SOURCE row for NVD is missing its DataAsOf, even though it ran:\n%q", row)
+	}
+}
+
+// TestStatus_AnAuthorityThatNeverRanHasNoRow is the third of the three
+// states a reader must be able to tell apart at a glance (D27's review): an
+// authority this database's build never configured at all must not appear
+// in the RATING SOURCE table (or the ratings: line) — as opposed to one
+// that ran and rated nothing, which DOES get a row (the sibling test
+// above). Nothing ran here, so neither the line nor the table's header may
+// appear at all.
+func TestStatus_AnAuthorityThatNeverRanHasNoRow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+		ID: "GHSA-no-annotator", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
+	}}}
+
+	var out, errOut bytes.Buffer
+	if code := Update(context.Background(), path, []provider.Provider{p}, nil, &out, &errOut); code != 0 {
+		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := Status(path, &out, &errOut); code != 0 {
+		t.Fatalf("Status = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	s := out.String()
+	if strings.Contains(s, "RATING SOURCE") {
+		t.Errorf("status prints a RATING SOURCE table when no annotator ever ran:\n%s", s)
+	}
+	if strings.Contains(s, "NVD") {
+		t.Errorf("status mentions NVD even though no annotator ran against this database:\n%s", s)
 	}
 }
 
