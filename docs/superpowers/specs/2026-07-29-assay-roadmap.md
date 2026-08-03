@@ -735,12 +735,40 @@ The record *quality* is better than this slice assumed: each carries a CVE ID, a
 and band, affected and fixed versions, a CWE, and a Korean description. The obstacle is not
 the format. It is that the subject matter and assay's targets barely intersect.
 
-**No KVE identifier appeared in any record examined.** Every published entry is titled and
-keyed on its CVE — `CVE-2026-24498 | EFM-Networks ipTIME …` — and the detail page cites only
-CVE. That is ten records out of 173, so it is a sample rather than a survey, but it is enough
-to flag that §1's premise ("KISA/KNVD publishes advisories and KVE identifiers") and D3's
-"CVE↔KVE join" may have nothing on the KVE side to join. Confirm before building anything
-that depends on it.
+**KVE identifiers exist, but nothing on the portal resolves them.** This was checked
+specifically, because §1 names KVE as part of why this project exists.
+
+KVE is real: KISA assigns the numbers, and third parties cite concrete ones — a networking
+vendor's own patch notice references `KVE-2023-6187`, and bug-bounty trackers list
+`KVE-2024-0770` and `KVE-2024-0771`. What could not be found is any public KNVD record under
+one. Measured through the portal's own integrated search:
+
+| query | 공지사항 | 보안공지 | 공개된 취약점 |
+|---|---|---|---|
+| `KVE-2024-0771` | 0 | 0 | 0 |
+| `KVE` (bare string) | 0 | 0 | 0 |
+| `CVE-2026-24498` *(control)* | 0 | 0 | **1** |
+
+The control matters: without it, zero results would be indistinguishable from a broken
+search. The search works; the string `KVE` simply does not occur anywhere in the portal's
+published content, and every published record is titled and keyed on its CVE
+(`CVE-2026-24498 | EFM-Networks ipTIME …`).
+
+The reading that fits: a KVE number is assigned during the report-handling workflow
+(신고 → 분석·검증 → 개발사 전달) and travels in correspondence and vendor patch notices, while
+the portal publishes under CVE. Secondary sources still describe KVE as "checkable on KNVD",
+but the portal was rebuilt — `resultList.do`, `detailSecNo.do` and `rewardExplain.do` all
+return errors now — so those descriptions may predate the rebuild.
+
+**Not established:** whether the previous portal published KVE records, whether a logged-in
+account sees them, and whether a KVE→CVE mapping exists anywhere retrievable. Each would need
+asking KISA directly.
+
+**What this means for the design.** §1's premise stands as written — KISA does publish KVE
+identifiers — but D3's `Aliases`/`Upstream` "CVE↔KVE join" has no public KVE side to join
+against today. That join is not load-bearing: reading both fields was independently confirmed
+necessary *within OSV* (Go records carry the CVE in `aliases`, Alpine records in `upstream`),
+so D3 survives on its own evidence regardless of KVE.
 
 **Access.** Two documented RSS feeds exist — `/rss/security/notice` and
 `/rss/security/info` — and each returns only the latest **10** items, with no bulk export,

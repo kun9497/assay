@@ -68,9 +68,15 @@ for the current targets: container images and source trees do not contain 한컴
 server-side and open-source software proves substantial enough to matter on its own.
 
 **Groundwork.** `Advisory.Source` records which provider supplied a record, and
-`Advisory.Aliases` plus `Advisory.Upstream` carry the CVE↔KVE mapping the join relies on —
-both, because OSV 1.7 puts the CVE link in `upstream` and reading only one field makes the
-join fail silently (D3).
+`Advisory.Aliases` plus `Advisory.Upstream` are read together — both, because OSV 1.7 puts the
+CVE link in `upstream` and reading only one field makes a join fail silently (D3).
+
+That pair was originally justified as carrying "the CVE↔KVE mapping". It does not: measured
+2026-08-02, KNVD's public search returns nothing for `KVE-2024-0771` or even the bare string
+`KVE`, while the same search finds a CVE (control). KVE numbers are real and third parties
+cite them, but no public record resolves one, so there is no KVE side to map to. D3 is
+unaffected — reading both fields was independently confirmed necessary inside OSV itself, Go
+records carrying the CVE in `aliases` and Alpine records in `upstream`.
 
 ---
 
