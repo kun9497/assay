@@ -13,6 +13,39 @@ import (
 	"github.com/kun9497/assay/internal/advisory"
 )
 
+// durPtr takes the address of a duration literal, for Options.Pause: a
+// *time.Duration cannot be constructed with & directly against a literal or
+// a constant expression.
+func durPtr(d time.Duration) *time.Duration { return &d }
+
+// New resolves Options.Pause without ever sleeping: a nil Pause gets the
+// rate-limit default (6.5s unauthenticated, 0.65s with a key), and a set
+// Pause - including an explicit zero - is used exactly as given. Asserted on
+// the resolved field rather than on elapsed time, so this stays fast and
+// deterministic: a wall-clock version of this test would either sleep for
+// real or not test the default at all.
+func TestNew_ResolvesPause(t *testing.T) {
+	tests := []struct {
+		name string
+		opts Options
+		want time.Duration
+	}{
+		{"nil Pause, no key: the unauthenticated rate-limit default", Options{}, defaultPause},
+		{"nil Pause, with a key: the authenticated rate-limit default", Options{APIKey: "k"}, defaultPauseWithKey},
+		{"an explicit zero Pause is honoured, not defaulted", Options{Pause: durPtr(0)}, 0},
+		{"an explicit non-default Pause is honoured verbatim", Options{Pause: durPtr(3 * time.Second)}, 3 * time.Second},
+		{"an explicit Pause wins even with a key set", Options{APIKey: "k", Pause: durPtr(9 * time.Second)}, 9 * time.Second},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := New(tc.opts)
+			if p.pause != tc.want {
+				t.Errorf("pause = %v, want %v", p.pause, tc.want)
+			}
+		})
+	}
+}
+
 // The pagination contract: keep requesting until startIndex covers
 // totalResults, and emit every record along the way.
 func TestAnnotate_PaginatesUntilComplete(t *testing.T) {
@@ -37,7 +70,7 @@ func TestAnnotate_PaginatesUntilComplete(t *testing.T) {
 	defer srv.Close()
 
 	var got []advisory.Rating
-	p := New(Options{BaseURL: srv.URL, PageSize: 2, Pause: 0})
+	p := New(Options{BaseURL: srv.URL, PageSize: 2, Pause: durPtr(0)})
 	prov, err := p.Annotate(context.Background(), func(r advisory.Rating) error {
 		got = append(got, r)
 		return nil
@@ -86,7 +119,7 @@ func TestAnnotate_ARecordWithNoScoreIsNotEmitted(t *testing.T) {
 	}))
 	defer srv.Close()
 	var got []advisory.Rating
-	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: 0})
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0)})
 	if _, err := p.Annotate(context.Background(), func(r advisory.Rating) error {
 		got = append(got, r)
 		return nil
@@ -112,7 +145,7 @@ func TestAnnotate_KeepsEveryVectorVersionPresent(t *testing.T) {
 	}))
 	defer srv.Close()
 	var got []advisory.Rating
-	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: 0})
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0)})
 	if _, err := p.Annotate(context.Background(), func(r advisory.Rating) error {
 		got = append(got, r)
 		return nil
@@ -159,7 +192,7 @@ func TestAnnotate_APIKeyIsOptionalAndSentAsAHeader(t *testing.T) {
 				io.WriteString(w, `{"totalResults":0,"vulnerabilities":[]}`)
 			}))
 			defer srv.Close()
-			p := New(Options{BaseURL: srv.URL, APIKey: tc.key, PageSize: 100, Pause: 0})
+			p := New(Options{BaseURL: srv.URL, APIKey: tc.key, PageSize: 100, Pause: durPtr(0)})
 			if _, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil }); err != nil {
 				t.Fatal(err)
 			}
@@ -184,7 +217,7 @@ func TestAnnotate_AnHTTPErrorIsNotAnEmptyFeed(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer srv.Close()
-	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: 0})
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0)})
 	_, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil })
 	if err == nil {
 		t.Fatal("Annotate returned nil on 503 - a failed sync must not read as " +
@@ -203,7 +236,7 @@ func TestAnnotate_RespectsContextCancellation(t *testing.T) {
 	}))
 	defer srv.Close()
 	ctx, cancel := context.WithCancel(context.Background())
-	p := New(Options{BaseURL: srv.URL, PageSize: 1, Pause: 0})
+	p := New(Options{BaseURL: srv.URL, PageSize: 1, Pause: durPtr(0)})
 	n := 0
 	_, err := p.Annotate(ctx, func(advisory.Rating) error {
 		n++

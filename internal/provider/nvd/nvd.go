@@ -31,10 +31,24 @@ const (
 // and Pause exist so tests can shrink a page and remove the real rate-limit
 // delay without changing the production defaults.
 type Options struct {
-	APIKey   string
-	BaseURL  string
+	APIKey  string
+	BaseURL string
+	// PageSize and BaseURL default from their zero value (0 and "") because
+	// neither is ever a meaningful request on its own - nobody wants a
+	// literal zero-record page or an empty URL, so the zero value is a safe,
+	// unambiguous "not set" sentinel.
 	PageSize int
-	Pause    time.Duration
+	// Pause is the delay between requests, or nil to use the rate-limit
+	// default (6.5s, or 0.65s with an API key).
+	//
+	// A *time.Duration, not a bare time.Duration, for the same reason
+	// scancmd.Options.FailOn is a *severity.Band rather than a bare Band
+	// (internal/scancmd/scancmd.go): zero is a real, requestable value - "no
+	// pause at all", which a test or a caller pointed at a local mirror
+	// might genuinely want - and Duration's zero value, so it cannot also
+	// mean "not set" without colliding with that explicit request. Unlike
+	// PageSize and BaseURL above, 0 is not a safe sentinel here.
+	Pause *time.Duration
 }
 
 type Provider struct {
@@ -54,12 +68,15 @@ func New(opts Options) *Provider {
 	if pageSize == 0 {
 		pageSize = defaultPageSize
 	}
-	pause := opts.Pause
-	if pause == 0 {
-		pause = defaultPause
-		if opts.APIKey != "" {
-			pause = defaultPauseWithKey
-		}
+	// The rate-limit default applies only when Pause is left nil - an
+	// explicit zero (or any other value) is used verbatim, never overridden,
+	// per the Options.Pause doc comment above.
+	pause := defaultPause
+	if opts.APIKey != "" {
+		pause = defaultPauseWithKey
+	}
+	if opts.Pause != nil {
+		pause = *opts.Pause
 	}
 	return &Provider{
 		apiKey:   opts.APIKey,
