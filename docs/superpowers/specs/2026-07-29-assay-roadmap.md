@@ -502,6 +502,61 @@ Directory scans do not get this. `go.mod`'s `go` directive is a language-version
 the toolchain that will build it, and treating it as one would report a version nothing was
 ever built with.
 
+### D25 — A finding carries every source's rating, not one winner
+
+Two databases routinely describe the same vulnerability, and they disagree. Measured over
+440 CVE groups reachable from the packages a real scan touches:
+
+| | |
+|---|---|
+| vulnerability groups (keyed by CVE) | 440 |
+| **with more than one record** | **169 (38%)** |
+| of those, severity differs between records | 140 |
+| of those, the fixed version differs | 152 |
+
+The disagreement concentrates in `GHSA` + `PYSEC` (161 of the 169). Django, from the live
+database:
+
+```
+CVE-2022-28347   GHSA-w24h-v9qh-8gxj -> critical      PYSEC-2022-191 -> unknown
+CVE-2018-6188    GHSA-rf4j-j272-fj86 -> high          PYSEC-2018-4   -> unknown
+CVE-2016-2048    GHSA-46x4-9jmv-jc8p -> high          PYSEC-2016-14  -> unknown
+```
+
+**Today the matcher keeps the first record it matches and discards the rest**, and "first" is
+not a decision anyone made. The package index is a JSON array built with
+`ids = append(ids, id)` and never sorted, so the order is whatever order the provider walked
+the OSV archives in.
+
+On the current database GHSA happens to come first, GHSA carries CVSS vectors, and the output
+is correct — a Django 3.2.12 scan reports critical 5 / high 10 / medium 4 and `--fail-on
+critical` exits 1. That is luck. Flip the ingestion order and PYSEC wins: the same critical
+findings report `unknown`, and because unknown never trips a threshold (D17), `--fail-on
+critical` exits **0**. CI goes green on a critical vulnerability, which is the exact defect
+slice 4 exists to remove, reachable through a detail nothing states or tests.
+
+**So a finding keeps every record's rating.** Not picking a winner removes the ordering
+dependency entirely, and turns a hidden disagreement into a visible one — which is what a
+scanner whose first goal is explainability should do with two authorities that differ.
+
+**The gate uses the highest band across sources.** This is the rule `severity.Highest`
+already applies to several vectors within one record, extended across records: a finding is as
+severe as its worst rating. `unknown` does not dilute it, because D17 keeps unknown outside
+the ordering rather than below it — so a source that rated nothing cannot pull a critical
+finding down to a pass.
+
+**"Source" means the database that authored the record**, not the provider that fetched it.
+Those are different: `Advisory.Source` is already `osv` for everything, and will stay that way
+while OSV is the only provider. The authoring database — GHSA, PYSEC, GO, ALPINE — is today
+only inferable from the identifier's prefix, and a prefix is a naming convention rather than a
+field. It is stored explicitly, which is a schema change.
+
+**NVD and KISA are not in this.** assay does not ingest NVD, so it cannot report what NIST
+rates something; that is a separate ingestion decision with real cost. KISA is blocked for the
+reasons slice 5 records. The mechanism works today with the sources already in hand and
+accepts a new one without redesign, which is the point of building it this way rather than
+special-casing two names.
+
 ## 3. Architecture
 
 ### Measured data volumes
