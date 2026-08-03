@@ -89,7 +89,24 @@ func explainOne(w io.Writer, f matcher.Finding) error {
 	if f.Advisory.Summary != "" {
 		lines = append(lines, fmt.Sprintf("summary:  %s", f.Advisory.Summary))
 	}
-	lines = append(lines, fmt.Sprintf("severity: %s", formatSeverity(f.Severity, f.Score)))
+	// Explain is the "why" view (D10), so unlike the table's single SEVERITY
+	// cell it shows every source in full, not just the one that set the
+	// band — agreeing or not. A finding built by hand with no Ratings (every
+	// pre-D25 fixture in this package) gets the plain one-line form below,
+	// unchanged from before this field existed.
+	if n := len(f.Ratings); n > 0 {
+		source := "source"
+		if n != 1 {
+			source = "sources"
+		}
+		lines = append(lines, fmt.Sprintf("severity: %s   [highest of %d %s]",
+			formatSeverity(f.Severity, f.Score), n, source))
+		for _, r := range f.Ratings {
+			lines = append(lines, ratingLine(r))
+		}
+	} else {
+		lines = append(lines, fmt.Sprintf("severity: %s", formatSeverity(f.Severity, f.Score)))
+	}
 	lines = append(lines, fmt.Sprintf("comparer: %s", comparerName(f.Package.Ecosystem)))
 
 	ev := f.Evidence
@@ -104,6 +121,28 @@ func explainOne(w io.Writer, f matcher.Finding) error {
 
 	_, err := fmt.Fprintln(w, strings.Join(lines, "\n")+"\n")
 	return err
+}
+
+// ratingLine formats one source's assessment of a finding for the full
+// breakdown printed under "severity:" — the detail the table's marker only
+// points at.
+//
+// Column widths are fixed rather than computed from the ratings actually
+// present: this is a handful of lines under one finding, not a table whose
+// rows must line up with a header printed once for the whole document
+// (table.go's own tabwriter), so a fixed width keeps each finding's
+// breakdown independently predictable rather than shifting with whichever
+// other findings happen to be explained alongside it. 6 fits every database
+// name measured so far ("ALPINE" is the longest); 24 clears real advisory
+// IDs including Alpine's own "ALPINE-CVE-2025-46394"; 16 clears the longest
+// formatSeverity output, "critical (10.0)".
+func ratingLine(r matcher.Rating) string {
+	fixed := r.Fixed
+	if fixed == "" {
+		fixed = "-"
+	}
+	return fmt.Sprintf("  %-6s %-24s %-16s fixed %s",
+		r.Database, r.AdvisoryID, formatSeverity(r.Severity, r.Score), fixed)
 }
 
 // comparerName names the version.Comparer that version.For would select

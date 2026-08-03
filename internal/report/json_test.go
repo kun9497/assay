@@ -28,9 +28,10 @@ var update = flag.Bool("update", false, "update golden files")
 // below it, so both exercise the identical input: one finding matched
 // through the source package (D8) with a full Evidence and locations, one
 // finding with an unrated (Unknown, D17) severity matched under Upstream
-// (D3) rather than Aliases, and two Skipped entries — one whole-package
-// (empty AdvisoryID) and one advisory-scoped — so every field the brief asks
-// JSON to carry that the table cannot is actually exercised.
+// (D3) rather than Aliases, one multi-source finding whose Ratings disagree
+// (D25), and two Skipped entries — one whole-package (empty AdvisoryID) and
+// one advisory-scoped — so every field the brief asks JSON to carry that the
+// table cannot is actually exercised.
 func goldenFixture() (matcher.Result, cyclonedx.Stats) {
 	res := matcher.Result{
 		Findings: []matcher.Finding{
@@ -77,6 +78,35 @@ func goldenFixture() (matcher.Result, cyclonedx.Stats) {
 				Severity:    severity.Unknown,
 				Score:       0,
 			},
+			// A third, multi-source finding (D25): the Django CVE the roadmap's
+			// own D25 measurement cites, where GHSA carries a CVSS vector and
+			// PYSEC does not. Severity/Score are the highest across Ratings
+			// (GHSA's), and the Ratings array is what the golden file exists to
+			// pin — every source kept, not collapsed to the winner.
+			{
+				Package: pkgmeta.Package{
+					Name: "django", Version: "3.2.12", Ecosystem: "PyPI",
+					PURL: "pkg:pypi/django@3.2.12",
+				},
+				Advisory: advisory.Advisory{
+					ID:      "GHSA-w24h-v9qh-8gxj",
+					Aliases: []string{"CVE-2022-28347"},
+					Summary: "Django SQL injection via QuerySet.explain()",
+				},
+				Evidence: version.Evidence{
+					RangeType:  advisory.RangeSemver,
+					Introduced: "0",
+					Fixed:      "2.2.28",
+					Reason:     "3.2.12 is at or above any earlier version and below the fix 2.2.28",
+				},
+				MatchedName: "django",
+				Severity:    severity.Critical,
+				Score:       9.8,
+				Ratings: []matcher.Rating{
+					{Database: "GHSA", AdvisoryID: "GHSA-w24h-v9qh-8gxj", Severity: severity.Critical, Score: 9.8, Fixed: "2.2.28"},
+					{Database: "PYSEC", AdvisoryID: "PYSEC-2022-191", Severity: severity.Unknown, Score: 0, Fixed: "2.2.28"},
+				},
+			},
 		},
 		Skipped: []matcher.Skipped{
 			{
@@ -90,7 +120,7 @@ func goldenFixture() (matcher.Result, cyclonedx.Stats) {
 			},
 		},
 	}
-	cat := cyclonedx.Stats{Components: 5, Cataloged: 4, SkippedNoPURL: 1}
+	cat := cyclonedx.Stats{Components: 6, Cataloged: 5, SkippedNoPURL: 1}
 	return res, cat
 }
 
@@ -194,8 +224,8 @@ func TestJSON_CarriesWhatTheTableCannot(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
-	if len(doc.Findings) != 2 {
-		t.Fatalf("Findings = %d, want 2", len(doc.Findings))
+	if len(doc.Findings) != 3 {
+		t.Fatalf("Findings = %d, want 3", len(doc.Findings))
 	}
 	f := doc.Findings[0]
 	if f.Package.Source == nil || f.Package.Source.Name != "openssl" {
@@ -216,10 +246,74 @@ func TestJSON_CarriesWhatTheTableCannot(t *testing.T) {
 	}
 
 	// Summary carries the same counts Table's own summary line prints.
-	if doc.Summary.Components != 5 || doc.Summary.Evaluated != 3 ||
+	if doc.Summary.Components != 6 || doc.Summary.Evaluated != 4 ||
 		doc.Summary.NotEvaluated != 2 || doc.Summary.IncompleteChecks != 1 ||
-		doc.Summary.Findings != 2 || doc.Summary.UnknownSeverity != 1 {
-		t.Errorf("Summary = %+v, want {5 3 2 1 2 1}", doc.Summary)
+		doc.Summary.Findings != 3 || doc.Summary.UnknownSeverity != 1 {
+		t.Errorf("Summary = %+v, want {6 4 2 1 3 1}", doc.Summary)
+	}
+}
+
+// TestJSON_CarriesFullRatingsArray: JSON is the machine-readable view a
+// filter would read from (D25), so it keeps every source's rating, not just
+// the one Severity/Score picked — the opposite of the table's single
+// SEVERITY cell. Checked both by content (every field of both ratings, in
+// full) and by order (index 0 is GHSA, index 1 is PYSEC — the sorted order
+// matcher.sortRatings produces), so a mutation that drops the array, keeps
+// only the winner, or re-sorts it (e.g. through an intermediate map) is
+// caught here directly rather than only surfacing as an opaque byte-diff in
+// the golden test.
+func TestJSON_CarriesFullRatingsArray(t *testing.T) {
+	res, cat := goldenFixture()
+	var buf bytes.Buffer
+	if _, err := JSON(&buf, res, cat); err != nil {
+		t.Fatal(err)
+	}
+	var doc Document
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Findings) != 3 {
+		t.Fatalf("Findings = %d, want 3", len(doc.Findings))
+	}
+	f := doc.Findings[2] // the multi-source Django finding goldenFixture appends
+	if len(f.Ratings) != 2 {
+		t.Fatalf("Ratings = %d entries, want 2 — JSON must not collapse to the winner", len(f.Ratings))
+	}
+	ghsa := f.Ratings[0]
+	if ghsa.Database != "GHSA" || ghsa.AdvisoryID != "GHSA-w24h-v9qh-8gxj" ||
+		ghsa.Severity != "critical" || ghsa.Score != 9.8 || ghsa.Fixed != "2.2.28" {
+		t.Errorf("Ratings[0] = %+v, want the GHSA rating in full", ghsa)
+	}
+	pysec := f.Ratings[1]
+	if pysec.Database != "PYSEC" || pysec.AdvisoryID != "PYSEC-2022-191" ||
+		pysec.Severity != "unknown" || pysec.Score != 0 || pysec.Fixed != "2.2.28" {
+		t.Errorf("Ratings[1] = %+v, want the PYSEC rating in full", pysec)
+	}
+}
+
+// TestJSON_RatingsIsEmptyArrayNotNullWhenAbsent: a hand-built Finding with no
+// Ratings (every fixture in this package that predates D25) must still
+// render "ratings": [], mirroring Document.Findings/Skipped's own
+// null-vs-empty-array discipline (TestJSON_EmptyResultHasEmptyArraysNotNull)
+// one level down, on a per-finding field instead of the document's top-level
+// arrays.
+func TestJSON_RatingsIsEmptyArrayNotNullWhenAbsent(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{ID: "GHSA-no-ratings"},
+		Severity: severity.High,
+		Score:    7.5,
+	}}}
+	var buf bytes.Buffer
+	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `"ratings": []`) {
+		t.Errorf(`output does not contain "ratings": [] for a finding with no Ratings:%s`, out)
+	}
+	if strings.Contains(out, "null") {
+		t.Errorf("output contains a null where jq expects an array:\n%s", out)
 	}
 }
 

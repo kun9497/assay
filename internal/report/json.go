@@ -66,6 +66,45 @@ type FindingRecord struct {
 	// severity first.
 	Score    float64        `json:"score"`
 	Evidence EvidenceRecord `json:"evidence"`
+	// Ratings carries every source's own assessment, never collapsed to the
+	// one that set Severity/Score above (D25): 140 of 169 measured
+	// multi-record groups disagree on severity and 152 on the fixed version,
+	// so a consumer building its own policy — e.g. "always take the more
+	// conservative fixed version" — needs the whole array, not just the
+	// highest band. JSON is the machine-readable view and the one a filter
+	// would read from, so nothing here is collapsed the way the table's
+	// single SEVERITY cell is.
+	//
+	// Always a slice, never nil (empty is `[]`, not `null`), matching
+	// Document.Findings/Skipped's own convention — a hand-built Finding with
+	// no ratings must not turn into a schema-breaking null for a consumer
+	// that assumes an array.
+	Ratings []RatingRecord `json:"ratings"`
+}
+
+// RatingRecord is one matcher.Rating, reshaped for stable JSON exactly like
+// FindingRecord itself: a plain struct rather than matcher.Rating embedded
+// directly, so a field matcher.Rating gains for an unrelated reason does not
+// silently change this document's shape.
+//
+// Order matters and is NOT re-derived here: matcher.Finding.Ratings arrives
+// already sorted by Database then AdvisoryID (D25's own sortRatings), and
+// findingRecord copies it element for element rather than through a map, so
+// this array is exactly as deterministic as the rest of the document.
+type RatingRecord struct {
+	Database   string `json:"database"`
+	AdvisoryID string `json:"advisoryId"`
+	// Severity is the band this one source gave — severity.Band's own
+	// String() form, same as FindingRecord.Severity above — which can
+	// legitimately differ from FindingRecord.Severity when this is not the
+	// source that set it.
+	Severity string  `json:"severity"`
+	Score    float64 `json:"score"`
+	// Fixed is the fixed version THIS record gives, which is why it lives
+	// here and not on FindingRecord: sources disagree on it too (152 of 169
+	// measured groups), and pulling one to the top level would make every
+	// source appear to agree about remediation.
+	Fixed string `json:"fixed,omitempty"`
 }
 
 type PackageRecord struct {
@@ -153,6 +192,19 @@ func JSON(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error)
 }
 
 func findingRecord(f matcher.Finding) FindingRecord {
+	// make(..., 0, len(...)), never a nil append target: an empty result must
+	// still encode as "ratings": [], the same reasoning Document.Findings and
+	// Document.Skipped already follow (TestJSON_EmptyResultHasEmptyArraysNotNull).
+	ratings := make([]RatingRecord, 0, len(f.Ratings))
+	for _, r := range f.Ratings {
+		ratings = append(ratings, RatingRecord{
+			Database:   r.Database,
+			AdvisoryID: r.AdvisoryID,
+			Severity:   r.Severity.String(),
+			Score:      r.Score,
+			Fixed:      r.Fixed,
+		})
+	}
 	return FindingRecord{
 		Package:     packageRecord(f.Package),
 		MatchedName: f.MatchedName,
@@ -171,6 +223,7 @@ func findingRecord(f matcher.Finding) FindingRecord {
 			LastAffected: f.Evidence.LastAffected,
 			Reason:       f.Evidence.Reason,
 		},
+		Ratings: ratings,
 	}
 }
 

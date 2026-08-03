@@ -50,6 +50,10 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 	case len(res.Findings) > 0:
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(tw, "PACKAGE\tVERSION\tECOSYSTEM\tADVISORY\tSEVERITY\tALIASES\tFIXED IN")
+		// disagreement tracks whether any row got the marker, so the footnote
+		// that explains it is printed at most once and only when it applies —
+		// a footnote nobody's row earned is worse than no footnote.
+		disagreement := false
 		for _, f := range res.Findings {
 			fixed := f.Evidence.Fixed
 			if fixed == "" {
@@ -73,12 +77,26 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 			if f.MatchedName != "" && f.MatchedName != f.Package.Name {
 				name = f.Package.Name + " (" + f.MatchedName + ")"
 			}
+			sev := formatSeverity(f.Severity, f.Score)
+			// One row, one SEVERITY cell (D25): the table is the scannable
+			// view and a row that grows with source count stops being
+			// scannable. When the sources behind it do not all agree, the
+			// cell earns a marker rather than silently presenting the
+			// highest band as if it were the only opinion; --explain carries
+			// the full breakdown (D10).
+			if sourcesDisagree(f.Ratings) {
+				sev += " " + disagreementMarker
+				disagreement = true
+			}
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				name, f.Package.Version, f.Package.Ecosystem,
-				f.Advisory.ID, formatSeverity(f.Severity, f.Score), aliases, fixed)
+				f.Advisory.ID, sev, aliases, fixed)
 		}
 		if err := tw.Flush(); err != nil {
 			return Summary{}, err
+		}
+		if disagreement {
+			fmt.Fprintf(w, "%s sources disagree on severity; see --explain <id> for the detail\n", disagreementMarker)
 		}
 
 	case cat.Components == 0:
@@ -220,6 +238,42 @@ func Summarize(res matcher.Result, cat cyclonedx.Stats) Summary {
 		Findings:         len(res.Findings),
 		UnknownSeverity:  unknownSeverity,
 	}
+}
+
+// disagreementMarker flags a SEVERITY cell whose sources did not all agree.
+//
+// `*` over `⚠`: this table is read in CI logs and terminals with unreliable
+// Unicode width handling, and the rest of the table (tabwriter's own output)
+// is plain ASCII already — a two-column-wide glyph that some terminals
+// render as one throws off every column after it, which is exactly the
+// misalignment cellAt's own doc comment warns a reader cannot see happen.
+const disagreementMarker = "*"
+
+// sourcesDisagree reports whether a finding's sources gave different
+// severity bands for the same vulnerability — the disagreement the table's
+// marker exists to surface.
+//
+// A difference in score or fixed version alone is NOT disagreement here:
+// two sources that both say "high" have not disagreed even if their CVSS
+// scores differ by a point or they name different fixed releases. Only the
+// band is what the table's aggregate SEVERITY cell — and any --fail-on gate
+// reading it — actually acts on, so that is the one field this checks.
+//
+// A finding with fewer than two ratings can never disagree with itself:
+// len(ratings) < 2 covers both the zero-rating case (a hand-built Finding in
+// a test that predates D25) and the single-source case the brief calls out
+// explicitly.
+func sourcesDisagree(ratings []matcher.Rating) bool {
+	if len(ratings) < 2 {
+		return false
+	}
+	first := ratings[0].Severity
+	for _, r := range ratings[1:] {
+		if r.Severity != first {
+			return true
+		}
+	}
+	return false
 }
 
 // formatSeverity renders a finding's band together with the score behind it.
