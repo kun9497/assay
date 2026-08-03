@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -377,5 +378,67 @@ func TestSleepCtx_ReturnsPromptlyWhenCancelledMidSleep(t *testing.T) {
 	if elapsed > 2*time.Second {
 		t.Errorf("sleepCtx took %v to notice cancellation, want well under "+
 			"the full 10s pause it was given", elapsed)
+	}
+}
+
+// Since bounds the sync with NVD's lastModStartDate filter, which is what
+// makes a daily run minutes rather than the seven hours a full pass costs.
+func TestAnnotate_SinceBoundsTheWindow(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		io.WriteString(w, `{"totalResults":0,"vulnerabilities":[],"timestamp":"2026-08-03T00:00:00.000"}`)
+	}))
+	defer srv.Close()
+
+	// Both ends pinned, so the assertion is on the exact window rather than on
+	// "a lastModStartDate appeared somewhere".
+	restore := nowUTC
+	nowUTC = func() time.Time { return time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC) }
+	defer func() { nowUTC = restore }()
+
+	p := New(Options{
+		BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0),
+		Since: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+	})
+	if _, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	q, err := url.ParseQuery(gotQuery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Parsed rather than substring-matched: the raw query contains the same
+	// date twice over in escaped form, so a Contains check could pass from
+	// either bound while the other was wrong or missing.
+	if got := q.Get("lastModStartDate"); got != "2026-07-01T00:00:00.000+00:00" {
+		t.Errorf("lastModStartDate = %q, want the Since value", got)
+	}
+	if got := q.Get("lastModEndDate"); got != "2026-08-03T12:00:00.000+00:00" {
+		t.Errorf("lastModEndDate = %q, want now - NVD rejects an open-ended "+
+			"window rather than reading it as \"until now\"", got)
+	}
+}
+
+// ...and a zero Since asks for the whole feed, with neither bound present.
+// Sending an empty lastModStartDate would be rejected by the API, so "not set"
+// has to mean "omit", not "send empty".
+func TestAnnotate_AZeroSinceSendsNoWindowAtAll(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		io.WriteString(w, `{"totalResults":0,"vulnerabilities":[],"timestamp":"2026-08-03T00:00:00.000"}`)
+	}))
+	defer srv.Close()
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0)})
+	if _, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	q, _ := url.ParseQuery(gotQuery)
+	for _, k := range []string{"lastModStartDate", "lastModEndDate"} {
+		if _, ok := q[k]; ok {
+			t.Errorf("%s was sent for a full sync; NVD rejects an empty value "+
+				"rather than treating it as no filter", k)
+		}
 	}
 }

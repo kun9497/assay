@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/kun9497/assay/internal/advisory"
@@ -56,9 +57,25 @@ type Options struct {
 	// mean "not set" without colliding with that explicit request. Unlike
 	// PageSize and BaseURL above, 0 is not a safe sentinel here.
 	Pause *time.Duration
+	// Since bounds the sync to CVEs modified on or after this instant, using
+	// NVD's lastModStartDate filter. Zero means the whole feed.
+	//
+	// It exists because the whole feed is not a 20-minute job. Measured
+	// 2026-08-03: a 2,000-record page takes 114-136 seconds regardless of
+	// page size or compression, because NVD generates the response rather
+	// than serving a file - 500 records took 41s, so the cost is roughly
+	// linear per record. 372,628 records is therefore about seven hours, and
+	// the rate-limit pauses this code is careful about are 20 minutes of it.
+	//
+	// NVD's own answer to that is incremental sync, and this is it: after one
+	// full pass, a daily run asks only for what changed. The window may not
+	// exceed 120 days, which the caller has to respect - a longer span is
+	// rejected by the API, not silently truncated.
+	Since time.Time
 }
 
 type Provider struct {
+	since    time.Time
 	apiKey   string
 	baseURL  string
 	pageSize int
@@ -93,7 +110,14 @@ func New(opts Options) *Provider {
 		// A single page is ~4.3 MB at the default page size (measured); a
 		// generous timeout leaves room for a slow connection without hanging
 		// forever.
-		client: &http.Client{Timeout: 2 * time.Minute},
+		since: opts.Since,
+		// Measured, not guessed: a single 2,000-record page took 114.5s
+		// uncompressed and 135.8s with gzip on 2026-08-03, and the same
+		// request had taken 33s earlier the same day. Two minutes - the
+		// first value here - failed a real sync on the first page. NVD
+		// generates these responses, so the variance is theirs and a margin
+		// of a few seconds is not a margin.
+		client: &http.Client{Timeout: 10 * time.Minute},
 	}
 }
 
@@ -204,8 +228,19 @@ type apiResponse struct {
 	Vulnerabilities []rawVulnerability `json:"vulnerabilities"`
 }
 
+// nowUTC is a seam so a test can pin the lastModEndDate it expects.
+var nowUTC = func() time.Time { return time.Now().UTC() }
+
 func (p *Provider) fetchPage(ctx context.Context, startIndex int) (apiResponse, time.Time, error) {
 	u := fmt.Sprintf("%s?resultsPerPage=%d&startIndex=%d", p.baseURL, p.pageSize, startIndex)
+	if !p.since.IsZero() {
+		// NVD requires both bounds together and caps the span at 120 days.
+		// The end is now rather than open-ended, because an absent
+		// lastModEndDate is rejected rather than treated as "until now".
+		u += fmt.Sprintf("&lastModStartDate=%s&lastModEndDate=%s",
+			url.QueryEscape(p.since.UTC().Format("2006-01-02T15:04:05.000-07:00")),
+			url.QueryEscape(nowUTC().Format("2006-01-02T15:04:05.000-07:00")))
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return apiResponse{}, time.Time{}, err

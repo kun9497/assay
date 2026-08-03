@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kun9497/assay/internal/dbcmd"
 	"github.com/kun9497/assay/internal/provider"
@@ -144,8 +146,32 @@ func run(args []string, stdout, stderr io.Writer) int {
 // The key is optional and never required: NVD_API_KEY absent yields
 // Options{APIKey: ""}, which nvd.New already treats as "send no apiKey
 // header" (a slower, unauthenticated sync, not a failure).
+// NVD_SINCE_DAYS additionally bounds the sync to CVEs modified in the last N
+// days, using NVD's own lastModStartDate filter. Absent or unparseable means
+// the whole feed.
+//
+// It is an environment variable rather than a flag because it is a property of
+// how this database is being maintained, not of one invocation: a builder runs
+// a full pass once and incremental passes daily, and mixing the two by hand on
+// the command line is how a database ends up with a gap nobody notices. A flag
+// can come later if anyone wants one.
+//
+// Measured 2026-08-03, and the reason this exists: a full pass is about seven
+// hours, because NVD generates each 2,000-record page in 114-136 seconds
+// whatever the page size or compression. The rate-limit pauses are 20 minutes
+// of that. Above 120 days the API rejects the window outright, so the value is
+// capped here rather than sent and refused.
 func nvdOptionsFromEnv() nvd.Options {
-	return nvd.Options{APIKey: os.Getenv("NVD_API_KEY")}
+	opts := nvd.Options{APIKey: os.Getenv("NVD_API_KEY")}
+	if raw := os.Getenv("NVD_SINCE_DAYS"); raw != "" {
+		if days, err := strconv.Atoi(raw); err == nil && days > 0 {
+			if days > 120 {
+				days = 120
+			}
+			opts.Since = time.Now().UTC().AddDate(0, 0, -days)
+		}
+	}
+	return opts
 }
 
 // newNVDAnnotator constructs the NVD annotator. A package variable, not a
