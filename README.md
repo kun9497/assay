@@ -206,7 +206,8 @@ binary: assay and grype find **the same three findings** — same packages, same
 same fixed versions — but grype rates two of them High and Medium where assay says `unknown`.
 Neither is wrong. All three advisories carry **zero** severity entries in the OSV data, so
 `unknown` is what D13 and D17 require; grype reaches NVD through each advisory's CVE alias
-and finds a score there. Enriching from NVD is named in D17 as a possibility, not a plan.
+and finds a score there. Enriching from NVD is a recorded deferral, not a plan — the mechanism for it landed with
+D25, the cost is CPE-to-purl matching, and `docs/deferred-decisions.md` names the trigger.
 
 
 `--explain` matches on the advisory's own ID or any alias, so the CVE you were given
@@ -214,7 +215,7 @@ resolves even when the record is filed under a GHSA or a distro-prefixed ID.
 
 Two databases routinely describe the same vulnerability and disagree about it. Measured
 against the live database: of 19,715 vulnerability groups, 8,893 (45%) carry more than one
-record, and 5,423 of those have one record rated where another is not (D25). A real scan of
+record, and in 5,693 of those the sources land on different severity bands (D25). A real scan of
 Django 3.2.12 finds 19 vulnerabilities, 15 of them described by both GHSA and PYSEC, and 14
 of those 15 rated by only one of the two. A finding
 keeps every source's rating rather than discarding all but one, and the gate uses the
@@ -232,11 +233,11 @@ run `assay db update` rather than silently fetching or silently reporting nothin
 
 | OS | Location |
 |---|---|
-| Windows | `%LocalAppData%\assay\db\v4\` |
-| macOS | `~/Library/Caches/assay/db/v4/` |
-| Linux | `~/.cache/assay/db/v4/` |
+| Windows | `%LocalAppData%\assay\db\v5\` |
+| macOS | `~/Library/Caches/assay/db/v5/` |
+| Linux | `~/.cache/assay/db/v5/` |
 
-Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v4` component
+Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v5` component
 is the schema version — a schema change rebuilds into a new directory rather than migrating
 in place. Note that `ASSAY_DB_DIR` carries no such component, so a CI cache keyed on that
 path survives an upgrade that should have invalidated it. Rebuild after upgrading, or key

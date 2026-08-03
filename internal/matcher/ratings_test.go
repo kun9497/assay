@@ -10,8 +10,8 @@ import (
 )
 
 // Two databases routinely describe one vulnerability and disagree about it:
-// 8,893 of 19,715 measured CVE groups carry more than one record, and 5,423 of
-// those have one record rated where another is not. These tests pin what a
+// 8,893 of 19,715 measured CVE groups carry more than one record, and in 5,693
+// of those the sources land on different severity bands. These tests pin what a
 // finding does with that (D25).
 
 const (

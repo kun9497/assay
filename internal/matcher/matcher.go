@@ -59,9 +59,10 @@ type Finding struct {
 	//
 	// Severity and Score above are the highest across these, and Advisory and
 	// Evidence are the record that set it. Keeping the rest is not a display
-	// nicety — 5,423 of the 8,893 measured multi-record groups have one record
-	// rated where another is not, so a report that showed one source's answer
-	// would be quietly presenting one authority's opinion as the answer.
+	// nicety — the sources land on different bands in 5,693 of the 8,893
+	// measured multi-record groups, so a report that showed one source's
+	// answer would be quietly presenting one authority's opinion as the
+	// answer.
 	Ratings []Rating
 }
 

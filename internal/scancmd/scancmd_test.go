@@ -465,10 +465,7 @@ func TestRun_UncoveredEcosystemExits2WithInstructions(t *testing.T) {
 // depend on this package re-deriving what internal/severity already owns.
 const (
 	vecCritical = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
-	// 6.5, medium - a second RATED source, so the two disagree on band and
-	// score rather than one simply having no opinion.
-	vecMediumJSON = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N"
-	vecMedium     = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N"
+	vecMedium   = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N"
 )
 
 // Addressable severity.Band values for Options.FailOn, which takes a pointer
@@ -1485,7 +1482,7 @@ func TestRun_JSONIsIdenticalWhenRecordOrderIsReversed(t *testing.T) {
 		{id: "GHSA-w24h-v9qh-8gxj", pkg: "shared", fixed: "2.0.0",
 			vectors: []string{vecCritical}, aliases: []string{"CVE-2022-28347"}},
 		{id: "PYSEC-2022-191", pkg: "shared", fixed: "3.1.0",
-			vectors: []string{vecMediumJSON}, aliases: []string{"CVE-2022-28347"}},
+			vectors: []string{vecMedium}, aliases: []string{"CVE-2022-28347"}},
 		{id: "GO-2022-0001", pkg: "shared", fixed: "2.5.0",
 			aliases: []string{"CVE-2022-28347"}},
 	}
@@ -1511,11 +1508,32 @@ func TestRun_JSONIsIdenticalWhenRecordOrderIsReversed(t *testing.T) {
 			"--- records forward ---\n%s\n--- records reversed ---\n%s",
 			forward, backward)
 	}
-	// Guards the guard: if the fixture stopped producing a multi-source
-	// finding, the two documents would be trivially identical and this test
-	// would pass while testing nothing.
-	if n := strings.Count(forward, `"advisoryId"`); n != 3 {
-		t.Errorf("fixture produced %d ratings, want 3 — the comparison above is "+
-			"vacuous unless one finding carries several; document:\n%s", n, forward)
+	// Guards the guard. If grouping broke and the three records came out as
+	// three single-rating findings, the comparison above would still pass —
+	// the documents stay byte-identical because sortFindings is a total order
+	// — and this test would be checking nothing. Counting ratings alone does
+	// not catch that: three findings carrying one rating each also counts
+	// three. The finding count is what distinguishes them.
+	var doc struct {
+		Findings []struct {
+			Ratings []struct {
+				Database string `json:"database"`
+			} `json:"ratings"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(forward), &doc); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(doc.Findings) != 1 || len(doc.Findings[0].Ratings) != 3 {
+		t.Errorf("fixture produced %d finding(s) with %v ratings, want 1 finding "+
+			"carrying 3 — the comparison above is vacuous unless the three "+
+			"records became one multi-source finding; document:\n%s",
+			len(doc.Findings), func() []int {
+				var n []int
+				for _, f := range doc.Findings {
+					n = append(n, len(f.Ratings))
+				}
+				return n
+			}(), forward)
 	}
 }

@@ -339,10 +339,10 @@ a SARIF renderer is a third `Reporter` over the same data rather than a new trav
 ### Ingesting NVD as a rating source
 
 D25 made a finding carry every source's rating rather than one winner. NVD is the obvious
-next source: it rates nearly everything, and the gap D25 exposes is that half of a real
-Django scan's findings are rated by GHSA alone while PYSEC supplies no severity at all.
+next source: it rates nearly everything, and the gap D25 exposes is that 14 of a real Django
+scan's 19 findings are rated by GHSA alone while PYSEC supplies no severity at all.
 
-**The mechanism is already there.** A new provider writes `Advisory.Database = "NVD"` and the
+**Groundwork.** A new provider writes `Advisory.Database = "NVD"` and the
 matcher, the gate and all three renderers pick it up with no change — that was the point of
 building D25 as a mechanism rather than special-casing two source names. Adding NVD is a
 provider, not a redesign.
@@ -439,6 +439,13 @@ Recorded because design decisions rest on them.
 | Assumption | Outcome |
 |---|---|
 | KNVD offers a machine-readable API, and its terms permit redistribution | **Both no, and a third answer matters more.** Two documented RSS feeds exist and each returns only the latest 10 items; the SPA's own POST API is undocumented and the portal's previous deep links now 500, so nothing there is a stable contract. The footer reads `Copyright(C) 2026 KISA. All rights reserved.` with no 공공누리 mark. But the finding that decides the slice is coverage: **173 records total**, all Korean domestic commercial software. See the roadmap's Slice 5. |
+
+### Resolved — measured 2026-08-03
+
+| Assumption | Outcome |
+|---|---|
+| Sources disagree about the fixed version in ~90% of multi-record groups (D25's own "152 of 169") | **Wrong as stated, and not reproducible.** Re-measured over the whole database: 2,210 of 8,893 (25%), 510 of 4,488 (11%) for `GHSA`+`PYSEC`, and 0 of 15 on the Django scan D25 cites as its example. The original scope was "the packages a real scan touches", which is not recoverable without that package list, so the two may not be measuring the same thing. Nothing in D25 rests on it — a rating carries its own fixed version because that source's remediation belongs to that source, agreement or not. Recorded beside the original in the roadmap. |
+| Sources disagree about severity often enough to matter | **Confirmed, with the mechanism clarified.** 5,693 of 8,893 multi-record groups land on different bands — but 5,423 of those are one source rating what another leaves unrated, and only 306 are two rated sources scoring differently. The aggregate's hard case is `unknown`, not conflicting scores, which is why D17 keeping `unknown` outside the ordering is what makes it work. |
 
 ### Still open
 

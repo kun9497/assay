@@ -67,8 +67,8 @@ type FindingRecord struct {
 	Score    float64        `json:"score"`
 	Evidence EvidenceRecord `json:"evidence"`
 	// Ratings carries every source's own assessment, never collapsed to the
-	// one that set Severity/Score above (D25): 5,423 of 8,893 measured
-	// multi-record groups have one record rated where another is not, so a
+	// one that set Severity/Score above (D25): the sources land on different
+	// bands in 5,693 of 8,893 measured multi-record groups, so a
 	// consumer building its own policy — e.g. "always take the more
 	// conservative fixed version" — needs the whole array, not just the
 	// highest band. JSON is the machine-readable view and the one a filter
@@ -101,13 +101,12 @@ type RatingRecord struct {
 	Severity string  `json:"severity"`
 	Score    float64 `json:"score"`
 	// Fixed is the fixed version THIS record gives, which is why it lives
-	// here and not on FindingRecord: sources disagree on it too (152 of 169
-	// measured groups), and pulling one to the top level would make every
-	// source appear to agree about remediation.
+	// here and not on FindingRecord: sources disagree on it in 2,210 of the
+	// 8,893 measured multi-record groups, and pulling one to the top level
+	// would make every source appear to agree about remediation.
 	//
 	// No omitempty, for the same reason Score above has none: a source that
-	// gave no fixed version is exactly the interesting case — disagreeing
-	// fixed versions are half of D25's own measurement — and with omitempty
+	// gave no fixed version is exactly the interesting case — and with omitempty
 	// a consumer cannot tell "this source said there is no fix yet" apart
 	// from "this document predates the field". The shape must not vary per
 	// rating, which is what a schema is for.

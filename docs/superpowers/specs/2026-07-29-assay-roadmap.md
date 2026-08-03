@@ -101,7 +101,7 @@ mode anyway. trivy made the same call for the same access pattern.
 
 ### D5 — Schema version in the path
 
-`<cache>/assay/db/v4/vulnerability.db`. A schema change means rebuilding into a new
+`<cache>/assay/db/v5/vulnerability.db`. A schema change means rebuilding into a new
 directory rather than writing migration code. Migration code is a liability for a project
 with one user.
 
@@ -285,7 +285,7 @@ Where assay differs, the difference is documented rather than left to be discove
 | `--fail-on <band>` | Band names are `none low medium high critical`; grype's are `negligible low medium high critical`. Same ordering, same positions — assay takes the name CVSS uses for 0.0 rather than the one grype invented (D21). |
 | `--fail-on-unknown` | No grype equivalent. Exists because unknown is not in assay's severity ordering (D17). |
 | `--fail-on-incomplete` | No grype equivalent. Exits **2**, not 1: a package that was never checked is a statement about coverage, not a finding (D21). |
-| severity of a multi-source finding | grype reports one band per match; assay reports every source's and gates on the highest (D25). Measured on Django 3.2.12, 19 findings: grype agrees with assay's aggregate on 19/19 — and with assay's GHSA rating on 19/19, but with its PYSEC rating on 1/15. On this sample "grype takes the highest" and "grype follows GHSA" cannot be told apart, because PYSEC rates none of them. Separating the two needs a case where a non-GHSA source rates higher. |
+| severity of a multi-source finding | grype reports one band per match; assay reports every source's and gates on the highest (D25). Measured on Django 3.2.12, 19 findings: grype agrees with assay's aggregate on 19/19 — and with assay's GHSA rating on 19/19, but with its PYSEC rating on 1/15 — counting a band as agreeing only when it is equal, so the 14 misses are grype's real band against PYSEC's `unknown`. On this sample "grype takes the highest" and "grype follows GHSA" cannot be told apart, because PYSEC rates none of them. Separating the two needs a case where a non-GHSA source rates higher. |
 
 Add a row here whenever a shared name gains different semantics. A silently divergent flag
 is worse than a differently named one.
@@ -543,11 +543,24 @@ slice 4 exists to remove, reachable through a detail nothing states or tests.
 |---|---|---|
 | vulnerability groups (keyed by CVE) | 19,715 | 19 findings |
 | with more than one record | **8,893 (45%)** | **15 (79%)** |
-| of those, one record rated and another not | 5,423 | 14 |
+| of those, the severity band differs | **5,693 (64%)** | **14** |
+| …because one is rated and another is not | 5,423 | 14 |
+| …with both rated, landing on different bands | 306 of 3,530 | 0 |
 | of those, the fixed version differs | 2,210 (25%) | **0** |
 
-The first two rows hold: multi-source is the common case, not the exception, and sources
-disagreeing about severity is what a finding has to survive.
+The severity rows hold, and the split under them is worth reading: almost all of the
+disagreement is one source rating what another leaves unrated (5,423), not two sources
+scoring the same thing differently (306). That is why `unknown` sitting outside the ordering
+(D17) is what makes the aggregate work — a source with no opinion must not be able to
+outrank one with an opinion, in either direction.
+
+The fixed-version comparison is the sorted set of every `fixed` event on every `affected`
+entry, compared as strings. It over-counts where one record enumerates release branches
+another collapses; it under-counts where two records write the same version differently
+(`2.2.28` against `2.2.28.0`, a `v` prefix, an epoch), because it never calls a `Comparer`
+(D9); and it ignores `last_affected`, so a record that bounds a range that way reads as
+having no fix. A tighter definition would need the matcher, at which point it is measuring a
+scan rather than the data.
 
 **The fixed-version figure above does not reproduce.** The 152-of-169 recorded in the
 original measurement is 90%; re-measured it is 25% across the database and 11% for `GHSA` +
@@ -709,7 +722,7 @@ type Finding struct {
 ### Storage layout
 
 ```
-<os.UserCacheDir()>/assay/db/v4/vulnerability.db      override: ASSAY_DB_DIR
+<os.UserCacheDir()>/assay/db/v5/vulnerability.db      override: ASSAY_DB_DIR
 
 buckets:
   advisories   "<ecosystem>\x00<name>"     → []AdvisoryID  primary lookup
@@ -728,9 +741,9 @@ which is microseconds.
 
 | OS | Path |
 |---|---|
-| Windows | `%LocalAppData%\assay\db\v4\` |
-| macOS | `~/Library/Caches/assay/db/v4/` |
-| Linux | `~/.cache/assay/db/v4/` (honours `XDG_CACHE_HOME`) |
+| Windows | `%LocalAppData%\assay\db\v5\` |
+| macOS | `~/Library/Caches/assay/db/v5/` |
+| Linux | `~/.cache/assay/db/v5/` (honours `XDG_CACHE_HOME`) |
 
 Values are JSON to start. At a few hundred lookups per scan, bbolt reads are microseconds
 and decoding dominates — still tens of milliseconds. Encoding is hidden behind `Store`
