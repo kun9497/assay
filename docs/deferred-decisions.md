@@ -371,6 +371,63 @@ how many of the unrated findings NVD actually rates, and how many verdicts flip.
 
 ---
 
+**Measured 2026-08-03.** The entry above said to measure first; this is that measurement,
+against a schema-5 database of 32,046 advisories and NVD's 2.0 API.
+
+*What NVD would add, as a severity source:*
+
+| | |
+|---|---|
+| advisories assay rates `unknown` | **8,029 (25%)** |
+| of those, carrying a CVE NVD could be asked about | 7,021 |
+| of those, carrying **no CVE at all** | **1,008 (13%)** |
+| random sample of unrated CVEs queried | 60 |
+| known to NVD | 57 (95%) |
+| carrying a CVSS score | **56 (93%)**, 95% CI 84–97% |
+| scoring **high or critical** | **29 (48%)**, 95% CI 36–61% |
+
+Nearly half of what assay reports as `unknown` NVD rates high or critical. Scanning assay's
+own binary makes this concrete: all three findings are unrated, so `--fail-on low` — the
+lowest threshold there is — exits 0. NVD rates two of them 7.8 (high) and 5.3 (medium); the
+third carries no CVE and would stay unknown. That is the 13% arriving in a three-finding scan.
+
+*What NVD would add as an independent matching source — the part that does not work:*
+
+NVD keys on `vendor:product`, and for a language package that pair is a curated string no
+purl can derive: `pkg:golang/gopkg.in/yaml.v3` is `cpe:2.3:a:yaml_project:yaml:...` and
+`django` splits across two vendors (`djangoproject` and `django_project`). So a full provider
+needs a purl→CPE dictionary, which is where grype spends much of its complexity.
+
+That dictionary can in principle be *learned* rather than written, by joining OSV and NVD on
+the CVE they share — 10,596 (ecosystem, package) pairs are reachable that way. Sampling 50 of
+them and resolving each against NVD:
+
+| ecosystem | rows teaching a trustworthy mapping |
+|---|---|
+| Alpine | 17 of 20 (85%) |
+| PyPI | 5 of 7 (71%) |
+| npm | 7 of 14 (50%) |
+| **Go** | **1 of 9 (11%)** |
+
+24% of the sampled CVEs carry no CPE at all, and **those rows are not awaiting analysis, they
+are `Deferred`** — NVD's status for records it has decided not to enrich (9 of the 12, against
+2 `Awaiting Analysis`). Five of Go's six CPE-less rows are `Deferred`. The gap is a decision,
+not a backlog, so it will not close by waiting.
+
+**The conclusion the numbers force.** NVD is a strong *severity* source and a weak *matching*
+source, and it is weakest exactly where assay's unrated population is largest: Go supplies
+4,125 of the 8,029 unrated advisories and is the one ecosystem whose CPEs cannot be learned.
+Alpine maps best, and is the one place NVD's version ranges would be wrong anyway, because
+distros backport fixes — the hazard already recorded under RHEL-family support.
+
+**Still deferred, with the trigger replaced.** The old trigger ("`--fail-on-unknown` becomes
+noise") asked the wrong question: the problem is not noise, it is that half of assay's
+`unknown` findings are high or critical and trip no gate at all. What is *not* yet decided is
+which shape to build, and that is a D decision, not a deferral: enrichment by CVE is small and
+supported by the evidence, an independent CPE matcher is large and contradicted by it.
+
+---
+
 ### VEX and ignore rules
 
 Suppressing known-irrelevant findings. Both grype and trivy support this, and it becomes
