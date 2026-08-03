@@ -710,12 +710,77 @@ shows the **matched** record that set its band, and an NVD rating can raise the 
 without ever being displayed. `--explain` lists it in the per-source breakdown, which is where
 a reader looks for exactly this.
 
-**Fetched by `db update`, never by a scan** (D14). NVD's 2.0 API paginates 2,000 records per
-request, so a full sync is 187 requests — about 20 minutes at the 5-per-30-seconds rate limit
-that applies without an API key, against roughly 12 hours if each CVE were fetched
-individually. 98% of records carry a score. An API key raises the limit tenfold and is
-supported but not required; a scanner that only works for people who registered for a key is
-a different tool.
+**Fetched by `db update`, never by a scan** (D14). ~~A full sync is 187 requests, about 20
+minutes at the no-key rate limit.~~ **That estimate was wrong and the live run found it.**
+
+It counted only the rate-limit pauses. Measured 2026-08-03, one 2,000-record page:
+
+| | |
+|---|---|
+| uncompressed | 4.3 MB, **114.5 s** |
+| gzip | 532 KB, **135.8 s** |
+| 500 records, gzip | 178 KB, 41.6 s |
+
+Compression cuts the bytes eightfold and does not cut the time, and the cost is roughly
+linear per record — so **NVD generates these responses rather than serving a file, and page
+size does not change the total**. 372,628 records is therefore about **seven hours**, of which
+the 187 rate-limit pauses are twenty minutes. An earlier single sample of 33 s was an outlier
+and it is what produced the wrong figure.
+
+Two consequences, both real:
+
+- The HTTP client timeout was two minutes. A real sync died on its first page, because 135.8 s
+  leaves no margin at all. It is ten minutes now — measured, not guessed.
+- **Seven hours per user is not a database anyone maintains.** NVD's own answer is incremental
+  sync, so `Options.Since` bounds a run with `lastModStartDate` (`NVD_SINCE_DAYS`, capped at
+  the API's 120-day window). A builder runs one full pass and daily deltas.
+
+The deeper answer is that the full pass should not be every user's problem at all. That is
+*Publishing the database as an OCI artifact* in `docs/deferred-decisions.md`, whose revisit
+trigger — "CI rebuild time becomes the bottleneck" — this measurement fires. grype and trivy
+both work this way: a builder builds, everyone else downloads.
+
+98% of records carry a score. An API key raises the rate limit tenfold and is supported but
+not required — it does not change the seven hours, because the bottleneck is NVD's response
+generation rather than the pacing.
+
+**Measured against the live feed, 2026-08-03.** A bounded sync — `NVD_SINCE_DAYS=30`, so
+CVEs modified in the last thirty days — produced **21,460 ratings** and is enough to settle
+the claim, because the findings in question are recent.
+
+`assay scan ./bin/assay`, before and after:
+
+| | before | after |
+|---|---|---|
+| findings | 3 | 3 |
+| unknown severity | **3** | **1** |
+| `--fail-on low` | 0 | **1** |
+| `--fail-on high` | **0** | **1** |
+| `--fail-on critical` | 0 | 0 |
+
+The three findings, after:
+
+```
+stdlib                          high     GO-2026-4970 unknown + NVD CVE-2026-39822 high (7.8)
+stdlib                          medium   GO-2026-5856 unknown + NVD CVE-2026-42505 medium (5.3)
+github.com/klauspost/compress   unknown  GO-2026-5841 - no CVE, so no join reaches it
+```
+
+That third row is the 13% arriving in a three-finding scan, exactly as this decision said it
+would. It is still `unknown`, still counted in the summary, and still trips no threshold on
+its own (D17).
+
+`--explain` shows the narrowing working:
+
+```
+severity: high (7.8)   [highest of 2 sources]
+  GO     GO-2026-4970    unknown          fixed 1.26.5
+  NVD    CVE-2026-39822  high (7.8)       fixed -  https://nvd.nist.gov/vuln/detail/CVE-2026-39822
+```
+
+The band comes from NVD; the displayed advisory, the matched range and the fixed version all
+come from the record assay actually compared against. NVD's own `fixed` is empty because NIST
+published no remediation for this package, and the report says so rather than borrowing one.
 
 **It does not touch coverage** (D20). NVD is not an ecosystem, and `Covers()` must not report
 one because NVD scores exist — otherwise a package in an ecosystem this database never

@@ -160,8 +160,18 @@ runs where rebuilding is too slow — neither applies yet. This is also infrastr
 (scheduled build workflow, registry auth, version tagging) rather than scanner work, and
 would mean building a distribution pipeline before the scanner runs.
 
-**Revisit when.** There are users beyond the author, or CI rebuild time becomes the
-bottleneck.
+**Revisit when.** ~~There are users beyond the author, or CI rebuild time becomes the
+bottleneck.~~ **Fired 2026-08-03, on the second condition.**
+
+Measured while building D27: a full NVD sync is about seven hours, because NVD generates each
+2,000-record page in 114–136 seconds and neither compression nor a smaller page changes the
+total. Local building was affordable while OSV was the only source — a few minutes of archive
+download. It is not affordable now, and it is not a constant anyone can tune away.
+
+That makes this the next slice rather than a someday. The shape is grype's and trivy's: a
+builder runs the seven hours once and daily deltas after (D27's `Since`), publishes the built
+database, and `assay db update` pulls it. A scan still fetches nothing (D14), and registry
+distribution brings mirroring and air-gapped operation with it.
 
 **Groundwork.** Provider source URLs are configuration rather than constants, so adding a
 pull path later does not disturb the interface.

@@ -423,25 +423,53 @@ exited 0 while 24 findings went unmentioned. **Done.**
 - [x] Explain mode — show the matching evidence for a single finding
 - [x] Per-source ratings — a finding keeps every database's assessment, the gate takes the
       highest (D25)
+- [x] NVD as a second rating source, joined on the CVE (D27)
 - [ ] SARIF output (see `docs/deferred-decisions.md`)
-- [ ] NVD as a second rating source, joined on the CVE (D27)
 
 **⑦ NVD severity** — what NIST scores a CVE, attached to findings assay already matched
-through OSV. **Next.**
+through OSV. **Done.**
 
 Measured 2026-08-03: of 8,029 advisories carrying no scorable vector, a 60-CVE sample found
-NVD scoring 93% and rating **48% high or critical**. Scanning assay's own binary shows the
-cost — all three findings are unrated, so `--fail-on low` exits 0, while NVD rates two of them
-7.8 and 5.3. The join is the CVE, never the CPE: NVD keys match data on `vendor:product`,
-which no purl derives, and a learned dictionary works for Alpine 85% but Go 11% — where Go is
-4,125 of the 8,029. 1,008 unrated advisories carry no CVE at all and stay unknown under any
-design (D27).
+NVD scoring 93% and rating **48% high or critical**. The join is the CVE, never the CPE: NVD
+keys match data on `vendor:product`, which no purl derives, and a learned dictionary works for
+Alpine 85% but Go 11% — where Go is 4,125 of the 8,029. 1,008 unrated advisories carry no CVE
+at all and stay unknown under any design (D27).
 
-- [ ] NVD provider — bulk sync via the 2.0 API, 187 requests, no API key required
-- [ ] Ratings joined on CVE, verdicts take the highest band (D25's mechanism)- [ ] NVD as a second rating source (see `docs/deferred-decisions.md`)
+Verified against the live feed. Scanning assay's own binary, before and after:
+
+| | before | after |
+|---|---|---|
+| unknown severity | 3 of 3 | **1 of 3** |
+| `--fail-on high` | 0 | **1** |
+
+```
+stdlib                          high     GO-2026-4970 unknown + NVD CVE-2026-39822 high (7.8)
+stdlib                          medium   GO-2026-5856 unknown + NVD CVE-2026-42505 medium (5.3)
+github.com/klauspost/compress   unknown  GO-2026-5841 - no CVE, so no join reaches it
+```
+
+The third row is the 1,008 in miniature: no CVE, so nothing joins, and it stays `unknown`
+rather than being guessed at. NVD sets the band; the advisory, the matched range and the fixed
+version still come from the record assay compared against.
+
+- [x] NVD provider — bulk sync via the 2.0 API, no API key required
+- [x] Ratings joined on CVE, verdicts take the highest band (D25's mechanism)
+- [x] Incremental sync (`NVD_SINCE_DAYS`), because a full pass is ~7 hours
+
+That seven hours is measured, not estimated, and it is the reason the next slice exists: NVD
+generates each 2,000-record page in 114–136 seconds, and neither compression nor a smaller
+page changes the total.
+
+**⑧ A published database** — a builder runs the slow sync; everyone else downloads the
+result. **Next.** This was a deferred decision whose revisit trigger — "CI rebuild time
+becomes the bottleneck" — the measurement above fired. grype and trivy both work this way.
+
+- [ ] Build the database centrally, publish it as an OCI artifact
+- [ ] `assay db update` pulls the published artifact instead of rebuilding
+- [ ] Daily deltas on top of one full pass
 
 **⑤ KISA enrichment** — Korean title, description and remediation joined onto matched
-findings by CVE. **Viable, and next after ⑦.**
+findings by CVE. **Viable, and next after ⑧.**
 
 The first investigation called this dead. It had measured the wrong board — KNVD's own
 disclosures (173 records, Korean domestic software) rather than its **security notices**,
