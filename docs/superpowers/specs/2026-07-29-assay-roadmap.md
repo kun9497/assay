@@ -988,6 +988,57 @@ all-rights-reserved with no 공공누리 mark, which matters for redistributing 
 What is not yet measured: how many of the 2,422 notices intersect a typical scan. Three of
 three sampled did, but they were the three that surfaced from a search, not a random draw.
 
+**Measured 2026-08-03, against a collected corpus.** ssk had already scraped the 보안공지
+board into structured JSON — 2,039 notices, each carrying `cve_id`, `product`,
+`problem_version` and `solved_version` already parsed out, plus the Korean title and body.
+That answers the access question the first investigation left open, and it supplies the
+number that one could not: **17,003 distinct CVE ids**.
+
+Joined against the live database (32,046 advisories):
+
+| | |
+|---|---|
+| KISA CVEs also carried by assay | **413 (2.4% of KISA)** |
+| of those, reachable in `Alpine` | 279 |
+| `Go` / `npm` / `PyPI` | 56 / 56 / 37 |
+| everything else | 16 |
+
+So the join fires, and it is smaller than the board's size suggests. KISA's corpus is
+dominated by desktop and enterprise software — MS 9,968 product entries, Adobe 1,985, Cisco
+921 — which assay does not scan. What overlaps is the server-side long tail: OpenSSL, Apache,
+Exim, Mozilla.
+
+Against roughly 4,405 Alpine advisories, 279 is about one finding in sixteen carrying a
+Korean title and remediation. That is a real feature and a modest one, and it is worth
+stating as such rather than as "Korean advisory data" in the abstract.
+
+**The access path is solved, by ssk's own crawler** (`make-kisa-rule/main.py`), which is
+where the corpus above came from. KNVD's SPA has an undocumented but working JSON API:
+
+```
+POST /api/core/pu/view/count/get        -> total notice count
+POST /api/core/pu/view/vuln-notice/get  -> paginated list
+     {"collectionType":"VULNOTICE","tabs":"ko","skipCount":N,"limit":50, ...}
+```
+
+The list response already carries `content` and `content_html`, so no per-notice detail fetch
+is needed — which is why the `detailSecNo.do` deep links returning 404 never mattered. The
+publication date is not exposed as a field; the crawler recovers it from the first four bytes
+of the Mongo ObjectId, which is the document's creation timestamp.
+
+Two things in that crawler do not port to this repo as they stand, and both are decisions
+rather than details:
+
+- It disables TLS verification (`verify=False`). A vulnerability scanner turning off
+  certificate checking needs a reason stronger than "it worked", so whether the endpoint
+  actually requires it has to be established first.
+- It parses the affected/fixed version tables out of `content_html` with BeautifulSoup.
+  This repo takes no third-party dependencies and Go's standard library has no HTML parser,
+  so that is the same choice `poetry.lock` forced: a narrow hand-rolled reader over the shapes
+  KNVD actually emits, or a dependency decision made deliberately. The tables are regular —
+  columns keyed on `제품`/`영향`/`해결`/`CVE` headers — but "regular" is what a permissive
+  parser assumes right up until it silently attributes the wrong version to a CVE.
+
 **KNVD's own vulnerability records number 173, and none of them is in an ecosystem assay
 scans.** The `공개된 취약점` corpus is 173 records total, published at roughly one or two a
 month since 2024. Every one of the ten most recent describes Korean domestic commercial

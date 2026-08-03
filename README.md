@@ -417,21 +417,42 @@ exited 0 while 24 findings went unmentioned. **Done.**
 - [x] Per-source ratings — a finding keeps every database's assessment, the gate takes the
       highest (D25)
 - [ ] SARIF output (see `docs/deferred-decisions.md`)
-- [ ] NVD as a second rating source, joined on the CVE (D27)- [ ] NVD as a second rating source (see `docs/deferred-decisions.md`)
+- [ ] NVD as a second rating source, joined on the CVE (D27)
 
-**⑤ KISA enrichment** — Korean descriptions and severity joined onto matched findings.
-**On hold: investigated 2026-08-02 and the data does not support it.**
+**⑦ NVD severity** — what NIST scores a CVE, attached to findings assay already matched
+through OSV. **Next.**
 
-KNVD publishes **173** vulnerability records in total, and every one of the ten most recent
-describes Korean domestic commercial software — ipTIME routers, 한컴오피스, 알집, a DVR, a
-groupware suite. None is a Go, npm, PyPI or Alpine package, so a CVE-ID join against a
-container image or a source tree would essentially never fire. The records themselves are
-well-formed — CVE ID, CVSS score and band, affected and fixed versions, a Korean description
-— so the obstacle is subject matter, not format. Access and licensing are also unfavourable:
-the two documented RSS feeds return only the latest 10 items, and the site is marked
-all-rights-reserved with no 공공누리 licence. Full findings in the roadmap.
+Measured 2026-08-03: of 8,029 advisories carrying no scorable vector, a 60-CVE sample found
+NVD scoring 93% and rating **48% high or critical**. Scanning assay's own binary shows the
+cost — all three findings are unrated, so `--fail-on low` exits 0, while NVD rates two of them
+7.8 and 5.3. The join is the CVE, never the CPE: NVD keys match data on `vendor:product`,
+which no purl derives, and a learned dictionary works for Alpine 85% but Go 11% — where Go is
+4,125 of the 8,029. 1,008 unrated advisories carry no CVE at all and stay unknown under any
+design (D27).
 
-- [ ] KNVD provider and enrichment join — revisit if targets expand to hosts or workstations
+- [ ] NVD provider — bulk sync via the 2.0 API, 187 requests, no API key required
+- [ ] Ratings joined on CVE, verdicts take the highest band (D25's mechanism)- [ ] NVD as a second rating source (see `docs/deferred-decisions.md`)
+
+**⑤ KISA enrichment** — Korean title, description and remediation joined onto matched
+findings by CVE. **Viable, and next after ⑦.**
+
+The first investigation called this dead. It had measured the wrong board — KNVD's own
+disclosures (173 records, Korean domestic software) rather than its **security notices**,
+which are the ones telling Korean organisations to patch CVEs in software they run.
+
+Measured against a collected corpus of 2,039 notices carrying **17,003 distinct CVEs**:
+**413 of them (2.4%)** are advisories assay already holds — 279 reachable in Alpine, 56 in
+Go, 56 in npm, 37 in PyPI. KISA's corpus is dominated by desktop and enterprise software
+assay does not scan (MS, Adobe, Cisco); what overlaps is the server-side long tail — OpenSSL,
+Apache, Exim, Mozilla. Against ~4,405 Alpine advisories that is about one finding in sixteen
+gaining a Korean title and remediation.
+
+It is a real feature and a modest one. Two things are still open: the licensing (the site is
+all-rights-reserved with no 공공누리 mark, which matters for redistributing a built database,
+not for scanning with one), and parsing the affected/fixed tables out of HTML without taking
+a dependency. Full findings in the roadmap.
+
+- [ ] KNVD provider and CVE-keyed enrichment join
 
 Correctness is checked by **differential testing against grype** at every stage. Exact
 agreement is not expected — the data sources differ — but a large divergence means the
