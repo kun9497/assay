@@ -18,6 +18,11 @@ type fakeStore struct {
 	// honest answer for the data it supplied rather than an empty set that
 	// would skip everything.
 	covers []string
+	// ratings is what RatingsFor serves, keyed by CVE (D27). Empty in every
+	// fixture that predates it, which is the honest default: a database with
+	// no NVD sync has no ratings.
+	ratings     map[string][]advisory.Rating
+	ratingCalls map[string]int
 }
 
 func (f fakeStore) Covers() (map[string]bool, error) {
@@ -44,8 +49,20 @@ func (f fakeStore) Lookup(ecosystem, name string) ([]advisory.Advisory, error) {
 func (f fakeStore) Meta() (store.Meta, error) { return store.Meta{}, nil }
 func (f fakeStore) Close() error              { return nil }
 
-// RatingsFor has no fixture data to serve yet; Task 3 gives it real behaviour.
-func (f fakeStore) RatingsFor(cve string) ([]advisory.Rating, error) { return nil, nil }
+// RatingsFor serves the ratings a fixture supplied and counts the asks, so a
+// test can pin that the matcher resolves one CVE once rather than once per
+// identifier that happens to name it.
+//
+// A value receiver, like the rest of fakeStore. The counter still survives back
+// to the test because a map is a reference type - incrementing through a copy
+// of the struct writes to the same map - and the test must initialise it, since
+// writing to a nil map panics rather than silently doing nothing.
+func (f fakeStore) RatingsFor(cve string) ([]advisory.Rating, error) {
+	if f.ratingCalls != nil {
+		f.ratingCalls[cve]++
+	}
+	return f.ratings[cve], nil
+}
 
 func advWithRange(id, eco, name, introduced, fixed string, rt advisory.RangeType) advisory.Advisory {
 	return advisory.Advisory{

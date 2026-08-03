@@ -356,12 +356,69 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 	res.Findings = live
 
 	for i := range res.Findings {
-		sortRatings(res.Findings[i].Ratings)
 		res.Findings[i].Identifiers = dedupSorted(res.Findings[i].Identifiers)
+		if err := m.annotate(&res.Findings[i]); err != nil {
+			return Result{}, err
+		}
+		sortRatings(res.Findings[i].Ratings)
 	}
 	sortFindings(res.Findings)
 	sortSkipped(res.Skipped)
 	return res, nil
+}
+
+// annotate attaches what other authorities said about this finding's CVEs —
+// NVD today, KISA next (D27). It runs once per finding, after every OSV record
+// has joined, because Identifiers is only complete then.
+//
+// The band can go up here and the displayed record cannot change. That is D25's
+// rule narrowed by one word: the finding shows the *matched* record that set
+// its band. An annotation carries a score and nothing else — no Evidence, no
+// range we compared against, no fixed version — because the match came from OSV
+// and NIST was asked only what the CVE is worth. Displaying it would put an
+// advisory on screen with nothing behind it, against goal #1, so Advisory,
+// Evidence and MatchedName are deliberately not touched below.
+//
+// Identifiers is already deduplicated, so one CVE is one store read even when a
+// record names it in both aliases and upstream (D3). On a real scan this is one
+// read per finding rather than one per alias.
+func (m *Matcher) annotate(f *Finding) error {
+	for _, id := range f.Identifiers {
+		if !strings.HasPrefix(id, "CVE-") {
+			continue
+		}
+		rs, err := m.store.RatingsFor(id)
+		if err != nil {
+			// Same reasoning as a failed Lookup: a store error is not a clean
+			// result. Failing the whole scan beats reporting a finding whose
+			// band is lower than the data would have made it.
+			return fmt.Errorf("ratings for %s: %w", id, err)
+		}
+		for _, r := range rs {
+			band, score := severity.Highest(vectorsOf(advisory.Advisory{Severity: r.Severity}))
+			f.Ratings = append(f.Ratings, Rating{
+				Database:   r.Source,
+				AdvisoryID: r.CVE,
+				Severity:   band,
+				Score:      score,
+			})
+			// The aggregate only, never the display. beats() decides whether
+			// this outranks what is there, so unknown still sits outside the
+			// ordering (D17) and a source that scored nothing cannot pull a
+			// rated finding down.
+			// winnerOf reads the DISPLAYED record's name alongside the
+			// current band, so once an annotation has raised the band the two
+			// halves no longer describe one record. That is deliberate and it
+			// is harmless: the name is only consulted to break a tie between
+			// equal scores, and a tie leaves Severity and Score unchanged
+			// whichever side wins. Nothing downstream reads winnerOf after
+			// this point - absorb and the join both run earlier.
+			if beats(f.Ratings[len(f.Ratings)-1], winnerOf(*f)) {
+				f.Severity, f.Score = band, score
+			}
+		}
+	}
+	return nil
 }
 
 // groupsOf returns the findings that ids already belong to, lowest index

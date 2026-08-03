@@ -1,7 +1,9 @@
 package matcher
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/kun9497/assay/internal/advisory"
@@ -443,4 +445,219 @@ func TestMatch_EachRatingCarriesItsOwnFixedVersion(t *testing.T) {
 		t.Errorf("fixed versions = %v, want GHSA 3.2.13 and PYSEC 3.2.14 — each "+
 			"rating reports what its own record says", fixes)
 	}
+}
+
+// nvdRating is the shape an NVD sync leaves in the store: a CVE and a vector,
+// with no package, no range and no fixed version. That absence is the whole
+// reason D27 narrows what a finding may display.
+func nvdRating(cve, vector string) advisory.Rating {
+	return advisory.Rating{
+		CVE:      cve,
+		Source:   "NVD",
+		Severity: []advisory.Severity{{Type: "CVSS_V3", Score: vector}},
+		URL:      "https://nvd.nist.gov/vuln/detail/" + cve,
+	}
+}
+
+// The case D27 exists for. Every OSV source left this unrated, so today it
+// reports unknown and trips no threshold at all - scanning assay's own binary,
+// --fail-on low exits 0 on exactly this shape. NVD rated it.
+func TestMatch_AnNVDRatingRaisesAnOtherwiseUnratedFinding(t *testing.T) {
+	s := twoSources(pysecRec(), pysecRec()) // neither carries a vector
+	s.ratings = map[string][]advisory.Rating{
+		"CVE-2022-28347": {nvdRating("CVE-2022-28347", vecCritical)},
+	}
+	res, err := New(s).Match(djangoTarget())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("got %d findings, want 1", len(res.Findings))
+	}
+	f := res.Findings[0]
+	if f.Severity != severity.Critical || f.Score != 9.8 {
+		t.Errorf("Severity/Score = %v/%.1f, want critical/9.8 - NVD rated what no "+
+			"OSV source did", f.Severity, f.Score)
+	}
+	got := map[string]severity.Band{}
+	for _, r := range f.Ratings {
+		got[r.Database] = r.Severity
+	}
+	if got["NVD"] != severity.Critical {
+		t.Errorf("ratings = %v, want NVD among them at critical", got)
+	}
+	if got["PYSEC"] != severity.Unknown {
+		t.Errorf("PYSEC rating = %v, want unknown - NVD's score is NVD's, and "+
+			"attaching it to a source that said nothing would invent agreement",
+			got["PYSEC"])
+	}
+}
+
+// ...and it is never the displayed record, however high it scores. An NVD
+// rating carries no Evidence, no matched range and no fixed version, because
+// the match came from OSV and NIST was only asked for a score. Displaying it
+// would put an advisory on screen with nothing behind it, against goal #1.
+func TestMatch_AnNVDRatingIsNeverTheDisplayedRecord(t *testing.T) {
+	s := twoSources(pysecRec(), pysecRec())
+	s.ratings = map[string][]advisory.Rating{
+		"CVE-2022-28347": {nvdRating("CVE-2022-28347", vecCritical)},
+	}
+	res, err := New(s).Match(djangoTarget())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := res.Findings[0]
+	if !strings.HasPrefix(f.Advisory.ID, "PYSEC-") {
+		t.Errorf("displayed advisory = %q, want the matched PYSEC record", f.Advisory.ID)
+	}
+	// The evidence of the record we actually compared against has to survive.
+	// Asserted on the value, not on non-emptiness: an NVD rating supplies no
+	// fixed version at all, so "not empty" would pass on anything.
+	if f.Evidence.Fixed != "3.2.13" {
+		t.Errorf("Evidence.Fixed = %q, want 3.2.13 from the matched record - the "+
+			"finding must keep the evidence of what it compared", f.Evidence.Fixed)
+	}
+	if f.MatchedName != "django" {
+		t.Errorf("MatchedName = %q, want django", f.MatchedName)
+	}
+}
+
+// D17 in both directions, through the new source: NVD rating an unrelated CVE
+// changes nothing, and NVD rating nothing at all leaves a rated finding alone.
+func TestMatch_AnNVDRatingForAnotherCVEChangesNothing(t *testing.T) {
+	with := twoSources(ghsaRec(), pysecRec())
+	with.ratings = map[string][]advisory.Rating{
+		"CVE-9999-9999": {nvdRating("CVE-9999-9999", vecCritical)},
+	}
+	a, err := New(with).Match(djangoTarget())
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := New(twoSources(ghsaRec(), pysecRec())).Match(djangoTarget())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(a.Findings) != fmt.Sprint(b.Findings) {
+		t.Errorf("a rating for an unrelated CVE changed the finding:\n  %v\n  %v",
+			a.Findings, b.Findings)
+	}
+}
+
+// One CVE, asked once - not once per identifier that names it. A finding
+// commonly carries the same CVE in both aliases and upstream (D3), and on a
+// real scan this is a store read per finding, not per alias.
+func TestMatch_ACVEIsResolvedOnceNotPerIdentifier(t *testing.T) {
+	rec := ghsaRec()
+	rec.Aliases = []string{"CVE-2022-28347"}
+	rec.Upstream = []string{"CVE-2022-28347"} // the same CVE, from both fields
+	s := fakeStore{
+		byKey:       map[string][]advisory.Advisory{key("PyPI", "django"): {rec}},
+		ratings:     map[string][]advisory.Rating{"CVE-2022-28347": {nvdRating("CVE-2022-28347", vecMedium)}},
+		ratingCalls: map[string]int{},
+	}
+	res, err := New(s).Match(djangoTarget())
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, r := range res.Findings[0].Ratings {
+		if r.Database == "NVD" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("NVD appears %d times in Ratings, want 1", n)
+	}
+	if s.ratingCalls["CVE-2022-28347"] != 1 {
+		t.Errorf("the store was asked about one CVE %d times, want 1",
+			s.ratingCalls["CVE-2022-28347"])
+	}
+	// ...and nothing that is not a CVE was looked up at all. Counting only the
+	// CVE's own calls leaves the filter unheld: dropping it keeps that count at
+	// 1 while adding a store read for every GHSA, PYSEC and BIT identifier the
+	// finding carries. Identical results, several times the reads, and no test
+	// would notice.
+	for id, n := range s.ratingCalls {
+		if !strings.HasPrefix(id, "CVE-") {
+			t.Errorf("the store was asked about %q (%d times) - only CVE "+
+				"identifiers reach a rating source", id, n)
+		}
+	}
+	if len(s.ratingCalls) != 1 {
+		t.Errorf("looked up %d identifiers, want 1 - the finding carries several, "+
+			"and exactly one of them is a CVE: %v", len(s.ratingCalls), s.ratingCalls)
+	}
+}
+
+// A rating that scores nothing must not displace one that does, and must not
+// make a rated finding look unrated (D17). NVD carrying an unscorable vector
+// is the shape that tests it.
+func TestMatch_AnUnscorableNVDRatingDoesNotDiluteARatedFinding(t *testing.T) {
+	s := twoSources(ghsaRec(), pysecRec()) // GHSA is critical
+	s.ratings = map[string][]advisory.Rating{
+		"CVE-2022-28347": {nvdRating("CVE-2022-28347", "not-a-vector")},
+	}
+	res, err := New(s).Match(djangoTarget())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := res.Findings[0]
+	if f.Severity != severity.Critical {
+		t.Errorf("Severity = %v, want critical - a source that scored nothing must "+
+			"not pull a rated finding down", f.Severity)
+	}
+	if f.Advisory.ID != "GHSA-w24h-v9qh-8gxj" {
+		t.Errorf("displayed advisory = %s, want the GHSA record", f.Advisory.ID)
+	}
+}
+
+// The invariant D25 established and D27 must not break: a finding is as severe
+// as its worst rating, counting the annotated ones. Asserted across a mixed set
+// rather than on one pair, because the annotation path updates Severity through
+// a different branch than the OSV join does and the two must agree.
+func TestMatch_SeverityIsTheHighestAcrossEveryRatingIncludingAnnotations(t *testing.T) {
+	medium := ghsaRec()
+	medium.Severity = []advisory.Severity{{Type: "CVSS_V3", Score: vecMedium}}
+	s := twoSources(medium, pysecRec()) // medium + unrated
+	s.ratings = map[string][]advisory.Rating{
+		"CVE-2022-28347": {nvdRating("CVE-2022-28347", vecCritical)},
+	}
+	res, err := New(s).Match(djangoTarget())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := res.Findings[0]
+	var best severity.Band
+	var bestScore float64
+	for _, r := range f.Ratings {
+		if r.Severity != severity.Unknown && r.Score > bestScore {
+			best, bestScore = r.Severity, r.Score
+		}
+	}
+	if f.Severity != best || f.Score != bestScore {
+		t.Errorf("Severity/Score = %v/%.1f, but the highest rating is %v/%.1f: %+v",
+			f.Severity, f.Score, best, bestScore, f.Ratings)
+	}
+	if f.Severity != severity.Critical {
+		t.Errorf("Severity = %v, want critical from the NVD annotation", f.Severity)
+	}
+}
+
+// A store failure while annotating fails the scan. Reporting a finding whose
+// band is lower than the data would have made it is the silent wrong answer
+// this project exists to avoid, and it would look exactly like a clean result.
+func TestMatch_ARatingStoreErrorFailsTheScan(t *testing.T) {
+	s := failingRatings{fakeStore: twoSources(ghsaRec(), pysecRec())}
+	if _, err := New(s).Match(djangoTarget()); err == nil {
+		t.Fatal("Match returned nil error when the rating store failed - a finding " +
+			"rated lower than the data allows must not read as a clean result")
+	}
+}
+
+// failingRatings answers every rating lookup with an error, so the scan's
+// handling of a broken store is exercised without a broken store.
+type failingRatings struct{ fakeStore }
+
+func (failingRatings) RatingsFor(string) ([]advisory.Rating, error) {
+	return nil, errors.New("ratings bucket unreadable")
 }
