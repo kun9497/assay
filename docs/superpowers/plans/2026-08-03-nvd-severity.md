@@ -129,11 +129,30 @@ works for people who registered is a different tool.
       Severity []Severity // the same (Type, Score) pairs an Advisory carries
       URL      string     // where a reader can check the claim
   }
-  // store
-  func (b *Bolt) PutRating(r advisory.Rating) error
-  func (b *Bolt) RatingsFor(cve string) ([]advisory.Rating, error)  // sorted by Source
+  // store - BOTH interfaces gain a method, not just the concrete type.
+  // Task 4's `db update` holds a store.Writer, so PutRating has to be on the
+  // interface or that task cannot call it; the matcher holds a store.Store,
+  // so RatingsFor has to be there for the same reason.
+  type Writer interface {
+      Put(a advisory.Advisory) error
+      PutRating(r advisory.Rating) error   // new
+      SetMeta(m Meta) error
+      Close() error
+  }
+  type Store interface {
+      Lookup(ecosystem, name string) ([]advisory.Advisory, error)
+      RatingsFor(cve string) ([]advisory.Rating, error)   // new, sorted by Source
+      Covers() (map[string]bool, error)
+      Meta() (Meta, error)
+      Close() error
+  }
   // SchemaVersion 5 -> 6
   ```
+
+  Adding to an interface breaks every implementer, which is the point: the
+  compiler names them. `internal/matcher`'s `fakeStore` is the only other one
+  and Task 3 extends it. If the compiler names a third, stop and report it —
+  the plan did not know about it.
 
 **Why a separate bucket and not a field on `Advisory`.** An advisory is one upstream record
 stored losslessly (D13); a rating is a different authority's opinion about a CVE that may
