@@ -720,9 +720,50 @@ finding's `Evidence`.
 KNVD provider → `enrichment` bucket → CVE ID join → Korean descriptions and severity in
 reports.
 
-**Blocked on a prerequisite:** confirming that KNVD offers a machine-readable interface and
-that its terms permit redistribution. That unknown is why this is last — if it does not
-resolve, the preceding four slices still stand on their own.
+**The prerequisite was investigated on 2026-08-02 and did not resolve.** The blocking
+question was whether KNVD offers a machine-readable interface and whether its terms permit
+redistribution. Both answers are unfavourable, and a third finding matters more than either:
+
+**KNVD's own vulnerability records number 173, and none of them is in an ecosystem assay
+scans.** The `공개된 취약점` corpus is 173 records total, published at roughly one or two a
+month since 2024. Every one of the ten most recent describes Korean domestic commercial
+software — ipTIME routers, 한컴오피스, 알집, 지니언스 NAC, 나다텔 DVR, 한비로 그룹웨어. Not one
+is a Go, npm, PyPI or Alpine package. A CVE-ID join against a container image or a Go module
+tree would essentially never fire.
+
+The record *quality* is better than this slice assumed: each carries a CVE ID, a CVSS score
+and band, affected and fixed versions, a CWE, and a Korean description. The obstacle is not
+the format. It is that the subject matter and assay's targets barely intersect.
+
+**No KVE identifier appeared in any record examined.** Every published entry is titled and
+keyed on its CVE — `CVE-2026-24498 | EFM-Networks ipTIME …` — and the detail page cites only
+CVE. That is ten records out of 173, so it is a sample rather than a survey, but it is enough
+to flag that §1's premise ("KISA/KNVD publishes advisories and KVE identifiers") and D3's
+"CVE↔KVE join" may have nothing on the KVE side to join. Confirm before building anything
+that depends on it.
+
+**Access.** Two documented RSS feeds exist — `/rss/security/notice` and
+`/rss/security/info` — and each returns only the latest **10** items, with no bulk export,
+no date range, and no pagination. The site is a Vue SPA served by an undocumented POST API
+(`/api/core/pu/view/…`) which does paginate, but it is not a published interface: the portal
+was rebuilt recently and its previous deep links (`detailSecNo.do?IDX=…`) now return a
+server error, so nothing about it is a stable contract. No corresponding dataset was found
+on 공공데이터포털.
+
+**Terms.** The site footer reads `Copyright(C) 2026 KISA. All rights reserved.` with no
+공공누리 (KOGL) mark. Korean public bodies that permit reuse label content with a KOGL type;
+its absence alongside an all-rights-reserved notice is not permission.
+
+**What is left of the idea.** The `보안공지` corpus is larger — 2,967 bulletins, covering
+Fortinet, Ubuntu, NGINX, WordPress and the like — and each carries a CVE-keyed table of
+affected and fixed versions. But those are vendor update round-ups whose CVE content OSV
+already holds; what they add is Korean prose, not matching data. That is a documentation
+feature, not a provider.
+
+**Revisit when** assay's targets include hosts or workstations rather than container images
+and source trees, which is when 한컴오피스 and ipTIME firmware become things a scan could
+encounter — the same trigger `docs/deferred-decisions.md` already records for treating KISA
+as an independent matching source. Until then this slice has no user.
 
 ---
 

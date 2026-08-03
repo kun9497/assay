@@ -397,10 +397,15 @@ Recorded because design decisions rest on them.
 | Distro advisories are source-keyed for Debian and RHEL | **True but understated.** Alpine is source-keyed too (`purl` carries `?arch=source`), so indirect matching is needed from slice 2 rather than later (D8). |
 | The CVE link for the KISA join lives in `aliases` | **Wrong.** OSV 1.7 records use `upstream`; a sampled Alpine record had `upstream` and no `aliases`. Both fields must be read (D3). |
 
+### Resolved — measured 2026-08-02
+
+| Assumption | Outcome |
+|---|---|
+| KNVD offers a machine-readable API, and its terms permit redistribution | **Both no, and a third answer matters more.** Two documented RSS feeds exist and each returns only the latest 10 items; the SPA's own POST API is undocumented and the portal's previous deep links now 500, so nothing there is a stable contract. The footer reads `Copyright(C) 2026 KISA. All rights reserved.` with no 공공누리 mark. But the finding that decides the slice is coverage: **173 records total**, all Korean domestic commercial software. See the roadmap's Slice 5. |
+
 ### Still open
 
 | Assumption | What depends on it |
 |---|---|
-| KNVD offers a machine-readable API, and its terms permit redistribution | The entire KISA provider; scraping would change its difficulty completely |
 | OSV's Red Hat data is backport-aware enough for accurate RHEL matching | Whether RHEL support is viable through OSV at all, or needs Red Hat's own feed |
 | grype's default database-age behaviour is a warning, with enforcement opt-in | Only referenced as prior art, not depended on |

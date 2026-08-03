@@ -372,10 +372,19 @@ anywhere.
 - [x] Explain mode — show the matching evidence for a single finding
 - [ ] SARIF output (see `docs/deferred-decisions.md`)
 
-**⑤ KISA enrichment** — Korean descriptions, KVE aliases, and severity joined onto matched
-findings.
+**⑤ KISA enrichment** — Korean descriptions and severity joined onto matched findings.
+**On hold: investigated 2026-08-02 and the data does not support it.**
 
-- [ ] KNVD provider and enrichment join
+KNVD publishes **173** vulnerability records in total, and every one of the ten most recent
+describes Korean domestic commercial software — ipTIME routers, 한컴오피스, 알집, a DVR, a
+groupware suite. None is a Go, npm, PyPI or Alpine package, so a CVE-ID join against a
+container image or a source tree would essentially never fire. The records themselves are
+well-formed — CVE ID, CVSS score and band, affected and fixed versions, a Korean description
+— so the obstacle is subject matter, not format. Access and licensing are also unfavourable:
+the two documented RSS feeds return only the latest 10 items, and the site is marked
+all-rights-reserved with no 공공누리 licence. Full findings in the roadmap.
+
+- [ ] KNVD provider and enrichment join — revisit if targets expand to hosts or workstations
 
 Correctness is checked by **differential testing against grype** at every stage. Exact
 agreement is not expected — the data sources differ — but a large divergence means the
