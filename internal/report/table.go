@@ -8,7 +8,6 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"github.com/kun9497/assay/internal/matcher"
 	"github.com/kun9497/assay/internal/severity"
@@ -64,7 +63,7 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 			// returned first. Without this, a CVE that assay matched correctly
 			// is absent from the output whenever the GHSA record won, and
 			// `assay scan … | grep CVE-…` finds nothing.
-			aliases := strings.Join(otherIDs(f.Advisory), ",")
+			aliases := strings.Join(otherIDs(f), ",")
 			if aliases == "" {
 				aliases = "-"
 			}
@@ -302,17 +301,14 @@ func formatSeverity(b severity.Band, score float64) string {
 // "derived from" rather than "the same as", and collapsing on it would suppress
 // a genuinely distinct advisory. Showing a reader one extra identifier is noise;
 // hiding a finding is a false negative.
-func otherIDs(a advisory.Advisory) []string {
-	out := make([]string, 0, len(a.Aliases)+len(a.Upstream))
-	seen := map[string]bool{a.ID: true}
-	for _, id := range a.Aliases {
-		if id == "" || seen[id] {
-			continue
-		}
-		seen[id] = true
-		out = append(out, id)
-	}
-	for _, id := range a.Upstream {
+// Read off the FINDING, not off its displayed advisory. Once two records
+// become one finding (D25), the names the losing record answered to are no
+// longer reachable through Advisory — and a reader handed a PYSEC ID by our
+// own JSON must still find the row it belongs to.
+func otherIDs(f matcher.Finding) []string {
+	out := make([]string, 0, len(f.Identifiers))
+	seen := map[string]bool{f.Advisory.ID: true}
+	for _, id := range f.Identifiers {
 		if id == "" || seen[id] {
 			continue
 		}

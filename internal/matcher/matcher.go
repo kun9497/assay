@@ -64,6 +64,24 @@ type Finding struct {
 	// answer would be quietly presenting one authority's opinion as the
 	// answer.
 	Ratings []Rating
+	// Identifiers is every name this finding answers to: the ID, aliases and
+	// upstream of every record that joined it, sorted, including the displayed
+	// advisory's own ID. A renderer showing "also known as" excludes whichever
+	// one it is displaying; a lookup by identifier matches against the lot.
+	//
+	// It has to live on the finding rather than be read off Advisory, because
+	// merging records is what D25 does: the moment two records become one
+	// finding, the identifiers of the record that did not win stop being
+	// reachable through Advisory. That was a real regression — a PYSEC ID
+	// printed in the JSON's own ratings array could not be fed back to
+	// --explain, which answered exit 2 for a scan that ran perfectly.
+	//
+	// Drawn from BOTH aliases and upstream (D3), unlike the grouping key,
+	// which deliberately excludes upstream because OSV defines it as "derived
+	// from" rather than "the same as". This is display and lookup, not
+	// identity: showing a reader one extra identifier is noise, failing to
+	// resolve one they were just handed is a defect.
+	Identifiers []string
 }
 
 // Rating is one database's assessment of one vulnerability: what GHSA said, as
@@ -305,10 +323,12 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 								Severity:    band,
 								Score:       score,
 								Ratings:     []Rating{r},
+								Identifiers: lookupIDs(a),
 							})
 						} else {
 							f := &res.Findings[idx]
 							f.Ratings = append(f.Ratings, r)
+							f.Identifiers = append(f.Identifiers, lookupIDs(a)...)
 							if beats(r, winnerOf(*f)) {
 								f.Advisory, f.Evidence = a, ev
 								f.MatchedName = lookupName
@@ -337,6 +357,7 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 
 	for i := range res.Findings {
 		sortRatings(res.Findings[i].Ratings)
+		res.Findings[i].Identifiers = dedupSorted(res.Findings[i].Identifiers)
 	}
 	sortFindings(res.Findings)
 	sortSkipped(res.Skipped)
@@ -371,6 +392,7 @@ func groupsOf(group map[string]int, ids []string) []int {
 func absorb(findings []Finding, group map[string]int, dst, src int) {
 	d, s := &findings[dst], &findings[src]
 	d.Ratings = append(d.Ratings, s.Ratings...)
+	d.Identifiers = append(d.Identifiers, s.Identifiers...)
 	if beats(winnerOf(*s), winnerOf(*d)) {
 		d.Advisory, d.Evidence = s.Advisory, s.Evidence
 		d.MatchedName = s.MatchedName
@@ -382,6 +404,37 @@ func absorb(findings []Finding, group map[string]int, dst, src int) {
 			group[id] = dst
 		}
 	}
+}
+
+// lookupIDs is every name a record answers to, for display and lookup rather
+// than for grouping — so unlike identifiers() it includes upstream (D3).
+//
+// Which field carries the CVE depends on the ecosystem, and the two measured
+// cases are exact mirror images: on the live Go dump all 8,510 records have an
+// empty upstream and carry the CVE in aliases, while on the live Alpine dump
+// all 4,405 have an empty aliases and carry it in upstream.
+func lookupIDs(a advisory.Advisory) []string {
+	out := make([]string, 0, 1+len(a.Aliases)+len(a.Upstream))
+	out = append(out, a.ID)
+	out = append(out, a.Aliases...)
+	return append(out, a.Upstream...)
+}
+
+// dedupSorted sorts and removes blanks and repeats. Two records describing one
+// vulnerability name most of the same identifiers, so the union is mostly
+// overlap; sorting keeps the rendered list from depending on arrival order.
+func dedupSorted(ids []string) []string {
+	sort.Strings(ids)
+	out := ids[:0]
+	var prev string
+	for i, id := range ids {
+		if id == "" || (i > 0 && id == prev) {
+			continue
+		}
+		prev = id
+		out = append(out, id)
+	}
+	return out
 }
 
 // winnerOf is the rating that set a finding's band — the record it displays.

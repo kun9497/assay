@@ -128,9 +128,15 @@ func goldenFixture() (matcher.Result, cyclonedx.Stats) {
 				MatchedName: "django",
 				Severity:    severity.Critical,
 				Score:       9.8,
+				// PYSEC's fixed version differs from GHSA's on purpose. With
+				// both at 2.2.28 every rating in every fixture matched its own
+				// finding's Evidence.Fixed, so a renderer reading the fixed
+				// version off the winning record instead of off each rating —
+				// exactly the collapse this field exists to prevent — produced
+				// byte-identical output and the golden file blessed it.
 				Ratings: []matcher.Rating{
 					{Database: "GHSA", AdvisoryID: "GHSA-w24h-v9qh-8gxj", Severity: severity.Critical, Score: 9.8, Fixed: "2.2.28"},
-					{Database: "PYSEC", AdvisoryID: "PYSEC-2022-191", Severity: severity.Unknown, Score: 0, Fixed: "2.2.28"},
+					{Database: "PYSEC", AdvisoryID: "PYSEC-2022-191", Severity: severity.Unknown, Score: 0, Fixed: "2.2.27"},
 				},
 			},
 		},
@@ -312,8 +318,16 @@ func TestJSON_CarriesFullRatingsArray(t *testing.T) {
 	}
 	pysec := f.Ratings[1]
 	if pysec.Database != "PYSEC" || pysec.AdvisoryID != "PYSEC-2022-191" ||
-		pysec.Severity != "unknown" || pysec.Score != 0 || pysec.Fixed != "2.2.28" {
+		pysec.Severity != "unknown" || pysec.Score != 0 || pysec.Fixed != "2.2.27" {
 		t.Errorf("Ratings[1] = %+v, want the PYSEC rating in full", pysec)
+	}
+	// Each rating's fixed version comes from its OWN record. The finding's
+	// Evidence carries the winner's, so a renderer that read it from there
+	// would emit 2.2.28 twice — every source appearing to agree about
+	// remediation, which is the collapse this array exists to prevent.
+	if pysec.Fixed == ghsa.Fixed {
+		t.Errorf("both ratings report fixed %q, so this test cannot tell a "+
+			"per-rating fixed version from one taken off the winner", ghsa.Fixed)
 	}
 }
 

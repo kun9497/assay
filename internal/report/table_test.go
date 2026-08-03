@@ -284,11 +284,12 @@ func TestTable_FindingCarriesItsAliases(t *testing.T) {
 	// record is only reachable through the alias column. Dropping the column
 	// makes `assay scan | grep CVE-...` silently find nothing.
 	res := matcher.Result{Findings: []matcher.Finding{{
-		Package:  pkgmeta.Package{Name: "Jinja2", Version: "2.11.2", Ecosystem: "PyPI"},
-		Advisory: advisory.Advisory{ID: "GHSA-g3rq-g295-4j3m", Aliases: []string{"CVE-2020-28493"}},
-		Evidence: version.Evidence{Fixed: "2.11.3"},
-		Severity: severity.High,
-		Score:    7.5,
+		Package:     pkgmeta.Package{Name: "Jinja2", Version: "2.11.2", Ecosystem: "PyPI"},
+		Advisory:    advisory.Advisory{ID: "GHSA-g3rq-g295-4j3m", Aliases: []string{"CVE-2020-28493"}},
+		Identifiers: []string{"CVE-2020-28493", "GHSA-g3rq-g295-4j3m"},
+		Evidence:    version.Evidence{Fixed: "2.11.3"},
+		Severity:    severity.High,
+		Score:       7.5,
 	}}}
 	var buf bytes.Buffer
 	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
@@ -437,11 +438,17 @@ func TestTable_FindingCarriesIdentifiersFromAliasesAndUpstream(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Identifiers is what Match populates and what the column reads,
+			// so the fixture builds it the way Match does: every name every
+			// joined record answers to, from aliases AND upstream (D3).
+			ids := append([]string{tt.adv.ID}, tt.adv.Aliases...)
+			ids = append(ids, tt.adv.Upstream...)
 			res := matcher.Result{Findings: []matcher.Finding{{
-				Package:  pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "e"},
-				Advisory: tt.adv,
-				Severity: severity.High,
-				Score:    7.5,
+				Package:     pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "e"},
+				Advisory:    tt.adv,
+				Identifiers: ids,
+				Severity:    severity.High,
+				Score:       7.5,
 			}}}
 			var buf bytes.Buffer
 			if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
@@ -464,6 +471,13 @@ func TestTable_OtherIdentifiersAreDeduplicated(t *testing.T) {
 			ID:       "ALPINE-CVE-2025-46394",
 			Aliases:  []string{"CVE-2025-46394"},
 			Upstream: []string{"CVE-2025-46394", "ALPINE-CVE-2025-46394"},
+		},
+		// Repeats on purpose, as Match hands them over before dedupSorted:
+		// two records describing one vulnerability name most of the same
+		// identifiers, so overlap is the normal case, not the odd one.
+		Identifiers: []string{
+			"ALPINE-CVE-2025-46394", "CVE-2025-46394",
+			"CVE-2025-46394", "ALPINE-CVE-2025-46394",
 		},
 		Severity: severity.High,
 		Score:    7.5,
@@ -583,11 +597,12 @@ func TestTable_SeverityColumn(t *testing.T) {
 // value landed where the header claims.
 func TestTable_ColumnOrderMatchesHeader(t *testing.T) {
 	res := matcher.Result{Findings: []matcher.Finding{{
-		Package:  pkgmeta.Package{Name: "svc", Version: "1.0.0", Ecosystem: "Go"},
-		Advisory: advisory.Advisory{ID: "GHSA-sev", Aliases: []string{"CVE-2024-00001"}},
-		Evidence: version.Evidence{Fixed: "2.0.0"},
-		Severity: severity.Critical,
-		Score:    9.8,
+		Package:     pkgmeta.Package{Name: "svc", Version: "1.0.0", Ecosystem: "Go"},
+		Advisory:    advisory.Advisory{ID: "GHSA-sev", Aliases: []string{"CVE-2024-00001"}},
+		Identifiers: []string{"CVE-2024-00001", "GHSA-sev"},
+		Evidence:    version.Evidence{Fixed: "2.0.0"},
+		Severity:    severity.Critical,
+		Score:       9.8,
 	}}}
 	var buf bytes.Buffer
 	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {

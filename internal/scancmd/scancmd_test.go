@@ -1537,3 +1537,47 @@ func TestRun_JSONIsIdenticalWhenRecordOrderIsReversed(t *testing.T) {
 			}(), forward)
 	}
 }
+
+// An identifier this scan's own JSON prints must resolve through --explain.
+//
+// D25 merges records that were separate findings before it, and the losing
+// record's identifiers then stop being reachable through Finding.Advisory. The
+// regression that produced: `--output json` emits PYSEC-2022-191 in
+// ratings[].advisoryId, and `--explain PYSEC-2022-191` answered exit 2 — "the
+// result cannot be trusted" (D11) — for a scan that ran perfectly.
+//
+// Every identifier is exercised, not just the losing one, because the fix
+// moves the lookup set off the advisory and onto the finding; getting the
+// winner or the shared CVE wrong in the move would be just as bad.
+func TestRun_ExplainResolvesEveryIdentifierTheScanPrints(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-w24h-v9qh-8gxj", pkg: "shared", fixed: "2.0.0",
+			vectors: []string{vecCritical}, aliases: []string{"CVE-2022-28347"}},
+		// Deliberately does NOT alias the GHSA record, only the shared CVE.
+		// The live records cross-alias, which hides this entirely.
+		{id: "PYSEC-2022-191", pkg: "shared", fixed: "2.0.0",
+			aliases: []string{"CVE-2022-28347"}},
+	})
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "shared", purlType: "golang"}})
+
+	for _, id := range []string{
+		"GHSA-w24h-v9qh-8gxj", // the winner, displayed
+		"CVE-2022-28347",      // the alias both records share
+		"PYSEC-2022-191",      // the losing record — the regression
+	} {
+		t.Run(id, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			code := Run(context.Background(), db, sbom, Options{Explain: id}, &out, &errOut)
+			if code != 0 {
+				t.Fatalf("--explain %s = %d, want 0; stderr: %s", id, code, errOut.String())
+			}
+			// The explanation must be of the merged finding, not of some other
+			// row that happened to match. Asserted on the rendered pair rather
+			// than on either identifier alone, since PYSEC-2022-191 also
+			// appears in the breakdown's own rating line.
+			if !strings.Contains(out.String(), "advisory: GHSA-w24h-v9qh-8gxj") {
+				t.Errorf("--explain %s did not explain the merged finding:\n%s", id, out.String())
+			}
+		})
+	}
+}

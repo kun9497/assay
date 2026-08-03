@@ -5,7 +5,6 @@ import (
 	"io"
 	"strings"
 
-	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/matcher"
 )
 
@@ -33,7 +32,7 @@ import (
 func Explain(w io.Writer, res matcher.Result, id string) (int, error) {
 	n := 0
 	for _, f := range res.Findings {
-		if !identifiesAdvisory(f.Advisory, id) {
+		if !identifiesFinding(f, id) {
 			continue
 		}
 		if err := explainOne(w, f); err != nil {
@@ -44,18 +43,18 @@ func Explain(w io.Writer, res matcher.Result, id string) (int, error) {
 	return n, nil
 }
 
-// identifiesAdvisory reports whether id names a (its own ID or any
-// alias/upstream identifier). It reuses otherIDs — the exact set the
+// identifiesFinding reports whether id names f: the displayed advisory's own
+// ID, or any identifier any record that joined this finding answered to. It reuses otherIDs — the exact set the
 // table's ALIASES column shows — rather than re-deriving which fields count
 // as identifiers a second time, and compares with ==, never Contains: real
 // identifiers nest (ALPINE-CVE-2025-46394 contains CVE-2025-46394), so a
 // substring match here would explain the wrong advisory on a false-positive
 // hit.
-func identifiesAdvisory(a advisory.Advisory, id string) bool {
-	if a.ID == id {
+func identifiesFinding(f matcher.Finding, id string) bool {
+	if f.Advisory.ID == id {
 		return true
 	}
-	for _, other := range otherIDs(a) {
+	for _, other := range otherIDs(f) {
 		if other == id {
 			return true
 		}
@@ -83,7 +82,7 @@ func explainOne(w io.Writer, f matcher.Finding) error {
 			f.MatchedName, f.Package.Name))
 	}
 	lines = append(lines, fmt.Sprintf("advisory: %s", f.Advisory.ID))
-	if ids := otherIDs(f.Advisory); len(ids) > 0 {
+	if ids := otherIDs(f); len(ids) > 0 {
 		lines = append(lines, fmt.Sprintf("also known as: %s", strings.Join(ids, ", ")))
 	}
 	if f.Advisory.Summary != "" {

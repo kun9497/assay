@@ -322,13 +322,22 @@ func TestMatch_ARecordLinkingTwoGroupsMergesThem(t *testing.T) {
 	// winner would report this critical vulnerability as unrated.
 	b.Severity = []advisory.Severity{{Type: "CVSS_V3", Score: vecCritical}}
 
+	// d reaches the merged finding only through an identifier that belonged to
+	// the ABSORBED group. That is what exercises absorb's repointing loop:
+	// without it the group map still points PYSEC-2022-2 at the emptied entry,
+	// d lands there, and the finding count goes back to depending on arrival
+	// order. BIT- records alias sibling IDs like this routinely.
+	d := mk("BIT-django-1", "BIT", "PYSEC-2022-2")
+
 	for _, order := range []struct {
 		name string
 		recs []advisory.Advisory
 	}{
-		{"linking record last", []advisory.Advisory{a, b, c}},
-		{"linking record first", []advisory.Advisory{c, a, b}},
-		{"linking record between", []advisory.Advisory{a, c, b}},
+		{"linking record last", []advisory.Advisory{a, b, c, d}},
+		{"linking record first", []advisory.Advisory{c, a, b, d}},
+		{"linking record between", []advisory.Advisory{a, c, b, d}},
+		{"absorbed group's id arrives after the merge", []advisory.Advisory{a, b, c, d}},
+		{"absorbed group's id arrives before it", []advisory.Advisory{a, b, d, c}},
 	} {
 		t.Run(order.name, func(t *testing.T) {
 			s := fakeStore{byKey: map[string][]advisory.Advisory{
@@ -339,15 +348,16 @@ func TestMatch_ARecordLinkingTwoGroupsMergesThem(t *testing.T) {
 				t.Fatal(err)
 			}
 			if len(res.Findings) != 1 {
-				t.Fatalf("got %d findings, want 1 — the third record names both "+
-					"of the others' CVEs, so all three are one vulnerability",
+				t.Fatalf("got %d findings, want 1 — the linking record names both "+
+					"of the others' CVEs and the fourth names an identifier from "+
+					"the group that got absorbed, so all four are one vulnerability",
 					len(res.Findings))
 			}
 			var ids []string
 			for _, r := range res.Findings[0].Ratings {
 				ids = append(ids, r.AdvisoryID)
 			}
-			want := []string{"GHSA-aaaa", "GO-2022-0003", "PYSEC-2022-2"}
+			want := []string{"BIT-django-1", "GHSA-aaaa", "GO-2022-0003", "PYSEC-2022-2"}
 			if fmt.Sprint(ids) != fmt.Sprint(want) {
 				t.Errorf("ratings = %v, want %v", ids, want)
 			}

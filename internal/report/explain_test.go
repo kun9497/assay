@@ -108,9 +108,10 @@ func TestExplain_PrintsTheFindingsEvidence(t *testing.T) {
 func TestExplain_MatchesByAliasOrUpstream(t *testing.T) {
 	t.Run("alias (Go shape)", func(t *testing.T) {
 		res := matcher.Result{Findings: []matcher.Finding{{
-			Package:  pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "Go"},
-			Advisory: advisory.Advisory{ID: "GHSA-alias-carrier", Aliases: []string{"CVE-2024-11111"}},
-			Severity: severity.High, Score: 7.5,
+			Package:     pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "Go"},
+			Advisory:    advisory.Advisory{ID: "GHSA-alias-carrier", Aliases: []string{"CVE-2024-11111"}},
+			Identifiers: []string{"CVE-2024-11111", "GHSA-alias-carrier"},
+			Severity:    severity.High, Score: 7.5,
 		}}}
 		var buf bytes.Buffer
 		n, err := Explain(&buf, res, "CVE-2024-11111")
@@ -130,9 +131,10 @@ func TestExplain_MatchesByAliasOrUpstream(t *testing.T) {
 		// substring (real Alpine IDs like ALPINE-CVE-2025-46394 do, which
 		// would let a substring-based lookup pass by accident).
 		res := matcher.Result{Findings: []matcher.Finding{{
-			Package:  pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "Alpine:v3.19"},
-			Advisory: advisory.Advisory{ID: "ALPINE-2025-0001", Upstream: []string{"CVE-2025-46394"}},
-			Severity: severity.High, Score: 7.5,
+			Package:     pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "Alpine:v3.19"},
+			Advisory:    advisory.Advisory{ID: "ALPINE-2025-0001", Upstream: []string{"CVE-2025-46394"}},
+			Identifiers: []string{"ALPINE-2025-0001", "CVE-2025-46394"},
+			Severity:    severity.High, Score: 7.5,
 		}}}
 		var buf bytes.Buffer
 		n, err := Explain(&buf, res, "CVE-2025-46394")
@@ -291,14 +293,16 @@ func TestExplain_LookupIsExactNotSubstring(t *testing.T) {
 func TestExplain_AliasLookupIsExactNotSubstring(t *testing.T) {
 	res := matcher.Result{Findings: []matcher.Finding{
 		{
-			Package:  pkgmeta.Package{Name: "has-cve-10", Version: "1", Ecosystem: "Go"},
-			Advisory: advisory.Advisory{ID: "GHSA-nest-a", Aliases: []string{"CVE-2024-10"}},
-			Severity: severity.Low, Score: 2.0,
+			Package:     pkgmeta.Package{Name: "has-cve-10", Version: "1", Ecosystem: "Go"},
+			Advisory:    advisory.Advisory{ID: "GHSA-nest-a", Aliases: []string{"CVE-2024-10"}},
+			Identifiers: []string{"CVE-2024-10", "GHSA-nest-a"},
+			Severity:    severity.Low, Score: 2.0,
 		},
 		{
-			Package:  pkgmeta.Package{Name: "has-cve-1", Version: "1", Ecosystem: "Go"},
-			Advisory: advisory.Advisory{ID: "GHSA-nest-b", Aliases: []string{"CVE-2024-1"}},
-			Severity: severity.High, Score: 7.5,
+			Package:     pkgmeta.Package{Name: "has-cve-1", Version: "1", Ecosystem: "Go"},
+			Advisory:    advisory.Advisory{ID: "GHSA-nest-b", Aliases: []string{"CVE-2024-1"}},
+			Identifiers: []string{"CVE-2024-1", "GHSA-nest-b"},
+			Severity:    severity.High, Score: 7.5,
 		},
 	}}
 	var buf bytes.Buffer
