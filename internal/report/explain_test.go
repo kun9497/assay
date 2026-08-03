@@ -414,12 +414,17 @@ func TestExplain_ShowsAllSourcesInFull(t *testing.T) {
 	}
 }
 
-// TestExplain_NoBreakdownWithoutRatings: a Finding built without D25's
-// Ratings field (every fixture that predates it, still legal for a
-// single-source scan or an old test) gets the plain one-line severity form,
-// with no annotation and no breakdown — the behaviour this package had
-// before D25, unchanged.
-func TestExplain_NoBreakdownWithoutRatings(t *testing.T) {
+// TestExplain_ZeroRatingsIsTheBoundaryNotABranch exercises n == 0: Match
+// never produces a Finding with an empty Ratings — this is a boundary case
+// of the general (additive) rendering, reachable only by constructing a
+// Finding directly, exactly as several OTHER tests in this file still do for
+// reasons unrelated to D25 (alias matching, D8 indirection). It is worth
+// pinning anyway because explainOne has no dedicated branch for it: the
+// severity line and the empty breakdown loop are the same code that runs for
+// n > 0, just with nothing to add and nothing to iterate over. If that ever
+// stops being true — if a special case for "no Ratings" gets reintroduced —
+// this is what would catch it.
+func TestExplain_ZeroRatingsIsTheBoundaryNotABranch(t *testing.T) {
 	res := matcher.Result{Findings: []matcher.Finding{{
 		Package:  pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "Go"},
 		Advisory: advisory.Advisory{ID: "GHSA-no-ratings"},
@@ -435,6 +440,36 @@ func TestExplain_NoBreakdownWithoutRatings(t *testing.T) {
 	}
 	if strings.Contains(out, "highest of") {
 		t.Errorf("output claims a source count for a finding with no Ratings:\n%s", out)
+	}
+}
+
+// TestExplain_SingleSourceShowsAnnotationAndOneLine pins n == 1 specifically.
+// TestExplain_ZeroRatingsIsTheBoundaryNotABranch above covers n == 0 and
+// TestExplain_ShowsAllSourcesInFull covers n == 2, but nothing pinned the
+// boundary in between: widening the `n > 0` guard in explainOne to `n > 1`
+// (treating one source the same as no Ratings at all) would leave every
+// other explain test in this file green.
+func TestExplain_SingleSourceShowsAnnotationAndOneLine(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "svc", Version: "1.0.0", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{ID: "GHSA-solo-explain"},
+		Severity: severity.High, Score: 7.5,
+		Ratings: []matcher.Rating{
+			{Database: "GHSA", AdvisoryID: "GHSA-solo-explain", Severity: severity.High, Score: 7.5, Fixed: "2.0.0"},
+		},
+	}}}
+	var buf bytes.Buffer
+	if _, err := Explain(&buf, res, "GHSA-solo-explain"); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if got, want := explainLine(t, out, "severity:"),
+		"severity: high (7.5)   [highest of 1 source]"; got != want {
+		t.Errorf("severity line = %q, want %q", got, want)
+	}
+	if got, want := explainLine(t, out, "  GHSA"),
+		"  GHSA   GHSA-solo-explain        high (7.5)       fixed 2.0.0"; got != want {
+		t.Errorf("rating line = %q, want %q\nfull output:\n%s", got, want, out)
 	}
 }
 

@@ -104,7 +104,14 @@ type RatingRecord struct {
 	// here and not on FindingRecord: sources disagree on it too (152 of 169
 	// measured groups), and pulling one to the top level would make every
 	// source appear to agree about remediation.
-	Fixed string `json:"fixed,omitempty"`
+	//
+	// No omitempty, for the same reason Score above has none: a source that
+	// gave no fixed version is exactly the interesting case — disagreeing
+	// fixed versions are half of D25's own measurement — and with omitempty
+	// a consumer cannot tell "this source said there is no fix yet" apart
+	// from "this document predates the field". The shape must not vary per
+	// rating, which is what a schema is for.
+	Fixed string `json:"fixed"`
 }
 
 type PackageRecord struct {

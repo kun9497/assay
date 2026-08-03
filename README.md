@@ -205,8 +205,8 @@ and finds a score there. Enriching from NVD is named in D17 as a possibility, no
 resolves even when the record is filed under a GHSA or a distro-prefixed ID.
 
 Two databases routinely describe the same vulnerability and disagree about it. Measured
-against the live database: 169 of 440 multi-record vulnerability groups carry more than one
-record, 140 of those disagree on severity, and 152 on the fixed version (D25). A finding
+against the live database: 440 vulnerability groups in total, of which 169 carry more than one
+record; of those 169, 140 disagree on severity and 152 on the fixed version (D25). A finding
 keeps every source's rating rather than discarding all but one, and the gate uses the
 highest band across them — an `unknown` from one source never dilutes a `critical` another
 source gave (D17). The table stays one row per finding, but marks the SEVERITY cell with `*`

@@ -740,27 +740,50 @@ func TestTable_MarksSeverityWhenSourcesDisagree(t *testing.T) {
 // alone is not the disagreement this marker exists to flag — only the two
 // sources landing on different bands is. Marking every finding with more
 // than one source, agreeing or not, would make the marker meaningless.
+//
+// Also covers the whole-scan footnote absence for both ways a finding can
+// fail to disagree: GHSA-agree has two sources that land on the same band,
+// GHSA-solo has exactly one. Neither earns a marker, and — since neither
+// row does — the scan-level footnote must not appear at all. (A fixture
+// using a real single-Rating Finding here, rather than one Match itself
+// could never produce, matters: Match always populates at least one
+// Rating (D25), so a zero-Ratings Finding was never a real "single-source"
+// case to begin with.)
 func TestTable_NoMarkerWhenSourcesAgree(t *testing.T) {
-	res := matcher.Result{Findings: []matcher.Finding{{
-		Package:  pkgmeta.Package{Name: "svc", Version: "1.0.0", Ecosystem: "Go"},
-		Advisory: advisory.Advisory{ID: "GHSA-agree"},
-		Severity: severity.High,
-		Score:    7.5,
-		Ratings: []matcher.Rating{
-			{Database: "GHSA", AdvisoryID: "GHSA-agree", Severity: severity.High, Score: 7.5, Fixed: "1.0.0"},
-			{Database: "PYSEC", AdvisoryID: "PYSEC-agree", Severity: severity.High, Score: 7.2, Fixed: "1.1.0"},
+	res := matcher.Result{Findings: []matcher.Finding{
+		{
+			Package:  pkgmeta.Package{Name: "svc", Version: "1.0.0", Ecosystem: "Go"},
+			Advisory: advisory.Advisory{ID: "GHSA-agree"},
+			Severity: severity.High,
+			Score:    7.5,
+			Ratings: []matcher.Rating{
+				{Database: "GHSA", AdvisoryID: "GHSA-agree", Severity: severity.High, Score: 7.5, Fixed: "1.0.0"},
+				{Database: "PYSEC", AdvisoryID: "PYSEC-agree", Severity: severity.High, Score: 7.2, Fixed: "1.1.0"},
+			},
 		},
-	}}}
+		{
+			Package:  pkgmeta.Package{Name: "lib", Version: "2.0.0", Ecosystem: "Go"},
+			Advisory: advisory.Advisory{ID: "GHSA-solo"},
+			Severity: severity.Critical,
+			Score:    9.8,
+			Ratings: []matcher.Rating{
+				{Database: "GHSA", AdvisoryID: "GHSA-solo", Severity: severity.Critical, Score: 9.8, Fixed: "2.1.0"},
+			},
+		},
+	}}
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 2, Cataloged: 2}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
 	if got := cellAt(t, out, "GHSA-agree", "SEVERITY"); got != "high (7.5)" {
 		t.Errorf("SEVERITY column = %q, want %q (no marker — the sources agree on the band)", got, "high (7.5)")
 	}
-	if strings.Contains(out, "disagree") {
-		t.Errorf("output claims a disagreement that did not happen:\n%s", out)
+	if got := cellAt(t, out, "GHSA-solo", "SEVERITY"); got != "critical (9.8)" {
+		t.Errorf("SEVERITY column = %q, want %q (no marker — a single source has nothing to disagree with)", got, "critical (9.8)")
+	}
+	if strings.Contains(out, "disagree") || strings.Contains(out, "--explain") {
+		t.Errorf("no finding disagreed, but the output claims a disagreement or carries its footnote:\n%s", out)
 	}
 }
 
@@ -834,22 +857,10 @@ func TestTable_FootnoteOnlyWhenSomeoneDisagrees(t *testing.T) {
 	}
 }
 
-// TestTable_NoFootnoteWhenNobodyDisagrees: the mirror image of the test
-// above, with no disagreeing rows at all — a scan whose findings all have
-// single-source or unanimous ratings must render no footnote whatsoever.
-func TestTable_NoFootnoteWhenNobodyDisagrees(t *testing.T) {
-	res := matcher.Result{Findings: []matcher.Finding{{
-		Package:  pkgmeta.Package{Name: "svc", Version: "1.0.0", Ecosystem: "Go"},
-		Advisory: advisory.Advisory{ID: "GHSA-clean"},
-		Severity: severity.High,
-		Score:    7.5,
-	}}}
-	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
-		t.Fatal(err)
-	}
-	out := buf.String()
-	if strings.Contains(out, "disagree") || strings.Contains(out, "--explain") {
-		t.Errorf("no finding disagreed, but the output carries the disagreement footnote:\n%s", out)
-	}
-}
+// The whole-scan "no footnote when nobody disagrees" case (both the
+// single-source and the multi-source-but-unanimous ways a finding can fail
+// to disagree) is folded into TestTable_NoMarkerWhenSourcesAgree above,
+// rather than kept as a separate test here: a standalone version of it
+// previously used a Finding with zero Ratings, a state Match itself never
+// produces (D25), to stand in for "single-source" — a case its neighbour
+// now covers with a real single-Rating fixture instead.

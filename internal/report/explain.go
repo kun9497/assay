@@ -91,21 +91,30 @@ func explainOne(w io.Writer, f matcher.Finding) error {
 	}
 	// Explain is the "why" view (D10), so unlike the table's single SEVERITY
 	// cell it shows every source in full, not just the one that set the
-	// band — agreeing or not. A finding built by hand with no Ratings (every
-	// pre-D25 fixture in this package) gets the plain one-line form below,
-	// unchanged from before this field existed.
+	// band — agreeing or not.
+	//
+	// The base line is unconditional; the source count and the per-source
+	// breakdown are purely additive on top of it. Deliberately NOT an
+	// if/else between "has Ratings" and "does not": Match always populates
+	// at least one Rating (D25), so a Finding with none reaches this
+	// function only by direct construction — several older fixtures in this
+	// package still do that, for reasons unrelated to D25 (D8 indirection,
+	// alias matching, and so on). An if/else here would give those fixtures
+	// their own dedicated rendering branch that nothing built by Match could
+	// ever reach, which is not a real code path worth maintaining as one.
+	// Structuring it as one line plus a loop means the zero-Ratings case is
+	// just that same loop running zero times, not a different branch.
+	sevLine := fmt.Sprintf("severity: %s", formatSeverity(f.Severity, f.Score))
 	if n := len(f.Ratings); n > 0 {
 		source := "source"
 		if n != 1 {
 			source = "sources"
 		}
-		lines = append(lines, fmt.Sprintf("severity: %s   [highest of %d %s]",
-			formatSeverity(f.Severity, f.Score), n, source))
-		for _, r := range f.Ratings {
-			lines = append(lines, ratingLine(r))
-		}
-	} else {
-		lines = append(lines, fmt.Sprintf("severity: %s", formatSeverity(f.Severity, f.Score)))
+		sevLine += fmt.Sprintf("   [highest of %d %s]", n, source)
+	}
+	lines = append(lines, sevLine)
+	for _, r := range f.Ratings {
+		lines = append(lines, ratingLine(r))
 	}
 	lines = append(lines, fmt.Sprintf("comparer: %s", comparerName(f.Package.Ecosystem)))
 

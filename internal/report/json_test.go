@@ -32,6 +32,12 @@ var update = flag.Bool("update", false, "update golden files")
 // (D25), and two Skipped entries — one whole-package (empty AdvisoryID) and
 // one advisory-scoped — so every field the brief asks JSON to carry that the
 // table cannot is actually exercised.
+//
+// Every finding here carries a Ratings slice, single-source or multi-source
+// but never empty, because that is the one state Match itself is documented
+// never to produce (matcher.go's own Finding.Ratings comment) — the golden
+// file is meant to be a byte-for-byte record of real tool output, so it must
+// not encode a shape the tool cannot actually emit.
 func goldenFixture() (matcher.Result, cyclonedx.Stats) {
 	res := matcher.Result{
 		Findings: []matcher.Finding{
@@ -58,6 +64,15 @@ func goldenFixture() (matcher.Result, cyclonedx.Stats) {
 				MatchedName: "openssl",
 				Severity:    severity.Critical,
 				Score:       9.8,
+				// Match always populates at least one Rating (D25); a Finding
+				// literal with none is a state the tool itself never produces.
+				// This is an ALPINE finding (matched through the source
+				// package, D8), so its one source is attributed to ALPINE, and
+				// its Fixed matches the Evidence.Fixed above — a single-source
+				// finding's one rating and its Evidence agree by construction.
+				Ratings: []matcher.Rating{
+					{Database: "ALPINE", AdvisoryID: "CVE-2024-12345", Severity: severity.Critical, Score: 9.8, Fixed: "3.1.4-r6"},
+				},
 			},
 			{
 				Package: pkgmeta.Package{
@@ -77,6 +92,17 @@ func goldenFixture() (matcher.Result, cyclonedx.Stats) {
 				MatchedName: "example.com/bar",
 				Severity:    severity.Unknown,
 				Score:       0,
+				// Same reasoning as the libssl3 finding above: Match never
+				// produces an empty Ratings. This one source is GHSA (matching
+				// Advisory.ID), unrated, and gives no fixed version — matching
+				// the Evidence above, which bounds by LastAffected rather than
+				// a Fixed event because none is known. Fixed left at its zero
+				// value on purpose: RatingRecord.Fixed has no `omitempty`, so
+				// the golden file below must show `"fixed": ""` for this one,
+				// not omit the key.
+				Ratings: []matcher.Rating{
+					{Database: "GHSA", AdvisoryID: "GHSA-abcd", Severity: severity.Unknown, Score: 0},
+				},
 			},
 			// A third, multi-source finding (D25): the Django CVE the roadmap's
 			// own D25 measurement cites, where GHSA carries a CVSS vector and
@@ -291,12 +317,16 @@ func TestJSON_CarriesFullRatingsArray(t *testing.T) {
 	}
 }
 
-// TestJSON_RatingsIsEmptyArrayNotNullWhenAbsent: a hand-built Finding with no
-// Ratings (every fixture in this package that predates D25) must still
-// render "ratings": [], mirroring Document.Findings/Skipped's own
-// null-vs-empty-array discipline (TestJSON_EmptyResultHasEmptyArraysNotNull)
-// one level down, on a per-finding field instead of the document's top-level
-// arrays.
+// TestJSON_RatingsIsEmptyArrayNotNullWhenAbsent pins the null-vs-empty-array
+// boundary (TestJSON_EmptyResultHasEmptyArraysNotNull's own discipline, one
+// level down, on a per-finding field instead of Document's top-level
+// arrays). Match itself never produces a Finding with zero Ratings (D25),
+// so this fixture — a Finding built directly, with none — is not a state a
+// real scan reaches; it is worth pinning anyway because findingRecord has no
+// special case for it: `make([]RatingRecord, 0, len(f.Ratings))` plus a
+// range over a nil slice already does the right thing, and this is what
+// would catch a change that broke that for the zero-length boundary
+// specifically.
 func TestJSON_RatingsIsEmptyArrayNotNullWhenAbsent(t *testing.T) {
 	res := matcher.Result{Findings: []matcher.Finding{{
 		Package:  pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "Go"},
@@ -314,6 +344,47 @@ func TestJSON_RatingsIsEmptyArrayNotNullWhenAbsent(t *testing.T) {
 	}
 	if strings.Contains(out, "null") {
 		t.Errorf("output contains a null where jq expects an array:\n%s", out)
+	}
+}
+
+// TestJSON_RatingFixedKeyIsPresentEvenWhenEmpty: RatingRecord.Fixed has no
+// omitempty, on purpose — a source that gave no fixed version is exactly the
+// interesting case (disagreeing fixed versions are half of D25's own
+// measurement), and omitempty would make that indistinguishable from a
+// document that predates the field. This is the test that would have caught
+// json.go:107 carrying `,omitempty` when json.go:56-67 argues the opposite
+// for the neighbouring Score field: without it, adding or removing
+// omitempty on Fixed was invisible to the whole suite (TestJSON_Golden's
+// fixture never gave a rating an empty Fixed either).
+func TestJSON_RatingFixedKeyIsPresentEvenWhenEmpty(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{ID: "GHSA-no-fix-yet"},
+		Severity: severity.High,
+		Score:    7.5,
+		Ratings: []matcher.Rating{
+			{Database: "GHSA", AdvisoryID: "GHSA-no-fix-yet", Severity: severity.High, Score: 7.5},
+		},
+	}}}
+	var buf bytes.Buffer
+	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	var doc Document
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Findings) != 1 || len(doc.Findings[0].Ratings) != 1 {
+		t.Fatalf("Findings/Ratings shape = %+v, want one finding with one rating", doc.Findings)
+	}
+	if got := doc.Findings[0].Ratings[0].Fixed; got != "" {
+		t.Errorf("Ratings[0].Fixed = %q, want empty string (a rating with no fix)", got)
+	}
+	// The unmarshal above cannot tell "" from an absent key, so the presence
+	// of the key itself is asserted against the raw bytes.
+	if !strings.Contains(buf.String(), `"fixed": ""`) {
+		t.Errorf(`output does not contain "fixed": "" — the key must be present even when`+
+			" empty, not omitted:\n%s", buf.String())
 	}
 }
 
