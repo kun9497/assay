@@ -344,10 +344,13 @@ func TestConvert_SetsTheDatabase(t *testing.T) {
 }
 
 // The schema bump is what stops an older database from serving records with
-// no Database at all.
-func TestSchemaVersionIs5(t *testing.T) {
-	if store.SchemaVersion != 5 {
-		t.Errorf("SchemaVersion = %d, want 5 — D25 adds a field, and a database "+
+// no Database at all. Pinned to the current value rather than a relation
+// (e.g. ">= 5") so this fails loudly the moment a later bump (schema 6 added
+// the ratings bucket) is not reflected here, instead of silently agreeing
+// with whatever the constant happens to be.
+func TestSchemaVersionIs6(t *testing.T) {
+	if store.SchemaVersion != 6 {
+		t.Errorf("SchemaVersion = %d, want 6 — D25 adds a field, and a database "+
 			"built without it must refuse rather than report unattributed ratings",
 			store.SchemaVersion)
 	}

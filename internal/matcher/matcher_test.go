@@ -44,6 +44,9 @@ func (f fakeStore) Lookup(ecosystem, name string) ([]advisory.Advisory, error) {
 func (f fakeStore) Meta() (store.Meta, error) { return store.Meta{}, nil }
 func (f fakeStore) Close() error              { return nil }
 
+// RatingsFor has no fixture data to serve yet; Task 3 gives it real behaviour.
+func (f fakeStore) RatingsFor(cve string) ([]advisory.Rating, error) { return nil, nil }
+
 func advWithRange(id, eco, name, introduced, fixed string, rt advisory.RangeType) advisory.Advisory {
 	return advisory.Advisory{
 		ID:   id,

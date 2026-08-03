@@ -39,7 +39,13 @@ import (
 // Bumped to 5 to add Advisory.Database (D25): a database built before this
 // field has it empty on every record, and an empty Database renders as a
 // rating from a source with no name rather than failing loudly.
-const SchemaVersion = 5
+//
+// Bumped to 6 to add the ratings bucket (an authority's CVSS opinion about a
+// CVE, stored separately from any advisory — see internal/advisory.Rating).
+// A schema-5 database has no such bucket, and reading a missing bucket would
+// silently return zero ratings for every CVE rather than failing, which is a
+// scan that quietly loses every NVD score while looking healthy.
+const SchemaVersion = 6
 
 var (
 	ErrNotFound       = errors.New("vulnerability database not found")
@@ -56,6 +62,11 @@ type Store interface {
 	// no separate method: OSV writes the source name into Affected[].Name, so
 	// the caller queries this with the source name as a second key.
 	Lookup(ecosystem, name string) ([]advisory.Advisory, error)
+	// RatingsFor answers a third-party severity opinion for one CVE, sorted by
+	// Source so two runs against the same database agree. An unrated CVE
+	// returns an empty slice and a nil error — the matcher calls this for
+	// every finding, so "nobody rated this" is a normal answer, not a failure.
+	RatingsFor(cve string) ([]advisory.Rating, error)
 	// Covers reports which ecosystem keys this database actually holds (D20).
 	// A caller that skips this cannot distinguish "no advisories for this
 	// package" from "this ecosystem was never ingested".
@@ -68,6 +79,10 @@ type Store interface {
 // handed something it could write through.
 type Writer interface {
 	Put(a advisory.Advisory) error
+	// PutRating stores one authority's CVSS opinion about a CVE, keyed on
+	// (CVE, Source) so re-putting the same source replaces rather than
+	// duplicates.
+	PutRating(r advisory.Rating) error
 	SetMeta(m Meta) error
 	Close() error
 }

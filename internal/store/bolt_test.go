@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -557,5 +558,118 @@ func TestSetMetaIgnoresACallerSuppliedEcosystems(t *testing.T) {
 	if !slices.Equal(m.Ecosystems, []string{"Go"}) {
 		t.Errorf("Meta.Ecosystems = %v, want [Go]: the caller's list must be "+
 			"ignored in favour of what the providers reported", m.Ecosystems)
+	}
+}
+
+// A rating round-trips, and is keyed on the CVE rather than on any advisory.
+func TestPutRating_RoundTrips(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := advisory.Rating{
+		CVE:    "CVE-2026-39822",
+		Source: "NVD",
+		Severity: []advisory.Severity{
+			{Type: "CVSS_V31", Score: "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H"},
+		},
+		URL: "https://nvd.nist.gov/vuln/detail/CVE-2026-39822",
+	}
+	if err := w.PutRating(want); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	got, err := db.RatingsFor("CVE-2026-39822")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d ratings, want 1", len(got))
+	}
+	// Asserted field by field, each with its own message: a single DeepEqual
+	// reports "not equal" and leaves the reader to diff two structs, and the
+	// fields here decide whether a band is derived at all.
+	if got[0].CVE != want.CVE {
+		t.Errorf("CVE = %q, want %q", got[0].CVE, want.CVE)
+	}
+	if got[0].Source != want.Source {
+		t.Errorf("Source = %q, want %q", got[0].Source, want.Source)
+	}
+	if len(got[0].Severity) != 1 || got[0].Severity[0].Score != want.Severity[0].Score {
+		t.Errorf("Severity = %+v, want the stored vector verbatim (D13)", got[0].Severity)
+	}
+	if got[0].URL != want.URL {
+		t.Errorf("URL = %q, want %q", got[0].URL, want.URL)
+	}
+}
+
+// A CVE nobody rated returns nothing and no error. "We have no rating" is a
+// normal answer, not a failure - the matcher asks this for every finding.
+func TestRatingsFor_UnknownCVEIsEmptyNotAnError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, _ := Create(path)
+	w.SetMeta(Meta{})
+	w.Close()
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	got, err := db.RatingsFor("CVE-0000-00000")
+	if err != nil {
+		t.Fatalf("RatingsFor returned %v; an unrated CVE is a normal answer", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %d ratings, want 0", len(got))
+	}
+}
+
+// Several authorities can rate one CVE. They come back sorted by Source, so
+// the report cannot vary between runs.
+func TestRatingsFor_SeveralSourcesComeBackSorted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, _ := Create(path)
+	// Written in an order that is NOT the sorted one, so the assertion below
+	// fails if the sort is dropped rather than passing by luck.
+	for _, s := range []string{"NVD", "KISA"} {
+		if err := w.PutRating(advisory.Rating{CVE: "CVE-2025-1", Source: s}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.SetMeta(Meta{})
+	w.Close()
+	db, _ := Open(path)
+	defer db.Close()
+	got, err := db.RatingsFor("CVE-2025-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, r := range got {
+		names = append(names, r.Source)
+	}
+	if fmt.Sprint(names) != fmt.Sprint([]string{"KISA", "NVD"}) {
+		t.Errorf("sources = %v, want [KISA NVD] - sorted, so two runs agree", names)
+	}
+}
+
+// Schema 6, and a database at any other version refuses rather than serving
+// records with no ratings bucket - which would read as "nobody rated any of
+// these" on a database that simply predates the field.
+func TestSchemaVersionIs6(t *testing.T) {
+	if SchemaVersion != 6 {
+		t.Errorf("SchemaVersion = %d, want 6", SchemaVersion)
 	}
 }
