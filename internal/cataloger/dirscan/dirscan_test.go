@@ -2,9 +2,11 @@ package dirscan
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
+	"github.com/kun9497/assay/internal/pkgmeta"
 )
 
 // The measurement D26 records, as a test. A directory holding go.mod and
@@ -161,5 +163,197 @@ func TestParse_NoManifestsAtAllIsAnError(t *testing.T) {
 	if err == nil {
 		t.Fatal("Parse returned nil error for a directory with no manifests — " +
 			"that must not read as a clean scan of zero packages")
+	}
+}
+
+// --- Fix round 1 (code review) ---
+
+// relocate's own comment explains why it rewrites Location.Path, but nothing
+// before this test asserted the value it writes — only that two runs agree
+// with each other (TestParse_PackageOrderIsDeterministic) or that a value is
+// present (TestParse_CatalogsEveryLockfileAndNamesTheRest's unread checks,
+// which do not touch Locations at all). Changing relocate's assignment to
+// `= ""` would still pass every test above; this is the one that would not.
+func TestParse_LocationIsTheManifestsOwnRelativePath(t *testing.T) {
+	root := mkdir(t, map[string]string{
+		"frontend/package-lock.json": `{"lockfileVersion":3,"packages":{` +
+			`"":{"version":"1"},"node_modules/lodash":{"version":"4.17.11"}}}`,
+	})
+	target, _, _, err := Parse(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("packages = %v, want exactly 1", target.Packages)
+	}
+	p := target.Packages[0]
+	if len(p.Locations) != 1 || p.Locations[0].Path != "frontend/package-lock.json" {
+		t.Errorf("Locations = %+v, want exactly one entry naming %q",
+			p.Locations, "frontend/package-lock.json")
+	}
+}
+
+// gomod.Parse builds its own Location.Path from filepath.Dir(full) joined
+// back with "go.mod" internally — a different construction from npmlock's
+// and poetrylock's (they use the path they were handed directly) — so it
+// gets its own test rather than trusting the npm case above to cover it.
+func TestParse_GoModLocationIsAlsoTheManifestsOwnRelativePath(t *testing.T) {
+	root := mkdir(t, map[string]string{
+		"backend/go.mod": "module example.com/backend\n\ngo 1.22\n\n" +
+			"require gopkg.in/yaml.v2 v2.2.1\n",
+	})
+	target, _, _, err := Parse(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("packages = %v, want exactly 1", target.Packages)
+	}
+	p := target.Packages[0]
+	if len(p.Locations) != 1 || p.Locations[0].Path != "backend/go.mod" {
+		t.Errorf("Locations = %+v, want exactly one entry naming %q",
+			p.Locations, "backend/go.mod")
+	}
+}
+
+// walk.go's Kind enum and parseManifest's switch are two separate
+// declarations kept in sync only by hand. Constructing a Manifest with a
+// Kind neither Walk nor this test needs to define — Kind is just a string —
+// exercises the switch's default branch directly, without touching walk.go.
+func TestParse_UnhandledKindBecomesUnreadNotSilent(t *testing.T) {
+	m := Manifest{Path: "mystery.lock", Kind: Kind("mystery-manifest")}
+	pkgs, stats, unread := parseManifest("irrelevant-root", m)
+	if pkgs != nil {
+		t.Errorf("packages = %v, want nil for a Kind with no parser", pkgs)
+	}
+	if stats != (cyclonedx.Stats{}) {
+		t.Errorf("stats = %+v, want the zero value for a Kind with no parser", stats)
+	}
+	if unread == nil {
+		t.Fatal("unread = nil — a Kind this switch has no case for must not " +
+			"vanish silently (no packages, no Unread, no error)")
+	}
+	if unread.Path != "mystery.lock" {
+		t.Errorf("Path = %q, want %q", unread.Path, "mystery.lock")
+	}
+	if unread.Reason == "" {
+		t.Error("Reason is empty — an unhandled Kind must say why it was not read")
+	}
+}
+
+// Only Reason != "" was asserted anywhere above, which a single shared
+// string across every Unread entry would satisfy just as well. This checks
+// that a parse failure's Reason actually carries the underlying error text
+// (not a generic placeholder) and that it is a different string from
+// requirements.txt's fixed reason — collapsing both into one flattened
+// explanation would pass every earlier assertion.
+func TestParse_UnreadReasonIsNotFlattenedToOneSharedString(t *testing.T) {
+	root := mkdir(t, map[string]string{
+		"broken/package-lock.json": `{"lockfileVersion":3, `,
+		"requirements.txt":         "Django==3.2.12\n",
+	})
+	_, _, unread, err := Parse(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var brokenReason, reqReason string
+	for _, u := range unread {
+		switch u.Path {
+		case "broken/package-lock.json":
+			brokenReason = u.Reason
+		case "requirements.txt":
+			reqReason = u.Reason
+		}
+	}
+	if brokenReason == "" || reqReason == "" {
+		t.Fatalf("unread = %+v, want entries for both broken/package-lock.json "+
+			"and requirements.txt", unread)
+	}
+	if !strings.Contains(brokenReason, "unexpected end of JSON input") {
+		t.Errorf("broken reason = %q, want it to contain the underlying JSON "+
+			"decode error", brokenReason)
+	}
+	if brokenReason == reqReason {
+		t.Errorf("both reasons are %q — a parse failure and a deliberately "+
+			"unread file must not share one flattened explanation", brokenReason)
+	}
+}
+
+// D7: a directory is not an operating system. Every other test above
+// happens to leave Distro untouched, but none of them ever look at it — this
+// is the one that would fail if a future change ever set it.
+func TestParse_DistroStaysEmpty(t *testing.T) {
+	root := mkdir(t, map[string]string{
+		"go.mod": "module example.com/nodistro\n\ngo 1.22\n\n" +
+			"require gopkg.in/yaml.v2 v2.2.1\n",
+	})
+	target, _, _, err := Parse(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.Distro != nil {
+		t.Errorf("Distro = %+v, want nil — a directory is not an operating "+
+			"system (D7)", target.Distro)
+	}
+}
+
+// TestParse_PackagesAreSortedByNameNotWalkOrder only forces the Name key.
+// sort.Slice gives no guarantee about the relative order of two elements a
+// comparator calls equal (that is what sort.SliceStable is for), so a
+// comparator missing the Ecosystem, Version, or Location key would not
+// necessarily fail loud through Parse's end-to-end fixtures — ties could
+// just as easily land in the "right" place by luck of the algorithm. Testing
+// lessPackage directly, with every higher key tied and only the key under
+// test differing (and every LOWER key deliberately disagreeing, so a
+// comparator that skipped straight to it would get the wrong answer), pins
+// down that all four keys actually participate.
+func TestLessPackage_EachKeyDecidesWhenEarlierKeysTie(t *testing.T) {
+	pkg := func(eco, name, version, loc string) pkgmeta.Package {
+		return pkgmeta.Package{
+			Ecosystem: eco,
+			Name:      name,
+			Version:   version,
+			Locations: []pkgmeta.Location{{Path: loc}},
+		}
+	}
+	cases := []struct {
+		name string
+		a, b pkgmeta.Package
+	}{
+		{
+			// Name, Version and Location all disagree in the OPPOSITE
+			// direction from what "a before b" requires — only Ecosystem
+			// being consulted first makes this pass.
+			name: "ecosystem",
+			a:    pkg("Go", "zzz", "9", "z"),
+			b:    pkg("npm", "aaa", "1", "a"),
+		},
+		{
+			name: "name",
+			a:    pkg("Go", "aaa", "9", "z"),
+			b:    pkg("Go", "zzz", "1", "a"),
+		},
+		{
+			name: "version",
+			a:    pkg("Go", "aaa", "1.0.0", "z"),
+			b:    pkg("Go", "aaa", "2.0.0", "a"),
+		},
+		{
+			name: "location",
+			a:    pkg("Go", "aaa", "1.0.0", "a"),
+			b:    pkg("Go", "aaa", "1.0.0", "z"),
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if !lessPackage(c.a, c.b) {
+				t.Errorf("lessPackage(a, b) = false, want true — %s must decide "+
+					"this pair once every earlier key has tied", c.name)
+			}
+			if lessPackage(c.b, c.a) {
+				t.Errorf("lessPackage(b, a) = true, want false — the order must " +
+					"be strict, not true in both directions")
+			}
+		})
 	}
 }
