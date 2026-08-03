@@ -285,6 +285,7 @@ Where assay differs, the difference is documented rather than left to be discove
 | `--fail-on <band>` | Band names are `none low medium high critical`; grype's are `negligible low medium high critical`. Same ordering, same positions — assay takes the name CVSS uses for 0.0 rather than the one grype invented (D21). |
 | `--fail-on-unknown` | No grype equivalent. Exists because unknown is not in assay's severity ordering (D17). |
 | `--fail-on-incomplete` | No grype equivalent. Exits **2**, not 1: a package that was never checked is a statement about coverage, not a finding (D21). |
+| severity of a multi-source finding | grype reports one band per match; assay reports every source's and gates on the highest (D25). Measured on Django 3.2.12, 19 findings: grype agrees with assay's aggregate on 19/19 — and with assay's GHSA rating on 19/19, but with its PYSEC rating on 1/15. On this sample "grype takes the highest" and "grype follows GHSA" cannot be told apart, because PYSEC rates none of them. Separating the two needs a case where a non-GHSA source rates higher. |
 
 Add a row here whenever a shared name gains different semantics. A silently divergent flag
 is worse than a differently named one.
@@ -534,6 +535,34 @@ critical` exits 1. That is luck. Flip the ingestion order and PYSEC wins: the sa
 findings report `unknown`, and because unknown never trips a threshold (D17), `--fail-on
 critical` exits **0**. CI goes green on a critical vulnerability, which is the exact defect
 slice 4 exists to remove, reachable through a detail nothing states or tests.
+
+**Re-measured on 2026-08-03**, against the whole database (32,046 advisories, OSV data as of
+2026-08-01) rather than the packages one scan touches, and against a real Django 3.2.12 scan:
+
+| | whole database | Django 3.2.12 scan |
+|---|---|---|
+| vulnerability groups (keyed by CVE) | 19,715 | 19 findings |
+| with more than one record | **8,893 (45%)** | **15 (79%)** |
+| of those, one record rated and another not | 5,423 | 14 |
+| of those, the fixed version differs | 2,210 (25%) | **0** |
+
+The first two rows hold: multi-source is the common case, not the exception, and sources
+disagreeing about severity is what a finding has to survive.
+
+**The fixed-version figure above does not reproduce.** The 152-of-169 recorded in the
+original measurement is 90%; re-measured it is 25% across the database and 11% for `GHSA` +
+`PYSEC` specifically (510 of 4,488) — the pairing the original sample was 161/169 made of.
+Django's fifteen multi-source findings agree on the fixed version unanimously. The original
+figure's scope was "the packages a real scan touches", which is not recoverable without that
+package list, and the two measurements may not be comparing the same thing: one record can
+carry fixed bounds for release branches another omits, which counts as a difference under
+one definition and not under the other.
+
+Nothing in D25 rests on it. Ratings carry their own fixed version because a source's
+remediation belongs to that source whether or not the sources happen to agree, and the
+mechanism is identical either way. The number is corrected here rather than quietly reused,
+because a measured figure that reads as authoritative and is not is the same defect the KVE
+entry in this document already records.
 
 **So a finding keeps every record's rating.** Not picking a winner removes the ordering
 dependency entirely, and turns a hidden disagreement into a visible one — which is what a

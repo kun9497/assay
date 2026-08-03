@@ -10,9 +10,9 @@ import (
 )
 
 // Two databases routinely describe one vulnerability and disagree about it:
-// 169 of 440 measured groups carry more than one record, 140 of those disagree
-// on severity and 152 on the fixed version. These tests pin what a finding does
-// with that (D25).
+// 8,893 of 19,715 measured CVE groups carry more than one record, and 5,423 of
+// those have one record rated where another is not. These tests pin what a
+// finding does with that (D25).
 
 const (
 	vecCritical = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" // 9.8
@@ -409,9 +409,15 @@ func TestMatch_RatingsAreSorted(t *testing.T) {
 	}
 }
 
-// The fixed version differs between sources on 152 of the 169 measured
-// multi-record groups, so each rating carries the one its OWN record gives.
-// Taking it from the winning record would make every source appear to agree.
+// Each rating carries the fixed version its OWN record gives, because a
+// source's remediation belongs to that source. Taking it from the winning
+// record would make every source appear to agree.
+//
+// Sources agreeing on the fixed version is in fact the common case — 2,210 of
+// 8,893 measured multi-record groups differ, and Django's fifteen agree
+// unanimously — which is exactly why this needs a test. The field is right by
+// construction on almost every real finding, so a version that read it off the
+// winner would look correct nearly everywhere.
 func TestMatch_EachRatingCarriesItsOwnFixedVersion(t *testing.T) {
 	late := pysecRec()
 	late.Affected[0].Ranges[0].Events[1].Fixed = "3.2.14"

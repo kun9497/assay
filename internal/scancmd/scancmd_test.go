@@ -465,7 +465,10 @@ func TestRun_UncoveredEcosystemExits2WithInstructions(t *testing.T) {
 // depend on this package re-deriving what internal/severity already owns.
 const (
 	vecCritical = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
-	vecMedium   = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N"
+	// 6.5, medium - a second RATED source, so the two disagree on band and
+	// score rather than one simply having no opinion.
+	vecMediumJSON = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N"
+	vecMedium     = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N"
 )
 
 // Addressable severity.Band values for Options.FailOn, which takes a pointer
@@ -1458,5 +1461,61 @@ func TestRun_ManyUnratedSourcesStillDoNotTripFailOn(t *testing.T) {
 		t.Errorf("the report shows %d rows for this package, want 1 — the three "+
 			"records share a CVE, so they are one finding carrying three "+
 			"ratings; stdout:\n%s", unratedRows, out.String())
+	}
+}
+
+// The ordering claim, proven at the seam a user actually reads: the same
+// advisories written to the store in opposite order produce byte-identical
+// JSON.
+//
+// This is the property D25 exists to establish, and it is asserted on the
+// whole document rather than on the verdict, because the verdict was only ever
+// half of it — the report also prints the advisory ID, its summary, and the
+// fixed version, all taken from one record. The store returns advisories in
+// the order the package index lists them, and that order is the order the
+// provider walked the OSV archives in, so "reversed" here is the same
+// difference a re-run of `assay db update` could produce.
+//
+// Every rating in the fixture disagrees with its sibling on something the
+// document shows: the band, the score, and the fixed version. If any of those
+// were still taken from whichever record arrived first, the two documents
+// would differ.
+func TestRun_JSONIsIdenticalWhenRecordOrderIsReversed(t *testing.T) {
+	recs := []matrixAdv{
+		{id: "GHSA-w24h-v9qh-8gxj", pkg: "shared", fixed: "2.0.0",
+			vectors: []string{vecCritical}, aliases: []string{"CVE-2022-28347"}},
+		{id: "PYSEC-2022-191", pkg: "shared", fixed: "3.1.0",
+			vectors: []string{vecMediumJSON}, aliases: []string{"CVE-2022-28347"}},
+		{id: "GO-2022-0001", pkg: "shared", fixed: "2.5.0",
+			aliases: []string{"CVE-2022-28347"}},
+	}
+	reversed := make([]matrixAdv, len(recs))
+	for i, r := range recs {
+		reversed[len(recs)-1-i] = r
+	}
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "shared", purlType: "golang"}})
+
+	render := func(order []matrixAdv) string {
+		t.Helper()
+		var out, errOut bytes.Buffer
+		if code := Run(context.Background(), buildMatrixDB(t, order), sbom,
+			Options{Output: "json"}, &out, &errOut); code != 0 {
+			t.Fatalf("Run = %d, want 0; stderr: %s", code, errOut.String())
+		}
+		return out.String()
+	}
+
+	forward, backward := render(recs), render(reversed)
+	if forward != backward {
+		t.Errorf("the JSON depends on the order records were written:\n"+
+			"--- records forward ---\n%s\n--- records reversed ---\n%s",
+			forward, backward)
+	}
+	// Guards the guard: if the fixture stopped producing a multi-source
+	// finding, the two documents would be trivially identical and this test
+	// would pass while testing nothing.
+	if n := strings.Count(forward, `"advisoryId"`); n != 3 {
+		t.Errorf("fixture produced %d ratings, want 3 — the comparison above is "+
+			"vacuous unless one finding carries several; document:\n%s", n, forward)
 	}
 }

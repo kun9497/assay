@@ -336,6 +336,37 @@ a SARIF renderer is a third `Reporter` over the same data rather than a new trav
 
 ---
 
+### Ingesting NVD as a rating source
+
+D25 made a finding carry every source's rating rather than one winner. NVD is the obvious
+next source: it rates nearly everything, and the gap D25 exposes is that half of a real
+Django scan's findings are rated by GHSA alone while PYSEC supplies no severity at all.
+
+**The mechanism is already there.** A new provider writes `Advisory.Database = "NVD"` and the
+matcher, the gate and all three renderers pick it up with no change — that was the point of
+building D25 as a mechanism rather than special-casing two source names. Adding NVD is a
+provider, not a redesign.
+
+**Why deferred.** The cost is in the data, not the code. NVD is a different shape from OSV
+(CPE match ranges, not purl-keyed `affected[]`), so it needs its own normalization into the
+OSV shape D1 requires, and CPE-to-purl matching is its own well-known problem — the place
+grype spends much of its complexity. The feed also has a request-rate policy and an API-key
+regime that the current "fetch archives over HTTPS" provider shape does not model.
+
+There is also a correctness question worth settling first. On the Django differential, grype
+matched assay's GHSA rating on 19 of 19 findings and assay's PYSEC rating on 1 of 15, which
+is consistent both with grype taking the highest and with grype following GHSA — the sample
+cannot separate them because PYSEC rates none of them. NVD would supply the third opinion
+that tells those apart, but it would also change what `--fail-on` fires on for a large number
+of currently-unrated findings, which is a verdict change, not an enrichment.
+
+**Revisit when** a scan's unrated findings are the thing blocking a decision — concretely,
+when `--fail-on-unknown` is being turned on and immediately becomes noise, which is the
+signal that "nobody rated this" has stopped being informative. At that point measure first:
+how many of the unrated findings NVD actually rates, and how many verdicts flip.
+
+---
+
 ### VEX and ignore rules
 
 Suppressing known-irrelevant findings. Both grype and trivy support this, and it becomes

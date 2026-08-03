@@ -67,9 +67,9 @@ type FindingRecord struct {
 	Score    float64        `json:"score"`
 	Evidence EvidenceRecord `json:"evidence"`
 	// Ratings carries every source's own assessment, never collapsed to the
-	// one that set Severity/Score above (D25): 140 of 169 measured
-	// multi-record groups disagree on severity and 152 on the fixed version,
-	// so a consumer building its own policy — e.g. "always take the more
+	// one that set Severity/Score above (D25): 5,423 of 8,893 measured
+	// multi-record groups have one record rated where another is not, so a
+	// consumer building its own policy — e.g. "always take the more
 	// conservative fixed version" — needs the whole array, not just the
 	// highest band. JSON is the machine-readable view and the one a filter
 	// would read from, so nothing here is collapsed the way the table's
