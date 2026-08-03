@@ -570,7 +570,23 @@ D23은 디렉터리 스캔이 *Go에 대해* 무엇을 읽는지를 정했습니
 | | 컴포넌트 | finding | 미평가 | 종료 코드 |
 |---|---|---|---|---|
 | 같은 패키지를 SBOM으로 | 3 | **27** | 0 | 0 |
-| `assay scan dir:.` | 1 | **3** | **0** | 0 |
+| `assay scan dir:.` — 이전 | 1 | **3** | **0** | 0 |
+| `assay scan dir:.` — 이후, Python 쪽이 `requirements.txt` | 2 | 8 | 0 | 0 |
+| `assay scan dir:.` — 이후, Python 쪽이 `poetry.lock` | 3 | **27** | 0 | 0 |
+
+2026-08-03에 스키마 5 데이터베이스(권고 32,106건, OSV 데이터 기준일 2026-08-01)로 같은 픽스처를
+다시 측정했습니다. Python 쪽이 락파일이면 디렉터리 스캔이 SBOM과 정확히 일치합니다. `requirements.txt`
+이면 일치하지 않고 — Django의 finding 19건이 여전히 보고되지 않습니다 — 다만 스캔이 그 사실을
+말합니다.
+
+```
+scanned dir:. as a directory
+go.mod names 1 module(s); this is what was requested, not what a build links - scan the built binary for that
+not read: requirements.txt (not a lockfile: versions may be ranges, not resolved versions)
+```
+
+그 줄이 두 번째 절반의 전부입니다. finding 8건짜리 행은 여전히 불완전하지만, 읽는 사람이 그것을
+알 수 있는 유일한 형태입니다.
 
 finding 24건이 사라지고, 그러면서 스캔은 `0 not evaluated`를 보고합니다. 이것은 "npm과 PyPI가
 미지원"인 상황이 아닙니다. 둘 다 수집되어 있고, 둘 다 comparer가 있고, 다른 모든 경로에서는

@@ -609,7 +609,23 @@ exists to prevent. Measured on a directory holding `go.mod`, `package-lock.json`
 | | components | findings | not evaluated | exit |
 |---|---|---|---|---|
 | the same packages as an SBOM | 3 | **27** | 0 | 0 |
-| `assay scan dir:.` | 1 | **3** | **0** | 0 |
+| `assay scan dir:.` — before | 1 | **3** | **0** | 0 |
+| `assay scan dir:.` — after, Python side is `requirements.txt` | 2 | 8 | 0 | 0 |
+| `assay scan dir:.` — after, Python side is `poetry.lock` | 3 | **27** | 0 | 0 |
+
+Measured again on 2026-08-03 against a schema-5 database (32,106 advisories, OSV data as of
+2026-08-01), same fixture. With a lockfile on the Python side the directory scan now agrees
+with the SBOM exactly. With `requirements.txt` it does not — Django's nineteen findings are
+still not reported — but the scan says so:
+
+```
+scanned dir:. as a directory
+go.mod names 1 module(s); this is what was requested, not what a build links - scan the built binary for that
+not read: requirements.txt (not a lockfile: versions may be ranges, not resolved versions)
+```
+
+That line is the whole of the second half. The 8-finding row is still incomplete, and it is
+the one shape where a reader can tell.
 
 Twenty-four findings disappear, and the scan reports `0 not evaluated` while doing it. This
 is not "npm and PyPI are unsupported": both are ingested, both have comparers, and both match
