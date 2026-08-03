@@ -108,9 +108,10 @@ func TestExplain_PrintsTheFindingsEvidence(t *testing.T) {
 func TestExplain_MatchesByAliasOrUpstream(t *testing.T) {
 	t.Run("alias (Go shape)", func(t *testing.T) {
 		res := matcher.Result{Findings: []matcher.Finding{{
-			Package:  pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "Go"},
-			Advisory: advisory.Advisory{ID: "GHSA-alias-carrier", Aliases: []string{"CVE-2024-11111"}},
-			Severity: severity.High, Score: 7.5,
+			Package:     pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "Go"},
+			Advisory:    advisory.Advisory{ID: "GHSA-alias-carrier", Aliases: []string{"CVE-2024-11111"}},
+			Identifiers: []string{"CVE-2024-11111", "GHSA-alias-carrier"},
+			Severity:    severity.High, Score: 7.5,
 		}}}
 		var buf bytes.Buffer
 		n, err := Explain(&buf, res, "CVE-2024-11111")
@@ -130,9 +131,10 @@ func TestExplain_MatchesByAliasOrUpstream(t *testing.T) {
 		// substring (real Alpine IDs like ALPINE-CVE-2025-46394 do, which
 		// would let a substring-based lookup pass by accident).
 		res := matcher.Result{Findings: []matcher.Finding{{
-			Package:  pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "Alpine:v3.19"},
-			Advisory: advisory.Advisory{ID: "ALPINE-2025-0001", Upstream: []string{"CVE-2025-46394"}},
-			Severity: severity.High, Score: 7.5,
+			Package:     pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "Alpine:v3.19"},
+			Advisory:    advisory.Advisory{ID: "ALPINE-2025-0001", Upstream: []string{"CVE-2025-46394"}},
+			Identifiers: []string{"ALPINE-2025-0001", "CVE-2025-46394"},
+			Severity:    severity.High, Score: 7.5,
 		}}}
 		var buf bytes.Buffer
 		n, err := Explain(&buf, res, "CVE-2025-46394")
@@ -291,14 +293,16 @@ func TestExplain_LookupIsExactNotSubstring(t *testing.T) {
 func TestExplain_AliasLookupIsExactNotSubstring(t *testing.T) {
 	res := matcher.Result{Findings: []matcher.Finding{
 		{
-			Package:  pkgmeta.Package{Name: "has-cve-10", Version: "1", Ecosystem: "Go"},
-			Advisory: advisory.Advisory{ID: "GHSA-nest-a", Aliases: []string{"CVE-2024-10"}},
-			Severity: severity.Low, Score: 2.0,
+			Package:     pkgmeta.Package{Name: "has-cve-10", Version: "1", Ecosystem: "Go"},
+			Advisory:    advisory.Advisory{ID: "GHSA-nest-a", Aliases: []string{"CVE-2024-10"}},
+			Identifiers: []string{"CVE-2024-10", "GHSA-nest-a"},
+			Severity:    severity.Low, Score: 2.0,
 		},
 		{
-			Package:  pkgmeta.Package{Name: "has-cve-1", Version: "1", Ecosystem: "Go"},
-			Advisory: advisory.Advisory{ID: "GHSA-nest-b", Aliases: []string{"CVE-2024-1"}},
-			Severity: severity.High, Score: 7.5,
+			Package:     pkgmeta.Package{Name: "has-cve-1", Version: "1", Ecosystem: "Go"},
+			Advisory:    advisory.Advisory{ID: "GHSA-nest-b", Aliases: []string{"CVE-2024-1"}},
+			Identifiers: []string{"CVE-2024-1", "GHSA-nest-b"},
+			Severity:    severity.High, Score: 7.5,
 		},
 	}}
 	var buf bytes.Buffer
@@ -339,6 +343,137 @@ func TestComparerName_ExactNamePerEcosystem(t *testing.T) {
 		if got := comparerName(tt.ecosystem); got != tt.want {
 			t.Errorf("comparerName(%q) = %q, want %q", tt.ecosystem, got, tt.want)
 		}
+	}
+}
+
+// TestRatingLine_FormatsOneSource is the direct unit test for ratingLine's
+// fixed-width layout, exactly the way TestFormatSeverity in table_test.go
+// directly tests formatSeverity. Expected strings were captured from a real
+// run of ratingLine and hand-verified against its format string
+// ("  %-6s %-24s %-16s fixed %s") rather than re-derived through the same
+// code under test, so a width constant drifting silently still fails this.
+func TestRatingLine_FormatsOneSource(t *testing.T) {
+	got := ratingLine(matcher.Rating{
+		Database: "GHSA", AdvisoryID: "GHSA-w24h-v9qh-8gxj",
+		Severity: severity.Critical, Score: 9.8, Fixed: "2.2.28",
+	})
+	want := "  GHSA   GHSA-w24h-v9qh-8gxj      critical (9.8)   fixed 2.2.28"
+	if got != want {
+		t.Errorf("ratingLine = %q, want %q", got, want)
+	}
+
+	// A rating that gave no fixed version renders "-", the same filler
+	// table.go's own FIXED IN column uses for the same absence, rather than
+	// a blank that a reader could mistake for a rendering glitch.
+	got = ratingLine(matcher.Rating{Database: "PYSEC", AdvisoryID: "PYSEC-2022-191", Severity: severity.Unknown})
+	want = "  PYSEC  PYSEC-2022-191           unknown          fixed -"
+	if got != want {
+		t.Errorf("ratingLine (no fixed version) = %q, want %q", got, want)
+	}
+}
+
+// TestExplain_ShowsAllSourcesInFull is D10's "why" view applied to D25:
+// where the table collapses to one SEVERITY cell (marked when sources
+// disagree), --explain lists every source in full. GHSA (the winner, per
+// matcher.beats) and PYSEC (the loser) disagree here — GHSA critical, PYSEC
+// unknown — and the assertion on the PYSEC line is the one a mutation that
+// prints only the winning source cannot pass: everything else in this
+// finding (advisory:, severity:, evidence) is already sourced from
+// Finding.Advisory/Severity/Score, which is GHSA's own data, so only the
+// Ratings loop can put PYSEC's line in the output at all.
+func TestExplain_ShowsAllSourcesInFull(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "django", Version: "3.2.12", Ecosystem: "PyPI"},
+		Advisory: advisory.Advisory{ID: "GHSA-w24h-v9qh-8gxj"},
+		Severity: severity.Critical,
+		Score:    9.8,
+		Ratings: []matcher.Rating{
+			{Database: "GHSA", AdvisoryID: "GHSA-w24h-v9qh-8gxj", Severity: severity.Critical, Score: 9.8, Fixed: "2.2.28"},
+			{Database: "PYSEC", AdvisoryID: "PYSEC-2022-191", Severity: severity.Unknown, Fixed: "2.2.28"},
+		},
+	}}}
+	var buf bytes.Buffer
+	n, err := Explain(&buf, res, "GHSA-w24h-v9qh-8gxj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("n = %d, want 1", n)
+	}
+	out := buf.String()
+
+	if got, want := explainLine(t, out, "severity:"),
+		"severity: critical (9.8)   [highest of 2 sources]"; got != want {
+		t.Errorf("severity line = %q, want %q", got, want)
+	}
+	if got, want := explainLine(t, out, "  GHSA"),
+		"  GHSA   GHSA-w24h-v9qh-8gxj      critical (9.8)   fixed 2.2.28"; got != want {
+		t.Errorf("GHSA rating line = %q, want %q\nfull output:\n%s", got, want, out)
+	}
+	// PYSEC is the source matcher.beats did NOT pick to set Advisory/
+	// Severity/Score. Its line can only come from the Ratings loop.
+	if got, want := explainLine(t, out, "  PYSEC"),
+		"  PYSEC  PYSEC-2022-191           unknown          fixed 2.2.28"; got != want {
+		t.Errorf("PYSEC rating line = %q, want %q\nfull output:\n%s", got, want, out)
+	}
+}
+
+// TestExplain_ZeroRatingsIsTheBoundaryNotABranch exercises n == 0: Match
+// never produces a Finding with an empty Ratings — this is a boundary case
+// of the general (additive) rendering, reachable only by constructing a
+// Finding directly, exactly as several OTHER tests in this file still do for
+// reasons unrelated to D25 (alias matching, D8 indirection). It is worth
+// pinning anyway because explainOne has no dedicated branch for it: the
+// severity line and the empty breakdown loop are the same code that runs for
+// n > 0, just with nothing to add and nothing to iterate over. If that ever
+// stops being true — if a special case for "no Ratings" gets reintroduced —
+// this is what would catch it.
+func TestExplain_ZeroRatingsIsTheBoundaryNotABranch(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{ID: "GHSA-no-ratings"},
+		Severity: severity.High, Score: 7.5,
+	}}}
+	var buf bytes.Buffer
+	if _, err := Explain(&buf, res, "GHSA-no-ratings"); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if got, want := explainLine(t, out, "severity:"), "severity: high (7.5)"; got != want {
+		t.Errorf("severity line = %q, want %q (no annotation without Ratings)", got, want)
+	}
+	if strings.Contains(out, "highest of") {
+		t.Errorf("output claims a source count for a finding with no Ratings:\n%s", out)
+	}
+}
+
+// TestExplain_SingleSourceShowsAnnotationAndOneLine pins n == 1 specifically.
+// TestExplain_ZeroRatingsIsTheBoundaryNotABranch above covers n == 0 and
+// TestExplain_ShowsAllSourcesInFull covers n == 2, but nothing pinned the
+// boundary in between: widening the `n > 0` guard in explainOne to `n > 1`
+// (treating one source the same as no Ratings at all) would leave every
+// other explain test in this file green.
+func TestExplain_SingleSourceShowsAnnotationAndOneLine(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "svc", Version: "1.0.0", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{ID: "GHSA-solo-explain"},
+		Severity: severity.High, Score: 7.5,
+		Ratings: []matcher.Rating{
+			{Database: "GHSA", AdvisoryID: "GHSA-solo-explain", Severity: severity.High, Score: 7.5, Fixed: "2.0.0"},
+		},
+	}}}
+	var buf bytes.Buffer
+	if _, err := Explain(&buf, res, "GHSA-solo-explain"); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if got, want := explainLine(t, out, "severity:"),
+		"severity: high (7.5)   [highest of 1 source]"; got != want {
+		t.Errorf("severity line = %q, want %q", got, want)
+	}
+	if got, want := explainLine(t, out, "  GHSA"),
+		"  GHSA   GHSA-solo-explain        high (7.5)       fixed 2.0.0"; got != want {
+		t.Errorf("rating line = %q, want %q\nfull output:\n%s", got, want, out)
 	}
 }
 

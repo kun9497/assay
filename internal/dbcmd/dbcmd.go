@@ -128,13 +128,28 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	fmt.Fprintf(stdout, "database: %s\n", dbPath)
-	fmt.Fprintf(stdout, "schema:   v%d\n", m.Schema)
-	fmt.Fprintf(stdout, "built:    %s\n", m.BuiltAt.Format(time.RFC3339))
+	// The value column is one wider than the longest label, so adding
+	// "databases:" below moved every line right by one rather than leaving
+	// that one label unaligned.
+	fmt.Fprintf(stdout, "path:      %s\n", dbPath)
+	fmt.Fprintf(stdout, "schema:    v%d\n", m.Schema)
+	fmt.Fprintf(stdout, "built:     %s\n", m.BuiltAt.Format(time.RFC3339))
 	// What this database covers decides which packages can be evaluated at
 	// all (D20). Without it here, coverage is discoverable only by running a
 	// scan and reading why it refused.
-	fmt.Fprintf(stdout, "covers:   %s\n", coverageSummary(m.Ecosystems))
+	fmt.Fprintf(stdout, "covers:    %s\n", coverageSummary(m.Ecosystems))
+	// Which databases a rating could be attributed to (D25), visible the same
+	// way coverage is: without running a scan.
+	//
+	// Labelled "databases", not "sources", even though D25's prose and the
+	// report both call these sources. This command already prints a SOURCE
+	// column four lines down, and that one holds Provenance.Source — the URL a
+	// provider fetched from. Two meanings of one word in a single screen of
+	// output is the ambiguity D25 exists to remove, not one to reintroduce.
+	// The stored field is Advisory.Database and the JSON key is "database", so
+	// this is also what a reader would grep for. The path line above was
+	// renamed to "path:" so the two no longer read as a pair.
+	fmt.Fprintf(stdout, "databases: %s\n", databasesSummary(m.Databases))
 	fmt.Fprintln(stdout)
 
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
@@ -192,6 +207,20 @@ func coverageSummary(ecos []string) string {
 		out = append(out, fmt.Sprintf("%s:%s..%s (%d releases)", f, rs[0], rs[len(rs)-1], len(rs)))
 	}
 	return strings.Join(out, ", ")
+}
+
+// databasesSummary lists which databases authored at least one stored
+// advisory (D25), so an operator can see what a rating could be attributed
+// to without running a scan. It joins comma-separated the same way
+// coverageSummary does, but does not sort: dbs already arrives sorted, from
+// Bolt.SetMeta, which is where Databases gets its ordering. There is also no
+// "family:release" collapsing to do here — database names, unlike Alpine
+// releases, don't nest into a family.
+func databasesSummary(dbs []string) string {
+	if len(dbs) == 0 {
+		return "nothing - ratings will not be attributable to a source"
+	}
+	return strings.Join(dbs, ", ")
 }
 
 // compareRelease orders "v3.9" below "v3.10". Anything it cannot parse sorts

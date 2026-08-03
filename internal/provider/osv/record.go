@@ -73,6 +73,21 @@ func familyMatches(ecosystem, want string) bool {
 	return ecosystem == want
 }
 
+// databaseOf returns the database that authored an advisory, read from its
+// identifier's namespace.
+//
+// Resolved once, at ingest, rather than at query time: a prefix is a naming
+// convention rather than a field, and these identifiers nest —
+// ALPINE-CVE-2025-46394 is an ALPINE record whose subject has a CVE. A parser
+// in the read path would have to get that right on every call, silently.
+func databaseOf(id string) string {
+	i := strings.Index(id, "-")
+	if i <= 0 {
+		return ""
+	}
+	return id[:i]
+}
+
 // Convert parses one OSV record and keeps only the parts relevant to
 // wantEcosystem. ok is false when the record is deliberately filtered out;
 // err is non-nil only when the record is malformed. Distinguishing the two
@@ -106,6 +121,7 @@ func Convert(data []byte, wantEcosystem string) (advisory.Advisory, bool, error)
 
 	out := advisory.Advisory{
 		ID:       r.ID,
+		Database: databaseOf(r.ID),
 		Aliases:  r.Aliases,
 		Upstream: r.Upstream,
 		Source:   SourceName,

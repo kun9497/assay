@@ -16,7 +16,8 @@ const (
 )
 
 type Advisory struct {
-	ID       string     `json:"id"` // CVE-… | GHSA-… | GO-… | ALPINE-… | KVE-…
+	ID       string     `json:"id"`       // CVE-… | GHSA-… | GO-… | ALPINE-… | KVE-…
+	Database string     `json:"database"` // the record's own namespace: "GHSA" | "PYSEC" | "GO" | "ALPINE" | … (D25)
 	Aliases  []string   `json:"aliases,omitempty"`
 	Upstream []string   `json:"upstream,omitempty"` // OSV 1.7 puts the CVE link here, not in Aliases (D3)
 	Source   string     `json:"source"`             // "osv" | "kisa"

@@ -27,15 +27,23 @@ Alpine packages match through their *source* package, so an `openssl` advisory r
 installed `libssl3`, and the report names both. That indirection is where distro scanners
 silently miss things.
 
+Go **binaries** and **directories** are read too — `debug/buildinfo` for the former,
+`go.mod` for the latter, with the Go toolchain itself matched as the package `stdlib`.
+
 Findings carry a severity band derived from the stored CVSS vector, and `--fail-on`,
 `--fail-on-unknown` and `--fail-on-incomplete` turn that into an exit code CI can gate on.
 `--output json` gives a stable machine-readable document and `--explain <id>` prints why a
 single finding matched.
 
-Everything else below is still the design target, not the build. Binaries
-and directories are not read. Non-Alpine images are read, but their packages cannot
-be matched: `assay scan debian:12` reports that it found no supported package database and
-exits 2, rather than reporting a clean image it never checked.
+A finding keeps **every** database's rating rather than the first one matched, and the
+verdict is the highest band across them. On a real Django 3.2.12 scan that is 15 of 19
+findings described by two sources, 14 of which only one of the two rated at all — so before
+this, 14 verdicts turned on which record the package index happened to list first.
+
+Everything else below is still the design target, not the build. Non-Alpine images are read,
+but their packages cannot be matched: `assay scan debian:12` reports that it found no
+supported package database and exits 2, rather than reporting a clean image it never
+checked.
 
 [`docs/superpowers/specs/2026-07-29-assay-roadmap.md`](docs/superpowers/specs/2026-07-29-assay-roadmap.md)
 carries the full design and the reasoning behind each decision.
@@ -198,11 +206,24 @@ binary: assay and grype find **the same three findings** — same packages, same
 same fixed versions — but grype rates two of them High and Medium where assay says `unknown`.
 Neither is wrong. All three advisories carry **zero** severity entries in the OSV data, so
 `unknown` is what D13 and D17 require; grype reaches NVD through each advisory's CVE alias
-and finds a score there. Enriching from NVD is named in D17 as a possibility, not a plan.
+and finds a score there. Enriching from NVD is a recorded deferral, not a plan — the mechanism for it landed with
+D25, the cost is CPE-to-purl matching, and `docs/deferred-decisions.md` names the trigger.
 
 
 `--explain` matches on the advisory's own ID or any alias, so the CVE you were given
 resolves even when the record is filed under a GHSA or a distro-prefixed ID.
+
+Two databases routinely describe the same vulnerability and disagree about it. Measured
+against the live database: of 19,715 vulnerability groups, 8,893 (45%) carry more than one
+record, and in 5,693 of those the sources land on different severity bands (D25). A real scan of
+Django 3.2.12 finds 19 vulnerabilities, 15 of them described by both GHSA and PYSEC, and 14
+of those 15 rated by only one of the two. A finding
+keeps every source's rating rather than discarding all but one, and the gate uses the
+highest band across them — an `unknown` from one source never dilutes a `critical` another
+source gave (D17). The table stays one row per finding, but marks the SEVERITY cell with `*`
+when its sources land on different bands, with a footnote pointing at `--explain <id>` for
+the detail; `--output json` carries every source in a `ratings` array rather than collapsing
+to the one that won.
 
 ### The database
 
@@ -212,11 +233,11 @@ run `assay db update` rather than silently fetching or silently reporting nothin
 
 | OS | Location |
 |---|---|
-| Windows | `%LocalAppData%\assay\db\v4\` |
-| macOS | `~/Library/Caches/assay/db/v4/` |
-| Linux | `~/.cache/assay/db/v4/` |
+| Windows | `%LocalAppData%\assay\db\v5\` |
+| macOS | `~/Library/Caches/assay/db/v5/` |
+| Linux | `~/.cache/assay/db/v5/` |
 
-Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v4` component
+Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v5` component
 is the schema version — a schema change rebuilds into a new directory rather than migrating
 in place. Note that `ASSAY_DB_DIR` carries no such component, so a CI cache keyed on that
 path survives an upgrade that should have invalidated it. Rebuild after upgrading, or key
@@ -370,7 +391,10 @@ anywhere.
 - [x] CVSS v3.1 and v4.0 scoring, checked against every vector in the live database
 - [x] JSON output with a schema version and a golden-file test
 - [x] Explain mode — show the matching evidence for a single finding
+- [x] Per-source ratings — a finding keeps every database's assessment, the gate takes the
+      highest (D25)
 - [ ] SARIF output (see `docs/deferred-decisions.md`)
+- [ ] NVD as a second rating source (see `docs/deferred-decisions.md`)
 
 **⑤ KISA enrichment** — Korean descriptions and severity joined onto matched findings.
 **On hold: investigated 2026-08-02 and the data does not support it.**

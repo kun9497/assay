@@ -28,9 +28,16 @@ var update = flag.Bool("update", false, "update golden files")
 // below it, so both exercise the identical input: one finding matched
 // through the source package (D8) with a full Evidence and locations, one
 // finding with an unrated (Unknown, D17) severity matched under Upstream
-// (D3) rather than Aliases, and two Skipped entries — one whole-package
-// (empty AdvisoryID) and one advisory-scoped — so every field the brief asks
-// JSON to carry that the table cannot is actually exercised.
+// (D3) rather than Aliases, one multi-source finding whose Ratings disagree
+// (D25), and two Skipped entries — one whole-package (empty AdvisoryID) and
+// one advisory-scoped — so every field the brief asks JSON to carry that the
+// table cannot is actually exercised.
+//
+// Every finding here carries a Ratings slice, single-source or multi-source
+// but never empty, because that is the one state Match itself is documented
+// never to produce (matcher.go's own Finding.Ratings comment) — the golden
+// file is meant to be a byte-for-byte record of real tool output, so it must
+// not encode a shape the tool cannot actually emit.
 func goldenFixture() (matcher.Result, cyclonedx.Stats) {
 	res := matcher.Result{
 		Findings: []matcher.Finding{
@@ -57,6 +64,15 @@ func goldenFixture() (matcher.Result, cyclonedx.Stats) {
 				MatchedName: "openssl",
 				Severity:    severity.Critical,
 				Score:       9.8,
+				// Match always populates at least one Rating (D25); a Finding
+				// literal with none is a state the tool itself never produces.
+				// This is an ALPINE finding (matched through the source
+				// package, D8), so its one source is attributed to ALPINE, and
+				// its Fixed matches the Evidence.Fixed above — a single-source
+				// finding's one rating and its Evidence agree by construction.
+				Ratings: []matcher.Rating{
+					{Database: "ALPINE", AdvisoryID: "CVE-2024-12345", Severity: severity.Critical, Score: 9.8, Fixed: "3.1.4-r6"},
+				},
 			},
 			{
 				Package: pkgmeta.Package{
@@ -76,6 +92,52 @@ func goldenFixture() (matcher.Result, cyclonedx.Stats) {
 				MatchedName: "example.com/bar",
 				Severity:    severity.Unknown,
 				Score:       0,
+				// Same reasoning as the libssl3 finding above: Match never
+				// produces an empty Ratings. This one source is GHSA (matching
+				// Advisory.ID), unrated, and gives no fixed version — matching
+				// the Evidence above, which bounds by LastAffected rather than
+				// a Fixed event because none is known. Fixed left at its zero
+				// value on purpose: RatingRecord.Fixed has no `omitempty`, so
+				// the golden file below must show `"fixed": ""` for this one,
+				// not omit the key.
+				Ratings: []matcher.Rating{
+					{Database: "GHSA", AdvisoryID: "GHSA-abcd", Severity: severity.Unknown, Score: 0},
+				},
+			},
+			// A third, multi-source finding (D25): the Django CVE the roadmap's
+			// own D25 measurement cites, where GHSA carries a CVSS vector and
+			// PYSEC does not. Severity/Score are the highest across Ratings
+			// (GHSA's), and the Ratings array is what the golden file exists to
+			// pin — every source kept, not collapsed to the winner.
+			{
+				Package: pkgmeta.Package{
+					Name: "django", Version: "3.2.12", Ecosystem: "PyPI",
+					PURL: "pkg:pypi/django@3.2.12",
+				},
+				Advisory: advisory.Advisory{
+					ID:      "GHSA-w24h-v9qh-8gxj",
+					Aliases: []string{"CVE-2022-28347"},
+					Summary: "Django SQL injection via QuerySet.explain()",
+				},
+				Evidence: version.Evidence{
+					RangeType:  advisory.RangeSemver,
+					Introduced: "0",
+					Fixed:      "2.2.28",
+					Reason:     "3.2.12 is at or above any earlier version and below the fix 2.2.28",
+				},
+				MatchedName: "django",
+				Severity:    severity.Critical,
+				Score:       9.8,
+				// PYSEC's fixed version differs from GHSA's on purpose. With
+				// both at 2.2.28 every rating in every fixture matched its own
+				// finding's Evidence.Fixed, so a renderer reading the fixed
+				// version off the winning record instead of off each rating —
+				// exactly the collapse this field exists to prevent — produced
+				// byte-identical output and the golden file blessed it.
+				Ratings: []matcher.Rating{
+					{Database: "GHSA", AdvisoryID: "GHSA-w24h-v9qh-8gxj", Severity: severity.Critical, Score: 9.8, Fixed: "2.2.28"},
+					{Database: "PYSEC", AdvisoryID: "PYSEC-2022-191", Severity: severity.Unknown, Score: 0, Fixed: "2.2.27"},
+				},
 			},
 		},
 		Skipped: []matcher.Skipped{
@@ -90,7 +152,7 @@ func goldenFixture() (matcher.Result, cyclonedx.Stats) {
 			},
 		},
 	}
-	cat := cyclonedx.Stats{Components: 5, Cataloged: 4, SkippedNoPURL: 1}
+	cat := cyclonedx.Stats{Components: 6, Cataloged: 5, SkippedNoPURL: 1}
 	return res, cat
 }
 
@@ -194,8 +256,8 @@ func TestJSON_CarriesWhatTheTableCannot(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
-	if len(doc.Findings) != 2 {
-		t.Fatalf("Findings = %d, want 2", len(doc.Findings))
+	if len(doc.Findings) != 3 {
+		t.Fatalf("Findings = %d, want 3", len(doc.Findings))
 	}
 	f := doc.Findings[0]
 	if f.Package.Source == nil || f.Package.Source.Name != "openssl" {
@@ -216,10 +278,127 @@ func TestJSON_CarriesWhatTheTableCannot(t *testing.T) {
 	}
 
 	// Summary carries the same counts Table's own summary line prints.
-	if doc.Summary.Components != 5 || doc.Summary.Evaluated != 3 ||
+	if doc.Summary.Components != 6 || doc.Summary.Evaluated != 4 ||
 		doc.Summary.NotEvaluated != 2 || doc.Summary.IncompleteChecks != 1 ||
-		doc.Summary.Findings != 2 || doc.Summary.UnknownSeverity != 1 {
-		t.Errorf("Summary = %+v, want {5 3 2 1 2 1}", doc.Summary)
+		doc.Summary.Findings != 3 || doc.Summary.UnknownSeverity != 1 {
+		t.Errorf("Summary = %+v, want {6 4 2 1 3 1}", doc.Summary)
+	}
+}
+
+// TestJSON_CarriesFullRatingsArray: JSON is the machine-readable view a
+// filter would read from (D25), so it keeps every source's rating, not just
+// the one Severity/Score picked — the opposite of the table's single
+// SEVERITY cell. Checked both by content (every field of both ratings, in
+// full) and by order (index 0 is GHSA, index 1 is PYSEC — the sorted order
+// matcher.sortRatings produces), so a mutation that drops the array, keeps
+// only the winner, or re-sorts it (e.g. through an intermediate map) is
+// caught here directly rather than only surfacing as an opaque byte-diff in
+// the golden test.
+func TestJSON_CarriesFullRatingsArray(t *testing.T) {
+	res, cat := goldenFixture()
+	var buf bytes.Buffer
+	if _, err := JSON(&buf, res, cat); err != nil {
+		t.Fatal(err)
+	}
+	var doc Document
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Findings) != 3 {
+		t.Fatalf("Findings = %d, want 3", len(doc.Findings))
+	}
+	f := doc.Findings[2] // the multi-source Django finding goldenFixture appends
+	if len(f.Ratings) != 2 {
+		t.Fatalf("Ratings = %d entries, want 2 — JSON must not collapse to the winner", len(f.Ratings))
+	}
+	ghsa := f.Ratings[0]
+	if ghsa.Database != "GHSA" || ghsa.AdvisoryID != "GHSA-w24h-v9qh-8gxj" ||
+		ghsa.Severity != "critical" || ghsa.Score != 9.8 || ghsa.Fixed != "2.2.28" {
+		t.Errorf("Ratings[0] = %+v, want the GHSA rating in full", ghsa)
+	}
+	pysec := f.Ratings[1]
+	if pysec.Database != "PYSEC" || pysec.AdvisoryID != "PYSEC-2022-191" ||
+		pysec.Severity != "unknown" || pysec.Score != 0 || pysec.Fixed != "2.2.27" {
+		t.Errorf("Ratings[1] = %+v, want the PYSEC rating in full", pysec)
+	}
+	// Each rating's fixed version comes from its OWN record. The finding's
+	// Evidence carries the winner's, so a renderer that read it from there
+	// would emit 2.2.28 twice — every source appearing to agree about
+	// remediation, which is the collapse this array exists to prevent.
+	if pysec.Fixed == ghsa.Fixed {
+		t.Errorf("both ratings report fixed %q, so this test cannot tell a "+
+			"per-rating fixed version from one taken off the winner", ghsa.Fixed)
+	}
+}
+
+// TestJSON_RatingsIsEmptyArrayNotNullWhenAbsent pins the null-vs-empty-array
+// boundary (TestJSON_EmptyResultHasEmptyArraysNotNull's own discipline, one
+// level down, on a per-finding field instead of Document's top-level
+// arrays). Match itself never produces a Finding with zero Ratings (D25),
+// so this fixture — a Finding built directly, with none — is not a state a
+// real scan reaches; it is worth pinning anyway because findingRecord has no
+// special case for it: `make([]RatingRecord, 0, len(f.Ratings))` plus a
+// range over a nil slice already does the right thing, and this is what
+// would catch a change that broke that for the zero-length boundary
+// specifically.
+func TestJSON_RatingsIsEmptyArrayNotNullWhenAbsent(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{ID: "GHSA-no-ratings"},
+		Severity: severity.High,
+		Score:    7.5,
+	}}}
+	var buf bytes.Buffer
+	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `"ratings": []`) {
+		t.Errorf(`output does not contain "ratings": [] for a finding with no Ratings:%s`, out)
+	}
+	if strings.Contains(out, "null") {
+		t.Errorf("output contains a null where jq expects an array:\n%s", out)
+	}
+}
+
+// TestJSON_RatingFixedKeyIsPresentEvenWhenEmpty: RatingRecord.Fixed has no
+// omitempty, on purpose — a source that gave no fixed version is exactly the
+// interesting case (disagreeing fixed versions are half of D25's own
+// measurement), and omitempty would make that indistinguishable from a
+// document that predates the field. This is the test that would have caught
+// json.go:107 carrying `,omitempty` when json.go:56-67 argues the opposite
+// for the neighbouring Score field: without it, adding or removing
+// omitempty on Fixed was invisible to the whole suite (TestJSON_Golden's
+// fixture never gave a rating an empty Fixed either).
+func TestJSON_RatingFixedKeyIsPresentEvenWhenEmpty(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{ID: "GHSA-no-fix-yet"},
+		Severity: severity.High,
+		Score:    7.5,
+		Ratings: []matcher.Rating{
+			{Database: "GHSA", AdvisoryID: "GHSA-no-fix-yet", Severity: severity.High, Score: 7.5},
+		},
+	}}}
+	var buf bytes.Buffer
+	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	var doc Document
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Findings) != 1 || len(doc.Findings[0].Ratings) != 1 {
+		t.Fatalf("Findings/Ratings shape = %+v, want one finding with one rating", doc.Findings)
+	}
+	if got := doc.Findings[0].Ratings[0].Fixed; got != "" {
+		t.Errorf("Ratings[0].Fixed = %q, want empty string (a rating with no fix)", got)
+	}
+	// The unmarshal above cannot tell "" from an absent key, so the presence
+	// of the key itself is asserted against the raw bytes.
+	if !strings.Contains(buf.String(), `"fixed": ""`) {
+		t.Errorf(`output does not contain "fixed": "" — the key must be present even when`+
+			" empty, not omitted:\n%s", buf.String())
 	}
 }
 

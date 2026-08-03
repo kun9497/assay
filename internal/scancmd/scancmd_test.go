@@ -493,6 +493,11 @@ type matrixAdv struct {
 	pkg     string
 	fixed   string
 	vectors []string // CVSS vectors; nil -> the finding's severity is Unknown
+	// aliases are the other identifiers this record claims. Records that share
+	// one describe a single vulnerability, so they become several ratings on
+	// one finding rather than several findings (D25). Without this there is no
+	// way to build the shape the aggregate exists for.
+	aliases []string
 }
 
 // buildMatrixDB writes advisories into a fresh database that covers "Go"
@@ -531,9 +536,16 @@ func buildMatrixDB(t *testing.T, advisories []matrixAdv) string {
 		if strings.Contains(adv.pkg, "/") {
 			affected = adv.pkg
 		}
+		// The authoring database, which the OSV provider derives from the
+		// identifier's prefix at ingest (D25). Derived the same way here
+		// rather than carried as another fixture field, so a record named
+		// GHSA-… in a test is a GHSA record in the store, as it would be.
+		database, _, _ := strings.Cut(adv.id, "-")
 		a := advisory.Advisory{
-			ID:   adv.id,
-			Kind: advisory.KindVulnerability,
+			ID:       adv.id,
+			Kind:     advisory.KindVulnerability,
+			Aliases:  adv.aliases,
+			Database: database,
 			Affected: []advisory.Affected{{
 				Ecosystem: "Go",
 				Name:      affected,
@@ -1359,5 +1371,213 @@ func TestRun_FailOnIncompleteAndUnknownAgreeAcrossRenderers(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// The scenario D25 exists for, driven through Run: one source rates a finding
+// critical, another rates the same vulnerability not at all, and --fail-on
+// critical must exit 1 whichever record the store lists first.
+//
+// Both orders are exercised because only one of them used to fail. The store
+// returns advisories in the order the package index lists them, which is the
+// order the provider walked the archives in — so before the aggregate, the
+// unrated record winning meant the finding reported unknown, unknown never
+// trips a threshold (D17), and CI went green on a critical vulnerability.
+func TestRun_FailOnUsesTheHighestSourceRegardlessOfOrder(t *testing.T) {
+	rec := func(id string, rated bool) matrixAdv {
+		a := matrixAdv{id: id, pkg: "shared", fixed: "2.0.0",
+			aliases: []string{"CVE-2022-28347"}}
+		if rated {
+			a.vectors = []string{vecCritical}
+		}
+		return a
+	}
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "shared", purlType: "golang"}})
+
+	// Which database carries the vector is varied as well as which record the
+	// store returns first. Pinning it on GHSA would leave the rated record
+	// always sorting first among the ratings, and a gate reading "the first
+	// rating" rather than the highest would pass every case.
+	for _, who := range []struct {
+		name        string
+		ghsaIsRated bool
+	}{
+		{"rated by the database that sorts first", true},
+		{"rated by the database that sorts last", false},
+	} {
+		ghsa := rec("GHSA-w24h-v9qh-8gxj", who.ghsaIsRated)
+		pysec := rec("PYSEC-2022-191", !who.ghsaIsRated)
+		cases := []struct {
+			name string
+			recs []matrixAdv
+		}{
+			{"GHSA record first", []matrixAdv{ghsa, pysec}},
+			{"PYSEC record first", []matrixAdv{pysec, ghsa}},
+		}
+		for _, tc := range cases {
+			t.Run(who.name+", "+tc.name, func(t *testing.T) {
+				critical := severity.Critical
+				var out, errOut bytes.Buffer
+				code := Run(context.Background(), buildMatrixDB(t, tc.recs), sbom,
+					Options{FailOn: &critical}, &out, &errOut)
+				if code != 1 {
+					t.Errorf("Run = %d, want 1 — one source rates this critical, so "+
+						"the finding is critical whichever record came back first "+
+						"and whichever database rated it; stdout:\n%s",
+						code, out.String())
+				}
+			})
+		}
+	}
+}
+
+// The mirror of it, and the boundary D17 draws: a finding every source left
+// unrated does not trip --fail-on even at the lowest threshold, however many
+// sources reported it. Three unrated ratings do not add up to a rated finding.
+func TestRun_ManyUnratedSourcesStillDoNotTripFailOn(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "PYSEC-2022-191", pkg: "unrated", fixed: "2.0.0", aliases: []string{"CVE-2022-28347"}},
+		{id: "PYSEC-2022-192", pkg: "unrated", fixed: "2.0.0", aliases: []string{"CVE-2022-28347"}},
+		{id: "GO-2022-0001", pkg: "unrated", fixed: "2.0.0", aliases: []string{"CVE-2022-28347"}},
+	})
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "unrated", purlType: "golang"}})
+
+	none := severity.None
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), db, sbom,
+		Options{FailOn: &none}, &out, &errOut); code != 0 {
+		t.Errorf("Run = %d, want 0 — unknown never trips a threshold (D17), "+
+			"however many sources reported it; stdout:\n%s", code, out.String())
+	}
+	// The three records are one vulnerability, so they are one finding with
+	// three ratings. Asserted because without it the test would also pass on a
+	// build that produced three separate unknown findings — which trips no
+	// threshold either, and would leave the aggregate untested.
+	unratedRows := strings.Count(out.String(), "example.com/unrated")
+	if unratedRows != 1 {
+		t.Errorf("the report shows %d rows for this package, want 1 — the three "+
+			"records share a CVE, so they are one finding carrying three "+
+			"ratings; stdout:\n%s", unratedRows, out.String())
+	}
+}
+
+// The ordering claim, proven at the seam a user actually reads: the same
+// advisories written to the store in opposite order produce byte-identical
+// JSON.
+//
+// This is the property D25 exists to establish, and it is asserted on the
+// whole document rather than on the verdict, because the verdict was only ever
+// half of it — the report also prints the advisory ID, its summary, and the
+// fixed version, all taken from one record. The store returns advisories in
+// the order the package index lists them, and that order is the order the
+// provider walked the OSV archives in, so "reversed" here is the same
+// difference a re-run of `assay db update` could produce.
+//
+// Every rating in the fixture disagrees with its sibling on something the
+// document shows: the band, the score, and the fixed version. If any of those
+// were still taken from whichever record arrived first, the two documents
+// would differ.
+func TestRun_JSONIsIdenticalWhenRecordOrderIsReversed(t *testing.T) {
+	recs := []matrixAdv{
+		{id: "GHSA-w24h-v9qh-8gxj", pkg: "shared", fixed: "2.0.0",
+			vectors: []string{vecCritical}, aliases: []string{"CVE-2022-28347"}},
+		{id: "PYSEC-2022-191", pkg: "shared", fixed: "3.1.0",
+			vectors: []string{vecMedium}, aliases: []string{"CVE-2022-28347"}},
+		{id: "GO-2022-0001", pkg: "shared", fixed: "2.5.0",
+			aliases: []string{"CVE-2022-28347"}},
+	}
+	reversed := make([]matrixAdv, len(recs))
+	for i, r := range recs {
+		reversed[len(recs)-1-i] = r
+	}
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "shared", purlType: "golang"}})
+
+	render := func(order []matrixAdv) string {
+		t.Helper()
+		var out, errOut bytes.Buffer
+		if code := Run(context.Background(), buildMatrixDB(t, order), sbom,
+			Options{Output: "json"}, &out, &errOut); code != 0 {
+			t.Fatalf("Run = %d, want 0; stderr: %s", code, errOut.String())
+		}
+		return out.String()
+	}
+
+	forward, backward := render(recs), render(reversed)
+	if forward != backward {
+		t.Errorf("the JSON depends on the order records were written:\n"+
+			"--- records forward ---\n%s\n--- records reversed ---\n%s",
+			forward, backward)
+	}
+	// Guards the guard. If grouping broke and the three records came out as
+	// three single-rating findings, the comparison above would still pass —
+	// the documents stay byte-identical because sortFindings is a total order
+	// — and this test would be checking nothing. Counting ratings alone does
+	// not catch that: three findings carrying one rating each also counts
+	// three. The finding count is what distinguishes them.
+	var doc struct {
+		Findings []struct {
+			Ratings []struct {
+				Database string `json:"database"`
+			} `json:"ratings"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(forward), &doc); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(doc.Findings) != 1 || len(doc.Findings[0].Ratings) != 3 {
+		t.Errorf("fixture produced %d finding(s) with %v ratings, want 1 finding "+
+			"carrying 3 — the comparison above is vacuous unless the three "+
+			"records became one multi-source finding; document:\n%s",
+			len(doc.Findings), func() []int {
+				var n []int
+				for _, f := range doc.Findings {
+					n = append(n, len(f.Ratings))
+				}
+				return n
+			}(), forward)
+	}
+}
+
+// An identifier this scan's own JSON prints must resolve through --explain.
+//
+// D25 merges records that were separate findings before it, and the losing
+// record's identifiers then stop being reachable through Finding.Advisory. The
+// regression that produced: `--output json` emits PYSEC-2022-191 in
+// ratings[].advisoryId, and `--explain PYSEC-2022-191` answered exit 2 — "the
+// result cannot be trusted" (D11) — for a scan that ran perfectly.
+//
+// Every identifier is exercised, not just the losing one, because the fix
+// moves the lookup set off the advisory and onto the finding; getting the
+// winner or the shared CVE wrong in the move would be just as bad.
+func TestRun_ExplainResolvesEveryIdentifierTheScanPrints(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-w24h-v9qh-8gxj", pkg: "shared", fixed: "2.0.0",
+			vectors: []string{vecCritical}, aliases: []string{"CVE-2022-28347"}},
+		// Deliberately does NOT alias the GHSA record, only the shared CVE.
+		// The live records cross-alias, which hides this entirely.
+		{id: "PYSEC-2022-191", pkg: "shared", fixed: "2.0.0",
+			aliases: []string{"CVE-2022-28347"}},
+	})
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "shared", purlType: "golang"}})
+
+	for _, id := range []string{
+		"GHSA-w24h-v9qh-8gxj", // the winner, displayed
+		"CVE-2022-28347",      // the alias both records share
+		"PYSEC-2022-191",      // the losing record — the regression
+	} {
+		t.Run(id, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			code := Run(context.Background(), db, sbom, Options{Explain: id}, &out, &errOut)
+			if code != 0 {
+				t.Fatalf("--explain %s = %d, want 0; stderr: %s", id, code, errOut.String())
+			}
+			// The explanation must be of the merged finding, not of some other
+			// row that happened to match. Asserted on the rendered pair rather
+			// than on either identifier alone, since PYSEC-2022-191 also
+			// appears in the breakdown's own rating line.
+			if !strings.Contains(out.String(), "advisory: GHSA-w24h-v9qh-8gxj") {
+				t.Errorf("--explain %s did not explain the merged finding:\n%s", id, out.String())
+			}
+		})
 	}
 }

@@ -284,11 +284,12 @@ func TestTable_FindingCarriesItsAliases(t *testing.T) {
 	// record is only reachable through the alias column. Dropping the column
 	// makes `assay scan | grep CVE-...` silently find nothing.
 	res := matcher.Result{Findings: []matcher.Finding{{
-		Package:  pkgmeta.Package{Name: "Jinja2", Version: "2.11.2", Ecosystem: "PyPI"},
-		Advisory: advisory.Advisory{ID: "GHSA-g3rq-g295-4j3m", Aliases: []string{"CVE-2020-28493"}},
-		Evidence: version.Evidence{Fixed: "2.11.3"},
-		Severity: severity.High,
-		Score:    7.5,
+		Package:     pkgmeta.Package{Name: "Jinja2", Version: "2.11.2", Ecosystem: "PyPI"},
+		Advisory:    advisory.Advisory{ID: "GHSA-g3rq-g295-4j3m", Aliases: []string{"CVE-2020-28493"}},
+		Identifiers: []string{"CVE-2020-28493", "GHSA-g3rq-g295-4j3m"},
+		Evidence:    version.Evidence{Fixed: "2.11.3"},
+		Severity:    severity.High,
+		Score:       7.5,
 	}}}
 	var buf bytes.Buffer
 	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
@@ -437,11 +438,17 @@ func TestTable_FindingCarriesIdentifiersFromAliasesAndUpstream(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Identifiers is what Match populates and what the column reads,
+			// so the fixture builds it the way Match does: every name every
+			// joined record answers to, from aliases AND upstream (D3).
+			ids := append([]string{tt.adv.ID}, tt.adv.Aliases...)
+			ids = append(ids, tt.adv.Upstream...)
 			res := matcher.Result{Findings: []matcher.Finding{{
-				Package:  pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "e"},
-				Advisory: tt.adv,
-				Severity: severity.High,
-				Score:    7.5,
+				Package:     pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "e"},
+				Advisory:    tt.adv,
+				Identifiers: ids,
+				Severity:    severity.High,
+				Score:       7.5,
 			}}}
 			var buf bytes.Buffer
 			if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
@@ -464,6 +471,13 @@ func TestTable_OtherIdentifiersAreDeduplicated(t *testing.T) {
 			ID:       "ALPINE-CVE-2025-46394",
 			Aliases:  []string{"CVE-2025-46394"},
 			Upstream: []string{"CVE-2025-46394", "ALPINE-CVE-2025-46394"},
+		},
+		// Repeats on purpose, as Match hands them over before dedupSorted:
+		// two records describing one vulnerability name most of the same
+		// identifiers, so overlap is the normal case, not the odd one.
+		Identifiers: []string{
+			"ALPINE-CVE-2025-46394", "CVE-2025-46394",
+			"CVE-2025-46394", "ALPINE-CVE-2025-46394",
 		},
 		Severity: severity.High,
 		Score:    7.5,
@@ -583,11 +597,12 @@ func TestTable_SeverityColumn(t *testing.T) {
 // value landed where the header claims.
 func TestTable_ColumnOrderMatchesHeader(t *testing.T) {
 	res := matcher.Result{Findings: []matcher.Finding{{
-		Package:  pkgmeta.Package{Name: "svc", Version: "1.0.0", Ecosystem: "Go"},
-		Advisory: advisory.Advisory{ID: "GHSA-sev", Aliases: []string{"CVE-2024-00001"}},
-		Evidence: version.Evidence{Fixed: "2.0.0"},
-		Severity: severity.Critical,
-		Score:    9.8,
+		Package:     pkgmeta.Package{Name: "svc", Version: "1.0.0", Ecosystem: "Go"},
+		Advisory:    advisory.Advisory{ID: "GHSA-sev", Aliases: []string{"CVE-2024-00001"}},
+		Identifiers: []string{"CVE-2024-00001", "GHSA-sev"},
+		Evidence:    version.Evidence{Fixed: "2.0.0"},
+		Severity:    severity.Critical,
+		Score:       9.8,
 	}}}
 	var buf bytes.Buffer
 	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
@@ -660,3 +675,207 @@ func TestTable_UnknownSeverityCountReflectsFindings(t *testing.T) {
 		t.Errorf("GHSA-1's SEVERITY column = %q, want \"unknown\"", got)
 	}
 }
+
+// TestSourcesDisagree is the direct unit test for the predicate the table's
+// marker and footnote are both driven by. "Disagree" means the Severity
+// bands differ, and nothing else: two ratings with the same band but
+// different scores or fixed versions have not disagreed by this table's own
+// definition (that finer-grained detail is --explain's job, D10).
+func TestSourcesDisagree(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		ratings []matcher.Rating
+		want    bool
+	}{
+		{"no ratings (pre-D25 fixture)", nil, false},
+		{"one rating", []matcher.Rating{{Database: "GHSA", Severity: severity.Critical}}, false},
+		{
+			"two ratings, same band, different score and fixed version",
+			[]matcher.Rating{
+				{Database: "GHSA", Severity: severity.High, Score: 7.5, Fixed: "1.0.0"},
+				{Database: "PYSEC", Severity: severity.High, Score: 7.2, Fixed: "1.1.0"},
+			},
+			false,
+		},
+		{
+			"two ratings, different band",
+			[]matcher.Rating{
+				{Database: "GHSA", Severity: severity.Critical, Score: 9.8},
+				{Database: "PYSEC", Severity: severity.Unknown},
+			},
+			true,
+		},
+		{
+			"three ratings, the third breaks agreement between the first two",
+			[]matcher.Rating{
+				{Database: "ALPINE", Severity: severity.High},
+				{Database: "GHSA", Severity: severity.High},
+				{Database: "PYSEC", Severity: severity.Low},
+			},
+			true,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sourcesDisagree(tt.ratings); got != tt.want {
+				t.Errorf("sourcesDisagree(%+v) = %v, want %v", tt.ratings, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestTable_MarksSeverityWhenSourcesDisagree: D25's whole point is that
+// disagreement between sources is not silently collapsed. The table keeps
+// one row and one SEVERITY cell, but a cell whose sources gave different
+// bands has to say so, or the aggregate reads as unanimous when it is not.
+func TestTable_MarksSeverityWhenSourcesDisagree(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "django", Version: "3.2.12", Ecosystem: "PyPI"},
+		Advisory: advisory.Advisory{ID: "GHSA-w24h-v9qh-8gxj"},
+		Severity: severity.Critical,
+		Score:    9.8,
+		Ratings: []matcher.Rating{
+			{Database: "GHSA", AdvisoryID: "GHSA-w24h-v9qh-8gxj", Severity: severity.Critical, Score: 9.8, Fixed: "2.2.28"},
+			{Database: "PYSEC", AdvisoryID: "PYSEC-2022-191", Severity: severity.Unknown, Fixed: "2.2.28"},
+		},
+	}}}
+	var buf bytes.Buffer
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if got := cellAt(t, out, "GHSA-w24h-v9qh-8gxj", "SEVERITY"); got != "critical (9.8) *" {
+		t.Errorf("SEVERITY column = %q, want %q", got, "critical (9.8) *")
+	}
+	if !strings.Contains(out, "--explain") {
+		t.Errorf("output does not point the reader at --explain for the detail:\n%s", out)
+	}
+}
+
+// TestTable_NoMarkerWhenSourcesAgree: a difference in score or fixed version
+// alone is not the disagreement this marker exists to flag — only the two
+// sources landing on different bands is. Marking every finding with more
+// than one source, agreeing or not, would make the marker meaningless.
+//
+// Also covers the whole-scan footnote absence for both ways a finding can
+// fail to disagree: GHSA-agree has two sources that land on the same band,
+// GHSA-solo has exactly one. Neither earns a marker, and — since neither
+// row does — the scan-level footnote must not appear at all. (A fixture
+// using a real single-Rating Finding here, rather than one Match itself
+// could never produce, matters: Match always populates at least one
+// Rating (D25), so a zero-Ratings Finding was never a real "single-source"
+// case to begin with.)
+func TestTable_NoMarkerWhenSourcesAgree(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{
+		{
+			Package:  pkgmeta.Package{Name: "svc", Version: "1.0.0", Ecosystem: "Go"},
+			Advisory: advisory.Advisory{ID: "GHSA-agree"},
+			Severity: severity.High,
+			Score:    7.5,
+			Ratings: []matcher.Rating{
+				{Database: "GHSA", AdvisoryID: "GHSA-agree", Severity: severity.High, Score: 7.5, Fixed: "1.0.0"},
+				{Database: "PYSEC", AdvisoryID: "PYSEC-agree", Severity: severity.High, Score: 7.2, Fixed: "1.1.0"},
+			},
+		},
+		{
+			Package:  pkgmeta.Package{Name: "lib", Version: "2.0.0", Ecosystem: "Go"},
+			Advisory: advisory.Advisory{ID: "GHSA-solo"},
+			Severity: severity.Critical,
+			Score:    9.8,
+			Ratings: []matcher.Rating{
+				{Database: "GHSA", AdvisoryID: "GHSA-solo", Severity: severity.Critical, Score: 9.8, Fixed: "2.1.0"},
+			},
+		},
+	}}
+	var buf bytes.Buffer
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 2, Cataloged: 2}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if got := cellAt(t, out, "GHSA-agree", "SEVERITY"); got != "high (7.5)" {
+		t.Errorf("SEVERITY column = %q, want %q (no marker — the sources agree on the band)", got, "high (7.5)")
+	}
+	if got := cellAt(t, out, "GHSA-solo", "SEVERITY"); got != "critical (9.8)" {
+		t.Errorf("SEVERITY column = %q, want %q (no marker — a single source has nothing to disagree with)", got, "critical (9.8)")
+	}
+	if strings.Contains(out, "disagree") || strings.Contains(out, "--explain") {
+		t.Errorf("no finding disagreed, but the output claims a disagreement or carries its footnote:\n%s", out)
+	}
+}
+
+// TestTable_NoMarkerWithASingleRating: the brief is explicit that a finding
+// with one rating never gets the marker — there is nothing for a single
+// source to disagree with.
+func TestTable_NoMarkerWithASingleRating(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "svc", Version: "1.0.0", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{ID: "GHSA-solo"},
+		Severity: severity.Critical,
+		Score:    9.8,
+		Ratings: []matcher.Rating{
+			{Database: "GHSA", AdvisoryID: "GHSA-solo", Severity: severity.Critical, Score: 9.8, Fixed: "1.0.0"},
+		},
+	}}}
+	var buf bytes.Buffer
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if got := cellAt(t, out, "GHSA-solo", "SEVERITY"); got != "critical (9.8)" {
+		t.Errorf("SEVERITY column = %q, want %q (no marker with one source)", got, "critical (9.8)")
+	}
+	if strings.Contains(out, "disagree") {
+		t.Errorf("output claims a disagreement with only one source:\n%s", out)
+	}
+}
+
+// TestTable_FootnoteOnlyWhenSomeoneDisagrees: the footnote is printed at
+// most once, and only when at least one row actually earned the marker — a
+// scan with no disagreeing findings must not carry a footnote explaining a
+// marker that never appears. Mixing one disagreeing and one agreeing
+// finding in the same result also proves the marker is per-row, not
+// per-scan: only GHSA-mixed-disagree gets it.
+func TestTable_FootnoteOnlyWhenSomeoneDisagrees(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{
+		{
+			Package:  pkgmeta.Package{Name: "a", Version: "1", Ecosystem: "Go"},
+			Advisory: advisory.Advisory{ID: "GHSA-mixed-disagree"},
+			Severity: severity.Critical,
+			Score:    9.8,
+			Ratings: []matcher.Rating{
+				{Database: "GHSA", AdvisoryID: "GHSA-mixed-disagree", Severity: severity.Critical, Score: 9.8},
+				{Database: "PYSEC", AdvisoryID: "PYSEC-mixed-disagree", Severity: severity.Unknown},
+			},
+		},
+		{
+			Package:  pkgmeta.Package{Name: "b", Version: "1", Ecosystem: "Go"},
+			Advisory: advisory.Advisory{ID: "GHSA-mixed-agree"},
+			Severity: severity.Medium,
+			Score:    5.0,
+			Ratings: []matcher.Rating{
+				{Database: "GHSA", AdvisoryID: "GHSA-mixed-agree", Severity: severity.Medium, Score: 5.0},
+			},
+		},
+	}}
+	var buf bytes.Buffer
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 2, Cataloged: 2}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if got := cellAt(t, out, "GHSA-mixed-disagree", "SEVERITY"); got != "critical (9.8) *" {
+		t.Errorf("SEVERITY column = %q, want %q", got, "critical (9.8) *")
+	}
+	if got := cellAt(t, out, "GHSA-mixed-agree", "SEVERITY"); got != "medium (5.0)" {
+		t.Errorf("SEVERITY column = %q, want %q (single source, no marker)", got, "medium (5.0)")
+	}
+	if n := strings.Count(out, "sources disagree"); n != 1 {
+		t.Errorf("footnote appears %d times, want exactly 1:\n%s", n, out)
+	}
+}
+
+// The whole-scan "no footnote when nobody disagrees" case (both the
+// single-source and the multi-source-but-unanimous ways a finding can fail
+// to disagree) is folded into TestTable_NoMarkerWhenSourcesAgree above,
+// rather than kept as a separate test here: a standalone version of it
+// previously used a Finding with zero Ratings, a state Match itself never
+// produces (D25), to stand in for "single-source" — a case its neighbour
+// now covers with a real single-Rating fixture instead.

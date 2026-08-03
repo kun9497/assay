@@ -33,7 +33,16 @@
         "introduced": "0",
         "fixed": "3.1.4-r6",
         "reason": "3.1.4-r5 is at or above any earlier version and below the fix 3.1.4-r6"
-      }
+      },
+      "ratings": [
+        {
+          "database": "ALPINE",
+          "advisoryId": "CVE-2024-12345",
+          "severity": "critical",
+          "score": 9.8,
+          "fixed": "3.1.4-r6"
+        }
+      ]
     },
     {
       "package": {
@@ -56,7 +65,56 @@
         "introduced": "0",
         "lastAffected": "2.0.0",
         "reason": "v1.2.3 is at or above any earlier version and at or below 2.0.0"
-      }
+      },
+      "ratings": [
+        {
+          "database": "GHSA",
+          "advisoryId": "GHSA-abcd",
+          "severity": "unknown",
+          "score": 0,
+          "fixed": ""
+        }
+      ]
+    },
+    {
+      "package": {
+        "name": "django",
+        "version": "3.2.12",
+        "ecosystem": "PyPI",
+        "purl": "pkg:pypi/django@3.2.12"
+      },
+      "matchedName": "django",
+      "advisory": {
+        "id": "GHSA-w24h-v9qh-8gxj",
+        "aliases": [
+          "CVE-2022-28347"
+        ],
+        "summary": "Django SQL injection via QuerySet.explain()"
+      },
+      "severity": "critical",
+      "score": 9.8,
+      "evidence": {
+        "rangeType": "SEMVER",
+        "introduced": "0",
+        "fixed": "2.2.28",
+        "reason": "3.2.12 is at or above any earlier version and below the fix 2.2.28"
+      },
+      "ratings": [
+        {
+          "database": "GHSA",
+          "advisoryId": "GHSA-w24h-v9qh-8gxj",
+          "severity": "critical",
+          "score": 9.8,
+          "fixed": "2.2.28"
+        },
+        {
+          "database": "PYSEC",
+          "advisoryId": "PYSEC-2022-191",
+          "severity": "unknown",
+          "score": 0,
+          "fixed": "2.2.27"
+        }
+      ]
     }
   ],
   "skipped": [
@@ -79,11 +137,11 @@
     }
   ],
   "summary": {
-    "components": 5,
-    "evaluated": 3,
+    "components": 6,
+    "evaluated": 4,
     "notEvaluated": 2,
     "incompleteChecks": 1,
-    "findings": 2,
+    "findings": 3,
     "unknownSeverity": 1
   }
 }

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/store"
 )
 
 const goRecord = `{
@@ -286,5 +287,68 @@ func TestConvert_LanguageEcosystemsStayExactMatch(t *testing.T) {
 	if _, ok, err := Convert([]byte(rec), "Go"); err != nil || ok {
 		t.Errorf("Convert(_, \"Go\") on a GoFoo-only record = ok %v err %v, want dropped: "+
 			"exact match must not degrade to a prefix match outside Alpine", ok, err)
+	}
+}
+
+// The authoring database comes from the record's own identifier, resolved
+// once at ingest. Every namespace the live database actually contains is
+// covered, plus the nesting case that makes prefix-parsing at query time a
+// bad idea: ALPINE-CVE-2025-46394 is an ALPINE record, not a CVE one.
+func TestDatabaseOf(t *testing.T) {
+	for in, want := range map[string]string{
+		"GHSA-w24h-v9qh-8gxj":   "GHSA",
+		"PYSEC-2022-191":        "PYSEC",
+		"GO-2026-4970":          "GO",
+		"ALPINE-CVE-2025-46394": "ALPINE",
+		"CVE-2021-41092":        "CVE",
+		"BIT-golang-2026-39822": "BIT",
+		"MAL-2024-1":            "MAL",
+	} {
+		if got := databaseOf(in); got != want {
+			t.Errorf("databaseOf(%q) = %q, want %q", in, got, want)
+		}
+	}
+	// An identifier with no namespace is not silently given one. An empty
+	// Database renders as a rating from a source with no name, which is
+	// worse than a loud refusal.
+	for _, bad := range []string{"", "nodashes", "-leading"} {
+		if got := databaseOf(bad); got != "" {
+			t.Errorf("databaseOf(%q) = %q, want empty", bad, got)
+		}
+	}
+}
+
+// Every record the provider emits carries a Database. A record without one
+// produces a rating attributed to nobody, which is the opposite of what D25
+// is for.
+func TestConvert_SetsTheDatabase(t *testing.T) {
+	for _, tt := range []struct{ id, want string }{
+		{"GHSA-w24h-v9qh-8gxj", "GHSA"},
+		{"PYSEC-2022-191", "PYSEC"},
+		{"ALPINE-CVE-2025-46394", "ALPINE"},
+	} {
+		// "versions" is the minimum an affected entry needs to survive the
+		// pre-existing "nothing left to match on" guard (TestConvert_Drops-
+		// GitOnlyAffected exercises the same guard deliberately); this test's
+		// subject is Database propagation, not version data.
+		rec := `{"id":"` + tt.id + `","affected":[{"package":` +
+			`{"ecosystem":"PyPI","name":"django"},"versions":["1"]}]}`
+		got, ok, err := Convert([]byte(rec), "PyPI")
+		if err != nil || !ok {
+			t.Fatalf("Convert(%s) = ok:%v err:%v", tt.id, ok, err)
+		}
+		if got.Database != tt.want {
+			t.Errorf("Convert(%s).Database = %q, want %q", tt.id, got.Database, tt.want)
+		}
+	}
+}
+
+// The schema bump is what stops an older database from serving records with
+// no Database at all.
+func TestSchemaVersionIs5(t *testing.T) {
+	if store.SchemaVersion != 5 {
+		t.Errorf("SchemaVersion = %d, want 5 — D25 adds a field, and a database "+
+			"built without it must refuse rather than report unattributed ratings",
+			store.SchemaVersion)
 	}
 }
