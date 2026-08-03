@@ -14,7 +14,10 @@ import (
 // on severity and 152 on the fixed version. These tests pin what a finding does
 // with that (D25).
 
-const vecCritical = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" // 9.8
+const (
+	vecCritical = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" // 9.8
+	vecMedium   = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N" // 6.5
+)
 
 // key mirrors fakeStore's own composite key. Built with string(rune(0)) rather
 // than written as an escape sequence: a literal NUL typed into a file has
@@ -157,6 +160,57 @@ func TestMatch_TheDisplayedRecordIsTheOneThatSetTheBand(t *testing.T) {
 			}
 			if f.Advisory.Database != "GHSA" {
 				t.Errorf("displayed Database = %q, want GHSA", f.Advisory.Database)
+			}
+		})
+	}
+}
+
+// Two sources that BOTH rated it, differently. This is the plain reading of
+// "the finding is as severe as its worst rating", and every other test here
+// pairs a rated source with an unrated one — which the unrated branch of
+// beats() answers before the scores are ever compared. Without this the score
+// comparison could be inverted and nothing would notice.
+func TestMatch_TheHigherOfTwoRatedSourcesWins(t *testing.T) {
+	medium := ghsaRec()
+	medium.Severity = []advisory.Severity{{Type: "CVSS_V3", Score: vecMedium}}
+	high := pysecRec()
+	high.Severity = []advisory.Severity{{Type: "CVSS_V3", Score: vecCritical}}
+
+	for _, order := range []struct {
+		name          string
+		first, second advisory.Advisory
+	}{
+		{"lower first", medium, high},
+		{"higher first", high, medium},
+	} {
+		t.Run(order.name, func(t *testing.T) {
+			res, err := New(twoSources(order.first, order.second)).Match(djangoTarget())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Findings) != 1 {
+				t.Fatalf("got %d findings, want 1", len(res.Findings))
+			}
+			f := res.Findings[0]
+			if f.Severity != severity.Critical || f.Score != 9.8 {
+				t.Errorf("Severity/Score = %v/%.1f, want critical/9.8 — the worse of "+
+					"the two ratings", f.Severity, f.Score)
+			}
+			// The record that rated it critical is PYSEC here, which also sorts
+			// LAST among the ratings. A displayed record taken from the front of
+			// the sorted list would show the medium one instead.
+			if f.Advisory.ID != "PYSEC-2022-191" {
+				t.Errorf("displayed advisory = %s, want PYSEC-2022-191 — it is the "+
+					"record that rated this critical", f.Advisory.ID)
+			}
+			var got []string
+			for _, r := range f.Ratings {
+				got = append(got, fmt.Sprintf("%s=%v", r.Database, r.Severity))
+			}
+			want := []string{"GHSA=medium", "PYSEC=critical"}
+			if fmt.Sprint(got) != fmt.Sprint(want) {
+				t.Errorf("ratings = %v, want %v — each source keeps its own band",
+					got, want)
 			}
 		})
 	}
