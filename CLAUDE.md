@@ -303,6 +303,23 @@ one reads as a decision. And check your mutation actually mutates: two "survivor
 slice turned out to be no-ops, and one needed edits in two places because the switch it
 targeted is a whitelist.
 
+**A mutation table only holds against the code it was run on.** Three ways it stops being
+true, all of which happened while building D27:
+
+- **The mutation does not mutate.** Deleting a line left a loop variable or an import unused,
+  so the build broke instead of a test failing. A compile error proves nothing about coverage.
+  Rewrite it to keep every identifier live — drop a field's value rather than the whole
+  statement.
+- **A later fix invalidates an earlier result.** `Options.Pause` became a pointer to fix a
+  zero-value ambiguity, and that removed 19.9 seconds of test wall clock which had been
+  accidentally standing in for an assertion. A mutation verified red before the fix was green
+  after it, and nothing said so. **Re-run the table after any change to the code it covers**,
+  not only after the change that prompted it.
+- **The revert does not fully restore.** A revert edit matched less than the mutation had
+  changed and left a duplicated comment block behind. Caught by re-reading the diff, not by a
+  test — because the suite was green either way. Diff the working tree against HEAD after a
+  mutation round rather than trusting that revert undid apply.
+
 ## Conventions
 
 - No third-party dependencies yet (`go.mod` has no `require` block). Adding one is a real

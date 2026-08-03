@@ -110,7 +110,7 @@ mode anyway. trivy made the same call for the same access pattern.
 
 ### D5 — Schema version in the path
 
-`<cache>/assay/db/v5/vulnerability.db`. A schema change means rebuilding into a new
+`<cache>/assay/db/v6/vulnerability.db`. A schema change means rebuilding into a new
 directory rather than writing migration code. Migration code is a liability for a project
 with one user.
 
@@ -849,7 +849,7 @@ type Finding struct {
 ### Storage layout
 
 ```
-<os.UserCacheDir()>/assay/db/v5/vulnerability.db      override: ASSAY_DB_DIR
+<os.UserCacheDir()>/assay/db/v6/vulnerability.db      override: ASSAY_DB_DIR
 
 buckets:
   advisories   "<ecosystem>\x00<name>"     → []AdvisoryID  primary lookup
@@ -868,9 +868,9 @@ which is microseconds.
 
 | OS | Path |
 |---|---|
-| Windows | `%LocalAppData%\assay\db\v5\` |
-| macOS | `~/Library/Caches/assay/db/v5/` |
-| Linux | `~/.cache/assay/db/v5/` (honours `XDG_CACHE_HOME`) |
+| Windows | `%LocalAppData%\assay\db\v6\` |
+| macOS | `~/Library/Caches/assay/db/v6/` |
+| Linux | `~/.cache/assay/db/v6/` (honours `XDG_CACHE_HOME`) |
 
 Values are JSON to start. At a few hundred lookups per scan, bbolt reads are microseconds
 and decoding dominates — still tens of milliseconds. Encoding is hidden behind `Store`
