@@ -291,8 +291,16 @@ func TestWalk_AnUnreadableSubdirectoryDoesNotAbortTheWalk(t *testing.T) {
 		"package-lock.json":     "{}",
 		"sub/package-lock.json": "{}",
 	})
+	// Windows does not honour a 0o000 directory mode, so this cannot assert
+	// anything there. The skip is deliberate and it is confined to this
+	// function, which asserts nothing else - a skip wrapping other assertions
+	// is how seven of eight mutations survived in slice 3 (CLAUDE.md). CI runs
+	// on ubuntu, so the mutation below must be verified there, not here.
+	if runtime.GOOS == "windows" {
+		t.Skip("directory permissions are not enforced on Windows; CI covers this")
+	}
 	if err := os.Chmod(filepath.Join(root, "sub"), 0o000); err != nil {
-		t.Skipf("cannot drop directory permissions here: %v", err)
+		t.Fatalf("could not drop directory permissions: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(filepath.Join(root, "sub"), 0o700) })
 	got, err := Walk(root)
@@ -525,15 +533,17 @@ func TestParse_MalformedJSONIsAnErrorNotAnEmptyResult(t *testing.T) {
 		t.Fatal("Parse returned nil error on truncated JSON — an unreadable " +
 			"lockfile must not read as a clean scan")
 	}
-	// The filename and the cause both survive: an error naming neither tells a
-	// reader nothing they can act on.
-	if !strings.Contains(err.Error(), "package-lock.json") {
-		t.Errorf("error %q does not name the file", err)
+	// Asserted on the full PATH, not the bare filename. A wrapper such as
+	// fmt.Errorf("parse package-lock.json: %w", err) satisfies a check for
+	// "package-lock.json" from its own hard-coded prefix even after dropping
+	// both the path and the cause - the exact defect CLAUDE.md records.
+	if !strings.Contains(err.Error(), p) {
+		t.Errorf("error %q does not name the file it failed on (%s)", err, p)
 	}
 }
 ```
 
-Add `"strings"` to the test imports.
+Add `"strings"` to the test imports, and `"runtime"` to Task 1's.
 
 - [ ] **Step 2: Run them, watch them fail**
 - [ ] **Step 3: Implement**
@@ -558,6 +568,7 @@ here would reach the report.
 | nested v1 dependencies are not recursed | the v1 test |
 | an unmatchable entry is dropped instead of counted | the invariant |
 | malformed JSON returns an empty slice and nil error | the malformed test |
+| the error is built without the path, e.g. `fmt.Errorf("parse package-lock.json: %w", err)` | the malformed test — it asserts the path, so a hard-coded filename does not satisfy it |
 | packages are emitted in map order | add a fixture with keys whose sorted order differs from insertion |
 
 - [ ] **Step 6: Commit**
@@ -730,8 +741,10 @@ func TestParse_AFileWithNoPackageBlocksIsAnError(t *testing.T) {
 		t.Fatal("Parse returned nil error for a file with no [[package]] blocks — " +
 			"an unreadable lockfile must not read as a clean scan")
 	}
-	if !strings.Contains(err.Error(), "poetry.lock") {
-		t.Errorf("error %q does not name the file", err)
+	// The full path, not the bare filename: a hard-coded "poetry.lock" in the
+	// error's own format string would satisfy the weaker check.
+	if !strings.Contains(err.Error(), p) {
+		t.Errorf("error %q does not name the file it failed on (%s)", err, p)
 	}
 }
 ```
