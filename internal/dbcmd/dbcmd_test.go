@@ -41,7 +41,7 @@ func (f fakeProvider) Fetch(_ context.Context, emit func(advisory.Advisory) erro
 func TestUpdateThenStatus(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vulnerability.db")
 	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
-		ID: "GHSA-x", Source: "osv", Kind: advisory.KindVulnerability,
+		ID: "GHSA-x", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
 		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
 	}}}
 
@@ -61,6 +61,12 @@ func TestUpdateThenStatus(t *testing.T) {
 	// it refused.
 	if !strings.Contains(s, "covers:") || !strings.Contains(s, "Go") {
 		t.Errorf("status does not report what the database covers:\n%s", s)
+	}
+	// Which databases a rating could be attributed to (D25), visible without
+	// running a scan. Asserting the rendered pair, not either half alone,
+	// since "GHSA" nested inside another field would satisfy a bare Contains.
+	if !strings.Contains(s, "databases: GHSA") {
+		t.Errorf("status does not report which databases are present:\n%s", s)
 	}
 	// Status reports upstream data time, which is the number that tells you
 	// whether the data is stale (D12).
@@ -165,6 +171,41 @@ func TestCoverageSummary(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := coverageSummary(tt.in); got != tt.want {
 				t.Errorf("coverageSummary(%v) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// `databases:` is the only place a rating's attributable source is visible
+// without running a scan (D25), so its shape is part of the contract too.
+func TestDatabasesSummary(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want string
+	}{
+		{
+			name: "several databases join sorted",
+			in:   []string{"GHSA", "PYSEC", "ALPINE", "GO"},
+			want: "GHSA, PYSEC, ALPINE, GO",
+		},
+		{
+			name: "one database",
+			in:   []string{"GHSA"},
+			want: "GHSA",
+		},
+		{
+			// A database holding no advisories is visible, not an empty
+			// string that reads as "the line failed to render".
+			name: "none present says so",
+			in:   nil,
+			want: "nothing - ratings will not be attributable to a source",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := databasesSummary(tt.in); got != tt.want {
+				t.Errorf("databasesSummary(%v) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
 	}

@@ -35,7 +35,11 @@ import (
 // D20 closes, and nothing else would prompt a rebuild — the field is present
 // and well-formed, only wrong. A schema change is the only signal that reaches
 // a database already on disk.
-const SchemaVersion = 4
+//
+// Bumped to 5 to add Advisory.Database (D25): a database built before this
+// field has it empty on every record, and an empty Database renders as a
+// rating from a source with no name rather than failing loudly.
+const SchemaVersion = 5
 
 var (
 	ErrNotFound       = errors.New("vulnerability database not found")
@@ -78,6 +82,14 @@ type Meta struct {
 	// in an ecosystem this database never held. Both return zero advisories,
 	// and without this the second reads as a clean scan.
 	Ecosystems []string `json:"ecosystems"`
+	// Databases is the set of authoring databases (Advisory.Database, D25)
+	// among the records actually stored, sorted.
+	//
+	// Unlike Ecosystems this is read from the stored records themselves, not
+	// from provider self-report: a record's Database describes only that one
+	// record, so there is no foreign-ecosystem-style over-claim to guard
+	// against the way D20 requires for Ecosystems.
+	Databases []string `json:"databases"`
 }
 
 type Provenance struct {

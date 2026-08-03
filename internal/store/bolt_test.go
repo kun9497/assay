@@ -423,6 +423,72 @@ func TestCovers(t *testing.T) {
 	}
 }
 
+// D25: Databases is read from what this build actually stored, unlike
+// Ecosystems (D20) which comes from provider self-report. A record's
+// Database names only itself, so there is no foreign-ecosystem-style
+// over-claim to guard against — scanning what was Put is the accurate
+// answer, not an approximation of it.
+func TestMetaDatabasesComesFromStoredRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Put(advisory.Advisory{
+		ID: "GHSA-a", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "x"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A second GHSA record: Databases must collapse this to one entry, not
+	// list "GHSA" twice.
+	if err := w.Put(advisory.Advisory{
+		ID: "GHSA-d", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "w"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Put(advisory.Advisory{
+		ID: "PYSEC-b", Database: "PYSEC", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "PyPI", Name: "y"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// No Database set at all (as a pre-D25 record would arrive): must not
+	// contribute an empty entry to the set.
+	if err := w.Put(advisory.Advisory{
+		ID: "GHSA-c", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "z"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(Meta{
+		BuiltAt:   time.Now(),
+		Databases: []string{"should-be-ignored"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	m, err := db.Meta()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"GHSA", "PYSEC"}
+	if !slices.Equal(m.Databases, want) {
+		t.Errorf("Meta.Databases = %v, want %v (sorted, deduplicated, no empty "+
+			"entry for the record with none, caller-supplied value ignored)",
+			m.Databases, want)
+	}
+}
+
 // SetMeta must not take the caller's word for coverage. The field is derived
 // from Providers, and a caller that fills it in directly is ignored — that is
 // what keeps a wrong caller from re-opening the hole D20 closed.

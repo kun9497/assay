@@ -178,11 +178,31 @@ func (b *Bolt) SetMeta(m Meta) error {
 		}
 	}
 	m.Ecosystems = slices.Sorted(maps.Keys(seen))
-	blob, err := json.Marshal(m)
-	if err != nil {
-		return err
-	}
+
 	return b.db.Update(func(tx *bolt.Tx) error {
+		// Databases (D25) is read from what this build actually stored, not
+		// from provider self-report: each record names only its own
+		// authoring database, so there is nothing to over-claim the way a
+		// stored ecosystem entry can.
+		dbs := map[string]struct{}{}
+		if err := tx.Bucket(bucketByID).ForEach(func(id, blob []byte) error {
+			var a advisory.Advisory
+			if err := json.Unmarshal(blob, &a); err != nil {
+				return fmt.Errorf("decode advisory %q: %w", id, err)
+			}
+			if a.Database != "" {
+				dbs[a.Database] = struct{}{}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		m.Databases = slices.Sorted(maps.Keys(dbs))
+
+		blob, err := json.Marshal(m)
+		if err != nil {
+			return err
+		}
 		return tx.Bucket(bucketMeta).Put([]byte("meta"), blob)
 	})
 }
