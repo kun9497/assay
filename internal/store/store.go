@@ -105,14 +105,22 @@ type Meta struct {
 	// record, so there is no foreign-ecosystem-style over-claim to guard
 	// against the way D20 requires for Ecosystems.
 	Databases []string `json:"databases"`
-	// Ratings is per-authority provenance for CVE ratings (D27): each
-	// Annotator's own report of what it fetched, written directly by
-	// dbcmd.Update the same way Providers is — not derived by scanning the
-	// ratings bucket the way Databases is derived from stored advisories,
-	// because a rating carries no self-describing field to scan for (unlike
-	// Advisory.Database, advisory.Rating has no per-record "who fetched me"
-	// beyond Source, and Source is the join key an authority rates under, not
-	// a discovery mechanism worth a bucket scan for this).
+	// Ratings is per-authority provenance for CVE ratings (D27): the DataAsOf
+	// and fetch Source URL an Annotator self-reports about its own run,
+	// written directly by dbcmd.Update from each Annotator's return value,
+	// mirroring Providers. Self-report is the only source for these two
+	// fields specifically — a stored advisory.Rating records neither when
+	// NVD's data was current nor which URL fetched it (D12) — unlike
+	// Advisory.Database, which every stored Advisory record carries and
+	// Databases below reads directly.
+	//
+	// Records on an entry here is NOT authoritative and must never be read
+	// for "did this authority rate anything" or "how many": an annotator
+	// that runs and emits nothing (or fewer than it claims) would otherwise
+	// let this map assert a rating count the stored data does not back up —
+	// exactly the over-claim D20 refuses to let Ecosystems make, one bucket
+	// over. RatingCounts below is the derived, trustworthy answer to that
+	// question; consult it, not this, for anything db status states as fact.
 	//
 	// Deliberately a separate map rather than folded into Providers, even
 	// though both hold store.Provenance: Bolt.SetMeta derives Ecosystems by
@@ -124,6 +132,15 @@ type Meta struct {
 	// maps apart makes that impossible by construction rather than by
 	// discipline.
 	Ratings map[string]Provenance `json:"ratings"`
+	// RatingCounts is how many CVEs each authority actually rated, read from
+	// the ratings bucket itself (Bolt.SetMeta) — the Databases pattern
+	// applied to the ratings bucket instead of the advisories one. A
+	// rating's Source is recoverable from its own key
+	// ("<CVE>\x00<Source>"), so — unlike Providers/Ecosystems — there is no
+	// reason to trust self-report here: this is what db status actually
+	// treats as ground truth for which rating sources exist and how many
+	// CVEs they rated, never Ratings above.
+	RatingCounts map[string]int `json:"ratingCounts"`
 }
 
 type Provenance struct {

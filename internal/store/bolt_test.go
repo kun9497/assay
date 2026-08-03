@@ -729,3 +729,109 @@ func TestPutRating_RepputSameSourceReplaces(t *testing.T) {
 			"Put must win over the first", got[0].Severity, second.Severity[0].Score)
 	}
 }
+
+// TestMetaRatingCountsComesFromStoredRatings mirrors
+// TestMetaDatabasesComesFromStoredRecords exactly, one bucket over (D27):
+// RatingCounts is read from what PutRating actually stored, keyed on the
+// tail of "<CVE>\x00<Source>", not from any caller-supplied value — the same
+// "derive it, don't trust self-report" fix Databases already applies to
+// Advisory.Database.
+func TestMetaRatingCountsComesFromStoredRatings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// NVD rates two CVEs, KISA rates one - deliberately uneven counts, so a
+	// mutation that returns "1" for everyone (or the number of DISTINCT
+	// CVEs instead of ratings) cannot pass by coincidence.
+	for _, r := range []advisory.Rating{
+		{CVE: "CVE-2026-1", Source: "NVD"},
+		{CVE: "CVE-2026-2", Source: "NVD"},
+		{CVE: "CVE-2026-1", Source: "KISA"},
+	} {
+		if err := w.PutRating(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A caller-supplied RatingCounts must be ignored exactly like a
+	// caller-supplied Databases already is (TestMetaDatabasesComesFromStoredRecords).
+	if err := w.SetMeta(Meta{
+		BuiltAt:      time.Now(),
+		RatingCounts: map[string]int{"should-be-ignored": 999},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	m, err := db.Meta()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int{"NVD": 2, "KISA": 1}
+	if len(m.RatingCounts) != len(want) || m.RatingCounts["NVD"] != 2 || m.RatingCounts["KISA"] != 1 {
+		t.Errorf("Meta.RatingCounts = %v, want %v (derived from the ratings bucket, "+
+			"caller-supplied value ignored)", m.RatingCounts, want)
+	}
+	if _, ok := m.RatingCounts["should-be-ignored"]; ok {
+		t.Error("Meta.RatingCounts trusted the caller-supplied map instead of deriving it")
+	}
+}
+
+// TestMetaRatingCountsIgnoresSelfReportedProvenance is the exact defect a
+// review of this slice caught: an Annotator's own Provenance.Records is not
+// ground truth, so a caller that fills in Meta.Ratings with a self-reported
+// count wildly different from what was actually PutRating'd must not make
+// RatingCounts (or, downstream, db status's ratings: line) repeat that
+// claim. Records here is deliberately 0 for a source that DID rate
+// something, and a large positive number for a source that rated nothing at
+// all — the two ways self-report can lie in either direction.
+func TestMetaRatingCountsIgnoresSelfReportedProvenance(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// NVD actually rated one CVE, but will self-report Records: 0 below -
+	// the "ran and rated nothing" shape the review flagged.
+	if err := w.PutRating(advisory.Rating{CVE: "CVE-2026-9", Source: "NVD"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(Meta{
+		BuiltAt: time.Now(),
+		Ratings: map[string]Provenance{
+			"NVD":  {Records: 0},
+			"KISA": {Records: 5000}, // claims 5000 ratings; none were ever PutRating'd
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	m, err := db.Meta()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.RatingCounts["NVD"] != 1 {
+		t.Errorf(`RatingCounts["NVD"] = %d, want 1 - the self-reported Records:0 `+
+			"must not suppress what was actually stored", m.RatingCounts["NVD"])
+	}
+	if _, ok := m.RatingCounts["KISA"]; ok {
+		t.Errorf(`RatingCounts["KISA"] = %d present, want absent - KISA self-reported `+
+			"5000 but rated nothing; the self-report must not be trusted", m.RatingCounts["KISA"])
+	}
+}

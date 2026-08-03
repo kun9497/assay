@@ -114,13 +114,13 @@ func Update(ctx context.Context, dbPath string, providers []provider.Provider, a
 		total += p.Records
 	}
 	fmt.Fprintf(stdout, "database updated: %d advisories at %s\n", total, dbPath)
-	if len(meta.Ratings) > 0 {
-		ratingsTotal := 0
-		for _, p := range meta.Ratings {
-			ratingsTotal += p.Records
-		}
-		fmt.Fprintf(stdout, "%d ratings from %d source(s)\n", ratingsTotal, len(meta.Ratings))
-	}
+	// No second "N ratings from N source(s)" line here: the only trustworthy
+	// rating count is the one Bolt.SetMeta just derived from the stored
+	// bucket (Meta.RatingCounts), and Writer does not expose a way to read
+	// it back after SetMeta returns. Printing a self-reported total here
+	// would be exactly the over-claim `db status` was just fixed to refuse
+	// (see Meta.Ratings' own doc comment) — `assay db status` is where the
+	// derived, accurate count belongs, and it already shows it.
 	return 0
 }
 
@@ -188,13 +188,15 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 	// this is also what a reader would grep for. The path line above was
 	// renamed to "path:" so the two no longer read as a pair.
 	fmt.Fprintf(stdout, "databases: %s\n", databasesSummary(m.Databases))
-	// Which authorities have rated at least one CVE (D27), the same "visible
-	// without running a scan" reasoning as databases: above, and the same
-	// line shape and padding — but a different set: an authority can rate a
-	// CVE without authoring any stored advisory, so this cannot be read off
-	// Databases, and Meta.Ratings is recorded separately (see its own doc
-	// comment in internal/store/store.go).
-	fmt.Fprintf(stdout, "ratings:   %s\n", ratingsSummary(m.Ratings))
+	// Which authorities have ACTUALLY rated at least one CVE (D27), with how
+	// many — the same "visible without running a scan" reasoning as
+	// databases: above, and the same line shape and padding, but read from
+	// Meta.RatingCounts (derived from the stored ratings bucket), never from
+	// Meta.Ratings' self-reported Provenance: an annotator that ran and
+	// rated nothing must not make this line claim a source that rated
+	// something (see RatingCounts' own doc comment in
+	// internal/store/store.go).
+	fmt.Fprintf(stdout, "ratings:   %s\n", ratingsSummary(m.RatingCounts))
 	fmt.Fprintln(stdout)
 
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
@@ -216,6 +218,45 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 	if err := tw.Flush(); err != nil {
 		fmt.Fprintf(stderr, "error: write status: %v\n", err)
 		return 2
+	}
+
+	// A second, separately-headed table for rating sources (D27, D12): "how
+	// fresh is the NVD data in this database" is not answerable from the
+	// ratings: line alone (it names sources and counts, not dates), and
+	// folding annotators into the PROVIDER table above would answer a
+	// different question under one header — that table already means
+	// "advisory providers", and Provider/Ecosystems (D20) is genuinely a
+	// different claim than an annotator's CVE opinions ever make.
+	//
+	// DATA AS OF and SOURCE come from Meta.Ratings (self-report: neither is
+	// derivable from a stored Rating, D12). RECORDS comes from
+	// Meta.RatingCounts (derived, trustworthy) instead of the self-reported
+	// Provenance.Records on the same entry — an annotator that ran and rated
+	// fewer than it claims (or nothing at all) must not have this table
+	// repeat the claim either. A name present in Ratings but absent from
+	// RatingCounts (an annotator that genuinely rated nothing) prints 0, the
+	// honest answer, rather than being silently dropped from the table.
+	if len(m.Ratings) > 0 {
+		fmt.Fprintln(stdout)
+		rtw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(rtw, "RATING SOURCE\tDATA AS OF\tRECORDS\tSOURCE")
+		ratingNames := make([]string, 0, len(m.Ratings))
+		for name := range m.Ratings {
+			ratingNames = append(ratingNames, name)
+		}
+		sort.Strings(ratingNames)
+		for _, name := range ratingNames {
+			p := m.Ratings[name]
+			asOf := "unknown"
+			if !p.DataAsOf.IsZero() {
+				asOf = p.DataAsOf.Format("2006-01-02")
+			}
+			fmt.Fprintf(rtw, "%s\t%s\t%d\t%s\n", name, asOf, m.RatingCounts[name], p.Source)
+		}
+		if err := rtw.Flush(); err != nil {
+			fmt.Fprintf(stderr, "error: write status: %v\n", err)
+			return 2
+		}
 	}
 	return 0
 }
@@ -268,23 +309,33 @@ func databasesSummary(dbs []string) string {
 	return strings.Join(dbs, ", ")
 }
 
-// ratingsSummary lists which authorities have rated at least one CVE (D27) —
-// same line shape and message convention as databasesSummary, a different
-// set. Unlike Databases, Meta.Ratings is a map keyed by annotator name and
-// populated directly by dbcmd.Update (store/store.go's own doc comment on
-// why it is not derived by scanning a bucket the way Databases is), so this
-// function sorts it itself rather than trusting an input Bolt.SetMeta
-// already sorted.
-func ratingsSummary(ratings map[string]store.Provenance) string {
-	if len(ratings) == 0 {
-		return "nothing - no rating source has run against this database"
+// ratingsSummary lists which authorities have ACTUALLY rated at least one
+// CVE (D27), each with how many — same line shape and message convention as
+// databasesSummary, a different set, and with a count per name since "how
+// many" is exactly the freshness/completeness question D12 asks and nowhere
+// else in db status answers for ratings.
+//
+// Takes counts, not Meta.Ratings' self-reported Provenance: unlike
+// Databases, which comes to this function pre-sorted from Bolt.SetMeta,
+// Meta.RatingCounts is a derived map with no ordering guarantee of its own,
+// so this function sorts it itself. Trusting self-report here is exactly
+// the defect this function exists to not repeat — see RatingCounts' own doc
+// comment in internal/store/store.go for why counts must be derived rather
+// than reported.
+func ratingsSummary(counts map[string]int) string {
+	if len(counts) == 0 {
+		return "nothing - no CVE in this database has been rated by any authority"
 	}
-	names := make([]string, 0, len(ratings))
-	for name := range ratings {
+	names := make([]string, 0, len(counts))
+	for name := range counts {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	return strings.Join(names, ", ")
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, fmt.Sprintf("%s (%d)", name, counts[name]))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // compareRelease orders "v3.9" below "v3.10". Anything it cannot parse sorts

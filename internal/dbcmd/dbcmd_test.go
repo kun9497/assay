@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -165,35 +164,67 @@ func TestUpdate_RunsAnnotatorsAndPersistsRatings(t *testing.T) {
 	}
 }
 
-// TestUpdate_AnnotatorFailureRemovesTempAndExits2: a failing annotator must
-// fail the whole build exactly like a failing provider does. A database
-// holding advisories but silently missing the ratings a configured annotator
-// was supposed to add would look complete and under-report every band NVD
-// would otherwise have raised - the exact silent failure D14/D11 exist to
-// rule out for a provider, one door over.
-func TestUpdate_AnnotatorFailureRemovesTempAndExits2(t *testing.T) {
+// TestUpdate_AnnotatorFailureLeavesAnExistingDatabaseUntouched: a failing
+// annotator must fail the whole build exactly like a failing provider does.
+// A database holding advisories but silently missing the ratings a
+// configured annotator was supposed to add would look complete and
+// under-report every band NVD would otherwise have raised - the exact
+// silent failure D14/D11 exist to rule out for a provider, one door over.
+//
+// Proven against a database that ALREADY EXISTS before the failing Update
+// runs, not a fresh t.TempDir() with nothing in it: the real guarantee is
+// that a pre-existing, working database survives a failed rebuild attempt
+// untouched (dbcmd.go's own comment: "the live database is untouched either
+// way"), which "no file appears" cannot tell apart from "correctly refused
+// with nothing to protect". This mirrors TestUpdateReplacesAtomically's own
+// two-Update shape, except the second Update here fails.
+func TestUpdate_AnnotatorFailureLeavesAnExistingDatabaseUntouched(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "vulnerability.db")
-	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
-		ID: "GHSA-z", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+
+	first := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+		ID: "GHSA-first", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
+	}}}
+	var out, errOut bytes.Buffer
+	if code := Update(context.Background(), path, []provider.Provider{first}, nil, &out, &errOut); code != 0 {
+		t.Fatalf("initial Update = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+
+	// A second Update at the SAME path, whose provider would replace the
+	// advisory but whose annotator fails. If the pre-existing database were
+	// disturbed at all, this is the record that would prove it -
+	// "GHSA-second-should-never-appear" must never be found.
+	second := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+		ID: "GHSA-second-should-never-appear", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
 		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
 	}}}
 	a := fakeAnnotator{name: "NVD", err: errBoom}
-
-	var out, errOut bytes.Buffer
-	code := Update(context.Background(), path, []provider.Provider{p}, []provider.Annotator{a}, &out, &errOut)
+	out.Reset()
+	errOut.Reset()
+	code := Update(context.Background(), path, []provider.Provider{second}, []provider.Annotator{a}, &out, &errOut)
 	if code != 2 {
-		t.Fatalf("Update = %d, want 2 (stderr: %s)", code, errOut.String())
+		t.Fatalf("second Update = %d, want 2 (stderr: %s)", code, errOut.String())
 	}
 	if !strings.Contains(errOut.String(), "NVD") {
 		t.Errorf("stderr does not name the failing annotator:\n%s", errOut.String())
 	}
-	// Neither the live database nor a leftover temp file may survive: a
-	// database is either complete or absent, never half-built and mistaken
-	// for complete (mirrors TestUpdateReplacesAtomically's own check).
-	if _, err := os.Stat(path); err == nil {
-		t.Error("a failed annotator left a database in place - a scan would read it as complete")
+
+	db, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("the pre-existing database must still open cleanly after the failed "+
+			"second Update: %v", err)
 	}
+	defer db.Close()
+	got, err := db.Lookup("Go", "github.com/a/b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "GHSA-first" {
+		t.Errorf("Lookup = %+v, want only the FIRST build's advisory - a failed second "+
+			"Update must leave the pre-existing database exactly as it was", got)
+	}
+
 	matches, _ := filepath.Glob(filepath.Join(dir, "*.tmp"))
 	if len(matches) != 0 {
 		t.Errorf("leftover temp files after a failed annotator: %v", matches)
@@ -338,35 +369,42 @@ func TestDatabasesSummary(t *testing.T) {
 
 // `ratings:` is the only place a rating's attributable authority is visible
 // without running a scan (D27), matching databases:'s own shape and message
-// convention.
+// convention, with a count per name appended (D12: "how many" is exactly
+// the freshness/completeness question nothing else in db status answers for
+// ratings). Takes counts derived from the ratings bucket, never
+// Meta.Ratings' self-reported Provenance — see ratingsSummary's own doc
+// comment for why.
 func TestRatingsSummary(t *testing.T) {
 	tests := []struct {
 		name string
-		in   map[string]store.Provenance
+		in   map[string]int
 		want string
 	}{
 		{
 			// Unlike databasesSummary, this input is a map — sorted here
-			// rather than trusted pre-sorted, since Meta.Ratings carries no
-			// ordering guarantee of its own the way Bolt.SetMeta's Databases
-			// does.
-			name: "sorts several sources",
-			in:   map[string]store.Provenance{"NVD": {}, "KISA": {}},
-			want: "KISA, NVD",
+			// rather than trusted pre-sorted, since Meta.RatingCounts is
+			// derived with no ordering guarantee of its own the way
+			// Bolt.SetMeta's Databases has.
+			name: "sorts several sources and shows each count",
+			in:   map[string]int{"NVD": 12345, "KISA": 40},
+			want: "KISA (40), NVD (12345)",
 		},
 		{
 			name: "one source",
-			in:   map[string]store.Provenance{"NVD": {}},
-			want: "NVD",
+			in:   map[string]int{"NVD": 7},
+			want: "NVD (7)",
 		},
 		{
-			// A database no rating source has run against is visible, not an
-			// empty string that reads as "the line failed to render" — the
-			// same discipline coverageSummary/databasesSummary already
-			// follow for their own empty case.
+			// A source that ran and rated nothing must not appear at all
+			// (an empty map is exactly what a caller-supplied-but-derived-
+			// away entry looks like) - the defect this whole fix exists
+			// for. A database no rating source has run against is visible,
+			// not an empty string that reads as "the line failed to
+			// render" — the same discipline coverageSummary/
+			// databasesSummary already follow for their own empty case.
 			name: "none present says so",
 			in:   nil,
-			want: "nothing - no rating source has run against this database",
+			want: "nothing - no CVE in this database has been rated by any authority",
 		},
 	}
 	for _, tt := range tests {
@@ -380,17 +418,23 @@ func TestRatingsSummary(t *testing.T) {
 
 // TestStatus_ShowsRatingSources: `db status` must show which authorities
 // rated at least one CVE (D27) after a real Update run, the same "visible
-// without running a scan" guarantee `databases:` already gives. Deleting the
-// ratings: line (or wiring it to an always-empty value) is the mutation this
-// exists to catch.
+// without running a scan" guarantee `databases:` already gives — the count
+// alongside the name (D12: "how many" is exactly the freshness question),
+// and a DATA AS OF for the source in the RATING SOURCE table. Deleting the
+// ratings: line, the RATING SOURCE table, or wiring either to an
+// always-empty value is the mutation this exists to catch.
 func TestStatus_ShowsRatingSources(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vulnerability.db")
 	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
 		ID: "GHSA-w", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
 		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
 	}}}
+	// Two ratings from NVD, so the count in "ratings:" is checkable against
+	// something other than 1 (which could pass by a mutation that always
+	// prints 1 for any non-empty source).
 	a := fakeAnnotator{name: "NVD", ratings: []advisory.Rating{
 		{CVE: "CVE-2026-2", Source: "NVD"},
+		{CVE: "CVE-2026-3", Source: "NVD"},
 	}}
 
 	var out, errOut bytes.Buffer
@@ -403,11 +447,58 @@ func TestStatus_ShowsRatingSources(t *testing.T) {
 	if code := Status(path, &out, &errOut); code != 0 {
 		t.Fatalf("Status = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
-	// Asserted as the rendered pair, not "NVD" alone: CLAUDE.md's own
-	// substring-collision note (a short word inside surrounding prose) is
-	// exactly the hazard a bare Contains(s, "NVD") would risk here.
-	if !strings.Contains(out.String(), "ratings:   NVD") {
-		t.Errorf("status does not report NVD as a rating source:\n%s", out.String())
+	s := out.String()
+	// Asserted as the rendered pair with its count, not "NVD" alone:
+	// CLAUDE.md's own substring-collision note (a short word inside
+	// surrounding prose) is exactly the hazard a bare Contains(s, "NVD")
+	// would risk here, and the count is the fact D27/D12 actually turn on.
+	if !strings.Contains(s, "ratings:   NVD (2)") {
+		t.Errorf("status does not report NVD as a rating source with its count:\n%s", s)
+	}
+	// The RATING SOURCE table is where DataAsOf lives (D12) - the "ratings:"
+	// line alone cannot answer "how fresh is the NVD data in this database".
+	if !strings.Contains(s, "RATING SOURCE") {
+		t.Errorf("status does not print a RATING SOURCE table:\n%s", s)
+	}
+	if !strings.Contains(s, "2026-08-03") {
+		t.Errorf("status does not report the rating source's DataAsOf:\n%s", s)
+	}
+}
+
+// TestStatus_AnAnnotatorThatRatesNothingIsNotClaimedAsASource is the exact
+// defect a review of this slice caught (D20's own hazard, one bucket over):
+// an annotator that runs successfully but emits zero ratings must not make
+// `ratings:` claim a source that rated something. Meta.RatingCounts is
+// derived from the stored ratings bucket, so an annotator with nothing to
+// show for itself simply is not in it - unlike the earlier, self-report-based
+// design, where Records: 0 still left the name in the map and the line
+// printed "ratings:   NVD" over an empty bucket.
+func TestStatus_AnAnnotatorThatRatesNothingIsNotClaimedAsASource(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+		ID: "GHSA-empty-ratings", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
+	}}}
+	// Ran successfully (nil error), emitted nothing - a legitimate "the feed
+	// had nothing to say" outcome, not a failure.
+	a := fakeAnnotator{name: "NVD", ratings: nil}
+
+	var out, errOut bytes.Buffer
+	if code := Update(context.Background(), path, []provider.Provider{p}, []provider.Annotator{a}, &out, &errOut); code != 0 {
+		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := Status(path, &out, &errOut); code != 0 {
+		t.Fatalf("Status = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	s := out.String()
+	if strings.Contains(s, "ratings:   NVD") {
+		t.Errorf("status claims NVD as a rating source, but it rated nothing:\n%s", s)
+	}
+	if !strings.Contains(s, "ratings:   nothing") {
+		t.Errorf("status does not say plainly that nothing was rated:\n%s", s)
 	}
 }
 

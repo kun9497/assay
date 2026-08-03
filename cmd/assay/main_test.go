@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/provider/nvd"
 	"github.com/kun9497/assay/internal/report"
 	"github.com/kun9497/assay/internal/scancmd"
 	"github.com/kun9497/assay/internal/severity"
@@ -837,4 +838,41 @@ func TestNVDOptionsFromEnv_PassesAPIKeyThrough(t *testing.T) {
 			t.Errorf("nvdOptionsFromEnv().APIKey = %q, want empty when NVD_API_KEY is unset", got.APIKey)
 		}
 	})
+}
+
+// TestDBUpdateAnnotators_ConstructsNVDWithTheAPIKeyFromEnv closes the gap
+// TestNVDOptionsFromEnv_PassesAPIKeyThrough cannot: that test only proves
+// nvdOptionsFromEnv reads NVD_API_KEY correctly in isolation, never that the
+// "db update" call site actually threads its result into the constructed
+// annotator. Mutating the call site to `nvd.New(nvd.Options{})` — dropping
+// the argument while keeping the import and the call — compiles, and left
+// every other test in this package (and the whole suite) green. This
+// substitutes newNVDAnnotator with a spy so the actual Options nvd.New would
+// have received is observable directly, without dbUpdateAnnotators (or `db
+// update` itself) ever calling Annotate and reaching the real network
+// nvd.New's BaseURL defaults to.
+func TestDBUpdateAnnotators_ConstructsNVDWithTheAPIKeyFromEnv(t *testing.T) {
+	t.Setenv("NVD_API_KEY", "spy-key-1")
+
+	var gotOpts nvd.Options
+	sawCall := false
+	orig := newNVDAnnotator
+	newNVDAnnotator = func(opts nvd.Options) *nvd.Provider {
+		gotOpts, sawCall = opts, true
+		return orig(opts)
+	}
+	defer func() { newNVDAnnotator = orig }()
+
+	annotators := dbUpdateAnnotators()
+
+	if !sawCall {
+		t.Fatal("dbUpdateAnnotators never constructed an NVD annotator")
+	}
+	if gotOpts.APIKey != "spy-key-1" {
+		t.Errorf("nvd.New was called with APIKey %q, want %q (NVD_API_KEY was not threaded through)",
+			gotOpts.APIKey, "spy-key-1")
+	}
+	if len(annotators) != 1 || annotators[0].Name() != nvd.SourceName {
+		t.Errorf("dbUpdateAnnotators() = %+v, want exactly one NVD annotator", annotators)
+	}
 }

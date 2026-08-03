@@ -116,7 +116,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		case "update":
 			return dbcmd.Update(context.Background(), path,
 				[]provider.Provider{osv.New(osv.Ecosystems, "")},
-				[]provider.Annotator{nvd.New(nvdOptionsFromEnv())},
+				dbUpdateAnnotators(),
 				stdout, stderr)
 		case "status":
 			return dbcmd.Status(path, stdout, stderr)
@@ -146,6 +146,25 @@ func run(args []string, stdout, stderr io.Writer) int {
 // header" (a slower, unauthenticated sync, not a failure).
 func nvdOptionsFromEnv() nvd.Options {
 	return nvd.Options{APIKey: os.Getenv("NVD_API_KEY")}
+}
+
+// newNVDAnnotator constructs the NVD annotator. A package variable, not a
+// direct call to nvd.New at the "update" call site, so a test can substitute
+// a spy and observe what Options actually reached it — proving NVD_API_KEY
+// is threaded all the way through to construction, not just read
+// (nvdOptionsFromEnv's own test only proves the read half; a mutation
+// dropping the argument entirely, e.g. `nvd.New(nvd.Options{})`, still
+// compiled and left that test, and every other test in this package, green).
+// Swapping this out never needs a network call: the spy can return the same
+// real *nvd.Provider nvd.New would have, or nothing at all, since dbUpdateAnnotators
+// itself never calls Annotate.
+var newNVDAnnotator = nvd.New
+
+// dbUpdateAnnotators is every provider.Annotator `db update` runs, built
+// from the environment. Pulled out of the "update" case as its own function
+// so a test can call it directly and inspect what reaches newNVDAnnotator.
+func dbUpdateAnnotators() []provider.Annotator {
+	return []provider.Annotator{newNVDAnnotator(nvdOptionsFromEnv())}
 }
 
 // scan is the pipeline entry point: parse the target into an inventory, match

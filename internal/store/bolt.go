@@ -236,6 +236,30 @@ func (b *Bolt) SetMeta(m Meta) error {
 		}
 		m.Databases = slices.Sorted(maps.Keys(dbs))
 
+		// RatingCounts (D27) is read from the ratings bucket actually
+		// stored, not from annotator self-report, exactly the reasoning
+		// above for Databases: a rating's Source is the tail of its own key
+		// ("<CVE>\x00<Source>"), so trusting a self-reported count would let
+		// an annotator that ran and rated nothing (or fewer than it claims)
+		// still make db status assert a source that rated something — the
+		// same over-claim D20 refuses to let a stored ecosystem entry make.
+		//
+		// Derived from the key alone, not by decoding each Rating blob: the
+		// key already carries Source verbatim (PutRating's own key
+		// construction), so there is nothing in the blob this scan needs
+		// that isn't already in the key.
+		counts := map[string]int{}
+		if err := tx.Bucket(bucketRatings).ForEach(func(k, _ []byte) error {
+			_, source, ok := bytes.Cut(k, []byte(keySep))
+			if ok && len(source) > 0 {
+				counts[string(source)]++
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		m.RatingCounts = counts
+
 		blob, err := json.Marshal(m)
 		if err != nil {
 			return err
