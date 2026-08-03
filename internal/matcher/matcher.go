@@ -4,6 +4,7 @@ package matcher
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -47,9 +48,14 @@ type Finding struct {
 	Severity severity.Band
 	Score    float64
 	// Ratings is what every database that described this vulnerability said
-	// about it (D25). Never empty: a single-source finding carries one rating,
-	// so no renderer has to tell "no source said anything" apart from "we
-	// dropped them".
+	// about it (D25). Never empty on a finding Match produced: a single-source
+	// finding carries one rating, so no renderer has to tell "no source said
+	// anything" apart from "we dropped them".
+	//
+	// As with Severity below, Match is the only legitimate constructor, and a
+	// Finding built any other way — tests included — must populate this. The
+	// zero value is an empty slice, which is the one state the renderers are
+	// entitled to assume cannot happen.
 	//
 	// Severity and Score above are the highest across these, and Advisory and
 	// Evidence are the record that set it. Keeping the rest is not a display
@@ -87,6 +93,11 @@ type Rating struct {
 // Equal standing is broken by name rather than left to arrival order. That is
 // the whole point of D25 — a tie resolved by "whichever the index listed
 // first" is the defect, not a harmless coin flip.
+//
+// One consequence is deliberate: a record banding this none (a real CVSS 0.0)
+// outranks a sibling that rated nothing, so the finding reports none and stops
+// counting toward --fail-on-unknown. That is the honest answer. Unknown means
+// nobody assessed it, and here somebody did.
 func beats(cand, cur Rating) bool {
 	candUnrated := cand.Severity == severity.Unknown
 	curUnrated := cur.Severity == severity.Unknown
@@ -203,18 +214,21 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 		// the finding it belongs to, so a later record joins that finding
 		// instead of starting a second one.
 		//
-		// Keyed on ANY shared identifier, not on the record's own ID. Two
-		// records that name each other are the easy case; the common one is two
-		// records that name only the same CVE — GHSA and PYSEC describing one
-		// Django vulnerability, 161 of the 169 measured multi-record groups.
-		// Matching on the record's own ID alone missed exactly those, which is
-		// how one vulnerability produced two findings.
+		// Keyed on ANY shared identifier, not on the record's own ID. Records
+		// that name each other are the easy case, and the live GHSA and PYSEC
+		// records for one Django CVE do exactly that — each lists the other's
+		// ID, checked against OSV. Records sharing only a CVE do not, and
+		// keying on the record's own ID missed those entirely: one
+		// vulnerability, two findings. It is also the only link a KISA record
+		// will have with a GHSA one.
 		//
-		// A record that links two previously separate groups is left linking to
-		// the first of them rather than merging the two. It needs three records
-		// where the third aliases two that never named each other, which the
-		// measured data does not contain; and the consequence is a duplicated
-		// finding, which is visible, rather than a dropped one, which is not.
+		// A record naming identifiers from two groups merges them, rather than
+		// joining the first and leaving the second standing. Attaching to the
+		// first is the cheaper code and it looked adequate — a duplicate
+		// finding is visible where a dropped one is not — but it leaves the
+		// finding COUNT dependent on arrival order, which is the property D25
+		// exists to establish. Given A(CVE-1), B(CVE-2), C(CVE-1, CVE-2):
+		// arriving A, B, C yields two findings and C, A, B yields one.
 		group := make(map[string]int)
 
 		for _, lookupName := range names {
@@ -272,28 +286,15 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 							Score:      score,
 							Fixed:      ev.Fixed,
 						}
-						idx, joined := groupOf(group, ids)
-						if joined {
-							f := &res.Findings[idx]
-							f.Ratings = append(f.Ratings, r)
-							// The finding shows the record that set its band, so
-							// what is displayed follows the verdict instead of
-							// the order the index happened to list. The reigning
-							// rating is read back off the finding rather than
-							// tracked alongside it, so there is no invariant
-							// about Ratings' order for the sort below to break.
-							cur := Rating{
-								Database:   f.Advisory.Database,
-								AdvisoryID: f.Advisory.ID,
-								Severity:   f.Severity,
-								Score:      f.Score,
+						idx := -1
+						for _, g := range groupsOf(group, ids) {
+							if idx == -1 {
+								idx = g
+								continue
 							}
-							if beats(r, cur) {
-								f.Advisory, f.Evidence = a, ev
-								f.MatchedName = lookupName
-								f.Severity, f.Score = band, score
-							}
-						} else {
+							absorb(res.Findings, group, idx, g)
+						}
+						if idx == -1 {
 							idx = len(res.Findings)
 							res.Findings = append(res.Findings, Finding{
 								Package:     p,
@@ -304,6 +305,14 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 								Score:       score,
 								Ratings:     []Rating{r},
 							})
+						} else {
+							f := &res.Findings[idx]
+							f.Ratings = append(f.Ratings, r)
+							if beats(r, winnerOf(*f)) {
+								f.Advisory, f.Evidence = a, ev
+								f.MatchedName = lookupName
+								f.Severity, f.Score = band, score
+							}
 						}
 						for _, id := range ids {
 							group[id] = idx
@@ -315,6 +324,16 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 		}
 	}
 
+	// Drop the entries absorb emptied. Deferred to here because group's values
+	// index this slice and stay valid only while it does not shift.
+	live := res.Findings[:0]
+	for _, f := range res.Findings {
+		if len(f.Ratings) > 0 {
+			live = append(live, f)
+		}
+	}
+	res.Findings = live
+
 	for i := range res.Findings {
 		sortRatings(res.Findings[i].Ratings)
 	}
@@ -323,14 +342,59 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 	return res, nil
 }
 
-// groupOf finds the finding that any of ids already belongs to.
-func groupOf(group map[string]int, ids []string) (int, bool) {
+// groupsOf returns the findings that ids already belong to, lowest index
+// first, without repeats. More than one means this record links groups that
+// were built separately.
+//
+// Sorted rather than returned in the order the identifiers happen to be listed
+// on the record, so which finding absorbs the others is a property of the scan
+// and not of how one advisory ordered its aliases.
+func groupsOf(group map[string]int, ids []string) []int {
+	var out []int
 	for _, id := range ids {
-		if idx, ok := group[id]; ok {
-			return idx, true
+		idx, ok := group[id]
+		if !ok || slices.Contains(out, idx) {
+			continue
+		}
+		out = append(out, idx)
+	}
+	sort.Ints(out)
+	return out
+}
+
+// absorb folds the finding at src into the one at dst and empties src.
+//
+// The emptied entry is left in place and dropped after the package loop
+// finishes, because every value in group is an index into this slice and
+// removing an element here would silently repoint all of them.
+func absorb(findings []Finding, group map[string]int, dst, src int) {
+	d, s := &findings[dst], &findings[src]
+	d.Ratings = append(d.Ratings, s.Ratings...)
+	if beats(winnerOf(*s), winnerOf(*d)) {
+		d.Advisory, d.Evidence = s.Advisory, s.Evidence
+		d.MatchedName = s.MatchedName
+		d.Severity, d.Score = s.Severity, s.Score
+	}
+	s.Ratings = nil
+	for id, idx := range group {
+		if idx == src {
+			group[id] = dst
 		}
 	}
-	return 0, false
+}
+
+// winnerOf is the rating that set a finding's band — the record it displays.
+//
+// Reconstructed from the finding rather than tracked beside it: Advisory,
+// Severity and Score are only ever assigned together, so this is exact, and it
+// leaves Ratings free to be sorted without disturbing anything.
+func winnerOf(f Finding) Rating {
+	return Rating{
+		Database:   f.Advisory.Database,
+		AdvisoryID: f.Advisory.ID,
+		Severity:   f.Severity,
+		Score:      f.Score,
+	}
 }
 
 // vectorsOf unwraps the CVSS vector strings carried on an advisory. It does
@@ -349,12 +413,22 @@ func vectorsOf(a advisory.Advisory) []string {
 // and its aliases.
 //
 // Upstream is deliberately excluded. OSV defines it as "derived from", not as
-// identity, so treating it as one would suppress a genuinely distinct advisory
-// — a false negative, where an extra alias line is only noise. It is still read
-// for the KISA join (D3), which is a different question: which records describe
-// the same CVE, not which are the same finding. Measured on the live Go dump,
-// upstream is empty on all 8,510 records while aliases already carry the CVE,
-// GO- and BIT- identifiers, so nothing is lost by leaving it out.
+// identity, so a record can declare an upstream it is not the same
+// vulnerability as.
+//
+// The reason for excluding it changed when findings started keeping every
+// record's rating. It used to be a false-negative argument — a wrongly joined
+// record was dropped and its advisory never reported. That is no longer true:
+// a joined record contributes a Rating carrying its own severity and fixed
+// version, so nothing disappears. What survives is the weaker but still
+// sufficient argument that merging two distinct vulnerabilities into one
+// finding reports one row where two are owed, and understates the work.
+//
+// Upstream is still read for the KISA join (D3), which asks a different
+// question: which records describe the same CVE, not which are the same
+// finding. Measured on the live Go dump, upstream is empty on all 8,510
+// records while aliases already carry the CVE, GO- and BIT- identifiers, so
+// leaving it out costs nothing today either.
 func identifiers(a advisory.Advisory) []string {
 	ids := make([]string, 0, 1+len(a.Aliases))
 	ids = append(ids, a.ID)

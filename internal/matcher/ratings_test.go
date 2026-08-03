@@ -147,6 +147,9 @@ func TestMatch_TheDisplayedRecordIsTheOneThatSetTheBand(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if len(res.Findings) != 1 {
+				t.Fatalf("got %d findings, want 1", len(res.Findings))
+			}
 			f := res.Findings[0]
 			if f.Advisory.ID != "GHSA-w24h-v9qh-8gxj" {
 				t.Errorf("displayed advisory = %s, want the GHSA record — it is the "+
@@ -166,6 +169,9 @@ func TestMatch_AnUnratedSourceDoesNotDiluteARatedOne(t *testing.T) {
 	res, err := New(twoSources(ghsaRec(), pysecRec())).Match(djangoTarget())
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("got %d findings, want 1", len(res.Findings))
 	}
 	f := res.Findings[0]
 	if f.Severity != severity.Critical {
@@ -194,6 +200,114 @@ func TestMatch_AllSourcesUnratedIsUnknown(t *testing.T) {
 	}
 	if len(f.Ratings) != 2 {
 		t.Errorf("got %d ratings, want 2 — both sources are still recorded", len(f.Ratings))
+	}
+	// Nothing separates these two on severity, so the displayed record comes
+	// down to the tiebreak. Without one it would be whichever the store listed
+	// first, which is the defect in miniature.
+	if f.Advisory.ID != "GO-2022-0999" {
+		t.Errorf("displayed advisory = %s, want GO-2022-0999 — with both sources "+
+			"unrated the tie breaks on database name, and GO sorts before PYSEC",
+			f.Advisory.ID)
+	}
+}
+
+// Two records from ONE database, equally unrated, differing only in their ID.
+// Every earlier tiebreak has run out, so this is the last one — and without it
+// the winner is whichever record the index happened to list first.
+func TestMatch_TwoRecordsFromOneDatabaseBreakTheTieOnID(t *testing.T) {
+	lo, hi := pysecRec(), pysecRec()
+	lo.ID, hi.ID = "PYSEC-2022-101", "PYSEC-2022-999"
+	for _, order := range []struct {
+		name          string
+		first, second advisory.Advisory
+	}{
+		{"lower id first", lo, hi},
+		{"higher id first", hi, lo},
+	} {
+		t.Run(order.name, func(t *testing.T) {
+			res, err := New(twoSources(order.first, order.second)).Match(djangoTarget())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Findings) != 1 {
+				t.Fatalf("got %d findings, want 1", len(res.Findings))
+			}
+			f := res.Findings[0]
+			if f.Advisory.ID != "PYSEC-2022-101" {
+				t.Errorf("displayed advisory = %s, want PYSEC-2022-101", f.Advisory.ID)
+			}
+			var ids []string
+			for _, r := range f.Ratings {
+				ids = append(ids, r.AdvisoryID)
+			}
+			want := []string{"PYSEC-2022-101", "PYSEC-2022-999"}
+			if fmt.Sprint(ids) != fmt.Sprint(want) {
+				t.Errorf("rating order = %v, want %v — one database, so the sort "+
+					"falls through to the advisory ID", ids, want)
+			}
+		})
+	}
+}
+
+// Three records where the third names identifiers from two groups that were
+// built separately. Merging them is what keeps the FINDING COUNT independent
+// of arrival order: joining the first group and leaving the second standing
+// gives two findings one way round and one the other.
+func TestMatch_ARecordLinkingTwoGroupsMergesThem(t *testing.T) {
+	mk := func(id, database, alias string) advisory.Advisory {
+		a := advWithRange(id, "PyPI", "django", "0", "3.2.13", advisory.RangeEcosystem)
+		a.Database, a.Aliases = database, []string{alias}
+		return a
+	}
+	a := mk("GHSA-aaaa", "GHSA", "CVE-2022-0001")
+	b := mk("PYSEC-2022-2", "PYSEC", "CVE-2022-0002")
+	c := mk("GO-2022-0003", "GO", "CVE-2022-0001")
+	c.Aliases = []string{"CVE-2022-0001", "CVE-2022-0002"}
+	// The band lives on the record in the group that gets ABSORBED when the
+	// linking record arrives last. A merge that keeps the surviving group's
+	// winner would report this critical vulnerability as unrated.
+	b.Severity = []advisory.Severity{{Type: "CVSS_V3", Score: vecCritical}}
+
+	for _, order := range []struct {
+		name string
+		recs []advisory.Advisory
+	}{
+		{"linking record last", []advisory.Advisory{a, b, c}},
+		{"linking record first", []advisory.Advisory{c, a, b}},
+		{"linking record between", []advisory.Advisory{a, c, b}},
+	} {
+		t.Run(order.name, func(t *testing.T) {
+			s := fakeStore{byKey: map[string][]advisory.Advisory{
+				key("PyPI", "django"): order.recs,
+			}}
+			res, err := New(s).Match(djangoTarget())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Findings) != 1 {
+				t.Fatalf("got %d findings, want 1 — the third record names both "+
+					"of the others' CVEs, so all three are one vulnerability",
+					len(res.Findings))
+			}
+			var ids []string
+			for _, r := range res.Findings[0].Ratings {
+				ids = append(ids, r.AdvisoryID)
+			}
+			want := []string{"GHSA-aaaa", "GO-2022-0003", "PYSEC-2022-2"}
+			if fmt.Sprint(ids) != fmt.Sprint(want) {
+				t.Errorf("ratings = %v, want %v", ids, want)
+			}
+			f := res.Findings[0]
+			if f.Severity != severity.Critical {
+				t.Errorf("Severity = %v, want critical — the only rated record is "+
+					"in the group that gets absorbed", f.Severity)
+			}
+			if f.Advisory.ID != "PYSEC-2022-2" {
+				t.Errorf("displayed advisory = %s, want PYSEC-2022-2 — merging must "+
+					"carry the absorbed group's winner across, not keep its own",
+					f.Advisory.ID)
+			}
+		})
 	}
 }
 
