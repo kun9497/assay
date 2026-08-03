@@ -55,6 +55,45 @@ func TestParse_V3PackagesObject(t *testing.T) {
 	}
 }
 
+// Name and Version are not enough to match anything - the matcher keys on
+// Type, Ecosystem, and (for distro packages) Source. A typo here, such as
+// Ecosystem: "npmjs", compiles, catalogs a Package, and simply never matches
+// an advisory: no crash, no error, a confident wrong answer. Locations is
+// checked too, since it is what --explain shows as the evidence for a
+// finding (D10). gomod_test.go:71-82 asserts the same shape for its own
+// cataloger.
+func TestParse_CatalogedPackageCarriesMatchableFields(t *testing.T) {
+	p := write(t, `{
+	  "lockfileVersion": 3,
+	  "packages": {
+	    "": {"version": "1.0.0"},
+	    "node_modules/lodash": {"version": "4.17.11"}
+	  }
+	}`)
+	pkgs, _, err := Parse(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pkgs) != 1 {
+		t.Fatalf("got %d packages, want 1", len(pkgs))
+	}
+	pk := pkgs[0]
+	if pk.Type != "npm" {
+		t.Errorf("Type = %q, want npm", pk.Type)
+	}
+	if pk.Ecosystem != "npm" {
+		t.Errorf("Ecosystem = %q, want npm", pk.Ecosystem)
+	}
+	// package-lock.json names no distro; D8's source/binary split is a distro
+	// concern, and Source must stay nil rather than fabricate one.
+	if pk.Source != nil {
+		t.Errorf("Source = %+v, want nil", pk.Source)
+	}
+	if len(pk.Locations) != 1 || pk.Locations[0].Path != p {
+		t.Errorf("Locations = %+v, want one entry naming %s", pk.Locations, p)
+	}
+}
+
 // npm 6 wrote lockfileVersion 1 with a nested "dependencies" tree, and those
 // files are still in real repositories. Reading only "packages" returns zero
 // packages for them — a silent empty result, which is the defect this slice
@@ -84,6 +123,50 @@ func TestParse_V1NestedDependencies(t *testing.T) {
 		if got[name] != want {
 			t.Errorf("%s = %q, want %q — nested dependencies must be walked (got %v)",
 				name, got[name], want, got)
+		}
+	}
+}
+
+// catalogDependencies sorts at every level of the v1 tree, not just the top.
+// TestParse_V1NestedDependencies only compares through a map, which cannot
+// see order at all, so it stays green even if the recursive call sorts
+// nothing. This asserts the returned SLICE directly: apple/mango/zebra pin
+// the top level, banana (nested under apple) and yak (nested under zebra)
+// pin that sorting also holds one level down. Declaration order in the
+// fixture (zebra, mango, apple) differs from the expected sorted DFS order,
+// so an unsorted range would need to get lucky to pass.
+func TestParse_V1DependenciesSortedAtEveryLevel(t *testing.T) {
+	p := write(t, `{
+	  "lockfileVersion": 1,
+	  "dependencies": {
+	    "zebra": {
+	      "version": "9.0.0",
+	      "dependencies": {"yak": {"version": "9.9.0"}}
+	    },
+	    "mango": {"version": "5.0.0"},
+	    "apple": {
+	      "version": "1.0.0",
+	      "dependencies": {"banana": {"version": "2.0.0"}}
+	    }
+	  }
+	}`)
+	pkgs, _, err := Parse(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, pk := range pkgs {
+		got = append(got, pk.Name)
+	}
+	// apple's own subtree (banana) is fully walked before mango, since the
+	// walk recurses into each entry immediately rather than breadth-first.
+	want := []string{"apple", "banana", "mango", "zebra", "yak"}
+	if len(got) != len(want) {
+		t.Fatalf("packages in order %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("packages in order %v, want %v (sorted at every level of the v1 tree)", got, want)
 		}
 	}
 }
@@ -177,6 +260,37 @@ func TestParse_PackagesInSortedKeyOrder(t *testing.T) {
 	}
 }
 
+// A real lockfileVersion 2 file carries BOTH "packages" (npm's canonical,
+// richer shape, introduced in v2) and "dependencies" (kept only for
+// backward compatibility with npm 6 tooling that reads v1 files). The two
+// are populated from the same resolution, but nothing stops them from
+// disagreeing - most often because "dependencies" was left over from an
+// npm 6 -> 7 upgrade and never regenerated. "packages" must win: it is the
+// shape npm itself reads when both are present.
+func TestParse_PackagesObjectTakesPrecedenceOverDependencies(t *testing.T) {
+	p := write(t, `{
+	  "lockfileVersion": 2,
+	  "packages": {
+	    "": {"version": "1.0.0"},
+	    "node_modules/lodash": {"version": "4.17.11"}
+	  },
+	  "dependencies": {
+	    "lodash": {"version": "4.17.10"}
+	  }
+	}`)
+	pkgs, _, err := Parse(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pkgs) != 1 {
+		t.Fatalf("got %d packages, want 1 (from \"packages\" only, not one from each): %+v", len(pkgs), pkgs)
+	}
+	if pkgs[0].Version != "4.17.11" {
+		t.Errorf("Version = %q, want 4.17.11 - \"packages\" is the canonical shape "+
+			"and must win over the legacy \"dependencies\" tree", pkgs[0].Version)
+	}
+}
+
 // A malformed lockfile is an error, not an empty result. "Zero packages"
 // renders as a clean scan; an error exits 2.
 func TestParse_MalformedJSONIsAnErrorNotAnEmptyResult(t *testing.T) {
@@ -192,5 +306,20 @@ func TestParse_MalformedJSONIsAnErrorNotAnEmptyResult(t *testing.T) {
 	// both the path and the cause - the exact defect CLAUDE.md records.
 	if !strings.Contains(err.Error(), p) {
 		t.Errorf("error %q does not name the file it failed on (%s)", err, p)
+	}
+}
+
+// A directory scan may find a manifest entry for a lockfile that turns out
+// not to exist (e.g. gitignored, or removed since the walk), and the error
+// still has to say which of possibly many lockfiles it was - gomod covers
+// the equivalent case for go.mod.
+func TestParse_MissingFileNamesThePath(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "package-lock.json") // never written
+	_, _, err := Parse(p)
+	if err == nil {
+		t.Fatal("Parse returned nil error for a lockfile that does not exist")
+	}
+	if !strings.Contains(err.Error(), p) {
+		t.Errorf("error %q does not name the missing path %s", err, p)
 	}
 }
