@@ -27,15 +27,23 @@ Alpine packages match through their *source* package, so an `openssl` advisory r
 installed `libssl3`, and the report names both. That indirection is where distro scanners
 silently miss things.
 
+Go **binaries** and **directories** are read too — `debug/buildinfo` for the former,
+`go.mod` for the latter, with the Go toolchain itself matched as the package `stdlib`.
+
 Findings carry a severity band derived from the stored CVSS vector, and `--fail-on`,
 `--fail-on-unknown` and `--fail-on-incomplete` turn that into an exit code CI can gate on.
 `--output json` gives a stable machine-readable document and `--explain <id>` prints why a
 single finding matched.
 
-Everything else below is still the design target, not the build. Binaries
-and directories are not read. Non-Alpine images are read, but their packages cannot
-be matched: `assay scan debian:12` reports that it found no supported package database and
-exits 2, rather than reporting a clean image it never checked.
+A finding keeps **every** database's rating rather than the first one matched, and the
+verdict is the highest band across them. On a real Django 3.2.12 scan that is 15 of 19
+findings described by two sources, 14 of which only one of the two rated at all — so before
+this, 14 verdicts turned on which record the package index happened to list first.
+
+Everything else below is still the design target, not the build. Non-Alpine images are read,
+but their packages cannot be matched: `assay scan debian:12` reports that it found no
+supported package database and exits 2, rather than reporting a clean image it never
+checked.
 
 [`docs/superpowers/specs/2026-07-29-assay-roadmap.md`](docs/superpowers/specs/2026-07-29-assay-roadmap.md)
 carries the full design and the reasoning behind each decision.
@@ -382,7 +390,10 @@ anywhere.
 - [x] CVSS v3.1 and v4.0 scoring, checked against every vector in the live database
 - [x] JSON output with a schema version and a golden-file test
 - [x] Explain mode — show the matching evidence for a single finding
+- [x] Per-source ratings — a finding keeps every database's assessment, the gate takes the
+      highest (D25)
 - [ ] SARIF output (see `docs/deferred-decisions.md`)
+- [ ] NVD as a second rating source (see `docs/deferred-decisions.md`)
 
 **⑤ KISA enrichment** — Korean descriptions and severity joined onto matched findings.
 **On hold: investigated 2026-08-02 and the data does not support it.**

@@ -10,15 +10,22 @@ the vulnerability database, and match the two. In the anchore ecosystem those ar
 separate projects (`syft`, `vunnel` + `grype-db`, `grype`). KISA/KNVD advisory data is a
 first-class provider — that is the main reason this exists rather than using grype.
 
-Slices ①, ②, ④ are built: `assay db update` builds a database from OSV (Go, npm, PyPI,
-Alpine), `assay scan` reads SBOMs and container images, matches them, and returns a verdict
-CI can gate on. Not built: binary and directory scanning (③), the KISA provider (⑤), and
-non-Alpine distros. Check what exists before assuming — this paragraph has been wrong before.
+Slices ①–④ are built: `assay db update` builds a database from OSV (Go, npm, PyPI, Alpine),
+and `assay scan` reads SBOMs, container images, Go binaries and directories, matches them,
+and returns a verdict CI can gate on. A finding carries every source's rating and the gate
+takes the highest (D25). Not built: the KISA provider (⑤, on hold — the data does not
+support it, see `docs/deferred-decisions.md`), non-Alpine distros, npm/PyPI directory
+scanning, SARIF, and NVD ingestion.
+
+**Check what exists before assuming — this paragraph has been wrong twice.** It claimed
+`scan` was unimplemented after slice 1 shipped it, and claimed binaries and directories were
+unread after slice 3 shipped both. `README.md`'s roadmap checkboxes are the more reliable
+record because they are edited task by task; this paragraph is edited from memory.
 
 **Read these before proposing anything structural:**
 
 - `docs/superpowers/specs/2026-07-29-assay-roadmap.md` — the reference design. Every
-  decision is recorded as `D1`…`D21` with its reasoning. Cite the decision ID when
+  decision is recorded as `D1`…`D25` with its reasoning. Cite the decision ID when
   discussing one.
 - `docs/deferred-decisions.md` — **required before suggesting a feature.** Most obvious
   gaps (Debian support, RHEL support, VEX, prebuilt database artifacts, database age
@@ -95,6 +102,15 @@ not a schema change.
 `low < medium < high < critical` ordering rather than below it. Unknown findings are always
 reported and always counted in the summary, do not trip `--fail-on <band>` on their own, and
 are gated only by the explicit `--fail-on-unknown`. Severity vectors may be CVSS v3 or v4.
+
+**A finding keeps every source's rating** (D25). Two databases routinely describe one
+vulnerability and disagree: 8,893 of 19,715 measured CVE groups carry more than one record,
+and 5,423 of those have one record rated where another is not. `Finding.Ratings` holds each
+authoring database's own band, score and fixed version; `Finding.Severity` is the highest
+across them and `Finding.Advisory` is the record that set it, so the report agrees with its
+own verdict. **Never resolve a tie by arrival order** — that was the defect, not a harmless
+coin flip. Findings group on *any* shared identifier, not the record's own ID, because a
+KISA record and a GHSA one will share only a CVE.
 
 **Flag names follow grype where semantics match** (D18) — it aids migration and makes the
 differential testing scriptable. When a shared name gains different behaviour, add a row to
@@ -179,7 +195,7 @@ Specs and user-facing documentation stay bilingual; plans do not.
 
 Run the main loop on the work that needs full context; delegate work that is bounded,
 independently verifiable, and parallel. The rule of thumb: **if the task's output is a
-conclusion or an artifact you can check, delegate it. If it requires knowing why D1–D18 were
+conclusion or an artifact you can check, delegate it. If it requires knowing why D1–D25 were
 decided, keep it.**
 
 **Delegate**
