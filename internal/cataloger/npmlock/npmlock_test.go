@@ -127,27 +127,46 @@ func TestParse_V1NestedDependencies(t *testing.T) {
 	}
 }
 
-// catalogDependencies sorts at every level of the v1 tree, not just the top.
-// TestParse_V1NestedDependencies only compares through a map, which cannot
-// see order at all, so it stays green even if the recursive call sorts
-// nothing. This asserts the returned SLICE directly: apple/mango/zebra pin
-// the top level, banana (nested under apple) and yak (nested under zebra)
-// pin that sorting also holds one level down. Declaration order in the
-// fixture (zebra, mango, apple) differs from the expected sorted DFS order,
-// so an unsorted range would need to get lucky to pass.
+// catalogDependencies sorts at every level of the v1 tree via ONE sortedKeys()
+// call reached through self-recursion, so a regression that deletes it breaks
+// every level at once - a fixture with a single-key nested map (as an earlier
+// version of this test used) cannot tell that apart from a fixture that only
+// exercises the top level, because a one-key map has exactly one possible
+// iteration order and "proves" nothing about sorting on its own; all of that
+// version's detection came from the top level, and its comment claiming
+// otherwise was wrong.
+//
+// Both levels here carry five keys each, declared out of sorted order, so
+// each level independently needs Go's per-run randomized map iteration to
+// land on fully-sorted order BY CHANCE to escape detection - 1-in-120 (5!)
+// odds, per level, for a regression confined to that level alone. (This
+// specific mutation - deleting the one shared sortedKeys() call - breaks both
+// levels simultaneously, so escaping THIS mutation needs both draws to land
+// sorted at once: on the order of 1-in-14400. A future regression that only
+// mis-recurses one level, without touching the other, still gets the 1-in-120
+// floor from that level by itself.)
+//
+// This can never be made deterministic - Go's map iteration order cannot be
+// forced - only made negligible by key count. The FIXED code (sort.Strings)
+// is fully deterministic; only the MUTANT's escape is probabilistic.
 func TestParse_V1DependenciesSortedAtEveryLevel(t *testing.T) {
 	p := write(t, `{
 	  "lockfileVersion": 1,
 	  "dependencies": {
-	    "zebra": {
-	      "version": "9.0.0",
-	      "dependencies": {"yak": {"version": "9.9.0"}}
+	    "zebra": {"version": "10.0.0"},
+	    "mango": {"version": "9.0.0"},
+	    "cherry": {
+	      "version": "8.0.0",
+	      "dependencies": {
+	        "yak": {"version": "5.0.0"},
+	        "iguana": {"version": "4.0.0"},
+	        "gecko": {"version": "3.0.0"},
+	        "elk": {"version": "2.0.0"},
+	        "cat": {"version": "1.0.0"}
+	      }
 	    },
-	    "mango": {"version": "5.0.0"},
-	    "apple": {
-	      "version": "1.0.0",
-	      "dependencies": {"banana": {"version": "2.0.0"}}
-	    }
+	    "banana": {"version": "7.0.0"},
+	    "apple": {"version": "6.0.0"}
 	  }
 	}`)
 	pkgs, _, err := Parse(p)
@@ -158,9 +177,11 @@ func TestParse_V1DependenciesSortedAtEveryLevel(t *testing.T) {
 	for _, pk := range pkgs {
 		got = append(got, pk.Name)
 	}
-	// apple's own subtree (banana) is fully walked before mango, since the
-	// walk recurses into each entry immediately rather than breadth-first.
-	want := []string{"apple", "banana", "mango", "zebra", "yak"}
+	// Top level sorted: apple, banana, cherry, mango, zebra. cherry's own
+	// subtree (sorted: cat, elk, gecko, iguana, yak) is fully walked
+	// immediately after cherry, before mango, since the walk recurses into
+	// each entry as it is visited rather than breadth-first.
+	want := []string{"apple", "banana", "cherry", "cat", "elk", "gecko", "iguana", "yak", "mango", "zebra"}
 	if len(got) != len(want) {
 		t.Fatalf("packages in order %v, want %v", got, want)
 	}
@@ -319,6 +340,16 @@ func TestParse_MissingFileNamesThePath(t *testing.T) {
 	if err == nil {
 		t.Fatal("Parse returned nil error for a lockfile that does not exist")
 	}
+	// Unlike the malformed-JSON check above, wrapping this specific error with
+	// %w behind a hard-coded "package-lock.json" prefix would NOT be caught by
+	// this assertion: %w's formatting includes the wrapped error's own text,
+	// and os.ReadFile's error already names the full path ("open <path>: ...")
+	// on its own, so the path survives even through a wrapper whose own
+	// literal text never mentions it. Verified directly (task-2-report.md,
+	// Fix round 1, Minor 4) - that mutation passed, and correctly so; only a
+	// wrapper that also drops the underlying cause (%v of a fabricated string,
+	// not %w of err) defeats this check, which is what the code below actually
+	// does by returning err unwrapped.
 	if !strings.Contains(err.Error(), p) {
 		t.Errorf("error %q does not name the missing path %s", err, p)
 	}
