@@ -184,12 +184,30 @@ func (b *Bolt) SetMeta(m Meta) error {
 		// from provider self-report: each record names only its own
 		// authoring database, so there is nothing to over-claim the way a
 		// stored ecosystem entry can.
+		//
+		// This scan adds a new way for SetMeta to fail: a record that will
+		// not decode aborts an otherwise-finished build (the temp-file build
+		// in dbcmd.Update discards it and leaves the live database
+		// untouched). That is deliberate, not incidental — a build that
+		// cannot read back what it just wrote is not one a scan should ever
+		// see, and refusing here is the same "fail loudly" rule Lookup
+		// applies to a dangling index entry.
 		dbs := map[string]struct{}{}
 		if err := tx.Bucket(bucketByID).ForEach(func(id, blob []byte) error {
 			var a advisory.Advisory
 			if err := json.Unmarshal(blob, &a); err != nil {
 				return fmt.Errorf("decode advisory %q: %w", id, err)
 			}
+			// Database is empty here only if it was never set. In practice
+			// that cannot happen today: databaseOf returns "" only for an ID
+			// with no dash (or one starting with a dash), and Convert
+			// rejects an empty ID before Database is ever computed, so every
+			// record osv/record.go emits has a non-empty Database. Guarded
+			// explicitly anyway because this scan does not know how a
+			// record was built — a future provider that leaves Database
+			// unset would otherwise pollute this set with an unlabelled ""
+			// entry. If that happens, the fix is a skip counter next to the
+			// one D20 already keeps for coverage, not a silent drop here.
 			if a.Database != "" {
 				dbs[a.Database] = struct{}{}
 			}

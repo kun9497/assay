@@ -65,7 +65,7 @@ func TestUpdateThenStatus(t *testing.T) {
 	// Which databases a rating could be attributed to (D25), visible without
 	// running a scan. Asserting the rendered pair, not either half alone,
 	// since "GHSA" nested inside another field would satisfy a bare Contains.
-	if !strings.Contains(s, "databases: GHSA") {
+	if !strings.Contains(s, "sources:  GHSA") {
 		t.Errorf("status does not report which databases are present:\n%s", s)
 	}
 	// Status reports upstream data time, which is the number that tells you
@@ -185,7 +185,10 @@ func TestDatabasesSummary(t *testing.T) {
 		want string
 	}{
 		{
-			name: "several databases join sorted",
+			// databasesSummary trusts its input's order rather than sorting
+			// -- Bolt.SetMeta is what sorts Databases -- so an unsorted
+			// input is joined unsorted, not alphabetized on the way out.
+			name: "joins in the order given",
 			in:   []string{"GHSA", "PYSEC", "ALPINE", "GO"},
 			want: "GHSA, PYSEC, ALPINE, GO",
 		},

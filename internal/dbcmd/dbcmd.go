@@ -136,8 +136,10 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 	// scan and reading why it refused.
 	fmt.Fprintf(stdout, "covers:   %s\n", coverageSummary(m.Ecosystems))
 	// Which databases a rating could be attributed to (D25), visible the same
-	// way coverage is: without running a scan.
-	fmt.Fprintf(stdout, "databases: %s\n", databasesSummary(m.Databases))
+	// way coverage is: without running a scan. Labelled "sources", not
+	// "databases" — that reads as a repeat of the "database:" path line two
+	// lines up, and the two are easy to misread as a pair.
+	fmt.Fprintf(stdout, "sources:  %s\n", databasesSummary(m.Databases))
 	fmt.Fprintln(stdout)
 
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
@@ -199,9 +201,11 @@ func coverageSummary(ecos []string) string {
 
 // databasesSummary lists which databases authored at least one stored
 // advisory (D25), so an operator can see what a rating could be attributed
-// to without running a scan. It shares coverageSummary's sorted,
-// comma-joined style; there is no "family:release" collapsing to do here
-// because database names, unlike Alpine releases, don't nest into a family.
+// to without running a scan. It joins comma-separated the same way
+// coverageSummary does, but does not sort: dbs already arrives sorted, from
+// Bolt.SetMeta, which is where Databases gets its ordering. There is also no
+// "family:release" collapsing to do here — database names, unlike Alpine
+// releases, don't nest into a family.
 func databasesSummary(dbs []string) string {
 	if len(dbs) == 0 {
 		return "nothing - ratings will not be attributable to a source"

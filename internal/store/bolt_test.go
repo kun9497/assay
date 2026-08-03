@@ -286,20 +286,39 @@ func TestOpenIncomplete(t *testing.T) {
 	}
 }
 
+// Both directions must refuse. A newer schema is the ordinary case (an old
+// binary opening a database a newer one built). An OLDER schema is the one
+// D25's bump exists for: it is what a pre-D25 database actually is, and
+// accepting it would silently serve records with Database empty on every
+// one. `Open` compares with `!=`, which happens to catch both today, but
+// nothing pins the older direction on its own — a change to `m.Schema >
+// SchemaVersion` (which reads, at a glance, like a reasonable
+// forward-compatibility check) would accept every older database and the
+// suite would stay green without this case.
 func TestOpenSchemaMismatch(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "v.db")
-	w, err := Create(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := w.setSchemaForTest(SchemaVersion + 1); err != nil {
-		t.Fatal(err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Open(path); !errors.Is(err, ErrSchemaMismatch) {
-		t.Errorf("Open(mismatched) err = %v, want ErrSchemaMismatch", err)
+	for _, tt := range []struct {
+		name string
+		v    int
+	}{
+		{"newer", SchemaVersion + 1},
+		{"older", SchemaVersion - 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "v.db")
+			w, err := Create(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := w.setSchemaForTest(tt.v); err != nil {
+				t.Fatal(err)
+			}
+			if err := w.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Open(path); !errors.Is(err, ErrSchemaMismatch) {
+				t.Errorf("Open(schema %d, want %d) err = %v, want ErrSchemaMismatch", tt.v, SchemaVersion, err)
+			}
+		})
 	}
 }
 
@@ -428,6 +447,15 @@ func TestCovers(t *testing.T) {
 // Database names only itself, so there is no foreign-ecosystem-style
 // over-claim to guard against — scanning what was Put is the accurate
 // answer, not an approximation of it.
+//
+// IDs are deliberately NOT alphabetized the same way their Database is.
+// Real OSV IDs have the Database as their own prefix (GHSA-x has Database
+// "GHSA"), which would make both Put() order and the by-id bucket's
+// key-sorted iteration agree with the correctly-sorted Databases output for
+// free — passing even if the explicit sort in SetMeta were dropped. Put()
+// is also called in this same scrambled order, so neither "the order Put
+// was called" nor "the order the bucket iterates" can pass for "sorted" by
+// coincidence.
 func TestMetaDatabasesComesFromStoredRecords(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v.db")
 	w, err := Create(path)
@@ -435,7 +463,13 @@ func TestMetaDatabasesComesFromStoredRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := w.Put(advisory.Advisory{
-		ID: "GHSA-a", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		ID: "REC-a1", Database: "PYSEC", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "PyPI", Name: "y"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Put(advisory.Advisory{
+		ID: "REC-m1", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
 		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "x"}},
 	}); err != nil {
 		t.Fatal(err)
@@ -443,25 +477,28 @@ func TestMetaDatabasesComesFromStoredRecords(t *testing.T) {
 	// A second GHSA record: Databases must collapse this to one entry, not
 	// list "GHSA" twice.
 	if err := w.Put(advisory.Advisory{
-		ID: "GHSA-d", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		ID: "REC-m2", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
 		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "w"}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := w.Put(advisory.Advisory{
-		ID: "PYSEC-b", Database: "PYSEC", Source: "osv", Kind: advisory.KindVulnerability,
-		Affected: []advisory.Affected{{Ecosystem: "PyPI", Name: "y"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	// No Database set at all (as a pre-D25 record would arrive): must not
 	// contribute an empty entry to the set.
 	if err := w.Put(advisory.Advisory{
-		ID: "GHSA-c", Source: "osv", Kind: advisory.KindVulnerability,
+		ID: "REC-b1", Source: "osv", Kind: advisory.KindVulnerability,
 		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "z"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := w.Put(advisory.Advisory{
+		ID: "REC-z1", Database: "ALPINE", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Alpine:v3.19", Name: "v"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Put() order above and the by-id bucket's key order (REC-a1 < REC-b1 <
+	// REC-m1 < REC-m2 < REC-z1) both discover PYSEC, then GHSA, then ALPINE
+	// — the exact reverse of the correct, alphabetically-sorted answer.
 	if err := w.SetMeta(Meta{
 		BuiltAt:   time.Now(),
 		Databases: []string{"should-be-ignored"},
@@ -481,7 +518,7 @@ func TestMetaDatabasesComesFromStoredRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"GHSA", "PYSEC"}
+	want := []string{"ALPINE", "GHSA", "PYSEC"}
 	if !slices.Equal(m.Databases, want) {
 		t.Errorf("Meta.Databases = %v, want %v (sorted, deduplicated, no empty "+
 			"entry for the record with none, caller-supplied value ignored)",
