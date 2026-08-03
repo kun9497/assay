@@ -673,3 +673,59 @@ func TestSchemaVersionIs6(t *testing.T) {
 		t.Errorf("SchemaVersion = %d, want 6", SchemaVersion)
 	}
 }
+
+// Re-putting the same (CVE, Source) replaces rather than duplicates.
+// Correctness here rests entirely on the key being identical across both
+// Puts -- bbolt overwrites whatever already sits at a key -- so this fails
+// if a per-call component (a counter, a timestamp) ever leaked into the key.
+func TestPutRating_RepputSameSourceReplaces(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := advisory.Rating{
+		CVE:    "CVE-2025-1",
+		Source: "NVD",
+		Severity: []advisory.Severity{
+			{Type: "CVSS_V31", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N"},
+		},
+	}
+	second := advisory.Rating{
+		CVE:    "CVE-2025-1",
+		Source: "NVD",
+		Severity: []advisory.Severity{
+			{Type: "CVSS_V31", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"},
+		},
+	}
+	if err := w.PutRating(first); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.PutRating(second); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	got, err := db.RatingsFor("CVE-2025-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d ratings, want 1 - a re-Put of the same source must "+
+			"replace, not add a second entry", len(got))
+	}
+	if len(got[0].Severity) != 1 || got[0].Severity[0].Score != second.Severity[0].Score {
+		t.Errorf("Severity = %+v, want the SECOND Put's vector (%q) - a repeat "+
+			"Put must win over the first", got[0].Severity, second.Severity[0].Score)
+	}
+}
