@@ -140,9 +140,23 @@ A **binary** scan reads `debug/buildinfo`: the main module, every dependency the
 actually kept, and the toolchain — matched as the package `stdlib`, which the Go
 vulnerability database holds 159 advisories against.
 
-A **directory** scan parses `go.mod`, with the standard library and no `go` invocation, so it
-works offline and needs no toolchain. That means it reports what the module *requires*, which
-is not what a build links. On this repository:
+A **directory** scan reads every lockfile it finds — `go.mod`, `package-lock.json` and
+`poetry.lock` — with the standard library and no `go`, `npm` or `pip` invocation, so it works
+offline and needs no toolchain.
+
+It walks subdirectories, so a `frontend/package-lock.json` is found, skipping `node_modules`,
+`vendor` and `.git` and stopping at six levels down. **Every manifest it recognizes but does
+not read is named, with the reason** — `requirements.txt` is not a lockfile (`Django>=3.2` is
+a constraint, not a version, and matching a range against advisory ranges would quietly
+answer "not vulnerable" for anything unpinned), and a lockfile that fails to parse says so
+rather than disappearing.
+
+That disclosure is the point. A manifest that is never read produces no package, so the
+summary's "not evaluated" count has nothing to count — the omission is invisible to the very
+machinery built to make omissions visible (D26).
+
+`go.mod` still reports what the module *requires*, which is not what a build links. On this
+repository:
 
 | | packages |
 |---|---|
@@ -157,6 +171,7 @@ $ assay scan dir:.
 scanned dir:. as a directory
 go.mod names 11 module(s); this is what was requested, not what a build links
   - scan the built binary for that
+not read: requirements.txt (not a lockfile: versions may be ranges, not resolved versions)
 ```
 
 Scan the binary for what ships. The reasoning is recorded as D23.

@@ -11,7 +11,7 @@ import (
 
 // The measurement D26 records, as a test. A directory holding go.mod and
 // package-lock.json must catalog BOTH ecosystems, and name requirements.txt
-// as unread.
+// as mf.Unread.
 func TestParse_CatalogsEveryLockfileAndNamesTheRest(t *testing.T) {
 	root := mkdir(t, map[string]string{
 		"go.mod": "module example.com/poly\n\ngo 1.22\n\n" +
@@ -21,7 +21,7 @@ func TestParse_CatalogsEveryLockfileAndNamesTheRest(t *testing.T) {
 			`"node_modules/lodash":{"version":"4.17.11"}}}`,
 		"requirements.txt": "Django==3.2.12\n",
 	})
-	target, stats, unread, err := Parse(root)
+	target, stats, mf, err := Parse(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,11 +37,11 @@ func TestParse_CatalogsEveryLockfileAndNamesTheRest(t *testing.T) {
 		stats.SkippedNoVersion+stats.SkippedUnsupportedEcosystem {
 		t.Errorf("the invariant does not survive the merge: %+v", stats)
 	}
-	if len(unread) != 1 || unread[0].Path != "requirements.txt" {
-		t.Fatalf("unread = %+v, want exactly requirements.txt", unread)
+	if len(mf.Unread) != 1 || mf.Unread[0].Path != "requirements.txt" {
+		t.Fatalf("mf.Unread = %+v, want exactly requirements.txt", mf.Unread)
 	}
-	if unread[0].Reason == "" {
-		t.Error("the unread entry carries no reason — a reader told only that " +
+	if mf.Unread[0].Reason == "" {
+		t.Error("the mf.Unread entry carries no reason — a reader told only that " +
 			"something was skipped cannot act on it")
 	}
 }
@@ -78,7 +78,7 @@ func TestParse_StatsAreSummedNotOverwritten(t *testing.T) {
 	}
 }
 
-// One unreadable manifest must not take the others down with it, and must not
+// One mf.Unreadable manifest must not take the others down with it, and must not
 // vanish: "we looked and could not read it" is a different fact from "we did
 // not look", and both belong in the report.
 func TestParse_AnUnparseableManifestBecomesUnreadNotAnAbort(t *testing.T) {
@@ -86,7 +86,7 @@ func TestParse_AnUnparseableManifestBecomesUnreadNotAnAbort(t *testing.T) {
 		"package-lock.json":        `{"lockfileVersion":3,"packages":{"":{"version":"1"},"node_modules/ok":{"version":"1.0.0"}}}`,
 		"broken/package-lock.json": `{"lockfileVersion":3, `,
 	})
-	target, _, unread, err := Parse(root)
+	target, _, mf, err := Parse(root)
 	if err != nil {
 		t.Fatalf("Parse = %v; one bad manifest must not abandon the scan", err)
 	}
@@ -94,7 +94,7 @@ func TestParse_AnUnparseableManifestBecomesUnreadNotAnAbort(t *testing.T) {
 		t.Error("the readable lockfile's packages were lost")
 	}
 	var found bool
-	for _, u := range unread {
+	for _, u := range mf.Unread {
 		if u.Path == "broken/package-lock.json" {
 			found = true
 			if u.Reason == "" {
@@ -103,7 +103,7 @@ func TestParse_AnUnparseableManifestBecomesUnreadNotAnAbort(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("unread = %+v, want it to name broken/package-lock.json", unread)
+		t.Errorf("mf.Unread = %+v, want it to name broken/package-lock.json", mf.Unread)
 	}
 }
 
@@ -171,7 +171,7 @@ func TestParse_NoManifestsAtAllIsAnError(t *testing.T) {
 // relocate's own comment explains why it rewrites Location.Path, but nothing
 // before this test asserted the value it writes — only that two runs agree
 // with each other (TestParse_PackageOrderIsDeterministic) or that a value is
-// present (TestParse_CatalogsEveryLockfileAndNamesTheRest's unread checks,
+// present (TestParse_CatalogsEveryLockfileAndNamesTheRest's mf.Unread checks,
 // which do not touch Locations at all). Changing relocate's assignment to
 // `= ""` would still pass every test above; this is the one that would not.
 func TestParse_LocationIsTheManifestsOwnRelativePath(t *testing.T) {
@@ -222,21 +222,21 @@ func TestParse_GoModLocationIsAlsoTheManifestsOwnRelativePath(t *testing.T) {
 // exercises the switch's default branch directly, without touching walk.go.
 func TestParse_UnhandledKindBecomesUnreadNotSilent(t *testing.T) {
 	m := Manifest{Path: "mystery.lock", Kind: Kind("mystery-manifest")}
-	pkgs, stats, unread := parseManifest("irrelevant-root", m)
+	pkgs, stats, u := parseManifest("irrelevant-root", m)
 	if pkgs != nil {
 		t.Errorf("packages = %v, want nil for a Kind with no parser", pkgs)
 	}
 	if stats != (cyclonedx.Stats{}) {
 		t.Errorf("stats = %+v, want the zero value for a Kind with no parser", stats)
 	}
-	if unread == nil {
-		t.Fatal("unread = nil — a Kind this switch has no case for must not " +
+	if u == nil {
+		t.Fatal("Unread = nil — a Kind this switch has no case for must not " +
 			"vanish silently (no packages, no Unread, no error)")
 	}
-	if unread.Path != "mystery.lock" {
-		t.Errorf("Path = %q, want %q", unread.Path, "mystery.lock")
+	if u.Path != "mystery.lock" {
+		t.Errorf("Path = %q, want %q", u.Path, "mystery.lock")
 	}
-	if unread.Reason == "" {
+	if u.Reason == "" {
 		t.Error("Reason is empty — an unhandled Kind must say why it was not read")
 	}
 }
@@ -252,12 +252,12 @@ func TestParse_UnreadReasonIsNotFlattenedToOneSharedString(t *testing.T) {
 		"broken/package-lock.json": `{"lockfileVersion":3, `,
 		"requirements.txt":         "Django==3.2.12\n",
 	})
-	_, _, unread, err := Parse(root)
+	_, _, mf, err := Parse(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var brokenReason, reqReason string
-	for _, u := range unread {
+	for _, u := range mf.Unread {
 		switch u.Path {
 		case "broken/package-lock.json":
 			brokenReason = u.Reason
@@ -266,8 +266,8 @@ func TestParse_UnreadReasonIsNotFlattenedToOneSharedString(t *testing.T) {
 		}
 	}
 	if brokenReason == "" || reqReason == "" {
-		t.Fatalf("unread = %+v, want entries for both broken/package-lock.json "+
-			"and requirements.txt", unread)
+		t.Fatalf("mf.Unread = %+v, want entries for both broken/package-lock.json "+
+			"and requirements.txt", mf.Unread)
 	}
 	if !strings.Contains(brokenReason, "unexpected end of JSON input") {
 		t.Errorf("broken reason = %q, want it to contain the underlying JSON "+
@@ -275,7 +275,7 @@ func TestParse_UnreadReasonIsNotFlattenedToOneSharedString(t *testing.T) {
 	}
 	if brokenReason == reqReason {
 		t.Errorf("both reasons are %q — a parse failure and a deliberately "+
-			"unread file must not share one flattened explanation", brokenReason)
+			"mf.Unread file must not share one flattened explanation", brokenReason)
 	}
 }
 
@@ -355,5 +355,58 @@ func TestLessPackage_EachKeyDecidesWhenEarlierKeysTie(t *testing.T) {
 					"be strict, not true in both directions")
 			}
 		})
+	}
+}
+
+// The disclosure D23 prints is about go.mod SPECIFICALLY — it names what the
+// module requires, not what a build links — so it needs go.mod's own count,
+// not the merged total. Stating it with the total would attribute every
+// lockfile's packages to go.mod, and a caveat carrying the wrong number is
+// worse than no caveat, because it reads as precise.
+//
+// The fixture gives the two manifests DIFFERENT counts on purpose: with both
+// at one, a disclosure reading the merged total would still print the right
+// number here and the test would pass on a bug.
+func TestParse_ReadRecordsEachManifestsOwnComponentCount(t *testing.T) {
+	root := mkdir(t, map[string]string{
+		"go.mod": "module example.com/poly\n\ngo 1.22\n\n" +
+			"require (\n\tgopkg.in/yaml.v2 v2.2.1\n\texample.com/other v1.0.0\n)\n",
+		"package-lock.json": `{"lockfileVersion":3,"packages":{` +
+			`"":{"version":"1.0.0"},"node_modules/lodash":{"version":"4.17.11"}}}`,
+	})
+	_, stats, mf, err := Parse(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gomod, ok := mf.GoMod()
+	if !ok {
+		t.Fatal("GoMod() reported no go.mod in a directory that has one")
+	}
+	if gomod.Components != 2 {
+		t.Errorf("go.mod Components = %d, want 2 — its own count, not the merged %d",
+			gomod.Components, stats.Components)
+	}
+	if gomod.Components == stats.Components {
+		t.Errorf("go.mod's count equals the merged total (%d), so this fixture "+
+			"cannot tell the two apart", stats.Components)
+	}
+	if gomod.Path != "go.mod" {
+		t.Errorf("go.mod Path = %q, want %q", gomod.Path, "go.mod")
+	}
+}
+
+// ...and a directory with no go.mod must say so, because the D23 caveat must
+// not be printed for a Python-only or JavaScript-only project.
+func TestParse_GoModReportsAbsenceRatherThanAZeroValue(t *testing.T) {
+	root := mkdir(t, map[string]string{
+		"package-lock.json": `{"lockfileVersion":3,"packages":{` +
+			`"":{"version":"1.0.0"},"node_modules/lodash":{"version":"4.17.11"}}}`,
+	})
+	_, _, mf, err := Parse(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := mf.GoMod(); ok {
+		t.Error("GoMod() claimed a go.mod in a directory that has none")
 	}
 }

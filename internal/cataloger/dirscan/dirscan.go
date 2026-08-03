@@ -42,6 +42,41 @@ type Unread struct {
 // anyway would fabricate a precision the file does not carry.
 const requirementsReason = "not a lockfile: versions may be ranges, not resolved versions"
 
+// Read is a manifest Parse did turn into packages, and how many components it
+// yielded on its own.
+//
+// The per-manifest count exists because the merged Stats cannot answer a
+// question the report has to answer: D23's caveat is about go.mod
+// specifically - it names what the module REQUIRES, not what a build links -
+// and stating it with the merged total would attribute every lockfile's
+// packages to go.mod. A caveat carrying the wrong number is worse than none,
+// because it reads as precise.
+type Read struct {
+	Path       string
+	Kind       Kind
+	Components int
+}
+
+// Manifests is what a scan read and what it did not. The two travel together
+// because a reader needs both to know how much of the tree was covered:
+// either half alone is a partial answer that looks complete.
+type Manifests struct {
+	Read   []Read
+	Unread []Unread
+}
+
+// GoMod returns the go.mod entry and whether one was read at all. The caller
+// is the D23 disclosure, which must not claim anything about a go.mod in a
+// directory that has none.
+func (m Manifests) GoMod() (Read, bool) {
+	for _, r := range m.Read {
+		if r.Kind == KindGoMod {
+			return r, true
+		}
+	}
+	return Read{}, false
+}
+
 // Parse walks root for recognized manifests and returns one merged
 // inventory. Distro stays nil - a directory is not an operating system (D7).
 //
@@ -51,33 +86,35 @@ const requirementsReason = "not a lockfile: versions may be ranges, not resolved
 // different - there is nothing here this scan understands, and that must
 // read as an error, not as a clean scan of zero packages, matching what
 // gomod.Parse already does for a directory with no go.mod.
-func Parse(root string) (pkgmeta.Target, cyclonedx.Stats, []Unread, error) {
+func Parse(root string) (pkgmeta.Target, cyclonedx.Stats, Manifests, error) {
 	manifests, err := Walk(root)
 	if err != nil {
-		return pkgmeta.Target{}, cyclonedx.Stats{}, nil, err
+		return pkgmeta.Target{}, cyclonedx.Stats{}, Manifests{}, err
 	}
 	if len(manifests) == 0 {
-		return pkgmeta.Target{}, cyclonedx.Stats{}, nil, fmt.Errorf("%s: no recognized manifest found", root)
+		return pkgmeta.Target{}, cyclonedx.Stats{}, Manifests{},
+			fmt.Errorf("%s: no recognized manifest found", root)
 	}
 
 	var (
 		target pkgmeta.Target
 		stats  cyclonedx.Stats
-		unread []Unread
+		found  Manifests
 	)
 
 	for _, m := range manifests {
 		pkgs, s, u := parseManifest(root, m)
 		if u != nil {
-			unread = append(unread, *u)
+			found.Unread = append(found.Unread, *u)
 			continue
 		}
+		found.Read = append(found.Read, Read{Path: m.Path, Kind: m.Kind, Components: s.Components})
 		target.Packages = append(target.Packages, pkgs...)
 		addStats(&stats, s)
 	}
 
 	sortPackages(target.Packages)
-	return target, stats, unread, nil
+	return target, stats, found, nil
 }
 
 // parseManifest dispatches one manifest to the cataloger for its Kind. It

@@ -11,8 +11,8 @@ import (
 
 	"github.com/kun9497/assay/internal/cataloger/apkdb"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
+	"github.com/kun9497/assay/internal/cataloger/dirscan"
 	"github.com/kun9497/assay/internal/cataloger/gobinary"
-	"github.com/kun9497/assay/internal/cataloger/gomod"
 	"github.com/kun9497/assay/internal/cataloger/osrelease"
 	"github.com/kun9497/assay/internal/matcher"
 	"github.com/kun9497/assay/internal/pkgmeta"
@@ -96,6 +96,10 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 	var (
 		inventory pkgmeta.Target
 		cat       cyclonedx.Stats
+		// manifests stays zero for every target that is not a directory, and
+		// its disclosure loop below is guarded on kind, so an image or SBOM
+		// scan cannot start printing directory diagnostics.
+		manifests dirscan.Manifests
 	)
 
 	kind, path, err := source.Classify(target)
@@ -149,14 +153,16 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		inventory, cat = t, stats
 
 	case source.TargetDirectory:
-		t, stats, err := gomod.Parse(path)
+		t, stats, mf, err := dirscan.Parse(path)
 		if err != nil {
-			// Same reasoning as the go-binary case: gomod.Parse's own error
-			// already names the go.mod path (os.ReadFile's message does).
+			// dirscan.Parse's own error names the root, and the only error it
+			// returns is "nothing here this scan understands". An individual
+			// manifest that could not be read is reported below instead, so
+			// one bad lockfile never costs the rest of the tree.
 			fmt.Fprintf(stderr, "error: %v\n", err)
 			return 2
 		}
-		inventory, cat = t, stats
+		inventory, cat, manifests = t, stats, mf
 
 	default: // source.TargetSBOM
 		f, err := os.Open(path)
@@ -181,11 +187,31 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		// every SUCCESSFUL directory scan, not just when packages are
 		// dropped, so the gap cannot be mistaken for a clean, complete result
 		// (D20/D21's silent-partial-coverage failure, arriving through a new
-		// door). This one genuinely needs cat.Components, which is only known
-		// once gomod.Parse above has succeeded — unlike the kind-only line,
-		// it cannot move any earlier than this.
-		fmt.Fprintf(stderr, "go.mod names %d module(s); this is what was requested, "+
-			"not what a build links - scan the built binary for that\n", cat.Components)
+		// door).
+		//
+		// Printed only when a go.mod was actually read, and with THAT
+		// manifest's own count rather than cat.Components. Since D26 a
+		// directory scan merges several manifests, so the total belongs to all
+		// of them — a caveat about go.mod carrying the whole tree's number
+		// would be precisely wrong, which is worse than absent because it
+		// reads as precise.
+		if gomod, ok := manifests.GoMod(); ok {
+			fmt.Fprintf(stderr, "go.mod names %d module(s); this is what was requested, "+
+				"not what a build links - scan the built binary for that\n", gomod.Components)
+		}
+		// D26: every manifest the walk recognized and did not turn into
+		// packages, named, with the reason. A count alone would tell a reader
+		// something is missing without telling them what to do about it.
+		//
+		// These are exactly the trees the summary's "not evaluated" figure
+		// CANNOT account for: a manifest that was never read produces no
+		// package, so there is nothing for the skip counter to count. Before
+		// this line existed, a directory holding go.mod beside
+		// package-lock.json reported the Go packages, said "0 not evaluated",
+		// and exited 0 while 24 findings went unmentioned.
+		for _, u := range manifests.Unread {
+			fmt.Fprintf(stderr, "not read: %s (%s)\n", u.Path, u.Reason)
+		}
 	}
 
 	db, err := store.Open(dbPath)

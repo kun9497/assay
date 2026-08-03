@@ -135,9 +135,21 @@ assay scan ./my-project               # go.mod이 있는 디렉터리
 그리고 툴체인 — 툴체인은 `stdlib`이라는 패키지로 매칭되며 Go 취약점 데이터베이스에 159건의
 권고가 있습니다.
 
-**디렉터리** 스캔은 표준 라이브러리로 `go.mod`를 파싱하고 `go`를 호출하지 않으므로, 오프라인에서
-툴체인 없이 동작합니다. 대신 모듈이 *요구하는* 것을 보고하며, 그것은 빌드가 링크하는 것과
-다릅니다. 이 저장소 기준:
+**디렉터리** 스캔은 찾은 락파일을 모두 읽습니다 — `go.mod`, `package-lock.json`,
+`poetry.lock`. 표준 라이브러리만 쓰고 `go`·`npm`·`pip`을 호출하지 않으므로 오프라인에서 툴체인
+없이 동작합니다.
+
+하위 디렉터리도 훑으므로 `frontend/package-lock.json`도 찾습니다. `node_modules`, `vendor`,
+`.git`은 건너뛰고 여섯 단계까지만 내려갑니다. **인식했지만 읽지 않은 매니페스트는 이유와 함께
+이름을 밝힙니다** — `requirements.txt`는 락파일이 아니고(`Django>=3.2`는 버전이 아니라 제약이며,
+범위를 권고의 범위에 맞추면 고정되지 않은 것에 조용히 "취약하지 않음"이라고 답하게 됩니다),
+파싱에 실패한 락파일도 사라지지 않고 그 사실을 말합니다.
+
+그 공개가 핵심입니다. 읽히지 않은 매니페스트는 패키지를 만들지 않으므로 요약의 "not evaluated"가
+셀 대상이 없습니다. 누락을 드러내려고 만든 바로 그 장치에 누락이 보이지 않는 것입니다 (D26).
+
+`go.mod`은 여전히 모듈이 *요구하는* 것을 보고하며, 그것은 빌드가 링크하는 것과 다릅니다.
+이 저장소 기준:
 
 | | 패키지 수 |
 |---|---|
@@ -152,6 +164,7 @@ $ assay scan dir:.
 scanned dir:. as a directory
 go.mod names 11 module(s); this is what was requested, not what a build links
   - scan the built binary for that
+not read: requirements.txt (not a lockfile: versions may be ranges, not resolved versions)
 ```
 
 배포되는 것을 알고 싶으면 바이너리를 스캔하세요. 근거는 D23에 기록되어 있습니다.
