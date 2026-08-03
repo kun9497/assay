@@ -105,6 +105,25 @@ type Meta struct {
 	// record, so there is no foreign-ecosystem-style over-claim to guard
 	// against the way D20 requires for Ecosystems.
 	Databases []string `json:"databases"`
+	// Ratings is per-authority provenance for CVE ratings (D27): each
+	// Annotator's own report of what it fetched, written directly by
+	// dbcmd.Update the same way Providers is — not derived by scanning the
+	// ratings bucket the way Databases is derived from stored advisories,
+	// because a rating carries no self-describing field to scan for (unlike
+	// Advisory.Database, advisory.Rating has no per-record "who fetched me"
+	// beyond Source, and Source is the join key an authority rates under, not
+	// a discovery mechanism worth a bucket scan for this).
+	//
+	// Deliberately a separate map rather than folded into Providers, even
+	// though both hold store.Provenance: Bolt.SetMeta derives Ecosystems by
+	// trusting every entry in Providers to describe advisory coverage (D20).
+	// An annotator answers a different question — what a CVE is worth, never
+	// which package is affected — so mixing it into Providers would make a
+	// future annotator's non-empty Provenance.Ecosystems (a bug, but one nothing
+	// here should be able to trigger) silently widen Covers(). Keeping the two
+	// maps apart makes that impossible by construction rather than by
+	// discipline.
+	Ratings map[string]Provenance `json:"ratings"`
 }
 
 type Provenance struct {

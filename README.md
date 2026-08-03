@@ -271,6 +271,13 @@ release-qualified ecosystem keys, so a single fetch covers every release from 3.
 you happened to download it. A mirror serving a three-month-old snapshot should not look
 fresh just because it was fetched this morning.
 
+`db update` also runs any configured rating source — NVD today (D27) — right after the
+advisory providers, writing its CVSS opinions into the same database rather than fetching
+anything at scan time (D14). `assay db status` lists which authorities have rated at least
+one CVE on a `ratings:` line, the same shape as `databases:`. Set `NVD_API_KEY` to raise
+NVD's request rate tenfold; it is optional and never required — `db update` still syncs NVD
+without one, just slower.
+
 ### Exit codes
 
 | Code | Meaning |

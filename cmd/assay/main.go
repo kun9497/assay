@@ -12,6 +12,7 @@ import (
 
 	"github.com/kun9497/assay/internal/dbcmd"
 	"github.com/kun9497/assay/internal/provider"
+	"github.com/kun9497/assay/internal/provider/nvd"
 	"github.com/kun9497/assay/internal/provider/osv"
 	"github.com/kun9497/assay/internal/scancmd"
 	"github.com/kun9497/assay/internal/severity"
@@ -114,7 +115,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		switch args[1] {
 		case "update":
 			return dbcmd.Update(context.Background(), path,
-				[]provider.Provider{osv.New(osv.Ecosystems, "")}, stdout, stderr)
+				[]provider.Provider{osv.New(osv.Ecosystems, "")},
+				[]provider.Annotator{nvd.New(nvdOptionsFromEnv())},
+				stdout, stderr)
 		case "status":
 			return dbcmd.Status(path, stdout, stderr)
 		default:
@@ -127,6 +130,22 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stderr, usage)
 		return exitError
 	}
+}
+
+// nvdOptionsFromEnv reads NVD_API_KEY and builds the nvd.Options the
+// annotator is constructed from. Pulled out as its own function, separate
+// from constructing the annotator itself, so a test can assert the key was
+// read and forwarded (D27's own contract: "the provider must never read the
+// environment itself, that is why it takes an option") without db update
+// making a real network call — nvd.New defaults BaseURL to the live NVD
+// endpoint, so exercising construction end to end here would either hit the
+// network or need a second seam just for tests.
+//
+// The key is optional and never required: NVD_API_KEY absent yields
+// Options{APIKey: ""}, which nvd.New already treats as "send no apiKey
+// header" (a slower, unauthenticated sync, not a failure).
+func nvdOptionsFromEnv() nvd.Options {
+	return nvd.Options{APIKey: os.Getenv("NVD_API_KEY")}
 }
 
 // scan is the pipeline entry point: parse the target into an inventory, match

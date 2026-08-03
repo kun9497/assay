@@ -814,3 +814,27 @@ func TestRun_ScanExplainConflictsWithOutputJSONExits2(t *testing.T) {
 		t.Errorf("stderr = %q, want it to name both conflicting flags", stderr.String())
 	}
 }
+
+// TestNVDOptionsFromEnv_PassesAPIKeyThrough: `db update` reads NVD_API_KEY
+// from the environment and must actually forward it into the Options the
+// annotator is built from, not just read it and drop it (D27: "the provider
+// must never read the environment itself - that is why it takes an
+// option"). This is the one seam that proves the forwarding without a real
+// `db update` run, which would either make a live network call to NVD or
+// need a second, test-only BaseURL override just to avoid one.
+func TestNVDOptionsFromEnv_PassesAPIKeyThrough(t *testing.T) {
+	t.Run("key set", func(t *testing.T) {
+		t.Setenv("NVD_API_KEY", "test-key-123")
+		if got := nvdOptionsFromEnv(); got.APIKey != "test-key-123" {
+			t.Errorf("nvdOptionsFromEnv().APIKey = %q, want %q", got.APIKey, "test-key-123")
+		}
+	})
+	// No key is a normal, fully supported configuration (D27: "never
+	// required"), so the zero value must round-trip too, not just a set one.
+	t.Run("key unset", func(t *testing.T) {
+		t.Setenv("NVD_API_KEY", "")
+		if got := nvdOptionsFromEnv(); got.APIKey != "" {
+			t.Errorf("nvdOptionsFromEnv().APIKey = %q, want empty when NVD_API_KEY is unset", got.APIKey)
+		}
+	})
+}

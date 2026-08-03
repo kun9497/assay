@@ -22,10 +22,20 @@ import (
 	"github.com/kun9497/assay/internal/store"
 )
 
-// Update rebuilds the database from every provider. It builds into a temporary
-// file and renames over the live database, so a concurrent scan never observes
-// a partial write.
-func Update(ctx context.Context, dbPath string, providers []provider.Provider, stdout, stderr io.Writer) int {
+// Update rebuilds the database from every provider, then runs every
+// annotator (D27) — an authority that rates a CVE rather than naming an
+// affected package — writing its opinions through PutRating. It builds into a
+// temporary file and renames over the live database, so a concurrent scan
+// never observes a partial write.
+//
+// Annotators run after the advisory providers, matching the order the brief
+// describes, but nothing about the result depends on it: ratings are keyed on
+// CVE in their own bucket, entirely independent of which advisories Put has
+// already written, so swapping the two loops produces an identical database
+// (verified: internal/dbcmd's own mutation check swaps them and the suite
+// stays green). The order is kept as the stated, documented contract anyway,
+// since a future annotator is not guaranteed to share that independence.
+func Update(ctx context.Context, dbPath string, providers []provider.Provider, annotators []provider.Annotator, stdout, stderr io.Writer) int {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		fmt.Fprintf(stderr, "error: create database directory: %v\n", err)
 		return 2
@@ -42,7 +52,11 @@ func Update(ctx context.Context, dbPath string, providers []provider.Provider, s
 		return 2
 	}
 
-	meta := store.Meta{BuiltAt: time.Now().UTC(), Providers: map[string]store.Provenance{}}
+	meta := store.Meta{
+		BuiltAt:   time.Now().UTC(),
+		Providers: map[string]store.Provenance{},
+		Ratings:   map[string]store.Provenance{},
+	}
 	for _, p := range providers {
 		fmt.Fprintf(stderr, "fetching %s…\n", p.Name())
 		prov, err := p.Fetch(ctx, func(a advisory.Advisory) error { return w.Put(a) })
@@ -53,6 +67,23 @@ func Update(ctx context.Context, dbPath string, providers []provider.Provider, s
 			return 2
 		}
 		meta.Providers[p.Name()] = prov
+	}
+	// Annotators run after the advisory providers (see Update's own doc
+	// comment on why the order is kept even though nothing here depends on
+	// it). A failing annotator fails the whole build exactly like a failing
+	// provider does: a database holding advisories but missing the ratings a
+	// configured annotator was supposed to add would look complete and
+	// quietly under-report every band it would otherwise have raised.
+	for _, a := range annotators {
+		fmt.Fprintf(stderr, "annotating with %s…\n", a.Name())
+		prov, err := a.Annotate(ctx, func(r advisory.Rating) error { return w.PutRating(r) })
+		if err != nil {
+			w.Close()
+			os.Remove(tmp)
+			fmt.Fprintf(stderr, "error: annotator %s: %v\n", a.Name(), err)
+			return 2
+		}
+		meta.Ratings[a.Name()] = prov
 	}
 	if err := w.SetMeta(meta); err != nil {
 		w.Close()
@@ -83,6 +114,13 @@ func Update(ctx context.Context, dbPath string, providers []provider.Provider, s
 		total += p.Records
 	}
 	fmt.Fprintf(stdout, "database updated: %d advisories at %s\n", total, dbPath)
+	if len(meta.Ratings) > 0 {
+		ratingsTotal := 0
+		for _, p := range meta.Ratings {
+			ratingsTotal += p.Records
+		}
+		fmt.Fprintf(stdout, "%d ratings from %d source(s)\n", ratingsTotal, len(meta.Ratings))
+	}
 	return 0
 }
 
@@ -150,6 +188,13 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 	// this is also what a reader would grep for. The path line above was
 	// renamed to "path:" so the two no longer read as a pair.
 	fmt.Fprintf(stdout, "databases: %s\n", databasesSummary(m.Databases))
+	// Which authorities have rated at least one CVE (D27), the same "visible
+	// without running a scan" reasoning as databases: above, and the same
+	// line shape and padding — but a different set: an authority can rate a
+	// CVE without authoring any stored advisory, so this cannot be read off
+	// Databases, and Meta.Ratings is recorded separately (see its own doc
+	// comment in internal/store/store.go).
+	fmt.Fprintf(stdout, "ratings:   %s\n", ratingsSummary(m.Ratings))
 	fmt.Fprintln(stdout)
 
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
@@ -221,6 +266,25 @@ func databasesSummary(dbs []string) string {
 		return "nothing - ratings will not be attributable to a source"
 	}
 	return strings.Join(dbs, ", ")
+}
+
+// ratingsSummary lists which authorities have rated at least one CVE (D27) —
+// same line shape and message convention as databasesSummary, a different
+// set. Unlike Databases, Meta.Ratings is a map keyed by annotator name and
+// populated directly by dbcmd.Update (store/store.go's own doc comment on
+// why it is not derived by scanning a bucket the way Databases is), so this
+// function sorts it itself rather than trusting an input Bolt.SetMeta
+// already sorted.
+func ratingsSummary(ratings map[string]store.Provenance) string {
+	if len(ratings) == 0 {
+		return "nothing - no rating source has run against this database"
+	}
+	names := make([]string, 0, len(ratings))
+	for name := range ratings {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 // compareRelease orders "v3.9" below "v3.10". Anything it cannot parse sorts
