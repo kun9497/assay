@@ -25,7 +25,7 @@ record because they are edited task by task; this paragraph is edited from memor
 **Read these before proposing anything structural:**
 
 - `docs/superpowers/specs/2026-07-29-assay-roadmap.md` — the reference design. Every
-  decision is recorded as `D1`…`D25` with its reasoning. Cite the decision ID when
+  decision is recorded as `D1`…`D26` with its reasoning. Cite the decision ID when
   discussing one.
 - `docs/deferred-decisions.md` — **required before suggesting a feature.** Most obvious
   gaps (Debian support, RHEL support, VEX, prebuilt database artifacts, database age
@@ -195,7 +195,7 @@ Specs and user-facing documentation stay bilingual; plans do not.
 
 Run the main loop on the work that needs full context; delegate work that is bounded,
 independently verifiable, and parallel. The rule of thumb: **if the task's output is a
-conclusion or an artifact you can check, delegate it. If it requires knowing why D1–D25 were
+conclusion or an artifact you can check, delegate it. If it requires knowing why D1–D26 were
 decided, keep it.**
 
 **Delegate**
