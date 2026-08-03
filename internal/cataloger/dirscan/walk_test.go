@@ -63,20 +63,25 @@ func TestWalk_FindsManifestsInSubdirectories(t *testing.T) {
 	}
 }
 
-// Sorted, so two runs over one tree cannot differ. filepath.WalkDir is already
-// lexical, so this fails only if someone introduces a map or a goroutine —
-// which is exactly when it needs to fail.
+// Sorted, so two runs over one tree cannot differ. This is NOT provable by
+// any fixture whose WalkDir traversal order already equals its sorted order —
+// filepath.WalkDir is depth-first, not lexical-by-full-path, and those two
+// orders usually coincide but are not the same thing. "a" and "a-b" are the
+// smallest pair that tells them apart: '-' (0x2D) sorts before '/' (0x2F), so
+// "a-b/..." sorts before "a/..." lexically, but WalkDir visits root entry "a"
+// first and walks it to completion - including its file - before it ever
+// reaches sibling "a-b". Only a fixture like this one fails if the explicit
+// sort is removed.
 func TestWalk_ResultsAreSorted(t *testing.T) {
 	root := mkdir(t, map[string]string{
-		"z/package-lock.json": "{}",
-		"a/package-lock.json": "{}",
-		"m/poetry.lock":       "",
+		"a/package-lock.json":   "{}",
+		"a-b/package-lock.json": "{}",
 	})
 	got, err := Walk(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"a/package-lock.json", "m/poetry.lock", "z/package-lock.json"}
+	want := []string{"a-b/package-lock.json", "a/package-lock.json"}
 	for i := range want {
 		if got[i].Path != want[i] {
 			t.Fatalf("order = %v, want %v", paths(got), want)
