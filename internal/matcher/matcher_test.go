@@ -54,9 +54,10 @@ func (f fakeStore) Close() error              { return nil }
 // identifier that happens to name it.
 //
 // A value receiver, like the rest of fakeStore. The counter still survives back
-// to the test because a map is a reference type - incrementing through a copy
-// of the struct writes to the same map - and the test must initialise it, since
-// writing to a nil map panics rather than silently doing nothing.
+// to the test because a map is a reference type: incrementing through a copy of
+// the struct writes to the same map. A fixture that does not want to count
+// leaves ratingCalls nil, which the guard below skips - so an uncounted fixture
+// is silent rather than a panic.
 func (f fakeStore) RatingsFor(cve string) ([]advisory.Rating, error) {
 	if f.ratingCalls != nil {
 		f.ratingCalls[cve]++

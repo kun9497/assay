@@ -98,7 +98,18 @@ type Rating struct {
 	// on the rating and not on the finding. Taking it from the winning record
 	// would make every source appear to agree about remediation when measured
 	// disagreement is the common case.
+	//
+	// Empty on an annotation (D27). NVD was asked what a CVE is worth, not
+	// which version fixes this package - filling it from the finding's own
+	// evidence would have the report claim NIST published a remediation it
+	// never published.
 	Fixed string
+	// URL is where a reader can check this rating, empty for an OSV record
+	// because the advisory is already named. An annotation has no advisory to
+	// name, so without this the per-source breakdown asserts what NIST says and
+	// offers nowhere to verify it - explainability is goal #1, and it applies
+	// to the sources as much as to the match.
+	URL string
 }
 
 // beats reports whether cand should displace cur as the rating that sets the
@@ -401,6 +412,8 @@ func (m *Matcher) annotate(f *Finding) error {
 				AdvisoryID: r.CVE,
 				Severity:   band,
 				Score:      score,
+				URL:        r.URL,
+				// Fixed stays empty on purpose: see Rating.Fixed.
 			})
 			// The aggregate only, never the display. beats() decides whether
 			// this outranks what is there, so unknown still sits outside the

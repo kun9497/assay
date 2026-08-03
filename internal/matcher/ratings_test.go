@@ -491,6 +491,43 @@ func TestMatch_AnNVDRatingRaisesAnOtherwiseUnratedFinding(t *testing.T) {
 			"attaching it to a source that said nothing would invent agreement",
 			got["PYSEC"])
 	}
+	// Sorted, including the annotation. Annotations are appended after the OSV
+	// ratings, so sortRatings has to run AFTER annotate - and nothing else
+	// would notice if it moved back above: "NVD" sorts before "PYSEC", the
+	// JSON renderer documents that it relies on this order, and the golden
+	// file would change without any test naming why.
+	var order []string
+	for _, r := range f.Ratings {
+		order = append(order, r.Database)
+	}
+	// One PYSEC, not two: twoSources hands the same record twice and seen[a.ID]
+	// collapses it, which is the dedup working rather than a fixture mistake.
+	if fmt.Sprint(order) != fmt.Sprint([]string{"NVD", "PYSEC"}) {
+		t.Errorf("rating order = %v, want [NVD PYSEC] - sorted after the "+
+			"annotation is attached, not before", order)
+	}
+	// What an annotation carries, and what it must not. NIST was asked what a
+	// CVE is worth, not which version fixes this package: a Fixed taken from
+	// the finding's own evidence would have the report claim NIST published a
+	// remediation it never published, which is the defect D27 exists to avoid.
+	var nvd Rating
+	for _, r := range f.Ratings {
+		if r.Database == "NVD" {
+			nvd = r
+		}
+	}
+	if nvd.Fixed != "" {
+		t.Errorf("the NVD rating carries Fixed=%q; NIST published no remediation "+
+			"for this package and the report must not say it did", nvd.Fixed)
+	}
+	if nvd.AdvisoryID != "CVE-2022-28347" {
+		t.Errorf("AdvisoryID = %q, want the CVE - an annotation has no advisory "+
+			"of its own to name", nvd.AdvisoryID)
+	}
+	if nvd.URL == "" {
+		t.Error("the NVD rating carries no URL, so the breakdown asserts what NIST " +
+			"says and offers nowhere to check it")
+	}
 }
 
 // ...and it is never the displayed record, however high it scores. An NVD
@@ -547,9 +584,18 @@ func TestMatch_AnNVDRatingForAnotherCVEChangesNothing(t *testing.T) {
 // commonly carries the same CVE in both aliases and upstream (D3), and on a
 // real scan this is a store read per finding, not per alias.
 func TestMatch_ACVEIsResolvedOnceNotPerIdentifier(t *testing.T) {
+	// One record carrying the aliases a real GHSA record carries - the header
+	// of this file records the measured set for this very CVE:
+	// [BIT-django-2022-28347 CVE-2022-28347 PYSEC-2022-191]. So Identifiers
+	// holds four names of which exactly one is a CVE, which is what the filter
+	// below has to act on.
+	//
+	// Two records linked only through upstream would NOT have worked here:
+	// grouping deliberately excludes upstream (see identifiers), so they stay
+	// two findings and each looks the CVE up once - correct behaviour, wrong
+	// fixture for this property.
 	rec := ghsaRec()
-	rec.Aliases = []string{"CVE-2022-28347"}
-	rec.Upstream = []string{"CVE-2022-28347"} // the same CVE, from both fields
+	rec.Aliases = []string{"BIT-django-2022-28347", "CVE-2022-28347", "PYSEC-2022-191"}
 	s := fakeStore{
 		byKey:       map[string][]advisory.Advisory{key("PyPI", "django"): {rec}},
 		ratings:     map[string][]advisory.Rating{"CVE-2022-28347": {nvdRating("CVE-2022-28347", vecMedium)}},
@@ -584,8 +630,9 @@ func TestMatch_ACVEIsResolvedOnceNotPerIdentifier(t *testing.T) {
 		}
 	}
 	if len(s.ratingCalls) != 1 {
-		t.Errorf("looked up %d identifiers, want 1 - the finding carries several, "+
-			"and exactly one of them is a CVE: %v", len(s.ratingCalls), s.ratingCalls)
+		t.Errorf("looked up %d identifiers, want 1 - the finding carries several "+
+			"(its own id plus three aliases), and exactly one is a CVE: %v",
+			len(s.ratingCalls), s.ratingCalls)
 	}
 }
 
