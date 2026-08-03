@@ -231,8 +231,18 @@ that reasoning.
   Ratings []Rating  // sorted by Database, then AdvisoryID. Always non-empty.
   ```
   `Finding.Severity` and `Finding.Score` keep their meaning and become the highest across
-  `Ratings` (D25). `Finding.Advisory` keeps being the record that matched first, because
-  changing which record is *displayed* is a separate decision from recording all of them.
+  `Ratings` (D25).
+
+  **`Finding.Advisory` and `Finding.Evidence` come from the record that set the band** --
+  highest rating wins, ties broken by database name. Not "whichever matched first".
+
+  This was nearly left out of scope, which the plan's own done-when criterion contradicts:
+  the JSON emits `advisory.id`, `advisory.summary` and `evidence.fixed` from this record, so
+  leaving it order-dependent means two builds with reversed record order still produce
+  different output -- and the fixed version differs between sources on 152 of the 169
+  measured groups, so it is not a rare case. Tying the displayed record to the band also
+  makes the report agree with itself: it says critical, and the advisory it shows is the one
+  saying so.
 
 **The shape of the change.** `matcher.go`'s `reported` map currently means "this vulnerability
 is already reported, skip it". It becomes "this vulnerability already has a finding, attach
@@ -471,6 +481,7 @@ Each must turn the suite red. Apply, confirm, revert:
 |---|---|
 | a later record is dropped instead of appended | the defect, restored |
 | the aggregate takes the first rating rather than the highest | order dependence, restored |
+| `Advisory`/`Evidence` taken from the first match rather than the band-setting record | the displayed record goes back to depending on index order |
 | the aggregate takes the *lowest* | a critical finding reported as unknown |
 | `unknown` counts as below `none` in the aggregate | D17 coerced through the back door |
 | `Ratings` returned unsorted | non-deterministic output |
@@ -676,4 +687,5 @@ mechanism accepts it, the data is a separate cost — with a revisit trigger.
 Ingesting NVD or any new provider — D25 is the mechanism, not the sources. Choosing a
 *preferred* source, or letting the user pick one; the aggregate is the highest and that is the
 whole rule. Reconciling disagreeing fixed versions into one answer — they are shown, not
-merged. Changing which record `Finding.Advisory` points at.
+merged. A *preferred-source* setting: the band-setting record is displayed because it
+justifies the verdict, not because any database is held to be better than another.
