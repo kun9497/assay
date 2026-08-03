@@ -1,0 +1,262 @@
+package matcher
+
+import (
+	"fmt"
+	"testing"
+
+	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/pkgmeta"
+	"github.com/kun9497/assay/internal/severity"
+)
+
+// Two databases routinely describe one vulnerability and disagree about it:
+// 169 of 440 measured groups carry more than one record, 140 of those disagree
+// on severity and 152 on the fixed version. These tests pin what a finding does
+// with that (D25).
+
+const vecCritical = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" // 9.8
+
+// key mirrors fakeStore's own composite key. Built with string(rune(0)) rather
+// than written as an escape sequence: a literal NUL typed into a file has
+// three times on this branch become the byte it was meant to denote, once
+// costing a compile error inside the comment warning about the other two
+// (CLAUDE.md).
+func key(eco, name string) string { return eco + string(rune(0)) + name }
+
+// The live shape, simplified: both records describe CVE-2022-28347 in Django
+// 3.2.x, GHSA carrying a CVSS vector and PYSEC carrying none.
+//
+// Linked here only through the CVE they both alias, which is weaker than the
+// real records — those cross-alias each other, checked against OSV:
+//
+//	GHSA-w24h-v9qh-8gxj  aliases [BIT-django-2022-28347 CVE-2022-28347 PYSEC-2022-191]
+//	PYSEC-2022-191       aliases [BIT-django-2022-28347 CVE-2022-28347 GHSA-w24h-v9qh-8gxj]
+//
+// The weaker link is deliberate. Naming each other is the easy case; sharing
+// only a CVE is what a KISA record and a GHSA record will have in common, and
+// it is the case the old code missed entirely — keyed on the record's own ID,
+// it produced two findings for one vulnerability. Testing the shape that
+// already worked would have left that unpinned.
+func ghsaRec() advisory.Advisory {
+	a := advWithRange("GHSA-w24h-v9qh-8gxj", "PyPI", "django", "0", "3.2.13",
+		advisory.RangeEcosystem)
+	a.Database = "GHSA"
+	a.Aliases = []string{"CVE-2022-28347"}
+	a.Severity = []advisory.Severity{{Type: "CVSS_V3", Score: vecCritical}}
+	return a
+}
+
+func pysecRec() advisory.Advisory {
+	a := advWithRange("PYSEC-2022-191", "PyPI", "django", "0", "3.2.13",
+		advisory.RangeEcosystem)
+	a.Database = "PYSEC"
+	a.Aliases = []string{"CVE-2022-28347"}
+	// No Severity at all — this is what PYSEC records look like, and it is the
+	// whole reason the aggregate matters.
+	return a
+}
+
+// twoSources holds one vulnerability twice, in the order given.
+func twoSources(first, second advisory.Advisory) fakeStore {
+	return fakeStore{byKey: map[string][]advisory.Advisory{
+		key("PyPI", "django"): {first, second},
+	}}
+}
+
+func djangoTarget() pkgmeta.Target {
+	return pkgmeta.Target{Packages: []pkgmeta.Package{pkg("django", "3.2.12", "PyPI")}}
+}
+
+// The measured case: two records, one vulnerability, different bands. Both are
+// kept, and the finding is as severe as the worst of them.
+func TestMatch_KeepsEverySourcesRating(t *testing.T) {
+	res, err := New(twoSources(ghsaRec(), pysecRec())).Match(djangoTarget())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("got %d findings, want 1 — the two records are one vulnerability", len(res.Findings))
+	}
+	f := res.Findings[0]
+	if len(f.Ratings) != 2 {
+		t.Fatalf("got %d ratings, want 2: %+v", len(f.Ratings), f.Ratings)
+	}
+	if f.Severity != severity.Critical {
+		t.Errorf("Severity = %v, want critical — the highest across sources", f.Severity)
+	}
+	got := map[string]severity.Band{}
+	for _, r := range f.Ratings {
+		got[r.Database] = r.Severity
+	}
+	if got["GHSA"] != severity.Critical {
+		t.Errorf("GHSA rating = %v, want critical", got["GHSA"])
+	}
+	if got["PYSEC"] != severity.Unknown {
+		t.Errorf("PYSEC rating = %v, want unknown — that record carries no vector", got["PYSEC"])
+	}
+}
+
+// The ordering dependency this change exists to remove. The same two records
+// are fed in BOTH orders and the finding must come out identical — every part
+// of it, not just the verdict, because the report prints the advisory ID, the
+// summary and the fixed version off Advisory and Evidence.
+func TestMatch_AFindingDoesNotDependOnRecordOrder(t *testing.T) {
+	forward, err := New(twoSources(ghsaRec(), pysecRec())).Match(djangoTarget())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reversed, err := New(twoSources(pysecRec(), ghsaRec())).Match(djangoTarget())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(forward.Findings) != 1 || len(reversed.Findings) != 1 {
+		t.Fatalf("findings: forward %d, reversed %d", len(forward.Findings), len(reversed.Findings))
+	}
+	a, b := forward.Findings[0], reversed.Findings[0]
+	if a.Severity != b.Severity {
+		t.Errorf("Severity depends on record order: %v vs %v", a.Severity, b.Severity)
+	}
+	// Compared as rendered strings so a failure names the difference rather
+	// than reporting "not deeply equal".
+	if fmt.Sprint(a.Ratings) != fmt.Sprint(b.Ratings) {
+		t.Errorf("Ratings depend on record order:\n  forward  %v\n  reversed %v", a.Ratings, b.Ratings)
+	}
+	if a.Advisory.ID != b.Advisory.ID {
+		t.Errorf("the displayed advisory depends on record order: %s vs %s",
+			a.Advisory.ID, b.Advisory.ID)
+	}
+	if a.Evidence != b.Evidence {
+		t.Errorf("Evidence depends on record order: %+v vs %+v", a.Evidence, b.Evidence)
+	}
+}
+
+// Which record is displayed is the one that set the band, so the report agrees
+// with itself: it says critical, and the advisory it shows is the one saying
+// so. Asserted on the ID, because the ID is what the table, the JSON and
+// --explain all print.
+func TestMatch_TheDisplayedRecordIsTheOneThatSetTheBand(t *testing.T) {
+	for _, order := range []struct {
+		name          string
+		first, second advisory.Advisory
+	}{
+		{"rated record first", ghsaRec(), pysecRec()},
+		{"unrated record first", pysecRec(), ghsaRec()},
+	} {
+		t.Run(order.name, func(t *testing.T) {
+			res, err := New(twoSources(order.first, order.second)).Match(djangoTarget())
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := res.Findings[0]
+			if f.Advisory.ID != "GHSA-w24h-v9qh-8gxj" {
+				t.Errorf("displayed advisory = %s, want the GHSA record — it is the "+
+					"one that rated this critical", f.Advisory.ID)
+			}
+			if f.Advisory.Database != "GHSA" {
+				t.Errorf("displayed Database = %q, want GHSA", f.Advisory.Database)
+			}
+		})
+	}
+}
+
+// D17 through the aggregate: a source that rated nothing must not pull a rated
+// finding down. unknown is outside the ordering, not below it — so the
+// aggregate of {critical, unknown} is critical, not unknown and not none.
+func TestMatch_AnUnratedSourceDoesNotDiluteARatedOne(t *testing.T) {
+	res, err := New(twoSources(ghsaRec(), pysecRec())).Match(djangoTarget())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := res.Findings[0]
+	if f.Severity != severity.Critical {
+		t.Fatalf("Severity = %v, want critical", f.Severity)
+	}
+	if f.Score != 9.8 {
+		t.Errorf("Score = %.1f, want 9.8 — the score of the band that won", f.Score)
+	}
+}
+
+// ...and a vulnerability every source left unrated is still unknown, never
+// coerced into a band (D17).
+func TestMatch_AllSourcesUnratedIsUnknown(t *testing.T) {
+	a, b := pysecRec(), pysecRec()
+	b.ID, b.Database = "GO-2022-0999", "GO"
+	res, err := New(twoSources(a, b)).Match(djangoTarget())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := res.Findings[0]
+	if f.Severity != severity.Unknown {
+		t.Errorf("Severity = %v, want unknown — no source rated it", f.Severity)
+	}
+	if f.Score != 0 {
+		t.Errorf("Score = %.1f, want 0", f.Score)
+	}
+	if len(f.Ratings) != 2 {
+		t.Errorf("got %d ratings, want 2 — both sources are still recorded", len(f.Ratings))
+	}
+}
+
+// A single-source finding still has exactly one rating. Ratings is never empty,
+// so no renderer has to special-case its absence — an empty slice would make
+// "no source said anything" indistinguishable from "we dropped them".
+func TestMatch_ASingleSourceStillProducesOneRating(t *testing.T) {
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		key("PyPI", "django"): {ghsaRec()},
+	}}
+	res, err := New(s).Match(djangoTarget())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := res.Findings[0]
+	if len(f.Ratings) != 1 {
+		t.Fatalf("got %d ratings, want 1: %+v", len(f.Ratings), f.Ratings)
+	}
+	if f.Ratings[0].Database != "GHSA" || f.Ratings[0].AdvisoryID != "GHSA-w24h-v9qh-8gxj" {
+		t.Errorf("rating = %+v, want it attributed to the record it came from", f.Ratings[0])
+	}
+}
+
+// Ratings are sorted. The point of this change is to stop depending on
+// incidental ordering; emitting them in whatever order the index listed would
+// reintroduce exactly that, one layer up, in the output instead of the verdict.
+func TestMatch_RatingsAreSorted(t *testing.T) {
+	goRec := pysecRec()
+	goRec.ID, goRec.Database = "GO-2022-0001", "GO"
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		// Deliberately not in sorted order.
+		key("PyPI", "django"): {pysecRec(), goRec, ghsaRec()},
+	}}
+	res, err := New(s).Match(djangoTarget())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range res.Findings[0].Ratings {
+		got = append(got, r.Database)
+	}
+	want := []string{"GHSA", "GO", "PYSEC"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("rating order = %v, want %v", got, want)
+	}
+}
+
+// The fixed version differs between sources on 152 of the 169 measured
+// multi-record groups, so each rating carries the one its OWN record gives.
+// Taking it from the winning record would make every source appear to agree.
+func TestMatch_EachRatingCarriesItsOwnFixedVersion(t *testing.T) {
+	late := pysecRec()
+	late.Affected[0].Ranges[0].Events[1].Fixed = "3.2.14"
+	res, err := New(twoSources(ghsaRec(), late)).Match(djangoTarget())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixes := map[string]string{}
+	for _, r := range res.Findings[0].Ratings {
+		fixes[r.Database] = r.Fixed
+	}
+	if fixes["GHSA"] != "3.2.13" || fixes["PYSEC"] != "3.2.14" {
+		t.Errorf("fixed versions = %v, want GHSA 3.2.13 and PYSEC 3.2.14 — each "+
+			"rating reports what its own record says", fixes)
+	}
+}

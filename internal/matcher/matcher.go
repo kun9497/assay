@@ -46,6 +46,60 @@ type Finding struct {
 	// Summary.UnknownSeverity, so the omission would be invisible to both.
 	Severity severity.Band
 	Score    float64
+	// Ratings is what every database that described this vulnerability said
+	// about it (D25). Never empty: a single-source finding carries one rating,
+	// so no renderer has to tell "no source said anything" apart from "we
+	// dropped them".
+	//
+	// Severity and Score above are the highest across these, and Advisory and
+	// Evidence are the record that set it. Keeping the rest is not a display
+	// nicety — 140 of 169 measured multi-record groups disagree on severity and
+	// 152 on the fixed version, so a report that showed one source's answer
+	// would be quietly presenting one authority's opinion as the answer.
+	Ratings []Rating
+}
+
+// Rating is one database's assessment of one vulnerability: what GHSA said, as
+// distinct from what PYSEC said about the same CVE.
+type Rating struct {
+	// Database is the database that authored the record — "GHSA", "PYSEC",
+	// "GO", "ALPINE" — not the provider that fetched it. Both exist and they
+	// differ: Advisory.Source is "osv" for every record here.
+	Database   string
+	AdvisoryID string
+	Severity   severity.Band
+	Score      float64
+	// Fixed is the fixed version THIS record gives, which is why the field is
+	// on the rating and not on the finding. Taking it from the winning record
+	// would make every source appear to agree about remediation when measured
+	// disagreement is the common case.
+	Fixed string
+}
+
+// beats reports whether cand should displace cur as the rating that sets the
+// finding's band — and so as the record the report displays.
+//
+// A rated record always outranks an unrated one, because unknown sits outside
+// the ordering rather than below it (D17): a source that rated nothing must
+// not be able to present a critical finding as unrated. Among rated records
+// the higher score wins.
+//
+// Equal standing is broken by name rather than left to arrival order. That is
+// the whole point of D25 — a tie resolved by "whichever the index listed
+// first" is the defect, not a harmless coin flip.
+func beats(cand, cur Rating) bool {
+	candUnrated := cand.Severity == severity.Unknown
+	curUnrated := cur.Severity == severity.Unknown
+	if candUnrated != curUnrated {
+		return curUnrated
+	}
+	if !candUnrated && cand.Score != cur.Score {
+		return cand.Score > cur.Score
+	}
+	if cand.Database != cur.Database {
+		return cand.Database < cur.Database
+	}
+	return cand.AdvisoryID < cur.AdvisoryID
 }
 
 // Skipped is something the matcher could not evaluate. It exists so that "we
@@ -142,12 +196,26 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 		// twice in a lookup result, so without this a single bad bound emits
 		// byte-identical skips and buries the rest of the report.
 		skipped := make(map[string]bool)
-		// One vulnerability commonly has records under several IDs. OSV's Go
+		// One vulnerability commonly has records under several IDs — OSV's Go
 		// ecosystem carries both the GHSA and the GO- identifier for the same
 		// issue, which doubled every Go finding in a real scan against grype.
-		// The first record to match wins; the rest are recognized through the
-		// aliases they declare.
-		reported := make(map[string]bool)
+		// group maps every identifier a matched record declares to the index of
+		// the finding it belongs to, so a later record joins that finding
+		// instead of starting a second one.
+		//
+		// Keyed on ANY shared identifier, not on the record's own ID. Two
+		// records that name each other are the easy case; the common one is two
+		// records that name only the same CVE — GHSA and PYSEC describing one
+		// Django vulnerability, 161 of the 169 measured multi-record groups.
+		// Matching on the record's own ID alone missed exactly those, which is
+		// how one vulnerability produced two findings.
+		//
+		// A record that links two previously separate groups is left linking to
+		// the first of them rather than merging the two. It needs three records
+		// where the third aliases two that never named each other, which the
+		// measured data does not contain; and the consequence is a duplicated
+		// finding, which is visible, rather than a dropped one, which is not.
+		group := make(map[string]int)
 
 		for _, lookupName := range names {
 			wantName := pkgmeta.NormalizeName(p.Ecosystem, lookupName)
@@ -195,21 +263,51 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 					}
 					if hit {
 						seen[a.ID] = true
-						if reported[a.ID] {
-							break // already reported under another identifier
-						}
-						for _, id := range identifiers(a) {
-							reported[id] = true
-						}
+						ids := identifiers(a)
 						band, score := severity.Highest(vectorsOf(a))
-						res.Findings = append(res.Findings, Finding{
-							Package:     p,
-							Advisory:    a,
-							Evidence:    ev,
-							MatchedName: lookupName,
-							Severity:    band,
-							Score:       score,
-						})
+						r := Rating{
+							Database:   a.Database,
+							AdvisoryID: a.ID,
+							Severity:   band,
+							Score:      score,
+							Fixed:      ev.Fixed,
+						}
+						idx, joined := groupOf(group, ids)
+						if joined {
+							f := &res.Findings[idx]
+							f.Ratings = append(f.Ratings, r)
+							// The finding shows the record that set its band, so
+							// what is displayed follows the verdict instead of
+							// the order the index happened to list. The reigning
+							// rating is read back off the finding rather than
+							// tracked alongside it, so there is no invariant
+							// about Ratings' order for the sort below to break.
+							cur := Rating{
+								Database:   f.Advisory.Database,
+								AdvisoryID: f.Advisory.ID,
+								Severity:   f.Severity,
+								Score:      f.Score,
+							}
+							if beats(r, cur) {
+								f.Advisory, f.Evidence = a, ev
+								f.MatchedName = lookupName
+								f.Severity, f.Score = band, score
+							}
+						} else {
+							idx = len(res.Findings)
+							res.Findings = append(res.Findings, Finding{
+								Package:     p,
+								Advisory:    a,
+								Evidence:    ev,
+								MatchedName: lookupName,
+								Severity:    band,
+								Score:       score,
+								Ratings:     []Rating{r},
+							})
+						}
+						for _, id := range ids {
+							group[id] = idx
+						}
 						break
 					}
 				}
@@ -217,9 +315,22 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 		}
 	}
 
+	for i := range res.Findings {
+		sortRatings(res.Findings[i].Ratings)
+	}
 	sortFindings(res.Findings)
 	sortSkipped(res.Skipped)
 	return res, nil
+}
+
+// groupOf finds the finding that any of ids already belongs to.
+func groupOf(group map[string]int, ids []string) (int, bool) {
+	for _, id := range ids {
+		if idx, ok := group[id]; ok {
+			return idx, true
+		}
+	}
+	return 0, false
 }
 
 // vectorsOf unwraps the CVSS vector strings carried on an advisory. It does
@@ -280,6 +391,22 @@ func sortFindings(fs []Finding) {
 		// only in where they were found — nested node_modules produce exactly
 		// that. Location is the last thing that tells them apart.
 		return locationKey(a.Package) < locationKey(b.Package)
+	})
+}
+
+// sortRatings orders a finding's ratings by database, then by advisory ID.
+//
+// Without it they would come out in whichever order the package index listed
+// the records — reintroducing, in the output, the exact dependence on
+// incidental ordering that D25 removes from the verdict. Two records from one
+// database are possible (a database can issue a second record for the same
+// CVE), so the ID is needed to make this a total order.
+func sortRatings(rs []Rating) {
+	sort.SliceStable(rs, func(i, j int) bool {
+		if rs[i].Database != rs[j].Database {
+			return rs[i].Database < rs[j].Database
+		}
+		return rs[i].AdvisoryID < rs[j].AdvisoryID
 	})
 }
 
