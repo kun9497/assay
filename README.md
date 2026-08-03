@@ -409,7 +409,7 @@ exited 0 while 24 findings went unmentioned. **Done.**
 - [x] Per-source ratings — a finding keeps every database's assessment, the gate takes the
       highest (D25)
 - [ ] SARIF output (see `docs/deferred-decisions.md`)
-- [ ] NVD as a second rating source (see `docs/deferred-decisions.md`)
+- [ ] NVD as a second rating source, joined on the CVE (D27)- [ ] NVD as a second rating source (see `docs/deferred-decisions.md`)
 
 **⑤ KISA enrichment** — Korean descriptions and severity joined onto matched findings.
 **On hold: investigated 2026-08-02 and the data does not support it.**

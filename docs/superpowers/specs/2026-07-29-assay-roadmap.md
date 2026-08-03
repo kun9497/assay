@@ -663,6 +663,60 @@ that something is missing without telling them what to do; `requirements.txt (no
 lockfile)` tells them which tree is unevaluated and why. Explainability is goal #1 and it
 applies to what was *not* checked as much as to what was.
 
+### D27 — NVD is a rating source, joined on the CVE, and never a matching source
+
+Half of what assay reports as `unknown` is not unknown to everyone. Measured over the live
+database and NVD's 2.0 API on 2026-08-03: of 8,029 advisories carrying no scorable vector,
+a 60-CVE random sample found NVD scoring **93%** of them and rating **48% high or critical**.
+Scanning assay's own binary shows what that costs — all three findings are unrated, so
+`--fail-on low`, the lowest threshold there is, exits 0, while NVD rates two of them 7.8 and
+5.3.
+
+**The join is the CVE, not the CPE.** NVD keys its match data on `vendor:product`, and for a
+language package that pair is a curated string no purl can derive: `pkg:golang/gopkg.in/yaml.v3`
+is `cpe:2.3:a:yaml_project:yaml`, and `django` splits across two vendors. A dictionary could
+in principle be learned by joining OSV and NVD on the shared CVE, but sampled 50 ways it
+teaches a trustworthy mapping for Alpine 85%, PyPI 71%, npm 50% and **Go 11%** — and Go
+supplies 4,125 of the 8,029 unrated advisories. The CPE-less records are `Deferred`, NVD's
+status for what it has decided not to enrich, so waiting does not help. Full findings in
+`docs/deferred-decisions.md`.
+
+So NVD answers exactly one question here: *what does NIST score this CVE?* It never decides
+whether a package is affected. That stays with OSV and the per-ecosystem `Comparer`s (D9),
+and it is why this is a small provider rather than a second matcher.
+
+**It is a Rating, so D25 already defines what happens to it.** An NVD score enters
+`Finding.Ratings` as `Database: "NVD"`, the verdict takes the highest band across ratings, and
+`unknown` still sits outside the ordering (D17). **Verdicts will change**, and that is the
+point rather than a side effect: a finding every OSV source left unrated can now reach
+`--fail-on high`. The exit-code contract is unchanged; what changed is that the aggregate has
+more to aggregate.
+
+**But an NVD rating is never the displayed record.** D25 says the finding shows the record
+that set its band. NVD sets a band without supplying the thing that makes a finding
+explainable: there is no range we compared against, no `Evidence`, no fixed version — we
+matched through OSV and asked NIST only for a score. Displaying it would put an advisory on
+screen with nothing behind it, against goal #1. So D25's rule narrows by one word: the finding
+shows the **matched** record that set its band, and an NVD rating can raise the aggregate
+without ever being displayed. `--explain` lists it in the per-source breakdown, which is where
+a reader looks for exactly this.
+
+**Fetched by `db update`, never by a scan** (D14). NVD's 2.0 API paginates 2,000 records per
+request, so a full sync is 187 requests — about 20 minutes at the 5-per-30-seconds rate limit
+that applies without an API key, against roughly 12 hours if each CVE were fetched
+individually. 98% of records carry a score. An API key raises the limit tenfold and is
+supported but not required; a scanner that only works for people who registered for a key is
+a different tool.
+
+**It does not touch coverage** (D20). NVD is not an ecosystem, and `Covers()` must not report
+one because NVD scores exist — otherwise a package in an ecosystem this database never
+ingested would stop being reported as unevaluated, which is the exact failure D20 exists to
+prevent.
+
+**The 13% stays.** 1,008 of the 8,029 unrated advisories carry no CVE at all, so no join
+reaches them under any design. That is not a gap to close later; it is the honest ceiling on
+this decision, and it showed up as one of the three findings in the binary scan above.
+
 ## 3. Architecture
 
 ### Measured data volumes

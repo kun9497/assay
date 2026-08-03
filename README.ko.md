@@ -391,7 +391,7 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] 출처별 평가 — finding이 모든 데이터베이스의 평가를 유지하고, 게이트는 그중 가장 높은
       것을 취함 (D25)
 - [ ] SARIF 출력 (`docs/deferred-decisions.md` 참조)
-- [ ] 두 번째 평가 출처로서의 NVD (`docs/deferred-decisions.md` 참조)
+- [ ] 두 번째 평가 출처로서의 NVD, CVE로 조인 (D27)- [ ] 두 번째 평가 출처로서의 NVD (`docs/deferred-decisions.md` 참조)
 
 **⑤ KISA 보강** — 매칭된 finding에 한국어 설명과 심각도를 결합합니다.
 **보류: 2026-08-02 조사 결과 데이터가 이를 뒷받침하지 않습니다.**
