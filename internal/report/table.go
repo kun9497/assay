@@ -262,6 +262,15 @@ const disagreementMarker = "*"
 // len(ratings) < 2 covers both the zero-rating case (a hand-built Finding in
 // a test that predates D25) and the single-source case the brief calls out
 // explicitly.
+//
+// An UNRATED source currently counts as disagreeing, and that is worth
+// revisiting rather than assuming: Unknown sits outside the ordering (D17),
+// so a source with no opinion has arguably not disagreed with one that has.
+// It was rare enough not to matter before D27; now NVD rates ~93% of CVEs
+// while about half of OSV's records carry no severity, so most annotated
+// findings get the marker. Left as-is deliberately — it over-marks rather
+// than under-marks, and narrowing what the marker means is a decision about
+// the report's contract, not a bug fix. See docs/deferred-decisions.md.
 func sourcesDisagree(ratings []matcher.Rating) bool {
 	if len(ratings) < 2 {
 		return false

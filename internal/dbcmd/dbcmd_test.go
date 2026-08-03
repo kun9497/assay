@@ -68,7 +68,8 @@ func (f fakeProvider) Fetch(_ context.Context, emit func(advisory.Advisory) erro
 type fakeAnnotator struct {
 	name    string
 	ratings []advisory.Rating
-	err     error // returned by Annotate instead of emitting anything, if set
+	err     error  // returned by Annotate instead of emitting anything, if set
+	window  string // what this run covered; empty means the annotator reported none
 }
 
 func (f fakeAnnotator) Name() string { return f.name }
@@ -86,6 +87,7 @@ func (f fakeAnnotator) Annotate(_ context.Context, emit func(advisory.Rating) er
 		Source:   "https://example.test/nvd",
 		DataAsOf: time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC),
 		Records:  len(f.ratings),
+		Window:   f.window,
 	}, nil
 }
 
@@ -492,6 +494,59 @@ func TestStatus_ShowsRatingSources(t *testing.T) {
 	}
 	if !strings.Contains(row, "https://example.test/nvd") {
 		t.Errorf("RATING SOURCE row for NVD is missing its fetch URL:\n%q", row)
+	}
+}
+
+// A bounded rating sync must say what it covered. Update rebuilds the
+// database from empty, so a windowed run's window is that source's ENTIRE
+// coverage rather than a delta on a fuller earlier pass — and without this
+// column a database holding one day of NVD renders identically to one
+// holding all of it, differing only in a RECORDS number no reader has a
+// baseline for. That is D20's over-claim in its quietest form: every finding
+// whose CVE fell outside the window keeps a lower band, and nothing says so.
+func TestStatus_RatingSourceDisclosesTheWindowItCovered(t *testing.T) {
+	for _, tc := range []struct {
+		name, window, want string
+	}{
+		{"bounded", "modified 2026-07-04..2026-08-03", "modified 2026-07-04..2026-08-03"},
+		{"whole feed", "the whole feed", "the whole feed"},
+		// A database built before Window existed must not render a blank
+		// cell, which reads as "no limit" — the one meaning it cannot have.
+		{"not reported", "", "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "vulnerability.db")
+			p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+				ID: "GHSA-x", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+				Affected: []advisory.Affected{{Ecosystem: "Go", Name: "x"}},
+			}}}
+			a := fakeAnnotator{
+				name:    "NVD",
+				ratings: []advisory.Rating{{CVE: "CVE-2026-2", Source: "NVD"}},
+				window:  tc.window,
+			}
+
+			var out, errOut bytes.Buffer
+			if code := Update(context.Background(), path, []provider.Provider{p}, []provider.Annotator{a}, &out, &errOut); code != 0 {
+				t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+			}
+			out.Reset()
+			if code := Status(path, &out, &errOut); code != 0 {
+				t.Fatalf("Status = %d, want 0 (stderr: %s)", code, errOut.String())
+			}
+			s := out.String()
+			row := ratingSourceLine(t, s, "NVD")
+			if !strings.Contains(row, tc.want) {
+				t.Errorf("RATING SOURCE row for NVD = %q, want it to disclose the covered window %q", row, tc.want)
+			}
+			// The heading too, not just the cell: deleting the column from
+			// the header leaves the value rendered under a neighbouring
+			// label, which a row-only assertion passes on happily (verified
+			// by mutation - it survived until this line existed).
+			if !strings.Contains(s, "COVERED") {
+				t.Errorf("RATING SOURCE table has no COVERED heading, so the window renders under another column:\n%s", s)
+			}
+		})
 	}
 }
 

@@ -130,6 +130,19 @@ func (p *Provider) Name() string { return SourceName }
 // Requests are made one at a time, in order, never in parallel: NVD's rate
 // limit is per source IP, so concurrency would not buy throughput and would
 // risk a block.
+// windowLabel describes what a run covered, for Provenance.Window. An
+// unbounded run says so in words rather than returning "" — an empty Window
+// is indistinguishable from a database built before this field existed, and
+// "the whole feed" is precisely the claim a reader needs to be able to tell
+// apart from "the last 30 days".
+func windowLabel(since, until time.Time) string {
+	if since.IsZero() {
+		return "the whole feed"
+	}
+	return fmt.Sprintf("modified %s..%s",
+		since.UTC().Format("2006-01-02"), until.UTC().Format("2006-01-02"))
+}
+
 func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) error) (store.Provenance, error) {
 	prov := store.Provenance{Source: p.baseURL}
 	var (
@@ -138,7 +151,16 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 		records    int
 		asOf       time.Time
 		first      = true
+		// Read once, before the first request, and held for the whole sync:
+		// see fetchPage on why the window must not move underneath the
+		// pagination.
+		until = nowUTC()
 	)
+	// What this run actually covered, recorded so a windowed database cannot
+	// present itself as a complete one (D20). Update rebuilds from empty, so
+	// a bounded run's window IS the database's entire NVD coverage — there is
+	// no earlier pass underneath it.
+	prov.Window = windowLabel(p.since, until)
 	// A do-while shape: the total is unknown before the first response, so
 	// the loop condition alone cannot gate the first request.
 	for first || startIndex < total {
@@ -167,7 +189,7 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 		}
 		first = false
 
-		page, pageAsOf, err := p.fetchPage(ctx, startIndex)
+		page, pageAsOf, err := p.fetchPage(ctx, startIndex, until)
 		if err != nil {
 			return store.Provenance{}, err
 		}
@@ -231,15 +253,26 @@ type apiResponse struct {
 // nowUTC is a seam so a test can pin the lastModEndDate it expects.
 var nowUTC = func() time.Time { return time.Now().UTC() }
 
-func (p *Provider) fetchPage(ctx context.Context, startIndex int) (apiResponse, time.Time, error) {
+// fetchPage requests one page. The window's upper bound is passed in rather
+// than read from the clock here, because this is called once per page and
+// pagination is by startIndex INTO the set the window defines: recomputing
+// the end date per request would move that set while it is being walked.
+// A 30-day sync is ~11 pages over ~25 minutes, and any CVE NVD modifies
+// during those 25 minutes would enter the window mid-walk and shift every
+// later offset by one — pushing a record past an offset already consumed,
+// where it is never emitted. That is a rating silently absent from the
+// database, so a finding keeps the lower band. NVD's own guidance is to
+// hold the range fixed across a paged read.
+func (p *Provider) fetchPage(ctx context.Context, startIndex int, until time.Time) (apiResponse, time.Time, error) {
 	u := fmt.Sprintf("%s?resultsPerPage=%d&startIndex=%d", p.baseURL, p.pageSize, startIndex)
 	if !p.since.IsZero() {
 		// NVD requires both bounds together and caps the span at 120 days.
-		// The end is now rather than open-ended, because an absent
-		// lastModEndDate is rejected rather than treated as "until now".
+		// The end is a real timestamp rather than open-ended, because an
+		// absent lastModEndDate is rejected rather than treated as "until
+		// now".
 		u += fmt.Sprintf("&lastModStartDate=%s&lastModEndDate=%s",
 			url.QueryEscape(p.since.UTC().Format("2006-01-02T15:04:05.000-07:00")),
-			url.QueryEscape(nowUTC().Format("2006-01-02T15:04:05.000-07:00")))
+			url.QueryEscape(until.UTC().Format("2006-01-02T15:04:05.000-07:00")))
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {

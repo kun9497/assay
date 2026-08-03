@@ -420,6 +420,145 @@ func TestAnnotate_SinceBoundsTheWindow(t *testing.T) {
 	}
 }
 
+// A record carrying metrics but no id is skipped rather than emitted. Stored,
+// it would key as "\x00NVD": unreachable, since the matcher only asks
+// RatingsFor about identifiers beginning "CVE-", but SetMeta derives its
+// per-source counts by splitting stored keys, so `db status` would count it
+// and claim a rating nothing can read (D20, over-claiming). Its URL would be
+// a bare .../vuln/detail/ too.
+func TestAnnotate_SkipsARecordWithMetricsButNoID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Two records, identical but for the id, so the assertion rests on
+		// the id alone rather than on the metrics being malformed.
+		io.WriteString(w, `{"totalResults":2,"vulnerabilities":[`+
+			`{"cve":{"id":"","metrics":{"cvssMetricV31":[{"cvssData":{"vectorString":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]}}},`+
+			`{"cve":{"id":"CVE-2026-7","metrics":{"cvssMetricV31":[{"cvssData":{"vectorString":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]}}}`+
+			`],"timestamp":"2026-08-03T00:00:00.000"}`)
+	}))
+	defer srv.Close()
+
+	var got []advisory.Rating
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0)})
+	prov, err := p.Annotate(context.Background(), func(r advisory.Rating) error {
+		got = append(got, r)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].CVE != "CVE-2026-7" {
+		t.Errorf("emitted %+v, want only the record that has an id", got)
+	}
+	// Records must not count the skipped one either: the number db status
+	// shows would otherwise disagree with what is actually in the bucket.
+	if prov.Records != 1 {
+		t.Errorf("Records = %d, want 1 - the skipped record must not be counted", prov.Records)
+	}
+}
+
+// The window is read once and held for the whole sync, not recomputed per
+// page. Pagination is by startIndex INTO the set the window defines, so
+// moving the upper bound between requests moves that set while it is being
+// walked: a CVE modified during the sync enters the window, shifts every
+// later offset by one, and a record pushed past an offset already consumed is
+// never emitted. That is a rating missing from the database and a finding
+// left on a lower band -- silent, which is the failure mode that matters
+// here. A real 30-day sync is ~11 pages over ~25 minutes, so this is not a
+// narrow race.
+//
+// TestAnnotate_SinceBoundsTheWindow cannot catch it: it serves totalResults 0,
+// so exactly one request is ever made and a per-page recomputation is
+// invisible.
+func TestAnnotate_TheWindowIsPinnedAcrossPages(t *testing.T) {
+	var ends []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ends = append(ends, r.URL.Query().Get("lastModEndDate"))
+		// Two pages of one record each: the first leaves startIndex short of
+		// totalResults, so a second request is required.
+		io.WriteString(w, `{"totalResults":2,"vulnerabilities":[{"cve":{"id":"CVE-2026-1",`+
+			`"metrics":{"cvssMetricV31":[{"cvssData":{"vectorString":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]}}}],`+
+			`"timestamp":"2026-08-03T00:00:00.000"}`)
+	}))
+	defer srv.Close()
+
+	// The clock ADVANCES between requests -- a day per call -- which is what
+	// makes a per-page nowUTC() observable at all. Pinned to fixed values so
+	// the assertion is on an exact string, not on "the two look similar".
+	calls := 0
+	restore := nowUTC
+	nowUTC = func() time.Time {
+		calls++
+		return time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC).AddDate(0, 0, calls-1)
+	}
+	defer func() { nowUTC = restore }()
+
+	p := New(Options{
+		BaseURL: srv.URL, PageSize: 1, Pause: durPtr(0),
+		Since: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+	})
+	if _, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(ends) != 2 {
+		t.Fatalf("made %d requests, want 2 - the fixture must actually paginate for this to test anything", len(ends))
+	}
+	if ends[0] != ends[1] {
+		t.Errorf("lastModEndDate moved between pages: %q then %q - the window must be read once and held",
+			ends[0], ends[1])
+	}
+	// And it is the value from BEFORE the first request, not some later
+	// reading: equality alone would also hold if both pages recomputed and
+	// the clock happened not to move.
+	if want := "2026-08-03T12:00:00.000+00:00"; ends[0] != want {
+		t.Errorf("lastModEndDate = %q, want %q - the window opens at the start of the sync", ends[0], want)
+	}
+}
+
+// A bounded run must say so in its Provenance. Update rebuilds the database
+// from empty every time, so a windowed sync's window IS that source's entire
+// coverage rather than a delta on an earlier pass -- and without this a
+// database holding one day of NVD is indistinguishable from one holding all
+// of it (D20).
+func TestAnnotate_ReportsWhatWindowItActuallyCovered(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"totalResults":0,"vulnerabilities":[],"timestamp":"2026-08-03T00:00:00.000"}`)
+	}))
+	defer srv.Close()
+
+	restore := nowUTC
+	nowUTC = func() time.Time { return time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC) }
+	defer func() { nowUTC = restore }()
+
+	t.Run("bounded", func(t *testing.T) {
+		p := New(Options{
+			BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0),
+			Since: time.Date(2026, 7, 4, 0, 0, 0, 0, time.UTC),
+		})
+		prov, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "modified 2026-07-04..2026-08-03"; prov.Window != want {
+			t.Errorf("Window = %q, want %q", prov.Window, want)
+		}
+	})
+
+	// An unbounded run says so in words. An empty Window would be
+	// indistinguishable from a database built before the field existed, and
+	// "no limit" is the one reading it must not be given by default.
+	t.Run("unbounded", func(t *testing.T) {
+		p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0)})
+		prov, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "the whole feed"; prov.Window != want {
+			t.Errorf("Window = %q, want %q", prov.Window, want)
+		}
+	})
+}
+
 // ...and a zero Since asks for the whole feed, with neither bound present.
 // Sending an empty lastModStartDate would be rejected by the API, so "not set"
 // has to mean "omit", not "send empty".

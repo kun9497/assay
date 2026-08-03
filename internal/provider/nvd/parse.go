@@ -63,7 +63,7 @@ const (
 )
 
 // convert turns one NVD vulnerability entry into a Rating. ok is false when
-// the record carries no CVSS metric at all.
+// the record carries no CVSS metric at all, or no id.
 //
 // That is a deliberate skip, not an oversight. severity.Highest(nil) already
 // derives an empty Severity as "unknown", so the band would come out right
@@ -96,6 +96,15 @@ func convert(v rawVulnerability) (advisory.Rating, bool) {
 		}
 	}
 	if len(sev) == 0 {
+		return advisory.Rating{}, false
+	}
+	// A record carrying metrics but no id would otherwise be stored under the
+	// key "\x00NVD". Nothing can ever read it back — the matcher only asks
+	// RatingsFor about identifiers beginning "CVE-" — but SetMeta derives its
+	// per-source counts by splitting stored keys, so it would count, and
+	// `db status` would report rating an unreachable CVE (D20, in the
+	// over-claiming direction). The URL would be a bare detail/ page too.
+	if v.CVE.ID == "" {
 		return advisory.Rating{}, false
 	}
 	return advisory.Rating{

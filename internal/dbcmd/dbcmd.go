@@ -261,7 +261,15 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 	if len(ratingNameSet) > 0 {
 		fmt.Fprintln(stdout)
 		rtw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(rtw, "RATING SOURCE\tDATA AS OF\tRECORDS\tSOURCE")
+		// COVERED is the annotator's analogue of the PROVIDER table's
+		// ecosystem list: what this source was actually asked for. A bounded
+		// NVD sync (D27's NVD_SINCE_DAYS) rebuilds from empty like every
+		// other run, so its window is the whole of that source's coverage
+		// rather than a delta on top of a fuller pass — and a database
+		// holding one day of NVD is otherwise indistinguishable here from
+		// one holding all of it, differing only in a RECORDS number nobody
+		// has a baseline for (D20).
+		fmt.Fprintln(rtw, "RATING SOURCE\tDATA AS OF\tRECORDS\tCOVERED\tSOURCE")
 		ratingNames := make([]string, 0, len(ratingNameSet))
 		for name := range ratingNameSet {
 			ratingNames = append(ratingNames, name)
@@ -277,7 +285,15 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 			if n, ok := m.RatingCounts[name]; ok {
 				records = fmt.Sprintf("%d", n)
 			}
-			fmt.Fprintf(rtw, "%s\t%s\t%s\t%s\n", name, asOf, records, p.Source)
+			// "unknown" rather than an empty cell for a database built
+			// before Window existed, or by a derived-only name with no
+			// self-report: a blank column reads as "no limit", which is the
+			// one thing it must not be mistaken for.
+			covered := p.Window
+			if covered == "" {
+				covered = "unknown"
+			}
+			fmt.Fprintf(rtw, "%s\t%s\t%s\t%s\t%s\n", name, asOf, records, covered, p.Source)
 		}
 		if err := rtw.Flush(); err != nil {
 			fmt.Fprintf(stderr, "error: write status: %v\n", err)

@@ -665,6 +665,55 @@ func TestRatingsFor_SeveralSourcesComeBackSorted(t *testing.T) {
 	}
 }
 
+// One CVE ID is a byte prefix of another -- CVE-2025-1 of CVE-2025-10 -- so
+// a Seek over "<CVE>" without the separator, or a scan that forgets to stop
+// at the end of the prefix, hands back a NEIGHBOUR's rating. That is not a
+// cosmetic leak: the matcher feeds every rating to beats(), which takes the
+// highest band, so an unrelated CVE's critical becomes this finding's
+// severity and can push a scan over --fail-on. It is CLAUDE.md's substring
+// hazard moved into the key space.
+//
+// No other fixture in this package puts more than one CVE in a database, so
+// until this existed both guards in RatingsFor were unheld: dropping keySep
+// from the prefix, and dropping the bytes.HasPrefix bound from the loop
+// condition, each left the entire repository green.
+func TestRatingsFor_DoesNotBleedAcrossCVEsSharingAPrefix(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, _ := Create(path)
+	// CVE-2025-10 sorts immediately after CVE-2025-1 under a bare-prefix
+	// Seek, so it is what an unbounded scan reaches first.
+	for _, r := range []advisory.Rating{
+		{CVE: "CVE-2025-1", Source: "NVD", URL: "own"},
+		{CVE: "CVE-2025-10", Source: "NVD", URL: "neighbour"},
+		{CVE: "CVE-2025-100", Source: "KISA", URL: "neighbour"},
+	} {
+		if err := w.PutRating(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.SetMeta(Meta{})
+	w.Close()
+	db, _ := Open(path)
+	defer db.Close()
+
+	got, err := db.RatingsFor("CVE-2025-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Asserted on the URL, not the source: "NVD" appears on the neighbour
+	// too, so a count-plus-source check would pass on the wrong row.
+	if len(got) != 1 || got[0].URL != "own" {
+		t.Errorf("RatingsFor(CVE-2025-1) = %+v, want exactly the one rating whose URL is %q", got, "own")
+	}
+	// And the longer ID still finds its own, so the fix is a boundary rather
+	// than an over-strict match.
+	if got, err := db.RatingsFor("CVE-2025-10"); err != nil {
+		t.Fatal(err)
+	} else if len(got) != 1 || got[0].CVE != "CVE-2025-10" {
+		t.Errorf("RatingsFor(CVE-2025-10) = %+v, want its own single rating", got)
+	}
+}
+
 // Schema 6, and a database at any other version refuses rather than serving
 // records with no ratings bucket - which would read as "nobody rated any of
 // these" on a database that simply predates the field.

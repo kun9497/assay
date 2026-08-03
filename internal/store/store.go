@@ -165,6 +165,24 @@ type Provenance struct {
 	// fetch list alone names a key nothing is looked up under and omits the 23
 	// that are.
 	Ecosystems []string `json:"ecosystems"`
+	// Window is what a RATING source actually covered, in its own words
+	// ("the whole feed", "modified 2026-07-04..2026-08-03"). Empty for
+	// advisory providers, which answer the same question with Ecosystems.
+	//
+	// It exists because a rating source can be fetched in part (D27's
+	// NVD_SINCE_DAYS bounds a sync to CVEs modified recently, since a full
+	// NVD pass is about seven hours) and Update rebuilds the database from
+	// empty every time. A bounded run's window is therefore the database's
+	// ENTIRE coverage from that source, not a delta layered on an earlier
+	// pass — so without this, a database holding one day of NVD looks
+	// exactly like one holding all of it, and every finding whose CVE fell
+	// outside the window silently keeps a lower band (D20).
+	//
+	// Self-reported, unlike RatingCounts, and that is sound here: the risk
+	// D20 guards against is a source claiming MORE coverage than it has,
+	// and a declared window only ever claims less. The count beside it is
+	// still derived.
+	Window string `json:"window,omitempty"`
 }
 
 // DefaultPath returns <user cache>/assay/db/v<schema>/vulnerability.db,
