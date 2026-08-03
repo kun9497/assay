@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -87,6 +88,12 @@ func TestAnnotate_PaginatesUntilComplete(t *testing.T) {
 	if prov.Source == "" {
 		t.Error("Provenance.Source is empty; a reader cannot check where this came from")
 	}
+	// Records is computed alongside DataAsOf but was previously never
+	// asserted anywhere in this file - a build that leaves it at its zero
+	// value passed the whole suite.
+	if prov.Records != 3 {
+		t.Errorf("Provenance.Records = %d, want 3 (one per rating actually emitted)", prov.Records)
+	}
 	// D12: freshness is measured from the upstream data, not from now. Pinned
 	// to the exact value the feed's earlier page carried - not just "non
 	// zero" - because time.Now() is never zero either, and a check that only
@@ -155,9 +162,19 @@ func TestAnnotate_KeepsEveryVectorVersionPresent(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("emitted %d, want 1", len(got))
 	}
-	if n := len(got[0].Severity); n != 3 {
-		t.Errorf("kept %d vectors, want 3 (v3.1, v4.0, v2) - all of them, so the "+
-			"band is a query-time decision: %+v", n, got[0].Severity)
+	// Asserted against the exact three vectors, not just a length of 3: a
+	// length-only check passes just as happily if one vector is appended
+	// three times, or if a Score is mangled in transit - convert's own
+	// field-append order (V2, V30, V31, V40) makes this order deterministic
+	// regardless of the JSON's own key order.
+	want := []advisory.Severity{
+		{Type: "CVSS_V2", Score: "AV:N/AC:L/Au:N/C:P/I:P/A:P"},
+		{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"},
+		{Type: "CVSS_V4", Score: "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N"},
+	}
+	if !slices.Equal(got[0].Severity, want) {
+		t.Errorf("Severity = %+v, want %+v (v2, v3.1, v4.0, all of them, so the "+
+			"band is a query-time decision)", got[0].Severity, want)
 	}
 }
 
@@ -248,5 +265,117 @@ func TestAnnotate_RespectsContextCancellation(t *testing.T) {
 	if err == nil {
 		t.Fatal("Annotate ignored a cancelled context and would have run to a " +
 			"million records")
+	}
+}
+
+// A page that returns zero records while startIndex has not yet reached
+// totalResults must not spin forever re-requesting the same startIndex:
+// nothing else in Annotate advances startIndex, so a zero-length page is the
+// one response shape that leaves the loop with no way to make progress. On
+// a real ~187-page sync against a service that occasionally returns an
+// empty page, that is a hang with no output and no error - the worst
+// failure shape for something that already takes 20 minutes.
+func TestAnnotate_AnEmptyPageBeforeTotalIsAnErrorNotAHang(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"totalResults":5,"vulnerabilities":[]}`)
+	}))
+	defer srv.Close()
+	p := New(Options{BaseURL: srv.URL, PageSize: 2, Pause: durPtr(0)})
+	_, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil })
+	if err == nil {
+		t.Fatal("Annotate returned nil over a page that never advances past " +
+			"startIndex 0 - this must be refused outright, not retried forever")
+	}
+}
+
+// The status check on fetchPage applies to every page, not just the first:
+// the first-page-only test above shares fetchPage with every later page, but
+// sharing code is not the same as testing the shared path at every call
+// site. A page-two failure must not let what NVD actually returned - a
+// partial sync - report as a complete one.
+func TestAnnotate_AnHTTPErrorOnALaterPageIsNotASilentPartialSync(t *testing.T) {
+	var reqs int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&reqs, 1) == 1 {
+			io.WriteString(w, `{"totalResults":3,"vulnerabilities":[
+			  {"cve":{"id":"CVE-2025-10","metrics":{"cvssMetricV31":[{"cvssData":{"vectorString":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]}}},
+			  {"cve":{"id":"CVE-2025-11","metrics":{"cvssMetricV31":[{"cvssData":{"vectorString":"CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:L/I:N/A:N"}}]}}}]}`)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	p := New(Options{BaseURL: srv.URL, PageSize: 2, Pause: durPtr(0)})
+	var got []advisory.Rating
+	_, err := p.Annotate(context.Background(), func(r advisory.Rating) error {
+		got = append(got, r)
+		return nil
+	})
+	if err == nil {
+		t.Fatalf("Annotate returned nil after page two failed (already emitted %d "+
+			"ratings) - a partial sync must not read as a complete one", len(got))
+	}
+}
+
+// Annotate paces requests through the sleep hook, not a bare sleepCtx call,
+// specifically so this can be asserted without spending the real pause to
+// prove it. Every other Annotate test in this file uses Pause: durPtr(0),
+// and sleepCtx's own "d <= 0 returns immediately" fast path means deleting
+// the pacing call from Annotate entirely breaks none of them: the 19.9s a
+// full local run used to take, before Options.Pause became a
+// *time.Duration, was the only evidence a pause ever happened, and nothing
+// here replaced that once the tests stopped needing to sleep for real.
+func TestAnnotate_PacesRequestsWithConfiguredPause(t *testing.T) {
+	var calls []time.Duration
+	orig := sleep
+	sleep = func(_ context.Context, d time.Duration) error {
+		calls = append(calls, d)
+		return nil
+	}
+	defer func() { sleep = orig }()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("startIndex") {
+		case "0":
+			io.WriteString(w, `{"totalResults":2,"vulnerabilities":[
+			  {"cve":{"id":"CVE-2025-12","metrics":{"cvssMetricV31":[{"cvssData":{"vectorString":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]}}}]}`)
+		default:
+			io.WriteString(w, `{"totalResults":2,"vulnerabilities":[
+			  {"cve":{"id":"CVE-2025-13","metrics":{"cvssMetricV31":[{"cvssData":{"vectorString":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]}}}]}`)
+		}
+	}))
+	defer srv.Close()
+
+	p := New(Options{BaseURL: srv.URL, PageSize: 1, Pause: durPtr(3 * time.Second)})
+	if _, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 1 || calls[0] != 3*time.Second {
+		t.Errorf("sleep calls = %v, want exactly one call of 3s - paced once, "+
+			"between the two pages, using the configured Pause", calls)
+	}
+}
+
+// sleepCtx must return promptly when cancelled mid-wait, not only when
+// checked between Annotate's iterations - the "^C during a 20-minute sync
+// stops promptly" property depends specifically on this, and nothing
+// exercised sleepCtx in isolation to hold it: every Annotate test above uses
+// a zero pause, which returns via the "d <= 0" fast path before the
+// cancellation-aware select is ever reached.
+func TestSleepCtx_ReturnsPromptlyWhenCancelledMidSleep(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	start := time.Now()
+	err := sleepCtx(ctx, 10*time.Second)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("sleepCtx returned nil after its context was cancelled mid-sleep")
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("sleepCtx took %v to notice cancellation, want well under "+
+			"the full 10s pause it was given", elapsed)
 	}
 }

@@ -8,8 +8,15 @@ import (
 	"time"
 
 	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/provider"
 	"github.com/kun9497/assay/internal/store"
 )
+
+// Checked here, not just at the first caller: a method added to
+// provider.Annotator without a matching change here should fail this
+// package's own build, not surface as a missing-method error somewhere else
+// entirely.
+var _ provider.Annotator = (*Provider)(nil)
 
 // DefaultBaseURL is NVD's CVE 2.0 API.
 const DefaultBaseURL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
@@ -126,8 +133,11 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 		if !first {
 			// Paced between requests, not just checked between them: a
 			// cancellation arriving mid-pause must not wait out the rest of
-			// it before Annotate notices.
-			if err := sleepCtx(ctx, p.pause); err != nil {
+			// it before Annotate notices. Called through the sleep variable
+			// (defaults to sleepCtx) rather than sleepCtx directly, so a test
+			// can substitute a recording stub and assert pacing actually
+			// happens without spending the real 6.5s to prove it.
+			if err := sleep(ctx, p.pause); err != nil {
 				return store.Provenance{}, err
 			}
 		}
@@ -155,11 +165,29 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 			}
 			records++
 		}
+		n := len(page.Vulnerabilities)
+		// A page that returns zero records while startIndex has not yet
+		// reached totalResults would otherwise re-request the exact same
+		// startIndex on every following iteration, forever: nothing above
+		// this point changes startIndex except this line, so a zero-length
+		// page is the one response shape that leaves the loop with no way to
+		// make progress. On a real ~187-page sync that is a hang with no
+		// output and no error - the worst failure shape for something that
+		// already takes 20 minutes - so it is refused outright rather than
+		// retried. totalResults == 0, a shrinking total, a short final page,
+		// and even a page repeating an earlier one's content are all fine;
+		// this guards specifically against zero records with more still
+		// expected.
+		if n == 0 && startIndex < total {
+			return store.Provenance{}, fmt.Errorf(
+				"nvd: page at startIndex %d returned zero records but totalResults is %d - refusing to loop forever",
+				startIndex, total)
+		}
 		// Advanced by what the page actually returned, not by the requested
 		// page size: NVD's own resultsPerPage can be smaller on the last
 		// page, and advancing by the request size would either skip records
 		// or loop forever short of totalResults.
-		startIndex += len(page.Vulnerabilities)
+		startIndex += n
 	}
 	prov.Records = records
 	prov.DataAsOf = asOf
@@ -226,6 +254,13 @@ func parseTimestamp(s string) (time.Time, error) {
 	}
 	return time.Time{}, fmt.Errorf("unrecognized NVD timestamp %q", s)
 }
+
+// sleep is the pacing hook Annotate actually calls. A package variable
+// rather than a direct call to sleepCtx so a test can substitute a
+// recording stub - the alternative, asserting on elapsed wall-clock time,
+// is exactly the flakiness a rate-limit pause should not force onto the
+// test suite.
+var sleep = sleepCtx
 
 // sleepCtx pauses for d, or returns early with ctx's error if it is
 // cancelled mid-wait. A ^C during a 20-minute sync depends on this, not just
