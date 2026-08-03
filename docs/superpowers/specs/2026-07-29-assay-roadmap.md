@@ -731,9 +731,23 @@ Two consequences, both real:
 
 - The HTTP client timeout was two minutes. A real sync died on its first page, because 135.8 s
   leaves no margin at all. It is ten minutes now — measured, not guessed.
-- **Seven hours per user is not a database anyone maintains.** NVD's own answer is incremental
-  sync, so `Options.Since` bounds a run with `lastModStartDate` (`NVD_SINCE_DAYS`, capped at
-  the API's 120-day window). A builder runs one full pass and daily deltas.
+- **Seven hours per user is not a database anyone maintains.** So NVD is **opt-in**
+  (`NVD_ENABLE`), and `Options.Since` bounds a run with `lastModStartDate`
+  (`NVD_SINCE_DAYS`, capped at the API's 120-day window).
+
+  ~~A builder runs one full pass and daily deltas.~~ **It cannot, and the review before merge
+  caught this sentence being wrong in the code as well as here.** `db update` builds into a
+  fresh database and renames over the live one, so nothing carries an earlier pass forward: a
+  bounded run's window is the database's *entire* NVD coverage. Following the recipe as
+  written — one full pass, then `NVD_SINCE_DAYS=1` nightly — leaves ~300 ratings where there
+  were ~372,000, and every finding whose CVE was not modified yesterday falls back to
+  `unknown` with nothing saying why.
+
+  Real deltas need the builder to layer onto an existing database, which is the publishing
+  slice's job. Until then the window is **disclosed** rather than claimed away:
+  `Provenance.Window` records what a run actually covered and `db status` prints it as
+  `COVERED`, because a database holding one day of NVD is otherwise indistinguishable from one
+  holding all of it (D20).
 
 The deeper answer is that the full pass should not be every user's problem at all. That is
 *Publishing the database as an OCI artifact* in `docs/deferred-decisions.md`, whose revisit

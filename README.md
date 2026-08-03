@@ -215,15 +215,29 @@ left to be discovered:
 | unrated findings | fold into the ordering | `unknown`, outside it — `--fail-on-unknown` only |
 | partial coverage | no gate | `--fail-on-incomplete`, exit 2 |
 | explain | `grype explain` subcommand | `--explain <id>` flag on `scan` |
-| severity source | enriched from NVD via the CVE alias | the stored CVSS vector only (D13) |
+| severity source | NVD, always, via the CVE alias | stored CVSS vectors, plus NVD when enabled |
 
-The severity divergence is the one worth knowing about. Measured on this repository's own
-binary: assay and grype find **the same three findings** — same packages, same advisory IDs,
-same fixed versions — but grype rates two of them High and Medium where assay says `unknown`.
-Neither is wrong. All three advisories carry **zero** severity entries in the OSV data, so
-`unknown` is what D13 and D17 require; grype reaches NVD through each advisory's CVE alias
-and finds a score there. Enriching from NVD is a recorded deferral, not a plan — the mechanism for it landed with
-D25, the cost is CPE-to-purl matching, and `docs/deferred-decisions.md` names the trigger.
+The severity divergence used to be the one worth knowing about, and closing it is what slice
+⑦ was for. Measured on this repository's own binary: assay and grype find **the same three
+findings** — same packages, same advisory IDs, same fixed versions — but grype rated two of
+them High and Medium where assay said `unknown`. Neither was wrong. All three advisories
+carry **zero** severity entries in the OSV data, so `unknown` was what D13 and D17 required,
+while grype reached NVD through each advisory's CVE alias and found a score there.
+
+With `NVD_ENABLE=1` on the database build, assay now rates the same two — high (7.8) and
+medium (5.3) — and reports **both** opinions rather than replacing one with the other:
+
+```
+severity: high (7.8)   [highest of 2 sources]
+  GO     GO-2026-4970    unknown          fixed 1.26.5
+  NVD    CVE-2026-39822  high (7.8)       fixed -  https://nvd.nist.gov/vuln/detail/CVE-2026-39822
+```
+
+The remaining difference is what happens to the third finding, and it is deliberate. It
+carries no CVE, so nothing joins to it and it stays `unknown` — counted, reported, and gated
+only by `--fail-on-unknown` (D17). NVD never decides *whether* a package matches, only how
+bad the CVE is (D27); the advisory, the matched range and the fixed version always come from
+the record assay actually compared against.
 
 
 `--explain` matches on the advisory's own ID or any alias, so the CVE you were given
@@ -454,11 +468,18 @@ version still come from the record assay compared against.
 
 - [x] NVD provider — bulk sync via the 2.0 API, no API key required
 - [x] Ratings joined on CVE, verdicts take the highest band (D25's mechanism)
-- [x] Incremental sync (`NVD_SINCE_DAYS`), because a full pass is ~7 hours
+- [x] Opt-in (`NVD_ENABLE`) with a bounded window (`NVD_SINCE_DAYS`), and `db status` prints
+      what that window covered
 
-That seven hours is measured, not estimated, and it is the reason the next slice exists: NVD
-generates each 2,000-record page in 114–136 seconds, and neither compression nor a smaller
-page changes the total.
+Opt-in because a full pass takes about seven hours — measured, not estimated: NVD generates
+each 2,000-record page in 114–136 seconds, and neither compression nor a smaller page changes
+the total. Leaving it on by default would also have made a routine NIST outage fatal to
+building any database at all.
+
+`NVD_SINCE_DAYS` bounds **one build**, and is not a daily delta: `db update` rebuilds from
+empty, so a bounded run's window is that database's entire NVD coverage. `db status` prints it
+in a `COVERED` column rather than letting a partial database look complete. Real deltas are
+the next slice's job.
 
 **⑧ A published database** — a builder runs the slow sync; everyone else downloads the
 result. **Next.** This was a deferred decision whose revisit trigger — "CI rebuild time
@@ -466,7 +487,7 @@ becomes the bottleneck" — the measurement above fired. grype and trivy both wo
 
 - [ ] Build the database centrally, publish it as an OCI artifact
 - [ ] `assay db update` pulls the published artifact instead of rebuilding
-- [ ] Daily deltas on top of one full pass
+- [ ] Daily deltas layered on one full pass (today every build starts from empty)
 
 **⑤ KISA enrichment** — Korean title, description and remediation joined onto matched
 findings by CVE. **Viable, and next after ⑧.**
