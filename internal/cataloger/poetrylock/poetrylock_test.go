@@ -50,6 +50,18 @@ lock-version = "2.0"
 	if pkgs[0].Ecosystem != "PyPI" || pkgs[0].Type != "pypi" {
 		t.Errorf("Ecosystem/Type = %q/%q, want PyPI/pypi", pkgs[0].Ecosystem, pkgs[0].Type)
 	}
+	// poetry.lock names no distro; D8's source/binary split is a distro
+	// concern, and Source must stay nil rather than fabricate one — the same
+	// assertion npmlock_test.go:89-93 and gomod_test.go:77-82 make for their
+	// own catalogers.
+	if pkgs[0].Source != nil {
+		t.Errorf("Source = %+v, want nil", pkgs[0].Source)
+	}
+	// Locations is what --explain shows as the evidence for a finding (D10);
+	// a package cataloged without it is unmatchable to the file it came from.
+	if len(pkgs[0].Locations) != 1 || pkgs[0].Locations[0].Path != p {
+		t.Errorf("Locations = %+v, want one entry naming %s", pkgs[0].Locations, p)
+	}
 	if stats.Components != stats.Cataloged+stats.SkippedNoPURL+
 		stats.SkippedNoVersion+stats.SkippedUnsupportedEcosystem {
 		t.Errorf("the Components == Cataloged + skips invariant does not hold: %+v", stats)
@@ -200,5 +212,27 @@ lock-version = "2.0"
 	}
 	if stats.SkippedNoVersion != 0 {
 		t.Errorf("SkippedNoVersion = %d, want 0 — nothing was skipped", stats.SkippedNoVersion)
+	}
+}
+
+// PEP 503 normalization (lowercasing, folding "-"/"_"/"." runs) is applied
+// once, at match time, by pkgmeta.NormalizeName — not by any cataloger. A
+// name is emitted exactly as poetry.lock wrote it; a stray call to
+// NormalizeName (or a hand-rolled lowercase) here would be a second copy of
+// that rule for it to drift out of sync with, and nothing else in this
+// package's tests would catch it since every other fixture happens to
+// already be lowercase.
+func TestParse_NameIsNotNormalized(t *testing.T) {
+	p := write(t, `[[package]]
+name = "PyYAML"
+version = "6.0"
+`)
+	pkgs, _, err := Parse(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pkgs) != 1 || pkgs[0].Name != "PyYAML" {
+		t.Errorf("Name = %q, want \"PyYAML\" unchanged — normalization belongs to "+
+			"pkgmeta.NormalizeName at match time, not to this cataloger", pkgs[0].Name)
 	}
 }

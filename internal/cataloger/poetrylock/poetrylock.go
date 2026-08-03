@@ -13,9 +13,24 @@
 // failure mode of guessing at TOML is not a crash, it is a WRONG VERSION,
 // and a wrong version that happens to fall outside the vulnerable range is
 // a silent false negative — the exact failure class D9 exists to prevent.
-// So this reader recognizes only the handful of line shapes poetry.lock is
-// defined to produce and refuses — via a counted skip or a returned error —
-// anything it does not.
+// So this reader recognizes only the line shapes poetry.lock is defined to
+// produce for the two fields it reads (a bare header line, or `key =
+// "single-line value"`) and either ignores or counts anything else — see
+// Parse and finalize for exactly which.
+//
+// Known limit: there is no state for a TOML multi-line string
+// (`"""..."""`). A `name` or `version` opened with one would have its
+// opening line read as a harmless empty match (parseQuotedAssignment finds
+// no closing quote on that line and returns ok=false), and every
+// continuation line would then be read as if it were ordinary content of
+// whatever block is still open — a continuation line that happened to read
+// exactly `name = "..."` would overwrite it, and one starting with `[`
+// would end the block early. This is accepted rather than handled: `name`
+// and `version` are never multi-line in a poetry-generated lockfile (they
+// are identifiers and version strings), and description — the one
+// free-text field poetry.lock carries — is always a single-line PyPI
+// summary. Handling a case Poetry does not produce would be scope creep
+// this task does not need.
 package poetrylock
 
 import (
