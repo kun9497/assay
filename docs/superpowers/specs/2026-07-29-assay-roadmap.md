@@ -599,6 +599,54 @@ reasons slice 5 records. The mechanism works today with the sources already in h
 accepts a new one without redesign, which is the point of building it this way rather than
 special-casing two names.
 
+### D26 — A directory scan reads every lockfile it finds, and names the ones it did not
+
+D23 settled what a directory scan reads *for Go*. It did not settle what happens to a
+directory that is not only Go, and the answer turned out to be the failure this project
+exists to prevent. Measured on a directory holding `go.mod`, `package-lock.json` and
+`requirements.txt`:
+
+| | components | findings | not evaluated | exit |
+|---|---|---|---|---|
+| the same packages as an SBOM | 3 | **27** | 0 | 0 |
+| `assay scan dir:.` | 1 | **3** | **0** | 0 |
+
+Twenty-four findings disappear, and the scan reports `0 not evaluated` while doing it. This
+is not "npm and PyPI are unsupported": both are ingested, both have comparers, and both match
+correctly through any other path. The directory cataloger simply never looked, and nothing in
+the report said so.
+
+That last part is what makes it a defect rather than a gap. D20 already establishes that a
+package which could not be evaluated is reported as skipped with a count, so CI can tell
+"found nothing" from "was broken". A manifest that is never read produces no package, so
+there is nothing for the skip counter to count — the omission is invisible to the very
+mechanism built to make omissions visible.
+
+**So the directory cataloger reads lockfiles, and discloses every manifest it recognized but
+did not read.** Both halves are load-bearing. Reading them removes the miss; disclosing the
+rest keeps the next unread format from being silent in the same way, which is the part that
+survives contact with formats nobody has written a cataloger for yet.
+
+**Lockfiles only** — `package-lock.json` and `poetry.lock`. They carry resolved, exact
+versions, so unlike `go.mod` they do not inherit D23's requested-versus-linked gap: a
+lockfile *is* what gets installed. `requirements.txt` is recognized and named as not read.
+It is not a lockfile — `Django>=3.2` is a constraint, not a version — and matching a range
+against advisory ranges is a different question than matching a version, one that would
+quietly answer "not vulnerable" for anything unpinned. That is a miss, so it waits for a
+decision of its own rather than being folded in here.
+
+**A bounded walk, not just the root.** Manifests live in subdirectories — `frontend/`,
+`services/api/` — and reading only the root would reproduce this exact defect one level
+down, in a repository shape that is completely ordinary. The walk skips `node_modules`,
+`vendor` and `.git`, because a lockfile inside a dependency tree describes that dependency's
+own requirements rather than this project's, and depth is bounded so a scan cannot be made
+arbitrarily slow by directory nesting. Both limits are disclosed the way D23's is.
+
+**The disclosure names the file, not just a count.** "1 manifest not read" tells a reader
+that something is missing without telling them what to do; `requirements.txt (not read: not a
+lockfile)` tells them which tree is unevaluated and why. Explainability is goal #1 and it
+applies to what was *not* checked as much as to what was.
+
 ## 3. Architecture
 
 ### Measured data volumes

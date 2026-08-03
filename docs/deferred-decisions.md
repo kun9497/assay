@@ -292,16 +292,20 @@ directory is an addition rather than a signature change.
 
 `package-lock.json` and `poetry.lock` / `requirements.txt`, the same way `go.mod` is read now.
 
-**Why deferred.** The matcher, the comparers and the database already cover npm and PyPI —
-slice 1 shipped them — so this is one `Cataloger` per ecosystem and nothing else. It is
-deferred only because nothing has asked for it: the Go path exercises the abstraction, and a
-second one proves less than the first did.
+**No longer deferred — promoted to slice ⑥ on 2026-08-03, and it was not a feature gap.**
+Measured: a directory holding `go.mod` and `package-lock.json` reports 3 findings and
+`0 not evaluated` where the same packages as an SBOM report 27. The deferral above reasoned
+that a second `Cataloger` "proves less than the first did", which was true of the cataloger
+and false of the scan — nothing disclosed that the other manifests existed, so the omission
+was invisible to the skip counter D20 built to make omissions visible. Recorded as D26.
 
-**Revisit when** someone scans a JavaScript or Python project. There is no design question
-left to answer, only work.
+The revisit trigger ("someone scans a JavaScript or Python project") was the wrong trigger:
+it required a user to appear before the defect could be noticed, when the defect was
+reachable by reading the dispatch in `scancmd.go`. A trigger that waits for a report is the
+wrong shape for a silent failure.
 
-**Groundwork.** The lockfile formats carry resolved versions, so unlike `go.mod` they do not
-inherit D23's requested-versus-linked gap.
+`requirements.txt` stays out. It is not a lockfile — `Django>=3.2` is a constraint, not a
+version — and it needs its own decision (see below).
 
 ---
 

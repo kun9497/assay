@@ -383,6 +383,13 @@ anywhere.
 
 - [x] Go binary scanning via `debug/buildinfo`, including the toolchain as `stdlib`
 - [x] Directory scanning (Go modules, `go.mod` only — no toolchain, no network)
+**⑥ What a directory scan does not read** — the gap D26 measured: a directory holding
+`go.mod` alongside `package-lock.json` reports the Go packages, says `0 not evaluated`, and
+exits 0 while 24 findings go unmentioned.
+
+- [ ] `package-lock.json` and `poetry.lock` catalogers, over a bounded subdirectory walk
+- [ ] Disclose every manifest recognized but not read, by name and reason (D26)
+
 - [ ] npm and PyPI directory scanning
 
 **④ Verdicts and output** — where exit code 1 first becomes reachable. **Done.**
