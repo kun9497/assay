@@ -54,13 +54,18 @@ carries the full design and the reasoning behind each decision.
 vulnerability database, and matching the two. In the anchore ecosystem those are three
 separate projects — `syft`, `vunnel` + `grype-db`, and `grype`.
 
-Existing scanners are excellent and battle-tested; use them in production. Two things shape
-this one:
+**This is a personal project, built to learn how a vulnerability scanner works by building
+one end to end.** Existing scanners are excellent and battle-tested; use them in production.
 
-- **Korean advisory data.** KISA/KNVD publishes advisories and KVE identifiers covering
-  software that NVD and OSV pick up late or not at all. Mainstream scanners do not ingest it.
-- **Explainable matches.** Every finding carries the evidence that produced it — which
-  range, which comparer, which comparison result — not just a verdict.
+It started out aimed at Korean advisory data — KISA/KNVD as a first-class provider. That did
+not survive the investigation: KNVD publishes 173 records in total, all Korean domestic
+commercial software, so a CVE join against a container or source tree essentially never
+fires. It is recorded as on hold rather than left here as a promise.
+
+What the code actually chases is narrower and, so far, has held up: **do not give a confident
+wrong answer.** Every finding carries the evidence that produced it — which range, which
+comparer, which comparison result. Everything the scan could not evaluate is counted and
+named. A scan never fetches vulnerability data.
 
 Design goals, in order:
 

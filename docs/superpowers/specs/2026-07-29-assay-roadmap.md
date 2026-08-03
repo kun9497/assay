@@ -23,12 +23,20 @@ construction, and matching.
 In the anchore ecosystem those are three separate projects: `syft` builds the inventory,
 `vunnel` + `grype-db` build the database, and `grype` matches. assay does all three.
 
-Two things distinguish it from existing scanners:
+**This is a personal project, built to learn how a vulnerability scanner works by building
+one end to end.** Existing scanners are excellent and battle-tested; use them in production.
+Nothing here is trying to replace them.
 
-- **Korean advisory data.** KISA/KNVD publishes advisories and KVE identifiers covering
-  software that NVD and OSV pick up late or not at all.
-- **Explainable matches.** Every finding carries the evidence that produced it — which
-  range, which comparer, which comparison result.
+It began with a differentiator that did not survive contact with the data. KISA/KNVD was to
+be a first-class provider, on the premise that it covers software NVD and OSV pick up late or
+not at all. Investigated 2026-08-02: KNVD publishes 173 records in total, all Korean domestic
+commercial software, none of them a Go, npm, PyPI or Alpine package — so a CVE join against a
+container or source tree essentially never fires. That is recorded in slice 5 and in
+`docs/deferred-decisions.md`, and the premise is not quietly retained here.
+
+What the build has actually produced, and what the design goals below are for, is a scanner
+that does not give a confident wrong answer: it says why every finding matched, it says what
+it could not evaluate, and it never fetches vulnerability data during a scan.
 
 Design goals, in priority order: **explainable**, **offline-capable**, **boring output**
 (deterministic, diffable, CI-friendly).
