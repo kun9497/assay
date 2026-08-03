@@ -493,6 +493,11 @@ type matrixAdv struct {
 	pkg     string
 	fixed   string
 	vectors []string // CVSS vectors; nil -> the finding's severity is Unknown
+	// aliases are the other identifiers this record claims. Records that share
+	// one describe a single vulnerability, so they become several ratings on
+	// one finding rather than several findings (D25). Without this there is no
+	// way to build the shape the aggregate exists for.
+	aliases []string
 }
 
 // buildMatrixDB writes advisories into a fresh database that covers "Go"
@@ -531,9 +536,16 @@ func buildMatrixDB(t *testing.T, advisories []matrixAdv) string {
 		if strings.Contains(adv.pkg, "/") {
 			affected = adv.pkg
 		}
+		// The authoring database, which the OSV provider derives from the
+		// identifier's prefix at ingest (D25). Derived the same way here
+		// rather than carried as another fixture field, so a record named
+		// GHSA-… in a test is a GHSA record in the store, as it would be.
+		database, _, _ := strings.Cut(adv.id, "-")
 		a := advisory.Advisory{
-			ID:   adv.id,
-			Kind: advisory.KindVulnerability,
+			ID:       adv.id,
+			Kind:     advisory.KindVulnerability,
+			Aliases:  adv.aliases,
+			Database: database,
 			Affected: []advisory.Affected{{
 				Ecosystem: "Go",
 				Name:      affected,
@@ -1359,5 +1371,92 @@ func TestRun_FailOnIncompleteAndUnknownAgreeAcrossRenderers(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// The scenario D25 exists for, driven through Run: one source rates a finding
+// critical, another rates the same vulnerability not at all, and --fail-on
+// critical must exit 1 whichever record the store lists first.
+//
+// Both orders are exercised because only one of them used to fail. The store
+// returns advisories in the order the package index lists them, which is the
+// order the provider walked the archives in — so before the aggregate, the
+// unrated record winning meant the finding reported unknown, unknown never
+// trips a threshold (D17), and CI went green on a critical vulnerability.
+func TestRun_FailOnUsesTheHighestSourceRegardlessOfOrder(t *testing.T) {
+	rec := func(id string, rated bool) matrixAdv {
+		a := matrixAdv{id: id, pkg: "shared", fixed: "2.0.0",
+			aliases: []string{"CVE-2022-28347"}}
+		if rated {
+			a.vectors = []string{vecCritical}
+		}
+		return a
+	}
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "shared", purlType: "golang"}})
+
+	// Which database carries the vector is varied as well as which record the
+	// store returns first. Pinning it on GHSA would leave the rated record
+	// always sorting first among the ratings, and a gate reading "the first
+	// rating" rather than the highest would pass every case.
+	for _, who := range []struct {
+		name        string
+		ghsaIsRated bool
+	}{
+		{"rated by the database that sorts first", true},
+		{"rated by the database that sorts last", false},
+	} {
+		ghsa := rec("GHSA-w24h-v9qh-8gxj", who.ghsaIsRated)
+		pysec := rec("PYSEC-2022-191", !who.ghsaIsRated)
+		cases := []struct {
+			name string
+			recs []matrixAdv
+		}{
+			{"GHSA record first", []matrixAdv{ghsa, pysec}},
+			{"PYSEC record first", []matrixAdv{pysec, ghsa}},
+		}
+		for _, tc := range cases {
+			t.Run(who.name+", "+tc.name, func(t *testing.T) {
+				critical := severity.Critical
+				var out, errOut bytes.Buffer
+				code := Run(context.Background(), buildMatrixDB(t, tc.recs), sbom,
+					Options{FailOn: &critical}, &out, &errOut)
+				if code != 1 {
+					t.Errorf("Run = %d, want 1 — one source rates this critical, so "+
+						"the finding is critical whichever record came back first "+
+						"and whichever database rated it; stdout:\n%s",
+						code, out.String())
+				}
+			})
+		}
+	}
+}
+
+// The mirror of it, and the boundary D17 draws: a finding every source left
+// unrated does not trip --fail-on even at the lowest threshold, however many
+// sources reported it. Three unrated ratings do not add up to a rated finding.
+func TestRun_ManyUnratedSourcesStillDoNotTripFailOn(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "PYSEC-2022-191", pkg: "unrated", fixed: "2.0.0", aliases: []string{"CVE-2022-28347"}},
+		{id: "PYSEC-2022-192", pkg: "unrated", fixed: "2.0.0", aliases: []string{"CVE-2022-28347"}},
+		{id: "GO-2022-0001", pkg: "unrated", fixed: "2.0.0", aliases: []string{"CVE-2022-28347"}},
+	})
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "unrated", purlType: "golang"}})
+
+	none := severity.None
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), db, sbom,
+		Options{FailOn: &none}, &out, &errOut); code != 0 {
+		t.Errorf("Run = %d, want 0 — unknown never trips a threshold (D17), "+
+			"however many sources reported it; stdout:\n%s", code, out.String())
+	}
+	// The three records are one vulnerability, so they are one finding with
+	// three ratings. Asserted because without it the test would also pass on a
+	// build that produced three separate unknown findings — which trips no
+	// threshold either, and would leave the aggregate untested.
+	unratedRows := strings.Count(out.String(), "example.com/unrated")
+	if unratedRows != 1 {
+		t.Errorf("the report shows %d rows for this package, want 1 — the three "+
+			"records share a CVE, so they are one finding carrying three "+
+			"ratings; stdout:\n%s", unratedRows, out.String())
 	}
 }

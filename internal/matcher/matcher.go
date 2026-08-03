@@ -52,7 +52,7 @@ type Finding struct {
 	// finding carries one rating, so no renderer has to tell "no source said
 	// anything" apart from "we dropped them".
 	//
-	// As with Severity below, Match is the only legitimate constructor, and a
+	// As with Severity above, Match is the only legitimate constructor, and a
 	// Finding built any other way — tests included — must populate this. The
 	// zero value is an empty slice, which is the one state the renderers are
 	// entitled to assume cannot happen.
