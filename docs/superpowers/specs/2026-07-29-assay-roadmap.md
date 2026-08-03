@@ -27,12 +27,13 @@ In the anchore ecosystem those are three separate projects: `syft` builds the in
 one end to end.** Existing scanners are excellent and battle-tested; use them in production.
 Nothing here is trying to replace them.
 
-It began with a differentiator that did not survive contact with the data. KISA/KNVD was to
-be a first-class provider, on the premise that it covers software NVD and OSV pick up late or
-not at all. Investigated 2026-08-02: KNVD publishes 173 records in total, all Korean domestic
-commercial software, none of them a Go, npm, PyPI or Alpine package — so a CVE join against a
-container or source tree essentially never fires. That is recorded in slice 5 and in
-`docs/deferred-decisions.md`, and the premise is not quietly retained here.
+It began with KISA/KNVD as a first-class provider. The first investigation (2026-08-02)
+concluded that was not viable, and **that conclusion was wrong because it measured the wrong
+board** — KNVD's own disclosures (173 records, Korean domestic software) rather than its
+security notices (2,422 records, CVE-keyed, about Apache, OpenSSL and the like). Corrected in
+slice 5: KISA is not an independent matching source, but a CVE-keyed enrichment join does
+fire, and three of three sampled notices are advisories assay already carries for Alpine
+`apache2` and `openssl`.
 
 What the build has actually produced, and what the design goals below are for, is a scanner
 that does not give a confident wrong answer: it says why every finding matched, it says what
@@ -946,6 +947,46 @@ reports.
 **The prerequisite was investigated on 2026-08-02 and did not resolve.** The blocking
 question was whether KNVD offers a machine-readable interface and whether its terms permit
 redistribution. Both answers are unfavourable, and a third finding matters more than either:
+
+**Corrected 2026-08-03. The measurement above answered the wrong question.**
+
+It asked whether KNVD could be an independent *matching* source — whether KNVD's own
+vulnerability disclosures cover packages assay scans. They do not, and that part stands.
+
+But KNVD has two boards, and the slice looked at the smaller one. `공개된 취약점` is KISA's
+own disclosures: 173 records, Korean domestic commercial software. `보안공지` is its security
+notices — **2,422 records** — telling Korean organizations to patch CVEs in software they
+actually run. Sampled from that board:
+
+```
+Apache 제품 보안 업데이트 권고    CVE-2026-23918   Apache HTTP Server 2.4.66 -> 2.4.67
+OpenSSL 취약점 보안 업데이트 권고  CVE-2025-11187   OpenSSL 3.4.x/3.5.x/3.6.x
+                                CVE-2025-15467   OpenSSL 3.0.x - 3.6.x
+```
+
+CVE-keyed, with affected and fixed versions and a Korean title and body. Checked against the
+live database, all three are advisories assay already carries, for packages that are in real
+containers:
+
+| KISA notice | our record | packages |
+|---|---|---|
+| CVE-2026-23918 | `ALPINE-CVE-2026-23918` | `apache2`, Alpine v3.20–v3.24 |
+| CVE-2025-11187 | `ALPINE-CVE-2025-11187` | `openssl`, Alpine v3.22–v3.24 |
+| CVE-2025-15467 | `ALPINE-CVE-2025-15467` | `openssl`, Alpine v3.17–v3.24 |
+
+So a **CVE-keyed enrichment join fires**, which is the shape D27 already builds for NVD:
+assay matches through OSV, then attaches what another authority said about the same CVE. What
+KISA adds is the Korean title, the Korean description, and the fact that KISA told Korean
+organizations to act on it — none of which any other scanner carries.
+
+What has not changed: KNVD as an independent matcher is still not viable, the access story is
+still poor (`knvd.krcert.or.kr` deep links 404 for a plain fetch; `boho.or.kr` serves the same
+notices and does read), and the licensing question is unresolved — the footer is
+all-rights-reserved with no 공공누리 mark, which matters for redistributing a built database
+(see *Splitting KISA data into a separate artifact*).
+
+What is not yet measured: how many of the 2,422 notices intersect a typical scan. Three of
+three sampled did, but they were the three that surfaced from a search, not a random draw.
 
 **KNVD's own vulnerability records number 173, and none of them is in an ecosystem assay
 scans.** The `공개된 취약점` corpus is 173 records total, published at roughly one or two a

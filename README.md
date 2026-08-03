@@ -57,10 +57,13 @@ separate projects — `syft`, `vunnel` + `grype-db`, and `grype`.
 **This is a personal project, built to learn how a vulnerability scanner works by building
 one end to end.** Existing scanners are excellent and battle-tested; use them in production.
 
-It started out aimed at Korean advisory data — KISA/KNVD as a first-class provider. That did
-not survive the investigation: KNVD publishes 173 records in total, all Korean domestic
-commercial software, so a CVE join against a container or source tree essentially never
-fires. It is recorded as on hold rather than left here as a promise.
+It started out aimed at Korean advisory data — KISA/KNVD as a first-class provider. The
+first investigation said that was not viable; it had measured the wrong board. KNVD's own
+disclosures are 173 records of Korean domestic software, but its **security notices are 2,422
+records** keyed on CVEs in Apache, OpenSSL and the like — and three of three sampled are
+advisories assay already carries, for packages that are in real containers. KISA cannot be an
+independent matching source, but attaching its Korean title and remediation to a CVE assay
+matched through OSV does work. That is the direction (D27's mechanism, a second source).
 
 What the code actually chases is narrower and, so far, has held up: **do not give a confident
 wrong answer.** Every finding carries the evidence that produced it — which range, which
