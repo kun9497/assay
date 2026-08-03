@@ -32,6 +32,18 @@ import (
 type Unread struct {
 	Path   string
 	Reason string
+	// Failed separates "we looked and could not read it" from "we did not
+	// look". Only the first is a statement about coverage the scan cannot
+	// stand behind: requirements.txt being unread is a documented, deliberate
+	// limit, while a lockfile that would not parse means there could be
+	// findings in this tree that this run did not see.
+	//
+	// The exit code needs the distinction. Without it an unreadable manifest
+	// reached no gate at all - a directory whose only lockfile was truncated
+	// printed "not read: ..." and then exited 0, which is a regression from
+	// the behaviour before this cataloger existed, where gomod.Parse's error
+	// returned 2.
+	Failed bool
 }
 
 // requirementsReason explains why requirements.txt is never parsed, so the
@@ -63,6 +75,18 @@ type Read struct {
 type Manifests struct {
 	Read   []Read
 	Unread []Unread
+}
+
+// AnyFailed reports whether any manifest was found and could not be read.
+// requirements.txt does not count: not reading it is a decision, not a
+// failure, and the two must not reach the exit code as the same thing.
+func (m Manifests) AnyFailed() bool {
+	for _, u := range m.Unread {
+		if u.Failed {
+			return true
+		}
+	}
+	return false
 }
 
 // GoMod returns the go.mod entry and whether one was read at all. The caller
@@ -144,7 +168,7 @@ func parseManifest(root string, m Manifest) ([]pkgmeta.Package, cyclonedx.Stats,
 		// itself, so its parent directory is what gomod.Parse wants.
 		t, s, perr := gomod.Parse(filepath.Dir(full))
 		if perr != nil {
-			return nil, cyclonedx.Stats{}, &Unread{Path: m.Path, Reason: perr.Error()}
+			return nil, cyclonedx.Stats{}, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
 		}
 		relocate(t.Packages, m.Path)
 		return t.Packages, s, nil
@@ -152,7 +176,7 @@ func parseManifest(root string, m Manifest) ([]pkgmeta.Package, cyclonedx.Stats,
 	case KindNPMLock:
 		pkgs, s, perr := npmlock.Parse(full)
 		if perr != nil {
-			return nil, cyclonedx.Stats{}, &Unread{Path: m.Path, Reason: perr.Error()}
+			return nil, cyclonedx.Stats{}, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
 		}
 		relocate(pkgs, m.Path)
 		return pkgs, s, nil
@@ -160,7 +184,7 @@ func parseManifest(root string, m Manifest) ([]pkgmeta.Package, cyclonedx.Stats,
 	case KindPoetryLock:
 		pkgs, s, perr := poetrylock.Parse(full)
 		if perr != nil {
-			return nil, cyclonedx.Stats{}, &Unread{Path: m.Path, Reason: perr.Error()}
+			return nil, cyclonedx.Stats{}, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
 		}
 		relocate(pkgs, m.Path)
 		return pkgs, s, nil

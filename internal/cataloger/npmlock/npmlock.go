@@ -91,15 +91,30 @@ func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, error) {
 func catalogPackages(entries map[string]packageEntry, path string, pkgs *[]pkgmeta.Package, stats *cyclonedx.Stats) {
 	for _, key := range sortedKeys(entries) {
 		e := entries[key]
+
+		// The "" key is the root project itself. It is not a component at
+		// all, so it is skipped BEFORE the count - the same way gomod.Parse
+		// counts requires but not the `module` line, and cyclonedx.Parse
+		// counts components but not metadata.component.
+		//
+		// Counting it was measurably wrong, not merely untidy: every npm 7+
+		// lockfile carries this key, so it put NotEvaluated at 1 on every
+		// healthy npm scan and made `--fail-on-incomplete` exit 2 on a
+		// directory where nothing had gone wrong. A lockfile with no
+		// dependencies went further - one component, none evaluated, so
+		// Trustworthy() was false and the scan exited 2 outright.
+		if key == "" {
+			continue
+		}
 		stats.Components++
 
-		// The "" key is the root project itself, not a dependency; "link"
-		// marks a workspace symlink to a local directory; an empty version
-		// means the entry has nothing a comparer can place inside a range.
-		// All three are real entries with nothing to match on, not absences
-		// - counted here rather than dropped, so the invariant
-		// (Components == Cataloged + skips) still accounts for them.
-		if key == "" || e.Link || e.Version == "" {
+		// "link" marks a workspace symlink to a local directory, and an empty
+		// version means the entry has nothing a comparer can place inside a
+		// range. Both ARE dependencies, unlike the root, so they are counted
+		// and then skipped - the invariant (Components == Cataloged + skips)
+		// accounts for them, and the report says they were seen and could not
+		// be evaluated.
+		if e.Link || e.Version == "" {
 			stats.SkippedNoVersion++
 			continue
 		}

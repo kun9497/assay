@@ -57,8 +57,15 @@ func TestParse_StatsAreSummedNotOverwritten(t *testing.T) {
 	root := mkdir(t, map[string]string{
 		"go.mod": "module example.com/sum\n\ngo 1.22\n\n" +
 			"require gopkg.in/yaml.v2 v2.2.1\n",
+		// The versionless entry is deliberate. Without a non-zero skip in the
+		// sum this test would compare {2,2,0,0,0} against {1,1,0,0,0} and
+		// still pass, but it would no longer exercise a skip counter
+		// surviving the merge — and the invariant is what those counters
+		// exist for. The "" root is NOT counted (it is the project, not a
+		// dependency), so it cannot supply that skip.
 		"package-lock.json": `{"lockfileVersion":3,"packages":{` +
 			`"":{"version":"1.0.0"},` +
+			`"node_modules/noversion":{},` +
 			`"node_modules/lodash":{"version":"4.17.11"}}}`,
 	})
 	_, stats, _, err := Parse(root)
@@ -66,11 +73,11 @@ func TestParse_StatsAreSummedNotOverwritten(t *testing.T) {
 		t.Fatal(err)
 	}
 	// go.mod's one require line contributes Components=1, Cataloged=1.
-	// package-lock.json's two entries ("" root, skipped with no version, and
-	// lodash, cataloged) contribute Components=2, Cataloged=1,
-	// SkippedNoVersion=1. Summed: Components=3, Cataloged=2,
-	// SkippedNoVersion=1 — a total neither manifest's own Stats holds alone,
-	// so only summing (not overwriting) can produce it.
+	// package-lock.json contributes Components=2 (lodash and noversion; the
+	// "" root is not a component), Cataloged=1, SkippedNoVersion=1. Summed:
+	// Components=3, Cataloged=2, SkippedNoVersion=1 — a total neither
+	// manifest's own Stats holds alone, so only summing (not overwriting) can
+	// produce it.
 	want := cyclonedx.Stats{Components: 3, Cataloged: 2, SkippedNoVersion: 1}
 	if stats != want {
 		t.Errorf("stats = %+v, want %+v — merging must sum every manifest's "+
@@ -408,5 +415,39 @@ func TestParse_GoModReportsAbsenceRatherThanAZeroValue(t *testing.T) {
 	}
 	if _, ok := mf.GoMod(); ok {
 		t.Error("GoMod() claimed a go.mod in a directory that has none")
+	}
+}
+
+// The poetry.lock arm of parseManifest's switch had no test that reached it:
+// walk_test writes an EMPTY poetry.lock and asserts only its Path, so pointing
+// KindPoetryLock at an unreachable Kind would disable PyPI directory scanning
+// with the whole suite green. Every other arm is covered; this one was not.
+func TestParse_PoetryLockReachesItsParser(t *testing.T) {
+	root := mkdir(t, map[string]string{
+		"poetry.lock": "[[package]]\nname = \"django\"\nversion = \"3.2.12\"\n" +
+			"optional = false\n\n[metadata]\nlock-version = \"2.0\"\n",
+	})
+	target, stats, _, err := Parse(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("got %d packages, want 1: %+v", len(target.Packages), target.Packages)
+	}
+	p := target.Packages[0]
+	// Asserted on the fields that decide whether a match happens. "pypi" and
+	// "PyPI" differ in case deliberately; getting either wrong compiles, passes
+	// a name-only assertion, and silently matches nothing.
+	if p.Name != "django" || p.Version != "3.2.12" {
+		t.Errorf("package = %s@%s, want django@3.2.12", p.Name, p.Version)
+	}
+	if p.Type != "pypi" || p.Ecosystem != "PyPI" {
+		t.Errorf("Type/Ecosystem = %q/%q, want pypi/PyPI", p.Type, p.Ecosystem)
+	}
+	if len(p.Locations) != 1 || p.Locations[0].Path != "poetry.lock" {
+		t.Errorf("Locations = %+v, want one entry naming poetry.lock", p.Locations)
+	}
+	if stats.Cataloged != 1 {
+		t.Errorf("Cataloged = %d, want 1", stats.Cataloged)
 	}
 }

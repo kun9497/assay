@@ -238,12 +238,17 @@ func TestParse_UnmatchableEntriesAreCountedNotDropped(t *testing.T) {
 	if len(pkgs) != 1 {
 		t.Fatalf("cataloged %d, want 1 (only 'real' is matchable)", len(pkgs))
 	}
-	if stats.Components != 4 {
-		t.Errorf("Components = %d, want 4 — every entry is seen, including the "+
-			"three that cannot be matched", stats.Components)
+	// Three, not four: the "" root is the project itself, not a component, so
+	// it is not counted at all — gomod does not count its `module` line and
+	// cyclonedx does not count metadata.component either. Counting it put
+	// NotEvaluated at 1 on every healthy npm scan and made
+	// --fail-on-incomplete exit 2 where nothing was wrong.
+	if stats.Components != 3 {
+		t.Errorf("Components = %d, want 3 — the two unmatchable DEPENDENCIES are "+
+			"counted, the root project is not a dependency at all", stats.Components)
 	}
-	if stats.SkippedNoVersion != 3 {
-		t.Errorf("SkippedNoVersion = %d, want 3 (root, link, no-version)",
+	if stats.SkippedNoVersion != 2 {
+		t.Errorf("SkippedNoVersion = %d, want 2 (link, no-version — not the root)",
 			stats.SkippedNoVersion)
 	}
 }

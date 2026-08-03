@@ -297,6 +297,33 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 			sum.Components)
 		return 2
 	}
+	// A manifest that was found and could not be read is a statement about
+	// coverage, and it has to reach the exit code the way every other
+	// incomplete-coverage path does (D11: 2 outranks the content of the
+	// result). Trustworthy() cannot see it — an unreadable manifest yields no
+	// packages, so it contributes nothing to Components and nothing to the
+	// skip counters, which is the same blind spot D26 exists to close, one
+	// level up.
+	//
+	// Two cases, deliberately different. Nothing readable at all means the
+	// scan could not run: that is an unconditional 2, and it restores what
+	// happened before this cataloger existed, when gomod.Parse's error
+	// returned 2 for a directory whose go.mod would not parse. A partial
+	// failure is a normal incomplete scan, so it is opt-in through
+	// --fail-on-incomplete rather than failing every CI job that has one bad
+	// lockfile in a large tree (D21's reasoning for that flag being opt-in).
+	if manifests.AnyFailed() {
+		if len(manifests.Read) == 0 {
+			fmt.Fprintln(stderr,
+				"error: no manifest in this directory could be read; this result cannot be trusted")
+			return 2
+		}
+		if opts.FailOnIncomplete {
+			fmt.Fprintln(stderr,
+				"error: at least one manifest could not be read (--fail-on-incomplete)")
+			return 2
+		}
+	}
 	return verdict(opts, sum, res.Findings)
 }
 

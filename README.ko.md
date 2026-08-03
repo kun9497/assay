@@ -164,16 +164,9 @@ $ assay scan dir:.
 scanned dir:. as a directory
 go.mod names 11 module(s); this is what was requested, not what a build links
   - scan the built binary for that
-not read: requirements.txt (not a lockfile: versions may be ranges, not resolved versions)
 ```
 
 배포되는 것을 알고 싶으면 바이너리를 스캔하세요. 근거는 D23에 기록되어 있습니다.
-
-아직 구현되지 않은 것 — 동작해서가 아니라 목표를 분명히 하기 위해 적어둡니다:
-
-```bash
-assay scan dir:./node-project                # ③ npm과 PyPI 디렉터리
-```
 
 ### 판정
 
@@ -380,14 +373,14 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 
 - [x] `debug/buildinfo`를 통한 Go 바이너리 스캔, 툴체인을 `stdlib`으로 포함
 - [x] 디렉터리 스캔 (Go 모듈, `go.mod`만 — 툴체인도 네트워크도 쓰지 않음)
+
 **⑥ 디렉터리 스캔이 읽지 않는 것** — D26이 측정한 공백입니다. `go.mod`과
 `package-lock.json`이 함께 있는 디렉터리가 Go 패키지만 보고하고 `0 not evaluated`라고 말한 뒤
-0을 반환하는 동안 finding 24건이 언급조차 되지 않습니다.
+0을 반환하는 동안 finding 24건이 언급조차 되지 않았습니다. **완료.**
 
-- [ ] `package-lock.json`과 `poetry.lock` cataloger, 제한된 하위 탐색 위에서
-- [ ] 인식했지만 읽지 않은 매니페스트를 이름과 이유와 함께 밝히기 (D26)
-
-- [ ] npm과 PyPI 디렉터리 스캔
+- [x] `package-lock.json`과 `poetry.lock` cataloger, 제한된 하위 탐색 위에서
+- [x] 인식했지만 읽지 않은 매니페스트를 이름과 이유와 함께 밝히기 (D26)
+- [ ] `requirements.txt` — 고정되지 않은 제약에 대한 별도 결정이 필요
 
 **④ 판정과 출력** — 종료 코드 1이 처음으로 도달 가능해지는 지점입니다. **완료.**
 

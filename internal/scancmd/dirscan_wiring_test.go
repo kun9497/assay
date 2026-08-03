@@ -114,3 +114,83 @@ func TestRun_TheGoModCaveatIsAccurateOrAbsent(t *testing.T) {
 		}
 	})
 }
+
+// A manifest that was found and could not be read must reach the exit code.
+//
+// Before this, the scan printed "not read: ..." and exited 0 — no gate saw it,
+// because an unreadable manifest yields no packages and so contributes nothing
+// to Components or to the skip counters that Trustworthy() and
+// --fail-on-incomplete read. That is D26's own blind spot one level up, and it
+// was a regression: before this cataloger existed, gomod.Parse's error on an
+// unparseable go.mod returned 2.
+func TestRun_AnUnreadableManifestReachesTheExitCode(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-critical", pkg: "critical", fixed: "2.0.0", vectors: []string{vecCritical}},
+	})
+	const truncated = `{"lockfileVersion":3, "packages": `
+	goodMod := "module example.com/poly\n\ngo 1.22\n\nrequire example.com/critical v1.0.0\n"
+
+	t.Run("nothing readable at all is exit 2, with or without the flag", func(t *testing.T) {
+		for _, opts := range []Options{{}, {FailOnIncomplete: true}} {
+			dir := t.TempDir()
+			writeManifest(t, dir, "package-lock.json", truncated)
+			var out, errOut bytes.Buffer
+			if code := Run(context.Background(), db, "dir:"+dir, opts, &out, &errOut); code != 2 {
+				t.Errorf("Run(%+v) = %d, want 2 — a directory whose only manifest "+
+					"could not be read has not produced a result worth acting on;"+
+					"\nstdout: %s\nstderr: %s", opts, code, out.String(), errOut.String())
+			}
+		}
+	})
+
+	// A partial failure is a normal incomplete scan: opt-in, so one bad
+	// lockfile in a large tree does not fail every CI job that has one.
+	t.Run("a partial failure is opt-in", func(t *testing.T) {
+		dir := t.TempDir()
+		writeManifest(t, dir, "go.mod", goodMod)
+		writeManifest(t, dir, "package-lock.json", truncated)
+
+		var out, errOut bytes.Buffer
+		// 0, not 2: without --fail-on-incomplete a partial failure is a normal
+		// scan, and Options{} sets no --fail-on either, so the critical finding
+		// does not trip anything on its own (D21).
+		if code := Run(context.Background(), db, "dir:"+dir, Options{}, &out, &errOut); code != 0 {
+			t.Errorf("Run = %d, want 0 — one unreadable manifest must not fail a "+
+				"scan that did not ask about coverage; stderr: %s", code, errOut.String())
+		}
+		// The Go package was still cataloged, so the failure did not cost the
+		// rest of the tree.
+		if !strings.Contains(out.String(), "example.com/critical") {
+			t.Errorf("one unreadable manifest lost the readable one's packages:\n%s",
+				out.String())
+		}
+
+		out.Reset()
+		errOut.Reset()
+		if code := Run(context.Background(), db, "dir:"+dir,
+			Options{FailOnIncomplete: true}, &out, &errOut); code != 2 {
+			t.Errorf("Run(--fail-on-incomplete) = %d, want 2 — an unreadable "+
+				"manifest is exactly the partial coverage that flag asks about; "+
+				"stderr: %s", code, errOut.String())
+		}
+	})
+
+	// requirements.txt is not read BY DECISION, so it must not trip the gate.
+	// Folding "we chose not to" together with "we could not" would make
+	// --fail-on-incomplete fire on every Python project, and the flag would be
+	// turned off — which is how a real gate stops being read.
+	t.Run("a deliberate non-read does not trip the gate", func(t *testing.T) {
+		dir := t.TempDir()
+		writeManifest(t, dir, "go.mod", goodMod)
+		writeManifest(t, dir, "requirements.txt", "Django==3.2.12\n")
+		var out, errOut bytes.Buffer
+		code := Run(context.Background(), db, "dir:"+dir,
+			Options{FailOnIncomplete: true}, &out, &errOut)
+		if code != 0 {
+			t.Errorf("Run(--fail-on-incomplete) = %d, want 0 — requirements.txt "+
+				"being unread is a documented limit, not a failure, and folding "+
+				"the two together would fire this flag on every Python project "+
+				"until someone turned it off; stderr: %s", code, errOut.String())
+		}
+	})
+}
