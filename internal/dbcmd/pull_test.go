@@ -106,37 +106,80 @@ func TestPull_LandsAUsableDatabase(t *testing.T) {
 // way, because the leftover on that later-checking path is dst+".tmp", not
 // dst. Only counting the actual blob fetch catches a schema check that
 // runs too late.
+//
+// Both directions are covered (fix round 2, finding 2): `!=` weakened to
+// `>` only refuses an artifact annotated NEWER than this binary, silently
+// admitting one annotated OLDER, which only the "newer" case here exercises.
+//
+// What this guard adds over store.Open(tmp)'s own schema check
+// (store/bolt.go: `if m.Schema != SchemaVersion`), stated plainly rather
+// than asserted as if it were self-evidently non-redundant: for BOTH
+// directions tested here, it adds the ENTIRE guarantee, not merely an
+// efficiency win. pushable() can only ever build a database at the
+// CURRENTLY RUNNING binary's store.SchemaVersion -- there is no way, within
+// one test binary, to construct a database that is genuinely a different
+// schema on disk. So in every case below, the artifact's REAL content is
+// always secretly compatible; only its ANNOTATION lies. store.Open(tmp)
+// checks the real, stamped Meta.Schema -- which is correct here regardless
+// of the annotation -- so it would pass every one of these artifacts through
+// with no complaint at all. A mistagged-but-actually-fine artifact is
+// exactly the case the doc comment on Pull's schema check calls out ("a
+// mis-tagged artifact is the case the tag cannot catch"), and it is a case
+// store.Open(tmp) cannot catch either, by construction of what it checks.
+// store.Open(tmp)'s own backstop is for a database that is GENUINELY a
+// different schema on disk -- a real cross-version artifact, which is not
+// something this suite can build, so it has no direct test here; the
+// closest this suite comes is TestPull_AFailedPullLeavesTheLiveDatabaseAlone,
+// which proves store.Open(tmp) rejects content that fails to open as a
+// database at all (a hard read failure, not a version comparison).
 func TestPull_RefusesAForeignSchemaWithoutDownloading(t *testing.T) {
-	var blobGETs int32
-	ref := publishedFrom(t, pushable(t, time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)),
-		store.SchemaVersion+1,
-		func(h http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/blobs/") {
-					atomic.AddInt32(&blobGETs, 1)
-				}
-				h.ServeHTTP(w, r)
-			})
-		})
-	// The push above (remote.Write, inside publishedFrom) only ever HEADs,
-	// POSTs, PATCHes and PUTs blobs while uploading -- never GETs one -- so
-	// the counter is still genuinely zero here, not merely reset to look
-	// that way.
-	dst := filepath.Join(t.TempDir(), "vulnerability.db")
+	for _, tc := range []struct {
+		name       string
+		schema     int
+		wantStderr string
+	}{
+		// != -> > survives this one alone (m.SchemaVersion > store.SchemaVersion
+		// is still true), which is why the "older" case below exists.
+		{"newer than this binary", store.SchemaVersion + 1, "upgrade assay"},
+		// != -> > does NOT catch this: SchemaVersion-1 > SchemaVersion is
+		// false, so the mutated check silently admits it, and Pull proceeds
+		// to download, unpack, and (since the real content is secretly
+		// compatible, see above) successfully install it.
+		{"older than this binary", store.SchemaVersion - 1, "upgrade the publisher"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var blobGETs int32
+			ref := publishedFrom(t, pushable(t, time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)),
+				tc.schema,
+				func(h http.Handler) http.Handler {
+					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/blobs/") {
+							atomic.AddInt32(&blobGETs, 1)
+						}
+						h.ServeHTTP(w, r)
+					})
+				})
+			// The push above (remote.Write, inside publishedFrom) only ever
+			// HEADs, POSTs, PATCHes and PUTs blobs while uploading -- never
+			// GETs one -- so the counter is still genuinely zero here, not
+			// merely reset to look that way.
+			dst := filepath.Join(t.TempDir(), "vulnerability.db")
 
-	var out, errOut bytes.Buffer
-	code := Pull(context.Background(), dst, ref, &out, &errOut)
-	if code != 2 {
-		t.Errorf("Pull of a newer schema = %d, want 2", code)
-	}
-	if !strings.Contains(errOut.String(), "upgrade") {
-		t.Errorf("stderr does not tell the user what to do:\n%s", errOut.String())
-	}
-	if _, err := os.Stat(dst); !os.IsNotExist(err) {
-		t.Error("a refused pull left a file behind")
-	}
-	if got := atomic.LoadInt32(&blobGETs); got != 0 {
-		t.Errorf("Pull fetched %d layer blob(s) before refusing the schema mismatch, want 0", got)
+			var out, errOut bytes.Buffer
+			code := Pull(context.Background(), dst, ref, &out, &errOut)
+			if code != 2 {
+				t.Errorf("Pull of a foreign schema = %d, want 2 (stderr: %s)", code, errOut.String())
+			}
+			if !strings.Contains(errOut.String(), tc.wantStderr) {
+				t.Errorf("stderr does not tell the user what to do:\n%s", errOut.String())
+			}
+			if _, err := os.Stat(dst); !os.IsNotExist(err) {
+				t.Error("a refused pull left a file behind")
+			}
+			if got := atomic.LoadInt32(&blobGETs); got != 0 {
+				t.Errorf("Pull fetched %d layer blob(s) before refusing the schema mismatch, want 0", got)
+			}
+		})
 	}
 }
 
@@ -213,46 +256,91 @@ func TestPull_UnreachableRegistryExitsTwo(t *testing.T) {
 }
 
 // Pull must install with Update's own retrying replace() (dbcmd.go), not a
-// bare, single-attempt os.Rename. Fix round 1 found the two are otherwise
-// indistinguishable on a rename that simply succeeds, so this forces a
-// PERSISTENT rename failure -- dbPath is an existing directory, which
-// os.Rename can never succeed against, retried or not, on any platform --
-// and asserts on ELAPSED TIME rather than the outcome: both variants return
-// exit 2, but only replace()'s four attempts with 0/100/250/500ms sleeps
-// between them (dbcmd.go's own schedule; ~850ms measured end to end) take
-// meaningfully longer than one immediate attempt (<1ms measured).
+// bare, single-attempt os.Rename.
 //
-// Deliberately does not rely on Windows' "rename over a file another
-// process holds open fails outright" semantics that motivate replace() in
-// the first place: CI runs ubuntu-latest, where that would not reproduce
-// (POSIX rename succeeds over an open file). Forcing a directory target
-// instead relies only on replace()'s sleep schedule running whenever the
-// underlying os.Rename keeps failing, which is plain Go and portable.
+// Fix round 1's version of this test forced a persistent rename failure and
+// asserted on ELAPSED TIME (>= 300ms, replace()'s ~850ms schedule vs. a
+// single attempt's <1ms). Fix round 2 found that threshold could go quietly
+// vacuous: replace()'s sleeps are a hard floor, so a mutant can only run
+// SLOWER than the fix, never faster -- but Pull's own pre-install work
+// (fetch, decompress, open) is NOT bounded, so on a loaded runner that work
+// alone can push total elapsed past 300ms even for a single-attempt mutant,
+// making the mutant read as correct. It also did not prove what its name
+// claimed: {0, 100, 250} (one fewer retry) still elapses ~350ms and clears a
+// 300ms floor; the floor could not distinguish "the schedule ran" from "some
+// sleeping happened."
 //
-// Also covers the other half of the same fix: on failure the temp file
-// must be KEPT, not deleted, matching Update's own reasoning (dbcmd.go) --
-// a verified, complete download is worth more than a tidy failure.
+// Replaced with a deterministic seam instead: renameFn lets this force
+// every rename attempt to fail and count exactly how many replace() makes,
+// with no wall clock involved at all -- immune to runner load by
+// construction, not by a wider margin.
 func TestPull_InstallUsesReplacesRetrySchedule(t *testing.T) {
-	dirAsDst := t.TempDir() // an existing directory: no rename can ever land here
+	origWaits, origRename := replaceWaits, renameFn
+	t.Cleanup(func() { replaceWaits, renameFn = origWaits, origRename })
+
+	// Zeroes the WAIT DURATIONS but keeps the COUNT from the live var,
+	// rather than hardcoding []time.Duration{0, 0, 0, 0}: a hardcoded
+	// replacement would silently mask a mutation that shortens
+	// replaceWaits itself, since the test would then be defining its own
+	// attempt count independent of production's. Deriving the length here,
+	// then wiping only the values, keeps that mutation visible.
+	replaceWaits = make([]time.Duration, len(replaceWaits))
+
+	var attempts int32
+	renameFn = func(string, string) error {
+		atomic.AddInt32(&attempts, 1)
+		return fmt.Errorf("simulated rename failure")
+	}
+
+	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	ref := published(t, store.SchemaVersion)
 
-	start := time.Now()
 	var out, errOut bytes.Buffer
-	code := Pull(context.Background(), dirAsDst, ref, &out, &errOut)
-	elapsed := time.Since(start)
-
+	code := Pull(context.Background(), dst, ref, &out, &errOut)
 	if code != 2 {
-		t.Fatalf("Pull with an un-renameable destination = %d, want 2 (stderr: %s)", code, errOut.String())
+		t.Fatalf("Pull with a permanently failing rename = %d, want 2 (stderr: %s)", code, errOut.String())
 	}
-	// 300ms comfortably separates "one immediate attempt" (measured <1ms)
-	// from "the retry schedule ran" (measured ~850ms), without sitting close
-	// enough to 850ms that ordinary CI jitter could false-fail the other way.
-	if elapsed < 300*time.Millisecond {
-		t.Errorf("Pull failed to install in %v, too fast for replace()'s retry schedule -- "+
-			"want the retrying replace() from dbcmd.go, not a single os.Rename attempt", elapsed)
+	// The number this test actually names: replace()'s own schedule is 4
+	// attempts (dbcmd.go). A hardcoded expectation, not len(replaceWaits)
+	// after the shrink above -- asserting against the live var here would
+	// make this tautological against exactly the mutation it needs to
+	// catch, since a shortened production schedule would shrink both what
+	// replace() calls AND what this assertion expects, together.
+	const wantAttempts = 4
+	if got := atomic.LoadInt32(&attempts); got != wantAttempts {
+		t.Errorf("renameFn called %d times, want exactly %d (replace()'s retry schedule, dbcmd.go)",
+			got, wantAttempts)
 	}
-	if _, err := os.Stat(dirAsDst + ".tmp"); err != nil {
+	// The other half of the same fix (fix round 1): on failure the temp
+	// file is KEPT, not deleted -- a verified, complete download is worth
+	// more than a tidy failure.
+	if _, err := os.Stat(dst + ".tmp"); err != nil {
 		t.Errorf("a failed install must keep the verified download, not delete it: %v", err)
+	}
+}
+
+// replace()'s retry schedule exists to give a concurrent reader time to
+// release the file (dbcmd.go's own doc comment on replace) -- a schedule
+// whose delays are all zero still makes the full number of attempts, so
+// TestPull_InstallUsesReplacesRetrySchedule would not catch that on its
+// own: it zeroes replaceWaits' VALUES itself, for its own speed, so a
+// production default that was ALREADY all zero would be indistinguishable
+// from a correct one there. Checked directly against the values instead,
+// with no wall clock at all -- deterministic, and immune to runner load by
+// construction rather than by a timing margin.
+func TestReplaceWaits_RetriesActuallyWait(t *testing.T) {
+	if len(replaceWaits) < 2 {
+		t.Fatalf("replaceWaits has %d entries, too few to ever retry", len(replaceWaits))
+	}
+	// replaceWaits[0] == 0 is correct and intentional: there is no reason to
+	// delay before the very first attempt. Every attempt AFTER that needs a
+	// real, positive wait, or it is not meaningfully a retry at all.
+	for i, w := range replaceWaits[1:] {
+		if w <= 0 {
+			t.Errorf("replaceWaits[%d] = %v, want > 0 -- a zero wait between retries gives a "+
+				"concurrent reader no time to release the file, defeating replace()'s own purpose",
+				i+1, w)
+		}
 	}
 }
 

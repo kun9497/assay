@@ -1090,6 +1090,25 @@ func TestResolveUpdateRef(t *testing.T) {
 	})
 }
 
+// Fix round 2, finding 3: TestResolveUpdateRef drives resolveUpdateRef
+// directly and never calls run(), so it cannot catch a mutation in
+// case "update":'s own dispatch -- e.g. `return exitOK` in place of
+// `return exitError` when resolveUpdateRef reports !ok. This closes that
+// gap end to end. Safe to run through the real dispatch (unlike a similar
+// check for the SUCCESS path, see resolveUpdateRef's own doc comment):
+// resolveUpdateRef returns ok=false before case "update": ever reaches
+// dbcmd.Pull, so this never touches the network regardless of what
+// case "update": does with the result.
+func TestRun_DBUpdateFromRejectionReachesExitError(t *testing.T) {
+	t.Setenv("ASSAY_DB_DIR", t.TempDir())
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"db", "update", "--from"}, &stdout, &stderr)
+	if code != exitError {
+		t.Errorf("db update --from (no value) via run() = %d, want %d\nstderr:\n%s",
+			code, exitError, stderr.String())
+	}
+}
+
 // `db ref` is what a CI workflow reads to know which tag `db push` should
 // publish to, so the artifact's tag comes from the binary rather than a
 // literal duplicated in the workflow (which would keep publishing to the

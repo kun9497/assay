@@ -124,6 +124,20 @@ func Update(ctx context.Context, dbPath string, providers []provider.Provider, a
 	return 0
 }
 
+// replaceWaits is replace's own retry schedule: the delay before each
+// attempt, first one immediate. A package-level var, not a literal inside
+// replace, so a test can shrink it to run in milliseconds instead of ~850ms
+// while still exercising the real retry COUNT (fix round 2, finding 1) --
+// reassigning this changes how long replace sleeps between attempts, not
+// how many it makes, which stays len(replaceWaits) either way.
+var replaceWaits = []time.Duration{0, 100 * time.Millisecond, 250 * time.Millisecond, 500 * time.Millisecond}
+
+// renameFn is os.Rename by default, and the seam replace calls through
+// instead of calling os.Rename directly, so a test can count attempts (or
+// force every one to fail) without needing a real locked or otherwise
+// unrenameable file.
+var renameFn = os.Rename
+
 // replace renames src over dst, retrying briefly first.
 //
 // On Windows a rename over a file another process holds open fails outright,
@@ -132,11 +146,11 @@ func Update(ctx context.Context, dbPath string, providers []provider.Provider, a
 // turns the common collision into a non-event.
 func replace(src, dst string) error {
 	var err error
-	for _, wait := range []time.Duration{0, 100 * time.Millisecond, 250 * time.Millisecond, 500 * time.Millisecond} {
+	for _, wait := range replaceWaits {
 		if wait > 0 {
 			time.Sleep(wait)
 		}
-		if err = os.Rename(src, dst); err == nil {
+		if err = renameFn(src, dst); err == nil {
 			return nil
 		}
 	}
