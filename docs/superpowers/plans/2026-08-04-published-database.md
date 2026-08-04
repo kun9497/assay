@@ -31,7 +31,17 @@ Measured 2026-08-03 while building D27: a full NVD sync is about **seven hours**
 Two consequences drive the design:
 
 1. **Seven hours per user is not a database anyone maintains.** grype and trivy both solve this the same way: a builder builds, everyone else downloads.
-2. **Seven hours does not fit in a GitHub Actions job either** — the limit is six. So the builder cannot do a full pass in one scheduled run, which means publishing alone is not enough. The build has to be able to *start from* the last one. That is Task 5, and it is the part that does not exist today: `dbcmd.Update` builds into a fresh store and renames over the live database, so nothing carries forward.
+2. **Seven hours does not fit in a GitHub Actions job either** — the limit is six. But the full pass does not need to happen in CI at all. It happens **once, locally**, where no job cap applies, and the result is pushed as the first artifact. Every scheduled run after that starts from the published artifact and fetches only what changed, which is minutes. That is Task 5, and it is the part that does not exist today: `dbcmd.Update` builds into a fresh store and renames over the live database, so nothing carries forward.
+
+### What the seed carries, and what it must not
+
+**Only the ratings bucket.** Advisories are rebuilt from the providers on every run, without exception.
+
+This is not an optimisation, it is a correctness requirement. OSV archives take minutes, so there is nothing to save by seeding them — and seeding them **makes deletion impossible**. An advisory that upstream later withdraws stops appearing in the archive, but a seeded database already holds it, and nothing in the build removes a record that no provider re-emits. D16 drops withdrawn advisories at ingestion precisely so no code path can forget the check; seeding advisories reintroduces the problem one layer up, as a false positive that never expires.
+
+Ratings do not have that failure mode. A rating is an opinion keyed on a CVE, NVD does not delete CVEs, and a revised score changes the record's `lastModified` so the next delta overwrites it. A stale rating for a CVE no advisory matches is unreachable — `Matcher.annotate` only asks `RatingsFor` about identifiers a finding already carries.
+
+The build must **say** which half it carried forward, on stderr, in the register `db build` already uses for its provider lines. A seeded build that looked identical to a full one would be the same silent over-claim in a new place.
 
 ## File Structure
 
@@ -1151,9 +1161,11 @@ A scan still never fetches anything (D14). This runs only from db update."
 
 ---
 
-### Task 5: `assay db build --seed <ref>` — layering onto an existing database
+### Task 5: `assay db build --seed <ref>` — carrying the ratings forward
 
-This is what makes a *daily* build possible, and it is not optional: a full NVD pass is seven hours and a GitHub Actions job is capped at six. Without seeding, the scheduled builder cannot ever produce a full database.
+This is what makes a *daily* build possible. The full seven-hour pass runs once, locally, and is pushed; every scheduled run after it starts from that artifact and fetches only what changed. Without seeding, a scheduled build either repeats the seven hours (and exceeds the six-hour job cap) or publishes a database whose NVD coverage is one day wide.
+
+**Read "What the seed carries, and what it must not" above before implementing.** The seed carries the **ratings bucket only**. Advisories are rebuilt from the providers every run, because a seeded advisory that upstream has withdrawn can never be removed and becomes a permanent false positive.
 
 **Files:**
 - Modify: `internal/dbcmd/dbcmd.go` (`Update` gains a seed)
@@ -1164,26 +1176,37 @@ This is what makes a *daily* build possible, and it is not optional: a full NVD 
 - Consumes: `Pull` (Task 4) to fetch a seed by reference; `store.Create`, `store.Open`.
 - Produces: `func Update(ctx context.Context, dbPath, seedPath string, providers []provider.Provider, annotators []provider.Annotator, stdout, stderr io.Writer) int` — `seedPath` empty means today's behaviour, building from empty.
 
-**Design notes:** seeding copies the seed file to the temp path and *opens it for writing* instead of creating an empty store, so providers and annotators overwrite what they re-fetch and leave the rest. `store.Create` currently truncates; the implementer needs a `store.OpenForWrite(path) (*store.Writer, error)` that opens an existing file and verifies its schema. Ratings and advisories are keyed, so re-emitting a record replaces it — the same property `TestPutRating_RepputSameSourceReplaces` already pins.
+**Design notes:** the build proceeds exactly as it does today — `store.Create(tmp)`, providers write advisories into an empty store — and the seed's **ratings are copied in before the annotators run**, so a delta overwrites the entries it re-fetches and leaves the rest. Copying ratings rather than opening the seed file for writing is what keeps advisories authoritative: the temp database starts empty, so a withdrawn advisory that is no longer in the archive is simply absent, which is the correct answer.
 
-**The hazard to guard:** a seeded build must not report the seed's coverage as its own. If the seed's NVD ratings are 30 days old and this run only refreshed one day, `db status` must not imply the whole database was refreshed today. `Provenance.Window` (D27) already exists for exactly this; the merge rule is that a provider which *ran* replaces its provenance, and one that did not keeps the seed's. Test both directions.
+Reading the seed's ratings needs an iterator the store does not have yet: `func (b *Bolt) EachRating(fn func(advisory.Rating) error) error`, walking `bucketRatings` in key order. Key order is deterministic in bbolt, so this adds no nondeterminism.
+
+**The hazard to guard:** a seeded build must not report the seed's coverage as its own. If the seed's ratings cover 30 days and this run refreshed one, `db status` must not imply the whole database was refreshed today. `Provenance.Window` (D27) exists for exactly this: an annotator that *ran* replaces its provenance, and the count beside it is still derived from the bucket (D20), so the merged count and the narrower window appear together — which is the honest reading. Test both directions.
+
+**The disclosure:** `db build --seed` prints, on stderr, what it carried forward and what it rebuilt. Concretely: `seeded 21460 rating(s) from <ref>; advisories rebuilt from source`. A seeded build that printed the same thing as a full one is the over-claim this project keeps re-learning.
 
 - [ ] **Step 1: Write the failing test**
 
 Add to `internal/dbcmd/dbcmd_test.go`:
 
 ```go
-// Seeding is what makes a daily build possible at all: a full NVD pass is
-// seven hours and a CI job is capped at six, so the scheduled builder has
-// to start from yesterday's database rather than from empty.
-func TestUpdate_SeedCarriesForwardWhatThisRunDidNotFetch(t *testing.T) {
+// Seeding carries the RATINGS forward -- the seven-hour half -- while
+// advisories are rebuilt from the providers every run.
+//
+// Both halves of that are load-bearing, and the second is the one that is
+// easy to get wrong: an advisory the upstream archive no longer carries
+// (withdrawn, D16) must be ABSENT from the rebuilt database. Nothing in
+// the build removes a record no provider re-emitted, so a seeded advisory
+// is a false positive with no expiry date.
+func TestUpdate_SeedCarriesRatingsButNotAdvisories(t *testing.T) {
 	seed := filepath.Join(t.TempDir(), "seed.db")
 	w, err := store.Create(seed)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// This advisory stands in for one upstream has since withdrawn: it is
+	// in the seed and this run's provider does not re-emit it.
 	if err := w.Put(advisory.Advisory{
-		ID: "GHSA-old", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		ID: "GHSA-withdrawn-upstream", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
 		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "old"}},
 	}); err != nil {
 		t.Fatal(err)
@@ -1197,7 +1220,7 @@ func TestUpdate_SeedCarriesForwardWhatThisRunDidNotFetch(t *testing.T) {
 	})
 	w.Close()
 
-	// This run fetches ONE new advisory and rates ONE new CVE.
+	// This run fetches ONE advisory and rates ONE new CVE.
 	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
 		ID: "GHSA-new", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
 		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "new"}},
@@ -1218,17 +1241,70 @@ func TestUpdate_SeedCarriesForwardWhatThisRunDidNotFetch(t *testing.T) {
 	}
 	defer db.Close()
 
-	// The seed's record survived...
-	if _, err := db.Get("GHSA-old"); err != nil {
-		t.Errorf("the seed's advisory was lost: %v", err)
-	}
-	// ...and so did its rating, which is the expensive half.
+	// The expensive half survived...
 	if rs, err := db.RatingsFor("CVE-2026-OLD"); err != nil || len(rs) != 1 {
-		t.Errorf("RatingsFor(CVE-2026-OLD) = %v, %v; the seed's rating was lost", rs, err)
+		t.Errorf("RatingsFor(CVE-2026-OLD) = %v, %v; the seed's rating was lost, which is the whole point of seeding", rs, err)
 	}
 	// ...alongside this run's.
 	if rs, err := db.RatingsFor("CVE-2026-NEW"); err != nil || len(rs) != 1 {
 		t.Errorf("RatingsFor(CVE-2026-NEW) = %v, %v; this run's rating is missing", rs, err)
+	}
+	// ...and this run's advisory is there.
+	if _, err := db.Get("GHSA-new"); err != nil {
+		t.Errorf("this run's advisory is missing: %v", err)
+	}
+	// But the seed's advisory is GONE, because no provider re-emitted it.
+	// If this assertion ever fails, every withdrawn advisory in every seed
+	// becomes a permanent false positive.
+	if _, err := db.Get("GHSA-withdrawn-upstream"); err == nil {
+		t.Error("a seeded advisory survived a rebuild: an advisory upstream withdraws can now never be removed")
+	}
+}
+
+// A seeded build must say so. One that printed what a full build prints
+// would be the same over-claim this project keeps re-learning (D20, D26).
+func TestUpdate_SeededBuildDisclosesWhatItCarriedForward(t *testing.T) {
+	seed := filepath.Join(t.TempDir(), "seed.db")
+	w, _ := store.Create(seed)
+	w.PutRating(advisory.Rating{CVE: "CVE-2026-OLD", Source: "NVD"})
+	w.SetMeta(store.Meta{})
+	w.Close()
+
+	dst := filepath.Join(t.TempDir(), "vulnerability.db")
+	var out, errOut bytes.Buffer
+	if code := Update(context.Background(), dst, seed, nil, nil, &out, &errOut); code != 0 {
+		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	s := errOut.String()
+	if !strings.Contains(s, "seeded 1 rating") {
+		t.Errorf("stderr does not say how many ratings were carried forward:\n%s", s)
+	}
+	if !strings.Contains(s, "advisories rebuilt") {
+		t.Errorf("stderr does not say advisories were rebuilt rather than inherited:\n%s", s)
+	}
+}
+
+// A seed that cannot be read fails the build. It must NOT fall back to
+// building from empty: the scheduled builder passes --seed every night, so
+// one registry outage would publish a one-day database over a complete one
+// and every finding outside that day would quietly lose its NVD band. The
+// failure has to be loud and the previous artifact has to stay published.
+func TestUpdate_AnUnreadableSeedFailsRatherThanBuildingFromEmpty(t *testing.T) {
+	dst := filepath.Join(t.TempDir(), "vulnerability.db")
+	missing := filepath.Join(t.TempDir(), "not-there.db")
+
+	a := fakeAnnotator{name: "NVD", ratings: []advisory.Rating{{CVE: "CVE-2026-NEW", Source: "NVD"}}}
+
+	var out, errOut bytes.Buffer
+	code := Update(context.Background(), dst, missing, nil, []provider.Annotator{a}, &out, &errOut)
+	if code != 2 {
+		t.Errorf("Update with an unreadable seed = %d, want 2", code)
+	}
+	if !strings.Contains(errOut.String(), "not-there.db") {
+		t.Errorf("stderr does not name the seed it could not read:\n%s", errOut.String())
+	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Error("a failed seeded build left a database behind; the next push would publish it")
 	}
 }
 
@@ -1274,61 +1350,70 @@ func TestUpdate_SeededRunReportsTheWindowItActuallyFetched(t *testing.T) {
 Run: `go test ./internal/dbcmd/ -run TestUpdate_Seed`
 Expected: FAIL to build — `Update` takes five arguments, not six.
 
-- [ ] **Step 3: Add `store.OpenForWrite`**
+- [ ] **Step 3: Add `Bolt.EachRating`**
 
-In `internal/store/bolt.go`, beside `Create`:
+In `internal/store/bolt.go`, beside `RatingsFor`:
 
 ```go
-// OpenForWrite opens an EXISTING database for appending, which is what a
-// seeded build needs: Create truncates, and a build that starts from
-// yesterday's database must not begin by discarding it.
-//
-// The schema is verified here rather than trusted. Appending v6 records
-// into a v5 file would produce a database that is internally inconsistent
-// in a way no later check looks for.
-func OpenForWrite(path string) (*Writer, error) {
-	// (implementation mirrors Create, minus the bucket creation, plus the
-	// same schema check Open performs)
+// EachRating walks every stored rating in key order, which is what a
+// seeded build copies forward. Key order is bbolt's own byte order, so
+// two runs over the same database visit the same sequence -- this adds no
+// nondeterminism to a build (see Meta's own sorted fields for why that
+// matters).
+func (b *Bolt) EachRating(fn func(advisory.Rating) error) error {
+	// (View + bucketRatings cursor + json.Unmarshal + fn, wrapping any
+	// decode error with the key the way RatingsFor does)
 }
 ```
+
+Add it to the `Store` interface alongside `RatingsFor`, and to the in-memory fake the matcher tests use.
 
 - [ ] **Step 4: Thread the seed through `Update`**
 
-Change the signature to take `seedPath string` after `dbPath`. Where it currently calls `store.Create(tmp)`:
+Change the signature to take `seedPath string` after `dbPath`. The build itself is **unchanged** — `store.Create(tmp)` still makes an empty store and the providers still fill it, which is what keeps a withdrawn advisory absent. The seed is copied in between the providers and the annotators:
 
 ```go
-var w *store.Writer
-if seedPath == "" {
-	w, err = store.Create(tmp)
-} else {
-	// Copied, not opened in place: the seed may BE the live database
-	// (a rebuild in place is the normal case), and building directly
-	// into it would leave a half-updated database visible to a
-	// concurrent scan -- the exact thing the temp-and-rename dance
-	// exists to prevent.
-	if err = copyFile(seedPath, tmp); err == nil {
-		w, err = store.OpenForWrite(tmp)
-	}
-}
-```
-
-Carry the seed's `Meta` forward, then let this run's providers and annotators overwrite their own entries:
-
-```go
-meta := store.Meta{
-	BuiltAt:   time.Now().UTC(),
-	Providers: map[string]store.Provenance{},
-	Ratings:   map[string]store.Provenance{},
-}
+// Ratings only, and deliberately so. Advisories are rebuilt from the
+// providers above, because nothing here removes a record that no
+// provider re-emitted -- a seeded advisory upstream has since withdrawn
+// (D16) would be a false positive with no expiry. Ratings have no such
+// failure: NVD does not delete CVEs, a revised score changes the
+// record's lastModified so the next delta overwrites it, and a rating
+// for a CVE no advisory matches is unreachable (Matcher.annotate only
+// asks about identifiers a finding already carries).
+//
+// Copied BEFORE the annotators run, so a delta overwrites the entries it
+// re-fetched and leaves the rest.
+seeded := 0
 if seedPath != "" {
-	// The seed's provenance is the starting point, so a source this run
-	// did not fetch keeps the seed's DataAsOf rather than vanishing from
-	// db status. A source this run DID fetch overwrites its entry below,
-	// which is what stops a one-day run inheriting a thirty-day claim.
-	if seeded, err := seedMeta(tmp); err == nil {
-		maps.Copy(meta.Providers, seeded.Providers)
-		maps.Copy(meta.Ratings, seeded.Ratings)
+	src, err := store.Open(seedPath)
+	if err != nil {
+		w.Close()
+		os.Remove(tmp)
+		fmt.Fprintf(stderr, "error: open seed %s: %v\n", seedPath, err)
+		return 2
 	}
+	err = src.EachRating(func(r advisory.Rating) error {
+		seeded++
+		return w.PutRating(r)
+	})
+	seedMeta, metaErr := src.Meta()
+	src.Close()
+	if err != nil {
+		w.Close()
+		os.Remove(tmp)
+		fmt.Fprintf(stderr, "error: read seed ratings: %v\n", err)
+		return 2
+	}
+	// The seed's rating provenance is the starting point, so an
+	// annotator this run did NOT run keeps the seed's window rather than
+	// vanishing from db status. One that DID run overwrites its entry in
+	// the loop below -- which is what stops a one-day delta inheriting a
+	// thirty-day coverage claim.
+	if metaErr == nil {
+		maps.Copy(meta.Ratings, seedMeta.Ratings)
+	}
+	fmt.Fprintf(stderr, "seeded %d rating(s) from %s; advisories rebuilt from source\n", seeded, seedPath)
 }
 ```
 
@@ -1384,11 +1469,6 @@ on:
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
-    inputs:
-      full:
-        description: "Build from empty instead of seeding from the last artifact"
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -1397,9 +1477,12 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # A full NVD pass is ~7h and the job cap is 6h, which is why the daily
-    # run seeds. The full build is a manual, chunked exception.
-    timeout-minutes: 350
+    # Comfortably inside the 6h job cap, because this run never does a full
+    # NVD pass. It seeds from the published artifact and fetches three days
+    # of NVD changes on top -- minutes, not hours. The one full pass is a
+    # local bootstrap, run once by a human; see the plan's "Bootstrapping
+    # the first artifact".
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -1408,24 +1491,35 @@ jobs:
       - run: make build
       - name: Log in to ghcr.io
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Resolve the artifact reference
+        id: ref
+        # Read from the binary rather than written literally: the tag is the
+        # schema version, and a hardcoded :v6 here would keep publishing to
+        # the old tag after a bump, silently serving everyone a database
+        # their assay refuses.
+        run: echo "ref=$(./bin/assay db ref)" >> "$GITHUB_OUTPUT"
       - name: Build
         env:
           NVD_ENABLE: "1"
-          # Bounded because the seed already holds everything older. On a
-          # full build this is unset, and the run is expected to need more
-          # than one job.
-          NVD_SINCE_DAYS: ${{ inputs.full && '' || '3' }}
-        run: |
-          if [ "${{ inputs.full }}" = "true" ]; then
-            ./bin/assay db build
-          else
-            ./bin/assay db build --seed ghcr.io/${{ github.repository_owner }}/assay-db:v6
-          fi
+          # Three days, not one: a run that fails leaves no gap, because the
+          # next day's window still covers what it missed. One day would
+          # make every skipped run a permanent hole in the ratings.
+          NVD_SINCE_DAYS: "3"
+        run: ./bin/assay db build --seed ${{ steps.ref.outputs.ref }}
       - name: Publish
-        run: ./bin/assay db push ghcr.io/${{ github.repository_owner }}/assay-db:v6
+        run: ./bin/assay db push ${{ steps.ref.outputs.ref }}
 ```
 
-**Note for the implementer:** the `:v6` in the workflow is duplicated from `store.SchemaVersion`, and a schema bump will make this workflow publish under the old tag. Add a step that reads the tag from the binary — `./bin/assay db update --print-ref` or equivalent — rather than leaving a literal here, and pin `actions/*` to a commit SHA if the repository's other workflows do.
+**Note for the implementer:** this needs a small `db ref` subcommand that prints `dbcmd.Ref(dbcmd.DefaultRef)` to stdout and exits 0 — four lines in the `db` switch, and it removes the duplicated schema version. Pin `actions/*` to a commit SHA if the repository's other workflows do.
+
+**Bootstrapping the first artifact.** The daily workflow seeds from an artifact that does not exist yet, so the first one is created by hand, once:
+
+```bash
+NVD_ENABLE=1 assay db build          # the full ~7 hours, locally, no job cap
+assay db push ghcr.io/kun9497/assay-db:v6
+```
+
+Document this in the README as the builder's one-time step. Note that `db build --seed` must fail with a clear error — not silently build from empty — when the reference does not resolve, or the first scheduled run after a registry outage would quietly publish a one-day database over a complete one. Add that to Task 5's tests.
 
 - [ ] **Step 2: Record D28 in the roadmap, bilingually**
 
