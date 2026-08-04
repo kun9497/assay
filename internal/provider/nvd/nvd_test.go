@@ -532,6 +532,77 @@ func TestAnnotate_RetriesATransientFailure(t *testing.T) {
 	}
 }
 
+// A failure that is NOT an HTTP status is retried too.
+//
+// This is the case the first retry implementation missed. It matched only
+// httpStatusError, because a 503 was the failure that had just been seen --
+// and the next bootstrap died at 116 minutes on an HTTP/2 stream error
+// surfacing during body decode, with the retry never firing. A truncated
+// body reproduces that shape: the request succeeds with 200, the decode
+// fails.
+func TestAnnotate_RetriesAFailureThatIsNotAnHTTPStatus(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			// 200 with a body that stops mid-object: a decode error, not a
+			// status error, which is exactly what the stream failure looked
+			// like by the time it reached this code.
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"totalResults":1,"vulnerabilities":[{"cve":{"id":`)
+			return
+		}
+		io.WriteString(w, `{"totalResults":1,"vulnerabilities":[{"cve":{"id":"CVE-2026-9","metrics":{"cvssMetricV31":[{"cvssData":{"vectorString":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]}}}],"timestamp":"2026-08-04T00:00:00.000"}`)
+	}))
+	defer srv.Close()
+
+	var got []advisory.Rating
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0)})
+	if _, err := p.Annotate(context.Background(), func(r advisory.Rating) error {
+		got = append(got, r)
+		return nil
+	}); err != nil {
+		t.Fatalf("Annotate failed on a retryable decode error: %v", err)
+	}
+	if calls != 2 {
+		t.Errorf("made %d requests, want 2 -- a non-status failure must still be retried", calls)
+	}
+	if len(got) != 1 {
+		t.Errorf("emitted %d rating(s), want 1", len(got))
+	}
+}
+
+// A context cancelled MID-REQUEST must not be retried: ^C during a
+// multi-hour sync has to stop, not wait out the whole schedule first.
+//
+// Cancelled mid-flight, deliberately. An already-cancelled context is
+// caught by Annotate's own ctx.Err() check at the top of the loop, before
+// fetchPage runs at all -- so a test using one passes whatever retryable
+// decides, and proves nothing about it (verified: that version of this test
+// survived the mutation).
+//
+// The assertion is on the retry NOTICE rather than the request count,
+// because sleep() also honours the context: a mutated retryable would fail
+// at the sleep instead and issue no extra request. The notice is the only
+// externally visible difference.
+func TestAnnotate_DoesNotRetryAContextCancelledMidRequest(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cancel()
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	var progress bytes.Buffer
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0), Progress: &progress})
+	if _, err := p.Annotate(ctx, func(advisory.Rating) error { return nil }); err == nil {
+		t.Fatal("Annotate succeeded despite cancellation")
+	}
+	if strings.Contains(progress.String(), "retrying") {
+		t.Errorf("progress = %q: a cancelled context was treated as retryable", progress.String())
+	}
+}
+
 // ...and a PERMANENT failure is not retried. Retrying a 404 would have
 // buried the window-too-wide bug behind four minutes of silent waiting
 // before reporting the same error anyway.

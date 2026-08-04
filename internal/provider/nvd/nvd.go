@@ -141,33 +141,63 @@ func New(opts Options) *Provider {
 
 func (p *Provider) Name() string { return SourceName }
 
-// retryWaits paces retries of a single page. A multi-hour sync makes a
-// transient failure a near-certainty rather than an edge case: the first
-// real 120-day bootstrap died at startIndex 42000 after 42 minutes on one
-// 503, and lost every record it had fetched, because Update builds into a
-// temporary database and only installs it at the end.
+// defaultRetryWaits paces retries of a single page. A multi-hour sync makes
+// a transient failure a near-certainty rather than an edge case: two real
+// bootstrap attempts died at 42 and 116 minutes, one on a 503 and one on an
+// HTTP/2 stream error, each losing every record it had fetched — Update
+// builds into a temporary database and installs it only at the end, so there
+// is no resume point.
 //
 // Values, not a fixed count, for the same reason replaceWaits is a slice in
 // internal/dbcmd: the schedule IS the policy, and a test that shrinks it
 // should not also change how many attempts happen. Roughly a minute total,
 // which is long enough for NVD to come back from a blip and short enough
 // that a genuine outage still fails the build rather than hanging it.
-// defaultRetryWaits holds the shipped schedule separately from retryWaits so
-// a test can assert the real values are non-zero even though TestMain zeroes
-// the working copy. Without that split, zeroing the production schedule --
-// turning every retry into a hot loop against NVD -- would pass the suite.
+//
+// Held separately from retryWaits so a test can assert the shipped values
+// are non-zero even though TestMain zeroes the working copy. Without that
+// split, zeroing the production schedule — turning every retry into a hot
+// loop against NVD — would pass the suite.
 var defaultRetryWaits = []time.Duration{2 * time.Second, 5 * time.Second, 15 * time.Second, 40 * time.Second}
 
+// retryWaits is the working copy the retry loop reads. TestMain replaces it
+// with a same-length, all-zero slice so the suite does not sleep.
 var retryWaits = defaultRetryWaits
 
-// transientStatus reports whether an HTTP status is worth retrying. 5xx is
-// NVD having a bad moment; 429 is us being told to slow down. A 4xx other
-// than 429 is a request this code got wrong -- retrying it just makes the
-// same mistake more slowly, and 404 in particular was a real bug (a window
-// wider than maxWindow) that a retry loop would have hidden behind four
-// minutes of silence.
-func transientStatus(code int) bool {
-	return code >= 500 || code == http.StatusTooManyRequests
+// retryable decides whether an error is worth another attempt.
+//
+// The policy is deny-list, not allow-list, and that is the correction of a
+// real mistake. The first version retried HTTP status errors only, because a
+// 503 was the failure that had just been observed. The next run died at
+// 116 minutes on `stream error: stream ID 91; INTERNAL_ERROR` -- an HTTP/2
+// transport failure surfacing during body decode, not a status at all -- and
+// the retry never fired. Enumerating the transient cases means the next
+// unenumerated one costs another two hours.
+//
+// So: everything is retryable except the two categories that are definitely
+// not.
+//
+//   - A cancelled or expired context is the caller saying stop. Retrying it
+//     ignores ^C and outlives the deadline it was given.
+//   - A 4xx other than 429 is this code getting the request wrong. Retrying
+//     makes the same mistake more slowly. 404 in particular was the
+//     window-wider-than-maxWindow bug, which a retry loop would have buried
+//     under a minute of silence before reporting the same error anyway.
+//
+// Everything else -- 5xx, 429, connection resets, stream errors, truncated
+// or malformed bodies -- is NVD or the network having a bad moment. A
+// genuinely malformed feed still fails, just after four attempts instead of
+// one, and that is the cheaper direction to be wrong in when the alternative
+// costs a multi-hour sync.
+func retryable(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var se *httpStatusError
+	if errors.As(err, &se) {
+		return se.code >= 500 || se.code == http.StatusTooManyRequests
+	}
+	return true
 }
 
 // httpStatusError carries the status code so fetchPageRetrying can decide
@@ -189,13 +219,12 @@ func (p *Provider) fetchPageRetrying(ctx context.Context, startIndex int, since,
 		if err == nil {
 			return page, asOf, nil
 		}
-		var se *httpStatusError
-		if !errors.As(err, &se) || !transientStatus(se.code) || attempt >= len(retryWaits) {
+		if !retryable(err) || attempt >= len(retryWaits) {
 			return apiResponse{}, time.Time{}, err
 		}
 		wait := retryWaits[attempt]
-		fmt.Fprintf(p.progress, nlFmt("nvd: page at startIndex %d failed (%s); retrying in %s (attempt %d of %d)"),
-			startIndex, se.msg, wait, attempt+1, len(retryWaits))
+		fmt.Fprintf(p.progress, nlFmt("nvd: page at startIndex %d failed (%v); retrying in %s (attempt %d of %d)"),
+			startIndex, err, wait, attempt+1, len(retryWaits))
 		if err := sleep(ctx, wait); err != nil {
 			return apiResponse{}, time.Time{}, err
 		}
