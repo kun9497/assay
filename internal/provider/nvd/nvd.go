@@ -150,15 +150,28 @@ func (p *Provider) Name() string { return SourceName }
 //
 // Values, not a fixed count, for the same reason replaceWaits is a slice in
 // internal/dbcmd: the schedule IS the policy, and a test that shrinks it
-// should not also change how many attempts happen. Roughly a minute total,
-// which is long enough for NVD to come back from a blip and short enough
-// that a genuine outage still fails the build rather than hanging it.
+// should not also change how many attempts happen.
+//
+// The budget is ~12 minutes, and the first version's ~1 minute was the
+// mistake. A run that had already spent 5h52m and reached startIndex 246000
+// hit a 503, waited 62 seconds, gave up, and discarded everything. Sixty-two
+// seconds is not a proportionate thing to risk six hours on: the retry
+// budget has to be measured against what is lost by giving up, not against
+// what feels like a polite pause. Twelve minutes still fits inside the
+// daily workflow's 60-minute timeout, so a delta run that meets a genuine
+// outage fails rather than hanging.
 //
 // Held separately from retryWaits so a test can assert the shipped values
 // are non-zero even though TestMain zeroes the working copy. Without that
 // split, zeroing the production schedule — turning every retry into a hot
 // loop against NVD — would pass the suite.
-var defaultRetryWaits = []time.Duration{2 * time.Second, 5 * time.Second, 15 * time.Second, 40 * time.Second}
+var defaultRetryWaits = []time.Duration{
+	5 * time.Second,
+	20 * time.Second,
+	time.Minute,
+	3 * time.Minute,
+	8 * time.Minute,
+}
 
 // retryWaits is the working copy the retry loop reads. TestMain replaces it
 // with a same-length, all-zero slice so the suite does not sleep.

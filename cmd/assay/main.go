@@ -247,7 +247,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 // It is an environment variable rather than a flag because it is a property
 // of how a database is being built, not of one scan. A flag can come later.
 func nvdOptionsFromEnv(stderr io.Writer) nvd.Options {
-	opts := nvd.Options{APIKey: os.Getenv("NVD_API_KEY")}
+	// Progress goes to stderr so retry notices are visible. Leaving it unset
+	// defaults it to io.Discard, and that is exactly what shipped: a run that
+	// spent 5h52m, hit a 503, retried four times and gave up printed nothing
+	// about any of it, so the log read "retries fired: 0" when four had. The
+	// option existed and was never connected — the observability was written
+	// and then thrown away one call site later.
+	opts := nvd.Options{APIKey: os.Getenv("NVD_API_KEY"), Progress: stderr}
 	raw := os.Getenv("NVD_SINCE_DAYS")
 	if raw == "" {
 		return opts

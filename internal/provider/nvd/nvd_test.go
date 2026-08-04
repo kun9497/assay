@@ -483,10 +483,25 @@ func TestRetryWaits_ShippedScheduleActuallyWaits(t *testing.T) {
 	if len(defaultRetryWaits) == 0 {
 		t.Fatal("no retry schedule at all")
 	}
+	var total time.Duration
 	for i, w := range defaultRetryWaits {
 		if w <= 0 {
 			t.Errorf("defaultRetryWaits[%d] = %v, want a real pause", i, w)
 		}
+		total += w
+	}
+	// The BUDGET is the point, not merely that each value is non-zero.
+	// The first schedule totalled 62s and threw away a run that had spent
+	// 5h52m -- every individual value was non-zero and the policy was
+	// still wrong. What has to hold is that the wait is proportionate to
+	// what giving up costs.
+	if min := 10 * time.Minute; total < min {
+		t.Errorf("retry budget is %v, want at least %v -- a multi-hour sync must not be discarded over a brief outage", total, min)
+	}
+	// ...and still inside the daily workflow's 60-minute timeout, so a
+	// genuine outage fails the build rather than hanging it.
+	if max := 30 * time.Minute; total > max {
+		t.Errorf("retry budget is %v, want at most %v", total, max)
 	}
 }
 
