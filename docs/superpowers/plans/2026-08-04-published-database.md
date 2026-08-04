@@ -1374,8 +1374,15 @@ func TestUpdate_SeededRunReportsTheWindowItActuallyFetched(t *testing.T) {
 	}
 	// Both CVEs are present, so the count is the merged one -- the window
 	// narrowing must not be read as "the older ratings were dropped".
-	if !strings.Contains(row, "2") {
-		t.Errorf("RATING SOURCE row = %q, want the merged count of 2", row)
+	//
+	// Asserted on the split FIELD, not Contains(row, "2"): the row carries
+	// "modified 2026-08-03..2026-08-04", and that date contains "2", so a
+	// substring check passes with a RECORDS cell of 1, 0, or the words
+	// "ran, rated nothing" -- i.e. it survives deleting the seed copy
+	// entirely. CLAUDE.md names this shape; it reached this plan anyway.
+	fields := strings.Fields(row)
+	if len(fields) < 3 || fields[2] != "2" {
+		t.Errorf("RATING SOURCE row = %q, want its RECORDS field to be the merged count 2", row)
 	}
 }
 ```
