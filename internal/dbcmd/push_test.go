@@ -18,6 +18,12 @@ import (
 	"github.com/kun9497/assay/internal/store"
 )
 
+// testBuiltAt is the fixed BuiltAt every fixture in this file writes, so a
+// test can assert Push read it back from the LOCAL store rather than
+// stamping the clock (fix round 1, finding 1) without repeating the literal
+// at every call site.
+var testBuiltAt = time.Date(2026, 8, 4, 6, 0, 0, 0, time.UTC)
+
 // pushable builds a real database on disk and returns its path.
 func pushable(t *testing.T, dataAsOf time.Time) string {
 	t.Helper()
@@ -27,7 +33,7 @@ func pushable(t *testing.T, dataAsOf time.Time) string {
 		t.Fatal(err)
 	}
 	if err := w.SetMeta(store.Meta{
-		BuiltAt: time.Date(2026, 8, 4, 6, 0, 0, 0, time.UTC),
+		BuiltAt: testBuiltAt,
 		Providers: map[string]store.Provenance{
 			"osv": {Source: "https://example.test", DataAsOf: dataAsOf},
 		},
@@ -62,7 +68,8 @@ func TestPush_WritesAPullableArtifact(t *testing.T) {
 	}
 
 	parsedRef, refErr := name.ParseReference(ref)
-	img, err := remote.Image(must(t, parsedRef, refErr))
+	target := must(t, parsedRef, refErr)
+	img, err := remote.Image(target)
 	if err != nil {
 		t.Fatalf("pushed artifact is not pullable: %v", err)
 	}
@@ -79,6 +86,30 @@ func TestPush_WritesAPullableArtifact(t *testing.T) {
 	if !m.DataAsOf.Equal(asOf) {
 		t.Errorf("published DataAsOf = %v, want the database's own %v", m.DataAsOf, asOf)
 	}
+	// fix round 1, finding 1: BuiltAt must come from the LOCAL database's own
+	// recorded metadata, not the moment Push happened to run. Unheld before
+	// this assertion existed -- `BuiltAt: time.Now().UTC()` in push.go passed
+	// the whole suite.
+	if !m.BuiltAt.Equal(testBuiltAt) {
+		t.Errorf("published BuiltAt = %v, want the database's own %v", m.BuiltAt, testBuiltAt)
+	}
+
+	// fix round 1, finding 2: the pushed digest is the RESULT of `db push`, so
+	// it belongs on stdout, not stderr -- a caller pins it with
+	// `assay db push ... | ...` or captures it via `$(...)`. Asserted as the
+	// rendered pair (name@digest), not a bare "sha256:" substring, which
+	// stderr's own error-path text could also contain.
+	wantDigest, err := img.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantLine := target.Context().Name() + "@" + wantDigest.String()
+	if !strings.Contains(out.String(), wantLine) {
+		t.Errorf("stdout = %q, want it to contain the pushed digest %q", out.String(), wantLine)
+	}
+	if strings.Contains(errOut.String(), wantLine) {
+		t.Errorf("the pushed digest leaked onto stderr, a diagnostics stream, not the result: %q", errOut.String())
+	}
 }
 
 // An artifact is only as fresh as its stalest provider. Reporting the
@@ -91,7 +122,7 @@ func TestPush_DataAsOfIsTheOldestProvider(t *testing.T) {
 	}
 	old := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 	if err := w.SetMeta(store.Meta{
-		BuiltAt: time.Date(2026, 8, 4, 6, 0, 0, 0, time.UTC),
+		BuiltAt: testBuiltAt,
 		Providers: map[string]store.Provenance{
 			"fresh": {DataAsOf: time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)},
 			"stale": {DataAsOf: old},
@@ -136,6 +167,50 @@ func TestPush_MissingDatabaseExitsTwo(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "absent.db") {
 		t.Errorf("stderr does not name the missing file:\n%s", errOut.String())
+	}
+}
+
+// fix round 1, finding 3: a malformed reference must fail before Push does
+// anything with a registry, and stderr must name the bad reference -- a
+// builder scripting several `db push` calls needs to know WHICH one it was.
+// Nothing previously supplied an unparseable ref, so a Push that silently
+// swallowed name.ParseReference's error and fell through to a false success
+// would not have been caught.
+func TestPush_UnparseableReferenceExitsTwo(t *testing.T) {
+	path := pushable(t, time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC))
+
+	var out, errOut bytes.Buffer
+	code := Push(context.Background(), path, "NOT A REF", &out, &errOut)
+	if code != 2 {
+		t.Errorf("Push with an unparseable ref = %d, want 2", code)
+	}
+	if !strings.Contains(errOut.String(), "NOT A REF") {
+		t.Errorf("stderr does not name the bad reference:\n%s", errOut.String())
+	}
+	if out.Len() != 0 {
+		t.Errorf("error path polluted stdout: %q", out.String())
+	}
+}
+
+// fix round 1, finding 3: a registry that refuses the connection must not be
+// swallowed into a false success -- exit 2, and stderr must say the PUSH
+// itself failed, distinct from the "not a valid reference" wording the
+// sibling test checks, so an operator debugging a failed publish can tell
+// the two apart. 127.0.0.1:1 is a loopback address nothing listens on, so
+// this needs no real network access and fails fast.
+func TestPush_UnreachableRegistryExitsTwo(t *testing.T) {
+	path := pushable(t, time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC))
+
+	var out, errOut bytes.Buffer
+	code := Push(context.Background(), path, "127.0.0.1:1/assay-db:v6", &out, &errOut)
+	if code != 2 {
+		t.Errorf("Push against an unreachable registry = %d, want 2", code)
+	}
+	if !strings.Contains(errOut.String(), "error: push:") {
+		t.Errorf("stderr does not say the push itself failed:\n%s", errOut.String())
+	}
+	if out.Len() != 0 {
+		t.Errorf("error path polluted stdout: %q", out.String())
 	}
 }
 
