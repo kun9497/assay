@@ -1,4 +1,7 @@
-// Package dbcmd implements `assay db update` and `assay db status`.
+// Package dbcmd implements every `assay db` subcommand: `db build` (Update
+// rebuilds from the providers -- the name predates D28 and now undersells
+// what it does), `db update` (Pull, downloads the published artifact),
+// `db status`, `db push` (publishes an artifact) and `db ref`.
 package dbcmd
 
 import (
@@ -255,7 +258,7 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrSchemaMismatch) ||
 			errors.Is(err, store.ErrIncomplete) {
 			fmt.Fprintf(stderr, "error: %v\n", err)
-			fmt.Fprintln(stderr, "run `assay db update` to build it")
+			fmt.Fprintln(stderr, "run `assay db update` to download it, or `assay db build` to build it from source")
 			return 2
 		}
 		fmt.Fprintf(stderr, "error: open database: %v\n", err)

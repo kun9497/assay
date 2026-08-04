@@ -65,7 +65,7 @@ func Open(path string) (*Bolt, error) {
 	// something an external temp-file-and-rename discipline has to guarantee.
 	if m.Schema == 0 {
 		db.Close()
-		return nil, fmt.Errorf("%w at %s: no metadata record, so `assay db update` did not finish", ErrIncomplete, path)
+		return nil, fmt.Errorf("%w at %s: no metadata record, so the last `assay db build` or `assay db update` did not finish", ErrIncomplete, path)
 	}
 	if m.Schema != SchemaVersion {
 		db.Close()
