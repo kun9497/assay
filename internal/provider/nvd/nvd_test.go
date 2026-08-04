@@ -505,6 +505,45 @@ func TestRetryWaits_ShippedScheduleActuallyWaits(t *testing.T) {
 	}
 }
 
+// The sync reports progress as it goes.
+//
+// Without this the loop printed nothing between "annotating with NVD" and
+// its result -- seven hours of silence on a full pass. Through four
+// bootstrap attempts the only way to tell a working sync from a hung one
+// was watching the temporary database grow from outside the process.
+func TestAnnotate_ReportsProgressPerPage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Two records total, one per page, so the loop runs twice.
+		idx := r.URL.Query().Get("startIndex")
+		id := "CVE-2026-1"
+		if idx == "1" {
+			id = "CVE-2026-2"
+		}
+		io.WriteString(w, `{"totalResults":2,"vulnerabilities":[{"cve":{"id":"`+id+`","metrics":{"cvssMetricV31":[{"cvssData":{"vectorString":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]}}}],"timestamp":"2026-08-04T00:00:00.000"}`)
+	}))
+	defer srv.Close()
+
+	var progress bytes.Buffer
+	p := New(Options{BaseURL: srv.URL, PageSize: 1, Pause: durPtr(0), Progress: &progress})
+	if _, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+
+	lines := strings.Count(progress.String(), "nvd: ")
+	if lines != 2 {
+		t.Errorf("progress has %d line(s), want one per page (2):\n%s", lines, progress.String())
+	}
+	// The counts have to be real, not a bare heartbeat: a line that says
+	// only "working" cannot distinguish progress from a loop re-reading
+	// the same page.
+	if want := "2/2 records"; !strings.Contains(progress.String(), want) {
+		t.Errorf("progress does not report the final count %q:\n%s", want, progress.String())
+	}
+	if want := "1/2 records"; !strings.Contains(progress.String(), want) {
+		t.Errorf("progress does not report intermediate position %q:\n%s", want, progress.String())
+	}
+}
+
 // A single transient failure must not destroy a multi-hour sync. The first
 // real 120-day bootstrap died at startIndex 42000 after 42 minutes on one
 // 503 and lost every record, because Update installs the database only at

@@ -384,6 +384,19 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 		// page, and advancing by the request size would either skip records
 		// or loop forever short of totalResults.
 		startIndex += n
+		// Progress, once per page.
+		//
+		// Without it this loop prints nothing between "annotating with NVD"
+		// and its result, which for a full pass is about seven hours of
+		// silence. During the bootstrap runs the only way to tell a working
+		// sync from a hung one was to watch the temporary database grow from
+		// outside the process -- a diagnostic nobody who is not already
+		// debugging this code would think to run.
+		//
+		// Per page, not per record: a page is minutes, so this is at most a
+		// few hundred lines across the longest sync, and it doubles as the
+		// pacing signal -- lines that stop arriving mean stalled, not slow.
+		fmt.Fprintf(p.progress, nlFmt("nvd: %d/%d records, %d rated"), startIndex, total, records)
 	}
 	prov.Records = records
 	prov.DataAsOf = asOf
