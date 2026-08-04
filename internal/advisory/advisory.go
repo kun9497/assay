@@ -64,3 +64,12 @@ type Severity struct {
 	Type  string `json:"type"`  // CVSS_V2 | CVSS_V3 | CVSS_V4
 	Score string `json:"score"` // the vector string
 }
+
+// Rating is one authority's assessment of one CVE, stored independently of
+// any advisory record.
+type Rating struct {
+	CVE      string     // "CVE-2026-39822"
+	Source   string     // "NVD"
+	Severity []Severity // the same (Type, Score) pairs an Advisory carries
+	URL      string     // where a reader can check the claim
+}

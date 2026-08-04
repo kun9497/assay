@@ -1,12 +1,14 @@
 package store
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	bolt "go.etcd.io/bbolt"
 
@@ -18,9 +20,10 @@ var (
 	bucketAdvisories = []byte("advisories") // "<ecosystem>\x00<name>"   -> []advisory ID
 	bucketByID       = []byte("by-id")      // "<advisory ID>"           -> the record, once
 	bucketMeta       = []byte("meta")
+	bucketRatings    = []byte("ratings") // "<CVE>\x00<Source>" -> the Rating record, once
 )
 
-var allBuckets = [][]byte{bucketAdvisories, bucketByID, bucketMeta}
+var allBuckets = [][]byte{bucketAdvisories, bucketByID, bucketMeta, bucketRatings}
 
 // keySep is NUL because no real ecosystem or package identifier can contain
 // one. A printable separator would collide: distro ecosystem keys already
@@ -166,6 +169,22 @@ func appendID(bk *bolt.Bucket, key, id string) error {
 	return bk.Put([]byte(key), blob)
 }
 
+// PutRating stores one authority's opinion about a CVE, keyed on (CVE,
+// Source) so several authorities can rate the same CVE and a re-Put of the
+// same source replaces its record rather than duplicating it. Severity is
+// stored exactly as given -- a CVSS vector, never a computed band (D13) -- so
+// a scoring fix later is a code change, not a database rebuild.
+func (b *Bolt) PutRating(r advisory.Rating) error {
+	blob, err := json.Marshal(r)
+	if err != nil {
+		return fmt.Errorf("marshal rating %s/%s: %w", r.CVE, r.Source, err)
+	}
+	key := r.CVE + keySep + r.Source
+	return b.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketRatings).Put([]byte(key), blob)
+	})
+}
+
 func (b *Bolt) SetMeta(m Meta) error {
 	m.Schema = SchemaVersion
 	// Coverage is the union of what each provider reported (D20). It is not
@@ -216,6 +235,30 @@ func (b *Bolt) SetMeta(m Meta) error {
 			return err
 		}
 		m.Databases = slices.Sorted(maps.Keys(dbs))
+
+		// RatingCounts (D27) is read from the ratings bucket actually
+		// stored, not from annotator self-report, exactly the reasoning
+		// above for Databases: a rating's Source is the tail of its own key
+		// ("<CVE>\x00<Source>"), so trusting a self-reported count would let
+		// an annotator that ran and rated nothing (or fewer than it claims)
+		// still make db status assert a source that rated something — the
+		// same over-claim D20 refuses to let a stored ecosystem entry make.
+		//
+		// Derived from the key alone, not by decoding each Rating blob: the
+		// key already carries Source verbatim (PutRating's own key
+		// construction), so there is nothing in the blob this scan needs
+		// that isn't already in the key.
+		counts := map[string]int{}
+		if err := tx.Bucket(bucketRatings).ForEach(func(k, _ []byte) error {
+			_, source, ok := bytes.Cut(k, []byte(keySep))
+			if ok && len(source) > 0 {
+				counts[string(source)]++
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		m.RatingCounts = counts
 
 		blob, err := json.Marshal(m)
 		if err != nil {
@@ -271,6 +314,40 @@ func (b *Bolt) resolve(index []byte, key string) ([]advisory.Advisory, error) {
 		return nil
 	})
 	return out, err
+}
+
+// RatingsFor answers every authority's opinion about one CVE, sorted by
+// Source so two runs against the same database agree. An unrated CVE is a
+// normal answer -- the matcher asks this for every finding -- so it returns
+// an empty slice and a nil error rather than treating a miss as a failure.
+func (b *Bolt) RatingsFor(cve string) ([]advisory.Rating, error) {
+	prefix := []byte(cve + keySep)
+	var out []advisory.Rating
+	err := b.db.View(func(tx *bolt.Tx) error {
+		c := tx.Bucket(bucketRatings).Cursor()
+		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
+			var r advisory.Rating
+			if err := json.Unmarshal(v, &r); err != nil {
+				return fmt.Errorf("decode rating %q: %w", k, err)
+			}
+			out = append(out, r)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	// The explicit sort is redundant against a bbolt cursor today -- keys are
+	// stored in byte order and Source is the tail of "<CVE>\x00<Source>", so a
+	// Seek over one CVE's prefix already yields entries ordered by Source.
+	// Kept anyway: it makes the guarantee a property of RatingsFor's contract
+	// rather than an accident of the key layout, so a future change to the key
+	// shape (or to how entries are collected) cannot silently reintroduce
+	// nondeterminism.
+	slices.SortFunc(out, func(a, b advisory.Rating) int {
+		return strings.Compare(a.Source, b.Source)
+	})
+	return out, nil
 }
 
 func (b *Bolt) Meta() (Meta, error) {

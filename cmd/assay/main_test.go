@@ -3,12 +3,15 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/provider/nvd"
 	"github.com/kun9497/assay/internal/report"
 	"github.com/kun9497/assay/internal/scancmd"
 	"github.com/kun9497/assay/internal/severity"
@@ -812,5 +815,146 @@ func TestRun_ScanExplainConflictsWithOutputJSONExits2(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "--explain") || !strings.Contains(stderr.String(), "--output") {
 		t.Errorf("stderr = %q, want it to name both conflicting flags", stderr.String())
+	}
+}
+
+// TestNVDOptionsFromEnv_PassesAPIKeyThrough: `db update` reads NVD_API_KEY
+// from the environment and must actually forward it into the Options the
+// annotator is built from, not just read it and drop it (D27: "the provider
+// must never read the environment itself - that is why it takes an
+// option"). This is the one seam that proves the forwarding without a real
+// `db update` run, which would either make a live network call to NVD or
+// need a second, test-only BaseURL override just to avoid one.
+func TestNVDOptionsFromEnv_PassesAPIKeyThrough(t *testing.T) {
+	t.Run("key set", func(t *testing.T) {
+		t.Setenv("NVD_API_KEY", "test-key-123")
+		if got := nvdOptionsFromEnv(io.Discard); got.APIKey != "test-key-123" {
+			t.Errorf("nvdOptionsFromEnv().APIKey = %q, want %q", got.APIKey, "test-key-123")
+		}
+	})
+	// No key is a normal, fully supported configuration (D27: "never
+	// required"), so the zero value must round-trip too, not just a set one.
+	t.Run("key unset", func(t *testing.T) {
+		t.Setenv("NVD_API_KEY", "")
+		if got := nvdOptionsFromEnv(io.Discard); got.APIKey != "" {
+			t.Errorf("nvdOptionsFromEnv().APIKey = %q, want empty when NVD_API_KEY is unset", got.APIKey)
+		}
+	})
+}
+
+// A rejected NVD_SINCE_DAYS silently produced a seven-hour full sync, which
+// is the opposite of what setting a window asks for and gave no clue why. It
+// says so now. Both directions matter: a value that cannot be used at all,
+// and one that is quietly reduced.
+func TestNVDOptionsFromEnv_SaysWhyItIgnoredOrCappedTheWindow(t *testing.T) {
+	for _, tc := range []struct {
+		name, value string
+		wantSince   bool   // did a window survive at all?
+		wantWarn    string // a distinctive fragment of the warning
+	}{
+		{"unparseable", "30d", false, "not a positive number"},
+		{"zero", "0", false, "not a positive number"},
+		{"negative", "-5", false, "not a positive number"},
+		{"over the API maximum", "365", true, "exceeds the API's 120-day maximum"},
+		{"accepted", "30", true, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("NVD_SINCE_DAYS", tc.value)
+			var errOut bytes.Buffer
+			got := nvdOptionsFromEnv(&errOut)
+
+			if gotSince := !got.Since.IsZero(); gotSince != tc.wantSince {
+				t.Errorf("Since set = %v, want %v", gotSince, tc.wantSince)
+			}
+			if tc.wantWarn == "" {
+				if errOut.Len() != 0 {
+					t.Errorf("stderr = %q, want nothing for an accepted value", errOut.String())
+				}
+				return
+			}
+			if !strings.Contains(errOut.String(), tc.wantWarn) {
+				t.Errorf("stderr = %q, want it to contain %q", errOut.String(), tc.wantWarn)
+			}
+			// The value is echoed so the warning names what was actually
+			// set, not just that something was wrong with it.
+			if !strings.Contains(errOut.String(), tc.value) {
+				t.Errorf("stderr = %q, want it to quote the offending value %q", errOut.String(), tc.value)
+			}
+		})
+	}
+
+	// 365 days must not merely warn -- it must actually clamp. Asserting the
+	// warning alone would pass on code that printed it and sent 365 anyway,
+	// which the API rejects outright.
+	t.Run("the cap is applied, not just announced", func(t *testing.T) {
+		t.Setenv("NVD_SINCE_DAYS", "365")
+		got := nvdOptionsFromEnv(io.Discard)
+		days := int(time.Since(got.Since).Hours() / 24)
+		if days < 119 || days > 121 {
+			t.Errorf("Since is %d days ago, want ~120 (the value was capped in the message but not in Options)", days)
+		}
+	})
+}
+
+// NVD is opt-in. It ran unconditionally at first, which made a routine NIST
+// 503 fatal to building any database at all -- dbcmd.Update deletes the
+// half-built file when a configured annotator fails, correctly, so with no
+// way to unconfigure NVD a user could not even rebuild the OSV-only database
+// that worked the day before. It also moved the default cost of `db update`
+// from minutes to about seven hours.
+func TestDBUpdateAnnotators_NVDIsOptIn(t *testing.T) {
+	// A key alone must NOT enable it: someone who exported NVD_API_KEY once
+	// would otherwise get the seven hours without asking for them.
+	t.Setenv("NVD_API_KEY", "spy-key-1")
+	t.Setenv("NVD_ENABLE", "")
+
+	orig := newNVDAnnotator
+	sawCall := false
+	newNVDAnnotator = func(opts nvd.Options) *nvd.Provider { sawCall = true; return orig(opts) }
+	defer func() { newNVDAnnotator = orig }()
+
+	if got := dbUpdateAnnotators(io.Discard); len(got) != 0 {
+		t.Errorf("dbUpdateAnnotators() = %+v, want none without NVD_ENABLE", got)
+	}
+	if sawCall {
+		t.Error("nvd.New was constructed even though NVD_ENABLE was unset")
+	}
+}
+
+// TestDBUpdateAnnotators_ConstructsNVDWithTheAPIKeyFromEnv closes the gap
+// TestNVDOptionsFromEnv_PassesAPIKeyThrough cannot: that test only proves
+// nvdOptionsFromEnv reads NVD_API_KEY correctly in isolation, never that the
+// "db update" call site actually threads its result into the constructed
+// annotator. Mutating the call site to `nvd.New(nvd.Options{})` — dropping
+// the argument while keeping the import and the call — compiles, and left
+// every other test in this package (and the whole suite) green. This
+// substitutes newNVDAnnotator with a spy so the actual Options nvd.New would
+// have received is observable directly, without dbUpdateAnnotators (or `db
+// update` itself) ever calling Annotate and reaching the real network
+// nvd.New's BaseURL defaults to.
+func TestDBUpdateAnnotators_ConstructsNVDWithTheAPIKeyFromEnv(t *testing.T) {
+	t.Setenv("NVD_API_KEY", "spy-key-1")
+	t.Setenv("NVD_ENABLE", "1")
+
+	var gotOpts nvd.Options
+	sawCall := false
+	orig := newNVDAnnotator
+	newNVDAnnotator = func(opts nvd.Options) *nvd.Provider {
+		gotOpts, sawCall = opts, true
+		return orig(opts)
+	}
+	defer func() { newNVDAnnotator = orig }()
+
+	annotators := dbUpdateAnnotators(io.Discard)
+
+	if !sawCall {
+		t.Fatal("dbUpdateAnnotators never constructed an NVD annotator")
+	}
+	if gotOpts.APIKey != "spy-key-1" {
+		t.Errorf("nvd.New was called with APIKey %q, want %q (NVD_API_KEY was not threaded through)",
+			gotOpts.APIKey, "spy-key-1")
+	}
+	if len(annotators) != 1 || annotators[0].Name() != nvd.SourceName {
+		t.Errorf("dbUpdateAnnotators() = %+v, want exactly one NVD annotator", annotators)
 	}
 }

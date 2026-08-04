@@ -144,13 +144,26 @@ func explainOne(w io.Writer, f matcher.Finding) error {
 // name measured so far ("ALPINE" is the longest); 24 clears real advisory
 // IDs including Alpine's own "ALPINE-CVE-2025-46394"; 16 clears the longest
 // formatSeverity output, "critical (10.0)".
+//
+// The URL, when present, is appended after the fixed-width columns rather
+// than given one of its own: an OSV rating leaves it empty (matcher.Rating's
+// own doc comment — the advisory ID already names something to look up), so
+// a fixed-width URL column would print blank space on most lines for a value
+// that exists at all only for an annotation (D27). An annotation carries no
+// Evidence, no matched range and no fixed version (D25 narrowed by D27) — no
+// advisory of its own to check — so without this, the breakdown states what
+// NIST scored a CVE and gives a reader nowhere to verify it, against goal #1.
 func ratingLine(r matcher.Rating) string {
 	fixed := r.Fixed
 	if fixed == "" {
 		fixed = "-"
 	}
-	return fmt.Sprintf("  %-6s %-24s %-16s fixed %s",
+	line := fmt.Sprintf("  %-6s %-24s %-16s fixed %s",
 		r.Database, r.AdvisoryID, formatSeverity(r.Severity, r.Score), fixed)
+	if r.URL != "" {
+		line += "  " + r.URL
+	}
+	return line
 }
 
 // comparerName names the version.Comparer that version.For would select

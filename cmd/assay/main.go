@@ -8,10 +8,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kun9497/assay/internal/dbcmd"
 	"github.com/kun9497/assay/internal/provider"
+	"github.com/kun9497/assay/internal/provider/nvd"
 	"github.com/kun9497/assay/internal/provider/osv"
 	"github.com/kun9497/assay/internal/scancmd"
 	"github.com/kun9497/assay/internal/severity"
@@ -59,6 +62,17 @@ Scan flags (any order, before or after the target):
   --output <format>     table (default) or json
   --explain <id>        Print one advisory's full Evidence (its own ID, or
                         any alias/upstream identifier) instead of the report
+
+Environment (db update only — a scan reads no environment and no network):
+  NVD_ENABLE=1          Also fetch NIST's CVSS scores, so findings whose
+                        advisory carries no severity can still be rated.
+                        Off by default: a full pass takes about seven hours.
+  NVD_SINCE_DAYS=<n>    Bound that fetch to CVEs modified in the last n days
+                        (max 120). Bounds ONE BUILD, not a delta on the last
+                        one — db status prints the window it covered.
+  NVD_API_KEY=<key>     Raise NVD's rate limit tenfold. Optional, and it does
+                        not shorten the seven hours; NVD's own response
+                        generation is the bottleneck, not the pacing.
 `
 
 func main() {
@@ -114,7 +128,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		switch args[1] {
 		case "update":
 			return dbcmd.Update(context.Background(), path,
-				[]provider.Provider{osv.New(osv.Ecosystems, "")}, stdout, stderr)
+				[]provider.Provider{osv.New(osv.Ecosystems, "")},
+				dbUpdateAnnotators(stderr),
+				stdout, stderr)
 		case "status":
 			return dbcmd.Status(path, stdout, stderr)
 		default:
@@ -127,6 +143,98 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stderr, usage)
 		return exitError
 	}
+}
+
+// nvdOptionsFromEnv reads NVD_API_KEY and builds the nvd.Options the
+// annotator is constructed from. Pulled out as its own function, separate
+// from constructing the annotator itself, so a test can assert the key was
+// read and forwarded (D27's own contract: "the provider must never read the
+// environment itself, that is why it takes an option") without db update
+// making a real network call — nvd.New defaults BaseURL to the live NVD
+// endpoint, so exercising construction end to end here would either hit the
+// network or need a second seam just for tests.
+//
+// The key is optional and never required: NVD_API_KEY absent yields
+// Options{APIKey: ""}, which nvd.New already treats as "send no apiKey
+// header" (a slower, unauthenticated sync, not a failure).
+// NVD_SINCE_DAYS additionally bounds the sync to CVEs modified in the last N
+// days, using NVD's own lastModStartDate filter. Absent means the whole feed.
+//
+// Measured 2026-08-03, and the reason this exists: a full pass is about seven
+// hours, because NVD generates each 2,000-record page in 114-136 seconds
+// whatever the page size or compression. The rate-limit pauses are 20 minutes
+// of that. Above 120 days the API rejects the window outright, so the value is
+// capped here rather than sent and refused.
+//
+// It bounds ONE BUILD; it is not a daily delta, and this comment used to say
+// it was. `db update` builds into a fresh database and renames over the live
+// one, so nothing carries an earlier pass forward: a bounded run's window is
+// the database's entire NVD coverage. Following the "full pass once, then
+// NVD_SINCE_DAYS=1 nightly" recipe this comment previously recommended would
+// leave ~300 ratings where there had been ~372,000, and every finding whose
+// CVE was not touched yesterday would quietly fall back to unknown. Real
+// deltas need the builder to layer onto an existing database, which is slice
+// 8's job. Until then the window is disclosed instead (Provenance.Window).
+//
+// It is an environment variable rather than a flag because it is a property
+// of how a database is being built, not of one scan. A flag can come later.
+func nvdOptionsFromEnv(stderr io.Writer) nvd.Options {
+	opts := nvd.Options{APIKey: os.Getenv("NVD_API_KEY")}
+	raw := os.Getenv("NVD_SINCE_DAYS")
+	if raw == "" {
+		return opts
+	}
+	// Every rejected value below silently produced a seven-hour full sync
+	// before this warned, which is the opposite of what someone setting a
+	// window wants and gives no clue why.
+	days, err := strconv.Atoi(raw)
+	switch {
+	case err != nil || days <= 0:
+		fmt.Fprintf(stderr, "warning: NVD_SINCE_DAYS=%q is not a positive number of days; syncing the whole feed\n", raw)
+		return opts
+	case days > 120:
+		fmt.Fprintf(stderr, "warning: NVD_SINCE_DAYS=%d exceeds the API's 120-day maximum window; using 120\n", days)
+		days = 120
+	}
+	opts.Since = time.Now().UTC().AddDate(0, 0, -days)
+	return opts
+}
+
+// newNVDAnnotator constructs the NVD annotator. A package variable, not a
+// direct call to nvd.New at the "update" call site, so a test can substitute
+// a spy and observe what Options actually reached it — proving NVD_API_KEY
+// is threaded all the way through to construction, not just read
+// (nvdOptionsFromEnv's own test only proves the read half; a mutation
+// dropping the argument entirely, e.g. `nvd.New(nvd.Options{})`, still
+// compiled and left that test, and every other test in this package, green).
+// Swapping this out never needs a network call: the spy can return the same
+// real *nvd.Provider nvd.New would have, or nothing at all, since dbUpdateAnnotators
+// itself never calls Annotate.
+var newNVDAnnotator = nvd.New
+
+// dbUpdateAnnotators is every provider.Annotator `db update` runs, built
+// from the environment. Pulled out of the "update" case as its own function
+// so a test can call it directly and inspect what reaches newNVDAnnotator.
+//
+// NVD is opt-in, via NVD_ENABLE. It ran unconditionally at first, which was
+// wrong twice over:
+//
+//   - It made a NIST outage fatal to building ANY database. A configured
+//     annotator failing must fail the build (dbcmd.Update explains why: a
+//     database missing ratings it was supposed to have looks complete and
+//     under-reports). But 503s from services.nvd.nist.gov are routine, and
+//     with no way to unconfigure NVD that rule left a user unable to build
+//     even the OSV-only database that worked yesterday.
+//   - It moved the default cost of `db update` from minutes to seven hours,
+//     with no way back.
+//
+// A full NVD pass is a builder's job, not every user's — which is exactly
+// what slice 8 exists to fix. Opt-in is the honest state until then.
+func dbUpdateAnnotators(stderr io.Writer) []provider.Annotator {
+	if os.Getenv("NVD_ENABLE") == "" {
+		return nil
+	}
+	return []provider.Annotator{newNVDAnnotator(nvdOptionsFromEnv(stderr))}
 }
 
 // scan is the pipeline entry point: parse the target into an inventory, match

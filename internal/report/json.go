@@ -111,6 +111,13 @@ type RatingRecord struct {
 	// from "this document predates the field". The shape must not vary per
 	// rating, which is what a schema is for.
 	Fixed string `json:"fixed"`
+	// URL is where a reader can check this rating (D27) — empty for an OSV
+	// record, whose AdvisoryID above already names something to look up, and
+	// populated for an annotation such as NVD's, which carries no advisory of
+	// its own to point at. No omitempty, same reasoning as Fixed above: an
+	// OSV rating's empty URL is meaningful ("look up the advisory instead"),
+	// not an absent field, and the shape must not vary per rating.
+	URL string `json:"url"`
 }
 
 type PackageRecord struct {
@@ -209,6 +216,7 @@ func findingRecord(f matcher.Finding) FindingRecord {
 			Severity:   r.Severity.String(),
 			Score:      r.Score,
 			Fixed:      r.Fixed,
+			URL:        r.URL,
 		})
 	}
 	return FindingRecord{

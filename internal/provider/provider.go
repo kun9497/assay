@@ -19,3 +19,11 @@ type Provider interface {
 	// which is discarded, and holding it all in memory buys nothing.
 	Fetch(ctx context.Context, emit func(advisory.Advisory) error) (store.Provenance, error)
 }
+
+// Annotator is an upstream that says what a CVE is worth, rather than which
+// package is affected. NVD is the first; KISA is the reason the interface is
+// not called "NVDProvider".
+type Annotator interface {
+	Name() string
+	Annotate(ctx context.Context, emit func(advisory.Rating) error) (store.Provenance, error)
+}

@@ -151,6 +151,31 @@ verified as sufficient (see Assumptions).
 
 ---
 
+### Does an unrated source count as disagreeing?
+
+The table marks a finding with `*` and footnotes "sources disagree on severity" whenever its
+sources landed on different bands. An UNRATED source currently counts as one of those bands.
+
+**Why deferred.** D17 says `unknown` sits outside the ordering: it means nobody assessed
+this, so arguably a source with no opinion has not disagreed with one that has. The current
+behaviour was harmless while it was rare. D27 makes it the norm — NVD rates ~93% of CVEs
+while about half of OSV's records carry no severity at all, so most annotated findings now
+get the marker, and a marker that fires on almost everything stops carrying information.
+
+Left alone anyway, because it fails in the safe direction: it over-marks rather than
+under-marks, and the cost is noise rather than a missed vulnerability. Narrowing what the
+marker means is a change to the report's contract — what a reader is being told when they see
+a `*` — and that is a decision, not a defect to quietly fix during a review pass.
+
+**Revisit when.** The first scan against a full NVD-enabled database, where the real ratio of
+marked to unmarked findings is visible rather than estimated. If nearly every row carries a
+`*`, the marker has already stopped working and the decision makes itself.
+
+**Groundwork.** `sourcesDisagree` is one function in `internal/report/table.go`, and its
+tests name the intended semantics explicitly, so the change is small either way.
+
+---
+
 ### Publishing the database as an OCI artifact
 
 Users build the database locally with `assay db update`.
@@ -160,8 +185,20 @@ runs where rebuilding is too slow — neither applies yet. This is also infrastr
 (scheduled build workflow, registry auth, version tagging) rather than scanner work, and
 would mean building a distribution pipeline before the scanner runs.
 
-**Revisit when.** There are users beyond the author, or CI rebuild time becomes the
-bottleneck.
+**Revisit when.** ~~There are users beyond the author, or CI rebuild time becomes the
+bottleneck.~~ **Fired 2026-08-03, on the second condition.**
+
+Measured while building D27: a full NVD sync is about seven hours, because NVD generates each
+2,000-record page in 114–136 seconds and neither compression nor a smaller page changes the
+total. Local building was affordable while OSV was the only source — a few minutes of archive
+download. It is not affordable now, and it is not a constant anyone can tune away.
+
+That makes this the next slice rather than a someday. The shape is grype's and trivy's: a
+builder runs the seven hours once and layers daily deltas on top, publishes the built
+database, and `assay db update` pulls it. Note that layering is the part that does not exist
+yet: `Update` rebuilds from empty, so D27's `Since` bounds one build rather than extending the
+last one, and this slice is what makes a real delta possible. A scan still fetches nothing
+(D14), and registry distribution brings mirroring and air-gapped operation with it.
 
 **Groundwork.** Provider source URLs are configuration rather than constants, so adding a
 pull path later does not disturb the interface.

@@ -39,7 +39,13 @@ import (
 // Bumped to 5 to add Advisory.Database (D25): a database built before this
 // field has it empty on every record, and an empty Database renders as a
 // rating from a source with no name rather than failing loudly.
-const SchemaVersion = 5
+//
+// Bumped to 6 to add the ratings bucket (an authority's CVSS opinion about a
+// CVE, stored separately from any advisory — see internal/advisory.Rating).
+// A schema-5 database has no such bucket, and reading a missing bucket would
+// silently return zero ratings for every CVE rather than failing, which is a
+// scan that quietly loses every NVD score while looking healthy.
+const SchemaVersion = 6
 
 var (
 	ErrNotFound       = errors.New("vulnerability database not found")
@@ -56,6 +62,11 @@ type Store interface {
 	// no separate method: OSV writes the source name into Affected[].Name, so
 	// the caller queries this with the source name as a second key.
 	Lookup(ecosystem, name string) ([]advisory.Advisory, error)
+	// RatingsFor answers a third-party severity opinion for one CVE, sorted by
+	// Source so two runs against the same database agree. An unrated CVE
+	// returns an empty slice and a nil error — the matcher calls this for
+	// every finding, so "nobody rated this" is a normal answer, not a failure.
+	RatingsFor(cve string) ([]advisory.Rating, error)
 	// Covers reports which ecosystem keys this database actually holds (D20).
 	// A caller that skips this cannot distinguish "no advisories for this
 	// package" from "this ecosystem was never ingested".
@@ -68,6 +79,10 @@ type Store interface {
 // handed something it could write through.
 type Writer interface {
 	Put(a advisory.Advisory) error
+	// PutRating stores one authority's CVSS opinion about a CVE, keyed on
+	// (CVE, Source) so re-putting the same source replaces rather than
+	// duplicates.
+	PutRating(r advisory.Rating) error
 	SetMeta(m Meta) error
 	Close() error
 }
@@ -90,6 +105,42 @@ type Meta struct {
 	// record, so there is no foreign-ecosystem-style over-claim to guard
 	// against the way D20 requires for Ecosystems.
 	Databases []string `json:"databases"`
+	// Ratings is per-authority provenance for CVE ratings (D27): the DataAsOf
+	// and fetch Source URL an Annotator self-reports about its own run,
+	// written directly by dbcmd.Update from each Annotator's return value,
+	// mirroring Providers. Self-report is the only source for these two
+	// fields specifically — a stored advisory.Rating records neither when
+	// NVD's data was current nor which URL fetched it (D12) — unlike
+	// Advisory.Database, which every stored Advisory record carries and
+	// Databases below reads directly.
+	//
+	// Records on an entry here is NOT authoritative and must never be read
+	// for "did this authority rate anything" or "how many": an annotator
+	// that runs and emits nothing (or fewer than it claims) would otherwise
+	// let this map assert a rating count the stored data does not back up —
+	// exactly the over-claim D20 refuses to let Ecosystems make, one bucket
+	// over. RatingCounts below is the derived, trustworthy answer to that
+	// question; consult it, not this, for anything db status states as fact.
+	//
+	// Deliberately a separate map rather than folded into Providers, even
+	// though both hold store.Provenance: Bolt.SetMeta derives Ecosystems by
+	// trusting every entry in Providers to describe advisory coverage (D20).
+	// An annotator answers a different question — what a CVE is worth, never
+	// which package is affected — so mixing it into Providers would make a
+	// future annotator's non-empty Provenance.Ecosystems (a bug, but one nothing
+	// here should be able to trigger) silently widen Covers(). Keeping the two
+	// maps apart makes that impossible by construction rather than by
+	// discipline.
+	Ratings map[string]Provenance `json:"ratings"`
+	// RatingCounts is how many CVEs each authority actually rated, read from
+	// the ratings bucket itself (Bolt.SetMeta) — the Databases pattern
+	// applied to the ratings bucket instead of the advisories one. A
+	// rating's Source is recoverable from its own key
+	// ("<CVE>\x00<Source>"), so — unlike Providers/Ecosystems — there is no
+	// reason to trust self-report here: this is what db status actually
+	// treats as ground truth for which rating sources exist and how many
+	// CVEs they rated, never Ratings above.
+	RatingCounts map[string]int `json:"ratingCounts"`
 }
 
 type Provenance struct {
@@ -114,6 +165,24 @@ type Provenance struct {
 	// fetch list alone names a key nothing is looked up under and omits the 23
 	// that are.
 	Ecosystems []string `json:"ecosystems"`
+	// Window is what a RATING source actually covered, in its own words
+	// ("the whole feed", "modified 2026-07-04..2026-08-03"). Empty for
+	// advisory providers, which answer the same question with Ecosystems.
+	//
+	// It exists because a rating source can be fetched in part (D27's
+	// NVD_SINCE_DAYS bounds a sync to CVEs modified recently, since a full
+	// NVD pass is about seven hours) and Update rebuilds the database from
+	// empty every time. A bounded run's window is therefore the database's
+	// ENTIRE coverage from that source, not a delta layered on an earlier
+	// pass — so without this, a database holding one day of NVD looks
+	// exactly like one holding all of it, and every finding whose CVE fell
+	// outside the window silently keeps a lower band (D20).
+	//
+	// Self-reported, unlike RatingCounts, and that is sound here: the risk
+	// D20 guards against is a source claiming MORE coverage than it has,
+	// and a declared window only ever claims less. The count beside it is
+	// still derived.
+	Window string `json:"window,omitempty"`
 }
 
 // DefaultPath returns <user cache>/assay/db/v<schema>/vulnerability.db,

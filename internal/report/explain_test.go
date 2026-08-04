@@ -370,6 +370,21 @@ func TestRatingLine_FormatsOneSource(t *testing.T) {
 	if got != want {
 		t.Errorf("ratingLine (no fixed version) = %q, want %q", got, want)
 	}
+
+	// An annotation (D27) carries a URL and no fixed version — nowhere else
+	// on the line names something a reader can check, since AdvisoryID here
+	// is the CVE itself, not an advisory. Appended after the fixed-width
+	// columns, not given one of its own (matcher.Rating.URL's own doc
+	// comment, and ratingLine's), so this is checked as a distinct case
+	// rather than folded into the fixed-width table above.
+	got = ratingLine(matcher.Rating{
+		Database: "NVD", AdvisoryID: "CVE-2026-39822", Severity: severity.High, Score: 7.8,
+		URL: "https://nvd.nist.gov/vuln/detail/CVE-2026-39822",
+	})
+	want = "  NVD    CVE-2026-39822           high (7.8)       fixed -  https://nvd.nist.gov/vuln/detail/CVE-2026-39822"
+	if got != want {
+		t.Errorf("ratingLine (annotation with a URL) = %q, want %q", got, want)
+	}
 }
 
 // TestExplain_ShowsAllSourcesInFull is D10's "why" view applied to D25:
@@ -415,6 +430,68 @@ func TestExplain_ShowsAllSourcesInFull(t *testing.T) {
 	if got, want := explainLine(t, out, "  PYSEC"),
 		"  PYSEC  PYSEC-2022-191           unknown          fixed 2.2.28"; got != want {
 		t.Errorf("PYSEC rating line = %q, want %q\nfull output:\n%s", got, want, out)
+	}
+}
+
+// TestExplain_ListsAnAnnotationInTheBreakdown is D27's own scenario: every
+// OSV source left the finding unrated, NVD did not, and the finding is now
+// critical — but the DISPLAYED advisory is still the matched PYSEC record
+// (D25 narrowed by D27: an annotation carries no Evidence, no matched range
+// and no fixed version, so it is never the displayed record). The task
+// brief says this already works with no renderer change beyond the source
+// name being present; this is that verification by test, not by reading —
+// Explain's `f.Ratings` loop is unfiltered, so proving NVD's line appears in
+// full (including its URL, the one thing only an annotation carries) is the
+// same proof that no hidden filter trims the breakdown down to matched
+// records only.
+func TestExplain_ListsAnAnnotationInTheBreakdown(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package: pkgmeta.Package{Name: "unrated", Version: "1.0.0", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{
+			ID:      "PYSEC-1",
+			Aliases: []string{"CVE-2025-9"},
+		},
+		// Identifiers is what Explain's lookup and otherIDs both read (D25's
+		// own "also known as" mechanism) - a hand-built Finding has to set it
+		// itself, unlike one Match produces.
+		Identifiers: []string{"CVE-2025-9", "PYSEC-1"},
+		Evidence: version.Evidence{
+			RangeType: advisory.RangeSemver, Introduced: "0", Fixed: "2.0.0",
+			Reason: "1.0.0 is at or above any earlier version and below the fix 2.0.0",
+		},
+		MatchedName: "unrated",
+		Severity:    severity.Critical, // raised by NVD; the matched PYSEC record was Unknown
+		Score:       9.8,
+		Ratings: []matcher.Rating{
+			{Database: "NVD", AdvisoryID: "CVE-2025-9", Severity: severity.Critical, Score: 9.8,
+				URL: "https://nvd.nist.gov/vuln/detail/CVE-2025-9"},
+			{Database: "PYSEC", AdvisoryID: "PYSEC-1", Severity: severity.Unknown, Fixed: "2.0.0"},
+		},
+	}}}
+	var buf bytes.Buffer
+	n, err := Explain(&buf, res, "CVE-2025-9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("n = %d, want 1 (lookup by the CVE NVD rated must find the finding)", n)
+	}
+	out := buf.String()
+
+	// The displayed record is still the matched one - the D27 rule narrowing
+	// D25 - never the annotation, even though the annotation set the band.
+	if got, want := explainLine(t, out, "advisory:"), "advisory: PYSEC-1"; got != want {
+		t.Errorf("advisory line = %q, want %q (the annotation must never be the displayed record)", got, want)
+	}
+	if got, want := explainLine(t, out, "severity:"),
+		"severity: critical (9.8)   [highest of 2 sources]"; got != want {
+		t.Errorf("severity line = %q, want %q", got, want)
+	}
+	// NVD's own line: named as the source, no fixed version, and the URL -
+	// the one place a reader can check a claim that comes with no advisory.
+	if got, want := explainLine(t, out, "  NVD"),
+		"  NVD    CVE-2025-9               critical (9.8)   fixed -  https://nvd.nist.gov/vuln/detail/CVE-2025-9"; got != want {
+		t.Errorf("NVD rating line = %q, want %q\nfull output:\n%s", got, want, out)
 	}
 }
 

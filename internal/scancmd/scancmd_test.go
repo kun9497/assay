@@ -602,6 +602,79 @@ func buildMatrixSBOM(t *testing.T, pkgs []matrixPkg) string {
 	return path
 }
 
+// putRating opens the database dbPath already names — the one buildMatrixDB
+// just built and closed — and writes one rating into it. This is what `db
+// update` will have left behind once an annotator (D27) has run: a scan
+// never fetches anything itself (D14), so a test proving a rating reaches
+// the gate has to put it in the SAME database Run will open, not somewhere
+// Run never reads from.
+//
+// store.Create, not store.Open: RatingsFor's caller needs a Writer, and
+// Create's own CreateBucketIfNotExists calls are no-ops against buckets that
+// already exist, so reopening an already-built database this way neither
+// erases nor duplicates what buildMatrixDB already wrote.
+func putRating(t *testing.T, dbPath string, r advisory.Rating) {
+	t.Helper()
+	w, err := store.Create(dbPath)
+	if err != nil {
+		t.Fatalf("open %s to add a rating: %v", dbPath, err)
+	}
+	if err := w.PutRating(r); err != nil {
+		t.Fatalf("PutRating: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+// TestRun_AnNVDRatingReachesTheGate is the end-to-end shape of D27, through
+// Run: a finding no OSV source rated reaches --fail-on high because NVD
+// rated it.
+//
+// The gate is checked through the DEFAULT table renderer, exactly the
+// realistic path (`assay scan ... --fail-on high`, no --explain) the
+// roadmap's own measurement describes. Naming the source, on the other
+// hand, is checked through --explain rather than the table: table.go's
+// SEVERITY cell deliberately collapses to one band per row and marks
+// disagreement with `*` rather than naming sources (see table.go's own
+// sourcesDisagree/disagreementMarker comments) — --explain is where D27
+// promises a reader can see which authority raised the band ("--explain
+// lists it in the per-source breakdown, which is where a reader looks for
+// exactly this" — the roadmap's own D27 text). verdict() does not depend on
+// which renderer ran (D11: the renderer is chosen, not a different notion
+// of what the scan found), so checking through --explain here still proves
+// the same gate trips.
+func TestRun_AnNVDRatingReachesTheGate(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "PYSEC-1", pkg: "unrated", fixed: "2.0.0", aliases: []string{"CVE-2025-9"}},
+	})
+	// The rating is written into the SAME database, because a scan never
+	// fetches anything (D14) - this is what `db update` will have left behind.
+	putRating(t, db, advisory.Rating{CVE: "CVE-2025-9", Source: "NVD",
+		Severity: []advisory.Severity{{Type: "CVSS_V31", Score: vecCritical}}})
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "unrated", purlType: "golang"}})
+
+	high := severity.High
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), db, sbom, Options{FailOn: &high}, &out, &errOut); code != 1 {
+		t.Errorf("Run = %d, want 1 - NVD rated this critical, so --fail-on high "+
+			"must trip; stdout:\n%s", code, out.String())
+	}
+
+	// Same database, same finding, --explain by the CVE NVD rated - the one
+	// renderer that names the source (see the doc comment above).
+	out.Reset()
+	errOut.Reset()
+	code := Run(context.Background(), db, sbom,
+		Options{FailOn: &high, Explain: "CVE-2025-9"}, &out, &errOut)
+	if code != 1 {
+		t.Errorf("Run with --explain = %d, want 1\nstdout:\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "NVD") {
+		t.Errorf("the report does not name NVD as a source:\n%s", out.String())
+	}
+}
+
 // TestRun_ExitCodeMatrix states, once and in one place, every combination of
 // the three --fail-on* gates that changes the exit code: findings at and
 // below a threshold, an unrated finding, an unevaluated package, an

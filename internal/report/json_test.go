@@ -134,8 +134,18 @@ func goldenFixture() (matcher.Result, cyclonedx.Stats) {
 				// version off the winning record instead of off each rating —
 				// exactly the collapse this field exists to prevent — produced
 				// byte-identical output and the golden file blessed it.
+				//
+				// A third rating, NVD (D27): an annotation, not a matched
+				// record, so its own AdvisoryID is the CVE itself (matching
+				// matcher.go's own annotate()) and Fixed is empty — NIST was
+				// asked only what the CVE is worth, never which version fixes
+				// it. URL is the one field only an annotation carries; the two
+				// OSV ratings above leave it empty because their AdvisoryID
+				// already names something to look up.
 				Ratings: []matcher.Rating{
 					{Database: "GHSA", AdvisoryID: "GHSA-w24h-v9qh-8gxj", Severity: severity.Critical, Score: 9.8, Fixed: "2.2.28"},
+					{Database: "NVD", AdvisoryID: "CVE-2022-28347", Severity: severity.Critical, Score: 9.8,
+						URL: "https://nvd.nist.gov/vuln/detail/CVE-2022-28347"},
 					{Database: "PYSEC", AdvisoryID: "PYSEC-2022-191", Severity: severity.Unknown, Score: 0, Fixed: "2.2.27"},
 				},
 			},
@@ -288,12 +298,19 @@ func TestJSON_CarriesWhatTheTableCannot(t *testing.T) {
 // TestJSON_CarriesFullRatingsArray: JSON is the machine-readable view a
 // filter would read from (D25), so it keeps every source's rating, not just
 // the one Severity/Score picked — the opposite of the table's single
-// SEVERITY cell. Checked both by content (every field of both ratings, in
-// full) and by order (index 0 is GHSA, index 1 is PYSEC — the sorted order
-// matcher.sortRatings produces), so a mutation that drops the array, keeps
-// only the winner, or re-sorts it (e.g. through an intermediate map) is
-// caught here directly rather than only surfacing as an opaque byte-diff in
-// the golden test.
+// SEVERITY cell. Checked both by content (every field of all three ratings,
+// in full) and by order (index 0 is GHSA, index 1 is NVD, index 2 is PYSEC —
+// the sorted order matcher.sortRatings produces), so a mutation that drops
+// the array, keeps only the winner, or re-sorts it (e.g. through an
+// intermediate map) is caught here directly rather than only surfacing as an
+// opaque byte-diff in the golden test.
+//
+// The NVD entry (D27) is what makes this the URL round-trip test too: it is
+// the one rating in this fixture with a non-empty URL and an empty Fixed —
+// exactly an annotation's shape, never a matched record's — so a mutation
+// that drops RatingRecord.URL, or that carries Evidence.Fixed onto an
+// annotation instead of leaving it empty, is caught here rather than only in
+// the golden byte-diff.
 func TestJSON_CarriesFullRatingsArray(t *testing.T) {
 	res, cat := goldenFixture()
 	var buf bytes.Buffer
@@ -308,18 +325,25 @@ func TestJSON_CarriesFullRatingsArray(t *testing.T) {
 		t.Fatalf("Findings = %d, want 3", len(doc.Findings))
 	}
 	f := doc.Findings[2] // the multi-source Django finding goldenFixture appends
-	if len(f.Ratings) != 2 {
-		t.Fatalf("Ratings = %d entries, want 2 — JSON must not collapse to the winner", len(f.Ratings))
+	if len(f.Ratings) != 3 {
+		t.Fatalf("Ratings = %d entries, want 3 — JSON must not collapse to the winner", len(f.Ratings))
 	}
 	ghsa := f.Ratings[0]
 	if ghsa.Database != "GHSA" || ghsa.AdvisoryID != "GHSA-w24h-v9qh-8gxj" ||
-		ghsa.Severity != "critical" || ghsa.Score != 9.8 || ghsa.Fixed != "2.2.28" {
-		t.Errorf("Ratings[0] = %+v, want the GHSA rating in full", ghsa)
+		ghsa.Severity != "critical" || ghsa.Score != 9.8 || ghsa.Fixed != "2.2.28" || ghsa.URL != "" {
+		t.Errorf("Ratings[0] = %+v, want the GHSA rating in full (URL empty — an advisory names itself)", ghsa)
 	}
-	pysec := f.Ratings[1]
+	nvd := f.Ratings[1]
+	if nvd.Database != "NVD" || nvd.AdvisoryID != "CVE-2022-28347" ||
+		nvd.Severity != "critical" || nvd.Score != 9.8 || nvd.Fixed != "" ||
+		nvd.URL != "https://nvd.nist.gov/vuln/detail/CVE-2022-28347" {
+		t.Errorf("Ratings[1] = %+v, want the NVD annotation in full "+
+			"(empty Fixed, a URL — the one place a reader can check it)", nvd)
+	}
+	pysec := f.Ratings[2]
 	if pysec.Database != "PYSEC" || pysec.AdvisoryID != "PYSEC-2022-191" ||
-		pysec.Severity != "unknown" || pysec.Score != 0 || pysec.Fixed != "2.2.27" {
-		t.Errorf("Ratings[1] = %+v, want the PYSEC rating in full", pysec)
+		pysec.Severity != "unknown" || pysec.Score != 0 || pysec.Fixed != "2.2.27" || pysec.URL != "" {
+		t.Errorf("Ratings[2] = %+v, want the PYSEC rating in full", pysec)
 	}
 	// Each rating's fixed version comes from its OWN record. The finding's
 	// Evidence carries the winner's, so a renderer that read it from there

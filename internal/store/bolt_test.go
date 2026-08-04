@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -557,5 +558,329 @@ func TestSetMetaIgnoresACallerSuppliedEcosystems(t *testing.T) {
 	if !slices.Equal(m.Ecosystems, []string{"Go"}) {
 		t.Errorf("Meta.Ecosystems = %v, want [Go]: the caller's list must be "+
 			"ignored in favour of what the providers reported", m.Ecosystems)
+	}
+}
+
+// A rating round-trips, and is keyed on the CVE rather than on any advisory.
+func TestPutRating_RoundTrips(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := advisory.Rating{
+		CVE:    "CVE-2026-39822",
+		Source: "NVD",
+		Severity: []advisory.Severity{
+			{Type: "CVSS_V31", Score: "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H"},
+		},
+		URL: "https://nvd.nist.gov/vuln/detail/CVE-2026-39822",
+	}
+	if err := w.PutRating(want); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	got, err := db.RatingsFor("CVE-2026-39822")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d ratings, want 1", len(got))
+	}
+	// Asserted field by field, each with its own message: a single DeepEqual
+	// reports "not equal" and leaves the reader to diff two structs, and the
+	// fields here decide whether a band is derived at all.
+	if got[0].CVE != want.CVE {
+		t.Errorf("CVE = %q, want %q", got[0].CVE, want.CVE)
+	}
+	if got[0].Source != want.Source {
+		t.Errorf("Source = %q, want %q", got[0].Source, want.Source)
+	}
+	if len(got[0].Severity) != 1 || got[0].Severity[0].Score != want.Severity[0].Score {
+		t.Errorf("Severity = %+v, want the stored vector verbatim (D13)", got[0].Severity)
+	}
+	if got[0].URL != want.URL {
+		t.Errorf("URL = %q, want %q", got[0].URL, want.URL)
+	}
+}
+
+// A CVE nobody rated returns nothing and no error. "We have no rating" is a
+// normal answer, not a failure - the matcher asks this for every finding.
+func TestRatingsFor_UnknownCVEIsEmptyNotAnError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, _ := Create(path)
+	w.SetMeta(Meta{})
+	w.Close()
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	got, err := db.RatingsFor("CVE-0000-00000")
+	if err != nil {
+		t.Fatalf("RatingsFor returned %v; an unrated CVE is a normal answer", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %d ratings, want 0", len(got))
+	}
+}
+
+// Several authorities can rate one CVE. They come back sorted by Source, so
+// the report cannot vary between runs.
+func TestRatingsFor_SeveralSourcesComeBackSorted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, _ := Create(path)
+	// Written in an order that is NOT the sorted one, so the assertion below
+	// fails if the sort is dropped rather than passing by luck.
+	for _, s := range []string{"NVD", "KISA"} {
+		if err := w.PutRating(advisory.Rating{CVE: "CVE-2025-1", Source: s}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.SetMeta(Meta{})
+	w.Close()
+	db, _ := Open(path)
+	defer db.Close()
+	got, err := db.RatingsFor("CVE-2025-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, r := range got {
+		names = append(names, r.Source)
+	}
+	if fmt.Sprint(names) != fmt.Sprint([]string{"KISA", "NVD"}) {
+		t.Errorf("sources = %v, want [KISA NVD] - sorted, so two runs agree", names)
+	}
+}
+
+// One CVE ID is a byte prefix of another -- CVE-2025-1 of CVE-2025-10 -- so
+// a Seek over "<CVE>" without the separator, or a scan that forgets to stop
+// at the end of the prefix, hands back a NEIGHBOUR's rating. That is not a
+// cosmetic leak: the matcher feeds every rating to beats(), which takes the
+// highest band, so an unrelated CVE's critical becomes this finding's
+// severity and can push a scan over --fail-on. It is CLAUDE.md's substring
+// hazard moved into the key space.
+//
+// No other fixture in this package puts more than one CVE in a database, so
+// until this existed both guards in RatingsFor were unheld: dropping keySep
+// from the prefix, and dropping the bytes.HasPrefix bound from the loop
+// condition, each left the entire repository green.
+func TestRatingsFor_DoesNotBleedAcrossCVEsSharingAPrefix(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, _ := Create(path)
+	// CVE-2025-10 sorts immediately after CVE-2025-1 under a bare-prefix
+	// Seek, so it is what an unbounded scan reaches first.
+	for _, r := range []advisory.Rating{
+		{CVE: "CVE-2025-1", Source: "NVD", URL: "own"},
+		{CVE: "CVE-2025-10", Source: "NVD", URL: "neighbour"},
+		{CVE: "CVE-2025-100", Source: "KISA", URL: "neighbour"},
+	} {
+		if err := w.PutRating(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.SetMeta(Meta{})
+	w.Close()
+	db, _ := Open(path)
+	defer db.Close()
+
+	got, err := db.RatingsFor("CVE-2025-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Asserted on the URL, not the source: "NVD" appears on the neighbour
+	// too, so a count-plus-source check would pass on the wrong row.
+	if len(got) != 1 || got[0].URL != "own" {
+		t.Errorf("RatingsFor(CVE-2025-1) = %+v, want exactly the one rating whose URL is %q", got, "own")
+	}
+	// And the longer ID still finds its own, so the fix is a boundary rather
+	// than an over-strict match.
+	if got, err := db.RatingsFor("CVE-2025-10"); err != nil {
+		t.Fatal(err)
+	} else if len(got) != 1 || got[0].CVE != "CVE-2025-10" {
+		t.Errorf("RatingsFor(CVE-2025-10) = %+v, want its own single rating", got)
+	}
+}
+
+// Schema 6, and a database at any other version refuses rather than serving
+// records with no ratings bucket - which would read as "nobody rated any of
+// these" on a database that simply predates the field.
+func TestSchemaVersionIs6(t *testing.T) {
+	if SchemaVersion != 6 {
+		t.Errorf("SchemaVersion = %d, want 6", SchemaVersion)
+	}
+}
+
+// Re-putting the same (CVE, Source) replaces rather than duplicates.
+// Correctness here rests entirely on the key being identical across both
+// Puts -- bbolt overwrites whatever already sits at a key -- so this fails
+// if a per-call component (a counter, a timestamp) ever leaked into the key.
+func TestPutRating_RepputSameSourceReplaces(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := advisory.Rating{
+		CVE:    "CVE-2025-1",
+		Source: "NVD",
+		Severity: []advisory.Severity{
+			{Type: "CVSS_V31", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N"},
+		},
+	}
+	second := advisory.Rating{
+		CVE:    "CVE-2025-1",
+		Source: "NVD",
+		Severity: []advisory.Severity{
+			{Type: "CVSS_V31", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"},
+		},
+	}
+	if err := w.PutRating(first); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.PutRating(second); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	got, err := db.RatingsFor("CVE-2025-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d ratings, want 1 - a re-Put of the same source must "+
+			"replace, not add a second entry", len(got))
+	}
+	if len(got[0].Severity) != 1 || got[0].Severity[0].Score != second.Severity[0].Score {
+		t.Errorf("Severity = %+v, want the SECOND Put's vector (%q) - a repeat "+
+			"Put must win over the first", got[0].Severity, second.Severity[0].Score)
+	}
+}
+
+// TestMetaRatingCountsComesFromStoredRatings mirrors
+// TestMetaDatabasesComesFromStoredRecords exactly, one bucket over (D27):
+// RatingCounts is read from what PutRating actually stored, keyed on the
+// tail of "<CVE>\x00<Source>", not from any caller-supplied value — the same
+// "derive it, don't trust self-report" fix Databases already applies to
+// Advisory.Database.
+func TestMetaRatingCountsComesFromStoredRatings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// NVD rates two CVEs, KISA rates one - deliberately uneven counts, so a
+	// mutation that returns "1" for everyone (or the number of DISTINCT
+	// CVEs instead of ratings) cannot pass by coincidence.
+	for _, r := range []advisory.Rating{
+		{CVE: "CVE-2026-1", Source: "NVD"},
+		{CVE: "CVE-2026-2", Source: "NVD"},
+		{CVE: "CVE-2026-1", Source: "KISA"},
+	} {
+		if err := w.PutRating(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A caller-supplied RatingCounts must be ignored exactly like a
+	// caller-supplied Databases already is (TestMetaDatabasesComesFromStoredRecords).
+	if err := w.SetMeta(Meta{
+		BuiltAt:      time.Now(),
+		RatingCounts: map[string]int{"should-be-ignored": 999},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	m, err := db.Meta()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int{"NVD": 2, "KISA": 1}
+	if len(m.RatingCounts) != len(want) || m.RatingCounts["NVD"] != 2 || m.RatingCounts["KISA"] != 1 {
+		t.Errorf("Meta.RatingCounts = %v, want %v (derived from the ratings bucket, "+
+			"caller-supplied value ignored)", m.RatingCounts, want)
+	}
+	if _, ok := m.RatingCounts["should-be-ignored"]; ok {
+		t.Error("Meta.RatingCounts trusted the caller-supplied map instead of deriving it")
+	}
+}
+
+// TestMetaRatingCountsIgnoresSelfReportedProvenance is the exact defect a
+// review of this slice caught: an Annotator's own Provenance.Records is not
+// ground truth, so a caller that fills in Meta.Ratings with a self-reported
+// count wildly different from what was actually PutRating'd must not make
+// RatingCounts (or, downstream, db status's ratings: line) repeat that
+// claim. Records here is deliberately 0 for a source that DID rate
+// something, and a large positive number for a source that rated nothing at
+// all — the two ways self-report can lie in either direction.
+func TestMetaRatingCountsIgnoresSelfReportedProvenance(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// NVD actually rated one CVE, but will self-report Records: 0 below -
+	// the "ran and rated nothing" shape the review flagged.
+	if err := w.PutRating(advisory.Rating{CVE: "CVE-2026-9", Source: "NVD"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(Meta{
+		BuiltAt: time.Now(),
+		Ratings: map[string]Provenance{
+			"NVD":  {Records: 0},
+			"KISA": {Records: 5000}, // claims 5000 ratings; none were ever PutRating'd
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	m, err := db.Meta()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.RatingCounts["NVD"] != 1 {
+		t.Errorf(`RatingCounts["NVD"] = %d, want 1 - the self-reported Records:0 `+
+			"must not suppress what was actually stored", m.RatingCounts["NVD"])
+	}
+	if _, ok := m.RatingCounts["KISA"]; ok {
+		t.Errorf(`RatingCounts["KISA"] = %d present, want absent - KISA self-reported `+
+			"5000 but rated nothing; the self-report must not be trusted", m.RatingCounts["KISA"])
 	}
 }

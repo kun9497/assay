@@ -54,13 +54,21 @@ carries the full design and the reasoning behind each decision.
 vulnerability database, and matching the two. In the anchore ecosystem those are three
 separate projects — `syft`, `vunnel` + `grype-db`, and `grype`.
 
-Existing scanners are excellent and battle-tested; use them in production. Two things shape
-this one:
+**This is a personal project, built to learn how a vulnerability scanner works by building
+one end to end.** Existing scanners are excellent and battle-tested; use them in production.
 
-- **Korean advisory data.** KISA/KNVD publishes advisories and KVE identifiers covering
-  software that NVD and OSV pick up late or not at all. Mainstream scanners do not ingest it.
-- **Explainable matches.** Every finding carries the evidence that produced it — which
-  range, which comparer, which comparison result — not just a verdict.
+It started out aimed at Korean advisory data — KISA/KNVD as a first-class provider. The
+first investigation said that was not viable; it had measured the wrong board. KNVD's own
+disclosures are 173 records of Korean domestic software, but its **security notices are 2,422
+records** keyed on CVEs in Apache, OpenSSL and the like — and three of three sampled are
+advisories assay already carries, for packages that are in real containers. KISA cannot be an
+independent matching source, but attaching its Korean title and remediation to a CVE assay
+matched through OSV does work. That is the direction (D27's mechanism, a second source).
+
+What the code actually chases is narrower and, so far, has held up: **do not give a confident
+wrong answer.** Every finding carries the evidence that produced it — which range, which
+comparer, which comparison result. Everything the scan could not evaluate is counted and
+named. A scan never fetches vulnerability data.
 
 Design goals, in order:
 
@@ -207,15 +215,29 @@ left to be discovered:
 | unrated findings | fold into the ordering | `unknown`, outside it — `--fail-on-unknown` only |
 | partial coverage | no gate | `--fail-on-incomplete`, exit 2 |
 | explain | `grype explain` subcommand | `--explain <id>` flag on `scan` |
-| severity source | enriched from NVD via the CVE alias | the stored CVSS vector only (D13) |
+| severity source | NVD, always, via the CVE alias | stored CVSS vectors, plus NVD when enabled |
 
-The severity divergence is the one worth knowing about. Measured on this repository's own
-binary: assay and grype find **the same three findings** — same packages, same advisory IDs,
-same fixed versions — but grype rates two of them High and Medium where assay says `unknown`.
-Neither is wrong. All three advisories carry **zero** severity entries in the OSV data, so
-`unknown` is what D13 and D17 require; grype reaches NVD through each advisory's CVE alias
-and finds a score there. Enriching from NVD is a recorded deferral, not a plan — the mechanism for it landed with
-D25, the cost is CPE-to-purl matching, and `docs/deferred-decisions.md` names the trigger.
+The severity divergence used to be the one worth knowing about, and closing it is what slice
+⑦ was for. Measured on this repository's own binary: assay and grype find **the same three
+findings** — same packages, same advisory IDs, same fixed versions — but grype rated two of
+them High and Medium where assay said `unknown`. Neither was wrong. All three advisories
+carry **zero** severity entries in the OSV data, so `unknown` was what D13 and D17 required,
+while grype reached NVD through each advisory's CVE alias and found a score there.
+
+With `NVD_ENABLE=1` on the database build, assay now rates the same two — high (7.8) and
+medium (5.3) — and reports **both** opinions rather than replacing one with the other:
+
+```
+severity: high (7.8)   [highest of 2 sources]
+  GO     GO-2026-4970    unknown          fixed 1.26.5
+  NVD    CVE-2026-39822  high (7.8)       fixed -  https://nvd.nist.gov/vuln/detail/CVE-2026-39822
+```
+
+The remaining difference is what happens to the third finding, and it is deliberate. It
+carries no CVE, so nothing joins to it and it stays `unknown` — counted, reported, and gated
+only by `--fail-on-unknown` (D17). NVD never decides *whether* a package matches, only how
+bad the CVE is (D27); the advisory, the matched range and the fixed version always come from
+the record assay actually compared against.
 
 
 `--explain` matches on the advisory's own ID or any alias, so the CVE you were given
@@ -241,11 +263,11 @@ run `assay db update` rather than silently fetching or silently reporting nothin
 
 | OS | Location |
 |---|---|
-| Windows | `%LocalAppData%\assay\db\v5\` |
-| macOS | `~/Library/Caches/assay/db/v5/` |
-| Linux | `~/.cache/assay/db/v5/` |
+| Windows | `%LocalAppData%\assay\db\v6\` |
+| macOS | `~/Library/Caches/assay/db/v6/` |
+| Linux | `~/.cache/assay/db/v6/` |
 
-Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v5` component
+Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v6` component
 is the schema version — a schema change rebuilds into a new directory rather than migrating
 in place. Note that `ASSAY_DB_DIR` carries no such component, so a CI cache keyed on that
 path survives an upgrade that should have invalidated it. Rebuild after upgrading, or key
@@ -262,6 +284,13 @@ release-qualified ecosystem keys, so a single fetch covers every release from 3.
 `assay db status` reports, per provider, when the **upstream data** was current — not when
 you happened to download it. A mirror serving a three-month-old snapshot should not look
 fresh just because it was fetched this morning.
+
+`db update` also runs any configured rating source — NVD today (D27) — right after the
+advisory providers, writing its CVSS opinions into the same database rather than fetching
+anything at scan time (D14). `assay db status` lists which authorities have rated at least
+one CVE on a `ratings:` line, the same shape as `databases:`. Set `NVD_API_KEY` to raise
+NVD's request rate tenfold; it is optional and never required — `db update` still syncs NVD
+without one, just slower.
 
 ### Exit codes
 
@@ -408,22 +437,78 @@ exited 0 while 24 findings went unmentioned. **Done.**
 - [x] Explain mode — show the matching evidence for a single finding
 - [x] Per-source ratings — a finding keeps every database's assessment, the gate takes the
       highest (D25)
+- [x] NVD as a second rating source, joined on the CVE (D27)
 - [ ] SARIF output (see `docs/deferred-decisions.md`)
-- [ ] NVD as a second rating source (see `docs/deferred-decisions.md`)
 
-**⑤ KISA enrichment** — Korean descriptions and severity joined onto matched findings.
-**On hold: investigated 2026-08-02 and the data does not support it.**
+**⑦ NVD severity** — what NIST scores a CVE, attached to findings assay already matched
+through OSV. **Done.**
 
-KNVD publishes **173** vulnerability records in total, and every one of the ten most recent
-describes Korean domestic commercial software — ipTIME routers, 한컴오피스, 알집, a DVR, a
-groupware suite. None is a Go, npm, PyPI or Alpine package, so a CVE-ID join against a
-container image or a source tree would essentially never fire. The records themselves are
-well-formed — CVE ID, CVSS score and band, affected and fixed versions, a Korean description
-— so the obstacle is subject matter, not format. Access and licensing are also unfavourable:
-the two documented RSS feeds return only the latest 10 items, and the site is marked
-all-rights-reserved with no 공공누리 licence. Full findings in the roadmap.
+Measured 2026-08-03: of 8,029 advisories carrying no scorable vector, a 60-CVE sample found
+NVD scoring 93% and rating **48% high or critical**. The join is the CVE, never the CPE: NVD
+keys match data on `vendor:product`, which no purl derives, and a learned dictionary works for
+Alpine 85% but Go 11% — where Go is 4,125 of the 8,029. 1,008 unrated advisories carry no CVE
+at all and stay unknown under any design (D27).
 
-- [ ] KNVD provider and enrichment join — revisit if targets expand to hosts or workstations
+Verified against the live feed. Scanning assay's own binary, before and after:
+
+| | before | after |
+|---|---|---|
+| unknown severity | 3 of 3 | **1 of 3** |
+| `--fail-on high` | 0 | **1** |
+
+```
+stdlib                          high     GO-2026-4970 unknown + NVD CVE-2026-39822 high (7.8)
+stdlib                          medium   GO-2026-5856 unknown + NVD CVE-2026-42505 medium (5.3)
+github.com/klauspost/compress   unknown  GO-2026-5841 - no CVE, so no join reaches it
+```
+
+The third row is the 1,008 in miniature: no CVE, so nothing joins, and it stays `unknown`
+rather than being guessed at. NVD sets the band; the advisory, the matched range and the fixed
+version still come from the record assay compared against.
+
+- [x] NVD provider — bulk sync via the 2.0 API, no API key required
+- [x] Ratings joined on CVE, verdicts take the highest band (D25's mechanism)
+- [x] Opt-in (`NVD_ENABLE`) with a bounded window (`NVD_SINCE_DAYS`), and `db status` prints
+      what that window covered
+
+Opt-in because a full pass takes about seven hours — measured, not estimated: NVD generates
+each 2,000-record page in 114–136 seconds, and neither compression nor a smaller page changes
+the total. Leaving it on by default would also have made a routine NIST outage fatal to
+building any database at all.
+
+`NVD_SINCE_DAYS` bounds **one build**, and is not a daily delta: `db update` rebuilds from
+empty, so a bounded run's window is that database's entire NVD coverage. `db status` prints it
+in a `COVERED` column rather than letting a partial database look complete. Real deltas are
+the next slice's job.
+
+**⑧ A published database** — a builder runs the slow sync; everyone else downloads the
+result. **Next.** This was a deferred decision whose revisit trigger — "CI rebuild time
+becomes the bottleneck" — the measurement above fired. grype and trivy both work this way.
+
+- [ ] Build the database centrally, publish it as an OCI artifact
+- [ ] `assay db update` pulls the published artifact instead of rebuilding
+- [ ] Daily deltas layered on one full pass (today every build starts from empty)
+
+**⑤ KISA enrichment** — Korean title, description and remediation joined onto matched
+findings by CVE. **Viable, and next after ⑧.**
+
+The first investigation called this dead. It had measured the wrong board — KNVD's own
+disclosures (173 records, Korean domestic software) rather than its **security notices**,
+which are the ones telling Korean organisations to patch CVEs in software they run.
+
+Measured against a collected corpus of 2,039 notices carrying **17,003 distinct CVEs**:
+**413 of them (2.4%)** are advisories assay already holds — 279 reachable in Alpine, 56 in
+Go, 56 in npm, 37 in PyPI. KISA's corpus is dominated by desktop and enterprise software
+assay does not scan (MS, Adobe, Cisco); what overlaps is the server-side long tail — OpenSSL,
+Apache, Exim, Mozilla. Against ~4,405 Alpine advisories that is about one finding in sixteen
+gaining a Korean title and remediation.
+
+It is a real feature and a modest one. Two things are still open: the licensing (the site is
+all-rights-reserved with no 공공누리 mark, which matters for redistributing a built database,
+not for scanning with one), and parsing the affected/fixed tables out of HTML without taking
+a dependency. Full findings in the roadmap.
+
+- [ ] KNVD provider and CVE-keyed enrichment join
 
 Correctness is checked by **differential testing against grype** at every stage. Exact
 agreement is not expected — the data sources differ — but a large divergence means the

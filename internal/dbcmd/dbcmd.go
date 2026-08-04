@@ -22,10 +22,20 @@ import (
 	"github.com/kun9497/assay/internal/store"
 )
 
-// Update rebuilds the database from every provider. It builds into a temporary
-// file and renames over the live database, so a concurrent scan never observes
-// a partial write.
-func Update(ctx context.Context, dbPath string, providers []provider.Provider, stdout, stderr io.Writer) int {
+// Update rebuilds the database from every provider, then runs every
+// annotator (D27) — an authority that rates a CVE rather than naming an
+// affected package — writing its opinions through PutRating. It builds into a
+// temporary file and renames over the live database, so a concurrent scan
+// never observes a partial write.
+//
+// Annotators run after the advisory providers, matching the order the brief
+// describes, but nothing about the result depends on it: ratings are keyed on
+// CVE in their own bucket, entirely independent of which advisories Put has
+// already written, so swapping the two loops produces an identical database
+// (verified: internal/dbcmd's own mutation check swaps them and the suite
+// stays green). The order is kept as the stated, documented contract anyway,
+// since a future annotator is not guaranteed to share that independence.
+func Update(ctx context.Context, dbPath string, providers []provider.Provider, annotators []provider.Annotator, stdout, stderr io.Writer) int {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		fmt.Fprintf(stderr, "error: create database directory: %v\n", err)
 		return 2
@@ -42,7 +52,11 @@ func Update(ctx context.Context, dbPath string, providers []provider.Provider, s
 		return 2
 	}
 
-	meta := store.Meta{BuiltAt: time.Now().UTC(), Providers: map[string]store.Provenance{}}
+	meta := store.Meta{
+		BuiltAt:   time.Now().UTC(),
+		Providers: map[string]store.Provenance{},
+		Ratings:   map[string]store.Provenance{},
+	}
 	for _, p := range providers {
 		fmt.Fprintf(stderr, "fetching %s…\n", p.Name())
 		prov, err := p.Fetch(ctx, func(a advisory.Advisory) error { return w.Put(a) })
@@ -53,6 +67,23 @@ func Update(ctx context.Context, dbPath string, providers []provider.Provider, s
 			return 2
 		}
 		meta.Providers[p.Name()] = prov
+	}
+	// Annotators run after the advisory providers (see Update's own doc
+	// comment on why the order is kept even though nothing here depends on
+	// it). A failing annotator fails the whole build exactly like a failing
+	// provider does: a database holding advisories but missing the ratings a
+	// configured annotator was supposed to add would look complete and
+	// quietly under-report every band it would otherwise have raised.
+	for _, a := range annotators {
+		fmt.Fprintf(stderr, "annotating with %s…\n", a.Name())
+		prov, err := a.Annotate(ctx, func(r advisory.Rating) error { return w.PutRating(r) })
+		if err != nil {
+			w.Close()
+			os.Remove(tmp)
+			fmt.Fprintf(stderr, "error: annotator %s: %v\n", a.Name(), err)
+			return 2
+		}
+		meta.Ratings[a.Name()] = prov
 	}
 	if err := w.SetMeta(meta); err != nil {
 		w.Close()
@@ -83,6 +114,13 @@ func Update(ctx context.Context, dbPath string, providers []provider.Provider, s
 		total += p.Records
 	}
 	fmt.Fprintf(stdout, "database updated: %d advisories at %s\n", total, dbPath)
+	// No second "N ratings from N source(s)" line here: the only trustworthy
+	// rating count is the one Bolt.SetMeta just derived from the stored
+	// bucket (Meta.RatingCounts), and Writer does not expose a way to read
+	// it back after SetMeta returns. Printing a self-reported total here
+	// would be exactly the over-claim `db status` was just fixed to refuse
+	// (see Meta.Ratings' own doc comment) — `assay db status` is where the
+	// derived, accurate count belongs, and it already shows it.
 	return 0
 }
 
@@ -150,6 +188,15 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 	// this is also what a reader would grep for. The path line above was
 	// renamed to "path:" so the two no longer read as a pair.
 	fmt.Fprintf(stdout, "databases: %s\n", databasesSummary(m.Databases))
+	// Which authorities have ACTUALLY rated at least one CVE (D27), with how
+	// many — the same "visible without running a scan" reasoning as
+	// databases: above, and the same line shape and padding, but read from
+	// Meta.RatingCounts (derived from the stored ratings bucket), never from
+	// Meta.Ratings' self-reported Provenance: an annotator that ran and
+	// rated nothing must not make this line claim a source that rated
+	// something (see RatingCounts' own doc comment in
+	// internal/store/store.go).
+	fmt.Fprintf(stdout, "ratings:   %s\n", ratingsSummary(m.RatingCounts))
 	fmt.Fprintln(stdout)
 
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
@@ -171,6 +218,87 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 	if err := tw.Flush(); err != nil {
 		fmt.Fprintf(stderr, "error: write status: %v\n", err)
 		return 2
+	}
+
+	// A second, separately-headed table for rating sources (D27, D12): "how
+	// fresh is the NVD data in this database" is not answerable from the
+	// ratings: line alone (it names sources and counts, not dates), and
+	// folding annotators into the PROVIDER table above would answer a
+	// different question under one header — that table already means
+	// "advisory providers", and Provider/Ecosystems (D20) is genuinely a
+	// different claim than an annotator's CVE opinions ever make.
+	//
+	// Driven from the UNION of the derived set (Meta.RatingCounts, ground
+	// truth for "did this authority rate anything") and the self-reported
+	// set (Meta.Ratings, the only source for DATA AS OF and SOURCE, D12) —
+	// not from Meta.Ratings alone. Under normal operation every derived name
+	// is also a self-reported one (only an annotator dbcmd.Update recorded
+	// in Ratings ever gets to call PutRating at all), so the union costs
+	// nothing today; it is here so a future divergence fails toward showing
+	// an extra row rather than toward silently dropping one.
+	//
+	// A name present in Ratings but absent from RatingCounts is an
+	// annotator that ran and rated NOTHING — a state D20/D26 already treat
+	// as one that must stay visible rather than being silently dropped
+	// (hiding it would trade an over-claim for a silence), but it must not
+	// read as "this source rated something" either: that was the exact
+	// defect a review caught, one column over from the ratings: line fixed
+	// earlier. So its RECORDS cell is words, not a bare 0 — a 0 rendered
+	// here can ONLY mean this (RatingCounts never stores an explicit zero:
+	// counts[source]++ only ever runs for a key that exists, so a present
+	// entry is always >= 1) — spelling out plainly that the sync ran and
+	// produced nothing, which is the thing worth investigating. A name
+	// absent from BOTH sets never appears as a row at all: that is how "this
+	// authority never ran against this database" reads, as opposed to a row
+	// that says it ran and got nothing.
+	ratingNameSet := make(map[string]struct{}, len(m.Ratings)+len(m.RatingCounts))
+	for name := range m.Ratings {
+		ratingNameSet[name] = struct{}{}
+	}
+	for name := range m.RatingCounts {
+		ratingNameSet[name] = struct{}{}
+	}
+	if len(ratingNameSet) > 0 {
+		fmt.Fprintln(stdout)
+		rtw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+		// COVERED is the annotator's analogue of the PROVIDER table's
+		// ecosystem list: what this source was actually asked for. A bounded
+		// NVD sync (D27's NVD_SINCE_DAYS) rebuilds from empty like every
+		// other run, so its window is the whole of that source's coverage
+		// rather than a delta on top of a fuller pass — and a database
+		// holding one day of NVD is otherwise indistinguishable here from
+		// one holding all of it, differing only in a RECORDS number nobody
+		// has a baseline for (D20).
+		fmt.Fprintln(rtw, "RATING SOURCE\tDATA AS OF\tRECORDS\tCOVERED\tSOURCE")
+		ratingNames := make([]string, 0, len(ratingNameSet))
+		for name := range ratingNameSet {
+			ratingNames = append(ratingNames, name)
+		}
+		sort.Strings(ratingNames)
+		for _, name := range ratingNames {
+			p := m.Ratings[name] // self-report; zero value if this name is derived-only
+			asOf := "unknown"
+			if !p.DataAsOf.IsZero() {
+				asOf = p.DataAsOf.Format("2006-01-02")
+			}
+			records := "ran, rated nothing - investigate the sync"
+			if n, ok := m.RatingCounts[name]; ok {
+				records = fmt.Sprintf("%d", n)
+			}
+			// "unknown" rather than an empty cell for a database built
+			// before Window existed, or by a derived-only name with no
+			// self-report: a blank column reads as "no limit", which is the
+			// one thing it must not be mistaken for.
+			covered := p.Window
+			if covered == "" {
+				covered = "unknown"
+			}
+			fmt.Fprintf(rtw, "%s\t%s\t%s\t%s\t%s\n", name, asOf, records, covered, p.Source)
+		}
+		if err := rtw.Flush(); err != nil {
+			fmt.Fprintf(stderr, "error: write status: %v\n", err)
+			return 2
+		}
 	}
 	return 0
 }
@@ -221,6 +349,35 @@ func databasesSummary(dbs []string) string {
 		return "nothing - ratings will not be attributable to a source"
 	}
 	return strings.Join(dbs, ", ")
+}
+
+// ratingsSummary lists which authorities have ACTUALLY rated at least one
+// CVE (D27), each with how many — same line shape and message convention as
+// databasesSummary, a different set, and with a count per name since "how
+// many" is exactly the freshness/completeness question D12 asks and nowhere
+// else in db status answers for ratings.
+//
+// Takes counts, not Meta.Ratings' self-reported Provenance: unlike
+// Databases, which comes to this function pre-sorted from Bolt.SetMeta,
+// Meta.RatingCounts is a derived map with no ordering guarantee of its own,
+// so this function sorts it itself. Trusting self-report here is exactly
+// the defect this function exists to not repeat — see RatingCounts' own doc
+// comment in internal/store/store.go for why counts must be derived rather
+// than reported.
+func ratingsSummary(counts map[string]int) string {
+	if len(counts) == 0 {
+		return "nothing - no CVE in this database has been rated by any authority"
+	}
+	names := make([]string, 0, len(counts))
+	for name := range counts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, fmt.Sprintf("%s (%d)", name, counts[name]))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // compareRelease orders "v3.9" below "v3.10". Anything it cannot parse sorts
