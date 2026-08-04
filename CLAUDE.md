@@ -322,7 +322,15 @@ true, all of which happened while building D27:
 
 ## Conventions
 
-- No third-party dependencies yet (`go.mod` has no `require` block). Adding one is a real
-  decision — prefer the stdlib, and check the cgo constraint above.
+- **Two direct dependencies, deliberately**: `go.etcd.io/bbolt` (the store, D4) and
+  `github.com/google/go-containerregistry` (registry, tarball and OCI-layout image reading).
+  Everything else in `go.mod` is indirect. Adding a third is a real decision — prefer the
+  stdlib, and check the cgo constraint above.
+
+  This line said "no third-party dependencies, `go.mod` has no `require` block" until
+  2026-08-04, long after both landed. It is worth knowing what is already there before
+  reaching for the stdlib version of it: go-containerregistry already carries registry
+  auth, manifest handling and blob transfer, which is why publishing the database as an
+  OCI artifact costs no new dependency.
 - Comments explain *why* a choice was made (see the exit-code and TODO comments in
   `main.go`); match that register rather than narrating what the code does.
