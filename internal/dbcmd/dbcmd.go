@@ -197,7 +197,7 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []p
 		// database is untouched either way — a rename never half-applies.
 		fmt.Fprintf(stderr, "error: replace database: %v\n", err)
 		fmt.Fprintf(stderr, "the new database is complete and left at %s\n", tmp)
-		fmt.Fprintln(stderr, "close any running scan and move it into place, or re-run `assay db update`")
+		fmt.Fprintln(stderr, "close any running scan and move it into place, or re-run `assay db build`")
 		return 2
 	}
 

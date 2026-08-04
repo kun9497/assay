@@ -1,8 +1,9 @@
 // Package store holds the local advisory database.
 //
-// The database is orthogonal to a scan (D14): providers write it through
-// `assay db update` and a scan only ever reads. That is what makes offline
-// operation the default rather than a flag.
+// The database is orthogonal to a scan (D14): `assay db build` populates it
+// from upstream sources, `assay db update` downloads one someone else built
+// (D28), and a scan only ever reads. That is what makes offline operation the
+// default rather than a flag.
 package store
 
 import (
