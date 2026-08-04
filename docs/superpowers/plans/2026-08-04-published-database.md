@@ -1176,6 +1176,12 @@ This is what makes a *daily* build possible. The full seven-hour pass runs once,
 - Consumes: `Pull` (Task 4) to fetch a seed by reference; `store.Create`, `store.Open`.
 - Produces: `func Update(ctx context.Context, dbPath, seedPath string, providers []provider.Provider, annotators []provider.Annotator, stdout, stderr io.Writer) int` — `seedPath` empty means today's behaviour, building from empty.
 
+**API facts you need, verified against the code — the plan text below was written from memory and got these wrong:**
+
+- `store.Create(path)` and `store.Open(path)` both return `(*store.Bolt, error)`. `store.Writer` is an *interface* (`Put`, `PutRating`, `SetMeta`, `Close`), not a struct — `var w *store.Writer` does not compile.
+- There is **no** fetch-by-ID method on the store. Advisories are read with `Lookup(ecosystem, name)`, which is what the matcher itself calls. `Bolt`'s full method set is `Close`, `Covers`, `Put`, `PutRating`, `SetMeta`, `Lookup`, `RatingsFor`, `Meta`, `RecordCount`.
+- `EachRating` (Step 3) is new; add it to `Bolt`, to the `Store` interface, and to every fake implementing `Store` — the matcher's in-memory fake will stop compiling otherwise.
+
 **Design notes:** the build proceeds exactly as it does today — `store.Create(tmp)`, providers write advisories into an empty store — and the seed's **ratings are copied in before the annotators run**, so a delta overwrites the entries it re-fetches and leaves the rest. Copying ratings rather than opening the seed file for writing is what keeps advisories authoritative: the temp database starts empty, so a withdrawn advisory that is no longer in the archive is simply absent, which is the correct answer.
 
 Reading the seed's ratings needs an iterator the store does not have yet: `func (b *Bolt) EachRating(fn func(advisory.Rating) error) error`, walking `bucketRatings` in key order. Key order is deterministic in bbolt, so this adds no nondeterminism.
@@ -1249,15 +1255,20 @@ func TestUpdate_SeedCarriesRatingsButNotAdvisories(t *testing.T) {
 	if rs, err := db.RatingsFor("CVE-2026-NEW"); err != nil || len(rs) != 1 {
 		t.Errorf("RatingsFor(CVE-2026-NEW) = %v, %v; this run's rating is missing", rs, err)
 	}
-	// ...and this run's advisory is there.
-	if _, err := db.Get("GHSA-new"); err != nil {
-		t.Errorf("this run's advisory is missing: %v", err)
+	// ...and this run's advisory is there. Reached through Lookup, which is
+	// how advisories are read -- there is no fetch-by-ID on the store, and
+	// Lookup is what the matcher itself calls, so this asserts on the path
+	// that actually decides findings.
+	if got, err := db.Lookup("Go", "new"); err != nil || len(got) != 1 {
+		t.Errorf("Lookup(Go, new) = %v, %v; this run's advisory is missing", got, err)
 	}
 	// But the seed's advisory is GONE, because no provider re-emitted it.
 	// If this assertion ever fails, every withdrawn advisory in every seed
 	// becomes a permanent false positive.
-	if _, err := db.Get("GHSA-withdrawn-upstream"); err == nil {
-		t.Error("a seeded advisory survived a rebuild: an advisory upstream withdraws can now never be removed")
+	if got, err := db.Lookup("Go", "old"); err != nil {
+		t.Fatal(err)
+	} else if len(got) != 0 {
+		t.Errorf("Lookup(Go, old) = %v, want none: a seeded advisory survived a rebuild, so an advisory upstream withdraws can now never be removed", got)
 	}
 }
 
