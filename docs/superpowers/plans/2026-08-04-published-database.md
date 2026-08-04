@@ -867,6 +867,8 @@ would make every re-push of an old database look current (D12)."
 - **Temp file then rename**, exactly as `Update` does: a failed pull must never leave a half-written database where a scan will find it.
 - **Never auto-pull from a scan** (D14). This runs only from `db update`.
 
+**A Go-syntax correction to the test code below.** `must(t, url.Parse(srv.URL))` does not compile: Go forbids mixing an ordinary argument with a spread multi-value call. Capture the pair into locals first and pass both explicitly — `u, err := url.Parse(srv.URL)` then `must(t, u, err)`. Task 3 hit this and settled on that form; `internal/dbcmd/push_test.go` already has the `must` helper and the working call shape. Reuse the existing helper rather than redefining it.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `internal/dbcmd/pull_test.go`:
@@ -912,7 +914,8 @@ func published(t *testing.T, schema int) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := remote.Write(must(t, name.ParseReference(ref)), img); err != nil {
+	parsedRef, refErr := name.ParseReference(ref)
+	if err := remote.Write(must(t, parsedRef, refErr), img); err != nil {
 		t.Fatal(err)
 	}
 	return ref
