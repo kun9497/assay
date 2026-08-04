@@ -606,7 +606,8 @@ func pushable(t *testing.T, dataAsOf time.Time) string {
 func TestPush_WritesAPullableArtifact(t *testing.T) {
 	srv := httptest.NewServer(registry.New())
 	defer srv.Close()
-	host := must(t, url.Parse(srv.URL)).Host
+	u, err := url.Parse(srv.URL)
+	host := must(t, u, err).Host
 	ref := host + "/assay-db:v6"
 
 	asOf := time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)
@@ -617,7 +618,8 @@ func TestPush_WritesAPullableArtifact(t *testing.T) {
 		t.Fatalf("Push = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
-	img, err := remote.Image(must(t, name.ParseReference(ref)))
+	parsedRef, refErr := name.ParseReference(ref)
+	img, err := remote.Image(must(t, parsedRef, refErr))
 	if err != nil {
 		t.Fatalf("pushed artifact is not pullable: %v", err)
 	}
@@ -658,13 +660,15 @@ func TestPush_DataAsOfIsTheOldestProvider(t *testing.T) {
 
 	srv := httptest.NewServer(registry.New())
 	defer srv.Close()
-	ref := must(t, url.Parse(srv.URL)).Host + "/assay-db:v6"
+	u, uerr := url.Parse(srv.URL)
+	ref := must(t, u, uerr).Host + "/assay-db:v6"
 
 	var out, errOut bytes.Buffer
 	if code := Push(context.Background(), path, ref, &out, &errOut); code != 0 {
 		t.Fatalf("Push = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
-	img, err := remote.Image(must(t, name.ParseReference(ref)))
+	parsedRef, refErr := name.ParseReference(ref)
+	img, err := remote.Image(must(t, parsedRef, refErr))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -679,7 +683,8 @@ func TestPush_DataAsOfIsTheOldestProvider(t *testing.T) {
 func TestPush_MissingDatabaseExitsTwo(t *testing.T) {
 	srv := httptest.NewServer(registry.New())
 	defer srv.Close()
-	ref := must(t, url.Parse(srv.URL)).Host + "/assay-db:v6"
+	u, uerr := url.Parse(srv.URL)
+	ref := must(t, u, uerr).Host + "/assay-db:v6"
 
 	var out, errOut bytes.Buffer
 	code := Push(context.Background(), filepath.Join(t.TempDir(), "absent.db"), ref, &out, &errOut)
@@ -902,7 +907,8 @@ func published(t *testing.T, schema int) string {
 	t.Helper()
 	srv := httptest.NewServer(registry.New())
 	t.Cleanup(srv.Close)
-	host := must(t, url.Parse(srv.URL)).Host
+	u, err := url.Parse(srv.URL)
+	host := must(t, u, err).Host
 	ref := host + "/assay-db:v" + itoa(schema)
 
 	src := pushable(t, time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC))
