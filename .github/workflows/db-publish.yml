@@ -1,0 +1,45 @@
+name: publish database
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Comfortably inside the 6h job cap, because this run never does a full
+    # NVD pass. It seeds from the published artifact and fetches three days
+    # of NVD changes on top -- minutes, not hours. The one full pass is a
+    # local bootstrap, run once by a human; see the README's "Bootstrapping
+    # the first artifact".
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - run: make build
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Resolve the artifact reference
+        id: ref
+        # Read from the binary rather than written literally: the tag is the
+        # schema version, and a hardcoded :v6 here would keep publishing to
+        # the old tag after a bump, silently serving everyone a database
+        # their assay refuses.
+        run: echo "ref=$(./bin/assay db ref)" >> "$GITHUB_OUTPUT"
+      - name: Build
+        env:
+          NVD_ENABLE: "1"
+          # Three days, not one: a run that fails leaves no gap, because the
+          # next day's window still covers what it missed. One day would
+          # make every skipped run a permanent hole in the ratings.
+          NVD_SINCE_DAYS: "3"
+        run: ./bin/assay db build --seed ${{ steps.ref.outputs.ref }}
+      - name: Publish
+        run: ./bin/assay db push ${{ steps.ref.outputs.ref }}

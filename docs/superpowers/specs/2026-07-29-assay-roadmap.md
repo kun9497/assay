@@ -805,6 +805,51 @@ prevent.
 reaches them under any design. That is not a gap to close later; it is the honest ceiling on
 this decision, and it showed up as one of the three findings in the binary scan above.
 
+### D28 — The database is built centrally and published as an OCI artifact
+
+One machine builds the database on a schedule and publishes it to `ghcr.io/kun9497/assay-db`;
+everyone else runs `assay db update`, which pulls it. `assay db build` still exists and still
+builds from the upstream providers — it is now the publisher's command, not the default
+end-user path. The artifact's tag is the schema version (`Ref` renders it as `:v6`), so a
+binary only ever asks for an artifact it can read: a schema bump produces a clean "not found"
+against the old tag rather than a database it would misinterpret, the same guarantee
+`store.DefaultPath` already gives the on-disk layout (D5). The artifact's `DataAsOf` is its
+**oldest** provider's, not its newest (`oldestDataAsOf` in `dbcmd.Push`) — the same "one stale
+component makes the whole thing stale" rule D12 already applies to a single database's own
+`Meta.Providers`, extended to what gets stamped on the thing that gets published. **A scan
+still never fetches** (D14) — `db update` and `db push` are the only two commands that touch
+the network on the database side, and a scan reads only what is already on disk.
+
+**Why this had to happen now, not later.** D27 measured a full NVD pass at about **seven
+hours** — NVD generates each 2,000-record page in 114–136 seconds regardless of page size or
+compression, so the cost is the API's response generation, not anything a client can tune
+away. GitHub Actions caps a job at **six hours**. A scheduled workflow cannot run the build
+this decision requires; it can only seed from the last published artifact and layer a bounded
+window on top (`NVD_SINCE_DAYS`), which is exactly what slice 8's seeding does and why it
+exists at all — publishing without it would ship a pipeline that can never populate the
+artifact it publishes. The one full seven-hour pass becomes a local, manual bootstrap: build
+once, push once, and every scheduled run after that seeds from what was pushed.
+
+**Why `ghcr.io`, and why it costs nothing new.** `go-containerregistry` is already a direct
+dependency — the registry `Source` (D-slice 2b) already does auth, manifest handling, and
+blob transfer to pull images. Publishing a database as an OCI artifact through the same
+library adds no new dependency and no new protocol; it reuses `remote.Write`/`remote.Image`
+and `authn.DefaultKeychain` for a second kind of content. This is also the shape grype and
+trivy already use — a builder builds, everyone else downloads — so it borrows a proven
+pattern rather than inventing a bespoke distribution format.
+
+**Why the seed carries ratings only, never advisories.** `dbcmd.Update`'s seeding step copies
+every `Rating` out of the seed database (`Store.EachRating`) before the provider loop runs,
+but every advisory is still rebuilt from the providers on every run, seeded or not. The
+alternative — copying advisories forward too — would mean an advisory upstream later marks
+`withdrawn` could never be removed from a seeded database, because nothing after the seed
+step ever re-examines it: D16 drops withdrawn advisories at ingestion specifically so no code
+path can forget the check, and a seed that skipped ingestion would be exactly that forgotten
+path. Ratings carry no such hazard — `PutRating` overwrites by key, so a stale seeded rating
+for a CVE this run's providers also rate is replaced outright, and one this run's providers
+did not touch (an annotator that did not run this cycle) still shows its last real value
+instead of `unknown`, which is what `db status`'s `COVERED` column is for (D20, D27).
+
 ## 3. Architecture
 
 ### Measured data volumes

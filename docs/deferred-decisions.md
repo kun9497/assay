@@ -176,46 +176,58 @@ tests name the intended semantics explicitly, so the change is small either way.
 
 ---
 
-### Publishing the database as an OCI artifact
+### ~~Publishing the database as an OCI artifact~~ — resolved in slice 8
 
-Users build the database locally with `assay db update`.
+`assay db update` pulls the published database from `ghcr.io/kun9497/assay-db`, tagged with
+the schema version — `assay db ref` prints exactly the tag a given binary reads. `assay db
+build` is the builder's command now: it still builds from the upstream providers, and a new
+`--seed <ref>` lets a scheduled run layer onto the previously published artifact instead of
+repeating the full pass. That is the only way the build fits inside GitHub Actions' six-hour
+job cap against the seven-hour NVD sync this entry's own revisit trigger measured. `assay db
+push <ref>` publishes. A scan still fetches nothing (D14). Full reasoning in D28.
 
-**Why deferred.** Prebuilt artifacts matter for distributing to other people and for CI
-runs where rebuilding is too slow — neither applies yet. This is also infrastructure work
-(scheduled build workflow, registry auth, version tagging) rather than scanner work, and
-would mean building a distribution pipeline before the scanner runs.
+The shape delivered is exactly what was scoped here: grype's and trivy's — a builder builds,
+everyone else downloads — over `ghcr.io`, at no new dependency cost, since
+`go-containerregistry` was already in the module graph for the registry `Source`.
 
-**Revisit when.** ~~There are users beyond the author, or CI rebuild time becomes the
-bottleneck.~~ **Fired 2026-08-03, on the second condition.**
+The first artifact is not produced by the schedule; it is a one-time, manual bootstrap
+(`NVD_ENABLE=1 assay db build` locally, then `assay db push`), because the daily workflow
+seeds from an artifact that must already exist. See the README's "Bootstrapping the first
+artifact".
 
-Measured while building D27: a full NVD sync is about seven hours, because NVD generates each
-2,000-record page in 114–136 seconds and neither compression nor a smaller page changes the
-total. Local building was affordable while OSV was the only source — a few minutes of archive
-download. It is not affordable now, and it is not a constant anyone can tune away.
+---
 
-That makes this the next slice rather than a someday. The shape is grype's and trivy's: a
-builder runs the seven hours once and layers daily deltas on top, publishes the built
-database, and `assay db update` pulls it. Note that layering is the part that does not exist
-yet: `Update` rebuilds from empty, so D27's `Since` bounds one build rather than extending the
-last one, and this slice is what makes a real delta possible. A scan still fetches nothing
-(D14), and registry distribution brings mirroring and air-gapped operation with it.
+### Signing and provenance for the published database artifact
 
-**Groundwork.** Provider source URLs are configuration rather than constants, so adding a
-pull path later does not disturb the interface.
+The artifact `assay db push` publishes, and `assay db update` / `assay db build --seed` pull,
+is not signed and carries no build provenance (SLSA or otherwise).
 
-*Borrowed from trivy, which distributes `trivy-db` via `ghcr.io`. Registry distribution
-gets mirroring, auth, and air-gapped operation for free.*
+**Why deferred.** A pull is already digest-verified by `go-containerregistry` — a corrupted or
+tampered blob is rejected before it reaches disk — but that only proves the bytes match what
+the manifest claims, not *who* built them. Left out of the publishing slice (D28) because it
+is its own decision: which signing scheme (cosign/Sigstore keyless is the obvious fit for
+`ghcr.io`), what verifies it (`Pull` would need to gain a verification step, not just a
+fetch), and what a failed verification should do — the same "exit 2, never silently proceed"
+question D14 and D16 already answer for other trust boundaries, not yet asked here.
+
+**Revisit when** the artifact is consumed by anyone beyond its own builder's CI. Today the
+same GitHub Actions identity builds and pushes, so there is no supply chain to attack yet;
+that changes the moment a third party's `db update` trusts this registry by default.
+
+**Groundwork.** `dbcmd.Push` and `dbcmd.Pull` already route every registry interaction
+through `go-containerregistry`'s `remote` package, so a `cosign.Verify`-shaped step is
+additive to `Pull` later, not a rewrite.
 
 ---
 
 ### Splitting KISA data into a separate artifact
 
-**Why deferred.** Depends entirely on the OCI artifact decision above — "separate
-artifact" presupposes artifacts. Enrichment data is a `CVE ID → description/severity`
-mapping, likely too small to be worth splitting.
+**Why deferred.** No longer blocked on artifacts existing — they do now (D28) — but on KISA
+enrichment itself, which is not yet built (slice ⑤). Enrichment data is a `CVE ID →
+description/severity` mapping, likely too small on its own to be worth a second artifact.
 
-**Revisit when.** Database artifacts exist, and KISA data grows enough that users who do
-not need it are paying a real cost.
+**Revisit when.** KISA enrichment ships, and its data grows enough that users who do not
+need it are paying a real cost.
 
 **Groundwork.** `Advisory.Source` makes partitioning by provider straightforward.
 
