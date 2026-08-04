@@ -965,11 +965,26 @@ func TestDBUpdateAnnotators_ConstructsNVDWithTheAPIKeyFromEnv(t *testing.T) {
 // working and then change meaning under them without ever erroring.
 func TestRun_DBBuildReplacesUpdate(t *testing.T) {
 	t.Run("build is a known subcommand", func(t *testing.T) {
+		// Pointed at a directory that cannot be created: `blocker` is a
+		// regular file, so MkdirAll on a path beneath it fails. Update
+		// creates the database directory BEFORE it touches a provider, so
+		// this returns immediately.
+		//
+		// That precaution is the whole reason this subtest is written this
+		// way. The first version just called `db build` and asserted on the
+		// error -- and with ASSAY_DB_DIR unset, store.DefaultPath resolves
+		// to the user's real cache, so the test performed an actual build:
+		// ~200 MB fetched from the live OSV endpoint, 183 seconds, and the
+		// developer's real database overwritten by `go test ./...`. A
+		// routing assertion must not be able to do that.
+		blocker := filepath.Join(t.TempDir(), "blocker")
+		if err := os.WriteFile(blocker, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("ASSAY_DB_DIR", filepath.Join(blocker, "sub"))
+
 		var stdout, stderr bytes.Buffer
-		// No network and no providers are reachable here, so this cannot
-		// succeed -- but "unknown db subcommand" is the one error it must
-		// not produce.
-		run([]string{"db", "build", "--nonexistent-flag"}, &stdout, &stderr)
+		run([]string{"db", "build"}, &stdout, &stderr)
 		if strings.Contains(stderr.String(), "unknown db subcommand") {
 			t.Errorf("db build is not routed:\n%s", stderr.String())
 		}
