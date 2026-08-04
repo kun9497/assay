@@ -3,7 +3,9 @@ package nvd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -72,6 +74,16 @@ type Options struct {
 	// exceed 120 days, which the caller has to respect - a longer span is
 	// rejected by the API, not silently truncated.
 	Since time.Time
+	// Progress is where retry notices go, or nil for io.Discard.
+	//
+	// It is an option rather than a parameter because provider.Annotator's
+	// signature is Annotate(ctx, emit) and must stay that way — every
+	// annotator shares it, and threading a writer through the interface to
+	// serve one implementation's diagnostics is the wrong trade. A sync that
+	// pauses 40 seconds with no output is indistinguishable from one that
+	// has hung, and this one already runs for hours, so the notice is worth
+	// an option field.
+	Progress io.Writer
 }
 
 type Provider struct {
@@ -81,6 +93,7 @@ type Provider struct {
 	pageSize int
 	pause    time.Duration
 	client   *http.Client
+	progress io.Writer
 }
 
 func New(opts Options) *Provider {
@@ -102,6 +115,10 @@ func New(opts Options) *Provider {
 	if opts.Pause != nil {
 		pause = *opts.Pause
 	}
+	progress := opts.Progress
+	if progress == nil {
+		progress = io.Discard
+	}
 	return &Provider{
 		apiKey:   opts.APIKey,
 		baseURL:  baseURL,
@@ -117,11 +134,79 @@ func New(opts Options) *Provider {
 		// first value here - failed a real sync on the first page. NVD
 		// generates these responses, so the variance is theirs and a margin
 		// of a few seconds is not a margin.
-		client: &http.Client{Timeout: 10 * time.Minute},
+		client:   &http.Client{Timeout: 10 * time.Minute},
+		progress: progress,
 	}
 }
 
 func (p *Provider) Name() string { return SourceName }
+
+// retryWaits paces retries of a single page. A multi-hour sync makes a
+// transient failure a near-certainty rather than an edge case: the first
+// real 120-day bootstrap died at startIndex 42000 after 42 minutes on one
+// 503, and lost every record it had fetched, because Update builds into a
+// temporary database and only installs it at the end.
+//
+// Values, not a fixed count, for the same reason replaceWaits is a slice in
+// internal/dbcmd: the schedule IS the policy, and a test that shrinks it
+// should not also change how many attempts happen. Roughly a minute total,
+// which is long enough for NVD to come back from a blip and short enough
+// that a genuine outage still fails the build rather than hanging it.
+// defaultRetryWaits holds the shipped schedule separately from retryWaits so
+// a test can assert the real values are non-zero even though TestMain zeroes
+// the working copy. Without that split, zeroing the production schedule --
+// turning every retry into a hot loop against NVD -- would pass the suite.
+var defaultRetryWaits = []time.Duration{2 * time.Second, 5 * time.Second, 15 * time.Second, 40 * time.Second}
+
+var retryWaits = defaultRetryWaits
+
+// transientStatus reports whether an HTTP status is worth retrying. 5xx is
+// NVD having a bad moment; 429 is us being told to slow down. A 4xx other
+// than 429 is a request this code got wrong -- retrying it just makes the
+// same mistake more slowly, and 404 in particular was a real bug (a window
+// wider than maxWindow) that a retry loop would have hidden behind four
+// minutes of silence.
+func transientStatus(code int) bool {
+	return code >= 500 || code == http.StatusTooManyRequests
+}
+
+// httpStatusError carries the status code so fetchPageRetrying can decide
+// whether to retry without parsing an error string.
+type httpStatusError struct {
+	code int
+	msg  string
+}
+
+func (e *httpStatusError) Error() string { return e.msg }
+
+// fetchPageRetrying retries one page through transient failures, reporting
+// each attempt on stderr. Silence here would be worse than the failure: a
+// sync that stalls for a minute with no output is indistinguishable from one
+// that has hung, and this one already takes hours.
+func (p *Provider) fetchPageRetrying(ctx context.Context, startIndex int, since, until time.Time) (apiResponse, time.Time, error) {
+	for attempt := 0; ; attempt++ {
+		page, asOf, err := p.fetchPage(ctx, startIndex, since, until)
+		if err == nil {
+			return page, asOf, nil
+		}
+		var se *httpStatusError
+		if !errors.As(err, &se) || !transientStatus(se.code) || attempt >= len(retryWaits) {
+			return apiResponse{}, time.Time{}, err
+		}
+		wait := retryWaits[attempt]
+		fmt.Fprintf(p.progress, nlFmt("nvd: page at startIndex %d failed (%s); retrying in %s (attempt %d of %d)"),
+			startIndex, se.msg, wait, attempt+1, len(retryWaits))
+		if err := sleep(ctx, wait); err != nil {
+			return apiResponse{}, time.Time{}, err
+		}
+	}
+}
+
+// nlFmt appends a newline to a format string. Assembled rather than typed,
+// because a literal escape inside a tool argument or a generating script has
+// silently become the byte it denotes three times on this repository -- see
+// CLAUDE.md. One helper is cheaper than remembering that at every call site.
+func nlFmt(s string) string { return s + string(rune(10)) }
 
 // maxWindow is NVD's hard limit on any lastModStartDate/lastModEndDate
 // range: 120 consecutive days, measured at request time. Exceeding it by
@@ -212,7 +297,7 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 		}
 		first = false
 
-		page, pageAsOf, err := p.fetchPage(ctx, startIndex, since, until)
+		page, pageAsOf, err := p.fetchPageRetrying(ctx, startIndex, since, until)
 		if err != nil {
 			return store.Provenance{}, err
 		}
@@ -312,7 +397,10 @@ func (p *Provider) fetchPage(ctx context.Context, startIndex int, since, until t
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return apiResponse{}, time.Time{}, fmt.Errorf("GET %s: %s", u, resp.Status)
+		return apiResponse{}, time.Time{}, &httpStatusError{
+			code: resp.StatusCode,
+			msg:  fmt.Sprintf("GET %s: %s", u, resp.Status),
+		}
 	}
 
 	var body apiResponse

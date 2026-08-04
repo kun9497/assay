@@ -1,11 +1,13 @@
 package nvd
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -453,6 +455,129 @@ func TestAnnotate_SkipsARecordWithMetricsButNoID(t *testing.T) {
 	// shows would otherwise disagree with what is actually in the bucket.
 	if prov.Records != 1 {
 		t.Errorf("Records = %d, want 1 - the skipped record must not be counted", prov.Records)
+	}
+}
+
+// TestMain zeroes the retry schedule for the whole package.
+//
+// Adding retries made two pre-existing failure tests wait out the real
+// schedule -- 62 seconds each, taking this package from 0.4s to 124s with
+// nothing announcing it. That is the wall-clock-standing-in-for-an-assertion
+// hazard CLAUDE.md records, arriving as a side effect rather than as a test
+// anyone wrote.
+//
+// The slice keeps its LENGTH, so attempt counts are unchanged and every
+// existing assertion still means what it meant. Only the sleeping goes.
+// TestRetryWaits_ShippedScheduleActuallyWaits covers the real values, which
+// this necessarily hides.
+func TestMain(m *testing.M) {
+	retryWaits = make([]time.Duration, len(defaultRetryWaits))
+	os.Exit(m.Run())
+}
+
+// The shipped schedule really waits. TestMain zeroes the working copy for
+// speed, so without this, changing every production value to 0 -- turning
+// each retry into a hot loop against NVD, four requests with no pause --
+// would pass the entire suite.
+func TestRetryWaits_ShippedScheduleActuallyWaits(t *testing.T) {
+	if len(defaultRetryWaits) == 0 {
+		t.Fatal("no retry schedule at all")
+	}
+	for i, w := range defaultRetryWaits {
+		if w <= 0 {
+			t.Errorf("defaultRetryWaits[%d] = %v, want a real pause", i, w)
+		}
+	}
+}
+
+// A single transient failure must not destroy a multi-hour sync. The first
+// real 120-day bootstrap died at startIndex 42000 after 42 minutes on one
+// 503 and lost every record, because Update installs the database only at
+// the end -- there is no resume point to fall back to.
+func TestAnnotate_RetriesATransientFailure(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls <= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		io.WriteString(w, `{"totalResults":1,"vulnerabilities":[{"cve":{"id":"CVE-2026-9","metrics":{"cvssMetricV31":[{"cvssData":{"vectorString":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]}}}],"timestamp":"2026-08-04T00:00:00.000"}`)
+	}))
+	defer srv.Close()
+
+	restoreWaits := retryWaits
+	retryWaits = []time.Duration{0, 0, 0, 0}
+	defer func() { retryWaits = restoreWaits }()
+
+	var progress bytes.Buffer
+	var got []advisory.Rating
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0), Progress: &progress})
+	if _, err := p.Annotate(context.Background(), func(r advisory.Rating) error {
+		got = append(got, r)
+		return nil
+	}); err != nil {
+		t.Fatalf("Annotate failed despite the failures being transient: %v", err)
+	}
+	if len(got) != 1 {
+		t.Errorf("emitted %d rating(s), want 1 -- the retry did not recover the page", len(got))
+	}
+	if calls != 3 {
+		t.Errorf("made %d requests, want 3 (two failures then success)", calls)
+	}
+	// The wait is announced. A sync that pauses with no output is
+	// indistinguishable from one that has hung.
+	if !strings.Contains(progress.String(), "retrying in") {
+		t.Errorf("progress = %q, want it to announce the retry", progress.String())
+	}
+}
+
+// ...and a PERMANENT failure is not retried. Retrying a 404 would have
+// buried the window-too-wide bug behind four minutes of silent waiting
+// before reporting the same error anyway.
+func TestAnnotate_DoesNotRetryAPermanentFailure(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	restoreWaits := retryWaits
+	retryWaits = []time.Duration{0, 0, 0, 0}
+	defer func() { retryWaits = restoreWaits }()
+
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0)})
+	_, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil })
+	if err == nil {
+		t.Fatal("Annotate succeeded against a 404")
+	}
+	if calls != 1 {
+		t.Errorf("made %d requests, want 1 -- a 404 is this code getting the request wrong, not NVD having a bad moment", calls)
+	}
+}
+
+// Retries are bounded: a genuine outage fails the build rather than
+// hanging it.
+func TestAnnotate_GivesUpAfterTheRetryScheduleIsExhausted(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	restoreWaits := retryWaits
+	retryWaits = []time.Duration{0, 0, 0}
+	defer func() { retryWaits = restoreWaits }()
+
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0)})
+	if _, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil }); err == nil {
+		t.Fatal("Annotate succeeded against a permanently failing registry")
+	}
+	// One initial attempt plus one per scheduled wait.
+	if want := len(retryWaits) + 1; calls != want {
+		t.Errorf("made %d requests, want %d (the schedule is the policy)", calls, want)
 	}
 }
 
