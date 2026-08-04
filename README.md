@@ -118,11 +118,12 @@ skopeo copy docker://alpine:3.19 oci:layout && assay scan oci-dir:layout
 assay scan sbom.cdx.json
 ```
 
-`assay db update` and `assay db build` are the only two commands that touch the network on
-the database side — **a scan itself still makes no network call at all** beyond fetching the
-remote *target* you named, if any (D14). `assay db build` builds from the upstream providers
-directly; it is the builder's command now, not the everyday path — see
-[The database](#the-database) below for who needs it and why.
+`assay db update`, `assay db build` and `assay db push` are the only three commands that
+touch the network on the database side — **a scan itself still makes no network call at all**
+beyond fetching the remote *target* you named, if any (D14). `assay db build` builds from the
+upstream providers directly and `assay db push` publishes the result; both are the builder's
+commands now, not the everyday path — see [The database](#the-database) below for who needs
+which and why.
 
 ### What a target can be
 
@@ -321,7 +322,8 @@ found" against an old tag rather than a database it would misinterpret.
   `<name>@<digest>` on success.
 
 None of this changes what a scan does: **a scan still never fetches anything** (D14). `db
-update` and `db build` are the only two commands that touch the network on the database side.
+update`, `db build` and `db push` are the only three commands that touch the network on the
+database side.
 
 **Bootstrapping the first artifact.** The daily workflow seeds from an artifact that has to
 already exist, so the very first one is a one-time, manual step:
@@ -363,8 +365,9 @@ ecosystem means writing one `Cataloger` and one `Comparer` — nothing else chan
 | `Comparer` | `Compare(a, b string) (int, error)` within one ecosystem | **semver**, **PEP 440**, **apk**, deb, rpm |
 | `Provider` | Upstream feed → `[]Advisory` | **OSV**, KISA |
 
-The database is orthogonal to the scan. `Provider`s populate it through `assay db update`;
-a scan only ever reads, and never repairs a stale or missing one behind your back. That is
+The database is orthogonal to the scan. `Provider`s populate it through `assay db build`, and
+`assay db update` downloads the published result (D28); a scan only ever reads, and never
+repairs a stale or missing one behind your back. That is
 what makes offline operation the default rather than a flag — a scanner that quietly
 downloads advisories produces results you cannot reproduce or audit.
 

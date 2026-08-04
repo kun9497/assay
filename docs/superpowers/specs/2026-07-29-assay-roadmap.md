@@ -814,11 +814,16 @@ end-user path. The artifact's tag is the schema version (`Ref` renders it as `:v
 binary only ever asks for an artifact it can read: a schema bump produces a clean "not found"
 against the old tag rather than a database it would misinterpret, the same guarantee
 `store.DefaultPath` already gives the on-disk layout (D5). The artifact's `DataAsOf` is its
-**oldest** provider's, not its newest (`oldestDataAsOf` in `dbcmd.Push`) — the same "one stale
-component makes the whole thing stale" rule D12 already applies to a single database's own
-`Meta.Providers`, extended to what gets stamped on the thing that gets published. **A scan
-still never fetches** (D14) — `db update` and `db push` are the only two commands that touch
-the network on the database side, and a scan reads only what is already on disk.
+**oldest** component's, not its newest (`oldestDataAsOf` in `dbcmd.Push`, folding both
+`Meta.Providers` and `Meta.Ratings` into one minimum — a `--seed` build carries `Ratings`
+forward without touching `Providers`, so a database whose advisories were just rebuilt but
+whose ratings are three months old must publish the ratings' age, not the advisories') — the
+same "one stale component makes the whole thing stale" rule D12 already applies within a
+single database's own metadata, extended to what gets stamped on the thing that gets
+published. **A scan
+still never fetches** (D14) — `db update`, `db build` and `db push` are the only three
+commands that touch the network on the database side, and a scan reads only what is already
+on disk.
 
 **Why this had to happen now, not later.** D27 measured a full NVD pass at about **seven
 hours** — NVD generates each 2,000-record page in 114–136 seconds regardless of page size or
