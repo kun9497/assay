@@ -173,7 +173,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 					return code
 				}
 			}
-			return dbcmd.Update(context.Background(), path, seedPath,
+			// ref is what the disclosure names the seed as -- the original
+			// reference, not seedPath's scratch file above, which an
+			// archived CI log would not recognize.
+			return dbcmd.Update(context.Background(), path, seedPath, ref,
 				[]provider.Provider{osv.New(osv.Ecosystems, "")},
 				dbUpdateAnnotators(stderr),
 				stdout, stderr)

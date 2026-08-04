@@ -100,7 +100,7 @@ func TestUpdateThenStatus(t *testing.T) {
 	}}}
 
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), path, "", []provider.Provider{p}, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), path, "", "", []provider.Provider{p}, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
@@ -158,7 +158,7 @@ func TestUpdate_RunsAnnotatorsAndPersistsRatings(t *testing.T) {
 	}}
 
 	var out, errOut bytes.Buffer
-	code := Update(context.Background(), path, "", []provider.Provider{p}, []provider.Annotator{a}, &out, &errOut)
+	code := Update(context.Background(), path, "", "", []provider.Provider{p}, []provider.Annotator{a}, &out, &errOut)
 	if code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
@@ -207,7 +207,7 @@ func TestUpdate_AnnotatorFailureLeavesAnExistingDatabaseUntouched(t *testing.T) 
 		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
 	}}}
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), path, "", []provider.Provider{first}, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), path, "", "", []provider.Provider{first}, nil, &out, &errOut); code != 0 {
 		t.Fatalf("initial Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
@@ -222,7 +222,7 @@ func TestUpdate_AnnotatorFailureLeavesAnExistingDatabaseUntouched(t *testing.T) 
 	a := fakeAnnotator{name: "NVD", err: errBoom}
 	out.Reset()
 	errOut.Reset()
-	code := Update(context.Background(), path, "", []provider.Provider{second}, []provider.Annotator{a}, &out, &errOut)
+	code := Update(context.Background(), path, "", "", []provider.Provider{second}, []provider.Annotator{a}, &out, &errOut)
 	if code != 2 {
 		t.Fatalf("second Update = %d, want 2 (stderr: %s)", code, errOut.String())
 	}
@@ -261,10 +261,10 @@ func TestUpdateReplacesAtomically(t *testing.T) {
 		}}}
 	}
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), path, "", []provider.Provider{mk("first")}, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), path, "", "", []provider.Provider{mk("first")}, nil, &out, &errOut); code != 0 {
 		t.Fatalf("first Update = %d: %s", code, errOut.String())
 	}
-	if code := Update(context.Background(), path, "", []provider.Provider{mk("second")}, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), path, "", "", []provider.Provider{mk("second")}, nil, &out, &errOut); code != 0 {
 		t.Fatalf("second Update = %d: %s", code, errOut.String())
 	}
 
@@ -458,7 +458,7 @@ func TestStatus_ShowsRatingSources(t *testing.T) {
 	}}
 
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), path, "", []provider.Provider{p}, []provider.Annotator{a}, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), path, "", "", []provider.Provider{p}, []provider.Annotator{a}, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
@@ -528,7 +528,7 @@ func TestStatus_RatingSourceDisclosesTheWindowItCovered(t *testing.T) {
 			}
 
 			var out, errOut bytes.Buffer
-			if code := Update(context.Background(), path, "", []provider.Provider{p}, []provider.Annotator{a}, &out, &errOut); code != 0 {
+			if code := Update(context.Background(), path, "", "", []provider.Provider{p}, []provider.Annotator{a}, &out, &errOut); code != 0 {
 				t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 			}
 			out.Reset()
@@ -580,7 +580,7 @@ func TestStatus_AnAnnotatorThatRatesNothingIsNotClaimedAsASource(t *testing.T) {
 	a := fakeAnnotator{name: "NVD", ratings: nil}
 
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), path, "", []provider.Provider{p}, []provider.Annotator{a}, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), path, "", "", []provider.Provider{p}, []provider.Annotator{a}, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
@@ -636,7 +636,7 @@ func TestStatus_AnAuthorityThatNeverRanHasNoRow(t *testing.T) {
 	}}}
 
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), path, "", []provider.Provider{p}, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), path, "", "", []provider.Provider{p}, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
@@ -707,7 +707,7 @@ func TestUpdate_SeedCarriesRatingsButNotAdvisories(t *testing.T) {
 
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), dst, seed,
+	if code := Update(context.Background(), dst, seed, "",
 		[]provider.Provider{p}, []provider.Annotator{a}, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
@@ -745,7 +745,42 @@ func TestUpdate_SeedCarriesRatingsButNotAdvisories(t *testing.T) {
 
 // A seeded build must say so. One that printed what a full build prints
 // would be the same over-claim this project keeps re-learning (D20, D26).
+//
+// Two ratings, not one: asserting "seeded 1 rating" against a fixture with
+// exactly one seeded rating cannot tell "the counter" from "the literal 1"
+// -- replacing `seeded` in the Fprintf with a hardcoded 1 would still pass
+// (fix round 1, item 4). "seeded 2" can only come from the real count.
 func TestUpdate_SeededBuildDisclosesWhatItCarriedForward(t *testing.T) {
+	seed := filepath.Join(t.TempDir(), "seed.db")
+	w, _ := store.Create(seed)
+	w.PutRating(advisory.Rating{CVE: "CVE-2026-OLD-1", Source: "NVD"})
+	w.PutRating(advisory.Rating{CVE: "CVE-2026-OLD-2", Source: "NVD"})
+	w.SetMeta(store.Meta{})
+	w.Close()
+
+	dst := filepath.Join(t.TempDir(), "vulnerability.db")
+	var out, errOut bytes.Buffer
+	if code := Update(context.Background(), dst, seed, "", nil, nil, &out, &errOut); code != 0 {
+		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	s := errOut.String()
+	if !strings.Contains(s, "seeded 2 rating") {
+		t.Errorf("stderr does not say how many ratings were carried forward:\n%s", s)
+	}
+	if !strings.Contains(s, "advisories rebuilt") {
+		t.Errorf("stderr does not say advisories were rebuilt rather than inherited:\n%s", s)
+	}
+}
+
+// The disclosure must name what a human or an archived CI log actually
+// recognizes -- the original --seed reference the CLI resolved -- not
+// seedPath, which for `db build --seed <ref>` is a throwaway scratch file
+// Pull wrote the artifact to (fix round 1, item 3). Asserted as the exact
+// rendered phrase, and asserted ABSENT for the scratch path, so a mutation
+// that silently falls back to seedPath even when seedRef is given cannot
+// pass by accident (the seed variable's own temp path is unique enough
+// that a stray match would mean exactly that regression).
+func TestUpdate_SeededDisclosureNamesTheGivenReferenceNotTheScratchPath(t *testing.T) {
 	seed := filepath.Join(t.TempDir(), "seed.db")
 	w, _ := store.Create(seed)
 	w.PutRating(advisory.Rating{CVE: "CVE-2026-OLD", Source: "NVD"})
@@ -754,15 +789,16 @@ func TestUpdate_SeededBuildDisclosesWhatItCarriedForward(t *testing.T) {
 
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), dst, seed, nil, nil, &out, &errOut); code != 0 {
+	ref := "ghcr.io/kun9497/assay-db:v6"
+	if code := Update(context.Background(), dst, seed, ref, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	s := errOut.String()
-	if !strings.Contains(s, "seeded 1 rating") {
-		t.Errorf("stderr does not say how many ratings were carried forward:\n%s", s)
+	if !strings.Contains(s, "seeded 1 rating(s) from "+ref) {
+		t.Errorf("stderr does not name the original reference:\n%s", s)
 	}
-	if !strings.Contains(s, "advisories rebuilt") {
-		t.Errorf("stderr does not say advisories were rebuilt rather than inherited:\n%s", s)
+	if strings.Contains(s, seed) {
+		t.Errorf("stderr names the scratch seed path instead of (or alongside) the reference it was given:\n%s", s)
 	}
 }
 
@@ -778,7 +814,7 @@ func TestUpdate_AnUnreadableSeedFailsRatherThanBuildingFromEmpty(t *testing.T) {
 	a := fakeAnnotator{name: "NVD", ratings: []advisory.Rating{{CVE: "CVE-2026-NEW", Source: "NVD"}}}
 
 	var out, errOut bytes.Buffer
-	code := Update(context.Background(), dst, missing, nil, []provider.Annotator{a}, &out, &errOut)
+	code := Update(context.Background(), dst, missing, "", nil, []provider.Annotator{a}, &out, &errOut)
 	if code != 2 {
 		t.Errorf("Update with an unreadable seed = %d, want 2", code)
 	}
@@ -794,21 +830,36 @@ func TestUpdate_AnUnreadableSeedFailsRatherThanBuildingFromEmpty(t *testing.T) {
 // seed holds 30 days of NVD and this run refreshed one, db status has to
 // say so -- otherwise seeding trades a seven-hour build for a database that
 // silently over-claims, which is D20's failure in a new place.
+//
+// Three seeded ratings, not one, and the RECORDS count is asserted as an
+// exact FIELD, not `strings.Contains(row, "2")` (fix round 1, item 1): the
+// rendered row is "NVD  2026-08-03  5  modified 2026-08-03..2026-08-04
+// https://example.test/nvd", and "2026-08-03" alone contains "2" three
+// times over, so the old assertion could not fail -- deleting the seed's
+// EachRating->PutRating copy entirely (dropping the count from 5 to 2)
+// left it green. 5 also cannot appear as a substring of either date in the
+// row (its digits are 2,0,6,0,8,0,3,0,4), so even a stray Contains
+// elsewhere in this row could not accidentally vouch for it.
 func TestUpdate_SeededRunReportsTheWindowItActuallyFetched(t *testing.T) {
 	seed := filepath.Join(t.TempDir(), "seed.db")
 	w, _ := store.Create(seed)
-	w.PutRating(advisory.Rating{CVE: "CVE-2026-OLD", Source: "NVD"})
+	w.PutRating(advisory.Rating{CVE: "CVE-2026-OLD-1", Source: "NVD"})
+	w.PutRating(advisory.Rating{CVE: "CVE-2026-OLD-2", Source: "NVD"})
+	w.PutRating(advisory.Rating{CVE: "CVE-2026-OLD-3", Source: "NVD"})
 	w.SetMeta(store.Meta{
 		Ratings: map[string]store.Provenance{"NVD": {Window: "modified 2026-07-05..2026-08-03"}},
 	})
 	w.Close()
 
 	a := fakeAnnotator{name: "NVD", window: "modified 2026-08-03..2026-08-04",
-		ratings: []advisory.Rating{{CVE: "CVE-2026-NEW", Source: "NVD"}}}
+		ratings: []advisory.Rating{
+			{CVE: "CVE-2026-NEW-1", Source: "NVD"},
+			{CVE: "CVE-2026-NEW-2", Source: "NVD"},
+		}}
 
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), dst, seed, nil, []provider.Annotator{a}, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), dst, seed, "", nil, []provider.Annotator{a}, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	out.Reset()
@@ -819,9 +870,66 @@ func TestUpdate_SeededRunReportsTheWindowItActuallyFetched(t *testing.T) {
 	if !strings.Contains(row, "2026-08-03..2026-08-04") {
 		t.Errorf("RATING SOURCE row = %q, want THIS run's window, not the seed's", row)
 	}
-	// Both CVEs are present, so the count is the merged one -- the window
-	// narrowing must not be read as "the older ratings were dropped".
-	if !strings.Contains(row, "2") {
-		t.Errorf("RATING SOURCE row = %q, want the merged count of 2", row)
+	// All five CVEs (3 seeded + 2 this run) are present, so the count is the
+	// merged one -- the window narrowing must not be read as "the older
+	// ratings were dropped". Field index 2 is RECORDS regardless of how many
+	// words COVERED renders as ("RATING SOURCE\tDATA AS OF\tRECORDS\t..." --
+	// only the trailing columns can contain embedded spaces).
+	fields := strings.Fields(row)
+	if len(fields) < 3 || fields[2] != "5" {
+		t.Errorf("RATING SOURCE row = %q, want RECORDS field \"5\" (the merged count), got %v", row, fields)
+	}
+}
+
+// The seed's Meta.Ratings provenance must survive a run where the
+// annotator it describes does NOT execute at all -- the real nightly
+// scenario this stands in for is NVD_ENABLE unset (or an NVD outage) on
+// one scheduled build, so `dbUpdateAnnotators` returns nil and the
+// annotator loop in Update never touches meta.Ratings["NVD"].
+//
+// Without the maps.Copy this test exists to cover (fix round 1, item 2:
+// the Step 6 mutation only MOVED that line, it never covered deleting it
+// outright), the ratings themselves still survive in the bucket via
+// EachRating -- so RATING SOURCE still gets a row for NVD, self-reported
+// DATA AS OF, COVERED and SOURCE all silently render "unknown" instead of
+// the seed's real values, with no error anywhere. That is a worse defect
+// than a missing row: it looks like a source that ran today and reported
+// nothing about itself, not a source whose freshness was carried forward
+// from the seed.
+func TestUpdate_SeededMetaSurvivesWhenThisRunsAnnotatorDidNotRun(t *testing.T) {
+	seed := filepath.Join(t.TempDir(), "seed.db")
+	w, _ := store.Create(seed)
+	w.PutRating(advisory.Rating{CVE: "CVE-2026-OLD", Source: "NVD"})
+	seedAsOf := time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC)
+	w.SetMeta(store.Meta{
+		Ratings: map[string]store.Provenance{"NVD": {
+			Window:   "modified 2026-07-01..2026-08-01",
+			DataAsOf: seedAsOf,
+			Source:   "https://example.test/nvd-seed",
+		}},
+	})
+	w.Close()
+
+	dst := filepath.Join(t.TempDir(), "vulnerability.db")
+	var out, errOut bytes.Buffer
+	// No annotators at all this run -- NVD_ENABLE unset for the night.
+	if code := Update(context.Background(), dst, seed, "", nil, nil, &out, &errOut); code != 0 {
+		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	out.Reset()
+	if code := Status(dst, &out, &errOut); code != 0 {
+		t.Fatalf("Status = %d, want 0", code)
+	}
+	row := ratingSourceLine(t, out.String(), "NVD")
+	// asOf is distinct from both dates inside the seed's window string, so
+	// this cannot pass by matching the wrong column.
+	if !strings.Contains(row, "2026-08-02") {
+		t.Errorf("RATING SOURCE row = %q, want the seed's DATA AS OF (2026-08-02) carried forward, not unknown", row)
+	}
+	if !strings.Contains(row, "modified 2026-07-01..2026-08-01") {
+		t.Errorf("RATING SOURCE row = %q, want the seed's COVERED window carried forward, not unknown", row)
+	}
+	if !strings.Contains(row, "https://example.test/nvd-seed") {
+		t.Errorf("RATING SOURCE row = %q, want the seed's SOURCE carried forward, not unknown", row)
 	}
 }
