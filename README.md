@@ -329,11 +329,26 @@ database side.
 already exist, so the very first one is a one-time, manual step:
 
 ```bash
-NVD_ENABLE=1 assay db build          # the full ~seven hours, locally, no job cap
-assay db push ghcr.io/kun9497/assay-db:v6
+NVD_ENABLE=1 NVD_SINCE_DAYS=30 assay db build   # 27 minutes, measured
+assay db status                                 # check `ratings: NVD (…)` is not zero
+assay db push ghcr.io/kun9497/assay-db:v6       # ~6.8 MB compressed
 ```
 
 After that, the scheduled workflow keeps it current on its own.
+
+**Bound the first pass; do not reach for the full feed.** An unbounded build is about seven
+hours and there is no resume point — `db build` assembles a temporary database and installs it
+only at the end, so a failure at hour five discards all five hours. Four attempts at a wide
+window failed that way before a 30-day one succeeded in 27m26s with 23,433 ratings.
+
+`NVD_SINCE_DAYS=120` is not the compromise it looks like, either. NVD keeps touching records —
+rescoring, adding references — so 120 days of *modifications* covers most of the 372,628-record
+feed and costs nearly as much as no window at all.
+
+The narrower coverage is disclosed rather than assumed: `db status` prints the range in a
+`COVERED` column, so a 30-day database cannot pass for a complete one. Check `ratings:` before
+pushing — an artifact with zero ratings becomes the seed every later delta builds on, and the
+daily runs would never fill in what it is missing.
 
 ### Exit codes
 
