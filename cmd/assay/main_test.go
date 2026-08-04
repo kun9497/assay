@@ -958,3 +958,31 @@ func TestDBUpdateAnnotators_ConstructsNVDWithTheAPIKeyFromEnv(t *testing.T) {
 		t.Errorf("dbUpdateAnnotators() = %+v, want exactly one NVD annotator", annotators)
 	}
 }
+
+// `db build` is the source-building command. `db update` used to be, and is
+// about to mean "download the published database" instead. Between those two
+// states it must not quietly keep building: someone's cron job would go on
+// working and then change meaning under them without ever erroring.
+func TestRun_DBBuildReplacesUpdate(t *testing.T) {
+	t.Run("build is a known subcommand", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		// No network and no providers are reachable here, so this cannot
+		// succeed -- but "unknown db subcommand" is the one error it must
+		// not produce.
+		run([]string{"db", "build", "--nonexistent-flag"}, &stdout, &stderr)
+		if strings.Contains(stderr.String(), "unknown db subcommand") {
+			t.Errorf("db build is not routed:\n%s", stderr.String())
+		}
+	})
+
+	t.Run("update does not silently build", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"db", "update"}, &stdout, &stderr)
+		if code != exitError {
+			t.Errorf("db update = %d, want %d until Task 4 gives it a meaning", code, exitError)
+		}
+		if !strings.Contains(stderr.String(), "db build") {
+			t.Errorf("stderr does not point at the new name:\n%s", stderr.String())
+		}
+	})
+}

@@ -49,7 +49,7 @@ Commands:
                   sbom:, file:, or dir: to say which it is when that would
                   be ambiguous. A directory is read from its go.mod alone -
                   what the module requires, not what a build would link.
-  db update       Build or refresh the local vulnerability database
+  db build        Build the vulnerability database from its upstream sources
   db status       Show what is in the database and how current it is
   version         Print version information
   help            Show this help
@@ -63,7 +63,7 @@ Scan flags (any order, before or after the target):
   --explain <id>        Print one advisory's full Evidence (its own ID, or
                         any alias/upstream identifier) instead of the report
 
-Environment (db update only — a scan reads no environment and no network):
+Environment (db build only — a scan reads no environment and no network):
   NVD_ENABLE=1          Also fetch NIST's CVSS scores, so findings whose
                         advisory carries no severity can still be rated.
                         Off by default: a full pass takes about seven hours.
@@ -117,7 +117,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	case "db":
 		if len(args) < 2 {
-			fmt.Fprintln(stderr, "error: db requires a subcommand (update, status)")
+			fmt.Fprintln(stderr, "error: db requires a subcommand (build, status)")
 			return exitError
 		}
 		path, err := store.DefaultPath()
@@ -126,11 +126,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return exitError
 		}
 		switch args[1] {
-		case "update":
+		case "build":
 			return dbcmd.Update(context.Background(), path,
 				[]provider.Provider{osv.New(osv.Ecosystems, "")},
 				dbUpdateAnnotators(stderr),
 				stdout, stderr)
+		case "update":
+			// Deliberately not an alias. `update` is about to mean "download the
+			// published database" (D28), and a cron job that keeps building
+			// because the old name still works would change behaviour under its
+			// owner the day the new meaning lands, with nothing in between saying
+			// so. Failing now is the only version of this that is visible.
+			fmt.Fprintln(stderr, "error: `db update` now downloads the published database, which is not wired up yet")
+			fmt.Fprintln(stderr, "  to build from source, use `assay db build`")
+			return exitError
 		case "status":
 			return dbcmd.Status(path, stdout, stderr)
 		default:
