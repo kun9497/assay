@@ -83,11 +83,26 @@ In `cmd/assay/main_test.go`:
 // working and then change meaning under them without ever erroring.
 func TestRun_DBBuildReplacesUpdate(t *testing.T) {
 	t.Run("build is a known subcommand", func(t *testing.T) {
+		// Pointed at a directory that cannot be created: `blocker` is a
+		// regular file, so MkdirAll on a path beneath it fails. Update
+		// creates the database directory BEFORE it touches a provider, so
+		// this returns immediately.
+		//
+		// That precaution is the whole reason this subtest is written this
+		// way. The first version just called `db build` and asserted on the
+		// error -- and with ASSAY_DB_DIR unset, store.DefaultPath resolves
+		// to the user's real cache, so the test performed an actual build:
+		// ~200 MB fetched from the live OSV endpoint, 183 seconds, and the
+		// developer's real database overwritten by `go test ./...`. A
+		// routing assertion must not be able to do that.
+		blocker := filepath.Join(t.TempDir(), "blocker")
+		if err := os.WriteFile(blocker, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("ASSAY_DB_DIR", filepath.Join(blocker, "sub"))
+
 		var stdout, stderr bytes.Buffer
-		// No network and no providers are reachable here, so this cannot
-		// succeed -- but "unknown db subcommand" is the one error it must
-		// not produce.
-		run([]string{"db", "build", "--nonexistent-flag"}, &stdout, &stderr)
+		run([]string{"db", "build"}, &stdout, &stderr)
 		if strings.Contains(stderr.String(), "unknown db subcommand") {
 			t.Errorf("db build is not routed:\n%s", stderr.String())
 		}
@@ -591,7 +606,8 @@ func pushable(t *testing.T, dataAsOf time.Time) string {
 func TestPush_WritesAPullableArtifact(t *testing.T) {
 	srv := httptest.NewServer(registry.New())
 	defer srv.Close()
-	host := must(t, url.Parse(srv.URL)).Host
+	u, err := url.Parse(srv.URL)
+	host := must(t, u, err).Host
 	ref := host + "/assay-db:v6"
 
 	asOf := time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)
@@ -602,7 +618,8 @@ func TestPush_WritesAPullableArtifact(t *testing.T) {
 		t.Fatalf("Push = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
-	img, err := remote.Image(must(t, name.ParseReference(ref)))
+	parsedRef, refErr := name.ParseReference(ref)
+	img, err := remote.Image(must(t, parsedRef, refErr))
 	if err != nil {
 		t.Fatalf("pushed artifact is not pullable: %v", err)
 	}
@@ -643,13 +660,15 @@ func TestPush_DataAsOfIsTheOldestProvider(t *testing.T) {
 
 	srv := httptest.NewServer(registry.New())
 	defer srv.Close()
-	ref := must(t, url.Parse(srv.URL)).Host + "/assay-db:v6"
+	u, uerr := url.Parse(srv.URL)
+	ref := must(t, u, uerr).Host + "/assay-db:v6"
 
 	var out, errOut bytes.Buffer
 	if code := Push(context.Background(), path, ref, &out, &errOut); code != 0 {
 		t.Fatalf("Push = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
-	img, err := remote.Image(must(t, name.ParseReference(ref)))
+	parsedRef, refErr := name.ParseReference(ref)
+	img, err := remote.Image(must(t, parsedRef, refErr))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -664,7 +683,8 @@ func TestPush_DataAsOfIsTheOldestProvider(t *testing.T) {
 func TestPush_MissingDatabaseExitsTwo(t *testing.T) {
 	srv := httptest.NewServer(registry.New())
 	defer srv.Close()
-	ref := must(t, url.Parse(srv.URL)).Host + "/assay-db:v6"
+	u, uerr := url.Parse(srv.URL)
+	ref := must(t, u, uerr).Host + "/assay-db:v6"
 
 	var out, errOut bytes.Buffer
 	code := Push(context.Background(), filepath.Join(t.TempDir(), "absent.db"), ref, &out, &errOut)
@@ -852,6 +872,8 @@ would make every re-push of an old database look current (D12)."
 - **Temp file then rename**, exactly as `Update` does: a failed pull must never leave a half-written database where a scan will find it.
 - **Never auto-pull from a scan** (D14). This runs only from `db update`.
 
+**A Go-syntax correction to the test code below.** `must(t, url.Parse(srv.URL))` does not compile: Go forbids mixing an ordinary argument with a spread multi-value call. Capture the pair into locals first and pass both explicitly — `u, err := url.Parse(srv.URL)` then `must(t, u, err)`. Task 3 hit this and settled on that form; `internal/dbcmd/push_test.go` already has the `must` helper and the working call shape. Reuse the existing helper rather than redefining it.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `internal/dbcmd/pull_test.go`:
@@ -885,7 +907,8 @@ func published(t *testing.T, schema int) string {
 	t.Helper()
 	srv := httptest.NewServer(registry.New())
 	t.Cleanup(srv.Close)
-	host := must(t, url.Parse(srv.URL)).Host
+	u, err := url.Parse(srv.URL)
+	host := must(t, u, err).Host
 	ref := host + "/assay-db:v" + itoa(schema)
 
 	src := pushable(t, time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC))
@@ -897,7 +920,8 @@ func published(t *testing.T, schema int) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := remote.Write(must(t, name.ParseReference(ref)), img); err != nil {
+	parsedRef, refErr := name.ParseReference(ref)
+	if err := remote.Write(must(t, parsedRef, refErr), img); err != nil {
 		t.Fatal(err)
 	}
 	return ref
@@ -1176,6 +1200,12 @@ This is what makes a *daily* build possible. The full seven-hour pass runs once,
 - Consumes: `Pull` (Task 4) to fetch a seed by reference; `store.Create`, `store.Open`.
 - Produces: `func Update(ctx context.Context, dbPath, seedPath string, providers []provider.Provider, annotators []provider.Annotator, stdout, stderr io.Writer) int` — `seedPath` empty means today's behaviour, building from empty.
 
+**API facts you need, verified against the code — the plan text below was written from memory and got these wrong:**
+
+- `store.Create(path)` and `store.Open(path)` both return `(*store.Bolt, error)`. `store.Writer` is an *interface* (`Put`, `PutRating`, `SetMeta`, `Close`), not a struct — `var w *store.Writer` does not compile.
+- There is **no** fetch-by-ID method on the store. Advisories are read with `Lookup(ecosystem, name)`, which is what the matcher itself calls. `Bolt`'s full method set is `Close`, `Covers`, `Put`, `PutRating`, `SetMeta`, `Lookup`, `RatingsFor`, `Meta`, `RecordCount`.
+- `EachRating` (Step 3) is new; add it to `Bolt`, to the `Store` interface, and to every fake implementing `Store` — the matcher's in-memory fake will stop compiling otherwise.
+
 **Design notes:** the build proceeds exactly as it does today — `store.Create(tmp)`, providers write advisories into an empty store — and the seed's **ratings are copied in before the annotators run**, so a delta overwrites the entries it re-fetches and leaves the rest. Copying ratings rather than opening the seed file for writing is what keeps advisories authoritative: the temp database starts empty, so a withdrawn advisory that is no longer in the archive is simply absent, which is the correct answer.
 
 Reading the seed's ratings needs an iterator the store does not have yet: `func (b *Bolt) EachRating(fn func(advisory.Rating) error) error`, walking `bucketRatings` in key order. Key order is deterministic in bbolt, so this adds no nondeterminism.
@@ -1249,15 +1279,20 @@ func TestUpdate_SeedCarriesRatingsButNotAdvisories(t *testing.T) {
 	if rs, err := db.RatingsFor("CVE-2026-NEW"); err != nil || len(rs) != 1 {
 		t.Errorf("RatingsFor(CVE-2026-NEW) = %v, %v; this run's rating is missing", rs, err)
 	}
-	// ...and this run's advisory is there.
-	if _, err := db.Get("GHSA-new"); err != nil {
-		t.Errorf("this run's advisory is missing: %v", err)
+	// ...and this run's advisory is there. Reached through Lookup, which is
+	// how advisories are read -- there is no fetch-by-ID on the store, and
+	// Lookup is what the matcher itself calls, so this asserts on the path
+	// that actually decides findings.
+	if got, err := db.Lookup("Go", "new"); err != nil || len(got) != 1 {
+		t.Errorf("Lookup(Go, new) = %v, %v; this run's advisory is missing", got, err)
 	}
 	// But the seed's advisory is GONE, because no provider re-emitted it.
 	// If this assertion ever fails, every withdrawn advisory in every seed
 	// becomes a permanent false positive.
-	if _, err := db.Get("GHSA-withdrawn-upstream"); err == nil {
-		t.Error("a seeded advisory survived a rebuild: an advisory upstream withdraws can now never be removed")
+	if got, err := db.Lookup("Go", "old"); err != nil {
+		t.Fatal(err)
+	} else if len(got) != 0 {
+		t.Errorf("Lookup(Go, old) = %v, want none: a seeded advisory survived a rebuild, so an advisory upstream withdraws can now never be removed", got)
 	}
 }
 
@@ -1339,8 +1374,15 @@ func TestUpdate_SeededRunReportsTheWindowItActuallyFetched(t *testing.T) {
 	}
 	// Both CVEs are present, so the count is the merged one -- the window
 	// narrowing must not be read as "the older ratings were dropped".
-	if !strings.Contains(row, "2") {
-		t.Errorf("RATING SOURCE row = %q, want the merged count of 2", row)
+	//
+	// Asserted on the split FIELD, not Contains(row, "2"): the row carries
+	// "modified 2026-08-03..2026-08-04", and that date contains "2", so a
+	// substring check passes with a RECORDS cell of 1, 0, or the words
+	// "ran, rated nothing" -- i.e. it survives deleting the seed copy
+	// entirely. CLAUDE.md names this shape; it reached this plan anyway.
+	fields := strings.Fields(row)
+	if len(fields) < 3 || fields[2] != "2" {
+		t.Errorf("RATING SOURCE row = %q, want its RECORDS field to be the merged count 2", row)
 	}
 }
 ```

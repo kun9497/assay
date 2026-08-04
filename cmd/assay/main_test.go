@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/dbcmd"
 	"github.com/kun9497/assay/internal/provider/nvd"
 	"github.com/kun9497/assay/internal/report"
 	"github.com/kun9497/assay/internal/scancmd"
@@ -956,5 +958,371 @@ func TestDBUpdateAnnotators_ConstructsNVDWithTheAPIKeyFromEnv(t *testing.T) {
 	}
 	if len(annotators) != 1 || annotators[0].Name() != nvd.SourceName {
 		t.Errorf("dbUpdateAnnotators() = %+v, want exactly one NVD annotator", annotators)
+	}
+}
+
+// `db build` is the source-building command; `db update` downloads the
+// published database (D28) instead of building it. This proves `build` is
+// still routed, and that `update` reaches Pull -- not a silent build, and
+// not the Task 1 placeholder -- without ever making a live call to the
+// default ghcr.io ref: `--from` points at an address nothing listens on,
+// the same unreachable-registry fixture internal/dbcmd's own Push/Pull
+// tests use, so the routing proof needs no network.
+func TestRun_DBBuildReplacesUpdate(t *testing.T) {
+	t.Run("build is a known subcommand", func(t *testing.T) {
+		// Pointed at a directory that cannot be created: `blocker` is a
+		// regular file, so MkdirAll on a path beneath it fails. Update
+		// creates the database directory BEFORE it touches a provider, so
+		// this returns immediately.
+		//
+		// That precaution is the whole reason this subtest is written this
+		// way. The first version just called `db build` and asserted on the
+		// error -- and with ASSAY_DB_DIR unset, store.DefaultPath resolves
+		// to the user's real cache, so the test performed an actual build:
+		// ~200 MB fetched from the live OSV endpoint, 183 seconds, and the
+		// developer's real database overwritten by `go test ./...`. A
+		// routing assertion must not be able to do that.
+		blocker := filepath.Join(t.TempDir(), "blocker")
+		if err := os.WriteFile(blocker, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("ASSAY_DB_DIR", filepath.Join(blocker, "sub"))
+
+		var stdout, stderr bytes.Buffer
+		run([]string{"db", "build"}, &stdout, &stderr)
+		if strings.Contains(stderr.String(), "unknown db subcommand") {
+			t.Errorf("db build is not routed:\n%s", stderr.String())
+		}
+	})
+
+	t.Run("update reaches Pull, not a silent build", func(t *testing.T) {
+		// ASSAY_DB_DIR is set even though this path is never written to
+		// (Pull's MkdirAll runs after the schema check, which this never
+		// reaches): store.DefaultPath is still called unconditionally for
+		// every db subcommand, and leaving it unset would resolve to the
+		// developer's real cache.
+		t.Setenv("ASSAY_DB_DIR", t.TempDir())
+
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"db", "update", "--from", "127.0.0.1:1/assay-db:v6"}, &stdout, &stderr)
+		if code != exitError {
+			t.Errorf("db update against an unreachable registry = %d, want %d\nstderr:\n%s",
+				code, exitError, stderr.String())
+		}
+		if strings.Contains(stderr.String(), "unknown db subcommand") {
+			t.Errorf("db update is not routed:\n%s", stderr.String())
+		}
+		if strings.Contains(stderr.String(), "not wired up yet") {
+			t.Errorf("db update is still the Task 1 placeholder:\n%s", stderr.String())
+		}
+		// Fix round 1: the three checks above are all negative -- replacing
+		// this case's body with `case "build":`'s call to dbcmd.Update
+		// (dropping the environment's real OSV/NVD network calls aside, which
+		// nothing here would observe either) still exits 2 on a provider
+		// failure and says neither forbidden string, so "not a silent build"
+		// was not actually held. dbcmd.Pull is the only function in the
+		// codebase that writes this exact "fetching <ref>…" line
+		// (internal/dbcmd/pull.go) -- dbcmd.Update's own progress lines name
+		// a provider or annotator instead -- so this is positive proof of
+		// which function ran, not just an absence of the wrong strings.
+		if !strings.Contains(stderr.String(), "fetching 127.0.0.1:1/assay-db:v6") {
+			t.Errorf("stderr does not show Pull's own fetch line, so update may not be "+
+				"reaching Pull at all:\n%s", stderr.String())
+		}
+	})
+}
+
+// `db build --seed <ref>` must reach Pull, and a Pull failure must fail the
+// whole build rather than falling through to a from-empty build -- the
+// scheduled builder passes --seed every night, so a registry outage has to
+// be loud (Task 5's whole point). 127.0.0.1:1 is a loopback address nothing
+// listens on, the same unreachable-registry fixture internal/dbcmd's own
+// Push/Pull tests and TestRun_DBBuildReplacesUpdate use, so this needs no
+// network.
+//
+// ASSAY_DB_DIR is pointed under a regular file so MkdirAll beneath it can
+// never succeed -- not to make the assertion pass, but to make the negative
+// assertion below SAFE: if a bug fell through to dbcmd.Update after a
+// failed seed, Update's own first step (MkdirAll on this same path) would
+// fail immediately instead of reaching a live OSV fetch, which is exactly
+// the "a routing test must not be able to perform a real build"
+// precaution TestRun_DBBuildReplacesUpdate's own comment explains.
+func TestRun_DBBuildWithSeedFailsRatherThanBuildingFromEmpty(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ASSAY_DB_DIR", filepath.Join(blocker, "sub"))
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"db", "build", "--seed", "127.0.0.1:1/assay-db:v6"}, &stdout, &stderr)
+	if code != exitError {
+		t.Errorf("db build --seed against an unreachable registry = %d, want %d\nstderr:\n%s",
+			code, exitError, stderr.String())
+	}
+	// Positive proof Pull ran at all: dbcmd.Pull is the only function that
+	// writes this exact "fetching <ref>…" line (dbcmd.Update's own progress
+	// lines name a provider or annotator instead).
+	if !strings.Contains(stderr.String(), "fetching 127.0.0.1:1/assay-db:v6") {
+		t.Errorf("stderr does not show Pull's own fetch line, so --seed may not be reaching Pull at all:\n%s", stderr.String())
+	}
+	// If dbcmd.Update ran despite the failed seed, ITS OWN MkdirAll (against
+	// the same blocked ASSAY_DB_DIR) would have printed this exact message
+	// -- so its absence is positive proof Update was never reached, not
+	// just that the build also failed for some unrelated reason.
+	if strings.Contains(stderr.String(), "create database directory") {
+		t.Errorf("dbcmd.Update ran even though the seed could not be read -- a seed "+
+			"failure must fail the whole build, never fall back to building from empty:\n%s", stderr.String())
+	}
+}
+
+// resolveBuildSeed mirrors resolveUpdateRef's own test shape and reasoning
+// (see TestResolveUpdateRef's doc comment): driven directly, never through
+// run(), so a validation bug here is provable without ever letting
+// execution reach dbcmd.Pull with a ref this test does not control.
+func TestResolveBuildSeed(t *testing.T) {
+	t.Run("no --seed builds from empty, as today", func(t *testing.T) {
+		var stderr bytes.Buffer
+		ref, has, ok := resolveBuildSeed([]string{"db", "build"}, &stderr)
+		if !ok {
+			t.Fatalf("ok = false, want true (stderr: %s)", stderr.String())
+		}
+		if has {
+			t.Error("has = true, want false: no --seed means build from empty")
+		}
+		if ref != "" {
+			t.Errorf("ref = %q, want empty", ref)
+		}
+	})
+
+	t.Run("--seed <ref> is carried through", func(t *testing.T) {
+		var stderr bytes.Buffer
+		ref, has, ok := resolveBuildSeed([]string{"db", "build", "--seed", "example.test/assay-db:v6"}, &stderr)
+		if !ok {
+			t.Fatalf("ok = false, want true (stderr: %s)", stderr.String())
+		}
+		if !has {
+			t.Error("has = false, want true: --seed was given")
+		}
+		if ref != "example.test/assay-db:v6" {
+			t.Errorf("ref = %q, want the explicit --seed value", ref)
+		}
+	})
+
+	t.Run("--seed with no value is rejected, not a silent from-empty build", func(t *testing.T) {
+		var stderr bytes.Buffer
+		_, _, ok := resolveBuildSeed([]string{"db", "build", "--seed"}, &stderr)
+		if ok {
+			t.Error("ok = true, want false: --seed with no value must not silently build from empty")
+		}
+		if !strings.Contains(stderr.String(), "--seed requires a reference") {
+			t.Errorf("stderr does not say --seed needs a value:\n%s", stderr.String())
+		}
+	})
+
+	t.Run("an unrecognized flag is rejected, not silently ignored", func(t *testing.T) {
+		var stderr bytes.Buffer
+		_, _, ok := resolveBuildSeed([]string{"db", "build", "--seeed", "example.test/assay-db:v6"}, &stderr)
+		if ok {
+			t.Error("ok = true, want false: a typo'd flag must not silently build from empty")
+		}
+		if !strings.Contains(stderr.String(), `unknown db build flag "--seeed"`) {
+			t.Errorf("stderr does not name the unrecognized flag:\n%s", stderr.String())
+		}
+	})
+}
+
+// Fix round 1, finding 2: `db update --from` with a missing value, or a
+// typo'd flag name, silently fell back to the default ref -- exactly wrong
+// for an air-gapped or mirror-pinned user, who set --from specifically to
+// avoid the public default. Driven directly against resolveUpdateRef, not
+// through run(), because a validation bug here would otherwise only be
+// provable by a test that lets execution reach dbcmd.Pull with the real
+// default ghcr.io ref -- an actual network call, which this environment can
+// in fact make (the codebase's own history: an unguarded ASSAY_DB_DIR once
+// let a routing test perform a live ~200 MB OSV fetch). resolveUpdateRef
+// itself never touches the network, so every case below is safe regardless
+// of what it returns.
+func TestResolveUpdateRef(t *testing.T) {
+	t.Run("no --from uses the default, schema-derived ref", func(t *testing.T) {
+		var stderr bytes.Buffer
+		ref, ok := resolveUpdateRef([]string{"db", "update"}, &stderr)
+		if !ok {
+			t.Fatalf("ok = false, want true (stderr: %s)", stderr.String())
+		}
+		want := dbcmd.Ref(dbcmd.DefaultRef)
+		if ref != want {
+			t.Errorf("ref = %q, want %q", ref, want)
+		}
+	})
+
+	t.Run("--from <ref> overrides the default", func(t *testing.T) {
+		var stderr bytes.Buffer
+		ref, ok := resolveUpdateRef([]string{"db", "update", "--from", "example.test/mirror:v6"}, &stderr)
+		if !ok {
+			t.Fatalf("ok = false, want true (stderr: %s)", stderr.String())
+		}
+		if ref != "example.test/mirror:v6" {
+			t.Errorf("ref = %q, want the explicit --from value", ref)
+		}
+	})
+
+	t.Run("--from with no value is rejected, not a silent default", func(t *testing.T) {
+		var stderr bytes.Buffer
+		_, ok := resolveUpdateRef([]string{"db", "update", "--from"}, &stderr)
+		if ok {
+			t.Error("ok = true, want false: --from with no value must not silently resolve to the default ref")
+		}
+		if !strings.Contains(stderr.String(), "--from requires a reference") {
+			t.Errorf("stderr does not say --from needs a value:\n%s", stderr.String())
+		}
+	})
+
+	t.Run("an unrecognized third argument is rejected, not silently ignored", func(t *testing.T) {
+		var stderr bytes.Buffer
+		_, ok := resolveUpdateRef([]string{"db", "update", "--form", "example.test/mirror:v6"}, &stderr)
+		if ok {
+			t.Error("ok = true, want false: a typo'd flag must not silently fall back to the default ref")
+		}
+		if !strings.Contains(stderr.String(), `unknown db update flag "--form"`) {
+			t.Errorf("stderr does not name the unrecognized flag:\n%s", stderr.String())
+		}
+	})
+}
+
+// Fix round 2, finding 3: TestResolveUpdateRef drives resolveUpdateRef
+// directly and never calls run(), so it cannot catch a mutation in
+// case "update":'s own dispatch -- e.g. `return exitOK` in place of
+// `return exitError` when resolveUpdateRef reports !ok. This closes that
+// gap end to end. Safe to run through the real dispatch (unlike a similar
+// check for the SUCCESS path, see resolveUpdateRef's own doc comment):
+// resolveUpdateRef returns ok=false before case "update": ever reaches
+// dbcmd.Pull, so this never touches the network regardless of what
+// case "update": does with the result.
+func TestRun_DBUpdateFromRejectionReachesExitError(t *testing.T) {
+	t.Setenv("ASSAY_DB_DIR", t.TempDir())
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"db", "update", "--from"}, &stdout, &stderr)
+	if code != exitError {
+		t.Errorf("db update --from (no value) via run() = %d, want %d\nstderr:\n%s",
+			code, exitError, stderr.String())
+	}
+}
+
+// `db ref` is what a CI workflow reads to know which tag `db push` should
+// publish to, so the artifact's tag comes from the binary rather than a
+// literal duplicated in the workflow (which would keep publishing to the
+// old tag after a schema bump). Asserted against store.SchemaVersion, not a
+// hardcoded "v6": this test must keep passing across a schema bump with no
+// edit here, the same way the workflow itself needs no edit.
+//
+// want is built from fmt.Sprintf directly, not by calling dbcmd.Ref: doing
+// the latter would launder a mutation to Ref's own format string right back
+// into this assertion (Ref(DefaultRef) as both the input and the oracle
+// always agree with itself). And the comparison is exact equality on the
+// trimmed line, not strings.Contains: "v6" is a substring of a mutated
+// "v6-nope", so a Contains check here would still pass against the exact
+// defect dbcmd's own TestRef_EndsInTheCurrentSchemaVersion exists to catch --
+// confirmed by running this test against that mutation before switching to
+// equality, which passed when it should not have.
+func TestRun_DBRefPrintsTheCurrentSchemaTag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"db", "ref"}, &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("db ref = %d, want %d\nstderr:\n%s", code, exitOK, stderr.String())
+	}
+	want := fmt.Sprintf("%s:v%d", dbcmd.DefaultRef, store.SchemaVersion)
+	got := strings.TrimSpace(stdout.String())
+	if got != want {
+		t.Errorf("stdout = %q, want exactly %q", got, want)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("db ref wrote a diagnostic for a clean run: %q", stderr.String())
+	}
+}
+
+// Finding 2 of the final review: `db push` had no routing test at all --
+// `build`, `update` and `ref` each had one, and replacing
+// `return dbcmd.Push(...)` with `return exitOK` in case "push" left the
+// whole suite green. ASSAY_DB_DIR points at an empty temp directory holding
+// no database file, so dbcmd.Push's own os.Stat fails before it ever
+// touches the network (mirroring TestRun_DBBuildReplacesUpdate's precaution
+// against a routing test performing a real network operation) with a
+// message unique to Push -- positive proof push reached it, not just an
+// absence of "unknown db subcommand".
+func TestRun_DBPushRoutesToPush(t *testing.T) {
+	t.Setenv("ASSAY_DB_DIR", t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"db", "push", "example.test/assay-db:v6"}, &stdout, &stderr)
+	if code != exitError {
+		t.Errorf("db push with no local database = %d, want %d\nstderr:\n%s", code, exitError, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "no database at") {
+		t.Errorf("stderr does not show Push's own missing-database message, so push may not be "+
+			"reaching dbcmd.Push at all:\n%s", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "unknown db subcommand") {
+		t.Errorf("db push is not routed:\n%s", stderr.String())
+	}
+}
+
+// resolvePushRef mirrors resolveUpdateRef's own test shape and reasoning:
+// driven directly, never through run(), so validation is provable without
+// ever letting execution reach dbcmd.Push.
+func TestResolvePushRef(t *testing.T) {
+	t.Run("a bare reference is accepted", func(t *testing.T) {
+		var stderr bytes.Buffer
+		ref, ok := resolvePushRef([]string{"db", "push", "example.test/assay-db:v6"}, &stderr)
+		if !ok {
+			t.Fatalf("ok = false, want true (stderr: %s)", stderr.String())
+		}
+		if ref != "example.test/assay-db:v6" {
+			t.Errorf("ref = %q, want the given reference", ref)
+		}
+	})
+
+	t.Run("no reference is rejected", func(t *testing.T) {
+		var stderr bytes.Buffer
+		_, ok := resolvePushRef([]string{"db", "push"}, &stderr)
+		if ok {
+			t.Error("ok = true, want false: db push needs a reference")
+		}
+		if !strings.Contains(stderr.String(), "db push needs a reference") {
+			t.Errorf("stderr does not say push needs a reference:\n%s", stderr.String())
+		}
+	})
+
+	// db push accepting trailing junk while db update rejects it
+	// (resolveUpdateRef) was the inconsistency the final review flagged --
+	// a reference typo followed by a stray argument must not silently
+	// publish to the first token while dropping the second.
+	t.Run("a trailing argument is rejected, not silently ignored", func(t *testing.T) {
+		var stderr bytes.Buffer
+		_, ok := resolvePushRef([]string{"db", "push", "example.test/assay-db:v6", "extra"}, &stderr)
+		if ok {
+			t.Error("ok = true, want false: db push takes exactly one reference")
+		}
+		if !strings.Contains(stderr.String(), `unexpected argument "extra"`) {
+			t.Errorf("stderr does not name the unexpected argument:\n%s", stderr.String())
+		}
+	})
+}
+
+// End-to-end version of the trailing-argument rejection above: proves the
+// "push" case in run() actually calls resolvePushRef rather than some other
+// validation (or none). Safe through the real dispatch because
+// resolvePushRef rejects before dbcmd.Push is ever reached, so this never
+// touches the network regardless of what case "push" does with the result.
+func TestRun_DBPushRejectsTrailingArgument(t *testing.T) {
+	t.Setenv("ASSAY_DB_DIR", t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"db", "push", "example.test/assay-db:v6", "extra"}, &stdout, &stderr)
+	if code != exitError {
+		t.Errorf("db push with a trailing argument = %d, want %d\nstderr:\n%s", code, exitError, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), `unexpected argument "extra"`) {
+		t.Errorf("stderr does not name the unexpected argument:\n%s", stderr.String())
 	}
 }

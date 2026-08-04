@@ -18,10 +18,10 @@ affecting it.
 
 🚧 **Early development. Alpine containers scan end to end; other distros do not.**
 
-`assay db update` builds a local database from OSV, and `assay scan` matches against it —
-Go, npm, PyPI, and **Alpine**. It reads container images directly, so syft is no longer in
-the loop. On real targets it reports the same findings as grype: same CVEs, not just the
-same count. See [Roadmap](#roadmap).
+`assay db update` downloads the published database — Go, npm, PyPI, and **Alpine**, built
+centrally and refreshed daily — and `assay scan` matches against it. It reads container
+images directly, so syft is no longer in the loop. On real targets it reports the same
+findings as grype: same CVEs, not just the same count. See [Roadmap](#roadmap).
 
 Alpine packages match through their *source* package, so an `openssl` advisory reaches the
 installed `libssl3`, and the report names both. That indirection is where distro scanners
@@ -101,7 +101,7 @@ make build
 Working today:
 
 ```bash
-# Build the local vulnerability database — the only command that fetches advisories
+# Download the published vulnerability database — the normal path, seconds not hours
 assay db update
 
 # What is in the database, and how current is it
@@ -117,6 +117,13 @@ skopeo copy docker://alpine:3.19 oci:layout && assay scan oci-dir:layout
 # Scan a CycloneDX SBOM (Go, npm, PyPI, Alpine)
 assay scan sbom.cdx.json
 ```
+
+`assay db update`, `assay db build` and `assay db push` are the only three commands that
+touch the network on the database side — **a scan itself still makes no network call at all**
+beyond fetching the remote *target* you named, if any (D14). `assay db build` builds from the
+upstream providers directly and `assay db push` publishes the result; both are the builder's
+commands now, not the everyday path — see [The database](#the-database) below for who needs
+which and why.
 
 ### What a target can be
 
@@ -274,7 +281,7 @@ path survives an upgrade that should have invalidated it. Rebuild after upgradin
 the cache on the assay version.
 
 A build over Go, npm, PyPI, and Alpine produces **64 MB on disk holding 32,050
-advisories** — measured from an actual `db update`, not estimated. Getting there downloads
+advisories** — measured from an actual `db build`, not estimated. Getting there downloads
 roughly 248 MB: OSV publishes one archive per ecosystem with no server-side filtering, and
 most of npm's archive is malicious-package reports that are discarded on ingestion.
 
@@ -285,12 +292,48 @@ release-qualified ecosystem keys, so a single fetch covers every release from 3.
 you happened to download it. A mirror serving a three-month-old snapshot should not look
 fresh just because it was fetched this morning.
 
-`db update` also runs any configured rating source — NVD today (D27) — right after the
+`db build` also runs any configured rating source — NVD today (D27) — right after the
 advisory providers, writing its CVSS opinions into the same database rather than fetching
 anything at scan time (D14). `assay db status` lists which authorities have rated at least
 one CVE on a `ratings:` line, the same shape as `databases:`. Set `NVD_API_KEY` to raise
-NVD's request rate tenfold; it is optional and never required — `db update` still syncs NVD
+NVD's request rate tenfold; it is optional and never required — a build still syncs NVD
 without one, just slower.
+
+**Publishing (D28).** The database is built centrally, once a day, and published to
+`ghcr.io/kun9497/assay-db` as an OCI artifact, tagged with the schema version — `assay db
+ref` prints exactly the tag a given binary reads, so an outdated binary gets a clean "not
+found" against an old tag rather than a database it would misinterpret.
+
+- **`assay db update [--from <ref>]`** — pulls the published artifact. This is the everyday
+  path: seconds, not hours, and it is what CI should run. `--from` points at a mirror or a
+  pinned digest instead of the default.
+- **`assay db build [--seed <ref>]`** — builds from the upstream providers directly. This is
+  the publisher's command, and it is also there for anyone who wants an independently built
+  database rather than trusting `ghcr.io`. A full pass over Go, npm, PyPI, Alpine, and NVD
+  (`NVD_ENABLE=1`) takes about **seven hours** (measured, see slice ⑦) — `--seed <ref>`
+  layers onto a previously published artifact instead, carrying its **ratings** forward but
+  rebuilding every **advisory** from source, so an advisory upstream later withdraws still
+  gets to disappear rather than surviving in the seed forever. Seeding is what lets the daily
+  publish (`.github/workflows/db-publish.yml`) fit inside GitHub Actions' six-hour job cap: it
+  seeds from the previous artifact and layers three days of fresh NVD changes on top. A
+  `--seed` reference that cannot be read fails the build outright — exit 2, never a silent
+  fall-through to building from empty.
+- **`assay db push <ref>`** — publishes the local database as an OCI artifact. Prints
+  `<name>@<digest>` on success.
+
+None of this changes what a scan does: **a scan still never fetches anything** (D14). `db
+update`, `db build` and `db push` are the only three commands that touch the network on the
+database side.
+
+**Bootstrapping the first artifact.** The daily workflow seeds from an artifact that has to
+already exist, so the very first one is a one-time, manual step:
+
+```bash
+NVD_ENABLE=1 assay db build          # the full ~seven hours, locally, no job cap
+assay db push ghcr.io/kun9497/assay-db:v6
+```
+
+After that, the scheduled workflow keeps it current on its own.
 
 ### Exit codes
 
@@ -322,8 +365,9 @@ ecosystem means writing one `Cataloger` and one `Comparer` — nothing else chan
 | `Comparer` | `Compare(a, b string) (int, error)` within one ecosystem | **semver**, **PEP 440**, **apk**, deb, rpm |
 | `Provider` | Upstream feed → `[]Advisory` | **OSV**, KISA |
 
-The database is orthogonal to the scan. `Provider`s populate it through `assay db update`;
-a scan only ever reads, and never repairs a stale or missing one behind your back. That is
+The database is orthogonal to the scan. `Provider`s populate it through `assay db build`, and
+`assay db update` downloads the published result (D28); a scan only ever reads, and never
+repairs a stale or missing one behind your back. That is
 what makes offline operation the default rather than a flag — a scanner that quietly
 downloads advisories produces results you cannot reproduce or audit.
 
@@ -476,21 +520,26 @@ each 2,000-record page in 114–136 seconds, and neither compression nor a small
 the total. Leaving it on by default would also have made a routine NIST outage fatal to
 building any database at all.
 
-`NVD_SINCE_DAYS` bounds **one build**, and is not a daily delta: `db update` rebuilds from
-empty, so a bounded run's window is that database's entire NVD coverage. `db status` prints it
-in a `COVERED` column rather than letting a partial database look complete. Real deltas are
-the next slice's job.
+`NVD_SINCE_DAYS` bounds **one build**, and is not by itself a daily delta: `assay db build`
+rebuilds from empty unless it is seeded, so an unseeded bounded run's window is that
+database's entire NVD coverage. `db status` prints it in a `COVERED` column rather than
+letting a partial database look complete. A real delta needs the builder to layer onto an
+existing database instead of starting from empty — that is `db build --seed <ref>`, shipped
+in slice ⑧ below.
 
 **⑧ A published database** — a builder runs the slow sync; everyone else downloads the
-result. **Next.** This was a deferred decision whose revisit trigger — "CI rebuild time
+result. **Done.** This was a deferred decision whose revisit trigger — "CI rebuild time
 becomes the bottleneck" — the measurement above fired. grype and trivy both work this way.
 
-- [ ] Build the database centrally, publish it as an OCI artifact
-- [ ] `assay db update` pulls the published artifact instead of rebuilding
-- [ ] Daily deltas layered on one full pass (today every build starts from empty)
+- [x] Build the database centrally, publish it as an OCI artifact (`assay db push`, D28)
+- [x] `assay db update` pulls the published artifact instead of rebuilding
+- [x] Daily deltas layered on the previous artifact (`assay db build --seed <ref>`), so the
+      scheduled publish fits GitHub Actions' six-hour job cap against the seven-hour full
+      NVD pass above; the seed carries its ratings forward but rebuilds every advisory from
+      source, so an advisory upstream withdraws still gets removed
 
 **⑤ KISA enrichment** — Korean title, description and remediation joined onto matched
-findings by CVE. **Viable, and next after ⑧.**
+findings by CVE. **Viable, and next.**
 
 The first investigation called this dead. It had measured the wrong board — KNVD's own
 disclosures (173 records, Korean domestic software) rather than its **security notices**,

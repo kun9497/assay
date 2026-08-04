@@ -219,7 +219,7 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrSchemaMismatch) ||
 			errors.Is(err, store.ErrIncomplete) {
 			fmt.Fprintf(stderr, "error: %v\n", err)
-			fmt.Fprintln(stderr, "run `assay db update` to build it")
+			fmt.Fprintln(stderr, "run `assay db update` to download it, or `assay db build` to build it from source")
 			return 2
 		}
 		fmt.Fprintf(stderr, "error: open database: %v\n", err)

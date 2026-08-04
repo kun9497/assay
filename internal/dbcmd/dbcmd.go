@@ -1,4 +1,7 @@
-// Package dbcmd implements `assay db update` and `assay db status`.
+// Package dbcmd implements every `assay db` subcommand: `db build` (Update
+// rebuilds from the providers -- the name predates D28 and now undersells
+// what it does), `db update` (Pull, downloads the published artifact),
+// `db status`, `db push` (publishes an artifact) and `db ref`.
 package dbcmd
 
 import (
@@ -35,7 +38,31 @@ import (
 // (verified: internal/dbcmd's own mutation check swaps them and the suite
 // stays green). The order is kept as the stated, documented contract anyway,
 // since a future annotator is not guaranteed to share that independence.
-func Update(ctx context.Context, dbPath string, providers []provider.Provider, annotators []provider.Annotator, stdout, stderr io.Writer) int {
+//
+// seedPath, when non-empty, names a previously built database (typically
+// pulled from a published artifact) whose RATINGS bucket only is copied into
+// this build, after the providers run and before the annotators do. Ratings
+// only, and deliberately so: advisories are rebuilt from the providers above
+// regardless of seedPath, because nothing here removes a record no provider
+// re-emitted, and a seeded advisory upstream has since withdrawn (D16) would
+// be a false positive with no expiry. Ratings have no such failure — NVD
+// does not delete CVEs, a revised score changes lastModified so the next
+// delta overwrites it, and a rating for a CVE no advisory matches is
+// unreachable (Matcher.annotate only asks about identifiers a finding
+// already carries) — which is what makes copying them forward sound where
+// copying advisories forward would not be. This is the seven-hour half a
+// six-hour scheduled build cannot otherwise afford.
+//
+// seedRef is what every message about the seed NAMES it as, instead of
+// seedPath. The CLI's `db build --seed <ref>` pulls the reference to a
+// throwaway scratch file before calling Update (Update itself only ever
+// reads a local path), so seedPath there is something like
+// "/tmp/assay-seed-183739/seed.db" -- meaningless in an archived CI log,
+// and useless for identifying which published artifact was actually
+// carried forward. Empty falls back to seedPath itself, which is what
+// every direct caller in this package's own tests passes as a real,
+// already-meaningful path.
+func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []provider.Provider, annotators []provider.Annotator, stdout, stderr io.Writer) int {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		fmt.Fprintf(stderr, "error: create database directory: %v\n", err)
 		return 2
@@ -68,6 +95,71 @@ func Update(ctx context.Context, dbPath string, providers []provider.Provider, a
 		}
 		meta.Providers[p.Name()] = prov
 	}
+
+	// Seeding, if requested: ratings only, copied BEFORE the annotators run
+	// so a delta below overwrites the entries it re-fetched and leaves the
+	// rest (see Update's own doc comment for why advisories are deliberately
+	// excluded). w is still the empty-then-provider-filled temp store here —
+	// nothing about the advisory build above changes for a seeded run, which
+	// is what keeps a withdrawn advisory absent rather than reintroduced.
+	if seedPath != "" {
+		// What every message below calls the seed. See seedRef's own doc
+		// comment on Update: the CLI passes the original --seed reference
+		// here, since seedPath by itself is a throwaway scratch file no
+		// human or CI log would recognize.
+		label := seedPath
+		if seedRef != "" {
+			label = seedRef
+		}
+		src, err := store.Open(seedPath)
+		if err != nil {
+			w.Close()
+			os.Remove(tmp)
+			fmt.Fprintf(stderr, "error: open seed %s: %v\n", label, err)
+			return 2
+		}
+		seeded := 0
+		copyErr := src.EachRating(func(r advisory.Rating) error {
+			seeded++
+			return w.PutRating(r)
+		})
+		seedMeta, metaErr := src.Meta()
+		src.Close()
+		if copyErr != nil {
+			w.Close()
+			os.Remove(tmp)
+			fmt.Fprintf(stderr, "error: read seed ratings: %v\n", copyErr)
+			return 2
+		}
+		if metaErr != nil {
+			// In practice unreachable today: store.Open above already read
+			// and validated Meta once (its own schema-version guard), so a
+			// second Meta() read against the same, still-open-read-only
+			// database failing here would mean the file changed or became
+			// unreadable between those two calls. Treated as fatal rather
+			// than skipped anyway: silently proceeding with an empty
+			// seedMeta.Ratings would leave every one of the seed's rating
+			// authorities un-merged, and `db status` would render every
+			// column for a source that DID run overnight as "unknown" with
+			// no error at all -- the exact silent freshness loss D12 exists
+			// to catch elsewhere, reintroduced here by a swallowed error
+			// instead of a missing field.
+			w.Close()
+			os.Remove(tmp)
+			fmt.Fprintf(stderr, "error: read seed metadata %s: %v\n", label, metaErr)
+			return 2
+		}
+		// The seed's rating provenance is the starting point, so an annotator
+		// this run did NOT run keeps the seed's window rather than vanishing
+		// from `db status`. One that DID run overwrites its entry in the loop
+		// below, which is what stops a one-day delta inheriting a
+		// thirty-day coverage claim (the hazard TestUpdate_SeededRunReports-
+		// TheWindowItActuallyFetched exists to pin: this copy must happen
+		// BEFORE the annotator loop, never after).
+		maps.Copy(meta.Ratings, seedMeta.Ratings)
+		fmt.Fprintf(stderr, "seeded %d rating(s) from %s; advisories rebuilt from source\n", seeded, label)
+	}
+
 	// Annotators run after the advisory providers (see Update's own doc
 	// comment on why the order is kept even though nothing here depends on
 	// it). A failing annotator fails the whole build exactly like a failing
@@ -105,7 +197,7 @@ func Update(ctx context.Context, dbPath string, providers []provider.Provider, a
 		// database is untouched either way — a rename never half-applies.
 		fmt.Fprintf(stderr, "error: replace database: %v\n", err)
 		fmt.Fprintf(stderr, "the new database is complete and left at %s\n", tmp)
-		fmt.Fprintln(stderr, "close any running scan and move it into place, or re-run `assay db update`")
+		fmt.Fprintln(stderr, "close any running scan and move it into place, or re-run `assay db build`")
 		return 2
 	}
 
@@ -124,6 +216,20 @@ func Update(ctx context.Context, dbPath string, providers []provider.Provider, a
 	return 0
 }
 
+// replaceWaits is replace's own retry schedule: the delay before each
+// attempt, first one immediate. A package-level var, not a literal inside
+// replace, so a test can shrink it to run in milliseconds instead of ~850ms
+// while still exercising the real retry COUNT (fix round 2, finding 1) --
+// reassigning this changes how long replace sleeps between attempts, not
+// how many it makes, which stays len(replaceWaits) either way.
+var replaceWaits = []time.Duration{0, 100 * time.Millisecond, 250 * time.Millisecond, 500 * time.Millisecond}
+
+// renameFn is os.Rename by default, and the seam replace calls through
+// instead of calling os.Rename directly, so a test can count attempts (or
+// force every one to fail) without needing a real locked or otherwise
+// unrenameable file.
+var renameFn = os.Rename
+
 // replace renames src over dst, retrying briefly first.
 //
 // On Windows a rename over a file another process holds open fails outright,
@@ -132,11 +238,11 @@ func Update(ctx context.Context, dbPath string, providers []provider.Provider, a
 // turns the common collision into a non-event.
 func replace(src, dst string) error {
 	var err error
-	for _, wait := range []time.Duration{0, 100 * time.Millisecond, 250 * time.Millisecond, 500 * time.Millisecond} {
+	for _, wait := range replaceWaits {
 		if wait > 0 {
 			time.Sleep(wait)
 		}
-		if err = os.Rename(src, dst); err == nil {
+		if err = renameFn(src, dst); err == nil {
 			return nil
 		}
 	}
@@ -152,7 +258,7 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrSchemaMismatch) ||
 			errors.Is(err, store.ErrIncomplete) {
 			fmt.Fprintf(stderr, "error: %v\n", err)
-			fmt.Fprintln(stderr, "run `assay db update` to build it")
+			fmt.Fprintln(stderr, "run `assay db update` to download it, or `assay db build` to build it from source")
 			return 2
 		}
 		fmt.Fprintf(stderr, "error: open database: %v\n", err)

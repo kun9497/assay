@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -49,8 +50,11 @@ Commands:
                   sbom:, file:, or dir: to say which it is when that would
                   be ambiguous. A directory is read from its go.mod alone -
                   what the module requires, not what a build would link.
-  db update       Build or refresh the local vulnerability database
+  db update       Download the published vulnerability database
+  db build        Build the vulnerability database from its upstream sources
   db status       Show what is in the database and how current it is
+  db push <ref>   Publish the built database as an OCI artifact (builders only)
+  db ref          Print the registry tag this binary's schema reads (CI only)
   version         Print version information
   help            Show this help
 
@@ -63,7 +67,22 @@ Scan flags (any order, before or after the target):
   --explain <id>        Print one advisory's full Evidence (its own ID, or
                         any alias/upstream identifier) instead of the report
 
-Environment (db update only — a scan reads no environment and no network):
+db update flags:
+  --from <ref>    Pull from a different registry reference (a mirror, or a
+                  pinned digest). The default derives its tag from the
+                  schema version this binary reads.
+
+db build flags:
+  --seed <ref>    Layer onto a previously published database (D-seed): its
+                  RATINGS are carried forward, its advisories are not --
+                  every advisory is rebuilt from the providers below
+                  regardless, so one upstream withdraws stays gone. This is
+                  what lets a scheduled build fit a six-hour job cap instead
+                  of repeating the seven-hour full pass. A seed that cannot
+                  be read fails the build rather than silently building from
+                  empty.
+
+Environment (db build only — a scan reads no environment and no network):
   NVD_ENABLE=1          Also fetch NIST's CVSS scores, so findings whose
                         advisory carries no severity can still be rated.
                         Off by default: a full pass takes about seven hours.
@@ -117,7 +136,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	case "db":
 		if len(args) < 2 {
-			fmt.Fprintln(stderr, "error: db requires a subcommand (update, status)")
+			fmt.Fprintln(stderr, "error: db requires a subcommand (update, build, status, push, ref)")
 			return exitError
 		}
 		path, err := store.DefaultPath()
@@ -126,13 +145,62 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return exitError
 		}
 		switch args[1] {
-		case "update":
-			return dbcmd.Update(context.Background(), path,
+		case "build":
+			ref, hasSeed, ok := resolveBuildSeed(args, stderr)
+			if !ok {
+				return exitError
+			}
+			seedPath := ""
+			if hasSeed {
+				// A scratch directory, not dbPath's own directory: the seed
+				// is read-only input to this build, kept apart from the tmp
+				// file Update itself builds into so the two can never
+				// collide or be cleaned up by each other's logic.
+				dir, err := os.MkdirTemp("", "assay-seed-")
+				if err != nil {
+					fmt.Fprintf(stderr, "error: create seed scratch directory: %v\n", err)
+					return exitError
+				}
+				defer os.RemoveAll(dir)
+				seedPath = filepath.Join(dir, "seed.db")
+				// Pull's own exit code and stderr already explain what went
+				// wrong. Returning it as-is (never falling through to build
+				// from empty) is Task 5's whole point: the scheduled builder
+				// passes --seed every night, so a registry outage must fail
+				// loudly rather than quietly publish a one-day database over
+				// a complete one.
+				if code := dbcmd.Pull(context.Background(), seedPath, ref, stdout, stderr); code != 0 {
+					return code
+				}
+			}
+			// ref is what the disclosure names the seed as -- the original
+			// reference, not seedPath's scratch file above, which an
+			// archived CI log would not recognize.
+			return dbcmd.Update(context.Background(), path, seedPath, ref,
 				[]provider.Provider{osv.New(osv.Ecosystems, "")},
 				dbUpdateAnnotators(stderr),
 				stdout, stderr)
+		case "update":
+			ref, ok := resolveUpdateRef(args, stderr)
+			if !ok {
+				return exitError
+			}
+			return dbcmd.Pull(context.Background(), path, ref, stdout, stderr)
 		case "status":
 			return dbcmd.Status(path, stdout, stderr)
+		case "push":
+			ref, ok := resolvePushRef(args, stderr)
+			if !ok {
+				return exitError
+			}
+			return dbcmd.Push(context.Background(), path, ref, stdout, stderr)
+		case "ref":
+			// Prints to stdout: it is a result a CI workflow captures to tag
+			// what `db push` publishes, not a diagnostic. Reading it from the
+			// binary rather than duplicating the tag as a literal in the
+			// workflow keeps the two from drifting apart on a schema bump.
+			fmt.Fprintln(stdout, dbcmd.Ref(dbcmd.DefaultRef))
+			return exitOK
 		default:
 			fmt.Fprintf(stderr, "error: unknown db subcommand %q\n", args[1])
 			return exitError
@@ -235,6 +303,91 @@ func dbUpdateAnnotators(stderr io.Writer) []provider.Annotator {
 		return nil
 	}
 	return []provider.Annotator{newNVDAnnotator(nvdOptionsFromEnv(stderr))}
+}
+
+// resolveUpdateRef decides which reference `db update` pulls from: the
+// default, schema-derived ref (dbcmd.Ref(dbcmd.DefaultRef)), or an explicit
+// override via `--from <ref>`. Pulled out of the "update" case as its own,
+// network-free function — matching parseScanArgs' own separation from the
+// commands that act on what it parses — so a test can drive every
+// argument shape directly rather than only through run()'s full dispatch to
+// dbcmd.Pull. That distinction matters here specifically: reaching Pull with
+// the unvalidated default ref would mean an actual attempt to fetch from
+// the real ghcr.io, which is exactly the network access no test may make,
+// so a bug in the validation below could otherwise only be proven by a test
+// that risks doing the very thing D14 forbids.
+//
+// A missing value ("--from" with nothing after it) or an unrecognized third
+// argument (a typo'd "--form", or anything else) is an error, not a silent
+// fall-through to the public default: someone pointing --from at a mirror
+// or a pinned digest, or relying on it specifically because they are
+// air-gapped, must not be quietly redirected to ghcr.io by a missing value
+// or a typo.
+func resolveUpdateRef(args []string, stderr io.Writer) (ref string, ok bool) {
+	if len(args) <= 2 {
+		return dbcmd.Ref(dbcmd.DefaultRef), true
+	}
+	if args[2] != "--from" {
+		fmt.Fprintf(stderr, "error: unknown db update flag %q (want --from <ref>)\n", args[2])
+		return "", false
+	}
+	if len(args) < 4 {
+		fmt.Fprintln(stderr, "error: --from requires a reference, e.g. ghcr.io/kun9497/assay-db:v6")
+		return "", false
+	}
+	return args[3], true
+}
+
+// resolveBuildSeed decides whether `db build` should layer onto a published
+// database: absent by default (has == false, today's from-empty build), or
+// an explicit `--seed <ref>`. Split out and network-free for the same
+// reason resolveUpdateRef is: a test can drive every argument shape
+// directly, without reaching dbcmd.Pull with an unvalidated ref (an actual
+// network call, which no test here may make).
+//
+// A missing value or an unrecognized flag is rejected outright rather than
+// silently building from empty — the scheduled builder passes --seed every
+// night specifically to avoid the seven-hour full pass, so a typo silently
+// falling back to it would turn into a job that blows the six-hour cap
+// instead of failing fast and loud.
+func resolveBuildSeed(args []string, stderr io.Writer) (ref string, has, ok bool) {
+	if len(args) <= 2 {
+		return "", false, true
+	}
+	if args[2] != "--seed" {
+		fmt.Fprintf(stderr, "error: unknown db build flag %q (want --seed <ref>)\n", args[2])
+		return "", false, false
+	}
+	if len(args) < 4 {
+		fmt.Fprintln(stderr, "error: --seed requires a reference, e.g. ghcr.io/kun9497/assay-db:v6")
+		return "", false, false
+	}
+	return args[3], true, true
+}
+
+// resolvePushRef validates `db push`'s arguments: exactly one reference, no
+// more. Split out and network-free for the same reason resolveUpdateRef and
+// resolveBuildSeed are: a test can drive every argument shape without
+// dbcmd.Push ever running.
+//
+// The trailing-argument rejection makes push consistent with update
+// (resolveUpdateRef): `db update` already refuses an unrecognized third
+// argument rather than silently ignoring it, and `db push ref junk` passing
+// silently — publishing to `ref` while `junk` is dropped on the floor — was
+// the exact "flag or argument accepted, then ignored" shape update's own
+// rejection exists to prevent, D18's divergence-table concern applied to
+// positional arguments instead of a flag.
+func resolvePushRef(args []string, stderr io.Writer) (ref string, ok bool) {
+	if len(args) < 3 {
+		fmt.Fprintln(stderr, "error: db push needs a reference, e.g. ghcr.io/kun9497/assay-db:v6")
+		return "", false
+	}
+	if len(args) > 3 {
+		fmt.Fprintf(stderr, "error: unexpected argument %q: db push takes exactly one reference (already have %q)\n",
+			args[3], args[2])
+		return "", false
+	}
+	return args[2], true
 }
 
 // scan is the pipeline entry point: parse the target into an inventory, match
