@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/dbcmd"
 	"github.com/kun9497/assay/internal/provider/nvd"
 	"github.com/kun9497/assay/internal/report"
 	"github.com/kun9497/assay/internal/scancmd"
@@ -959,10 +961,13 @@ func TestDBUpdateAnnotators_ConstructsNVDWithTheAPIKeyFromEnv(t *testing.T) {
 	}
 }
 
-// `db build` is the source-building command. `db update` used to be, and is
-// about to mean "download the published database" instead. Between those two
-// states it must not quietly keep building: someone's cron job would go on
-// working and then change meaning under them without ever erroring.
+// `db build` is the source-building command; `db update` downloads the
+// published database (D28) instead of building it. This proves `build` is
+// still routed, and that `update` reaches Pull -- not a silent build, and
+// not the Task 1 placeholder -- without ever making a live call to the
+// default ghcr.io ref: `--from` points at an address nothing listens on,
+// the same unreachable-registry fixture internal/dbcmd's own Push/Pull
+// tests use, so the routing proof needs no network.
 func TestRun_DBBuildReplacesUpdate(t *testing.T) {
 	t.Run("build is a known subcommand", func(t *testing.T) {
 		// Pointed at a directory that cannot be created: `blocker` is a
@@ -990,14 +995,57 @@ func TestRun_DBBuildReplacesUpdate(t *testing.T) {
 		}
 	})
 
-	t.Run("update does not silently build", func(t *testing.T) {
+	t.Run("update reaches Pull, not a silent build", func(t *testing.T) {
+		// ASSAY_DB_DIR is set even though this path is never written to
+		// (Pull's MkdirAll runs after the schema check, which this never
+		// reaches): store.DefaultPath is still called unconditionally for
+		// every db subcommand, and leaving it unset would resolve to the
+		// developer's real cache.
+		t.Setenv("ASSAY_DB_DIR", t.TempDir())
+
 		var stdout, stderr bytes.Buffer
-		code := run([]string{"db", "update"}, &stdout, &stderr)
+		code := run([]string{"db", "update", "--from", "127.0.0.1:1/assay-db:v6"}, &stdout, &stderr)
 		if code != exitError {
-			t.Errorf("db update = %d, want %d until Task 4 gives it a meaning", code, exitError)
+			t.Errorf("db update against an unreachable registry = %d, want %d\nstderr:\n%s",
+				code, exitError, stderr.String())
 		}
-		if !strings.Contains(stderr.String(), "db build") {
-			t.Errorf("stderr does not point at the new name:\n%s", stderr.String())
+		if strings.Contains(stderr.String(), "unknown db subcommand") {
+			t.Errorf("db update is not routed:\n%s", stderr.String())
+		}
+		if strings.Contains(stderr.String(), "not wired up yet") {
+			t.Errorf("db update is still the Task 1 placeholder:\n%s", stderr.String())
 		}
 	})
+}
+
+// `db ref` is what a CI workflow reads to know which tag `db push` should
+// publish to, so the artifact's tag comes from the binary rather than a
+// literal duplicated in the workflow (which would keep publishing to the
+// old tag after a schema bump). Asserted against store.SchemaVersion, not a
+// hardcoded "v6": this test must keep passing across a schema bump with no
+// edit here, the same way the workflow itself needs no edit.
+//
+// want is built from fmt.Sprintf directly, not by calling dbcmd.Ref: doing
+// the latter would launder a mutation to Ref's own format string right back
+// into this assertion (Ref(DefaultRef) as both the input and the oracle
+// always agree with itself). And the comparison is exact equality on the
+// trimmed line, not strings.Contains: "v6" is a substring of a mutated
+// "v6-nope", so a Contains check here would still pass against the exact
+// defect dbcmd's own TestRef_EndsInTheCurrentSchemaVersion exists to catch --
+// confirmed by running this test against that mutation before switching to
+// equality, which passed when it should not have.
+func TestRun_DBRefPrintsTheCurrentSchemaTag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"db", "ref"}, &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("db ref = %d, want %d\nstderr:\n%s", code, exitOK, stderr.String())
+	}
+	want := fmt.Sprintf("%s:v%d", dbcmd.DefaultRef, store.SchemaVersion)
+	got := strings.TrimSpace(stdout.String())
+	if got != want {
+		t.Errorf("stdout = %q, want exactly %q", got, want)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("db ref wrote a diagnostic for a clean run: %q", stderr.String())
+	}
 }

@@ -49,9 +49,11 @@ Commands:
                   sbom:, file:, or dir: to say which it is when that would
                   be ambiguous. A directory is read from its go.mod alone -
                   what the module requires, not what a build would link.
+  db update       Download the published vulnerability database
   db build        Build the vulnerability database from its upstream sources
   db status       Show what is in the database and how current it is
   db push <ref>   Publish the built database as an OCI artifact (builders only)
+  db ref          Print the registry tag this binary's schema reads (CI only)
   version         Print version information
   help            Show this help
 
@@ -63,6 +65,11 @@ Scan flags (any order, before or after the target):
   --output <format>     table (default) or json
   --explain <id>        Print one advisory's full Evidence (its own ID, or
                         any alias/upstream identifier) instead of the report
+
+db update flags:
+  --from <ref>    Pull from a different registry reference (a mirror, or a
+                  pinned digest). The default derives its tag from the
+                  schema version this binary reads.
 
 Environment (db build only — a scan reads no environment and no network):
   NVD_ENABLE=1          Also fetch NIST's CVSS scores, so findings whose
@@ -133,14 +140,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 				dbUpdateAnnotators(stderr),
 				stdout, stderr)
 		case "update":
-			// Deliberately not an alias. `update` is about to mean "download the
-			// published database" (D28), and a cron job that keeps building
-			// because the old name still works would change behaviour under its
-			// owner the day the new meaning lands, with nothing in between saying
-			// so. Failing now is the only version of this that is visible.
-			fmt.Fprintln(stderr, "error: `db update` now downloads the published database, which is not wired up yet")
-			fmt.Fprintln(stderr, "  to build from source, use `assay db build`")
-			return exitError
+			ref := dbcmd.Ref(dbcmd.DefaultRef)
+			// --from takes a full reference including its tag, because someone
+			// pointing at a mirror or a pinned digest needs to say exactly what
+			// they mean. The default is the only path that derives its own tag.
+			if len(args) > 3 && args[2] == "--from" {
+				ref = args[3]
+			}
+			return dbcmd.Pull(context.Background(), path, ref, stdout, stderr)
 		case "status":
 			return dbcmd.Status(path, stdout, stderr)
 		case "push":
@@ -149,6 +156,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 				return exitError
 			}
 			return dbcmd.Push(context.Background(), path, args[2], stdout, stderr)
+		case "ref":
+			// Prints to stdout: it is a result a CI workflow captures to tag
+			// what `db push` publishes, not a diagnostic. Reading it from the
+			// binary rather than duplicating the tag as a literal in the
+			// workflow keeps the two from drifting apart on a schema bump.
+			fmt.Fprintln(stdout, dbcmd.Ref(dbcmd.DefaultRef))
+			return exitOK
 		default:
 			fmt.Fprintf(stderr, "error: unknown db subcommand %q\n", args[1])
 			return exitError
