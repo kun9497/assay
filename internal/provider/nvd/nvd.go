@@ -123,13 +123,11 @@ func New(opts Options) *Provider {
 
 func (p *Provider) Name() string { return SourceName }
 
-// Annotate pages through NVD's CVE 2.0 API from startIndex 0 until it covers
-// totalResults, emitting one Rating per record that carries at least one
-// CVSS metric (D13, D27).
-//
-// Requests are made one at a time, in order, never in parallel: NVD's rate
-// limit is per source IP, so concurrency would not buy throughput and would
-// risk a block.
+// maxWindow is NVD's hard limit on any lastModStartDate/lastModEndDate
+// range: 120 consecutive days, measured at request time. Exceeding it by
+// even seconds is answered with 404, not a helpful error.
+const maxWindow = 120 * 24 * time.Hour
+
 // windowLabel describes what a run covered, for Provenance.Window. An
 // unbounded run says so in words rather than returning "" — an empty Window
 // is indistinguishable from a database built before this field existed, and
@@ -143,6 +141,13 @@ func windowLabel(since, until time.Time) string {
 		since.UTC().Format("2006-01-02"), until.UTC().Format("2006-01-02"))
 }
 
+// Annotate pages through NVD's CVE 2.0 API from startIndex 0 until it covers
+// totalResults, emitting one Rating per record that carries at least one
+// CVSS metric (D13, D27).
+//
+// Requests are made one at a time, in order, never in parallel: NVD's rate
+// limit is per source IP, so concurrency would not buy throughput and would
+// risk a block.
 func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) error) (store.Provenance, error) {
 	prov := store.Provenance{Source: p.baseURL}
 	var (
@@ -156,11 +161,29 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 		// pagination.
 		until = nowUTC()
 	)
+	// Clamped here, where both ends are finally known, rather than where
+	// Since was chosen.
+	//
+	// NVD rejects any date range wider than 120 consecutive days, and it
+	// measures the span at request time. Since is computed when the options
+	// are read, `until` when Annotate starts — and in between, db update runs
+	// every advisory provider, which takes minutes. So NVD_SINCE_DAYS=120
+	// arrived as 120 days plus the OSV fetch and was answered with a bare
+	// 404, meaning the documented maximum could never actually be used. Found
+	// by running it: the first real bootstrap died after 2m51s.
+	//
+	// Narrowing rather than failing is safe because the result is disclosed:
+	// windowLabel below records the range actually requested, and db status
+	// prints it, so a clamped run cannot report coverage it does not have.
+	since := p.since
+	if !since.IsZero() && until.Sub(since) > maxWindow {
+		since = until.Add(-maxWindow)
+	}
 	// What this run actually covered, recorded so a windowed database cannot
 	// present itself as a complete one (D20). Update rebuilds from empty, so
 	// a bounded run's window IS the database's entire NVD coverage — there is
 	// no earlier pass underneath it.
-	prov.Window = windowLabel(p.since, until)
+	prov.Window = windowLabel(since, until)
 	// A do-while shape: the total is unknown before the first response, so
 	// the loop condition alone cannot gate the first request.
 	for first || startIndex < total {
@@ -189,7 +212,7 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 		}
 		first = false
 
-		page, pageAsOf, err := p.fetchPage(ctx, startIndex, until)
+		page, pageAsOf, err := p.fetchPage(ctx, startIndex, since, until)
 		if err != nil {
 			return store.Provenance{}, err
 		}
@@ -263,15 +286,15 @@ var nowUTC = func() time.Time { return time.Now().UTC() }
 // where it is never emitted. That is a rating silently absent from the
 // database, so a finding keeps the lower band. NVD's own guidance is to
 // hold the range fixed across a paged read.
-func (p *Provider) fetchPage(ctx context.Context, startIndex int, until time.Time) (apiResponse, time.Time, error) {
+func (p *Provider) fetchPage(ctx context.Context, startIndex int, since, until time.Time) (apiResponse, time.Time, error) {
 	u := fmt.Sprintf("%s?resultsPerPage=%d&startIndex=%d", p.baseURL, p.pageSize, startIndex)
-	if !p.since.IsZero() {
+	if !since.IsZero() {
 		// NVD requires both bounds together and caps the span at 120 days.
 		// The end is a real timestamp rather than open-ended, because an
 		// absent lastModEndDate is rejected rather than treated as "until
 		// now".
 		u += fmt.Sprintf("&lastModStartDate=%s&lastModEndDate=%s",
-			url.QueryEscape(p.since.UTC().Format("2006-01-02T15:04:05.000-07:00")),
+			url.QueryEscape(since.UTC().Format("2006-01-02T15:04:05.000-07:00")),
 			url.QueryEscape(until.UTC().Format("2006-01-02T15:04:05.000-07:00")))
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)

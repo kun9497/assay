@@ -456,6 +456,120 @@ func TestAnnotate_SkipsARecordWithMetricsButNoID(t *testing.T) {
 	}
 }
 
+// NVD_SINCE_DAYS=120 -- the documented maximum -- could never actually be
+// used, and the API said so with a bare 404.
+//
+// The span is measured by NVD at REQUEST time. Since is computed when the
+// options are read; until is read when Annotate starts; and in between,
+// db update runs every advisory provider. The first real bootstrap spent
+// 2m51s fetching OSV, so a 120-day window arrived as 120 days and 2m51s and
+// was rejected outright.
+//
+// Clamping is safe rather than lossy because the narrowing is disclosed --
+// Provenance.Window records the range actually requested and db status
+// prints it -- so a clamped run cannot claim coverage it does not have.
+func TestAnnotate_ClampsAWindowThatGrewPastNVDsMaximum(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		io.WriteString(w, `{"totalResults":0,"vulnerabilities":[],"timestamp":"2026-08-04T00:00:00.000"}`)
+	}))
+	defer srv.Close()
+
+	until := time.Date(2026, 8, 4, 3, 46, 10, 0, time.UTC)
+	restore := nowUTC
+	nowUTC = func() time.Time { return until }
+	defer func() { nowUTC = restore }()
+
+	// Exactly the shape that failed: Since chosen 120 days before the
+	// moment the options were read, which was 2m50s before Annotate ran.
+	since := until.Add(-maxWindow).Add(-2*time.Minute - 50*time.Second)
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0), Since: since})
+	prov, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	q, err := url.ParseQuery(gotQuery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start, err := time.Parse("2006-01-02T15:04:05.000-07:00", q.Get("lastModStartDate"))
+	if err != nil {
+		t.Fatalf("lastModStartDate %q: %v", q.Get("lastModStartDate"), err)
+	}
+	end, err := time.Parse("2006-01-02T15:04:05.000-07:00", q.Get("lastModEndDate"))
+	if err != nil {
+		t.Fatalf("lastModEndDate %q: %v", q.Get("lastModEndDate"), err)
+	}
+	// Asserted on the SPAN, not on either bound: NVD rejects the range, so
+	// the range is the thing that has to hold.
+	if span := end.Sub(start); span > maxWindow {
+		t.Errorf("requested span %v exceeds NVD's %v maximum; the API answers this with 404", span, maxWindow)
+	}
+	_ = prov
+}
+
+// ...and the clamp is disclosed, not silent.
+//
+// Split from the test above deliberately. There the overshoot is 2m50s --
+// the real one -- which does not move the calendar day, so asserting the
+// Window date there passes whether or not the clamp is reflected in it
+// (verified by mutation: it survived). A large overshoot is what makes the
+// disclosure observable.
+func TestAnnotate_DisclosesTheClampedWindowNotTheRequestedOne(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"totalResults":0,"vulnerabilities":[],"timestamp":"2026-08-04T00:00:00.000"}`)
+	}))
+	defer srv.Close()
+
+	until := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	restore := nowUTC
+	nowUTC = func() time.Time { return until }
+	defer func() { nowUTC = restore }()
+
+	// 200 days requested; 120 is the most NVD allows, so the reported start
+	// must be the clamped 2026-04-06, not the requested 2026-01-16.
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0),
+		Since: until.Add(-200 * 24 * time.Hour)})
+	prov, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "modified 2026-04-06"; !strings.Contains(prov.Window, want) {
+		t.Errorf("Window = %q, want it to start at the clamped %q -- db status must not claim the 200 days that were asked for", prov.Window, want)
+	}
+	if strings.Contains(prov.Window, "2026-01-16") {
+		t.Errorf("Window = %q reports the REQUESTED start, so a clamped run claims coverage it does not have", prov.Window)
+	}
+}
+
+// A window comfortably inside the maximum is passed through untouched --
+// the clamp must not quietly narrow every run.
+func TestAnnotate_LeavesAWindowInsideTheMaximumAlone(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		io.WriteString(w, `{"totalResults":0,"vulnerabilities":[],"timestamp":"2026-08-04T00:00:00.000"}`)
+	}))
+	defer srv.Close()
+
+	until := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	restore := nowUTC
+	nowUTC = func() time.Time { return until }
+	defer func() { nowUTC = restore }()
+
+	since := time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC) // 30 days
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0), Since: since})
+	if _, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	q, _ := url.ParseQuery(gotQuery)
+	if got := q.Get("lastModStartDate"); got != "2026-07-05T00:00:00.000+00:00" {
+		t.Errorf("lastModStartDate = %q, want the Since value unchanged", got)
+	}
+}
+
 // The window is read once and held for the whole sync, not recomputed per
 // page. Pagination is by startIndex INTO the set the window defines, so
 // moving the upper bound between requests moves that set while it is being
