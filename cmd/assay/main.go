@@ -51,6 +51,7 @@ Commands:
                   what the module requires, not what a build would link.
   db build        Build the vulnerability database from its upstream sources
   db status       Show what is in the database and how current it is
+  db push <ref>   Publish the built database as an OCI artifact (builders only)
   version         Print version information
   help            Show this help
 
@@ -142,6 +143,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return exitError
 		case "status":
 			return dbcmd.Status(path, stdout, stderr)
+		case "push":
+			if len(args) < 3 {
+				fmt.Fprintln(stderr, "error: db push needs a reference, e.g. ghcr.io/kun9497/assay-db:v6")
+				return exitError
+			}
+			return dbcmd.Push(context.Background(), path, args[2], stdout, stderr)
 		default:
 			fmt.Fprintf(stderr, "error: unknown db subcommand %q\n", args[1])
 			return exitError

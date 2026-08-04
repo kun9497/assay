@@ -1,0 +1,148 @@
+package dbcmd
+
+import (
+	"bytes"
+	"context"
+	"net/http/httptest"
+	"net/url"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/google/go-containerregistry/pkg/registry"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
+
+	"github.com/kun9497/assay/internal/dbartifact"
+	"github.com/kun9497/assay/internal/store"
+)
+
+// pushable builds a real database on disk and returns its path.
+func pushable(t *testing.T, dataAsOf time.Time) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(store.Meta{
+		BuiltAt: time.Date(2026, 8, 4, 6, 0, 0, 0, time.UTC),
+		Providers: map[string]store.Provenance{
+			"osv": {Source: "https://example.test", DataAsOf: dataAsOf},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// The whole point of the slice: a built database becomes something a
+// registry serves. Tested against go-containerregistry's own in-memory
+// registry, so this needs no network and no credentials.
+func TestPush_WritesAPullableArtifact(t *testing.T) {
+	srv := httptest.NewServer(registry.New())
+	defer srv.Close()
+	// must's generic signature can't take Go's "spread a multi-value call
+	// into the last N parameters" shorthand alongside a leading t, so the
+	// multi-value call is captured first and passed through as two values.
+	u, err := url.Parse(srv.URL)
+	host := must(t, u, err).Host
+	ref := host + "/assay-db:v6"
+
+	asOf := time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)
+	path := pushable(t, asOf)
+
+	var out, errOut bytes.Buffer
+	if code := Push(context.Background(), path, ref, &out, &errOut); code != 0 {
+		t.Fatalf("Push = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+
+	parsedRef, refErr := name.ParseReference(ref)
+	img, err := remote.Image(must(t, parsedRef, refErr))
+	if err != nil {
+		t.Fatalf("pushed artifact is not pullable: %v", err)
+	}
+	m, err := dbartifact.MetaOf(img)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.SchemaVersion != store.SchemaVersion {
+		t.Errorf("published schema = %d, want %d", m.SchemaVersion, store.SchemaVersion)
+	}
+	// D12: the artifact carries the UPSTREAM freshness, not the moment it
+	// was pushed. Asserting this is what stops a mirror that re-pushes an
+	// old database from presenting it as current.
+	if !m.DataAsOf.Equal(asOf) {
+		t.Errorf("published DataAsOf = %v, want the database's own %v", m.DataAsOf, asOf)
+	}
+}
+
+// An artifact is only as fresh as its stalest provider. Reporting the
+// newest would let one recently-synced source vouch for a stale one.
+func TestPush_DataAsOfIsTheOldestProvider(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	if err := w.SetMeta(store.Meta{
+		BuiltAt: time.Date(2026, 8, 4, 6, 0, 0, 0, time.UTC),
+		Providers: map[string]store.Provenance{
+			"fresh": {DataAsOf: time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)},
+			"stale": {DataAsOf: old},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+
+	srv := httptest.NewServer(registry.New())
+	defer srv.Close()
+	u, err := url.Parse(srv.URL)
+	ref := must(t, u, err).Host + "/assay-db:v6"
+
+	var out, errOut bytes.Buffer
+	if code := Push(context.Background(), path, ref, &out, &errOut); code != 0 {
+		t.Fatalf("Push = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	parsedRef, refErr := name.ParseReference(ref)
+	img, err := remote.Image(must(t, parsedRef, refErr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, _ := dbartifact.MetaOf(img)
+	if !m.DataAsOf.Equal(old) {
+		t.Errorf("DataAsOf = %v, want the OLDEST provider's %v", m.DataAsOf, old)
+	}
+}
+
+// Pushing a database that is not there is a 2 that says so, not a panic
+// and not a silent empty artifact.
+func TestPush_MissingDatabaseExitsTwo(t *testing.T) {
+	srv := httptest.NewServer(registry.New())
+	defer srv.Close()
+	u, err := url.Parse(srv.URL)
+	ref := must(t, u, err).Host + "/assay-db:v6"
+
+	var out, errOut bytes.Buffer
+	code := Push(context.Background(), filepath.Join(t.TempDir(), "absent.db"), ref, &out, &errOut)
+	if code != 2 {
+		t.Errorf("Push with no database = %d, want 2", code)
+	}
+	if !strings.Contains(errOut.String(), "absent.db") {
+		t.Errorf("stderr does not name the missing file:\n%s", errOut.String())
+	}
+}
+
+func must[T any](t *testing.T, v T, err error) T {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
