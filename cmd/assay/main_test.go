@@ -1032,6 +1032,106 @@ func TestRun_DBBuildReplacesUpdate(t *testing.T) {
 	})
 }
 
+// `db build --seed <ref>` must reach Pull, and a Pull failure must fail the
+// whole build rather than falling through to a from-empty build -- the
+// scheduled builder passes --seed every night, so a registry outage has to
+// be loud (Task 5's whole point). 127.0.0.1:1 is a loopback address nothing
+// listens on, the same unreachable-registry fixture internal/dbcmd's own
+// Push/Pull tests and TestRun_DBBuildReplacesUpdate use, so this needs no
+// network.
+//
+// ASSAY_DB_DIR is pointed under a regular file so MkdirAll beneath it can
+// never succeed -- not to make the assertion pass, but to make the negative
+// assertion below SAFE: if a bug fell through to dbcmd.Update after a
+// failed seed, Update's own first step (MkdirAll on this same path) would
+// fail immediately instead of reaching a live OSV fetch, which is exactly
+// the "a routing test must not be able to perform a real build"
+// precaution TestRun_DBBuildReplacesUpdate's own comment explains.
+func TestRun_DBBuildWithSeedFailsRatherThanBuildingFromEmpty(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ASSAY_DB_DIR", filepath.Join(blocker, "sub"))
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"db", "build", "--seed", "127.0.0.1:1/assay-db:v6"}, &stdout, &stderr)
+	if code != exitError {
+		t.Errorf("db build --seed against an unreachable registry = %d, want %d\nstderr:\n%s",
+			code, exitError, stderr.String())
+	}
+	// Positive proof Pull ran at all: dbcmd.Pull is the only function that
+	// writes this exact "fetching <ref>…" line (dbcmd.Update's own progress
+	// lines name a provider or annotator instead).
+	if !strings.Contains(stderr.String(), "fetching 127.0.0.1:1/assay-db:v6") {
+		t.Errorf("stderr does not show Pull's own fetch line, so --seed may not be reaching Pull at all:\n%s", stderr.String())
+	}
+	// If dbcmd.Update ran despite the failed seed, ITS OWN MkdirAll (against
+	// the same blocked ASSAY_DB_DIR) would have printed this exact message
+	// -- so its absence is positive proof Update was never reached, not
+	// just that the build also failed for some unrelated reason.
+	if strings.Contains(stderr.String(), "create database directory") {
+		t.Errorf("dbcmd.Update ran even though the seed could not be read -- a seed "+
+			"failure must fail the whole build, never fall back to building from empty:\n%s", stderr.String())
+	}
+}
+
+// resolveBuildSeed mirrors resolveUpdateRef's own test shape and reasoning
+// (see TestResolveUpdateRef's doc comment): driven directly, never through
+// run(), so a validation bug here is provable without ever letting
+// execution reach dbcmd.Pull with a ref this test does not control.
+func TestResolveBuildSeed(t *testing.T) {
+	t.Run("no --seed builds from empty, as today", func(t *testing.T) {
+		var stderr bytes.Buffer
+		ref, has, ok := resolveBuildSeed([]string{"db", "build"}, &stderr)
+		if !ok {
+			t.Fatalf("ok = false, want true (stderr: %s)", stderr.String())
+		}
+		if has {
+			t.Error("has = true, want false: no --seed means build from empty")
+		}
+		if ref != "" {
+			t.Errorf("ref = %q, want empty", ref)
+		}
+	})
+
+	t.Run("--seed <ref> is carried through", func(t *testing.T) {
+		var stderr bytes.Buffer
+		ref, has, ok := resolveBuildSeed([]string{"db", "build", "--seed", "example.test/assay-db:v6"}, &stderr)
+		if !ok {
+			t.Fatalf("ok = false, want true (stderr: %s)", stderr.String())
+		}
+		if !has {
+			t.Error("has = false, want true: --seed was given")
+		}
+		if ref != "example.test/assay-db:v6" {
+			t.Errorf("ref = %q, want the explicit --seed value", ref)
+		}
+	})
+
+	t.Run("--seed with no value is rejected, not a silent from-empty build", func(t *testing.T) {
+		var stderr bytes.Buffer
+		_, _, ok := resolveBuildSeed([]string{"db", "build", "--seed"}, &stderr)
+		if ok {
+			t.Error("ok = true, want false: --seed with no value must not silently build from empty")
+		}
+		if !strings.Contains(stderr.String(), "--seed requires a reference") {
+			t.Errorf("stderr does not say --seed needs a value:\n%s", stderr.String())
+		}
+	})
+
+	t.Run("an unrecognized flag is rejected, not silently ignored", func(t *testing.T) {
+		var stderr bytes.Buffer
+		_, _, ok := resolveBuildSeed([]string{"db", "build", "--seeed", "example.test/assay-db:v6"}, &stderr)
+		if ok {
+			t.Error("ok = true, want false: a typo'd flag must not silently build from empty")
+		}
+		if !strings.Contains(stderr.String(), `unknown db build flag "--seeed"`) {
+			t.Errorf("stderr does not name the unrecognized flag:\n%s", stderr.String())
+		}
+	})
+}
+
 // Fix round 1, finding 2: `db update --from` with a missing value, or a
 // typo'd flag name, silently fell back to the default ref -- exactly wrong
 // for an air-gapped or mirror-pinned user, who set --from specifically to

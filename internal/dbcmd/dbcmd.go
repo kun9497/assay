@@ -35,7 +35,21 @@ import (
 // (verified: internal/dbcmd's own mutation check swaps them and the suite
 // stays green). The order is kept as the stated, documented contract anyway,
 // since a future annotator is not guaranteed to share that independence.
-func Update(ctx context.Context, dbPath string, providers []provider.Provider, annotators []provider.Annotator, stdout, stderr io.Writer) int {
+//
+// seedPath, when non-empty, names a previously built database (typically
+// pulled from a published artifact) whose RATINGS bucket only is copied into
+// this build, after the providers run and before the annotators do. Ratings
+// only, and deliberately so: advisories are rebuilt from the providers above
+// regardless of seedPath, because nothing here removes a record no provider
+// re-emitted, and a seeded advisory upstream has since withdrawn (D16) would
+// be a false positive with no expiry. Ratings have no such failure — NVD
+// does not delete CVEs, a revised score changes lastModified so the next
+// delta overwrites it, and a rating for a CVE no advisory matches is
+// unreachable (Matcher.annotate only asks about identifiers a finding
+// already carries) — which is what makes copying them forward sound where
+// copying advisories forward would not be. This is the seven-hour half a
+// six-hour scheduled build cannot otherwise afford.
+func Update(ctx context.Context, dbPath, seedPath string, providers []provider.Provider, annotators []provider.Annotator, stdout, stderr io.Writer) int {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		fmt.Fprintf(stderr, "error: create database directory: %v\n", err)
 		return 2
@@ -68,6 +82,47 @@ func Update(ctx context.Context, dbPath string, providers []provider.Provider, a
 		}
 		meta.Providers[p.Name()] = prov
 	}
+
+	// Seeding, if requested: ratings only, copied BEFORE the annotators run
+	// so a delta below overwrites the entries it re-fetched and leaves the
+	// rest (see Update's own doc comment for why advisories are deliberately
+	// excluded). w is still the empty-then-provider-filled temp store here —
+	// nothing about the advisory build above changes for a seeded run, which
+	// is what keeps a withdrawn advisory absent rather than reintroduced.
+	if seedPath != "" {
+		src, err := store.Open(seedPath)
+		if err != nil {
+			w.Close()
+			os.Remove(tmp)
+			fmt.Fprintf(stderr, "error: open seed %s: %v\n", seedPath, err)
+			return 2
+		}
+		seeded := 0
+		copyErr := src.EachRating(func(r advisory.Rating) error {
+			seeded++
+			return w.PutRating(r)
+		})
+		seedMeta, metaErr := src.Meta()
+		src.Close()
+		if copyErr != nil {
+			w.Close()
+			os.Remove(tmp)
+			fmt.Fprintf(stderr, "error: read seed ratings: %v\n", copyErr)
+			return 2
+		}
+		// The seed's rating provenance is the starting point, so an annotator
+		// this run did NOT run keeps the seed's window rather than vanishing
+		// from `db status`. One that DID run overwrites its entry in the loop
+		// below, which is what stops a one-day delta inheriting a
+		// thirty-day coverage claim (the hazard TestUpdate_SeededRunReports-
+		// TheWindowItActuallyFetched exists to pin: this copy must happen
+		// BEFORE the annotator loop, never after).
+		if metaErr == nil {
+			maps.Copy(meta.Ratings, seedMeta.Ratings)
+		}
+		fmt.Fprintf(stderr, "seeded %d rating(s) from %s; advisories rebuilt from source\n", seeded, seedPath)
+	}
+
 	// Annotators run after the advisory providers (see Update's own doc
 	// comment on why the order is kept even though nothing here depends on
 	// it). A failing annotator fails the whole build exactly like a failing

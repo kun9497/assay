@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -70,6 +71,16 @@ db update flags:
   --from <ref>    Pull from a different registry reference (a mirror, or a
                   pinned digest). The default derives its tag from the
                   schema version this binary reads.
+
+db build flags:
+  --seed <ref>    Layer onto a previously published database (D-seed): its
+                  RATINGS are carried forward, its advisories are not --
+                  every advisory is rebuilt from the providers below
+                  regardless, so one upstream withdraws stays gone. This is
+                  what lets a scheduled build fit a six-hour job cap instead
+                  of repeating the seven-hour full pass. A seed that cannot
+                  be read fails the build rather than silently building from
+                  empty.
 
 Environment (db build only — a scan reads no environment and no network):
   NVD_ENABLE=1          Also fetch NIST's CVSS scores, so findings whose
@@ -135,7 +146,34 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		switch args[1] {
 		case "build":
-			return dbcmd.Update(context.Background(), path,
+			ref, hasSeed, ok := resolveBuildSeed(args, stderr)
+			if !ok {
+				return exitError
+			}
+			seedPath := ""
+			if hasSeed {
+				// A scratch directory, not dbPath's own directory: the seed
+				// is read-only input to this build, kept apart from the tmp
+				// file Update itself builds into so the two can never
+				// collide or be cleaned up by each other's logic.
+				dir, err := os.MkdirTemp("", "assay-seed-")
+				if err != nil {
+					fmt.Fprintf(stderr, "error: create seed scratch directory: %v\n", err)
+					return exitError
+				}
+				defer os.RemoveAll(dir)
+				seedPath = filepath.Join(dir, "seed.db")
+				// Pull's own exit code and stderr already explain what went
+				// wrong. Returning it as-is (never falling through to build
+				// from empty) is Task 5's whole point: the scheduled builder
+				// passes --seed every night, so a registry outage must fail
+				// loudly rather than quietly publish a one-day database over
+				// a complete one.
+				if code := dbcmd.Pull(context.Background(), seedPath, ref, stdout, stderr); code != 0 {
+					return code
+				}
+			}
+			return dbcmd.Update(context.Background(), path, seedPath,
 				[]provider.Provider{osv.New(osv.Ecosystems, "")},
 				dbUpdateAnnotators(stderr),
 				stdout, stderr)
@@ -295,6 +333,33 @@ func resolveUpdateRef(args []string, stderr io.Writer) (ref string, ok bool) {
 		return "", false
 	}
 	return args[3], true
+}
+
+// resolveBuildSeed decides whether `db build` should layer onto a published
+// database: absent by default (has == false, today's from-empty build), or
+// an explicit `--seed <ref>`. Split out and network-free for the same
+// reason resolveUpdateRef is: a test can drive every argument shape
+// directly, without reaching dbcmd.Pull with an unvalidated ref (an actual
+// network call, which no test here may make).
+//
+// A missing value or an unrecognized flag is rejected outright rather than
+// silently building from empty — the scheduled builder passes --seed every
+// night specifically to avoid the seven-hour full pass, so a typo silently
+// falling back to it would turn into a job that blows the six-hour cap
+// instead of failing fast and loud.
+func resolveBuildSeed(args []string, stderr io.Writer) (ref string, has, ok bool) {
+	if len(args) <= 2 {
+		return "", false, true
+	}
+	if args[2] != "--seed" {
+		fmt.Fprintf(stderr, "error: unknown db build flag %q (want --seed <ref>)\n", args[2])
+		return "", false, false
+	}
+	if len(args) < 4 {
+		fmt.Fprintln(stderr, "error: --seed requires a reference, e.g. ghcr.io/kun9497/assay-db:v6")
+		return "", false, false
+	}
+	return args[3], true, true
 }
 
 // scan is the pipeline entry point: parse the target into an inventory, match

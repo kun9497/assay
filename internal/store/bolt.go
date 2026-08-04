@@ -350,6 +350,27 @@ func (b *Bolt) RatingsFor(cve string) ([]advisory.Rating, error) {
 	return out, nil
 }
 
+// EachRating walks every stored rating in key order, which is what a
+// seeded build copies forward. Key order is bbolt's own byte order, so
+// two runs over the same database visit the same sequence -- this adds no
+// nondeterminism to a build (see Meta's own sorted fields for why that
+// matters).
+func (b *Bolt) EachRating(fn func(advisory.Rating) error) error {
+	return b.db.View(func(tx *bolt.Tx) error {
+		c := tx.Bucket(bucketRatings).Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			var r advisory.Rating
+			if err := json.Unmarshal(v, &r); err != nil {
+				return fmt.Errorf("decode rating %q: %w", k, err)
+			}
+			if err := fn(r); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func (b *Bolt) Meta() (Meta, error) {
 	var m Meta
 	err := b.db.View(func(tx *bolt.Tx) error {

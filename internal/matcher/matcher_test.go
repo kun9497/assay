@@ -1,6 +1,7 @@
 package matcher
 
 import (
+	"sort"
 	"strings"
 	"testing"
 
@@ -63,6 +64,27 @@ func (f fakeStore) RatingsFor(cve string) ([]advisory.Rating, error) {
 		f.ratingCalls[cve]++
 	}
 	return f.ratings[cve], nil
+}
+
+// EachRating exists only to satisfy store.Store -- nothing in the matcher's
+// own tests walks the whole bucket, that is dbcmd.Update's job (the seeded
+// `db build` path), not the matcher's. Sorted anyway, matching
+// Bolt.EachRating's own key-order contract, so a fixture that DID depend on
+// order would fail here rather than only in production.
+func (f fakeStore) EachRating(fn func(advisory.Rating) error) error {
+	cves := make([]string, 0, len(f.ratings))
+	for cve := range f.ratings {
+		cves = append(cves, cve)
+	}
+	sort.Strings(cves)
+	for _, cve := range cves {
+		for _, r := range f.ratings[cve] {
+			if err := fn(r); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func advWithRange(id, eco, name, introduced, fixed string, rt advisory.RangeType) advisory.Advisory {

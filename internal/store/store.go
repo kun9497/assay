@@ -67,6 +67,12 @@ type Store interface {
 	// returns an empty slice and a nil error — the matcher calls this for
 	// every finding, so "nobody rated this" is a normal answer, not a failure.
 	RatingsFor(cve string) ([]advisory.Rating, error)
+	// EachRating walks every stored rating, in key order, so a caller
+	// (a seeded `db build`, D-seed) can copy the whole ratings bucket forward
+	// without knowing which CVEs it holds ahead of time. Key order is the
+	// store's own byte order, not an incidental one — see Bolt.EachRating's
+	// doc comment for why that determinism matters here specifically.
+	EachRating(fn func(advisory.Rating) error) error
 	// Covers reports which ecosystem keys this database actually holds (D20).
 	// A caller that skips this cannot distinguish "no advisories for this
 	// package" from "this ecosystem was never ingested".
