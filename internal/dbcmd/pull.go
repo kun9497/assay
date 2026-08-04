@@ -97,9 +97,18 @@ func Pull(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer) int
 	}
 	db.Close()
 
-	if err := os.Rename(tmp, dbPath); err != nil {
-		os.Remove(tmp)
+	// The same retrying rename Update uses (dbcmd.go), not a bare os.Rename:
+	// on Windows a rename over a file a concurrent scan holds open fails
+	// outright, and a scan reading the database is exactly the case the
+	// temp-file dance exists to support. On failure the temp file is kept,
+	// not removed -- it is a verified, complete database that cost a real
+	// download, and losing it because a scan happened to be running is a
+	// worse outcome than leaving a file behind (dbcmd.go's own reasoning for
+	// Update, applied here since the download makes it matter even more).
+	if err := replace(tmp, dbPath); err != nil {
 		fmt.Fprintf(stderr, "error: install database: %v\n", err)
+		fmt.Fprintf(stderr, "the downloaded database is complete and left at %s\n", tmp)
+		fmt.Fprintln(stderr, "close any running scan and move it into place, or re-run `assay db update`")
 		return 2
 	}
 	fmt.Fprintf(stderr, "database installed at %s\n", dbPath)

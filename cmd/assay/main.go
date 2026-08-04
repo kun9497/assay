@@ -125,7 +125,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	case "db":
 		if len(args) < 2 {
-			fmt.Fprintln(stderr, "error: db requires a subcommand (build, status)")
+			fmt.Fprintln(stderr, "error: db requires a subcommand (update, build, status, push, ref)")
 			return exitError
 		}
 		path, err := store.DefaultPath()
@@ -140,12 +140,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 				dbUpdateAnnotators(stderr),
 				stdout, stderr)
 		case "update":
-			ref := dbcmd.Ref(dbcmd.DefaultRef)
-			// --from takes a full reference including its tag, because someone
-			// pointing at a mirror or a pinned digest needs to say exactly what
-			// they mean. The default is the only path that derives its own tag.
-			if len(args) > 3 && args[2] == "--from" {
-				ref = args[3]
+			ref, ok := resolveUpdateRef(args, stderr)
+			if !ok {
+				return exitError
 			}
 			return dbcmd.Pull(context.Background(), path, ref, stdout, stderr)
 		case "status":
@@ -265,6 +262,39 @@ func dbUpdateAnnotators(stderr io.Writer) []provider.Annotator {
 		return nil
 	}
 	return []provider.Annotator{newNVDAnnotator(nvdOptionsFromEnv(stderr))}
+}
+
+// resolveUpdateRef decides which reference `db update` pulls from: the
+// default, schema-derived ref (dbcmd.Ref(dbcmd.DefaultRef)), or an explicit
+// override via `--from <ref>`. Pulled out of the "update" case as its own,
+// network-free function — matching parseScanArgs' own separation from the
+// commands that act on what it parses — so a test can drive every
+// argument shape directly rather than only through run()'s full dispatch to
+// dbcmd.Pull. That distinction matters here specifically: reaching Pull with
+// the unvalidated default ref would mean an actual attempt to fetch from
+// the real ghcr.io, which is exactly the network access no test may make,
+// so a bug in the validation below could otherwise only be proven by a test
+// that risks doing the very thing D14 forbids.
+//
+// A missing value ("--from" with nothing after it) or an unrecognized third
+// argument (a typo'd "--form", or anything else) is an error, not a silent
+// fall-through to the public default: someone pointing --from at a mirror
+// or a pinned digest, or relying on it specifically because they are
+// air-gapped, must not be quietly redirected to ghcr.io by a missing value
+// or a typo.
+func resolveUpdateRef(args []string, stderr io.Writer) (ref string, ok bool) {
+	if len(args) <= 2 {
+		return dbcmd.Ref(dbcmd.DefaultRef), true
+	}
+	if args[2] != "--from" {
+		fmt.Fprintf(stderr, "error: unknown db update flag %q (want --from <ref>)\n", args[2])
+		return "", false
+	}
+	if len(args) < 4 {
+		fmt.Fprintln(stderr, "error: --from requires a reference, e.g. ghcr.io/kun9497/assay-db:v6")
+		return "", false
+	}
+	return args[3], true
 }
 
 // scan is the pipeline entry point: parse the target into an inventory, match

@@ -1015,6 +1015,78 @@ func TestRun_DBBuildReplacesUpdate(t *testing.T) {
 		if strings.Contains(stderr.String(), "not wired up yet") {
 			t.Errorf("db update is still the Task 1 placeholder:\n%s", stderr.String())
 		}
+		// Fix round 1: the three checks above are all negative -- replacing
+		// this case's body with `case "build":`'s call to dbcmd.Update
+		// (dropping the environment's real OSV/NVD network calls aside, which
+		// nothing here would observe either) still exits 2 on a provider
+		// failure and says neither forbidden string, so "not a silent build"
+		// was not actually held. dbcmd.Pull is the only function in the
+		// codebase that writes this exact "fetching <ref>…" line
+		// (internal/dbcmd/pull.go) -- dbcmd.Update's own progress lines name
+		// a provider or annotator instead -- so this is positive proof of
+		// which function ran, not just an absence of the wrong strings.
+		if !strings.Contains(stderr.String(), "fetching 127.0.0.1:1/assay-db:v6") {
+			t.Errorf("stderr does not show Pull's own fetch line, so update may not be "+
+				"reaching Pull at all:\n%s", stderr.String())
+		}
+	})
+}
+
+// Fix round 1, finding 2: `db update --from` with a missing value, or a
+// typo'd flag name, silently fell back to the default ref -- exactly wrong
+// for an air-gapped or mirror-pinned user, who set --from specifically to
+// avoid the public default. Driven directly against resolveUpdateRef, not
+// through run(), because a validation bug here would otherwise only be
+// provable by a test that lets execution reach dbcmd.Pull with the real
+// default ghcr.io ref -- an actual network call, which this environment can
+// in fact make (the codebase's own history: an unguarded ASSAY_DB_DIR once
+// let a routing test perform a live ~200 MB OSV fetch). resolveUpdateRef
+// itself never touches the network, so every case below is safe regardless
+// of what it returns.
+func TestResolveUpdateRef(t *testing.T) {
+	t.Run("no --from uses the default, schema-derived ref", func(t *testing.T) {
+		var stderr bytes.Buffer
+		ref, ok := resolveUpdateRef([]string{"db", "update"}, &stderr)
+		if !ok {
+			t.Fatalf("ok = false, want true (stderr: %s)", stderr.String())
+		}
+		want := dbcmd.Ref(dbcmd.DefaultRef)
+		if ref != want {
+			t.Errorf("ref = %q, want %q", ref, want)
+		}
+	})
+
+	t.Run("--from <ref> overrides the default", func(t *testing.T) {
+		var stderr bytes.Buffer
+		ref, ok := resolveUpdateRef([]string{"db", "update", "--from", "example.test/mirror:v6"}, &stderr)
+		if !ok {
+			t.Fatalf("ok = false, want true (stderr: %s)", stderr.String())
+		}
+		if ref != "example.test/mirror:v6" {
+			t.Errorf("ref = %q, want the explicit --from value", ref)
+		}
+	})
+
+	t.Run("--from with no value is rejected, not a silent default", func(t *testing.T) {
+		var stderr bytes.Buffer
+		_, ok := resolveUpdateRef([]string{"db", "update", "--from"}, &stderr)
+		if ok {
+			t.Error("ok = true, want false: --from with no value must not silently resolve to the default ref")
+		}
+		if !strings.Contains(stderr.String(), "--from requires a reference") {
+			t.Errorf("stderr does not say --from needs a value:\n%s", stderr.String())
+		}
+	})
+
+	t.Run("an unrecognized third argument is rejected, not silently ignored", func(t *testing.T) {
+		var stderr bytes.Buffer
+		_, ok := resolveUpdateRef([]string{"db", "update", "--form", "example.test/mirror:v6"}, &stderr)
+		if ok {
+			t.Error("ok = true, want false: a typo'd flag must not silently fall back to the default ref")
+		}
+		if !strings.Contains(stderr.String(), `unknown db update flag "--form"`) {
+			t.Errorf("stderr does not name the unrecognized flag:\n%s", stderr.String())
+		}
 	})
 }
 
