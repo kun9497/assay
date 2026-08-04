@@ -77,18 +77,35 @@ func Push(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer) int
 }
 
 // oldestDataAsOf is "the oldest upstream wins" (D12), the same rule the NVD
-// provider applies across its own pages: an artifact is only as fresh as
-// its stalest component. Taking the newest would let one recently-synced
+// provider applies across its own pages: an artifact is only as fresh as its
+// stalest component. Taking the newest would let one recently-synced
 // provider vouch for a database whose other half is months old.
+//
+// Both provenance buckets are consulted, not just Providers: Ratings is
+// where NVD's own DataAsOf lives, and --seed carries Ratings forward without
+// touching Providers (D-seed rebuilds every advisory but layers ratings from
+// the seed). A build on 2026-11-01 seeded from an August database and run
+// without NVD_ENABLE has fresh Providers and three-month-old Ratings; taking
+// only the former would publish DataAsOf = 2026-11-01 while every CVE first
+// rated in September silently reads as unknown and stops tripping
+// --fail-on. Folding Ratings into the same minimum is what this function's
+// own "an artifact is only as fresh as its stalest component" already
+// promises — it just was not keeping that promise for half of Meta.
 func oldestDataAsOf(m store.Meta) time.Time {
 	var oldest time.Time
-	for _, p := range m.Providers {
+	consider := func(p store.Provenance) {
 		if p.DataAsOf.IsZero() {
-			continue
+			return
 		}
 		if oldest.IsZero() || p.DataAsOf.Before(oldest) {
 			oldest = p.DataAsOf
 		}
+	}
+	for _, p := range m.Providers {
+		consider(p)
+	}
+	for _, p := range m.Ratings {
+		consider(p)
 	}
 	return oldest
 }

@@ -152,6 +152,54 @@ func TestPush_DataAsOfIsTheOldestProvider(t *testing.T) {
 	}
 }
 
+// Finding 1 of the final review: oldestDataAsOf only walked m.Providers, so
+// a build seeded from an old published database (--seed carries Ratings
+// forward via maps.Copy without touching Providers, D-seed) and re-run
+// without NVD_ENABLE published the fresh Providers timestamp while the
+// carried-forward NVD ratings were months stale. This asserts the opposite:
+// Ratings provenance older than every Providers entry must win, the same
+// "oldest wins" rule already applied within Providers alone.
+func TestPush_DataAsOfIsTheOldestAcrossProvidersAndRatings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleRatings := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	if err := w.SetMeta(store.Meta{
+		BuiltAt: testBuiltAt,
+		Providers: map[string]store.Provenance{
+			"osv": {DataAsOf: time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)},
+		},
+		Ratings: map[string]store.Provenance{
+			"nvd": {DataAsOf: staleRatings},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+
+	srv := httptest.NewServer(registry.New())
+	defer srv.Close()
+	u, err := url.Parse(srv.URL)
+	ref := must(t, u, err).Host + "/assay-db:v6"
+
+	var out, errOut bytes.Buffer
+	if code := Push(context.Background(), path, ref, &out, &errOut); code != 0 {
+		t.Fatalf("Push = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	parsedRef, refErr := name.ParseReference(ref)
+	img, err := remote.Image(must(t, parsedRef, refErr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, _ := dbartifact.MetaOf(img)
+	if !m.DataAsOf.Equal(staleRatings) {
+		t.Errorf("DataAsOf = %v, want the stale RATINGS provenance %v, not the fresher Providers one",
+			m.DataAsOf, staleRatings)
+	}
+}
+
 // Pushing a database that is not there is a 2 that says so, not a panic
 // and not a silent empty artifact.
 func TestPush_MissingDatabaseExitsTwo(t *testing.T) {
