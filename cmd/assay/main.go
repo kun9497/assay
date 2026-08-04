@@ -189,11 +189,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		case "status":
 			return dbcmd.Status(path, stdout, stderr)
 		case "push":
-			if len(args) < 3 {
-				fmt.Fprintln(stderr, "error: db push needs a reference, e.g. ghcr.io/kun9497/assay-db:v6")
+			ref, ok := resolvePushRef(args, stderr)
+			if !ok {
 				return exitError
 			}
-			return dbcmd.Push(context.Background(), path, args[2], stdout, stderr)
+			return dbcmd.Push(context.Background(), path, ref, stdout, stderr)
 		case "ref":
 			// Prints to stdout: it is a result a CI workflow captures to tag
 			// what `db push` publishes, not a diagnostic. Reading it from the
@@ -363,6 +363,31 @@ func resolveBuildSeed(args []string, stderr io.Writer) (ref string, has, ok bool
 		return "", false, false
 	}
 	return args[3], true, true
+}
+
+// resolvePushRef validates `db push`'s arguments: exactly one reference, no
+// more. Split out and network-free for the same reason resolveUpdateRef and
+// resolveBuildSeed are: a test can drive every argument shape without
+// dbcmd.Push ever running.
+//
+// The trailing-argument rejection makes push consistent with update
+// (resolveUpdateRef): `db update` already refuses an unrecognized third
+// argument rather than silently ignoring it, and `db push ref junk` passing
+// silently — publishing to `ref` while `junk` is dropped on the floor — was
+// the exact "flag or argument accepted, then ignored" shape update's own
+// rejection exists to prevent, D18's divergence-table concern applied to
+// positional arguments instead of a flag.
+func resolvePushRef(args []string, stderr io.Writer) (ref string, ok bool) {
+	if len(args) < 3 {
+		fmt.Fprintln(stderr, "error: db push needs a reference, e.g. ghcr.io/kun9497/assay-db:v6")
+		return "", false
+	}
+	if len(args) > 3 {
+		fmt.Fprintf(stderr, "error: unexpected argument %q: db push takes exactly one reference (already have %q)\n",
+			args[3], args[2])
+		return "", false
+	}
+	return args[2], true
 }
 
 // scan is the pipeline entry point: parse the target into an inventory, match

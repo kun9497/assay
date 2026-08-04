@@ -1240,3 +1240,89 @@ func TestRun_DBRefPrintsTheCurrentSchemaTag(t *testing.T) {
 		t.Errorf("db ref wrote a diagnostic for a clean run: %q", stderr.String())
 	}
 }
+
+// Finding 2 of the final review: `db push` had no routing test at all --
+// `build`, `update` and `ref` each had one, and replacing
+// `return dbcmd.Push(...)` with `return exitOK` in case "push" left the
+// whole suite green. ASSAY_DB_DIR points at an empty temp directory holding
+// no database file, so dbcmd.Push's own os.Stat fails before it ever
+// touches the network (mirroring TestRun_DBBuildReplacesUpdate's precaution
+// against a routing test performing a real network operation) with a
+// message unique to Push -- positive proof push reached it, not just an
+// absence of "unknown db subcommand".
+func TestRun_DBPushRoutesToPush(t *testing.T) {
+	t.Setenv("ASSAY_DB_DIR", t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"db", "push", "example.test/assay-db:v6"}, &stdout, &stderr)
+	if code != exitError {
+		t.Errorf("db push with no local database = %d, want %d\nstderr:\n%s", code, exitError, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "no database at") {
+		t.Errorf("stderr does not show Push's own missing-database message, so push may not be "+
+			"reaching dbcmd.Push at all:\n%s", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "unknown db subcommand") {
+		t.Errorf("db push is not routed:\n%s", stderr.String())
+	}
+}
+
+// resolvePushRef mirrors resolveUpdateRef's own test shape and reasoning:
+// driven directly, never through run(), so validation is provable without
+// ever letting execution reach dbcmd.Push.
+func TestResolvePushRef(t *testing.T) {
+	t.Run("a bare reference is accepted", func(t *testing.T) {
+		var stderr bytes.Buffer
+		ref, ok := resolvePushRef([]string{"db", "push", "example.test/assay-db:v6"}, &stderr)
+		if !ok {
+			t.Fatalf("ok = false, want true (stderr: %s)", stderr.String())
+		}
+		if ref != "example.test/assay-db:v6" {
+			t.Errorf("ref = %q, want the given reference", ref)
+		}
+	})
+
+	t.Run("no reference is rejected", func(t *testing.T) {
+		var stderr bytes.Buffer
+		_, ok := resolvePushRef([]string{"db", "push"}, &stderr)
+		if ok {
+			t.Error("ok = true, want false: db push needs a reference")
+		}
+		if !strings.Contains(stderr.String(), "db push needs a reference") {
+			t.Errorf("stderr does not say push needs a reference:\n%s", stderr.String())
+		}
+	})
+
+	// db push accepting trailing junk while db update rejects it
+	// (resolveUpdateRef) was the inconsistency the final review flagged --
+	// a reference typo followed by a stray argument must not silently
+	// publish to the first token while dropping the second.
+	t.Run("a trailing argument is rejected, not silently ignored", func(t *testing.T) {
+		var stderr bytes.Buffer
+		_, ok := resolvePushRef([]string{"db", "push", "example.test/assay-db:v6", "extra"}, &stderr)
+		if ok {
+			t.Error("ok = true, want false: db push takes exactly one reference")
+		}
+		if !strings.Contains(stderr.String(), `unexpected argument "extra"`) {
+			t.Errorf("stderr does not name the unexpected argument:\n%s", stderr.String())
+		}
+	})
+}
+
+// End-to-end version of the trailing-argument rejection above: proves the
+// "push" case in run() actually calls resolvePushRef rather than some other
+// validation (or none). Safe through the real dispatch because
+// resolvePushRef rejects before dbcmd.Push is ever reached, so this never
+// touches the network regardless of what case "push" does with the result.
+func TestRun_DBPushRejectsTrailingArgument(t *testing.T) {
+	t.Setenv("ASSAY_DB_DIR", t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"db", "push", "example.test/assay-db:v6", "extra"}, &stdout, &stderr)
+	if code != exitError {
+		t.Errorf("db push with a trailing argument = %d, want %d\nstderr:\n%s", code, exitError, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), `unexpected argument "extra"`) {
+		t.Errorf("stderr does not name the unexpected argument:\n%s", stderr.String())
+	}
+}
