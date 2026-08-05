@@ -149,18 +149,25 @@ func (f fakeEnricher) Enrich(_ context.Context, emit func(advisory.Enrichment) e
 			return store.Provenance{}, err
 		}
 	}
-	if f.err != nil {
-		return store.Provenance{}, f.err
-	}
 	records := f.claims
 	if records == 0 {
 		records = len(f.records)
 	}
-	return store.Provenance{
+	prov := store.Provenance{
 		Source:   "https://example.test/knvd",
 		DataAsOf: time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC),
 		Records:  records,
-	}, nil
+	}
+	if f.err != nil {
+		// A fully populated Provenance is returned ALONGSIDE the error, on
+		// purpose, and it is more hostile than any real enricher: knvd returns
+		// a zero one. It is here so Update discarding what a failed run
+		// reported about itself is an assertion rather than an accident of the
+		// fixture — a run that did not finish cannot vouch for its own
+		// freshness, and `db status` must not print a DATA AS OF for it (D12).
+		return prov, f.err
+	}
+	return prov, nil
 }
 
 func TestUpdateThenStatus(t *testing.T) {
@@ -1251,5 +1258,121 @@ func TestStatus_NoEnricherMeansNoEnrichmentTable(t *testing.T) {
 	}
 	if strings.Contains(s, "KISA") {
 		t.Errorf("status mentions KISA even though no enricher ran against this database:\n%s", s)
+	}
+}
+
+// A failed enrichment run is visible in `db status` whether or not it wrote
+// anything first.
+//
+// The first version of this recorded nothing for a failed source, which
+// produced the worst of both worlds: a PARTIAL failure still rendered a row
+// (its records are in the bucket, so the derived half of the union answers
+// for it) while a TOTAL failure rendered none at all. The same fault was
+// visible or invisible depending on when the feed died, and a reader had no
+// way to tell either shape from a healthy run — the partial one reads as a
+// complete fetch of exactly that many records.
+//
+// The stderr warning is not a substitute: it scrolls past with the build,
+// while the database is what anyone looks at afterwards, and a scan run a
+// week later has only `db status` to go on.
+func TestStatus_AFailedEnricherIsVisibleWhetherOrNotItWroteAnything(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		records []advisory.Enrichment
+		err     error
+		// wantCount is the number that must appear as its own field in the
+		// row, or "" when the run wrote nothing at all.
+		wantCount string
+		// wantTail is a word from LATER in the error message that must land
+		// on the same row, or "" when the message is a single line anyway.
+		wantTail string
+	}{
+		{
+			name:    "total failure",
+			records: nil,
+			err:     errBoom,
+		},
+		{
+			name: "partial failure",
+			records: []advisory.Enrichment{
+				{CVE: "CVE-2026-1000", Source: "KISA", Title: "제목 하나"},
+				{CVE: "CVE-2026-2000", Source: "KISA", Title: "제목 둘"},
+			},
+			err:       errBoom,
+			wantCount: "2",
+		},
+		{
+			// A message spanning lines must be folded into one. A tabwriter
+			// row containing a newline does not render as an odd-looking
+			// cell — it silently becomes two rows, the second unlabelled and
+			// unaligned, so the cause ends up under a heading it has nothing
+			// to do with and the table stops being readable at all.
+			name: "a failure whose message spans lines",
+			err:  errors.New("boom\nsecond line of the message"),
+			// "second" can only appear on this row if the newline was
+			// flattened; otherwise it starts a row of its own.
+			wantTail: "second",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "vulnerability.db")
+			p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+				ID: "GHSA-failed-enricher", Database: "GHSA", Source: "osv",
+				Kind:     advisory.KindVulnerability,
+				Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
+			}}}
+			e := fakeEnricher{name: "KISA", records: tc.records, err: tc.err}
+
+			var out, errOut bytes.Buffer
+			if code := Update(context.Background(), path, "", "", []provider.Provider{p}, nil,
+				[]provider.Enricher{e}, &out, &errOut); code != 0 {
+				t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+			}
+			out.Reset()
+			errOut.Reset()
+			if code := Status(path, &out, &errOut); code != 0 {
+				t.Fatalf("Status = %d, want 0 (stderr: %s)", code, errOut.String())
+			}
+			row := enrichmentSourceLine(t, out.String(), "KISA")
+
+			// It says it failed, and it says why. The cause is asserted
+			// separately from the word: a row that said "failed" with no
+			// reason would leave an operator exactly where the missing row
+			// left them.
+			if !strings.Contains(row, "failed") {
+				t.Errorf("ENRICHMENT SOURCE row for KISA does not say the run failed:\n%q", row)
+			}
+			if !strings.Contains(row, "boom") {
+				t.Errorf("ENRICHMENT SOURCE row for KISA does not name the cause:\n%q", row)
+			}
+			// And it cannot be read as a healthy run that simply had nothing
+			// to say — the wording the successful-but-empty case uses.
+			if strings.Contains(row, "ran, enriched nothing") {
+				t.Errorf("a FAILED enrichment run renders as a successful empty one:\n%q", row)
+			}
+			// DATA AS OF stays unknown. The fixture returns a fully populated
+			// Provenance alongside its error, so a row showing 2026-08-05 here
+			// means Update believed a run that did not finish (D12).
+			fields := strings.Fields(row)
+			if !slices.Contains(fields, "unknown") {
+				t.Errorf("ENRICHMENT SOURCE row for KISA reports a DATA AS OF for a run that "+
+					"did not finish:\n%q", row)
+			}
+			if slices.Contains(fields, "https://example.test/knvd") {
+				t.Errorf("ENRICHMENT SOURCE row for KISA reports a fetch URL for a run that "+
+					"did not finish:\n%q", row)
+			}
+			if tc.wantTail != "" && !strings.Contains(row, tc.wantTail) {
+				t.Errorf("the rest of a multi-line failure message is not on this row, so it "+
+					"became a row of its own and broke the table:\n%q\nin:\n%s", row, out.String())
+			}
+			if tc.wantCount != "" && !slices.Contains(fields, tc.wantCount) {
+				// The records that DID land are still worth stating: "2" and
+				// "2 out of an unknown number" are different claims, and the
+				// second is the one this row has to make.
+				t.Errorf("ENRICHMENT SOURCE row for KISA does not show the %s record(s) that "+
+					"landed before the failure:\n%q", tc.wantCount, row)
+			}
+		})
 	}
 }

@@ -162,6 +162,16 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []p
 		// what the database holds rather than only what this run fetched
 		// (see mergeRatingCoverage). This copy must still happen BEFORE the
 		// annotator loop, never after.
+		// Enrichment is deliberately NOT carried forward, and unlike
+		// advisories that is a cost decision rather than a correctness one.
+		// A published artifact has none to carry (D29 strips it), and a
+		// seed built locally would only hold what its own build fetched — so
+		// a nightly `db build --seed` run without KISA_ENABLE simply has no
+		// Korean prose, silently, until the next run that sets it. That is
+		// affordable because the whole KNVD walk is ~41 requests and under a
+		// minute: re-fetching is cheaper than the machinery to inherit it,
+		// where ratings genuinely cost seven hours. If enrichment ever grows
+		// a cost like that, this is the line that has to change.
 		maps.Copy(meta.Ratings, seedMeta.Ratings)
 		fmt.Fprintf(stderr, "seeded %d rating(s) from %s; advisories rebuilt from source\n", seeded, label)
 	}
@@ -197,17 +207,31 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []p
 	// all, and would do it AFTER an OSV fetch and possibly a seven-hour NVD
 	// pass had already succeeded.
 	//
-	// Nothing is recorded in meta.Enrichment for a source that failed, so
-	// `db status` cannot present a half-run as a completed one. Records it
-	// managed to write before failing are left in place rather than rolled
-	// back: they are harmless by construction, and the count `db status`
-	// shows is derived from the bucket (store.Meta.EnrichmentCounts), so it
-	// describes what is actually there rather than what was claimed.
+	// A failure is still RECORDED, not merely warned about: the entry carries
+	// Provenance.Error and nothing else, so `db status` renders a row saying
+	// this source did not finish. Warning on stderr alone is not enough —
+	// the build's output scrolls past, while the database is what anyone
+	// looks at afterwards, and D20's rule is that a source which did not
+	// deliver must not be indistinguishable from one that was never
+	// configured.
+	//
+	// Writing nothing was the first version and it was worse than either
+	// alternative. Records an enricher managed to emit before failing stay in
+	// the bucket (they are harmless by construction — nothing here reaches a
+	// verdict), so the derived half of `db status`'s union already produced a
+	// row for a PARTIAL failure while a TOTAL one produced none: the same
+	// fault visible or invisible depending on when the feed died.
 	for _, e := range enrichers {
 		fmt.Fprintf(stderr, "enriching with %s…\n", e.Name())
 		prov, err := e.Enrich(ctx, func(en advisory.Enrichment) error { return w.PutEnrichment(en) })
 		if err != nil {
 			fmt.Fprintf(stderr, "warning: enricher %s: %v\n", e.Name(), err)
+			// Whatever the enricher returned alongside its error is
+			// discarded: a run that failed cannot vouch for its own DataAsOf
+			// or record count, and rendering a freshness date for a fetch
+			// that did not finish is exactly the over-claim D12 exists to
+			// stop. The failure itself is the only thing recorded.
+			meta.Enrichment[e.Name()] = store.Provenance{Error: oneLine(err.Error())}
 			continue
 		}
 		meta.Enrichment[e.Name()] = prov
@@ -250,6 +274,16 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []p
 	// (see Meta.Ratings' own doc comment) — `assay db status` is where the
 	// derived, accurate count belongs, and it already shows it.
 	return 0
+}
+
+// oneLine flattens a message so it cannot break the table it is rendered
+// into. A tabwriter row containing a newline is not a row with an odd-looking
+// cell — it silently becomes two rows, one of them unaligned and unlabelled,
+// and the value that mattered ends up under a column heading it has nothing
+// to do with. Provider errors are single-line today; a wrapped one from a
+// future source is not this function's caller's problem to remember.
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // replaceWaits is replace's own retry schedule: the delay before each
@@ -460,6 +494,14 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 	//     a 0 reads as "no problem" rather than "check the sync");
 	//   - a name in neither never ran, and has no row at all.
 	//
+	// With a fourth this table has that RATING SOURCE does not need: a run
+	// that FAILED. An enricher's failure does not fail the build (see
+	// Update), so unlike an annotator's it leaves a database behind for
+	// someone to read — and a source that died halfway must not be readable
+	// as one that finished. Both shapes of failure say so, the partial one
+	// alongside the count that did land, because "2 records" and "2 records
+	// out of an unknown number" are different claims.
+	//
 	// There is no COVERED column: an enricher fetches the whole notice list
 	// every build (~41 requests), so there is no window to disclose the way a
 	// bounded NVD sync has one.
@@ -489,9 +531,23 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 			if !p.DataAsOf.IsZero() {
 				asOf = p.DataAsOf.Format("2006-01-02")
 			}
-			records := "ran, enriched nothing - investigate the sync"
-			if n, ok := m.EnrichmentCounts[name]; ok {
+			n, enriched := m.EnrichmentCounts[name]
+			var records string
+			switch {
+			case p.Error != "" && enriched:
+				// Partial. The count is real but it is not the whole of what
+				// this source holds, and saying only "2" would present an
+				// interrupted fetch as a complete one. The number keeps a
+				// space after it so it is still a field of its own in the
+				// rendered row -- "2," would not be, and a test asserting on
+				// the count would have to know the punctuation.
+				records = fmt.Sprintf("%d written, then failed - %s", n, p.Error)
+			case p.Error != "":
+				records = fmt.Sprintf("failed, enriched nothing - %s", p.Error)
+			case enriched:
 				records = fmt.Sprintf("%d", n)
+			default:
+				records = "ran, enriched nothing - investigate the sync"
 			}
 			fmt.Fprintf(etw, "%s\t%s\t%s\t%s\n", name, asOf, records, p.Source)
 		}

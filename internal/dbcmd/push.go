@@ -59,10 +59,11 @@ func Push(ctx context.Context, dbPath, ref string, force bool, stdout, stderr io
 	// the two lines below empty it, and `db update` therefore never delivers
 	// it — anyone who wants the Korean text runs their own `db build`.
 	//
-	// REVERSING D29 IS DELETING THE store.StripEnrichment CALL BELOW. Nothing
-	// else moves: the data already lives in the same database as everything
-	// else precisely so that publishing it, once the licence question
-	// resolves, is a deletion rather than a restructure.
+	// REVERSING D29 IS DELETING THE stripEnrichment CALL BELOW (the seam over
+	// store.StripEnrichment). Nothing else moves: the data already lives in
+	// the same database as everything else precisely so that publishing it,
+	// once the licence question resolves, is a deletion rather than a
+	// restructure.
 	//
 	// Packed from a COPY, never from the live database. Stripping in place
 	// would take the prose away from the one machine allowed to have it, and
@@ -73,7 +74,7 @@ func Push(ctx context.Context, dbPath, ref string, force bool, stdout, stderr io
 		return 2
 	}
 	defer cleanup()
-	if err := store.StripEnrichment(packPath); err != nil {
+	if err := stripEnrichment(packPath); err != nil {
 		// Fatal, not a warning. Publishing an artifact whose enrichment could
 		// not be removed is the licensing violation this guard exists to
 		// prevent, and "we tried" is not a defence.
@@ -123,6 +124,18 @@ func Push(ctx context.Context, dbPath, ref string, force bool, stdout, stderr io
 	fmt.Fprintf(stdout, "%s@%s\n", target.Context().Name(), digest)
 	return 0
 }
+
+// stripEnrichment is store.StripEnrichment, and the seam Push calls it
+// through, so a test can force the failure branch below.
+//
+// It is a package variable for the same reason renameFn is one: the failure
+// cannot be provoked with a fixture. The path handed to it was created by
+// stagedCopy moments earlier, so making bbolt refuse to open it means racing
+// the copy or corrupting a file mid-function. And this is the one error path
+// in the slice whose mis-handling is a licensing violation rather than a
+// wrong number — a `return 2` downgraded to a warning publishes the
+// unstripped copy — so leaving it unreachable by any test was not an option.
+var stripEnrichment = store.StripEnrichment
 
 // stagedCopy copies the database to a scratch file the caller may modify
 // freely, and returns the copy's path with a cleanup that removes the whole

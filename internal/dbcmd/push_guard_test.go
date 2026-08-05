@@ -482,39 +482,21 @@ func TestPush_ADeltaSeededFromTheWholeFeedStaysWhole(t *testing.T) {
 	}
 }
 
-// D29: enrichment is built locally and never published. KISA's site is
-// all-rights-reserved with no 공공누리 mark, which does not restrict scanning
-// with the data but does restrict redistributing it — and `db push`
-// redistributes.
+// enrichedDatabase builds a database holding all three record kinds — an
+// advisory, a rating and an enrichment — so a D29 test can tell "the strip
+// removed the enrichment" from "the strip removed the database".
 //
-// Asserted by reading the artifact BACK, not by inspecting what Push was
-// handed: the guarantee is about what leaves the machine, and a strip
-// applied to the wrong copy, or after packing, would satisfy any assertion
-// made on the way in. The failure this holds against is silent and its
-// consequence is a licensing violation rather than a wrong number, so the
-// pull is done exactly the way a user's `db update` does it.
-//
-// The three other assertions are as load-bearing as the empty bucket:
-//
-//   - the advisories and the ratings must SURVIVE, or "strip the enrichment"
-//     is indistinguishable from "publish an empty database";
-//   - the published metadata must claim no enrichment either, or `db status`
-//     on a pulled database reports a source and a count for a bucket that
-//     holds nothing — the over-claim this repository has already fixed twice;
-//   - the LOCAL database must keep its enrichment, because the strip runs on
-//     a copy. Stripping in place would take the Korean text away from the one
-//     machine allowed to have it, and would do it while a concurrent scan may
-//     be reading the file.
-func TestPush_NeverPublishesEnrichment(t *testing.T) {
+// Its identifiers deliberately do not nest: the advisory ID ALPINE-2025-0001
+// does not contain the CVE, and the CVE does not contain the package name, so
+// no assertion made against this fixture can be satisfied by a neighbouring
+// column (CLAUDE.md's substring rule).
+func enrichedDatabase(t *testing.T) string {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "vulnerability.db")
 	w, err := store.Create(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Fixture identifiers deliberately do not nest: the advisory ID
-	// ALPINE-2025-0001 does not contain the CVE, and the CVE does not contain
-	// the package name, so no assertion below can be satisfied by a
-	// neighbouring column (CLAUDE.md's substring rule).
 	if err := w.Put(advisory.Advisory{
 		ID: "ALPINE-2025-0001", Database: "ALPINE", Source: "osv",
 		Kind:     advisory.KindVulnerability,
@@ -545,6 +527,52 @@ func TestPush_NeverPublishesEnrichment(t *testing.T) {
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
+	return path
+}
+
+// isolateTempDir points os.MkdirTemp at a directory belonging to this test,
+// so an assertion about leftover staged copies cannot be answered by another
+// test's — `go test ./...` runs packages as concurrent processes, and
+// cmd/assay drives `db push` too, so a glob over the shared %TEMP% would be a
+// race rather than an assertion.
+//
+// All three variables are set because os.TempDir reads TMPDIR on Unix (which
+// is what CI runs) and TMP or TEMP on Windows (which is what this is written
+// on). Verified on both spellings rather than assumed.
+func isolateTempDir(t *testing.T) string {
+	t.Helper()
+	iso := t.TempDir()
+	for _, k := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(k, iso)
+	}
+	return iso
+}
+
+// D29: enrichment is built locally and never published. KISA's site is
+// all-rights-reserved with no 공공누리 mark, which does not restrict scanning
+// with the data but does restrict redistributing it — and `db push`
+// redistributes.
+//
+// Asserted by reading the artifact BACK, not by inspecting what Push was
+// handed: the guarantee is about what leaves the machine, and a strip
+// applied to the wrong copy, or after packing, would satisfy any assertion
+// made on the way in. The failure this holds against is silent and its
+// consequence is a licensing violation rather than a wrong number, so the
+// pull is done exactly the way a user's `db update` does it.
+//
+// The three other assertions are as load-bearing as the empty bucket:
+//
+//   - the advisories and the ratings must SURVIVE, or "strip the enrichment"
+//     is indistinguishable from "publish an empty database";
+//   - the published metadata must claim no enrichment either, or `db status`
+//     on a pulled database reports a source and a count for a bucket that
+//     holds nothing — the over-claim this repository has already fixed twice;
+//   - the LOCAL database must keep its enrichment, because the strip runs on
+//     a copy. Stripping in place would take the Korean text away from the one
+//     machine allowed to have it, and would do it while a concurrent scan may
+//     be reading the file.
+func TestPush_NeverPublishesEnrichment(t *testing.T) {
+	path := enrichedDatabase(t)
 
 	ref := liveRegistry(t)
 	var out, errOut bytes.Buffer
@@ -612,5 +640,80 @@ func TestPush_NeverPublishesEnrichment(t *testing.T) {
 	if got, err := local.EnrichmentFor("CVE-2025-46394"); err != nil || len(got) != 1 {
 		t.Errorf("EnrichmentFor on the LOCAL database = %v, %v, want the record it was built "+
 			"with: `db push` stripped the live database instead of a copy", got, err)
+	}
+}
+
+// A strip that FAILS must publish nothing at all.
+//
+// This is the D29 path's own error branch, and it is the most dangerous line
+// in the slice: downgrading its `return 2` to a warning publishes the
+// unstripped copy — the licensing violation, silently, with every other test
+// still green. The comment there says "we tried" is not a defence; this is
+// what makes that a guarantee rather than a note.
+//
+// The failure is forced through the stripEnrichment seam because it cannot be
+// forced with a fixture: the path handed to it was created by stagedCopy
+// moments earlier, so making bbolt refuse it would mean racing the copy.
+//
+// The assertion that matters is the last one — that the registry holds
+// nothing. Exit 2 alone would pass on a Push that reports the problem and
+// publishes anyway, which is exactly the shape being guarded against.
+func TestPush_AFailedStripPublishesNothing(t *testing.T) {
+	iso := isolateTempDir(t)
+	orig := stripEnrichment
+	stripEnrichment = func(string) error { return errBoom }
+	defer func() { stripEnrichment = orig }()
+
+	ref := liveRegistry(t)
+	var out, errOut bytes.Buffer
+	if code := Push(context.Background(), enrichedDatabase(t), ref, false, &out, &errOut); code != 2 {
+		t.Errorf("Push with a failing strip = %d, want 2", code)
+	}
+	// Named AND caused: Contains(stderr, "strip") alone would pass on a
+	// message that dropped the reason, which is the one thing an operator
+	// needs to act on.
+	if !strings.Contains(errOut.String(), "strip enrichment before publishing: boom") {
+		t.Errorf("stderr does not say the strip failed and why:\n%s", errOut.String())
+	}
+	if out.Len() != 0 {
+		t.Errorf("a failed push wrote a digest to stdout, which reads as success: %q", out.String())
+	}
+
+	target, err := name.ParseReference(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := remote.Image(target); err == nil {
+		t.Error("a push whose enrichment strip failed published an artifact anyway - " +
+			"that artifact carries KISA's prose, which is the licensing violation D29 exists to prevent")
+	}
+
+	// The early return still cleans up after itself.
+	if left, _ := filepath.Glob(filepath.Join(iso, "assay-push-*")); len(left) != 0 {
+		t.Errorf("a failed strip left its staged copy behind: %v", left)
+	}
+}
+
+// Push removes the staged copy it packs from.
+//
+// Not cosmetic: the copy is the whole database, so a leak is ~244 MB of
+// %TEMP% per push on the builder that publishes every night, and nothing
+// would ever report it. dbartifact.Pack reads the file eagerly, so no handle
+// is open by the time the deferred cleanup runs and this is simply a matter
+// of the defer existing.
+func TestPush_RemovesItsStagedCopy(t *testing.T) {
+	iso := isolateTempDir(t)
+	ref := liveRegistry(t)
+
+	var out, errOut bytes.Buffer
+	if code := Push(context.Background(), enrichedDatabase(t), ref, false, &out, &errOut); code != 0 {
+		t.Fatalf("Push = %d, want 0 (%s)", code, errOut.String())
+	}
+	left, err := filepath.Glob(filepath.Join(iso, "assay-push-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) != 0 {
+		t.Errorf("Push left its staged copy of the database behind: %v", left)
 	}
 }

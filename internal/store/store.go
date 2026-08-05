@@ -177,9 +177,14 @@ type Meta struct {
 	// authoritative, and EnrichmentCounts below is the derived answer to "did
 	// this authority enrich anything, and how much".
 	//
-	// A source that FAILED is absent from this map entirely: dbcmd.Update
-	// warns and records nothing, so a name here always means a run that
-	// returned successfully.
+	// A source whose run FAILED is here too, with Provenance.Error set and
+	// nothing else. That is deliberate and it is the second version of this
+	// decision: recording nothing meant a total failure produced no row at
+	// all while a PARTIAL failure produced one anyway (its records are in the
+	// bucket, so the derived half of the union answers for it) — the same
+	// fault rendering as visible or invisible depending on when the feed
+	// died. A failure is always visible now, whatever it managed to write
+	// first.
 	//
 	// It is stripped, along with EnrichmentCounts, from any database `db push`
 	// publishes (D29): the artifact must not name a source whose records it
@@ -245,6 +250,23 @@ type Provenance struct {
 	// that by parsing "modified 2026-07-05..2026-08-04" would make a
 	// coverage guard depend on the wording of a display string.
 	CoversSince time.Time `json:"covers_since,omitempty"`
+	// Error is why this source's last run did not finish, empty when it did.
+	//
+	// It exists because "ran and produced nothing" and "did not finish" are
+	// different facts with different remedies, and every other field renders
+	// identically for both: a zero DataAsOf, a zero Records, an empty Source.
+	// Without it, `db status` shows a failed enrichment run and a successful
+	// but empty one in exactly the same words.
+	//
+	// Only dbcmd.Update writes it, and only for a source whose failure is not
+	// fatal to the build — an Enricher (D3). A failing Provider or Annotator
+	// aborts the build outright, so no metadata describing it is ever written
+	// at all, which is why this field would have nothing to say for them.
+	//
+	// A display string, never something to branch on: it is whatever the
+	// source's error said, flattened to one line so it cannot break the table
+	// it is rendered into.
+	Error string `json:"error,omitempty"`
 	// CoversSinceKnown separates "unbounded" from "not recorded". Both are
 	// a zero CoversSince, and they are opposites: one is the broadest
 	// coverage there is, the other is no information at all.

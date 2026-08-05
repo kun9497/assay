@@ -1415,3 +1415,61 @@ func TestDBUpdateEnrichers_ConstructsKNVDWithProgressOnStderr(t *testing.T) {
 		t.Errorf("dbUpdateEnrichers() = %+v, want exactly one KISA enricher", enrichers)
 	}
 }
+
+// The `db build` CALL SITE must hand its own stderr to both source
+// constructors.
+//
+// TestNVDOptionsFromEnv_ConnectsProgressToStderr and
+// TestDBUpdateEnrichers_ConstructsKNVDWithProgressOnStderr each prove one
+// builder function connects Progress correctly, and neither can see what
+// run() passes INTO it: changing either call in the "build" case to
+// io.Discard reproduces the nvd defect exactly — every page and retry notice
+// to nowhere, a multi-hour sync that reports nothing about the four retries
+// it fired — and left the whole suite green. This is the assertion that holds
+// the argument rather than the parameter, for both sources at once.
+//
+// It never fetches anything. ASSAY_DB_DIR points beneath a regular file, so
+// dbcmd.Update's own MkdirAll fails before it touches a provider — the same
+// fixture TestRun_DBBuildReplacesUpdate uses, and for the same reason: with
+// ASSAY_DB_DIR unset, store.DefaultPath resolves to the developer's real
+// cache and a routing test performed a genuine 183-second, ~200 MB build
+// over their database. The exit code AND the reason are both asserted, so a
+// future change that made the build get further would fail here rather than
+// quietly going to the network.
+//
+// The spies return what the real constructors would, so nothing downstream
+// sees a nil provider; construction alone reaches no network for either.
+func TestRun_DBBuildConnectsBothProgressWritersToItsStderr(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ASSAY_DB_DIR", filepath.Join(blocker, "sub"))
+	t.Setenv("NVD_ENABLE", "1")
+	t.Setenv("KISA_ENABLE", "1")
+
+	var gotNVD nvd.Options
+	var gotKNVD knvd.Options
+	origNVD, origKNVD := newNVDAnnotator, newKNVDEnricher
+	newNVDAnnotator = func(o nvd.Options) *nvd.Provider { gotNVD = o; return origNVD(o) }
+	newKNVDEnricher = func(o knvd.Options) *knvd.Provider { gotKNVD = o; return origKNVD(o) }
+	defer func() { newNVDAnnotator, newKNVDEnricher = origNVD, origKNVD }()
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"db", "build"}, &stdout, &stderr); code != exitError {
+		t.Fatalf("db build against an uncreatable database directory = %d, want %d", code, exitError)
+	}
+	if !strings.Contains(stderr.String(), "create database directory") {
+		t.Fatalf("db build failed for the wrong reason, so this test may have reached a "+
+			"provider and the network:\n%s", stderr.String())
+	}
+
+	if gotNVD.Progress != io.Writer(&stderr) {
+		t.Errorf("nvd.Options.Progress = %v, want the stderr `db build` was given - every "+
+			"retry notice from a seven-hour sync goes to io.Discard", gotNVD.Progress)
+	}
+	if gotKNVD.Progress != io.Writer(&stderr) {
+		t.Errorf("knvd.Options.Progress = %v, want the stderr `db build` was given - every "+
+			"page and retry notice goes to io.Discard", gotKNVD.Progress)
+	}
+}
