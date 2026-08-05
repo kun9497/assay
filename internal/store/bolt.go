@@ -260,27 +260,120 @@ func (b *Bolt) SetMeta(m Meta) error {
 		// still make db status assert a source that rated something — the
 		// same over-claim D20 refuses to let a stored ecosystem entry make.
 		//
-		// Derived from the key alone, not by decoding each Rating blob: the
-		// key already carries Source verbatim (PutRating's own key
-		// construction), so there is nothing in the blob this scan needs
-		// that isn't already in the key.
-		counts := map[string]int{}
-		if err := tx.Bucket(bucketRatings).ForEach(func(k, _ []byte) error {
-			_, source, ok := bytes.Cut(k, []byte(keySep))
-			if ok && len(source) > 0 {
-				counts[string(source)]++
-			}
-			return nil
-		}); err != nil {
+		// Derived from the key alone, never by decoding each stored blob —
+		// see countBySource, which both this and the enrichment count below
+		// go through.
+		counts, err := countBySource(tx.Bucket(bucketRatings))
+		if err != nil {
 			return err
 		}
 		m.RatingCounts = counts
+
+		// EnrichmentCounts (D3) is derived exactly as RatingCounts is, and for
+		// exactly the reason above: a third source kind arriving next to the
+		// one that already over-claimed gets the derived treatment from the
+		// start rather than after the same review finds it again.
+		enriched, err := countBySource(tx.Bucket(bucketEnrichment))
+		if err != nil {
+			return err
+		}
+		m.EnrichmentCounts = enriched
 
 		blob, err := json.Marshal(m)
 		if err != nil {
 			return err
 		}
 		return tx.Bucket(bucketMeta).Put([]byte("meta"), blob)
+	})
+}
+
+// countBySource counts a bucket's entries per authoring source, reading the
+// source out of the key ("<CVE>\x00<Source>") rather than decoding each
+// stored blob: PutRating and PutEnrichment both build the key that way, so
+// there is nothing in the value this scan needs.
+//
+// Shared by the ratings and enrichment buckets because they are keyed
+// identically and the rule is the same one (counts are derived, never
+// self-reported). This is not the shared-comparer mistake D9 forbids —
+// nothing here is per-ecosystem, and there is no upstream disagreement for a
+// single implementation to paper over.
+//
+// An entry whose key carries no separator, or an empty source, is skipped
+// rather than counted under "": a key that shape cannot have been written by
+// either Put method, and inventing an unnamed source for it would put a
+// nameless row in `db status`.
+func countBySource(bk *bolt.Bucket) (map[string]int, error) {
+	counts := map[string]int{}
+	err := bk.ForEach(func(k, _ []byte) error {
+		_, source, ok := bytes.Cut(k, []byte(keySep))
+		if ok && len(source) > 0 {
+			counts[string(source)]++
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return counts, nil
+}
+
+// StripEnrichment empties the enrichment bucket of the database at path, and
+// removes the metadata describing it (D29).
+//
+// KISA's site is all-rights-reserved with no 공공누리 mark. That does not
+// restrict scanning with the data; it restricts REDISTRIBUTING it, and
+// `db push` redistributes. So `db build` fills this bucket, `db push` strips
+// it from the copy it packs, and `db update` therefore never delivers it.
+//
+// It lives here rather than in dbcmd because the bucket names are this
+// package's, and a caller reaching for bbolt directly to delete one would put
+// the on-disk shape in two places.
+//
+// The bucket is recreated EMPTY rather than left absent. EnrichmentFor and
+// EachEnrichment dereference it directly, so a database with no enrichment
+// bucket at all would panic on the first lookup instead of answering
+// "nothing" — and the artifact this produces is what every `db update` user
+// then scans with.
+//
+// The metadata goes with it. Leaving Meta.Enrichment behind would publish an
+// artifact naming a source and a count for a bucket it deliberately does not
+// carry, which is the same over-claim `db status` has already been fixed for
+// twice, arriving this time through the publish path.
+func StripEnrichment(path string) error {
+	db, err := bolt.Open(path, 0o600, nil)
+	if err != nil {
+		return fmt.Errorf("open %s for stripping: %w", path, err)
+	}
+	defer db.Close()
+	return db.Update(func(tx *bolt.Tx) error {
+		if tx.Bucket(bucketEnrichment) != nil {
+			if err := tx.DeleteBucket(bucketEnrichment); err != nil {
+				return fmt.Errorf("delete enrichment bucket: %w", err)
+			}
+		}
+		if _, err := tx.CreateBucketIfNotExists(bucketEnrichment); err != nil {
+			return fmt.Errorf("recreate enrichment bucket: %w", err)
+		}
+		bk := tx.Bucket(bucketMeta)
+		if bk == nil {
+			return ErrNotFound
+		}
+		raw := bk.Get([]byte("meta"))
+		if raw == nil {
+			// No metadata record means the build never finished, and Open
+			// refuses such a database anyway. Nothing to un-claim.
+			return nil
+		}
+		var m Meta
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return fmt.Errorf("decode metadata: %w", err)
+		}
+		m.Enrichment, m.EnrichmentCounts = nil, nil
+		blob, err := json.Marshal(m)
+		if err != nil {
+			return err
+		}
+		return bk.Put([]byte("meta"), blob)
 	})
 }
 

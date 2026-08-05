@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -50,7 +51,37 @@ func Push(ctx context.Context, dbPath, ref string, force bool, stdout, stderr io
 		RatingsSinceKnown: ratingBoundKnown(meta),
 		RatingCount:       totalRatings(meta),
 	}
-	img, err := dbartifact.Pack(dbPath, incoming)
+	// D29: enrichment is built locally and never published.
+	//
+	// KISA's site is all-rights-reserved with no 공공누리 mark. That does not
+	// restrict SCANNING with the data; it restricts REDISTRIBUTING it, and
+	// this function redistributes. So `db build` fills the enrichment bucket,
+	// the two lines below empty it, and `db update` therefore never delivers
+	// it — anyone who wants the Korean text runs their own `db build`.
+	//
+	// REVERSING D29 IS DELETING THE store.StripEnrichment CALL BELOW. Nothing
+	// else moves: the data already lives in the same database as everything
+	// else precisely so that publishing it, once the licence question
+	// resolves, is a deletion rather than a restructure.
+	//
+	// Packed from a COPY, never from the live database. Stripping in place
+	// would take the prose away from the one machine allowed to have it, and
+	// would rewrite a file a concurrent scan may be reading.
+	packPath, cleanup, err := stagedCopy(dbPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: stage database for publishing: %v\n", err)
+		return 2
+	}
+	defer cleanup()
+	if err := store.StripEnrichment(packPath); err != nil {
+		// Fatal, not a warning. Publishing an artifact whose enrichment could
+		// not be removed is the licensing violation this guard exists to
+		// prevent, and "we tried" is not a defence.
+		fmt.Fprintf(stderr, "error: strip enrichment before publishing: %v\n", err)
+		return 2
+	}
+
+	img, err := dbartifact.Pack(packPath, incoming)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: pack database: %v\n", err)
 		return 2
@@ -93,6 +124,52 @@ func Push(ctx context.Context, dbPath, ref string, force bool, stdout, stderr io
 	return 0
 }
 
+// stagedCopy copies the database to a scratch file the caller may modify
+// freely, and returns the copy's path with a cleanup that removes the whole
+// scratch directory.
+//
+// It exists so the D29 strip has somewhere to happen that is not the live
+// database. A scratch DIRECTORY rather than a sibling temp file, matching how
+// `db build --seed` stages its pull: the copy is not a database anyone should
+// discover, and it must not collide with the "<db>.tmp" name Update and Pull
+// both use for a half-installed one.
+//
+// Streamed rather than read whole: dbartifact.Pack already holds the file and
+// its gzip in memory, and a ~244 MB database does not need a third copy of
+// itself alongside them.
+func stagedCopy(dbPath string) (path string, cleanup func(), err error) {
+	dir, err := os.MkdirTemp("", "assay-push-")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup = func() { os.RemoveAll(dir) }
+	src, err := os.Open(dbPath)
+	if err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	defer src.Close()
+	path = filepath.Join(dir, "vulnerability.db")
+	dst, err := os.Create(path)
+	if err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()
+		cleanup()
+		return "", nil, err
+	}
+	// Closed explicitly, not deferred: the copy is opened again immediately
+	// (by StripEnrichment, which takes bbolt's exclusive lock), and on Windows
+	// that fails outright while this handle is still open.
+	if err := dst.Close(); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	return path, cleanup, nil
+}
+
 // oldestDataAsOf is "the oldest upstream wins" (D12), the same rule the NVD
 // provider applies across its own pages: an artifact is only as fresh as its
 // stalest component. Taking the newest would let one recently-synced
@@ -108,6 +185,13 @@ func Push(ctx context.Context, dbPath, ref string, force bool, stdout, stderr io
 // --fail-on. Folding Ratings into the same minimum is what this function's
 // own "an artifact is only as fresh as its stalest component" already
 // promises — it just was not keeping that promise for half of Meta.
+//
+// Meta.Enrichment is deliberately NOT consulted, and that is not the same
+// oversight in a third place. Freshness describes what the artifact CARRIES,
+// and the artifact carries no enrichment at all (D29 — it is stripped just
+// below). A stale KISA fetch dragging the published DataAsOf backwards would
+// make every puller believe the advisories they did receive are older than
+// they are, on the strength of data they did not.
 func oldestDataAsOf(m store.Meta) time.Time {
 	var oldest time.Time
 	consider := func(p store.Provenance) {

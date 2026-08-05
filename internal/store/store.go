@@ -169,6 +169,29 @@ type Meta struct {
 	// treats as ground truth for which rating sources exist and how many
 	// CVEs they rated, never Ratings above.
 	RatingCounts map[string]int `json:"ratingCounts"`
+	// Enrichment is per-authority provenance for CVE prose (D3): the DataAsOf
+	// and fetch Source URL an Enricher self-reports about its own run, written
+	// by dbcmd.Update from each Enricher's return value. It is the Ratings
+	// pattern one bucket over, and everything Ratings' own doc comment says
+	// about self-report applies here verbatim — Records on an entry is NOT
+	// authoritative, and EnrichmentCounts below is the derived answer to "did
+	// this authority enrich anything, and how much".
+	//
+	// A source that FAILED is absent from this map entirely: dbcmd.Update
+	// warns and records nothing, so a name here always means a run that
+	// returned successfully.
+	//
+	// It is stripped, along with EnrichmentCounts, from any database `db push`
+	// publishes (D29): the artifact must not name a source whose records it
+	// deliberately does not carry.
+	Enrichment map[string]Provenance `json:"enrichment"`
+	// EnrichmentCounts is how many CVEs each authority actually enriched, read
+	// from the enrichment bucket itself (Bolt.SetMeta) — RatingCounts applied
+	// one bucket over, for the same reason: an enrichment's Source is
+	// recoverable from its own key ("<CVE>\x00<Source>"), so there is no need
+	// to trust a self-report that has already over-claimed once on this
+	// branch. This is what `db status` treats as ground truth.
+	EnrichmentCounts map[string]int `json:"enrichmentCounts"`
 }
 
 type Provenance struct {

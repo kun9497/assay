@@ -15,6 +15,7 @@ import (
 
 	"github.com/kun9497/assay/internal/dbcmd"
 	"github.com/kun9497/assay/internal/provider"
+	"github.com/kun9497/assay/internal/provider/knvd"
 	"github.com/kun9497/assay/internal/provider/nvd"
 	"github.com/kun9497/assay/internal/provider/osv"
 	"github.com/kun9497/assay/internal/scancmd"
@@ -93,6 +94,15 @@ Environment (db build only — a scan reads no environment and no network):
   NVD_API_KEY=<key>     Raise NVD's rate limit tenfold. Optional, and it does
                         not shorten the seven hours; NVD's own response
                         generation is the bottleneck, not the pacing.
+  KISA_ENABLE=1         Also fetch KISA/KNVD's Korean security notices, so a
+                        finding whose CVE one of them describes carries its
+                        Korean title, summary and link. The fetch is about 41
+                        requests and under a minute, and a failure warns
+                        rather than failing the build - enrichment cannot
+                        change a verdict. This data is LOCAL ONLY: KISA's
+                        terms do not permit redistributing it, so db push
+                        strips it and db update never delivers it. Build it
+                        yourself or go without it.
 `
 
 func main() {
@@ -180,6 +190,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return dbcmd.Update(context.Background(), path, seedPath, ref,
 				[]provider.Provider{osv.New(osv.Ecosystems, "")},
 				dbUpdateAnnotators(stderr),
+				dbUpdateEnrichers(stderr),
 				stdout, stderr)
 		case "update":
 			ref, ok := resolveUpdateRef(args, stderr)
@@ -310,6 +321,38 @@ func dbUpdateAnnotators(stderr io.Writer) []provider.Annotator {
 		return nil
 	}
 	return []provider.Annotator{newNVDAnnotator(nvdOptionsFromEnv(stderr))}
+}
+
+// newKNVDEnricher constructs the KISA/KNVD enricher. A package variable for
+// the same reason newNVDAnnotator is one: a test can substitute a spy and
+// observe the Options that actually reached construction, without knvd.New's
+// default BaseURL (the live KNVD endpoint) ever being fetched from.
+var newKNVDEnricher = knvd.New
+
+// dbUpdateEnrichers is every provider.Enricher `db build` runs, built from
+// the environment.
+//
+// KISA is opt-in via KISA_ENABLE, exactly as NVD is via NVD_ENABLE, though
+// the reasoning is different in kind: the NVD pass costs seven hours, while
+// this one is ~41 requests and under a minute. What makes it opt-in is D29 —
+// the data may not be redistributed, so `db push` strips it and `db update`
+// never carries it, which means the only person who can get it is someone who
+// deliberately built it themselves. An off-by-default flag is the honest
+// shape for something a user has to opt into holding.
+//
+// A failing enricher does not fail the build (see dbcmd.Update), so enabling
+// this cannot cost anyone their database the way an unconditional NVD did.
+func dbUpdateEnrichers(stderr io.Writer) []provider.Enricher {
+	if os.Getenv("KISA_ENABLE") == "" {
+		return nil
+	}
+	// Progress goes to stderr so the per-page and retry lines are visible.
+	// Leaving it unset defaults it to io.Discard, and that is exactly what
+	// shipped in nvd: a run that spent 5h52m, hit a 503 and retried four times
+	// printed nothing about any of it, so the log read "retries fired: 0". The
+	// option existed and was thrown away one call site later; this is that
+	// call site.
+	return []provider.Enricher{newKNVDEnricher(knvd.Options{Progress: stderr})}
 }
 
 // resolveUpdateRef decides which reference `db update` pulls from: the

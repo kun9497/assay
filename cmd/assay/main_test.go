@@ -13,6 +13,7 @@ import (
 
 	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/dbcmd"
+	"github.com/kun9497/assay/internal/provider/knvd"
 	"github.com/kun9497/assay/internal/provider/nvd"
 	"github.com/kun9497/assay/internal/report"
 	"github.com/kun9497/assay/internal/scancmd"
@@ -1346,5 +1347,71 @@ func TestRun_DBPushRejectsTrailingArgument(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), `unexpected argument "extra"`) {
 		t.Errorf("stderr does not name the unexpected argument:\n%s", stderr.String())
+	}
+}
+
+// KISA enrichment is opt-in, and nothing may construct the enricher without
+// KISA_ENABLE.
+//
+// The gate is not about cost the way NVD's is (~41 requests, under a minute).
+// It is D29: the data may not be redistributed, so `db push` strips it and
+// `db update` never carries it, which leaves a deliberate local build as the
+// only way to hold it. Off by default is the honest shape for that.
+func TestDBUpdateEnrichers_KISAIsOptIn(t *testing.T) {
+	t.Setenv("KISA_ENABLE", "")
+
+	orig := newKNVDEnricher
+	sawCall := false
+	newKNVDEnricher = func(opts knvd.Options) *knvd.Provider { sawCall = true; return orig(opts) }
+	defer func() { newKNVDEnricher = orig }()
+
+	if got := dbUpdateEnrichers(io.Discard); len(got) != 0 {
+		t.Errorf("dbUpdateEnrichers() = %+v, want none without KISA_ENABLE", got)
+	}
+	if sawCall {
+		t.Error("knvd.New was constructed even though KISA_ENABLE was unset")
+	}
+}
+
+// With KISA_ENABLE set, exactly one enricher is constructed and its Progress
+// is connected to the stderr passed in.
+//
+// The second half is the one that has already gone wrong here: nvd.Options
+// carried the identical field, it shipped unwired, and a run that retried
+// four times logged "retries fired: 0" because the notices went to
+// io.Discard. Task 3 built knvd.Options.Progress and left it with no caller;
+// this is that caller, and asserting on identity is what makes "the option
+// exists" and "the option is connected" different statements.
+//
+// Driven through a spy on newKNVDEnricher rather than by inspecting the
+// returned Provider, because Options is consumed by New and not readable
+// back — and because knvd.New defaults BaseURL to the live KNVD endpoint,
+// which no test may reach.
+func TestDBUpdateEnrichers_ConstructsKNVDWithProgressOnStderr(t *testing.T) {
+	t.Setenv("KISA_ENABLE", "1")
+
+	var errOut bytes.Buffer
+	var gotOpts knvd.Options
+	sawCall := false
+	orig := newKNVDEnricher
+	newKNVDEnricher = func(opts knvd.Options) *knvd.Provider {
+		gotOpts, sawCall = opts, true
+		return orig(opts)
+	}
+	defer func() { newKNVDEnricher = orig }()
+
+	enrichers := dbUpdateEnrichers(&errOut)
+
+	if !sawCall {
+		t.Fatal("dbUpdateEnrichers never constructed a KNVD enricher")
+	}
+	if gotOpts.Progress == nil {
+		t.Fatal("Options.Progress is nil, so every page and retry notice goes to io.Discard")
+	}
+	if gotOpts.Progress != io.Writer(&errOut) {
+		t.Errorf("Options.Progress = %v, want the stderr passed in", gotOpts.Progress)
+	}
+	if len(enrichers) != 1 || enrichers[0].Name() != knvd.SourceName {
+		t.Errorf("dbUpdateEnrichers() = %+v, want exactly one KISA enricher", enrichers)
 	}
 }

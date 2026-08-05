@@ -420,7 +420,7 @@ func TestPush_ASecondSeededDeltaIsStillPublishable(t *testing.T) {
 		out.Reset()
 		errOut.Reset()
 		if code := Update(context.Background(), built, seedPath, ref, nil,
-			[]provider.Annotator{a}, &out, &errOut); code != 0 {
+			[]provider.Annotator{a}, nil, &out, &errOut); code != 0 {
 			t.Fatalf("day %d: Update = %d (%s)", i+1, code, errOut.String())
 		}
 
@@ -466,7 +466,7 @@ func TestPush_ADeltaSeededFromTheWholeFeedStaysWhole(t *testing.T) {
 	out.Reset()
 	errOut.Reset()
 	if code := Update(context.Background(), built, seedPath, ref, nil,
-		[]provider.Annotator{a}, &out, &errOut); code != 0 {
+		[]provider.Annotator{a}, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d (%s)", code, errOut.String())
 	}
 
@@ -479,5 +479,138 @@ func TestPush_ADeltaSeededFromTheWholeFeedStaysWhole(t *testing.T) {
 	if !got.RatingsSinceKnown || !got.RatingsSince.IsZero() {
 		t.Errorf("published RatingsSince = %v (known=%v), want unbounded: the database still holds the whole feed",
 			got.RatingsSince, got.RatingsSinceKnown)
+	}
+}
+
+// D29: enrichment is built locally and never published. KISA's site is
+// all-rights-reserved with no 공공누리 mark, which does not restrict scanning
+// with the data but does restrict redistributing it — and `db push`
+// redistributes.
+//
+// Asserted by reading the artifact BACK, not by inspecting what Push was
+// handed: the guarantee is about what leaves the machine, and a strip
+// applied to the wrong copy, or after packing, would satisfy any assertion
+// made on the way in. The failure this holds against is silent and its
+// consequence is a licensing violation rather than a wrong number, so the
+// pull is done exactly the way a user's `db update` does it.
+//
+// The three other assertions are as load-bearing as the empty bucket:
+//
+//   - the advisories and the ratings must SURVIVE, or "strip the enrichment"
+//     is indistinguishable from "publish an empty database";
+//   - the published metadata must claim no enrichment either, or `db status`
+//     on a pulled database reports a source and a count for a bucket that
+//     holds nothing — the over-claim this repository has already fixed twice;
+//   - the LOCAL database must keep its enrichment, because the strip runs on
+//     a copy. Stripping in place would take the Korean text away from the one
+//     machine allowed to have it, and would do it while a concurrent scan may
+//     be reading the file.
+func TestPush_NeverPublishesEnrichment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Fixture identifiers deliberately do not nest: the advisory ID
+	// ALPINE-2025-0001 does not contain the CVE, and the CVE does not contain
+	// the package name, so no assertion below can be satisfied by a
+	// neighbouring column (CLAUDE.md's substring rule).
+	if err := w.Put(advisory.Advisory{
+		ID: "ALPINE-2025-0001", Database: "ALPINE", Source: "osv",
+		Kind:     advisory.KindVulnerability,
+		Upstream: []string{"CVE-2025-46394"},
+		Affected: []advisory.Affected{{Ecosystem: "Alpine:v3.19", Name: "openssl"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.PutRating(advisory.Rating{CVE: "CVE-2025-46394", Source: "NVD"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.PutEnrichment(advisory.Enrichment{
+		CVE: "CVE-2025-46394", Source: "KISA",
+		Title:   "OpenSSL 보안 업데이트 권고",
+		Summary: "원격의 공격자가 임의 코드를 실행할 수 있는 취약점",
+		URL:     "https://knvd.krcert.or.kr/info/vuln/notice/detail?id=99",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(store.Meta{
+		BuiltAt:    time.Date(2026, 8, 5, 6, 0, 0, 0, time.UTC),
+		Providers:  map[string]store.Provenance{"osv": {DataAsOf: time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)}},
+		Ratings:    map[string]store.Provenance{"NVD": {CoversSinceKnown: true}},
+		Enrichment: map[string]store.Provenance{"KISA": {Source: "https://knvd.krcert.or.kr", Records: 1}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	ref := liveRegistry(t)
+	var out, errOut bytes.Buffer
+	if code := Push(context.Background(), path, ref, false, &out, &errOut); code != 0 {
+		t.Fatalf("Push = %d, want 0 (%s)", code, errOut.String())
+	}
+
+	// Pulled the way `assay db update` pulls, into a fresh path.
+	pulled := filepath.Join(t.TempDir(), "vulnerability.db")
+	out.Reset()
+	errOut.Reset()
+	if code := Pull(context.Background(), pulled, ref, &out, &errOut); code != 0 {
+		t.Fatalf("Pull = %d, want 0 (%s)", code, errOut.String())
+	}
+	db, err := store.Open(pulled)
+	if err != nil {
+		t.Fatalf("the published artifact is not a usable database: %v", err)
+	}
+	defer db.Close()
+
+	if got, err := db.EnrichmentFor("CVE-2025-46394"); err != nil || len(got) != 0 {
+		t.Errorf("the published artifact carries %d enrichment record(s) for CVE-2025-46394 (%v), "+
+			"want none: D29 says KISA's prose is built locally and never redistributed", len(got), err)
+	}
+	// The whole bucket, not just the one CVE asked about: a strip that removed
+	// the record under test and left the rest would pass the check above.
+	published := 0
+	if err := db.EachEnrichment(func(advisory.Enrichment) error { published++; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if published != 0 {
+		t.Errorf("the published enrichment bucket holds %d record(s), want none (D29)", published)
+	}
+
+	// ...while everything the artifact IS for survives.
+	if got, err := db.Lookup("Alpine:v3.19", "openssl"); err != nil || len(got) != 1 {
+		t.Errorf("Lookup(Alpine:v3.19, openssl) = %v, %v; the strip took the advisories with it", got, err)
+	}
+	if got, err := db.RatingsFor("CVE-2025-46394"); err != nil || len(got) != 1 {
+		t.Errorf("RatingsFor(CVE-2025-46394) = %v, %v; the strip took the ratings with it", got, err)
+	}
+
+	// And the published metadata makes no enrichment claim, so `db status` on
+	// a pulled database cannot report a source for an empty bucket.
+	m, err := db.Meta()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Enrichment) != 0 {
+		t.Errorf("published Meta.Enrichment = %v, want empty: the artifact names an enrichment "+
+			"source whose records it does not carry", m.Enrichment)
+	}
+	if len(m.EnrichmentCounts) != 0 {
+		t.Errorf("published Meta.EnrichmentCounts = %v, want empty", m.EnrichmentCounts)
+	}
+
+	// The LOCAL database is untouched: the strip works on a copy, because a
+	// concurrent scan may be reading this file and because the machine that
+	// fetched the prose is allowed to keep it.
+	local, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("the local database did not survive the push: %v", err)
+	}
+	defer local.Close()
+	if got, err := local.EnrichmentFor("CVE-2025-46394"); err != nil || len(got) != 1 {
+		t.Errorf("EnrichmentFor on the LOCAL database = %v, %v, want the record it was built "+
+			"with: `db push` stripped the live database instead of a copy", got, err)
 	}
 }

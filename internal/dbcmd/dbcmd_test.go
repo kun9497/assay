@@ -32,6 +32,29 @@ func ratingSourceLine(t *testing.T, out, name string) string {
 	return ""
 }
 
+// enrichmentSourceLine returns the ENRICHMENT SOURCE table's row for name.
+//
+// It cuts the output at that table's own heading first, then matches on the
+// row's FIRST field exactly — the RATING SOURCE table sits directly above and
+// nothing stops one authority appearing in both, so a plain first-field scan
+// over the whole output could answer from the wrong table entirely. Same
+// wrong-column hazard CLAUDE.md describes, one table up.
+func enrichmentSourceLine(t *testing.T, out, name string) string {
+	t.Helper()
+	_, after, ok := strings.Cut(out, "ENRICHMENT SOURCE")
+	if !ok {
+		t.Fatalf("no ENRICHMENT SOURCE table in:\n%s", out)
+	}
+	for _, line := range strings.Split(after, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && fields[0] == name {
+			return line
+		}
+	}
+	t.Fatalf("no ENRICHMENT SOURCE row for %q in:\n%s", name, out)
+	return ""
+}
+
 // errBoom is a fixed sentinel a fakeAnnotator/fakeProvider can return, so a
 // failure test asserts on a specific, known error rather than "any error".
 var errBoom = errors.New("boom")
@@ -98,6 +121,48 @@ func (f fakeAnnotator) Annotate(_ context.Context, emit func(advisory.Rating) er
 	}, nil
 }
 
+// fakeEnricher stands in for provider/knvd (D3): it never touches the
+// network, so a test using it proves Update's own wiring — that it calls
+// Enrich at all and writes what comes back through PutEnrichment — without
+// depending on internal/provider/knvd, which has its own tests and whose
+// New() defaults BaseURL to the live KNVD endpoint.
+type fakeEnricher struct {
+	name    string
+	records []advisory.Enrichment
+	// err is returned by Enrich AFTER records have been emitted, so a test
+	// can exercise the partial-run shape (some prose written, then the feed
+	// fell over) as well as the total failure.
+	err error
+	// claims, when non-zero, is the Records count this enricher SELF-REPORTS,
+	// whatever it actually emitted. It exists so a test can tell a count
+	// derived from the enrichment bucket apart from one copied out of the
+	// provenance — the over-claim Meta.Ratings made once already on this
+	// branch, where `db status` named a source that had rated nothing.
+	claims int
+}
+
+func (f fakeEnricher) Name() string { return f.name }
+
+func (f fakeEnricher) Enrich(_ context.Context, emit func(advisory.Enrichment) error) (store.Provenance, error) {
+	for _, e := range f.records {
+		if err := emit(e); err != nil {
+			return store.Provenance{}, err
+		}
+	}
+	if f.err != nil {
+		return store.Provenance{}, f.err
+	}
+	records := f.claims
+	if records == 0 {
+		records = len(f.records)
+	}
+	return store.Provenance{
+		Source:   "https://example.test/knvd",
+		DataAsOf: time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC),
+		Records:  records,
+	}, nil
+}
+
 func TestUpdateThenStatus(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vulnerability.db")
 	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
@@ -106,7 +171,7 @@ func TestUpdateThenStatus(t *testing.T) {
 	}}}
 
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), path, "", "", []provider.Provider{p}, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), path, "", "", []provider.Provider{p}, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
@@ -164,7 +229,7 @@ func TestUpdate_RunsAnnotatorsAndPersistsRatings(t *testing.T) {
 	}}
 
 	var out, errOut bytes.Buffer
-	code := Update(context.Background(), path, "", "", []provider.Provider{p}, []provider.Annotator{a}, &out, &errOut)
+	code := Update(context.Background(), path, "", "", []provider.Provider{p}, []provider.Annotator{a}, nil, &out, &errOut)
 	if code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
@@ -213,7 +278,7 @@ func TestUpdate_AnnotatorFailureLeavesAnExistingDatabaseUntouched(t *testing.T) 
 		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
 	}}}
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), path, "", "", []provider.Provider{first}, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), path, "", "", []provider.Provider{first}, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("initial Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
@@ -228,7 +293,7 @@ func TestUpdate_AnnotatorFailureLeavesAnExistingDatabaseUntouched(t *testing.T) 
 	a := fakeAnnotator{name: "NVD", err: errBoom}
 	out.Reset()
 	errOut.Reset()
-	code := Update(context.Background(), path, "", "", []provider.Provider{second}, []provider.Annotator{a}, &out, &errOut)
+	code := Update(context.Background(), path, "", "", []provider.Provider{second}, []provider.Annotator{a}, nil, &out, &errOut)
 	if code != 2 {
 		t.Fatalf("second Update = %d, want 2 (stderr: %s)", code, errOut.String())
 	}
@@ -267,10 +332,10 @@ func TestUpdateReplacesAtomically(t *testing.T) {
 		}}}
 	}
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), path, "", "", []provider.Provider{mk("first")}, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), path, "", "", []provider.Provider{mk("first")}, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("first Update = %d: %s", code, errOut.String())
 	}
-	if code := Update(context.Background(), path, "", "", []provider.Provider{mk("second")}, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), path, "", "", []provider.Provider{mk("second")}, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("second Update = %d: %s", code, errOut.String())
 	}
 
@@ -464,7 +529,7 @@ func TestStatus_ShowsRatingSources(t *testing.T) {
 	}}
 
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), path, "", "", []provider.Provider{p}, []provider.Annotator{a}, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), path, "", "", []provider.Provider{p}, []provider.Annotator{a}, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
@@ -534,7 +599,7 @@ func TestStatus_RatingSourceDisclosesTheWindowItCovered(t *testing.T) {
 			}
 
 			var out, errOut bytes.Buffer
-			if code := Update(context.Background(), path, "", "", []provider.Provider{p}, []provider.Annotator{a}, &out, &errOut); code != 0 {
+			if code := Update(context.Background(), path, "", "", []provider.Provider{p}, []provider.Annotator{a}, nil, &out, &errOut); code != 0 {
 				t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 			}
 			out.Reset()
@@ -586,7 +651,7 @@ func TestStatus_AnAnnotatorThatRatesNothingIsNotClaimedAsASource(t *testing.T) {
 	a := fakeAnnotator{name: "NVD", ratings: nil}
 
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), path, "", "", []provider.Provider{p}, []provider.Annotator{a}, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), path, "", "", []provider.Provider{p}, []provider.Annotator{a}, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
@@ -642,7 +707,7 @@ func TestStatus_AnAuthorityThatNeverRanHasNoRow(t *testing.T) {
 	}}}
 
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), path, "", "", []provider.Provider{p}, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), path, "", "", []provider.Provider{p}, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
@@ -714,7 +779,7 @@ func TestUpdate_SeedCarriesRatingsButNotAdvisories(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
 	if code := Update(context.Background(), dst, seed, "",
-		[]provider.Provider{p}, []provider.Annotator{a}, &out, &errOut); code != 0 {
+		[]provider.Provider{p}, []provider.Annotator{a}, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
@@ -766,7 +831,7 @@ func TestUpdate_SeededBuildDisclosesWhatItCarriedForward(t *testing.T) {
 
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), dst, seed, "", nil, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), dst, seed, "", nil, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	s := errOut.String()
@@ -796,7 +861,7 @@ func TestUpdate_SeededDisclosureNamesTheGivenReferenceNotTheScratchPath(t *testi
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
 	ref := "ghcr.io/kun9497/assay-db:v6"
-	if code := Update(context.Background(), dst, seed, ref, nil, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), dst, seed, ref, nil, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	s := errOut.String()
@@ -820,7 +885,7 @@ func TestUpdate_AnUnreadableSeedFailsRatherThanBuildingFromEmpty(t *testing.T) {
 	a := fakeAnnotator{name: "NVD", ratings: []advisory.Rating{{CVE: "CVE-2026-NEW", Source: "NVD"}}}
 
 	var out, errOut bytes.Buffer
-	code := Update(context.Background(), dst, missing, "", nil, []provider.Annotator{a}, &out, &errOut)
+	code := Update(context.Background(), dst, missing, "", nil, []provider.Annotator{a}, nil, &out, &errOut)
 	if code != 2 {
 		t.Errorf("Update with an unreadable seed = %d, want 2", code)
 	}
@@ -873,7 +938,7 @@ func TestUpdate_SeededRunReportsTheWindowItActuallyFetched(t *testing.T) {
 
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), dst, seed, "", nil, []provider.Annotator{a}, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), dst, seed, "", nil, []provider.Annotator{a}, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	out.Reset()
@@ -932,7 +997,7 @@ func TestUpdate_SeededMetaSurvivesWhenThisRunsAnnotatorDidNotRun(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
 	// No annotators at all this run -- NVD_ENABLE unset for the night.
-	if code := Update(context.Background(), dst, seed, "", nil, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), dst, seed, "", nil, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	out.Reset()
@@ -950,5 +1015,241 @@ func TestUpdate_SeededMetaSurvivesWhenThisRunsAnnotatorDidNotRun(t *testing.T) {
 	}
 	if !strings.Contains(row, "https://example.test/nvd-seed") {
 		t.Errorf("RATING SOURCE row = %q, want the seed's SOURCE carried forward, not unknown", row)
+	}
+}
+
+// TestUpdate_RunsEnrichers is the direct wiring check for D3's third source
+// kind: Update must actually call Enrich, not merely accept an enrichers
+// slice and never touch it, and every field of what Enrich emits must be
+// readable back through Store.EnrichmentFor once the build is done — the
+// same database a scan will later open (D14: a scan never fetches anything,
+// so a local `db build` is the only way KISA's prose can enter).
+//
+// Asserted field by field, not by length: Summary in particular is the one
+// field Task 1's own round-trip test omitted, and a `json:"-"` on it would
+// empty every Korean overview while leaving that suite green.
+func TestUpdate_RunsEnrichers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+		ID: "GHSA-enriched", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
+	}}}
+	want := advisory.Enrichment{
+		CVE:     "CVE-2026-46394",
+		Source:  "KISA",
+		Title:   "리눅스 커널 취약점 보안 업데이트 권고",
+		Summary: "원격의 공격자가 임의 코드를 실행할 수 있는 취약점",
+		URL:     "https://knvd.krcert.or.kr/info/vuln/notice/detail?id=99",
+	}
+	e := fakeEnricher{name: "KISA", records: []advisory.Enrichment{want}}
+
+	var out, errOut bytes.Buffer
+	if code := Update(context.Background(), path, "", "", []provider.Provider{p}, nil,
+		[]provider.Enricher{e}, &out, &errOut); code != 0 {
+		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+
+	db, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	got, err := db.EnrichmentFor("CVE-2026-46394")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("EnrichmentFor(CVE-2026-46394) = %d record(s), want 1 — Enrich ran but "+
+			"what it emitted was never persisted", len(got))
+	}
+	if got[0] != want {
+		t.Errorf("stored enrichment = %+v, want %+v", got[0], want)
+	}
+	// And the enricher ran after (not instead of) the providers: the advisory
+	// half of the same build must still be there.
+	if advs, err := db.Lookup("Go", "github.com/a/b"); err != nil || len(advs) != 1 {
+		t.Errorf("Lookup(Go, github.com/a/b) = %v, %v; the enricher displaced the advisory build", advs, err)
+	}
+}
+
+// A failing enricher does NOT fail the build, unlike a failing provider or a
+// failing annotator.
+//
+// The asymmetry is deliberate and it is the point of this test. Enrichment
+// cannot change a verdict (D3), so losing it costs a reader some Korean text
+// and costs the scan nothing — while failing the build would let an
+// unreachable KISA endpoint stop a user getting any database at all, after
+// an OSV fetch and possibly a seven-hour NVD pass have already succeeded.
+//
+// It is still reported: the warning names the enricher AND carries the cause,
+// asserted as one string, because Contains(stderr, "enricher") alone would
+// pass on a message that dropped the reason entirely (CLAUDE.md's
+// wrapper-satisfies-the-assertion shape).
+func TestUpdate_AFailingEnricherIsReportedButDoesNotFailTheBuild(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vulnerability.db")
+	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+		ID: "GHSA-survives-a-failed-enricher", Database: "GHSA", Source: "osv",
+		Kind:     advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
+	}}}
+	e := fakeEnricher{name: "KISA", err: errBoom}
+
+	var out, errOut bytes.Buffer
+	code := Update(context.Background(), path, "", "", []provider.Provider{p}, nil,
+		[]provider.Enricher{e}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("Update with a failing enricher = %d, want 0 — an unreachable enrichment "+
+			"source must not stop a database being built (stderr: %s)", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "warning: enricher KISA: boom") {
+		t.Errorf("stderr does not name the failing enricher and its cause:\n%s", errOut.String())
+	}
+
+	// The database was still installed, and holds this run's advisories.
+	db, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("a failing enricher left no usable database: %v", err)
+	}
+	defer db.Close()
+	got, err := db.Lookup("Go", "github.com/a/b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "GHSA-survives-a-failed-enricher" {
+		t.Errorf("Lookup = %+v, want the advisory this build fetched", got)
+	}
+	matches, _ := filepath.Glob(filepath.Join(dir, "*.tmp"))
+	if len(matches) != 0 {
+		t.Errorf("leftover temp files after a failing enricher: %v", matches)
+	}
+}
+
+// An enricher's self-reported Records count is not believed: `db status`
+// reports what the enrichment bucket actually holds.
+//
+// This is the defect Meta.Ratings already shipped once on this branch —
+// `db status` naming a source that had rated nothing, because the number came
+// from the annotator's own Provenance instead of the stored data. A third
+// source kind arriving next to it gets the derived treatment from the start.
+//
+// The fixture claims 999 and emits 2, so the two answers cannot be confused,
+// and 999 is asserted ABSENT from the whole of `db status` — a self-reported
+// count leaking into any column, not just this row, fails here.
+func TestStatus_EnrichmentCountsAreDerivedFromTheBucketNotTheEnricher(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+		ID: "GHSA-counted", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
+	}}}
+	e := fakeEnricher{name: "KISA", claims: 999, records: []advisory.Enrichment{
+		{CVE: "CVE-2026-1000", Source: "KISA", Title: "제목 하나"},
+		{CVE: "CVE-2026-2000", Source: "KISA", Title: "제목 둘"},
+	}}
+
+	var out, errOut bytes.Buffer
+	if code := Update(context.Background(), path, "", "", []provider.Provider{p}, nil,
+		[]provider.Enricher{e}, &out, &errOut); code != 0 {
+		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := Status(path, &out, &errOut); code != 0 {
+		t.Fatalf("Status = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	s := out.String()
+	if strings.Contains(s, "999") {
+		t.Errorf("status prints the enricher's self-reported count instead of what the "+
+			"bucket holds:\n%s", s)
+	}
+	row := enrichmentSourceLine(t, s, "KISA")
+	fields := strings.Fields(row)
+	// RECORDS is checked as an exact FIELD rather than a substring:
+	// "2026-08-05" contains "2" twice over, so Contains(row, "2") could not
+	// fail whatever the count column held.
+	if !slices.Contains(fields, "2") {
+		t.Errorf("ENRICHMENT SOURCE row for KISA does not show its actual count (2):\n%q", row)
+	}
+	if !slices.Contains(fields, "2026-08-05") {
+		t.Errorf("ENRICHMENT SOURCE row for KISA is missing its DataAsOf:\n%q", row)
+	}
+	if !strings.Contains(row, "https://example.test/knvd") {
+		t.Errorf("ENRICHMENT SOURCE row for KISA is missing its fetch URL:\n%q", row)
+	}
+	if strings.Contains(row, "enriched nothing") {
+		t.Errorf("ENRICHMENT SOURCE row for KISA reads as having enriched nothing, but it "+
+			"wrote 2 records:\n%q", row)
+	}
+}
+
+// An enricher that ran and enriched NOTHING is neither claimed as a source
+// nor silently dropped — the third rendering the RATING SOURCE table already
+// has to produce (D20/D26), one table down.
+//
+// "Ran and got nothing" is worth investigating and must stay visible, but it
+// must not read as "this source enriched something" either. A bare 0 in the
+// RECORDS cell reads as the second, so the cell is words. EnrichmentCounts
+// can never store an explicit zero (a key exists only once counts[source]++
+// has run), so a literal "0" token in this row could only come from a
+// fallback that treats a missing key as a count.
+func TestStatus_AnEnricherThatEnrichedNothingIsNotClaimedAsASource(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+		ID: "GHSA-empty-enrichment", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
+	}}}
+	// Ran successfully (nil error), emitted nothing — a legitimate "the feed
+	// had nothing this build could use" outcome, not a failure.
+	e := fakeEnricher{name: "KISA", records: nil}
+
+	var out, errOut bytes.Buffer
+	if code := Update(context.Background(), path, "", "", []provider.Provider{p}, nil,
+		[]provider.Enricher{e}, &out, &errOut); code != 0 {
+		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := Status(path, &out, &errOut); code != 0 {
+		t.Fatalf("Status = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	row := enrichmentSourceLine(t, out.String(), "KISA")
+	if !strings.Contains(row, "enriched nothing") {
+		t.Errorf("ENRICHMENT SOURCE row for KISA does not say it enriched nothing:\n%q", row)
+	}
+	if slices.Contains(strings.Fields(row), "0") {
+		t.Errorf("ENRICHMENT SOURCE row for KISA shows a bare 0, which reads as \"enriched "+
+			"things\" rather than \"ran and enriched nothing\":\n%q", row)
+	}
+	if !slices.Contains(strings.Fields(row), "2026-08-05") {
+		t.Errorf("ENRICHMENT SOURCE row for KISA is missing its DataAsOf, even though it ran:\n%q", row)
+	}
+}
+
+// An authority that never ran against this database has no ENRICHMENT SOURCE
+// row at all — as opposed to one that ran and enriched nothing, which does
+// (the sibling test above). Nothing enriched here, so neither the table nor
+// its heading may appear.
+func TestStatus_NoEnricherMeansNoEnrichmentTable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+		ID: "GHSA-no-enricher", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
+	}}}
+
+	var out, errOut bytes.Buffer
+	if code := Update(context.Background(), path, "", "", []provider.Provider{p}, nil, nil, &out, &errOut); code != 0 {
+		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := Status(path, &out, &errOut); code != 0 {
+		t.Fatalf("Status = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	s := out.String()
+	if strings.Contains(s, "ENRICHMENT SOURCE") {
+		t.Errorf("status prints an ENRICHMENT SOURCE table when no enricher ever ran:\n%s", s)
+	}
+	if strings.Contains(s, "KISA") {
+		t.Errorf("status mentions KISA even though no enricher ran against this database:\n%s", s)
 	}
 }
