@@ -87,6 +87,18 @@ func (f fakeStore) EachRating(fn func(advisory.Rating) error) error {
 	return nil
 }
 
+// EnrichmentFor and EachEnrichment exist only to satisfy store.Store -- no
+// fixture in this package sets enrichment, so both answer empty. Enrichment
+// arrives in a later slice; the matcher itself never reaches a verdict off
+// of it, so an empty answer here cannot mask a matcher defect.
+func (f fakeStore) EnrichmentFor(cve string) ([]advisory.Enrichment, error) {
+	return nil, nil
+}
+
+func (f fakeStore) EachEnrichment(fn func(advisory.Enrichment) error) error {
+	return nil
+}
+
 func advWithRange(id, eco, name, introduced, fixed string, rt advisory.RangeType) advisory.Advisory {
 	return advisory.Advisory{
 		ID:   id,

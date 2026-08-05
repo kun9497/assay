@@ -714,12 +714,11 @@ func TestRatingsFor_DoesNotBleedAcrossCVEsSharingAPrefix(t *testing.T) {
 	}
 }
 
-// Schema 6, and a database at any other version refuses rather than serving
-// records with no ratings bucket - which would read as "nobody rated any of
-// these" on a database that simply predates the field.
-func TestSchemaVersionIs6(t *testing.T) {
-	if SchemaVersion != 6 {
-		t.Errorf("SchemaVersion = %d, want 6", SchemaVersion)
+// Schema 7. A v6 database must be refused rather than read as one where
+// nothing happened to be enriched.
+func TestSchemaVersionIs7(t *testing.T) {
+	if SchemaVersion != 7 {
+		t.Errorf("SchemaVersion = %d, want 7", SchemaVersion)
 	}
 }
 
@@ -882,5 +881,69 @@ func TestMetaRatingCountsIgnoresSelfReportedProvenance(t *testing.T) {
 	if _, ok := m.RatingCounts["KISA"]; ok {
 		t.Errorf(`RatingCounts["KISA"] = %d present, want absent - KISA self-reported `+
 			"5000 but rated nothing; the self-report must not be trusted", m.RatingCounts["KISA"])
+	}
+}
+
+// Enrichment is keyed (CVE, Source) exactly as ratings are, so two sources
+// can describe one CVE and re-putting one replaces rather than duplicates.
+func TestPutEnrichment_RoundTripsAndReplaces(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []advisory.Enrichment{
+		{CVE: "CVE-2026-1", Source: "KISA", Title: "첫 번째", Summary: "요약", URL: "https://example.test/1"},
+		{CVE: "CVE-2026-1", Source: "KISA", Title: "고쳐 쓴 제목", Summary: "요약", URL: "https://example.test/1"},
+		{CVE: "CVE-2026-10", Source: "KISA", Title: "이웃", Summary: "요약", URL: "https://example.test/10"},
+	} {
+		if err := w.PutEnrichment(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.SetMeta(Meta{})
+	w.Close()
+
+	db, _ := Open(path)
+	defer db.Close()
+
+	got, err := db.EnrichmentFor("CVE-2026-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One record, the second Put having replaced the first. Asserted on the
+	// title, because the CVE and Source are what the key is made of and
+	// would match either way.
+	if len(got) != 1 || got[0].Title != "고쳐 쓴 제목" {
+		t.Errorf("EnrichmentFor(CVE-2026-1) = %+v, want exactly the replaced record", got)
+	}
+	// CVE-2026-1 is a byte prefix of CVE-2026-10. The same trap RatingsFor
+	// has: without the separator in the seek prefix, or without the
+	// HasPrefix bound, the neighbour bleeds in.
+	if got[0].URL != "https://example.test/1" {
+		t.Errorf("EnrichmentFor(CVE-2026-1) returned the neighbour: %+v", got)
+	}
+	if got, err := db.EnrichmentFor("CVE-2026-10"); err != nil {
+		t.Fatal(err)
+	} else if len(got) != 1 || got[0].Title != "이웃" {
+		t.Errorf("EnrichmentFor(CVE-2026-10) = %+v, want its own record", got)
+	}
+}
+
+// An unenriched CVE is a normal answer, not a failure: the matcher asks for
+// every finding and most CVEs have no Korean notice.
+func TestEnrichmentFor_UnknownCVEIsEmptyNotAnError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, _ := Create(path)
+	w.SetMeta(Meta{})
+	w.Close()
+	db, _ := Open(path)
+	defer db.Close()
+	got, err := db.EnrichmentFor("CVE-2026-999")
+	if err != nil {
+		t.Fatalf("EnrichmentFor returned an error for an unenriched CVE: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("EnrichmentFor = %+v, want empty", got)
 	}
 }

@@ -343,25 +343,25 @@ func TestConvert_SetsTheDatabase(t *testing.T) {
 	}
 }
 
-// Schema 6 exists for D27 (NVD as a rating source), which added the ratings
-// BUCKET — a third-party CVE opinion stored independently of any advisory,
-// not a field on Advisory the way D25's Database was. Pinned to the current
-// value rather than a relation (e.g. ">= 5") so this fails loudly the moment
-// a later bump is not reflected here, instead of silently agreeing with
-// whatever the constant happens to be.
+// Schema 7 exists for the enrichment bucket (a third-party's prose about a
+// CVE — title, summary, link — stored independently of any advisory, the
+// same shape D27's ratings bucket already used for schema 6). Pinned to the
+// current value rather than a relation (e.g. ">= 5") so this fails loudly the
+// moment a later bump is not reflected here, instead of silently agreeing
+// with whatever the constant happens to be.
 //
-// Duplicated deliberately, alongside store.TestSchemaVersionIs6: that copy
+// Duplicated deliberately, alongside store.TestSchemaVersionIs7: that copy
 // pins the value from the package that owns SchemaVersion and enforces
 // ErrSchemaMismatch; this one pins it from the provider package whose
 // on-disk assumptions (Convert always setting Database, tested above) depend
 // on the schema being at least what D25 required. Someone working only in
 // this package, and never running internal/store's suite, still gets a
 // visible failure the moment the two disagree.
-func TestSchemaVersionIs6(t *testing.T) {
-	if store.SchemaVersion != 6 {
-		t.Errorf("SchemaVersion = %d, want 6 — D27 adds the ratings bucket, and a "+
-			"database built without it must refuse rather than silently report "+
-			"zero ratings for every CVE",
+func TestSchemaVersionIs7(t *testing.T) {
+	if store.SchemaVersion != 7 {
+		t.Errorf("SchemaVersion = %d, want 7 — schema 7 adds the enrichment "+
+			"bucket, and a database built without it must refuse rather than "+
+			"silently report no enrichment for every CVE",
 			store.SchemaVersion)
 	}
 }

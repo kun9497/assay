@@ -46,7 +46,14 @@ import (
 // A schema-5 database has no such bucket, and reading a missing bucket would
 // silently return zero ratings for every CVE rather than failing, which is a
 // scan that quietly loses every NVD score while looking healthy.
-const SchemaVersion = 6
+//
+// Bumped to 7 to add the enrichment bucket (an authority's prose about a CVE
+// — title, summary, link — stored separately from any advisory or rating;
+// see internal/advisory.Enrichment). Same reasoning as the bump to 6: a
+// schema-6 database has no such bucket, and a missing bucket read as "nothing
+// enriched" is indistinguishable from a scan that ran before KISA prose
+// existed at all.
+const SchemaVersion = 7
 
 var (
 	ErrNotFound       = errors.New("vulnerability database not found")
@@ -74,6 +81,16 @@ type Store interface {
 	// store's own byte order, not an incidental one — see Bolt.EachRating's
 	// doc comment for why that determinism matters here specifically.
 	EachRating(fn func(advisory.Rating) error) error
+	// EnrichmentFor answers a third-party's prose about one CVE -- title,
+	// summary, link -- sorted by Source so two runs against the same
+	// database agree. An un-enriched CVE returns an empty slice and a nil
+	// error, mirroring RatingsFor: most CVEs have no Korean notice, and that
+	// is a normal answer, not a failure.
+	EnrichmentFor(cve string) ([]advisory.Enrichment, error)
+	// EachEnrichment walks every stored enrichment, in key order, mirroring
+	// EachRating -- a seeded `db build` can copy the whole bucket forward
+	// without knowing which CVEs it holds ahead of time.
+	EachEnrichment(fn func(advisory.Enrichment) error) error
 	// Covers reports which ecosystem keys this database actually holds (D20).
 	// A caller that skips this cannot distinguish "no advisories for this
 	// package" from "this ecosystem was never ingested".
@@ -90,6 +107,10 @@ type Writer interface {
 	// (CVE, Source) so re-putting the same source replaces rather than
 	// duplicates.
 	PutRating(r advisory.Rating) error
+	// PutEnrichment stores one authority's prose about a CVE, keyed on (CVE,
+	// Source) exactly like PutRating, for the same replace-not-duplicate
+	// reason.
+	PutEnrichment(e advisory.Enrichment) error
 	SetMeta(m Meta) error
 	Close() error
 }

@@ -20,10 +20,11 @@ var (
 	bucketAdvisories = []byte("advisories") // "<ecosystem>\x00<name>"   -> []advisory ID
 	bucketByID       = []byte("by-id")      // "<advisory ID>"           -> the record, once
 	bucketMeta       = []byte("meta")
-	bucketRatings    = []byte("ratings") // "<CVE>\x00<Source>" -> the Rating record, once
+	bucketRatings    = []byte("ratings")    // "<CVE>\x00<Source>" -> the Rating record, once
+	bucketEnrichment = []byte("enrichment") // "<CVE>\x00<Source>" -> the Enrichment record, once
 )
 
-var allBuckets = [][]byte{bucketAdvisories, bucketByID, bucketMeta, bucketRatings}
+var allBuckets = [][]byte{bucketAdvisories, bucketByID, bucketMeta, bucketRatings, bucketEnrichment}
 
 // keySep is NUL because no real ecosystem or package identifier can contain
 // one. A printable separator would collide: distro ecosystem keys already
@@ -182,6 +183,21 @@ func (b *Bolt) PutRating(r advisory.Rating) error {
 	key := r.CVE + keySep + r.Source
 	return b.db.Update(func(tx *bolt.Tx) error {
 		return tx.Bucket(bucketRatings).Put([]byte(key), blob)
+	})
+}
+
+// PutEnrichment stores one authority's prose about a CVE, keyed on (CVE,
+// Source) exactly like PutRating -- so several authorities can describe the
+// same CVE and a re-Put of the same source replaces its record rather than
+// duplicating it.
+func (b *Bolt) PutEnrichment(e advisory.Enrichment) error {
+	blob, err := json.Marshal(e)
+	if err != nil {
+		return fmt.Errorf("marshal enrichment %s/%s: %w", e.CVE, e.Source, err)
+	}
+	key := e.CVE + keySep + e.Source
+	return b.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketEnrichment).Put([]byte(key), blob)
 	})
 }
 
@@ -364,6 +380,58 @@ func (b *Bolt) EachRating(fn func(advisory.Rating) error) error {
 				return fmt.Errorf("decode rating %q: %w", k, err)
 			}
 			if err := fn(r); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// EnrichmentFor answers every authority's prose about one CVE, sorted by
+// Source so two runs against the same database agree. An un-enriched CVE is a
+// normal answer -- the matcher asks this for every finding, and most CVEs
+// have no Korean notice -- so it returns an empty slice and a nil error
+// rather than treating a miss as a failure.
+func (b *Bolt) EnrichmentFor(cve string) ([]advisory.Enrichment, error) {
+	prefix := []byte(cve + keySep)
+	var out []advisory.Enrichment
+	err := b.db.View(func(tx *bolt.Tx) error {
+		c := tx.Bucket(bucketEnrichment).Cursor()
+		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
+			var e advisory.Enrichment
+			if err := json.Unmarshal(v, &e); err != nil {
+				return fmt.Errorf("decode enrichment %q: %w", k, err)
+			}
+			out = append(out, e)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Redundant against bbolt's byte-ordered keys today -- Source is the tail
+	// of "<CVE>\x00<Source>", so a Seek over one CVE's prefix already yields
+	// entries in Source order -- kept for the same reason RatingsFor keeps
+	// its own: the guarantee belongs to EnrichmentFor's contract, not to an
+	// accident of the key layout that a future change could undo silently.
+	slices.SortFunc(out, func(a, b advisory.Enrichment) int {
+		return strings.Compare(a.Source, b.Source)
+	})
+	return out, nil
+}
+
+// EachEnrichment walks every stored enrichment in key order, which is what a
+// seeded build copies forward -- the same reasoning as EachRating, one bucket
+// over.
+func (b *Bolt) EachEnrichment(fn func(advisory.Enrichment) error) error {
+	return b.db.View(func(tx *bolt.Tx) error {
+		c := tx.Bucket(bucketEnrichment).Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			var e advisory.Enrichment
+			if err := json.Unmarshal(v, &e); err != nil {
+				return fmt.Errorf("decode enrichment %q: %w", k, err)
+			}
+			if err := fn(e); err != nil {
 				return err
 			}
 		}
