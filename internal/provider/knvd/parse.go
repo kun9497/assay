@@ -1,7 +1,10 @@
-// Package knvd converts KISA's KNVD security notices into advisory
-// enrichment records. It is deliberately pure: no HTTP, no store. Fetching
-// notices and writing them to the store are separate concerns layered on
-// top of convert.
+// Package knvd fetches KISA's KNVD security notices and converts them into
+// advisory enrichment records.
+//
+// The two halves are deliberately separate. This file is pure — convert
+// takes one notice and returns records, with no HTTP and no store — and
+// knvd.go layers the paginated fetch on top of it. Writing the records to
+// the store is a third concern and belongs to neither.
 package knvd
 
 import (
