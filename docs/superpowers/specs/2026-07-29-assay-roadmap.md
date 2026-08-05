@@ -110,7 +110,7 @@ mode anyway. trivy made the same call for the same access pattern.
 
 ### D5 — Schema version in the path
 
-`<cache>/assay/db/v6/vulnerability.db`. A schema change means rebuilding into a new
+`<cache>/assay/db/v7/vulnerability.db`. A schema change means rebuilding into a new
 directory rather than writing migration code. Migration code is a liability for a project
 with one user.
 
@@ -859,7 +859,7 @@ this decision, and it showed up as one of the three findings in the binary scan 
 One machine builds the database on a schedule and publishes it to `ghcr.io/kun9497/assay-db`;
 everyone else runs `assay db update`, which pulls it. `assay db build` still exists and still
 builds from the upstream providers — it is now the publisher's command, not the default
-end-user path. The artifact's tag is the schema version (`Ref` renders it as `:v6`), so a
+end-user path. The artifact's tag is the schema version (`Ref` renders it as `:v7`), so a
 binary only ever asks for an artifact it can read: a schema bump produces a clean "not found"
 against the old tag rather than a database it would misinterpret, the same guarantee
 `store.DefaultPath` already gives the on-disk layout (D5). The artifact's `DataAsOf` is its
@@ -1079,7 +1079,7 @@ type Finding struct {
 ### Storage layout
 
 ```
-<os.UserCacheDir()>/assay/db/v6/vulnerability.db      override: ASSAY_DB_DIR
+<os.UserCacheDir()>/assay/db/v7/vulnerability.db      override: ASSAY_DB_DIR
 
 buckets:
   advisories   "<ecosystem>\x00<name>"     → []AdvisoryID  primary lookup
@@ -1098,9 +1098,9 @@ which is microseconds.
 
 | OS | Path |
 |---|---|
-| Windows | `%LocalAppData%\assay\db\v6\` |
-| macOS | `~/Library/Caches/assay/db/v6/` |
-| Linux | `~/.cache/assay/db/v6/` (honours `XDG_CACHE_HOME`) |
+| Windows | `%LocalAppData%\assay\db\v7\` |
+| macOS | `~/Library/Caches/assay/db/v7/` |
+| Linux | `~/.cache/assay/db/v7/` (honours `XDG_CACHE_HOME`) |
 
 Values are JSON to start. At a few hundred lookups per scan, bbolt reads are microseconds
 and decoding dominates — still tens of milliseconds. Encoding is hidden behind `Store`

@@ -103,7 +103,7 @@ inspect`로 회수할 수 있고, 어차피 계획된 explain 모드와 겹칩�
 
 ### D5 — 경로에 스키마 버전을 둔다
 
-`<cache>/assay/db/v6/vulnerability.db`. 스키마가 바뀌면 마이그레이션 코드를 쓰는 대신 새
+`<cache>/assay/db/v7/vulnerability.db`. 스키마가 바뀌면 마이그레이션 코드를 쓰는 대신 새
 디렉터리에 다시 빌드합니다. **사용자가 한 명인 프로젝트에서 마이그레이션 코드는 부채입니다.**
 
 ### D6 — 배포판 패키지는 릴리스를 키에 포함한다
@@ -799,7 +799,7 @@ severity: high (7.8)   [highest of 2 sources]
 한 머신이 일정에 따라 데이터베이스를 빌드해 `ghcr.io/kun9497/assay-db`에 배포하고, 나머지는 모두
 `assay db update`로 그것을 받아옵니다. `assay db build`는 여전히 존재하고 여전히 업스트림
 provider들로부터 빌드하지만, 이제는 배포자의 명령이지 일반 사용자의 기본 경로가 아닙니다.
-아티팩트의 태그는 스키마 버전입니다(`Ref`가 `:v6`로 렌더링). 그래서 바이너리는 항상 자신이 읽을 수
+아티팩트의 태그는 스키마 버전입니다(`Ref`가 `:v7`로 렌더링). 그래서 바이너리는 항상 자신이 읽을 수
 있는 아티팩트만 요청합니다. 스키마가 올라가면 옛 태그에 대해서는 깔끔한 "찾을 수 없음"이 나올 뿐,
 잘못 해석할 데이터베이스를 받는 일은 없습니다. `store.DefaultPath`가 온디스크 레이아웃에 이미 주는
 것과 같은 보장입니다(D5). 아티팩트의 `DataAsOf`는 구성 요소들 중 **가장 오래된** 것을 따르며 가장 최신 것을 따르지
@@ -1009,7 +1009,7 @@ type Finding struct {
 ### 저장소 레이아웃
 
 ```
-<os.UserCacheDir()>/assay/db/v6/vulnerability.db      override: ASSAY_DB_DIR
+<os.UserCacheDir()>/assay/db/v7/vulnerability.db      override: ASSAY_DB_DIR
 
 buckets:
   advisories   "<ecosystem>\x00<name>"     → []AdvisoryID  primary lookup
@@ -1027,9 +1027,9 @@ ID를 `by-id`로 해석하는 데 점 조회가 한 번 더 들지만 마이크�
 
 | OS | 경로 |
 |---|---|
-| Windows | `%LocalAppData%\assay\db\v6\` |
-| macOS | `~/Library/Caches/assay/db/v6/` |
-| Linux | `~/.cache/assay/db/v6/` (`XDG_CACHE_HOME` 존중) |
+| Windows | `%LocalAppData%\assay\db\v7\` |
+| macOS | `~/Library/Caches/assay/db/v7/` |
+| Linux | `~/.cache/assay/db/v7/` (`XDG_CACHE_HOME` 존중) |
 
 값은 JSON으로 시작합니다. 스캔당 수백 번 조회 기준으로 bbolt 읽기는 마이크로초이고 디코딩이
 지배적이지만 그래도 수십 밀리초 수준입니다. 인코딩은 `Store` 뒤에 가려져 있어 호출자를 건드리지
