@@ -3,6 +3,7 @@ package knvd
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // One notice, several CVEs: each gets its own record pointing back at the
@@ -39,6 +40,15 @@ func TestConvert_OneRecordPerNamedCVE(t *testing.T) {
 		if !seen[want] {
 			t.Errorf("%s missing from %+v", want, got)
 		}
+	}
+	// Determinism is a global constraint, not just "the right set came
+	// back" -- a caller writing records in whatever order convert returns
+	// them needs that order to be reproducible across runs. Checking
+	// membership through `seen` above cannot catch a reversed or
+	// unsorted result, so pin the order explicitly.
+	if got[0].CVE != "CVE-2026-66066" || got[1].CVE != "CVE-2026-70001" {
+		t.Errorf("got order [%s, %s], want ascending sorted order [CVE-2026-66066, CVE-2026-70001]",
+			got[0].CVE, got[1].CVE)
 	}
 }
 
@@ -96,5 +106,52 @@ func TestConvert_FallsBackWhenThereIsNoOverviewHeading(t *testing.T) {
 	}
 	if got[0].Summary == "" {
 		t.Error("Summary is empty for a notice with no 개요 heading")
+	}
+}
+
+// A notice with "□ 개요" but no closing "□ " heading (malformed, or the
+// content was itself cut off upstream) must not hand back an unbounded
+// summary -- the same display-length bound applies as when there is no
+// 개요 heading at all, because both are "the section's end is unknown."
+func TestConvert_OverviewSectionIsBoundedWhenThereIsNoClosingHeading(t *testing.T) {
+	long := strings.Repeat("나", 400) // no second "□ " heading follows this
+	got := convert(rawNotice{
+		ID:          "abc",
+		Title:       "제목",
+		ContentText: "□ 개요 " + long + " CVE-2026-1",
+	})
+	if len(got) != 1 {
+		t.Fatalf("want 1 record, got %d", len(got))
+	}
+	if n := utf8.RuneCountInString(got[0].Summary); n > fallbackSummaryLimit {
+		t.Errorf("Summary has %d runes, want at most %d (the same bound the no-heading fallback uses)",
+			n, fallbackSummaryLimit)
+	}
+}
+
+// The fallback summary must be cut on a rune boundary, not a byte offset --
+// this text is Korean, and a byte slice can land inside a multi-byte
+// syllable and emit replacement characters. Every other fixture's fallback
+// text is well under the limit, so this one alone exercises the truncating
+// branch.
+//
+// The leading "X" matters, not just padding: "가" is a 3-byte rune, and
+// fallbackSummaryLimit (300) is a multiple of 3, so byte-slicing 400 bare
+// "가" runes at byte offset 300 lands on a rune boundary by coincidence --
+// wrong rune count, but still valid UTF-8, so it would not exercise
+// utf8.ValidString at all. Shifting everything by one byte forces a
+// byte-offset cut to land inside a multi-byte syllable instead.
+func TestConvert_FallbackSummaryIsTruncatedOnARuneBoundary(t *testing.T) {
+	long := "X" + strings.Repeat("가", 400) // 401 runes, well over fallbackSummaryLimit
+	got := convert(rawNotice{ID: "abc", Title: "제목", ContentText: long + " CVE-2026-1"})
+	if len(got) != 1 {
+		t.Fatalf("want 1 record, got %d", len(got))
+	}
+	summary := got[0].Summary
+	if !utf8.ValidString(summary) {
+		t.Errorf("Summary is not valid UTF-8: %q", summary)
+	}
+	if n := utf8.RuneCountInString(summary); n != fallbackSummaryLimit {
+		t.Errorf("Summary has %d runes, want exactly %d", n, fallbackSummaryLimit)
 	}
 }

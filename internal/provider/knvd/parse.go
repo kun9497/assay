@@ -122,7 +122,13 @@ func summarize(text string) string {
 	if loc := nextHeadingRE.FindStringIndex(body); loc != nil {
 		body = body[:loc[0]]
 	}
-	return collapseWhitespace(body)
+	// A notice with "□ 개요" but no closing heading (malformed, or the
+	// content was itself truncated upstream) would otherwise hand back
+	// everything from the heading to the end of the notice. The same bound
+	// applies here as in the no-heading fallback below -- both are "we
+	// could not find where this section ends," and an unbounded summary in
+	// either case still renders in a report.
+	return truncateRunes(collapseWhitespace(body), fallbackSummaryLimit)
 }
 
 var whitespaceRE = regexp.MustCompile(`\s+`)
