@@ -245,15 +245,23 @@ func TestPush_ADatabaseThatDoesNotRecordCoverageClaimsNone(t *testing.T) {
 
 // unrecordedCoverage builds a database in the shape a pre-upgrade one has:
 // a Window for the reader, nothing a machine can compare.
-func unrecordedCoverage(t *testing.T) string {
+// ratings is a parameter, not a fixed 1, because this fixture is used
+// against seeded registries and the rating-count check is a separate rule:
+// a fixture with fewer ratings than the published artifact trips THAT and
+// the test stops exercising coverage dates at all. CI caught exactly this —
+// the count check landed after the fixture and turned a passing test into
+// a failing one for a reason unrelated to what it asserts.
+func unrecordedCoverage(t *testing.T, ratings int) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "vulnerability.db")
 	w, err := store.Create(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := w.PutRating(advisory.Rating{CVE: "CVE-2026-1", Source: "NVD"}); err != nil {
-		t.Fatal(err)
+	for i := 0; i < ratings; i++ {
+		if err := w.PutRating(advisory.Rating{CVE: fmt.Sprintf("CVE-2026-%d", i), Source: "NVD"}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := w.SetMeta(store.Meta{
 		Ratings: map[string]store.Provenance{"NVD": {Window: "modified 2026-07-05..2026-08-04"}},
@@ -280,7 +288,7 @@ func TestPush_UnrecordedCoverageIsNotComparedAsARegression(t *testing.T) {
 	t.Run("published records nothing, incoming records a bound", func(t *testing.T) {
 		ref := liveRegistry(t)
 		var out, errOut bytes.Buffer
-		if code := Push(context.Background(), unrecordedCoverage(t), ref, false, &out, &errOut); code != 0 {
+		if code := Push(context.Background(), unrecordedCoverage(t, 5), ref, false, &out, &errOut); code != 0 {
 			t.Fatalf("seeding failed: %d (%s)", code, errOut.String())
 		}
 		out.Reset()
@@ -296,7 +304,7 @@ func TestPush_UnrecordedCoverageIsNotComparedAsARegression(t *testing.T) {
 		seed(t, ref, time.Time{}, 5)
 
 		var out, errOut bytes.Buffer
-		if code := Push(context.Background(), unrecordedCoverage(t), ref, false, &out, &errOut); code != 0 {
+		if code := Push(context.Background(), unrecordedCoverage(t, 5), ref, false, &out, &errOut); code != 0 {
 			t.Errorf("Push of an artifact with unrecorded coverage = %d, want 0 (%s)", code, errOut.String())
 		}
 	})
