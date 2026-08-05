@@ -14,7 +14,15 @@ import (
 // reads it (a jq script, a CI policy). It changes only when the shape below
 // changes, so a consumer can tell "the format I know" apart from "something
 // new I have not seen" without having to guess from field presence.
-const schemaVersion = 1
+//
+// Bumped to 2 when FindingRecord gained `enrichment` (D3). Two earlier
+// additions should have bumped it and did not — `ratings` (D25) and
+// RatingRecord.URL (D27) both changed the shape while this constant stayed at
+// 1 — so version 1 in the wild denotes three different documents. That is the
+// cost of the misses, and it cannot be repaired retroactively; what it does
+// mean is that a consumer reading 2 can rely on every field below being
+// present, which is the guarantee the constant exists to give.
+const schemaVersion = 2
 
 // Document is the stable shape of `assay scan --output json` (design goal
 // #3). It carries what Table shows plus what Table cannot: the full
@@ -80,6 +88,41 @@ type FindingRecord struct {
 	// no ratings must not turn into a schema-breaking null for a consumer
 	// that assumes an array.
 	Ratings []RatingRecord `json:"ratings"`
+	// Enrichment is what another authority wrote about this vulnerability in
+	// prose (D3) — KISA's Korean headline, overview and notice link. It is
+	// display copy: nothing here contributes to Severity or Score above, and a
+	// consumer must not derive a band from it, because the source that wrote
+	// it frequently cannot say which package is affected at all.
+	//
+	// Empty on most findings (the measured KISA overlap is 2.4% of the
+	// advisories this tool holds), and — like Ratings above — always a slice,
+	// never nil. A shape that varied with whether a Korean notice happened to
+	// exist would make `.enrichment | length` a runtime error on most
+	// findings, which is exactly what a schema is for preventing.
+	Enrichment []EnrichmentRecord `json:"enrichment"`
+}
+
+// EnrichmentRecord is one matcher.Enrichment, reshaped for stable JSON on the
+// same reasoning as RatingRecord: a plain struct rather than the matcher type
+// embedded, so a field that type gains for an unrelated reason cannot silently
+// change this document.
+//
+// Order is not re-derived here either — matcher.Finding.Enrichment arrives
+// sorted by source (matcher's own dedupSortedEnrichment) and findingRecord
+// copies it element for element.
+//
+// There is no severity field and there must never be one (D17): enrichment
+// carries no band, and a null or zero severity here would be read as a rating
+// of none by exactly the consumers this document exists to serve.
+type EnrichmentRecord struct {
+	// Source is the authority that wrote it — "KISA". No omitempty on any
+	// field here, for the reason RatingRecord.Fixed gives: an absent value is
+	// a fact about the record ("this notice has no overview"), and a shape
+	// that varies per record is not a schema.
+	Source  string `json:"source"`
+	Title   string `json:"title"`
+	Summary string `json:"summary"`
+	URL     string `json:"url"`
 }
 
 // RatingRecord is one matcher.Rating, reshaped for stable JSON exactly like
@@ -219,6 +262,17 @@ func findingRecord(f matcher.Finding) FindingRecord {
 			URL:        r.URL,
 		})
 	}
+	// Same reasoning as ratings above: an empty result encodes as
+	// "enrichment": [], never null.
+	enrichment := make([]EnrichmentRecord, 0, len(f.Enrichment))
+	for _, e := range f.Enrichment {
+		enrichment = append(enrichment, EnrichmentRecord{
+			Source:  e.Source,
+			Title:   e.Title,
+			Summary: e.Summary,
+			URL:     e.URL,
+		})
+	}
 	return FindingRecord{
 		Package:     packageRecord(f.Package),
 		MatchedName: f.MatchedName,
@@ -237,7 +291,8 @@ func findingRecord(f matcher.Finding) FindingRecord {
 			LastAffected: f.Evidence.LastAffected,
 			Reason:       f.Evidence.Reason,
 		},
-		Ratings: ratings,
+		Ratings:    ratings,
+		Enrichment: enrichment,
 	}
 }
 

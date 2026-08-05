@@ -633,8 +633,8 @@ func TestRun_ScanOutputJSONReachesRealExitCode(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
 		t.Fatalf("stdout is not valid JSON: %v\n%s", err, stdout.String())
 	}
-	if doc.SchemaVersion != 1 {
-		t.Errorf("SchemaVersion = %d, want 1", doc.SchemaVersion)
+	if doc.SchemaVersion != 2 {
+		t.Errorf("SchemaVersion = %d, want 2", doc.SchemaVersion)
 	}
 	// buildRunSeamFixture's critical + unrated findings; somecrate is
 	// dropped by the cataloger and never reaches a Finding at all.

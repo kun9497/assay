@@ -5,6 +5,8 @@ package report
 import (
 	"fmt"
 	"io"
+	"slices"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -53,6 +55,13 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 		// that explains it is printed at most once and only when it applies —
 		// a footnote nobody's row earned is worse than no footnote.
 		disagreement := false
+		// enrichedBy is the same idea for the enrichment marker, except the
+		// footnote has to NAME the authority rather than just explain a glyph:
+		// unattributed Korean prose in the report is prose a reader cannot
+		// weigh. A slice, not a set keyed by map — a map's iteration order
+		// would reach the stream, and design goal #3 is output that does not
+		// churn between runs.
+		var enrichedBy []string
 		for _, f := range res.Findings {
 			fixed := f.Evidence.Fixed
 			if fixed == "" {
@@ -87,15 +96,42 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 				sev += " " + disagreementMarker
 				disagreement = true
 			}
+			// Enrichment is marked on the ADVISORY cell, never on SEVERITY:
+			// the prose says nothing about how bad this is (D3 — it carries no
+			// band at all, and D17 forbids inventing one), and a second glyph
+			// in the severity cell would read as a second opinion about the
+			// band. The advisory ID is also what a reader hands to --explain,
+			// which is where the text itself lives.
+			//
+			// A marker and a footnote, not the title: Korean is double-width in
+			// a fixed-width terminal and tabwriter counts bytes, so a title in
+			// a cell misaligns every column after it — and the misalignment is
+			// invisible to the code that produced it.
+			advisoryID := f.Advisory.ID
+			if len(f.Enrichment) > 0 {
+				advisoryID += " " + enrichmentMarker
+				for _, e := range f.Enrichment {
+					if e.Source != "" && !slices.Contains(enrichedBy, e.Source) {
+						enrichedBy = append(enrichedBy, e.Source)
+					}
+				}
+			}
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				name, f.Package.Version, f.Package.Ecosystem,
-				f.Advisory.ID, sev, aliases, fixed)
+				advisoryID, sev, aliases, fixed)
 		}
 		if err := tw.Flush(); err != nil {
 			return Summary{}, err
 		}
 		if disagreement {
 			fmt.Fprintf(w, "%s sources disagree on severity; see --explain <id> for the detail\n", disagreementMarker)
+		}
+		if len(enrichedBy) > 0 {
+			// Sorted, so two runs over one result agree even though the order
+			// findings contributed their sources in is incidental.
+			sort.Strings(enrichedBy)
+			fmt.Fprintf(w, "%s also described by %s; see --explain <id> for the text\n",
+				enrichmentMarker, strings.Join(enrichedBy, ", "))
 		}
 
 	case cat.Components == 0:
@@ -247,6 +283,18 @@ func Summarize(res matcher.Result, cat cyclonedx.Stats) Summary {
 // render as one throws off every column after it, which is exactly the
 // misalignment cellAt's own doc comment warns a reader cannot see happen.
 const disagreementMarker = "*"
+
+// enrichmentMarker flags an ADVISORY cell some other authority has also
+// written about (D3) — today KISA, in Korean.
+//
+// ASCII, and a different glyph from disagreementMarker, for the two reasons
+// that constant gives: the table is read in CI logs whose Unicode width
+// handling is unreliable, and a marker that could be confused with the
+// severity one would have a reader looking for a disagreement that is not
+// there. `+` reads as "there is more here", which is exactly what it means —
+// the text itself is in --explain, because Korean is double-width and a table
+// cannot carry it without misaligning every column after it.
+const enrichmentMarker = "+"
 
 // sourcesDisagree reports whether a finding's sources gave different
 // severity bands for the same vulnerability — the disagreement the table's

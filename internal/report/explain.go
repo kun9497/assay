@@ -126,9 +126,55 @@ func explainOne(w io.Writer, f matcher.Finding) error {
 		reason = "matched an enumerated affected version, not a range"
 	}
 	lines = append(lines, fmt.Sprintf("result:   %s", reason))
+	lines = append(lines, enrichmentLines(f.Enrichment)...)
 
 	_, err := fmt.Fprintln(w, strings.Join(lines, "\n")+"\n")
 	return err
+}
+
+// enrichmentLines renders what another authority wrote about this
+// vulnerability in prose (D3): who wrote it, the headline, the overview, and
+// where to read the rest.
+//
+// This is where the feature actually pays off. The table can only carry a
+// marker — Korean is double-width in a fixed-width terminal, so a title in a
+// cell misaligns every column after it — so --explain is the only renderer
+// that shows the text at all, and it shows all of it rather than a truncation.
+//
+// It stays strictly below "result:" and adds nothing to the lines above,
+// because everything above is the account of why this package matched and
+// enrichment is not evidence of anything (D3). A reader who stops before this
+// block has read the whole match.
+//
+// Nothing here carries a severity, and none is derived from what KISA's own
+// grading says (D17): the finding's band is above, set by sources that scored
+// it, and a second band-shaped statement here would be read as one.
+//
+// Empty title, summary or link lines are dropped rather than printed blank.
+// The source is always named when there is anything to attribute, so a record
+// that arrived with only a link still says who is speaking — an unattributed
+// URL in a vulnerability report is worse than none.
+func enrichmentLines(es []matcher.Enrichment) []string {
+	var lines []string
+	for _, e := range es {
+		lines = append(lines, fmt.Sprintf("enrichment: %s", e.Source))
+		for _, f := range []struct{ label, value string }{
+			{"title", e.Title},
+			{"summary", e.Summary},
+			{"link", e.URL},
+		} {
+			if f.value == "" {
+				continue
+			}
+			// A fixed label width, for ratingLine's own reason: this is a
+			// handful of lines under one finding, not a table whose rows must
+			// line up with a header printed once for the document, so a fixed
+			// width keeps each block independently predictable. 9 clears
+			// "summary:", the longest of the three labels.
+			lines = append(lines, fmt.Sprintf("  %-9s %s", f.label+":", f.value))
+		}
+	}
+	return lines
 }
 
 // ratingLine formats one source's assessment of a finding for the full

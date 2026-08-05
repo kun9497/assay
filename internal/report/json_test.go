@@ -73,6 +73,13 @@ func goldenFixture() (matcher.Result, cyclonedx.Stats) {
 				Ratings: []matcher.Rating{
 					{Database: "ALPINE", AdvisoryID: "CVE-2024-12345", Severity: severity.Critical, Score: 9.8, Fixed: "3.1.4-r6"},
 				},
+				// KISA's prose about the same CVE (D3), on the Alpine finding
+				// because Alpine is where the overlap actually is — 279 of the
+				// 413 CVEs KISA and this database share. The other two findings
+				// deliberately gain nothing, which is the ordinary case at a
+				// 2.4% overlap and is what makes "enrichment": [] part of the
+				// committed shape rather than a case no fixture reaches.
+				Enrichment: []matcher.Enrichment{kisaEnrichment()},
 			},
 			{
 				Package: pkgmeta.Package{
@@ -207,8 +214,9 @@ func TestJSON_SchemaVersionIsPresentAndStable(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
 		t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())
 	}
-	if doc.SchemaVersion != 1 {
-		t.Errorf("SchemaVersion = %d, want 1", doc.SchemaVersion)
+	if doc.SchemaVersion != 2 {
+		t.Errorf("SchemaVersion = %d, want 2 — bumped when findings gained "+
+			"`enrichment` (D3)", doc.SchemaVersion)
 	}
 }
 

@@ -24,6 +24,13 @@ type fakeStore struct {
 	// no NVD sync has no ratings.
 	ratings     map[string][]advisory.Rating
 	ratingCalls map[string]int
+	// enrichment is what EnrichmentFor serves, keyed by CVE (D3), and
+	// enrichmentCalls counts the asks exactly as ratingCalls does. Empty in
+	// every fixture that predates it — a database built without KISA enabled
+	// has no enrichment, and that is the ordinary case rather than a
+	// degenerate one: the measured overlap is 2.4% of the corpus.
+	enrichment      map[string][]advisory.Enrichment
+	enrichmentCalls map[string]int
 }
 
 func (f fakeStore) Covers() (map[string]bool, error) {
@@ -87,15 +94,39 @@ func (f fakeStore) EachRating(fn func(advisory.Rating) error) error {
 	return nil
 }
 
-// EnrichmentFor and EachEnrichment exist only to satisfy store.Store -- no
-// fixture in this package sets enrichment, so both answer empty. Enrichment
-// arrives in a later slice; the matcher itself never reaches a verdict off
-// of it, so an empty answer here cannot mask a matcher defect.
+// EnrichmentFor serves the enrichment a fixture supplied and counts the asks,
+// mirroring RatingsFor above -- same value receiver, same reference-type
+// counter, same nil-map guard so an uncounted fixture is silent rather than a
+// panic.
+//
+// It deliberately does NOT sort what it returns, even though Bolt.EnrichmentFor
+// does. The store's sort is per CVE; a finding carrying two enriched CVEs
+// receives two independently-sorted answers and nothing about their
+// concatenation is ordered, so the matcher owns that ordering and a fake that
+// pre-sorted would hide whether it does it.
 func (f fakeStore) EnrichmentFor(cve string) ([]advisory.Enrichment, error) {
-	return nil, nil
+	if f.enrichmentCalls != nil {
+		f.enrichmentCalls[cve]++
+	}
+	return f.enrichment[cve], nil
 }
 
+// EachEnrichment exists only to satisfy store.Store -- nothing in the matcher
+// walks the whole bucket, that is dbcmd's job. Sorted anyway, matching
+// Bolt.EachEnrichment's key-order contract, for the reason EachRating gives.
 func (f fakeStore) EachEnrichment(fn func(advisory.Enrichment) error) error {
+	cves := make([]string, 0, len(f.enrichment))
+	for cve := range f.enrichment {
+		cves = append(cves, cve)
+	}
+	sort.Strings(cves)
+	for _, cve := range cves {
+		for _, e := range f.enrichment[cve] {
+			if err := fn(e); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
