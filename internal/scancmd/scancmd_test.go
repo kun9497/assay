@@ -841,8 +841,8 @@ func TestRun_OutputJSON(t *testing.T) {
 		if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
 			t.Fatalf("stdout is not valid JSON: %v\n%s", err, out.String())
 		}
-		if doc.SchemaVersion != 1 {
-			t.Errorf("SchemaVersion = %d, want 1", doc.SchemaVersion)
+		if doc.SchemaVersion != 2 {
+			t.Errorf("SchemaVersion = %d, want 2", doc.SchemaVersion)
 		}
 		if len(doc.Findings) != 1 || doc.Findings[0].Advisory.ID != "GHSA-json-medium" {
 			t.Errorf("Findings = %+v, want the one medium finding", doc.Findings)
@@ -1650,6 +1650,277 @@ func TestRun_ExplainResolvesEveryIdentifierTheScanPrints(t *testing.T) {
 			// appears in the breakdown's own rating line.
 			if !strings.Contains(out.String(), "advisory: GHSA-w24h-v9qh-8gxj") {
 				t.Errorf("--explain %s did not explain the merged finding:\n%s", id, out.String())
+			}
+		})
+	}
+}
+
+// putEnrichment writes one KISA record into the database dbPath already names,
+// the way putRating above writes a rating and for the same reason: a scan never
+// fetches anything (D14), so a test proving Korean prose reaches a report has
+// to put it in the SAME database Run will open. store.Create rather than
+// store.Open, again as putRating explains -- the Writer half is what carries
+// PutEnrichment, and Create's CreateBucketIfNotExists calls are no-ops against
+// buckets that already exist.
+func putEnrichment(t *testing.T, dbPath string, e advisory.Enrichment) {
+	t.Helper()
+	w, err := store.Create(dbPath)
+	if err != nil {
+		t.Fatalf("open %s to add enrichment: %v", dbPath, err)
+	}
+	if err := w.PutEnrichment(e); err != nil {
+		t.Fatalf("PutEnrichment: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+// What one KISA notice carries (D3). Non-nesting tokens, and none of them
+// contains a CVE ID or the notice id, so an assertion about the summary cannot
+// be satisfied by the title, by the link, or by the identifier the join ran on.
+const (
+	kisaTitle   = "제목-오픈소스-라이브러리-보안-업데이트-권고"
+	kisaSummary = "개요-원격에서-임의의-코드를-실행할-수-있는-결함이-발견되었습니다"
+	kisaURL     = "https://knvd.krcert.or.kr/info/vuln/notice/detail?id=99887"
+)
+
+func kisaNotice(cve string) advisory.Enrichment {
+	return advisory.Enrichment{
+		CVE: cve, Source: "KISA", Title: kisaTitle, Summary: kisaSummary, URL: kisaURL,
+	}
+}
+
+// TestRun_KISAEnrichmentReachesEveryRenderer is D3 end to end, through a real
+// bbolt database: `db build` writes a notice, a scan joins it to a finding on
+// the CVE, and each of the three renderers shows what it is supposed to.
+//
+// It goes through the store rather than a fake on purpose. advisory.Enrichment
+// is JSON-encoded into the bucket, so the path from PutEnrichment to a rendered
+// line is what proves the payload survives storage -- a `json:"-"` on Summary
+// would empty every stored Korean overview, and until this test existed nothing
+// anywhere read that field back.
+func TestRun_KISAEnrichmentReachesEveryRenderer(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-enriched", pkg: "enriched", fixed: "2.0.0",
+			vectors: []string{vecCritical}, aliases: []string{"CVE-2025-9"}},
+		// A second finding nothing enriched, so every "the text is present"
+		// assertion below has a row it must NOT be coming from.
+		{id: "GHSA-plain", pkg: "plain", fixed: "2.0.0", vectors: []string{vecMedium}},
+	})
+	putEnrichment(t, db, kisaNotice("CVE-2025-9"))
+	sbom := buildMatrixSBOM(t, []matrixPkg{
+		{name: "enriched", purlType: "golang"},
+		{name: "plain", purlType: "golang"},
+	})
+
+	t.Run("--explain prints the title, summary and link in full", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		// Looked up by the CVE the notice was filed under -- the identifier a
+		// reader would have copied out of the table's ALIASES column.
+		if code := Run(context.Background(), db, sbom,
+			Options{Explain: "CVE-2025-9"}, &out, &errOut); code != 0 {
+			t.Fatalf("Run = %d, want 0; stderr: %s", code, errOut.String())
+		}
+		for _, want := range []string{
+			"enrichment: KISA",
+			"  title:    " + kisaTitle,
+			"  summary:  " + kisaSummary,
+			"  link:     " + kisaURL,
+		} {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("--explain output is missing %q:\n%s", want, out.String())
+			}
+		}
+		// Results to stdout, diagnostics to stderr; the prose is a result.
+		if strings.Contains(errOut.String(), kisaSummary) {
+			t.Errorf("the Korean text reached stderr:\n%s", errOut.String())
+		}
+	})
+
+	// The workflow the footnote advertises, through the real CLI seam: read the
+	// table, copy the marked ADVISORY cell, run --explain with it. Before the
+	// marker was trimmed this answered `no finding matches advisory or alias
+	// "GHSA-enriched +"` and exit 2 -- the report instructing a reader to run a
+	// command that fails on the report's own output.
+	t.Run("--explain accepts the marked ADVISORY cell verbatim", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		code := Run(context.Background(), db, sbom,
+			Options{Explain: "GHSA-enriched +"}, &out, &errOut)
+		if code != 0 {
+			t.Fatalf("Run(--explain %q) = %d, want 0; stderr: %s",
+				"GHSA-enriched +", code, errOut.String())
+		}
+		if !strings.Contains(out.String(), "advisory: GHSA-enriched") {
+			t.Errorf("the copied cell did not explain the finding it was copied from:\n%s",
+				out.String())
+		}
+	})
+
+	t.Run("the table marks the row and names the source", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		if code := Run(context.Background(), db, sbom, Options{}, &out, &errOut); code != 0 {
+			t.Fatalf("Run = %d, want 0; stderr: %s", code, errOut.String())
+		}
+		if !strings.Contains(out.String(), "+ also described by KISA") {
+			t.Errorf("the table does not name KISA in a footnote:\n%s", out.String())
+		}
+		if !strings.Contains(out.String(), "GHSA-enriched +") {
+			t.Errorf("the enriched row is not marked:\n%s", out.String())
+		}
+		// The marker is per row: the finding nothing enriched must not get one.
+		if strings.Contains(out.String(), "GHSA-plain +") {
+			t.Errorf("the un-enriched row is marked too:\n%s", out.String())
+		}
+		if strings.Contains(out.String(), kisaTitle) || strings.Contains(out.String(), kisaSummary) {
+			t.Errorf("the table carries the Korean text itself:\n%s", out.String())
+		}
+	})
+
+	t.Run("--output json carries the whole record", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		if code := Run(context.Background(), db, sbom,
+			Options{Output: "json"}, &out, &errOut); code != 0 {
+			t.Fatalf("Run = %d, want 0; stderr: %s", code, errOut.String())
+		}
+		var doc report.Document
+		if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+			t.Fatalf("stdout is not valid JSON: %v\n%s", err, out.String())
+		}
+		var enriched []report.EnrichmentRecord
+		for _, f := range doc.Findings {
+			if f.Advisory.ID == "GHSA-enriched" {
+				enriched = f.Enrichment
+				continue
+			}
+			if len(f.Enrichment) != 0 {
+				t.Errorf("finding %s gained enrichment nothing filed for it: %+v",
+					f.Advisory.ID, f.Enrichment)
+			}
+		}
+		want := report.EnrichmentRecord{
+			Source: "KISA", Title: kisaTitle, Summary: kisaSummary, URL: kisaURL,
+		}
+		if len(enriched) != 1 || enriched[0] != want {
+			t.Errorf("enrichment = %+v, want [%+v]", enriched, want)
+		}
+	})
+}
+
+// TestRun_EnrichmentChangesNoVerdict is the property this whole feature is
+// constrained by (D3), held where it actually matters: at the exit code, across
+// every gate, through two real databases whose ONLY difference is a KISA record.
+//
+// The matcher-level half of this lives in
+// internal/matcher.TestMatch_EnrichmentChangesNoVerdict, which compares the
+// findings themselves. This one compares what CI reads -- the exit code and the
+// summary counts -- because those are computed by report and scancmd, which that
+// test cannot reach without an import cycle.
+func TestRun_EnrichmentChangesNoVerdict(t *testing.T) {
+	// Every gate has something to fire on: a critical finding, an unrated one,
+	// an advisory that cannot be evaluated, and a package the cataloger drops.
+	// Enrichment lands on the UNRATED finding as well as the rated one, because
+	// the unrated finding is where an enrichment that could set a band would
+	// show up first -- nothing else has claimed one there.
+	advisories := []matrixAdv{
+		{id: "GHSA-critical", pkg: "critical", fixed: "2.0.0",
+			vectors: []string{vecCritical}, aliases: []string{"CVE-2025-9"}},
+		{id: "GHSA-unrated", pkg: "unrated", fixed: "2.0.0", aliases: []string{"CVE-2025-8"}},
+		{id: "GHSA-badcompare", pkg: "badcompare"}, // malformed bound -> incomplete check
+	}
+	sbom := buildMatrixSBOM(t, []matrixPkg{
+		{name: "critical", purlType: "golang"},
+		{name: "unrated", purlType: "golang"},
+		{name: "badcompare", purlType: "golang"},
+		{name: "somecrate", purlType: "cargo"}, // dropped by the cataloger
+	})
+
+	withDB := buildMatrixDB(t, advisories)
+	putEnrichment(t, withDB, kisaNotice("CVE-2025-9"))
+	putEnrichment(t, withDB, kisaNotice("CVE-2025-8"))
+	withoutDB := buildMatrixDB(t, advisories)
+
+	// Non-vacuity first. Two databases that both enrich nothing agree
+	// trivially, and every comparison below would pass with the feature
+	// deleted. Asserted on the payload, so it fails too if records attached but
+	// arrived empty.
+	var probe, probeErr bytes.Buffer
+	if code := Run(context.Background(), withDB, sbom, Options{Output: "json"}, &probe, &probeErr); code != 0 {
+		t.Fatalf("probe run = %d, want 0; stderr: %s", code, probeErr.String())
+	}
+	var probeDoc report.Document
+	if err := json.Unmarshal(probe.Bytes(), &probeDoc); err != nil {
+		t.Fatalf("probe output is not valid JSON: %v", err)
+	}
+	attached := 0
+	for _, f := range probeDoc.Findings {
+		for _, e := range f.Enrichment {
+			if e.Source == "KISA" && e.Summary == kisaSummary {
+				attached++
+			}
+		}
+	}
+	if attached != 2 {
+		t.Fatalf("the enriched database attached %d KISA records, want 2 -- with "+
+			"nothing attached this test proves nothing:\n%s", attached, probe.String())
+	}
+
+	for _, tc := range []struct {
+		name string
+		opts Options
+	}{
+		{"no flags", Options{}},
+		{"--fail-on critical", Options{FailOn: &bandCritical}},
+		{"--fail-on high", Options{FailOn: &bandHigh}},
+		// The gate an invented band would move first: an enrichment that
+		// contributed a severity would stop the unrated finding being unrated.
+		{"--fail-on-unknown", Options{FailOnUnknown: true}},
+		{"--fail-on none (D17: unknown trips nothing)", Options{FailOn: &bandNone}},
+		{"--fail-on-incomplete", Options{FailOnIncomplete: true}},
+		{"every gate at once", Options{
+			FailOn: &bandLow, FailOnUnknown: true, FailOnIncomplete: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// --output json on both sides, so the summary counts can be
+			// compared as well as the exit code. A renderer is chosen, never a
+			// different notion of what the scan found (D11), so this is the
+			// same verdict the table would reach.
+			opts := tc.opts
+			opts.Output = "json"
+
+			var withOut, withErr bytes.Buffer
+			withCode := Run(context.Background(), withDB, sbom, opts, &withOut, &withErr)
+			var withoutOut, withoutErr bytes.Buffer
+			withoutCode := Run(context.Background(), withoutDB, sbom, opts, &withoutOut, &withoutErr)
+
+			if withCode != withoutCode {
+				t.Errorf("exit code %d with enrichment, %d without -- a reader's "+
+					"convenience moved a gate\nwith stderr: %s\nwithout stderr: %s",
+					withCode, withoutCode, withErr.String(), withoutErr.String())
+			}
+			var withDoc, withoutDoc report.Document
+			if err := json.Unmarshal(withOut.Bytes(), &withDoc); err != nil {
+				t.Fatalf("enriched output is not valid JSON: %v", err)
+			}
+			if err := json.Unmarshal(withoutOut.Bytes(), &withoutDoc); err != nil {
+				t.Fatalf("un-enriched output is not valid JSON: %v", err)
+			}
+			if withDoc.Summary != withoutDoc.Summary {
+				t.Errorf("summary %+v with enrichment, %+v without",
+					withDoc.Summary, withoutDoc.Summary)
+			}
+			// Per finding as well, so a band that moved somewhere the summary
+			// happens to net out is still caught.
+			if len(withDoc.Findings) != len(withoutDoc.Findings) {
+				t.Fatalf("finding count %d with enrichment, %d without",
+					len(withDoc.Findings), len(withoutDoc.Findings))
+			}
+			for i := range withDoc.Findings {
+				a, b := withDoc.Findings[i], withoutDoc.Findings[i]
+				if a.Severity != b.Severity || a.Score != b.Score {
+					t.Errorf("finding %s: %s/%.1f with enrichment, %s/%.1f without",
+						a.Advisory.ID, a.Severity, a.Score, b.Severity, b.Score)
+				}
 			}
 		})
 	}

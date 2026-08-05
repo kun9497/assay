@@ -15,6 +15,7 @@ import (
 
 	"github.com/kun9497/assay/internal/dbcmd"
 	"github.com/kun9497/assay/internal/provider"
+	"github.com/kun9497/assay/internal/provider/knvd"
 	"github.com/kun9497/assay/internal/provider/nvd"
 	"github.com/kun9497/assay/internal/provider/osv"
 	"github.com/kun9497/assay/internal/scancmd"
@@ -93,6 +94,15 @@ Environment (db build only — a scan reads no environment and no network):
   NVD_API_KEY=<key>     Raise NVD's rate limit tenfold. Optional, and it does
                         not shorten the seven hours; NVD's own response
                         generation is the bottleneck, not the pacing.
+  KISA_ENABLE=1         Also fetch KISA/KNVD's Korean security notices, so a
+                        finding whose CVE one of them describes carries its
+                        Korean title, summary and link. The fetch is about 41
+                        requests and under a minute, and a failure warns
+                        rather than failing the build - enrichment cannot
+                        change a verdict. This data is LOCAL ONLY: KISA's
+                        terms do not permit redistributing it, so db push
+                        strips it and db update never delivers it. Build it
+                        yourself or go without it.
 `
 
 func main() {
@@ -180,6 +190,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return dbcmd.Update(context.Background(), path, seedPath, ref,
 				[]provider.Provider{osv.New(osv.Ecosystems, "")},
 				dbUpdateAnnotators(stderr),
+				dbUpdateEnrichers(stderr),
 				stdout, stderr)
 		case "update":
 			ref, ok := resolveUpdateRef(args, stderr)
@@ -312,6 +323,38 @@ func dbUpdateAnnotators(stderr io.Writer) []provider.Annotator {
 	return []provider.Annotator{newNVDAnnotator(nvdOptionsFromEnv(stderr))}
 }
 
+// newKNVDEnricher constructs the KISA/KNVD enricher. A package variable for
+// the same reason newNVDAnnotator is one: a test can substitute a spy and
+// observe the Options that actually reached construction, without knvd.New's
+// default BaseURL (the live KNVD endpoint) ever being fetched from.
+var newKNVDEnricher = knvd.New
+
+// dbUpdateEnrichers is every provider.Enricher `db build` runs, built from
+// the environment.
+//
+// KISA is opt-in via KISA_ENABLE, exactly as NVD is via NVD_ENABLE, though
+// the reasoning is different in kind: the NVD pass costs seven hours, while
+// this one is ~41 requests and under a minute. What makes it opt-in is D29 —
+// the data may not be redistributed, so `db push` strips it and `db update`
+// never carries it, which means the only person who can get it is someone who
+// deliberately built it themselves. An off-by-default flag is the honest
+// shape for something a user has to opt into holding.
+//
+// A failing enricher does not fail the build (see dbcmd.Update), so enabling
+// this cannot cost anyone their database the way an unconditional NVD did.
+func dbUpdateEnrichers(stderr io.Writer) []provider.Enricher {
+	if os.Getenv("KISA_ENABLE") == "" {
+		return nil
+	}
+	// Progress goes to stderr so the per-page and retry lines are visible.
+	// Leaving it unset defaults it to io.Discard, and that is exactly what
+	// shipped in nvd: a run that spent 5h52m, hit a 503 and retried four times
+	// printed nothing about any of it, so the log read "retries fired: 0". The
+	// option existed and was thrown away one call site later; this is that
+	// call site.
+	return []provider.Enricher{newKNVDEnricher(knvd.Options{Progress: stderr})}
+}
+
 // resolveUpdateRef decides which reference `db update` pulls from: the
 // default, schema-derived ref (dbcmd.Ref(dbcmd.DefaultRef)), or an explicit
 // override via `--from <ref>`. Pulled out of the "update" case as its own,
@@ -339,7 +382,12 @@ func resolveUpdateRef(args []string, stderr io.Writer) (ref string, ok bool) {
 		return "", false
 	}
 	if len(args) < 4 {
-		fmt.Fprintln(stderr, "error: --from requires a reference, e.g. ghcr.io/kun9497/assay-db:v6")
+		// Derived, never spelled out. A literal tag here is a hardcoded schema
+		// version that drifts the moment SchemaVersion is bumped, and this one
+		// had: it still read :v6 after the bump to v7, telling a user to fetch
+		// a tag that 404s. dbcmd.Ref is the same function `db ref` prints and
+		// the default this very function returns two branches up.
+		fmt.Fprintf(stderr, "error: --from requires a reference, e.g. %s\n", dbcmd.Ref(dbcmd.DefaultRef))
 		return "", false
 	}
 	return args[3], true
@@ -366,7 +414,7 @@ func resolveBuildSeed(args []string, stderr io.Writer) (ref string, has, ok bool
 		return "", false, false
 	}
 	if len(args) < 4 {
-		fmt.Fprintln(stderr, "error: --seed requires a reference, e.g. ghcr.io/kun9497/assay-db:v6")
+		fmt.Fprintf(stderr, "error: --seed requires a reference, e.g. %s\n", dbcmd.Ref(dbcmd.DefaultRef))
 		return "", false, false
 	}
 	return args[3], true, true
@@ -399,7 +447,11 @@ func resolvePushRef(args []string, stderr io.Writer) (ref string, force bool, ok
 	}
 	switch len(positional) {
 	case 0:
-		fmt.Fprintln(stderr, "error: db push needs a reference, e.g. ghcr.io/kun9497/assay-db:v6")
+		// The audience here is a PUBLISHER, so a stale tag is worse than it is
+		// two branches up: following it publishes a v7 database under the v6
+		// tag, where every v6 client would pull a schema it refuses and every
+		// v7 client would still 404.
+		fmt.Fprintf(stderr, "error: db push needs a reference, e.g. %s\n", dbcmd.Ref(dbcmd.DefaultRef))
 		return "", false, false
 	case 1:
 		return positional[0], force, true

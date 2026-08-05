@@ -62,7 +62,12 @@ import (
 // carried forward. Empty falls back to seedPath itself, which is what
 // every direct caller in this package's own tests passes as a real,
 // already-meaningful path.
-func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []provider.Provider, annotators []provider.Annotator, stdout, stderr io.Writer) int {
+//
+// enrichers run last and are the one source kind whose failure does NOT fail
+// the build; see the loop itself for why that asymmetry is deliberate. What
+// they write never leaves this machine — `db push` strips the enrichment
+// bucket from the copy it publishes (D29).
+func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []provider.Provider, annotators []provider.Annotator, enrichers []provider.Enricher, stdout, stderr io.Writer) int {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		fmt.Fprintf(stderr, "error: create database directory: %v\n", err)
 		return 2
@@ -80,9 +85,10 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []p
 	}
 
 	meta := store.Meta{
-		BuiltAt:   time.Now().UTC(),
-		Providers: map[string]store.Provenance{},
-		Ratings:   map[string]store.Provenance{},
+		BuiltAt:    time.Now().UTC(),
+		Providers:  map[string]store.Provenance{},
+		Ratings:    map[string]store.Provenance{},
+		Enrichment: map[string]store.Provenance{},
 	}
 	for _, p := range providers {
 		fmt.Fprintf(stderr, "fetching %s…\n", p.Name())
@@ -156,6 +162,16 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []p
 		// what the database holds rather than only what this run fetched
 		// (see mergeRatingCoverage). This copy must still happen BEFORE the
 		// annotator loop, never after.
+		// Enrichment is deliberately NOT carried forward, and unlike
+		// advisories that is a cost decision rather than a correctness one.
+		// A published artifact has none to carry (D29 strips it), and a
+		// seed built locally would only hold what its own build fetched — so
+		// a nightly `db build --seed` run without KISA_ENABLE simply has no
+		// Korean prose, silently, until the next run that sets it. That is
+		// affordable because the whole KNVD walk is ~41 requests and under a
+		// minute: re-fetching is cheaper than the machinery to inherit it,
+		// where ratings genuinely cost seven hours. If enrichment ever grows
+		// a cost like that, this is the line that has to change.
 		maps.Copy(meta.Ratings, seedMeta.Ratings)
 		fmt.Fprintf(stderr, "seeded %d rating(s) from %s; advisories rebuilt from source\n", seeded, label)
 	}
@@ -177,6 +193,50 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []p
 		}
 		meta.Ratings[a.Name()] = mergeRatingCoverage(meta.Ratings[a.Name()], prov)
 	}
+
+	// Enrichers run last, and a failing one does NOT fail the build.
+	//
+	// That is the opposite of what the two loops above do, deliberately, so
+	// do not "fix" it to match them. An advisory or a rating changes what a
+	// scan concludes, so a database missing one a configured source was
+	// supposed to supply looks complete and under-reports — which is why
+	// those abort. Enrichment cannot reach a verdict at all (D3): it is a
+	// Korean title, a summary and a link hung off a finding that exists
+	// either way. Losing it costs a reader some text; aborting the build
+	// would let an unreachable KISA endpoint deny a user any database at
+	// all, and would do it AFTER an OSV fetch and possibly a seven-hour NVD
+	// pass had already succeeded.
+	//
+	// A failure is still RECORDED, not merely warned about: the entry carries
+	// Provenance.Error and nothing else, so `db status` renders a row saying
+	// this source did not finish. Warning on stderr alone is not enough —
+	// the build's output scrolls past, while the database is what anyone
+	// looks at afterwards, and D20's rule is that a source which did not
+	// deliver must not be indistinguishable from one that was never
+	// configured.
+	//
+	// Writing nothing was the first version and it was worse than either
+	// alternative. Records an enricher managed to emit before failing stay in
+	// the bucket (they are harmless by construction — nothing here reaches a
+	// verdict), so the derived half of `db status`'s union already produced a
+	// row for a PARTIAL failure while a TOTAL one produced none: the same
+	// fault visible or invisible depending on when the feed died.
+	for _, e := range enrichers {
+		fmt.Fprintf(stderr, "enriching with %s…\n", e.Name())
+		prov, err := e.Enrich(ctx, func(en advisory.Enrichment) error { return w.PutEnrichment(en) })
+		if err != nil {
+			fmt.Fprintf(stderr, "warning: enricher %s: %v\n", e.Name(), err)
+			// Whatever the enricher returned alongside its error is
+			// discarded: a run that failed cannot vouch for its own DataAsOf
+			// or record count, and rendering a freshness date for a fetch
+			// that did not finish is exactly the over-claim D12 exists to
+			// stop. The failure itself is the only thing recorded.
+			meta.Enrichment[e.Name()] = store.Provenance{Error: oneLine(err.Error())}
+			continue
+		}
+		meta.Enrichment[e.Name()] = prov
+	}
+
 	if err := w.SetMeta(meta); err != nil {
 		w.Close()
 		os.Remove(tmp)
@@ -214,6 +274,16 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []p
 	// (see Meta.Ratings' own doc comment) — `assay db status` is where the
 	// derived, accurate count belongs, and it already shows it.
 	return 0
+}
+
+// oneLine flattens a message so it cannot break the table it is rendered
+// into. A tabwriter row containing a newline is not a row with an odd-looking
+// cell — it silently becomes two rows, one of them unaligned and unlabelled,
+// and the value that mattered ends up under a column heading it has nothing
+// to do with. Provider errors are single-line today; a wrapped one from a
+// future source is not this function's caller's problem to remember.
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // replaceWaits is replace's own retry schedule: the delay before each
@@ -274,14 +344,15 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 
 	// The value column is one wider than the longest label, so adding
 	// "databases:" below moved every line right by one rather than leaving
-	// that one label unaligned.
-	fmt.Fprintf(stdout, "path:      %s\n", dbPath)
-	fmt.Fprintf(stdout, "schema:    v%d\n", m.Schema)
-	fmt.Fprintf(stdout, "built:     %s\n", m.BuiltAt.Format(time.RFC3339))
+	// that one label unaligned — and adding "enrichment:" moved them all
+	// right by one again.
+	fmt.Fprintf(stdout, "path:       %s\n", dbPath)
+	fmt.Fprintf(stdout, "schema:     v%d\n", m.Schema)
+	fmt.Fprintf(stdout, "built:      %s\n", m.BuiltAt.Format(time.RFC3339))
 	// What this database covers decides which packages can be evaluated at
 	// all (D20). Without it here, coverage is discoverable only by running a
 	// scan and reading why it refused.
-	fmt.Fprintf(stdout, "covers:    %s\n", coverageSummary(m.Ecosystems))
+	fmt.Fprintf(stdout, "covers:     %s\n", coverageSummary(m.Ecosystems))
 	// Which databases a rating could be attributed to (D25), visible the same
 	// way coverage is: without running a scan.
 	//
@@ -293,7 +364,7 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 	// The stored field is Advisory.Database and the JSON key is "database", so
 	// this is also what a reader would grep for. The path line above was
 	// renamed to "path:" so the two no longer read as a pair.
-	fmt.Fprintf(stdout, "databases: %s\n", databasesSummary(m.Databases))
+	fmt.Fprintf(stdout, "databases:  %s\n", databasesSummary(m.Databases))
 	// Which authorities have ACTUALLY rated at least one CVE (D27), with how
 	// many — the same "visible without running a scan" reasoning as
 	// databases: above, and the same line shape and padding, but read from
@@ -302,7 +373,25 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 	// rated nothing must not make this line claim a source that rated
 	// something (see RatingCounts' own doc comment in
 	// internal/store/store.go).
-	fmt.Fprintf(stdout, "ratings:   %s\n", ratingsSummary(m.RatingCounts))
+	fmt.Fprintf(stdout, "ratings:    %s\n", ratingsSummary(m.RatingCounts))
+	// And which have enriched one (D3), on its own line beside ratings: for
+	// the same reason that one sits beside databases: — the ENRICHMENT SOURCE
+	// table further down is the only other place this is stated, and a reader
+	// skimming the header block would otherwise have to infer from the
+	// absence of a table that there is no enrichment, which is not something
+	// an absence can say.
+	//
+	// Derived from Meta.EnrichmentCounts, never from Meta.Enrichment's
+	// self-reported Provenance, for the reason RatingCounts' own doc comment
+	// gives: a source that ran and enriched nothing must not make this line
+	// claim it enriched something.
+	//
+	// This line reads "nothing" on every PULLED database and that is correct,
+	// not a defect to hide: `db push` strips the bucket and this provenance
+	// (D29), so the artifact genuinely carries none. Saying so plainly is the
+	// point — a user wondering why no finding shows a Korean title gets the
+	// answer here rather than from a missing table.
+	fmt.Fprintf(stdout, "enrichment: %s\n", enrichmentLine(m.EnrichmentCounts))
 	fmt.Fprintln(stdout)
 
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
@@ -399,9 +488,115 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 			if covered == "" {
 				covered = "unknown"
 			}
-			fmt.Fprintf(rtw, "%s\t%s\t%s\t%s\t%s\n", name, asOf, records, covered, p.Source)
+			// SOURCE gets the same treatment, for the same reason and to
+			// settle it the same way in both tables. A derived-only name has
+			// no self-reported fetch URL, which is the identical situation
+			// its missing DATA AS OF and COVERED are already in — rendering
+			// two of the three as a word and the third as whitespace gives
+			// one row two vocabularies for one fact, and a blank cell reads
+			// as "there is nothing to say here" rather than "this was not
+			// established".
+			//
+			// The ENRICHMENT SOURCE table below already did this. Leaving
+			// this one blank is what made two adjacent tables disagree about
+			// the same absence, so the convention moved here rather than the
+			// other way round.
+			source := p.Source
+			if source == "" {
+				source = "unknown"
+			}
+			fmt.Fprintf(rtw, "%s\t%s\t%s\t%s\t%s\n", name, asOf, records, covered, source)
 		}
 		if err := rtw.Flush(); err != nil {
+			fmt.Fprintf(stderr, "error: write status: %v\n", err)
+			return 2
+		}
+	}
+
+	// A third table for enrichment sources (D3), beside RATING SOURCE and for
+	// the same reason it is beside PROVIDER: these answer a different question
+	// again. A provider says which package is affected, an annotator what a
+	// CVE is worth, an enricher only what it is CALLED — so folding them
+	// together would put three claims of different weight under one heading.
+	//
+	// It follows RATING SOURCE's conventions exactly, because the three states
+	// a reader must tell apart are the same ones:
+	//
+	//   - a name in the derived set enriched something, and the row shows how
+	//     many;
+	//   - a name self-reported but absent from the derived set RAN and
+	//     enriched nothing, which is worth investigating, so its RECORDS cell
+	//     is words rather than a bare 0 (D20/D26 forbid dropping the row, and
+	//     a 0 reads as "no problem" rather than "check the sync");
+	//   - a name in neither never ran, and has no row at all.
+	//
+	// With a fourth this table has that RATING SOURCE does not need: a run
+	// that FAILED. An enricher's failure does not fail the build (see
+	// Update), so unlike an annotator's it leaves a database behind for
+	// someone to read — and a source that died halfway must not be readable
+	// as one that finished. Both shapes of failure say so, the partial one
+	// alongside the count that did land, because "2 records" and "2 records
+	// out of an unknown number" are different claims.
+	//
+	// There is no COVERED column: an enricher fetches the whole notice list
+	// every build (~41 requests), so there is no window to disclose the way a
+	// bounded NVD sync has one.
+	//
+	// Nothing here appears in a PULLED database: `db push` strips both the
+	// bucket and this provenance (D29), so an artifact cannot claim a source
+	// whose records it does not carry.
+	enrichNameSet := make(map[string]struct{}, len(m.Enrichment)+len(m.EnrichmentCounts))
+	for name := range m.Enrichment {
+		enrichNameSet[name] = struct{}{}
+	}
+	for name := range m.EnrichmentCounts {
+		enrichNameSet[name] = struct{}{}
+	}
+	if len(enrichNameSet) > 0 {
+		fmt.Fprintln(stdout)
+		etw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(etw, "ENRICHMENT SOURCE\tDATA AS OF\tRECORDS\tSOURCE")
+		names := make([]string, 0, len(enrichNameSet))
+		for name := range enrichNameSet {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			p := m.Enrichment[name] // self-report; zero value if this name is derived-only
+			asOf := "unknown"
+			if !p.DataAsOf.IsZero() {
+				asOf = p.DataAsOf.Format("2006-01-02")
+			}
+			n, enriched := m.EnrichmentCounts[name]
+			var records string
+			switch {
+			case p.Error != "" && enriched:
+				// Partial. The count is real but it is not the whole of what
+				// this source holds, and saying only "2" would present an
+				// interrupted fetch as a complete one. The number keeps a
+				// space after it so it is still a field of its own in the
+				// rendered row -- "2," would not be, and a test asserting on
+				// the count would have to know the punctuation.
+				records = fmt.Sprintf("%d written, then failed - %s", n, p.Error)
+			case p.Error != "":
+				records = fmt.Sprintf("failed, enriched nothing - %s", p.Error)
+			case enriched:
+				records = fmt.Sprintf("%d", n)
+			default:
+				records = "ran, enriched nothing - investigate the sync"
+			}
+			// "unknown", not a blank cell, and the same word DATA AS OF uses
+			// two columns over — and the same word the RATING SOURCE table
+			// above now uses in its own SOURCE column, so the two tables read
+			// one absence one way. See there for the reasoning; this is where
+			// it was written first.
+			source := p.Source
+			if source == "" {
+				source = "unknown"
+			}
+			fmt.Fprintf(etw, "%s\t%s\t%s\t%s\n", name, asOf, records, source)
+		}
+		if err := etw.Flush(); err != nil {
 			fmt.Fprintf(stderr, "error: write status: %v\n", err)
 			return 2
 		}
@@ -473,6 +668,31 @@ func databasesSummary(dbs []string) string {
 func ratingsSummary(counts map[string]int) string {
 	if len(counts) == 0 {
 		return "nothing - no CVE in this database has been rated by any authority"
+	}
+	names := make([]string, 0, len(counts))
+	for name := range counts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, fmt.Sprintf("%s (%d)", name, counts[name]))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// enrichmentLine lists which sources have ACTUALLY enriched at least one CVE
+// (D3), each with how many — the same shape, ordering and derived-not-reported
+// rule as ratingsSummary one line up.
+//
+// Its empty message differs from ratingsSummary's, because the empty state
+// means something different here. No ratings is a gap; no enrichment is the
+// normal condition of every published artifact (D29), so the message names
+// that rather than implying something went wrong.
+func enrichmentLine(counts map[string]int) string {
+	if len(counts) == 0 {
+		return "nothing - no CVE in this database carries a localized notice, " +
+			"which is what a pulled artifact always looks like (D29)"
 	}
 	names := make([]string, 0, len(counts))
 	for name := range counts {

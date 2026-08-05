@@ -82,6 +82,44 @@ type Finding struct {
 	// identity: showing a reader one extra identifier is noise, failing to
 	// resolve one they were just handed is a defect.
 	Identifiers []string
+	// Enrichment is what other authorities wrote ABOUT this vulnerability in
+	// prose — KISA's Korean headline, overview and notice link — joined on the
+	// CVE exactly the way Ratings are (D3).
+	//
+	// It is display copy and nothing else, and that is the property to hold
+	// hardest here: Severity, Score, the report's summary counts and every
+	// exit code must be identical to the same scan against a database with no
+	// enrichment at all. KISA describes much of its corpus in prose with no
+	// ecosystem and no package name, so anything here that could move a gate
+	// would be a source that cannot say which package is affected deciding
+	// whether CI passes.
+	//
+	// Empty on most findings — the measured overlap between KISA's corpus and
+	// the advisories this tool holds is 413 CVEs, 2.4% — so unlike Ratings,
+	// absence is the ordinary case and a renderer must read nothing into it.
+	Enrichment []Enrichment
+}
+
+// Enrichment is one authority's prose about the vulnerability a finding
+// describes: a headline, an overview, and somewhere to read the rest.
+//
+// Deliberately not a Rating. A Rating carries a band and a score and can raise
+// Finding.Severity; this carries neither and can raise nothing (D3).
+//
+// It also drops advisory.Enrichment's own CVE field. A finding is reached
+// through any of the identifiers it answers to, and which one of them the
+// prose happened to be filed under is not a fact a reader of the report can
+// act on — while keeping it would make two records that say exactly the same
+// thing (one KISA notice naming several CVEs produces one record per CVE)
+// render as two, purely because the finding carried both CVEs.
+type Enrichment struct {
+	// Source is the authority that wrote it — "KISA" — the same name the store
+	// keys the record under, so a report can say who is speaking rather than
+	// presenting unattributed prose.
+	Source  string
+	Title   string
+	Summary string
+	URL     string
 }
 
 // Rating is one database's assessment of one vulnerability: what GHSA said, as
@@ -378,9 +416,16 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 	return res, nil
 }
 
-// annotate attaches what other authorities said about this finding's CVEs —
-// NVD today, KISA next (D27). It runs once per finding, after every OSV record
-// has joined, because Identifiers is only complete then.
+// annotate attaches what other authorities said about this finding's CVEs:
+// NVD's rating (D27) and KISA's prose (D3). It runs once per finding, after
+// every OSV record has joined, because Identifiers is only complete then.
+//
+// The two are read in the same loop over the same identifiers, and that is the
+// whole of what they share. A rating is an assessment and may raise the band; an
+// enrichment is display copy and may raise nothing — Severity, Score, Advisory,
+// Evidence and Ratings are untouched by the enrichment half below, so a scan
+// against a database holding KISA's whole corpus reaches the same verdict as one
+// against a database with no enrichment at all.
 //
 // The band can go up here and the displayed record cannot change. That is D25's
 // rule narrowed by one word: the finding shows the *matched* record that set
@@ -430,8 +475,69 @@ func (m *Matcher) annotate(f *Finding) error {
 				f.Severity, f.Score = band, score
 			}
 		}
+
+		es, err := m.store.EnrichmentFor(id)
+		if err != nil {
+			// Fails the scan, like a failed Lookup or RatingsFor, and for a
+			// reason that is NOT the one D3 governs. D3 is about what stored
+			// enrichment may do to a verdict — nothing — and a read that
+			// errored produced no enrichment to have an opinion. What it did
+			// produce is evidence that the database this scan is reading is
+			// damaged, and a damaged database is exactly what exit 2 means
+			// (D11). Swallowing it would also be unreportable: the matcher has
+			// no stderr, so "the prose could not be read" would reach nobody.
+			return fmt.Errorf("enrichment for %s: %w", id, err)
+		}
+		for _, e := range es {
+			// The band, the score, the displayed advisory and the ratings are
+			// all deliberately untouched. Everything this loop may do is append
+			// display copy.
+			f.Enrichment = append(f.Enrichment, Enrichment{
+				Source:  e.Source,
+				Title:   e.Title,
+				Summary: e.Summary,
+				URL:     e.URL,
+			})
+		}
 	}
+	f.Enrichment = dedupSortedEnrichment(f.Enrichment)
 	return nil
+}
+
+// dedupSortedEnrichment sorts a finding's enrichment by source and drops exact
+// repeats.
+//
+// Sorted because the loop above appends in identifier order, so a finding
+// carrying two enriched CVEs would otherwise present its prose in the order its
+// identifiers happen to sort in — the same dependence on incidental ordering
+// sortRatings exists to remove, one field over. Source is the key the brief
+// names; the remaining fields follow it so the comparator is a total order and
+// a genuine tie cannot be left to sort.Slice, which is not stable.
+//
+// Deduplicated because one KISA notice naming several CVEs becomes one stored
+// record PER CVE (knvd.convert), all carrying the same title, summary and link.
+// A finding that grouped two of those CVEs would print the same Korean
+// paragraph twice, which reads as two authorities agreeing when it is one
+// notice counted twice. Exact repeats only — two different notices about one
+// CVE are two things a reader wants.
+func dedupSortedEnrichment(es []Enrichment) []Enrichment {
+	sort.SliceStable(es, func(i, j int) bool {
+		a, b := es[i], es[j]
+		if a.Source != b.Source {
+			return a.Source < b.Source
+		}
+		if a.Title != b.Title {
+			return a.Title < b.Title
+		}
+		if a.URL != b.URL {
+			return a.URL < b.URL
+		}
+		return a.Summary < b.Summary
+	})
+	// Compact removes ADJACENT repeats only, which is exactly right after a
+	// sort keyed on every field: two equal entries cannot be separated by a
+	// third that sorts between them.
+	return slices.Compact(es)
 }
 
 // groupsOf returns the findings that ids already belong to, lowest index

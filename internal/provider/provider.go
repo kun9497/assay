@@ -27,3 +27,20 @@ type Annotator interface {
 	Name() string
 	Annotate(ctx context.Context, emit func(advisory.Rating) error) (store.Provenance, error)
 }
+
+// Enricher is an upstream that describes a CVE in prose, rather than saying
+// which package is affected or what the CVE is worth. KISA/KNVD is the first
+// and the reason the interface exists (D3): much of its corpus names a CVE
+// and describes it in Korean with no ecosystem and no package version, so
+// treating it as a Provider would invent findings nothing can substantiate
+// and treating it as an Annotator would put a band on data that carries no
+// score.
+//
+// A third interface rather than a flag on Provider because the difference is
+// what the data may do, not where it came from. Nothing an Enricher emits
+// may reach a verdict: a scan against a database with a full enrichment
+// bucket and one with none must agree on every exit code.
+type Enricher interface {
+	Name() string
+	Enrich(ctx context.Context, emit func(advisory.Enrichment) error) (store.Provenance, error)
+}

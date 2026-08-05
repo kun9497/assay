@@ -270,11 +270,11 @@ run `assay db update` rather than silently fetching or silently reporting nothin
 
 | OS | Location |
 |---|---|
-| Windows | `%LocalAppData%\assay\db\v6\` |
-| macOS | `~/Library/Caches/assay/db/v6/` |
-| Linux | `~/.cache/assay/db/v6/` |
+| Windows | `%LocalAppData%\assay\db\v7\` |
+| macOS | `~/Library/Caches/assay/db/v7/` |
+| Linux | `~/.cache/assay/db/v7/` |
 
-Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v6` component
+Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v7` component
 is the schema version — a schema change rebuilds into a new directory rather than migrating
 in place. Note that `ASSAY_DB_DIR` carries no such component, so a CI cache keyed on that
 path survives an upgrade that should have invalidated it. Rebuild after upgrading, or key
@@ -321,6 +321,17 @@ found" against an old tag rather than a database it would misinterpret.
 - **`assay db push <ref>`** — publishes the local database as an OCI artifact. Prints
   `<name>@<digest>` on success.
 
+**Local-only enrichment (D29).** `KISA_ENABLE=1` on `db build` also fetches KISA's Korean
+security notices and joins them onto matched findings by CVE — a title, a summary and a
+link, never a matching source and never a severity (D3). KISA's site is all-rights-reserved
+with no 공공누리 mark, which restricts redistributing that data, not scanning with it — and
+`db push` redistributes. So `db push` empties the `enrichment` bucket on a staged copy and
+then builds the file it publishes by copying that copy's *live* data into a fresh one — a
+deleted bucket leaves its records in freed pages, and the artifact is the whole file — and
+`db update` therefore never delivers it: anyone who wants the Korean text runs their own `db
+build`. Reversing this, if the licence question resolves, is deleting the strip rather than
+moving where enrichment lives.
+
 None of this changes what a scan does: **a scan still never fetches anything** (D14). `db
 update`, `db build` and `db push` are the only three commands that touch the network on the
 database side.
@@ -331,7 +342,7 @@ already exist, so the very first one is a one-time, manual step:
 ```bash
 NVD_ENABLE=1 NVD_SINCE_DAYS=30 assay db build   # 27 minutes, measured
 assay db status                                 # check `ratings: NVD (…)` is not zero
-assay db push ghcr.io/kun9497/assay-db:v6       # ~6.8 MB compressed
+assay db push ghcr.io/kun9497/assay-db:v7       # ~6.8 MB compressed
 ```
 
 After that, the scheduled workflow keeps it current on its own.
@@ -378,7 +389,12 @@ ecosystem means writing one `Cataloger` and one `Comparer` — nothing else chan
 | `Cataloger` | Files → `[]Package` | **apk**, **os-release**, **cyclonedx**, dpkg, go-mod, go-binary, npm, jar |
 | `Store` | Advisory lookup | **bbolt** |
 | `Comparer` | `Compare(a, b string) (int, error)` within one ecosystem | **semver**, **PEP 440**, **apk**, deb, rpm |
-| `Provider` | Upstream feed → `[]Advisory` | **OSV**, KISA |
+| `Provider` | Upstream feed → `[]Advisory` | **OSV** |
+
+Two more interfaces sit beside `Provider` rather than inside it, because what they attach to
+a finding is not an `Advisory`: `Annotator` rates a CVE that assay already matched (**NVD**,
+D27), and `Enricher` describes one in prose (**KISA**, D29). Neither can make a package match
+or fail to; both are additive to a verdict a `Provider` already produced.
 
 The database is orthogonal to the scan. `Provider`s populate it through `assay db build`, and
 `assay db update` downloads the published result (D28); a scan only ever reads, and never
@@ -554,7 +570,7 @@ becomes the bottleneck" — the measurement above fired. grype and trivy both wo
       source, so an advisory upstream withdraws still gets removed
 
 **⑤ KISA enrichment** — Korean title, description and remediation joined onto matched
-findings by CVE. **Viable, and next.**
+findings by CVE. **Done.**
 
 The first investigation called this dead. It had measured the wrong board — KNVD's own
 disclosures (173 records, Korean domestic software) rather than its **security notices**,
@@ -567,12 +583,23 @@ assay does not scan (MS, Adobe, Cisco); what overlaps is the server-side long ta
 Apache, Exim, Mozilla. Against ~4,405 Alpine advisories that is about one finding in sixteen
 gaining a Korean title and remediation.
 
-It is a real feature and a modest one. Two things are still open: the licensing (the site is
-all-rights-reserved with no 공공누리 mark, which matters for redistributing a built database,
-not for scanning with one), and parsing the affected/fixed tables out of HTML without taking
-a dependency. Full findings in the roadmap.
+Two things had been recorded as still open — TLS verification, and parsing the affected/fixed
+tables out of HTML without taking a dependency. Measured 2026-08-05, against the live service
+rather than against documentation about it, neither was real: `knvd.krcert.or.kr` verifies
+strictly (`Verify return code: 0 (ok)`, a DigiCert-issued certificate), and the list response
+already carries `content_text` alongside its HTML, plain, needing no parser at all. The
+reference crawler parses HTML tables only to build affected/fixed *version rules*, which D3
+already rules out for enrichment.
 
-- [ ] KNVD provider and CVE-keyed enrichment join
+What was actually left was the licensing, and that is what D29 decides: KISA's site is
+all-rights-reserved with no 공공누리 mark, which restricts redistributing a built database,
+not scanning with one. So `KISA_ENABLE=1` on `db build` fetches and stores KISA's Korean
+prose locally, and `db push` strips it before publishing — `db update` therefore never
+delivers it, and anyone who wants it runs their own `db build`. Reversing that, if the
+licence question resolves, is deleting the strip. Full findings, including how KISA's own
+count endpoint turned out not to work and how it reports its own outages, are in the roadmap.
+
+- [x] KNVD provider and CVE-keyed enrichment join
 
 Correctness is checked by **differential testing against grype** at every stage. Exact
 agreement is not expected — the data sources differ — but a large divergence means the

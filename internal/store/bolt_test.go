@@ -1,10 +1,13 @@
 package store
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -714,12 +717,11 @@ func TestRatingsFor_DoesNotBleedAcrossCVEsSharingAPrefix(t *testing.T) {
 	}
 }
 
-// Schema 6, and a database at any other version refuses rather than serving
-// records with no ratings bucket - which would read as "nobody rated any of
-// these" on a database that simply predates the field.
-func TestSchemaVersionIs6(t *testing.T) {
-	if SchemaVersion != 6 {
-		t.Errorf("SchemaVersion = %d, want 6", SchemaVersion)
+// Schema 7. A v6 database must be refused rather than read as one where
+// nothing happened to be enriched.
+func TestSchemaVersionIs7(t *testing.T) {
+	if SchemaVersion != 7 {
+		t.Errorf("SchemaVersion = %d, want 7", SchemaVersion)
 	}
 }
 
@@ -883,4 +885,207 @@ func TestMetaRatingCountsIgnoresSelfReportedProvenance(t *testing.T) {
 		t.Errorf(`RatingCounts["KISA"] = %d present, want absent - KISA self-reported `+
 			"5000 but rated nothing; the self-report must not be trusted", m.RatingCounts["KISA"])
 	}
+}
+
+// Enrichment is keyed (CVE, Source) exactly as ratings are, so two sources
+// can describe one CVE and re-putting one replaces rather than duplicates.
+func TestPutEnrichment_RoundTripsAndReplaces(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []advisory.Enrichment{
+		{CVE: "CVE-2026-1", Source: "KISA", Title: "첫 번째", Summary: "요약", URL: "https://example.test/1"},
+		{CVE: "CVE-2026-1", Source: "KISA", Title: "고쳐 쓴 제목", Summary: "요약", URL: "https://example.test/1"},
+		{CVE: "CVE-2026-10", Source: "KISA", Title: "이웃", Summary: "요약", URL: "https://example.test/10"},
+	} {
+		if err := w.PutEnrichment(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.SetMeta(Meta{})
+	w.Close()
+
+	db, _ := Open(path)
+	defer db.Close()
+
+	got, err := db.EnrichmentFor("CVE-2026-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One record, the second Put having replaced the first. Asserted on the
+	// title, because the CVE and Source are what the key is made of and
+	// would match either way.
+	if len(got) != 1 || got[0].Title != "고쳐 쓴 제목" {
+		t.Errorf("EnrichmentFor(CVE-2026-1) = %+v, want exactly the replaced record", got)
+	}
+	// CVE-2026-1 is a byte prefix of CVE-2026-10. The same trap RatingsFor
+	// has: without the separator in the seek prefix, or without the
+	// HasPrefix bound, the neighbour bleeds in.
+	if got[0].URL != "https://example.test/1" {
+		t.Errorf("EnrichmentFor(CVE-2026-1) returned the neighbour: %+v", got)
+	}
+	if got, err := db.EnrichmentFor("CVE-2026-10"); err != nil {
+		t.Fatal(err)
+	} else if len(got) != 1 || got[0].Title != "이웃" {
+		t.Errorf("EnrichmentFor(CVE-2026-10) = %+v, want its own record", got)
+	}
+}
+
+// An unenriched CVE is a normal answer, not a failure: the matcher asks for
+// every finding and most CVEs have no Korean notice.
+func TestEnrichmentFor_UnknownCVEIsEmptyNotAnError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, _ := Create(path)
+	w.SetMeta(Meta{})
+	w.Close()
+	db, _ := Open(path)
+	defer db.Close()
+	got, err := db.EnrichmentFor("CVE-2026-999")
+	if err != nil {
+		t.Fatalf("EnrichmentFor returned an error for an unenriched CVE: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("EnrichmentFor = %+v, want empty", got)
+	}
+}
+
+// StripEnrichment followed by CompactInto is the whole of D29's publish-side
+// guarantee, and the assertions here are on the resulting BYTES rather than
+// on what the bucket API answers about them.
+//
+// Reading it back through EnrichmentFor is what let the sixth bypass through:
+// bbolt's DeleteBucket frees the pages holding those records without zeroing
+// them, so a stripped-in-place file answers "nothing" to every query while
+// the Korean text is still legible in it — and dbartifact.Pack gzips the
+// whole file. So this checks the file the same way `gunzip | strings` would.
+//
+// Both halves are asserted, because either alone is wrong: the strip alone
+// leaves the bytes behind, and the compaction alone faithfully copies live
+// records across.
+func TestCompactInto_LeavesNoStrippedBytesBehind(t *testing.T) {
+	const secret = "원격의 공격자가 임의 코드를 실행할 수 있는 취약점"
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.db")
+	w, err := Create(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Put(sample("ALPINE-2025-0001", "Alpine:v3.19", "openssl")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.PutRating(advisory.Rating{CVE: "CVE-2025-46394", Source: "NVD"}); err != nil {
+		t.Fatal(err)
+	}
+	// Enough records that no amount of page reuse during the strip's own
+	// metadata rewrite could account for a clean result.
+	for i := 0; i < 200; i++ {
+		if err := w.PutEnrichment(advisory.Enrichment{
+			CVE: fmt.Sprintf("CVE-2025-9%04d", i), Source: "KISA", Summary: secret,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.SetMeta(Meta{BuiltAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := StripEnrichment(src); err != nil {
+		t.Fatal(err)
+	}
+	// The premise, checked rather than assumed: if a stripped file already
+	// held none of these bytes, the compaction below would be proving nothing
+	// and this test would pass for the wrong reason forever.
+	if n := countInFile(t, src, secret); n == 0 {
+		t.Fatalf("the stripped file already holds no copy of the enrichment text, so this test "+
+			"cannot show that CompactInto is what removes it -- either bbolt stopped leaving "+
+			"freed pages intact, or %s is no longer what the records carry", secret)
+	}
+
+	dst := filepath.Join(dir, "dst.db")
+	if err := CompactInto(dst, src); err != nil {
+		t.Fatal(err)
+	}
+	if n := countInFile(t, dst, secret); n != 0 {
+		t.Errorf("the compacted file holds %d copies of the enrichment text: CompactInto copied "+
+			"more than the live data, and everything it produces is published", n)
+	}
+
+	// ...and it is still the database. A CompactInto that produced an empty
+	// file would satisfy the scan above.
+	db, err := Open(dst)
+	if err != nil {
+		t.Fatalf("the compacted database does not open: %v", err)
+	}
+	defer db.Close()
+	if got, err := db.Lookup("Alpine:v3.19", "openssl"); err != nil || len(got) != 1 {
+		t.Errorf("Lookup on the compacted database = %v, %v; the compaction dropped the advisories", got, err)
+	}
+	if got, err := db.RatingsFor("CVE-2025-46394"); err != nil || len(got) != 1 {
+		t.Errorf("RatingsFor on the compacted database = %v, %v; the compaction dropped the ratings", got, err)
+	}
+	// The enrichment bucket must still EXIST, empty. EnrichmentFor
+	// dereferences it directly, so a compacted database missing it panics on
+	// the first lookup a puller makes rather than answering "nothing".
+	got, err := db.EnrichmentFor("CVE-2025-90000")
+	if err != nil {
+		t.Errorf("EnrichmentFor on the compacted database errored (%v); the empty bucket did not survive", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("EnrichmentFor on the compacted database = %+v, want empty", got)
+	}
+}
+
+// CompactInto refuses to write into a file that already exists: bbolt's
+// Compact CREATES each bucket as it walks, so a second run into the same path
+// fails partway and leaves a half-written database behind rather than saying
+// so up front.
+//
+// The assertion is on the message CompactInto itself produces, not on the
+// words "already exists". bbolt's own failure ("bucket already exists",
+// raised mid-walk) contains that phrase too, so the first version of this
+// test passed with the guard deleted -- found by deleting it. The phrase
+// "compact into" appears only in the up-front refusal: the wrapped bbolt
+// error reads "compact <src> into <dst>", with the paths in between.
+func TestCompactInto_RefusesAnExistingDestination(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.db")
+	w, err := Create(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(Meta{BuiltAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dir, "dst.db")
+	if err := CompactInto(dst, src); err != nil {
+		t.Fatal(err)
+	}
+	err = CompactInto(dst, src)
+	if err == nil {
+		t.Fatal("CompactInto into an existing file succeeded, want an error")
+	}
+	if !strings.Contains(err.Error(), "compact into") || !strings.Contains(err.Error(), "file already exists") {
+		t.Errorf("CompactInto error = %q, want its own up-front refusal (\"compact into <dst>: file "+
+			"already exists\") rather than a bbolt error raised partway through the walk", err)
+	}
+}
+
+// countInFile reports how many times text appears in the raw bytes of path --
+// the same view dbartifact.Pack takes of a database, and the one every
+// bucket-level assertion about D29 cannot see.
+func countInFile(t *testing.T, path, text string) int {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bytes.Count(raw, []byte(text))
 }

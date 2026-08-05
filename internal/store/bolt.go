@@ -20,10 +20,11 @@ var (
 	bucketAdvisories = []byte("advisories") // "<ecosystem>\x00<name>"   -> []advisory ID
 	bucketByID       = []byte("by-id")      // "<advisory ID>"           -> the record, once
 	bucketMeta       = []byte("meta")
-	bucketRatings    = []byte("ratings") // "<CVE>\x00<Source>" -> the Rating record, once
+	bucketRatings    = []byte("ratings")    // "<CVE>\x00<Source>" -> the Rating record, once
+	bucketEnrichment = []byte("enrichment") // "<CVE>\x00<Source>" -> the Enrichment record, once
 )
 
-var allBuckets = [][]byte{bucketAdvisories, bucketByID, bucketMeta, bucketRatings}
+var allBuckets = [][]byte{bucketAdvisories, bucketByID, bucketMeta, bucketRatings, bucketEnrichment}
 
 // keySep is NUL because no real ecosystem or package identifier can contain
 // one. A printable separator would collide: distro ecosystem keys already
@@ -185,6 +186,21 @@ func (b *Bolt) PutRating(r advisory.Rating) error {
 	})
 }
 
+// PutEnrichment stores one authority's prose about a CVE, keyed on (CVE,
+// Source) exactly like PutRating -- so several authorities can describe the
+// same CVE and a re-Put of the same source replaces its record rather than
+// duplicating it.
+func (b *Bolt) PutEnrichment(e advisory.Enrichment) error {
+	blob, err := json.Marshal(e)
+	if err != nil {
+		return fmt.Errorf("marshal enrichment %s/%s: %w", e.CVE, e.Source, err)
+	}
+	key := e.CVE + keySep + e.Source
+	return b.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketEnrichment).Put([]byte(key), blob)
+	})
+}
+
 func (b *Bolt) SetMeta(m Meta) error {
 	m.Schema = SchemaVersion
 	// Coverage is the union of what each provider reported (D20). It is not
@@ -244,21 +260,24 @@ func (b *Bolt) SetMeta(m Meta) error {
 		// still make db status assert a source that rated something — the
 		// same over-claim D20 refuses to let a stored ecosystem entry make.
 		//
-		// Derived from the key alone, not by decoding each Rating blob: the
-		// key already carries Source verbatim (PutRating's own key
-		// construction), so there is nothing in the blob this scan needs
-		// that isn't already in the key.
-		counts := map[string]int{}
-		if err := tx.Bucket(bucketRatings).ForEach(func(k, _ []byte) error {
-			_, source, ok := bytes.Cut(k, []byte(keySep))
-			if ok && len(source) > 0 {
-				counts[string(source)]++
-			}
-			return nil
-		}); err != nil {
+		// Derived from the key alone, never by decoding each stored blob —
+		// see countBySource, which both this and the enrichment count below
+		// go through.
+		counts, err := countBySource(tx.Bucket(bucketRatings))
+		if err != nil {
 			return err
 		}
 		m.RatingCounts = counts
+
+		// EnrichmentCounts (D3) is derived exactly as RatingCounts is, and for
+		// exactly the reason above: a third source kind arriving next to the
+		// one that already over-claimed gets the derived treatment from the
+		// start rather than after the same review finds it again.
+		enriched, err := countBySource(tx.Bucket(bucketEnrichment))
+		if err != nil {
+			return err
+		}
+		m.EnrichmentCounts = enriched
 
 		blob, err := json.Marshal(m)
 		if err != nil {
@@ -266,6 +285,154 @@ func (b *Bolt) SetMeta(m Meta) error {
 		}
 		return tx.Bucket(bucketMeta).Put([]byte("meta"), blob)
 	})
+}
+
+// countBySource counts a bucket's entries per authoring source, reading the
+// source out of the key ("<CVE>\x00<Source>") rather than decoding each
+// stored blob: PutRating and PutEnrichment both build the key that way, so
+// there is nothing in the value this scan needs.
+//
+// Shared by the ratings and enrichment buckets because they are keyed
+// identically and the rule is the same one (counts are derived, never
+// self-reported). This is not the shared-comparer mistake D9 forbids —
+// nothing here is per-ecosystem, and there is no upstream disagreement for a
+// single implementation to paper over.
+//
+// An entry whose key carries no separator, or an empty source, is skipped
+// rather than counted under "": a key that shape cannot have been written by
+// either Put method, and inventing an unnamed source for it would put a
+// nameless row in `db status`.
+func countBySource(bk *bolt.Bucket) (map[string]int, error) {
+	counts := map[string]int{}
+	err := bk.ForEach(func(k, _ []byte) error {
+		_, source, ok := bytes.Cut(k, []byte(keySep))
+		if ok && len(source) > 0 {
+			counts[string(source)]++
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return counts, nil
+}
+
+// StripEnrichment empties the enrichment bucket of the database at path, and
+// removes the metadata describing it (D29).
+//
+// KISA's site is all-rights-reserved with no 공공누리 mark. That does not
+// restrict scanning with the data; it restricts REDISTRIBUTING it, and
+// `db push` redistributes. So `db build` fills this bucket, `db push` strips
+// it from the copy it packs, and `db update` therefore never delivers it.
+//
+// It lives here rather than in dbcmd because the bucket names are this
+// package's, and a caller reaching for bbolt directly to delete one would put
+// the on-disk shape in two places.
+//
+// The bucket is recreated EMPTY rather than left absent. EnrichmentFor and
+// EachEnrichment dereference it directly, so a database with no enrichment
+// bucket at all would panic on the first lookup instead of answering
+// "nothing" — and the artifact this produces is what every `db update` user
+// then scans with.
+//
+// The metadata goes with it. Leaving Meta.Enrichment behind would publish an
+// artifact naming a source and a count for a bucket it deliberately does not
+// carry, which is the same over-claim `db status` has already been fixed for
+// twice, arriving this time through the publish path.
+//
+// THIS IS NOT ENOUGH ON ITS OWN TO MAKE A FILE PUBLISHABLE. Deleting a bucket
+// frees its pages; it does not zero them, and the records stay legible in the
+// file's bytes. Every caller that publishes must follow this with CompactInto,
+// which copies the live data out into a fresh file -- see its doc comment for
+// the measurement.
+func StripEnrichment(path string) error {
+	db, err := bolt.Open(path, 0o600, nil)
+	if err != nil {
+		return fmt.Errorf("open %s for stripping: %w", path, err)
+	}
+	defer db.Close()
+	return db.Update(func(tx *bolt.Tx) error {
+		if tx.Bucket(bucketEnrichment) != nil {
+			if err := tx.DeleteBucket(bucketEnrichment); err != nil {
+				return fmt.Errorf("delete enrichment bucket: %w", err)
+			}
+		}
+		if _, err := tx.CreateBucketIfNotExists(bucketEnrichment); err != nil {
+			return fmt.Errorf("recreate enrichment bucket: %w", err)
+		}
+		bk := tx.Bucket(bucketMeta)
+		if bk == nil {
+			return ErrNotFound
+		}
+		raw := bk.Get([]byte("meta"))
+		if raw == nil {
+			// No metadata record means the build never finished, and Open
+			// refuses such a database anyway. Nothing to un-claim.
+			return nil
+		}
+		var m Meta
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return fmt.Errorf("decode metadata: %w", err)
+		}
+		m.Enrichment, m.EnrichmentCounts = nil, nil
+		blob, err := json.Marshal(m)
+		if err != nil {
+			return err
+		}
+		return bk.Put([]byte("meta"), blob)
+	})
+}
+
+// compactTxMaxSize bounds one write transaction during CompactInto, so a
+// 244 MB database does not have to fit in a single transaction's memory.
+// bbolt commits and reopens whenever the running total would exceed it.
+const compactTxMaxSize = 64 << 10
+
+// CompactInto writes a fresh database at dst holding the LIVE data of the
+// database at src, and nothing else. dst must not already exist -- bbolt's
+// Compact creates each bucket as it walks, which fails against a file that
+// already has them.
+//
+// This exists because StripEnrichment alone does not make a file publishable
+// (D29). DeleteBucket FREES the pages that held those records; it does not
+// zero them, and dbartifact.Pack gzips the whole file, freed pages included.
+// A final review measured it against this tree: a database with 200
+// enrichment records, stripped in place, still yielded 546 occurrences of
+// their text in the 131,072-byte result -- recoverable from the published
+// layer with `gunzip` and `strings`. Reading the stripped file back through
+// EnrichmentFor said "nothing", because the bucket API is the level above
+// where the data survives.
+//
+// Copying live data OUT is what fixes that: Compact walks src's live pages
+// into a new file, and a page freed by the strip is not a live page. So the
+// order is load-bearing -- strip src first, compact second. Compacting before
+// the strip would faithfully copy the records across.
+func CompactInto(dst, src string) error {
+	// Read-only: the source here is the caller's staged copy, but nothing
+	// about producing a publishable file should be able to write to it.
+	srcDB, err := bolt.Open(src, 0o600, &bolt.Options{ReadOnly: true})
+	if err != nil {
+		return fmt.Errorf("open %s to compact: %w", src, err)
+	}
+	defer srcDB.Close()
+	if _, err := os.Stat(dst); err == nil {
+		return fmt.Errorf("compact into %s: file already exists", dst)
+	}
+	dstDB, err := bolt.Open(dst, 0o600, nil)
+	if err != nil {
+		return fmt.Errorf("create %s to compact into: %w", dst, err)
+	}
+	if err := bolt.Compact(dstDB, srcDB, compactTxMaxSize); err != nil {
+		dstDB.Close()
+		return fmt.Errorf("compact %s into %s: %w", src, dst, err)
+	}
+	// Closed explicitly rather than deferred, and its error returned: this is
+	// the point the publishable bytes reach the disk, and a caller that packs
+	// a file whose last commit failed publishes a truncated database.
+	if err := dstDB.Close(); err != nil {
+		return fmt.Errorf("close %s after compacting: %w", dst, err)
+	}
+	return nil
 }
 
 func (b *Bolt) setSchemaForTest(v int) error {
@@ -364,6 +531,58 @@ func (b *Bolt) EachRating(fn func(advisory.Rating) error) error {
 				return fmt.Errorf("decode rating %q: %w", k, err)
 			}
 			if err := fn(r); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// EnrichmentFor answers every authority's prose about one CVE, sorted by
+// Source so two runs against the same database agree. An un-enriched CVE is a
+// normal answer -- the matcher asks this for every finding, and most CVEs
+// have no Korean notice -- so it returns an empty slice and a nil error
+// rather than treating a miss as a failure.
+func (b *Bolt) EnrichmentFor(cve string) ([]advisory.Enrichment, error) {
+	prefix := []byte(cve + keySep)
+	var out []advisory.Enrichment
+	err := b.db.View(func(tx *bolt.Tx) error {
+		c := tx.Bucket(bucketEnrichment).Cursor()
+		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
+			var e advisory.Enrichment
+			if err := json.Unmarshal(v, &e); err != nil {
+				return fmt.Errorf("decode enrichment %q: %w", k, err)
+			}
+			out = append(out, e)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Redundant against bbolt's byte-ordered keys today -- Source is the tail
+	// of "<CVE>\x00<Source>", so a Seek over one CVE's prefix already yields
+	// entries in Source order -- kept for the same reason RatingsFor keeps
+	// its own: the guarantee belongs to EnrichmentFor's contract, not to an
+	// accident of the key layout that a future change could undo silently.
+	slices.SortFunc(out, func(a, b advisory.Enrichment) int {
+		return strings.Compare(a.Source, b.Source)
+	})
+	return out, nil
+}
+
+// EachEnrichment walks every stored enrichment in key order, which is what a
+// seeded build copies forward -- the same reasoning as EachRating, one bucket
+// over.
+func (b *Bolt) EachEnrichment(fn func(advisory.Enrichment) error) error {
+	return b.db.View(func(tx *bolt.Tx) error {
+		c := tx.Bucket(bucketEnrichment).Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			var e advisory.Enrichment
+			if err := json.Unmarshal(v, &e); err != nil {
+				return fmt.Errorf("decode enrichment %q: %w", k, err)
+			}
+			if err := fn(e); err != nil {
 				return err
 			}
 		}

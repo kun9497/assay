@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -50,7 +51,62 @@ func Push(ctx context.Context, dbPath, ref string, force bool, stdout, stderr io
 		RatingsSinceKnown: ratingBoundKnown(meta),
 		RatingCount:       totalRatings(meta),
 	}
-	img, err := dbartifact.Pack(dbPath, incoming)
+	// D29: enrichment is built locally and never published.
+	//
+	// KISA's site is all-rights-reserved with no 공공누리 mark. That does not
+	// restrict SCANNING with the data; it restricts REDISTRIBUTING it, and
+	// this function redistributes. So `db build` fills the enrichment bucket,
+	// the lines below empty it, and `db update` therefore never delivers it —
+	// anyone who wants the Korean text runs their own `db build`.
+	//
+	// REVERSING D29 IS DELETING THE stripEnrichment CALL BELOW (the seam over
+	// store.StripEnrichment). Nothing else moves: the compaction that follows
+	// it copies whatever is live at that point, so with the strip gone the
+	// records simply come across. The data already lives in the same database
+	// as everything else precisely so that publishing it, once the licence
+	// question resolves, is a deletion rather than a restructure.
+	//
+	// Packed from a COPY, never from the live database. Stripping in place
+	// would take the prose away from the one machine allowed to have it, and
+	// would rewrite a file a concurrent scan may be reading.
+	staged, cleanup, err := stagedCopy(dbPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: stage database for publishing: %v\n", err)
+		return 2
+	}
+	defer cleanup()
+	if err := stripEnrichment(staged); err != nil {
+		// Fatal, not a warning. Publishing an artifact whose enrichment could
+		// not be removed is the licensing violation this guard exists to
+		// prevent, and "we tried" is not a defence.
+		fmt.Fprintf(stderr, "error: strip enrichment before publishing: %v\n", err)
+		return 2
+	}
+	// The strip is not the whole of it, and believing it was is how the sixth
+	// D29 bypass got this far. The staged copy is byte-identical to the live
+	// database, so deleting the bucket only FREES the pages holding KISA's
+	// prose — dbartifact.Pack reads the whole file, freed pages and all, and
+	// `gunzip | strings` on the published layer recovers the Korean text
+	// verbatim. Measured on this tree: 200 records stripped that way left 546
+	// occurrences of them in the result.
+	//
+	// So the file that actually gets packed is built by copying the live data
+	// OUT, into a file that never held a record to begin with. The order is
+	// load-bearing: compacting before the strip would copy the records across
+	// as live data.
+	//
+	// A second file in the same scratch directory rather than a rewrite of the
+	// staged one, because compaction writes into a database it creates.
+	packPath := filepath.Join(filepath.Dir(staged), "publishable.db")
+	if err := compactInto(packPath, staged); err != nil {
+		// Fatal for the same reason the strip's failure is: falling back to
+		// the staged copy here would publish exactly the bytes this step
+		// exists to leave behind.
+		fmt.Fprintf(stderr, "error: compact database for publishing: %v\n", err)
+		return 2
+	}
+
+	img, err := dbartifact.Pack(packPath, incoming)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: pack database: %v\n", err)
 		return 2
@@ -93,6 +149,73 @@ func Push(ctx context.Context, dbPath, ref string, force bool, stdout, stderr io
 	return 0
 }
 
+// stripEnrichment is store.StripEnrichment, and the seam Push calls it
+// through, so a test can force the failure branch below.
+//
+// It is a package variable for the same reason renameFn is one: the failure
+// cannot be provoked with a fixture. The path handed to it was created by
+// stagedCopy moments earlier, so making bbolt refuse to open it means racing
+// the copy or corrupting a file mid-function. And this is an error path whose
+// mis-handling is a licensing violation rather than a wrong number — a
+// `return 2` downgraded to a warning publishes the unstripped copy — so
+// leaving it unreachable by any test was not an option.
+var stripEnrichment = store.StripEnrichment
+
+// compactInto is store.CompactInto, and a seam for the same reason
+// stripEnrichment is one: its failure cannot be provoked with a fixture (both
+// paths it touches were created by this function moments earlier), and
+// mis-handling it is the same licensing violation — a `return 2` downgraded
+// to a warning would pack the staged copy, whose freed pages still hold every
+// record the strip just "removed".
+var compactInto = store.CompactInto
+
+// stagedCopy copies the database to a scratch file the caller may modify
+// freely, and returns the copy's path with a cleanup that removes the whole
+// scratch directory.
+//
+// It exists so the D29 strip has somewhere to happen that is not the live
+// database. A scratch DIRECTORY rather than a sibling temp file, matching how
+// `db build --seed` stages its pull: the copy is not a database anyone should
+// discover, it must not collide with the "<db>.tmp" name Update and Pull both
+// use for a half-installed one, and the directory is also where the
+// compaction writes the file that is actually packed.
+//
+// Streamed rather than read whole: dbartifact.Pack already holds the file and
+// its gzip in memory, and a ~244 MB database does not need a third copy of
+// itself alongside them.
+func stagedCopy(dbPath string) (path string, cleanup func(), err error) {
+	dir, err := os.MkdirTemp("", "assay-push-")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup = func() { os.RemoveAll(dir) }
+	src, err := os.Open(dbPath)
+	if err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	defer src.Close()
+	path = filepath.Join(dir, "vulnerability.db")
+	dst, err := os.Create(path)
+	if err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()
+		cleanup()
+		return "", nil, err
+	}
+	// Closed explicitly, not deferred: the copy is opened again immediately
+	// (by StripEnrichment, which takes bbolt's exclusive lock), and on Windows
+	// that fails outright while this handle is still open.
+	if err := dst.Close(); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	return path, cleanup, nil
+}
+
 // oldestDataAsOf is "the oldest upstream wins" (D12), the same rule the NVD
 // provider applies across its own pages: an artifact is only as fresh as its
 // stalest component. Taking the newest would let one recently-synced
@@ -108,6 +231,13 @@ func Push(ctx context.Context, dbPath, ref string, force bool, stdout, stderr io
 // --fail-on. Folding Ratings into the same minimum is what this function's
 // own "an artifact is only as fresh as its stalest component" already
 // promises — it just was not keeping that promise for half of Meta.
+//
+// Meta.Enrichment is deliberately NOT consulted, and that is not the same
+// oversight in a third place. Freshness describes what the artifact CARRIES,
+// and the artifact carries no enrichment at all (D29 — it is stripped just
+// below). A stale KISA fetch dragging the published DataAsOf backwards would
+// make every puller believe the advisories they did receive are older than
+// they are, on the strength of data they did not.
 func oldestDataAsOf(m store.Meta) time.Time {
 	var oldest time.Time
 	consider := func(p store.Provenance) {

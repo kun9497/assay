@@ -251,14 +251,25 @@ additive to `Pull` later, not a rewrite.
 
 ### Splitting KISA data into a separate artifact
 
-**Why deferred.** No longer blocked on artifacts existing — they do now (D28) — but on KISA
-enrichment itself, which is not yet built (slice ⑤). Enrichment data is a `CVE ID →
-description/severity` mapping, likely too small on its own to be worth a second artifact.
+**Why deferred.** No longer blocked on artifacts existing — they do now (D28) — and no
+longer blocked on KISA enrichment itself, which now ships (D29, slice ⑤). What blocks it
+today is that the data cannot be published in *any* artifact: KISA's terms restrict
+redistribution, so `db push` strips the `enrichment` bucket before publishing rather than
+choosing which artifact carries it. Splitting it out would solve a distribution-size problem
+this decision does not have yet — the bucket is a `CVE → title/summary/URL` mapping fetched
+in ~41 requests, nowhere near the size that would make bundling it a real cost.
 
-**Revisit when.** KISA enrichment ships, and its data grows enough that users who do not
-need it are paying a real cost.
+**Revisit when.** Both halves of a concrete trigger fire together: the licence question D29
+defers resolves — a 공공누리 mark appears, or KISA answers directly that redistribution is
+permitted — **and**, separately, the enrichment data has by then grown large enough that
+bundling it with the main artifact costs users who do not want it a download they cannot
+skip. Until the licence resolves, this entry has nothing to fire on at all; the trigger is
+that combination, not either half alone.
 
-**Groundwork.** `Advisory.Source` makes partitioning by provider straightforward.
+**Groundwork.** `Advisory.Source` makes partitioning by provider straightforward, and the
+`enrichment` bucket is already its own bbolt bucket, keyed `(CVE, Source)` exactly like
+ratings — splitting it into a second artifact later is a choice about what
+`dbartifact.Pack` reads from, not a schema change.
 
 *Borrowed from trivy's separate `trivy-java-db`.*
 

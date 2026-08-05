@@ -50,7 +50,11 @@ func Explain(w io.Writer, res matcher.Result, id string) (int, error) {
 // identifiers nest (ALPINE-CVE-2025-46394 contains CVE-2025-46394), so a
 // substring match here would explain the wrong advisory on a false-positive
 // hit.
+//
+// A table marker is trimmed off first (trimCellMarker), because the table's
+// own footnote tells the reader to hand this the cell that carries one.
 func identifiesFinding(f matcher.Finding, id string) bool {
+	id = trimCellMarker(id)
 	if f.Advisory.ID == id {
 		return true
 	}
@@ -60,6 +64,39 @@ func identifiesFinding(f matcher.Finding, id string) bool {
 		}
 	}
 	return false
+}
+
+// trimCellMarker removes a table marker a reader copied along with the cell it
+// annotates — "GHSA-1 +" becomes "GHSA-1".
+//
+// This is not lenient input handling; it closes a loop the report opens itself.
+// The table appends enrichmentMarker INSIDE the ADVISORY cell (table.go), and
+// the footnote beneath it says "see --explain <id>". The ADVISORY cell is
+// literally --explain's input, so a reader who follows that instruction by
+// copying the cell was answered with `no finding matches advisory or alias
+// "GHSA-1 +"` and exit 2 — the report's own instruction failing on the report's
+// own output.
+//
+// Safe because the marker must be preceded by a SPACE and advisory identifiers
+// contain none: CVE-2024-12345, GHSA-w24h-v9qh-8gxj, ALPINE-CVE-2025-46394,
+// PYSEC-2022-191, GO-2022-0999. Nothing that could be a real identifier ends in
+// " +" or " *", so this cannot swallow one — and an id that ends in a marker
+// with no space ("CVE-2024-1+") is left exactly as typed. The comparison after
+// it is still ==, never Contains.
+//
+// One marker, not a loop: the two markers live in different columns on purpose
+// (table.go's enrichmentMarker doc comment), so no cell carries both, and a
+// loop here would be a branch nothing can reach. disagreementMarker is trimmed
+// as well even though it sits in SEVERITY — the argument for handling it costs
+// one line and removes the question of what happens if a marker ever moves.
+func trimCellMarker(id string) string {
+	id = strings.TrimRight(id, " ")
+	for _, marker := range []string{enrichmentMarker, disagreementMarker} {
+		if cut, ok := strings.CutSuffix(id, " "+marker); ok {
+			return strings.TrimRight(cut, " ")
+		}
+	}
+	return id
 }
 
 // explainOne writes one finding's account: the package and how it was
@@ -126,9 +163,55 @@ func explainOne(w io.Writer, f matcher.Finding) error {
 		reason = "matched an enumerated affected version, not a range"
 	}
 	lines = append(lines, fmt.Sprintf("result:   %s", reason))
+	lines = append(lines, enrichmentLines(f.Enrichment)...)
 
 	_, err := fmt.Fprintln(w, strings.Join(lines, "\n")+"\n")
 	return err
+}
+
+// enrichmentLines renders what another authority wrote about this
+// vulnerability in prose (D3): who wrote it, the headline, the overview, and
+// where to read the rest.
+//
+// This is where the feature actually pays off. The table can only carry a
+// marker — Korean is double-width in a fixed-width terminal, so a title in a
+// cell misaligns every column after it — so --explain is the only renderer
+// that shows the text at all, and it shows all of it rather than a truncation.
+//
+// It stays strictly below "result:" and adds nothing to the lines above,
+// because everything above is the account of why this package matched and
+// enrichment is not evidence of anything (D3). A reader who stops before this
+// block has read the whole match.
+//
+// Nothing here carries a severity, and none is derived from what KISA's own
+// grading says (D17): the finding's band is above, set by sources that scored
+// it, and a second band-shaped statement here would be read as one.
+//
+// Empty title, summary or link lines are dropped rather than printed blank.
+// The source is always named when there is anything to attribute, so a record
+// that arrived with only a link still says who is speaking — an unattributed
+// URL in a vulnerability report is worse than none.
+func enrichmentLines(es []matcher.Enrichment) []string {
+	var lines []string
+	for _, e := range es {
+		lines = append(lines, fmt.Sprintf("enrichment: %s", e.Source))
+		for _, f := range []struct{ label, value string }{
+			{"title", e.Title},
+			{"summary", e.Summary},
+			{"link", e.URL},
+		} {
+			if f.value == "" {
+				continue
+			}
+			// A fixed label width, for ratingLine's own reason: this is a
+			// handful of lines under one finding, not a table whose rows must
+			// line up with a header printed once for the document, so a fixed
+			// width keeps each block independently predictable. 9 clears
+			// "summary:", the longest of the three labels.
+			lines = append(lines, fmt.Sprintf("  %-9s %s", f.label+":", f.value))
+		}
+	}
+	return lines
 }
 
 // ratingLine formats one source's assessment of a finding for the full

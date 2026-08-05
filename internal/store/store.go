@@ -46,7 +46,14 @@ import (
 // A schema-5 database has no such bucket, and reading a missing bucket would
 // silently return zero ratings for every CVE rather than failing, which is a
 // scan that quietly loses every NVD score while looking healthy.
-const SchemaVersion = 6
+//
+// Bumped to 7 to add the enrichment bucket (an authority's prose about a CVE
+// — title, summary, link — stored separately from any advisory or rating;
+// see internal/advisory.Enrichment). Same reasoning as the bump to 6: a
+// schema-6 database has no such bucket, and a missing bucket read as "nothing
+// enriched" is indistinguishable from a scan that ran before KISA prose
+// existed at all.
+const SchemaVersion = 7
 
 var (
 	ErrNotFound       = errors.New("vulnerability database not found")
@@ -74,6 +81,16 @@ type Store interface {
 	// store's own byte order, not an incidental one — see Bolt.EachRating's
 	// doc comment for why that determinism matters here specifically.
 	EachRating(fn func(advisory.Rating) error) error
+	// EnrichmentFor answers a third-party's prose about one CVE -- title,
+	// summary, link -- sorted by Source so two runs against the same
+	// database agree. An un-enriched CVE returns an empty slice and a nil
+	// error, mirroring RatingsFor: most CVEs have no Korean notice, and that
+	// is a normal answer, not a failure.
+	EnrichmentFor(cve string) ([]advisory.Enrichment, error)
+	// EachEnrichment walks every stored enrichment, in key order, mirroring
+	// EachRating -- a seeded `db build` can copy the whole bucket forward
+	// without knowing which CVEs it holds ahead of time.
+	EachEnrichment(fn func(advisory.Enrichment) error) error
 	// Covers reports which ecosystem keys this database actually holds (D20).
 	// A caller that skips this cannot distinguish "no advisories for this
 	// package" from "this ecosystem was never ingested".
@@ -90,6 +107,10 @@ type Writer interface {
 	// (CVE, Source) so re-putting the same source replaces rather than
 	// duplicates.
 	PutRating(r advisory.Rating) error
+	// PutEnrichment stores one authority's prose about a CVE, keyed on (CVE,
+	// Source) exactly like PutRating, for the same replace-not-duplicate
+	// reason.
+	PutEnrichment(e advisory.Enrichment) error
 	SetMeta(m Meta) error
 	Close() error
 }
@@ -148,6 +169,34 @@ type Meta struct {
 	// treats as ground truth for which rating sources exist and how many
 	// CVEs they rated, never Ratings above.
 	RatingCounts map[string]int `json:"ratingCounts"`
+	// Enrichment is per-authority provenance for CVE prose (D3): the DataAsOf
+	// and fetch Source URL an Enricher self-reports about its own run, written
+	// by dbcmd.Update from each Enricher's return value. It is the Ratings
+	// pattern one bucket over, and everything Ratings' own doc comment says
+	// about self-report applies here verbatim — Records on an entry is NOT
+	// authoritative, and EnrichmentCounts below is the derived answer to "did
+	// this authority enrich anything, and how much".
+	//
+	// A source whose run FAILED is here too, with Provenance.Error set and
+	// nothing else. That is deliberate and it is the second version of this
+	// decision: recording nothing meant a total failure produced no row at
+	// all while a PARTIAL failure produced one anyway (its records are in the
+	// bucket, so the derived half of the union answers for it) — the same
+	// fault rendering as visible or invisible depending on when the feed
+	// died. A failure is always visible now, whatever it managed to write
+	// first.
+	//
+	// It is stripped, along with EnrichmentCounts, from any database `db push`
+	// publishes (D29): the artifact must not name a source whose records it
+	// deliberately does not carry.
+	Enrichment map[string]Provenance `json:"enrichment"`
+	// EnrichmentCounts is how many CVEs each authority actually enriched, read
+	// from the enrichment bucket itself (Bolt.SetMeta) — RatingCounts applied
+	// one bucket over, for the same reason: an enrichment's Source is
+	// recoverable from its own key ("<CVE>\x00<Source>"), so there is no need
+	// to trust a self-report that has already over-claimed once on this
+	// branch. This is what `db status` treats as ground truth.
+	EnrichmentCounts map[string]int `json:"enrichmentCounts"`
 }
 
 type Provenance struct {
@@ -210,6 +259,27 @@ type Provenance struct {
 	// exists to avoid. A database built before this field simply has false
 	// here, which is the truthful answer for it.
 	CoversSinceKnown bool `json:"covers_since_known,omitempty"`
+	// Error is why this source's last run did not finish, empty when it did.
+	//
+	// Below CoversSince/CoversSinceKnown rather than between them: those two
+	// are one fact in two fields, and a reader who meets the second without
+	// the first immediately above it has to go looking for what it qualifies.
+	//
+	// It exists because "ran and produced nothing" and "did not finish" are
+	// different facts with different remedies, and every other field renders
+	// identically for both: a zero DataAsOf, a zero Records, an empty Source.
+	// Without it, `db status` shows a failed enrichment run and a successful
+	// but empty one in exactly the same words.
+	//
+	// Only dbcmd.Update writes it, and only for a source whose failure is not
+	// fatal to the build — an Enricher (D3). A failing Provider or Annotator
+	// aborts the build outright, so no metadata describing it is ever written
+	// at all, which is why this field would have nothing to say for them.
+	//
+	// A display string, never something to branch on: it is whatever the
+	// source's error said, flattened to one line so it cannot break the table
+	// it is rendered into.
+	Error string `json:"error,omitempty"`
 }
 
 // DefaultPath returns <user cache>/assay/db/v<schema>/vulnerability.db,

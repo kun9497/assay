@@ -2,8 +2,10 @@ package dbcmd
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"fmt"
+	"io"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
@@ -420,7 +422,7 @@ func TestPush_ASecondSeededDeltaIsStillPublishable(t *testing.T) {
 		out.Reset()
 		errOut.Reset()
 		if code := Update(context.Background(), built, seedPath, ref, nil,
-			[]provider.Annotator{a}, &out, &errOut); code != 0 {
+			[]provider.Annotator{a}, nil, &out, &errOut); code != 0 {
 			t.Fatalf("day %d: Update = %d (%s)", i+1, code, errOut.String())
 		}
 
@@ -466,7 +468,7 @@ func TestPush_ADeltaSeededFromTheWholeFeedStaysWhole(t *testing.T) {
 	out.Reset()
 	errOut.Reset()
 	if code := Update(context.Background(), built, seedPath, ref, nil,
-		[]provider.Annotator{a}, &out, &errOut); code != 0 {
+		[]provider.Annotator{a}, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d (%s)", code, errOut.String())
 	}
 
@@ -479,5 +481,520 @@ func TestPush_ADeltaSeededFromTheWholeFeedStaysWhole(t *testing.T) {
 	if !got.RatingsSinceKnown || !got.RatingsSince.IsZero() {
 		t.Errorf("published RatingsSince = %v (known=%v), want unbounded: the database still holds the whole feed",
 			got.RatingsSince, got.RatingsSinceKnown)
+	}
+}
+
+// The enrichment record's own text, named rather than repeated so the test
+// that scans the PUBLISHED BYTES for it cannot drift from the fixture that
+// wrote it — a sentinel scan looking for a string the fixture no longer
+// stores passes unconditionally, which is the worst shape a test can take on
+// a guarantee like D29's.
+//
+// All three are Korean or a URL, so none can be satisfied by another field's
+// text (CLAUDE.md's substring rule).
+const (
+	kisaTitle   = "OpenSSL 보안 업데이트 권고"
+	kisaSummary = "원격의 공격자가 임의 코드를 실행할 수 있는 취약점"
+	kisaURL     = "https://knvd.krcert.or.kr/info/vuln/notice/detail?id=99"
+)
+
+// enrichedDatabase builds a database holding all three record kinds — an
+// advisory, a rating and an enrichment — so a D29 test can tell "the strip
+// removed the enrichment" from "the strip removed the database".
+//
+// Its identifiers deliberately do not nest: the advisory ID ALPINE-2025-0001
+// does not contain the CVE, and the CVE does not contain the package name, so
+// no assertion made against this fixture can be satisfied by a neighbouring
+// column (CLAUDE.md's substring rule).
+func enrichedDatabase(t *testing.T) string {
+	t.Helper()
+	return enrichedDatabaseOfSize(t, 1)
+}
+
+// enrichedDatabaseOfSize is enrichedDatabase with n enrichment records rather
+// than one, all carrying the same prose so a byte scan of the published layer
+// counts n copies of it rather than one.
+//
+// The first record is always the CVE every other D29 test here asks about;
+// the rest exist only to make the freed pages numerous enough that page reuse
+// cannot explain a clean result away.
+func enrichedDatabaseOfSize(t *testing.T, n int) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Put(advisory.Advisory{
+		ID: "ALPINE-2025-0001", Database: "ALPINE", Source: "osv",
+		Kind:     advisory.KindVulnerability,
+		Upstream: []string{"CVE-2025-46394"},
+		Affected: []advisory.Affected{{Ecosystem: "Alpine:v3.19", Name: "openssl"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.PutRating(advisory.Rating{CVE: "CVE-2025-46394", Source: "NVD"}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < n; i++ {
+		cve := "CVE-2025-46394"
+		if i > 0 {
+			cve = fmt.Sprintf("CVE-2025-9%04d", i)
+		}
+		if err := w.PutEnrichment(advisory.Enrichment{
+			CVE: cve, Source: "KISA",
+			Title:   kisaTitle,
+			Summary: kisaSummary,
+			URL:     kisaURL,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.SetMeta(store.Meta{
+		BuiltAt:    time.Date(2026, 8, 5, 6, 0, 0, 0, time.UTC),
+		Providers:  map[string]store.Provenance{"osv": {DataAsOf: time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)}},
+		Ratings:    map[string]store.Provenance{"NVD": {CoversSinceKnown: true}},
+		Enrichment: map[string]store.Provenance{"KISA": {Source: "https://knvd.krcert.or.kr", Records: n}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// isolateTempDir points os.MkdirTemp at a directory belonging to this test,
+// so an assertion about leftover staged copies cannot be answered by another
+// test's — `go test ./...` runs packages as concurrent processes, and
+// cmd/assay drives `db push` too, so a glob over the shared %TEMP% would be a
+// race rather than an assertion.
+//
+// All three variables are set because os.TempDir reads TMPDIR on Unix (which
+// is what CI runs) and TMP or TEMP on Windows (which is what this is written
+// on). Verified on both spellings rather than assumed.
+func isolateTempDir(t *testing.T) string {
+	t.Helper()
+	iso := t.TempDir()
+	for _, k := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(k, iso)
+	}
+	return iso
+}
+
+// D29: enrichment is built locally and never published. KISA's site is
+// all-rights-reserved with no 공공누리 mark, which does not restrict scanning
+// with the data but does restrict redistributing it — and `db push`
+// redistributes.
+//
+// Asserted by reading the artifact BACK, not by inspecting what Push was
+// handed: the guarantee is about what leaves the machine, and a strip
+// applied to the wrong copy, or after packing, would satisfy any assertion
+// made on the way in. The failure this holds against is silent and its
+// consequence is a licensing violation rather than a wrong number, so the
+// pull is done exactly the way a user's `db update` does it.
+//
+// The three other assertions are as load-bearing as the empty bucket:
+//
+//   - the advisories and the ratings must SURVIVE, or "strip the enrichment"
+//     is indistinguishable from "publish an empty database";
+//   - the published metadata must claim no enrichment either, or `db status`
+//     on a pulled database reports a source and a count for a bucket that
+//     holds nothing — the over-claim this repository has already fixed twice;
+//   - the LOCAL database must keep its enrichment, because the strip runs on
+//     a copy. Stripping in place would take the Korean text away from the one
+//     machine allowed to have it, and would do it while a concurrent scan may
+//     be reading the file.
+func TestPush_NeverPublishesEnrichment(t *testing.T) {
+	path := enrichedDatabase(t)
+
+	ref := liveRegistry(t)
+	var out, errOut bytes.Buffer
+	if code := Push(context.Background(), path, ref, false, &out, &errOut); code != 0 {
+		t.Fatalf("Push = %d, want 0 (%s)", code, errOut.String())
+	}
+
+	// Pulled the way `assay db update` pulls, into a fresh path.
+	pulled := filepath.Join(t.TempDir(), "vulnerability.db")
+	out.Reset()
+	errOut.Reset()
+	if code := Pull(context.Background(), pulled, ref, &out, &errOut); code != 0 {
+		t.Fatalf("Pull = %d, want 0 (%s)", code, errOut.String())
+	}
+	db, err := store.Open(pulled)
+	if err != nil {
+		t.Fatalf("the published artifact is not a usable database: %v", err)
+	}
+	defer db.Close()
+
+	if got, err := db.EnrichmentFor("CVE-2025-46394"); err != nil || len(got) != 0 {
+		t.Errorf("the published artifact carries %d enrichment record(s) for CVE-2025-46394 (%v), "+
+			"want none: D29 says KISA's prose is built locally and never redistributed", len(got), err)
+	}
+	// The whole bucket, not just the one CVE asked about: a strip that removed
+	// the record under test and left the rest would pass the check above.
+	published := 0
+	if err := db.EachEnrichment(func(advisory.Enrichment) error { published++; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if published != 0 {
+		t.Errorf("the published enrichment bucket holds %d record(s), want none (D29)", published)
+	}
+
+	// ...while everything the artifact IS for survives.
+	if got, err := db.Lookup("Alpine:v3.19", "openssl"); err != nil || len(got) != 1 {
+		t.Errorf("Lookup(Alpine:v3.19, openssl) = %v, %v; the strip took the advisories with it", got, err)
+	}
+	if got, err := db.RatingsFor("CVE-2025-46394"); err != nil || len(got) != 1 {
+		t.Errorf("RatingsFor(CVE-2025-46394) = %v, %v; the strip took the ratings with it", got, err)
+	}
+
+	// And the published metadata makes no enrichment claim, so `db status` on
+	// a pulled database cannot report a source for an empty bucket.
+	m, err := db.Meta()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Enrichment) != 0 {
+		t.Errorf("published Meta.Enrichment = %v, want empty: the artifact names an enrichment "+
+			"source whose records it does not carry", m.Enrichment)
+	}
+	if len(m.EnrichmentCounts) != 0 {
+		t.Errorf("published Meta.EnrichmentCounts = %v, want empty", m.EnrichmentCounts)
+	}
+
+	// The LOCAL database is untouched: the strip works on a copy, because a
+	// concurrent scan may be reading this file and because the machine that
+	// fetched the prose is allowed to keep it.
+	local, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("the local database did not survive the push: %v", err)
+	}
+	defer local.Close()
+	if got, err := local.EnrichmentFor("CVE-2025-46394"); err != nil || len(got) != 1 {
+		t.Errorf("EnrichmentFor on the LOCAL database = %v, %v, want the record it was built "+
+			"with: `db push` stripped the live database instead of a copy", got, err)
+	}
+}
+
+// The published BYTES carry none of KISA's prose either — not merely the
+// published bucket.
+//
+// This is the sixth D29 bypass and the only one that was not a branch around
+// the strip: it was the strip not doing what its name says. StripEnrichment
+// deletes the bucket and bbolt FREES those pages rather than zeroing them,
+// dbartifact.Pack reads the whole file, and `gunzip | strings` on the layer
+// recovers the Korean text verbatim. Measured before the fix on the one-record
+// fixture below: one surviving copy of the summary in a 32,768-byte layer, and
+// on a 200-record one, 546 in 131,072 bytes.
+//
+// TestPush_NeverPublishesEnrichment above cannot see any of that. It pulls the
+// artifact and asks EnrichmentFor, EachEnrichment and Meta — the level ABOVE
+// where the data survives, all three of which correctly answer "nothing"
+// while the record sits in the file underneath them. So this asserts on the
+// decompressed layer itself, and no assertion here may go back through the
+// bucket API: that is precisely what missed it.
+//
+// Run at two sizes deliberately. One record is the fixture every other D29
+// test here uses, so this holds the same artifact those tests call clean; 200
+// is the reviewer's own repro, and large enough that no amount of page reuse
+// during the strip's own metadata rewrite could account for the result.
+func TestPush_ThePublishedBytesCarryNoEnrichment(t *testing.T) {
+	for _, records := range []int{1, 200} {
+		t.Run(fmt.Sprintf("%d record(s)", records), func(t *testing.T) {
+			path := enrichedDatabaseOfSize(t, records)
+
+			ref := liveRegistry(t)
+			var out, errOut bytes.Buffer
+			if code := Push(context.Background(), path, ref, false, &out, &errOut); code != 0 {
+				t.Fatalf("Push = %d, want 0 (%s)", code, errOut.String())
+			}
+			raw := publishedLayerBytes(t, ref)
+
+			// Every field of the record, because they are stored as one JSON
+			// blob and a partial survivor is still a redistribution. The
+			// values are Korean and a URL, so none of them can pass or fail
+			// from some other column's text the way an ID or a package name
+			// could.
+			for _, field := range []struct{ name, text string }{
+				{"Summary", kisaSummary},
+				{"Title", kisaTitle},
+				{"URL", kisaURL},
+			} {
+				if n := bytes.Count(raw, []byte(field.text)); n != 0 {
+					t.Errorf("the published layer holds %d occurrence(s) of the enrichment record's %s "+
+						"(%q) across %d byte(s): the bucket was deleted rather than the live data copied "+
+						"out, so the records are still legible in the freed pages that Pack gzipped. "+
+						"`gunzip` and `strings` on this layer recover KISA's prose, which is the "+
+						"redistribution D29 forbids", n, field.name, field.text, len(raw))
+				}
+			}
+
+			// The sentinel scan is only meaningful if these bytes really are
+			// the database. A layer that failed to decompress, or one holding
+			// something else entirely, would satisfy every assertion above.
+			if !bytes.Contains(raw, []byte("ALPINE-2025-0001")) {
+				t.Fatalf("the decompressed layer (%d bytes) does not contain the advisory ID the "+
+					"fixture was built with, so it is not the database and the scan above proved nothing",
+					len(raw))
+			}
+		})
+	}
+}
+
+// publishedLayerBytes returns the decompressed database layer of the artifact
+// at ref: what a puller receives, before any code of ours interprets it.
+func publishedLayerBytes(t *testing.T, ref string) []byte {
+	t.Helper()
+	target, err := name.ParseReference(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := remote.Image(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	layers, err := img.Layers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range layers {
+		mt, err := l.MediaType()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(mt) != dbartifact.MediaTypeLayer {
+			continue
+		}
+		rc, err := l.Compressed()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rc.Close()
+		zr, err := gzip.NewReader(rc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer zr.Close()
+		raw, err := io.ReadAll(zr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	t.Fatalf("the artifact at %s has no %s layer", ref, dbartifact.MediaTypeLayer)
+	return nil
+}
+
+// Either half of the D29 path failing must publish nothing at all.
+//
+// These are the D29 path's own error branches, and they are the most
+// dangerous lines in the slice: downgrading either `return 2` to a warning
+// publishes a file that still holds KISA's prose — the licensing violation,
+// silently, with every other test still green. The strip's comment says "we
+// tried" is not a defence; this is what makes that a guarantee rather than a
+// note.
+//
+// BOTH seams, because the two failures publish the same violation by
+// different routes. A failed strip leaves the records live; a failed
+// compaction leaves them in the freed pages of the file that would then be
+// packed, which is the sixth bypass arriving through an error path instead of
+// the happy one. Falling back to `staged` on a compaction error is the
+// natural-looking recovery, and with only the strip case here it would have
+// survived the whole suite.
+//
+// The failures are forced through the seams because neither can be forced
+// with a fixture: both paths were created by Push moments earlier, so making
+// bbolt refuse one would mean racing the copy.
+//
+// The assertion that matters is the last one — that the registry holds
+// nothing. Exit 2 alone would pass on a Push that reports the problem and
+// publishes anyway, which is exactly the shape being guarded against.
+//
+// Run with --force as well as without it, because --force is an override for
+// the COVERAGE guard and must never become one for the licensing guard.
+// `err != nil && !force` is a one-token change that reads like consistency
+// with the guard beside it, and with only an unforced case here it survived
+// the whole suite. The two guards refuse different things: one protects
+// everyone's database from getting narrower, and a publisher who means it can
+// say so; the other protects data that may not be redistributed at all, and
+// there is nobody who may say so.
+func TestPush_AFailedStripPublishesNothing(t *testing.T) {
+	// Each case breaks ONE seam and leaves the other real, so a case cannot
+	// pass because the step it is not testing happened to fail too.
+	steps := []struct {
+		name    string
+		install func(t *testing.T)
+		// wantErr is the message AND its cause: Contains(stderr, "strip")
+		// alone would pass on a message that dropped the reason, which is
+		// the one thing an operator needs to act on.
+		wantErr string
+	}{
+		{
+			name: "the strip fails",
+			install: func(t *testing.T) {
+				orig := stripEnrichment
+				stripEnrichment = func(string) error { return errBoom }
+				t.Cleanup(func() { stripEnrichment = orig })
+			},
+			wantErr: "strip enrichment before publishing: boom",
+		},
+		{
+			name: "the compaction fails",
+			install: func(t *testing.T) {
+				orig := compactInto
+				compactInto = func(dst, src string) error { return errBoom }
+				t.Cleanup(func() { compactInto = orig })
+			},
+			wantErr: "compact database for publishing: boom",
+		},
+	}
+	for _, step := range steps {
+		for _, force := range []bool{false, true} {
+			name_ := step.name + " without --force"
+			if force {
+				name_ = step.name + " with --force"
+			}
+			t.Run(name_, func(t *testing.T) {
+				iso := isolateTempDir(t)
+				step.install(t)
+
+				ref := liveRegistry(t)
+				var out, errOut bytes.Buffer
+				if code := Push(context.Background(), enrichedDatabase(t), ref, force, &out, &errOut); code != 2 {
+					t.Errorf("Push where %s = %d, want 2", step.name, code)
+				}
+				if !strings.Contains(errOut.String(), step.wantErr) {
+					t.Errorf("stderr does not say that %s, and why:\n%s", step.name, errOut.String())
+				}
+				if out.Len() != 0 {
+					t.Errorf("a failed push wrote a digest to stdout, which reads as success: %q", out.String())
+				}
+
+				target, err := name.ParseReference(ref)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := remote.Image(target); err == nil {
+					t.Errorf("a push where %s published an artifact anyway - that artifact carries "+
+						"KISA's prose, which is the licensing violation D29 exists to prevent", step.name)
+				}
+
+				// The early return still cleans up after itself.
+				if left, _ := filepath.Glob(filepath.Join(iso, "assay-push-*")); len(left) != 0 {
+					t.Errorf("a push where %s left its staged copy behind: %v", step.name, left)
+				}
+			})
+		}
+	}
+}
+
+// The strip keys off NOTHING. It runs on every push, whatever the metadata
+// says the database holds.
+//
+// The fixture is a database whose enrichment BUCKET is populated while its
+// Meta.Enrichment is empty, and every other D29 test here sets both — so
+// wrapping the strip in `if len(meta.Enrichment) > 0` reads as a harmless
+// "nothing to do" optimisation and survives the rest of the suite.
+//
+// That is this branch's oldest defect arriving on the licensing path: trusting
+// a self-report over the stored data, already fixed once for RatingCounts and
+// once for EnrichmentCounts. The state is reachable, not hypothetical —
+// dropping the provenance write in Update while records still land produces
+// exactly it, and so would any future writer that fills the bucket without
+// recording a source.
+//
+// The consequence differs from the earlier two, which were wrong numbers in a
+// status table. Here the metadata says "no enrichment", the artifact carries
+// it anyway, and nothing in the published database contradicts the claim.
+func TestPush_StripsTheBucketEvenWhenTheMetadataClaimsNothingToStrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.PutEnrichment(advisory.Enrichment{
+		CVE: "CVE-2025-46394", Source: "KISA",
+		Title: "OpenSSL 보안 업데이트 권고",
+		URL:   "https://knvd.krcert.or.kr/info/vuln/notice/detail?id=99",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// No Enrichment entry: the bucket holds a record that the provenance does
+	// not account for.
+	if err := w.SetMeta(store.Meta{
+		BuiltAt:   time.Date(2026, 8, 5, 6, 0, 0, 0, time.UTC),
+		Providers: map[string]store.Provenance{"osv": {DataAsOf: time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// The fixture is only meaningful if it really is in that state, so it is
+	// checked rather than assumed: SetMeta derives EnrichmentCounts from the
+	// bucket, so a future change there could quietly make this an ordinary
+	// database and the test would pass for the wrong reason.
+	local, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := local.Meta()
+	local.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Enrichment) != 0 {
+		t.Fatalf("fixture is not in the intended state: Meta.Enrichment = %v, want empty", m.Enrichment)
+	}
+
+	ref := liveRegistry(t)
+	var out, errOut bytes.Buffer
+	if code := Push(context.Background(), path, ref, false, &out, &errOut); code != 0 {
+		t.Fatalf("Push = %d, want 0 (%s)", code, errOut.String())
+	}
+	pulled := filepath.Join(t.TempDir(), "vulnerability.db")
+	out.Reset()
+	errOut.Reset()
+	if code := Pull(context.Background(), pulled, ref, &out, &errOut); code != 0 {
+		t.Fatalf("Pull = %d, want 0 (%s)", code, errOut.String())
+	}
+	db, err := store.Open(pulled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	published := 0
+	if err := db.EachEnrichment(func(advisory.Enrichment) error { published++; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if published != 0 {
+		t.Errorf("the published artifact carries %d enrichment record(s) that the local "+
+			"metadata never mentioned - the strip consulted the self-report instead of the "+
+			"bucket, and D29's guarantee is only as good as that metadata", published)
+	}
+}
+
+// Push removes the staged copy it packs from.
+//
+// Not cosmetic: the copy is the whole database, so a leak is ~244 MB of
+// %TEMP% per push on the builder that publishes every night, and nothing
+// would ever report it. dbartifact.Pack reads the file eagerly, so no handle
+// is open by the time the deferred cleanup runs and this is simply a matter
+// of the defer existing.
+func TestPush_RemovesItsStagedCopy(t *testing.T) {
+	iso := isolateTempDir(t)
+	ref := liveRegistry(t)
+
+	var out, errOut bytes.Buffer
+	if code := Push(context.Background(), enrichedDatabase(t), ref, false, &out, &errOut); code != 0 {
+		t.Fatalf("Push = %d, want 0 (%s)", code, errOut.String())
+	}
+	left, err := filepath.Glob(filepath.Join(iso, "assay-push-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) != 0 {
+		t.Errorf("Push left its staged copy of the database behind: %v", left)
 	}
 }
