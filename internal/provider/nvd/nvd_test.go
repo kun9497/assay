@@ -3,6 +3,7 @@ package nvd
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -953,5 +954,105 @@ func TestAnnotate_AZeroSinceSendsNoWindowAtAll(t *testing.T) {
 			t.Errorf("%s was sent for a full sync; NVD rejects an empty value "+
 				"rather than treating it as no filter", k)
 		}
+	}
+}
+
+// A stalled page is retried. This is the second correction to retryable --
+// the first turned an allow-list into a deny-list -- and the most expensive
+// case it had left.
+//
+// net/http reports its OWN Client.Timeout as a deadline error: a
+// timeoutError's Is(context.DeadlineExceeded) is true, for the
+// response-header timeout and the body-read timeout alike (verified against
+// Go 1.26). So the obvious spelling of "do not retry a cancellation" --
+// errors.Is(err, context.DeadlineExceeded), which is what this file shipped
+// -- also caught this provider's own ten-minute timeout, and classified it
+// permanent. A 2,000-record page has taken 136 seconds and varies with NVD's
+// load, so overrunning that timeout is an ordinary event; a full pass is
+// about seven hours, and Update installs the database only at the end. One
+// slow page therefore discarded the entire run with the retry never firing
+// -- the exact failure the retry schedule was lengthened to twelve minutes
+// to prevent.
+//
+// Only the CALLER's context can answer the question that exclusion is
+// asking, so that is what is asked.
+func TestRetryable_JudgesTheCallersContextNotTheError(t *testing.T) {
+	// Shaped like what net/http hands back, without waiting out a real
+	// timeout to produce one: what matters is that errors.Is finds
+	// DeadlineExceeded inside it, which is exactly why the old test passed
+	// while the policy was wrong.
+	timeout := fmt.Errorf("Get %q: %w", "https://services.nvd.nist.gov", context.DeadlineExceeded)
+
+	if !retryable(context.Background(), timeout) {
+		t.Error("a client timeout was judged permanent -- a seven-hour sync must not be " +
+			"discarded because one page was slow")
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if retryable(cancelled, timeout) {
+		t.Error("the caller's cancellation was retried; ^C must stop the sync, not restart it")
+	}
+	expired, cancelExpired := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancelExpired()
+	if retryable(expired, timeout) {
+		t.Error("an expired caller deadline was retried; the retry would outlive the deadline it was given")
+	}
+	// ...and the status rules are unchanged by the switch.
+	for _, tc := range []struct {
+		code int
+		want bool
+	}{
+		{http.StatusNotFound, false},
+		{http.StatusBadRequest, false},
+		{http.StatusTooManyRequests, true},
+		{http.StatusServiceUnavailable, true},
+		{http.StatusInternalServerError, true},
+	} {
+		if got := retryable(context.Background(), &httpStatusError{code: tc.code}); got != tc.want {
+			t.Errorf("retryable(%d) = %v, want %v", tc.code, got, tc.want)
+		}
+	}
+}
+
+// ...and the same thing end to end, through a real net/http timeout rather
+// than an error shaped like one, so this cannot pass on a wrong idea of what
+// Client.Timeout actually produces.
+func TestAnnotate_RetriesARealClientTimeout(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			// Never answers. The client's own Timeout ends the request; the
+			// CALLER's context is untouched throughout, which is the whole
+			// distinction being tested.
+			<-r.Context().Done()
+			return
+		}
+		io.WriteString(w, `{"totalResults":1,"vulnerabilities":[{"cve":{"id":"CVE-2026-11","metrics":{"cvssMetricV31":[{"cvssData":{"vectorString":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]}}}],"timestamp":"2026-08-05T00:00:00.000"}`)
+	}))
+	defer srv.Close()
+
+	var progress bytes.Buffer
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0), Progress: &progress})
+	// A second, against a local server that answers in microseconds. The
+	// margin is four orders of magnitude, so this bounds a hang rather than
+	// asserting a speed.
+	p.client.Timeout = time.Second
+
+	var got []advisory.Rating
+	if _, err := p.Annotate(context.Background(), func(r advisory.Rating) error {
+		got = append(got, r)
+		return nil
+	}); err != nil {
+		t.Fatalf("Annotate failed on a client timeout, which is the most ordinary transient "+
+			"failure this provider has: %v", err)
+	}
+	if len(got) != 1 {
+		t.Errorf("emitted %d rating(s), want 1 -- the retry did not recover the page", len(got))
+	}
+	if n := atomic.LoadInt32(&calls); n != 2 {
+		t.Errorf("made %d requests, want 2 (one stalled page, then success)", n)
+	}
+	if !strings.Contains(progress.String(), "retrying in") {
+		t.Errorf("progress = %q, want the retry announced", progress.String())
 	}
 }

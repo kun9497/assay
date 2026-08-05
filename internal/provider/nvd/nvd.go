@@ -190,8 +190,8 @@ var retryWaits = defaultRetryWaits
 // So: everything is retryable except the two categories that are definitely
 // not.
 //
-//   - A cancelled or expired context is the caller saying stop. Retrying it
-//     ignores ^C and outlives the deadline it was given.
+//   - The CALLER's context being cancelled or expired is the caller saying
+//     stop. Retrying it ignores ^C and outlives the deadline it was given.
 //   - A 4xx other than 429 is this code getting the request wrong. Retrying
 //     makes the same mistake more slowly. 404 in particular was the
 //     window-wider-than-maxWindow bug, which a retry loop would have buried
@@ -202,8 +202,21 @@ var retryWaits = defaultRetryWaits
 // genuinely malformed feed still fails, just after four attempts instead of
 // one, and that is the cheaper direction to be wrong in when the alternative
 // costs a multi-hour sync.
-func retryable(err error) bool {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+//
+// The first argument is ctx and not err, and that is the second correction
+// to this function rather than a style choice. Asking the ERROR whether it
+// is a cancellation -- errors.Is(err, context.DeadlineExceeded), which is
+// what this did -- also matches OUR OWN client timeout: net/http's
+// timeoutError reports Is(context.DeadlineExceeded) as true, for the
+// response-header timeout and the body-read timeout alike (verified against
+// Go 1.26). Client.Timeout here is ten minutes because a 2,000-record page
+// has taken 136 seconds and varies with NVD's load, so a page that overruns
+// it is the most ordinary transient failure this provider has -- and it was
+// classified permanent, aborting a sync that may already have run for hours
+// having retried nothing. Only the caller's own context can answer "was I
+// told to stop", so only the caller's context is asked.
+func retryable(ctx context.Context, err error) bool {
+	if ctx.Err() != nil {
 		return false
 	}
 	var se *httpStatusError
@@ -232,7 +245,7 @@ func (p *Provider) fetchPageRetrying(ctx context.Context, startIndex int, since,
 		if err == nil {
 			return page, asOf, nil
 		}
-		if !retryable(err) || attempt >= len(retryWaits) {
+		if !retryable(ctx, err) || attempt >= len(retryWaits) {
 			return apiResponse{}, time.Time{}, err
 		}
 		wait := retryWaits[attempt]
