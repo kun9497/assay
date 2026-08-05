@@ -51,6 +51,26 @@ func TestNew_ResolvesPause(t *testing.T) {
 	}
 }
 
+// The client is bounded.
+//
+// Held here rather than by the two timeout tests below, which set
+// p.client.Timeout themselves and so pass against a client that ships with
+// none. An unbounded client turns a stalled page into a sync that hangs
+// forever, and the retry schedule -- the thing this file spends twelve
+// minutes of budget on -- never gets its chance to fire, because nothing
+// ever returns an error for it to judge. That is the defect
+// TestRetryable_JudgesTheCallersContextNotTheError repairs, one layer up.
+func TestNew_TheClientIsBounded(t *testing.T) {
+	p := New(Options{})
+	if p.client == nil {
+		t.Fatal("client is nil")
+	}
+	if p.client.Timeout <= 0 {
+		t.Error("client has no timeout; a stalled page would hang the sync forever " +
+			"and no retry could fire, because no error would ever be returned")
+	}
+}
+
 // The pagination contract: keep requesting until startIndex covers
 // totalResults, and emit every record along the way.
 func TestAnnotate_PaginatesUntilComplete(t *testing.T) {
@@ -1033,10 +1053,12 @@ func TestAnnotate_RetriesARealClientTimeout(t *testing.T) {
 
 	var progress bytes.Buffer
 	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0), Progress: &progress})
-	// A second, against a local server that answers in microseconds. The
-	// margin is four orders of magnitude, so this bounds a hang rather than
-	// asserting a speed.
-	p.client.Timeout = time.Second
+	// A tenth of a second, against a local server that answers in
+	// microseconds. The margin is still three orders of magnitude, so this
+	// bounds a hang rather than asserting a speed -- and redness comes from
+	// the explicit assertions below, not from the clock, so a loaded runner
+	// can only make this slower, never flip it.
+	p.client.Timeout = 100 * time.Millisecond
 
 	var got []advisory.Rating
 	if _, err := p.Annotate(context.Background(), func(r advisory.Rating) error {

@@ -150,6 +150,21 @@ func notice(id, title, contentText string) string {
 	return string(b)
 }
 
+// noticeNoID builds a notice with no id field at all -- broken data, but
+// data the service can still serve. Written as a separate builder rather
+// than notice("", …) so the JSON genuinely omits the key, which is what a
+// missing field looks like on the wire.
+func noticeNoID(title, contentText string) string {
+	b, err := json.Marshal(map[string]string{
+		"title":        title,
+		"content_text": contentText,
+	})
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
 // page wraps notices in the envelope the live service returns:
 // {"resType":"RES_OK","resMsg":null,"resList":[...]}.
 func page(notices ...string) string {
@@ -479,12 +494,63 @@ func TestEnrich_RefusesAServiceThatIgnoresSkipCount(t *testing.T) {
 	if !strings.Contains(err.Error(), "not honouring skipCount") {
 		t.Errorf("error %q does not name the fault", err)
 	}
+	// ...and says WHERE, on both axes. The phrase above is a hard-coded
+	// string in the format, so it passes just as well from a message that
+	// dropped everything variable: the offset the walk stalled at and the
+	// notice it kept being served. Both are what a reader needs to confirm
+	// the diagnosis against the service by hand.
+	if !strings.Contains(err.Error(), "skipCount 2") {
+		t.Errorf("error %q does not say which offset the walk stalled at", err)
+	}
+	if !strings.Contains(err.Error(), "(n-alpha)") {
+		t.Errorf("error %q does not name the notice that kept coming back", err)
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	// Detected on the page after the first, which is the earliest it can be
 	// known: one page alone is indistinguishable from a working service.
 	if calls != 2 {
 		t.Errorf("made %d requests, want 2", calls)
+	}
+}
+
+// Two pages the walk cannot tell apart are refused as well.
+//
+// A notice with no id is broken data, and it defeats the guard above by
+// removing the only thing pages are compared on. The gate is therefore on
+// "is there a previous page" rather than on "did the previous page have an
+// id": the alternative reads as the more careful check and is the opposite
+// -- with every id empty, prevFirstID stays empty forever and the comparison
+// meant to catch a repeat never runs, which is precisely the shape it exists
+// to catch.
+//
+// The two pages here carry genuinely different notices, and refusing them is
+// the intended answer rather than a tolerated false positive: with no id
+// there is no evidence the service is advancing, and this provider does not
+// trust unprovable progress. It costs nothing real -- convert builds a
+// notice's link from its id, so an id-less corpus produces records pointing
+// at nothing.
+func TestEnrich_RefusesPagesItCannotTellApart(t *testing.T) {
+	_, srv := newFake(t, 4, map[int]string{
+		0: page(
+			noticeNoID("제품 A 권고", overview("CVE-2026-9401")),
+			noticeNoID("제품 B 권고", overview("CVE-2026-9402")),
+		),
+		2: page(
+			noticeNoID("제품 C 권고", overview("CVE-2026-9403")),
+			noticeNoID("제품 D 권고", overview("CVE-2026-9404")),
+		),
+	})
+
+	p := New(Options{BaseURL: srv.URL, PageSize: 2, Pause: durPtr(0)})
+	_, _, err := collect(t, p)
+	if err == nil {
+		t.Fatal("Enrich returned nil over pages with no id on any notice -- with nothing " +
+			"to compare, the walk cannot show it is making progress and must not proceed " +
+			"as though it had")
+	}
+	if !strings.Contains(err.Error(), "not honouring skipCount") {
+		t.Errorf("error %q does not name the fault", err)
 	}
 }
 
@@ -903,10 +969,12 @@ func TestEnrich_RetriesARealClientTimeout(t *testing.T) {
 
 	var progress bytes.Buffer
 	p := New(Options{BaseURL: srv.URL, PageSize: 1, Pause: durPtr(0), Progress: &progress})
-	// A second, against a local server that answers in microseconds. The
-	// margin is four orders of magnitude, so this bounds a hang rather than
-	// asserting a speed.
-	p.client.Timeout = time.Second
+	// A tenth of a second, against a local server that answers in
+	// microseconds. The margin is still three orders of magnitude, so this
+	// bounds a hang rather than asserting a speed -- and redness comes from
+	// the explicit assertions below, not from the clock, so a loaded runner
+	// can only make this slower, never flip it.
+	p.client.Timeout = 100 * time.Millisecond
 
 	cves, _, err := collect(t, p)
 	if err != nil {
