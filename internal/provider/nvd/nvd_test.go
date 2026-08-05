@@ -1,11 +1,13 @@
 package nvd
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -453,6 +455,368 @@ func TestAnnotate_SkipsARecordWithMetricsButNoID(t *testing.T) {
 	// shows would otherwise disagree with what is actually in the bucket.
 	if prov.Records != 1 {
 		t.Errorf("Records = %d, want 1 - the skipped record must not be counted", prov.Records)
+	}
+}
+
+// TestMain zeroes the retry schedule for the whole package.
+//
+// Adding retries made two pre-existing failure tests wait out the real
+// schedule -- 62 seconds each, taking this package from 0.4s to 124s with
+// nothing announcing it. That is the wall-clock-standing-in-for-an-assertion
+// hazard CLAUDE.md records, arriving as a side effect rather than as a test
+// anyone wrote.
+//
+// The slice keeps its LENGTH, so attempt counts are unchanged and every
+// existing assertion still means what it meant. Only the sleeping goes.
+// TestRetryWaits_ShippedScheduleActuallyWaits covers the real values, which
+// this necessarily hides.
+func TestMain(m *testing.M) {
+	retryWaits = make([]time.Duration, len(defaultRetryWaits))
+	os.Exit(m.Run())
+}
+
+// The shipped schedule really waits. TestMain zeroes the working copy for
+// speed, so without this, changing every production value to 0 -- turning
+// each retry into a hot loop against NVD, four requests with no pause --
+// would pass the entire suite.
+func TestRetryWaits_ShippedScheduleActuallyWaits(t *testing.T) {
+	if len(defaultRetryWaits) == 0 {
+		t.Fatal("no retry schedule at all")
+	}
+	var total time.Duration
+	for i, w := range defaultRetryWaits {
+		if w <= 0 {
+			t.Errorf("defaultRetryWaits[%d] = %v, want a real pause", i, w)
+		}
+		total += w
+	}
+	// The BUDGET is the point, not merely that each value is non-zero.
+	// The first schedule totalled 62s and threw away a run that had spent
+	// 5h52m -- every individual value was non-zero and the policy was
+	// still wrong. What has to hold is that the wait is proportionate to
+	// what giving up costs.
+	if min := 10 * time.Minute; total < min {
+		t.Errorf("retry budget is %v, want at least %v -- a multi-hour sync must not be discarded over a brief outage", total, min)
+	}
+	// ...and still inside the daily workflow's 60-minute timeout, so a
+	// genuine outage fails the build rather than hanging it.
+	if max := 30 * time.Minute; total > max {
+		t.Errorf("retry budget is %v, want at most %v", total, max)
+	}
+}
+
+// The sync reports progress as it goes.
+//
+// Without this the loop printed nothing between "annotating with NVD" and
+// its result -- seven hours of silence on a full pass. Through four
+// bootstrap attempts the only way to tell a working sync from a hung one
+// was watching the temporary database grow from outside the process.
+func TestAnnotate_ReportsProgressPerPage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Two records total, one per page, so the loop runs twice.
+		idx := r.URL.Query().Get("startIndex")
+		id := "CVE-2026-1"
+		if idx == "1" {
+			id = "CVE-2026-2"
+		}
+		io.WriteString(w, `{"totalResults":2,"vulnerabilities":[{"cve":{"id":"`+id+`","metrics":{"cvssMetricV31":[{"cvssData":{"vectorString":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]}}}],"timestamp":"2026-08-04T00:00:00.000"}`)
+	}))
+	defer srv.Close()
+
+	var progress bytes.Buffer
+	p := New(Options{BaseURL: srv.URL, PageSize: 1, Pause: durPtr(0), Progress: &progress})
+	if _, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+
+	lines := strings.Count(progress.String(), "nvd: ")
+	if lines != 2 {
+		t.Errorf("progress has %d line(s), want one per page (2):\n%s", lines, progress.String())
+	}
+	// The counts have to be real, not a bare heartbeat: a line that says
+	// only "working" cannot distinguish progress from a loop re-reading
+	// the same page.
+	if want := "2/2 records"; !strings.Contains(progress.String(), want) {
+		t.Errorf("progress does not report the final count %q:\n%s", want, progress.String())
+	}
+	if want := "1/2 records"; !strings.Contains(progress.String(), want) {
+		t.Errorf("progress does not report intermediate position %q:\n%s", want, progress.String())
+	}
+}
+
+// A single transient failure must not destroy a multi-hour sync. The first
+// real 120-day bootstrap died at startIndex 42000 after 42 minutes on one
+// 503 and lost every record, because Update installs the database only at
+// the end -- there is no resume point to fall back to.
+func TestAnnotate_RetriesATransientFailure(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls <= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		io.WriteString(w, `{"totalResults":1,"vulnerabilities":[{"cve":{"id":"CVE-2026-9","metrics":{"cvssMetricV31":[{"cvssData":{"vectorString":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]}}}],"timestamp":"2026-08-04T00:00:00.000"}`)
+	}))
+	defer srv.Close()
+
+	restoreWaits := retryWaits
+	retryWaits = []time.Duration{0, 0, 0, 0}
+	defer func() { retryWaits = restoreWaits }()
+
+	var progress bytes.Buffer
+	var got []advisory.Rating
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0), Progress: &progress})
+	if _, err := p.Annotate(context.Background(), func(r advisory.Rating) error {
+		got = append(got, r)
+		return nil
+	}); err != nil {
+		t.Fatalf("Annotate failed despite the failures being transient: %v", err)
+	}
+	if len(got) != 1 {
+		t.Errorf("emitted %d rating(s), want 1 -- the retry did not recover the page", len(got))
+	}
+	if calls != 3 {
+		t.Errorf("made %d requests, want 3 (two failures then success)", calls)
+	}
+	// The wait is announced. A sync that pauses with no output is
+	// indistinguishable from one that has hung.
+	if !strings.Contains(progress.String(), "retrying in") {
+		t.Errorf("progress = %q, want it to announce the retry", progress.String())
+	}
+}
+
+// A failure that is NOT an HTTP status is retried too.
+//
+// This is the case the first retry implementation missed. It matched only
+// httpStatusError, because a 503 was the failure that had just been seen --
+// and the next bootstrap died at 116 minutes on an HTTP/2 stream error
+// surfacing during body decode, with the retry never firing. A truncated
+// body reproduces that shape: the request succeeds with 200, the decode
+// fails.
+func TestAnnotate_RetriesAFailureThatIsNotAnHTTPStatus(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			// 200 with a body that stops mid-object: a decode error, not a
+			// status error, which is exactly what the stream failure looked
+			// like by the time it reached this code.
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"totalResults":1,"vulnerabilities":[{"cve":{"id":`)
+			return
+		}
+		io.WriteString(w, `{"totalResults":1,"vulnerabilities":[{"cve":{"id":"CVE-2026-9","metrics":{"cvssMetricV31":[{"cvssData":{"vectorString":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]}}}],"timestamp":"2026-08-04T00:00:00.000"}`)
+	}))
+	defer srv.Close()
+
+	var got []advisory.Rating
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0)})
+	if _, err := p.Annotate(context.Background(), func(r advisory.Rating) error {
+		got = append(got, r)
+		return nil
+	}); err != nil {
+		t.Fatalf("Annotate failed on a retryable decode error: %v", err)
+	}
+	if calls != 2 {
+		t.Errorf("made %d requests, want 2 -- a non-status failure must still be retried", calls)
+	}
+	if len(got) != 1 {
+		t.Errorf("emitted %d rating(s), want 1", len(got))
+	}
+}
+
+// A context cancelled MID-REQUEST must not be retried: ^C during a
+// multi-hour sync has to stop, not wait out the whole schedule first.
+//
+// Cancelled mid-flight, deliberately. An already-cancelled context is
+// caught by Annotate's own ctx.Err() check at the top of the loop, before
+// fetchPage runs at all -- so a test using one passes whatever retryable
+// decides, and proves nothing about it (verified: that version of this test
+// survived the mutation).
+//
+// The assertion is on the retry NOTICE rather than the request count,
+// because sleep() also honours the context: a mutated retryable would fail
+// at the sleep instead and issue no extra request. The notice is the only
+// externally visible difference.
+func TestAnnotate_DoesNotRetryAContextCancelledMidRequest(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cancel()
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	var progress bytes.Buffer
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0), Progress: &progress})
+	if _, err := p.Annotate(ctx, func(advisory.Rating) error { return nil }); err == nil {
+		t.Fatal("Annotate succeeded despite cancellation")
+	}
+	if strings.Contains(progress.String(), "retrying") {
+		t.Errorf("progress = %q: a cancelled context was treated as retryable", progress.String())
+	}
+}
+
+// ...and a PERMANENT failure is not retried. Retrying a 404 would have
+// buried the window-too-wide bug behind four minutes of silent waiting
+// before reporting the same error anyway.
+func TestAnnotate_DoesNotRetryAPermanentFailure(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	restoreWaits := retryWaits
+	retryWaits = []time.Duration{0, 0, 0, 0}
+	defer func() { retryWaits = restoreWaits }()
+
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0)})
+	_, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil })
+	if err == nil {
+		t.Fatal("Annotate succeeded against a 404")
+	}
+	if calls != 1 {
+		t.Errorf("made %d requests, want 1 -- a 404 is this code getting the request wrong, not NVD having a bad moment", calls)
+	}
+}
+
+// Retries are bounded: a genuine outage fails the build rather than
+// hanging it.
+func TestAnnotate_GivesUpAfterTheRetryScheduleIsExhausted(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	restoreWaits := retryWaits
+	retryWaits = []time.Duration{0, 0, 0}
+	defer func() { retryWaits = restoreWaits }()
+
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0)})
+	if _, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil }); err == nil {
+		t.Fatal("Annotate succeeded against a permanently failing registry")
+	}
+	// One initial attempt plus one per scheduled wait.
+	if want := len(retryWaits) + 1; calls != want {
+		t.Errorf("made %d requests, want %d (the schedule is the policy)", calls, want)
+	}
+}
+
+// NVD_SINCE_DAYS=120 -- the documented maximum -- could never actually be
+// used, and the API said so with a bare 404.
+//
+// The span is measured by NVD at REQUEST time. Since is computed when the
+// options are read; until is read when Annotate starts; and in between,
+// db update runs every advisory provider. The first real bootstrap spent
+// 2m51s fetching OSV, so a 120-day window arrived as 120 days and 2m51s and
+// was rejected outright.
+//
+// Clamping is safe rather than lossy because the narrowing is disclosed --
+// Provenance.Window records the range actually requested and db status
+// prints it -- so a clamped run cannot claim coverage it does not have.
+func TestAnnotate_ClampsAWindowThatGrewPastNVDsMaximum(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		io.WriteString(w, `{"totalResults":0,"vulnerabilities":[],"timestamp":"2026-08-04T00:00:00.000"}`)
+	}))
+	defer srv.Close()
+
+	until := time.Date(2026, 8, 4, 3, 46, 10, 0, time.UTC)
+	restore := nowUTC
+	nowUTC = func() time.Time { return until }
+	defer func() { nowUTC = restore }()
+
+	// Exactly the shape that failed: Since chosen 120 days before the
+	// moment the options were read, which was 2m50s before Annotate ran.
+	since := until.Add(-maxWindow).Add(-2*time.Minute - 50*time.Second)
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0), Since: since})
+	prov, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	q, err := url.ParseQuery(gotQuery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start, err := time.Parse("2006-01-02T15:04:05.000-07:00", q.Get("lastModStartDate"))
+	if err != nil {
+		t.Fatalf("lastModStartDate %q: %v", q.Get("lastModStartDate"), err)
+	}
+	end, err := time.Parse("2006-01-02T15:04:05.000-07:00", q.Get("lastModEndDate"))
+	if err != nil {
+		t.Fatalf("lastModEndDate %q: %v", q.Get("lastModEndDate"), err)
+	}
+	// Asserted on the SPAN, not on either bound: NVD rejects the range, so
+	// the range is the thing that has to hold.
+	if span := end.Sub(start); span > maxWindow {
+		t.Errorf("requested span %v exceeds NVD's %v maximum; the API answers this with 404", span, maxWindow)
+	}
+	_ = prov
+}
+
+// ...and the clamp is disclosed, not silent.
+//
+// Split from the test above deliberately. There the overshoot is 2m50s --
+// the real one -- which does not move the calendar day, so asserting the
+// Window date there passes whether or not the clamp is reflected in it
+// (verified by mutation: it survived). A large overshoot is what makes the
+// disclosure observable.
+func TestAnnotate_DisclosesTheClampedWindowNotTheRequestedOne(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"totalResults":0,"vulnerabilities":[],"timestamp":"2026-08-04T00:00:00.000"}`)
+	}))
+	defer srv.Close()
+
+	until := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	restore := nowUTC
+	nowUTC = func() time.Time { return until }
+	defer func() { nowUTC = restore }()
+
+	// 200 days requested; 120 is the most NVD allows, so the reported start
+	// must be the clamped 2026-04-06, not the requested 2026-01-16.
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0),
+		Since: until.Add(-200 * 24 * time.Hour)})
+	prov, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "modified 2026-04-06"; !strings.Contains(prov.Window, want) {
+		t.Errorf("Window = %q, want it to start at the clamped %q -- db status must not claim the 200 days that were asked for", prov.Window, want)
+	}
+	if strings.Contains(prov.Window, "2026-01-16") {
+		t.Errorf("Window = %q reports the REQUESTED start, so a clamped run claims coverage it does not have", prov.Window)
+	}
+}
+
+// A window comfortably inside the maximum is passed through untouched --
+// the clamp must not quietly narrow every run.
+func TestAnnotate_LeavesAWindowInsideTheMaximumAlone(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		io.WriteString(w, `{"totalResults":0,"vulnerabilities":[],"timestamp":"2026-08-04T00:00:00.000"}`)
+	}))
+	defer srv.Close()
+
+	until := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	restore := nowUTC
+	nowUTC = func() time.Time { return until }
+	defer func() { nowUTC = restore }()
+
+	since := time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC) // 30 days
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0), Since: since})
+	if _, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	q, _ := url.ParseQuery(gotQuery)
+	if got := q.Get("lastModStartDate"); got != "2026-07-05T00:00:00.000+00:00" {
+		t.Errorf("lastModStartDate = %q, want the Since value unchanged", got)
 	}
 }
 

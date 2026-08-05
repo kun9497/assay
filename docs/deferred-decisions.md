@@ -197,6 +197,35 @@ artifact".
 
 ---
 
+### Checkpointing a long sync
+
+`db build` assembles a temporary database and installs it only at the end, so a failure
+anywhere discards everything the run had done.
+
+**Why deferred.** It was invisible while OSV was the only source: an archive download is a few
+minutes, and losing it costs a few minutes. NVD changed the arithmetic — the first real
+bootstrap lost 42, 116 and 352 minutes to three separate failures before a bounded run
+succeeded. Retries make a single page survivable and do not make a run resumable; those are
+different problems, and only the first is solved.
+
+Deferred rather than built because the bounded window makes it avoidable today. A 30-day pass
+is 27 minutes, which is cheap enough to simply repeat, and the publishing artifact means most
+people never build at all. Checkpointing also needs decisions this project has not had to make
+yet — where a partial database lives, how a resumed run proves the checkpoint matches the
+window it is resuming, and what happens when the schema changes underneath one.
+
+**Revisit when.** A full unbounded pass becomes necessary — because the 30-day seed's coverage
+is not enough, or because someone wants to rebuild from scratch without a published artifact to
+start from. At seven hours with no resume point, that is not a job anyone can rely on
+completing.
+
+**Groundwork.** `Provenance.Window` already records what a run covered, which is the fact a
+resumed run would have to match against. The temporary-then-rename install is the right shape
+to build on: a checkpoint is a temporary database that outlives one process rather than a new
+mechanism.
+
+---
+
 ### Signing and provenance for the published database artifact
 
 The artifact `assay db push` publishes, and `assay db update` / `assay db build --seed` pull,

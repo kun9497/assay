@@ -749,6 +749,55 @@ Two consequences, both real:
   `COVERED`, because a database holding one day of NVD is otherwise indistinguishable from one
   holding all of it (D20).
 
+### What the first real bootstrap cost, 2026-08-04
+
+Publishing the database meant actually building one, and that took five attempts. Each of the
+four failures was a different defect, and none of them was visible by reading the code.
+
+| Attempt | Failed after | Symptom | Defect |
+|---|---|---|---|
+| 1 | 2m51s | `404` | the window was 120 days **plus the OSV fetch** |
+| 2 | 42m | `503` | no retry at all |
+| 3 | 116m | `stream error: INTERNAL_ERROR` | retry matched HTTP statuses only |
+| 4 | 5h52m | `503` at `startIndex=246000` | 62-second retry budget; notices went to `io.Discard` |
+| 5 | **27m26s, succeeded** | — | 30-day window, **23,433 ratings** |
+
+Four things worth keeping:
+
+**`NVD_SINCE_DAYS=120` is not a meaningful reduction.** Attempt 4 reached `startIndex=246000`
+of a 372,628-record corpus before dying. NVD keeps touching records — rescoring, adding
+references — so 120 days of *modifications* covers most of the feed. The window only shortens
+the job at much smaller spans: 30 days is 27 minutes, and that is measured.
+
+**The documented maximum could not be used.** NVD checks the `lastModStartDate`/`lastModEndDate`
+span at request time. `Since` was computed when the options were read and the end when the sync
+started, and `db update` runs every advisory provider in between — so `NVD_SINCE_DAYS=120`
+arrived as 120 days plus minutes and was answered with a bare 404. It is clamped at request
+time now, where both ends are finally known.
+
+**A retry budget has to be measured against what giving up costs.** The first schedule totalled
+62 seconds, and attempt 4 spent 5h52m before throwing all of it away over a blip. Every value in
+that schedule was non-zero, so "each wait is a real pause" was never the property worth
+asserting — the budget is. It is ~12 minutes now, which still fits inside the daily workflow's
+60-minute timeout.
+
+**Enumerating transient failures only covers the one already seen.** The first retry matched
+HTTP status errors, because a 503 was what had just happened; attempt 3 then died on an HTTP/2
+transport error surfacing during body decode, and the retry never fired. The policy is a
+deny-list now: everything retries except a cancelled context and a 4xx other than 429.
+
+The observability failures are the ones worth being embarrassed about. `Options.Progress`
+existed, was documented as the answer to exactly this problem, and was never wired to a writer —
+so attempt 4 logged "retries fired: 0" when four had fired. And nothing printed between
+`annotating with NVD…` and the result, so the only way to tell a working sync from a hung one
+was watching the temporary database grow from outside the process. Both are fixed; neither was
+found by a test.
+
+The remaining gap is structural and not fixed: **a failed sync loses everything**. `Update`
+builds into a temporary database and installs it only at the end, so attempts 2, 3 and 4
+discarded 42, 116 and 352 minutes of completed work. Retries make a page survivable; they do
+not make the run resumable. Checkpointing is what would, and it is not built.
+
 The deeper answer is that the full pass should not be every user's problem at all. That is
 *Publishing the database as an OCI artifact* in `docs/deferred-decisions.md`, whose revisit
 trigger — "CI rebuild time becomes the bottleneck" — this measurement fires. grype and trivy

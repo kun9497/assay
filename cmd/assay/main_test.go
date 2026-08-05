@@ -898,6 +898,28 @@ func TestNVDOptionsFromEnv_SaysWhyItIgnoredOrCappedTheWindow(t *testing.T) {
 	})
 }
 
+// nvd.Options.Progress must actually be connected to stderr.
+//
+// It was not, and that is how a run that spent 5h52m, hit a 503, retried
+// four times and gave up reported "retries fired: 0" -- the notices went to
+// io.Discard, which is what an unset Progress defaults to. The option was
+// written for exactly this situation and then never wired, so the sync that
+// most needed the output was the one that produced none.
+//
+// Asserted on identity, not on any message: what failed here was a
+// connection, and nothing this test can trigger would make the provider
+// emit a retry notice without a live NVD misbehaving.
+func TestNVDOptionsFromEnv_ConnectsProgressToStderr(t *testing.T) {
+	var errOut bytes.Buffer
+	got := nvdOptionsFromEnv(&errOut)
+	if got.Progress == nil {
+		t.Fatal("Options.Progress is nil, so every retry notice goes to io.Discard")
+	}
+	if got.Progress != io.Writer(&errOut) {
+		t.Errorf("Options.Progress = %v, want the stderr passed in", got.Progress)
+	}
+}
+
 // NVD is opt-in. It ran unconditionally at first, which made a routine NIST
 // 503 fatal to building any database at all -- dbcmd.Update deletes the
 // half-built file when a configured annotator fails, correctly, so with no

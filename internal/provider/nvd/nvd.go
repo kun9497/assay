@@ -3,7 +3,9 @@ package nvd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -72,6 +74,16 @@ type Options struct {
 	// exceed 120 days, which the caller has to respect - a longer span is
 	// rejected by the API, not silently truncated.
 	Since time.Time
+	// Progress is where retry notices go, or nil for io.Discard.
+	//
+	// It is an option rather than a parameter because provider.Annotator's
+	// signature is Annotate(ctx, emit) and must stay that way — every
+	// annotator shares it, and threading a writer through the interface to
+	// serve one implementation's diagnostics is the wrong trade. A sync that
+	// pauses 40 seconds with no output is indistinguishable from one that
+	// has hung, and this one already runs for hours, so the notice is worth
+	// an option field.
+	Progress io.Writer
 }
 
 type Provider struct {
@@ -81,6 +93,7 @@ type Provider struct {
 	pageSize int
 	pause    time.Duration
 	client   *http.Client
+	progress io.Writer
 }
 
 func New(opts Options) *Provider {
@@ -102,6 +115,10 @@ func New(opts Options) *Provider {
 	if opts.Pause != nil {
 		pause = *opts.Pause
 	}
+	progress := opts.Progress
+	if progress == nil {
+		progress = io.Discard
+	}
 	return &Provider{
 		apiKey:   opts.APIKey,
 		baseURL:  baseURL,
@@ -117,19 +134,127 @@ func New(opts Options) *Provider {
 		// first value here - failed a real sync on the first page. NVD
 		// generates these responses, so the variance is theirs and a margin
 		// of a few seconds is not a margin.
-		client: &http.Client{Timeout: 10 * time.Minute},
+		client:   &http.Client{Timeout: 10 * time.Minute},
+		progress: progress,
 	}
 }
 
 func (p *Provider) Name() string { return SourceName }
 
-// Annotate pages through NVD's CVE 2.0 API from startIndex 0 until it covers
-// totalResults, emitting one Rating per record that carries at least one
-// CVSS metric (D13, D27).
+// defaultRetryWaits paces retries of a single page. A multi-hour sync makes
+// a transient failure a near-certainty rather than an edge case: two real
+// bootstrap attempts died at 42 and 116 minutes, one on a 503 and one on an
+// HTTP/2 stream error, each losing every record it had fetched — Update
+// builds into a temporary database and installs it only at the end, so there
+// is no resume point.
 //
-// Requests are made one at a time, in order, never in parallel: NVD's rate
-// limit is per source IP, so concurrency would not buy throughput and would
-// risk a block.
+// Values, not a fixed count, for the same reason replaceWaits is a slice in
+// internal/dbcmd: the schedule IS the policy, and a test that shrinks it
+// should not also change how many attempts happen.
+//
+// The budget is ~12 minutes, and the first version's ~1 minute was the
+// mistake. A run that had already spent 5h52m and reached startIndex 246000
+// hit a 503, waited 62 seconds, gave up, and discarded everything. Sixty-two
+// seconds is not a proportionate thing to risk six hours on: the retry
+// budget has to be measured against what is lost by giving up, not against
+// what feels like a polite pause. Twelve minutes still fits inside the
+// daily workflow's 60-minute timeout, so a delta run that meets a genuine
+// outage fails rather than hanging.
+//
+// Held separately from retryWaits so a test can assert the shipped values
+// are non-zero even though TestMain zeroes the working copy. Without that
+// split, zeroing the production schedule — turning every retry into a hot
+// loop against NVD — would pass the suite.
+var defaultRetryWaits = []time.Duration{
+	5 * time.Second,
+	20 * time.Second,
+	time.Minute,
+	3 * time.Minute,
+	8 * time.Minute,
+}
+
+// retryWaits is the working copy the retry loop reads. TestMain replaces it
+// with a same-length, all-zero slice so the suite does not sleep.
+var retryWaits = defaultRetryWaits
+
+// retryable decides whether an error is worth another attempt.
+//
+// The policy is deny-list, not allow-list, and that is the correction of a
+// real mistake. The first version retried HTTP status errors only, because a
+// 503 was the failure that had just been observed. The next run died at
+// 116 minutes on `stream error: stream ID 91; INTERNAL_ERROR` -- an HTTP/2
+// transport failure surfacing during body decode, not a status at all -- and
+// the retry never fired. Enumerating the transient cases means the next
+// unenumerated one costs another two hours.
+//
+// So: everything is retryable except the two categories that are definitely
+// not.
+//
+//   - A cancelled or expired context is the caller saying stop. Retrying it
+//     ignores ^C and outlives the deadline it was given.
+//   - A 4xx other than 429 is this code getting the request wrong. Retrying
+//     makes the same mistake more slowly. 404 in particular was the
+//     window-wider-than-maxWindow bug, which a retry loop would have buried
+//     under a minute of silence before reporting the same error anyway.
+//
+// Everything else -- 5xx, 429, connection resets, stream errors, truncated
+// or malformed bodies -- is NVD or the network having a bad moment. A
+// genuinely malformed feed still fails, just after four attempts instead of
+// one, and that is the cheaper direction to be wrong in when the alternative
+// costs a multi-hour sync.
+func retryable(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var se *httpStatusError
+	if errors.As(err, &se) {
+		return se.code >= 500 || se.code == http.StatusTooManyRequests
+	}
+	return true
+}
+
+// httpStatusError carries the status code so fetchPageRetrying can decide
+// whether to retry without parsing an error string.
+type httpStatusError struct {
+	code int
+	msg  string
+}
+
+func (e *httpStatusError) Error() string { return e.msg }
+
+// fetchPageRetrying retries one page through transient failures, reporting
+// each attempt on stderr. Silence here would be worse than the failure: a
+// sync that stalls for a minute with no output is indistinguishable from one
+// that has hung, and this one already takes hours.
+func (p *Provider) fetchPageRetrying(ctx context.Context, startIndex int, since, until time.Time) (apiResponse, time.Time, error) {
+	for attempt := 0; ; attempt++ {
+		page, asOf, err := p.fetchPage(ctx, startIndex, since, until)
+		if err == nil {
+			return page, asOf, nil
+		}
+		if !retryable(err) || attempt >= len(retryWaits) {
+			return apiResponse{}, time.Time{}, err
+		}
+		wait := retryWaits[attempt]
+		fmt.Fprintf(p.progress, nlFmt("nvd: page at startIndex %d failed (%v); retrying in %s (attempt %d of %d)"),
+			startIndex, err, wait, attempt+1, len(retryWaits))
+		if err := sleep(ctx, wait); err != nil {
+			return apiResponse{}, time.Time{}, err
+		}
+	}
+}
+
+// nlFmt appends a newline to a format string. Assembled rather than typed,
+// because a literal escape inside a tool argument or a generating script has
+// silently become the byte it denotes three times on this repository -- see
+// CLAUDE.md. One helper is cheaper than remembering that at every call site.
+func nlFmt(s string) string { return s + string(rune(10)) }
+
+// maxWindow is NVD's hard limit on any lastModStartDate/lastModEndDate
+// range: 120 consecutive days, measured at request time. Exceeding it by
+// even seconds is answered with 404, not a helpful error.
+const maxWindow = 120 * 24 * time.Hour
+
 // windowLabel describes what a run covered, for Provenance.Window. An
 // unbounded run says so in words rather than returning "" — an empty Window
 // is indistinguishable from a database built before this field existed, and
@@ -143,6 +268,13 @@ func windowLabel(since, until time.Time) string {
 		since.UTC().Format("2006-01-02"), until.UTC().Format("2006-01-02"))
 }
 
+// Annotate pages through NVD's CVE 2.0 API from startIndex 0 until it covers
+// totalResults, emitting one Rating per record that carries at least one
+// CVSS metric (D13, D27).
+//
+// Requests are made one at a time, in order, never in parallel: NVD's rate
+// limit is per source IP, so concurrency would not buy throughput and would
+// risk a block.
 func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) error) (store.Provenance, error) {
 	prov := store.Provenance{Source: p.baseURL}
 	var (
@@ -156,11 +288,29 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 		// pagination.
 		until = nowUTC()
 	)
+	// Clamped here, where both ends are finally known, rather than where
+	// Since was chosen.
+	//
+	// NVD rejects any date range wider than 120 consecutive days, and it
+	// measures the span at request time. Since is computed when the options
+	// are read, `until` when Annotate starts — and in between, db update runs
+	// every advisory provider, which takes minutes. So NVD_SINCE_DAYS=120
+	// arrived as 120 days plus the OSV fetch and was answered with a bare
+	// 404, meaning the documented maximum could never actually be used. Found
+	// by running it: the first real bootstrap died after 2m51s.
+	//
+	// Narrowing rather than failing is safe because the result is disclosed:
+	// windowLabel below records the range actually requested, and db status
+	// prints it, so a clamped run cannot report coverage it does not have.
+	since := p.since
+	if !since.IsZero() && until.Sub(since) > maxWindow {
+		since = until.Add(-maxWindow)
+	}
 	// What this run actually covered, recorded so a windowed database cannot
 	// present itself as a complete one (D20). Update rebuilds from empty, so
 	// a bounded run's window IS the database's entire NVD coverage — there is
 	// no earlier pass underneath it.
-	prov.Window = windowLabel(p.since, until)
+	prov.Window = windowLabel(since, until)
 	// A do-while shape: the total is unknown before the first response, so
 	// the loop condition alone cannot gate the first request.
 	for first || startIndex < total {
@@ -189,7 +339,7 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 		}
 		first = false
 
-		page, pageAsOf, err := p.fetchPage(ctx, startIndex, until)
+		page, pageAsOf, err := p.fetchPageRetrying(ctx, startIndex, since, until)
 		if err != nil {
 			return store.Provenance{}, err
 		}
@@ -234,6 +384,19 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 		// page, and advancing by the request size would either skip records
 		// or loop forever short of totalResults.
 		startIndex += n
+		// Progress, once per page.
+		//
+		// Without it this loop prints nothing between "annotating with NVD"
+		// and its result, which for a full pass is about seven hours of
+		// silence. During the bootstrap runs the only way to tell a working
+		// sync from a hung one was to watch the temporary database grow from
+		// outside the process -- a diagnostic nobody who is not already
+		// debugging this code would think to run.
+		//
+		// Per page, not per record: a page is minutes, so this is at most a
+		// few hundred lines across the longest sync, and it doubles as the
+		// pacing signal -- lines that stop arriving mean stalled, not slow.
+		fmt.Fprintf(p.progress, nlFmt("nvd: %d/%d records, %d rated"), startIndex, total, records)
 	}
 	prov.Records = records
 	prov.DataAsOf = asOf
@@ -263,15 +426,15 @@ var nowUTC = func() time.Time { return time.Now().UTC() }
 // where it is never emitted. That is a rating silently absent from the
 // database, so a finding keeps the lower band. NVD's own guidance is to
 // hold the range fixed across a paged read.
-func (p *Provider) fetchPage(ctx context.Context, startIndex int, until time.Time) (apiResponse, time.Time, error) {
+func (p *Provider) fetchPage(ctx context.Context, startIndex int, since, until time.Time) (apiResponse, time.Time, error) {
 	u := fmt.Sprintf("%s?resultsPerPage=%d&startIndex=%d", p.baseURL, p.pageSize, startIndex)
-	if !p.since.IsZero() {
+	if !since.IsZero() {
 		// NVD requires both bounds together and caps the span at 120 days.
 		// The end is a real timestamp rather than open-ended, because an
 		// absent lastModEndDate is rejected rather than treated as "until
 		// now".
 		u += fmt.Sprintf("&lastModStartDate=%s&lastModEndDate=%s",
-			url.QueryEscape(p.since.UTC().Format("2006-01-02T15:04:05.000-07:00")),
+			url.QueryEscape(since.UTC().Format("2006-01-02T15:04:05.000-07:00")),
 			url.QueryEscape(until.UTC().Format("2006-01-02T15:04:05.000-07:00")))
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
@@ -289,7 +452,10 @@ func (p *Provider) fetchPage(ctx context.Context, startIndex int, until time.Tim
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return apiResponse{}, time.Time{}, fmt.Errorf("GET %s: %s", u, resp.Status)
+		return apiResponse{}, time.Time{}, &httpStatusError{
+			code: resp.StatusCode,
+			msg:  fmt.Sprintf("GET %s: %s", u, resp.Status),
+		}
 	}
 
 	var body apiResponse
