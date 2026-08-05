@@ -904,6 +904,58 @@ for a CVE this run's providers also rate is replaced outright, and one this run'
 did not touch (an annotator that did not run this cycle) still shows its last real value
 instead of `unknown`, which is what `db status`'s `COVERED` column is for (D20, D27).
 
+### D29 — Enrichment is built locally, and `db push` strips it before publishing
+
+`db build` fills the `enrichment` bucket from KISA's security notices when `KISA_ENABLE=1`
+is set; `db push` deletes that bucket from the staged copy of the database before packing it
+into an artifact. `db update` therefore never delivers KISA's Korean text — anyone who wants
+it runs a local `db build`.
+
+**Why.** KISA's site footer reads `Copyright(C) 2026 KISA. All rights reserved.` with no
+공공누리 (KOGL) mark (recorded above, under *Terms*). That restricts **redistributing** the
+data, not **scanning** with it — a database built and read on the machine that fetched it is
+not a redistribution. `db push` is one: it publishes to `ghcr.io/kun9497/assay-db`, a public
+registry. So enrichment stays on the machine that built it, and only that local copy ever
+carries it.
+
+**The revisit trigger is the licence question resolving** — a 공공누리 mark appearing on the
+site, or KISA answering directly that redistribution is permitted. When that happens,
+reversing D29 is deleting the `store.StripEnrichment(packPath)` call in `push.go`, not
+restructuring where enrichment lives: it was put in the same bbolt database as everything
+else, keyed `(CVE, Source)` exactly as ratings are, specifically so the reversal would be
+that small. A separate file or a separate artifact for KISA data was considered and set
+aside for the same reason (see *Splitting KISA data into a separate artifact*,
+`docs/deferred-decisions.md`) — that shape earns its cost only once the licence resolves,
+and building it now would mean un-building it later if it never does.
+
+**A failing enricher warns; it does not fail the build.** Unlike a `Provider` or an
+`Annotator`, whose failure aborts `db build` outright — an unreachable OSV mirror or a broken
+NVD sync must not silently ship a partial database — an unreachable KISA endpoint costs a
+reader some Korean prose and nothing else: enrichment cannot change a verdict (D3), so there
+is no correctness reason to withhold a database over it.
+
+**Five distinct routes to publishing unstripped data were found during review, none by a
+test.** Each is now held by one:
+
+1. Deleting the strip call outright.
+2. Pointing the strip at the live database instead of the staged copy actually being packed
+   — both halves fire at once: the artifact keeps the prose *and* the builder loses its own
+   copy.
+3. Downgrading the strip's failure from `return 2` to a warning, so a strip that could not
+   run still lets the push complete.
+4. Gating the strip on `Meta.Enrichment` being non-empty instead of always running it —
+   reachable whenever the bucket holds records but nothing recorded a source for them.
+5. Letting `--force` override the strip's failure, the way it already overrides `db push`'s
+   other refusal (narrowing published coverage). The two guards protect different things: the
+   coverage guard protects a database from getting narrower, which a publisher who means it
+   may choose to override; the licensing guard protects data that may not be redistributed at
+   all, which nobody may override.
+
+The recorded ruling is that the current shape — a strip that runs unconditionally on the
+staged copy, fails the push loudly, and cannot be bypassed by any flag — is safe to merge. A
+**sixth** route found later would mean the shape of `Push` itself is the problem, not its
+branches, and would call for restructuring rather than one more guard.
+
 ## 3. Architecture
 
 ### Measured data volumes
@@ -1204,18 +1256,44 @@ is needed — which is why the `detailSecNo.do` deep links returning 404 never m
 publication date is not exposed as a field; the crawler recovers it from the first four bytes
 of the Mongo ObjectId, which is the document's creation timestamp.
 
-Two things in that crawler do not port to this repo as they stand, and both are decisions
-rather than details:
+Two things in that crawler were recorded as not porting to this repo as they stand, and both
+were treated as decisions rather than details:
 
 - It disables TLS verification (`verify=False`). A vulnerability scanner turning off
   certificate checking needs a reason stronger than "it worked", so whether the endpoint
   actually requires it has to be established first.
 - It parses the affected/fixed version tables out of `content_html` with BeautifulSoup.
   This repo takes no third-party dependencies and Go's standard library has no HTML parser,
-  so that is the same choice `poetry.lock` forced: a narrow hand-rolled reader over the shapes
-  KNVD actually emits, or a dependency decision made deliberately. The tables are regular —
-  columns keyed on `제품`/`영향`/`해결`/`CVE` headers — but "regular" is what a permissive
-  parser assumes right up until it silently attributes the wrong version to a CVE.
+  so that looked like the same choice `poetry.lock` forced: a narrow hand-rolled reader over
+  the shapes KNVD actually emits, or a dependency decision made deliberately.
+
+**Neither turned out to be real, and the way that was found is worth stating once: calling
+the service, not reading about it.** Measured 2026-08-05, against the live endpoint:
+
+- `https://knvd.krcert.or.kr/` verifies strictly — `Verify return code: 0 (ok)`, a
+  DigiCert-issued certificate, HTTP 200. The reference crawler's `verify=False` was
+  defensive, not required; this repo uses ordinary TLS and never sets
+  `InsecureSkipVerify`.
+- The list response carries `content_text` alongside `content_html` — already plain text, no
+  tags, no parser needed at all. The reference crawler's BeautifulSoup pass over
+  `content_html` exists to build the affected/fixed *version tables* into structured rules,
+  and D3 already rules that out for enrichment: a title, a summary and a link, never a
+  matching source.
+
+Two more things the live service settled, neither anticipated going in and neither found by
+reading documentation:
+
+- **KISA's own count endpoint does not work.** `POST /api/core/pu/view/count/get` was probed
+  with the list request's own body and three shorter ones; all four answered
+  `{"resType":"RES_ERROR","resMsg":"…"}`. There is no total to page against — unlike `nvd`,
+  which pages against `totalResults` — so the walk has to detect its own end from the list
+  responses alone: it stops on the first empty page after the first, and refuses (rather than
+  retrying forever) an empty page at `skipCount` 0, which cannot be the true end of a corpus
+  of thousands of notices.
+- **KNVD reports its own failures as HTTP 200 with an empty list** — the exact shape the end
+  of the corpus takes. Without checking the response's own `resType` field, a service outage
+  mid-walk is indistinguishable from having reached the end, and would silently truncate the
+  sync rather than fail it loudly.
 
 **KNVD's own vulnerability records number 173, and none of them is in an ecosystem assay
 scans.** The `공개된 취약점` corpus is 173 records total, published at roughly one or two a
@@ -1266,25 +1344,33 @@ so D3 survives on its own evidence regardless of KVE.
 **Access.** Two documented RSS feeds exist — `/rss/security/notice` and
 `/rss/security/info` — and each returns only the latest **10** items, with no bulk export,
 no date range, and no pagination. The site is a Vue SPA served by an undocumented POST API
-(`/api/core/pu/view/…`) which does paginate, but it is not a published interface: the portal
-was rebuilt recently and its previous deep links (`detailSecNo.do?IDX=…`) now return a
-server error, so nothing about it is a stable contract. No corresponding dataset was found
-on 공공데이터포털.
+(`/api/core/pu/view/…`) which does paginate, but it is not a *published* interface: the
+portal was rebuilt recently and its previous deep links (`detailSecNo.do?IDX=…`) now return
+a server error, so nothing about it was ever a stable contract. No corresponding dataset was
+found on 공공데이터포털. `internal/provider/knvd` is built to survive exactly that
+instability rather than assume it away — a `resType` check on every page (the count-endpoint
+and empty-list findings above), a repeated-first-ID guard against a service that stops
+honouring `skipCount`, and a retry policy that treats anything not definitely permanent as
+transient.
 
 **Terms.** The site footer reads `Copyright(C) 2026 KISA. All rights reserved.` with no
 공공누리 (KOGL) mark. Korean public bodies that permit reuse label content with a KOGL type;
-its absence alongside an all-rights-reserved notice is not permission.
+its absence alongside an all-rights-reserved notice is not permission. This is what D29
+resolves: built locally, stripped before publishing, until that changes.
 
-**What is left of the idea.** The `보안공지` corpus is larger — 2,967 bulletins, covering
-Fortinet, Ubuntu, NGINX, WordPress and the like — and each carries a CVE-keyed table of
-affected and fixed versions. But those are vendor update round-ups whose CVE content OSV
-already holds; what they add is Korean prose, not matching data. That is a documentation
-feature, not a provider.
+**Shipped 2026-08-05.** `internal/provider/knvd` fetches the notices, `internal/advisory`
+and the `enrichment` bucket (schema 7) hold one record per CVE a notice names,
+`Matcher.annotate` attaches them to a finding by CVE exactly as NVD's ratings are, and the
+table, `--explain` and JSON all render them. `KISA_ENABLE` gates the fetch in `db build`, the
+same shape `NVD_ENABLE` already has. What D3 said from the start held all the way through:
+enrichment changes no verdict, no severity and no exit code — it is prose for a reader.
 
-**Revisit when** assay's targets include hosts or workstations rather than container images
-and source trees, which is when 한컴오피스 and ipTIME firmware become things a scan could
-encounter — the same trigger `docs/deferred-decisions.md` already records for treating KISA
-as an independent matching source. Until then this slice has no user.
+**Revisit whether KNVD could become an independent matching source when** assay's targets
+include hosts or workstations rather than container images and source trees, which is when
+한컴오피스 and ipTIME firmware become things a scan could encounter — the same trigger
+`docs/deferred-decisions.md` already records for that question. That question is separate
+from enrichment and remains open; enrichment itself does not wait on it and already has a
+user.
 
 ---
 
