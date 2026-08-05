@@ -1044,6 +1044,13 @@ func TestCompactInto_LeavesNoStrippedBytesBehind(t *testing.T) {
 // Compact CREATES each bucket as it walks, so a second run into the same path
 // fails partway and leaves a half-written database behind rather than saying
 // so up front.
+//
+// The assertion is on the message CompactInto itself produces, not on the
+// words "already exists". bbolt's own failure ("bucket already exists",
+// raised mid-walk) contains that phrase too, so the first version of this
+// test passed with the guard deleted -- found by deleting it. The phrase
+// "compact into" appears only in the up-front refusal: the wrapped bbolt
+// error reads "compact <src> into <dst>", with the paths in between.
 func TestCompactInto_RefusesAnExistingDestination(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src.db")
@@ -1065,8 +1072,9 @@ func TestCompactInto_RefusesAnExistingDestination(t *testing.T) {
 	if err == nil {
 		t.Fatal("CompactInto into an existing file succeeded, want an error")
 	}
-	if !strings.Contains(err.Error(), "already exists") {
-		t.Errorf("CompactInto error = %q, want it to say the destination already exists", err)
+	if !strings.Contains(err.Error(), "compact into") || !strings.Contains(err.Error(), "file already exists") {
+		t.Errorf("CompactInto error = %q, want its own up-front refusal (\"compact into <dst>: file "+
+			"already exists\") rather than a bbolt error raised partway through the walk", err)
 	}
 }
 
