@@ -159,16 +159,27 @@ var retryWaits = defaultRetryWaits
 // So everything is retryable except the two categories that definitely are
 // not:
 //
-//   - A cancelled or expired context is the caller saying stop. Retrying it
-//     ignores ^C and outlives the deadline it was given.
+//   - The CALLER's context being cancelled or expired is the caller saying
+//     stop. Retrying it ignores ^C and outlives the deadline it was given.
 //   - A 4xx other than 429 is this code getting the request wrong. Retrying
 //     makes the same mistake more slowly.
 //
 // Everything else — 5xx, 429, connection resets, stream errors, truncated
 // bodies, and KNVD's own RES_ERROR (which arrives as HTTP 200, see
 // fetchPage) — is the service or the network having a bad moment.
-func retryable(err error) bool {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+//
+// The first argument is ctx and not err, and that distinction is the whole
+// point rather than a style choice. Asking the ERROR whether it is a
+// cancellation — errors.Is(err, context.DeadlineExceeded), which is what
+// this and nvd both did — also matches OUR OWN client timeout: net/http's
+// timeoutError reports Is(context.DeadlineExceeded) as true, for the
+// response-header timeout and the body-read timeout alike (verified against
+// Go 1.26). A page that stalls past Client.Timeout is the single most
+// ordinary transient failure there is, and classifying it as permanent
+// aborted the run having retried nothing. Only the caller's own context can
+// answer "was I told to stop", so only the caller's context is asked.
+func retryable(ctx context.Context, err error) bool {
+	if ctx.Err() != nil {
 		return false
 	}
 	var se *httpStatusError
@@ -202,7 +213,7 @@ func (p *Provider) fetchPageRetrying(ctx context.Context, skipCount int) (listRe
 		if err == nil {
 			return page, nil
 		}
-		if !retryable(err) || attempt >= len(retryWaits) {
+		if !retryable(ctx, err) || attempt >= len(retryWaits) {
 			return listResponse{}, err
 		}
 		wait := retryWaits[attempt]
@@ -259,6 +270,9 @@ func (p *Provider) Enrich(ctx context.Context, emit func(advisory.Enrichment) er
 		notices   int
 		records   int
 		first     = true
+		// The first notice ID of the previous page, held to detect a service
+		// that is not honouring skipCount at all. See the guard below.
+		prevFirstID string
 	)
 	for {
 		// Checked at the top of the loop rather than left to the request's
@@ -308,6 +322,40 @@ func (p *Provider) Enrich(ctx context.Context, emit func(advisory.Enrichment) er
 			break
 		}
 
+		// A page that starts with the same notice as the one before it means
+		// the service is ignoring skipCount and serving the same page every
+		// time. Nothing else in this loop can notice: the pages are full, so
+		// the cursor advances, the record count climbs, and the progress
+		// lines increment — the walk reads as healthy while it repeats
+		// forever, emitting duplicates. Measured by review: a fake that
+		// ignores the offset took 24,510 requests in two seconds, and Enrich
+		// stopped only because the test's context expired.
+		//
+		// Dropping nvd's `startIndex < total` loop bound is what opened this
+		// door, since the empty page then became the only exit. A sanity
+		// ceiling on notices seen would bound the COST; this names the
+		// FAULT, and any ceiling loose enough to survive a corpus that grows
+		// is also loose enough to be a long hang first.
+		//
+		// It compares the first ID rather than the whole page because that
+		// is sufficient and cheap. A false positive needs the corpus to
+		// shift by exactly one page between two requests — at the default
+		// page size of 50, fifty notices published inside 0.14 s — and would
+		// be a loud failure that the next run recovers from, since db update
+		// rebuilds from empty.
+		firstID := page.ResList[0].ID
+		// Compared only once a previous page exists. Gated on notices rather
+		// than on firstID being non-empty, so a service returning notices
+		// with no id at all is caught by this too instead of slipping
+		// through the comparison that was meant to catch it.
+		if notices > 0 && firstID == prevFirstID {
+			return store.Provenance{}, fmt.Errorf(
+				"knvd: the page at skipCount %d starts with the same notice (%s) as the "+
+					"one before it - the service is not honouring skipCount, and the walk "+
+					"would repeat forever", skipCount, firstID)
+		}
+		prevFirstID = firstID
+
 		for _, notice := range page.ResList {
 			for _, e := range convert(notice) {
 				if err := emit(e); err != nil {
@@ -350,6 +398,10 @@ func (p *Provider) Enrich(ctx context.Context, emit func(advisory.Enrichment) er
 // to one record of prose — an Enrichment can never reach a verdict — so this
 // is not worth deviating from a request body confirmed against the live
 // service. It would be, for anything that could change an exit code.
+//
+// The loss is also transient rather than cumulative: db update rebuilds the
+// database from empty, so a notice skipped by one run is picked up whole by
+// the next one, and nothing accretes a permanent gap.
 type listRequest struct {
 	SortBy         string `json:"sortBy"`
 	Order          int    `json:"order"`
@@ -424,12 +476,18 @@ func (p *Provider) fetchPage(ctx context.Context, skipCount int) (listResponse, 
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return listResponse{}, fmt.Errorf("decode knvd response: %w", err)
 	}
+	// Anything that is not RES_OK, rather than RES_ERROR specifically: a
+	// third response type, or the bare {} a gateway can substitute, decodes
+	// into a listResponse with no notices in it and would otherwise be read
+	// as the end of the corpus.
+	//
+	// Not an httpStatusError, so retryable() treats it as transient — which
+	// is right: RES_ERROR is the service saying it failed, the same class as
+	// a 500, and it arrives with a 200 only because of how this API is
+	// built.
 	if out.ResType != resTypeOK {
-		// Not an httpStatusError, so retryable() treats it as transient —
-		// which is right: RES_ERROR is the service saying it failed, the
-		// same class as a 500, and it arrives with a 200 only because of how
-		// this API is built.
-		return listResponse{}, fmt.Errorf("knvd: %s at skipCount %d: %s", out.ResType, skipCount, out.ResMsg)
+		return listResponse{}, fmt.Errorf("knvd: unexpected resType %q at skipCount %d: %s",
+			out.ResType, skipCount, out.ResMsg)
 	}
 	return out, nil
 }

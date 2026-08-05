@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -430,6 +432,62 @@ func TestEnrich_AnEmptyPagePastTheFirstEndsTheWalk(t *testing.T) {
 	}
 }
 
+// A service that ignores skipCount entirely must fail the run, not drive it
+// forever.
+//
+// Nothing else in the walk can notice this. The pages are full, so the
+// cursor advances; the record count climbs; the progress lines increment --
+// it reads as a healthy sync while it repeats the same page and emits the
+// same records indefinitely. Measured by review against a fake shaped like
+// this one: 24,510 requests in two seconds, stopped only because the test
+// supplied a context deadline. In production, paced at one request per
+// second, that is db update hanging with every outward sign of working.
+//
+// Dropping nvd's `startIndex < total` loop bound is what opened this door,
+// since the empty page then became the only exit. The assertion is that
+// Enrich FAILS: merely stopping would report the first page's two notices as
+// the whole corpus, which is the "found nothing" / "was broken" confusion one
+// level up.
+func TestEnrich_RefusesAServiceThatIgnoresSkipCount(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	// The same page every time, whatever is asked for.
+	same := page(
+		notice("n-alpha", "제품 A 권고", overview("CVE-2026-9301")),
+		notice("n-beta", "제품 B 권고", overview("CVE-2026-9302")),
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		n := calls
+		mu.Unlock()
+		if n > 4 {
+			t.Errorf("request %d: the walk is unbounded against a service that ignores skipCount", n)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		io.WriteString(w, same)
+	}))
+	defer srv.Close()
+
+	p := New(Options{BaseURL: srv.URL, PageSize: 2, Pause: durPtr(0)})
+	_, _, err := collect(t, p)
+	if err == nil {
+		t.Fatal("Enrich returned nil against a service that serves the same page forever -- " +
+			"a walk that cannot end must fail, not report what it happened to collect")
+	}
+	if !strings.Contains(err.Error(), "not honouring skipCount") {
+		t.Errorf("error %q does not name the fault", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	// Detected on the page after the first, which is the earliest it can be
+	// known: one page alone is indistinguishable from a working service.
+	if calls != 2 {
+		t.Errorf("made %d requests, want 2", calls)
+	}
+}
+
 // The cursor advances by NOTICES, not by records emitted. Much of KNVD's
 // corpus names no CVE at all, and convert returns nothing for those -- so a
 // page of them yields zero records while still being a page that was read.
@@ -646,22 +704,50 @@ func TestEnrich_RetriesAnApplicationLevelError(t *testing.T) {
 	}
 }
 
-// ...and one that never recovers fails with the service's own diagnostic,
-// rather than with the empty-corpus message, which would send whoever reads
-// it looking at the wrong thing.
-func TestEnrich_AnUnrecoveredApplicationErrorNamesItself(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, `{"resType":"RES_ERROR","resMsg":"점검중","resList":[]}`)
-	}))
-	defer srv.Close()
-
-	p := New(Options{BaseURL: srv.URL, PageSize: 1, Pause: durPtr(0)})
-	_, _, err := collect(t, p)
-	if err == nil {
-		t.Fatal("Enrich returned nil against a service reporting RES_ERROR on every request")
+// ...and one that never recovers fails naming what the service said, rather
+// than with the empty-corpus message, which would send whoever reads it
+// looking at the wrong thing.
+//
+// The rows past the first are why the check is "not RES_OK" rather than "is
+// RES_ERROR". Every one of these decodes into a listResponse with no notices
+// in it, so under an equality test against RES_ERROR they would all be read
+// as the end of the corpus -- silently truncating the walk mid-corpus, or
+// being blamed on an empty corpus at skipCount 0. A response type this code
+// has not seen, and the bare {} a gateway can substitute for a body it could
+// not proxy, are exactly the shapes nobody writes a case for.
+func TestEnrich_AResponseThatIsNotRESOKIsNotAnEmptyCorpus(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		wantInErr string
+	}{
+		{"RES_ERROR, the documented failure", `{"resType":"RES_ERROR","resMsg":"점검중","resList":[]}`, "점검중"},
+		{"a response type this code has never seen", `{"resType":"RES_WARN","resMsg":"부분 결과","resList":[]}`, "RES_WARN"},
+		{"a bare object, as a gateway can substitute", `{}`, `resType ""`},
+		{"a body carrying resList but no resType", `{"resList":[]}`, `resType ""`},
 	}
-	if !strings.Contains(err.Error(), "점검중") {
-		t.Errorf("error %q drops the service's own message", err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+
+			p := New(Options{BaseURL: srv.URL, PageSize: 1, Pause: durPtr(0)})
+			_, _, err := collect(t, p)
+			if err == nil {
+				t.Fatal("Enrich returned nil against a service that never answered RES_OK")
+			}
+			if !strings.Contains(err.Error(), tc.wantInErr) {
+				t.Errorf("error %q does not carry %q", err, tc.wantInErr)
+			}
+			// The failure must be attributed to the response, not to the
+			// corpus. Blaming an empty corpus sends the reader to KISA's
+			// content when the problem is the transport in front of it.
+			if strings.Contains(err.Error(), "zero notices") {
+				t.Errorf("error %q blames an empty corpus for a response that was never RES_OK", err)
+			}
+		})
 	}
 }
 
@@ -722,11 +808,120 @@ func TestEnrich_DoesNotRetryAContextCancelledMidRequest(t *testing.T) {
 
 	var progress bytes.Buffer
 	p := New(Options{BaseURL: srv.URL, PageSize: 1, Pause: durPtr(0), Progress: &progress})
-	if _, err := p.Enrich(ctx, func(advisory.Enrichment) error { return nil }); err == nil {
+	_, err := p.Enrich(ctx, func(advisory.Enrichment) error { return nil })
+	if err == nil {
 		t.Fatal("Enrich succeeded despite cancellation")
+	}
+	// The cancellation reaches the caller intact. Asserting only that the
+	// progress writer stayed quiet is an assertion about a diagnostic: it
+	// passes just as well if the writer went silent for an unrelated reason,
+	// or if the retry was skipped and the error arrived as something the
+	// caller cannot recognise as its own ^C.
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Enrich returned %v, want an error the caller can recognise as its own cancellation", err)
 	}
 	if strings.Contains(progress.String(), "retrying") {
 		t.Errorf("progress = %q: a cancelled context was treated as retryable", progress.String())
+	}
+}
+
+// A stalled page is retried, and that is the failure mode this provider is
+// most likely to meet.
+//
+// net/http reports its OWN Client.Timeout as a deadline error: a
+// timeoutError's Is(context.DeadlineExceeded) is true, for the
+// response-header timeout and the body-read timeout alike (Go 1.26). So the
+// obvious spelling of "do not retry a cancellation" --
+// errors.Is(err, context.DeadlineExceeded) -- also catches this, and
+// classifies the single most ordinary transient failure there is as
+// permanent: the run aborts having retried nothing. Only the CALLER's
+// context can answer the question that exclusion is asking.
+func TestRetryable_JudgesTheCallersContextNotTheError(t *testing.T) {
+	// Shaped like what net/http hands back, without waiting for a real
+	// timeout to produce one: what matters is that errors.Is finds
+	// DeadlineExceeded in it, which is precisely why the old test was wrong.
+	timeout := fmt.Errorf("Post %q: %w", "http://example.invalid", context.DeadlineExceeded)
+
+	if !retryable(context.Background(), timeout) {
+		t.Error("a client timeout was judged permanent -- this is the retry's main reason to exist")
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if retryable(cancelled, timeout) {
+		t.Error("the caller's cancellation was retried; ^C must stop the walk, not restart it")
+	}
+	expired, cancelExpired := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancelExpired()
+	if retryable(expired, timeout) {
+		t.Error("an expired caller deadline was retried; the retry would outlive the deadline it was given")
+	}
+	// ...and the status rules are unchanged by the switch.
+	for _, tc := range []struct {
+		code int
+		want bool
+	}{
+		{http.StatusNotFound, false},
+		{http.StatusBadRequest, false},
+		{http.StatusTooManyRequests, true},
+		{http.StatusServiceUnavailable, true},
+		{http.StatusInternalServerError, true},
+	} {
+		if got := retryable(context.Background(), &httpStatusError{code: tc.code}); got != tc.want {
+			t.Errorf("retryable(%d) = %v, want %v", tc.code, got, tc.want)
+		}
+	}
+}
+
+// ...and the same thing end to end, through a real net/http timeout rather
+// than an error shaped like one, so this cannot pass on a wrong idea of what
+// Client.Timeout produces.
+func TestEnrich_RetriesARealClientTimeout(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	pages := map[int]string{
+		0: page(notice("n-alpha", "제품 A 권고", overview("CVE-2026-6004"))),
+		1: emptyPage,
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		calls++
+		n := calls
+		mu.Unlock()
+		if n == 1 {
+			// Never answers. The client's own Timeout ends the request; the
+			// CALLER's context is untouched throughout, which is the whole
+			// distinction being tested.
+			<-r.Context().Done()
+			return
+		}
+		var body map[string]any
+		json.Unmarshal(raw, &body)
+		io.WriteString(w, pages[int(body["skipCount"].(float64))])
+	}))
+	defer srv.Close()
+
+	var progress bytes.Buffer
+	p := New(Options{BaseURL: srv.URL, PageSize: 1, Pause: durPtr(0), Progress: &progress})
+	// A second, against a local server that answers in microseconds. The
+	// margin is four orders of magnitude, so this bounds a hang rather than
+	// asserting a speed.
+	p.client.Timeout = time.Second
+
+	cves, _, err := collect(t, p)
+	if err != nil {
+		t.Fatalf("Enrich failed on a client timeout, which is the most ordinary transient failure there is: %v", err)
+	}
+	if want := []string{"CVE-2026-6004"}; !slices.Equal(cves, want) {
+		t.Errorf("emitted %v, want %v", cves, want)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 3 {
+		t.Errorf("made %d requests, want 3 (one stalled page, then both pages)", calls)
+	}
+	if !strings.Contains(progress.String(), "retrying in") {
+		t.Errorf("progress = %q, want the retry announced", progress.String())
 	}
 }
 
