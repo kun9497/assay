@@ -316,7 +316,7 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 	// what the caller asked for -- the publish-side coverage guard
 	// compares these, and comparing an unhonoured request would let a
 	// narrower artifact claim to be as broad as the flag it was given.
-	prov.CoversSince = since
+	prov.CoversSince, prov.CoversSinceKnown = since, true
 	// A do-while shape: the total is unknown before the first response, so
 	// the loop condition alone cannot gate the first request.
 	for first || startIndex < total {

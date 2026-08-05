@@ -218,8 +218,8 @@ func refuseCoverageRegression(ctx context.Context, target name.Reference, incomi
 
 // ratingBoundKnown reports whether the bound above can be substantiated.
 //
-// A rating source that recorded a Window but no CoversSince predates that
-// field, and its zero bound means "not recorded", not "unbounded". Publishing
+// A rating source with CoversSinceKnown false predates that field, and its
+// zero bound means "not recorded", not "unbounded". Publishing
 // the difference as unbounded is how a 30-day artifact came to claim the
 // whole feed in its own manifest — caught by pushing to the live registry,
 // not by any test. An artifact that cannot substantiate a coverage claim
@@ -227,7 +227,7 @@ func refuseCoverageRegression(ctx context.Context, target name.Reference, incomi
 // than as maximal.
 func ratingBoundKnown(m store.Meta) bool {
 	for _, p := range m.Ratings {
-		if p.CoversSince.IsZero() && p.Window != "" {
+		if !p.CoversSinceKnown {
 			return false
 		}
 	}

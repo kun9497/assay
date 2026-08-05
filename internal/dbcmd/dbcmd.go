@@ -152,10 +152,10 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []p
 		// The seed's rating provenance is the starting point, so an annotator
 		// this run did NOT run keeps the seed's window rather than vanishing
 		// from `db status`. One that DID run overwrites its entry in the loop
-		// below, which is what stops a one-day delta inheriting a
-		// thirty-day coverage claim (the hazard TestUpdate_SeededRunReports-
-		// TheWindowItActuallyFetched exists to pin: this copy must happen
-		// BEFORE the annotator loop, never after).
+		// below -- MERGED with it, not replacing it, so the entry describes
+		// what the database holds rather than only what this run fetched
+		// (see mergeRatingCoverage). This copy must still happen BEFORE the
+		// annotator loop, never after.
 		maps.Copy(meta.Ratings, seedMeta.Ratings)
 		fmt.Fprintf(stderr, "seeded %d rating(s) from %s; advisories rebuilt from source\n", seeded, label)
 	}
@@ -175,7 +175,7 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []p
 			fmt.Fprintf(stderr, "error: annotator %s: %v\n", a.Name(), err)
 			return 2
 		}
-		meta.Ratings[a.Name()] = prov
+		meta.Ratings[a.Name()] = mergeRatingCoverage(meta.Ratings[a.Name()], prov)
 	}
 	if err := w.SetMeta(meta); err != nil {
 		w.Close()
@@ -520,4 +520,67 @@ func releaseParts(rel string) (major, minor int, ok bool) {
 		return 0, 0, false
 	}
 	return major, minor, true
+}
+
+// mergeRatingCoverage combines what a seed already held with what this run
+// fetched, for one rating source.
+//
+// The annotator's own Provenance describes only its fetch: a nightly delta
+// reports three days. But a seeded database holds the seed's ratings too, so
+// replacing the entry outright made the artifact claim three days while
+// holding thirty. Two things break.
+//
+// The claim is false, in the direction that matters least to a reader and
+// most to a publisher -- and `db push`'s coverage guard reads exactly this.
+// Day one publishes "since D-3"; day two seeds from it, reports "since D-3"
+// against a now-later date, and the guard correctly sees a narrowing and
+// refuses. The scheduled workflow would have stopped publishing on its
+// second run, having worked perfectly on its first.
+//
+// So coverage is the BROADER of the two, because the ratings from both are
+// present. Everything else -- Source, DataAsOf, Records -- stays this run's,
+// which is what those fields mean.
+func mergeRatingCoverage(seeded, fetched store.Provenance) store.Provenance {
+	merged := fetched
+	switch {
+	case seeded.Window == "" && !seeded.CoversSinceKnown && seeded.CoversSince.IsZero():
+		// Nothing was seeded for this source.
+		return merged
+	case !seeded.CoversSinceKnown:
+		// The seed recorded coverage for a human and not for a machine --
+		// a database built before CoversSince existed. Its vintage is
+		// genuinely unknown, so the merged coverage is unknown too.
+		// Claiming this run's narrow window would be false, and claiming
+		// unbounded would be the over-claim `db push` already refuses to
+		// make. Saying nothing is the only honest option.
+		merged.CoversSince, merged.CoversSinceKnown = time.Time{}, false
+		merged.Window = seeded.Window + " + this run (seed coverage not recorded)"
+		return merged
+	case !fetched.CoversSinceKnown:
+		// This run does not record its own bound, so nothing can be
+		// merged against the seed's.
+		return merged
+	case !fetched.CoversSince.IsZero() && seeded.CoversSince.Before(fetched.CoversSince):
+		// An unbounded seed needs no case of its own: its zero CoversSince
+		// sorts before every real date, so it wins here. An explicit branch
+		// for it was written first and removed after a mutation proved it a
+		// true equivalent -- disabling it changed nothing, because control
+		// simply fell through to this comparison and produced the same
+		// result. An untestable branch reads as an untested one forever.
+		merged.CoversSince = seeded.CoversSince
+		merged.Window = coverageLabel(seeded.CoversSince)
+	}
+	return merged
+}
+
+// coverageLabel renders a merged bound in the shape the providers use, so
+// `db status` reads the same whether a build was seeded or not. Duplicating
+// the format is deliberate: the alternative is a provider deciding how a
+// merge it never saw should be described.
+func coverageLabel(since time.Time) string {
+	if since.IsZero() {
+		return "the whole feed"
+	}
+	return fmt.Sprintf("modified %s..%s",
+		since.UTC().Format("2006-01-02"), time.Now().UTC().Format("2006-01-02"))
 }

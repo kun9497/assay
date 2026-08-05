@@ -201,6 +201,15 @@ type Provenance struct {
 	// that by parsing "modified 2026-07-05..2026-08-04" would make a
 	// coverage guard depend on the wording of a display string.
 	CoversSince time.Time `json:"covers_since,omitempty"`
+	// CoversSinceKnown separates "unbounded" from "not recorded". Both are
+	// a zero CoversSince, and they are opposites: one is the broadest
+	// coverage there is, the other is no information at all.
+	//
+	// Without it the only way to tell them apart is reading Window, and a
+	// correctness path that parses a display string is what CoversSince
+	// exists to avoid. A database built before this field simply has false
+	// here, which is the truthful answer for it.
+	CoversSinceKnown bool `json:"covers_since_known,omitempty"`
 }
 
 // DefaultPath returns <user cache>/assay/db/v<schema>/vulnerability.db,

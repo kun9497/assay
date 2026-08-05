@@ -17,6 +17,7 @@ import (
 
 	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/dbartifact"
+	"github.com/kun9497/assay/internal/provider"
 	"github.com/kun9497/assay/internal/store"
 )
 
@@ -38,7 +39,7 @@ func bounded(t *testing.T, since time.Time, ratings int) string {
 	if err := w.SetMeta(store.Meta{
 		BuiltAt:   time.Date(2026, 8, 4, 6, 0, 0, 0, time.UTC),
 		Providers: map[string]store.Provenance{"osv": {DataAsOf: time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)}},
-		Ratings:   map[string]store.Provenance{"NVD": {CoversSince: since}},
+		Ratings:   map[string]store.Provenance{"NVD": {CoversSince: since, CoversSinceKnown: true}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -377,5 +378,106 @@ func TestRatingBound_UsesEachSourcesOwnBound(t *testing.T) {
 	got = ratingBound(store.Meta{Ratings: map[string]store.Provenance{"NVD": {}}})
 	if !got.IsZero() {
 		t.Errorf("ratingBound = %v, want zero when nothing is bounded", got)
+	}
+}
+
+// The scheduled workflow must still be publishable on its second run.
+//
+// This is the sequence that was broken. The daily build seeds from the
+// published artifact and fetches a small window on top, so the entry the
+// annotator returns describes three days while the database holds the
+// seed's thirty. Publishing that bound made day two look like a narrowing
+// of day one, and `db push` refused it -- a workflow that worked perfectly
+// the first time and stopped forever the second.
+//
+// Driven through Update rather than by hand-building Provenance, because
+// the defect was in how Update merges, and a fixture that set the merged
+// value directly would have passed against the broken code.
+func TestPush_ASecondSeededDeltaIsStillPublishable(t *testing.T) {
+	ref := liveRegistry(t)
+
+	day := func(n int) time.Time { return time.Date(2026, 8, n, 0, 0, 0, 0, time.UTC) }
+
+	// Day 0: a broad artifact is published.
+	seed(t, ref, day(1), 5)
+
+	// Day 1 and day 2: seed from the published artifact, fetch a narrow
+	// window on top, publish. Both must succeed.
+	for i, fetched := range []time.Time{day(10), day(11)} {
+		seedPath := filepath.Join(t.TempDir(), "seed.db")
+		var out, errOut bytes.Buffer
+		if code := Pull(context.Background(), seedPath, ref, &out, &errOut); code != 0 {
+			t.Fatalf("day %d: Pull = %d (%s)", i+1, code, errOut.String())
+		}
+
+		built := filepath.Join(t.TempDir(), "vulnerability.db")
+		a := fakeAnnotator{
+			name:        "NVD",
+			ratings:     []advisory.Rating{{CVE: fmt.Sprintf("CVE-2026-new%d", i), Source: "NVD"}},
+			window:      "modified narrow",
+			coversSince: fetched,
+		}
+		out.Reset()
+		errOut.Reset()
+		if code := Update(context.Background(), built, seedPath, ref, nil,
+			[]provider.Annotator{a}, &out, &errOut); code != 0 {
+			t.Fatalf("day %d: Update = %d (%s)", i+1, code, errOut.String())
+		}
+
+		out.Reset()
+		errOut.Reset()
+		if code := Push(context.Background(), built, ref, false, &out, &errOut); code != 0 {
+			t.Fatalf("day %d: Push = %d, want 0 -- the scheduled workflow stops here (%s)",
+				i+1, code, errOut.String())
+		}
+		// And the coverage it publishes is still the seed's, not the narrow
+		// fetch: the database holds both.
+		if got := publishedMeta(t, ref); !got.RatingsSince.Equal(day(1)) {
+			t.Errorf("day %d: published RatingsSince = %v, want the seed's %v", i+1, got.RatingsSince, day(1))
+		}
+	}
+}
+
+// A delta seeded from a FULL-corpus artifact stays full.
+//
+// This is the case that arrives the moment the unbounded build is
+// published: the nightly run seeds from an artifact covering the whole
+// feed and fetches three days on top. If the merge let this run's narrow
+// bound win, the artifact would claim three days while holding everything,
+// and the next push would be refused as a narrowing — the same day-two
+// breakage, reintroduced by the broader seed rather than by a narrower one.
+func TestPush_ADeltaSeededFromTheWholeFeedStaysWhole(t *testing.T) {
+	ref := liveRegistry(t)
+	seed(t, ref, time.Time{}, 5) // published: the whole feed
+
+	seedPath := filepath.Join(t.TempDir(), "seed.db")
+	var out, errOut bytes.Buffer
+	if code := Pull(context.Background(), seedPath, ref, &out, &errOut); code != 0 {
+		t.Fatalf("Pull = %d (%s)", code, errOut.String())
+	}
+
+	built := filepath.Join(t.TempDir(), "vulnerability.db")
+	a := fakeAnnotator{
+		name:        "NVD",
+		ratings:     []advisory.Rating{{CVE: "CVE-2026-fresh", Source: "NVD"}},
+		window:      "modified narrow",
+		coversSince: time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC),
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := Update(context.Background(), built, seedPath, ref, nil,
+		[]provider.Annotator{a}, &out, &errOut); code != 0 {
+		t.Fatalf("Update = %d (%s)", code, errOut.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := Push(context.Background(), built, ref, false, &out, &errOut); code != 0 {
+		t.Fatalf("Push = %d, want 0 -- a delta on a full seed was refused (%s)", code, errOut.String())
+	}
+	got := publishedMeta(t, ref)
+	if !got.RatingsSinceKnown || !got.RatingsSince.IsZero() {
+		t.Errorf("published RatingsSince = %v (known=%v), want unbounded: the database still holds the whole feed",
+			got.RatingsSince, got.RatingsSinceKnown)
 	}
 }
