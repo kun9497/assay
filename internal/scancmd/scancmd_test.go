@@ -1738,6 +1738,25 @@ func TestRun_KISAEnrichmentReachesEveryRenderer(t *testing.T) {
 		}
 	})
 
+	// The workflow the footnote advertises, through the real CLI seam: read the
+	// table, copy the marked ADVISORY cell, run --explain with it. Before the
+	// marker was trimmed this answered `no finding matches advisory or alias
+	// "GHSA-enriched +"` and exit 2 -- the report instructing a reader to run a
+	// command that fails on the report's own output.
+	t.Run("--explain accepts the marked ADVISORY cell verbatim", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		code := Run(context.Background(), db, sbom,
+			Options{Explain: "GHSA-enriched +"}, &out, &errOut)
+		if code != 0 {
+			t.Fatalf("Run(--explain %q) = %d, want 0; stderr: %s",
+				"GHSA-enriched +", code, errOut.String())
+		}
+		if !strings.Contains(out.String(), "advisory: GHSA-enriched") {
+			t.Errorf("the copied cell did not explain the finding it was copied from:\n%s",
+				out.String())
+		}
+	})
+
 	t.Run("the table marks the row and names the source", func(t *testing.T) {
 		var out, errOut bytes.Buffer
 		if code := Run(context.Background(), db, sbom, Options{}, &out, &errOut); code != 0 {

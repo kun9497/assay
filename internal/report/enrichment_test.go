@@ -268,6 +268,90 @@ func TestExplain_PrintsTheEnrichmentInFull(t *testing.T) {
 	}
 }
 
+// The workflow the table's own footnote advertises: mark a row, tell the reader
+// to run `--explain <id>`, and have the cell they copy actually work.
+//
+// The marker lands inside the ADVISORY cell, which is --explain's input, so
+// before trimCellMarker existed this printed `no finding matches advisory or
+// alias "ALPINE-2025-0001 +"` and exited 2 — the report's own instruction
+// failing on the report's own output.
+//
+// The string handed to Explain is READ OUT OF THE RENDERED TABLE rather than
+// written out here: cellAt fails the test unless a row's ADVISORY cell is
+// exactly that text, so this pins the two renderers to each other. A change to
+// how the marker is attached breaks this test rather than quietly breaking the
+// workflow.
+func TestExplain_ResolvesTheAdvisoryCellAReaderCopied(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:     pkgmeta.Package{Name: "libssl3", Version: "3.1.4-r5", Ecosystem: "Alpine:v3.19"},
+		Advisory:    advisory.Advisory{ID: "ALPINE-2025-0001"},
+		Identifiers: []string{"ALPINE-2025-0001", "CVE-2025-46394"},
+		Severity:    severity.High,
+		Score:       7.5,
+		Ratings: []matcher.Rating{
+			{Database: "ALPINE", AdvisoryID: "ALPINE-2025-0001", Severity: severity.High, Score: 7.5},
+		},
+		Enrichment: []matcher.Enrichment{kisaEnrichment()},
+	}}}
+	var table bytes.Buffer
+	if _, err := Table(&table, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	cell := cellAt(t, table.String(), "ALPINE-2025-0001 "+enrichmentMarker, "ADVISORY")
+	if cell == "ALPINE-2025-0001" {
+		t.Fatalf("the ADVISORY cell carries no marker, so this test cannot tell a "+
+			"trimmed lookup from an untrimmed one:\n%s", table.String())
+	}
+
+	for _, id := range []string{
+		cell,                                 // exactly what the table rendered
+		"ALPINE-2025-0001",                   // the bare id, which must keep working
+		"CVE-2025-46394 " + enrichmentMarker, // an alias, marker and all
+	} {
+		t.Run(id, func(t *testing.T) {
+			var buf bytes.Buffer
+			n, err := Explain(&buf, res, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n != 1 {
+				t.Fatalf("Explain(%q) found %d findings, want 1 — the table's footnote "+
+					"sends a reader here with this exact string", id, n)
+			}
+			if got := explainLine(t, buf.String(), "advisory:"); got != "advisory: ALPINE-2025-0001" {
+				t.Errorf("explained %q, want the ALPINE-2025-0001 finding", got)
+			}
+		})
+	}
+}
+
+// trimCellMarker's own boundaries. The trim is safe only because a marker is
+// preceded by a space and advisory identifiers contain none — so the cases that
+// must NOT be trimmed matter as much as the ones that must.
+func TestTrimCellMarker(t *testing.T) {
+	for _, tt := range []struct{ in, want string }{
+		{"GHSA-1 +", "GHSA-1"},                             // the ADVISORY cell
+		{"critical (9.8) *", "critical (9.8)"},             // the SEVERITY cell, for free
+		{"GHSA-1  +", "GHSA-1"},                            // padding a reader may have copied
+		{"GHSA-1 + ", "GHSA-1"},                            // ...and trailing padding
+		{"GHSA-1", "GHSA-1"},                               // untouched
+		{"CVE-2024-12345", "CVE-2024-12345"},               // untouched
+		{"ALPINE-CVE-2025-46394", "ALPINE-CVE-2025-46394"}, // a nesting id, untouched
+		// No space, so this is a string a reader typed rather than a cell they
+		// copied. Trimming it would be inventing an identifier they did not ask
+		// for, and --explain answering exit 2 for a typo is the correct answer.
+		{"CVE-2024-1+", "CVE-2024-1+"},
+		// A bare marker is not an identifier with a marker; there is nothing
+		// underneath it to find.
+		{"+", "+"},
+		{"*", "*"},
+	} {
+		if got := trimCellMarker(tt.in); got != tt.want {
+			t.Errorf("trimCellMarker(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
 // Most findings gain nothing (the measured KISA overlap is 2.4%), so the block
 // has to be absent rather than empty — an "enrichment:" heading with nothing
 // under it reads as a lookup that failed.

@@ -294,6 +294,11 @@ const disagreementMarker = "*"
 // there. `+` reads as "there is more here", which is exactly what it means —
 // the text itself is in --explain, because Korean is double-width and a table
 // cannot carry it without misaligning every column after it.
+//
+// It lands inside the ADVISORY cell, which is also --explain's own input, so
+// explain.go trims it back off (trimCellMarker) — otherwise the footnote below
+// the table instructs a reader to run a command that fails on the cell the
+// footnote is pointing at.
 const enrichmentMarker = "+"
 
 // sourcesDisagree reports whether a finding's sources gave different

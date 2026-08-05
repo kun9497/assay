@@ -50,7 +50,11 @@ func Explain(w io.Writer, res matcher.Result, id string) (int, error) {
 // identifiers nest (ALPINE-CVE-2025-46394 contains CVE-2025-46394), so a
 // substring match here would explain the wrong advisory on a false-positive
 // hit.
+//
+// A table marker is trimmed off first (trimCellMarker), because the table's
+// own footnote tells the reader to hand this the cell that carries one.
 func identifiesFinding(f matcher.Finding, id string) bool {
+	id = trimCellMarker(id)
 	if f.Advisory.ID == id {
 		return true
 	}
@@ -60,6 +64,39 @@ func identifiesFinding(f matcher.Finding, id string) bool {
 		}
 	}
 	return false
+}
+
+// trimCellMarker removes a table marker a reader copied along with the cell it
+// annotates — "GHSA-1 +" becomes "GHSA-1".
+//
+// This is not lenient input handling; it closes a loop the report opens itself.
+// The table appends enrichmentMarker INSIDE the ADVISORY cell (table.go), and
+// the footnote beneath it says "see --explain <id>". The ADVISORY cell is
+// literally --explain's input, so a reader who follows that instruction by
+// copying the cell was answered with `no finding matches advisory or alias
+// "GHSA-1 +"` and exit 2 — the report's own instruction failing on the report's
+// own output.
+//
+// Safe because the marker must be preceded by a SPACE and advisory identifiers
+// contain none: CVE-2024-12345, GHSA-w24h-v9qh-8gxj, ALPINE-CVE-2025-46394,
+// PYSEC-2022-191, GO-2022-0999. Nothing that could be a real identifier ends in
+// " +" or " *", so this cannot swallow one — and an id that ends in a marker
+// with no space ("CVE-2024-1+") is left exactly as typed. The comparison after
+// it is still ==, never Contains.
+//
+// One marker, not a loop: the two markers live in different columns on purpose
+// (table.go's enrichmentMarker doc comment), so no cell carries both, and a
+// loop here would be a branch nothing can reach. disagreementMarker is trimmed
+// as well even though it sits in SEVERITY — the argument for handling it costs
+// one line and removes the question of what happens if a marker ever moves.
+func trimCellMarker(id string) string {
+	id = strings.TrimRight(id, " ")
+	for _, marker := range []string{enrichmentMarker, disagreementMarker} {
+		if cut, ok := strings.CutSuffix(id, " "+marker); ok {
+			return strings.TrimRight(cut, " ")
+		}
+	}
+	return id
 }
 
 // explainOne writes one finding's account: the package and how it was
