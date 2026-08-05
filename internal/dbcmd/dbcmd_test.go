@@ -71,6 +71,10 @@ type fakeAnnotator struct {
 	ratings []advisory.Rating
 	err     error  // returned by Annotate instead of emitting anything, if set
 	window  string // what this run covered; empty means the annotator reported none
+	// coversSince is the machine-comparable form of window. Left zero
+	// WITH coversSinceKnown false, it reproduces a pre-upgrade database.
+	coversSince      time.Time
+	coversSinceKnown bool
 }
 
 func (f fakeAnnotator) Name() string { return f.name }
@@ -85,10 +89,12 @@ func (f fakeAnnotator) Annotate(_ context.Context, emit func(advisory.Rating) er
 		}
 	}
 	return store.Provenance{
-		Source:   "https://example.test/nvd",
-		DataAsOf: time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC),
-		Records:  len(f.ratings),
-		Window:   f.window,
+		Source:           "https://example.test/nvd",
+		DataAsOf:         time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC),
+		Records:          len(f.ratings),
+		Window:           f.window,
+		CoversSince:      f.coversSince,
+		CoversSinceKnown: f.coversSinceKnown || !f.coversSince.IsZero(),
 	}, nil
 }
 
@@ -831,6 +837,14 @@ func TestUpdate_AnUnreadableSeedFailsRatherThanBuildingFromEmpty(t *testing.T) {
 // say so -- otherwise seeding trades a seven-hour build for a database that
 // silently over-claims, which is D20's failure in a new place.
 //
+// This test used to assert the row showed only THIS run's window, and that
+// expectation was itself the bug. A seeded database HOLDS the seed's
+// ratings, so reporting the one-day fetch understates it -- and worse, the
+// artifact then published a bound later than the one it replaced, which
+// db push's coverage guard reads as a narrowing. The scheduled workflow
+// would have published successfully on day one and been refused on day two.
+// Coverage now describes what the database holds; see mergeRatingCoverage.
+//
 // Three seeded ratings, not one, and the RECORDS count is asserted as an
 // exact FIELD, not `strings.Contains(row, "2")` (fix round 1, item 1): the
 // rendered row is "NVD  2026-08-03  5  modified 2026-08-03..2026-08-04
@@ -867,8 +881,13 @@ func TestUpdate_SeededRunReportsTheWindowItActuallyFetched(t *testing.T) {
 		t.Fatalf("Status = %d, want 0", code)
 	}
 	row := ratingSourceLine(t, out.String(), "NVD")
-	if !strings.Contains(row, "2026-08-03..2026-08-04") {
-		t.Errorf("RATING SOURCE row = %q, want THIS run's window, not the seed's", row)
+	// The seed here records a Window but no CoversSince -- the shape a
+	// database built before that field has -- so the merged coverage is
+	// genuinely UNKNOWN and the row has to say so. Claiming this run's
+	// one-day window would understate a database holding the seed's
+	// thirty, and claiming thirty would assert a vintage nothing recorded.
+	if !strings.Contains(row, "seed coverage not recorded") {
+		t.Errorf("RATING SOURCE row = %q, want it to disclose that the seed's coverage is unknown", row)
 	}
 	// All five CVEs (3 seeded + 2 this run) are present, so the count is the
 	// merged one -- the window narrowing must not be read as "the older
