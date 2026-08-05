@@ -178,9 +178,19 @@ func refuseCoverageRegression(ctx context.Context, target name.Reference, incomi
 
 	var why string
 	switch {
-	case cur.RatingCount > 0 && incoming.RatingCount == 0:
-		why = fmt.Sprintf("the published artifact holds %d rating(s) and this one holds none",
-			cur.RatingCount)
+	case incoming.RatingCount < cur.RatingCount:
+		// Fewer, not merely none. The first version only refused zero, and
+		// that hole was found by walking into it: a 2,903-rating artifact
+		// replaced a 23,433-rating one on the live registry, during the very
+		// run that was demonstrating this guard. Zero is the loudest case,
+		// not the only one.
+		//
+		// A drop is not ambiguous in normal operation. A seeded build
+		// carries the published ratings forward and adds to them, so the
+		// count only ever grows; a smaller number means the seed was not
+		// used, or covered less. Both are exactly what this refuses.
+		why = fmt.Sprintf("the published artifact holds %d rating(s) and this one holds %d",
+			cur.RatingCount, incoming.RatingCount)
 	case !cur.RatingsSinceKnown || !incoming.RatingsSinceKnown:
 		// One side does not record its coverage, so the dates cannot be
 		// compared. The rating-count check above still applies.

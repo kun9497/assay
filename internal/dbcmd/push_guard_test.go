@@ -143,20 +143,48 @@ func TestPush_RefusesToNarrowBetweenTwoBoundedArtifacts(t *testing.T) {
 // Publishing zero ratings over a rated artifact is the same regression in
 // its worst form: the artifact becomes the seed every later delta layers
 // onto, so what it drops is never recovered by a later run.
-func TestPush_RefusesToPublishNoRatingsOverSome(t *testing.T) {
-	ref := liveRegistry(t)
-	seed(t, ref, time.Time{}, 5)
+func TestPush_RefusesToPublishFewerRatings(t *testing.T) {
+	// Table rather than a single zero case. The first version of this guard
+	// refused only zero, and the gap was found by walking into it on the
+	// live registry: a 2,903-rating artifact replaced a 23,433-rating one
+	// during the run that was demonstrating the guard. Zero is the loudest
+	// regression, not the only one.
+	for _, tc := range []struct {
+		name     string
+		incoming int
+	}{
+		{"none at all", 0},
+		{"merely fewer", 3},
+		{"one fewer", 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ref := liveRegistry(t)
+			seed(t, ref, time.Time{}, 5)
 
-	var out, errOut bytes.Buffer
-	if code := Push(context.Background(), bounded(t, time.Time{}, 0), ref, false, &out, &errOut); code != 2 {
-		t.Errorf("Push of an unrated artifact over a rated one = %d, want 2", code)
+			var out, errOut bytes.Buffer
+			if code := Push(context.Background(), bounded(t, time.Time{}, tc.incoming), ref, false, &out, &errOut); code != 2 {
+				t.Errorf("Push of %d ratings over 5 = %d, want 2", tc.incoming, code)
+			}
+			if !strings.Contains(errOut.String(), "rating(s)") {
+				t.Errorf("stderr does not name the regression:\n%s", errOut.String())
+			}
+			if got := publishedMeta(t, ref); got.RatingCount != 5 {
+				t.Errorf("published RatingCount = %d, want the original 5", got.RatingCount)
+			}
+		})
 	}
-	if !strings.Contains(errOut.String(), "holds none") {
-		t.Errorf("stderr does not name the regression:\n%s", errOut.String())
-	}
-	if got := publishedMeta(t, ref); got.RatingCount != 5 {
-		t.Errorf("published RatingCount = %d, want the original 5", got.RatingCount)
-	}
+
+	// The same count is not a regression -- a rebuild that finds nothing new
+	// must still be publishable.
+	t.Run("the same count is allowed", func(t *testing.T) {
+		ref := liveRegistry(t)
+		seed(t, ref, time.Time{}, 5)
+
+		var out, errOut bytes.Buffer
+		if code := Push(context.Background(), bounded(t, time.Time{}, 5), ref, false, &out, &errOut); code != 0 {
+			t.Errorf("Push of an equal count = %d, want 0 (%s)", code, errOut.String())
+		}
+	})
 }
 
 // --force is the deliberate override, and it announces itself rather than
