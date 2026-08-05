@@ -190,6 +190,17 @@ type Provenance struct {
 	// and a declared window only ever claims less. The count beside it is
 	// still derived.
 	Window string `json:"window,omitempty"`
+	// CoversSince is the same fact as Window, in a form a machine can
+	// compare: the earliest modification date this source was asked for.
+	// Zero means unbounded — the whole feed — and therefore sorts as
+	// broader than any date, not narrower.
+	//
+	// Window stays because it is what a human reads in `db status`. This
+	// exists because the publish path has to answer "is the artifact I am
+	// about to push narrower than the one already published", and deriving
+	// that by parsing "modified 2026-07-05..2026-08-04" would make a
+	// coverage guard depend on the wording of a display string.
+	CoversSince time.Time `json:"covers_since,omitempty"`
 }
 
 // DefaultPath returns <user cache>/assay/db/v<schema>/vulnerability.db,

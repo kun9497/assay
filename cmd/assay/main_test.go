@@ -1295,7 +1295,7 @@ func TestRun_DBPushRoutesToPush(t *testing.T) {
 func TestResolvePushRef(t *testing.T) {
 	t.Run("a bare reference is accepted", func(t *testing.T) {
 		var stderr bytes.Buffer
-		ref, ok := resolvePushRef([]string{"db", "push", "example.test/assay-db:v6"}, &stderr)
+		ref, _, ok := resolvePushRef([]string{"db", "push", "example.test/assay-db:v6"}, &stderr)
 		if !ok {
 			t.Fatalf("ok = false, want true (stderr: %s)", stderr.String())
 		}
@@ -1306,7 +1306,7 @@ func TestResolvePushRef(t *testing.T) {
 
 	t.Run("no reference is rejected", func(t *testing.T) {
 		var stderr bytes.Buffer
-		_, ok := resolvePushRef([]string{"db", "push"}, &stderr)
+		_, _, ok := resolvePushRef([]string{"db", "push"}, &stderr)
 		if ok {
 			t.Error("ok = true, want false: db push needs a reference")
 		}
@@ -1321,7 +1321,7 @@ func TestResolvePushRef(t *testing.T) {
 	// publish to the first token while dropping the second.
 	t.Run("a trailing argument is rejected, not silently ignored", func(t *testing.T) {
 		var stderr bytes.Buffer
-		_, ok := resolvePushRef([]string{"db", "push", "example.test/assay-db:v6", "extra"}, &stderr)
+		_, _, ok := resolvePushRef([]string{"db", "push", "example.test/assay-db:v6", "extra"}, &stderr)
 		if ok {
 			t.Error("ok = true, want false: db push takes exactly one reference")
 		}
