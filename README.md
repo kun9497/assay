@@ -270,11 +270,11 @@ run `assay db update` rather than silently fetching or silently reporting nothin
 
 | OS | Location |
 |---|---|
-| Windows | `%LocalAppData%\assay\db\v6\` |
-| macOS | `~/Library/Caches/assay/db/v6/` |
-| Linux | `~/.cache/assay/db/v6/` |
+| Windows | `%LocalAppData%\assay\db\v7\` |
+| macOS | `~/Library/Caches/assay/db/v7/` |
+| Linux | `~/.cache/assay/db/v7/` |
 
-Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v6` component
+Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v7` component
 is the schema version — a schema change rebuilds into a new directory rather than migrating
 in place. Note that `ASSAY_DB_DIR` carries no such component, so a CI cache keyed on that
 path survives an upgrade that should have invalidated it. Rebuild after upgrading, or key
@@ -340,7 +340,7 @@ already exist, so the very first one is a one-time, manual step:
 ```bash
 NVD_ENABLE=1 NVD_SINCE_DAYS=30 assay db build   # 27 minutes, measured
 assay db status                                 # check `ratings: NVD (…)` is not zero
-assay db push ghcr.io/kun9497/assay-db:v6       # ~6.8 MB compressed
+assay db push ghcr.io/kun9497/assay-db:v7       # ~6.8 MB compressed
 ```
 
 After that, the scheduled workflow keeps it current on its own.
