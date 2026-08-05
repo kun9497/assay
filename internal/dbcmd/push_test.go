@@ -63,7 +63,7 @@ func TestPush_WritesAPullableArtifact(t *testing.T) {
 	path := pushable(t, asOf)
 
 	var out, errOut bytes.Buffer
-	if code := Push(context.Background(), path, ref, &out, &errOut); code != 0 {
+	if code := Push(context.Background(), path, ref, false, &out, &errOut); code != 0 {
 		t.Fatalf("Push = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
@@ -138,7 +138,7 @@ func TestPush_DataAsOfIsTheOldestProvider(t *testing.T) {
 	ref := must(t, u, err).Host + "/assay-db:v6"
 
 	var out, errOut bytes.Buffer
-	if code := Push(context.Background(), path, ref, &out, &errOut); code != 0 {
+	if code := Push(context.Background(), path, ref, false, &out, &errOut); code != 0 {
 		t.Fatalf("Push = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	parsedRef, refErr := name.ParseReference(ref)
@@ -185,7 +185,7 @@ func TestPush_DataAsOfIsTheOldestAcrossProvidersAndRatings(t *testing.T) {
 	ref := must(t, u, err).Host + "/assay-db:v6"
 
 	var out, errOut bytes.Buffer
-	if code := Push(context.Background(), path, ref, &out, &errOut); code != 0 {
+	if code := Push(context.Background(), path, ref, false, &out, &errOut); code != 0 {
 		t.Fatalf("Push = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	parsedRef, refErr := name.ParseReference(ref)
@@ -209,7 +209,7 @@ func TestPush_MissingDatabaseExitsTwo(t *testing.T) {
 	ref := must(t, u, err).Host + "/assay-db:v6"
 
 	var out, errOut bytes.Buffer
-	code := Push(context.Background(), filepath.Join(t.TempDir(), "absent.db"), ref, &out, &errOut)
+	code := Push(context.Background(), filepath.Join(t.TempDir(), "absent.db"), ref, false, &out, &errOut)
 	if code != 2 {
 		t.Errorf("Push with no database = %d, want 2", code)
 	}
@@ -228,7 +228,7 @@ func TestPush_UnparseableReferenceExitsTwo(t *testing.T) {
 	path := pushable(t, time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC))
 
 	var out, errOut bytes.Buffer
-	code := Push(context.Background(), path, "NOT A REF", &out, &errOut)
+	code := Push(context.Background(), path, "NOT A REF", false, &out, &errOut)
 	if code != 2 {
 		t.Errorf("Push with an unparseable ref = %d, want 2", code)
 	}
@@ -250,7 +250,7 @@ func TestPush_UnreachableRegistryExitsTwo(t *testing.T) {
 	path := pushable(t, time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC))
 
 	var out, errOut bytes.Buffer
-	code := Push(context.Background(), path, "127.0.0.1:1/assay-db:v6", &out, &errOut)
+	code := Push(context.Background(), path, "127.0.0.1:1/assay-db:v6", false, &out, &errOut)
 	if code != 2 {
 		t.Errorf("Push against an unreachable registry = %d, want 2", code)
 	}

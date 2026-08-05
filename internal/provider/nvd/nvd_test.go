@@ -792,6 +792,16 @@ func TestAnnotate_DisclosesTheClampedWindowNotTheRequestedOne(t *testing.T) {
 	if strings.Contains(prov.Window, "2026-01-16") {
 		t.Errorf("Window = %q reports the REQUESTED start, so a clamped run claims coverage it does not have", prov.Window)
 	}
+	// CoversSince carries the same fact in comparable form, and it must be
+	// the CLAMPED value too. This is the field `db push`'s coverage guard
+	// compares, so recording the unhonoured request would let a 120-day
+	// artifact claim to be as broad as the 200 days it was invoked with --
+	// and then overwrite a genuinely broader published one without tripping
+	// the guard. Window being right while this is wrong is exactly the
+	// split a display string and a machine value can drift into.
+	if want := until.Add(-maxWindow); !prov.CoversSince.Equal(want) {
+		t.Errorf("CoversSince = %v, want the clamped %v", prov.CoversSince, want)
+	}
 }
 
 // A window comfortably inside the maximum is passed through untouched --

@@ -43,6 +43,17 @@ const (
 	AnnotationSchema   = "dev.assay.schema-version"
 	AnnotationBuiltAt  = "dev.assay.built-at"
 	AnnotationDataAsOf = "dev.assay.data-as-of"
+	// RatingsSince and RatingCount exist so a publisher can tell, from the
+	// manifest alone, whether the artifact it is about to push covers LESS
+	// than the one already published. Reading that from the layer would
+	// mean downloading the database to decide whether to overwrite it.
+	//
+	// An absent RatingsSince means unbounded -- the whole feed -- which is
+	// broader than any date. That is also what a database built before
+	// these annotated looks like, so the guard treats a missing value as
+	// "unknown" rather than "unbounded"; see dbcmd.Push.
+	AnnotationRatingsSince = "dev.assay.ratings-since"
+	AnnotationRatingCount  = "dev.assay.rating-count"
 )
 
 // Meta is what a puller can learn before committing to the download.
@@ -55,6 +66,23 @@ type Meta struct {
 	// the former reports stale data as fresh.
 	BuiltAt  time.Time
 	DataAsOf time.Time
+	// RatingsSince is the narrowest bound across rating sources: the
+	// latest date any of them was limited to. Zero WITH RatingsSinceKnown
+	// means no rating source was bounded at all.
+	RatingsSince time.Time
+	// RatingsSinceKnown separates "unbounded" from "not recorded".
+	//
+	// Collapsing them was a real bug, caught by pushing to the live
+	// registry: a database built before CoversSince existed has a zero
+	// bound, and publishing that as "the whole feed" made a 30-day
+	// artifact claim complete coverage in its own manifest. An artifact
+	// that cannot substantiate a coverage claim must make none.
+	RatingsSinceKnown bool
+	// RatingCount is how many ratings the database holds. Zero is a real,
+	// publishable value -- a database with no rating source is legitimate
+	// -- but publishing zero OVER a non-zero artifact destroys the seed
+	// every later delta builds on.
+	RatingCount int
 }
 
 // Pack reads the database at dbPath and returns a single-layer OCI image.
@@ -85,16 +113,36 @@ func Pack(dbPath string, m Meta) (v1.Image, error) {
 	if err != nil {
 		return nil, fmt.Errorf("append database layer: %w", err)
 	}
-	annotated := mutate.Annotations(img, map[string]string{
-		AnnotationSchema:   strconv.Itoa(m.SchemaVersion),
-		AnnotationBuiltAt:  m.BuiltAt.UTC().Format(time.RFC3339),
-		AnnotationDataAsOf: m.DataAsOf.UTC().Format(time.RFC3339),
-	})
+	anns := map[string]string{
+		AnnotationSchema:      strconv.Itoa(m.SchemaVersion),
+		AnnotationBuiltAt:     m.BuiltAt.UTC().Format(time.RFC3339),
+		AnnotationDataAsOf:    m.DataAsOf.UTC().Format(time.RFC3339),
+		AnnotationRatingCount: strconv.Itoa(m.RatingCount),
+	}
+	// Omitted rather than guessed when the database does not record it.
+	if m.RatingsSinceKnown {
+		anns[AnnotationRatingsSince] = ratingsSinceValue(m.RatingsSince)
+	}
+	annotated := mutate.Annotations(img, anns)
 	out, ok := annotated.(v1.Image)
 	if !ok {
 		return nil, fmt.Errorf("annotating produced %T, not a v1.Image", annotated)
 	}
 	return out, nil
+}
+
+// unboundedRatings is what AnnotationRatingsSince carries when no rating
+// source was limited. A word rather than an empty string, because an empty
+// annotation is indistinguishable from an absent one, and "unbounded" and
+// "this artifact predates the annotation" must not compare equal -- one is
+// the broadest possible coverage, the other is unknown.
+const unboundedRatings = "unbounded"
+
+func ratingsSinceValue(t time.Time) string {
+	if t.IsZero() {
+		return unboundedRatings
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 // MetaOf reads what Pack recorded, from the manifest alone.
@@ -122,6 +170,16 @@ func MetaOf(img v1.Image) (Meta, error) {
 	}
 	if t, err := time.Parse(time.RFC3339, mf.Annotations[AnnotationDataAsOf]); err == nil {
 		m.DataAsOf = t
+	}
+	if raw, ok := mf.Annotations[AnnotationRatingsSince]; ok {
+		if raw == unboundedRatings {
+			m.RatingsSinceKnown = true
+		} else if t, err := time.Parse(time.RFC3339, raw); err == nil {
+			m.RatingsSince, m.RatingsSinceKnown = t, true
+		}
+	}
+	if n, err := strconv.Atoi(mf.Annotations[AnnotationRatingCount]); err == nil {
+		m.RatingCount = n
 	}
 	return m, nil
 }

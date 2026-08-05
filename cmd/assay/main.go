@@ -53,7 +53,8 @@ Commands:
   db update       Download the published vulnerability database
   db build        Build the vulnerability database from its upstream sources
   db status       Show what is in the database and how current it is
-  db push <ref>   Publish the built database as an OCI artifact (builders only)
+  db push <ref>   Publish the built database as an OCI artifact (builders only).
+                  Refuses to narrow the published coverage; --force overrides.
   db ref          Print the registry tag this binary's schema reads (CI only)
   version         Print version information
   help            Show this help
@@ -189,11 +190,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		case "status":
 			return dbcmd.Status(path, stdout, stderr)
 		case "push":
-			ref, ok := resolvePushRef(args, stderr)
+			ref, force, ok := resolvePushRef(args, stderr)
 			if !ok {
 				return exitError
 			}
-			return dbcmd.Push(context.Background(), path, ref, stdout, stderr)
+			return dbcmd.Push(context.Background(), path, ref, force, stdout, stderr)
 		case "ref":
 			// Prints to stdout: it is a result a CI workflow captures to tag
 			// what `db push` publishes, not a diagnostic. Reading it from the
@@ -383,17 +384,30 @@ func resolveBuildSeed(args []string, stderr io.Writer) (ref string, has, ok bool
 // the exact "flag or argument accepted, then ignored" shape update's own
 // rejection exists to prevent, D18's divergence-table concern applied to
 // positional arguments instead of a flag.
-func resolvePushRef(args []string, stderr io.Writer) (ref string, ok bool) {
-	if len(args) < 3 {
+func resolvePushRef(args []string, stderr io.Writer) (ref string, force bool, ok bool) {
+	rest := args[2:]
+	// --force is accepted on either side of the reference. It overrides the
+	// coverage guard, so it is spelled out rather than abbreviated: the
+	// thing it permits is replacing everyone's database with a narrower one.
+	var positional []string
+	for _, a := range rest {
+		if a == "--force" {
+			force = true
+			continue
+		}
+		positional = append(positional, a)
+	}
+	switch len(positional) {
+	case 0:
 		fmt.Fprintln(stderr, "error: db push needs a reference, e.g. ghcr.io/kun9497/assay-db:v6")
-		return "", false
-	}
-	if len(args) > 3 {
+		return "", false, false
+	case 1:
+		return positional[0], force, true
+	default:
 		fmt.Fprintf(stderr, "error: unexpected argument %q: db push takes exactly one reference (already have %q)\n",
-			args[3], args[2])
-		return "", false
+			positional[1], positional[0])
+		return "", false, false
 	}
-	return args[2], true
 }
 
 // scan is the pipeline entry point: parse the target into an inventory, match

@@ -311,6 +311,12 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 	// a bounded run's window IS the database's entire NVD coverage — there is
 	// no earlier pass underneath it.
 	prov.Window = windowLabel(since, until)
+	// The same bound in comparable form. `since` here is the CLAMPED
+	// value, so what is recorded is what was actually requested, not
+	// what the caller asked for -- the publish-side coverage guard
+	// compares these, and comparing an unhonoured request would let a
+	// narrower artifact claim to be as broad as the flag it was given.
+	prov.CoversSince = since
 	// A do-while shape: the total is unknown before the first response, so
 	// the loop condition alone cannot gate the first request.
 	for first || startIndex < total {

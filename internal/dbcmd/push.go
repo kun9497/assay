@@ -23,7 +23,7 @@ import (
 // provenance, never from the clock. Stamping time.Now() here would make
 // every re-push of an old database look current, which is the exact
 // failure D12 separates DataAsOf from BuiltAt to prevent.
-func Push(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer) int {
+func Push(ctx context.Context, dbPath, ref string, force bool, stdout, stderr io.Writer) int {
 	if _, err := os.Stat(dbPath); err != nil {
 		fmt.Fprintf(stderr, "error: no database at %s: %v\n", dbPath, err)
 		fmt.Fprintln(stderr, "  build one first with `assay db build`")
@@ -42,11 +42,15 @@ func Push(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer) int
 	}
 	db.Close()
 
-	img, err := dbartifact.Pack(dbPath, dbartifact.Meta{
-		SchemaVersion: store.SchemaVersion,
-		BuiltAt:       meta.BuiltAt,
-		DataAsOf:      oldestDataAsOf(meta),
-	})
+	incoming := dbartifact.Meta{
+		SchemaVersion:     store.SchemaVersion,
+		BuiltAt:           meta.BuiltAt,
+		DataAsOf:          oldestDataAsOf(meta),
+		RatingsSince:      ratingBound(meta),
+		RatingsSinceKnown: ratingBoundKnown(meta),
+		RatingCount:       totalRatings(meta),
+	}
+	img, err := dbartifact.Pack(dbPath, incoming)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: pack database: %v\n", err)
 		return 2
@@ -56,6 +60,19 @@ func Push(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer) int
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %q is not a valid reference: %v\n", ref, err)
 		return 2
+	}
+	// Checked before writing, against the manifest only -- remote.Image is
+	// lazy, so this costs one request rather than the published database.
+	//
+	// The failure it prevents is real and was going to happen: the daily
+	// workflow seeds from this same tag and pushes back to it, so a full
+	// build published while a delta run is in flight gets overwritten
+	// minutes later by an artifact seeded from the OLD one. Seven hours of
+	// coverage disappears, nothing errors, and db status keeps reporting
+	// the narrower window truthfully -- it says what the artifact holds,
+	// not that it used to hold more.
+	if code := refuseCoverageRegression(ctx, target, incoming, force, stderr); code != 0 {
+		return code
 	}
 	fmt.Fprintf(stderr, "pushing to %s…\n", target)
 	if err := remote.Write(target, img,
@@ -108,4 +125,111 @@ func oldestDataAsOf(m store.Meta) time.Time {
 		consider(p)
 	}
 	return oldest
+}
+
+// narrowestRatingBound is the latest bound across rating sources, which is
+// the one that limits the artifact. Zero means no rating source was bounded
+// -- the whole feed -- and that is broader than any date, so it wins only
+// if every source is unbounded.
+func ratingBound(m store.Meta) time.Time {
+	var narrowest time.Time
+	for _, p := range m.Ratings {
+		if p.CoversSince.IsZero() {
+			continue
+		}
+		if narrowest.IsZero() || p.CoversSince.After(narrowest) {
+			narrowest = p.CoversSince
+		}
+	}
+	return narrowest
+}
+
+// totalRatings counts what the database actually holds, from the derived
+// counts rather than any self-report (D20).
+func totalRatings(m store.Meta) int {
+	n := 0
+	for _, c := range m.RatingCounts {
+		n += c
+	}
+	return n
+}
+
+// refuseCoverageRegression stops a push that would publish less than what is
+// already published. Returns 0 to proceed, 2 to stop.
+//
+// Absent or unreadable published metadata is not a regression: the tag may
+// not exist yet (the first push), the registry may be unreachable, or the
+// artifact may predate these annotations. None of those is evidence that
+// coverage is shrinking, and refusing on them would make the guard fail
+// closed against a first publish -- so it proceeds and says why.
+func refuseCoverageRegression(ctx context.Context, target name.Reference, incoming dbartifact.Meta, force bool, stderr io.Writer) int {
+	published, err := remote.Image(target,
+		remote.WithContext(ctx),
+		remote.WithAuthFromKeychain(authn.DefaultKeychain))
+	if err != nil {
+		fmt.Fprintf(stderr, "no published artifact to compare against (%v); publishing\n", err)
+		return 0
+	}
+	cur, err := dbartifact.MetaOf(published)
+	if err != nil {
+		fmt.Fprintf(stderr, "published artifact carries no readable metadata (%v); publishing\n", err)
+		return 0
+	}
+
+	var why string
+	switch {
+	case incoming.RatingCount < cur.RatingCount:
+		// Fewer, not merely none. The first version only refused zero, and
+		// that hole was found by walking into it: a 2,903-rating artifact
+		// replaced a 23,433-rating one on the live registry, during the very
+		// run that was demonstrating this guard. Zero is the loudest case,
+		// not the only one.
+		//
+		// A drop is not ambiguous in normal operation. A seeded build
+		// carries the published ratings forward and adds to them, so the
+		// count only ever grows; a smaller number means the seed was not
+		// used, or covered less. Both are exactly what this refuses.
+		why = fmt.Sprintf("the published artifact holds %d rating(s) and this one holds %d",
+			cur.RatingCount, incoming.RatingCount)
+	case !cur.RatingsSinceKnown || !incoming.RatingsSinceKnown:
+		// One side does not record its coverage, so the dates cannot be
+		// compared. The rating-count check above still applies.
+		return 0
+	case cur.RatingsSince.IsZero() && !incoming.RatingsSince.IsZero():
+		why = fmt.Sprintf("the published artifact covers the whole feed and this one starts at %s",
+			incoming.RatingsSince.UTC().Format("2006-01-02"))
+	case !cur.RatingsSince.IsZero() && incoming.RatingsSince.After(cur.RatingsSince):
+		why = fmt.Sprintf("the published artifact covers from %s and this one only from %s",
+			cur.RatingsSince.UTC().Format("2006-01-02"), incoming.RatingsSince.UTC().Format("2006-01-02"))
+	default:
+		return 0
+	}
+
+	if force {
+		fmt.Fprintf(stderr, "warning: %s; publishing anyway because --force was given\n", why)
+		return 0
+	}
+	fmt.Fprintf(stderr, "error: this would narrow published coverage: %s\n", why)
+	fmt.Fprintln(stderr, "  a narrower artifact becomes the seed every later build layers onto,")
+	fmt.Fprintln(stderr, "  so what it drops is not recovered by the next run")
+	fmt.Fprintln(stderr, "  pass --force if you mean to replace it")
+	return 2
+}
+
+// ratingBoundKnown reports whether the bound above can be substantiated.
+//
+// A rating source that recorded a Window but no CoversSince predates that
+// field, and its zero bound means "not recorded", not "unbounded". Publishing
+// the difference as unbounded is how a 30-day artifact came to claim the
+// whole feed in its own manifest — caught by pushing to the live registry,
+// not by any test. An artifact that cannot substantiate a coverage claim
+// makes none, and the guard treats a missing claim as uncomparable rather
+// than as maximal.
+func ratingBoundKnown(m store.Meta) bool {
+	for _, p := range m.Ratings {
+		if p.CoversSince.IsZero() && p.Window != "" {
+			return false
+		}
+	}
+	return true
 }
