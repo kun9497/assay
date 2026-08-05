@@ -325,7 +325,9 @@ found" against an old tag rather than a database it would misinterpret.
 security notices and joins them onto matched findings by CVE — a title, a summary and a
 link, never a matching source and never a severity (D3). KISA's site is all-rights-reserved
 with no 공공누리 mark, which restricts redistributing that data, not scanning with it — and
-`db push` redistributes. So `db push` strips the `enrichment` bucket before publishing, and
+`db push` redistributes. So `db push` empties the `enrichment` bucket on a staged copy and
+then builds the file it publishes by copying that copy's *live* data into a fresh one — a
+deleted bucket leaves its records in freed pages, and the artifact is the whole file — and
 `db update` therefore never delivers it: anyone who wants the Korean text runs their own `db
 build`. Reversing this, if the licence question resolves, is deleting the strip rather than
 moving where enrichment lives.

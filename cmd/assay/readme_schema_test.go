@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 
+	"github.com/kun9497/assay/internal/dbcmd"
 	"github.com/kun9497/assay/internal/store"
 )
 
@@ -14,6 +17,11 @@ import (
 // quoted in prose, on both path separators: the Windows row spells it
 // `assay\db\v6\`, macOS and Linux spell it `assay/db/v6/`.
 var docCacheDirPattern = regexp.MustCompile(`assay[/\\]db[/\\]v(\d+)[/\\]`)
+
+// srcArtifactTagPattern finds a schema-versioned artifact tag written as a
+// literal in Go source: `ghcr.io/kun9497/assay-db:v6`, or any other
+// registry path carrying a `:vN` tag.
+var srcArtifactTagPattern = regexp.MustCompile(`[\w.\-]+/[\w.\-/]+:v(\d+)`)
 
 // docsClaimingTheCacheDir are every file that states, as a claim about where
 // the database currently lives, the schema-versioned cache directory:
@@ -106,4 +114,104 @@ func TestDocs_CacheDirMatchesSchemaVersion(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSource_CLIMessagesDeriveTheArtifactTag holds the same guarantee one
+// layer down from the documentation: the tag `cmd/assay` SHOWS a user is
+// derived from store.SchemaVersion, not typed.
+//
+// The sibling above exists because "assay/db/vN/" drifted in prose twice.
+// It drifted in code as well, and nothing caught it: three error messages —
+// `--from`, `--seed`, and `db push` — still named `:v6` after the bump to
+// v7, so `db update`'s own instructions pointed at a tag that 404s, and
+// `db push`'s pointed a PUBLISHER at the wrong tag entirely. Everything else
+// in the package already went through dbcmd.Ref; these three were the
+// literals it never reached.
+//
+// Two assertions, because either alone is weak. The first is behavioural: it
+// drives each message and requires the CURRENT tag in it, so a literal that
+// happens to be right today fails the moment SchemaVersion moves. The second
+// scans the source for any literal at all, which catches the case the first
+// cannot — a fourth message added later, in a branch no test drives.
+func TestSource_CLIMessagesDeriveTheArtifactTag(t *testing.T) {
+	want := dbcmd.Ref(dbcmd.DefaultRef)
+	// Guarded rather than assumed: if Ref ever stopped putting the schema in
+	// the tag, every assertion below would still pass while the thing being
+	// held stopped being true.
+	if !strings.HasSuffix(want, ":v"+strconv.Itoa(store.SchemaVersion)) {
+		t.Fatalf("dbcmd.Ref(DefaultRef) = %q, which does not end in the current schema tag :v%d -- "+
+			"this test's oracle is no longer the thing it is meant to hold", want, store.SchemaVersion)
+	}
+
+	t.Run("the messages name it", func(t *testing.T) {
+		// Each case is an argument shape whose rejection SUGGESTS a reference,
+		// which is the only place a tag is shown to a user.
+		for _, tc := range []struct {
+			name string
+			run  func(stderr *bytes.Buffer)
+		}{
+			{"db update --from with no value", func(stderr *bytes.Buffer) {
+				resolveUpdateRef([]string{"db", "update", "--from"}, stderr)
+			}},
+			{"db build --seed with no value", func(stderr *bytes.Buffer) {
+				resolveBuildSeed([]string{"db", "build", "--seed"}, stderr)
+			}},
+			{"db push with no reference", func(stderr *bytes.Buffer) {
+				resolvePushRef([]string{"db", "push"}, stderr)
+			}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				var stderr bytes.Buffer
+				tc.run(&stderr)
+				if !strings.Contains(stderr.String(), want) {
+					t.Errorf("%s suggests a reference that is not the current one (%s):\n%s",
+						tc.name, want, stderr.String())
+				}
+			})
+		}
+	})
+
+	t.Run("and no source file spells one out", func(t *testing.T) {
+		// The pattern is checked against a known-positive control first. A
+		// source scan that finds nothing is the PASSING state here -- the
+		// opposite of the documentation guard above, where finding nothing
+		// means the prose stopped saying it -- so a pattern that silently
+		// stopped matching would leave this assertion green forever.
+		const control = "ghcr.io/kun9497/assay-db:v6"
+		if m := srcArtifactTagPattern.FindStringSubmatch(control); m == nil || m[1] != "6" {
+			t.Fatalf("srcArtifactTagPattern no longer matches %q (%v), so scanning with it proves nothing",
+				control, m)
+		}
+
+		dir := filepath.Join(findRepoRoot(t), "cmd", "assay")
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Non-test files only. A _test.go file naming "example.test/mirror:v6"
+		// is using an arbitrary reference as INPUT -- it makes no claim about
+		// where the real artifact lives, and rewriting those on every schema
+		// bump would be churn that teaches people to ignore this test.
+		scanned := 0
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+				continue
+			}
+			scanned++
+			data, err := os.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, m := range srcArtifactTagPattern.FindAllStringSubmatch(string(data), -1) {
+				t.Errorf("cmd/assay/%s contains the literal artifact tag %q -- write "+
+					"dbcmd.Ref(dbcmd.DefaultRef) instead, so it follows store.SchemaVersion (now v%d) "+
+					"rather than drifting the way :v6 did across the bump to v7",
+					name, m[0], store.SchemaVersion)
+			}
+		}
+		if scanned == 0 {
+			t.Fatal("scanned no non-test Go file in cmd/assay, so this guard held nothing")
+		}
+	})
 }

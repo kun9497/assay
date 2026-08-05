@@ -339,6 +339,12 @@ func countBySource(bk *bolt.Bucket) (map[string]int, error) {
 // artifact naming a source and a count for a bucket it deliberately does not
 // carry, which is the same over-claim `db status` has already been fixed for
 // twice, arriving this time through the publish path.
+//
+// THIS IS NOT ENOUGH ON ITS OWN TO MAKE A FILE PUBLISHABLE. Deleting a bucket
+// frees its pages; it does not zero them, and the records stay legible in the
+// file's bytes. Every caller that publishes must follow this with CompactInto,
+// which copies the live data out into a fresh file -- see its doc comment for
+// the measurement.
 func StripEnrichment(path string) error {
 	db, err := bolt.Open(path, 0o600, nil)
 	if err != nil {
@@ -375,6 +381,58 @@ func StripEnrichment(path string) error {
 		}
 		return bk.Put([]byte("meta"), blob)
 	})
+}
+
+// compactTxMaxSize bounds one write transaction during CompactInto, so a
+// 244 MB database does not have to fit in a single transaction's memory.
+// bbolt commits and reopens whenever the running total would exceed it.
+const compactTxMaxSize = 64 << 10
+
+// CompactInto writes a fresh database at dst holding the LIVE data of the
+// database at src, and nothing else. dst must not already exist -- bbolt's
+// Compact creates each bucket as it walks, which fails against a file that
+// already has them.
+//
+// This exists because StripEnrichment alone does not make a file publishable
+// (D29). DeleteBucket FREES the pages that held those records; it does not
+// zero them, and dbartifact.Pack gzips the whole file, freed pages included.
+// A final review measured it against this tree: a database with 200
+// enrichment records, stripped in place, still yielded 546 occurrences of
+// their text in the 131,072-byte result -- recoverable from the published
+// layer with `gunzip` and `strings`. Reading the stripped file back through
+// EnrichmentFor said "nothing", because the bucket API is the level above
+// where the data survives.
+//
+// Copying live data OUT is what fixes that: Compact walks src's live pages
+// into a new file, and a page freed by the strip is not a live page. So the
+// order is load-bearing -- strip src first, compact second. Compacting before
+// the strip would faithfully copy the records across.
+func CompactInto(dst, src string) error {
+	// Read-only: the source here is the caller's staged copy, but nothing
+	// about producing a publishable file should be able to write to it.
+	srcDB, err := bolt.Open(src, 0o600, &bolt.Options{ReadOnly: true})
+	if err != nil {
+		return fmt.Errorf("open %s to compact: %w", src, err)
+	}
+	defer srcDB.Close()
+	if _, err := os.Stat(dst); err == nil {
+		return fmt.Errorf("compact into %s: file already exists", dst)
+	}
+	dstDB, err := bolt.Open(dst, 0o600, nil)
+	if err != nil {
+		return fmt.Errorf("create %s to compact into: %w", dst, err)
+	}
+	if err := bolt.Compact(dstDB, srcDB, compactTxMaxSize); err != nil {
+		dstDB.Close()
+		return fmt.Errorf("compact %s into %s: %w", src, dst, err)
+	}
+	// Closed explicitly rather than deferred, and its error returned: this is
+	// the point the publishable bytes reach the disk, and a caller that packs
+	// a file whose last commit failed publishes a truncated database.
+	if err := dstDB.Close(); err != nil {
+		return fmt.Errorf("close %s after compacting: %w", dst, err)
+	}
+	return nil
 }
 
 func (b *Bolt) setSchemaForTest(v int) error {

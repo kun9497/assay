@@ -382,7 +382,12 @@ func resolveUpdateRef(args []string, stderr io.Writer) (ref string, ok bool) {
 		return "", false
 	}
 	if len(args) < 4 {
-		fmt.Fprintln(stderr, "error: --from requires a reference, e.g. ghcr.io/kun9497/assay-db:v6")
+		// Derived, never spelled out. A literal tag here is a hardcoded schema
+		// version that drifts the moment SchemaVersion is bumped, and this one
+		// had: it still read :v6 after the bump to v7, telling a user to fetch
+		// a tag that 404s. dbcmd.Ref is the same function `db ref` prints and
+		// the default this very function returns two branches up.
+		fmt.Fprintf(stderr, "error: --from requires a reference, e.g. %s\n", dbcmd.Ref(dbcmd.DefaultRef))
 		return "", false
 	}
 	return args[3], true
@@ -409,7 +414,7 @@ func resolveBuildSeed(args []string, stderr io.Writer) (ref string, has, ok bool
 		return "", false, false
 	}
 	if len(args) < 4 {
-		fmt.Fprintln(stderr, "error: --seed requires a reference, e.g. ghcr.io/kun9497/assay-db:v6")
+		fmt.Fprintf(stderr, "error: --seed requires a reference, e.g. %s\n", dbcmd.Ref(dbcmd.DefaultRef))
 		return "", false, false
 	}
 	return args[3], true, true
@@ -442,7 +447,11 @@ func resolvePushRef(args []string, stderr io.Writer) (ref string, force bool, ok
 	}
 	switch len(positional) {
 	case 0:
-		fmt.Fprintln(stderr, "error: db push needs a reference, e.g. ghcr.io/kun9497/assay-db:v6")
+		// The audience here is a PUBLISHER, so a stale tag is worse than it is
+		// two branches up: following it publishes a v7 database under the v6
+		// tag, where every v6 client would pull a schema it refuses and every
+		// v7 client would still 404.
+		fmt.Fprintf(stderr, "error: db push needs a reference, e.g. %s\n", dbcmd.Ref(dbcmd.DefaultRef))
 		return "", false, false
 	case 1:
 		return positional[0], force, true

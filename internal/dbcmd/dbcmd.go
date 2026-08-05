@@ -344,14 +344,15 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 
 	// The value column is one wider than the longest label, so adding
 	// "databases:" below moved every line right by one rather than leaving
-	// that one label unaligned.
-	fmt.Fprintf(stdout, "path:      %s\n", dbPath)
-	fmt.Fprintf(stdout, "schema:    v%d\n", m.Schema)
-	fmt.Fprintf(stdout, "built:     %s\n", m.BuiltAt.Format(time.RFC3339))
+	// that one label unaligned — and adding "enrichment:" moved them all
+	// right by one again.
+	fmt.Fprintf(stdout, "path:       %s\n", dbPath)
+	fmt.Fprintf(stdout, "schema:     v%d\n", m.Schema)
+	fmt.Fprintf(stdout, "built:      %s\n", m.BuiltAt.Format(time.RFC3339))
 	// What this database covers decides which packages can be evaluated at
 	// all (D20). Without it here, coverage is discoverable only by running a
 	// scan and reading why it refused.
-	fmt.Fprintf(stdout, "covers:    %s\n", coverageSummary(m.Ecosystems))
+	fmt.Fprintf(stdout, "covers:     %s\n", coverageSummary(m.Ecosystems))
 	// Which databases a rating could be attributed to (D25), visible the same
 	// way coverage is: without running a scan.
 	//
@@ -363,7 +364,7 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 	// The stored field is Advisory.Database and the JSON key is "database", so
 	// this is also what a reader would grep for. The path line above was
 	// renamed to "path:" so the two no longer read as a pair.
-	fmt.Fprintf(stdout, "databases: %s\n", databasesSummary(m.Databases))
+	fmt.Fprintf(stdout, "databases:  %s\n", databasesSummary(m.Databases))
 	// Which authorities have ACTUALLY rated at least one CVE (D27), with how
 	// many — the same "visible without running a scan" reasoning as
 	// databases: above, and the same line shape and padding, but read from
@@ -372,7 +373,25 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 	// rated nothing must not make this line claim a source that rated
 	// something (see RatingCounts' own doc comment in
 	// internal/store/store.go).
-	fmt.Fprintf(stdout, "ratings:   %s\n", ratingsSummary(m.RatingCounts))
+	fmt.Fprintf(stdout, "ratings:    %s\n", ratingsSummary(m.RatingCounts))
+	// And which have enriched one (D3), on its own line beside ratings: for
+	// the same reason that one sits beside databases: — the ENRICHMENT SOURCE
+	// table further down is the only other place this is stated, and a reader
+	// skimming the header block would otherwise have to infer from the
+	// absence of a table that there is no enrichment, which is not something
+	// an absence can say.
+	//
+	// Derived from Meta.EnrichmentCounts, never from Meta.Enrichment's
+	// self-reported Provenance, for the reason RatingCounts' own doc comment
+	// gives: a source that ran and enriched nothing must not make this line
+	// claim it enriched something.
+	//
+	// This line reads "nothing" on every PULLED database and that is correct,
+	// not a defect to hide: `db push` strips the bucket and this provenance
+	// (D29), so the artifact genuinely carries none. Saying so plainly is the
+	// point — a user wondering why no finding shows a Korean title gets the
+	// answer here rather than from a missing table.
+	fmt.Fprintf(stdout, "enrichment: %s\n", enrichmentLine(m.EnrichmentCounts))
 	fmt.Fprintln(stdout)
 
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
@@ -469,7 +488,24 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 			if covered == "" {
 				covered = "unknown"
 			}
-			fmt.Fprintf(rtw, "%s\t%s\t%s\t%s\t%s\n", name, asOf, records, covered, p.Source)
+			// SOURCE gets the same treatment, for the same reason and to
+			// settle it the same way in both tables. A derived-only name has
+			// no self-reported fetch URL, which is the identical situation
+			// its missing DATA AS OF and COVERED are already in — rendering
+			// two of the three as a word and the third as whitespace gives
+			// one row two vocabularies for one fact, and a blank cell reads
+			// as "there is nothing to say here" rather than "this was not
+			// established".
+			//
+			// The ENRICHMENT SOURCE table below already did this. Leaving
+			// this one blank is what made two adjacent tables disagree about
+			// the same absence, so the convention moved here rather than the
+			// other way round.
+			source := p.Source
+			if source == "" {
+				source = "unknown"
+			}
+			fmt.Fprintf(rtw, "%s\t%s\t%s\t%s\t%s\n", name, asOf, records, covered, source)
 		}
 		if err := rtw.Flush(); err != nil {
 			fmt.Fprintf(stderr, "error: write status: %v\n", err)
@@ -550,12 +586,10 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 				records = "ran, enriched nothing - investigate the sync"
 			}
 			// "unknown", not a blank cell, and the same word DATA AS OF uses
-			// two columns over. A failed run has no verified fetch URL to
-			// show, which is the identical situation its missing timestamp is
-			// in, and rendering one as a word and the other as whitespace
-			// gives one row two vocabularies for one fact. A blank cell also
-			// reads as "there is nothing to say here" rather than "this was
-			// not established".
+			// two columns over — and the same word the RATING SOURCE table
+			// above now uses in its own SOURCE column, so the two tables read
+			// one absence one way. See there for the reasoning; this is where
+			// it was written first.
 			source := p.Source
 			if source == "" {
 				source = "unknown"
@@ -634,6 +668,31 @@ func databasesSummary(dbs []string) string {
 func ratingsSummary(counts map[string]int) string {
 	if len(counts) == 0 {
 		return "nothing - no CVE in this database has been rated by any authority"
+	}
+	names := make([]string, 0, len(counts))
+	for name := range counts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, fmt.Sprintf("%s (%d)", name, counts[name]))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// enrichmentLine lists which sources have ACTUALLY enriched at least one CVE
+// (D3), each with how many — the same shape, ordering and derived-not-reported
+// rule as ratingsSummary one line up.
+//
+// Its empty message differs from ratingsSummary's, because the empty state
+// means something different here. No ratings is a gap; no enrichment is the
+// normal condition of every published artifact (D29), so the message names
+// that rather than implying something went wrong.
+func enrichmentLine(counts map[string]int) string {
+	if len(counts) == 0 {
+		return "nothing - no CVE in this database carries a localized notice, " +
+			"which is what a pulled artifact always looks like (D29)"
 	}
 	names := make([]string, 0, len(counts))
 	for name := range counts {

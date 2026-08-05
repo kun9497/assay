@@ -210,7 +210,7 @@ func TestUpdateThenStatus(t *testing.T) {
 	// Which databases a rating could be attributed to (D25), visible without
 	// running a scan. Asserting the rendered pair, not either half alone,
 	// since "GHSA" nested inside another field would satisfy a bare Contains.
-	if !strings.Contains(s, "databases: GHSA") {
+	if !strings.Contains(s, "databases:  GHSA") {
 		t.Errorf("status does not report which databases are present:\n%s", s)
 	}
 	// Status reports upstream data time, which is the number that tells you
@@ -225,7 +225,7 @@ func TestUpdateThenStatus(t *testing.T) {
 	// being absent (the same "nothing covered says so" discipline
 	// coverageSummary and databasesSummary already follow) or, worse, being
 	// silently blank.
-	if !strings.Contains(s, "ratings:   nothing") {
+	if !strings.Contains(s, "ratings:    nothing") {
 		t.Errorf("status does not report that no rating source has run:\n%s", s)
 	}
 }
@@ -563,7 +563,7 @@ func TestStatus_ShowsRatingSources(t *testing.T) {
 	// CLAUDE.md's own substring-collision note (a short word inside
 	// surrounding prose) is exactly the hazard a bare Contains(s, "NVD")
 	// would risk here, and the count is the fact D27/D12 actually turn on.
-	if !strings.Contains(s, "ratings:   NVD (2)") {
+	if !strings.Contains(s, "ratings:    NVD (2)") {
 		t.Errorf("status does not report NVD as a rating source with its count:\n%s", s)
 	}
 	// The RATING SOURCE table is where DataAsOf lives (D12) - the "ratings:"
@@ -649,7 +649,7 @@ func TestStatus_RatingSourceDisclosesTheWindowItCovered(t *testing.T) {
 // derived from the stored ratings bucket, so an annotator with nothing to
 // show for itself simply is not in it - unlike the earlier, self-report-based
 // design, where Records: 0 still left the name in the map and the line
-// printed "ratings:   NVD" over an empty bucket.
+// printed "ratings:    NVD" over an empty bucket.
 //
 // A re-review of this same fix caught a second occurrence one table down:
 // the RATING SOURCE table still iterated Meta.Ratings (self-report) and only
@@ -681,10 +681,10 @@ func TestStatus_AnAnnotatorThatRatesNothingIsNotClaimedAsASource(t *testing.T) {
 		t.Fatalf("Status = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	s := out.String()
-	if strings.Contains(s, "ratings:   NVD") {
+	if strings.Contains(s, "ratings:    NVD") {
 		t.Errorf("status claims NVD as a rating source, but it rated nothing:\n%s", s)
 	}
-	if !strings.Contains(s, "ratings:   nothing") {
+	if !strings.Contains(s, "ratings:    nothing") {
 		t.Errorf("status does not say plainly that nothing was rated:\n%s", s)
 	}
 
@@ -1398,5 +1398,140 @@ func TestStatus_AFailedEnricherIsVisibleWhetherOrNotItWroteAnything(t *testing.T
 					"landed before the failure:\n%q", tc.wantCount, row)
 			}
 		})
+	}
+}
+
+// `db status`'s header block says whether anything in this database carries a
+// localized notice, beside the ratings: line and read the same way.
+//
+// Without it, the only statement of D3's coverage is the ENRICHMENT SOURCE
+// table further down, and its ABSENCE is what a reader would have to infer
+// "nothing is enriched" from — an absence cannot say that, and the same gap
+// on the ratings: line is one this command has already been fixed for.
+//
+// The count is asserted with its label attached ("enrichment: KISA (2)"), not
+// as a bare "KISA": the ENRICHMENT SOURCE table two blocks down also holds
+// that name and that number, so a substring assertion on either half would
+// pass from the table with this line deleted entirely.
+func TestStatus_HeaderSaysWhetherAnythingIsEnriched(t *testing.T) {
+	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+		ID: "GHSA-header-enrich", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
+	}}}
+
+	t.Run("when something is", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "vulnerability.db")
+		// Claims 999, emits 2: the line must report the bucket, never the
+		// self-report, for the reason RatingCounts' doc comment gives.
+		e := fakeEnricher{name: "KISA", claims: 999, records: []advisory.Enrichment{
+			{CVE: "CVE-2026-1000", Source: "KISA", Title: "제목 하나"},
+			{CVE: "CVE-2026-2000", Source: "KISA", Title: "제목 둘"},
+		}}
+		var out, errOut bytes.Buffer
+		if code := Update(context.Background(), path, "", "", []provider.Provider{p}, nil,
+			[]provider.Enricher{e}, &out, &errOut); code != 0 {
+			t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+		}
+		out.Reset()
+		errOut.Reset()
+		if code := Status(path, &out, &errOut); code != 0 {
+			t.Fatalf("Status = %d, want 0 (stderr: %s)", code, errOut.String())
+		}
+		s := out.String()
+		if !strings.Contains(s, "enrichment: KISA (2)") {
+			t.Errorf("status has no enrichment: line naming the source and its count:\n%s", s)
+		}
+		if strings.Contains(s, "enrichment: KISA (999)") {
+			t.Errorf("the enrichment: line reports the enricher's self-reported count:\n%s", s)
+		}
+	})
+
+	t.Run("when nothing is", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "vulnerability.db")
+		var out, errOut bytes.Buffer
+		if code := Update(context.Background(), path, "", "", []provider.Provider{p}, nil, nil,
+			&out, &errOut); code != 0 {
+			t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+		}
+		out.Reset()
+		errOut.Reset()
+		if code := Status(path, &out, &errOut); code != 0 {
+			t.Fatalf("Status = %d, want 0 (stderr: %s)", code, errOut.String())
+		}
+		s := out.String()
+		// Stated, not omitted. A database with no enrichment is the normal
+		// condition of every PULLED artifact (D29), and "no line at all" is
+		// exactly the inference this line exists to stop a reader making.
+		if !strings.Contains(s, "enrichment: nothing") {
+			t.Errorf("status omits the enrichment: line when nothing is enriched, so the "+
+				"absence of the table is the only thing that says so:\n%s", s)
+		}
+	})
+}
+
+// Both source tables render a MISSING source URL the same way.
+//
+// The ENRICHMENT SOURCE table arrived on this branch writing "unknown" where
+// RATING SOURCE, directly above it, left the cell blank — two conventions for
+// one absence, in adjacent tables, on one screen. A blank cell also reads as
+// "there is nothing to say here" rather than "this was not established",
+// which is the same mistake the COVERED column was already fixed for.
+//
+// The fixture is a database whose buckets hold records that its provenance
+// never accounted for, which is the only way a derived-only row arises: the
+// name is in RatingCounts/EnrichmentCounts (derived from the stored data) and
+// absent from Ratings/Enrichment (self-reported), so p.Source is "".
+func TestStatus_BothTablesNameAMissingSourceTheSameWay(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.PutRating(advisory.Rating{CVE: "CVE-2026-4242", Source: "NVD"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.PutEnrichment(advisory.Enrichment{CVE: "CVE-2026-4242", Source: "KISA", Title: "제목"}); err != nil {
+		t.Fatal(err)
+	}
+	// No Ratings and no Enrichment provenance: both names are derived-only.
+	if err := w.SetMeta(store.Meta{BuiltAt: time.Date(2026, 8, 5, 6, 0, 0, 0, time.UTC)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	if code := Status(path, &out, &errOut); code != 0 {
+		t.Fatalf("Status = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	s := out.String()
+
+	// The last field of each row is its SOURCE cell. Compared to each other
+	// as well as to "unknown", because the requirement is agreement: pinning
+	// only the literal would still pass if one table later moved to some
+	// other word and the other did not.
+	ratingFields := strings.Fields(ratingSourceLine(t, s, "NVD"))
+	enrichFields := strings.Fields(enrichmentSourceLine(t, s, "KISA"))
+	// Guarded rather than assumed: an empty SOURCE cell makes the row one
+	// field SHORTER, so indexing the last field without checking the length
+	// would silently read the COVERED column instead and find "unknown" there.
+	if len(ratingFields) != 5 {
+		t.Fatalf("RATING SOURCE row has %d fields, want 5 (name, as-of, records, covered, source) - "+
+			"an empty SOURCE cell is exactly what makes it 4:\n%q", len(ratingFields), ratingSourceLine(t, s, "NVD"))
+	}
+	if len(enrichFields) != 4 {
+		t.Fatalf("ENRICHMENT SOURCE row has %d fields, want 4 (name, as-of, records, source):\n%q",
+			len(enrichFields), enrichmentSourceLine(t, s, "KISA"))
+	}
+	ratingSource := ratingFields[len(ratingFields)-1]
+	enrichSource := enrichFields[len(enrichFields)-1]
+	if ratingSource != enrichSource {
+		t.Errorf("RATING SOURCE renders a missing source as %q and ENRICHMENT SOURCE as %q; "+
+			"two adjacent tables must not read one absence two ways", ratingSource, enrichSource)
+	}
+	if ratingSource != "unknown" {
+		t.Errorf("RATING SOURCE renders a missing source as %q, want \"unknown\" - the same word "+
+			"its own DATA AS OF and COVERED columns already use for the same absence", ratingSource)
 	}
 }
