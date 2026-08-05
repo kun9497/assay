@@ -55,6 +55,19 @@ func enrichmentSourceLine(t *testing.T, out, name string) string {
 	return ""
 }
 
+// countField counts how many of a rendered row's whitespace-separated fields
+// are exactly want. Exact fields rather than strings.Count, so a word that
+// merely appears inside a longer cell cannot inflate the total.
+func countField(fields []string, want string) int {
+	n := 0
+	for _, f := range fields {
+		if f == want {
+			n++
+		}
+	}
+	return n
+}
+
 // errBoom is a fixed sentinel a fakeAnnotator/fakeProvider can return, so a
 // failure test asserts on a specific, known error rather than "any error".
 var errBoom = errors.New("boom")
@@ -1350,17 +1363,28 @@ func TestStatus_AFailedEnricherIsVisibleWhetherOrNotItWroteAnything(t *testing.T
 			if strings.Contains(row, "ran, enriched nothing") {
 				t.Errorf("a FAILED enrichment run renders as a successful empty one:\n%q", row)
 			}
-			// DATA AS OF stays unknown. The fixture returns a fully populated
-			// Provenance alongside its error, so a row showing 2026-08-05 here
-			// means Update believed a run that did not finish (D12).
+			// Neither the freshness nor the fetch URL the enricher reported
+			// may appear. The fixture returns both alongside its error, so a
+			// row carrying either means Update believed a run that did not
+			// finish (D12).
 			fields := strings.Fields(row)
-			if !slices.Contains(fields, "unknown") {
+			if slices.Contains(fields, "2026-08-05") {
 				t.Errorf("ENRICHMENT SOURCE row for KISA reports a DATA AS OF for a run that "+
 					"did not finish:\n%q", row)
 			}
 			if slices.Contains(fields, "https://example.test/knvd") {
 				t.Errorf("ENRICHMENT SOURCE row for KISA reports a fetch URL for a run that "+
 					"did not finish:\n%q", row)
+			}
+			// And both say so in the SAME word rather than one of them going
+			// blank. DATA AS OF and SOURCE are in the identical situation
+			// here — neither was established — so one row with two
+			// vocabularies for one fact is a reader's problem, and a blank
+			// cell additionally reads as "nothing to say here" rather than
+			// "not established".
+			if n := countField(fields, "unknown"); n != 2 {
+				t.Errorf("ENRICHMENT SOURCE row for KISA has %d \"unknown\" cell(s), want 2 "+
+					"(DATA AS OF and SOURCE):\n%q", n, row)
 			}
 			if tc.wantTail != "" && !strings.Contains(row, tc.wantTail) {
 				t.Errorf("the rest of a multi-line failure message is not on this row, so it "+

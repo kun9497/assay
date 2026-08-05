@@ -250,7 +250,20 @@ type Provenance struct {
 	// that by parsing "modified 2026-07-05..2026-08-04" would make a
 	// coverage guard depend on the wording of a display string.
 	CoversSince time.Time `json:"covers_since,omitempty"`
+	// CoversSinceKnown separates "unbounded" from "not recorded". Both are
+	// a zero CoversSince, and they are opposites: one is the broadest
+	// coverage there is, the other is no information at all.
+	//
+	// Without it the only way to tell them apart is reading Window, and a
+	// correctness path that parses a display string is what CoversSince
+	// exists to avoid. A database built before this field simply has false
+	// here, which is the truthful answer for it.
+	CoversSinceKnown bool `json:"covers_since_known,omitempty"`
 	// Error is why this source's last run did not finish, empty when it did.
+	//
+	// Below CoversSince/CoversSinceKnown rather than between them: those two
+	// are one fact in two fields, and a reader who meets the second without
+	// the first immediately above it has to go looking for what it qualifies.
 	//
 	// It exists because "ran and produced nothing" and "did not finish" are
 	// different facts with different remedies, and every other field renders
@@ -267,15 +280,6 @@ type Provenance struct {
 	// source's error said, flattened to one line so it cannot break the table
 	// it is rendered into.
 	Error string `json:"error,omitempty"`
-	// CoversSinceKnown separates "unbounded" from "not recorded". Both are
-	// a zero CoversSince, and they are opposites: one is the broadest
-	// coverage there is, the other is no information at all.
-	//
-	// Without it the only way to tell them apart is reading Window, and a
-	// correctness path that parses a display string is what CoversSince
-	// exists to avoid. A database built before this field simply has false
-	// here, which is the truthful answer for it.
-	CoversSinceKnown bool `json:"covers_since_known,omitempty"`
 }
 
 // DefaultPath returns <user cache>/assay/db/v<schema>/vulnerability.db,

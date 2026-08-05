@@ -549,7 +549,18 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 			default:
 				records = "ran, enriched nothing - investigate the sync"
 			}
-			fmt.Fprintf(etw, "%s\t%s\t%s\t%s\n", name, asOf, records, p.Source)
+			// "unknown", not a blank cell, and the same word DATA AS OF uses
+			// two columns over. A failed run has no verified fetch URL to
+			// show, which is the identical situation its missing timestamp is
+			// in, and rendering one as a word and the other as whitespace
+			// gives one row two vocabularies for one fact. A blank cell also
+			// reads as "there is nothing to say here" rather than "this was
+			// not established".
+			source := p.Source
+			if source == "" {
+				source = "unknown"
+			}
+			fmt.Fprintf(etw, "%s\t%s\t%s\t%s\n", name, asOf, records, source)
 		}
 		if err := etw.Flush(); err != nil {
 			fmt.Fprintf(stderr, "error: write status: %v\n", err)

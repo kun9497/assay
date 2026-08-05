@@ -658,39 +658,142 @@ func TestPush_NeverPublishesEnrichment(t *testing.T) {
 // The assertion that matters is the last one — that the registry holds
 // nothing. Exit 2 alone would pass on a Push that reports the problem and
 // publishes anyway, which is exactly the shape being guarded against.
+//
+// Run with --force as well as without it, because --force is an override for
+// the COVERAGE guard and must never become one for the licensing guard.
+// `err != nil && !force` is a one-token change that reads like consistency
+// with the guard beside it, and with only an unforced case here it survived
+// the whole suite. The two guards refuse different things: one protects
+// everyone's database from getting narrower, and a publisher who means it can
+// say so; the other protects data that may not be redistributed at all, and
+// there is nobody who may say so.
 func TestPush_AFailedStripPublishesNothing(t *testing.T) {
-	iso := isolateTempDir(t)
-	orig := stripEnrichment
-	stripEnrichment = func(string) error { return errBoom }
-	defer func() { stripEnrichment = orig }()
+	for _, force := range []bool{false, true} {
+		name_ := "without --force"
+		if force {
+			name_ = "with --force"
+		}
+		t.Run(name_, func(t *testing.T) {
+			iso := isolateTempDir(t)
+			orig := stripEnrichment
+			stripEnrichment = func(string) error { return errBoom }
+			defer func() { stripEnrichment = orig }()
 
-	ref := liveRegistry(t)
-	var out, errOut bytes.Buffer
-	if code := Push(context.Background(), enrichedDatabase(t), ref, false, &out, &errOut); code != 2 {
-		t.Errorf("Push with a failing strip = %d, want 2", code)
-	}
-	// Named AND caused: Contains(stderr, "strip") alone would pass on a
-	// message that dropped the reason, which is the one thing an operator
-	// needs to act on.
-	if !strings.Contains(errOut.String(), "strip enrichment before publishing: boom") {
-		t.Errorf("stderr does not say the strip failed and why:\n%s", errOut.String())
-	}
-	if out.Len() != 0 {
-		t.Errorf("a failed push wrote a digest to stdout, which reads as success: %q", out.String())
-	}
+			ref := liveRegistry(t)
+			var out, errOut bytes.Buffer
+			if code := Push(context.Background(), enrichedDatabase(t), ref, force, &out, &errOut); code != 2 {
+				t.Errorf("Push with a failing strip = %d, want 2", code)
+			}
+			// Named AND caused: Contains(stderr, "strip") alone would pass on
+			// a message that dropped the reason, which is the one thing an
+			// operator needs to act on.
+			if !strings.Contains(errOut.String(), "strip enrichment before publishing: boom") {
+				t.Errorf("stderr does not say the strip failed and why:\n%s", errOut.String())
+			}
+			if out.Len() != 0 {
+				t.Errorf("a failed push wrote a digest to stdout, which reads as success: %q", out.String())
+			}
 
-	target, err := name.ParseReference(ref)
+			target, err := name.ParseReference(ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := remote.Image(target); err == nil {
+				t.Error("a push whose enrichment strip failed published an artifact anyway - " +
+					"that artifact carries KISA's prose, which is the licensing violation D29 exists to prevent")
+			}
+
+			// The early return still cleans up after itself.
+			if left, _ := filepath.Glob(filepath.Join(iso, "assay-push-*")); len(left) != 0 {
+				t.Errorf("a failed strip left its staged copy behind: %v", left)
+			}
+		})
+	}
+}
+
+// The strip keys off NOTHING. It runs on every push, whatever the metadata
+// says the database holds.
+//
+// The fixture is a database whose enrichment BUCKET is populated while its
+// Meta.Enrichment is empty, and every other D29 test here sets both — so
+// wrapping the strip in `if len(meta.Enrichment) > 0` reads as a harmless
+// "nothing to do" optimisation and survives the rest of the suite.
+//
+// That is this branch's oldest defect arriving on the licensing path: trusting
+// a self-report over the stored data, already fixed once for RatingCounts and
+// once for EnrichmentCounts. The state is reachable, not hypothetical —
+// dropping the provenance write in Update while records still land produces
+// exactly it, and so would any future writer that fills the bucket without
+// recording a source.
+//
+// The consequence differs from the earlier two, which were wrong numbers in a
+// status table. Here the metadata says "no enrichment", the artifact carries
+// it anyway, and nothing in the published database contradicts the claim.
+func TestPush_StripsTheBucketEvenWhenTheMetadataClaimsNothingToStrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := remote.Image(target); err == nil {
-		t.Error("a push whose enrichment strip failed published an artifact anyway - " +
-			"that artifact carries KISA's prose, which is the licensing violation D29 exists to prevent")
+	if err := w.PutEnrichment(advisory.Enrichment{
+		CVE: "CVE-2025-46394", Source: "KISA",
+		Title: "OpenSSL 보안 업데이트 권고",
+		URL:   "https://knvd.krcert.or.kr/info/vuln/notice/detail?id=99",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// No Enrichment entry: the bucket holds a record that the provenance does
+	// not account for.
+	if err := w.SetMeta(store.Meta{
+		BuiltAt:   time.Date(2026, 8, 5, 6, 0, 0, 0, time.UTC),
+		Providers: map[string]store.Provenance{"osv": {DataAsOf: time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC)}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// The fixture is only meaningful if it really is in that state, so it is
+	// checked rather than assumed: SetMeta derives EnrichmentCounts from the
+	// bucket, so a future change there could quietly make this an ordinary
+	// database and the test would pass for the wrong reason.
+	local, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := local.Meta()
+	local.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Enrichment) != 0 {
+		t.Fatalf("fixture is not in the intended state: Meta.Enrichment = %v, want empty", m.Enrichment)
 	}
 
-	// The early return still cleans up after itself.
-	if left, _ := filepath.Glob(filepath.Join(iso, "assay-push-*")); len(left) != 0 {
-		t.Errorf("a failed strip left its staged copy behind: %v", left)
+	ref := liveRegistry(t)
+	var out, errOut bytes.Buffer
+	if code := Push(context.Background(), path, ref, false, &out, &errOut); code != 0 {
+		t.Fatalf("Push = %d, want 0 (%s)", code, errOut.String())
+	}
+	pulled := filepath.Join(t.TempDir(), "vulnerability.db")
+	out.Reset()
+	errOut.Reset()
+	if code := Pull(context.Background(), pulled, ref, &out, &errOut); code != 0 {
+		t.Fatalf("Pull = %d, want 0 (%s)", code, errOut.String())
+	}
+	db, err := store.Open(pulled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	published := 0
+	if err := db.EachEnrichment(func(advisory.Enrichment) error { published++; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if published != 0 {
+		t.Errorf("the published artifact carries %d enrichment record(s) that the local "+
+			"metadata never mentioned - the strip consulted the self-report instead of the "+
+			"bucket, and D29's guarantee is only as good as that metadata", published)
 	}
 }
 
