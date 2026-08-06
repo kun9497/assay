@@ -210,9 +210,58 @@ func TestAffectsVersion_EnumeratedPropagatesCompareError(t *testing.T) {
 		Name:      "x",
 		Versions:  []string{"1.0.0", "2.0.0"},
 	}
-	_, _, err := AffectsVersion(SemVer{}, "not-a-version", a)
+	_, _, unreadable, err := AffectsVersion(SemVer{}, "not-a-version", a)
 	if !errors.Is(err, ErrInvalid) {
 		t.Errorf("AffectsVersion err = %v, want ErrInvalid", err)
+	}
+	// D30 skips an unreadable LISTED version and keeps going. It must not do
+	// that here: the unreadable operand is the installed version, so every
+	// entry would be skipped and the package would come back clean. Asserting
+	// the empty slice is what separates the two cases — a signature that
+	// reported these two entries as merely "unreadable" would satisfy the
+	// error check above only until someone downgraded the abort to a skip.
+	if len(unreadable) != 0 {
+		t.Errorf("unreadable = %v, want none: an unreadable installed version aborts, it does not skip entries", unreadable)
+	}
+}
+
+// D30. An unreadable entry in the enumerated list must not take the whole
+// advisory down with it: 2,411 of 1,309,665 enumerated versions in the v7
+// database do not parse, and one of them was enough to report a package whose
+// own version is perfectly readable as unevaluable.
+func TestAffectsVersion_EnumeratedSkipsUnreadableEntries(t *testing.T) {
+	// "0.9-stable" is real: PyPI advisory data for trac carries it.
+	a := advisory.Affected{
+		Ecosystem: "PyPI",
+		Name:      "trac",
+		Versions:  []string{"0.9-stable", "1.0", "2.0"},
+	}
+	// The junk entry sits BEFORE the match, so a loop that aborts on it never
+	// reaches 1.0 and this cannot pass by accident of ordering.
+	hit, _, unreadable, err := AffectsVersion(PEP440{}, "1.0", a)
+	if err != nil {
+		t.Fatalf("AffectsVersion error = %v, want nil: one bad listed version must not fail the advisory", err)
+	}
+	if !hit {
+		t.Error("hit = false, want true: 1.0 is listed, and an earlier unreadable entry must not hide it")
+	}
+	if len(unreadable) != 1 || unreadable[0] != "0.9-stable" {
+		t.Errorf("unreadable = %v, want exactly [0.9-stable]", unreadable)
+	}
+
+	// And the same list with no match: the verdict is "not affected", but the
+	// caller must still learn the evaluation was incomplete. Returning nil here
+	// is the silent-miss failure mode, so it is asserted separately from the
+	// hit case above.
+	hit, _, unreadable, err = AffectsVersion(PEP440{}, "3.0", a)
+	if err != nil {
+		t.Fatalf("AffectsVersion error = %v, want nil", err)
+	}
+	if hit {
+		t.Error("hit = true, want false: 3.0 is not listed")
+	}
+	if len(unreadable) != 1 || unreadable[0] != "0.9-stable" {
+		t.Errorf("unreadable on the no-hit path = %v, want [0.9-stable]; a verdict reached over an unread entry is incomplete", unreadable)
 	}
 }
 
@@ -249,9 +298,12 @@ func TestAffectsVersion_EnumeratedOnly(t *testing.T) {
 		{"1.0.0", true}, // equal under PEP 440 even though the strings differ
 		{"1.5", false},
 	} {
-		got, _, err := AffectsVersion(PEP440{}, tc.v, a)
+		got, _, unreadable, err := AffectsVersion(PEP440{}, tc.v, a)
 		if err != nil {
 			t.Fatalf("AffectsVersion(%q) error: %v", tc.v, err)
+		}
+		if len(unreadable) != 0 {
+			t.Errorf("AffectsVersion(%q) unreadable = %v, want none: every entry here parses", tc.v, unreadable)
 		}
 		if got != tc.want {
 			t.Errorf("AffectsVersion(%q) = %v, want %v", tc.v, got, tc.want)

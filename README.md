@@ -616,6 +616,9 @@ across 86 packages. The dominant cause is a version with fewer components than t
 demands (`lxd` at `4.0`, `next` at `13.0`), not an exotic one. Live scans hit two the same
 day: `alpine:3.14` skipped `libretls 3.3.3p1-r3` and with it CVE-2022-0778.
 
+- [x] An unreadable entry in `affected[].versions` is skipped and counted, not fatal (D30) —
+      2,411 of 1,309,665 enumerated entries do not parse, and one was enough to report a
+      readable package as unevaluable
 - [ ] Per-ecosystem leniency rules — one decision each, D9 forbids a shared one
 - [ ] Table-driven cases per ecosystem, checked against that ecosystem's published vectors
 

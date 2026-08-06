@@ -314,6 +314,78 @@ func TestMatch_SkipsAreDeduplicatedPerAdvisory(t *testing.T) {
 	}
 }
 
+// D30. An unreadable entry in an advisory's enumerated Versions list no longer
+// fails the advisory — but the verdict it produces was reached over data that
+// was not read, and CI must be told. This is the point where the guarantee
+// could go quiet: AffectsVersion hands back the unreadable entries, and if the
+// matcher drops them the scan reports a confident clean answer instead.
+func TestMatch_UnreadableListedVersionStillReportsIncomplete(t *testing.T) {
+	// "0.9-stable" is real PyPI advisory data (trac). The installed version is
+	// perfectly readable and matches nothing here, so before D30 this package
+	// came back unevaluable, and the risk after it is that it comes back
+	// silently clean.
+	adv := advisory.Advisory{
+		ID:   "PYSEC-junk",
+		Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{
+			Ecosystem: "PyPI",
+			Name:      "trac",
+			Versions:  []string{"0.9-stable", "1.0"},
+		}},
+	}
+	s := fakeStore{byKey: map[string][]advisory.Advisory{"PyPI\x00trac": {adv}}}
+
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("trac", "3.0", "PyPI")},
+	})
+	if err != nil {
+		t.Fatalf("Match error = %v, want nil: one bad listed version must not fail the scan", err)
+	}
+	if len(res.Findings) != 0 {
+		t.Errorf("Findings = %+v, want none: 3.0 is not listed", res.Findings)
+	}
+	if len(res.Skipped) != 1 {
+		t.Fatalf("Skipped = %d, want 1: a verdict reached over an unread entry is incomplete, and CI gates on this", len(res.Skipped))
+	}
+	// Assert the entry that could not be read, not merely that some text was
+	// produced. The advisory ID and package name are both present in this
+	// fixture, so a Reason that named only those would still be non-empty
+	// while saying nothing about what went unread.
+	if got := res.Skipped[0].Reason; !strings.Contains(got, `"0.9-stable"`) {
+		t.Errorf("Skipped[0].Reason = %q, want it to name the entry that could not be read", got)
+	}
+	if got := res.Skipped[0].AdvisoryID; got != "PYSEC-junk" {
+		t.Errorf("Skipped[0].AdvisoryID = %q, want PYSEC-junk: the skip belongs to the advisory it came from", got)
+	}
+}
+
+// The companion to the test above: the same shape with a readable list must
+// stay silent. Without this, a matcher that recorded a skip unconditionally
+// would satisfy the assertions above and turn every enumerated advisory into
+// an incomplete result.
+func TestMatch_ReadableListedVersionsReportNoSkip(t *testing.T) {
+	adv := advisory.Advisory{
+		ID:   "PYSEC-clean",
+		Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{
+			Ecosystem: "PyPI",
+			Name:      "trac",
+			Versions:  []string{"0.9", "1.0"},
+		}},
+	}
+	s := fakeStore{byKey: map[string][]advisory.Advisory{"PyPI\x00trac": {adv}}}
+
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("trac", "3.0", "PyPI")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Skipped) != 0 {
+		t.Errorf("Skipped = %+v, want none: every listed version here parses", res.Skipped)
+	}
+}
+
 func TestMatch_AliasedAdvisoriesReportOnce(t *testing.T) {
 	// OSV's Go ecosystem carries the same vulnerability under both a GHSA and
 	// a GO- identifier, each declaring the other as an alias. Reporting both

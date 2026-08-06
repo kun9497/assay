@@ -1000,6 +1000,53 @@ added no sixth branch. A **seventh** route would raise the question again, and t
 time is more likely to be that the enrichment must not share a file with the published data
 at all (see *Splitting KISA data into a separate artifact*, `docs/deferred-decisions.md`).
 
+### D30 — An unreadable entry in `affected[].versions` is skipped and counted, not fatal
+
+`AffectsVersion` walks an advisory's ranges first and falls back to its enumerated
+`versions[]` list. When a comparison in that list failed, the whole advisory failed with it.
+The two operands mean opposite things and the code conflated them:
+
+- **The installed version** is the left operand and is constant across the loop, so an
+  unreadable one really does fail every entry. Skipping on that would turn a total failure
+  into a silent clean verdict. It is checked once, before the loop, and still aborts.
+- **The listed version** is the right operand and is upstream data. Measured over the v7
+  database, 2,411 of 1,309,665 enumerated entries (0.184%) do not parse, poisoning 154
+  affected entries. One of them was enough to report a package whose own version is
+  perfectly readable as unevaluable against that advisory.
+
+A listed version that will not parse cannot be shown equal to one that will, so skipping it
+concludes nothing that aborting would have concluded — it only stops the rest of the list
+being thrown away with it. `AffectsVersion` returns the entries it could not read, and the
+matcher records a `Skipped` against that advisory exactly as a hard failure does. **That
+record is the whole safety argument**: the verdict is now reached over data that was not
+read, and without it a loud miss becomes a quiet one. It fires on the "not affected" path
+too, because a clean answer computed over an unread entry is just as incomplete as an
+affected one.
+
+**The comment this replaces asserted the opposite and was wrong**, which is why it survived
+review: it justified failing the advisory by claiming the failure must come from the
+installed version, which is exactly the case that still aborts. Reproduced directly —
+installed `3.0.0`, list `["1.0.0", "0.9-stable", "2.0.0"]`, and the package comes back
+unevaluable because of an entry that is not it.
+
+**Sized honestly.** Of the 154 poisoned entries, **2** change an outcome; the other 152
+gain a computed verdict and keep their incompleteness note. What those 2 are worth is
+concrete: `asterix-decoder v2.6.0` against PYSEC-2021-860 went from "0 findings, 1 check
+could not be completed" to a **critical (9.1)** finding, and **335** installed versions
+across the two entries move the same way. The reason to take the change at that size is that
+it removes a class rather than a count — new junk arriving in PyPI's enumerated lists can no
+longer take an advisory down with it.
+
+**Dropping `versions[]` when `Ranges` is present was considered and rejected.** It would have
+rescued 148 of the 154 by never reading the list, and the comment being replaced claimed the
+list is redundant when both exist. The data denies it: 1,390 enumerated entries across 19,939
+affected entries are not covered by their own entry's ranges. Some of that is upstream
+over-breadth — ALPINE-CVE-2018-6196 lists w3m 0.5.4-r0 and 0.5.5-r0 as affected while its
+range fixes at 0.5.3_git20241203-r0 — but some corrects a range this walk cannot follow:
+PYSEC-2009-17 carries one `introduced` and five `last_affected` events, so the window closes
+at the first and only the enumerated list still names plone 3.2 and 3.3. Trading a loud miss
+for a silent one is the one thing this package exists to prevent.
+
 ## 3. Architecture
 
 ### Measured data volumes
