@@ -633,8 +633,12 @@ func TestRun_ScanOutputJSONReachesRealExitCode(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
 		t.Fatalf("stdout is not valid JSON: %v\n%s", err, stdout.String())
 	}
-	if doc.SchemaVersion != 2 {
-		t.Errorf("SchemaVersion = %d, want 2", doc.SchemaVersion)
+	// Pinned, not read from the package: a constant compared against itself
+	// cannot notice that the shape changed under it. Bumping this is meant to
+	// be the deliberate act that accompanies a schema change (D33 was the
+	// third).
+	if doc.SchemaVersion != 3 {
+		t.Errorf("SchemaVersion = %d, want 3", doc.SchemaVersion)
 	}
 	// buildRunSeamFixture's critical + unrated findings; somecrate is
 	// dropped by the cataloger and never reaches a Finding at all.

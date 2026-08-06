@@ -1000,6 +1000,243 @@ added no sixth branch. A **seventh** route would raise the question again, and t
 time is more likely to be that the enrichment must not share a file with the published data
 at all (see *Splitting KISA data into a separate artifact*, `docs/deferred-decisions.md`).
 
+### D30 — An unreadable entry in `affected[].versions` is skipped and counted, not fatal
+
+`AffectsVersion` walks an advisory's ranges first and falls back to its enumerated
+`versions[]` list. When a comparison in that list failed, the whole advisory failed with it.
+The two operands mean opposite things and the code conflated them:
+
+- **The installed version** is the left operand and is constant across the loop, so an
+  unreadable one really does fail every entry. Skipping on that would turn a total failure
+  into a silent clean verdict. It is checked once, before the loop, and still aborts.
+- **The listed version** is the right operand and is upstream data. Measured over the v7
+  database, 2,411 of 1,309,665 enumerated entries (0.184%) do not parse, poisoning 154
+  affected entries. One of them was enough to report a package whose own version is
+  perfectly readable as unevaluable against that advisory.
+
+A listed version that will not parse cannot be shown equal to one that will, so skipping it
+concludes nothing that aborting would have concluded — it only stops the rest of the list
+being thrown away with it. `AffectsVersion` returns the entries it could not read, and the
+matcher records a `Skipped` against that advisory exactly as a hard failure does. **That
+record is the whole safety argument**: the verdict is now reached over data that was not
+read, and without it a loud miss becomes a quiet one. It fires on the "not affected" path
+too, because a clean answer computed over an unread entry is just as incomplete as an
+affected one.
+
+**The comment this replaces asserted the opposite and was wrong**, which is why it survived
+review: it justified failing the advisory by claiming the failure must come from the
+installed version, which is exactly the case that still aborts. Reproduced directly —
+installed `3.0.0`, list `["1.0.0", "0.9-stable", "2.0.0"]`, and the package comes back
+unevaluable because of an entry that is not it.
+
+**Sized honestly.** Of the 154 poisoned entries, **2** change an outcome; the other 152
+gain a computed verdict and keep their incompleteness note. What those 2 are worth is
+concrete: `asterix-decoder v2.6.0` against PYSEC-2021-860 went from "0 findings, 1 check
+could not be completed" to a **critical (9.1)** finding, and **335** installed versions
+across the two entries move the same way. The reason to take the change at that size is that
+it removes a class rather than a count — new junk arriving in PyPI's enumerated lists can no
+longer take an advisory down with it.
+
+**Dropping `versions[]` when `Ranges` is present was considered and rejected.** It would have
+rescued 148 of the 154 by never reading the list, and the comment being replaced claimed the
+list is redundant when both exist. The data denies it: 1,390 enumerated entries across 19,939
+affected entries are not covered by their own entry's ranges. Some of that is upstream
+over-breadth — ALPINE-CVE-2018-6196 lists w3m 0.5.4-r0 and 0.5.5-r0 as affected while its
+range fixes at 0.5.3_git20241203-r0 — but some corrects a range this walk cannot follow:
+PYSEC-2009-17 carries one `introduced` and five `last_affected` events, so the window closes
+at the first and only the enumerated list still names plone 3.2 and 3.3. Trading a loud miss
+for a silent one is the one thing this package exists to prevent.
+
+### D31 — An apk letter may carry a numeric patch level, and it follows apk-tools 2.x
+
+The apk grammar gains exactly one production — digits, once, immediately after the single
+letter:
+
+```
+digits ('.' digits)* [ letter [digits] ] ('_' suffix [digits])* ['~' hexhash] ['-r' digits]
+                              ^^^^^^^^
+```
+
+`libretls 3.3.3p1-r3`, `sudo 1.7.4p6-r0`, `py3-* 0.12.5a0-r0` and `2.1a15-r17` are all real
+Alpine package versions that the earlier grammar refused.
+
+**The two apk-tools majors disagree, and 2.x is the one to follow.** apk-tools 2.x parses
+these: `next_token()` carries an explicit `*type == TOKEN_LETTER && isdigit(...)` clause
+emitting `TOKEN_DIGIT`, and its demotion whitelist names that transition. apk-tools 3.x
+rejects them — `token_next()`'s digit case lists only `INITIAL_DIGIT`, `DIGIT` and `SUFFIX`
+before `default: goto invalid` — and asserts so in its own vectors (`!0.1a1`, `!0.1bc1`).
+
+Three facts decide it. Every *released* Alpine ships apk-tools 2.14.x; only edge ships 3.x.
+Alpine ships the versions regardless. And 3.x's rejection is not a safe conservatism: both
+sides of `3.3.3p1-r3` vs `3.3.3p1-r2` reach `TOKEN_INVALID` at the same offset, so
+`apk_version_compare_fuzzy` returns **EQUAL** and an unpatched host reads as fixed.
+Emulating 3.x here would import that.
+
+**Two properties of the new token are load-bearing.** It is an `apkDigit` — the kind 2.x
+uses — and the ordinal matters against `apkSuffix` and `apkRevisionNo`. And it is exempt
+from `apkDigit`'s leading-zero string-sort branch: in 2.x that rule belongs to
+`TOKEN_DIGIT_OR_ZERO`, the state entered after `.`, while a post-letter digit is a plain
+`TOKEN_DIGIT`. So `1.0a01 == 1.0a1`, where a string sort would call them different.
+
+**The hard constraint holds structurally, not statistically.** The new branch can only fire
+when a digit immediately follows the letter, and every such string fails the current parser
+at its trailing-input check. No version that parses today can reach it, so no ordering that
+is correct today can change. apk-tools' own 738-comparison vector file still replays with
+736 agreements, 0 mismatches and the same 2 recorded divergences.
+
+**Scope discipline.** apk-tools 2.x accepts more than this rule does, and the extra is bugs
+rather than versions: its digit loop accepts an *empty* run, so `1.18.-r2` and `0.8.21.r2`
+parse there and the second sorts **above** the `0.8.21-r2` it is a typo for. A second letter
+(`1.0a1b2`) and a dot after the patch level (`1.0a1.2`, which 3.x asserts invalid) stay
+errors too. The rule is "a letter may carry a patch level", not "be bug-compatible with 2.x",
+and the invalid-input table holds that line by name.
+
+**One new over-acceptance, taken knowingly.** `~hash` is a 3.x feature this parser already
+implements, so the combination `1.0a1~abcd` is now accepted by neither reference — 2.x has no
+hash token and 3.x has no post-letter digit. It appears in no APKINDEX, secdb file or OSV
+bound measured. This parser was already a 2.x/3.x hybrid; the combination is the cost of
+that, and it is recorded rather than guarded.
+
+**Measured effect.** apk range bounds that will not parse fell from 61 to **39** (30 packages
+to 17), and enumerated apk versions that will not parse fell to **zero** — D31 removes the
+whole Alpine share of the D30 problem. On an `alpine:3.14` inventory carrying
+`libretls 3.3.3p1-r2` and `sudo 1.8.1p1-r0`, the scan goes from **0 findings and 9 checks
+that could not be completed** to **6 high-severity findings and none skipped**, including
+CVE-2022-0778 and CVE-2019-14287. CVE-2021-3156 correctly stays absent: 1.8.1p1 is below its
+`introduced` bound of 1.8.2, which is a comparison that could not even be attempted before.
+
+**The footprint is EOL-skewed and that is worth saying.** The 29 affected APKINDEX entries
+are 13 from v3.14/main and 16 from v3.19/community; scanning v3.20, v3.21 and v3.22 across
+main and community — 69,893 entries — finds **zero**. libretls is `3.7.0-r2` now. This rule
+matters for scanning old images, which is most of what a vulnerability scanner is pointed at,
+and it will not grow.
+
+**Two surviving mutations, both verified equivalent rather than untested.** Typing the token
+`apkInitialDigit` instead of `apkDigit` leaves the table green: the post-letter token sits at
+index 2 or later, `apkInitialDigit` only ever at index 0, and a dotted `apkDigit` can never
+align with it because the letter position resolves the comparison first — so ordinals 0 and 1
+answer alike everywhere reachable. Likewise `ta.postLetter || tb.postLetter` versus `&&`: the
+two flags cannot disagree, for the same reason. Substituting `apkSuffixNo` or `apkRevisionNo`
+*does* turn the table red, which is what makes the ordinal claim tested rather than asserted.
+
+**A gap in the upstream check, recorded so it is not mistaken for coverage.** The vector
+harness reads only three-field comparison lines, so apk-tools master's validity assertions
+(`!0.1a1`) are skipped. The deliberate divergence from 3.x is therefore invisible to the
+strongest test this package has, and rests on the reasoning above rather than on that replay.
+
+### D32 — A bare short semver core is a shorthand, padded with zeros
+
+`parseSemVer` pads a core of one or two identifiers to three — but only when the string
+carried no pre-release and no build suffix. Everything else is unchanged: leading zeroes
+still rejected, four or more identifiers still rejected, non-numeric identifiers still
+rejected.
+
+This is verbatim `golang.org/x/mod/semver`'s documented exception — *"recognizes vMAJOR and
+vMAJOR.MINOR (with no prerelease or build suffixes) as shorthands"* — and govulncheck already
+relies on it to read these same bounds. The data needs it: `github.com/canonical/lxd` is
+written at `4.0`, `6.0` and `6.5`, npm's `next` at `13.0`, `github.com/cosmos/cosmos-sdk` at
+`0.46`, `github.com/esm-dev/esm.sh` at a bare `136`.
+
+**The bare-form restriction is the rule, not a detail.** `parseSemVer` strips build and
+pre-release off the string *before* it splits the core, so by that point `4.0` and `4.0-rc.1`
+are indistinguishable; the flag has to be recorded on the way past. Both references refuse
+the suffixed form — x/mod's `IsValid` is false for `v4.0-rc1` and `v4.0+meta`, and
+node-semver refuses them in strict and loose alike — so padding them would be an invention
+neither makes.
+
+**The two references disagree about the bare form, and x/mod is the right one here.**
+node-semver rejects `4.0` as a *version* in strict and loose both; it accepts it only as a
+*range expression*, where `13.0` means `>=13.0.0 <13.1.0-0`. That reading does not apply:
+an OSV `SEMVER` range event is a single version, not npm range syntax. `fixed: "13.0"` means
+the release 13.0.0, which is what x/mod's shorthand and node-semver's own `coerce` both
+produce. The same rule is therefore right for the Go and npm ecosystems even though one of
+the two references would refuse the string outright.
+
+**Leading zeroes were considered and deliberately not adopted.** `19.03.0` (docker/cli, via
+GHSA) and `4.072` (neuvector/scanner) stay errors. node-semver throws on `4.072` even under
+`loose`, and accepting the shape without also stripping the zeros would be worse than
+refusing it: `compareNumeric` orders digit strings by length first, so `4.072` would sort
+*above* `4.72` while denoting the same release. That is a silent reordering, which is the
+trade this slice exists to avoid. `github.com/docker/cli` therefore remains a loud skip.
+
+**Four or more identifiers stay an error** for the opposite reason to the padding: coercion
+would read `1.2.3.4` as `1.2.3`, discarding a component rather than supplying a missing one.
+
+**The OSV sentinel is excluded by name.** `"0"` is a bare one-identifier core and would
+otherwise pad to `0.0.0`, which is not what it means — the range layer resolves it to
+negative infinity, and a `0.0.0` reading sorts *above* every `0.0.0-prerelease` build and
+would drop them out of the window. That protection used to fall out of the three-identifier
+check for free, so relaxing that check has to restore it deliberately. This was found by the
+existing invalid-input test, which listed `"0"` with exactly that reasoning already recorded.
+
+**The hard constraint holds structurally.** Padding fires only where the parser errors today,
+so no version that parses now can change its comparison key or its ordering against any
+other.
+
+**Measured effect.** semver range bounds that will not parse fell from 96 to **40** (42
+packages to 19); what remains is the leading-zero family and genuinely malformed strings like
+`2.10-rc2` and `9.6.0b1`. On an inventory of `lxd v5.0.2`, `cosmos-sdk v0.45.9` and
+`next 12.3.0`, the scan goes from **29 findings with 8 advisories unevaluable** to **34
+findings and none skipped** — including `next` reaching CVE-2025-29927, which is critical.
+
+Six mutations verified red: dropping the padding, dropping the bare-form guard, dropping the
+sentinel guard, padding with `1` instead of `0`, padding only two-identifier cores, and
+letting a four-identifier core through.
+
+### D33 — The narrowest KISA notice wins, and its breadth is disclosed
+
+Enrichment is keyed `(CVE, Source)` and every KISA record carries the same source, so a CVE
+named by two notices kept whichever page arrived last. Measured live on 2026-08-06, `convert`
+produces **20,315** records for **18,524** CVEs: **1,791** were being decided by page order,
+the tie-break D25 forbids in as many words.
+
+The winner is now the notice naming the **fewest** CVEs, ties broken on the notice URL. The
+tie-break is arbitrary on purpose — the point is that it is a rule at all rather than a
+property of the network.
+
+**Selection happens in the provider, not the store.** Only the walk knows how many CVEs each
+notice named, and the rule needs the whole corpus: emitting as pages arrive cannot know a
+narrower notice is still to come. So nothing is emitted until the walk finishes, and a walk
+that fails part-way emits nothing rather than winners chosen from the half it read — which
+would be the arrival-order defect again, wearing a rule.
+
+**This is not the store's job, and D13's usual argument does not apply.** Lossless storage
+exists so that adding a field later does not mean rebuilding — and enrichment is rebuilt from
+scratch on every `db build` in under a minute, never carried forward by a seed. The rebuild
+D13 protects against costs nothing here, so keeping the losers would buy nothing.
+
+**The roundup problem is disclosed, not solved, and the measurement is why.** The expectation
+recorded when this slice opened was that narrowest-wins would remove the arrival-order
+dependence *and* the roundup dilution together. Only the first is true. After selection,
+**12,972 of 18,524 records (70%)** still come from a notice naming more than twenty CVEs, and
+only **822 (4%)** come from one naming that CVE alone — because for most CVEs the monthly
+bulletin is the **only** notice that names them. There is nothing narrower to prefer.
+
+So the mitigation is disclosure. `Enrichment.Claims` records how many CVEs the notice named,
+`--explain` prints `scope: this notice covers N vulnerabilities, not only this one` above one,
+and the JSON document carries `claims` (schema 3). Without it a bulletin naming a thousand
+CVEs and prose written about this one render identically, and the reader has no way to tell
+which they are looking at. **Dropping wide notices outright was rejected**: it would discard
+70% of the corpus, including the only Korean text those CVEs have, to fix a presentation
+problem.
+
+**`Provenance.Records` reports what the database will hold**, not what `convert` produced.
+Reporting the larger number would over-claim by exactly the records selection discarded,
+which is the thing being fixed (D20's rule, applied to the enricher).
+
+**A third defect turned out not to be one.** 2,202 records (12%) carried a summary beginning
+from the no-overview fallback, which read as a parser failure. Measured against 100 live
+notices: the exact `□ 개요` heading is present in 65, a looser `□ …개요` form finds 67, and
+the remaining 33 have no overview section at all. The fallback is the correct answer for
+those, not a miss, and widening the heading match buys two notices in a hundred for a
+false-positive risk on every one. Left alone deliberately.
+
+Six mutations verified red: first-notice-wins, last-notice-wins, widest-wins, treating an
+unreported breadth as narrowest, reporting the pre-selection count as `Records`, and never
+populating `Claims`. The report fixture sets `Claims` to a value that appears nowhere else in
+it, because an int left at its zero value lets a renderer that never reads the field produce
+byte-identical output.
+
 ## 3. Architecture
 
 ### Measured data volumes
@@ -1415,6 +1652,100 @@ include hosts or workstations rather than container images and source trees, whi
 `docs/deferred-decisions.md` already records for that question. That question is separate
 from enrichment and remains open; enrichment itself does not wait on it and already has a
 user.
+
+### The first full-corpus build, 2026-08-05
+
+Slices ⑦, ⑧ and ⑤ were merged and then run together for the first time, on a build server
+rather than in CI, with every window unbounded: **6h31m**, 32,272 advisories, NVD's whole
+feed at **354,067** rated CVEs, KISA at **18,523** enrichment records drawn from 2,971
+notices, 256 MB on disk. Published as `ghcr.io/kun9497/assay-db:v7`.
+
+Three things it measured that no test could:
+
+- **The timeout fix is load-bearing.** The run before it died at 3h50m and 262,000 records
+  on a client timeout classified as permanent — `net/http`'s `timeoutError.Is` answers true
+  for `context.DeadlineExceeded`, so the deny-list let it through as fatal. The v7 run hit
+  the same family once, an HTTP/2 `stream error`, and recovered in **5 seconds**. The
+  identical failure cost 116 minutes before the fix and 5 seconds after it.
+- **D29 holds on the real artifact, not only in the test.** The published layer was pulled
+  back into a clean directory and read as bytes: the local build carries **1,719,126**
+  Hangul sequences and 18,524 `knvd.krcert.or.kr` occurrences, the published artifact
+  **zero** of each. That is the check route 6 above defeated, run against the file users
+  actually download.
+- **A scan against the pulled artifact behaves identically** apart from the absent Korean —
+  same findings, same bands, same exit codes across `--fail-on critical|high|medium|low`.
+  D3's "enrichment changes no verdict" is now checked end to end rather than only in a unit
+  test.
+
+### Slice 9 — Versions the comparers cannot read ← next
+
+A package whose version will not parse is reported as **skipped** and never folded into a
+clean verdict (D20, D21), so this is loud rather than silent. It is still a vulnerability
+that went un-assessed, which is what D9 says directly: *treating an unparseable version as
+"not vulnerable" is a miss.*
+
+Measured 2026-08-06 against the v7 database — every range bound of every advisory, fed to
+the comparer that owns its ecosystem:
+
+| comparer | bounds it cannot parse | bounds | packages |
+|---|---:|---:|---:|
+| semver (Go, npm) | 96 | 29,840 | 42 |
+| pep440 (PyPI) | 45 | 31,147 | 14 |
+| apk (Alpine) | 61 | 53,819 | 30 |
+
+0.18% overall, and the cause is not exotic. The dominant shape is a version with **fewer
+components than the grammar demands**: `github.com/canonical/lxd` at `4.0`, `6.0` and `6.5`,
+`next` at `13.0`, `github.com/cosmos/cosmos-sdk` at `0.46`. Semver requires three
+components; upstream advisory text routinely writes two. The rest are genuine oddities —
+`libdwarf` at `1999-12-14` (a date), `buildbot` at `0.7.11p3`, `neutron` at `7.2.0-12.1`.
+
+Two were met in live scans the same day. `alpine:3.14` skipped `libretls 3.3.3p1-r3`, and
+with it CVE-2022-0778; a scan of assay's own binary skipped `github.com/docker/cli` because
+a GHSA range bound reads `19.03.0`, whose `03` is the leading-zero numeric identifier semver
+forbids.
+
+**The open question is per-ecosystem leniency, and D9 forbids answering it once for all
+three.** Whether `4.0` may be read as `4.0.0` in a semver ecosystem, whether apk should
+accept a letter followed by digits (`3.3.3p1`) as Alpine's own package versions imply
+apk-tools does, and whether pep440 should accept a `p3` patch suffix are three questions with
+three different upstream authorities. Each needs its own decision, its own table-driven
+cases, and its own check against that ecosystem's published vectors — the apk comparer
+already stands against apk-tools' 738 comparisons, and that is the bar. One shared "be
+lenient" rule is precisely the collapse D9 exists to prevent.
+
+Nothing here may make a version compare **lower** than it does today. The failure being
+fixed is a miss, and a lenient parse that reorders versions already handled correctly would
+trade a loud miss for a silent one.
+
+### Slice 10 — Which KISA notice wins
+
+Found on first real use, 2026-08-06, and measured against the v7 database. Two defects, one
+cause.
+
+**The store resolves a tie by arrival order, which D25 forbids.** The enrichment bucket is
+keyed `(CVE, Source)` and every KISA record carries the same source, so a CVE named by two
+notices keeps whichever arrived last. The build's own log holds the number: `convert` emitted
+**20,314** records and the store kept **18,523**, so **1,791** were overwritten by page
+order. D25 settled this for ratings — *never resolve a tie by arrival order; that was the
+defect, not a harmless coin flip* — and the enrichment bucket repeated it.
+
+**Most notices are monthly roundups, and they win those ties by volume.** Of 1,935 distinct
+notices, 804 name exactly one CVE, while 38 name more than a hundred and `MS 7월 보안 위협에
+따른 정기 보안 업데이트 권고` alone names **1,046**. **12,997 of 18,523 stored records (70%)**
+come from a notice claiming more than 20 CVEs. Every enriched finding met in live scanning —
+`openssl` CVE-2024-5535 on `node:14-alpine`, `curl` CVE-2024-6197 on `nginx:1.25.3-alpine` —
+attached a Microsoft monthly patch bulletin to a non-Microsoft vulnerability. The specific
+notices that make the feature worth having do exist (`OpenSSH 제품 보안 업데이트 권고` for
+regreSSHion, `XZ-Utils 보안 주의 권고` for CVE-2024-3094, `BIND DNS 취약점 보안 업데이트 권고`)
+and lose to a roundup whenever both name the same CVE.
+
+The likely rule is **the narrowest notice wins** — fewest CVEs claimed, ties broken on the
+notice ID so two runs agree — which removes the arrival-order dependence and the roundup
+dilution together. A third defect rides along: 2,202 records (12%) carry a summary that
+begins from the `제목없음` fallback because the `□ 개요` heading was not found.
+
+Enrichment changes no verdict (D3), so none of this can produce a wrong answer. That is why
+it is queued behind slice 9 rather than ahead of it.
 
 ---
 

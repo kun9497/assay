@@ -85,6 +85,11 @@ func convert(n rawNotice) []advisory.Enrichment {
 			Title:   n.Title,
 			Summary: summary,
 			URL:     url,
+			// Every record from one notice carries that notice's whole CVE
+			// count, so a reader looking at one CVE can see how much else the
+			// notice was about, and so selection can prefer the narrowest
+			// notice without holding the corpus (D33).
+			Claims: len(cves),
 		})
 	}
 	return out

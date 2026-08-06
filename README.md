@@ -601,6 +601,53 @@ count endpoint turned out not to work and how it reports its own outages, are in
 
 - [x] KNVD provider and CVE-keyed enrichment join
 
+**The first full-corpus build, 2026-08-05.** Slices ⑦, ⑧ and ⑤ ran together for the first
+time with no windows bounded: **6h31m**, 32,272 advisories, NVD's whole feed at **354,067**
+rated CVEs, KISA at **18,523** enrichment records over 2,971 notices, published as
+`ghcr.io/kun9497/assay-db:v7`. The published layer was then pulled back and read as bytes:
+the local build holds **1,719,126** Hangul sequences, the published artifact **zero** — D29
+checked against the file users download, not only in a test.
+
+**⑨ Versions the comparers cannot read** — a package whose version will not parse is
+reported as skipped rather than clean (D20, D21), so it is loud; it is still a vulnerability
+that went un-assessed, which D9 calls a miss. Measured 2026-08-06 over every range bound in
+the v7 database: 96 of 29,840 semver bounds, 45 of 31,147 pep440, 61 of 53,819 apk — 0.18%,
+across 86 packages. The dominant cause is a version with fewer components than the grammar
+demands (`lxd` at `4.0`, `next` at `13.0`), not an exotic one. Live scans hit two the same
+day: `alpine:3.14` skipped `libretls 3.3.3p1-r3` and with it CVE-2022-0778.
+
+- [x] An unreadable entry in `affected[].versions` is skipped and counted, not fatal (D30) —
+      2,411 of 1,309,665 enumerated entries do not parse, and one was enough to report a
+      readable package as unevaluable
+- [x] apk: a letter may carry a numeric patch level (D31) — `libretls 3.3.3p1-r3`,
+      `sudo 1.7.4p6-r0`. Follows apk-tools 2.x, which every released Alpine ships; 3.x
+      rejects these and answers EQUAL for `3.3.3p1-r3` vs `-r2`, calling an unpatched host
+      fixed. apk bounds that will not parse: 61 -> 39; enumerated apk versions: -> 0
+- [x] semver: a bare short core is padded with zeros (D32) — `lxd` at `4.0`, npm's `next`
+      at `13.0`. Verbatim `golang.org/x/mod/semver`'s documented shorthand, which
+      govulncheck relies on for these bounds; suffixed forms like `4.0-rc1` stay errors
+      because neither reference accepts them. semver bounds that will not parse: 96 -> 40
+- [ ] Leading-zero cores (`19.03.0`, `4.072`) stay a loud skip — accepting the shape without
+      stripping the zeros would sort `4.072` above `4.72`, trading a loud miss for a silent one
+- [ ] pep440 leniency — deferred; the two candidate rules rescue 2 advisory bounds between them
+- [ ] Table-driven cases per ecosystem, checked against that ecosystem's published vectors
+
+**⑩ Which KISA notice wins** — found on first real use. The enrichment bucket keys on
+`(CVE, Source)`, so a CVE named by two KISA notices keeps whichever arrived last: `convert`
+emitted 20,314 records and the store kept 18,523, meaning **1,791** were decided by page
+order — the tie-break D25 forbids. And 70% of stored records come from a notice claiming
+more than 20 CVEs (one names 1,046), so every enriched finding met in live scanning attached
+a Microsoft monthly bulletin to a non-Microsoft vulnerability. Enrichment changes no verdict
+(D3), which is why this is queued behind ⑨.
+
+- [x] Narrowest notice wins, ties broken on the notice URL (D33) — 1,791 of 20,315 records
+      were being decided by page arrival order, the tie-break D25 forbids
+- [x] Breadth disclosed rather than removed — after selection **70%** of records still come
+      from a notice naming more than twenty CVEs, because for most CVEs the monthly bulletin
+      is the only notice that names them. `--explain` now says so, and JSON carries `claims`
+- [x] Summary extraction measured and left alone — of 100 live notices, 65 carry `□ 개요`, a
+      looser match finds 67, and the other 33 have no overview section at all
+
 Correctness is checked by **differential testing against grype** at every stage. Exact
 agreement is not expected — the data sources differ — but a large divergence means the
 matcher is wrong. Slice ① came out set-identical on both SBOMs it was run against:

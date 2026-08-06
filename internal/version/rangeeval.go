@@ -25,36 +25,65 @@ type Evidence struct {
 }
 
 // AffectsVersion reports whether v falls within any range of a, falling back to
-// the enumerated Versions list when a carries no usable ranges.
-func AffectsVersion(c Comparer, v string, a advisory.Affected) (bool, Evidence, error) {
+// the enumerated Versions list. The returned slice names the listed versions
+// that could not be read; it is empty on the ranges path and on a clean list.
+//
+// Versions is not redundant with Ranges even when both are present, which the
+// earlier comment here asserted and the data denies: measured over the v7
+// database, 1,390 enumerated entries across 19,939 affected entries are not
+// covered by that entry's own ranges. Some of those are upstream over-breadth
+// and some correct a range this walk cannot follow — PYSEC-2009-17 carries one
+// `introduced` and five `last_affected` events, so the window closes at the
+// first of them and only the enumerated list still names plone 3.2 and 3.3.
+// Dropping the list to dodge the parse problem would buy false negatives.
+func AffectsVersion(c Comparer, v string, a advisory.Affected) (bool, Evidence, []string, error) {
 	for _, r := range a.Ranges {
 		hit, ev, err := InRange(c, v, r)
 		if err != nil {
-			return false, Evidence{}, err
+			return false, Evidence{}, nil, err
 		}
 		if hit {
-			return true, ev, nil
+			return true, ev, nil, nil
 		}
 	}
-	// Versions is redundant with Ranges when both are present, but it is the
-	// only data when Ranges is absent, so it cannot be dropped.
+	if len(a.Versions) == 0 {
+		return false, Evidence{}, nil, nil
+	}
+
+	// D30. Two operands can fail here and they mean opposite things, which the
+	// earlier version of this function conflated: it blamed the left one in a
+	// comment and then failed the whole advisory whichever one was at fault.
+	//
+	// The left operand is the installed version, constant across the loop, so
+	// an unreadable one really does fail every entry — skipping on that would
+	// turn a total failure into a silent clean verdict. It is checked once,
+	// here, and still aborts.
+	if _, err := c.Compare(v, v); err != nil {
+		return false, Evidence{}, nil, fmt.Errorf("compare %q: %w", v, err)
+	}
+	// The right operand is upstream data, and 0.184% of it does not parse
+	// (2,411 of 1,309,665 entries measured). One such entry aborted the whole
+	// advisory, so a package whose own version is perfectly readable was
+	// reported unevaluable because some *other* release in the list was not.
+	// A listed version we cannot parse cannot be shown equal to a v we can, so
+	// nothing is concluded either way by skipping it — but it may denote the
+	// same release, so it is returned rather than discarded and the caller
+	// records it. Dropping that record silently is what turns this from a loud
+	// miss into a quiet one.
+	var unreadable []string
 	for _, known := range a.Versions {
 		cmp, err := c.Compare(v, known)
 		if err != nil {
-			// Surface it. The left operand is the installed version and is
-			// identical on every iteration, so an unparseable one fails every
-			// entry — skipping would turn a 100% failure rate into a silent
-			// clean verdict, which is the exact false negative this package
-			// exists to prevent.
-			return false, Evidence{}, fmt.Errorf("compare %q to listed version %q: %w", v, known, err)
+			unreadable = append(unreadable, known)
+			continue
 		}
 		if cmp == 0 {
 			return true, Evidence{
 				Reason: fmt.Sprintf("version %s is listed as affected", v),
-			}, nil
+			}, unreadable, nil
 		}
 	}
-	return false, Evidence{}, nil
+	return false, Evidence{}, unreadable, nil
 }
 
 // InRange walks an OSV range's events in ascending version order, tracking

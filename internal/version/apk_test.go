@@ -60,6 +60,37 @@ func TestAPKCompare(t *testing.T) {
 		{"1.1.1k-r0", "1.1.1l-r0", -1, "the real openssl case"},
 		{"1.1.1l-r0", "1.1.1l-r1", -1, "revision still breaks the tie"},
 
+		// D31: a letter may carry a numeric patch level. Alpine ships these —
+		// libretls 3.3.3p1-r3, sudo 1.7.4p6-r0, py3-* 0.12.5a0-r0 — and
+		// apk-tools 2.x, which every released Alpine runs, parses them.
+		{"3.3.3-r3", "3.3.3p1-r3", -1, "the letter outranks the bare version: libretls, Alpine 3.14"},
+		{"3.3.3p1-r3", "3.3.4-r0", -1, "the numeric components still decide first"},
+		{"3.3.3p1-r2", "3.3.3p1-r3", -1, "revision breaks the tie under the patch level"},
+		{"3.3.3p1-r0", "3.3.3p2-r0", -1, "the patch level itself orders"},
+		{"3.3.3p2-r0", "3.3.3p10-r0", -1, "and it is numeric, not lexical: 2 < 10"},
+		{"1.7.4p6-r0", "1.9.5p2-r0", -1, "real sudo pair; components before the letter win"},
+		{"2.1a15-r17", "2.1a16-r0", -1, "real py-* shape, two-digit patch level"},
+		{"1.0a1", "1.0.1", -1, "apkLetter(2) outranks apkDigit(1), so the letter form is lower"},
+
+		// The patch level is NOT subject to the leading-zero string sort below:
+		// in apk-tools 2.x that rule belongs to the token entered after '.', and
+		// this one is a plain digit token. This pair is the only one in the table
+		// that can tell the two apart — "0" vs "1" gives '<' either way, so the
+		// obvious-looking 0.12.5a0 vs 0.12.5a1 row proves nothing here.
+		{"1.0a01", "1.0a1", 0, "patch level is numeric: 01 == 1, where a string sort would differ"},
+		{"1.0a010", "1.0a10", 0, "same rule, two digits"},
+
+		// The patch level must be a DIGIT token, which is what apk-tools 2.x
+		// emits (next_token sets n = TOKEN_DIGIT there). Every row above still
+		// passes if it is given apkSuffixNo instead, because that kind compares
+		// numerically too — these are the pairs that align it against a token of
+		// another kind, where the ordinal alone decides. apkDigit(1) is below
+		// apkSuffix(3), so the suffixed side is the lower version; under
+		// apkSuffixNo(4) both answers invert.
+		{"1.0a_p1", "1.0a1", -1, "a patch level outranks a _p suffix: apkDigit(1) < apkSuffix(3)"},
+		{"1.0a_git1", "1.0a1", -1, "same ordinal rule with a different post-release suffix"},
+		{"1.0a1", "1.0a1_p1", -1, "and a suffix may still follow the patch level"},
+
 		// Leading zeros switch to string comparison — but only for components
 		// AFTER the first. That is why apk-tools gives the first one its own
 		// token kind.
@@ -148,6 +179,17 @@ func TestAPKCompare_Invalid(t *testing.T) {
 		"1.0~",      // commit-hash marker with no hash
 		"1.0~ABC",   // apk's hex class is [0-9a-f]; uppercase is not hex
 		"1.0~xyz",   // not hex at all
+
+		// D31 adds digits after the letter and nothing else. apk-tools 2.x is
+		// bug-compatible with more than this — it accepts an empty digit run,
+		// so "1.18.-r2" and "0.8.21.r2" parse there and the second sorts ABOVE
+		// the "0.8.21-r2" it is a typo for. The rule is "a letter may carry a
+		// patch level", not "match 2.x exactly", and these hold that line.
+		"1.0a1b2",   // a second letter after the patch level
+		"1.0a1.2",   // a dot after it; apk-tools 3.x asserts !0.1a.1 in its vectors
+		"1.18.-r2",  // empty digit run, which 2.x accepts and 3.x rejects
+		"0.8.21.r2", // '.r2' is a typo for '-r2', not a revision
+		"1.0a1-1",   // still must be '-r'
 	}
 	var c APK
 	for _, v := range bad {

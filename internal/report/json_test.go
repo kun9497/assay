@@ -214,9 +214,9 @@ func TestJSON_SchemaVersionIsPresentAndStable(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
 		t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())
 	}
-	if doc.SchemaVersion != 2 {
-		t.Errorf("SchemaVersion = %d, want 2 — bumped when findings gained "+
-			"`enrichment` (D3)", doc.SchemaVersion)
+	if doc.SchemaVersion != 3 {
+		t.Errorf("SchemaVersion = %d, want 3 — bumped when EnrichmentRecord "+
+			"gained `claims` (D33)", doc.SchemaVersion)
 	}
 }
 

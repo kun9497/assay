@@ -15,14 +15,15 @@ import (
 // changes, so a consumer can tell "the format I know" apart from "something
 // new I have not seen" without having to guess from field presence.
 //
-// Bumped to 2 when FindingRecord gained `enrichment` (D3). Two earlier
-// additions should have bumped it and did not — `ratings` (D25) and
-// RatingRecord.URL (D27) both changed the shape while this constant stayed at
-// 1 — so version 1 in the wild denotes three different documents. That is the
-// cost of the misses, and it cannot be repaired retroactively; what it does
-// mean is that a consumer reading 2 can rely on every field below being
-// present, which is the guarantee the constant exists to give.
-const schemaVersion = 2
+// Bumped to 2 when FindingRecord gained `enrichment` (D3), and to 3 when
+// EnrichmentRecord gained `claims` (D33). Two earlier additions should have
+// bumped it and did not — `ratings` (D25) and RatingRecord.URL (D27) both
+// changed the shape while this constant stayed at 1 — so version 1 in the wild
+// denotes three different documents. That is the cost of the misses, and it
+// cannot be repaired retroactively; what it does mean is that a consumer
+// reading 2 or later can rely on every field below being present, which is the
+// guarantee the constant exists to give.
+const schemaVersion = 3
 
 // Document is the stable shape of `assay scan --output json` (design goal
 // #3). It carries what Table shows plus what Table cannot: the full
@@ -123,6 +124,13 @@ type EnrichmentRecord struct {
 	Title   string `json:"title"`
 	Summary string `json:"summary"`
 	URL     string `json:"url"`
+	// Claims is how many vulnerabilities this notice named (D33). A consumer
+	// filtering for prose that is actually about the finding wants
+	// `.claims == 1`; without it, a monthly bulletin naming a thousand CVEs is
+	// indistinguishable from an advisory written about this one. Zero means the
+	// source does not report breadth, which is why there is no omitempty: an
+	// absent number and an unreported one would otherwise look alike.
+	Claims int `json:"claims"`
 }
 
 // RatingRecord is one matcher.Rating, reshaped for stable JSON exactly like
@@ -271,6 +279,7 @@ func findingRecord(f matcher.Finding) FindingRecord {
 			Title:   e.Title,
 			Summary: e.Summary,
 			URL:     e.URL,
+			Claims:  e.Claims,
 		})
 	}
 	return FindingRecord{

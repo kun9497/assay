@@ -79,6 +79,11 @@ func parseSemVer(s string) (semverParsed, error) {
 	// error path.
 	s = strings.TrimPrefix(s, "v")
 
+	// suffixed records that a pre-release or build suffix was present, for the
+	// short-form rule below. It has to be tracked here because both are stripped
+	// off s before the core is split, so by then "4.0" and "4.0-rc.1" look alike.
+	suffixed := false
+
 	// Build metadata is discarded before comparison, not used as a tiebreaker
 	// (§10). It must still be syntactically valid.
 	if i := strings.IndexByte(s, '+'); i >= 0 {
@@ -86,6 +91,7 @@ func parseSemVer(s string) (semverParsed, error) {
 			return p, fmt.Errorf("semver %q build metadata: %w", s, ErrInvalid)
 		}
 		s = s[:i]
+		suffixed = true
 	}
 	if i := strings.IndexByte(s, '-'); i >= 0 {
 		pre := s[i+1:]
@@ -94,8 +100,34 @@ func parseSemVer(s string) (semverParsed, error) {
 		}
 		p.pre = strings.Split(pre, ".")
 		s = s[:i]
+		suffixed = true
 	}
 	parts := strings.Split(s, ".")
+	// D32: a bare short core is a shorthand, padded with zeros. Advisory range
+	// bounds routinely carry two components where the spec demands three —
+	// github.com/canonical/lxd at "4.0", npm's next at "13.0" — and refusing
+	// them made the whole package unevaluable. This is verbatim
+	// golang.org/x/mod/semver's documented exception, which govulncheck already
+	// relies on to read these same bounds.
+	//
+	// The bare-form restriction is the rule, not a detail. x/mod's IsValid is
+	// false for "v4.0-rc1" and "v4.0+meta", and node-semver refuses both in
+	// strict and loose alike; padding them would be an invention neither
+	// reference makes. Four or more identifiers stay an error too: node-semver's
+	// coerce would read "1.2.3.4" as 1.2.3, which silently discards a component
+	// rather than supplying a missing one.
+	//
+	// The OSV sentinel is excluded by name. "0" is a bare one-identifier core
+	// and would otherwise pad to 0.0.0, which is not what it means: the range
+	// layer resolves it to negative infinity, and a 0.0.0 reading sorts ABOVE
+	// every 0.0.0-prerelease build and would silently drop them out of the
+	// window. That protection used to come free from the three-identifier check
+	// this rule relaxes, so relaxing it has to restore the guard deliberately.
+	if len(parts) < 3 && !suffixed && s != introducedSentinel {
+		for len(parts) < 3 {
+			parts = append(parts, "0")
+		}
+	}
 	if len(parts) != 3 {
 		return p, fmt.Errorf("semver %q: core needs exactly three identifiers: %w", s, ErrInvalid)
 	}

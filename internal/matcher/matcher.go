@@ -120,6 +120,11 @@ type Enrichment struct {
 	Title   string
 	Summary string
 	URL     string
+	// Claims is how many vulnerabilities the notice this came from named
+	// (D33). Carried through to the report because a notice naming a thousand
+	// CVEs and one naming this CVE alone render identically without it, and
+	// the first is a monthly bulletin rather than prose about this finding.
+	Claims int
 }
 
 // Rating is one database's assessment of one vulnerability: what GHSA said, as
@@ -327,7 +332,22 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 						pkgmeta.NormalizeName(aff.Ecosystem, aff.Name) != wantName {
 						continue
 					}
-					hit, ev, err := version.AffectsVersion(cmp, p.Version, aff)
+					hit, ev, unreadable, err := version.AffectsVersion(cmp, p.Version, aff)
+					// D30: the advisory WAS evaluated, and some enumerated
+					// version in it was not. That is a third state — neither a
+					// clean verdict nor a skipped advisory — and it is recorded
+					// against the advisory exactly as a skip is, because a
+					// verdict reached over an unread entry is incomplete
+					// whether it says "affected" or "not affected".
+					if len(unreadable) > 0 && !skipped[a.ID] {
+						skipped[a.ID] = true
+						res.Skipped = append(res.Skipped, Skipped{
+							Package:    p,
+							AdvisoryID: a.ID,
+							Reason: fmt.Sprintf("%d of %d listed version(s) could not be compared, starting with %q",
+								len(unreadable), len(aff.Versions), unreadable[0]),
+						})
+					}
 					if err != nil {
 						// One advisory this package cannot be evaluated against.
 						// Recorded against that advisory and the loop continues, so
@@ -497,6 +517,7 @@ func (m *Matcher) annotate(f *Finding) error {
 				Title:   e.Title,
 				Summary: e.Summary,
 				URL:     e.URL,
+				Claims:  e.Claims,
 			})
 		}
 	}

@@ -46,6 +46,12 @@ type apkPart struct {
 	num  uint64 // digits, suffix numbers, revision
 	str  string // raw text, for the string-sort path and letters/hashes
 	sfx  int    // index into apkSuffixOrder, for apkSuffix
+	// postLetter marks the digits of a letter patch level (the "1" of 3.3.3p1).
+	// They are apkDigit so the kind ordering comes out right, but they must not
+	// take apkDigit's leading-zero string-sort path: in apk-tools 2.x that rule
+	// belongs to TOKEN_DIGIT_OR_ZERO, the state entered after '.', and the
+	// post-letter token is a plain TOKEN_DIGIT. See D31.
+	postLetter bool
 }
 
 // parseAPK turns a version into its token stream. It rejects rather than
@@ -100,6 +106,31 @@ func parseAPK(v string) ([]apkPart, error) {
 	if i < len(v) && v[i] >= 'a' && v[i] <= 'z' {
 		parts = append(parts, apkPart{kind: apkLetter, str: v[i : i+1]})
 		i++
+		// D31: a letter may carry a numeric patch level — libretls 3.3.3p1-r3,
+		// sudo 1.7.4p6-r0, python 0.12.5a0-r0. apk-tools 2.x parses these
+		// (next_token has an explicit TOKEN_LETTER-then-digit clause, and its
+		// demotion whitelist names that transition); apk-tools 3.x rejects them
+		// and asserts so in its own vectors. Every released Alpine ships 2.14.x,
+		// and 3.x answers EQUAL for 3.3.3p1-r3 against 3.3.3p1-r2 — it would
+		// call an unpatched host fixed — so 2.x is the behaviour to follow here.
+		//
+		// Only ONE production is added: digits, once, immediately after the
+		// letter. A second letter (1.0a1b2) and a dot after these digits
+		// (1.0a1.2, which 3.x rejects outright) still fall through to the
+		// trailing-input check below and stay errors.
+		//
+		// apkDigit is the kind apk-tools 2.x uses (next_token sets n =
+		// TOKEN_DIGIT here), and the ordinal is load-bearing against apkSuffix
+		// and apkRevisionNo — both of those substitutions turn the table red.
+		// Substituting apkInitialDigit does NOT, and that one is a true
+		// equivalent rather than a gap: this token sits at index 2 or later,
+		// apkInitialDigit only ever sits at index 0, and a dotted apkDigit can
+		// never align with it either because the letter position resolves the
+		// comparison first. Ordinals 0 and 1 both sit below every kind it can
+		// actually meet, so the two answer alike everywhere reachable.
+		if n, raw, ok := readNum(); ok {
+			parts = append(parts, apkPart{kind: apkDigit, num: n, str: raw, postLetter: true})
+		}
 	}
 
 	for i < len(v) && v[i] == '_' {
@@ -219,7 +250,17 @@ func (APK) Compare(a, b string) (int, error) {
 			// apk-tools: "if either of the digits have a leading zero, use raw
 			// string comparison similar to Gentoo spec". So 1.01 < 1.1, which
 			// numeric comparison would call equal.
-			if strings.HasPrefix(ta.str, "0") || strings.HasPrefix(tb.str, "0") {
+			//
+			// D31: a letter's patch level is exempt. In apk-tools 2.x that rule
+			// lives in TOKEN_DIGIT_OR_ZERO — the state entered after '.' — and a
+			// post-letter digit is a plain TOKEN_DIGIT, so 1.0a01 == 1.0a1 there
+			// while a string sort would call them different. The two flags can
+			// never disagree: for a post-letter digit to align with a dotted one,
+			// one stream would have to carry apkLetter where the other carries
+			// apkDigit, and the kind check above returns before reaching here.
+			// A mutation flipping || to && therefore survives, and is equivalent.
+			if !(ta.postLetter || tb.postLetter) &&
+				(strings.HasPrefix(ta.str, "0") || strings.HasPrefix(tb.str, "0")) {
 				if c := strings.Compare(ta.str, tb.str); c != 0 {
 					return c, nil
 				}
