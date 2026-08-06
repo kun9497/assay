@@ -657,8 +657,13 @@ day: `alpine:3.14` skipped `libretls 3.3.3p1-r3` and with it CVE-2022-0778.
       the bad bound as `0` inverts the window rather than widening it
 - [ ] pep440 leniency — deferred; the two candidate rules rescue 2 advisory bounds between them
 - [x] apk checked against apk-tools' own 738-comparison vector file, replayed in CI
-- [ ] semver and pep440 have no upstream vector file to replay; their tables are hand-written
-      and that is the weakest point of the three
+- [x] semver replays npm/node-semver's own comparison fixtures, and rejects its 31 loose-input
+      forms as a negative fixture (D39)
+- [x] Both specifications' ordered chains are checked offline — every pair, not only
+      neighbours, with transitivity and antisymmetry (55 + 136 pairs)
+- [x] **Measured: the hand tables were not the weak point.** No conformance corpus exists;
+      `x/mod/semver` orders `1.2.3` and `1.2.4` as EQUAL because it requires a `v` prefix
+      (20.6% of real bounds); packaging's corpus passes a comparer that says `1.9 > 1.10`
 
 **⑩ Which KISA notice wins** — found on first real use. The enrichment bucket keys on
 `(CVE, Source)`, so a CVE named by two KISA notices keeps whichever arrived last: `convert`

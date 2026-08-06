@@ -1534,6 +1534,58 @@ rather than a component, unusable lines counted but not named, options counted a
 requirements.txt returned to unread, cataloger skips dropped from the target scope, an
 unsupported ecosystem added to it, and the disclosure removed.
 
+
+### D39 — There is no upstream vector file for semver or PEP 440, and the hand tables are stronger than the corpora that exist
+
+The apk comparer replays apk-tools' own 738-comparison vector file, and that replay caught a
+defect the hand-written table had missed. semver and pep440 had no equivalent, which made them
+look like the weakest of the three. **They were not, and this decision is mostly the
+measurement that says so.**
+
+**No conformance corpus exists.** There is no semver equivalent of `JSON-Schema-Test-Suite` or
+`yaml-test-suite`; every implementation carries its own table, and the semver specification
+repository is eleven files of which none is a fixture. Recorded so the negative result does not
+have to be rediscovered.
+
+**`golang.org/x/mod/semver` is a silently wrong oracle.** It implements *Go module* semver,
+where the leading `v` is mandatory: `IsValid("1.2.3")` is false, and x/mod then orders every
+invalid string as equal to every other — so `Compare("1.2.3", "1.2.4")` returns **0** where this
+package returns -1. Not an error, an ordering. OSV's SEMVER bounds carry no `v` prefix, so the
+class is not exotic: measured over 5,546 real strings, **1,143 (20.6%)** are accepted here and
+rejected there. Importing it would also make a third direct dependency, but that was never the
+deciding objection.
+
+**packaging's `VERSIONS` list is blind where it matters most.** 92 entries yielding 4,186
+ordered pairs — and only **four distinct release strings** among them (`1.0`, `1.0.1`, `1.1`,
+`1.2`). Verified by mutation: a comparer that compares release segments **lexically** passes all
+4,186 pairs and still says `1.9 > 1.10`. That is the most common false negative in version
+comparison and exactly what a scanner meets — an advisory bounded at `< 1.10.3` against an
+installed `1.9.x`. This package's own table already carries `{"1.10", "1.9", 1}`. Replaying a
+corpus weaker than the table it would check is worse than not replaying it.
+
+**What was added anyway, and what it is worth.** node-semver's `comparisons.js` is replayed
+under the existing build tag: 31 pairs, ISC, parseable with one regex because the file is a pure
+array literal — unlike its sibling `invalid-versions.js`, which needs a JavaScript engine. Its
+`equality.js` is inverted into a **negative** fixture, because 31 of its 37 entries are npm
+input-normalisation cases (leading whitespace, an `=` prefix, `v 1.2.3`) that a scanner's
+comparer must refuse rather than accept. And both specifications' own ordered chains are
+transcribed offline — 55 semver pairs and 136 PEP 440 pairs, every pair rather than only
+neighbours, with antisymmetry asserted alongside.
+
+**Measured yield: zero.** Every one passes on first run, and mutation says why — the pre-release
+rank inversion, numeric-versus-alphanumeric rank, build metadata as a tiebreaker, the `=` prefix,
+epoch, post/dev order and dev rank are each caught by the *existing* table as well as by the new
+ones. Nothing added here catches anything the hand tables did not already catch.
+
+They are kept as a **tripwire, not as coverage**: node-semver is the dialect D34 deliberately
+follows, so the replay fires if npm adds a case this package gets wrong or if a future edit
+diverges from it — and its divergence list is empty rather than counted with a tolerance, so the
+first divergence is a decision somebody writes down. The offline chains cost no network and
+check transitivity, which a table of independent pairs does not.
+
+The README line calling these two "the weakest point of the three" is corrected: the weakness
+was an untested assumption about the tables, and testing it is what this decision did.
+
 ## 3. Architecture
 
 ### Measured data volumes
