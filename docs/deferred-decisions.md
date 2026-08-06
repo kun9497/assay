@@ -429,7 +429,7 @@ a SARIF renderer is a third `Reporter` over the same data rather than a new trav
 
 ---
 
-### Ingesting NVD as a rating source
+### ~~Ingesting NVD as a rating source~~ — resolved in slice ⑦ (D27)
 
 D25 made a finding carry every source's rating rather than one winner. NVD is the obvious
 next source: it rates nearly everything, and the gap D25 exposes is that 14 of a real Django
@@ -509,11 +509,12 @@ source, and it is weakest exactly where assay's unrated population is largest: G
 Alpine maps best, and is the one place NVD's version ranges would be wrong anyway, because
 distros backport fixes — the hazard already recorded under RHEL-family support.
 
-**Still deferred, with the trigger replaced.** The old trigger ("`--fail-on-unknown` becomes
-noise") asked the wrong question: the problem is not noise, it is that half of assay's
-`unknown` findings are high or critical and trip no gate at all. What is *not* yet decided is
-which shape to build, and that is a D decision, not a deferral: enrichment by CVE is small and
-supported by the evidence, an independent CPE matcher is large and contradicted by it.
+**Resolved 2026-08-04 as D27.** The shape the measurement pointed at is the one that
+shipped: NVD joined on the CVE as a *rating* source, never as a matching source, reusing D25's
+mechanism unchanged. The full-corpus run on 2026-08-05 rated **354,067** CVEs. The independent
+CPE matcher this entry weighed against it stays unbuilt and stays contradicted by the same
+evidence — see *Debian and Ubuntu package support* and *RHEL-family package support* for the
+backport hazard that is the reason.
 
 ---
 
