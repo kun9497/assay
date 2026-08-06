@@ -1358,6 +1358,67 @@ in `repair.go`: no valid apk version can contain `.r` at all, so the already-par
 never change an answer, and `Index` for `LastIndex` cannot either once the second guard
 rejects a repair that leaves a later `.r` behind.
 
+### D36 — Incompleteness carries a cause, and the gate can be narrowed to what you can fix
+
+D35 put *whose data is unreadable* in the message. D36 puts it in the type, because a CI
+policy deciding whether to fail a build cannot match on prose — and the prose changed one
+decision ago, which is the argument in miniature.
+
+`matcher.Skipped` gains `Cause`, one of three:
+
+| cause | means | can the caller act? |
+|---|---|---|
+| `target` | a version in the scanned artifact will not parse | yes |
+| `advisory` | a bound or listed version in the vulnerability data will not parse | no |
+| `coverage` | this database or this build does not handle the ecosystem (D20) | sometimes — `db update` |
+
+The classification comes from the `version` package rather than from a string match:
+`version.CauseOf(err)` answers `CauseAdvisoryData` or `CauseTargetVersion`, carried on a
+wrapper type whose `Error()` delegates, so D35's wording is untouched and this is purely a
+second channel for the same fact. An error the package did not classify reports
+`CauseUnknown`, deliberately not one of the two real answers: a new error site that forgets
+to classify itself has to show up as unknown rather than silently joining whichever side the
+zero value names.
+
+**The gate is added, not changed.** `--fail-on-incomplete` keeps meaning "anything went
+unchecked", because exit codes are contract (D11) and quietly narrowing an existing flag
+would stop failing pipelines that rely on it. `--fail-on-incomplete=target` is the narrow
+form, and `=any` spells out the default so a pipeline can say which it means rather than
+relying on the bare form continuing to mean the broad one. An unrecognized scope is an error,
+not a silently disabled gate.
+
+**Why the narrow form has to exist.** 85 range bounds in the live database are malformed
+upstream data — `1999-12-14` as a version, `7.0.0-0` in an Alpine record, `9.6.0b1` missing a
+hyphen — and no amount of fixing the scanned artifact changes any of them. A pipeline gated on
+`--fail-on-incomplete` that meets one of those is red on every run until somebody turns the
+gate off, and **a gate that gets turned off protects nothing.** Measured on `libdwarf 0.5.0-r0`
+against the v7 database:
+
+```
+--fail-on-incomplete           exit 2     (an advisory bound nobody can fix)
+--fail-on-incomplete=target    exit 0     (nothing wrong with the scanned artifact)
+```
+
+...and on an SBOM carrying `github.com/gogo/protobuf 1.3-broken`, `=target` exits 2.
+
+`Summary.TargetIncomplete` carries the count and `SkippedRecord.cause` carries the per-record
+value (report schema 4), so a policy that wants only its own broken input filters on
+`.cause == "target"` rather than on the reason text. `TargetIncomplete` cuts across both
+existing counts rather than being a subtotal of either — a whole-package skip the caller
+caused must gate too, and a gate reading `IncompleteChecks` would miss it.
+
+**An unclassified error maps to `advisory`, not `target`.** The conservative direction is the
+one that does not tell someone their input is broken when we do not know that, and it also
+keeps an unclassified error inside the default gate rather than quietly outside it.
+
+Nine mutations verified red, including both directions of the mapping, tagging the uncovered
+ecosystem as the caller's fault, counting every skip as the target's, reading
+`IncompleteChecks` in the narrow gate, `=target` setting the broad flag, and accepting an
+unknown scope silently. One initially survived — stripping the cause tag off the advisory-bound
+error, which the matcher's conservative default made invisible. It is now held by asserting
+`CauseOf` in the `version` package directly, since that answer is that package's contract
+regardless of what any caller defaults to.
+
 ## 3. Architecture
 
 ### Measured data volumes

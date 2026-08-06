@@ -24,6 +24,15 @@ type Summary struct {
 	Evaluated        int `json:"evaluated"`
 	NotEvaluated     int `json:"notEvaluated"`
 	IncompleteChecks int `json:"incompleteChecks"`
+	// TargetIncomplete is how much of the incompleteness above belongs to the
+	// scanned artifact rather than to the vulnerability data (D36) — an
+	// installed version that will not parse, not an advisory whose bound will
+	// not. Counted across BOTH kinds above, so it is a subtotal of neither.
+	//
+	// Populated whether or not it is zero, for the reason UnknownSeverity is:
+	// `--fail-on-incomplete=target` reads it directly, and a count that only
+	// appears when non-zero is not one a caller can rely on.
+	TargetIncomplete int `json:"targetIncomplete"`
 	Findings         int `json:"findings"`
 	// UnknownSeverity is the number of findings whose severity could not be
 	// rated — no vector scored (D17). It is populated whether or not it is
@@ -243,8 +252,16 @@ func Summarize(res matcher.Result, cat cyclonedx.Stats) Summary {
 	// not be judged. They must be counted apart, because only the first one
 	// changes how many packages were evaluated — and only the second one used
 	// to disappear from the report entirely.
-	var unevaluated, incompleteChecks int
+	//
+	// D36 adds a third axis, cutting across both: WHOSE data made it
+	// incomplete. targetIncomplete counts only what the person running the
+	// scan could act on, so a gate can exist that does not fire forever on
+	// upstream advisory defects nobody can fix.
+	var unevaluated, incompleteChecks, targetIncomplete int
 	for _, s := range res.Skipped {
+		if s.Cause == matcher.SkipTarget {
+			targetIncomplete++
+		}
 		if s.AdvisoryID == "" {
 			unevaluated++
 			continue
@@ -270,6 +287,7 @@ func Summarize(res matcher.Result, cat cyclonedx.Stats) Summary {
 		Evaluated:        evaluated,
 		NotEvaluated:     notEvaluated,
 		IncompleteChecks: incompleteChecks,
+		TargetIncomplete: targetIncomplete,
 		Findings:         len(res.Findings),
 		UnknownSeverity:  unknownSeverity,
 	}

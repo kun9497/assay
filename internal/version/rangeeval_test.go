@@ -333,6 +333,15 @@ func TestInRange_ErrorNamesWhoseDataIsBroken(t *testing.T) {
 		if strings.Contains(err.Error(), "package") {
 			t.Errorf("error = %q, blames the package for the advisory's defect", err)
 		}
+		// D36: the same fact, machine-readable. Asserted here rather than
+		// through the matcher, because the matcher defaults an unclassified
+		// error to "advisory" — so an untagged error reaches the same verdict
+		// there and the tag looks redundant. It is not: CauseOf answering
+		// correctly is this package's contract, and a caller that ever chose a
+		// different default would silently misclassify every bad bound.
+		if got := CauseOf(err); got != CauseAdvisoryData {
+			t.Errorf("CauseOf = %v, want CauseAdvisoryData", got)
+		}
 	})
 
 	t.Run("a malformed installed version is the package's", func(t *testing.T) {
@@ -350,6 +359,21 @@ func TestInRange_ErrorNamesWhoseDataIsBroken(t *testing.T) {
 		// half that would be wrong.
 		if strings.Contains(err.Error(), "advisory's range bound") {
 			t.Errorf("error = %q, blames the advisory for the package's version", err)
+		}
+		if got := CauseOf(err); got != CauseTargetVersion {
+			t.Errorf("CauseOf = %v, want CauseTargetVersion", got)
+		}
+	})
+
+	t.Run("an unclassified error is not silently assigned a side", func(t *testing.T) {
+		// The zero value must stay distinguishable. A new error site that
+		// forgets to classify itself has to show up as unknown rather than
+		// joining whichever side the zero value happens to name.
+		if got := CauseOf(errors.New("something else")); got != CauseUnknown {
+			t.Errorf("CauseOf(unclassified) = %v, want CauseUnknown", got)
+		}
+		if got := CauseOf(nil); got != CauseUnknown {
+			t.Errorf("CauseOf(nil) = %v, want CauseUnknown", got)
 		}
 	})
 }

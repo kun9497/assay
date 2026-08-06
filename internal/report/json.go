@@ -15,15 +15,16 @@ import (
 // changes, so a consumer can tell "the format I know" apart from "something
 // new I have not seen" without having to guess from field presence.
 //
-// Bumped to 2 when FindingRecord gained `enrichment` (D3), and to 3 when
-// EnrichmentRecord gained `claims` (D33). Two earlier additions should have
+// Bumped to 2 when FindingRecord gained `enrichment` (D3), to 3 when
+// EnrichmentRecord gained `claims` (D33), and to 4 when SkippedRecord gained
+// `cause` and Summary gained `targetIncomplete` (D36). Two earlier additions should have
 // bumped it and did not — `ratings` (D25) and RatingRecord.URL (D27) both
 // changed the shape while this constant stayed at 1 — so version 1 in the wild
 // denotes three different documents. That is the cost of the misses, and it
 // cannot be repaired retroactively; what it does mean is that a consumer
 // reading 2 or later can rely on every field below being present, which is the
 // guarantee the constant exists to give.
-const schemaVersion = 3
+const schemaVersion = 4
 
 // Document is the stable shape of `assay scan --output json` (design goal
 // #3). It carries what Table shows plus what Table cannot: the full
@@ -216,6 +217,16 @@ type SkippedRecord struct {
 	Package    PackageRecord `json:"package"`
 	AdvisoryID string        `json:"advisoryId,omitempty"`
 	Reason     string        `json:"reason"`
+	// Cause is whose data made this incomplete (D36): "target" for the artifact
+	// being scanned, "advisory" for the vulnerability record, "coverage" for an
+	// ecosystem this database or this build does not handle. A CI policy that
+	// wants to fail only on its own broken input filters on `.cause ==
+	// "target"`; matching on the reason text instead would break the first time
+	// the wording changed, which it did one decision ago.
+	//
+	// No omitempty: an absent cause and an unclassified one would look alike,
+	// and the shape must not vary per record.
+	Cause matcher.SkipCause `json:"cause"`
 }
 
 // JSON renders res as the Document above and writes it to w as the only
@@ -244,6 +255,7 @@ func JSON(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error)
 			Package:    packageRecord(s.Package),
 			AdvisoryID: s.AdvisoryID,
 			Reason:     s.Reason,
+			Cause:      s.Cause,
 		})
 	}
 

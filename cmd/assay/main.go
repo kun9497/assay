@@ -64,7 +64,11 @@ Scan flags (any order, before or after the target):
   --fail-on <band>      Exit 1 if a finding is at or above <band>
                         (none, low, medium, high, critical)
   --fail-on-unknown     Exit 1 if a finding's severity could not be rated
-  --fail-on-incomplete  Exit 2 if any package's evaluation was incomplete
+  --fail-on-incomplete[=any|target]
+                        Exit 2 if any package's evaluation was incomplete.
+                        =target narrows it to causes you can act on (a version
+                        in the scanned artifact that will not parse), leaving
+                        out malformed advisory data you cannot fix.
   --output <format>     table (default) or json
   --explain <id>        Print one advisory's full Evidence (its own ID, or
                         any alias/upstream identifier) instead of the report
@@ -512,6 +516,21 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 
 		case a == "--fail-on-incomplete":
 			opts.FailOnIncomplete = true
+
+		// D36. The valued form narrows the gate to what the caller can act on.
+		// "any" is spelled out as well as being the default, so a pipeline can
+		// say which it means rather than relying on the bare form continuing to
+		// mean the broad one.
+		case strings.HasPrefix(a, "--fail-on-incomplete="):
+			switch v := strings.TrimPrefix(a, "--fail-on-incomplete="); v {
+			case "any":
+				opts.FailOnIncomplete = true
+			case "target":
+				opts.FailOnIncompleteTarget = true
+			default:
+				return "", scancmd.Options{}, fmt.Errorf(
+					"--fail-on-incomplete: unknown scope %q (want any or target)", v)
+			}
 
 		case a == "--output":
 			i++

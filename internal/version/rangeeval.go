@@ -61,7 +61,8 @@ func AffectsVersion(c Comparer, v string, a advisory.Affected) (bool, Evidence, 
 	if _, err := c.Compare(v, v); err != nil {
 		// Same distinction as D35 draws in the ranges path: this is the
 		// installed version, not the advisory's list.
-		return false, Evidence{}, nil, fmt.Errorf("this package's own version %q could not be read: %w", v, err)
+		return false, Evidence{}, nil, withCause(CauseTargetVersion,
+			fmt.Errorf("this package's own version %q could not be read: %w", v, err))
 	}
 	// The right operand is upstream data, and 0.184% of it does not parse
 	// (2,411 of 1,309,665 entries measured). One such entry aborted the whole
@@ -211,7 +212,8 @@ func sortEvents(c Comparer, in []advisory.Event) ([]advisory.Event, error) {
 			// installed version. Both used to render as "not evaluated" with
 			// the cause left to be worked out from which operand the wrapped
 			// error happened to name.
-			return nil, fmt.Errorf("the advisory's range bound %q could not be read: %w", ver, err)
+			return nil, withCause(CauseAdvisoryData,
+				fmt.Errorf("the advisory's range bound %q could not be read: %w", ver, err))
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -257,8 +259,9 @@ func sortEvents(c Comparer, in []advisory.Event) ([]advisory.Event, error) {
 // The bound is still named, as context for which comparison was being made, not
 // as a suspect.
 func unreadablePackageVersion(v, role, bound string, err error) error {
-	return fmt.Errorf("this package's own version %q could not be read, comparing it against the advisory's %s bound %q: %w",
-		v, role, bound, err)
+	return withCause(CauseTargetVersion,
+		fmt.Errorf("this package's own version %q could not be read, comparing it against the advisory's %s bound %q: %w",
+			v, role, bound, err))
 }
 
 // atLeast reports whether v >= bound, resolving the OSV sentinel first.

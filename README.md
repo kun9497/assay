@@ -196,6 +196,7 @@ Scan the binary for what ships. The reasoning is recorded as D23.
 assay scan alpine:3.19 --fail-on high         # exit 1 on a high or critical finding
 assay scan alpine:3.19 --fail-on-unknown      # exit 1 on an unrated finding
 assay scan alpine:3.19 --fail-on-incomplete   # exit 2 if anything went unevaluated
+assay scan alpine:3.19 --fail-on-incomplete=target  # ...only if YOUR data caused it
 assay scan alpine:3.19 --output json          # one JSON document on stdout
 assay scan alpine:3.19 --explain CVE-2025-46394
 ```
@@ -220,7 +221,7 @@ left to be discovered:
 |---|---|---|
 | lowest band | `negligible` | `none` |
 | unrated findings | fold into the ordering | `unknown`, outside it — `--fail-on-unknown` only |
-| partial coverage | no gate | `--fail-on-incomplete`, exit 2 |
+| partial coverage | no gate | `--fail-on-incomplete[=any\|target]`, exit 2 |
 | explain | `grype explain` subcommand | `--explain <id>` flag on `scan` |
 | severity source | NVD, always, via the CVE alias | stored CVSS vectors, plus NVD when enabled |
 
@@ -640,6 +641,9 @@ day: `alpine:3.14` skipped `libretls 3.3.3p1-r3` and with it CVE-2022-0778.
 - [x] Repair `.rN` to `-rN` for Alpine at ingestion (D35) — 11 bounds, every apk `fixed`
       failure in the database. Not taught to the comparer: apk-tools 2.x parses the typo and
       sorts it *above* the version it is a typo for
+- [x] Incompleteness carries a cause, and `--fail-on-incomplete=target` narrows the gate to
+      what the caller can act on (D36) — 85 malformed advisory bounds would otherwise keep the
+      broad gate red forever, and a gate that gets turned off protects nothing
 - [ ] Partial evaluation of a range with one unreadable bound — **rejected**, see D35.
       Alpine's imagemagick carries `introduced 7.0.0-0` above `fixed 6.9.6.8-r0`, so treating
       the bad bound as `0` inverts the window rather than widening it

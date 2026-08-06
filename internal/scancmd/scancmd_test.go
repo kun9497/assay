@@ -841,8 +841,8 @@ func TestRun_OutputJSON(t *testing.T) {
 		if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
 			t.Fatalf("stdout is not valid JSON: %v\n%s", err, out.String())
 		}
-		if doc.SchemaVersion != 3 {
-			t.Errorf("SchemaVersion = %d, want 3", doc.SchemaVersion)
+		if doc.SchemaVersion != 4 {
+			t.Errorf("SchemaVersion = %d, want 4", doc.SchemaVersion)
 		}
 		if len(doc.Findings) != 1 || doc.Findings[0].Advisory.ID != "GHSA-json-medium" {
 			t.Errorf("Findings = %+v, want the one medium finding", doc.Findings)
@@ -1923,5 +1923,53 @@ func TestRun_EnrichmentChangesNoVerdict(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// D36. The whole point of the narrowed gate is that it does NOT fire on
+// upstream data the caller cannot fix. Both directions are asserted, because a
+// gate that fires on everything and a gate that fires on nothing each satisfy
+// exactly one of them.
+func TestVerdict_FailOnIncompleteTargetIgnoresAdvisoryDefects(t *testing.T) {
+	// One advisory-caused skip, nothing wrong with the scanned artifact. This
+	// is the shape of 85 range bounds in the live database.
+	advisoryOnly := report.Summary{NotEvaluated: 0, IncompleteChecks: 1, TargetIncomplete: 0}
+	// The same scan, plus one package whose own version will not parse.
+	withTarget := report.Summary{NotEvaluated: 0, IncompleteChecks: 2, TargetIncomplete: 1}
+
+	for _, tc := range []struct {
+		name string
+		opts Options
+		sum  report.Summary
+		want int
+	}{
+		{"narrow gate stays quiet on an advisory defect",
+			Options{FailOnIncompleteTarget: true}, advisoryOnly, 0},
+		{"narrow gate fires on the caller's own data",
+			Options{FailOnIncompleteTarget: true}, withTarget, 2},
+		// The broad gate is contract and must be untouched by D36 (D11): a
+		// pipeline relying on it would silently stop failing.
+		{"broad gate still fires on an advisory defect",
+			Options{FailOnIncomplete: true}, advisoryOnly, 2},
+		{"broad gate still fires on the caller's own data",
+			Options{FailOnIncomplete: true}, withTarget, 2},
+		// Neither flag set is still exit 0, however incomplete the scan was.
+		{"no gate, no failure", Options{}, withTarget, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := verdict(tc.opts, tc.sum, nil); got != tc.want {
+				t.Errorf("verdict = %d, want %d (summary %+v)", got, tc.want, tc.sum)
+			}
+		})
+	}
+}
+
+// A whole-package skip caused by the target counts too. TargetIncomplete is
+// deliberately not a subtotal of IncompleteChecks — it cuts across both kinds —
+// and a gate reading IncompleteChecks instead would miss this case entirely.
+func TestVerdict_FailOnIncompleteTargetCountsWholePackageSkips(t *testing.T) {
+	sum := report.Summary{NotEvaluated: 1, IncompleteChecks: 0, TargetIncomplete: 1}
+	if got := verdict(Options{FailOnIncompleteTarget: true}, sum, nil); got != 2 {
+		t.Errorf("verdict = %d, want 2: a whole-package skip the caller caused must gate", got)
 	}
 }
