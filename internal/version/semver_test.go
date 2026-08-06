@@ -40,6 +40,24 @@ var semverTests = []struct {
 	{"0.46", "0.46.0-rc3", 1},
 	{"4.0", "4.0.0-alpha", 1},
 
+	// D34: a leading zero in the core is normalized away rather than refused.
+	{"19.03.0", "19.3.0", 0},   // the same release, written two ways
+	{"19.03.0", "19.03.9", -1}, // docker's own patch line
+	{"19.03.9", "19.10.0", -1}, // 3 < 10: the ordering a string sort gets right
+	{"01.0.0", "1.0.0", 0},
+	{"1.0.01", "1.0.1", 0},
+	{"1.00.0", "1.0.0", 0}, // all-zero identifier keeps one digit, not none
+	// The pair that makes normalization load-bearing rather than cosmetic.
+	// compareNumeric orders digit strings by LENGTH first, so accepting "072"
+	// without trimming it puts it above "72" — the same release sorting above
+	// itself. Length differs here and the values are equal, which is the only
+	// shape that can tell acceptance apart from acceptance-plus-normalization.
+	{"4.072.0", "4.72.0", 0},
+	{"1.0.007", "1.0.7", 0},
+	// ...and normalization must not flatten genuinely different versions.
+	{"1.0.007", "1.0.8", -1},
+	{"4.072.0", "4.73.0", -1},
+
 	// Pre-release versus normal at equal core (§11.3)
 	{"1.0.0-alpha", "1.0.0", -1},
 	{"1.0.0", "1.0.0-alpha", 1},
@@ -147,6 +165,14 @@ func TestSemVerCompare(t *testing.T) {
 func TestSemVerInvalid(t *testing.T) {
 	invalid := []string{
 		"", "1.0.0.0", "v1.0.0.0",
+		// D34 accepts a leading zero in a three-identifier core and normalizes
+		// it away. It does NOT extend to the D32 shorthand: node-semver's loose
+		// parser needs three identifiers and throws on these, and x/mod's
+		// shorthand needs no leading zero, so nothing sanctions the pair.
+		"4.072", "01.0", "1.0e5", "v4.072",
+		// Pre-release identifiers keep the spec's own rule (§9); D34 changed the
+		// core only, and no data asks for more.
+		"1.0.0-01", "1.0.0-alpha.00",
 		// D32 pads a bare short core; it does NOT pad a suffixed one. x/mod's
 		// IsValid is false for both of these and node-semver refuses them in
 		// strict and loose alike, so padding them would be an invention neither
@@ -154,8 +180,8 @@ func TestSemVerInvalid(t *testing.T) {
 		// reason: coercing 1.0.0.0 to 1.0.0 discards a component rather than
 		// supplying a missing one.
 		"1.0-rc.1", "1-rc.1", "1.0+meta", "1+meta", "1.0-", "1.0+",
-		"01.0.0", "1.01.0", "1.0.01", "-1.0.0",
-		"1.0.0-01", "1.0.0-alpha.00", "1.0.0-", "1.0.0-alpha..1",
+		"-1.0.0",
+		"1.0.0-", "1.0.0-alpha..1",
 		"1.0.0-.alpha", "1.0.0-alpha.", "1.0.0-alpha_beta", "1.0.0-α",
 		"1.0.0-beta*", "1.0.0-a b", "1.0.0+", "1.0.0+build..1",
 		"1.0.0+build_1", "1.0.0+build+more", "1.0.0-+build",
@@ -186,6 +212,11 @@ func TestSemVerValidButUnusual(t *testing.T) {
 		// github.com/cosmos/cosmos-sdk at "0.46", github.com/esm-dev/esm.sh at
 		// a bare "136".
 		"4.0", "13.0", "0.46", "136", "v4.0", "v136",
+		// D34: real GHSA range bounds. Docker tags 19.03.x, which Go's own
+		// version rules cannot express — part of why it is carried as
+		// +incompatible — so the string reaches us through the advisory, not
+		// through a module version.
+		"19.03.0", "19.03.9", "01.0.0", "1.01.0", "1.0.01", "v19.03.9",
 	}
 	for _, in := range valid {
 		if _, err := (SemVer{}).Compare(in, "1.0.0"); err != nil {

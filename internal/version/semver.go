@@ -123,21 +123,64 @@ func parseSemVer(s string) (semverParsed, error) {
 	// every 0.0.0-prerelease build and would silently drop them out of the
 	// window. That protection used to come free from the three-identifier check
 	// this rule relaxes, so relaxing it has to restore the guard deliberately.
+	padded := false
 	if len(parts) < 3 && !suffixed && s != introducedSentinel {
 		for len(parts) < 3 {
 			parts = append(parts, "0")
+			padded = true
 		}
 	}
 	if len(parts) != 3 {
 		return p, fmt.Errorf("semver %q: core needs exactly three identifiers: %w", s, ErrInvalid)
 	}
 	for i, part := range parts {
-		if !isNumericID(part) || hasLeadingZero(part) {
+		if !isNumericID(part) {
 			return p, fmt.Errorf("semver %q core identifier %q: %w", s, part, ErrInvalid)
+		}
+		// D34: a leading zero in the core is accepted and normalized away, the
+		// way node-semver's loose mode does — SemVer("19.03.0", {loose:true})
+		// reports 19.3.0, and equals 19.3.0. Docker really tags 19.03.x, so
+		// GHSA range bounds carry the string and refusing it meant skipping
+		// github.com/docker/docker, github.com/moby/moby and every image that
+		// vendors them.
+		//
+		// Accepting WITHOUT normalizing would have been worse than refusing,
+		// which is why D32 declined to do it: compareNumeric orders digit
+		// strings by length first, so "072" would sort above "72" while
+		// denoting the same release — a silent reordering in place of a loud
+		// skip. Acceptance and normalization are one rule, not two.
+		//
+		// This is a deliberate divergence from golang.org/x/mod/semver, which
+		// refuses a leading zero outright, and it is taken knowingly: 19.03.9 is
+		// a real upstream tag that Go's own version rules cannot express, which
+		// is part of why docker is carried as +incompatible in the first place.
+		// The bound is GHSA's text about a release, not a Go module version.
+		if hasLeadingZero(part) {
+			// Not extended to the D32 shorthand. Those are separate rules from
+			// separate references, and neither reference applies both at once:
+			// node-semver's loose parser needs three identifiers and throws on
+			// "4.072", while x/mod's shorthand needs no leading zero. Combining
+			// them would read "4.072" as 4.72.0, which only coerce() does — a
+			// lossier entry point that also silently truncates "1.2.3.4".
+			if padded {
+				return p, fmt.Errorf("semver %q core identifier %q: %w", s, part, ErrInvalid)
+			}
+			part = trimLeadingZeros(part)
 		}
 		p.core[i] = part
 	}
 	return p, nil
+}
+
+// trimLeadingZeros normalizes a numeric identifier for comparison. All-zero
+// input keeps one digit — "00" is 0, not the empty string, and an empty core
+// identifier would compare below every real version rather than equal to zero.
+func trimLeadingZeros(s string) string {
+	i := 0
+	for i < len(s)-1 && s[i] == '0' {
+		i++
+	}
+	return s[i:]
 }
 
 // validIdentifiers checks a dot-separated identifier list. build allows leading
