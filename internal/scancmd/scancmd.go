@@ -57,6 +57,18 @@ type Options struct {
 	// this exits 2 rather than 1, and why it outranks FailOn/FailOnUnknown
 	// under D11's 2 > 1 > 0 precedence.
 	FailOnIncomplete bool
+	// FailOnIncompleteTarget narrows FailOnIncomplete to what the person
+	// running the scan can act on (D36): an installed version that will not
+	// parse, not an advisory whose bound will not.
+	//
+	// It exists because the broad gate is unusable in a pipeline that meets any
+	// of the 85 malformed range bounds still in the database. Those are upstream
+	// data nobody scanning can fix, so a job gated on them is red on every run
+	// until somebody turns the gate off — and a gate that gets turned off
+	// protects nothing. Both flags are honoured together; the broad one is
+	// unchanged, because exit codes are contract (D11) and quietly narrowing an
+	// existing flag would break pipelines that rely on it.
+	FailOnIncompleteTarget bool
 	// Output selects the renderer: "" and "table" both mean the human table
 	// (Options{}'s zero value must reproduce today's behaviour exactly, the
 	// same rule Options.FailOn* already follows), "json" means the stable
@@ -357,6 +369,13 @@ func article(kind source.TargetKind) string {
 // AtOrAbove, one field over — so the loop below exists only for FailOn.
 func verdict(opts Options, sum report.Summary, findings []matcher.Finding) int {
 	if opts.FailOnIncomplete && (sum.NotEvaluated > 0 || sum.IncompleteChecks > 0) {
+		return 2
+	}
+	// D36: the same exit code for a narrower cause. Deliberately a second
+	// condition rather than a mode on the first — the two are independent
+	// questions ("did anything go unchecked" and "did MY data go unchecked"),
+	// and a pipeline may reasonably ask both.
+	if opts.FailOnIncompleteTarget && sum.TargetIncomplete > 0 {
 		return 2
 	}
 	if opts.FailOnUnknown && sum.UnknownSeverity > 0 {

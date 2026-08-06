@@ -157,15 +157,28 @@ func goldenFixture() (matcher.Result, cyclonedx.Stats) {
 				},
 			},
 		},
+		// D36: all three causes, so the golden pins each one and a renderer
+		// that dropped the field could not produce byte-identical output. The
+		// zero value of SkipCause is the empty string, which is exactly what an
+		// unwired field looks like — a fixture leaving any of these unset would
+		// prove nothing about the wiring.
 		Skipped: []matcher.Skipped{
 			{
 				Package: pkgmeta.Package{Name: "x", Version: "1.0.0", Ecosystem: "Go"},
 				Reason:  "no version comparer for ecosystem \"bogus\"",
+				Cause:   matcher.SkipCoverage,
 			},
 			{
 				Package:    pkgmeta.Package{Name: "y", Version: "2.0.0", Ecosystem: "Go"},
 				AdvisoryID: "GHSA-bad",
 				Reason:     `the advisory's range bound "not-a-version" could not be read: invalid version`,
+				Cause:      matcher.SkipAdvisory,
+			},
+			{
+				Package:    pkgmeta.Package{Name: "z", Version: "not-a-version", Ecosystem: "Go"},
+				AdvisoryID: "GHSA-target",
+				Reason:     `this package's own version "not-a-version" could not be read: invalid version`,
+				Cause:      matcher.SkipTarget,
 			},
 		},
 	}
@@ -214,9 +227,9 @@ func TestJSON_SchemaVersionIsPresentAndStable(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
 		t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())
 	}
-	if doc.SchemaVersion != 3 {
-		t.Errorf("SchemaVersion = %d, want 3 — bumped when EnrichmentRecord "+
-			"gained `claims` (D33)", doc.SchemaVersion)
+	if doc.SchemaVersion != 4 {
+		t.Errorf("SchemaVersion = %d, want 4 — bumped when EnrichmentRecord "+
+			"gained `cause` and Summary gained `targetIncomplete` (D36)", doc.SchemaVersion)
 	}
 }
 
@@ -275,7 +288,7 @@ func TestJSON_CarriesWhatTheTableCannot(t *testing.T) {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 	if len(doc.Findings) != 3 {
-		t.Fatalf("Findings = %d, want 3", len(doc.Findings))
+		t.Fatalf("Findings = %d, want 4", len(doc.Findings))
 	}
 	f := doc.Findings[0]
 	if f.Package.Source == nil || f.Package.Source.Name != "openssl" {
@@ -297,9 +310,15 @@ func TestJSON_CarriesWhatTheTableCannot(t *testing.T) {
 
 	// Summary carries the same counts Table's own summary line prints.
 	if doc.Summary.Components != 6 || doc.Summary.Evaluated != 4 ||
-		doc.Summary.NotEvaluated != 2 || doc.Summary.IncompleteChecks != 1 ||
+		doc.Summary.NotEvaluated != 2 || doc.Summary.IncompleteChecks != 2 ||
 		doc.Summary.Findings != 3 || doc.Summary.UnknownSeverity != 1 {
-		t.Errorf("Summary = %+v, want {6 4 2 1 3 1}", doc.Summary)
+		t.Errorf("Summary = %+v, want components=6 evaluated=4 notEvaluated=2 incompleteChecks=2 findings=3 unknownSeverity=1", doc.Summary)
+	}
+	// D36: one of the three skips is the target's fault and two are not, so a
+	// field that simply mirrored IncompleteChecks — or that counted every skip
+	// — would be wrong here rather than coincidentally right.
+	if doc.Summary.TargetIncomplete != 1 {
+		t.Errorf("Summary.TargetIncomplete = %d, want 1 of the 3 skips", doc.Summary.TargetIncomplete)
 	}
 }
 
@@ -330,11 +349,11 @@ func TestJSON_CarriesFullRatingsArray(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(doc.Findings) != 3 {
-		t.Fatalf("Findings = %d, want 3", len(doc.Findings))
+		t.Fatalf("Findings = %d, want 4", len(doc.Findings))
 	}
 	f := doc.Findings[2] // the multi-source Django finding goldenFixture appends
 	if len(f.Ratings) != 3 {
-		t.Fatalf("Ratings = %d entries, want 3 — JSON must not collapse to the winner", len(f.Ratings))
+		t.Fatalf("Ratings = %d entries, want 4 — JSON must not collapse to the winner", len(f.Ratings))
 	}
 	ghsa := f.Ratings[0]
 	if ghsa.Database != "GHSA" || ghsa.AdvisoryID != "GHSA-w24h-v9qh-8gxj" ||
@@ -450,14 +469,22 @@ func TestJSON_CarriesSkippedEntries(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
 		t.Fatal(err)
 	}
-	if len(doc.Skipped) != 2 {
-		t.Fatalf("Skipped = %d entries, want 2", len(doc.Skipped))
+	if len(doc.Skipped) != 3 {
+		t.Fatalf("Skipped = %d entries, want 3", len(doc.Skipped))
 	}
 	if doc.Skipped[0].AdvisoryID != "" || doc.Skipped[0].Package.Name != "x" {
 		t.Errorf("Skipped[0] = %+v, want the whole-package skip (empty AdvisoryID) for %q", doc.Skipped[0], "x")
 	}
 	if doc.Skipped[1].AdvisoryID != "GHSA-bad" || doc.Skipped[1].Package.Name != "y" {
 		t.Errorf("Skipped[1] = %+v, want the advisory-scoped skip for %q", doc.Skipped[1], "y")
+	}
+	// D36: the cause reaches the document, per record. Asserted on all three
+	// because they are the three distinct values — a wiring that emitted one
+	// constant would satisfy any single check.
+	for i, want := range []matcher.SkipCause{matcher.SkipCoverage, matcher.SkipAdvisory, matcher.SkipTarget} {
+		if got := doc.Skipped[i].Cause; got != want {
+			t.Errorf("Skipped[%d].Cause = %q, want %q", i, got, want)
+		}
 	}
 }
 

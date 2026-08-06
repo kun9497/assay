@@ -948,3 +948,60 @@ func TestMatch_UnscorableSeverityVectorIsUnknownNotNone(t *testing.T) {
 			"unscorable vector must not be coerced to none", f.Severity, f.Score)
 	}
 }
+
+// D36. The cause has to be set from the error's own classification, not
+// guessed. Both directions run through the real comparer, so the mapping is
+// exercised end to end rather than against a hand-built error.
+func TestMatch_SkipCauseSeparatesAdvisoryFromTarget(t *testing.T) {
+	// The bound is malformed; the installed version is fine.
+	badBound := advWithRange("GHSA-badbound", "Go", "x", "0", "not-a-version", advisory.RangeSemver)
+	// The installed version is malformed; the bounds are fine.
+	goodBound := advWithRange("GHSA-goodbound", "Go", "y", "0", "2.0.0", advisory.RangeSemver)
+
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Go\x00x": {badBound},
+		"Go\x00y": {goodBound},
+	}}
+	res, err := New(s).Match(pkgmeta.Target{Packages: []pkgmeta.Package{
+		pkg("x", "1.0.0", "Go"),
+		pkg("y", "not-a-version", "Go"),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]SkipCause{}
+	for _, s := range res.Skipped {
+		got[s.Package.Name] = s.Cause
+	}
+	if got["x"] != SkipAdvisory {
+		t.Errorf("x (malformed bound, good version) cause = %q, want %q", got["x"], SkipAdvisory)
+	}
+	if got["y"] != SkipTarget {
+		t.Errorf("y (good bound, malformed version) cause = %q, want %q", got["y"], SkipTarget)
+	}
+	// The two must not collapse: a mapping that returned one constant would
+	// satisfy either check alone.
+	if got["x"] == got["y"] {
+		t.Errorf("both skips reported cause %q; the distinction is the whole feature", got["x"])
+	}
+}
+
+// An ecosystem this database does not cover is neither party's malformed data,
+// and must not be reported as the caller's — otherwise `--fail-on-incomplete=
+// target` fires on a stale database, which is exactly the false alarm D36
+// exists to remove.
+func TestMatch_UncoveredEcosystemIsCoverageNotTarget(t *testing.T) {
+	s := fakeStore{byKey: map[string][]advisory.Advisory{}, covers: []string{"Go"}}
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("requests", "2.0.0", "PyPI")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Skipped) != 1 {
+		t.Fatalf("Skipped = %d, want 1", len(res.Skipped))
+	}
+	if got := res.Skipped[0].Cause; got != SkipCoverage {
+		t.Errorf("cause = %q, want %q", got, SkipCoverage)
+	}
+}

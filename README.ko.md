@@ -188,6 +188,7 @@ go.mod names 11 module(s); this is what was requested, not what a build links
 assay scan alpine:3.19 --fail-on high         # high 이상 finding이면 1
 assay scan alpine:3.19 --fail-on-unknown      # 미평가 finding이 있으면 1
 assay scan alpine:3.19 --fail-on-incomplete   # 평가하지 못한 것이 있으면 2
+assay scan alpine:3.19 --fail-on-incomplete=target  # ...그 원인이 내 데이터일 때만
 assay scan alpine:3.19 --output json          # stdout에 JSON 문서 하나
 assay scan alpine:3.19 --explain CVE-2025-46394
 ```
@@ -209,7 +210,7 @@ assay scan alpine:3.19 --explain CVE-2025-46394
 |---|---|---|
 | 최하위 밴드 | `negligible` | `none` |
 | 미평가 finding | 순서 안에 접어 넣음 | 순서 밖의 `unknown` — `--fail-on-unknown`으로만 |
-| 부분 커버리지 | 게이트 없음 | `--fail-on-incomplete`, 종료 코드 2 |
+| 부분 커버리지 | 게이트 없음 | `--fail-on-incomplete[=any\|target]`, 종료 코드 2 |
 | explain | `grype explain` 서브커맨드 | `scan`의 `--explain <id>` 플래그 |
 | 심각도 출처 | 항상 CVE alias를 통해 NVD | 저장된 CVSS 벡터 + (활성화 시) NVD |
 
@@ -608,6 +609,9 @@ CVE-2022-0778을 건너뛰었습니다.
 - [x] Alpine의 `.rN`을 `-rN`으로 수집 시점에 수리 (D35) — 11개 경계, 데이터베이스의 apk
       `fixed` 실패 전부. comparer에 가르치지 않았습니다. apk-tools 2.x는 그 오타를 파싱하고
       오타의 원본보다 *위로* 정렬합니다
+- [x] 불완전함이 원인을 갖고, `--fail-on-incomplete=target`이 게이트를 호출자가 조치할 수
+      있는 것으로 좁힘 (D36) — 기형 advisory 경계 85개가 아니면 넓은 게이트를 영원히
+      빨간불로 두고, 꺼진 게이트는 아무것도 지키지 않습니다
 - [ ] 경계 하나가 읽히지 않는 range의 부분 평가 — **기각**, D35 참조. Alpine imagemagick이
       `introduced 7.0.0-0`을 `fixed 6.9.6.8-r0` 위에 갖고 있어서, 나쁜 경계를 `0`으로 보면
       창이 넓어지는 게 아니라 뒤집힙니다

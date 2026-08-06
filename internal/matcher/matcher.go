@@ -200,6 +200,43 @@ type Skipped struct {
 	// comparer is registered for its ecosystem.
 	AdvisoryID string
 	Reason     string
+	// Cause is who the incompleteness belongs to (D36). D35 put this in the
+	// Reason text; a CI policy deciding whether to fail a build cannot match on
+	// prose, and the difference matters more than presentation: SkipTarget is
+	// something the person running the scan can fix, and the other two are not.
+	// A gate that cannot tell them apart stays red forever and gets turned off,
+	// which is worse than no gate.
+	Cause SkipCause
+}
+
+// SkipCause classifies why an evaluation could not be completed.
+type SkipCause string
+
+const (
+	// SkipTarget: the thing being scanned is at fault — an installed version
+	// that will not parse. Actionable by whoever ran the scan.
+	SkipTarget SkipCause = "target"
+	// SkipAdvisory: the vulnerability data is malformed. Measured on the v7
+	// database, 85 range bounds are in this state and no amount of fixing the
+	// scanned artifact will change any of them.
+	SkipAdvisory SkipCause = "advisory"
+	// SkipCoverage: neither side is malformed — this database, or this build of
+	// assay, simply does not cover the ecosystem (D20). Distinct from
+	// SkipAdvisory because the remedy is different and sometimes exists:
+	// `assay db update` fixes a stale database, nothing fixes a bad bound.
+	SkipCoverage SkipCause = "coverage"
+)
+
+// skipCauseOf maps a comparison failure onto who owns it. An error this package
+// cannot classify is reported as SkipAdvisory rather than SkipTarget: the
+// conservative direction is the one that does NOT tell a user their input is
+// broken when we do not know that, and it also keeps an unclassified error
+// inside the default gate rather than quietly outside it.
+func skipCauseOf(err error) SkipCause {
+	if version.CauseOf(err) == version.CauseTargetVersion {
+		return SkipTarget
+	}
+	return SkipAdvisory
 }
 
 type Result struct {
@@ -236,6 +273,7 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 			res.Skipped = append(res.Skipped, Skipped{
 				Package: p,
 				Reason:  fmt.Sprintf("no version comparer for ecosystem %q", p.Ecosystem),
+				Cause:   SkipCoverage,
 			})
 			continue
 		}
@@ -246,6 +284,7 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 				Package: p,
 				Reason: fmt.Sprintf("ecosystem %q is not in this database; "+
 					"run `assay db update`", p.Ecosystem),
+				Cause: SkipCoverage,
 			})
 			continue
 		}
@@ -346,6 +385,10 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 							AdvisoryID: a.ID,
 							Reason: fmt.Sprintf("%d of %d listed version(s) could not be compared, starting with %q",
 								len(unreadable), len(aff.Versions), unreadable[0]),
+							// The unreadable entries are the advisory's own
+							// enumerated list; the installed version parsed,
+							// or AffectsVersion would have aborted (D30).
+							Cause: SkipAdvisory,
 						})
 					}
 					if err != nil {
@@ -367,6 +410,7 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 								// whose cause is the advisory, which is the
 								// confusion being removed.
 								Reason: err.Error(),
+								Cause:  skipCauseOf(err),
 							})
 						}
 						continue

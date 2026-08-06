@@ -637,8 +637,8 @@ func TestRun_ScanOutputJSONReachesRealExitCode(t *testing.T) {
 	// cannot notice that the shape changed under it. Bumping this is meant to
 	// be the deliberate act that accompanies a schema change (D33 was the
 	// third).
-	if doc.SchemaVersion != 3 {
-		t.Errorf("SchemaVersion = %d, want 3", doc.SchemaVersion)
+	if doc.SchemaVersion != 4 {
+		t.Errorf("SchemaVersion = %d, want 4", doc.SchemaVersion)
 	}
 	// buildRunSeamFixture's critical + unrated findings; somecrate is
 	// dropped by the cataloger and never reaches a Finding at all.
@@ -1475,5 +1475,47 @@ func TestRun_DBBuildConnectsBothProgressWritersToItsStderr(t *testing.T) {
 	if gotKNVD.Progress != io.Writer(&stderr) {
 		t.Errorf("knvd.Options.Progress = %v, want the stderr `db build` was given - every "+
 			"page and retry notice goes to io.Discard", gotKNVD.Progress)
+	}
+}
+
+// D36: the valued form of --fail-on-incomplete, and its rejection of anything
+// else. A scope typo that silently left the gate off would be worse than the
+// unusable gate it replaces.
+func TestParseScan_FailOnIncompleteScopes(t *testing.T) {
+	for _, tc := range []struct {
+		arg          string
+		wantAny      bool
+		wantTarget   bool
+		wantErrPiece string
+	}{
+		{arg: "--fail-on-incomplete", wantAny: true},
+		{arg: "--fail-on-incomplete=any", wantAny: true},
+		{arg: "--fail-on-incomplete=target", wantTarget: true},
+		{arg: "--fail-on-incomplete=", wantErrPiece: `unknown scope ""`},
+		{arg: "--fail-on-incomplete=advisory", wantErrPiece: `unknown scope "advisory"`},
+		{arg: "--fail-on-incomplete=TARGET", wantErrPiece: "unknown scope"},
+	} {
+		t.Run(tc.arg, func(t *testing.T) {
+			_, opts, err := parseScanArgs([]string{"sbom.json", tc.arg})
+			if tc.wantErrPiece != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErrPiece) {
+					t.Fatalf("err = %v, want one containing %q", err, tc.wantErrPiece)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseScan: %v", err)
+			}
+			if opts.FailOnIncomplete != tc.wantAny {
+				t.Errorf("FailOnIncomplete = %v, want %v", opts.FailOnIncomplete, tc.wantAny)
+			}
+			// Asserted as well as the one above: the bare form must NOT set the
+			// narrow flag, and "=target" must NOT set the broad one. A parser
+			// that set both would satisfy either assertion on its own and turn
+			// the narrow scope into a no-op.
+			if opts.FailOnIncompleteTarget != tc.wantTarget {
+				t.Errorf("FailOnIncompleteTarget = %v, want %v", opts.FailOnIncompleteTarget, tc.wantTarget)
+			}
+		})
 	}
 }

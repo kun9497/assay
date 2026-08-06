@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "findings": [
     {
       "package": {
@@ -147,7 +147,8 @@
         "version": "1.0.0",
         "ecosystem": "Go"
       },
-      "reason": "no version comparer for ecosystem \"bogus\""
+      "reason": "no version comparer for ecosystem \"bogus\"",
+      "cause": "coverage"
     },
     {
       "package": {
@@ -156,14 +157,26 @@
         "ecosystem": "Go"
       },
       "advisoryId": "GHSA-bad",
-      "reason": "the advisory's range bound \"not-a-version\" could not be read: invalid version"
+      "reason": "the advisory's range bound \"not-a-version\" could not be read: invalid version",
+      "cause": "advisory"
+    },
+    {
+      "package": {
+        "name": "z",
+        "version": "not-a-version",
+        "ecosystem": "Go"
+      },
+      "advisoryId": "GHSA-target",
+      "reason": "this package's own version \"not-a-version\" could not be read: invalid version",
+      "cause": "target"
     }
   ],
   "summary": {
     "components": 6,
     "evaluated": 4,
     "notEvaluated": 2,
-    "incompleteChecks": 1,
+    "incompleteChecks": 2,
+    "targetIncomplete": 1,
     "findings": 3,
     "unknownSeverity": 1
   }
