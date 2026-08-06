@@ -11,8 +11,9 @@ separate projects (`syft`, `vunnel` + `grype-db`, `grype`). KISA/KNVD advisory d
 first-class provider — that is the main reason this exists rather than using grype.
 
 Slices ①–⑩ are built. `assay db build` builds a database from OSV (Go, npm, PyPI, Alpine)
-with NVD ratings (D27) and, under `KISA_ENABLE=1`, KISA's Korean prose as enrichment (⑤,
-D29 — local only, stripped by `db push`); `assay db update` pulls the published OCI artifact
+with NVD ratings (D27, opt-in via `NVD_ENABLE`) and KISA's Korean prose as enrichment (⑤, on
+by default since D37, local only because `db push` strips it, D29); `assay db update` pulls
+the published OCI artifact
 (D28) rather than rebuilding. `assay scan` reads SBOMs, container images, Go binaries and
 directories, matches them, and returns a verdict CI can gate on. A finding carries every
 source's rating and the gate takes the highest (D25). Incompleteness carries a cause, and

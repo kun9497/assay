@@ -40,6 +40,12 @@ jobs:
           # next day's window still covers what it missed. One day would
           # make every skipped run a permanent hole in the ratings.
           NVD_SINCE_DAYS: "3"
+          # Off here, on by default everywhere else (D37). db push strips
+          # enrichment before publishing, so fetching it would mean 41 requests
+          # to a public-sector service for data this job deletes seconds later.
+          # The flag has to be honoured as "0" for that to work, which it was
+          # not until D37 replaced the non-empty test.
+          KISA_ENABLE: "0"
         # The seed fetch is the first thing that touches ghcr, so an access
         # problem surfaces here. DENIED is not a code defect and reads like
         # one: GITHUB_TOKEN can only touch packages LINKED to this repository,

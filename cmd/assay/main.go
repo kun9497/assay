@@ -98,15 +98,18 @@ Environment (db build only — a scan reads no environment and no network):
   NVD_API_KEY=<key>     Raise NVD's rate limit tenfold. Optional, and it does
                         not shorten the seven hours; NVD's own response
                         generation is the bottleneck, not the pacing.
-  KISA_ENABLE=1         Also fetch KISA/KNVD's Korean security notices, so a
-                        finding whose CVE one of them describes carries its
-                        Korean title, summary and link. The fetch is about 41
-                        requests and under a minute, and a failure warns
-                        rather than failing the build - enrichment cannot
-                        change a verdict. This data is LOCAL ONLY: KISA's
-                        terms do not permit redistributing it, so db push
-                        strips it and db update never delivers it. Build it
-                        yourself or go without it.
+  KISA_ENABLE=0         Skip KISA/KNVD's Korean security notices. ON BY
+                        DEFAULT (D37): attaching them is what this project was
+                        built for, and leaving it to a flag meant the flagship
+                        feature was off for everyone who forgot. The fetch is
+                        about 41 requests and under a minute, and a failure
+                        warns rather than failing the build - enrichment
+                        cannot change a verdict.
+                        This data is LOCAL ONLY: KISA's terms do not permit
+                        redistributing it, so db push strips it and db update
+                        never delivers it. Set this to 0 when the result is
+                        going to be pushed anyway, which is why the publish
+                        workflow does.
 `
 
 func main() {
@@ -302,6 +305,41 @@ func nvdOptionsFromEnv(stderr io.Writer) nvd.Options {
 // itself never calls Annotate.
 var newNVDAnnotator = nvd.New
 
+// nl is a newline, assembled rather than typed. CLAUDE.md records the hazard
+// and it fired twice while this file was being edited: a literal escape inside
+// a script that writes Go collapses into the byte it denotes, and the file
+// stops compiling. rune(10) cannot collapse.
+var nl = string(rune(10))
+
+// envFlag reads a boolean environment variable, falling back to def when it is
+// unset or empty.
+//
+// It exists because the shape it replaces — `os.Getenv(name) != ""` — reads
+// KISA_ENABLE=0 as ON. That was harmless while both flags were opt-in and
+// nobody had a reason to write a falsy value, and it stopped being harmless the
+// moment D37 made one of them default-on and the publish workflow needed to
+// turn it off. An "off" switch that silently means "on" is worse than none: the
+// caller believes the fetch is disabled and it runs anyway.
+//
+// An unrecognised value is a warning and the default, not an error. This is a
+// database build, not a scan; refusing to start over a malformed environment
+// variable would trade a fetch nobody wanted for a build nobody got, and the
+// warning is on stderr where the rest of the build's diagnostics are.
+func envFlag(stderr io.Writer, name string, def bool) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "":
+		return def
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		fmt.Fprintf(stderr, "warning: %s=%q is not a boolean; using the default (%v)"+nl,
+			name, os.Getenv(name), def)
+		return def
+	}
+}
+
 // dbUpdateAnnotators is every provider.Annotator `db update` runs, built
 // from the environment. Pulled out of the "update" case as its own function
 // so a test can call it directly and inspect what reaches newNVDAnnotator.
@@ -321,7 +359,10 @@ var newNVDAnnotator = nvd.New
 // A full NVD pass is a builder's job, not every user's — which is exactly
 // what slice 8 exists to fix. Opt-in is the honest state until then.
 func dbUpdateAnnotators(stderr io.Writer) []provider.Annotator {
-	if os.Getenv("NVD_ENABLE") == "" {
+	// Still opt-in: the full pass costs hours, so a build that starts one
+	// nobody asked for is a different kind of surprise from a fetch that takes
+	// a minute (D37).
+	if !envFlag(stderr, "NVD_ENABLE", false) {
 		return nil
 	}
 	return []provider.Annotator{newNVDAnnotator(nvdOptionsFromEnv(stderr))}
@@ -347,7 +388,7 @@ var newKNVDEnricher = knvd.New
 // A failing enricher does not fail the build (see dbcmd.Update), so enabling
 // this cannot cost anyone their database the way an unconditional NVD did.
 func dbUpdateEnrichers(stderr io.Writer) []provider.Enricher {
-	if os.Getenv("KISA_ENABLE") == "" {
+	if !envFlag(stderr, "KISA_ENABLE", true) {
 		return nil
 	}
 	// Progress goes to stderr so the per-page and retry lines are visible.
