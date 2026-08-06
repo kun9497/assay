@@ -165,7 +165,7 @@ func goldenFixture() (matcher.Result, cyclonedx.Stats) {
 			{
 				Package:    pkgmeta.Package{Name: "y", Version: "2.0.0", Ecosystem: "Go"},
 				AdvisoryID: "GHSA-bad",
-				Reason:     "comparing 2.0.0: invalid version",
+				Reason:     `the advisory's range bound "not-a-version" could not be read: invalid version`,
 			},
 		},
 	}

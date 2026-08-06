@@ -59,7 +59,9 @@ func AffectsVersion(c Comparer, v string, a advisory.Affected) (bool, Evidence, 
 	// turn a total failure into a silent clean verdict. It is checked once,
 	// here, and still aborts.
 	if _, err := c.Compare(v, v); err != nil {
-		return false, Evidence{}, nil, fmt.Errorf("compare %q: %w", v, err)
+		// Same distinction as D35 draws in the ranges path: this is the
+		// installed version, not the advisory's list.
+		return false, Evidence{}, nil, fmt.Errorf("this package's own version %q could not be read: %w", v, err)
 	}
 	// The right operand is upstream data, and 0.184% of it does not parse
 	// (2,411 of 1,309,665 entries measured). One such entry aborted the whole
@@ -144,7 +146,7 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 		case e.Fixed != "":
 			cmp, err := c.Compare(v, e.Fixed)
 			if err != nil {
-				return false, Evidence{}, fmt.Errorf("compare %q to fixed %q: %w", v, e.Fixed, err)
+				return false, Evidence{}, unreadablePackageVersion(v, "fixed", e.Fixed, err)
 			}
 			if inside && cmp >= 0 {
 				inside = false // exclusive upper bound
@@ -158,7 +160,7 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 		case e.LastAffected != "":
 			cmp, err := c.Compare(v, e.LastAffected)
 			if err != nil {
-				return false, Evidence{}, fmt.Errorf("compare %q to last_affected %q: %w", v, e.LastAffected, err)
+				return false, Evidence{}, unreadablePackageVersion(v, "last_affected", e.LastAffected, err)
 			}
 			if inside && cmp > 0 {
 				inside = false // inclusive upper bound: equal is still affected
@@ -203,7 +205,13 @@ func sortEvents(c Comparer, in []advisory.Event) ([]advisory.Event, error) {
 			continue
 		}
 		if _, err := c.Compare(ver, ver); err != nil {
-			return nil, fmt.Errorf("range event bound %q: %w", ver, err)
+			// D35: say whose data is at fault. This is the advisory's own
+			// bound, and nothing the person running the scan can act on —
+			// the opposite of the walk's failures below, which are always the
+			// installed version. Both used to render as "not evaluated" with
+			// the cause left to be worked out from which operand the wrapped
+			// error happened to name.
+			return nil, fmt.Errorf("the advisory's range bound %q could not be read: %w", ver, err)
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -234,6 +242,25 @@ func sortEvents(c Comparer, in []advisory.Event) ([]advisory.Event, error) {
 	return out, nil
 }
 
+// unreadablePackageVersion names the installed version as the cause, which by
+// this point it must be.
+//
+// sortEvents validates every bound before the walk begins, and it selects the
+// field to validate with the same introduced/fixed/last_affected precedence the
+// walk uses to select the field to compare (eventVersion mirrors InRange's
+// switch). So the bound reaching Compare here is always one that already
+// parsed, and the only operand left that can fail is v. **Those two orderings
+// have to stay identical**: give eventVersion a different precedence and an
+// unvalidated bound reaches this function, which would then blame the package
+// for the advisory's defect — the exact confusion D35 exists to remove.
+//
+// The bound is still named, as context for which comparison was being made, not
+// as a suspect.
+func unreadablePackageVersion(v, role, bound string, err error) error {
+	return fmt.Errorf("this package's own version %q could not be read, comparing it against the advisory's %s bound %q: %w",
+		v, role, bound, err)
+}
+
 // atLeast reports whether v >= bound, resolving the OSV sentinel first.
 func atLeast(c Comparer, v, bound string) (bool, error) {
 	if bound == introducedSentinel {
@@ -241,7 +268,7 @@ func atLeast(c Comparer, v, bound string) (bool, error) {
 	}
 	cmp, err := c.Compare(v, bound)
 	if err != nil {
-		return false, fmt.Errorf("compare %q to introduced %q: %w", v, bound, err)
+		return false, unreadablePackageVersion(v, "introduced", bound, err)
 	}
 	return cmp >= 0, nil
 }

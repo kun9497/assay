@@ -156,7 +156,7 @@
         "ecosystem": "Go"
       },
       "advisoryId": "GHSA-bad",
-      "reason": "comparing 2.0.0: invalid version"
+      "reason": "the advisory's range bound \"not-a-version\" could not be read: invalid version"
     }
   ],
   "summary": {

@@ -634,6 +634,15 @@ day: `alpine:3.14` skipped `libretls 3.3.3p1-r3` and with it CVE-2022-0778.
       alternative is `docker/docker`, `moby/moby` and `docker/cli` permanently unevaluable.
       semver bounds that will not parse: 40 -> 12, and `assay` now scans its own binary with
       nothing unevaluated
+- [x] Say whose data is unreadable (D35) — a malformed advisory bound and an unreadable
+      installed version both rendered as `not evaluated`; they mean opposite things to a
+      reader and the report now says which
+- [x] Repair `.rN` to `-rN` for Alpine at ingestion (D35) — 11 bounds, every apk `fixed`
+      failure in the database. Not taught to the comparer: apk-tools 2.x parses the typo and
+      sorts it *above* the version it is a typo for
+- [ ] Partial evaluation of a range with one unreadable bound — **rejected**, see D35.
+      Alpine's imagemagick carries `introduced 7.0.0-0` above `fixed 6.9.6.8-r0`, so treating
+      the bad bound as `0` inverts the window rather than widening it
 - [ ] pep440 leniency — deferred; the two candidate rules rescue 2 advisory bounds between them
 - [ ] Table-driven cases per ecosystem, checked against that ecosystem's published vectors
 

@@ -365,3 +365,64 @@ func TestSchemaVersionIs7(t *testing.T) {
 			store.SchemaVersion)
 	}
 }
+
+// D35: the repair has to be wired into ingestion, not merely to exist. Every
+// apk `fixed` bound in the v7 database that will not parse is this shape — 11
+// occurrences across irssi and mariadb — and repairBound passing its own unit
+// test proves nothing about whether Convert calls it.
+func TestConvert_RepairsAlpineRevisionTypo(t *testing.T) {
+	const rec = `{
+	  "id": "ALPINE-CVE-2017-9468",
+	  "affected": [{
+	    "package": {"ecosystem": "Alpine:v3.5", "name": "irssi"},
+	    "ranges": [{"type": "ECOSYSTEM", "events": [
+	      {"introduced": "0"},
+	      {"fixed": "0.8.21.r2"}
+	    ]}]
+	  }]
+	}`
+	got, ok, err := Convert([]byte(rec), "Alpine")
+	if err != nil {
+		t.Fatalf("Convert: %v", err)
+	}
+	if !ok {
+		t.Fatal("Convert returned ok=false")
+	}
+	ev := got.Affected[0].Ranges[0].Events
+	if len(ev) != 2 {
+		t.Fatalf("events = %d, want 2", len(ev))
+	}
+	if ev[1].Fixed != "0.8.21-r2" {
+		t.Errorf("fixed = %q, want %q — the repair is not reaching ingestion",
+			ev[1].Fixed, "0.8.21-r2")
+	}
+	// The sentinel is not a version and must survive untouched; a repair that
+	// reached it would be rewriting the one bound the range layer resolves
+	// specially.
+	if ev[0].Introduced != "0" {
+		t.Errorf("introduced = %q, want the sentinel %q", ev[0].Introduced, "0")
+	}
+}
+
+// ...and it must not reach a bound that already parses, in any ecosystem. A
+// repair that fired on good data would be undetectable downstream: the database
+// would simply hold a version nobody published.
+func TestConvert_LeavesGoodBoundsAlone(t *testing.T) {
+	const rec = `{
+	  "id": "ALPINE-CVE-2022-0778",
+	  "affected": [{
+	    "package": {"ecosystem": "Alpine:v3.14", "name": "libretls"},
+	    "ranges": [{"type": "ECOSYSTEM", "events": [
+	      {"introduced": "0"},
+	      {"fixed": "3.3.3p1-r3"}
+	    ]}]
+	  }]
+	}`
+	got, _, err := Convert([]byte(rec), "Alpine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fixed := got.Affected[0].Ranges[0].Events[1].Fixed; fixed != "3.3.3p1-r3" {
+		t.Errorf("fixed = %q, want it stored exactly as published", fixed)
+	}
+}
