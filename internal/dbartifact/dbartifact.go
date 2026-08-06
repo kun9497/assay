@@ -36,10 +36,31 @@ const (
 	// runnable image by anything that inspects it.
 	MediaTypeConfig = "application/vnd.assay.db.config.v1+json"
 
+	// SourceRepo is this project's own repository, written into every artifact
+	// as AnnotationSource. Hardcoded for the same reason dbcmd.DefaultRef is:
+	// there is one assay, it publishes to one place, and deriving this from the
+	// push target would be wrong anyway -- the artifact is `assay-db` and the
+	// repository is `assay`.
+	SourceRepo = "https://github.com/kun9497/assay"
+
 	// Metadata lives in manifest annotations rather than the config blob,
 	// because a client can read the manifest without downloading the
 	// layer. A schema mismatch is the ordinary case for an out-of-date
 	// binary, and finding out after a 60 MB download is the wrong order.
+	// AnnotationSource is the OCI standard key for "the repository this came
+	// from", and GHCR reads it to link a package to a repository. That linkage
+	// is not cosmetic: a workflow's GITHUB_TOKEN can only touch packages linked
+	// to its own repository, so an unlinked package makes the scheduled publish
+	// fail with DENIED however its permissions are declared -- which is exactly
+	// what happened on 2026-08-04 and 2026-08-05, after the first artifact was
+	// bootstrapped by hand with a personal token and therefore linked to
+	// nothing.
+	//
+	// Written on every push rather than only the first, because the linkage is
+	// a property of the package that a re-bootstrap under a new schema tag has
+	// to re-establish.
+	AnnotationSource = "org.opencontainers.image.source"
+
 	AnnotationSchema   = "dev.assay.schema-version"
 	AnnotationBuiltAt  = "dev.assay.built-at"
 	AnnotationDataAsOf = "dev.assay.data-as-of"
@@ -115,6 +136,7 @@ func Pack(dbPath string, m Meta) (v1.Image, error) {
 	}
 	anns := map[string]string{
 		AnnotationSchema:      strconv.Itoa(m.SchemaVersion),
+		AnnotationSource:      SourceRepo,
 		AnnotationBuiltAt:     m.BuiltAt.UTC().Format(time.RFC3339),
 		AnnotationDataAsOf:    m.DataAsOf.UTC().Format(time.RFC3339),
 		AnnotationRatingCount: strconv.Itoa(m.RatingCount),

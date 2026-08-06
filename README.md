@@ -669,6 +669,14 @@ a Microsoft monthly bulletin to a non-Microsoft vulnerability. Enrichment change
 - [x] Summary extraction measured and left alone — of 100 live notices, 65 carry `□ 개요`, a
       looser match finds 67, and the other 33 have no overview section at all
 
+**One manual step after the first bootstrap.** The artifact is pushed by hand the first
+time, with a personal token, which leaves the ghcr package owned by the account and linked to
+no repository — and a workflow's `GITHUB_TOKEN` can only touch packages linked to its own
+repository. Until the link is made, the scheduled publish fails with `DENIED` however its
+permissions are declared. Link it once on the package page: *Package settings → Manage Actions
+access → add the repository with Write*. Pushes carry `org.opencontainers.image.source`, so a
+package created by the workflow links itself; one created by hand before that does not.
+
 Correctness is checked by **differential testing against grype** at every stage. Exact
 agreement is not expected — the data sources differ — but a large divergence means the
 matcher is wrong. Slice ① came out set-identical on both SBOMs it was run against:
