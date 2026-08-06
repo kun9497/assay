@@ -601,6 +601,35 @@ count endpoint turned out not to work and how it reports its own outages, are in
 
 - [x] KNVD provider and CVE-keyed enrichment join
 
+**The first full-corpus build, 2026-08-05.** Slices ⑦, ⑧ and ⑤ ran together for the first
+time with no windows bounded: **6h31m**, 32,272 advisories, NVD's whole feed at **354,067**
+rated CVEs, KISA at **18,523** enrichment records over 2,971 notices, published as
+`ghcr.io/kun9497/assay-db:v7`. The published layer was then pulled back and read as bytes:
+the local build holds **1,719,126** Hangul sequences, the published artifact **zero** — D29
+checked against the file users download, not only in a test.
+
+**⑨ Versions the comparers cannot read** — a package whose version will not parse is
+reported as skipped rather than clean (D20, D21), so it is loud; it is still a vulnerability
+that went un-assessed, which D9 calls a miss. Measured 2026-08-06 over every range bound in
+the v7 database: 96 of 29,840 semver bounds, 45 of 31,147 pep440, 61 of 53,819 apk — 0.18%,
+across 86 packages. The dominant cause is a version with fewer components than the grammar
+demands (`lxd` at `4.0`, `next` at `13.0`), not an exotic one. Live scans hit two the same
+day: `alpine:3.14` skipped `libretls 3.3.3p1-r3` and with it CVE-2022-0778.
+
+- [ ] Per-ecosystem leniency rules — one decision each, D9 forbids a shared one
+- [ ] Table-driven cases per ecosystem, checked against that ecosystem's published vectors
+
+**⑩ Which KISA notice wins** — found on first real use. The enrichment bucket keys on
+`(CVE, Source)`, so a CVE named by two KISA notices keeps whichever arrived last: `convert`
+emitted 20,314 records and the store kept 18,523, meaning **1,791** were decided by page
+order — the tie-break D25 forbids. And 70% of stored records come from a notice claiming
+more than 20 CVEs (one names 1,046), so every enriched finding met in live scanning attached
+a Microsoft monthly bulletin to a non-Microsoft vulnerability. Enrichment changes no verdict
+(D3), which is why this is queued behind ⑨.
+
+- [ ] Narrowest notice wins, ties broken on notice ID
+- [ ] Summary extraction — 12% of records fall back past a missing `□ 개요` heading
+
 Correctness is checked by **differential testing against grype** at every stage. Exact
 agreement is not expected — the data sources differ — but a large divergence means the
 matcher is wrong. Slice ① came out set-identical on both SBOMs it was run against:

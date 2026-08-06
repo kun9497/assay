@@ -1416,6 +1416,100 @@ include hosts or workstations rather than container images and source trees, whi
 from enrichment and remains open; enrichment itself does not wait on it and already has a
 user.
 
+### The first full-corpus build, 2026-08-05
+
+Slices ⑦, ⑧ and ⑤ were merged and then run together for the first time, on a build server
+rather than in CI, with every window unbounded: **6h31m**, 32,272 advisories, NVD's whole
+feed at **354,067** rated CVEs, KISA at **18,523** enrichment records drawn from 2,971
+notices, 256 MB on disk. Published as `ghcr.io/kun9497/assay-db:v7`.
+
+Three things it measured that no test could:
+
+- **The timeout fix is load-bearing.** The run before it died at 3h50m and 262,000 records
+  on a client timeout classified as permanent — `net/http`'s `timeoutError.Is` answers true
+  for `context.DeadlineExceeded`, so the deny-list let it through as fatal. The v7 run hit
+  the same family once, an HTTP/2 `stream error`, and recovered in **5 seconds**. The
+  identical failure cost 116 minutes before the fix and 5 seconds after it.
+- **D29 holds on the real artifact, not only in the test.** The published layer was pulled
+  back into a clean directory and read as bytes: the local build carries **1,719,126**
+  Hangul sequences and 18,524 `knvd.krcert.or.kr` occurrences, the published artifact
+  **zero** of each. That is the check route 6 above defeated, run against the file users
+  actually download.
+- **A scan against the pulled artifact behaves identically** apart from the absent Korean —
+  same findings, same bands, same exit codes across `--fail-on critical|high|medium|low`.
+  D3's "enrichment changes no verdict" is now checked end to end rather than only in a unit
+  test.
+
+### Slice 9 — Versions the comparers cannot read ← next
+
+A package whose version will not parse is reported as **skipped** and never folded into a
+clean verdict (D20, D21), so this is loud rather than silent. It is still a vulnerability
+that went un-assessed, which is what D9 says directly: *treating an unparseable version as
+"not vulnerable" is a miss.*
+
+Measured 2026-08-06 against the v7 database — every range bound of every advisory, fed to
+the comparer that owns its ecosystem:
+
+| comparer | bounds it cannot parse | bounds | packages |
+|---|---:|---:|---:|
+| semver (Go, npm) | 96 | 29,840 | 42 |
+| pep440 (PyPI) | 45 | 31,147 | 14 |
+| apk (Alpine) | 61 | 53,819 | 30 |
+
+0.18% overall, and the cause is not exotic. The dominant shape is a version with **fewer
+components than the grammar demands**: `github.com/canonical/lxd` at `4.0`, `6.0` and `6.5`,
+`next` at `13.0`, `github.com/cosmos/cosmos-sdk` at `0.46`. Semver requires three
+components; upstream advisory text routinely writes two. The rest are genuine oddities —
+`libdwarf` at `1999-12-14` (a date), `buildbot` at `0.7.11p3`, `neutron` at `7.2.0-12.1`.
+
+Two were met in live scans the same day. `alpine:3.14` skipped `libretls 3.3.3p1-r3`, and
+with it CVE-2022-0778; a scan of assay's own binary skipped `github.com/docker/cli` because
+a GHSA range bound reads `19.03.0`, whose `03` is the leading-zero numeric identifier semver
+forbids.
+
+**The open question is per-ecosystem leniency, and D9 forbids answering it once for all
+three.** Whether `4.0` may be read as `4.0.0` in a semver ecosystem, whether apk should
+accept a letter followed by digits (`3.3.3p1`) as Alpine's own package versions imply
+apk-tools does, and whether pep440 should accept a `p3` patch suffix are three questions with
+three different upstream authorities. Each needs its own decision, its own table-driven
+cases, and its own check against that ecosystem's published vectors — the apk comparer
+already stands against apk-tools' 738 comparisons, and that is the bar. One shared "be
+lenient" rule is precisely the collapse D9 exists to prevent.
+
+Nothing here may make a version compare **lower** than it does today. The failure being
+fixed is a miss, and a lenient parse that reorders versions already handled correctly would
+trade a loud miss for a silent one.
+
+### Slice 10 — Which KISA notice wins
+
+Found on first real use, 2026-08-06, and measured against the v7 database. Two defects, one
+cause.
+
+**The store resolves a tie by arrival order, which D25 forbids.** The enrichment bucket is
+keyed `(CVE, Source)` and every KISA record carries the same source, so a CVE named by two
+notices keeps whichever arrived last. The build's own log holds the number: `convert` emitted
+**20,314** records and the store kept **18,523**, so **1,791** were overwritten by page
+order. D25 settled this for ratings — *never resolve a tie by arrival order; that was the
+defect, not a harmless coin flip* — and the enrichment bucket repeated it.
+
+**Most notices are monthly roundups, and they win those ties by volume.** Of 1,935 distinct
+notices, 804 name exactly one CVE, while 38 name more than a hundred and `MS 7월 보안 위협에
+따른 정기 보안 업데이트 권고` alone names **1,046**. **12,997 of 18,523 stored records (70%)**
+come from a notice claiming more than 20 CVEs. Every enriched finding met in live scanning —
+`openssl` CVE-2024-5535 on `node:14-alpine`, `curl` CVE-2024-6197 on `nginx:1.25.3-alpine` —
+attached a Microsoft monthly patch bulletin to a non-Microsoft vulnerability. The specific
+notices that make the feature worth having do exist (`OpenSSH 제품 보안 업데이트 권고` for
+regreSSHion, `XZ-Utils 보안 주의 권고` for CVE-2024-3094, `BIND DNS 취약점 보안 업데이트 권고`)
+and lose to a roundup whenever both name the same CVE.
+
+The likely rule is **the narrowest notice wins** — fewest CVEs claimed, ties broken on the
+notice ID so two runs agree — which removes the arrival-order dependence and the roundup
+dilution together. A third defect rides along: 2,202 records (12%) carry a summary that
+begins from the `제목없음` fallback because the `□ 개요` heading was not found.
+
+Enrichment changes no verdict (D3), so none of this can produce a wrong answer. That is why
+it is queued behind slice 9 rather than ahead of it.
+
 ---
 
 ## 5. Verification

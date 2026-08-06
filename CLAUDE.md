@@ -10,22 +10,24 @@ the vulnerability database, and match the two. In the anchore ecosystem those ar
 separate projects (`syft`, `vunnel` + `grype-db`, `grype`). KISA/KNVD advisory data is a
 first-class provider — that is the main reason this exists rather than using grype.
 
-Slices ①–④ are built: `assay db update` builds a database from OSV (Go, npm, PyPI, Alpine),
-and `assay scan` reads SBOMs, container images, Go binaries and directories, matches them,
-and returns a verdict CI can gate on. A finding carries every source's rating and the gate
-takes the highest (D25). Not built: the KISA provider (⑤, on hold — the data does not
-support it, see `docs/deferred-decisions.md`), non-Alpine distros, npm/PyPI directory
-scanning, SARIF, and NVD ingestion.
+Slices ①–⑧ are built. `assay db build` builds a database from OSV (Go, npm, PyPI, Alpine)
+with NVD ratings (D27) and, under `KISA_ENABLE=1`, KISA's Korean prose as enrichment (⑤,
+D29 — local only, stripped by `db push`); `assay db update` pulls the published OCI artifact
+(D28) rather than rebuilding. `assay scan` reads SBOMs, container images, Go binaries and
+directories, matches them, and returns a verdict CI can gate on. A finding carries every
+source's rating and the gate takes the highest (D25). Not built: non-Alpine distros,
+npm/PyPI directory scanning, SARIF, and slices ⑨/⑩ (see `README.md`).
 
-**Check what exists before assuming — this paragraph has been wrong twice.** It claimed
-`scan` was unimplemented after slice 1 shipped it, and claimed binaries and directories were
-unread after slice 3 shipped both. `README.md`'s roadmap checkboxes are the more reliable
-record because they are edited task by task; this paragraph is edited from memory.
+**Check what exists before assuming — this paragraph has been wrong three times.** It
+claimed `scan` was unimplemented after slice 1 shipped it, claimed binaries and directories
+were unread after slice 3 shipped both, and claimed the KISA provider was on hold and NVD
+uningested for a day after both merged. `README.md`'s roadmap checkboxes are the more
+reliable record because they are edited task by task; this paragraph is edited from memory.
 
 **Read these before proposing anything structural:**
 
 - `docs/superpowers/specs/2026-07-29-assay-roadmap.md` — the reference design. Every
-  decision is recorded as `D1`…`D27` with its reasoning. Cite the decision ID when
+  decision is recorded as `D1`…`D29` with its reasoning. Cite the decision ID when
   discussing one.
 - `docs/deferred-decisions.md` — **required before suggesting a feature.** Most obvious
   gaps (Debian support, RHEL support, VEX, prebuilt database artifacts, database age
