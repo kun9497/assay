@@ -314,11 +314,16 @@ func TestJSON_CarriesWhatTheTableCannot(t *testing.T) {
 		doc.Summary.Findings != 3 || doc.Summary.UnknownSeverity != 1 {
 		t.Errorf("Summary = %+v, want components=6 evaluated=4 notEvaluated=2 incompleteChecks=2 findings=3 unknownSeverity=1", doc.Summary)
 	}
-	// D36: one of the three skips is the target's fault and two are not, so a
-	// field that simply mirrored IncompleteChecks — or that counted every skip
-	// — would be wrong here rather than coincidentally right.
-	if doc.Summary.TargetIncomplete != 1 {
-		t.Errorf("Summary.TargetIncomplete = %d, want 1 of the 3 skips", doc.Summary.TargetIncomplete)
+	// D36: one of the three matcher skips is the target's fault and two are
+	// not, so a field that simply mirrored IncompleteChecks — or that counted
+	// every skip — would be wrong here rather than coincidentally right.
+	//
+	// D38 adds the cataloger's own skips, which are the target's data by
+	// construction. The fixture carries one (SkippedNoPURL), so the expected
+	// total is 2 and the two sources are distinguishable: a change that dropped
+	// either half moves this number.
+	if doc.Summary.TargetIncomplete != 2 {
+		t.Errorf("Summary.TargetIncomplete = %d, want 2 — one matcher skip caused by the target plus one cataloger skip", doc.Summary.TargetIncomplete)
 	}
 }
 

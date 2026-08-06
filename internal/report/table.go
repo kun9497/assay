@@ -257,7 +257,16 @@ func Summarize(res matcher.Result, cat cyclonedx.Stats) Summary {
 	// incomplete. targetIncomplete counts only what the person running the
 	// scan could act on, so a gate can exist that does not fire forever on
 	// upstream advisory defects nobody can fix.
-	var unevaluated, incompleteChecks, targetIncomplete int
+	// D38: the cataloger's own skips are the target's data by construction --
+	// a component with no usable version or no purl is something the scanned
+	// artifact said, not something an advisory said. They were missing from
+	// this count when D36 introduced it, which left `--fail-on-incomplete=
+	// target` silent on the case it most obviously exists for: an unpinned
+	// requirements.txt, where "pin it or give us a lockfile" is exactly the
+	// action the caller can take. SkippedUnsupportedEcosystem is deliberately
+	// NOT here: that one is assay's coverage, not their file.
+	targetIncomplete := cat.SkippedNoVersion + cat.SkippedNoPURL
+	var unevaluated, incompleteChecks int
 	for _, s := range res.Skipped {
 		if s.Cause == matcher.SkipTarget {
 			targetIncomplete++

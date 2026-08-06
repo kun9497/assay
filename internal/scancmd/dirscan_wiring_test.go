@@ -22,6 +22,12 @@ func writeManifest(t *testing.T, dir, name, body string) {
 // Before this, the same directory reported the Go packages, said
 // "0 not evaluated", and exited 0 while the npm and PyPI findings went
 // unmentioned — 3 findings where the same packages as an SBOM gave 27.
+// nlChar is a newline, assembled rather than typed: a literal escape written
+// into this file by a generator collapses into the byte it denotes, which is
+// the hazard CLAUDE.md records and which fired four times in the session that
+// added D38.
+var nlChar = string(rune(10))
+
 func TestRun_DirectoryScanReadsLockfilesAndDisclosesTheRest(t *testing.T) {
 	dir := t.TempDir()
 	writeManifest(t, dir, "go.mod",
@@ -29,7 +35,7 @@ func TestRun_DirectoryScanReadsLockfilesAndDisclosesTheRest(t *testing.T) {
 	writeManifest(t, dir, "package-lock.json",
 		`{"lockfileVersion":3,"packages":{"":{"version":"1.0.0"},`+
 			`"node_modules/example.com/medium":{"version":"1.0.0"}}}`)
-	writeManifest(t, dir, "requirements.txt", "Django==3.2.12\n")
+	writeManifest(t, dir, "requirements.txt", "Django==3.2.12\nflask>=2.0\n")
 
 	db := buildMatrixDB(t, []matrixAdv{
 		{id: "GHSA-critical", pkg: "critical", fixed: "2.0.0", vectors: []string{vecCritical}},
@@ -40,16 +46,41 @@ func TestRun_DirectoryScanReadsLockfilesAndDisclosesTheRest(t *testing.T) {
 		t.Fatalf("Run = %d, want 0; stderr: %s", code, errOut.String())
 	}
 
-	// Asserted on the rendered pair, not on "requirements.txt" alone: that
-	// filename could appear in any path the scan prints, so a bare Contains
-	// would pass from the wrong line.
-	if !strings.Contains(errOut.String(), "not read: requirements.txt (") {
-		t.Errorf("the scan did not name the manifest it declined to read:\n%s", errOut.String())
+	// D38: requirements.txt is read now, so what must be disclosed is the LINE
+	// it could not use, not the file. Asserted on the rendered triple rather
+	// than on "requirements.txt" or "flask" alone: both strings appear in paths
+	// the scan prints, so a bare Contains would pass from the wrong line.
+	if !strings.Contains(errOut.String(), "not pinned: requirements.txt: flask>=2.0 (") {
+		t.Errorf("the scan did not name the requirement it could not use:\n%s", errOut.String())
 	}
 	// ...and the reason has to travel with it. A reader told only that
 	// something was skipped cannot act on it.
-	if !strings.Contains(errOut.String(), "not a lockfile") {
+	if !strings.Contains(errOut.String(), "not pinned to one version") {
 		t.Errorf("the disclosure carries no reason:\n%s", errOut.String())
+	}
+	// The pinned line became a package. Without this, the two assertions above
+	// pass for a parser that refuses every line — which is the behaviour D38
+	// replaced, not the one it introduced.
+	// The pinned line became a package and reached the matcher. Without this,
+	// the two assertions above pass for a parser that refuses every line —
+	// which is the behaviour D38 replaced, not the one it introduced.
+	//
+	// Asserted on stdout, not stderr: results go to stdout and diagnostics to
+	// stderr, and reaching for the wrong stream is how an assertion passes or
+	// fails for a reason unrelated to what it tests.
+	//
+	// Four components, not three: go.mod's module, package-lock's package, and
+	// BOTH requirement lines. An unpinned requirement is still a component the
+	// scan saw and did not evaluate, which is what makes it show up in the
+	// "not evaluated" figure rather than vanishing.
+	if !strings.Contains(out.String(), "4 component(s) seen") {
+		t.Errorf("want four components — go.mod, package-lock.json and both requirement lines:\n%s", out.String())
+	}
+	// Named, not merely counted. This database covers only Go, so the pinned
+	// requirement lands as a coverage skip — which is the proof it reached the
+	// matcher at all rather than being dropped by the cataloger.
+	if !strings.Contains(out.String(), `Django 3.2.12: ecosystem "PyPI"`) {
+		t.Errorf("the pinned requirement did not reach the matcher as a PyPI package:\n%s", out.String())
 	}
 	// Both ecosystems reached the matcher, which is the half that removes the
 	// silent miss. The Go one alone would have passed before this slice.
@@ -175,22 +206,47 @@ func TestRun_AnUnreadableManifestReachesTheExitCode(t *testing.T) {
 		}
 	})
 
-	// requirements.txt is not read BY DECISION, so it must not trip the gate.
-	// Folding "we chose not to" together with "we could not" would make
-	// --fail-on-incomplete fire on every Python project, and the flag would be
-	// turned off — which is how a real gate stops being read.
-	t.Run("a deliberate non-read does not trip the gate", func(t *testing.T) {
+	// D38 removed the premise this subtest used to rest on: requirements.txt is
+	// no longer unread, so "we chose not to look" is not a state it can be in.
+	// What replaces it is the distinction D36 introduced, now reachable from a
+	// real file rather than a hand-built Skipped.
+	t.Run("an unpinned requirement is the caller's to fix", func(t *testing.T) {
 		dir := t.TempDir()
 		writeManifest(t, dir, "go.mod", goodMod)
-		writeManifest(t, dir, "requirements.txt", "Django==3.2.12\n")
+		writeManifest(t, dir, "requirements.txt", "flask>=2.0"+nlChar)
 		var out, errOut bytes.Buffer
-		code := Run(context.Background(), db, "dir:"+dir,
-			Options{FailOnIncomplete: true}, &out, &errOut)
-		if code != 0 {
-			t.Errorf("Run(--fail-on-incomplete) = %d, want 0 — requirements.txt "+
-				"being unread is a documented limit, not a failure, and folding "+
-				"the two together would fire this flag on every Python project "+
-				"until someone turned it off; stderr: %s", code, errOut.String())
+		// The broad gate fires: something went unevaluated.
+		if code := Run(context.Background(), db, "dir:"+dir,
+			Options{FailOnIncomplete: true}, &out, &errOut); code != 2 {
+			t.Errorf("Run(--fail-on-incomplete) = %d, want 2; stderr: %s", code, errOut.String())
+		}
+		out.Reset()
+		errOut.Reset()
+		// ...and so does the narrow one, because pinning it is an action the
+		// person running the scan can actually take. This is the case D36's
+		// scope exists for, and it was silent until the cataloger's own skips
+		// were counted into it.
+		if code := Run(context.Background(), db, "dir:"+dir,
+			Options{FailOnIncompleteTarget: true}, &out, &errOut); code != 2 {
+			t.Errorf("Run(--fail-on-incomplete=target) = %d, want 2 — an unpinned "+
+				"requirement is the caller's own file; stderr: %s", code, errOut.String())
+		}
+	})
+
+	// The contrast that makes the assertion above mean something. A PINNED
+	// requirement is evaluated; if it goes unevaluated anyway it is because
+	// this database does not cover PyPI, which is assay's coverage and not the
+	// caller's data — so the broad gate fires and the narrow one must not.
+	t.Run("an uncovered ecosystem is not the caller's to fix", func(t *testing.T) {
+		dir := t.TempDir()
+		writeManifest(t, dir, "go.mod", goodMod)
+		writeManifest(t, dir, "requirements.txt", "Django==3.2.12"+nlChar)
+		var out, errOut bytes.Buffer
+		if code := Run(context.Background(), db, "dir:"+dir,
+			Options{FailOnIncompleteTarget: true}, &out, &errOut); code != 0 {
+			t.Errorf("Run(--fail-on-incomplete=target) = %d, want 0 — the requirement "+
+				"is pinned; what is missing is PyPI coverage, which the caller "+
+				"cannot pin their way out of; stderr: %s", code, errOut.String())
 		}
 	})
 }
