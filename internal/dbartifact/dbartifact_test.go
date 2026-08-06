@@ -115,3 +115,61 @@ func TestUnpack_RejectsAnImageThatIsNotADatabase(t *testing.T) {
 		t.Errorf("error %q does not name the media type it wanted", err)
 	}
 }
+
+// The source annotation is what GHCR reads to link a package to a repository,
+// and that linkage is what lets the scheduled publish use GITHUB_TOKEN at all.
+// Its absence cost two silent daily failures before anyone looked, so it is
+// asserted on the manifest rather than assumed from the map literal.
+func TestPack_CarriesTheSourceAnnotation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vulnerability.db")
+	if err := os.WriteFile(path, []byte("bolt-ish bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	img, err := Pack(path, Meta{SchemaVersion: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mf, err := img.Manifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := mf.Annotations[AnnotationSource]
+	if !ok {
+		t.Fatalf("manifest carries no %s; GHCR cannot link the package and a workflow token cannot touch it", AnnotationSource)
+	}
+	// Derived from go.mod rather than compared against SourceRepo, which would
+	// be circular — editing the constant would move both sides and the test
+	// would stay green while the package linked to the wrong repository, which
+	// is worse than no link because it looks correct on the package page.
+	// Reading the module path also makes a repo rename fail here rather than
+	// silently in a scheduled job.
+	mod, err := os.ReadFile(filepath.Join("..", "..", "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Split on fields rather than on lines: a newline written into this file by
+	// a generator script is the hazard CLAUDE.md records, and it bit this very
+	// test once — the literal collapsed into a real newline, the file stopped
+	// compiling, and four mutations reported "caught" when they had only broken
+	// the build. Fields needs no escape at all.
+	var modPath string
+	fields := strings.Fields(string(mod))
+	for i, f := range fields {
+		if f == "module" && i+1 < len(fields) {
+			modPath = fields[i+1]
+			break
+		}
+	}
+	if modPath == "" {
+		t.Fatal("no module line in go.mod; this test cannot check what it claims to")
+	}
+	if want := "https://" + modPath; got != want {
+		t.Errorf("%s = %q, want %q (derived from go.mod's module path)", AnnotationSource, got, want)
+	}
+	// The key must be the OCI standard one. A dev.assay.* spelling would be
+	// carried faithfully and read by nobody.
+	if AnnotationSource != "org.opencontainers.image.source" {
+		t.Errorf("AnnotationSource = %q, want the OCI standard key", AnnotationSource)
+	}
+}

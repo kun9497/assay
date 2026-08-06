@@ -40,6 +40,24 @@ jobs:
           # next day's window still covers what it missed. One day would
           # make every skipped run a permanent hole in the ratings.
           NVD_SINCE_DAYS: "3"
-        run: ./bin/assay db build --seed ${{ steps.ref.outputs.ref }}
+        # The seed fetch is the first thing that touches ghcr, so an access
+        # problem surfaces here. DENIED is not a code defect and reads like
+        # one: GITHUB_TOKEN can only touch packages LINKED to this repository,
+        # and the first artifact was bootstrapped by hand with a personal
+        # token, so it was linked to nothing. That cost two silent daily
+        # failures (2026-08-04, 2026-08-05) before anyone read the log, so the
+        # remedy is printed next to the error rather than left to be rederived.
+        run: |
+          set -o pipefail
+          if ! ./bin/assay db build --seed ${{ steps.ref.outputs.ref }} 2>&1 | tee /tmp/build.log; then
+            if grep -q DENIED /tmp/build.log; then
+              echo "::error::GITHUB_TOKEN cannot reach ${{ steps.ref.outputs.ref }}."
+              echo "::error::Link the package to this repository once: the ghcr.io package page ->"
+              echo "::error::Package settings -> Manage Actions access -> add kun9497/assay with Write."
+              echo "::error::Artifacts pushed from here carry org.opencontainers.image.source and link"
+              echo "::error::themselves; one bootstrapped by hand before that existed does not."
+            fi
+            exit 2
+          fi
       - name: Publish
         run: ./bin/assay db push ${{ steps.ref.outputs.ref }}
