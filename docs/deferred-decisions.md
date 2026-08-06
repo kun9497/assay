@@ -393,8 +393,10 @@ it required a user to appear before the defect could be noticed, when the defect
 reachable by reading the dispatch in `scancmd.go`. A trigger that waits for a report is the
 wrong shape for a silent failure.
 
-`requirements.txt` stays out. It is not a lockfile — `Django>=3.2` is a constraint, not a
-version — and it needs its own decision (see below).
+`requirements.txt` stayed out at the time, and **D38 brought it in on 2026-08-06** without
+reversing the reasoning: the lines that name exactly one version become packages, and every
+other line is counted and named. Refusing the file to avoid guessing at some lines threw away
+the ones that need no guessing.
 
 ---
 

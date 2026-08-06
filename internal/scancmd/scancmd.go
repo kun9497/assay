@@ -221,6 +221,14 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		// this line existed, a directory holding go.mod beside
 		// package-lock.json reported the Go packages, said "0 not evaluated",
 		// and exited 0 while 24 findings went unmentioned.
+		// D38: a line a manifest WAS read but could not use. Named rather than
+		// only counted — "3 package(s) with no version to compare" does not say
+		// which three, and pinning them is the action being asked for. Printed
+		// as its own list so it is not read as a claim that the file went
+		// unread, which is the opposite of what happened.
+		for _, u := range manifests.Unusable {
+			fmt.Fprintf(stderr, "not pinned: %s: %s (%s)\n", u.Path, u.Line, u.Reason)
+		}
 		for _, u := range manifests.Unread {
 			fmt.Fprintf(stderr, "not read: %s (%s)\n", u.Path, u.Reason)
 		}

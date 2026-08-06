@@ -19,6 +19,7 @@ import (
 	"github.com/kun9497/assay/internal/cataloger/gomod"
 	"github.com/kun9497/assay/internal/cataloger/npmlock"
 	"github.com/kun9497/assay/internal/cataloger/poetrylock"
+	"github.com/kun9497/assay/internal/cataloger/requirements"
 	"github.com/kun9497/assay/internal/pkgmeta"
 )
 
@@ -75,6 +76,21 @@ type Read struct {
 type Manifests struct {
 	Read   []Read
 	Unread []Unread
+	// Unusable is every requirement line a manifest WAS read but could not
+	// use (D38). It is a third state and not a variant of Unread: the file
+	// parsed, some of it became packages, and these lines did not. Folding it
+	// into Unread would say the file went unread, which is the opposite of
+	// what happened and would hide the packages it did yield.
+	Unusable []Unusable
+}
+
+// Unusable names one requirement line a parser refused, and where it was. The
+// path travels with the line because a directory scan reads several manifests
+// and "Django>=3.2" on its own does not say which file to go and pin.
+type Unusable struct {
+	Path   string
+	Line   string
+	Reason string
 }
 
 // AnyFailed reports whether any manifest was found and could not be read.
@@ -127,11 +143,12 @@ func Parse(root string) (pkgmeta.Target, cyclonedx.Stats, Manifests, error) {
 	)
 
 	for _, m := range manifests {
-		pkgs, s, u := parseManifest(root, m)
+		pkgs, s, un, u := parseManifest(root, m)
 		if u != nil {
 			found.Unread = append(found.Unread, *u)
 			continue
 		}
+		found.Unusable = append(found.Unusable, un...)
 		found.Read = append(found.Read, Read{Path: m.Path, Kind: m.Kind, Components: s.Components})
 		target.Packages = append(target.Packages, pkgs...)
 		addStats(&stats, s)
@@ -157,8 +174,9 @@ func Parse(root string) (pkgmeta.Target, cyclonedx.Stats, Manifests, error) {
 // of silent false negative this whole slice exists to remove, reproduced
 // inside the slice's own dispatch code. Recording it as Unread instead keeps
 // it visible in the disclosure a reader actually sees.
-func parseManifest(root string, m Manifest) ([]pkgmeta.Package, cyclonedx.Stats, *Unread) {
+func parseManifest(root string, m Manifest) ([]pkgmeta.Package, cyclonedx.Stats, []Unusable, *Unread) {
 	full := filepath.Join(root, filepath.FromSlash(m.Path))
+	var unusable []Unusable
 
 	switch m.Kind {
 	case KindGoMod:
@@ -168,34 +186,44 @@ func parseManifest(root string, m Manifest) ([]pkgmeta.Package, cyclonedx.Stats,
 		// itself, so its parent directory is what gomod.Parse wants.
 		t, s, perr := gomod.Parse(filepath.Dir(full))
 		if perr != nil {
-			return nil, cyclonedx.Stats{}, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
+			return nil, cyclonedx.Stats{}, nil, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
 		}
 		relocate(t.Packages, m.Path)
-		return t.Packages, s, nil
+		return t.Packages, s, nil, nil
 
 	case KindNPMLock:
 		pkgs, s, perr := npmlock.Parse(full)
 		if perr != nil {
-			return nil, cyclonedx.Stats{}, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
+			return nil, cyclonedx.Stats{}, nil, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
 		}
 		relocate(pkgs, m.Path)
-		return pkgs, s, nil
+		return pkgs, s, nil, nil
 
 	case KindPoetryLock:
 		pkgs, s, perr := poetrylock.Parse(full)
 		if perr != nil {
-			return nil, cyclonedx.Stats{}, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
+			return nil, cyclonedx.Stats{}, nil, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
 		}
 		relocate(pkgs, m.Path)
-		return pkgs, s, nil
+		return pkgs, s, nil, nil
 
 	case KindRequirements:
-		// Recognized by Walk so the disclosure can name it (D26), but
-		// never read: see requirementsReason.
-		return nil, cyclonedx.Stats{}, &Unread{Path: m.Path, Reason: requirementsReason}
+		// D38: read, but only the lines that name exactly one version. The
+		// rest are counted and named rather than guessed at — see the
+		// requirements package for why a fabricated version is worse than a
+		// refusal in both directions.
+		t, s, un, perr := requirements.Parse(full)
+		if perr != nil {
+			return nil, cyclonedx.Stats{}, nil, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
+		}
+		relocate(t.Packages, m.Path)
+		for _, u := range un {
+			unusable = append(unusable, Unusable{Path: m.Path, Line: u.Line, Reason: u.Reason})
+		}
+		return t.Packages, s, unusable, nil
 
 	default:
-		return nil, cyclonedx.Stats{}, &Unread{
+		return nil, cyclonedx.Stats{}, nil, &Unread{
 			Path:   m.Path,
 			Reason: fmt.Sprintf("recognized manifest kind %q has no parser", m.Kind),
 		}

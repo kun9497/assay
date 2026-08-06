@@ -1459,6 +1459,81 @@ Seven mutations verified red: KISA back to opt-in, NVD flipped to default-on, `"
 disabling, case sensitivity dropped, whitespace not trimmed, an unrecognised value disabling
 instead of defaulting, and the warning removed.
 
+### D38 — `requirements.txt` is read, and only the lines that name one version become packages
+
+D26 left it unread and gave the reason: `Django>=3.2` is a constraint, not a version, and
+putting a range inside an advisory range would quietly answer "not vulnerable" for anything
+unpinned. That reasoning is intact. What changes is the conclusion drawn from it — refusing
+the *file* to avoid guessing at *some lines* threw away the ones that need no guessing.
+
+A line becomes a package iff its specifier set is a **single** clause whose operator is `==`
+(with no `*`) or `===`. Everything else is counted, named, and left unevaluated.
+
+**A requirements file is a list of pip install arguments, not a manifest** — pip's own
+framing, and the reason a parser built on PEP 508 alone is already wrong. The grammar is
+argparse *around* PEP 508: options, includes, editable installs and bare paths share the file
+with requirement specifiers, and each has to be recognized in order to be refused honestly.
+pip's preprocessing order is reproduced rather than approximated — join continuations, then
+strip comments, then drop empties — because reversing the first two lets a trailing comment
+swallow the backslash and glue two requirements into one.
+
+**`#` starts a comment only at line start or after whitespace.** pip's own `COMMENT_RE` is
+copied rather than approximated with `strings.Index`, which would destroy `#egg=`,
+`#subdirectory=` and `#sha256=` fragments mid-URL.
+
+**`==3.2` is a pin and `==3.2.*` is not.** PEP 440 zero-pads the release segment before
+comparing and PyPI normalizes on upload, so `3.2`, `3.2.0` and `3.2.0.0` are one release, not
+three — `==3.2` names exactly one and reaches neither `3.2.1` nor `3.2.0.post1` nor `3.2a1`.
+The wildcard form is a prefix match: a range wearing an `==`.
+
+**Multi-clause sets are refused even when they do pin.** `Django==3.2,!=3.2.1` really does
+name one version. Admitting it means admitting multi-clause sets, and the first draft of that
+rule — "exactly one `==` clause, all others `!=`" — let `foo==1.4.*,!=1.4.1` through, because
+the wildcard exclusion had been written into the single-clause branch only. A review found it;
+a rule with no multi-clause case cannot have it.
+
+**This follows pip-audit, not syft.** syft's `guessVersion` rewrites `*` to `0` and takes the
+*maximum* of a `>=` bound, inventing a version the file never stated. trivy gates on the
+operator. pip-audit — from PyPA itself — refuses an unpinned requirement and reports it as a
+skipped dependency. A fabricated version is a confident wrong answer in both directions: too
+low and a fixed package reads as vulnerable, too high and a real vulnerability reads as fixed.
+
+**Environment markers are dropped, not evaluated.** Evaluating `python_version < "3.8"` needs
+the environment the code will *run* in, and all this process has is its own — so a marker that
+is false here says nothing about the deployment. Reporting a package a marker excludes is a
+false positive, which is loud; refusing every marked line is a silent gap in a shape the corpus
+shows is common. `${VAR}` is refused outright for the same reason inverted: pip expands it from
+its own environment at install time, and expanding it here would invent a version.
+
+**Includes are components, not options.** `-r base.txt` is reported as unevaluated rather than
+ignored. A file whose every line is an include would otherwise catalog nothing and report a
+clean scan — the shape a review measured at 1.8% of a sampled corpus, and exactly the silent
+miss D26 exists to prevent.
+
+**What could not be used is named, not only counted.** "3 package(s) with no version to
+compare" does not say which three, and pinning them is the action being asked for:
+
+```
+not pinned: requirements.txt: flask>=2.0 (not pinned to one version: >=2.0)
+not pinned: requirements.txt: -r base.txt (includes another requirements file, …)
+```
+
+**And it closes a hole D36 left.** `--fail-on-incomplete=target` counted only the matcher's
+skips, so the cataloger's own — a component with no usable version or no purl, which is the
+scanned artifact's data by construction — reached no gate. An unpinned requirement is the
+clearest case that flag exists for, since "pin it or give us a lockfile" is precisely an action
+the caller can take. `SkippedUnsupportedEcosystem` stays out: that one is assay's coverage.
+
+**Measured.** A seven-line requirements.txt against the live database: **23 findings** where
+before there were none, three lines named as unpinned, `--fail-on-incomplete=target` exiting 2
+until they are pinned and 0 once they are.
+
+Eleven mutations verified red, including the wildcard admitted as a pin, multi-clause admitted,
+the naive comment cut, an environment variable silently accepted, `-r` treated as an option
+rather than a component, unusable lines counted but not named, options counted as components,
+requirements.txt returned to unread, cataloger skips dropped from the target scope, an
+unsupported ecosystem added to it, and the disclosure removed.
+
 ## 3. Architecture
 
 ### Measured data volumes

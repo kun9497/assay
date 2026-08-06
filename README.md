@@ -508,7 +508,10 @@ exited 0 while 24 findings went unmentioned. **Done.**
 
 - [x] `package-lock.json` and `poetry.lock` catalogers, over a bounded subdirectory walk
 - [x] Disclose every manifest recognized but not read, by name and reason (D26)
-- [ ] `requirements.txt` — needs its own decision about unpinned constraints
+- [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
+      the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
+      rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a
+      seven-line file where there were none
 
 **④ Verdicts and output** — where exit code 1 first becomes reachable. **Done.**
 

@@ -879,3 +879,38 @@ func TestTable_FootnoteOnlyWhenSomeoneDisagrees(t *testing.T) {
 // previously used a Finding with zero Ratings, a state Match itself never
 // produces (D25), to stand in for "single-source" — a case its neighbour
 // now covers with a real single-Rating fixture instead.
+
+// D38 counts the cataloger's own skips into TargetIncomplete, and one of them
+// must stay out: an ecosystem assay does not support is assay's coverage, not
+// the caller's data, and no amount of editing their manifest changes it.
+//
+// Asserted as a unit rather than through a scan, because no fixture directory
+// produces a cataloger-side unsupported-ecosystem skip — which is exactly why
+// adding it to the sum survived a first mutation round.
+func TestSummary_TargetIncompleteExcludesUnsupportedEcosystem(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cat  cyclonedx.Stats
+		want int
+	}{
+		{"no version is the caller's data",
+			cyclonedx.Stats{Components: 1, SkippedNoVersion: 1}, 1},
+		{"no purl is the caller's data",
+			cyclonedx.Stats{Components: 1, SkippedNoPURL: 1}, 1},
+		{"an unsupported ecosystem is not",
+			cyclonedx.Stats{Components: 1, SkippedUnsupportedEcosystem: 1}, 0},
+		{"and the three do not merge",
+			cyclonedx.Stats{Components: 3, SkippedNoVersion: 1, SkippedNoPURL: 1, SkippedUnsupportedEcosystem: 1}, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			sum, err := Table(&buf, matcher.Result{}, tc.cat)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sum.TargetIncomplete != tc.want {
+				t.Errorf("TargetIncomplete = %d, want %d for %+v", sum.TargetIncomplete, tc.want, tc.cat)
+			}
+		})
+	}
+}

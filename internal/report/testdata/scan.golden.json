@@ -176,7 +176,7 @@
     "evaluated": 4,
     "notEvaluated": 2,
     "incompleteChecks": 2,
-    "targetIncomplete": 1,
+    "targetIncomplete": 2,
     "findings": 3,
     "unknownSeverity": 1
   }

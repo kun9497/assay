@@ -19,7 +19,10 @@ func TestParse_CatalogsEveryLockfileAndNamesTheRest(t *testing.T) {
 		"package-lock.json": `{"lockfileVersion":3,"packages":{` +
 			`"":{"version":"1.0.0"},` +
 			`"node_modules/lodash":{"version":"4.17.11"}}}`,
-		"requirements.txt": "Django==3.2.12\n",
+		// D38: one pinned line and one that is not, so the fixture exercises both
+		// halves of the rule. An all-pinned fixture would let a parser that never
+		// refuses anything pass.
+		"requirements.txt": "Django==3.2.12\nflask>=2.0\n",
 	})
 	target, stats, mf, err := Parse(root)
 	if err != nil {
@@ -37,12 +40,29 @@ func TestParse_CatalogsEveryLockfileAndNamesTheRest(t *testing.T) {
 		stats.SkippedNoVersion+stats.SkippedUnsupportedEcosystem {
 		t.Errorf("the invariant does not survive the merge: %+v", stats)
 	}
-	if len(mf.Unread) != 1 || mf.Unread[0].Path != "requirements.txt" {
-		t.Fatalf("mf.Unread = %+v, want exactly requirements.txt", mf.Unread)
+	// D38: requirements.txt is now READ, so it is no longer Unread. What
+	// survives is the obligation it carried — a reader must still be told what
+	// the scan could not use, and now it is told per line rather than per file.
+	if len(mf.Unread) != 0 {
+		t.Fatalf("mf.Unread = %+v, want none: every manifest here is readable", mf.Unread)
 	}
-	if mf.Unread[0].Reason == "" {
-		t.Error("the mf.Unread entry carries no reason — a reader told only that " +
-			"something was skipped cannot act on it")
+	var readReq bool
+	for _, r := range mf.Read {
+		if r.Path == "requirements.txt" {
+			readReq = true
+		}
+	}
+	if !readReq {
+		t.Errorf("mf.Read = %+v, want requirements.txt among them (D38)", mf.Read)
+	}
+	if len(mf.Unusable) == 0 {
+		t.Fatal("mf.Unusable is empty; the unpinned requirement must be named, not silently dropped")
+	}
+	for _, u := range mf.Unusable {
+		if u.Path == "" || u.Line == "" || u.Reason == "" {
+			t.Errorf("mf.Unusable entry %+v is missing a field — a reader told only that "+
+				"something was skipped cannot act on it", u)
+		}
 	}
 }
 
@@ -229,7 +249,7 @@ func TestParse_GoModLocationIsAlsoTheManifestsOwnRelativePath(t *testing.T) {
 // exercises the switch's default branch directly, without touching walk.go.
 func TestParse_UnhandledKindBecomesUnreadNotSilent(t *testing.T) {
 	m := Manifest{Path: "mystery.lock", Kind: Kind("mystery-manifest")}
-	pkgs, stats, u := parseManifest("irrelevant-root", m)
+	pkgs, stats, _, u := parseManifest("irrelevant-root", m)
 	if pkgs != nil {
 		t.Errorf("packages = %v, want nil for a Kind with no parser", pkgs)
 	}
@@ -257,7 +277,7 @@ func TestParse_UnhandledKindBecomesUnreadNotSilent(t *testing.T) {
 func TestParse_UnreadReasonIsNotFlattenedToOneSharedString(t *testing.T) {
 	root := mkdir(t, map[string]string{
 		"broken/package-lock.json": `{"lockfileVersion":3, `,
-		"requirements.txt":         "Django==3.2.12\n",
+		"requirements.txt":         "Django==3.2.12\nflask>=2.0\n",
 	})
 	_, _, mf, err := Parse(root)
 	if err != nil {
@@ -268,13 +288,17 @@ func TestParse_UnreadReasonIsNotFlattenedToOneSharedString(t *testing.T) {
 		switch u.Path {
 		case "broken/package-lock.json":
 			brokenReason = u.Reason
-		case "requirements.txt":
-			reqReason = u.Reason
 		}
 	}
-	if brokenReason == "" || reqReason == "" {
-		t.Fatalf("mf.Unread = %+v, want entries for both broken/package-lock.json "+
-			"and requirements.txt", mf.Unread)
+	// D38 moved requirements.txt out of Unread; the reason under test here is
+	// the unreadable lockfile's, and the point is still that it is its own
+	// string rather than a shared constant.
+	if brokenReason == "" {
+		t.Fatalf("mf.Unread = %+v, want an entry for broken/package-lock.json", mf.Unread)
+	}
+	if len(mf.Unusable) == 0 || mf.Unusable[0].Reason == brokenReason {
+		t.Errorf("the unusable requirement's reason (%+v) must not be the lockfile's (%q)",
+			mf.Unusable, brokenReason)
 	}
 	if !strings.Contains(brokenReason, "unexpected end of JSON input") {
 		t.Errorf("broken reason = %q, want it to contain the underlying JSON "+
