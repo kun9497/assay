@@ -26,10 +26,19 @@ const (
 	kisaTitle   = "제목-오픈소스-라이브러리-보안-업데이트-권고"
 	kisaSummary = "개요-원격에서-임의의-코드를-실행할-수-있는-결함이-발견되었습니다"
 	kisaURL     = "https://knvd.krcert.or.kr/info/vuln/notice/detail?id=99887"
+	// D33. Non-zero on purpose: Claims is an int, so a fixture leaving it at
+	// its zero value would let a renderer that never reads the field produce
+	// byte-identical output. It is also a value that appears nowhere else in
+	// the fixture — not in the id, the version, or any count — so an assertion
+	// on it cannot pass from another column.
+	kisaClaims = 47
 )
 
 func kisaEnrichment() matcher.Enrichment {
-	return matcher.Enrichment{Source: "KISA", Title: kisaTitle, Summary: kisaSummary, URL: kisaURL}
+	return matcher.Enrichment{
+		Source: "KISA", Title: kisaTitle, Summary: kisaSummary, URL: kisaURL,
+		Claims: kisaClaims,
+	}
 }
 
 // footnoteLine returns the table footnote beginning with marker, or "" when
@@ -381,8 +390,38 @@ func TestEnrichmentLines(t *testing.T) {
 			"  title:    " + kisaTitle,
 			"  summary:  " + kisaSummary,
 			"  link:     " + kisaURL,
+			"  scope:    this notice covers 47 vulnerabilities, not only this one",
 		}
 		assertLines(t, got, want)
+	})
+
+	// D33: the scope line is what separates prose about this vulnerability from
+	// a monthly bulletin that happened to list it. It is printed only above one
+	// — a notice about a single CVE has nothing to disclose, and a line saying
+	// so on every record would train a reader to skip the block.
+	t.Run("a notice about one CVE discloses no scope", func(t *testing.T) {
+		got := enrichmentLines([]matcher.Enrichment{
+			{Source: "KISA", Title: kisaTitle, URL: kisaURL, Claims: 1},
+		})
+		want := []string{
+			"enrichment: KISA",
+			"  title:    " + kisaTitle,
+			"  link:     " + kisaURL,
+		}
+		assertLines(t, got, want)
+	})
+
+	// Zero is "this source does not report breadth", which is not the same as
+	// one and must not render as a claim about scope either way.
+	t.Run("unreported breadth discloses no scope", func(t *testing.T) {
+		got := enrichmentLines([]matcher.Enrichment{
+			{Source: "KISA", Title: kisaTitle, URL: kisaURL},
+		})
+		for _, l := range got {
+			if strings.Contains(l, "scope:") {
+				t.Errorf("rendered %q for a record whose breadth is unreported", l)
+			}
+		}
 	})
 
 	// A notice whose overview could not be extracted still has a headline and a
@@ -423,6 +462,7 @@ func TestEnrichmentLines(t *testing.T) {
 			"  title:    " + kisaTitle,
 			"  summary:  " + kisaSummary,
 			"  link:     " + kisaURL,
+			"  scope:    this notice covers 47 vulnerabilities, not only this one",
 		}
 		assertLines(t, got, want)
 	})
@@ -464,7 +504,10 @@ func TestJSON_CarriesEnrichmentInFull(t *testing.T) {
 	if len(f.Enrichment) != 1 {
 		t.Fatalf("Enrichment = %d entries, want 1: %+v", len(f.Enrichment), f.Enrichment)
 	}
-	want := EnrichmentRecord{Source: "KISA", Title: kisaTitle, Summary: kisaSummary, URL: kisaURL}
+	want := EnrichmentRecord{
+		Source: "KISA", Title: kisaTitle, Summary: kisaSummary, URL: kisaURL,
+		Claims: kisaClaims,
+	}
 	if f.Enrichment[0] != want {
 		t.Errorf("Enrichment[0] = %+v, want %+v", f.Enrichment[0], want)
 	}

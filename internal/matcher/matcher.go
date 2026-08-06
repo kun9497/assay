@@ -120,6 +120,11 @@ type Enrichment struct {
 	Title   string
 	Summary string
 	URL     string
+	// Claims is how many vulnerabilities the notice this came from named
+	// (D33). Carried through to the report because a notice naming a thousand
+	// CVEs and one naming this CVE alone render identically without it, and
+	// the first is a monthly bulletin rather than prose about this finding.
+	Claims int
 }
 
 // Rating is one database's assessment of one vulnerability: what GHSA said, as
@@ -512,6 +517,7 @@ func (m *Matcher) annotate(f *Finding) error {
 				Title:   e.Title,
 				Summary: e.Summary,
 				URL:     e.URL,
+				Claims:  e.Claims,
 			})
 		}
 	}

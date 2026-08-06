@@ -1183,6 +1183,60 @@ Six mutations verified red: dropping the padding, dropping the bare-form guard, 
 sentinel guard, padding with `1` instead of `0`, padding only two-identifier cores, and
 letting a four-identifier core through.
 
+### D33 — The narrowest KISA notice wins, and its breadth is disclosed
+
+Enrichment is keyed `(CVE, Source)` and every KISA record carries the same source, so a CVE
+named by two notices kept whichever page arrived last. Measured live on 2026-08-06, `convert`
+produces **20,315** records for **18,524** CVEs: **1,791** were being decided by page order,
+the tie-break D25 forbids in as many words.
+
+The winner is now the notice naming the **fewest** CVEs, ties broken on the notice URL. The
+tie-break is arbitrary on purpose — the point is that it is a rule at all rather than a
+property of the network.
+
+**Selection happens in the provider, not the store.** Only the walk knows how many CVEs each
+notice named, and the rule needs the whole corpus: emitting as pages arrive cannot know a
+narrower notice is still to come. So nothing is emitted until the walk finishes, and a walk
+that fails part-way emits nothing rather than winners chosen from the half it read — which
+would be the arrival-order defect again, wearing a rule.
+
+**This is not the store's job, and D13's usual argument does not apply.** Lossless storage
+exists so that adding a field later does not mean rebuilding — and enrichment is rebuilt from
+scratch on every `db build` in under a minute, never carried forward by a seed. The rebuild
+D13 protects against costs nothing here, so keeping the losers would buy nothing.
+
+**The roundup problem is disclosed, not solved, and the measurement is why.** The expectation
+recorded when this slice opened was that narrowest-wins would remove the arrival-order
+dependence *and* the roundup dilution together. Only the first is true. After selection,
+**12,972 of 18,524 records (70%)** still come from a notice naming more than twenty CVEs, and
+only **822 (4%)** come from one naming that CVE alone — because for most CVEs the monthly
+bulletin is the **only** notice that names them. There is nothing narrower to prefer.
+
+So the mitigation is disclosure. `Enrichment.Claims` records how many CVEs the notice named,
+`--explain` prints `scope: this notice covers N vulnerabilities, not only this one` above one,
+and the JSON document carries `claims` (schema 3). Without it a bulletin naming a thousand
+CVEs and prose written about this one render identically, and the reader has no way to tell
+which they are looking at. **Dropping wide notices outright was rejected**: it would discard
+70% of the corpus, including the only Korean text those CVEs have, to fix a presentation
+problem.
+
+**`Provenance.Records` reports what the database will hold**, not what `convert` produced.
+Reporting the larger number would over-claim by exactly the records selection discarded,
+which is the thing being fixed (D20's rule, applied to the enricher).
+
+**A third defect turned out not to be one.** 2,202 records (12%) carried a summary beginning
+from the no-overview fallback, which read as a parser failure. Measured against 100 live
+notices: the exact `□ 개요` heading is present in 65, a looser `□ …개요` form finds 67, and
+the remaining 33 have no overview section at all. The fallback is the correct answer for
+those, not a miss, and widening the heading match buys two notices in a hundred for a
+false-positive risk on every one. Left alone deliberately.
+
+Six mutations verified red: first-notice-wins, last-notice-wins, widest-wins, treating an
+unreported breadth as narrowest, reporting the pre-selection count as `Records`, and never
+populating `Claims`. The report fixture sets `Claims` to a value that appears nowhere else in
+it, because an int left at its zero value lets a renderer that never reads the field produce
+byte-identical output.
+
 ## 3. Architecture
 
 ### Measured data volumes

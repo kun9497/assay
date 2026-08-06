@@ -21,4 +21,14 @@ type Enrichment struct {
 	// time.
 	Summary string
 	URL     string
+	// Claims is how many distinct CVEs the notice this record came from named.
+	// It is stored rather than derived because the notice's own breadth is the
+	// only signal separating "an OpenSSL advisory" from "a monthly roundup that
+	// happened to list this CVE among a thousand others", and the record cannot
+	// be re-read to recover it — the source text is not kept (D33).
+	//
+	// One means the notice is about this CVE and nothing else. Zero means the
+	// authoring source does not report breadth, which is a real answer, not a
+	// narrower one: selection treats it as unknown rather than best.
+	Claims int
 }

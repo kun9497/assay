@@ -210,6 +210,18 @@ func enrichmentLines(es []matcher.Enrichment) []string {
 			// "summary:", the longest of the three labels.
 			lines = append(lines, fmt.Sprintf("  %-9s %s", f.label+":", f.value))
 		}
+		// D33: how much else the notice was about. A source's narrowest notice
+		// for a CVE still may not be about that CVE — 70% of KISA's records
+		// come from notices naming more than twenty, and where a roundup is the
+		// only notice naming a CVE it is what a reader gets. Saying so is the
+		// difference between prose about this vulnerability and a monthly
+		// bulletin that happened to list it; without the count they render
+		// identically. Printed only above one, because "covers 1 vulnerability"
+		// is what the reader already assumed.
+		if e.Claims > 1 {
+			lines = append(lines, fmt.Sprintf("  %-9s this notice covers %d vulnerabilities, not only this one",
+				"scope:", e.Claims))
+		}
 	}
 	return lines
 }

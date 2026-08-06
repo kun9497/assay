@@ -1157,24 +1157,122 @@ func TestEnrich_ProvenanceRecordsWhatWasFetched(t *testing.T) {
 	}
 }
 
-// An emit failure stops the walk instead of being swallowed. The caller is
-// writing to a database; a failed write that the walk carries on past means
+// An emit failure stops the emit loop instead of being swallowed. The caller is
+// writing to a database; a failed write that the loop carries on past means
 // db update reports a corpus it did not store.
+//
+// D33 moved emission after the walk, so this no longer saves requests — the
+// walk has to finish before a winner can be chosen at all. What it must still
+// guarantee is that the error reaches the caller verbatim and that no further
+// record is offered after the first refusal, which is the half that protects
+// the database rather than the network.
 func TestEnrich_StopsWhenEmitFails(t *testing.T) {
-	f, srv := newFake(t, 3, map[int]string{
+	_, srv := newFake(t, 3, map[int]string{
 		0: page(notice("n-alpha", "제품 A 권고", overview("CVE-2026-9101"))),
 		1: page(notice("n-beta", "제품 B 권고", overview("CVE-2026-9102"))),
 		2: emptyPage,
 	})
 
 	want := errBoom
+	emits := 0
 	p := New(Options{BaseURL: srv.URL, PageSize: 1, Pause: durPtr(0)})
-	_, err := p.Enrich(context.Background(), func(advisory.Enrichment) error { return want })
+	_, err := p.Enrich(context.Background(), func(advisory.Enrichment) error {
+		emits++
+		return want
+	})
 	if err != want {
 		t.Fatalf("Enrich returned %v, want the emit error %v verbatim", err, want)
 	}
-	if got := len(f.Skips()); got != 1 {
-		t.Errorf("made %d requests after emit failed on the first record, want 1", got)
+	// Two CVEs are in the corpus. Continuing past the first refusal would offer
+	// the second, and a loop that ignored the error entirely would offer it and
+	// return nil — the assertion above catches that, and this one catches the
+	// half-measure that logs and carries on.
+	if emits != 1 {
+		t.Errorf("offered %d records after the first emit failed, want 1", emits)
+	}
+}
+
+// D33. One CVE named by two notices used to keep whichever page arrived last —
+// 1,791 of 20,314 records on the real corpus. The narrowest notice must win
+// regardless of the order the pages come in, so the same corpus is walked twice
+// with the notices swapped and both runs must agree.
+func TestEnrich_NarrowestNoticeWins(t *testing.T) {
+	// The roundup names the CVE the specific notice is about, plus two others,
+	// exactly as KISA's monthly bulletins do.
+	specific := notice("n-openssl", "OpenSSL 제품 보안 업데이트 권고", overview("CVE-2026-1111"))
+	roundup := notice("n-monthly", "MS 정기 보안 업데이트 권고",
+		overview("CVE-2026-1111 CVE-2026-2222 CVE-2026-3333"))
+
+	for _, tc := range []struct {
+		name       string
+		first, snd string
+	}{
+		{"specific arrives first", specific, roundup},
+		{"roundup arrives first", roundup, specific},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, srv := newFake(t, 3, map[int]string{
+				0: page(tc.first),
+				1: page(tc.snd),
+				2: emptyPage,
+			})
+			got := map[string]advisory.Enrichment{}
+			p := New(Options{BaseURL: srv.URL, PageSize: 1, Pause: durPtr(0)})
+			prov, err := p.Enrich(context.Background(), func(e advisory.Enrichment) error {
+				got[e.CVE] = e
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The shared CVE takes the notice that named only it.
+			shared := got["CVE-2026-1111"]
+			if shared.Title != "OpenSSL 제품 보안 업데이트 권고" {
+				t.Errorf("CVE-2026-1111 kept %q, want the notice that names only it", shared.Title)
+			}
+			if shared.Claims != 1 {
+				t.Errorf("CVE-2026-1111 Claims = %d, want 1", shared.Claims)
+			}
+			// The two the roundup alone names still get it — losing to a
+			// narrower notice is not the same as being dropped, and a rule that
+			// discarded roundups outright would take these with them.
+			for _, cve := range []string{"CVE-2026-2222", "CVE-2026-3333"} {
+				if got[cve].Title != "MS 정기 보안 업데이트 권고" {
+					t.Errorf("%s kept %q, want the roundup that is its only source", cve, got[cve].Title)
+				}
+				if got[cve].Claims != 3 {
+					t.Errorf("%s Claims = %d, want 3 — a reader must be able to see the breadth", cve, got[cve].Claims)
+				}
+			}
+			if len(got) != 3 {
+				t.Errorf("emitted %d CVEs, want 3", len(got))
+			}
+			// Records reports what the database will hold, not what convert
+			// produced. Four records were converted; three survive selection.
+			if prov.Records != 3 {
+				t.Errorf("Provenance.Records = %d, want 3 — the count must not include what selection discarded", prov.Records)
+			}
+		})
+	}
+}
+
+// A source that does not report breadth must not outrank one that does. Claims
+// is zero for such a record, and reading zero as "narrowest" would let it win
+// every tie against a notice that honestly said it covers one CVE.
+func TestKeep_UnknownBreadthDoesNotDisplaceKnown(t *testing.T) {
+	known := advisory.Enrichment{CVE: "CVE-2026-1", Source: "KISA", URL: "z", Claims: 9}
+	unknown := advisory.Enrichment{CVE: "CVE-2026-1", Source: "OTHER", URL: "a", Claims: 0}
+
+	// Either arrival order, same answer — and the URL ordering is deliberately
+	// set so a tie-break on URL alone would pick the unknown one.
+	for _, order := range [][]advisory.Enrichment{{known, unknown}, {unknown, known}} {
+		best := map[string]advisory.Enrichment{}
+		for _, e := range order {
+			keep(best, e)
+		}
+		if got := best["CVE-2026-1"].Claims; got != 9 {
+			t.Errorf("kept Claims = %d, want 9: an unreported breadth is unknown, not narrowest", got)
+		}
 	}
 }
 

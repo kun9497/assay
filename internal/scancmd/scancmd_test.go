@@ -841,8 +841,8 @@ func TestRun_OutputJSON(t *testing.T) {
 		if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
 			t.Fatalf("stdout is not valid JSON: %v\n%s", err, out.String())
 		}
-		if doc.SchemaVersion != 2 {
-			t.Errorf("SchemaVersion = %d, want 2", doc.SchemaVersion)
+		if doc.SchemaVersion != 3 {
+			t.Errorf("SchemaVersion = %d, want 3", doc.SchemaVersion)
 		}
 		if len(doc.Findings) != 1 || doc.Findings[0].Advisory.ID != "GHSA-json-medium" {
 			t.Errorf("Findings = %+v, want the one medium finding", doc.Findings)

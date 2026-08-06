@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/kun9497/assay/internal/advisory"
@@ -265,6 +267,20 @@ func (p *Provider) Enrich(ctx context.Context, emit func(advisory.Enrichment) er
 		// it.
 		DataAsOf: nowUTC(),
 	}
+	// D33: one CVE is named by several notices, and the store keys enrichment
+	// on (CVE, Source) — so whichever page arrived last used to win. Measured
+	// on the 2026-08-05 corpus, convert produced 20,314 records and the store
+	// kept 18,523: 1,791 were decided by page order, the tie-break D25 forbids.
+	//
+	// The winner is chosen here rather than by the store because only this
+	// walk knows how many CVEs each notice named, and because the rule needs
+	// the whole corpus: emitting as pages arrive cannot know that a narrower
+	// notice is still to come. Nothing is emitted until the walk finishes, so
+	// a walk that fails part-way emits nothing at all rather than a set of
+	// winners chosen from the half it managed to read — which would be the
+	// arrival-order defect again, wearing a rule.
+	best := map[string]advisory.Enrichment{}
+
 	var (
 		skipCount int
 		notices   int
@@ -358,9 +374,7 @@ func (p *Provider) Enrich(ctx context.Context, emit func(advisory.Enrichment) er
 
 		for _, notice := range page.ResList {
 			for _, e := range convert(notice) {
-				if err := emit(e); err != nil {
-					return store.Provenance{}, err
-				}
+				keep(best, e)
 				records++
 			}
 		}
@@ -380,8 +394,61 @@ func (p *Provider) Enrich(ctx context.Context, emit func(advisory.Enrichment) er
 		// yields far fewer records per notice is worth seeing.
 		fmt.Fprintf(p.progress, nlFmt("knvd: %d notices, %d records"), notices, records)
 	}
-	prov.Records = records
+	// Emitted in CVE order so two runs over the same corpus write the same
+	// bytes in the same sequence — the store is keyed, so order cannot change
+	// what is held, but a build that is reproducible only up to map iteration
+	// is not one whose output can be diffed.
+	for _, cve := range slices.Sorted(maps.Keys(best)) {
+		if err := emit(best[cve]); err != nil {
+			return store.Provenance{}, err
+		}
+	}
+	// The count of what the database will hold, not of what convert produced.
+	// Reporting the larger number would over-claim by exactly the records this
+	// selection discarded, which is the thing being fixed.
+	prov.Records = len(best)
+	if dropped := records - len(best); dropped > 0 {
+		fmt.Fprintf(p.progress, nlFmt("knvd: %d records for %d CVEs; %d dropped to a narrower notice"),
+			records, len(best), dropped)
+	}
 	return prov, nil
+}
+
+// keep applies D33's selection: for one CVE, the notice naming the fewest CVEs
+// wins. A monthly roundup naming 1,046 of them describes none of them, and 70%
+// of the corpus's records come from notices naming more than twenty.
+//
+// Ties break on URL, which carries the notice ID, purely so the answer does not
+// depend on which page arrived first. It is an arbitrary rule and deliberately
+// so — the point is that it is a rule at all.
+//
+// A record with no breadth reported (Claims == 0) never displaces one that has
+// it. Zero is "this source does not say", and reading it as "narrowest possible"
+// would let a source that reports nothing outrank every notice that does.
+func keep(best map[string]advisory.Enrichment, e advisory.Enrichment) {
+	cur, seen := best[e.CVE]
+	if !seen {
+		best[e.CVE] = e
+		return
+	}
+	if better(e, cur) {
+		best[e.CVE] = e
+	}
+}
+
+func better(a, b advisory.Enrichment) bool {
+	switch {
+	case a.Claims == 0 && b.Claims == 0:
+		return a.URL < b.URL
+	case a.Claims == 0:
+		return false
+	case b.Claims == 0:
+		return true
+	case a.Claims != b.Claims:
+		return a.Claims < b.Claims
+	default:
+		return a.URL < b.URL
+	}
 }
 
 // listRequest is KNVD's query, sent as the POST body. Recorded verbatim from

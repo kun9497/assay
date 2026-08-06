@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "findings": [
     {
       "package": {
@@ -49,7 +49,8 @@
           "source": "KISA",
           "title": "제목-오픈소스-라이브러리-보안-업데이트-권고",
           "summary": "개요-원격에서-임의의-코드를-실행할-수-있는-결함이-발견되었습니다",
-          "url": "https://knvd.krcert.or.kr/info/vuln/notice/detail?id=99887"
+          "url": "https://knvd.krcert.or.kr/info/vuln/notice/detail?id=99887",
+          "claims": 47
         }
       ]
     },

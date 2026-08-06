@@ -640,8 +640,13 @@ more than 20 CVEs (one names 1,046), so every enriched finding met in live scann
 a Microsoft monthly bulletin to a non-Microsoft vulnerability. Enrichment changes no verdict
 (D3), which is why this is queued behind ⑨.
 
-- [ ] Narrowest notice wins, ties broken on notice ID
-- [ ] Summary extraction — 12% of records fall back past a missing `□ 개요` heading
+- [x] Narrowest notice wins, ties broken on the notice URL (D33) — 1,791 of 20,315 records
+      were being decided by page arrival order, the tie-break D25 forbids
+- [x] Breadth disclosed rather than removed — after selection **70%** of records still come
+      from a notice naming more than twenty CVEs, because for most CVEs the monthly bulletin
+      is the only notice that names them. `--explain` now says so, and JSON carries `claims`
+- [x] Summary extraction measured and left alone — of 100 live notices, 65 carry `□ 개요`, a
+      looser match finds 67, and the other 33 have no overview section at all
 
 Correctness is checked by **differential testing against grype** at every stage. Exact
 agreement is not expected — the data sources differ — but a large divergence means the
