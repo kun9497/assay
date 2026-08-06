@@ -627,8 +627,13 @@ day: `alpine:3.14` skipped `libretls 3.3.3p1-r3` and with it CVE-2022-0778.
       at `13.0`. Verbatim `golang.org/x/mod/semver`'s documented shorthand, which
       govulncheck relies on for these bounds; suffixed forms like `4.0-rc1` stay errors
       because neither reference accepts them. semver bounds that will not parse: 96 -> 40
-- [ ] Leading-zero cores (`19.03.0`, `4.072`) stay a loud skip — accepting the shape without
-      stripping the zeros would sort `4.072` above `4.72`, trading a loud miss for a silent one
+- [x] Leading-zero cores are normalized away, not refused (D34) — `19.03.0` equals `19.3.0`,
+      which is node-semver's loose mode. Acceptance and normalization are one rule:
+      `compareNumeric` is length-first, so accepting without trimming would sort `4.072`
+      above `4.72`. A deliberate divergence from `x/mod`, which refuses leading zeros — the
+      alternative is `docker/docker`, `moby/moby` and `docker/cli` permanently unevaluable.
+      semver bounds that will not parse: 40 -> 12, and `assay` now scans its own binary with
+      nothing unevaluated
 - [ ] pep440 leniency — deferred; the two candidate rules rescue 2 advisory bounds between them
 - [ ] Table-driven cases per ecosystem, checked against that ecosystem's published vectors
 

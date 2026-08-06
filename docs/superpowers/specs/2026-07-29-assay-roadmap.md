@@ -1237,6 +1237,57 @@ populating `Claims`. The report fixture sets `Claims` to a value that appears no
 it, because an int left at its zero value lets a renderer that never reads the field produce
 byte-identical output.
 
+### D34 — A leading zero in a semver core is normalized away, not refused
+
+A core identifier with a leading zero is accepted and trimmed: `19.03.0` compares equal to
+`19.3.0`. This is node-semver's loose mode, verified against 7.8.1 —
+`SemVer("19.03.0", {loose:true}).version === "19.3.0"` and
+`eq("19.03.0", "19.3.0", {loose:true}) === true`.
+
+**Acceptance and normalization are one rule, not two.** D32 declined to accept the shape
+precisely because accepting it alone would be worse than refusing: `compareNumeric` orders
+digit strings by length before value, so `4.072.0` would sort *above* `4.72.0` while denoting
+the same release — a silent reordering in place of a loud skip. Trimming is what makes the
+acceptance safe, and the test table carries the pair whose lengths differ and whose values
+agree, because that is the only shape that can tell the two apart.
+
+**A deliberate divergence from `golang.org/x/mod/semver`, which refuses a leading zero
+outright.** `19.03.9` is a real Docker tag that Go's own version rules cannot express — part
+of why docker is carried as `+incompatible` in the first place — and the string reaches this
+code as a GHSA range bound describing a release, not as a module version anything resolved.
+Following x/mod here would mean `github.com/docker/docker`, `github.com/moby/moby` and
+`github.com/docker/cli` stay permanently unevaluable, which is a worse answer than the one
+node-semver gives.
+
+**Not extended to D32's shorthand.** `4.072` and `01.0` stay errors. The two rules come from
+different references and neither applies both at once: node-semver's loose *parser* needs
+three identifiers and throws on `4.072`, and x/mod's shorthand needs no leading zero. Only
+`coerce()` reads `4.072` as `4.72.0`, and coerce is a lossier entry point that also silently
+truncates `1.2.3.4` to `1.2.3`. Pre-release identifiers keep the spec's own §9 rule for the
+same reason: nothing in the data asks for more.
+
+**Chosen over pep440 leniency on frequency, not on count.** The pep440 residue is larger — 45
+bounds against semver's 40 at the time — but it sits on `buildbot`, `trac`, `neutron` and
+`asterix-decoder`, packages a real inventory rarely carries. The semver residue sat on
+`docker/docker`, `moby/moby`, `go-redis`, `argo-cd` and `grafana`. A bound is worth what it
+costs when it fires, and these fire.
+
+**Measured effect.** semver range bounds that will not parse fell from 40 to **12**, across 19
+packages to **11** — a larger drop than the bound count suggests, because `19.03.x` recurs
+across many docker and moby advisories. `assay` scanning its own binary now reports **no
+unevaluated packages at all**, where before it skipped `github.com/docker/cli`;
+`v29.5.3+incompatible` is correctly not a finding against a range bounded at 19.03.
+
+What remains is genuinely malformed rather than merely unconventional: `9.6.0b1` (go-redis),
+`2.10-rc2` (argo-cd) and `3.0-beta1` (grafana) are missing the hyphen semver requires,
+`2018-05-19` is a date, and `1.0.25.1` and `0.4.4.3` carry four identifiers. Guessing where a
+hyphen belongs is a different decision from reading a zero-padded number, and there is no
+reference to follow for it.
+
+Five mutations verified red: refusing leading zeros again, accepting without normalizing,
+dropping the padded-core guard, trimming an all-zero identifier down to nothing, and allowing
+leading zeros in pre-release identifiers.
+
 ## 3. Architecture
 
 ### Measured data volumes
