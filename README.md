@@ -105,6 +105,10 @@ Working today:
 # Download the published vulnerability database — the normal path, seconds not hours
 assay db update
 
+# ...or build it yourself, which is the only way to get KISA's Korean notices.
+# They are on by default (D37) and stripped from anything published (D29).
+assay db build --seed "$(assay db ref)"
+
 # What is in the database, and how current is it
 assay db status
 

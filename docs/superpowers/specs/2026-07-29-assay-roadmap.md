@@ -1419,6 +1419,46 @@ error, which the matcher's conservative default made invisible. It is now held b
 `CauseOf` in the `version` package directly, since that answer is that package's contract
 regardless of what any caller defaults to.
 
+### D37 — KISA enrichment is on by default, and the publish workflow turns it off
+
+D29 made `KISA_ENABLE` opt-in and gave a reason: the data may not be redistributed, so an
+off-by-default flag is the honest shape for something a user has to choose to hold. That
+reasoning protected the wrong person. `db push` strips enrichment either way, so an opt-in
+flag never guarded redistribution — it only guarded against *having* the feature, and the
+person it kept it from was the one who wanted it and forgot the variable. This project exists
+to attach KISA's Korean prose to findings; that was off by default for everyone including its
+author, which is how the question came up.
+
+So the default flips. `db build` fetches KISA unless told not to, and `KISA_ENABLE=0` is how
+you tell it. Nothing about D29 changes: `db push` still strips, `db update` still never
+carries it, and the artifact is still byte-identical to what it published before.
+
+**The publish workflow sets `KISA_ENABLE=0`, and that is the point of the flag now.** Turning
+enrichment on there would mean 41 requests to a public-sector service, every day, for data
+`db push` deletes seconds later — worse than pointless, since the cost lands on somebody
+else's servers.
+
+**The off switch had to be built before the default could move.** The shape being replaced was
+`os.Getenv(name) != ""`, under which `KISA_ENABLE=0` means **on**. That was survivable while
+both flags were opt-in and nobody had a reason to write a falsy value, and it stops being
+survivable the moment a workflow depends on "0". `envFlag` reads `1/true/yes/on` and
+`0/false/no/off`, case-insensitively and whitespace-trimmed, because YAML quoting varies and
+`KISA_ENABLE: "0"` must not arrive as `" 0 "` and mean the opposite.
+
+**An unrecognised value warns and takes the default rather than failing.** This is a database
+build, not a scan: refusing to start over a malformed environment variable would trade a fetch
+nobody wanted for a build nobody got. The warning names the variable and the value, on stderr
+with the rest of the build's diagnostics.
+
+**NVD stays opt-in**, now through the same reader. Its gate is about cost — a full pass is
+about seven hours — and starting one nobody asked for is a different kind of surprise from a
+fetch that takes a minute. Sharing `envFlag` means `NVD_ENABLE=0` now works too, which it did
+not before.
+
+Seven mutations verified red: KISA back to opt-in, NVD flipped to default-on, `"0"` no longer
+disabling, case sensitivity dropped, whitespace not trimmed, an unrecognised value disabling
+instead of defaulting, and the warning removed.
+
 ## 3. Architecture
 
 ### Measured data volumes

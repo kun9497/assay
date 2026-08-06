@@ -1355,25 +1355,80 @@ func TestRun_DBPushRejectsTrailingArgument(t *testing.T) {
 }
 
 // KISA enrichment is opt-in, and nothing may construct the enricher without
-// KISA_ENABLE.
+// KISA_ENABLE, which D37 made default-ON.
 //
 // The gate is not about cost the way NVD's is (~41 requests, under a minute).
-// It is D29: the data may not be redistributed, so `db push` strips it and
-// `db update` never carries it, which leaves a deliberate local build as the
-// only way to hold it. Off by default is the honest shape for that.
-func TestDBUpdateEnrichers_KISAIsOptIn(t *testing.T) {
-	t.Setenv("KISA_ENABLE", "")
+// D29 made it opt-in because the data may not be redistributed, and D37 flipped
+// that: `db push` strips it either way, so the only person a default-off flag
+// protected was the one who wanted the feature and forgot the variable.
+//
+// Both directions are asserted, and the falsy spellings especially: the shape
+// this replaced was `os.Getenv(name) != ""`, under which KISA_ENABLE=0 meant ON.
+// That was survivable while the flag was opt-in and nobody wrote a falsy value,
+// and it is not survivable now that the publish workflow depends on "0" to
+// avoid 41 requests for data it deletes.
+func TestDBUpdateEnrichers_KISADefaultsOn(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{
+		{"", true},     // unset: the D37 default
+		{"1", true},    //
+		{"true", true}, //
+		{"on", true},   //
+		{"0", false},   // the one the publish workflow sets
+		{"false", false},
+		{"no", false},
+		{"OFF", false},  // case-insensitive
+		{" 0 ", false},  // and whitespace-tolerant, because YAML quoting varies
+		{"maybe", true}, // unrecognised: warn and take the default, never fail the build
+	} {
+		t.Run("KISA_ENABLE="+tc.value, func(t *testing.T) {
+			t.Setenv("KISA_ENABLE", tc.value)
 
-	orig := newKNVDEnricher
-	sawCall := false
-	newKNVDEnricher = func(opts knvd.Options) *knvd.Provider { sawCall = true; return orig(opts) }
-	defer func() { newKNVDEnricher = orig }()
+			orig := newKNVDEnricher
+			sawCall := false
+			newKNVDEnricher = func(opts knvd.Options) *knvd.Provider { sawCall = true; return orig(opts) }
+			defer func() { newKNVDEnricher = orig }()
 
-	if got := dbUpdateEnrichers(io.Discard); len(got) != 0 {
-		t.Errorf("dbUpdateEnrichers() = %+v, want none without KISA_ENABLE", got)
+			got := dbUpdateEnrichers(io.Discard)
+			if (len(got) > 0) != tc.want {
+				t.Errorf("dbUpdateEnrichers() = %d enricher(s), want enabled=%v", len(got), tc.want)
+			}
+			// Constructing knvd.New is what reaches the live endpoint's default
+			// BaseURL, so "returned nothing" and "built nothing" are different
+			// claims and both matter.
+			if sawCall != tc.want {
+				t.Errorf("knvd.New constructed = %v, want %v", sawCall, tc.want)
+			}
+		})
 	}
-	if sawCall {
-		t.Error("knvd.New was constructed even though KISA_ENABLE was unset")
+}
+
+// The same reader guards NVD, which stays opt-in — a full pass costs hours, so
+// starting one nobody asked for is a different kind of surprise. Asserted here
+// because the two now share envFlag, and a change that flipped the shared
+// default would turn every build into a seven-hour one.
+func TestDBUpdateAnnotators_NVDStaysOptIn(t *testing.T) {
+	for value, want := range map[string]bool{"": false, "0": false, "1": true, "true": true} {
+		t.Setenv("NVD_ENABLE", value)
+		if got := dbUpdateAnnotators(io.Discard); (len(got) > 0) != want {
+			t.Errorf("NVD_ENABLE=%q: %d annotator(s), want enabled=%v", value, len(got), want)
+		}
+	}
+}
+
+// An unrecognised value says so rather than failing silently in either
+// direction. This is a database build, not a scan: refusing to start over a
+// malformed variable would trade a fetch nobody wanted for a build nobody got.
+func TestEnvFlag_UnrecognisedValueWarns(t *testing.T) {
+	t.Setenv("KISA_ENABLE", "yeah-ok")
+	var buf bytes.Buffer
+	if !envFlag(&buf, "KISA_ENABLE", true) {
+		t.Error("envFlag returned the non-default for an unrecognised value")
+	}
+	if !strings.Contains(buf.String(), "KISA_ENABLE") || !strings.Contains(buf.String(), "yeah-ok") {
+		t.Errorf("warning = %q, want it to name the variable and the value it could not read", buf.String())
 	}
 }
 

@@ -100,6 +100,10 @@ make build
 # 배포된 취약점 데이터베이스 받아오기 — 평상시 경로, 시간이 아니라 초 단위
 assay db update
 
+# ...또는 직접 빌드합니다. KISA의 한국어 공지를 얻는 유일한 방법입니다.
+# 기본으로 켜져 있고(D37), 배포되는 것에서는 벗겨집니다(D29).
+assay db build --seed "$(assay db ref)"
+
 # 데이터베이스에 무엇이 들어 있고 얼마나 최신인지
 assay db status
 
