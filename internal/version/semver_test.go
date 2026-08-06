@@ -24,6 +24,22 @@ var semverTests = []struct {
 	{"1.0.0", "18446744073709551616.0.0", -1}, // 2^64: must not overflow
 	{"99999999999999999999.1.0", "99999999999999999999.2.0", -1},
 
+	// D32: a bare short core is padded with zeros, exactly as
+	// golang.org/x/mod/semver documents. These are real advisory bounds.
+	{"4.0", "4.0.0", 0},   // lxd
+	{"13.0", "13.0.0", 0}, // npm next
+	{"136", "136.0.0", 0}, // esm.sh, a bare major
+	{"0.46", "0.46.0", 0}, // cosmos-sdk
+	{"4.0", "4.1.0", -1},
+	{"4.0", "3.9.9", 1},
+	{"0.46", "0.46.1", -1},
+	{"136", "1360.0.0", -1}, // padded, then numeric: not a string compare
+	// The padded form is a real release, so it outranks its own pre-releases.
+	// Reading "0.46" as anything below them is the mistake the OSV sentinel
+	// comment warns about, and this row is what separates the two.
+	{"0.46", "0.46.0-rc3", 1},
+	{"4.0", "4.0.0-alpha", 1},
+
 	// Pre-release versus normal at equal core (§11.3)
 	{"1.0.0-alpha", "1.0.0", -1},
 	{"1.0.0", "1.0.0-alpha", 1},
@@ -130,7 +146,14 @@ func TestSemVerCompare(t *testing.T) {
 
 func TestSemVerInvalid(t *testing.T) {
 	invalid := []string{
-		"", "1", "1.0", "1.0.0.0", "v1.0.0.0",
+		"", "1.0.0.0", "v1.0.0.0",
+		// D32 pads a bare short core; it does NOT pad a suffixed one. x/mod's
+		// IsValid is false for both of these and node-semver refuses them in
+		// strict and loose alike, so padding them would be an invention neither
+		// reference makes. Four identifiers stay an error above for the opposite
+		// reason: coercing 1.0.0.0 to 1.0.0 discards a component rather than
+		// supplying a missing one.
+		"1.0-rc.1", "1-rc.1", "1.0+meta", "1+meta", "1.0-", "1.0+",
 		"01.0.0", "1.01.0", "1.0.01", "-1.0.0",
 		"1.0.0-01", "1.0.0-alpha.00", "1.0.0-", "1.0.0-alpha..1",
 		"1.0.0-.alpha", "1.0.0-alpha.", "1.0.0-alpha_beta", "1.0.0-α",
@@ -158,6 +181,11 @@ func TestSemVerValidButUnusual(t *testing.T) {
 		"1.0.0-0", "1.0.0+001", "1.0.0-01a", "1.0.0-0valid",
 		"0.0.0", "0.0.0-0", "99999999999999999999.0.0",
 		"v2.0.0+incompatible", "v0.0.0-20191109021931-daa7c04131f5",
+		// D32: bare short cores, real advisory bounds. github.com/canonical/lxd
+		// is published at "4.0"/"6.0"/"6.5", npm's next at "13.0",
+		// github.com/cosmos/cosmos-sdk at "0.46", github.com/esm-dev/esm.sh at
+		// a bare "136".
+		"4.0", "13.0", "0.46", "136", "v4.0", "v136",
 	}
 	for _, in := range valid {
 		if _, err := (SemVer{}).Compare(in, "1.0.0"); err != nil {

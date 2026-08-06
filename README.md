@@ -623,7 +623,13 @@ day: `alpine:3.14` skipped `libretls 3.3.3p1-r3` and with it CVE-2022-0778.
       `sudo 1.7.4p6-r0`. Follows apk-tools 2.x, which every released Alpine ships; 3.x
       rejects these and answers EQUAL for `3.3.3p1-r3` vs `-r2`, calling an unpatched host
       fixed. apk bounds that will not parse: 61 -> 39; enumerated apk versions: -> 0
-- [ ] Per-ecosystem leniency rules — one decision each, D9 forbids a shared one
+- [x] semver: a bare short core is padded with zeros (D32) — `lxd` at `4.0`, npm's `next`
+      at `13.0`. Verbatim `golang.org/x/mod/semver`'s documented shorthand, which
+      govulncheck relies on for these bounds; suffixed forms like `4.0-rc1` stay errors
+      because neither reference accepts them. semver bounds that will not parse: 96 -> 40
+- [ ] Leading-zero cores (`19.03.0`, `4.072`) stay a loud skip — accepting the shape without
+      stripping the zeros would sort `4.072` above `4.72`, trading a loud miss for a silent one
+- [ ] pep440 leniency — deferred; the two candidate rules rescue 2 advisory bounds between them
 - [ ] Table-driven cases per ecosystem, checked against that ecosystem's published vectors
 
 **⑩ Which KISA notice wins** — found on first real use. The enrichment bucket keys on

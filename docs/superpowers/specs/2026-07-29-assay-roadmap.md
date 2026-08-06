@@ -1124,6 +1124,65 @@ harness reads only three-field comparison lines, so apk-tools master's validity 
 (`!0.1a1`) are skipped. The deliberate divergence from 3.x is therefore invisible to the
 strongest test this package has, and rests on the reasoning above rather than on that replay.
 
+### D32 — A bare short semver core is a shorthand, padded with zeros
+
+`parseSemVer` pads a core of one or two identifiers to three — but only when the string
+carried no pre-release and no build suffix. Everything else is unchanged: leading zeroes
+still rejected, four or more identifiers still rejected, non-numeric identifiers still
+rejected.
+
+This is verbatim `golang.org/x/mod/semver`'s documented exception — *"recognizes vMAJOR and
+vMAJOR.MINOR (with no prerelease or build suffixes) as shorthands"* — and govulncheck already
+relies on it to read these same bounds. The data needs it: `github.com/canonical/lxd` is
+written at `4.0`, `6.0` and `6.5`, npm's `next` at `13.0`, `github.com/cosmos/cosmos-sdk` at
+`0.46`, `github.com/esm-dev/esm.sh` at a bare `136`.
+
+**The bare-form restriction is the rule, not a detail.** `parseSemVer` strips build and
+pre-release off the string *before* it splits the core, so by that point `4.0` and `4.0-rc.1`
+are indistinguishable; the flag has to be recorded on the way past. Both references refuse
+the suffixed form — x/mod's `IsValid` is false for `v4.0-rc1` and `v4.0+meta`, and
+node-semver refuses them in strict and loose alike — so padding them would be an invention
+neither makes.
+
+**The two references disagree about the bare form, and x/mod is the right one here.**
+node-semver rejects `4.0` as a *version* in strict and loose both; it accepts it only as a
+*range expression*, where `13.0` means `>=13.0.0 <13.1.0-0`. That reading does not apply:
+an OSV `SEMVER` range event is a single version, not npm range syntax. `fixed: "13.0"` means
+the release 13.0.0, which is what x/mod's shorthand and node-semver's own `coerce` both
+produce. The same rule is therefore right for the Go and npm ecosystems even though one of
+the two references would refuse the string outright.
+
+**Leading zeroes were considered and deliberately not adopted.** `19.03.0` (docker/cli, via
+GHSA) and `4.072` (neuvector/scanner) stay errors. node-semver throws on `4.072` even under
+`loose`, and accepting the shape without also stripping the zeros would be worse than
+refusing it: `compareNumeric` orders digit strings by length first, so `4.072` would sort
+*above* `4.72` while denoting the same release. That is a silent reordering, which is the
+trade this slice exists to avoid. `github.com/docker/cli` therefore remains a loud skip.
+
+**Four or more identifiers stay an error** for the opposite reason to the padding: coercion
+would read `1.2.3.4` as `1.2.3`, discarding a component rather than supplying a missing one.
+
+**The OSV sentinel is excluded by name.** `"0"` is a bare one-identifier core and would
+otherwise pad to `0.0.0`, which is not what it means — the range layer resolves it to
+negative infinity, and a `0.0.0` reading sorts *above* every `0.0.0-prerelease` build and
+would drop them out of the window. That protection used to fall out of the three-identifier
+check for free, so relaxing that check has to restore it deliberately. This was found by the
+existing invalid-input test, which listed `"0"` with exactly that reasoning already recorded.
+
+**The hard constraint holds structurally.** Padding fires only where the parser errors today,
+so no version that parses now can change its comparison key or its ordering against any
+other.
+
+**Measured effect.** semver range bounds that will not parse fell from 96 to **40** (42
+packages to 19); what remains is the leading-zero family and genuinely malformed strings like
+`2.10-rc2` and `9.6.0b1`. On an inventory of `lxd v5.0.2`, `cosmos-sdk v0.45.9` and
+`next 12.3.0`, the scan goes from **29 findings with 8 advisories unevaluable** to **34
+findings and none skipped** — including `next` reaching CVE-2025-29927, which is critical.
+
+Six mutations verified red: dropping the padding, dropping the bare-form guard, dropping the
+sentinel guard, padding with `1` instead of `0`, padding only two-identifier cores, and
+letting a four-identifier core through.
+
 ## 3. Architecture
 
 ### Measured data volumes
