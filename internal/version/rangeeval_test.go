@@ -2,6 +2,7 @@ package version
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kun9497/assay/internal/advisory"
@@ -309,4 +310,46 @@ func TestAffectsVersion_EnumeratedOnly(t *testing.T) {
 			t.Errorf("AffectsVersion(%q) = %v, want %v", tc.v, got, tc.want)
 		}
 	}
+}
+
+// D35. The two failures render as the same "not evaluated" line, and they mean
+// opposite things to whoever is reading it: an advisory whose bound is malformed
+// is nothing the person running the scan can act on, while an unreadable
+// installed version usually means their own inventory. The message has to say
+// which, and this is the assertion that makes it a contract rather than
+// wording — reverting either string to the old operand-agnostic form turns it
+// red.
+func TestInRange_ErrorNamesWhoseDataIsBroken(t *testing.T) {
+	t.Run("a malformed bound is the advisory's", func(t *testing.T) {
+		// The version under test parses perfectly; only the bound does not.
+		_, _, err := InRange(APK{}, "1.2.3-r4",
+			rng(advisory.RangeEcosystem, intro("0"), fixed("1999-12-14")))
+		if err == nil {
+			t.Fatal("InRange returned no error for an unreadable bound")
+		}
+		if !strings.Contains(err.Error(), "advisory") {
+			t.Errorf("error = %q, want it to name the advisory as the source of the bad data", err)
+		}
+		if strings.Contains(err.Error(), "package") {
+			t.Errorf("error = %q, blames the package for the advisory's defect", err)
+		}
+	})
+
+	t.Run("a malformed installed version is the package's", func(t *testing.T) {
+		// Every bound here parses; only the installed version does not.
+		_, _, err := InRange(APK{}, "not-a-version",
+			rng(advisory.RangeEcosystem, intro("0"), fixed("1.2.3-r4")))
+		if err == nil {
+			t.Fatal("InRange returned no error for an unreadable installed version")
+		}
+		if !strings.Contains(err.Error(), "package") {
+			t.Errorf("error = %q, want it to name the package's own version", err)
+		}
+		// The bound is still named for context, so this cannot assert on its
+		// absence — it asserts that the ADVISORY is not blamed, which is the
+		// half that would be wrong.
+		if strings.Contains(err.Error(), "advisory's range bound") {
+			t.Errorf("error = %q, blames the advisory for the package's version", err)
+		}
+	})
 }

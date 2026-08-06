@@ -1288,6 +1288,76 @@ Five mutations verified red: refusing leading zeros again, accepting without nor
 dropping the padded-core guard, trimming an all-zero identifier down to nothing, and allowing
 leading zeros in pre-release identifiers.
 
+### D35 — Name whose data is unreadable, and repair one documented typo at ingestion
+
+96 range bounds across the three comparers still will not parse. Every one of them sits in a
+range that carries another bound that does, so the question was never "is there information"
+but "what may be concluded from it". Two changes, and one option rejected on the data.
+
+**Say whose data is at fault.** A malformed advisory bound and an unreadable installed
+version both rendered as `not evaluated`, and they mean opposite things to a reader: the
+first is nothing they can act on, the second is usually their own inventory. The two are
+already separated structurally — `sortEvents` validates every bound before the walk begins,
+and it selects the field to validate with the same introduced/fixed/last_affected precedence
+the walk uses to select the field to compare — so a failure inside the walk can only be the
+installed version. That invariant was load-bearing and unwritten; it is now stated where both
+halves can see it, because giving `eventVersion` a different precedence would send an
+unvalidated bound into the walk and make the message blame the package for the advisory's
+defect.
+
+```
+libdwarf 0.5.0-r0 (ALPINE-CVE-2015-8538):
+  the advisory's range bound "1999-12-14" could not be read: …
+github.com/gogo/protobuf 1.3-broken (GHSA-c3h9-896r-86jm):
+  this package's own version "1.3-broken" could not be read, comparing it against
+  the advisory's fixed bound "1.3.2": …
+```
+
+The matcher's `comparing <version>:` prefix went with it: the package and its version already
+head the rendered line, and prefixing every message with the installed version put that string
+in front of the ones whose cause is the advisory — the confusion being removed.
+
+**Repair `.rN` to `-rN` for Alpine, at ingestion.** Measured on the v7 database this is
+**11** bounds and every apk `fixed` failure there is one of three strings — `0.8.21.r2`
+(irssi, 6), `10.2.24.r0` and `10.2.22.r0` (mariadb, 5) — on Alpine v3.3 through v3.8.
+
+It happens at ingestion for D16's reason, so no query path can forget it, and **not** in the
+comparer for D31's: apk-tools 2.x does parse `0.8.21.r2`, through a tolerance for empty digit
+runs, and orders it *above* the `0.8.21-r2` it is a typo for. Teaching the grammar about the
+string would mean adopting that ordering or contradicting the only reference that reads it at
+all. Calling it a typo and repairing the datum is the honest description of what is happening.
+D31 already recorded that reading, in this document and in the invalid-input table, so this
+asserts nothing new.
+
+Two guards carry it. The original must not parse, so nothing already valid is ever rewritten;
+and the replacement must parse, so a failed repair leaves the original in place and the error
+still names what upstream published rather than something this code invented.
+
+**This does write something upstream did not publish**, which is a real cost against D13. The
+alternatives were worse for eleven bounds on two EOL packages: storing both forms complicates
+every reader, and threading a repair count out through `Convert`, `Fetch` and the `Provider`
+interface is three signature changes. What it gets instead is that the rule is one
+substitution in one pure function with the affected set pinned by a table — "what did this
+change?" is answerable by reading rather than by trusting. If the repaired set ever grows past
+a handful, or a second substitution is proposed, that trade stops holding and the count has to
+be plumbed.
+
+**Partial evaluation was considered and rejected on the data.** The obvious rule — treat an
+unparseable `introduced` as `0`, since widening a window cannot cause a false negative — is
+refuted by the largest single case. Alpine's imagemagick records, 18 occurrences, carry
+`introduced 7.0.0-0` (unreadable) beside `fixed 6.9.6.8-r0` (fine): the introduced bound is
+*above* the fixed one. Rewriting it to `0` does not widen the window, it inverts it, from
+`[7.0.0, ∞)` to `[0, 6.9.6.8)` — losing every 7.x version it was written to cover. The same
+objection defeats the more careful version, "answer only when the parseable bounds force the
+answer": for imagemagick 7.0.1 the range as written does force *not affected*, and that is a
+confident wrong answer, which is the one thing this tool exists not to give.
+
+So 28 apk bounds, 45 pep440 and 12 semver remain loud skips, which is the correct behaviour
+for data with no reading. Six mutations verified red; two survive as equivalents, documented
+in `repair.go`: no valid apk version can contain `.r` at all, so the already-parses guard can
+never change an answer, and `Index` for `LastIndex` cannot either once the second guard
+rejects a repair that leaves a later `.r` behind.
+
 ## 3. Architecture
 
 ### Measured data volumes

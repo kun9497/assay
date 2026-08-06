@@ -165,11 +165,14 @@ func Convert(data []byte, wantEcosystem string) (advisory.Advisory, bool, error)
 			}
 			rng := advisory.Range{Type: typ}
 			for _, re := range rr.Events {
+				// D35 repairs one documented Alpine typo here, at ingestion,
+				// so no query path can forget it (D16's rule). Everything else
+				// is stored exactly as published.
 				rng.Events = append(rng.Events, advisory.Event{
-					Introduced:   re.Introduced,
-					Fixed:        re.Fixed,
-					LastAffected: re.LastAffected,
-					Limit:        re.Limit,
+					Introduced:   repairBound(ra.Package.Ecosystem, re.Introduced),
+					Fixed:        repairBound(ra.Package.Ecosystem, re.Fixed),
+					LastAffected: repairBound(ra.Package.Ecosystem, re.LastAffected),
+					Limit:        repairBound(ra.Package.Ecosystem, re.Limit),
 				})
 			}
 			if len(rng.Events) > 0 {

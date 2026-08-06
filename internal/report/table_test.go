@@ -307,7 +307,7 @@ func TestTable_AdvisoryScopedSkipIsAlwaysShown(t *testing.T) {
 	res := matcher.Result{Skipped: []matcher.Skipped{{
 		Package:    pkgmeta.Package{Name: "x", Version: "1.0.0", Ecosystem: "Go"},
 		AdvisoryID: "GHSA-unevaluable",
-		Reason:     "comparing 1.0.0: invalid version",
+		Reason:     `the advisory's range bound "not-a-version" could not be read: invalid version`,
 	}}}
 	var buf bytes.Buffer
 	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {

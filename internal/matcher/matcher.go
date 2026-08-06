@@ -358,7 +358,15 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 							res.Skipped = append(res.Skipped, Skipped{
 								Package:    p,
 								AdvisoryID: a.ID,
-								Reason:     fmt.Sprintf("comparing %s: %v", p.Version, err),
+								// D35: no "comparing <version>:" prefix. The
+								// package and its version already head the
+								// rendered line, and the error now names which
+								// side could not be read — prefixing it with
+								// the installed version put that string in
+								// front of every message including the ones
+								// whose cause is the advisory, which is the
+								// confusion being removed.
+								Reason: err.Error(),
 							})
 						}
 						continue
