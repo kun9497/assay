@@ -59,11 +59,12 @@ one end to end.** Existing scanners are excellent and battle-tested; use them in
 
 It started out aimed at Korean advisory data — KISA/KNVD as a first-class provider. The
 first investigation said that was not viable; it had measured the wrong board. KNVD's own
-disclosures are 173 records of Korean domestic software, but its **security notices are 2,422
-records** keyed on CVEs in Apache, OpenSSL and the like — and three of three sampled are
-advisories assay already carries, for packages that are in real containers. KISA cannot be an
-independent matching source, but attaching its Korean title and remediation to a CVE assay
-matched through OSV does work. That is the direction (D27's mechanism, a second source).
+disclosures are 173 records of Korean domestic software, while its **security notices** are
+keyed on CVEs in Apache, OpenSSL and the like. **That is now built** (slice ⑤): KISA is not an
+independent matching source, but a CVE-keyed enrichment join is, and a live walk on 2026-08-06
+read **2,971 notices** naming **18,524 distinct CVEs**. What it cannot do is travel: KISA's
+terms permit scanning with the data, not redistributing it, so enrichment is built locally and
+stripped from the published artifact (D29).
 
 What the code actually chases is narrower and, so far, has held up: **do not give a confident
 wrong answer.** Every finding carries the evidence that produced it — which range, which
@@ -648,7 +649,9 @@ day: `alpine:3.14` skipped `libretls 3.3.3p1-r3` and with it CVE-2022-0778.
       Alpine's imagemagick carries `introduced 7.0.0-0` above `fixed 6.9.6.8-r0`, so treating
       the bad bound as `0` inverts the window rather than widening it
 - [ ] pep440 leniency — deferred; the two candidate rules rescue 2 advisory bounds between them
-- [ ] Table-driven cases per ecosystem, checked against that ecosystem's published vectors
+- [x] apk checked against apk-tools' own 738-comparison vector file, replayed in CI
+- [ ] semver and pep440 have no upstream vector file to replay; their tables are hand-written
+      and that is the weakest point of the three
 
 **⑩ Which KISA notice wins** — found on first real use. The enrichment bucket keys on
 `(CVE, Source)`, so a CVE named by two KISA notices keeps whichever arrived last: `convert`
