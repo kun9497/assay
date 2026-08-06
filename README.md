@@ -619,6 +619,10 @@ day: `alpine:3.14` skipped `libretls 3.3.3p1-r3` and with it CVE-2022-0778.
 - [x] An unreadable entry in `affected[].versions` is skipped and counted, not fatal (D30) —
       2,411 of 1,309,665 enumerated entries do not parse, and one was enough to report a
       readable package as unevaluable
+- [x] apk: a letter may carry a numeric patch level (D31) — `libretls 3.3.3p1-r3`,
+      `sudo 1.7.4p6-r0`. Follows apk-tools 2.x, which every released Alpine ships; 3.x
+      rejects these and answers EQUAL for `3.3.3p1-r3` vs `-r2`, calling an unpatched host
+      fixed. apk bounds that will not parse: 61 -> 39; enumerated apk versions: -> 0
 - [ ] Per-ecosystem leniency rules — one decision each, D9 forbids a shared one
 - [ ] Table-driven cases per ecosystem, checked against that ecosystem's published vectors
 

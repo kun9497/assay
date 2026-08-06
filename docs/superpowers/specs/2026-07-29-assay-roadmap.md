@@ -1047,6 +1047,83 @@ PYSEC-2009-17 carries one `introduced` and five `last_affected` events, so the w
 at the first and only the enumerated list still names plone 3.2 and 3.3. Trading a loud miss
 for a silent one is the one thing this package exists to prevent.
 
+### D31 — An apk letter may carry a numeric patch level, and it follows apk-tools 2.x
+
+The apk grammar gains exactly one production — digits, once, immediately after the single
+letter:
+
+```
+digits ('.' digits)* [ letter [digits] ] ('_' suffix [digits])* ['~' hexhash] ['-r' digits]
+                              ^^^^^^^^
+```
+
+`libretls 3.3.3p1-r3`, `sudo 1.7.4p6-r0`, `py3-* 0.12.5a0-r0` and `2.1a15-r17` are all real
+Alpine package versions that the earlier grammar refused.
+
+**The two apk-tools majors disagree, and 2.x is the one to follow.** apk-tools 2.x parses
+these: `next_token()` carries an explicit `*type == TOKEN_LETTER && isdigit(...)` clause
+emitting `TOKEN_DIGIT`, and its demotion whitelist names that transition. apk-tools 3.x
+rejects them — `token_next()`'s digit case lists only `INITIAL_DIGIT`, `DIGIT` and `SUFFIX`
+before `default: goto invalid` — and asserts so in its own vectors (`!0.1a1`, `!0.1bc1`).
+
+Three facts decide it. Every *released* Alpine ships apk-tools 2.14.x; only edge ships 3.x.
+Alpine ships the versions regardless. And 3.x's rejection is not a safe conservatism: both
+sides of `3.3.3p1-r3` vs `3.3.3p1-r2` reach `TOKEN_INVALID` at the same offset, so
+`apk_version_compare_fuzzy` returns **EQUAL** and an unpatched host reads as fixed.
+Emulating 3.x here would import that.
+
+**Two properties of the new token are load-bearing.** It is an `apkDigit` — the kind 2.x
+uses — and the ordinal matters against `apkSuffix` and `apkRevisionNo`. And it is exempt
+from `apkDigit`'s leading-zero string-sort branch: in 2.x that rule belongs to
+`TOKEN_DIGIT_OR_ZERO`, the state entered after `.`, while a post-letter digit is a plain
+`TOKEN_DIGIT`. So `1.0a01 == 1.0a1`, where a string sort would call them different.
+
+**The hard constraint holds structurally, not statistically.** The new branch can only fire
+when a digit immediately follows the letter, and every such string fails the current parser
+at its trailing-input check. No version that parses today can reach it, so no ordering that
+is correct today can change. apk-tools' own 738-comparison vector file still replays with
+736 agreements, 0 mismatches and the same 2 recorded divergences.
+
+**Scope discipline.** apk-tools 2.x accepts more than this rule does, and the extra is bugs
+rather than versions: its digit loop accepts an *empty* run, so `1.18.-r2` and `0.8.21.r2`
+parse there and the second sorts **above** the `0.8.21-r2` it is a typo for. A second letter
+(`1.0a1b2`) and a dot after the patch level (`1.0a1.2`, which 3.x asserts invalid) stay
+errors too. The rule is "a letter may carry a patch level", not "be bug-compatible with 2.x",
+and the invalid-input table holds that line by name.
+
+**One new over-acceptance, taken knowingly.** `~hash` is a 3.x feature this parser already
+implements, so the combination `1.0a1~abcd` is now accepted by neither reference — 2.x has no
+hash token and 3.x has no post-letter digit. It appears in no APKINDEX, secdb file or OSV
+bound measured. This parser was already a 2.x/3.x hybrid; the combination is the cost of
+that, and it is recorded rather than guarded.
+
+**Measured effect.** apk range bounds that will not parse fell from 61 to **39** (30 packages
+to 17), and enumerated apk versions that will not parse fell to **zero** — D31 removes the
+whole Alpine share of the D30 problem. On an `alpine:3.14` inventory carrying
+`libretls 3.3.3p1-r2` and `sudo 1.8.1p1-r0`, the scan goes from **0 findings and 9 checks
+that could not be completed** to **6 high-severity findings and none skipped**, including
+CVE-2022-0778 and CVE-2019-14287. CVE-2021-3156 correctly stays absent: 1.8.1p1 is below its
+`introduced` bound of 1.8.2, which is a comparison that could not even be attempted before.
+
+**The footprint is EOL-skewed and that is worth saying.** The 29 affected APKINDEX entries
+are 13 from v3.14/main and 16 from v3.19/community; scanning v3.20, v3.21 and v3.22 across
+main and community — 69,893 entries — finds **zero**. libretls is `3.7.0-r2` now. This rule
+matters for scanning old images, which is most of what a vulnerability scanner is pointed at,
+and it will not grow.
+
+**Two surviving mutations, both verified equivalent rather than untested.** Typing the token
+`apkInitialDigit` instead of `apkDigit` leaves the table green: the post-letter token sits at
+index 2 or later, `apkInitialDigit` only ever at index 0, and a dotted `apkDigit` can never
+align with it because the letter position resolves the comparison first — so ordinals 0 and 1
+answer alike everywhere reachable. Likewise `ta.postLetter || tb.postLetter` versus `&&`: the
+two flags cannot disagree, for the same reason. Substituting `apkSuffixNo` or `apkRevisionNo`
+*does* turn the table red, which is what makes the ordinal claim tested rather than asserted.
+
+**A gap in the upstream check, recorded so it is not mistaken for coverage.** The vector
+harness reads only three-field comparison lines, so apk-tools master's validity assertions
+(`!0.1a1`) are skipped. The deliberate divergence from 3.x is therefore invisible to the
+strongest test this package has, and rests on the reasoning above rather than on that replay.
+
 ## 3. Architecture
 
 ### Measured data volumes
