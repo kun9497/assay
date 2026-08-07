@@ -138,9 +138,11 @@ const (
 var rpmDBDirs = []string{"usr/lib/sysimage/rpm", "var/lib/rpm"}
 
 // rpmDBFiles are the file names inside those directories, one per backend.
-// Packages (BerkeleyDB) and Packages.db (ndb) are probed even though neither is
-// read yet: finding one and naming it is a refusal somebody can act on, where
-// finding nothing is indistinguishable from a clean image.
+// Packages is BerkeleyDB (RHEL 8 and older, Amazon Linux 2) and rpmdb.sqlite is
+// SQLite (RHEL 9 and newer); both are read. Packages.db is ndb, which only
+// openSUSE and SLES use — it is probed anyway, because finding one and naming
+// it is a refusal somebody can act on where finding nothing is
+// indistinguishable from a clean image.
 var rpmDBFiles = []string{"rpmdb.sqlite", "rpmdb.sqlite-wal", "Packages", "Packages.db"}
 
 // rpmFamilies are the /etc/os-release IDs whose package database is an rpmdb.
@@ -631,20 +633,32 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 		// feed is errata-only and cannot express "affected, will not fix", so a
 		// verdict built on it would be confidently clean about 39,372 CVEs it
 		// has never seen.
-		switch {
-		case rpmFound.bdbPath != "":
-			return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf(
-				"%s carries a BerkeleyDB rpm database at %s (RHEL 8 and older, Amazon Linux 2), "+
-					"which this build cannot read; the SQLite backend used by RHEL 9 and newer is supported",
-				ref, rpmFound.bdbPath)
-		case rpmFound.ndbPath != "":
+		if rpmFound.ndbPath != "" {
 			return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf(
 				"%s carries an ndb rpm database at %s (openSUSE and SLES), which this build "+
 					"does not read; there is no SUSE advisory source for it to serve",
 				ref, rpmFound.ndbPath)
 		}
-		f := files[rpmFound.sqlitePath]
-		res, err := rpmdb.ReadSQLite(f.Data, rpmFound.walSize, ecosystem, rpmFound.sqlitePath)
+		// Two backends, one header parser. Which one an image carries is a
+		// property of its release, not of anything the caller asked for: RHEL 8
+		// and older and Amazon Linux 2 keep a BerkeleyDB hash file, RHEL 9 and
+		// newer a SQLite one, and the packages that come out are identical
+		// either way.
+		var (
+			res  rpmdb.Result
+			err  error
+			f    source.FileFromLayer
+			path string
+		)
+		if rpmFound.bdbPath != "" {
+			path = rpmFound.bdbPath
+			f = files[path]
+			res, err = rpmdb.ReadBDB(f.Data, ecosystem, path)
+		} else {
+			path = rpmFound.sqlitePath
+			f = files[path]
+			res, err = rpmdb.ReadSQLite(f.Data, rpmFound.walSize, ecosystem, path)
+		}
 		if err != nil {
 			return pkgmeta.Target{}, cyclonedx.Stats{}, err
 		}
