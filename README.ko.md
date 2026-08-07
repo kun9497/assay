@@ -633,6 +633,37 @@ Debian은 backport를 버전에 **적습니다**(`7.74.0-1.3+deb11u10`). (CVE, �
       밝히며 exit 2입니다
 - [ ] write-ahead log를 거절하는 대신 재생하기
 
+**⑬ Red Hat advisory provider** — `REDHAT_ENABLE=1 assay db build`가 Red Hat의 CSAF VEX 피드를
+넣습니다. RHEL 패키지가 취약하고 **수정되지 않을 것**이라고 말할 수 있는 유일한 출처입니다.
+**수집 완료, 매칭은 다음 슬라이스.**
+
+실제 2026-08-05 아카이브를 89초에 끝에서 끝까지 스트리밍한 측정:
+
+```
+67,261 documents -> 28,907 advisories, 1,918,779 affected entries
+(1,278,384 with no fix available); skipped 431,985 module builds,
+3,234,355 non-mainline products, 216,790 container images, 9,430
+whole-product entries naming no package, 0 unreadable products,
+0 unreadable documents
+```
+
+스키마 변경 없이 D1이 성립합니다. 이것이 말할 값어치가 있는 결과입니다. CSAF의 "fix 없는 affected"는
+`introduced` 이벤트만 있고 `fixed`가 없는 OSV range이고, 스토어는 이미 이해하고 있었습니다.
+
+- [x] 스트리밍 CSAF VEX 리더 — 압축 262 MB, 압축 해제 17.1 GB, 최대 단일 문서 94 MB, 디스크에
+      아무것도 쓰지 않음(D49)
+- [x] **새 의존성 없음.** go-containerregistry가 zstd 레이어 때문에 끌어와서
+      `klauspost/compress/zstd`가 이미 링크되어 있었습니다. `go mod tidy`가 옮긴 것은 한 줄이고,
+      `go.sum`은 바이트 단위로 동일하며 모듈 수는 52로 그대로입니다
+- [x] 생태계 키는 메인라인 major(D47) — CPE 모양이 462가지이고, 그것들이 담은 지원 채널은
+      파일시스템에 표현이 없는 구독 속성입니다
+- [x] fix 없는 affected를 `fixed` 이벤트 없는 range로 저장(D48)
+- [x] CI에서 **실제 피드**로 검증하고, 양이 아니라 모양을 단언합니다. CVE-2024-6387은 여전히 fixed
+      `openssh` range를, CVE-2005-2541은 fix 없는 `tar` range를 내야 합니다
+- [ ] 매칭: RPM comparer 등록, `--fail-on-unfixable` 추가, 그리고 D48 규칙대로 수정 불가 finding
+      보고 — 항상 보이고 세어지되 자기 플래그로만 게이트
+- [ ] EUS/AUS/E4S 호스트가 메인라인 errata에 맞춰집니다. 그 발산을 리포트에 공개해야 합니다
+
 **⑨ comparer가 읽지 못하는 버전** — 버전이 파싱되지 않는 패키지는 깨끗함이 아니라 건너뜀으로
 보고되므로(D20, D21) 시끄러운 실패입니다. 그래도 판정을 받지 못한 취약점이고, D9은 그것을 놓침이라
 부릅니다. 2026-08-06, v7 데이터베이스의 모든 범위 경계로 측정했습니다. semver 29,840개 중 96개,
