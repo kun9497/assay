@@ -306,7 +306,7 @@ a long sync*.
 
 ---
 
-### The VEX archive lags its own change feed
+### ~~The VEX archive lags its own change feed~~ — resolved in slice ⓯
 
 **Why deferred.** The provider reads the one full archive `archive_latest.txt` names, and
 nothing else. Red Hat rebuilds that archive on its own schedule, and individual documents
@@ -326,9 +326,21 @@ documents modified after the archive's own date would close the gap for a bounde
 extra requests. The provider already parses the archive date out of its filename for D12, so
 the comparison point is in hand.
 
-**Revisit when** the lag matters more than the requests cost, or when somebody is bitten by a
-same-week CVE. Note the interaction with *Checkpointing a long sync*: the delta pass is the
-part that would want resuming, not the archive read.
+**Resolved 2026-08-07.** `changes.csv` is read after the archive and every document newer than
+the archive's own date is fetched individually. Only a 404 is survivable — a document withdrawn
+between `changes.csv` and `deletions.csv` being written is a race, and everything else fails
+the build rather than closing part of the gap and looking complete.
+
+**What is NOT handled, and the measurement that says why.** A document present in the archive
+and DELETED afterwards still gets ingested: deleted paths are removed from `changes.csv`, so
+only `deletions.csv` names them, and that file is 15 MB and 280,953 rows. Measured against the
+2026-08-05 archive there was **exactly one** such deletion, and about 30 a month. The exposure
+also closes on its own — the next archive rebuild drops the document — so the window is one
+archive cycle for roughly one record. Revisit if that ratio changes, or if the store ever gains
+a reason to download `deletions.csv` anyway.
+
+Note the interaction with *Checkpointing a long sync*: the delta pass is the part that would
+want resuming, not the archive read.
 
 ---
 
