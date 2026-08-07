@@ -628,9 +628,12 @@ Debian은 backport를 버전에 **적습니다**(`7.74.0-1.3+deb11u10`). (CVE, �
 - [ ] Red Hat advisory provider. fix 없는 영향 상태를 표현할 수 있는 출처가 필요하고 — 완전한
       것은 CSAF VEX뿐입니다 — CPE에서 온 903개 생태계 키에 대한 답도 필요합니다. 그 키가 담은
       지원 채널은 파일시스템에 표현이 없습니다
-- [ ] RHEL 8과 Amazon Linux 2를 위한 BerkeleyDB(`Packages`) — 약 300줄 더, 여전히 의존성 없음.
-      순차 페이지 순회에 해시 인덱스가 필요 없기 때문입니다. 그 이미지들은 백엔드를 이름으로
-      밝히며 exit 2입니다
+- [x] RHEL 8과 Amazon Linux 2를 위한 BerkeleyDB(`Packages`)(D44) — 약 300줄, 여전히 의존성
+      없음, 그리고 ubi8의 실제 11 MB 데이터베이스로 검증했습니다. 183 패키지, 183건 전부 syft와
+      공유, 소스 이름 불일치 0건. 빅엔디언 데이터베이스도 읽습니다. BerkeleyDB가 호스트 순서로 쓰고
+      s390x가 지원 플랫폼이기 때문입니다
+- [ ] ndb(`Packages.db`) — openSUSE와 SLES 전용이고 봉사할 SUSE advisory 출처가 없습니다. 그
+      이미지들은 백엔드를 이름으로 밝히며 exit 2입니다
 - [ ] write-ahead log를 거절하는 대신 재생하기
 
 **⑬ Red Hat advisory provider** — `REDHAT_ENABLE=1 assay db build`가 Red Hat의 CSAF VEX 피드를

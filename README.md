@@ -665,9 +665,12 @@ them from 2023 onwards. Matching on it would report all of them clean.
 - [ ] A Red Hat advisory provider. Needs a source that can express affectedness without a fix
       — CSAF VEX is the only complete one — plus an answer to the 903 CPE-derived ecosystem
       keys, whose support channel has no filesystem representation
-- [ ] BerkeleyDB (`Packages`) for RHEL 8 and Amazon Linux 2 — another ~300 lines and still no
-      dependency, since a sequential page walk needs no hash index. Those images exit 2 with
-      the backend named
+- [x] BerkeleyDB (`Packages`) for RHEL 8 and Amazon Linux 2 (D44) — ~300 lines, still no
+      dependency, and validated against ubi8's real 11 MB database: 183 packages, all 183
+      shared with syft, zero source-name disagreements. Big-endian databases read too, because
+      BerkeleyDB writes host order and s390x is a supported platform
+- [ ] ndb (`Packages.db`) — openSUSE and SLES only, and no SUSE advisory source to serve it.
+      Those images exit 2 with the backend named
 - [ ] Replaying a write-ahead log rather than refusing it
 
 **⑬ The Red Hat advisory provider** — `REDHAT_ENABLE=1 assay db build` ingests Red Hat's CSAF

@@ -24,6 +24,7 @@ import (
 const (
 	rpmFixture    = "../cataloger/rpmdb/testdata/rpmdb.sqlite"
 	rpmWALFixture = "../cataloger/rpmdb/testdata/rpmdb-wal.sqlite"
+	bdbFixture    = "../cataloger/rpmdb/testdata/Packages"
 	rpmWALSidecar = "../cataloger/rpmdb/testdata/rpmdb-wal.sqlite-wal"
 )
 
@@ -35,6 +36,16 @@ VERSION="9.8 (Plow)"
 ID="rhel"
 VERSION_ID="9.8"
 PRETTY_NAME="Red Hat Enterprise Linux 9.8 (Plow)"
+`
+
+// osReleaseRHEL8 is a real ubi8 /etc/os-release, and the fixture database was
+// built from that same image -- so a scan of the two together keys on Red Hat:8
+// and reads packages that really do belong to it.
+const osReleaseRHEL8 = `NAME="Red Hat Enterprise Linux"
+VERSION="8.10 (Ootpa)"
+ID="rhel"
+VERSION_ID="8.10"
+PRETTY_NAME="Red Hat Enterprise Linux 8.10 (Ootpa)"
 `
 
 func fixtureBytes(t *testing.T, path string) string {
@@ -234,28 +245,97 @@ func TestCatalogFromImage_LiveWALIsRefused(t *testing.T) {
 	}
 }
 
-// Backends this build does not read are NAMED. "We found a database we cannot
-// read" and "we found no database" are different facts, and only the first
-// tells the reader what to do about it.
-func TestCatalogFromImage_UnreadableBackendsAreNamed(t *testing.T) {
-	// A BerkeleyDB Packages file: the magic at offset 12, little-endian.
-	bdb := make([]byte, 4096)
-	bdb[12], bdb[13], bdb[14], bdb[15] = 0x61, 0x15, 0x06, 0x00
+// Both backends are read, and which one an image carries is a property of its
+// release rather than of anything the caller asked for. RHEL 8 keeps a
+// BerkeleyDB hash file where RHEL 9 keeps a SQLite one, and the packages that
+// come out are the same shape either way.
+func TestCatalogFromImage_BerkeleyDBIsRead(t *testing.T) {
+	img := rpmImage(t, map[string]string{
+		osReleasePath:          osReleaseRHEL8,
+		"var/lib/rpm/Packages": fixtureBytes(t, bdbFixture),
+	})
+	target, stats, err := catalogFromImage("test-image", img)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Cataloged != 6 {
+		t.Fatalf("cataloged %d packages, want 6: %+v", stats.Cataloged, target.Packages)
+	}
+	byName := map[string]string{}
+	for _, p := range target.Packages {
+		byName[p.Name] = p.Version
+		// RHEL 8, not 9: the key follows os-release, and a scan that read the
+		// database correctly but keyed it on the wrong release would match
+		// nothing while looking perfectly healthy.
+		if p.Ecosystem != "Red Hat:8" {
+			t.Errorf("%s ecosystem = %q, want Red Hat:8", p.Name, p.Ecosystem)
+		}
+		if p.Locations[0].LayerDigest != "sha256:rpm" {
+			t.Errorf("%s LayerDigest = %q", p.Name, p.Locations[0].LayerDigest)
+		}
+	}
+	if got := byName["libnsl2"]; got != "1.2.0-2.20180605git4a062cf.el8" {
+		t.Errorf("libnsl2 = %q, want 1.2.0-2.20180605git4a062cf.el8", got)
+	}
+	// D8 through SOURCERPM, on the backend that did not have it a slice ago.
+	for _, p := range target.Packages {
+		if p.Name == "langpacks-en" && (p.Source == nil || p.Source.Name != "langpacks") {
+			t.Errorf("langpacks-en Source = %+v, want name langpacks", p.Source)
+		}
+	}
+}
 
-	for _, tc := range []struct{ name, path, want string }{
-		{"BerkeleyDB", "var/lib/rpm/Packages", "BerkeleyDB"},
-		{"ndb", "usr/lib/sysimage/rpm/Packages.db", "ndb"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			img := rpmImage(t, map[string]string{osReleasePath: osReleaseRHEL9, tc.path: string(bdb)})
-			_, _, err := catalogFromImage("test-image", img)
-			if err == nil {
-				t.Fatal("an unreadable backend was catalogued")
-			}
-			if !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), tc.path) {
-				t.Errorf("error = %v, want it to name both %q and the path", err, tc.want)
-			}
-		})
+// The relocated directory holds a BerkeleyDB database on some images too, so
+// both backends are probed at both paths rather than one path each.
+func TestCatalogFromImage_BerkeleyDBAtTheRelocatedPath(t *testing.T) {
+	img := rpmImage(t, map[string]string{
+		osReleasePath:                   osReleaseRHEL8,
+		"usr/lib/sysimage/rpm/Packages": fixtureBytes(t, bdbFixture),
+	})
+	_, stats, err := catalogFromImage("test-image", img)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Cataloged != 6 {
+		t.Errorf("cataloged %d packages, want 6", stats.Cataloged)
+	}
+}
+
+// ndb is still refused BY NAME. openSUSE and SLES are the only distributions
+// that use it and there is no SUSE advisory source for it to serve, so
+// "we found a database we do not read" is the honest answer and "we found no
+// database" is not.
+func TestCatalogFromImage_NDBIsNamed(t *testing.T) {
+	ndb := make([]byte, 4096)
+	copy(ndb, "RpmP")
+	img := rpmImage(t, map[string]string{
+		osReleasePath:                      osReleaseRHEL9,
+		"usr/lib/sysimage/rpm/Packages.db": string(ndb),
+	})
+	_, _, err := catalogFromImage("test-image", img)
+	if err == nil {
+		t.Fatal("an ndb database was catalogued")
+	}
+	for _, want := range []string{"ndb", "usr/lib/sysimage/rpm/Packages.db"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %v, want it to name %q", err, want)
+		}
+	}
+}
+
+// A BerkeleyDB file that is damaged fails the scan rather than yielding a
+// short list, the same way a damaged SQLite one does.
+func TestCatalogFromImage_DamagedBerkeleyDBIsRefused(t *testing.T) {
+	b := []byte(fixtureBytes(t, bdbFixture))
+	truncated := string(b[:len(b)-4096])
+	img := rpmImage(t, map[string]string{
+		osReleasePath:          osReleaseRHEL8,
+		"var/lib/rpm/Packages": truncated,
+	})
+	if _, _, err := catalogFromImage("test-image", img); err == nil {
+		t.Fatal("a truncated BerkeleyDB database was catalogued")
+	} else if !strings.Contains(err.Error(), "truncated") {
+		t.Errorf("error = %v, want it to say the database is truncated", err)
 	}
 }
 
