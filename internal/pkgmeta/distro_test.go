@@ -46,9 +46,19 @@ func TestDistroEcosystem_Unsupported(t *testing.T) {
 		// ever reached — the ID guard needs a version that WOULD parse. Without
 		// these, deleting `d.ID != "alpine"` leaves the suite green and
 		// Distro{ID: "ubuntu", VersionID: "22.04"} yields "Alpine:v22.04".
-		{"unsupported distro", Distro{ID: "debian", VersionID: "12"}},
-		{"unsupported distro with a parseable version", Distro{ID: "debian", VersionID: "12.5"}},
-		{"another unsupported distro", Distro{ID: "ubuntu", VersionID: "22.04"}},
+		{"unsupported distro", Distro{ID: "fedora", VersionID: "40"}},
+		{"unsupported distro with a parseable version", Distro{ID: "rhel", VersionID: "9.4"}},
+		// Ubuntu is deliberately here rather than mapped alongside Debian. OSV
+		// keys it "Ubuntu:24.04:LTS", and its Pro and FIPS lineages
+		// ("Ubuntu:Pro:FIPS-updates:18.04:LTS") describe the SAME release, so a
+		// release-only key cannot separate them and would report an ESM-patched
+		// system as vulnerable. It needs its own decision, not a second case
+		// here.
+		{"ubuntu needs its own decision", Distro{ID: "ubuntu", VersionID: "22.04"}},
+		// Debian testing and sid ship no VERSION_ID, and OSV publishes no
+		// ecosystem for either. A scan of one must say it could not be checked.
+		{"debian testing has no VERSION_ID", Distro{ID: "debian", VersionID: ""}},
+		{"debian with a non-numeric version", Distro{ID: "debian", VersionID: "trixie"}},
 		{"no id", Distro{ID: "", VersionID: "3.19"}},
 	}
 	for _, tt := range tests {
@@ -88,5 +98,35 @@ func TestDistroEcosystem_MatchesTheOSVKeyExactly(t *testing.T) {
 	}
 	if !strings.HasPrefix(got, "Alpine:v") {
 		t.Errorf("Ecosystem() = %q; OSV keys carry the v prefix", got)
+	}
+}
+
+// Debian's ecosystem key is the bare major, which is what both OSV and
+// /etc/os-release use. The dot-suffixed point release is the shape a real
+// bookworm image ships in VERSION_ID on some rebuilds, and it must not become
+// part of the key: OSV has no "Debian:12.5".
+func TestDistroEcosystem_Debian(t *testing.T) {
+	for _, tc := range []struct {
+		versionID string
+		want      string
+	}{
+		{"11", "Debian:11"},
+		{"12", "Debian:12"},
+		{"13", "Debian:13"},
+		{"12.5", "Debian:12"},
+	} {
+		got, err := Distro{ID: "debian", VersionID: tc.versionID}.Ecosystem()
+		if err != nil {
+			t.Errorf("VERSION_ID=%q: %v", tc.versionID, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("VERSION_ID=%q -> %q, want %q", tc.versionID, got, tc.want)
+		}
+	}
+	// And Alpine is untouched: its key keeps the "v" and the minor, because its
+	// releases are X.Y and OSV spells them that way.
+	if got, err := (Distro{ID: "alpine", VersionID: "3.19"}).Ecosystem(); err != nil || got != "Alpine:v3.19" {
+		t.Errorf("alpine 3.19 -> %q, %v; want Alpine:v3.19 — the two schemes must not converge", got, err)
 	}
 }

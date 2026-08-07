@@ -67,10 +67,15 @@ type rawSeverity struct {
 // never appears in real data. Narrowing this back to exact equality would
 // match nothing at all and silently ingest zero Alpine records.
 func familyMatches(ecosystem, want string) bool {
-	if want == "Alpine" {
-		return ecosystem == "Alpine" || strings.HasPrefix(ecosystem, "Alpine:")
-	}
-	return ecosystem == want
+	// The rule was written as a special case for "Alpine" and is general: a
+	// distro archive is fetched under its family name and holds
+	// release-qualified keys inside it (D6). Debian arrived and the hardcoded
+	// name silently matched nothing, which the fetch guard caught — an archive
+	// of 62,318 records yielding zero.
+	//
+	// Harmless for the language ecosystems: there is no "Go:1.22" key, so the
+	// prefix clause never fires for them.
+	return ecosystem == want || strings.HasPrefix(ecosystem, want+":")
 }
 
 // databaseOf returns the database that authored an advisory, read from its

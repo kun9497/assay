@@ -255,10 +255,14 @@ func TestForEcosystem(t *testing.T) {
 // distro keys carry a release (D6) and resolve by prefix rather than by entry —
 // guarding the map alone let Alpine through unnoticed.
 func TestNoUnbackedDistroComparer(t *testing.T) {
+	// Debian left this list when dpkgdb landed, which is the whole point of the
+	// guard: the comparer, the cataloger that populates Package.Source, and the
+	// image wiring that calls it had to arrive together, and moving this line
+	// is the deliberate act that says they did.
 	for _, eco := range []string{
-		"Debian:11", "Debian:12", "Debian:13",
-		"Ubuntu:22.04", "Red Hat:9", "Rocky Linux:9", "AlmaLinux:9",
+		"Ubuntu:22.04", "Ubuntu:24.04:LTS", "Red Hat:9", "Rocky Linux:9", "AlmaLinux:9",
 		"Alpine", // unversioned: not a key we ever build (D6)
+		"Debian", // likewise
 	} {
 		if _, ok := For(eco); ok {
 			t.Errorf("For(%q) resolves, but nothing populates Package.Source for it. "+

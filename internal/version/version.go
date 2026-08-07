@@ -83,6 +83,12 @@ func For(ecosystem string) (Comparer, bool) {
 	if rel, ok := strings.CutPrefix(ecosystem, "Alpine:"); ok && rel != "" {
 		return APK{}, true
 	}
+	// Same rule, same reason: "Debian" bare is not a key this project ever
+	// builds, and resolving it would make a bug that drops the release look
+	// like it worked.
+	if rel, ok := strings.CutPrefix(ecosystem, "Debian:"); ok && rel != "" {
+		return Deb{}, true
+	}
 	c, ok := registry[ecosystem]
 	return c, ok
 }

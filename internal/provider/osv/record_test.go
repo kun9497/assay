@@ -426,3 +426,31 @@ func TestConvert_LeavesGoodBoundsAlone(t *testing.T) {
 		t.Errorf("fixed = %q, want it stored exactly as published", fixed)
 	}
 }
+
+// familyMatches was written with "Alpine" hardcoded, and Debian arriving turned
+// that into an archive of 62,318 records yielding zero. The fetch guard caught
+// it; this pins the rule so it cannot regress to a name list.
+func TestFamilyMatches_IsGeneralNotAName(t *testing.T) {
+	for _, tc := range []struct {
+		ecosystem, want string
+		match           bool
+	}{
+		{"Alpine:v3.19", "Alpine", true},
+		{"Alpine", "Alpine", true},
+		{"Debian:12", "Debian", true},
+		{"Debian", "Debian", true},
+		{"Ubuntu:24.04:LTS", "Ubuntu", true}, // whenever Ubuntu arrives, this already holds
+		{"Go", "Go", true},
+		// A family must not swallow a differently named one that starts the
+		// same way. Without the colon in the prefix test, "Debian" would match
+		// a hypothetical "DebianExtra".
+		{"DebianExtra", "Debian", false},
+		{"AlpineLinux:v3.19", "Alpine", false},
+		{"Debian:12", "Alpine", false},
+		{"npm", "Go", false},
+	} {
+		if got := familyMatches(tc.ecosystem, tc.want); got != tc.match {
+			t.Errorf("familyMatches(%q, %q) = %v, want %v", tc.ecosystem, tc.want, got, tc.match)
+		}
+	}
+}

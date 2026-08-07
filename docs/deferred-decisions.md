@@ -122,7 +122,7 @@ such as Checkmarx. Provenance is in `credits`.*
 
 ---
 
-### Debian and Ubuntu package support
+### ~~Debian package support~~ — resolved in slice ⑪ (D40–D42)
 
 First container slice covers Alpine only.
 
@@ -132,10 +132,42 @@ package path — purl → distro release → `Alpine:vX.Y` lookup → apk compar
 at the lowest cost. Debian's `epoch:upstream-revision` scheme and Ubuntu's ESM/backport
 representation are additional work on a path already known to function.
 
-**Revisit when.** The Alpine path is working end to end.
+**Resolved 2026-08-07 as D40–D42.** The trigger fired, and the decisive question — whether
+Debian has Red Hat's backport problem — was answered by measurement: it does not. Debian
+encodes the backport in the version (`7.74.0-1.3+deb11u10`), and 169,282 (CVE, source,
+release) triples joined against Debian's own tracker disagree zero times.
 
-**Groundwork.** `Package.Source` exists for indirect matching, and dpkg's
-`/var/lib/dpkg/status` exposes the `Source:` field needed to populate it.
+The groundwork held. `Package.Source` already carried a `Version` field, which turned out to
+be exactly what D41 needed — a binNMU rebuilds a binary without touching the source, so 13–15%
+of Debian packages carry a source version that differs from the binary one, and OSV's
+advisories are written against the source.
+
+**Ubuntu did NOT come with it**, and now has its own entry below.
+
+---
+
+### Ubuntu package support
+
+**Why deferred.** Not the version scheme — the dpkg comparer D40 added handles Ubuntu
+revisions (`2.4.4-2ubuntu17.10`) unchanged. Two other things.
+
+OSV keys Ubuntu as `Ubuntu:24.04:LTS`, and its Pro and FIPS lineages —
+`Ubuntu:Pro:FIPS-updates:18.04:LTS`, `Ubuntu:Pro:20.04:LTS` — describe the **same release**. A
+release-only ecosystem key cannot separate them, so a scan of an ESM-patched system would
+match the non-ESM lineage's fixed versions and report it vulnerable. That is a systematic
+false positive, and D6's "the release is in the key" is not enough on its own; the key has to
+carry the lineage too, which is a decision about what an ecosystem key means rather than a
+line in the distro mapping.
+
+The corpus is also 5.8 GB unpacked against Debian's 383 MB, so the provider would have to
+stream and discard `versions[]` rather than parsing records whole.
+
+**Revisit when** the lineage question has an answer. Measuring first is the cheap step: how
+many packages in a real Ubuntu image are covered by more than one lineage, and how often the
+fixed versions differ between them.
+
+**Groundwork.** The comparer, the dpkg cataloger and the `Source:` handling are all done and
+ecosystem-agnostic. What is missing is the key.
 
 ---
 

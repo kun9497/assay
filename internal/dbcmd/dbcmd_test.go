@@ -1535,3 +1535,31 @@ func TestStatus_BothTablesNameAMissingSourceTheSameWay(t *testing.T) {
 			"its own DATA AS OF and COVERED columns already use for the same absence", ratingSource)
 	}
 }
+
+// A bare major is a release. Alpine spells its releases "v3.19" and Debian
+// spells the modern ones "12", and requiring the dot dropped every Debian
+// release from 7 up into the lexical fallback — which printed "Debian:3.0..9"
+// for a database covering 3.0 through 14, telling an operator the newest four
+// releases were missing when they were the bulk of the archive.
+func TestCompareRelease_BareMajorIsARelease(t *testing.T) {
+	got := append([]string(nil), "14", "9", "3.0", "11", "7", "6.0", "10")
+	slices.SortFunc(got, compareRelease)
+	want := []string{"3.0", "6.0", "7", "9", "10", "11", "14"}
+	if !slices.Equal(got, want) {
+		t.Errorf("sorted = %v, want %v", got, want)
+	}
+	// Alpine's own form still sorts numerically, which is what the comparison
+	// was written for.
+	alpine := append([]string(nil), "v3.9", "v3.10", "v3.2", "v3.24")
+	slices.SortFunc(alpine, compareRelease)
+	if !slices.Equal(alpine, []string{"v3.2", "v3.9", "v3.10", "v3.24"}) {
+		t.Errorf("alpine sorted = %v", alpine)
+	}
+	// And a genuinely unparseable release still sorts last rather than
+	// corrupting the range.
+	mixed := append([]string(nil), "edge", "12", "3.0")
+	slices.SortFunc(mixed, compareRelease)
+	if mixed[len(mixed)-1] != "edge" {
+		t.Errorf("mixed = %v, want the unparseable one last", mixed)
+	}
+}

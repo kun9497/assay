@@ -617,6 +617,25 @@ rated CVEs, KISA at **18,523** enrichment records over 2,971 notices, published 
 the local build holds **1,719,126** Hangul sequences, the published artifact **zero** — D29
 checked against the file users download, not only in a test.
 
+**⑪ Debian packages** — `debian:12` scans end to end, the way Alpine does. **Done.**
+
+The question that decided it was whether Debian has Red Hat's backport problem, and the
+measurement says no: Debian *encodes* the backport in the version (`7.74.0-1.3+deb11u10`),
+and 169,282 (CVE, source, release) triples joined against Debian's own security tracker
+disagree zero times.
+
+- [x] A dpkg version comparer, checked against the real `dpkg --compare-versions` in CI (D40)
+- [x] `/var/lib/dpkg/status`, read as deb822 rather than RFC822, with installed-ness decided
+      on the third word of `Status` — syft drops `deinstall ok installed` and trivy drops
+      `purge ok installed`, both of them packages whose files are on disk
+- [x] The version compared follows the name that reached the advisory (D41) — 13–15% of
+      Debian packages carry a source version that differs from the binary one
+- [ ] Ubuntu — the version scheme already works; what does not is the ecosystem key. OSV's
+      Pro and FIPS lineages describe the *same release*, so a release-only key reports an
+      ESM-patched system as vulnerable
+- [ ] Distroless images keep their database in `var/lib/dpkg/status.d` as a directory, which
+      the layer reader cannot ask for; those images exit 2 with the shape named
+
 **⑨ Versions the comparers cannot read** — a package whose version will not parse is
 reported as skipped rather than clean (D20, D21), so it is loud; it is still a vulnerability
 that went un-assessed, which D9 calls a miss. Measured 2026-08-06 over every range bound in
