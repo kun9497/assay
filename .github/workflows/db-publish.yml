@@ -17,7 +17,12 @@ jobs:
     # of NVD changes on top -- minutes, not hours. The one full pass is a
     # local bootstrap, run once by a human; see the README's "Bootstrapping
     # the first artifact".
-    timeout-minutes: 60
+    #
+    # Raised from 60 when the artifact started carrying Red Hat (D51). Measured
+    # on a developer machine the Red Hat pass alone is about 27 minutes, most
+    # of it bbolt writing 1.9 million affected entries, and a hosted runner is
+    # slower. 120 leaves room for that to grow without leaving room for a hang.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -46,6 +51,14 @@ jobs:
           # The flag has to be honoured as "0" for that to work, which it was
           # not until D37 replaced the non-empty test.
           KISA_ENABLE: "0"
+          # D51. The artifact carries Red Hat's CSAF VEX data: it is TLP:WHITE
+          # on all 67,261 documents, so unlike KISA there is nothing to strip,
+          # and it is the only source that can say a package is affected and
+          # will not be fixed. Set explicitly rather than left to the default
+          # so that changing the default cannot silently narrow what is
+          # published -- db push would refuse it, but a refused daily publish
+          # is a worse way to find out than a line in this file.
+          REDHAT_ENABLE: "1"
         # The seed fetch is the first thing that touches ghcr, so an access
         # problem surfaces here. DENIED is not a code defect and reads like
         # one: GITHUB_TOKEN can only touch packages LINKED to this repository,

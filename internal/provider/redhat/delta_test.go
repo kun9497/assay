@@ -2,9 +2,11 @@ package redhat
 
 import (
 	"context"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kun9497/assay/internal/advisory"
 )
@@ -276,5 +278,150 @@ func TestDelta_HonoursCancellation(t *testing.T) {
 	}
 	if emitted > 3 {
 		t.Errorf("kept emitting after cancellation: %d of %d", emitted, len(docs))
+	}
+}
+
+// Documents are fetched concurrently and emitted IN ORDER, and this is what
+// makes that testable: the first document is held back long enough that the
+// two behind it certainly finish first. An implementation that emitted results
+// as they arrived would put them the other way round — and since the store's
+// last-write-wins is what makes a re-emitted advisory replace its own record,
+// that would make which version survives depend on which request was quickest.
+func TestDelta_EmitsInOrderDespiteConcurrency(t *testing.T) {
+	order := []string{"2026/cve-2026-3001.json", "2026/cve-2026-3002.json", "2026/cve-2026-3003.json"}
+	rows := make([][2]string, 0, len(order))
+	docs := map[string]string{}
+	for i, p := range order {
+		rows = append(rows, [2]string{p, "2026-08-06T00:00:0" + strconv.Itoa(i) + "+00:00"})
+		docs[p] = rhel9Doc(t, "CVE-2026-300"+strconv.Itoa(i+1), "curl", "")
+	}
+	// Descending, as the real file is.
+	rows[0], rows[2] = rows[2], rows[0]
+	first := rows[0][0]
+	f := &feed{
+		pointer: "csaf_vex_2026-08-05.tar.zst",
+		archive: archiveWith(t),
+		changes: changesCSV(rows...),
+		docs:    docs,
+		delay:   map[string]time.Duration{first: 300 * time.Millisecond},
+	}
+	got, _, err := fetchAll(t, serve(t, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The archive's advisory comes first, then the delta's in changes.csv order.
+	var ids []string
+	for _, a := range got {
+		ids = append(ids, a.ID)
+	}
+	want := []string{"CVE-2024-0001", "CVE-2026-3003", "CVE-2026-3002", "CVE-2026-3001"}
+	if len(ids) != len(want) {
+		t.Fatalf("emitted %v, want %v", ids, want)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("emitted %v, want %v — the delayed document must still come first", ids, want)
+		}
+	}
+}
+
+// Concurrency must not cost cancellation. A stale archive can mean thousands
+// of requests, and stopping has to stop the ones in flight too.
+func TestDelta_CancellationStopsTheConcurrentFetches(t *testing.T) {
+	rows := make([][2]string, 0, 200)
+	docs := map[string]string{}
+	for i := 0; i < 200; i++ {
+		p := "2026/cve-2026-" + strconv.Itoa(41000+i) + ".json"
+		rows = append(rows, [2]string{p, "2026-08-06T00:00:00+00:00"})
+		docs[p] = rhel9Doc(t, "CVE-2026-"+strconv.Itoa(41000+i), "curl", "")
+	}
+	f := &feed{
+		pointer: "csaf_vex_2026-08-05.tar.zst",
+		archive: archiveWith(t),
+		changes: changesCSV(rows...),
+		docs:    docs,
+	}
+	s := serve(t, f)
+	ctx, cancel := context.WithCancel(context.Background())
+	emitted := 0
+	// Cancel on the SECOND advisory: the first is the archive's, so by then the
+	// archive walk has finished and only the delta can be stopped.
+	_, err := New(Options{BaseURL: s.URL}).Fetch(ctx, func(advisory.Advisory) error {
+		emitted++
+		if emitted == 2 {
+			cancel()
+		}
+		return nil
+	})
+	if err == nil {
+		t.Fatal("a cancelled delta ran to completion")
+	}
+	// A few may already be in flight and land, but not two hundred.
+	if emitted > deltaWorkers+2 {
+		t.Errorf("kept emitting after cancellation: %d of %d", emitted, len(docs))
+	}
+}
+
+// Cancelling must not leave the producer wedged. It blocks handing out
+// semaphore tokens once deltaWorkers are outstanding, and if it stopped
+// watching for cancellation it would sit there forever holding the path list
+// and every slot channel — a leak rather than a wrong answer, which is exactly
+// why nothing else here catches it.
+func TestDelta_CancellationLeavesNoGoroutineBehind(t *testing.T) {
+	rows := make([][2]string, 0, 400)
+	docs := map[string]string{}
+	for i := 0; i < 400; i++ {
+		p := "2026/cve-2026-" + strconv.Itoa(51000+i) + ".json"
+		rows = append(rows, [2]string{p, "2026-08-06T00:00:00+00:00"})
+		docs[p] = rhel9Doc(t, "CVE-2026-"+strconv.Itoa(51000+i), "curl", "")
+	}
+	f := &feed{
+		pointer: "csaf_vex_2026-08-05.tar.zst",
+		archive: archiveWith(t),
+		changes: changesCSV(rows...),
+		docs:    docs,
+		// Slow enough that the workers are certainly all busy, and the
+		// producer certainly blocked, when the cancel lands.
+		delay: map[string]time.Duration{},
+	}
+	for p := range docs {
+		f.delay[p] = 40 * time.Millisecond
+	}
+	s := serve(t, f)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	emitted := 0
+	_, err := New(Options{BaseURL: s.URL}).Fetch(ctx, func(advisory.Advisory) error {
+		emitted++
+		if emitted == 2 {
+			cancel()
+		}
+		return nil
+	})
+	if err == nil {
+		t.Fatal("a cancelled delta ran to completion")
+	}
+
+	// The stack is searched for THIS function's producer goroutine by name
+	// rather than the total being counted: net/http keeps idle-connection
+	// goroutines of its own, so a count is noisy in the direction that fails a
+	// correct implementation — it did, at 9 against 3, before this was written
+	// this way.
+	//
+	// Polled, because the in-flight fetches are still unwinding when Fetch
+	// returns.
+	const producer = "eachDocument.func1"
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		buf := make([]byte, 1<<20)
+		dump := string(buf[:runtime.Stack(buf, true)])
+		if !strings.Contains(dump, producer) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s is still running after cancellation; it is waiting for a semaphore "+
+				"token nobody will return", producer)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

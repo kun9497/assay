@@ -110,6 +110,9 @@ type feed struct {
 	// status overrides the response code for a path, so a test can produce a
 	// failure that is NOT a withdrawal.
 	status map[string]int
+	// delay holds a path's response back, so a test can make a later document
+	// finish before an earlier one and see whether the order survives it.
+	delay map[string]time.Duration
 	// hits counts requests per path, so a test can assert what was and was not
 	// fetched rather than inferring it from the result.
 	mu   sync.Mutex
@@ -129,6 +132,9 @@ func serve(t *testing.T, f *feed) *httptest.Server {
 		f.mu.Lock()
 		f.hits[p]++
 		f.mu.Unlock()
+		if d := f.delay[p]; d != 0 {
+			time.Sleep(d)
+		}
 		if code := f.status[p]; code != 0 {
 			http.Error(w, "nope", code)
 			return
