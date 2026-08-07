@@ -22,8 +22,9 @@ VEX feed rather than OSV, behind `REDHAT_ENABLE` (D47–D49), because the OSV Re
 errata-only and cannot say "affected, will not fix" — two thirds of what Red Hat publishes
 about its own packages. Those findings are reported and counted always and gated only by
 `--fail-on-unfixable` (D48), and only `rhel` routes to `Red Hat:N` (D50): Alma, Rocky, CentOS,
-Fedora and Amazon Linux are catalogued and reported as not evaluated. Not built: Ubuntu, the
-BerkeleyDB rpm backend, distroless `status.d`, SARIF, and pep440 leniency (see `README.md`).
+Fedora and Amazon Linux are catalogued and reported as not evaluated. Both rpmdb backends are read — SQLite for RHEL 9+ and BerkeleyDB for RHEL 8 and older
+(D44). Not built: Ubuntu, the ndb rpmdb backend, distroless `status.d`, SARIF, and pep440
+leniency (see `README.md`).
 
 **Check what exists before assuming — this paragraph has been wrong four times.** It claimed
 `scan` was unimplemented after slice 1 shipped it, claimed binaries and directories were

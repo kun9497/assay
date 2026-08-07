@@ -2346,6 +2346,44 @@ CVE 둘에서 오는데, 그 VEX 문서가 assay가 읽은 아카이브 다음�
 모듈 컨텍스트가 epoch 구분자로 읽혔고, 그 결과 828개 CVE에 걸쳐 패키지 이름이 잘렸습니다. D47의
 `splitContext` 참조.
 
+### 측정: `registry.access.redhat.com/ubi8/ubi`, 2026-08-07
+
+BerkeleyDB 백엔드가 들어온 뒤(D44) RHEL 8에 대한 같은 비교입니다. 그 전에는 이 이미지가
+**grype 504건에 대해 0건**이었습니다. 포맷 거절이 매칭보다 먼저 왔기 때문입니다.
+
+| | |
+|---|---|
+| grype finding | 504 |
+| assay finding | 517 |
+| 양쪽 모두 | 496 |
+| assay에만 | 21 |
+| grype에만 | 8 |
+| 공유 finding의 fix 상태 불일치 | **0** |
+
+**모든 발산에 답이 있고, 어느 쪽도 틀리지 않았습니다.**
+
+grype에만 있는 8건은 또 최신성입니다. CVE-2026-8458과 CVE-2026-18839는 2026-08-06에,
+CVE-2026-12143은 **2026-08-07**에 쓰였고, 전부 2026-08-05 아카이브 이후입니다.
+
+assay에만 있는 21건은 **grype의 출처가 실지 않는 데이터에서 D8이 제 일을 한 것**입니다. Red Hat의
+`known_affected` 목록은 소스 패키지 이름을 답니다 — `python-chardet.src`, `python-idna.src`,
+`python-urllib3.src` — 메인라인 RHEL 8에서 fix 없이. assay는 설치된 바이너리의 `SOURCERPM`을 통해
+거기에 닿습니다. 21건 중 18건이 그것이고, `--explain`이 하나하나 그렇게 말합니다:
+
+```
+package:  python3-chardet 3.0.4-7.el8 [Red Hat:8]
+matched:  python-chardet (source package, D8 — installed package is python3-chardet)
+result:   3.0.4-7.el8 is at or above any earlier version, with no fixed version recorded
+```
+
+나머지 3건은 `subscription-manager-rhsm-certificates`이고, Red Hat이 번들된 JavaScript 의존성 셋
+때문에 그 이름 그대로 지목합니다. 21건 전부를 그 출처 VEX 문서와 대조했습니다. 전부 지목되어 있고,
+전부 메인라인 RHEL 8이며, 전부 fix 없는 `known_affected`입니다.
+
+**assay가 grype보다 더 많이 보고하면서 그게 맞는 첫 번째 발산입니다.** 더 낚b다는 주장이 아니라,
+D8이 존재하는 이유인 소스 패키지 간접 참조가 Red Hat은 발행하고 grype의 상류는 노출하지 않는 진술에
+닿은 것입니다.
+
 그 외:
 
 - `Store`가 인터페이스이므로 `Matcher`는 인메모리 fake로 테스트합니다 — 매칭 로직을 검증하는 데

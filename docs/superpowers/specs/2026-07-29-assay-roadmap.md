@@ -2526,6 +2526,45 @@ CVE-2022-2309 against `python3`, where Red Hat's document names
 `python3-lxml::inkscape:flatpak`. The `::` module context was being read as an epoch
 separator, truncating package names across 828 CVEs. See D47's `splitContext`.
 
+### Measured: `registry.access.redhat.com/ubi8/ubi`, 2026-08-07
+
+The same comparison against RHEL 8, once the BerkeleyDB backend landed (D44). Before it, this
+image produced **0 findings against grype's 504** — the format refusal came before any matching.
+
+| | |
+|---|---|
+| grype findings | 504 |
+| assay findings | 517 |
+| in both | 496 |
+| assay-only | 21 |
+| grype-only | 8 |
+| fix-state disagreements on shared findings | **0** |
+
+**Every divergence has an answer, and neither side is wrong.**
+
+The 8 grype-only findings are recency again: CVE-2026-8458 and CVE-2026-18839 were written
+2026-08-06 and CVE-2026-12143 on **2026-08-07**, all after the 2026-08-05 archive.
+
+The 21 assay-only findings are **D8 doing its job on data grype's source does not carry**. Red
+Hat's `known_affected` lists name SOURCE packages — `python-chardet.src`, `python-idna.src`,
+`python-urllib3.src` — at mainline RHEL 8 with no fix, and assay reaches them through the
+installed binary's `SOURCERPM`. Eighteen of the twenty-one are that; `--explain` says so on
+every one:
+
+```
+package:  python3-chardet 3.0.4-7.el8 [Red Hat:8]
+matched:  python-chardet (source package, D8 — installed package is python3-chardet)
+result:   3.0.4-7.el8 is at or above any earlier version, with no fixed version recorded
+```
+
+The other three are `subscription-manager-rhsm-certificates`, named by Red Hat under its own
+name for three bundled JavaScript dependencies. Each of the twenty-one was checked against the
+VEX document it came from: all named, all mainline RHEL 8, all `known_affected` with no fix.
+
+**This is the first divergence where assay reports MORE than grype and is right to.** It is
+not a claim to be better — it is the source-package indirection D8 exists for, reaching a
+statement Red Hat publishes and grype's upstream does not expose.
+
 Beyond that:
 
 - `Store` is an interface, so `Matcher` is tested against an in-memory fake — no database

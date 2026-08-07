@@ -353,27 +353,33 @@ and either is a store change that D5 turns into a schema bump and a rebuild.
 
 ---
 
-### The BerkeleyDB rpm backend
+### ~~The BerkeleyDB rpm backend~~ — resolved in slice ⓮ (D44)
 
-**Why deferred.** RHEL 8, Amazon Linux 2 and their rebuilds keep the database as a
-BerkeleyDB hash file (`Packages`, magic `0x00061561`) rather than SQLite. Those images now
-exit 2 with the backend named, which is honest but not support.
+**Why it was deferred.** RHEL 8, Amazon Linux 2 and their rebuilds keep the database as a
+BerkeleyDB hash file (`Packages`, magic `0x00061561`) rather than SQLite. Those images exited 2
+with the backend named, which was honest but not support.
 
-It is not expensive and it needs no dependency — roughly 300 more lines, on D44's reasoning:
-a scanner only enumerates, so the hash function is never computed and a sequential page walk
-over types 13 (`P_HASH`) and 2 (`P_HASH_UNSORTED`) recovers every record. That was verified,
-185 packages from `redhat/ubi8` and 107 from `amazonlinux:2`, each matching the count stored
-in the format's own reserved key-0 record. `H_OFFPAGE` values resolve through a `P_OVERFLOW`
-chain; inline `H_KEYDATA` values must be handled too, because anchore/go-rpmdb handles only
-the first and the only inline item in either image measured was that key-0 counter — safe
-today, not guaranteed by the format.
+**Resolved 2026-08-07.** Roughly 300 lines, no dependency, on D44's reasoning a second time: a
+scanner only enumerates, so the hash function is never computed, the bucket array is never
+consulted, and the nineteen btree indices beside the file are never opened.
 
-It was left out because the slice it belonged to ships no verdict anyway (D43), so the
-difference between "RHEL 8 is not read" and "RHEL 8 is read and refused" is one error message.
+The cost of leaving it was measured before it was closed — grype found **504 findings on a real
+ubi8 image where assay found none**, because the format refusal came before any matching. The
+reader was then validated against that same image: 183 packages, all 183 shared with syft,
+syft's only extras being the two `gpg-pubkey` keyring entries this build filters, and zero
+source-name disagreements.
 
-**Revisit when** a Red Hat advisory provider exists, or someone needs the inventory for a
-RHEL 8 image. AlmaLinux 8 is 58.7% of Alma's advisory entries and Rocky 8 is 82.7% of Rocky's,
-so this is the majority of that data rather than a long tail.
+Both inline (`H_KEYDATA`) and off-page (`H_OFFPAGE`) values are read. anchore/go-rpmdb handles
+only the second, and on every image measured the sole inline data item is the reserved key-0
+counter — safe today, not guaranteed by the format, and a package small enough to fit on a page
+would otherwise vanish silently.
+
+**Big-endian databases are read too.** BerkeleyDB writes its integers in host order and s390x
+is a supported RHEL platform, so the magic doubles as the byte-order probe rather than
+little-endian being assumed.
+
+**Still not read: ndb.** openSUSE and SLES only, and there is no SUSE advisory source for it to
+serve. Those images exit 2 with the backend named.
 
 ---
 
