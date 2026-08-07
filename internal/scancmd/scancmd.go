@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/kun9497/assay/internal/cataloger/apkdb"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
@@ -420,6 +421,28 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 			return 2
 		}
 	}
+	// D47's debt, paid on stderr so `--output json | jq` stays clean.
+	//
+	// Red Hat findings are matched against MAINLINE errata, because the
+	// support channel that would pick between mainline, EUS, AUS, TUS and E4S
+	// is a subscription attribute with no filesystem representation —
+	// /etc/os-release says "9.8" and nothing on disk says which channel the
+	// host is entitled to. Restricting to mainline is what makes the key
+	// derivable at all, and it drops fixed-version ambiguity from 25.1% of
+	// (CVE, package, major) groups to 6.1%; the residual is a real divergence
+	// and a reader has to be told, not left to discover that a fixed version
+	// they cannot install was quoted at them.
+	//
+	// Printed whenever a Red Hat finding was emitted rather than whenever the
+	// distro is RHEL: a scan that produced none has nothing to caveat, and a
+	// caveat attached to nothing is one readers learn to skip.
+	if redHatFindings(res.Findings) {
+		fmt.Fprintln(stderr,
+			"note: Red Hat findings are matched against mainline RHEL errata. A host on "+
+				"Extended Update Support, AUS, TUS or E4S may have a different fixed version "+
+				"for the same CVE; the support channel is a subscription attribute and is not "+
+				"readable from the filesystem.")
+	}
 	// The report already said so in prose; exiting 0 anyway would let CI read a
 	// scan that evaluated nothing as a pass (D11).
 	if !sum.Trustworthy() {
@@ -666,4 +689,20 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 		Components:       len(pkgs) + skippedRecords,
 		SkippedNoVersion: skippedRecords,
 	}, nil
+}
+
+// redHatFindings reports whether any finding was matched under a Red Hat
+// ecosystem key, which is what earns the mainline-errata caveat above.
+//
+// Keyed on the ecosystem of the FINDING rather than on Target.Distro, so an
+// SBOM carrying Red Hat components gets the same caveat as an image scan: the
+// divergence belongs to the data the match used, not to how the inventory was
+// obtained.
+func redHatFindings(findings []matcher.Finding) bool {
+	for _, f := range findings {
+		if strings.HasPrefix(f.Package.Ecosystem, "Red Hat:") {
+			return true
+		}
+	}
+	return false
 }

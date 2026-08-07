@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -490,4 +491,49 @@ func lineWith(out, needle string) string {
 		}
 	}
 	return ""
+}
+
+// D47's debt. A RHEL finding is matched against MAINLINE errata, and a host on
+// EUS, AUS, TUS or E4S may have a different fixed version for the same CVE.
+// The reader has to be told, because the alternative is discovering it when a
+// quoted fixed version turns out not to be installable.
+func TestRun_RedHatFindingsDiscloseTheMainlineCaveat(t *testing.T) {
+	var out, errOut bytes.Buffer
+	Run(context.Background(), redHatDB(t), "docker-archive:"+rhelTar(t), Options{}, &out, &errOut)
+	if !strings.Contains(errOut.String(), "mainline RHEL errata") {
+		t.Errorf("stderr does not disclose the mainline-errata caveat:\n%s", errOut.String())
+	}
+	// On stderr, never stdout: `--output json | jq` has to stay clean, and the
+	// whole of D18's stream discipline rests on nothing but the report reaching
+	// stdout.
+	if strings.Contains(out.String(), "mainline RHEL errata") {
+		t.Errorf("the caveat reached stdout, which breaks `--output json | jq`:\n%s", out.String())
+	}
+	var jsonOut, jsonErr bytes.Buffer
+	Run(context.Background(), redHatDB(t), "docker-archive:"+rhelTar(t),
+		Options{Output: "json"}, &jsonOut, &jsonErr)
+	if !json.Valid(jsonOut.Bytes()) {
+		t.Errorf("--output json did not produce a valid document:\n%s", jsonOut.String())
+	}
+	if !strings.Contains(jsonErr.String(), "mainline RHEL errata") {
+		t.Errorf("the caveat is missing from the json run's stderr:\n%s", jsonErr.String())
+	}
+}
+
+// And it is printed only when a Red Hat finding was actually emitted. A caveat
+// attached to nothing is one readers learn to skip past, and the next one they
+// skip may be the one that mattered.
+func TestRun_NoRedHatFindingsNoCaveat(t *testing.T) {
+	// An Alpine image against the ordinary fixture database: findings or not,
+	// nothing here was matched under a Red Hat key.
+	tarPath := filepath.Join(t.TempDir(), "image.tar")
+	writeImageTar(t, tarPath, map[string]string{
+		osReleasePath: osReleaseAlpine319,
+		apkDBPath:     apkOneRecord,
+	})
+	var out, errOut bytes.Buffer
+	Run(context.Background(), testDB(t), "docker-archive:"+tarPath, Options{}, &out, &errOut)
+	if strings.Contains(errOut.String(), "mainline RHEL errata") {
+		t.Errorf("an Alpine scan disclosed a Red Hat caveat:\n%s", errOut.String())
+	}
 }
