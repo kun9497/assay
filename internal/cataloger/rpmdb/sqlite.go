@@ -29,9 +29,12 @@ const (
 	// Anything larger holds at least one page image that is not in the main
 	// file (D45).
 	walHeaderLen = 32
-	// walAbsent is the walSize a caller passes when there is no -wal sibling
-	// at all, as distinct from one that exists and is empty.
-	walAbsent = -1
+	// WALAbsent is the walSize a caller passes when the image carries no -wal
+	// sibling at all, as distinct from one that exists and is empty. Exported
+	// because the caller has to name it: a bare 0 would be a plausible-looking
+	// "no log" that actually means "an empty one", and the difference is the
+	// whole of D45.
+	WALAbsent = -1
 
 	// B-tree page types. Index pages are never decoded — a scanner enumerates
 	// the table and never looks a row up — but they are still walked
@@ -62,7 +65,7 @@ type Result struct {
 // ReadSQLite reads an rpmdb.sqlite and returns the packages it holds.
 //
 // walSize is the size in bytes of the sibling rpmdb.sqlite-wal file, or
-// walAbsent (-1) when there is no such file. It is a REQUIRED argument rather
+// WALAbsent (-1) when there is no such file. It is a REQUIRED argument rather
 // than something this function discovers, and that is the whole of D45:
 //
 // rpm always opens its database in WAL mode. Every rpmdb.sqlite measured —
@@ -78,7 +81,7 @@ type Result struct {
 // The only guard that works reads the OTHER FILE, which is why this signature
 // takes a size instead of a bare []byte.
 func ReadSQLite(db []byte, walSize int64, ecosystem, path string) (Result, error) {
-	if walSize < walAbsent {
+	if walSize < WALAbsent {
 		return Result{}, ErrWALNotChecked
 	}
 	if walSize > walHeaderLen {

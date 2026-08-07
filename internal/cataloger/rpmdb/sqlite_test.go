@@ -31,7 +31,7 @@ func read(t *testing.T, path string) []byte {
 // Every package in the fixture, with the NEVRA and source name real SQLite
 // says the blobs encode.
 func TestReadSQLite_Fixture(t *testing.T) {
-	res, err := ReadSQLite(read(t, fixture), walAbsent, "", fixturePath)
+	res, err := ReadSQLite(read(t, fixture), WALAbsent, "", fixturePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestReadSQLite_LiveWALIsRefused(t *testing.T) {
 
 	// First: the main file alone is genuinely stale. Real SQLite sees three
 	// rows in this database; the main file holds two.
-	stale, err := ReadSQLite(db, walAbsent, "", fixturePath)
+	stale, err := ReadSQLite(db, WALAbsent, "", fixturePath)
 	if err != nil {
 		t.Fatalf("reading the main file alone should succeed (it is a valid database): %v", err)
 	}
@@ -242,7 +242,7 @@ func TestReadSQLite_DamagedPageIsRefused(t *testing.T) {
 	}
 
 	// So the refusal has to come from validating the rest of the file.
-	if _, err := ReadSQLite(corrupt, walAbsent, "", fixturePath); !errors.Is(err, ErrSQLite) {
+	if _, err := ReadSQLite(corrupt, WALAbsent, "", fixturePath); !errors.Is(err, ErrSQLite) {
 		t.Errorf("a database with a destroyed index root was read as though it were intact "+
 			"(err = %v); real SQLite calls this image malformed", err)
 	}
@@ -286,7 +286,7 @@ func TestReadSQLite_RejectsWrongFiles(t *testing.T) {
 		{"truncated mid-database", good[:f.pageSize*3]},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := ReadSQLite(tc.in, walAbsent, "", fixturePath)
+			res, err := ReadSQLite(tc.in, WALAbsent, "", fixturePath)
 			if !errors.Is(err, ErrSQLite) {
 				t.Fatalf("err = %v, want one wrapping ErrSQLite (got %d packages)", err, len(res.Packages))
 			}
@@ -332,7 +332,7 @@ func TestReadSQLite_NoPackagesTable(t *testing.T) {
 	// Zero the cell count on page 1, leaving a structurally valid but empty
 	// schema.
 	blank[sqliteHeaderLen+3], blank[sqliteHeaderLen+4] = 0, 0
-	res, err := ReadSQLite(blank, walAbsent, "", fixturePath)
+	res, err := ReadSQLite(blank, WALAbsent, "", fixturePath)
 	if !errors.Is(err, ErrSQLite) {
 		t.Errorf("a database with no Packages table read as %d packages (err = %v)", len(res.Packages), err)
 	}

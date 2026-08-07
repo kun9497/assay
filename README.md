@@ -636,6 +636,40 @@ disagree zero times.
 - [ ] Distroless images keep their database in `var/lib/dpkg/status.d` as a directory, which
       the layer reader cannot ask for; those images exit 2 with the shape named
 
+**⑫ RHEL-family inventory** — `ubi9`, `rocky:9`, `almalinux:9`, `fedora` and
+`amazonlinux:2023` are read, and **no verdict follows**. A RHEL image's packages are listed
+with their NEVRAs and every one of them is reported as not evaluated, so the scan exits 2.
+**Inventory done; matching deliberately not.**
+
+The recorded objection — that Red Hat backports fixes without saying so in the version, so
+comparison produces false positives — turned out to be **wrong**, and the correction is in
+`docs/deferred-decisions.md`. All 588,150 fixed events in Red Hat's OSV export carry an epoch
+and a release, 95.8% carry `.elN`, and against a real `ubi9` image every patched package
+reads as fixed. What blocks matching is different: that feed is **errata-only** and cannot
+express "affected, will not fix" — 39,372 CVEs exist only in Red Hat's VEX feed, 19,341 of
+them from 2023 onwards. Matching on it would report all of them clean.
+
+- [x] A pure-Go SQLite reader for `rpmdb.sqlite`, with overflow chains — no new dependency
+      (D44). A scanner only enumerates, so the hash index and the SQL layer are dead weight;
+      `modernc.org/sqlite` costs 4 modules and 3.8 MB to buy the one backend cheapest to write
+- [x] An RPM header parser, and `SOURCERPM` as D8's source-name indirection
+- [x] A non-empty write-ahead log and a damaged page are hard errors, and the guard reads the
+      **sibling file** (D45) — rpm always uses WAL mode, so a guard on the header's version
+      bytes cannot fire
+- [x] Both `/var/lib/rpm` and `/usr/lib/sysimage/rpm` are probed; the first is a symlink on
+      RHEL 10, Fedora and CentOS Stream 10, and an RPM distro with no database found is a hard
+      error rather than an empty inventory (D43)
+- [x] An `rpmvercmp` comparer, checked against the real `rpm` in CI (D46). Written and
+      deliberately **not registered**: with no provider, a resolvable comparer would let an
+      empty lookup report clean
+- [ ] A Red Hat advisory provider. Needs a source that can express affectedness without a fix
+      — CSAF VEX is the only complete one — plus an answer to the 903 CPE-derived ecosystem
+      keys, whose support channel has no filesystem representation
+- [ ] BerkeleyDB (`Packages`) for RHEL 8 and Amazon Linux 2 — another ~300 lines and still no
+      dependency, since a sequential page walk needs no hash index. Those images exit 2 with
+      the backend named
+- [ ] Replaying a write-ahead log rather than refusing it
+
 **⑨ Versions the comparers cannot read** — a package whose version will not parse is
 reported as skipped rather than clean (D20, D21), so it is loud; it is still a vulnerability
 that went un-assessed, which D9 calls a miss. Measured 2026-08-06 over every range bound in

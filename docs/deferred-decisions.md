@@ -258,6 +258,53 @@ supplying VEX to suppress findings, this one is about a vendor publishing affect
 
 ---
 
+### The BerkeleyDB rpm backend
+
+**Why deferred.** RHEL 8, Amazon Linux 2 and their rebuilds keep the database as a
+BerkeleyDB hash file (`Packages`, magic `0x00061561`) rather than SQLite. Those images now
+exit 2 with the backend named, which is honest but not support.
+
+It is not expensive and it needs no dependency — roughly 300 more lines, on D44's reasoning:
+a scanner only enumerates, so the hash function is never computed and a sequential page walk
+over types 13 (`P_HASH`) and 2 (`P_HASH_UNSORTED`) recovers every record. That was verified,
+185 packages from `redhat/ubi8` and 107 from `amazonlinux:2`, each matching the count stored
+in the format's own reserved key-0 record. `H_OFFPAGE` values resolve through a `P_OVERFLOW`
+chain; inline `H_KEYDATA` values must be handled too, because anchore/go-rpmdb handles only
+the first and the only inline item in either image measured was that key-0 counter — safe
+today, not guaranteed by the format.
+
+It was left out because the slice it belonged to ships no verdict anyway (D43), so the
+difference between "RHEL 8 is not read" and "RHEL 8 is read and refused" is one error message.
+
+**Revisit when** a Red Hat advisory provider exists, or someone needs the inventory for a
+RHEL 8 image. AlmaLinux 8 is 58.7% of Alma's advisory entries and Rocky 8 is 82.7% of Rocky's,
+so this is the majority of that data rather than a long tail.
+
+---
+
+### Replaying an rpmdb write-ahead log
+
+**Why deferred.** A `rpmdb.sqlite-wal` larger than its 32-byte header currently fails the
+scan (D45). Replaying it instead would be correct rather than merely safe: the log's frames
+hold the newest version of each page, and reading them would give the same answer real SQLite
+gives.
+
+The refusal was chosen because the failure modes are asymmetric. A refusal is loud and exits
+2; a replay with a subtle bug in its checksum or commit-frame handling is a package list that
+is quietly wrong, which is the class D45 exists to close. All ten images measured carry a
+zero-byte log, so the refusal has never fired on real input.
+
+**Revisit when** it fires on a real image, or when scanning a live host rather than an image
+becomes a target — a running system checkpoints on its own schedule and would meet this
+routinely.
+
+**Groundwork.** `ReadSQLite` already takes the log's size as a required argument, so the call
+sites already reach the sibling file. What is missing is the 32-byte log header, the 24-byte
+frame headers, the salt and checksum validation that says which frames are committed, and the
+page overlay.
+
+---
+
 ### Does an unrated source count as disagreeing?
 
 The table marks a finding with `*` and footnotes "sources disagree on severity" whenever its
