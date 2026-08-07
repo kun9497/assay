@@ -1924,6 +1924,25 @@ and nothing downstream can use a not-affected claim).
 Red Hat built it. A name with no readable date is fatal rather than falling back to
 `time.Now()` — substituting the fetch time for the data time is exactly what D12 forbids.
 
+**The archive is a snapshot, and a delta pass follows it.** Red Hat rebuilds
+`csaf_vex_YYYY-MM-DD.tar.zst` on its own schedule while individual documents change in between,
+so a database built from the archive alone is behind by however long that has been. It is not a
+theoretical gap: on BOTH differential runs against grype — ubi9 and ubi8 — every finding grype
+had and assay did not came from documents written after the archive, and nothing else did.
+
+`changes.csv` lists every document with its last-modified time, **newest first**, so the scan
+stops at the first row older than the archive's own date rather than reading all 62,989.
+Measured 2026-08-07 against a 2026-08-05 archive: **1,827 documents**, roughly 900 per day of
+drift. The cutoff is the archive's DATE at midnight rather than its build time, which nothing
+publishes — that over-fetches by up to a day, and over-fetching is the harmless direction
+because `Bolt.Put` keys on the advisory ID. The delta is emitted AFTER the archive walk so
+last-write-wins is the newer document.
+
+Only a 404 is survivable: `changes.csv` and `deletions.csv` are written separately, so a
+document withdrawn between them is a race. Everything else fails the build, because a pass that
+exists to close a known gap and quietly closes part of it leaves the database looking complete
+while sitting somewhere in between.
+
 **Opt-in via `REDHAT_ENABLE`, for a third reason.** Not redistribution: the feed is TLP:WHITE
 on all 67,261 documents, so unlike KISA (D29) what is built from it can be published. Not
 runtime either: 90 seconds, against NVD's seven hours. What makes it opt-in is **size of
@@ -2507,12 +2526,17 @@ Run against grype 0.104 (database built 2026-08-02) and assay's own database bui
 | grype-only | 3 |
 | fix-state disagreements on shared findings | **0** |
 
-**assay is a strict subset of grype here, and the difference is entirely data recency.** All
-three grype-only findings come from two CVEs whose VEX documents were created on 2026-08-06,
+**assay was a strict subset of grype here, and the difference was entirely data recency.** All
+three grype-only findings came from two CVEs whose VEX documents were created on 2026-08-06,
 the day AFTER the archive assay read: `changes.csv` timestamps them
 `2026-08-06T03:46:10` and `2026-08-06T12:51:52`, and neither document is present in
-`csaf_vex_2026-08-05.tar.zst`. See the deferred entry *The VEX archive lags its own change
-feed*.
+`csaf_vex_2026-08-05.tar.zst`.
+
+**Re-run the same day with the archive delta (D49): 418 grype, 418 assay, 418 in both, zero on
+either side.** Exact agreement, which the section above says is not expected — and it is worth
+being precise about why it happened rather than treating it as a target. The two tools read the
+same image and, once the recency gap closed, the same statements from the same vendor. It will
+stop being exact the moment either side's data moves.
 
 Both tools also agree on the substance: assay evaluated all 186 packages with none skipped,
 found 415 findings and rated **all 415 unfixable**; grype's fix state for those same 415 is
@@ -2542,8 +2566,9 @@ image produced **0 findings against grype's 504** — the format refusal came be
 
 **Every divergence has an answer, and neither side is wrong.**
 
-The 8 grype-only findings are recency again: CVE-2026-8458 and CVE-2026-18839 were written
-2026-08-06 and CVE-2026-12143 on **2026-08-07**, all after the 2026-08-05 archive.
+The 8 grype-only findings were recency again: CVE-2026-8458 and CVE-2026-18839 written
+2026-08-06 and CVE-2026-12143 on **2026-08-07**, all after the 2026-08-05 archive. **With the
+delta they are gone: 504 grype, 526 assay, all 504 in both, zero grype-only.**
 
 The 21 assay-only findings are **D8 doing its job on data grype's source does not carry**. Red
 Hat's `known_affected` lists name SOURCE packages — `python-chardet.src`, `python-idna.src`,

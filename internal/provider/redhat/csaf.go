@@ -261,6 +261,13 @@ type stats struct {
 	// checks.
 	SkippedBadProduct int
 	SkippedBadDoc     int
+	// The delta pass (delta.go). Counted apart from the archive's numbers
+	// because they answer different questions: the archive's say what the
+	// snapshot held, these say how far behind it was.
+	DeltaListed     int // documents changes.csv named as newer than the archive
+	DeltaFetched    int // of those, how many were still published
+	DeltaGone       int // and how many had been withdrawn between the two files
+	DeltaAdvisories int // how many of the fetched ones yielded a record
 }
 
 // convert turns one CSAF document into at most one advisory.
