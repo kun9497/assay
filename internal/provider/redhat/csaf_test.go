@@ -392,3 +392,94 @@ func TestConvert_DropsDocumentsWithNothingToStore(t *testing.T) {
 		})
 	}
 }
+
+// The module/flatpak context, and the ordering that makes it matter.
+//
+// Found by a differential run against grype on a real ubi9 image: assay
+// reported CVE-2022-2309 against `python3`, which grype did not. Red Hat's
+// document names `python3-lxml::inkscape:flatpak` — a different package, in a
+// flatpak whose contents are not in the rpmdb at all — and splitNEVRA read the
+// context's colon as an epoch separator, truncating the name at the hyphen
+// before it.
+func TestSplitContext(t *testing.T) {
+	for _, tc := range []struct{ in, component, context string }{
+		{"python3-lxml::inkscape:flatpak", "python3-lxml", "inkscape:flatpak"},
+		{"Judy.src::mariadb:10.3", "Judy.src", "mariadb:10.3"},
+		{"389-ds-base::389-directory-server:1.4", "389-ds-base", "389-directory-server:1.4"},
+		{"ant-antlr::ant:1.10", "ant-antlr", "ant:1.10"},
+		// A fixed entry with an epoch AND a context: the epoch colon comes
+		// first, so this one parsed correctly even before the fix. It is here
+		// so a change that split on the FIRST colon rather than on "::" fails.
+		{"389-ds-base-0:1.4.1.3-7.module+el8.1.0+4150+5b8c2c1f.x86_64::389-directory-server:1.4",
+			"389-ds-base-0:1.4.1.3-7.module+el8.1.0+4150+5b8c2c1f.x86_64", "389-directory-server:1.4"},
+		// No context at all: the ordinary case, unchanged.
+		{"openssh-0:8.7p1-38.el9_4.1.x86_64", "openssh-0:8.7p1-38.el9_4.1.x86_64", ""},
+		{"mailman", "mailman", ""},
+	} {
+		comp, ctx := splitContext(tc.in)
+		if comp != tc.component || ctx != tc.context {
+			t.Errorf("splitContext(%q) = (%q, %q), want (%q, %q)", tc.in, comp, ctx, tc.component, tc.context)
+		}
+	}
+}
+
+// The defect itself, asserted end to end rather than on the helper: a
+// context-scoped entry must not put a vulnerability on a package that only
+// looks like its prefix.
+func TestConvert_ModuleContextDoesNotRenameThePackage(t *testing.T) {
+	d := buildDoc(t, "CVE-2022-2309",
+		map[string]string{"RHEL9": "cpe:/o:redhat:enterprise_linux:9"},
+		nil,
+		[]string{
+			"RHEL9:python3-lxml::inkscape:flatpak",
+			"RHEL9:389-ds-base::389-directory-server:1.4",
+			"RHEL9:ant-antlr::ant:1.10",
+		})
+	var st stats
+	adv, ok := convert(d, &st)
+	if ok {
+		// Every entry is context-scoped, so nothing is storable at all.
+		t.Errorf("a document naming only module-scoped entries produced an advisory: %+v", adv.Affected)
+	}
+	if st.SkippedModuleContext != 3 {
+		t.Errorf("SkippedModuleContext = %d, want 3", st.SkippedModuleContext)
+	}
+	// The names that would have been invented. Each is a REAL package, which
+	// is what made this a false positive rather than a harmless miss: `python3`
+	// is installed on almost every RHEL image.
+	for _, wrong := range []string{"python3", "389-ds", "ant"} {
+		for _, a := range adv.Affected {
+			if a.Name == wrong {
+				t.Errorf("stored a finding against %q, which is a different package from the "+
+					"one the advisory names", wrong)
+			}
+		}
+	}
+}
+
+// A context-scoped entry alongside an ordinary one: the ordinary one still
+// lands, so the fix drops what it should and nothing else.
+func TestConvert_ContextScopedEntriesDoNotSuppressTheRest(t *testing.T) {
+	d := buildDoc(t, "CVE-2024-0009",
+		map[string]string{"RHEL9": "cpe:/o:redhat:enterprise_linux:9"},
+		[]string{"RHEL9:openssh-0:8.7p1-38.el9_4.1.x86_64"},
+		[]string{"RHEL9:python3-lxml::inkscape:flatpak", "RHEL9:tar"})
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("the whole document was dropped")
+	}
+	got := affectedByName(adv)
+	if len(got) != 2 {
+		t.Fatalf("stored %d entries, want openssh and tar only: %+v", len(got), adv.Affected)
+	}
+	if _, ok := got["Red Hat:9/openssh"]; !ok {
+		t.Error("the fixed openssh entry was lost")
+	}
+	if _, ok := got["Red Hat:9/tar"]; !ok {
+		t.Error("the unscoped tar entry was lost")
+	}
+	if st.SkippedModuleContext != 1 {
+		t.Errorf("SkippedModuleContext = %d, want 1", st.SkippedModuleContext)
+	}
+}

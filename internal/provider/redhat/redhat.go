@@ -245,11 +245,12 @@ func (p *Provider) get(ctx context.Context, url string) (io.ReadCloser, error) {
 func (s stats) String() string {
 	return fmt.Sprintf(
 		"%d documents -> %d advisories, %d affected entries (%d with no fix available); "+
-			"skipped %d module builds, %d non-mainline products, %d container images, "+
+			"skipped %d module builds, %d module/flatpak-scoped entries, "+
+			"%d non-mainline products, %d container images, "+
 			"%d products with no CPE, %d whole-product entries naming no package, "+
 			"%d unreadable products, %d documents with no CVE id, "+
 			"%d unreadable documents",
 		s.Documents, s.Advisories, s.Affected, s.Unfixable,
-		s.SkippedModule, s.SkippedNonRHEL, s.SkippedImage,
+		s.SkippedModule, s.SkippedModuleContext, s.SkippedNonRHEL, s.SkippedImage,
 		s.SkippedNoCPE, s.SkippedWholeProduct, s.SkippedBadProduct, s.SkippedNoCVE, s.SkippedBadDoc)
 }

@@ -116,6 +116,36 @@ func stripArch(s string) string {
 	return s
 }
 
+// splitContext separates a product component from the module or flatpak
+// context it is scoped to. Red Hat marks those with "::":
+//
+//	python3-lxml::inkscape:flatpak   -> ("python3-lxml", "inkscape:flatpak")
+//	Judy.src::mariadb:10.3           -> ("Judy.src",     "mariadb:10.3")
+//	openssh-0:8.7p1-38.el9_4.1.x86_64 -> (unchanged,      "")
+//
+// It MUST run before splitNEVRA, and that ordering is the whole of this
+// function. The context contains a colon, and splitNEVRA reads the first colon
+// as the epoch separator — so on a bare `known_affected` name, which carries no
+// epoch of its own, the context's colon is the first one and the name is
+// truncated at the hyphen before it:
+//
+//	python3-lxml::inkscape:flatpak   -> name "python3"   (a real, different package)
+//	389-ds-base::389-directory-server:1.4 -> name "389-ds"
+//	ant-antlr::ant:1.10              -> name "ant"
+//
+// Measured over the whole archive: 453,164 of 6,315,078 mainline product
+// entries (7.18%) carry a context, and parsing them without splitting it off
+// first produced 786 distinct wrong package names across 828 CVEs. A
+// differential run against grype on a real ubi9 image is what found it — one
+// false positive there, `python3` carrying CVE-2022-2309, which belongs to
+// python3-lxml inside an inkscape flatpak.
+func splitContext(s string) (component, context string) {
+	if i := strings.Index(s, "::"); i >= 0 {
+		return s[:i], s[i+2:]
+	}
+	return s, ""
+}
+
 // splitNEVRA separates a product component into a package name and an EVR.
 //
 // The two shapes mean different things, and the difference is the whole point
@@ -187,15 +217,20 @@ func collectCPE(bs []branch, out map[string]string) {
 // A provider that silently drops two thirds of its input is indistinguishable
 // from one that is broken.
 type stats struct {
-	Documents      int
-	Advisories     int
-	Affected       int
-	Unfixable      int // affected entries with no fixed version at all
-	SkippedModule  int
-	SkippedNonRHEL int
-	SkippedNoCPE   int
-	SkippedNoCVE   int
-	SkippedImage   int
+	Documents     int
+	Advisories    int
+	Affected      int
+	Unfixable     int // affected entries with no fixed version at all
+	SkippedModule int
+	// SkippedModuleContext is an entry scoped to a module or flatpak by a "::"
+	// suffix. Counted apart from SkippedModule because the two are found
+	// differently — one by the release string, one by the product id — and a
+	// single counter would hide which detection was doing the work.
+	SkippedModuleContext int
+	SkippedNonRHEL       int
+	SkippedNoCPE         int
+	SkippedNoCVE         int
+	SkippedImage         int
 	// SkippedWholeProduct is an entry that names a PRODUCT and no package at
 	// all — "Red Hat Linux 6.2", "Red Hat Enterprise Linux AS (Advanced
 	// Server) version 2.1", "Red Hat Powertools 7.0". Red Hat used that form
@@ -283,6 +318,17 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 		eco, ok := ecosystemFor(c)
 		if !ok {
 			st.SkippedNonRHEL++
+			return
+		}
+		comp, context := splitContext(comp)
+		if context != "" {
+			// Module- and flatpak-scoped, and dropped for D47's reason: the
+			// scan cannot know which module streams are enabled, and a flatpak's
+			// contents are not in the rpmdb at all. Matching the bare name
+			// regardless of stream would be a false positive against a host
+			// running a different one, which is the same trade D47 refused for
+			// module FIXED versions.
+			st.SkippedModuleContext++
 			return
 		}
 		name, evr := splitNEVRA(stripArch(comp))
