@@ -1651,11 +1651,21 @@ version" — what `dpkg-gencontrol` omits the field to say, and what apk's origi
 
 ### D42 — Debian only; Ubuntu needs its own decision
 
-**The Red Hat warning does not transfer to Debian.** Red Hat backports fixes and omits that
-from the version, which is why `docs/deferred-decisions.md` records RHEL as blocked. Debian
-backports and *encodes* it: `7.74.0-1.3+deb11u10`. 169,282 (CVE, source, release) triples were
-joined against Debian's own security tracker and **zero disagree** — OSV's Debian data is a
-faithful mechanical transform of the tracker, not an independent re-derivation.
+**Debian encodes its backports in the version**: `7.74.0-1.3+deb11u10`. 169,282 (CVE, source,
+release) triples were joined against Debian's own security tracker and **zero disagree** —
+OSV's Debian data is a faithful mechanical transform of the tracker, not an independent
+re-derivation.
+
+> **Correction, measured 2026-08-07 (D43).** This paragraph originally opened "The Red Hat
+> warning does not transfer to Debian. Red Hat backports fixes and omits that from the
+> version, which is why `docs/deferred-decisions.md` records RHEL as blocked." That contrast
+> was wrong in both halves. Red Hat encodes the backport too, in the advisory's fixed version
+> (`0:8.7p1-38.el9_4.1` for regreSSHion), and all 588,150 fixed events in its OSV export carry
+> an epoch and a release. Debian's advantage over RHEL is not backport encoding — it is that
+> `Debian:12` is derivable from `/etc/os-release` while Red Hat's key is one of 903 CPE-derived
+> variants, and that Debian's feed can express an unfixed vulnerability while Red Hat's OSV
+> export is errata-only. The measurement above stands; only the comparison drawn from it was
+> wrong.
 
 Ecosystem keys are the bare major, `Debian:11` through `Debian:14`, which is what both OSV and
 `/etc/os-release`'s `VERSION_ID` use. **testing and sid carry no `VERSION_ID` at all** and OSV
@@ -1682,6 +1692,132 @@ on the THIRD word of `Status` and nothing else, which is how syft drops
 `deinstall ok installed` by substring-matching and trivy drops `purge ok installed` by
 scanning for a bare word. An absent `Status` means installed, because every package in a
 distroless image is in that state.
+
+### D43 — RHEL-family targets are inventoried and refused, not matched
+
+An image whose `/etc/os-release` names an RPM-family distro has its package list read and
+reaches **exit 2**. The reader, the RPM header parser and the comparer ship; no provider does,
+so no RHEL finding is ever emitted.
+
+**Why the inventory without the matching.** The obstacle recorded against RHEL — that Red Hat
+backports fixes and its OSV data therefore carries upstream versions — is wrong, and D42's
+correction above records the measurement. But a different property of that feed blocks
+matching: **it is errata-only.** Zero of 588,150 affected entries lack a fixed version, so
+"affected, will not fix", "fix deferred" and "out of support scope" cannot be represented at
+all. Red Hat's CSAF VEX feed carries 62,983 CVEs against OSV's 23,668; **39,372 exist only in
+VEX, 19,341 of them from 2023 onwards**, and 37–43% of two independent samples name a base-OS
+RPM as `known_affected` with no fix. Matching on this feed returns a clean verdict for every
+one of them. That is D20's failure one level up — not "the ecosystem was never ingested" but
+"the ecosystem was ingested and cannot say the thing that matters".
+
+Two further obstacles are recorded in `docs/deferred-decisions.md` rather than here, because
+they shape the provider rather than this slice: the ecosystem key is one of 903 CPE-derived
+variants and the support channel it encodes is a subscription attribute with no filesystem
+representation, and the modularity label is absent from every one of the 588,150 purls.
+
+**No new exit rule was needed, and that is the point.** `Summary.Trustworthy()` already
+returns false when `Components > 0 && Evaluated == 0`, so a RHEL image whose 186 packages are
+all catalogued unkeyed reaches exit 2 through the guard slice 4 wrote. Adding a RHEL special
+case would have been the wrong instinct — the general rule already covers it, and a test that
+proves the guard fires on this path is worth more than a second code path that agrees with it.
+
+**"RPM distro detected but no rpmdb found" is a hard error, never an empty inventory.**
+`/var/lib/rpm` is a *symlink* on RHEL 10, Fedora and CentOS Stream 10, whose real database
+lives at `/usr/lib/sysimage/rpm` (Fedora 36's RelocateRPMToUsr). A reader that probes only the
+traditional path finds nothing in the layer tar, and without this rule an image with 172
+packages would report as having none. Both paths are probed.
+
+**AlmaLinux and Rocky Linux are not shortcuts**, despite keying on the bare major. AlmaLinux
+carries zero `aliases` and zero `upstream` across all 5,494 records — every CVE is in
+`related`, which OSV defines as explicitly not an alias — so under D3 it yields **0 CVEs**, and
+it has no severity data at all. Rocky's export has a median 0.29 coverage of Red Hat's runtime
+package set and **no record whatsoever for CVE-2024-6387**. Neither changes this decision.
+
+
+### D44 — The rpmdb is read by hand, not by dependency
+
+Both backends, in this repository, with no addition to `go.mod`: SQLite b-tree with overflow
+chains for RHEL 9+, and BerkeleyDB hash for RHEL 8 and older. Roughly 750 lines plus the shared
+RPM header parser.
+
+**The argument is that a scanner only ever enumerates.** rpm's own read-only BerkeleyDB backend
+is ~850 lines of C because `rpm -q openssl` is a point lookup and needs the hash index. This
+never looks a package up by name, so the index, the btree backend and the entire SQL layer are
+dead weight — a sequential page walk recovers every record. Validated: 185 packages from
+`redhat/ubi8` and 107 from `amazonlinux:2`, each matching the count in the format's own
+reserved key-0 record, and on the SQLite side all 188 blobs from `ubi9` byte-identical to what
+real SQLite returns across seven images.
+
+**The dependency is expensive exactly where writing it is cheap.** `modernc.org/sqlite` costs
+4 modules, 136 packages, ~217,000 compiled lines of transpiled C and 3.8 MB of binary, and buys
+only the SQLite backend — the one that is 294 lines to write. `anchore/go-rpmdb`'s BDB and NDB
+backends are pure stdlib and pull nothing, which is the same conclusion arrived at from the
+other direction.
+
+**`SOURCERPM` gives D8 its indirection for free.** `audit-3.1.5-8.el9.src.rpm` yields source
+name `audit` after stripping `.src.rpm` and the last two hyphen-separated fields. Across seven
+images every real package resolved a source name; `gpg-pubkey` rows are keyring entries with no
+arch and are filtered.
+
+**NDB is not implemented.** It is openSUSE/SLES only, no Red Hat lineage uses it, and there is
+no SUSE advisory provider for it to serve.
+
+
+### D45 — A write-ahead log or a damaged page is a hard error, and the guard reads the file, not the header
+
+**rpm always uses WAL mode.** Every `rpmdb.sqlite` checked — ten of them — carries file-format
+write and read version bytes of exactly 2, the SQLite encoding for WAL. So a guard written as
+`if h[18] > 2 || h[19] > 2` can never fire, and the reader silently returns whatever the main
+file held when the log was last checkpointed.
+
+This is not hypothetical. A research prototype shipped that exact guard, with a comment above
+it reading *"refuse rather than silently report a stale package list"*, and it was demonstrated
+wrong: against a database with a live 28,872-byte WAL holding one newly inserted package, real
+SQLite returns 189 rows and the reader returned **186, `skipped=0`, exit 0, no error**. A second
+run with 40 deletions in the log returned 186 against a true 148. An installed package invisible
+to a vulnerability scanner is the silent miss this project exists to prevent — and the guard
+that was supposed to stop it was the CLAUDE.md antipattern in its purest form: declared,
+documented as the thing that prevents the defect, and unable to fail.
+
+**So the guard is on the sibling file.** A `rpmdb.sqlite-wal` larger than its 32-byte header
+means the main file alone is not the current database, and the read is refused. This forces the
+reader's signature to reach the sibling file rather than taking a bare `io.ReaderAt` — an API
+consequence, not an `if` statement, which is why it is recorded rather than left to
+implementation.
+
+**Page-level damage is refused the same way.** An `ubi9` database with page 41 overwritten by
+`0xFF` — the rootpage of the `Recommendname` index, one of roughly twenty tables the file
+actually holds, not the one the prototype assumed — produced 186 packages and no error where
+real SQLite reports the image as malformed. Structural checks cover the whole file, not only
+the pages the `Packages` walk happens to touch.
+
+**A test is not enough on its own here.** Both defects above passed a suite that named them.
+Each guard added under this decision must be verified by making the failure real — a fixture
+with an actual non-empty WAL, a fixture with an actually corrupted page — and confirming the
+suite goes red before the guard lands.
+
+
+### D46 — RPM version comparison is its own comparer, and an absent epoch is zero on both sides
+
+A fourth `Comparer` implementing `rpmvercmp`, per D9. It is not dpkg with different separators:
+`~` sorts below everything as in Debian, but `^` sorts *above*, alphabetic segments compare
+below numeric ones, and the segment splitting differs. Upstream's `rpmio/rpmvercmp.cc` is a
+115-line function body, and full EVR comparison adds `epoch:version-release` splitting on top.
+
+**The highest-risk row in the table is the absent epoch, and it is absent on both sides.**
+AlmaLinux omits the epoch when it is zero (52,290 of 67,076 fixed events) while Red Hat and
+Rocky always emit it; on the installed side, 145 of 158 real packages in `almalinux:9`'s rpmdb
+carry no `EPOCH` tag at all. So `7.76.1-23.el9_2.4` and `0:7.76.1-23.el9_2.4` are one version
+and a comparer that string-compares them, or that treats a missing epoch as anything other
+than 0, is wrong in whichever direction the data happens to fall. The table must also cover
+`.el9_4.1` against `.el9`, `module+el8.5.0+12582+56d94c81` against
+`module_el8.5.0+119+9a9ec082`, `0:208-20.ael7b_1.9` against `0:208-20.el7_1.9`, and
+leading-zero stripping.
+
+Written in the main loop with the table reviewed line by line, per CLAUDE.md's delegation
+rules: a subtle ordering bug here is a silent false negative, which is the exact failure the
+per-ecosystem design exists to prevent.
+
 
 ## 3. Architecture
 

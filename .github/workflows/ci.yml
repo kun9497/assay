@@ -45,6 +45,13 @@ jobs:
       # after it: the node-semver fixtures shipped and ran nowhere for a day.
       # A check that is counted as coverage and never executes is worse than one
       # that is absent.
+      # dpkg is already on an Ubuntu runner; rpm is not. Installed rather than
+      # skipped around, because the RPM replay uses rpm's own embedded Lua to
+      # call rpmvercmp(), and its requireCI guard turns a missing binary into a
+      # failure here on purpose.
+      - name: Install rpm for the RPM comparer oracle
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
       - name: Upstream version vectors
         env:
           # Raises the contents-API limit from 60/hour per shared runner IP to

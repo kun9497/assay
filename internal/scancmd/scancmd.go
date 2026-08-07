@@ -15,6 +15,7 @@ import (
 	"github.com/kun9497/assay/internal/cataloger/dpkgdb"
 	"github.com/kun9497/assay/internal/cataloger/gobinary"
 	"github.com/kun9497/assay/internal/cataloger/osrelease"
+	"github.com/kun9497/assay/internal/cataloger/rpmdb"
 	"github.com/kun9497/assay/internal/matcher"
 	"github.com/kun9497/assay/internal/pkgmeta"
 	"github.com/kun9497/assay/internal/report"
@@ -105,6 +106,91 @@ const (
 	// every stanza, and matching it would double the inventory.
 	dpkgDBPath = "var/lib/dpkg/status"
 )
+
+// rpmDBDirs are the two places an RPM database lives, newest convention first.
+//
+// BOTH are probed, and that is not belt and braces. `/var/lib/rpm` is a
+// SYMLINK on RHEL 10, CentOS Stream 10, Fedora 36+ and every openSUSE — the
+// real directory moved to /usr/lib/sysimage/rpm with Fedora's RelocateRPMToUsr
+// — and Image.Files matches exact tar entry names. It follows a symlink that IS
+// the wanted path; it does not follow one on a DIRECTORY COMPONENT of it, which
+// is the same limitation that makes distroless status.d a named error (D42).
+// So a reader that probed only the traditional path would find nothing in those
+// images' layers and, without D43's hard error below, would report a 172-package
+// image as having none.
+var rpmDBDirs = []string{"usr/lib/sysimage/rpm", "var/lib/rpm"}
+
+// rpmDBFiles are the file names inside those directories, one per backend.
+// Packages (BerkeleyDB) and Packages.db (ndb) are probed even though neither is
+// read yet: finding one and naming it is a refusal somebody can act on, where
+// finding nothing is indistinguishable from a clean image.
+var rpmDBFiles = []string{"rpmdb.sqlite", "rpmdb.sqlite-wal", "Packages", "Packages.db"}
+
+// rpmFamilies are the /etc/os-release IDs whose package database is an rpmdb.
+//
+// Routing on ID rather than on the `elN` release string is deliberate: ubi
+// reports rhel, almalinux reports almalinux and rocky reports rocky, and the
+// three write their module builds differently enough that matching one distro's
+// advisory versions against another's is a real hazard (see the RHEL entry in
+// docs/deferred-decisions.md). The list is used only to turn "no database
+// found" into a specific error, so an ID missing from it costs a vaguer message
+// and nothing else.
+var rpmFamilies = map[string]bool{
+	"rhel": true, "centos": true, "fedora": true, "almalinux": true,
+	"rocky": true, "ol": true, "amzn": true, "openEuler": true,
+	"sles": true, "opensuse-leap": true, "opensuse-tumbleweed": true,
+	"azurelinux": true, "mariner": true,
+}
+
+// rpmDBPaths is every tar entry the RPM probe asks for.
+func rpmDBPaths() []string {
+	out := make([]string, 0, len(rpmDBDirs)*len(rpmDBFiles))
+	for _, d := range rpmDBDirs {
+		for _, f := range rpmDBFiles {
+			out = append(out, d+"/"+f)
+		}
+	}
+	return out
+}
+
+// foundRPMDB is the RPM database an image carries. Exactly one of the three
+// paths is set.
+type foundRPMDB struct {
+	sqlitePath string
+	// walSize is the size of the sibling -wal file, or rpmdb.WALAbsent when the
+	// image has no such entry at all. Carried explicitly because ReadSQLite
+	// refuses to guess (D45), and "Files did not return it" is a real answer
+	// here: Files walks every layer, so absence means the image does not have
+	// it rather than that nobody looked.
+	walSize int64
+	bdbPath string // BerkeleyDB: RHEL 8 and older, Amazon Linux 2
+	ndbPath string // ndb: openSUSE and SLES only
+}
+
+// findRPMDB picks the database out of the probed files, preferring the SQLite
+// backend and then the relocated directory.
+func findRPMDB(files map[string]source.FileFromLayer) (foundRPMDB, bool) {
+	for _, d := range rpmDBDirs {
+		p := d + "/rpmdb.sqlite"
+		if files[p].Data == nil {
+			continue
+		}
+		db := foundRPMDB{sqlitePath: p, walSize: rpmdb.WALAbsent}
+		if w, ok := files[p+"-wal"]; ok && w.Data != nil {
+			db.walSize = int64(len(w.Data))
+		}
+		return db, true
+	}
+	for _, d := range rpmDBDirs {
+		if files[d+"/Packages"].Data != nil {
+			return foundRPMDB{bdbPath: d + "/Packages"}, true
+		}
+		if files[d+"/Packages.db"].Data != nil {
+			return foundRPMDB{ndbPath: d + "/Packages.db"}, true
+		}
+	}
+	return foundRPMDB{}, false
+}
 
 // Run scans whatever one target argument names — an SBOM, a container image
 // (a registry reference, a docker-archive: tarball, or an oci-dir: layout), a
@@ -444,7 +530,7 @@ func catalogImage(ctx context.Context, ref string) (pkgmeta.Target, cyclonedx.St
 // error naming what was looked for is the honest answer, and Run already maps
 // a catalog error to exit 2 with stdout untouched.
 func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.Stats, error) {
-	files, err := img.Files([]string{osReleasePath, apkDBPath, dpkgDBPath})
+	files, err := img.Files(append([]string{osReleasePath, apkDBPath, dpkgDBPath}, rpmDBPaths()...))
 	if err != nil {
 		return pkgmeta.Target{}, cyclonedx.Stats{}, err
 	}
@@ -474,6 +560,8 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 	// — the matcher reports those as skipped rather than clean.
 	var pkgs []pkgmeta.Package
 	var diffID string
+	var skippedRecords int
+	rpmFound, hasRPM := findRPMDB(files)
 	switch {
 	case files[apkDBPath].Data != nil:
 		f := files[apkDBPath]
@@ -489,16 +577,54 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 			return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("parse %s: %w", dpkgDBPath, err)
 		}
 		pkgs, diffID = p, f.DiffID
+	case hasRPM:
+		// D43. The inventory is read and no verdict follows: ecosystem is ""
+		// for every RPM distro because Distro.Ecosystem() has no key for them,
+		// so the matcher reports all of these as skipped and Trustworthy()
+		// takes the scan to exit 2. That is the whole design — the OSV Red Hat
+		// feed is errata-only and cannot express "affected, will not fix", so a
+		// verdict built on it would be confidently clean about 39,372 CVEs it
+		// has never seen.
+		switch {
+		case rpmFound.bdbPath != "":
+			return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf(
+				"%s carries a BerkeleyDB rpm database at %s (RHEL 8 and older, Amazon Linux 2), "+
+					"which this build cannot read; the SQLite backend used by RHEL 9 and newer is supported",
+				ref, rpmFound.bdbPath)
+		case rpmFound.ndbPath != "":
+			return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf(
+				"%s carries an ndb rpm database at %s (openSUSE and SLES), which this build "+
+					"does not read; there is no SUSE advisory source for it to serve",
+				ref, rpmFound.ndbPath)
+		}
+		f := files[rpmFound.sqlitePath]
+		res, err := rpmdb.ReadSQLite(f.Data, rpmFound.walSize, ecosystem, rpmFound.sqlitePath)
+		if err != nil {
+			return pkgmeta.Target{}, cyclonedx.Stats{}, err
+		}
+		pkgs, diffID, skippedRecords = res.Packages, f.DiffID, len(res.Skipped)
 	}
 	if len(pkgs) == 0 {
-		// Naming the shapes that were looked for, and the one known shape that
-		// is not supported yet, because "no database" and "a database this
-		// build cannot read" are different facts and only the second tells the
-		// reader what to do about it.
+		// Naming the shapes that were looked for, and the ones that are known
+		// and not supported, because "no database" and "a database this build
+		// cannot read" are different facts and only the second tells the reader
+		// what to do about it.
+		//
+		// An RPM distro with no database at all gets its own sentence. It is
+		// the most likely false negative in this whole path: /var/lib/rpm is a
+		// symlink on RHEL 10, Fedora and CentOS Stream 10, so a probe that
+		// missed the relocated directory would find nothing — and without this
+		// error, "nothing" is a clean image.
+		if target.Distro != nil && rpmFamilies[target.Distro.ID] {
+			return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf(
+				"%s reports itself as %q, an RPM distribution, but none of %v holds an rpm "+
+					"database; this result cannot be trusted",
+				ref, target.Distro.ID, rpmDBPaths())
+		}
 		return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf(
-			"no supported package database found in %s (looked for %s and %s; "+
-				"a distroless image keeps its database in var/lib/dpkg/status.d, "+
-				"which this build cannot read)", ref, apkDBPath, dpkgDBPath)
+			"no supported package database found in %s (looked for %s, %s and an rpm database "+
+				"under %v; a distroless image keeps its database in var/lib/dpkg/status.d, "+
+				"which this build cannot read)", ref, apkDBPath, dpkgDBPath, rpmDBDirs)
 	}
 	for i := range pkgs {
 		for j := range pkgs[i].Locations {
@@ -507,5 +633,14 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 	}
 	target.Packages = pkgs
 
-	return target, cyclonedx.Stats{Cataloged: len(pkgs), Components: len(pkgs)}, nil
+	// A record whose header could not be read is a package whose version we do
+	// not know, which is the field that already means exactly that and already
+	// feeds Summary.TargetIncomplete (D36). Counting it anywhere else, or not
+	// counting it, would let an image with three damaged headers report the
+	// same as one with none.
+	return target, cyclonedx.Stats{
+		Cataloged:        len(pkgs),
+		Components:       len(pkgs) + skippedRecords,
+		SkippedNoVersion: skippedRecords,
+	}, nil
 }
