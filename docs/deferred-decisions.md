@@ -269,40 +269,23 @@ disclosing it, which needs a channel signal no image carries.
 
 ---
 
-### Whether the published artifact carries the Red Hat data
+### ~~Whether the published artifact carries the Red Hat data~~ — resolved in slice ⓰ (D51)
 
-**Why deferred.** `REDHAT_ENABLE` is off by default (D49), so `assay db build` produces the
-same database it always did unless somebody asks for more, and the publish workflow has not
-been changed. What has not been decided is whether the artifact `db update` delivers should
-carry it at all.
+**It does.** `db push` publishes whatever the database holds, and there was nothing to add:
+the feed is TLP:WHITE on all 67,261 documents, so unlike KISA (D29) there is no strip step.
 
-Measured on this machine, 2026-08-07, both builds from the same sources on the same day:
+Measured 2026-08-07 on the same machine, with the concurrent delta in place:
 
-| | OSV only | with Red Hat VEX |
+| | without Red Hat | with |
 |---|---|---|
-| advisories | 94,122 | 123,029 |
-| bbolt file | 512 MiB | **1.00 GiB** |
-| build CPU | 126 s | **848 s** |
-| wall clock | ~9.5 min | ~24 min |
+| artifact download | 20.9 MB | **28.7 MB** |
+| database on disk | 512 MiB | 1.07 GB |
+| `db build` wall clock | ~10 min | ~28 min |
 
-Both file sizes are exact powers of two because bbolt grows its mmap that way, so they are
-allocation sizes rather than bytes of data — the real content is smaller and the ratio between
-them is not 2.00. The CPU figure is unambiguous, and it is **6.7×**: streaming and converting
-the archive takes 90 seconds, and the rest is bbolt writing 1.9 million affected entries.
-
-**The options are the same three that *Splitting KISA data into a separate artifact* records,
-and for a different reason.** KISA is split because it may not be redistributed (D29); this
-would be split because most users do not scan RHEL images and a doubled download serves them
-nothing. A second artifact, a second tag, or simply leaving it to people who build their own
-are all live.
-
-**Revisit when** RHEL matching ships and someone actually wants the data delivered rather than
-built. Until then the honest state is that `db update` never carries it and `REDHAT_ENABLE=1
-assay db build` is the only way to get it, which is exactly what the flag documents.
-
-**Related hazard.** A 24-minute build is close enough to the six-hour job cap that nothing
-breaks today, but it compounds with anything else added to the same run — see *Checkpointing
-a long sync*.
+The download is what a user feels, and 8 MB more for the only source that can say a package is
+affected and will not be fixed decided it. `REDHAT_ENABLE` now defaults ON to match, because a
+default disagreeing with the artifact would make `db build` and `db update` produce different
+databases and `db push` refuse the narrower one. See D51.
 
 ---
 

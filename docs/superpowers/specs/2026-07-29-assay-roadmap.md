@@ -1991,6 +1991,48 @@ decision, not a permanent judgement: the moment AlmaLinux's own feed is ingested
 an `AlmaLinux:N` key, an `almalinux` ID routes there and nothing here changes.
 
 
+### D51 — The published artifact carries the Red Hat data, and `REDHAT_ENABLE` defaults on
+
+`db push` publishes whatever the database holds, and from now on that includes Red Hat's CSAF
+VEX records. Nothing had to be added to make it publishable: the feed is **TLP:WHITE on all
+67,261 documents**, so unlike KISA (D29) there is no strip step and no licence question.
+
+**What it costs, measured 2026-08-07 on the same machine.** The download is what a user feels;
+the disk figure is the bbolt file `db update` leaves behind.
+
+| | without Red Hat | with |
+|---|---|---|
+| artifact download | 20.9 MB | **28.7 MB** |
+| database on disk | 512 MiB | 1.07 GB |
+| `db build` wall clock | ~10 min | **~28 min** |
+
+The download grows by 37% and the disk by roughly double. The download was the number that
+decided it: 8 MB more for the only source that can say a RHEL package is affected and will not
+be fixed is a trade worth making for everyone, including the people who never scan a RHEL
+image and pay only the 8 MB.
+
+**`REDHAT_ENABLE` therefore defaults ON**, reversing what D49 recorded. A default that
+disagreed with the artifact would mean `db build` and `db update` produce different databases,
+and `db push`'s coverage guard would refuse the narrower one — a refused daily publish is a bad
+way to discover a default. `REDHAT_ENABLE=0` still turns it off for a local build that does not
+scan RHEL and wants to be twenty minutes shorter. The publish workflow sets it explicitly all
+the same, so changing the default later cannot silently narrow what is published.
+
+**The daily job had to be made to fit first.** The delta pass was 1,827 sequential requests and
+about nineteen minutes. They are latency-bound, so fetching eight at a time takes it to about
+four, and the whole build to 28 minutes; the workflow's timeout goes from 60 to 120 minutes.
+Documents are still emitted IN ORDER — the store's last-write-wins is what makes a re-emitted
+advisory replace its own record, so an out-of-order pass would make which version survives
+depend on which request finished first.
+
+**Two defects came out of that concurrency, and neither came out of review.** Cancelling left
+the producer goroutine wedged on a semaphore token nobody would return — a leak rather than a
+wrong answer, which is why nothing caught it until a mutation did. And a `select` whose cases
+are both ready picks at RANDOM, so watching for cancellation only inside it made stopping
+probabilistic: the test asserting otherwise failed three runs in ten, and checking `ctx.Err()`
+at the top of the loop made it 12 for 12.
+
+
 ## 3. Architecture
 
 ### Measured data volumes
