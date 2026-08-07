@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/kun9497/assay/internal/cataloger/apkdb"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
@@ -71,6 +72,22 @@ type Options struct {
 	// unchanged, because exit codes are contract (D11) and quietly narrowing an
 	// existing flag would break pipelines that rely on it.
 	FailOnIncompleteTarget bool
+	// FailOnUnfixable makes a finding no source can offer a fix for trip the
+	// scan on its own, exit 1 (D48).
+	//
+	// A separate flag rather than folding these into FailOn, and the reasoning
+	// is D17's exactly: an unfixable finding has a real band, so unlike
+	// severity.Unknown it ALREADY trips --fail-on when it is severe enough.
+	// This flag is for the opposite ask -- fail on them whatever the band --
+	// which is a different question and cannot be spelled as a threshold.
+	//
+	// Why it is not the default: Red Hat's feed alone contributes 4,491
+	// unfixable findings for the kernel on RHEL 9, against single or low
+	// double digits for every other base package. A host scan gated on these
+	// is red on every run with nothing anyone can do about it, and D36 already
+	// records what happens to such a gate -- somebody turns it off, and a gate
+	// that is off protects nothing.
+	FailOnUnfixable bool
 	// Output selects the renderer: "" and "table" both mean the human table
 	// (Options{}'s zero value must reproduce today's behaviour exactly, the
 	// same rule Options.FailOn* already follows), "json" means the stable
@@ -404,6 +421,28 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 			return 2
 		}
 	}
+	// D47's debt, paid on stderr so `--output json | jq` stays clean.
+	//
+	// Red Hat findings are matched against MAINLINE errata, because the
+	// support channel that would pick between mainline, EUS, AUS, TUS and E4S
+	// is a subscription attribute with no filesystem representation —
+	// /etc/os-release says "9.8" and nothing on disk says which channel the
+	// host is entitled to. Restricting to mainline is what makes the key
+	// derivable at all, and it drops fixed-version ambiguity from 25.1% of
+	// (CVE, package, major) groups to 6.1%; the residual is a real divergence
+	// and a reader has to be told, not left to discover that a fixed version
+	// they cannot install was quoted at them.
+	//
+	// Printed whenever a Red Hat finding was emitted rather than whenever the
+	// distro is RHEL: a scan that produced none has nothing to caveat, and a
+	// caveat attached to nothing is one readers learn to skip.
+	if redHatFindings(res.Findings) {
+		fmt.Fprintln(stderr,
+			"note: Red Hat findings are matched against mainline RHEL errata. A host on "+
+				"Extended Update Support, AUS, TUS or E4S may have a different fixed version "+
+				"for the same CVE; the support channel is a subscription attribute and is not "+
+				"readable from the filesystem.")
+	}
 	// The report already said so in prose; exiting 0 anyway would let CI read a
 	// scan that evaluated nothing as a pass (D11).
 	if !sum.Trustworthy() {
@@ -482,6 +521,13 @@ func verdict(opts Options, sum report.Summary, findings []matcher.Finding) int {
 		return 2
 	}
 	if opts.FailOnUnknown && sum.UnknownSeverity > 0 {
+		return 1
+	}
+	// D48. Checked beside FailOnUnknown rather than inside the loop below,
+	// because Summarize already counted it and re-deriving the same fact a
+	// second way here is the drift hazard the FailOnUnknown comment names one
+	// field over.
+	if opts.FailOnUnfixable && sum.Unfixable > 0 {
 		return 1
 	}
 	for _, f := range findings {
@@ -643,4 +689,20 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 		Components:       len(pkgs) + skippedRecords,
 		SkippedNoVersion: skippedRecords,
 	}, nil
+}
+
+// redHatFindings reports whether any finding was matched under a Red Hat
+// ecosystem key, which is what earns the mainline-errata caveat above.
+//
+// Keyed on the ecosystem of the FINDING rather than on Target.Distro, so an
+// SBOM carrying Red Hat components gets the same caveat as an image scan: the
+// divergence belongs to the data the match used, not to how the inventory was
+// obtained.
+func redHatFindings(findings []matcher.Finding) bool {
+	for _, f := range findings {
+		if strings.HasPrefix(f.Package.Ecosystem, "Red Hat:") {
+			return true
+		}
+	}
+	return false
 }

@@ -227,7 +227,7 @@ func TestJSON_SchemaVersionIsPresentAndStable(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
 		t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())
 	}
-	if doc.SchemaVersion != 4 {
+	if doc.SchemaVersion != 5 {
 		t.Errorf("SchemaVersion = %d, want 4 — bumped when EnrichmentRecord "+
 			"gained `cause` and Summary gained `targetIncomplete` (D36)", doc.SchemaVersion)
 	}
@@ -288,7 +288,7 @@ func TestJSON_CarriesWhatTheTableCannot(t *testing.T) {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 	if len(doc.Findings) != 3 {
-		t.Fatalf("Findings = %d, want 4", len(doc.Findings))
+		t.Fatalf("Findings = %d, want 5", len(doc.Findings))
 	}
 	f := doc.Findings[0]
 	if f.Package.Source == nil || f.Package.Source.Name != "openssl" {
@@ -354,7 +354,7 @@ func TestJSON_CarriesFullRatingsArray(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(doc.Findings) != 3 {
-		t.Fatalf("Findings = %d, want 4", len(doc.Findings))
+		t.Fatalf("Findings = %d, want 5", len(doc.Findings))
 	}
 	f := doc.Findings[2] // the multi-source Django finding goldenFixture appends
 	if len(f.Ratings) != 3 {

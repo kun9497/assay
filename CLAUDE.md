@@ -17,12 +17,12 @@ pulls the published OCI artifact (D28) rather than rebuilding. `assay scan` read
 container images, Go binaries and directories, matches them, and returns a verdict CI can
 gate on. A finding carries every source's rating and the gate takes the highest (D25).
 Incompleteness carries a cause, and `--fail-on-incomplete=target` gates only on what the
-caller can fix (D36). Alpine and Debian images scan end to end; RHEL-family images are
-**inventoried and refused** — the rpmdb is read, every package is listed, and the scan exits
-2, because the OSV Red Hat feed is errata-only and cannot say "affected, will not fix" (D43).
-Red Hat's CSAF VEX feed is ingested behind `REDHAT_ENABLE` (D47–D49) — the only source that
-can say a package is affected and will not be fixed — but nothing MATCHES against it yet: the
-RPM comparer is written and deliberately unregistered. Not built: RHEL matching, Ubuntu, the
+caller can fix (D36). Alpine, Debian and RHEL images scan end to end. RHEL takes its advisories from Red Hat's CSAF
+VEX feed rather than OSV, behind `REDHAT_ENABLE` (D47–D49), because the OSV Red Hat export is
+errata-only and cannot say "affected, will not fix" — two thirds of what Red Hat publishes
+about its own packages. Those findings are reported and counted always and gated only by
+`--fail-on-unfixable` (D48), and only `rhel` routes to `Red Hat:N` (D50): Alma, Rocky, CentOS,
+Fedora and Amazon Linux are catalogued and reported as not evaluated. Not built: Ubuntu, the
 BerkeleyDB rpm backend, distroless `status.d`, SARIF, and pep440 leniency (see `README.md`).
 
 **Check what exists before assuming — this paragraph has been wrong four times.** It claimed

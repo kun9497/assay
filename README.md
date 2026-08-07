@@ -698,10 +698,30 @@ understood it.
 - [x] Affected-with-no-fix stored as a range with no `fixed` event (D48)
 - [x] Checked against the LIVE feed in CI, asserting shape rather than volume: CVE-2024-6387
       must still yield a fixed `openssh` range, CVE-2005-2541 a fix-less `tar` one
-- [ ] Matching: register the RPM comparer, add `--fail-on-unfixable`, and report unfixable
-      findings under D48's rule — always shown and counted, gated only on their own flag
-- [ ] EUS/AUS/E4S hosts are matched against mainline errata; the divergence needs disclosing
-      in the report
+- [x] Matching (D48, D50) — the RPM comparer is registered, RPM packages are keyed on the
+      mainline major, and `--fail-on-unfixable` gates on findings nothing can fix
+- [x] EUS/AUS/E4S hosts are matched against mainline errata, and the scan says so on stderr
+
+```
+PACKAGE             VERSION          ECOSYSTEM  ADVISORY       FIXED IN
+audit-libs (audit)  3.1.5-8.el9      Red Hat:9  CVE-2024-0003  3.1.5-99.el9
+openssl-libs        1:3.5.5-6.el9_8  Red Hat:9  CVE-2024-0001  1:3.5.5-8.el9_8
+zlib                1.2.11-40.el9    Red Hat:9  CVE-2005-2541  none
+none = no source records a version that fixes this; mitigate or remove the package
+```
+
+`none` and `-` are different facts and the column keeps them apart: `none` means no source
+names a version to upgrade to, `-` means the record that set this finding's severity carries
+none while another source does. Telling a reader to remove a package they could upgrade is
+worse than saying nothing.
+
+Only `rhel` routes to `Red Hat:N` (D50). AlmaLinux and Rocky are rebuilds but not
+byte-identical ones, `centos` covers one product that trailed RHEL and another that runs
+ahead of it, and Fedora and Amazon Linux have their own feeds. Each is still catalogued and
+reported as not evaluated — a loud skip, never a clean verdict.
+
+- [ ] A `Red Hat:N` scan of an EUS host still quotes mainline fixed versions; closing that
+      needs a channel signal no image carries
 
 **⑨ Versions the comparers cannot read** — a package whose version will not parse is
 reported as skipped rather than clean (D20, D21), so it is loud; it is still a vulnerability

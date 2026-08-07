@@ -266,25 +266,39 @@ func TestRPM_TildeCaretChain(t *testing.T) {
 	}, "rpm rpmio/rpmvercmp.cc")
 }
 
-// The comparer exists and is deliberately NOT reachable. D43 ships the rpmdb
-// reader without a provider, so no Red Hat ecosystem key is ever built and no
-// RHEL package is ever compared — every one of them is catalogued unkeyed and
-// reported as skipped.
+// The comparer is now reachable, and only under a release-qualified key.
 //
-// Registering RPM{} before that provider lands would be the mistake
-// TestNoUnbackedDistroComparer was written to catch, one slice earlier: a
-// comparer that resolves for an ecosystem nothing populates turns "we cannot
-// check this" into "this is clean". Moving these lines is the deliberate act
-// that says the provider arrived.
-func TestRPM_NotYetRoutable(t *testing.T) {
+// It was written one slice before it could be used: D43 shipped the rpmdb
+// reader with no provider, so registering it then would have let an empty
+// lookup report clean -- the mistake TestNoUnbackedDistroComparer exists to
+// catch. The Red Hat CSAF VEX provider (D47-D49) is what moved that line, and
+// this test is the other half of the same guard.
+func TestRPM_Routing(t *testing.T) {
 	for _, eco := range []string{
-		"Red Hat:enterprise_linux:9::baseos", "Red Hat:9",
-		"AlmaLinux:9", "Rocky Linux:9", "Fedora:44", "rpm",
+		"Red Hat:7", "Red Hat:8", "Red Hat:9", "Red Hat:10",
 	} {
+		c, ok := For(eco)
+		if !ok {
+			t.Errorf("For(%q) does not resolve; every RHEL package would be reported "+
+				"as having no comparer", eco)
+			continue
+		}
+		if _, isRPM := c.(RPM); !isRPM {
+			t.Errorf("For(%q) = %T, want RPM", eco, c)
+		}
+	}
+	// The bare family is NOT a key this project builds (D6), and resolving it
+	// would make a bug that drops the release look like it worked -- every
+	// lookup landing in an empty bucket and reporting clean.
+	if _, ok := For("Red Hat"); ok {
+		t.Error(`For("Red Hat") resolves; the provider only ever writes "Red Hat:<major>"`)
+	}
+	// And the rebuilds still do not, because Red Hat's errata describe Red
+	// Hat's own builds (D50). Their packages are catalogued and reported as
+	// not evaluated.
+	for _, eco := range []string{"AlmaLinux:9", "Rocky Linux:9", "Fedora:44", "CentOS:9"} {
 		if _, ok := For(eco); ok {
-			t.Errorf("For(%q) resolves to a comparer, but no provider populates that ecosystem. "+
-				"See D43: the RHEL slice ships the inventory and refuses the verdict, and a "+
-				"resolvable comparer would let an empty lookup report clean.", eco)
+			t.Errorf("For(%q) resolves, but nothing populates that ecosystem", eco)
 		}
 	}
 }

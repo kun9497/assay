@@ -159,11 +159,18 @@ func TestParseScanArgs(t *testing.T) {
 		if !opts.FailOnIncomplete {
 			t.Error("opts.FailOnIncomplete = false, want true")
 		}
+		// D48. Not part of the pair above but parsed in the same switch, and
+		// without this a case arm that accepted the flag and dropped it on the
+		// floor left the whole suite green.
+		if opts.FailOnUnfixable {
+			t.Error("opts.FailOnUnfixable = true, but --fail-on-unfixable was not given")
+		}
 	})
 
 	t.Run("all three flags plus the target, mixed order", func(t *testing.T) {
 		target, opts, err := parseScanArgs([]string{
 			"--fail-on-incomplete", "alpine:3.19", "--fail-on", "medium", "--fail-on-unknown",
+			"--fail-on-unfixable",
 		})
 		if err != nil {
 			t.Fatalf("err = %v, want nil", err)
@@ -174,8 +181,8 @@ func TestParseScanArgs(t *testing.T) {
 		if opts.FailOn == nil || *opts.FailOn != severity.Medium {
 			t.Errorf("opts.FailOn = %v, want %v", opts.FailOn, severity.Medium)
 		}
-		if !opts.FailOnUnknown || !opts.FailOnIncomplete {
-			t.Errorf("opts = %+v, want both bool gates true", opts)
+		if !opts.FailOnUnknown || !opts.FailOnIncomplete || !opts.FailOnUnfixable {
+			t.Errorf("opts = %+v, want every bool gate true", opts)
 		}
 	})
 
@@ -444,7 +451,7 @@ func TestRun_ScanFlagsWithNoTargetExits2(t *testing.T) {
 
 // buildRunSeamFixture writes a real database (at ASSAY_DB_DIR/vulnerability.db
 // — the caller must have already pointed ASSAY_DB_DIR at dir) and a matching
-// CycloneDX SBOM naming three packages, so that all three --fail-on* gates
+// CycloneDX SBOM naming four packages, so that all four --fail-on* gates
 // have something to fire on simultaneously:
 //
 //   - "critical": a critical-severity finding (for --fail-on).
@@ -453,8 +460,12 @@ func TestRun_ScanFlagsWithNoTargetExits2(t *testing.T) {
 //   - "somecrate": a cargo purl, an unsupported ecosystem type the cataloger
 //     drops before the matcher ever sees it, so report.Summary.NotEvaluated
 //     is > 0 (for --fail-on-incomplete).
+//   - "nofix": a RATED finding whose range never closes, so no source names a
+//     version to upgrade to (for --fail-on-unfixable, D48). Rated on purpose:
+//     an unrated one would trip --fail-on-unknown too and the two gates could
+//     not be isolated from each other.
 //
-// All three conditions are present unconditionally; only which flag is set
+// All four conditions are present unconditionally; only which flag is set
 // decides whether any of them changes the exit code, which is exactly what
 // TestRun_ScanFlagsReachRealExitCode needs to isolate one flag at a time
 // against one shared fixture.
@@ -497,6 +508,27 @@ func buildRunSeamFixture(t *testing.T, dir string) string {
 			}},
 			// No Severity entries at all -> severity.Highest returns Unknown.
 		},
+		{
+			ID:   "GHSA-nofix",
+			Kind: advisory.KindVulnerability,
+			Affected: []advisory.Affected{{
+				Ecosystem: "Go",
+				Name:      "example.com/nofix",
+				// An introduced event and NOTHING else: affected at every
+				// version, with nothing to upgrade to (D48). This is the shape
+				// Red Hat's CSAF VEX feed publishes 1,278,384 times, spelled
+				// here against a Go package so the fixture stays one ecosystem.
+				Ranges: []advisory.Range{{
+					Type:   advisory.RangeSemver,
+					Events: []advisory.Event{{Introduced: "0"}},
+				}},
+			}},
+			// Rated, deliberately: an unrated one would also trip
+			// --fail-on-unknown and the two gates could not be told apart.
+			Severity: []advisory.Severity{
+				{Type: "CVSS_V3", Score: "CVSS:3.1/AV:L/AC:H/PR:H/UI:R/S:U/C:L/I:N/A:N"},
+			},
+		},
 	}
 	for _, a := range advisories {
 		if err := w.Put(a); err != nil {
@@ -516,6 +548,7 @@ func buildRunSeamFixture(t *testing.T, dir string) string {
 	doc := `{"bomFormat":"CycloneDX","specVersion":"1.5","version":1,"components":[` +
 		`{"type":"library","name":"critical","version":"1.0.0","purl":"pkg:golang/example.com/critical@1.0.0"},` +
 		`{"type":"library","name":"unknownsev","version":"1.0.0","purl":"pkg:golang/example.com/unknownsev@1.0.0"},` +
+		`{"type":"library","name":"nofix","version":"1.0.0","purl":"pkg:golang/example.com/nofix@1.0.0"},` +
 		`{"type":"library","name":"somecrate","version":"1.0.0","purl":"pkg:cargo/somecrate@1.0.0"}` +
 		`]}`
 	if err := os.WriteFile(sbom, []byte(doc), 0o600); err != nil {
@@ -565,6 +598,8 @@ func TestRun_ScanFlagsReachRealExitCode(t *testing.T) {
 			[]string{"--fail-on-unknown"}, exitFindings},
 		{"--fail-on-incomplete reaches scancmd.Run through run()",
 			[]string{"--fail-on-incomplete"}, exitError},
+		{"--fail-on-unfixable reaches scancmd.Run through run()",
+			[]string{"--fail-on-unfixable"}, exitFindings},
 	}
 
 	for _, tc := range cases {
@@ -637,13 +672,27 @@ func TestRun_ScanOutputJSONReachesRealExitCode(t *testing.T) {
 	// cannot notice that the shape changed under it. Bumping this is meant to
 	// be the deliberate act that accompanies a schema change (D33 was the
 	// third).
-	if doc.SchemaVersion != 4 {
-		t.Errorf("SchemaVersion = %d, want 4", doc.SchemaVersion)
+	if doc.SchemaVersion != 5 {
+		t.Errorf("SchemaVersion = %d, want 5", doc.SchemaVersion)
 	}
-	// buildRunSeamFixture's critical + unrated findings; somecrate is
-	// dropped by the cataloger and never reaches a Finding at all.
-	if len(doc.Findings) != 2 {
-		t.Errorf("Findings = %d, want 2\nstdout:\n%s", len(doc.Findings), stdout.String())
+	// buildRunSeamFixture's critical, unrated and no-fix findings; somecrate
+	// is dropped by the cataloger and never reaches a Finding at all.
+	if len(doc.Findings) != 3 {
+		t.Errorf("Findings = %d, want 3\nstdout:\n%s", len(doc.Findings), stdout.String())
+	}
+	// D48 reaches the document, and on exactly one of the three. A field that
+	// was always false would satisfy every other assertion here.
+	unfixable := 0
+	for _, f := range doc.Findings {
+		if f.Unfixable {
+			unfixable++
+		}
+	}
+	if unfixable != 1 {
+		t.Errorf("findings with unfixable=true = %d, want 1\nstdout:\n%s", unfixable, stdout.String())
+	}
+	if doc.Summary.Unfixable != 1 {
+		t.Errorf("summary.unfixable = %d, want 1", doc.Summary.Unfixable)
 	}
 	if strings.Contains(stdout.String(), "PACKAGE") {
 		t.Errorf("stdout contains the table header; --output json must reach scancmd "+

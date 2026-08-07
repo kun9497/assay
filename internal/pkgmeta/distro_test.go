@@ -47,7 +47,28 @@ func TestDistroEcosystem_Unsupported(t *testing.T) {
 		// these, deleting `d.ID != "alpine"` leaves the suite green and
 		// Distro{ID: "ubuntu", VersionID: "22.04"} yields "Alpine:v22.04".
 		{"unsupported distro", Distro{ID: "fedora", VersionID: "40"}},
-		{"unsupported distro with a parseable version", Distro{ID: "rhel", VersionID: "9.4"}},
+		{"unsupported distro with a parseable version", Distro{ID: "opensuse-leap", VersionID: "15.6"}},
+		// D50. These are RPM distributions whose packages ARE catalogued, and
+		// they must still not resolve: Red Hat's errata describe Red Hat's own
+		// builds and nobody else's.
+		//
+		//   - Alma and Rocky are rebuilds but not byte-identical ones (Alma
+		//     writes `module_el` where Red Hat writes `module+el`, and adds
+		//     `.alma` release suffixes).
+		//   - `centos` covers CentOS Linux, which trailed RHEL, and CentOS
+		//     Stream, which runs ahead of it — so one key would be wrong in
+		//     opposite directions for the two.
+		//   - Fedora and Amazon Linux have their own advisory feeds entirely.
+		//
+		// Each row has a version that WOULD parse, so the ID is what has to
+		// reject it. Without that, deleting the case labels leaves the suite
+		// green while an almalinux:9 scan is answered with Red Hat's errata.
+		{"almalinux is a rebuild, not the same builds", Distro{ID: "almalinux", VersionID: "9.6"}},
+		{"rocky likewise", Distro{ID: "rocky", VersionID: "9.6"}},
+		{"centos is ahead of RHEL on Stream and behind it on Linux", Distro{ID: "centos", VersionID: "9"}},
+		{"amazon linux has its own advisories", Distro{ID: "amzn", VersionID: "2023"}},
+		{"rhel with no VERSION_ID", Distro{ID: "rhel", VersionID: ""}},
+		{"rhel with a non-numeric version", Distro{ID: "rhel", VersionID: "beta"}},
 		// Ubuntu is deliberately here rather than mapped alongside Debian. OSV
 		// keys it "Ubuntu:24.04:LTS", and its Pro and FIPS lineages
 		// ("Ubuntu:Pro:FIPS-updates:18.04:LTS") describe the SAME release, so a
@@ -128,5 +149,44 @@ func TestDistroEcosystem_Debian(t *testing.T) {
 	// releases are X.Y and OSV spells them that way.
 	if got, err := (Distro{ID: "alpine", VersionID: "3.19"}).Ecosystem(); err != nil || got != "Alpine:v3.19" {
 		t.Errorf("alpine 3.19 -> %q, %v; want Alpine:v3.19 — the two schemes must not converge", got, err)
+	}
+}
+
+// D47: the Red Hat key is the mainline MAJOR, and the minor is dropped.
+// /etc/os-release reports "9.8"; the provider writes "Red Hat:9" from the
+// mainline CPE's major, because the support channel that distinguishes 9.8's
+// EUS errata from mainline's is a subscription attribute with no filesystem
+// representation.
+func TestDistroEcosystem_RedHat(t *testing.T) {
+	for _, tc := range []struct {
+		versionID string
+		want      string
+	}{
+		{"9", "Red Hat:9"},
+		{"9.8", "Red Hat:9"},
+		{"8.10", "Red Hat:8"},
+		{"10.2", "Red Hat:10"},
+		{"7", "Red Hat:7"},
+	} {
+		got, err := Distro{ID: "rhel", VersionID: tc.versionID}.Ecosystem()
+		if err != nil {
+			t.Errorf("VERSION_ID=%q: %v", tc.versionID, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("VERSION_ID=%q -> %q, want %q", tc.versionID, got, tc.want)
+		}
+	}
+	// The three schemes must not converge. Each keeps its own shape, and a
+	// change that collapsed them would make one distro's advisories reachable
+	// under another's key.
+	for _, tc := range []struct{ id, versionID, want string }{
+		{"alpine", "3.19", "Alpine:v3.19"},
+		{"debian", "12", "Debian:12"},
+		{"rhel", "9.8", "Red Hat:9"},
+	} {
+		if got, err := (Distro{ID: tc.id, VersionID: tc.versionID}).Ecosystem(); err != nil || got != tc.want {
+			t.Errorf("%s %s -> %q, %v; want %q", tc.id, tc.versionID, got, err, tc.want)
+		}
 	}
 }

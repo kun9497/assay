@@ -89,6 +89,13 @@ func For(ecosystem string) (Comparer, bool) {
 	if rel, ok := strings.CutPrefix(ecosystem, "Debian:"); ok && rel != "" {
 		return Deb{}, true
 	}
+	// Same rule again. "Red Hat" bare is not a key this project builds — the
+	// provider writes "Red Hat:9" from the mainline CPE's major (D47) — and
+	// resolving it would make a bug that drops the release look like it
+	// worked.
+	if rel, ok := strings.CutPrefix(ecosystem, "Red Hat:"); ok && rel != "" {
+		return RPM{}, true
+	}
 	c, ok := registry[ecosystem]
 	return c, ok
 }

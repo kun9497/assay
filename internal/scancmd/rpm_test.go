@@ -4,13 +4,17 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/severity"
 	"github.com/kun9497/assay/internal/source"
+	"github.com/kun9497/assay/internal/store"
 )
 
 // The rpmdb fixtures are read from the cataloger's own testdata rather than
@@ -95,16 +99,11 @@ func TestCatalogFromImage_RPMAtEitherLocation(t *testing.T) {
 	}
 }
 
-// D43: the inventory is read and NO verdict follows. Every package is
-// catalogued with an empty ecosystem, because Distro.Ecosystem() has no key for
-// an RPM distro and this build ships no provider for one — so the matcher
-// reports all of them as skipped and Summary.Trustworthy() takes the scan to
-// exit 2.
-//
-// The alternative would be a clean verdict built on the OSV Red Hat feed, which
-// is errata-only: it cannot express "affected, will not fix", a class covering
-// 39,372 CVEs that exist only in Red Hat's VEX feed.
-func TestCatalogFromImage_RPMPackagesAreUnkeyed(t *testing.T) {
+// D47: RPM packages are keyed on the mainline major, so they are actually
+// evaluated. This is the line slice 12 deliberately did not cross -- with no
+// provider, a key here would have sent every lookup into an empty bucket and
+// reported clean.
+func TestCatalogFromImage_RPMPackagesAreKeyed(t *testing.T) {
 	img := rpmImage(t, map[string]string{
 		osReleasePath:              osReleaseRHEL9,
 		"var/lib/rpm/rpmdb.sqlite": fixtureBytes(t, rpmFixture),
@@ -114,24 +113,23 @@ func TestCatalogFromImage_RPMPackagesAreUnkeyed(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, p := range target.Packages {
-		if p.Ecosystem != "" {
-			t.Errorf("%s has ecosystem %q; D43 ships no Red Hat provider, so a key here "+
-				"would send the lookup into an empty bucket and report clean", p.Name, p.Ecosystem)
+		// The MINOR is dropped: os-release says 9.8, the advisories are keyed
+		// on the major, and a "Red Hat:9.8" key would match nothing at all.
+		if p.Ecosystem != "Red Hat:9" {
+			t.Errorf("%s has ecosystem %q, want Red Hat:9", p.Name, p.Ecosystem)
 		}
-		// The source name is still populated, because it costs nothing now and
-		// D8's indirection is what the provider will need.
 		if p.Source == nil || p.Source.Name == "" {
 			t.Errorf("%s has no Source; SOURCERPM is what D8 looks the advisory up under", p.Name)
 		}
 	}
 }
 
-// And the scan really does reach exit 2 rather than reporting a clean image.
-// This is the assertion D43 rests on, and it holds through a guard slice 4
-// wrote — Summary.Trustworthy() is false when Components > 0 and Evaluated ==
-// 0 — rather than through any RHEL special case.
-func TestRun_RHELImageIsNotClean(t *testing.T) {
-	dbPath := testDB(t)
+// A RHEL image against a database with no Red Hat data is NOT clean. D20's
+// coverage set is what carries this: the ecosystem resolves, the lookup finds
+// nothing, and the difference between "ingested and nothing matched" and
+// "never ingested" is the whole reason that set is stored.
+func TestRun_RHELImageAgainstADatabaseWithoutRedHat(t *testing.T) {
+	dbPath := testDB(t) // declares Alpine, Go, npm, PyPI -- no Red Hat
 	tarPath := filepath.Join(t.TempDir(), "image.tar")
 	writeImageTar(t, tarPath, map[string]string{
 		osReleasePath:              osReleaseRHEL9,
@@ -141,23 +139,14 @@ func TestRun_RHELImageIsNotClean(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := Run(context.Background(), dbPath, "docker-archive:"+tarPath, Options{}, &out, &errOut)
 	if code != 2 {
-		t.Errorf("Run(RHEL image) = %d, want 2 (stdout: %s, stderr: %s)", code, out.String(), errOut.String())
+		t.Errorf("Run = %d, want 2 (stdout: %s, stderr: %s)", code, out.String(), errOut.String())
 	}
-	if !strings.Contains(out.String(), "NOT a clean result") {
-		t.Errorf("stdout = %q, want the report to say this is not clean", out.String())
-	}
-	// The packages were found and NAMED, not silently dropped — an inventory
-	// nobody can see is the same as no scan. Asserted on the rendered
-	// name-and-version pair rather than on either half: "openssl" is a
-	// substring of "openssl-libs" and a bare "6" would match any digit
-	// anywhere, so both would pass off a column this test is not about
-	// (CLAUDE.md).
 	for _, want := range []string{
-		"openssl-libs 1:3.5.5-6.el9_8: no version comparer",
+		`ecosystem "Red Hat:9" is not in this database`,
 		"6 component(s) seen, 0 evaluated",
 	} {
 		if !strings.Contains(out.String(), want) {
-			t.Errorf("stdout does not contain %q:\n%s", want, out.String())
+			t.Errorf("stdout does not contain %q: %s", want, out.String())
 		}
 	}
 }
@@ -342,5 +331,209 @@ func TestCatalogFromImage_UnreadableHeaderIsCounted(t *testing.T) {
 	// denominator the report computes.
 	if stats.Components != 6 {
 		t.Errorf("Components = %d, want 6 (5 read + 1 skipped)", stats.Components)
+	}
+}
+
+// redHatDB is a database carrying Red Hat records for the fixture image, in
+// the two shapes the CSAF VEX provider emits (D48): a range that closes on a
+// fixed version, and one that never closes because Red Hat says there is
+// nothing to upgrade to.
+func redHatDB(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	put := func(id, name string, events []advisory.Event) {
+		t.Helper()
+		if err := w.Put(advisory.Advisory{
+			ID:       id,
+			Database: "REDHAT",
+			Source:   "redhat",
+			Kind:     advisory.KindVulnerability,
+			Upstream: []string{id},
+			Affected: []advisory.Affected{{
+				Ecosystem: "Red Hat:9",
+				Name:      name,
+				Ranges:    []advisory.Range{{Type: advisory.RangeEcosystem, Events: events}},
+			}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Installed openssl-libs is 1:3.5.5-6.el9_8, below the fix.
+	put("CVE-2024-0001", "openssl-libs",
+		[]advisory.Event{{Introduced: "0"}, {Fixed: "1:3.5.5-8.el9_8"}})
+	// Installed glibc is 2.34-274.el9_8, above the fix: not a finding, which is
+	// what proves the comparer is running rather than everything matching.
+	put("CVE-2024-0002", "glibc",
+		[]advisory.Event{{Introduced: "0"}, {Fixed: "2.34-100.el9"}})
+	// The shape this whole slice exists for. No fixed event at all.
+	put("CVE-2005-2541", "zlib", []advisory.Event{{Introduced: "0"}})
+	// Written against the SOURCE package (D8): the image has audit-libs, whose
+	// SOURCERPM names audit. An advisory naming audit must still reach it.
+	put("CVE-2024-0003", "audit", []advisory.Event{{Introduced: "0"}, {Fixed: "3.1.5-99.el9"}})
+
+	if err := w.SetMeta(store.Meta{
+		Providers: map[string]store.Provenance{"redhat": {Ecosystems: []string{"Red Hat:9"}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func rhelTar(t *testing.T) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "image.tar")
+	writeImageTar(t, p, map[string]string{
+		osReleasePath:              osReleaseRHEL9,
+		"var/lib/rpm/rpmdb.sqlite": fixtureBytes(t, rpmFixture),
+	})
+	return p
+}
+
+// The whole path, end to end: an rpmdb read out of an image layer, packages
+// keyed on Red Hat:9, versions ordered by rpmvercmp, and findings rendered.
+func TestRun_RHELImageProducesFindings(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := Run(context.Background(), redHatDB(t), "docker-archive:"+rhelTar(t), Options{}, &out, &errOut)
+	if code != 0 {
+		t.Errorf("Run = %d, want 0 — findings exist but no --fail-on gate was set "+
+			"(stderr: %s)", code, errOut.String())
+	}
+	s := out.String()
+
+	// Asserted per ROW, by locating the line the advisory is on and checking
+	// the other cells of that same line. A bare Contains over the whole report
+	// would pass off a neighbouring row: "openssl" is a substring of
+	// "openssl-libs", and "zlib" appears in the fixture's own file lists.
+	for _, tc := range []struct{ advisory, wantPkg, wantVersion, wantFixed string }{
+		{"CVE-2024-0001", "openssl-libs", "1:3.5.5-6.el9_8", "1:3.5.5-8.el9_8"},
+		// D8: the advisory names the SOURCE package, and the row has to show
+		// both so a reader can check the claim against the advisory they look
+		// up.
+		{"CVE-2024-0003", "audit-libs (audit)", "3.1.5-8.el9", "3.1.5-99.el9"},
+		// D48: no fixed event at all, and the cell says so in a word rather
+		// than with the "-" that means "not in this record".
+		{"CVE-2005-2541", "zlib", "1.2.11-40.el9", "none"},
+	} {
+		line := lineWith(s, tc.advisory)
+		if line == "" {
+			t.Errorf("no row for %s: %s", tc.advisory, s)
+			continue
+		}
+		for _, want := range []string{tc.wantPkg, tc.wantVersion, tc.wantFixed} {
+			if !strings.Contains(line, want) {
+				t.Errorf("row %s = %q, missing %q", tc.advisory, line, want)
+			}
+		}
+	}
+
+	// glibc is above its fix and must NOT appear. This is the row that shows
+	// the comparer decided something rather than everything matching.
+	if strings.Contains(s, "CVE-2024-0002") {
+		t.Errorf("glibc 2.34-274.el9_8 was reported against a fix of 2.34-100.el9:\n%s", s)
+	}
+	if !strings.Contains(s, "3 finding(s)") {
+		t.Errorf("want exactly 3 findings:\n%s", s)
+	}
+	// D48's rendering: the unfixable row says so, and says it differently from
+	// a row whose fix simply is not in this record.
+	if !strings.Contains(s, "1 with no fix available") {
+		t.Errorf("summary does not count the unfixable finding:\n%s", s)
+	}
+	if !strings.Contains(s, "no source records a version that fixes this") {
+		t.Errorf("the FIXED IN footnote is missing:\n%s", s)
+	}
+}
+
+// D48's gate. The findings here are all unrated, so --fail-on cannot reach
+// them and this flag is the only thing that can — which is why it exists as a
+// flag rather than as a band.
+func TestRun_RHELFailOnUnfixable(t *testing.T) {
+	dbPath, tarPath := redHatDB(t), rhelTar(t)
+	critical, none := severity.Critical, severity.None
+	for _, tc := range []struct {
+		name string
+		opts Options
+		want int
+	}{
+		{"no gate", Options{}, 0},
+		{"--fail-on-unfixable", Options{FailOnUnfixable: true}, 1},
+		// A severity threshold cannot express this ask: every finding here is
+		// unrated, and D17 keeps Unknown outside the ordering.
+		{"--fail-on critical", Options{FailOn: &critical}, 0},
+		{"--fail-on none", Options{FailOn: &none}, 0},
+		// The gates are independent: nothing in this scan was incomplete, so
+		// the incompleteness gate stays quiet and only the unfixable one
+		// fires. A gate that fired on somebody else's condition would be
+		// indistinguishable from one that worked.
+		{"unfixable and incomplete together, nothing incomplete", Options{FailOnUnfixable: true, FailOnIncomplete: true}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			if code := Run(context.Background(), dbPath, "docker-archive:"+tarPath, tc.opts, &out, &errOut); code != tc.want {
+				t.Errorf("Run = %d, want %d (stdout: %s)", code, tc.want, out.String())
+			}
+		})
+	}
+}
+
+// lineWith returns the single output line containing needle, or "".
+func lineWith(out, needle string) string {
+	for _, l := range strings.Split(out, string(rune(10))) {
+		if strings.Contains(l, needle) {
+			return l
+		}
+	}
+	return ""
+}
+
+// D47's debt. A RHEL finding is matched against MAINLINE errata, and a host on
+// EUS, AUS, TUS or E4S may have a different fixed version for the same CVE.
+// The reader has to be told, because the alternative is discovering it when a
+// quoted fixed version turns out not to be installable.
+func TestRun_RedHatFindingsDiscloseTheMainlineCaveat(t *testing.T) {
+	var out, errOut bytes.Buffer
+	Run(context.Background(), redHatDB(t), "docker-archive:"+rhelTar(t), Options{}, &out, &errOut)
+	if !strings.Contains(errOut.String(), "mainline RHEL errata") {
+		t.Errorf("stderr does not disclose the mainline-errata caveat:\n%s", errOut.String())
+	}
+	// On stderr, never stdout: `--output json | jq` has to stay clean, and the
+	// whole of D18's stream discipline rests on nothing but the report reaching
+	// stdout.
+	if strings.Contains(out.String(), "mainline RHEL errata") {
+		t.Errorf("the caveat reached stdout, which breaks `--output json | jq`:\n%s", out.String())
+	}
+	var jsonOut, jsonErr bytes.Buffer
+	Run(context.Background(), redHatDB(t), "docker-archive:"+rhelTar(t),
+		Options{Output: "json"}, &jsonOut, &jsonErr)
+	if !json.Valid(jsonOut.Bytes()) {
+		t.Errorf("--output json did not produce a valid document:\n%s", jsonOut.String())
+	}
+	if !strings.Contains(jsonErr.String(), "mainline RHEL errata") {
+		t.Errorf("the caveat is missing from the json run's stderr:\n%s", jsonErr.String())
+	}
+}
+
+// And it is printed only when a Red Hat finding was actually emitted. A caveat
+// attached to nothing is one readers learn to skip past, and the next one they
+// skip may be the one that mattered.
+func TestRun_NoRedHatFindingsNoCaveat(t *testing.T) {
+	// An Alpine image against the ordinary fixture database: findings or not,
+	// nothing here was matched under a Red Hat key.
+	tarPath := filepath.Join(t.TempDir(), "image.tar")
+	writeImageTar(t, tarPath, map[string]string{
+		osReleasePath: osReleaseAlpine319,
+		apkDBPath:     apkOneRecord,
+	})
+	var out, errOut bytes.Buffer
+	Run(context.Background(), testDB(t), "docker-archive:"+tarPath, Options{}, &out, &errOut)
+	if strings.Contains(errOut.String(), "mainline RHEL errata") {
+		t.Errorf("an Alpine scan disclosed a Red Hat caveat:\n%s", errOut.String())
 	}
 }

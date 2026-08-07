@@ -100,6 +100,33 @@ type Finding struct {
 	Enrichment []Enrichment
 }
 
+// Unfixable reports whether NO source on this finding named a version to
+// upgrade to (D48).
+//
+// It reads Ratings rather than Evidence.Fixed, and that is the whole
+// distinction: Evidence carries the bound on the record that set the severity,
+// so a finding whose winning record has no fix while another source does would
+// look unfixable when it is not. A reader can act on any source's fix.
+//
+// The name describes the reader's situation, not a claim about the vendor.
+// Red Hat's CSAF VEX feed states it outright — 1,278,384 of its affected
+// entries are "affected at every version, nothing to upgrade to" (D48) — but
+// another source may simply never have recorded one. Either way there is no
+// version this report can tell anyone to move to, which is what the gate and
+// the FIXED IN column both say.
+//
+// Ratings is never empty on a Match-produced finding, so the loop cannot
+// return true vacuously for one. A Finding built any other way must populate
+// it, for the reason the field's own doc gives.
+func (f Finding) Unfixable() bool {
+	for _, r := range f.Ratings {
+		if r.Fixed != "" {
+			return false
+		}
+	}
+	return true
+}
+
 // Enrichment is one authority's prose about the vulnerability a finding
 // describes: a headline, an overview, and somewhere to read the rest.
 //

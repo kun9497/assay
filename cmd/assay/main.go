@@ -65,6 +65,11 @@ Scan flags (any order, before or after the target):
   --fail-on <band>      Exit 1 if a finding is at or above <band>
                         (none, low, medium, high, critical)
   --fail-on-unknown     Exit 1 if a finding's severity could not be rated
+  --fail-on-unfixable   Exit 1 if a finding has no fix available from any
+                        source - the vendor says the package is affected and
+                        will not be fixed, or nobody recorded a version to
+                        move to. Reported and counted either way; this makes
+                        it fail the build.
   --fail-on-incomplete[=any|target]
                         Exit 2 if any package's evaluation was incomplete.
                         =target narrows it to causes you can act on (a version
@@ -601,6 +606,11 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 
 		case a == "--fail-on-unknown":
 			opts.FailOnUnknown = true
+
+		// D48. Beside --fail-on-unknown because it is the same shape of ask:
+		// a property of the finding that no severity threshold can express.
+		case a == "--fail-on-unfixable":
+			opts.FailOnUnfixable = true
 
 		case a == "--fail-on-incomplete":
 			opts.FailOnIncomplete = true
