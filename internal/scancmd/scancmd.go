@@ -71,6 +71,22 @@ type Options struct {
 	// unchanged, because exit codes are contract (D11) and quietly narrowing an
 	// existing flag would break pipelines that rely on it.
 	FailOnIncompleteTarget bool
+	// FailOnUnfixable makes a finding no source can offer a fix for trip the
+	// scan on its own, exit 1 (D48).
+	//
+	// A separate flag rather than folding these into FailOn, and the reasoning
+	// is D17's exactly: an unfixable finding has a real band, so unlike
+	// severity.Unknown it ALREADY trips --fail-on when it is severe enough.
+	// This flag is for the opposite ask -- fail on them whatever the band --
+	// which is a different question and cannot be spelled as a threshold.
+	//
+	// Why it is not the default: Red Hat's feed alone contributes 4,491
+	// unfixable findings for the kernel on RHEL 9, against single or low
+	// double digits for every other base package. A host scan gated on these
+	// is red on every run with nothing anyone can do about it, and D36 already
+	// records what happens to such a gate -- somebody turns it off, and a gate
+	// that is off protects nothing.
+	FailOnUnfixable bool
 	// Output selects the renderer: "" and "table" both mean the human table
 	// (Options{}'s zero value must reproduce today's behaviour exactly, the
 	// same rule Options.FailOn* already follows), "json" means the stable
@@ -482,6 +498,13 @@ func verdict(opts Options, sum report.Summary, findings []matcher.Finding) int {
 		return 2
 	}
 	if opts.FailOnUnknown && sum.UnknownSeverity > 0 {
+		return 1
+	}
+	// D48. Checked beside FailOnUnknown rather than inside the loop below,
+	// because Summarize already counted it and re-deriving the same fact a
+	// second way here is the drift hazard the FailOnUnknown comment names one
+	// field over.
+	if opts.FailOnUnfixable && sum.Unfixable > 0 {
 		return 1
 	}
 	for _, f := range findings {

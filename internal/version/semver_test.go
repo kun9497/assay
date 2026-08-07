@@ -259,10 +259,14 @@ func TestNoUnbackedDistroComparer(t *testing.T) {
 	// guard: the comparer, the cataloger that populates Package.Source, and the
 	// image wiring that calls it had to arrive together, and moving this line
 	// is the deliberate act that says they did.
+	// Red Hat left this list when the CSAF VEX provider landed (D47-D49), for
+	// the same reason Debian did: the comparer, the provider that populates
+	// the ecosystem, and the wiring that keys the packages arrived together.
 	for _, eco := range []string{
-		"Ubuntu:22.04", "Ubuntu:24.04:LTS", "Red Hat:9", "Rocky Linux:9", "AlmaLinux:9",
-		"Alpine", // unversioned: not a key we ever build (D6)
-		"Debian", // likewise
+		"Ubuntu:22.04", "Ubuntu:24.04:LTS", "Rocky Linux:9", "AlmaLinux:9",
+		"Alpine",  // unversioned: not a key we ever build (D6)
+		"Debian",  // likewise
+		"Red Hat", // likewise -- the provider writes "Red Hat:9"
 	} {
 		if _, ok := For(eco); ok {
 			t.Errorf("For(%q) resolves, but nothing populates Package.Source for it. "+

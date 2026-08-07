@@ -120,6 +120,11 @@ func TestCellAt_AnEmptyCellDoesNotShiftTheColumns(t *testing.T) {
 		Advisory: advisory.Advisory{ID: "GHSA-empty"},
 		Severity: severity.Critical,
 		Score:    9.8,
+		// A rating carrying a fix, so this row exercises the ordinary FIXED IN
+		// path. Without it the finding has no rating at all, Unfixable() is
+		// vacuously true, and the cell reads "none" -- which is the right
+		// answer for that finding and the wrong subject for this test.
+		Ratings: []matcher.Rating{{Database: "GHSA", AdvisoryID: "GHSA-empty", Fixed: "2.0.0"}},
 	}}}
 	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
 		t.Fatal(err)
@@ -912,5 +917,85 @@ func TestSummary_TargetIncompleteExcludesUnsupportedEcosystem(t *testing.T) {
 				t.Errorf("TargetIncomplete = %d, want %d for %+v", sum.TargetIncomplete, tc.want, tc.cat)
 			}
 		})
+	}
+}
+
+// D48: the FIXED IN column keeps two different facts apart, and the
+// discriminator is a finding whose WINNING record has no fix while another
+// source does. Reading Evidence.Fixed alone renders both as "none" and tells a
+// reader to mitigate or remove a package they could simply upgrade.
+func TestTable_NoFixIsDistinctFromNotRecordedHere(t *testing.T) {
+	find := func(id string, ratings []matcher.Rating) matcher.Finding {
+		return matcher.Finding{
+			Package:  pkgmeta.Package{Name: "openssl-libs", Version: "1:3.5.5-6.el9_8", Ecosystem: "Red Hat:9"},
+			Advisory: advisory.Advisory{ID: id},
+			Severity: severity.High,
+			Score:    7.5,
+			Ratings:  ratings,
+		}
+	}
+	var buf bytes.Buffer
+	res := matcher.Result{Findings: []matcher.Finding{
+		// Nobody records a fix: Red Hat says the package is affected at every
+		// version it ships.
+		find("CVE-2005-0001", []matcher.Rating{{Database: "REDHAT", AdvisoryID: "CVE-2005-0001"}}),
+		// The record that set the severity carries no fix, but another source
+		// does. There IS something to upgrade to.
+		find("CVE-2005-0002", []matcher.Rating{
+			{Database: "REDHAT", AdvisoryID: "CVE-2005-0002"},
+			{Database: "GHSA", AdvisoryID: "GHSA-x", Fixed: "1:3.5.5-8.el9_8"},
+		}),
+	}}
+	sum, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if got := cellAt(t, out, "CVE-2005-0001", "FIXED IN"); got != "none" {
+		t.Errorf("a finding no source can fix shows %q, want \"none\"", got)
+	}
+	if got := cellAt(t, out, "CVE-2005-0002", "FIXED IN"); got != "-" {
+		t.Errorf("a finding another source CAN fix shows %q, want \"-\" — telling a reader to "+
+			"remove a package they could upgrade is worse than saying nothing", got)
+	}
+	// The footnote is printed because a row earned it, and explains the word
+	// rather than leaving the reader to guess.
+	if !strings.Contains(out, "no source records a version that fixes this") {
+		t.Errorf("the footnote is missing:\n%s", out)
+	}
+	// And the count reaches the summary, which is what --fail-on-unfixable
+	// reads. One of the two, not both.
+	if sum.Unfixable != 1 {
+		t.Errorf("Summary.Unfixable = %d, want 1", sum.Unfixable)
+	}
+	if !strings.Contains(out, "1 with no fix available") {
+		t.Errorf("the summary line does not carry the count:\n%s", out)
+	}
+}
+
+// The footnote is printed only when a row earned it. A footnote explaining a
+// word that never appears is noise the reader learns to skip.
+func TestTable_NoFixFootnoteOnlyWhenEarned(t *testing.T) {
+	var buf bytes.Buffer
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "x", Version: "1.0.0", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{ID: "GHSA-fixed"},
+		Severity: severity.Low,
+		Ratings:  []matcher.Rating{{Database: "GHSA", AdvisoryID: "GHSA-fixed", Fixed: "2.0.0"}},
+	}}}
+	sum, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "no source records a version") {
+		t.Errorf("the footnote was printed with no row to explain:\n%s", buf.String())
+	}
+	if sum.Unfixable != 0 {
+		t.Errorf("Summary.Unfixable = %d, want 0", sum.Unfixable)
+	}
+	// Printed at zero all the same, because a count that only appears when
+	// non-zero is one readers stop checking for.
+	if !strings.Contains(buf.String(), "0 with no fix available") {
+		t.Errorf("the summary line drops the count at zero:\n%s", buf.String())
 	}
 }

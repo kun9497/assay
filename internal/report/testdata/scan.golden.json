@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "findings": [
     {
       "package": {
@@ -44,6 +44,7 @@
           "url": ""
         }
       ],
+      "unfixable": false,
       "enrichment": [
         {
           "source": "KISA",
@@ -86,6 +87,7 @@
           "url": ""
         }
       ],
+      "unfixable": true,
       "enrichment": []
     },
     {
@@ -137,6 +139,7 @@
           "url": ""
         }
       ],
+      "unfixable": false,
       "enrichment": []
     }
   ],
@@ -178,6 +181,7 @@
     "incompleteChecks": 2,
     "targetIncomplete": 2,
     "findings": 3,
-    "unknownSeverity": 1
+    "unknownSeverity": 1,
+    "unfixable": 1
   }
 }

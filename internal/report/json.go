@@ -17,14 +17,15 @@ import (
 //
 // Bumped to 2 when FindingRecord gained `enrichment` (D3), to 3 when
 // EnrichmentRecord gained `claims` (D33), and to 4 when SkippedRecord gained
-// `cause` and Summary gained `targetIncomplete` (D36). Two earlier additions should have
+// `cause` and Summary gained `targetIncomplete` (D36), and to 5 when
+// FindingRecord gained `unfixable` and Summary gained `unfixable` (D48). Two earlier additions should have
 // bumped it and did not — `ratings` (D25) and RatingRecord.URL (D27) both
 // changed the shape while this constant stayed at 1 — so version 1 in the wild
 // denotes three different documents. That is the cost of the misses, and it
 // cannot be repaired retroactively; what it does mean is that a consumer
 // reading 2 or later can rely on every field below being present, which is the
 // guarantee the constant exists to give.
-const schemaVersion = 4
+const schemaVersion = 5
 
 // Document is the stable shape of `assay scan --output json` (design goal
 // #3). It carries what Table shows plus what Table cannot: the full
@@ -90,6 +91,15 @@ type FindingRecord struct {
 	// no ratings must not turn into a schema-breaking null for a consumer
 	// that assumes an array.
 	Ratings []RatingRecord `json:"ratings"`
+	// Unfixable says no rating above names a version to upgrade to (D48).
+	//
+	// Derived rather than left for a consumer to compute, and that is the
+	// point: "every element of ratings has an empty fixed" is a rule a jq
+	// script would have to get right, and getting it wrong in the safe
+	// direction means silently treating a will-not-fix vulnerability as
+	// remediable. Present on every finding, never omitempty, so `false` is a
+	// statement rather than an absence.
+	Unfixable bool `json:"unfixable"`
 	// Enrichment is what another authority wrote about this vulnerability in
 	// prose (D3) — KISA's Korean headline, overview and notice link. It is
 	// display copy: nothing here contributes to Severity or Score above, and a
@@ -313,6 +323,7 @@ func findingRecord(f matcher.Finding) FindingRecord {
 			Reason:       f.Evidence.Reason,
 		},
 		Ratings:    ratings,
+		Unfixable:  f.Unfixable(),
 		Enrichment: enrichment,
 	}
 }

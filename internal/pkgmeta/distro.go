@@ -60,6 +60,40 @@ func (d Distro) Ecosystem() (string, error) {
 				ErrNoEcosystem, d.ID, d.VersionID)
 		}
 		return "Debian:" + major, nil
+	case "rhel":
+		// D50. `rhel` and nothing else. Red Hat's CSAF VEX feed describes Red
+		// Hat's own builds, keyed on the mainline major (D47), and
+		// /etc/os-release's VERSION_ID is "9.8" — the minor is dropped because
+		// the key is not release-qualified below the major.
+		//
+		// The other RPM distributions are NOT routed here, and each is a
+		// different reason rather than one blanket caution:
+		//
+		//   - almalinux, rocky: rebuilds, but not byte-identical ones. Alma
+		//     writes module builds as `module_el8.5.0+119+9a9ec082` where Red
+		//     Hat writes `module+el8.5.0+12582+56d94c81`, and its own rebuilds
+		//     carry `.alma` release suffixes. Comparing one distro's installed
+		//     versions against another's advisory versions is the hazard
+		//     docs/deferred-decisions.md records against both.
+		//   - centos: the ID covers CentOS Linux, which trailed RHEL, AND
+		//     CentOS Stream, which runs AHEAD of it. A fixed version that has
+		//     not reached RHEL yet is already in Stream, so the same key would
+		//     be wrong in opposite directions for the two.
+		//   - fedora, amzn: different version schemes and their own advisory
+		//     feeds (FEDORA-*, ALAS-*). Red Hat's errata do not describe them.
+		//
+		// Every one of those still reaches the cataloger and is reported as
+		// not evaluated, so an unrouted distro is a loud skip and never a
+		// clean verdict.
+		if d.VersionID == "" {
+			return "", fmt.Errorf("%w: distro %q has no VERSION_ID", ErrNoEcosystem, d.ID)
+		}
+		major, _, _ := strings.Cut(d.VersionID, ".")
+		if !allDigits(major) {
+			return "", fmt.Errorf("%w: distro %q version %q is not a numbered release",
+				ErrNoEcosystem, d.ID, d.VersionID)
+		}
+		return "Red Hat:" + major, nil
 	default:
 		return "", fmt.Errorf("%w: distro %q is not supported yet", ErrNoEcosystem, d.ID)
 	}

@@ -39,6 +39,16 @@ type Summary struct {
 	// zero, because a --fail-on-unknown gate reads it directly and a count
 	// that only appears when non-zero is not one a caller can rely on.
 	UnknownSeverity int `json:"unknownSeverity"`
+	// Unfixable is the number of findings no source named a version to upgrade
+	// to (D48). Populated whether or not it is zero, for the same reason
+	// UnknownSeverity is: `--fail-on-unfixable` reads it directly.
+	//
+	// It is a subtotal of Findings and overlaps every other count on this
+	// struct freely -- an unfixable finding can also be unrated. Red Hat's
+	// CSAF VEX feed is where most of these come from: 1,278,384 of the
+	// affected entries it publishes say a package is affected at every version
+	// and there is nothing to move to.
+	Unfixable int `json:"unfixable"`
 }
 
 // Trustworthy reports whether the run produced a result worth acting on. A scan
@@ -71,10 +81,25 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 		// would reach the stream, and design goal #3 is output that does not
 		// churn between runs.
 		var enrichedBy []string
+		// noFix is the same idea again: the footnote explaining the FIXED IN
+		// cell is printed at most once, and only when a row earned it.
+		noFix := false
 		for _, f := range res.Findings {
 			fixed := f.Evidence.Fixed
 			if fixed == "" {
+				// D48. "-" and "none" are different facts and the column has
+				// to keep them apart. "-" means the record that set this
+				// finding's severity carried no fix while another source may
+				// have; "none" means NO source did, so there is nothing to
+				// upgrade to and the reader's only options are mitigation or
+				// removal. Printing "-" for both is what made Red Hat's
+				// will-not-fix records indistinguishable from a gap in the
+				// data.
 				fixed = "-"
+				if f.Unfixable() {
+					fixed = noFixCell
+					noFix = true
+				}
 			}
 			// Other identifiers are printed because dedup keeps only one record
 			// per vulnerability, and the one that wins is whichever the index
@@ -131,6 +156,10 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 		}
 		if err := tw.Flush(); err != nil {
 			return Summary{}, err
+		}
+		if noFix {
+			fmt.Fprintf(w, "%s = no source records a version that fixes this; "+
+				"mitigate or remove the package\n", noFixCell)
 		}
 		if disagreement {
 			fmt.Fprintf(w, "%s sources disagree on severity; see --explain <id> for the detail\n", disagreementMarker)
@@ -195,8 +224,13 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 	// The unknown-severity count is appended unconditionally (D17): printed
 	// even at zero, because a count that only shows up when non-zero is one
 	// readers learn to stop checking for.
-	fmt.Fprintf(w, "\n%d component(s) seen, %d evaluated, %d finding(s), %d not evaluated, %d unknown severity\n",
-		cat.Components, evaluated, len(res.Findings), notEvaluated, unknownSeverity)
+	// The no-fix count is appended unconditionally for the same reason the
+	// unknown-severity one is (D17, D48): a count that only shows up when
+	// non-zero is one readers learn to stop checking for, and this one gates
+	// an exit code.
+	fmt.Fprintf(w, "\n%d component(s) seen, %d evaluated, %d finding(s), %d not evaluated, "+
+		"%d unknown severity, %d with no fix available\n",
+		cat.Components, evaluated, len(res.Findings), notEvaluated, unknownSeverity, sum.Unfixable)
 
 	// Gated on both counts. Keying only on notEvaluated hid every
 	// advisory-scoped skip whenever the rest of the document was fully
@@ -284,10 +318,16 @@ func Summarize(res matcher.Result, cat cyclonedx.Stats) Summary {
 
 	// Counted unconditionally (D17): a threshold that hides how much it could
 	// not judge is not a threshold.
-	var unknownSeverity int
+	var unknownSeverity, unfixable int
 	for _, f := range res.Findings {
 		if f.Severity == severity.Unknown {
 			unknownSeverity++
+		}
+		// D48. Counted here rather than derived by a renderer, so the table,
+		// the JSON and the gate cannot drift apart about what "unfixable"
+		// means.
+		if f.Unfixable() {
+			unfixable++
 		}
 	}
 
@@ -299,6 +339,7 @@ func Summarize(res matcher.Result, cat cyclonedx.Stats) Summary {
 		TargetIncomplete: targetIncomplete,
 		Findings:         len(res.Findings),
 		UnknownSeverity:  unknownSeverity,
+		Unfixable:        unfixable,
 	}
 }
 
@@ -309,6 +350,12 @@ func Summarize(res matcher.Result, cat cyclonedx.Stats) Summary {
 // is plain ASCII already — a two-column-wide glyph that some terminals
 // render as one throws off every column after it, which is exactly the
 // misalignment cellAt's own doc comment warns a reader cannot see happen.
+// noFixCell is what the FIXED IN column shows when no source named a version
+// to upgrade to (D48). A word rather than a glyph: this cell is what a reader
+// acts on, and "there is no fix" is worth spelling out where "sources
+// disagree about severity" is worth a marker and a footnote.
+const noFixCell = "none"
+
 const disagreementMarker = "*"
 
 // enrichmentMarker flags an ADVISORY cell some other authority has also
