@@ -60,5 +60,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: go test -tags upstreamvectors ./internal/version/ -v
 
+      # The Red Hat provider is checked against the live feed rather than a
+      # fixture, for the reason the comparers are: the fixture is what I think
+      # the format is, and the feed is what it is. It streams a 262 MB archive
+      # and takes about ninety seconds, which is why it is tagged and lives
+      # here rather than in `go test ./...`.
+      - name: Red Hat CSAF VEX feed
+        run: go test -tags upstreamvectors ./internal/provider/redhat/ -v -timeout 30m
+
       - name: Build
         run: go build ./...
