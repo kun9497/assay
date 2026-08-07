@@ -171,15 +171,90 @@ ecosystem-agnostic. What is missing is the key.
 
 ---
 
-### RHEL-family package support
+### RHEL-family package support — inventory resolved in slice ⑫ (D43–D46), matching still deferred
 
-**Why deferred.** Two independent obstacles. Reading the package list means parsing
-`/var/lib/rpm/*`, a binary database — BerkeleyDB on older releases, SQLite on RHEL 9+ —
-which needs a pure-Go rpmdb parser. Separately, Red Hat backports fixes, so upstream
+**Why deferred.** Two independent obstacles were recorded. Reading the package list means
+parsing `/var/lib/rpm/*`, a binary database — BerkeleyDB on older releases, SQLite on RHEL 9+
+— which needs a pure-Go rpmdb parser. Separately, Red Hat backports fixes, so upstream
 version comparison produces false positives without Red Hat's own fixed-version data.
 
-**Revisit when.** Debian/Ubuntu are working, and OSV's RHEL-family coverage has been
-verified as sufficient (see Assumptions).
+**The second obstacle was wrong as written, measured 2026-08-07.** Red Hat's OSV export
+carries native NEVRAs, not upstream versions. All 588,150 fixed events across the 21,851
+records carry both an epoch and a release; 95.8% carry `.elN` and the residual are RHEL 3–5
+records in the older uppercase form, which also carry both. There is no upstream-shaped fixed
+version anywhere in the archive.
+
+```
+RHSA-2024:4312  CVE-2024-6387 (regreSSHion; upstream fixed in 9.8p1)
+  ecosystem "Red Hat:enterprise_linux:9::baseos"  package "openssh"
+  fixed: "0:8.7p1-38.el9_4.1"
+```
+
+The upstream version is untouched by the fix and the whole backport lives in the release
+field — the same mechanism that let Debian pass its own gate. Checked against a real
+`ubi9` image, every patched package reads as fixed: `openssl-libs 1:3.5.5-6.el9_8` against a
+maximum advisory fixed of `1:3.5.5-4.el9_8`, and the same for `glibc`, `systemd-libs` and
+`libxml2`. The systematic false positive the obstacle predicted does not reproduce.
+
+**The first obstacle is real but cheaper than assumed**, which is why the inventory half
+shipped. See D44 — a scanner only ever enumerates the database, so the hash index that makes
+rpm's own read-only BerkeleyDB backend 850 lines of C is dead weight.
+
+**Three different obstacles replace the one that was wrong, and they still gate matching:**
+
+- **The OSV Red Hat feed is errata-only.** Zero of the 588,150 affected entries lack a fixed
+  version, so "affected, will not fix", "fix deferred" and "out of support scope" cannot be
+  expressed at all. Red Hat's CSAF VEX feed carries 62,983 CVEs against OSV's 23,668 —
+  **39,372 CVEs exist only in VEX, 19,341 of them from 2023 onwards**, and in two independent
+  samples 37–43% of those name a base-OS RPM as `known_affected` with no fix available. A
+  scanner built on this feed alone reports every one of them clean. That is the silent
+  false-negative class this project exists to avoid, and it is why D43 emits no RHEL findings.
+- **The ecosystem key cannot be derived from an image.** 903 distinct keys across mainline,
+  `rhel_eus`, `rhel_aus`, `rhel_tus`, `rhel_e4s` and per-minor variants, with repository
+  granularity below that (`::baseos`, `::appstream`, `::crb`, `::realtime`, `::nfv`). 53.1% of
+  (CVE, package, major) groups span more than one key and 29.7% resolve to a *different* fixed
+  version depending on which is chosen. `/etc/os-release` gives the minor version but the
+  support channel is a subscription attribute with no filesystem representation. The keys also
+  come in five shapes, and RHEL 10 uses the bare three-part form
+  (`Red Hat:enterprise_linux:10.2`) that a parser written for the common one drops silently.
+  Unrelated products share the namespace (`Red Hat:openstack:10::el7`,
+  `Red Hat:jboss_enterprise_application_platform:6`, 9,118 entries), so a prefix match on
+  `Red Hat:` pulls them in.
+- **The modularity label is absent from the archive.** All 588,150 purls are bare — no
+  qualifiers of any kind — and the stream name is not recoverable from the version string,
+  which encodes only the platform build and a context hash
+  (`1:20.20.2-2.module+el9.6.0+24220+c44c288d`). 19.1% of mainline groups are module-tagged and
+  modules cause 69% of the residual fixed-version ambiguity that survives restricting to
+  mainline keys. `('CVE-2021-20291', 'buildah', '8')` resolves to two fixed versions from two
+  streams of `container-tools`; taking the higher is a systematic false positive and taking the
+  lower is a false negative.
+
+**AlmaLinux and Rocky Linux are not the easier path.** Both key on the major version only —
+three keys each, derivable from `/etc/os-release` — which is genuinely simpler. Neither
+survives the rest:
+
+- **AlmaLinux carries zero `aliases` and zero `upstream` fields** across all 5,494 records.
+  Every CVE reference is in `related`, which OSV defines as explicitly *not* an alias. Under D3
+  as written, AlmaLinux yields **0 CVEs** and the D25 rating join produces 0 matches. It also
+  has no severity data at all (0% CVSS coverage, against Red Hat's ~84%), so under D17 every
+  Alma finding would land in `unknown` and never trip `--fail-on`. Reading `related` is a
+  semantic change to the join, and therefore its own decision.
+- **Rocky Linux's export is too incomplete to ship.** Median 0.29 coverage of Red Hat's runtime
+  package set, 83% of shared (CVE, major) groups missing at least one runtime package, only
+  `curl` named for CVE-2023-38545 where Red Hat and Alma both name `curl`, `curl-minimal`,
+  `libcurl` and `libcurl-minimal` — and **no record whatsoever for CVE-2024-6387**. A
+  `rockylinux:` target must exit 2, never exit 0.
+- Alma also writes module builds as `module_el8.5.0+119+9a9ec082` where Red Hat and Rocky write
+  `module+el8.5.0+12582+56d94c81`, so Alma advisory versions must never be compared against
+  RHEL-installed packages. Routing on `/etc/os-release` `ID` (`rhel` / `almalinux` / `rocky`)
+  rather than on the `elN` release string is what prevents that.
+
+**Revisit when.** A source that can express affectedness without a fix has been decided on —
+Red Hat's CSAF VEX feed is the only complete one, since OVAL v2 covers RHEL 5–9 and has no
+RHEL 10. That is a real provider, not a variation on an OSV one, and it is the second test of
+D1's claim that owning the schema is what makes a non-OSV provider possible. Note that the
+"VEX" in *VEX and ignore rules* below is a different thing: that entry is about a consumer
+supplying VEX to suppress findings, this one is about a vendor publishing affectedness.
 
 ---
 
@@ -615,7 +690,7 @@ Recorded because design decisions rest on them.
 | Assumption | Outcome |
 |---|---|
 | OSV record volumes are in the hundreds of thousands, not millions | **Confirmed.** 257,075 records across slice 1 ecosystems, 28,613 after excluding `MAL-*`. bbolt and JSON hold, with headroom either way. Full numbers in the roadmap's *Measured data volumes*. |
-| OSV's RHEL-family coverage is thinner than Alpine/Debian | **Wrong as stated.** A `Red Hat` ecosystem exists (25 MB compressed). Whether it is backport-aware enough for accurate matching is still open — but the data is not absent. |
+| OSV's RHEL-family coverage is thinner than Alpine/Debian | **Wrong as stated.** A `Red Hat` ecosystem exists (25 MB compressed). Whether it is backport-aware enough for accurate matching was still open here; resolved 2026-08-07 below — it is, and a different kind of thinness is the problem instead. |
 | Distro advisories are source-keyed for Debian and RHEL | **True but understated.** Alpine is source-keyed too (`purl` carries `?arch=source`), so indirect matching is needed from slice 2 rather than later (D8). |
 | The CVE link for the KISA join lives in `aliases` | **Wrong.** OSV 1.7 records use `upstream`; a sampled Alpine record had `upstream` and no `aliases`. Both fields must be read (D3). |
 
@@ -632,9 +707,16 @@ Recorded because design decisions rest on them.
 | Sources disagree about the fixed version in ~90% of multi-record groups (D25's own "152 of 169") | **Wrong as stated, and not reproducible.** Re-measured over the whole database: 2,210 of 8,893 (25%), 510 of 4,488 (11%) for `GHSA`+`PYSEC`, and 0 of 15 on the Django scan D25 cites as its example. The original scope was "the packages a real scan touches", which is not recoverable without that package list, so the two may not be measuring the same thing. Nothing in D25 rests on it — a rating carries its own fixed version because that source's remediation belongs to that source, agreement or not. Recorded beside the original in the roadmap. |
 | Sources disagree about severity often enough to matter | **Confirmed, with the mechanism clarified.** 5,693 of 8,893 multi-record groups land on different bands — but 5,423 of those are one source rating what another leaves unrated, and only 306 are two rated sources scoring differently. The aggregate's hard case is `unknown`, not conflicting scores, which is why D17 keeping `unknown` outside the ordering is what makes it work. |
 
+### Resolved — measured 2026-08-07
+
+| Assumption | Outcome |
+|---|---|
+| OSV's Red Hat data is backport-aware enough for accurate RHEL matching | **Confirmed, and it is not what blocks RHEL.** All 588,150 fixed events carry an epoch and a release, 95.8% carry `.elN`, and no upstream-shaped version appears anywhere. Checked against a real `ubi9` image, every patched package reads as fixed. What blocks matching instead is that the feed is *errata-only* — it cannot express "affected, will not fix", a class covering 39,372 CVEs that exist only in Red Hat's VEX feed. See *RHEL-family package support*. |
+| Reading the rpmdb needs a third dependency | **Wrong.** A scanner only enumerates, never looks up by name, so the hash index is dead weight: a sequential page walk recovers every record, self-checked against BerkeleyDB's own key-0 counter (185 packages on `ubi8`, 107 on `amazonlinux:2`). The SQLite side is a b-tree scan with overflow chains, validated byte-identical against real SQLite on 7 images. `modernc.org/sqlite` costs 4 modules, 136 packages and 3.8 MB to buy the one backend that is cheapest to write (D44). |
+| RHEL 8 uses ndb, so only EOL RHEL 7 needs BerkeleyDB | **Wrong.** Verified by magic bytes on `redhat/ubi8`, `almalinux:8` and `rockylinux:8`: all three ship the multi-file layout with `Packages` as a BerkeleyDB hash (`0x00061561`). ndb is openSUSE/SLES only and no Red Hat lineage uses it. Both engines are needed. |
+
 ### Still open
 
 | Assumption | What depends on it |
 |---|---|
-| OSV's Red Hat data is backport-aware enough for accurate RHEL matching | Whether RHEL support is viable through OSV at all, or needs Red Hat's own feed |
 | grype's default database-age behaviour is a warning, with enforcement opt-in | Only referenced as prior art, not depended on |
