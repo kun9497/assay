@@ -306,6 +306,53 @@ a long sync*.
 
 ---
 
+### The VEX archive lags its own change feed
+
+**Why deferred.** The provider reads the one full archive `archive_latest.txt` names, and
+nothing else. Red Hat rebuilds that archive on its own schedule, and individual documents
+change in between — so a database built from the archive alone is behind by up to a day, and
+sometimes more.
+
+Measured on the ubi9 differential (2026-08-07): grype found 3 findings assay did not, all from
+two CVEs whose documents were created on **2026-08-06**, the day after
+`csaf_vex_2026-08-05.tar.zst` was built. `changes.csv` timestamps them
+`2026-08-06T03:46:10` and `2026-08-06T12:51:52`, `index.txt` lists them, the per-document
+endpoint serves them — and neither is in the archive. That is 3 of grype's 418 findings, 0.7%,
+and the whole of the divergence between the two tools on that image.
+
+**The mechanism to close it already exists upstream.** `changes.csv` is 3.4 MB and lists every
+document with its last-modified timestamp; `index.txt` lists every path. Fetching only the
+documents modified after the archive's own date would close the gap for a bounded number of
+extra requests. The provider already parses the archive date out of its filename for D12, so
+the comparison point is in hand.
+
+**Revisit when** the lag matters more than the requests cost, or when somebody is bitten by a
+same-week CVE. Note the interaction with *Checkpointing a long sync*: the delta pass is the
+part that would want resuming, not the archive read.
+
+---
+
+### Red Hat's fix state is collapsed to "there is no fix"
+
+**Why deferred.** CSAF distinguishes remediation categories that this provider does not keep.
+Archive-wide there are 22,289 `no_fix_planned` and 16,935 `none_available` remediations, and
+grype surfaces the same distinction as `wont-fix` versus `not-fixed`. On the ubi9 differential
+grype's 415 shared findings split **404 `not-fixed` / 11 `wont-fix`**; assay reports all 415 as
+"no fix available".
+
+The two mean different things to a reader. "Red Hat has decided not to fix this" is final and
+the only remaining moves are mitigation or removal; "no fix yet" is a reason to watch the CVE.
+Collapsing them loses an action, not just a label.
+
+**Why it was not done now.** D48 chose the OSV range shape — an `introduced` event and no
+`fixed` one — precisely because it needed no schema change, and that shape has nowhere to put
+a reason. Carrying it means either a field on `advisory.Range` or a per-advisory annotation,
+and either is a store change that D5 turns into a schema bump and a rebuild.
+
+**Revisit when** the store next changes shape for another reason, so the two land together.
+
+---
+
 ### The BerkeleyDB rpm backend
 
 **Why deferred.** RHEL 8, Amazon Linux 2 and their rebuilds keep the database as a

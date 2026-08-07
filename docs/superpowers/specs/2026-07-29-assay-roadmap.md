@@ -2493,6 +2493,39 @@ Exact agreement is not expected — the data sources differ. The signal is magni
 divergence means our matcher is wrong. This is the cheapest strong oracle available, and it
 costs nothing to run.
 
+### Measured: `registry.access.redhat.com/ubi9/ubi`, 2026-08-07
+
+Run against grype 0.104 (database built 2026-08-02) and assay's own database built from the
+2026-08-05 CSAF VEX archive. Both tools read the same image digest, `sha256:73f6c558`.
+
+| | |
+|---|---|
+| grype findings | 418 |
+| assay findings | 415 |
+| in both | **415** |
+| assay-only | **0** |
+| grype-only | 3 |
+| fix-state disagreements on shared findings | **0** |
+
+**assay is a strict subset of grype here, and the difference is entirely data recency.** All
+three grype-only findings come from two CVEs whose VEX documents were created on 2026-08-06,
+the day AFTER the archive assay read: `changes.csv` timestamps them
+`2026-08-06T03:46:10` and `2026-08-06T12:51:52`, and neither document is present in
+`csaf_vex_2026-08-05.tar.zst`. See the deferred entry *The VEX archive lags its own change
+feed*.
+
+Both tools also agree on the substance: assay evaluated all 186 packages with none skipped,
+found 415 findings and rated **all 415 unfixable**; grype's fix state for those same 415 is
+404 `not-fixed` plus 11 `wont-fix` — no fix available, unanimously. A ubi9 image is fully
+patched against everything Red Hat has actually fixed, which is what makes it a good test of
+D48 specifically: without the VEX provider every one of those 415 would have been reported
+clean.
+
+**The run earned its keep.** It found a false positive nothing else had: assay reported
+CVE-2022-2309 against `python3`, where Red Hat's document names
+`python3-lxml::inkscape:flatpak`. The `::` module context was being read as an epoch
+separator, truncating package names across 828 CVEs. See D47's `splitContext`.
+
 Beyond that:
 
 - `Store` is an interface, so `Matcher` is tested against an in-memory fake — no database

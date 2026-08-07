@@ -188,6 +188,18 @@ func splitNEVRA(s string) (name, evr string) {
 // Red Hat writes `module+el`; AlmaLinux writes `module_el`. Both are matched
 // so the rule does not quietly stop applying if this provider ever reads an
 // Alma feed.
+//
+// **It fires zero times on the current archive**, and that is recorded rather
+// than left to be rediscovered as a suspicious no-op. Every module-built
+// product id in the 2026-08-05 archive also carries a `::` context, so
+// splitContext catches all of them first: the counts moved from 431,985
+// module builds and 0 contexts to 0 and 453,164 when that check was added.
+// The check stays because the two detections are independent — a feed could
+// name a module build without a context, and AlmaLinux's `module_el` spelling
+// exists in a feed this provider does not read yet — and because a guard that
+// is cheap and occasionally right is worth more than one deleted on the
+// strength of a single archive. TestIsModule and TestConvert exercise it
+// directly, so it is unreached rather than untested.
 func isModule(evr string) bool {
 	return strings.Contains(evr, "module+el") || strings.Contains(evr, "module_el")
 }
