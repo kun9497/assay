@@ -171,7 +171,7 @@ ecosystem-agnostic. What is missing is the key.
 
 ---
 
-### RHEL-family package support — inventory in slice ⑫ (D43–D46), advisories in ⑬ (D47–D49); matching still deferred
+### ~~RHEL-family package support~~ — resolved across slices ⓫–⓭ (D43–D50)
 
 **Why deferred.** Two independent obstacles were recorded. Reading the package list means
 parsing `/var/lib/rpm/*`, a binary database — BerkeleyDB on older releases, SQLite on RHEL 9+
@@ -249,20 +249,23 @@ survives the rest:
   RHEL-installed packages. Routing on `/etc/os-release` `ID` (`rhel` / `almalinux` / `rocky`)
   rather than on the `elN` release string is what prevents that.
 
+**Resolved. The inventory landed in ⓫ (D43–D46), the advisory data in ⓬ (D47–D49), and
+matching in ⓭ (D48, D50) — `assay scan ubi9` now produces findings, and
+`--fail-on-unfixable` gates on the ones nothing can fix.**
+
 **The advisory half was resolved in slice ⓬ (D47–D49).** Red Hat's CSAF VEX feed is
 ingested: 67,261 documents yield 28,907 advisories and 1,918,779 affected entries, 1,278,384 of
-them with no fix available. It cost no new dependency. What remains is MATCHING — the RPM
-comparer is written and deliberately unregistered, so a RHEL scan still reports its inventory
-and exits 2. See the roadmap's D47–D49 and the README's slice ⓬.
+them with no fix available. It cost no new dependency. See the roadmap's D47–D49 and
+the README's slice ⓬.
 
 Note that the "VEX" in *VEX and ignore rules* below is a different thing: that entry is about a
 consumer supplying VEX to suppress findings, this one is about a vendor publishing
 affectedness.
 
 **Still deferred.** OVAL v2 as a second opinion (it covers RHEL 5–9 and has no RHEL 10, so it
-could never be the primary source); AlmaLinux and Rocky, whose objections above are unchanged;
-and the EUS/AUS/E4S divergence D47 accepts, which needs disclosing in the report rather than
-resolving in the data.
+could never be the primary source); AlmaLinux and Rocky, whose objections above are unchanged
+and which D50 therefore does not route; and closing the EUS/AUS/E4S divergence rather than
+disclosing it, which needs a channel signal no image carries.
 
 ---
 

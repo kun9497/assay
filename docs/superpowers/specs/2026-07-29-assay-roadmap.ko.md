@@ -1792,6 +1792,34 @@ zstd 압축 이미지 레이어 때문에 끌어오고, 이 provider가 있기 �
 실패가 아니라 범주입니다. 카운터 하나가 원인 둘을 담당하니 놀랍고 틀렸으며 믿겼을 숫자가 나왔습니다.
 
 
+### D50 — Red Hat errata에 매칭되는 것은 `rhel`뿐이다
+
+`/etc/os-release`의 `ID`가 정하고, `Red Hat:N` 생태계로 풀리는 것은 `rhel`뿐입니다. 다른 RPM
+배포판은 여전히 카탈로그됩니다 — rpmdb를 읽고 모든 패키지를 나열합니다 — 그리고 전부 평가되지 않음으로
+보고되므로, 경로가 없는 배포판은 시끄러운 skip이지 깨끗한 판정이 아닙니다.
+
+`elN` 릴리스 문자열이 아니라 `ID`로 경로를 가르는 것이 핵심입니다. `ubi9`, `almalinux:9`,
+`rocky:9`가 전부 `el9` 릴리스 문자열을 달고 있고, 그것들을 구별하는 것은 ID뿐입니다.
+
+**제외 이유가 각각 다릅니다. 하나의 뭉뚱그린 주의가 아닙니다:**
+
+- **AlmaLinux와 Rocky**는 리빌드이지만 바이트 단위로 같지는 않습니다. Alma는 module 빌드를
+  `module_el8.5.0+119+9a9ec082`로 쓰고 Red Hat은 `module+el8.5.0+12582+56d94c81`로 쓰며, Alma
+  자신의 리빌드는 `.alma` 릴리스 접미사를 답니다. 한 배포판의 설치된 버전을 다른 배포판의 advisory
+  버전과 비교하는 것이 `docs/deferred-decisions.md`가 둘 모두에 대해 기록한 함정입니다. 둘은 자기
+  OSV 피드도 갖고 있는데 그 항목이 각각의 문제를 기록합니다. AlmaLinux는 `aliases`도 `upstream`도
+  0개라 D3이 CVE를 0개 산출하고, Rocky는 CVE-2024-6387 레코드가 아예 없습니다.
+- **`centos`**는 RHEL의 양쪽에 놓인 두 제품을 하나의 ID가 덮습니다. CentOS Linux는 RHEL을 뒤따랐고,
+  CentOS Stream은 RHEL보다 *앞서* 갑니다. RHEL에 아직 닿지 않은 수정이 Stream에는 이미 있습니다.
+  같은 키가 둘에 대해 반대 방향으로 틀리고, `/etc/os-release`의 어떤 것도 둘을 확실히 가르지 않습니다.
+- **Fedora와 Amazon Linux**는 버전 체계가 다르고 자기 advisory 피드(`FEDORA-*`, `ALAS-*`)를 갖고
+  있습니다. Red Hat의 errata는 이들을 서술하지 않습니다.
+
+**언제 다시 볼까.** 해당 배포판의 provider가 생겼을 때. 이것은 영구적인 판단이 아니라 경로 결정입니다.
+AlmaLinux 자기 피드가 `AlmaLinux:N` 키로 들어오는 순간 `almalinux` ID는 그쪽으로 가고 여기서 바뀌는
+것은 없습니다.
+
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

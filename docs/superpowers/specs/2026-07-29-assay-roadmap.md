@@ -1939,6 +1939,39 @@ name a **product and no package at all**. A category, not a failure. One counter
 causes produced an alarming number that was wrong and would have been believed.
 
 
+### D50 — Only `rhel` is matched against Red Hat's errata
+
+`/etc/os-release`'s `ID` decides, and only `rhel` resolves to a `Red Hat:N`
+ecosystem. Every other RPM distribution is still catalogued — the rpmdb is read and
+every package listed — and every one of them is reported as not evaluated, so an
+unrouted distribution is a loud skip and never a clean verdict.
+
+Routing on `ID` rather than on the `elN` release string is the load-bearing part.
+`ubi9`, `almalinux:9` and `rocky:9` all carry `el9` release strings, and only the ID
+tells them apart.
+
+**Each exclusion is a different reason, not one blanket caution:**
+
+- **AlmaLinux and Rocky** are rebuilds, but not byte-identical ones. Alma writes module
+  builds as `module_el8.5.0+119+9a9ec082` where Red Hat writes
+  `module+el8.5.0+12582+56d94c81`, and its own rebuilds carry `.alma` release suffixes.
+  Comparing one distribution's installed versions against another's advisory versions is
+  the hazard `docs/deferred-decisions.md` records against both. They also have their own
+  OSV feeds, whose separate problems that entry records: AlmaLinux carries zero `aliases`
+  and zero `upstream` so D3 yields 0 CVEs from it, and Rocky has no record at all for
+  CVE-2024-6387.
+- **`centos`** is one ID covering two products that sit on opposite sides of RHEL.
+  CentOS Linux trailed it; CentOS Stream runs *ahead* of it, so a fix that has not
+  reached RHEL yet is already in Stream. The same key would be wrong in opposite
+  directions for the two, and nothing in `/etc/os-release` separates them reliably.
+- **Fedora and Amazon Linux** have different version schemes and their own advisory
+  feeds (`FEDORA-*`, `ALAS-*`). Red Hat's errata do not describe them at all.
+
+**Revisit when** a provider exists for the distribution in question. This is a routing
+decision, not a permanent judgement: the moment AlmaLinux's own feed is ingested under
+an `AlmaLinux:N` key, an `almalinux` ID routes there and nothing here changes.
+
+
 ## 3. Architecture
 
 ### Measured data volumes

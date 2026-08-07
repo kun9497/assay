@@ -660,9 +660,29 @@ whole-product entries naming no package, 0 unreadable products,
 - [x] fix 없는 affected를 `fixed` 이벤트 없는 range로 저장(D48)
 - [x] CI에서 **실제 피드**로 검증하고, 양이 아니라 모양을 단언합니다. CVE-2024-6387은 여전히 fixed
       `openssh` range를, CVE-2005-2541은 fix 없는 `tar` range를 내야 합니다
-- [ ] 매칭: RPM comparer 등록, `--fail-on-unfixable` 추가, 그리고 D48 규칙대로 수정 불가 finding
-      보고 — 항상 보이고 세어지되 자기 플래그로만 게이트
-- [ ] EUS/AUS/E4S 호스트가 메인라인 errata에 맞춰집니다. 그 발산을 리포트에 공개해야 합니다
+- [x] 매칭(D48, D50) — RPM comparer가 등록되고, RPM 패키지가 메인라인 major로 키를 잡으며,
+      `--fail-on-unfixable`이 고칠 수 없는 finding을 게이트합니다
+- [x] EUS/AUS/E4S 호스트가 메인라인 errata에 맞춰지고, 스캔이 그것을 stderr에 밝힙니다
+
+```
+PACKAGE             VERSION          ECOSYSTEM  ADVISORY       FIXED IN
+audit-libs (audit)  3.1.5-8.el9      Red Hat:9  CVE-2024-0003  3.1.5-99.el9
+openssl-libs        1:3.5.5-6.el9_8  Red Hat:9  CVE-2024-0001  1:3.5.5-8.el9_8
+zlib                1.2.11-40.el9    Red Hat:9  CVE-2005-2541  none
+none = no source records a version that fixes this; mitigate or remove the package
+```
+
+`none`과 `-`는 다른 사실이고 이 열은 둘을 구별합니다. `none`은 어느 출처도 올라갈 버전을 대지
+않는다는 뜻이고, `-`는 이 finding의 심각도를 정한 레코드에는 없지만 다른 출처에는 있다는 뜻입니다.
+올릴 수 있는 패키지를 제거하라고 말하는 것은 아무 말도 안 하는 것보다 나쁩니다.
+
+`Red Hat:N`으로 가는 것은 `rhel`뿐입니다(D50). AlmaLinux와 Rocky는 리빌드지만 바이트 단위로 같지
+않고, `centos`는 RHEL을 뒤따른 제품과 앞서 가는 제품을 한 ID로 덮으며, Fedora와 Amazon Linux는 자기
+피드가 있습니다. 각각 여전히 카탈로그되고 평가되지 않음으로 보고됩니다 — 시끄러운 skip이지 깨끗한
+판정이 아닙니다.
+
+- [ ] EUS 호스트의 `Red Hat:N` 스캔은 여전히 메인라인 fixed 버전을 인용합니다. 이걸 닫으려면 어떤
+      이미지도 담고 있지 않은 채널 신호가 필요합니다
 
 **⑨ comparer가 읽지 못하는 버전** — 버전이 파싱되지 않는 패키지는 깨끗함이 아니라 건너뜀으로
 보고되므로(D20, D21) 시끄러운 실패입니다. 그래도 판정을 받지 못한 취약점이고, D9은 그것을 놓침이라
