@@ -670,6 +670,39 @@ them from 2023 onwards. Matching on it would report all of them clean.
       the backend named
 - [ ] Replaying a write-ahead log rather than refusing it
 
+**⑬ The Red Hat advisory provider** — `REDHAT_ENABLE=1 assay db build` ingests Red Hat's CSAF
+VEX feed, the only source that can say a RHEL package is affected and **will not be fixed**.
+**Ingestion done; matching is the next slice.**
+
+Measured on the real 2026-08-05 archive, streamed end to end in 89 seconds:
+
+```
+67,261 documents -> 28,907 advisories, 1,918,779 affected entries
+(1,278,384 with no fix available); skipped 431,985 module builds,
+3,234,355 non-mainline products, 216,790 container images, 9,430
+whole-product entries naming no package, 0 unreadable products,
+0 unreadable documents
+```
+
+D1 holds without a schema change, which is the result worth stating: CSAF's "affected with no
+fix" is an OSV range with an `introduced` event and no `fixed` one. The store already
+understood it.
+
+- [x] A streaming CSAF VEX reader — 262 MB compressed, 17.1 GB decompressed, largest single
+      document 94 MB, nothing written to disk (D49)
+- [x] **No new dependency.** `klauspost/compress/zstd` was already linked, because
+      go-containerregistry pulls it for zstd layers. `go mod tidy` moved one line; `go.sum` is
+      byte-identical and the module count is unchanged at 52
+- [x] The ecosystem key is the mainline major (D47) — 462 CPE shapes exist, and the support
+      channel they encode is a subscription attribute with no filesystem representation
+- [x] Affected-with-no-fix stored as a range with no `fixed` event (D48)
+- [x] Checked against the LIVE feed in CI, asserting shape rather than volume: CVE-2024-6387
+      must still yield a fixed `openssh` range, CVE-2005-2541 a fix-less `tar` one
+- [ ] Matching: register the RPM comparer, add `--fail-on-unfixable`, and report unfixable
+      findings under D48's rule — always shown and counted, gated only on their own flag
+- [ ] EUS/AUS/E4S hosts are matched against mainline errata; the divergence needs disclosing
+      in the report
+
 **⑨ Versions the comparers cannot read** — a package whose version will not parse is
 reported as skipped rather than clean (D20, D21), so it is loud; it is still a vulnerability
 that went un-assessed, which D9 calls a miss. Measured 2026-08-06 over every range bound in

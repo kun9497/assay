@@ -1683,6 +1683,115 @@ CLAUDE.md의 위임 규칙대로 메인 루프에서 쓰고 표를 한 줄씩 �
 조용한 미탐이고, 그것이 생태계별 설계가 막으려고 존재하는 바로 그 실패입니다.
 
 
+### D47 — Red Hat 생태계 키는 메인라인 major다. 스캔이 유도할 수 있는 것이 그것뿐이므로
+
+`/etc/os-release`의 `VERSION_ID` major에서 온 `Red Hat:9`을, `cpe:/[oa]:redhat:enterprise_linux:9`
+제품 전체의 union에 맞춥니다 — 맨 형태와 그 아래의 `::baseos`, `::appstream`, `::crb`, `::server`,
+`::client`, `::workstation`, `::computenode` 저장소 전부.
+
+**대안이 더 어려운 게 아니라 존재하지 않습니다.** Red Hat VEX 아카이브에는 903개 정확한 키에 걸쳐
+**462가지 CPE 모양**이 있습니다. 메인라인, `rhel_eus`, `rhel_aus`, `rhel_tus`, `rhel_e4s`, 그리고
+마이너 단위 변종들. 이들은 같은 릴리스를 다른 fixed 버전으로 서술하는데, **어느 것이 이 호스트에
+적용되는지는 파일시스템에 표현이 없는 구독 속성입니다.** `/etc/os-release`는 `9.8`이라고 말하고,
+디스크의 어떤 것도 그 구독이 EUS인지 말하지 않습니다. 메인라인으로 제한하면 fixed 버전이 둘 이상으로
+갈리는 (CVE, 패키지, major) 그룹의 비율이 **25.1%에서 6.1%로** 떨어집니다.
+
+**필터는 접두사 매칭이 아니라 앵커된 정규식입니다.** 무관한 제품이 같은 이름공간을 쓰기 때문입니다.
+`cpe:/a:redhat:openstack:10::el7`, `cpe:/a:redhat:jboss_enterprise_application_platform:6`(9,118건),
+`cpe:/a:redhat:satellite:6::el7`, `cpe:/a:redhat:ceph_storage:5`. 느슨한 패턴이 삼킬 근접 사례도
+있습니다. `enterprise_linux_nvidia`와 `enterprise_linux_eus`는 이름의 앞부분만 같은 다른 제품입니다.
+
+**RHEL 10은 마이너 단위 메인라인 CPE를 씁니다** — `cpe:/o:redhat:enterprise_linux:10.2` — 8과 9가
+맨 major를 쓰는 것과 달리. 흔한 모양으로 쓴 패턴은 244,865개 레코드를 조용히 버리므로, 마이너를
+받아들여 major로 접습니다.
+
+**module 빌드는 저장하지 않고 세어서 버립니다.** 릴리스 문자열은 플랫폼 빌드와 컨텍스트 해시를
+기록하지만 스트림 이름은 기록하지 않아서, `1:20.20.2-2.module+el9.6.0+24220+c44c288d`만으로는
+`nodejs:18`과 `nodejs:20`을 구별할 수 없습니다. 메인라인 그룹의 19.1%가 module 태그이고, 메인라인
+필터를 통과한 뒤 남는 fixed 버전 모호성의 69%가 module 때문입니다.
+`('CVE-2021-20291', 'buildah', '8')`은 `container-tools`의 두 스트림에서 온 fixed 버전 둘로 풀립니다.
+높은 쪽은 체계적 오탐, 낮은 쪽은 미탐이고, 데이터에서 얻을 수 있는 제3의 답은 없습니다.
+
+**이것이 지는 공개 의무.** EUS, AUS, E4S 호스트는 메인라인 errata에 맞춰지고, 그 errata는 그 호스트의
+채널이 실은 적 없는 fixed 버전을 댈 수 있습니다. 숨겨진 것이 아니라 알려지고 한정된 발산이며, RHEL
+finding이 나가기 시작하면 리포트에 들어가야 합니다.
+
+
+### D48 — fix 없는 affected는 fixed 이벤트가 없는 range이고, 항상 보고하되 자기 플래그로만 게이트한다
+
+Red Hat이 "이 패키지는 우리가 싣는 모든 버전에서 취약하고 올라갈 곳이 없다"고 말하는 것입니다. CSAF에서
+그것은 **맨 패키지 이름**을 담은 `known_affected` product ID이고, `fixed` 쪽은 완전한 NEVRA를 담습니다:
+
+```
+cpe:/o:redhat:enterprise_linux:5   mailman                     <- affected, fix 없음
+cpe:/o:redhat:enterprise_linux:9   openssh-0:8.7p1-38.el9_4.1  <- fixed
+```
+
+**OSV 모양으로는 `introduced` 이벤트만 있고 `fixed`가 없는 range**이고, 스토어는 이미 이해하고 있었으며
+matcher는 이미 평가합니다. 이를 받아들이기 위해 스키마에서 바뀐 것이 없고, 그것이 스키마를 소유하는 것이
+non-OSV provider를 가능하게 한다는 D1 주장의 두 번째 확인입니다. 첫 번째는 KISA였습니다.
+
+**게이트를 정한 측정.** 이 피드가 내놓는 메인라인 레코드 1,995,138건 중 **1,292,054건(65%)이 fix가
+없습니다.** Red Hat 9만으로 2,935개 패키지에 걸쳐 552,599건입니다. 하지만 분포가 평평하지 않습니다.
+Red Hat 9에서 소스 패키지별로 세면:
+
+```
+glibc 0   openssl 7   systemd 1   bash 0   coreutils 2   curl 27
+libxml2 9 krb5 1      sqlite 2    python3 21   tar 10    zlib 1
+kernel 4491
+```
+
+컨테이너 이미지에는 커널이 없으므로 보통의 이미지 스캔은 수백 건 수준을 얻습니다 — 많지만 홍수는
+아니고, 하나하나가 보안팀이 알아야 할 실제 취약점입니다. **호스트** 스캔은 커널 하나로 4,491건을 얻고
+나머지를 전부 묻어버립니다.
+
+**그래서 `unknown`의 규칙을 그대로 따릅니다(D17).** 항상 보고되고 항상 요약에 세어지며, `--fail-on
+<band>`를 단독으로 건드리지 않고, 명시적인 `--fail-on-unfixable`을 통해서만 exit 1에 닿습니다. 선례를
+고른 것은 의도적입니다. 메커니즘이 이미 코드베이스에 있고, 이미 이해되고 있고, 이미 논증되어 있습니다.
+D36이 매 실행마다 빨갛고 고칠 수 없는 게이트에 무슨 일이 일어나는지 기록해 뒀습니다. 누군가 끕니다.
+그리고 꺼진 게이트는 아무것도 지키지 않습니다.
+
+**보고하지 않는 선택지는 애초에 없었습니다.** 그것이 이 provider가 대체하려는 OSV 내보내기입니다.
+
+
+### D49 — VEX 아카이브는 zstd로 읽고, 그것은 의존성을 들이지 않는다
+
+Red Hat은 전체 아카이브 하나를 `csaf_vex_YYYY-MM-DD.tar.zst`로 발행하고 `archive_latest.txt`가 그
+이름을 댑니다. gzip 변종도 연도별 분할도 없고, 대안은 문서 63,071개를 개별로 받는 것입니다.
+
+**`github.com/klauspost/compress/zstd`는 이미 바이너리에 링크되어 있습니다.** go-containerregistry가
+zstd 압축 이미지 레이어 때문에 끌어오고, 이 provider가 있기 전에도 `go list -deps ./...`에 zstd
+패키지가 나왔습니다. 직접 의존성으로 올리는 비용은 **`go.mod`의 indirect 블록에서 direct 블록으로 옮겨진
+한 줄**입니다. `go.sum`은 바이트 단위로 동일하고, 모듈 수는 52로 그대로이며, 바이너리는 56 KB 늘었는데
+그것은 이 provider 자신의 코드입니다. D28과 같은 모양입니다 — 데이터베이스를 OCI 아티팩트로 발행하는 데
+새 의존성이 들지 않았던 이유가 go-containerregistry가 이미 레지스트리 인증과 blob 전송을 갖고 있었기
+때문인 것처럼.
+
+**전부 스트리밍하고 디스크에 아무것도 쓰지 않습니다.** 아카이브는 압축 262 MB이고
+**문서 67,261개에 걸쳐 압축 해제 17.1 GB이며 그중 가장 큰 것이 94 MB**입니다. 문서 구조체가 의도적으로
+좁은 이유는 `encoding/json`이 없는 필드를 할당 없이 건너뛰기 때문입니다. 그래서 실제 문서의 가장 큰 두
+부분이 아예 실체화되지 않습니다. `product_tree.relationships`(CVE-2024-6387의 4.7 MB 중 2.8 MB이고
+불필요합니다 — product_status 항목이 이미 `platform:component`를 적고 있습니다)와
+`product_status.known_not_affected`(아카이브 전체에서 4,476,026건이고, 영향 없음 주장은 하류에서 쓸 데가
+없습니다).
+
+**최신성은 아카이브 이름에서 옵니다(D12).** `csaf_vex_2026-08-05.tar.zst`는 Red Hat이 만든 날을
+이름으로 댑니다. 날짜를 읽을 수 없는 이름은 `time.Now()`로 되돌아가지 않고 치명적 오류입니다. 데이터
+시각 자리에 가져온 시각을 넣는 것이 정확히 D12가 금지하는 것입니다.
+
+**`REDHAT_ENABLE`로 옵트인이고, 이유가 세 번째 종류입니다.** 재배포가 아닙니다. 피드는 67,261개 문서
+전부 TLP:WHITE라서 KISA(D29)와 달리 여기서 만든 것은 발행할 수 있습니다. 실행 시간도 아닙니다. NVD의
+일곱 시간에 비해 90초입니다. 옵트인으로 만든 것은 **결과의 크기**입니다 — RHEL 이미지를 한 번도 스캔하지
+않을 사용자에게 affected 항목 약 190만 건이 더해집니다. D37이 KISA를 기본 켜기로 한 논거는 비용이 거의
+없고 보지 않는 사람에게 아무것도 바꾸지 않는다는 것이었는데, 이건 정반대 경우입니다.
+
+**카운터를 원인별로 나눴고, 왜 그랬는지가 기록할 값어치가 있습니다.** 실제 아카이브에 대한 첫 실행이
+*"9,430 unreadable"*을 보고했습니다. 파싱에 실패한 문서는 하나도 없었습니다. 그것들은 Red Hat의 2005년
+이전 릴리스에서 온 `known_affected` 항목 — `Red Hat Linux 6.2`, `Red Hat Powertools 7.0`,
+`Red Hat Enterprise Linux AS (Advanced Server) version 2.1` — 로, **제품을 대고 패키지는 대지 않습니다.**
+실패가 아니라 범주입니다. 카운터 하나가 원인 둘을 담당하니 놀랍고 틀렸으며 믿겼을 숫자가 나왔습니다.
+
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

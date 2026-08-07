@@ -1819,6 +1819,126 @@ rules: a subtle ordering bug here is a silent false negative, which is the exact
 per-ecosystem design exists to prevent.
 
 
+### D47 — The Red Hat ecosystem key is the mainline major, because that is the only one a scan can derive
+
+`Red Hat:9`, from `/etc/os-release`'s `VERSION_ID` major, matched against the union of every
+`cpe:/[oa]:redhat:enterprise_linux:9` product — bare, and at any `::baseos`, `::appstream`,
+`::crb`, `::server`, `::client`, `::workstation` or `::computenode` repository below it.
+
+**The alternative is not available, rather than merely harder.** Red Hat's VEX archive carries
+**462 distinct CPE shapes** across 903 exact keys: mainline, `rhel_eus`, `rhel_aus`,
+`rhel_tus`, `rhel_e4s`, and per-minor variants. Those describe the same releases with
+different fixed versions — and **which one applies to a host is a subscription attribute with
+no filesystem representation.** `/etc/os-release` says `9.8`; nothing on disk says whether the
+subscription is EUS. Restricting to mainline drops the share of (CVE, package, major) groups
+that resolve to more than one fixed version from **25.1% to 6.1%**.
+
+**The filter is an anchored regexp, not a prefix match**, because unrelated products share the
+namespace: `cpe:/a:redhat:openstack:10::el7`,
+`cpe:/a:redhat:jboss_enterprise_application_platform:6` (9,118 entries),
+`cpe:/a:redhat:satellite:6::el7`, `cpe:/a:redhat:ceph_storage:5`. So do near-misses that a
+loose pattern would swallow: `enterprise_linux_nvidia` and `enterprise_linux_eus` are
+different products whose names merely begin the same way.
+
+**RHEL 10 uses a per-minor mainline CPE** — `cpe:/o:redhat:enterprise_linux:10.2` — where 8
+and 9 use the bare major. A pattern written for the common shape drops 244,865 records
+silently, so the minor is accepted and folded into the major.
+
+**Module builds are dropped and counted**, not stored. The release string records the platform
+build and a context hash but NOT the stream name, so `nodejs:18` and `nodejs:20` are
+indistinguishable from `1:20.20.2-2.module+el9.6.0+24220+c44c288d` alone. 19.1% of mainline
+groups are module-tagged and modules cause 69% of the fixed-version ambiguity that survives
+the mainline filter. `('CVE-2021-20291', 'buildah', '8')` resolves to two fixed versions from
+two streams of `container-tools`: taking the higher is a systematic false positive, taking the
+lower is a false negative, and there is no third answer available from the data.
+
+**The disclosure this owes.** An EUS, AUS or E4S host is matched against mainline errata, which
+can name a fixed version that host's channel never shipped. That is a known, bounded divergence
+rather than a hidden one, and it belongs in the report when RHEL findings are emitted.
+
+
+### D48 — Affected with no fix is a range with no fixed event, reported always and gated only on its own flag
+
+Red Hat says a package is affected at every version it ships and there is nothing to upgrade
+to. In CSAF that is a `known_affected` product ID carrying a **bare package name** where a
+`fixed` one carries a full NEVRA:
+
+```
+cpe:/o:redhat:enterprise_linux:5   mailman                     <- affected, no fix
+cpe:/o:redhat:enterprise_linux:9   openssh-0:8.7p1-38.el9_4.1  <- fixed
+```
+
+**In OSV shape that is a range with an `introduced` event and no `fixed` one**, which the
+store already understood and the matcher already evaluates. Nothing in the schema changed to
+accept it, and that is the second confirmation of D1's claim that owning the schema is what
+makes a non-OSV provider possible — the first being KISA.
+
+**The measurement that decided the gating.** Of the 1,995,138 mainline records this feed
+yields, **1,292,054 (65%) have no fix**. Red Hat 9 alone carries 552,599 of them across 2,935
+packages. But the distribution is not flat — counted per source package on Red Hat 9:
+
+```
+glibc 0   openssl 7   systemd 1   bash 0   coreutils 2   curl 27
+libxml2 9 krb5 1      sqlite 2    python3 21   tar 10    zlib 1
+kernel 4491
+```
+
+A container image has no kernel, so an ordinary image scan gains something in the low hundreds
+— a lot, but not a flood, and every one of them is a real vulnerability a security team should
+know about. A HOST scan gains 4,491 from the kernel alone, which would bury everything else.
+
+**So these follow `unknown`'s rule exactly (D17).** They are always reported and always
+counted in the summary, they never trip `--fail-on <band>` on their own, and they reach exit 1
+only through an explicit `--fail-on-unfixable`. The precedent is deliberate: the mechanism is
+already in the codebase, already understood, and already argued — D36 records what happens to
+a gate that is red on every run and cannot be fixed, which is that somebody turns it off, and
+a gate that is off protects nothing.
+
+**Not reporting them was never an option.** That is the OSV export this provider exists to
+replace.
+
+
+### D49 — The VEX archive is read as zstd, which costs no dependency
+
+Red Hat publishes one full archive, `csaf_vex_YYYY-MM-DD.tar.zst`, named by
+`archive_latest.txt`. There is no gzip variant and no per-year split; the alternative is 63,071
+individual document fetches.
+
+**`github.com/klauspost/compress/zstd` is already linked into the binary.**
+go-containerregistry pulls it for zstd-compressed image layers, and `go list -deps ./...`
+showed the zstd package in the build before this provider existed. Promoting it costs **one
+line moved from `go.mod`'s indirect block to its direct one**: `go.sum` is byte-identical, the
+module count is unchanged at 52, and the binary grew 56 KB — this provider's own code. It is
+the same shape as D28, where publishing the database as an OCI artifact cost no new dependency
+because go-containerregistry already carried registry auth and blob transfer.
+
+**Everything is streamed and nothing is written to disk.** The archive is 262 MB compressed and
+**17.1 GB decompressed across 67,261 documents, the largest of them 94 MB**. The document
+struct is deliberately narrow because `encoding/json` skips absent fields without allocating,
+so the two biggest parts of a real document never materialize: `product_tree.relationships`
+(2.8 MB of CVE-2024-6387's 4.7 MB, and unnecessary — a product_status entry already spells
+`platform:component`) and `product_status.known_not_affected` (4,476,026 entries archive-wide,
+and nothing downstream can use a not-affected claim).
+
+**Freshness comes from the archive's name** (D12). `csaf_vex_2026-08-05.tar.zst` names the day
+Red Hat built it. A name with no readable date is fatal rather than falling back to
+`time.Now()` — substituting the fetch time for the data time is exactly what D12 forbids.
+
+**Opt-in via `REDHAT_ENABLE`, for a third reason.** Not redistribution: the feed is TLP:WHITE
+on all 67,261 documents, so unlike KISA (D29) what is built from it can be published. Not
+runtime either: 90 seconds, against NVD's seven hours. What makes it opt-in is **size of
+result** — roughly 1.9 million affected entries added for users who may never scan a RHEL
+image. D37's argument for defaulting KISA ON was that it costs almost nothing and changes
+nothing for anyone not looking at it; this is the opposite case.
+
+**The counters are split by cause, and finding out why is worth recording.** The first run
+against the real archive reported *"9,430 unreadable"*. Not one document had failed to parse.
+They are `known_affected` entries from Red Hat's pre-2005 releases — `Red Hat Linux 6.2`,
+`Red Hat Powertools 7.0`, `Red Hat Enterprise Linux AS (Advanced Server) version 2.1` — that
+name a **product and no package at all**. A category, not a failure. One counter serving two
+causes produced an alarming number that was wrong and would have been believed.
+
+
 ## 3. Architecture
 
 ### Measured data volumes

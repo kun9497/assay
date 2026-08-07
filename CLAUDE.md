@@ -10,7 +10,7 @@ the vulnerability database, and match the two. In the anchore ecosystem those ar
 separate projects (`syft`, `vunnel` + `grype-db`, `grype`). KISA/KNVD advisory data is a
 first-class provider — that is the main reason this exists rather than using grype.
 
-Slices ①–⑫ are built. `assay db build` builds a database from OSV (Go, npm, PyPI, Alpine,
+Slices ①–⑬ are built. `assay db build` builds a database from OSV (Go, npm, PyPI, Alpine,
 Debian) with NVD ratings (D27, opt-in via `NVD_ENABLE`) and KISA's Korean prose as enrichment
 (⑤, on by default since D37, local only because `db push` strips it, D29); `assay db update`
 pulls the published OCI artifact (D28) rather than rebuilding. `assay scan` reads SBOMs,
@@ -20,8 +20,10 @@ Incompleteness carries a cause, and `--fail-on-incomplete=target` gates only on 
 caller can fix (D36). Alpine and Debian images scan end to end; RHEL-family images are
 **inventoried and refused** — the rpmdb is read, every package is listed, and the scan exits
 2, because the OSV Red Hat feed is errata-only and cannot say "affected, will not fix" (D43).
-Not built: a Red Hat advisory provider, Ubuntu, the BerkeleyDB rpm backend, distroless
-`status.d`, SARIF, and pep440 leniency (see `README.md`).
+Red Hat's CSAF VEX feed is ingested behind `REDHAT_ENABLE` (D47–D49) — the only source that
+can say a package is affected and will not be fixed — but nothing MATCHES against it yet: the
+RPM comparer is written and deliberately unregistered. Not built: RHEL matching, Ubuntu, the
+BerkeleyDB rpm backend, distroless `status.d`, SARIF, and pep440 leniency (see `README.md`).
 
 **Check what exists before assuming — this paragraph has been wrong four times.** It claimed
 `scan` was unimplemented after slice 1 shipped it, claimed binaries and directories were

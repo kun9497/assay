@@ -171,7 +171,7 @@ ecosystem-agnostic. What is missing is the key.
 
 ---
 
-### RHEL-family package support — inventory resolved in slice ⑫ (D43–D46), matching still deferred
+### RHEL-family package support — inventory in slice ⑫ (D43–D46), advisories in ⑬ (D47–D49); matching still deferred
 
 **Why deferred.** Two independent obstacles were recorded. Reading the package list means
 parsing `/var/lib/rpm/*`, a binary database — BerkeleyDB on older releases, SQLite on RHEL 9+
@@ -249,12 +249,20 @@ survives the rest:
   RHEL-installed packages. Routing on `/etc/os-release` `ID` (`rhel` / `almalinux` / `rocky`)
   rather than on the `elN` release string is what prevents that.
 
-**Revisit when.** A source that can express affectedness without a fix has been decided on —
-Red Hat's CSAF VEX feed is the only complete one, since OVAL v2 covers RHEL 5–9 and has no
-RHEL 10. That is a real provider, not a variation on an OSV one, and it is the second test of
-D1's claim that owning the schema is what makes a non-OSV provider possible. Note that the
-"VEX" in *VEX and ignore rules* below is a different thing: that entry is about a consumer
-supplying VEX to suppress findings, this one is about a vendor publishing affectedness.
+**The advisory half was resolved in slice ⓬ (D47–D49).** Red Hat's CSAF VEX feed is
+ingested: 67,261 documents yield 28,907 advisories and 1,918,779 affected entries, 1,278,384 of
+them with no fix available. It cost no new dependency. What remains is MATCHING — the RPM
+comparer is written and deliberately unregistered, so a RHEL scan still reports its inventory
+and exits 2. See the roadmap's D47–D49 and the README's slice ⓬.
+
+Note that the "VEX" in *VEX and ignore rules* below is a different thing: that entry is about a
+consumer supplying VEX to suppress findings, this one is about a vendor publishing
+affectedness.
+
+**Still deferred.** OVAL v2 as a second opinion (it covers RHEL 5–9 and has no RHEL 10, so it
+could never be the primary source); AlmaLinux and Rocky, whose objections above are unchanged;
+and the EUS/AUS/E4S divergence D47 accepts, which needs disclosing in the report rather than
+resolving in the data.
 
 ---
 

@@ -59,6 +59,17 @@ func TestEcosystemFor(t *testing.T) {
 		{"cpe:/o:redhat:enterprise_linux_nvidia:10::el10", "", "a different product with a longer name"},
 		{"cpe:/a:redhat:enterprise_linux_eus:10.0", "", "likewise, and it is NOT the mainline key"},
 		{"", "", "no CPE at all"},
+
+		// The rows that make the ANCHORS load-bearing. Every shape above is
+		// rejected by an unanchored pattern too — `enterprise_linux_nvidia:` is
+		// simply not `enterprise_linux:` — so without these a mutation that
+		// dropped the ^ and $ survived the whole table. A trailing component
+		// that is not a `::` repository is the shape that separates them, and
+		// it must be refused for the same reason EUS is: it names a channel
+		// this scan cannot know it is on.
+		{"cpe:/o:redhat:enterprise_linux:9:beta", "", "a trailing component that is not a :: repository"},
+		{"cpe:/o:redhat:enterprise_linux:9-preview", "", "a suffix on the version"},
+		{"x cpe:/o:redhat:enterprise_linux:9", "", "a CPE with something before it is not a CPE"},
 	} {
 		got, ok := ecosystemFor(tc.cpe)
 		if got != tc.want || ok != (tc.want != "") {

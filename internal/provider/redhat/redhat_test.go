@@ -101,12 +101,18 @@ func serve(t *testing.T, pointer string, archive []byte) *httptest.Server {
 	mux.HandleFunc("/"+pointerFile, func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprint(w, pointer+nl)
 	})
+	// EVERY other path serves the archive, deliberately. An earlier version
+	// 404'd anything that did not end in .tar.zst, which made
+	// TestFetch_RefusesABadPointerFile pass from the 404 rather than from the
+	// validation it names: deleting the pointer-file checks entirely left it
+	// green. A server that answers anything means only a real refusal can
+	// produce an error.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, ".tar.zst") && archive != nil {
-			w.Write(archive)
+		if archive == nil {
+			http.NotFound(w, r)
 			return
 		}
-		http.NotFound(w, r)
+		w.Write(archive)
 	})
 	s := httptest.NewServer(mux)
 	t.Cleanup(s.Close)
@@ -222,17 +228,37 @@ func TestArchiveDate(t *testing.T) {
 // The pointer file's contents become a URL, so anything that is not a plain
 // archive filename is refused before it is requested.
 func TestFetch_RefusesABadPointerFile(t *testing.T) {
+	// A perfectly good archive is served at every path, so a pointer that
+	// slipped past validation would SUCCEED rather than 404. Without that,
+	// this test passes on the wrong error.
+	good := archiveOf(t, map[string]string{
+		"a.json": docJSON(t, "CVE-2024-0001",
+			map[string]string{"R": "cpe:/o:redhat:enterprise_linux:9"},
+			[]string{"R:x-0:1-1.el9.x86_64"}, nil),
+	})
+	// The first three carry a PERFECTLY VALID DATE, and that is the point.
+	// Without them every case was caught downstream by archiveDate instead —
+	// so deleting the pointer-file checks entirely left the test green while
+	// the provider happily turned the file's contents into a URL and fetched
+	// it. Each of these must be refused by the validation itself, named.
 	for _, pointer := range []string{
+		"https://example.invalid/csaf_vex_2026-08-05.tar.zst",
+		"../../../csaf_vex_2026-08-05.tar.zst",
+		"a/b/csaf_vex_2026-08-05.tar.zst",
 		"",
-		"../../../etc/passwd",
-		"https://example.invalid/evil.tar.zst",
 		"csaf_vex_2026-08-05.tar.gz",
 		"<html>404 Not Found</html>",
 	} {
 		t.Run(pointer, func(t *testing.T) {
-			s := serve(t, pointer, nil)
-			if _, _, err := fetchAll(t, s); err == nil {
-				t.Errorf("pointer %q was accepted", pointer)
+			s := serve(t, pointer, good)
+			_, _, err := fetchAll(t, s)
+			if err == nil {
+				t.Fatalf("pointer %q was accepted, and its contents became a URL this "+
+					"provider then fetched", pointer)
+			}
+			if !strings.Contains(err.Error(), pointerFile) {
+				t.Errorf("pointer %q was rejected by something other than the pointer-file "+
+					"validation, so that validation is not what is being tested: %v", pointer, err)
 			}
 		})
 	}
@@ -276,17 +302,34 @@ func TestFetch_OneBadDocumentDoesNotFailTheSync(t *testing.T) {
 	}
 }
 
-// A cancelled context stops the stream. The real archive takes minutes to
-// read, so this is the difference between Ctrl-C working and not.
+// A context cancelled MID-STREAM stops the walk. The real archive holds 67,261
+// documents and takes about ninety seconds, so this is the difference between
+// Ctrl-C working and not.
+//
+// Cancelling before the call would prove nothing: the HTTP request fails on
+// its own, and the check inside the loop could be deleted with the test still
+// green. This one cancels from the emit callback, after the response body has
+// already been delivered, so only the loop's own ctx.Err() can stop it.
 func TestFetch_HonoursContextCancellation(t *testing.T) {
-	s := serve(t, "csaf_vex_2026-08-05.tar.zst", archiveOf(t, map[string]string{
-		"a.json": docJSON(t, "CVE-2024-0001",
+	docs := map[string]string{}
+	for i := 0; i < 50; i++ {
+		docs[fmt.Sprintf("cve-2024-%04d.json", i)] = docJSON(t, fmt.Sprintf("CVE-2024-%04d", i),
 			map[string]string{"R": "cpe:/o:redhat:enterprise_linux:9"},
-			[]string{"R:x-0:1-1.el9.x86_64"}, nil),
-	}))
+			[]string{"R:x-0:1-1.el9.x86_64"}, nil)
+	}
+	s := serve(t, "csaf_vex_2026-08-05.tar.zst", archiveOf(t, docs))
+
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := New(Options{BaseURL: s.URL}).Fetch(ctx, func(advisory.Advisory) error { return nil }); err == nil {
-		t.Error("a cancelled context did not stop the fetch")
+	emitted := 0
+	_, err := New(Options{BaseURL: s.URL}).Fetch(ctx, func(advisory.Advisory) error {
+		emitted++
+		cancel()
+		return nil
+	})
+	if err == nil {
+		t.Fatal("a context cancelled mid-stream did not stop the fetch")
+	}
+	if emitted > 2 {
+		t.Errorf("kept emitting after cancellation: %d advisories out of %d documents", emitted, len(docs))
 	}
 }
