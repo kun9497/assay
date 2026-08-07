@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -94,29 +95,79 @@ func docJSON(t *testing.T, cve string, cpes map[string]string, fixed, affected [
 	return string(b)
 }
 
-// serve stands up a feed: a pointer file and the archive it names.
-func serve(t *testing.T, pointer string, archive []byte) *httptest.Server {
+// feed is a whole Red Hat CSAF endpoint: the pointer file, the archive it
+// names, the changes list, and the individual documents a delta pass fetches.
+type feed struct {
+	pointer string
+	archive []byte
+	// changes is the body served at changes.csv. Empty means "one header-less
+	// file with no rows", which is what a test that does not care about the
+	// delta wants.
+	changes string
+	// docs are served at their own paths; anything listed in changes and
+	// absent here 404s, which is the withdrawn-between-files race.
+	docs map[string]string
+	// status overrides the response code for a path, so a test can produce a
+	// failure that is NOT a withdrawal.
+	status map[string]int
+	// hits counts requests per path, so a test can assert what was and was not
+	// fetched rather than inferring it from the result.
+	mu   sync.Mutex
+	hits map[string]int
+}
+
+// serve stands up a feed. Everything not otherwise routed serves the archive,
+// deliberately: an earlier version 404'd unknown paths, which made the
+// pointer-file validation test pass from the 404 rather than from the
+// validation it names.
+func serve(t *testing.T, f *feed) *httptest.Server {
 	t.Helper()
+	f.hits = map[string]int{}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/"+pointerFile, func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprint(w, pointer+nl)
-	})
-	// EVERY other path serves the archive, deliberately. An earlier version
-	// 404'd anything that did not end in .tar.zst, which made
-	// TestFetch_RefusesABadPointerFile pass from the 404 rather than from the
-	// validation it names: deleting the pointer-file checks entirely left it
-	// green. A server that answers anything means only a real refusal can
-	// produce an error.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if archive == nil {
-			http.NotFound(w, r)
+		p := strings.TrimPrefix(r.URL.Path, "/")
+		f.mu.Lock()
+		f.hits[p]++
+		f.mu.Unlock()
+		if code := f.status[p]; code != 0 {
+			http.Error(w, "nope", code)
 			return
 		}
-		w.Write(archive)
+		switch {
+		case p == pointerFile:
+			fmt.Fprint(w, f.pointer+nl)
+		case p == changesFile:
+			fmt.Fprint(w, f.changes)
+		case f.docs[p] != "":
+			fmt.Fprint(w, f.docs[p])
+		case strings.HasSuffix(p, ".json"):
+			// Listed in changes.csv and no longer published.
+			http.NotFound(w, r)
+		case f.archive != nil:
+			w.Write(f.archive)
+		default:
+			http.NotFound(w, r)
+		}
 	})
 	s := httptest.NewServer(mux)
 	t.Cleanup(s.Close)
 	return s
+}
+
+func (f *feed) hitsFor(p string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.hits[p]
+}
+
+// changesCSV renders rows in the shape Red Hat publishes: quoted path, quoted
+// RFC3339 timestamp, newest first.
+func changesCSV(rows ...[2]string) string {
+	var b strings.Builder
+	for _, r := range rows {
+		fmt.Fprintf(&b, "%q,%q"+nl, r[0], r[1])
+	}
+	return b.String()
 }
 
 func fetchAll(t *testing.T, s *httptest.Server) ([]advisory.Advisory, string, error) {
@@ -137,7 +188,7 @@ func fetchAll(t *testing.T, s *httptest.Server) ([]advisory.Advisory, string, er
 }
 
 func TestFetch(t *testing.T) {
-	s := serve(t, "csaf_vex_2026-08-05.tar.zst", archiveOf(t, map[string]string{
+	s := serve(t, &feed{pointer: "csaf_vex_2026-08-05.tar.zst", archive: archiveOf(t, map[string]string{
 		"2024/cve-2024-6387.json": docJSON(t, "CVE-2024-6387",
 			map[string]string{"BaseOS-9": "cpe:/o:redhat:enterprise_linux:9::baseos"},
 			[]string{"BaseOS-9:openssh-0:8.7p1-38.el9_4.1.x86_64"}, nil),
@@ -151,7 +202,7 @@ func TestFetch(t *testing.T) {
 			[]string{"CEPH:ceph-0:1-1.x86_64"}, nil),
 		// Not a document at all. Real archives carry an index and checksums.
 		"index.txt": "2024/cve-2024-6387.json" + nl,
-	}))
+	})})
 
 	got, progress, err := fetchAll(t, s)
 	if err != nil {
@@ -186,11 +237,11 @@ func TestFetch(t *testing.T) {
 // D12: how current the data is comes from the archive Red Hat built, never
 // from the clock on the machine running the sync.
 func TestFetch_DataAsOfComesFromTheArchiveName(t *testing.T) {
-	s := serve(t, "csaf_vex_2026-08-05.tar.zst", archiveOf(t, map[string]string{
+	s := serve(t, &feed{pointer: "csaf_vex_2026-08-05.tar.zst", archive: archiveOf(t, map[string]string{
 		"a.json": docJSON(t, "CVE-2024-0001",
 			map[string]string{"R": "cpe:/o:redhat:enterprise_linux:9"},
 			[]string{"R:x-0:1-1.el9.x86_64"}, nil),
-	}))
+	})})
 	p := New(Options{BaseURL: s.URL})
 	prov, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil })
 	if err != nil {
@@ -250,7 +301,7 @@ func TestFetch_RefusesABadPointerFile(t *testing.T) {
 		"<html>404 Not Found</html>",
 	} {
 		t.Run(pointer, func(t *testing.T) {
-			s := serve(t, pointer, good)
+			s := serve(t, &feed{pointer: pointer, archive: good})
 			_, _, err := fetchAll(t, s)
 			if err == nil {
 				t.Fatalf("pointer %q was accepted, and its contents became a URL this "+
@@ -267,11 +318,11 @@ func TestFetch_RefusesABadPointerFile(t *testing.T) {
 // D20's guard. An archive that yields no Red Hat records must fail the build
 // rather than write a database whose every RHEL scan reports clean.
 func TestFetch_NoRecordsIsAnError(t *testing.T) {
-	s := serve(t, "csaf_vex_2026-08-05.tar.zst", archiveOf(t, map[string]string{
+	s := serve(t, &feed{pointer: "csaf_vex_2026-08-05.tar.zst", archive: archiveOf(t, map[string]string{
 		"a.json": docJSON(t, "CVE-2024-0001",
 			map[string]string{"CEPH": "cpe:/a:redhat:ceph_storage:5"},
 			[]string{"CEPH:ceph-0:1-1.x86_64"}, nil),
-	}))
+	})})
 	_, _, err := fetchAll(t, s)
 	if err == nil {
 		t.Fatal("an archive with no mainline Red Hat records was accepted")
@@ -284,12 +335,12 @@ func TestFetch_NoRecordsIsAnError(t *testing.T) {
 // One unreadable document is counted and the sync continues. A 17 GB archive
 // with a single truncated entry must not cost a whole build.
 func TestFetch_OneBadDocumentDoesNotFailTheSync(t *testing.T) {
-	s := serve(t, "csaf_vex_2026-08-05.tar.zst", archiveOf(t, map[string]string{
+	s := serve(t, &feed{pointer: "csaf_vex_2026-08-05.tar.zst", archive: archiveOf(t, map[string]string{
 		"bad.json": "{not json",
 		"good.json": docJSON(t, "CVE-2024-0001",
 			map[string]string{"R": "cpe:/o:redhat:enterprise_linux:9"},
 			[]string{"R:openssh-0:1-1.el9.x86_64"}, nil),
-	}))
+	})})
 	got, progress, err := fetchAll(t, s)
 	if err != nil {
 		t.Fatalf("one unreadable document failed the whole sync: %v", err)
@@ -317,7 +368,7 @@ func TestFetch_HonoursContextCancellation(t *testing.T) {
 			map[string]string{"R": "cpe:/o:redhat:enterprise_linux:9"},
 			[]string{"R:x-0:1-1.el9.x86_64"}, nil)
 	}
-	s := serve(t, "csaf_vex_2026-08-05.tar.zst", archiveOf(t, docs))
+	s := serve(t, &feed{pointer: "csaf_vex_2026-08-05.tar.zst", archive: archiveOf(t, docs)})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	emitted := 0

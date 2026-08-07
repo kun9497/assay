@@ -164,6 +164,13 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		}
 	}
 
+	// The archive is a snapshot; documents written since it was built are
+	// fetched individually and emitted on top. See deltaSince — this is the
+	// only thing that separated assay from grype on either differential run.
+	if err := p.deltaSince(ctx, asOf, emit, &st, covered); err != nil {
+		return store.Provenance{}, err
+	}
+
 	// D20's coverage set, and the guard beside it. A build that produced no
 	// Red Hat records must fail rather than write a database that answers
 	// every RHEL scan with "no advisories for this ecosystem" -- which is
@@ -189,7 +196,12 @@ func (p *Provider) archiveName(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer body.Close()
+	// Drained for the delta pass's reason: an undrained body costs the
+	// connection, and every request after it pays for a new one.
+	defer func() {
+		io.Copy(io.Discard, io.LimitReader(body, 1<<20))
+		body.Close()
+	}()
 	// The pointer file holds one short filename. The cap is what stops a
 	// misrouted response — an HTML error page, a redirect to a login — from
 	// being read as a name and then requested.
@@ -249,8 +261,10 @@ func (s stats) String() string {
 			"%d non-mainline products, %d container images, "+
 			"%d products with no CPE, %d whole-product entries naming no package, "+
 			"%d unreadable products, %d documents with no CVE id, "+
-			"%d unreadable documents",
+			"%d unreadable documents; delta: %d changed since the archive, "+
+			"%d fetched, %d already withdrawn, %d yielded a record",
 		s.Documents, s.Advisories, s.Affected, s.Unfixable,
 		s.SkippedModule, s.SkippedModuleContext, s.SkippedNonRHEL, s.SkippedImage,
-		s.SkippedNoCPE, s.SkippedWholeProduct, s.SkippedBadProduct, s.SkippedNoCVE, s.SkippedBadDoc)
+		s.SkippedNoCPE, s.SkippedWholeProduct, s.SkippedBadProduct, s.SkippedNoCVE, s.SkippedBadDoc,
+		s.DeltaListed, s.DeltaFetched, s.DeltaGone, s.DeltaAdvisories)
 }
