@@ -673,9 +673,10 @@ them from 2023 onwards. Matching on it would report all of them clean.
       Those images exit 2 with the backend named
 - [ ] Replaying a write-ahead log rather than refusing it
 
-**⑬ The Red Hat advisory provider** — `REDHAT_ENABLE=1 assay db build` ingests Red Hat's CSAF
-VEX feed, the only source that can say a RHEL package is affected and **will not be fixed**.
-**Ingestion done; matching is the next slice.**
+**⑬ The Red Hat advisory provider** — `assay db build` ingests Red Hat's CSAF VEX feed, the
+only source that can say a RHEL package is affected and **will not be fixed**. On by default
+since D51, and **carried by the published artifact**, so `assay db update` delivers it too:
+20.9 MB of download becomes 28.7 MB.
 
 Measured on the real 2026-08-05 archive, streamed end to end in 89 seconds:
 

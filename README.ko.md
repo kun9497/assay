@@ -636,9 +636,10 @@ Debian은 backport를 버전에 **적습니다**(`7.74.0-1.3+deb11u10`). (CVE, �
       이미지들은 백엔드를 이름으로 밝히며 exit 2입니다
 - [ ] write-ahead log를 거절하는 대신 재생하기
 
-**⑬ Red Hat advisory provider** — `REDHAT_ENABLE=1 assay db build`가 Red Hat의 CSAF VEX 피드를
-넣습니다. RHEL 패키지가 취약하고 **수정되지 않을 것**이라고 말할 수 있는 유일한 출처입니다.
-**수집 완료, 매칭은 다음 슬라이스.**
+**⑬ Red Hat advisory provider** — `assay db build`가 Red Hat의 CSAF VEX 피드를 넣습니다. RHEL
+패키지가 취약하고 **수정되지 않을 것**이라고 말할 수 있는 유일한 출처입니다. D51 이후 기본 켜짐이고
+**발행되는 아티팩트가 실으므로** `assay db update`로도 받습니다. 다운로드가 20.9 MB에서 28.7 MB가
+됩니다.
 
 실제 2026-08-05 아카이브를 89초에 끝에서 끝까지 스트리밍한 측정:
 
