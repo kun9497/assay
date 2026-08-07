@@ -727,9 +727,15 @@ func compareRelease(a, b string) int {
 }
 
 func releaseParts(rel string) (major, minor int, ok bool) {
+	// A bare major is a release, not an unparseable string. Alpine spells its
+	// releases "v3.19" and Debian spells the modern ones "12", and requiring
+	// the dot dropped every Debian release from 7 up into the lexical fallback
+	// — which printed "Debian:3.0..9" for a database that covers 3.0 through
+	// 14, telling an operator the newest four releases were missing when they
+	// were the bulk of the archive.
 	maj, min, found := strings.Cut(strings.TrimPrefix(rel, "v"), ".")
 	if !found {
-		return 0, 0, false
+		min = "0"
 	}
 	major, err := strconv.Atoi(maj)
 	if err != nil {

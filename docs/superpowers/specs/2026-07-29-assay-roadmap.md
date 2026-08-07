@@ -1586,6 +1586,103 @@ check transitivity, which a table of independent pairs does not.
 The README line calling these two "the weakest point of the three" is corrected: the weakness
 was an untested assumption about the tables, and testing it is what this decision did.
 
+
+### D40 — The Debian comparer is a transliteration of dpkg, checked against dpkg
+
+`internal/version/deb.go` is a line-by-line transliteration of `verrevcmp` and `parseversion`
+(dpkg's `lib/dpkg/version.c` and `lib/dpkg/parsehelp.c`), not an interpretation of
+deb-version(7). The two agree, but the algorithm is the normative artefact and the prose is
+loose exactly where it matters.
+
+**Debian is the ecosystem where a subtle ordering bug is most likely and most costly.** `~`
+sorts BELOW the end of a string, which no other ecosystem does:
+
+```
+1.0~~  <  1.0~~a  <  1.0~  <  1.0  <  1.0a
+```
+
+Getting it backwards makes every backport and release candidate compare on the wrong side of
+its own base — `1.2.3-4~bpo11+1` reading as newer than `1.2.3-4` is a silent miss on exactly
+the systems that took the security fix. Two more rules break intuition: every letter sorts
+below every other punctuation mark (`1.0z < 1.0.0`, because `z` ranks 122 and `.` ranks 302),
+and leading zeros are stripped from digit runs before comparison, so `1.09` and `1.9` are one
+version.
+
+**The oracle is the real dpkg binary, not a file.** dpkg ships no machine-readable vector file
+— its vectors live inside a Perl test module and a C unit test — but `dpkg --compare-versions`
+is on every ubuntu-latest runner, which is a better oracle than a file and costs no network.
+Unlike the apk replay it has **no known-divergence list and must not grow one**: apk falls
+back to a string sort for input it cannot parse, a guess this project deliberately refuses,
+while dpkg either parses a version or rejects it. A disagreement is a defect.
+
+Alongside it: 39 table rows (upstream dpkg vectors plus real strings from `debian:bookworm`,
+`gcr.io/distroless/base-debian12` and Ubuntu 24.04), 14 invalid inputs, 15 valid-but-unusual
+shapes, and the Policy chain over all 66 pairs with transitivity and antisymmetry.
+
+**Three rows of that table were wrong on first run and the comparer was right every time**:
+`1.2.3` equals `1.2.3-0` (dpkg strips the revision's leading zero, leaving both empty),
+`1.0-2-3` is valid under the last-hyphen split, and `+b1` sorts BELOW `+deb11u1` because `b`
+ranks 98 and `d` ranks 100.
+
+### D41 — The version compared is the one belonging to the name that reached the advisory
+
+D8's comment said indirect matching needed no version adjustment, "because an Alpine binary
+package carries its source package's version". Debian breaks that, and the break is
+systematic rather than exotic:
+
+| binary | binary version | source | source version |
+|---|---|---|---|
+| `bash` | `5.2.15-2+b13` | `bash` | `5.2.15-2` |
+| `bsdutils` | `1:2.38.1-5+deb12u3` | `util-linux` | `2.38.1-5+deb12u3` |
+
+A binNMU rebuilds a binary without touching the source, and the second row drops an epoch the
+binary carries. **13–15% of Debian packages differ this way**, against about 1% on Ubuntu —
+Debian binNMUs where Ubuntu rebuilds with a new revision — so a fixture built only on Ubuntu
+would exercise it about once.
+
+OSV's Debian advisories are source-keyed and carry SOURCE fixed versions; every packaged purl
+in the archive is `?arch=source`. Comparing a binary version against one of those is comparing
+two strings from different counters that happen to look alike.
+
+So the matcher compares `Source.Version` when the advisory was reached through the source
+name, and `Version` otherwise. An empty `Source.Version` means "the same as the binary
+version" — what `dpkg-gencontrol` omits the field to say, and what apk's origin always implies
+— so Alpine reaches exactly the answer it did before.
+
+### D42 — Debian only; Ubuntu needs its own decision
+
+**The Red Hat warning does not transfer to Debian.** Red Hat backports fixes and omits that
+from the version, which is why `docs/deferred-decisions.md` records RHEL as blocked. Debian
+backports and *encodes* it: `7.74.0-1.3+deb11u10`. 169,282 (CVE, source, release) triples were
+joined against Debian's own security tracker and **zero disagree** — OSV's Debian data is a
+faithful mechanical transform of the tracker, not an independent re-derivation.
+
+Ecosystem keys are the bare major, `Debian:11` through `Debian:14`, which is what both OSV and
+`/etc/os-release`'s `VERSION_ID` use. **testing and sid carry no `VERSION_ID` at all** and OSV
+publishes no ecosystem for either, so they are a loud skip: inventing `Debian:14` would
+compare against fixed versions sid does not ship.
+
+**Ubuntu is deliberately excluded.** OSV keys it `Ubuntu:24.04:LTS`, and its Pro and FIPS
+lineages — `Ubuntu:Pro:FIPS-updates:18.04:LTS` — describe the *same release*. A release-only
+key cannot separate them, so a scan of an ESM-patched system would match the non-ESM lineage's
+fixed versions and report it vulnerable. That is a systematic false positive, and it needs a
+decision about lineage keys rather than a second case in the ecosystem mapping. The corpus is
+also 5.8 GB unpacked against Debian's 383 MB, which the provider would have to stream.
+
+**Distroless images are named, not silently empty.** They keep the database in
+`var/lib/dpkg/status.d` as a DIRECTORY, and `source.Image.Files` takes exact paths. Those
+images reach the "no supported package database" error, which names the shape it cannot read.
+Reading them needs a prefix walk in the image layer reader, which is its own change.
+
+The cataloger reads deb822, not RFC822: whitespace before the colon is legal, field names
+match case-insensitively (the exact opposite of the apk database's `P:`/`p:` rule), and
+continuation is ANY whitespace — syft tests only for a leading space, so a tab-continued field
+becomes a new field, fails to find a colon, and is silently dropped. Installed-ness is decided
+on the THIRD word of `Status` and nothing else, which is how syft drops
+`deinstall ok installed` by substring-matching and trivy drops `purge ok installed` by
+scanning for a bare word. An absent `Status` means installed, because every package in a
+distroless image is in that state.
+
 ## 3. Architecture
 
 ### Measured data volumes
