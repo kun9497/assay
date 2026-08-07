@@ -12,6 +12,7 @@ import (
 	"github.com/kun9497/assay/internal/cataloger/apkdb"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"github.com/kun9497/assay/internal/cataloger/dirscan"
+	"github.com/kun9497/assay/internal/cataloger/dpkgdb"
 	"github.com/kun9497/assay/internal/cataloger/gobinary"
 	"github.com/kun9497/assay/internal/cataloger/osrelease"
 	"github.com/kun9497/assay/internal/matcher"
@@ -95,6 +96,14 @@ type Options struct {
 const (
 	osReleasePath = "etc/os-release"
 	apkDBPath     = "lib/apk/db/installed"
+	// dpkgDBPath is the ordinary Debian and Ubuntu database. Distroless images
+	// use /var/lib/dpkg/status.d as a DIRECTORY of one stanza per package
+	// instead, which Files cannot ask for — it takes exact paths. Those images
+	// therefore reach the "no supported package database" error below, which
+	// names them, rather than being reported as having no packages. Never
+	// glob status*: debian:* ships status-old holding a full duplicate of
+	// every stanza, and matching it would double the inventory.
+	dpkgDBPath = "var/lib/dpkg/status"
 )
 
 // Run scans whatever one target argument names — an SBOM, a container image
@@ -435,7 +444,7 @@ func catalogImage(ctx context.Context, ref string) (pkgmeta.Target, cyclonedx.St
 // error naming what was looked for is the honest answer, and Run already maps
 // a catalog error to exit 2 with stdout untouched.
 func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.Stats, error) {
-	files, err := img.Files([]string{osReleasePath, apkDBPath})
+	files, err := img.Files([]string{osReleasePath, apkDBPath, dpkgDBPath})
 	if err != nil {
 		return pkgmeta.Target{}, cyclonedx.Stats{}, err
 	}
@@ -459,18 +468,37 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 		// clean" — exactly the false negative D11 exists to prevent.
 	}
 
+	// Dispatched on which database the image actually carries, not on what
+	// os-release claimed. An image may have neither, and one that has a
+	// database whose distro has no ecosystem is still worth cataloging unkeyed
+	// — the matcher reports those as skipped rather than clean.
 	var pkgs []pkgmeta.Package
 	var diffID string
-	if f, ok := files[apkDBPath]; ok {
+	switch {
+	case files[apkDBPath].Data != nil:
+		f := files[apkDBPath]
 		p, err := apkdb.Parse(bytes.NewReader(f.Data), ecosystem)
 		if err != nil {
 			return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("parse %s: %w", apkDBPath, err)
 		}
 		pkgs, diffID = p, f.DiffID
+	case files[dpkgDBPath].Data != nil:
+		f := files[dpkgDBPath]
+		p, err := dpkgdb.Parse(bytes.NewReader(f.Data), ecosystem)
+		if err != nil {
+			return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("parse %s: %w", dpkgDBPath, err)
+		}
+		pkgs, diffID = p, f.DiffID
 	}
 	if len(pkgs) == 0 {
+		// Naming the shapes that were looked for, and the one known shape that
+		// is not supported yet, because "no database" and "a database this
+		// build cannot read" are different facts and only the second tells the
+		// reader what to do about it.
 		return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf(
-			"no supported package database found in %s (looked for %s)", ref, apkDBPath)
+			"no supported package database found in %s (looked for %s and %s; "+
+				"a distroless image keeps its database in var/lib/dpkg/status.d, "+
+				"which this build cannot read)", ref, apkDBPath, dpkgDBPath)
 	}
 	for i := range pkgs {
 		for j := range pkgs[i].Locations {

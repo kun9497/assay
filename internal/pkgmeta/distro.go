@@ -35,7 +35,32 @@ func (d Distro) Ecosystem() (string, error) {
 	if d.ID == "" {
 		return "", fmt.Errorf("%w: distro has no ID", ErrNoEcosystem)
 	}
-	if d.ID != "alpine" {
+	switch d.ID {
+	case "alpine":
+	case "debian":
+		// OSV keys modern Debian releases on the bare major — Debian:11 through
+		// Debian:14 hold 200,082 of the archive's 211,021 affected entries,
+		// and /etc/os-release's VERSION_ID is that same bare major ("12").
+		// The ancient releases OSV spells Debian:3.0 / 5.0 / 6.0 are not
+		// reachable this way and are not worth a special case: no supported
+		// image ships them.
+		//
+		// testing and sid carry NO VERSION_ID at all, and OSV publishes no
+		// ecosystem for them, so they fall through to the error below. That is
+		// deliberate: a scan of a sid image must say it could not be checked,
+		// because inventing Debian:14 for it would compare against a release
+		// whose fixed versions are not the ones sid ships.
+		if d.VersionID == "" {
+			return "", fmt.Errorf("%w: distro %q has no VERSION_ID (testing or sid), "+
+				"and OSV publishes no ecosystem for it", ErrNoEcosystem, d.ID)
+		}
+		major, _, _ := strings.Cut(d.VersionID, ".")
+		if !allDigits(major) {
+			return "", fmt.Errorf("%w: distro %q version %q is not a numbered release",
+				ErrNoEcosystem, d.ID, d.VersionID)
+		}
+		return "Debian:" + major, nil
+	default:
 		return "", fmt.Errorf("%w: distro %q is not supported yet", ErrNoEcosystem, d.ID)
 	}
 

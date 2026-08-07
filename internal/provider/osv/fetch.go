@@ -34,7 +34,13 @@ const DefaultBaseURL = "https://osv-vulnerabilities.storage.googleapis.com"
 // ("Alpine:v3.19"), only the archive PATH is not. See familyMatches in
 // record.go for how Convert reconciles a bare "Alpine" want against those
 // release-qualified keys.
-var Ecosystems = []string{"Go", "npm", "PyPI", "Alpine"}
+//
+// "Debian" joins them on the same terms and for the same reason: one archive
+// path, release-qualified keys inside it ("Debian:12"). It is the largest of
+// the five — 62,318 records against Alpine's 4,405 — and unlike Alpine its
+// per-release archives are current, but a single fetch is still fewer requests
+// and one freshness timestamp instead of four.
+var Ecosystems = []string{"Go", "npm", "PyPI", "Alpine", "Debian"}
 
 type Provider struct {
 	ecosystems []string
@@ -74,8 +80,12 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		// advisories. Building a database that silently has none turns every
 		// later Alpine scan into a clean report at exit 0 — the same failure
 		// discovery's hard-fail existed to prevent, one layer further in.
-		if eco == "Alpine" && n == 0 {
-			return store.Provenance{}, fmt.Errorf("fetch %s: archive yielded no Alpine:* records", eco)
+		// The same guard for both distro archives. Zero matching records means
+		// the family match broke or the archive's shape changed, not that the
+		// distro has no advisories — and a database that silently has none
+		// turns every later scan of that distro into a clean report at exit 0.
+		if (eco == "Alpine" || eco == "Debian") && n == 0 {
+			return store.Provenance{}, fmt.Errorf("fetch %s: archive yielded no %s:* records", eco, eco)
 		}
 		prov.Records += n
 		for e := range covered {

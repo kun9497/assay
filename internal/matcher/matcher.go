@@ -345,6 +345,31 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 
 		for _, lookupName := range names {
 			wantName := pkgmeta.NormalizeName(p.Ecosystem, lookupName)
+			// D41: compare the version that belongs to the NAME which reached
+			// the advisory.
+			//
+			// The comment above says an Alpine binary package carries its
+			// source package's version, and that is true — it is why indirect
+			// matching needed no version adjustment when D8 was written. Debian
+			// breaks it. A binNMU rebuilds a binary without touching the
+			// source, so bookworm's bash is binary 5.2.15-2+b13 from source
+			// 5.2.15-2, and bsdutils is binary 1:2.38.1-5+deb12u3 from source
+			// 2.38.1-5+deb12u3 — the source version drops an epoch the binary
+			// carries. 13-15% of Debian packages differ this way.
+			//
+			// OSV's Debian advisories are written against the source and carry
+			// SOURCE fixed versions (every packaged purl in the archive is
+			// ?arch=source). Comparing a binary version against one of those is
+			// comparing across namespaces: two strings from different counters
+			// that happen to look alike.
+			//
+			// Empty means "the same as the binary version", which is what
+			// dpkg-gencontrol omits the field to say and what apk's origin
+			// always implies — so Alpine reaches the same answer it did before.
+			compareVersion := p.Version
+			if lookupName != p.Name && p.Source != nil && p.Source.Version != "" {
+				compareVersion = p.Source.Version
+			}
 			candidates, err := m.store.Lookup(p.Ecosystem, lookupName)
 			if err != nil {
 				// A store error is not a clean result. Fail the whole scan
@@ -371,7 +396,7 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 						pkgmeta.NormalizeName(aff.Ecosystem, aff.Name) != wantName {
 						continue
 					}
-					hit, ev, unreadable, err := version.AffectsVersion(cmp, p.Version, aff)
+					hit, ev, unreadable, err := version.AffectsVersion(cmp, compareVersion, aff)
 					// D30: the advisory WAS evaluated, and some enumerated
 					// version in it was not. That is a third state — neither a
 					// clean verdict nor a skipped advisory — and it is recorded
