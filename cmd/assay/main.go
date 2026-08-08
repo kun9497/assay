@@ -104,16 +104,13 @@ Environment (db build only — a scan reads no environment and no network):
   NVD_API_KEY=<key>     Raise NVD's rate limit tenfold. Optional, and it does
                         not shorten the seven hours; NVD's own response
                         generation is the bottleneck, not the pacing.
-  REDHAT_ENABLE=1       Also fetch Red Hat's CSAF VEX feed, which is the only
-                        source that can say a RHEL package is affected and
-                        WILL NOT BE FIXED. OSV's Red Hat export is errata-only
-                        and cannot express that at all, so without this a scan
-                        reports 21,938 such CVEs as clean (D43, D48).
-                        Off by default for size, not for licensing: the feed is
-                        TLP:WHITE and freely redistributable, but the archive is
-                        262 MB compressed / 17.1 GB streamed and contributes
-                        about 1.9 million affected entries, two thirds of which
-                        no upgrade can resolve.
+  REDHAT_ENABLE=0       Skip Red Hat's CSAF VEX feed. ON BY DEFAULT (D51): it
+                        is the only source that can say a RHEL package is
+                        affected and WILL NOT BE FIXED, and the published
+                        artifact carries it, so a build without it produces a
+                        narrower database than db update delivers.
+                        Set this to 0 for a local build that does not scan RHEL
+                        and wants to be about twenty minutes shorter.
   KISA_ENABLE=0         Skip KISA/KNVD's Korean security notices. ON BY
                         DEFAULT (D37): attaching them is what this project was
                         built for, and leaving it to a flag meant the flagship
@@ -393,25 +390,18 @@ var newRedHatProvider = redhat.New
 
 // dbUpdateProviders is every provider.Provider `db build` runs.
 //
-// OSV is unconditional. Red Hat is opt-in via REDHAT_ENABLE, and the reasoning
-// is a third one, different from both NVD's and KISA's:
+// Both are on by default. Red Hat was opt-in when it landed, on the grounds
+// that it adds ~1.9 million affected entries for people who may never scan a
+// RHEL image — and D51 reversed that once the published artifact started
+// carrying it. A default that disagreed with the artifact would mean `db
+// build` and `db update` produce different databases, and `db push` would
+// refuse the narrower one.
 //
-//   - Not redistribution. The feed is TLP:WHITE on all 67,261 documents, so
-//     unlike KISA (D29) whatever is built from it can be published.
-//   - Not runtime either, quite. The archive is 262 MB compressed and 17.1 GB
-//     decompressed and takes about ninety seconds to stream, which is
-//     noticeable but nothing like NVD's seven hours.
-//
-// What makes it opt-in is SIZE OF RESULT. It contributes roughly 1.9 million
-// affected entries against the OSV corpus's whole database, and two thirds of
-// them are records that can never be resolved by upgrading — a RHEL host is
-// simply affected. Turning that on for everyone by default would change what
-// `assay db update` produces for people who never scan a RHEL image, and D37's
-// argument for defaulting KISA ON was precisely that it costs almost nothing
-// and changes nothing for anyone not looking at it. This is the opposite case.
+// REDHAT_ENABLE=0 still turns it off, for a local build that wants to be
+// twenty minutes shorter and does not care about RHEL.
 func dbUpdateProviders(stderr io.Writer) []provider.Provider {
 	ps := []provider.Provider{osv.New(osv.Ecosystems, "")}
-	if envFlag(stderr, "REDHAT_ENABLE", false) {
+	if envFlag(stderr, "REDHAT_ENABLE", true) {
 		// Progress goes to stderr for nvd's reason: this provider discards the
 		// large majority of what it reads, and a run that printed nothing
 		// about it would be indistinguishable from one that was broken.

@@ -18,8 +18,8 @@ container images, Go binaries and directories, matches them, and returns a verdi
 gate on. A finding carries every source's rating and the gate takes the highest (D25).
 Incompleteness carries a cause, and `--fail-on-incomplete=target` gates only on what the
 caller can fix (D36). Alpine, Debian and RHEL images scan end to end. RHEL takes its advisories from Red Hat's CSAF
-VEX feed rather than OSV, behind `REDHAT_ENABLE` (D47–D49), because the OSV Red Hat export is
-errata-only and cannot say "affected, will not fix" — two thirds of what Red Hat publishes
+VEX feed rather than OSV (D47–D49, on by default and carried by the published artifact since
+D51), because the OSV Red Hat export is errata-only and cannot say "affected, will not fix" — two thirds of what Red Hat publishes
 about its own packages. Those findings are reported and counted always and gated only by
 `--fail-on-unfixable` (D48), and only `rhel` routes to `Red Hat:N` (D50): Alma, Rocky, CentOS,
 Fedora and Amazon Linux are catalogued and reported as not evaluated. Both rpmdb backends are read — SQLite for RHEL 9+ and BerkeleyDB for RHEL 8 and older

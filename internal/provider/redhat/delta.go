@@ -70,33 +70,19 @@ func (p *Provider) deltaSince(ctx context.Context, cutoff time.Time,
 				"merely lagging", len(paths), cutoff.Format("2006-01-02"), maxDelta)
 	}
 
-	for _, rel := range paths {
-		// A TRUE EQUIVALENT, recorded rather than left as a suspicious no-op:
-		// deleting it survives the test table, because document() derives its
-		// own request context from this one and a cancelled context fails the
-		// very next fetch anyway. It stays for two reasons — it matches the
-		// archive loop's shape one function over, and it stops BETWEEN
-		// documents rather than inside a request, so cancellation surfaces as
-		// a context error instead of a transport one.
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		d, err := p.document(ctx, rel)
-		if err != nil {
-			return err
-		}
+	return p.eachDocument(ctx, paths, func(rel string, d *document) error {
 		if d == nil {
 			// The document is listed and no longer served. changes.csv and
 			// deletions.csv are written separately, so a document withdrawn
 			// between the two being generated is a race rather than a fault —
 			// counted, and not a reason to fail a build.
 			st.DeltaGone++
-			continue
+			return nil
 		}
 		st.DeltaFetched++
 		adv, ok := convert(d, st)
 		if !ok {
-			continue
+			return nil
 		}
 		for _, a := range adv.Affected {
 			covered[a.Ecosystem] = true
@@ -105,6 +91,92 @@ func (p *Provider) deltaSince(ctx context.Context, cutoff time.Time,
 			return err
 		}
 		st.DeltaAdvisories++
+		return nil
+	})
+}
+
+// deltaWorkers is how many documents are fetched at once.
+//
+// Sequentially, 1,827 documents took about nineteen minutes — the requests are
+// latency-bound, not bandwidth-bound, so the machine spends almost all of it
+// waiting. Eight is enough to make the pass a few minutes without being rude to
+// a service that is giving the data away, and it is what lets the daily publish
+// job fit its timeout at all.
+const deltaWorkers = 8
+
+// eachDocument fetches paths concurrently and hands them to fn IN ORDER.
+//
+// The ordering is not cosmetic. Documents are emitted in the order the caller
+// receives them, and the store's last-write-wins is what makes a re-emitted
+// advisory replace its own record — so an out-of-order pass would make which
+// version survives depend on which request happened to finish first.
+//
+// At most deltaWorkers fetches are outstanding OR waiting to be consumed. The
+// semaphore is released by the CONSUMER rather than by the fetching goroutine,
+// which is the part that bounds memory: releasing on completion would let a
+// slow document at the front of the queue accumulate every later result behind
+// it, and a single CSAF document can be 94 MB.
+func (p *Provider) eachDocument(ctx context.Context, paths []string,
+	fn func(rel string, d *document) error) error {
+
+	type result struct {
+		doc *document
+		err error
+	}
+	// Cancelled on the way out, so a failure stops the fetches still running
+	// rather than leaving them to finish into a slice nobody reads.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	sem := make(chan struct{}, deltaWorkers)
+	slots := make([]chan result, len(paths))
+	for i := range slots {
+		slots[i] = make(chan result, 1)
+	}
+	go func() {
+		for i, rel := range paths {
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			go func(i int, rel string) {
+				d, err := p.document(ctx, rel)
+				slots[i] <- result{d, err}
+			}(i, rel)
+		}
+	}()
+
+	for i, rel := range paths {
+		// Checked BEFORE the select, not only inside it. A select whose cases
+		// are both ready picks at RANDOM, so the ctx.Done() arm alone makes
+		// cancellation probabilistic rather than prompt: with results already
+		// buffered the loop kept consuming, and the test asserting otherwise
+		// failed three runs in ten. With this check it is 12 for 12.
+		//
+		// The two are redundant for CORRECTNESS and a mutation of either
+		// survives, which is recorded here rather than left to be rediscovered:
+		// delete this and the select still stops eventually, delete the select
+		// arm and this still stops. What only this one gives is stopping at a
+		// known point, and a flaky test is worse than no test.
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var r result
+		select {
+		case r = <-slots[i]:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		// Every slot that can be received from was spawned, and every spawn
+		// took a token, so this cannot block.
+		<-sem
+		if r.err != nil {
+			return r.err
+		}
+		if err := fn(rel, r.doc); err != nil {
+			return err
+		}
 	}
 	return nil
 }
