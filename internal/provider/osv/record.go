@@ -7,6 +7,7 @@ package osv
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -53,6 +54,27 @@ type rawEvent struct {
 type rawSeverity struct {
 	Type  string `json:"type"`
 	Score string `json:"score"`
+}
+
+// mainlineUbuntuKey is the only Ubuntu shape this build ingests: a long-term
+// release carries the suffix, an interim one does not. It is deliberately a
+// copy of the pattern in internal/version rather than an import — that one
+// decides what a scan can COMPARE, this one decides what a build STORES, and
+// a single shared constant would make the two look like one decision when
+// either could legitimately move without the other.
+var mainlineUbuntuKey = regexp.MustCompile(`^Ubuntu:[0-9]{2}\.[0-9]{2}(:LTS)?$`)
+
+// ubuntuLineage reports whether a key names one of the Ubuntu lineages this
+// build does not ingest — Pro, FIPS, FIPS-updates, FIPS-preview, Realtime,
+// Nvidia-BlueField, and whatever OSV adds next.
+//
+// Written as "Ubuntu but not mainline" rather than as a list of the six
+// families, because OSV's schema documents only the bare :Pro: prefix. The
+// other spellings are convention, two non-canonical shapes are already in
+// the live export (Ubuntu:22.04:LTS:for:NVIDIA:BlueField), and a list would
+// silently start storing whatever family is invented next.
+func ubuntuLineage(ecosystem string) bool {
+	return strings.HasPrefix(ecosystem, "Ubuntu") && !mainlineUbuntuKey.MatchString(ecosystem)
 }
 
 // familyMatches reports whether a record's affected ecosystem key belongs to
@@ -152,6 +174,26 @@ func Convert(data []byte, wantEcosystem string) (advisory.Advisory, bool, error)
 		// Selecting the right entries is the matcher's job, and it already
 		// filters on ecosystem and name. This also restores D13.
 		if ra.Package.Name == "" {
+			continue
+		}
+		// The one exception to the paragraph above, and it is safe for the
+		// reason that paragraph gives rather than in spite of it (D53).
+		//
+		// What made stripping lossy was that another PASS had already
+		// indexed the entries being dropped. No pass ever indexes an Ubuntu
+		// lineage key: Ecosystems never names one, familyMatches can never
+		// return true for one, and version.For refuses to resolve one. An
+		// entry dropped here is therefore unreachable by construction, not
+		// merely unreached today.
+		//
+		// It is dropped on EVERY fetch rather than only the Ubuntu one, so
+		// the invariant does not depend on pass ordering.
+		//
+		// This is also what makes the corpus affordable. Ubuntu records carry
+		// 38.9 affected entries each against Debian's 3.4 — 6.03 GB unpacked
+		// against 254 MB — and the multiplier is one entry per
+		// (lineage x release x binary package), not longer version lists.
+		if ubuntuLineage(ra.Package.Ecosystem) {
 			continue
 		}
 		if familyMatches(ra.Package.Ecosystem, wantEcosystem) {
