@@ -206,6 +206,15 @@ func fixStateOf(ev version.Evidence) advisory.FixState {
 	if ev.Fixed != "" {
 		return advisory.FixStateFixed
 	}
+	// Redundant with advisory.FixState.String(), which resolves the same
+	// empty string at every render boundary, and a mutation of either one
+	// survives — stated here rather than left for someone to find and
+	// delete as dead. They guard different things. String() keeps the
+	// PUBLISHED document honest whatever reaches it; this keeps
+	// matcher.Rating.FixState itself one of the four words, so a future
+	// consumer reading the field directly — an --explain renderer, a
+	// second gate — does not have to know that the store spells unknown
+	// as nothing at all.
 	if ev.FixState == "" {
 		return advisory.FixStateUnknown
 	}

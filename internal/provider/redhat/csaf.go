@@ -527,6 +527,13 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 			if len(r.GroupIDs) > 0 {
 				st.RemediationGrouped++
 			}
+			// A filter for memory, not for correctness, and a mutation of it
+			// survives the whole test table: fixStateFor reads only the two
+			// keys it names, so letting vendor_fix and workaround into the map
+			// changes no answer. What it changes is the map's size on a feed
+			// where those two are 74% of all remediation objects (114,155 of
+			// 154,795). Recorded here rather than left to read as an untested
+			// branch forever.
 			if r.Category != remedyNoFixPlanned && r.Category != remedyNoneAvailable {
 				continue
 			}
