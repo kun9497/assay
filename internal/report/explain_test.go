@@ -560,7 +560,26 @@ func TestExplain_SingleSourceShowsAnnotationAndOneLine(t *testing.T) {
 // version.For ever starts (or stops) recognizing an ecosystem, this table
 // must be updated in the same commit, or this test goes red.
 func TestComparerName_AgreesWithVersionFor(t *testing.T) {
-	for _, eco := range []string{"Go", "npm", "PyPI", "Alpine:v3.19", "Alpine:v3.99", "Alpine:", "bogus-eco"} {
+	// Every ecosystem key this project can BUILD, plus the malformed ones
+	// that must stay unresolved. The list was {Go, npm, PyPI, Alpine:*}
+	// and stayed that way through Debian (D31) and Red Hat (D47), so for
+	// two slices --explain printed "comparer: unknown" on every distro
+	// finding while the matcher was using deb and rpm — and this test,
+	// which exists for exactly that drift, could not see it: a guard is
+	// not held by naming the right thing, only by covering the input that
+	// breaks it. A new distro family belongs in this list in the same
+	// commit that teaches version.For about it.
+	for _, eco := range []string{
+		"Go", "npm", "PyPI",
+		"Alpine:v3.19", "Alpine:v3.99",
+		"Debian:12", "Debian:forky",
+		"Red Hat:8", "Red Hat:9", "Red Hat:10",
+		// Bare family names and empty releases resolve nowhere, by D6:
+		// letting one through would make a bug that dropped the release
+		// look like it worked.
+		"Alpine:", "Debian:", "Red Hat:",
+		"Alpine", "Debian", "Red Hat", "bogus-eco",
+	} {
 		_, ok := version.For(eco)
 		name := comparerName(eco)
 		if ok && name == "unknown" {
