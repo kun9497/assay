@@ -574,10 +574,12 @@ func TestComparerName_AgreesWithVersionFor(t *testing.T) {
 		"Alpine:v3.19", "Alpine:v3.99",
 		"Debian:12", "Debian:forky",
 		"Red Hat:8", "Red Hat:9", "Red Hat:10",
+		"Ubuntu:22.04:LTS", "Ubuntu:24.04:LTS", "Ubuntu:25.10",
 		// Bare family names and empty releases resolve nowhere, by D6:
 		// letting one through would make a bug that dropped the release
 		// look like it worked.
 		"Alpine:", "Debian:", "Red Hat:",
+		"Ubuntu:", "Ubuntu:Pro:22.04:LTS", "Ubuntu:Pro:FIPS-updates:18.04:LTS",
 		"Alpine", "Debian", "Red Hat", "bogus-eco",
 	} {
 		_, ok := version.For(eco)
