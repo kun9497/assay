@@ -53,7 +53,16 @@ import (
 // schema-6 database has no such bucket, and a missing bucket read as "nothing
 // enriched" is indistinguishable from a scan that ran before KISA prose
 // existed at all.
-const SchemaVersion = 7
+//
+// Bumped to 8 to add Range.FixState (D52) — Red Hat's own statement that a
+// package will never be fixed, which no shape the store had could express. A
+// schema-7 database carries the field empty on every range, and empty means
+// "the source did not say": the whole feed would read as unknown, so the
+// distinction would be silently absent from a database that otherwise looks
+// current. That is the same failure the bump to 4 exists for — a field present
+// and well-formed, only wrong — and a schema change is the only signal that
+// reaches a database already on disk.
+const SchemaVersion = 8
 
 var (
 	ErrNotFound       = errors.New("vulnerability database not found")

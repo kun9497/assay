@@ -327,7 +327,7 @@ want resuming, not the archive read.
 
 ---
 
-### Red Hat's fix state is collapsed to "there is no fix"
+### ~~Red Hat's fix state is collapsed to "there is no fix"~~ — resolved in slice ⓱ (D52)
 
 **Why deferred.** CSAF distinguishes remediation categories that this provider does not keep.
 Archive-wide there are 22,289 `no_fix_planned` and 16,935 `none_available` remediations, and
@@ -339,12 +339,29 @@ The two mean different things to a reader. "Red Hat has decided not to fix this"
 the only remaining moves are mitigation or removal; "no fix yet" is a reason to watch the CVE.
 Collapsing them loses an action, not just a label.
 
-**Why it was not done now.** D48 chose the OSV range shape — an `introduced` event and no
-`fixed` one — precisely because it needed no schema change, and that shape has nowhere to put
-a reason. Carrying it means either a field on `advisory.Range` or a per-advisory annotation,
-and either is a store change that D5 turns into a schema bump and a rebuild.
+**Why it was deferred.** D48 chose the OSV range shape — an `introduced` event and no `fixed`
+one — precisely because it needed no schema change, and that shape had nowhere to put a
+reason. Carrying it meant a store change that D5 turns into a schema bump and a rebuild, and the
+revisit trigger was "when the store next changes shape for another reason".
 
-**Revisit when** the store next changes shape for another reason, so the two land together.
+**Resolved 2026-08-10**, and not by that trigger — nothing else wanted a schema change. It was
+done on its own merits once the cost of leaving it was measured against the cost of moving: a
+rebuild for everyone, against a distinction that turns out to apply to **every** unfixable Red
+Hat finding rather than to a fraction of them.
+
+The number that decided it was coverage, not the split. Of the 1,282,093 mainline
+(CVE, ecosystem, package) tuples with no fixed version in the 2026-08-09 archive, every single
+one is named by a `no_fix_planned` or `none_available` remediation — zero carry neither. Had a
+large fraction been uncategorised, most findings would have stayed "no fix available" whatever
+the schema did, and the rebuild would have bought a label for a minority.
+`stats.UnfixableUnstated` counts that bucket on every sync, so the day it stops being zero is
+visible rather than inferred.
+
+The field went on `advisory.Range` rather than on the advisory, because a package can be fixed
+on one release and permanently affected on another and both ranges are emitted side by side.
+The gate is a scope on the existing flag — `--fail-on-unfixable=wont-fix`, following D36's
+`--fail-on-incomplete=target` — so no existing CI changed behaviour. See D52 for the tie-break
+on the 179 packages Red Hat tags both ways, and for why `fixed` is derived rather than stored.
 
 ---
 

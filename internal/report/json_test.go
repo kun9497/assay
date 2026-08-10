@@ -227,9 +227,15 @@ func TestJSON_SchemaVersionIsPresentAndStable(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
 		t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())
 	}
-	if doc.SchemaVersion != 5 {
-		t.Errorf("SchemaVersion = %d, want 4 — bumped when EnrichmentRecord "+
-			"gained `cause` and Summary gained `targetIncomplete` (D36)", doc.SchemaVersion)
+	// Pinned against the package constant rather than a second literal. The
+	// two were separate numbers until D52 and drifted the moment D48 bumped
+	// one of them: this assertion still read `want 4` while comparing against
+	// 5, so its failure message named a version nothing had used for two
+	// slices. A message that can go stale independently of what it asserts is
+	// worse than no message.
+	if doc.SchemaVersion != schemaVersion {
+		t.Errorf("SchemaVersion = %d, want %d — bump the constant and this "+
+			"document's own changelog together", doc.SchemaVersion, schemaVersion)
 	}
 }
 
@@ -518,6 +524,111 @@ func TestJSON_UnknownSeverityIsNotCoerced(t *testing.T) {
 // jq is the stated use case for --output json — the one fixture the golden
 // test exercises always has two of each, so a nil-slice regression there
 // would go unnoticed without a dedicated empty-input case.
+// D52: FixState flows from Range through Rating to the JSON document,
+// spelled as one of the four words — never an empty string, never omitted —
+// on both the finding (the strongest claim any source made) and each of its
+// ratings (what that one source said). Table-driven over the four states.
+func TestJSON_FixStateIsOneOfFourWordsOnEveryFindingAndRating(t *testing.T) {
+	find := func(id string, rating matcher.Rating) matcher.Finding {
+		return matcher.Finding{
+			Package:  pkgmeta.Package{Name: id, Version: "1", Ecosystem: "Red Hat:9"},
+			Advisory: advisory.Advisory{ID: id},
+			Severity: severity.High,
+			Score:    7.5,
+			Ratings:  []matcher.Rating{rating},
+		}
+	}
+	res := matcher.Result{Findings: []matcher.Finding{
+		{
+			Package:  pkgmeta.Package{Name: "fixed", Version: "1", Ecosystem: "Go"},
+			Advisory: advisory.Advisory{ID: "RH-FIXED-1"},
+			Evidence: version.Evidence{Fixed: "2.0.0"},
+			Severity: severity.High,
+			Score:    7.5,
+			Ratings:  []matcher.Rating{{Database: "GHSA", AdvisoryID: "RH-FIXED-1", Fixed: "2.0.0"}},
+		},
+		// FixState left at its zero value — the ordinary case for every
+		// provider but Red Hat's CSAF VEX feed.
+		find("RH-UNKNOWN-1", matcher.Rating{Database: "OSV", AdvisoryID: "RH-UNKNOWN-1"}),
+		find("RH-NOTFIXED-1", matcher.Rating{Database: "REDHAT", AdvisoryID: "RH-NOTFIXED-1", FixState: advisory.FixStateNotFixed}),
+		find("RH-WONTFIX-1", matcher.Rating{Database: "REDHAT", AdvisoryID: "RH-WONTFIX-1", FixState: advisory.FixStateWontFix}),
+	}}
+	var buf bytes.Buffer
+	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 4, Cataloged: 4}); err != nil {
+		t.Fatal(err)
+	}
+	var doc Document
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if len(doc.Findings) != 4 {
+		t.Fatalf("Findings = %d, want 4", len(doc.Findings))
+	}
+	byID := make(map[string]FindingRecord, len(doc.Findings))
+	for _, f := range doc.Findings {
+		byID[f.Advisory.ID] = f
+	}
+	for _, tt := range []struct{ id, want string }{
+		{"RH-FIXED-1", "fixed"},
+		{"RH-UNKNOWN-1", "unknown"},
+		{"RH-NOTFIXED-1", "not-fixed"},
+		{"RH-WONTFIX-1", "wont-fix"},
+	} {
+		f, ok := byID[tt.id]
+		if !ok {
+			t.Fatalf("no finding for %q in %+v", tt.id, byID)
+		}
+		if f.FixState != tt.want {
+			t.Errorf("%s: FindingRecord.FixState = %q, want %q", tt.id, f.FixState, tt.want)
+		}
+		if len(f.Ratings) != 1 {
+			t.Fatalf("%s: Ratings = %d entries, want 1", tt.id, len(f.Ratings))
+		}
+		if got := f.Ratings[0].FixState; got != tt.want {
+			t.Errorf("%s: RatingRecord.FixState = %q, want %q", tt.id, got, tt.want)
+		}
+	}
+}
+
+// D52: RatingRecord.FixState is r.FixState.String(), not string(r.FixState)
+// — the difference shows only on the store's own empty-string spelling of
+// unknown (advisory.go's own doc comment on FixStateUnknown), and unmarshalling
+// into the struct cannot tell "the encoder wrote an empty string" apart from
+// "the encoder wrote nothing at all"; a zero-value Go string field reads back
+// identically either way. Checked against the raw bytes for exactly that
+// reason.
+func TestJSON_RatingFixStateResolvesTheStoredEmptyStringToUnknown(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{ID: "RH-ZERO-VALUE-1"},
+		Severity: severity.High,
+		Score:    7.5,
+		// FixState left at its zero value on purpose — the STORED spelling
+		// of unknown (D52), not the already-resolved word.
+		Ratings: []matcher.Rating{{Database: "OSV", AdvisoryID: "RH-ZERO-VALUE-1"}},
+	}}}
+	var buf bytes.Buffer
+	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if strings.Contains(out, `"fixState": ""`) {
+		t.Errorf("a stored zero-value FixState was written to JSON as an empty string, "+
+			"not resolved to \"unknown\":\n%s", out)
+	}
+	// Two fixState keys in this document: one on the finding, one on its
+	// single rating. Counting them catches a key silently omitted, which a
+	// struct-unmarshal check (nil vs "") cannot distinguish from "present and
+	// empty".
+	if n := strings.Count(out, `"fixState"`); n != 2 {
+		t.Errorf(`"fixState" key appears %d times, want 2 (finding + one rating) — `+
+			"present on both, never omitted:\n%s", n, out)
+	}
+	if n := strings.Count(out, `"fixState": "unknown"`); n != 2 {
+		t.Errorf(`"fixState": "unknown" appears %d times, want 2:\n%s`, n, out)
+	}
+}
+
 func TestJSON_EmptyResultHasEmptyArraysNotNull(t *testing.T) {
 	var buf bytes.Buffer
 	if _, err := JSON(&buf, matcher.Result{}, cyclonedx.Stats{}); err != nil {

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"github.com/kun9497/assay/internal/matcher"
 	"github.com/kun9497/assay/internal/severity"
@@ -49,6 +50,15 @@ type Summary struct {
 	// affected entries it publishes say a package is affected at every version
 	// and there is nothing to move to.
 	Unfixable int `json:"unfixable"`
+	// WontFix is the subset of Unfixable whose vendor has said it will stay
+	// that way (D52) — findings where waiting is not a strategy. Populated
+	// whether or not it is zero, for the same reason Unfixable is:
+	// `--fail-on-unfixable=wont-fix` reads it directly.
+	//
+	// Only Red Hat's CSAF VEX feed distinguishes these today, so this is zero
+	// on a target with no RHEL packages. It runs 3-12% of Unfixable on the RHEL
+	// images measured: 11 of 416 on ubi9:9.3, 59 of 505 on ubi8:8.9.
+	WontFix int `json:"wontFix"`
 }
 
 // Trustworthy reports whether the run produced a result worth acting on. A scan
@@ -81,9 +91,10 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 		// would reach the stream, and design goal #3 is output that does not
 		// churn between runs.
 		var enrichedBy []string
-		// noFix is the same idea again: the footnote explaining the FIXED IN
-		// cell is printed at most once, and only when a row earned it.
-		noFix := false
+		// noFix is the same idea again, one entry per FIXED IN cell a row
+		// earned, so the three no-fix footnotes each appear at most once and
+		// only when something on the table needs them (D52).
+		noFix := map[advisory.FixState]bool{}
 		for _, f := range res.Findings {
 			fixed := f.Evidence.Fixed
 			if fixed == "" {
@@ -97,8 +108,13 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 				// data.
 				fixed = "-"
 				if f.Unfixable() {
-					fixed = noFixCell
-					noFix = true
+					// D52 splits this cell three ways. "no fix yet" and
+					// "won't fix" are different instructions, not different
+					// wordings: one is a reason to watch the advisory, the
+					// other says watching will never pay off.
+					state := f.FixState()
+					fixed = noFixCells[state]
+					noFix[state] = true
 				}
 			}
 			// Other identifiers are printed because dedup keeps only one record
@@ -157,9 +173,12 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 		if err := tw.Flush(); err != nil {
 			return Summary{}, err
 		}
-		if noFix {
-			fmt.Fprintf(w, "%s = no source records a version that fixes this; "+
-				"mitigate or remove the package\n", noFixCell)
+		// Ranged over a fixed slice rather than the map, so two runs over one
+		// result print the footnotes in the same order (design goal #3).
+		for _, s := range noFixOrder {
+			if noFix[s] {
+				fmt.Fprintf(w, "%s = %s\n", noFixCells[s], noFixFootnotes[s])
+			}
 		}
 		if disagreement {
 			fmt.Fprintf(w, "%s sources disagree on severity; see --explain <id> for the detail\n", disagreementMarker)
@@ -229,8 +248,9 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 	// non-zero is one readers learn to stop checking for, and this one gates
 	// an exit code.
 	fmt.Fprintf(w, "\n%d component(s) seen, %d evaluated, %d finding(s), %d not evaluated, "+
-		"%d unknown severity, %d with no fix available\n",
-		cat.Components, evaluated, len(res.Findings), notEvaluated, unknownSeverity, sum.Unfixable)
+		"%d unknown severity, %d with no fix available (%d will not be fixed)\n",
+		cat.Components, evaluated, len(res.Findings), notEvaluated, unknownSeverity,
+		sum.Unfixable, sum.WontFix)
 
 	// Gated on both counts. Keying only on notEvaluated hid every
 	// advisory-scoped skip whenever the rest of the document was fully
@@ -318,7 +338,7 @@ func Summarize(res matcher.Result, cat cyclonedx.Stats) Summary {
 
 	// Counted unconditionally (D17): a threshold that hides how much it could
 	// not judge is not a threshold.
-	var unknownSeverity, unfixable int
+	var unknownSeverity, unfixable, wontFix int
 	for _, f := range res.Findings {
 		if f.Severity == severity.Unknown {
 			unknownSeverity++
@@ -328,6 +348,11 @@ func Summarize(res matcher.Result, cat cyclonedx.Stats) Summary {
 		// means.
 		if f.Unfixable() {
 			unfixable++
+			// D52, counted alongside for the same reason: the gate reads this
+			// number, so a renderer must not be the one deciding what it means.
+			if f.FixState() == advisory.FixStateWontFix {
+				wontFix++
+			}
 		}
 	}
 
@@ -340,6 +365,7 @@ func Summarize(res matcher.Result, cat cyclonedx.Stats) Summary {
 		Findings:         len(res.Findings),
 		UnknownSeverity:  unknownSeverity,
 		Unfixable:        unfixable,
+		WontFix:          wontFix,
 	}
 }
 
@@ -350,11 +376,38 @@ func Summarize(res matcher.Result, cat cyclonedx.Stats) Summary {
 // is plain ASCII already — a two-column-wide glyph that some terminals
 // render as one throws off every column after it, which is exactly the
 // misalignment cellAt's own doc comment warns a reader cannot see happen.
-// noFixCell is what the FIXED IN column shows when no source named a version
-// to upgrade to (D48). A word rather than a glyph: this cell is what a reader
-// acts on, and "there is no fix" is worth spelling out where "sources
-// disagree about severity" is worth a marker and a footnote.
-const noFixCell = "none"
+// noFixCells is what the FIXED IN column shows when no source named a version
+// to upgrade to (D48), split by the reason (D52). Words rather than glyphs:
+// this cell is what a reader acts on, and "there is no fix" is worth spelling
+// out where "sources disagree about severity" is worth a marker and a footnote.
+//
+// "none" keeps the meaning it had before the split — no source named a version
+// and none said why — so a source that publishes no fix state reads exactly as
+// it did. Only Red Hat's feed populates the other two today.
+//
+// Unlike grype, which renders not-fixed and unknown as the same empty cell,
+// these are three visibly different strings. The distinction is the reason the
+// data is carried at all; collapsing two thirds of it back at the last step
+// would leave the reader where they started.
+var noFixCells = map[advisory.FixState]string{
+	advisory.FixStateUnknown:  "none",
+	advisory.FixStateNotFixed: "no fix yet",
+	advisory.FixStateWontFix:  "won't fix",
+}
+
+var noFixFootnotes = map[advisory.FixState]string{
+	advisory.FixStateUnknown: "no source records a version that fixes this; " +
+		"mitigate or remove the package",
+	advisory.FixStateNotFixed: "affected, with no fix published yet; " +
+		"watch the advisory",
+	advisory.FixStateWontFix: "the vendor has said this will not be fixed; " +
+		"mitigating or removing the package is the only remedy",
+}
+
+// noFixOrder fixes the footnote order, worst first.
+var noFixOrder = []advisory.FixState{
+	advisory.FixStateWontFix, advisory.FixStateNotFixed, advisory.FixStateUnknown,
+}
 
 const disagreementMarker = "*"
 

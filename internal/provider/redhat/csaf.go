@@ -57,6 +57,23 @@ type document struct {
 			Fixed         []string `json:"fixed"`
 			KnownAffected []string `json:"known_affected"`
 		} `json:"product_status"`
+		// Remediations is what makes D52's distinction possible. product_status
+		// says a package is affected; only this says whether Red Hat intends to
+		// do anything about it. The product ids are the same "platform:component"
+		// strings product_status uses, resolved through the same product_tree.
+		Remediations []struct {
+			Category   string   `json:"category"`
+			ProductIDs []string `json:"product_ids"`
+			// GroupIDs names a product_tree.product_groups entry instead of
+			// listing products. CSAF allows it; Red Hat does not use it — 0 of
+			// 63,152 documents in the 2026-08-09 archive carry one, and 0 carry
+			// a product_groups block to resolve it against. It is read only to
+			// be COUNTED (stats.RemediationGrouped), so that a feed which
+			// started using it would show up as a number climbing off zero
+			// rather than as fix states quietly going unstated. Expanding it
+			// against no data to test with would be the worse trade.
+			GroupIDs []string `json:"group_ids"`
+		} `json:"remediations"`
 		Scores []struct {
 			CVSSv3 struct {
 				VectorString string `json:"vectorString"`
@@ -225,15 +242,159 @@ func collectCPE(bs []branch, out map[string]string) {
 	}
 }
 
+// productKey is what one CSAF product id collapses to: the store's ecosystem
+// and the package name inside it.
+type productKey struct{ eco, pkg string }
+
+// skipReason names why a product id yields no key.
+//
+// It is RETURNED rather than counted at the point of failure because the two
+// callers want different things from the same parse. A product_status entry is
+// inventory and every discard is disclosed (stats exists for that). A
+// remediation naming a product outside the mainline slice is not a discard at
+// all — it is a statement about something this store never held — and counting
+// those in the same totals would roughly triple every skip line for no gain.
+type skipReason int
+
+const (
+	skipNone skipReason = iota
+	skipWholeProduct
+	skipBadProduct
+	skipImage
+	skipNoCPE
+	skipNonRHEL
+	skipModuleContext
+	skipModule
+)
+
+// resolveProduct turns "platform:component" into a key and an EVR.
+//
+// The order of the checks is load-bearing and matches the order the failures
+// occur in the data: separator, emptiness, image digest, platform CPE, mainline
+// filter, module context, then the name/EVR split. splitContext MUST stay ahead
+// of splitNEVRA for the reason splitContext documents.
+func resolveProduct(id string, cpe map[string]string) (productKey, string, skipReason) {
+	plat, comp, ok := strings.Cut(id, ":")
+	if !ok {
+		// No separator means the entry names a whole product and no package.
+		// See stats.SkippedWholeProduct.
+		return productKey{}, "", skipWholeProduct
+	}
+	if comp == "" {
+		return productKey{}, "", skipBadProduct
+	}
+	if strings.Contains(comp, "@sha256:") {
+		// A container image, identified by digest rather than by version.
+		// Nothing in the RPM inventory can match one.
+		return productKey{}, "", skipImage
+	}
+	c, ok := cpe[plat]
+	if !ok {
+		return productKey{}, "", skipNoCPE
+	}
+	eco, ok := ecosystemFor(c)
+	if !ok {
+		return productKey{}, "", skipNonRHEL
+	}
+	comp, context := splitContext(comp)
+	if context != "" {
+		// Module- and flatpak-scoped, and dropped for D47's reason: the scan
+		// cannot know which module streams are enabled, and a flatpak's
+		// contents are not in the rpmdb at all. Matching the bare name
+		// regardless of stream would be a false positive against a host running
+		// a different one, which is the same trade D47 refused for module FIXED
+		// versions.
+		return productKey{}, "", skipModuleContext
+	}
+	name, evr := splitNEVRA(stripArch(comp))
+	if name == "" {
+		return productKey{}, "", skipBadProduct
+	}
+	if isModule(evr) {
+		return productKey{}, "", skipModule
+	}
+	return productKey{eco, name}, evr, skipNone
+}
+
+// The two CSAF remediation categories that say why a package has no fix.
+//
+// The feed uses four of the spec's six. `vendor_fix` and `workaround` are read
+// and ignored on purpose: neither answers the question. A `vendor_fix` sitting
+// on a package that ALSO has no fix is the point-release collapse D47 already
+// documents — fixed on one channel, not on another, both folding into one
+// major — and a `workaround` is a second axis entirely, present alongside every
+// other category. Measured over the 2026-08-09 archive: of the 1,282,093
+// mainline (CVE, ecosystem, package) tuples with no fixed version, every single
+// one is named by no_fix_planned or none_available. Not one is left with only
+// vendor_fix or workaround to go on, which is why stats.UnfixableUnstated
+// reading zero is the expected result rather than a suspicious one.
+const (
+	remedyNoFixPlanned  = "no_fix_planned"
+	remedyNoneAvailable = "none_available"
+)
+
+// fixStateFor picks one state from the categories that named a package.
+//
+// no_fix_planned wins when a package carries both, and the tie is broken
+// deliberately rather than by whichever was read first (the discipline D25 sets
+// for severity). The two errors are not symmetric: calling a package
+// "won't fix" when a fix later arrives is a false alarm the reader dismisses on
+// the next scan, while calling it "no fix yet" when none is ever coming leaves
+// them waiting on a fix that does not exist — the quiet failure this provider
+// exists to prevent.
+//
+// The blast radius is small either way. 179 of the 1,282,093 unfixable tuples
+// in the 2026-08-09 archive carry both categories — 0.014% — and every one
+// sampled was kernel-rt on RHEL 9, a package that ships many parallel
+// point-release variants and is not present in a container image at all. The
+// count is disclosed so that a feed which started disagreeing with itself in
+// bulk would be visible rather than silently resolved 179 times over.
+func fixStateFor(cats map[string]bool, st *stats) advisory.FixState {
+	never, pending := cats[remedyNoFixPlanned], cats[remedyNoneAvailable]
+	if never && pending {
+		st.UnfixableBothReasons++
+	}
+	switch {
+	case never:
+		st.UnfixableWontFix++
+		return advisory.FixStateWontFix
+	case pending:
+		st.UnfixableNotFixed++
+		return advisory.FixStateNotFixed
+	default:
+		// Red Hat said the package is affected and gave no reason for there
+		// being no fix. Left unstated rather than guessed at (D17's rule for
+		// absent severity, applied to absent intent).
+		st.UnfixableUnstated++
+		return advisory.FixStateUnknown
+	}
+}
+
 // stats counts what one conversion pass discarded, so a sync can report it.
 // A provider that silently drops two thirds of its input is indistinguishable
 // from one that is broken.
 type stats struct {
-	Documents     int
-	Advisories    int
-	Affected      int
-	Unfixable     int // affected entries with no fixed version at all
-	SkippedModule int
+	Documents  int
+	Advisories int
+	Affected   int
+	Unfixable  int // affected entries with no fixed version at all
+	// The D52 split of Unfixable. The three are disjoint and sum to it, so a
+	// drift between them and the total is a bug rather than a rounding.
+	UnfixableWontFix  int // Red Hat said no fix is planned
+	UnfixableNotFixed int // Red Hat said none is available yet
+	// UnfixableUnstated is affected with no fix and no reason given. Zero on
+	// every archive measured; a non-zero one means the feed changed shape and
+	// the reasons stopped arriving, which is worth seeing rather than reading
+	// as "nothing to report".
+	UnfixableUnstated int
+	// UnfixableBothReasons overlaps UnfixableWontFix — it counts the packages
+	// Red Hat tagged both ways, which fixStateFor resolves toward wont-fix.
+	UnfixableBothReasons int
+	// RemediationGrouped counts remediations that name a product_groups entry
+	// instead of listing products. Zero on every archive measured; see the
+	// GroupIDs field for why it is counted rather than expanded.
+	RemediationGrouped int
+	SkippedModule      int
 	// SkippedModuleContext is an entry scoped to a module or flatpak by a "::"
 	// suffix. Counted apart from SkippedModule because the two are found
 	// differently — one by the release string, one by the product id — and a
@@ -299,12 +460,15 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 	// and affected records the ones with no fix. A package can appear in both
 	// — fixed on one minor release and unfixed on another — and both belong in
 	// the record.
-	type key struct{ eco, pkg string }
-	fixed := map[key]map[string]bool{}
-	unfixed := map[key]bool{}
-	order := []key{}
-	seen := map[key]bool{}
-	note := func(k key) {
+	fixed := map[productKey]map[string]bool{}
+	unfixed := map[productKey]bool{}
+	// remedy records which reasons Red Hat gave, per package, for a fix not
+	// existing. Filled from the remediation lists, which are a separate section
+	// of the document from product_status and join to it by product id.
+	remedy := map[productKey]map[string]bool{}
+	order := []productKey{}
+	seen := map[productKey]bool{}
+	note := func(k productKey) {
 		if !seen[k] {
 			seen[k] = true
 			order = append(order, k)
@@ -312,54 +476,30 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 	}
 
 	add := func(id string, isFixed bool) {
-		plat, comp, ok := strings.Cut(id, ":")
-		if !ok {
-			// No separator means the entry names a whole product and no
-			// package. See stats.SkippedWholeProduct.
+		k, evr, why := resolveProduct(id, cpe)
+		switch why {
+		case skipWholeProduct:
 			st.SkippedWholeProduct++
 			return
-		}
-		if comp == "" {
+		case skipBadProduct:
 			st.SkippedBadProduct++
 			return
-		}
-		if strings.Contains(comp, "@sha256:") {
-			// A container image, identified by digest rather than by version.
-			// Nothing in the RPM inventory can match one.
+		case skipImage:
 			st.SkippedImage++
 			return
-		}
-		c, ok := cpe[plat]
-		if !ok {
+		case skipNoCPE:
 			st.SkippedNoCPE++
 			return
-		}
-		eco, ok := ecosystemFor(c)
-		if !ok {
+		case skipNonRHEL:
 			st.SkippedNonRHEL++
 			return
-		}
-		comp, context := splitContext(comp)
-		if context != "" {
-			// Module- and flatpak-scoped, and dropped for D47's reason: the
-			// scan cannot know which module streams are enabled, and a flatpak's
-			// contents are not in the rpmdb at all. Matching the bare name
-			// regardless of stream would be a false positive against a host
-			// running a different one, which is the same trade D47 refused for
-			// module FIXED versions.
+		case skipModuleContext:
 			st.SkippedModuleContext++
 			return
-		}
-		name, evr := splitNEVRA(stripArch(comp))
-		if name == "" {
-			st.SkippedBadProduct++
-			return
-		}
-		if isModule(evr) {
+		case skipModule:
 			st.SkippedModule++
 			return
 		}
-		k := key{eco, name}
 		note(k)
 		if isFixed && evr != "" {
 			if fixed[k] == nil {
@@ -382,6 +522,27 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 		}
 		for _, id := range v.ProductStatus.KnownAffected {
 			add(id, false)
+		}
+		for _, r := range v.Remediations {
+			if len(r.GroupIDs) > 0 {
+				st.RemediationGrouped++
+			}
+			if r.Category != remedyNoFixPlanned && r.Category != remedyNoneAvailable {
+				continue
+			}
+			for _, id := range r.ProductIDs {
+				// Skips are not counted here; resolveProduct's doc comment says
+				// why. A remediation naming a product this store does not hold
+				// is not a discard.
+				k, _, why := resolveProduct(id, cpe)
+				if why != skipNone {
+					continue
+				}
+				if remedy[k] == nil {
+					remedy[k] = map[string]bool{}
+				}
+				remedy[k][r.Category] = true
+			}
 		}
 		for _, s := range v.Scores {
 			if s.CVSSv4.VectorString != "" {
@@ -424,9 +585,15 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 			// saying. It is not a range the ingestion should repair or drop:
 			// 1,292,054 of the 1,995,138 mainline records this feed yields are
 			// this shape, and they are the whole reason the provider exists.
+			//
+			// The state rides on this range and not on the Affected entry
+			// because the same package can be fixed on one release and
+			// permanently affected on another — both ranges are emitted here,
+			// side by side, and only the range knows which it is (D52).
 			a.Ranges = append(a.Ranges, advisory.Range{
-				Type:   advisory.RangeEcosystem,
-				Events: []advisory.Event{{Introduced: "0"}},
+				Type:     advisory.RangeEcosystem,
+				Events:   []advisory.Event{{Introduced: "0"}},
+				FixState: fixStateFor(remedy[k], st),
 			})
 			st.Unfixable++
 		}

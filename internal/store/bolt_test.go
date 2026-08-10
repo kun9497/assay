@@ -717,11 +717,11 @@ func TestRatingsFor_DoesNotBleedAcrossCVEsSharingAPrefix(t *testing.T) {
 	}
 }
 
-// Schema 7. A v6 database must be refused rather than read as one where
-// nothing happened to be enriched.
-func TestSchemaVersionIs7(t *testing.T) {
-	if SchemaVersion != 7 {
-		t.Errorf("SchemaVersion = %d, want 7", SchemaVersion)
+// Schema 8. A v7 database must be refused rather than read as one where no
+// vendor happened to declare anything will-not-fix (D52).
+func TestSchemaVersionIs8(t *testing.T) {
+	if SchemaVersion != 8 {
+		t.Errorf("SchemaVersion = %d, want 8", SchemaVersion)
 	}
 }
 

@@ -498,6 +498,21 @@ type matrixAdv struct {
 	// one finding rather than several findings (D25). Without this there is no
 	// way to build the shape the aggregate exists for.
 	aliases []string
+	// unfixable, when true, gives the range an Introduced event and NO Fixed
+	// event at all (D48/D52) - the shape Red Hat's CSAF VEX feed emits
+	// 1,278,384 times: affected at every version, nothing to upgrade to. This
+	// is deliberately a separate signal from fixed == "", which already means
+	// something else in this fixture builder (a malformed bound that produces
+	// an advisory-scoped skip, not a finding) - reusing that would make it
+	// impossible to ask for a genuinely unfixable finding here.
+	unfixable bool
+	// fixState is stored on the range only when unfixable is true (D52); it is
+	// ignored otherwise. Left at its zero value it is the empty string, which
+	// is the store's own spelling of "unknown" (advisory.go's own doc comment)
+	// - the state every source but Red Hat's feed leaves an unfixable finding
+	// in - so a fixture asking for "unfixable, no stated reason" does not need
+	// to spell out FixStateUnknown itself.
+	fixState advisory.FixState
 }
 
 // buildMatrixDB writes advisories into a fresh database that covers "Go"
@@ -512,9 +527,20 @@ func buildMatrixDB(t *testing.T, advisories []matrixAdv) string {
 		t.Fatalf("Create: %v", err)
 	}
 	for _, adv := range advisories {
-		fixed := adv.fixed
-		if fixed == "" {
-			fixed = "not-a-version"
+		// D52's shape takes priority over the "empty fixed -> malformed bound"
+		// convention below: an unfixable fixture wants an Introduced-only
+		// range, not a Fixed event of any kind, malformed or otherwise.
+		var events []advisory.Event
+		var rangeFixState advisory.FixState
+		if adv.unfixable {
+			events = []advisory.Event{{Introduced: "0"}}
+			rangeFixState = adv.fixState
+		} else {
+			fixed := adv.fixed
+			if fixed == "" {
+				fixed = "not-a-version"
+			}
+			events = []advisory.Event{{Introduced: "0"}, {Fixed: fixed}}
 		}
 		var sev []advisory.Severity
 		for _, v := range adv.vectors {
@@ -550,8 +576,9 @@ func buildMatrixDB(t *testing.T, advisories []matrixAdv) string {
 				Ecosystem: "Go",
 				Name:      affected,
 				Ranges: []advisory.Range{{
-					Type:   advisory.RangeSemver,
-					Events: []advisory.Event{{Introduced: "0"}, {Fixed: fixed}},
+					Type:     advisory.RangeSemver,
+					Events:   events,
+					FixState: rangeFixState,
 				}},
 			}},
 			Severity: sev,
@@ -821,6 +848,112 @@ func TestRun_ExitCodeMatrix(t *testing.T) {
 	}
 }
 
+// TestRun_FailOnUnfixableWontFixGate is the D52 analogue of the exit-code
+// matrix above, kept separate rather than folded into it because it needs
+// its own fixture shape (matrixAdv.unfixable) that none of that matrix's
+// rows use.
+//
+// Every fixture finding here carries a vector (vecCritical), never left
+// unrated: an unrated unfixable finding would also trip --fail-on-unknown,
+// and a row that could fire for either reason would not isolate the flag
+// this test exists to check.
+func TestRun_FailOnUnfixableWontFixGate(t *testing.T) {
+	// wontFixOnly: one finding, unfixable, and the vendor has said so (D52).
+	wontFixOnly := func(t *testing.T) (db, sbom string) {
+		db = buildMatrixDB(t, []matrixAdv{
+			{id: "RHSA-wontfix", pkg: "wontfix", vectors: []string{vecCritical},
+				unfixable: true, fixState: advisory.FixStateWontFix},
+		})
+		sbom = buildMatrixSBOM(t, []matrixPkg{{name: "wontfix", purlType: "golang"}})
+		return db, sbom
+	}
+	// notFixedOnly: unfixable, but no source has said it never will be -
+	// affected with no fix published yet. This is the fixture that matters
+	// most in this test: an implementation that gated
+	// FailOnUnfixableWontFix on Unfixable() alone, without reading FixState,
+	// would trip on this row exactly as it does on wontFixOnly - the brief's
+	// own warning about the first half passing alone.
+	notFixedOnly := func(t *testing.T) (db, sbom string) {
+		db = buildMatrixDB(t, []matrixAdv{
+			{id: "RHSA-notfixed", pkg: "notfixed", vectors: []string{vecCritical},
+				unfixable: true, fixState: advisory.FixStateNotFixed},
+		})
+		sbom = buildMatrixSBOM(t, []matrixPkg{{name: "notfixed", purlType: "golang"}})
+		return db, sbom
+	}
+	// unknownStateOnly: unfixable, FixState left at the store's own zero
+	// value (empty string) rather than spelled out - the shape every source
+	// but Red Hat's feed leaves an unfixable finding in.
+	unknownStateOnly := func(t *testing.T) (db, sbom string) {
+		db = buildMatrixDB(t, []matrixAdv{
+			{id: "GHSA-unknownfix", pkg: "unknownfix", vectors: []string{vecCritical}, unfixable: true},
+		})
+		sbom = buildMatrixSBOM(t, []matrixPkg{{name: "unknownfix", purlType: "golang"}})
+		return db, sbom
+	}
+	// incompleteWithWontFix: a wont-fix finding AND a second, unrelated
+	// package the cataloger drops (unsupported purl type) - the shape D11's
+	// precedence needs, a scan that is both incomplete and carries a
+	// wont-fix finding.
+	incompleteWithWontFix := func(t *testing.T) (db, sbom string) {
+		db = buildMatrixDB(t, []matrixAdv{
+			{id: "RHSA-wontfix-incomplete", pkg: "wontfixincomplete", vectors: []string{vecCritical},
+				unfixable: true, fixState: advisory.FixStateWontFix},
+		})
+		sbom = buildMatrixSBOM(t, []matrixPkg{
+			{name: "wontfixincomplete", purlType: "golang"},
+			{name: "somecrate", purlType: "cargo"}, // dropped by the cataloger
+		})
+		return db, sbom
+	}
+
+	cases := []struct {
+		name    string
+		fixture func(t *testing.T) (db, sbom string)
+		opts    Options
+		want    int
+	}{
+		{"a wont-fix finding does not trip the gate when the flag is not given at all",
+			wontFixOnly, Options{}, 0},
+
+		{"--fail-on-unfixable=wont-fix trips on a wont-fix finding",
+			wontFixOnly, Options{FailOnUnfixableWontFix: true}, 1},
+
+		// The case the brief calls out by name: a broad implementation that
+		// gated on Unfixable() alone, ignoring FixState, would also exit 1
+		// here and this row would be the only thing to catch it.
+		{"--fail-on-unfixable=wont-fix does NOT trip on a not-fixed-only result",
+			notFixedOnly, Options{FailOnUnfixableWontFix: true}, 0},
+		{"--fail-on-unfixable=wont-fix does NOT trip when the only unfixable finding's state is unknown",
+			unknownStateOnly, Options{FailOnUnfixableWontFix: true}, 0},
+
+		// The broad gate (D48) is unchanged by D52's narrower one: it still
+		// fires on every shape of unfixable finding, wont-fix or not.
+		{"the broad --fail-on-unfixable still trips on a not-fixed-only result",
+			notFixedOnly, Options{FailOnUnfixable: true}, 1},
+		{"the broad --fail-on-unfixable still trips on a wont-fix finding too",
+			wontFixOnly, Options{FailOnUnfixable: true}, 1},
+
+		// D11: 2 > 1 > 0. An incomplete scan outranks its own findings, so the
+		// wont-fix gate below must never be allowed to report 1 here.
+		{"precedence: incomplete beats fail-on-unfixable=wont-fix (D11, 2 > 1)",
+			incompleteWithWontFix,
+			Options{FailOnIncomplete: true, FailOnUnfixableWontFix: true}, 2},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db, sbom := tc.fixture(t)
+			var out, errOut bytes.Buffer
+			got := Run(context.Background(), db, sbom, tc.opts, &out, &errOut)
+			if got != tc.want {
+				t.Errorf("Run() = %d, want %d\nstdout:\n%s\nstderr:\n%s",
+					got, tc.want, out.String(), errOut.String())
+			}
+		})
+	}
+}
+
 // TestRun_OutputJSON is the wiring test for Options.Output == "json": Run
 // must call report.JSON instead of report.Table, and --output json must not
 // merely add JSON alongside the table — `assay scan ... --output json | jq`
@@ -841,8 +974,8 @@ func TestRun_OutputJSON(t *testing.T) {
 		if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
 			t.Fatalf("stdout is not valid JSON: %v\n%s", err, out.String())
 		}
-		if doc.SchemaVersion != 5 {
-			t.Errorf("SchemaVersion = %d, want 5", doc.SchemaVersion)
+		if doc.SchemaVersion != 6 {
+			t.Errorf("SchemaVersion = %d, want 6", doc.SchemaVersion)
 		}
 		if len(doc.Findings) != 1 || doc.Findings[0].Advisory.ID != "GHSA-json-medium" {
 			t.Errorf("Findings = %+v, want the one medium finding", doc.Findings)

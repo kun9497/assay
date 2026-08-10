@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"github.com/kun9497/assay/internal/matcher"
 	"github.com/kun9497/assay/internal/pkgmeta"
@@ -18,14 +19,15 @@ import (
 // Bumped to 2 when FindingRecord gained `enrichment` (D3), to 3 when
 // EnrichmentRecord gained `claims` (D33), and to 4 when SkippedRecord gained
 // `cause` and Summary gained `targetIncomplete` (D36), and to 5 when
-// FindingRecord gained `unfixable` and Summary gained `unfixable` (D48). Two earlier additions should have
+// FindingRecord gained `unfixable` and Summary gained `unfixable` (D48), and to
+// 6 when both gained `fixState` and RatingRecord gained one too (D52). Two earlier additions should have
 // bumped it and did not — `ratings` (D25) and RatingRecord.URL (D27) both
 // changed the shape while this constant stayed at 1 — so version 1 in the wild
 // denotes three different documents. That is the cost of the misses, and it
 // cannot be repaired retroactively; what it does mean is that a consumer
 // reading 2 or later can rely on every field below being present, which is the
 // guarantee the constant exists to give.
-const schemaVersion = 5
+const schemaVersion = 6
 
 // Document is the stable shape of `assay scan --output json` (design goal
 // #3). It carries what Table shows plus what Table cannot: the full
@@ -100,6 +102,15 @@ type FindingRecord struct {
 	// remediable. Present on every finding, never omitempty, so `false` is a
 	// statement rather than an absence.
 	Unfixable bool `json:"unfixable"`
+	// FixState says WHY there is no fix, when a source was willing to say
+	// (D52): "wont-fix" once any source reports the vendor has closed the
+	// matter, "not-fixed" when one says a fix is merely absent, "unknown"
+	// when none said, and "fixed" whenever Unfixable above is false.
+	//
+	// Spelled as grype spells it so the two documents can be diffed field to
+	// field (D18). Present on every finding, never omitempty: "unknown" is an
+	// answer, and a consumer must not have to tell it apart from a missing key.
+	FixState string `json:"fixState"`
 	// Enrichment is what another authority wrote about this vulnerability in
 	// prose (D3) — KISA's Korean headline, overview and notice link. It is
 	// display copy: nothing here contributes to Severity or Score above, and a
@@ -180,6 +191,12 @@ type RatingRecord struct {
 	// OSV rating's empty URL is meaningful ("look up the advisory instead"),
 	// not an absent field, and the shape must not vary per rating.
 	URL string `json:"url"`
+	// FixState is what THIS record says about a fix, on the same reasoning
+	// that puts Fixed here (D52): the finding-level value is the strongest
+	// claim any source made, and a consumer checking whether Red Hat
+	// specifically called something will-not-fix needs the per-source answer.
+	// No omitempty, same reasoning as Fixed and URL above.
+	FixState string `json:"fixState"`
 }
 
 type PackageRecord struct {
@@ -290,6 +307,7 @@ func findingRecord(f matcher.Finding) FindingRecord {
 			Score:      r.Score,
 			Fixed:      r.Fixed,
 			URL:        r.URL,
+			FixState:   ratingFixState(r),
 		})
 	}
 	// Same reasoning as ratings above: an empty result encodes as
@@ -324,6 +342,7 @@ func findingRecord(f matcher.Finding) FindingRecord {
 		},
 		Ratings:    ratings,
 		Unfixable:  f.Unfixable(),
+		FixState:   f.FixState().String(),
 		Enrichment: enrichment,
 	}
 }
@@ -342,4 +361,22 @@ func packageRecord(p pkgmeta.Package) PackageRecord {
 		pr.Locations = append(pr.Locations, LocationRecord{Path: l.Path, LayerDigest: l.LayerDigest})
 	}
 	return pr
+}
+
+// ratingFixState keeps one rating's two fix columns from contradicting each
+// other in the document.
+//
+// A rating that names a fixed version IS fixed, whatever its FixState field
+// happens to hold. Match sets the two together (matcher.fixStateOf), but
+// matcher.go explicitly allows a Finding built any other way, and a
+// "fixed" of 2.0.0 beside a "fixState" of unknown is not something a consumer
+// can act on — it would have to decide which of the two this document meant.
+// Derived rather than trusted, which is D13's reason for deriving anything: two
+// copies of one fact can disagree, and here the disagreement would be
+// published.
+func ratingFixState(r matcher.Rating) string {
+	if r.Fixed != "" {
+		return advisory.FixStateFixed.String()
+	}
+	return r.FixState.String()
 }

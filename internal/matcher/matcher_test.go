@@ -1005,3 +1005,173 @@ func TestMatch_UncoveredEcosystemIsCoverageNotTarget(t *testing.T) {
 		t.Errorf("cause = %q, want %q", got, SkipCoverage)
 	}
 }
+
+// D52: Red Hat's CSAF VEX feed distinguishes "the vendor has decided never to
+// fix this" from "no fix yet". Finding.FixState is the strongest claim across
+// every source's rating, wont-fix outranking not-fixed outranking unknown.
+//
+// Both orderings of {not-fixed, wont-fix} sit in the same table rather than
+// one apiece. A single ordering cannot tell a real precedence rule from
+// "whichever rating happened to be last" — the exact defect D25 already
+// forbids for ties elsewhere in this package, and FixState answers to the
+// same rule.
+func TestFinding_FixState_Precedence(t *testing.T) {
+	tests := []struct {
+		name    string
+		ratings []Rating
+		want    advisory.FixState
+	}{
+		{
+			name: "wont-fix listed before not-fixed",
+			ratings: []Rating{
+				{Database: "REDHAT", FixState: advisory.FixStateWontFix},
+				{Database: "OSV", FixState: advisory.FixStateNotFixed},
+			},
+			want: advisory.FixStateWontFix,
+		},
+		{
+			// Same two ratings, reversed. An implementation that just kept the
+			// last state it saw would pass the row above and flip on this one.
+			name: "not-fixed listed before wont-fix",
+			ratings: []Rating{
+				{Database: "OSV", FixState: advisory.FixStateNotFixed},
+				{Database: "REDHAT", FixState: advisory.FixStateWontFix},
+			},
+			want: advisory.FixStateWontFix,
+		},
+		{
+			name: "not-fixed outranks unknown",
+			ratings: []Rating{
+				{Database: "OSV", FixState: advisory.FixStateNotFixed},
+				{Database: "GHSA", FixState: advisory.FixStateUnknown},
+			},
+			want: advisory.FixStateNotFixed,
+		},
+		{
+			name: "unknown and unknown stays unknown",
+			ratings: []Rating{
+				{Database: "OSV", FixState: advisory.FixStateUnknown},
+				{Database: "GHSA", FixState: advisory.FixStateUnknown},
+			},
+			want: advisory.FixStateUnknown,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Every rating here carries no Fixed version, so Unfixable() is
+			// true and FixState() actually has to walk Ratings rather than
+			// short-circuit on the guard the next test covers.
+			f := Finding{Ratings: tt.ratings}
+			if got := f.FixState(); got != tt.want {
+				t.Errorf("FixState() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// A rating naming a fixed version makes the finding Fixed outright, without
+// consulting any rating's FixState — including its own. Built with the fixed
+// rating BESIDE a wont-fix one, so an implementation that let a wont-fix
+// sibling outvote a real fix is caught rather than passing on a fixture where
+// there was nothing to outvote.
+func TestFinding_FixState_FixedRatingWinsOverWontFixSibling(t *testing.T) {
+	f := Finding{Ratings: []Rating{
+		{Database: "GHSA", Fixed: "2.0.0", FixState: advisory.FixStateFixed},
+		{Database: "REDHAT", FixState: advisory.FixStateWontFix},
+	}}
+	if got := f.FixState(); got != advisory.FixStateFixed {
+		t.Errorf("FixState() = %q, want %q: a rating with a fixed version must "+
+			"win outright, not be outvoted by an unfixable sibling", got, advisory.FixStateFixed)
+	}
+}
+
+// Finding.Ratings' own doc says a Finding built by hand — tests included —
+// must populate it explicitly, and nothing stops that hand-built Rating from
+// leaving FixState at its Go zero value. That zero value must resolve to the
+// named Unknown state, not surface as a distinct, unnamed fourth value the
+// way the store's own empty spelling would if nothing resolved it (advisory.
+// FixState.String documents the store's side of the same rule).
+func TestFinding_FixState_ZeroValueRatingIsUnknown(t *testing.T) {
+	f := Finding{Ratings: []Rating{{Database: "OSV", FixState: ""}}}
+	// Compared and printed as the raw underlying string, not through
+	// FixState.String(): that method resolves "" to "unknown" for every
+	// caller, which would make a leaked empty string print identically to a
+	// correct result and hide the exact bug this test exists to catch.
+	if got := f.FixState(); string(got) != string(advisory.FixStateUnknown) {
+		t.Errorf("FixState() = %q (raw %q), want %q", got, string(got), advisory.FixStateUnknown)
+	}
+	// advisory.FixStateUnknown must itself be the non-empty word, or this test
+	// would pass by asserting "" == "" and prove nothing about resolution.
+	if advisory.FixStateUnknown == "" {
+		t.Fatal("advisory.FixStateUnknown is the empty string; this test cannot tell resolution from silence")
+	}
+}
+
+// advWithFixState builds an advisory whose range carries NO fixed event — the
+// only shape a Range is allowed to store a FixState on (D52's own doc on
+// advisory.Range.FixState) — unlike advWithRange, which always adds one. It
+// exists so a fixture can pin the Range -> version.Evidence -> matcher.Rating
+// wiring instead of the ordinary "has a fix" path advWithRange already covers.
+func advWithFixState(id, eco, name, introduced string, fs advisory.FixState, rt advisory.RangeType) advisory.Advisory {
+	return advisory.Advisory{
+		ID:   id,
+		Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{
+			Ecosystem: eco,
+			Name:      name,
+			Ranges: []advisory.Range{{
+				Type:     rt,
+				Events:   []advisory.Event{{Introduced: introduced}},
+				FixState: fs,
+			}},
+		}},
+	}
+}
+
+// This is the only test in the package that drives FixState through the real
+// Match path rather than building a Finding by hand — everything above stops
+// at Finding.FixState() itself. Deleting `ev.FixState = r.FixState` in
+// version.InRange, or the assignment in matcher.fixStateOf, leaves every
+// other FixState test in this file green because they never call Match.
+func TestMatch_FixStateFlowsFromRangeThroughToRating(t *testing.T) {
+	// A fix-less range carrying Red Hat's own "the vendor will not fix this"
+	// statement (D52) — the shape only Red Hat's CSAF VEX feed produces today.
+	wontFix := advWithFixState("RHSA-wontfix", "Red Hat:9", "openssl", "0",
+		advisory.FixStateWontFix, advisory.RangeEcosystem)
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Red Hat:9\x00openssl": {wontFix},
+	}}
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("openssl", "1.0.0-1.el9", "Red Hat:9")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1", len(res.Findings))
+	}
+	if got := res.Findings[0].Ratings[0].FixState; got != advisory.FixStateWontFix {
+		t.Errorf("Rating.FixState = %q, want %q: the range's stored state must "+
+			"reach the rating unchanged", got, advisory.FixStateWontFix)
+	}
+
+	// A range that HAS a fixed event is fixed by construction whatever it
+	// stores — fixStateOf's whole reason for existing — with the installed
+	// version sitting below that fix.
+	fixed := advWithRange("RHSA-fixed", "Red Hat:9", "curl", "0", "8.0.0-1.el9", advisory.RangeEcosystem)
+	s2 := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Red Hat:9\x00curl": {fixed},
+	}}
+	res2, err := New(s2).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("curl", "7.0.0-1.el9", "Red Hat:9")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res2.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1", len(res2.Findings))
+	}
+	if got := res2.Findings[0].Ratings[0].FixState; got != advisory.FixStateFixed {
+		t.Errorf("Rating.FixState = %q, want %q", got, advisory.FixStateFixed)
+	}
+}
