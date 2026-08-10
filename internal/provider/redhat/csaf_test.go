@@ -483,3 +483,307 @@ func TestConvert_ContextScopedEntriesDoNotSuppressTheRest(t *testing.T) {
 		t.Errorf("SkippedModuleContext = %d, want 1", st.SkippedModuleContext)
 	}
 }
+
+// buildDocWithRemediations is buildDoc plus a vulnerabilities[].remediations
+// list. Kept separate rather than adding a parameter to buildDoc: only the
+// D52 tests below need remediations, and threading an extra argument through
+// every existing buildDoc call site would touch tests that have nothing to do
+// with fix state.
+func buildDocWithRemediations(t *testing.T, cve string, cpes map[string]string, fixed, affected []string, remediations []map[string]any) *document {
+	t.Helper()
+	type prod struct {
+		ProductID string `json:"product_id"`
+		Helper    struct {
+			CPE string `json:"cpe"`
+		} `json:"product_identification_helper"`
+	}
+	var kids []map[string]any
+	for id, c := range cpes {
+		p := prod{ProductID: id}
+		p.Helper.CPE = c
+		kids = append(kids, map[string]any{"category": "product_name", "name": id, "product": p})
+	}
+	raw := map[string]any{
+		"document": map[string]any{
+			"title":    "a test advisory",
+			"tracking": map[string]any{"id": cve},
+		},
+		"product_tree": map[string]any{
+			"branches": []any{map[string]any{
+				"category": "vendor", "name": "Red Hat",
+				"branches": []any{map[string]any{
+					"category": "product_family", "name": "fam", "branches": kids,
+				}},
+			}},
+		},
+		"vulnerabilities": []any{map[string]any{
+			"cve": cve,
+			"product_status": map[string]any{
+				"fixed":          fixed,
+				"known_affected": affected,
+			},
+			"remediations": remediations,
+			"scores": []any{map[string]any{
+				"cvss_v3": map[string]any{"vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H"},
+			}},
+		}},
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d document
+	if err := json.Unmarshal(b, &d); err != nil {
+		t.Fatal(err)
+	}
+	return &d
+}
+
+// D52: a known_affected package named by a no_fix_planned remediation is
+// "won't fix", not merely "no fix yet" — the distinction the whole feature
+// exists to make.
+func TestConvert_RemediationNoFixPlanned(t *testing.T) {
+	d := buildDocWithRemediations(t, "CVE-2025-1001",
+		map[string]string{"RHEL9": "cpe:/o:redhat:enterprise_linux:9"},
+		nil,
+		[]string{"RHEL9:libwontfix"},
+		[]map[string]any{
+			{"category": "no_fix_planned", "product_ids": []string{"RHEL9:libwontfix"}},
+		})
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped a document naming a mainline package")
+	}
+	a := affectedByName(adv)["Red Hat:9/libwontfix"]
+	if len(a.Ranges) != 1 {
+		t.Fatalf("libwontfix has %d ranges, want 1: %+v", len(a.Ranges), a.Ranges)
+	}
+	if a.Ranges[0].FixState != advisory.FixStateWontFix {
+		t.Errorf("FixState = %q, want %q (no_fix_planned)", a.Ranges[0].FixState, advisory.FixStateWontFix)
+	}
+	if st.UnfixableWontFix != 1 {
+		t.Errorf("UnfixableWontFix = %d, want 1", st.UnfixableWontFix)
+	}
+}
+
+// The other half of the same distinction: none_available is "no fix yet", a
+// reason to keep watching the CVE rather than to stop expecting one.
+func TestConvert_RemediationNoneAvailable(t *testing.T) {
+	d := buildDocWithRemediations(t, "CVE-2025-1002",
+		map[string]string{"RHEL9": "cpe:/o:redhat:enterprise_linux:9"},
+		nil,
+		[]string{"RHEL9:libnotfixedyet"},
+		[]map[string]any{
+			{"category": "none_available", "product_ids": []string{"RHEL9:libnotfixedyet"}},
+		})
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped a document naming a mainline package")
+	}
+	a := affectedByName(adv)["Red Hat:9/libnotfixedyet"]
+	if len(a.Ranges) != 1 {
+		t.Fatalf("libnotfixedyet has %d ranges, want 1: %+v", len(a.Ranges), a.Ranges)
+	}
+	if a.Ranges[0].FixState != advisory.FixStateNotFixed {
+		t.Errorf("FixState = %q, want %q (none_available)", a.Ranges[0].FixState, advisory.FixStateNotFixed)
+	}
+	if st.UnfixableNotFixed != 1 {
+		t.Errorf("UnfixableNotFixed = %d, want 1", st.UnfixableNotFixed)
+	}
+}
+
+// Both reasons named for one package: fixStateFor's comment says the tie
+// breaks toward wont-fix on purpose (a false "never" costs a reader one
+// dismissed scan; a false "not yet" leaves them waiting on a fix that will
+// never come). Both the resolved state and the overlap counter are asserted
+// — a tie-break that resolves right but forgets to record the overlap would
+// look identical on the FixState alone.
+func TestConvert_RemediationBothReasons(t *testing.T) {
+	d := buildDocWithRemediations(t, "CVE-2025-1003",
+		map[string]string{"RHEL9": "cpe:/o:redhat:enterprise_linux:9"},
+		nil,
+		[]string{"RHEL9:libbothreasons"},
+		[]map[string]any{
+			{"category": "no_fix_planned", "product_ids": []string{"RHEL9:libbothreasons"}},
+			{"category": "none_available", "product_ids": []string{"RHEL9:libbothreasons"}},
+		})
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped a document naming a mainline package")
+	}
+	a := affectedByName(adv)["Red Hat:9/libbothreasons"]
+	if len(a.Ranges) != 1 || a.Ranges[0].FixState != advisory.FixStateWontFix {
+		t.Errorf("Ranges = %+v, want a single range resolved to %q", a.Ranges, advisory.FixStateWontFix)
+	}
+	if st.UnfixableBothReasons != 1 {
+		t.Errorf("UnfixableBothReasons = %d, want 1", st.UnfixableBothReasons)
+	}
+	// The tie-break must not also book the package under NotFixed.
+	if st.UnfixableWontFix != 1 || st.UnfixableNotFixed != 0 {
+		t.Errorf("UnfixableWontFix/UnfixableNotFixed = %d/%d, want 1/0", st.UnfixableWontFix, st.UnfixableNotFixed)
+	}
+}
+
+// A package the product_status calls affected but no remediation explains,
+// and one that only carries vendor_fix or workaround — neither of which
+// answers "is there a fix" — all come out unstated rather than guessed at
+// (D17's rule for absent severity, applied here to absent intent).
+func TestConvert_RemediationUnstated(t *testing.T) {
+	d := buildDocWithRemediations(t, "CVE-2025-1004",
+		map[string]string{"RHEL9": "cpe:/o:redhat:enterprise_linux:9"},
+		nil,
+		[]string{"RHEL9:libnoremedy", "RHEL9:libvendorfixonly", "RHEL9:libworkaroundonly"},
+		[]map[string]any{
+			{"category": "vendor_fix", "product_ids": []string{"RHEL9:libvendorfixonly"}},
+			{"category": "workaround", "product_ids": []string{"RHEL9:libworkaroundonly"}},
+		})
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped a document naming mainline packages")
+	}
+	by := affectedByName(adv)
+	for _, name := range []string{"libnoremedy", "libvendorfixonly", "libworkaroundonly"} {
+		a := by["Red Hat:9/"+name]
+		if len(a.Ranges) != 1 {
+			t.Fatalf("%s has %d ranges, want 1: %+v", name, len(a.Ranges), a.Ranges)
+		}
+		// Resolved through String() rather than compared to "" directly: D52's
+		// contract is that the empty store value and the literal "unknown" mean
+		// the same thing to a reader, and this test is about the meaning, not
+		// about which of the two spellings this code path happens to pick.
+		if got := a.Ranges[0].FixState.String(); got != advisory.FixStateUnknown.String() {
+			t.Errorf("%s FixState.String() = %q, want %q", name, got, advisory.FixStateUnknown.String())
+		}
+	}
+	if st.UnfixableUnstated != 3 {
+		t.Errorf("UnfixableUnstated = %d, want 3", st.UnfixableUnstated)
+	}
+}
+
+// resolveProduct's doc comment promises that a remediation naming a product
+// outside the mainline slice "is not a discard at all — it is a statement
+// about something this store never held", and that counting it alongside
+// product_status discards "would roughly triple every skip line for no
+// gain". Each shape below is named ONLY from a remediation, never from
+// product_status, so any increment on these counters can only have leaked
+// out of the remediation loop.
+func TestConvert_RemediationOutsideMainlineDoesNotInflateSkipped(t *testing.T) {
+	d := buildDocWithRemediations(t, "CVE-2025-1005",
+		map[string]string{
+			"RHEL9": "cpe:/o:redhat:enterprise_linux:9",
+			"EUS":   "cpe:/a:redhat:rhel_eus:9.4::appstream",
+		},
+		nil,
+		[]string{"RHEL9:libreal"},
+		[]map[string]any{
+			// A non-RHEL CPE.
+			{"category": "no_fix_planned", "product_ids": []string{"EUS:libeus"}},
+			// A container image, identified by digest rather than a version.
+			{"category": "no_fix_planned", "product_ids": []string{"RHEL9:animage@sha256:abc123_x86_64"}},
+			// A module- or flatpak-scoped id.
+			{"category": "no_fix_planned", "product_ids": []string{"RHEL9:libctx::module:context"}},
+			// A platform this document's product_tree never declared.
+			{"category": "no_fix_planned", "product_ids": []string{"Undeclared:libundeclared"}},
+		})
+	var st stats
+	if _, ok := convert(d, &st); !ok {
+		t.Fatal("convert dropped a document naming a mainline package")
+	}
+	if st.SkippedNonRHEL != 0 {
+		t.Errorf("SkippedNonRHEL = %d, want 0 — only product_status discards are counted", st.SkippedNonRHEL)
+	}
+	if st.SkippedImage != 0 {
+		t.Errorf("SkippedImage = %d, want 0", st.SkippedImage)
+	}
+	if st.SkippedModuleContext != 0 {
+		t.Errorf("SkippedModuleContext = %d, want 0", st.SkippedModuleContext)
+	}
+	if st.SkippedNoCPE != 0 {
+		t.Errorf("SkippedNoCPE = %d, want 0", st.SkippedNoCPE)
+	}
+}
+
+// GroupIDs names a product_tree.product_groups entry Red Hat's feed has never
+// used (see the GroupIDs field comment); it is counted so a feed that started
+// using it would show up as a number climbing off zero. One remediation
+// carries group_ids and one does not, so a mutation that counts every
+// remediation — not just grouped ones — is caught by the second entry staying
+// uncounted.
+func TestConvert_RemediationGroupedIsCounted(t *testing.T) {
+	d := buildDocWithRemediations(t, "CVE-2025-1006",
+		map[string]string{"RHEL9": "cpe:/o:redhat:enterprise_linux:9"},
+		nil,
+		[]string{"RHEL9:libgrouped", "RHEL9:libungrouped"},
+		[]map[string]any{
+			{"category": "no_fix_planned", "product_ids": []string{"RHEL9:libgrouped"}, "group_ids": []string{"G1"}},
+			{"category": "no_fix_planned", "product_ids": []string{"RHEL9:libungrouped"}},
+		})
+	var st stats
+	if _, ok := convert(d, &st); !ok {
+		t.Fatal("convert dropped a document naming mainline packages")
+	}
+	if st.RemediationGrouped != 1 {
+		t.Errorf("RemediationGrouped = %d, want 1", st.RemediationGrouped)
+	}
+}
+
+// D52 rides on the same fixed/unfixed split TestConvert_FixedAndUnfixedTogether
+// covers: FixState is a property of the RANGE, not the package, so the fixed
+// release's range must carry no FixState even though the very same package is
+// won't-fix on another release.
+func TestConvert_FixedAndUnfixedTogether_FixState(t *testing.T) {
+	d := buildDocWithRemediations(t, "CVE-2025-1007",
+		map[string]string{
+			"RHEL9": "cpe:/o:redhat:enterprise_linux:9",
+			"RHEL7": "cpe:/o:redhat:enterprise_linux:7",
+		},
+		[]string{"RHEL9:curl-0:7.76.1-31.el9.x86_64"},
+		[]string{"RHEL7:curl"},
+		[]map[string]any{
+			{"category": "no_fix_planned", "product_ids": []string{"RHEL7:curl"}},
+		})
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped a document naming mainline packages")
+	}
+	by := affectedByName(adv)
+	fixedSide := by["Red Hat:9/curl"]
+	if len(fixedSide.Ranges) != 1 || fixedSide.Ranges[0].FixState != "" {
+		t.Errorf("RHEL 9 curl ranges = %+v, want one fixed range with no FixState", fixedSide.Ranges)
+	}
+	unfixedSide := by["Red Hat:7/curl"]
+	if len(unfixedSide.Ranges) != 1 || unfixedSide.Ranges[0].FixState != advisory.FixStateWontFix {
+		t.Errorf("RHEL 7 curl ranges = %+v, want one range resolved to %q", unfixedSide.Ranges, advisory.FixStateWontFix)
+	}
+}
+
+// The three D52 counters are disjoint and documented to sum to Unfixable, so
+// a future change that makes one range take two paths — or forgets one —
+// shows up here as a drift rather than only inside the individual counters
+// asserted above.
+func TestConvert_UnfixableCountersSumToTotal(t *testing.T) {
+	d := buildDocWithRemediations(t, "CVE-2025-1008",
+		map[string]string{"RHEL9": "cpe:/o:redhat:enterprise_linux:9"},
+		nil,
+		[]string{"RHEL9:libsumwont", "RHEL9:libsumnotfixed", "RHEL9:libsumunstated"},
+		[]map[string]any{
+			{"category": "no_fix_planned", "product_ids": []string{"RHEL9:libsumwont"}},
+			{"category": "none_available", "product_ids": []string{"RHEL9:libsumnotfixed"}},
+		})
+	var st stats
+	if _, ok := convert(d, &st); !ok {
+		t.Fatal("convert dropped a document naming mainline packages")
+	}
+	if st.Unfixable != 3 {
+		t.Fatalf("Unfixable = %d, want 3", st.Unfixable)
+	}
+	if sum := st.UnfixableWontFix + st.UnfixableNotFixed + st.UnfixableUnstated; sum != st.Unfixable {
+		t.Errorf("UnfixableWontFix(%d) + UnfixableNotFixed(%d) + UnfixableUnstated(%d) = %d, want Unfixable(%d)",
+			st.UnfixableWontFix, st.UnfixableNotFixed, st.UnfixableUnstated, sum, st.Unfixable)
+	}
+}

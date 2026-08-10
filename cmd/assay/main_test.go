@@ -1623,3 +1623,106 @@ func TestParseScan_FailOnIncompleteScopes(t *testing.T) {
 		})
 	}
 }
+
+// D52: the valued form of --fail-on-unfixable, and its rejection of anything
+// else. Same shape as TestParseScan_FailOnIncompleteScopes above, for the
+// same reason: a scope typo that silently left the gate off (or, worse,
+// silently widened it) would be worse than the unusable broad gate D52 exists
+// to narrow.
+func TestParseScan_FailOnUnfixableScopes(t *testing.T) {
+	for _, tc := range []struct {
+		arg          string
+		wantAny      bool
+		wantWontFix  bool
+		wantErrPiece string
+	}{
+		{arg: "--fail-on-unfixable", wantAny: true},
+		{arg: "--fail-on-unfixable=any", wantAny: true},
+		{arg: "--fail-on-unfixable=wont-fix", wantWontFix: true},
+		{arg: "--fail-on-unfixable=", wantErrPiece: `unknown scope ""`},
+		{arg: "--fail-on-unfixable=nonsense", wantErrPiece: `unknown scope "nonsense"`},
+		{arg: "--fail-on-unfixable=WONT-FIX", wantErrPiece: "unknown scope"},
+	} {
+		t.Run(tc.arg, func(t *testing.T) {
+			_, opts, err := parseScanArgs([]string{"sbom.json", tc.arg})
+			if tc.wantErrPiece != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErrPiece) {
+					t.Fatalf("err = %v, want one containing %q", err, tc.wantErrPiece)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseScan: %v", err)
+			}
+			if opts.FailOnUnfixable != tc.wantAny {
+				t.Errorf("FailOnUnfixable = %v, want %v", opts.FailOnUnfixable, tc.wantAny)
+			}
+			// Asserted as well as the one above: the bare form (and "=any") must
+			// NOT set the narrow flag, and "=wont-fix" must NOT set the broad
+			// one. A parser that set both would satisfy either assertion on its
+			// own and turn the narrow scope into a no-op, exactly the shape
+			// TestParseScan_FailOnIncompleteScopes guards for its own pair.
+			if opts.FailOnUnfixableWontFix != tc.wantWontFix {
+				t.Errorf("FailOnUnfixableWontFix = %v, want %v", opts.FailOnUnfixableWontFix, tc.wantWontFix)
+			}
+		})
+	}
+}
+
+// D52: an unknown scope names BOTH accepted spellings, not just one - a
+// reader who typed "wontfix" or "all" needs the message to say "any" and
+// "wont-fix" so they can fix the flag without going to the docs.
+func TestParseScan_FailOnUnfixableUnknownScopeNamesBothAccepted(t *testing.T) {
+	_, _, err := parseScanArgs([]string{"sbom.json", "--fail-on-unfixable=nonsense"})
+	if err == nil {
+		t.Fatal("err = nil, want an error for an unknown scope")
+	}
+	for _, want := range []string{"any", "wont-fix"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q, missing accepted spelling %q", err, want)
+		}
+	}
+}
+
+// Unlike --fail-on and --output, --fail-on-unfixable has no repeat guard: the
+// bare form and the "=wont-fix" form set two DIFFERENT fields (the doc
+// comment on Options.FailOnUnfixableWontFix says passing both is "redundant
+// but not contradictory"), so giving both on one command line must compose,
+// not error.
+func TestParseScan_FailOnUnfixableBothFormsTogether(t *testing.T) {
+	_, opts, err := parseScanArgs(
+		[]string{"sbom.json", "--fail-on-unfixable", "--fail-on-unfixable=wont-fix"})
+	if err != nil {
+		t.Fatalf("err = %v, want nil: both forms together is redundant, not contradictory", err)
+	}
+	if !opts.FailOnUnfixable {
+		t.Error("opts.FailOnUnfixable = false, want true")
+	}
+	if !opts.FailOnUnfixableWontFix {
+		t.Error("opts.FailOnUnfixableWontFix = false, want true")
+	}
+}
+
+// The CLI contract end to end for D52's scope rejection, the same shape as
+// TestRun_ScanBadFailOnValueExits2 above: an unrecognized
+// --fail-on-unfixable scope must reach run() as exit 2 with the accepted
+// spellings on stderr and stdout untouched, not a scan that silently ran
+// with the gate off. The target does not exist, so a passing exit 2 here can
+// only come from the scope rejection itself, never from the (unreached)
+// scan.
+func TestRun_ScanBadFailOnUnfixableScopeExits2(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"scan", "docker-archive:/does/not/exist.tar", "--fail-on-unfixable=nonsense"},
+		&stdout, &stderr)
+	if code != exitError {
+		t.Errorf("run() = %d, want exitError (%d)", code, exitError)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("error path polluted stdout: %q", stdout.String())
+	}
+	for _, want := range []string{"any", "wont-fix"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("stderr = %q, missing accepted spelling %q", stderr.String(), want)
+		}
+	}
+}
