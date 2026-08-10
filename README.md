@@ -632,9 +632,13 @@ disagree zero times.
       `purge ok installed`, both of them packages whose files are on disk
 - [x] The version compared follows the name that reached the advisory (D41) — 13–15% of
       Debian packages carry a source version that differs from the binary one
-- [ ] Ubuntu — the version scheme already works; what does not is the ecosystem key. OSV's
-      Pro and FIPS lineages describe the *same release*, so a release-only key reports an
-      ESM-patched system as vulnerable
+- [x] Ubuntu (D53) — keyed on the mainline release, `Ubuntu:22.04:LTS` or `Ubuntu:25.10`.
+      The Pro, FIPS and Realtime lineages describe the *same release* and are dropped at
+      ingestion; a package whose own version carries `+esmN` or `+FipsN` is reported as not
+      evaluated rather than judged against mainline data. The measurement reversed what was
+      expected here: the error is a silent false NEGATIVE on a FIPS host, not a false
+      positive, because Canonical appends `+FipsN` to the same base version and dpkg sorts
+      it above
 - [ ] Distroless images keep their database in `var/lib/dpkg/status.d` as a directory, which
       the layer reader cannot ask for; those images exit 2 with the shape named
 

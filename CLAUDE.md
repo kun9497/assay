@@ -26,7 +26,10 @@ remediation categories separate "will not be fixed" from "not fixed yet", every 
 mainline tuple has one, and `--fail-on-unfixable=wont-fix` gates on the first alone. Only
 `rhel` routes to `Red Hat:N` (D50): Alma, Rocky, CentOS,
 Fedora and Amazon Linux are catalogued and reported as not evaluated. Both rpmdb backends are read — SQLite for RHEL 9+ and BerkeleyDB for RHEL 8 and older
-(D44). Not built: Ubuntu, the ndb rpmdb backend, distroless `status.d`, SARIF, and pep440
+(D44). Ubuntu scans since D53, keyed on the mainline release; its Pro/FIPS/Realtime
+lineages are dropped at ingestion and a package whose version carries `+esmN` or `+FipsN`
+is reported as not evaluated rather than judged against mainline data. Not built: the ndb
+rpmdb backend, distroless `status.d`, SARIF, and pep440
 leniency (see `README.md`).
 
 **Check what exists before assuming — this paragraph has been wrong four times.** It claimed

@@ -2121,6 +2121,102 @@ exercises would ship an untested path; `stats.RemediationGrouped` makes a feed t
 using it visible instead, and the affected packages would degrade to `unknown` rather than to a
 wrong answer.
 
+### D53 — Ubuntu is keyed on its mainline release, and a lineage build is skipped rather than judged
+
+**Decision.** `Ubuntu:22.04:LTS` and `Ubuntu:25.10` are the only Ubuntu keys this build stores
+and the only ones `version.For` resolves. The Pro, FIPS, FIPS-updates, FIPS-preview, Realtime
+and Nvidia-BlueField lineages are dropped at ingestion. A package whose own version carries a
+lineage marker — `+esmN`, `~esmN`, `+FipsN` — is reported as not evaluated instead of being
+compared against mainline advisories.
+
+No schema change: the key is a string in a field that already exists.
+
+**The version scheme was never the blocker.** D40's dpkg comparer handles Ubuntu revisions
+(`2.4.4-2ubuntu17.10`) unchanged, the dpkg cataloger already populates `Package.Source` from the
+same field, and the matcher's source lookup is ecosystem-agnostic. Unlike Debian and Red Hat,
+nothing had to arrive alongside the comparer except the key.
+
+**The lineages are the problem, and the measurement reversed what this project expected.** The
+deferred entry predicted a false positive: a release-only key matching the non-ESM lineage's
+fixed versions and reporting an ESM-patched system vulnerable. Measured against the live export
+on 2026-08-10, the observable direction is the opposite and it is unanimous. Of the (CVE,
+package) pairs at one release carrying both a mainline and a lineage fixed version, **67 of 67
+differ, and in 67 of 67 the lineage version sorts strictly higher**. The mechanism is
+mechanical rather than incidental: Canonical builds a FIPS package by appending `+FipsN` to the
+identical base version, and dpkg orders a `+`-suffixed string above the string it extends. So
+mainline's fixed version is always the lower bar, and a mainline-only scan of a FIPS host reads
+clean when it is not. On a real image that is 72 of 136 (CVE, package, lineage) triples at
+22.04 and 14 of 23 at 24.04, **every one in the silent-miss direction and none in the other**.
+
+That number proves mainline-only cannot certify a FIPS host. It is not a measurement of how
+often a deployed image is misscored, because no Pro/FIPS image is anonymously pullable and none
+was tested — which is worth stating plainly rather than letting the 72 read as more than it is.
+
+**Detectability is where Ubuntu differs from RHEL, and it differs in the dangerous direction.**
+D47 refused to guess RHEL's support channel because no filesystem signal exists at all. Ubuntu
+writes real files when a subscription is attached — an apt source, a credential, a machine
+token. But **Canonical's own documented way to build a FIPS or ESM container image deletes every
+one of them**: attach, install the patched packages, detach, purge the client, all inside one
+`RUN` so the token never reaches a layer. What ships is patched binaries and no trace of the
+entitlement. A scanner reading "no config" as "mainline" would be wrong on exactly the images
+built the way Canonical says to build them — a heuristic that looks like it works in testing and
+fails quietly in production, which is worse than RHEL's flat "never available".
+
+**So the signal is the installed version string, which the install itself bakes into the dpkg
+database and no purge removes.** `[~+]esm\d` is what syft matches for the same reason, and its
+own comment calls an installed `+esmN` package the durable signal. `+FipsN` comes from
+Canonical's advisory data, where a FIPS fixed version is the identical base plus the suffix. The
+match is case-insensitive because Canonical writes `Fips` in a version and `FIPS` in an
+ecosystem key, and missing one spelling would report every FIPS package clean.
+
+**Skipped, not guessed at.** A lineage package becomes a `SkipCoverage` entry: counted, named in
+the report, and reaching exit 2 through `--fail-on-incomplete`. That is D47's answer to the same
+question, and the reason it is right here too is that the alternative is not "slightly wrong" —
+it is confidently clean on a compliance host, which is the one place a scan result is load
+bearing.
+
+**Realtime and Nvidia-BlueField are not covered and are not claimed to be.** Those lineages
+differ by package NAME (`linux-realtime`, `linux-bluefield`) rather than by a version suffix, so
+this detector cannot see them. A container image ships no kernel, so the gap is a host-scan one.
+It is recorded in `docs/deferred-decisions.md` rather than papered over with a name list nothing
+has measured.
+
+**Dropping the lineage entries at ingestion is what makes the corpus affordable.** Ubuntu's
+export is 601 MB compressed and 6.03 GB unpacked against Debian's 70 MB and 254 MB. The driver
+is not record count — 62,751 against 62,465, near enough identical — but **38.9 affected entries
+per record against Debian's 3.4**, because each record lists one entry per (lineage × release ×
+binary package). Version lists are not the cause: they are 23.2% of Ubuntu's bytes against 49.5%
+of Debian's.
+
+Stripping affected entries is the thing that broke this provider once before, so the drop is
+written to be safe for the reason that bug gives rather than in spite of it. What made stripping
+lossy was that another PASS had already indexed the entries being dropped. No pass ever indexes
+an Ubuntu lineage key: `Ecosystems` never names one, `familyMatches` can never return true for
+one, and `version.For` refuses to resolve one. An entry dropped here is unreachable by
+construction, not merely unreached today — and it is dropped on every fetch rather than only the
+Ubuntu one, so the invariant does not depend on pass ordering.
+
+**The lineage predicate is "Ubuntu but not mainline", not a list of the six families.** OSV's
+schema documents only the bare `:Pro:` prefix; every other spelling is convention, and two
+non-canonical shapes are already in the live export
+(`Ubuntu:22.04:LTS:for:NVIDIA:BlueField`). A list would silently start storing whatever family
+is invented next.
+
+**The LTS suffix is read from PRETTY_NAME**, because OSV keys a long-term release
+`Ubuntu:22.04:LTS` and an interim one `Ubuntu:25.10`, so the suffix is part of the key. The
+tempting alternative — infer LTS from an even year and an `.04` month — is already wrong on a
+shipping key: 25.04 is an April release and is not long-term. Reading a free-text field is
+acceptable only because the failure is loud: a wrong key names an ecosystem the database does not
+hold, and D20's coverage check turns that into a whole-package skip and exit 2, never a clean
+verdict.
+
+**Neither grype nor trivy solves this**, which is worth recording because it means there is no
+prior art to follow. Both read Canonical's Launchpad tracker through their own pipelines, where
+lineage is a per-package pocket annotation rather than a competing top-level key, so the
+ambiguity never arises for them. Holding D1 — every provider normalizes into OSV shape — is what
+gives assay a problem neither had. grype carries exactly one Ubuntu channel, `esm`, and excludes
+FIPS and Realtime deliberately as separate compliance products.
+
 ## 3. Architecture
 
 ### Measured data volumes
