@@ -2,6 +2,8 @@ package osv
 
 import (
 	"encoding/json"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/kun9497/assay/internal/advisory"
@@ -158,3 +160,29 @@ func affectedJSON(ecosystem, name, fixed string) map[string]any {
 }
 
 var _ = advisory.RangeEcosystem
+
+// TestEcosystems_IncludesUbuntu pins the one-line list that decides whether any
+// of the above ever runs against real data (D53).
+//
+// Dropping the entry does not break a scan loudly at build time — it makes
+// `assay db build` stop fetching the archive, and an Ubuntu image then reports
+// its ecosystem as absent from the database. That IS a loud skip and exit 2
+// rather than a false clean, so this is a regression guard, not a safety one:
+// without it, a mutation removing the entry left every test in the package
+// green.
+func TestEcosystems_IncludesUbuntu(t *testing.T) {
+	for _, want := range []string{"Ubuntu", "Debian", "Alpine"} {
+		if !slices.Contains(Ecosystems, want) {
+			t.Errorf("Ecosystems = %v, want it to include %q", Ecosystems, want)
+		}
+	}
+	// The lineage keys are archive CONTENTS, never archive paths: OSV serves
+	// one Ubuntu/all.zip and the release- and lineage-qualified keys live
+	// inside it (D6). Naming one here would request a path that does not
+	// exist.
+	for _, eco := range Ecosystems {
+		if strings.Contains(eco, ":") {
+			t.Errorf("Ecosystems contains %q; entries are archive paths, not keys", eco)
+		}
+	}
+}
