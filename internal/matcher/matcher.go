@@ -4,6 +4,7 @@ package matcher
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -322,6 +323,45 @@ const (
 	SkipCoverage SkipCause = "coverage"
 )
 
+// ubuntuLineageOf names the Ubuntu lineage a package version was built for,
+// or "" for a mainline build (D53).
+//
+// The two markers are the ones Canonical actually stamps into a version
+// string. ESM appends ~esmN or +esmN; the same pattern is what syft uses to
+// detect ESM, and its own comment calls an installed +esmN package the
+// durable signal. FIPS appends +FipsN or +FipsN.M — measured on Canonical's
+// own advisory data, where a FIPS fixed version is the identical base plus
+// the suffix (3.8.3-1.1ubuntu3.6 against 3.8.3-1.1ubuntu3.6+Fips1.2).
+//
+// Case-insensitive on the word: Canonical writes Fips in version strings and
+// FIPS in ecosystem keys, and a scanner that missed one spelling would report
+// a FIPS package clean, which is the whole failure this exists to prevent.
+//
+// Realtime and Nvidia-BlueField are NOT detectable this way and are not
+// claimed to be: those lineages differ by package NAME (linux-realtime,
+// linux-bluefield) rather than by a version suffix. A container image ships
+// no kernel, so the gap is a host-scan one; it is recorded in
+// docs/deferred-decisions.md rather than papered over with a name list this
+// project has no measurement behind.
+func ubuntuLineageOf(version string) string {
+	m := ubuntuLineageMarker.FindStringSubmatch(version)
+	if m == nil {
+		return ""
+	}
+	if strings.EqualFold(m[1], "esm") {
+		return "ESM"
+	}
+	return "FIPS"
+}
+
+// ubuntuLineageMarker matches the suffix, anchored to a digit so an ordinary
+// package whose name or version merely contains the letters cannot trip it.
+// (?i) is load-bearing, not tidiness: Canonical writes `+Fips1.2` in a version
+// string and `FIPS-updates` in an ecosystem key, so a case-sensitive `fips`
+// would match neither and report every FIPS package clean — the exact silent
+// miss this detector exists to prevent.
+var ubuntuLineageMarker = regexp.MustCompile(`(?i)[~+](esm|fips)[0-9]`)
+
 // skipCauseOf maps a comparison failure onto who owns it. An error this package
 // cannot classify is reported as SkipAdvisory rather than SkipTarget: the
 // conservative direction is the one that does NOT tell a user their input is
@@ -379,6 +419,45 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 				Package: p,
 				Reason: fmt.Sprintf("ecosystem %q is not in this database; "+
 					"run `assay db update`", p.Ecosystem),
+				Cause: SkipCoverage,
+			})
+			continue
+		}
+
+		// D53. The package's own version says which Ubuntu lineage built it,
+		// and this build ingests only the mainline one.
+		//
+		// Judging such a package against mainline advisories is a SILENT
+		// MISS, not a false alarm, and that direction was measured rather
+		// than assumed: Canonical builds a FIPS package by appending
+		// +FipsN to the identical base version, dpkg orders a +-suffixed
+		// string above the string it extends, so a mainline fixed version
+		// is always the lower bar. Every one of the 72 disagreements on a
+		// real 22.04 image and 14 on 24.04 ran mainline-says-clean /
+		// lineage-says-vulnerable. Zero ran the other way.
+		//
+		// The version string is the only signal that survives. The config
+		// files an attachment writes — the apt source, the credential,
+		// machine-token.json — are all deleted by Canonical's own documented
+		// way of building a FIPS or ESM image (attach, install, detach,
+		// purge the client, one layer), which leaves the patched binaries in
+		// place and every trace of the entitlement gone. Reading "no config"
+		// as "mainline" would be wrong on exactly the images built the way
+		// Canonical says to build them. A version suffix is baked into the
+		// dpkg database by the install itself and cannot be purged.
+		//
+		// Skipped rather than guessed at, which is D47's answer to the same
+		// question for RHEL's EUS channel: counted, reported, and reaching
+		// exit 2 through --fail-on-incomplete, never folded into a clean
+		// verdict.
+		if lineage := ubuntuLineageOf(p.Version); lineage != "" {
+			res.Skipped = append(res.Skipped, Skipped{
+				Package: p,
+				Reason: fmt.Sprintf(
+					"version %q is an Ubuntu %s build, and this database holds only "+
+						"mainline %s advisories; the %s lineage publishes its own fixed "+
+						"versions and they are always later than mainline's",
+					p.Version, lineage, p.Ecosystem, lineage),
 				Cause: SkipCoverage,
 			})
 			continue

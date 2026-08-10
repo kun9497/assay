@@ -146,7 +146,7 @@ advisories are written against the source.
 
 ---
 
-### Ubuntu package support
+### ~~Ubuntu package support~~ — resolved in slice ⓲ (D53)
 
 **Why deferred.** Not the version scheme — the dpkg comparer D40 added handles Ubuntu
 revisions (`2.4.4-2ubuntu17.10`) unchanged. Two other things.
@@ -162,12 +162,35 @@ line in the distro mapping.
 The corpus is also 5.8 GB unpacked against Debian's 383 MB, so the provider would have to
 stream and discard `versions[]` rather than parsing records whole.
 
-**Revisit when** the lineage question has an answer. Measuring first is the cheap step: how
-many packages in a real Ubuntu image are covered by more than one lineage, and how often the
-fixed versions differ between them.
+**Resolved 2026-08-10**, by taking the measurement this entry asked for — which reversed the
+direction it predicted.
 
-**Groundwork.** The comparer, the dpkg cataloger and the `Source:` handling are all done and
-ecosystem-agnostic. What is missing is the key.
+The entry expected a false positive. Of the (CVE, package) pairs at one release carrying both
+a mainline and a lineage fixed version, **67 of 67 differ and 67 of 67 have the lineage version
+sorting strictly higher**: Canonical appends `+FipsN` to the identical base version and dpkg
+orders a `+`-suffixed string above the string it extends. So mainline is always the lower bar
+and the error is a **silent false negative** on a FIPS host, not a false alarm — 72 of 136
+triples on a real 22.04 image and 14 of 23 on 24.04, every one in that direction and none in
+the other. The false-positive case the entry describes could not be tested at all: 22.04 has
+not left standard support, so no ESM-infra record exists yet to check against.
+
+D53 keys mainline only and reports a lineage-built package as not evaluated, detected from its
+own version suffix — the one signal that survives, because Canonical's documented way to build
+a FIPS or ESM image deletes every config file an attachment writes while leaving the patched
+binaries in place. See D53 for why that makes Ubuntu's detectability worse than RHEL's rather
+than better, and for how the 6.03 GB corpus is cut down at ingestion.
+
+**Two gaps remain open and are recorded rather than closed:**
+
+- **Realtime and Nvidia-BlueField.** Those lineages differ by package NAME
+  (`linux-realtime`, `linux-bluefield`), not by a version suffix, so D53's detector cannot see
+  them. A container image ships no kernel, so this is a host-scan gap. Revisit if assay ever
+  scans a live host's `/proc`, or if a name-based rule earns a measurement.
+- **No lineage image was ever tested.** Every number above compares a confirmed-mainline
+  image's versions against lineage thresholds, because no Pro/FIPS image is anonymously
+  pullable — they ship only behind a paid marketplace subscription. The detector rests on
+  Canonical's advisory data and syft's regex, never on an observed installed package. Revisit
+  if such an image becomes reachable.
 
 ---
 

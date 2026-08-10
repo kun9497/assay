@@ -69,13 +69,14 @@ func TestDistroEcosystem_Unsupported(t *testing.T) {
 		{"amazon linux has its own advisories", Distro{ID: "amzn", VersionID: "2023"}},
 		{"rhel with no VERSION_ID", Distro{ID: "rhel", VersionID: ""}},
 		{"rhel with a non-numeric version", Distro{ID: "rhel", VersionID: "beta"}},
-		// Ubuntu is deliberately here rather than mapped alongside Debian. OSV
-		// keys it "Ubuntu:24.04:LTS", and its Pro and FIPS lineages
-		// ("Ubuntu:Pro:FIPS-updates:18.04:LTS") describe the SAME release, so a
-		// release-only key cannot separate them and would report an ESM-patched
-		// system as vulnerable. It needs its own decision, not a second case
-		// here.
-		{"ubuntu needs its own decision", Distro{ID: "ubuntu", VersionID: "22.04"}},
+		// D53 gave Ubuntu its decision, so it resolves now — but only for a
+		// VERSION_ID shaped like a release. A version this cannot read is
+		// refused rather than concatenated into a key that would look
+		// plausible and match nothing in the database.
+		{"ubuntu with no VERSION_ID", Distro{ID: "ubuntu", VersionID: ""}},
+		{"ubuntu codename instead of a version", Distro{ID: "ubuntu", VersionID: "jammy"}},
+		{"ubuntu major only", Distro{ID: "ubuntu", VersionID: "22"}},
+		{"ubuntu point release", Distro{ID: "ubuntu", VersionID: "22.04.5"}},
 		// Debian testing and sid ship no VERSION_ID, and OSV publishes no
 		// ecosystem for either. A scan of one must say it could not be checked.
 		{"debian testing has no VERSION_ID", Distro{ID: "debian", VersionID: ""}},
@@ -188,5 +189,54 @@ func TestDistroEcosystem_RedHat(t *testing.T) {
 		if got, err := (Distro{ID: tc.id, VersionID: tc.versionID}).Ecosystem(); err != nil || got != tc.want {
 			t.Errorf("%s %s -> %q, %v; want %q", tc.id, tc.versionID, got, err, tc.want)
 		}
+	}
+}
+
+// TestDistroEcosystem_Ubuntu pins the two shapes OSV gives a mainline Ubuntu
+// release (D53): a long-term one carries ":LTS", an interim one does not.
+//
+// PRETTY_NAME is the only field on Distro that distinguishes them, which is
+// why it stopped being reporting-only. The alternative — inferring LTS from
+// an even year and an .04 month — is a rule Canonical has never promised.
+//
+// The lineage keys are NOT here and must never be produced by this function:
+// which lineage a system is entitled to is not something /etc/os-release
+// carries, and D53 handles those packages at match time instead.
+func TestDistroEcosystem_Ubuntu(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		d    Distro
+		want string
+	}{
+		// PRETTY_NAME verbatim from the real images, pulled 2026-08-10.
+		{"22.04 LTS", Distro{ID: "ubuntu", VersionID: "22.04",
+			PrettyName: "Ubuntu 22.04.5 LTS"}, "Ubuntu:22.04:LTS"},
+		{"24.04 LTS", Distro{ID: "ubuntu", VersionID: "24.04",
+			PrettyName: "Ubuntu 24.04.4 LTS"}, "Ubuntu:24.04:LTS"},
+		{"25.10 interim", Distro{ID: "ubuntu", VersionID: "25.10",
+			PrettyName: "Ubuntu 25.10"}, "Ubuntu:25.10"},
+		// 25.04 is an April release and NOT long-term. An implementation
+		// that guessed LTS from the .04 month rather than reading
+		// PRETTY_NAME gets this one wrong, and OSV really does key it
+		// bare.
+		{"25.04 is interim despite the month", Distro{ID: "ubuntu", VersionID: "25.04",
+			PrettyName: "Ubuntu 25.04"}, "Ubuntu:25.04"},
+		// No PRETTY_NAME at all: the key comes out bare, which names an
+		// ecosystem the database does not hold, and D20's coverage check
+		// turns that into a whole-package skip rather than a clean
+		// verdict. Pinned because that safety net is the reason reading a
+		// free-text field here is acceptable at all.
+		{"no PRETTY_NAME degrades to the bare key",
+			Distro{ID: "ubuntu", VersionID: "22.04"}, "Ubuntu:22.04"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.d.Ecosystem()
+			if err != nil {
+				t.Fatalf("Ecosystem() error = %v, want %q", err, tt.want)
+			}
+			if got != tt.want {
+				t.Errorf("Ecosystem() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

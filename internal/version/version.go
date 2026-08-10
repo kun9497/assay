@@ -7,6 +7,7 @@ package version
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 )
 
@@ -74,6 +75,11 @@ var registry = map[string]Comparer{
 	"PyPI": PEP440{},
 }
 
+// mainlineUbuntu matches the two shapes OSV gives a mainline Ubuntu release:
+// a long-term one carries the suffix, an interim one does not. Anchored, so
+// that no lineage key can satisfy it.
+var mainlineUbuntu = regexp.MustCompile(`^Ubuntu:[0-9]{2}\.[0-9]{2}(:LTS)?$`)
+
 func For(ecosystem string) (Comparer, bool) {
 	// Distro ecosystems carry their release (D6), so "Alpine:v3.19" cannot be a
 	// map key — the map would need one entry per release, forever. The bare
@@ -95,6 +101,20 @@ func For(ecosystem string) (Comparer, bool) {
 	// worked.
 	if rel, ok := strings.CutPrefix(ecosystem, "Red Hat:"); ok && rel != "" {
 		return RPM{}, true
+	}
+	// D53. Ubuntu is dpkg, so the comparer D40 wrote for Debian handles its
+	// revisions (2.4.4-2ubuntu17.10) unchanged — the version scheme was never
+	// the blocker. The KEY was.
+	//
+	// Matched by an anchored pattern rather than by prefix, and that is the
+	// whole point. Ubuntu:Pro:22.04:LTS and Ubuntu:Pro:FIPS-updates:22.04:LTS
+	// are real OSV keys describing the SAME release, and this build does not
+	// ingest them (D53). A prefix match would hand them a comparer, and a
+	// package carrying such a key would then be evaluated against a database
+	// holding nothing for it — the silent clean D20 exists to prevent.
+	// Refusing them here routes those packages to the coverage skip instead.
+	if mainlineUbuntu.MatchString(ecosystem) {
+		return Deb{}, true
 	}
 	c, ok := registry[ecosystem]
 	return c, ok

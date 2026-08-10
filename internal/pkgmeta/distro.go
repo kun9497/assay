@@ -3,6 +3,7 @@ package pkgmeta
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -15,9 +16,13 @@ var ErrNoEcosystem = errors.New("no vulnerability ecosystem for distro")
 // not to each package (D7): an image is Alpine 3.19; its packages are not.
 // Fields mirror /etc/os-release, which is also what syft reports.
 type Distro struct {
-	ID         string // os-release ID, e.g. "alpine"
-	VersionID  string // os-release VERSION_ID, e.g. "3.19.9"
-	PrettyName string // os-release PRETTY_NAME; reporting only, never a lookup key
+	ID        string // os-release ID, e.g. "alpine"
+	VersionID string // os-release VERSION_ID, e.g. "3.19.9"
+	// PrettyName is os-release PRETTY_NAME. It was reporting-only until D53,
+	// which reads the word LTS out of it: OSV's Ubuntu keys carry the
+	// suffix and nothing else on this struct distinguishes a long-term
+	// release from an interim one.
+	PrettyName string
 }
 
 // Ecosystem returns the OSV ecosystem key for this distro — "Alpine:v3.19".
@@ -31,6 +36,11 @@ type Distro struct {
 // syft reports VersionID as a patch release ("3.19.9") while OSV keys on the
 // minor ("Alpine:v3.19"), so the trailing component is dropped here rather than
 // at each call site.
+// ubuntuRelease is Ubuntu's YY.MM version, the shape every OSV Ubuntu key
+// is built on. Anchored: a VERSION_ID this does not match is refused rather
+// than concatenated into a key that would look plausible and match nothing.
+var ubuntuRelease = regexp.MustCompile(`^[0-9]{2}\.[0-9]{2}$`)
+
 func (d Distro) Ecosystem() (string, error) {
 	if d.ID == "" {
 		return "", fmt.Errorf("%w: distro has no ID", ErrNoEcosystem)
@@ -60,6 +70,38 @@ func (d Distro) Ecosystem() (string, error) {
 				ErrNoEcosystem, d.ID, d.VersionID)
 		}
 		return "Debian:" + major, nil
+	case "ubuntu":
+		// D53. OSV keys Ubuntu as "Ubuntu:22.04:LTS" for a long-term release and
+		// "Ubuntu:25.10" for an interim one, so the suffix is part of the key
+		// rather than decoration. It is read from PRETTY_NAME, which is the
+		// system's own statement about itself — the alternative, inferring
+		// LTS from an even year and an .04 month, is a rule Canonical has
+		// never promised and every key would silently move the day they
+		// break it.
+		//
+		// Getting the suffix wrong is safe in the way that matters: the key
+		// would name an ecosystem the database does not hold, and D20's
+		// coverage check turns that into a whole-package skip and exit 2,
+		// never a clean verdict. That is why this reads a free-text field at
+		// all: the failure is loud.
+		//
+		// Only the mainline lineage is keyed here. Ubuntu's Pro, FIPS and
+		// Realtime lineages have OSV keys of their own describing the SAME
+		// release, and which one a system is entitled to is not a fact
+		// /etc/os-release carries. Packages built from one of them are
+		// detected by the matcher from their own version string and reported
+		// as not evaluated (D53).
+		if d.VersionID == "" {
+			return "", fmt.Errorf("%w: distro %q has no VERSION_ID", ErrNoEcosystem, d.ID)
+		}
+		if !ubuntuRelease.MatchString(d.VersionID) {
+			return "", fmt.Errorf("%w: distro %q version %q is not a YY.MM release",
+				ErrNoEcosystem, d.ID, d.VersionID)
+		}
+		if strings.Contains(d.PrettyName, "LTS") {
+			return "Ubuntu:" + d.VersionID + ":LTS", nil
+		}
+		return "Ubuntu:" + d.VersionID, nil
 	case "rhel":
 		// D50. `rhel` and nothing else. Red Hat's CSAF VEX feed describes Red
 		// Hat's own builds, keyed on the mainline major (D47), and

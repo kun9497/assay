@@ -40,7 +40,14 @@ const DefaultBaseURL = "https://osv-vulnerabilities.storage.googleapis.com"
 // the five — 62,318 records against Alpine's 4,405 — and unlike Alpine its
 // per-release archives are current, but a single fetch is still fewer requests
 // and one freshness timestamp instead of four.
-var Ecosystems = []string{"Go", "npm", "PyPI", "Alpine", "Debian"}
+// "Ubuntu" joins on the same terms (D53) and is by far the largest: 601 MB
+// compressed and 6.03 GB unpacked, against Debian's 70 MB and 254 MB. The
+// driver is not record count — 62,751 against Debian's 62,465, near enough
+// identical — but 38.9 affected entries per record against 3.4, because each
+// record lists one entry per (lineage x release x binary package). Convert
+// drops the lineage entries as it goes (ubuntuLineage), so what is stored is
+// mainline only and the stream is never held whole.
+var Ecosystems = []string{"Go", "npm", "PyPI", "Alpine", "Debian", "Ubuntu"}
 
 type Provider struct {
 	ecosystems []string
@@ -84,7 +91,7 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		// the family match broke or the archive's shape changed, not that the
 		// distro has no advisories — and a database that silently has none
 		// turns every later scan of that distro into a clean report at exit 0.
-		if (eco == "Alpine" || eco == "Debian") && n == 0 {
+		if (eco == "Alpine" || eco == "Debian" || eco == "Ubuntu") && n == 0 {
 			return store.Provenance{}, fmt.Errorf("fetch %s: archive yielded no %s:* records", eco, eco)
 		}
 		prov.Records += n

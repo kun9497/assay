@@ -262,8 +262,14 @@ func TestNoUnbackedDistroComparer(t *testing.T) {
 	// Red Hat left this list when the CSAF VEX provider landed (D47-D49), for
 	// the same reason Debian did: the comparer, the provider that populates
 	// the ecosystem, and the wiring that keys the packages arrived together.
+	// Ubuntu left this list under D53. It needed no new cataloger: the dpkg
+	// one already populates Package.Source from the same Source: field, and
+	// the matcher's source lookup is ecosystem-agnostic — so unlike Debian and
+	// Red Hat, what had to arrive with the comparer was the KEY, not the
+	// plumbing. The lineage keys stay unresolved on purpose and are covered
+	// by TestFor_UbuntuLineageKeysDoNotResolve below.
 	for _, eco := range []string{
-		"Ubuntu:22.04", "Ubuntu:24.04:LTS", "Rocky Linux:9", "AlmaLinux:9",
+		"Rocky Linux:9", "AlmaLinux:9",
 		"Alpine",  // unversioned: not a key we ever build (D6)
 		"Debian",  // likewise
 		"Red Hat", // likewise -- the provider writes "Red Hat:9"
@@ -286,5 +292,46 @@ func TestNoUnbackedDistroComparer(t *testing.T) {
 	}
 	if len(registry) != len(want) {
 		t.Errorf("registry has %d entries, want %d", len(registry), len(want))
+	}
+}
+
+// TestFor_UbuntuLineageKeysDoNotResolve is the other half of D53's key
+// decision, and it guards the direction that fails silently.
+//
+// OSV publishes 34 Ubuntu keys across six lineage families, and the Pro, FIPS
+// and Realtime ones describe the SAME release as the mainline key. This build
+// ingests mainline only, so a lineage key must NOT resolve a comparer: if it
+// did, a package carrying that ecosystem would be evaluated against a database
+// holding nothing for it and report clean. Refusing it here sends the package
+// to D20's coverage skip instead, which is counted and reaches exit 2.
+//
+// Every key below was observed in the live OSV export on 2026-08-10, including
+// the two non-canonical shapes — OSV's schema documents only the bare :Pro:
+// prefix, so these spellings are convention rather than specification and a
+// prefix match is not safe against them.
+func TestFor_UbuntuLineageKeysDoNotResolve(t *testing.T) {
+	for _, eco := range []string{
+		"Ubuntu:Pro:20.04:LTS",
+		"Ubuntu:Pro:FIPS:16.04:LTS",
+		"Ubuntu:Pro:FIPS-updates:18.04:LTS",
+		"Ubuntu:Pro:FIPS-preview:22.04:LTS",
+		"Ubuntu:Pro:Realtime:22.04:LTS",
+		"Ubuntu:Nvidia-BlueField:24.04:LTS",
+		"Ubuntu:22.04:LTS:for:NVIDIA:BlueField",
+		"Ubuntu:Pro:24.04:LTS:Realtime:Kernel",
+		// The bare family name, for the reason every other distro guards it
+		// (D6): it is not a key this project builds, and resolving it would
+		// make a bug that dropped the release look like it worked.
+		"Ubuntu", "Ubuntu:",
+		// Shapes that are close enough to a real key to slip past a loose
+		// pattern.
+		"Ubuntu:22.04:lts", "Ubuntu:2.04:LTS", "Ubuntu:22.04:LTS:extra",
+		"xUbuntu:22.04:LTS", "Ubuntu:jammy",
+	} {
+		if _, ok := For(eco); ok {
+			t.Errorf("For(%q) resolves a comparer, but this build ingests no "+
+				"advisories under that key. A package carrying it would be "+
+				"evaluated against nothing and report clean (D53, D20).", eco)
+		}
 	}
 }
