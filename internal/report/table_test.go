@@ -999,3 +999,248 @@ func TestTable_NoFixFootnoteOnlyWhenEarned(t *testing.T) {
 		t.Errorf("the summary line drops the count at zero:\n%s", buf.String())
 	}
 }
+
+// D52: the FIXED IN column has to say WHY there is no fix, not just that
+// there isn't one. Table-driven over the four states a cell can render,
+// asserted against the rendered ROW (cellAt), not a bare Contains — a "none"
+// or "no fix yet" landing in the wrong column would still satisfy a
+// substring check, which is the exact defect CLAUDE.md documents twice.
+func TestTable_FixedInColumnRendersEachFixState(t *testing.T) {
+	tests := []struct {
+		name    string
+		finding matcher.Finding
+		want    string
+	}{
+		{
+			name: "a real fix renders the version, not a word",
+			finding: matcher.Finding{
+				Package:  pkgmeta.Package{Name: "p", Version: "1.0.0", Ecosystem: "Go"},
+				Advisory: advisory.Advisory{ID: "RH-FIXED-1"},
+				Evidence: version.Evidence{Fixed: "9.9.9"},
+				Severity: severity.High,
+				Score:    7.5,
+				Ratings:  []matcher.Rating{{Database: "GHSA", AdvisoryID: "RH-FIXED-1", Fixed: "9.9.9"}},
+			},
+			want: "9.9.9",
+		},
+		{
+			// No source states a reason at all — the ordinary case for every
+			// provider but Red Hat's CSAF VEX feed (FixState left at its zero
+			// value).
+			name: "no fix state recorded resolves to none",
+			finding: matcher.Finding{
+				Package:  pkgmeta.Package{Name: "p", Version: "1.0.0", Ecosystem: "Go"},
+				Advisory: advisory.Advisory{ID: "RH-UNKNOWN-1"},
+				Severity: severity.High,
+				Score:    7.5,
+				Ratings:  []matcher.Rating{{Database: "GHSA", AdvisoryID: "RH-UNKNOWN-1"}},
+			},
+			want: "none",
+		},
+		{
+			name: "affected, no fix published yet",
+			finding: matcher.Finding{
+				Package:  pkgmeta.Package{Name: "openssl-libs", Version: "1:3.5.5-6.el9_8", Ecosystem: "Red Hat:9"},
+				Advisory: advisory.Advisory{ID: "RH-NOTFIXED-1"},
+				Severity: severity.High,
+				Score:    7.5,
+				Ratings: []matcher.Rating{
+					{Database: "REDHAT", AdvisoryID: "RH-NOTFIXED-1", FixState: advisory.FixStateNotFixed},
+				},
+			},
+			want: "no fix yet",
+		},
+		{
+			name: "the vendor has said it will not fix this",
+			finding: matcher.Finding{
+				Package:  pkgmeta.Package{Name: "openssl-libs", Version: "1:3.5.5-6.el9_8", Ecosystem: "Red Hat:9"},
+				Advisory: advisory.Advisory{ID: "RH-WONTFIX-1"},
+				Severity: severity.High,
+				Score:    7.5,
+				Ratings: []matcher.Rating{
+					{Database: "REDHAT", AdvisoryID: "RH-WONTFIX-1", FixState: advisory.FixStateWontFix},
+				},
+			},
+			want: "won't fix",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := matcher.Result{Findings: []matcher.Finding{tt.finding}}
+			var buf bytes.Buffer
+			if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+				t.Fatal(err)
+			}
+			out := buf.String()
+			if got := cellAt(t, out, tt.finding.Advisory.ID, "FIXED IN"); got != tt.want {
+				t.Errorf("FIXED IN column = %q, want %q\n%s", got, tt.want, out)
+			}
+		})
+	}
+}
+
+// D52: a table with only wont-fix rows must not print the "no fix yet" or
+// "none" footnotes — each footnote is earned by a row, not printed as a
+// fixed set. Two wont-fix rows also proves de-duplication: the footnote
+// must appear exactly once even though two rows earned it.
+func TestTable_NoFixFootnotesOnlyWhenEarned(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{
+		{
+			Package:  pkgmeta.Package{Name: "a", Version: "1", Ecosystem: "Red Hat:9"},
+			Advisory: advisory.Advisory{ID: "RH-WONTFIX-1"},
+			Severity: severity.High,
+			Score:    7.5,
+			Ratings:  []matcher.Rating{{Database: "REDHAT", AdvisoryID: "RH-WONTFIX-1", FixState: advisory.FixStateWontFix}},
+		},
+		{
+			Package:  pkgmeta.Package{Name: "b", Version: "1", Ecosystem: "Red Hat:9"},
+			Advisory: advisory.Advisory{ID: "RH-WONTFIX-2"},
+			Severity: severity.High,
+			Score:    7.5,
+			Ratings:  []matcher.Rating{{Database: "REDHAT", AdvisoryID: "RH-WONTFIX-2", FixState: advisory.FixStateWontFix}},
+		},
+	}}
+	var buf bytes.Buffer
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 2, Cataloged: 2}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if n := strings.Count(out, "the vendor has said this will not be fixed"); n != 1 {
+		t.Errorf("won't-fix footnote appears %d times, want exactly 1 even though two rows earned it:\n%s", n, out)
+	}
+	if strings.Contains(out, "affected, with no fix published yet") {
+		t.Errorf("the \"no fix yet\" footnote is printed with no row to explain it:\n%s", out)
+	}
+	if strings.Contains(out, "no source records a version that fixes this") {
+		t.Errorf("the \"none\" footnote is printed with no row to explain it:\n%s", out)
+	}
+}
+
+// D52: the footnote order is fixed — won't fix, then no fix yet, then none —
+// regardless of which order the findings that earned them appear in the
+// result. noFixOrder ranges over a slice specifically so a map cannot
+// randomise this; the findings below are deliberately built in the reverse
+// order so a footnote block that just mirrored finding order would fail
+// this test rather than pass it by accident. Asserted by relative POSITION,
+// not presence, because presence alone would not notice an order flip.
+func TestTable_NoFixFootnoteOrderIsFixed(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{
+		{
+			Package:  pkgmeta.Package{Name: "a", Version: "1", Ecosystem: "Red Hat:9"},
+			Advisory: advisory.Advisory{ID: "RH-UNKNOWN-1"},
+			Severity: severity.High,
+			Score:    7.5,
+			Ratings:  []matcher.Rating{{Database: "REDHAT", AdvisoryID: "RH-UNKNOWN-1"}},
+		},
+		{
+			Package:  pkgmeta.Package{Name: "b", Version: "1", Ecosystem: "Red Hat:9"},
+			Advisory: advisory.Advisory{ID: "RH-NOTFIXED-1"},
+			Severity: severity.High,
+			Score:    7.5,
+			Ratings:  []matcher.Rating{{Database: "REDHAT", AdvisoryID: "RH-NOTFIXED-1", FixState: advisory.FixStateNotFixed}},
+		},
+		{
+			Package:  pkgmeta.Package{Name: "c", Version: "1", Ecosystem: "Red Hat:9"},
+			Advisory: advisory.Advisory{ID: "RH-WONTFIX-1"},
+			Severity: severity.High,
+			Score:    7.5,
+			Ratings:  []matcher.Rating{{Database: "REDHAT", AdvisoryID: "RH-WONTFIX-1", FixState: advisory.FixStateWontFix}},
+		},
+	}}
+	var buf bytes.Buffer
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 3, Cataloged: 3}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	wontFixAt := strings.Index(out, "the vendor has said this will not be fixed")
+	notFixedAt := strings.Index(out, "affected, with no fix published yet")
+	noneAt := strings.Index(out, "no source records a version that fixes this")
+	if wontFixAt == -1 || notFixedAt == -1 || noneAt == -1 {
+		t.Fatalf("not all three footnotes are present:\n%s", out)
+	}
+	if !(wontFixAt < notFixedAt && notFixedAt < noneAt) {
+		t.Errorf("footnote order is wrong — want won't-fix, then no-fix-yet, then none; "+
+			"got offsets %d, %d, %d:\n%s", wontFixAt, notFixedAt, noneAt, out)
+	}
+}
+
+// D52: WontFix is a subset of Unfixable, not a synonym for it. A fix-less
+// finding with no stated reason, or one merely marked not-fixed, must not
+// inflate WontFix, and a wont-fix finding must still count toward Unfixable
+// the same way the other two no-fix states do.
+func TestSummary_WontFixCountsOnlyWontFixFindings(t *testing.T) {
+	find := func(id string, fixState advisory.FixState) matcher.Finding {
+		return matcher.Finding{
+			Package:  pkgmeta.Package{Name: id, Version: "1", Ecosystem: "Red Hat:9"},
+			Advisory: advisory.Advisory{ID: id},
+			Severity: severity.High,
+			Score:    7.5,
+			Ratings:  []matcher.Rating{{Database: "REDHAT", AdvisoryID: id, FixState: fixState}},
+		}
+	}
+	res := matcher.Result{Findings: []matcher.Finding{
+		find("RH-UNKNOWN-1", ""),
+		find("RH-NOTFIXED-1", advisory.FixStateNotFixed),
+		find("RH-WONTFIX-1", advisory.FixStateWontFix),
+		find("RH-WONTFIX-2", advisory.FixStateWontFix),
+		// A finding with a real fix: unfixable in neither sense, and its
+		// presence proves WontFix/Unfixable are not simply len(Findings).
+		{
+			Package:  pkgmeta.Package{Name: "fixed", Version: "1", Ecosystem: "Go"},
+			Advisory: advisory.Advisory{ID: "RH-FIXED-1"},
+			Evidence: version.Evidence{Fixed: "2.0.0"},
+			Severity: severity.High,
+			Score:    7.5,
+			Ratings:  []matcher.Rating{{Database: "GHSA", AdvisoryID: "RH-FIXED-1", Fixed: "2.0.0"}},
+		},
+	}}
+	var buf bytes.Buffer
+	sum, err := Table(&buf, res, cyclonedx.Stats{Components: 5, Cataloged: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.Unfixable != 4 {
+		t.Errorf("Summary.Unfixable = %d, want 4 (unknown + not-fixed + two wont-fix)", sum.Unfixable)
+	}
+	if sum.WontFix != 2 {
+		t.Errorf("Summary.WontFix = %d, want 2 — it must count only the wont-fix findings, "+
+			"not every unfixable one", sum.WontFix)
+	}
+}
+
+// D52: the will-not-be-fixed count is printed unconditionally, the same
+// discipline UnknownSeverity and Unfixable already follow — a count that
+// only shows up when non-zero is one a --fail-on-unfixable=wont-fix caller
+// learns to stop checking for.
+func TestTable_WillNotBeFixedCountIsAlwaysPrinted(t *testing.T) {
+	var buf bytes.Buffer
+	sum, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{Components: 1, Cataloged: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "(0 will not be fixed)") {
+		t.Errorf("summary omits the will-not-be-fixed count when it is zero:\n%s", buf.String())
+	}
+	if sum.WontFix != 0 {
+		t.Errorf("Summary.WontFix = %d, want 0", sum.WontFix)
+	}
+
+	buf.Reset()
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "a", Version: "1", Ecosystem: "Red Hat:9"},
+		Advisory: advisory.Advisory{ID: "RH-WONTFIX-1"},
+		Severity: severity.High,
+		Score:    7.5,
+		Ratings:  []matcher.Rating{{Database: "REDHAT", AdvisoryID: "RH-WONTFIX-1", FixState: advisory.FixStateWontFix}},
+	}}}
+	sum, err = Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "(1 will not be fixed)") {
+		t.Errorf("summary line does not carry the will-not-be-fixed count:\n%s", buf.String())
+	}
+	if sum.WontFix != 1 {
+		t.Errorf("Summary.WontFix = %d, want 1", sum.WontFix)
+	}
+}

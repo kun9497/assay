@@ -194,6 +194,8 @@ assay scan alpine:3.19 --fail-on high         # high 이상 finding이면 1
 assay scan alpine:3.19 --fail-on-unknown      # 미평가 finding이 있으면 1
 assay scan alpine:3.19 --fail-on-incomplete   # 평가하지 못한 것이 있으면 2
 assay scan alpine:3.19 --fail-on-incomplete=target  # ...그 원인이 내 데이터일 때만
+assay scan ubi8:8.9 --fail-on-unfixable             # 아무도 못 고치는 finding이면 exit 1
+assay scan ubi8:8.9 --fail-on-unfixable=wont-fix    # ...그중 영영 안 고쳐질 것만
 assay scan alpine:3.19 --output json          # stdout에 JSON 문서 하나
 assay scan alpine:3.19 --explain CVE-2025-46394
 ```
@@ -263,11 +265,11 @@ severity: high (7.8)   [highest of 2 sources]
 
 | OS | 위치 |
 |---|---|
-| Windows | `%LocalAppData%\assay\db\v7\` |
-| macOS | `~/Library/Caches/assay/db/v7/` |
-| Linux | `~/.cache/assay/db/v7/` |
+| Windows | `%LocalAppData%\assay\db\v8\` |
+| macOS | `~/Library/Caches/assay/db/v8/` |
+| Linux | `~/.cache/assay/db/v8/` |
 
-CI 캐시나 에어갭 환경에서는 `ASSAY_DB_DIR`로 재정의합니다. 경로의 `v7`는 스키마 버전입니다 —
+CI 캐시나 에어갭 환경에서는 `ASSAY_DB_DIR`로 재정의합니다. 경로의 `v8`는 스키마 버전입니다 —
 스키마가 바뀌면 제자리에서 마이그레이션하는 대신 새 디렉터리에 다시 빌드합니다. 다만
 `ASSAY_DB_DIR`에는 그 성분이 없으므로, 그 경로를 키로 삼은 CI 캐시는 무효화되었어야 할
 업그레이드를 넘어 살아남습니다. 업그레이드 후에는 다시 빌드하거나 캐시 키에 assay 버전을
@@ -332,7 +334,7 @@ KISA 사이트는 공공누리 표시 없이 모든 권리를 보유하고 있�
 ```bash
 NVD_ENABLE=1 NVD_SINCE_DAYS=30 assay db build   # 27분, 측정값
 assay db status                                 # `ratings: NVD (…)`가 0이 아닌지 확인
-assay db push ghcr.io/kun9497/assay-db:v7       # 압축 약 6.8 MB
+assay db push ghcr.io/kun9497/assay-db:v8       # 압축 약 6.8 MB
 ```
 
 **첫 패스는 범위를 제한하세요. 전체 피드로 가지 마십시오.** 제한 없는 빌드는 약 7시간이고 재개
@@ -666,12 +668,18 @@ whole-product entries naming no package, 0 unreadable products,
       `openssh` range를, CVE-2005-2541은 fix 없는 `tar` range를 내야 합니다
 - [x] 매칭(D48, D50) — RPM comparer가 등록되고, RPM 패키지가 메인라인 major로 키를 잡으며,
       `--fail-on-unfixable`이 고칠 수 없는 finding을 게이트합니다
+- [x] 왜 픽스가 없는지(D52) — Red Hat의 remediation 카테고리가 "안 고칠 것"과 "아직 안 고쳐진
+      것"을 가르고, `--fail-on-unfixable=wont-fix`가 앞쁳것에만 걸립니다. 픽스 없는 메인라인
+      튜플 1,282,093건 전부가 이유를 실어 있어서 일부가 아니라 전체에 적용됩니다.
+      ubi8:8.9에서 505건 중 59건, ubi9:9.3에서 416건 중 11건
 - [x] EUS/AUS/E4S 호스트가 메인라인 errata에 맞춰지고, 스캔이 그것을 stderr에 밝힙니다
 
 ```
 PACKAGE             VERSION          ECOSYSTEM  ADVISORY       FIXED IN
 audit-libs (audit)  3.1.5-8.el9      Red Hat:9  CVE-2024-0003  3.1.5-99.el9
 openssl-libs        1:3.5.5-6.el9_8  Red Hat:9  CVE-2024-0001  1:3.5.5-8.el9_8
+vim-minimal         2:8.2.2637-22    Red Hat:9  CVE-2024-0002  won't fix
+python3-libs        3.9.21-2.el9     Red Hat:9  CVE-2024-0004  no fix yet
 zlib                1.2.11-40.el9    Red Hat:9  CVE-2005-2541  none
 none = no source records a version that fixes this; mitigate or remove the package
 ```

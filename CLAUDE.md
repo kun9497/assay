@@ -21,7 +21,10 @@ caller can fix (D36). Alpine, Debian and RHEL images scan end to end. RHEL takes
 VEX feed rather than OSV (D47–D49, on by default and carried by the published artifact since
 D51), because the OSV Red Hat export is errata-only and cannot say "affected, will not fix" — two thirds of what Red Hat publishes
 about its own packages. Those findings are reported and counted always and gated only by
-`--fail-on-unfixable` (D48), and only `rhel` routes to `Red Hat:N` (D50): Alma, Rocky, CentOS,
+`--fail-on-unfixable` (D48), which since D52 also carries WHY there is no fix — Red Hat's
+remediation categories separate "will not be fixed" from "not fixed yet", every unfixable
+mainline tuple has one, and `--fail-on-unfixable=wont-fix` gates on the first alone. Only
+`rhel` routes to `Red Hat:N` (D50): Alma, Rocky, CentOS,
 Fedora and Amazon Linux are catalogued and reported as not evaluated. Both rpmdb backends are read — SQLite for RHEL 9+ and BerkeleyDB for RHEL 8 and older
 (D44). Not built: Ubuntu, the ndb rpmdb backend, distroless `status.d`, SARIF, and pep440
 leniency (see `README.md`).
@@ -239,6 +242,25 @@ decided, keep it.**
   optimize for that slice.
 - **Anything that would add or revise a `D` decision.** Those come from conversation with the
   user, not from an agent's judgement.
+
+**Commit before an agent touches the working tree, always.** Delegated work that edits
+files has to be able to undo itself, and an agent picks its own way to do that. On
+2026-08-10 four agents were asked to mutation-test the D52 slice — change one line, watch
+it go red, revert — with the implementation still uncommitted. One of them reverted with
+`git stash`, which is a perfectly reasonable reading of the instruction and took **the entire
+slice** with it: implementation, schema bump, both roadmaps, both READMEs. It was
+recoverable only because `git stash list` still had it.
+
+Two rules come out of it, and the first is the one that matters:
+
+- **Commit first.** A committed baseline turns every revert an agent can invent — `stash`,
+  `checkout --`, `restore`, `reset --hard` — from a data-loss event into a no-op. This costs
+  one commit and removes the whole class.
+- **Never let several agents mutate shared implementation files at once.** Even with a
+  baseline, agent A's revert lands on top of agent B's live mutation, so B's "caught" or
+  "survived" is measuring a file it did not write. Mutation testing is a main-loop job for
+  that reason, not only because judging a survivor needs the design context: the whole
+  method depends on one writer at a time. Delegate the writing of tests, keep the mutating.
 
 **Model assignment.** Match the model to the failure mode, not the task size. Use the
 stronger model where a wrong answer is *quiet* — version-ordering rules, severity

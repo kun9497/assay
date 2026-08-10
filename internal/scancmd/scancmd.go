@@ -88,6 +88,17 @@ type Options struct {
 	// records what happens to such a gate -- somebody turns it off, and a gate
 	// that is off protects nothing.
 	FailOnUnfixable bool
+	// FailOnUnfixableWontFix narrows FailOnUnfixable to the findings a
+	// vendor has declared it will never fix (D52), the way
+	// FailOnIncompleteTarget narrows FailOnIncomplete (D36) — and for the
+	// same reason the paragraph above gives. The broad gate is red on every
+	// run of a RHEL host scan and gets switched off; this one fires on the
+	// subset where waiting is not a strategy, which on the images measured is
+	// 11 of 416 unfixable findings on ubi9 and 59 of 505 on ubi8.
+	//
+	// Independent of FailOnUnfixable rather than a mode of it: passing both
+	// is redundant but not contradictory, and the broad one subsumes this.
+	FailOnUnfixableWontFix bool
 	// Output selects the renderer: "" and "table" both mean the human table
 	// (Options{}'s zero value must reproduce today's behaviour exactly, the
 	// same rule Options.FailOn* already follows), "json" means the stable
@@ -530,6 +541,12 @@ func verdict(opts Options, sum report.Summary, findings []matcher.Finding) int {
 	// second way here is the drift hazard the FailOnUnknown comment names one
 	// field over.
 	if opts.FailOnUnfixable && sum.Unfixable > 0 {
+		return 1
+	}
+	// D52, and reading Summarize's count for the same reason: the renderer,
+	// the JSON and this gate must not each decide separately what counts as
+	// will-not-fix.
+	if opts.FailOnUnfixableWontFix && sum.WontFix > 0 {
 		return 1
 	}
 	for _, f := range findings {

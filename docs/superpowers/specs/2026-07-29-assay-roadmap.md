@@ -110,7 +110,7 @@ mode anyway. trivy made the same call for the same access pattern.
 
 ### D5 — Schema version in the path
 
-`<cache>/assay/db/v7/vulnerability.db`. A schema change means rebuilding into a new
+`<cache>/assay/db/v8/vulnerability.db`. A schema change means rebuilding into a new
 directory rather than writing migration code. Migration code is a liability for a project
 with one user.
 
@@ -859,7 +859,7 @@ this decision, and it showed up as one of the three findings in the binary scan 
 One machine builds the database on a schedule and publishes it to `ghcr.io/kun9497/assay-db`;
 everyone else runs `assay db update`, which pulls it. `assay db build` still exists and still
 builds from the upstream providers — it is now the publisher's command, not the default
-end-user path. The artifact's tag is the schema version (`Ref` renders it as `:v7`), so a
+end-user path. The artifact's tag is the schema version (`Ref` renders it as `:v8`), so a
 binary only ever asks for an artifact it can read: a schema bump produces a clean "not found"
 against the old tag rather than a database it would misinterpret, the same guarantee
 `store.DefaultPath` already gives the on-disk layout (D5). The artifact's `DataAsOf` is its
@@ -2033,6 +2033,94 @@ probabilistic: the test asserting otherwise failed three runs in ten, and checki
 at the top of the loop made it 12 for 12.
 
 
+### D52 — A range carries why it has no fix, and the gate can be narrowed to "never"
+
+**Decision.** `advisory.Range` gains a `FixState`. Red Hat's CSAF remediation categories fill
+it: `no_fix_planned` becomes `wont-fix`, `none_available` becomes `not-fixed`. The report shows
+the three cases apart, and `--fail-on-unfixable=wont-fix` gates on the first alone.
+
+The store's schema goes to 8, which under D5 means every database is rebuilt rather than
+migrated.
+
+**Why it was worth a rebuild.** Two thirds of what Red Hat publishes about its own packages is
+"affected, no fix" — 1,282,093 of 1,927,642 mainline tuples in the 2026-08-09 archive — and
+until now assay printed one sentence for all of it. Inside that mass are two different
+instructions. "Red Hat will not fix this" leaves mitigation or removal and nothing else; "no fix
+yet" is a reason to watch the CVE. A reader who cannot tell them apart has to treat every
+unfixable finding as either permanent or temporary, and both readings are wrong most of the
+time.
+
+On a real image the split is not a rounding error. Measured with grype, which already carries
+the distinction:
+
+| Image | Findings with no fix | Of those, will never be fixed |
+|---|---:|---:|
+| ubi9:9.3 | 416 | 11 (2.6%) |
+| ubi8:8.9 | 505 | 59 (11.7%) |
+
+On ubi8 that is roughly one line in nine, concentrated in packages an image actually ships —
+`vim-minimal` (7), `ncurses-base` and `ncurses-libs` (12 between them), `openssl-libs` (3).
+
+**The distinction turned out to be fully carryable, which was not a given.** The measurement
+that decided this was not the split but the coverage: of those 1,282,093 unfixable tuples,
+**every single one** is named by a `no_fix_planned` or `none_available` remediation. Zero carry
+neither. Had a large fraction been uncategorised, most findings would have stayed "no fix
+available" whatever the schema did, and the rebuild would have bought a label for a minority.
+`stats.UnfixableUnstated` counts that bucket on every sync so the day it stops being zero is
+visible rather than inferred.
+
+**The state sits on the range, not on the package or the advisory.** A package can be fixed on
+one release and permanently affected on another — `TestConvert_FixedAndUnfixedTogether` was
+already a fixture for exactly that shape before this slice — and both ranges are emitted side by
+side. A field on `Affected` would have to pick one of the two and silently drop the other. A
+field on `Advisory` is worse still: one CVE routinely spans many packages with different
+answers.
+
+**`fixed` is derived, never stored.** A range that has a `fixed` event is fixed, and writing
+that down a second time creates two copies of one fact that a later ingestion bug can make
+disagree. `matcher.fixStateOf` resolves it from the evidence instead, which is D13's rule
+applied to a field D13 would otherwise have no opinion about.
+
+**Unknown is a state, exactly as D17 has it for severity.** Only Red Hat publishes a reason
+today. An OSV range with no `fixed` event records that no fix is known — not that a vendor
+intends one — so those stay `unknown` and render as they did before this slice. Nothing about a
+non-RHEL target changed. In the store, unknown is the empty string, because it is the
+overwhelmingly common case and a repeated word across a million ranges is real bytes on a
+database already running 1.07 GB; `matcher.fixStateOf` is where that spelling stops, so no
+renderer has to know the two are the same answer.
+
+**Both categories on one package resolve to `wont-fix`, deliberately.** 179 of the 1,282,093
+tuples carry both — 0.014%, every sampled one `kernel-rt` on RHEL 9, a package that ships many
+parallel point-release variants and appears in no container image. The tie is broken by a stated
+rule rather than by arrival order (D25), and toward `wont-fix` because the two errors are not
+symmetric: calling something permanent when a fix later lands is a false alarm the next scan
+clears, while calling it temporary when nothing is coming leaves the reader waiting on a fix
+that does not exist. `stats.UnfixableBothReasons` discloses the count, so a feed that began
+disagreeing with itself in bulk would show rather than be resolved 179 times in silence.
+
+**Names follow grype (D18)** — `fixed`, `not-fixed`, `wont-fix`, `unknown`, and
+`FindingRecord.fixState` in the JSON — so a differential run compares field to field. Two of
+grype's own habits are not copied. Its table renders `not-fixed` and `unknown` as the same empty
+cell, which throws away most of the distinction at the last step; assay prints `no fix yet`,
+`none` and `won't fix` as three visibly different strings. And its one filter setting answers to
+three different names (`--ignore-states`, config `ignore-wontfix`, env `GRYPE_IGNORE_WONTFIX`);
+`--fail-on-unfixable=wont-fix` is spelled one way.
+
+**The gate is a scope on the existing flag, not a new one**, following D36's
+`--fail-on-incomplete=target`. Bare `--fail-on-unfixable` keeps its meaning exactly, so no
+existing CI changes behaviour, and `=any` spells that out for a pipeline that would rather say
+which it means than rely on a default never moving. The narrow form exists for the reason D48
+gave for not making the broad one a default: Red Hat contributes 4,491 unfixable kernel findings
+on RHEL 9 alone, a gate that is red on every run gets switched off, and a gate that is off
+protects nothing. `=wont-fix` fires on the tenth of that where waiting is not a strategy.
+
+**`group_ids` is counted, not expanded.** CSAF lets a remediation name a product group instead
+of listing products; Red Hat does not use it — 0 of 63,152 documents in the 2026-08-09 archive,
+and no `product_groups` block to resolve one against. Implementing an expansion no data
+exercises would ship an untested path; `stats.RemediationGrouped` makes a feed that started
+using it visible instead, and the affected packages would degrade to `unknown` rather than to a
+wrong answer.
+
 ## 3. Architecture
 
 ### Measured data volumes
@@ -2156,7 +2244,7 @@ type Finding struct {
 ### Storage layout
 
 ```
-<os.UserCacheDir()>/assay/db/v7/vulnerability.db      override: ASSAY_DB_DIR
+<os.UserCacheDir()>/assay/db/v8/vulnerability.db      override: ASSAY_DB_DIR
 
 buckets:
   advisories   "<ecosystem>\x00<name>"     → []AdvisoryID  primary lookup
@@ -2175,9 +2263,9 @@ which is microseconds.
 
 | OS | Path |
 |---|---|
-| Windows | `%LocalAppData%\assay\db\v7\` |
-| macOS | `~/Library/Caches/assay/db/v7/` |
-| Linux | `~/.cache/assay/db/v7/` (honours `XDG_CACHE_HOME`) |
+| Windows | `%LocalAppData%\assay\db\v8\` |
+| macOS | `~/Library/Caches/assay/db/v8/` |
+| Linux | `~/.cache/assay/db/v8/` (honours `XDG_CACHE_HOME`) |
 
 Values are JSON to start. At a few hundred lookups per scan, bbolt reads are microseconds
 and decoding dominates — still tens of milliseconds. Encoding is hidden behind `Store`

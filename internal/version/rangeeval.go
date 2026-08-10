@@ -22,6 +22,13 @@ type Evidence struct {
 	Fixed        string
 	LastAffected string
 	Reason       string
+	// FixState is the matched range's own statement about why no fix exists,
+	// carried through UNRESOLVED (D13). A range whose upper bound this walk
+	// actually reached is fixed regardless of what it stores, and only the
+	// caller — which can see whether Fixed came back populated — is in a
+	// position to say so. Resolving it here would bake a derivation into the
+	// evidence and leave no way to tell a stored state from an inferred one.
+	FixState advisory.FixState
 }
 
 // AffectsVersion reports whether v falls within any range of a, falling back to
@@ -130,6 +137,7 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 		ev     Evidence
 	)
 	ev.RangeType = r.Type
+	ev.FixState = r.FixState
 
 	for _, e := range events {
 		switch {

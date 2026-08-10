@@ -48,6 +48,61 @@ const (
 type Range struct {
 	Type   RangeType `json:"type"`
 	Events []Event   `json:"events"`
+	// FixState says WHY a range carries no `fixed` event (D52). It is stored
+	// only on fix-less ranges: a range that has a `fixed` event is fixed by
+	// construction, and storing that separately would be a second copy of a
+	// fact the events already carry — one that a later ingestion bug could make
+	// disagree with them. Derived at query time instead (D13).
+	FixState FixState `json:"fix_state,omitempty"`
+}
+
+// FixState distinguishes "the vendor has decided never to fix this" from "no
+// fix yet" (D52). The two read alike in a report and mean opposite things to
+// whoever has to act: one leaves only mitigation or removal, the other is a
+// reason to watch the CVE.
+//
+// Spellings follow grype (D18) so a differential run compares field to field.
+type FixState string
+
+const (
+	// FixStateUnknown is a state rather than a default (the discipline D17 sets
+	// for severity). A fix-less range from a source that does not publish a
+	// reason gets this and keeps it: every provider except Red Hat's CSAF VEX
+	// feed is in that position today, and coercing them to NotFixed would put
+	// words in their mouth — OSV records that no fix is known, not that a
+	// vendor intends one.
+	//
+	// A STORED range spells it as the empty string, which is what the zero
+	// value and `omitempty` give for free; unknown is the overwhelmingly common
+	// case and a word repeated across a million records is real bytes on a
+	// database that already runs 1.07 GB. Readers get the word instead —
+	// matcher.fixStateOf resolves it — so nothing outside the store has to know
+	// that "" and "unknown" are the same answer.
+	FixStateUnknown FixState = "unknown"
+	// FixStateNotFixed is affected with no fix available yet.
+	FixStateNotFixed FixState = "not-fixed"
+	// FixStateWontFix is affected and the vendor has said it will stay that
+	// way. Requires positive evidence — nothing derives it.
+	FixStateWontFix FixState = "wont-fix"
+	// FixStateFixed is never stored; it is what a range with a `fixed` event
+	// resolves to at query time. It exists so the four states a report can show
+	// are all named in one place.
+	FixStateFixed FixState = "fixed"
+)
+
+// String resolves the store's empty spelling of unknown to the word.
+//
+// Every renderer goes through here rather than converting with string(), so a
+// value that reached one without passing matcher.fixStateOf — a Finding built
+// by hand, a provider that forgot the field — still comes out as one of the
+// four states. The JSON document promises exactly that and no omitempty to
+// hide behind, and a promise held only on the paths someone remembered is not
+// one a consumer can code against.
+func (s FixState) String() string {
+	if s == "" {
+		return string(FixStateUnknown)
+	}
+	return string(s)
 }
 
 // Event carries exactly one populated field. LastAffected is an inclusive upper

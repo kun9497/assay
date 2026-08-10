@@ -202,6 +202,8 @@ assay scan alpine:3.19 --fail-on high         # exit 1 on a high or critical fin
 assay scan alpine:3.19 --fail-on-unknown      # exit 1 on an unrated finding
 assay scan alpine:3.19 --fail-on-incomplete   # exit 2 if anything went unevaluated
 assay scan alpine:3.19 --fail-on-incomplete=target  # ...only if YOUR data caused it
+assay scan ubi8:8.9 --fail-on-unfixable             # exit 1 on a finding nothing fixes
+assay scan ubi8:8.9 --fail-on-unfixable=wont-fix    # ...only the ones never getting one
 assay scan alpine:3.19 --output json          # one JSON document on stdout
 assay scan alpine:3.19 --explain CVE-2025-46394
 ```
@@ -276,11 +278,11 @@ run `assay db update` rather than silently fetching or silently reporting nothin
 
 | OS | Location |
 |---|---|
-| Windows | `%LocalAppData%\assay\db\v7\` |
-| macOS | `~/Library/Caches/assay/db/v7/` |
-| Linux | `~/.cache/assay/db/v7/` |
+| Windows | `%LocalAppData%\assay\db\v8\` |
+| macOS | `~/Library/Caches/assay/db/v8/` |
+| Linux | `~/.cache/assay/db/v8/` |
 
-Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v7` component
+Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v8` component
 is the schema version — a schema change rebuilds into a new directory rather than migrating
 in place. Note that `ASSAY_DB_DIR` carries no such component, so a CI cache keyed on that
 path survives an upgrade that should have invalidated it. Rebuild after upgrading, or key
@@ -348,7 +350,7 @@ already exist, so the very first one is a one-time, manual step:
 ```bash
 NVD_ENABLE=1 NVD_SINCE_DAYS=30 assay db build   # 27 minutes, measured
 assay db status                                 # check `ratings: NVD (…)` is not zero
-assay db push ghcr.io/kun9497/assay-db:v7       # ~6.8 MB compressed
+assay db push ghcr.io/kun9497/assay-db:v8       # ~6.8 MB compressed
 ```
 
 After that, the scheduled workflow keeps it current on its own.
@@ -704,12 +706,19 @@ understood it.
       must still yield a fixed `openssh` range, CVE-2005-2541 a fix-less `tar` one
 - [x] Matching (D48, D50) — the RPM comparer is registered, RPM packages are keyed on the
       mainline major, and `--fail-on-unfixable` gates on findings nothing can fix
+- [x] Why there is no fix (D52) — Red Hat's remediation categories separate "will not be
+      fixed" from "not fixed yet", and `--fail-on-unfixable=wont-fix` gates on the first
+      alone. Every one of the 1,282,093 unfixable mainline tuples carries a reason, so the
+      split applies to all of them rather than to a sample: 59 of 505 on ubi8:8.9, 11 of
+      416 on ubi9:9.3
 - [x] EUS/AUS/E4S hosts are matched against mainline errata, and the scan says so on stderr
 
 ```
 PACKAGE             VERSION          ECOSYSTEM  ADVISORY       FIXED IN
 audit-libs (audit)  3.1.5-8.el9      Red Hat:9  CVE-2024-0003  3.1.5-99.el9
 openssl-libs        1:3.5.5-6.el9_8  Red Hat:9  CVE-2024-0001  1:3.5.5-8.el9_8
+vim-minimal         2:8.2.2637-22    Red Hat:9  CVE-2024-0002  won't fix
+python3-libs        3.9.21-2.el9     Red Hat:9  CVE-2024-0004  no fix yet
 zlib                1.2.11-40.el9    Red Hat:9  CVE-2005-2541  none
 none = no source records a version that fixes this; mitigate or remove the package
 ```

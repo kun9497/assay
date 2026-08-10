@@ -180,6 +180,74 @@ type Rating struct {
 	// offers nowhere to verify it - explainability is goal #1, and it applies
 	// to the sources as much as to the match.
 	URL string
+	// FixState is what THIS record says about a fix existing, on the same
+	// reasoning that puts Fixed here rather than on the finding: two databases
+	// describing one CVE routinely disagree, and one of them saying "the vendor
+	// will never fix this" is a fact about that database's record, not about
+	// the vulnerability (D52).
+	//
+	// FixStateFixed when Fixed is populated. Otherwise whatever the matched
+	// range stated, which is FixStateUnknown for every source but Red Hat's
+	// CSAF VEX feed — those record that no fix is known without saying why.
+	FixState advisory.FixState
+}
+
+// fixStateOf resolves what one match says about a fix.
+//
+// The derivation lives here rather than in the range walk because only this
+// side knows whether the walk actually reached an upper bound: a stored state
+// describes a range with no `fixed` event, and a range that HAS one is fixed
+// whatever it stores. Deriving it means the two can never contradict each
+// other, which is D13's reason for deriving anything.
+// It is also where the store's empty-string spelling of unknown stops: past
+// this point every FixState is one of the four words, so no renderer has to
+// carry the knowledge that an absent field and "unknown" mean the same thing.
+func fixStateOf(ev version.Evidence) advisory.FixState {
+	if ev.Fixed != "" {
+		return advisory.FixStateFixed
+	}
+	// Redundant with advisory.FixState.String(), which resolves the same
+	// empty string at every render boundary, and a mutation of either one
+	// survives — stated here rather than left for someone to find and
+	// delete as dead. They guard different things. String() keeps the
+	// PUBLISHED document honest whatever reaches it; this keeps
+	// matcher.Rating.FixState itself one of the four words, so a future
+	// consumer reading the field directly — an --explain renderer, a
+	// second gate — does not have to know that the store spells unknown
+	// as nothing at all.
+	if ev.FixState == "" {
+		return advisory.FixStateUnknown
+	}
+	return ev.FixState
+}
+
+// FixState says why an unfixable finding has no fix, across every source that
+// described it.
+//
+// wont-fix outranks not-fixed outranks unknown, and the order is the reader's
+// available actions rather than a severity: one source saying the vendor has
+// closed the matter is the strongest claim on the table, and hearing it from
+// anywhere is enough to act on. As everywhere in D25, the tie is broken by a
+// stated rule and never by arrival order.
+//
+// Ratings that carry a fixed version take no part. A finding where some source
+// has a fix is not unfixable at all (Unfixable reads the same field), and
+// letting a fixed rating vote here would let one database's silence about a
+// version outrank another's explicit "never".
+func (f Finding) FixState() advisory.FixState {
+	if !f.Unfixable() {
+		return advisory.FixStateFixed
+	}
+	out := advisory.FixStateUnknown
+	for _, r := range f.Ratings {
+		switch r.FixState {
+		case advisory.FixStateWontFix:
+			return advisory.FixStateWontFix
+		case advisory.FixStateNotFixed:
+			out = advisory.FixStateNotFixed
+		}
+	}
+	return out
 }
 
 // beats reports whether cand should displace cur as the rating that sets the
@@ -477,6 +545,7 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 							Severity:   band,
 							Score:      score,
 							Fixed:      ev.Fixed,
+							FixState:   fixStateOf(ev),
 						}
 						idx := -1
 						for _, g := range groupsOf(group, ids) {

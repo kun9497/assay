@@ -256,7 +256,9 @@ func (p *Provider) get(ctx context.Context, url string) (io.ReadCloser, error) {
 // input and looks identical to one that is broken.
 func (s stats) String() string {
 	return fmt.Sprintf(
-		"%d documents -> %d advisories, %d affected entries (%d with no fix available); "+
+		"%d documents -> %d advisories, %d affected entries (%d with no fix available: "+
+			"%d will not be fixed, %d not fixed yet, %d with no reason given, "+
+			"%d tagged both ways, %d remediations naming a product group); "+
 			"skipped %d module builds, %d module/flatpak-scoped entries, "+
 			"%d non-mainline products, %d container images, "+
 			"%d products with no CPE, %d whole-product entries naming no package, "+
@@ -264,6 +266,8 @@ func (s stats) String() string {
 			"%d unreadable documents; delta: %d changed since the archive, "+
 			"%d fetched, %d already withdrawn, %d yielded a record",
 		s.Documents, s.Advisories, s.Affected, s.Unfixable,
+		s.UnfixableWontFix, s.UnfixableNotFixed, s.UnfixableUnstated,
+		s.UnfixableBothReasons, s.RemediationGrouped,
 		s.SkippedModule, s.SkippedModuleContext, s.SkippedNonRHEL, s.SkippedImage,
 		s.SkippedNoCPE, s.SkippedWholeProduct, s.SkippedBadProduct, s.SkippedNoCVE, s.SkippedBadDoc,
 		s.DeltaListed, s.DeltaFetched, s.DeltaGone, s.DeltaAdvisories)

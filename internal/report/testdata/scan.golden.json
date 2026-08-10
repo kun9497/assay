@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "findings": [
     {
       "package": {
@@ -41,10 +41,12 @@
           "severity": "critical",
           "score": 9.8,
           "fixed": "3.1.4-r6",
-          "url": ""
+          "url": "",
+          "fixState": "fixed"
         }
       ],
       "unfixable": false,
+      "fixState": "fixed",
       "enrichment": [
         {
           "source": "KISA",
@@ -84,10 +86,12 @@
           "severity": "unknown",
           "score": 0,
           "fixed": "",
-          "url": ""
+          "url": "",
+          "fixState": "unknown"
         }
       ],
       "unfixable": true,
+      "fixState": "unknown",
       "enrichment": []
     },
     {
@@ -120,7 +124,8 @@
           "severity": "critical",
           "score": 9.8,
           "fixed": "2.2.28",
-          "url": ""
+          "url": "",
+          "fixState": "fixed"
         },
         {
           "database": "NVD",
@@ -128,7 +133,8 @@
           "severity": "critical",
           "score": 9.8,
           "fixed": "",
-          "url": "https://nvd.nist.gov/vuln/detail/CVE-2022-28347"
+          "url": "https://nvd.nist.gov/vuln/detail/CVE-2022-28347",
+          "fixState": "unknown"
         },
         {
           "database": "PYSEC",
@@ -136,10 +142,12 @@
           "severity": "unknown",
           "score": 0,
           "fixed": "2.2.27",
-          "url": ""
+          "url": "",
+          "fixState": "fixed"
         }
       ],
       "unfixable": false,
+      "fixState": "fixed",
       "enrichment": []
     }
   ],
@@ -182,6 +190,7 @@
     "targetIncomplete": 2,
     "findings": 3,
     "unknownSeverity": 1,
-    "unfixable": 1
+    "unfixable": 1,
+    "wontFix": 0
   }
 }

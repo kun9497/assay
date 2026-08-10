@@ -264,7 +264,8 @@ func ratingLine(r matcher.Rating) string {
 // comparerName names the version.Comparer that version.For would select
 // for ecosystem, without exporting version's own unexported registry just
 // for this display purpose. It mirrors version.For's dispatch exactly —
-// Alpine:vX.Y -> apk, Go/npm -> semver, PyPI -> pep440 — and
+// Alpine:vX.Y -> apk, Debian:N -> deb, Red Hat:N -> rpm, Go/npm -> semver,
+// PyPI -> pep440 — and
 // TestComparerName_AgreesWithVersionFor cross-checks the two directly, so a
 // future ecosystem added to one and not the other fails loudly here rather
 // than explain mode quietly naming the wrong comparer (D9: comparison rules
@@ -273,6 +274,12 @@ func ratingLine(r matcher.Rating) string {
 func comparerName(ecosystem string) string {
 	if rel, ok := strings.CutPrefix(ecosystem, "Alpine:"); ok && rel != "" {
 		return "apk"
+	}
+	if rel, ok := strings.CutPrefix(ecosystem, "Debian:"); ok && rel != "" {
+		return "deb"
+	}
+	if rel, ok := strings.CutPrefix(ecosystem, "Red Hat:"); ok && rel != "" {
+		return "rpm"
 	}
 	switch ecosystem {
 	case "Go", "npm":
