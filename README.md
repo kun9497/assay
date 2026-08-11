@@ -639,8 +639,11 @@ disagree zero times.
       expected here: the error is a silent false NEGATIVE on a FIPS host, not a false
       positive, because Canonical appends `+FipsN` to the same base version and dpkg sorts
       it above
-- [ ] Distroless images keep their database in `var/lib/dpkg/status.d` as a directory, which
-      the layer reader cannot ask for; those images exit 2 with the shape named
+- [x] Distroless images keep their database in `var/lib/dpkg/status.d` as a directory (D54).
+      `Image.FilesUnder` enumerates it with the same layer rules a named path gets — newest
+      layer wins, a whiteout hides lower layers but not its own, an opaque marker replaces the
+      directory. A symlink under it is counted rather than followed and joins the incomplete
+      count
 
 **⑫ RHEL-family inventory** — `ubi9`, `rocky:9`, `almalinux:9`, `fedora` and
 `amazonlinux:2023` are read, and **no verdict follows**. A RHEL image's packages are listed

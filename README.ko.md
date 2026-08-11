@@ -605,21 +605,10 @@ Debian은 backport를 버전에 **적습니다**(`7.74.0-1.3+deb11u10`). (CVE, �
       평가 불가로 보고합니다. 측정이 예상을 뒤집었습니다 — 오류는 FIPS 호스트에서의 조용한
       **미탐**이지 오탐이 아닙니다. Canonical이 같은 베이스 버전에 `+FipsN`을 붙이고
       dpkg가 그것을 위로 정렬하기 때문입니다
-- [ ] distroless 이미지는 데이터베이스를 `var/lib/dpkg/status.d` 디렉터리에 두는데 레이어 리더가
-      그것을 요청하지 못합니다. 그 이미지들은 모양을 이름으로 밝히며 exit 2입니다
-
-**⑫ RHEL 계열 인벤토리** — `ubi9`, `rocky:9`, `almalinux:9`, `fedora`,
-`amazonlinux:2023`을 읽고, **판정은 내리지 않습니다.** RHEL 이미지의 패키지가 NEVRA와 함께
-나열되고 전부 평가되지 않음으로 보고되어 스캔은 exit 2입니다. **인벤토리 완료, 매칭은 의도적으로
-안 함.**
-
-기록되어 있던 반대 이유 — Red Hat이 백포트를 버전에 적지 않아 비교하면 오탐이 난다 — 는
-**틀렸고**, 정정은 `docs/deferred-decisions.md`에 있습니다. Red Hat OSV 내보내기의 fixed 이벤트
-588,150개가 전부 epoch와 release를 달고, 95.8%가 `.elN`을 달며, 실제 `ubi9` 이미지에서 패치된
-패키지가 전부 fixed로 읽힙니다. 매칭을 막는 것은 다른 것입니다. 그 피드는 **errata 전용**이라
-"affected, will not fix"를 표현할 수 없습니다 — CVE 39,372개가 Red Hat VEX 피드에만 있고 그중
-19,341개가 2023년 이후입니다. 이 피드로 매칭하면 그 전부가 clean으로 나옵니다.
-
+- [x] distroless 이미지는 데이터베이스를 `var/lib/dpkg/status.d` 디렉터리에 둡니다(D54).
+      `Image.FilesUnder`가 이름 지정 경로와 같은 레이어 규칙으로 열거합니다 — 최신 레이어가 이기고,
+      whiteout은 아래 레이어를 가리되 자기 레이어는 가리지 않으며, opaque 표식은 디렉터리를
+      교체합니다. 그 아래의 심볼링크는 따라가지 않고 세서 불완전 카운트에 더합니다
 - [x] `rpmdb.sqlite`를 읽는 순수 Go SQLite 리더, overflow 체인 포함 — 새 의존성 없음(D44).
       스캐너는 열거만 하므로 해시 인덱스도 SQL 계층도 사표입니다. `modernc.org/sqlite`는 모듈
       4개와 3.8 MB를 치르고 정작 가장 쓰기 쉬운 백엔드 하나를 사 옵니다

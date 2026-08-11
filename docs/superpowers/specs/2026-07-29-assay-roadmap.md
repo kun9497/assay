@@ -2219,6 +2219,45 @@ ambiguity never arises for them. Holding D1 — every provider normalizes into O
 gives assay a problem neither had. grype carries exactly one Ubuntu channel, `esm`, and excludes
 FIPS and Realtime deliberately as separate compliance products.
 
+### D54 — A distroless dpkg database is a directory, and the layer walk learned to enumerate one
+
+**Decision.** `Image.FilesUnder(dir)` returns every regular file directly inside a directory,
+across layers, with the same rules `Files` applies to a named path. `scancmd` uses it to read
+`/var/lib/dpkg/status.d` when `/var/lib/dpkg/status` is absent, and `dpkgdb.ParseStanza` —
+which already existed for this shape — parses each stanza.
+
+**Why a new method rather than more paths.** `Files` takes exact names, which is right for the
+three databases a scan wants by name. It cannot express this one: the contents of `status.d` are
+named after the packages, which is what the scan is trying to find out. The set has to be
+discovered, and that is a different operation rather than a longer list.
+
+**The layer rules are not optional here either.** Newest layer wins per path; a whiteout hides
+lower layers but not its own; an opaque marker replaces the directory wholesale. A distroless
+image built by copying one base's `status.d` over another's is exactly where those decide the
+inventory, and getting the second wrong makes an upgraded package vanish entirely — a silent
+miss rather than a wrong version.
+
+**Direct children only.** `status.d` is flat. Recursing would hand this cataloger files from
+some future image shape that it would then try to parse as dpkg stanzas. A prefix match would
+also pull in `status.d.old`, which is the same class of mistake the existing rule against
+globbing `status*` guards — `debian:*` ships `status-old` holding a duplicate of every stanza.
+
+**A symlink under the directory is counted, not followed**, and the count joins
+`skippedRecords`, so it reaches `Summary.TargetIncomplete` (D36). Following one would mean a
+resolve pass per entry against a set that is itself being discovered, and no distroless image
+measured carries one. It also shadows a lower layer's regular file at that path: the link is
+what the image ships, and substituting the shadowed file would report a version the image does
+not have. Zero is the expected count; a non-zero one is something a reader can act on.
+
+**Tried only when the single-file database is absent**, so an ordinary Debian image pays nothing
+— `FilesUnder` is a second full pass over every layer. An image carrying both is not a shape
+anything ships, and preferring the file leaves the existing path untouched.
+
+**The known limitation is unchanged and is the one `Files` already has:** a symlink on a
+DIRECTORY COMPONENT of the path is not followed. If some image made `var/lib/dpkg` itself a
+link, this would find nothing and the scan would refuse with its "no supported package
+database" error rather than report clean.
+
 ## 3. Architecture
 
 ### Measured data volumes

@@ -125,14 +125,20 @@ type Options struct {
 const (
 	osReleasePath = "etc/os-release"
 	apkDBPath     = "lib/apk/db/installed"
-	// dpkgDBPath is the ordinary Debian and Ubuntu database. Distroless images
-	// use /var/lib/dpkg/status.d as a DIRECTORY of one stanza per package
-	// instead, which Files cannot ask for — it takes exact paths. Those images
-	// therefore reach the "no supported package database" error below, which
-	// names them, rather than being reported as having no packages. Never
-	// glob status*: debian:* ships status-old holding a full duplicate of
-	// every stanza, and matching it would double the inventory.
+	// dpkgDBPath is the ordinary Debian and Ubuntu database: one file holding
+	// every stanza. Never glob status*: debian:* ships status-old holding a
+	// full duplicate of every stanza, and matching it would double the
+	// inventory.
 	dpkgDBPath = "var/lib/dpkg/status"
+	// dpkgStatusDir is the same database as a DIRECTORY of one stanza per
+	// package, which is what distroless images ship (D54). Its contents are
+	// named after the packages, so unlike every other path here it cannot be
+	// asked for by name — Image.FilesUnder discovers it.
+	//
+	// Tried only when the single-file form is absent. An image carrying both
+	// is not a shape anything ships, and preferring the file keeps the
+	// ordinary Debian path exactly as it was.
+	dpkgStatusDir = "var/lib/dpkg/status.d"
 )
 
 // rpmDBDirs are the two places an RPM database lives, newest convention first.
@@ -599,6 +605,20 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 	if err != nil {
 		return pkgmeta.Target{}, cyclonedx.Stats{}, err
 	}
+	// Only when the single-file database is absent, so an ordinary Debian
+	// image pays nothing for this: FilesUnder is a second full pass over
+	// every layer (D54).
+	var statusD map[string]source.FileFromLayer
+	var statusDLinks int
+	if files[dpkgDBPath].Data == nil {
+		statusD, statusDLinks, err = img.FilesUnder(dpkgStatusDir)
+		if err != nil {
+			return pkgmeta.Target{}, cyclonedx.Stats{}, err
+		}
+	}
+	if err != nil {
+		return pkgmeta.Target{}, cyclonedx.Stats{}, err
+	}
 
 	var (
 		target    pkgmeta.Target
@@ -642,6 +662,33 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 			return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("parse %s: %w", dpkgDBPath, err)
 		}
 		pkgs, diffID = p, f.DiffID
+	case len(statusD) > 0:
+		// D54. One stanza per file, parsed in sorted order so two scans of one
+		// image agree — FilesUnder returns a map, and a map's iteration order
+		// reaching the report would make every run a different document.
+		//
+		// diffID is taken from the layer the FIRST stanza came from. A
+		// distroless image's status.d is written by one COPY, so in practice
+		// every stanza shares a layer; where it does not, the per-package
+		// Location already carries the file it came from, which is the
+		// finer-grained answer a reader wants anyway.
+		for _, name := range source.SortedNames(statusD) {
+			f := statusD[name]
+			p, err := dpkgdb.ParseStanza(bytes.NewReader(f.Data), ecosystem, name)
+			if err != nil {
+				return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("parse %s: %w", name, err)
+			}
+			if diffID == "" {
+				diffID = f.DiffID
+			}
+			pkgs = append(pkgs, p...)
+		}
+		// A symlink under status.d is a stanza this build did not read, so it
+		// is counted as a package whose version is unknown rather than
+		// dropped. Zero on every distroless image measured; if that ever
+		// changes, the scan says how many rather than quietly shrinking the
+		// inventory (D36's rule, applied to a shape D54 introduces).
+		skippedRecords += statusDLinks
 	case hasRPM:
 		// D43. The inventory is read and no verdict follows: ecosystem is ""
 		// for every RPM distro because Distro.Ecosystem() has no key for them,
@@ -699,9 +746,8 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 				ref, target.Distro.ID, rpmDBPaths())
 		}
 		return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf(
-			"no supported package database found in %s (looked for %s, %s and an rpm database "+
-				"under %v; a distroless image keeps its database in var/lib/dpkg/status.d, "+
-				"which this build cannot read)", ref, apkDBPath, dpkgDBPath, rpmDBDirs)
+			"no supported package database found in %s (looked for %s, %s, %s/ and an rpm "+
+				"database under %v)", ref, apkDBPath, dpkgDBPath, dpkgStatusDir, rpmDBDirs)
 	}
 	for i := range pkgs {
 		for j := range pkgs[i].Locations {
