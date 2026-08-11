@@ -738,8 +738,11 @@ byte-identical ones, `centos` covers one product that trailed RHEL and another t
 ahead of it, and Fedora and Amazon Linux have their own feeds. Each is still catalogued and
 reported as not evaluated — a loud skip, never a clean verdict.
 
-- [ ] A `Red Hat:N` scan of an EUS host still quotes mainline fixed versions; closing that
-      needs a channel signal no image carries
+- [ ] A `Red Hat:N` scan of an EUS host still quotes mainline fixed versions. Measured
+      2026-08-11: the error is a false POSITIVE in 149,726 of 155,549 differing groups
+      (96.3%) — the loud direction — with a 1.3% silent tail. The release suffix cannot
+      close it (`.elN_M` means z-stream, and mainline uses it on 92.6% of RHEL 9 entries);
+      see `docs/deferred-decisions.md`
 
 **⑨ Versions the comparers cannot read** — a package whose version will not parse is
 reported as skipped rather than clean (D20, D21), so it is loud; it is still a vulnerability
