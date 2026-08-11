@@ -3,6 +3,7 @@ package report
 import (
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 
 	"github.com/kun9497/assay/internal/matcher"
@@ -261,10 +262,18 @@ func ratingLine(r matcher.Rating) string {
 	return line
 }
 
+// mainlineUbuntuName mirrors version.For's own Ubuntu pattern, anchored for
+// the same reason: the Pro and FIPS lineages resolve no comparer (D53), and
+// a prefix here would have --explain name one for a package the matcher
+// refused to evaluate. The drift guard caught exactly that on the first
+// attempt at this function.
+var mainlineUbuntuName = regexp.MustCompile(`^Ubuntu:[0-9]{2}\.[0-9]{2}(:LTS)?$`)
+
 // comparerName names the version.Comparer that version.For would select
 // for ecosystem, without exporting version's own unexported registry just
 // for this display purpose. It mirrors version.For's dispatch exactly —
-// Alpine:vX.Y -> apk, Debian:N -> deb, Red Hat:N -> rpm, Go/npm -> semver,
+// Alpine:vX.Y -> apk, Debian:N and Ubuntu:NN.NN -> deb, Red Hat:N -> rpm,
+// Go/npm -> semver,
 // PyPI -> pep440 — and
 // TestComparerName_AgreesWithVersionFor cross-checks the two directly, so a
 // future ecosystem added to one and not the other fails loudly here rather
@@ -276,6 +285,15 @@ func comparerName(ecosystem string) string {
 		return "apk"
 	}
 	if rel, ok := strings.CutPrefix(ecosystem, "Debian:"); ok && rel != "" {
+		return "deb"
+	}
+	// Ubuntu is dpkg too (D53). Added in the same commit that taught
+	// version.For about it, because this mirror going stale is not
+	// hypothetical: it had already been wrong for Debian and Red Hat for two
+	// slices, and the drift guard below missed Ubuntu on the very next one
+	// for the same reason — a hardcoded list cannot cover a family nobody
+	// remembered to add to it.
+	if mainlineUbuntuName.MatchString(ecosystem) {
 		return "deb"
 	}
 	if rel, ok := strings.CutPrefix(ecosystem, "Red Hat:"); ok && rel != "" {
