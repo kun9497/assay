@@ -631,9 +631,10 @@ Debian은 backport를 버전에 **적습니다**(`7.74.0-1.3+deb11u10`). (CVE, �
       아니라 하드 에러입니다(D43)
 - [x] `rpmvercmp` comparer, CI에서 실제 `rpm`과 대조(D46). 작성했지만 **등록하지 않았습니다**.
       provider가 없는 상태에서 comparer가 해석되면 빈 조회가 clean으로 보고됩니다
-- [ ] Red Hat advisory provider. fix 없는 영향 상태를 표현할 수 있는 출처가 필요하고 — 완전한
-      것은 CSAF VEX뿐입니다 — CPE에서 온 903개 생태계 키에 대한 답도 필요합니다. 그 키가 담은
-      지원 채널은 파일시스템에 표현이 없습니다
+- [x] Red Hat advisory provider(D47–D49). fix 없는 영향 상태를 표현할 수 있는 유일하게 완전한
+      출처가 CSAF VEX였고, CPE에서 온 903개 생태계 키는 메인라인만 수집하는 것으로 답했습니다 —
+      지원 채널은 파일시스템에 표현이 없으므로 EUS/AUS/E4S 호스트는 메인라인 errata에 맞춰지고
+      스캔이 그것을 stderr에 밝힙니다
 - [x] RHEL 8과 Amazon Linux 2를 위한 BerkeleyDB(`Packages`)(D44) — 약 300줄, 여전히 의존성
       없음, 그리고 ubi8의 실제 11 MB 데이터베이스로 검증했습니다. 183 패키지, 183건 전부 syft와
       공유, 소스 이름 불일치 0건. 빅엔디언 데이터베이스도 읽습니다. BerkeleyDB가 호스트 순서로 쓰고

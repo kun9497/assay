@@ -668,9 +668,10 @@ them from 2023 onwards. Matching on it would report all of them clean.
 - [x] An `rpmvercmp` comparer, checked against the real `rpm` in CI (D46). Written and
       deliberately **not registered**: with no provider, a resolvable comparer would let an
       empty lookup report clean
-- [ ] A Red Hat advisory provider. Needs a source that can express affectedness without a fix
-      — CSAF VEX is the only complete one — plus an answer to the 903 CPE-derived ecosystem
-      keys, whose support channel has no filesystem representation
+- [x] A Red Hat advisory provider (D47–D49). CSAF VEX was the only source that can express
+      affectedness without a fix, and the 903 CPE-derived ecosystem keys were answered by
+      ingesting mainline only — the support channel has no filesystem representation, so
+      EUS/AUS/E4S hosts are matched against mainline errata and the scan says so on stderr
 - [x] BerkeleyDB (`Packages`) for RHEL 8 and Amazon Linux 2 (D44) — ~300 lines, still no
       dependency, and validated against ubi8's real 11 MB database: 183 packages, all 183
       shared with syft, zero source-name disagreements. Big-endian databases read too, because

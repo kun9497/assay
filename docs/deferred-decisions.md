@@ -159,8 +159,16 @@ false positive, and D6's "the release is in the key" is not enough on its own; t
 carry the lineage too, which is a decision about what an ecosystem key means rather than a
 line in the distro mapping.
 
-The corpus is also 5.8 GB unpacked against Debian's 383 MB, so the provider would have to
-stream and discard `versions[]` rather than parsing records whole.
+The corpus is also 6.03 GB unpacked against Debian's 254 MB, so the provider would have to
+stream rather than parse records whole.
+
+Both of those numbers were wrong when this was written, and the correction changes what the
+work is. Debian's was quoted as 383 MB — an on-disk figure inflated by 4 KB allocation
+blocks against a 4 KB mean record, not the 254 MB the content actually weighs. And the cost
+is not `versions[]`: those are 23.2% of Ubuntu's bytes against 49.5% of Debian's, so Ubuntu's
+are proportionally SMALLER. What multiplies is affected entries per record, 38.9 against 3.4,
+because each record lists one per (lineage × release × binary package). Dropping the lineage
+entries is therefore both the correctness decision and the size one — see D53.
 
 **Resolved 2026-08-10**, by taking the measurement this entry asked for — which reversed the
 direction it predicted.
