@@ -998,3 +998,31 @@ func TestPush_RemovesItsStagedCopy(t *testing.T) {
 		t.Errorf("Push left its staged copy of the database behind: %v", left)
 	}
 }
+
+// A published artifact holding NO ratings does not block a push that has some.
+//
+// This is the bug that broke the nightly publish for a day, and it is the same
+// shape RatingsSinceKnown was added for one field over: a zero RatingsSince
+// means "no lower bound", which reads as whole-feed coverage — and a build that
+// never ran the NVD provider records exactly that while covering nothing at
+// all. The v8 artifact was bootstrapped by hand from such a build, and every
+// nightly run afterwards was refused for narrowing a window the seed never had.
+//
+// The fixture is the real situation: published with zero ratings and no bound,
+// incoming with real ratings and the bounded window a daily NVD window has.
+func TestPush_ZeroRatingArtifactCannotBlockAPushThatHasSome(t *testing.T) {
+	ref := liveRegistry(t)
+	seed(t, ref, time.Time{}, 0) // published: no ratings, so no coverage to narrow
+
+	var out, errOut bytes.Buffer
+	real := bounded(t, time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC), 5)
+	if code := Push(context.Background(), real, ref, false, &out, &errOut); code != 0 {
+		t.Fatalf("Push = %d, want 0 — a published artifact with no ratings has no "+
+			"window to narrow: %s", code, errOut.String())
+	}
+	// Published, not merely permitted: a guard that returned 0 and then failed
+	// to write would pass an exit-code-only assertion.
+	if got := publishedMeta(t, ref); got.RatingCount != 5 {
+		t.Errorf("published RatingCount = %d, want 5", got.RatingCount)
+	}
+}
