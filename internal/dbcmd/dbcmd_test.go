@@ -1178,12 +1178,22 @@ func TestStatus_EnrichmentCountsAreDerivedFromTheBucketNotTheEnricher(t *testing
 		t.Fatalf("Status = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	s := out.String()
-	if strings.Contains(s, "999") {
-		t.Errorf("status prints the enricher's self-reported count instead of what the "+
-			"bucket holds:\n%s", s)
-	}
 	row := enrichmentSourceLine(t, s, "KISA")
 	fields := strings.Fields(row)
+	// Scoped to the KISA ROW, not to everything Status prints, and that is not
+	// tidiness. Contains(s, "999") matched the temp directory in the output's
+	// own path header: CI drew
+	// /tmp/TestStatus_...2999817164/001/vulnerability.db and this test failed
+	// on a run where nothing was wrong.
+	//
+	// Same family as the substring rule in CLAUDE.md, in the direction that
+	// fails loudly rather than passing vacuously — which is the only reason it
+	// was ever noticed. The row check below has the matching comment about why
+	// it compares fields rather than substrings.
+	if slices.Contains(fields, "999") || slices.Contains(fields, "(999)") {
+		t.Errorf("status prints the enricher's self-reported count instead of what the "+
+			"bucket holds: %q", row)
+	}
 	// RECORDS is checked as an exact FIELD rather than a substring:
 	// "2026-08-05" contains "2" twice over, so Contains(row, "2") could not
 	// fail whatever the count column held.
