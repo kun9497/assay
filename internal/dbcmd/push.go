@@ -321,6 +321,21 @@ func refuseCoverageRegression(ctx context.Context, target name.Reference, incomi
 		// used, or covered less. Both are exactly what this refuses.
 		why = fmt.Sprintf("the published artifact holds %d rating(s) and this one holds %d",
 			cur.RatingCount, incoming.RatingCount)
+	case cur.RatingCount == 0:
+		// A published artifact with NO ratings has no coverage window to
+		// narrow, whatever its RatingsSince says. Zero means "no lower
+		// bound", which reads as whole-feed coverage — and a build that never
+		// ran the NVD provider records exactly that while covering nothing at
+		// all. This is the same ambiguity RatingsSinceKnown was added for, one
+		// field over, and it was found the same way: by walking into it. The
+		// v8 artifact was bootstrapped by hand from a build without
+		// NVD_ENABLE, and every nightly publish after it was refused for
+		// narrowing a window the seed did not have.
+		//
+		// The rating-count check above still applies and is the one that
+		// matters here: an incoming artifact cannot hold FEWER than zero, so
+		// nothing is being let through that the count would have caught.
+		return 0
 	case !cur.RatingsSinceKnown || !incoming.RatingsSinceKnown:
 		// One side does not record its coverage, so the dates cannot be
 		// compared. The rating-count check above still applies.
