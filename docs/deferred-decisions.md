@@ -426,6 +426,57 @@ serve. Those images exit 2 with the backend named.
 
 ---
 
+### Detecting a RHEL EUS/AUS/E4S host from its package versions — **measured and rejected**
+
+**The idea.** D53 closed Ubuntu's lineage problem by detecting the package BUILD rather than the
+entitlement: an installed `+esmN` or `+FipsN` version is baked into the package database and
+nothing can purge it. RHEL looks like it offers the same handle — EUS builds carry a
+minor-qualified release string (`.el8_6`) where a mainline build carries a bare one (`.el8`) —
+which would close D47's known hole: an EUS host is currently quoted mainline fixed versions.
+
+**It does not work, and the reason is that the suffix means something else.** Measured over the
+2026-08-09 CSAF archive with the provider's own parsing rules, `.elN_M` marks a z-stream rebuild
+against a released minor — something mainline does constantly:
+
+| channel | bare `.elN` | minor `.elN_M` |
+|---|---:|---:|
+| mainline (4,519,290 entries) | 31.3% | **61.7%** |
+| EUS family (1,468,830) | **10.0%** | 89.9% |
+
+The mainline share rises with the major: **92.6% on RHEL 9 and 97.8% on RHEL 10.** A detector
+keyed on the suffix would refuse to evaluate nearly every current RHEL 9 and 10 package — and a
+stock UBI image, which is indisputably mainline, already carries it on 24–30% of its RPMs
+(55 of 185 on ubi8:8.9, 44 of 183 on ubi9:9.3).
+
+And it would still miss what it exists to catch: **10.0% of genuinely entitled EUS-family builds
+carry a bare suffix**, in every channel measured and not only in old data — CVE-2025-53057 ships
+`java-1.8.0-openjdk-1:1.8.0.472.b08-1.el8` on `rhel_eus_long_life:8.4`.
+
+So it fails in both directions at once. That is the mirror image of D53's Ubuntu result, where
+the marker collided with mainline zero times in 67 of 67 measured groups. The techniques are not
+transferable, and the reason is worth keeping: Ubuntu's marker names a PRODUCT LINE, RHEL's
+names a REBUILD OCCASION that every product line shares.
+
+**What the hole actually costs, now that it is measured.** Of 155,549 (CVE, package, major)
+groups where mainline and a channel give different fixed versions, mainline sorts HIGHER in
+**149,726 (96.3%)**. So today's mainline-only matching mostly over-alarms an EUS host — it
+demands a version that channel never needed to reach — which is the loud direction this project
+prefers, and D47's stderr note is the right handling for it.
+
+**The 1.3% is the part that is not settled.** In 2,001 groups the channel's fixed version sorts
+higher, so mainline's lower threshold reads such a host clean while its own channel has not
+shipped the fix — a silent miss, the failure class this project ranks worst. It is concentrated
+on RHEL 7 (392 of 7,658 directional groups, 5.1%) and thins out on 9 (0.8%). Nothing here closes
+it: a suffix cannot, and no other filesystem signal is known.
+
+**Revisit when** a channel signal exists that is not the release string — a subscription-manager
+artifact in the image, an `/etc/yum.repos.d` entry naming an EUS repo, or a Red Hat feed that
+states the channel per installed package. Ingesting the EUS CPEs as their own ecosystem keys is
+NOT a route on its own: without a way to tell which channel a host is on, it would add keys
+nothing can ever look up. Do not re-derive the suffix idea; it is measured and dead.
+
+---
+
 ### Replaying an rpmdb write-ahead log
 
 **Why deferred.** A `rpmdb.sqlite-wal` larger than its 32-byte header currently fails the
