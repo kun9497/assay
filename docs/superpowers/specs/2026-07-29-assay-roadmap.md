@@ -1677,7 +1677,9 @@ lineages — `Ubuntu:Pro:FIPS-updates:18.04:LTS` — describe the *same release*
 key cannot separate them, so a scan of an ESM-patched system would match the non-ESM lineage's
 fixed versions and report it vulnerable. That is a systematic false positive, and it needs a
 decision about lineage keys rather than a second case in the ecosystem mapping. The corpus is
-also 5.8 GB unpacked against Debian's 383 MB, which the provider would have to stream.
+also 6.03 GB unpacked against Debian's 254 MB, which the provider would have to stream.
+(Both figures were misquoted here until D53 measured them: Debian's 383 MB was an on-disk
+block count, and the multiplier is affected entries per record, not `versions[]`.)
 
 **Distroless images are named, not silently empty.** They keep the database in
 `var/lib/dpkg/status.d` as a DIRECTORY, and `source.Image.Files` takes exact paths. Those
