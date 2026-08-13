@@ -296,9 +296,33 @@ func refuseCoverageRegression(ctx context.Context, target name.Reference, incomi
 	published, err := remote.Image(target,
 		remote.WithContext(ctx),
 		remote.WithAuthFromKeychain(authn.DefaultKeychain))
+	compared := target.String()
 	if err != nil {
-		fmt.Fprintf(stderr, "no published artifact to compare against (%v); publishing\n", err)
-		return 0
+		// D60. A schema bump moves the tag, so the FIRST push to :vN has
+		// nothing at its own tag to compare against — and every check below
+		// is skipped at exactly the moment a bootstrap is most likely to be
+		// wrong. That is not hypothetical: the v8 bootstrap was built by
+		// hand without NVD_ENABLE and published 0 ratings where :v7 held
+		// 355,030, and because :v8 did not exist yet nothing objected.
+		//
+		// So the previous schema's tag is tried. It holds the same corpus
+		// one shape earlier, which is exactly the baseline a bootstrap
+		// should not fall below.
+		prev, perr := previousSchemaRef(target)
+		if perr != nil {
+			fmt.Fprintf(stderr, "no published artifact to compare against (%v); publishing\n", err)
+			return 0
+		}
+		published, err = remote.Image(prev,
+			remote.WithContext(ctx),
+			remote.WithAuthFromKeychain(authn.DefaultKeychain))
+		if err != nil {
+			fmt.Fprintf(stderr, "no published artifact to compare against (%v); publishing\n", err)
+			return 0
+		}
+		compared = prev.String()
+		fmt.Fprintf(stderr, "%s does not exist yet; comparing against %s, the previous schema\n",
+			target, prev)
 	}
 	cur, err := dbartifact.MetaOf(published)
 	if err != nil {
@@ -354,7 +378,8 @@ func refuseCoverageRegression(ctx context.Context, target name.Reference, incomi
 		fmt.Fprintf(stderr, "warning: %s; publishing anyway because --force was given\n", why)
 		return 0
 	}
-	fmt.Fprintf(stderr, "error: this would narrow published coverage: %s\n", why)
+	fmt.Fprintf(stderr, "error: this would narrow published coverage against %s: %s\n",
+		compared, why)
 	fmt.Fprintln(stderr, "  a narrower artifact becomes the seed every later build layers onto,")
 	fmt.Fprintln(stderr, "  so what it drops is not recovered by the next run")
 	fmt.Fprintln(stderr, "  pass --force if you mean to replace it")
@@ -377,4 +402,21 @@ func ratingBoundKnown(m store.Meta) bool {
 		}
 	}
 	return true
+}
+
+// previousSchemaRef points at the same repository one schema version back.
+//
+// It exists for the bootstrap case only (D60): the first push to a new schema
+// tag would otherwise face no baseline at all, which is when a hand-built
+// artifact is most likely to be missing something the published one had.
+//
+// Schema 1 has no predecessor and reports so rather than constructing :v0,
+// which would be a tag nothing has ever published and a 404 dressed as a
+// comparison.
+func previousSchemaRef(target name.Reference) (name.Reference, error) {
+	if store.SchemaVersion <= 1 {
+		return nil, fmt.Errorf("schema %d has no predecessor", store.SchemaVersion)
+	}
+	repo := target.Context().Name()
+	return name.NewTag(fmt.Sprintf("%s:v%d", repo, store.SchemaVersion-1))
 }
