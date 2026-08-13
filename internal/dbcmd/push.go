@@ -367,7 +367,20 @@ func refuseCoverageRegression(ctx context.Context, target name.Reference, incomi
 	case cur.RatingsSince.IsZero() && !incoming.RatingsSince.IsZero():
 		why = fmt.Sprintf("the published artifact covers the whole feed and this one starts at %s",
 			incoming.RatingsSince.UTC().Format("2006-01-02"))
-	case !cur.RatingsSince.IsZero() && incoming.RatingsSince.After(cur.RatingsSince):
+	// Truncated to the second before comparing, because that is the precision
+	// the published annotation carries: dbartifact writes it with time.RFC3339,
+	// which has no fractional part, while the local metadata keeps the
+	// nanoseconds time.Now() produced. Comparing the two directly makes an
+	// artifact with IDENTICAL coverage look later by a fraction of a second,
+	// every time — which blocked the 2026-08-13 re-run with a message that
+	// contradicted itself: "covers from 2026-08-09 and this one only from
+	// 2026-08-09".
+	//
+	// It stayed hidden until then because the guard short-circuits when either
+	// side has no bound, and the artifact it compares against had none until
+	// the previous day's push wrote one. Every incremental publish after that
+	// would have been refused.
+	case !cur.RatingsSince.IsZero() && incoming.RatingsSince.Truncate(time.Second).After(cur.RatingsSince):
 		why = fmt.Sprintf("the published artifact covers from %s and this one only from %s",
 			cur.RatingsSince.UTC().Format("2006-01-02"), incoming.RatingsSince.UTC().Format("2006-01-02"))
 	default:

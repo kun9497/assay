@@ -1130,3 +1130,41 @@ func mustRef(t *testing.T, s string) name.Reference {
 	}
 	return r
 }
+
+// TestPush_SubSecondPrecisionIsNotANarrowing reproduces the failure that
+// blocked the 2026-08-13 re-run: the build finished, and `db push` refused with
+//
+//	the published artifact covers from 2026-08-09 and this one only from 2026-08-09
+//
+// — a message that contradicts itself, because the two values differ by less
+// than a second.
+//
+// The annotation is written with time.RFC3339, which carries no fractional
+// seconds, while the local metadata keeps the nanoseconds time.Now() produced.
+// So a republish compares a truncated published value against an untruncated
+// incoming one, and the incoming is later by a fraction of a second every
+// single time. It is not a narrowing; the coverage is identical.
+//
+// This blocks EVERY incremental publish once the published artifact carries a
+// rating bound at all, which is why it only surfaced now: the artifact it was
+// comparing against had none until yesterday's push wrote one.
+func TestPush_SubSecondPrecisionIsNotANarrowing(t *testing.T) {
+	host := registryHost(t)
+	ref := fmt.Sprintf("%s/assay-db:v%d", host, store.SchemaVersion)
+
+	// A bound with nanoseconds, the way time.Now().AddDate() produces one.
+	since := time.Date(2026, 8, 9, 7, 23, 41, 123456789, time.UTC)
+
+	// Published: the same instant, as the annotation records it — RFC3339, so
+	// the nanoseconds are gone.
+	seed(t, ref, since.Truncate(time.Second), 3081)
+
+	// Incoming: the same coverage, carried forward by mergeRatingCoverage, and
+	// more ratings than the published artifact holds.
+	var out, errOut bytes.Buffer
+	code := Push(context.Background(), bounded(t, since, 7249), ref, false, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("Push = %d, want 0 — identical coverage must not read as a narrowing\nstderr: %s",
+			code, errOut.String())
+	}
+}
