@@ -108,6 +108,11 @@ type Options struct {
 	// renderer choice, not a silently-ignored flag, but the earlier a typo
 	// surfaces the better.
 	Output string
+	// Version reaches the SARIF renderer and nothing else (D55): a SARIF
+	// file is read detached from the command that produced it, so the
+	// document has to say what scanned. The TARGET is Run's own parameter
+	// and needs no option.
+	Version string
 	// Explain, when non-empty, selects one advisory to explain instead of
 	// rendering the table or JSON: its own ID, or any alias/upstream
 	// identifier it carries (D3) — whatever a reader would have grepped the
@@ -429,6 +434,16 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		}
 	case opts.Output == "json":
 		sum, err = report.JSON(stdout, res, cat)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: write report: %v\n", err)
+			return 2
+		}
+	case opts.Output == "sarif":
+		// D55. The target is passed so a result message can name what was
+		// scanned: a SARIF file is read in a web UI detached from the
+		// command that produced it, where "libc6 is affected" alone does
+		// not say which image.
+		sum, err = report.SARIF(stdout, res, cat, target, opts.Version)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: write report: %v\n", err)
 			return 2

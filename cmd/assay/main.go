@@ -78,7 +78,11 @@ Scan flags (any order, before or after the target):
                         =target narrows it to causes you can act on (a version
                         in the scanned artifact that will not parse), leaving
                         out malformed advisory data you cannot fix.
-  --output <format>     table (default) or json
+  --output <format>     table (default), json, or sarif
+                        sarif is SARIF 2.1.0 for GitHub code scanning. Packages
+                        that could not be evaluated are emitted as note-level
+                        results as well as tool notifications, because a partial
+                        scan must not read as a complete one (D55).
   --explain <id>        Print one advisory's full Evidence (its own ID, or
                         any alias/upstream identifier) instead of the report
 
@@ -560,6 +564,9 @@ func scan(ctx context.Context, target string, opts scancmd.Options, stdout, stde
 		fmt.Fprintf(stderr, "error: locate database: %v\n", err)
 		return exitError
 	}
+	// The SARIF driver reports which build produced the document (D55);
+	// nothing else reads it.
+	opts.Version = version
 	return scancmd.Run(ctx, path, target, opts, stdout, stderr)
 }
 
@@ -705,11 +712,11 @@ func setOutput(opts *scancmd.Options, value string) error {
 		return fmt.Errorf("--output given more than once (already %q)", opts.Output)
 	}
 	switch strings.ToLower(value) {
-	case "table", "json":
+	case "table", "json", "sarif":
 		opts.Output = strings.ToLower(value)
 		return nil
 	default:
-		return fmt.Errorf("invalid output format %q: want one of table, json", value)
+		return fmt.Errorf("invalid output format %q: want one of table, json, sarif", value)
 	}
 }
 

@@ -294,14 +294,31 @@ func TestParseScanArgs(t *testing.T) {
 		}
 	})
 
+	// The example used to be "sarif", which D55 then implemented — so this
+	// guard failed the moment the format landed, which is exactly what it is
+	// for. Replaced with a format nothing plans to add rather than deleted.
 	t.Run("an invalid --output value is an error naming what is accepted", func(t *testing.T) {
-		_, _, err := parseScanArgs([]string{"alpine:3.19", "--output", "sarif"})
+		_, _, err := parseScanArgs([]string{"alpine:3.19", "--output", "cyclonedx"})
 		if err == nil {
 			t.Fatal("err = nil, want an error for an unsupported output format")
 		}
-		for _, want := range []string{"sarif", "table", "json"} {
+		for _, want := range []string{"cyclonedx", "table", "json", "sarif"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("err = %q, missing %q", err, want)
+			}
+		}
+	})
+
+	// D55. The accepted list is a switch, so a format missing from it is inert
+	// rather than loud — the flag parses and the default renderer runs.
+	t.Run("--output sarif selects the sarif renderer", func(t *testing.T) {
+		for _, in := range []string{"sarif", "SARIF", "Sarif"} {
+			_, opts, err := parseScanArgs([]string{"alpine:3.19", "--output", in})
+			if err != nil {
+				t.Fatalf("parseScanArgs(--output %s): %v", in, err)
+			}
+			if opts.Output != "sarif" {
+				t.Errorf("--output %s gave Output = %q, want sarif", in, opts.Output)
 			}
 		}
 	})
