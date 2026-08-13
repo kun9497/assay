@@ -236,3 +236,29 @@ func TestReportTimings_NoStoreSplitWhenNotMeasured(t *testing.T) {
 // ln avoids writing a newline escape inside a generated string, which this
 // project has lost three times in transit (CLAUDE.md).
 const ln = string(rune(10))
+
+// TestUpdate_ReportsTheStoreSplit is the wiring, and nothing else held it: a
+// mutation dropping Stored from the row Update builds left every other test in
+// this package green. reportTimings rendering a split correctly proves nothing
+// if the value reaching it is always zero.
+func TestUpdate_ReportsTheStoreSplit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	var out, errOut bytes.Buffer
+	p := fakeProvider{
+		name:   "fake",
+		covers: []string{"Go"},
+		advs: []advisory.Advisory{
+			{ID: "GHSA-a", Affected: []advisory.Affected{{Ecosystem: "Go", Name: "x"}}},
+			{ID: "GHSA-b", Affected: []advisory.Affected{{Ecosystem: "Go", Name: "y"}}},
+		},
+	}
+	if code := Update(context.Background(), path, "", "",
+		[]provider.Provider{p}, nil, nil, &out, &errOut); code != 0 {
+		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	s := errOut.String()
+	if !strings.Contains(s, "store]") {
+		t.Errorf("the provider row carries no store split, so Update never "+
+			"measured one:"+ln+"%s", s)
+	}
+}
