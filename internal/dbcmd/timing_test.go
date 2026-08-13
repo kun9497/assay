@@ -286,19 +286,19 @@ func (c countingProvider) Fetch(_ context.Context, emit func(advisory.Advisory) 
 	return store.Provenance{Ecosystems: []string{"Go"}, Records: c.n}, nil
 }
 
-// TestUpdate_FlushesMidFetchNotOnlyAtTheEnd. Correctness does not need this —
-// the tail flush alone stores every record — which is exactly why a mutation
-// removing the mid-fetch flush survived the rest of the suite.
+// TestUpdate_RecordsSurviveBatchBoundaries pins what a batched write can
+// plausibly get wrong: an advisory dropped at the seam between two batches, or
+// a tail shorter than putBatchSize never written at all. The fixture is two
+// full batches plus a partial one for exactly that reason.
 //
-// What it needs is the memory bound. putBatchSize exists because bolt holds a
-// transaction's dirty pages until commit AND because the caller's buffer grows
-// until it flushes; without a mid-fetch flush the buffer reaches the whole
-// corpus, about 150,000 advisories, and the bound is fiction.
-//
-// Asserted through the store split rather than by reaching into the buffer: a
-// run that flushed once would show one store interval, and the timing already
-// measures each one.
-func TestUpdate_FlushesMidFetchNotOnlyAtTheEnd(t *testing.T) {
+// It does NOT pin the mid-fetch flush, and the name says so because the first
+// version of this test claimed to. A mutation removing that flush survives
+// this and the rest of the suite, and it should: every record still lands via
+// the tail. What the flush protects is the MEMORY BOUND — without it the
+// caller's buffer grows to the whole corpus — and that is not observable
+// through any seam this package exposes. Recorded here rather than covered by
+// a test that cannot fail on its own subject.
+func TestUpdate_RecordsSurviveBatchBoundaries(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
 	// Two full batches and a partial one, so a single-flush implementation

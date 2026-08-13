@@ -139,6 +139,13 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []p
 		}
 		prov, err := p.Fetch(ctx, func(a advisory.Advisory) error {
 			batch = append(batch, a)
+			// A mutation of this flush SURVIVES the suite, and that is a true
+			// equivalent rather than a gap: the tail flush below stores every
+			// record either way, so nothing observable changes. What it protects
+			// is the memory bound — without it the buffer grows to the whole
+			// corpus, roughly 150,000 advisories, and putBatchSize means nothing.
+			// Stated here so it reads as a decision rather than as an untested
+			// branch.
 			if len(batch) < putBatchSize {
 				return nil
 			}
