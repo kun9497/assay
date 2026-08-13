@@ -162,7 +162,9 @@ func affectedJSON(ecosystem, name, fixed string) map[string]any {
 var _ = advisory.RangeEcosystem
 
 // TestEcosystems_IncludesUbuntu pins the one-line list that decides whether any
-// of the above ever runs against real data (D53).
+// of the above ever runs against real data (D53). crates.io rides in the same
+// assertion (D62) for the same reason: the entry is one word in one slice, and
+// nothing else in the package fails when it is gone.
 //
 // Dropping the entry does not break a scan loudly at build time — it makes
 // `assay db build` stop fetching the archive, and an Ubuntu image then reports
@@ -171,7 +173,7 @@ var _ = advisory.RangeEcosystem
 // without it, a mutation removing the entry left every test in the package
 // green.
 func TestEcosystems_IncludesUbuntu(t *testing.T) {
-	for _, want := range []string{"Ubuntu", "Debian", "Alpine"} {
+	for _, want := range []string{"Ubuntu", "Debian", "Alpine", "crates.io"} {
 		if !slices.Contains(Ecosystems, want) {
 			t.Errorf("Ecosystems = %v, want it to include %q", Ecosystems, want)
 		}

@@ -161,8 +161,9 @@ actually kept, and the toolchain — matched as the package `stdlib`, which the 
 vulnerability database holds 159 advisories against.
 
 A **directory** scan reads every lockfile it finds — `go.mod`, `package-lock.json`,
-`npm-shrinkwrap.json`, `yarn.lock` (v1), `poetry.lock` and `Pipfile.lock` — with the standard
-library and no `go`, `npm` or `pip` invocation, so it works offline and needs no toolchain.
+`npm-shrinkwrap.json`, `yarn.lock` (v1), `poetry.lock`, `Pipfile.lock`, `uv.lock` and
+`Cargo.lock` — with the standard library and no `go`, `npm`, `pip`, `uv` or `cargo` invocation,
+so it works offline and needs no toolchain.
 
 It walks subdirectories, so a `frontend/package-lock.json` is found, skipping `node_modules`,
 `vendor` and `.git` and stopping at six levels down. **Every manifest it recognizes but does
@@ -171,9 +172,9 @@ a constraint, not a version, and matching a range against advisory ranges would 
 answer "not vulnerable" for anything unpinned), and a lockfile that fails to parse says so
 rather than disappearing.
 
-`pnpm-lock.yaml`, `uv.lock` and yarn berry lockfiles are recognized and **exit 2** (D61).
-Reading them needs a YAML or TOML parser, which is a third direct dependency this project has
-not taken; until it does, a repository whose only lockfile is one of these has had none of its
+`pnpm-lock.yaml` and yarn berry lockfiles are recognized and **exit 2** (D61). Reading them
+needs a YAML parser, which is a third direct dependency this project has not taken; until it
+does, a repository whose only lockfile is one of these has had none of its
 dependencies looked at, and that is an untrustworthy result rather than a clean one. Yarn
 berry is sniffed rather than attempted, because the v1 parser does not fail on it — it
 succeeds and finds nothing.
@@ -519,7 +520,11 @@ exited 0 while 24 findings went unmentioned. **Done.**
 - [x] Disclose every manifest recognized but not read, by name and reason (D26)
 - [x] `yarn.lock` (v1), `Pipfile.lock` and `npm-shrinkwrap.json` catalogers (D61); an
       aliased yarn entry resolves to the package installed, not the local name
-- [x] `pnpm-lock.yaml`, `uv.lock` and yarn berry recognized, named and exited 2 on (D61)
+- [x] `pnpm-lock.yaml` and yarn berry recognized, named and exited 2 on (D61)
+- [x] `Cargo.lock` and the OSV crates.io archive (D62) — 2,725 records, 62% of them rated,
+      and the first ecosystem whose key (`crates.io`) is not its purl type (`cargo`)
+- [x] `uv.lock` (D63), correcting D61's claim that it needed a TOML reader — 77 of 77 packages
+      on uv's own lockfile, sharing `Cargo.lock`'s scanner so the two cannot drift
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a

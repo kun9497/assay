@@ -47,7 +47,7 @@ const DefaultBaseURL = "https://osv-vulnerabilities.storage.googleapis.com"
 // record lists one entry per (lineage x release x binary package). Convert
 // drops the lineage entries as it goes (ubuntuLineage), so what is stored is
 // mainline only and the stream is never held whole.
-var Ecosystems = []string{"Go", "npm", "PyPI", "Alpine", "Debian", "Ubuntu"}
+var Ecosystems = []string{"Go", "npm", "PyPI", "crates.io", "Alpine", "Debian", "Ubuntu"}
 
 type Provider struct {
 	ecosystems []string

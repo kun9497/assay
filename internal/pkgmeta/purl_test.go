@@ -80,7 +80,12 @@ func TestNormalizeName(t *testing.T) {
 }
 
 func TestEcosystemForPURLType(t *testing.T) {
-	cases := map[string]string{"golang": "Go", "npm": "npm", "pypi": "PyPI"}
+	// cargo is the one entry whose purl type and ecosystem key are different
+	// strings, which is why the map exists at all rather than being an
+	// identity function with exceptions. Getting it wrong is silent: the
+	// lookup lands in a bucket no provider writes and the package reports
+	// clean.
+	cases := map[string]string{"golang": "Go", "npm": "npm", "pypi": "PyPI", "cargo": "crates.io"}
 	for typ, want := range cases {
 		got, ok := EcosystemForPURLType(typ)
 		if !ok || got != want {

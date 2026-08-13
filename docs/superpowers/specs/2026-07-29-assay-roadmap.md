@@ -2466,6 +2466,87 @@ standard library, and this project has two direct dependencies on purpose. Takin
 decision (see `docs/deferred-decisions.md`), and until it is made, saying so loudly beats
 guessing.
 
+**Correction, measured and then fixed the same day (D62, D63).** The claim above is right about
+pnpm and was wrong about uv. `uv.lock` is a flat sequence of `[[package]]` blocks whose name and
+version are bare quoted scalars — the same subset `poetry.lock` has always been read with — so it
+needs no TOML library. It is read as of D63. Only pnpm and yarn berry are still refused, and only
+those two are a dependency question.
+
+---
+
+### D62 — crates.io, and the first ecosystem whose key is not its purl type
+
+**Decision.** `Cargo.lock` is read, the OSV `crates.io` archive is ingested, and the ecosystem
+key is `crates.io` while the purl type stays `cargo`.
+
+**The two strings differ, and that is the hazard.** Every ecosystem before this one had a purl
+type that either matched its key (`npm`) or differed by case (`pypi`/`PyPI`, `golang`/`Go`).
+Rust is the first where they are unrelated words. Writing `cargo` as the ecosystem sends every
+lookup to a bucket no provider ever writes, and a lookup that finds nothing reports **clean** —
+so this is asserted on the package the cataloger produces, not left to the store.
+
+**The archive is small and unusually well rated.** Measured 2026-08-13: 2,725 records, 3.4 MB
+against npm's 203 MB. 1,518 GHSA, 1,197 RUSTSEC, 10 `MAL-*` (excluded, D15), 87 withdrawn
+(dropped at ingestion, D16). **62% carry a severity**, against roughly half across OSV as a
+whole — RUSTSEC rates its own advisories. 3,657 ranges are `SEMVER` and 190 `ECOSYSTEM`.
+
+**Cargo's versions are semver, so the comparer is the one npm and Go already use.** Cargo
+refuses to publish a crate whose version is not semver-compliant and `Cargo.lock` records the
+resolved one, so there was nothing per-ecosystem to write. This is the first time D9's answer
+was "the existing comparer, unchanged", and it is worth naming as such: the rule is that
+version schemes get their own comparer *when they disagree*, not that every ecosystem gets one.
+
+**A local crate is cataloged, not skipped.** The root crate and any path dependency carry no
+`source` field. They are still components of the tree, and skipping them would put "not
+evaluated" above zero on every healthy Rust scan — the defect `npmlock` hit with
+`package-lock.json`'s root key, which made `--fail-on-incomplete` exit 2 where nothing was
+wrong.
+
+**A table header closes the block.** `Cargo.lock` v1 ends with a `[metadata]` table whose keys
+name every package again. Reading past it lets a stray assignment complete a block whose own
+version never arrived. Together with first-assignment-wins these are two guards on one hazard,
+and they only differ on an incomplete block — which is what the test for the header rule uses,
+because with both fields set the other guard makes the mutation invisible.
+
+**Until the published database is rebuilt, a Rust scan exits 2 rather than reporting clean.**
+`store.Covers()` already refuses an ecosystem the database does not hold, so the cataloger
+could land before the data without a silent verdict. That ordering is safe by construction, not
+by care.
+
+---
+
+### D63 — uv.lock, and the reader three lockfiles now share
+
+**Decision.** `uv.lock` is read. The block scanner behind `Cargo.lock` moves into
+`internal/cataloger/tomlblock` and both catalogers use it.
+
+**This is a correction, not a feature.** D61 refused `uv.lock` on the grounds that it needs a
+TOML library. That was reasoning from the format's *name* rather than from the file, and it was
+wrong for eight hours: measured against `astral-sh/uv`'s own 1,650-line lockfile, the scanner
+written for `Cargo.lock` reads **77 of 77 `[[package]]` blocks with none skipped**. Scanning the
+real repository now finds 23 findings across all 77 packages, none of them not-evaluated.
+
+**Worth recording as a failure mode, because it is cheap to repeat.** A deferred entry that
+names a wrong constraint is worse than one that names none: "needs a third dependency" reads as
+settled and stops anyone looking, where "nobody has written it" invites the twenty minutes it
+actually took. The measurement that corrected it was one `curl` and one simulation of the
+scanner in a throwaway script.
+
+**The subset is the real boundary, not the format.** `Cargo.lock`, `uv.lock` and `poetry.lock`
+are all TOML, and all three are machine-written as a flat sequence of `[[package]]` tables whose
+name and version are bare quoted scalars. Anything outside that subset yields **no field** here
+rather than a wrong one — `source = { registry = "..." }` and `wheels = [` are simply not quoted
+scalars — so the reader degrades into a counted skip instead of a fabricated version. pnpm's
+YAML has no such property: its nesting means a restricted reader parses fixtures and mis-reads
+real files, which is why D61's refusal stands there.
+
+**One scanner, not two copies.** The catalogers differ only in ecosystem, purl type and package
+type. Duplicating the scanner would mean a fix to one reader silently not reaching the other,
+and the defect that produces — a package that is never cataloged — is a false negative.
+
+**uv needs no database rebuild**, unlike crates.io: PyPI has been ingested since slice 1, so
+these findings work the moment the binary ships.
+
 ---
 
 ## 3. Architecture
