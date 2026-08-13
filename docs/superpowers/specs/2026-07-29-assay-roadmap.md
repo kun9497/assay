@@ -2330,6 +2330,43 @@ on every build trains the reader to stop seeing the line.
 
 **To stderr**, with every other diagnostic: the database path on stdout is what a script reads.
 
+### D58 — A transient delta fetch is retried; a permanent one still fails the build
+
+**Decision.** One document fetch in the delta pass gets three attempts, 0.5s then 1s apart.
+What is transient and what is not is the whole decision, and it lives in one function.
+
+**Why.** A single closed connection killed a 42-minute build on 2026-08-13, on document
+2,448 of a delta pass: `cve-2026-64179.json: EOF`. D49's rule is unchanged and is why
+that hurt — only a 404 yields nil, everything else fails the build rather than quietly
+closing part of the gap the delta exists for. What that rule did not do is separate "the
+feed is gone" from "the socket hiccuped", and D51's 8-way concurrency made the second more
+likely by raising the request count.
+
+**Both directions of misclassification cost.** Retrying a PERMANENT error turns a changed
+feed into a slow build that fails anyway and buries which document broke under three
+identical failures. Not retrying a TRANSIENT one is the bug.
+
+Retried: transport failures, 429, 5xx, and a body cut off mid-document. Not retried: 404
+(D49 reads it as a withdrawal), any other 4xx, a parse error that is not truncation, and
+context cancellation — which is checked FIRST, because it surfaces as a transport error
+and would otherwise be retried three times per remaining document against a deadline
+already passed.
+
+**The truncated-body case was unreachable in the first version**, and that is worth keeping
+rather than quietly fixing. The function returned on the HTTP status before looking at the
+error, so a response cut off mid-document — which arrives as **200** with an unexpected
+EOF from the decoder — was classified permanent. The test row that should have caught it
+used status 0, which is not how the failure arrives. Found by reading the test back, not by
+running it.
+
+**Three attempts, not more.** The delta fetches up to 20,000 documents one at a time, so a
+feed that has genuinely gone away must fail quickly rather than turn into a slow death: at
+this backoff a total outage costs each document about a second and a half. The pauses are
+short on purpose — this is for a connection closed mid-handshake, not for a service under
+load, and an assay build is one client.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes
