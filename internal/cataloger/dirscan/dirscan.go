@@ -18,8 +18,10 @@ import (
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"github.com/kun9497/assay/internal/cataloger/gomod"
 	"github.com/kun9497/assay/internal/cataloger/npmlock"
+	"github.com/kun9497/assay/internal/cataloger/pipfilelock"
 	"github.com/kun9497/assay/internal/cataloger/poetrylock"
 	"github.com/kun9497/assay/internal/cataloger/requirements"
+	"github.com/kun9497/assay/internal/cataloger/yarnlock"
 	"github.com/kun9497/assay/internal/pkgmeta"
 )
 
@@ -191,7 +193,10 @@ func parseManifest(root string, m Manifest) ([]pkgmeta.Package, cyclonedx.Stats,
 		relocate(t.Packages, m.Path)
 		return t.Packages, s, nil, nil
 
-	case KindNPMLock:
+	case KindNPMLock, KindNPMShrinkwrap:
+		// One arm for both: npm-shrinkwrap.json is package-lock.json's schema
+		// under another filename, so a second case calling the same parser
+		// would be two places to keep in step for no gain.
 		pkgs, s, perr := npmlock.Parse(full)
 		if perr != nil {
 			return nil, cyclonedx.Stats{}, nil, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
@@ -222,10 +227,61 @@ func parseManifest(root string, m Manifest) ([]pkgmeta.Package, cyclonedx.Stats,
 		}
 		return t.Packages, s, unusable, nil
 
+	case KindYarnLock:
+		pkgs, s, perr := yarnlock.Parse(full)
+		if perr != nil {
+			// A berry lockfile is not a read failure in the usual sense -
+			// nothing is corrupt - but it reaches the exit code the same way
+			// on purpose. The file resolves every dependency in the tree and
+			// this scan read none of them, so the result cannot be stood
+			// behind whatever the reason.
+			return nil, cyclonedx.Stats{}, nil, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
+		}
+		relocate(pkgs, m.Path)
+		return pkgs, s, nil, nil
+
+	case KindPipfileLock:
+		pkgs, s, perr := pipfilelock.Parse(full)
+		if perr != nil {
+			return nil, cyclonedx.Stats{}, nil, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
+		}
+		relocate(pkgs, m.Path)
+		return pkgs, s, nil, nil
+
+	case KindPnpmLock, KindUVLock:
+		// Recognized, and deliberately unread: neither YAML nor TOML is in
+		// the standard library, and taking a parser for either is a
+		// dependency decision this slice does not make (walk.go's Kind
+		// comment records the reasoning).
+		//
+		// Failed is true, and that is the substance of this arm rather than
+		// an implementation detail. requirements.txt goes unread because the
+		// FILE cannot answer the question - it carries ranges, not resolved
+		// versions - and no tool could do better. These files answer it
+		// perfectly and assay cannot read them, so a scan whose only manifest
+		// is one of them has looked at none of the tree's dependencies. That
+		// is an untrustworthy result, not a clean one, and D11 puts 2 above
+		// both 1 and 0 for exactly this case.
+		return nil, cyclonedx.Stats{}, nil, &Unread{
+			Path: m.Path,
+			// The reason does not repeat the filename: every renderer of
+			// Unread already prints Path in front of it, and "not read:
+			// pnpm-lock.yaml (pnpm-lock.yaml: ...)" is the doubling that
+			// produces.
+			Reason: fmt.Sprintf("no parser for this format (it needs a %s reader, which assay does not have)", markupOf(m.Kind)),
+			Failed: true,
+		}
+
 	default:
 		return nil, cyclonedx.Stats{}, nil, &Unread{
-			Path:   m.Path,
+			Path: m.Path,
+			// Failed, because this arm means Kind grew a value the dispatch
+			// was never taught: the manifest was found, nothing read it, and
+			// the run cannot tell whether it held findings. A silent 0 here
+			// would be the same defect one level up from the one this whole
+			// cataloger exists to remove.
 			Reason: fmt.Sprintf("recognized manifest kind %q has no parser", m.Kind),
+			Failed: true,
 		}
 	}
 }
@@ -315,4 +371,20 @@ func locationPath(p pkgmeta.Package) string {
 		return ""
 	}
 	return p.Locations[0].Path
+}
+
+// markupOf names the file format a Kind is written in, for the reason string
+// an unread manifest carries. It exists so the message says what would be
+// needed to read the file rather than only that it was not read: "needs a YAML
+// reader" is actionable, "no parser" is not.
+func markupOf(k Kind) string {
+	switch k {
+	case KindPnpmLock:
+		return "YAML"
+	case KindUVLock:
+		return "TOML"
+	}
+	// Unreachable from the one arm that calls this, and returning a wrong
+	// concrete name would be worse than admitting the gap if that changes.
+	return "format"
 }

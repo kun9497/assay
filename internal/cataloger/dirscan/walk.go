@@ -23,6 +23,27 @@ const (
 	// from a transitive one - so parsing it would fabricate precision the
 	// file does not carry.
 	KindRequirements Kind = "requirements.txt"
+
+	// KindNPMShrinkwrap is package-lock.json's schema under another name: npm
+	// writes it when a project wants its lockfile published with the package.
+	// It routes to the same parser.
+	KindNPMShrinkwrap Kind = "npm-shrinkwrap.json"
+	KindPipfileLock   Kind = "Pipfile.lock"
+	KindYarnLock      Kind = "yarn.lock"
+
+	// KindPnpmLock and KindUVLock are recognized and NOT read. Both are
+	// formats assay has no parser for - pnpm's is YAML, uv's is TOML, and the
+	// standard library parses neither - so reading them would need a third
+	// direct dependency, which is a decision rather than a detail (see the
+	// conventions section of CLAUDE.md).
+	//
+	// They are named anyway, and that is the whole point of this entry: before
+	// it, a repository whose only lockfile was pnpm-lock.yaml scanned to
+	// completion, found nothing, and exited 0. Nothing in the report said a
+	// lockfile had been passed over. "Found nothing" and "did not look" are
+	// the two facts this project exists to keep apart.
+	KindPnpmLock Kind = "pnpm-lock.yaml"
+	KindUVLock   Kind = "uv.lock"
 )
 
 // Manifest is one recognized file found by the walk.
@@ -45,10 +66,20 @@ var excludedDirs = map[string]bool{
 // equality only: "package-lock.json.bak" and "my-go.mod" are not manifests,
 // and a prefix/suffix match would wrongly claim they are.
 var manifestKinds = map[string]Kind{
-	"go.mod":            KindGoMod,
-	"package-lock.json": KindNPMLock,
-	"poetry.lock":       KindPoetryLock,
-	"requirements.txt":  KindRequirements,
+	"go.mod":              KindGoMod,
+	"package-lock.json":   KindNPMLock,
+	"poetry.lock":         KindPoetryLock,
+	"requirements.txt":    KindRequirements,
+	"npm-shrinkwrap.json": KindNPMShrinkwrap,
+	// Capitalized as pipenv writes it. Matching is by exact equality, so a
+	// lowercase "pipfile.lock" is not recognized - on a case-insensitive
+	// filesystem the walk sees whatever name the directory entry actually
+	// carries, and inventing a case-folding rule here would diverge from
+	// every other name in this map.
+	"Pipfile.lock":   KindPipfileLock,
+	"yarn.lock":      KindYarnLock,
+	"pnpm-lock.yaml": KindPnpmLock,
+	"uv.lock":        KindUVLock,
 }
 
 // maxDepth is how many directory levels below root are descended into. A

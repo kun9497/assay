@@ -2406,6 +2406,68 @@ must not fail half the time on a race with the clock.
 
 ---
 
+### D60 — A bootstrap compares against the previous schema, not against nothing
+
+**Decision.** When `db push` finds no artifact at the tag it is publishing to, it compares
+against the previous schema's tag rather than skipping every coverage check.
+
+**The hole was structural, not a slip.** `refuseCoverageRegression` compares against the
+artifact at the *same* tag. A schema bump moves the tag, so the first push to `:vN` faced no
+baseline at all — and every check was skipped at exactly the moment a hand-built bootstrap is
+most likely to be missing something.
+
+**It cost 352,000 ratings.** The `:v8` bootstrap after D52 was built locally with
+`NVD_ENABLE` unset and published 3,081 NVD ratings where `:v7` held 355,030. Nothing
+objected, because `:v8` did not exist yet. The daily job then fetches an *incremental* NVD
+window — the API caps any range at 120 days — so a rating for a CVE last modified in 2023 is
+never re-requested and the gap does not close on its own.
+
+**The previous schema is the right baseline** because it holds the same corpus one shape
+earlier, which is exactly what a bootstrap must not fall below.
+
+**Schema 1 reports that it has no predecessor** rather than constructing `:v0`, a tag nothing
+has ever published — a 404 dressed as a comparison would restore the same silent skip under a
+different name. A repository with nothing published at all still accepts a first push, or the
+tool could never ship one.
+
+---
+
+### D61 — A lockfile assay cannot read fails the scan
+
+**Decision.** `yarn.lock` (v1) and `Pipfile.lock` are read; `npm-shrinkwrap.json` routes to
+the `package-lock.json` parser. `pnpm-lock.yaml`, `uv.lock` and yarn berry lockfiles are
+recognized, named, and **exit 2**.
+
+**Recognition is the substance, not the parsers.** Before this, a repository whose only
+lockfile was `pnpm-lock.yaml` scanned to completion, found nothing, and exited 0 — with
+nothing in the report saying a lockfile had been passed over. "Found nothing" and "did not
+look" arriving as the same verdict is the failure this project exists to prevent, and it was
+sitting in the cataloger the whole time.
+
+**Exit 2, and this is where it differs from `requirements.txt`** (D26). That file goes unread
+because the FILE cannot answer the question — it carries ranges, not resolved versions, and
+no tool could do better; the limit is documented and the scan is still trustworthy. These
+files answer it perfectly and *assay* cannot read them, so a scan whose only manifest is one
+of them has looked at none of the tree's dependencies. D11 puts 2 above both 1 and 0 for
+exactly that.
+
+**Yarn berry is detected rather than attempted.** Berry (v2+) is YAML under the same filename
+as v1, and the v1 parser does not fail on it — it succeeds and finds nothing, because berry
+writes `version: 1.3.0` where v1 writes `version "1.3.0"`. A clean verdict over an unread
+lockfile is the worst of the available outcomes, so the format is sniffed (`__metadata:`, with
+the `# yarn lockfile v1` banner settling it the other way) and refused.
+
+**An aliased dependency resolves to the package installed, not the local name.**
+`"aliased@npm:lodash@^4.0.0"` is lodash on disk and in every advisory; splitting on the last
+`@` alone yields `aliased@npm:lodash`, a name no ecosystem has — a false negative, silent.
+
+**pnpm and uv are deferred on a dependency, not on effort.** Neither YAML nor TOML is in the
+standard library, and this project has two direct dependencies on purpose. Taking a third is a
+decision (see `docs/deferred-decisions.md`), and until it is made, saying so loudly beats
+guessing.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes
