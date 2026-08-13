@@ -2,9 +2,16 @@ package dbcmd
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/provider"
+	"github.com/kun9497/assay/internal/store"
 )
 
 // lineIndex returns which output line first contains want, or -1. Used for the
@@ -137,5 +144,52 @@ func TestRoundDur(t *testing.T) {
 		if got := roundDur(tt.in); got != tt.want {
 			t.Errorf("roundDur(%v) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+// dyingProvider fails after emitting nothing, which is what a feed that goes
+// away mid-fetch looks like from here.
+type dyingProvider struct{ name string }
+
+func (d dyingProvider) Name() string { return d.name }
+
+func (d dyingProvider) Fetch(context.Context, func(advisory.Advisory) error) (store.Provenance, error) {
+	return store.Provenance{}, errors.New("the feed went away")
+}
+
+// TestUpdate_ReportsTimingWhenAProviderFails is the claim D56 rests on, and
+// nothing else holds it: a mutation removing BOTH failure-path calls to
+// reportTimings left every other test in this package green.
+//
+// A build that dies after forty minutes is exactly when someone needs to know
+// which stage ate the time, and a summary printed only on success is
+// guaranteed to be missing from every run where it would have mattered.
+func TestUpdate_ReportsTimingWhenAProviderFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	var out, errOut bytes.Buffer
+	code := Update(context.Background(), path, "", "",
+		[]provider.Provider{dyingProvider{name: "doomed"}}, nil, nil, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("Update = %d, want 2 for a provider that failed", code)
+	}
+	s := errOut.String()
+	if !strings.Contains(s, "timing (") {
+		t.Errorf("a failed build printed no timing table:\n%s", s)
+	}
+	// And the row names the stage that died, marked — a table listing only
+	// the stages that finished would be empty on exactly this run.
+	//
+	// Scoped to the lines AFTER the timing header. The first line mentioning
+	// the provider is its own "fetching doomed…" progress line, and a search
+	// over the whole output finds that instead — the substring collision
+	// CLAUDE.md documents, met while writing the test for it.
+	header := lineIndex(s, "timing (")
+	table := strings.Join(strings.Split(s, "\n")[header:], "\n")
+	i := lineIndex(table, "doomed")
+	if i < 0 {
+		t.Fatalf("the failed provider is absent from the table:\n%s", table)
+	}
+	if row := strings.Split(table, "\n")[i]; !strings.Contains(row, "failed") {
+		t.Errorf("the failed provider is not marked: %q", row)
 	}
 }
