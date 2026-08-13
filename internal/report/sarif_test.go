@@ -163,6 +163,24 @@ func TestSARIF_SkipsAreVisibleInBothPlaces(t *testing.T) {
 		t.Fatalf("not-evaluated results = %d, want 1 — a skip invisible in GitHub is a "+
 			"partial scan reading as a complete one", len(notEvaluated))
 	}
+	// The RULE has to be declared too, not just referenced. A result whose
+	// ruleId names nothing in driver.rules is a degraded document that a
+	// consumer may drop outright — and dropping it is precisely the silence
+	// this decision exists to prevent. Found by mutation: deleting the rule
+	// while keeping the results left every test here green.
+	var declared bool
+	for _, rule := range rulesOf(t, run) {
+		if rule["id"] == notEvaluatedRuleID {
+			declared = true
+			if _, ok := rule["properties"].(map[string]any)["security-severity"]; ok {
+				t.Error("the not-evaluated rule carries a security-severity; it makes no " +
+					"security claim and must not be scored")
+			}
+		}
+	}
+	if !declared {
+		t.Errorf("results reference %q but driver.rules does not declare it", notEvaluatedRuleID)
+	}
 	if got := notEvaluated[0]["level"]; got != "note" {
 		t.Errorf("level = %v, want note: this is not a claim about the package's security", got)
 	}
