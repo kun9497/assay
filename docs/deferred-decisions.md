@@ -50,6 +50,34 @@ measurement against a full NVD-enabled database. Today's run — ubi9, 9 of 783 
 none marked solely because an unrated source counted as disagreeing — was taken against these
 3,081 ratings. That number says NVD is nearly absent, not that the marker is quiet.
 
+### Reading pnpm and uv lockfiles — a YAML or TOML parser as a third dependency
+
+`pnpm-lock.yaml` and `uv.lock` are recognized, named, and exit 2 (D61). Reading them is
+deferred on one question: whether this project takes a third direct dependency.
+
+**Why deferred.** Neither YAML nor TOML is in the standard library, and the two direct
+dependencies this repo has are deliberate (`bbolt` for the store, `go-containerregistry` for
+registry, tarball and OCI-layout reading). pnpm's format is real YAML — anchors, nested
+importers, the `snapshots` section — so hand-parsing it is the kind of "restricted subset"
+that works on fixtures and quietly mis-reads a real file. A parser that silently gets a
+version wrong is worse than one that refuses.
+
+**Left refusing rather than guessing** because the refusal is loud and correct: exit 2 says
+this scan looked at none of the tree, which is exactly what happened. The cost is that a pnpm
+or uv repository cannot be scanned at all, not that it is scanned wrongly.
+
+**Revisit when** either a pnpm/uv repository is something this tool is actually pointed at, or
+a third dependency is being taken for another reason and the marginal cost drops to zero.
+`gopkg.in/yaml.v3` and `github.com/BurntSushi/toml` are both pure Go, so the `CGO_ENABLED=0`
+constraint does not decide this — only the dependency count does.
+
+**Groundwork.** The Kinds, the walk entries, and the dispatch arm all exist; reading them is a
+parser and one `case` each. `markupOf` in `dirscan.go` already names which reader each format
+needs.
+
+**Yarn berry rides on the same decision.** Berry is YAML under the `yarn.lock` filename, and
+`yarnlock.isBerry` detects and refuses it today. The same YAML parser would cover it.
+
 ### Ecosystem coverage against grype — the six-fold gap
 
 grype ships **26 providers**; assay has **4** (OSV, Red Hat CSAF, NVD ratings, KISA

@@ -155,14 +155,20 @@ assay scan ./my-project               # go.mod이 있는 디렉터리
 권고가 있습니다.
 
 **디렉터리** 스캔은 찾은 락파일을 모두 읽습니다 — `go.mod`, `package-lock.json`,
-`poetry.lock`. 표준 라이브러리만 쓰고 `go`·`npm`·`pip`을 호출하지 않으므로 오프라인에서 툴체인
-없이 동작합니다.
+`npm-shrinkwrap.json`, `yarn.lock`(v1), `poetry.lock`, `Pipfile.lock`. 표준 라이브러리만 쓰고
+`go`·`npm`·`pip`을 호출하지 않으므로 오프라인에서 툴체인 없이 동작합니다.
 
 하위 디렉터리도 훑으므로 `frontend/package-lock.json`도 찾습니다. `node_modules`, `vendor`,
 `.git`은 건너뛰고 여섯 단계까지만 내려갑니다. **인식했지만 읽지 않은 매니페스트는 이유와 함께
 이름을 밝힙니다** — `requirements.txt`는 락파일이 아니고(`Django>=3.2`는 버전이 아니라 제약이며,
 범위를 권고의 범위에 맞추면 고정되지 않은 것에 조용히 "취약하지 않음"이라고 답하게 됩니다),
 파싱에 실패한 락파일도 사라지지 않고 그 사실을 말합니다.
+
+`pnpm-lock.yaml`·`uv.lock`·yarn berry 락파일은 인식하고 **exit 2**를 냅니다 (D61). 읽으려면
+YAML이나 TOML 파서가 필요하고 그건 이 프로젝트가 아직 받지 않은 세 번째 직접 의존성입니다. 받기
+전까지, 락파일이 이것뿐인 저장소는 의존성을 하나도 보지 않은 것이고 그건 깨끗한 결과가 아니라 믿을
+수 없는 결과입니다. yarn berry는 시도하지 않고 감지합니다. v1 파서가 berry 파일에서 실패하지 않고
+성공한 뒤 아무것도 못 찾기 때문입니다.
 
 그 공개가 핵심입니다. 읽히지 않은 매니페스트는 패키지를 만들지 않으므로 요약의 "not evaluated"가
 셀 대상이 없습니다. 누락을 드러내려고 만든 바로 그 장치에 누락이 보이지 않는 것입니다 (D26).
@@ -485,6 +491,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 
 - [x] `package-lock.json`과 `poetry.lock` cataloger, 제한된 하위 탐색 위에서
 - [x] 인식했지만 읽지 않은 매니페스트를 이름과 이유와 함께 밝히기 (D26)
+- [x] `yarn.lock`(v1)·`Pipfile.lock`·`npm-shrinkwrap.json` cataloger (D61). yarn의 별칭
+      항목은 로컬 이름이 아니라 실제 설치된 패키지로 해석됩니다
+- [x] `pnpm-lock.yaml`·`uv.lock`·yarn berry는 인식하고 이름을 부르고 2를 냅니다 (D61)
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건
