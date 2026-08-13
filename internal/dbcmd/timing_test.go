@@ -193,3 +193,46 @@ func TestUpdate_ReportsTimingWhenAProviderFails(t *testing.T) {
 		t.Errorf("the failed provider is not marked: %q", row)
 	}
 }
+
+// TestReportTimings_StoreSplitIsShownWhenMeasured is the row this table gained
+// to answer a question its totals could not: OSV was 48m16s of a 50m51s build,
+// and nothing in that number said whether to add concurrency or to batch the
+// writes — opposite fixes, and concurrency makes a store-bound stage worse,
+// because bolt permits one write transaction at a time.
+//
+// Both halves are printed rather than one plus a total, so the reader is not
+// left subtracting to find the number that decides the work.
+func TestReportTimings_StoreSplitIsShownWhenMeasured(t *testing.T) {
+	var buf bytes.Buffer
+	reportTimings(&buf, []stageTiming{
+		{Kind: "provider", Name: "osv", Elapsed: 50 * time.Minute,
+			Stored: 40 * time.Minute, Records: 149495},
+	}, time.Now().Add(-51*time.Minute))
+	out := buf.String()
+	// 50 total, 40 in the store, so 10 fetching. A row showing only the total
+	// or only one half would satisfy a Contains check on "osv".
+	if !strings.Contains(out, "10m0s fetch") {
+		t.Errorf("the fetch half is missing or wrong:"+ln+"%s", out)
+	}
+	if !strings.Contains(out, "40m0s store") {
+		t.Errorf("the store half is missing or wrong:"+ln+"%s", out)
+	}
+}
+
+// TestReportTimings_NoStoreSplitWhenNotMeasured. An annotator or enricher does
+// not write through the emit callback this instruments, so its Stored is zero
+// — and rendering "[0s fetch, 0s store]" on those rows would be a measurement
+// nobody took, printed as though someone had.
+func TestReportTimings_NoStoreSplitWhenNotMeasured(t *testing.T) {
+	var buf bytes.Buffer
+	reportTimings(&buf, []stageTiming{
+		{Kind: "enricher", Name: "KISA", Elapsed: 2 * time.Minute, Records: 18552},
+	}, time.Now().Add(-3*time.Minute))
+	if out := buf.String(); strings.Contains(out, "store]") {
+		t.Errorf("a split was rendered for a stage that never measured one:"+ln+"%s", out)
+	}
+}
+
+// ln avoids writing a newline escape inside a generated string, which this
+// project has lost three times in transit (CLAUDE.md).
+const ln = string(rune(10))

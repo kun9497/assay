@@ -13,7 +13,17 @@ type stageTiming struct {
 	Name    string
 	Elapsed time.Duration
 	Records int
-	Failed  bool
+	// Stored is how much of Elapsed went into the store rather than into
+	// fetching and parsing. Zero for a stage that does not write through an
+	// emit callback, and rendered only when it is not.
+	//
+	// It exists because a provider's total cannot tell you which half to
+	// fix, and the two answers call for opposite work: a download-bound
+	// stage wants concurrency, a store-bound one wants fewer and larger
+	// transactions — and concurrency would make a store-bound stage worse,
+	// since bolt permits one writer at a time.
+	Stored time.Duration
+	Failed bool
 }
 
 // reportTimings prints where a build spent its time, slowest first.
@@ -56,8 +66,16 @@ func reportTimings(stderr io.Writer, ts []stageTiming, started time.Time) {
 		if total > 0 {
 			share = fmt.Sprintf(" %4.1f%%", 100*s.Elapsed.Seconds()/total.Seconds())
 		}
-		fmt.Fprintf(stderr, "  %-9s %-22s %10s%s  %d record(s)%s\n",
-			s.Kind, s.Name, roundDur(s.Elapsed), share, s.Records, note)
+		split := ""
+		if s.Stored > 0 {
+			// Both halves, named. A single percentage would leave the reader
+			// to subtract, and the whole point is that the two numbers lead
+			// to different work.
+			split = fmt.Sprintf(" [%s fetch, %s store]",
+				roundDur(s.Elapsed-s.Stored), roundDur(s.Stored))
+		}
+		fmt.Fprintf(stderr, "  %-9s %-22s %10s%s  %d record(s)%s%s\n",
+			s.Kind, s.Name, roundDur(s.Elapsed), share, s.Records, split, note)
 	}
 
 	// The remainder is everything that is not a stage: opening the store,

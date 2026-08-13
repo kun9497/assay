@@ -104,10 +104,27 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []p
 	for _, p := range providers {
 		fmt.Fprintf(stderr, "fetching %s…\n", p.Name())
 		started := time.Now()
-		prov, err := p.Fetch(ctx, func(a advisory.Advisory) error { return w.Put(a) })
+		// D56. The store write is timed SEPARATELY from the fetch, because a
+		// provider's total says nothing about which half to fix and the two
+		// answers point in opposite directions.
+		//
+		// The emit callback runs inside Fetch, so every Put is already counted
+		// in the provider's elapsed time. Measured 2026-08-13: OSV alone was
+		// 48m16s of a 50m51s build, and nothing in that number said whether it
+		// was the 601 MB download or the one bolt transaction Put opens per
+		// advisory, 149,495 of them. Concurrency fixes the first and would
+		// make the second worse — bolt allows one write transaction at a time,
+		// so parallel fetches queue at exactly this callback.
+		var stored time.Duration
+		prov, err := p.Fetch(ctx, func(a advisory.Advisory) error {
+			t0 := time.Now()
+			err := w.Put(a)
+			stored += time.Since(t0)
+			return err
+		})
 		timings = append(timings, stageTiming{
 			Kind: "provider", Name: p.Name(), Elapsed: time.Since(started),
-			Records: prov.Records, Failed: err != nil})
+			Records: prov.Records, Stored: stored, Failed: err != nil})
 		if err != nil {
 			w.Close()
 			os.Remove(tmp)
