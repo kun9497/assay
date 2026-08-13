@@ -214,38 +214,6 @@ func TestParse_EcosystemAndPURL(t *testing.T) {
 	}
 }
 
-func TestStringField(t *testing.T) {
-	cases := []struct {
-		line string
-		key  string
-		want string
-		ok   bool
-	}{
-		{`name = "serde"`, "name", "serde", true},
-		{`version = "1.0.196"`, "version", "1.0.196", true},
-		{`  name = "indented"`, "name", "indented", true},
-		{`name="no-spaces"`, "name", "no-spaces", true},
-		{`version = "1.0.0-alpha.1+build.5"`, "version", "1.0.0-alpha.1+build.5", true},
-		// A different key entirely.
-		{`source = "registry+https://x"`, "name", "", false},
-		// A key the wanted one is a prefix of. Compared exactly, so this is
-		// not a name.
-		{`name_hint = "wrong"`, "name", "", false},
-		// Not a quoted scalar: an array or an inline table.
-		{`dependencies = [`, "dependencies", "", false},
-		{`source = { registry = "x" }`, "source", "", false},
-		{`name = ""`, "name", "", false},
-		{`name`, "name", "", false},
-	}
-
-	for _, tc := range cases {
-		got, ok := stringField(tc.line, tc.key)
-		if got != tc.want || ok != tc.ok {
-			t.Errorf("stringField(%q, %q) = %q, %v; want %q, %v", tc.line, tc.key, got, ok, tc.want, tc.ok)
-		}
-	}
-}
-
 func TestParse_EmptyLockfileIsNotAnError(t *testing.T) {
 	path := write(t, "# no packages resolved\nversion = 3\n")
 

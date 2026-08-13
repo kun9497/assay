@@ -201,12 +201,6 @@ func TestParse_UnreadableLockfileIsNamedAndFailsTheScan(t *testing.T) {
 			mustSay: "YAML",
 		},
 		{
-			name:    "uv",
-			file:    "uv.lock",
-			body:    "version = 1\n\n[[package]]\nname = \"django\"\nversion = \"3.2.19\"\n",
-			mustSay: "TOML",
-		},
-		{
 			name: "yarn berry",
 			file: "yarn.lock",
 			// Berry is YAML and shares the filename with v1. Reading it with

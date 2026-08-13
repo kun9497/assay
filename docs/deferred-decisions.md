@@ -82,9 +82,10 @@ needs.
 **Yarn berry rides on the same decision.** Berry is YAML under the `yarn.lock` filename, and
 `yarnlock.isBerry` detects and refuses it today. The same YAML parser would cover it.
 
-### `uv.lock` — measured readable, cataloger not written
+### ~~`uv.lock` — measured readable, cataloger not written~~ — resolved the same day (D63)
 
-Recognized, named, and exits 2 (D61), and unlike pnpm this is **not** a dependency question.
+Read as of D63. Kept here because the entry above it was written wrong, and the record of how
+is worth more than the entry was.
 
 **Measured 2026-08-13**, against `astral-sh/uv`'s own 1,650-line `uv.lock`: the line scanner
 written for `Cargo.lock` parses **77 of 77 `[[package]]` blocks with none skipped**. The file
@@ -92,14 +93,16 @@ is the same flat shape as `poetry.lock` and `Cargo.lock` — name and version ar
 scalars at the top of each block — and the first-assignment-wins rule steps over the inline
 tables inside `dependencies` without special handling.
 
-**Why it is still deferred.** Nobody has written the cataloger. That is the whole reason, and
-recording it plainly matters more than the work does: the D61 slice asserted this file needed a
-TOML reader, which was reasoning from the format's name rather than from the file, and a wrong
-constraint in a deferred entry is how a cheap thing stays undone for months.
+**What it took.** A `uvlock` package shaped like `cargolock`, a Kind, and a dispatch arm — the
+scanner moved to `internal/cataloger/tomlblock` so the two cannot drift. Scanning uv's own
+repository finds 23 findings across all 77 packages, none not-evaluated. PyPI was already
+ingested, so no database rebuild was needed.
 
-**What it takes.** A `uvlock` package shaped like `cargolock`, with `Ecosystem: "PyPI"` and
-`pkg:pypi/` instead of crates.io, plus a Kind and a dispatch arm. PyPI is already ingested, so
-unlike crates.io the findings work the moment it lands, with no database rebuild.
+**The lesson, which is why this entry stays.** D61 asserted this file needed a TOML reader,
+reasoning from the format's *name* rather than from the file. A deferred entry that names a
+wrong constraint is worse than one that names none: "needs a third dependency" reads as settled
+and stops anyone looking, where "nobody has written it" invites the twenty minutes it actually
+took. Before deferring on a constraint, measure the constraint.
 
 ### Ecosystem coverage against grype — the six-fold gap
 

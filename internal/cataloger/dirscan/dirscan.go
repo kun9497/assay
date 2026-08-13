@@ -22,6 +22,7 @@ import (
 	"github.com/kun9497/assay/internal/cataloger/pipfilelock"
 	"github.com/kun9497/assay/internal/cataloger/poetrylock"
 	"github.com/kun9497/assay/internal/cataloger/requirements"
+	"github.com/kun9497/assay/internal/cataloger/uvlock"
 	"github.com/kun9497/assay/internal/cataloger/yarnlock"
 	"github.com/kun9497/assay/internal/pkgmeta"
 )
@@ -257,7 +258,15 @@ func parseManifest(root string, m Manifest) ([]pkgmeta.Package, cyclonedx.Stats,
 		relocate(pkgs, m.Path)
 		return pkgs, s, nil, nil
 
-	case KindPnpmLock, KindUVLock:
+	case KindUVLock:
+		pkgs, s, perr := uvlock.Parse(full)
+		if perr != nil {
+			return nil, cyclonedx.Stats{}, nil, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
+		}
+		relocate(pkgs, m.Path)
+		return pkgs, s, nil, nil
+
+	case KindPnpmLock:
 		// Recognized, and deliberately unread: neither YAML nor TOML is in
 		// the standard library, and taking a parser for either is a
 		// dependency decision this slice does not make (walk.go's Kind
@@ -390,8 +399,6 @@ func markupOf(k Kind) string {
 	switch k {
 	case KindPnpmLock:
 		return "YAML"
-	case KindUVLock:
-		return "TOML"
 	}
 	// Unreachable from the one arm that calls this, and returning a wrong
 	// concrete name would be worse than admitting the gap if that changes.

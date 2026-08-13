@@ -2466,12 +2466,11 @@ standard library, and this project has two direct dependencies on purpose. Takin
 decision (see `docs/deferred-decisions.md`), and until it is made, saying so loudly beats
 guessing.
 
-**Correction, measured the same day (D62).** The claim above is right about pnpm and was wrong
-about uv. `uv.lock` is a flat sequence of `[[package]]` blocks whose name and version are bare
-quoted scalars — the same subset `poetry.lock` has always been read with — and the line scanner
-written for `Cargo.lock` parses a real 1,650-line `uv.lock` at 77 of 77 blocks with none
-skipped. It needs no TOML library. The refusal stands until a cataloger is written, but the
-reason is that nobody has written one, not that it needs a dependency.
+**Correction, measured and then fixed the same day (D62, D63).** The claim above is right about
+pnpm and was wrong about uv. `uv.lock` is a flat sequence of `[[package]]` blocks whose name and
+version are bare quoted scalars — the same subset `poetry.lock` has always been read with — so it
+needs no TOML library. It is read as of D63. Only pnpm and yarn berry are still refused, and only
+those two are a dependency question.
 
 ---
 
@@ -2513,6 +2512,40 @@ because with both fields set the other guard makes the mutation invisible.
 `store.Covers()` already refuses an ecosystem the database does not hold, so the cataloger
 could land before the data without a silent verdict. That ordering is safe by construction, not
 by care.
+
+---
+
+### D63 — uv.lock, and the reader three lockfiles now share
+
+**Decision.** `uv.lock` is read. The block scanner behind `Cargo.lock` moves into
+`internal/cataloger/tomlblock` and both catalogers use it.
+
+**This is a correction, not a feature.** D61 refused `uv.lock` on the grounds that it needs a
+TOML library. That was reasoning from the format's *name* rather than from the file, and it was
+wrong for eight hours: measured against `astral-sh/uv`'s own 1,650-line lockfile, the scanner
+written for `Cargo.lock` reads **77 of 77 `[[package]]` blocks with none skipped**. Scanning the
+real repository now finds 23 findings across all 77 packages, none of them not-evaluated.
+
+**Worth recording as a failure mode, because it is cheap to repeat.** A deferred entry that
+names a wrong constraint is worse than one that names none: "needs a third dependency" reads as
+settled and stops anyone looking, where "nobody has written it" invites the twenty minutes it
+actually took. The measurement that corrected it was one `curl` and one simulation of the
+scanner in a throwaway script.
+
+**The subset is the real boundary, not the format.** `Cargo.lock`, `uv.lock` and `poetry.lock`
+are all TOML, and all three are machine-written as a flat sequence of `[[package]]` tables whose
+name and version are bare quoted scalars. Anything outside that subset yields **no field** here
+rather than a wrong one — `source = { registry = "..." }` and `wheels = [` are simply not quoted
+scalars — so the reader degrades into a counted skip instead of a fabricated version. pnpm's
+YAML has no such property: its nesting means a restricted reader parses fixtures and mis-reads
+real files, which is why D61's refusal stands there.
+
+**One scanner, not two copies.** The catalogers differ only in ecosystem, purl type and package
+type. Duplicating the scanner would mean a fix to one reader silently not reaching the other,
+and the defect that produces — a package that is never cataloged — is a false negative.
+
+**uv needs no database rebuild**, unlike crates.io: PyPI has been ingested since slice 1, so
+these findings work the moment the binary ships.
 
 ---
 

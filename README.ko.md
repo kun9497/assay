@@ -155,8 +155,8 @@ assay scan ./my-project               # go.mod이 있는 디렉터리
 권고가 있습니다.
 
 **디렉터리** 스캔은 찾은 락파일을 모두 읽습니다 — `go.mod`, `package-lock.json`,
-`npm-shrinkwrap.json`, `yarn.lock`(v1), `poetry.lock`, `Pipfile.lock`, `Cargo.lock`. 표준
-라이브러리만 쓰고 `go`·`npm`·`pip`·`cargo`를 호출하지 않으므로 오프라인에서 툴체인 없이
+`npm-shrinkwrap.json`, `yarn.lock`(v1), `poetry.lock`, `Pipfile.lock`, `uv.lock`, `Cargo.lock`.
+표준 라이브러리만 쓰고 `go`·`npm`·`pip`·`uv`·`cargo`를 호출하지 않으므로 오프라인에서 툴체인 없이
 동작합니다.
 
 하위 디렉터리도 훑으므로 `frontend/package-lock.json`도 찾습니다. `node_modules`, `vendor`,
@@ -165,8 +165,8 @@ assay scan ./my-project               # go.mod이 있는 디렉터리
 범위를 권고의 범위에 맞추면 고정되지 않은 것에 조용히 "취약하지 않음"이라고 답하게 됩니다),
 파싱에 실패한 락파일도 사라지지 않고 그 사실을 말합니다.
 
-`pnpm-lock.yaml`·`uv.lock`·yarn berry 락파일은 인식하고 **exit 2**를 냅니다 (D61). 읽으려면
-YAML이나 TOML 파서가 필요하고 그건 이 프로젝트가 아직 받지 않은 세 번째 직접 의존성입니다. 받기
+`pnpm-lock.yaml`과 yarn berry 락파일은 인식하고 **exit 2**를 냅니다 (D61). 읽으려면 YAML 파서가
+필요하고 그건 이 프로젝트가 아직 받지 않은 세 번째 직접 의존성입니다. 받기
 전까지, 락파일이 이것뿐인 저장소는 의존성을 하나도 보지 않은 것이고 그건 깨끗한 결과가 아니라 믿을
 수 없는 결과입니다. yarn berry는 시도하지 않고 감지합니다. v1 파서가 berry 파일에서 실패하지 않고
 성공한 뒤 아무것도 못 찾기 때문입니다.
@@ -494,9 +494,11 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] 인식했지만 읽지 않은 매니페스트를 이름과 이유와 함께 밝히기 (D26)
 - [x] `yarn.lock`(v1)·`Pipfile.lock`·`npm-shrinkwrap.json` cataloger (D61). yarn의 별칭
       항목은 로컬 이름이 아니라 실제 설치된 패키지로 해석됩니다
-- [x] `pnpm-lock.yaml`·`uv.lock`·yarn berry는 인식하고 이름을 부르고 2를 냅니다 (D61)
+- [x] `pnpm-lock.yaml`과 yarn berry는 인식하고 이름을 부르고 2를 냅니다 (D61)
 - [x] `Cargo.lock`과 OSV crates.io 아카이브 (D62) — 레코드 2,725건, 그중 62%가 등급을 담고
       있으며, 키(`crates.io`)가 purl 타입(`cargo`)과 다른 첫 생태계
+- [x] `uv.lock` (D63). TOML 리더가 필요하다던 D61의 주장을 정정합니다 — uv 자신의 락파일에서
+      패키지 77개 중 77개, `Cargo.lock`과 스캐너를 공유해 둘이 어긋날 수 없습니다
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건
