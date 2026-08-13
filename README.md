@@ -524,7 +524,10 @@ exited 0 while 24 findings went unmentioned. **Done.**
 - [x] Per-source ratings — a finding keeps every database's assessment, the gate takes the
       highest (D25)
 - [x] NVD as a second rating source, joined on the CVE (D27)
-- [ ] SARIF output (see `docs/deferred-decisions.md`)
+- [x] SARIF output (D55) — `--output sarif`. Packages that could not be evaluated are
+      emitted as note-level results AND as tool notifications, because GitHub code scanning
+      ignores the spec's own `invocations[]` channel and a partial scan must not read as a
+      complete one
 
 **⑦ NVD severity** — what NIST scores a CVE, attached to findings assay already matched
 through OSV. **Done.**

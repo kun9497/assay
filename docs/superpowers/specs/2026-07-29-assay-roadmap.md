@@ -2258,6 +2258,49 @@ DIRECTORY COMPONENT of the path is not followed. If some image made `var/lib/dpk
 link, this would find nothing and the scan would refuse with its "no supported package
 database" error rather than report clean.
 
+### D55 — SARIF puts the skips where the consumer will see them, not only where the spec says
+
+**Decision.** `--output sarif` writes SARIF 2.1.0. Packages that could not be evaluated are
+emitted **twice**: as `invocations[].toolExecutionNotifications[]`, which is the spec's own
+channel for what a tool has to say about its run, and as `note`-level results under an
+`assay/not-evaluated` rule. Unrated findings carry no `security-severity` at all.
+
+**The duplication is the decision.** GitHub code scanning does not support `invocations` — the
+field is absent from its supported-properties tables entirely. A document that disclosed its
+skips only there would satisfy the spec and show a reader nothing, which is the shape this
+project keeps finding in its own tests: something that names the right thing and cannot be
+seen. The obligation is the one every renderer here carries — a partial scan must not read as a
+complete one — and a `results` array is the only place the consumer that matters looks.
+
+Verified against a real Rocky Linux 9 image, which D50 catalogues and refuses to route: 146
+packages, **146 note-level results, 147 notifications, `executionSuccessful: false`, exit 2.**
+Zero findings serialises to an empty `results` array, and an empty array is what a clean scan
+looks like; that is the failure this shape prevents.
+
+**An unrated finding gets no `security-severity`.** GitHub's scale starts above 0.0 and has no
+room for unknown, so the only way to fill the field is to invent a band. Writing 0.1 would show
+the finding as low and be indistinguishable from a real low one — the coercion D17 exists to
+forbid, arriving through a format's constraint rather than through the matcher. The property is
+omitted and the result still carries `level: warning`, because a finding nobody rated is still
+a finding and `none` reads as informational.
+
+**Fingerprints identify the finding, never its version.** GitHub requires
+`partialFingerprints` to track a result across commits, and keying one on the installed version
+or a file offset would close every alert and open an identical one the moment a package moved —
+on a vulnerability that is still unfixed. The hash is (advisory id, ecosystem, package, matched
+name), and the key names the scheme so a later change ships as a new key rather than silently
+re-identifying everything.
+
+**Two things grype's SARIF drops are carried here.** Its `help.text` prints an empty
+`Fix Version:` for every unfixed finding and says nothing about whether one is coming; this
+writes a sentence and puts D52's `fixState` in the rule's properties, so the wont-fix / not-fixed
+distinction survives into the format a reviewer actually reads. And the message names the
+source package when D8 matched through one: a SARIF file is read in a web UI detached from the
+command, where "libssl3 is affected by an openssl advisory" is otherwise unverifiable.
+
+**Hand-rolled structs rather than a SARIF library.** The format is large, this uses a corner of
+it, and a third direct dependency is a real decision this does not justify.
+
 ## 3. Architecture
 
 ### Measured data volumes

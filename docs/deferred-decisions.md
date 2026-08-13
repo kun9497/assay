@@ -749,7 +749,7 @@ the ones that need no guessing.
 
 ---
 
-### SARIF output
+### ~~SARIF output~~ — resolved in slice ⓴ (D55)
 
 `--output json` is assay's own schema, versioned and golden-tested. SARIF is the format
 GitHub code scanning and most CI dashboards ingest, so it is what makes findings show up
@@ -777,6 +777,14 @@ trigger; the filesystem one has been discharged.
 (advisory ID, aliases, severity band and score, package name and version, purl, the source
 package, and the layer digest and path of every location) from a single `Summarize` call, so
 a SARIF renderer is a third `Reporter` over the same data rather than a new traversal.
+
+
+**Resolved 2026-08-11.** The mapping was never the hard part; the question the entry named —
+what a location means, and what happens to a package with no finding — turned out to have a
+sharper form. GitHub code scanning does not support `invocations[]`, so the spec's own channel
+for "what this run could not do" is invisible in the consumer that matters. D55 emits skips
+there AND as note-level results, so a partial scan cannot read as a complete one. See D55 for
+why an unrated finding gets no `security-severity` and why fingerprints ignore the version.
 
 ---
 
