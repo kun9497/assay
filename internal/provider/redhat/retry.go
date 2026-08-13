@@ -57,16 +57,28 @@ func deltaBackoff(attempt int) time.Duration {
 //   - context cancellation, which is the caller deciding to stop. Retrying
 //     through it would ignore the one instruction that outranks this.
 func retryable(err error, status int) bool {
-	if status != 0 {
-		return status == http.StatusTooManyRequests || status >= 500
-	}
-	if err == nil {
+	// Cancellation is checked before anything else, including the status.
+	// It surfaces as a transport error, and treating it as transient would
+	// retry against a deadline that has already passed — three times, per
+	// document, for the rest of the pass.
+	if err != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
 		return false
 	}
-	// Checked FIRST. A cancelled context surfaces as a transport error, and
-	// treating it as transient would retry against a deadline that has already
-	// passed — three times, per document, for the rest of the pass.
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	// A status the server chose to send: 429 and 5xx say try later, and any
+	// other 4xx says the request is wrong and will be wrong again.
+	if status == http.StatusTooManyRequests || status >= 500 {
+		return true
+	}
+	if status >= 400 {
+		return false
+	}
+	// Status 0 (no response at all) or a 2xx that failed afterwards. The
+	// second is not hypothetical and was nearly missed: a body cut off
+	// mid-document arrives as 200 with an unexpected EOF from the decoder,
+	// and an earlier version of this function returned on the status before
+	// ever looking at the error — so the truncation case below was
+	// unreachable.
+	if err == nil {
 		return false
 	}
 	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {

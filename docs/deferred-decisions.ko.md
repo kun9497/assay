@@ -12,6 +12,76 @@
 
 ## 미룬 작업
 
+### grype 대비 생태계 커버리지 — 여섯 배 격차
+
+grype는 **provider 26개**를 싣고, assay는 **4개**입니다(OSV, Red Hat CSAF, NVD 등급, KISA 보강).
+2026-08-13에 `grype db providers`로 측정: alma, alpine, amazon, arch, bitnami, chainguard,
+chainguard-libraries, debian, echo, eol, epss, fedora, github, govulndb, hummingbird, kev,
+mariner, minimos, nvd, oracle, photon, rhel, secureos, sles, ubuntu, wolfi.
+
+**이 항목이 있는 이유.** 이 저장소의 차분 결과는 전부 grype와 동률이거나 앞서는데, 그것들은 모두
+assay가 다루는 배포판에서 잰 것입니다. 선택된 표본이고 README가 다르게 읽히면 안 됩니다. Amazon
+Linux, Oracle, SLES, Photon, Wolfi, Mariner, Arch, 그리고 Java·Ruby·Rust·.NET·PHP 애플리케이션에서
+**assay는 아무것도 찾지 못합니다.** Alma·Rocky·Fedora는 카탈로그하고 평가 불가로 보고하지만(D50),
+그건 시끄러운 거부이지 지원이 아닙니다.
+
+**각각의 비용은 같지 않습니다.** 언어 생태계는 거의 공짜입니다 — OSV가 Maven, RubyGems,
+crates.io, NuGet, Packagist를 이미 수집 중인 다섯 개와 같은 모양으로 발행하므로, 비용은 버전 체계당
+comparer 하나(D9)와 매니페스트 형식당 카탈로거 하나입니다. 비싼 쪽은 RPM 계열 배포판입니다. 각자
+자기 advisory 출처가 필요하고, 그 패키지를 Red Hat errata에 맞추면 안 되는 이유는 D50에 있습니다.
+
+**언제 다시 볼까.** 커버리지 숫자가 아니라 특정 생태계에 존재 이유가 생겼을 때. 뒤에 provider가 없는
+comparer는 D46이 RPM에 대해 거부한 모양이고, 측정된 수요 없는 provider는 값 없이 치르는 코퍼스
+비용입니다 — 우분투 아카이브 하나가 6 GB와 빌드 36분을 더했습니다(D53, D56).
+
+---
+
+### 우분투 finding에는 fix state가 없다
+
+D52가 "벤더가 영영 안 고침"과 "아직 안 고쳐짐"을 가르고 D53이 우분투를 들였지만, 우분투 finding은
+전부 `unknown`으로 나옵니다. 실제 ubuntu:22.04 스캔에서 104건 전부이고, 같은 이미지에서 grype는
+**15건을 wont-fix로** 표시합니다.
+
+**이유.** matcher 버그가 아닙니다. OSV의 우분투 export에는 fix state 필드가 아예 없습니다. grype는
+vunnel을 통해 Canonical의 Launchpad CVE 트래커에서 받는데, 거기서 상태는 OSV가 표현하지 않는
+패키지별 pocket 주석입니다. finding이 추측 대신 `unknown`이라고 말하는 것은 D17의 규율이고 그
+데이터에 대해서는 옳은 답입니다 — 다만 정보는 존재하고 assay가 그걸 안 읽고 있습니다.
+
+**필요한 것은 구현이 아니라 D1 질문입니다.** D1은 모든 provider가 OSV 형태로 정규화한다고 정했고,
+그것이 KISA와 Red Hat provider를 가능하게 했습니다. Launchpad를 읽는다는 것은 이미 동작하는 OSV
+우분투 수집 옆에 원래 모양이 OSV가 아닌 두 번째 우분투 출처를 두는 것 — 한 배포판에 provider 둘이거나,
+OSV 경로를 Launchpad로 갈아치우고 이 프로젝트의 누구도 관리하지 않는 스크레이퍼를 떠안는 것입니다.
+
+**언제 다시 볼까.** wont-fix 구분이 RHEL에서 그랬던 만큼 우분투에서도 중요해질 때. 먼저 확인할 것은
+측정된 비율입니다. 우분투에서 104건 중 15건, ubi8에서 505건 중 59건 — 충분히 비슷해서 근거도 아마
+비슷할 것이고, D1을 다시 열기 전에 제대로 재볼 값이 있습니다.
+
+---
+
+### 무엇도 끝났다고 하기 전의 전체 QA 패스
+
+**왜 가정하지 않고 적어두나.** 이 프로젝트의 모든 슬라이스가 자기 테스트와 자기 뮤테이션 라운드를
+갖고 출하됐는데도, 뮤테이션이 그중 넷에서 진짜 결함을 찾았습니다 — 헬퍼는 덮이고 그것을 부르는
+배선은 안 덮인 두 건을 포함해서요. 슬라이스별 검토가 못 잡은 이유는 각 슬라이스의 테스트가 그것만
+놓고 보면 완전해 보였기 때문입니다.
+
+**여기서 실제로 깨진 것을 근거로, 무엇을 봐야 하나:**
+
+- **헬퍼가 아니라 배선.** 반복된 결함입니다. 함수는 따로 테스트되는데 그걸 누가 부른다는 단언이
+  없습니다. 지금까지 네 건(실패 경로의 타이밍 보고, store 분해 값이 표에 도달하는지, SARIF의
+  not-evaluated 규칙 선언, `Ecosystems` 항목).
+- **substring 단언.** CLAUDE.md에 두 번 기록됐고 그 뒤로 두 번 더 나왔습니다. 한 번은 바로 그
+  종류를 잡으려고 쓴 테스트 안에서.
+- **슬라이스 간 상호작용.** 지금까지 모든 뮤테이션 라운드가 한 패키지에 갇혀 있었습니다. 한
+  슬라이스의 코드를 변형하고 다른 슬라이스의 테스트를 돌려본 적이 없습니다.
+- **exit code 계약 전체.** D11이 2 > 1 > 0을 고정하는데, 각 게이트는 자기 플래그에 대해서만
+  테스트됐지 서로에 대해서는 아닙니다.
+
+**언제 할까.** 기능 추가가 멈췄을 때. 슬라이스 중간에 하면 곧 바뀔 모양을 재는 것이고, 값은 훑기가
+통째일 때 나옵니다.
+
+---
+
 ### Docker 데몬을 이미지 소스로 쓰기
 
 `assay`는 레지스트리, `docker save` tarball, OCI layout 디렉터리에서 이미지를 읽습니다.
