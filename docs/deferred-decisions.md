@@ -12,6 +12,44 @@ Read alongside the Architecture section of the [README](../README.md).
 
 ## Deferred work
 
+### The published database lost 352,000 NVD ratings and will not recover them on its own
+
+**When: soon.** This is not deferred because it is unclear — it is an open defect with a
+known remedy, and the remedy is an operation rather than a code change, so it would leave no
+trace anywhere else.
+
+The published artifact at `:v8` carries **3,081** NVD ratings. `:v7` carried **355,030**.
+Measured 2026-08-13 by pulling both and counting the ratings bucket.
+
+**How it happened.** D52 bumped the schema, so the daily job had no `:v8` to seed from and I
+bootstrapped one by hand from a local build with `NVD_ENABLE` unset. `refuseCoverageRegression`
+compares against the artifact at the *same tag*, `:v8` did not exist yet, and every check was
+skipped — at exactly the moment a hand-built artifact is most likely to be missing something.
+D60 closes that hole for the next bump: the first push to a new schema tag now compares
+against the previous schema's tag.
+
+**Why it does not heal on its own.** The daily job fetches an *incremental* NVD window. The
+API caps any range at 120 days and the 2026-08-12 run covered about 30, so a rating for a CVE
+last modified in 2023 is never re-requested. The count climbs by one day's modifications a
+day; the 352,000 stay gone.
+
+**Why it matters more than a missing field.** A finding whose rating is gone reports `unknown`
+severity, and D17 deliberately keeps `unknown` outside the `low < medium < high < critical`
+ordering — so it does not trip `--fail-on critical`. A finding that would have failed a build
+now passes it, and the report is honest the whole time: it says the finding is unrated, which
+is true. Nothing anywhere says it used to be rated critical. This is the silent-miss direction
+the whole project is built to avoid, arriving through the database rather than the matcher.
+
+**The remedy.** One unbounded NVD sync, walking 120-day windows back through the corpus.
+Hours, not minutes — which is why it wants a deliberate run rather than being folded into a
+nightly job that already takes 85 minutes. Then republish and confirm the ratings count
+against `:v7`'s 355,030.
+
+**It blocks the entry below.** *Does an unrated source count as disagreeing?* asks for a
+measurement against a full NVD-enabled database. Today's run — ubi9, 9 of 783 findings marked,
+none marked solely because an unrated source counted as disagreeing — was taken against these
+3,081 ratings. That number says NVD is nearly absent, not that the marker is quiet.
+
 ### Ecosystem coverage against grype — the six-fold gap
 
 grype ships **26 providers**; assay has **4** (OSV, Red Hat CSAF, NVD ratings, KISA
@@ -597,6 +635,13 @@ a `*` — and that is a decision, not a defect to quietly fix during a review pa
 **Revisit when.** The first scan against a full NVD-enabled database, where the real ratio of
 marked to unmarked findings is visible rather than estimated. If nearly every row carries a
 `*`, the marker has already stopped working and the decision makes itself.
+
+**Attempted 2026-08-13, and it did not answer.** ubi9 marked 9 of 783 findings, and not one
+of them was marked *solely* because an unrated source counted — which reads like the marker is
+healthy and is not evidence of anything. The database used carried 3,081 NVD ratings instead
+of 355,030 (see the first entry above), so it was not the full NVD-enabled database this
+condition asks for; it was very nearly the pre-D27 database. Redo the measurement after the
+ratings corpus is restored, and do not treat the 9-of-783 as a baseline.
 
 **Groundwork.** `sourcesDisagree` is one function in `internal/report/table.go`, and its
 tests name the intended semantics explicitly, so the change is small either way.
