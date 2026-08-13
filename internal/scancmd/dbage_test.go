@@ -2,6 +2,9 @@ package scancmd
 
 import (
 	"bytes"
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -186,5 +189,80 @@ func TestOldestProvider_IsDeterministic(t *testing.T) {
 		if !got.Equal(first) || name != "alpha" {
 			t.Fatalf("oldestProvider gave %q on run %d; want alpha every time", name, i)
 		}
+	}
+}
+
+// TestRun_DBMaxAgeIsActuallyConsulted is the wiring, and nothing else held it:
+// a mutation disabling the call in Run left every test above green, because all
+// of them exercise checkDBAge directly and none of them is a scan.
+//
+// Sixth time in this project that a helper was covered and its caller was not.
+func TestRun_DBMaxAgeIsActuallyConsulted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Deliberately ancient, and coverage declared so that D20 is not what
+	// fails: the refusal under test has to be the age one.
+	if err := w.SetMeta(store.Meta{Providers: map[string]store.Provenance{
+		"osv": {Ecosystems: []string{"Go"}, DataAsOf: time.Now().AddDate(0, 0, -400)},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	sbom := filepath.Join(t.TempDir(), "s.cdx.json")
+	if err := os.WriteFile(sbom, []byte(`{"bomFormat":"CycloneDX","specVersion":"1.5",`+
+		`"components":[{"type":"library","name":"example.com/x","version":"1.0.0",`+
+		`"purl":"pkg:golang/example.com/x@1.0.0"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	code := Run(context.Background(), path, sbom,
+		Options{DBMaxAge: 48 * time.Hour}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("Run = %d, want 2 — the database is 400 days old\nstdout: %s\nstderr: %s",
+			code, out.String(), errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "db-max-age") {
+		t.Errorf("stderr does not mention the flag that refused the scan:\n%s", errOut.String())
+	}
+	// And nothing was written to stdout: a verdict printed before the refusal
+	// would be a result from data the next line calls untrustworthy.
+	if out.Len() != 0 {
+		t.Errorf("a refused scan wrote a report to stdout:\n%s", out.String())
+	}
+}
+
+// TestRun_WithoutDBMaxAgeAnAncientDatabaseStillScans. The flag is off by
+// default, and every existing caller goes through this path — a check that ran
+// anyway would change all of them.
+func TestRun_WithoutDBMaxAgeAnAncientDatabaseStillScans(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(store.Meta{Providers: map[string]store.Provenance{
+		"osv": {Ecosystems: []string{"Go"}, DataAsOf: time.Now().AddDate(0, 0, -400)},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	sbom := filepath.Join(t.TempDir(), "s.cdx.json")
+	if err := os.WriteFile(sbom, []byte(`{"bomFormat":"CycloneDX","specVersion":"1.5",`+
+		`"components":[{"type":"library","name":"example.com/x","version":"1.0.0",`+
+		`"purl":"pkg:golang/example.com/x@1.0.0"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), path, sbom, Options{}, &out, &errOut); code != 0 {
+		t.Errorf("Run = %d, want 0 — the check is off\nstderr: %s", code, errOut.String())
 	}
 }
