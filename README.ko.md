@@ -498,7 +498,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] 출처별 평가 — finding이 모든 데이터베이스의 평가를 유지하고, 게이트는 그중 가장 높은
       것을 취함 (D25)
 - [x] 두 번째 평가 출처로서의 NVD, CVE로 조인 (D27)
-- [ ] SARIF 출력 (`docs/deferred-decisions.md` 참조)
+- [x] SARIF 출력(D55) — `--output sarif`. 평가하지 못한 패키지는 note 수준 결과로도, 도구
+      알림으로도 나갑니다. GitHub code scanning이 스펙의 `invocations[]` 채널을 무시하고,
+      부분 스캔이 온전한 것으로 읽힐 수는 없기 때문입니다
 
 **⑦ NVD 심각도** — assay가 OSV로 이미 매칭한 finding에 NIST가 그 CVE를 몇 점으로 보는지 붙입니다.
 **완료.**
