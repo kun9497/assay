@@ -2367,6 +2367,45 @@ load, and an assay build is one client.
 
 ---
 
+### D59 — A scan can refuse vulnerability data that is too old
+
+**Decision.** `--db-max-age=<duration>` exits 2 when the vulnerability data is older than
+the duration. Off by default.
+
+**Freshness is the upstream data's, not the build's** — which is D12, and it is the only
+reason this can be honest. A mirror serving a six-month-old snapshot fetched an hour ago has
+a recent `BuiltAt` and an ancient `DataAsOf`, and judging by the former would call it fresh.
+D12 stored the two separately from the start for exactly this.
+
+**The age is the OLDEST provider's.** A database is only as fresh as its stalest source, and
+taking the newest would let one daily provider vouch for another that stopped updating in
+March. The error names which one, because "the data is old" leaves the reader to work out
+which feed died.
+
+**An unknown age is refused, not passed.** This is D17's discipline applied to time: a
+provider that could not say when its data was current has not said it is fresh. Treating
+silence as "recent enough" would let through exactly the database this exists to catch —
+the provider whose feed died is also the one least likely to report a date.
+
+**Ratings and enrichment are deliberately not considered.** Both are additive. Stale NVD
+means some findings carry no score, which the report already says (D17); stale KISA prose is
+display copy that cannot move a verdict (D3). Only the ADVISORIES decide whether a package is
+reported affected, so only their age can make a clean result untrustworthy — and folding
+the others in would fail builds over prose.
+
+**Exit 2, not 1** (D11). Out-of-date data does not mean "found nothing", it means the result
+cannot be trusted, which is the same reason a schema mismatch exits 2.
+
+**No default, and zero is not accepted from the command line.** The right number depends on
+how the caller runs `db update`, and inventing one here would be a policy nobody chose.
+Zero disables the check internally, so accepting `--db-max-age=0` would make a strict-looking
+flag mean the opposite.
+
+**The boundary is inclusive.** `--db-max-age=24h` against a database refreshed every 24 hours
+must not fail half the time on a race with the clock.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes
