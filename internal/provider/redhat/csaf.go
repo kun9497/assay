@@ -429,6 +429,14 @@ type stats struct {
 	DeltaFetched    int // of those, how many were still published
 	DeltaGone       int // and how many had been withdrawn between the two files
 	DeltaAdvisories int // how many of the fetched ones yielded a record
+	// DeltaRetried is extra attempts made; DeltaRescued is documents that
+	// succeeded only because of one (D58). Both are printed because they
+	// answer different questions: the first is how flaky the fetch was,
+	// the second is how many builds the retry saved. A run with retries and
+	// no rescues means the retry is buying nothing and the failures are
+	// permanent after all.
+	DeltaRetried int
+	DeltaRescued int
 }
 
 // convert turns one CSAF document into at most one advisory.

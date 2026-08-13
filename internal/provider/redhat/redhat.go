@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/klauspost/compress/zstd"
@@ -59,6 +60,18 @@ type Provider struct {
 	baseURL  string
 	progress io.Writer
 	client   *http.Client
+	// Retry counters (D58). Atomic because the delta fetches eight
+	// documents at once, and on the Provider rather than threaded through
+	// eachDocument because they are diagnostics: nothing branches on them,
+	// so the alternative is changing a signature for a number that only
+	// ever gets printed.
+	//
+	// Counted because the first build after D58 could not tell whether a
+	// retry had saved it or no transient failure had occurred — the same
+	// run had died at document 2,448 the day before, and "it worked" is not
+	// evidence that the fix is what made it work.
+	retried atomic.Int64 // extra attempts made, across all documents
+	rescued atomic.Int64 // documents that succeeded only after a retry
 }
 
 func New(opts Options) *Provider {
@@ -181,6 +194,8 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 			"redhat: %s yielded no mainline Red Hat records out of %d documents; "+
 				"the archive's shape has changed or the CPE filter no longer matches", name, st.Documents)
 	}
+	st.DeltaRetried = int(p.retried.Load())
+	st.DeltaRescued = int(p.rescued.Load())
 	fmt.Fprintln(p.progress, "redhat: "+st.String())
 	return store.Provenance{
 		Source:     url,
@@ -264,11 +279,13 @@ func (s stats) String() string {
 			"%d products with no CPE, %d whole-product entries naming no package, "+
 			"%d unreadable products, %d documents with no CVE id, "+
 			"%d unreadable documents; delta: %d changed since the archive, "+
-			"%d fetched, %d already withdrawn, %d yielded a record",
+			"%d fetched, %d already withdrawn, %d yielded a record, "+
+			"%d retried, %d rescued by a retry",
 		s.Documents, s.Advisories, s.Affected, s.Unfixable,
 		s.UnfixableWontFix, s.UnfixableNotFixed, s.UnfixableUnstated,
 		s.UnfixableBothReasons, s.RemediationGrouped,
 		s.SkippedModule, s.SkippedModuleContext, s.SkippedNonRHEL, s.SkippedImage,
 		s.SkippedNoCPE, s.SkippedWholeProduct, s.SkippedBadProduct, s.SkippedNoCVE, s.SkippedBadDoc,
-		s.DeltaListed, s.DeltaFetched, s.DeltaGone, s.DeltaAdvisories)
+		s.DeltaListed, s.DeltaFetched, s.DeltaGone, s.DeltaAdvisories,
+		s.DeltaRetried, s.DeltaRescued)
 }
