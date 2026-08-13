@@ -127,6 +127,61 @@ func (b *Bolt) Covers() (map[string]bool, error) {
 // Put stores one advisory once in by-id and appends its ID to the lookup key of
 // every package it affects. Storing IDs rather than records is what keeps the
 // database from growing by the 1.44x measured duplication factor.
+// PutMany stores a batch of advisories in ONE transaction (D57).
+//
+// Put opens a write transaction per advisory, and a full build makes about
+// 150,000 of them. Two costs come off in a batch. The commits: bolt fsyncs on
+// each one, so the count is paid in disk round trips. And the index
+// read-modify-write: appendID unmarshals the existing ID list for a key,
+// scans it, appends and re-marshals, and inside one transaction those pages
+// stay in memory across the batch instead of being re-read per advisory.
+//
+// ALL OR NOTHING, deliberately. A partial batch would leave a database that
+// looks complete and holds less, which is the failure this project ranks
+// worst — so the transaction rolls back whole and the caller fails the build.
+// Put's per-advisory granularity is the thing being traded away, and that is
+// the right trade only because a build that loses records is not a build
+// anyone should publish.
+//
+// The batch is bounded by the caller, not here: bolt holds a transaction's
+// dirty pages in memory until commit, so an unbounded one would grow with
+// the corpus.
+func (b *Bolt) PutMany(as []advisory.Advisory) error {
+	if len(as) == 0 {
+		return nil
+	}
+	// Marshalled before the transaction opens. A write transaction blocks
+	// every other writer for as long as it is held, and JSON encoding is
+	// not work that needs the lock.
+	blobs := make([][]byte, len(as))
+	for i, a := range as {
+		blob, err := json.Marshal(a)
+		if err != nil {
+			return fmt.Errorf("marshal %s: %w", a.ID, err)
+		}
+		blobs[i] = blob
+	}
+	return b.db.Update(func(tx *bolt.Tx) error {
+		byID := tx.Bucket(bucketByID)
+		idx := tx.Bucket(bucketAdvisories)
+		for i, a := range as {
+			if err := byID.Put([]byte(a.ID), blobs[i]); err != nil {
+				return err
+			}
+			for _, aff := range a.Affected {
+				if aff.Ecosystem == "" || aff.Name == "" {
+					continue
+				}
+				key := aff.Ecosystem + keySep + pkgmeta.NormalizeName(aff.Ecosystem, aff.Name)
+				if err := appendID(idx, key, a.ID); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+}
+
 func (b *Bolt) Put(a advisory.Advisory) error {
 	blob, err := json.Marshal(a)
 	if err != nil {
