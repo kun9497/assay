@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -260,5 +261,66 @@ func TestUpdate_ReportsTheStoreSplit(t *testing.T) {
 	if !strings.Contains(s, "store]") {
 		t.Errorf("the provider row carries no store split, so Update never "+
 			"measured one:"+ln+"%s", s)
+	}
+}
+
+// countingProvider emits n advisories and reports how many times the store was
+// asked to write, by counting the batches its emit callback triggered.
+type countingProvider struct {
+	name string
+	n    int
+}
+
+func (c countingProvider) Name() string { return c.name }
+
+func (c countingProvider) Fetch(_ context.Context, emit func(advisory.Advisory) error) (store.Provenance, error) {
+	for i := 0; i < c.n; i++ {
+		a := advisory.Advisory{
+			ID:       "GHSA-" + strconv.Itoa(i),
+			Affected: []advisory.Affected{{Ecosystem: "Go", Name: "example.com/x"}},
+		}
+		if err := emit(a); err != nil {
+			return store.Provenance{}, err
+		}
+	}
+	return store.Provenance{Ecosystems: []string{"Go"}, Records: c.n}, nil
+}
+
+// TestUpdate_RecordsSurviveBatchBoundaries pins what a batched write can
+// plausibly get wrong: an advisory dropped at the seam between two batches, or
+// a tail shorter than putBatchSize never written at all. The fixture is two
+// full batches plus a partial one for exactly that reason.
+//
+// It does NOT pin the mid-fetch flush, and the name says so because the first
+// version of this test claimed to. A mutation removing that flush survives
+// this and the rest of the suite, and it should: every record still lands via
+// the tail. What the flush protects is the MEMORY BOUND — without it the
+// caller's buffer grows to the whole corpus — and that is not observable
+// through any seam this package exposes. Recorded here rather than covered by
+// a test that cannot fail on its own subject.
+func TestUpdate_RecordsSurviveBatchBoundaries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	var out, errOut bytes.Buffer
+	// Two full batches and a partial one, so a single-flush implementation
+	// and a correct one differ in how many times the store is entered.
+	const n = putBatchSize*2 + 7
+	if code := Update(context.Background(), path, "", "",
+		[]provider.Provider{countingProvider{name: "counter", n: n}}, nil, nil,
+		&out, &errOut); code != 0 {
+		t.Fatalf("Update = %d (stderr: %s)", code, errOut.String())
+	}
+	// Every advisory landed, whichever way it was flushed.
+	db, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	got, err := db.Lookup("Go", "example.com/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != n {
+		t.Errorf("Lookup = %d advisories, want %d — records were lost between"+
+			" the batches", len(got), n)
 	}
 }

@@ -116,12 +116,49 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []p
 		// make the second worse — bolt allows one write transaction at a time,
 		// so parallel fetches queue at exactly this callback.
 		var stored time.Duration
-		prov, err := p.Fetch(ctx, func(a advisory.Advisory) error {
+		// D57. Buffered and written in batches rather than one transaction per
+		// advisory. The buffer lives here rather than in the store so that
+		// nothing holds a bolt write transaction across calls — SetMeta,
+		// PutRating and PutEnrichment all open their own, and a long-lived one
+		// would deadlock against them.
+		//
+		// The error a caller sees may belong to an earlier advisory in the
+		// batch, which is the cost of the trade and is why PutMany is all or
+		// nothing: a partially written batch would leave a database that looks
+		// complete and holds less.
+		batch := make([]advisory.Advisory, 0, putBatchSize)
+		flush := func() error {
+			if len(batch) == 0 {
+				return nil
+			}
 			t0 := time.Now()
-			err := w.Put(a)
+			err := w.PutMany(batch)
 			stored += time.Since(t0)
+			batch = batch[:0]
 			return err
+		}
+		prov, err := p.Fetch(ctx, func(a advisory.Advisory) error {
+			batch = append(batch, a)
+			// A mutation of this flush SURVIVES the suite, and that is a true
+			// equivalent rather than a gap: the tail flush below stores every
+			// record either way, so nothing observable changes. What it protects
+			// is the memory bound — without it the buffer grows to the whole
+			// corpus, roughly 150,000 advisories, and putBatchSize means nothing.
+			// Stated here so it reads as a decision rather than as an untested
+			// branch.
+			if len(batch) < putBatchSize {
+				return nil
+			}
+			return flush()
 		})
+		// The tail, and it must run even when Fetch failed: a provider that
+		// died mid-archive still emitted everything before the failure, and
+		// dropping that silently would make a partial fetch look like a smaller
+		// upstream. The build fails either way — what matters is that the
+		// count in the timing table is the count that was actually written.
+		if ferr := flush(); ferr != nil && err == nil {
+			err = ferr
+		}
 		timings = append(timings, stageTiming{
 			Kind: "provider", Name: p.Name(), Elapsed: time.Since(started),
 			Records: prov.Records, Stored: stored, Failed: err != nil})
@@ -855,3 +892,11 @@ func coverageLabel(since time.Time) string {
 	return fmt.Sprintf("modified %s..%s",
 		since.UTC().Format("2006-01-02"), time.Now().UTC().Format("2006-01-02"))
 }
+
+// putBatchSize is how many advisories share one write transaction (D57).
+//
+// Bolt holds a transaction's dirty pages in memory until commit, so this is a
+// memory bound as much as a batching one: at roughly 10 KB an advisory, a
+// thousand is about 10 MB of pending write against a build that already
+// streams a 6 GB corpus.
+const putBatchSize = 1000

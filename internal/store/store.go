@@ -112,6 +112,12 @@ type Store interface {
 // handed something it could write through.
 type Writer interface {
 	Put(a advisory.Advisory) error
+	// PutMany stores a batch in one transaction (D57). Semantically Put in
+	// a loop, with one difference the caller has to accept: it is ALL OR
+	// NOTHING, so an error means none of the batch landed. A build that
+	// loses records is not one anyone should publish, which is what makes
+	// that the right trade.
+	PutMany(as []advisory.Advisory) error
 	// PutRating stores one authority's CVSS opinion about a CVE, keyed on
 	// (CVE, Source) so re-putting the same source replaces rather than
 	// duplicates.
