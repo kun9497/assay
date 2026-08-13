@@ -1026,3 +1026,107 @@ func TestPush_ZeroRatingArtifactCannotBlockAPushThatHasSome(t *testing.T) {
 		t.Errorf("published RatingCount = %d, want 5", got.RatingCount)
 	}
 }
+
+// registryHost returns a live in-process registry's host, so a test can name
+// several tags in the same repository rather than the single one liveRegistry
+// hands back.
+func registryHost(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewServer(registry.New())
+	t.Cleanup(srv.Close)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u.Host
+}
+
+// TestPush_BootstrapComparesAgainstThePreviousSchema is the hole D60 closes,
+// and it is a hole this project fell into rather than one anticipated.
+//
+// A schema bump moves the tag, so the first push to :vN faces no baseline at
+// its own tag — and every regression check is skipped at exactly the moment a
+// hand-built bootstrap is most likely to be missing something. The v8 bootstrap
+// published 0 ratings where :v7 held 355,030, and nothing objected, because
+// :v8 did not exist yet.
+//
+// This drives Push, not the comparison helper: the helper being right proves
+// nothing if the bootstrap path never reaches it.
+func TestPush_BootstrapComparesAgainstThePreviousSchema(t *testing.T) {
+	host := registryHost(t)
+	prev := fmt.Sprintf("%s/assay-db:v%d", host, store.SchemaVersion-1)
+	cur := fmt.Sprintf("%s/assay-db:v%d", host, store.SchemaVersion)
+
+	// The previous schema holds a real corpus.
+	seed(t, prev, time.Time{}, 5000)
+
+	// The bootstrap has none, which is exactly what a build without
+	// NVD_ENABLE produces.
+	var out, errOut bytes.Buffer
+	code := Push(context.Background(), bounded(t, time.Time{}, 0), cur, false, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("Push = %d, want 2 — a bootstrap dropping 5000 ratings to 0 must be "+
+			"refused\nstderr: %s", code, errOut.String())
+	}
+	s := errOut.String()
+	if !strings.Contains(s, "previous schema") {
+		t.Errorf("stderr does not say it compared against the previous schema:\n%s", s)
+	}
+	// And it names WHICH artifact it fell below, or the operator cannot tell a
+	// same-tag regression from a bootstrap one.
+	if !strings.Contains(s, prev) {
+		t.Errorf("stderr does not name %q:\n%s", prev, s)
+	}
+	// Nothing was published: asserting the exit code alone would pass on a
+	// guard that reports the problem and writes anyway.
+	if _, err := remote.Image(mustRef(t, cur)); err == nil {
+		t.Error("the refused bootstrap published anyway")
+	}
+}
+
+// TestPush_BootstrapProceedsWhenItCarriesTheCorpus. The guard must not block a
+// legitimate schema bump: a bootstrap built the right way carries at least what
+// the previous schema had, and refusing that would make every future bump need
+// --force, which trains the operator to pass it always.
+func TestPush_BootstrapProceedsWhenItCarriesTheCorpus(t *testing.T) {
+	host := registryHost(t)
+	prev := fmt.Sprintf("%s/assay-db:v%d", host, store.SchemaVersion-1)
+	cur := fmt.Sprintf("%s/assay-db:v%d", host, store.SchemaVersion)
+	seed(t, prev, time.Time{}, 5000)
+
+	var out, errOut bytes.Buffer
+	if code := Push(context.Background(), bounded(t, time.Time{}, 5000), cur,
+		false, &out, &errOut); code != 0 {
+		t.Fatalf("Push = %d, want 0 — the bootstrap carries the corpus\nstderr: %s",
+			code, errOut.String())
+	}
+	if got := publishedMeta(t, cur).RatingCount; got != 5000 {
+		t.Errorf("published RatingCount = %d, want 5000", got)
+	}
+}
+
+// TestPush_NoPreviousSchemaEitherStillPublishes. A repository with nothing at
+// all published must still accept a first push, or the very first release of
+// this tool could never ship one.
+func TestPush_NoPreviousSchemaEitherStillPublishes(t *testing.T) {
+	host := registryHost(t)
+	cur := fmt.Sprintf("%s/assay-db:v%d", host, store.SchemaVersion)
+
+	var out, errOut bytes.Buffer
+	if code := Push(context.Background(), bounded(t, time.Time{}, 3), cur,
+		false, &out, &errOut); code != 0 {
+		t.Fatalf("Push = %d, want 0 on an empty repository\nstderr: %s", code, errOut.String())
+	}
+	if got := publishedMeta(t, cur).RatingCount; got != 3 {
+		t.Errorf("published RatingCount = %d, want 3", got)
+	}
+}
+
+func mustRef(t *testing.T, s string) name.Reference {
+	t.Helper()
+	r, err := name.ParseReference(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
