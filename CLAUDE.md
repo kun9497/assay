@@ -311,6 +311,43 @@ Pick fixture values that cannot collide (`ALPINE-2025-0001` with upstream
 half. Then delete the code the test covers and confirm the suite goes red — a report test
 that never fails is worse than no test, because it is counted as coverage.
 
+## The helper is covered; nothing calls it
+
+**The single most repeated defect on this project. Six times, all found by mutation and none
+by review.** Write the caller's test FIRST, before the helper's, or this happens again.
+
+The shape is always the same. A new function gets a thorough table-driven test — every
+branch, every boundary, adversarial rows — and nothing asserts that the code which is
+supposed to call it does. Delete the call site and the suite stays green, because every test
+of the helper reaches it directly.
+
+| Slice | The helper, well tested | What nothing held |
+|---|---|---|
+| D55 | the SARIF renderer's not-evaluated results | that `driver.rules` declared the rule they name |
+| D53 | `ubuntuLineage` and the drop it drives | that `Ecosystems` still listed Ubuntu at all |
+| D56 | `reportTimings` | that a FAILED build called it |
+| D56 | the store-split rendering | that `Update` ever set `Stored` |
+| D58 | `retryable` and `sleepOrDone` | that the retry loop ran more than once |
+| D59 | `checkDBAge`, nine cases | that `Run` consulted it |
+
+**Why review never catches it.** Each slice's tests look complete on their own, because they
+are — of the helper. The missing assertion is in a different file, about a line that is one
+call. Reading the helper's test file gives no signal at all.
+
+**The rule.** When you add a function that something else must call, the FIRST test you write
+drives the caller and asserts the observable effect. Then test the helper directly for the
+branches the caller cannot reach. Written in that order the gap cannot open; written in the
+other order it opens every time.
+
+**And check it deliberately.** Before believing a slice is covered, delete each new call site
+— not the function, the CALL — and run the suite. If it stays green, the feature is not
+tested; only its implementation is.
+
+One caveat learned the same way: the caller's test must assert something that DIFFERS when the
+call is gone. D57's first attempt drove the caller and asserted every record landed, which was
+true either way — a test that named the right thing and could not fail on it, which is the
+section below.
+
 ## Guards that exist but are not held
 
 **A guard is not covered by the test that mentions it.** The recurring defect in slice 3 was
