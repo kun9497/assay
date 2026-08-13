@@ -300,7 +300,9 @@ func comparerName(ecosystem string) string {
 		return "rpm"
 	}
 	switch ecosystem {
-	case "Go", "npm":
+	// crates.io joins here in the same commit that taught version.For about
+	// it, which is the rule the comment above was written for.
+	case "Go", "npm", "crates.io":
 		return "semver"
 	case "PyPI":
 		return "pep440"

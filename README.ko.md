@@ -155,8 +155,9 @@ assay scan ./my-project               # go.mod이 있는 디렉터리
 권고가 있습니다.
 
 **디렉터리** 스캔은 찾은 락파일을 모두 읽습니다 — `go.mod`, `package-lock.json`,
-`npm-shrinkwrap.json`, `yarn.lock`(v1), `poetry.lock`, `Pipfile.lock`. 표준 라이브러리만 쓰고
-`go`·`npm`·`pip`을 호출하지 않으므로 오프라인에서 툴체인 없이 동작합니다.
+`npm-shrinkwrap.json`, `yarn.lock`(v1), `poetry.lock`, `Pipfile.lock`, `Cargo.lock`. 표준
+라이브러리만 쓰고 `go`·`npm`·`pip`·`cargo`를 호출하지 않으므로 오프라인에서 툴체인 없이
+동작합니다.
 
 하위 디렉터리도 훑으므로 `frontend/package-lock.json`도 찾습니다. `node_modules`, `vendor`,
 `.git`은 건너뛰고 여섯 단계까지만 내려갑니다. **인식했지만 읽지 않은 매니페스트는 이유와 함께
@@ -494,6 +495,8 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] `yarn.lock`(v1)·`Pipfile.lock`·`npm-shrinkwrap.json` cataloger (D61). yarn의 별칭
       항목은 로컬 이름이 아니라 실제 설치된 패키지로 해석됩니다
 - [x] `pnpm-lock.yaml`·`uv.lock`·yarn berry는 인식하고 이름을 부르고 2를 냅니다 (D61)
+- [x] `Cargo.lock`과 OSV crates.io 아카이브 (D62) — 레코드 2,725건, 그중 62%가 등급을 담고
+      있으며, 키(`crates.io`)가 purl 타입(`cargo`)과 다른 첫 생태계
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건

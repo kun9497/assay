@@ -30,6 +30,7 @@ const (
 	KindNPMShrinkwrap Kind = "npm-shrinkwrap.json"
 	KindPipfileLock   Kind = "Pipfile.lock"
 	KindYarnLock      Kind = "yarn.lock"
+	KindCargoLock     Kind = "Cargo.lock"
 
 	// KindPnpmLock and KindUVLock are recognized and NOT read. Both are
 	// formats assay has no parser for - pnpm's is YAML, uv's is TOML, and the
@@ -78,6 +79,7 @@ var manifestKinds = map[string]Kind{
 	// every other name in this map.
 	"Pipfile.lock":   KindPipfileLock,
 	"yarn.lock":      KindYarnLock,
+	"Cargo.lock":     KindCargoLock,
 	"pnpm-lock.yaml": KindPnpmLock,
 	"uv.lock":        KindUVLock,
 }

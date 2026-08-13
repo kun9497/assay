@@ -83,6 +83,9 @@ var purlTypeToEcosystem = map[string]string{
 	"golang": "Go",
 	"npm":    "npm",
 	"pypi":   "PyPI",
+	// OSV writes pkg:cargo/<crate> and keys the ecosystem "crates.io"; the
+	// purl type and the ecosystem name differ, which is why this map exists.
+	"cargo": "crates.io",
 }
 
 func EcosystemForPURLType(typ string) (string, bool) {

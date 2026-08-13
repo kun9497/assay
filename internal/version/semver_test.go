@@ -284,7 +284,7 @@ func TestNoUnbackedDistroComparer(t *testing.T) {
 
 	// The language ecosystems are exactly these; a new one should be a
 	// deliberate edit here rather than an accident.
-	want := map[string]bool{"Go": true, "npm": true, "PyPI": true}
+	want := map[string]bool{"Go": true, "npm": true, "PyPI": true, "crates.io": true}
 	for eco := range registry {
 		if !want[eco] {
 			t.Errorf("comparer registered for %q, which is not a known language ecosystem", eco)

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/kun9497/assay/internal/cataloger/cargolock"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"github.com/kun9497/assay/internal/cataloger/gomod"
 	"github.com/kun9497/assay/internal/cataloger/npmlock"
@@ -235,6 +236,14 @@ func parseManifest(root string, m Manifest) ([]pkgmeta.Package, cyclonedx.Stats,
 			// on purpose. The file resolves every dependency in the tree and
 			// this scan read none of them, so the result cannot be stood
 			// behind whatever the reason.
+			return nil, cyclonedx.Stats{}, nil, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
+		}
+		relocate(pkgs, m.Path)
+		return pkgs, s, nil, nil
+
+	case KindCargoLock:
+		pkgs, s, perr := cargolock.Parse(full)
+		if perr != nil {
 			return nil, cyclonedx.Stats{}, nil, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
 		}
 		relocate(pkgs, m.Path)

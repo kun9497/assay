@@ -73,6 +73,11 @@ var registry = map[string]Comparer{
 	"Go":   SemVer{},
 	"npm":  SemVer{},
 	"PyPI": PEP440{},
+	// Cargo requires a semver-compliant version of every crate it publishes,
+	// and Cargo.lock records the resolved one, so the comparer written for npm
+	// and Go applies unchanged. crates.io is not a distro: the key carries no
+	// release, so it is a plain map entry rather than a prefix rule (D6).
+	"crates.io": SemVer{},
 }
 
 // mainlineUbuntu matches the two shapes OSV gives a mainline Ubuntu release:

@@ -2466,6 +2466,54 @@ standard library, and this project has two direct dependencies on purpose. Takin
 decision (see `docs/deferred-decisions.md`), and until it is made, saying so loudly beats
 guessing.
 
+**Correction, measured the same day (D62).** The claim above is right about pnpm and was wrong
+about uv. `uv.lock` is a flat sequence of `[[package]]` blocks whose name and version are bare
+quoted scalars — the same subset `poetry.lock` has always been read with — and the line scanner
+written for `Cargo.lock` parses a real 1,650-line `uv.lock` at 77 of 77 blocks with none
+skipped. It needs no TOML library. The refusal stands until a cataloger is written, but the
+reason is that nobody has written one, not that it needs a dependency.
+
+---
+
+### D62 — crates.io, and the first ecosystem whose key is not its purl type
+
+**Decision.** `Cargo.lock` is read, the OSV `crates.io` archive is ingested, and the ecosystem
+key is `crates.io` while the purl type stays `cargo`.
+
+**The two strings differ, and that is the hazard.** Every ecosystem before this one had a purl
+type that either matched its key (`npm`) or differed by case (`pypi`/`PyPI`, `golang`/`Go`).
+Rust is the first where they are unrelated words. Writing `cargo` as the ecosystem sends every
+lookup to a bucket no provider ever writes, and a lookup that finds nothing reports **clean** —
+so this is asserted on the package the cataloger produces, not left to the store.
+
+**The archive is small and unusually well rated.** Measured 2026-08-13: 2,725 records, 3.4 MB
+against npm's 203 MB. 1,518 GHSA, 1,197 RUSTSEC, 10 `MAL-*` (excluded, D15), 87 withdrawn
+(dropped at ingestion, D16). **62% carry a severity**, against roughly half across OSV as a
+whole — RUSTSEC rates its own advisories. 3,657 ranges are `SEMVER` and 190 `ECOSYSTEM`.
+
+**Cargo's versions are semver, so the comparer is the one npm and Go already use.** Cargo
+refuses to publish a crate whose version is not semver-compliant and `Cargo.lock` records the
+resolved one, so there was nothing per-ecosystem to write. This is the first time D9's answer
+was "the existing comparer, unchanged", and it is worth naming as such: the rule is that
+version schemes get their own comparer *when they disagree*, not that every ecosystem gets one.
+
+**A local crate is cataloged, not skipped.** The root crate and any path dependency carry no
+`source` field. They are still components of the tree, and skipping them would put "not
+evaluated" above zero on every healthy Rust scan — the defect `npmlock` hit with
+`package-lock.json`'s root key, which made `--fail-on-incomplete` exit 2 where nothing was
+wrong.
+
+**A table header closes the block.** `Cargo.lock` v1 ends with a `[metadata]` table whose keys
+name every package again. Reading past it lets a stray assignment complete a block whose own
+version never arrived. Together with first-assignment-wins these are two guards on one hazard,
+and they only differ on an incomplete block — which is what the test for the header rule uses,
+because with both fields set the other guard makes the mutation invisible.
+
+**Until the published database is rebuilt, a Rust scan exits 2 rather than reporting clean.**
+`store.Covers()` already refuses an ecosystem the database does not hold, so the cataloger
+could land before the data without a silent verdict. That ordering is safe by construction, not
+by care.
+
 ---
 
 ## 3. Architecture
