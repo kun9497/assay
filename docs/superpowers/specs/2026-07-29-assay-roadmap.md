@@ -2549,6 +2549,46 @@ these findings work the moment the binary ships.
 
 ---
 
+### D64 — The Red Hat archive is spooled to disk before it is parsed
+
+**Decision.** `Fetch` downloads the 261 MB archive to a temporary file, closes the connection,
+then decompresses and parses from disk. The download retries with `Range` resume, and a
+transfer that ends short of the promised length is an error rather than a short archive.
+
+**This is the 2026-08-13 publish failure.** The build died at 1h3m with
+`read csaf_vex_2026-08-09.tar.zst: read tcp ...: connection reset by peer`, and produced no
+artifact that day.
+
+**D56's instrumentation named the cause in the same output that reported the failure:**
+
+```
+provider  Red Hat CSAF VEX   10m23s  0 record(s) [2m4s fetch, 8m19s store] (failed)
+```
+
+Two minutes of transfer, eight of storing, one connection held open across both. Streaming the
+archive while writing every record it produced kept the socket alive four times longer than the
+download needed it, and the reset arrived in the extra time. Spooling first is not an
+optimization — it removes the window rather than surviving it.
+
+**D58's retry did not help, and that is the lesson worth keeping.** It was written the day
+before for exactly this class of failure, and it covers the *delta documents*: a different code
+path, reached after the archive. The retry was real and the reasoning was right; it was simply
+attached to the half that was not failing. A transient-failure fix should name which transfers
+it covers, because "we added retries" reads as covering all of them.
+
+**Resumed, not restarted.** The server supports `Range`, so an interruption at 200 MB costs the
+remaining 61 MB. A server that ignores `Range` answers 200 with the whole file, and that case
+truncates the spool first — appending would produce one and a third copies of the archive, which
+zstd rejects minutes later and nowhere near the cause.
+
+**A short download is an error.** zstd and tar both stop at a truncation without complaining, so
+a build would otherwise publish an artifact missing whatever was in the tail and say nothing.
+`net/http` enforces `Content-Length` itself, so the only way a short body arrives with no error
+is a chunked response — which a proxy in front of the archive can produce, and which the test
+for this has to construct deliberately.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes
