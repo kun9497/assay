@@ -90,13 +90,29 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []p
 		Ratings:    map[string]store.Provenance{},
 		Enrichment: map[string]store.Provenance{},
 	}
+
+	// D56. Which stage a build spends its time in is not guessable from the
+	// outside, and it stopped being an idle question when the publish job
+	// went from 29 minutes to 85 after Ubuntu landed — one run was cancelled
+	// at the 120-minute timeout with no way to say which provider to blame.
+	//
+	// Recorded for FAILED stages too. A provider that died after 40 minutes
+	// is the most useful timing in the run and the one a summary printed
+	// only on success would always be missing.
+	buildStarted := time.Now()
+	var timings []stageTiming
 	for _, p := range providers {
 		fmt.Fprintf(stderr, "fetching %s…\n", p.Name())
+		started := time.Now()
 		prov, err := p.Fetch(ctx, func(a advisory.Advisory) error { return w.Put(a) })
+		timings = append(timings, stageTiming{
+			Kind: "provider", Name: p.Name(), Elapsed: time.Since(started),
+			Records: prov.Records, Failed: err != nil})
 		if err != nil {
 			w.Close()
 			os.Remove(tmp)
 			fmt.Fprintf(stderr, "error: provider %s: %v\n", p.Name(), err)
+			reportTimings(stderr, timings, buildStarted)
 			return 2
 		}
 		meta.Providers[p.Name()] = prov
@@ -184,11 +200,16 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []p
 	// quietly under-report every band it would otherwise have raised.
 	for _, a := range annotators {
 		fmt.Fprintf(stderr, "annotating with %s…\n", a.Name())
+		started := time.Now()
 		prov, err := a.Annotate(ctx, func(r advisory.Rating) error { return w.PutRating(r) })
+		timings = append(timings, stageTiming{
+			Kind: "annotator", Name: a.Name(), Elapsed: time.Since(started),
+			Records: prov.Records, Failed: err != nil})
 		if err != nil {
 			w.Close()
 			os.Remove(tmp)
 			fmt.Fprintf(stderr, "error: annotator %s: %v\n", a.Name(), err)
+			reportTimings(stderr, timings, buildStarted)
 			return 2
 		}
 		meta.Ratings[a.Name()] = mergeRatingCoverage(meta.Ratings[a.Name()], prov)
@@ -223,7 +244,11 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []p
 	// fault visible or invisible depending on when the feed died.
 	for _, e := range enrichers {
 		fmt.Fprintf(stderr, "enriching with %s…\n", e.Name())
+		started := time.Now()
 		prov, err := e.Enrich(ctx, func(en advisory.Enrichment) error { return w.PutEnrichment(en) })
+		timings = append(timings, stageTiming{
+			Kind: "enricher", Name: e.Name(), Elapsed: time.Since(started),
+			Records: prov.Records, Failed: err != nil})
 		if err != nil {
 			fmt.Fprintf(stderr, "warning: enricher %s: %v\n", e.Name(), err)
 			// Whatever the enricher returned alongside its error is
@@ -265,6 +290,9 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []p
 	for _, p := range meta.Providers {
 		total += p.Records
 	}
+	// Before the stdout line, so a reader watching a terminal sees the timing
+	// attached to the run that produced it rather than after the result.
+	reportTimings(stderr, timings, buildStarted)
 	fmt.Fprintf(stdout, "database updated: %d advisories at %s\n", total, dbPath)
 	// No second "N ratings from N source(s)" line here: the only trustworthy
 	// rating count is the one Bolt.SetMeta just derived from the stored
