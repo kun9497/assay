@@ -12,6 +12,84 @@ Read alongside the Architecture section of the [README](../README.md).
 
 ## Deferred work
 
+### Ecosystem coverage against grype — the six-fold gap
+
+grype ships **26 providers**; assay has **4** (OSV, Red Hat CSAF, NVD ratings, KISA
+enrichment). Measured 2026-08-13 from `grype db providers`: alma, alpine, amazon, arch,
+bitnami, chainguard, chainguard-libraries, debian, echo, eol, epss, fedora, github,
+govulndb, hummingbird, kev, mariner, minimos, nvd, oracle, photon, rhel, secureos, sles,
+ubuntu, wolfi.
+
+**Why this entry exists.** The differential runs in this repo all agree with grype or beat
+it, and every one of them was taken on a distro assay covers. That is a selected sample and
+the README should not be read as saying otherwise: on Amazon Linux, Oracle, SLES, Photon,
+Wolfi, Mariner, Arch or a Java, Ruby, Rust, .NET or PHP application, **assay finds nothing at
+all**. Alma, Rocky and Fedora are catalogued and reported as not evaluated (D50), which is a
+loud refusal rather than a clean verdict, but it is still not support.
+
+**What each would take.** Not equal work. The language ecosystems are nearly free — OSV
+publishes Maven, RubyGems, crates.io, NuGet and Packagist archives in the same shape as the
+five already ingested, so the cost is a comparer per version scheme (D9) and a cataloger per
+manifest format. The RPM-family distros are the expensive ones: each needs its own advisory
+source, and D50 records why their packages must not be matched against Red Hat's errata.
+
+**Revisit when** a specific ecosystem has a reason to exist rather than as a coverage count.
+A comparer with no provider behind it is the shape D46 refused for RPM, and a provider with
+no measured demand is corpus size paid for nothing — the Ubuntu archive alone added 6 GB and
+36 minutes of build (D53, D56).
+
+---
+
+### Ubuntu findings carry no fix state
+
+D52 distinguishes "the vendor will never fix this" from "no fix yet" and D53 brought Ubuntu
+in, but every Ubuntu finding reports `unknown`. On a real ubuntu:22.04 scan that is all 104 of
+them, while grype marks **15 as wont-fix** on the same image.
+
+**Why.** Not a bug in the matcher. OSV's Ubuntu export carries no fix-state field at all;
+grype gets it from Canonical's Launchpad CVE tracker through vunnel, where the state is a
+per-package pocket annotation rather than anything OSV represents. D17's discipline is why
+the finding says `unknown` rather than guessing, and that is the right answer for the data —
+but the information exists and assay is not reading it.
+
+**What it would take is a D1 question, not an implementation one.** D1 says every provider
+normalizes into OSV shape, and that is what made the KISA and Red Hat providers possible.
+Reading Launchpad means a second Ubuntu source whose native shape is not OSV's, alongside an
+OSV Ubuntu ingest that already works — either two providers for one distro, or replacing the
+OSV path with a Launchpad one and inheriting a scraper nobody else in this project maintains.
+
+**Revisit when** the wont-fix distinction matters on Ubuntu the way it did on RHEL. The
+measured share is what to check first: 15 of 104 findings on ubi-equivalent Ubuntu against
+59 of 505 on ubi8 — similar enough that the case is probably as strong, and worth measuring
+properly before reopening D1.
+
+---
+
+### A whole-project QA pass before anything is called finished
+
+**Why this is written down rather than assumed.** Every slice in this project has shipped
+with its own tests and its own mutation round, and mutation testing still found real defects
+in four of them — including two where the helper was covered and the wiring that calls it was
+not, which no per-slice review caught because each slice's tests looked complete on their own.
+
+**What it should cover, based on what has actually broken here:**
+
+- **Wiring, not helpers.** The recurring defect: a function tested in isolation and nothing
+  asserting anyone calls it. Four instances so far (the failure-path timing report, the
+  store-split value reaching the table, the SARIF not-evaluated rule declaration, the
+  `Ecosystems` entry).
+- **Substring assertions.** Documented twice in CLAUDE.md and hit twice more since, once in
+  the test written to catch that very class.
+- **Cross-slice interaction.** Every mutation round so far has been scoped to one package.
+  Nothing has tried mutating one slice's code and running another's tests.
+- **The exit-code contract end to end.** D11 fixes 2 > 1 > 0, and each gate was tested
+  against its own flag rather than against the others.
+
+**Revisit when** the feature set stops moving. Doing it mid-slice would measure a shape that
+is about to change, and the value is in the sweep being whole.
+
+---
+
 ### The Docker daemon as an image source
 
 `assay` reads images from a registry, a `docker save` tarball, and an OCI layout directory.

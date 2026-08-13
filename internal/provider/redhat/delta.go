@@ -250,18 +250,52 @@ func (p *Provider) changedSince(ctx context.Context, cutoff time.Time) ([]string
 // known gap and a delta that quietly closed only part of it would be worse
 // than not having one: the database would look complete and be somewhere in
 // between.
+// document fetches one CSAF document, retrying a transient failure (D58).
+//
+// The retry exists because a single closed connection killed a 42-minute
+// build on 2026-08-13, on document 2,448 of a delta pass. D49's rule is
+// unchanged and is why that hurt: only a 404 yields nil, and everything else
+// fails the build rather than quietly closing part of the gap this pass
+// exists for. What that rule did not do is separate "the feed is gone" from
+// "the socket hiccuped", and retryable() is where that separation lives.
 func (p *Provider) document(ctx context.Context, rel string) (*document, error) {
+	var lastErr error
+	for attempt := 1; attempt <= deltaAttempts; attempt++ {
+		if attempt > 1 {
+			if err := sleepOrDone(ctx, deltaBackoff(attempt-1)); err != nil {
+				return nil, err
+			}
+		}
+		d, status, err := p.documentOnce(ctx, rel)
+		if err == nil {
+			return d, nil
+		}
+		lastErr = err
+		if !retryable(err, status) {
+			return nil, err
+		}
+	}
+	// The last error, not a summary of all of them. A reader needs the one
+	// that ended it and the document it names; "3 attempts failed" without
+	// the cause is a worse message than the cause alone.
+	return nil, fmt.Errorf("redhat: %d attempts: %w", deltaAttempts, lastErr)
+}
+
+// documentOnce is one attempt. It returns the HTTP status alongside the error
+// so the caller can tell a 503 from a closed connection without parsing a
+// message; status is 0 when the request never produced a response.
+func (p *Provider) documentOnce(ctx context.Context, rel string) (*document, int, error) {
 	ctx, cancel := context.WithTimeout(ctx, deltaRequestTimeout)
 	defer cancel()
 
 	url := p.baseURL + "/" + rel
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("redhat: fetch %s: %w", url, err)
+		return nil, 0, fmt.Errorf("redhat: fetch %s: %w", url, err)
 	}
 	// Drained, not just closed. json.Decode stops at the end of the VALUE, so
 	// any trailing byte left in the body makes net/http give up on the
@@ -275,14 +309,14 @@ func (p *Provider) document(ctx context.Context, rel string) (*document, error) 
 		resp.Body.Close()
 	}()
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, nil
+		return nil, resp.StatusCode, nil
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("redhat: fetch %s: %s", url, resp.Status)
+		return nil, resp.StatusCode, fmt.Errorf("redhat: fetch %s: %s", url, resp.Status)
 	}
 	var d document
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxDocument)).Decode(&d); err != nil {
-		return nil, fmt.Errorf("redhat: parse %s: %w", url, err)
+		return nil, resp.StatusCode, fmt.Errorf("redhat: parse %s: %w", url, err)
 	}
-	return &d, nil
+	return &d, resp.StatusCode, nil
 }
