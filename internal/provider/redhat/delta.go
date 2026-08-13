@@ -266,8 +266,17 @@ func (p *Provider) document(ctx context.Context, rel string) (*document, error) 
 				return nil, err
 			}
 		}
+		if attempt > 1 {
+			p.retried.Add(1)
+		}
 		d, status, err := p.documentOnce(ctx, rel)
 		if err == nil {
+			// Counted only when a retry is what produced the answer, so
+			// the two numbers say different things: retried is how much
+			// extra work the pass did, rescued is how many builds it saved.
+			if attempt > 1 {
+				p.rescued.Add(1)
+			}
 			return d, nil
 		}
 		lastErr = err

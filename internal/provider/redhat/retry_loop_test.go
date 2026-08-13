@@ -140,3 +140,75 @@ func TestDocument_StopsOnCancellation(t *testing.T) {
 		t.Errorf("server saw %d requests after cancellation, want at most 1", got)
 	}
 }
+
+// TestDocument_CountsRetriesAndRescues. The counters exist because the first
+// build after D58 could not tell whether a retry had saved it or no transient
+// failure had occurred, and "it worked" is not evidence that the fix is what
+// made it work.
+//
+// The two numbers say different things and both are asserted: retried is how
+// much extra work the pass did, rescued is how many builds it saved. A run with
+// retries and no rescues means the retry is buying nothing.
+func TestDocument_CountsRetriesAndRescues(t *testing.T) {
+	var hits int32
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&hits, 1) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Write([]byte(`{"document":{"tracking":{"id":"CVE-2026-9"}},` +
+			`"vulnerabilities":[{"cve":"CVE-2026-9"}]}`))
+	}))
+	defer s.Close()
+
+	p := New(Options{BaseURL: s.URL})
+	if _, err := p.document(context.Background(), "2026/cve-2026-9.json"); err != nil {
+		t.Fatalf("document: %v", err)
+	}
+	if got := p.retried.Load(); got != 1 {
+		t.Errorf("retried = %d, want 1 (one extra attempt)", got)
+	}
+	if got := p.rescued.Load(); got != 1 {
+		t.Errorf("rescued = %d, want 1 — the document only succeeded because of the retry", got)
+	}
+}
+
+// TestDocument_CountsNothingWhenTheFirstAttemptWorks. A counter that ticked on
+// every document would report a flaky feed on a perfectly healthy run, and the
+// number exists precisely to be trusted when it is zero.
+func TestDocument_CountsNothingWhenTheFirstAttemptWorks(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"document":{"tracking":{"id":"CVE-2026-8"}},` +
+			`"vulnerabilities":[{"cve":"CVE-2026-8"}]}`))
+	}))
+	defer s.Close()
+
+	p := New(Options{BaseURL: s.URL})
+	if _, err := p.document(context.Background(), "2026/cve-2026-8.json"); err != nil {
+		t.Fatal(err)
+	}
+	if r, rs := p.retried.Load(), p.rescued.Load(); r != 0 || rs != 0 {
+		t.Errorf("retried=%d rescued=%d, want 0 and 0 on a clean fetch", r, rs)
+	}
+}
+
+// TestDocument_CountsARetryThatDidNotRescue. A document that fails every
+// attempt still cost extra work, and hiding that would make a feed outage look
+// cheap in the summary.
+func TestDocument_CountsARetryThatDidNotRescue(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer s.Close()
+
+	p := New(Options{BaseURL: s.URL})
+	if _, err := p.document(context.Background(), "2026/cve-2026-7.json"); err == nil {
+		t.Fatal("document returned no error against a server that always 503s")
+	}
+	if got := p.retried.Load(); got != int64(deltaAttempts-1) {
+		t.Errorf("retried = %d, want %d", got, deltaAttempts-1)
+	}
+	if got := p.rescued.Load(); got != 0 {
+		t.Errorf("rescued = %d, want 0 — nothing was rescued", got)
+	}
+}
