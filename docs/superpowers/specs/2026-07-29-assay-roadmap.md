@@ -2301,6 +2301,35 @@ command, where "libssl3 is affected by an openssl advisory" is otherwise unverif
 **Hand-rolled structs rather than a SARIF library.** The format is large, this uses a corner of
 it, and a third direct dependency is a real decision this does not justify.
 
+### D56 — `db build` says where it spent its time
+
+**Decision.** Every provider, annotator and enricher is timed, and `db build` prints a summary
+to stderr: slowest first, with each stage's share of the wall clock, its record count, and the
+remainder that belongs to no stage.
+
+**Why now.** The nightly publish went from 29 minutes to 85 after Ubuntu landed (D53), and one
+run was cancelled at the 120-minute timeout with nothing in the log to say which provider to
+blame. Raising the timeout without that is guessing at which stage to raise it for, and the
+obvious suspect is not always right — the Red Hat delta looked like the expensive part until it
+was measured and turned out to be latency, which 8-way concurrency cut from 19 minutes to 4.
+
+**Slowest first, not run order.** The question this output answers is always "what do I fix"
+and never "what ran when"; run order is already visible in the `fetching`/`annotating` lines
+above it.
+
+**A failed stage is listed with its elapsed time and marked, never omitted.** A provider that
+died after forty minutes is the most useful row in the table, and a summary printed only on
+success is guaranteed to be missing from every run where it would have mattered. That claim had
+no test until a mutation removing both failure-path calls left the package green.
+
+**The gap between the stages and the wall clock is named.** A build whose stages sum to a
+fraction of its total is saying the bottleneck is somewhere this table does not look — store
+opening, seeding, coverage, the final rename — and an unexplained gap reads as the stages being
+the whole story. The row is omitted when there is nothing in it, because "everything else 0s"
+on every build trains the reader to stop seeing the line.
+
+**To stderr**, with every other diagnostic: the database path on stdout is what a script reads.
+
 ## 3. Architecture
 
 ### Measured data volumes
