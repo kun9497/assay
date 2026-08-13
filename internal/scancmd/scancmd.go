@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/kun9497/assay/internal/cataloger/apkdb"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
@@ -113,6 +114,11 @@ type Options struct {
 	// document has to say what scanned. The TARGET is Run's own parameter
 	// and needs no option.
 	Version string
+	// DBMaxAge refuses a scan against vulnerability data older than this
+	// (D59). Zero disables the check, which is the default: the right
+	// number depends on how the caller runs `db update`, and inventing one
+	// here would be a policy nobody chose.
+	DBMaxAge time.Duration
 	// Explain, when non-empty, selects one advisory to explain instead of
 	// rendering the table or JSON: its own ID, or any alias/upstream
 	// identifier it carries (D3) — whatever a reader would have grepped the
@@ -382,6 +388,20 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		return 2
 	}
 	defer db.Close()
+
+	// D59. Before matching, not after: a scan that will be refused for age
+	// should not spend the time, and a summary printed first would be a
+	// verdict from data the next line calls untrustworthy.
+	if opts.DBMaxAge > 0 {
+		m, merr := db.Meta()
+		if merr != nil {
+			fmt.Fprintf(stderr, "error: read database metadata: %v\n", merr)
+			return 2
+		}
+		if code := checkDBAge(m, opts.DBMaxAge, time.Now(), stderr); code != 0 {
+			return code
+		}
+	}
 
 	res, err := matcher.New(db).Match(inventory)
 	if err != nil {

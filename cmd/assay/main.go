@@ -78,6 +78,10 @@ Scan flags (any order, before or after the target):
                         =target narrows it to causes you can act on (a version
                         in the scanned artifact that will not parse), leaving
                         out malformed advisory data you cannot fix.
+  --db-max-age=<dur>    Exit 2 if the vulnerability data is older than <dur>
+                        (24h, 168h). Measured from the UPSTREAM data, not from
+                        when the database was built, so a mirror serving a stale
+                        snapshot does not read as fresh. Off by default.
   --output <format>     table (default), json, or sarif
                         sarif is SARIF 2.1.0 for GitHub code scanning. Packages
                         that could not be evaluated are emitted as note-level
@@ -609,6 +613,29 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 
 		// D48. Beside --fail-on-unknown because it is the same shape of ask:
 		// a property of the finding that no severity threshold can express.
+		// D59. A duration, not a day count: CI cadences are not all daily,
+		// and Go's own parser already spells 36h and 7d-equivalent 168h
+		// without this inventing a unit.
+		case strings.HasPrefix(a, "--db-max-age="):
+			v := strings.TrimPrefix(a, "--db-max-age=")
+			d, perr := time.ParseDuration(v)
+			if perr != nil {
+				return "", scancmd.Options{}, fmt.Errorf(
+					"--db-max-age: %q is not a duration (try 24h, 168h): %w", v, perr)
+			}
+			// Zero disables the check, so accepting it from the command line
+			// would make --db-max-age=0 look like a strict setting and be the
+			// opposite. A negative one is nonsense the same way.
+			if d <= 0 {
+				return "", scancmd.Options{}, fmt.Errorf(
+					"--db-max-age: %q must be positive; omit the flag to scan without the check", v)
+			}
+			opts.DBMaxAge = d
+
+		case a == "--db-max-age":
+			return "", scancmd.Options{}, fmt.Errorf(
+				"--db-max-age needs a duration, e.g. --db-max-age=48h")
+
 		case a == "--fail-on-unfixable":
 			opts.FailOnUnfixable = true
 
