@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -115,12 +116,19 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		return store.Provenance{}, err
 	}
 
+	// Spooled to disk first, then decompressed from there. Streaming the
+	// archive while storing what it produced held one connection open for the
+	// whole build (D64) - the transfer takes two minutes and the store takes
+	// eight, and on 2026-08-13 the far end reset it in between, losing the day.
 	url := p.baseURL + "/" + name
-	body, err := p.get(ctx, url)
+	body, err := p.spool(ctx, url, name)
 	if err != nil {
 		return store.Provenance{}, err
 	}
-	defer body.Close()
+	defer func() {
+		body.Close()
+		os.Remove(body.Name())
+	}()
 
 	zr, err := zstd.NewReader(body)
 	if err != nil {
