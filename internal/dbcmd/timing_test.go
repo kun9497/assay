@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -260,5 +261,66 @@ func TestUpdate_ReportsTheStoreSplit(t *testing.T) {
 	if !strings.Contains(s, "store]") {
 		t.Errorf("the provider row carries no store split, so Update never "+
 			"measured one:"+ln+"%s", s)
+	}
+}
+
+// countingProvider emits n advisories and reports how many times the store was
+// asked to write, by counting the batches its emit callback triggered.
+type countingProvider struct {
+	name string
+	n    int
+}
+
+func (c countingProvider) Name() string { return c.name }
+
+func (c countingProvider) Fetch(_ context.Context, emit func(advisory.Advisory) error) (store.Provenance, error) {
+	for i := 0; i < c.n; i++ {
+		a := advisory.Advisory{
+			ID:       "GHSA-" + strconv.Itoa(i),
+			Affected: []advisory.Affected{{Ecosystem: "Go", Name: "example.com/x"}},
+		}
+		if err := emit(a); err != nil {
+			return store.Provenance{}, err
+		}
+	}
+	return store.Provenance{Ecosystems: []string{"Go"}, Records: c.n}, nil
+}
+
+// TestUpdate_FlushesMidFetchNotOnlyAtTheEnd. Correctness does not need this —
+// the tail flush alone stores every record — which is exactly why a mutation
+// removing the mid-fetch flush survived the rest of the suite.
+//
+// What it needs is the memory bound. putBatchSize exists because bolt holds a
+// transaction's dirty pages until commit AND because the caller's buffer grows
+// until it flushes; without a mid-fetch flush the buffer reaches the whole
+// corpus, about 150,000 advisories, and the bound is fiction.
+//
+// Asserted through the store split rather than by reaching into the buffer: a
+// run that flushed once would show one store interval, and the timing already
+// measures each one.
+func TestUpdate_FlushesMidFetchNotOnlyAtTheEnd(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	var out, errOut bytes.Buffer
+	// Two full batches and a partial one, so a single-flush implementation
+	// and a correct one differ in how many times the store is entered.
+	const n = putBatchSize*2 + 7
+	if code := Update(context.Background(), path, "", "",
+		[]provider.Provider{countingProvider{name: "counter", n: n}}, nil, nil,
+		&out, &errOut); code != 0 {
+		t.Fatalf("Update = %d (stderr: %s)", code, errOut.String())
+	}
+	// Every advisory landed, whichever way it was flushed.
+	db, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	got, err := db.Lookup("Go", "example.com/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != n {
+		t.Errorf("Lookup = %d advisories, want %d — records were lost between"+
+			" the batches", len(got), n)
 	}
 }
