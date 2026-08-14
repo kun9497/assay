@@ -2622,6 +2622,16 @@ would say the artifact covers nothing since April — false in the direction tha
 because tomorrow's nightly would look like it was widening coverage and the publish guard
 would wave a narrower artifact through.
 
+**The 120-day cap is on the window's width, not its start** — corrected after the first
+slice ran. The pre-D65 cap applied to `NVD_SINCE_DAYS` alone, which was the same thing while
+the end was always "now" and made every deeper slice unrepresentable afterwards: the first
+dispatch of `[240,120]` had SINCE capped to 120, which made UNTIL=120 read as inverted, and
+the two warnings composed into a `[120, now]` window nobody asked for. It happened to be the
+most useful window in the feed and recovered the ratings corpus in one 51-minute run — luck,
+not design, and the guards' own honesty (both warned, `db status` disclosed the real window)
+is what made the accident visible. A too-wide slice now clamps to 120 days above its own end
+and says so.
+
 **An end with no start is ignored.** `NVD_UNTIL_DAYS` without `NVD_SINCE_DAYS` is a window
 from 1999 to a date in the past — the seven-hour pass with extra steps, requested by someone
 reaching for a bounded slice. An inverted window (end at or before start) is refused with a

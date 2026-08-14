@@ -326,25 +326,78 @@ func nvdOptionsFromEnv(stderr io.Writer) nvd.Options {
 	// before this warned, which is the opposite of what someone setting a
 	// window wants and gives no clue why.
 	days, err := strconv.Atoi(raw)
-	switch {
-	case err != nil || days <= 0:
+	if err != nil || days <= 0 {
 		fmt.Fprintf(stderr, "warning: NVD_SINCE_DAYS=%q is not a positive number of days; syncing the whole feed\n", raw)
 		return opts
-	case days > 120:
-		fmt.Fprintf(stderr, "warning: NVD_SINCE_DAYS=%d exceeds the API's 120-day maximum window; using 120\n", days)
-		days = 120
 	}
-	// One clock reading for both ends of the window. Computed separately,
-	// NVD_SINCE_DAYS=30 with NVD_UNTIL_DAYS=30 produced an until a few
-	// MICROSECONDS after since -- so the inverted-window refusal below let it
-	// through on Linux and refused it on Windows, whose coarser clock returns
-	// the same reading for both calls. CI caught what the local run could
-	// not: the same sub-second-precision class as the push guard defect the
-	// day before, one layer down.
+
+	untilDays := nvdUntilDaysFromEnv(stderr)
+	// Inverted (or empty) windows are refused at DAY granularity, on the
+	// integers, before any clock is read. The first version compared two
+	// time.Time values and was wrong twice for it: once when the two ends
+	// came from separate clock readings (equal days inverted by microseconds,
+	// caught by CI on Linux only), and once when the pre-D65 SINCE cap ran
+	// first -- NVD_SINCE_DAYS=240 was capped to 120, which made
+	// NVD_UNTIL_DAYS=120 read as inverted, and the two warnings COMPOSED into
+	// a [120d, now] window nobody asked for. The 2026-08-14 backfill slice
+	// ran exactly that window. (It happened to be the most useful window in
+	// the feed and recovered the ratings anyway, which is luck, not design.)
+	if untilDays >= 0 && untilDays >= days {
+		fmt.Fprintf(stderr,
+			"warning: NVD_UNTIL_DAYS=%d is not after NVD_SINCE_DAYS; the window ends now\n", untilDays)
+		untilDays = -1
+	}
+
+	// The API's 120-day maximum is on the WIDTH of the window, not on how far
+	// back it starts -- lastModStartDate to lastModEndDate may span at most
+	// 120 days, wherever they sit. Capping SINCE alone predates D65, when the
+	// end was always "now" and the two were the same thing; kept as-is it
+	// made every slice deeper than 120 days unrepresentable, and the runbook
+	// [240,120] slice impossible.
+	floor := 0
+	if untilDays > 0 {
+		floor = untilDays
+	}
+	if days-floor > 120 {
+		if untilDays > 0 {
+			fmt.Fprintf(stderr,
+				"warning: NVD_SINCE_DAYS=%d with NVD_UNTIL_DAYS=%d spans more than the API's 120-day maximum window; using %d\n",
+				days, untilDays, floor+120)
+		} else {
+			fmt.Fprintf(stderr,
+				"warning: NVD_SINCE_DAYS=%d exceeds the API's 120-day maximum window; using 120\n", days)
+		}
+		days = floor + 120
+	}
+
+	// One clock reading for both ends -- see clockNow.
 	now := clockNow()
 	opts.Since = now.AddDate(0, 0, -days)
-	opts.Until = nvdUntilFromEnv(stderr, now, opts.Since)
+	if untilDays > 0 {
+		opts.Until = now.AddDate(0, 0, -untilDays)
+	}
 	return opts
+}
+
+// nvdUntilDaysFromEnv reads NVD_UNTIL_DAYS as a day count, -1 when unset or
+// unusable. The window arithmetic it feeds lives in nvdOptionsFromEnv above,
+// on integers -- this only answers "what number did the environment carry".
+//
+// A negative count is days in the FUTURE: AddDate flips its sign, the
+// inverted-window check passes (a future end IS after since), and CoversUntil
+// then records a date that has not happened -- coverage claimed for time that
+// does not exist yet. Refused at parse, like the SINCE side.
+func nvdUntilDaysFromEnv(stderr io.Writer) int {
+	raw := os.Getenv("NVD_UNTIL_DAYS")
+	if raw == "" {
+		return -1
+	}
+	days, err := strconv.Atoi(raw)
+	if err != nil || days < 0 {
+		fmt.Fprintf(stderr, "warning: NVD_UNTIL_DAYS=%q is not a number of days; the window ends now\n", raw)
+		return -1
+	}
+	return days
 }
 
 // clockNow is a seam so a test can inject a clock that ADVANCES between
