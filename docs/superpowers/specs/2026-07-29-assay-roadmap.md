@@ -110,7 +110,7 @@ mode anyway. trivy made the same call for the same access pattern.
 
 ### D5 — Schema version in the path
 
-`<cache>/assay/db/v8/vulnerability.db`. A schema change means rebuilding into a new
+`<cache>/assay/db/v9/vulnerability.db`. A schema change means rebuilding into a new
 directory rather than writing migration code. Migration code is a liability for a project
 with one user.
 
@@ -2674,6 +2674,30 @@ why the flag's own usage text says so rather than leaving it to this document.
 
 ---
 
+### D67 — One index key per (package, advisory)
+
+**Decision.** The `advisories` index maps `<eco> <name> <advisoryID>` to nothing,
+one key per pair, replacing per-package JSON arrays of IDs. Schema 8 → 9.
+
+**Why.** Measured three times: the OSV stage spends ~47–54 minutes storing against ~1.5
+fetching, after D57's batching. The cost was `appendID`'s read-modify-write — every insert
+re-read, unmarshalled, scanned and re-wrote its package's whole ID list, quadratic on hot
+packages. A composite key is one blind `Put`: no read, no marshal, dedup free because a
+re-Put lands on the same key.
+
+**Lookups walk a cursor from `Seek(prefix)`, and the prefix ENDS with the separator** —
+without it `openssl` prefix-matches `openssl-foo`, the substring-collision class CLAUDE.md
+documents, moved into the key space. The prefix is built in exactly one function shared by
+every writer and the scan, so they cannot disagree.
+
+**The bootstrap does not repeat the v8 incident.** `OpenSeedRatings` reads schema N−1 for
+the RATINGS bucket alone (its shape did not change); the ratings-only path refuses an old
+seed entirely, because it carries advisories verbatim and the advisories are what changed.
+D60's guard compares the first `:v9` push against `:v8`, so 357,678 ratings is the floor a
+bootstrap must carry.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes
@@ -2797,7 +2821,7 @@ type Finding struct {
 ### Storage layout
 
 ```
-<os.UserCacheDir()>/assay/db/v8/vulnerability.db      override: ASSAY_DB_DIR
+<os.UserCacheDir()>/assay/db/v9/vulnerability.db      override: ASSAY_DB_DIR
 
 buckets:
   advisories   "<ecosystem>\x00<name>"     → []AdvisoryID  primary lookup
@@ -2816,9 +2840,9 @@ which is microseconds.
 
 | OS | Path |
 |---|---|
-| Windows | `%LocalAppData%\assay\db\v8\` |
-| macOS | `~/Library/Caches/assay/db/v8/` |
-| Linux | `~/.cache/assay/db/v8/` (honours `XDG_CACHE_HOME`) |
+| Windows | `%LocalAppData%\assay\db\v9\` |
+| macOS | `~/Library/Caches/assay/db/v9/` |
+| Linux | `~/.cache/assay/db/v9/` (honours `XDG_CACHE_HOME`) |
 
 Values are JSON to start. At a few hundred lookups per scan, bbolt reads are microseconds
 and decoding dominates — still tens of milliseconds. Encoding is hidden behind `Store`

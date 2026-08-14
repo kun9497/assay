@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	bolt "go.etcd.io/bbolt"
 
 	"github.com/kun9497/assay/internal/advisory"
 )
@@ -236,6 +239,105 @@ func TestLookupFindsSourceKeyedAdvisories(t *testing.T) {
 	}
 }
 
+// TestLookup_PrefixEndsAtTheSeparator is D67's composite-key substring
+// hazard, written first because Lookup is the CALLER whose behaviour the
+// key format has to hold, not advisoryIndexPrefix in isolation: "openssl" is
+// a byte-prefix of "openssl-foo", so a Seek prefix built without the
+// trailing keySep would let a lookup for the shorter name also return the
+// longer name's advisories -- CLAUDE.md's substring-collision class, moved
+// into the index's key space (the plan's own words for it). bytes.HasPrefix
+// bounding the cursor walk is the other half: dropping it would continue
+// past this package's own keys into whatever sorts next in the bucket.
+func TestLookup_PrefixEndsAtTheSeparator(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Put(advisory.Advisory{
+		ID: "ALPINE-2025-0001", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Alpine:v3.19", Name: "openssl"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Put(advisory.Advisory{
+		ID: "ALPINE-2025-0002", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Alpine:v3.19", Name: "openssl-foo"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(Meta{BuiltAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	got, err := db.Lookup("Alpine:v3.19", "openssl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "ALPINE-2025-0001" {
+		t.Errorf("Lookup(openssl) = %+v, want exactly ALPINE-2025-0001 -- a Seek prefix "+
+			"missing its trailing separator would also return openssl-foo's advisory", got)
+	}
+
+	got, err = db.Lookup("Alpine:v3.19", "openssl-foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "ALPINE-2025-0002" {
+		t.Errorf("Lookup(openssl-foo) = %+v, want exactly ALPINE-2025-0002 -- its own "+
+			"advisory, not the shorter name's leaking the other way", got)
+	}
+}
+
+// TestPut_RepeatedPutDoesNotDuplicateIndexEntry is D67's dedup guarantee
+// exercised through Put directly rather than PutMany's batch (which
+// TestPutMany_MatchesPutExactly already covers with a duplicate-ID row): a
+// blind composite-key Put overwrites the same nil value on a repeat, so
+// re-Putting one advisory must not make Lookup return it twice.
+func TestPut_RepeatedPutDoesNotDuplicateIndexEntry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := sample("GHSA-repeat", "Go", "example.com/z")
+	if err := w.Put(a); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Put(a); err != nil { // the exact same advisory, re-Put
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(Meta{BuiltAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	got, err := db.Lookup("Go", "example.com/z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Errorf("Lookup after two Puts of the same advisory = %d entries, want 1 -- "+
+			"a re-Put must overwrite the same composite key, not add a second one", len(got))
+	}
+}
+
 func TestMeta(t *testing.T) {
 	db, err := Open(buildTestDB(t, sample("GHSA-aaa", "Go", "x")))
 	if err != nil {
@@ -324,6 +426,142 @@ func TestOpenSchemaMismatch(t *testing.T) {
 			}
 		})
 	}
+}
+
+// buildOldShapedFixture writes a bolt file directly through go.etcd.io/bbolt,
+// bypassing every method on Bolt, in the PRE-D67 shape: bucketAdvisories
+// keyed on "<eco>\x00<name>" with a JSON array of advisory IDs as its value
+// -- exactly what a real database built before this slice looks like on
+// disk. Nothing reachable through Create/Put can produce that shape any
+// more once D67 lands, which is the whole reason this test writes the file
+// by hand instead of building it through the store package's own API and
+// then only patching the schema number: a fixture built that way would have
+// the CURRENT (composite-key) index shape underneath an old schema label,
+// proving nothing about whether a caller opening a real old artifact is
+// safe.
+func buildOldShapedFixture(t *testing.T, path string, advs []advisory.Advisory, ratings []advisory.Rating, schema int) {
+	t.Helper()
+	db, err := bolt.Open(path, 0o600, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	err = db.Update(func(tx *bolt.Tx) error {
+		for _, name := range allBuckets {
+			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
+				return err
+			}
+		}
+		byID := tx.Bucket(bucketByID)
+		idx := tx.Bucket(bucketAdvisories)
+		oldIndex := map[string][]string{}
+		for _, a := range advs {
+			blob, err := json.Marshal(a)
+			if err != nil {
+				return err
+			}
+			if err := byID.Put([]byte(a.ID), blob); err != nil {
+				return err
+			}
+			for _, aff := range a.Affected {
+				key := aff.Ecosystem + keySep + aff.Name
+				oldIndex[key] = append(oldIndex[key], a.ID)
+			}
+		}
+		for key, ids := range oldIndex {
+			blob, err := json.Marshal(ids)
+			if err != nil {
+				return err
+			}
+			if err := idx.Put([]byte(key), blob); err != nil {
+				return err
+			}
+		}
+		ratingsBk := tx.Bucket(bucketRatings)
+		for _, r := range ratings {
+			blob, err := json.Marshal(r)
+			if err != nil {
+				return err
+			}
+			if err := ratingsBk.Put([]byte(r.CVE+keySep+r.Source), blob); err != nil {
+				return err
+			}
+		}
+		metaBlob, err := json.Marshal(Meta{Schema: schema, BuiltAt: time.Now()})
+		if err != nil {
+			return err
+		}
+		return tx.Bucket(bucketMeta).Put([]byte("meta"), metaBlob)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestOpenSeedRatings_AcceptsOneSchemaBehind is the D67 bootstrap hazard
+// (SchemaVersion's own doc comment, and dbcmd.Update's ratings-copy block):
+// a v(N-1) artifact's ratings bucket did not change shape in the bump to N,
+// so its ratings must still be readable even though its advisories index
+// -- old JSON-array shaped in this fixture, exactly as a real one would be
+// -- is not something this binary's Lookup could walk.
+func TestOpenSeedRatings_AcceptsOneSchemaBehind(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "n-minus-1-seed.db")
+	buildOldShapedFixture(t, path,
+		[]advisory.Advisory{sample("GHSA-old-shape", "Go", "old")},
+		[]advisory.Rating{{CVE: "CVE-2026-SEED", Source: "NVD"}},
+		SchemaVersion-1)
+
+	db, err := OpenSeedRatings(path)
+	if err != nil {
+		t.Fatalf("OpenSeedRatings(schema %d) = %v, want a database one schema "+
+			"behind this binary's to open for ratings", SchemaVersion-1, err)
+	}
+	defer db.Close()
+
+	got, err := db.RatingsFor("CVE-2026-SEED")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Errorf("RatingsFor(CVE-2026-SEED) = %+v, want the one seeded rating", got)
+	}
+
+	var n int
+	if err := db.EachRating(func(advisory.Rating) error { n++; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("EachRating visited %d ratings, want 1 -- this is what dbcmd.Update's "+
+			"ratings-copy block actually calls against a seed", n)
+	}
+}
+
+// TestOpenSeedRatings_RefusesTwoSchemasBehind: N-2 is refused exactly like
+// Open refuses it. See OpenSeedRatings' own doc comment for why nothing
+// widens the tolerance further just because N-1 turned out to be safe --
+// this pins that the boundary is exactly one schema, not "old enough that
+// nobody has one any more".
+func TestOpenSeedRatings_RefusesTwoSchemasBehind(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "n-minus-2-seed.db")
+	buildOldShapedFixture(t, path, nil,
+		[]advisory.Rating{{CVE: "CVE-2026-TOO-OLD", Source: "NVD"}},
+		SchemaVersion-2)
+
+	if _, err := OpenSeedRatings(path); !errors.Is(err, ErrSchemaMismatch) {
+		t.Errorf("OpenSeedRatings(schema %d) err = %v, want ErrSchemaMismatch", SchemaVersion-2, err)
+	}
+}
+
+// TestOpenSeedRatings_AcceptsCurrentSchema is the ordinary case outside a
+// bootstrap: a same-schema seed must not become collateral damage from
+// loosening the N-1 case above it.
+func TestOpenSeedRatings_AcceptsCurrentSchema(t *testing.T) {
+	path := buildTestDB(t, sample("GHSA-current", "Go", "x"))
+	db, err := OpenSeedRatings(path)
+	if err != nil {
+		t.Fatalf("OpenSeedRatings on a current-schema database = %v, want nil", err)
+	}
+	db.Close()
 }
 
 // D20: coverage is what the PROVIDERS reported, and specifically NOT every
@@ -717,11 +955,12 @@ func TestRatingsFor_DoesNotBleedAcrossCVEsSharingAPrefix(t *testing.T) {
 	}
 }
 
-// Schema 8. A v7 database must be refused rather than read as one where no
-// vendor happened to declare anything will-not-fix (D52).
-func TestSchemaVersionIs8(t *testing.T) {
-	if SchemaVersion != 8 {
-		t.Errorf("SchemaVersion = %d, want 8", SchemaVersion)
+// Schema 9. A v8 database must be refused by Open rather than read with a
+// cursor walk that silently finds nothing against its old JSON-array index
+// (D67).
+func TestSchemaVersionIs9(t *testing.T) {
+	if SchemaVersion != 9 {
+		t.Errorf("SchemaVersion = %d, want 9", SchemaVersion)
 	}
 }
 

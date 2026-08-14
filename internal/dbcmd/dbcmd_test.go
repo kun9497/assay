@@ -3,6 +3,7 @@ package dbcmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	bolt "go.etcd.io/bbolt"
 
 	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/provider"
@@ -838,6 +841,192 @@ func TestUpdate_SeedCarriesRatingsButNotAdvisories(t *testing.T) {
 		t.Fatal(err)
 	} else if len(got) != 0 {
 		t.Errorf("Lookup(Go, old) = %v, want none: a seeded advisory survived a rebuild, so an advisory upstream withdraws can now never be removed", got)
+	}
+}
+
+// dbcmdTestKeySep mirrors store's own keySep (internal/store/bolt.go),
+// unexported there and unreachable from this package. Defined once, here,
+// and referenced everywhere below that needs it, rather than retyped at
+// each call site -- the same "reference it, never retype it" discipline
+// store itself follows for the same byte, applied on this side of the
+// package boundary where the constant itself cannot be reached.
+const dbcmdTestKeySep = "\x00"
+
+// buildOldShapedSeed writes a bolt file directly through go.etcd.io/bbolt,
+// bypassing dbcmd and store entirely, in the shape a database built before
+// D67 has on disk: the "advisories" bucket keyed on "<eco>\x00<name>" with a
+// JSON array of advisory IDs as its value, rather than the composite keys
+// store.Put now writes. It exists to drive dbcmd.Update against a REAL
+// schema-(N-1) or schema-(N-2) artifact -- store.Create followed by
+// patching Meta.Schema would leave the CURRENT composite-key shape
+// underneath an old schema label and prove nothing about opening a real one.
+func buildOldShapedSeed(t *testing.T, path string, advs []advisory.Advisory, ratings []advisory.Rating, schema int) {
+	t.Helper()
+	db, err := bolt.Open(path, 0o600, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	err = db.Update(func(tx *bolt.Tx) error {
+		for _, name := range []string{"advisories", "by-id", "meta", "ratings", "enrichment"} {
+			if _, err := tx.CreateBucketIfNotExists([]byte(name)); err != nil {
+				return err
+			}
+		}
+		byID := tx.Bucket([]byte("by-id"))
+		idx := tx.Bucket([]byte("advisories"))
+		oldIndex := map[string][]string{}
+		for _, a := range advs {
+			blob, err := json.Marshal(a)
+			if err != nil {
+				return err
+			}
+			if err := byID.Put([]byte(a.ID), blob); err != nil {
+				return err
+			}
+			for _, aff := range a.Affected {
+				key := aff.Ecosystem + dbcmdTestKeySep + aff.Name
+				oldIndex[key] = append(oldIndex[key], a.ID)
+			}
+		}
+		for key, ids := range oldIndex {
+			blob, err := json.Marshal(ids)
+			if err != nil {
+				return err
+			}
+			if err := idx.Put([]byte(key), blob); err != nil {
+				return err
+			}
+		}
+		ratingsBk := tx.Bucket([]byte("ratings"))
+		for _, r := range ratings {
+			blob, err := json.Marshal(r)
+			if err != nil {
+				return err
+			}
+			if err := ratingsBk.Put([]byte(r.CVE+dbcmdTestKeySep+r.Source), blob); err != nil {
+				return err
+			}
+		}
+		metaBlob, err := json.Marshal(store.Meta{Schema: schema, BuiltAt: time.Now()})
+		if err != nil {
+			return err
+		}
+		return tx.Bucket([]byte("meta")).Put([]byte("meta"), metaBlob)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestUpdate_SeedsRatingsFromASchemaOneBehindArtifact is the D67 bootstrap
+// hazard's caller-first test: it drives Update itself, not
+// store.OpenSeedRatings directly, because the risk being guarded against is
+// Update's ratings-copy block silently continuing to call store.Open (which
+// refuses anything but an exact schema match) instead of the looser
+// function. If that swap were ever reverted, this is the test that goes red.
+func TestUpdate_SeedsRatingsFromASchemaOneBehindArtifact(t *testing.T) {
+	seed := filepath.Join(t.TempDir(), "seed.db")
+	buildOldShapedSeed(t, seed,
+		[]advisory.Advisory{{ID: "GHSA-old-shape", Database: "GHSA", Source: "osv",
+			Kind:     advisory.KindVulnerability,
+			Affected: []advisory.Affected{{Ecosystem: "Go", Name: "old"}}}},
+		[]advisory.Rating{{CVE: "CVE-2026-SEEDED-OLD-SCHEMA", Source: "NVD"}},
+		store.SchemaVersion-1)
+
+	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+		ID: "GHSA-new", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "new"}},
+	}}}
+
+	dst := filepath.Join(t.TempDir(), "vulnerability.db")
+	var out, errOut bytes.Buffer
+	code := Update(context.Background(), dst, seed, "", false,
+		[]provider.Provider{p}, nil, nil, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("Update with a schema-%d seed = %d, want 0 (stderr: %s)",
+			store.SchemaVersion-1, code, errOut.String())
+	}
+
+	db, err := store.Open(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// The seed's rating survived through OpenSeedRatings.
+	if rs, err := db.RatingsFor("CVE-2026-SEEDED-OLD-SCHEMA"); err != nil || len(rs) != 1 {
+		t.Errorf("RatingsFor(CVE-2026-SEEDED-OLD-SCHEMA) = %v, %v; the schema-%d seed's "+
+			"rating did not carry forward", rs, err, store.SchemaVersion-1)
+	}
+	// This run's advisory is there...
+	if got, err := db.Lookup("Go", "new"); err != nil || len(got) != 1 {
+		t.Errorf("Lookup(Go, new) = %v, %v; this run's advisory is missing", got, err)
+	}
+	// ...but the seed's OLD-SHAPED advisory must NOT have been carried
+	// forward: the ratings-copy block never reads a seed's advisories at
+	// all, regardless of the seed's schema, so this must read exactly as it
+	// would against a same-schema seed.
+	if got, err := db.Lookup("Go", "old"); err != nil {
+		t.Fatal(err)
+	} else if len(got) != 0 {
+		t.Errorf("Lookup(Go, old) = %v, want none: the old-schema seed's advisory "+
+			"survived a rebuild", got)
+	}
+}
+
+// TestUpdate_RatingsOnlyRefusesASeedOneSchemaBehind is hazard 3's other
+// half: readSeedMeta (the ratings-only path, D66) must keep using
+// store.Open's EXACT match rather than the loosened OpenSeedRatings, because
+// a ratings-only build carries the seed's advisories forward as a
+// byte-for-byte file copy -- so a schema-(N-1) seed's still
+// JSON-array-shaped index would land, unconverted, inside a database this
+// binary then labels schema N, and every Lookup against it would silently
+// find nothing. Refusing here is what stops that from ever being possible.
+func TestUpdate_RatingsOnlyRefusesASeedOneSchemaBehind(t *testing.T) {
+	seed := filepath.Join(t.TempDir(), "seed.db")
+	buildOldShapedSeed(t, seed,
+		[]advisory.Advisory{{ID: "GHSA-old-shape", Database: "GHSA", Source: "osv",
+			Kind:     advisory.KindVulnerability,
+			Affected: []advisory.Affected{{Ecosystem: "Go", Name: "old"}}}},
+		[]advisory.Rating{{CVE: "CVE-2026-SEEDED-OLD-SCHEMA", Source: "NVD"}},
+		store.SchemaVersion-1)
+
+	a := fakeAnnotator{name: "NVD", ratings: []advisory.Rating{{CVE: "CVE-2026-NEW", Source: "NVD"}}}
+
+	dst := filepath.Join(t.TempDir(), "vulnerability.db")
+	var out, errOut bytes.Buffer
+	code := Update(context.Background(), dst, seed, "", true, nil, []provider.Annotator{a}, nil, &out, &errOut)
+	if code != 2 {
+		t.Errorf("Update --ratings-only with a schema-%d seed = %d, want 2 (stderr: %s)",
+			store.SchemaVersion-1, code, errOut.String())
+	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Error("a refused ratings-only build left a database behind; the next push would publish it")
+	}
+}
+
+// TestUpdate_RefusesASeedTwoSchemasBehind proves OpenSeedRatings' N-2
+// refusal through the real caller (Update's ratings-copy path), not only
+// through the store package's own unit test of the function -- this is what
+// stops the boundary silently drifting (e.g. a future "just accept anything
+// older" edit) without a test in the package that actually calls it going
+// red.
+func TestUpdate_RefusesASeedTwoSchemasBehind(t *testing.T) {
+	seed := filepath.Join(t.TempDir(), "seed.db")
+	buildOldShapedSeed(t, seed, nil,
+		[]advisory.Rating{{CVE: "CVE-2026-TOO-OLD", Source: "NVD"}},
+		store.SchemaVersion-2)
+
+	dst := filepath.Join(t.TempDir(), "vulnerability.db")
+	var out, errOut bytes.Buffer
+	code := Update(context.Background(), dst, seed, "", false, nil, nil, nil, &out, &errOut)
+	if code != 2 {
+		t.Errorf("Update with a schema-%d seed = %d, want 2 (stderr: %s)",
+			store.SchemaVersion-2, code, errOut.String())
+	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Error("a refused seeded build left a database behind; the next push would publish it")
 	}
 }
 
