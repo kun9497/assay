@@ -378,13 +378,17 @@ run seeding from the published artifact and publishing in turn — the artifact 
 checkpoint, and a failed slice costs one slice instead of the whole pass:
 
 ```bash
-# each slice: [now-SINCE, now-UNTIL], walked backwards 120 days at a time
-NVD_ENABLE=1 NVD_SINCE_DAYS=240 NVD_UNTIL_DAYS=120 assay db build --seed ghcr.io/kun9497/assay-db:v8
+# each slice: [now-SINCE, now-UNTIL], walked backwards 120 days at a time.
+# --ratings-only (D66) carries the seed's advisories verbatim and re-runs just
+# the NVD window, so a slice costs its own NVD time and not a full rebuild.
+NVD_ENABLE=1 NVD_SINCE_DAYS=240 NVD_UNTIL_DAYS=120 assay db build --seed ghcr.io/kun9497/assay-db:v8 --ratings-only
 assay db push ghcr.io/kun9497/assay-db:v8
-NVD_ENABLE=1 NVD_SINCE_DAYS=360 NVD_UNTIL_DAYS=240 assay db build --seed ghcr.io/kun9497/assay-db:v8
+NVD_ENABLE=1 NVD_SINCE_DAYS=360 NVD_UNTIL_DAYS=240 assay db build --seed ghcr.io/kun9497/assay-db:v8 --ratings-only
 assay db push ghcr.io/kun9497/assay-db:v8
 # ...until db status shows the COVERED range reaching the feed's start
 ```
+
+In CI, `gh workflow run db-backfill.yml -f since_days=240 -f until_days=120` runs one slice.
 
 Run the slices in order. Coverage only extends backwards when a slice *touches* the range
 already covered — out of order, the ratings still land but the claimed coverage stays put,

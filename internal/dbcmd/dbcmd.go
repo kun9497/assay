@@ -67,7 +67,50 @@ import (
 // the build; see the loop itself for why that asymmetry is deliberate. What
 // they write never leaves this machine — `db push` strips the enrichment
 // bucket from the copy it publishes (D29).
-func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []provider.Provider, annotators []provider.Annotator, enrichers []provider.Enricher, stdout, stderr io.Writer) int {
+//
+// ratingsOnly (D66) skips the provider loop entirely and carries the seed's
+// advisories forward as a FILE COPY rather than a record-by-record one: the
+// seed's own file becomes this build's tmp file directly, and only the
+// annotators below still run against it. It exists to make a D65 backfill
+// slice affordable — every other build rebuilds OSV (~54 minutes) and Red
+// Hat (~21 minutes) regardless of what changed, and a slice's whole point is
+// the NVD window alone. It requires seedPath (there is nothing to carry
+// forward without one) and at least one configured annotator (otherwise the
+// build changes nothing) — both refused at the very top of the function,
+// before anything touches disk, same D60 class as the empty-artifact
+// bootstrap incident this project has already paid for once.
+//
+// The carried advisories' provenance is the seed's, not this run's: unlike
+// the ratings-only-copy path a few paragraphs up (which rebuilds advisories
+// from providers every time and so reports THIS run's fetch), a
+// ratings-only build never fetched an advisory at all, so `db status` must
+// report the freshness the seed actually had.
+func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly bool, providers []provider.Provider, annotators []provider.Annotator, enrichers []provider.Enricher, stdout, stderr io.Writer) int {
+	// Both refusals are the D60 class: an empty-advisory database published
+	// over a real one, or a build that changes nothing arriving as success.
+	// Checked first, before MkdirAll or anything else touches disk — a
+	// ratings-only invocation that cannot proceed must fail exactly as fast
+	// as a normal one that never got as far as a network call.
+	if ratingsOnly {
+		if seedPath == "" {
+			fmt.Fprintln(stderr, "error: --ratings-only requires --seed <ref>: without a seed "+
+				"there are no advisories at all, and an empty-advisory database published over "+
+				"a real one is exactly the D60 bootstrap incident again")
+			return 2
+		}
+		// No separate "did this build produce any advisories" guard exists in
+		// Update today for the non-ratings-only path to worry about
+		// misfiring here — the only place that matters is the final "database
+		// updated: N advisories" line, and that total already sums
+		// meta.Providers, which a ratings-only build populates from the
+		// seed's own Provenance (see below) rather than from an emit count.
+		if len(annotators) == 0 {
+			fmt.Fprintln(stderr, "error: --ratings-only with no rating annotator configured "+
+				"would change nothing from the seed — enable one (e.g. NVD_ENABLE=1) or drop the flag")
+			return 2
+		}
+	}
+
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		fmt.Fprintf(stderr, "error: create database directory: %v\n", err)
 		return 2
@@ -75,6 +118,42 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []p
 	tmp := dbPath + ".tmp"
 	_ = os.Remove(tmp)
 
+	// What every message about the seed calls it, ratings-only or not — see
+	// seedRef's own doc comment above for why (a throwaway scratch path is
+	// meaningless in an archived CI log).
+	label := seedPath
+	if seedRef != "" {
+		label = seedRef
+	}
+
+	var seedMeta store.Meta
+	if ratingsOnly {
+		// Read BEFORE the copy below and before the annotators run: this is
+		// what supplies meta.Providers verbatim and meta.Ratings' starting
+		// point a few lines down.
+		sm, err := readSeedMeta(seedPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: read seed %s: %v\n", label, err)
+			return 2
+		}
+		seedMeta = sm
+		fmt.Fprintf(stderr, "advisories carried from seed %s: this build re-rates, it does not re-fetch\n", label)
+		// D66: a file copy, not a record copy. The seed's advisories are
+		// wanted verbatim — buckets, index and all — so there is nothing to
+		// decide record by record the way the ratings-copy block below does
+		// for a normal seeded build.
+		if err := copyFile(seedPath, tmp); err != nil {
+			os.Remove(tmp)
+			fmt.Fprintf(stderr, "error: copy seed %s: %v\n", label, err)
+			return 2
+		}
+	}
+
+	// store.Create on a path that already holds a complete database (the
+	// copy just made, for a ratings-only build) opens it read-write and only
+	// ensures its buckets exist — it does not wipe (internal/store/bolt.go,
+	// Create's own doc comment). On every other build tmp does not exist
+	// yet, and this is the ordinary from-empty path it always was.
 	w, err := store.Create(tmp)
 	if err != nil {
 		// bolt.Open can create the file before a later step fails, so clean up
@@ -90,6 +169,18 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []p
 		Ratings:    map[string]store.Provenance{},
 		Enrichment: map[string]store.Provenance{},
 	}
+	if ratingsOnly {
+		// The advisories ARE the seed's, so their provenance must be too
+		// (D66) — SetMeta derives Ecosystems from this map (D20), and a scan
+		// must see the same coverage `db status` showed against the seed,
+		// not an empty one because no provider ran this time.
+		maps.Copy(meta.Providers, seedMeta.Providers)
+		// The starting point mergeRatingCoverage builds on in the annotator
+		// loop below, exactly like the existing ratings-copy block: an
+		// annotator that does not run this time keeps the seed's window, one
+		// that does run merges with it instead of replacing it.
+		maps.Copy(meta.Ratings, seedMeta.Ratings)
+	}
 
 	// D56. Which stage a build spends its time in is not guessable from the
 	// outside, and it stopped being an idle question when the publish job
@@ -101,75 +192,80 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []p
 	// only on success would always be missing.
 	buildStarted := time.Now()
 	var timings []stageTiming
-	for _, p := range providers {
-		fmt.Fprintf(stderr, "fetching %s…\n", p.Name())
-		started := time.Now()
-		// D56. The store write is timed SEPARATELY from the fetch, because a
-		// provider's total says nothing about which half to fix and the two
-		// answers point in opposite directions.
-		//
-		// The emit callback runs inside Fetch, so every Put is already counted
-		// in the provider's elapsed time. Measured 2026-08-13: OSV alone was
-		// 48m16s of a 50m51s build, and nothing in that number said whether it
-		// was the 601 MB download or the one bolt transaction Put opens per
-		// advisory, 149,495 of them. Concurrency fixes the first and would
-		// make the second worse — bolt allows one write transaction at a time,
-		// so parallel fetches queue at exactly this callback.
-		var stored time.Duration
-		// D57. Buffered and written in batches rather than one transaction per
-		// advisory. The buffer lives here rather than in the store so that
-		// nothing holds a bolt write transaction across calls — SetMeta,
-		// PutRating and PutEnrichment all open their own, and a long-lived one
-		// would deadlock against them.
-		//
-		// The error a caller sees may belong to an earlier advisory in the
-		// batch, which is the cost of the trade and is why PutMany is all or
-		// nothing: a partially written batch would leave a database that looks
-		// complete and holds less.
-		batch := make([]advisory.Advisory, 0, putBatchSize)
-		flush := func() error {
-			if len(batch) == 0 {
-				return nil
+	// D66: providers do not run at all in a ratings-only build — the seed's
+	// advisories, already sitting in tmp from the file copy above, are what
+	// this build carries forward.
+	if !ratingsOnly {
+		for _, p := range providers {
+			fmt.Fprintf(stderr, "fetching %s…\n", p.Name())
+			started := time.Now()
+			// D56. The store write is timed SEPARATELY from the fetch, because a
+			// provider's total says nothing about which half to fix and the two
+			// answers point in opposite directions.
+			//
+			// The emit callback runs inside Fetch, so every Put is already counted
+			// in the provider's elapsed time. Measured 2026-08-13: OSV alone was
+			// 48m16s of a 50m51s build, and nothing in that number said whether it
+			// was the 601 MB download or the one bolt transaction Put opens per
+			// advisory, 149,495 of them. Concurrency fixes the first and would
+			// make the second worse — bolt allows one write transaction at a time,
+			// so parallel fetches queue at exactly this callback.
+			var stored time.Duration
+			// D57. Buffered and written in batches rather than one transaction per
+			// advisory. The buffer lives here rather than in the store so that
+			// nothing holds a bolt write transaction across calls — SetMeta,
+			// PutRating and PutEnrichment all open their own, and a long-lived one
+			// would deadlock against them.
+			//
+			// The error a caller sees may belong to an earlier advisory in the
+			// batch, which is the cost of the trade and is why PutMany is all or
+			// nothing: a partially written batch would leave a database that looks
+			// complete and holds less.
+			batch := make([]advisory.Advisory, 0, putBatchSize)
+			flush := func() error {
+				if len(batch) == 0 {
+					return nil
+				}
+				t0 := time.Now()
+				err := w.PutMany(batch)
+				stored += time.Since(t0)
+				batch = batch[:0]
+				return err
 			}
-			t0 := time.Now()
-			err := w.PutMany(batch)
-			stored += time.Since(t0)
-			batch = batch[:0]
-			return err
-		}
-		prov, err := p.Fetch(ctx, func(a advisory.Advisory) error {
-			batch = append(batch, a)
-			// A mutation of this flush SURVIVES the suite, and that is a true
-			// equivalent rather than a gap: the tail flush below stores every
-			// record either way, so nothing observable changes. What it protects
-			// is the memory bound — without it the buffer grows to the whole
-			// corpus, roughly 150,000 advisories, and putBatchSize means nothing.
-			// Stated here so it reads as a decision rather than as an untested
-			// branch.
-			if len(batch) < putBatchSize {
-				return nil
+			prov, err := p.Fetch(ctx, func(a advisory.Advisory) error {
+				batch = append(batch, a)
+				// A mutation of this flush SURVIVES the suite, and that is a true
+				// equivalent rather than a gap: the tail flush below stores every
+				// record either way, so nothing observable changes. What it protects
+				// is the memory bound — without it the buffer grows to the whole
+				// corpus, roughly 150,000 advisories, and putBatchSize means nothing.
+				// Stated here so it reads as a decision rather than as an untested
+				// branch.
+				if len(batch) < putBatchSize {
+					return nil
+				}
+				return flush()
+			})
+			// The tail, and it must run even when Fetch failed: a provider that
+			// died mid-archive still emitted everything before the failure, and
+			// dropping that silently would make a partial fetch look like a smaller
+			// upstream. The build fails either way — what matters is that the
+			// count in the timing table is the count that was actually written.
+			if ferr := flush(); ferr != nil && err == nil {
+				err = ferr
 			}
-			return flush()
-		})
-		// The tail, and it must run even when Fetch failed: a provider that
-		// died mid-archive still emitted everything before the failure, and
-		// dropping that silently would make a partial fetch look like a smaller
-		// upstream. The build fails either way — what matters is that the
-		// count in the timing table is the count that was actually written.
-		if ferr := flush(); ferr != nil && err == nil {
-			err = ferr
+			timings = append(timings, stageTiming{
+				Kind: "provider", Name: p.Name(), Elapsed: time.Since(started),
+				Records: prov.Records, Stored: stored, Failed: err != nil})
+			if err != nil {
+				w.Close()
+				os.Remove(tmp)
+				fmt.Fprintf(stderr, "error: provider %s: %v\n", p.Name(), err)
+				reportTimings(stderr, timings, buildStarted)
+				return 2
+			}
+			meta.Providers[p.Name()] = prov
 		}
-		timings = append(timings, stageTiming{
-			Kind: "provider", Name: p.Name(), Elapsed: time.Since(started),
-			Records: prov.Records, Stored: stored, Failed: err != nil})
-		if err != nil {
-			w.Close()
-			os.Remove(tmp)
-			fmt.Fprintf(stderr, "error: provider %s: %v\n", p.Name(), err)
-			reportTimings(stderr, timings, buildStarted)
-			return 2
-		}
-		meta.Providers[p.Name()] = prov
 	}
 
 	// Seeding, if requested: ratings only, copied BEFORE the annotators run
@@ -178,15 +274,16 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []p
 	// excluded). w is still the empty-then-provider-filled temp store here —
 	// nothing about the advisory build above changes for a seeded run, which
 	// is what keeps a withdrawn advisory absent rather than reintroduced.
-	if seedPath != "" {
-		// What every message below calls the seed. See seedRef's own doc
-		// comment on Update: the CLI passes the original --seed reference
-		// here, since seedPath by itself is a throwaway scratch file no
-		// human or CI log would recognize.
-		label := seedPath
-		if seedRef != "" {
-			label = seedRef
-		}
+	//
+	// Skipped for a ratings-only build: that seed was already copied whole,
+	// advisories and ratings both, before store.Create ran above, so this
+	// record-by-record ratings copy would be redundant at best and would
+	// overwrite meta.Ratings (already primed from seedMeta) with a second
+	// read of the same seed at worst.
+	if seedPath != "" && !ratingsOnly {
+		// label (computed above, once for every path) is what all messages
+		// call the seed — the original --seed reference, never the throwaway
+		// scratch path.
 		src, err := store.Open(seedPath)
 		if err != nil {
 			w.Close()
@@ -356,6 +453,44 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, providers []p
 	// (see Meta.Ratings' own doc comment) — `assay db status` is where the
 	// derived, accurate count belongs, and it already shows it.
 	return 0
+}
+
+// readSeedMeta opens seedPath just long enough to read its Meta record, for
+// a ratings-only build (D66): this has to happen BEFORE copyFile below
+// duplicates the file and BEFORE store.Create reopens the copy read-write,
+// so a read-only handle on the original never overlaps with a write handle
+// on the target.
+func readSeedMeta(seedPath string) (store.Meta, error) {
+	db, err := store.Open(seedPath)
+	if err != nil {
+		return store.Meta{}, err
+	}
+	defer db.Close()
+	return db.Meta()
+}
+
+// copyFile duplicates the seed database wholesale for a ratings-only build
+// (D66): its advisories are wanted verbatim, so the seed's own file —
+// buckets, index and all — becomes this build's starting point rather than
+// an empty store.Create followed by a record-by-record copy. Measured at
+// ~64 MB for a full artifact today, small enough that io.Copy rather than
+// anything more careful is the whole implementation: there is nothing to
+// diff, every byte of the seed is wanted.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // oneLine flattens a message so it cannot break the table it is rendered

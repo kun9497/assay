@@ -1,0 +1,64 @@
+# One backfill slice of NVD ratings (D65, D66).
+#
+# Dispatched by hand, once per slice, walking backwards:
+#
+#   gh workflow run db-backfill.yml -f since_days=240 -f until_days=120
+#   gh workflow run db-backfill.yml -f since_days=360 -f until_days=240
+#   ...
+#
+# Run the slices IN ORDER. Coverage only extends backwards when a slice
+# touches the range already covered (D65's touch rule) — out of order, the
+# ratings land but the claimed coverage stays put, and `db status` will show
+# it not advancing.
+#
+# Each slice seeds from the published artifact and publishes in turn, so the
+# artifact is the checkpoint: a failed slice costs one slice, and re-running
+# the same slice is safe. --ratings-only (D66) carries the seed's advisories
+# verbatim and re-runs only the NVD annotator, which is what fits a slice
+# inside the job cap — a full rebuild per slice would add ~75 minutes each.
+name: backfill ratings
+
+on:
+  workflow_dispatch:
+    inputs:
+      since_days:
+        description: "window start, days before now (max 120 days wide)"
+        required: true
+      until_days:
+        description: "window end, days before now (0 = now)"
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - run: make build
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Resolve the artifact reference
+        id: ref
+        run: echo "ref=$(./bin/assay db ref)" >> "$GITHUB_OUTPUT"
+      - name: Build the slice
+        env:
+          NVD_ENABLE: "1"
+          NVD_SINCE_DAYS: ${{ inputs.since_days }}
+          NVD_UNTIL_DAYS: ${{ inputs.until_days }}
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+          # Advisories are carried from the seed by --ratings-only, so the
+          # advisory providers' switches are irrelevant here; KISA stays off
+          # for the same reason as the nightly job — push strips it anyway.
+          KISA_ENABLE: "0"
+        run: ./bin/assay db build --seed ${{ steps.ref.outputs.ref }} --ratings-only
+      - name: What the slice covered
+        run: ./bin/assay db status
+      - name: Publish
+        run: ./bin/assay db push ${{ steps.ref.outputs.ref }}
