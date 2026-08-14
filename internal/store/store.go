@@ -274,6 +274,17 @@ type Provenance struct {
 	// exists to avoid. A database built before this field simply has false
 	// here, which is the truthful answer for it.
 	CoversSinceKnown bool `json:"covers_since_known,omitempty"`
+	// CoversUntil is the other end of the window, and it exists because a
+	// backfill asks for an OLDER range than the one already covered (D65).
+	// The two ends together are what decide whether a slice EXTENDS the
+	// covered range or leaves a hole in it, and a hole is the difference
+	// between a database that covers a span and one that merely holds
+	// ratings from both sides of it. Zero means "up to when the run
+	// happened".
+	CoversUntil time.Time `json:"covers_until,omitempty"`
+	// CoversUntilKnown separates "ran up to now" from "not recorded", the
+	// same distinction CoversSinceKnown draws at the other end.
+	CoversUntilKnown bool `json:"covers_until_known,omitempty"`
 	// Error is why this source's last run did not finish, empty when it did.
 	//
 	// Below CoversSince/CoversSinceKnown rather than between them: those two

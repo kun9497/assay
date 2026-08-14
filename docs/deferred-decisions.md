@@ -40,10 +40,12 @@ now passes it, and the report is honest the whole time: it says the finding is u
 is true. Nothing anywhere says it used to be rated critical. This is the silent-miss direction
 the whole project is built to avoid, arriving through the database rather than the matcher.
 
-**The remedy.** One unbounded NVD sync, walking 120-day windows back through the corpus.
-Hours, not minutes — which is why it wants a deliberate run rather than being folded into a
-nightly job that already takes 85 minutes. Then republish and confirm the ratings count
-against `:v7`'s 355,030.
+**The remedy.** ~~One unbounded NVD sync~~ — measured, and rejected the way the README's
+bootstrap section already had: seven hours, no resume point, four failed attempts on record.
+D65 replaces it with bounded slices walked backwards (`NVD_UNTIL_DAYS` closes the window's
+late end; the published artifact is the checkpoint between slices; coverage only extends when
+a slice touches the range already covered). The README's "Backfilling older ratings" section
+is the runbook. Then confirm the ratings count against `:v7`'s 355,030.
 
 **It blocks the entry below.** *Does an unrated source count as disagreeing?* asks for a
 measurement against a full NVD-enabled database. Today's run — ubi9, 9 of 783 findings marked,

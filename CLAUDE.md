@@ -28,17 +28,20 @@ mainline tuple has one, and `--fail-on-unfixable=wont-fix` gates on the first al
 Fedora and Amazon Linux are catalogued and reported as not evaluated. Both rpmdb backends are read — SQLite for RHEL 9+ and BerkeleyDB for RHEL 8 and older
 (D44). Ubuntu scans since D53, keyed on the mainline release; its Pro/FIPS/Realtime
 lineages are dropped at ingestion and a package whose version carries `+esmN` or `+FipsN`
-is reported as not evaluated rather than judged against mainline data. Not built: the ndb
-rpmdb backend, distroless `status.d`, SARIF, and pep440
-leniency (see `README.md`).
+is reported as not evaluated rather than judged against mainline data. Distroless images are
+read via `status.d` (D54) and SARIF is an output format (D55). A directory scan reads eight
+lockfile formats and refuses two by name (D61–D63). The NVD window has both ends
+(`NVD_SINCE_DAYS` / `NVD_UNTIL_DAYS`, D65) so lost ratings can be backfilled in slices. Not
+built: the ndb rpmdb backend and pep440 leniency (see `README.md`).
 
-**Check what exists before assuming — this paragraph has been wrong four times.** It claimed
+**Check what exists before assuming — this paragraph has been wrong five times.** It claimed
 `scan` was unimplemented after slice 1 shipped it, claimed binaries and directories were
 unread after slice 3 shipped both, claimed the KISA provider was on hold and NVD uningested
 for a day after both merged, and claimed non-Alpine distros, `requirements.txt` and
-npm/PyPI directory scanning were unbuilt after all three shipped. `README.md`'s roadmap
-checkboxes are the more reliable record because they are edited task by task; this paragraph
-is edited from memory.
+npm/PyPI directory scanning were unbuilt after all three shipped, and claimed distroless
+`status.d` and SARIF were not built for nine days after D54 and D55 shipped both — found by
+a documentation sweep, not by a reader. `README.md`'s roadmap checkboxes are the more
+reliable record because they are edited task by task; this paragraph is edited from memory.
 
 **Read these before proposing anything structural:**
 
@@ -402,10 +405,13 @@ true, all of which happened while building D27:
 
 ## Conventions
 
-- **Two direct dependencies, deliberately**: `go.etcd.io/bbolt` (the store, D4) and
-  `github.com/google/go-containerregistry` (registry, tarball and OCI-layout image reading).
-  Everything else in `go.mod` is indirect. Adding a third is a real decision — prefer the
-  stdlib, and check the cgo constraint above.
+- **Three direct dependencies, deliberately**: `go.etcd.io/bbolt` (the store, D4),
+  `github.com/google/go-containerregistry` (registry, tarball and OCI-layout image reading),
+  and `github.com/klauspost/compress` (zstd, for Red Hat's archive — it was already linked
+  transitively through go-containerregistry, so promoting it moved one line in `go.mod` and
+  added no code). Everything else in `go.mod` is indirect. Adding a fourth is a real
+  decision — prefer the stdlib, and check the cgo constraint above. The pnpm/yarn-berry
+  YAML question in `docs/deferred-decisions.md` is exactly such a decision, still open.
 
   This line said "no third-party dependencies, `go.mod` has no `require` block" until
   2026-08-04, long after both landed. It is worth knowing what is already there before

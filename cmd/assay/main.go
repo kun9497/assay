@@ -112,6 +112,10 @@ Environment (db build only — a scan reads no environment and no network):
   NVD_SINCE_DAYS=<n>    Bound that fetch to CVEs modified in the last n days
                         (max 120). Bounds ONE BUILD, not a delta on the last
                         one — db status prints the window it covered.
+  NVD_UNTIL_DAYS=<n>    Close that window n days ago, so a backfill can walk
+                        the feed in slices (D65). Needs NVD_SINCE_DAYS, and
+                        the slices only extend claimed coverage in order —
+                        see the README's "Backfilling older ratings".
   NVD_API_KEY=<key>     Raise NVD's rate limit tenfold. Optional, and it does
                         not shorten the seven hours; NVD's own response
                         generation is the bottleneck, not the pacing.
@@ -313,8 +317,61 @@ func nvdOptionsFromEnv(stderr io.Writer) nvd.Options {
 		fmt.Fprintf(stderr, "warning: NVD_SINCE_DAYS=%d exceeds the API's 120-day maximum window; using 120\n", days)
 		days = 120
 	}
-	opts.Since = time.Now().UTC().AddDate(0, 0, -days)
+	// One clock reading for both ends of the window. Computed separately,
+	// NVD_SINCE_DAYS=30 with NVD_UNTIL_DAYS=30 produced an until a few
+	// MICROSECONDS after since -- so the inverted-window refusal below let it
+	// through on Linux and refused it on Windows, whose coarser clock returns
+	// the same reading for both calls. CI caught what the local run could
+	// not: the same sub-second-precision class as the push guard defect the
+	// day before, one layer down.
+	now := clockNow()
+	opts.Since = now.AddDate(0, 0, -days)
+	opts.Until = nvdUntilFromEnv(stderr, now, opts.Since)
 	return opts
+}
+
+// clockNow is a seam so a test can inject a clock that ADVANCES between
+// calls. That is not a convenience: the defect it guards against is two ends
+// of one window read from two clock calls, which Windows' coarse clock hides
+// (both calls return the same reading) and Linux's nanosecond one exposes --
+// the shape CI caught on 2026-08-14 after the local suite passed. A test
+// using the real clock inherits whichever platform it runs on; one injecting
+// an advancing clock fails on the defect everywhere.
+var clockNow = func() time.Time { return time.Now().UTC() }
+
+// nvdUntilFromEnv reads NVD_UNTIL_DAYS, the LATE end of the window, in days
+// before now (D65).
+//
+// It exists for one operation: restoring ratings for records nobody has
+// modified recently. Every window before this ran to the present, so
+// re-running could never reach them however far back Since was set --
+// NVD_SINCE_DAYS=120 and NVD_SINCE_DAYS=365 both end today and both cost a
+// full pass. A backfill instead walks CLOSED ranges backwards, one per run,
+// and each run publishes, so the artifact is the checkpoint.
+//
+// Ignored when no Since was given: an end with no start is a window running
+// from 1999 to a date in the past, which is the seven-hour pass with extra
+// steps rather than the bounded slice the caller was reaching for.
+func nvdUntilFromEnv(stderr io.Writer, now time.Time, since time.Time) time.Time {
+	raw := os.Getenv("NVD_UNTIL_DAYS")
+	if raw == "" {
+		return time.Time{}
+	}
+	days, err := strconv.Atoi(raw)
+	if err != nil || days < 0 {
+		fmt.Fprintf(stderr, "warning: NVD_UNTIL_DAYS=%q is not a number of days; the window ends now\n", raw)
+		return time.Time{}
+	}
+	until := now.AddDate(0, 0, -days)
+	// A window that ends before it starts asks for nothing, and NVD answers
+	// an inverted range with a 404 rather than an empty page -- an hour into
+	// a build, having said nothing about why.
+	if !until.After(since) {
+		fmt.Fprintf(stderr,
+			"warning: NVD_UNTIL_DAYS=%d is not after NVD_SINCE_DAYS; the window ends now\n", days)
+		return time.Time{}
+	}
+	return until
 }
 
 // newNVDAnnotator constructs the NVD annotator. A package variable, not a

@@ -969,6 +969,123 @@ func TestNVDOptionsFromEnv_SaysWhyItIgnoredOrCappedTheWindow(t *testing.T) {
 	})
 }
 
+// NVD_UNTIL_DAYS (D65) sets the LATE end of a backfill window. Driven through
+// nvdOptionsFromEnv, the caller, rather than nvdUntilFromEnv directly: the
+// project rule is that a helper's own test proves nothing about whether
+// anything calls it, and nvdOptionsFromEnv is the only thing that does
+// (CLAUDE.md, "the helper is covered; nothing calls it").
+//
+// The "equal to since" case is the one that matters. nvdUntilFromEnv refuses
+// an until that is not strictly after since with `if !until.After(since)`.
+// Flip that guard to `if false && ...` and every other case here still
+// passes -- unequal windows never exercise the boundary -- so it is the one
+// case that must set since==until exactly and demand the refusal fires.
+func TestNvdOptionsFromEnv_UntilDays(t *testing.T) {
+	cases := []struct {
+		name string
+		// "" means the variable is left unset.
+		since, until string
+		wantZero     bool // opts.Until must be the zero time.Time
+		wantAgoDays  int  // when !wantZero, opts.Until must land here, within a minute
+		wantWarn     []string
+		wantNoWarn   bool // stderr must be empty
+	}{
+		{
+			name:        "until inside the window is accepted",
+			since:       "30",
+			until:       "7",
+			wantZero:    false,
+			wantAgoDays: 7,
+			wantNoWarn:  true,
+		},
+		{
+			// THE KEY CASE: since==until is not After, so this must be
+			// refused. This is what catches `if !until.After(since)` being
+			// mutated to `if false && ...`.
+			name:     "until equal to since is refused",
+			since:    "30",
+			until:    "30",
+			wantZero: true,
+			wantWarn: []string{"NVD_UNTIL_DAYS", "not after NVD_SINCE_DAYS"},
+		},
+		{
+			name:     "until before since is refused",
+			since:    "30",
+			until:    "60",
+			wantZero: true,
+			wantWarn: []string{"NVD_UNTIL_DAYS", "not after NVD_SINCE_DAYS"},
+		},
+		{
+			name:     "unparseable until",
+			since:    "30",
+			until:    "abc",
+			wantZero: true,
+			// "not a number of days" alone also reads as a substring of
+			// the SINCE warning's "not a positive number of days" in
+			// spirit, so pin down which flag actually fired too.
+			wantWarn: []string{"NVD_UNTIL_DAYS", "not a number of days"},
+		},
+		{
+			// A negative count is days in the FUTURE: AddDate(0,0,-days)
+			// flips its sign, the inverted-window check passes (a future
+			// end IS after since), and CoversUntil then records a date
+			// that has not happened — coverage claimed for time that does
+			// not exist yet. Refused at parse, like the SINCE side.
+			name:     "negative until is refused, not a future date",
+			since:    "30",
+			until:    "-5",
+			wantZero: true,
+			wantWarn: []string{"NVD_UNTIL_DAYS", "not a number of days"},
+		},
+		{
+			// Doc comment on nvdUntilFromEnv: "Ignored when no Since was
+			// given ... rather than the bounded slice the caller was
+			// reaching for." nvdOptionsFromEnv returns before Since is even
+			// computed, so NVD_UNTIL_DAYS is never read at all.
+			name:       "until with no since is ignored",
+			since:      "",
+			until:      "7",
+			wantZero:   true,
+			wantNoWarn: true,
+		},
+		{
+			name:       "since with no until leaves the window open",
+			since:      "30",
+			until:      "",
+			wantZero:   true,
+			wantNoWarn: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("NVD_SINCE_DAYS", tc.since)
+			t.Setenv("NVD_UNTIL_DAYS", tc.until)
+			var errOut bytes.Buffer
+			got := nvdOptionsFromEnv(&errOut)
+
+			if gotZero := got.Until.IsZero(); gotZero != tc.wantZero {
+				t.Errorf("Until.IsZero() = %v, want %v (Until = %v)", gotZero, tc.wantZero, got.Until)
+			}
+			if !tc.wantZero {
+				wantApprox := time.Now().UTC().AddDate(0, 0, -tc.wantAgoDays)
+				if diff := got.Until.Sub(wantApprox); diff < -time.Minute || diff > time.Minute {
+					t.Errorf("Until = %v, want within a minute of %v (now minus %d days)", got.Until, wantApprox, tc.wantAgoDays)
+				}
+			}
+
+			if tc.wantNoWarn && errOut.Len() != 0 {
+				t.Errorf("stderr = %q, want nothing", errOut.String())
+			}
+			for _, frag := range tc.wantWarn {
+				if !strings.Contains(errOut.String(), frag) {
+					t.Errorf("stderr = %q, want it to contain %q", errOut.String(), frag)
+				}
+			}
+		})
+	}
+}
+
 // nvd.Options.Progress must actually be connected to stderr.
 //
 // It was not, and that is how a run that spent 5h52m, hit a 503, retried
@@ -1741,5 +1858,35 @@ func TestRun_ScanBadFailOnUnfixableScopeExits2(t *testing.T) {
 		if !strings.Contains(stderr.String(), want) {
 			t.Errorf("stderr = %q, missing accepted spelling %q", stderr.String(), want)
 		}
+	}
+}
+
+// TestNvdOptionsFromEnv_OneClockReadingForBothEnds pins the fix CI caught on
+// 2026-08-14: Since and Until computed from two separate time.Now() calls made
+// an equal-days window inverted by microseconds — refused on Windows, whose
+// coarse clock returns the same reading twice, accepted on Linux. The
+// advancing clock makes the defect visible on every platform: with one shared
+// reading the equal-days case is exactly equal and refused; with two calls the
+// second lands later and slips through.
+func TestNvdOptionsFromEnv_OneClockReadingForBothEnds(t *testing.T) {
+	base := time.Date(2026, 8, 14, 0, 0, 0, 0, time.UTC)
+	calls := 0
+	orig := clockNow
+	clockNow = func() time.Time {
+		calls++
+		return base.Add(time.Duration(calls) * time.Microsecond)
+	}
+	defer func() { clockNow = orig }()
+
+	t.Setenv("NVD_SINCE_DAYS", "30")
+	t.Setenv("NVD_UNTIL_DAYS", "30")
+
+	var errOut bytes.Buffer
+	opts := nvdOptionsFromEnv(&errOut)
+	if !opts.Until.IsZero() {
+		t.Errorf("Until = %v, want zero — equal days must refuse even when the clock advances between reads", opts.Until)
+	}
+	if !strings.Contains(errOut.String(), "not after NVD_SINCE_DAYS") {
+		t.Errorf("stderr = %q, want the inverted-window warning", errOut.String())
 	}
 }

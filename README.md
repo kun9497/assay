@@ -372,6 +372,24 @@ window failed that way before a 30-day one succeeded in 27m26s with 23,433 ratin
 rescoring, adding references — so 120 days of *modifications* covers most of the 372,628-record
 feed and costs nearly as much as no window at all.
 
+**Backfilling older ratings** (D65) is the one place the window gets an *end*:
+`NVD_UNTIL_DAYS` closes it, so the full feed can be walked backwards in bounded slices, each
+run seeding from the published artifact and publishing in turn — the artifact is the
+checkpoint, and a failed slice costs one slice instead of the whole pass:
+
+```bash
+# each slice: [now-SINCE, now-UNTIL], walked backwards 120 days at a time
+NVD_ENABLE=1 NVD_SINCE_DAYS=240 NVD_UNTIL_DAYS=120 assay db build --seed ghcr.io/kun9497/assay-db:v8
+assay db push ghcr.io/kun9497/assay-db:v8
+NVD_ENABLE=1 NVD_SINCE_DAYS=360 NVD_UNTIL_DAYS=240 assay db build --seed ghcr.io/kun9497/assay-db:v8
+assay db push ghcr.io/kun9497/assay-db:v8
+# ...until db status shows the COVERED range reaching the feed's start
+```
+
+Run the slices in order. Coverage only extends backwards when a slice *touches* the range
+already covered — out of order, the ratings still land but the claimed coverage stays put,
+because a claim that jumps a hole would say the database covers a span it has fragments of.
+
 The narrower coverage is disclosed rather than assumed: `db status` prints the range in a
 `COVERED` column, so a 30-day database cannot pass for a complete one. Check `ratings:` before
 pushing — an artifact with zero ratings becomes the seed every later delta builds on, and the
@@ -401,11 +419,11 @@ ecosystem means writing one `Cataloger` and one `Comparer` — nothing else chan
 
 | Interface | Responsibility | Implementations |
 |---|---|---|
-| `Source` | Open a target for file access; carries layer provenance | **registry**, **`docker save` tarball**, **OCI layout**, dir, binary |
-| `Cataloger` | Files → `[]Package` | **apk**, **os-release**, **cyclonedx**, dpkg, go-mod, go-binary, npm, jar |
+| `Source` | Open a target for file access; carries layer provenance | **registry**, **`docker save` tarball**, **OCI layout**, **dir**, **binary** |
+| `Cataloger` | Files → `[]Package` | **apk**, **os-release**, **cyclonedx**, **dpkg**, **rpmdb**, **go-mod**, **go-binary**, **npm**, **yarn**, **pypi lockfiles**, **cargo**, jar |
 | `Store` | Advisory lookup | **bbolt** |
-| `Comparer` | `Compare(a, b string) (int, error)` within one ecosystem | **semver**, **PEP 440**, **apk**, deb, rpm |
-| `Provider` | Upstream feed → `[]Advisory` | **OSV** |
+| `Comparer` | `Compare(a, b string) (int, error)` within one ecosystem | **semver**, **PEP 440**, **apk**, **deb**, **rpm** |
+| `Provider` | Upstream feed → `[]Advisory` | **OSV**, **Red Hat CSAF VEX** |
 
 Two more interfaces sit beside `Provider` rather than inside it, because what they attach to
 a finding is not an `Advisory`: `Annotator` rates a CVE that assay already matched (**NVD**,

@@ -877,8 +877,53 @@ func mergeRatingCoverage(seeded, fetched store.Provenance) store.Provenance {
 		// result. An untestable branch reads as an untested one forever.
 		merged.CoversSince = seeded.CoversSince
 		merged.Window = coverageLabel(seeded.CoversSince)
+	case fetched.CoversSince.Before(seeded.CoversSince):
+		// A backfill slice (D65): this run asked for an OLDER range than the
+		// seed already covers. Whether that EXTENDS the covered span depends
+		// on the two ranges meeting.
+		//
+		// Both branches are written out, and the second one is why. `merged`
+		// starts as `fetched`, so falling through on a gap would leave the
+		// SLICE's bounds in place -- a database claiming to cover from
+		// December while holding nothing between April and August. The
+		// over-claim this rule exists to prevent was the default.
+		if touches(fetched, seeded) {
+			merged.CoversSince = fetched.CoversSince
+			merged.Window = coverageLabel(fetched.CoversSince)
+		} else {
+			merged.CoversSince = seeded.CoversSince
+			merged.Window = coverageLabel(seeded.CoversSince) +
+				" (an earlier slice is held but does not reach it)"
+		}
+		// Either way the span now runs to wherever the SEED reached, not to
+		// where this slice stopped. Leaving the slice's end in place would
+		// say the artifact covers nothing since April, which is false in the
+		// direction that matters: it would make tomorrow's nightly run look
+		// like it was widening coverage and the guard would let a narrower
+		// artifact through.
+		merged.CoversUntil, merged.CoversUntilKnown = seeded.CoversUntil, seeded.CoversUntilKnown
 	}
 	return merged
+}
+
+// touches reports whether a slice's window reaches the range the seed already
+// covers, so the two describe one span rather than two with a hole between.
+//
+// This is the whole reason CoversUntil exists. Ratings from a slice land in
+// the database whatever the answer here -- they are real and they are kept --
+// but the CLAIM is what this decides, and claiming coverage across a hole is
+// the over-claim the publish guard and `db status` both read. Run the slices
+// out of order and coverage simply does not advance, which is a visible
+// refusal rather than a database that says it covers a year it has four
+// months of.
+//
+// An unrecorded end is treated as reaching the present, which is what every
+// run before D65 did.
+func touches(slice, seeded store.Provenance) bool {
+	if !slice.CoversUntilKnown || slice.CoversUntil.IsZero() {
+		return true
+	}
+	return !slice.CoversUntil.Before(seeded.CoversSince)
 }
 
 // coverageLabel renders a merged bound in the shape the providers use, so

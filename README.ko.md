@@ -352,6 +352,24 @@ assay db push ghcr.io/kun9497/assay-db:v8       # 압축 약 6.8 MB
 `NVD_SINCE_DAYS=120`도 보이는 것 같은 절충이 아닙니다. NVD가 재채점·참조 추가로 레코드를 계속
 건드려서, 120일치 *수정분*이 37만 2,628건 피드의 대부분을 덮고 창이 없는 것과 비용이 거의 같습니다.
 
+**오래된 등급 백필**(D65)은 창에 *끝*이 생기는 유일한 지점입니다. `NVD_UNTIL_DAYS`가 그 끝을
+닫으므로, 전체 피드를 경계가 있는 슬라이스들로 나눠 거꾸로 훑을 수 있습니다. 각 실행은 발행된
+아티팩트에서 seed하고 차례로 push합니다 — 아티팩트가 체크포인트이므로, 실패한 슬라이스는 전체
+패스가 아니라 슬라이스 하나만 잃습니다.
+
+```bash
+# 각 슬라이스: [now-SINCE, now-UNTIL], 120일씩 뒤로 훑습니다
+NVD_ENABLE=1 NVD_SINCE_DAYS=240 NVD_UNTIL_DAYS=120 assay db build --seed ghcr.io/kun9497/assay-db:v8
+assay db push ghcr.io/kun9497/assay-db:v8
+NVD_ENABLE=1 NVD_SINCE_DAYS=360 NVD_UNTIL_DAYS=240 assay db build --seed ghcr.io/kun9497/assay-db:v8
+assay db push ghcr.io/kun9497/assay-db:v8
+# ...db status의 COVERED 범위가 피드의 시작점에 닿을 때까지 반복합니다
+```
+
+슬라이스는 순서대로 실행하세요. 커버리지는 슬라이스가 이미 커버된 범위에 *닿을* 때만 과거로
+확장됩니다 — 순서를 벗어나면 rating은 그대로 들어가지만 주장하는 커버리지는 그 자리에 머뭅니다.
+구멍을 건너뛴 주장은 데이터베이스가 조각만 가진 구간을 전부 커버한다고 말하는 셈이기 때문입니다.
+
 좁아진 커버리지는 가정하지 않고 공개합니다. `db status`가 `COVERED` 열에 범위를 출력하므로 30일짜리
 데이터베이스가 완전한 것처럼 보일 수 없습니다. push 전에 `ratings:`를 확인하세요 — rating이 0인
 아티팩트는 이후 모든 델타 빌드의 seed가 되고, 매일 도는 실행이 빠진 것을 영영 채우지 못합니다.
@@ -382,11 +400,11 @@ CI에서는 "뭔가 찾았다"와 "돌지 못했다"를 구분하는 것이 중�
 
 | 인터페이스 | 책임 | 구현체 |
 |---|---|---|
-| `Source` | 타깃을 열어 파일 접근 제공, 레이어 출처를 담음 | **레지스트리**, **`docker save` tarball**, **OCI layout**, dir, binary |
-| `Cataloger` | 파일 → `[]Package` | **apk**, **os-release**, **cyclonedx**, dpkg, go-mod, go-binary, npm, jar |
+| `Source` | 타깃을 열어 파일 접근 제공, 레이어 출처를 담음 | **레지스트리**, **`docker save` tarball**, **OCI layout**, **dir**, **binary** |
+| `Cataloger` | 파일 → `[]Package` | **apk**, **os-release**, **cyclonedx**, **dpkg**, **rpmdb**, **go-mod**, **go-binary**, **npm**, **yarn**, **pypi 락파일들**, **cargo**, jar |
 | `Store` | 권고 조회 | **bbolt** |
-| `Comparer` | 한 생태계 안에서 `Compare(a, b string) (int, error)` | **semver**, **PEP 440**, **apk**, deb, rpm |
-| `Provider` | 업스트림 피드 → `[]Advisory` | **OSV** |
+| `Comparer` | 한 생태계 안에서 `Compare(a, b string) (int, error)` | **semver**, **PEP 440**, **apk**, **deb**, **rpm** |
+| `Provider` | 업스트림 피드 → `[]Advisory` | **OSV**, **Red Hat CSAF VEX** |
 
 `Provider` 옆에는 두 인터페이스가 더 있습니다. `Provider` 안에 넣지 않은 이유는 이 둘이 finding에
 붙이는 것이 `Advisory`가 아니기 때문입니다. `Annotator`는 assay가 이미 매칭한 CVE의 점수를 매기고
