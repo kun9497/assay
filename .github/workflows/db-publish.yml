@@ -5,6 +5,15 @@ on:
     - cron: "0 6 * * *"
   workflow_dispatch:
 
+# One writer to the artifact at a time, across BOTH workflows (same group
+# name in each): on 2026-08-14 two backfill walkers raced the same slice and
+# the second push was refused by the coverage guard -- correctly, but the race
+# itself belongs to the scheduler, not the guard. Queued, never cancelled: a
+# backfill slice and the nightly must both eventually run.
+concurrency:
+  group: db-artifact-writer
+  cancel-in-progress: false
+
 permissions:
   contents: read
   packages: write

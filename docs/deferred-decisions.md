@@ -12,7 +12,15 @@ Read alongside the Architecture section of the [README](../README.md).
 
 ## Deferred work
 
-### The published database lost 352,000 NVD ratings and will not recover them on its own
+### ~~The published database lost 352,000 NVD ratings and will not recover them on its own~~ — recovered in full, 2026-08-14 (D65, D66)
+
+**Closed.** The artifact holds **357,678** ratings against `:v7`'s 355,030 — the recoverable
+maximum, not a partial recovery: walking the remaining `lastModified` bands back to the
+feed's edge fetched 17,476 more records and **not one carried a score** (NVD's unenriched
+backlog and rejected records). The recovery took one accidental 51-minute whole-window run
+(the D65/D48 cap composition — luck), then seven deliberate ratings-only slices (~2.5 min
+each) proving the tail empty. Coverage claim: `modified 2023-08-30..now`, which the band
+probes show IS the entire feed. The original entry follows, kept for the mechanism.
 
 **When: soon.** This is not deferred because it is unclear — it is an open defect with a
 known remedy, and the remedy is an operation rather than a code change, so it would leave no
