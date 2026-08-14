@@ -104,6 +104,15 @@ db build flags:
                   of repeating the seven-hour full pass. A seed that cannot
                   be read fails the build rather than silently building from
                   empty.
+  --ratings-only  Skip the advisory providers entirely and carry the seed's
+                  advisories forward VERBATIM (a file copy, not a rebuild),
+                  re-running only the rating annotators below. Requires
+                  --seed. Exists for a D65 backfill slice, whose whole point
+                  is the NVD window alone -- without this every slice paid
+                  for rebuilding OSV (~54min) and Red Hat (~21min) too.
+                  An advisory withdrawn upstream since the seed was built
+                  survives until the next full build: fine for a seed at
+                  most a day old, wrong for anything older.
 
 Environment (db build only — a scan reads no environment and no network):
   NVD_ENABLE=1          Also fetch NIST's CVSS scores, so findings whose
@@ -192,7 +201,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		switch args[1] {
 		case "build":
-			ref, hasSeed, ok := resolveBuildSeed(args, stderr)
+			// Parsed independently of resolveBuildSeed below: --ratings-only
+			// is a bare boolean, not a "consume the next token" flag like
+			// --seed, so scanning for it once and then stripping it out is
+			// simpler than teaching resolveBuildSeed's position-locked
+			// parsing (args[2]/args[3], unchanged since before this flag
+			// existed -- readme_schema_test.go calls it directly) a second
+			// flag shape. See resolveRatingsOnly's own doc comment.
+			ratingsOnly := resolveRatingsOnly(args)
+			ref, hasSeed, ok := resolveBuildSeed(withoutRatingsOnly(args), stderr)
 			if !ok {
 				return exitError
 			}
@@ -222,7 +239,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			// ref is what the disclosure names the seed as -- the original
 			// reference, not seedPath's scratch file above, which an
 			// archived CI log would not recognize.
-			return dbcmd.Update(context.Background(), path, seedPath, ref,
+			return dbcmd.Update(context.Background(), path, seedPath, ref, ratingsOnly,
 				dbUpdateProviders(stderr),
 				dbUpdateAnnotators(stderr),
 				dbUpdateEnrichers(stderr),
@@ -573,6 +590,50 @@ func resolveBuildSeed(args []string, stderr io.Writer) (ref string, has, ok bool
 		return "", false, false
 	}
 	return args[3], true, true
+}
+
+// resolveRatingsOnly reports whether `--ratings-only` (D66) was given
+// anywhere among a `db build` invocation's flags.
+//
+// Split out rather than folded into resolveBuildSeed above: that function's
+// parsing is position-locked (args[2] must be exactly "--seed", its value
+// exactly args[3]) and predates this flag -- readme_schema_test.go calls it
+// directly with that exact shape, so its behaviour for "--seed <ref>" alone
+// has to keep working unchanged. A bare boolean does not share --seed's
+// "consume the next token as a value" shape anyway, so scanning the whole
+// slice once here, independently, composes with --seed in EITHER order
+// (`--ratings-only --seed <ref>` and `--seed <ref> --ratings-only` both
+// work) without resolveBuildSeed ever having to know this flag exists -- see
+// withoutRatingsOnly, which is what makes that true.
+func resolveRatingsOnly(args []string) bool {
+	if len(args) <= 2 {
+		return false
+	}
+	for _, a := range args[2:] {
+		if a == "--ratings-only" {
+			return true
+		}
+	}
+	return false
+}
+
+// withoutRatingsOnly strips every "--ratings-only" token out of a `db build`
+// argument list before it reaches resolveBuildSeed, which -- per
+// resolveRatingsOnly's own doc comment -- only ever expects to find "--seed
+// <ref>" (or nothing) starting at args[2]. Without this, `--ratings-only`
+// arriving BEFORE `--seed` would land at args[2] itself and resolveBuildSeed
+// would reject it as an unknown flag, even though it is a real one.
+func withoutRatingsOnly(args []string) []string {
+	if len(args) <= 2 {
+		return args
+	}
+	out := append([]string{}, args[:2]...)
+	for _, a := range args[2:] {
+		if a != "--ratings-only" {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // resolvePushRef validates `db push`'s arguments: exactly one reference, no

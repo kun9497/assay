@@ -358,13 +358,18 @@ assay db push ghcr.io/kun9497/assay-db:v8       # 압축 약 6.8 MB
 패스가 아니라 슬라이스 하나만 잃습니다.
 
 ```bash
-# 각 슬라이스: [now-SINCE, now-UNTIL], 120일씩 뒤로 훑습니다
-NVD_ENABLE=1 NVD_SINCE_DAYS=240 NVD_UNTIL_DAYS=120 assay db build --seed ghcr.io/kun9497/assay-db:v8
+# 각 슬라이스: [now-SINCE, now-UNTIL], 120일씩 뒤로 훑습니다.
+# --ratings-only(D66)는 시드의 advisory를 그대로 가져오고 NVD 창만 다시 돌리므로,
+# 슬라이스 비용은 그 자체의 NVD 시간뿐이고 전체 재빌드가 아닙니다.
+NVD_ENABLE=1 NVD_SINCE_DAYS=240 NVD_UNTIL_DAYS=120 assay db build --seed ghcr.io/kun9497/assay-db:v8 --ratings-only
 assay db push ghcr.io/kun9497/assay-db:v8
-NVD_ENABLE=1 NVD_SINCE_DAYS=360 NVD_UNTIL_DAYS=240 assay db build --seed ghcr.io/kun9497/assay-db:v8
+NVD_ENABLE=1 NVD_SINCE_DAYS=360 NVD_UNTIL_DAYS=240 assay db build --seed ghcr.io/kun9497/assay-db:v8 --ratings-only
 assay db push ghcr.io/kun9497/assay-db:v8
 # ...db status의 COVERED 범위가 피드의 시작점에 닿을 때까지 반복합니다
 ```
+
+CI에서는 `gh workflow run db-backfill.yml -f since_days=240 -f until_days=120`가 슬라이스 하나를
+실행합니다.
 
 슬라이스는 순서대로 실행하세요. 커버리지는 슬라이스가 이미 커버된 범위에 *닿을* 때만 과거로
 확장됩니다 — 순서를 벗어나면 rating은 그대로 들어가지만 주장하는 커버리지는 그 자리에 머뭅니다.

@@ -2634,6 +2634,36 @@ Red Hat (~77 minutes) today; a ratings-only build mode is the next slice, not th
 
 ---
 
+### D66 — A build that re-rates without re-fetching
+
+**Decision.** `db build --ratings-only --seed <ref>` carries the seed's advisories verbatim —
+a file copy, not a record copy — and runs only the rating annotators on top. The advisory
+providers do not run.
+
+**It exists to make D65's slices affordable.** A backfill slice needs the NVD window and
+nothing else, but every build rebuilt OSV (~54 minutes, almost all of it store) and Red Hat
+(~21 minutes) regardless — 75 minutes per slice of work whose output is identical to the
+seed's. Three slices would have spent nearly four hours rebuilding the same advisories three
+times inside a 2-hour job cap.
+
+**The advisories' provenance is carried too**, because it is true: this build did not fetch
+them, so their `DataAsOf` is the seed's, and `db status` says so. A ratings-only publish
+therefore never claims fresher advisory data than it has — the freshness that regressed is
+the freshness that was already published.
+
+**Two refusals, both the D60 class.** Without a seed there are no advisories at all, and an
+empty-advisory database published over a real one is the bootstrap incident again. Without an
+annotator enabled the build would change nothing, and "changed nothing" arriving as success
+trains the operator to trust a no-op.
+
+**The withdrawal caveat is the cost, and it is bounded by the nightly.** A full build drops
+advisories withdrawn upstream since the last run (D16 at ingestion); a ratings-only build
+carries them, because it does not consult the providers at all. Acceptable when the seed is at
+most a day old — the next nightly rebuild sweeps them — and wrong for anything older, which is
+why the flag's own usage text says so rather than leaving it to this document.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

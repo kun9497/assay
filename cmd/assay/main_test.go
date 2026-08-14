@@ -1342,6 +1342,73 @@ func TestResolveBuildSeed(t *testing.T) {
 	})
 }
 
+// `db build --ratings-only` without `--seed` must reach dbcmd.Update's own
+// refusal (D66) -- proving --ratings-only is actually parsed off the command
+// line and threaded through to Update, not silently dropped on the floor,
+// the "drive the caller first" shape CLAUDE.md asks of every new flag.
+//
+// ASSAY_DB_DIR is still pointed at a scratch directory, matching every other
+// `db build` test in this file, even though Update's own refusal fires
+// before MkdirAll ever runs -- a future reordering inside Update must not
+// turn this into a test that performs a real build against the developer's
+// cache the way TestRun_DBBuildReplacesUpdate's own comment warns about.
+func TestRun_DBBuildRatingsOnlyWithoutSeedRefuses(t *testing.T) {
+	t.Setenv("ASSAY_DB_DIR", t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"db", "build", "--ratings-only"}, &stdout, &stderr)
+	if code != exitError {
+		t.Errorf("db build --ratings-only without --seed = %d, want %d\nstderr:\n%s",
+			code, exitError, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "--ratings-only") {
+		t.Errorf("stderr does not name --ratings-only:\n%s", stderr.String())
+	}
+}
+
+// resolveRatingsOnly is order-independent with respect to --seed, which
+// resolveBuildSeed's own position-locked parsing (args[2]/args[3]) cannot be
+// taught without breaking readme_schema_test.go's direct call to it -- see
+// resolveRatingsOnly's own doc comment for why the two are split apart.
+func TestResolveRatingsOnly(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"absent", []string{"db", "build"}, false},
+		{"absent with --seed", []string{"db", "build", "--seed", "example.test/assay-db:v6"}, false},
+		{"present alone", []string{"db", "build", "--ratings-only"}, true},
+		{"present after --seed", []string{"db", "build", "--seed", "example.test/assay-db:v6", "--ratings-only"}, true},
+		{"present before --seed", []string{"db", "build", "--ratings-only", "--seed", "example.test/assay-db:v6"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveRatingsOnly(tt.args); got != tt.want {
+				t.Errorf("resolveRatingsOnly(%v) = %v, want %v", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
+// withoutRatingsOnly is what makes resolveBuildSeed still work when
+// --ratings-only comes BEFORE --seed on the command line -- without it,
+// "--ratings-only" would land at args[2] itself and resolveBuildSeed would
+// reject it as an unknown flag, even combined with a perfectly valid --seed
+// right after it.
+func TestWithoutRatingsOnly_LeavesSeedParsingIntact(t *testing.T) {
+	var stderr bytes.Buffer
+	args := []string{"db", "build", "--ratings-only", "--seed", "example.test/assay-db:v6"}
+	ref, has, ok := resolveBuildSeed(withoutRatingsOnly(args), &stderr)
+	if !ok {
+		t.Fatalf("ok = false, want true (stderr: %s)", stderr.String())
+	}
+	if !has || ref != "example.test/assay-db:v6" {
+		t.Errorf("ref = %q has = %v, want the seed ref carried through even with "+
+			"--ratings-only ahead of it in the argument list", ref, has)
+	}
+}
+
 // Fix round 1, finding 2: `db update --from` with a missing value, or a
 // typo'd flag name, silently fell back to the default ref -- exactly wrong
 // for an air-gapped or mirror-pinned user, who set --from specifically to
