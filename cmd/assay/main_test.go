@@ -1957,3 +1957,82 @@ func TestNvdOptionsFromEnv_OneClockReadingForBothEnds(t *testing.T) {
 		t.Errorf("stderr = %q, want the inverted-window warning", errOut.String())
 	}
 }
+
+// TestNvdOptionsFromEnv_WindowSpanCap pins the fix for the 2026-08-14
+// backfill accident. The API's 120-day maximum is on the window's WIDTH, but
+// the cap predated D65 and applied to SINCE alone — so NVD_SINCE_DAYS=240 was
+// capped to 120, which made NVD_UNTIL_DAYS=120 read as inverted, and the two
+// warnings COMPOSED into a [120d, now] window nobody asked for. The runbook's
+// own example was unrepresentable.
+func TestNvdOptionsFromEnv_WindowSpanCap(t *testing.T) {
+	base := time.Date(2026, 8, 14, 0, 0, 0, 0, time.UTC)
+	orig := clockNow
+	clockNow = func() time.Time { return base }
+	defer func() { clockNow = orig }()
+
+	cases := []struct {
+		name         string
+		since, until string
+		wantSinceAgo int // days; 0 means Since must be zero
+		wantUntilAgo int // days; 0 means Until must be zero
+		wantWarn     string
+	}{
+		{
+			// The runbook slice, verbatim. Before the fix this produced
+			// [120, 0] with two warnings; it must now run as asked.
+			name:  "the runbook slice [240,120] is representable",
+			since: "240", until: "120",
+			wantSinceAgo: 240, wantUntilAgo: 120,
+		},
+		{
+			name:  "a deep slice [360,240] is representable",
+			since: "360", until: "240",
+			wantSinceAgo: 360, wantUntilAgo: 240,
+		},
+		{
+			// Width 260 > 120: clamped to [until+120, until], disclosed.
+			name:  "a too-wide slice is clamped to 120 days above its end",
+			since: "380", until: "120",
+			wantSinceAgo: 240, wantUntilAgo: 120,
+			wantWarn: "spans more than the API's 120-day maximum window; using 240",
+		},
+		{
+			// No until: the pre-D65 behaviour, byte for byte.
+			name:         "no until keeps the old SINCE cap and its warning",
+			since:        "365",
+			wantSinceAgo: 120,
+			wantWarn:     "exceeds the API's 120-day maximum window; using 120",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("NVD_SINCE_DAYS", tc.since)
+			if tc.until != "" {
+				t.Setenv("NVD_UNTIL_DAYS", tc.until)
+			}
+			var errOut bytes.Buffer
+			opts := nvdOptionsFromEnv(&errOut)
+
+			if want := base.AddDate(0, 0, -tc.wantSinceAgo); !opts.Since.Equal(want) {
+				t.Errorf("Since = %v, want %v (%d days ago)", opts.Since, want, tc.wantSinceAgo)
+			}
+			if tc.wantUntilAgo == 0 {
+				if !opts.Until.IsZero() {
+					t.Errorf("Until = %v, want zero", opts.Until)
+				}
+			} else if want := base.AddDate(0, 0, -tc.wantUntilAgo); !opts.Until.Equal(want) {
+				t.Errorf("Until = %v, want %v (%d days ago)", opts.Until, want, tc.wantUntilAgo)
+			}
+
+			s := errOut.String()
+			if tc.wantWarn == "" {
+				if s != "" {
+					t.Errorf("stderr = %q, want none — a representable slice must not warn", s)
+				}
+			} else if !strings.Contains(s, tc.wantWarn) {
+				t.Errorf("stderr = %q, want it to contain %q", s, tc.wantWarn)
+			}
+		})
+	}
+}
