@@ -680,7 +680,28 @@ page overlay.
 
 ---
 
-### Does an unrated source count as disagreeing?
+### ~~Does an unrated source count as disagreeing?~~ — measured 2026-08-14: yes, and it barely matters
+
+**Closed, no change.** Measured against the complete NVD database (357,678 ratings), three
+targets:
+
+| target | multi-source | marked now | marked if unrated excluded | delta |
+|---|---:|---:|---:|---:|
+| ubi9 | 415 | 140 (33.7%) | 139 | **1** |
+| ubuntu:22.04 | 85 | 1 | 0 | **1** |
+| python:3.9-slim | 271 | 11 | 11 | **0** |
+
+The predicted flood never arrived: excluding unrated sources would change at most ONE finding
+per scan, because NVD now rates nearly everything a second source also describes — the
+disagreements are between two RATED sources. Changing the report's contract for a delta of one
+is not worth the divergence.
+
+ubi9 does cross the entry's own ~30% "marker stopped working" threshold — at 33.7% — but for
+the opposite reason the entry predicted: NVD and Red Hat genuinely land on different bands for
+a third of shared findings (111 adjacent, 28 two-plus bands apart). Red Hat rates within its
+product context, NVD in the abstract. That is signal, not noise: the gate takes the highest
+band (D25), so a reader deserves to know when the sources it aggregates disagree. The marker
+is doing its job; the original question follows, kept for the reasoning.
 
 The table marks a finding with `*` and footnotes "sources disagree on severity" whenever its
 sources landed on different bands. An UNRATED source currently counts as one of those bands.
