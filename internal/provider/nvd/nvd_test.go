@@ -1078,3 +1078,64 @@ func TestAnnotate_RetriesARealClientTimeout(t *testing.T) {
 		t.Errorf("progress = %q, want the retry announced", progress.String())
 	}
 }
+
+// TestAnnotate_UntilBoundsTheRequestedWindow pins the half of D65 that reaches
+// the wire. A backfill slice asks for a range that CLOSED in the past, and
+// without this the window always ran to the present — so no amount of
+// re-running could ever reach a record nobody had touched recently, which is
+// the whole reason the 352,000 lost ratings do not come back on their own.
+func TestAnnotate_UntilBoundsTheRequestedWindow(t *testing.T) {
+	var gotStart, gotEnd string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotStart = r.URL.Query().Get("lastModStartDate")
+		gotEnd = r.URL.Query().Get("lastModEndDate")
+		io.WriteString(w, `{"totalResults":0,"timestamp":"2026-01-01T00:00:00.000","vulnerabilities":[]}`)
+	}))
+	defer srv.Close()
+
+	// A closed range well inside the 120-day maximum.
+	since := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	until := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+
+	p := New(Options{BaseURL: srv.URL, Since: since, Until: until, Pause: durPtr(0)})
+	prov, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil })
+	if err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+
+	if !strings.HasPrefix(gotStart, "2026-01-01") {
+		t.Errorf("lastModStartDate = %q, want it to start 2026-01-01", gotStart)
+	}
+	// The assertion that matters: without Until this is today's date, so a
+	// prefix check on the SLICE's end is what separates the two behaviours.
+	if !strings.HasPrefix(gotEnd, "2026-03-01") {
+		t.Errorf("lastModEndDate = %q, want it to start 2026-03-01 — the window must close where it was told to", gotEnd)
+	}
+
+	// And it is recorded, because the merge that decides whether a slice
+	// extends the covered span reads exactly this.
+	if !prov.CoversUntilKnown {
+		t.Error("CoversUntilKnown = false, want true")
+	}
+	if !prov.CoversUntil.Equal(until) {
+		t.Errorf("CoversUntil = %v, want %v", prov.CoversUntil, until)
+	}
+}
+
+// A run with no Until still reaches the present and says so: a zero
+// CoversUntil WITH CoversUntilKnown, which the merge reads as "up to now".
+func TestAnnotate_NoUntilRecordsAnOpenEnd(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"totalResults":0,"timestamp":"2026-01-01T00:00:00.000","vulnerabilities":[]}`)
+	}))
+	defer srv.Close()
+
+	p := New(Options{BaseURL: srv.URL, Pause: durPtr(0)})
+	prov, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil })
+	if err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+	if !prov.CoversUntilKnown || !prov.CoversUntil.IsZero() {
+		t.Errorf("CoversUntil = %v, known = %v; want zero and known", prov.CoversUntil, prov.CoversUntilKnown)
+	}
+}

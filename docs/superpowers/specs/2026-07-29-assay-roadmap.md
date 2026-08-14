@@ -2589,6 +2589,51 @@ for this has to construct deliberately.
 
 ---
 
+### D65 — The NVD window gets an end, so the backfill can be sliced
+
+**Decision.** `NVD_UNTIL_DAYS` bounds the late end of the NVD window; `Provenance` records
+`CoversUntil` beside `CoversSince`; and a seeded build's merged coverage only reaches further
+back when the slice's window **touches** the range already covered.
+
+**The problem it exists for.** The 352,000 lost ratings (D60's incident) cannot come back on
+their own, and they cannot come back in one run either: every window before this ended at
+"now", so `NVD_SINCE_DAYS=120` and `=365` cost the same near-full pass — NVD keeps touching
+records, so 120 days of *modifications* is most of the feed. The unbounded pass is about
+seven hours with **no resume point**: `db build` installs its temporary database only at the
+end, so a failure at hour five discards five hours. Four attempts died exactly that way
+before the README said to stop trying.
+
+**The artifact is the checkpoint.** With an end on the window, the backfill becomes closed
+slices walked backwards — `[now−240d, now−120d]`, `[now−360d, now−240d]`, … — each run
+seeding from the published artifact and publishing in turn. A failed slice costs one slice.
+No new checkpoint format, no resumable build: the mechanism that already carries ratings
+forward nightly (`mergeRatingCoverage`, D-seeded builds) carries the backfill too.
+
+**The honesty rule is the substance.** A slice's ratings always land in the database — they
+are real whatever order the slices run in. The **claim** is what the touch rule bounds:
+coverage only extends backwards when the slice's end reaches the seed's start, so running
+slices out of order leaves the claim where it was rather than asserting a span with a hole in
+it. A database claiming a year while holding four months of it is exactly the over-claim D20
+exists to prevent, and the merge's default (`merged := fetched`) would have produced it —
+both branches are written out because falling through *was* the bug.
+
+**On a gap, the merged end is the seed's, not the slice's.** Leaving the slice's end in place
+would say the artifact covers nothing since April — false in the direction that matters,
+because tomorrow's nightly would look like it was widening coverage and the publish guard
+would wave a narrower artifact through.
+
+**An end with no start is ignored.** `NVD_UNTIL_DAYS` without `NVD_SINCE_DAYS` is a window
+from 1999 to a date in the past — the seven-hour pass with extra steps, requested by someone
+reaching for a bounded slice. An inverted window (end at or before start) is refused with a
+warning rather than sent to NVD, which answers it with a bare 404 an hour in.
+
+**What it deliberately does not do.** The API key stays optional and nearly irrelevant here:
+the rate-limit pause is 20 minutes of a seven-hour unbounded pass — the time is NVD serving
+2,000-record pages, and no key changes that. And each backfill slice still rebuilds OSV and
+Red Hat (~77 minutes) today; a ratings-only build mode is the next slice, not this one.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

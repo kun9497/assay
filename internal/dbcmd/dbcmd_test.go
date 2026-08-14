@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -111,6 +112,10 @@ type fakeAnnotator struct {
 	// WITH coversSinceKnown false, it reproduces a pre-upgrade database.
 	coversSince      time.Time
 	coversSinceKnown bool
+	// coversUntil is the window's late end (D65). Zero WITH
+	// coversUntilKnown reproduces a run that went up to now.
+	coversUntil      time.Time
+	coversUntilKnown bool
 }
 
 func (f fakeAnnotator) Name() string { return f.name }
@@ -131,6 +136,8 @@ func (f fakeAnnotator) Annotate(_ context.Context, emit func(advisory.Rating) er
 		Window:           f.window,
 		CoversSince:      f.coversSince,
 		CoversSinceKnown: f.coversSinceKnown || !f.coversSince.IsZero(),
+		CoversUntil:      f.coversUntil,
+		CoversUntilKnown: f.coversUntilKnown || !f.coversUntil.IsZero(),
 	}, nil
 }
 
@@ -1571,5 +1578,123 @@ func TestCompareRelease_BareMajorIsARelease(t *testing.T) {
 	slices.SortFunc(mixed, compareRelease)
 	if mixed[len(mixed)-1] != "edge" {
 		t.Errorf("mixed = %v, want the unparseable one last", mixed)
+	}
+}
+
+// seedCovering builds a seed database whose NVD ratings are declared to cover
+// from `since` onward, which is the shape every published artifact has.
+func seedCovering(t *testing.T, since time.Time, ratings int) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "seed.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < ratings; i++ {
+		if err := w.PutRating(advisory.Rating{CVE: fmt.Sprintf("CVE-2020-%d", i), Source: "NVD"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.SetMeta(store.Meta{Ratings: map[string]store.Provenance{
+		"NVD": {CoversSince: since, CoversSinceKnown: true, Window: coverageLabel(since)},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	return path
+}
+
+func mergedNVDCoverage(t *testing.T, seed string, a fakeAnnotator) store.Provenance {
+	t.Helper()
+	dst := filepath.Join(t.TempDir(), "vulnerability.db")
+	var out, errOut bytes.Buffer
+	if code := Update(context.Background(), dst, seed, "", nil, []provider.Annotator{a}, nil, &out, &errOut); code != 0 {
+		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	db, err := store.Open(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	m, err := db.Meta()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m.Ratings["NVD"]
+}
+
+// A backfill slice that reaches the range already covered extends the claim
+// backwards: the two windows describe one span (D65).
+func TestUpdate_BackfillSliceThatTouchesExtendsCoverage(t *testing.T) {
+	covered := time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC)
+	seed := seedCovering(t, covered, 3)
+
+	// [2025-12-16, 2026-04-15] -- its end IS where the seed's coverage starts.
+	slice := fakeAnnotator{name: "NVD",
+		coversSince: time.Date(2025, 12, 16, 0, 0, 0, 0, time.UTC),
+		coversUntil: covered,
+		ratings:     []advisory.Rating{{CVE: "CVE-2019-1", Source: "NVD"}},
+	}
+
+	got := mergedNVDCoverage(t, seed, slice)
+	if !got.CoversSince.Equal(slice.coversSince) {
+		t.Errorf("CoversSince = %v, want %v — a touching slice extends the covered span",
+			got.CoversSince, slice.coversSince)
+	}
+	// The span now runs to wherever the SEED reached, not to where the slice
+	// stopped. Leaving the slice's end in place would say the artifact covers
+	// nothing since April — false in the direction that matters, because
+	// tomorrow's nightly would then look like it was WIDENING coverage and
+	// the publish guard would wave a narrower artifact through.
+	if !got.CoversUntil.IsZero() {
+		t.Errorf("CoversUntil = %v, want zero (the seed reaches the present)", got.CoversUntil)
+	}
+}
+
+// A slice that stops short of the covered range leaves a hole, and the claim
+// must NOT jump across it. The ratings it fetched are still in the database;
+// what this pins is that coverage describes a span rather than a set of
+// disconnected fragments -- otherwise `db status` and the publish guard both
+// read a database that says it covers a year it has four months of.
+func TestUpdate_BackfillSliceWithAGapDoesNotExtendCoverage(t *testing.T) {
+	covered := time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)
+	seed := seedCovering(t, covered, 3)
+
+	// [2025-12-16, 2026-04-15] -- four months short of where coverage starts.
+	slice := fakeAnnotator{name: "NVD",
+		coversSince: time.Date(2025, 12, 16, 0, 0, 0, 0, time.UTC),
+		coversUntil: time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC),
+		ratings:     []advisory.Rating{{CVE: "CVE-2019-1", Source: "NVD"}},
+	}
+
+	got := mergedNVDCoverage(t, seed, slice)
+	if !got.CoversSince.Equal(covered) {
+		t.Errorf("CoversSince = %v, want the seed's %v — the slice leaves a four-month hole",
+			got.CoversSince, covered)
+	}
+
+	// The ratings themselves are kept regardless: the gap bounds the CLAIM,
+	// not the data. Asserting only the date would pass on an implementation
+	// that dropped the slice entirely.
+	if got.Records == 0 {
+		t.Error("Records = 0; the slice's ratings must still be stored")
+	}
+}
+
+// A run with no explicit end reaches the present, which is what every run
+// before D65 did -- so the ordinary nightly path is unaffected by the gap rule.
+func TestUpdate_RunWithNoExplicitEndStillExtendsCoverage(t *testing.T) {
+	covered := time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)
+	seed := seedCovering(t, covered, 3)
+
+	older := fakeAnnotator{name: "NVD",
+		coversSince:      time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC),
+		coversUntilKnown: true, // ran up to now
+		ratings:          []advisory.Rating{{CVE: "CVE-2019-1", Source: "NVD"}},
+	}
+
+	got := mergedNVDCoverage(t, seed, older)
+	if !got.CoversSince.Equal(older.coversSince) {
+		t.Errorf("CoversSince = %v, want %v", got.CoversSince, older.coversSince)
 	}
 }

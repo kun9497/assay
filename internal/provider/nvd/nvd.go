@@ -43,6 +43,12 @@ const (
 type Options struct {
 	APIKey  string
 	BaseURL string
+	// Until bounds the window's LATE end. Zero means "up to now", which is
+	// every run except a backfill slice (D65): restoring ratings for records
+	// nobody has touched recently means asking for a range that ENDS in the
+	// past, and without this the window always ran to the present and no
+	// amount of re-running could reach them.
+	Until time.Time
 	// PageSize and BaseURL default from their zero value (0 and "") because
 	// neither is ever a meaningful request on its own - nobody wants a
 	// literal zero-record page or an empty URL, so the zero value is a safe,
@@ -88,6 +94,7 @@ type Options struct {
 
 type Provider struct {
 	since    time.Time
+	until    time.Time
 	apiKey   string
 	baseURL  string
 	pageSize int
@@ -128,6 +135,7 @@ func New(opts Options) *Provider {
 		// generous timeout leaves room for a slow connection without hanging
 		// forever.
 		since: opts.Since,
+		until: opts.Until,
 		// Measured, not guessed: a single 2,000-record page took 114.5s
 		// uncompressed and 135.8s with gzip on 2026-08-03, and the same
 		// request had taken 33s earlier the same day. Two minutes - the
@@ -301,6 +309,12 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 		// pagination.
 		until = nowUTC()
 	)
+	// A slice with an explicit end asks for a range that closed in the past.
+	// A future or zero end stays "now": clamping to now rather than refusing
+	// keeps a clock skew from turning into a failed seven-hour build.
+	if !p.until.IsZero() && p.until.Before(until) {
+		until = p.until
+	}
 	// Clamped here, where both ends are finally known, rather than where
 	// Since was chosen.
 	//
@@ -330,6 +344,10 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 	// compares these, and comparing an unhonoured request would let a
 	// narrower artifact claim to be as broad as the flag it was given.
 	prov.CoversSince, prov.CoversSinceKnown = since, true
+	// The end is recorded whether or not it was asked for, because "ran up
+	// to now" and "not recorded" are different facts and the merge below
+	// has to tell a slice that ENDS in the past from one that does not.
+	prov.CoversUntil, prov.CoversUntilKnown = p.until, true
 	// A do-while shape: the total is unknown before the first response, so
 	// the loop condition alone cannot gate the first request.
 	for first || startIndex < total {
