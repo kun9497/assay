@@ -5,13 +5,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/google/go-containerregistry/pkg/registry"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
+
 	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/dbartifact"
 	"github.com/kun9497/assay/internal/dbcmd"
 	"github.com/kun9497/assay/internal/provider/knvd"
 	"github.com/kun9497/assay/internal/provider/nvd"
@@ -1242,13 +1249,15 @@ func TestRun_DBBuildReplacesUpdate(t *testing.T) {
 	})
 }
 
-// `db build --seed <ref>` must reach Pull, and a Pull failure must fail the
-// whole build rather than falling through to a from-empty build -- the
-// scheduled builder passes --seed every night, so a registry outage has to
-// be loud (Task 5's whole point). 127.0.0.1:1 is a loopback address nothing
-// listens on, the same unreachable-registry fixture internal/dbcmd's own
-// Push/Pull tests and TestRun_DBBuildReplacesUpdate use, so this needs no
-// network.
+// `db build --seed <ref>` must reach PullSeed, and a PullSeed failure must
+// fail the whole build rather than falling through to a from-empty build --
+// the scheduled builder passes --seed every night, so a registry outage has
+// to be loud (Task 5's whole point). 127.0.0.1:1 is a loopback address
+// nothing listens on -- a connection failure, not a MANIFEST_UNKNOWN, so
+// PullSeed's D-seed-bootstrap retry never fires and this exercises the same
+// plain fetch-failure path Pull itself has, the same unreachable-registry
+// fixture internal/dbcmd's own Push/Pull tests and TestRun_DBBuildReplacesUpdate
+// use, so this needs no network.
 //
 // ASSAY_DB_DIR is pointed under a regular file so MkdirAll beneath it can
 // never succeed -- not to make the assertion pass, but to make the negative
@@ -1270,11 +1279,12 @@ func TestRun_DBBuildWithSeedFailsRatherThanBuildingFromEmpty(t *testing.T) {
 		t.Errorf("db build --seed against an unreachable registry = %d, want %d\nstderr:\n%s",
 			code, exitError, stderr.String())
 	}
-	// Positive proof Pull ran at all: dbcmd.Pull is the only function that
-	// writes this exact "fetching <ref>…" line (dbcmd.Update's own progress
-	// lines name a provider or annotator instead).
+	// Positive proof PullSeed ran at all: dbcmd.Pull and dbcmd.PullSeed are
+	// the only functions that write this exact "fetching <ref>…" line
+	// (dbcmd.Update's own progress lines name a provider or annotator
+	// instead), and Pull is no longer what `db build --seed` calls.
 	if !strings.Contains(stderr.String(), "fetching 127.0.0.1:1/assay-db:v6") {
-		t.Errorf("stderr does not show Pull's own fetch line, so --seed may not be reaching Pull at all:\n%s", stderr.String())
+		t.Errorf("stderr does not show PullSeed's own fetch line, so --seed may not be reaching PullSeed at all:\n%s", stderr.String())
 	}
 	// If dbcmd.Update ran despite the failed seed, ITS OWN MkdirAll (against
 	// the same blocked ASSAY_DB_DIR) would have printed this exact message
@@ -1283,6 +1293,110 @@ func TestRun_DBBuildWithSeedFailsRatherThanBuildingFromEmpty(t *testing.T) {
 	if strings.Contains(stderr.String(), "create database directory") {
 		t.Errorf("dbcmd.Update ran even though the seed could not be read -- a seed "+
 			"failure must fail the whole build, never fall back to building from empty:\n%s", stderr.String())
+	}
+}
+
+// publishSeedArtifact packs a small, genuinely valid database and pushes it
+// to ref under the given schema annotation. It exists so this package's own
+// tests can populate an in-memory registry the way internal/dbcmd's own
+// pull_test.go does (publishedFrom) -- reimplemented here because that
+// helper is unexported across the package boundary.
+func publishSeedArtifact(t *testing.T, ref string, schema int) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "seed.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.PutRating(advisory.Rating{CVE: "CVE-2026-BOOTSTRAP", Source: "NVD"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(store.Meta{BuiltAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	img, err := dbartifact.Pack(path, dbartifact.Meta{SchemaVersion: schema, BuiltAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := name.ParseReference(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.Write(target, img); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRun_DBBuildSeedReachesPullSeedsBootstrapFallback is the caller-side
+// proof for the D-seed-bootstrap fix: `db build --seed` must reach
+// dbcmd.PullSeed, not dbcmd.Pull (CLAUDE.md: "the helper is covered; nothing
+// calls it"). The two differ on exactly this input -- Pull has no retry and
+// refuses a MANIFEST_UNKNOWN outright -- so if main.go's build case ever
+// reverted to dbcmd.Pull, this test goes red while every dbcmd-level test of
+// PullSeed itself (internal/dbcmd/pullseed_test.go) stays green.
+//
+// This is the exact failure the first :v9 publish hit: the nightly seed
+// points at `assay db ref`, this binary's own schema tag, which cannot exist
+// before the schema's own first push.
+//
+// ASSAY_DB_DIR is pointed under a regular file, the same blocker trick
+// TestRun_DBBuildWithSeedFailsRatherThanBuildingFromEmpty uses, so that once
+// PullSeed succeeds and control reaches dbcmd.Update, Update's own first
+// step (MkdirAll on this same blocked path) fails immediately -- before any
+// provider runs and, critically, before the real OSV network fetch
+// dbUpdateProviders wires in by default (TestRun_DBBuildReplacesUpdate's own
+// comment explains why a routing test must never be able to perform that).
+// The exit code this produces (exitError, from Update's own MkdirAll
+// failure) is therefore identical whether PullSeed is wired correctly or
+// not; what differs is the STDERR content asserted below, which is why both
+// assertions matter and neither alone would prove the wiring.
+func TestRun_DBBuildSeedReachesPullSeedsBootstrapFallback(t *testing.T) {
+	srv := httptest.NewServer(registry.New())
+	defer srv.Close()
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := u.Host
+
+	prevRef := fmt.Sprintf("%s/assay-db:v%d", host, store.SchemaVersion-1)
+	curRef := fmt.Sprintf("%s/assay-db:v%d", host, store.SchemaVersion)
+	// Only the PREVIOUS schema's tag is published -- the registry state a
+	// brand new schema's tag has on its own first day, before its own first
+	// push.
+	publishSeedArtifact(t, prevRef, store.SchemaVersion-1)
+
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ASSAY_DB_DIR", filepath.Join(blocker, "sub"))
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"db", "build", "--seed", curRef}, &stdout, &stderr)
+	if code != exitError {
+		t.Fatalf("db build --seed with only the previous schema published = %d, want %d "+
+			"(dbcmd.Update's own MkdirAll must still fail against the blocked ASSAY_DB_DIR)\nstderr:\n%s",
+			code, exitError, stderr.String())
+	}
+	// PullSeed's own fallback line: reached only if the build case calls
+	// PullSeed, not Pull -- Pull would have failed outright on the
+	// MANIFEST_UNKNOWN with no retry, and neither line below would appear.
+	if !strings.Contains(stderr.String(), "the previous schema") {
+		t.Errorf("stderr does not show PullSeed's D-seed-bootstrap fallback, so --seed may "+
+			"still be reaching dbcmd.Pull instead of dbcmd.PullSeed:\n%s", stderr.String())
+	}
+	// Positive proof the fallback SUCCEEDED and control reached
+	// dbcmd.Update, not merely that a "previous schema" line was printed
+	// before a second, unrelated failure: Update's own first line, from its
+	// own MkdirAll against the still-blocked ASSAY_DB_DIR.
+	if !strings.Contains(stderr.String(), "create database directory") {
+		t.Errorf("stderr does not show dbcmd.Update being reached after the seed fallback, "+
+			"so PullSeed's bootstrap retry may not have actually succeeded:\n%s", stderr.String())
 	}
 }
 
