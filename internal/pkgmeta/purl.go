@@ -86,6 +86,13 @@ var purlTypeToEcosystem = map[string]string{
 	// OSV writes pkg:cargo/<crate> and keys the ecosystem "crates.io"; the
 	// purl type and the ecosystem name differ, which is why this map exists.
 	"cargo": "crates.io",
+	// gem, nuget and composer also differ from their OSV ecosystem key;
+	// maven happens to share its spelling, but is listed all the same so the
+	// map stays the single place every purl type is resolved.
+	"gem":      "RubyGems",
+	"nuget":    "NuGet",
+	"composer": "Packagist",
+	"maven":    "Maven",
 }
 
 func EcosystemForPURLType(typ string) (string, bool) {
@@ -100,32 +107,42 @@ func EcosystemForPURLType(typ string) (string, bool) {
 // mismatch would surface as a lookup that returns nothing — no error, no skip,
 // just a package silently reported as clean.
 //
-// PyPI is the case that matters. PEP 503 lowercases and folds runs of "-", "_"
-// and "." into a single "-", and OSV publishes only normalized names: all 1,586
-// distinct PyPI names in the live dump are already in that form. syft is not —
-// it emits pkg:pypi/Jinja2 and pkg:pypi/PyYAML verbatim from the installed
-// metadata, so without this every mixed-case PyPI package missed every advisory
-// it had.
+// PyPI is the case that matters most. PEP 503 lowercases and folds runs of
+// "-", "_" and "." into a single "-", and OSV publishes only normalized names:
+// all 1,586 distinct PyPI names in the live dump are already in that form.
+// syft is not — it emits pkg:pypi/Jinja2 and pkg:pypi/PyYAML verbatim from the
+// installed metadata, so without this every mixed-case PyPI package missed
+// every advisory it had.
+//
+// NuGet package IDs are case-insensitive — the NuGet client and gallery both
+// treat "Newtonsoft.Json" and "newtonsoft.json" as one package — and OSV's own
+// advisory names are not consistently cased: measured, 98% of advisory names
+// in the live NuGet dump are mixed-case. A lowercase fold is enough; NuGet has
+// no PEP 503-style separator folding to also apply.
 //
 // Go and npm names are case-sensitive in their own registries and OSV preserves
-// them, so they are returned unchanged.
+// them, so they — and every other ecosystem — are returned unchanged.
 func NormalizeName(ecosystem, name string) string {
-	if ecosystem != "PyPI" {
+	switch ecosystem {
+	case "PyPI":
+		var b strings.Builder
+		b.Grow(len(name))
+		var lastSep bool
+		for _, r := range strings.ToLower(name) {
+			if r == '-' || r == '_' || r == '.' {
+				if !lastSep {
+					b.WriteByte('-')
+					lastSep = true
+				}
+				continue
+			}
+			lastSep = false
+			b.WriteRune(r)
+		}
+		return b.String()
+	case "NuGet":
+		return strings.ToLower(name)
+	default:
 		return name
 	}
-	var b strings.Builder
-	b.Grow(len(name))
-	var lastSep bool
-	for _, r := range strings.ToLower(name) {
-		if r == '-' || r == '_' || r == '.' {
-			if !lastSep {
-				b.WriteByte('-')
-				lastSep = true
-			}
-			continue
-		}
-		lastSep = false
-		b.WriteRune(r)
-	}
-	return b.String()
 }

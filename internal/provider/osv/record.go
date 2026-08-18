@@ -88,6 +88,39 @@ func ubuntuLineage(ecosystem string) bool {
 // "Alpine:vX.Y" entry the archive contains, not just an exact "Alpine" that
 // never appears in real data. Narrowing this back to exact equality would
 // match nothing at all and silently ingest zero Alpine records.
+// foldPackagistEcosystem folds a package-repository-qualified Packagist key
+// ("Packagist:https://packages.drupal.org/8", used for Drupal contrib
+// modules) down to the plain "Packagist" family key before it is stored.
+//
+// familyMatches already prefix-matches the family, so a record naming this
+// qualified key is ingested either way (matching alone is not the problem).
+// The problem is what gets STORED: NormalizeName and EcosystemForPURLType
+// only ever build the plain "Packagist" key from a purl or a package name —
+// neither can construct "Packagist:https://packages.drupal.org/8" — so a
+// lookup can never reach a record stored under the qualified key. Preserving
+// it would be D13's "store losslessly" taken past the point it helps: the
+// data would be there and permanently unreachable, which is worse than not
+// storing the distinction at all.
+//
+// Measured 2026-08-18: 521 records in the Packagist archive carry this
+// qualified ecosystem, every one a drupal/* package name. The fold cannot
+// collide with an unrelated package: "drupal" is a vendor namespace reserved
+// for Drupal on packages.org, so drupal/* never names anything else there.
+//
+// Packagist only — deliberately not generalized to every "family:qualifier"
+// shape. Distro families (Alpine:v3.19, Debian:12, Red Hat:9, Ubuntu:24.04)
+// carry their RELEASE in that position, and the release is part of the key by
+// design (D6): folding those the same way would merge every release into one
+// bucket and reintroduce the exact miss D6 exists to prevent. Packagist has
+// no such release axis — the qualifier here names a secondary repository, not
+// a version — so nothing depends on keeping it.
+func foldPackagistEcosystem(ecosystem string) string {
+	if rest, ok := strings.CutPrefix(ecosystem, "Packagist:"); ok && rest != "" {
+		return "Packagist"
+	}
+	return ecosystem
+}
+
 func familyMatches(ecosystem, want string) bool {
 	// The rule was written as a special case for "Alpine" and is general: a
 	// distro archive is fetched under its family name and holds
@@ -200,7 +233,11 @@ func Convert(data []byte, wantEcosystem string) (advisory.Advisory, bool, error)
 			matchesWanted = true
 		}
 		aff := advisory.Affected{
-			Ecosystem: ra.Package.Ecosystem,
+			// Drupal contrib records name "Packagist:<repository URL>"; folded
+			// to plain "Packagist" here, at ingestion, so no lookup path has to
+			// know the qualified shape exists (foldPackagistEcosystem's own
+			// comment; same rationale as D16).
+			Ecosystem: foldPackagistEcosystem(ra.Package.Ecosystem),
 			Name:      ra.Package.Name,
 			Versions:  ra.Versions, // verbatim: OSV publishes non-canonical forms (D13)
 		}

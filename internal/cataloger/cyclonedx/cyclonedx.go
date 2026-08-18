@@ -146,7 +146,16 @@ func catalogOne(c component, distroEcosystem string, target *pkgmeta.Target, sta
 	// would make every apk lookup miss its advisory.
 	name := p.Name
 	if p.Type != "apk" && p.Namespace != "" {
-		name = p.Namespace + "/" + p.Name
+		// The purl spec always separates namespace and name with "/"
+		// (pkg:maven/group/artifact), but OSV's Maven advisories name the
+		// package "group:artifact" — measured 12,457/12,457 live records.
+		// Joining with "/" here would build a name OSV never publishes and
+		// every Maven package would silently miss its advisory.
+		sep := "/"
+		if p.Type == "maven" {
+			sep = ":"
+		}
+		name = p.Namespace + sep + p.Name
 	}
 
 	loc := pkgmeta.Location{Path: "sbom"}

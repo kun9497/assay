@@ -173,7 +173,10 @@ var _ = advisory.RangeEcosystem
 // without it, a mutation removing the entry left every test in the package
 // green.
 func TestEcosystems_IncludesUbuntu(t *testing.T) {
-	for _, want := range []string{"Ubuntu", "Debian", "Alpine", "crates.io"} {
+	for _, want := range []string{
+		"Ubuntu", "Debian", "Alpine", "crates.io",
+		"RubyGems", "Packagist", "NuGet", "Maven",
+	} {
 		if !slices.Contains(Ecosystems, want) {
 			t.Errorf("Ecosystems = %v, want it to include %q", Ecosystems, want)
 		}

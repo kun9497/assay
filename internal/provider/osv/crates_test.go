@@ -79,3 +79,66 @@ func TestFetch_CratesIO(t *testing.T) {
 		t.Errorf("Provenance.Ecosystems = %v, want [crates.io]", prov.Ecosystems)
 	}
 }
+
+// TestFetch_RubyGems is TestFetch_CratesIO's counterpart for RubyGems, with
+// the MAL-dropping fixture style from TestFetch in fetch_test.go folded in:
+// the live RubyGems archive is measured at 75% MAL-* records (D15), so this
+// drives Fetch over an archive holding one of each and checks that only the
+// GHSA record survives, keyed "RubyGems" — not just that the Ecosystems list
+// contains the string (D62's own reasoning, same as crates.io above).
+func TestFetch_RubyGems(t *testing.T) {
+	const ghsaRecord = `{
+	  "id": "GHSA-rails-x1y2z3",
+	  "aliases": ["CVE-2024-12345"],
+	  "modified": "2026-08-01T00:00:00Z",
+	  "affected": [{
+	    "package": {"name": "rails", "ecosystem": "RubyGems", "purl": "pkg:gem/rails"},
+	    "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "7.0.8"}]}]
+	  }],
+	  "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"}]
+	}`
+	const malRecord = `{
+	  "id": "MAL-2024-9999",
+	  "modified": "2026-08-01T00:00:00Z",
+	  "affected": [{
+	    "package": {"name": "evil-gem", "ecosystem": "RubyGems"},
+	    "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}]}]
+	  }]
+	}`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/RubyGems/all.zip" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write(zipWith(t, map[string]string{
+			"GHSA-rails-x1y2z3.json": ghsaRecord,
+			"MAL-2024-9999.json":     malRecord,
+		}))
+	}))
+	defer srv.Close()
+
+	p := New([]string{"RubyGems"}, srv.URL)
+
+	var got []advisory.Advisory
+	prov, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
+		got = append(got, a)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "GHSA-rails-x1y2z3" {
+		t.Fatalf("ingested %v, want only the one GHSA record (MAL-* must be dropped, D15)", got)
+	}
+	a := got[0]
+	if len(a.Affected) != 1 || a.Affected[0].Ecosystem != "RubyGems" {
+		t.Fatalf("Affected = %+v, want one entry keyed RubyGems", a.Affected)
+	}
+	if a.Affected[0].Name != "rails" {
+		t.Errorf("package = %q, want rails", a.Affected[0].Name)
+	}
+	if len(prov.Ecosystems) != 1 || prov.Ecosystems[0] != "RubyGems" {
+		t.Errorf("Provenance.Ecosystems = %v, want [RubyGems]", prov.Ecosystems)
+	}
+}

@@ -571,6 +571,7 @@ func TestComparerName_AgreesWithVersionFor(t *testing.T) {
 	// commit that teaches version.For about it.
 	for _, eco := range []string{
 		"Go", "npm", "PyPI", "crates.io",
+		"RubyGems", "Packagist", "NuGet", "Maven",
 		"Alpine:v3.19", "Alpine:v3.99",
 		"Debian:12", "Debian:forky",
 		"Red Hat:8", "Red Hat:9", "Red Hat:10",

@@ -47,7 +47,13 @@ const DefaultBaseURL = "https://osv-vulnerabilities.storage.googleapis.com"
 // record lists one entry per (lineage x release x binary package). Convert
 // drops the lineage entries as it goes (ubuntuLineage), so what is stored is
 // mainline only and the stream is never held whole.
-var Ecosystems = []string{"Go", "npm", "PyPI", "crates.io", "Alpine", "Debian", "Ubuntu"}
+// RubyGems, Packagist, NuGet and Maven join the language ecosystems on the
+// same terms as crates.io: a plain archive path, a plain (unversioned)
+// ecosystem key (D6 does not apply to them, only to distros).
+var Ecosystems = []string{
+	"Go", "npm", "PyPI", "crates.io", "RubyGems", "Packagist", "NuGet", "Maven",
+	"Alpine", "Debian", "Ubuntu",
+}
 
 type Provider struct {
 	ecosystems []string

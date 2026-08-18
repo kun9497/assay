@@ -17,8 +17,9 @@
 
 🚧 **초기 개발 단계. Alpine 컨테이너는 끝에서 끝까지 스캔되고, 다른 배포판은 아직입니다.**
 
-`assay db update`가 배포된 데이터베이스를 받아옵니다 — Go, npm, PyPI, 그리고 **Alpine**을
-중앙에서 빌드해 매일 갱신한 것입니다 — 그리고 `assay scan`이 거기에 매칭합니다. **컨테이너
+`assay db update`가 배포된 데이터베이스를 받아옵니다 — Go, npm, PyPI, Maven, RubyGems, NuGet,
+Packagist, 그리고 **Alpine**을 중앙에서 빌드해 매일 갱신한 것입니다 — 그리고 `assay scan`이
+거기에 매칭합니다. **컨테이너
 이미지를 직접 읽으므로 syft가 더 이상 필요하지 않습니다.** 실제 대상에서 grype와 동일한 finding을
 보고합니다: 개수만 같은 것이 아니라 CVE 집합이 같습니다. [로드맵](#로드맵) 참조.
 
@@ -408,7 +409,7 @@ CI에서는 "뭔가 찾았다"와 "돌지 못했다"를 구분하는 것이 중�
 | `Source` | 타깃을 열어 파일 접근 제공, 레이어 출처를 담음 | **레지스트리**, **`docker save` tarball**, **OCI layout**, **dir**, **binary** |
 | `Cataloger` | 파일 → `[]Package` | **apk**, **os-release**, **cyclonedx**, **dpkg**, **rpmdb**, **go-mod**, **go-binary**, **npm**, **yarn**, **pypi 락파일들**, **cargo**, jar |
 | `Store` | 권고 조회 | **bbolt** |
-| `Comparer` | 한 생태계 안에서 `Compare(a, b string) (int, error)` | **semver**, **PEP 440**, **apk**, **deb**, **rpm** |
+| `Comparer` | 한 생태계 안에서 `Compare(a, b string) (int, error)` | **semver**, **PEP 440**, **apk**, **deb**, **rpm**, **gem**, **composer**, **nuget**, **maven** |
 | `Provider` | 업스트림 피드 → `[]Advisory` | **OSV**, **Red Hat CSAF VEX** |
 
 `Provider` 옆에는 두 인터페이스가 더 있습니다. `Provider` 안에 넣지 않은 이유는 이 둘이 finding에
@@ -522,6 +523,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       있으며, 키(`crates.io`)가 purl 타입(`cargo`)과 다른 첫 생태계
 - [x] `uv.lock` (D63). TOML 리더가 필요하다던 D61의 주장을 정정합니다 — uv 자신의 락파일에서
       패키지 77개 중 77개, `Cargo.lock`과 스캐너를 공유해 둘이 어긋날 수 없습니다
+- [x] Maven, RubyGems, NuGet, Packagist를 OSV에서 (D68) — 정본 소스 comparer 네 개, Drupal
+      contrib 폴드, 그리고 끝에서 끝까지 동작하는 SBOM 스캔; lockfile cataloger는 다음
+      슬라이스
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건

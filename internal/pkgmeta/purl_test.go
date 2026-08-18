@@ -71,6 +71,17 @@ func TestNormalizeName(t *testing.T) {
 		{"Go", "github.com/Masterminds/semver/v3", "github.com/Masterminds/semver/v3"},
 		{"npm", "@jupyterlab/help-extension", "@jupyterlab/help-extension"},
 		{"npm", "JSONStream", "JSONStream"},
+		// NuGet package IDs are case-insensitive; measured, 98% of advisory
+		// names in the live dump are mixed-case, so a lowercase fold (no PEP
+		// 503 separator folding) is what keeps a lookup from missing them.
+		{"NuGet", "Newtonsoft.Json", "newtonsoft.json"},
+		{"NuGet", "newtonsoft.json", "newtonsoft.json"},
+		{"NuGet", "System.Text.Json", "system.text.json"},
+		// RubyGems, Packagist and Maven are case-sensitive and pass through
+		// unchanged, the same as Go and npm above.
+		{"RubyGems", "Rails", "Rails"},
+		{"Packagist", "Drupal/Core", "Drupal/Core"},
+		{"Maven", "org.apache.logging.log4j:log4j-core", "org.apache.logging.log4j:log4j-core"},
 	}
 	for _, tc := range cases {
 		if got := NormalizeName(tc.eco, tc.in); got != tc.want {
@@ -85,7 +96,10 @@ func TestEcosystemForPURLType(t *testing.T) {
 	// identity function with exceptions. Getting it wrong is silent: the
 	// lookup lands in a bucket no provider writes and the package reports
 	// clean.
-	cases := map[string]string{"golang": "Go", "npm": "npm", "pypi": "PyPI", "cargo": "crates.io"}
+	cases := map[string]string{
+		"golang": "Go", "npm": "npm", "pypi": "PyPI", "cargo": "crates.io",
+		"gem": "RubyGems", "nuget": "NuGet", "composer": "Packagist", "maven": "Maven",
+	}
 	for typ, want := range cases {
 		got, ok := EcosystemForPURLType(typ)
 		if !ok || got != want {

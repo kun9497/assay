@@ -2698,6 +2698,52 @@ bootstrap must carry.
 
 ---
 
+### D68 — Four language ecosystems, and the comparers that carry them
+
+**Decision.** Maven, RubyGems, NuGet and Packagist are ingested from OSV and matched with
+per-ecosystem comparers ported from each ecosystem's canonical implementation: Maven's
+ComparableVersion (3.9.x — the line GHSA ranges were authored against, not Maven 4),
+rubygems' Gem::Version, NuGet.Versioning's VersionComparer.Default, and composer's
+VersionParser over PHP's version_compare.
+
+**Measured before built** (2026-08-18): 6,948 / 4,656 / 1,877 / 6,938 records; RubyGems is
+75% MAL-* (excluded, D15) so its real corpus is ~1,078; ranges are almost entirely
+ECOSYSTEM-typed, so the comparers carry the whole matching burden — which is why each was
+specified by research against the canonical source, oracle-validated (composer 98/98 against
+its own test data; Maven replaying its entire ~600-assertion suite), and implemented in the
+main loop per D9's delegation rule. All four tables passed on first run.
+
+**The Drupal fold.** The Packagist archive carries 521 records keyed
+"Packagist:https://packages.drupal.org/8" — Drupal contrib advisories, all drupal/* names
+with pkg:composer purls. They are ingested with the key REWRITTEN to plain "Packagist":
+no lookup can ever construct the qualified key, so preserving it stores unreachable data,
+and the drupal vendor is reserved on packagist.org so the fold cannot collide. Packagist
+only — a distro's release qualifier (Alpine:v3.19) is part of its key by design (D6), and
+the fold's own test pins that it must NOT generalize.
+
+**Name plumbing the purls forced.** Maven's OSV names are group:artifact (12,457 of 12,457
+measured) while its purls are pkg:maven/group/artifact, so the CycloneDX namespace join is
+":" for maven and "/" for everything else. NuGet package IDs are case-insensitive (98%
+of advisory names are mixed-case), so NormalizeName lowercases NuGet — one definition,
+shared by store and matcher, as always.
+
+**Recorded divergences from the canonical implementations**, all in the refusing direction:
+an empty version errors everywhere (rubygems reads it as 0, Maven as equal-to-0 — both
+would mark a package clean on corrupt input); NuGet's internal-whitespace tolerance
+("1. 2 .3") is rejected; Maven digits are ASCII-only (Maven 4's rule; 3.x accepts Unicode
+digits via Character.isDigit). Faithful oddities kept: NuGet's int32 label overflow falls
+back to string comparison, composer's patch > stable and uppercase-STABLE-below-dev, and
+Maven's BigInteger-zero outranking int zero.
+
+**Verified end to end** on a seven-probe SBOM: log4shell at critical 10.0 through the Maven
+namespace join, Spring's .RELEASE alias resolving in a live lookup, Newtonsoft.Json through
+the NuGet case fold, DRUPAL-CONTRIB-2017-082 through the Packagist fold, and nokogiri's
+1.13.0.rc1 caught inside its vulnerable range through Gem prerelease ordering. SBOM scans
+work today; lockfile catalogers (Gemfile.lock, composer.lock, packages.lock.json) are the
+next slice.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes
