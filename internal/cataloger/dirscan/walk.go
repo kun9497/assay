@@ -45,6 +45,16 @@ const (
 	// the two facts this project exists to keep apart.
 	KindPnpmLock Kind = "pnpm-lock.yaml"
 	KindUVLock   Kind = "uv.lock"
+
+	// KindGemfileLock is bundler's lockfile. Capitalized as bundler writes
+	// it, the same as Pipfile.lock - matching is by exact equality, so a
+	// lowercase "gemfile.lock" is not recognized.
+	KindGemfileLock  Kind = "Gemfile.lock"
+	KindComposerLock Kind = "composer.lock"
+	// KindNuGetLock is packages.lock.json, NuGet's opt-in lockfile - opt-in
+	// because unlike the other ecosystems here, a bare NuGet project has no
+	// lockfile at all until "RestorePackagesWithLockFile" is turned on.
+	KindNuGetLock Kind = "packages.lock.json"
 )
 
 // Manifest is one recognized file found by the walk.
@@ -82,6 +92,10 @@ var manifestKinds = map[string]Kind{
 	"Cargo.lock":     KindCargoLock,
 	"pnpm-lock.yaml": KindPnpmLock,
 	"uv.lock":        KindUVLock,
+
+	"Gemfile.lock":       KindGemfileLock,
+	"composer.lock":      KindComposerLock,
+	"packages.lock.json": KindNuGetLock,
 }
 
 // maxDepth is how many directory levels below root are descended into. A

@@ -16,9 +16,12 @@ import (
 	"sort"
 
 	"github.com/kun9497/assay/internal/cataloger/cargolock"
+	"github.com/kun9497/assay/internal/cataloger/composerlock"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
+	"github.com/kun9497/assay/internal/cataloger/gemlock"
 	"github.com/kun9497/assay/internal/cataloger/gomod"
 	"github.com/kun9497/assay/internal/cataloger/npmlock"
+	"github.com/kun9497/assay/internal/cataloger/nugetlock"
 	"github.com/kun9497/assay/internal/cataloger/pipfilelock"
 	"github.com/kun9497/assay/internal/cataloger/poetrylock"
 	"github.com/kun9497/assay/internal/cataloger/requirements"
@@ -260,6 +263,30 @@ func parseManifest(root string, m Manifest) ([]pkgmeta.Package, cyclonedx.Stats,
 
 	case KindUVLock:
 		pkgs, s, perr := uvlock.Parse(full)
+		if perr != nil {
+			return nil, cyclonedx.Stats{}, nil, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
+		}
+		relocate(pkgs, m.Path)
+		return pkgs, s, nil, nil
+
+	case KindGemfileLock:
+		pkgs, s, perr := gemlock.Parse(full)
+		if perr != nil {
+			return nil, cyclonedx.Stats{}, nil, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
+		}
+		relocate(pkgs, m.Path)
+		return pkgs, s, nil, nil
+
+	case KindComposerLock:
+		pkgs, s, perr := composerlock.Parse(full)
+		if perr != nil {
+			return nil, cyclonedx.Stats{}, nil, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
+		}
+		relocate(pkgs, m.Path)
+		return pkgs, s, nil, nil
+
+	case KindNuGetLock:
+		pkgs, s, perr := nugetlock.Parse(full)
 		if perr != nil {
 			return nil, cyclonedx.Stats{}, nil, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
 		}
