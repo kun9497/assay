@@ -226,13 +226,22 @@ func run(args []string, stdout, stderr io.Writer) int {
 				}
 				defer os.RemoveAll(dir)
 				seedPath = filepath.Join(dir, "seed.db")
-				// Pull's own exit code and stderr already explain what went
+				// dbcmd.PullSeed, not dbcmd.Pull: a --seed input tolerates a
+				// schema one behind this binary's (D67's own seed contract)
+				// and retries once against the previous schema's tag on a
+				// MANIFEST_UNKNOWN (D-seed-bootstrap, symmetric with push.go's
+				// D60) -- the failure the scheduled builder hit on the day a
+				// new schema's tag had never been pushed to yet. `db update`
+				// keeps using Pull's exact match; only a --seed input is safe
+				// to loosen (see PullSeed's own doc comment for why).
+				//
+				// Its own exit code and stderr already explain what went
 				// wrong. Returning it as-is (never falling through to build
 				// from empty) is Task 5's whole point: the scheduled builder
 				// passes --seed every night, so a registry outage must fail
 				// loudly rather than quietly publish a one-day database over
 				// a complete one.
-				if code := dbcmd.Pull(context.Background(), seedPath, ref, stdout, stderr); code != 0 {
+				if code := dbcmd.PullSeed(context.Background(), seedPath, ref, stdout, stderr); code != 0 {
 					return code
 				}
 			}
