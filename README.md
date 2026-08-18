@@ -162,9 +162,9 @@ actually kept, and the toolchain — matched as the package `stdlib`, which the 
 vulnerability database holds 159 advisories against.
 
 A **directory** scan reads every lockfile it finds — `go.mod`, `package-lock.json`,
-`npm-shrinkwrap.json`, `yarn.lock` (v1), `poetry.lock`, `Pipfile.lock`, `uv.lock` and
-`Cargo.lock` — with the standard library and no `go`, `npm`, `pip`, `uv` or `cargo` invocation,
-so it works offline and needs no toolchain.
+`npm-shrinkwrap.json`, `yarn.lock` (v1), `poetry.lock`, `Pipfile.lock`, `uv.lock`, `Cargo.lock`,
+`Gemfile.lock`, `composer.lock` and `packages.lock.json` — with the standard library and no
+`go`, `npm`, `pip`, `uv` or `cargo` invocation, so it works offline and needs no toolchain.
 
 It walks subdirectories, so a `frontend/package-lock.json` is found, skipping `node_modules`,
 `vendor` and `.git` and stopping at six levels down. **Every manifest it recognizes but does
@@ -425,7 +425,7 @@ ecosystem means writing one `Cataloger` and one `Comparer` — nothing else chan
 | Interface | Responsibility | Implementations |
 |---|---|---|
 | `Source` | Open a target for file access; carries layer provenance | **registry**, **`docker save` tarball**, **OCI layout**, **dir**, **binary** |
-| `Cataloger` | Files → `[]Package` | **apk**, **os-release**, **cyclonedx**, **dpkg**, **rpmdb**, **go-mod**, **go-binary**, **npm**, **yarn**, **pypi lockfiles**, **cargo**, jar |
+| `Cataloger` | Files → `[]Package` | **apk**, **os-release**, **cyclonedx**, **dpkg**, **rpmdb**, **go-mod**, **go-binary**, **npm**, **yarn**, **pypi lockfiles**, **cargo**, **gem**, **composer**, **nuget lockfile**, jar |
 | `Store` | Advisory lookup | **bbolt** |
 | `Comparer` | `Compare(a, b string) (int, error)` within one ecosystem | **semver**, **PEP 440**, **apk**, **deb**, **rpm**, **gem**, **composer**, **nuget**, **maven** |
 | `Provider` | Upstream feed → `[]Advisory` | **OSV**, **Red Hat CSAF VEX** |
@@ -551,6 +551,8 @@ exited 0 while 24 findings went unmentioned. **Done.**
 - [x] Maven, RubyGems, NuGet and Packagist from OSV (D68) — four canonical-source comparers,
       the Drupal contrib fold, and SBOM scans end to end; lockfile catalogers are the next
       slice
+- [x] `Gemfile.lock`, `composer.lock` and `packages.lock.json` catalogers (D69) — checkouts
+      now match everywhere SBOMs do; Maven has no lockfile, its path is jar scanning
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a

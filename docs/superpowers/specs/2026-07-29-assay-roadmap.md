@@ -2744,6 +2744,41 @@ next slice.
 
 ---
 
+### D69 — Lockfile catalogers for the D68 ecosystems
+
+**Decision.** A directory scan reads `Gemfile.lock`, `composer.lock` and `packages.lock.json`,
+completing the path D68 opened: the ecosystems matched from SBOMs now match from checkouts.
+Maven deliberately has no entry here — it has no lockfile; its path is jar scanning, still
+deferred.
+
+**Gemfile.lock is indentation-sensitive and the indentation is the parser.** In the `GEM`
+section's `specs:` block, a 4-space line is an installed package and a 6-space line is that
+package's dependency CONSTRAINT (`actionpack (= 7.0.4)`) — cataloging the 6-space lines
+would invent packages at versions nothing installed. The distinction is pinned by its own
+test. `GIT` and `PATH` specs are counted and skipped, not cataloged: their source is not
+rubygems.org, and a fork at version X need not carry the fix that rubygems' X carries —
+the same treatment Pipfile's VCS entries get, for the same reason.
+
+**composer.lock keeps versions verbatim, `v` prefix and all.** The Composer comparer owns
+normalization; a cataloger that stripped the prefix would be a second definition of that
+rule, one drift away from disagreeing with it. `dev-*` versions are counted and skipped —
+the comparer refuses branches by design, and the skip is the honest surface for that
+refusal. Both `packages` and `packages-dev` are read: a dev dependency is still installed
+in CI, which is where a scan runs.
+
+**packages.lock.json walks every framework and dedupes on (name, resolved).** One package
+restored for net6.0 and net8.0 is one component, not two. `"type": "Project"` entries are
+project references with no resolved version — counted, skipped, never guessed at. Names
+keep their case verbatim; `NormalizeName` lowercases NuGet at match time, in the one
+definition store and matcher share.
+
+**What this does not change.** The exit-2 contract for recognized-but-unreadable formats
+(D61) is untouched: pnpm and yarn berry still refuse. And the counted-skip invariant —
+Components == Cataloged + skips, held by every cataloger since slice ⑥ — is asserted for
+each of the three by the caller-first tests, before the parsers' own.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes
