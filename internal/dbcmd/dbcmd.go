@@ -284,7 +284,14 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 		// label (computed above, once for every path) is what all messages
 		// call the seed — the original --seed reference, never the throwaway
 		// scratch path.
-		src, err := store.Open(seedPath)
+		//
+		// store.OpenSeedRatings, not store.Open (D67): this block reads only
+		// EachRating and Meta below, never the advisories index, so a seed one
+		// schema behind this binary's is exactly as usable here as a current
+		// one -- see OpenSeedRatings' own doc comment for why that is safe for
+		// ratings specifically and why the ratings-only path a few paragraphs
+		// up must NOT make the same swap.
+		src, err := store.OpenSeedRatings(seedPath)
 		if err != nil {
 			w.Close()
 			os.Remove(tmp)

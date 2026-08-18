@@ -62,7 +62,19 @@ import (
 // current. That is the same failure the bump to 4 exists for — a field present
 // and well-formed, only wrong — and a schema change is the only signal that
 // reaches a database already on disk.
-const SchemaVersion = 8
+//
+// Bumped to 9 for the composite-key advisory index (D67): the "advisories"
+// bucket's key changed from "<eco>\x00<name>" (value: a JSON array of
+// advisory IDs) to "<eco>\x00<name>\x00<advisoryID>" (value: nil). A
+// schema-8 database still has the old shape, and Lookup's cursor prefix scan
+// against it would not error -- Seek would simply never land on a schema-8
+// key, because every one of them is shorter than the shortest prefix the new
+// scan looks for. That is a silent false negative on every package in an old
+// database, not a crash, which is exactly the failure a schema bump exists
+// to turn into a loud one. Ratings and enrichment are unaffected -- neither
+// bucket's shape moved -- which is what lets a schema-8 seed's RATINGS still
+// be read forward by this version (see store.OpenSeedRatings).
+const SchemaVersion = 9
 
 var (
 	ErrNotFound       = errors.New("vulnerability database not found")

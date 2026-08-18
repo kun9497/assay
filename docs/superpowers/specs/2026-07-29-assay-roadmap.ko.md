@@ -103,7 +103,7 @@ inspect`로 회수할 수 있고, 어차피 계획된 explain 모드와 겹칩�
 
 ### D5 — 경로에 스키마 버전을 둔다
 
-`<cache>/assay/db/v8/vulnerability.db`. 스키마가 바뀌면 마이그레이션 코드를 쓰는 대신 새
+`<cache>/assay/db/v9/vulnerability.db`. 스키마가 바뀌면 마이그레이션 코드를 쓰는 대신 새
 디렉터리에 다시 빌드합니다. **사용자가 한 명인 프로젝트에서 마이그레이션 코드는 부채입니다.**
 
 ### D6 — 배포판 패키지는 릴리스를 키에 포함한다
@@ -2460,6 +2460,29 @@ provider를 아예 참조하지 않으므로 그것들을 그대로 가지고 �
 
 ---
 
+### D67 — (패키지, advisory) 쌍마다 인덱스 키 하나
+
+**결정.** `advisories` 인덱스는 `<eco>\x00<name>\x00<advisoryID>`를 아무 값도 없이 매핑합니다 —
+쌍마다 키 하나이며, 패키지별 ID JSON 배열을 대체합니다. 스키마 8 → 9.
+
+**왜.** 세 번 측정했습니다: D57의 배치 처리 이후에도 OSV 단계는 fetch에 쓰는 ~1.5분에 비해 저장에
+~47–54분을 씁니다. 비용의 정체는 `appendID`의 read-modify-write였습니다 — insert 한 번마다 패키지의
+ID 목록 전체를 다시 읽고, unmarshal하고, 훑고, 다시 썼으므로 인기 패키지에서는 2차식으로
+불어났습니다. 복합 키는 눈먼 `Put` 한 번입니다: 읽기도, marshal도 없고, 재-`Put`이 같은 키에 그대로
+떨어지므로 중복 제거도 공짜입니다.
+
+**조회는 `Seek(prefix)`로 커서를 훑고, 그 prefix는 구분자로 끝납니다** — 끝나지 않으면 `openssl`이
+`openssl-foo`에 prefix-매치되는데, 이는 CLAUDE.md가 문서화한 부분 문자열 충돌 부류가 키 공간으로
+옮겨온 것입니다. prefix는 모든 writer와 scan이 공유하는 단 하나의 함수에서 만들어지므로, 둘이 서로
+어긋날 수 없습니다.
+
+**부트스트랩은 v8 사고를 반복하지 않습니다.** `OpenSeedRatings`는 스키마 N−1에서 RATINGS 버킷만
+읽습니다(그 모양은 바뀌지 않았으므로). ratings-only 경로는 오래된 시드를 아예 거부하는데, advisory를
+그대로 옮겨 나르고 바뀐 것이 바로 그 advisory이기 때문입니다. D60의 가드는 첫 `:v9` push를
+`:v8`과 비교하므로, 부트스트랩이 실어 날라야 할 최저선은 rating 357,678건입니다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모
@@ -2580,7 +2603,7 @@ type Finding struct {
 ### 저장소 레이아웃
 
 ```
-<os.UserCacheDir()>/assay/db/v8/vulnerability.db      override: ASSAY_DB_DIR
+<os.UserCacheDir()>/assay/db/v9/vulnerability.db      override: ASSAY_DB_DIR
 
 buckets:
   advisories   "<ecosystem>\x00<name>"     → []AdvisoryID  primary lookup
@@ -2598,9 +2621,9 @@ ID를 `by-id`로 해석하는 데 점 조회가 한 번 더 들지만 마이크�
 
 | OS | 경로 |
 |---|---|
-| Windows | `%LocalAppData%\assay\db\v8\` |
-| macOS | `~/Library/Caches/assay/db/v8/` |
-| Linux | `~/.cache/assay/db/v8/` (`XDG_CACHE_HOME` 존중) |
+| Windows | `%LocalAppData%\assay\db\v9\` |
+| macOS | `~/Library/Caches/assay/db/v9/` |
+| Linux | `~/.cache/assay/db/v9/` (`XDG_CACHE_HOME` 존중) |
 
 값은 JSON으로 시작합니다. 스캔당 수백 번 조회 기준으로 bbolt 읽기는 마이크로초이고 디코딩이
 지배적이지만 그래도 수십 밀리초 수준입니다. 인코딩은 `Store` 뒤에 가려져 있어 호출자를 건드리지

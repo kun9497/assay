@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	bucketAdvisories = []byte("advisories") // "<ecosystem>\x00<name>"   -> []advisory ID
+	bucketAdvisories = []byte("advisories") // "<ecosystem>\x00<name>\x00<advisory ID>" -> nil
 	bucketByID       = []byte("by-id")      // "<advisory ID>"           -> the record, once
 	bucketMeta       = []byte("meta")
 	bucketRatings    = []byte("ratings")    // "<CVE>\x00<Source>" -> the Rating record, once
@@ -42,22 +42,25 @@ var (
 	_ Writer = (*Bolt)(nil)
 )
 
-// Open opens an existing database read-only. A missing or schema-mismatched
-// database is an error, never an empty result: the scan path must exit 2 with
-// instructions rather than reporting a clean scan it did not perform (D14).
-func Open(path string) (*Bolt, error) {
+// openReadOnly does the file-existence check, read-only bolt.Open and the
+// incomplete-build check every read-only entry point needs, leaving the
+// schema comparison itself to the caller: Open and OpenSeedRatings apply two
+// different rules over the same three steps, and folding them into one
+// function is what keeps the two from drifting out of sync by accident the
+// way duplicating this block would invite.
+func openReadOnly(path string) (*Bolt, Meta, error) {
 	if _, err := os.Stat(path); err != nil {
-		return nil, fmt.Errorf("%w at %s", ErrNotFound, path)
+		return nil, Meta{}, fmt.Errorf("%w at %s", ErrNotFound, path)
 	}
 	db, err := bolt.Open(path, 0o600, &bolt.Options{ReadOnly: true})
 	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", path, err)
+		return nil, Meta{}, fmt.Errorf("open %s: %w", path, err)
 	}
 	b := &Bolt{db: db}
 	m, err := b.Meta()
 	if err != nil {
 		db.Close()
-		return nil, err
+		return nil, Meta{}, err
 	}
 	// The metadata record is written once, last, by SetMeta. Its absence means
 	// the build did not finish — and an unfinished database is the dangerous
@@ -66,11 +69,69 @@ func Open(path string) (*Bolt, error) {
 	// something an external temp-file-and-rename discipline has to guarantee.
 	if m.Schema == 0 {
 		db.Close()
-		return nil, fmt.Errorf("%w at %s: no metadata record, so the last `assay db build` or `assay db update` did not finish", ErrIncomplete, path)
+		return nil, Meta{}, fmt.Errorf("%w at %s: no metadata record, so the last `assay db build` or `assay db update` did not finish", ErrIncomplete, path)
+	}
+	return b, m, nil
+}
+
+// Open opens an existing database read-only. A missing or schema-mismatched
+// database is an error, never an empty result: the scan path must exit 2 with
+// instructions rather than reporting a clean scan it did not perform (D14).
+func Open(path string) (*Bolt, error) {
+	b, m, err := openReadOnly(path)
+	if err != nil {
+		return nil, err
 	}
 	if m.Schema != SchemaVersion {
-		db.Close()
+		b.Close()
 		return nil, fmt.Errorf("%w: found v%d, want v%d", ErrSchemaMismatch, m.Schema, SchemaVersion)
+	}
+	return b, nil
+}
+
+// OpenSeedRatings opens path for reading its RATINGS bucket and metadata
+// only, accepting a database one schema behind this binary's in addition to
+// an exact match -- Open's exact-match rule, loosened narrowly for exactly
+// one caller's exactly one use.
+//
+// It exists for the D67 bootstrap hazard: the tag `db ref` names moves to
+// :v9 the moment this binary ships, so the nightly `db build --seed` run
+// that has always pointed there suddenly has nothing to pull -- no v9
+// artifact exists until the first build after this lands publishes one. The
+// operator bootstrapping that first build has to point --seed at the last
+// PUBLISHED artifact, v8, and that has to be readable for its ratings or the
+// D60 bootstrap loss (352,000 ratings, paid once already) happens again in
+// the opposite direction.
+//
+// Ratings, and only ratings, is why v8 is safe to accept here: the ratings
+// bucket's key and value shape did not move in the bump to 9 (only the
+// advisories index did -- see SchemaVersion's own doc comment), so a v8
+// artifact's EachRating and Meta reads are exactly as trustworthy as a v9's.
+// Its ADVISORIES are not: a v8 index bucket is still JSON-array-of-IDs
+// shaped, and this binary's Lookup would silently find nothing against it.
+// That is why dbcmd.Update's ratings-only path (D66), which carries a
+// seed's advisories forward as a byte-for-byte file copy, must keep using
+// Open rather than this function -- this function widens what a
+// RATINGS-only reader accepts, it does not certify a whole database as
+// current, and nothing stops a caller from misusing the *Bolt it returns to
+// read advisories anyway. The contract is enforced by this doc comment, not
+// by the type system: read this function's callers before changing what it
+// returns.
+//
+// Two schemas behind (N-2) is refused exactly like Open refuses it -- v7's
+// ratings bucket may well be identical in shape too, but nothing here
+// tracks how far back that is actually guaranteed, and a hazard this
+// function exists to bound should not grow its own tolerance without a
+// reason to.
+func OpenSeedRatings(path string) (*Bolt, error) {
+	b, m, err := openReadOnly(path)
+	if err != nil {
+		return nil, err
+	}
+	if m.Schema != SchemaVersion && m.Schema != SchemaVersion-1 {
+		b.Close()
+		return nil, fmt.Errorf("%w: found v%d, want v%d (ratings) or v%d",
+			ErrSchemaMismatch, m.Schema, SchemaVersion-1, SchemaVersion)
 	}
 	return b, nil
 }
@@ -124,17 +185,38 @@ func (b *Bolt) Covers() (map[string]bool, error) {
 	return out, nil
 }
 
-// Put stores one advisory once in by-id and appends its ID to the lookup key of
-// every package it affects. Storing IDs rather than records is what keeps the
-// database from growing by the 1.44x measured duplication factor.
+// advisoryIndexPrefix is the composite key's non-ID portion, shared between
+// every index write (Put, PutMany) and Lookup's prefix scan so the two can
+// never independently disagree about where one package's keys begin (D67).
+// It always ends in keySep -- an ID appended without that trailing separator
+// would let a Lookup for "openssl" prefix-match "openssl-foo"'s keys too,
+// the substring collision CLAUDE.md documents.
+func advisoryIndexPrefix(ecosystem, name string) string {
+	return ecosystem + keySep + pkgmeta.NormalizeName(ecosystem, name) + keySep
+}
+
+// Put stores one advisory once in by-id and adds one composite-key entry to
+// the index for every package it affects. Storing IDs rather than records is
+// what keeps the database from growing by the 1.44x measured duplication
+// factor.
 // PutMany stores a batch of advisories in ONE transaction (D57).
 //
 // Put opens a write transaction per advisory, and a full build makes about
-// 150,000 of them. Two costs come off in a batch. The commits: bolt fsyncs on
-// each one, so the count is paid in disk round trips. And the index
-// read-modify-write: appendID unmarshals the existing ID list for a key,
-// scans it, appends and re-marshals, and inside one transaction those pages
-// stay in memory across the batch instead of being re-read per advisory.
+// 150,000 of them. bolt fsyncs on every commit, so that cost is paid in disk
+// round trips regardless of how the index itself is written -- batching pays
+// it once per BATCH instead of once per advisory, which is the whole saving
+// PutMany exists for.
+//
+// The index write itself is one blind Put per (package, advisory) pair --
+// key "<eco>\x00<name>\x00<advisoryID>", nil value (D67) -- not the
+// read-modify-write a JSON-array index used to require: appendID (deleted in
+// D67) unmarshalled the existing ID list for a key, scanned it for the ID
+// being added, appended and re-marshalled the whole thing, which made a hot
+// key's cost grow with how many advisories name it -- quadratic overall for
+// a package like the kernel or openssl. A blind Put is O(1) per advisory and
+// inherently dedup-free: writing the same key twice overwrites the same nil
+// value rather than duplicating an entry, so nothing here has to check
+// whether an ID is already indexed.
 //
 // ALL OR NOTHING, deliberately. A partial batch would leave a database that
 // looks complete and holds less, which is the failure this project ranks
@@ -172,8 +254,8 @@ func (b *Bolt) PutMany(as []advisory.Advisory) error {
 				if aff.Ecosystem == "" || aff.Name == "" {
 					continue
 				}
-				key := aff.Ecosystem + keySep + pkgmeta.NormalizeName(aff.Ecosystem, aff.Name)
-				if err := appendID(idx, key, a.ID); err != nil {
+				key := advisoryIndexPrefix(aff.Ecosystem, aff.Name) + a.ID
+				if err := idx.Put([]byte(key), nil); err != nil {
 					return err
 				}
 			}
@@ -196,33 +278,13 @@ func (b *Bolt) Put(a advisory.Advisory) error {
 			if aff.Ecosystem == "" || aff.Name == "" {
 				continue
 			}
-			key := aff.Ecosystem + keySep + pkgmeta.NormalizeName(aff.Ecosystem, aff.Name)
-			if err := appendID(idx, key, a.ID); err != nil {
+			key := advisoryIndexPrefix(aff.Ecosystem, aff.Name) + a.ID
+			if err := idx.Put([]byte(key), nil); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
-}
-
-func appendID(bk *bolt.Bucket, key, id string) error {
-	var ids []string
-	if raw := bk.Get([]byte(key)); raw != nil {
-		if err := json.Unmarshal(raw, &ids); err != nil {
-			return fmt.Errorf("decode index %q: %w", key, err)
-		}
-		for _, existing := range ids {
-			if existing == id {
-				return nil
-			}
-		}
-	}
-	ids = append(ids, id)
-	blob, err := json.Marshal(ids)
-	if err != nil {
-		return err
-	}
-	return bk.Put([]byte(key), blob)
 }
 
 // PutRating stores one authority's opinion about a CVE, keyed on (CVE,
@@ -503,29 +565,31 @@ func (b *Bolt) setSchemaForTest(v int) error {
 // Lookup answers for one name. A caller matching a distro package calls this
 // twice -- once with the binary name, once with the source name (D8) -- because
 // OSV writes the source name into Affected[].Name, which Put already indexes.
+//
+// Walks bucketAdvisories with a cursor rather than decoding one JSON-array
+// value (D67): the index key IS "<eco>\x00<name>\x00<advisoryID>" now, so
+// every key under this package's prefix names one advisory directly, and
+// the ID is read off the key itself rather than out of the value. The Seek
+// prefix ends in keySep -- via advisoryIndexPrefix, the same helper every
+// writer builds its keys from -- because without that trailing separator a
+// lookup for "openssl" would also match "openssl-foo"'s keys (CLAUDE.md's
+// substring-collision class, moved into the key space). bytes.HasPrefix on
+// every step is what stops the walk at the end of this package's own run of
+// keys instead of continuing into the next package's.
 func (b *Bolt) Lookup(ecosystem, name string) ([]advisory.Advisory, error) {
-	return b.resolve(bucketAdvisories, ecosystem+keySep+pkgmeta.NormalizeName(ecosystem, name))
-}
-
-func (b *Bolt) resolve(index []byte, key string) ([]advisory.Advisory, error) {
+	prefix := []byte(advisoryIndexPrefix(ecosystem, name))
 	var out []advisory.Advisory
 	err := b.db.View(func(tx *bolt.Tx) error {
-		raw := tx.Bucket(index).Get([]byte(key))
-		if raw == nil {
-			return nil
-		}
-		var ids []string
-		if err := json.Unmarshal(raw, &ids); err != nil {
-			return fmt.Errorf("decode index %q: %w", key, err)
-		}
 		byID := tx.Bucket(bucketByID)
-		for _, id := range ids {
-			blob := byID.Get([]byte(id))
+		c := tx.Bucket(bucketAdvisories).Cursor()
+		for k, _ := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, _ = c.Next() {
+			id := k[len(prefix):]
+			blob := byID.Get(id)
 			if blob == nil {
 				// A dangling index entry means the database is inconsistent.
 				// Fail loudly rather than returning a short list that reads as
 				// "fewer vulnerabilities".
-				return fmt.Errorf("index %q references missing advisory %q", key, id)
+				return fmt.Errorf("index %q references missing advisory %q", k, id)
 			}
 			var a advisory.Advisory
 			if err := json.Unmarshal(blob, &a); err != nil {

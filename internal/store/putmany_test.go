@@ -29,7 +29,8 @@ func advFor(id, eco, name string) advisory.Advisory {
 // TestPutMany_IsPutInALoop. The batch is an optimisation, and an optimisation
 // that stores something different from what it replaced is not one. Both the
 // record and the index it feeds are checked, because a batch that wrote the
-// blob and skipped appendID would satisfy a lookup by ID and fail every scan.
+// blob and skipped the index Put would satisfy a lookup by ID and fail every
+// scan.
 func TestPutMany_IsPutInALoop(t *testing.T) {
 	b := openTmp(t)
 	if err := b.PutMany([]advisory.Advisory{
@@ -65,7 +66,8 @@ func TestPutMany_MatchesPutExactly(t *testing.T) {
 			{Ecosystem: "Go", Name: "example.com/x"},
 			{Ecosystem: "npm", Name: "left-pad"},
 		}},
-		// A duplicate ID re-put, which appendID must not list twice.
+		// A duplicate ID re-put, which the composite key's blind overwrite
+		// must not turn into two entries.
 		advFor("GHSA-a", "Go", "example.com/x"),
 	}
 

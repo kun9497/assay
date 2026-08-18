@@ -272,11 +272,11 @@ severity: high (7.8)   [highest of 2 sources]
 
 | OS | 위치 |
 |---|---|
-| Windows | `%LocalAppData%\assay\db\v8\` |
-| macOS | `~/Library/Caches/assay/db/v8/` |
-| Linux | `~/.cache/assay/db/v8/` |
+| Windows | `%LocalAppData%\assay\db\v9\` |
+| macOS | `~/Library/Caches/assay/db/v9/` |
+| Linux | `~/.cache/assay/db/v9/` |
 
-CI 캐시나 에어갭 환경에서는 `ASSAY_DB_DIR`로 재정의합니다. 경로의 `v8`는 스키마 버전입니다 —
+CI 캐시나 에어갭 환경에서는 `ASSAY_DB_DIR`로 재정의합니다. 경로의 `v9`는 스키마 버전입니다 —
 스키마가 바뀌면 제자리에서 마이그레이션하는 대신 새 디렉터리에 다시 빌드합니다. 다만
 `ASSAY_DB_DIR`에는 그 성분이 없으므로, 그 경로를 키로 삼은 CI 캐시는 무효화되었어야 할
 업그레이드를 넘어 살아남습니다. 업그레이드 후에는 다시 빌드하거나 캐시 키에 assay 버전을

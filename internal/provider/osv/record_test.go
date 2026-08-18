@@ -343,26 +343,27 @@ func TestConvert_SetsTheDatabase(t *testing.T) {
 	}
 }
 
-// Schema 8 exists for Range.FixState (D52) — a vendor's statement that a
-// package will never be fixed, which the range shape alone cannot express.
-// Pinned to the
-// current value rather than a relation (e.g. ">= 5") so this fails loudly the
-// moment a later bump is not reflected here, instead of silently agreeing
-// with whatever the constant happens to be.
+// Schema 9 exists for the composite-key advisory index (D67) — the
+// "advisories" bucket's key became "<eco>\x00<name>\x00<advisoryID>", so a
+// database built before this must refuse rather than have Lookup silently
+// find nothing against its old JSON-array shape. Pinned to the current value
+// rather than a relation (e.g. ">= 5") so this fails loudly the moment a
+// later bump is not reflected here, instead of silently agreeing with
+// whatever the constant happens to be.
 //
-// Duplicated deliberately, alongside store.TestSchemaVersionIs8: that copy
+// Duplicated deliberately, alongside store.TestSchemaVersionIs9: that copy
 // pins the value from the package that owns SchemaVersion and enforces
 // ErrSchemaMismatch; this one pins it from the provider package whose
 // on-disk assumptions (Convert always setting Database, tested above) depend
 // on the schema being at least what D25 required. Someone working only in
 // this package, and never running internal/store's suite, still gets a
 // visible failure the moment the two disagree.
-func TestSchemaVersionIs8(t *testing.T) {
-	if store.SchemaVersion != 8 {
-		t.Errorf("SchemaVersion = %d, want 8 — schema 8 adds Range.FixState, "+
-			"and a database built without it must refuse rather than silently "+
-			"report every will-not-fix package as merely unfixed",
-			store.SchemaVersion)
+func TestSchemaVersionIs9(t *testing.T) {
+	if store.SchemaVersion != 9 {
+		t.Errorf("SchemaVersion = %d, want 9 — schema 9 replaces the advisory "+
+			"index's JSON-array value with composite keys, and a database built "+
+			"before that must refuse rather than silently return no advisories "+
+			"for every package", store.SchemaVersion)
 	}
 }
 
