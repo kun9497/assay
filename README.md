@@ -18,8 +18,9 @@ affecting it.
 
 🚧 **Early development. Alpine containers scan end to end; other distros do not.**
 
-`assay db update` downloads the published database — Go, npm, PyPI, and **Alpine**, built
-centrally and refreshed daily — and `assay scan` matches against it. It reads container
+`assay db update` downloads the published database — Go, npm, PyPI, Maven, RubyGems, NuGet,
+Packagist, and **Alpine**, built centrally and refreshed daily — and `assay scan` matches
+against it. It reads container
 images directly, so syft is no longer in the loop. On real targets it reports the same
 findings as grype: same CVEs, not just the same count. See [Roadmap](#roadmap).
 
@@ -426,7 +427,7 @@ ecosystem means writing one `Cataloger` and one `Comparer` — nothing else chan
 | `Source` | Open a target for file access; carries layer provenance | **registry**, **`docker save` tarball**, **OCI layout**, **dir**, **binary** |
 | `Cataloger` | Files → `[]Package` | **apk**, **os-release**, **cyclonedx**, **dpkg**, **rpmdb**, **go-mod**, **go-binary**, **npm**, **yarn**, **pypi lockfiles**, **cargo**, jar |
 | `Store` | Advisory lookup | **bbolt** |
-| `Comparer` | `Compare(a, b string) (int, error)` within one ecosystem | **semver**, **PEP 440**, **apk**, **deb**, **rpm** |
+| `Comparer` | `Compare(a, b string) (int, error)` within one ecosystem | **semver**, **PEP 440**, **apk**, **deb**, **rpm**, **gem**, **composer**, **nuget**, **maven** |
 | `Provider` | Upstream feed → `[]Advisory` | **OSV**, **Red Hat CSAF VEX** |
 
 Two more interfaces sit beside `Provider` rather than inside it, because what they attach to
@@ -547,6 +548,9 @@ exited 0 while 24 findings went unmentioned. **Done.**
       and the first ecosystem whose key (`crates.io`) is not its purl type (`cargo`)
 - [x] `uv.lock` (D63), correcting D61's claim that it needed a TOML reader — 77 of 77 packages
       on uv's own lockfile, sharing `Cargo.lock`'s scanner so the two cannot drift
+- [x] Maven, RubyGems, NuGet and Packagist from OSV (D68) — four canonical-source comparers,
+      the Drupal contrib fold, and SBOM scans end to end; lockfile catalogers are the next
+      slice
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a

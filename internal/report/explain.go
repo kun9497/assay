@@ -306,6 +306,20 @@ func comparerName(ecosystem string) string {
 		return "semver"
 	case "PyPI":
 		return "pep440"
+	// RubyGems, Packagist, NuGet and Maven each get their own case rather than
+	// folding into the semver one above: they are NOT semver (Gem, Composer,
+	// NuGet and Maven are each their own Comparer, D9), and collapsing them
+	// into "semver" would have this function agree with version.For on
+	// PRESENCE while naming the wrong comparer — the exact drift
+	// TestComparerName_ExactNamePerEcosystem was written to catch for PyPI.
+	case "RubyGems":
+		return "gem"
+	case "Packagist":
+		return "composer"
+	case "NuGet":
+		return "nuget"
+	case "Maven":
+		return "maven"
 	default:
 		return "unknown"
 	}

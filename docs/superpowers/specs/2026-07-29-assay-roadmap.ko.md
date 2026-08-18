@@ -2483,6 +2483,49 @@ ID 목록 전체를 다시 읽고, unmarshal하고, 훑고, 다시 썼으므로 
 
 ---
 
+### D68 — 언어 생태계 넷, 그리고 그것을 떠받치는 comparer들
+
+**결정.** Maven, RubyGems, NuGet, Packagist를 OSV에서 수집하고, 각 생태계의 정본 구현에서 이식한
+생태계별 comparer로 매칭합니다: Maven은 ComparableVersion(3.9.x — GHSA 범위가 근거로 삼은 라인이지
+Maven 4가 아닙니다), rubygems는 Gem::Version, NuGet은 NuGet.Versioning의
+VersionComparer.Default, composer는 PHP의 version_compare 위에 얹은 VersionParser입니다.
+
+**만들기 전에 측정했습니다**(2026-08-18): 6,948 / 4,656 / 1,877 / 6,938건; RubyGems는 75%가
+MAL-*(제외, D15)라 실제 코퍼스는 ~1,078건에 불과합니다. 범위는 거의 전부 ECOSYSTEM 타입이므로
+매칭의 전체 부담을 comparer가 짊어집니다 — 그래서 넷 다 정본 소스를 조사해 명세를 뽑고, oracle로
+검증했으며(composer는 자체 테스트 데이터 대비 98/98, Maven은 자신의 ~600개 assertion 스위트 전체를
+재생), D9의 위임 규칙에 따라 main loop에서 구현했습니다. 네 테이블 모두 첫 실행에서 통과했습니다.
+
+**Drupal 폴드.** Packagist 아카이브는 "Packagist:https://packages.drupal.org/8"로 키가 잡힌
+레코드 521건을 담고 있습니다 — Drupal contrib advisory이며, 전부 pkg:composer purl을 쓰는
+drupal/* 이름입니다. 이들은 그 키를 평범한 "Packagist"로 **다시 쓴** 채로 수집됩니다: 어떤 조회도
+그 한정된 키를 구성할 수 없으므로 그대로 보존하면 결코 닿을 수 없는 데이터를 저장하는 셈이고,
+drupal vendor는 packagist.org에 예약되어 있어 이 폴드가 충돌할 수 없습니다. Packagist에만
+적용합니다 — 배포판의 릴리스 한정자(Alpine:v3.19)는 설계상 그 키의 일부이고(D6), 이 폴드 자체의
+테스트가 일반화해서는 안 된다는 것을 못박아 둡니다.
+
+**purl이 강제한 이름 배관.** Maven의 OSV 이름은 group:artifact 형태이고(측정한 12,457건 중
+12,457건), purl은 pkg:maven/group/artifact이므로 CycloneDX 네임스페이스 조인은 maven에서는
+":"이고 나머지 전부는 "/"입니다. NuGet 패키지 ID는 대소문자를 구분하지 않으므로(advisory 이름의
+98%가 대소문자 섞임) NormalizeName이 NuGet을 소문자로 내립니다 — 늘 그렇듯 store와 matcher가
+공유하는 정의 하나입니다.
+
+**정본 구현과 갈라진 지점을 기록해 둡니다. 전부 거부하는 방향입니다.** 빈 버전은 어디서나
+오류입니다(rubygems는 0으로, Maven은 0과 같은 값으로 읽는데 — 둘 다 오염된 입력을 깨끗하다고
+표시하게 됩니다); NuGet의 내부 공백 허용("1. 2 .3")은 거부합니다; Maven 숫자는 ASCII만
+허용합니다(Maven 4의 규칙; 3.x는 Character.isDigit을 통해 유니코드 숫자도 받습니다). 충실하게
+남긴 기이함들: NuGet의 int32 레이블 오버플로는 문자열 비교로 폴백하고, composer는 patch가
+stable보다 높고 대문자 STABLE은 dev보다 아래이며, Maven은 BigInteger 0이 int 0보다 순위가
+높습니다.
+
+**7개짜리 probe SBOM으로 끝에서 끝까지 검증했습니다:** Maven 네임스페이스 조인을 거쳐 critical
+10.0인 log4shell, 살아 있는 조회에서 풀리는 Spring의 .RELEASE alias, NuGet 대소문자 폴드를 거친
+Newtonsoft.Json, Packagist 폴드를 거친 DRUPAL-CONTRIB-2017-082, 그리고 Gem 프리릴리스 순서를 통해
+취약 범위 안에서 잡히는 nokogiri의 1.13.0.rc1. SBOM 스캔은 오늘 당장 동작합니다; lockfile
+cataloger(Gemfile.lock, composer.lock, packages.lock.json)는 다음 슬라이스입니다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

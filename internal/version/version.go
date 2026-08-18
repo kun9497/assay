@@ -78,6 +78,13 @@ var registry = map[string]Comparer{
 	// and Go applies unchanged. crates.io is not a distro: the key carries no
 	// release, so it is a plain map entry rather than a prefix rule (D6).
 	"crates.io": SemVer{},
+	// RubyGems, Packagist, NuGet and Maven are language ecosystems like the
+	// four above, not distros: their OSV keys carry no release, so each is a
+	// plain map entry rather than a prefix rule (D6).
+	"RubyGems":  Gem{},
+	"Packagist": Composer{},
+	"NuGet":     NuGet{},
+	"Maven":     Maven{},
 }
 
 // mainlineUbuntu matches the two shapes OSV gives a mainline Ubuntu release:
