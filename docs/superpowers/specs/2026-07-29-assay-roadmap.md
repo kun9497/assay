@@ -2779,6 +2779,39 @@ each of the three by the caller-first tests, before the parsers' own.
 
 ---
 
+### D70 — Jar scanning: identity from pom.properties, never from the filename
+
+**Decision.** `assay scan app.jar` (and every `*.jar`/`*.war` a directory scan finds) reads
+Maven identity from `META-INF/maven/<group>/<artifact>/pom.properties` entries — every one of
+them, recursing into nested archives to depth 3 with a 512 MiB per-entry cap. A jar with no
+pom.properties is a counted, disclosed skip. Nothing is ever guessed from the filename or
+MANIFEST.MF.
+
+**The refusal to guess is the decision.** `foo-1.2.3.jar` names a file, not a package: a
+fabricated GAV is wrong in both directions — a false positive against coordinates nobody
+ships, or a false negative clearing coordinates they do. Other scanners take the filename
+heuristic; assay takes the loud skip, and the summary line ("2 components seen, 1 evaluated,
+1 not evaluated") is that refusal made visible.
+
+**Every pom.properties in an archive is a component.** A shaded jar embeds its dependencies'
+entries, and surfacing all of them is the only way a shaded log4j is caught. A nested jar
+with no identity of its own still recurses — an anonymous shell around identified contents
+is the ordinary Spring Boot shape (`BOOT-INF/lib/*.jar` needs no special casing; it is just
+a zip entry ending in .jar).
+
+**The caps refuse loudly.** Depth past 3 and entries past 512 MiB are counted skips, never
+silent truncation — a zip-bomb guard that quietly dropped the tail would read as coverage.
+
+**Verified end to end**: a synthetic fat jar — anonymous outer, log4j-core 2.14.1's
+pom.properties nested under BOOT-INF/lib — reports log4shell at critical 10.0 with the outer
+shell counted as not evaluated. This closes the Maven checkout path D69 could not (Maven has
+no lockfile): SBOM, jar and fat jar all match now.
+
+**Deferred, recorded**: jars inside container images need a whole-tree walk the Source
+interface does not expose yet — the image path still catalogs OS packages only.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

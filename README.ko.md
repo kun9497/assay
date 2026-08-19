@@ -135,6 +135,7 @@ assay scan oci-dir:./layout           # OCI 레이아웃 디렉터리
 assay scan sbom.cdx.json              # CycloneDX SBOM
 assay scan ./bin/assay                # Go 바이너리
 assay scan ./my-project               # go.mod이 있는 디렉터리
+assay scan ./app.jar                  # Java 아카이브(신원은 pom.properties에서)
 ```
 
 접두사 없는 경로는 **내용으로** 분류합니다. 디렉터리면 디렉터리, `debug/buildinfo`가 읽을 수
@@ -159,6 +160,10 @@ assay scan ./my-project               # go.mod이 있는 디렉터리
 `npm-shrinkwrap.json`, `yarn.lock`(v1), `poetry.lock`, `Pipfile.lock`, `uv.lock`, `Cargo.lock`,
 `Gemfile.lock`, `composer.lock`, `packages.lock.json`. 표준 라이브러리만 쓰고
 `go`·`npm`·`pip`·`uv`·`cargo`를 호출하지 않으므로 오프라인에서 툴체인 없이 동작합니다.
+
+트리에서 찾은 모든 `*.jar`/`*.war`도 함께 읽습니다 — 신원은 `pom.properties` 항목에서 가져오며,
+중첩되거나 shade된 아카이브도 포함합니다; `pom.properties`가 없는 jar는 세어서 이름을 밝힐 뿐,
+파일명에서 추측하지 않습니다.
 
 하위 디렉터리도 훑으므로 `frontend/package-lock.json`도 찾습니다. `node_modules`, `vendor`,
 `.git`은 건너뛰고 여섯 단계까지만 내려갑니다. **인식했지만 읽지 않은 매니페스트는 이유와 함께
@@ -407,7 +412,7 @@ CI에서는 "뭔가 찾았다"와 "돌지 못했다"를 구분하는 것이 중�
 | 인터페이스 | 책임 | 구현체 |
 |---|---|---|
 | `Source` | 타깃을 열어 파일 접근 제공, 레이어 출처를 담음 | **레지스트리**, **`docker save` tarball**, **OCI layout**, **dir**, **binary** |
-| `Cataloger` | 파일 → `[]Package` | **apk**, **os-release**, **cyclonedx**, **dpkg**, **rpmdb**, **go-mod**, **go-binary**, **npm**, **yarn**, **pypi 락파일들**, **cargo**, **gem**, **composer**, **nuget 락파일**, jar |
+| `Cataloger` | 파일 → `[]Package` | **apk**, **os-release**, **cyclonedx**, **dpkg**, **rpmdb**, **go-mod**, **go-binary**, **npm**, **yarn**, **pypi 락파일들**, **cargo**, **gem**, **composer**, **nuget 락파일**, **jar** |
 | `Store` | 권고 조회 | **bbolt** |
 | `Comparer` | 한 생태계 안에서 `Compare(a, b string) (int, error)` | **semver**, **PEP 440**, **apk**, **deb**, **rpm**, **gem**, **composer**, **nuget**, **maven** |
 | `Provider` | 업스트림 피드 → `[]Advisory` | **OSV**, **Red Hat CSAF VEX** |
@@ -528,6 +533,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       슬라이스
 - [x] `Gemfile.lock`, `composer.lock`, `packages.lock.json` cataloger (D69) — 이제 checkout도
       SBOM이 매칭되는 모든 곳에서 매칭됩니다; Maven은 락파일이 없고, 그 경로는 jar 스캔입니다
+- [x] jar와 fat-jar 스캔 (D70) — 아카이브 안의 모든 `pom.properties`, 깊이 3까지 중첩
+      탐색; 합성 Spring Boot jar 안에서 log4shell을 끝에서 끝까지 찾아냄; 파일명 추측은
+      거부
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건

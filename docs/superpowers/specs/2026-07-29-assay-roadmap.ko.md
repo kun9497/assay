@@ -2560,6 +2560,39 @@ skips, 슬라이스 ⑥ 이후 모든 cataloger가 지켜온 것 — 은 셋 각
 
 ---
 
+### D70 — jar 스캔: 신원은 pom.properties에서, 파일명에서는 절대
+
+**결정.** `assay scan app.jar`는(그리고 디렉터리 스캔이 찾는 모든 `*.jar`/`*.war`도) Maven 신원을
+`META-INF/maven/<group>/<artifact>/pom.properties` 항목에서 읽습니다 — 그 안의 모든 항목을,
+512 MiB 엔트리당 상한을 두고 깊이 3까지 중첩 아카이브로 재귀합니다. pom.properties가 없는 jar는
+세어서 공개하는 skip입니다. 무엇도 파일명이나 MANIFEST.MF에서 추측하지 않습니다.
+
+**추측을 거부하는 것 자체가 결정입니다.** `foo-1.2.3.jar`는 파일 이름이지 패키지가 아닙니다:
+지어낸 GAV는 양쪽 방향 모두 틀립니다 — 아무도 배포하지 않는 좌표에 대한 오탐이거나, 실제로
+배포하는 좌표를 깨끗하다고 지워버리는 미탐입니다. 다른 스캐너는 파일명 휴리스틱을 택하지만,
+assay는 시끄러운 skip을 택합니다. 요약 줄("2 components seen, 1 evaluated, 1 not evaluated")이
+바로 그 거부를 눈에 보이게 만든 것입니다.
+
+**아카이브 안의 모든 pom.properties는 컴포넌트 하나입니다.** shade된 jar는 자신의 의존성들이
+가진 항목을 통째로 품고 있고, 그것들을 전부 드러내는 것만이 shade된 log4j를 잡는 유일한
+방법입니다. 자기 신원이 없는 중첩 jar도 재귀는 계속됩니다 — 식별된 내용물을 감싼 익명의 껍데기는
+흔한 Spring Boot 모양입니다(`BOOT-INF/lib/*.jar`는 특별한 처리가 필요 없습니다. 그저 .jar로
+끝나는 zip 엔트리일 뿐입니다).
+
+**상한은 시끄럽게 거부합니다.** 깊이 3을 넘거나 엔트리가 512 MiB를 넘으면 세어지는 skip이지
+조용한 잘림이 아닙니다 — zip 폭탄 가드가 꼬리를 조용히 떨어뜨린다면 그것이 커버리지처럼 읽히게
+됩니다.
+
+**끝에서 끝까지 검증했습니다**: 합성 fat jar 하나 — 익명 외피, BOOT-INF/lib 아래에 중첩된
+log4j-core 2.14.1의 pom.properties — 가 critical 10.0인 log4shell을 보고하고, 외피는 not
+evaluated로 셉니다. 이것으로 D69가 닫지 못했던 Maven checkout 경로가 닫힙니다(Maven은 락파일이
+없으므로): 이제 SBOM, jar, fat jar 전부 매칭됩니다.
+
+**미룸, 기록해 둡니다**: 컨테이너 이미지 안의 jar는 `Source` 인터페이스가 아직 노출하지 않는
+전체 트리 walk이 필요합니다 — 이미지 경로는 여전히 OS 패키지만 카탈로그합니다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

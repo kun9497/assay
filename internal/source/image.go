@@ -28,6 +28,10 @@ const (
 	TargetImage
 	TargetDirectory
 	TargetGoBinary
+	// TargetJar is a Java archive (.jar or .war), D70. Distro stays nil for it
+	// the same way it does for TargetGoBinary and TargetDirectory (D7): a jar
+	// is not an operating system.
+	TargetJar
 )
 
 func (k TargetKind) String() string {
@@ -40,6 +44,8 @@ func (k TargetKind) String() string {
 		return "directory"
 	case TargetGoBinary:
 		return "go-binary"
+	case TargetJar:
+		return "jar"
 	}
 	// Not reachable through Classify, but a kind rendered as "" turns
 	// "scanned X as a " into what reads as a rendering bug rather than an

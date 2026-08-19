@@ -1,6 +1,7 @@
 package source
 
 import (
+	"archive/zip"
 	"bytes"
 	"debug/buildinfo"
 	"encoding/json"
@@ -16,20 +17,23 @@ import (
 // handed a binary to the CycloneDX parser and reported a malformed document —
 // sending the reader after a broken file rather than a misread target.
 //
-// A bare path is now decided by CONTENT: directory, then Go binary, then
-// CycloneDX. Each test is cheap — buildinfo reads a header and fails
-// immediately on anything that is not a Go binary, and the CycloneDX test
+// A bare path is now decided by CONTENT: directory, then Go binary, then jar,
+// then CycloneDX. Each test is cheap — buildinfo reads a header and fails
+// immediately on anything that is not a Go binary, looksLikeJar reads four
+// magic bytes before opening the central directory, and the CycloneDX test
 // reads a 512-byte prefix before falling back to a streaming scan for the
 // top-level key.
 //
-// The three are mutually exclusive on any real input, so their order is not
-// observable today: a Go binary's header cannot contain `"bomFormat"`, and a
-// JSON document cannot satisfy buildinfo. Swapping the last two is a true
-// equivalent, verified as a surviving mutation rather than assumed. The order
-// is fixed anyway, because the day a fourth format is added the exclusivity
-// stops holding and an unordered sniff would change behaviour silently.
+// The four are mutually exclusive on any real input, so their order is not
+// observable today: a Go binary's header cannot contain `"bomFormat"` or the
+// zip magic, and a JSON document cannot satisfy buildinfo or start with zip
+// magic bytes. Swapping sniffs among themselves is a true equivalent,
+// verified as a surviving mutation rather than assumed for the original
+// three. The order is fixed anyway, because the day a fifth format is added
+// the exclusivity stops holding and an unordered sniff would change
+// behaviour silently.
 //
-// A file matching none of them is an error naming all three and the prefixes
+// A file matching none of them is an error naming all four and the prefixes
 // that override them, never a silent fallthrough to whichever branch happens
 // to be last — which is what produced "malformed JSON" for a binary.
 //
@@ -49,6 +53,7 @@ func Classify(target string) (TargetKind, string, error) {
 		{"sbom:", TargetSBOM},
 		{"dir:", TargetDirectory},
 		{"file:", TargetGoBinary},
+		{"jar:", TargetJar},
 	} {
 		if rest, ok := strings.CutPrefix(target, p.prefix); ok {
 			return p.kind, rest, nil
@@ -69,12 +74,72 @@ func Classify(target string) (TargetKind, string, error) {
 	if _, err := buildinfo.ReadFile(target); err == nil {
 		return TargetGoBinary, target, nil
 	}
+	if looksLikeJar(target) {
+		return TargetJar, target, nil
+	}
 	if looksLikeCycloneDX(target) {
 		return TargetSBOM, target, nil
 	}
 	return 0, "", fmt.Errorf(
-		"%s is a file, but not a Go binary and not a CycloneDX document; "+
-			"prefix it with file:, sbom: or dir: to say which it is", target)
+		"%s is a file, but not a Go binary, not a CycloneDX document, and not a jar; "+
+			"prefix it with file:, sbom:, dir: or jar: to say which it is", target)
+}
+
+// jarMagic is the four bytes every ZIP-format file begins with, "PK\x03\x04" —
+// spelled as hex bytes rather than typed as an escape sequence, per
+// CLAUDE.md's "writing escape sequences into files": a literal \x03\x04 typed
+// into a source file risks losing a backslash in transit and becoming the
+// byte it was meant to denote, and a []byte literal is the one place in this
+// codebase that value needs writing at all.
+var jarMagic = []byte{0x50, 0x4b, 0x03, 0x04}
+
+// looksLikeJar reports whether target looks like a Java archive (D70): ZIP
+// magic, AND either a .jar/.war name or a META-INF/ entry inside it.
+//
+// Neither signal alone is enough. The name alone would misclassify an
+// ordinary .zip that happens to be named "release.jar" by something that is
+// not a Java archive at all; magic bytes alone would misclassify any plain
+// .zip (an SBOM bundle, a source archive) as a component inventory, since
+// jar and war are themselves just the ZIP format with different intended
+// contents. META-INF/ is the one thing every real jar carries — at minimum
+// a MANIFEST.MF — that a plain zip does not.
+func looksLikeJar(target string) bool {
+	f, err := os.Open(target)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	var head [4]byte
+	if _, err := io.ReadFull(f, head[:]); err != nil {
+		return false
+	}
+	if !bytes.Equal(head[:], jarMagic) {
+		return false
+	}
+
+	lower := strings.ToLower(target)
+	if strings.HasSuffix(lower, ".jar") || strings.HasSuffix(lower, ".war") {
+		return true
+	}
+
+	// The name did not settle it — open the central directory and look for a
+	// META-INF/ entry. zip.OpenReader re-reads the file from the start (it
+	// does not reuse f, which has already consumed 4 bytes), which is fine:
+	// this path is only reached for a file that already passed the magic-byte
+	// check above, so the extra open is not paid by every random file on the
+	// classifier's most common (non-jar) inputs.
+	zr, err := zip.OpenReader(target)
+	if err != nil {
+		return false
+	}
+	defer zr.Close()
+	for _, e := range zr.File {
+		if strings.HasPrefix(e.Name, "META-INF/") {
+			return true
+		}
+	}
+	return false
 }
 
 // looksLikeCycloneDX reports whether a file opens like a CycloneDX document.

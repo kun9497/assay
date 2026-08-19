@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // Kind identifies which recognized manifest a Manifest is.
@@ -55,6 +56,14 @@ const (
 	// because unlike the other ecosystems here, a bare NuGet project has no
 	// lockfile at all until "RestorePackagesWithLockFile" is turned on.
 	KindNuGetLock Kind = "packages.lock.json"
+
+	// KindJarArchive is a Java archive (.jar or .war), D70 — Maven's path
+	// into a directory scan, since unlike the lockfile ecosystems above a
+	// checked-out Maven project has no lockfile at all (D69's own note on
+	// why it has no entry there). One Kind for both extensions: a .war is a
+	// jar with a servlet-container layout, not a different archive format,
+	// and jar.Parse reads either the same way.
+	KindJarArchive Kind = "jar-archive"
 )
 
 // Manifest is one recognized file found by the walk.
@@ -151,6 +160,14 @@ func Walk(root string) ([]Manifest, error) {
 		}
 
 		kind, ok := manifestKinds[d.Name()]
+		if !ok && isJarOrWar(d.Name()) {
+			// The one Kind in this package matched by suffix rather than
+			// exact name: unlike a lockfile, a jar's filename is chosen by
+			// whoever built it (mylib-1.2.3.jar, app.war), not fixed by the
+			// tool that produced it, so there is no single exact string to
+			// put in manifestKinds.
+			kind, ok = KindJarArchive, true
+		}
 		if !ok {
 			return nil
 		}
@@ -170,6 +187,14 @@ func Walk(root string) ([]Manifest, error) {
 
 	sort.Slice(manifests, func(i, j int) bool { return manifests[i].Path < manifests[j].Path })
 	return manifests, nil
+}
+
+// isJarOrWar reports whether name ends in .jar or .war, case-insensitively —
+// a build tool can write "app.WAR" on a case-preserving filesystem, and a
+// checked-out repository's filenames are not under this project's control.
+func isJarOrWar(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.HasSuffix(lower, ".jar") || strings.HasSuffix(lower, ".war")
 }
 
 // depth counts filepath.Separator occurrences in rel (root-relative,
