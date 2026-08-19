@@ -638,6 +638,71 @@ func TestRun_ScanFlagsReachRealExitCode(t *testing.T) {
 	}
 }
 
+// TestRun_ScanDBMaxAgeReachesRealExitCode is the run()-seam wiring check for
+// --db-max-age, which had none: main_test.go never mentioned the flag, and
+// scancmd's own dbage_test.go drives scancmd.Run with Options{DBMaxAge: ...}
+// built by hand, holding checkDBAge and Run's own consultation of it but
+// never the parseScanArgs assignment (opts.DBMaxAge = d) one hop earlier.
+// Dropping that assignment lets `assay scan --db-max-age=48h` parse cleanly
+// and silently perform no age check at all -- a stale database would read as
+// trustworthy, exactly the D59 hazard this flag exists to catch.
+//
+// store.DefaultPath honours ASSAY_DB_DIR (internal/store/store.go), the same
+// seam TestRun_ScanFlagsReachRealExitCode uses to point the real lookup path
+// at a temp dir without a database-path parameter on run() itself.
+func TestRun_ScanDBMaxAgeReachesRealExitCode(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ASSAY_DB_DIR", dir)
+
+	dbPath := filepath.Join(dir, "vulnerability.db")
+	w, err := store.Create(dbPath)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// Ancient but with coverage declared, so a refusal can only be the age
+	// check firing, never D20's separate "nothing covers this ecosystem" gate.
+	if err := w.SetMeta(store.Meta{Providers: map[string]store.Provenance{
+		"osv": {Ecosystems: []string{"Go"}, DataAsOf: time.Now().AddDate(0, 0, -400)},
+	}}); err != nil {
+		t.Fatalf("SetMeta: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	sbom := filepath.Join(dir, "s.cdx.json")
+	doc := `{"bomFormat":"CycloneDX","specVersion":"1.5","version":1,"components":[` +
+		`{"type":"library","name":"x","version":"1.0.0","purl":"pkg:golang/example.com/x@1.0.0"}]}`
+	if err := os.WriteFile(sbom, []byte(doc), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"scan", sbom, "--db-max-age=1h"}
+	if code := run(args, &stdout, &stderr); code != exitError {
+		t.Fatalf("run(%v) = %d, want %d (exitError) -- the database is 400 days old\n"+
+			"stdout:\n%s\nstderr:\n%s", args, code, exitError, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "db-max-age") {
+		t.Errorf("stderr does not mention the flag that refused the scan:\n%s", stderr.String())
+	}
+	// A verdict printed before the refusal would be a result from data the
+	// next line calls untrustworthy.
+	if stdout.Len() != 0 {
+		t.Errorf("a refused scan wrote a report to stdout:\n%s", stdout.String())
+	}
+
+	// The same ancient database, with no --db-max-age at all, still scans --
+	// proving the exit above came from the flag reaching Options.DBMaxAge,
+	// not from something else about this fixture.
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"scan", sbom}, &stdout, &stderr); code != exitOK {
+		t.Errorf("run without --db-max-age = %d, want %d (exitOK)\nstderr:\n%s",
+			code, exitOK, stderr.String())
+	}
+}
+
 // The CLI contract end to end for the repeated-flag rejection: exit 2, the
 // diagnostic on stderr, and stdout untouched. TestParseScanArgs already
 // proves parseScanArgs returns a non-nil error for a repeat; this proves the

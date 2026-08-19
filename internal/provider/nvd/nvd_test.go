@@ -3,6 +3,7 @@ package nvd
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -131,6 +132,40 @@ func TestAnnotate_PaginatesUntilComplete(t *testing.T) {
 		t.Errorf("Provenance.DataAsOf = %v, want %v - the feed's own timestamp "+
 			"from its earliest page, not time.Now() and not the latest page seen",
 			prov.DataAsOf, want)
+	}
+}
+
+// An emit failure stops Annotate's loop immediately, the NVD mirror of
+// knvd's TestEnrich_StopsWhenEmitFails -- nothing in this file ever made
+// emit return an error before this test, so a caller silently swallowing it
+// (a failed store write mid `db update`) would report success while the
+// installed database quietly lacked the ratings that failed to write,
+// leaving those findings on a lower band. Two records arrive on the SAME
+// page, so a loop that stops only BETWEEN pages, rather than at the first
+// refusal, would still offer the second and pass a version of this test that
+// used two pages instead.
+func TestAnnotate_StopsWhenEmitFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"totalResults":2,"vulnerabilities":[
+		  {"cve":{"id":"CVE-2026-101","metrics":{"cvssMetricV31":[{"cvssData":{"vectorString":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]}}},
+		  {"cve":{"id":"CVE-2026-102","metrics":{"cvssMetricV31":[{"cvssData":{"vectorString":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]}}}],
+		  "timestamp":"2026-08-04T00:00:00.000"}`)
+	}))
+	defer srv.Close()
+
+	want := errors.New("store write failed")
+	emits := 0
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0)})
+	_, err := p.Annotate(context.Background(), func(r advisory.Rating) error {
+		emits++
+		return want
+	})
+	if err != want {
+		t.Fatalf("Annotate returned %v, want the emit error %v verbatim", err, want)
+	}
+	if emits != 1 {
+		t.Errorf("offered %d record(s) after the first emit failed, want 1 -- the loop "+
+			"must stop at the first refusal, not carry on within the same page", emits)
 	}
 }
 

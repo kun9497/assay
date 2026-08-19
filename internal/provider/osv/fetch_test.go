@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/kun9497/assay/internal/advisory"
 )
@@ -219,6 +221,83 @@ func TestFetch_AlpineZeroRecordsIsAnError(t *testing.T) {
 	if err == nil {
 		t.Error("Fetch of an Alpine archive with zero Alpine:* records = nil error; " +
 			"a database built from this silently has no Alpine coverage")
+	}
+}
+
+// The same hard-fail as Alpine's above (TestFetch_AlpineZeroRecordsIsAnError),
+// extended to Debian and Ubuntu: an archive fetched under either family name
+// that names no matching record is the exact regression the guard's own
+// comment records happening to Debian when it first joined this list, and
+// only the Alpine arm was ever held by a test. Narrowing the guard's
+// condition to "eco == Alpine" alone leaves the whole suite green, because
+// nothing else in this file, or anywhere in the package, drives a Debian or
+// Ubuntu fetch through zero matching records.
+func TestFetch_DebianAndUbuntuZeroRecordsIsAnError(t *testing.T) {
+	for _, eco := range []string{"Debian", "Ubuntu"} {
+		t.Run(eco, func(t *testing.T) {
+			body := zipWith(t, map[string]string{
+				// Well-formed, but names an ecosystem this archive would never
+				// actually carry -- simulating a shape change or a broken family
+				// match, exactly as the Alpine case does.
+				"GHSA-unrelated.json": `{"id":"GHSA-unrelated","affected":[{"package":{"name":"x","ecosystem":"Go"},
+					"ranges":[{"type":"SEMVER","events":[{"introduced":"0"}]}]}]}`,
+			})
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/"+eco+"/all.zip" {
+					http.NotFound(w, r)
+					return
+				}
+				w.Write(body)
+			}))
+			defer srv.Close()
+
+			p := New([]string{eco}, srv.URL)
+			_, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil })
+			if err == nil {
+				t.Fatalf("Fetch of a %s archive with zero %s:* records = nil error; "+
+					"a database built from this silently has no %s coverage", eco, eco, eco)
+			}
+			if !strings.Contains(err.Error(), eco) {
+				t.Errorf("error %q does not name the family %q that broke", err, eco)
+			}
+		})
+	}
+}
+
+// D12: the OLDEST upstream timestamp wins, checked across two DATED
+// ecosystems. TestFetch above pins a single ecosystem's own timestamp, and
+// TestFetch_UnknownTimestampMakesAggregateUnknown zeroes the aggregate via an
+// UNDATED second ecosystem -- neither one exercises the actual "older wins"
+// comparison, so flipping Before to After (newest wins) leaves both green
+// while over-claiming DataAsOf and hiding a stale mirror behind a freshly
+// fetched one.
+func TestFetch_OldestOfTwoDatedTimestampsWins(t *testing.T) {
+	body := zipWith(t, map[string]string{
+		"GHSA-a.json": `{"id":"GHSA-a","affected":[{"package":{"name":"x","ecosystem":"Go"},
+			"ranges":[{"type":"SEMVER","events":[{"introduced":"0"}]}]}]}`,
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/Go/all.zip":
+			// Fetched FIRST (Ecosystems lists Go before npm below) and NEWER.
+			w.Header().Set("Last-Modified", "Wed, 05 Aug 2026 00:00:00 GMT")
+		case "/npm/all.zip":
+			// Fetched SECOND and OLDER -- this is the one DataAsOf must report.
+			w.Header().Set("Last-Modified", "Mon, 06 Jul 2026 00:00:00 GMT")
+		}
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	p := New([]string{"Go", "npm"}, srv.URL)
+	prov, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil })
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	want := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
+	if !prov.DataAsOf.Equal(want) {
+		t.Errorf("Provenance.DataAsOf = %v, want %v -- the OLDER of the two timestamps, "+
+			"carried by the SECOND archive fetched, not the newer first one", prov.DataAsOf, want)
 	}
 }
 

@@ -92,6 +92,83 @@ func TestParse_JarArchiveStatsInvariantHolds(t *testing.T) {
 	}
 }
 
+// A corrupt or truncated .jar must fail the scan (Unread.Failed -> AnyFailed
+// -> scancmd's exit 2), not print "not read: ..." and exit 0 -- the exact
+// regression Unread.Failed's own doc comment says it exists to prevent.
+// Every other jar test in this file uses a VALID archive and asserts Unread
+// is empty, so nothing before this one ever drove the KindJarArchive error
+// arm in dirscan.go at all: setting Failed:false there (the mutation this
+// test exists to catch) leaves every one of them green.
+func TestParse_CorruptJarFailsTheScan(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"lib/broken.jar": "this is not a zip file, just garbage bytes",
+	})
+
+	target, _, found, err := Parse(root)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(target.Packages) != 0 {
+		t.Errorf("packages = %+v, want none from an unreadable jar", target.Packages)
+	}
+	if len(found.Unread) != 1 {
+		t.Fatalf("Unread = %+v, want exactly one entry", found.Unread)
+	}
+	u := found.Unread[0]
+	if u.Path != "lib/broken.jar" {
+		t.Errorf("Unread path = %q, want lib/broken.jar", u.Path)
+	}
+	if !u.Failed {
+		t.Error("Failed = false; a corrupt jar means this scan saw none of its " +
+			"dependencies, which must reach exit 2 (AnyFailed -> scancmd)")
+	}
+	if !found.AnyFailed() {
+		t.Error("AnyFailed() = false, want true")
+	}
+}
+
+// The same Failed:true contract, on the two other manifest kinds cheapest to
+// break: composer.lock and packages.lock.json both decode as JSON and error
+// loudly on truncated input (Gemfile.lock's line scanner does not -- a
+// truncated one just yields fewer packages rather than an error, so it is
+// not a comparable fixture). Each of these catalogers' own dirscan tests
+// (composer_test.go, nuget_test.go) drive a VALID manifest through the same
+// dispatch and never see the error arm either, so Failed:false on any one of
+// them would leave those files green too.
+func TestParse_UnreadableManifestFailsTheScan(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		file string
+		body string
+	}{
+		{"jar", "lib/broken2.jar", "still not a zip file"},
+		{"composer.lock", "composer.lock", `{"packages": [{"name": "vendor/pkg"`},
+		{"packages.lock.json", "packages.lock.json", `{"dependencies": {"net6.0": {"Some.Pkg`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := writeTree(t, map[string]string{tc.file: tc.body})
+
+			target, _, found, err := Parse(root)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if len(target.Packages) != 0 {
+				t.Errorf("packages = %+v, want none from an unreadable manifest", target.Packages)
+			}
+			if len(found.Unread) != 1 {
+				t.Fatalf("Unread = %+v, want exactly one entry", found.Unread)
+			}
+			if !found.Unread[0].Failed {
+				t.Error("Failed = false; an unreadable manifest means this scan saw none " +
+					"of its dependencies, which must reach exit 2 (AnyFailed -> scancmd)")
+			}
+			if !found.AnyFailed() {
+				t.Error("AnyFailed() = false, want true")
+			}
+		})
+	}
+}
+
 // A nested archive's composite Location ("outer!inner") must survive
 // relocation to the manifest's repo-relative path with the "!inner" suffix
 // intact — relocate()'s own doc comment warns that a plain overwrite would
