@@ -16,6 +16,7 @@ import (
 	"github.com/kun9497/assay/internal/cataloger/dirscan"
 	"github.com/kun9497/assay/internal/cataloger/dpkgdb"
 	"github.com/kun9497/assay/internal/cataloger/gobinary"
+	"github.com/kun9497/assay/internal/cataloger/jar"
 	"github.com/kun9497/assay/internal/cataloger/osrelease"
 	"github.com/kun9497/assay/internal/cataloger/rpmdb"
 	"github.com/kun9497/assay/internal/matcher"
@@ -305,6 +306,21 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 			return 2
 		}
 		inventory, cat = t, stats
+
+	case source.TargetJar:
+		// jar.Parse returns the raw package slice, not a pkgmeta.Target
+		// (D70's fixed signature, shared with every per-manifest cataloger
+		// dirscan dispatches to) - wrapped here the same way dirscan.Parse's
+		// own callers never see, since a jar scan has exactly one manifest
+		// and no merge to do.
+		pkgs, stats, err := jar.Parse(path)
+		if err != nil {
+			// jar.Parse's own error already names path.
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 2
+		}
+		// Distro stays nil - a jar is not an operating system (D7).
+		inventory, cat = pkgmeta.Target{Packages: pkgs}, stats
 
 	case source.TargetDirectory:
 		t, stats, mf, err := dirscan.Parse(path)

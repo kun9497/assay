@@ -14,12 +14,14 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/kun9497/assay/internal/cataloger/cargolock"
 	"github.com/kun9497/assay/internal/cataloger/composerlock"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"github.com/kun9497/assay/internal/cataloger/gemlock"
 	"github.com/kun9497/assay/internal/cataloger/gomod"
+	"github.com/kun9497/assay/internal/cataloger/jar"
 	"github.com/kun9497/assay/internal/cataloger/npmlock"
 	"github.com/kun9497/assay/internal/cataloger/nugetlock"
 	"github.com/kun9497/assay/internal/cataloger/pipfilelock"
@@ -293,6 +295,22 @@ func parseManifest(root string, m Manifest) ([]pkgmeta.Package, cyclonedx.Stats,
 		relocate(pkgs, m.Path)
 		return pkgs, s, nil, nil
 
+	case KindJarArchive:
+		pkgs, s, perr := jar.Parse(full)
+		if perr != nil {
+			return nil, cyclonedx.Stats{}, nil, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
+		}
+		// Not relocate(): jar.Parse can stamp a Location with more than the
+		// manifest path alone — a nested entry's composite
+		// "<jar path>!<inner path>" (jar.go's own doc comment on
+		// jarLocationSeparator) — and relocate() would flatten that suffix
+		// away entirely, exactly the loss its own doc comment warns a future
+		// caller about. relocateJar rewrites only the absolute prefix
+		// jar.Parse stamped, to this manifest's repo-relative path, and
+		// keeps whatever "!nested/entry" suffix follows it.
+		relocateJar(pkgs, full, m.Path)
+		return pkgs, s, nil, nil
+
 	case KindPnpmLock:
 		// Recognized, and deliberately unread: neither YAML nor TOML is in
 		// the standard library, and taking a parser for either is a
@@ -359,6 +377,31 @@ func parseManifest(root string, m Manifest) ([]pkgmeta.Package, cyclonedx.Stats,
 func relocate(pkgs []pkgmeta.Package, relPath string) {
 	for i := range pkgs {
 		for j := range pkgs[i].Locations {
+			pkgs[i].Locations[j].Path = relPath
+		}
+	}
+}
+
+// relocateJar is relocate's counterpart for KindJarArchive: it performs the
+// same absolute-to-repo-relative rewrite, but as a PREFIX replacement rather
+// than a full overwrite, so a nested entry's "!inner/path" suffix (jar.Parse
+// stamped it onto Location.Path, composed with full, the absolute path
+// jar.Parse was called with) survives the rewrite instead of being discarded.
+// A package with no such suffix — every top-level component in the jar
+// itself — ends up identical to what relocate would have produced.
+func relocateJar(pkgs []pkgmeta.Package, full, relPath string) {
+	for i := range pkgs {
+		for j := range pkgs[i].Locations {
+			if rest, ok := strings.CutPrefix(pkgs[i].Locations[j].Path, full); ok {
+				pkgs[i].Locations[j].Path = relPath + rest
+				continue
+			}
+			// Defensive fallback: jar.Parse's own Location construction
+			// always starts with the path it was called with (full), so this
+			// arm is not expected to be reached — but falling back to the
+			// same behaviour relocate() has, rather than leaving an absolute
+			// path in the output, is the safer failure mode if that ever
+			// stops being true.
 			pkgs[i].Locations[j].Path = relPath
 		}
 	}

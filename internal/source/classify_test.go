@@ -1,11 +1,37 @@
 package source
 
 import (
+	"archive/zip"
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// writeZip builds a minimal zip archive from name -> content pairs and writes
+// it to path, for classify_test.go's own jar-sniffing fixtures. Never a
+// committed binary fixture (CLAUDE.md) — built in-test with archive/zip.
+func writeZip(t *testing.T, path string, entries map[string]string) {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, body := range entries {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+		if _, err := w.Write([]byte(body)); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip writer: %v", err)
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o600); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
 
 // The prefixes are the escape hatch from the sniff, so they must win outright
 // — including when the sniff would have said something else, which is the only
@@ -27,12 +53,16 @@ func TestClassify_ExplicitPrefixesOverrideTheContent(t *testing.T) {
 		// file: on a document the sniff would have called an SBOM. If the
 		// prefix did not win, this row would return TargetSBOM.
 		{"file:" + sbom, TargetGoBinary, sbom},
+		// jar: on that same document. If the prefix did not win, this row
+		// would return TargetSBOM too — the sniff never even runs.
+		{"jar:" + sbom, TargetJar, sbom},
 		// A prefix on a path that does not exist is still that kind. The
 		// error the caller then reports is "cannot open", which is true,
 		// rather than "not a recognised target", which is not.
 		{"dir:/does/not/exist", TargetDirectory, "/does/not/exist"},
 		{"file:/does/not/exist", TargetGoBinary, "/does/not/exist"},
 		{"sbom:/does/not/exist", TargetSBOM, "/does/not/exist"},
+		{"jar:/does/not/exist", TargetJar, "/does/not/exist"},
 	} {
 		gotKind, gotPath, err := Classify(tt.in)
 		if err != nil {
@@ -83,6 +113,15 @@ func TestClassify_BarePathsAreSniffed(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Recognized by name suffix alone (the common case: a real jar always
+	// carries META-INF/, but the suffix check is cheap and tried first).
+	byName := filepath.Join(dir, "app.jar")
+	writeZip(t, byName, map[string]string{"com/example/Main.class": "not real bytecode"})
+	// No .jar/.war suffix at all, recognized only by the META-INF/ entry
+	// inside it — the fallback the suffix check exists beside.
+	byContent := filepath.Join(dir, "app.bin")
+	writeZip(t, byContent, map[string]string{"META-INF/MANIFEST.MF": "Manifest-Version: 1.0\n"})
+
 	for _, tt := range []struct {
 		name string
 		in   string
@@ -91,6 +130,8 @@ func TestClassify_BarePathsAreSniffed(t *testing.T) {
 		{"a Go binary", self, TargetGoBinary},
 		{"a CycloneDX document", sbom, TargetSBOM},
 		{"a directory", dir, TargetDirectory},
+		{"a jar recognized by its .jar name", byName, TargetJar},
+		{"a jar recognized by its META-INF/ content", byContent, TargetJar},
 		// Not a path at all: the pre-existing behaviour, unchanged.
 		{"a registry reference", "alpine:3.19", TargetImage},
 		{"a registry reference with a port", "registry.example.com:5000/team/app", TargetImage},
@@ -148,13 +189,28 @@ func TestClassify_AnUnrecognisedFileIsAnErrorNamingWhatWasTried(t *testing.T) {
 	}
 	// The message has to name what was tried AND how to override, because
 	// those are the user's two next questions.
-	for _, want := range []string{"Go binary", "CycloneDX", "sbom:", "file:", "dir:"} {
+	for _, want := range []string{"Go binary", "CycloneDX", "jar", "sbom:", "file:", "dir:", "jar:"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q - the user cannot tell what to do next", err, want)
 		}
 	}
 	if !strings.Contains(err.Error(), path) {
 		t.Errorf("error %q does not name the file", err)
+	}
+}
+
+// A plain zip — the magic bytes without either signal jar scanning actually
+// needs — is none of the four kinds and must reach the same loud error, not
+// be misclassified as a component inventory just because it happens to share
+// jar's container format.
+func TestClassify_APlainZipIsNotAJar(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "archive.zip")
+	writeZip(t, path, map[string]string{"readme.txt": "not a jar"})
+
+	kind, _, err := Classify(path)
+	if err == nil {
+		t.Fatalf("Classify(plain zip) = %v, want an error - it names neither "+
+			".jar/.war nor META-INF/", kind)
 	}
 }
 
@@ -251,6 +307,7 @@ func TestTargetKindString(t *testing.T) {
 		TargetSBOM:      "sbom",
 		TargetDirectory: "directory",
 		TargetGoBinary:  "go-binary",
+		TargetJar:       "jar",
 	} {
 		if got := k.String(); got != want {
 			t.Errorf("TargetKind(%d).String() = %q, want %q", int(k), got, want)
