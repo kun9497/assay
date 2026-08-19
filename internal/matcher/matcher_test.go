@@ -703,6 +703,97 @@ func TestMatch_UnkeyablePackageIsSkippedNotClean(t *testing.T) {
 	}
 }
 
+// TestMatch_FindingIdentifiersIncludeUpstream drives Match(), not lookupIDs
+// directly (D3: "read both aliases and upstream"). identifiers() -- the
+// grouping key -- is deliberately upstream-blind
+// (TestIdentifiers_ExcludesUpstream below), and every existing --explain /
+// annotate test either hand-builds Finding.Identifiers or uses a fixture that
+// already carries the CVE in Aliases, so nothing running Match ever checked
+// that Finding.Identifiers itself carries Upstream. This fixture is
+// Alpine-shaped on purpose: Aliases empty, the CVE only in Upstream, exactly
+// the measured shape of all 4,405 real Alpine records. Losing Upstream here
+// silently disconnects such a finding from the CVE that --explain's lookup,
+// a `scan | grep CVE-…`, and NVD/KISA's own CVE join all depend on.
+func TestMatch_FindingIdentifiersIncludeUpstream(t *testing.T) {
+	a := advisory.Advisory{
+		ID:       "ALPINE-CVE-2026-1",
+		Kind:     advisory.KindVulnerability,
+		Upstream: []string{"CVE-2026-1"}, // no Aliases at all -- Alpine's own shape
+		Affected: []advisory.Affected{{
+			Ecosystem: "Go",
+			Name:      "github.com/foo/upstreamonly",
+			Ranges: []advisory.Range{{
+				Type:   advisory.RangeSemver,
+				Events: []advisory.Event{{Introduced: "0"}, {Fixed: "1.5.0"}},
+			}},
+		}},
+	}
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Go\x00github.com/foo/upstreamonly": {a},
+	}}
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("github.com/foo/upstreamonly", "v1.2.3", "Go")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1", len(res.Findings))
+	}
+	var gotUpstream bool
+	for _, id := range res.Findings[0].Identifiers {
+		if id == "CVE-2026-1" {
+			gotUpstream = true
+		}
+	}
+	if !gotUpstream {
+		t.Errorf("Identifiers = %v, want CVE-2026-1 from Upstream (D3) -- --explain and a "+
+			"CVE-keyed grep both read this field", res.Findings[0].Identifiers)
+	}
+}
+
+// D41's source-version comparison, driven through Match rather than only
+// checked at the cataloger that populates Source (dpkgdb_test's "this is the
+// version D41 compares"). Every existing matcher fixture sets Source with a
+// Name only, so `compareVersion = p.Source.Version` never actually differed
+// from `compareVersion = p.Version` in anything that ran Match --
+// TestMatch_SourcePackageReachesTheAdvisory above leaves Source.Version
+// empty, which takes the "same as the binary version" branch either way.
+//
+// This is the real bookworm shape D41's own comment names: bsdutils's
+// installed BINARY carries an epoch a binNMU added (1:2.38.1-5+deb12u3)
+// while the SOURCE package -- which is what OSV's Debian advisories are
+// written against -- does not (2.38.1-5+deb12u2, still short of the fix).
+// Comparing the binary version against the source-namespace bound sorts it
+// ABOVE every fixed version on the epoch alone, regardless of the upstream
+// release -- a silent false negative on the 13-15% of Debian packages whose
+// binary and source versions diverge this way.
+func TestMatch_IndirectLookupComparesTheSourceVersion(t *testing.T) {
+	adv := advWithRange("DEBIAN-CVE-2026-1", "Debian:12", "util-linux",
+		"0", "2.38.1-5+deb12u3", advisory.RangeEcosystem)
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Debian:12\x00util-linux": {adv},
+	}}
+
+	p := pkg("bsdutils", "1:2.38.1-5+deb12u3", "Debian:12")
+	p.Source = &pkgmeta.SourcePackage{Name: "util-linux", Version: "2.38.1-5+deb12u2"}
+
+	res, err := New(s).Match(pkgmeta.Target{Packages: []pkgmeta.Package{p}})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1: the SOURCE version 2.38.1-5+deb12u2 is inside "+
+			"[0, 2.38.1-5+deb12u3); comparing the BINARY version 1:2.38.1-5+deb12u3 "+
+			"(a later binNMU's epoch) sorts it above the fix regardless of the upstream "+
+			"release and misses this false negative; got %+v (skipped %+v)",
+			len(res.Findings), res.Findings, res.Skipped)
+	}
+	if got := res.Findings[0].Advisory.ID; got != "DEBIAN-CVE-2026-1" {
+		t.Errorf("Advisory.ID = %q, want DEBIAN-CVE-2026-1", got)
+	}
+}
+
 // identifiers() feeds the dedup map, and it must NOT include Upstream. OSV
 // defines upstream as "derived from", not "the same as", so collapsing on it
 // suppresses a genuinely distinct advisory — a false negative, where an extra

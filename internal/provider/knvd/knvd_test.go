@@ -1256,6 +1256,55 @@ func TestEnrich_NarrowestNoticeWins(t *testing.T) {
 	}
 }
 
+// better()'s equal-Claims tie-break on URL exists, per its own comment,
+// purely so the winner does not depend on which page arrived first (D25/D33's
+// forbidden tie-break) -- and nothing driving Enrich ever reached it.
+// TestEnrich_NarrowestNoticeWins ties Claims 1 against 3, which resolves in
+// the a.Claims != b.Claims branch, and TestKeep_UnknownBreadthDoesNotDisplaceKnown
+// ties 0 against 9, the a.Claims == 0 branches. Only two notices tied on the
+// SAME nonzero breadth reach the `default` arm this test targets, and only
+// walking them in both page orders proves the winner is the URL, not
+// whichever page the fake happened to serve first.
+func TestEnrich_EqualBreadthTiesBreakOnURLNotArrivalOrder(t *testing.T) {
+	// Both notices claim exactly two CVEs (Claims == 2, tied and nonzero) and
+	// share CVE-2026-5001. detailURL + id makes n-alpha's URL lexically
+	// smaller than n-beta's, so the shared CVE must end up with n-alpha's
+	// title regardless of which page is served first.
+	alpha := notice("n-alpha", "Product A 보안 업데이트 권고",
+		overview("CVE-2026-5001", "CVE-2026-5002"))
+	beta := notice("n-beta", "Product B 보안 업데이트 권고",
+		overview("CVE-2026-5001", "CVE-2026-5003"))
+
+	for _, tc := range []struct {
+		name       string
+		first, snd string
+	}{
+		{"alpha (smaller URL) arrives first", alpha, beta},
+		{"beta (larger URL) arrives first", beta, alpha},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, srv := newFake(t, 3, map[int]string{
+				0: page(tc.first),
+				1: page(tc.snd),
+				2: emptyPage,
+			})
+			got := map[string]advisory.Enrichment{}
+			p := New(Options{BaseURL: srv.URL, PageSize: 1, Pause: durPtr(0)})
+			if _, err := p.Enrich(context.Background(), func(e advisory.Enrichment) error {
+				got[e.CVE] = e
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			shared := got["CVE-2026-5001"]
+			if shared.Title != "Product A 보안 업데이트 권고" {
+				t.Errorf("CVE-2026-5001 kept %q, want n-alpha's title (the lexically "+
+					"smaller URL) regardless of arrival order", shared.Title)
+			}
+		})
+	}
+}
+
 // A source that does not report breadth must not outrank one that does. Claims
 // is zero for such a record, and reading zero as "narrowest" would let it win
 // every tie against a notice that honestly said it covers one CVE.

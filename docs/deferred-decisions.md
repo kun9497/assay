@@ -167,7 +167,26 @@ properly before reopening D1.
 
 ---
 
-### A whole-project QA pass before anything is called finished
+### ~~A whole-project QA pass before anything is called finished~~ — first pass run 2026-08-19
+
+**Run when the architecture table filled in** (D70 made every cell bold), as five parallel
+auditors over the four defect classes this entry names, each finding carrying the exact
+one-line mutation that would prove it, verified in isolated worktrees against the FULL suite
+— the cross-slice requirement, mechanized.
+
+**Results: 25 findings, 9 verified by mutation, every verified one real (0 false alarms).**
+The confirmed gaps, all closed the same day by tests that turn those exact mutations red:
+`Unread.Failed` unheld on the jar arm (a corrupt .jar exited 0 under `--fail-on-incomplete`);
+the OSV zero-record guard held for Alpine only; NVD's emit error swallowed (a store-write
+failure during `db update` reported success); the four D68 comparers' REGISTRY wiring
+untested (the seventh instance of helper-covered-nothing-calls-it — `"RubyGems": SemVer{}`
+survived); `--db-max-age` parsed and dropped; knvd's URL tie-break; D3's `upstream`
+identifiers and D41's source-version comparison unheld on the consumer side; one substring
+assertion in the test written for the substring-assertion class.
+
+**Still open: 14 unverified medium/low findings** (SARIF renderer arm, the D11 interaction
+matrices, PullSeed contract arms, OpenSeedRatings pin, reportTimings wiring, others) — the
+next pass's starting list, recorded in the QA workflow journal. The original entry follows.
 
 **Why this is written down rather than assumed.** Every slice in this project has shipped
 with its own tests and its own mutation round, and mutation testing still found real defects
