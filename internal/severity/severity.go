@@ -65,13 +65,18 @@ func Of(vector string) (Band, float64, error) {
 // compares scores across a mix of both) instead of comparing as a different
 // kind of value.
 //
-// The mapping is the RHSA convention — Critical, Important, Moderate, Low —
-// which AlmaLinux's ALSA summaries inherit byte-for-byte (D72). A word not in
-// this table is left unrecognized rather than guessed at: Of's default branch
-// then reports it unscorable, and severity.Highest skips it exactly as it
-// skips a garbled CVSS vector, landing on Unknown rather than a fabricated
-// band (D17) — coercing an unexpected spelling to Low would hide whatever the
-// vendor actually asserted behind a silent misclassification.
+// The base mapping is the RHSA convention — Critical, Important, Moderate,
+// Low — which AlmaLinux's ALSA summaries inherit byte-for-byte (D72); Amazon
+// Linux's own "Medium" (D73) and Fedora's own "Urgent"/"High" (D75) were
+// added alongside it rather than folded into it, because each is a
+// genuinely different WORD a different vendor writes for the same band, not
+// a spelling variant of an existing one — see each entry's own comment for
+// why. A word not in this table is left unrecognized rather than guessed
+// at: Of's default branch then reports it unscorable, and severity.Highest
+// skips it exactly as it skips a garbled CVSS vector, landing on Unknown
+// rather than a fabricated band (D17) — coercing an unexpected spelling to
+// Low would hide whatever the vendor actually asserted behind a silent
+// misclassification.
 var vendorSeverityWords = map[string]struct {
 	band  Band
 	score float64
@@ -90,6 +95,18 @@ var vendorSeverityWords = map[string]struct {
 	// would have to know to check for.
 	"Medium": {Medium, 4.0},
 	"Low":    {Low, 0.1},
+	// D75: Fedora's Bodhi feed has its own five-word ladder --
+	// urgent/high/medium/low/unspecified -- and "urgent"/"high" are
+	// genuinely different WORDS from RHSA's "Critical"/"Important", not a
+	// casing or spelling variant of them (measured 2026-08-19: Bodhi never
+	// writes "Critical" or "Important" anywhere). Mapped faithfully rather
+	// than renamed: the STORED word stays "Urgent"/"High" -- what the
+	// Fedora packager actually wrote -- while banding to the same ordinal
+	// place (Critical/High) that severity.Highest compares against a mix of
+	// every other source's ratings, the same "two keys, one value" shape
+	// the "Medium" entry above set for Amazon Linux's own spelling.
+	"Urgent": {Critical, 9.0},
+	"High":   {High, 7.0},
 }
 
 // Highest returns the worst band across a record's vectors, and that band's

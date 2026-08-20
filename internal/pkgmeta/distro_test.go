@@ -46,7 +46,7 @@ func TestDistroEcosystem_Unsupported(t *testing.T) {
 		// ever reached — the ID guard needs a version that WOULD parse. Without
 		// these, deleting `d.ID != "alpine"` leaves the suite green and
 		// Distro{ID: "ubuntu", VersionID: "22.04"} yields "Alpine:v22.04".
-		{"unsupported distro", Distro{ID: "fedora", VersionID: "40"}},
+		{"unsupported distro", Distro{ID: "gentoo", VersionID: "40"}},
 		{"unsupported distro with a parseable version", Distro{ID: "opensuse-leap", VersionID: "15.6"}},
 		// D50. These are RPM distributions whose packages ARE catalogued, and
 		// they must still not resolve: Red Hat's errata describe Red Hat's own
@@ -96,6 +96,16 @@ func TestDistroEcosystem_Unsupported(t *testing.T) {
 		// apply to it that apply to rhel/rocky/almalinux above.
 		{"ol with no VERSION_ID", Distro{ID: "ol", VersionID: ""}},
 		{"ol with a non-numeric version", Distro{ID: "ol", VersionID: "beta"}},
+		// D75 gave Fedora its decision. The no-VERSION_ID and non-numeric
+		// cases are the same two every other RPM distro's decision needed --
+		// but Fedora ALSO refuses a dotted version, unlike rhel/rocky/
+		// almalinux/ol above: fedora-release.spec's VERSION_ID has never
+		// carried a minor, so a dotted shape is refused outright rather than
+		// silently truncated at the major the way the others are.
+		{"fedora with no VERSION_ID", Distro{ID: "fedora", VersionID: ""}},
+		{"fedora with a non-numeric version", Distro{ID: "fedora", VersionID: "rawhide"}},
+		{"fedora VERSION_ID has never carried a minor; a dotted one is refused, not truncated",
+			Distro{ID: "fedora", VersionID: "43.1"}},
 		// D53 gave Ubuntu its decision, so it resolves now — but only for a
 		// VERSION_ID shaped like a release. A version this cannot read is
 		// refused rather than concatenated into a key that would look
@@ -456,6 +466,63 @@ func TestDistroEcosystem_Oracle(t *testing.T) {
 	// default case that accidentally let every RPM ID through.
 	if _, err := (Distro{ID: "centos", VersionID: "9"}).Ecosystem(); err == nil {
 		t.Error("centos resolved an ecosystem; D50 still excludes it")
+	}
+	// The no-VERSION_ID and non-numeric-VERSION_ID refusals are pinned in
+	// TestDistroEcosystem_Unsupported, alongside rhel's identical two rows.
+}
+
+// TestDistroEcosystem_Fedora: D75. Fedora left D50's not-evaluated list once
+// Bodhi's own updates feed was ingested (internal/provider/fedora) -- there
+// is no OSV archive for it at all. Unlike every other RPM distro above, the
+// key is the WHOLE VERSION_ID, never truncated at a '.' -- fedora-release
+// .spec's VERSION_ID has never carried a minor, so "43" IS the release, not
+// a major with a dropped minor.
+func TestDistroEcosystem_Fedora(t *testing.T) {
+	for _, tc := range []struct {
+		versionID string
+		want      string
+	}{
+		{"43", "Fedora:43"},
+		{"44", "Fedora:44"},
+	} {
+		got, err := Distro{ID: "fedora", VersionID: tc.versionID}.Ecosystem()
+		if err != nil {
+			t.Errorf("VERSION_ID=%q: %v", tc.versionID, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("VERSION_ID=%q -> %q, want %q", tc.versionID, got, tc.want)
+		}
+	}
+	// Fedora's key must not converge with any other RPM distro's -- a
+	// change that collapsed them would make one distro's advisories
+	// reachable under another's key.
+	for _, tc := range []struct{ id, versionID, want string }{
+		{"alpine", "3.19", "Alpine:v3.19"},
+		{"rhel", "9.8", "Red Hat:9"},
+		{"rocky", "9.4", "Rocky Linux:9"},
+		{"almalinux", "9.6", "AlmaLinux:9"},
+		{"amzn", "2023", "Amazon Linux:2023"},
+		{"ol", "9.8", "Oracle Linux:9"},
+		{"fedora", "44", "Fedora:44"},
+	} {
+		if got, err := (Distro{ID: tc.id, VersionID: tc.versionID}).Ecosystem(); err != nil || got != tc.want {
+			t.Errorf("%s %s -> %q, %v; want %q", tc.id, tc.versionID, got, err, tc.want)
+		}
+	}
+	// centos must still not resolve (D50) -- Fedora leaving the
+	// not-evaluated list must not have been a change to the switch's
+	// default case that accidentally let every RPM ID through.
+	if _, err := (Distro{ID: "centos", VersionID: "9"}).Ecosystem(); err == nil {
+		t.Error("centos resolved an ecosystem; D50 still excludes it")
+	}
+	// A dotted VERSION_ID ("43.1") is refused rather than truncated to
+	// "Fedora:43" -- unlike rhel/rocky/almalinux/ol above, Fedora's release
+	// number has never had a minor to drop, so a dotted shape is a format
+	// this provider has never seen rather than one it should silently
+	// tolerate.
+	if got, err := (Distro{ID: "fedora", VersionID: "43.1"}).Ecosystem(); err == nil {
+		t.Errorf("fedora 43.1 resolved to %q, want a refusal -- Fedora's VERSION_ID is never dotted", got)
 	}
 	// The no-VERSION_ID and non-numeric-VERSION_ID refusals are pinned in
 	// TestDistroEcosystem_Unsupported, alongside rhel's identical two rows.

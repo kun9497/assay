@@ -573,6 +573,9 @@ exited 0 while 24 findings went unmentioned. **Done.**
 - [x] Oracle Linux 5-10 from ELSA OVAL (D74) — first OVAL criteria-tree parser; UEK
       cross-definition ambiguity dropped-and-counted; v2-only definitions fall to the NVD
       join; ksplice/FIPS lineages disclosed as unfiltered
+- [x] Fedora current releases from Bodhi (D75) — prose-CVE misses counted (81.7%
+      ceiling), EOL freeze disclosed, unspecified severity stays Unknown; the buildable
+      RPM family closes
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a
@@ -804,11 +807,12 @@ worse than saying nothing.
 
 Only `rhel` routes to `Red Hat:N` (D50); Rocky Linux routes to `Rocky Linux:N` (D71),
 AlmaLinux to `AlmaLinux:N` (D72), Amazon Linux 2/2023 to `Amazon Linux:2` /
-`Amazon Linux:2023` (D73), and Oracle Linux 5–10 to `Oracle Linux:<major>` (D74), each
-against its OWN advisory feed, never against Red Hat's or each other's. `centos` covers one
-product that trailed RHEL and another that runs ahead of it, and Fedora still has its own
-feed — it, along with Amazon Linux 1 and AL2022, is catalogued and reported as not
-evaluated, a loud skip, never a clean verdict.
+`Amazon Linux:2023` (D73), Oracle Linux 5–10 to `Oracle Linux:<major>` (D74), and Fedora's
+current releases to `Fedora:<release>` (D75), each against its OWN advisory feed, never
+against Red Hat's or each other's. `centos` covers one product that trailed RHEL and another
+that runs ahead of it — still catalogued and reported as not evaluated, alongside Amazon
+Linux 1, AL2022 and any Fedora release past its 13-month EOL, a loud skip, never a clean
+verdict.
 
 A Rocky verdict is clean-of-what-Rocky-published: its feed is errata-only and measured
 thinner than RHSA's (no regreSSHion advisory at all), and module-build fixes are skipped and
@@ -823,6 +827,11 @@ An Amazon verdict is core-repos-only, and that narrowing is disclosed rather tha
 AL2's 73 extras repos (964 advisories — docker, ecs, kernel livepatches) are not fetched, and
 `db build` prints that gap at build time rather than leaving it to be discovered on a scan
 that needed them.
+
+A Fedora verdict inherits two disclosed limits: CVE extraction from Bodhi's update prose
+tops out at a measured 81.7%, and an EOL'd release's advisories freeze in place rather than
+stopping the scan — `db build` prints both at build time rather than leaving them to be
+found later.
 
 - [ ] A `Red Hat:N` scan of an EUS host still quotes mainline fixed versions. Measured
       2026-08-11: the error is a false POSITIVE in 149,726 of 155,549 differing groups

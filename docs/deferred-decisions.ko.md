@@ -416,11 +416,11 @@ RHSA-2024:4312  CVE-2024-6387 (regreSSHion, 업스트림은 9.8p1에서 수정)
   `('CVE-2021-20291', 'buildah', '8')`은 `container-tools`의 두 스트림에서 온 fixed 버전 둘로
   풀립니다. 높은 쪽을 고르면 체계적 오탐이고 낮은 쪽을 고르면 미탐입니다.
 
-**~~AlmaLinux와 Rocky Linux는 더 쉬운 길이 아닙니다~~ — 이제 넷 다 해결됐습니다: Rocky는
-D71에서, AlmaLinux는 D72에서, Amazon Linux 2/2023은 D73에서, Oracle Linux 5–10은 D74에서;
-Fedora, SLES는 여전히 열려 있습니다.** 둘 다 major 버전만으로 키를 잡아 — 각 3개,
-`/etc/os-release`에서 유도 가능 — 실제로 더 단순했습니다. 당시에는 Alma도 Rocky도 나머지를
-못 넘겼습니다:
+**~~AlmaLinux와 Rocky Linux는 더 쉬운 길이 아닙니다~~ — 이제 다섯 다 해결됐습니다: Rocky는
+D71에서, AlmaLinux는 D72에서, Amazon Linux 2/2023은 D73에서, Oracle Linux 5–10은 D74에서,
+Fedora는 D75에서; 이제 SLES만 `ndb` 뒤에서 열려 있습니다.** 둘 다 major 버전만으로 키를 잡아
+— 각 3개, `/etc/os-release`에서 유도 가능 — 실제로 더 단순했습니다. 당시에는 Alma도 Rocky도
+나머지를 못 넘겼습니다:
 
 - ~~**AlmaLinux는 `aliases`도 `upstream`도 0개**입니다. 레코드 5,494개 전부에 대해서. 모든 CVE
   참조가 `related`에 있는데, OSV는 `related`를 alias가 *아니라고* 명시적으로 정의합니다. D3을
@@ -464,21 +464,21 @@ README의 슬라이스 ⑬ 참조.
 억제하는 이야기이고, 이쪽은 벤더가 영향 여부를 발행하는 이야기입니다.
 
 **여전히 보류.** 제2의 의견으로서의 OVAL v2(RHEL 5–9만 다루고 RHEL 10이 없어서 주 출처가 될 수
-없습니다), 위의 반대 이유(SLES는 이 문서 다른 곳의 ndb 항목)가 그대로이고 그래서 D50도 D71도
-D72도 D73도 D74도 경로를 주지 않는 Fedora, SLES, 그리고 EUS/AUS/E4S 발산을 공개하는 데서
-끝내지 않고 닫는 것. 마지막 것은 어떤 이미지도 담고 있지 않은 채널 신호가 필요합니다. Rocky
-Linux, AlmaLinux, Amazon Linux, Oracle Linux는 이 목록에서 빠졌습니다 — D71, D72, D73, D74
-참조.
+없습니다), SLES 하나뿐이고 이 문서 다른 곳의 ndb 항목이 그대로이며 D50도 D71도 D72도 D73도
+D74도 D75도 경로를 주지 않는 것, 그리고 EUS/AUS/E4S 발산을 공개하는 데서 끝내지 않고 닫는 것.
+마지막 것은 어떤 이미지도 담고 있지 않은 채널 신호가 필요합니다. Rocky Linux, AlmaLinux,
+Amazon Linux, Oracle Linux, Fedora는 이 목록에서 빠졌습니다 — D71부터 D75까지 참조.
 
 **Oracle Linux 자신은 아직 결정 하나를 빚지고 있습니다.** D74는 걸러내는 대신 공개했습니다:
 ksplice 계보와 FIPS 계보 패키지를 메인라인과 구분하지 않으며, 이는 Ubuntu D53과 같은 모양의
-  첫 수집에서 실측: 교차-definition UEK/module 가드가 affected 항목 43,123개(모호 (CVE, major,
-  package) 그룹 169,585개)를 떨어뜨렸습니다 -- 연구 추정 ~1,700 그룹을 크게 웃돕니다. Oracle이 같은
-  CVE+패키지를 연속 ELSA에서 재수정하기 때문입니다. 방향은 보수적(잘못된 트레인 매칭 없음)이지만
-  미탐 비용이 후속 결정의 진짜 질문입니다: 트레인 인지 매칭이냐, 최초 수정 유지냐.
 위험입니다. 그래서 그 계보에 대한 `oraclelinux:` 판정은 적용되지 않을 수도 있는 메인라인
 advisory를 담습니다. 후속 사항이지 막는 것은 아닙니다 — 패키지 문서뿐 아니라 여기와 D74에도
 기록해 둡니다.
+
+첫 수집에서 실측: 교차-definition UEK/module 가드가 affected 항목 43,123개(모호 (CVE, major,
+package) 그룹 169,585개)를 떨어뜨렸습니다 — 연구 추정 ~1,700 그룹을 크게 웃돕니다. Oracle이 같은
+CVE+패키지를 연속 ELSA에서 재수정하기 때문입니다. 방향은 보수적(잘못된 트레인 매칭 없음)이지만
+미탐 비용이 후속 결정의 진짜 질문입니다: 트레인 인지 매칭이냐, 최초 수정 유지냐.
 
 **이 조사가 만들어낸 다섯 결정은 이제 D71에 있습니다**, 여기가 아니라 — 다음 배포판 슬라이스들이
 그것들을 재사용하기 때문입니다: 배포판이 직접 쓴 레코드로 범위를 좁혀 CVE 조인에 `related`를

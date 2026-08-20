@@ -153,6 +153,16 @@ func For(ecosystem string) (Comparer, bool) {
 	if rel, ok := strings.CutPrefix(ecosystem, "Oracle Linux:"); ok && rel != "" {
 		return RPM{}, true
 	}
+	// D75. Fedora is RPM too -- Bodhi's updates feed is release-qualified
+	// the same way ("Fedora:43"), and rpmvercmp does not care which distro
+	// built the package. Same rule, same reason as the five clauses above:
+	// "Fedora" bare is not a key this project ever builds -- the provider
+	// writes "Fedora:"+VERSION_ID from a bare-integer release (D75) -- and
+	// resolving it would make a bug that drops the release look like it
+	// worked.
+	if rel, ok := strings.CutPrefix(ecosystem, "Fedora:"); ok && rel != "" {
+		return RPM{}, true
+	}
 	// D53. Ubuntu is dpkg, so the comparer D40 wrote for Debian handles its
 	// revisions (2.4.4-2ubuntu17.10) unchanged — the version scheme was never
 	// the blocker. The KEY was.

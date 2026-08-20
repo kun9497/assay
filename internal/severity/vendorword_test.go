@@ -27,6 +27,12 @@ func TestOf_VendorWord(t *testing.T) {
 		// vendorSeverityWords' own comment for why both keys stay.
 		{"Medium", Medium, 4.0},
 		{"Low", Low, 0.1},
+		// D75: Fedora's Bodhi feed spells its own top two bands "Urgent"/
+		// "High" -- genuinely different words from RHSA's "Critical"/
+		// "Important", not case or spelling variants -- mapped to the same
+		// band+score rather than renamed onto the RHSA vocabulary.
+		{"Urgent", Critical, 9.0},
+		{"High", High, 7.0},
 	} {
 		b, score, err := Of(tt.word)
 		if err != nil {
@@ -59,11 +65,13 @@ func TestOf_VendorWord(t *testing.T) {
 // consistently, so silently folding case would risk matching a coincidental
 // lowercase word in an unrelated sentence fragment.
 func TestOf_UnrecognizedVendorWordIsUnscorable(t *testing.T) {
-	// "medium" (lowercase) is Amazon Linux's own AL2 spelling (D73) -- proving
-	// it is NOT recognized here is what makes internal/provider/amazon's own
-	// normalizeSeverityWord (which title-cases it before storage) load-bearing
-	// rather than redundant.
-	for _, word := range []string{"Sev4", "critical", "IMPORTANT", "Info", "medium", ""} {
+	// "medium" (lowercase) is Amazon Linux's own AL2 spelling (D73), and
+	// "urgent"/"high" (lowercase) are Fedora's own Bodhi spelling (D75) --
+	// proving none of them are recognized here is what makes each
+	// provider's own normalizeSeverityWord (which title-cases before
+	// storage) load-bearing rather than redundant. "unspecified" is Bodhi's
+	// own "nobody set a severity" value (D75) and must never score either.
+	for _, word := range []string{"Sev4", "critical", "IMPORTANT", "Info", "medium", "urgent", "high", "unspecified", ""} {
 		b, score, err := Of(word)
 		if err == nil {
 			t.Errorf("Of(%q) returned no error, want ErrUnscorable", word)
