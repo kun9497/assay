@@ -3172,6 +3172,41 @@ host/rootfs scans.
 
 ---
 
+### D80 — MODULARITYLABEL: the stream is data, so stop refusing it
+
+**Decision.** Module streams become first-class on both sides of the store. The cataloger
+reads RPMTAG_MODULARITYLABEL (tag 5096) into `Package.ModuleStream` — the label's first two
+fields only, because VERSION and CONTEXT vary between builds of ONE installed stream
+(measured on real ubi8/ubi9 AppStream images), and the module name is not derivable from
+the package name (perl-Mozilla-CA carries `perl-libwww-perl:6.34`). `Affected.ModuleStream`
+carries the advisory side, additively (D71's Related pattern, no schema bump). The Red Hat
+provider keeps the 487,796 module-scoped entries D47 dropped — the `::module:stream`
+context parses structurally in 100% of the corpus — with flatpak pseudo-streams excluded
+(4,999, own counter) and the context-less module-tagged guard kept at its load-bearing
+zero. Module known_affected entries (22,888) now flow too: per-stream will-not-fix reaches
+`--fail-on-unfixable`.
+
+**Three matching rules, each measured before it was written.** ① Stream equality: a module
+package is judged only against its own stream's entries, a non-modular package only against
+stream-less ones — inequality is silent inapplicability (a different stream's fix says
+nothing), while a stream-BLIND module-tagged bound (Rocky/Alma OSV until D82) stays loudly
+skipped through the D47/D71 guard. ② A module-tagged version with no readable label is
+reported not evaluated at the package level, never mistaken for non-modular — the release
+marker and the tag agreed 13/13 and 0/1,049 on real images, so their disagreement is the
+anomaly. ③ Stream-matched comparison truncates both EVRs at the module tail: the
+`+platform+context` trailer differs per architecture within one advisory (2,256 of 2,279
+multi-EVR Rocky tuples differ only there), so ordering it would decide verdicts by MBS
+hash — D25's forbidden tie-break wearing version clothing. The comparer is wrapped rather
+than the strings rewritten, so Evidence still quotes the real fix build (D10).
+
+**E2E, the whole point in one line.** ubi8/nodejs-18 catalogs 289 packages, 8 with streams;
+CVE-2021-35065's advisory carries three separate entries — nodejs:14, :16, :18, each with
+its own fixed EVR — and the scan matched exactly the installed stream's, `0 not evaluated`,
+no leakage from the other two. D81 attaches Oracle's streams (OVAL module criteria,
+structural), D82 Rocky/Alma's (summary-prose tokens, 98.7%/98.8% convention).
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

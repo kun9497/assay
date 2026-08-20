@@ -193,14 +193,21 @@ func splitNEVRA(s string) (name, evr string) {
 
 // isModule reports whether an EVR belongs to a modular build.
 //
-// These are dropped rather than stored, and the count is disclosed. 19.1% of
-// mainline groups are module-tagged and modules cause 69% of the fixed-version
-// ambiguity that survives the mainline filter, because the release string
-// records the platform build and a context hash but NOT the stream name:
-// `nodejs:18` and `nodejs:20` are indistinguishable from the version alone.
-// ('CVE-2021-20291', 'buildah', '8') resolves to two fixed versions from two
-// streams of container-tools — taking the higher is a systematic false
-// positive and taking the lower is a false negative, so neither is stored.
+// Called only when resolveProduct found no "::" context (D80): a module
+// build named WITH a context carries the stream that context supplies and is
+// stored, streamed, same as any other entry. This function exists for what
+// is left over — a module-tagged EVR whose product id carries no context at
+// all, so nothing says which stream it belongs to. 19.1% of mainline groups
+// are module-tagged, and `nodejs:18` and `nodejs:20` are indistinguishable
+// from the version alone. ('CVE-2021-20291', 'buildah', '8') is the real
+// archive row that showed why guessing is wrong either way: two streams of
+// container-tools resolve to two different fixed versions, taking the higher
+// is a systematic false positive against a host on the lower stream, and
+// taking the lower is a false negative against a host on the higher one. D80
+// resolved that exact row by attaching the context's stream instead — both
+// streams are stored, separately, each judged only against a host installed
+// from it — so this guard is only what fires on a build with neither an EVR
+// stream marker's context nor any other way to say which stream it is.
 //
 // Red Hat writes `module+el`; AlmaLinux writes `module_el`. Both are matched
 // so the rule does not quietly stop applying if this provider ever reads an
@@ -208,15 +215,14 @@ func splitNEVRA(s string) (name, evr string) {
 //
 // **It fires zero times on the current archive**, and that is recorded rather
 // than left to be rediscovered as a suspicious no-op. Every module-built
-// product id in the 2026-08-05 archive also carries a `::` context, so
-// splitContext catches all of them first: the counts moved from 431,985
-// module builds and 0 contexts to 0 and 453,164 when that check was added.
-// The check stays because the two detections are independent — a feed could
-// name a module build without a context, and AlmaLinux's `module_el` spelling
-// exists in a feed this provider does not read yet — and because a guard that
-// is cheap and occasionally right is worth more than one deleted on the
-// strength of a single archive. TestIsModule and TestConvert exercise it
-// directly, so it is unreached rather than untested.
+// product id measured also carries a `::` context, so resolveProduct's
+// context branch reaches all of them first and stores them with a stream
+// instead. The check stays because the two detections are independent — a
+// feed could name a module build without a context, and AlmaLinux's
+// `module_el` spelling exists in a feed this provider does not read yet —
+// and because a guard that is cheap and occasionally right is worth more
+// than one deleted on the strength of a single archive. TestIsModule and
+// TestConvert exercise it directly, so it is unreached rather than untested.
 func isModule(evr string) bool {
 	return strings.Contains(evr, "module+el") || strings.Contains(evr, "module_el")
 }
@@ -242,9 +248,13 @@ func collectCPE(bs []branch, out map[string]string) {
 	}
 }
 
-// productKey is what one CSAF product id collapses to: the store's ecosystem
-// and the package name inside it.
-type productKey struct{ eco, pkg string }
+// productKey is what one CSAF product id collapses to: the store's ecosystem,
+// the package name inside it, and the module stream if any (D80). Two streams
+// of one module — "nodejs:18" and "nodejs:20" — are two keys, not one: they
+// fix on independent timelines, and merging them would be the same unsound
+// comparison D47 refused when the release string alone was all there was to
+// go on. stream is "" for an ordinary, non-modular entry.
+type productKey struct{ eco, pkg, stream string }
 
 // skipReason names why a product id yields no key.
 //
@@ -263,6 +273,7 @@ const (
 	skipImage
 	skipNoCPE
 	skipNonRHEL
+	skipFlatpak
 	skipModuleContext
 	skipModule
 )
@@ -270,9 +281,19 @@ const (
 // resolveProduct turns "platform:component" into a key and an EVR.
 //
 // The order of the checks is load-bearing and matches the order the failures
-// occur in the data: separator, emptiness, image digest, platform CPE, mainline
-// filter, module context, then the name/EVR split. splitContext MUST stay ahead
-// of splitNEVRA for the reason splitContext documents.
+// occur in the data: separator, emptiness, image digest, platform CPE,
+// mainline filter, context (flatpak vs. module vs. malformed), the name/EVR
+// split, then the context-less module guard. splitContext MUST stay ahead of
+// splitNEVRA for the reason splitContext documents.
+//
+// D80 reversed what a "::" context does here. It used to mean an unconditional
+// drop (skipModuleContext, unconditionally): the scan could not know which
+// module stream was enabled, so matching the bare name would risk a false
+// positive against a different stream's fix. The context turns out to BE the
+// stream name Red Hat left out of the release string — rpmdb's
+// RPMTAG_MODULARITYLABEL carries the same "name:stream" shape (D80's cataloger
+// half) — so an entry that carries one is now kept, with the stream attached,
+// rather than dropped for lacking exactly the information it names.
 func resolveProduct(id string, cpe map[string]string) (productKey, string, skipReason) {
 	plat, comp, ok := strings.Cut(id, ":")
 	if !ok {
@@ -297,23 +318,42 @@ func resolveProduct(id string, cpe map[string]string) (productKey, string, skipR
 		return productKey{}, "", skipNonRHEL
 	}
 	comp, context := splitContext(comp)
+	var stream string
 	if context != "" {
-		// Module- and flatpak-scoped, and dropped for D47's reason: the scan
-		// cannot know which module streams are enabled, and a flatpak's
-		// contents are not in the rpmdb at all. Matching the bare name
-		// regardless of stream would be a false positive against a host running
-		// a different one, which is the same trade D47 refused for module FIXED
-		// versions.
-		return productKey{}, "", skipModuleContext
+		if strings.HasSuffix(context, ":flatpak") {
+			// Flatpak content is not a module and is not in the rpmdb at all
+			// (D47): nothing installed can ever carry it, so treating
+			// "flatpak" as a stream name would invite a join against a
+			// package that was never really modular. Measured 4,999 on the
+			// 2026-08-19 archive, all known_affected.
+			return productKey{}, "", skipFlatpak
+		}
+		name, rest, cut := strings.Cut(context, ":")
+		if !cut || name == "" || rest == "" {
+			// Every context in the 2026-08-19 archive parses as exactly
+			// "name:stream" — one colon, both halves non-empty — across all
+			// 463,701 module-scoped and 4,999 flatpak-scoped entries
+			// measured. This is the guard for a feed that stops being that
+			// shape, not a path real data takes today.
+			return productKey{}, "", skipModuleContext
+		}
+		stream = name + ":" + rest
 	}
 	name, evr := splitNEVRA(stripArch(comp))
 	if name == "" {
 		return productKey{}, "", skipBadProduct
 	}
-	if isModule(evr) {
+	if stream == "" && isModule(evr) {
+		// D80's load-bearing zero, carried over unchanged from the rule
+		// isModule's own comment documents: a module-tagged build with no
+		// "::" context cannot say which stream it belongs to, so it is
+		// dropped rather than guessed at, and the guard stays even though
+		// every module build measured also carried a context (isModule's
+		// comment explains why a cheap, occasionally-right guard survives a
+		// zero count).
 		return productKey{}, "", skipModule
 	}
-	return productKey{eco, name}, evr, skipNone
+	return productKey{eco, name, stream}, evr, skipNone
 }
 
 // The two CSAF remediation categories that say why a package has no fix.
@@ -370,6 +410,17 @@ func fixStateFor(cats map[string]bool, st *stats) advisory.FixState {
 	}
 }
 
+// keepModule records one product_status entry stored with a module stream
+// (D80): the raw count ModuleKept reports, and the stream itself for the
+// distinct-stream count String() derives from it.
+func (s *stats) keepModule(stream string) {
+	s.ModuleKept++
+	if s.moduleStreams == nil {
+		s.moduleStreams = map[string]bool{}
+	}
+	s.moduleStreams[stream] = true
+}
+
 // stats counts what one conversion pass discarded, so a sync can report it.
 // A provider that silently drops two thirds of its input is indistinguishable
 // from one that is broken.
@@ -394,11 +445,35 @@ type stats struct {
 	// instead of listing products. Zero on every archive measured; see the
 	// GroupIDs field for why it is counted rather than expanded.
 	RemediationGrouped int
-	SkippedModule      int
-	// SkippedModuleContext is an entry scoped to a module or flatpak by a "::"
-	// suffix. Counted apart from SkippedModule because the two are found
-	// differently — one by the release string, one by the product id — and a
-	// single counter would hide which detection was doing the work.
+	// ModuleKept counts product_status entries scoped to a module stream and
+	// STORED with one (D80) — the reversal of what a "::" context used to mean
+	// here. Counted once per raw product id, the same granularity as every
+	// other counter below, so it lines up with the archive measurement
+	// (463,701 module-scoped entries, of which the flatpak share is counted
+	// separately below).
+	ModuleKept int
+	// moduleStreams is the set of distinct "name:stream" values ModuleKept
+	// entries carried, read only through its length (see String()). Cheap to
+	// keep: RHEL's modules number in the low thousands across the whole
+	// archive, not the millions ModuleKept counts.
+	moduleStreams map[string]bool
+	// SkippedModule is a module-TAGGED build (its EVR carries "module+el" or
+	// "module_el") with NO "::" context to say which stream it belongs to —
+	// D80's load-bearing zero, carried over unchanged from the rule isModule
+	// documents. Measured zero on every archive: every module build the feed
+	// has ever carried also carried a context.
+	SkippedModule int
+	// SkippedFlatpak is an entry scoped by "::" to a flatpak rather than a
+	// module (D80): flatpak content is not in the rpmdb at all, so treating
+	// "flatpak" as a stream name would invite a join no installed package
+	// could ever satisfy. Measured 4,999 on the 2026-08-19 archive, all
+	// known_affected.
+	SkippedFlatpak int
+	// SkippedModuleContext is a "::" context that is neither a flatpak nor the
+	// measured "name:stream" shape — no colon, or an empty half. Zero on every
+	// archive measured (100% of contexts parse cleanly); kept as a guard
+	// against a feed that stops being that shape, the same discipline
+	// isModule's zero and SkippedModule's zero both document.
 	SkippedModuleContext int
 	SkippedNonRHEL       int
 	SkippedNoCPE         int
@@ -501,6 +576,9 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 		case skipNonRHEL:
 			st.SkippedNonRHEL++
 			return
+		case skipFlatpak:
+			st.SkippedFlatpak++
+			return
 		case skipModuleContext:
 			st.SkippedModuleContext++
 			return
@@ -509,6 +587,9 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 			return
 		}
 		note(k)
+		if k.stream != "" {
+			st.keepModule(k.stream)
+		}
 		if isFixed && evr != "" {
 			if fixed[k] == nil {
 				fixed[k] = map[string]bool{}
@@ -549,6 +630,16 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 				// Skips are not counted here; resolveProduct's doc comment says
 				// why. A remediation naming a product this store does not hold
 				// is not a discard.
+				//
+				// D80 also fixed what this join could reach: a remediation
+				// naming a module-scoped product id used to resolve to
+				// skipModuleContext unconditionally, so `why != skipNone`
+				// dropped it here too — silently, because this loop does not
+				// count skips. Now that resolveProduct returns skipNone (and
+				// the stream, inside k) for a module-scoped id, the same
+				// no_fix_planned/none_available reason reaches a module
+				// package's range exactly as it already did for an ordinary
+				// one.
 				k, _, why := resolveProduct(id, cpe)
 				if why != skipNone {
 					continue
@@ -585,7 +676,10 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 		Upstream: []string{cve},
 	}
 	for _, k := range order {
-		a := advisory.Affected{Ecosystem: k.eco, Name: k.pkg}
+		// ModuleStream carries D80's stream, or "" for an ordinary entry —
+		// productKey.stream is already in the shape Affected.ModuleStream
+		// documents ("name:stream"), so no further translation happens here.
+		a := advisory.Affected{Ecosystem: k.eco, Name: k.pkg, ModuleStream: k.stream}
 		if vs := fixed[k]; len(vs) > 0 {
 			for _, v := range sortedKeys(vs) {
 				a.Ranges = append(a.Ranges, advisory.Range{

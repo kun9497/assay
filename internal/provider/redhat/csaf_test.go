@@ -423,9 +423,13 @@ func TestSplitContext(t *testing.T) {
 	}
 }
 
-// The defect itself, asserted end to end rather than on the helper: a
-// context-scoped entry must not put a vulnerability on a package that only
-// looks like its prefix.
+// The original defect, re-scoped by D80: a context-scoped entry must not put
+// a vulnerability on a package that only looks like its prefix. Before D80
+// the fix was to drop every context-scoped entry, so the assertion was "not
+// stored under the truncated name"; D80 now KEEPS the module-scoped two of
+// these three, so the assertion becomes "stored under the FULL, correct
+// name" for those, while the flatpak-scoped one stays dropped exactly as
+// before.
 func TestConvert_ModuleContextDoesNotRenameThePackage(t *testing.T) {
 	d := buildDoc(t, "CVE-2022-2309",
 		map[string]string{"RHEL9": "cpe:/o:redhat:enterprise_linux:9"},
@@ -437,28 +441,43 @@ func TestConvert_ModuleContextDoesNotRenameThePackage(t *testing.T) {
 		})
 	var st stats
 	adv, ok := convert(d, &st)
-	if ok {
-		// Every entry is context-scoped, so nothing is storable at all.
-		t.Errorf("a document naming only module-scoped entries produced an advisory: %+v", adv.Affected)
+	if !ok {
+		t.Fatal("convert dropped a document naming mainline module packages")
 	}
-	if st.SkippedModuleContext != 3 {
-		t.Errorf("SkippedModuleContext = %d, want 3", st.SkippedModuleContext)
+	by := affectedByName(adv)
+	if len(by) != 2 {
+		t.Fatalf("produced %d affected entries, want 2 (the flatpak entry stays dropped): %+v", len(by), adv.Affected)
 	}
-	// The names that would have been invented. Each is a REAL package, which
-	// is what made this a false positive rather than a harmless miss: `python3`
-	// is installed on almost every RHEL image.
+	// The names a colon-blind split would have invented. Each is a REAL
+	// package, which is what made the original bug a false positive rather
+	// than a harmless miss: `python3` is installed on almost every RHEL image.
 	for _, wrong := range []string{"python3", "389-ds", "ant"} {
-		for _, a := range adv.Affected {
-			if a.Name == wrong {
-				t.Errorf("stored a finding against %q, which is a different package from the "+
-					"one the advisory names", wrong)
-			}
+		if _, ok := by["Red Hat:9/"+wrong]; ok {
+			t.Errorf("stored a finding against %q, which is a different package from the "+
+				"one the advisory names", wrong)
 		}
+	}
+	ds, ok := by["Red Hat:9/389-ds-base"]
+	if !ok {
+		t.Fatal("389-ds-base was dropped; it is a real module-scoped known_affected entry (D80)")
+	}
+	if ds.ModuleStream != "389-directory-server:1.4" {
+		t.Errorf("389-ds-base ModuleStream = %q, want %q", ds.ModuleStream, "389-directory-server:1.4")
+	}
+	antlr, ok := by["Red Hat:9/ant-antlr"]
+	if !ok {
+		t.Fatal("ant-antlr was dropped; it is a real module-scoped known_affected entry (D80)")
+	}
+	if antlr.ModuleStream != "ant:1.10" {
+		t.Errorf("ant-antlr ModuleStream = %q, want %q", antlr.ModuleStream, "ant:1.10")
+	}
+	if st.SkippedFlatpak != 1 {
+		t.Errorf("SkippedFlatpak = %d, want 1 (python3-lxml::inkscape:flatpak)", st.SkippedFlatpak)
 	}
 }
 
-// A context-scoped entry alongside an ordinary one: the ordinary one still
-// lands, so the fix drops what it should and nothing else.
+// A flatpak-scoped entry alongside ordinary ones: the ordinary ones still
+// land, so the exclusion drops what it should and nothing else.
 func TestConvert_ContextScopedEntriesDoNotSuppressTheRest(t *testing.T) {
 	d := buildDoc(t, "CVE-2024-0009",
 		map[string]string{"RHEL9": "cpe:/o:redhat:enterprise_linux:9"},
@@ -479,8 +498,8 @@ func TestConvert_ContextScopedEntriesDoNotSuppressTheRest(t *testing.T) {
 	if _, ok := got["Red Hat:9/tar"]; !ok {
 		t.Error("the unscoped tar entry was lost")
 	}
-	if st.SkippedModuleContext != 1 {
-		t.Errorf("SkippedModuleContext = %d, want 1", st.SkippedModuleContext)
+	if st.SkippedFlatpak != 1 {
+		t.Errorf("SkippedFlatpak = %d, want 1", st.SkippedFlatpak)
 	}
 }
 
@@ -684,8 +703,13 @@ func TestConvert_RemediationOutsideMainlineDoesNotInflateSkipped(t *testing.T) {
 			{"category": "no_fix_planned", "product_ids": []string{"EUS:libeus"}},
 			// A container image, identified by digest rather than a version.
 			{"category": "no_fix_planned", "product_ids": []string{"RHEL9:animage@sha256:abc123_x86_64"}},
-			// A module- or flatpak-scoped id.
-			{"category": "no_fix_planned", "product_ids": []string{"RHEL9:libctx::module:context"}},
+			// A flatpak-scoped id — still a genuine discard after D80, unlike
+			// the module-scoped shape this test used to name here (D80 makes
+			// that one resolve successfully, with a stream, so it stopped
+			// testing this promise at all).
+			{"category": "no_fix_planned", "product_ids": []string{"RHEL9:libctx::inkscape:flatpak"}},
+			// A "::" context that is not the measured name:stream shape.
+			{"category": "no_fix_planned", "product_ids": []string{"RHEL9:libbadctx::nocolonhere"}},
 			// A platform this document's product_tree never declared.
 			{"category": "no_fix_planned", "product_ids": []string{"Undeclared:libundeclared"}},
 		})
@@ -698,6 +722,9 @@ func TestConvert_RemediationOutsideMainlineDoesNotInflateSkipped(t *testing.T) {
 	}
 	if st.SkippedImage != 0 {
 		t.Errorf("SkippedImage = %d, want 0", st.SkippedImage)
+	}
+	if st.SkippedFlatpak != 0 {
+		t.Errorf("SkippedFlatpak = %d, want 0", st.SkippedFlatpak)
 	}
 	if st.SkippedModuleContext != 0 {
 		t.Errorf("SkippedModuleContext = %d, want 0", st.SkippedModuleContext)
@@ -785,5 +812,257 @@ func TestConvert_UnfixableCountersSumToTotal(t *testing.T) {
 	if sum := st.UnfixableWontFix + st.UnfixableNotFixed + st.UnfixableUnstated; sum != st.Unfixable {
 		t.Errorf("UnfixableWontFix(%d) + UnfixableNotFixed(%d) + UnfixableUnstated(%d) = %d, want Unfixable(%d)",
 			st.UnfixableWontFix, st.UnfixableNotFixed, st.UnfixableUnstated, sum, st.Unfixable)
+	}
+}
+
+// D80's caller-first test: a module fix's "::" context is no longer an
+// unconditional drop. The fixture is a real product id from the archive —
+// buildah in container-tools:rhel8, on RHEL 8.5 — chosen because deleting
+// the ctx-parse call this test drives (not merely testing splitContext or
+// resolveProduct in isolation) must turn it red: without the stream, this
+// entry either vanishes (back to the pre-D80 unconditional drop) or lands
+// under a truncated name (the pre-splitContext defect), and either way the
+// assertions below fail.
+func TestConvert_ModuleContextKeptWithStream(t *testing.T) {
+	d := buildDoc(t, "CVE-2025-2000",
+		map[string]string{"AppStream-8.5.0.GA": "cpe:/a:redhat:enterprise_linux:8::appstream"},
+		[]string{
+			"AppStream-8.5.0.GA:buildah-0:1.22.3-2.module+el8.5.0+12582+56d94c81.x86_64::container-tools:rhel8",
+		}, nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped a document naming a mainline module package")
+	}
+	if len(adv.Affected) != 1 {
+		t.Fatalf("produced %d affected entries, want 1: %+v", len(adv.Affected), adv.Affected)
+	}
+	a := adv.Affected[0]
+	if a.Name != "buildah" {
+		t.Errorf("Name = %q, want %q", a.Name, "buildah")
+	}
+	if a.ModuleStream != "container-tools:rhel8" {
+		t.Errorf("ModuleStream = %q, want %q", a.ModuleStream, "container-tools:rhel8")
+	}
+	if len(a.Ranges) != 1 || len(a.Ranges[0].Events) != 2 ||
+		a.Ranges[0].Events[1].Fixed != "0:1.22.3-2.module+el8.5.0+12582+56d94c81" {
+		t.Errorf("Ranges = %+v, want a fixed range at %q (the full EVR, module tail included)",
+			a.Ranges, "0:1.22.3-2.module+el8.5.0+12582+56d94c81")
+	}
+	if st.ModuleKept != 1 {
+		t.Errorf("ModuleKept = %d, want 1", st.ModuleKept)
+	}
+}
+
+// known_affected flows through the same fix-state machinery as an unscoped
+// entry, now carrying the stream — and this is also the end-to-end check for
+// the remediation-reason join: resolveProduct used to resolve every
+// module-scoped id to skipModuleContext unconditionally, which the
+// remediation loop reads as "not this store's product" and silently drops,
+// so a won't-fix/not-fixed reason could never reach a module package. With
+// D80 resolving it to skipNone (carrying the stream in the key), the same
+// join that already worked for an ordinary package now reaches this one too.
+func TestConvert_KnownAffectedModuleKeptWithStream(t *testing.T) {
+	d := buildDocWithRemediations(t, "CVE-2025-2003",
+		map[string]string{"AppStream-8": "cpe:/a:redhat:enterprise_linux:8::appstream"},
+		nil,
+		[]string{"AppStream-8:libmodnofix::container-tools:rhel8"},
+		[]map[string]any{
+			{"category": "none_available", "product_ids": []string{"AppStream-8:libmodnofix::container-tools:rhel8"}},
+		})
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped a document naming a mainline module package")
+	}
+	a := affectedByName(adv)["Red Hat:8/libmodnofix"]
+	if a.ModuleStream != "container-tools:rhel8" {
+		t.Errorf("ModuleStream = %q, want %q", a.ModuleStream, "container-tools:rhel8")
+	}
+	if len(a.Ranges) != 1 || len(a.Ranges[0].Events) != 1 || a.Ranges[0].Events[0].Introduced != "0" {
+		t.Fatalf("Ranges = %+v, want one introduced-0 event and no fixed event", a.Ranges)
+	}
+	if a.Ranges[0].Events[0].Fixed != "" {
+		t.Error("libmodnofix carries a fixed version; Red Hat says there is none")
+	}
+	if a.Ranges[0].FixState != advisory.FixStateNotFixed {
+		t.Errorf("FixState = %q, want %q — the remediation reason must reach a module-scoped package "+
+			"the same way it reaches an unscoped one", a.Ranges[0].FixState, advisory.FixStateNotFixed)
+	}
+	if st.ModuleKept != 1 {
+		t.Errorf("ModuleKept = %d, want 1", st.ModuleKept)
+	}
+}
+
+// Two streams of one module land as two Affected entries, not one merged by
+// name — the reason productKey now carries the stream. "nodejs:18" and
+// "nodejs:20" fix on independent timelines (isModule's doc comment gives the
+// real CVE-2021-20291/buildah/container-tools row that showed why merging
+// them is wrong in both directions), so a document naming both streams must
+// keep both, each with its own fixed EVR.
+func TestConvert_TwoModuleStreamsKeptSeparately(t *testing.T) {
+	d := buildDoc(t, "CVE-2025-2002",
+		map[string]string{"AppStream-9": "cpe:/a:redhat:enterprise_linux:9::appstream"},
+		[]string{
+			"AppStream-9:nodejs-1:18.20.4-1.module+el9.6.0+11111+aaaaaaaa.x86_64::nodejs:18",
+			"AppStream-9:nodejs-1:20.18.1-1.module+el9.6.0+22222+bbbbbbbb.x86_64::nodejs:20",
+		}, nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped a document naming mainline module packages")
+	}
+	if len(adv.Affected) != 2 {
+		t.Fatalf("produced %d affected entries, want 2 (one per stream): %+v", len(adv.Affected), adv.Affected)
+	}
+	byStream := map[string]advisory.Affected{}
+	for _, a := range adv.Affected {
+		if a.Name != "nodejs" {
+			t.Errorf("Name = %q, want %q", a.Name, "nodejs")
+		}
+		byStream[a.ModuleStream] = a
+	}
+	n18, ok18 := byStream["nodejs:18"]
+	n20, ok20 := byStream["nodejs:20"]
+	if !ok18 || !ok20 {
+		t.Fatalf("streams present = %v, want nodejs:18 and nodejs:20: %+v", byStream, adv.Affected)
+	}
+	if len(n18.Ranges) != 1 || n18.Ranges[0].Events[1].Fixed != "1:18.20.4-1.module+el9.6.0+11111+aaaaaaaa" {
+		t.Errorf("nodejs:18 ranges = %+v, want a fixed range at 1:18.20.4-1.module+el9.6.0+11111+aaaaaaaa", n18.Ranges)
+	}
+	if len(n20.Ranges) != 1 || n20.Ranges[0].Events[1].Fixed != "1:20.18.1-1.module+el9.6.0+22222+bbbbbbbb" {
+		t.Errorf("nodejs:20 ranges = %+v, want a fixed range at 1:20.18.1-1.module+el9.6.0+22222+bbbbbbbb", n20.Ranges)
+	}
+	if st.ModuleKept != 2 {
+		t.Errorf("ModuleKept = %d, want 2", st.ModuleKept)
+	}
+}
+
+// Flatpak content is not in the rpmdb at all (D47), so it is excluded rather
+// than treated as a module stream — "flatpak" is not a stream name, and this
+// asserts the stored side of that as well as the drop: nothing in ModuleKept
+// and no Affected entry carries a ModuleStream ending ":flatpak".
+func TestConvert_FlatpakContextSkipped(t *testing.T) {
+	d := buildDoc(t, "CVE-2022-2309",
+		map[string]string{"RHEL9": "cpe:/o:redhat:enterprise_linux:9"},
+		nil,
+		[]string{"RHEL9:python3-lxml::inkscape:flatpak"})
+	var st stats
+	adv, ok := convert(d, &st)
+	if ok {
+		t.Fatalf("a document naming only a flatpak-scoped entry produced an advisory: %+v", adv.Affected)
+	}
+	if st.SkippedFlatpak != 1 {
+		t.Errorf("SkippedFlatpak = %d, want 1", st.SkippedFlatpak)
+	}
+	if st.ModuleKept != 0 {
+		t.Errorf("ModuleKept = %d, want 0 — a flatpak context is not a module stream", st.ModuleKept)
+	}
+}
+
+// D80's load-bearing zero, re-verified after the rewrite: a module-TAGGED
+// EVR (its release string carries "module+el") with NO "::" context at all
+// still cannot say which stream it belongs to, and is still dropped rather
+// than guessed at. Distinguished from TestConvert's existing nodejs case by
+// asserting the counter under its new name and confirming ModuleKept stays
+// at 0 — a mutation that let a context-less module build through would trip
+// this without necessarily changing TestConvert's affected-entry count.
+func TestConvert_ModuleTaggedWithoutContextStillDropped(t *testing.T) {
+	d := buildDoc(t, "CVE-2025-2005",
+		map[string]string{"AppStream-9": "cpe:/a:redhat:enterprise_linux:9::appstream"},
+		[]string{
+			"AppStream-9:nodejs-1:20.20.2-2.module+el9.6.0+24220+c44c288d.x86_64",
+		}, nil)
+	var st stats
+	adv, ok := convert(d, &st)
+	if ok {
+		t.Fatalf("a document naming only a context-less module build produced an advisory: %+v", adv.Affected)
+	}
+	if st.SkippedModule != 1 {
+		t.Errorf("SkippedModule = %d, want 1", st.SkippedModule)
+	}
+	if st.ModuleKept != 0 {
+		t.Errorf("ModuleKept = %d, want 0", st.ModuleKept)
+	}
+}
+
+// The guard for a "::" context that is not the measured shape at all — no
+// colon, so it cannot be split into module and stream. Never seen on the
+// real archive (100% of contexts measured parse cleanly); kept for the same
+// reason isModule's zero is kept, and exercised directly here since nothing
+// on today's archive reaches it.
+func TestConvert_MalformedModuleContextIsDroppedAndCounted(t *testing.T) {
+	d := buildDoc(t, "CVE-2025-2004",
+		map[string]string{"RHEL9": "cpe:/o:redhat:enterprise_linux:9"},
+		nil,
+		[]string{"RHEL9:weirdpkg::nocolonhere"})
+	var st stats
+	adv, ok := convert(d, &st)
+	if ok {
+		t.Fatalf("a document naming only a malformed module context produced an advisory: %+v", adv.Affected)
+	}
+	if st.SkippedModuleContext != 1 {
+		t.Errorf("SkippedModuleContext = %d, want 1", st.SkippedModuleContext)
+	}
+}
+
+// resolveProduct directly, table-driven, the same density TestSplitNEVRA and
+// TestIsModule give their helpers. Fixture package names are distinct across
+// rows on purpose (D80's own substring-collision lesson): "buildah" and
+// "nodejs" never appear twice, so a row cannot pass by matching another
+// row's output.
+func TestResolveProduct(t *testing.T) {
+	cpe := map[string]string{
+		"BaseOS-9":    "cpe:/o:redhat:enterprise_linux:9::baseos",
+		"AppStream-8": "cpe:/a:redhat:enterprise_linux:8::appstream",
+		"EUS-9.4":     "cpe:/a:redhat:rhel_eus:9.4::appstream",
+	}
+	for _, tc := range []struct {
+		name       string
+		id         string
+		wantEco    string
+		wantPkg    string
+		wantStream string
+		wantEVR    string
+		wantWhy    skipReason
+	}{
+		{"ordinary fixed", "BaseOS-9:openssh-0:8.7p1-38.el9_4.1.x86_64",
+			"Red Hat:9", "openssh", "", "0:8.7p1-38.el9_4.1", skipNone},
+		{"ordinary known_affected", "BaseOS-9:mailman",
+			"Red Hat:9", "mailman", "", "", skipNone},
+		{"module fixed with context", "AppStream-8:buildah-0:1.22.3-2.module+el8.5.0+12582+56d94c81.x86_64::container-tools:rhel8",
+			"Red Hat:8", "buildah", "container-tools:rhel8", "0:1.22.3-2.module+el8.5.0+12582+56d94c81", skipNone},
+		{"module known_affected with context", "AppStream-8:libmodnofix::container-tools:rhel8",
+			"Red Hat:8", "libmodnofix", "container-tools:rhel8", "", skipNone},
+		{"flatpak context", "BaseOS-9:python3-lxml::inkscape:flatpak",
+			"", "", "", "", skipFlatpak},
+		{"malformed context, no colon", "BaseOS-9:weirdpkg::nocolonhere",
+			"", "", "", "", skipModuleContext},
+		{"module-tagged EVR, no context", "AppStream-8:nodejs-1:20.20.2-2.module+el9.6.0+24220+c44c288d.x86_64",
+			"", "", "", "", skipModule},
+		{"non-mainline CPE", "EUS-9.4:openssh-0:8.7p1-12.el9_4.3.x86_64",
+			"", "", "", "", skipNonRHEL},
+		{"container image", "BaseOS-9:rhcos@sha256:abc_x86_64",
+			"", "", "", "", skipImage},
+		{"whole product, no separator", "Red Hat Enterprise Linux 5",
+			"", "", "", "", skipWholeProduct},
+		{"no CPE for platform", "Undeclared-9:openssh-0:1-1.el9.x86_64",
+			"", "", "", "", skipNoCPE},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			k, evr, why := resolveProduct(tc.id, cpe)
+			if why != tc.wantWhy {
+				t.Fatalf("resolveProduct(%q) skipReason = %v, want %v", tc.id, why, tc.wantWhy)
+			}
+			if why != skipNone {
+				return
+			}
+			if k.eco != tc.wantEco || k.pkg != tc.wantPkg || k.stream != tc.wantStream || evr != tc.wantEVR {
+				t.Errorf("resolveProduct(%q) = (%+v, %q), want eco=%q pkg=%q stream=%q evr=%q",
+					tc.id, k, evr, tc.wantEco, tc.wantPkg, tc.wantStream, tc.wantEVR)
+			}
+		})
 	}
 }

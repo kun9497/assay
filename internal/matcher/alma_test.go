@@ -53,7 +53,10 @@ func TestMatch_AlmaModuleBuildFixIsSkippedNotMatched(t *testing.T) {
 			// An installed modular build from an OLDER stream context. No
 			// comparison should be attempted at all, because the fixed
 			// bound's stream is unknown from the release string alone.
-			{Name: "nodejs", Version: "1:20.18.1-1.module_el8.5.0+21542+abc12345", Ecosystem: eco,
+			// ModuleStream as the D80 cataloger reads it; the entry below is
+			// stream-blind (Alma OSV until D82), so the per-advisory skip is
+			// still the asserted path.
+			{Name: "nodejs", Version: "1:20.18.1-1.module_el8.5.0+21542+abc12345", Ecosystem: eco, ModuleStream: "nodejs:20",
 				Source: &pkgmeta.SourcePackage{Name: "nodejs"}},
 			// An ordinary package on the same target, to prove the skip is
 			// per-advisory and does not poison the rest of the scan.

@@ -277,22 +277,30 @@ func (p *Provider) get(ctx context.Context, url string) (io.ReadCloser, error) {
 // String renders what a sync discarded, for Options.Progress. Every count
 // is here because the alternative is a provider that quietly drops most of its
 // input and looks identical to one that is broken.
+//
+// D80 moved module-scoped entries out of "skipped" and into "kept": they used
+// to be an unconditional discard (a "::" context meant the scan could not
+// know which stream was enabled) and are now stored, streamed, because the
+// context turned out to carry the very stream name the release string was
+// missing.
 func (s stats) String() string {
 	return fmt.Sprintf(
-		"%d documents -> %d advisories, %d affected entries (%d with no fix available: "+
-			"%d will not be fixed, %d not fixed yet, %d with no reason given, "+
+		"%d documents -> %d advisories, %d affected entries (%d module-scoped across %d streams, "+
+			"%d with no fix available: %d will not be fixed, %d not fixed yet, %d with no reason given, "+
 			"%d tagged both ways, %d remediations naming a product group); "+
-			"skipped %d module builds, %d module/flatpak-scoped entries, "+
+			"skipped %d module builds with no readable stream, %d flatpak-scoped entries, "+
+			"%d module contexts that did not parse as name:stream, "+
 			"%d non-mainline products, %d container images, "+
 			"%d products with no CPE, %d whole-product entries naming no package, "+
 			"%d unreadable products, %d documents with no CVE id, "+
 			"%d unreadable documents; delta: %d changed since the archive, "+
 			"%d fetched, %d already withdrawn, %d yielded a record, "+
 			"%d retried, %d rescued by a retry",
-		s.Documents, s.Advisories, s.Affected, s.Unfixable,
-		s.UnfixableWontFix, s.UnfixableNotFixed, s.UnfixableUnstated,
+		s.Documents, s.Advisories, s.Affected, s.ModuleKept, len(s.moduleStreams),
+		s.Unfixable, s.UnfixableWontFix, s.UnfixableNotFixed, s.UnfixableUnstated,
 		s.UnfixableBothReasons, s.RemediationGrouped,
-		s.SkippedModule, s.SkippedModuleContext, s.SkippedNonRHEL, s.SkippedImage,
+		s.SkippedModule, s.SkippedFlatpak, s.SkippedModuleContext,
+		s.SkippedNonRHEL, s.SkippedImage,
 		s.SkippedNoCPE, s.SkippedWholeProduct, s.SkippedBadProduct, s.SkippedNoCVE, s.SkippedBadDoc,
 		s.DeltaListed, s.DeltaFetched, s.DeltaGone, s.DeltaAdvisories,
 		s.DeltaRetried, s.DeltaRescued)

@@ -2952,6 +2952,41 @@ major, package)에 대한 메인라인 fix와 충돌하는 계보 EVR이 D74의 
 
 ---
 
+### D80 — MODULARITYLABEL: 스트림은 데이터다, 거부를 멈춘다
+
+**결정.** module stream이 store 양쪽에서 일급이 됩니다. cataloger는 RPMTAG_MODULARITYLABEL
+(태그 5096)을 `Package.ModuleStream`으로 읽습니다 — 레이블의 처음 두 필드만입니다, VERSION과
+CONTEXT는 설치된 스트림 '하나'의 빌드마다 달라지기 때문이고(실제 ubi8/ubi9 AppStream
+이미지로 측정), module 이름은 패키지 이름에서 이끌어낼 수 없기 때문입니다(perl-Mozilla-CA는
+`perl-libwww-perl:6.34`를 답니다). `Affected.ModuleStream`이 advisory 쪽을 담습니다,
+덧붙이는 방식으로(D71의 Related 패턴, 스키마 상향 없음). Red Hat provider는 D47이 떨어뜨린
+module 범위 항목 487,796개를 보존합니다 — `::module:stream` 컨텍스트는 코퍼스의 100%에서
+구조적으로 파싱됩니다 — flatpak 가짜 스트림은 제외하고(4,999건, 별도 카운터), 컨텍스트 없는
+module 태그 가드는 자신이 지탱하는 0을 그대로 유지합니다. module known_affected 항목
+(22,888건)도 이제 흐릅니다: 스트림별 will-not-fix가 `--fail-on-unfixable`에 닿습니다.
+
+**매칭 규칙 셋, 전부 쓰기 전에 측정했습니다.** ① 스트림 동등성: module 패키지는 자기 스트림의
+항목에 대해서만 판정받고, 비-modular 패키지는 스트림 없는 항목에 대해서만 판정받습니다 —
+불일치는 조용한 부적용입니다(다른 스트림의 fix는 아무 말도 하지 않습니다), 반면 스트림을
+못 보는 module 태그 경계(D82까지의 Rocky/Alma OSV)는 D47/D71 가드를 통해 계속 시끄럽게
+skip됩니다. ② module 태그가 붙었지만 레이블을 읽을 수 없는 버전은 패키지 수준에서 평가되지
+않음으로 보고되며, 비-modular로 결코 오인되지 않습니다 — release 마커와 태그는 실제
+이미지에서 13/13과 0/1,049로 일치했으므로, 둘이 어긋나는 쪽이 이상 신호입니다. ③
+스트림이 매칭된 비교는 양쪽 EVR을 module 꼬리에서 자릅니다: `+platform+context` 트레일러는
+한 advisory 안에서도 아키텍처마다 다르므로(Rocky의 multi-EVR 튜플 2,279개 중 2,256개가
+바로 거기서만 다릅니다), 그것을 순서에 넣으면 판정을 MBS 해시로 정하는 셈이 됩니다 — 버전
+옷을 입은, D25가 금지하는 동점 처리입니다. comparer를 감싸는 것이지 문자열을 다시 쓰는 것이
+아니므로, Evidence는 여전히 진짜 fix 빌드를 인용합니다(D10).
+
+**E2E, 요점 전부를 한 줄로.** ubi8/nodejs-18은 패키지 289개를 카탈로그하고, 그중 8개가
+스트림을 갖습니다; CVE-2021-35065의 advisory는 별도 항목 셋을 담습니다 — nodejs:14, :16,
+:18, 각자 자기만의 fixed EVR을 달고 — 스캔은 설치된 스트림의 것에만 정확히 매칭했고,
+`0 not evaluated`, 나머지 둘에서는 새어 나온 것이 없습니다. D81은 Oracle의 스트림을
+붙이고(OVAL module criteria, 구조적), D82는 Rocky/Alma의 것을 붙입니다(요약문 산문 토큰,
+98.7%/98.8% 관례).
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

@@ -51,7 +51,10 @@ func TestMatch_RockyModuleBuildFixIsSkippedNotMatched(t *testing.T) {
 			// mainline fix by byte order alone (a real rpm comparison would call
 			// this "greater") is not the point: no comparison should be attempted
 			// at all, because the fixed bound's stream is unknown.
-			{Name: "nodejs", Version: "1:20.18.1-1.module+el9.5.0+21542+abc12345", Ecosystem: eco,
+			// ModuleStream is what the D80 cataloger reads from tag 5096; the
+			// advisory entry below is stream-BLIND (Rocky OSV until D82), so
+			// the per-advisory module-bound skip is still the asserted path.
+			{Name: "nodejs", Version: "1:20.18.1-1.module+el9.5.0+21542+abc12345", Ecosystem: eco, ModuleStream: "nodejs:20",
 				Source: &pkgmeta.SourcePackage{Name: "nodejs"}},
 			// An ordinary package on the same target, to prove the skip is
 			// per-advisory and does not poison the rest of the scan.

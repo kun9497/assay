@@ -171,7 +171,10 @@ func TestMatch_OracleModuleBuildFixIsSkippedNotMatched(t *testing.T) {
 	target := pkgmeta.Target{
 		Distro: &pkgmeta.Distro{ID: "ol", VersionID: "9.8"},
 		Packages: []pkgmeta.Package{
-			{Name: "nodejs", Version: "1:20.19.1-1.module+el9.6.0+90603+e4b3d4d2", Ecosystem: eco,
+			// ModuleStream as the D80 cataloger reads it; Oracle OVAL entries
+			// gain streams in D81, so this one is stream-blind and the
+			// per-advisory skip is still the asserted path.
+			{Name: "nodejs", Version: "1:20.19.1-1.module+el9.6.0+90603+e4b3d4d2", Ecosystem: eco, ModuleStream: "nodejs:20",
 				Source: &pkgmeta.SourcePackage{Name: "nodejs"}},
 			{Name: "bash", Version: "0:5.1.8-9.el9", Ecosystem: eco,
 				Source: &pkgmeta.SourcePackage{Name: "bash"}},
