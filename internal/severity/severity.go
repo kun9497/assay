@@ -79,7 +79,17 @@ var vendorSeverityWords = map[string]struct {
 	"Critical":  {Critical, 9.0},
 	"Important": {High, 7.0},
 	"Moderate":  {Medium, 4.0},
-	"Low":       {Low, 0.1},
+	// D73: Amazon Linux's ALAS feed spells this same band "Medium" rather
+	// than RHSA's "Moderate" (measured 2026-08-19 against both AL2's and
+	// AL2023's live core updateinfo.xml: the literal text is
+	// "<severity>Medium</severity>" / "<severity>medium</severity>", never
+	// "Moderate"). A different vendor, a different word, the same band and
+	// the same representative score, so a word-derived rating from either
+	// distro sits at the identical point in severity.Highest's ordering --
+	// two keys mapping to one value rather than a second Medium a caller
+	// would have to know to check for.
+	"Medium": {Medium, 4.0},
+	"Low":    {Low, 0.1},
 }
 
 // Highest returns the worst band across a record's vectors, and that band's

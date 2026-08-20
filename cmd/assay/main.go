@@ -15,6 +15,7 @@ import (
 
 	"github.com/kun9497/assay/internal/dbcmd"
 	"github.com/kun9497/assay/internal/provider"
+	"github.com/kun9497/assay/internal/provider/amazon"
 	"github.com/kun9497/assay/internal/provider/knvd"
 	"github.com/kun9497/assay/internal/provider/nvd"
 	"github.com/kun9497/assay/internal/provider/osv"
@@ -135,6 +136,18 @@ Environment (db build only — a scan reads no environment and no network):
                         narrower database than db update delivers.
                         Set this to 0 for a local build that does not scan RHEL
                         and wants to be about twenty minutes shorter.
+  AMAZON_ENABLE=0       Skip Amazon Linux's ALAS feed (AL2 and AL2023). ON BY
+                        DEFAULT (D73), for the same reason as Red Hat: the
+                        published artifact carries it, so a build without it
+                        produces a narrower database than db update delivers.
+                        CORE REPOSITORIES ONLY: AL2's 73 extras repos (~964
+                        advisories across docker, ecs, livepatch,
+                        nitro-enclaves, firefox and more) and AL2023's
+                        NVIDIA/livepatch repos are not fetched, so a package
+                        installed from one of those is evaluated only against
+                        core data.
+                        Set this to 0 for a local build that does not scan
+                        Amazon Linux.
   KISA_ENABLE=0         Skip KISA/KNVD's Korean security notices. ON BY
                         DEFAULT (D37): attaching them is what this project was
                         built for, and leaving it to a flag meant the flagship
@@ -535,17 +548,26 @@ func dbUpdateAnnotators(stderr io.Writer) []provider.Annotator {
 // fetched from.
 var newRedHatProvider = redhat.New
 
+// newAmazonProvider constructs the Amazon Linux ALAS provider. A package
+// variable for the same reason newRedHatProvider is: a test can substitute a
+// spy and observe the Options that reached construction, without
+// amazon.New's default repos — the live cdn.amazonlinux.com feeds — ever
+// being fetched from.
+var newAmazonProvider = amazon.New
+
 // dbUpdateProviders is every provider.Provider `db build` runs.
 //
-// Both are on by default. Red Hat was opt-in when it landed, on the grounds
-// that it adds ~1.9 million affected entries for people who may never scan a
-// RHEL image — and D51 reversed that once the published artifact started
-// carrying it. A default that disagreed with the artifact would mean `db
-// build` and `db update` produce different databases, and `db push` would
-// refuse the narrower one.
+// All three are on by default. Red Hat was opt-in when it landed, on the
+// grounds that it adds ~1.9 million affected entries for people who may
+// never scan a RHEL image — and D51 reversed that once the published
+// artifact started carrying it. Amazon Linux followed the same reasoning
+// from the start (D73) rather than repeating Red Hat's opt-in-then-reverse
+// path: the published artifact is meant to carry it, and a default that
+// disagreed with the artifact would mean `db build` and `db update` produce
+// different databases, and `db push` would refuse the narrower one.
 //
-// REDHAT_ENABLE=0 still turns it off, for a local build that wants to be
-// twenty minutes shorter and does not care about RHEL.
+// REDHAT_ENABLE=0 and AMAZON_ENABLE=0 still turn each off, for a local build
+// that wants to be shorter and does not care about that distro.
 func dbUpdateProviders(stderr io.Writer) []provider.Provider {
 	ps := []provider.Provider{osv.New(osv.Ecosystems, "")}
 	if envFlag(stderr, "REDHAT_ENABLE", true) {
@@ -553,6 +575,12 @@ func dbUpdateProviders(stderr io.Writer) []provider.Provider {
 		// large majority of what it reads, and a run that printed nothing
 		// about it would be indistinguishable from one that was broken.
 		ps = append(ps, newRedHatProvider(redhat.Options{Progress: stderr}))
+	}
+	if envFlag(stderr, "AMAZON_ENABLE", true) {
+		// Progress goes to stderr for the same reason: Fetch's own
+		// extrasDisclosure line is what keeps a core-only build from reading
+		// as a complete one, and it has to land somewhere a reader sees it.
+		ps = append(ps, newAmazonProvider(amazon.Options{Progress: stderr}))
 	}
 	return ps
 }

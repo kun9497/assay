@@ -2901,6 +2901,32 @@ all. The README's AlmaLinux line says so next to the feature.
 
 ---
 
+### D73 — Amazon Linux, the first updateinfo provider
+
+**Decision.** Amazon Linux 2 and 2023 are ingested from their own repos' `updateinfo.xml`
+(repomd indirection followed live — the final URLs carry rotating hashes), keys
+`Amazon Linux:2` / `Amazon Linux:2023`; `ID=amzn` routes on VERSION_ID, and AL1
+("2018.03") and AL2022 stay not-evaluated with the version named. `AMAZON_ENABLE` is on
+by default, like Red Hat: the published artifact should carry it.
+
+**D71/D72's decisions applied unchanged**: CVE references land in `Related`
+(distro-authored), severity is a VENDOR_WORD stored losslessly and banded at query time.
+Two facts the feeds forced: Amazon spells the middle band **Medium** (never RHSA's
+Moderate — both words now map), and AL2 writes the words lowercase while AL2023
+capitalizes them, so the provider canonicalizes case before storing (the severity map
+stays deliberately case-sensitive; normalization is the provider's job, verified by
+mutation both ways).
+
+**Core-only is a known partial view, disclosed** (the one new decision): AL2's 73 extras
+repos (964 advisories — docker, ecs, kernel livepatches) are not fetched. Fetch prints
+one line saying so, and the usage text carries the same sentence. Extras become their own
+decision when someone scans an image that uses them.
+
+**No modularity in Amazon's release strings** — the RPM module-build guard is inert here
+by construction, noted in the package doc rather than tested against nothing.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

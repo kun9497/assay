@@ -2683,6 +2683,32 @@ comparer로 게이트되어 있고, Red Hat/Rocky의 `module+el`과 AlmaLinux �
 
 ---
 
+### D73 — Amazon Linux, 첫 updateinfo provider
+
+**결정.** Amazon Linux 2와 2023을 자기 저장소의 `updateinfo.xml`에서 수집합니다(repomd 간접
+참조를 실시간으로 따라갑니다 — 최종 URL이 회전하는 해시를 답니다), 키는 `Amazon Linux:2` /
+`Amazon Linux:2023`; `ID=amzn`이 VERSION_ID로 경로를 잡고, AL1("2018.03")과 AL2022는 버전
+이름을 밝힌 채 미평가로 남습니다. `AMAZON_ENABLE`은 Red Hat처럼 기본으로 켜져 있습니다: 발행되는
+아티팩트가 그것을 실어야 합니다.
+
+**D71/D72의 결정을 그대로 적용합니다**: CVE 참조는 `Related`에 담기고(배포판이 직접 씀),
+심각도는 VENDOR_WORD로 무손실 저장되어 조회 시점에 밴드화됩니다. 피드가 강제한 사실 두 가지:
+Amazon은 중간 밴드를 **Medium**으로 씁니다(RHSA의 Moderate는 절대 쓰지 않습니다 — 이제 두
+단어 다 매핑됩니다), 그리고 AL2는 단어를 소문자로 쓰는데 AL2023은 대문자로 씁니다, 그래서
+provider가 저장 전에 대소문자를 정규화합니다(심각도 맵은 의도적으로 대소문자를 구분한 채로
+남습니다; 정규화는 provider의 일이고, 양방향 모두 mutation으로 검증했습니다).
+
+**core만 다루는 것은 알려진 부분적 시야이고, 공개합니다**(새로 생긴 결정 하나): AL2의 extras
+저장소 73개(advisory 964건 — docker, ecs, 커널 라이브패치)는 가져오지 않습니다. Fetch가 그것을
+말하는 한 줄을 찍고, usage 텍스트도 같은 문장을 싣습니다. extras는 누군가 그것을 쓰는 이미지를
+스캔할 때 그 자체의 결정이 됩니다.
+
+**Amazon의 release 문자열에는 modularity가 없습니다** — RPM module-build 가드는 여기서는
+구조적으로 그냥 비활성 상태이고, 아무것도 없는 것을 대고 테스트하는 대신 패키지 문서에 그렇게
+적어 둡니다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

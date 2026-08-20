@@ -55,21 +55,24 @@ func TestDistroEcosystem_Unsupported(t *testing.T) {
 		//   - `centos` covers CentOS Linux, which trailed RHEL, and CentOS
 		//     Stream, which runs ahead of it — so one key would be wrong in
 		//     opposite directions for the two.
-		//   - Fedora and Amazon Linux have their own advisory feeds entirely.
+		//   - Fedora has its own advisory feed entirely (FEDORA-*).
 		//
-		// Rocky left this list under D71, and AlmaLinux under D72 — see
-		// TestDistroEcosystem_Rocky and TestDistroEcosystem_Alma below —
-		// because each ingests from its own OSV archive rather than Red
-		// Hat's errata, so the byte-identity hazard these rows guard against
+		// Rocky left this list under D71, AlmaLinux under D72, and Amazon
+		// Linux's AL2/AL2023 under D73 — see TestDistroEcosystem_Rocky,
+		// TestDistroEcosystem_Alma and TestDistroEcosystem_Amazon below —
+		// because each ingests from its own feed rather than Red Hat's
+		// errata, so the byte-identity hazard these rows guard against
 		// (module builds spelled `module_el`/`module+el`, `.alma` release
 		// suffixes) never applied to matching either against ITS OWN data.
+		// AL1 and AL2022 stay on this list below, alongside amzn — see
+		// TestDistroEcosystem_Unsupported's "amzn" rows further down and
+		// TestDistroEcosystem_Amazon's own not-evaluated cases.
 		//
 		// Each row has a version that WOULD parse, so the ID is what has to
 		// reject it. Without that, deleting the case labels leaves the suite
 		// green while an unsupported distro's scan is answered with Red
 		// Hat's errata.
 		{"centos is ahead of RHEL on Stream and behind it on Linux", Distro{ID: "centos", VersionID: "9"}},
-		{"amazon linux has its own advisories", Distro{ID: "amzn", VersionID: "2023"}},
 		{"rhel with no VERSION_ID", Distro{ID: "rhel", VersionID: ""}},
 		{"rhel with a non-numeric version", Distro{ID: "rhel", VersionID: "beta"}},
 		// D71 gave Rocky its decision, so the same two edge cases apply to it
@@ -80,6 +83,15 @@ func TestDistroEcosystem_Unsupported(t *testing.T) {
 		// to it too.
 		{"almalinux with no VERSION_ID", Distro{ID: "almalinux", VersionID: ""}},
 		{"almalinux with a non-numeric version", Distro{ID: "almalinux", VersionID: "beta"}},
+		// D73: one os-release ID spans four Amazon Linux generations, and
+		// only AL2/AL2023 have a provider. Each of these has a version that
+		// WOULD otherwise look plausible, so the version itself is what has
+		// to be rejected — a bug that mapped every amzn VERSION_ID to
+		// whichever key came first would let these through.
+		{"amazon linux 1 predates VERSION_ID as amzn/2 spells it", Distro{ID: "amzn", VersionID: "2018.03"}},
+		{"amazon linux 2022 was an abandoned preview, frozen 2023-01-31", Distro{ID: "amzn", VersionID: "2022"}},
+		{"amazon linux with no VERSION_ID", Distro{ID: "amzn", VersionID: ""}},
+		{"amazon linux with a non-numeric version", Distro{ID: "amzn", VersionID: "beta"}},
 		// D53 gave Ubuntu its decision, so it resolves now — but only for a
 		// VERSION_ID shaped like a release. A version this cannot read is
 		// refused rather than concatenated into a key that would look
@@ -293,6 +305,56 @@ func TestDistroEcosystem_Alma(t *testing.T) {
 	}
 	// The no-VERSION_ID and non-numeric-VERSION_ID refusals are pinned in
 	// TestDistroEcosystem_Unsupported, alongside rhel's identical two rows.
+}
+
+// TestDistroEcosystem_Amazon: D73. One os-release ID ("amzn") spans four
+// Amazon Linux generations; only AL2 and AL2023 route to a real key, because
+// only those two have a provider (internal/provider/amazon's ALAS core
+// feed — there is no OSV archive for any Amazon Linux release at all).
+// Unlike Rocky and AlmaLinux the key is release-qualified at the WHOLE
+// VERSION_ID string ("2", "2023"), not a truncated major: Amazon spells its
+// own release numbers that way already, with no minor component to drop.
+func TestDistroEcosystem_Amazon(t *testing.T) {
+	for _, tc := range []struct {
+		versionID string
+		want      string
+	}{
+		{"2", "Amazon Linux:2"},
+		{"2023", "Amazon Linux:2023"},
+	} {
+		got, err := Distro{ID: "amzn", VersionID: tc.versionID}.Ecosystem()
+		if err != nil {
+			t.Errorf("VERSION_ID=%q: %v", tc.versionID, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("VERSION_ID=%q -> %q, want %q", tc.versionID, got, tc.want)
+		}
+	}
+	// Amazon Linux's keys must not converge with Red Hat's, Rocky's,
+	// AlmaLinux's or Alpine's — a change that collapsed them would make one
+	// distro's advisories reachable under another's key.
+	for _, tc := range []struct{ id, versionID, want string }{
+		{"alpine", "3.19", "Alpine:v3.19"},
+		{"rhel", "9.8", "Red Hat:9"},
+		{"rocky", "9.4", "Rocky Linux:9"},
+		{"almalinux", "9.6", "AlmaLinux:9"},
+		{"amzn", "2023", "Amazon Linux:2023"},
+	} {
+		if got, err := (Distro{ID: tc.id, VersionID: tc.versionID}).Ecosystem(); err != nil || got != tc.want {
+			t.Errorf("%s %s -> %q, %v; want %q", tc.id, tc.versionID, got, err, tc.want)
+		}
+	}
+	// centos must still not resolve (D50) — Amazon Linux leaving part of the
+	// not-evaluated list must not have been a change to the switch's default
+	// case that accidentally let every RPM ID through.
+	if _, err := (Distro{ID: "centos", VersionID: "9"}).Ecosystem(); err == nil {
+		t.Error("centos resolved an ecosystem; D50 still excludes it")
+	}
+	// AL1 (VERSION_ID "2018.03") and AL2022 (VERSION_ID "2022") stay
+	// not-evaluated: pinned in TestDistroEcosystem_Unsupported, alongside the
+	// no-VERSION_ID and non-numeric-VERSION_ID refusals every other RPM
+	// distro's decision needed.
 }
 
 // TestDistroEcosystem_Ubuntu pins the two shapes OSV gives a mainline Ubuntu

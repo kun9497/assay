@@ -20,6 +20,7 @@ import (
 	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/dbartifact"
 	"github.com/kun9497/assay/internal/dbcmd"
+	"github.com/kun9497/assay/internal/provider/amazon"
 	"github.com/kun9497/assay/internal/provider/knvd"
 	"github.com/kun9497/assay/internal/provider/nvd"
 	"github.com/kun9497/assay/internal/report"
@@ -1240,6 +1241,67 @@ func TestDBUpdateAnnotators_ConstructsNVDWithTheAPIKeyFromEnv(t *testing.T) {
 	}
 	if len(annotators) != 1 || annotators[0].Name() != nvd.SourceName {
 		t.Errorf("dbUpdateAnnotators() = %+v, want exactly one NVD annotator", annotators)
+	}
+}
+
+// TestDBUpdateProviders_AmazonOnByDefault is the caller-first proof for
+// D73's wiring: dbUpdateProviders must actually construct the Amazon Linux
+// provider when AMAZON_ENABLE is unset, not merely have amazon.New sitting
+// unused in the import list. Driven through a spy exactly as
+// TestDBUpdateAnnotators_ConstructsNVDWithTheAPIKeyFromEnv's own doc comment
+// explains why: mutating the call site to drop the provider (or to drop its
+// Options) compiles and would leave every other test in this package green.
+func TestDBUpdateProviders_AmazonOnByDefault(t *testing.T) {
+	t.Setenv("AMAZON_ENABLE", "")
+	t.Setenv("REDHAT_ENABLE", "0") // isolate: only Amazon's own wiring is under test here
+
+	orig := newAmazonProvider
+	sawCall := false
+	var gotOpts amazon.Options
+	newAmazonProvider = func(opts amazon.Options) *amazon.Provider {
+		sawCall, gotOpts = true, opts
+		return orig(opts)
+	}
+	defer func() { newAmazonProvider = orig }()
+
+	ps := dbUpdateProviders(io.Discard)
+	if !sawCall {
+		t.Fatal("dbUpdateProviders never constructed the Amazon Linux provider -- AMAZON_ENABLE defaults ON (D73)")
+	}
+	if gotOpts.Progress == nil {
+		t.Error("amazon.New was constructed with a nil Progress -- Fetch's extras disclosure would go nowhere")
+	}
+	var found bool
+	for _, p := range ps {
+		if p.Name() == "Amazon Linux ALAS" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("dbUpdateProviders() = %+v, want it to include the Amazon Linux provider", ps)
+	}
+}
+
+// TestDBUpdateProviders_AmazonDisabledViaEnv is the other half: an operator
+// who does not want to scan Amazon Linux must be able to turn the fetch off
+// entirely, exactly as REDHAT_ENABLE=0 already lets them skip Red Hat's.
+func TestDBUpdateProviders_AmazonDisabledViaEnv(t *testing.T) {
+	t.Setenv("AMAZON_ENABLE", "0")
+	t.Setenv("REDHAT_ENABLE", "0")
+
+	orig := newAmazonProvider
+	sawCall := false
+	newAmazonProvider = func(opts amazon.Options) *amazon.Provider { sawCall = true; return orig(opts) }
+	defer func() { newAmazonProvider = orig }()
+
+	ps := dbUpdateProviders(io.Discard)
+	if sawCall {
+		t.Error("amazon.New was constructed even though AMAZON_ENABLE=0")
+	}
+	for _, p := range ps {
+		if p.Name() == "Amazon Linux ALAS" {
+			t.Errorf("dbUpdateProviders() = %+v, want no Amazon Linux provider with AMAZON_ENABLE=0", ps)
+		}
 	}
 }
 

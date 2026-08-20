@@ -134,6 +134,16 @@ func For(ecosystem string) (Comparer, bool) {
 	if rel, ok := strings.CutPrefix(ecosystem, "AlmaLinux:"); ok && rel != "" {
 		return RPM{}, true
 	}
+	// D73. Amazon Linux is RPM too -- its ALAS feed is release-qualified the
+	// same way ("Amazon Linux:2", "Amazon Linux:2023"), and rpmvercmp does
+	// not care which distro built the package (rpm.go's own doc comment
+	// already names Amazon Linux as one of the four it orders). Same rule,
+	// same reason as the three clauses above: "Amazon Linux" bare is not a
+	// key this project ever builds, and resolving it would make a bug that
+	// drops the release look like it worked.
+	if rel, ok := strings.CutPrefix(ecosystem, "Amazon Linux:"); ok && rel != "" {
+		return RPM{}, true
+	}
 	// D53. Ubuntu is dpkg, so the comparer D40 wrote for Debian handles its
 	// revisions (2.4.4-2ubuntu17.10) unchanged — the version scheme was never
 	// the blocker. The KEY was.

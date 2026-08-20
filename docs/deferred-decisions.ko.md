@@ -416,10 +416,10 @@ RHSA-2024:4312  CVE-2024-6387 (regreSSHion, 업스트림은 9.8p1에서 수정)
   `('CVE-2021-20291', 'buildah', '8')`은 `container-tools`의 두 스트림에서 온 fixed 버전 둘로
   풀립니다. 높은 쪽을 고르면 체계적 오탐이고 낮은 쪽을 고르면 미탐입니다.
 
-**~~AlmaLinux와 Rocky Linux는 더 쉬운 길이 아닙니다~~ — 둘 다 해결됐습니다, Rocky는 D71에서
-AlmaLinux는 D72에서; Amazon Linux, Oracle Linux, Fedora, SLES는 여전히 열려 있습니다.** 둘 다
-major 버전만으로 키를 잡아 — 각 3개, `/etc/os-release`에서 유도 가능 — 실제로 더 단순했습니다.
-당시에는 Alma도 Rocky도 나머지를 못 넘겼습니다:
+**~~AlmaLinux와 Rocky Linux는 더 쉬운 길이 아닙니다~~ — 이제 셋 다 해결됐습니다: Rocky는
+D71에서, AlmaLinux는 D72에서, Amazon Linux 2/2023은 D73에서; Oracle Linux, Fedora, SLES는
+여전히 열려 있습니다.** 둘 다 major 버전만으로 키를 잡아 — 각 3개, `/etc/os-release`에서 유도
+가능 — 실제로 더 단순했습니다. 당시에는 Alma도 Rocky도 나머지를 못 넘겼습니다:
 
 - ~~**AlmaLinux는 `aliases`도 `upstream`도 0개**입니다. 레코드 5,494개 전부에 대해서. 모든 CVE
   참조가 `related`에 있는데, OSV는 `related`를 alias가 *아니라고* 명시적으로 정의합니다. D3을
@@ -464,9 +464,9 @@ README의 슬라이스 ⑬ 참조.
 
 **여전히 보류.** 제2의 의견으로서의 OVAL v2(RHEL 5–9만 다루고 RHEL 10이 없어서 주 출처가 될 수
 없습니다), 위의 반대 이유(SLES는 이 문서 다른 곳의 ndb 항목)가 그대로이고 그래서 D50도 D71도
-D72도 경로를 주지 않는 Amazon Linux, Oracle Linux, Fedora, SLES, 그리고 EUS/AUS/E4S
-발산을 공개하는 데서 끝내지 않고 닫는 것. 마지막 것은 어떤 이미지도 담고 있지 않은 채널 신호가
-필요합니다. Rocky Linux와 AlmaLinux는 이 목록에서 빠졌습니다 — D71과 D72 참조.
+D72도 D73도 경로를 주지 않는 Oracle Linux, Fedora, SLES, 그리고 EUS/AUS/E4S 발산을 공개하는
+데서 끝내지 않고 닫는 것. 마지막 것은 어떤 이미지도 담고 있지 않은 채널 신호가 필요합니다.
+Rocky Linux, AlmaLinux, Amazon Linux는 이 목록에서 빠졌습니다 — D71, D72, D73 참조.
 
 **이 조사가 만들어낸 다섯 결정은 이제 D71에 있습니다**, 여기가 아니라 — 다음 배포판 슬라이스들이
 그것들을 재사용하기 때문입니다: 배포판이 직접 쓴 레코드로 범위를 좁혀 CVE 조인에 `related`를
