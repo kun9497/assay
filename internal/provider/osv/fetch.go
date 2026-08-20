@@ -78,6 +78,14 @@ type Provider struct {
 	ecosystems []string
 	baseURL    string
 	client     *http.Client
+	// progress is where D82's module-stream counts are printed, or
+	// io.Discard by default. Not a New(...) parameter -- the dozen existing
+	// two-argument New(...) call sites across this package's tests would all
+	// have to change for a diagnostic nobody there asserts on. WithProgress
+	// is the opt-in, the same shape redhat/oracle/amazon/fedora/suse.Options
+	// .Progress serves for their own providers, just set after construction
+	// instead of at it.
+	progress io.Writer
 }
 
 func New(ecosystems []string, baseURL string) *Provider {
@@ -88,8 +96,20 @@ func New(ecosystems []string, baseURL string) *Provider {
 		ecosystems: ecosystems,
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		// A generous timeout: npm's archive alone is ~203 MB.
-		client: &http.Client{Timeout: 30 * time.Minute},
+		client:   &http.Client{Timeout: 30 * time.Minute},
+		progress: io.Discard,
 	}
+}
+
+// WithProgress sets where this provider's own diagnostics go (D82's
+// module-stream counts today) and returns p for chaining at the call site.
+// A nil writer is ignored rather than replacing the io.Discard default --
+// there is no reason to silence a caller that already opted in.
+func (p *Provider) WithProgress(w io.Writer) *Provider {
+	if w != nil {
+		p.progress = w
+	}
+	return p
 }
 
 func (p *Provider) Name() string { return SourceName }
@@ -98,9 +118,15 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 	prov := store.Provenance{Source: p.baseURL}
 	allCovered := map[string]struct{}{}
 	var known int
+	// D82: one counter across every ecosystem this Fetch covers, not one per
+	// archive -- Rocky Linux and AlmaLinux are two of p.ecosystems' entries
+	// among many, and a build that runs with only one of the two enabled
+	// still gets an honest (zero-for-the-other) line rather than one line per
+	// archive most of which would read "0, 0, 0".
+	var st stats
 	for _, eco := range p.ecosystems {
 		u := fmt.Sprintf("%s/%s/all.zip", p.baseURL, url.PathEscape(eco))
-		n, asOf, covered, err := p.fetchOne(ctx, u, eco, emit)
+		n, asOf, covered, err := p.fetchOne(ctx, u, eco, emit, &st)
 		if err != nil {
 			return store.Provenance{}, fmt.Errorf("fetch %s: %w", eco, err)
 		}
@@ -143,6 +169,11 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		prov.DataAsOf = time.Time{}
 	}
 	prov.Ecosystems = slices.Sorted(maps.Keys(allCovered))
+	// Printed unconditionally, the same discipline redhat/oracle's own stats
+	// lines follow: a build that ran with neither Rocky Linux nor AlmaLinux
+	// enabled prints an honest all-zero line rather than staying silent,
+	// which is indistinguishable from "this counter does not exist".
+	fmt.Fprintln(p.progress, "osv: "+st.String())
 	return prov, nil
 }
 
@@ -150,7 +181,7 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 // keys this archive actually covered. The third is not the same as `ecosystem`:
 // the Alpine archive is fetched as "Alpine" and covers Alpine:v3.2 through
 // Alpine:v3.24 (D20).
-func (p *Provider) fetchOne(ctx context.Context, u, ecosystem string, emit func(advisory.Advisory) error) (int, time.Time, map[string]struct{}, error) {
+func (p *Provider) fetchOne(ctx context.Context, u, ecosystem string, emit func(advisory.Advisory) error, st *stats) (int, time.Time, map[string]struct{}, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return 0, time.Time{}, nil, err
@@ -199,7 +230,7 @@ func (p *Provider) fetchOne(ctx context.Context, u, ecosystem string, emit func(
 		if err != nil {
 			return kept, asOf, covered, fmt.Errorf("read %s: %w", f.Name, err)
 		}
-		a, ok, err := Convert(data, ecosystem)
+		a, ok, err := convert(data, ecosystem, st)
 		if err != nil {
 			return kept, asOf, covered, fmt.Errorf("convert %s: %w", f.Name, err)
 		}
