@@ -21,6 +21,7 @@ import (
 	"github.com/kun9497/assay/internal/dbartifact"
 	"github.com/kun9497/assay/internal/dbcmd"
 	"github.com/kun9497/assay/internal/provider/amazon"
+	"github.com/kun9497/assay/internal/provider/fedora"
 	"github.com/kun9497/assay/internal/provider/knvd"
 	"github.com/kun9497/assay/internal/provider/nvd"
 	"github.com/kun9497/assay/internal/provider/oracle"
@@ -1366,6 +1367,73 @@ func TestDBUpdateProviders_OracleDisabledViaEnv(t *testing.T) {
 	for _, p := range ps {
 		if p.Name() == "Oracle Linux OVAL" {
 			t.Errorf("dbUpdateProviders() = %+v, want no Oracle Linux provider with ORACLE_ENABLE=0", ps)
+		}
+	}
+}
+
+// TestDBUpdateProviders_FedoraOnByDefault is the caller-first proof for
+// D75's wiring: dbUpdateProviders must actually construct the Fedora
+// provider when FEDORA_ENABLE is unset, not merely have fedora.New sitting
+// unused in the import list. Mirrors TestDBUpdateProviders_OracleOnByDefault
+// exactly, for the identical reason its own doc comment gives: mutating the
+// call site to drop the provider (or its Options) compiles and would leave
+// every other test in this package green.
+func TestDBUpdateProviders_FedoraOnByDefault(t *testing.T) {
+	t.Setenv("FEDORA_ENABLE", "")
+	t.Setenv("REDHAT_ENABLE", "0") // isolate: only Fedora's own wiring is under test here
+	t.Setenv("AMAZON_ENABLE", "0")
+	t.Setenv("ORACLE_ENABLE", "0")
+
+	orig := newFedoraProvider
+	sawCall := false
+	var gotOpts fedora.Options
+	newFedoraProvider = func(opts fedora.Options) *fedora.Provider {
+		sawCall, gotOpts = true, opts
+		return orig(opts)
+	}
+	defer func() { newFedoraProvider = orig }()
+
+	ps := dbUpdateProviders(io.Discard)
+	if !sawCall {
+		t.Fatal("dbUpdateProviders never constructed the Fedora provider -- FEDORA_ENABLE defaults ON (D75)")
+	}
+	if gotOpts.Progress == nil {
+		t.Error("fedora.New was constructed with a nil Progress -- the EOL disclosure and " +
+			"NoExtractableCVE count would go nowhere")
+	}
+	var found bool
+	for _, p := range ps {
+		if p.Name() == "Fedora Bodhi Updates" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("dbUpdateProviders() = %+v, want it to include the Fedora provider", ps)
+	}
+}
+
+// TestDBUpdateProviders_FedoraDisabledViaEnv is the other half: an operator
+// who does not want to scan Fedora must be able to turn the fetch off
+// entirely, exactly as REDHAT_ENABLE=0, AMAZON_ENABLE=0 and ORACLE_ENABLE=0
+// already let them.
+func TestDBUpdateProviders_FedoraDisabledViaEnv(t *testing.T) {
+	t.Setenv("FEDORA_ENABLE", "0")
+	t.Setenv("REDHAT_ENABLE", "0")
+	t.Setenv("AMAZON_ENABLE", "0")
+	t.Setenv("ORACLE_ENABLE", "0")
+
+	orig := newFedoraProvider
+	sawCall := false
+	newFedoraProvider = func(opts fedora.Options) *fedora.Provider { sawCall = true; return orig(opts) }
+	defer func() { newFedoraProvider = orig }()
+
+	ps := dbUpdateProviders(io.Discard)
+	if sawCall {
+		t.Error("fedora.New was constructed even though FEDORA_ENABLE=0")
+	}
+	for _, p := range ps {
+		if p.Name() == "Fedora Bodhi Updates" {
+			t.Errorf("dbUpdateProviders() = %+v, want no Fedora provider with FEDORA_ENABLE=0", ps)
 		}
 	}
 }

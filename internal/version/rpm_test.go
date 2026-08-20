@@ -287,6 +287,10 @@ func TestRPM_Routing(t *testing.T) {
 		// Oracle rebuild's own release suffixes (elNuek, .ksplice1.) are
 		// still ordinary rpmvercmp separators.
 		"Oracle Linux:8", "Oracle Linux:9", "Oracle Linux:10",
+		// Fedora left this list under D75, for the same reason: Bodhi's
+		// updates feed is release-qualified the same way ("Fedora:44"), and
+		// rpmvercmp does not care which distro built the package.
+		"Fedora:43", "Fedora:44",
 	} {
 		c, ok := For(eco)
 		if !ok {
@@ -313,12 +317,15 @@ func TestRPM_Routing(t *testing.T) {
 	if _, ok := For("Oracle Linux"); ok {
 		t.Error(`For("Oracle Linux") resolves; the provider only ever writes "Oracle Linux:<major>"`)
 	}
+	if _, ok := For("Fedora"); ok {
+		t.Error(`For("Fedora") resolves; the provider only ever writes "Fedora:<VERSION_ID>"`)
+	}
 	// And the rest still do not: Red Hat's errata describe Red Hat's own
 	// builds (D50), Rocky's own feed is ingested only under "Rocky Linux:N"
-	// (D71), and AlmaLinux's only under "AlmaLinux:N" (D72) -- none of them
-	// populate these keys. Their packages are still catalogued and reported
-	// as not evaluated.
-	for _, eco := range []string{"Fedora:44", "CentOS:9"} {
+	// (D71), AlmaLinux's only under "AlmaLinux:N" (D72), and Fedora's own
+	// feed only under "Fedora:N" (D75) -- none of them populate CentOS's
+	// key. Its packages are still catalogued and reported as not evaluated.
+	for _, eco := range []string{"CentOS:9"} {
 		if _, ok := For(eco); ok {
 			t.Errorf("For(%q) resolves, but nothing populates that ecosystem", eco)
 		}

@@ -2955,6 +2955,33 @@ decision Oracle still owes.
 
 ---
 
+### D75 — Fedora, shipped with its hazards counted
+
+**Decision.** Fedora's current releases are ingested from Bodhi's REST API (security
+updates, `FEDORA-` ids only so EPEL cannot fold in) under keys `Fedora:<release>`;
+`ID=fedora` routes; `FEDORA_ENABLE` on by default. The research ranked Fedora last on
+value-per-effort, and the answer is not to skip it but to ship every weakness loud:
+
+1. **The API is slow and bot-fronted** — sequential pagination, descriptive User-Agent,
+   retries only on 429/5xx with cancellation checked first (D58's classification order).
+2. **CVEs come from prose** — regex over title+notes, measured ceiling 81.7%. Every update
+   with no extractable CVE is COUNTED and the build log says so; the miss is never silent.
+3. **The 13-month EOL freeze** — an EOL'd release gets no new advisories, so its lower
+   bound silently freezes. Fetch names which releases were fetched and says exactly that;
+   the usage text repeats it. The scan side cannot know a release went EOL, so the
+   disclosure lives where the knowledge does.
+
+Bodhi's severity ladder (urgent/high/medium/low/unspecified, measured lowercase) maps
+faithfully as its own VENDOR_WORD entries — Urgent→critical, High→high, the shared
+Medium/Low, and `unspecified` deliberately unrecognized: it is Bodhi's own "nobody set
+one", which is Unknown, never a defaulted Low (D17). 0% CVSS in the feed; the NVD join
+carries the rest (D71 decision 2).
+
+This closes the buildable RPM family: Rocky, Alma, Amazon, Oracle, Fedora (D71–D75).
+SLES remains behind the ndb rpmdb backend.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

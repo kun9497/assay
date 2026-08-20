@@ -16,6 +16,7 @@ import (
 	"github.com/kun9497/assay/internal/dbcmd"
 	"github.com/kun9497/assay/internal/provider"
 	"github.com/kun9497/assay/internal/provider/amazon"
+	"github.com/kun9497/assay/internal/provider/fedora"
 	"github.com/kun9497/assay/internal/provider/knvd"
 	"github.com/kun9497/assay/internal/provider/nvd"
 	"github.com/kun9497/assay/internal/provider/oracle"
@@ -159,6 +160,26 @@ Environment (db build only — a scan reads no environment and no network):
                         REDHAT_ENABLE=0 does.
                         Set this to 0 for a local build that does not scan
                         Oracle Linux.
+  FEDORA_ENABLE=0       Skip Fedora's Bodhi updates feed (F43 and F44, its
+                        current stable releases). ON BY DEFAULT (D75), for
+                        the same reason as Red Hat, Amazon Linux and Oracle
+                        Linux: the published artifact carries it, so a build
+                        without it produces a narrower database than
+                        db update delivers.
+                        CURRENT RELEASES ONLY: Fedora's ~13-month support
+                        window means an EOL'd release (F42 archived
+                        2026-05-27) gets no new advisories from this feed
+                        ever again, so a scan of an EOL'd Fedora image is a
+                        frozen lower bound with no in-band signal that it
+                        stopped moving. Severity also has no CVSS vector
+                        anywhere in this feed -- only Bodhi's own
+                        urgent/high/medium/low word, with the NVD join
+                        carrying the rest -- and CVE linkage is extracted
+                        from free-text prose rather than a structured field,
+                        which is a measured 18.3% miss rate that is counted
+                        rather than hidden.
+                        Set this to 0 for a local build that does not scan
+                        Fedora.
   KISA_ENABLE=0         Skip KISA/KNVD's Korean security notices. ON BY
                         DEFAULT (D37): attaching them is what this project was
                         built for, and leaving it to a flag meant the flagship
@@ -573,21 +594,28 @@ var newAmazonProvider = amazon.New
 // ever being fetched from.
 var newOracleProvider = oracle.New
 
+// newFedoraProvider constructs the Fedora Bodhi updates provider. A package
+// variable for the same reason newRedHatProvider, newAmazonProvider and
+// newOracleProvider are: a test can substitute a spy and observe the
+// Options that reached construction, without fedora.New's default releases
+// — the live bodhi.fedoraproject.org feed — ever being fetched from.
+var newFedoraProvider = fedora.New
+
 // dbUpdateProviders is every provider.Provider `db build` runs.
 //
-// All four are on by default. Red Hat was opt-in when it landed, on the
+// All five are on by default. Red Hat was opt-in when it landed, on the
 // grounds that it adds ~1.9 million affected entries for people who may
 // never scan a RHEL image — and D51 reversed that once the published
-// artifact started carrying it. Amazon Linux and Oracle Linux followed the
-// same reasoning from the start (D73, D74) rather than repeating Red Hat's
-// opt-in-then-reverse path: the published artifact is meant to carry each of
-// them, and a default that disagreed with the artifact would mean
-// `db build` and `db update` produce different databases, and `db push`
-// would refuse the narrower one.
+// artifact started carrying it. Amazon Linux, Oracle Linux and Fedora
+// followed the same reasoning from the start (D73, D74, D75) rather than
+// repeating Red Hat's opt-in-then-reverse path: the published artifact is
+// meant to carry each of them, and a default that disagreed with the
+// artifact would mean `db build` and `db update` produce different
+// databases, and `db push` would refuse the narrower one.
 //
-// REDHAT_ENABLE=0, AMAZON_ENABLE=0 and ORACLE_ENABLE=0 still turn each off,
-// for a local build that wants to be shorter and does not care about that
-// distro.
+// REDHAT_ENABLE=0, AMAZON_ENABLE=0, ORACLE_ENABLE=0 and FEDORA_ENABLE=0
+// still turn each off, for a local build that wants to be shorter and does
+// not care about that distro.
 func dbUpdateProviders(stderr io.Writer) []provider.Provider {
 	ps := []provider.Provider{osv.New(osv.Ecosystems, "")}
 	if envFlag(stderr, "REDHAT_ENABLE", true) {
@@ -607,6 +635,13 @@ func dbUpdateProviders(stderr io.Writer) []provider.Provider {
 		// guard's skip counts are exactly the "silently drops part of its
 		// input" case every other provider's Progress line exists for.
 		ps = append(ps, newOracleProvider(oracle.Options{Progress: stderr}))
+	}
+	if envFlag(stderr, "FEDORA_ENABLE", true) {
+		// Progress goes to stderr for the same reason: Fetch's own
+		// eolDisclosure line and its NoExtractableCVE count are exactly the
+		// "silently drops/narrows part of its input" case every other
+		// provider's Progress line exists for.
+		ps = append(ps, newFedoraProvider(fedora.Options{Progress: stderr}))
 	}
 	return ps
 }
