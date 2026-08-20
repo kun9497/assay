@@ -23,6 +23,7 @@ import (
 	"github.com/kun9497/assay/internal/provider/amazon"
 	"github.com/kun9497/assay/internal/provider/knvd"
 	"github.com/kun9497/assay/internal/provider/nvd"
+	"github.com/kun9497/assay/internal/provider/oracle"
 	"github.com/kun9497/assay/internal/report"
 	"github.com/kun9497/assay/internal/scancmd"
 	"github.com/kun9497/assay/internal/severity"
@@ -1301,6 +1302,70 @@ func TestDBUpdateProviders_AmazonDisabledViaEnv(t *testing.T) {
 	for _, p := range ps {
 		if p.Name() == "Amazon Linux ALAS" {
 			t.Errorf("dbUpdateProviders() = %+v, want no Amazon Linux provider with AMAZON_ENABLE=0", ps)
+		}
+	}
+}
+
+// TestDBUpdateProviders_OracleOnByDefault is the caller-first proof for
+// D74's wiring: dbUpdateProviders must actually construct the Oracle Linux
+// provider when ORACLE_ENABLE is unset, not merely have oracle.New sitting
+// unused in the import list. Mirrors
+// TestDBUpdateProviders_AmazonOnByDefault exactly, for the identical reason
+// its own doc comment gives: mutating the call site to drop the provider (or
+// its Options) compiles and would leave every other test in this package
+// green.
+func TestDBUpdateProviders_OracleOnByDefault(t *testing.T) {
+	t.Setenv("ORACLE_ENABLE", "")
+	t.Setenv("REDHAT_ENABLE", "0") // isolate: only Oracle's own wiring is under test here
+	t.Setenv("AMAZON_ENABLE", "0")
+
+	orig := newOracleProvider
+	sawCall := false
+	var gotOpts oracle.Options
+	newOracleProvider = func(opts oracle.Options) *oracle.Provider {
+		sawCall, gotOpts = true, opts
+		return orig(opts)
+	}
+	defer func() { newOracleProvider = orig }()
+
+	ps := dbUpdateProviders(io.Discard)
+	if !sawCall {
+		t.Fatal("dbUpdateProviders never constructed the Oracle Linux provider -- ORACLE_ENABLE defaults ON (D74)")
+	}
+	if gotOpts.Progress == nil {
+		t.Error("oracle.New was constructed with a nil Progress -- the UEK/module-train guard's skip counts would go nowhere")
+	}
+	var found bool
+	for _, p := range ps {
+		if p.Name() == "Oracle Linux OVAL" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("dbUpdateProviders() = %+v, want it to include the Oracle Linux provider", ps)
+	}
+}
+
+// TestDBUpdateProviders_OracleDisabledViaEnv is the other half: an operator
+// who does not want to scan Oracle Linux must be able to turn the fetch off
+// entirely, exactly as REDHAT_ENABLE=0 and AMAZON_ENABLE=0 already let them.
+func TestDBUpdateProviders_OracleDisabledViaEnv(t *testing.T) {
+	t.Setenv("ORACLE_ENABLE", "0")
+	t.Setenv("REDHAT_ENABLE", "0")
+	t.Setenv("AMAZON_ENABLE", "0")
+
+	orig := newOracleProvider
+	sawCall := false
+	newOracleProvider = func(opts oracle.Options) *oracle.Provider { sawCall = true; return orig(opts) }
+	defer func() { newOracleProvider = orig }()
+
+	ps := dbUpdateProviders(io.Discard)
+	if sawCall {
+		t.Error("oracle.New was constructed even though ORACLE_ENABLE=0")
+	}
+	for _, p := range ps {
+		if p.Name() == "Oracle Linux OVAL" {
+			t.Errorf("dbUpdateProviders() = %+v, want no Oracle Linux provider with ORACLE_ENABLE=0", ps)
 		}
 	}
 }

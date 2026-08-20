@@ -18,6 +18,7 @@ import (
 	"github.com/kun9497/assay/internal/provider/amazon"
 	"github.com/kun9497/assay/internal/provider/knvd"
 	"github.com/kun9497/assay/internal/provider/nvd"
+	"github.com/kun9497/assay/internal/provider/oracle"
 	"github.com/kun9497/assay/internal/provider/osv"
 	"github.com/kun9497/assay/internal/provider/redhat"
 	"github.com/kun9497/assay/internal/scancmd"
@@ -148,6 +149,16 @@ Environment (db build only — a scan reads no environment and no network):
                         core data.
                         Set this to 0 for a local build that does not scan
                         Amazon Linux.
+  ORACLE_ENABLE=0       Skip Oracle Linux's OVAL feed (ELSA/ELBA errata,
+                        Oracle Linux 5-10). ON BY DEFAULT (D74), for the
+                        same reason as Red Hat and Amazon Linux: the
+                        published artifact carries it, so a build without
+                        it produces a narrower database than db update
+                        delivers. The archive is one 12 MB unauthenticated
+                        file, so this does not shorten a build the way
+                        REDHAT_ENABLE=0 does.
+                        Set this to 0 for a local build that does not scan
+                        Oracle Linux.
   KISA_ENABLE=0         Skip KISA/KNVD's Korean security notices. ON BY
                         DEFAULT (D37): attaching them is what this project was
                         built for, and leaving it to a flag meant the flagship
@@ -555,19 +566,28 @@ var newRedHatProvider = redhat.New
 // being fetched from.
 var newAmazonProvider = amazon.New
 
+// newOracleProvider constructs the Oracle Linux OVAL provider. A package
+// variable for the same reason newRedHatProvider and newAmazonProvider are: a
+// test can substitute a spy and observe the Options that reached
+// construction, without oracle.New's default URL — the live 12 MB archive —
+// ever being fetched from.
+var newOracleProvider = oracle.New
+
 // dbUpdateProviders is every provider.Provider `db build` runs.
 //
-// All three are on by default. Red Hat was opt-in when it landed, on the
+// All four are on by default. Red Hat was opt-in when it landed, on the
 // grounds that it adds ~1.9 million affected entries for people who may
 // never scan a RHEL image — and D51 reversed that once the published
-// artifact started carrying it. Amazon Linux followed the same reasoning
-// from the start (D73) rather than repeating Red Hat's opt-in-then-reverse
-// path: the published artifact is meant to carry it, and a default that
-// disagreed with the artifact would mean `db build` and `db update` produce
-// different databases, and `db push` would refuse the narrower one.
+// artifact started carrying it. Amazon Linux and Oracle Linux followed the
+// same reasoning from the start (D73, D74) rather than repeating Red Hat's
+// opt-in-then-reverse path: the published artifact is meant to carry each of
+// them, and a default that disagreed with the artifact would mean
+// `db build` and `db update` produce different databases, and `db push`
+// would refuse the narrower one.
 //
-// REDHAT_ENABLE=0 and AMAZON_ENABLE=0 still turn each off, for a local build
-// that wants to be shorter and does not care about that distro.
+// REDHAT_ENABLE=0, AMAZON_ENABLE=0 and ORACLE_ENABLE=0 still turn each off,
+// for a local build that wants to be shorter and does not care about that
+// distro.
 func dbUpdateProviders(stderr io.Writer) []provider.Provider {
 	ps := []provider.Provider{osv.New(osv.Ecosystems, "")}
 	if envFlag(stderr, "REDHAT_ENABLE", true) {
@@ -581,6 +601,12 @@ func dbUpdateProviders(stderr io.Writer) []provider.Provider {
 		// extrasDisclosure line is what keeps a core-only build from reading
 		// as a complete one, and it has to land somewhere a reader sees it.
 		ps = append(ps, newAmazonProvider(amazon.Options{Progress: stderr}))
+	}
+	if envFlag(stderr, "ORACLE_ENABLE", true) {
+		// Progress goes to stderr for the same reason: the UEK/module-train
+		// guard's skip counts are exactly the "silently drops part of its
+		// input" case every other provider's Progress line exists for.
+		ps = append(ps, newOracleProvider(oracle.Options{Progress: stderr}))
 	}
 	return ps
 }

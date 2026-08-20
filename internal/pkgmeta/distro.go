@@ -221,6 +221,29 @@ func (d Distro) Ecosystem() (string, error) {
 			return "", fmt.Errorf("%w: distro %q version %q is not AL2 or AL2023 "+
 				"(AL1 and AL2022 have no provider)", ErrNoEcosystem, d.ID, d.VersionID)
 		}
+	case "ol":
+		// D74. Oracle Linux ingests from its own OVAL feed
+		// (internal/provider/oracle), keyed on the mainline MAJOR the same
+		// way D47 keyed Red Hat's and D71/D72 keyed Rocky's and AlmaLinux's:
+		// the feed's own criteria gate only on "Oracle Linux N is
+		// installed", nothing finer, and /etc/os-release's VERSION_ID
+		// ("9.8") needs the same truncation.
+		//
+		// Oracle Linux is NOT routed to Red Hat's CSAF feed (the "rhel" case
+		// above), for the same byte-identity reason AlmaLinux is not: an
+		// Oracle rebuild carries its own release suffixes (elNuek for the
+		// UEK kernel lineage, .ksplice1. for live-patched packages, .0.1
+		// rebuild markers) that Red Hat never built and must never be
+		// compared against Red Hat's advisory versions.
+		if d.VersionID == "" {
+			return "", fmt.Errorf("%w: distro %q has no VERSION_ID", ErrNoEcosystem, d.ID)
+		}
+		major, _, _ := strings.Cut(d.VersionID, ".")
+		if !allDigits(major) {
+			return "", fmt.Errorf("%w: distro %q version %q is not a numbered release",
+				ErrNoEcosystem, d.ID, d.VersionID)
+		}
+		return "Oracle Linux:" + major, nil
 	default:
 		return "", fmt.Errorf("%w: distro %q is not supported yet", ErrNoEcosystem, d.ID)
 	}

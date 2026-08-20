@@ -92,6 +92,10 @@ func TestDistroEcosystem_Unsupported(t *testing.T) {
 		{"amazon linux 2022 was an abandoned preview, frozen 2023-01-31", Distro{ID: "amzn", VersionID: "2022"}},
 		{"amazon linux with no VERSION_ID", Distro{ID: "amzn", VersionID: ""}},
 		{"amazon linux with a non-numeric version", Distro{ID: "amzn", VersionID: "beta"}},
+		// D74 gave Oracle Linux its decision, so the same two edge cases
+		// apply to it that apply to rhel/rocky/almalinux above.
+		{"ol with no VERSION_ID", Distro{ID: "ol", VersionID: ""}},
+		{"ol with a non-numeric version", Distro{ID: "ol", VersionID: "beta"}},
 		// D53 gave Ubuntu its decision, so it resolves now — but only for a
 		// VERSION_ID shaped like a release. A version this cannot read is
 		// refused rather than concatenated into a key that would look
@@ -404,4 +408,55 @@ func TestDistroEcosystem_Ubuntu(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestDistroEcosystem_Oracle: D74. Oracle Linux left D50's not-evaluated
+// list once its own OVAL archive was ingested, the same move D71/D72/D73
+// made for Rocky, AlmaLinux and Amazon Linux -- the key is the mainline
+// MAJOR, the shape the feed's own "Oracle Linux N is installed" criteria
+// gate on, not release-qualified any finer.
+func TestDistroEcosystem_Oracle(t *testing.T) {
+	for _, tc := range []struct {
+		versionID string
+		want      string
+	}{
+		{"9", "Oracle Linux:9"},
+		{"9.8", "Oracle Linux:9"},
+		{"8.10", "Oracle Linux:8"},
+		{"10.0", "Oracle Linux:10"},
+	} {
+		got, err := Distro{ID: "ol", VersionID: tc.versionID}.Ecosystem()
+		if err != nil {
+			t.Errorf("VERSION_ID=%q: %v", tc.versionID, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("VERSION_ID=%q -> %q, want %q", tc.versionID, got, tc.want)
+		}
+	}
+	// Oracle Linux's key must not converge with Red Hat's, Rocky's,
+	// AlmaLinux's or Amazon Linux's -- a change that collapsed them would
+	// make one distro's advisories reachable under another's key, and an
+	// Oracle rebuild's own release suffixes (elNuek, .ksplice1., .0.1
+	// rebuild markers) are never comparable against another distro's data.
+	for _, tc := range []struct{ id, versionID, want string }{
+		{"alpine", "3.19", "Alpine:v3.19"},
+		{"rhel", "9.8", "Red Hat:9"},
+		{"rocky", "9.4", "Rocky Linux:9"},
+		{"almalinux", "9.6", "AlmaLinux:9"},
+		{"amzn", "2023", "Amazon Linux:2023"},
+		{"ol", "9.8", "Oracle Linux:9"},
+	} {
+		if got, err := (Distro{ID: tc.id, VersionID: tc.versionID}).Ecosystem(); err != nil || got != tc.want {
+			t.Errorf("%s %s -> %q, %v; want %q", tc.id, tc.versionID, got, err, tc.want)
+		}
+	}
+	// centos must still not resolve (D50) -- Oracle Linux leaving the
+	// not-evaluated list must not have been a change to the switch's
+	// default case that accidentally let every RPM ID through.
+	if _, err := (Distro{ID: "centos", VersionID: "9"}).Ecosystem(); err == nil {
+		t.Error("centos resolved an ecosystem; D50 still excludes it")
+	}
+	// The no-VERSION_ID and non-numeric-VERSION_ID refusals are pinned in
+	// TestDistroEcosystem_Unsupported, alongside rhel's identical two rows.
 }

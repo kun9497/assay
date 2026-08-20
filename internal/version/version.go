@@ -144,6 +144,15 @@ func For(ecosystem string) (Comparer, bool) {
 	if rel, ok := strings.CutPrefix(ecosystem, "Amazon Linux:"); ok && rel != "" {
 		return RPM{}, true
 	}
+	// D74. Oracle Linux is RPM too -- its own OVAL archive is
+	// release-qualified the same way ("Oracle Linux:9"), and rpmvercmp does
+	// not care which distro built the package. Same rule, same reason as
+	// the four clauses above: "Oracle Linux" bare is not a key this project
+	// ever builds, and resolving it would make a bug that drops the release
+	// look like it worked.
+	if rel, ok := strings.CutPrefix(ecosystem, "Oracle Linux:"); ok && rel != "" {
+		return RPM{}, true
+	}
 	// D53. Ubuntu is dpkg, so the comparer D40 wrote for Debian handles its
 	// revisions (2.4.4-2ubuntu17.10) unchanged — the version scheme was never
 	// the blocker. The KEY was.

@@ -570,6 +570,9 @@ exited 0 while 24 findings went unmentioned. **Done.**
 - [x] Amazon Linux 2/2023 from their own updateinfo repos (D73) — first non-OSV advisory
       provider after Red Hat; Medium/word-casing quirks measured and mapped; extras
       disclosed as unfetched
+- [x] Oracle Linux 5-10 from ELSA OVAL (D74) — first OVAL criteria-tree parser; UEK
+      cross-definition ambiguity dropped-and-counted; v2-only definitions fall to the NVD
+      join; ksplice/FIPS lineages disclosed as unfiltered
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a
@@ -800,11 +803,12 @@ none while another source does. Telling a reader to remove a package they could 
 worse than saying nothing.
 
 Only `rhel` routes to `Red Hat:N` (D50); Rocky Linux routes to `Rocky Linux:N` (D71),
-AlmaLinux to `AlmaLinux:N` (D72), and Amazon Linux 2/2023 to `Amazon Linux:2` /
-`Amazon Linux:2023` (D73), each against its OWN advisory feed, never against Red Hat's or
-each other's. `centos` covers one product that trailed RHEL and another that runs ahead of
-it, and Fedora still has its own feed — it, along with Amazon Linux 1 and AL2022, is
-catalogued and reported as not evaluated, a loud skip, never a clean verdict.
+AlmaLinux to `AlmaLinux:N` (D72), Amazon Linux 2/2023 to `Amazon Linux:2` /
+`Amazon Linux:2023` (D73), and Oracle Linux 5–10 to `Oracle Linux:<major>` (D74), each
+against its OWN advisory feed, never against Red Hat's or each other's. `centos` covers one
+product that trailed RHEL and another that runs ahead of it, and Fedora still has its own
+feed — it, along with Amazon Linux 1 and AL2022, is catalogued and reported as not
+evaluated, a loud skip, never a clean verdict.
 
 A Rocky verdict is clean-of-what-Rocky-published: its feed is errata-only and measured
 thinner than RHSA's (no regreSSHion advisory at all), and module-build fixes are skipped and
