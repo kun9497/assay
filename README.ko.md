@@ -572,6 +572,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] Oracle module stream (D81) — gate가 걸린 fix 17,930건을 Oracle 철자 stream 87개에
       걸쳐 저장, 모호성이 예측 그대로 32,621건→22,939건으로 떨어짐; gate 없는 module EVR
       150개는 계속 시끄러움
+- [x] Rocky/Alma module stream을 summary 산문에서 (D82) — 항목 21,540건이 하나-토큰
+      규칙 아래 stream을 얻음; 풀리지 않는 레코드 15+96건은 stream 없이 계속 시끄러움;
+      MODULARITYLABEL 삼부작이 닫힘
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건

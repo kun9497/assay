@@ -623,7 +623,12 @@ var newSUSEProvider = suse.New
 // SUSE_ENABLE=0 still turn each off, for a local build that wants to be
 // shorter and does not care about that distro.
 func dbUpdateProviders(stderr io.Writer) []provider.Provider {
-	ps := []provider.Provider{osv.New(osv.Ecosystems, "")}
+	// Progress goes to stderr for the same reason every provider below sends
+	// theirs there: D82's Rocky Linux/AlmaLinux module-stream attachment
+	// narrows what it attaches (a record with zero or 2+ summary tokens stays
+	// stream-less), and a run that printed nothing about it would be
+	// indistinguishable from one that was broken.
+	ps := []provider.Provider{osv.New(osv.Ecosystems, "").WithProgress(stderr)}
 	if envFlag(stderr, "REDHAT_ENABLE", true) {
 		// Progress goes to stderr for nvd's reason: this provider discards the
 		// large majority of what it reads, and a run that printed nothing

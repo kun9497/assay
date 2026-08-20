@@ -201,7 +201,19 @@ func vendorSeverityWord(summary string) (string, bool) {
 // wantEcosystem. ok is false when the record is deliberately filtered out;
 // err is non-nil only when the record is malformed. Distinguishing the two
 // keeps "we chose to skip this" from looking like "the database is broken".
+//
+// A thin wrapper over convert with a nil *stats: every pre-D82 caller (and
+// every existing test in this package) calls Convert and does not want to
+// know about module-stream counting, so the signature that answers "did this
+// record convert" stays exactly as it always was. fetchOne is the one caller
+// that wants the counts and calls convert directly with a real *stats.
 func Convert(data []byte, wantEcosystem string) (advisory.Advisory, bool, error) {
+	return convert(data, wantEcosystem, nil)
+}
+
+// convert is Convert's real body, plus D82's module-stream attachment. st is
+// nil from every caller that does not care about the counts (see Convert).
+func convert(data []byte, wantEcosystem string, st *stats) (advisory.Advisory, bool, error) {
 	var r rawRecord
 	if err := json.Unmarshal(data, &r); err != nil {
 		return advisory.Advisory{}, false, fmt.Errorf("decode osv record: %w", err)
@@ -353,5 +365,158 @@ func Convert(data []byte, wantEcosystem string) (advisory.Advisory, bool, error)
 	if len(out.Affected) == 0 || !matchesWanted {
 		return advisory.Advisory{}, false, nil
 	}
+	// D82: Rocky Linux and AlmaLinux OSV carry no per-entry module-stream
+	// attribution at all -- the only place either archive states which stream
+	// an errata patches is its own summary. Runs only on a record that
+	// survives the drop check above, so a record this fetch pass is not
+	// keeping never contributes to st's counts.
+	attachModuleStreams(&out, r.Summary, st)
 	return out, true, nil
+}
+
+// moduleStreamSeverityPrefix strips a distro summary's leading severity word
+// before D82's token extraction runs. Without stripping it first, the
+// summary's own "Word:" prefix reads as a spurious first token
+// ("Important:idm" out of "Important: idm:DL1 security update"), consuming
+// the colon the real token needs -- and on a summary with no OTHER colon at
+// all ("Important: varnish security update"), fabricating a token where none
+// exists. The same four words vendorSeverityWordPrefix recognizes, but this
+// copy also consumes the whitespace after the colon: vendorSeverityWordPrefix's
+// only caller reads the word alone and does not care what follows it, while
+// this one feeds what is left straight into moduleStreamTokenRe.
+var moduleStreamSeverityPrefix = regexp.MustCompile(`^(?:Critical|Important|Moderate|Low):\s*`)
+
+// moduleStreamTokenRe matches one "name:stream" token in a Rocky/AlmaLinux
+// summary, already stripped of its severity prefix -- the RHSA title
+// convention ("python38:3.8 security, bug fix, and enhancement update") that
+// is the only place either archive states which module stream an errata
+// patches. Measured 2026-08-20: OSV's own `affected` entries carry a bare
+// module COMPONENT name (Judy under mariadb, not mariadb itself), so
+// attribution can only ever be read here, at the record level, never per
+// entry.
+var moduleStreamTokenRe = regexp.MustCompile(`([A-Za-z][\w-]*):([A-Za-z0-9][\w.]*)`)
+
+// moduleStreamTokens extracts every distinct "name:stream" token from a
+// Rocky/AlmaLinux summary, in first-seen order. Zero tokens (no colon left
+// once the severity prefix is stripped, e.g. "go-toolset security update")
+// and two-plus distinct tokens (two streams named in one summary -- the
+// idm:DL1 + idm:client shape, or two genuinely different modules like
+// "python39:3.9 and python39-devel:3.9") both mean the record's module
+// entries stay stream-less; attachModuleStreams is what decides that, this
+// function only reports what the prose contains.
+func moduleStreamTokens(summary string) []string {
+	rest := moduleStreamSeverityPrefix.ReplaceAllString(summary, "")
+	var tokens []string
+	seen := map[string]bool{}
+	for _, m := range moduleStreamTokenRe.FindAllStringSubmatch(rest, -1) {
+		tok := m[1] + ":" + m[2]
+		if seen[tok] {
+			continue
+		}
+		seen[tok] = true
+		tokens = append(tokens, tok)
+	}
+	return tokens
+}
+
+// moduleTaggedFixedEVR duplicates redhat.isModule / matcher.rpmModuleBuild /
+// oracle.isModuleBuildEVR -- the same reason every one of those duplicates
+// the others: this package cannot import across the provider/matcher
+// boundary for one string check, and the two spellings ("module+el" Red
+// Hat/Rocky, "module_el" AlmaLinux) are cheap to keep in sync by comment
+// rather than by import.
+func moduleTaggedFixedEVR(evr string) bool {
+	return strings.Contains(evr, "module+el") || strings.Contains(evr, "module_el")
+}
+
+// affectedCarriesModuleTag reports whether any Fixed event in aff's ranges is
+// a module-tagged build. D82 attaches a stream only to entries that pass
+// this -- an ordinary, non-modular Rocky/AlmaLinux package must never gain a
+// ModuleStream just because its record's summary happens to look like a
+// module title.
+func affectedCarriesModuleTag(aff advisory.Affected) bool {
+	for _, rng := range aff.Ranges {
+		for _, ev := range rng.Events {
+			if ev.Fixed != "" && moduleTaggedFixedEVR(ev.Fixed) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// rockyOrAlmaEcosystem reports whether an Affected entry's own ecosystem key
+// is a Rocky Linux or AlmaLinux release -- D82's scope, checked per entry
+// rather than trusted from wantEcosystem: a record's Affected list can carry
+// entries for other ecosystems too (TestConvert_KeepsForeignEcosystemEntries
+// is why Convert never strips them), and only the Rocky/Alma ones are
+// eligible for a summary-derived stream.
+func rockyOrAlmaEcosystem(ecosystem string) bool {
+	return familyMatches(ecosystem, "Rocky Linux") || familyMatches(ecosystem, "AlmaLinux")
+}
+
+// attachModuleStreams implements D82. Rocky Linux and AlmaLinux OSV records
+// carry no per-entry module-stream attribution at all -- an affected entry's
+// own name is a bare module COMPONENT ("Judy" under "mariadb"), never the
+// module itself -- so the only place either archive states which stream an
+// errata patches is its own summary, in the RHSA title convention
+// ("Moderate: python38:3.8 security, bug fix, and enhancement update").
+// Attribution is therefore RECORD-level: every module-tagged entry in a
+// qualifying record gets the SAME stream, or none at all.
+//
+// Exactly one distinct token in the summary (after stripping the severity
+// prefix) is attached to every module-tagged entry. Zero tokens or two-plus
+// distinct tokens leave every module entry stream-less instead of guessing --
+// deliberately conservative, the same call D80's matcher already makes for a
+// stream-blind module bound: "python39:3.9 and python39-devel:3.9" names two
+// modules and OSV cannot say which component belongs to which, and three
+// real advisories name two streams of ONE module (idm:DL1 + idm:client) that
+// cannot be split at all. Ordinary, non-module entries in the same record --
+// Rocky/Alma or otherwise -- are never touched.
+func attachModuleStreams(out *advisory.Advisory, summary string, st *stats) {
+	var moduleEntries []int
+	for i, aff := range out.Affected {
+		if rockyOrAlmaEcosystem(aff.Ecosystem) && affectedCarriesModuleTag(aff) {
+			moduleEntries = append(moduleEntries, i)
+		}
+	}
+	if len(moduleEntries) == 0 {
+		return
+	}
+	switch tokens := moduleStreamTokens(summary); len(tokens) {
+	case 1:
+		for _, i := range moduleEntries {
+			out.Affected[i].ModuleStream = tokens[0]
+		}
+		if st != nil {
+			st.ModuleEntriesStreamed += len(moduleEntries)
+		}
+	case 0:
+		if st != nil {
+			st.ModuleRecordsZeroToken++
+		}
+	default:
+		if st != nil {
+			st.ModuleRecordsMultiToken++
+		}
+	}
+}
+
+// stats counts what D82's module-stream attachment did across a fetch -- the
+// same discipline every other provider's own stats struct exists for: a
+// provider that silently narrows what it attaches looks exactly like one
+// that is broken. nil is a valid *stats (every pre-D82 caller reaches convert
+// through Convert, which passes nil) -- every increment site above guards on
+// it.
+type stats struct {
+	ModuleEntriesStreamed   int // module-tagged Rocky/AlmaLinux entries that got a summary-derived ModuleStream (D82)
+	ModuleRecordsZeroToken  int // qualifying records whose summary yielded no stream token
+	ModuleRecordsMultiToken int // qualifying records whose summary yielded 2+ distinct stream tokens
+}
+
+func (s stats) String() string {
+	return fmt.Sprintf(
+		"module streams (D82): %d module-tagged Rocky/AlmaLinux entr(y/ies) streamed from summary prose, "+
+			"%d record(s) left stream-less for no token, %d record(s) left stream-less for 2+ tokens",
+		s.ModuleEntriesStreamed, s.ModuleRecordsZeroToken, s.ModuleRecordsMultiToken)
 }

@@ -3015,6 +3015,34 @@ red가 됩니다.
 
 ---
 
+### D82 — Rocky와 Alma의 stream은 산문에 산다, 그러니 산문을 조심히 읽는다
+
+**결정.** 마지막 stream 출처: Rocky/Alma OSV 레코드는 module stream을 오직 레코드의
+`summary`에만 담습니다(RHSA 제목 관례 — "Moderate: python38:3.8 security update"), 그래서
+OSV provider가 거기서 name:stream 토큰을 뽑아냅니다 — 심각도 접두사를 먼저 벗기므로,
+"Important: idm:DL1 ..."는 idm:DL1을 내고, 콜론 쌍이 그 접두사 하나뿐인 summary는 아무것도
+내지 않습니다. 귀속은 레코드 단위입니다, affected 이름이 module의 COMPONENT이기
+때문이고(mariadb 아래의 Judy), OSV는 어떤 component가 어느 module에 속하는지 결코 말하지
+않기 때문입니다. 규칙은 의도적으로 보수적입니다: **레코드 안의 모든 module 태그 항목에는
+서로 다른 토큰이 정확히 하나만 붙습니다; 0개나 2개 이상이면 stream 없이 남습니다** —
+stream 없는 module 경계는 D80의 matcher 가드를 통해 계속 시끄럽고, 결코 조용하지 않습니다.
+
+**실전**: 항목 21,540건이 stream을 답니다; 레코드 15건은 토큰 0개라서 stream 없이
+남습니다(측정으로 확인한 관례 위반자들 — "Moderate: go-toolset security update"); 96건은
+토큰 2개 이상이라서 그렇습니다(idm의 two-stream advisory 3건에다, 보수적 규칙이 추측을
+거부하는 서로 다른 module 두 개짜리 모양). store 발췌 확인: RLSA-2020:4641의 babel은
+`python38:3.8`을 담습니다; ALSA-2022:8832의 항목은 `nodejs:18`입니다. rockylinux:9 스캔은
+그대로입니다.
+
+**삼부작이 닫힙니다.** D80(스키마, cataloger, matcher, Red Hat: 항목 487,796건), D81
+(Oracle: gate 걸린 fix 17,930건, 모호성 −29.7%), D82(Rocky/Alma: 항목 21,540건) — 네
+피드가 표현할 수 있는 모든 module stream이 이제 matcher에 닿고, 표현할 수 없는 것은
+전부 세어지고 시끄럽습니다. 설계상 stream 없이 남는 것: SUSE(Fedora식 modularity가
+없음), Amazon(module stream 없음, D73에서 측정), 그리고 각 슬라이스가 이름 붙인
+잔여물(Oracle의 gate 없는 EVR 150개, 풀리지 않는 OSV 레코드 15+96건).
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

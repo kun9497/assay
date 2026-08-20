@@ -3235,6 +3235,33 @@ that mutation goes red.
 
 ---
 
+### D82 — Rocky and Alma's streams live in prose, so read the prose carefully
+
+**Decision.** The last stream source: Rocky/Alma OSV records carry the module stream ONLY
+in the record's `summary` (the RHSA title convention — "Moderate: python38:3.8 security
+update"), so the OSV provider extracts name:stream tokens from it — severity prefix
+stripped first, so "Important: idm:DL1 ..." yields idm:DL1 and a summary whose only colon
+pair IS the prefix yields nothing. Attribution is record-level, because affected names are
+module COMPONENTS (Judy under mariadb) and OSV never says which component belongs to which
+module. The rule is deliberately conservative: **exactly one distinct token attaches to
+every module-tagged entry in the record; zero or two-plus leave them stream-less** — and
+stream-less module bounds stay loud through D80's matcher guard, never silent.
+
+**Live**: 21,540 entries streamed; 15 records stream-less for zero tokens (the measured
+convention breakers — "Moderate: go-toolset security update"); 96 for two-plus tokens
+(the 3 idm two-stream advisories plus the two-different-modules shape the conservative
+rule refuses to guess about). Store spot-checks: RLSA-2020:4641's babel carries
+`python38:3.8`; ALSA-2022:8832's entry `nodejs:18`. rockylinux:9 scans unchanged.
+
+**The trilogy closes.** D80 (schema, cataloger, matcher, Red Hat: 487,796 entries),
+D81 (Oracle: 17,930 gated fixes, ambiguity −29.7%), D82 (Rocky/Alma: 21,540 entries) —
+every module stream the four feeds can express now reaches the matcher, and every one
+they cannot express is counted and loud. What remains stream-less by design: SUSE (no
+Fedora-modularity), Amazon (no module streams, measured in D73), and the residues each
+slice named (150 gate-less Oracle EVRs, 15+96 unresolvable OSV records).
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes
