@@ -442,6 +442,7 @@ func TestFamilyMatches_IsGeneralNotAName(t *testing.T) {
 		{"Debian", "Debian", true},
 		{"Ubuntu:24.04:LTS", "Ubuntu", true},   // whenever Ubuntu arrives, this already holds
 		{"Rocky Linux:9", "Rocky Linux", true}, // and again for Rocky Linux (D71)
+		{"AlmaLinux:9", "AlmaLinux", true},     // and again for AlmaLinux (D72)
 		{"Go", "Go", true},
 		// A family must not swallow a differently named one that starts the
 		// same way. Without the colon in the prefix test, "Debian" would match
@@ -453,6 +454,160 @@ func TestFamilyMatches_IsGeneralNotAName(t *testing.T) {
 	} {
 		if got := familyMatches(tc.ecosystem, tc.want); got != tc.match {
 			t.Errorf("familyMatches(%q, %q) = %v, want %v", tc.ecosystem, tc.want, got, tc.match)
+		}
+	}
+}
+
+// TestConvert_DropsBugfixAndEnhancementErrata pins ALBA and ALEA directly at
+// Convert, alongside TestConvert_DropsWithdrawn and TestConvert_DropsMalicious
+// above (same file, same pattern) -- TestFetch_AlmaLinuxDropsBugfixAndEnhance-
+// mentErrata in fetch_test.go already drove this through the caller (Fetch)
+// first; this is the narrower unit coverage for the two branches that test
+// cannot reach on its own (a mix that also names ALSA, so a single dropped
+// record cannot make the archive-level zero-records guard fire instead of
+// exercising the drop).
+func TestConvert_DropsBugfixAndEnhancementErrata(t *testing.T) {
+	for _, id := range []string{"ALBA-2026-0001", "ALEA-2026-0002"} {
+		rec := `{"id":"` + id + `","related":["CVE-2026-1"],` +
+			`"affected":[{"package":{"name":"bash","ecosystem":"AlmaLinux:9"},` +
+			`"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1"}]}]}]}`
+		_, ok, err := Convert([]byte(rec), "AlmaLinux")
+		if err != nil {
+			t.Fatalf("Convert(%s): %v", id, err)
+		}
+		if ok {
+			t.Errorf("%s was converted; ALBA and ALEA name no vulnerability and must be dropped (D72)", id)
+		}
+	}
+	// An ALSA record must NOT be caught by the same guard -- distinguishing
+	// "starts with ALSA" from "starts with AL" is the point.
+	const alsa = `{"id":"ALSA-2026-0003","related":["CVE-2026-1"],
+	  "affected":[{"package":{"name":"bash","ecosystem":"AlmaLinux:9"},
+	    "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1"}]}]}]}`
+	if _, ok, err := Convert([]byte(alsa), "AlmaLinux"); err != nil || !ok {
+		t.Errorf("ALSA record: ok=%v err=%v, want it kept -- only ALBA and ALEA are dropped", ok, err)
+	}
+}
+
+// TestConvert_RelatedIsScopedToDistroAuthoredRecords is D71 decision 1's own
+// hazard, pinned directly: a GHSA record's `related` names genuinely
+// different, merely similar advisories, and reading it as an alias would
+// fabricate a join between two distinct vulnerabilities. Without the scope, a
+// mutation that widened Related population to every record would pass every
+// other test in this package (nothing else asserts GHSA's Related is empty)
+// while silently starting to misjoin language-ecosystem records.
+func TestConvert_RelatedIsScopedToDistroAuthoredRecords(t *testing.T) {
+	const ghsa = `{"id":"GHSA-aaaa-bbbb-cccc","related":["GHSA-similar-but-different"],
+	  "affected":[{"package":{"name":"x","ecosystem":"Go"},
+	    "ranges":[{"type":"SEMVER","events":[{"introduced":"0"}]}]}]}`
+	got, ok, err := Convert([]byte(ghsa), "Go")
+	if err != nil || !ok {
+		t.Fatalf("Convert: ok=%v err=%v", ok, err)
+	}
+	if len(got.Related) != 0 {
+		t.Errorf("Related = %v, want empty -- GHSA's `related` names a DIFFERENT "+
+			"advisory, not an alias for this one", got.Related)
+	}
+
+	const alsa = `{"id":"ALSA-2026-0004","related":["CVE-2026-40004"],
+	  "affected":[{"package":{"name":"bash","ecosystem":"AlmaLinux:9"},
+	    "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1"}]}]}]}`
+	got, ok, err = Convert([]byte(alsa), "AlmaLinux")
+	if err != nil || !ok {
+		t.Fatalf("Convert: ok=%v err=%v", ok, err)
+	}
+	if len(got.Related) != 1 || got.Related[0] != "CVE-2026-40004" {
+		t.Errorf("Related = %v, want [CVE-2026-40004] -- ALSA IS distro-authored, "+
+			"and this is the only field carrying its CVE", got.Related)
+	}
+}
+
+// TestConvert_VendorSeverityWordOnlyWhenDistroAuthoredAndNoCVSS pins the two
+// guards on the VENDOR_WORD entry itself: it must not fire outside a
+// distro-authored record (a language-ecosystem summary starting with one of
+// the four words by coincidence must not be mistaken for a vendor rating),
+// and it must not fire when the record already carries a real CVSS vector
+// (D13: store what was published, and a record with a vector published one).
+func TestConvert_VendorSeverityWordOnlyWhenDistroAuthoredAndNoCVSS(t *testing.T) {
+	// A GHSA summary that happens to start with "Word:" -- the exact shape
+	// vendorSeverityWord's regex looks for -- must not gain a fabricated
+	// VENDOR_WORD rating just because the text matches. Without the colon
+	// after "Critical" this fixture would be rejected by the regex alone,
+	// regardless of whether the distroAuthored gate ran at all -- proven by
+	// mutation: replacing "distroAuthored(db)" with "true" left this test
+	// green when the summary read "Critical bug in a parser" (no colon).
+	const ghsa = `{"id":"GHSA-wordy","summary":"Critical: bug in a parser",
+	  "affected":[{"package":{"name":"x","ecosystem":"Go"},
+	    "ranges":[{"type":"SEMVER","events":[{"introduced":"0"}]}]}]}`
+	got, ok, err := Convert([]byte(ghsa), "Go")
+	if err != nil || !ok {
+		t.Fatalf("Convert: ok=%v err=%v", ok, err)
+	}
+	if len(got.Severity) != 0 {
+		t.Errorf("Severity = %+v, want empty -- GHSA is not distro-authored, so its "+
+			"summary's leading word must not become a rating", got.Severity)
+	}
+
+	// An ALSA record that already carries a real CVSS vector must not also
+	// gain a VENDOR_WORD entry alongside it.
+	const alsaWithCVSS = `{"id":"ALSA-2026-0005","summary":"Important: has a real vector too",
+	  "severity":[{"type":"CVSS_V3","score":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}],
+	  "affected":[{"package":{"name":"bash","ecosystem":"AlmaLinux:9"},
+	    "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1"}]}]}]}`
+	got, ok, err = Convert([]byte(alsaWithCVSS), "AlmaLinux")
+	if err != nil || !ok {
+		t.Fatalf("Convert: ok=%v err=%v", ok, err)
+	}
+	if len(got.Severity) != 1 || got.Severity[0].Type != "CVSS_V3" {
+		t.Errorf("Severity = %+v, want only the CVSS_V3 entry -- a record that HAS a "+
+			"vector must not also get a fabricated VENDOR_WORD one", got.Severity)
+	}
+
+	// An ALSA record with no severity and an unrecognized leading word gets
+	// no VENDOR_WORD entry either -- an unrecognized word is not guessed at.
+	const alsaUnrecognized = `{"id":"ALSA-2026-0006","summary":"Sev4: openssh update",
+	  "affected":[{"package":{"name":"bash","ecosystem":"AlmaLinux:9"},
+	    "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1"}]}]}]}`
+	got, ok, err = Convert([]byte(alsaUnrecognized), "AlmaLinux")
+	if err != nil || !ok {
+		t.Fatalf("Convert: ok=%v err=%v", ok, err)
+	}
+	if len(got.Severity) != 0 {
+		t.Errorf("Severity = %+v, want empty -- \"Sev4\" is not one of the four "+
+			"recognized words", got.Severity)
+	}
+
+	// The ordinary case: an ALSA record with no CVSS and a recognized word
+	// gets exactly one VENDOR_WORD entry carrying it.
+	const alsaWordOnly = `{"id":"ALSA-2026-0007","summary":"Moderate: openssh update",
+	  "affected":[{"package":{"name":"bash","ecosystem":"AlmaLinux:9"},
+	    "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1"}]}]}]}`
+	got, ok, err = Convert([]byte(alsaWordOnly), "AlmaLinux")
+	if err != nil || !ok {
+		t.Fatalf("Convert: ok=%v err=%v", ok, err)
+	}
+	if len(got.Severity) != 1 || got.Severity[0].Type != "VENDOR_WORD" || got.Severity[0].Score != "Moderate" {
+		t.Errorf("Severity = %+v, want one VENDOR_WORD entry scored \"Moderate\"", got.Severity)
+	}
+}
+
+// TestDistroAuthored is the classifier's own table -- adversarial on both
+// sides, since the scope guard above only exercises one row of each.
+func TestDistroAuthored(t *testing.T) {
+	for db, want := range map[string]bool{
+		"ALPINE": true, "DEBIAN": true, "UBUNTU": true, "RLSA": true,
+		"ALSA": true, "ALBA": true, "ALEA": true,
+		"GHSA": false, "PYSEC": false, "GO": false, "RUSTSEC": false,
+		"CVE": false, "BIT": false, "MAL": false, "": false,
+		// Adversarial: a namespace that merely starts with a distro one's
+		// letters must not match by accident (distroAuthored is a switch on
+		// the whole string, not a prefix test, but a mutation that changed
+		// it to strings.HasPrefix would pass every row above and only this
+		// one would catch it).
+		"ALSAX": false, "AL": false,
+	} {
+		if got := distroAuthored(db); got != want {
+			t.Errorf("distroAuthored(%q) = %v, want %v", db, got, want)
 		}
 	}
 }

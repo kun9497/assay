@@ -416,17 +416,23 @@ RHSA-2024:4312  CVE-2024-6387 (regreSSHion, 업스트림은 9.8p1에서 수정)
   `('CVE-2021-20291', 'buildah', '8')`은 `container-tools`의 두 스트림에서 온 fixed 버전 둘로
   풀립니다. 높은 쪽을 고르면 체계적 오탐이고 낮은 쪽을 고르면 미탐입니다.
 
-**~~AlmaLinux와 Rocky Linux는 더 쉬운 길이 아닙니다~~ — Rocky는 D71에서 해결됐고, AlmaLinux,
-Amazon Linux, Oracle Linux, Fedora, SLES는 여전히 열려 있습니다.** 둘 다 major 버전만으로 키를
-잡아 — 각 3개, `/etc/os-release`에서 유도 가능 — 실제로 더 단순했습니다. 당시에는 둘 다
-나머지를 못 넘겼습니다:
+**~~AlmaLinux와 Rocky Linux는 더 쉬운 길이 아닙니다~~ — 둘 다 해결됐습니다, Rocky는 D71에서
+AlmaLinux는 D72에서; Amazon Linux, Oracle Linux, Fedora, SLES는 여전히 열려 있습니다.** 둘 다
+major 버전만으로 키를 잡아 — 각 3개, `/etc/os-release`에서 유도 가능 — 실제로 더 단순했습니다.
+당시에는 Alma도 Rocky도 나머지를 못 넘겼습니다:
 
-- **AlmaLinux는 `aliases`도 `upstream`도 0개**입니다. 레코드 5,494개 전부에 대해서. 모든 CVE
+- ~~**AlmaLinux는 `aliases`도 `upstream`도 0개**입니다. 레코드 5,494개 전부에 대해서. 모든 CVE
   참조가 `related`에 있는데, OSV는 `related`를 alias가 *아니라고* 명시적으로 정의합니다. D3을
   쓰인 그대로 적용하면 AlmaLinux는 **CVE를 0개** 산출하고 D25 rating 조인도 0건입니다. 심각도
   데이터도 전혀 없어서(CVSS 커버리지 0%, Red Hat은 약 84%) D17 하에서 모든 Alma finding이
   `unknown`에 떨어지고 `--fail-on`을 절대 건드리지 못합니다. `related`를 읽는 것은 조인의 의미를
-  바꾸는 일이므로 그 자체가 별도 결정입니다.
+  바꾸는 일이므로 그 자체가 별도 결정입니다.~~ **D72에서 해결됐습니다**, 바로 이것을 위해 D71의
+  조사가 미리 마련해 둔 두 결정 위에서입니다: `related`이 CVE 읽기에 합류하되 배포판이 직접 쓴
+  레코드로 범위를 좁히고(2026-08-19 측정 5,606건, 전부 `related`을 통해 CVE에 닿음), 요약문의
+  맨 앞 심각도 단어("Important: openssh security update")를 `VENDOR_WORD` 심각도 항목으로
+  무손실 저장하고 `internal/severity`로 밴드화합니다 — Critical/Important/Moderate/Low, Alma
+  자신의 ALSA 요약문이 바이트 단위로 물려받은 RHSA 관례입니다. 둘 다 Alma 이전이 아니라 Alma와
+  함께 구현했습니다; Alma는 둘 중 하나라도 없이는 나갈 수 없었던 바로 그 레코드입니다.
 - ~~**Rocky Linux의 내보내기는 출시하기엔 너무 불완전합니다.**~~ Red Hat 런타임 패키지 집합 대비
   커버리지 중앙값 0.29, 공유 (CVE, major) 그룹의 83%가 런타임 패키지를 최소 하나 빠뜨리며,
   CVE-2023-38545에 `curl` 하나만 지목합니다(Red Hat과 Alma는 `curl`, `curl-minimal`,
@@ -435,9 +441,14 @@ Amazon Linux, Oracle Linux, Fedora, SLES는 여전히 열려 있습니다.** 둘
   `rockylinux:` 타깃은 이제 exit 2가 아니라 exit 0이지만, 그 판정은 "Rocky가 발행한 것에 한해
   깨끗함"으로 문서화되어 있지 그냥 깨끗함이 아닙니다.
 - Alma는 module 빌드를 `module_el8.5.0+119+9a9ec082`로 쓰고 Red Hat과 Rocky는
-  `module+el8.5.0+12582+56d94c81`로 씁니다. 그래서 Alma의 advisory 버전을 RHEL에 설치된
-  패키지와 비교해서는 안 됩니다. `elN` 릴리스 문자열이 아니라 `/etc/os-release`의 `ID`
-  (`rhel` / `almalinux` / `rocky`)로 경로를 가르는 것이 이를 막습니다.
+  `module+el8.5.0+12582+56d94c81`로 씁니다. AlmaLinux 자신을 매칭하는 데는 이제 더 이상
+  문제가 되지 않습니다 — D72는 `almalinux`를 Red Hat도 Rocky도 아닌 Alma 자신의 아카이브
+  (`AlmaLinux:N`)로 경로 잡으므로, 어떤 것도 Alma 버전을 다른 배포판의 advisory 버전과
+  비교하지 않습니다 — 다만 경로를 공유되는 `elN` 릴리스 문자열이 아니라 `/etc/os-release`의
+  `ID`(`rhel` / `almalinux` / `rocky`)로 가르는 이유는 여전히 그것이고, D71의 module-build
+  매치 시점 가드(RPM comparer로 게이트되지, ecosystem으로 게이트되지 않습니다)가 처음부터
+  두 철자를 모두 인식해야 했던 이유이기도 합니다: AlmaLinux 자신의 피드는 Rocky가
+  `module+el` 빌드를 담는 것과 똑같이 `module_el` 빌드를 담습니다.
 
 **해결됐습니다. 인벤토리는 ⓫(D43–D46), advisory 데이터는 ⓬(D47–D49), 매칭은 ⓭(D48, D50)에서
 났습니다** — `assay scan ubi9`이 이제 finding을 내고, `--fail-on-unfixable`이 아무것도 고칠 수
@@ -453,9 +464,9 @@ README의 슬라이스 ⑬ 참조.
 
 **여전히 보류.** 제2의 의견으로서의 OVAL v2(RHEL 5–9만 다루고 RHEL 10이 없어서 주 출처가 될 수
 없습니다), 위의 반대 이유(SLES는 이 문서 다른 곳의 ndb 항목)가 그대로이고 그래서 D50도 D71도
-경로를 주지 않는 AlmaLinux, Amazon Linux, Oracle Linux, Fedora, SLES, 그리고 EUS/AUS/E4S
+D72도 경로를 주지 않는 Amazon Linux, Oracle Linux, Fedora, SLES, 그리고 EUS/AUS/E4S
 발산을 공개하는 데서 끝내지 않고 닫는 것. 마지막 것은 어떤 이미지도 담고 있지 않은 채널 신호가
-필요합니다. Rocky Linux는 이 목록에서 빠졌습니다 — D71 참조.
+필요합니다. Rocky Linux와 AlmaLinux는 이 목록에서 빠졌습니다 — D71과 D72 참조.
 
 **이 조사가 만들어낸 다섯 결정은 이제 D71에 있습니다**, 여기가 아니라 — 다음 배포판 슬라이스들이
 그것들을 재사용하기 때문입니다: 배포판이 직접 쓴 레코드로 범위를 좁혀 CVE 조인에 `related`를
@@ -464,7 +475,8 @@ stream-match하는 대신 세어서 버리는 것, OSV가 있는 곳에서는 OS
 SLES는 여전히 `ndb` 뒤에 남는 것 — 다만 위에서 `ndb` 자체를 미룬 근거로 적어 둔 것은 더 이상
 유효하지 않습니다. 오늘날 최신 SLES/BCI 이미지는 advisory 문제와 무관하게 독립적으로 측정해도
 아예 카탈로그할 수 없습니다. SUSE 계열 커버리지를 `ndb`를 쓰기 전에 먼저 원한다면 openSUSE
-Leap이 깨끗한 부분집합입니다.
+Leap이 깨끗한 부분집합입니다. D72(AlmaLinux)가 이 다섯 중 앞의 둘을 실제로 쓴 첫
+슬라이스입니다 — 로드맵의 D72를 참조하십시오.
 
 ---
 

@@ -15,17 +15,21 @@ import (
 // and count it, rather than treating an unrated finding as an absent one.
 var ErrUnscorable = errors.New("unscorable severity vector")
 
-// Of scores one CVSS vector and returns its band.
+// Of scores one severity value and returns its band — ordinarily a CVSS
+// vector, or (D72) a distro's own severity WORD when the record carries no
+// CVSS vector at all.
 //
-// It takes the vector and nothing else. The record's own declared type is not
+// It takes the value and nothing else. The record's own declared type is not
 // a parameter because it is not reliable: one advisory in the live database
 // files a `CVSS:3.1/...` vector under `CVSS_V4`. Dispatching on the label
 // would hand that vector to the wrong scorer, and there is no arrangement of
 // the two scorers under which that produces an error rather than a plausible
 // wrong number. The version inside the vector is the only trustworthy source,
-// so it is the only one consulted.
+// so it is the only one consulted — and a vendor word needs no such label
+// either: it cannot collide with a CVSS vector's own "CVSS:3."/"CVSS:4."
+// prefix, so content alone still disambiguates.
 //
-// An unscorable vector is (Unknown, 0, error). It is never a band: guessing
+// An unscorable value is (Unknown, 0, error). It is never a band: guessing
 // is the same failure as coercing absent severity to low (D17), and the
 // caller needs to count it, which it cannot do if the guess looks like data.
 func Of(vector string) (Band, float64, error) {
@@ -39,12 +43,43 @@ func Of(vector string) (Band, float64, error) {
 	case strings.HasPrefix(vector, "CVSS:4."):
 		score, err = scoreV4(vector)
 	default:
+		// D72: AlmaLinux's ALSA records carry no CVSS vector anywhere in the
+		// archive (measured 2026-08-19: 0%) — their only severity signal is
+		// the vendor's own word, lifted from the summary's leading
+		// "Word:" prefix at ingestion (osv.Convert) into a VENDOR_WORD
+		// severity entry whose Score is the bare word rather than a vector.
+		if vw, ok := vendorSeverityWords[vector]; ok {
+			return vw.band, vw.score, nil
+		}
 		return Unknown, 0, fmt.Errorf("%w: %q is not a version this scores", ErrUnscorable, vector)
 	}
 	if err != nil {
 		return Unknown, 0, err
 	}
 	return bandOf(score), score, nil
+}
+
+// vendorSeverityWords maps a distro's declared severity WORD to a band and a
+// representative score matching bandOf's own boundaries, so a word-derived
+// rating sits in the same ordering as a CVSS-derived one (severity.Highest
+// compares scores across a mix of both) instead of comparing as a different
+// kind of value.
+//
+// The mapping is the RHSA convention — Critical, Important, Moderate, Low —
+// which AlmaLinux's ALSA summaries inherit byte-for-byte (D72). A word not in
+// this table is left unrecognized rather than guessed at: Of's default branch
+// then reports it unscorable, and severity.Highest skips it exactly as it
+// skips a garbled CVSS vector, landing on Unknown rather than a fabricated
+// band (D17) — coercing an unexpected spelling to Low would hide whatever the
+// vendor actually asserted behind a silent misclassification.
+var vendorSeverityWords = map[string]struct {
+	band  Band
+	score float64
+}{
+	"Critical":  {Critical, 9.0},
+	"Important": {High, 7.0},
+	"Moderate":  {Medium, 4.0},
+	"Low":       {Low, 0.1},
 }
 
 // Highest returns the worst band across a record's vectors, and that band's

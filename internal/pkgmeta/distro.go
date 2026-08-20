@@ -111,12 +111,6 @@ func (d Distro) Ecosystem() (string, error) {
 		// The other RPM distributions are NOT routed here, and each is a
 		// different reason rather than one blanket caution:
 		//
-		//   - almalinux: a rebuild, but not a byte-identical one. It writes
-		//     module builds as `module_el8.5.0+119+9a9ec082` where Red Hat
-		//     writes `module+el8.5.0+12582+56d94c81`, and its own rebuilds
-		//     carry `.alma` release suffixes. Comparing Alma's installed
-		//     versions against Red Hat's advisory versions is the hazard
-		//     docs/deferred-decisions.md records.
 		//   - centos: the ID covers CentOS Linux, which trailed RHEL, AND
 		//     CentOS Stream, which runs AHEAD of it. A fixed version that has
 		//     not reached RHEL yet is already in Stream, so the same key would
@@ -124,10 +118,16 @@ func (d Distro) Ecosystem() (string, error) {
 		//   - fedora, amzn: different version schemes and their own advisory
 		//     feeds (FEDORA-*, ALAS-*). Red Hat's errata do not describe them.
 		//
-		// Rocky left this list under D71 below: it has its own OSV archive
-		// now, so it no longer needs (or wants) Red Hat's errata routed at it
-		// — the byte-identity hazard above never applied to Rocky's own data
-		// the way it does to Alma's.
+		// Rocky left this list under D71 below, and AlmaLinux under D72: each
+		// has its own OSV archive now, so neither needs (or wants) Red Hat's
+		// errata routed at it — module builds spelled `module_el` versus Red
+		// Hat's `module+el`, and Alma's own `.alma` release suffixes, were
+		// the hazard of matching Alma's installed versions against RED HAT's
+		// advisory versions (docs/deferred-decisions.md still records that
+		// hazard, for anyone tempted to route Alma at Red Hat's feed instead
+		// of its own). Matching Alma's installed versions against Alma's OWN
+		// advisory versions has no such hazard: both sides come from the same
+		// build.
 		//
 		// Every one of those still reaches the cataloger and is reported as
 		// not evaluated, so an unrouted distro is a loud skip and never a
@@ -155,9 +155,10 @@ func (d Distro) Ecosystem() (string, error) {
 		// "Rocky Linux:10") and /etc/os-release's VERSION_ID ("9.4") needs
 		// the same truncation D47 already applies to Red Hat's.
 		//
-		// AlmaLinux stays unrouted (D50) until its own feed lands: it has no
-		// archive of its own ingested yet, and its `related`-only CVE
-		// linkage and 0% CVSS coverage are hazards this routing does not fix.
+		// AlmaLinux left D50's not-evaluated list too, under D72 below —
+		// see that case for what made ITS feed usable (0% CVSS, CVE only in
+		// `related`), which is a different set of hazards than Rocky's own
+		// feed ever had (84.1% native CVSS v3, CVE via `upstream`).
 		if d.VersionID == "" {
 			return "", fmt.Errorf("%w: distro %q has no VERSION_ID", ErrNoEcosystem, d.ID)
 		}
@@ -167,6 +168,35 @@ func (d Distro) Ecosystem() (string, error) {
 				ErrNoEcosystem, d.ID, d.VersionID)
 		}
 		return "Rocky Linux:" + major, nil
+	case "almalinux":
+		// D72. AlmaLinux ingests from its OWN OSV archive ("AlmaLinux/all.zip",
+		// measured 2026-08-19), not Red Hat's CSAF feed — the same move D71
+		// made for Rocky, and for the same reason: an archive of Alma's own
+		// builds carries no byte-identity hazard against Alma's own installed
+		// versions, unlike matching Alma against Red Hat's errata (the "rhel"
+		// case above).
+		//
+		// What made Alma's OWN feed usable took two of D71's five decisions,
+		// neither of which Rocky needed: the archive carries 0% CVSS anywhere
+		// (severity exists only as the summary's leading word, stored as a
+		// VENDOR_WORD severity entry and banded by internal/severity), and
+		// every CVE lives ONLY in `related` (aliases and upstream are empty
+		// on every record) — read here because osv.distroAuthored scopes that
+		// read to distro-authored namespaces, so a GHSA record's unrelated
+		// `related` entries are never mistaken for aliases.
+		//
+		// The key is release-qualified at the major for the same reason as
+		// Rocky's: the archive's own ecosystem keys carry it ("AlmaLinux:9"),
+		// and /etc/os-release's VERSION_ID ("9.6") needs the same truncation.
+		if d.VersionID == "" {
+			return "", fmt.Errorf("%w: distro %q has no VERSION_ID", ErrNoEcosystem, d.ID)
+		}
+		major, _, _ := strings.Cut(d.VersionID, ".")
+		if !allDigits(major) {
+			return "", fmt.Errorf("%w: distro %q version %q is not a numbered release",
+				ErrNoEcosystem, d.ID, d.VersionID)
+		}
+		return "AlmaLinux:" + major, nil
 	default:
 		return "", fmt.Errorf("%w: distro %q is not supported yet", ErrNoEcosystem, d.ID)
 	}

@@ -925,17 +925,25 @@ func absorb(findings []Finding, group map[string]int, dst, src int) {
 }
 
 // lookupIDs is every name a record answers to, for display and lookup rather
-// than for grouping — so unlike identifiers() it includes upstream (D3).
+// than for grouping — so unlike identifiers() it includes upstream (D3) and,
+// since D72, related (D71 decision 1).
 //
 // Which field carries the CVE depends on the ecosystem, and the two measured
 // cases are exact mirror images: on the live Go dump all 8,510 records have an
 // empty upstream and carry the CVE in aliases, while on the live Alpine dump
-// all 4,405 have an empty aliases and carry it in upstream.
+// all 4,405 have an empty aliases and carry it in upstream. AlmaLinux is a
+// third shape entirely — both aliases and upstream empty, the CVE ONLY in
+// related — which Related is safe to append here unconditionally: it is
+// populated on the advisory in the first place only for distro-authored
+// records (osv.distroAuthored's own comment explains why a global read is
+// rejected), so a language-ecosystem record's genuinely-different `related`
+// advisories never reach this field at all.
 func lookupIDs(a advisory.Advisory) []string {
-	out := make([]string, 0, 1+len(a.Aliases)+len(a.Upstream))
+	out := make([]string, 0, 1+len(a.Aliases)+len(a.Upstream)+len(a.Related))
 	out = append(out, a.ID)
 	out = append(out, a.Aliases...)
-	return append(out, a.Upstream...)
+	out = append(out, a.Upstream...)
+	return append(out, a.Related...)
 }
 
 // dedupSorted sorts and removes blanks and repeats. Two records describing one
@@ -969,10 +977,12 @@ func winnerOf(f Finding) Rating {
 	}
 }
 
-// vectorsOf unwraps the CVSS vector strings carried on an advisory. It does
-// no picking of its own — severity.Highest already skips what does not score
+// vectorsOf unwraps the severity values carried on an advisory — ordinarily
+// CVSS vectors, or (D72) a distro's own severity WORD when a record has no
+// CVSS vector at all (severity.Of recognizes both by content). It does no
+// picking of its own — severity.Highest already skips what does not score
 // and takes the worst of what does — this only exists because Advisory.Severity
-// is a slice of (type, vector) pairs and Highest wants the vectors alone.
+// is a slice of (type, value) pairs and Highest wants the values alone.
 func vectorsOf(a advisory.Advisory) []string {
 	vectors := make([]string, 0, len(a.Severity))
 	for _, s := range a.Severity {
