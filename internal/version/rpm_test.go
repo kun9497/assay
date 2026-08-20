@@ -282,6 +282,11 @@ func TestRPM_Routing(t *testing.T) {
 		"Rocky Linux:8", "Rocky Linux:9", "Rocky Linux:10",
 		// AlmaLinux left this list under D72, for the same reason.
 		"AlmaLinux:8", "AlmaLinux:9", "AlmaLinux:10",
+		// Oracle Linux left this list under D74, for the same reason: its
+		// own OVAL archive is release-qualified the same way, and an
+		// Oracle rebuild's own release suffixes (elNuek, .ksplice1.) are
+		// still ordinary rpmvercmp separators.
+		"Oracle Linux:8", "Oracle Linux:9", "Oracle Linux:10",
 	} {
 		c, ok := For(eco)
 		if !ok {
@@ -304,6 +309,9 @@ func TestRPM_Routing(t *testing.T) {
 	}
 	if _, ok := For("AlmaLinux"); ok {
 		t.Error(`For("AlmaLinux") resolves; the provider only ever writes "AlmaLinux:<major>"`)
+	}
+	if _, ok := For("Oracle Linux"); ok {
+		t.Error(`For("Oracle Linux") resolves; the provider only ever writes "Oracle Linux:<major>"`)
 	}
 	// And the rest still do not: Red Hat's errata describe Red Hat's own
 	// builds (D50), Rocky's own feed is ingested only under "Rocky Linux:N"

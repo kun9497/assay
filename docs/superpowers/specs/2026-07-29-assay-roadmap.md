@@ -2927,6 +2927,34 @@ by construction, noted in the package doc rather than tested against nothing.
 
 ---
 
+### D74 — Oracle Linux, and the first OVAL parser
+
+**Decision.** Oracle Linux 5–10 are ingested from Oracle's ELSA OVAL feed
+(com.oracle.elsa-all.xml.bz2, spooled per D64, streamed through stdlib bzip2+xml): the
+criteria tree (AND/OR over rpminfo tests) is walked per major, one Advisory per
+(ELSA, major) under keys `Oracle Linux:<major>`. `ID=ol` routes; `ORACLE_ENABLE` on by
+default. 9,796 definitions, the richest severity data of the family: CVSS v3 vectors parsed
+natively, the vendor word stored beside them (D71 decision 2, both arms).
+
+**The v2 decision.** 8.8k pre-2016 definitions carry CVSS v2 only. A v2 parser was
+considered and rejected: their band comes from the NVD join via the CVE in `Related` —
+the same fallback arm decision 2 already names, and one less scoring implementation to
+keep faithful.
+
+**The UEK guard is cross-definition, corrected from the design.** The brief assumed the
+multi-train ambiguity lives inside one definition's criteria; measured against the real
+archive it does not — three separate ELSAs fix the same CVE's `kernel-uek` at three
+different EVRs for one major. The guard therefore indexes (CVE, major, package) across the
+whole corpus and drops-and-counts collisions: matching a version against the wrong kernel
+train is wrong in both directions, and 857 OL8 / 817 OL9 groups collide. Module-stream
+conflicts fall out of the same guard for free.
+
+**Disclosed, not fixed here:** ksplice- and FIPS-lineage packages are not filtered — the
+Ubuntu-D53-shaped hazard, recorded in the package doc and this entry as the follow-up
+decision Oracle still owes.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

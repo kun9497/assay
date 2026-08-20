@@ -546,6 +546,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] Amazon Linux 2/2023을 자기 updateinfo 저장소에서 (D73) — Red Hat 이후 첫 non-OSV
       advisory provider; Medium/대소문자 표기 차이를 측정해 매핑; extras는 못 가져왔다고
       공개
+- [x] Oracle Linux 5-10을 ELSA OVAL에서 (D74) — 첫 OVAL criteria-tree 파서; UEK의
+      definition을 가로지르는 모호성은 버려서 셈; v2뿐인 definition은 NVD 조인으로 떨어짐;
+      ksplice/FIPS 계보는 거르지 않았다고 공개
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건
@@ -747,10 +750,11 @@ none = no source records a version that fixes this; mitigate or remove the packa
 
 `Red Hat:N`으로 가는 것은 `rhel`뿐입니다(D50); Rocky Linux는 `Rocky Linux:N`으로(D71),
 AlmaLinux는 `AlmaLinux:N`으로(D72), Amazon Linux 2/2023은 `Amazon Linux:2` /
-`Amazon Linux:2023`으로(D73) 갑니다 — 각자 자기만의 advisory 피드만 상대하지, Red Hat의 것도
-서로의 것도 상대하지 않습니다. `centos`는 RHEL을 뒤따른 제품과 앞서 가는 제품을 한 ID로
-덮으며, Fedora는 여전히 자기 피드가 있습니다 — Fedora는 Amazon Linux 1, AL2022와 함께 여전히
-카탈로그되고 평가되지 않음으로 보고됩니다. 시끄러운 skip이지 깨끗한 판정이 아닙니다.
+`Amazon Linux:2023`으로(D73), Oracle Linux 5–10은 `Oracle Linux:<major>`로(D74) 갑니다 —
+각자 자기만의 advisory 피드만 상대하지, Red Hat의 것도 서로의 것도 상대하지 않습니다.
+`centos`는 RHEL을 뒤따른 제품과 앞서 가는 제품을 한 ID로 덮으며, Fedora는 여전히 자기
+피드가 있습니다 — Fedora는 Amazon Linux 1, AL2022와 함께 여전히 카탈로그되고 평가되지
+않음으로 보고됩니다. 시끄러운 skip이지 깨끗한 판정이 아닙니다.
 
 Rocky의 판정은 Rocky가 발행한 것에 한해 깨끗하다는 뜻입니다: 그 피드는 errata뿐이고 RHSA보다
 얇게 측정되며(regreSSHion 권고가 아예 없습니다), module 빌드로 얻는 fix는 stream까지 매칭하지

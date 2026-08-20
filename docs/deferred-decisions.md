@@ -459,9 +459,9 @@ rpm's own read-only BerkeleyDB backend 850 lines of C is dead weight.
   streams of `container-tools`; taking the higher is a systematic false positive and taking the
   lower is a false negative.
 
-**~~AlmaLinux and Rocky Linux are not the easier path~~ — all three now resolved: Rocky in
-D71, AlmaLinux in D72, and Amazon Linux 2/2023 in D73; Oracle Linux, Fedora and SLES remain
-open.** Both keyed on the major version only — three keys each, derivable from
+**~~AlmaLinux and Rocky Linux are not the easier path~~ — four now resolved: Rocky in D71,
+AlmaLinux in D72, Amazon Linux 2/2023 in D73, and Oracle Linux 5–10 in D74; Fedora and SLES
+remain open.** Both keyed on the major version only — three keys each, derivable from
 `/etc/os-release` — which is genuinely simpler. Neither Alma nor Rocky survived the rest, at
 the time:
 
@@ -507,11 +507,22 @@ consumer supplying VEX to suppress findings, this one is about a vendor publishi
 affectedness.
 
 **Still deferred.** OVAL v2 as a second opinion (it covers RHEL 5–9 and has no RHEL 10, so it
-could never be the primary source); Oracle Linux, Fedora and SLES, whose objections above (or,
-for SLES, the ndb entry elsewhere in this document) are unchanged and which none of D50, D71,
-D72 or D73 routes; and closing the EUS/AUS/E4S divergence rather than disclosing it, which
-needs a channel signal no image carries. Rocky Linux, AlmaLinux and Amazon Linux are off this
-list — see D71, D72 and D73.
+could never be the primary source); Fedora and SLES, whose objections above (or, for SLES,
+the ndb entry elsewhere in this document) are unchanged and which none of D50, D71, D72, D73
+or D74 routes; and closing the EUS/AUS/E4S divergence rather than disclosing it, which needs
+a channel signal no image carries. Rocky Linux, AlmaLinux, Amazon Linux and Oracle Linux are
+off this list — see D71, D72, D73 and D74.
+
+**Oracle Linux itself still owes one decision.** D74 disclosed rather than filtered:
+ksplice- and FIPS-lineage packages are not distinguished from mainline ones, the same
+  Measured at first ingestion: the cross-definition UEK/module guard dropped 43,123
+  affected entries (169,585 ambiguous (CVE, major, package) groups) -- far above the
+  research's ~1,700-group estimate, because Oracle re-fixes the same CVE+package across
+  successive ELSAs. Conservative direction (no wrong-train match), but the false-negative
+  cost is the follow-up's real question: train-aware matching, or keeping the earliest fix.
+Ubuntu-D53-shaped hazard, so `oraclelinux:` verdicts on those lineages carry mainline
+advisories that may not apply. Follow-up, not blocking — recorded here and in D74 rather
+than only in the package doc.
 
 **The five decisions this research forced now live in D71**, not here, because the next
 distro slices reuse them: reading `related` for CVE joins, scoped to distro-authored records;

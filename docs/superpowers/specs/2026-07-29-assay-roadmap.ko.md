@@ -2709,6 +2709,33 @@ provider가 저장 전에 대소문자를 정규화합니다(심각도 맵은 �
 
 ---
 
+### D74 — Oracle Linux, 그리고 첫 OVAL 파서
+
+**결정.** Oracle Linux 5–10을 Oracle의 ELSA OVAL 피드에서 수집합니다
+(com.oracle.elsa-all.xml.bz2, D64에 따라 스풀하고, stdlib의 bzip2+xml로 스트리밍합니다): criteria
+트리(rpminfo 테스트에 대한 AND/OR)를 major별로 훑어, (ELSA, major) 하나당 Advisory 하나를
+`Oracle Linux:<major>` 키 아래 둡니다. `ID=ol`이 경로를 잡고; `ORACLE_ENABLE`은 기본으로
+켜져 있습니다. definition 9,796개로, 이 계열에서 가장 풍부한 심각도 데이터입니다: CVSS v3
+벡터를 네이티브로 파싱하고, 벤더 단어를 그 옆에 저장합니다(D71 결정 2, 양쪽 팔 다).
+
+**v2 결정.** 2016년 이전 definition 8,800개는 CVSS v2만 담고 있습니다. v2 파서를 검토했고
+기각했습니다: 그 밴드는 `Related`에 담긴 CVE를 거쳐 NVD 조인에서 옵니다 — 결정 2가 이미
+이름 붙인 바로 그 대체 팔이고, 충실하게 유지해야 할 스코어링 구현이 하나 줄어드는 셈입니다.
+
+**UEK 가드는 definition을 가로지르며, 설계에서 수정됐습니다.** 애초 구상은 멀티 트레인 모호성이
+definition 하나의 criteria 안에 산다고 가정했습니다; 실제 아카이브로 측정해 보니 그렇지
+않습니다 — 서로 다른 ELSA 세 개가 같은 CVE의 `kernel-uek`를 한 major에 대해 서로 다른 EVR
+세 개로 고칩니다. 그래서 가드는 전체 코퍼스를 가로질러 (CVE, major, package)로 색인하고
+충돌을 버려서 셉니다: 버전을 잘못된 커널 트레인에 대고 매칭하면 양쪽 방향 모두 틀리고, OL8
+그룹 857개 / OL9 그룹 817개가 충돌합니다. module-stream 충돌도 같은 가드에서 공짜로
+딸려 나옵니다.
+
+**여기서 공개할 뿐, 고치지는 않습니다:** ksplice 계보와 FIPS 계보 패키지는 걸러내지 않습니다 —
+Ubuntu의 D53 모양과 같은 위험이고, 패키지 문서와 이 항목에 Oracle이 여전히 갚아야 할 후속
+결정으로 기록해 둡니다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

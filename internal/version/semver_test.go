@@ -279,6 +279,10 @@ func TestNoUnbackedDistroComparer(t *testing.T) {
 	// (internal/provider/amazon) is what arrived, and D8 source indirection
 	// is not even needed for it (updateinfo enumerates binary package names
 	// directly, so no by-source lookup is on the critical path at all).
+	// Oracle Linux left it under D74, for the identical reason again — its
+	// own OVAL provider (internal/provider/oracle) is what arrived, and D8
+	// source indirection is not needed for it either: the feed names every
+	// package by its binary name, so LookupBySource sits idle here too.
 	for _, eco := range []string{
 		"Alpine",       // unversioned: not a key we ever build (D6)
 		"Debian",       // likewise
@@ -286,6 +290,7 @@ func TestNoUnbackedDistroComparer(t *testing.T) {
 		"Rocky Linux",  // likewise -- the provider writes "Rocky Linux:9"
 		"AlmaLinux",    // likewise -- the provider writes "AlmaLinux:9"
 		"Amazon Linux", // likewise -- the provider writes "Amazon Linux:2"
+		"Oracle Linux", // likewise -- the provider writes "Oracle Linux:9"
 	} {
 		if _, ok := For(eco); ok {
 			t.Errorf("For(%q) resolves, but nothing populates Package.Source for it. "+

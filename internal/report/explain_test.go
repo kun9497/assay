@@ -343,6 +343,7 @@ func TestComparerName_ExactNamePerEcosystem(t *testing.T) {
 		{"AlmaLinux:9", "rpm"},       // D72
 		{"Amazon Linux:2", "rpm"},    // D73
 		{"Amazon Linux:2023", "rpm"}, // D73
+		{"Oracle Linux:9", "rpm"},    // D74
 		{"bogus-eco", "unknown"},
 	} {
 		if got := comparerName(tt.ecosystem); got != tt.want {
@@ -584,12 +585,13 @@ func TestComparerName_AgreesWithVersionFor(t *testing.T) {
 		"Rocky Linux:8", "Rocky Linux:9", "Rocky Linux:10",
 		"AlmaLinux:8", "AlmaLinux:9", "AlmaLinux:10",
 		"Amazon Linux:2", "Amazon Linux:2023",
+		"Oracle Linux:8", "Oracle Linux:9", "Oracle Linux:10",
 		// Bare family names and empty releases resolve nowhere, by D6:
 		// letting one through would make a bug that dropped the release
 		// look like it worked.
-		"Alpine:", "Debian:", "Red Hat:", "Rocky Linux:", "AlmaLinux:", "Amazon Linux:",
+		"Alpine:", "Debian:", "Red Hat:", "Rocky Linux:", "AlmaLinux:", "Amazon Linux:", "Oracle Linux:",
 		"Ubuntu:", "Ubuntu:Pro:22.04:LTS", "Ubuntu:Pro:FIPS-updates:18.04:LTS",
-		"Alpine", "Debian", "Red Hat", "Rocky Linux", "AlmaLinux", "Amazon Linux", "bogus-eco",
+		"Alpine", "Debian", "Red Hat", "Rocky Linux", "AlmaLinux", "Amazon Linux", "Oracle Linux", "bogus-eco",
 	} {
 		_, ok := version.For(eco)
 		name := comparerName(eco)
