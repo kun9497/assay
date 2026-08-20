@@ -27,15 +27,14 @@ import (
 // nothing new.
 
 // rawDefinitionXML is the subset of one <definition> this provider reads.
-// Only rpminfo_test/_object/_state are ever joined against (see
-// classifyCriterion) -- a module-gate criterion's test_ref points at a
-// textfilecontent54_test, which this parser never builds a map for, so it
-// falls through as informational rather than being specially excluded. That
-// is deliberate: Oracle's real module ambiguity (two streams of one module
-// fixing the same package at two different versions within one definition)
-// is not filtered by name, it is caught the same way the UEK trains are --
-// as two distinct fixed EVRs for one package under one key, which
-// dropAmbiguous below drops regardless of what gated either branch.
+// rpminfo_test/_object/_state are joined against for platform-major and
+// package-fix facts (see classifyCriterion); textfilecontent54_test/_object/
+// _state are joined against separately (D81, moduleGateStream) for the
+// "Module X:Y is enabled" gates that scope a fix to one RPM module stream --
+// a second, parallel join over the same tests/objects/states pools, keyed by
+// a disjoint set of ids and never confused with the rpminfo ones because
+// classifyCriterion and moduleGateStream each look the test_ref up in their
+// own map only.
 type rawDefinitionXML struct {
 	Metadata struct {
 		Title      string `xml:"title"`
@@ -57,25 +56,39 @@ type rawDefinitionXML struct {
 // rawCriteria is one node of the AND/OR tree. Operator is read but never
 // branches this parser's walk: an OR node's alternatives (two arches, two
 // module streams, two kernel-uek trains) legitimately contribute the SAME
-// fact when they agree and a genuinely DIFFERENT one when they do not, and
-// "different fact for the same package under the same key" is exactly the
-// signal dropAmbiguous exists to catch. Treating AND and OR alike is what
-// makes that catch general rather than special-cased to kernel-uek by name.
+// fact when they agree and a genuinely DIFFERENT one when they do not.
+// Before D81, "different fact for the same package under the same key" was
+// always the signal dropAmbiguous exists to catch, module streams included.
+// D81 narrows that for streams specifically: two streams' fixes are no
+// longer a collision at all (they are stored as separate Affected entries,
+// each scoped to its own stream), so dropAmbiguous's guard now only fires
+// within one stream, or across facts this parser still cannot tell apart
+// (kernel-uek's trains, arch disagreements that are actually errors). AND
+// and OR are still treated alike for reaching that guard -- module streams
+// just resolve cleanly before it runs, rather than being caught by it.
 type rawCriteria struct {
 	Operator  string         `xml:"operator,attr"`
 	Criterion []rawCriterion `xml:"criterion"`
 	Criteria  []rawCriteria  `xml:"criteria"`
 }
 
+// rawCriterion carries its own comment text (D81) alongside the test_ref
+// every criterion already had. Comment is read for every criterion, not
+// just module gates -- there is no cheap way to know in advance which
+// criterion is a gate before resolving test_ref against the textfilecontent54
+// pool -- but it is only ever LOOKED at for the ones moduleGateStream
+// resolves as a gate; an arch or platform criterion's comment is decoded and
+// ignored, same as its unread structured fields already are.
 type rawCriterion struct {
 	TestRef string `xml:"test_ref,attr"`
+	Comment string `xml:"comment,attr"`
 }
 
 // rawTest is one <rpminfo_test>. Every other test type in the archive
-// (textfilecontent54_test for "Module X is enabled", family_test, ...) is
-// read as plain tokens and never reaches this struct, so a criterion
-// referencing one simply fails the map lookup in classifyCriterion and is
-// treated as informational.
+// (family_test, ...) besides rpminfo_test and textfilecontent54_test (D81)
+// is read as plain tokens and never reaches a struct at all, so a criterion
+// referencing one simply fails both maps' lookups and is treated as
+// informational.
 type rawTest struct {
 	ID     string `xml:"id,attr"`
 	Object struct {
@@ -97,9 +110,11 @@ type rawObjectXML struct {
 // fixed-EVR test (<evr>, "is earlier than"), an arch test (<arch>) and a
 // signing test (<signature_keyid>) -- there is no other structural marker,
 // and Oracle's own criterion COMMENT text ("... is earlier than ...") is
-// deliberately not what this parser reads: the design calls for a real join
-// against tests/objects/states, not a regex over prose that happens to be
-// present today.
+// deliberately not what this parser reads for THESE facts: the design calls
+// for a real join against tests/objects/states, not a regex over prose that
+// happens to be present today. Module gates are the one place a comment IS
+// read (D81, moduleGateStream) -- and even there only as a cross-check
+// against the same structural join, never as the sole source.
 type rawState struct {
 	ID      string      `xml:"id,attr"`
 	Version *rawOpValue `xml:"version"`
@@ -117,12 +132,55 @@ type rawGenerator struct {
 	Timestamp string `xml:"timestamp"`
 }
 
+// rawTFC54Test is one <textfilecontent54_test> -- the OVAL shape a "Module
+// X:Y is enabled" gate takes (D81). It carries the same object_ref/state_ref
+// join shape as rawTest, but is indexed separately (tfcTests, not tests) so
+// a criterion's test_ref is checked against exactly one of the two pools:
+// classifyCriterion never sees a module gate, and moduleGateStream never
+// sees a platform/package/arch test. Both structural halves of the gate ride
+// on this join: the object's filepath names the module ("/etc/dnf/modules.d/
+// nodejs.module"), the state's pattern-match text carries the stream
+// ("stream\s*=\s*24\b...").
+type rawTFC54Test struct {
+	ID     string `xml:"id,attr"`
+	Object struct {
+		Ref string `xml:"object_ref,attr"`
+	} `xml:"object"`
+	State struct {
+		Ref string `xml:"state_ref,attr"`
+	} `xml:"state"`
+}
+
+// rawTFC54Object is one <textfilecontent54_object>. Only Filepath is read --
+// datatype, pattern and instance siblings exist in the real archive but name
+// nothing this provider needs (D81 measured every one of the 763 gates'
+// filepath basenames agreeing with its own comment's module name).
+type rawTFC54Object struct {
+	ID       string `xml:"id,attr"`
+	Filepath string `xml:"filepath"`
+}
+
+// rawTFC54State is one <textfilecontent54_state>. Text is the state's own
+// pattern-match value -- a regex the real OVAL engine evaluates against the
+// module file's contents, spelled out as a literal string here (its own
+// backslashes are ordinary characters in this struct field, not Go escapes;
+// they only mean anything as regex syntax to moduleStreamFromStateText,
+// which is the only reader of this field).
+type rawTFC54State struct {
+	ID   string `xml:"id,attr"`
+	Text string `xml:"text"`
+}
+
 // resolvedDef is one <definition>'s metadata plus the result of walking its
 // criteria tree: which package is fixed at which EVR, under which Oracle
-// Linux major. perMajor[major][pkgName] is a SET rather than a single string
-// because the whole point of building it this way is to let more than one
-// distinct EVR land there when the data disagrees with itself -- that set's
-// size is what dropAmbiguous inspects.
+// Linux major and (D81) which module stream, if any.
+// perMajor[major][pkgName][moduleStream] is a SET of EVRs, not a single
+// string, for the same reason it always was -- letting more than one
+// distinct EVR land there is what lets dropAmbiguous see a genuine
+// disagreement. moduleStream is "" for an ordinary, non-modular fix; D81
+// adds this fourth level so two DIFFERENT streams of one module fixing the
+// same package under the same major are two separate sets rather than one
+// set dropAmbiguous would see as self-contradictory.
 type resolvedDef struct {
 	id           string // "ELSA-2026-55857" or "ELBA-..."
 	database     string // "ELSA" or "ELBA" (databaseOf(id))
@@ -130,7 +188,7 @@ type resolvedDef struct {
 	cves         []string          // Related, deduped, first-seen order
 	cvssByCVE    map[string]string // CVE -> "CVSS:3.1/..." vector string
 	severityWord string            // raw upstream word, e.g. "IMPORTANT"
-	perMajor     map[int]map[string]map[string]bool
+	perMajor     map[int]map[string]map[string]map[string]bool
 }
 
 // stats counts what one parse discarded or found ambiguous, so a sync can
@@ -145,10 +203,17 @@ type stats struct {
 	UnrecognizedSeverity  int // a severity word outside IMPORTANT/MODERATE/LOW/CRITICAL (e.g. "N/A")
 	NoMajorContext        int // a package-fix criterion with no platform guard above it anywhere in the tree
 	SkippedLineageFixes   int // a fixed EVR carrying a Ksplice or FIPS lineage marker, dropped before ambiguity grouping (D79)
-	AmbiguousGroups       int // distinct (CVE-or-ELSA, major, package) groups with 2+ fixed EVRs
+	AmbiguousGroups       int // distinct (CVE-or-ELSA, major, package, stream) groups with 2+ fixed EVRs (D81 adds stream)
 	SkippedAmbiguousFixes int // individual Affected entries dropped because of an AmbiguousGroups hit
 	Advisories            int // advisory.Advisory records emitted
 	Affected              int // Affected entries emitted across all of them
+
+	// D81: module stream gating.
+	ModuleGatedFixesKept              int // Affected entries emitted carrying a non-empty ModuleStream
+	DistinctModuleStreams             int // distinct "name:stream" values among ModuleGatedFixesKept
+	UngatedModuleFixes                int // distinct, stored (definition, major, package) Affected entries whose EVR is module+el/module_el but stream-less: no in-scope gate resolved a stream for it (150 measured 2026-08-20, deduplicated -- an arch-branch fanout hitting the same fact twice is not double-counted here, unlike SkippedLineageFixes/NoMajorContext above)
+	ModuleGateExtractionDisagreements int // a gate whose comment and structural extraction both succeeded but named a different (name, stream); structural kept (0 measured 2026-08-20)
+	ModuleGateUnresolved              int // a gate resolved (test_ref hit textfilecontent54_test) but neither comment nor structural extraction could read a (name, stream) from it (0 measured 2026-08-20)
 }
 
 func (s stats) String() string {
@@ -158,12 +223,18 @@ func (s stats) String() string {
 			"%d advisories carried an unrecognized severity word; "+
 			"%d package-fix criteria had no platform guard above them (skipped); "+
 			"%d lineage (ksplice/fips) fixed versions dropped (D79); "+
-			"UEK/module-train guard: %d ambiguous (CVE, major, package) group(s), "+
-			"%d affected entr(y/ies) dropped for it",
+			"UEK/module-train guard: %d ambiguous (CVE, major, package, stream) group(s), "+
+			"%d affected entr(y/ies) dropped for it; "+
+			"module streams (D81): %d gated fix(es) kept across %d distinct stream(s), "+
+			"%d module-tagged fixed version(s) stored stream-less for lack of a resolvable gate, "+
+			"%d gate(s) where comment and structural extraction disagreed (structural kept), "+
+			"%d gate(s) resolved but unparseable either way",
 		s.Definitions, s.Advisories, s.Affected, s.SkippedBadDoc,
 		s.SkippedNoID, s.SkippedNoPackages, s.UnrecognizedSeverity, s.NoMajorContext,
 		s.SkippedLineageFixes,
-		s.AmbiguousGroups, s.SkippedAmbiguousFixes)
+		s.AmbiguousGroups, s.SkippedAmbiguousFixes,
+		s.ModuleGatedFixesKept, s.DistinctModuleStreams,
+		s.UngatedModuleFixes, s.ModuleGateExtractionDisagreements, s.ModuleGateUnresolved)
 }
 
 // parseOVAL streams r (already bzip2-decompressed) and returns every
@@ -179,6 +250,15 @@ func parseOVAL(r io.Reader, st *stats) ([]resolvedDef, time.Time, error) {
 	tests := map[string]rawTest{}
 	objects := map[string]string{} // id -> name
 	states := map[string]rawState{}
+	// D81's second join pool, parallel to tests/objects/states above and
+	// never sharing an id with them in the live archive (textfilecontent54_*
+	// and rpminfo_* mint ids from disjoint counters). tfcObjects and
+	// tfcStates are pre-flattened to the one field each is ever read for
+	// (filepath, pattern text) rather than kept as raw structs, the same
+	// choice `objects` already makes for rpminfo_object's <name>.
+	tfcTests := map[string]rawTFC54Test{}
+	tfcObjects := map[string]string{} // id -> filepath
+	tfcStates := map[string]string{}  // id -> pattern-match text
 	var asOf time.Time
 
 	for {
@@ -220,6 +300,24 @@ func parseOVAL(r io.Reader, st *stats) ([]resolvedDef, time.Time, error) {
 				continue
 			}
 			states[raw.ID] = raw
+		case "textfilecontent54_test":
+			var raw rawTFC54Test
+			if err := dec.DecodeElement(&raw, &se); err != nil {
+				continue
+			}
+			tfcTests[raw.ID] = raw
+		case "textfilecontent54_object":
+			var raw rawTFC54Object
+			if err := dec.DecodeElement(&raw, &se); err != nil {
+				continue
+			}
+			tfcObjects[raw.ID] = raw.Filepath
+		case "textfilecontent54_state":
+			var raw rawTFC54State
+			if err := dec.DecodeElement(&raw, &se); err != nil {
+				continue
+			}
+			tfcStates[raw.ID] = raw.Text
 		case "generator":
 			var raw rawGenerator
 			if err := dec.DecodeElement(&raw, &se); err != nil {
@@ -248,8 +346,8 @@ func parseOVAL(r io.Reader, st *stats) ([]resolvedDef, time.Time, error) {
 		if !ok {
 			continue
 		}
-		d.perMajor = map[int]map[string]map[string]bool{}
-		walkCriteria(raw.Criteria, 0, tests, objects, states, d.perMajor, st)
+		d.perMajor = map[int]map[string]map[string]map[string]bool{}
+		walkCriteria(raw.Criteria, 0, "", tests, objects, states, tfcTests, tfcObjects, tfcStates, d.perMajor, st)
 		defs = append(defs, d)
 	}
 	return defs, asOf, nil
@@ -347,12 +445,13 @@ const (
 // fixed-version test regardless of what gated it, a <version> child on the
 // "oraclelinux-release" object is the platform-major test, and everything
 // else (arch, signature_keyid, a test_ref this parser never indexed because
-// it was not an rpminfo_test) is informational. This is also why a
-// module-enablement criterion needs no special case: its test_ref points at
-// a textfilecontent54_test, which never enters `tests`, so the lookup below
-// simply misses and the criterion is skipped -- the sibling "package is
-// earlier than" criterion under the SAME module-stream branch is still an
-// ordinary rpminfo_test and is read normally.
+// it was not an rpminfo_test) is informational. A module-enablement
+// criterion's test_ref points at a textfilecontent54_test, which never
+// enters `tests` at all, so the lookup below simply misses and this function
+// reports factOther for it -- moduleGateStream is what resolves it, against
+// the SEPARATE tfcTests/tfcObjects/tfcStates pools (D81), and walkCriteria
+// calls both on every criterion rather than either function trying to cover
+// the other's pool.
 func classifyCriterion(testRef string, tests map[string]rawTest, objects map[string]string, states map[string]rawState) (kind factKind, pkgName string, major int, evr string) {
 	t, ok := tests[testRef]
 	if !ok {
@@ -420,19 +519,189 @@ func parseMajorPattern(s string) (int, bool) {
 // comment says is sound.
 var oracleLineageMarker = regexp.MustCompile(`(?i)\.ksplice[0-9]+\.|_fips$`)
 
+// isModuleBuildEVR duplicates internal/matcher's rpmModuleBuild (D80) for
+// the same reason oracleLineageMarker above duplicates matcher's lineage
+// regexp: this package cannot import the matcher package, and the two
+// spellings ("module+el" Red Hat/Rocky, "module_el" AlmaLinux -- Oracle
+// itself only ever measured the first, D81's 38,998 gated hits are all
+// "module+el") are cheap enough to keep in sync by comment rather than by
+// import. Used here only to decide whether a stream-less fixed EVR is an
+// ordinary mainline package (nothing to count) or a module build this
+// parser could not attach a stream to (st.UngatedModuleFixes).
+func isModuleBuildEVR(evr string) bool {
+	return strings.Contains(evr, "module+el") || strings.Contains(evr, "module_el")
+}
+
+// moduleGateCommentRe matches a module-enablement criterion's own comment,
+// "Module <name>:<stream> is enabled" -- the exact text on all 763 gates
+// measured against the full archive 2026-08-20.
+var moduleGateCommentRe = regexp.MustCompile(`^Module (\S+) is enabled$`)
+
+// moduleStreamFromComment reads (name, stream) out of a criterion's own
+// comment text. The name:stream pair is split at the FIRST ':' rather than
+// requiring exactly one -- no module name in the corpus contains a colon,
+// but a stream that legitimately did (none measured) should still parse
+// instead of silently failing into "no gate".
+func moduleStreamFromComment(comment string) (name, stream string, ok bool) {
+	m := moduleGateCommentRe.FindStringSubmatch(comment)
+	if m == nil {
+		return "", "", false
+	}
+	name, stream, cut := strings.Cut(m[1], ":")
+	if !cut || name == "" || stream == "" {
+		return "", "", false
+	}
+	return name, stream, true
+}
+
+// moduleStreamPattern reads the stream token out of a textfilecontent54_state's
+// own pattern-match TEXT -- itself a regex, spelled out literally
+// ("\nstream\s*=\s*24\b[\w\W]*..."), not evaluated as one. This pattern
+// therefore matches against the LITERAL backslash-letter sequences that
+// text contains: `\\s` and `\*` below match the two literal characters
+// `\` and `s`, `\` and `*`, exactly as they sit in the source string,
+// stopping the (non-greedy) capture at the literal `\b` every measured
+// state text uses to close the token. moduleStreamFromStateText then
+// unescapes any backslash-escaped regex metacharacter the captured token
+// itself carries (only "\." is measured -- "1\.4" for stream "1.4").
+var moduleStreamPattern = regexp.MustCompile(`stream\\s\*=\\s\*(.+?)\\b`)
+
+// unescapeRegexLiteral drops the backslash out of any backslash-escaped
+// character in s ("1\.4" -> "1.4", "kvm_utils3" unchanged -- no backslash to
+// drop). Generic rather than special-cased to '.' on purpose: '.' is the
+// only escape measured in the 763-gate archive, but QuoteMeta-style escaping
+// can legally produce others, and a stream captured with one still in it
+// would silently fail to match Package.ModuleStream's un-escaped spelling
+// downstream in the matcher.
+func unescapeRegexLiteral(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			i++
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+// moduleStreamFromStateText resolves the structural half of a module gate:
+// the stream token captured out of the state's own pattern-match text.
+func moduleStreamFromStateText(text string) (stream string, ok bool) {
+	m := moduleStreamPattern.FindStringSubmatch(text)
+	if m == nil {
+		return "", false
+	}
+	stream = unescapeRegexLiteral(m[1])
+	if stream == "" {
+		return "", false
+	}
+	return stream, true
+}
+
+// moduleNameFromFilepath resolves the other structural half: the module
+// name out of the gate object's own filepath ("/etc/dnf/modules.d/
+// nodejs.module" -> "nodejs"), basename minus the fixed ".module" suffix
+// every gate object measured 2026-08-20 carries.
+func moduleNameFromFilepath(fp string) (name string, ok bool) {
+	const suffix = ".module"
+	base := fp
+	if i := strings.LastIndexByte(fp, '/'); i >= 0 {
+		base = fp[i+1:]
+	}
+	if !strings.HasSuffix(base, suffix) {
+		return "", false
+	}
+	name = strings.TrimSuffix(base, suffix)
+	if name == "" {
+		return "", false
+	}
+	return name, true
+}
+
+// moduleGateStream resolves ONE criterion as a module-enablement gate
+// (D81). Whether cr IS a gate is decided the same way classifyCriterion
+// decides a criterion is a package fix or a platform test: by whether its
+// test_ref resolves against the pool this parser indexes for the purpose --
+// here, tfcTests rather than tests. A criterion that does not resolve there
+// is not a module gate (isGate=false), which covers every other criterion
+// this parser reads (platform, arch, signature, package-fix) without a
+// separate exclusion list.
+//
+// A gate that DOES resolve carries its "name:stream" two ways -- the
+// criterion's own COMMENT ("Module nodejs:24 is enabled", moduleStreamFrom
+// Comment) and STRUCTURALLY (the gate object's filepath basename, the gate
+// state's own pattern text, moduleNameFromFilepath/moduleStreamFromStateText).
+// They agreed on every one of the 763 gates measured against the full
+// archive 2026-08-20. When they disagree the structural pair wins: the
+// comment is prose Oracle writes for a human reader, the structural pair is
+// what the fields this scanner (and, presumably, Oracle's own OVAL engine)
+// actually evaluates. A gate that resolves as a gate but yields neither pair
+// (0 measured) returns ok=false: its fixes fall through to the same
+// stream-less path an EVR with no gate above it at all takes
+// (st.UngatedModuleFixes in the caller), which is also the shape D80's
+// matcher already knows how to report skipped rather than guessed.
+func moduleGateStream(cr rawCriterion, tfcTests map[string]rawTFC54Test, tfcObjects map[string]string, tfcStates map[string]string, st *stats) (nameStream string, isGate bool) {
+	t, ok := tfcTests[cr.TestRef]
+	if !ok {
+		return "", false
+	}
+
+	var structName, structStream string
+	var structOK bool
+	if fp, ok := tfcObjects[t.Object.Ref]; ok {
+		if n, ok := moduleNameFromFilepath(fp); ok {
+			if txt, ok := tfcStates[t.State.Ref]; ok {
+				if s, ok := moduleStreamFromStateText(txt); ok {
+					structName, structStream, structOK = n, s, true
+				}
+			}
+		}
+	}
+	commentName, commentStream, commentOK := moduleStreamFromComment(cr.Comment)
+
+	switch {
+	case structOK && commentOK:
+		if structName != commentName || structStream != commentStream {
+			st.ModuleGateExtractionDisagreements++
+		}
+		return structName + ":" + structStream, true
+	case structOK:
+		return structName + ":" + structStream, true
+	case commentOK:
+		return commentName + ":" + commentStream, true
+	default:
+		st.ModuleGateUnresolved++
+		return "", true
+	}
+}
+
 // walkCriteria descends one <criteria> node, carrying the Oracle Linux major
-// gating it (0 until a platform-major criterion is seen). It runs in two
-// passes over this node's own criterion children rather than one: a
-// platform-major criterion can appear anywhere among its siblings (in the
-// live archive it is always first, but nothing in the schema promises that),
-// and every package-fix sibling in the SAME node has to see the major
-// whichever position it was declared in.
-func walkCriteria(c rawCriteria, major int, tests map[string]rawTest, objects map[string]string, states map[string]rawState, perMajor map[int]map[string]map[string]bool, st *stats) {
+// (D74) and module stream (D81) gating it -- major 0 and stream "" until a
+// platform-major or module-gate criterion is seen. It runs in two passes
+// over this node's own criterion children rather than one: a platform-major
+// or module-gate criterion can appear anywhere among its siblings (in the
+// live archive the platform one is always first; module gates always
+// precede their fix sibling, but nothing in the schema promises either
+// position), and every package-fix sibling in the SAME node has to see both
+// whichever position they were declared in.
+//
+// D81 measured zero nested gates and exactly one module in scope per gated
+// fix hit, so propagation needs no more machinery than effMajor already
+// has: a sibling OR branch's own gate (or absence of one) only ever affects
+// that branch's own subtree, because each recursive call below carries its
+// own local effModule downward and siblings never share a stack frame's
+// mutation.
+func walkCriteria(c rawCriteria, major int, moduleStream string, tests map[string]rawTest, objects map[string]string, states map[string]rawState, tfcTests map[string]rawTFC54Test, tfcObjects map[string]string, tfcStates map[string]string, perMajor map[int]map[string]map[string]map[string]bool, st *stats) {
 	effMajor := major
+	effModule := moduleStream
 	for _, cr := range c.Criterion {
 		kind, _, m, _ := classifyCriterion(cr.TestRef, tests, objects, states)
 		if kind == factMajor {
 			effMajor = m
+		}
+		if ns, isGate := moduleGateStream(cr, tfcTests, tfcObjects, tfcStates, st); isGate {
+			effModule = ns
 		}
 	}
 	for _, cr := range c.Criterion {
@@ -458,8 +727,8 @@ func walkCriteria(c rawCriteria, major int, tests map[string]rawTest, objects ma
 			// mainline. Dropped HERE, before perMajor is built and
 			// therefore before dropAmbiguous ever groups it -- a lineage
 			// EVR left in would collide there with a mainline fix for the
-			// same (CVE, major, package), and D74's guard drops BOTH
-			// contributors of a collision, not just the lineage one
+			// same (CVE, major, package[, stream]), and D74's guard drops
+			// BOTH contributors of a collision, not just the lineage one
 			// (measured 2026-08-20: 24.4% of everything dropAmbiguous
 			// dropped was exactly this collision, openssl's entire
 			// ambiguity among it). Skipping it before that grouping runs is
@@ -467,20 +736,40 @@ func walkCriteria(c rawCriteria, major int, tests map[string]rawTest, objects ma
 			// oracleLineageOf is the other half: once this filter runs, an
 			// installed lineage package has no mainline record left to be
 			// judged against, so it is reported not-evaluated there instead
-			// of matched here.
+			// of matched here. This check runs BEFORE the module-stream
+			// attachment below, unchanged from pre-D81 order (D81's own
+			// requirement: the lineage count must not move, 12,174 on the
+			// live feed).
 			st.SkippedLineageFixes++
 			continue
 		}
+		// D81: stream is attached here, but whether it ends up "" for lack
+		// of a gate is not counted at THIS granularity -- this loop runs
+		// once per CRITERION (an arch-branch fanout hits the same
+		// (major, pkg, evr) more than once, exactly the shape
+		// TestParseOVAL_ArchBranchesAgreeingIsNotAmbiguous collapses), while
+		// perMajor below dedupes into a SET. st.UngatedModuleFixes is
+		// counted in normalize(), once per surviving (deduplicated) Affected
+		// entry, so it answers "how many stored records", not "how many
+		// criteria were seen" -- measured 2026-08-20: 290 raw criterion
+		// hits collapse to exactly 150 distinct (definition, major,
+		// package, evr) tuples, all four contributing definitions
+		// (ELSA-2026-50239, ELSA-2020-5500, ELSA-2021-1809,
+		// ELSA-2019-2925) carrying arch-duplicated fix criteria.
+		stream := effModule
 		if perMajor[effMajor] == nil {
-			perMajor[effMajor] = map[string]map[string]bool{}
+			perMajor[effMajor] = map[string]map[string]map[string]bool{}
 		}
 		if perMajor[effMajor][pkg] == nil {
-			perMajor[effMajor][pkg] = map[string]bool{}
+			perMajor[effMajor][pkg] = map[string]map[string]bool{}
 		}
-		perMajor[effMajor][pkg][evr] = true
+		if perMajor[effMajor][pkg][stream] == nil {
+			perMajor[effMajor][pkg][stream] = map[string]bool{}
+		}
+		perMajor[effMajor][pkg][stream][evr] = true
 	}
 	for _, child := range c.Criteria {
-		walkCriteria(child, effMajor, tests, objects, states, perMajor, st)
+		walkCriteria(child, effMajor, effModule, tests, objects, states, tfcTests, tfcObjects, tfcStates, perMajor, st)
 	}
 }
 
@@ -533,25 +822,40 @@ func severityFor(d resolvedDef, st *stats) []advisory.Severity {
 	return sev
 }
 
-// dropKey is one (definition, major, package) triple that the UEK/module
-// guard has decided must not be emitted.
+// dropKey is one (definition, major, package, stream) quadruple that the
+// UEK/module guard has decided must not be emitted. D81 adds stream so
+// dropping one stream's ambiguous fix for a package never also drops a
+// DIFFERENT, unambiguous stream's fix for the same package under the same
+// definition and major -- structurally possible even though 0 were measured
+// mixing that way (D81's own "zero nested gates" count is about gate
+// NESTING, not about whether one definition can gate the same package under
+// two different streams in two OR branches, which the intra-definition
+// recovery test below shows it can).
 type dropKey struct {
 	defIdx int
 	major  int
 	pkg    string
+	stream string
 }
 
 // ambKey groups fixed-EVR facts across every definition that shares one CVE
 // (or, for the 106 definitions with no CVE at all, shares nothing but
 // itself -- see the joinKeysFor comment). It is scoped to one Oracle Linux
-// major and one package name because kernel-uek accumulates a fixed EVR for
-// EVERY CVE it has ever patched; without the CVE in the key, "how many
-// distinct EVRs has kernel-uek ever had on OL9" would be answered "hundreds"
-// and every kernel-uek entry in the database would be dropped.
+// major, one package name, and (D81) one module stream, because kernel-uek
+// accumulates a fixed EVR for EVERY CVE it has ever patched (without the CVE
+// in the key, "how many distinct EVRs has kernel-uek ever had on OL9" would
+// be answered "hundreds") and because two module streams of one package are
+// never the same fix timeline (D80's own refusal to compare across streams,
+// applied here to which EVRs are even allowed to collide in the first
+// place): "nodejs:18" and "nodejs:20" fixing the same CVE at different EVRs
+// is not a disagreement to catch, it is two vendors' worth of correct
+// information, and grouping them under one key would drop both for no
+// reason.
 type ambKey struct {
-	join  string
-	major int
-	pkg   string
+	join   string
+	major  int
+	pkg    string
+	stream string
 }
 
 // joinKeysFor is what dropAmbiguous groups a definition's own facts under.
@@ -571,31 +875,34 @@ func joinKeysFor(d resolvedDef) []string {
 	return []string{d.id}
 }
 
-// dropAmbiguous finds every (join key, major, package) that resolves to more
-// than one distinct fixed EVR across the whole corpus, and returns which
-// (definition, major, package) triples contributed to one -- every
-// contributor is dropped, not just the second one seen, because arrival
-// order says nothing about which train a real host is on (D25's "never
-// resolve a tie by arrival order", applied here to a tie this provider
-// cannot break at all rather than one D25 breaks by score).
+// dropAmbiguous finds every (join key, major, package, stream) that resolves
+// to more than one distinct fixed EVR across the whole corpus, and returns
+// which (definition, major, package, stream) quadruples contributed to one
+// -- every contributor is dropped, not just the second one seen, because
+// arrival order says nothing about which train (or, D81, which module
+// stream) a real host is on (D25's "never resolve a tie by arrival order",
+// applied here to a tie this provider cannot break at all rather than one
+// D25 breaks by score).
 func dropAmbiguous(defs []resolvedDef, st *stats) map[dropKey]bool {
 	evrsOf := map[ambKey]map[string]bool{}
 	contributorsOf := map[ambKey]map[int]bool{}
 	for di, d := range defs {
 		for _, join := range joinKeysFor(d) {
 			for major, pkgs := range d.perMajor {
-				for pkg, evrSet := range pkgs {
-					k := ambKey{join, major, pkg}
-					if evrsOf[k] == nil {
-						evrsOf[k] = map[string]bool{}
+				for pkg, streams := range pkgs {
+					for stream, evrSet := range streams {
+						k := ambKey{join, major, pkg, stream}
+						if evrsOf[k] == nil {
+							evrsOf[k] = map[string]bool{}
+						}
+						for evr := range evrSet {
+							evrsOf[k][evr] = true
+						}
+						if contributorsOf[k] == nil {
+							contributorsOf[k] = map[int]bool{}
+						}
+						contributorsOf[k][di] = true
 					}
-					for evr := range evrSet {
-						evrsOf[k][evr] = true
-					}
-					if contributorsOf[k] == nil {
-						contributorsOf[k] = map[int]bool{}
-					}
-					contributorsOf[k][di] = true
 				}
 			}
 		}
@@ -608,7 +915,7 @@ func dropAmbiguous(defs []resolvedDef, st *stats) map[dropKey]bool {
 		}
 		st.AmbiguousGroups++
 		for di := range contributorsOf[k] {
-			dropped[dropKey{di, k.major, k.pkg}] = true
+			dropped[dropKey{di, k.major, k.pkg, k.stream}] = true
 		}
 	}
 	return dropped
@@ -618,9 +925,15 @@ func dropAmbiguous(defs []resolvedDef, st *stats) map[dropKey]bool {
 // one per (definition, major) that still has at least one package left after
 // dropAmbiguous -- the shape D74 calls for so each record's Affected list is
 // homogeneous in ecosystem, the same property every other provider's
-// single-Advisory-per-record shape gets for free.
+// single-Advisory-per-record shape gets for free. D81 adds a per-stream
+// inner loop: one (definition, major, package) can now contribute MORE than
+// one Affected entry, one per surviving module stream (plus a stream-less
+// one when the package has an ordinary, non-modular fix too, though 0 were
+// measured mixing that way) -- each carries its own ModuleStream, the shape
+// Red Hat's csaf.go already emits for the identical reason (D80).
 func normalize(defs []resolvedDef, st *stats) []advisory.Advisory {
 	dropped := dropAmbiguous(defs, st)
+	streamsSeen := map[string]bool{}
 
 	var out []advisory.Advisory
 	for di, d := range defs {
@@ -640,31 +953,71 @@ func normalize(defs []resolvedDef, st *stats) []advisory.Advisory {
 
 			var affected []advisory.Affected
 			for _, name := range pkgNames {
-				if dropped[dropKey{di, major, name}] {
-					st.SkippedAmbiguousFixes++
-					continue
+				streamsOf := d.perMajor[major][name]
+				streamKeys := make([]string, 0, len(streamsOf))
+				for stream := range streamsOf {
+					streamKeys = append(streamKeys, stream)
 				}
-				evrSet := d.perMajor[major][name]
-				// dropAmbiguous already removed every (def, major, pkg)
-				// whose evrSet had more than one member (whether that
-				// ambiguity came from this definition alone or from another
-				// one sharing a CVE), so exactly one is left to take here.
-				var evr string
-				for e := range evrSet {
-					evr = e
-					break
+				sort.Strings(streamKeys)
+
+				for _, stream := range streamKeys {
+					if dropped[dropKey{di, major, name, stream}] {
+						st.SkippedAmbiguousFixes++
+						continue
+					}
+					evrSet := streamsOf[stream]
+					// dropAmbiguous already removed every (def, major, pkg,
+					// stream) whose evrSet had more than one member (whether
+					// that ambiguity came from this definition alone or from
+					// another one sharing a CVE), so exactly one is left to
+					// take here.
+					var evr string
+					for e := range evrSet {
+						evr = e
+						break
+					}
+					aff := advisory.Affected{
+						Ecosystem: "Oracle Linux:" + strconv.Itoa(major),
+						Name:      name,
+						Ranges: []advisory.Range{{
+							Type: advisory.RangeEcosystem,
+							Events: []advisory.Event{
+								{Introduced: "0"},
+								{Fixed: evr},
+							},
+						}},
+					}
+					if stream != "" {
+						aff.ModuleStream = stream
+						st.ModuleGatedFixesKept++
+						streamsSeen[stream] = true
+					} else if isModuleBuildEVR(evr) {
+						// D81: a module-tagged EVR (its release string
+						// carries "module+el"/"module_el") with no
+						// in-scope module gate -- either no
+						// textfilecontent54_test criterion appeared
+						// anywhere above it at all (150 distinct
+						// (definition, major, package, evr) tuples measured
+						// 2026-08-20), or one did but moduleGateStream could
+						// not read a (name, stream) from it (0 measured;
+						// ModuleGateUnresolved counts that half
+						// separately). Either way the stream cannot be
+						// recovered from this OVAL tree, so the entry is
+						// stored the same as an ordinary stream-less fix.
+						// D80's matcher already reports a stream-blind
+						// module bound skipped loudly at match time
+						// (moduleBuildBound), the same path Rocky and
+						// AlmaLinux take until D82. Counted HERE rather
+						// than in walkCriteria so an arch-branch fanout
+						// (the same criterion seen twice, once per arch)
+						// is not double-counted -- this loop runs once per
+						// SURVIVING, deduplicated Affected entry, matching
+						// ModuleGatedFixesKept's own granularity just
+						// above.
+						st.UngatedModuleFixes++
+					}
+					affected = append(affected, aff)
 				}
-				affected = append(affected, advisory.Affected{
-					Ecosystem: "Oracle Linux:" + strconv.Itoa(major),
-					Name:      name,
-					Ranges: []advisory.Range{{
-						Type: advisory.RangeEcosystem,
-						Events: []advisory.Event{
-							{Introduced: "0"},
-							{Fixed: evr},
-						},
-					}},
-				})
 			}
 			if len(affected) == 0 {
 				st.SkippedNoPackages++
@@ -684,5 +1037,6 @@ func normalize(defs []resolvedDef, st *stats) []advisory.Advisory {
 			st.Affected += len(affected)
 		}
 	}
+	st.DistinctModuleStreams = len(streamsSeen)
 	return out
 }

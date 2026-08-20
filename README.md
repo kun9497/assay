@@ -595,6 +595,9 @@ exited 0 while 24 findings went unmentioned.
       Red Hat module entries kept with their streams, per-stream wont-fix, stream-equality
       matching with tail-truncated comparison; ubi8/nodejs-18 matches exactly its
       installed stream out of three
+- [x] Oracle module streams (D81) — 17,930 gated fixes stored across 87 Oracle-spelled
+      streams, ambiguity drops 32,621→22,939 exactly as predicted; the 150 gate-less
+      module EVRs stay loud
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a
