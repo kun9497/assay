@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -383,5 +384,88 @@ func TestReadEntryCapped_RefusesADeclaredSizePastTheCap(t *testing.T) {
 
 	if _, err := readEntryCapped(f); err == nil {
 		t.Fatal("readEntryCapped did not refuse a declared size past the cap")
+	}
+}
+
+// zeroReader streams n zero bytes without ever materializing them all at
+// once, so a fixture larger than maxEntrySize can be built without holding a
+// 512+ MiB []byte in the test process.
+type zeroReader struct{ n int64 }
+
+func (z *zeroReader) Read(p []byte) (int, error) {
+	if z.n <= 0 {
+		return 0, io.EOF
+	}
+	if int64(len(p)) > z.n {
+		p = p[:z.n]
+	}
+	for i := range p {
+		p[i] = 0
+	}
+	z.n -= int64(len(p))
+	return len(p), nil
+}
+
+// TestParse_RefusesAPomPropertiesPastTheSizeCap is the caller-side proof for
+// readEntryCapped's cap that TestReadEntryCapped_RefusesADeclaredSizePastTheCap
+// above deliberately does not give: that test's own comment explains why it
+// drives the helper directly rather than through Parse -- reaching the cap
+// through a real archive "would need an actual 512 MiB fixture, which is
+// impractical." That leaves addComponent's own call site (jar.go) unheld:
+// nothing proves Parse, walking a real archive, ever reaches the cap rather
+// than an unbounded read of whatever a crafted pom.properties entry claims.
+//
+// The fixture writes a genuinely valid, complete set of properties FIRST,
+// then pads past the cap with zero bytes carrying no newline -- so a full
+// (uncapped) read would parse groupId/artifactId/version successfully and
+// catalog a package, and only the size cap stops it. A padding fixture that
+// never wrote valid properties at all would pass under the mutation for the
+// wrong reason: an all-zero payload parses to zero properties either way, so
+// "no package" would come from D70's missing-key skip regardless of whether
+// the cap ran -- the trap CLAUDE.md calls "asserting presence when order (or
+// cause) is the point." A run of zero bytes compresses to a few hundred
+// bytes under DEFLATE, so the fixture is tiny on disk despite decompressing
+// past the cap -- streamed through zeroReader rather than built as one
+// []byte, so the test itself does not need to hold 512+ MiB either.
+func TestParse_RefusesAPomPropertiesPastTheSizeCap(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "oversized.jar")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(f)
+	w, err := zw.Create("META-INF/maven/com.example.huge/huge/pom.properties")
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := []byte("groupId=com.example.huge\nartifactId=huge\nversion=1.0.0\n")
+	if _, err := w.Write(valid); err != nil {
+		t.Fatal(err)
+	}
+	// Zero bytes with no newline: one token far longer than
+	// bufio.Scanner's default line-length limit, so a CAPPED read never
+	// gets far enough to notice that, while an UNCAPPED one reads it all
+	// and still finds the three valid lines already scanned above it.
+	if _, err := io.Copy(w, &zeroReader{n: maxEntrySize + 1 - int64(len(valid))}); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	pkgs, stats, err := Parse(path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(pkgs) != 0 {
+		t.Fatalf("got %d package(s), want 0 -- an oversized pom.properties must be "+
+			"refused, not read in full and cataloged: %+v", len(pkgs), pkgs)
+	}
+	if stats.SkippedNoVersion != 1 {
+		t.Errorf("SkippedNoVersion = %d, want 1 -- the size cap must count as a "+
+			"skip, the same as any other unreadable pom.properties", stats.SkippedNoVersion)
 	}
 }

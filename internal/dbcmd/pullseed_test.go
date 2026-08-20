@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/registry"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 
 	"github.com/kun9497/assay/internal/advisory"
@@ -198,5 +202,62 @@ func TestPullSeed_RefusesAnArtifactTwoSchemasBehindAtThePreviousTag(t *testing.T
 	}
 	if _, err := os.Stat(dst); !os.IsNotExist(err) {
 		t.Error("a refused PullSeed left a file behind at dbPath")
+	}
+}
+
+// TestPullSeed_DoesNotFallBackOnANonManifestError is the other half of
+// PullSeed's own doc comment: "On a fetch error for ref whose message names
+// MANIFEST_UNKNOWN, it retries ONCE against the previous schema's tag ...
+// Any other fetch error ... fails exactly as Pull does." No existing test
+// ever drives a fetch error that is NOT MANIFEST_UNKNOWN (or its cousin
+// NAME_UNKNOWN, both of which name a genuinely missing manifest), so nothing
+// holds the narrowing: widening the trigger to every fetch error means a
+// transient network, auth, or 5xx failure against a current tag that DOES
+// exist and is perfectly readable silently substitutes the stale N-1 tag
+// instead, printing "does not exist yet; seeding from ..., the previous
+// schema" -- a false statement about why the fetch actually failed.
+//
+// The registry here answers every request normally except a GET/HEAD for
+// the CURRENT schema's manifest, which always 500s -- an error whose message
+// contains neither MANIFEST_UNKNOWN nor NAME_UNKNOWN. The previous schema's
+// tag is seeded and perfectly valid, which makes this the sharpest form of
+// the defect: a broadened guard does not merely fail differently, it
+// SUCCEEDS by installing the stale seed. Exit code and "file installed or
+// not" are therefore the observable difference, not just stderr wording.
+func TestPullSeed_DoesNotFallBackOnANonManifestError(t *testing.T) {
+	curTag := fmt.Sprintf("v%d", store.SchemaVersion)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/assay-db/manifests/"+curTag, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	})
+	mux.Handle("/", registry.New())
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := u.Host
+
+	prevRef := fmt.Sprintf("%s/assay-db:v%d", host, store.SchemaVersion-1)
+	curRef := fmt.Sprintf("%s/assay-db:v%d", host, store.SchemaVersion)
+	// Genuinely valid and installable -- so a silent fallback would SUCCEED,
+	// not merely fail on a different message.
+	seed(t, prevRef, time.Time{}, 5)
+
+	dst := filepath.Join(t.TempDir(), "seed.db")
+	var out, errOut bytes.Buffer
+	code := PullSeed(context.Background(), dst, curRef, &out, &errOut)
+	if code != 2 {
+		t.Errorf("PullSeed on a 500 fetching the current tag = %d, want 2 -- a 500 is not "+
+			"a missing manifest and must not fall back to the stale previous schema "+
+			"(stderr: %s)", code, errOut.String())
+	}
+	if strings.Contains(errOut.String(), "the previous schema") {
+		t.Errorf("PullSeed fell back to the previous schema on a non-manifest error -- "+
+			"a false statement about why the fetch failed:\n%s", errOut.String())
+	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Error("a refused PullSeed installed a file from the stale fallback")
 	}
 }

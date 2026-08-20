@@ -19,6 +19,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 
 	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/matcher"
 	"github.com/kun9497/assay/internal/report"
 	"github.com/kun9497/assay/internal/severity"
 	"github.com/kun9497/assay/internal/source"
@@ -1004,6 +1005,46 @@ func TestRun_OutputJSON(t *testing.T) {
 			t.Fatalf("stdout is not valid JSON even though --fail-on tripped: %v\n%s", err, out.String())
 		}
 	})
+}
+
+// TestRun_OutputSARIF is the run()-seam wiring check for --output sarif,
+// mirroring TestRun_OutputJSON above. report.SARIF has a thorough direct
+// suite (internal/report/sarif_test.go) and cmd/assay's own tests only
+// assert that parseScanArgs sets Options.Output == "sarif" -- nothing
+// anywhere drives Run (or the CLI's run()) with sarif output, so the
+// opts.Output == "sarif" case in Run's renderer switch is held by nothing:
+// changing that comparison to any other string (or deleting the case) falls
+// through to the default Table renderer and leaves the whole suite green,
+// silently handing a SARIF-format request a human table instead.
+func TestRun_OutputSARIF(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-sarif-medium", pkg: "sarifmedium", fixed: "2.0.0", vectors: []string{vecMedium}},
+	})
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "sarifmedium", purlType: "golang"}})
+
+	var out, errOut bytes.Buffer
+	code := Run(context.Background(), db, sbom, Options{Output: "sarif"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("Run() = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, out.String(), errOut.String())
+	}
+	// The SARIF-specific top-level shape (report/sarif.go's unexported
+	// sarifDocument: "$schema" and the SARIF spec version), which the plain
+	// table and the plain JSON document ("schemaVersion", an int, per
+	// report/json.go) do not carry.
+	if !strings.Contains(out.String(), `"$schema"`) || !strings.Contains(out.String(), `"version": "2.1.0"`) {
+		t.Errorf("stdout does not look like a SARIF document:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), `"schemaVersion"`) {
+		t.Errorf("stdout carries the plain JSON renderer's field; --output sarif "+
+			"must replace it entirely:\n%s", out.String())
+	}
+	// The table's own header would prove Run fell back to Table instead of
+	// replacing it, the same fallback TestRun_OutputJSON's identical check
+	// guards against for --output json.
+	if strings.Contains(out.String(), "PACKAGE") {
+		t.Errorf("stdout contains the table header; --output sarif must replace "+
+			"Table entirely:\n%s", out.String())
+	}
 }
 
 // TestRun_Explain is the wiring test for Options.Explain: Run must call
@@ -2092,6 +2133,49 @@ func TestVerdict_FailOnIncompleteTargetIgnoresAdvisoryDefects(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := verdict(tc.opts, tc.sum, nil); got != tc.want {
 				t.Errorf("verdict = %d, want %d (summary %+v)", got, tc.want, tc.sum)
+			}
+		})
+	}
+}
+
+// D11's 2 > 1 > 0 precedence applies to FailOnIncompleteTarget exactly as it
+// does to the broad FailOnIncomplete gate above (both rows of that table set
+// FailOnIncomplete alongside FailOn/FailOnUnknown) — but no row anywhere
+// arms FailOnIncompleteTarget alongside an exit-1 gate that is ALSO true, so
+// an ordering defect between the narrow gate and FailOn/FailOnUnknown is
+// invisible to the suite. Two independent shapes of that defect were found
+// by mutation testing, and each row below is aimed at one:
+//
+//   - narrowing the guard itself to `&& opts.FailOn == nil` returns 1
+//     instead of 2 whenever --fail-on is also armed and its own finding
+//     trips it;
+//   - swapping the guard below FailOnUnknown's returns 1 instead of 2
+//     whenever --fail-on-unknown is also armed and UnknownSeverity > 0.
+//
+// Both defects make verdict return 1; only 2 is correct under D11, so this
+// is not "presence of some exit code" but the exact code.
+func TestVerdict_FailOnIncompleteTargetOutranksExitOneGates(t *testing.T) {
+	bandHigh := severity.High
+	sum := report.Summary{TargetIncomplete: 1, UnknownSeverity: 1}
+	// A finding that would itself trip --fail-on high on its own, so the
+	// narrowed-guard mutation (which only stops gating when FailOn is set)
+	// has something to fall through to.
+	findings := []matcher.Finding{{Severity: severity.Critical}}
+
+	for _, tc := range []struct {
+		name string
+		opts Options
+	}{
+		{"alongside --fail-on, armed with a finding that would itself trip it",
+			Options{FailOnIncompleteTarget: true, FailOn: &bandHigh}},
+		{"alongside --fail-on-unknown, with an unrated finding present",
+			Options{FailOnIncompleteTarget: true, FailOnUnknown: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := verdict(tc.opts, sum, findings); got != 2 {
+				t.Errorf("verdict = %d, want 2 -- the caller's own incomplete "+
+					"data (D36) must outrank a finding-based exit-1 gate (D11), "+
+					"regardless of which other gate is also armed", got)
 			}
 		})
 	}
