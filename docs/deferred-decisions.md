@@ -459,12 +459,12 @@ rpm's own read-only BerkeleyDB backend 850 lines of C is dead weight.
   streams of `container-tools`; taking the higher is a systematic false positive and taking the
   lower is a false negative.
 
-**~~AlmaLinux and Rocky Linux are not the easier path~~ — five now resolved: Rocky in D71,
-AlmaLinux in D72, Amazon Linux 2/2023 in D73, Oracle Linux 5–10 in D74, and Fedora in D75;
-SLES remains open, no longer behind `ndb` (D76 reads the format) but behind still having no
-SUSE advisory feed at all.** Both keyed on the major version only — three keys
-each, derivable from `/etc/os-release` — which is genuinely simpler. Neither Alma nor Rocky
-survived the rest, at the time:
+**~~AlmaLinux and Rocky Linux are not the easier path~~ — the whole RPM family is resolved:
+Rocky in D71, AlmaLinux in D72, Amazon Linux 2/2023 in D73, Oracle Linux 5–10 in D74, Fedora
+in D75, and SLES plus openSUSE Leap in D77 (over D76's ndb backend). Tumbleweed is refused by
+name — rolling, no release axis to key on.** Both keyed on the major version only — three
+keys each, derivable from `/etc/os-release` — which is genuinely simpler. Neither Alma nor
+Rocky survived the rest, at the time:
 
 - ~~**AlmaLinux carries zero `aliases` and zero `upstream` fields** across all 5,494 records.
   Every CVE reference is in `related`, which OSV defines as explicitly *not* an alias. Under D3
@@ -507,13 +507,12 @@ Note that the "VEX" in *VEX and ignore rules* below is a different thing: that e
 consumer supplying VEX to suppress findings, this one is about a vendor publishing
 affectedness.
 
-**Still deferred.** OVAL v2 as a second opinion (it covers RHEL 5–9 and has no RHEL 10, so it
-could never be the primary source); SLES, which D76 catalogues (the ndb rpmdb backend, see the
-ndb entry elsewhere in this document) but which none of D50, D71, D72, D73, D74 or D75 routes
-to an advisory feed — there still is no SUSE archive ingested; and closing the EUS/AUS/E4S
-divergence rather than disclosing it, which needs a channel signal no image carries. Rocky
-Linux, AlmaLinux, Amazon Linux, Oracle Linux and Fedora are off this list — see D71 through
-D75.
+**Still deferred.** Only OVAL v2 as a second opinion (it covers RHEL 5–9 and has no RHEL 10,
+so it could never be the primary source), and closing the EUS/AUS/E4S divergence rather than
+disclosing it, which needs a channel signal no image carries. Every distro this entry
+originally named is off this list — see D71 through D77 — and openSUSE Tumbleweed was never
+on it: rolling releases have no release axis to key on, so it is refused by name rather than
+deferred.
 
 **Oracle Linux itself still owes one decision.** D74 disclosed rather than filtered:
 ksplice- and FIPS-lineage packages are not distinguished from mainline ones, the same
@@ -534,13 +533,13 @@ module builds instead of stream-matching them; treating OSV as the primary feed 
 exists; and SLES staying behind `ndb`. D72 (AlmaLinux) is the first slice to actually spend
 the first two of those five — see D72 in the roadmap.
 
-**The `ndb` half of that list is resolved — D76 reads the format.** Modern SLES/BCI images
-could not be catalogued at all, measured independently of any advisory question; that
+**The `ndb` half of that list was resolved first — D76 reads the format.** Modern SLES/BCI
+images could not be catalogued at all, measured independently of any advisory question; that
 justification for deferring `ndb` no longer held once measured, so the backend was built and
 verified against a real `registry.suse.com/bci/bci-base` image (138 packages, 0 skipped — see
-the roadmap's D76 entry for the full verification). SUSE-family coverage — an actual advisory
-feed, and the `sles`/`opensuse-*` ecosystem keys and comparer routing it needs — is what is
-still open, unchanged by D76 on purpose (D76 is cataloging only).
+the roadmap's D76 entry for the full verification). D76 was cataloging only, on purpose; the
+advisory half — SUSE's own CSAF VEX feed, and the `sles`/`opensuse-*` ecosystem keys and
+comparer routing it needs — is resolved in D77, closing the RPM family entirely.
 
 ---
 

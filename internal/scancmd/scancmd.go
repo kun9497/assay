@@ -740,17 +740,24 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 		skippedRecords += statusDLinks
 	case hasRPM:
 		// D43, extended to the third container format by D76. The inventory
-		// is read and no verdict follows: ecosystem is "" for every RPM
-		// distro because Distro.Ecosystem() has no key for them (D50 routes
-		// only `rhel`), so the matcher reports all of these as skipped and
-		// Trustworthy() takes the scan to exit 2. That is the whole design —
-		// the OSV Red Hat feed is errata-only and cannot express "affected,
-		// will not fix", so a verdict built on it would be confidently clean
-		// about 39,372 CVEs it has never seen. An ndb image (openSUSE, SLES)
-		// takes the identical path: catalogued, unkeyed, reported not
-		// evaluated — there is still no SUSE advisory source to serve it,
-		// only "we cannot even list its packages" that no longer has to be
-		// true too.
+		// is read regardless of whether pkgmeta.Distro.Ecosystem() can key
+		// it: a distro this build has no advisory feed for (centos,
+		// openEuler, azurelinux, mariner, opensuse-tumbleweed) resolves
+		// ecosystem "", the matcher reports it skipped, and Trustworthy()
+		// takes the scan to exit 2 rather than a confidently clean verdict
+		// built on nothing.
+		//
+		// An ndb image (openSUSE, SLES) no longer takes that path by
+		// default: D76 closed "we cannot even list its packages", and D77
+		// closed the advisory half that comment left open — `sles` and
+		// `opensuse-leap` now resolve a real key (suse.foldKey's fold on the
+		// provider side, pkgmeta.Distro.Ecosystem's "SLES:"/"openSUSE
+		// Leap:" case on this side) and are matched against SUSE's own CSAF
+		// VEX feed, the same errata-plus-no-fix-states shape D47-D52 built
+		// for Red Hat. opensuse-tumbleweed still resolves nothing — a
+		// rolling release has no stable release axis to key advisories on —
+		// so it still takes the catalogued-but-not-evaluated path this
+		// comment originally described for the whole ndb family.
 		//
 		// Three backends, one header parser. Which one an image carries is a
 		// property of its release, not of anything the caller asked for:

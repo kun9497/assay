@@ -25,6 +25,7 @@ import (
 	"github.com/kun9497/assay/internal/provider/knvd"
 	"github.com/kun9497/assay/internal/provider/nvd"
 	"github.com/kun9497/assay/internal/provider/oracle"
+	"github.com/kun9497/assay/internal/provider/suse"
 	"github.com/kun9497/assay/internal/report"
 	"github.com/kun9497/assay/internal/scancmd"
 	"github.com/kun9497/assay/internal/severity"
@@ -1256,6 +1257,7 @@ func TestDBUpdateAnnotators_ConstructsNVDWithTheAPIKeyFromEnv(t *testing.T) {
 func TestDBUpdateProviders_AmazonOnByDefault(t *testing.T) {
 	t.Setenv("AMAZON_ENABLE", "")
 	t.Setenv("REDHAT_ENABLE", "0") // isolate: only Amazon's own wiring is under test here
+	t.Setenv("SUSE_ENABLE", "0")
 
 	orig := newAmazonProvider
 	sawCall := false
@@ -1290,6 +1292,7 @@ func TestDBUpdateProviders_AmazonOnByDefault(t *testing.T) {
 func TestDBUpdateProviders_AmazonDisabledViaEnv(t *testing.T) {
 	t.Setenv("AMAZON_ENABLE", "0")
 	t.Setenv("REDHAT_ENABLE", "0")
+	t.Setenv("SUSE_ENABLE", "0")
 
 	orig := newAmazonProvider
 	sawCall := false
@@ -1319,6 +1322,7 @@ func TestDBUpdateProviders_OracleOnByDefault(t *testing.T) {
 	t.Setenv("ORACLE_ENABLE", "")
 	t.Setenv("REDHAT_ENABLE", "0") // isolate: only Oracle's own wiring is under test here
 	t.Setenv("AMAZON_ENABLE", "0")
+	t.Setenv("SUSE_ENABLE", "0")
 
 	orig := newOracleProvider
 	sawCall := false
@@ -1354,6 +1358,7 @@ func TestDBUpdateProviders_OracleDisabledViaEnv(t *testing.T) {
 	t.Setenv("ORACLE_ENABLE", "0")
 	t.Setenv("REDHAT_ENABLE", "0")
 	t.Setenv("AMAZON_ENABLE", "0")
+	t.Setenv("SUSE_ENABLE", "0")
 
 	orig := newOracleProvider
 	sawCall := false
@@ -1383,6 +1388,7 @@ func TestDBUpdateProviders_FedoraOnByDefault(t *testing.T) {
 	t.Setenv("REDHAT_ENABLE", "0") // isolate: only Fedora's own wiring is under test here
 	t.Setenv("AMAZON_ENABLE", "0")
 	t.Setenv("ORACLE_ENABLE", "0")
+	t.Setenv("SUSE_ENABLE", "0")
 
 	orig := newFedoraProvider
 	sawCall := false
@@ -1421,6 +1427,7 @@ func TestDBUpdateProviders_FedoraDisabledViaEnv(t *testing.T) {
 	t.Setenv("REDHAT_ENABLE", "0")
 	t.Setenv("AMAZON_ENABLE", "0")
 	t.Setenv("ORACLE_ENABLE", "0")
+	t.Setenv("SUSE_ENABLE", "0")
 
 	orig := newFedoraProvider
 	sawCall := false
@@ -1434,6 +1441,74 @@ func TestDBUpdateProviders_FedoraDisabledViaEnv(t *testing.T) {
 	for _, p := range ps {
 		if p.Name() == "Fedora Bodhi Updates" {
 			t.Errorf("dbUpdateProviders() = %+v, want no Fedora provider with FEDORA_ENABLE=0", ps)
+		}
+	}
+}
+
+// TestDBUpdateProviders_SUSEOnByDefault is the caller-first proof for D77's
+// wiring: dbUpdateProviders must actually construct the SUSE provider when
+// SUSE_ENABLE is unset, not merely have suse.New sitting unused in the
+// import list. Mirrors TestDBUpdateProviders_FedoraOnByDefault exactly, for
+// the identical reason its own doc comment gives: mutating the call site to
+// drop the provider (or its Options) compiles and would leave every other
+// test in this package green.
+func TestDBUpdateProviders_SUSEOnByDefault(t *testing.T) {
+	t.Setenv("SUSE_ENABLE", "")
+	t.Setenv("REDHAT_ENABLE", "0") // isolate: only SUSE's own wiring is under test here
+	t.Setenv("AMAZON_ENABLE", "0")
+	t.Setenv("ORACLE_ENABLE", "0")
+	t.Setenv("FEDORA_ENABLE", "0")
+
+	orig := newSUSEProvider
+	sawCall := false
+	var gotOpts suse.Options
+	newSUSEProvider = func(opts suse.Options) *suse.Provider {
+		sawCall, gotOpts = true, opts
+		return orig(opts)
+	}
+	defer func() { newSUSEProvider = orig }()
+
+	ps := dbUpdateProviders(io.Discard)
+	if !sawCall {
+		t.Fatal("dbUpdateProviders never constructed the SUSE provider -- SUSE_ENABLE defaults ON (D77)")
+	}
+	if gotOpts.Progress == nil {
+		t.Error("suse.New was constructed with a nil Progress -- the discard counts would go nowhere")
+	}
+	var found bool
+	for _, p := range ps {
+		if p.Name() == "SUSE CSAF VEX" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("dbUpdateProviders() = %+v, want it to include the SUSE provider", ps)
+	}
+}
+
+// TestDBUpdateProviders_SUSEDisabledViaEnv is the other half: an operator
+// who does not want to scan SLES or openSUSE Leap must be able to turn the
+// fetch off entirely, exactly as REDHAT_ENABLE=0, AMAZON_ENABLE=0,
+// ORACLE_ENABLE=0 and FEDORA_ENABLE=0 already let them.
+func TestDBUpdateProviders_SUSEDisabledViaEnv(t *testing.T) {
+	t.Setenv("SUSE_ENABLE", "0")
+	t.Setenv("REDHAT_ENABLE", "0")
+	t.Setenv("AMAZON_ENABLE", "0")
+	t.Setenv("ORACLE_ENABLE", "0")
+	t.Setenv("FEDORA_ENABLE", "0")
+
+	orig := newSUSEProvider
+	sawCall := false
+	newSUSEProvider = func(opts suse.Options) *suse.Provider { sawCall = true; return orig(opts) }
+	defer func() { newSUSEProvider = orig }()
+
+	ps := dbUpdateProviders(io.Discard)
+	if sawCall {
+		t.Error("suse.New was constructed even though SUSE_ENABLE=0")
+	}
+	for _, p := range ps {
+		if p.Name() == "SUSE CSAF VEX" {
+			t.Errorf("dbUpdateProviders() = %+v, want no SUSE provider with SUSE_ENABLE=0", ps)
 		}
 	}
 }

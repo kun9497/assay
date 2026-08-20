@@ -1226,7 +1226,9 @@ func advWithFixState(id, eco, name, introduced string, fs advisory.FixState, rt 
 // other FixState test in this file green because they never call Match.
 func TestMatch_FixStateFlowsFromRangeThroughToRating(t *testing.T) {
 	// A fix-less range carrying Red Hat's own "the vendor will not fix this"
-	// statement (D52) — the shape only Red Hat's CSAF VEX feed produces today.
+	// statement (D52) — the shape Red Hat's CSAF VEX feed produces, and since
+	// D77 SUSE's CSAF VEX feed too (TestMatch_FixStateFlowsFromRangeThroughToRating_SUSE
+	// below drives the identical path on an "SLES:" key).
 	wontFix := advWithFixState("RHSA-wontfix", "Red Hat:9", "openssl", "0",
 		advisory.FixStateWontFix, advisory.RangeEcosystem)
 	s := fakeStore{byKey: map[string][]advisory.Advisory{
@@ -1264,5 +1266,36 @@ func TestMatch_FixStateFlowsFromRangeThroughToRating(t *testing.T) {
 	}
 	if got := res2.Findings[0].Ratings[0].FixState; got != advisory.FixStateFixed {
 		t.Errorf("Rating.FixState = %q, want %q", got, advisory.FixStateFixed)
+	}
+}
+
+// TestMatch_FixStateFlowsFromRangeThroughToRating_SUSE is D77's caller-first
+// proof: the FixState machinery (D52) is generic, ecosystem-agnostic wiring
+// -- version.InRange, matcher.fixStateOf, Finding.FixState -- and this is
+// what proves it, by driving the identical Match path
+// TestMatch_FixStateFlowsFromRangeThroughToRating drives above, but through
+// an "SLES:" key rather than a "Red Hat:" one. Nothing in this package had
+// to change for SUSE's CSAF VEX provider (internal/provider/suse) to make
+// --fail-on-unfixable work on SLES: the range this test builds is exactly
+// the shape suse.convert emits for a known_affected entry with a
+// no_fix_planned remediation.
+func TestMatch_FixStateFlowsFromRangeThroughToRating_SUSE(t *testing.T) {
+	wontFix := advWithFixState("SUSE-wontfix", "SLES:15.SP6", "openssl", "0",
+		advisory.FixStateWontFix, advisory.RangeEcosystem)
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"SLES:15.SP6\x00openssl": {wontFix},
+	}}
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("openssl", "1.0.0-1.1", "SLES:15.SP6")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1", len(res.Findings))
+	}
+	if got := res.Findings[0].Ratings[0].FixState; got != advisory.FixStateWontFix {
+		t.Errorf("Rating.FixState = %q, want %q: the range's stored state must "+
+			"reach the rating unchanged", got, advisory.FixStateWontFix)
 	}
 }

@@ -588,12 +588,16 @@ func TestComparerName_AgreesWithVersionFor(t *testing.T) {
 		"Amazon Linux:2", "Amazon Linux:2023",
 		"Oracle Linux:8", "Oracle Linux:9", "Oracle Linux:10",
 		"Fedora:43", "Fedora:44",
+		"SLES:15.SP6", "SLES:12.SP5", "SLES:16.0",
+		"openSUSE Leap:15.6", "openSUSE Leap:16.0",
 		// Bare family names and empty releases resolve nowhere, by D6:
 		// letting one through would make a bug that dropped the release
 		// look like it worked.
 		"Alpine:", "Debian:", "Red Hat:", "Rocky Linux:", "AlmaLinux:", "Amazon Linux:", "Oracle Linux:", "Fedora:",
+		"SLES:", "openSUSE Leap:",
 		"Ubuntu:", "Ubuntu:Pro:22.04:LTS", "Ubuntu:Pro:FIPS-updates:18.04:LTS",
-		"Alpine", "Debian", "Red Hat", "Rocky Linux", "AlmaLinux", "Amazon Linux", "Oracle Linux", "Fedora", "bogus-eco",
+		"Alpine", "Debian", "Red Hat", "Rocky Linux", "AlmaLinux", "Amazon Linux", "Oracle Linux", "Fedora",
+		"SLES", "openSUSE Leap", "bogus-eco",
 	} {
 		_, ok := version.For(eco)
 		name := comparerName(eco)

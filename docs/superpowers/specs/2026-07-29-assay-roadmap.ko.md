@@ -2854,6 +2854,37 @@ comparer 라우팅. 이 슬라이스는 의도적으로 둘 다 건드리지 않
 
 ---
 
+### D77 — SUSE의 CSAF VEX에서 SLES와 openSUSE Leap, RPM 계열을 닫다
+
+**결정.** SLES와 openSUSE Leap을 SUSE의 CSAF VEX 피드에서 수집합니다(445 MB짜리
+`csaf-vex.tar.bz2`, D64에 따라 스풀하고, 가장 오래된 것부터 훑는 `changes.csv`로 델타를
+만듭니다), Red Hat CSAF 장치의 모양을 재사용합니다. 키: SUSE의 module별 제품 이름(원본
+393개 측정)을 `SLES:15.SPn` / `SLES:16.0`으로 접습니다; Leap은 `openSUSE Leap:15.6`에
+1:1로 매핑됩니다; Tumbleweed는 이름으로 거부합니다 — 롤링이라 키로 잡을 릴리스 축이
+없습니다. `ID=sles`/`opensuse-leap`이 경로를 잡고; `SUSE_ENABLE`은 기본으로 켜져
+있습니다. 이것으로 이 조사의 여섯 배포판짜리 RPM 계열이 닫힙니다(D71–D77, D76의 ndb
+백엔드 위에서).
+
+**바이트 단위 키 일치가 이 슬라이스의 핵심을 지탱하는 테스트입니다.** cataloger는
+os-release VERSION_ID에서 키를 이끌어내고(실제 bci-base 15.6, Leap 15.6, Tumbleweed
+이미지로 검증) provider는 제품 이름 접기에서 키를 이끌어냅니다; 한 글자만 어긋나도 조용한
+clean 판정이 되므로, 전용 테스트가 양쪽이 똑같은 문자열을 만드는지 단언합니다 — GA 키에
+가짜 `.SP0`을 심는 mutation은 red로 잡힙니다.
+
+**CSAF는 OSV 버킷 대신 스스로를 골랐습니다**: 그 버킷들은 측정해 보니 자기 자신의 출처보다
+13,432건 뒤처져 있었고, CSAF는 그것들이 담을 수 없는 것 — fix 상태 — 을 담습니다. SUSE의
+철자 별종들, 전부 실측(문서 63,784개 기준): `product_status.recommended`가 "fixed"를
+뜻하는 SUSE의 단어입니다(`fixed` 자체는 1,280만 항목 중 18건의 우연한 오타일 뿐입니다);
+product id당 콜론 하나, Red Hat식 module 컨텍스트는 없음; 신선도는 파일명이 절대 바뀌지
+않으므로 아카이브의 HTTP Last-Modified에서 옵니다.
+
+**단서를 붙일 값이 있는 fix-상태 발견**: 고칠 수 없는 SUSE 항목 567,501건 중 **99.96%가
+이유를 밝히지 않습니다** — Red Hat과는 정반대입니다, Red Hat은 미기재가 0건이니까요.
+`--fail-on-unfixable`은 SUSE에서도 동작하지만, `=wont-fix`는 SUSE가 굳이 분류해 둔 201건만
+잡습니다; README가 그 기능 바로 옆에서 그렇게 말합니다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모
