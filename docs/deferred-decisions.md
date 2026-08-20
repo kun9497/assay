@@ -114,26 +114,29 @@ wrong constraint is worse than one that names none: "needs a third dependency" r
 and stops anyone looking, where "nobody has written it" invites the twenty minutes it actually
 took. Before deferring on a constraint, measure the constraint.
 
-### Ecosystem coverage against grype — the six-fold gap
+### Ecosystem coverage against grype — the gap, remeasured
 
-grype ships **26 providers**; assay has **4** (OSV, Red Hat CSAF, NVD ratings, KISA
-enrichment). Measured 2026-08-13 from `grype db providers`: alma, alpine, amazon, arch,
-bitnami, chainguard, chainguard-libraries, debian, echo, eol, epss, fedora, github,
-govulndb, hummingbird, kev, mariner, minimos, nvd, oracle, photon, rhel, secureos, sles,
-ubuntu, wolfi.
+grype ships **26 providers**; assay had **4** when this entry was written (2026-08-13) and
+has **8** since the RPM-family series closed (OSV, Red Hat CSAF, Amazon ALAS, Oracle ELSA
+OVAL, Fedora Bodhi, SUSE CSAF, NVD ratings, KISA enrichment). grype's list for reference:
+alma, alpine, amazon, arch, bitnami, chainguard, chainguard-libraries, debian, echo, eol,
+epss, fedora, github, govulndb, hummingbird, kev, mariner, minimos, nvd, oracle, photon,
+rhel, secureos, sles, ubuntu, wolfi.
 
-**Why this entry exists.** The differential runs in this repo all agree with grype or beat
-it, and every one of them was taken on a distro assay covers. That is a selected sample and
-the README should not be read as saying otherwise: on Amazon Linux, Oracle, SLES, Photon,
-Wolfi, Mariner, Arch or a Java, Ruby, Rust, .NET or PHP application, **assay finds nothing at
-all**. Alma, Rocky and Fedora are catalogued and reported as not evaluated (D50), which is a
-loud refusal rather than a clean verdict, but it is still not support.
+**Why this entry stays.** The differential runs in this repo were all taken on ecosystems
+assay covers — a selected sample. The 2026-08-13 version of this entry said assay found
+nothing on Amazon Linux, Oracle, SLES, or a Java/Ruby/Rust/.NET/PHP application; D68–D79
+closed every one of those (language ecosystems D68–D70, the RPM family D71–D79). What is
+STILL true: on Photon, Wolfi, Chainguard, Mariner/Azure Linux, Arch, or the other boutique
+apk-family distros, **assay finds nothing at all** — those images are catalogued and
+reported as not evaluated, a loud refusal, not support. grype also ships enrichment feeds
+assay has no equivalent for: EPSS scores, KEV (known-exploited), and EOL data.
 
-**What each would take.** Not equal work. The language ecosystems are nearly free — OSV
-publishes Maven, RubyGems, crates.io, NuGet and Packagist archives in the same shape as the
-five already ingested, so the cost is a comparer per version scheme (D9) and a cataloger per
-manifest format. The RPM-family distros are the expensive ones: each needs its own advisory
-source, and D50 records why their packages must not be matched against Red Hat's errata.
+**What each would take.** The remaining distros are each their own advisory feed in their
+own format (Wolfi/Chainguard publish OSV-shaped advisories — likely the cheap ones; Photon
+and Mariner publish their own JSON/OVAL). EPSS/KEV are rating-shaped joins on CVE, the same
+mechanical shape as the NVD join (D27) — cheap to ingest, but each is a new decision about
+what the gate does with it.
 
 **Revisit when** a specific ecosystem has a reason to exist rather than as a coverage count.
 A comparer with no provider behind it is the shape D46 refused for RPM, and a provider with

@@ -103,23 +103,29 @@ D63부터 읽습니다. 바로 위 항목을 틀리게 썼기 때문에 남겨�
 나쁩니다. "세 번째 의존성이 필요하다"는 결론처럼 읽혀서 아무도 다시 안 보게 만들지만, "아무도 안
 썼다"는 실제로 걸린 20분을 부릅니다. 제약을 근거로 미루기 전에 그 제약을 측정하십시오.
 
-### grype 대비 생태계 커버리지 — 여섯 배 격차
+### grype 대비 생태계 커버리지 — 격차, 재측정
 
-grype는 **provider 26개**를 싣고, assay는 **4개**입니다(OSV, Red Hat CSAF, NVD 등급, KISA 보강).
-2026-08-13에 `grype db providers`로 측정: alma, alpine, amazon, arch, bitnami, chainguard,
-chainguard-libraries, debian, echo, eol, epss, fedora, github, govulndb, hummingbird, kev,
-mariner, minimos, nvd, oracle, photon, rhel, secureos, sles, ubuntu, wolfi.
+grype는 **provider 26개**를 싣고, assay는 이 항목을 쓴 시점(2026-08-13)에는 **4개**였다가
+RPM 계열 시리즈가 닫힌 뒤로는 **8개**입니다(OSV, Red Hat CSAF, Amazon ALAS, Oracle ELSA
+OVAL, Fedora Bodhi, SUSE CSAF, NVD 등급, KISA 보강). 참고로 grype의 목록: alma, alpine,
+amazon, arch, bitnami, chainguard, chainguard-libraries, debian, echo, eol, epss, fedora,
+github, govulndb, hummingbird, kev, mariner, minimos, nvd, oracle, photon, rhel, secureos,
+sles, ubuntu, wolfi.
 
-**이 항목이 있는 이유.** 이 저장소의 차분 결과는 전부 grype와 동률이거나 앞서는데, 그것들은 모두
-assay가 다루는 배포판에서 잰 것입니다. 선택된 표본이고 README가 다르게 읽히면 안 됩니다. Amazon
-Linux, Oracle, SLES, Photon, Wolfi, Mariner, Arch, 그리고 Java·Ruby·Rust·.NET·PHP 애플리케이션에서
-**assay는 아무것도 찾지 못합니다.** Alma·Rocky·Fedora는 카탈로그하고 평가 불가로 보고하지만(D50),
-그건 시끄러운 거부이지 지원이 아닙니다.
+**이 항목이 남아 있는 이유.** 이 저장소의 차분 실행은 전부 assay가 다루는 생태계에서 잰
+것입니다 — 선택된 표본입니다. 이 항목의 2026-08-13판은 Amazon Linux, Oracle, SLES, 또는
+Java/Ruby/Rust/.NET/PHP 애플리케이션에서 assay가 아무것도 찾지 못한다고 말했습니다; D68–D79가
+그 전부를 닫았습니다(언어 생태계는 D68–D70, RPM 계열은 D71–D79). 여전히 사실인 것: Photon,
+Wolfi, Chainguard, Mariner/Azure Linux, Arch, 그리고 그 밖의 소규모 apk 계열 배포판에서는
+**assay가 정말로 아무것도 찾지 못합니다** — 그 이미지들은 카탈로그되고 평가되지 않음으로
+보고됩니다, 시끄러운 거부이지 지원이 아닙니다. grype는 또한 assay에 대응물이 없는 보강
+피드도 싣습니다: EPSS 점수, KEV(known-exploited), EOL 데이터.
 
-**각각의 비용은 같지 않습니다.** 언어 생태계는 거의 공짜입니다 — OSV가 Maven, RubyGems,
-crates.io, NuGet, Packagist를 이미 수집 중인 다섯 개와 같은 모양으로 발행하므로, 비용은 버전 체계당
-comparer 하나(D9)와 매니페스트 형식당 카탈로거 하나입니다. 비싼 쪽은 RPM 계열 배포판입니다. 각자
-자기 advisory 출처가 필요하고, 그 패키지를 Red Hat errata에 맞추면 안 되는 이유는 D50에 있습니다.
+**각각에 무엇이 드는가.** 남은 배포판들은 각자 자기만의 형식으로 된 자기만의 advisory
+피드를 갖습니다(Wolfi/Chainguard는 OSV 모양의 advisory를 발행합니다 — 아마 싼 쪽일
+것입니다; Photon과 Mariner는 자체 JSON/OVAL을 발행합니다). EPSS/KEV는 CVE에 대한 rating
+모양의 조인이고, NVD 조인(D27)과 기계적으로 같은 모양입니다 — 수집 자체는 싸지만, 게이트가
+그것으로 무엇을 할지는 각각 새로운 결정입니다.
 
 **언제 다시 볼까.** 커버리지 숫자가 아니라 특정 생태계에 존재 이유가 생겼을 때. 뒤에 provider가 없는
 comparer는 D46이 RPM에 대해 거부한 모양이고, 측정된 수요 없는 provider는 값 없이 치르는 코퍼스
