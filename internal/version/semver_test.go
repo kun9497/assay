@@ -274,13 +274,18 @@ func TestNoUnbackedDistroComparer(t *testing.T) {
 	// shipped for Red Hat), so what had to arrive with the comparer was the
 	// release-qualified KEY, not new plumbing. AlmaLinux left it under D72
 	// for the identical reason — its own OSV provider is what arrived, not
-	// new rpmdb or Package.Source plumbing.
+	// new rpmdb or Package.Source plumbing. Amazon Linux left it under D73,
+	// for the identical reason again — its own ALAS provider
+	// (internal/provider/amazon) is what arrived, and D8 source indirection
+	// is not even needed for it (updateinfo enumerates binary package names
+	// directly, so no by-source lookup is on the critical path at all).
 	for _, eco := range []string{
-		"Alpine",      // unversioned: not a key we ever build (D6)
-		"Debian",      // likewise
-		"Red Hat",     // likewise -- the provider writes "Red Hat:9"
-		"Rocky Linux", // likewise -- the provider writes "Rocky Linux:9"
-		"AlmaLinux",   // likewise -- the provider writes "AlmaLinux:9"
+		"Alpine",       // unversioned: not a key we ever build (D6)
+		"Debian",       // likewise
+		"Red Hat",      // likewise -- the provider writes "Red Hat:9"
+		"Rocky Linux",  // likewise -- the provider writes "Rocky Linux:9"
+		"AlmaLinux",    // likewise -- the provider writes "AlmaLinux:9"
+		"Amazon Linux", // likewise -- the provider writes "Amazon Linux:2"
 	} {
 		if _, ok := For(eco); ok {
 			t.Errorf("For(%q) resolves, but nothing populates Package.Source for it. "+

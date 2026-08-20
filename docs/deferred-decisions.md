@@ -459,10 +459,11 @@ rpm's own read-only BerkeleyDB backend 850 lines of C is dead weight.
   streams of `container-tools`; taking the higher is a systematic false positive and taking the
   lower is a false negative.
 
-**~~AlmaLinux and Rocky Linux are not the easier path~~ — both resolved, Rocky in D71 and
-AlmaLinux in D72; Amazon Linux, Oracle Linux, Fedora and SLES remain open.** Both keyed
-on the major version only — three keys each, derivable from `/etc/os-release` — which is
-genuinely simpler. Neither Alma nor Rocky survived the rest, at the time:
+**~~AlmaLinux and Rocky Linux are not the easier path~~ — all three now resolved: Rocky in
+D71, AlmaLinux in D72, and Amazon Linux 2/2023 in D73; Oracle Linux, Fedora and SLES remain
+open.** Both keyed on the major version only — three keys each, derivable from
+`/etc/os-release` — which is genuinely simpler. Neither Alma nor Rocky survived the rest, at
+the time:
 
 - ~~**AlmaLinux carries zero `aliases` and zero `upstream` fields** across all 5,494 records.
   Every CVE reference is in `related`, which OSV defines as explicitly *not* an alias. Under D3
@@ -506,11 +507,11 @@ consumer supplying VEX to suppress findings, this one is about a vendor publishi
 affectedness.
 
 **Still deferred.** OVAL v2 as a second opinion (it covers RHEL 5–9 and has no RHEL 10, so it
-could never be the primary source); Amazon Linux, Oracle Linux, Fedora and SLES, whose
-objections above (or, for SLES, the ndb entry elsewhere in this document) are unchanged and
-which neither D50, D71 nor D72 routes; and closing the EUS/AUS/E4S divergence rather than
-disclosing it, which needs a channel signal no image carries. Rocky Linux and AlmaLinux are
-off this list — see D71 and D72.
+could never be the primary source); Oracle Linux, Fedora and SLES, whose objections above (or,
+for SLES, the ndb entry elsewhere in this document) are unchanged and which none of D50, D71,
+D72 or D73 routes; and closing the EUS/AUS/E4S divergence rather than disclosing it, which
+needs a channel signal no image carries. Rocky Linux, AlmaLinux and Amazon Linux are off this
+list — see D71, D72 and D73.
 
 **The five decisions this research forced now live in D71**, not here, because the next
 distro slices reuse them: reading `related` for CVE joins, scoped to distro-authored records;

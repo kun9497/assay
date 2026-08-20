@@ -115,17 +115,21 @@ func (d Distro) Ecosystem() (string, error) {
 		//     CentOS Stream, which runs AHEAD of it. A fixed version that has
 		//     not reached RHEL yet is already in Stream, so the same key would
 		//     be wrong in opposite directions for the two.
-		//   - fedora, amzn: different version schemes and their own advisory
-		//     feeds (FEDORA-*, ALAS-*). Red Hat's errata do not describe them.
+		//   - fedora: a different version scheme and its own advisory feed
+		//     (FEDORA-*). Red Hat's errata do not describe it.
+		//   - amzn: its own version scheme and its own advisory feed (ALAS-*)
+		//     too, but see the "amzn" case below — D73 gave it a provider of
+		//     its own rather than leaving it on this list forever.
 		//
-		// Rocky left this list under D71 below, and AlmaLinux under D72: each
-		// has its own OSV archive now, so neither needs (or wants) Red Hat's
-		// errata routed at it — module builds spelled `module_el` versus Red
-		// Hat's `module+el`, and Alma's own `.alma` release suffixes, were
-		// the hazard of matching Alma's installed versions against RED HAT's
+		// Rocky left this list under D71 below, AlmaLinux under D72, and
+		// Amazon Linux (AL2 and AL2023 only) under D73: each ingests from its
+		// own feed now, so none of them needs (or wants) Red Hat's errata
+		// routed at it — module builds spelled `module_el` versus Red Hat's
+		// `module+el`, and Alma's own `.alma` release suffixes, were the
+		// hazard of matching Alma's installed versions against RED HAT's
 		// advisory versions (docs/deferred-decisions.md still records that
 		// hazard, for anyone tempted to route Alma at Red Hat's feed instead
-		// of its own). Matching Alma's installed versions against Alma's OWN
+		// of its own). Matching a distro's installed versions against ITS OWN
 		// advisory versions has no such hazard: both sides come from the same
 		// build.
 		//
@@ -197,6 +201,26 @@ func (d Distro) Ecosystem() (string, error) {
 				ErrNoEcosystem, d.ID, d.VersionID)
 		}
 		return "AlmaLinux:" + major, nil
+	case "amzn":
+		// D73. One os-release ID spans four generations: AL1 (EOL, frozen
+		// RSS, VERSION_ID "2018.03"), AL2022 (abandoned preview, frozen
+		// 2023-01-31, VERSION_ID "2022"), AL2 ("2") and AL2023 ("2023") --
+		// and only the latter two have a provider at all
+		// (internal/provider/amazon's ALAS core feed; there is no OSV
+		// archive for any of them, measured 2026-08-19 against
+		// osv-vulnerabilities.storage.googleapis.com/ecosystems.txt).
+		// VERSION_ID is what tells the four apart; routing on ID alone would
+		// key an AL1 or AL2022 package against fixed versions built for a
+		// different release entirely.
+		switch d.VersionID {
+		case "2":
+			return "Amazon Linux:2", nil
+		case "2023":
+			return "Amazon Linux:2023", nil
+		default:
+			return "", fmt.Errorf("%w: distro %q version %q is not AL2 or AL2023 "+
+				"(AL1 and AL2022 have no provider)", ErrNoEcosystem, d.ID, d.VersionID)
+		}
 	default:
 		return "", fmt.Errorf("%w: distro %q is not supported yet", ErrNoEcosystem, d.ID)
 	}

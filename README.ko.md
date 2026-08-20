@@ -543,6 +543,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       밴드화합니다; CVE는 오직 `related`에만 있어 배포판이 직접 쓴 레코드로 범위를 좁혀
       읽습니다; ALBA/ALEA 버그 수정·개선 errata는 수집 시점에 버리고, 취약점을 담는 것은
       ALSA뿐입니다
+- [x] Amazon Linux 2/2023을 자기 updateinfo 저장소에서 (D73) — Red Hat 이후 첫 non-OSV
+      advisory provider; Medium/대소문자 표기 차이를 측정해 매핑; extras는 못 가져왔다고
+      공개
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건
@@ -743,10 +746,11 @@ none = no source records a version that fixes this; mitigate or remove the packa
 올릴 수 있는 패키지를 제거하라고 말하는 것은 아무 말도 안 하는 것보다 나쁩니다.
 
 `Red Hat:N`으로 가는 것은 `rhel`뿐입니다(D50); Rocky Linux는 `Rocky Linux:N`으로(D71),
-AlmaLinux는 `AlmaLinux:N`으로(D72) 갑니다 — 각자 자기만의 OSV 아카이브만을 상대하지, Red
-Hat의 것도 서로의 것도 상대하지 않습니다. `centos`는 RHEL을 뒤따른 제품과 앞서 가는 제품을
-한 ID로 덮으며, Fedora와 Amazon Linux는 자기 피드가 있습니다 — 이들은 여전히 카탈로그되고
-평가되지 않음으로 보고됩니다. 시끄러운 skip이지 깨끗한 판정이 아닙니다.
+AlmaLinux는 `AlmaLinux:N`으로(D72), Amazon Linux 2/2023은 `Amazon Linux:2` /
+`Amazon Linux:2023`으로(D73) 갑니다 — 각자 자기만의 advisory 피드만 상대하지, Red Hat의 것도
+서로의 것도 상대하지 않습니다. `centos`는 RHEL을 뒤따른 제품과 앞서 가는 제품을 한 ID로
+덮으며, Fedora는 여전히 자기 피드가 있습니다 — Fedora는 Amazon Linux 1, AL2022와 함께 여전히
+카탈로그되고 평가되지 않음으로 보고됩니다. 시끄러운 skip이지 깨끗한 판정이 아닙니다.
 
 Rocky의 판정은 Rocky가 발행한 것에 한해 깨끗하다는 뜻입니다: 그 피드는 errata뿐이고 RHSA보다
 얇게 측정되며(regreSSHion 권고가 아예 없습니다), module 빌드로 얻는 fix는 stream까지 매칭하지
@@ -756,6 +760,10 @@ AlmaLinux 심각도는 점수가 아니라 벤더 자신의 단어(Critical/Impo
 연결은 `aliases`나 `upstream`이 아니라 `related`를 통해 이루어집니다 — 둘 다 무손실로
 저장되고 올바르게 읽히지만(D72), Red Hat이나 Rocky 판정과 비교해 유난히 단어 위주로 보일 때
 알아 두면 좋습니다.
+
+Amazon의 판정은 core 저장소로만 한정되며, 그 축소는 감추지 않고 공개합니다: AL2의 extras
+저장소 73개(advisory 964건 — docker, ecs, 커널 라이브패치)는 가져오지 않고, `db build`가 그
+구멍을 나중에 스캔에서 발견되게 두는 대신 빌드 시점에 찍어 보여줍니다.
 
 - [ ] EUS 호스트의 `Red Hat:N` 스캔은 여전히 메인라인 fixed 버전을 인용합니다. 2026-08-11 측정:
       달라지는 155,549개 그룹 중 149,726개(96.3%)에서 오류는 **오탐** 방향 — 시끄러운 쪽 — 이고

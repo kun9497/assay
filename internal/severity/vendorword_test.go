@@ -22,6 +22,10 @@ func TestOf_VendorWord(t *testing.T) {
 		{"Critical", Critical, 9.0},
 		{"Important", High, 7.0},
 		{"Moderate", Medium, 4.0},
+		// D73: Amazon Linux's own spelling for the same band, added
+		// alongside "Moderate" rather than replacing it -- see
+		// vendorSeverityWords' own comment for why both keys stay.
+		{"Medium", Medium, 4.0},
 		{"Low", Low, 0.1},
 	} {
 		b, score, err := Of(tt.word)
@@ -55,7 +59,11 @@ func TestOf_VendorWord(t *testing.T) {
 // consistently, so silently folding case would risk matching a coincidental
 // lowercase word in an unrelated sentence fragment.
 func TestOf_UnrecognizedVendorWordIsUnscorable(t *testing.T) {
-	for _, word := range []string{"Sev4", "critical", "IMPORTANT", "Info", ""} {
+	// "medium" (lowercase) is Amazon Linux's own AL2 spelling (D73) -- proving
+	// it is NOT recognized here is what makes internal/provider/amazon's own
+	// normalizeSeverityWord (which title-cases it before storage) load-bearing
+	// rather than redundant.
+	for _, word := range []string{"Sev4", "critical", "IMPORTANT", "Info", "medium", ""} {
 		b, score, err := Of(word)
 		if err == nil {
 			t.Errorf("Of(%q) returned no error, want ErrUnscorable", word)
