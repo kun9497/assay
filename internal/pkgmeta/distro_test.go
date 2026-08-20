@@ -47,7 +47,6 @@ func TestDistroEcosystem_Unsupported(t *testing.T) {
 		// these, deleting `d.ID != "alpine"` leaves the suite green and
 		// Distro{ID: "ubuntu", VersionID: "22.04"} yields "Alpine:v22.04".
 		{"unsupported distro", Distro{ID: "gentoo", VersionID: "40"}},
-		{"unsupported distro with a parseable version", Distro{ID: "opensuse-leap", VersionID: "15.6"}},
 		// D50. These are RPM distributions whose packages ARE catalogued, and
 		// they must still not resolve: Red Hat's errata describe Red Hat's own
 		// builds and nobody else's.
@@ -118,6 +117,22 @@ func TestDistroEcosystem_Unsupported(t *testing.T) {
 		// ecosystem for either. A scan of one must say it could not be checked.
 		{"debian testing has no VERSION_ID", Distro{ID: "debian", VersionID: ""}},
 		{"debian with a non-numeric version", Distro{ID: "debian", VersionID: "trixie"}},
+		// D77 gave SLES and openSUSE Leap their decision, so the same
+		// no-VERSION_ID and non-numeric-VERSION_ID edge cases every other RPM
+		// distro's decision needed apply to them too.
+		{"sles with no VERSION_ID", Distro{ID: "sles", VersionID: ""}},
+		{"sles with a non-numeric version", Distro{ID: "sles", VersionID: "beta"}},
+		{"sles major only, no minor to read the SP number from", Distro{ID: "sles", VersionID: "15"}},
+		{"opensuse-leap with no VERSION_ID", Distro{ID: "opensuse-leap", VersionID: ""}},
+		{"opensuse-leap with a non-numeric version", Distro{ID: "opensuse-leap", VersionID: "beta"}},
+		// Tumbleweed is refused by NAME, not by version shape (D77) — pinned
+		// here with a version that would otherwise parse as a perfectly good
+		// X.Y release, and again with its REAL VERSION_ID (a build date,
+		// verified by pulling docker.io/opensuse/tumbleweed:latest 2026-08-20)
+		// to prove the refusal does not depend on the version failing to parse.
+		{"opensuse-tumbleweed refuses even a version shaped like a release", Distro{ID: "opensuse-tumbleweed", VersionID: "15.6"}},
+		{"opensuse-tumbleweed's real VERSION_ID is a build date, not a release", Distro{ID: "opensuse-tumbleweed", VersionID: "20260818"}},
+		{"opensuse-tumbleweed with no VERSION_ID at all", Distro{ID: "opensuse-tumbleweed", VersionID: ""}},
 		{"no id", Distro{ID: "", VersionID: "3.19"}},
 	}
 	for _, tt := range tests {
@@ -526,4 +541,103 @@ func TestDistroEcosystem_Fedora(t *testing.T) {
 	}
 	// The no-VERSION_ID and non-numeric-VERSION_ID refusals are pinned in
 	// TestDistroEcosystem_Unsupported, alongside rhel's identical two rows.
+}
+
+// TestDistroEcosystem_SLES: D77. SLES left D50's not-evaluated list once
+// SUSE's own CSAF VEX feed was ingested (internal/provider/suse) — the ndb
+// rpmdb backend D76 built made a SLES image catalogable at all, and this is
+// the advisory half D76's own doc comment left open.
+//
+// VERSION_ID's minor digit is the SP number for every release below 16
+// (verified against a real 15.6 image); "N.0" is the bare, pre-SP1 release
+// and drops the ".SP0" the same way the CSAF feed's own product name does
+// ("SUSE Linux Enterprise Server 15", not "... 15 SP0"). 16 and up carry
+// VERSION_ID through verbatim because the feed's own product names already
+// dropped the "SPn" wording there ("SUSE Linux Enterprise Server 16.0").
+func TestDistroEcosystem_SLES(t *testing.T) {
+	for _, tc := range []struct {
+		versionID string
+		want      string
+	}{
+		{"15.6", "SLES:15.SP6"},
+		{"15.0", "SLES:15"},
+		{"15.7", "SLES:15.SP7"},
+		{"12.5", "SLES:12.SP5"},
+		{"12.0", "SLES:12"},
+		{"11.4", "SLES:11.SP4"},
+		{"16.0", "SLES:16.0"},
+		{"16.1", "SLES:16.1"},
+	} {
+		got, err := Distro{ID: "sles", VersionID: tc.versionID}.Ecosystem()
+		if err != nil {
+			t.Errorf("VERSION_ID=%q: %v", tc.versionID, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("VERSION_ID=%q -> %q, want %q", tc.versionID, got, tc.want)
+		}
+	}
+	// SLES's key must not converge with any other RPM distro's, openSUSE
+	// Leap's, or Alpine's -- a change that collapsed them would make one
+	// distro's advisories reachable under another's key.
+	for _, tc := range []struct{ id, versionID, want string }{
+		{"alpine", "3.19", "Alpine:v3.19"},
+		{"rhel", "9.8", "Red Hat:9"},
+		{"rocky", "9.4", "Rocky Linux:9"},
+		{"almalinux", "9.6", "AlmaLinux:9"},
+		{"amzn", "2023", "Amazon Linux:2023"},
+		{"ol", "9.8", "Oracle Linux:9"},
+		{"fedora", "44", "Fedora:44"},
+		{"sles", "15.6", "SLES:15.SP6"},
+		{"opensuse-leap", "15.6", "openSUSE Leap:15.6"},
+	} {
+		if got, err := (Distro{ID: tc.id, VersionID: tc.versionID}).Ecosystem(); err != nil || got != tc.want {
+			t.Errorf("%s %s -> %q, %v; want %q", tc.id, tc.versionID, got, err, tc.want)
+		}
+	}
+	// centos must still not resolve (D50) -- SLES leaving the not-evaluated
+	// list must not have been a change to the switch's default case that
+	// accidentally let every RPM ID through.
+	if _, err := (Distro{ID: "centos", VersionID: "9"}).Ecosystem(); err == nil {
+		t.Error("centos resolved an ecosystem; D50 still excludes it")
+	}
+	// The no-VERSION_ID and non-numeric-VERSION_ID refusals are pinned in
+	// TestDistroEcosystem_Unsupported, alongside rhel's identical two rows.
+}
+
+// TestDistroEcosystem_OpenSUSELeap: D77. Unlike SLES, openSUSE Leap's CSAF
+// product names ("openSUSE Leap 15.6") match /etc/os-release's VERSION_ID
+// 1:1 -- verified against a real docker.io/opensuse/leap:15.6 image -- so
+// the key is the family prefix plus VERSION_ID verbatim, no per-module fold.
+func TestDistroEcosystem_OpenSUSELeap(t *testing.T) {
+	for _, tc := range []struct {
+		versionID string
+		want      string
+	}{
+		{"15.6", "openSUSE Leap:15.6"},
+		{"15.0", "openSUSE Leap:15.0"},
+		{"16.0", "openSUSE Leap:16.0"},
+	} {
+		got, err := Distro{ID: "opensuse-leap", VersionID: tc.versionID}.Ecosystem()
+		if err != nil {
+			t.Errorf("VERSION_ID=%q: %v", tc.versionID, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("VERSION_ID=%q -> %q, want %q", tc.versionID, got, tc.want)
+		}
+	}
+	// A bare major with no minor must not silently truncate to "openSUSE
+	// Leap:15" the way SLES's below-16 branch truncates a bare SP0 -- Leap's
+	// key keeps the full VERSION_ID unconditionally, so a dotless VERSION_ID
+	// is a shape this branch has never seen rather than one to normalize.
+	if got, err := (Distro{ID: "opensuse-leap", VersionID: "15"}).Ecosystem(); err == nil {
+		t.Errorf("opensuse-leap VERSION_ID=15 resolved to %q, want a refusal -- there is no minor to read", got)
+	}
+	// opensuse-tumbleweed must never resolve, whatever VERSION_ID it is given
+	// (pinned with several shapes in TestDistroEcosystem_Unsupported) -- it is
+	// a rolling release refused by ID, not by a version that fails to parse.
+	if _, err := (Distro{ID: "opensuse-tumbleweed", VersionID: "15.6"}).Ecosystem(); err == nil {
+		t.Error("opensuse-tumbleweed resolved an ecosystem with a release-shaped VERSION_ID; it must always be refused")
+	}
 }

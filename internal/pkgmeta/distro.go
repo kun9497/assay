@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -272,6 +273,78 @@ func (d Distro) Ecosystem() (string, error) {
 				ErrNoEcosystem, d.ID, d.VersionID)
 		}
 		return "Fedora:" + d.VersionID, nil
+	case "sles":
+		// D77. SLES ingests from SUSE's own CSAF VEX feed (internal/provider/suse),
+		// keyed on the release the way D47 keyed Red Hat's — but SUSE spreads one
+		// release's advisories over ~20 per-module product names in the raw feed
+		// ("SUSE Linux Enterprise Module for Basesystem 15 SP6" etc.), which the
+		// provider folds into ONE key per release at ingestion (suse.foldKey).
+		// This side of the key has to land on the exact same string byte for
+		// byte, or every SLES scan looks up a key nothing was ever stored under
+		// and reports clean (D20 turns that into a whole-ecosystem skip instead,
+		// but only if the two sides genuinely disagree in a way that resolves to
+		// NO key at all — a MISMATCHED key is silent, which is why
+		// TestDistroEcosystem_SLES cross-checks this against suse.foldKey's own
+		// table rather than trusting the two were written consistently).
+		//
+		// Verified against a real image (registry.suse.com/bci/bci-base:15.6,
+		// pulled 2026-08-20): NAME="SLES", VERSION_ID="15.6",
+		// PRETTY_NAME="SUSE Linux Enterprise Server 15 SP6". The minor digit IS
+		// the SP number for every release SLES has shipped as "N SPm" in the CSAF
+		// product tree (measured across the whole 2026-08-19 CSAF VEX archive:
+		// SP0 through SP7 on 15.x, SP1 through SP5 on 12.x, SP1 through SP4 on
+		// 11.x) — "15.0" is the bare, pre-SP1 release the feed calls
+		// "SUSE Linux Enterprise Server 15" with no suffix at all, which is why a
+		// minor of "0" drops the ".SP0" rather than keeping it.
+		//
+		// SLES 16 broke that pattern: the feed's own product names are already
+		// "SUSE Linux Enterprise Server 16.0" / "16.1" (no "SPn" wording anywhere,
+		// sampled from the live CSAF archive — no 16.x image has been pulled to
+		// verify os-release independently, so VERSION_ID "16.0" is inferred from
+		// the CPE the feed carries, cpe:/o:suse:sles:16:16.0:server, not
+		// image-verified the way 15.6 is), so major 16 and up are carried through
+		// VERSION_ID verbatim instead of being reshaped into "SPn".
+		if d.VersionID == "" {
+			return "", fmt.Errorf("%w: distro %q has no VERSION_ID", ErrNoEcosystem, d.ID)
+		}
+		major, minor, ok := strings.Cut(d.VersionID, ".")
+		if !ok || !allDigits(major) || !allDigits(minor) {
+			return "", fmt.Errorf("%w: distro %q version %q is not an X.Y release",
+				ErrNoEcosystem, d.ID, d.VersionID)
+		}
+		if n, err := strconv.Atoi(major); err == nil && n >= 16 {
+			return "SLES:" + d.VersionID, nil
+		}
+		if minor == "0" {
+			return "SLES:" + major, nil
+		}
+		return "SLES:" + major + ".SP" + minor, nil
+	case "opensuse-leap":
+		// D77. openSUSE Leap's os-release VERSION_ID ("15.6", verified by
+		// pulling docker.io/opensuse/leap:15.6 2026-08-20: NAME="openSUSE Leap",
+		// ID="opensuse-leap", VERSION_ID="15.6") matches the CSAF feed's own
+		// product name 1:1 ("openSUSE Leap 15.6") — no per-module fold needed,
+		// only the family prefix, unlike SLES above.
+		if d.VersionID == "" {
+			return "", fmt.Errorf("%w: distro %q has no VERSION_ID", ErrNoEcosystem, d.ID)
+		}
+		major, minor, ok := strings.Cut(d.VersionID, ".")
+		if !ok || !allDigits(major) || !allDigits(minor) {
+			return "", fmt.Errorf("%w: distro %q version %q is not an X.Y release",
+				ErrNoEcosystem, d.ID, d.VersionID)
+		}
+		return "openSUSE Leap:" + d.VersionID, nil
+	case "opensuse-tumbleweed":
+		// D77. Refused by NAME, not by version shape: Tumbleweed is a rolling
+		// release with no stable release axis to key on (SUSE's CSAF feed
+		// carries its advisories under the single unqualified "openSUSE
+		// Tumbleweed" product, which the provider refuses to fold for the same
+		// reason). Verified by pulling docker.io/opensuse/tumbleweed:latest
+		// 2026-08-20: VERSION_ID is a build date ("20260818"), not a release —
+		// even if that happened to parse as an X.Y version it must never resolve
+		// a key, so this is refused before the version is even inspected.
+		return "", fmt.Errorf("%w: distro %q is a rolling release with no stable "+
+			"release to key advisories on", ErrNoEcosystem, d.ID)
 	default:
 		return "", fmt.Errorf("%w: distro %q is not supported yet", ErrNoEcosystem, d.ID)
 	}

@@ -82,10 +82,10 @@ type FixState string
 const (
 	// FixStateUnknown is a state rather than a default (the discipline D17 sets
 	// for severity). A fix-less range from a source that does not publish a
-	// reason gets this and keeps it: every provider except Red Hat's CSAF VEX
-	// feed is in that position today, and coercing them to NotFixed would put
-	// words in their mouth — OSV records that no fix is known, not that a
-	// vendor intends one.
+	// reason gets this and keeps it: every provider except Red Hat's and
+	// SUSE's CSAF VEX feeds (D52, D77) is in that position today, and coercing
+	// them to NotFixed would put words in their mouth — OSV records that no
+	// fix is known, not that a vendor intends one.
 	//
 	// A STORED range spells it as the empty string, which is what the zero
 	// value and `omitempty` give for free; unknown is the overwhelmingly common

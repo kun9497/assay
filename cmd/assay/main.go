@@ -22,6 +22,7 @@ import (
 	"github.com/kun9497/assay/internal/provider/oracle"
 	"github.com/kun9497/assay/internal/provider/osv"
 	"github.com/kun9497/assay/internal/provider/redhat"
+	"github.com/kun9497/assay/internal/provider/suse"
 	"github.com/kun9497/assay/internal/scancmd"
 	"github.com/kun9497/assay/internal/severity"
 	"github.com/kun9497/assay/internal/store"
@@ -601,21 +602,28 @@ var newOracleProvider = oracle.New
 // — the live bodhi.fedoraproject.org feed — ever being fetched from.
 var newFedoraProvider = fedora.New
 
+// newSUSEProvider constructs the SUSE CSAF VEX provider (D77). A package
+// variable for the same reason newRedHatProvider, newAmazonProvider,
+// newOracleProvider and newFedoraProvider are: a test can substitute a spy
+// and observe the Options that reached construction, without suse.New's
+// default BaseURL — the live 445 MB archive — ever being fetched from.
+var newSUSEProvider = suse.New
+
 // dbUpdateProviders is every provider.Provider `db build` runs.
 //
-// All five are on by default. Red Hat was opt-in when it landed, on the
+// All six are on by default. Red Hat was opt-in when it landed, on the
 // grounds that it adds ~1.9 million affected entries for people who may
 // never scan a RHEL image — and D51 reversed that once the published
-// artifact started carrying it. Amazon Linux, Oracle Linux and Fedora
-// followed the same reasoning from the start (D73, D74, D75) rather than
-// repeating Red Hat's opt-in-then-reverse path: the published artifact is
-// meant to carry each of them, and a default that disagreed with the
+// artifact started carrying it. Amazon Linux, Oracle Linux, Fedora and SUSE
+// followed the same reasoning from the start (D73, D74, D75, D77) rather
+// than repeating Red Hat's opt-in-then-reverse path: the published artifact
+// is meant to carry each of them, and a default that disagreed with the
 // artifact would mean `db build` and `db update` produce different
 // databases, and `db push` would refuse the narrower one.
 //
-// REDHAT_ENABLE=0, AMAZON_ENABLE=0, ORACLE_ENABLE=0 and FEDORA_ENABLE=0
-// still turn each off, for a local build that wants to be shorter and does
-// not care about that distro.
+// REDHAT_ENABLE=0, AMAZON_ENABLE=0, ORACLE_ENABLE=0, FEDORA_ENABLE=0 and
+// SUSE_ENABLE=0 still turn each off, for a local build that wants to be
+// shorter and does not care about that distro.
 func dbUpdateProviders(stderr io.Writer) []provider.Provider {
 	ps := []provider.Provider{osv.New(osv.Ecosystems, "")}
 	if envFlag(stderr, "REDHAT_ENABLE", true) {
@@ -642,6 +650,13 @@ func dbUpdateProviders(stderr io.Writer) []provider.Provider {
 		// "silently drops/narrows part of its input" case every other
 		// provider's Progress line exists for.
 		ps = append(ps, newFedoraProvider(fedora.Options{Progress: stderr}))
+	}
+	if envFlag(stderr, "SUSE_ENABLE", true) {
+		// Progress goes to stderr for the same reason: this provider discards
+		// the large majority of what it reads (SAP, HPC, Micro, Manager,
+		// Storage and every other product sharing SLES's namespace), the
+		// identical shape Red Hat's own discard line exists for.
+		ps = append(ps, newSUSEProvider(suse.Options{Progress: stderr}))
 	}
 	return ps
 }

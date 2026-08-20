@@ -555,6 +555,8 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] ndb rpmdb 백엔드(D76) — openSUSE와 SLES 자신만의 패키지 데이터베이스 컨테이너 포맷으로,
       BerkeleyDB와 SQLite(D44)에 이은 세 번째; 카탈로징만 하며 SUSE advisory 피드는 아직 없음,
       실제 SLES/BCI 이미지로 검증(패키지 138개, skip 0건)
+- [x] SLES와 openSUSE Leap을 SUSE CSAF VEX에서 (D77) — advisory 40,221건, RHEL 이후 처음
+      나온 fix 상태, 바이트 단위 키 일치를 고정; RPM 계열이 닫힘
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건
@@ -759,11 +761,13 @@ none = no source records a version that fixes this; mitigate or remove the packa
 `Red Hat:N`으로 가는 것은 `rhel`뿐입니다(D50); Rocky Linux는 `Rocky Linux:N`으로(D71),
 AlmaLinux는 `AlmaLinux:N`으로(D72), Amazon Linux 2/2023은 `Amazon Linux:2` /
 `Amazon Linux:2023`으로(D73), Oracle Linux 5–10은 `Oracle Linux:<major>`로(D74), Fedora의
-현재 릴리스는 `Fedora:<release>`로(D75) 갑니다 — 각자 자기만의 advisory 피드만 상대하지, Red
-Hat의 것도 서로의 것도 상대하지 않습니다. `centos`는 RHEL을 뒤따른 제품과 앞서 가는 제품을
-한 ID로 덮습니다 — 여전히 카탈로그되고 평가되지 않음으로 보고되며, Amazon Linux 1, AL2022,
-그리고 13개월 EOL을 지난 Fedora 릴리스도 마찬가지입니다. 시끄러운 skip이지 깨끗한 판정이
-아닙니다.
+현재 릴리스는 `Fedora:<release>`로(D75), SLES 15.x/16.0과 openSUSE Leap은
+`SLES:15.SPn` / `SLES:16.0` / `openSUSE Leap:15.6`로(D77) 갑니다 — 각자 자기만의 advisory
+피드만 상대하지, Red Hat의 것도 서로의 것도 상대하지 않습니다 — openSUSE Tumbleweed는
+경로를 잡는 대신 이름으로 거부합니다. 롤링 릴리스는 키로 잡을 릴리스 축이 없기 때문입니다.
+`centos`는 RHEL을 뒤따른 제품과 앞서 가는 제품을 한 ID로 덮습니다 — 여전히 카탈로그되고
+평가되지 않음으로 보고되며, Amazon Linux 1, AL2022, 그리고 13개월 EOL을 지난 Fedora
+릴리스도 마찬가지입니다. 시끄러운 skip이지 깨끗한 판정이 아닙니다.
 
 Rocky의 판정은 Rocky가 발행한 것에 한해 깨끗하다는 뜻입니다: 그 피드는 errata뿐이고 RHSA보다
 얇게 측정되며(regreSSHion 권고가 아예 없습니다), module 빌드로 얻는 fix는 stream까지 매칭하지
@@ -781,6 +785,9 @@ Amazon의 판정은 core 저장소로만 한정되며, 그 축소는 감추지 �
 Fedora의 판정은 공개된 한계 두 가지를 물려받습니다: Bodhi 업데이트 산문에서 CVE를 뽑아내는
 것은 측정된 상한 81.7%에서 멈추고, EOL된 릴리스의 advisory는 스캔을 막는 대신 그 자리에서
 얼어붙습니다 — `db build`가 나중에 발견되게 두는 대신 둘 다 빌드 시점에 찍어 보여줍니다.
+
+SUSE에서는 `--fail-on-unfixable`이 동작하지만 `=wont-fix`는 SUSE가 분류해 둔 것만 잡습니다
+— fix 없는 항목의 99.96%가 이유를 밝히지 않으며(측정값), 이는 Red Hat과는 정반대입니다.
 
 - [ ] EUS 호스트의 `Red Hat:N` 스캔은 여전히 메인라인 fixed 버전을 인용합니다. 2026-08-11 측정:
       달라지는 155,549개 그룹 중 149,726개(96.3%)에서 오류는 **오탐** 방향 — 시끄러운 쪽 — 이고

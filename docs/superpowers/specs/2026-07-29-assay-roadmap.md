@@ -3075,6 +3075,36 @@ therefore `pkgmeta.Distro.Ecosystem()` keys and `version.For` comparer routing f
 
 ---
 
+### D77 — SLES and openSUSE Leap from SUSE's CSAF VEX, closing the RPM family
+
+**Decision.** SLES and openSUSE Leap are ingested from SUSE's CSAF VEX feed (the 445 MB
+`csaf-vex.tar.bz2`, spooled per D64, delta'd via an oldest-first `changes.csv`), reusing the
+Red Hat CSAF machinery's shape. Keys: SUSE's per-module product names (393 measured raw)
+fold to `SLES:15.SPn` / `SLES:16.0`; Leap maps 1:1 to `openSUSE Leap:15.6`; Tumbleweed is
+refused by name — rolling, no release axis to key on. `ID=sles`/`opensuse-leap` route;
+`SUSE_ENABLE` on by default. This closes the research's six-distro RPM family (D71–D77,
+over D76's ndb backend).
+
+**The byte-for-byte key agreement is the slice's load-bearing test.** The cataloger derives
+keys from os-release VERSION_ID (verified against real bci-base 15.6, Leap 15.6 and
+Tumbleweed images) and the provider from product-name folds; a one-character disagreement
+is a silent clean verdict, so a dedicated test asserts both sides produce identical strings
+— and a mutation planting a spurious `.SP0` on the GA key goes red.
+
+**CSAF chose itself over the OSV buckets**: the buckets were measured 13,432 records behind
+their own source, and CSAF carries what they cannot — fix states. SUSE's spelling quirks,
+all measured at full scale (63,784 documents): `product_status.recommended` is its word for
+"fixed" (`fixed` itself is 18 stray typos in 12.8M entries); one colon per product id, no
+Red-Hat-style module context; freshness comes from the archive's HTTP Last-Modified because
+the filename never changes.
+
+**The fix-state finding worth a caveat**: of 567,501 unfixable SUSE entries, **99.96% state
+no reason** — the inverse of Red Hat, where unstated is zero. `--fail-on-unfixable` works
+on SUSE, but `=wont-fix` catches only the 201 entries SUSE bothered to classify; the README
+says so next to the feature.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

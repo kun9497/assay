@@ -163,6 +163,21 @@ func For(ecosystem string) (Comparer, bool) {
 	if rel, ok := strings.CutPrefix(ecosystem, "Fedora:"); ok && rel != "" {
 		return RPM{}, true
 	}
+	// D77. SLES and openSUSE Leap are RPM too -- SUSE's own CSAF VEX feed
+	// (internal/provider/suse) folds SLES's per-module product names into
+	// release-qualified keys ("SLES:15.SP6") and openSUSE Leap's map 1:1
+	// ("openSUSE Leap:15.6"), and rpmvercmp does not care which distro built
+	// the package. Same rule, same reason as the six clauses above: neither
+	// bare family name is a key this project ever builds -- distro.go writes
+	// "SLES:"+the derived release and "openSUSE Leap:"+VERSION_ID -- and
+	// resolving the bare form would make a bug that drops the release look
+	// like it worked.
+	if rel, ok := strings.CutPrefix(ecosystem, "SLES:"); ok && rel != "" {
+		return RPM{}, true
+	}
+	if rel, ok := strings.CutPrefix(ecosystem, "openSUSE Leap:"); ok && rel != "" {
+		return RPM{}, true
+	}
 	// D53. Ubuntu is dpkg, so the comparer D40 wrote for Debian handles its
 	// revisions (2.4.4-2ubuntu17.10) unchanged — the version scheme was never
 	// the blocker. The KEY was.

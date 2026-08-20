@@ -579,6 +579,9 @@ exited 0 while 24 findings went unmentioned. **Done.**
 - [x] ndb rpmdb backend (D76) — openSUSE's and SLES's own package-database container
       format, the third alongside BerkeleyDB and SQLite (D44); cataloging only, no SUSE
       advisory feed yet, verified against a real SLES/BCI image (138 packages, 0 skipped)
+- [x] SLES and openSUSE Leap from SUSE CSAF VEX (D77) — 40,221 advisories, fix states
+      beyond RHEL for the first time, byte-for-byte key agreement pinned; the RPM family
+      closes
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a
@@ -812,12 +815,14 @@ worse than saying nothing.
 
 Only `rhel` routes to `Red Hat:N` (D50); Rocky Linux routes to `Rocky Linux:N` (D71),
 AlmaLinux to `AlmaLinux:N` (D72), Amazon Linux 2/2023 to `Amazon Linux:2` /
-`Amazon Linux:2023` (D73), Oracle Linux 5–10 to `Oracle Linux:<major>` (D74), and Fedora's
-current releases to `Fedora:<release>` (D75), each against its OWN advisory feed, never
-against Red Hat's or each other's. `centos` covers one product that trailed RHEL and another
-that runs ahead of it — still catalogued and reported as not evaluated, alongside Amazon
-Linux 1, AL2022 and any Fedora release past its 13-month EOL, a loud skip, never a clean
-verdict.
+`Amazon Linux:2023` (D73), Oracle Linux 5–10 to `Oracle Linux:<major>` (D74), Fedora's
+current releases to `Fedora:<release>` (D75), and SLES 15.x/16.0 plus openSUSE Leap to
+`SLES:15.SPn` / `SLES:16.0` / `openSUSE Leap:15.6` (D77), each against its OWN advisory
+feed, never against Red Hat's or each other's — openSUSE Tumbleweed is refused by name
+rather than routed, since a rolling release has no release axis to key on. `centos` covers
+one product that trailed RHEL and another that runs ahead of it — still catalogued and
+reported as not evaluated, alongside Amazon Linux 1, AL2022 and any Fedora release past its
+13-month EOL, a loud skip, never a clean verdict.
 
 A Rocky verdict is clean-of-what-Rocky-published: its feed is errata-only and measured
 thinner than RHSA's (no regreSSHion advisory at all), and module-build fixes are skipped and
@@ -837,6 +842,9 @@ A Fedora verdict inherits two disclosed limits: CVE extraction from Bodhi's upda
 tops out at a measured 81.7%, and an EOL'd release's advisories freeze in place rather than
 stopping the scan — `db build` prints both at build time rather than leaving them to be
 found later.
+
+On SUSE, `--fail-on-unfixable` works but `=wont-fix` catches only what SUSE classifies —
+99.96% of its no-fix entries state no reason (measured), the inverse of Red Hat.
 
 - [ ] A `Red Hat:N` scan of an EUS host still quotes mainline fixed versions. Measured
       2026-08-11: the error is a false POSITIVE in 149,726 of 155,549 differing groups

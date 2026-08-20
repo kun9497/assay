@@ -328,12 +328,14 @@ func TestCatalogFromImage_NDBIsRouted(t *testing.T) {
 	byName := map[string]string{}
 	for _, p := range target.Packages {
 		byName[p.Name] = p.Version
-		// D50: sles has no ecosystem key yet (only `rhel` is routed to
-		// advisories), so the package must come through UNKEYED rather than
-		// guessing a substitute — the matcher is what turns an empty
-		// Ecosystem into a loud "not evaluated" rather than a clean verdict.
-		if p.Ecosystem != "" {
-			t.Errorf("%s Ecosystem = %q, want empty — D76 is cataloging only, not a SLES provider", p.Name, p.Ecosystem)
+		// D77: sles now resolves a real ecosystem key (SUSE's own CSAF VEX
+		// provider, internal/provider/suse), so this is the sibling of
+		// TestCatalogFromImage_NDBIsRouted's own name — D76 shipped the ndb
+		// backend with the package coming through UNKEYED, and this pins
+		// that it is D77's own wiring, not a coincidence of this fixture's
+		// VERSION_ID, that changed it.
+		if p.Ecosystem != "SLES:15.SP6" {
+			t.Errorf("%s Ecosystem = %q, want %q (D77)", p.Name, p.Ecosystem, "SLES:15.SP6")
 		}
 		// D8, reached through the header pipeline ndb shares with the other
 		// two backends: SOURCERPM is stripped to a source package name.
@@ -413,8 +415,9 @@ func TestRun_SLESImageIsCatalogedButNotEvaluated(t *testing.T) {
 
 // osReleaseSLES15 is a representative SUSE Linux Enterprise Server
 // /etc/os-release. ID is "sles" -- rpmFamilies routes it for the "found a
-// database this build cannot read" error message (now moot, since ndb IS
-// read) and rpmFamilies/D50 both still agree it has no ecosystem key.
+// database this build cannot read" error message (moot since D76, when ndb
+// support shipped) and, since D77, pkgmeta.Distro.Ecosystem resolves
+// VERSION_ID "15.6" to "SLES:15.SP6" through SUSE's own CSAF VEX provider.
 const osReleaseSLES15 = `NAME="SLES"
 VERSION="15-SP6"
 ID="sles"

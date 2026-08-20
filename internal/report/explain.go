@@ -325,6 +325,14 @@ func comparerName(ecosystem string) string {
 	if rel, ok := strings.CutPrefix(ecosystem, "Fedora:"); ok && rel != "" {
 		return "rpm"
 	}
+	// SLES and openSUSE Leap are RPM too (D77), added in the same commit that
+	// taught version.For about them, for the same reason.
+	if rel, ok := strings.CutPrefix(ecosystem, "SLES:"); ok && rel != "" {
+		return "rpm"
+	}
+	if rel, ok := strings.CutPrefix(ecosystem, "openSUSE Leap:"); ok && rel != "" {
+		return "rpm"
+	}
 	switch ecosystem {
 	// crates.io joins here in the same commit that taught version.For about
 	// it, which is the rule the comment above was written for.
