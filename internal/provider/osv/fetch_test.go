@@ -225,15 +225,15 @@ func TestFetch_AlpineZeroRecordsIsAnError(t *testing.T) {
 }
 
 // The same hard-fail as Alpine's above (TestFetch_AlpineZeroRecordsIsAnError),
-// extended to Debian and Ubuntu: an archive fetched under either family name
-// that names no matching record is the exact regression the guard's own
-// comment records happening to Debian when it first joined this list, and
-// only the Alpine arm was ever held by a test. Narrowing the guard's
-// condition to "eco == Alpine" alone leaves the whole suite green, because
-// nothing else in this file, or anywhere in the package, drives a Debian or
-// Ubuntu fetch through zero matching records.
-func TestFetch_DebianAndUbuntuZeroRecordsIsAnError(t *testing.T) {
-	for _, eco := range []string{"Debian", "Ubuntu"} {
+// extended to Debian, Ubuntu and Rocky Linux (D71): an archive fetched under
+// any family name that names no matching record is the exact regression the
+// guard's own comment records happening to Debian when it first joined this
+// list, and only the Alpine arm was ever held by a test. Narrowing the
+// guard's condition to "eco == Alpine" alone leaves the whole suite green,
+// because nothing else in this file, or anywhere in the package, drives a
+// Debian, Ubuntu or Rocky Linux fetch through zero matching records.
+func TestFetch_DebianUbuntuAndRockyZeroRecordsIsAnError(t *testing.T) {
+	for _, eco := range []string{"Debian", "Ubuntu", "Rocky Linux"} {
 		t.Run(eco, func(t *testing.T) {
 			body := zipWith(t, map[string]string{
 				// Well-formed, but names an ecosystem this archive would never
@@ -364,5 +364,88 @@ func TestFetch_CoverageIsTheFamilyFetchedNotEveryEcosystemNamed(t *testing.T) {
 				t.Errorf("Provenance.Ecosystems = %v, want %v", prov.Ecosystems, tt.want)
 			}
 		})
+	}
+}
+
+// TestFetch_RockyLinuxPathIsURLEncoded pins the one thing that makes "Rocky
+// Linux" different from every other entry in Ecosystems: the archive family
+// name contains a space, and an unescaped one would be sent as a literal space
+// in the request line -- not the %20 GCS actually serves the archive under. The
+// build already routes every fetch through url.PathEscape(eco) (fetchOne's own
+// URL string), so this is a regression guard on that call staying in place for
+// Rocky Linux specifically, not a test that the mechanism exists at all.
+//
+// Checked against r.URL.EscapedPath() rather than r.URL.Path: the latter is
+// automatically un-escaped by net/http on the way in, so a server that
+// forgot to encode the space would still show a "correct" decoded Path while
+// the actual bytes on the wire were wrong.
+func TestFetch_RockyLinuxPathIsURLEncoded(t *testing.T) {
+	body := zipWith(t, map[string]string{
+		"RLSA-2026-0001.json": `{"id":"RLSA-2026-0001","affected":[{"package":{"name":"x","ecosystem":"Rocky Linux:9"},
+			"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"}]}]}]}`,
+	})
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	p := New([]string{"Rocky Linux"}, srv.URL)
+	if _, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil }); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if gotPath != "/Rocky%20Linux/all.zip" {
+		t.Errorf("request path = %q, want /Rocky%%20Linux/all.zip -- the archive "+
+			"name has a space, and an unescaped one is a different URL that GCS "+
+			"does not serve", gotPath)
+	}
+}
+
+// TestFetch_RockyLinux is the end-to-end shape D71 rests on: one RLSA record,
+// keyed "Rocky Linux:9" the way the real archive is (measured 2026-08-19), a
+// CVE reachable through `upstream` (D3 -- Rocky's own linkage, at 99.3%
+// coverage) rather than `aliases`, and a CVSS v3 vector (84.1% of the archive
+// carries one). Fetch must emit it with all three intact and report the
+// release-qualified key as covered (D20), not the bare archive name.
+func TestFetch_RockyLinux(t *testing.T) {
+	body := zipWith(t, map[string]string{
+		"RLSA-2026-0001.json": `{"id":"RLSA-2026-0001","upstream":["CVE-2026-30001"],
+			"severity":[{"type":"CVSS_V3","score":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}],
+			"affected":[{"package":{"name":"nodejs","ecosystem":"Rocky Linux:9"},
+				"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1:20.18.1-1.el9"}]}]}]}`,
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/Rocky Linux/all.zip" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	p := New([]string{"Rocky Linux"}, srv.URL)
+	var got []advisory.Advisory
+	prov, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
+		got = append(got, a)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "RLSA-2026-0001" {
+		t.Fatalf("Fetch emitted %d advisories (%v), want only RLSA-2026-0001", len(got), got)
+	}
+	if len(got[0].Upstream) != 1 || got[0].Upstream[0] != "CVE-2026-30001" {
+		t.Errorf("Upstream = %v, want [CVE-2026-30001] -- D3 reads this field for the CVE join", got[0].Upstream)
+	}
+	if len(got[0].Affected) != 1 || got[0].Affected[0].Ecosystem != "Rocky Linux:9" {
+		t.Fatalf("Affected = %v, want one entry keyed Rocky Linux:9", got[0].Affected)
+	}
+	if len(got[0].Severity) != 1 || got[0].Severity[0].Type != "CVSS_V3" {
+		t.Errorf("Severity = %v, want the CVSS_V3 vector carried through", got[0].Severity)
+	}
+	if !slices.Contains(prov.Ecosystems, "Rocky Linux:9") {
+		t.Errorf("Provenance.Ecosystems = %v, want it to include Rocky Linux:9", prov.Ecosystems)
 	}
 }

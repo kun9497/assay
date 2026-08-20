@@ -114,6 +114,14 @@ func For(ecosystem string) (Comparer, bool) {
 	if rel, ok := strings.CutPrefix(ecosystem, "Red Hat:"); ok && rel != "" {
 		return RPM{}, true
 	}
+	// D71. Rocky is RPM too — its OSV archive is release-qualified the same
+	// way ("Rocky Linux:9"), and rpmvercmp does not care which distro built
+	// the package. Same rule, same reason as the two clauses above: "Rocky
+	// Linux" bare is not a key this project ever builds, and resolving it
+	// would make a bug that drops the release look like it worked.
+	if rel, ok := strings.CutPrefix(ecosystem, "Rocky Linux:"); ok && rel != "" {
+		return RPM{}, true
+	}
 	// D53. Ubuntu is dpkg, so the comparer D40 wrote for Debian handles its
 	// revisions (2.4.4-2ubuntu17.10) unchanged — the version scheme was never
 	// the blocker. The KEY was.

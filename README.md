@@ -561,6 +561,8 @@ exited 0 while 24 findings went unmentioned. **Done.**
 - [x] Jar and fat-jar scanning (D70) — every `pom.properties` in the archive, nested to
       depth 3; log4shell found inside a synthetic Spring Boot jar end to end; filename
       guessing refused
+- [x] Rocky Linux from OSV (D71) — keys Rocky Linux:8/9/10, 84% native CVSS, module builds
+      dropped-and-counted; the five RPM-family decisions recorded
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a
@@ -790,10 +792,15 @@ names a version to upgrade to, `-` means the record that set this finding's seve
 none while another source does. Telling a reader to remove a package they could upgrade is
 worse than saying nothing.
 
-Only `rhel` routes to `Red Hat:N` (D50). AlmaLinux and Rocky are rebuilds but not
-byte-identical ones, `centos` covers one product that trailed RHEL and another that runs
-ahead of it, and Fedora and Amazon Linux have their own feeds. Each is still catalogued and
-reported as not evaluated — a loud skip, never a clean verdict.
+Only `rhel` routes to `Red Hat:N` (D50); Rocky Linux now routes to `Rocky Linux:N` (D71).
+AlmaLinux is a rebuild but not a byte-identical one, `centos` covers one product that trailed
+RHEL and another that runs ahead of it, and Fedora and Amazon Linux have their own feeds —
+each of those is still catalogued and reported as not evaluated, a loud skip, never a clean
+verdict.
+
+A Rocky verdict is clean-of-what-Rocky-published: its feed is errata-only and measured
+thinner than RHSA's (no regreSSHion advisory at all), and module-build fixes are skipped and
+counted rather than stream-matched.
 
 - [ ] A `Red Hat:N` scan of an EUS host still quotes mainline fixed versions. Measured
       2026-08-11: the error is a false POSITIVE in 149,726 of 155,549 differing groups

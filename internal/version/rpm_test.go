@@ -276,6 +276,10 @@ func TestRPM_TildeCaretChain(t *testing.T) {
 func TestRPM_Routing(t *testing.T) {
 	for _, eco := range []string{
 		"Red Hat:7", "Red Hat:8", "Red Hat:9", "Red Hat:10",
+		// Rocky left this list under D71: its own OSV archive is
+		// release-qualified the same way Red Hat's CSAF key is, and
+		// rpmvercmp does not care which distro built the package.
+		"Rocky Linux:8", "Rocky Linux:9", "Rocky Linux:10",
 	} {
 		c, ok := For(eco)
 		if !ok {
@@ -293,10 +297,14 @@ func TestRPM_Routing(t *testing.T) {
 	if _, ok := For("Red Hat"); ok {
 		t.Error(`For("Red Hat") resolves; the provider only ever writes "Red Hat:<major>"`)
 	}
-	// And the rebuilds still do not, because Red Hat's errata describe Red
-	// Hat's own builds (D50). Their packages are catalogued and reported as
-	// not evaluated.
-	for _, eco := range []string{"AlmaLinux:9", "Rocky Linux:9", "Fedora:44", "CentOS:9"} {
+	if _, ok := For("Rocky Linux"); ok {
+		t.Error(`For("Rocky Linux") resolves; the provider only ever writes "Rocky Linux:<major>"`)
+	}
+	// And the rest still do not: Red Hat's errata describe Red Hat's own
+	// builds (D50), and Rocky's own feed is ingested only under "Rocky
+	// Linux:N" (D71) -- neither one populates these keys. Their packages are
+	// still catalogued and reported as not evaluated.
+	for _, eco := range []string{"AlmaLinux:9", "Fedora:44", "CentOS:9"} {
 		if _, ok := For(eco); ok {
 			t.Errorf("For(%q) resolves, but nothing populates that ecosystem", eco)
 		}

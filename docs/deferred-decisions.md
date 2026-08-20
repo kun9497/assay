@@ -459,9 +459,10 @@ rpm's own read-only BerkeleyDB backend 850 lines of C is dead weight.
   streams of `container-tools`; taking the higher is a systematic false positive and taking the
   lower is a false negative.
 
-**AlmaLinux and Rocky Linux are not the easier path.** Both key on the major version only —
-three keys each, derivable from `/etc/os-release` — which is genuinely simpler. Neither
-survives the rest:
+**~~AlmaLinux and Rocky Linux are not the easier path~~ — Rocky resolved in D71; AlmaLinux,
+Amazon Linux, Oracle Linux, Fedora and SLES remain open.** Both keyed on the major version
+only — three keys each, derivable from `/etc/os-release` — which is genuinely simpler.
+Neither survived the rest, at the time:
 
 - **AlmaLinux carries zero `aliases` and zero `upstream` fields** across all 5,494 records.
   Every CVE reference is in `related`, which OSV defines as explicitly *not* an alias. Under D3
@@ -469,11 +470,12 @@ survives the rest:
   has no severity data at all (0% CVSS coverage, against Red Hat's ~84%), so under D17 every
   Alma finding would land in `unknown` and never trip `--fail-on`. Reading `related` is a
   semantic change to the join, and therefore its own decision.
-- **Rocky Linux's export is too incomplete to ship.** Median 0.29 coverage of Red Hat's runtime
-  package set, 83% of shared (CVE, major) groups missing at least one runtime package, only
-  `curl` named for CVE-2023-38545 where Red Hat and Alma both name `curl`, `curl-minimal`,
-  `libcurl` and `libcurl-minimal` — and **no record whatsoever for CVE-2024-6387**. A
-  `rockylinux:` target must exit 2, never exit 0.
+- ~~**Rocky Linux's export is too incomplete to ship.**~~ Median 0.29 coverage of Red Hat's
+  runtime package set, 83% of shared (CVE, major) groups missing at least one runtime package,
+  only `curl` named for CVE-2023-38545 where Red Hat and Alma both name `curl`, `curl-minimal`,
+  `libcurl` and `libcurl-minimal` — and **no record whatsoever for CVE-2024-6387**. **Shipped
+  anyway in D71**: the same gap is still there, disclosed rather than closed — a `rockylinux:`
+  target now exits 0 on a verdict documented as clean-of-what-Rocky-published, not clean.
 - Alma also writes module builds as `module_el8.5.0+119+9a9ec082` where Red Hat and Rocky write
   `module+el8.5.0+12582+56d94c81`, so Alma advisory versions must never be compared against
   RHEL-installed packages. Routing on `/etc/os-release` `ID` (`rhel` / `almalinux` / `rocky`)
@@ -493,9 +495,20 @@ consumer supplying VEX to suppress findings, this one is about a vendor publishi
 affectedness.
 
 **Still deferred.** OVAL v2 as a second opinion (it covers RHEL 5–9 and has no RHEL 10, so it
-could never be the primary source); AlmaLinux and Rocky, whose objections above are unchanged
-and which D50 therefore does not route; and closing the EUS/AUS/E4S divergence rather than
-disclosing it, which needs a channel signal no image carries.
+could never be the primary source); AlmaLinux, Amazon Linux, Oracle Linux, Fedora and SLES,
+whose objections above (or, for SLES, the ndb entry elsewhere in this document) are unchanged
+and which neither D50 nor D71 routes; and closing the EUS/AUS/E4S divergence rather than
+disclosing it, which needs a channel signal no image carries. Rocky Linux is off this list —
+see D71.
+
+**The five decisions this research forced now live in D71**, not here, because the next
+distro slices reuse them: reading `related` for CVE joins, scoped to distro-authored records;
+storing a losslessly-kept vendor severity word alongside an NVD join; dropping and counting
+module builds instead of stream-matching them; treating OSV as the primary feed where it
+exists; and SLES staying behind `ndb` — except the justification recorded above for deferring
+`ndb` itself no longer holds. Modern SLES/BCI images cannot be catalogued at all today,
+measured independently of any advisory question; openSUSE Leap is the clean subset if
+SUSE-family coverage is wanted before `ndb` is written.
 
 ---
 

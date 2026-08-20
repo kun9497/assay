@@ -50,9 +50,17 @@ const DefaultBaseURL = "https://osv-vulnerabilities.storage.googleapis.com"
 // RubyGems, Packagist, NuGet and Maven join the language ecosystems on the
 // same terms as crates.io: a plain archive path, a plain (unversioned)
 // ecosystem key (D6 does not apply to them, only to distros).
+//
+// "Rocky Linux" joins on the same terms (D71): one archive
+// ("Rocky%20Linux/all.zip" — the family name has a space, and url.PathEscape
+// in fetchOne's URL build is what turns it into the %20 a real GET needs),
+// release-qualified keys inside it ("Rocky Linux:9"). Measured 2026-08-19:
+// 3,941 records, 3,915 of them RLSA, 84.1% carrying a CVSS v3 vector, and CVE
+// linkage via `upstream` at 99.3% — D3 already reads that field, so nothing
+// there had to change.
 var Ecosystems = []string{
 	"Go", "npm", "PyPI", "crates.io", "RubyGems", "Packagist", "NuGet", "Maven",
-	"Alpine", "Debian", "Ubuntu",
+	"Alpine", "Debian", "Ubuntu", "Rocky Linux",
 }
 
 type Provider struct {
@@ -93,11 +101,12 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		// advisories. Building a database that silently has none turns every
 		// later Alpine scan into a clean report at exit 0 — the same failure
 		// discovery's hard-fail existed to prevent, one layer further in.
-		// The same guard for both distro archives. Zero matching records means
-		// the family match broke or the archive's shape changed, not that the
-		// distro has no advisories — and a database that silently has none
-		// turns every later scan of that distro into a clean report at exit 0.
-		if (eco == "Alpine" || eco == "Debian" || eco == "Ubuntu") && n == 0 {
+		// The same guard for every distro archive, Rocky Linux included (D71).
+		// Zero matching records means the family match broke or the archive's
+		// shape changed, not that the distro has no advisories — and a
+		// database that silently has none turns every later scan of that
+		// distro into a clean report at exit 0.
+		if (eco == "Alpine" || eco == "Debian" || eco == "Ubuntu" || eco == "Rocky Linux") && n == 0 {
 			return store.Provenance{}, fmt.Errorf("fetch %s: archive yielded no %s:* records", eco, eco)
 		}
 		prov.Records += n
