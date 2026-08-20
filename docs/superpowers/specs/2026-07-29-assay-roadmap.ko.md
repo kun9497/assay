@@ -2987,6 +2987,34 @@ skip됩니다. ② module 태그가 붙었지만 레이블을 읽을 수 없는 
 
 ---
 
+### D81 — Oracle의 module gate를 구조적으로 읽다
+
+**결정.** Oracle provider는 D80의 matcher가 이미 소비할 줄 아는 OVAL module-enablement
+gate에서 module stream을 풀어냅니다: `textfilecontent54_test` criteria("Module nodejs:24
+is enabled")이고, 주석에서'도' 그리고 구조적으로도 함께 뽑아냅니다(object의
+`/etc/dnf/modules.d/<name>.module` 경로에 state의 `stream = ...` 정규식을 더한 것,
+unescape 처리) — 둘은 gate 763개 전부에서 일치했고, 그래도 불일치 카운터는 존재하며
+구조적 쪽이 이깁니다. stream은 platform major가 그러듯 criteria 트리를 타고 그대로
+전파되고, `dropAmbiguous`는 그것을 핵심 키로 얻습니다: 한 stream 안의 충돌은 여전히
+떨어지고(D74는 변하지 않습니다), 서로 다른 stream은 더 이상 충돌하지 않습니다.
+
+**실전, decision-sheet 재현이 낸 예측 대비**: 모호 그룹 158,119개 → 143,015개(예측
+143,014개), 떨어진 항목 32,621건 → 22,939건(예측 22,938건), 계보 drop 12,174건은
+그대로, 추출 불일치 0건 — 그리고 gate가 걸린 fix 17,930건이 Oracle 철자 stream 87개에
+걸쳐 저장됩니다(원본 criterion 히트 38,998건, 아키텍처 팬아웃 ~1.95로 나누고, stream 내부
+충돌 2,063건을 뺀 값). gate를 풀 수 없는 module 태그 EVR 150개(처음 측정한 둘이 아니라
+definition 네 개)는 stream 없이 저장되고 세어질 뿐입니다; D80의 matcher가 그것들을 시끄럽게
+건너뜁니다. store 발췌 확인: ELSA-2026-55603은 `nodejs:24`를 그대로 담고 있습니다 —
+Oracle의 철자이고, Red Hat 쪽으로 정규화된 적이 없습니다.
+
+**리뷰 라운드가 제 몫을 했습니다**: 복구 테스트의 첫 픽스처는 gate와 fix를 나란히
+놓았는데, stream이 자식 criteria로 내려가는 상속을 끊어도 green으로 남았습니다 — 반면
+실제 피드에서는 모든 gate가 fix 가지를 담은 OR의 AND-형제이므로, 그랬다면 17,930건
+전부를 잃었을 것입니다. 이제 픽스처는 데이터가 중첩되는 그대로 중첩되고, 그 mutation은
+red가 됩니다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

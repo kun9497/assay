@@ -2,6 +2,7 @@ package oracle
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -69,15 +70,51 @@ func (o *ovalBuilder) archCriterion(arch string) string {
 	return fmt.Sprintf(`<criterion test_ref=%q comment="Oracle Linux arch is %s"/>`, tst, arch)
 }
 
-// moduleCriterion returns a <criterion> whose test_ref points at an id NEVER
-// registered in o.testsXML -- the real shape a "Module X is enabled" test
-// has (it is a textfilecontent54_test, which this parser never indexes at
-// all, see classifyCriterion's own comment) rendered without bothering to
-// emit a resolvable rpminfo_test, since the point is that classifyCriterion
-// must treat it as informational rather than erroring.
-func (o *ovalBuilder) moduleCriterion(stream string) string {
+// moduleGateCriterionRaw returns the <criterion> XML for a module-enablement
+// gate (D81's real shape), registering a resolvable
+// textfilecontent54_test/_object/_state trio so BOTH extraction paths can
+// read it -- the criterion's own COMMENT names (commentName, commentStream),
+// while the registered gate OBJECT (filepath) and STATE (pattern text)
+// structurally name (structName, structStream). Equal for the ordinary case
+// (moduleGateCriterion below); deliberately different for
+// TestParseOVAL_ModuleGateCommentStructureDisagreementStructuralWins.
+// structStream is regexp.QuoteMeta-escaped before being embedded in the
+// state's pattern text, mirroring the real archive's "1\.4" spelling for a
+// literal dot (moduleStreamFromStateText's own doc comment has the measured
+// example) -- callers pass the plain stream value, not an already-escaped
+// one.
+func (o *ovalBuilder) moduleGateCriterionRaw(commentName, commentStream, structName, structStream string) string {
+	tst, obj, ste := o.id("tst"), o.id("obj"), o.id("ste")
+	o.testsXML = append(o.testsXML, fmt.Sprintf(
+		`<ind-def:textfilecontent54_test id=%q comment="Module %s:%s is enabled" check="all"><ind-def:object object_ref=%q/><ind-def:state state_ref=%q/></ind-def:textfilecontent54_test>`,
+		tst, commentName, commentStream, obj, ste))
+	o.objsXML = append(o.objsXML, fmt.Sprintf(
+		`<ind-def:textfilecontent54_object id=%q><ind-def:filepath datatype="string">/etc/dnf/modules.d/%s.module</ind-def:filepath></ind-def:textfilecontent54_object>`,
+		obj, structName))
+	o.statesXML = append(o.statesXML, fmt.Sprintf(
+		`<ind-def:textfilecontent54_state id=%q><ind-def:text operation="pattern match">stream\s*=\s*%s\b</ind-def:text></ind-def:textfilecontent54_state>`,
+		ste, regexp.QuoteMeta(structStream)))
+	return fmt.Sprintf(`<criterion test_ref=%q comment="Module %s:%s is enabled"/>`, tst, commentName, commentStream)
+}
+
+// moduleGateCriterion is moduleGateCriterionRaw's ordinary case: comment and
+// structure agree, the shape measured on all 763 gates in the full archive
+// 2026-08-20.
+func (o *ovalBuilder) moduleGateCriterion(name, stream string) string {
+	return o.moduleGateCriterionRaw(name, stream, name, stream)
+}
+
+// unresolvedModuleComment returns a <criterion> whose comment reads exactly
+// like a real module gate ("Module X:Y is enabled") but whose test_ref
+// points at an id NEVER registered against any textfilecontent54_test --
+// pinning moduleGateStream's own rule (D81): a criterion is a module gate
+// IFF its test_ref resolves against that pool, never by sniffing its
+// comment text alone. If isGate were decided by the comment regex instead,
+// TestParseOVAL_UnresolvedModuleCommentIsNotAGate below would wrongly
+// attach a stream.
+func (o *ovalBuilder) unresolvedModuleComment(nameStream string) string {
 	tst := o.id("tst")
-	return fmt.Sprintf(`<criterion test_ref=%q comment="Module %s is enabled"/>`, tst, stream)
+	return fmt.Sprintf(`<criterion test_ref=%q comment="Module %s is enabled"/>`, tst, nameStream)
 }
 
 type cveFixture struct {
@@ -480,18 +517,21 @@ func TestParseOVAL_LineageMarkerLookalikesNotDropped(t *testing.T) {
 	}
 }
 
-// TestParseOVAL_ModuleStreamAmbiguityCaughtByGuard is the intra-definition
-// half of the same mechanism: ONE definition bundling two module streams
-// (nodejs:18, nodejs:20) that fix the SAME package at two different EVRs.
-// There is no module-specific code anywhere in this parser (classifyCriterion
-// never resolves a "Module X is enabled" test_ref at all -- moduleCriterion
-// below deliberately registers none), so this is the general
-// same-package/same-major/different-EVR guard catching a module conflict it
-// was never told about by name.
-func TestParseOVAL_ModuleStreamAmbiguityCaughtByGuard(t *testing.T) {
+// TestParseOVAL_ModuleStreamsWithinOneDefinitionBothKept is the
+// intra-definition half of D81's stream-aware guard: ONE definition
+// bundling two REAL module gates (nodejs:18, nodejs:20, each with a
+// resolvable textfilecontent54_test/_object/_state trio, moduleGateCriterion)
+// that fix the SAME package at two different EVRs. Before D81 -- when this
+// fixture registered no resolvable gate at all -- the two collided under
+// the stream-blind key and both were dropped; that was this test's own
+// assertion under its old name, TestParseOVAL_ModuleStreamAmbiguityCaughtBy
+// Guard. With a real stream now attached to each branch, the two never
+// share an ambiguity key: BOTH survive as separate Affected entries for the
+// same package, each carrying its own stream.
+func TestParseOVAL_ModuleStreamsWithinOneDefinitionBothKept(t *testing.T) {
 	o := &ovalBuilder{}
-	stream18 := o.moduleCriterion("nodejs:18") + o.fixCriterion("nodejs", "1:18.20.4-1.module+el8+1+aaaaaaaa")
-	stream20 := o.moduleCriterion("nodejs:20") + o.fixCriterion("nodejs", "1:20.15.1-1.module+el8+2+bbbbbbbb")
+	stream18 := o.moduleGateCriterion("nodejs", "18") + o.fixCriterion("nodejs", "1:18.20.4-1.module+el8+1+aaaaaaaa")
+	stream20 := o.moduleGateCriterion("nodejs", "20") + o.fixCriterion("nodejs", "1:20.15.1-1.module+el8+2+bbbbbbbb")
 	crit := o.platformCriterion(8) + fmt.Sprintf(
 		`<criteria operator="OR"><criteria operator="AND">%s</criteria><criteria operator="AND">%s</criteria></criteria>`, stream18, stream20)
 	doc := o.doc(definitionXML("ELSA-2026-0003", "elsa", "nodejs security update",
@@ -503,14 +543,262 @@ func TestParseOVAL_ModuleStreamAmbiguityCaughtByGuard(t *testing.T) {
 		t.Fatalf("parseOVAL: %v", err)
 	}
 	advs := normalize(defs, &st)
-	if len(advs) != 0 {
-		t.Fatalf("advs = %+v, want none: nodejs was the ONLY package, so dropping it must leave nothing to emit", advs)
+	a, ok := findAdvisory(advs, "ELSA-2026-0003")
+	if !ok {
+		t.Fatalf("no advisory ELSA-2026-0003 among %+v", advs)
+	}
+	if len(a.Affected) != 2 {
+		t.Fatalf("Affected = %+v, want 2 entries (one per stream)", a.Affected)
+	}
+	var got18, got20 *advisory.Affected
+	for i := range a.Affected {
+		switch a.Affected[i].ModuleStream {
+		case "nodejs:18":
+			got18 = &a.Affected[i]
+		case "nodejs:20":
+			got20 = &a.Affected[i]
+		}
+	}
+	if got18 == nil || got20 == nil {
+		t.Fatalf("missing a stream's Affected entry: %+v", a.Affected)
+	}
+	if fixedOf(*got18) != "1:18.20.4-1.module+el8+1+aaaaaaaa" {
+		t.Errorf("nodejs:18 fixed = %q, want the 18 EVR", fixedOf(*got18))
+	}
+	if fixedOf(*got20) != "1:20.15.1-1.module+el8+2+bbbbbbbb" {
+		t.Errorf("nodejs:20 fixed = %q, want the 20 EVR", fixedOf(*got20))
+	}
+	if st.AmbiguousGroups != 0 {
+		t.Errorf("AmbiguousGroups = %d, want 0 -- different streams must not collide", st.AmbiguousGroups)
+	}
+	if st.ModuleGatedFixesKept != 2 {
+		t.Errorf("ModuleGatedFixesKept = %d, want 2", st.ModuleGatedFixesKept)
+	}
+	if st.DistinctModuleStreams != 2 {
+		t.Errorf("DistinctModuleStreams = %d, want 2", st.DistinctModuleStreams)
+	}
+}
+
+// TestParseOVAL_ModuleStreamAmbiguityRecoveredAcrossDefinitions is D81's
+// direct regression test -- the reason this slice exists. Two SEPARATE
+// definitions patch the SAME CVE, major and package, gated to DIFFERENT
+// module streams (nodejs:18, nodejs:20), at different fixed EVRs -- exactly
+// the measured shape (38,998 gated fix hits, each with exactly one module in
+// scope, full archive 2026-08-20). Before D81 this collided under the
+// stream-blind cross-definition ambiguity key (dropAmbiguous joins on
+// shared CVE) and BOTH were dropped, even though the two module streams are
+// independent, correct facts about independent hosts. With the stream
+// folded into the key, they no longer collide: BOTH advisories survive,
+// each with its own Affected entry carrying its own stream.
+func TestParseOVAL_ModuleStreamAmbiguityRecoveredAcrossDefinitions(t *testing.T) {
+	o := &ovalBuilder{}
+	// The fixes sit in a DESCENDANT criteria node, not beside the gate —
+	// the shape every real module-gated definition takes (the gate is an
+	// AND sibling of the OR that holds the per-package fix branches), so
+	// this test holds the stream's inheritance into child criteria, not
+	// just its application to siblings. A flat fixture here left the
+	// inheritance path unheld: severing it stayed green while the live
+	// feed lost every one of its 17,930 gated fixes.
+	nest := func(fix string) string {
+		return `<criteria operator="OR"><criteria operator="AND">` + fix + `</criteria></criteria>`
+	}
+	critA := o.platformCriterion(9) + o.moduleGateCriterion("nodejs", "18") + nest(o.fixCriterion("nodejs", "1:18.20.4-1.module+el9+1+aaaaaaaa"))
+	critB := o.platformCriterion(9) + o.moduleGateCriterion("nodejs", "20") + nest(o.fixCriterion("nodejs", "1:20.15.1-1.module+el9+2+bbbbbbbb"))
+	docA := definitionXML("ELSA-2026-9101", "elsa", "nodejs:18 security update",
+		[]cveFixture{{"CVE-2026-9101", ""}}, "MODERATE", critA)
+	docB := definitionXML("ELSA-2026-9102", "elsa", "nodejs:20 security update",
+		[]cveFixture{{"CVE-2026-9101", ""}}, "MODERATE", critB)
+	doc := o.doc(docA, docB)
+
+	var st stats
+	defs, _, err := parseOVAL(strings.NewReader(doc), &st)
+	if err != nil {
+		t.Fatalf("parseOVAL: %v", err)
+	}
+	advs := normalize(defs, &st)
+
+	aA, okA := findAdvisory(advs, "ELSA-2026-9101")
+	aB, okB := findAdvisory(advs, "ELSA-2026-9102")
+	if !okA || !okB {
+		t.Fatalf("expected BOTH advisories to survive (different module streams, not a real collision): %+v", advs)
+	}
+	affA, okA2 := affectedFor(aA, "Oracle Linux:9", "nodejs")
+	affB, okB2 := affectedFor(aB, "Oracle Linux:9", "nodejs")
+	if !okA2 || !okB2 {
+		t.Fatalf("missing a per-definition Affected entry: A ok=%v B ok=%v", okA2, okB2)
+	}
+	if affA.ModuleStream != "nodejs:18" {
+		t.Errorf("ELSA-2026-9101 ModuleStream = %q, want nodejs:18", affA.ModuleStream)
+	}
+	if affB.ModuleStream != "nodejs:20" {
+		t.Errorf("ELSA-2026-9102 ModuleStream = %q, want nodejs:20", affB.ModuleStream)
+	}
+	if fixedOf(affA) != "1:18.20.4-1.module+el9+1+aaaaaaaa" {
+		t.Errorf("ELSA-2026-9101 fixed = %q, want the 18 EVR", fixedOf(affA))
+	}
+	if fixedOf(affB) != "1:20.15.1-1.module+el9+2+bbbbbbbb" {
+		t.Errorf("ELSA-2026-9102 fixed = %q, want the 20 EVR", fixedOf(affB))
+	}
+	if st.AmbiguousGroups != 0 {
+		t.Errorf("AmbiguousGroups = %d, want 0 -- the whole point of D81 is that this is NOT ambiguous", st.AmbiguousGroups)
+	}
+	if st.SkippedAmbiguousFixes != 0 {
+		t.Errorf("SkippedAmbiguousFixes = %d, want 0", st.SkippedAmbiguousFixes)
+	}
+}
+
+// TestParseOVAL_ModuleStreamCollisionWithinOneStreamStillDropped proves
+// D74's original ambiguity rule still applies WITHIN one stream: two
+// definitions both gate nodejs:18 (same CVE, major and package), at
+// different fixed EVRs -- an actual disagreement about what nodejs:18 is
+// fixed at, which D81 must still catch and drop, exactly as the
+// stream-blind guard did before this slice.
+func TestParseOVAL_ModuleStreamCollisionWithinOneStreamStillDropped(t *testing.T) {
+	o := &ovalBuilder{}
+	critA := o.platformCriterion(9) + o.moduleGateCriterion("nodejs", "18") + o.fixCriterion("nodejs", "1:18.20.1-1.module+el9+1+aaaaaaaa")
+	critB := o.platformCriterion(9) + o.moduleGateCriterion("nodejs", "18") + o.fixCriterion("nodejs", "1:18.20.2-1.module+el9+2+bbbbbbbb")
+	docA := definitionXML("ELSA-2026-9201", "elsa", "nodejs:18 update A",
+		[]cveFixture{{"CVE-2026-9201", ""}}, "MODERATE", critA)
+	docB := definitionXML("ELSA-2026-9202", "elsa", "nodejs:18 update B",
+		[]cveFixture{{"CVE-2026-9201", ""}}, "MODERATE", critB)
+	doc := o.doc(docA, docB)
+
+	var st stats
+	defs, _, err := parseOVAL(strings.NewReader(doc), &st)
+	if err != nil {
+		t.Fatalf("parseOVAL: %v", err)
+	}
+	advs := normalize(defs, &st)
+
+	if _, ok := findAdvisory(advs, "ELSA-2026-9201"); ok {
+		t.Errorf("ELSA-2026-9201 survived; both nodejs:18 fixes disagree and must be dropped")
+	}
+	if _, ok := findAdvisory(advs, "ELSA-2026-9202"); ok {
+		t.Errorf("ELSA-2026-9202 survived; both nodejs:18 fixes disagree and must be dropped")
 	}
 	if st.AmbiguousGroups != 1 {
 		t.Errorf("AmbiguousGroups = %d, want 1", st.AmbiguousGroups)
 	}
-	if st.SkippedNoPackages != 1 {
-		t.Errorf("SkippedNoPackages = %d, want 1 (the only package this def named was dropped)", st.SkippedNoPackages)
+	if st.SkippedAmbiguousFixes != 2 {
+		t.Errorf("SkippedAmbiguousFixes = %d, want 2 (one dropped from each contributing definition)", st.SkippedAmbiguousFixes)
+	}
+}
+
+// TestParseOVAL_UngatedModuleEVRStoredStreamless is the measured 150-EVR
+// case (full archive, 2026-08-20): a fixed EVR whose release string carries
+// the "module+el" marker but has NO textfilecontent54_test criterion
+// anywhere above it in the tree -- the stream is genuinely unrecoverable
+// from this OVAL document. It must still be stored (not dropped outright),
+// but stream-less: D80's matcher already knows how to report a
+// stream-blind module bound skipped rather than guessed at match time
+// (moduleBuildBound).
+func TestParseOVAL_UngatedModuleEVRStoredStreamless(t *testing.T) {
+	o := &ovalBuilder{}
+	crit := o.platformCriterion(8) + o.fixCriterion("389-ds-base", "0:1.4.3.39-26.module+el8.10.0+90990+5ec542c6")
+	doc := o.doc(definitionXML("ELSA-2026-9301", "elsa", "389-ds-base update",
+		[]cveFixture{{"CVE-2026-9301", ""}}, "MODERATE", crit))
+
+	var st stats
+	defs, _, err := parseOVAL(strings.NewReader(doc), &st)
+	if err != nil {
+		t.Fatalf("parseOVAL: %v", err)
+	}
+	advs := normalize(defs, &st)
+	a, ok := findAdvisory(advs, "ELSA-2026-9301")
+	if !ok {
+		t.Fatalf("advisory ELSA-2026-9301 missing -- an ungated module EVR must still be stored: %+v", advs)
+	}
+	aff, ok := affectedFor(a, "Oracle Linux:8", "389-ds-base")
+	if !ok {
+		t.Fatalf("no Affected entry for 389-ds-base: %+v", a.Affected)
+	}
+	if aff.ModuleStream != "" {
+		t.Errorf("ModuleStream = %q, want empty -- no gate means no stream, not a guess", aff.ModuleStream)
+	}
+	if got := fixedOf(aff); got != "0:1.4.3.39-26.module+el8.10.0+90990+5ec542c6" {
+		t.Errorf("fixed = %q, want the EVR unchanged", got)
+	}
+	if st.UngatedModuleFixes != 1 {
+		t.Errorf("UngatedModuleFixes = %d, want 1", st.UngatedModuleFixes)
+	}
+	if st.ModuleGatedFixesKept != 0 {
+		t.Errorf("ModuleGatedFixesKept = %d, want 0 -- this entry never got a stream", st.ModuleGatedFixesKept)
+	}
+}
+
+// TestParseOVAL_ModuleGateCommentStructureDisagreementStructuralWins is the
+// synthetic disagreement case (0 measured on the live 2026-08-20 archive,
+// where the two extraction paths agreed on all 763 gates): the criterion's
+// own comment names "foo:1" while the gate object's filepath and state
+// pattern structurally name "bar:2". moduleGateStream's own doc comment
+// says why structural wins -- the comment is prose for a human reader, the
+// structural fields are what the OVAL engine (and this parser) actually
+// evaluate.
+func TestParseOVAL_ModuleGateCommentStructureDisagreementStructuralWins(t *testing.T) {
+	o := &ovalBuilder{}
+	gate := o.moduleGateCriterionRaw("foo", "1", "bar", "2")
+	crit := o.platformCriterion(9) + gate + o.fixCriterion("bar", "1:2.0-1.module+el9+1+cccccccc")
+	doc := o.doc(definitionXML("ELSA-2026-9401", "elsa", "disagreement fixture",
+		[]cveFixture{{"CVE-2026-9401", ""}}, "LOW", crit))
+
+	var st stats
+	defs, _, err := parseOVAL(strings.NewReader(doc), &st)
+	if err != nil {
+		t.Fatalf("parseOVAL: %v", err)
+	}
+	advs := normalize(defs, &st)
+	a, ok := findAdvisory(advs, "ELSA-2026-9401")
+	if !ok {
+		t.Fatalf("advisory ELSA-2026-9401 missing: %+v", advs)
+	}
+	aff, ok := affectedFor(a, "Oracle Linux:9", "bar")
+	if !ok {
+		t.Fatalf("no Affected entry for bar: %+v", a.Affected)
+	}
+	if aff.ModuleStream != "bar:2" {
+		t.Errorf("ModuleStream = %q, want bar:2 (structural, not foo:1 the comment names)", aff.ModuleStream)
+	}
+	if st.ModuleGateExtractionDisagreements != 1 {
+		t.Errorf("ModuleGateExtractionDisagreements = %d, want 1", st.ModuleGateExtractionDisagreements)
+	}
+}
+
+// TestParseOVAL_UnresolvedModuleCommentIsNotAGate pins D81's own rule
+// (moduleGateStream's doc comment): a criterion is a module gate iff its
+// test_ref resolves against the textfilecontent54_test pool, never by
+// sniffing comment text alone. This criterion's comment reads exactly like
+// a real gate ("Module nodejs:18 is enabled") but its test_ref was never
+// registered against any textfilecontent54_test -- if isGate were decided
+// by the comment regex instead of the test_ref join, this would wrongly
+// attach a stream to the sibling fix below.
+func TestParseOVAL_UnresolvedModuleCommentIsNotAGate(t *testing.T) {
+	o := &ovalBuilder{}
+	crit := o.platformCriterion(9) + o.unresolvedModuleComment("nodejs:18") + o.fixCriterion("nodejs", "1:18.20.4-1.module+el9+1+aaaaaaaa")
+	doc := o.doc(definitionXML("ELSA-2026-9501", "elsa", "unresolved comment fixture",
+		[]cveFixture{{"CVE-2026-9501", ""}}, "LOW", crit))
+
+	var st stats
+	defs, _, err := parseOVAL(strings.NewReader(doc), &st)
+	if err != nil {
+		t.Fatalf("parseOVAL: %v", err)
+	}
+	advs := normalize(defs, &st)
+	a, ok := findAdvisory(advs, "ELSA-2026-9501")
+	if !ok {
+		t.Fatalf("advisory ELSA-2026-9501 missing: %+v", advs)
+	}
+	aff, ok := affectedFor(a, "Oracle Linux:9", "nodejs")
+	if !ok {
+		t.Fatalf("no Affected entry for nodejs: %+v", a.Affected)
+	}
+	if aff.ModuleStream != "" {
+		t.Errorf("ModuleStream = %q, want empty -- an unresolvable test_ref must never be treated as a gate", aff.ModuleStream)
+	}
+	if st.ModuleGatedFixesKept != 0 {
+		t.Errorf("ModuleGatedFixesKept = %d, want 0", st.ModuleGatedFixesKept)
+	}
+	if st.UngatedModuleFixes != 1 {
+		t.Errorf("UngatedModuleFixes = %d, want 1 -- the EVR is module-tagged but no real gate was found", st.UngatedModuleFixes)
 	}
 }
 

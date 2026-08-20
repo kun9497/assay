@@ -569,6 +569,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] MODULARITYLABEL 매칭 (D80) — module stream이 끝에서 끝까지 일급 대접을 받음: Red
       Hat module 항목 487,796건을 스트림과 함께 보존, 스트림별 wont-fix, 꼬리를 자른
       비교로 스트림 동등성 매칭; ubi8/nodejs-18은 셋 중 설치된 스트림에만 정확히 매칭됨
+- [x] Oracle module stream (D81) — gate가 걸린 fix 17,930건을 Oracle 철자 stream 87개에
+      걸쳐 저장, 모호성이 예측 그대로 32,621건→22,939건으로 떨어짐; gate 없는 module EVR
+      150개는 계속 시끄러움
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건

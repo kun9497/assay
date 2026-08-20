@@ -3207,6 +3207,34 @@ structural), D82 Rocky/Alma's (summary-prose tokens, 98.7%/98.8% convention).
 
 ---
 
+### D81 — Oracle's module gates, read structurally
+
+**Decision.** The Oracle provider resolves module streams from the OVAL module-enablement
+gates D80's matcher already knows how to consume: `textfilecontent54_test` criteria
+("Module nodejs:24 is enabled"), extracted BOTH from the comment and structurally (the
+object's `/etc/dnf/modules.d/<name>.module` path plus the state's `stream = ...` regex,
+unescaped) — the two agreed on all 763 gates, disagreement counts exist anyway and the
+structural pair wins. The stream propagates down the criteria tree exactly as the platform
+major does, and `dropAmbiguous` gains it as a key part: collisions within one stream still
+drop (D74 unchanged), different streams stop colliding.
+
+**Live, against the predictions from the decision-sheet reproduction**: ambiguous groups
+158,119 → 143,015 (predicted 143,014), dropped entries 32,621 → 22,939 (predicted 22,938),
+lineage drops 12,174 untouched, extraction disagreements 0 — and 17,930 gated fixes stored
+across 87 Oracle-spelled streams (38,998 raw criterion hits, ÷~1.95 arch fan-out, −2,063
+within-stream collisions). The 150 module-tagged EVRs with no resolvable gate (four
+definitions, not the two first measured) stay stored stream-less and counted; the D80
+matcher skips them loudly. Store spot-check: ELSA-2026-55603 carries `nodejs:24` verbatim —
+Oracle's spelling, never normalized toward Red Hat's.
+
+**The review round earned its keep**: the recovery test's first fixture put the gate and
+the fix side by side, and severing the stream's inheritance into child criteria stayed
+green — while the real feed, where every gate is an AND-sibling of the OR holding the fix
+branches, would have lost all 17,930. The fixture now nests the way the data does, and
+that mutation goes red.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes
