@@ -885,6 +885,37 @@ CycloneDX가 먼저입니다. SPDX는 이미 검증된 파이프라인에 파서
 
 ---
 
+### CycloneDX는 `rpm` purl 타입을 매핑하지 않는다
+
+D78의 E2E가 찾아냈지, 읽다가 찾은 게 아닙니다: `purlTypeToEcosystem`에 `rpm` 항목이 없어서,
+RPM 계열 패키지를 이름으로 담은 SBOM(`pkg:rpm/amzn/containerd@...`)은 matcher에 결코 닿지
+못합니다 — 데이터베이스의 distro 쪽 전체가 SBOM 경로에서는 닿을 수 없습니다. 한 줄짜리 수정이
+아니라서 여기 적어 둡니다: `rpm` purl은 자신의 distro를 타입이 아니라 qualifier에
+담습니다(`distro=amzn-2`, `distro=rhel-9.4`), 그리고 그것을 릴리스 한정 ecosystem
+키(D6)로 매핑하려면 이미지 경로가 `internal/pkgmeta`에서 받는 것과 같은 os-release 정규화가
+필요합니다 — 게다가 distro qualifier가 아예 없는 purl을 어떻게 할지도 정해야 합니다(아마도
+평가되지 않음으로 보고, D17의 등록부). 그때까지 RPM 계열 스캔은 이미지와 디렉터리 전용입니다;
+D78은 대신 matcher 이음매에서 extras finding을 검증했습니다.
+
+**다시 볼 계기:** 배포판 SBOM을 스캔하는 첫 사용자(syft는 정확히 이런 purl을 냅니다), 또는
+위의 SPDX 수용이 먼저 들어오는 경우 — 매핑은 한 번만 만들어 두 파서가 공유해야 합니다.
+
+---
+
+### AL2023의 NVIDIA와 livepatch 저장소
+
+D78이 AL2의 extras 구멍을 닫았습니다; AL2023의 대응물은 여전히 열려 있고 공개돼 있습니다.
+ALAS2023NVIDIA 306건 + ALAS2023LIVEPATCH 286건(ALAS RSS에서 2026-08-19 측정)이 AL2023
+core 바깥에 살고 있고, AL2 방식은 그대로 옮겨오지 않습니다: AL2023은 대응하는 URL에 extras
+카탈로그를 전혀 발행하지 않습니다(403, 2026-08-20 확인) — 그 extra 저장소는 D78 슬라이스에서
+조사하지 않은 다른 레이아웃의 DNF module입니다. Fetch 공개 줄이 이 나머지를 이름으로 밝히므로,
+core-plus-AL2-extras 빌드가 AL2023을 완전히 커버하는 것처럼 읽히지 않습니다.
+
+**다시 볼 계기:** 누군가 NVIDIA 드라이버나 livepatch가 설치된 AL2023 이미지를 스캔하거나,
+AL2023 저장소 레이아웃이 `amazon-research.json`이 AL2의 것을 측정했던 방식으로 측정될 때.
+
+---
+
 ### `db` 서브커맨드의 플래그
 
 `assay db status --output json`은 0을 반환하고 사람이 읽는 표를 그대로 출력합니다. `assay db

@@ -2885,6 +2885,46 @@ product id당 콜론 하나, Red Hat식 module 컨텍스트는 없음; 신선도
 
 ---
 
+### D78 — AL2의 extras topic, 하드코딩 대신 열거
+
+**결정.** Amazon provider가 AL2의 extras topic 73개를 피드 자신의 카탈로그
+(`extras-catalog-x86_64.json` — topic 이름은 `"name"`이 아니라 `"n"`입니다)에서 열거하고,
+core가 이미 쓰는 것과 동일한 mirror.list → repomd.xml → updateinfo.xml.gz 체인을 통해 각각을
+가져와, 같은 `Amazon Linux:2` 키 위에 둡니다: extras에서 설치된 패키지도 같은 OS core 위에서
+돕니다. 이것으로 D73이 공개한 채로 출하했던 구멍이 닫힙니다 — 그리고 그것은 Amazon이 AL2에
+대해 발행한 전체의 29.4%였고, 정확히 AL2가 사는 자리였습니다: docker 138, ecs 124,
+nitro-enclaves 116, firefox 61, tomcat9 27, livepatch 297. 수집 시점(2026-08-20) 측정:
+extras advisory 1,414건(2026-08-19의 964건에 하루치 피드 증가분을 더한 것; topic별 표본이
+전부 정확히 일치했습니다).
+
+**가드 둘, 0이 무엇을 뜻하는지에 따라 범위가 다릅니다.** CORE 저장소가 advisory 0건을 내는
+것은 여전히 D73이 만든 하드 에러입니다. extras topic이 0건을 내는 것은 피드의 정상적인
+모양입니다 — 측정된 73개 중 28개가 그렇고, 절반은 updateinfo 항목을 아예 발행하지 않고
+절반은 빈 것을 발행합니다 — 그래서 두 종류의 0 모두 통계 줄에 세어질 뿐, 치명적이지 않습니다.
+한 단계 위에서는, 파싱은 되지만 topic을 0개로 이름 붙이는 카탈로그는 거부됩니다: 이름이 바뀐
+`"n"`은 깔끔하게 아무것도 아닌 것으로 디코딩되고, 그것을 그냥 통과시키면 이 슬라이스가 닫으려는
+바로 그 조용한 core-only 데이터베이스를 다시 만들게 됩니다.
+
+**Livepatch는 측정으로 확인한 비문제이고, 방아쇠는 기록해 둡니다.** ALAS2LIVEPATCH는 ksplice의
+위험 계열이므로 수집 전에 측정했습니다: advisory 297건에 걸친 서로 다른 패키지 이름 277개가
+전부 `kernel-livepatch-<version>` 한정자를 답니다 — 맨 메인라인 이름은 하나도 없으므로,
+advisory는 실제로 설치된 livepatch 패키지에만 매칭될 수 있습니다. 평범하게 수집합니다; 패키지
+문서는 방아쇠(맨 메인라인 이름이 나타나는 것)와 가드가 취할 모양(oracle의 drop-and-count,
+D74 — 이 피드는 이름으로 계보를 구분하므로 Ubuntu의 접미사 관례인 D53은 적용되지 않습니다)을
+기록해 둡니다.
+
+**여전히 열려 있는 것.** AL2023은 NVIDIA(306건)와 livepatch(286건) advisory를 core 바깥의
+다른 저장소 레이아웃에 그대로 둡니다(그 extras 카탈로그 URL은 403을 답합니다); Fetch 공개
+줄은 이제 닫힌 AL2 구멍 대신 그 나머지를 이름으로 밝힙니다. 그리고 이 슬라이스의 E2E가 한
+단계 위에서 기존에 있던 구멍을 드러냈습니다: CycloneDX SBOM 수집이 `rpm` purl 타입을 전혀
+매핑하지 않아서, RPM 계열 패키지를 이름으로 담은 SBOM은 아예 matcher에 닿지 못합니다 —
+`docs/deferred-decisions.md`에 기록해 두고, 대신 matcher 이음매에서 검증했습니다:
+`Amazon Linux:2` 위의 containerd `2.1.7-1.amzn2.0.1`은 extras 네임스페이스 세 곳에 걸쳐
+finding 17건을 그려내고, 그중에는 `ALAS2DOCKER-2026-139`(high, fixed `2.1.9-1.amzn2.0.2`)도
+있습니다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

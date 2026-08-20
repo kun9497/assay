@@ -557,6 +557,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       실제 SLES/BCI 이미지로 검증(패키지 138개, skip 0건)
 - [x] SLES와 openSUSE Leap을 SUSE CSAF VEX에서 (D77) — advisory 40,221건, RHEL 이후 처음
       나온 fix 상태, 바이트 단위 키 일치를 고정; RPM 계열이 닫힘
+- [x] AL2 extras topic을 열거해 가져옴 (D78) — advisory 1,414건으로 AL2가 발행한 전체의
+      29.4%(docker, ecs, livepatch, firefox); topic 0개짜리 카탈로그는 모양 변화로 보고
+      거부; AL2023 NVIDIA/livepatch는 여전히 공개 상태로 남음
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건
@@ -778,9 +781,11 @@ AlmaLinux 심각도는 점수가 아니라 벤더 자신의 단어(Critical/Impo
 저장되고 올바르게 읽히지만(D72), Red Hat이나 Rocky 판정과 비교해 유난히 단어 위주로 보일 때
 알아 두면 좋습니다.
 
-Amazon의 판정은 core 저장소로만 한정되며, 그 축소는 감추지 않고 공개합니다: AL2의 extras
-저장소 73개(advisory 964건 — docker, ecs, 커널 라이브패치)는 가져오지 않고, `db build`가 그
-구멍을 나중에 스캔에서 발견되게 두는 대신 빌드 시점에 찍어 보여줍니다.
+이제 Amazon의 판정은 AL2 core에 extras topic 73개 — docker, ecs, 커널 livepatch를
+비롯한 나머지 — 를 더해 같은 방식으로 가져오고 매칭한 것을 반영합니다(D78). 대신 공개된
+채로 남는 것은 AL2023 쪽입니다: NVIDIA(306건)와 livepatch(286건) advisory가 D78이 닿지
+못한 저장소 레이아웃의 AL2023 core 바깥에 살아 있고, `db build`가 그 구멍을 나중에 스캔에서
+발견되게 두는 대신 빌드 시점에 찍어 보여줍니다.
 
 Fedora의 판정은 공개된 한계 두 가지를 물려받습니다: Bodhi 업데이트 산문에서 CVE를 뽑아내는
 것은 측정된 상한 81.7%에서 멈추고, EOL된 릴리스의 advisory는 스캔을 막는 대신 그 자리에서

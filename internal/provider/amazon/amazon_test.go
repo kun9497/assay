@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -102,30 +104,112 @@ func gzipOf(t *testing.T, b []byte) []byte {
 	return out.Bytes()
 }
 
-// repoServer stands up one repo's mirror.list -> repomd.xml ->
-// updateinfo.xml.gz chain behind an httptest server, resolving through a
-// SEPARATE "mirror" path the way the real cdn.amazonlinux.com does (a
-// rotating GUID/hash segment) rather than serving updateinfo directly off
-// the mirror.list URL -- proving the indirection is actually followed, not
-// hardcoded past.
-func repoServer(t *testing.T, ups []updateFixture) *httptest.Server {
+// mountRepo mounts one repo's mirror.list -> repomd.xml -> updateinfo.xml.gz
+// chain onto mux at the given path prefix ("" for the root, the way the
+// original single-repo repoServer used it; "/extras/<topic>/latest/x86_64"
+// for an extras topic, matching the real URL shape so a test proves the
+// production URL construction rather than standing in for it). Resolves
+// through a SEPARATE "resolved/guid/" path the way the real
+// cdn.amazonlinux.com does (a rotating GUID/hash segment) rather than
+// serving updateinfo directly off the mirror.list URL -- proving the
+// indirection is actually followed, not hardcoded past.
+func mountRepo(t *testing.T, mux *http.ServeMux, path string, ups []updateFixture) {
 	t.Helper()
 	gz := gzipOf(t, updatesXML(t, ups))
-	mux := http.NewServeMux()
-	mux.HandleFunc("/mirror.list", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "http://%s/resolved/guid-abc123/\n", r.Host)
+	resolved := path + "/resolved/guid/"
+	mux.HandleFunc(path+"/mirror.list", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "http://%s%s\n", r.Host, resolved)
 	})
-	mux.HandleFunc("/resolved/guid-abc123/repodata/repomd.xml", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(resolved+"repodata/repomd.xml", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `<repomd xmlns="http://linux.duke.edu/metadata/repo">`+
 			`<revision>1700000000</revision>`+
 			`<data type="primary"><location href="repodata/primary.xml.gz" /></data>`+
 			`<data type="updateinfo"><location href="repodata/updateinfo.xml.gz" /></data>`+
 			`</repomd>`)
 	})
-	mux.HandleFunc("/resolved/guid-abc123/repodata/updateinfo.xml.gz", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(resolved+"repodata/updateinfo.xml.gz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "binary/octet-stream")
 		w.Write(gz)
 	})
+}
+
+// mountRepoNoUpdateinfo mounts a repo whose repomd.xml names NO updateinfo
+// entry at all -- the OTHER zero-advisory shape measured live 2026-08-20 (14
+// of 73 AL2 extras topics, e.g. emacs), distinct from an updateinfo.xml.gz
+// that decodes to zero <update> elements. Exercises errNoUpdateinfo's own
+// branch in fetchRepo rather than convertUpdate's ordinary empty-list path.
+func mountRepoNoUpdateinfo(t *testing.T, mux *http.ServeMux, path string) {
+	t.Helper()
+	resolved := path + "/resolved/guid/"
+	mux.HandleFunc(path+"/mirror.list", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "http://%s%s\n", r.Host, resolved)
+	})
+	mux.HandleFunc(resolved+"repodata/repomd.xml", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<repomd xmlns="http://linux.duke.edu/metadata/repo">`+
+			`<revision>1700000000</revision>`+
+			`<data type="primary"><location href="repodata/primary.xml.gz" /></data>`+
+			`</repomd>`)
+	})
+}
+
+// mountExtrasCatalog mounts AL2's extras-catalog-x86_64.json, naming exactly
+// the topics given -- proving fetchExtrasTopics reads the real "n" field
+// (not "name") and that Fetch enumerates whatever the catalog names, nothing
+// hardcoded past it. The real document's other top-level and per-topic
+// fields ("motd", "whitelists", "inst", "deprecated-at", ...) are omitted on
+// purpose: extrasCatalogDoc's own doc comment explains why there is no
+// allowlist to keep in sync with them.
+func mountExtrasCatalog(t *testing.T, mux *http.ServeMux, topics []string) {
+	t.Helper()
+	mux.HandleFunc("/extras-catalog-x86_64.json", func(w http.ResponseWriter, r *http.Request) {
+		var b strings.Builder
+		b.WriteString(`{"status":"ok","version":1,"topics":[`)
+		for i, name := range topics {
+			if i > 0 {
+				b.WriteString(",")
+			}
+			fmt.Fprintf(&b, `{"n":%s}`, mustJSONString(t, name))
+		}
+		b.WriteString(`]}`)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, b.String())
+	})
+}
+
+func mustJSONString(t *testing.T, s string) string {
+	t.Helper()
+	b, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// quietExtrasServer stands up an extras catalog naming one topic whose repo
+// publishes no updateinfo at all -- the quietest legitimate shape the live
+// feed has (14 of 73 topics measured 2026-08-20) -- for every test in this
+// file that is not itself testing extras behaviour: Options.ExtrasBaseURL
+// defaults to the live CDN (DefaultExtrasBaseURL), so any test that left it
+// unset would reach cdn.amazonlinux.com from `go test`. It cannot serve a
+// zero-topic catalog instead, because Fetch's zero-topics guard refuses that
+// as a shape change (TestFetch_ExtrasCatalogZeroTopicsErrors).
+func quietExtrasServer(t *testing.T) string {
+	t.Helper()
+	mux := http.NewServeMux()
+	mountExtrasCatalog(t, mux, []string{"quiet-topic"})
+	mountRepoNoUpdateinfo(t, mux, "/extras/quiet-topic/latest/x86_64")
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+// repoServer stands up one repo's mirror.list -> repomd.xml ->
+// updateinfo.xml.gz chain behind an httptest server of its own -- the single-
+// repo shape every pre-D78 test in this file uses, now built on mountRepo.
+func repoServer(t *testing.T, ups []updateFixture) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mountRepo(t, mux, "", ups)
 	return httptest.NewServer(mux)
 }
 
@@ -147,7 +231,10 @@ func TestFetch_ResolvesIndirectionAndEmitsAdvisories(t *testing.T) {
 	}})
 	defer srv.Close()
 
-	p := New(Options{Repos: []Repo{{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/mirror.list"}}})
+	p := New(Options{
+		Repos:         []Repo{{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/mirror.list"}},
+		ExtrasBaseURL: quietExtrasServer(t),
+	})
 	var got []advisory.Advisory
 	prov, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
 		got = append(got, a)
@@ -224,10 +311,13 @@ func TestFetch_SeverityCasingBothNormalize(t *testing.T) {
 	}})
 	defer al2023.Close()
 
-	p := New(Options{Repos: []Repo{
-		{Ecosystem: "Amazon Linux:2", MirrorListURL: al2.URL + "/mirror.list"},
-		{Ecosystem: "Amazon Linux:2023", MirrorListURL: al2023.URL + "/mirror.list"},
-	}})
+	p := New(Options{
+		Repos: []Repo{
+			{Ecosystem: "Amazon Linux:2", MirrorListURL: al2.URL + "/mirror.list"},
+			{Ecosystem: "Amazon Linux:2023", MirrorListURL: al2023.URL + "/mirror.list"},
+		},
+		ExtrasBaseURL: quietExtrasServer(t),
+	})
 	var got []advisory.Advisory
 	if _, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
 		got = append(got, a)
@@ -257,7 +347,10 @@ func TestFetch_MediumIsAmazonsSpellingForModerate(t *testing.T) {
 		pkgs: []pkgFixture{{name: "curl", epoch: "0", version: "8.1.0", release: "1.amzn2023"}},
 	}})
 	defer srv.Close()
-	p := New(Options{Repos: []Repo{{Ecosystem: "Amazon Linux:2023", MirrorListURL: srv.URL + "/mirror.list"}}})
+	p := New(Options{
+		Repos:         []Repo{{Ecosystem: "Amazon Linux:2023", MirrorListURL: srv.URL + "/mirror.list"}},
+		ExtrasBaseURL: quietExtrasServer(t),
+	})
 	var got advisory.Advisory
 	if _, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
 		got = a
@@ -296,7 +389,10 @@ func TestFetch_ZeroAdvisoryRepoErrors(t *testing.T) {
 		pkgs: []pkgFixture{{name: "bash", epoch: "0", version: "5.1", release: "1.amzn2"}},
 	}})
 	defer srv.Close()
-	p := New(Options{Repos: []Repo{{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/mirror.list"}}})
+	p := New(Options{
+		Repos:         []Repo{{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/mirror.list"}},
+		ExtrasBaseURL: quietExtrasServer(t),
+	})
 	_, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil })
 	if err == nil {
 		t.Fatal("Fetch: no error, want one -- a repo with zero kept advisories must fail the build")
@@ -318,7 +414,10 @@ func TestFetch_NonSecurityUpdateIsSkippedNotEmitted(t *testing.T) {
 			pkgs: []pkgFixture{{name: "bash", epoch: "0", version: "5.1", release: "2.amzn2"}}},
 	})
 	defer srv.Close()
-	p := New(Options{Repos: []Repo{{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/mirror.list"}}})
+	p := New(Options{
+		Repos:         []Repo{{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/mirror.list"}},
+		ExtrasBaseURL: quietExtrasServer(t),
+	})
 	var got []advisory.Advisory
 	if _, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
 		got = append(got, a)
@@ -347,7 +446,10 @@ func TestFetch_DedupesAcrossArch(t *testing.T) {
 		},
 	}})
 	defer srv.Close()
-	p := New(Options{Repos: []Repo{{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/mirror.list"}}})
+	p := New(Options{
+		Repos:         []Repo{{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/mirror.list"}},
+		ExtrasBaseURL: quietExtrasServer(t),
+	})
 	var got advisory.Advisory
 	if _, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
 		got = a
@@ -374,7 +476,10 @@ func TestFetch_EpochIncludedOnlyWhenNonZero(t *testing.T) {
 		},
 	}})
 	defer srv.Close()
-	p := New(Options{Repos: []Repo{{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/mirror.list"}}})
+	p := New(Options{
+		Repos:         []Repo{{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/mirror.list"}},
+		ExtrasBaseURL: quietExtrasServer(t),
+	})
 	var got advisory.Advisory
 	if _, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
 		got = a
@@ -407,15 +512,18 @@ func TestFetch_PrintsExtrasDisclosure(t *testing.T) {
 	defer srv.Close()
 	var progress strings.Builder
 	p := New(Options{
-		Repos:    []Repo{{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/mirror.list"}},
-		Progress: &progress,
+		Repos:         []Repo{{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/mirror.list"}},
+		ExtrasBaseURL: quietExtrasServer(t),
+		Progress:      &progress,
 	})
 	if _, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil }); err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
 	out := progress.String()
-	if !strings.Contains(out, "extras repos") || !strings.Contains(out, "CORE") {
-		t.Errorf("progress output = %q, want it to disclose the core-only extras gap", out)
+	// D78 closed the AL2 extras gap; the disclosure now names the ONE that
+	// remains, AL2023's NVIDIA/livepatch repos.
+	if !strings.Contains(out, "AL2023") || !strings.Contains(out, "NVIDIA") {
+		t.Errorf("progress output = %q, want it to disclose the remaining AL2023 extras gap", out)
 	}
 }
 
@@ -428,7 +536,10 @@ func TestFetch_NoCVERefsStillEmits(t *testing.T) {
 		pkgs: []pkgFixture{{name: "bash", epoch: "0", version: "5.1", release: "1.amzn2"}},
 	}})
 	defer srv.Close()
-	p := New(Options{Repos: []Repo{{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/mirror.list"}}})
+	p := New(Options{
+		Repos:         []Repo{{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/mirror.list"}},
+		ExtrasBaseURL: quietExtrasServer(t),
+	})
 	var got advisory.Advisory
 	if _, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
 		got = a
@@ -441,5 +552,274 @@ func TestFetch_NoCVERefsStillEmits(t *testing.T) {
 	}
 	if len(got.Related) != 0 {
 		t.Errorf("Related = %v, want empty", got.Related)
+	}
+}
+
+// TestFetch_ExtrasTopicsEnumeratedAndAdvisoriesLand is the caller-first proof
+// for D78's whole slice: Fetch must enumerate AL2's extras catalog and fetch
+// every topic it names, not merely have fetchExtrasTopics sitting unused.
+// Deleting the p.fetchExtrasTopics(ctx) call in Fetch (or the loop that turns
+// its result into Repo entries) makes ALAS2DOCKER-2099-001 never land, and
+// this is the only test that would notice.
+//
+// Two topics are mounted -- "docker" carrying one advisory, "quiet-topic"
+// carrying none -- alongside the two ordinary CORE repos, all behind ONE
+// httptest server, proving Options.Repos and Options.ExtrasBaseURL can point
+// at the same server a hermetic test needs even though a real deployment
+// never would.
+func TestFetch_ExtrasTopicsEnumeratedAndAdvisoriesLand(t *testing.T) {
+	mux := http.NewServeMux()
+	mountExtrasCatalog(t, mux, []string{"docker", "quiet-topic"})
+	// "extrpkg" and "ALAS2DOCKER-2099-001" share no substring (CLAUDE.md's
+	// substring-collision rule) -- neither could pass this test by landing on
+	// the wrong column.
+	mountRepo(t, mux, "/extras/docker/latest/x86_64", []updateFixture{{
+		id: "ALAS2DOCKER-2099-001", severity: "important",
+		cves: []string{"CVE-2099-5001"},
+		pkgs: []pkgFixture{{name: "extrpkg", epoch: "0", version: "1.0", release: "1.amzn2"}},
+	}})
+	mountRepo(t, mux, "/extras/quiet-topic/latest/x86_64", nil) // 0 <update> elements
+	mountRepo(t, mux, "/core-al2", []updateFixture{{
+		id: "ALAS2-2099-100", severity: "low",
+		pkgs: []pkgFixture{{name: "bash", epoch: "0", version: "5.1", release: "1.amzn2"}},
+	}})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := New(Options{
+		Repos:         []Repo{{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/core-al2/mirror.list"}},
+		ExtrasBaseURL: srv.URL,
+	})
+	var got []advisory.Advisory
+	prov, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
+		got = append(got, a)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+
+	var extrasAdv *advisory.Advisory
+	for i := range got {
+		if got[i].ID == "ALAS2DOCKER-2099-001" {
+			extrasAdv = &got[i]
+		}
+	}
+	if extrasAdv == nil {
+		t.Fatalf("extras advisory ALAS2DOCKER-2099-001 was never emitted (topic enumeration did not run); "+
+			"got %d advisories: %+v", len(got), got)
+	}
+	if len(extrasAdv.Affected) != 1 || extrasAdv.Affected[0].Name != "extrpkg" {
+		t.Fatalf("extras advisory Affected = %+v, want exactly one entry named extrpkg", extrasAdv.Affected)
+	}
+	if extrasAdv.Affected[0].Ecosystem != "Amazon Linux:2" {
+		t.Errorf("extras advisory Ecosystem = %q, want Amazon Linux:2 (same key core uses)",
+			extrasAdv.Affected[0].Ecosystem)
+	}
+
+	var coreFound bool
+	for _, a := range got {
+		if a.ID == "ALAS2-2099-100" {
+			coreFound = true
+		}
+	}
+	if !coreFound {
+		t.Errorf("core advisory ALAS2-2099-100 missing from %+v -- extras enumeration must not crowd out core", got)
+	}
+	if len(got) != 2 {
+		t.Errorf("emitted %d advisories, want exactly 2 (one extras, one core): %+v", len(got), got)
+	}
+	if prov.Records != 2 {
+		t.Errorf("Records = %d, want 2", prov.Records)
+	}
+}
+
+// TestFetch_ExtrasCatalogZeroTopicsErrors holds the zero-topics guard: a
+// catalog that parses cleanly but names no topics is a shape change (a
+// renamed "n" field decodes to exactly this), not a smaller feed -- the live
+// catalog carried 73 topics measured 2026-08-20 -- and shipping past it
+// would rebuild the silently core-only database D78 exists to close.
+// Deleting the guard in Fetch turns this red.
+func TestFetch_ExtrasCatalogZeroTopicsErrors(t *testing.T) {
+	mux := http.NewServeMux()
+	mountExtrasCatalog(t, mux, nil)
+	mountRepo(t, mux, "/core-al2", []updateFixture{{
+		id: "ALAS2-2099-100", severity: "low",
+		pkgs: []pkgFixture{{name: "bash", epoch: "0", version: "5.1", release: "1.amzn2"}},
+	}})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := New(Options{
+		Repos:         []Repo{{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/core-al2/mirror.list"}},
+		ExtrasBaseURL: srv.URL,
+	})
+	_, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil })
+	if err == nil {
+		t.Fatal("Fetch succeeded against a zero-topic extras catalog; want the shape-change error")
+	}
+	if !strings.Contains(err.Error(), "zero topics") {
+		t.Errorf("error %q does not name the zero-topic condition", err)
+	}
+}
+
+// TestFetch_ExtrasEmptyTopicCountedNotError is the zero-advisory scoping
+// test (item 3): an extras topic whose updateinfo.xml.gz decodes to zero
+// <update> elements (28 of 73 measured live 2026-08-20) must not fail the
+// build the way a CORE repo doing the same does
+// (TestFetch_ZeroAdvisoryRepoErrors, unchanged by D78) -- it must be counted
+// in the stats line instead. Deleting the `if !r.Extras` guard in Fetch's
+// zero-kept branch turns this red.
+func TestFetch_ExtrasEmptyTopicCountedNotError(t *testing.T) {
+	mux := http.NewServeMux()
+	mountExtrasCatalog(t, mux, []string{"quiet-topic"})
+	mountRepo(t, mux, "/extras/quiet-topic/latest/x86_64", nil)
+	mountRepo(t, mux, "/core-al2", []updateFixture{{
+		id: "ALAS2-2099-200", severity: "low",
+		pkgs: []pkgFixture{{name: "bash", epoch: "0", version: "5.1", release: "1.amzn2"}},
+	}})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	var progress strings.Builder
+	p := New(Options{
+		Repos:         []Repo{{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/core-al2/mirror.list"}},
+		ExtrasBaseURL: srv.URL,
+		Progress:      &progress,
+	})
+	if _, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil }); err != nil {
+		t.Fatalf("Fetch: %v, want no error -- an empty extras topic must be counted, not fatal", err)
+	}
+	want := "extras: 1 topics enumerated, 1 with zero advisories, 0 advisories ingested"
+	if !strings.Contains(progress.String(), want) {
+		t.Errorf("progress output = %q, want it to contain %q", progress.String(), want)
+	}
+}
+
+// TestFetch_ExtrasTopicWithNoUpdateinfoEntryCountedNotError exercises the
+// OTHER zero-advisory shape measured live 2026-08-20 (14 of 73 AL2 extras
+// topics, e.g. emacs): repomd.xml names no <data type="updateinfo"> entry at
+// all -- the errNoUpdateinfo branch in fetchRepo, distinct from
+// TestFetch_ExtrasEmptyTopicCountedNotError's updateinfo.xml.gz that decodes
+// to zero <update> elements, and not reached by that test or the
+// caller-first test above. Deleting the errors.Is(err, errNoUpdateinfo)
+// check in fetchRepo turns this red.
+func TestFetch_ExtrasTopicWithNoUpdateinfoEntryCountedNotError(t *testing.T) {
+	mux := http.NewServeMux()
+	mountExtrasCatalog(t, mux, []string{"no-updateinfo-topic"})
+	mountRepoNoUpdateinfo(t, mux, "/extras/no-updateinfo-topic/latest/x86_64")
+	mountRepo(t, mux, "/core-al2", []updateFixture{{
+		id: "ALAS2-2099-300", severity: "low",
+		pkgs: []pkgFixture{{name: "bash", epoch: "0", version: "5.1", release: "1.amzn2"}},
+	}})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	var progress strings.Builder
+	p := New(Options{
+		Repos:         []Repo{{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/core-al2/mirror.list"}},
+		ExtrasBaseURL: srv.URL,
+		Progress:      &progress,
+	})
+	if _, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil }); err != nil {
+		t.Fatalf("Fetch: %v, want no error -- a topic with no updateinfo entry at all must be counted, not fatal", err)
+	}
+	want := "extras: 1 topics enumerated, 1 with zero advisories, 0 advisories ingested"
+	if !strings.Contains(progress.String(), want) {
+		t.Errorf("progress output = %q, want it to contain %q", progress.String(), want)
+	}
+}
+
+// TestFetch_ExtrasFetchErrorNamesTheMirrorURL proves a genuine fetch failure
+// on an extras topic (as opposed to a legitimate zero) still fails the
+// build, and that the error names WHICH topic failed: with up to 73 extras
+// repos sharing one ecosystem string ("Amazon Linux:2"), r.Ecosystem alone
+// (core's own error shape) would not say which one. Also pins the real URL
+// shape (item 1): <base>/extras/<topic>/latest/x86_64/mirror.list.
+func TestFetch_ExtrasFetchErrorNamesTheMirrorURL(t *testing.T) {
+	mux := http.NewServeMux()
+	mountExtrasCatalog(t, mux, []string{"broken-topic"})
+	// No handler mounted for /extras/broken-topic/... at all: mirror.list
+	// 404s, the same as a topic the CDN stopped serving mid-build.
+	mountRepo(t, mux, "/core-al2", []updateFixture{{
+		id: "ALAS2-2099-500", severity: "low",
+		pkgs: []pkgFixture{{name: "bash", epoch: "0", version: "5.1", release: "1.amzn2"}},
+	}})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := New(Options{
+		Repos:         []Repo{{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/core-al2/mirror.list"}},
+		ExtrasBaseURL: srv.URL,
+	})
+	_, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil })
+	if err == nil {
+		t.Fatal("Fetch: no error, want one -- broken-topic's mirror.list 404s")
+	}
+	if !strings.Contains(err.Error(), "/extras/broken-topic/latest/x86_64/mirror.list") {
+		t.Errorf("error = %q, want it to name the failing topic's mirror.list URL", err)
+	}
+}
+
+// TestFetch_CoreZeroAdvisoryErrorCountsOnlyThatRepo proves the per-repo delta
+// Fetch now tracks (updatesBefore): with dozens of extras repos able to share
+// one stats accumulator, the zero-advisory error must report the FAILING
+// repo's own update count, not the running total across every repo already
+// processed in the loop. AL2 core here contributes one update before
+// AL2023's (empty) chain is read; the error must say "0 updates", not "1".
+func TestFetch_CoreZeroAdvisoryErrorCountsOnlyThatRepo(t *testing.T) {
+	mux := http.NewServeMux()
+	mountRepo(t, mux, "/core-al2", []updateFixture{{
+		id: "ALAS2-2099-400", severity: "low",
+		pkgs: []pkgFixture{{name: "bash", epoch: "0", version: "5.1", release: "1.amzn2"}},
+	}})
+	mountRepo(t, mux, "/core-al2023", nil) // 0 <update> elements: the guard must fire here
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := New(Options{
+		Repos: []Repo{
+			{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/core-al2/mirror.list"},
+			{Ecosystem: "Amazon Linux:2023", MirrorListURL: srv.URL + "/core-al2023/mirror.list"},
+		},
+		ExtrasBaseURL: quietExtrasServer(t),
+	})
+	_, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil })
+	if err == nil {
+		t.Fatal("Fetch: no error, want one -- Amazon Linux:2023 yielded zero advisories")
+	}
+	if !strings.Contains(err.Error(), "Amazon Linux:2023") {
+		t.Errorf("error %q does not name the repo that yielded nothing", err)
+	}
+	if !strings.Contains(err.Error(), "out of 0 updates") {
+		t.Errorf("error = %q, want it to report 0 updates for Amazon Linux:2023 itself, "+
+			"not the 1 update Amazon Linux:2 (processed first) contributed to the running total", err)
+	}
+}
+
+// TestFetchExtrasTopics_SkipsEmptyNamesAndIgnoresUnknownFields is a direct
+// unit test of the helper for a branch the caller-first test does not
+// exercise: a topic entry with an empty "n" (never seen live, but the
+// catalog is third-party JSON) must not become a mirror.list URL that could
+// only 404, and the catalog's other real fields (motd, whitelists, inst,
+// versions, deprecated-at -- all present live 2026-08-20, none read by
+// extrasTopic) must not break decoding.
+func TestFetchExtrasTopics_SkipsEmptyNamesAndIgnoresUnknownFields(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/extras-catalog-x86_64.json", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"motd":"hello","status":"ok","version":1,"whitelists":[[0,1]],`+
+			`"topics":[{"n":"docker","inst":["docker"],"versions":["stable"],"deprecated-at":"2023-09-30"},`+
+			`{"n":""},{"n":"livepatch","versions":["stable"]}]}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := New(Options{ExtrasBaseURL: srv.URL})
+	topics, err := p.fetchExtrasTopics(context.Background())
+	if err != nil {
+		t.Fatalf("fetchExtrasTopics: %v", err)
+	}
+	if want := []string{"docker", "livepatch"}; !reflect.DeepEqual(topics, want) {
+		t.Errorf("fetchExtrasTopics = %v, want %v (empty-name entry skipped)", topics, want)
 	}
 }

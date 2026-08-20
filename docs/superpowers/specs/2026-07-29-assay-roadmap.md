@@ -3105,6 +3105,44 @@ says so next to the feature.
 
 ---
 
+### D78 — AL2's extras topics, enumerated rather than hardcoded
+
+**Decision.** The Amazon provider enumerates AL2's 73 extras topics from the feed's own
+catalog (`extras-catalog-x86_64.json` — the topic name is `"n"`, not `"name"`) and fetches
+each through the identical mirror.list → repomd.xml → updateinfo.xml.gz chain core already
+uses, onto the same `Amazon Linux:2` key: a package installed from extras runs on the same
+OS core does. This closes the gap D73 shipped disclosed — and it was 29.4% of everything
+Amazon had published for AL2, exactly where AL2 lives: docker 138, ecs 124,
+nitro-enclaves 116, firefox 61, tomcat9 27, livepatch 297. Measured at ingestion
+2026-08-20: 1,414 extras advisories (the 964 of 2026-08-19 plus a day of feed growth;
+every per-topic sample matched exactly).
+
+**Two guards, scoped by what a zero means.** A CORE repo yielding zero advisories is still
+the hard error D73 made it. An extras topic yielding zero is the feed's normal shape — 28
+of 73 measured, half publishing no updateinfo entry at all, half an empty one — so both
+zero flavours are counted in the stats line, never fatal. One level up, a catalog that
+parses but names zero topics is refused: a renamed `"n"` decodes cleanly to nothing, and
+shipping past it would rebuild the silently core-only database this slice exists to close.
+
+**Livepatch is a measured non-issue, with the trigger on record.** ALAS2LIVEPATCH is
+ksplice's hazard family, so it was measured before being ingested: all 277 distinct package
+names across its 297 advisories are `kernel-livepatch-<version>`-qualified — none is a bare
+mainline name, so an advisory can only ever match an actually-installed livepatch package.
+Ingested normally; the package doc records the trigger (a bare mainline name appearing)
+and the shape the guard would take (oracle's drop-and-count, D74, since this feed
+distinguishes lineages by name — Ubuntu's suffix convention, D53, does not apply).
+
+**What stays open.** AL2023 keeps NVIDIA (306) and livepatch (286) advisories outside its
+core in a different repo layout (its extras catalog URL answers 403); the Fetch disclosure
+line now names that remainder instead of the closed AL2 gap. And the slice's E2E surfaced a
+pre-existing hole one layer up: CycloneDX SBOM ingestion maps no `rpm` purl type, so an
+SBOM naming an RPM-family package cannot reach the matcher at all — recorded in
+`docs/deferred-decisions.md`, verified instead at the matcher seam: containerd
+`2.1.7-1.amzn2.0.1` on `Amazon Linux:2` draws 17 findings across three extras namespaces,
+`ALAS2DOCKER-2026-139` (high, fixed `2.1.9-1.amzn2.0.2`) among them.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes
