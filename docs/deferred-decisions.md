@@ -959,6 +959,40 @@ architecture.
 
 ---
 
+### CycloneDX maps no `rpm` purl type
+
+Found by D78's E2E, not by a reader: `purlTypeToEcosystem` has no `rpm` entry, so an SBOM
+naming an RPM-family package (`pkg:rpm/amzn/containerd@...`) never reaches the matcher —
+the whole distro side of the database is unreachable from the SBOM path. It is not a
+one-line fix, which is why it is here: an `rpm` purl carries its distro in a qualifier
+(`distro=amzn-2`, `distro=rhel-9.4`), not the type, and mapping that to release-qualified
+ecosystem keys (D6) needs the same os-release normalization the image path gets from
+`internal/pkgmeta` — plus a decision about purls with no distro qualifier at all (report
+as not evaluated, presumably, D17's register). Until then RPM-family scanning is image-
+and directory-only; D78 verified its extras findings at the matcher seam instead.
+
+**Revisit trigger:** the first user scanning distro SBOMs (syft emits exactly these purls),
+or SPDX ingestion above landing first — the mapping should be built once, shared by both
+parsers.
+
+---
+
+### AL2023's NVIDIA and livepatch repos
+
+D78 closed AL2's extras gap; AL2023's equivalent stays open and disclosed. 306
+ALAS2023NVIDIA + 286 ALAS2023LIVEPATCH advisories (measured 2026-08-19 from the ALAS RSS)
+live outside AL2023 core, and the AL2 approach does not transfer: AL2023 publishes no
+extras catalog at the parallel URL (403, verified 2026-08-20) — its extra repos are DNF
+modules with a different layout that was not researched in D78's slice. The Fetch
+disclosure line names this remainder, so a core-plus-AL2-extras build cannot read as
+covering AL2023 completely.
+
+**Revisit trigger:** someone scans an AL2023 image with NVIDIA drivers or livepatches
+installed, or the AL2023 repo layout gets measured the way `amazon-research.json` measured
+AL2's.
+
+---
+
 ### Flags on the `db` subcommands
 
 `assay db status --output json` exits 0 and prints the human table; `assay db status

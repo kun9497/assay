@@ -582,6 +582,9 @@ exited 0 while 24 findings went unmentioned. **Done.**
 - [x] SLES and openSUSE Leap from SUSE CSAF VEX (D77) — 40,221 advisories, fix states
       beyond RHEL for the first time, byte-for-byte key agreement pinned; the RPM family
       closes
+- [x] AL2 extras topics enumerated and fetched (D78) — 1,414 advisories that were 29.4%
+      of everything AL2 published (docker, ecs, livepatch, firefox), a zero-topic catalog
+      refused as a shape change; AL2023 NVIDIA/livepatch stays disclosed
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a
@@ -833,10 +836,11 @@ linkage runs through `related` rather than `aliases` or `upstream` — both stor
 and read correctly (D72), but worth knowing when a verdict is unusually word-shaped compared
 to a Red Hat or Rocky one.
 
-An Amazon verdict is core-repos-only, and that narrowing is disclosed rather than hidden:
-AL2's 73 extras repos (964 advisories — docker, ecs, kernel livepatches) are not fetched, and
-`db build` prints that gap at build time rather than leaving it to be discovered on a scan
-that needed them.
+An Amazon verdict now reads AL2 core plus its 73 extras topics — docker, ecs, kernel
+livepatches and the rest — fetched and matched the same way (D78). What stays disclosed
+instead is AL2023's: its NVIDIA (306) and livepatch (286) advisories live outside AL2023
+core in a repo layout D78 did not reach, and `db build` prints that gap at build time
+rather than leaving it to be discovered on a scan that needed them.
 
 A Fedora verdict inherits two disclosed limits: CVE extraction from Bodhi's update prose
 tops out at a measured 81.7%, and an EOL'd release's advisories freeze in place rather than

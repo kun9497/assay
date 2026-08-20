@@ -139,18 +139,16 @@ Environment (db build only — a scan reads no environment and no network):
                         narrower database than db update delivers.
                         Set this to 0 for a local build that does not scan RHEL
                         and wants to be about twenty minutes shorter.
-  AMAZON_ENABLE=0       Skip Amazon Linux's ALAS feed (AL2 and AL2023). ON BY
-                        DEFAULT (D73), for the same reason as Red Hat: the
-                        published artifact carries it, so a build without it
-                        produces a narrower database than db update delivers.
-                        CORE REPOSITORIES ONLY: AL2's 73 extras repos (~964
-                        advisories across docker, ecs, livepatch,
-                        nitro-enclaves, firefox and more) and AL2023's
-                        NVIDIA/livepatch repos are not fetched, so a package
-                        installed from one of those is evaluated only against
-                        core data.
-                        Set this to 0 for a local build that does not scan
-                        Amazon Linux.
+  AMAZON_ENABLE=0       Skip Amazon Linux's ALAS feed (AL2 core+extras and AL2023 core). ON BY
+                        DEFAULT (D73, D78), for the same reason as Red Hat: the published
+                        artifact carries it, so a build without it produces a narrower database
+                        than db update delivers.
+                        AL2's 73 extras topics (D78) are fetched alongside core -- docker, ecs,
+                        livepatch, nitro-enclaves, firefox and more. AL2023's NVIDIA and
+                        livepatch repos are NOT fetched: 306 + 286 advisories live outside
+                        AL2023 core in a different repo layout, so a package installed from
+                        either is evaluated only against AL2023 core data.
+                        Set this to 0 for a local build that does not scan Amazon Linux.
   ORACLE_ENABLE=0       Skip Oracle Linux's OVAL feed (ELSA/ELBA errata,
                         Oracle Linux 5-10). ON BY DEFAULT (D74), for the
                         same reason as Red Hat and Amazon Linux: the
