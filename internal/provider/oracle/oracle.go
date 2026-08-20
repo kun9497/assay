@@ -17,13 +17,24 @@
 // kernel-uek lineage genuinely fixes the same CVE at two or more unrelated
 // version trains in parallel (the UEK guard in oval.go's dropAmbiguous).
 //
-// ksplice-lineage and FIPS-lineage packages (Oracle's analogues of RHEL's
-// live-patch and Ubuntu's FIPS builds, D53) are NOT filtered by this slice.
-// They are a known, measured hazard -- 92 ksplice definitions and roughly
-// 2,500 FIPS-suffixed fixed EVRs, per the research this slice shipped from --
-// left for docs/deferred-decisions.md rather than solved here, the same way
-// D73 shipped Amazon Linux core-only and disclosed the extras gap rather than
-// silently narrowing scope further to close it.
+// Ksplice-lineage and FIPS-lineage fixed EVRs (Oracle's analogues of RHEL's
+// live-patch and Ubuntu's FIPS builds, D53) are filtered at ingestion (D79,
+// oval.go's oracleLineageMarker): the criteria walk drops any fixed EVR
+// carrying `.ksplice<N>.` or an end-anchored `_fips` before it ever reaches
+// perMajor, which is also before dropAmbiguous groups it. Left in, a lineage
+// EVR collides with the mainline fix for the same (CVE, major, package), and
+// D74's cross-definition guard drops BOTH -- measured 2026-08-20 by
+// reproducing dropAmbiguous against the full live archive: excluding
+// lineage EVRs recovers 10,502 of the 43,123 dropped affected entries
+// (24.4%; 169,585 ambiguous groups fall to 158,119), and openssl's entire
+// ambiguity among them disappears. A package actually installed from one of
+// these lineages still has nothing sound to be judged against once its
+// lineage fix is gone -- mainline bounds do not order against a Ksplice or
+// FIPS release in either direction -- so the matcher half of D79
+// (oracleLineageOf/oracleLineageMarker in internal/matcher/matcher.go, a
+// deliberate duplicate of the regexp here for the same reason csaf.go's
+// isModule and matcher's rpmModuleBuild are duplicated) reports such an
+// installed package not-evaluated rather than matched.
 package oracle
 
 import (

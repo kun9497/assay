@@ -572,7 +572,7 @@ exited 0 while 24 findings went unmentioned. **Done.**
       disclosed as unfetched
 - [x] Oracle Linux 5-10 from ELSA OVAL (D74) — first OVAL criteria-tree parser; UEK
       cross-definition ambiguity dropped-and-counted; v2-only definitions fall to the NVD
-      join; ksplice/FIPS lineages disclosed as unfiltered
+      join; ksplice/FIPS lineages filtered since D79
 - [x] Fedora current releases from Bodhi (D75) — prose-CVE misses counted (81.7%
       ceiling), EOL freeze disclosed, unspecified severity stays Unknown; the buildable
       RPM family closes
@@ -585,6 +585,9 @@ exited 0 while 24 findings went unmentioned. **Done.**
 - [x] AL2 extras topics enumerated and fetched (D78) — 1,414 advisories that were 29.4%
       of everything AL2 published (docker, ecs, livepatch, firefox), a zero-topic catalog
       refused as a shape change; AL2023 NVIDIA/livepatch stays disclosed
+- [x] Ksplice/FIPS lineage filter (D79) — 12,174 lineage fixed versions dropped at
+      ingestion, installed lineage packages reported not evaluated; the filter recovered
+      24.4% of what the UEK ambiguity guard was throwing out, openssl entirely
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a

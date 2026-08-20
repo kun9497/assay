@@ -3143,6 +3143,35 @@ SBOM naming an RPM-family package cannot reach the matcher at all — recorded i
 
 ---
 
+### D79 — Ksplice and FIPS are lineages, not versions
+
+**Decision.** Oracle's Ksplice- and FIPS-lineage builds are handled the way D53 handles
+Ubuntu's ESM/FIPS lineages, on both sides of the store. At ingestion, a fixed EVR carrying
+a lineage marker is dropped and counted (12,174 measured 2026-08-20) before D74's
+ambiguity guard ever groups it. At scan time, an installed package whose version carries
+the marker is reported not evaluated — mainline bounds do not order soundly against a
+lineage release in either direction. The markers are the corpus's own two spellings,
+measured across every fixed EVR: `.ksplice<N>.` inside the release (92 distinct
+`.ksplice1.`, one `.ksplice2.`) and `_fips` ending it (33 distinct, all `el<major>[_minor]_fips`).
+The provider and matcher each carry a copy of the marker with cross-referencing comments —
+the isModule/rpmModuleBuild pattern — because one decides what enters the store and the
+other what gets judged against it, and drift between them is a silent wrong verdict.
+
+**The measured surprise: the filter pays for itself in recovered mainline fixes.** A
+lineage EVR colliding with the mainline fix for the same (CVE, major, package) made D74's
+guard throw BOTH out. Filtering lineage first recovers 10,502 of the 43,123 entries D74
+dropped (24.4%) — openssl's entire ambiguity was lineage noise. Predicted from a
+reproduction of dropAmbiguous against the archive, then confirmed live to within 0.03%:
+158,119 ambiguous groups and 32,621 dropped entries, both exactly as computed.
+
+**What the remainder is made of** (recorded with the train question in
+`docs/deferred-decisions.md`): kernel* is 83.4% of remaining groups but 40.7% of entries;
+nodejs/postgresql/qemu re-fixes are module streams — D71 decision 3's territory, not
+UEK's. The genuinely open train-aware question is kernel-and-kin only, and only for
+host/rootfs scans.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

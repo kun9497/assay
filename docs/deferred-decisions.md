@@ -514,17 +514,29 @@ originally named is off this list — see D71 through D77 — and openSUSE Tumbl
 on it: rolling releases have no release axis to key on, so it is refused by name rather than
 deferred.
 
-**Oracle Linux itself still owes one decision.** D74 disclosed rather than filtered:
-ksplice- and FIPS-lineage packages are not distinguished from mainline ones, the same
-Ubuntu-D53-shaped hazard, so `oraclelinux:` verdicts on those lineages carry mainline
-advisories that may not apply. Follow-up, not blocking — recorded here and in D74 rather
-than only in the package doc.
+**~~Oracle Linux itself still owes one decision~~ — the lineage half is resolved in D79.**
+Ksplice- and FIPS-lineage fixed EVRs are dropped at ingestion (12,174 measured, counted in
+the stats line) and an installed lineage package is reported not evaluated by the matcher,
+Ubuntu-D53's shape with Oracle's own two markers (`.ksplice<N>.` in the release, `_fips`
+ending it — both measured across the full corpus, and the marker copies in the provider
+and the matcher carry cross-referencing comments because they must not drift).
 
-Measured at first ingestion: the cross-definition UEK/module guard dropped 43,123 affected
-entries (169,585 ambiguous (CVE, major, package) groups) — far above the research's
-~1,700-group estimate, because Oracle re-fixes the same CVE+package across successive
-ELSAs. Conservative direction (no wrong-train match), but the false-negative cost is the
-follow-up's real question: train-aware matching, or keeping the earliest fix.
+What remains is the train question, now a third smaller and better characterized. D74's
+first ingestion dropped 43,123 affected entries (169,585 ambiguous (CVE, major, package)
+groups); D79's lineage filter recovered 10,502 of them — 24.4%, openssl's entire ambiguity
+among it, because a lineage EVR colliding with the mainline fix made D74's guard throw both
+out. Post-D79 the guard drops 32,621 entries across 158,119 groups, and the composition was
+measured (2026-08-20): kernel* packages are 83.4% of the GROUPS but only 40.7% of the
+ENTRIES; perf/bpftool/python-perf (~790 entries) are kernel-train artifacts by another
+name; and the biggest non-kernel names — nodejs (106), postgresql (87), qemu (90) — are not
+a UEK problem at all but MODULE STREAMS re-fixing the same CVE per stream, i.e. the
+MODULARITYLABEL deferral D71 decision 3 already records. The genuinely open question is
+narrower than it looked: train-aware matching (or keeping the earliest fix) for the
+kernel-and-kin remainder, which only pays off on host/rootfs scans — container images ship
+no kernel. Conservative direction meanwhile (no wrong-train match), unchanged.
+
+**Revisit trigger:** a host/rootfs scan user appears, or MODULARITYLABEL matching (D71
+decision 3) starts — the module-stream slice of the remainder belongs to that work.
 
 **The five decisions this research forced now live in D71**, not here, because the next
 distro slices reuse them: reading `related` for CVE joins, scoped to distro-authored records;
