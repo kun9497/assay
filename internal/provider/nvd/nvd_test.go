@@ -1174,3 +1174,57 @@ func TestAnnotate_NoUntilRecordsAnOpenEnd(t *testing.T) {
 		t.Errorf("CoversUntil = %v, known = %v; want zero and known", prov.CoversUntil, prov.CoversUntilKnown)
 	}
 }
+
+// TestAnnotate_FutureUntilIsClampedToNow is the other half of the clamp
+// documented right above it in Annotate (nvd.go): "A future or zero end
+// stays 'now' ... keeps a clock skew from turning into a failed seven-hour
+// build." TestAnnotate_UntilBoundsTheRequestedWindow and every other test
+// that sets Until uses a PAST instant, so nothing ever drove the
+// `p.until.Before(until)` half of the guard with a value on the other side
+// of it. Dropping that conjunct sends a future Until to NVD verbatim as
+// lastModEndDate instead of clamping it -- exactly the request the comment
+// says must never reach the wire.
+//
+// Since must be set (a past instant, like TestAnnotate_UntilBoundsTheRequestedWindow's
+// own fixture) because fetchPage only sends lastModStartDate/lastModEndDate
+// at all when since is non-zero -- with no Since, both assertions below would
+// be vacuously satisfied by an absent parameter regardless of the clamp.
+//
+// prov.CoversUntil is deliberately NOT asserted here: it is set from the RAW
+// p.until, unclamped, by design (nvd.go's own comment: "the end is recorded
+// whether or not it was asked for"), so it does not observe this guard at
+// all. prov.Window does -- windowLabel(since, until) uses the same clamped
+// local `until` the wire request does -- which is why both assertions below
+// read from the wire request and prov.Window, never from prov.CoversUntil.
+func TestAnnotate_FutureUntilIsClampedToNow(t *testing.T) {
+	restore := nowUTC
+	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	nowUTC = func() time.Time { return now }
+	defer func() { nowUTC = restore }()
+
+	var gotEnd string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotEnd = r.URL.Query().Get("lastModEndDate")
+		io.WriteString(w, `{"totalResults":0,"timestamp":"2026-01-01T00:00:00.000","vulnerabilities":[]}`)
+	}))
+	defer srv.Close()
+
+	since := now.AddDate(0, -1, 0) // 2026-07-03: well inside the 120-day cap.
+	// 30 days AFTER the pinned "now" -- clock skew, or a caller's typo'd
+	// flag, either way a range NVD's own clock has not reached yet.
+	future := now.AddDate(0, 0, 30)
+	p := New(Options{BaseURL: srv.URL, Since: since, Until: future, Pause: durPtr(0)})
+	prov, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil })
+	if err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+
+	if !strings.HasPrefix(gotEnd, "2026-08-03") {
+		t.Errorf("lastModEndDate = %q, want it clamped to now (2026-08-03), "+
+			"not sent verbatim as the future Until (2026-09-02)", gotEnd)
+	}
+	if prov.Window != "modified 2026-07-03..2026-08-03" {
+		t.Errorf("Window = %q, want the recorded window clamped to now, "+
+			"not the future Until that was given", prov.Window)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -285,6 +286,61 @@ func TestUpdate_RunsAnnotatorsAndPersistsRatings(t *testing.T) {
 	}
 }
 
+// TestUpdate_InstallUsesReplacesRetrySchedule is Update's own counterpart to
+// pull_test.go's TestPull_InstallUsesReplacesRetrySchedule. replace()'s retry
+// schedule is thoroughly covered from below (replaceWaits' own values test)
+// and through Pull's call site, but Update's install -- a SEPARATE call to
+// replace() a few dozen lines down from Pull's -- was held by nothing:
+// swapping it for a single bare renameFn(tmp, dbPath) attempt reintroduces
+// the exact "rename over a file a concurrent scan holds open fails outright"
+// collision the retry exists for, on the nightly builder, and every
+// Update/atomicity test in this file passes regardless because none of them
+// ever makes the rename itself fail. Same shape as CLAUDE.md's D58 row: the
+// helper's retries are covered, one of its two callers was not.
+func TestUpdate_InstallUsesReplacesRetrySchedule(t *testing.T) {
+	origWaits, origRename := replaceWaits, renameFn
+	t.Cleanup(func() { replaceWaits, renameFn = origWaits, origRename })
+	// Zeroes the WAIT DURATIONS but keeps the COUNT from the live var, for
+	// the identical reason TestPull_InstallUsesReplacesRetrySchedule does:
+	// a hardcoded replacement would mask a mutation that shortens
+	// replaceWaits itself.
+	replaceWaits = make([]time.Duration, len(replaceWaits))
+
+	var attempts int32
+	renameFn = func(string, string) error {
+		atomic.AddInt32(&attempts, 1)
+		return fmt.Errorf("simulated rename failure")
+	}
+
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+		ID: "GHSA-replace", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
+	}}}
+
+	var out, errOut bytes.Buffer
+	code := Update(context.Background(), path, "", "", false,
+		[]provider.Provider{p}, nil, nil, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("Update with a permanently failing rename = %d, want 2 (stderr: %s)", code, errOut.String())
+	}
+	// The number this test actually names: replace()'s own schedule is 4
+	// attempts (dbcmd.go), asserted as a hardcoded constant for the same
+	// reason Pull's own version of this test does -- asserting against the
+	// live var would make this tautological against exactly the mutation it
+	// needs to catch.
+	const wantAttempts = 4
+	if got := atomic.LoadInt32(&attempts); got != wantAttempts {
+		t.Errorf("renameFn called %d times, want exactly %d (replace()'s retry schedule, dbcmd.go)",
+			got, wantAttempts)
+	}
+	// The other half of the same guarantee Pull's version pins: on failure
+	// the built database is KEPT, not deleted.
+	if _, err := os.Stat(path + ".tmp"); err != nil {
+		t.Errorf("a failed install must keep the built database, not delete it: %v", err)
+	}
+}
+
 // TestUpdate_AnnotatorFailureLeavesAnExistingDatabaseUntouched: a failing
 // annotator must fail the whole build exactly like a failing provider does.
 // A database holding advisories but silently missing the ratings a
@@ -349,6 +405,42 @@ func TestUpdate_AnnotatorFailureLeavesAnExistingDatabaseUntouched(t *testing.T) 
 	matches, _ := filepath.Glob(filepath.Join(dir, "*.tmp"))
 	if len(matches) != 0 {
 		t.Errorf("leftover temp files after a failed annotator: %v", matches)
+	}
+}
+
+// TestUpdate_ReportsTimingWhenAnAnnotatorFails is the annotator loop's own
+// counterpart of TestUpdate_ReportsTimingWhenAProviderFails (added after a
+// mutation removing BOTH failure-path calls to reportTimings survived) --
+// but only the PROVIDER loop's call ended up pinned. The one a few lines
+// down, inside the annotator loop, is held by nothing:
+// TestUpdate_AnnotatorFailureLeavesAnExistingDatabaseUntouched above only
+// asserts that stderr names "NVD", which the earlier "annotating with
+// NVD…" progress line already satisfies on its own -- deleting the
+// reportTimings call there leaves that assertion, and every other test in
+// this file, green. This asserts the timing TABLE itself: its header, and
+// the failed annotator's own row marked (failed) -- neither appears
+// anywhere else in the output, so only reportTimings actually running can
+// satisfy them.
+func TestUpdate_ReportsTimingWhenAnAnnotatorFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+		ID: "GHSA-timing-annotator", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
+	}}}
+	a := fakeAnnotator{name: "NVD", err: errBoom}
+
+	var out, errOut bytes.Buffer
+	code := Update(context.Background(), path, "", "", false,
+		[]provider.Provider{p}, []provider.Annotator{a}, nil, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("Update with a failing annotator = %d, want 2 (stderr: %s)", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "\ntiming (") {
+		t.Errorf("stderr does not show the timing table's own header:\n%s", errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "annotator NVD") || !strings.Contains(errOut.String(), "(failed)") {
+		t.Errorf("stderr does not show the failing annotator's own timing row marked (failed):\n%s",
+			errOut.String())
 	}
 }
 
@@ -1338,6 +1430,53 @@ func TestUpdate_AFailingEnricherIsReportedButDoesNotFailTheBuild(t *testing.T) {
 	matches, _ := filepath.Glob(filepath.Join(dir, "*.tmp"))
 	if len(matches) != 0 {
 		t.Errorf("leftover temp files after a failing enricher: %v", matches)
+	}
+}
+
+// TestUpdate_TimingMarksAFailingEnricher is the enricher loop's own
+// counterpart of the provider- and annotator-loop timing tests above.
+// reportTimings' "(failed)" marking is tested directly
+// (TestReportTimings_FailedStageIsListedAndMarked: "a summary printed only
+// on success would never show it") and its Failed wiring is held only for
+// providers and annotators; the enricher loop's own `Failed: err != nil`
+// (dbcmd.go) is unheld: hardcoding it to false makes a failed KISA fetch
+// render in the timing table as a completed stage even though the build
+// still exits 0 with a warning on stderr. Every existing enricher-failure
+// test (TestUpdate_AFailingEnricherIsReportedButDoesNotFailTheBuild above,
+// dbcmd_status_test.go's status-row coverage) asserts the warning line and
+// the status row, never the timing row -- so this reads the specific
+// timing-table LINE naming KISA (the row reportTimings prints, identified
+// by its own "record(s)" suffix, not the "enriching with KISA…" progress
+// line or the "warning: enricher KISA" error line, both of which also
+// contain "KISA" but neither of which the mutation touches) and requires
+// (failed) on that exact line.
+func TestUpdate_TimingMarksAFailingEnricher(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+		ID: "GHSA-timing-enricher", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
+	}}}
+	e := fakeEnricher{name: "KISA", err: errBoom}
+
+	var out, errOut bytes.Buffer
+	code := Update(context.Background(), path, "", "", false,
+		[]provider.Provider{p}, nil, []provider.Enricher{e}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("Update with a failing enricher = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+
+	var timingLine string
+	for _, line := range strings.Split(errOut.String(), "\n") {
+		if strings.Contains(line, "KISA") && strings.Contains(line, "record(s)") {
+			timingLine = line
+			break
+		}
+	}
+	if timingLine == "" {
+		t.Fatalf("no timing-table row for KISA in stderr:\n%s", errOut.String())
+	}
+	if !strings.Contains(timingLine, "(failed)") {
+		t.Errorf("KISA's own timing row is not marked (failed): %q", timingLine)
 	}
 }
 

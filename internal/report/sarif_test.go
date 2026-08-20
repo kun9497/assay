@@ -108,6 +108,28 @@ func TestSARIF_ShapeGitHubRequires(t *testing.T) {
 	}
 }
 
+// TestSARIF_DriverVersionIsTheBuildThatScanned pins the field D55's own
+// comment on the Version parameter exists for: "a SARIF file is read
+// detached from the command that produced it, so the document has to say
+// what scanned." TestSARIF_ShapeGitHubRequires above asserts the SARIF
+// FORMAT version (doc["version"], "2.1.0") but nothing anywhere asserts the
+// tool driver's OWN version -- the assay build string threaded through
+// SARIF's fifth parameter -- so blanking it (the field carries
+// `omitempty`, so an empty value drops the JSON key entirely) leaves the
+// whole suite green: a reader opening the document in a web UI, detached
+// from the command that produced it, could not tell which build scanned.
+func TestSARIF_DriverVersionIsTheBuildThatScanned(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{
+		findingFixture("CVE-2026-3", "libc6", severity.High, 7.5, "1.0.1", advisory.FixStateFixed),
+	}}
+	run := run0(t, sarifOf(t, res, cyclonedx.Stats{Components: 1, Cataloged: 1}))
+	driver := run["tool"].(map[string]any)["driver"].(map[string]any)
+	if got := driver["version"]; got != "v0.0.0-test" {
+		t.Errorf("driver.version = %v, want %q -- the build that produced this document",
+			got, "v0.0.0-test")
+	}
+}
+
 // TestSARIF_UnratedFindingCarriesNoSecuritySeverity is D17 at the SARIF
 // boundary, and it is the assertion most likely to be "fixed" by someone
 // wanting a tidier document.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ import (
 	"github.com/kun9497/assay/internal/provider/knvd"
 	"github.com/kun9497/assay/internal/provider/nvd"
 	"github.com/kun9497/assay/internal/provider/oracle"
+	"github.com/kun9497/assay/internal/provider/redhat"
 	"github.com/kun9497/assay/internal/provider/suse"
 	"github.com/kun9497/assay/internal/report"
 	"github.com/kun9497/assay/internal/scancmd"
@@ -707,6 +709,79 @@ func TestRun_ScanDBMaxAgeReachesRealExitCode(t *testing.T) {
 	}
 }
 
+// TestRun_ScanFailOnIncompleteTargetReachesRealExitCode is the run()-seam
+// wiring check for --fail-on-incomplete=target. TestParseScan_FailOnIncompleteScopes
+// proves parseScanArgs sets Options.FailOnIncompleteTarget correctly, and
+// scancmd's own TestVerdict_FailOnIncompleteTargetIgnoresAdvisoryDefects (plus
+// dirscan_wiring's "an unpinned requirement is the caller's to fix" subtest)
+// prove scancmd.Run honours it -- but both stop at hand-built Options, and
+// scan() sits between them setting opts.Version right where it could as
+// easily zero the field: `opts.Version = version; opts.FailOnIncompleteTarget
+// = false` type-checks and leaves both suites green, exactly the class of bug
+// TestRun_ScanFlagsReachRealExitCode exists to catch for the other three
+// --fail-on* gates. An unpinned requirements.txt line is the caller's own
+// file (D36), not a coverage gap, so it trips the narrow gate without the
+// database needing to cover anything at all.
+func TestRun_ScanFailOnIncompleteTargetReachesRealExitCode(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ASSAY_DB_DIR", dir)
+
+	dbPath := filepath.Join(dir, "vulnerability.db")
+	w, err := store.Create(dbPath)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// Coverage declared for Go, so the go.mod package below is evaluated
+	// (zero findings) rather than itself becoming a whole-package coverage
+	// skip -- otherwise sum.Trustworthy() would be false regardless of the
+	// flag under test, and the exit code would prove nothing about it.
+	if err := w.SetMeta(store.Meta{
+		Providers: map[string]store.Provenance{"osv": {Ecosystems: []string{"Go"}}},
+	}); err != nil {
+		t.Fatalf("SetMeta: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	scanDir := filepath.Join(dir, "target")
+	if err := os.MkdirAll(scanDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(scanDir, "go.mod"),
+		[]byte("module example.com/poly\n\ngo 1.22\n\nrequire example.com/critical v1.0.0\n"),
+		0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	// An unpinned requirement is the caller's own file (D36), not a coverage
+	// gap, so it trips the narrow gate on its own -- but only alongside an
+	// evaluated package, or sum.Trustworthy() being false would exit 2 on
+	// every row regardless of --fail-on-incomplete=target.
+	if err := os.WriteFile(filepath.Join(scanDir, "requirements.txt"),
+		[]byte("flask>=2.0\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"scan", "dir:" + scanDir, "--fail-on-incomplete=target"}
+	if code := run(args, &stdout, &stderr); code != exitError {
+		t.Fatalf("run(%v) = %d, want %d (exitError) -- an unpinned requirement "+
+			"is exactly the target-scope incompleteness this flag exists to catch\n"+
+			"stdout:\n%s\nstderr:\n%s", args, code, exitError, stdout.String(), stderr.String())
+	}
+
+	// The same directory, with no --fail-on-incomplete at all, still scans
+	// clean -- proving the exit above came from the flag reaching
+	// Options.FailOnIncompleteTarget, not from something else about this
+	// fixture.
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"scan", "dir:" + scanDir}, &stdout, &stderr); code != exitOK {
+		t.Errorf("run without the flag = %d, want %d (exitOK)\nstderr:\n%s",
+			code, exitOK, stderr.String())
+	}
+}
+
 // The CLI contract end to end for the repeated-flag rejection: exit 2, the
 // diagnostic on stderr, and stdout untouched. TestParseScanArgs already
 // proves parseScanArgs returns a non-nil error for a repeat; this proves the
@@ -1244,6 +1319,79 @@ func TestDBUpdateAnnotators_ConstructsNVDWithTheAPIKeyFromEnv(t *testing.T) {
 	}
 	if len(annotators) != 1 || annotators[0].Name() != nvd.SourceName {
 		t.Errorf("dbUpdateAnnotators() = %+v, want exactly one NVD annotator", annotators)
+	}
+}
+
+// TestDBUpdateProviders_RedHatOnByDefault is the caller-first proof for
+// D51's wiring: dbUpdateProviders must actually construct the Red Hat
+// provider when REDHAT_ENABLE is unset, not merely have redhat.New sitting
+// unused in the import list. Every other test in this file that sets
+// REDHAT_ENABLE sets it to "0", to isolate Amazon/Oracle/Fedora/SUSE's own
+// wiring from Red Hat's -- none of them observes Red Hat's OWN default-on
+// behaviour, so nothing anywhere calls dbUpdateProviders with REDHAT_ENABLE
+// left unset and checks Red Hat landed. Driven through a spy exactly as
+// TestDBUpdateProviders_AmazonOnByDefault's own doc comment explains why:
+// mutating the call site's default argument (or dropping the provider, or
+// its Options) compiles and would leave every other test in this package
+// green, since AMAZON_ENABLE=0/ORACLE_ENABLE=0/FEDORA_ENABLE=0/SUSE_ENABLE=0
+// isolation in those tests leaves REDHAT_ENABLE at its own default either way.
+func TestDBUpdateProviders_RedHatOnByDefault(t *testing.T) {
+	t.Setenv("REDHAT_ENABLE", "")
+	t.Setenv("AMAZON_ENABLE", "0") // isolate: only Red Hat's own wiring is under test here
+	t.Setenv("ORACLE_ENABLE", "0")
+	t.Setenv("FEDORA_ENABLE", "0")
+	t.Setenv("SUSE_ENABLE", "0")
+
+	orig := newRedHatProvider
+	sawCall := false
+	var gotOpts redhat.Options
+	newRedHatProvider = func(opts redhat.Options) *redhat.Provider {
+		sawCall, gotOpts = true, opts
+		return orig(opts)
+	}
+	defer func() { newRedHatProvider = orig }()
+
+	ps := dbUpdateProviders(io.Discard)
+	if !sawCall {
+		t.Fatal("dbUpdateProviders never constructed the Red Hat provider -- REDHAT_ENABLE defaults ON (D51)")
+	}
+	if gotOpts.Progress == nil {
+		t.Error("redhat.New was constructed with a nil Progress -- Fetch's own discard counts would go nowhere")
+	}
+	var found bool
+	for _, p := range ps {
+		if p.Name() == "Red Hat CSAF VEX" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("dbUpdateProviders() = %+v, want it to include the Red Hat provider", ps)
+	}
+}
+
+// TestDBUpdateProviders_RedHatDisabledViaEnv is the other half: REDHAT_ENABLE=0
+// must actually turn the fetch off, not merely be read and ignored -- the
+// silent-drop direction every OTHER provider's test in this file already
+// pins for its own flag, with Red Hat's used only as the isolating value.
+func TestDBUpdateProviders_RedHatDisabledViaEnv(t *testing.T) {
+	t.Setenv("REDHAT_ENABLE", "0")
+
+	orig := newRedHatProvider
+	sawCall := false
+	newRedHatProvider = func(opts redhat.Options) *redhat.Provider {
+		sawCall = true
+		return orig(opts)
+	}
+	defer func() { newRedHatProvider = orig }()
+
+	ps := dbUpdateProviders(io.Discard)
+	if sawCall {
+		t.Error("dbUpdateProviders constructed the Red Hat provider even with REDHAT_ENABLE=0")
+	}
+	for _, p := range ps {
+		if p.Name() == "Red Hat CSAF VEX" {
+			t.Errorf("dbUpdateProviders() = %+v, want no Red Hat provider with REDHAT_ENABLE=0", ps)
+		}
 	}
 }
 
@@ -2050,6 +2198,107 @@ func TestRun_DBPushRejectsTrailingArgument(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), `unexpected argument "extra"`) {
 		t.Errorf("stderr does not name the unexpected argument:\n%s", stderr.String())
+	}
+}
+
+// pushForceFixtureDB writes a local database carrying exactly n NVD ratings,
+// the same shape internal/dbcmd/push_guard_test.go's own `bounded` helper
+// uses to build artifacts that differ only in how much coverage they claim --
+// small enough here that a push from the FEWER-ratings copy onto a
+// MORE-ratings published artifact trips refuseCoverageRegression's
+// RatingCount comparison deterministically.
+func pushForceFixtureDB(t *testing.T, n int) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	for i := 0; i < n; i++ {
+		if err := w.PutRating(advisory.Rating{
+			CVE: fmt.Sprintf("CVE-2026-%d", i), Source: "NVD",
+		}); err != nil {
+			t.Fatalf("PutRating: %v", err)
+		}
+	}
+	if err := w.SetMeta(store.Meta{}); err != nil {
+		t.Fatalf("SetMeta: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	return path
+}
+
+// TestRun_DBPushForceReachesRealExitCode is the run()-seam wiring check for
+// `db push --force`. resolvePushRef's own tests (TestResolvePushRef) blank
+// the returned force value on every subtest (`ref, _, ok :=`), and no test
+// anywhere in this file passes --force through run() and observes what
+// dbcmd.Push does with it -- so the CLI-to-dbcmd wiring of the flag that
+// overrides the coverage-regression guard (internal/dbcmd/push_guard_test.go
+// covers the guard itself thoroughly, always calling dbcmd.Push directly with
+// a hand-built bool) is held by nothing. Hardcoding resolvePushRef's return to
+// always report force=true -- so would silently dropping it and always
+// reporting false -- leaves the whole suite green: `assay db push ref`
+// (without --force) would either always bypass the guard that stops a
+// narrower database silently replacing a wider published one, or the
+// documented `--force` override would never actually work.
+//
+// A real in-memory registry (github.com/google/go-containerregistry's
+// registry.New(), the same helper internal/dbcmd/push_guard_test.go uses) is
+// seeded with a 5-rating artifact through dbcmd.Push itself, so the
+// comparison below is the real guard rather than a fake standing in for it.
+func TestRun_DBPushForceReachesRealExitCode(t *testing.T) {
+	srv := httptest.NewServer(registry.New())
+	defer srv.Close()
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := u.Host + "/assay-db-push-force-test:v1"
+
+	// Seed the registry with a WIDER artifact (5 ratings) via the real Push
+	// path, force=false -- the first push to a fresh tag always succeeds
+	// (D60: nothing exists yet to compare against).
+	var seedOut, seedErr bytes.Buffer
+	if code := dbcmd.Push(context.Background(), pushForceFixtureDB(t, 5), ref, false,
+		&seedOut, &seedErr); code != 0 {
+		t.Fatalf("seeding the registry failed: %d (%s)", code, seedErr.String())
+	}
+
+	// The LOCAL database run() will publish from, narrower than what is
+	// already published -- exactly the regression refuseCoverageRegression
+	// exists to catch.
+	t.Setenv("ASSAY_DB_DIR", t.TempDir())
+	narrower := pushForceFixtureDB(t, 2)
+	if err := os.Rename(narrower, filepath.Join(os.Getenv("ASSAY_DB_DIR"), "vulnerability.db")); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"db", "push", ref}
+	if code := run(args, &stdout, &stderr); code != exitError {
+		t.Fatalf("run(%v) = %d, want %d (exitError) -- publishing 2 ratings over "+
+			"a published 5-rating artifact without --force must be refused\n"+
+			"stderr:\n%s", args, code, exitError, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "pass --force") {
+		t.Errorf("stderr does not show the coverage-regression refusal:\n%s", stderr.String())
+	}
+
+	// The identical push, with --force, reaches run() through the exact same
+	// parseScanArgs-adjacent path (resolvePushRef) and must now succeed,
+	// proving the flag reaches dbcmd.Push's force parameter rather than being
+	// dropped in either direction.
+	stdout.Reset()
+	stderr.Reset()
+	args = []string{"db", "push", ref, "--force"}
+	if code := run(args, &stdout, &stderr); code != exitOK {
+		t.Fatalf("run(%v) = %d, want %d (exitOK) -- --force must override the guard\n"+
+			"stderr:\n%s", args, code, exitOK, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "--force was given") {
+		t.Errorf("stderr does not show --force's own override notice:\n%s", stderr.String())
 	}
 }
 

@@ -552,6 +552,30 @@ func TestOpenSeedRatings_RefusesTwoSchemasBehind(t *testing.T) {
 	}
 }
 
+// TestOpenSeedRatings_RefusesNewerSchema pins the boundary from the other
+// side: the whitelist above is exactly {N, N-1}, held from below by
+// TestOpenSeedRatings_AcceptsOneSchemaBehind (N-1 accepted) and
+// TestOpenSeedRatings_RefusesTwoSchemasBehind (N-2 refused), but nothing
+// ever fed it a NEWER-than-binary seed. A future v(N+1) seed's ratings
+// bucket carries no contract this binary has ever read -- the identical
+// hazard TestOpenSchemaMismatch pins for Open, one function over -- so a
+// whitelist collapsed to "anything from N-2 or older is refused" (which
+// happens to also satisfy every case below it) would silently accept one.
+func TestOpenSeedRatings_RefusesNewerSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "n-plus-1-seed.db")
+	buildOldShapedFixture(t, path, nil,
+		[]advisory.Rating{{CVE: "CVE-2026-TOO-NEW", Source: "NVD"}},
+		SchemaVersion+1)
+
+	db, err := OpenSeedRatings(path)
+	if db != nil {
+		defer db.Close()
+	}
+	if !errors.Is(err, ErrSchemaMismatch) {
+		t.Errorf("OpenSeedRatings(schema %d) err = %v, want ErrSchemaMismatch", SchemaVersion+1, err)
+	}
+}
+
 // TestOpenSeedRatings_AcceptsCurrentSchema is the ordinary case outside a
 // bootstrap: a same-schema seed must not become collateral damage from
 // loosening the N-1 case above it.

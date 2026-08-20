@@ -1,6 +1,7 @@
 package redhat
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -199,6 +200,40 @@ func TestFetch_ArchiveRetryResumes(t *testing.T) {
 	}
 	if !s.ranged.Load() {
 		t.Error("no Range header was sent; the retry restarted the whole download")
+	}
+}
+
+// TestFetch_ReportsTheRetryItMade is the caller-side proof for the D58
+// retry counters: retry_loop_test.go and this file's own
+// TestFetch_ArchiveResetIsRetried/TestFetch_ArchiveRetryResumes hold that
+// p.retried and p.rescued increment correctly, but nothing holds Fetch's own
+// copy of them into stats (st.DeltaRetried = int(p.retried.Load()) etc.,
+// redhat.go) and on into the disclosed "N retried, M rescued" progress
+// line -- the exact "helper covered, caller unheld" shape CLAUDE.md
+// documents for D56's reportTimings, one provider over. Hardcoding either
+// field to 0 there leaves every existing retry test green, because none of
+// them reads the progress line's own numbers: the disclosure exists because
+// "the build finished" was not evidence the retry saved it, and a build
+// that silently always reports "0 retried, 0 rescued" removes exactly that
+// evidence.
+func TestFetch_ReportsTheRetryItMade(t *testing.T) {
+	body := archiveOf(t, map[string]string{
+		"vex/2026/CVE-2026-1000.json": vexDoc("CVE-2026-1000"),
+	})
+	s := &resettingServer{body: body, failFirst: 1}
+	srv := httptest.NewServer(s.handler(t))
+	defer srv.Close()
+
+	var progress bytes.Buffer
+	p := New(Options{BaseURL: srv.URL, Progress: &progress})
+	_, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil })
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if !strings.Contains(progress.String(), "1 retried, 1 rescued by a retry") {
+		t.Errorf("progress does not disclose the retry Fetch actually made "+
+			"(exactly one archive-download attempt failed and was rescued):\n%s",
+			progress.String())
 	}
 }
 
