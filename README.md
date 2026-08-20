@@ -576,6 +576,9 @@ exited 0 while 24 findings went unmentioned. **Done.**
 - [x] Fedora current releases from Bodhi (D75) — prose-CVE misses counted (81.7%
       ceiling), EOL freeze disclosed, unspecified severity stays Unknown; the buildable
       RPM family closes
+- [x] ndb rpmdb backend (D76) — openSUSE's and SLES's own package-database container
+      format, the third alongside BerkeleyDB and SQLite (D44); cataloging only, no SUSE
+      advisory feed yet, verified against a real SLES/BCI image (138 packages, 0 skipped)
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a
@@ -748,8 +751,10 @@ them from 2023 onwards. Matching on it would report all of them clean.
       dependency, and validated against ubi8's real 11 MB database: 183 packages, all 183
       shared with syft, zero source-name disagreements. Big-endian databases read too, because
       BerkeleyDB writes host order and s390x is a supported platform
-- [ ] ndb (`Packages.db`) — openSUSE and SLES only, and no SUSE advisory source to serve it.
-      Those images exit 2 with the backend named
+- [x] ndb (`Packages.db`) for openSUSE and SLES (D76) — cataloging only, still no SUSE
+      advisory source; verified against a real SLES/BCI `Packages.db`: 138 packages, 0
+      skipped, source names stripped correctly. Those images now scan to completion and are
+      reported not evaluated, rather than exiting 2 before the database can even be opened
 - [ ] Replaying a write-ahead log rather than refusing it
 
 **⑬ The Red Hat advisory provider** — `assay db build` ingests Red Hat's CSAF VEX feed, the

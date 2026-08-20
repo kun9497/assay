@@ -1763,8 +1763,10 @@ name `audit` after stripping `.src.rpm` and the last two hyphen-separated fields
 images every real package resolved a source name; `gpg-pubkey` rows are keyring entries with no
 arch and are filtered.
 
-**NDB is not implemented.** It is openSUSE/SLES only, no Red Hat lineage uses it, and there is
-no SUSE advisory provider for it to serve.
+**NDB was not implemented, at this point.** It is openSUSE/SLES only, no Red Hat lineage uses
+it, and there was no SUSE advisory provider for it to serve. The first half of that reasoning
+stopped holding — D76 reads it — while the second half (still no SUSE advisory provider) has
+not changed.
 
 
 ### D45 — A write-ahead log or a damaged page is a hard error, and the guard reads the file, not the header
@@ -2978,7 +2980,98 @@ one", which is Unknown, never a defaulted Low (D17). 0% CVSS in the feed; the NV
 carries the rest (D71 decision 2).
 
 This closes the buildable RPM family: Rocky, Alma, Amazon, Oracle, Fedora (D71–D75).
-SLES remains behind the ndb rpmdb backend.
+SLES remained behind the ndb rpmdb backend until D76.
+
+---
+
+### D76 — The ndb rpmdb backend: cataloging only, SLES's own advisory feed still open
+
+**Decision.** `internal/cataloger/rpmdb/ndb.go` reads rpm's third on-disk container format —
+openSUSE's and SLES's own, `/usr/lib/sysimage/rpm/Packages.db` — and feeds the same
+format-agnostic header parser (`header.go`) the BerkeleyDB and SQLite backends already share
+(D44). `scancmd.go`'s RPM routing switch, which used to refuse an `ndb` database BY NAME
+(`"...which this build does not read; there is no SUSE advisory source for it to serve"`),
+now reads it exactly like the other two. This is cataloging only: `pkgmeta.Distro.Ecosystem()`
+still has no key for `sles` or `opensuse-*` (D50 routes only `rhel`), so an ndb image's
+packages are catalogued unkeyed, and the matcher reports them not evaluated — the same shape
+D43 gives every unrouted RPM family. A SUSE advisory provider is the next slice, not this one.
+
+**Why now.** D44 deferred ndb with two reasons bundled into one sentence: "openSUSE/SLES
+only, no Red Hat lineage uses it, and there is no SUSE advisory provider for it to serve."
+`docs/deferred-decisions.md`'s SLES research (feeding D71–D75, measured 2026-08-19) split
+that sentence and found only the second half still true: modern SLES/BCI images could not be
+**catalogued at all**, independent of any advisory question. That half of the justification is
+what this closes; the advisory half is exactly as open as it was.
+
+**The format, verified against the source, not the sketch that opened this slice.** Every
+on-disk fact came from `rpm-software-management/rpm@master`,
+`lib/backend/ndb/rpmpkg.c` (`rpmpkgReadHeader`, `rpmpkgReadSlots`, `rpmpkgReadBlob`,
+`rpmpkgWriteBlob`), then checked against a REAL `registry.suse.com/bci/bci-base:latest`
+`Packages.db` pulled with a throwaway `go-containerregistry` program (not committed — see
+below). Two things the opening sketch had only approximately right:
+
+- **Every integer is little-endian, unconditionally.** Unlike BerkeleyDB (`bdb.go`), which
+  writes host order and uses its magic as a byte-order probe because s390x is a supported RHEL
+  platform, ndb's own source has no such probe anywhere — it was written once, for x86, and
+  the format never grew one.
+- **A block is 16 bytes**, confirmed both in `rpmpkg.c`'s `BLK_SIZE` and by recomputing a real
+  blob's block count from its stored length and getting the slot's own `blkcnt` back exactly.
+
+The full layout: a 32-byte header (`RpmP` magic, version, generation, `slotnpages`,
+`nextpkgidx`, all little-endian `uint32`) occupies the byte range of the slot table's first two
+entries; the slot table proper is `slotnpages × 4096` bytes of 16-byte slots (`Slot` magic,
+pkgidx, block offset, block count), stamped with the magic on every slot — occupied or not —
+so a missing magic anywhere means the table itself is damaged; a deleted or never-allocated
+slot has the magic but a zero block offset, nothing else; each occupied slot's blob starts with
+a 16-byte head (`BlbS` magic, pkgidx, the database's own generation counter, byte length), the raw rpm header
+(the same bytes `parseHeader` already reads out of the other two backends), zero padding to a
+whole number of blocks, and a 12-byte tail (adler32 checksum, byte length again, `BlbE` magic).
+rpm's own reader skips the adler32 check on an ordinary read and verifies it only when
+explicitly asked; this reader always verifies — the cost is one pass over bytes already being
+read, and D45's SQLite/BerkeleyDB backends both do full structural validation before trusting
+anything, for the same reason.
+
+**Corruption is split the same way the other two backends split it (D45).** A damaged slot
+table — a slot without its magic — fails the WHOLE read: the table is what makes every
+pkgidx/block-offset pair trustworthy, so once it is suspect nothing downstream can be either. A
+damaged individual blob — wrong magic, a length mismatch, an adler32 mismatch, a pkgidx beyond
+what the header's own `nextpkgidx` says was ever allocated, two slots claiming the same pkgidx —
+is a counted, per-package skip, the same way one unreadable header blob is on the BerkeleyDB and
+SQLite paths. A truncated file is refused at both the slot-table and the per-blob level. None of
+this is theoretical: mutation-tested by deleting each guard in turn and confirming the relevant
+test goes red (the deleted-slot skip, the slot-magic check, and the adler32 check each turn a
+passing test red when removed), and the scancmd routing line was mutation-tested the same way —
+removing the `case rpmFound.ndbPath != "":` arm turns both the cataloging test and the
+end-to-end `Run` test red.
+
+**Verified against the real file.** `registry.suse.com/bci/bci-base:latest`, pulled
+2026-08-20, single layer, `Packages.db` 5,595,120 bytes, `slotnpages` 1, `nextpkgidx` 146 (145
+package-index numbers ever allocated), 144 occupied slots. `ReadNDB` recovers **138 packages,
+0 skipped, 0 corrupt** — the gap from 144 is 6 `gpg-pubkey` keyring entries this build filters
+(D44's rule, reached from ndb through the shared header pipeline) and the one already-deleted
+slot the header's own bookkeeping implies (145 allocated − 144 occupied), which is a real,
+in-the-wild instance of the deleted-slot path the fixture tests exercise synthetically. Three
+samples, byte for byte as read: `sles-release 15.7-150700.67.6.1` (source `sles-release`),
+`rpm-ndb 4.14.3-150400.59.19.1` (source `rpm-ndb` — rpm's own ndb-aware tooling, installed on
+the image whose database this slice now reads), `zypper 1.14.98-150700.13.6.1` (source
+`zypper`). Every sampled package's `SOURCERPM` stripped correctly (D8), confirming the shared
+header pipeline is genuinely reached, not reimplemented.
+
+The pull program and the real `Packages.db` are not committed — a multi-MB binary is not a test
+fixture (see `docs/deferred-decisions.md`'s note on this same tradeoff for the BerkeleyDB
+fixture). The committed tests instead hand-build a ≤20 KB synthetic ndb file in Go, covering two
+packages, one deleted slot, a corrupt slot-table magic, a truncated file, and a damaged blob
+(adler32 mismatch) — both at `internal/cataloger/rpmdb` (`ndb_test.go`, sharing the package's
+own `buildHeader` test helper) and, independently reimplemented from the same source facts
+because it is a different package, at `internal/scancmd` (`rpm_test.go`, `buildNDBFixture`) for
+an end-to-end `Run` test: an ndb-backed SLES image now scans to completion — one package
+catalogued — and fails only because nothing keys `sles` to an ecosystem yet, not because the
+database could not be opened at all.
+
+**What is still open**, and belongs to a future slice, not this one: a SUSE advisory source
+(there still is none — `docs/deferred-decisions.md`'s SLES entry is otherwise unchanged), and
+therefore `pkgmeta.Distro.Ecosystem()` keys and `version.For` comparer routing for `sles` and
+`opensuse-*`. This slice deliberately does not touch either.
 
 ---
 

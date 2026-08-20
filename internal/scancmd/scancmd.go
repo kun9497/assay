@@ -166,12 +166,10 @@ const (
 // image as having none.
 var rpmDBDirs = []string{"usr/lib/sysimage/rpm", "var/lib/rpm"}
 
-// rpmDBFiles are the file names inside those directories, one per backend.
-// Packages is BerkeleyDB (RHEL 8 and older, Amazon Linux 2) and rpmdb.sqlite is
-// SQLite (RHEL 9 and newer); both are read. Packages.db is ndb, which only
-// openSUSE and SLES use — it is probed anyway, because finding one and naming
-// it is a refusal somebody can act on where finding nothing is
-// indistinguishable from a clean image.
+// rpmDBFiles are the file names inside those directories, one per backend, all
+// three read. Packages is BerkeleyDB (RHEL 8 and older, Amazon Linux 2),
+// rpmdb.sqlite is SQLite (RHEL 9 and newer), and Packages.db is ndb (D76),
+// which only openSUSE and SLES use.
 var rpmDBFiles = []string{"rpmdb.sqlite", "rpmdb.sqlite-wal", "Packages", "Packages.db"}
 
 // rpmFamilies are the /etc/os-release IDs whose package database is an rpmdb.
@@ -212,7 +210,7 @@ type foundRPMDB struct {
 	// it rather than that nobody looked.
 	walSize int64
 	bdbPath string // BerkeleyDB: RHEL 8 and older, Amazon Linux 2
-	ndbPath string // ndb: openSUSE and SLES only
+	ndbPath string // ndb (D76): openSUSE and SLES only
 }
 
 // findRPMDB picks the database out of the probed files, preferring the SQLite
@@ -741,35 +739,40 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 		// inventory (D36's rule, applied to a shape D54 introduces).
 		skippedRecords += statusDLinks
 	case hasRPM:
-		// D43. The inventory is read and no verdict follows: ecosystem is ""
-		// for every RPM distro because Distro.Ecosystem() has no key for them,
-		// so the matcher reports all of these as skipped and Trustworthy()
-		// takes the scan to exit 2. That is the whole design — the OSV Red Hat
-		// feed is errata-only and cannot express "affected, will not fix", so a
-		// verdict built on it would be confidently clean about 39,372 CVEs it
-		// has never seen.
-		if rpmFound.ndbPath != "" {
-			return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf(
-				"%s carries an ndb rpm database at %s (openSUSE and SLES), which this build "+
-					"does not read; there is no SUSE advisory source for it to serve",
-				ref, rpmFound.ndbPath)
-		}
-		// Two backends, one header parser. Which one an image carries is a
-		// property of its release, not of anything the caller asked for: RHEL 8
-		// and older and Amazon Linux 2 keep a BerkeleyDB hash file, RHEL 9 and
-		// newer a SQLite one, and the packages that come out are identical
-		// either way.
+		// D43, extended to the third container format by D76. The inventory
+		// is read and no verdict follows: ecosystem is "" for every RPM
+		// distro because Distro.Ecosystem() has no key for them (D50 routes
+		// only `rhel`), so the matcher reports all of these as skipped and
+		// Trustworthy() takes the scan to exit 2. That is the whole design —
+		// the OSV Red Hat feed is errata-only and cannot express "affected,
+		// will not fix", so a verdict built on it would be confidently clean
+		// about 39,372 CVEs it has never seen. An ndb image (openSUSE, SLES)
+		// takes the identical path: catalogued, unkeyed, reported not
+		// evaluated — there is still no SUSE advisory source to serve it,
+		// only "we cannot even list its packages" that no longer has to be
+		// true too.
+		//
+		// Three backends, one header parser. Which one an image carries is a
+		// property of its release, not of anything the caller asked for:
+		// RHEL 8 and older and Amazon Linux 2 keep a BerkeleyDB hash file,
+		// RHEL 9 and newer a SQLite one, openSUSE and SLES an ndb one, and
+		// the packages that come out are identical either way.
 		var (
 			res  rpmdb.Result
 			err  error
 			f    source.FileFromLayer
 			path string
 		)
-		if rpmFound.bdbPath != "" {
+		switch {
+		case rpmFound.bdbPath != "":
 			path = rpmFound.bdbPath
 			f = files[path]
 			res, err = rpmdb.ReadBDB(f.Data, ecosystem, path)
-		} else {
+		case rpmFound.ndbPath != "":
+			path = rpmFound.ndbPath
+			f = files[path]
+			res, err = rpmdb.ReadNDB(f.Data, ecosystem, path)
+		default:
 			path = rpmFound.sqlitePath
 			f = files[path]
 			res, err = rpmdb.ReadSQLite(f.Data, rpmFound.walSize, ecosystem, path)

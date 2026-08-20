@@ -1634,8 +1634,10 @@ SQLite b-tree와, RHEL 8 이하를 위한 BerkeleyDB 해시. 공용 RPM 헤더 �
 하이픈으로 구분된 마지막 두 필드를 떼면 소스 이름 `audit`이 나옵니다. 이미지 7개에서 실제 패키지는
 전부 소스 이름이 풀렸고, `gpg-pubkey` 행은 arch가 없는 키링 항목이라 걸러냅니다.
 
-**NDB는 구현하지 않습니다.** openSUSE/SLES 전용이고, Red Hat 계열은 아무도 쓰지 않으며, 그것이 봉사할
-SUSE advisory provider도 없습니다.
+**NDB는 이 시점까지는 구현하지 않았습니다.** openSUSE/SLES 전용이고, Red Hat 계열은 아무도 쓰지
+않으며, 그것이 봉사할 SUSE advisory provider도 없었습니다. 그 근거의 앞쪽 절반은 더 이상
+유효하지 않습니다 — D76이 그것을 읽습니다 — 반면 뒤쪽 절반(여전히 SUSE advisory provider가
+없다는 것)은 바뀌지 않았습니다.
 
 
 ### D45 — WAL이나 손상된 페이지는 하드 에러이고, 가드는 헤더가 아니라 파일을 읽는다
@@ -2760,7 +2762,95 @@ VENDOR_WORD 항목으로 충실하게 매핑됩니다 — Urgent→critical, Hig
 0%입니다; 나머지는 NVD 조인이 나릅니다(D71 결정 2).
 
 이것으로 빌드 가능한 RPM 계열이 닫힙니다: Rocky, Alma, Amazon, Oracle, Fedora(D71–D75).
-SLES는 ndb rpmdb 백엔드 뒤에 계속 남습니다.
+SLES는 D76 전까지 ndb rpmdb 백엔드 뒤에 남아 있었습니다.
+
+---
+
+### D76 — ndb rpmdb 백엔드: 카탈로징만, SLES 자신의 advisory 피드는 여전히 열려 있음
+
+**결정.** `internal/cataloger/rpmdb/ndb.go`가 rpm의 세 번째 온디스크 컨테이너 포맷 —
+openSUSE와 SLES 자신만의 것인 `/usr/lib/sysimage/rpm/Packages.db` — 를 읽어, BerkeleyDB와
+SQLite 백엔드가 이미 공유하는(D44) 포맷 무관 헤더 파서(`header.go`)에 그대로 먹입니다.
+`scancmd.go`의 RPM 라우팅 switch는 예전에는 `ndb` 데이터베이스를 이름으로 대놓고 거절했지만
+(`"...which this build does not read; there is no SUSE advisory source for it to serve"`),
+이제 나머지 둘과 똑같이 읽습니다. 이것은 카탈로징뿐입니다: `pkgmeta.Distro.Ecosystem()`은
+여전히 `sles`나 `opensuse-*`용 키가 없고(D50은 `rhel`만 경로를 잡습니다), 그래서 ndb 이미지의
+패키지는 키 없이 카탈로그되고, matcher는 그것들을 평가되지 않음으로 보고합니다 — D43이 경로가
+없는 모든 RPM 계열에 주는 것과 같은 모양입니다. SUSE advisory provider는 이 슬라이스가 아니라
+다음 슬라이스입니다.
+
+**왜 지금인가.** D44는 한 문장에 이유 두 개를 묶어 ndb를 미뤘습니다: "openSUSE/SLES 전용이고,
+Red Hat 계열은 아무도 쓰지 않으며, 그것이 봉사할 SUSE advisory provider도 없다." (D71–D75에
+재료를 댄, 2026-08-19에 측정한) `docs/deferred-decisions.md`의 SLES 조사가 그 문장을 갈라
+뒤쪽 절반만 여전히 사실임을 찾아냈습니다: 최신 SLES/BCI 이미지는 advisory 문제와 무관하게
+**아예 카탈로그할 수조차 없었습니다.** 이 슬라이스가 닫는 것은 근거의 그 절반이고, advisory
+절반은 예전 그대로 열려 있습니다.
+
+**포맷은 이 슬라이스를 연 스케치가 아니라 소스로 검증했습니다.** 온디스크 사실은 전부
+`rpm-software-management/rpm@master`의 `lib/backend/ndb/rpmpkg.c`(`rpmpkgReadHeader`,
+`rpmpkgReadSlots`, `rpmpkgReadBlob`, `rpmpkgWriteBlob`)에서 왔고, 그다음 일회용
+`go-containerregistry` 프로그램으로 받은(커밋하지 않음 — 아래 참조) 실제
+`registry.suse.com/bci/bci-base:latest`의 `Packages.db`로 대조 확인했습니다. 이 슬라이스를
+열었던 스케치가 대략적으로만 맞혔던 것 두 가지:
+
+- **모든 정수는 무조건 리틀엔디언입니다.** 호스트 순서로 쓰고 s390x가 지원되는 RHEL 플랫폼이라
+  매직을 바이트 순서 탐지로도 쓰는 BerkeleyDB(`bdb.go`)와 달리, ndb 자신의 소스에는 그런 탐지가
+  어디에도 없습니다 — x86 하나만 보고 한 번 작성됐고, 포맷은 그것을 끝내 갖추지 않았습니다.
+- **블록은 16바이트입니다**, `rpmpkg.c`의 `BLK_SIZE`로도, 실제 blob의 블록 수를 저장된 길이에서
+  다시 계산해 슬롯 자신의 `blkcnt`와 정확히 일치함을 확인해서도 둘 다 확인했습니다.
+
+전체 레이아웃은 이렇습니다: 32바이트 헤더(`RpmP` 매직, version, generation, `slotnpages`,
+`nextpkgidx`, 전부 리틀엔디언 `uint32`)가 슬롯 테이블의 첫 두 엔트리가 차지할 바이트 범위를
+그대로 차지하고; 슬롯 테이블 본체는 16바이트 슬롯(`Slot` 매직, pkgidx, 블록 오프셋, 블록 수)
+`slotnpages × 4096`바이트로, 점유 여부와 무관하게 모든 슬롯에 매직이 찍혀 있어 — 그래서 어디든
+매직이 빠지면 테이블 자체가 손상됐다는 뜻입니다 — 삭제됐거나 한 번도 할당된 적 없는 슬롯은
+매직은 있지만 블록 오프셋이 0이고 그 외에는 아무것도 없습니다; 점유된 슬롯마다 blob은 16바이트
+머리(`BlbS` 매직, pkgidx, 데이터베이스 자신의 generation 카운터, 바이트 길이)로 시작해, 원본 rpm 헤더(다른 두
+백엔드에서 `parseHeader`가 이미 읽어내는 것과 같은 바이트), 블록 정수 배수로 맞추는 제로 패딩,
+그리고 12바이트 꼬리(adler32 체크섬, 바이트 길이 반복, `BlbE` 매직)로 이어집니다. rpm 자신의
+리더는 일반 읽기에서는 adler32 검사를 건너뛰고 명시적으로 요청했을 때만 검증하는데, 이 리더는
+항상 검증합니다 — 어차피 읽는 바이트를 한 번 더 훑는 비용일 뿐이고, D45의 SQLite/BerkeleyDB
+백엔드 둘 다 같은 이유로 무엇이든 신뢰하기 전에 구조 검증을 전부 마칩니다.
+
+**손상은 다른 두 백엔드가 가른 것과 같은 방식으로 가릅니다(D45).** 손상된 슬롯 테이블 —
+매직이 없는 슬롯 하나 — 은 읽기 전체를 실패시킵니다: 모든 pkgidx/블록-오프셋 쌍을 믿을 수 있게
+만드는 것이 바로 그 테이블이므로, 일단 의심스러워지면 그 아래 무엇도 믿을 수 없습니다. 손상된
+개별 blob — 잘못된 매직, 길이 불일치, adler32 불일치, 헤더 자신의 `nextpkgidx`가 말하는
+할당 범위를 넘는 pkgidx, 같은 pkgidx를 주장하는 슬롯 두 개 — 는 BerkeleyDB와 SQLite 경로에서
+읽지 못하는 헤더 blob 하나가 그렇듯 세어지는 패키지 단위 skip입니다. 잘린 파일은 슬롯 테이블
+수준에서도 blob 단위 수준에서도 거절됩니다. 이 중 어느 것도 탁상공론이 아닙니다: 가드를 하나씩
+지워가며 해당 테스트가 빨갛게 되는지 확인하는 mutation 테스트를 거쳤고(삭제된 슬롯 skip, 슬롯
+매직 검사, adler32 검사 각각이 지워지면 통과하던 테스트를 빨갛게 만듭니다), scancmd 라우팅
+줄도 같은 방식으로 mutation 테스트했습니다 — `case rpmFound.ndbPath != "":` 분기를 지우면
+카탈로징 테스트와 end-to-end `Run` 테스트가 둘 다 빨갛게 됩니다.
+
+**실제 파일로 검증했습니다.** `registry.suse.com/bci/bci-base:latest`, 2026-08-20에 pull,
+레이어 하나, `Packages.db` 5,595,120바이트, `slotnpages` 1, `nextpkgidx` 146(지금까지 할당된
+패키지-인덱스 번호 145개), 점유된 슬롯 144개. `ReadNDB`는 **패키지 138개, skip 0건, corrupt
+0건**을 복구합니다 — 144와의 차이는 이 빌드가 거르는 `gpg-pubkey` 키링 항목 6개(D44의 규칙이며,
+ndb에서 공유 헤더 파이프라인을 거쳐 도달합니다)와, 헤더 자신의 장부가 암시하는 이미 삭제된
+슬롯 하나(할당 145 − 점유 144)로 설명됩니다. 후자는 픽스처 테스트가 합성으로 연습하는 삭제된
+슬롯 경로의 실제, 실전 사례입니다. 읽은 그대로 바이트 단위로 확인한 표본 셋: `sles-release
+15.7-150700.67.6.1`(소스 `sles-release`), `rpm-ndb 4.14.3-150400.59.19.1`(소스 `rpm-ndb` —
+rpm 자신의 ndb 인지 도구이고, 이 슬라이스가 이제 읽는 바로 그 데이터베이스를 가진 이미지에
+설치되어 있습니다), `zypper 1.14.98-150700.13.6.1`(소스 `zypper`). 표본으로 뽑은 모든
+패키지의 `SOURCERPM`이 정확히 벗겨졌고(D8), 이는 공유 헤더 파이프라인이 재구현이 아니라
+실제로 도달되고 있음을 확인해 줍니다.
+
+pull 프로그램과 실제 `Packages.db`는 커밋하지 않습니다 — 수 MB짜리 바이너리는 테스트 픽스처가
+아닙니다(BerkeleyDB 픽스처에 대해 같은 트레이드오프를 적어 둔 `docs/deferred-decisions.md`의
+메모 참조). 대신 커밋된 테스트는 Go로 ≤20 KB짜리 합성 ndb 파일을 손으로 만들어, 패키지 2개,
+삭제된 슬롯 1개, 손상된 슬롯-테이블 매직, 잘린 파일, 손상된 blob(adler32 불일치)을 다룹니다 —
+`internal/cataloger/rpmdb`(`ndb_test.go`, 패키지 자신의 `buildHeader` 테스트 헬퍼를 공유)와,
+다른 패키지이므로 같은 소스 사실에서 독립적으로 다시 구현한 `internal/scancmd`(`rpm_test.go`,
+`buildNDBFixture`) 양쪽 다에서, end-to-end `Run` 테스트를 위해서입니다: ndb를 쓰는 SLES
+이미지는 이제 끝까지 스캔되어 — 패키지 1개가 카탈로그되고 — 데이터베이스를 아예 열 수 없어서가
+아니라 아직 아무것도 `sles`를 생태계에 키로 잡아주지 않아서만 실패합니다.
+
+**여전히 열려 있는 것**은 이 슬라이스가 아니라 미래의 슬라이스 몫입니다: SUSE advisory 출처
+(여전히 없습니다 — `docs/deferred-decisions.md`의 SLES 항목은 그 밖에는 바뀌지 않았습니다),
+그리고 그에 따른 `sles`와 `opensuse-*`용 `pkgmeta.Distro.Ecosystem()` 키와 `version.For`
+comparer 라우팅. 이 슬라이스는 의도적으로 둘 다 건드리지 않습니다.
 
 ---
 

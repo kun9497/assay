@@ -6,9 +6,10 @@
 //
 //   - The database is BINARY, not a text stanza file. apk and dpkg are read
 //     line by line; this walks pages.
-//   - The container format changed mid-lineage. RHEL 8 and older keep a
-//     BerkeleyDB hash database, RHEL 9 and newer a SQLite one, and openSUSE a
-//     third (ndb) that no Red Hat distro uses and this does not implement.
+//   - The container format changed mid-lineage, and diverged again outside
+//     it. RHEL 8 and older keep a BerkeleyDB hash database, RHEL 9 and newer
+//     a SQLite one, and openSUSE and SLES a third (ndb, D76) that no Red Hat
+//     distro uses.
 //   - The record inside is the same in all of them: an RPM header blob, which
 //     this file reads.
 //
