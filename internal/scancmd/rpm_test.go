@@ -4,7 +4,9 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
+	"hash/adler32"
 	"io"
 	"os"
 	"path/filepath"
@@ -301,26 +303,232 @@ func TestCatalogFromImage_BerkeleyDBAtTheRelocatedPath(t *testing.T) {
 	}
 }
 
-// ndb is still refused BY NAME. openSUSE and SLES are the only distributions
-// that use it and there is no SUSE advisory source for it to serve, so
-// "we found a database we do not read" is the honest answer and "we found no
-// database" is not.
-func TestCatalogFromImage_NDBIsNamed(t *testing.T) {
-	ndb := make([]byte, 4096)
-	copy(ndb, "RpmP")
-	img := rpmImage(t, map[string]string{
-		osReleasePath:                      osReleaseRHEL9,
-		"usr/lib/sysimage/rpm/Packages.db": string(ndb),
+// ndb is read, not refused (D76). openSUSE and SLES are the only
+// distributions that use it, and there is still no SUSE advisory source
+// behind it — but that is a matching-and-routing gap (D50), not a reason to
+// fail the catalog step: the packages are readable and D43's own precedent
+// (every unrouted RPM family is catalogued and reported not evaluated) says
+// they should be catalogued, unkeyed, the same way.
+func TestCatalogFromImage_NDBIsRouted(t *testing.T) {
+	db := buildNDBFixture(t, 5, []ndbFixtureEntry{
+		{pkgidx: 1, name: "libzypp", version: "17.35.9", release: "1.1", sourcerpm: "libzypp-17.35.9-1.1.src.rpm"},
+		{pkgidx: 2, name: "openssl-3", version: "3.1.4", release: "1.1", sourcerpm: "openssl-3-3.1.4-1.1.src.rpm"},
 	})
-	_, _, err := catalogFromImage("test-image", img)
-	if err == nil {
-		t.Fatal("an ndb database was catalogued")
+	img := rpmImage(t, map[string]string{
+		osReleasePath:                      osReleaseSLES15,
+		"usr/lib/sysimage/rpm/Packages.db": string(db),
+	})
+	target, stats, err := catalogFromImage("test-image", img)
+	if err != nil {
+		t.Fatalf("an ndb database was refused rather than read: %v", err)
 	}
-	for _, want := range []string{"ndb", "usr/lib/sysimage/rpm/Packages.db"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error = %v, want it to name %q", err, want)
+	if stats.Cataloged != 2 {
+		t.Fatalf("cataloged %d packages, want 2: %+v", stats.Cataloged, target.Packages)
+	}
+	byName := map[string]string{}
+	for _, p := range target.Packages {
+		byName[p.Name] = p.Version
+		// D50: sles has no ecosystem key yet (only `rhel` is routed to
+		// advisories), so the package must come through UNKEYED rather than
+		// guessing a substitute — the matcher is what turns an empty
+		// Ecosystem into a loud "not evaluated" rather than a clean verdict.
+		if p.Ecosystem != "" {
+			t.Errorf("%s Ecosystem = %q, want empty — D76 is cataloging only, not a SLES provider", p.Name, p.Ecosystem)
+		}
+		// D8, reached through the header pipeline ndb shares with the other
+		// two backends: SOURCERPM is stripped to a source package name.
+		if p.Source == nil || p.Source.Name == "" {
+			t.Errorf("%s has no Source; the shared header pipeline was not reached from ndb", p.Name)
 		}
 	}
+	if got := byName["libzypp"]; got != "17.35.9-1.1" {
+		t.Errorf("libzypp = %q, want 17.35.9-1.1", got)
+	}
+	if got := byName["openssl-3"]; got != "3.1.4-1.1" {
+		t.Errorf("openssl-3 = %q, want 3.1.4-1.1", got)
+	}
+}
+
+// A corrupt ndb database fails the scan rather than yielding a short list or
+// silently reporting fewer packages — the same rule
+// TestCatalogFromImage_DamagedBerkeleyDBIsRefused proves for BerkeleyDB.
+// Damaging the slot table (rather than a single blob) is chosen deliberately:
+// it is the failure ReadNDB treats as whole-file corruption rather than a
+// per-package skip (D76's split, mirroring D45's for the other two backends).
+func TestCatalogFromImage_DamagedNDBIsRefused(t *testing.T) {
+	db := buildNDBFixture(t, 5, []ndbFixtureEntry{
+		{pkgidx: 1, name: "libzypp", version: "17.35.9", release: "1.1"},
+	})
+	// Flip a byte in the FIRST slot's own magic (byte offset 32, the start of
+	// the slot table proper) rather than anywhere in the header or blob, so
+	// this is unambiguously the slot-table corruption path.
+	db[32] ^= 0xff
+	img := rpmImage(t, map[string]string{
+		osReleasePath:                      osReleaseSLES15,
+		"usr/lib/sysimage/rpm/Packages.db": string(db),
+	})
+	if _, _, err := catalogFromImage("test-image", img); err == nil {
+		t.Fatal("a damaged ndb database was catalogued")
+	} else if !strings.Contains(err.Error(), "corrupt") {
+		t.Errorf("error = %v, want it to say the slot table is corrupt", err)
+	}
+}
+
+// The whole path, end to end: an ndb-backed SLES image now scans to
+// completion instead of failing to open its package database at all. It
+// still cannot pass — D76 is cataloging only, and there is no SUSE advisory
+// provider yet (D50) — but the FAILURE has to change shape: "0 evaluated,
+// N not evaluated" is a database gap a caller can act on
+// (`assay db update` will not fix it, a SUSE provider will), where "cannot
+// read the package database" looks like a bug in assay itself.
+func TestRun_SLESImageIsCatalogedButNotEvaluated(t *testing.T) {
+	db := buildNDBFixture(t, 3, []ndbFixtureEntry{
+		{pkgidx: 1, name: "libzypp", version: "17.35.9", release: "1.1", sourcerpm: "libzypp-17.35.9-1.1.src.rpm"},
+	})
+	tarPath := filepath.Join(t.TempDir(), "image.tar")
+	writeImageTar(t, tarPath, map[string]string{
+		osReleasePath:                      osReleaseSLES15,
+		"usr/lib/sysimage/rpm/Packages.db": string(db),
+	})
+
+	var out, errOut bytes.Buffer
+	code := Run(context.Background(), testDB(t), "docker-archive:"+tarPath, Options{}, &out, &errOut)
+	if code != 2 {
+		t.Errorf("Run = %d, want 2 (stdout: %s, stderr: %s)", code, out.String(), errOut.String())
+	}
+	// The catalog step itself must not have failed: a package was read and
+	// counted, which is the whole deliverable D76 adds. Failure now comes
+	// from the matcher finding no comparer for the package's (empty)
+	// ecosystem, not from the image loader refusing the database by name.
+	for _, unwanted := range []string{"does not read", "which this build", "cannot be trusted; this result"} {
+		if strings.Contains(out.String()+errOut.String(), unwanted) {
+			t.Errorf("output still reads like the old by-name refusal (%q found):\nstdout: %s\nstderr: %s",
+				unwanted, out.String(), errOut.String())
+		}
+	}
+	if !strings.Contains(out.String(), "1 component(s) seen, 0 evaluated") {
+		t.Errorf("stdout does not show the package was catalogued and left not evaluated:\n%s", out.String())
+	}
+}
+
+// osReleaseSLES15 is a representative SUSE Linux Enterprise Server
+// /etc/os-release. ID is "sles" -- rpmFamilies routes it for the "found a
+// database this build cannot read" error message (now moot, since ndb IS
+// read) and rpmFamilies/D50 both still agree it has no ecosystem key.
+const osReleaseSLES15 = `NAME="SLES"
+VERSION="15-SP6"
+ID="sles"
+VERSION_ID="15.6"
+PRETTY_NAME="SUSE Linux Enterprise Server 15 SP6"
+`
+
+// ndbFixtureEntry is one package to write into a synthetic ndb file.
+type ndbFixtureEntry struct {
+	pkgidx                 uint32
+	name, version, release string
+	sourcerpm              string
+}
+
+// buildNDBFixture hand-assembles a complete, well-formed ndb (openSUSE/SLES
+// rpmdb container, D76) database directly in the test — the format is simple
+// enough that a few-KB synthetic file is the right fixture, not a multi-MB
+// binary pulled from a real image. Reimplemented independently of
+// internal/cataloger/rpmdb's own ndb.go and its test helper (different
+// package, so there is nothing to import), from the same source facts:
+// rpm-software-management/rpm's lib/backend/ndb/rpmpkg.c. Verified during
+// development against a REAL registry.suse.com/bci/bci-base Packages.db
+// (not committed) — see the roadmap's D76 entry for the byte-for-byte
+// comparison and the package counts.
+func buildNDBFixture(t *testing.T, nextpkgidx uint32, entries []ndbFixtureEntry) []byte {
+	t.Helper()
+	const (
+		headerSize = 32
+		slotSize   = 16
+		blkSize    = 16
+		pageSize   = 4096
+		slotStart  = headerSize / slotSize // the header occupies the first two slots
+		blobHead   = 16                    // magic(4) pkgidx(4) generation(4) bloblen(4)
+		blobTail   = 12                    // adler32(4) bloblen(4) magic(4)
+		slotnpages = 1
+	)
+	magic := func(s string) []byte { return []byte(s) } // ASCII only, no escapes: RpmP/Slot/BlbS/BlbE
+
+	header := make([]byte, headerSize)
+	copy(header[0:4], magic("RpmP"))
+	binary.LittleEndian.PutUint32(header[4:8], 0)  // version
+	binary.LittleEndian.PutUint32(header[8:12], 1) // generation; never read back
+	binary.LittleEndian.PutUint32(header[12:16], slotnpages)
+	binary.LittleEndian.PutUint32(header[16:20], nextpkgidx)
+
+	slots := make([]byte, slotnpages*pageSize)
+	for off := 0; off+slotSize <= len(slots); off += slotSize {
+		copy(slots[off:off+4], magic("Slot"))
+	}
+	copy(slots[0:headerSize], header)
+
+	var blocks []byte
+	blkoff := uint32(slotnpages * pageSize / blkSize)
+	slotOff := slotStart * slotSize
+	for _, e := range entries {
+		rpmHeader := buildRPMHeaderBlobFixture(e.name, e.version, e.release, e.sourcerpm)
+		blkcnt := uint32((blobHead + len(rpmHeader) + blobTail + blkSize - 1) / blkSize)
+		total := int(blkcnt) * blkSize
+
+		blob := make([]byte, total)
+		copy(blob[0:4], magic("BlbS"))
+		binary.LittleEndian.PutUint32(blob[4:8], e.pkgidx)
+		binary.LittleEndian.PutUint32(blob[8:12], 1) // generation counter; never read back
+		binary.LittleEndian.PutUint32(blob[12:16], uint32(len(rpmHeader)))
+		copy(blob[blobHead:], rpmHeader)
+		adl := adler32.Checksum(blob[:total-blobTail])
+		tail := blob[total-blobTail:]
+		binary.LittleEndian.PutUint32(tail[0:4], adl)
+		binary.LittleEndian.PutUint32(tail[4:8], uint32(len(rpmHeader)))
+		copy(tail[8:12], magic("BlbE"))
+
+		binary.LittleEndian.PutUint32(slots[slotOff+4:slotOff+8], e.pkgidx)
+		binary.LittleEndian.PutUint32(slots[slotOff+8:slotOff+12], blkoff)
+		binary.LittleEndian.PutUint32(slots[slotOff+12:slotOff+16], blkcnt)
+		blocks = append(blocks, blob...)
+		blkoff += blkcnt
+		slotOff += slotSize
+	}
+	return append(slots, blocks...)
+}
+
+// buildRPMHeaderBlobFixture writes the raw rpm header shape
+// internal/cataloger/rpmdb/header.go's parseHeader reads: an 8-byte prefix
+// (index-entry count, data-store size, both big-endian), one 16-byte index
+// entry per tag, then the NUL-terminated string data store. Tag numbers are
+// rpm's own, stable ones (NAME=1000, VERSION=1001, RELEASE=1002,
+// SOURCERPM=1044); type 6 is STRING.
+func buildRPMHeaderBlobFixture(name, version, release, sourcerpm string) []byte {
+	type field struct {
+		tag uint32
+		s   string
+	}
+	fields := []field{{1000, name}, {1001, version}, {1002, release}}
+	if sourcerpm != "" {
+		fields = append(fields, field{1044, sourcerpm})
+	}
+	var data []byte
+	type idx struct{ tag, offset uint32 }
+	var idxs []idx
+	for _, f := range fields {
+		idxs = append(idxs, idx{tag: f.tag, offset: uint32(len(data))})
+		data = append(data, f.s...)
+		data = append(data, 0) // NUL terminator, as a byte, never as an escape (CLAUDE.md)
+	}
+	buf := binary.BigEndian.AppendUint32(nil, uint32(len(idxs)))
+	buf = binary.BigEndian.AppendUint32(buf, uint32(len(data)))
+	const typeString = 6
+	for _, e := range idxs {
+		buf = binary.BigEndian.AppendUint32(buf, e.tag)
+		buf = binary.BigEndian.AppendUint32(buf, typeString)
+		buf = binary.BigEndian.AppendUint32(buf, e.offset)
+		buf = binary.BigEndian.AppendUint32(buf, 1) // count
+	}
+	return append(buf, data...)
 }
 
 // A BerkeleyDB file that is damaged fails the scan rather than yielding a

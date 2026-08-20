@@ -461,7 +461,8 @@ rpm's own read-only BerkeleyDB backend 850 lines of C is dead weight.
 
 **~~AlmaLinux and Rocky Linux are not the easier path~~ — five now resolved: Rocky in D71,
 AlmaLinux in D72, Amazon Linux 2/2023 in D73, Oracle Linux 5–10 in D74, and Fedora in D75;
-only SLES remains open, behind `ndb`.** Both keyed on the major version only — three keys
+SLES remains open, no longer behind `ndb` (D76 reads the format) but behind still having no
+SUSE advisory feed at all.** Both keyed on the major version only — three keys
 each, derivable from `/etc/os-release` — which is genuinely simpler. Neither Alma nor Rocky
 survived the rest, at the time:
 
@@ -507,8 +508,9 @@ consumer supplying VEX to suppress findings, this one is about a vendor publishi
 affectedness.
 
 **Still deferred.** OVAL v2 as a second opinion (it covers RHEL 5–9 and has no RHEL 10, so it
-could never be the primary source); SLES alone, behind the ndb entry elsewhere in this
-document, which none of D50, D71, D72, D73, D74 or D75 routes; and closing the EUS/AUS/E4S
+could never be the primary source); SLES, which D76 catalogues (the ndb rpmdb backend, see the
+ndb entry elsewhere in this document) but which none of D50, D71, D72, D73, D74 or D75 routes
+to an advisory feed — there still is no SUSE archive ingested; and closing the EUS/AUS/E4S
 divergence rather than disclosing it, which needs a channel signal no image carries. Rocky
 Linux, AlmaLinux, Amazon Linux, Oracle Linux and Fedora are off this list — see D71 through
 D75.
@@ -529,11 +531,16 @@ follow-up's real question: train-aware matching, or keeping the earliest fix.
 distro slices reuse them: reading `related` for CVE joins, scoped to distro-authored records;
 storing a losslessly-kept vendor severity word alongside an NVD join; dropping and counting
 module builds instead of stream-matching them; treating OSV as the primary feed where it
-exists; and SLES staying behind `ndb` — except the justification recorded above for deferring
-`ndb` itself no longer holds. Modern SLES/BCI images cannot be catalogued at all today,
-measured independently of any advisory question; openSUSE Leap is the clean subset if
-SUSE-family coverage is wanted before `ndb` is written. D72 (AlmaLinux) is the first slice to
-actually spend the first two of those five — see D72 in the roadmap.
+exists; and SLES staying behind `ndb`. D72 (AlmaLinux) is the first slice to actually spend
+the first two of those five — see D72 in the roadmap.
+
+**The `ndb` half of that list is resolved — D76 reads the format.** Modern SLES/BCI images
+could not be catalogued at all, measured independently of any advisory question; that
+justification for deferring `ndb` no longer held once measured, so the backend was built and
+verified against a real `registry.suse.com/bci/bci-base` image (138 packages, 0 skipped — see
+the roadmap's D76 entry for the full verification). SUSE-family coverage — an actual advisory
+feed, and the `sles`/`opensuse-*` ecosystem keys and comparer routing it needs — is what is
+still open, unchanged by D76 on purpose (D76 is cataloging only).
 
 ---
 
@@ -658,8 +665,13 @@ would otherwise vanish silently.
 is a supported RHEL platform, so the magic doubles as the byte-order probe rather than
 little-endian being assumed.
 
-**Still not read: ndb.** openSUSE and SLES only, and there is no SUSE advisory source for it to
-serve. Those images exit 2 with the backend named.
+**ndb, the third format (openSUSE and SLES only), is read too — as of D76.** It was left
+unread here for the same reason ndb stayed off D44's list: no SUSE advisory source existed for
+it to serve. That justification stopped covering the cataloging half once measured — modern
+SLES/BCI images could not even be catalogued, independent of any advisory question — so D76
+built the backend; those images now scan to completion and are reported not evaluated, the
+same way every other unrouted RPM family already is, rather than exiting 2 before the package
+database can even be opened. There is still no SUSE advisory source; that half is unchanged.
 
 ---
 

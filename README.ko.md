@@ -552,6 +552,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] Fedora 현재 릴리스를 Bodhi에서 (D75) — 산문에서 뽑아내지 못한 CVE는 세어서 표시(상한
       81.7%), EOL 동결을 공개, unspecified 심각도는 Unknown으로 남음; 빌드 가능한 RPM 계열이
       닫힘
+- [x] ndb rpmdb 백엔드(D76) — openSUSE와 SLES 자신만의 패키지 데이터베이스 컨테이너 포맷으로,
+      BerkeleyDB와 SQLite(D44)에 이은 세 번째; 카탈로징만 하며 SUSE advisory 피드는 아직 없음,
+      실제 SLES/BCI 이미지로 검증(패키지 138개, skip 0건)
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건
@@ -697,8 +700,10 @@ Debian은 backport를 버전에 **적습니다**(`7.74.0-1.3+deb11u10`). (CVE, �
       없음, 그리고 ubi8의 실제 11 MB 데이터베이스로 검증했습니다. 183 패키지, 183건 전부 syft와
       공유, 소스 이름 불일치 0건. 빅엔디언 데이터베이스도 읽습니다. BerkeleyDB가 호스트 순서로 쓰고
       s390x가 지원 플랫폼이기 때문입니다
-- [ ] ndb(`Packages.db`) — openSUSE와 SLES 전용이고 봉사할 SUSE advisory 출처가 없습니다. 그
-      이미지들은 백엔드를 이름으로 밝히며 exit 2입니다
+- [x] openSUSE와 SLES를 위한 ndb(`Packages.db`)(D76) — 카탈로징만 하며 여전히 SUSE
+      advisory 출처는 없습니다; 실제 SLES/BCI `Packages.db`로 검증했습니다: 패키지 138개,
+      skip 0건, 소스 이름을 정확히 벗겨냈습니다. 그 이미지들은 이제 데이터베이스조차 열지
+      못해 exit 2 하는 대신 끝까지 스캔되어 평가되지 않음으로 보고됩니다
 - [ ] write-ahead log를 거절하는 대신 재생하기
 
 **⑬ Red Hat advisory provider** — `assay db build`가 Red Hat의 CSAF VEX 피드를 넣습니다. RHEL
