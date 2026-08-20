@@ -16,15 +16,18 @@ affecting it.
 
 ## Status
 
-🚧 **Early development. Alpine containers scan end to end; other distros do not.**
+🚧 **Active development. Eleven distro families and eight language ecosystems scan end to
+end; the [Roadmap](#roadmap) checkboxes are the authoritative list.**
 
-`assay db update` downloads the published database — Go, npm, PyPI, Maven, RubyGems, NuGet,
-Packagist, and **Alpine**, built centrally and refreshed daily — and `assay scan` matches
-against it. It reads container
-images directly, so syft is no longer in the loop. On real targets it reports the same
-findings as grype: same CVEs, not just the same count. See [Roadmap](#roadmap).
+`assay db update` downloads the published database — OSV's language ecosystems (Go, npm,
+PyPI, crates.io, Maven, RubyGems, NuGet, Packagist) alongside Alpine, Debian, Ubuntu, Rocky
+and Alma; Red Hat's CSAF VEX with fix states; Amazon's ALAS (core and AL2 extras); Oracle's
+ELSA; Fedora's Bodhi; and SUSE's CSAF VEX — built centrally and refreshed daily, with NVD
+ratings joined on — and `assay scan` matches container images, Go binaries, directories and
+SBOMs against it. It reads container images directly, so syft is not in the loop. On real
+targets it reports the same findings as grype: same CVEs, not just the same count.
 
-Alpine packages match through their *source* package, so an `openssl` advisory reaches the
+Distro packages match through their *source* package, so an `openssl` advisory reaches the
 installed `libssl3`, and the report names both. That indirection is where distro scanners
 silently miss things.
 
@@ -534,15 +537,15 @@ The Docker daemon is deliberately not a source: importing it takes the linked de
 count from 9 modules to 27, and an image already present locally reaches `assay` through
 `docker save`.
 
-**③ Filesystem and binary targets** — depends on neither ② nor ④, so it can slot in
+**③ Filesystem and binary targets** ✅ — depends on neither ② nor ④, so it can slot in
 anywhere.
 
 - [x] Go binary scanning via `debug/buildinfo`, including the toolchain as `stdlib`
 - [x] Directory scanning (Go modules, `go.mod` only — no toolchain, no network)
 
-**⑥ What a directory scan does not read** — the gap D26 measured: a directory holding
+**⑥ What a directory scan does not read** ✅ — the gap D26 measured: a directory holding
 `go.mod` alongside `package-lock.json` reported the Go packages, said `0 not evaluated`, and
-exited 0 while 24 findings went unmentioned. **Done.**
+exited 0 while 24 findings went unmentioned.
 
 - [x] `package-lock.json` and `poetry.lock` catalogers, over a bounded subdirectory walk
 - [x] Disclose every manifest recognized but not read, by name and reason (D26)
@@ -593,7 +596,7 @@ exited 0 while 24 findings went unmentioned. **Done.**
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a
       seven-line file where there were none
 
-**④ Verdicts and output** — where exit code 1 first becomes reachable. **Done.**
+**④ Verdicts and output** ✅ — where exit code 1 first becomes reachable.
 
 - [x] `--fail-on` severity gating, plus `--fail-on-unknown` and `--fail-on-incomplete`
 - [x] CVSS v3.1 and v4.0 scoring, checked against every vector in the live database
@@ -607,8 +610,8 @@ exited 0 while 24 findings went unmentioned. **Done.**
       ignores the spec's own `invocations[]` channel and a partial scan must not read as a
       complete one
 
-**⑦ NVD severity** — what NIST scores a CVE, attached to findings assay already matched
-through OSV. **Done.**
+**⑦ NVD severity** ✅ — what NIST scores a CVE, attached to findings assay already matched
+through OSV.
 
 Measured 2026-08-03: of 8,029 advisories carrying no scorable vector, a 60-CVE sample found
 NVD scoring 93% and rating **48% high or critical**. The join is the CVE, never the CPE: NVD
@@ -650,8 +653,8 @@ letting a partial database look complete. A real delta needs the builder to laye
 existing database instead of starting from empty — that is `db build --seed <ref>`, shipped
 in slice ⑧ below.
 
-**⑧ A published database** — a builder runs the slow sync; everyone else downloads the
-result. **Done.** This was a deferred decision whose revisit trigger — "CI rebuild time
+**⑧ A published database** ✅ — a builder runs the slow sync; everyone else downloads the
+result. This was a deferred decision whose revisit trigger — "CI rebuild time
 becomes the bottleneck" — the measurement above fired. grype and trivy both work this way.
 
 - [x] Build the database centrally, publish it as an OCI artifact (`assay db push`, D28)
@@ -661,8 +664,8 @@ becomes the bottleneck" — the measurement above fired. grype and trivy both wo
       NVD pass above; the seed carries its ratings forward but rebuilds every advisory from
       source, so an advisory upstream withdraws still gets removed
 
-**⑤ KISA enrichment** — Korean title, description and remediation joined onto matched
-findings by CVE. **Done.**
+**⑤ KISA enrichment** ✅ — Korean title, description and remediation joined onto matched
+findings by CVE.
 
 The first investigation called this dead. It had measured the wrong board — KNVD's own
 disclosures (173 records, Korean domestic software) rather than its **security notices**,
@@ -700,7 +703,7 @@ rated CVEs, KISA at **18,523** enrichment records over 2,971 notices, published 
 the local build holds **1,719,126** Hangul sequences, the published artifact **zero** — D29
 checked against the file users download, not only in a test.
 
-**⑪ Debian packages** — `debian:12` scans end to end, the way Alpine does. **Done.**
+**⑪ Debian packages** ✅ — `debian:12` scans end to end, the way Alpine does.
 
 The question that decided it was whether Debian has Red Hat's backport problem, and the
 measurement says no: Debian *encodes* the backport in the version (`7.74.0-1.3+deb11u10`),
@@ -726,7 +729,7 @@ disagree zero times.
       directory. A symlink under it is counted rather than followed and joins the incomplete
       count
 
-**⑫ RHEL-family inventory** — `ubi9`, `rocky:9`, `almalinux:9`, `fedora` and
+**⑫ RHEL-family inventory** ✅ — `ubi9`, `rocky:9`, `almalinux:9`, `fedora` and
 `amazonlinux:2023` are read, and **no verdict follows**. A RHEL image's packages are listed
 with their NEVRAs and every one of them is reported as not evaluated, so the scan exits 2.
 **Inventory done; matching deliberately not.**
@@ -766,7 +769,7 @@ them from 2023 onwards. Matching on it would report all of them clean.
       reported not evaluated, rather than exiting 2 before the database can even be opened
 - [ ] Replaying a write-ahead log rather than refusing it
 
-**⑬ The Red Hat advisory provider** — `assay db build` ingests Red Hat's CSAF VEX feed, the
+**⑬ The Red Hat advisory provider** ✅ — `assay db build` ingests Red Hat's CSAF VEX feed, the
 only source that can say a RHEL package is affected and **will not be fixed**. On by default
 since D51, and **carried by the published artifact**, so `assay db update` delivers it too:
 20.9 MB of download becomes 28.7 MB.
@@ -859,7 +862,7 @@ On SUSE, `--fail-on-unfixable` works but `=wont-fix` catches only what SUSE clas
       close it (`.elN_M` means z-stream, and mainline uses it on 92.6% of RHEL 9 entries);
       see `docs/deferred-decisions.md`
 
-**⑨ Versions the comparers cannot read** — a package whose version will not parse is
+**⑨ Versions the comparers cannot read** ✅ — a package whose version will not parse is
 reported as skipped rather than clean (D20, D21), so it is loud; it is still a vulnerability
 that went un-assessed, which D9 calls a miss. Measured 2026-08-06 over every range bound in
 the v7 database: 96 of 29,840 semver bounds, 45 of 31,147 pep440, 61 of 53,819 apk — 0.18%,
@@ -907,7 +910,7 @@ day: `alpine:3.14` skipped `libretls 3.3.3p1-r3` and with it CVE-2022-0778.
       `x/mod/semver` orders `1.2.3` and `1.2.4` as EQUAL because it requires a `v` prefix
       (20.6% of real bounds); packaging's corpus passes a comparer that says `1.9 > 1.10`
 
-**⑩ Which KISA notice wins** — found on first real use. The enrichment bucket keys on
+**⑩ Which KISA notice wins** ✅ — found on first real use. The enrichment bucket keys on
 `(CVE, Source)`, so a CVE named by two KISA notices keeps whichever arrived last: `convert`
 emitted 20,314 records and the store kept 18,523, meaning **1,791** were decided by page
 order — the tie-break D25 forbids. And 70% of stored records come from a notice claiming

@@ -10,37 +10,38 @@ the vulnerability database, and match the two. In the anchore ecosystem those ar
 separate projects (`syft`, `vunnel` + `grype-db`, `grype`). KISA/KNVD advisory data is a
 first-class provider — that is the main reason this exists rather than using grype.
 
-Slices ①–⑬ are built. `assay db build` builds a database from OSV (Go, npm, PyPI, Alpine,
-Debian) with NVD ratings (D27, opt-in via `NVD_ENABLE`) and KISA's Korean prose as enrichment
-(⑤, on by default since D37, local only because `db push` strips it, D29); `assay db update`
-pulls the published OCI artifact (D28) rather than rebuilding. `assay scan` reads SBOMs,
-container images, Go binaries and directories, matches them, and returns a verdict CI can
-gate on. A finding carries every source's rating and the gate takes the highest (D25).
-Incompleteness carries a cause, and `--fail-on-incomplete=target` gates only on what the
-caller can fix (D36). Alpine, Debian and RHEL images scan end to end. RHEL takes its advisories from Red Hat's CSAF
-VEX feed rather than OSV (D47–D49, on by default and carried by the published artifact since
-D51), because the OSV Red Hat export is errata-only and cannot say "affected, will not fix" — two thirds of what Red Hat publishes
-about its own packages. Those findings are reported and counted always and gated only by
-`--fail-on-unfixable` (D48), which since D52 also carries WHY there is no fix — Red Hat's
-remediation categories separate "will not be fixed" from "not fixed yet", every unfixable
-mainline tuple has one, and `--fail-on-unfixable=wont-fix` gates on the first alone. Only
-`rhel` routes to `Red Hat:N` (D50): Alma, Rocky, CentOS,
-Fedora and Amazon Linux are catalogued and reported as not evaluated. Both rpmdb backends are read — SQLite for RHEL 9+ and BerkeleyDB for RHEL 8 and older
-(D44). Ubuntu scans since D53, keyed on the mainline release; its Pro/FIPS/Realtime
-lineages are dropped at ingestion and a package whose version carries `+esmN` or `+FipsN`
-is reported as not evaluated rather than judged against mainline data. Distroless images are
-read via `status.d` (D54) and SARIF is an output format (D55). A directory scan reads eight
-lockfile formats and refuses two by name (D61–D63). The NVD window has both ends
-(`NVD_SINCE_DAYS` / `NVD_UNTIL_DAYS`, D65) so lost ratings can be backfilled in slices. Not
-built: the ndb rpmdb backend and pep440 leniency (see `README.md`).
+Slices ①–⑬ are built, and the D-numbered work has reached D79. `assay db build` builds a
+database from OSV (Go, npm, PyPI, crates.io, Maven, RubyGems, NuGet, Packagist, Alpine,
+Debian, Ubuntu, Rocky, Alma) with NVD ratings (D27, opt-in via `NVD_ENABLE`, windowed on
+both ends since D65) and KISA's Korean prose as enrichment (⑤, on by default since D37,
+local only because `db push` strips it, D29); `assay db update` pulls the published OCI
+artifact (D28) rather than rebuilding. Five more providers are on by default and carried by
+the artifact: Red Hat CSAF VEX (D47–D52 — fix states with reasons, `--fail-on-unfixable`
+and `=wont-fix`), Amazon ALAS core plus AL2 extras (D73, D78), Oracle ELSA OVAL (D74,
+Ksplice/FIPS lineage-filtered since D79), Fedora Bodhi (D75) and SUSE CSAF VEX (D77, whose
+no-fix entries are 99.96% reason-unstated — the inverse of Red Hat). `assay scan` reads
+SBOMs, container images (distroless via `status.d`, D54), Go binaries and directories
+(eight lockfile formats, two refused by name, plus jars — D61–D63, D68–D70), and returns a
+verdict CI can gate on; SARIF is an output format (D55). A finding carries every source's
+rating and the gate takes the highest (D25); incompleteness carries a cause and
+`--fail-on-incomplete=target` gates only on what the caller can fix (D36). Images scan end
+to end for Alpine, Debian, Ubuntu mainline (D53), RHEL, Rocky (D71), AlmaLinux (D72),
+Amazon Linux 2/2023 (D73), Oracle Linux 5–10 (D74), Fedora (D75), and SLES/openSUSE Leap
+(D77) — across three rpmdb backends: BerkeleyDB, SQLite and ndb (D44, D76). Installed
+Ubuntu ESM/FIPS and Oracle Ksplice/FIPS lineage packages are reported not evaluated rather
+than judged against mainline data (D53, D79). Not built: pep440 leniency, MODULARITYLABEL
+matching, and the CycloneDX `rpm` purl mapping (see `README.md` and
+`docs/deferred-decisions.md`).
 
-**Check what exists before assuming — this paragraph has been wrong five times.** It claimed
+**Check what exists before assuming — this paragraph has been wrong six times.** It claimed
 `scan` was unimplemented after slice 1 shipped it, claimed binaries and directories were
 unread after slice 3 shipped both, claimed the KISA provider was on hold and NVD uningested
 for a day after both merged, and claimed non-Alpine distros, `requirements.txt` and
 npm/PyPI directory scanning were unbuilt after all three shipped, and claimed distroless
 `status.d` and SARIF were not built for nine days after D54 and D55 shipped both — found by
-a documentation sweep, not by a reader. `README.md`'s roadmap checkboxes are the more
+a documentation sweep, not by a reader — and claimed the ndb backend unbuilt and five RPM
+distros not evaluated after D71–D79 had shipped every one of them, caught 2026-08-20 only
+because the user asked for a freshness sweep. `README.md`'s roadmap checkboxes are the more
 reliable record because they are edited task by task; this paragraph is edited from memory.
 
 **Read these before proposing anything structural:**
