@@ -1607,7 +1607,10 @@ tar에서 아무것도 못 찾고, 이 규칙이 없으면 패키지 172개짜�
 레코드 5,494개 전부에 `aliases`도 `upstream`도 0개이고 — 모든 CVE가 `related`에 있는데 OSV는 이를
 alias가 아니라고 명시합니다 — 그래서 D3 하에서 **CVE를 0개** 산출하며 심각도 데이터도 전혀 없습니다.
 Rocky의 내보내기는 Red Hat 런타임 패키지 집합 대비 커버리지 중앙값이 0.29이고
-**CVE-2024-6387은 레코드가 아예 없습니다.** 둘 다 이 결정을 바꾸지 않습니다.
+**CVE-2024-6387은 레코드가 아예 없습니다.** 둘 다 이 결정을 바꾸지 않습니다(RHEL 8/9/10은
+여전히 Red Hat 자신의 CSAF 피드로 경로를 잡지, 어느 리빌드의 OSV export로도 잡지 않습니다) —
+다만 이후 두 배포판이 각자 자기 아카이브로 가는 자기만의 경로를 갖게 되는 D71과 D72를
+참조하십시오.
 
 
 ### D44 — rpmdb는 의존성이 아니라 손으로 읽는다
@@ -2631,6 +2634,52 @@ comparer가 그대로 적용됩니다. Rocky는 D50의 미평가 목록에서 �
 Rocky 스캔의 "clean"은 Rocky가 발행한 것에 한해 깨끗하다는 뜻이고, RHEL 판정보다 약한 진술이며
 — 이 조사가 측정한 다른 모든 피드와 마찬가지로 — errata뿐이므로 `--fail-on-unfixable`이 걸 것이
 없습니다. README의 Rocky 줄이 둘 다 말합니다.
+
+---
+
+### D72 — AlmaLinux, 그것 없이는 내보낼 수 없었던 D71의 결정 둘을 씀
+
+**결정.** AlmaLinux 8/9/10을 OSV의 `AlmaLinux` 아카이브에서 수집합니다(2026-08-19 측정:
+5,606건 — ALSA(보안) 4,405건, ALBA(버그 수정) 979건, ALEA(개선) 222건, 철회 1건) — 릴리스
+한정 키 `AlmaLinux:<major>` 아래에서입니다. os-release `ID=almalinux`가 그리로 경로를 잡고,
+기존 RPM comparer가 그대로 적용됩니다. AlmaLinux는 D50의 미평가 목록에서 빠집니다 — D71의
+Rocky에 이어 그렇게 된 두 번째(그리고 지금까지는 유일한 다른) 배포판입니다.
+
+**D71의 조사가 곧바로 결실을 본 곳.** D71이 기록한 다섯 결정 중 둘은 Rocky가 아니라 이
+슬라이스를 위해 쓰인 것이었습니다 — Rocky는 둘 다 필요 없었습니다:
+
+1. **`related`이 CVE 읽기에 합류합니다(D3 수정).** AlmaLinux의 아카이브는 5,606건 레코드
+   전부에 `aliases`도 `upstream`도 0개입니다 — CVE는 오직 `related`에만 있습니다. 배포판이
+   직접 쓴 레코드로 범위를 좁혀(`osv.distroAuthored`) 구현합니다: ALPINE, DEBIAN, UBUNTU,
+   RLSA(Rocky)와 AlmaLinux 자신의 ALSA/ALBA/ALEA가 해당하고, GHSA, RUSTSEC과 그 밖의 모든
+   언어 생태계 이름공간은 해당하지 않습니다 — 그쪽의 `related`는 진짜로 관련은 있지만 서로
+   다른 advisory를 가리키므로, 전역으로 읽으면 서로 다른 두 취약점 사이에 alias 조인을
+   지어내게 되기 때문입니다.
+2. **벤더 심각도 단어를 무손실로 저장합니다(D13).** 아카이브 어디에도 CVSS 벡터가
+   없습니다(0%) — 심각도는 오직 요약문의 맨 앞 단어로만 존재합니다("Important: openssh
+   security update", Critical/Important/Moderate/Low 순서를 따르며, Alma가 바이트 단위로
+   물려받은 RHSA 관례입니다). 수집 시점에 `VENDOR_WORD` 심각도 항목으로 저장하고, 조회
+   시점에 `internal/severity`가 밴드화합니다(D13이 평소에 나누는 방식 그대로) — 수집
+   시점에는 절대 밴드화하지 않습니다. Critical→critical, Important→high, Moderate→medium,
+   Low→low이고, 인식하지 못한 단어는 추측한 기본값이 아니라 Unknown으로 밴드화합니다(D17).
+
+**ALBA와 ALEA는 수집 시점에 버리고, 저장했다가 나중에 거르지 않습니다.** 버그 수정과 개선
+errata는 애초에 취약점을 전혀 지목하지 않습니다 — `MAL-*`(D15)와는 다른 이유입니다. `MAL-*`는
+엄연히 보안 finding입니다, 다만 성격이 다를 뿐입니다. withdrawn/`MAL-*` 패턴을 그대로
+따릅니다: `osv.Convert`에서 버리므로 어떤 질의 경로도 그 확인을 잊을 수 없습니다(D16).
+
+**module-build 가드는 새 코드가 필요 없었고, 넓힌 키 하나면 됐습니다.** D71의
+가드(`internal/matcher`의 `moduleBuildBound`)는 어떤 ecosystem 문자열이 아니라 RPM
+comparer로 게이트되어 있고, Red Hat/Rocky의 `module+el`과 AlmaLinux 자신의 `module_el` 두
+철자를 이미 인식하고 있었습니다 — `rpmModuleBuild`가 처음부터 둘 다를 상대로 쓰였기
+때문입니다. `AlmaLinux:N`을 `version.RPM{}`로 경로 잡는 것이 가드에 필요했던 유일한
+변경이었고, 이는 새 production 코드가 아니라 호출자 우선 테스트(Alma의 module 빌드 fix가
+똑같은 skip-and-count 경로에 닿는지)로 증명됩니다.
+
+**감추지 않고 공개합니다:** AlmaLinux 판정은 Rocky의 errata뿐이라는 단서(같은 OSV
+파이프라인으로 측정)를 그대로 지니면서, 자기만의 모양도 하나 얹습니다 — 모든 심각도가
+점수가 아니라 벤더 단어이고, Rocky의 네이티브 CVSS 커버리지 84.1%와 달리 AlmaLinux는 아예
+0%입니다. README의 AlmaLinux 줄이 그 기능 바로 옆에서 이를 말합니다.
 
 ---
 

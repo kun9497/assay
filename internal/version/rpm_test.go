@@ -280,6 +280,8 @@ func TestRPM_Routing(t *testing.T) {
 		// release-qualified the same way Red Hat's CSAF key is, and
 		// rpmvercmp does not care which distro built the package.
 		"Rocky Linux:8", "Rocky Linux:9", "Rocky Linux:10",
+		// AlmaLinux left this list under D72, for the same reason.
+		"AlmaLinux:8", "AlmaLinux:9", "AlmaLinux:10",
 	} {
 		c, ok := For(eco)
 		if !ok {
@@ -300,11 +302,15 @@ func TestRPM_Routing(t *testing.T) {
 	if _, ok := For("Rocky Linux"); ok {
 		t.Error(`For("Rocky Linux") resolves; the provider only ever writes "Rocky Linux:<major>"`)
 	}
+	if _, ok := For("AlmaLinux"); ok {
+		t.Error(`For("AlmaLinux") resolves; the provider only ever writes "AlmaLinux:<major>"`)
+	}
 	// And the rest still do not: Red Hat's errata describe Red Hat's own
-	// builds (D50), and Rocky's own feed is ingested only under "Rocky
-	// Linux:N" (D71) -- neither one populates these keys. Their packages are
-	// still catalogued and reported as not evaluated.
-	for _, eco := range []string{"AlmaLinux:9", "Fedora:44", "CentOS:9"} {
+	// builds (D50), Rocky's own feed is ingested only under "Rocky Linux:N"
+	// (D71), and AlmaLinux's only under "AlmaLinux:N" (D72) -- none of them
+	// populate these keys. Their packages are still catalogued and reported
+	// as not evaluated.
+	for _, eco := range []string{"Fedora:44", "CentOS:9"} {
 		if _, ok := For(eco); ok {
 			t.Errorf("For(%q) resolves, but nothing populates that ecosystem", eco)
 		}

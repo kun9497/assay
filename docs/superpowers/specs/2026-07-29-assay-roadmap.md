@@ -1733,7 +1733,9 @@ packages would report as having none. Both paths are probed.
 carries zero `aliases` and zero `upstream` across all 5,494 records — every CVE is in
 `related`, which OSV defines as explicitly not an alias — so under D3 it yields **0 CVEs**, and
 it has no severity data at all. Rocky's export has a median 0.29 coverage of Red Hat's runtime
-package set and **no record whatsoever for CVE-2024-6387**. Neither changes this decision.
+package set and **no record whatsoever for CVE-2024-6387**. Neither changes this decision
+(RHEL 8/9/10 still route to Red Hat's own CSAF feed, not to either rebuild's OSV export) — but
+see D71 and D72, where both distros later got their own routing to their own archives instead.
 
 
 ### D44 — The rpmdb is read by hand, not by dependency
@@ -2850,6 +2852,52 @@ coverage holes — no advisory for regreSSHion at all, and 2023–24 output runn
 RHSA's. A Rocky scan's "clean" is clean-of-what-Rocky-published, a weaker statement than the
 RHEL verdict, and — like every feed this research measured — errata-only, so
 `--fail-on-unfixable` has nothing to gate on. The README's Rocky line says both.
+
+---
+
+### D72 — AlmaLinux, spending the two D71 decisions it could not ship without
+
+**Decision.** AlmaLinux 8/9/10 are ingested from OSV's `AlmaLinux` archive (measured
+2026-08-19: 5,606 records — 4,405 ALSA (security), 979 ALBA (bugfix), 222 ALEA (enhancement),
+1 withdrawn) under release-qualified keys `AlmaLinux:<major>`; an os-release `ID=almalinux`
+routes there, and the existing RPM comparer applies. AlmaLinux leaves D50's not-evaluated
+list, the second (and so far only other) distro to do so after Rocky in D71.
+
+**Where D71's research paid off directly.** Two of the five decisions D71 recorded were
+written FOR this slice, not for Rocky, which needed neither:
+
+1. **`related` joins the CVE read (D3 revised).** AlmaLinux's archive carries zero `aliases`
+   and zero `upstream` on every one of its 5,606 records — the CVE lives ONLY in `related`.
+   Implemented scoped to distro-authored records (`osv.distroAuthored`): ALPINE, DEBIAN,
+   UBUNTU, RLSA (Rocky) and AlmaLinux's own ALSA/ALBA/ALEA qualify; GHSA, RUSTSEC and every
+   other language-ecosystem namespace do not, because their `related` names genuinely
+   different, merely similar advisories, and a global read would fabricate an alias join
+   between two distinct vulnerabilities.
+2. **Vendor severity words, stored losslessly (D13).** 0% of the archive carries a CVSS
+   vector anywhere — severity exists only as the summary's leading word ("Important: openssh
+   security update", following Critical/Important/Moderate/Low, the RHSA convention Alma
+   inherits byte-for-byte). Stored as a `VENDOR_WORD` severity entry at ingestion and banded
+   by `internal/severity` at query time (D13's usual split), never banded at ingestion.
+   Critical→critical, Important→high, Moderate→medium, Low→low; an unrecognized word bands
+   Unknown rather than a guessed default (D17).
+
+**ALBA and ALEA are dropped at ingestion, not stored and filtered later.** Bugfix and
+enhancement errata name no vulnerability at all — a different reason from `MAL-*` (D15),
+which IS a security finding, only of a different class. Mirrors the withdrawn/`MAL-*`
+pattern: dropped in `osv.Convert`, so no query path can forget the check (D16).
+
+**The module-build guard needed no new code, only a wider key.** D71's guard
+(`internal/matcher`'s `moduleBuildBound`) is gated on the RPM comparer, not on any ecosystem
+string, and already recognized both spellings — Red Hat/Rocky's `module+el` and AlmaLinux's
+own `module_el` — because `rpmModuleBuild` was written against both from the start. Routing
+`AlmaLinux:N` to `version.RPM{}` was the only change the guard needed; it is proven by a
+caller-first test (an Alma module-build fix reaches the same skip-and-count path), not by new
+production code.
+
+**Disclosed rather than hidden:** an AlmaLinux verdict carries Rocky's errata-only caveat
+(measured against the same OSV pipeline) plus a shape of its own — every severity is a vendor
+word rather than a score, and unlike Rocky's 84.1% native CVSS coverage, AlmaLinux has none at
+all. The README's AlmaLinux line says so next to the feature.
 
 ---
 

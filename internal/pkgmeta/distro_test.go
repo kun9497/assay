@@ -52,23 +52,22 @@ func TestDistroEcosystem_Unsupported(t *testing.T) {
 		// they must still not resolve: Red Hat's errata describe Red Hat's own
 		// builds and nobody else's.
 		//
-		//   - Alma is a rebuild but not a byte-identical one (it writes
-		//     `module_el` where Red Hat writes `module+el`, and adds `.alma`
-		//     release suffixes).
 		//   - `centos` covers CentOS Linux, which trailed RHEL, and CentOS
 		//     Stream, which runs ahead of it — so one key would be wrong in
 		//     opposite directions for the two.
 		//   - Fedora and Amazon Linux have their own advisory feeds entirely.
 		//
-		// Rocky left this list under D71 — see TestDistroEcosystem_Rocky
-		// below — because it ingests from its own OSV archive rather than
-		// Red Hat's errata, so the hazard these rows guard against never
-		// applied to it.
+		// Rocky left this list under D71, and AlmaLinux under D72 — see
+		// TestDistroEcosystem_Rocky and TestDistroEcosystem_Alma below —
+		// because each ingests from its own OSV archive rather than Red
+		// Hat's errata, so the byte-identity hazard these rows guard against
+		// (module builds spelled `module_el`/`module+el`, `.alma` release
+		// suffixes) never applied to matching either against ITS OWN data.
 		//
 		// Each row has a version that WOULD parse, so the ID is what has to
 		// reject it. Without that, deleting the case labels leaves the suite
-		// green while an almalinux:9 scan is answered with Red Hat's errata.
-		{"almalinux is a rebuild, not the same builds", Distro{ID: "almalinux", VersionID: "9.6"}},
+		// green while an unsupported distro's scan is answered with Red
+		// Hat's errata.
 		{"centos is ahead of RHEL on Stream and behind it on Linux", Distro{ID: "centos", VersionID: "9"}},
 		{"amazon linux has its own advisories", Distro{ID: "amzn", VersionID: "2023"}},
 		{"rhel with no VERSION_ID", Distro{ID: "rhel", VersionID: ""}},
@@ -77,6 +76,10 @@ func TestDistroEcosystem_Unsupported(t *testing.T) {
 		// that apply to rhel above.
 		{"rocky with no VERSION_ID", Distro{ID: "rocky", VersionID: ""}},
 		{"rocky with a non-numeric version", Distro{ID: "rocky", VersionID: "beta"}},
+		// D72 gave AlmaLinux its decision, so the same two edge cases apply
+		// to it too.
+		{"almalinux with no VERSION_ID", Distro{ID: "almalinux", VersionID: ""}},
+		{"almalinux with a non-numeric version", Distro{ID: "almalinux", VersionID: "beta"}},
 		// D53 gave Ubuntu its decision, so it resolves now — but only for a
 		// VERSION_ID shaped like a release. A version this cannot read is
 		// refused rather than concatenated into a key that would look
@@ -223,24 +226,70 @@ func TestDistroEcosystem_Rocky(t *testing.T) {
 			t.Errorf("VERSION_ID=%q -> %q, want %q", tc.versionID, got, tc.want)
 		}
 	}
-	// Rocky's key must not converge with Red Hat's or Alpine's — a change
-	// that collapsed them would make one distro's advisories reachable under
-	// another's key, exactly the hazard the "rhel" case's comment records
-	// against AlmaLinux.
+	// Rocky's key must not converge with Red Hat's, Alpine's or AlmaLinux's —
+	// a change that collapsed them would make one distro's advisories
+	// reachable under another's key.
 	for _, tc := range []struct{ id, versionID, want string }{
 		{"alpine", "3.19", "Alpine:v3.19"},
 		{"rhel", "9.8", "Red Hat:9"},
 		{"rocky", "9.4", "Rocky Linux:9"},
+		{"almalinux", "9.6", "AlmaLinux:9"},
 	} {
 		if got, err := (Distro{ID: tc.id, VersionID: tc.versionID}).Ecosystem(); err != nil || got != tc.want {
 			t.Errorf("%s %s -> %q, %v; want %q", tc.id, tc.versionID, got, err, tc.want)
 		}
 	}
-	// almalinux must still not resolve (D50) — Rocky leaving the
+	// centos must still not resolve (D50) — Rocky leaving the not-evaluated
+	// list must not have been a change to the switch's default case that
+	// accidentally let every RPM ID through.
+	if _, err := (Distro{ID: "centos", VersionID: "9"}).Ecosystem(); err == nil {
+		t.Error("centos resolved an ecosystem; D50 still excludes it")
+	}
+	// The no-VERSION_ID and non-numeric-VERSION_ID refusals are pinned in
+	// TestDistroEcosystem_Unsupported, alongside rhel's identical two rows.
+}
+
+// D72: AlmaLinux left D50's not-evaluated list once its own OSV archive was
+// ingested, the same move D71 made for Rocky and for the same reason — the
+// key is the mainline MAJOR, release-qualified the way the archive's own
+// ecosystem keys are ("AlmaLinux:9"), not below it.
+func TestDistroEcosystem_Alma(t *testing.T) {
+	for _, tc := range []struct {
+		versionID string
+		want      string
+	}{
+		{"9", "AlmaLinux:9"},
+		{"9.6", "AlmaLinux:9"},
+		{"8.10", "AlmaLinux:8"},
+		{"10.0", "AlmaLinux:10"},
+	} {
+		got, err := Distro{ID: "almalinux", VersionID: tc.versionID}.Ecosystem()
+		if err != nil {
+			t.Errorf("VERSION_ID=%q: %v", tc.versionID, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("VERSION_ID=%q -> %q, want %q", tc.versionID, got, tc.want)
+		}
+	}
+	// AlmaLinux's key must not converge with Red Hat's, Rocky's or Alpine's —
+	// a change that collapsed them would make one distro's advisories
+	// reachable under another's key.
+	for _, tc := range []struct{ id, versionID, want string }{
+		{"alpine", "3.19", "Alpine:v3.19"},
+		{"rhel", "9.8", "Red Hat:9"},
+		{"rocky", "9.4", "Rocky Linux:9"},
+		{"almalinux", "9.6", "AlmaLinux:9"},
+	} {
+		if got, err := (Distro{ID: tc.id, VersionID: tc.versionID}).Ecosystem(); err != nil || got != tc.want {
+			t.Errorf("%s %s -> %q, %v; want %q", tc.id, tc.versionID, got, err, tc.want)
+		}
+	}
+	// centos must still not resolve (D50) — AlmaLinux leaving the
 	// not-evaluated list must not have been a change to the switch's
 	// default case that accidentally let every RPM ID through.
-	if _, err := (Distro{ID: "almalinux", VersionID: "9.6"}).Ecosystem(); err == nil {
-		t.Error("almalinux resolved an ecosystem; D50 still excludes it")
+	if _, err := (Distro{ID: "centos", VersionID: "9"}).Ecosystem(); err == nil {
+		t.Error("centos resolved an ecosystem; D50 still excludes it")
 	}
 	// The no-VERSION_ID and non-numeric-VERSION_ID refusals are pinned in
 	// TestDistroEcosystem_Unsupported, alongside rhel's identical two rows.

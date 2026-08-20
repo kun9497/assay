@@ -538,6 +538,11 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       거부
 - [x] Rocky Linux를 OSV에서 (D71) — Rocky Linux:8/9/10로 키를 잡고, 네이티브 CVSS 84%,
       module 빌드는 버려서 셈; RPM계 다섯 결정을 기록
+- [x] AlmaLinux를 OSV에서 (D72) — AlmaLinux:8/9/10으로 키를 잡고, CVSS는 어디에도 0%라서
+      요약문의 심각도 단어("Important: openssh security update")를 무손실로 저장하고
+      밴드화합니다; CVE는 오직 `related`에만 있어 배포판이 직접 쓴 레코드로 범위를 좁혀
+      읽습니다; ALBA/ALEA 버그 수정·개선 errata는 수집 시점에 버리고, 취약점을 담는 것은
+      ALSA뿐입니다
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건
@@ -737,14 +742,20 @@ none = no source records a version that fixes this; mitigate or remove the packa
 않는다는 뜻이고, `-`는 이 finding의 심각도를 정한 레코드에는 없지만 다른 출처에는 있다는 뜻입니다.
 올릴 수 있는 패키지를 제거하라고 말하는 것은 아무 말도 안 하는 것보다 나쁩니다.
 
-`Red Hat:N`으로 가는 것은 `rhel`뿐입니다(D50); Rocky Linux는 이제 `Rocky Linux:N`으로
-갑니다(D71). AlmaLinux는 리빌드지만 바이트 단위로 같지 않고, `centos`는 RHEL을 뒤따른 제품과
-앞서 가는 제품을 한 ID로 덮으며, Fedora와 Amazon Linux는 자기 피드가 있습니다 — 이들은 여전히
-카탈로그되고 평가되지 않음으로 보고됩니다. 시끄러운 skip이지 깨끗한 판정이 아닙니다.
+`Red Hat:N`으로 가는 것은 `rhel`뿐입니다(D50); Rocky Linux는 `Rocky Linux:N`으로(D71),
+AlmaLinux는 `AlmaLinux:N`으로(D72) 갑니다 — 각자 자기만의 OSV 아카이브만을 상대하지, Red
+Hat의 것도 서로의 것도 상대하지 않습니다. `centos`는 RHEL을 뒤따른 제품과 앞서 가는 제품을
+한 ID로 덮으며, Fedora와 Amazon Linux는 자기 피드가 있습니다 — 이들은 여전히 카탈로그되고
+평가되지 않음으로 보고됩니다. 시끄러운 skip이지 깨끗한 판정이 아닙니다.
 
 Rocky의 판정은 Rocky가 발행한 것에 한해 깨끗하다는 뜻입니다: 그 피드는 errata뿐이고 RHSA보다
 얇게 측정되며(regreSSHion 권고가 아예 없습니다), module 빌드로 얻는 fix는 stream까지 매칭하지
-않고 세어서 건너뜁니다.
+않고 세어서 건너뜁니다. AlmaLinux의 판정도 같은 errata뿐이라는 단서를 지니면서, 자기만의
+단서도 하나 더 얹습니다: 그 아카이브는 CVSS 벡터를 하나도(0%) 담고 있지 않아서 모든
+AlmaLinux 심각도는 점수가 아니라 벤더 자신의 단어(Critical/Important/Moderate/Low)이고, CVE
+연결은 `aliases`나 `upstream`이 아니라 `related`를 통해 이루어집니다 — 둘 다 무손실로
+저장되고 올바르게 읽히지만(D72), Red Hat이나 Rocky 판정과 비교해 유난히 단어 위주로 보일 때
+알아 두면 좋습니다.
 
 - [ ] EUS 호스트의 `Red Hat:N` 스캔은 여전히 메인라인 fixed 버전을 인용합니다. 2026-08-11 측정:
       달라지는 155,549개 그룹 중 149,726개(96.3%)에서 오류는 **오탐** 방향 — 시끄러운 쪽 — 이고

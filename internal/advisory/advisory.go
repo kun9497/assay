@@ -16,11 +16,26 @@ const (
 )
 
 type Advisory struct {
-	ID       string     `json:"id"`       // CVE-… | GHSA-… | GO-… | ALPINE-… | KVE-…
-	Database string     `json:"database"` // the record's own namespace: "GHSA" | "PYSEC" | "GO" | "ALPINE" | … (D25)
-	Aliases  []string   `json:"aliases,omitempty"`
-	Upstream []string   `json:"upstream,omitempty"` // OSV 1.7 puts the CVE link here, not in Aliases (D3)
-	Source   string     `json:"source"`             // "osv" | "kisa"
+	ID       string   `json:"id"`       // CVE-… | GHSA-… | GO-… | ALPINE-… | KVE-…
+	Database string   `json:"database"` // the record's own namespace: "GHSA" | "PYSEC" | "GO" | "ALPINE" | … (D25)
+	Aliases  []string `json:"aliases,omitempty"`
+	Upstream []string `json:"upstream,omitempty"` // OSV 1.7 puts the CVE link here, not in Aliases (D3)
+	// Related is OSV's `related` field, kept ONLY when the record is
+	// distro-authored (D3 revised by D71 decision 1, scoped in
+	// osv.distroAuthored). AlmaLinux's ALSA records carry their CVE nowhere
+	// else at all -- aliases and upstream are empty on every one measured
+	// 2026-08-19 -- so without this an Alma finding would ship with zero
+	// ratings, silently. The scope stays narrow on purpose: GHSA and RUSTSEC
+	// also populate `related`, but for genuinely different, merely similar
+	// advisories, and a global read would fabricate an alias join between two
+	// distinct vulnerabilities.
+	//
+	// Additive, no schema bump: a database built before this field existed
+	// simply decodes it as empty, and `assay db update` rebuilds every
+	// advisory from its provider on every run, so the next nightly populates
+	// it corpus-wide without a migration step.
+	Related  []string   `json:"related,omitempty"`
+	Source   string     `json:"source"` // "osv" | "kisa"
 	Kind     Kind       `json:"kind"`
 	Summary  string     `json:"summary,omitempty"`
 	Modified time.Time  `json:"modified,omitempty"`

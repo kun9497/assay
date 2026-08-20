@@ -563,6 +563,10 @@ exited 0 while 24 findings went unmentioned. **Done.**
       guessing refused
 - [x] Rocky Linux from OSV (D71) — keys Rocky Linux:8/9/10, 84% native CVSS, module builds
       dropped-and-counted; the five RPM-family decisions recorded
+- [x] AlmaLinux from OSV (D72) — keys AlmaLinux:8/9/10; 0% CVSS anywhere, so the summary's
+      severity word ("Important: openssh security update") is stored losslessly and banded;
+      the CVE lives only in `related`, read scoped to distro-authored records; ALBA/ALEA
+      bugfix and enhancement errata dropped at ingestion, only ALSA carries a vulnerability
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a
@@ -792,15 +796,20 @@ names a version to upgrade to, `-` means the record that set this finding's seve
 none while another source does. Telling a reader to remove a package they could upgrade is
 worse than saying nothing.
 
-Only `rhel` routes to `Red Hat:N` (D50); Rocky Linux now routes to `Rocky Linux:N` (D71).
-AlmaLinux is a rebuild but not a byte-identical one, `centos` covers one product that trailed
-RHEL and another that runs ahead of it, and Fedora and Amazon Linux have their own feeds —
-each of those is still catalogued and reported as not evaluated, a loud skip, never a clean
-verdict.
+Only `rhel` routes to `Red Hat:N` (D50); Rocky Linux routes to `Rocky Linux:N` (D71) and
+AlmaLinux to `AlmaLinux:N` (D72), each against its OWN OSV archive, never against Red Hat's
+or each other's. `centos` covers one product that trailed RHEL and another that runs ahead of
+it, and Fedora and Amazon Linux have their own feeds — each of those is still catalogued and
+reported as not evaluated, a loud skip, never a clean verdict.
 
 A Rocky verdict is clean-of-what-Rocky-published: its feed is errata-only and measured
 thinner than RHSA's (no regreSSHion advisory at all), and module-build fixes are skipped and
-counted rather than stream-matched.
+counted rather than stream-matched. An AlmaLinux verdict carries the same errata-only caveat,
+plus one of its own: 0% of its archive carries a CVSS vector, so every AlmaLinux severity is
+the vendor's own word (Critical/Important/Moderate/Low) rather than a score, and its CVE
+linkage runs through `related` rather than `aliases` or `upstream` — both stored losslessly
+and read correctly (D72), but worth knowing when a verdict is unusually word-shaped compared
+to a Red Hat or Rocky one.
 
 - [ ] A `Red Hat:N` scan of an EUS host still quotes mainline fixed versions. Measured
       2026-08-11: the error is a false POSITIVE in 149,726 of 155,549 differing groups

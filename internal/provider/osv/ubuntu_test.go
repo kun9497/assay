@@ -182,6 +182,8 @@ func TestEcosystems_IncludesUbuntu(t *testing.T) {
 		// the one line that decides whether any of Rocky's own tests ever run
 		// against real data.
 		"Rocky Linux",
+		// AlmaLinux joined the same way (D72).
+		"AlmaLinux",
 	} {
 		if !slices.Contains(Ecosystems, want) {
 			t.Errorf("Ecosystems = %v, want it to include %q", Ecosystems, want)

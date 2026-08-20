@@ -272,15 +272,15 @@ func TestNoUnbackedDistroComparer(t *testing.T) {
 	// Rocky Linux left this list under D71, for the same reason Ubuntu did:
 	// the rpmdb cataloger and Package.Source population already exist (D44,
 	// shipped for Red Hat), so what had to arrive with the comparer was the
-	// release-qualified KEY, not new plumbing. AlmaLinux has not — its own
-	// provider is a future slice (D71's own research notes) — so it stays
-	// here.
+	// release-qualified KEY, not new plumbing. AlmaLinux left it under D72
+	// for the identical reason — its own OSV provider is what arrived, not
+	// new rpmdb or Package.Source plumbing.
 	for _, eco := range []string{
-		"AlmaLinux:9",
 		"Alpine",      // unversioned: not a key we ever build (D6)
 		"Debian",      // likewise
 		"Red Hat",     // likewise -- the provider writes "Red Hat:9"
 		"Rocky Linux", // likewise -- the provider writes "Rocky Linux:9"
+		"AlmaLinux",   // likewise -- the provider writes "AlmaLinux:9"
 	} {
 		if _, ok := For(eco); ok {
 			t.Errorf("For(%q) resolves, but nothing populates Package.Source for it. "+

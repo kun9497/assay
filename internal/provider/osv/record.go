@@ -25,6 +25,7 @@ type rawRecord struct {
 	Withdrawn *time.Time    `json:"withdrawn"`
 	Aliases   []string      `json:"aliases"`
 	Upstream  []string      `json:"upstream"`
+	Related   []string      `json:"related"`
 	Affected  []rawAffected `json:"affected"`
 	Severity  []rawSeverity `json:"severity"`
 }
@@ -148,6 +149,54 @@ func databaseOf(id string) string {
 	return id[:i]
 }
 
+// distroAuthored reports whether database names a distro's own
+// security-advisory namespace, as opposed to a language- or
+// ecosystem-authored one.
+//
+// This is the scope D71 decision 1 drew, and D72 (AlmaLinux) is the record
+// that could not ship without it: a distro-authored record's `related` field
+// names OTHER identifiers for the SAME advisory — AlmaLinux's ALSA records
+// carry their CVE nowhere else at all (measured 2026-08-19: aliases and
+// upstream are empty on every one). GHSA and RUSTSEC also populate `related`,
+// but for genuinely different, merely similar advisories; reading it there as
+// an alias would fabricate a join between two distinct vulnerabilities. A
+// global read was rejected for exactly that reason, so the field is only ever
+// populated for the namespaces below.
+//
+// ALBA and ALEA are listed even though neither ever reaches this function in
+// practice — Convert drops them before Database would matter (they are not
+// vulnerability reports at all) — but a database prefix is cheap to name
+// correctly and a future caller of distroAuthored should not have to
+// rediscover that AlmaLinux's three namespaces are siblings.
+func distroAuthored(database string) bool {
+	switch database {
+	case "ALPINE", "DEBIAN", "UBUNTU", "RLSA", "ALSA", "ALBA", "ALEA":
+		return true
+	default:
+		return false
+	}
+}
+
+// vendorSeverityWordPrefix matches a distro summary's leading severity word —
+// the RHSA convention AlmaLinux's ALSA summaries inherit byte-for-byte
+// ("Important: openssh security update"), measured 2026-08-19 as the ONLY
+// severity signal AlmaLinux's archive carries (0% CVSS anywhere). Anchored to
+// the start of the string and to the four words severity.vendorSeverityWords
+// actually recognizes, so a summary that merely happens to contain one of
+// these words later in the sentence cannot trip it.
+var vendorSeverityWordPrefix = regexp.MustCompile(`^(Critical|Important|Moderate|Low):`)
+
+// vendorSeverityWord extracts the severity word from a distro summary's
+// leading "Word:" prefix, or reports false when the summary carries none of
+// the four recognized words there.
+func vendorSeverityWord(summary string) (string, bool) {
+	m := vendorSeverityWordPrefix.FindStringSubmatch(summary)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
 // Convert parses one OSV record and keeps only the parts relevant to
 // wantEcosystem. ok is false when the record is deliberately filtered out;
 // err is non-nil only when the record is malformed. Distinguishing the two
@@ -179,9 +228,23 @@ func Convert(data []byte, wantEcosystem string) (advisory.Advisory, bool, error)
 		return advisory.Advisory{}, false, nil
 	}
 
+	db := databaseOf(r.ID)
+	// D72: ALBA (bugfix) and ALEA (enhancement) errata name no vulnerability
+	// at all. That is a different reason from MAL-* above — D15's Kind
+	// machinery exists for a malicious-PACKAGE report, which IS a security
+	// finding, only of a different class; ALBA/ALEA are AlmaLinux's own
+	// bugfix and enhancement notices and were never vulnerability reports to
+	// begin with, so they never reach Kind and are simpler to drop outright.
+	// Mirrors the withdrawn/MAL-* pattern above: dropped at ingestion (D16),
+	// so no query path can forget the check. Measured 2026-08-19: 979 ALBA +
+	// 222 ALEA of AlmaLinux's 5,606 records.
+	if db == "ALBA" || db == "ALEA" {
+		return advisory.Advisory{}, false, nil
+	}
+
 	out := advisory.Advisory{
 		ID:       r.ID,
-		Database: databaseOf(r.ID),
+		Database: db,
 		Aliases:  r.Aliases,
 		Upstream: r.Upstream,
 		Source:   SourceName,
@@ -189,8 +252,24 @@ func Convert(data []byte, wantEcosystem string) (advisory.Advisory, bool, error)
 		Summary:  r.Summary,
 		Modified: r.Modified,
 	}
+	// D3 revised by D71 decision 1, scoped to distro-authored records —
+	// distroAuthored's own comment explains why a global read is rejected.
+	if distroAuthored(db) {
+		out.Related = r.Related
+	}
 	for _, sev := range r.Severity {
 		out.Severity = append(out.Severity, advisory.Severity{Type: sev.Type, Score: sev.Score})
+	}
+	// D72: a distro-authored record with no CVSS entries at all states its
+	// severity only as the summary's leading word. Stored losslessly as a
+	// VENDOR_WORD severity entry (D13) rather than banded here, so
+	// internal/severity stays the one place that turns a stored value into a
+	// verdict — severity.vendorSeverityWords carries the RHSA word -> band
+	// mapping this entry's Score will be read against.
+	if len(out.Severity) == 0 && distroAuthored(db) {
+		if word, ok := vendorSeverityWord(r.Summary); ok {
+			out.Severity = append(out.Severity, advisory.Severity{Type: "VENDOR_WORD", Score: word})
+		}
 	}
 
 	var matchesWanted bool

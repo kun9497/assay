@@ -58,9 +58,20 @@ const DefaultBaseURL = "https://osv-vulnerabilities.storage.googleapis.com"
 // 3,941 records, 3,915 of them RLSA, 84.1% carrying a CVSS v3 vector, and CVE
 // linkage via `upstream` at 99.3% — D3 already reads that field, so nothing
 // there had to change.
+//
+// "AlmaLinux" joins on the same terms (D72): one archive path (no space, so
+// url.PathEscape is a no-op here — unlike "Rocky Linux"), release-qualified
+// keys inside it ("AlmaLinux:8/9/10"). Measured 2026-08-19: 5,606 records —
+// 4,405 ALSA (security), 979 ALBA (bugfix), 222 ALEA (enhancement), the
+// latter two dropped at Convert because they name no vulnerability — 0% CVSS
+// anywhere, and the CVE lives ONLY in `related` (aliases and upstream are
+// empty on every record), which is what made D71 decision 1 (`related`
+// joins the CVE read, scoped to distro-authored records) and decision 2
+// (vendor severity words, stored losslessly) load-bearing rather than
+// optional for this feed specifically.
 var Ecosystems = []string{
 	"Go", "npm", "PyPI", "crates.io", "RubyGems", "Packagist", "NuGet", "Maven",
-	"Alpine", "Debian", "Ubuntu", "Rocky Linux",
+	"Alpine", "Debian", "Ubuntu", "Rocky Linux", "AlmaLinux",
 }
 
 type Provider struct {
@@ -101,12 +112,12 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		// advisories. Building a database that silently has none turns every
 		// later Alpine scan into a clean report at exit 0 — the same failure
 		// discovery's hard-fail existed to prevent, one layer further in.
-		// The same guard for every distro archive, Rocky Linux included (D71).
-		// Zero matching records means the family match broke or the archive's
-		// shape changed, not that the distro has no advisories — and a
-		// database that silently has none turns every later scan of that
-		// distro into a clean report at exit 0.
-		if (eco == "Alpine" || eco == "Debian" || eco == "Ubuntu" || eco == "Rocky Linux") && n == 0 {
+		// The same guard for every distro archive, Rocky Linux and AlmaLinux
+		// included (D71, D72). Zero matching records means the family match
+		// broke or the archive's shape changed, not that the distro has no
+		// advisories — and a database that silently has none turns every
+		// later scan of that distro into a clean report at exit 0.
+		if (eco == "Alpine" || eco == "Debian" || eco == "Ubuntu" || eco == "Rocky Linux" || eco == "AlmaLinux") && n == 0 {
 			return store.Provenance{}, fmt.Errorf("fetch %s: archive yielded no %s:* records", eco, eco)
 		}
 		prov.Records += n

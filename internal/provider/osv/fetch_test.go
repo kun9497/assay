@@ -225,15 +225,16 @@ func TestFetch_AlpineZeroRecordsIsAnError(t *testing.T) {
 }
 
 // The same hard-fail as Alpine's above (TestFetch_AlpineZeroRecordsIsAnError),
-// extended to Debian, Ubuntu and Rocky Linux (D71): an archive fetched under
-// any family name that names no matching record is the exact regression the
-// guard's own comment records happening to Debian when it first joined this
-// list, and only the Alpine arm was ever held by a test. Narrowing the
-// guard's condition to "eco == Alpine" alone leaves the whole suite green,
-// because nothing else in this file, or anywhere in the package, drives a
-// Debian, Ubuntu or Rocky Linux fetch through zero matching records.
-func TestFetch_DebianUbuntuAndRockyZeroRecordsIsAnError(t *testing.T) {
-	for _, eco := range []string{"Debian", "Ubuntu", "Rocky Linux"} {
+// extended to Debian, Ubuntu, Rocky Linux (D71) and AlmaLinux (D72): an
+// archive fetched under any family name that names no matching record is the
+// exact regression the guard's own comment records happening to Debian when
+// it first joined this list, and only the Alpine arm was ever held by a
+// test. Narrowing the guard's condition to "eco == Alpine" alone leaves the
+// whole suite green, because nothing else in this file, or anywhere in the
+// package, drives a Debian, Ubuntu, Rocky Linux or AlmaLinux fetch through
+// zero matching records.
+func TestFetch_DebianUbuntuRockyAndAlmaZeroRecordsIsAnError(t *testing.T) {
+	for _, eco := range []string{"Debian", "Ubuntu", "Rocky Linux", "AlmaLinux"} {
 		t.Run(eco, func(t *testing.T) {
 			body := zipWith(t, map[string]string{
 				// Well-formed, but names an ecosystem this archive would never
@@ -447,5 +448,105 @@ func TestFetch_RockyLinux(t *testing.T) {
 	}
 	if !slices.Contains(prov.Ecosystems, "Rocky Linux:9") {
 		t.Errorf("Provenance.Ecosystems = %v, want it to include Rocky Linux:9", prov.Ecosystems)
+	}
+}
+
+// TestFetch_AlmaLinux is the end-to-end shape D72 rests on, and it is the
+// mirror image of TestFetch_RockyLinux's fixture on purpose: AlmaLinux's
+// measured archive (2026-08-19) carries its CVE ONLY in `related` (aliases
+// and upstream are empty on every record) and 0% CVSS anywhere, so the
+// severity comes from the summary's word prefix instead. Fetch must emit the
+// record with Related populated and a VENDOR_WORD severity entry, and report
+// the release-qualified key as covered (D20), not the bare archive name.
+func TestFetch_AlmaLinux(t *testing.T) {
+	body := zipWith(t, map[string]string{
+		"ALSA-2026-0001.json": `{"id":"ALSA-2026-0001","related":["CVE-2026-40001"],
+			"summary":"Important: openssh security update",
+			"affected":[{"package":{"name":"openssh","ecosystem":"AlmaLinux:9"},
+				"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"8.7p1-38.el9"}]}]}]}`,
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/AlmaLinux/all.zip" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	p := New([]string{"AlmaLinux"}, srv.URL)
+	var got []advisory.Advisory
+	prov, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
+		got = append(got, a)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "ALSA-2026-0001" {
+		t.Fatalf("Fetch emitted %d advisories (%v), want only ALSA-2026-0001", len(got), got)
+	}
+	if len(got[0].Upstream) != 0 || len(got[0].Aliases) != 0 {
+		t.Errorf("Upstream=%v Aliases=%v, want both empty -- AlmaLinux's measured shape "+
+			"carries the CVE nowhere else", got[0].Upstream, got[0].Aliases)
+	}
+	if len(got[0].Related) != 1 || got[0].Related[0] != "CVE-2026-40001" {
+		t.Errorf("Related = %v, want [CVE-2026-40001] -- D72's whole reason for reading "+
+			"this field at all", got[0].Related)
+	}
+	if len(got[0].Affected) != 1 || got[0].Affected[0].Ecosystem != "AlmaLinux:9" {
+		t.Fatalf("Affected = %v, want one entry keyed AlmaLinux:9", got[0].Affected)
+	}
+	if len(got[0].Severity) != 1 || got[0].Severity[0].Type != "VENDOR_WORD" || got[0].Severity[0].Score != "Important" {
+		t.Errorf("Severity = %v, want one VENDOR_WORD entry scored \"Important\" from the summary", got[0].Severity)
+	}
+	if !slices.Contains(prov.Ecosystems, "AlmaLinux:9") {
+		t.Errorf("Provenance.Ecosystems = %v, want it to include AlmaLinux:9", prov.Ecosystems)
+	}
+}
+
+// TestFetch_AlmaLinuxDropsBugfixAndEnhancementErrata drives the ALBA/ALEA
+// drop through Fetch rather than only through Convert directly (the
+// caller-first rule): ALBA (bugfix) and ALEA (enhancement) errata name no
+// vulnerability at all, and a served archive mixing all three AlmaLinux
+// namespaces must yield only the ALSA (security) record. AlmaLinux has no
+// separate drop-count stat (D72 mirrors the withdrawn/MAL-* pattern, which
+// has none either), so this only asserts what a real archive fetch would
+// show: the two non-security records never reach emit.
+func TestFetch_AlmaLinuxDropsBugfixAndEnhancementErrata(t *testing.T) {
+	body := zipWith(t, map[string]string{
+		"ALSA-2026-0001.json": `{"id":"ALSA-2026-0001","related":["CVE-2026-40001"],
+			"summary":"Important: openssh security update",
+			"affected":[{"package":{"name":"openssh","ecosystem":"AlmaLinux:9"},
+				"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"8.7p1-38.el9"}]}]}]}`,
+		"ALBA-2026-0002.json": `{"id":"ALBA-2026-0002","related":["CVE-2026-40002"],
+			"summary":"bash bugfix update",
+			"affected":[{"package":{"name":"bash","ecosystem":"AlmaLinux:9"},
+				"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"5.1.8-9.el9"}]}]}]}`,
+		"ALEA-2026-0003.json": `{"id":"ALEA-2026-0003","related":["CVE-2026-40003"],
+			"summary":"vim enhancement update",
+			"affected":[{"package":{"name":"vim","ecosystem":"AlmaLinux:9"},
+				"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"8.2.2637-20.el9"}]}]}]}`,
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/AlmaLinux/all.zip" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	p := New([]string{"AlmaLinux"}, srv.URL)
+	var got []advisory.Advisory
+	if _, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
+		got = append(got, a)
+		return nil
+	}); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "ALSA-2026-0001" {
+		t.Fatalf("Fetch emitted %v, want only the ALSA record -- ALBA and ALEA name no "+
+			"vulnerability and must never be emitted", got)
 	}
 }
