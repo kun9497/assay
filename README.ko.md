@@ -548,7 +548,7 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       공개
 - [x] Oracle Linux 5-10을 ELSA OVAL에서 (D74) — 첫 OVAL criteria-tree 파서; UEK의
       definition을 가로지르는 모호성은 버려서 셈; v2뿐인 definition은 NVD 조인으로 떨어짐;
-      ksplice/FIPS 계보는 거르지 않았다고 공개
+      ksplice/FIPS 계보는 D79부터 필터링됨
 - [x] Fedora 현재 릴리스를 Bodhi에서 (D75) — 산문에서 뽑아내지 못한 CVE는 세어서 표시(상한
       81.7%), EOL 동결을 공개, unspecified 심각도는 Unknown으로 남음; 빌드 가능한 RPM 계열이
       닫힘
@@ -560,6 +560,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] AL2 extras topic을 열거해 가져옴 (D78) — advisory 1,414건으로 AL2가 발행한 전체의
       29.4%(docker, ecs, livepatch, firefox); topic 0개짜리 카탈로그는 모양 변화로 보고
       거부; AL2023 NVIDIA/livepatch는 여전히 공개 상태로 남음
+- [x] Ksplice/FIPS 계보 필터 (D79) — 계보 fixed 버전 12,174건을 수집 시점에 떨어뜨리고,
+      설치된 계보 패키지는 평가되지 않음으로 보고; UEK 모호성 가드가 버리던 것의 24.4%를
+      필터가 되찾음, openssl은 전부
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건

@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -143,6 +144,7 @@ type stats struct {
 	SkippedNoPackages     int // every package this definition named was dropped
 	UnrecognizedSeverity  int // a severity word outside IMPORTANT/MODERATE/LOW/CRITICAL (e.g. "N/A")
 	NoMajorContext        int // a package-fix criterion with no platform guard above it anywhere in the tree
+	SkippedLineageFixes   int // a fixed EVR carrying a Ksplice or FIPS lineage marker, dropped before ambiguity grouping (D79)
 	AmbiguousGroups       int // distinct (CVE-or-ELSA, major, package) groups with 2+ fixed EVRs
 	SkippedAmbiguousFixes int // individual Affected entries dropped because of an AmbiguousGroups hit
 	Advisories            int // advisory.Advisory records emitted
@@ -155,10 +157,12 @@ func (s stats) String() string {
 			"%d with no ELSA/ELBA id, %d left with no packages after the UEK/module guard; "+
 			"%d advisories carried an unrecognized severity word; "+
 			"%d package-fix criteria had no platform guard above them (skipped); "+
+			"%d lineage (ksplice/fips) fixed versions dropped (D79); "+
 			"UEK/module-train guard: %d ambiguous (CVE, major, package) group(s), "+
 			"%d affected entr(y/ies) dropped for it",
 		s.Definitions, s.Advisories, s.Affected, s.SkippedBadDoc,
 		s.SkippedNoID, s.SkippedNoPackages, s.UnrecognizedSeverity, s.NoMajorContext,
+		s.SkippedLineageFixes,
 		s.AmbiguousGroups, s.SkippedAmbiguousFixes)
 }
 
@@ -402,6 +406,20 @@ func parseMajorPattern(s string) (int, bool) {
 	return n, true
 }
 
+// oracleLineageMarker duplicates internal/matcher's oracleLineageMarker
+// (D79) -- its own comment there has the measurement behind both shapes
+// (92 distinct `.ksplice1.` EVRs, one `.ksplice2.`, 33 `_fips`-suffixed,
+// every one across the full ELSA OVAL corpus 2026-08-20). This is the same
+// deliberate-duplicate pattern csaf.go's isModule and matcher's
+// rpmModuleBuild already use rather than importing across the
+// provider/matcher boundary for one regexp. The two copies MUST stay in
+// agreement: this one decides which fixed EVRs never reach the store at
+// all, matcher.go's decides which installed packages get reported
+// not-evaluated instead of matched -- if they drifted apart, a lineage
+// package could be silently judged against a mainline bound neither
+// comment says is sound.
+var oracleLineageMarker = regexp.MustCompile(`(?i)\.ksplice[0-9]+\.|_fips$`)
+
 // walkCriteria descends one <criteria> node, carrying the Oracle Linux major
 // gating it (0 until a platform-major criterion is seen). It runs in two
 // passes over this node's own criterion children rather than one: a
@@ -433,6 +451,24 @@ func walkCriteria(c rawCriteria, major int, tests map[string]rawTest, objects ma
 			// future malformed definition from being silently attributed to
 			// the wrong release.
 			st.NoMajorContext++
+			continue
+		}
+		if oracleLineageMarker.MatchString(evr) {
+			// D79: this fixed EVR is Ksplice- or FIPS-lineage, not
+			// mainline. Dropped HERE, before perMajor is built and
+			// therefore before dropAmbiguous ever groups it -- a lineage
+			// EVR left in would collide there with a mainline fix for the
+			// same (CVE, major, package), and D74's guard drops BOTH
+			// contributors of a collision, not just the lineage one
+			// (measured 2026-08-20: 24.4% of everything dropAmbiguous
+			// dropped was exactly this collision, openssl's entire
+			// ambiguity among it). Skipping it before that grouping runs is
+			// what lets the mainline entry recover. matcher.go's
+			// oracleLineageOf is the other half: once this filter runs, an
+			// installed lineage package has no mainline record left to be
+			// judged against, so it is reported not-evaluated there instead
+			// of matched here.
+			st.SkippedLineageFixes++
 			continue
 		}
 		if perMajor[effMajor] == nil {

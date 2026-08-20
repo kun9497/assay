@@ -362,6 +362,36 @@ func ubuntuLineageOf(version string) string {
 // miss this detector exists to prevent.
 var ubuntuLineageMarker = regexp.MustCompile(`(?i)[~+](esm|fips)[0-9]`)
 
+// oracleLineageOf names the Oracle Linux lineage a package version was built
+// for, or "" for a mainline build (D79) — Ubuntu's rule (D53) with Oracle's
+// own two spellings, measured across every fixed EVR in the full ELSA OVAL
+// corpus 2026-08-20: Ksplice stamps `.ksplice<N>.` into the release (92
+// distinct EVRs with .ksplice1., one with .ksplice2., e.g.
+// 2:2.28-251.0.4.ksplice1.el8_10.40) and FIPS ends the release with `_fips`
+// (33 distinct EVRs, every one shaped el<major>[_minor]_fips, e.g.
+// 10:1.0.2k-22.el7_9_fips). Unlike Ubuntu's, this marker is only consulted
+// under an Oracle Linux ecosystem key: `_fips` is anchored to nothing but the
+// string's end, and only Oracle's release convention was measured to make it
+// unambiguous there.
+func oracleLineageOf(version string) string {
+	m := oracleLineageMarker.FindString(version)
+	if m == "" {
+		return ""
+	}
+	if strings.Contains(strings.ToLower(m), "ksplice") {
+		return "Ksplice"
+	}
+	return "FIPS"
+}
+
+// oracleLineageMarker: `.ksplice<N>.` is digit-anchored the way Ubuntu's
+// marker is; `_fips` is end-anchored because that is the only position it
+// occupies in the measured corpus, and an unanchored match would fire on any
+// package whose version merely mentions the letters. (?i) for the same
+// silent-miss reason as ubuntuLineageMarker, though every measured Oracle
+// spelling is lowercase.
+var oracleLineageMarker = regexp.MustCompile(`(?i)\.ksplice[0-9]+\.|_fips$`)
+
 // rpmModuleBuild reports whether v names a modular RPM build platform tag —
 // "module+el" (Red Hat, Rocky) or "module_el" (AlmaLinux), the same two
 // spellings csaf.go's isModule matches, for the same reason (D47's own
@@ -501,6 +531,35 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 				Cause: SkipCoverage,
 			})
 			continue
+		}
+
+		// D79. The same rule for Oracle Linux's Ksplice and FIPS lineages,
+		// with one difference in where the lineage data went: Canonical
+		// publishes lineage advisories assay never ingests, while Oracle
+		// publishes lineage fixed versions inside the same ELSA definitions
+		// as mainline ones — and D79 drops those EVRs at ingestion, because
+		// left in they collide with mainline fixes for the same (CVE, major,
+		// package) and D74's ambiguity guard then throws BOTH out (a measured
+		// 24.4% of everything it dropped, openssl's entire ambiguity among
+		// it). So an installed lineage package has nothing sound to be judged
+		// against: mainline bounds mis-order against a lineage release in
+		// both directions. Skipped with the same accounting as Ubuntu's —
+		// counted, reported, exit 2 via --fail-on-incomplete, never a clean
+		// verdict. Gated on the ecosystem key because `_fips` was measured
+		// unambiguous only under Oracle's release convention.
+		if strings.HasPrefix(p.Ecosystem, "Oracle Linux:") {
+			if lineage := oracleLineageOf(p.Version); lineage != "" {
+				res.Skipped = append(res.Skipped, Skipped{
+					Package: p,
+					Reason: fmt.Sprintf(
+						"version %q is an Oracle Linux %s build; %s fixed versions are "+
+							"dropped at ingestion (D79) and mainline bounds do not order "+
+							"soundly against a %s release",
+						p.Version, lineage, lineage, lineage),
+					Cause: SkipCoverage,
+				})
+				continue
+			}
 		}
 
 		// Distro advisories are written against SOURCE packages while what is

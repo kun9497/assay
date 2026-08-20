@@ -336,6 +336,150 @@ func TestParseOVAL_UEKCrossDefinitionAmbiguityDropped(t *testing.T) {
 	}
 }
 
+// TestParseOVAL_LineageFixDroppedRecoversMainline is D79's direct regression
+// test: without the lineage filter, this is exactly the UEK shape above --
+// two definitions naming the SAME package under the SAME CVE and major at
+// two different EVRs, so dropAmbiguous throws both out and the mainline fix
+// is lost along with the lineage one, even though only the lineage EVR is
+// untrustworthy. ELSA-2026-6001 fixes openssl at a mainline EVR;
+// ELSA-2026-6002 "fixes" the same CVE/major/package at a `.ksplice1.` EVR --
+// Oracle's own shape (measured 2026-08-20: 92 distinct `.ksplice1.` EVRs
+// across the live archive). The filter must drop the ksplice EVR before
+// dropAmbiguous ever groups it, so the group never becomes ambiguous at all
+// and the mainline advisory survives untouched.
+func TestParseOVAL_LineageFixDroppedRecoversMainline(t *testing.T) {
+	o := &ovalBuilder{}
+	mainlineCrit := o.platformCriterion(9) + o.fixCriterion("openssl", "1:3.0.7-6.el9")
+	kspliceCrit := o.platformCriterion(9) + o.fixCriterion("openssl", "1:3.0.7-6.0.1.ksplice1.el9_2")
+	docMain := definitionXML("ELSA-2026-6001", "elsa", "openssl security update",
+		[]cveFixture{{"CVE-2026-6001", ""}}, "IMPORTANT", mainlineCrit)
+	docKsplice := definitionXML("ELSA-2026-6002", "elsa", "openssl ksplice update",
+		[]cveFixture{{"CVE-2026-6001", ""}}, "IMPORTANT", kspliceCrit)
+	doc := o.doc(docMain, docKsplice)
+
+	var st stats
+	defs, _, err := parseOVAL(strings.NewReader(doc), &st)
+	if err != nil {
+		t.Fatalf("parseOVAL: %v", err)
+	}
+	advs := normalize(defs, &st)
+
+	a, ok := findAdvisory(advs, "ELSA-2026-6001")
+	if !ok {
+		t.Fatalf("mainline advisory ELSA-2026-6001 missing -- the ksplice EVR must not have dragged it into the ambiguity guard: %+v", advs)
+	}
+	aff, ok := affectedFor(a, "Oracle Linux:9", "openssl")
+	if !ok {
+		t.Fatalf("no Affected entry for openssl under Oracle Linux:9: %+v", a.Affected)
+	}
+	if got := fixedOf(aff); got != "1:3.0.7-6.el9" {
+		t.Errorf("fixed = %q, want the mainline EVR 1:3.0.7-6.el9", got)
+	}
+	if _, ok := findAdvisory(advs, "ELSA-2026-6002"); ok {
+		t.Errorf("ksplice-only definition ELSA-2026-6002 was emitted; openssl was its only package and that package's only fix was lineage")
+	}
+	if st.SkippedLineageFixes != 1 {
+		t.Errorf("SkippedLineageFixes = %d, want 1", st.SkippedLineageFixes)
+	}
+	if st.AmbiguousGroups != 0 {
+		t.Errorf("AmbiguousGroups = %d, want 0 -- the lineage EVR must be dropped BEFORE ambiguity grouping runs, not after", st.AmbiguousGroups)
+	}
+	if st.SkippedAmbiguousFixes != 0 {
+		t.Errorf("SkippedAmbiguousFixes = %d, want 0 -- nothing should ever reach the ambiguity guard here", st.SkippedAmbiguousFixes)
+	}
+}
+
+// TestParseOVAL_FIPSLineageFixDroppedRecoversMainline is the second marker
+// shape through the same caller path: Oracle's FIPS lineage ends the release
+// with `_fips` rather than stamping `.ksplice<N>.` into it (measured
+// 2026-08-20: 33 distinct `_fips`-suffixed EVRs, every one shaped
+// el<major>[_minor]_fips, epoch 10 in the real corpus though the suffix is
+// the signal this filter reads, not the epoch). Same collision, same
+// recovery: without the filter both ELSA-2026-7001 and ELSA-2026-7002 would
+// be dropped by the ambiguity guard; with it, only the FIPS EVR is.
+func TestParseOVAL_FIPSLineageFixDroppedRecoversMainline(t *testing.T) {
+	o := &ovalBuilder{}
+	mainlineCrit := o.platformCriterion(7) + o.fixCriterion("openssl", "1:1.0.2k-19.el7")
+	fipsCrit := o.platformCriterion(7) + o.fixCriterion("openssl", "10:1.0.2k-19.el7_9_fips")
+	docMain := definitionXML("ELSA-2026-7001", "elsa", "openssl security update",
+		[]cveFixture{{"CVE-2026-7001", ""}}, "IMPORTANT", mainlineCrit)
+	docFips := definitionXML("ELSA-2026-7002", "elsa", "openssl fips update",
+		[]cveFixture{{"CVE-2026-7001", ""}}, "IMPORTANT", fipsCrit)
+	doc := o.doc(docMain, docFips)
+
+	var st stats
+	defs, _, err := parseOVAL(strings.NewReader(doc), &st)
+	if err != nil {
+		t.Fatalf("parseOVAL: %v", err)
+	}
+	advs := normalize(defs, &st)
+
+	a, ok := findAdvisory(advs, "ELSA-2026-7001")
+	if !ok {
+		t.Fatalf("mainline advisory ELSA-2026-7001 missing -- the FIPS EVR must not have dragged it into the ambiguity guard: %+v", advs)
+	}
+	aff, ok := affectedFor(a, "Oracle Linux:7", "openssl")
+	if !ok {
+		t.Fatalf("no Affected entry for openssl under Oracle Linux:7: %+v", a.Affected)
+	}
+	if got := fixedOf(aff); got != "1:1.0.2k-19.el7" {
+		t.Errorf("fixed = %q, want the mainline EVR 1:1.0.2k-19.el7", got)
+	}
+	if _, ok := findAdvisory(advs, "ELSA-2026-7002"); ok {
+		t.Errorf("FIPS-only definition ELSA-2026-7002 was emitted; openssl was its only package and that package's only fix was lineage")
+	}
+	if st.SkippedLineageFixes != 1 {
+		t.Errorf("SkippedLineageFixes = %d, want 1", st.SkippedLineageFixes)
+	}
+	if st.AmbiguousGroups != 0 {
+		t.Errorf("AmbiguousGroups = %d, want 0 -- the FIPS EVR must be dropped BEFORE ambiguity grouping runs, not after", st.AmbiguousGroups)
+	}
+}
+
+// TestParseOVAL_LineageMarkerLookalikesNotDropped is the negative row: an EVR
+// that merely CONTAINS the marker letters at the wrong position must survive.
+// "_fipstools" does not end in "_fips" (the suffix must be end-anchored), and
+// a package NAMED ksplice-tools with an ordinary EVR carries no `.ksplice<N>.`
+// substring in its version at all -- classifyCriterion only ever inspects the
+// EVR text, never the package name, so a name collision alone must never
+// trip this filter either.
+func TestParseOVAL_LineageMarkerLookalikesNotDropped(t *testing.T) {
+	o := &ovalBuilder{}
+	crit := o.platformCriterion(8) +
+		o.fixCriterion("libfipstools", "0:1.0-1_fipstools.el8") +
+		o.fixCriterion("ksplice-tools", "0:2.4-3.el8")
+	doc := o.doc(definitionXML("ELSA-2026-8001", "elsa", "lookalike packages",
+		[]cveFixture{{"CVE-2026-8001", ""}}, "LOW", crit))
+
+	var st stats
+	defs, _, err := parseOVAL(strings.NewReader(doc), &st)
+	if err != nil {
+		t.Fatalf("parseOVAL: %v", err)
+	}
+	advs := normalize(defs, &st)
+	a, ok := findAdvisory(advs, "ELSA-2026-8001")
+	if !ok {
+		t.Fatalf("advisory ELSA-2026-8001 missing -- lookalikes must not trip the lineage filter: %+v", advs)
+	}
+	fipsAff, ok := affectedFor(a, "Oracle Linux:8", "libfipstools")
+	if !ok {
+		t.Fatalf("libfipstools dropped -- its EVR's _fipstools suffix is not the end-anchored _fips marker: %+v", a.Affected)
+	}
+	if got := fixedOf(fipsAff); got != "0:1.0-1_fipstools.el8" {
+		t.Errorf("libfipstools fixed = %q, want 0:1.0-1_fipstools.el8 unchanged", got)
+	}
+	kspliceAff, ok := affectedFor(a, "Oracle Linux:8", "ksplice-tools")
+	if !ok {
+		t.Fatalf("ksplice-tools dropped -- the marker is named in its PACKAGE, not its EVR: %+v", a.Affected)
+	}
+	if got := fixedOf(kspliceAff); got != "0:2.4-3.el8" {
+		t.Errorf("ksplice-tools fixed = %q, want 0:2.4-3.el8 unchanged", got)
+	}
+	if st.SkippedLineageFixes != 0 {
+		t.Errorf("SkippedLineageFixes = %d, want 0", st.SkippedLineageFixes)
+	}
+}
+
 // TestParseOVAL_ModuleStreamAmbiguityCaughtByGuard is the intra-definition
 // half of the same mechanism: ONE definition bundling two module streams
 // (nodejs:18, nodejs:20) that fix the SAME package at two different EVRs.
