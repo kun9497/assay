@@ -538,8 +538,10 @@ narrower than it looked: train-aware matching (or keeping the earliest fix) for 
 kernel-and-kin remainder, which only pays off on host/rootfs scans — container images ship
 no kernel. Conservative direction meanwhile (no wrong-train match), unchanged.
 
-**Revisit trigger:** a host/rootfs scan user appears, or MODULARITYLABEL matching (D71
-decision 3) starts — the module-stream slice of the remainder belongs to that work.
+**Revisit trigger:** a host/rootfs scan user appears — the kernel-train remainder is the
+only part left. The module-stream slice of the remainder went to MODULARITYLABEL matching
+when it started (D80; Oracle's stream attachment lands in D81), which is the second trigger
+firing.
 
 **The five decisions this research forced now live in D71**, not here, because the next
 distro slices reuse them: reading `related` for CVE joins, scoped to distro-authored records;

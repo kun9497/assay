@@ -591,6 +591,10 @@ exited 0 while 24 findings went unmentioned.
 - [x] Ksplice/FIPS lineage filter (D79) — 12,174 lineage fixed versions dropped at
       ingestion, installed lineage packages reported not evaluated; the filter recovered
       24.4% of what the UEK ambiguity guard was throwing out, openssl entirely
+- [x] MODULARITYLABEL matching (D80) — module streams first-class end to end: 487,796
+      Red Hat module entries kept with their streams, per-stream wont-fix, stream-equality
+      matching with tail-truncated comparison; ubi8/nodejs-18 matches exactly its
+      installed stream out of three
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a

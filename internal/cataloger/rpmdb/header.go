@@ -44,6 +44,12 @@ const (
 	tagEpoch     = 1003
 	tagArch      = 1022
 	tagSourceRPM = 1044
+	// tagModularityLabel (RPMTAG_MODULARITYLABEL) is a plain STRING holding
+	// "name:stream:version:context", present only on packages installed from
+	// a module stream (D80). Absent on every non-modular package — measured
+	// 0 of 1,049 across five real images, with the tag present on exactly
+	// the 13 packages whose RELEASE carries a module build marker.
+	tagModularityLabel = 5096
 )
 
 // RPM header data types. Four of the ten are enough for a NEVRA; the rest
@@ -230,6 +236,18 @@ func toPackage(h header, ecosystem, path string) (pkgmeta.Package, error) {
 		src = name
 	}
 	p.Source = &pkgmeta.SourcePackage{Name: src, Version: p.Version}
+	// D80. Only NAME:STREAM is kept — the label's VERSION and CONTEXT differ
+	// between builds of one installed stream (see Package.ModuleStream's own
+	// doc). A label that does not split into at least four fields is mapped
+	// to "" rather than guessed at; the matcher still refuses to judge such
+	// a package, because its RELEASE carries the module marker and a module
+	// build with no readable stream is reported not evaluated there.
+	if label, ok := h.str(tagModularityLabel); ok {
+		parts := strings.SplitN(label, ":", 4)
+		if len(parts) == 4 && parts[0] != "" && parts[1] != "" {
+			p.ModuleStream = parts[0] + ":" + parts[1]
+		}
+	}
 	return p, nil
 }
 

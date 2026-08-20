@@ -48,6 +48,20 @@ type Affected struct {
 	Name      string   `json:"name"`
 	Ranges    []Range  `json:"ranges,omitempty"`
 	Versions  []string `json:"versions,omitempty"` // enumerated; the only data when Ranges is empty
+	// ModuleStream scopes this entry to one RPM module stream, as
+	// "name:stream" ("nodejs:18", "container-tools:rhel8"), or "" for an
+	// ordinary entry (D80). The spelling is distro-local — Red Hat's
+	// "container-tools:rhel8" and Oracle's "container-tools:ol8" are
+	// different strings on purpose, because their fixed EVRs are different
+	// builds and must never judge each other's packages. The matcher applies
+	// entries with a stream only to packages installed FROM that stream
+	// (Package.ModuleStream, read from RPMTAG_MODULARITYLABEL) and
+	// stream-less entries only to non-modular packages: a module build and a
+	// mainline build of the same package are on different fix timelines, and
+	// ordering one against the other is the unsound comparison D47 refused.
+	// Additive like Related (D71) — advisories are rebuilt from providers on
+	// every db build, so no schema bump.
+	ModuleStream string `json:"module_stream,omitempty"`
 }
 
 // RangeType mirrors OSV. GIT ranges carry commit SHAs, not versions, and must

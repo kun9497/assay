@@ -410,6 +410,35 @@ func rpmModuleBuild(v string) bool {
 	return strings.Contains(v, "module+el") || strings.Contains(v, "module_el")
 }
 
+// moduleTailTruncate cuts a version at its module marker — everything from
+// ".module+el"/".module_el" on is the platform build and MBS context hash,
+// which vary per architecture and per rebuild WITHIN one stream and one
+// advisory (D80; Rocky spells '+', Alma '_'). What precedes the marker is the
+// upstream version and packager release, the part a stream's successive
+// fixes actually order on. v is returned unchanged when it carries no marker,
+// so the wrapped comparer below is safe on mixed pairs.
+func moduleTailTruncate(v string) string {
+	if i := strings.Index(v, ".module+el"); i >= 0 {
+		return v[:i]
+	}
+	if i := strings.Index(v, ".module_el"); i >= 0 {
+		return v[:i]
+	}
+	return v
+}
+
+// moduleTailComparer orders module-build EVRs by their pre-tail prefix. Used
+// ONLY for a stream-matched pairing (D80): with both sides known to be the
+// same stream, the tails carry no ordering information — two builds of one
+// fix differ only there — and rpmvercmp on them would decide near-boundary
+// verdicts by MBS hash, which is D25's forbidden arrival-order tie-break
+// wearing version clothing.
+type moduleTailComparer struct{ inner version.Comparer }
+
+func (c moduleTailComparer) Compare(a, b string) (int, error) {
+	return c.inner.Compare(moduleTailTruncate(a), moduleTailTruncate(b))
+}
+
 // moduleBuildBound returns the first module-tagged range bound in aff, if any.
 //
 // Checked across Introduced, Fixed and LastAffected — every field
@@ -562,6 +591,26 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 			}
 		}
 
+		// D80. A module build whose stream could not be read. The release
+		// marker and RPMTAG_MODULARITYLABEL agreed on every measured package
+		// (13/13 with both, 0/1,049 with neither), so a module-tagged
+		// version arriving with no stream means the label was absent,
+		// corrupt, or the target format cannot carry it — and matching would
+		// order this build against fixes from an unknowable stream, the
+		// comparison D47 refused. Not evaluated, never guessed.
+		if p.ModuleStream == "" && rpmModuleBuild(p.Version) {
+			res.Skipped = append(res.Skipped, Skipped{
+				Package: p,
+				Reason: fmt.Sprintf(
+					"version %q is a modular RPM build but no module stream could be "+
+						"read from the package database; fixes are per-stream and "+
+						"cannot be applied to an unknown one",
+					p.Version),
+				Cause: SkipCoverage,
+			})
+			continue
+		}
+
 		// Distro advisories are written against SOURCE packages while what is
 		// installed are binary packages (D8), so the source name is a second
 		// lookup key. Both are queried because they coincide for most packages
@@ -669,17 +718,42 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 						pkgmeta.NormalizeName(aff.Ecosystem, aff.Name) != wantName {
 						continue
 					}
+					// D80: entries scoped to a module stream apply only to
+					// packages installed FROM that stream, and stream-less
+					// entries only to non-modular packages. Inequality covers
+					// every unsound pairing at once — module vs mainline,
+					// mainline vs module, stream vs different stream — and is
+					// silent because a different stream's fix is genuinely
+					// inapplicable, not unevaluable: the same reason a
+					// different ecosystem's entry is skipped silently above.
+					// The one stream-blind pairing that IS unevaluable — a
+					// module-tagged bound with no stream, Rocky/Alma's OSV
+					// shape until D82 — stays loud through the guard below.
+					if aff.ModuleStream != "" && aff.ModuleStream != p.ModuleStream {
+						continue
+					}
+					streamMatched := aff.ModuleStream != "" && aff.ModuleStream == p.ModuleStream
+					if p.ModuleStream != "" && aff.ModuleStream == "" {
+						if _, ok := moduleBuildBound(aff); !ok {
+							// A plain mainline entry cannot judge a module
+							// install — different build lineage, different
+							// fix timeline (D47's refusal, entry-shaped).
+							continue
+						}
+						// Module-tagged and stream-blind: fall through to the
+						// guard below, which reports it skipped.
+					}
 					// D71/D47: a modular RPM build's release string cannot say
 					// which STREAM it belongs to, so ordering it against an
 					// installed package as a fix boundary answers a question the
-					// version alone cannot settle. Red Hat's own CSAF feed never
-					// reaches here — those are dropped before they are ever
-					// stored (csaf.go's isModule) — but Rocky's OSV feed stores
-					// them (measured 2026-08-19: 74% of its affected entries'
-					// fixed versions carry the marker), so the same refusal has
-					// to happen at match time instead, for every RPM-family
-					// ecosystem this build recognizes.
-					if _, isRPM := cmp.(version.RPM); isRPM {
+					// version alone cannot settle. Rocky's OSV feed stores such
+					// bounds (measured 2026-08-19: 74% of its affected entries'
+					// fixed versions carry the marker), so the refusal happens
+					// at match time, for every RPM-family ecosystem this build
+					// recognizes — unless D80 attached the stream and it equals
+					// the installed one, which is exactly the knowledge whose
+					// absence this guard exists to refuse.
+					if _, isRPM := cmp.(version.RPM); isRPM && !streamMatched {
 						if bound, ok := moduleBuildBound(aff); ok {
 							if !skipped[a.ID] {
 								skipped[a.ID] = true
@@ -698,7 +772,22 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 							continue
 						}
 					}
-					hit, ev, unreadable, err := version.AffectsVersion(cmp, compareVersion, aff)
+					evalCmp := cmp
+					if streamMatched {
+						// Same stream on both sides: the fix bound is sound,
+						// but only up to the module tail — the release's
+						// "+<platform>+<context>" trailer differs per
+						// architecture within ONE advisory (measured: 2,256 of
+						// 2,279 multi-EVR Rocky tuples and all 2,364 Alma ones
+						// differ only there), so comparison happens with both
+						// tails cut at the module marker. The comparer is
+						// wrapped rather than the strings rewritten so the
+						// Evidence keeps the full EVRs the advisory and the
+						// package actually carry (D10) — a report telling
+						// someone to upgrade must name the real fix build.
+						evalCmp = moduleTailComparer{inner: cmp}
+					}
+					hit, ev, unreadable, err := version.AffectsVersion(evalCmp, compareVersion, aff)
 					// D30: the advisory WAS evaluated, and some enumerated
 					// version in it was not. That is a third state — neither a
 					// clean verdict nor a skipped advisory — and it is recorded
