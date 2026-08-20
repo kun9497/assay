@@ -176,6 +176,12 @@ func TestEcosystems_IncludesUbuntu(t *testing.T) {
 	for _, want := range []string{
 		"Ubuntu", "Debian", "Alpine", "crates.io",
 		"RubyGems", "Packagist", "NuGet", "Maven",
+		// Rocky Linux joined on the same terms (D71): one archive path, a
+		// release-qualified key inside it. Checked here rather than in a
+		// dedicated test for the same reason the entries above are -- this is
+		// the one line that decides whether any of Rocky's own tests ever run
+		// against real data.
+		"Rocky Linux",
 	} {
 		if !slices.Contains(Ecosystems, want) {
 			t.Errorf("Ecosystems = %v, want it to include %q", Ecosystems, want)

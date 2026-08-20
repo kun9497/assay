@@ -111,18 +111,23 @@ func (d Distro) Ecosystem() (string, error) {
 		// The other RPM distributions are NOT routed here, and each is a
 		// different reason rather than one blanket caution:
 		//
-		//   - almalinux, rocky: rebuilds, but not byte-identical ones. Alma
-		//     writes module builds as `module_el8.5.0+119+9a9ec082` where Red
-		//     Hat writes `module+el8.5.0+12582+56d94c81`, and its own rebuilds
-		//     carry `.alma` release suffixes. Comparing one distro's installed
-		//     versions against another's advisory versions is the hazard
-		//     docs/deferred-decisions.md records against both.
+		//   - almalinux: a rebuild, but not a byte-identical one. It writes
+		//     module builds as `module_el8.5.0+119+9a9ec082` where Red Hat
+		//     writes `module+el8.5.0+12582+56d94c81`, and its own rebuilds
+		//     carry `.alma` release suffixes. Comparing Alma's installed
+		//     versions against Red Hat's advisory versions is the hazard
+		//     docs/deferred-decisions.md records.
 		//   - centos: the ID covers CentOS Linux, which trailed RHEL, AND
 		//     CentOS Stream, which runs AHEAD of it. A fixed version that has
 		//     not reached RHEL yet is already in Stream, so the same key would
 		//     be wrong in opposite directions for the two.
 		//   - fedora, amzn: different version schemes and their own advisory
 		//     feeds (FEDORA-*, ALAS-*). Red Hat's errata do not describe them.
+		//
+		// Rocky left this list under D71 below: it has its own OSV archive
+		// now, so it no longer needs (or wants) Red Hat's errata routed at it
+		// — the byte-identity hazard above never applied to Rocky's own data
+		// the way it does to Alma's.
 		//
 		// Every one of those still reaches the cataloger and is reported as
 		// not evaluated, so an unrouted distro is a loud skip and never a
@@ -136,6 +141,32 @@ func (d Distro) Ecosystem() (string, error) {
 				ErrNoEcosystem, d.ID, d.VersionID)
 		}
 		return "Red Hat:" + major, nil
+	case "rocky":
+		// D71. Rocky ingests from its OWN OSV archive ("Rocky Linux/all.zip",
+		// measured 2026-08-19), not Red Hat's CSAF feed — unlike AlmaLinux,
+		// whose module-build spelling and `.alma` release suffixes make
+		// matching against another distro's advisory versions a hazard
+		// (the "rhel" case above, and docs/deferred-decisions.md), Rocky's
+		// OSV records describe Rocky's own builds, so nothing here is
+		// borrowed from another distro's data.
+		//
+		// The key is release-qualified at the major, because that is the
+		// shape the archive's own ecosystem keys carry ("Rocky Linux:9",
+		// "Rocky Linux:10") and /etc/os-release's VERSION_ID ("9.4") needs
+		// the same truncation D47 already applies to Red Hat's.
+		//
+		// AlmaLinux stays unrouted (D50) until its own feed lands: it has no
+		// archive of its own ingested yet, and its `related`-only CVE
+		// linkage and 0% CVSS coverage are hazards this routing does not fix.
+		if d.VersionID == "" {
+			return "", fmt.Errorf("%w: distro %q has no VERSION_ID", ErrNoEcosystem, d.ID)
+		}
+		major, _, _ := strings.Cut(d.VersionID, ".")
+		if !allDigits(major) {
+			return "", fmt.Errorf("%w: distro %q version %q is not a numbered release",
+				ErrNoEcosystem, d.ID, d.VersionID)
+		}
+		return "Rocky Linux:" + major, nil
 	default:
 		return "", fmt.Errorf("%w: distro %q is not supported yet", ErrNoEcosystem, d.ID)
 	}

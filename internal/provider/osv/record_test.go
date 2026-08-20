@@ -440,7 +440,8 @@ func TestFamilyMatches_IsGeneralNotAName(t *testing.T) {
 		{"Alpine", "Alpine", true},
 		{"Debian:12", "Debian", true},
 		{"Debian", "Debian", true},
-		{"Ubuntu:24.04:LTS", "Ubuntu", true}, // whenever Ubuntu arrives, this already holds
+		{"Ubuntu:24.04:LTS", "Ubuntu", true},   // whenever Ubuntu arrives, this already holds
+		{"Rocky Linux:9", "Rocky Linux", true}, // and again for Rocky Linux (D71)
 		{"Go", "Go", true},
 		// A family must not swallow a differently named one that starts the
 		// same way. Without the colon in the prefix test, "Debian" would match

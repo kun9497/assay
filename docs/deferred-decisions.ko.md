@@ -416,8 +416,10 @@ RHSA-2024:4312  CVE-2024-6387 (regreSSHion, 업스트림은 9.8p1에서 수정)
   `('CVE-2021-20291', 'buildah', '8')`은 `container-tools`의 두 스트림에서 온 fixed 버전 둘로
   풀립니다. 높은 쪽을 고르면 체계적 오탐이고 낮은 쪽을 고르면 미탐입니다.
 
-**AlmaLinux와 Rocky Linux는 더 쉬운 길이 아닙니다.** 둘 다 major 버전만으로 키를 잡아 — 각 3개,
-`/etc/os-release`에서 유도 가능 — 실제로 더 단순합니다. 하지만 나머지를 못 넘깁니다:
+**~~AlmaLinux와 Rocky Linux는 더 쉬운 길이 아닙니다~~ — Rocky는 D71에서 해결됐고, AlmaLinux,
+Amazon Linux, Oracle Linux, Fedora, SLES는 여전히 열려 있습니다.** 둘 다 major 버전만으로 키를
+잡아 — 각 3개, `/etc/os-release`에서 유도 가능 — 실제로 더 단순했습니다. 당시에는 둘 다
+나머지를 못 넘겼습니다:
 
 - **AlmaLinux는 `aliases`도 `upstream`도 0개**입니다. 레코드 5,494개 전부에 대해서. 모든 CVE
   참조가 `related`에 있는데, OSV는 `related`를 alias가 *아니라고* 명시적으로 정의합니다. D3을
@@ -425,11 +427,13 @@ RHSA-2024:4312  CVE-2024-6387 (regreSSHion, 업스트림은 9.8p1에서 수정)
   데이터도 전혀 없어서(CVSS 커버리지 0%, Red Hat은 약 84%) D17 하에서 모든 Alma finding이
   `unknown`에 떨어지고 `--fail-on`을 절대 건드리지 못합니다. `related`를 읽는 것은 조인의 의미를
   바꾸는 일이므로 그 자체가 별도 결정입니다.
-- **Rocky Linux의 내보내기는 출시하기엔 너무 불완전합니다.** Red Hat 런타임 패키지 집합 대비
+- ~~**Rocky Linux의 내보내기는 출시하기엔 너무 불완전합니다.**~~ Red Hat 런타임 패키지 집합 대비
   커버리지 중앙값 0.29, 공유 (CVE, major) 그룹의 83%가 런타임 패키지를 최소 하나 빠뜨리며,
   CVE-2023-38545에 `curl` 하나만 지목합니다(Red Hat과 Alma는 `curl`, `curl-minimal`,
   `libcurl`, `libcurl-minimal`을 모두 지목). 그리고 **CVE-2024-6387은 레코드가 아예 없습니다.**
-  `rockylinux:` 타깃은 exit 0이 아니라 exit 2여야 합니다.
+  **D71에서 그래도 출시했습니다**: 같은 간극이 그대로 있고, 닫는 대신 공개합니다 —
+  `rockylinux:` 타깃은 이제 exit 2가 아니라 exit 0이지만, 그 판정은 "Rocky가 발행한 것에 한해
+  깨끗함"으로 문서화되어 있지 그냥 깨끗함이 아닙니다.
 - Alma는 module 빌드를 `module_el8.5.0+119+9a9ec082`로 쓰고 Red Hat과 Rocky는
   `module+el8.5.0+12582+56d94c81`로 씁니다. 그래서 Alma의 advisory 버전을 RHEL에 설치된
   패키지와 비교해서는 안 됩니다. `elN` 릴리스 문자열이 아니라 `/etc/os-release`의 `ID`
@@ -448,9 +452,19 @@ README의 슬라이스 ⑬ 참조.
 억제하는 이야기이고, 이쪽은 벤더가 영향 여부를 발행하는 이야기입니다.
 
 **여전히 보류.** 제2의 의견으로서의 OVAL v2(RHEL 5–9만 다루고 RHEL 10이 없어서 주 출처가 될 수
-없습니다), 위의 반대 이유가 그대로이고 그래서 D50이 경로를 주지 않는 AlmaLinux와 Rocky, 그리고
-EUS/AUS/E4S 발산을 공개하는 데서 끝내지 않고 닫는 것. 마지막 것은 어떤 이미지도 담고 있지 않은
-채널 신호가 필요합니다.
+없습니다), 위의 반대 이유(SLES는 이 문서 다른 곳의 ndb 항목)가 그대로이고 그래서 D50도 D71도
+경로를 주지 않는 AlmaLinux, Amazon Linux, Oracle Linux, Fedora, SLES, 그리고 EUS/AUS/E4S
+발산을 공개하는 데서 끝내지 않고 닫는 것. 마지막 것은 어떤 이미지도 담고 있지 않은 채널 신호가
+필요합니다. Rocky Linux는 이 목록에서 빠졌습니다 — D71 참조.
+
+**이 조사가 만들어낸 다섯 결정은 이제 D71에 있습니다**, 여기가 아니라 — 다음 배포판 슬라이스들이
+그것들을 재사용하기 때문입니다: 배포판이 직접 쓴 레코드로 범위를 좁혀 CVE 조인에 `related`를
+읽는 것, 무손실로 저장한 벤더 심각도 단어를 NVD 조인과 나란히 두는 것, module 빌드를
+stream-match하는 대신 세어서 버리는 것, OSV가 있는 곳에서는 OSV를 주 출처로 삼는 것, 그리고
+SLES는 여전히 `ndb` 뒤에 남는 것 — 다만 위에서 `ndb` 자체를 미룬 근거로 적어 둔 것은 더 이상
+유효하지 않습니다. 오늘날 최신 SLES/BCI 이미지는 advisory 문제와 무관하게 독립적으로 측정해도
+아예 카탈로그할 수 없습니다. SUSE 계열 커버리지를 `ndb`를 쓰기 전에 먼저 원한다면 openSUSE
+Leap이 깨끗한 부분집합입니다.
 
 ---
 

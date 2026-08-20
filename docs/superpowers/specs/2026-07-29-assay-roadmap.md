@@ -2812,6 +2812,47 @@ interface does not expose yet — the image path still catalogs OS packages only
 
 ---
 
+### D71 — Rocky Linux, and the five decisions the RPM-family research fixed
+
+**Decision.** Rocky Linux 8/9/10 are ingested from OSV's `Rocky Linux` archive (measured
+2026-08-19: 3,941 records, 84.1% carrying CVSS v3 vectors, CVE linkage via `upstream` at
+99.3%) under release-qualified keys `Rocky Linux:<major>`; an os-release `ID=rocky` routes
+there, and the existing RPM comparer applies. Rocky leaves D50's not-evaluated list; Alma,
+Fedora and the rest stay on it until their own slices land.
+
+**The research fixed five decisions at once, recorded here because the next four slices
+reuse them:**
+
+1. **`related` joins the CVE read (D3 revised), scoped to distro-authored records.** Alma
+   keeps its CVEs ONLY in `related` — under D3 as written it would ship with zero ratings,
+   silently. The scope stays narrow because `related` on GHSA records carries genuinely
+   related-but-different advisories, and a global read would fabricate alias joins.
+   Implemented with the Alma slice, which cannot ship without it; Rocky does not need it.
+2. **A feed without CVSS stores its vendor severity word losslessly AND joins NVD** — both,
+   not either: the word is what the vendor asserted (D13: store upstream, derive at query
+   time), the NVD join is what D25 aggregates. Alma/Amazon/Fedora need this; Rocky mostly
+   does not (84% native vectors).
+3. **Module builds are dropped and counted (D47's answer), not stream-matched.** Rocky 8 is
+   86% module entries, 9 is 28%, 10 is 0% — so Rocky 8's coverage through this provider is
+   thin and the skip counts say so on every scan. Reading rpmdb's MODULARITYLABEL and
+   matching stream-qualified is its own future slice; until then the loud skip beats a
+   stream-blind match that would be wrong in both directions.
+4. **OSV is the primary feed where it exists.** Confirmed against the alternatives by
+   measurement: Alma's own errata API is missing 38% of release-10 records the OSV export
+   carries; Rocky's Apollo API adds module metadata but no coverage. Enrichment later,
+   primary never.
+5. **SLES stays deferred behind the ndb rpmdb backend** — and the research removed the
+   recorded justification for deferring ndb itself (modern SLES/BCI images cannot even be
+   cataloged today). openSUSE Leap is the clean subset if SUSE-family value is wanted first.
+
+**The hazard this ships with, disclosed rather than hidden:** Rocky's feed has measured
+coverage holes — no advisory for regreSSHion at all, and 2023–24 output running 41–57% of
+RHSA's. A Rocky scan's "clean" is clean-of-what-Rocky-published, a weaker statement than the
+RHEL verdict, and — like every feed this research measured — errata-only, so
+`--fail-on-unfixable` has nothing to gate on. The README's Rocky line says both.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

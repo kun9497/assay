@@ -299,6 +299,12 @@ func comparerName(ecosystem string) string {
 	if rel, ok := strings.CutPrefix(ecosystem, "Red Hat:"); ok && rel != "" {
 		return "rpm"
 	}
+	// Rocky is RPM too (D71), added in the same commit that taught
+	// version.For about it for the reason the comment above this function
+	// gives.
+	if rel, ok := strings.CutPrefix(ecosystem, "Rocky Linux:"); ok && rel != "" {
+		return "rpm"
+	}
 	switch ecosystem {
 	// crates.io joins here in the same commit that taught version.For about
 	// it, which is the rule the comment above was written for.

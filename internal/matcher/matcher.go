@@ -362,6 +362,46 @@ func ubuntuLineageOf(version string) string {
 // miss this detector exists to prevent.
 var ubuntuLineageMarker = regexp.MustCompile(`(?i)[~+](esm|fips)[0-9]`)
 
+// rpmModuleBuild reports whether v names a modular RPM build platform tag —
+// "module+el" (Red Hat, Rocky) or "module_el" (AlmaLinux), the same two
+// spellings csaf.go's isModule matches, for the same reason (D47's own
+// comment there).
+//
+// This is NOT a claim that the RPM comparer cannot order these strings: it
+// can, faithfully (D46, TestRPMValidButUnusual — '+' and '_' are ordinary
+// separators to rpmvercmp, so nothing here is malformed, and the comparer must
+// keep comparing them for that reason alone). What is missing is the STREAM
+// the release string does not carry: `nodejs:18` and `nodejs:20` are
+// indistinguishable from a module release alone, so an ordering answer exists
+// and is not a trustworthy fix boundary. D47 already refused this trade for
+// Red Hat's own module builds by dropping them before they are ever stored;
+// D71 makes the same refusal for Rocky, whose OSV feed stores them instead.
+func rpmModuleBuild(v string) bool {
+	return strings.Contains(v, "module+el") || strings.Contains(v, "module_el")
+}
+
+// moduleBuildBound returns the first module-tagged range bound in aff, if any.
+//
+// Checked across Introduced, Fixed and LastAffected — every field
+// InRange's walk actually compares against the installed version (D71) — but
+// deliberately NOT Versions: an enumerated affected version is matched by
+// EQUALITY (AffectsVersion's fallback path), which carries none of the STREAM
+// ambiguity a range bound does. Two identical module-build strings still name
+// the same build; only ordering one against a version from an unknown stream
+// is the unsound step.
+func moduleBuildBound(aff advisory.Affected) (string, bool) {
+	for _, r := range aff.Ranges {
+		for _, e := range r.Events {
+			for _, v := range []string{e.Introduced, e.Fixed, e.LastAffected, e.Limit} {
+				if v != "" && rpmModuleBuild(v) {
+					return v, true
+				}
+			}
+		}
+	}
+	return "", false
+}
+
 // skipCauseOf maps a comparison failure onto who owns it. An error this package
 // cannot classify is reported as SkipAdvisory rather than SkipTarget: the
 // conservative direction is the one that does NOT tell a user their input is
@@ -569,6 +609,35 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 					if aff.Ecosystem != p.Ecosystem ||
 						pkgmeta.NormalizeName(aff.Ecosystem, aff.Name) != wantName {
 						continue
+					}
+					// D71/D47: a modular RPM build's release string cannot say
+					// which STREAM it belongs to, so ordering it against an
+					// installed package as a fix boundary answers a question the
+					// version alone cannot settle. Red Hat's own CSAF feed never
+					// reaches here — those are dropped before they are ever
+					// stored (csaf.go's isModule) — but Rocky's OSV feed stores
+					// them (measured 2026-08-19: 74% of its affected entries'
+					// fixed versions carry the marker), so the same refusal has
+					// to happen at match time instead, for every RPM-family
+					// ecosystem this build recognizes.
+					if _, isRPM := cmp.(version.RPM); isRPM {
+						if bound, ok := moduleBuildBound(aff); ok {
+							if !skipped[a.ID] {
+								skipped[a.ID] = true
+								res.Skipped = append(res.Skipped, Skipped{
+									Package:    p,
+									AdvisoryID: a.ID,
+									Reason: fmt.Sprintf(
+										"advisory range names a modular RPM build %q; "+
+											"the fix stream cannot be determined from the "+
+											"release string alone, so this entry is skipped "+
+											"rather than stream-matched",
+										bound),
+									Cause: SkipAdvisory,
+								})
+							}
+							continue
+						}
 					}
 					hit, ev, unreadable, err := version.AffectsVersion(cmp, compareVersion, aff)
 					// D30: the advisory WAS evaluated, and some enumerated
