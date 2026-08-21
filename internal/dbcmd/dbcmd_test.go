@@ -936,6 +936,139 @@ func TestUpdate_SeedCarriesRatingsButNotAdvisories(t *testing.T) {
 	}
 }
 
+// TestUpdate_SeedExcludesPerishableRatingSources is D86's own version of
+// TestUpdate_SeedCarriesRatingsButNotAdvisories just above: a seed carrying
+// an NVD rating, an EPSS rating and a KEV rating, copied into a build with
+// NO annotators configured at all this run. NVD's rating -- a fact fixed by
+// a past scoring event -- must carry forward exactly like the seeded
+// advisory case does. EPSS and KEV must NOT: a daily-rescored probability or
+// a catalog entry CISA might since have removed must never ride forward
+// under a database built today, silently presented as current.
+//
+// No annotators this run (not even a fresh EPSS/KEV one) is deliberate: it
+// isolates the seed-copy exclusion from the ordinary case where the
+// default-on annotators would overwrite the stale value anyway and mask a
+// broken exclusion. Delete the `if perishableRatingSources[r.Source]`
+// skip in the EachRating copy and this test goes red on the EPSS/KEV
+// assertions below.
+func TestUpdate_SeedExcludesPerishableRatingSources(t *testing.T) {
+	seed := filepath.Join(t.TempDir(), "seed.db")
+	w, err := store.Create(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.PutRating(advisory.Rating{CVE: "CVE-2026-NVD1", Source: "NVD",
+		Severity: []advisory.Severity{{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.PutRating(advisory.Rating{CVE: "CVE-2026-EPSS1", Source: "EPSS",
+		EPSS: 0.9, EPSSPercentile: 0.99, EPSSModel: "v2026.06.15"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.PutRating(advisory.Rating{CVE: "CVE-2026-KEV1", Source: "KEV",
+		KEV: true, KEVDateAdded: "2026-01-01", KEVRansomware: "Known"}); err != nil {
+		t.Fatal(err)
+	}
+	w.SetMeta(store.Meta{
+		Ratings: map[string]store.Provenance{
+			"NVD":  {Window: "modified 2026-07-01..2026-08-01"},
+			"EPSS": {Window: "the whole feed", DataAsOf: time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)},
+			"KEV":  {Window: "the whole feed", DataAsOf: time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)},
+		},
+	})
+	w.Close()
+
+	dst := filepath.Join(t.TempDir(), "vulnerability.db")
+	var out, errOut bytes.Buffer
+	if code := Update(context.Background(), dst, seed, "", false, nil, nil, nil, &out, &errOut); code != 0 {
+		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+
+	db, err := store.Open(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// The cumulative fact survived...
+	if rs, err := db.RatingsFor("CVE-2026-NVD1"); err != nil || len(rs) != 1 {
+		t.Errorf("RatingsFor(CVE-2026-NVD1) = %v, %v; NVD's seeded rating should carry forward (cumulative facts ride)", rs, err)
+	}
+	// ...the perishable ones did not.
+	if rs, err := db.RatingsFor("CVE-2026-EPSS1"); err != nil {
+		t.Fatal(err)
+	} else if len(rs) != 0 {
+		t.Errorf("RatingsFor(CVE-2026-EPSS1) = %v, want none: a daily-rescored EPSS probability must never ride forward from yesterday's seed", rs)
+	}
+	if rs, err := db.RatingsFor("CVE-2026-KEV1"); err != nil {
+		t.Fatal(err)
+	} else if len(rs) != 0 {
+		t.Errorf("RatingsFor(CVE-2026-KEV1) = %v, want none: KEV membership must be re-fetched fresh, not carried from the seed", rs)
+	}
+
+	// And the coverage claim did not carry either -- meta.Ratings["EPSS"]/
+	// ["KEV"] must not still be the seed's stale window once no annotator
+	// for either ran this build.
+	m, err := db.Meta()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, ok := m.Ratings["EPSS"]; ok {
+		t.Errorf("Meta().Ratings[EPSS] = %+v, want absent: the seed's stale coverage window must not carry forward when EPSS did not run this build", p)
+	}
+	if p, ok := m.Ratings["KEV"]; ok {
+		t.Errorf("Meta().Ratings[KEV] = %+v, want absent: the seed's stale coverage window must not carry forward when KEV did not run this build", p)
+	}
+	if _, ok := m.Ratings["NVD"]; !ok {
+		t.Error("Meta().Ratings[NVD] is absent, want the seed's NVD coverage carried forward")
+	}
+}
+
+// TestUpdate_SeedExcludedPerishableRatingIsReplacedByAFreshFetch is the other
+// half: when this build's own EPSS annotator DOES run, its fresh rating must
+// land, not be shadowed by (or merged with) whatever the seed held.
+func TestUpdate_SeedExcludedPerishableRatingIsReplacedByAFreshFetch(t *testing.T) {
+	seed := filepath.Join(t.TempDir(), "seed.db")
+	w, err := store.Create(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.PutRating(advisory.Rating{CVE: "CVE-2026-EPSS2", Source: "EPSS",
+		EPSS: 0.1, EPSSPercentile: 0.2, EPSSModel: "v-stale"}); err != nil {
+		t.Fatal(err)
+	}
+	w.SetMeta(store.Meta{
+		Ratings: map[string]store.Provenance{"EPSS": {Window: "the whole feed"}},
+	})
+	w.Close()
+
+	a := fakeAnnotator{name: "EPSS", ratings: []advisory.Rating{
+		{CVE: "CVE-2026-EPSS2", Source: "EPSS", EPSS: 0.9, EPSSPercentile: 0.99, EPSSModel: "v-fresh"},
+	}}
+
+	dst := filepath.Join(t.TempDir(), "vulnerability.db")
+	var out, errOut bytes.Buffer
+	if code := Update(context.Background(), dst, seed, "", false, nil, []provider.Annotator{a}, nil, &out, &errOut); code != 0 {
+		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+
+	db, err := store.Open(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	rs, err := db.RatingsFor("CVE-2026-EPSS2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rs) != 1 {
+		t.Fatalf("RatingsFor(CVE-2026-EPSS2) = %d rating(s), want exactly 1 (the seed's stale row must not survive alongside the fresh one)", len(rs))
+	}
+	if rs[0].EPSSModel != "v-fresh" || rs[0].EPSS != 0.9 {
+		t.Errorf("rating = %+v, want the FRESH fetch (v-fresh, 0.9), not the seed's stale one (v-stale, 0.1)", rs[0])
+	}
+}
+
 // dbcmdTestKeySep mirrors store's own keySep (internal/store/bolt.go),
 // unexported there and unreachable from this package. Defined once, here,
 // and referenced everywhere below that needs it, rather than retyped at

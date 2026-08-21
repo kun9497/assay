@@ -59,6 +59,14 @@ type Summary struct {
 	// on a target with no RHEL packages. It runs 3-12% of Unfixable on the RHEL
 	// images measured: 11 of 416 on ubi9:9.3, 59 of 505 on ubi8:8.9.
 	WontFix int `json:"wontFix"`
+	// KnownExploited is the number of findings CISA's Known Exploited
+	// Vulnerabilities catalog lists (D86) — a fact independent of severity
+	// band and independent of Unfixable/WontFix above, so it overlaps both
+	// freely rather than subtracting from either. Populated whether or not
+	// it is zero, for the same reason Unfixable is: `--fail-on-kev` reads it
+	// directly, and a count that only appears when non-zero is not one a
+	// caller can rely on.
+	KnownExploited int `json:"knownExploited"`
 }
 
 // Trustworthy reports whether the run produced a result worth acting on. A scan
@@ -247,10 +255,24 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error
 	// unknown-severity one is (D17, D48): a count that only shows up when
 	// non-zero is one readers learn to stop checking for, and this one gates
 	// an exit code.
+	//
+	// knownExploited rides inside the same parens as WontFix, but — unlike
+	// every other count on this line — only when it is non-zero (D86). Most
+	// scans have zero KEV hits, and the other counts earn their permanent
+	// place because each one gates an exit code on its own (--fail-on-unknown,
+	// --fail-on-unfixable); --fail-on-kev is that same kind of gate, but
+	// printing "0 known-exploited" on every clean scan is exactly the noise
+	// D48's WontFix column avoided by living inside Unfixable's parenthetical
+	// rather than getting one of its own -- this goes a step further because,
+	// unlike WontFix, it is usually true on every finding-free line as well.
+	noFixParen := fmt.Sprintf("%d will not be fixed", sum.WontFix)
+	if sum.KnownExploited > 0 {
+		noFixParen += fmt.Sprintf(", %d known-exploited", sum.KnownExploited)
+	}
 	fmt.Fprintf(w, "\n%d component(s) seen, %d evaluated, %d finding(s), %d not evaluated, "+
-		"%d unknown severity, %d with no fix available (%d will not be fixed)\n",
+		"%d unknown severity, %d with no fix available (%s)\n",
 		cat.Components, evaluated, len(res.Findings), notEvaluated, unknownSeverity,
-		sum.Unfixable, sum.WontFix)
+		sum.Unfixable, noFixParen)
 
 	// Gated on both counts. Keying only on notEvaluated hid every
 	// advisory-scoped skip whenever the rest of the document was fully
@@ -338,7 +360,7 @@ func Summarize(res matcher.Result, cat cyclonedx.Stats) Summary {
 
 	// Counted unconditionally (D17): a threshold that hides how much it could
 	// not judge is not a threshold.
-	var unknownSeverity, unfixable, wontFix int
+	var unknownSeverity, unfixable, wontFix, knownExploited int
 	for _, f := range res.Findings {
 		if f.Severity == severity.Unknown {
 			unknownSeverity++
@@ -354,6 +376,12 @@ func Summarize(res matcher.Result, cat cyclonedx.Stats) Summary {
 				wontFix++
 			}
 		}
+		// D86, same reasoning: the table's marker, the JSON and
+		// --fail-on-kev must all read one count rather than each deriving
+		// their own.
+		if _, ok := f.KnownExploited(); ok {
+			knownExploited++
+		}
 	}
 
 	return Summary{
@@ -366,6 +394,7 @@ func Summarize(res matcher.Result, cat cyclonedx.Stats) Summary {
 		UnknownSeverity:  unknownSeverity,
 		Unfixable:        unfixable,
 		WontFix:          wontFix,
+		KnownExploited:   knownExploited,
 	}
 }
 
@@ -455,8 +484,19 @@ func sourcesDisagree(ratings []matcher.Rating) bool {
 	if len(ratings) < 2 {
 		return false
 	}
-	first := ratings[0].Severity
-	for _, r := range ratings[1:] {
+	// Opinionless annotations (D86: EPSS/KEV rows carry no severity vectors)
+	// are not disagreements — an exploit probability neither agrees nor
+	// disagrees with a CVSS band, and without this filter every annotated
+	// finding would wear the marker.
+	first, haveFirst := severity.Unknown, false
+	for _, r := range ratings {
+		if r.NoSeverityOpinion {
+			continue
+		}
+		if !haveFirst {
+			first, haveFirst = r.Severity, true
+			continue
+		}
 		if r.Severity != first {
 			return true
 		}

@@ -994,6 +994,122 @@ func TestRun_FailOnUnfixableWontFixGate(t *testing.T) {
 	}
 }
 
+// TestRun_FailOnKEVAndEPSSGates is D86's analogue of
+// TestRun_FailOnUnfixableWontFixGate just above, on its own table shape: a
+// finding's KEV/EPSS rows enter through a rating (D27's shape, exactly like
+// TestRun_AnNVDRatingReachesTheGate's NVD one), never through the advisory
+// itself, so every fixture here builds the advisory with buildMatrixDB and
+// then attaches the exploit-signal rating with putRating.
+func TestRun_FailOnKEVAndEPSSGates(t *testing.T) {
+	// kevListed: one finding, and CISA's catalog lists its CVE.
+	kevListed := func(t *testing.T) (db, sbom string) {
+		db = buildMatrixDB(t, []matrixAdv{
+			{id: "PYSEC-kev", pkg: "kevlisted", fixed: "2.0.0",
+				aliases: []string{"CVE-2025-9001"}, vectors: []string{vecMedium}},
+		})
+		putRating(t, db, advisory.Rating{CVE: "CVE-2025-9001", Source: "KEV",
+			KEV: true, KEVDateAdded: "2025-01-01", KEVRansomware: "Known"})
+		sbom = buildMatrixSBOM(t, []matrixPkg{{name: "kevlisted", purlType: "golang"}})
+		return db, sbom
+	}
+	// notKevListed: a finding with no KEV rating at all -- isolates "the flag
+	// does nothing when nothing is listed" from kevListed's always-present row.
+	notKevListed := func(t *testing.T) (db, sbom string) {
+		db = buildMatrixDB(t, []matrixAdv{
+			{id: "PYSEC-nokev", pkg: "notkevlisted", fixed: "2.0.0", vectors: []string{vecMedium}},
+		})
+		sbom = buildMatrixSBOM(t, []matrixPkg{{name: "notkevlisted", purlType: "golang"}})
+		return db, sbom
+	}
+	// highEPSS: one finding, EPSS-scored well above the 0.5 threshold every
+	// row below uses.
+	highEPSS := func(t *testing.T) (db, sbom string) {
+		db = buildMatrixDB(t, []matrixAdv{
+			{id: "PYSEC-hiepss", pkg: "highepss", fixed: "2.0.0",
+				aliases: []string{"CVE-2025-9002"}, vectors: []string{vecMedium}},
+		})
+		putRating(t, db, advisory.Rating{CVE: "CVE-2025-9002", Source: "EPSS",
+			EPSS: 0.94, EPSSPercentile: 0.99, EPSSModel: "v-test"})
+		sbom = buildMatrixSBOM(t, []matrixPkg{{name: "highepss", purlType: "golang"}})
+		return db, sbom
+	}
+	// lowEPSS: EPSS-scored, but below the threshold -- isolates "scored but
+	// not high enough" from an absent score entirely.
+	lowEPSS := func(t *testing.T) (db, sbom string) {
+		db = buildMatrixDB(t, []matrixAdv{
+			{id: "PYSEC-loepss", pkg: "lowepss", fixed: "2.0.0",
+				aliases: []string{"CVE-2025-9003"}, vectors: []string{vecMedium}},
+		})
+		putRating(t, db, advisory.Rating{CVE: "CVE-2025-9003", Source: "EPSS",
+			EPSS: 0.1, EPSSPercentile: 0.2, EPSSModel: "v-test"})
+		sbom = buildMatrixSBOM(t, []matrixPkg{{name: "lowepss", purlType: "golang"}})
+		return db, sbom
+	}
+	// noEPSS: a finding with no EPSS rating at all -- D17's "absent stays
+	// absent" case. Even the loosest possible threshold (0.0, "fail on
+	// anything EPSS has scored") must not trip on a finding EPSS never
+	// scored, which is the whole reason MaxEPSS returns an ok bool rather
+	// than treating a missing score as probability zero.
+	noEPSS := func(t *testing.T) (db, sbom string) {
+		db = buildMatrixDB(t, []matrixAdv{
+			{id: "PYSEC-noepss", pkg: "noepss", fixed: "2.0.0", vectors: []string{vecMedium}},
+		})
+		sbom = buildMatrixSBOM(t, []matrixPkg{{name: "noepss", purlType: "golang"}})
+		return db, sbom
+	}
+	// kevAndIncomplete: a KEV-listed finding AND a second, unrelated package
+	// the cataloger drops (unsupported purl type) -- the shape D11's
+	// precedence needs.
+	kevAndIncomplete := func(t *testing.T) (db, sbom string) {
+		db = buildMatrixDB(t, []matrixAdv{
+			{id: "PYSEC-kevinc", pkg: "kevincomplete", fixed: "2.0.0",
+				aliases: []string{"CVE-2025-9004"}, vectors: []string{vecMedium}},
+		})
+		putRating(t, db, advisory.Rating{CVE: "CVE-2025-9004", Source: "KEV", KEV: true})
+		sbom = buildMatrixSBOM(t, []matrixPkg{
+			{name: "kevincomplete", purlType: "golang"},
+			{name: "somecrate", purlType: "cargo"}, // dropped by the cataloger
+		})
+		return db, sbom
+	}
+
+	threshold := 0.5
+	zeroThreshold := 0.0
+
+	cases := []struct {
+		name    string
+		fixture func(t *testing.T) (db, sbom string)
+		opts    Options
+		want    int
+	}{
+		{"a KEV-listed finding does not trip the gate when the flag is not given", kevListed, Options{}, 0},
+		{"--fail-on-kev trips on a KEV-listed finding", kevListed, Options{FailOnKEV: true}, 1},
+		{"--fail-on-kev does not trip when nothing is KEV-listed", notKevListed, Options{FailOnKEV: true}, 0},
+
+		{"--fail-on-epss 0.5 trips at 0.94", highEPSS, Options{FailOnEPSS: &threshold}, 1},
+		{"--fail-on-epss 0.5 does not trip at 0.1", lowEPSS, Options{FailOnEPSS: &threshold}, 0},
+		{"--fail-on-epss never trips on a finding EPSS never scored, even at the loosest threshold (D17)",
+			noEPSS, Options{FailOnEPSS: &zeroThreshold}, 0},
+
+		// D11: 2 > 1 > 0. An incomplete scan outranks a KEV/EPSS finding
+		// exactly as it outranks every other exit-1 gate.
+		{"precedence: incomplete beats fail-on-kev (D11, 2 > 1)",
+			kevAndIncomplete, Options{FailOnIncomplete: true, FailOnKEV: true}, 2},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db, sbom := tc.fixture(t)
+			var out, errOut bytes.Buffer
+			got := Run(context.Background(), db, sbom, tc.opts, &out, &errOut)
+			if got != tc.want {
+				t.Errorf("Run() = %d, want %d\nstdout:\n%s\nstderr:\n%s",
+					got, tc.want, out.String(), errOut.String())
+			}
+		})
+	}
+}
+
 // TestRun_OutputJSON is the wiring test for Options.Output == "json": Run
 // must call report.JSON instead of report.Table, and --output json must not
 // merely add JSON alongside the table — `assay scan ... --output json | jq`
@@ -1014,8 +1130,8 @@ func TestRun_OutputJSON(t *testing.T) {
 		if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
 			t.Fatalf("stdout is not valid JSON: %v\n%s", err, out.String())
 		}
-		if doc.SchemaVersion != 6 {
-			t.Errorf("SchemaVersion = %d, want 6", doc.SchemaVersion)
+		if doc.SchemaVersion != 7 {
+			t.Errorf("SchemaVersion = %d, want 7", doc.SchemaVersion)
 		}
 		if len(doc.Findings) != 1 || doc.Findings[0].Advisory.ID != "GHSA-json-medium" {
 			t.Errorf("Findings = %+v, want the one medium finding", doc.Findings)

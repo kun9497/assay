@@ -102,6 +102,25 @@ type Options struct {
 	// Independent of FailOnUnfixable rather than a mode of it: passing both
 	// is redundant but not contradictory, and the broad one subsumes this.
 	FailOnUnfixableWontFix bool
+	// FailOnKEV makes a finding CISA's Known Exploited Vulnerabilities
+	// catalog lists trip the scan on its own, exit 1 (D86) — the identical
+	// shape to FailOnUnfixable one field up: a fact about the finding that
+	// no severity threshold expresses, checked through
+	// matcher.Finding.KnownExploited() rather than a band comparison.
+	FailOnKEV bool
+	// FailOnEPSS gates on FIRST.org's exploit-probability score: exit 1 when
+	// any finding's MaxEPSS() is at or above this threshold.
+	//
+	// A pointer for the reason Options.FailOn is one — 0.0 is a real,
+	// requestable threshold ("fail on anything EPSS has scored at all") and
+	// also float64's zero value, so it cannot mean "not set" without
+	// colliding with that explicit request.
+	//
+	// A finding with no EPSS row at all NEVER trips this: MaxEPSS's own
+	// ok == false already keeps D17's shape (absent stays absent), so the
+	// verdict check must read ok, never just compare the returned float
+	// against zero.
+	FailOnEPSS *float64
 	// Output selects the renderer: "" and "table" both mean the human table
 	// (Options{}'s zero value must reproduce today's behaviour exactly, the
 	// same rule Options.FailOn* already follows), "json" means the stable
@@ -618,6 +637,26 @@ func verdict(opts Options, sum report.Summary, findings []matcher.Finding) int {
 	// will-not-fix.
 	if opts.FailOnUnfixableWontFix && sum.WontFix > 0 {
 		return 1
+	}
+	// D86. Checked beside the unfixable gates above, and reading the count
+	// Summarize already computed for the same reason those do: the table's
+	// own "known-exploited" count and this gate must not drift apart on what
+	// counts as one.
+	if opts.FailOnKEV && sum.KnownExploited > 0 {
+		return 1
+	}
+	// D86. No precomputed count to read here, unlike FailOnKEV just above:
+	// the threshold is a caller-supplied number, not a fixed classification
+	// like KnownExploited or WontFix, so Summarize has nothing it could have
+	// counted in advance. Absent stays absent (D17's shape) because MaxEPSS's
+	// own ok is false for a finding no source scored, and the loop below
+	// only ever compares the ones that came back true.
+	if opts.FailOnEPSS != nil {
+		for _, f := range findings {
+			if v, ok := f.MaxEPSS(); ok && v >= *opts.FailOnEPSS {
+				return 1
+			}
+		}
 	}
 	for _, f := range findings {
 		// No separate "unless f.Severity is Unknown" guard: AtOrAbove already

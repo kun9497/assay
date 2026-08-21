@@ -156,6 +156,21 @@ func findingRule(id string, f matcher.Finding) sarifRule {
 	if f.Severity != severity.Unknown {
 		props["security-severity"] = fmt.Sprintf("%.1f", f.Score)
 	}
+	// D86, on this bag's own reasoning: neither grype nor trivy puts KEV
+	// membership or an EPSS score in SARIF at all, and both change what a
+	// finding is worth reviewing first, which is exactly what this
+	// properties bag exists to carry past the four fixed SARIF levels.
+	// Omitted rather than false/zero when absent, same as security-severity
+	// above -- a finding no source scored must not render as EPSS 0.0, which
+	// reads as "scored safest possible" rather than "not scored at all".
+	if kr, ok := f.KnownExploited(); ok {
+		props["kev"] = true
+		props["kevDateAdded"] = kr.KEVDateAdded
+		props["kevRansomware"] = kr.KEVRansomware
+	}
+	if v, ok := f.MaxEPSS(); ok {
+		props["epss"] = v
+	}
 	r := sarifRule{
 		ID:               id,
 		Name:             "Vulnerability",

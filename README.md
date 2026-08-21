@@ -611,6 +611,9 @@ exited 0 while 24 findings went unmentioned.
 - [x] Ubuntu fix states from Canonical's CVE tracker (D85) — stamped on the D52 seam at
       OSV conversion; grype parity exact on ubuntu:22.04 (the same 15 wont-fix pairs),
       and the build's first tool dependency (git) fails loud, never silent
+- [x] EPSS and KEV (D86) — typed rating fields that band ordering cannot see,
+      seed-excluded and refetched daily, --fail-on-kev and --fail-on-epss; log4j-core
+      draws 2 known-exploited and Log4Shell trips both gates
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a

@@ -23,7 +23,9 @@ import (
 	"github.com/kun9497/assay/internal/dbcmd"
 	"github.com/kun9497/assay/internal/provider"
 	"github.com/kun9497/assay/internal/provider/amazon"
+	"github.com/kun9497/assay/internal/provider/epss"
 	"github.com/kun9497/assay/internal/provider/fedora"
+	"github.com/kun9497/assay/internal/provider/kev"
 	"github.com/kun9497/assay/internal/provider/knvd"
 	"github.com/kun9497/assay/internal/provider/nvd"
 	"github.com/kun9497/assay/internal/provider/oracle"
@@ -179,6 +181,97 @@ func TestParseScanArgs(t *testing.T) {
 		// floor left the whole suite green.
 		if opts.FailOnUnfixable {
 			t.Error("opts.FailOnUnfixable = true, but --fail-on-unfixable was not given")
+		}
+	})
+
+	// D86: --fail-on-kev is a bare bool flag, the same shape as
+	// --fail-on-unfixable above.
+	t.Run("--fail-on-kev sets opts.FailOnKEV", func(t *testing.T) {
+		target, opts, err := parseScanArgs([]string{"alpine:3.19", "--fail-on-kev"})
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if target != "alpine:3.19" {
+			t.Errorf("target = %q, want %q", target, "alpine:3.19")
+		}
+		if !opts.FailOnKEV {
+			t.Error("opts.FailOnKEV = false, want true")
+		}
+	})
+
+	t.Run("--fail-on-epss, space form", func(t *testing.T) {
+		target, opts, err := parseScanArgs([]string{"alpine:3.19", "--fail-on-epss", "0.5"})
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if target != "alpine:3.19" {
+			t.Errorf("target = %q, want %q", target, "alpine:3.19")
+		}
+		if opts.FailOnEPSS == nil || *opts.FailOnEPSS != 0.5 {
+			t.Errorf("opts.FailOnEPSS = %v, want 0.5", opts.FailOnEPSS)
+		}
+	})
+
+	t.Run("--fail-on-epss=value form", func(t *testing.T) {
+		_, opts, err := parseScanArgs([]string{"alpine:3.19", "--fail-on-epss=0.94"})
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if opts.FailOnEPSS == nil || *opts.FailOnEPSS != 0.94 {
+			t.Errorf("opts.FailOnEPSS = %v, want 0.94", opts.FailOnEPSS)
+		}
+	})
+
+	// 0.0 is a real, requestable threshold ("fail on anything EPSS has
+	// scored"), not "not set" - the same D17-adjacent reasoning
+	// Options.FailOn's own pointer gets.
+	t.Run("--fail-on-epss=0 is a real threshold, not unset", func(t *testing.T) {
+		_, opts, err := parseScanArgs([]string{"alpine:3.19", "--fail-on-epss=0"})
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if opts.FailOnEPSS == nil {
+			t.Fatal("opts.FailOnEPSS = nil, want a pointer to 0.0")
+		}
+		if *opts.FailOnEPSS != 0 {
+			t.Errorf("*opts.FailOnEPSS = %v, want 0", *opts.FailOnEPSS)
+		}
+	})
+
+	t.Run("--fail-on-epss requires a value", func(t *testing.T) {
+		_, _, err := parseScanArgs([]string{"alpine:3.19", "--fail-on-epss"})
+		if err == nil {
+			t.Fatal("err = nil, want an error naming the missing value")
+		}
+		if !strings.Contains(err.Error(), "--fail-on-epss") {
+			t.Errorf("err = %q, want it to name --fail-on-epss", err)
+		}
+	})
+
+	t.Run("--fail-on-epss rejects a non-numeric value", func(t *testing.T) {
+		_, _, err := parseScanArgs([]string{"alpine:3.19", "--fail-on-epss=high"})
+		if err == nil {
+			t.Fatal("err = nil, want an error for a non-numeric EPSS threshold")
+		}
+	})
+
+	t.Run("--fail-on-epss rejects a value outside 0..1", func(t *testing.T) {
+		_, _, err := parseScanArgs([]string{"alpine:3.19", "--fail-on-epss=1.5"})
+		if err == nil {
+			t.Fatal("err = nil, want an error - EPSS is a probability, at most 1")
+		}
+		_, _, err = parseScanArgs([]string{"alpine:3.19", "--fail-on-epss=-0.1"})
+		if err == nil {
+			t.Fatal("err = nil, want an error - EPSS is a probability, at least 0")
+		}
+	})
+
+	// The same "the user thought they set a threshold but did not" shape
+	// setFailOn's own repeat-rejection guards against.
+	t.Run("a repeated --fail-on-epss is rejected, not silently last-wins", func(t *testing.T) {
+		_, _, err := parseScanArgs([]string{"alpine:3.19", "--fail-on-epss=0.5", "--fail-on-epss=0.1"})
+		if err == nil {
+			t.Fatal("err = nil, want an error: a repeated --fail-on-epss must not silently change the threshold")
 		}
 	})
 
@@ -784,6 +877,92 @@ func TestRun_ScanFailOnIncompleteTargetReachesRealExitCode(t *testing.T) {
 	}
 }
 
+// TestRun_ScanFailOnKEVAndEPSSReachRealExitCode is D86's own version of
+// TestRun_ScanFailOnIncompleteTargetReachesRealExitCode just above -- the
+// identical class of bug its own doc comment names: TestParseScanArgs proves
+// parseScanArgs sets opts.FailOnKEV/opts.FailOnEPSS correctly, and
+// scancmd's own TestRun_FailOnKEVAndEPSSGates proves scancmd.Run honours
+// them, but both stop at hand-built Options and scan() sits between them
+// setting opts.Version, where `opts.FailOnKEV = false` would type-check and
+// leave both suites green.
+func TestRun_ScanFailOnKEVAndEPSSReachRealExitCode(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ASSAY_DB_DIR", dir)
+
+	dbPath := filepath.Join(dir, "vulnerability.db")
+	w, err := store.Create(dbPath)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := w.Put(advisory.Advisory{
+		ID: "GHSA-kev-cli", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		Aliases: []string{"CVE-2026-88001"},
+		Affected: []advisory.Affected{{
+			Ecosystem: "Go",
+			Name:      "example.com/exploited",
+			Ranges: []advisory.Range{{
+				Type:   advisory.RangeSemver,
+				Events: []advisory.Event{{Introduced: "0"}, {Fixed: "2.0.0"}},
+			}},
+		}},
+		Severity: []advisory.Severity{
+			{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N"}, // medium
+		},
+	}); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	// D27's shape: KEV/EPSS enter as ratings on the CVE, not on the advisory
+	// itself -- what `db update` will have left behind once EPSS_ENABLE/
+	// KEV_ENABLE (D86, default ON) have run.
+	if err := w.PutRating(advisory.Rating{CVE: "CVE-2026-88001", Source: "KEV",
+		KEV: true, KEVDateAdded: "2026-01-01", KEVRansomware: "Known"}); err != nil {
+		t.Fatalf("PutRating(KEV): %v", err)
+	}
+	if err := w.PutRating(advisory.Rating{CVE: "CVE-2026-88001", Source: "EPSS",
+		EPSS: 0.94, EPSSPercentile: 0.99, EPSSModel: "v-test"}); err != nil {
+		t.Fatalf("PutRating(EPSS): %v", err)
+	}
+	if err := w.SetMeta(store.Meta{
+		Providers: map[string]store.Provenance{"osv": {Ecosystems: []string{"Go"}}},
+	}); err != nil {
+		t.Fatalf("SetMeta: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	sbom := filepath.Join(dir, "s.cdx.json")
+	doc := `{"bomFormat":"CycloneDX","specVersion":"1.5","version":1,"components":[` +
+		`{"type":"library","name":"exploited","version":"1.0.0","purl":"pkg:golang/example.com/exploited@1.0.0"}]}`
+	if err := os.WriteFile(sbom, []byte(doc), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		args []string
+		want int
+	}{
+		{"no flags: a KEV/EPSS-carrying finding present, neither gate changes the exit code alone",
+			[]string{"scan", sbom}, exitOK},
+		{"--fail-on-kev reaches scancmd.Run through run()",
+			[]string{"scan", sbom, "--fail-on-kev"}, exitFindings},
+		{"--fail-on-epss=0.5 reaches scancmd.Run through run() (scored 0.94)",
+			[]string{"scan", sbom, "--fail-on-epss=0.5"}, exitFindings},
+		{"--fail-on-epss=0.99 does not trip below its own score (0.94 < 0.99)",
+			[]string{"scan", sbom, "--fail-on-epss=0.99"}, exitOK},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := run(tc.args, &stdout, &stderr); code != tc.want {
+				t.Errorf("run(%v) = %d, want %d\nstdout:\n%s\nstderr:\n%s",
+					tc.args, code, tc.want, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
 // The CLI contract end to end for the repeated-flag rejection: exit 2, the
 // diagnostic on stderr, and stdout untouched. TestParseScanArgs already
 // proves parseScanArgs returns a non-nil error for a repeat; this proves the
@@ -842,8 +1021,8 @@ func TestRun_ScanOutputJSONReachesRealExitCode(t *testing.T) {
 	// cannot notice that the shape changed under it. Bumping this is meant to
 	// be the deliberate act that accompanies a schema change (D33 was the
 	// third).
-	if doc.SchemaVersion != 6 {
-		t.Errorf("SchemaVersion = %d, want 6", doc.SchemaVersion)
+	if doc.SchemaVersion != 7 {
+		t.Errorf("SchemaVersion = %d, want 7", doc.SchemaVersion)
 	}
 	// buildRunSeamFixture's critical, unrated and no-fix findings; somecrate
 	// is dropped by the cataloger and never reaches a Finding at all.
@@ -1272,6 +1451,13 @@ func TestDBUpdateAnnotators_NVDIsOptIn(t *testing.T) {
 	// would otherwise get the seven hours without asking for them.
 	t.Setenv("NVD_API_KEY", "spy-key-1")
 	t.Setenv("NVD_ENABLE", "")
+	// D86: EPSS_ENABLE/KEV_ENABLE default ON, unlike NVD_ENABLE -- isolated
+	// here so this test's "none without NVD_ENABLE" checks NVD's own opt-in
+	// wiring, not the two default-on annotators added alongside it. Same
+	// isolation shape TestDBUpdateProviders_RedHatOnByDefault uses for
+	// AMAZON/ORACLE/FEDORA/SUSE_ENABLE.
+	t.Setenv("EPSS_ENABLE", "0")
+	t.Setenv("KEV_ENABLE", "0")
 
 	orig := newNVDAnnotator
 	sawCall := false
@@ -1300,6 +1486,10 @@ func TestDBUpdateAnnotators_NVDIsOptIn(t *testing.T) {
 func TestDBUpdateAnnotators_ConstructsNVDWithTheAPIKeyFromEnv(t *testing.T) {
 	t.Setenv("NVD_API_KEY", "spy-key-1")
 	t.Setenv("NVD_ENABLE", "1")
+	// D86: isolate NVD's own wiring from the two default-on annotators added
+	// alongside it -- see TestDBUpdateAnnotators_NVDIsOptIn's own comment.
+	t.Setenv("EPSS_ENABLE", "0")
+	t.Setenv("KEV_ENABLE", "0")
 
 	var gotOpts nvd.Options
 	sawCall := false
@@ -1321,6 +1511,120 @@ func TestDBUpdateAnnotators_ConstructsNVDWithTheAPIKeyFromEnv(t *testing.T) {
 	}
 	if len(annotators) != 1 || annotators[0].Name() != nvd.SourceName {
 		t.Errorf("dbUpdateAnnotators() = %+v, want exactly one NVD annotator", annotators)
+	}
+}
+
+// TestDBUpdateAnnotators_EPSSOnByDefault is the caller-first proof for D86's
+// wiring: dbUpdateAnnotators must actually construct the EPSS annotator when
+// EPSS_ENABLE is unset, not merely have epss.New sitting unused in the
+// import list. Driven through a spy exactly as
+// TestDBUpdateProviders_RedHatOnByDefault's own doc comment explains why:
+// mutating the call site to drop the annotator (or its Options) compiles and
+// leaves every other test in this package green. NVD_ENABLE and KEV_ENABLE
+// are isolated the same way TestDBUpdateProviders_AmazonOnByDefault isolates
+// REDHAT_ENABLE/SUSE_ENABLE from its own subject.
+func TestDBUpdateAnnotators_EPSSOnByDefault(t *testing.T) {
+	t.Setenv("EPSS_ENABLE", "")
+	t.Setenv("NVD_ENABLE", "0")
+	t.Setenv("KEV_ENABLE", "0")
+
+	orig := newEPSSAnnotator
+	sawCall := false
+	var gotOpts epss.Options
+	newEPSSAnnotator = func(opts epss.Options) *epss.Provider {
+		sawCall, gotOpts = true, opts
+		return orig(opts)
+	}
+	defer func() { newEPSSAnnotator = orig }()
+
+	annotators := dbUpdateAnnotators(io.Discard)
+	if !sawCall {
+		t.Fatal("dbUpdateAnnotators never constructed the EPSS annotator -- EPSS_ENABLE defaults ON (D86)")
+	}
+	if gotOpts.Progress == nil {
+		t.Error("epss.New was constructed with a nil Progress -- Annotate's own stats line would go nowhere")
+	}
+	if len(annotators) != 1 || annotators[0].Name() != epss.SourceName {
+		t.Errorf("dbUpdateAnnotators() = %+v, want exactly one EPSS annotator", annotators)
+	}
+}
+
+// TestDBUpdateAnnotators_EPSSDisabledViaEnv is the other half:
+// EPSS_ENABLE=0 must actually turn the fetch off, not merely be read and
+// ignored -- the silent-drop direction every other provider's test in this
+// file already pins for its own flag.
+func TestDBUpdateAnnotators_EPSSDisabledViaEnv(t *testing.T) {
+	t.Setenv("EPSS_ENABLE", "0")
+
+	orig := newEPSSAnnotator
+	sawCall := false
+	newEPSSAnnotator = func(opts epss.Options) *epss.Provider {
+		sawCall = true
+		return orig(opts)
+	}
+	defer func() { newEPSSAnnotator = orig }()
+
+	annotators := dbUpdateAnnotators(io.Discard)
+	if sawCall {
+		t.Error("dbUpdateAnnotators constructed the EPSS annotator even with EPSS_ENABLE=0")
+	}
+	for _, a := range annotators {
+		if a.Name() == epss.SourceName {
+			t.Errorf("dbUpdateAnnotators() = %+v, want no EPSS annotator with EPSS_ENABLE=0", annotators)
+		}
+	}
+}
+
+// TestDBUpdateAnnotators_KEVOnByDefault is EPSS's own test, mirrored for KEV
+// (D86) -- see TestDBUpdateAnnotators_EPSSOnByDefault's doc comment for the
+// full reasoning.
+func TestDBUpdateAnnotators_KEVOnByDefault(t *testing.T) {
+	t.Setenv("KEV_ENABLE", "")
+	t.Setenv("NVD_ENABLE", "0")
+	t.Setenv("EPSS_ENABLE", "0")
+
+	orig := newKEVAnnotator
+	sawCall := false
+	var gotOpts kev.Options
+	newKEVAnnotator = func(opts kev.Options) *kev.Provider {
+		sawCall, gotOpts = true, opts
+		return orig(opts)
+	}
+	defer func() { newKEVAnnotator = orig }()
+
+	annotators := dbUpdateAnnotators(io.Discard)
+	if !sawCall {
+		t.Fatal("dbUpdateAnnotators never constructed the KEV annotator -- KEV_ENABLE defaults ON (D86)")
+	}
+	if gotOpts.Progress == nil {
+		t.Error("kev.New was constructed with a nil Progress -- Annotate's own stats line would go nowhere")
+	}
+	if len(annotators) != 1 || annotators[0].Name() != kev.SourceName {
+		t.Errorf("dbUpdateAnnotators() = %+v, want exactly one KEV annotator", annotators)
+	}
+}
+
+// TestDBUpdateAnnotators_KEVDisabledViaEnv is EPSS's own disabled-test,
+// mirrored for KEV (D86).
+func TestDBUpdateAnnotators_KEVDisabledViaEnv(t *testing.T) {
+	t.Setenv("KEV_ENABLE", "0")
+
+	orig := newKEVAnnotator
+	sawCall := false
+	newKEVAnnotator = func(opts kev.Options) *kev.Provider {
+		sawCall = true
+		return orig(opts)
+	}
+	defer func() { newKEVAnnotator = orig }()
+
+	annotators := dbUpdateAnnotators(io.Discard)
+	if sawCall {
+		t.Error("dbUpdateAnnotators constructed the KEV annotator even with KEV_ENABLE=0")
+	}
+	for _, a := range annotators {
+		if a.Name() == kev.SourceName {
+			t.Errorf("dbUpdateAnnotators() = %+v, want no KEV annotator with KEV_ENABLE=0", annotators)
+		}
 	}
 }
 
@@ -2409,6 +2713,13 @@ func TestDBUpdateEnrichers_KISADefaultsOn(t *testing.T) {
 // because the two now share envFlag, and a change that flipped the shared
 // default would turn every build into a seven-hour one.
 func TestDBUpdateAnnotators_NVDStaysOptIn(t *testing.T) {
+	// D86: isolated from the two default-on annotators added alongside NVD --
+	// see TestDBUpdateAnnotators_NVDIsOptIn's own comment. Without this,
+	// len(got) > 0 is true unconditionally (EPSS+KEV alone), and every case
+	// below -- including want=false -- would pass regardless of what
+	// NVD_ENABLE actually did.
+	t.Setenv("EPSS_ENABLE", "0")
+	t.Setenv("KEV_ENABLE", "0")
 	for value, want := range map[string]bool{"": false, "0": false, "1": true, "true": true} {
 		t.Setenv("NVD_ENABLE", value)
 		if got := dbUpdateAnnotators(io.Discard); (len(got) > 0) != want {

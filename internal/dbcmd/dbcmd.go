@@ -53,6 +53,34 @@ import (
 // copying advisories forward would not be. This is the seven-hour half a
 // six-hour scheduled build cannot otherwise afford.
 //
+// Ratings have no such failure — NVD does not delete CVEs, a revised score
+// changes lastModified so the next delta overwrites it, and a rating for a
+// CVE no advisory matches is unreachable (Matcher.annotate only asks about
+// identifiers a finding already carries) — which is what makes copying them
+// forward sound where copying advisories forward would not be. That
+// soundness assumes the rating is a FACT fixed by a past scoring event,
+// which is what NVD's CVSS vector, KISA's grading and every OSV record's
+// severity all are. EPSS and KEV are the exception (D86, see
+// perishableRatingSources below): an EPSS score is a daily-rescored
+// probability with no "revised score" concept — there is only today's
+// number — and a KEV catalog entry can be REMOVED, something a carry-forward
+// has no way to notice since nothing here re-reads CISA's current list. Both
+// are excluded from the record-by-record ratings copy a few paragraphs down
+// and re-fetched fresh by their own annotator every build (EPSS_ENABLE/
+// KEV_ENABLE default ON, main.go).
+//
+// NOT excluded from ratingsOnly's own copy just below, which is a whole-FILE
+// copy rather than a record-by-record one and so has no per-record hook to
+// exclude anything at. In the ordinary case that is harmless: EPSS_ENABLE
+// and KEV_ENABLE default ON, so their annotators re-run and overwrite every
+// carried-forward row with a fresh fetch regardless. It stops being
+// harmless only if a `--ratings-only` build ALSO sets EPSS_ENABLE=0 or
+// KEV_ENABLE=0 — a build asking to re-rate with NVD alone would then still
+// carry the seed's stale EPSS/KEV rows forward verbatim. Narrow enough
+// (--ratings-only is D65's own backfill-only flag) that it is recorded here
+// rather than fixed: closing it needs bucket-level surgery on the copied
+// file, not a filter on a stream this path never reads record by record.
+//
 // seedRef is what every message about the seed NAMES it as, instead of
 // seedPath. The CLI's `db build --seed <ref>` pulls the reference to a
 // throwaway scratch file before calling Update (Update itself only ever
@@ -300,6 +328,14 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 		}
 		seeded := 0
 		copyErr := src.EachRating(func(r advisory.Rating) error {
+			// D86: EPSS and KEV are excluded from the seed copy -- see
+			// perishableRatingSources' own doc comment for why a
+			// daily-rescored probability or a catalog membership must never
+			// ride forward from yesterday's artifact the way NVD's CVSS
+			// opinion does.
+			if perishableRatingSources[r.Source] {
+				return nil
+			}
 			seeded++
 			return w.PutRating(r)
 		})
@@ -346,7 +382,19 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 		// minute: re-fetching is cheaper than the machinery to inherit it,
 		// where ratings genuinely cost seven hours. If enrichment ever grows
 		// a cost like that, this is the line that has to change.
-		maps.Copy(meta.Ratings, seedMeta.Ratings)
+		//
+		// EPSS/KEV coverage is excluded from this merge too, for the same
+		// reason the ratings copy above excludes their rows (D86,
+		// perishableRatingSources' own doc comment): a build whose EPSS/KEV
+		// annotator did not run this time must report "not covered" rather
+		// than the seed's stale window claiming current coverage for data
+		// that was never actually re-fetched.
+		for name, p := range seedMeta.Ratings {
+			if perishableRatingSources[name] {
+				continue
+			}
+			meta.Ratings[name] = p
+		}
 		fmt.Fprintf(stderr, "seeded %d rating(s) from %s; advisories rebuilt from source\n", seeded, label)
 	}
 
@@ -971,6 +1019,25 @@ func releaseParts(rel string) (major, minor int, ok bool) {
 	}
 	return major, minor, true
 }
+
+// perishableRatingSources names the D86 annotators whose data must never
+// ride forward from a seed (Update's own doc comment on the "seedRef" block
+// gives the full reasoning): EPSS is a probability rescored daily with no
+// concept of a stable historical value the way a CVE's CVSS vector is, and a
+// KEV catalog entry can be REMOVED by CISA, something copying a seed forward
+// has no way to notice. Both re-fetch the whole feed on every build
+// (EPSS_ENABLE/KEV_ENABLE default ON in cmd/assay/main.go, unlike NVD's
+// opt-in), so excluding them here costs nothing a normal build was not
+// already going to redo.
+//
+// A literal set of source-name strings, not a reference to epss.SourceName/
+// kev.SourceName: this package takes provider.Annotator as an interface and
+// otherwise names no concrete provider package at all -- cmd/assay/main.go's
+// dbUpdateAnnotators is what constructs the concrete epss.Provider/
+// kev.Provider values, and dbcmd itself never imports either package -- so
+// two string literals is cheaper than breaking that separation for a
+// comparison this narrow.
+var perishableRatingSources = map[string]bool{"EPSS": true, "KEV": true}
 
 // mergeRatingCoverage combines what a seed already held with what this run
 // fetched, for one rating source.

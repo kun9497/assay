@@ -585,6 +585,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] Ubuntu fix state를 Canonical의 CVE tracker에서 (D85) — OSV 변환 시점에 D52
       이음매에 찍음; ubuntu:22.04에서 grype와 정확히 일치(같은 wont-fix 쌍 15개), 그리고
       빌드의 첫 도구 의존성(git)은 조용하지 않고 시끄럽게 실패함
+- [x] EPSS와 KEV (D86) — 밴드 순서가 볼 수 없는 typed rating 필드, seed에서 제외되고
+      매일 다시 fetch됨, --fail-on-kev와 --fail-on-epss; log4j-core는
+      2 known-exploited를 그려내고 Log4Shell이 두 게이트 다 건드림
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건

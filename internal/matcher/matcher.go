@@ -191,6 +191,48 @@ type Rating struct {
 	// range stated, which is FixStateUnknown for every source but Red Hat's
 	// CSAF VEX feed — those record that no fix is known without saying why.
 	FixState advisory.FixState
+	// NoSeverityOpinion marks a source that expressed none — an annotation
+	// carrying zero Severity entries (D86: EPSS/KEV). A probability is not a
+	// severity opinion, and the disagreement marker must not fire because an
+	// opinionless source "differs" from a rated one. Inverted so the zero
+	// value is correct for every matched record and every NVD annotation:
+	// only the exceptional row sets it.
+	NoSeverityOpinion bool
+	// D86: typed exploit-likelihood fields, copied verbatim from the stored
+	// rating. Never consulted by band ordering — see advisory.Rating's own
+	// comment for why they are typed rather than Severity-encoded.
+	EPSS           float64
+	EPSSPercentile float64
+	EPSSModel      string
+	KEV            bool
+	KEVDateAdded   string
+	KEVRansomware  string
+}
+
+// KnownExploited returns the KEV-carrying rating, if any source attached one
+// (D86). One accessor rather than renderers walking Ratings, so the gate and
+// every renderer agree on what "on the KEV list" means.
+func (f Finding) KnownExploited() (Rating, bool) {
+	for _, r := range f.Ratings {
+		if r.KEV {
+			return r, true
+		}
+	}
+	return Rating{}, false
+}
+
+// MaxEPSS returns the highest EPSS probability any source attached, and
+// whether one was attached at all — absent stays absent (D17's shape): a
+// finding with no EPSS row must not read as probability zero, which would
+// mean "safest possible" rather than "unscored".
+func (f Finding) MaxEPSS() (float64, bool) {
+	best, ok := 0.0, false
+	for _, r := range f.Ratings {
+		if r.EPSSModel != "" && (!ok || r.EPSS > best) {
+			best, ok = r.EPSS, true
+		}
+	}
+	return best, ok
 }
 
 // fixStateOf resolves what one match says about a fix.
@@ -942,13 +984,26 @@ func (m *Matcher) annotate(f *Finding) error {
 		for _, r := range rs {
 			band, score := severity.Highest(vectorsOf(advisory.Advisory{Severity: r.Severity}))
 			f.Ratings = append(f.Ratings, Rating{
-				Database:   r.Source,
-				AdvisoryID: r.CVE,
-				Severity:   band,
-				Score:      score,
-				URL:        r.URL,
+				Database:          r.Source,
+				AdvisoryID:        r.CVE,
+				Severity:          band,
+				Score:             score,
+				URL:               r.URL,
+				NoSeverityOpinion: len(r.Severity) == 0,
+				EPSS:              r.EPSS,
+				EPSSPercentile:    r.EPSSPercentile,
+				EPSSModel:         r.EPSSModel,
+				KEV:               r.KEV,
+				KEVDateAdded:      r.KEVDateAdded,
+				KEVRansomware:     r.KEVRansomware,
 				// Fixed stays empty on purpose: see Rating.Fixed.
 			})
+			// An opinionless annotation (D86: EPSS/KEV) has nothing to raise
+			// and must not enter beats()'s tie-break either — its Unknown
+			// band is an artifact of carrying no vectors, not an assessment.
+			if len(r.Severity) == 0 {
+				continue
+			}
 			// The aggregate only, never the display. beats() decides whether
 			// this outranks what is there, so unknown still sits outside the
 			// ordering (D17) and a source that scored nothing cannot pull a

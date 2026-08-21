@@ -151,8 +151,20 @@ func explainOne(w io.Writer, f matcher.Finding) error {
 	}
 	lines = append(lines, sevLine)
 	for _, r := range f.Ratings {
+		// D86: an EPSS/KEV row carries no severity opinion at all
+		// (matcher.Rating.NoSeverityOpinion's own doc comment) and must never
+		// render as a ratingLine pretending to be a severity source --
+		// ratingLine's fixed SEVERITY column would print "unknown" beside a
+		// database that never claimed a band, reading as a fourth source
+		// that looked at this CVE and shrugged rather than what it actually
+		// is: a different kind of opinion entirely. Rendered separately,
+		// below, after every real severity source.
+		if isExploitSignal(r) {
+			continue
+		}
 		lines = append(lines, ratingLine(r))
 	}
+	lines = append(lines, epssKevLines(f.Ratings)...)
 	lines = append(lines, fmt.Sprintf("comparer: %s", comparerName(f.Package.Ecosystem)))
 
 	ev := f.Evidence
@@ -260,6 +272,51 @@ func ratingLine(r matcher.Rating) string {
 		line += "  " + r.URL
 	}
 	return line
+}
+
+// isExploitSignal reports whether r is one of D86's EPSS/KEV rows rather
+// than a severity source.
+//
+// A signal check, not an identity check on r.Database: EPSSModel is set on
+// every EPSS row and on no other source's rating (advisory.Rating's own
+// comment — the typed fields are additive and copied verbatim, never routed
+// through Severity), and KEV is a plain bool no other source ever sets. This
+// mirrors the check matcher.Finding.MaxEPSS/KnownExploited themselves use,
+// rather than hardcoding the string "EPSS"/"KEV" a second time in this
+// package.
+func isExploitSignal(r matcher.Rating) bool {
+	return r.EPSSModel != "" || r.KEV
+}
+
+// epssKevLines renders D86's exploit-likelihood/known-exploitation rows as
+// short labeled lines, on enrichmentLines' own precedent (that function's own
+// doc comment): this is a different kind of information than a severity
+// source's rating, so it earns its own shape rather than being squeezed into
+// ratingLine's fixed columns, which is exactly why isExploitSignal excludes
+// these rows from the loop that precedes this block.
+//
+// One finding can carry both a separate EPSS rating and a separate KEV
+// rating (the store keys each source under its own "<CVE>\x00<Source>" —
+// two rows, not one with both sets of fields), so this checks each field
+// independently per row rather than assuming they are mutually exclusive.
+func epssKevLines(rs []matcher.Rating) []string {
+	var lines []string
+	for _, r := range rs {
+		// r.Database already names the source ("EPSS"/"KEV") via the %-6s
+		// column, so the label after it says what the row means rather than
+		// repeating the name a second time.
+		if r.EPSSModel != "" {
+			lines = append(lines, fmt.Sprintf(
+				"  %-6s probability %.5f, percentile %.5f, model %s",
+				r.Database, r.EPSS, r.EPSSPercentile, r.EPSSModel))
+		}
+		if r.KEV {
+			lines = append(lines, fmt.Sprintf(
+				"  %-6s added %s, ransomware use: %s",
+				r.Database, r.KEVDateAdded, r.KEVRansomware))
+		}
+	}
+	return lines
 }
 
 // mainlineUbuntuName mirrors version.For's own Ubuntu pattern, anchored for
