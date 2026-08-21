@@ -736,6 +736,29 @@ func TestParse_SourceFromUpstreamQualifier(t *testing.T) {
 	}
 }
 
+// D84: apk gets the same per-purl "distro" qualifier fallback rpm and deb
+// already had (D83). Before this fix the apk branch keyed ONLY from the
+// document's own operating-system component, so a document with no such
+// component left every apk package unkeyed even when the purl itself carried
+// a usable "distro" qualifier — exactly the shape a real syft 1.51 SPDX
+// document has, since SPDX carries no operating-system entity at all.
+func TestParse_APKKeyedViaQualifierFallback_NoOSComponent(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+	  {"type":"library","name":"libssl3","version":"3.1.4-r5",
+	   "purl":"pkg:apk/alpine/libssl3@3.1.4-r5?arch=x86_64&distro=alpine-3.19.9"}]}`
+	target, _, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1", len(target.Packages))
+	}
+	if got := target.Packages[0].Ecosystem; got != "Alpine:v3.19" {
+		t.Errorf("Ecosystem = %q, want %q (keyed from the purl's own distro qualifier, D84)",
+			got, "Alpine:v3.19")
+	}
+}
+
 // An SBOM with apk packages but no distro cannot be keyed. The packages must
 // still be cataloged so they are counted and reported as skipped — dropping
 // them would shrink the denominator and make the scan look complete.

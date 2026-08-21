@@ -579,6 +579,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       키를 잡고, epoch는 자신의 qualifier에서 복원; rockylinux:9는 SBOM과 이미지가
       finding 169건으로 일치하고, 최신 syft SBOM은 더 이상
       --fail-on-incomplete=target에 걸리지 않음
+- [x] SPDX 2.2/2.3 JSON (D84) — 공유 purl core가 syft와 Red Hat 벤더 SBOM을 똑같이
+      읽음(repository_id, rpmmod, arch=src); rocky9는 SPDX와 CycloneDX가 동일하게
+      스캔되고, Red Hat 자신의 ubi9-micro SBOM은 20/20으로 키가 잡힘
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건

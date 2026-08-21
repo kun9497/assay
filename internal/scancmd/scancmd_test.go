@@ -245,6 +245,45 @@ func TestRun_TargetKinds(t *testing.T) {
 	})
 }
 
+// TestRun_SPDXTargetIsRouted proves the SPDX sniff added to classify.go and
+// scancmd's own TargetSBOM branch (D84) actually reaches spdx.Parse: an
+// inline SPDX-2.3 document's one Go package, on the database's Go coverage,
+// is both cataloged AND matched against a real advisory — not merely
+// accepted as valid JSON, which "no components" (the empty-document message)
+// would also satisfy.
+//
+// Deleting either sniff branch sends this document into cyclonedx.Parse
+// instead, which fails outright: an SPDX document carries no "bomFormat"
+// key, so BOMFormat decodes to "" and cyclonedx.Parse's own check rejects it
+// — exit 2, not the exit-0/1-finding result asserted here.
+func TestRun_SPDXTargetIsRouted(t *testing.T) {
+	dbPath := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-spdx-routed", pkg: "spdxrouted", fixed: "2.0.0", vectors: []string{vecCritical}},
+	})
+	// No DESCRIBES relationship here on purpose: SPDX-2.3 does not require
+	// one, and this document's only package must NOT be mistaken for the
+	// document-root pseudo-package (D84) — pointing DESCRIBES at the sole
+	// real package (rather than a separate, synthetic root) would exclude
+	// it, proving nothing about routing at all.
+	const doc = `{"spdxVersion":"SPDX-2.3","SPDXID":"SPDXRef-DOCUMENT","packages":[
+	  {"name":"spdxrouted","SPDXID":"SPDXRef-Package-spdxrouted","versionInfo":"1.0.0",
+	   "externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl",
+	     "referenceLocator":"pkg:golang/example.com/spdxrouted@1.0.0"}]}]}`
+	path := filepath.Join(t.TempDir(), "s.spdx.json")
+	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), dbPath, path, Options{}, &out, &errOut); code != 0 {
+		t.Fatalf("Run(spdx) = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "1 finding") {
+		t.Errorf("stdout = %q, want the GHSA-spdx-routed finding matched off the SPDX document's purl",
+			out.String())
+	}
+}
+
 // A target we cannot read is exit 2 with a message naming the target, never a
 // clean empty scan (D11).
 func TestRun_UnreadableTargetExits2(t *testing.T) {

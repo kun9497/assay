@@ -3078,6 +3078,44 @@ ubi8/nodejs-18을 syft-1.51 SBOM으로: module 패키지가 stream-match됩니�
 
 ---
 
+### D84 — SPDX, 벤더가 실제로 발행하는 형식
+
+**결정.** SPDX 2.2/2.3 JSON이 두 번째 SBOM 파서입니다, stdlib만 씁니다(네 번째 의존성
+없음), 최상위 `spdxVersion` 키로 감지하며 같은 classify 이음매를 씁니다 — 그 이음매의
+주석이 예측했던 "다섯 번째 형식"입니다. D83이 만든 purl→Package 매핑은 공유 core로
+`pkgmeta`에 옮겨졌습니다; CycloneDX 테스트 전부가 옮기지 않고도 통과했고, 이것이 추출이
+동작을 보존했다는 증거입니다. 이 이동은 두 파서 모두에서 발견된 구멍도 고쳤습니다:
+apk 분기에는 purl별 distro-qualifier 대체 수단이 없었습니다(그리고 `upstream`에서 오는
+Source도 없었습니다 — D8의 libssl3→openssl 조인이 syft의 originPackage 속성이 없는
+문서에서는 조용히 빠져 있었습니다).
+
+**SPDX는 CycloneDX가 진실을 말했던 자리에서 거짓말을 하므로, 규칙이 뒤집힙니다.**
+`versionInfo`는 세 가지로 거짓말합니다(Red Hat 컨테이너는 release를 빼고, product SBOM은
+""나 "UNKNOWN"을 쓰고, syft는 purl이 빼는 epoch를 넣습니다) — purl만이 읽는 버전입니다.
+`referenceCategory`는 같은 벤더가 `PACKAGE-MANAGER`와 `PACKAGE_MANAGER` 둘 다로
+씁니다 — `referenceType=="purl"`만 매칭합니다. operating-system 엔티티가 없으므로 모든
+패키지는 자기 자신의 qualifier에서 키를 잡습니다; Ubuntu의 LTS 접미사는 그것을 말해 줄
+PRETTY_NAME이 없을 때만 짝수 연도 .04 주기에서 유도합니다(진술이 정책을 이깁니다).
+문서 루트의 가짜 패키지는 DESCRIBES 관계로 제외되고, files[]는 무시되며, 패키지당 purl
+여러 개는 매핑된 튜플 기준으로 중복 제거됩니다.
+
+**Red Hat 자신의 SBOM은 신호를 자기만의 철자로 담습니다**: `distro` qualifier가 아예
+없습니다 — `repository_id=rhel-9-for-x86_64-baseos-rpms`가 `Red Hat:9`를
+이끌어냅니다(접두사만, 그 밖의 것은 시끄럽게 키 없이 남습니다); `rpmmod=NSVC`가 D80이
+매칭하는 module stream을 담습니다; `arch=src` SRPM 패키지는 skip되고 세어집니다. 실전:
+실제 ubi9-micro 벤더 SBOM은 repository_id로 키를 잡아 rpm 패키지 20/20을 스캔하고,
+finding 57건입니다; delve module SBOM은 `rpmmod`에서 `go-toolset:rhel8`을 stream-match
+합니다.
+
+**E2E와 정직한 성능 저하.** rocky9 SPDX ≡ CycloneDX(144/144/169/0 동일); ubi8/nodejs-18
+SPDX는 syft의 modularityLabel 속성을 잃습니다(SPDX에는 그것을 둘 자리가 없습니다), 그래서
+그 module 패키지 8개는 CycloneDX 쌍둥이가 stream-match하는 자리에서 시끄럽게 not
+evaluated입니다 — D80의 거부가 정확히 제 할 일을 하는 것입니다. debian:12 SPDX 스캔은
+키가 잡히고, 버전 없는 ELF-note purl 하나(`distro=Debian`)는 추측하는 대신 올바르게
+거부됩니다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

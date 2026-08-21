@@ -605,6 +605,9 @@ exited 0 while 24 findings went unmentioned.
       image path uses, epoch restored from its qualifier; a rockylinux:9 SBOM and the
       image agree at 169 findings, and modern syft SBOMs stop tripping
       --fail-on-incomplete=target
+- [x] SPDX 2.2/2.3 JSON (D84) — the shared purl core reads syft and Red Hat vendor SBOMs
+      alike (repository_id, rpmmod, arch=src); rocky9 SPDX and CycloneDX scan
+      identically, and Red Hat's own ubi9-micro SBOM keys 20/20
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a

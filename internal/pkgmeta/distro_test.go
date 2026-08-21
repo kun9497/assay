@@ -420,8 +420,21 @@ func TestDistroEcosystem_Ubuntu(t *testing.T) {
 		// turns that into a whole-package skip rather than a clean
 		// verdict. Pinned because that safety net is the reason reading a
 		// free-text field here is acceptable at all.
-		{"no PRETTY_NAME degrades to the bare key",
-			Distro{ID: "ubuntu", VersionID: "22.04"}, "Ubuntu:22.04"},
+		// D84 changed the no-PRETTY_NAME case: an SBOM purl's distro
+		// qualifier carries no PrettyName at all, and Canonical's even-year
+		// .04 cadence is deterministic, so the fallback derives LTS rather
+		// than degrading — but ONLY when no statement exists.
+		{"no PRETTY_NAME, even-year .04 derives LTS",
+			Distro{ID: "ubuntu", VersionID: "22.04"}, "Ubuntu:22.04:LTS"},
+		{"no PRETTY_NAME, odd-year .04 stays bare",
+			Distro{ID: "ubuntu", VersionID: "23.04"}, "Ubuntu:23.04"},
+		{"no PRETTY_NAME, October release stays bare",
+			Distro{ID: "ubuntu", VersionID: "24.10"}, "Ubuntu:24.10"},
+		// A statement beats the policy: a PRETTY_NAME that exists and does
+		// NOT say LTS wins over the even-year rule, whatever the version.
+		{"PRETTY_NAME without LTS overrides the even-year rule",
+			Distro{ID: "ubuntu", VersionID: "24.04", PrettyName: "Ubuntu Custom 24.04"},
+			"Ubuntu:24.04"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := tt.d.Ecosystem()
