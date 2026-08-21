@@ -393,6 +393,100 @@ func TestJSON_CarriesFullRatingsArray(t *testing.T) {
 	}
 }
 
+// TestJSON_RatingRecordCarriesEPSSAndKEVFields is D86's caller-first proof
+// for the JSON renderer: matcher.Rating's typed EPSS/KEV fields must reach
+// RatingRecord, not just exist on the type nothing populates. A finding
+// carries a plain GHSA rating, a separate EPSS rating and a separate KEV
+// rating — the shape a real scan produces once EPSS_ENABLE/KEV_ENABLE have
+// run (each source keyed under its own "<CVE>\x00<Source>" in the store).
+func TestJSON_RatingRecordCarriesEPSSAndKEVFields(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "libfoo", Version: "1.0.0", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{ID: "GHSA-epsskev-json"},
+		Severity: severity.High,
+		Score:    7.5,
+		Ratings: []matcher.Rating{
+			{Database: "GHSA", AdvisoryID: "GHSA-epsskev-json", Severity: severity.High, Score: 7.5, Fixed: "2.0.0"},
+			// Severity: Unknown, NoSeverityOpinion: true -- what
+			// matcher.annotate() actually sets for a stored rating with no
+			// Severity entries (matcher.go), not the zero value (None).
+			{Database: "EPSS", Severity: severity.Unknown, NoSeverityOpinion: true,
+				EPSS: 0.62345, EPSSPercentile: 0.81111, EPSSModel: "v2026.06.15"},
+			{Database: "KEV", Severity: severity.Unknown, NoSeverityOpinion: true,
+				KEV: true, KEVDateAdded: "2026-03-15", KEVRansomware: "Known"},
+		},
+	}}}
+	var buf bytes.Buffer
+	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	var doc Document
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Findings) != 1 || len(doc.Findings[0].Ratings) != 3 {
+		t.Fatalf("Findings/Ratings shape = %+v, want one finding with three ratings", doc.Findings)
+	}
+	rs := doc.Findings[0].Ratings
+
+	epssRow, kevRow := rs[1], rs[2]
+	if epssRow.Database != "EPSS" || epssRow.EPSS != 0.62345 ||
+		epssRow.EPSSPercentile != 0.81111 || epssRow.EPSSModel != "v2026.06.15" {
+		t.Errorf("EPSS rating = %+v, want EPSS=0.62345 EPSSPercentile=0.81111 EPSSModel=v2026.06.15", epssRow)
+	}
+	if epssRow.KEV || epssRow.KEVDateAdded != "" || epssRow.KEVRansomware != "" {
+		t.Errorf("EPSS rating carries KEV fields it should not: %+v", epssRow)
+	}
+	if kevRow.Database != "KEV" || !kevRow.KEV || kevRow.KEVDateAdded != "2026-03-15" || kevRow.KEVRansomware != "Known" {
+		t.Errorf("KEV rating = %+v, want KEV=true KEVDateAdded=2026-03-15 KEVRansomware=Known", kevRow)
+	}
+	if kevRow.EPSS != 0 || kevRow.EPSSModel != "" {
+		t.Errorf("KEV rating carries EPSS fields it should not: %+v", kevRow)
+	}
+
+	// The raw bytes, not just the unmarshaled struct: proves the keys are
+	// actually spelled "epss"/"kevDateAdded"/etc in the wire format, which a
+	// json tag typo could break while every unmarshal-based assertion above
+	// stayed green (Go's decoder is case-insensitive and tolerates unknown
+	// fields, so a struct-only check cannot catch a renamed key).
+	out := buf.String()
+	for _, want := range []string{
+		`"epss": 0.62345`, `"epssPercentile": 0.81111`, `"epssModel": "v2026.06.15"`,
+		`"kev": true`, `"kevDateAdded": "2026-03-15"`, `"kevRansomware": "Known"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output does not contain %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestJSON_EPSSKEVFieldsOmittedWhenAbsent is the omitempty half: an ordinary
+// rating from any OTHER source must not carry six zero/empty EPSS/KEV keys —
+// RatingRecord's own doc comment explains why that departs from every other
+// field's no-omitempty convention on this type (six columns of noise on
+// every rating from every source that is not EPSS or KEV).
+func TestJSON_EPSSKEVFieldsOmittedWhenAbsent(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{ID: "GHSA-no-epsskev"},
+		Severity: severity.High,
+		Score:    7.5,
+		Ratings: []matcher.Rating{
+			{Database: "GHSA", AdvisoryID: "GHSA-no-epsskev", Severity: severity.High, Score: 7.5, Fixed: "2.0.0"},
+		},
+	}}}
+	var buf bytes.Buffer
+	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, key := range []string{`"epss"`, `"epssPercentile"`, `"epssModel"`, `"kev"`, `"kevDateAdded"`, `"kevRansomware"`} {
+		if strings.Contains(out, key) {
+			t.Errorf("output contains %q for a rating from a source that never sets it:\n%s", key, out)
+		}
+	}
+}
+
 // TestJSON_RatingsIsEmptyArrayNotNullWhenAbsent pins the null-vs-empty-array
 // boundary (TestJSON_EmptyResultHasEmptyArraysNotNull's own discipline, one
 // level down, on a per-finding field instead of Document's top-level

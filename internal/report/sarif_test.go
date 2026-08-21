@@ -154,6 +154,79 @@ func TestSARIF_UnratedFindingCarriesNoSecuritySeverity(t *testing.T) {
 	}
 }
 
+// TestSARIF_PropertiesBagCarriesKEVAndEPSS is D86's caller-first proof for
+// the SARIF renderer's properties bag (findingRule's own doc comment names
+// the precedent: neither grype nor trivy puts KEV/EPSS in SARIF at all). A
+// finding with a separate EPSS rating and a separate KEV rating must carry
+// both into the finding RULE's properties, alongside fixState/unfixable and
+// security-severity, which is where a GitHub code-scanning consumer would
+// actually read them.
+func TestSARIF_PropertiesBagCarriesKEVAndEPSS(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package: pkgmeta.Package{
+			Name: "libfoo", Version: "1.0.0", Ecosystem: "Go",
+			PURL: "pkg:golang/example.com/libfoo@1.0.0",
+		},
+		Advisory:    advisory.Advisory{ID: "GHSA-sarif-epsskev", Summary: "a summary"},
+		Evidence:    version.Evidence{Fixed: "2.0.0"},
+		MatchedName: "libfoo",
+		Severity:    severity.High,
+		Score:       7.5,
+		Ratings: []matcher.Rating{
+			{Database: "GHSA", AdvisoryID: "GHSA-sarif-epsskev", Severity: severity.High, Score: 7.5, Fixed: "2.0.0"},
+			// Severity: Unknown, NoSeverityOpinion: true -- what
+			// matcher.annotate() actually sets for a stored rating with no
+			// Severity entries (matcher.go), not the zero value (None).
+			{Database: "EPSS", Severity: severity.Unknown, NoSeverityOpinion: true,
+				EPSS: 0.62345, EPSSPercentile: 0.81111, EPSSModel: "v2026.06.15"},
+			{Database: "KEV", Severity: severity.Unknown, NoSeverityOpinion: true,
+				KEV: true, KEVDateAdded: "2026-03-15", KEVRansomware: "Known"},
+		},
+	}}}
+	run := run0(t, sarifOf(t, res, cyclonedx.Stats{Components: 1, Cataloged: 1}))
+	rules := rulesOf(t, run)
+	if len(rules) != 1 {
+		t.Fatalf("rules = %d, want 1", len(rules))
+	}
+	props, ok := rules[0]["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("rule has no properties bag: %+v", rules[0])
+	}
+
+	if v, ok := props["kev"]; !ok || v != true {
+		t.Errorf("properties[kev] = %v (present=%v), want true", v, ok)
+	}
+	if v, ok := props["kevDateAdded"]; !ok || v != "2026-03-15" {
+		t.Errorf("properties[kevDateAdded] = %v (present=%v), want %q", v, ok, "2026-03-15")
+	}
+	if v, ok := props["kevRansomware"]; !ok || v != "Known" {
+		t.Errorf("properties[kevRansomware] = %v (present=%v), want %q", v, ok, "Known")
+	}
+	if v, ok := props["epss"]; !ok || v != 0.62345 {
+		t.Errorf("properties[epss] = %v (present=%v), want 0.62345", v, ok)
+	}
+}
+
+// TestSARIF_PropertiesBagOmitsKEVAndEPSSWhenAbsent is the omitted half: an
+// ordinary finding with no KEV/EPSS row must not carry a false "kev" or a
+// zeroed "epss" -- either would misread as "checked, and clean" rather than
+// "not scored at all" (D17's own coercion, one renderer over).
+func TestSARIF_PropertiesBagOmitsKEVAndEPSSWhenAbsent(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{
+		findingFixture("CVE-2026-nokev", "zlib1g", severity.High, 7.5, "2.0.0", advisory.FixStateFixed),
+	}}
+	run := run0(t, sarifOf(t, res, cyclonedx.Stats{Components: 1, Cataloged: 1}))
+	props, ok := rulesOf(t, run)[0]["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("rule has no properties bag")
+	}
+	for _, key := range []string{"kev", "kevDateAdded", "kevRansomware", "epss"} {
+		if v, present := props[key]; present {
+			t.Errorf("properties[%s] = %v, want absent for a finding with no KEV/EPSS row", key, v)
+		}
+	}
+}
+
 // TestSARIF_SkipsAreVisibleInBothPlaces is D55's whole reason for existing.
 //
 // The spec-native channel is invocations[].toolExecutionNotifications[], which

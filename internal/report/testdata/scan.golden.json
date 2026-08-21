@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 6,
+  "schemaVersion": 7,
   "findings": [
     {
       "package": {
@@ -191,6 +191,7 @@
     "findings": 3,
     "unknownSeverity": 1,
     "unfixable": 1,
-    "wontFix": 0
+    "wontFix": 0,
+    "knownExploited": 0
   }
 }

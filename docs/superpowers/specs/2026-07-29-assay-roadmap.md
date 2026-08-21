@@ -3366,6 +3366,36 @@ the tracker; 1,415,900 ranges stamp wont-fix and 192,727 not-fixed across the co
 
 ---
 
+### D86 — EPSS and KEV: exploit likelihood is data, not severity
+
+**Decision.** FIRST.org's EPSS scores (362,881 CVEs, daily) and CISA's KEV catalog (1,673
+entries) join at db build as CVE-keyed annotations riding the D27 ratings bucket — with
+their values in TYPED Rating fields, never in Severity[]. A probability is not a severity
+opinion: encoded as a Severity.Score its safety would rest on severity.Of failing to parse
+it, one vendorSeverityWords entry away from a silent band. Typed fields are invisible to
+band ordering, the disagreement marker and beats() by construction; opinionless rows are
+flagged (NoSeverityOpinion) so the marker cannot fire on "EPSS differs from GHSA".
+KEV's dueDate is deliberately not stored — a US federal compliance deadline, not a
+technical fact. Absent stays absent (D17): MaxEPSS answers (0, false), never probability
+zero, which would mean "safest possible" rather than "unscored".
+
+**Perishable data inverts the seed rule.** NVD ratings ride the seed forward because they
+are cumulative facts; EPSS re-scores its whole corpus daily, so EPSS/KEV are EXCLUDED from
+the seed copy and re-fetched every build — seconds, not NVD's hours, which is also why
+both default ON where NVD is opt-in, and why a fetch failure fails the build rather than
+silently narrowing. Join coverage measured: 98.5% of our stored CVEs have an EPSS row;
+only 380 of KEV's 1,673 are reachable at all (the rest are appliance CVEs outside every
+ecosystem catalogued) — a number to quote honestly, never as "KEV coverage".
+
+**Gates and surfaces.** `--fail-on-kev` (any finding on the list) and
+`--fail-on-epss <0..1>`; the summary line counts "N known-exploited"; `--explain` renders
+EPSS (probability, percentile, model version) and KEV (date added, ransomware verbatim) as
+labeled lines below the ratings table, never as rows pretending to be severity sources;
+JSON carries the typed fields (schema 7), SARIF a properties bag. Live: log4j-core@2.14.1
+draws "2 known-exploited", Log4Shell scores 0.99999, both gates exit 1.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

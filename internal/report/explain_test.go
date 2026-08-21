@@ -561,6 +561,113 @@ func TestExplain_SingleSourceShowsAnnotationAndOneLine(t *testing.T) {
 	}
 }
 
+// TestExplain_EPSSAndKEVRenderAsSeparateLinesNotRatingRows is D86's caller-
+// first proof for explain.go: a finding whose Ratings carry a GHSA severity
+// row, a separate EPSS row and a separate KEV row must show the GHSA row
+// through ratingLine as usual, and must show the EPSS/KEV rows as SHORT
+// LABELED LINES after the ratings breakdown — never through ratingLine
+// itself, which would print "unknown" in the SEVERITY column beside a
+// database that expressed no severity opinion at all and read as a fourth
+// source that looked at the CVE and shrugged.
+//
+// Fixture values are chosen collision-free (CLAUDE.md's own warning): the
+// EPSS probability, percentile and model string share no substring with the
+// KEV date or ransomware value, and neither collides with the GHSA line's
+// own fixed version, so an assertion on one line cannot pass from another.
+func TestExplain_EPSSAndKEVRenderAsSeparateLinesNotRatingRows(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "libfoo", Version: "1.0.0", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{ID: "GHSA-epsskev"},
+		Severity: severity.High, Score: 7.5,
+		Ratings: []matcher.Rating{
+			{Database: "GHSA", AdvisoryID: "GHSA-epsskev", Severity: severity.High, Score: 7.5, Fixed: "9.9.9"},
+			// Severity: Unknown, NoSeverityOpinion: true on both rows below --
+			// what matcher.annotate() actually sets for a stored rating with
+			// no Severity entries (matcher.go), not the zero value (None).
+			{Database: "EPSS", Severity: severity.Unknown, NoSeverityOpinion: true,
+				EPSS: 0.62345, EPSSPercentile: 0.81111, EPSSModel: "v2026.06.15"},
+			{Database: "KEV", Severity: severity.Unknown, NoSeverityOpinion: true,
+				KEV: true, KEVDateAdded: "2026-03-15", KEVRansomware: "Known"},
+		},
+	}}}
+	var buf bytes.Buffer
+	if _, err := Explain(&buf, res, "GHSA-epsskev"); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+
+	// The severity line's own source count still counts every Ratings entry
+	// (explainOne does not filter it) -- pinned here so a future change to
+	// that count is a deliberate edit, not a silent one.
+	if got, want := explainLine(t, out, "severity:"),
+		"severity: high (7.5)   [highest of 3 sources]"; got != want {
+		t.Errorf("severity line = %q, want %q", got, want)
+	}
+	if got, want := explainLine(t, out, "  GHSA"),
+		"  GHSA   GHSA-epsskev             high (7.5)       fixed 9.9.9"; got != want {
+		t.Errorf("GHSA rating line = %q, want %q\nfull output:\n%s", got, want, out)
+	}
+	if got, want := explainLine(t, out, "  EPSS"),
+		"  EPSS   probability 0.62345, percentile 0.81111, model v2026.06.15"; got != want {
+		t.Errorf("EPSS line = %q, want %q\nfull output:\n%s", got, want, out)
+	}
+	if got, want := explainLine(t, out, "  KEV"),
+		"  KEV    added 2026-03-15, ransomware use: Known"; got != want {
+		t.Errorf("KEV line = %q, want %q\nfull output:\n%s", got, want, out)
+	}
+
+	// Never rendered as ratingLine rows: neither line may contain "fixed",
+	// the literal ratingLine carries on every row it produces (fixed - or a
+	// real version), which would be the tell that isExploitSignal's filter
+	// had stopped excluding them from that loop.
+	if strings.Contains(explainLine(t, out, "  EPSS"), "fixed") {
+		t.Errorf("EPSS line looks like a ratingLine row (contains \"fixed\"):\n%s", out)
+	}
+	if strings.Contains(explainLine(t, out, "  KEV"), "fixed") {
+		t.Errorf("KEV line looks like a ratingLine row (contains \"fixed\"):\n%s", out)
+	}
+
+	// Positioned after the ratings breakdown and before "comparer:" (the
+	// task's own placement: "AFTER the ratings table").
+	lines := strings.Split(out, "\n")
+	idx := func(prefix string) int {
+		for i, l := range lines {
+			if strings.HasPrefix(l, prefix) {
+				return i
+			}
+		}
+		t.Fatalf("no line starting with %q", prefix)
+		return -1
+	}
+	ghsaIdx, epssIdx, kevIdx, comparerIdx := idx("  GHSA"), idx("  EPSS"), idx("  KEV"), idx("comparer:")
+	if !(ghsaIdx < epssIdx && epssIdx < kevIdx && kevIdx < comparerIdx) {
+		t.Errorf("wrong order: GHSA=%d EPSS=%d KEV=%d comparer=%d, want GHSA < EPSS < KEV < comparer\n%s",
+			ghsaIdx, epssIdx, kevIdx, comparerIdx, out)
+	}
+}
+
+// TestExplain_NoEPSSOrKEVLinesWhenNeitherIsPresent proves epssKevLines does
+// not print anything for an ordinary finding -- so this feature is additive,
+// never noise on every explained finding.
+func TestExplain_NoEPSSOrKEVLinesWhenNeitherIsPresent(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "plain", Version: "1.0.0", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{ID: "GHSA-plain"},
+		Severity: severity.High, Score: 7.5,
+		Ratings: []matcher.Rating{
+			{Database: "GHSA", AdvisoryID: "GHSA-plain", Severity: severity.High, Score: 7.5, Fixed: "2.0.0"},
+		},
+	}}}
+	var buf bytes.Buffer
+	if _, err := Explain(&buf, res, "GHSA-plain"); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "probability") || strings.Contains(out, "ransomware") {
+		t.Errorf("output mentions EPSS/KEV with neither present:\n%s", out)
+	}
+}
+
 // TestComparerName_AgreesWithVersionFor is the drift guard for the small,
 // local ecosystem -> comparer-name mirror explain.go uses to say "which
 // comparer" without exporting version's unexported registry (D9). If

@@ -130,13 +130,14 @@ closed every one of those (language ecosystems D68–D70, the RPM family D71–D
 STILL true: on Photon, Wolfi, Chainguard, Mariner/Azure Linux, Arch, or the other boutique
 apk-family distros, **assay finds nothing at all** — those images are catalogued and
 reported as not evaluated, a loud refusal, not support. grype also ships enrichment feeds
-assay has no equivalent for: EPSS scores, KEV (known-exploited), and EOL data.
+assay had no equivalent for; D86 ingested EPSS and KEV (typed rating fields, both gates),
+leaving EOL data as the remaining one.
 
 **What each would take.** The remaining distros are each their own advisory feed in their
 own format (Wolfi/Chainguard publish OSV-shaped advisories — likely the cheap ones; Photon
-and Mariner publish their own JSON/OVAL). EPSS/KEV are rating-shaped joins on CVE, the same
-mechanical shape as the NVD join (D27) — cheap to ingest, but each is a new decision about
-what the gate does with it.
+and Mariner publish their own JSON/OVAL). EPSS/KEV landed exactly as the previous
+sentence predicted (D86 — the D27 shape, with typed fields and two gates). EOL data is
+still open, and still cheap-looking.
 
 **Revisit when** a specific ecosystem has a reason to exist rather than as a coverage count.
 A comparer with no provider behind it is the shape D46 refused for RPM, and a provider with

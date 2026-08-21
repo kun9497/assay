@@ -3155,6 +3155,38 @@ wont-fix를, 192,727개가 not-fixed를 찍습니다.
 
 ---
 
+### D86 — EPSS와 KEV: 악용 가능성은 severity가 아니라 데이터다
+
+**결정.** FIRST.org의 EPSS 점수(CVE 362,881개, 매일)와 CISA의 KEV 카탈로그(항목
+1,673개)가 db build 시점에 D27의 ratings 버킷에 올라타는 CVE 키 annotation으로
+조인됩니다 — 그 값은 TYPED Rating 필드에 담기지, 결코 Severity[]에 담기지 않습니다.
+확률은 severity 의견이 아닙니다: Severity.Score로 인코딩하면 그 안전성은 severity.Of가
+그것을 파싱하지 못하는 데에만 기대게 되고, vendorSeverityWords 항목 하나 차이로 조용한
+밴드가 될 수 있습니다. typed 필드는 구조적으로 밴드 순서, 불일치 마커, beats()에 보이지
+않습니다; 의견 없는 행은 표시됩니다(NoSeverityOpinion), 그래서 마커가 "EPSS가 GHSA와
+다르다"는 이유로 발동하지 않습니다. KEV의 dueDate는 의도적으로 저장하지 않습니다 — 미국
+연방 준수 기한이지, 기술적 사실이 아니기 때문입니다. 없는 것은 없는 채로 남습니다(D17):
+MaxEPSS는 (0, false)로 답하지, 결코 확률 0으로 답하지 않습니다, 확률 0은 "채점되지
+않음"이 아니라 "가장 안전함"을 뜻하게 되기 때문입니다.
+
+**썩는 데이터는 seed 규칙을 뒤집습니다.** NVD 등급은 누적 사실이므로 seed를 타고
+앞으로 이어지지만, EPSS는 코퍼스 전체를 매일 다시 채점하므로 EPSS/KEV는 seed 복사에서
+제외되고 빌드마다 다시 fetch됩니다 — NVD의 몇 시간이 아니라 몇 초입니다, 이것이 또한
+NVD는 opt-in인데 둘 다 기본으로 켜져 있는 이유이고, fetch 실패가 조용히 축소되는 대신
+빌드를 실패시키는 이유입니다. 조인 커버리지 측정값: 저장된 CVE의 98.5%가 EPSS 행을
+갖습니다; KEV 1,673개 중 겨우 380개만 닿을 수 있습니다(나머지는 카탈로그된 어떤
+생태계 밖에 있는 장비 CVE입니다) — 정직하게 인용해야 할 숫자이지, 결코 "KEV
+커버리지"로 인용해서는 안 됩니다.
+
+**게이트와 표면.** `--fail-on-kev`(목록에 있는 finding 아무거나)와 `--fail-on-epss
+<0..1>`; 요약 줄이 "N known-exploited"를 셉니다; `--explain`은 EPSS(확률, 백분위,
+모델 버전)와 KEV(추가일, ransomware 그대로)를 ratings 표 아래 라벨 붙은 줄로
+렌더링합니다, 결코 severity 출처인 척하는 행으로는 렌더링하지 않습니다; JSON은 typed
+필드를 나릅니다(스키마 7), SARIF는 properties bag입니다. 실전: log4j-core@2.14.1은
+"2 known-exploited"를 그려내고, Log4Shell은 0.99999점이며, 두 게이트 다 exit 1입니다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

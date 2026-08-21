@@ -20,14 +20,17 @@ import (
 // EnrichmentRecord gained `claims` (D33), and to 4 when SkippedRecord gained
 // `cause` and Summary gained `targetIncomplete` (D36), and to 5 when
 // FindingRecord gained `unfixable` and Summary gained `unfixable` (D48), and to
-// 6 when both gained `fixState` and RatingRecord gained one too (D52). Two earlier additions should have
-// bumped it and did not — `ratings` (D25) and RatingRecord.URL (D27) both
-// changed the shape while this constant stayed at 1 — so version 1 in the wild
-// denotes three different documents. That is the cost of the misses, and it
-// cannot be repaired retroactively; what it does mean is that a consumer
-// reading 2 or later can rely on every field below being present, which is the
-// guarantee the constant exists to give.
-const schemaVersion = 6
+// 6 when both gained `fixState` and RatingRecord gained one too (D52), and to
+// 7 when RatingRecord gained `epss`/`epssPercentile`/`epssModel`/`kev`/
+// `kevDateAdded`/`kevRansomware` and Summary gained `knownExploited` (D86).
+// Two earlier additions should have bumped it and did not — `ratings` (D25)
+// and RatingRecord.URL (D27) both changed the shape while this constant
+// stayed at 1 — so version 1 in the wild denotes three different documents.
+// That is the cost of the misses, and it cannot be repaired retroactively;
+// what it does mean is that a consumer reading 2 or later can rely on every
+// field below being present, which is the guarantee the constant exists to
+// give.
+const schemaVersion = 7
 
 // Document is the stable shape of `assay scan --output json` (design goal
 // #3). It carries what Table shows plus what Table cannot: the full
@@ -197,6 +200,26 @@ type RatingRecord struct {
 	// specifically called something will-not-fix needs the per-source answer.
 	// No omitempty, same reasoning as Fixed and URL above.
 	FixState string `json:"fixState"`
+	// EPSS/KEV fields (D86), copied verbatim from matcher.Rating's own typed
+	// fields -- never folded into Severity/Score, on advisory.Rating's own
+	// reasoning (its doc comment): an exploit probability is not a severity
+	// opinion.
+	//
+	// omitempty on all six, UNLIKE every other field on this record. Every
+	// other field's own comment argues the opposite -- an absent value is a
+	// fact worth keeping present in the shape -- but these six are zero on
+	// every rating from every OTHER source (GHSA, PYSEC, NVD, and so on),
+	// which on a typical finding is most of Ratings. Printing six zero/empty
+	// keys on every one of those rows would not be an absence worth keeping
+	// visible the way an empty Fixed is; it would be six columns of noise
+	// repeated once per rating, on a shape only two sources (EPSS, KEV) ever
+	// populate.
+	EPSS           float64 `json:"epss,omitempty"`
+	EPSSPercentile float64 `json:"epssPercentile,omitempty"`
+	EPSSModel      string  `json:"epssModel,omitempty"`
+	KEV            bool    `json:"kev,omitempty"`
+	KEVDateAdded   string  `json:"kevDateAdded,omitempty"`
+	KEVRansomware  string  `json:"kevRansomware,omitempty"`
 }
 
 type PackageRecord struct {
@@ -301,13 +324,19 @@ func findingRecord(f matcher.Finding) FindingRecord {
 	ratings := make([]RatingRecord, 0, len(f.Ratings))
 	for _, r := range f.Ratings {
 		ratings = append(ratings, RatingRecord{
-			Database:   r.Database,
-			AdvisoryID: r.AdvisoryID,
-			Severity:   r.Severity.String(),
-			Score:      r.Score,
-			Fixed:      r.Fixed,
-			URL:        r.URL,
-			FixState:   ratingFixState(r),
+			Database:       r.Database,
+			AdvisoryID:     r.AdvisoryID,
+			Severity:       r.Severity.String(),
+			Score:          r.Score,
+			Fixed:          r.Fixed,
+			URL:            r.URL,
+			FixState:       ratingFixState(r),
+			EPSS:           r.EPSS,
+			EPSSPercentile: r.EPSSPercentile,
+			EPSSModel:      r.EPSSModel,
+			KEV:            r.KEV,
+			KEVDateAdded:   r.KEVDateAdded,
+			KEVRansomware:  r.KEVRansomware,
 		})
 	}
 	// Same reasoning as ratings above: an empty result encodes as

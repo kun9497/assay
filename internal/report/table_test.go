@@ -1244,3 +1244,101 @@ func TestTable_WillNotBeFixedCountIsAlwaysPrinted(t *testing.T) {
 		t.Errorf("Summary.WontFix = %d, want 1", sum.WontFix)
 	}
 }
+
+// TestSummary_KnownExploitedCountsOnlyKEVFindings is D86's own version of
+// TestSummary_WontFixCountsOnlyWontFixFindings just above: a finding with a
+// KEV rating counts, a finding with none does not, and a finding's KEV row
+// is independent of whatever Unfixable/WontFix already counted it as (D86:
+// "overlaps both freely").
+func TestSummary_KnownExploitedCountsOnlyKEVFindings(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{
+		// KEV-listed AND unfixable/wont-fix, to prove the two counts do not
+		// collide -- fixture value "RH-BOTH-1" is Red Hat's own wont-fix
+		// shape, distinct from the plain KEV-only row below.
+		{
+			Package:  pkgmeta.Package{Name: "both", Version: "1", Ecosystem: "Red Hat:9"},
+			Advisory: advisory.Advisory{ID: "RH-BOTH-1"},
+			Severity: severity.Critical,
+			Score:    9.8,
+			Ratings: []matcher.Rating{
+				{Database: "REDHAT", AdvisoryID: "RH-BOTH-1", FixState: advisory.FixStateWontFix},
+				{Database: "KEV", Severity: severity.Unknown, NoSeverityOpinion: true,
+					KEV: true, KEVDateAdded: "2026-01-01", KEVRansomware: "Known"},
+			},
+		},
+		// KEV-listed, fixable -- proves KnownExploited is not derived from
+		// Unfixable.
+		{
+			Package:  pkgmeta.Package{Name: "kevonly", Version: "1", Ecosystem: "Go"},
+			Advisory: advisory.Advisory{ID: "GHSA-kevonly"},
+			Evidence: version.Evidence{Fixed: "2.0.0"},
+			Severity: severity.High,
+			Score:    7.5,
+			Ratings: []matcher.Rating{
+				{Database: "GHSA", AdvisoryID: "GHSA-kevonly", Fixed: "2.0.0"},
+				{Database: "KEV", Severity: severity.Unknown, NoSeverityOpinion: true,
+					KEV: true, KEVDateAdded: "2026-02-01", KEVRansomware: "Unknown"},
+			},
+		},
+		// Not KEV-listed at all -- proves the count is not len(Findings).
+		{
+			Package:  pkgmeta.Package{Name: "notkev", Version: "1", Ecosystem: "Go"},
+			Advisory: advisory.Advisory{ID: "GHSA-notkev"},
+			Severity: severity.High,
+			Score:    7.5,
+			Ratings:  []matcher.Rating{{Database: "GHSA", AdvisoryID: "GHSA-notkev"}},
+		},
+	}}
+	var buf bytes.Buffer
+	sum, err := Table(&buf, res, cyclonedx.Stats{Components: 3, Cataloged: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.KnownExploited != 2 {
+		t.Errorf("Summary.KnownExploited = %d, want 2 (both + kevonly, not notkev)", sum.KnownExploited)
+	}
+}
+
+// TestTable_KnownExploitedCountAppearsOnlyWhenNonZero is the deliberate
+// exception to TestTable_WillNotBeFixedCountIsAlwaysPrinted's own rule
+// (table.go's own comment on why): every other count on the summary line is
+// printed even at zero, but knownExploited rides inside the parens only when
+// it is greater than zero, because most scans have no KEV hit at all and
+// "(0 known-exploited)" on every clean scan would be exactly the kind of
+// noise readers learn to stop reading.
+func TestTable_KnownExploitedCountAppearsOnlyWhenNonZero(t *testing.T) {
+	var buf bytes.Buffer
+	sum, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{Components: 1, Cataloged: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "known-exploited") {
+		t.Errorf("summary line mentions known-exploited when the count is zero:\n%s", buf.String())
+	}
+	if sum.KnownExploited != 0 {
+		t.Errorf("Summary.KnownExploited = %d, want 0", sum.KnownExploited)
+	}
+
+	buf.Reset()
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "a", Version: "1", Ecosystem: "Go"},
+		Advisory: advisory.Advisory{ID: "GHSA-kev-1"},
+		Severity: severity.High,
+		Score:    7.5,
+		Ratings: []matcher.Rating{
+			{Database: "GHSA", AdvisoryID: "GHSA-kev-1"},
+			{Database: "KEV", Severity: severity.Unknown, NoSeverityOpinion: true,
+				KEV: true, KEVDateAdded: "2026-01-01", KEVRansomware: "Known"},
+		},
+	}}}
+	sum, err = Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "(0 will not be fixed, 1 known-exploited)") {
+		t.Errorf("summary line does not carry the known-exploited count inside the existing parens:\n%s", buf.String())
+	}
+	if sum.KnownExploited != 1 {
+		t.Errorf("Summary.KnownExploited = %d, want 1", sum.KnownExploited)
+	}
+}

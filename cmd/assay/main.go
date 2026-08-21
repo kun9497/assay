@@ -16,7 +16,9 @@ import (
 	"github.com/kun9497/assay/internal/dbcmd"
 	"github.com/kun9497/assay/internal/provider"
 	"github.com/kun9497/assay/internal/provider/amazon"
+	"github.com/kun9497/assay/internal/provider/epss"
 	"github.com/kun9497/assay/internal/provider/fedora"
+	"github.com/kun9497/assay/internal/provider/kev"
 	"github.com/kun9497/assay/internal/provider/knvd"
 	"github.com/kun9497/assay/internal/provider/nvd"
 	"github.com/kun9497/assay/internal/provider/oracle"
@@ -77,6 +79,12 @@ Scan flags (any order, before or after the target):
                         it fail the build. =wont-fix narrows it to the ones a
                         vendor has said will never be fixed, where waiting is
                         not a strategy.
+  --fail-on-kev         Exit 1 if any finding is in CISA's Known Exploited
+                        Vulnerabilities catalog - it is being exploited in
+                        the wild today, independent of severity band.
+  --fail-on-epss <n>    Exit 1 if any finding's EPSS exploit-probability
+                        (0..1) is at or above <n>. A finding EPSS has not
+                        scored never trips this - absent stays absent.
   --fail-on-incomplete[=any|target]
                         Exit 2 if any package's evaluation was incomplete.
                         =target narrows it to causes you can act on (a version
@@ -201,6 +209,24 @@ Environment (db build only — a scan reads no environment and no network):
                         this flag as the off switch, rather than silently building without
                         Ubuntu fix-state data. Set this to 0 for a local build that does not scan
                         Ubuntu, or has no git installed.
+  EPSS_ENABLE=0         Skip FIRST.org's EPSS exploit-probability feed. ON BY
+                        DEFAULT (D86), unlike NVD's opt-in: the feed is one
+                        file, ~2.5 MB compressed, fetched and parsed in
+                        seconds rather than NVD's seven hours, so there is no
+                        large cost here to opt into. Every CVE FIRST.org has
+                        scored is emitted, not narrowed to CVEs already in
+                        the database, so a CVE that lands in tomorrow's OSV
+                        or NVD sync already has a score to join.
+                        Set this to 0 for a local build that does not want
+                        the fetch.
+  KEV_ENABLE=0          Skip CISA's Known Exploited Vulnerabilities catalog.
+                        ON BY DEFAULT (D86), for the same reason as
+                        EPSS_ENABLE: one file, ~1.6 MB, fetched and parsed in
+                        seconds. The catalog's own dueDate (a compliance
+                        deadline, not a technical fact about the
+                        vulnerability) is never stored.
+                        Set this to 0 for a local build that does not want
+                        the fetch.
 `
 
 func main() {
@@ -554,6 +580,16 @@ func envFlag(stderr io.Writer, name string, def bool) bool {
 	}
 }
 
+// newEPSSAnnotator and newKEVAnnotator construct the EPSS and KEV annotators
+// (D86). Package variables for the same reason newNVDAnnotator is one: a
+// test can substitute a spy and observe the Options that reached
+// construction, without epss.New's/kev.New's own DefaultURL — the live
+// feeds — ever being fetched from.
+var (
+	newEPSSAnnotator = epss.New
+	newKEVAnnotator  = kev.New
+)
+
 // dbUpdateAnnotators is every provider.Annotator `db update` runs, built
 // from the environment. Pulled out of the "update" case as its own function
 // so a test can call it directly and inspect what reaches newNVDAnnotator.
@@ -572,14 +608,34 @@ func envFlag(stderr io.Writer, name string, def bool) bool {
 //
 // A full NVD pass is a builder's job, not every user's — which is exactly
 // what slice 8 exists to fix. Opt-in is the honest state until then.
+//
+// EPSS and KEV (D86) are the opposite call, DEFAULT ON via EPSS_ENABLE and
+// KEV_ENABLE, even though a failing annotator fails the whole build exactly
+// like NVD's would. What makes that safe here and not for NVD is cost: each
+// feed is one small file — the EPSS download is ~2.5 MB compressed, the KEV
+// catalog ~1.6 MB, both measured 2026-08-21 — fetched, parsed and done in
+// seconds, not the seven hours a full NVD pass costs. A build that fails
+// after this provider's own bounded retry schedule (epss.fetchAttempts,
+// kev.fetchAttempts) rather than silently narrowing is the right trade at
+// that price: `db push`'s coverage guard exists because the published
+// artifact is meant to carry every default-on source, and an opt-in EPSS/KEV
+// would repeat Red Hat's opt-in-then-reverse path (D51) for no reason — there
+// is no seven-hour cost here to be careful about.
 func dbUpdateAnnotators(stderr io.Writer) []provider.Annotator {
+	var out []provider.Annotator
 	// Still opt-in: the full pass costs hours, so a build that starts one
 	// nobody asked for is a different kind of surprise from a fetch that takes
 	// a minute (D37).
-	if !envFlag(stderr, "NVD_ENABLE", false) {
-		return nil
+	if envFlag(stderr, "NVD_ENABLE", false) {
+		out = append(out, newNVDAnnotator(nvdOptionsFromEnv(stderr)))
 	}
-	return []provider.Annotator{newNVDAnnotator(nvdOptionsFromEnv(stderr))}
+	if envFlag(stderr, "EPSS_ENABLE", true) {
+		out = append(out, newEPSSAnnotator(epss.Options{Progress: stderr}))
+	}
+	if envFlag(stderr, "KEV_ENABLE", true) {
+		out = append(out, newKEVAnnotator(kev.Options{Progress: stderr}))
+	}
+	return out
 }
 
 // newRedHatProvider constructs the Red Hat CSAF VEX provider. A package
@@ -957,6 +1013,25 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 					"--fail-on-unfixable: unknown scope %q (want any or wont-fix)", v)
 			}
 
+		// D86. Beside --fail-on-unfixable above: a property of the finding no
+		// severity threshold can express, the same shape as D48's gate.
+		case a == "--fail-on-kev":
+			opts.FailOnKEV = true
+
+		case a == "--fail-on-epss":
+			i++
+			if i >= len(args) {
+				return "", scancmd.Options{}, fmt.Errorf("--fail-on-epss requires a value")
+			}
+			if err := setFailOnEPSS(&opts, args[i]); err != nil {
+				return "", scancmd.Options{}, err
+			}
+
+		case strings.HasPrefix(a, "--fail-on-epss="):
+			if err := setFailOnEPSS(&opts, strings.TrimPrefix(a, "--fail-on-epss=")); err != nil {
+				return "", scancmd.Options{}, err
+			}
+
 		case a == "--fail-on-incomplete":
 			opts.FailOnIncomplete = true
 
@@ -1085,5 +1160,29 @@ func setFailOn(opts *scancmd.Options, value string) error {
 		return err
 	}
 	opts.FailOn = &b
+	return nil
+}
+
+// setFailOnEPSS validates value and stores it on opts.FailOnEPSS (D86),
+// shared by "--fail-on-epss value" and "--fail-on-epss=value" on setFailOn's
+// own reasoning: one parse site rather than two that could drift, and a
+// repeat rejected rather than silently taking the last value.
+//
+// EPSS is a probability, so the valid range is 0..1 -- rejected here, at
+// parse time, rather than left for a threshold that can never trip (a typo'd
+// "50" instead of "0.5" would otherwise silently accept and then never fire,
+// which is worse than refusing it outright).
+func setFailOnEPSS(opts *scancmd.Options, value string) error {
+	if opts.FailOnEPSS != nil {
+		return fmt.Errorf("--fail-on-epss given more than once (already %v)", *opts.FailOnEPSS)
+	}
+	v, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return fmt.Errorf("--fail-on-epss: %q is not a number: %w", value, err)
+	}
+	if v < 0 || v > 1 {
+		return fmt.Errorf("--fail-on-epss: %q must be between 0 and 1 (EPSS is a probability)", value)
+	}
+	opts.FailOnEPSS = &v
 	return nil
 }

@@ -156,4 +156,34 @@ type Rating struct {
 	Source   string     // "NVD"
 	Severity []Severity // the same (Type, Score) pairs an Advisory carries
 	URL      string     // where a reader can check the claim
+
+	// D86: exploit-likelihood and known-exploitation live in TYPED fields,
+	// never in Severity[]. A probability is not a severity opinion: encoded
+	// as a Severity.Score it would enter band ordering, the disagreement
+	// marker and beats()'s tie-break, and its safety would rest on
+	// severity.Of failing to parse it — one vendorSeverityWords entry away
+	// from a silent band (the measured hazard). Typed fields are invisible
+	// to every band computation by construction. All additive: the ratings
+	// bucket stores JSON, so N-1 seeds and v9 databases decode with zero
+	// values and no schema bump.
+
+	// EPSS is FIRST.org's exploit-probability for this CVE (0..1), with its
+	// population percentile and the model version that scored it — stored
+	// losslessly (D13) because scores are only comparable within one model
+	// version, and a retrain re-scores the whole corpus at once.
+	EPSS           float64 `json:",omitempty"`
+	EPSSPercentile float64 `json:",omitempty"`
+	EPSSModel      string  `json:",omitempty"`
+
+	// KEV marks membership in CISA's Known Exploited Vulnerabilities
+	// catalog. KEVDateAdded is when CISA listed it; KEVRansomware is CISA's
+	// "Known"/"Unknown" verbatim (two values measured, stored as-is rather
+	// than a bool so a third value arrives as data, not a parse failure).
+	// The catalog's dueDate is deliberately NOT stored: it is a US federal
+	// compliance deadline (BOD 22-01), not a technical fact about the
+	// vulnerability, and surfacing it unlabelled misreads as remediation
+	// info.
+	KEV           bool   `json:",omitempty"`
+	KEVDateAdded  string `json:",omitempty"` // "2021-11-03"
+	KEVRansomware string `json:",omitempty"` // "Known" | "Unknown"
 }
