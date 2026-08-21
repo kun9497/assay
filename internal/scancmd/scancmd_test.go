@@ -1130,8 +1130,8 @@ func TestRun_OutputJSON(t *testing.T) {
 		if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
 			t.Fatalf("stdout is not valid JSON: %v\n%s", err, out.String())
 		}
-		if doc.SchemaVersion != 7 {
-			t.Errorf("SchemaVersion = %d, want 7", doc.SchemaVersion)
+		if doc.SchemaVersion != 8 {
+			t.Errorf("SchemaVersion = %d, want 8", doc.SchemaVersion)
 		}
 		if len(doc.Findings) != 1 || doc.Findings[0].Advisory.ID != "GHSA-json-medium" {
 			t.Errorf("Findings = %+v, want the one medium finding", doc.Findings)
@@ -2286,7 +2286,7 @@ func TestVerdict_FailOnIncompleteTargetIgnoresAdvisoryDefects(t *testing.T) {
 		{"no gate, no failure", Options{}, withTarget, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := verdict(tc.opts, tc.sum, nil); got != tc.want {
+			if got := verdict(tc.opts, tc.sum, nil, report.EOLStatus{}); got != tc.want {
 				t.Errorf("verdict = %d, want %d (summary %+v)", got, tc.want, tc.sum)
 			}
 		})
@@ -2327,7 +2327,7 @@ func TestVerdict_FailOnIncompleteTargetOutranksExitOneGates(t *testing.T) {
 			Options{FailOnIncompleteTarget: true, FailOnUnknown: true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := verdict(tc.opts, sum, findings); got != 2 {
+			if got := verdict(tc.opts, sum, findings, report.EOLStatus{}); got != 2 {
 				t.Errorf("verdict = %d, want 2 -- the caller's own incomplete "+
 					"data (D36) must outrank a finding-based exit-1 gate (D11), "+
 					"regardless of which other gate is also armed", got)
@@ -2341,7 +2341,7 @@ func TestVerdict_FailOnIncompleteTargetOutranksExitOneGates(t *testing.T) {
 // and a gate reading IncompleteChecks instead would miss this case entirely.
 func TestVerdict_FailOnIncompleteTargetCountsWholePackageSkips(t *testing.T) {
 	sum := report.Summary{NotEvaluated: 1, IncompleteChecks: 0, TargetIncomplete: 1}
-	if got := verdict(Options{FailOnIncompleteTarget: true}, sum, nil); got != 2 {
+	if got := verdict(Options{FailOnIncompleteTarget: true}, sum, nil, report.EOLStatus{}); got != 2 {
 		t.Errorf("verdict = %d, want 2: a whole-package skip the caller caused must gate", got)
 	}
 }

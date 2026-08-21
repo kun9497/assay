@@ -224,6 +224,96 @@ type Meta struct {
 	// to trust a self-report that has already over-claimed once on this
 	// branch. This is what `db status` treats as ground truth.
 	EnrichmentCounts map[string]int `json:"enrichmentCounts"`
+	// EOL is distro end-of-life data from endoflife.date (D87), one row per
+	// (DistroID, Release). Meta-carried rather than a schema bump: it needs
+	// no bucket, no index and no query path of its own — a scan reads the
+	// whole small slice (~200 rows) and looks one up in memory, so it rides
+	// the same JSON blob every other Meta field already does. A database
+	// built before this field decodes it nil, which is what "no EOL data"
+	// means to a scan (see scancmd's own EOL lookup) — never a silent empty
+	// answer masquerading as "this release is not EOL".
+	//
+	// Stored LOSSLESSLY (D13): every field endoflife.date publishes that a
+	// scan or `db status` might need, not a pre-computed verdict. In
+	// particular isEol itself is deliberately NOT one of these fields — see
+	// EOLRelease's own doc comment for why a boolean computed at THEIR
+	// generation time cannot ride in a database built once and read for
+	// months.
+	EOL []EOLRelease `json:"eol"`
+	// EOLProvenance is self-reported by the EOLSource exactly as Ratings and
+	// Enrichment are by their own sources (D27/D3) — one entry, not a map,
+	// because there is exactly one EOL source rather than several competing
+	// authorities.
+	//
+	// A dedicated field rather than riding under Providers["eol"]: an entry
+	// there renders in `db status`'s PROVIDER table, which means "this
+	// fetched advisory coverage" (D20) — an EOL row has no Ecosystems to
+	// report and does not participate in Covers() at all, so folding it in
+	// would put a claim of a different kind under a heading that already
+	// means something specific. `db status` gives EOL its own line instead
+	// (dbcmd.Status).
+	//
+	// A pointer, not a value: nil is what an old database (built before D87)
+	// or a build with EOL_ENABLE=0 decodes to, and that is a DIFFERENT fact
+	// from "the source ran and reported a zero-value Provenance" — the same
+	// distinction store.Provenance.Error exists to draw for Enrichment,
+	// drawn here with the type itself instead of an extra field, since there
+	// is only one entry.
+	EOLProvenance *Provenance `json:"eol_provenance"`
+}
+
+// EOLRelease is one distro release's end-of-life facts from endoflife.date
+// (D87), stored losslessly (D13) rather than as a precomputed verdict.
+//
+// isEol is deliberately NOT a stored field, even though endoflife.date's API
+// publishes one. It is computed at THEIR generation time ("is this release
+// EOL as of right now") and goes stale the moment it is written into a
+// database that then sits on disk for weeks — a scan run today must compare
+// TODAY's date against EOLFrom, not answer with a boolean endoflife.date
+// computed when `db build` ran. See scancmd's own EOL lookup for where that
+// comparison happens.
+//
+// EOLLabel and EOESLabel are stored per row (rather than once per distro)
+// because Meta.EOL is a flat slice with no per-distro grouping struct of its
+// own — a few repeated short strings across a release family's rows costs
+// nothing against carrying a second, distro-keyed structure just to hold
+// two labels. They are what stops an unconditional "EOL implies untrusted"
+// misfire: Debian's bookworm is isEol yet IsMaintained under
+// "Debian LTS" (EOESLabel), and rendering that fact needs the label text,
+// not just a date.
+type EOLRelease struct {
+	// DistroID is the os-release ID this row applies to ("alpine", "amzn",
+	// "rhel", ...), not endoflife.date's own product slug ("alpine-linux",
+	// "amazon-linux", "rhel") — the two differ for several products, and a
+	// scan looks this up by Target.Distro.ID, never by the upstream slug.
+	DistroID string `json:"distro_id"`
+	// Release is endoflife.date's release.name field, verbatim — "3.19",
+	// "12", "22.04", "9". Never re-derived from VERSION_ID at lookup time;
+	// see scancmd's own doc comment on why the ecosystem key's already-
+	// truncated suffix is what a lookup parses instead.
+	Release string `json:"release"`
+	// EOLFrom, EOASFrom and EOESFrom are ISO 8601 date strings ("" when
+	// endoflife.date published null for that phase, e.g. no distro publishes
+	// EOAS/EOES at all). Kept as the strings endoflife.date sent, not
+	// time.Time: a lookup parses the one field it needs (EOLFrom) and the
+	// other two are otherwise rendered verbatim in a report line, never
+	// compared.
+	EOLFrom  string `json:"eol_from"`
+	EOASFrom string `json:"eoas_from"`
+	EOESFrom string `json:"eoes_from"`
+	// IsLTS and IsMaintained are endoflife.date's own booleans, stored as
+	// published rather than re-derived — IsMaintained in particular is NOT
+	// "not yet past EOLFrom": Debian's LTS phase is a distro maintaining a
+	// release past its own security-support EOL, which no date comparison
+	// on this row alone can reconstruct.
+	IsLTS        bool `json:"is_lts"`
+	IsMaintained bool `json:"is_maintained"`
+	// EOLLabel and EOESLabel are the product's labels.eol / labels.eoes
+	// prose ("Debian Security Support", "Debian LTS") — what a phase is
+	// actually CALLED, which is what stops a report line reading as a bare,
+	// unexplained "still maintained" (see the type's own doc comment).
+	EOLLabel  string `json:"eol_label"`
+	EOESLabel string `json:"eoes_label"`
 }
 
 type Provenance struct {

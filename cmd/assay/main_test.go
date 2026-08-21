@@ -23,6 +23,7 @@ import (
 	"github.com/kun9497/assay/internal/dbcmd"
 	"github.com/kun9497/assay/internal/provider"
 	"github.com/kun9497/assay/internal/provider/amazon"
+	"github.com/kun9497/assay/internal/provider/eol"
 	"github.com/kun9497/assay/internal/provider/epss"
 	"github.com/kun9497/assay/internal/provider/fedora"
 	"github.com/kun9497/assay/internal/provider/kev"
@@ -1021,8 +1022,8 @@ func TestRun_ScanOutputJSONReachesRealExitCode(t *testing.T) {
 	// cannot notice that the shape changed under it. Bumping this is meant to
 	// be the deliberate act that accompanies a schema change (D33 was the
 	// third).
-	if doc.SchemaVersion != 7 {
-		t.Errorf("SchemaVersion = %d, want 7", doc.SchemaVersion)
+	if doc.SchemaVersion != 8 {
+		t.Errorf("SchemaVersion = %d, want 8", doc.SchemaVersion)
 	}
 	// buildRunSeamFixture's critical, unrated and no-fix findings; somecrate
 	// is dropped by the cataloger and never reaches a Finding at all.
@@ -2725,6 +2726,87 @@ func TestDBUpdateAnnotators_NVDStaysOptIn(t *testing.T) {
 		if got := dbUpdateAnnotators(io.Discard); (len(got) > 0) != want {
 			t.Errorf("NVD_ENABLE=%q: %d annotator(s), want enabled=%v", value, len(got), want)
 		}
+	}
+}
+
+// TestDBUpdateEOLSource_DefaultsOn is dbUpdateEOLSource's own version of
+// TestDBUpdateEnrichers_KISADefaultsOn: EOL_ENABLE defaults ON (D87, unlike
+// KISA's default-off D29 shape), and both truthy and falsy spellings are
+// asserted for the identical envFlag reason that test's own comment gives.
+func TestDBUpdateEOLSource_DefaultsOn(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{
+		{"", true},     // unset: the D87 default
+		{"1", true},    //
+		{"true", true}, //
+		{"on", true},   //
+		{"0", false},   // a local build that does not want the fetch
+		{"false", false},
+		{"no", false},
+		{"OFF", false},  // case-insensitive
+		{" 0 ", false},  // and whitespace-tolerant, on envFlag's own contract
+		{"maybe", true}, // unrecognised: warn and take the default, never fail the build
+	} {
+		t.Run("EOL_ENABLE="+tc.value, func(t *testing.T) {
+			t.Setenv("EOL_ENABLE", tc.value)
+
+			orig := newEOLSource
+			sawCall := false
+			newEOLSource = func(opts eol.Options) *eol.Provider { sawCall = true; return orig(opts) }
+			defer func() { newEOLSource = orig }()
+
+			got := dbUpdateEOLSource(io.Discard)
+			if (got != nil) != tc.want {
+				t.Errorf("dbUpdateEOLSource() = %v, want non-nil=%v", got, tc.want)
+			}
+			// Constructing eol.New is what reaches the live endpoint's default
+			// URL, so "returned non-nil" and "built one" are different claims
+			// and both matter -- the same distinction the KISA test draws.
+			if sawCall != tc.want {
+				t.Errorf("eol.New constructed = %v, want %v", sawCall, tc.want)
+			}
+		})
+	}
+}
+
+// TestDBUpdateEOLSource_ConstructsWithProgress is the direct wiring check —
+// on TestDBUpdateAnnotators_ConstructsNVDWithOptionsFromEnv's own precedent
+// a few lines up in spirit — that dbUpdateEOLSource actually passes stderr
+// through as Options.Progress, not silently defaulting it to io.Discard the
+// way nvd's own history (dbUpdateAnnotators' doc comment) warns a forgotten
+// wiring reads: a 5h52m run that hit a 503 and retried four times printed
+// nothing about any of it once before on this exact class of mistake.
+func TestDBUpdateEOLSource_ConstructsWithProgress(t *testing.T) {
+	orig := newEOLSource
+	var gotOpts eol.Options
+	newEOLSource = func(opts eol.Options) *eol.Provider { gotOpts = opts; return orig(opts) }
+	defer func() { newEOLSource = orig }()
+
+	var errOut bytes.Buffer
+	if got := dbUpdateEOLSource(&errOut); got == nil {
+		t.Fatal("dbUpdateEOLSource() = nil, want a constructed source (EOL_ENABLE defaults on)")
+	}
+	if gotOpts.Progress != &errOut {
+		t.Error("dbUpdateEOLSource did not pass stderr through as Options.Progress")
+	}
+}
+
+// TestDBUpdateEOLSource_DisabledDisclosesOnStderr: unlike REDHAT_ENABLE=0
+// and its siblings (which skip silently), EOL_ENABLE=0 must say so — it is
+// the one source whose absence changes what a FLAG can do, `--fail-on-eol`
+// degrading to its own warning rather than gating (see scancmd), so a
+// reader who set this and forgot must not learn about it only by noticing
+// the flag never fires.
+func TestDBUpdateEOLSource_DisabledDisclosesOnStderr(t *testing.T) {
+	t.Setenv("EOL_ENABLE", "0")
+	var errOut bytes.Buffer
+	if got := dbUpdateEOLSource(&errOut); got != nil {
+		t.Fatalf("dbUpdateEOLSource() with EOL_ENABLE=0 = %v, want nil", got)
+	}
+	if !strings.Contains(errOut.String(), "EOL_ENABLE=0") || !strings.Contains(errOut.String(), "fail-on-eol") {
+		t.Errorf("stderr does not disclose why no EOL source ran:\n%s", errOut.String())
 	}
 }
 

@@ -22,7 +22,8 @@ import (
 // FindingRecord gained `unfixable` and Summary gained `unfixable` (D48), and to
 // 6 when both gained `fixState` and RatingRecord gained one too (D52), and to
 // 7 when RatingRecord gained `epss`/`epssPercentile`/`epssModel`/`kev`/
-// `kevDateAdded`/`kevRansomware` and Summary gained `knownExploited` (D86).
+// `kevDateAdded`/`kevRansomware` and Summary gained `knownExploited` (D86),
+// and to 8 when Document gained the target-level `eol` object (D87).
 // Two earlier additions should have bumped it and did not — `ratings` (D25)
 // and RatingRecord.URL (D27) both changed the shape while this constant
 // stayed at 1 — so version 1 in the wild denotes three different documents.
@@ -30,7 +31,7 @@ import (
 // what it does mean is that a consumer reading 2 or later can rely on every
 // field below being present, which is the guarantee the constant exists to
 // give.
-const schemaVersion = 7
+const schemaVersion = 8
 
 // Document is the stable shape of `assay scan --output json` (design goal
 // #3). It carries what Table shows plus what Table cannot: the full
@@ -49,6 +50,15 @@ type Document struct {
 	Findings      []FindingRecord `json:"findings"`
 	Skipped       []SkippedRecord `json:"skipped"`
 	Summary       Summary         `json:"summary"`
+	// EOL is the scanned target's distro end-of-life status (D87), nil when
+	// there is no answer — see EOLRecord's own doc comment for the three
+	// reasons and why nil, not a zero-value object, is what "no answer"
+	// must serialize as. omitempty on top of the nil check: an older
+	// consumer's `.eol` lookup on a document from before this field existed
+	// and one where the target carried no distro identity should not have
+	// to distinguish "absent key" from "null value" — both already mean
+	// the same thing here.
+	EOL *EOLRecord `json:"eol,omitempty"`
 }
 
 // FindingRecord is one matcher.Finding, reshaped for stable JSON rather than
@@ -288,7 +298,7 @@ type SkippedRecord struct {
 // this file. The counts come from Summarize, the exact function Table calls
 // for the same numbers, so JSON and the table cannot drift apart on what
 // "evaluated" means.
-func JSON(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error) {
+func JSON(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus) (Summary, error) {
 	sum := Summarize(res, cat)
 
 	doc := Document{
@@ -296,6 +306,7 @@ func JSON(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error)
 		Findings:      make([]FindingRecord, 0, len(res.Findings)),
 		Skipped:       make([]SkippedRecord, 0, len(res.Skipped)),
 		Summary:       sum,
+		EOL:           eol.Record(),
 	}
 	for _, f := range res.Findings {
 		doc.Findings = append(doc.Findings, findingRecord(f))

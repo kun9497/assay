@@ -119,14 +119,15 @@ Java/Ruby/Rust/.NET/PHP 애플리케이션에서 assay가 아무것도 찾지 �
 Wolfi, Chainguard, Mariner/Azure Linux, Arch, 그리고 그 밖의 소규모 apk 계열 배포판에서는
 **assay가 정말로 아무것도 찾지 못합니다** — 그 이미지들은 카탈로그되고 평가되지 않음으로
 보고됩니다, 시끄러운 거부이지 지원이 아닙니다. grype는 또한 assay에 대응물이 없던 보강
-피드도 싣습니다; D86이 EPSS와 KEV를 수집했고(typed rating 필드, 게이트 둘), EOL
-데이터만 남았습니다.
+피드도 싣습니다; D86이 EPSS와 KEV를 수집했고(typed rating 필드, 게이트 둘) D87이 EOL
+데이터를 수집했습니다 — grype 대비 보강 피드 격차가 닫혔습니다.
 
 **각각에 무엇이 드는가.** 남은 배포판들은 각자 자기만의 형식으로 된 자기만의 advisory
 피드를 갖습니다(Wolfi/Chainguard는 OSV 모양의 advisory를 발행합니다 — 아마 싼 쪽일
 것입니다; Photon과 Mariner는 자체 JSON/OVAL을 발행합니다). EPSS/KEV는 바로 앞 문장이
 예측한 그대로 들어왔습니다(D86 — D27 모양 그대로, typed 필드와 게이트 둘을 달고서).
-EOL 데이터는 여전히 열려 있고, 여전히 싸 보입니다.
+EOL 데이터는 D87에서 들어왔습니다(Meta에 실리고, phase로 라벨 붙고,
+--fail-on-eol) — 정말로 쌌습니다.
 
 **언제 다시 볼까.** 커버리지 숫자가 아니라 특정 생태계에 존재 이유가 생겼을 때. 뒤에 provider가 없는
 comparer는 D46이 RPM에 대해 거부한 모양이고, 측정된 수요 없는 provider는 값 없이 치르는 코퍼스

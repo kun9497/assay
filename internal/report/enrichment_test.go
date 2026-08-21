@@ -80,7 +80,7 @@ func TestTable_MarksAnEnrichedFindingAndNamesItsSource(t *testing.T) {
 		},
 	}}
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 2, Cataloged: 2}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 2, Cataloged: 2}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -126,7 +126,7 @@ func TestTable_NoEnrichmentNoMarkerAndNoFootnote(t *testing.T) {
 		Ratings:  []matcher.Rating{{Database: "GHSA", AdvisoryID: "GHSA-unenriched", Severity: severity.High, Score: 7.5}},
 	}}}
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -167,7 +167,7 @@ func TestTable_EnrichmentFootnoteNamesEverySourceOnceSorted(t *testing.T) {
 		finding("GHSA-3", kisaEnrichment()),
 	}}
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 3, Cataloged: 3}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 3, Cataloged: 3}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -198,7 +198,7 @@ func TestTable_EnrichmentAndDisagreementMarkersCoexist(t *testing.T) {
 		Enrichment: []matcher.Enrichment{kisaEnrichment()},
 	}}}
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -303,7 +303,7 @@ func TestExplain_ResolvesTheAdvisoryCellAReaderCopied(t *testing.T) {
 		Enrichment: []matcher.Enrichment{kisaEnrichment()},
 	}}}
 	var table bytes.Buffer
-	if _, err := Table(&table, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := Table(&table, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	cell := cellAt(t, table.String(), "ALPINE-2025-0001 "+enrichmentMarker, "ADVISORY")
@@ -490,7 +490,7 @@ func assertLines(t *testing.T, got, want []string) {
 func TestJSON_CarriesEnrichmentInFull(t *testing.T) {
 	res, cat := goldenFixture()
 	var buf bytes.Buffer
-	if _, err := JSON(&buf, res, cat); err != nil {
+	if _, err := JSON(&buf, res, cat, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	var doc Document
@@ -535,7 +535,7 @@ func TestJSON_EnrichmentIsEmptyArrayNotNullWhenAbsent(t *testing.T) {
 		},
 	}}}
 	var buf bytes.Buffer
-	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()

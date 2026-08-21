@@ -130,14 +130,14 @@ closed every one of those (language ecosystems D68–D70, the RPM family D71–D
 STILL true: on Photon, Wolfi, Chainguard, Mariner/Azure Linux, Arch, or the other boutique
 apk-family distros, **assay finds nothing at all** — those images are catalogued and
 reported as not evaluated, a loud refusal, not support. grype also ships enrichment feeds
-assay had no equivalent for; D86 ingested EPSS and KEV (typed rating fields, both gates),
-leaving EOL data as the remaining one.
+assay had no equivalent for; D86 ingested EPSS and KEV (typed rating fields, both gates)
+and D87 the EOL data — the enrichment-feed gap against grype is closed.
 
 **What each would take.** The remaining distros are each their own advisory feed in their
 own format (Wolfi/Chainguard publish OSV-shaped advisories — likely the cheap ones; Photon
 and Mariner publish their own JSON/OVAL). EPSS/KEV landed exactly as the previous
-sentence predicted (D86 — the D27 shape, with typed fields and two gates). EOL data is
-still open, and still cheap-looking.
+sentence predicted (D86 — the D27 shape, with typed fields and two gates). EOL data landed in D87
+(Meta-carried, phase-labelled, --fail-on-eol) — it was indeed cheap.
 
 **Revisit when** a specific ecosystem has a reason to exist rather than as a coverage count.
 A comparer with no provider behind it is the shape D46 refused for RPM, and a provider with

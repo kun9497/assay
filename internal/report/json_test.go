@@ -193,7 +193,7 @@ func goldenFixture() (matcher.Result, cyclonedx.Stats) {
 func TestJSON_Golden(t *testing.T) {
 	res, cat := goldenFixture()
 	var buf bytes.Buffer
-	if _, err := JSON(&buf, res, cat); err != nil {
+	if _, err := JSON(&buf, res, cat, EOLStatus{}); err != nil {
 		t.Fatalf("JSON: %v", err)
 	}
 	got := buf.Bytes()
@@ -220,7 +220,7 @@ func TestJSON_Golden(t *testing.T) {
 // at all cannot be told apart from one whose shape simply changed.
 func TestJSON_SchemaVersionIsPresentAndStable(t *testing.T) {
 	var buf bytes.Buffer
-	if _, err := JSON(&buf, matcher.Result{}, cyclonedx.Stats{}); err != nil {
+	if _, err := JSON(&buf, matcher.Result{}, cyclonedx.Stats{}, EOLStatus{}); err != nil {
 		t.Fatalf("JSON: %v", err)
 	}
 	var doc Document
@@ -247,10 +247,10 @@ func TestJSON_SchemaVersionIsPresentAndStable(t *testing.T) {
 func TestJSON_Deterministic(t *testing.T) {
 	res, cat := goldenFixture()
 	var first, second bytes.Buffer
-	if _, err := JSON(&first, res, cat); err != nil {
+	if _, err := JSON(&first, res, cat, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := JSON(&second, res, cat); err != nil {
+	if _, err := JSON(&second, res, cat, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	if first.String() != second.String() {
@@ -266,11 +266,11 @@ func TestJSON_Deterministic(t *testing.T) {
 func TestJSON_CountsMatchTable(t *testing.T) {
 	res, cat := goldenFixture()
 	var tableBuf, jsonBuf bytes.Buffer
-	tableSum, err := Table(&tableBuf, res, cat)
+	tableSum, err := Table(&tableBuf, res, cat, EOLStatus{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	jsonSum, err := JSON(&jsonBuf, res, cat)
+	jsonSum, err := JSON(&jsonBuf, res, cat, EOLStatus{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func TestJSON_CountsMatchTable(t *testing.T) {
 func TestJSON_CarriesWhatTheTableCannot(t *testing.T) {
 	res, cat := goldenFixture()
 	var buf bytes.Buffer
-	if _, err := JSON(&buf, res, cat); err != nil {
+	if _, err := JSON(&buf, res, cat, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	var doc Document
@@ -352,7 +352,7 @@ func TestJSON_CarriesWhatTheTableCannot(t *testing.T) {
 func TestJSON_CarriesFullRatingsArray(t *testing.T) {
 	res, cat := goldenFixture()
 	var buf bytes.Buffer
-	if _, err := JSON(&buf, res, cat); err != nil {
+	if _, err := JSON(&buf, res, cat, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	var doc Document
@@ -417,7 +417,7 @@ func TestJSON_RatingRecordCarriesEPSSAndKEVFields(t *testing.T) {
 		},
 	}}}
 	var buf bytes.Buffer
-	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	var doc Document
@@ -476,7 +476,7 @@ func TestJSON_EPSSKEVFieldsOmittedWhenAbsent(t *testing.T) {
 		},
 	}}}
 	var buf bytes.Buffer
-	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -505,7 +505,7 @@ func TestJSON_RatingsIsEmptyArrayNotNullWhenAbsent(t *testing.T) {
 		Score:    7.5,
 	}}}
 	var buf bytes.Buffer
-	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -537,7 +537,7 @@ func TestJSON_RatingFixedKeyIsPresentEvenWhenEmpty(t *testing.T) {
 		},
 	}}}
 	var buf bytes.Buffer
-	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	var doc Document
@@ -567,7 +567,7 @@ func TestJSON_RatingFixedKeyIsPresentEvenWhenEmpty(t *testing.T) {
 func TestJSON_CarriesSkippedEntries(t *testing.T) {
 	res, cat := goldenFixture()
 	var buf bytes.Buffer
-	if _, err := JSON(&buf, res, cat); err != nil {
+	if _, err := JSON(&buf, res, cat, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	var doc Document
@@ -600,7 +600,7 @@ func TestJSON_CarriesSkippedEntries(t *testing.T) {
 func TestJSON_UnknownSeverityIsNotCoerced(t *testing.T) {
 	res, cat := goldenFixture()
 	var buf bytes.Buffer
-	if _, err := JSON(&buf, res, cat); err != nil {
+	if _, err := JSON(&buf, res, cat, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	var doc Document
@@ -648,7 +648,7 @@ func TestJSON_FixStateIsOneOfFourWordsOnEveryFindingAndRating(t *testing.T) {
 		find("RH-WONTFIX-1", matcher.Rating{Database: "REDHAT", AdvisoryID: "RH-WONTFIX-1", FixState: advisory.FixStateWontFix}),
 	}}
 	var buf bytes.Buffer
-	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 4, Cataloged: 4}); err != nil {
+	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 4, Cataloged: 4}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	var doc Document
@@ -702,7 +702,7 @@ func TestJSON_RatingFixStateResolvesTheStoredEmptyStringToUnknown(t *testing.T) 
 		Ratings: []matcher.Rating{{Database: "OSV", AdvisoryID: "RH-ZERO-VALUE-1"}},
 	}}}
 	var buf bytes.Buffer
-	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -725,7 +725,7 @@ func TestJSON_RatingFixStateResolvesTheStoredEmptyStringToUnknown(t *testing.T) 
 
 func TestJSON_EmptyResultHasEmptyArraysNotNull(t *testing.T) {
 	var buf bytes.Buffer
-	if _, err := JSON(&buf, matcher.Result{}, cyclonedx.Stats{}); err != nil {
+	if _, err := JSON(&buf, matcher.Result{}, cyclonedx.Stats{}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()

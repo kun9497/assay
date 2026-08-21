@@ -3187,6 +3187,42 @@ NVD는 opt-in인데 둘 다 기본으로 켜져 있는 이유이고, fetch 실�
 
 ---
 
+### D87 — end of life는 타깃의 사실이고, 이제 스캔이 그것을 말한다
+
+**결정.** endoflife.date에서 오는 배포판 EOL 데이터가 grype 대비 마지막 보강 격차를
+닫습니다 — CVE가 아니라 (product, release)로 키를 잡는데, 이것이 전부를 결정했습니다.
+db build 시점에 한 번 대량으로 fetch합니다(v1의 `/products/full` 엔드포인트, 2.7MB,
+제품 464개 중 assay의 배포판 계열 11개는 필수 정적 slug 테이블을 거쳐 남습니다 — API의
+alias는 `amzn`도 `ol`도 커버하지 않습니다). 저장은 Meta에 실립니다, 약 219행, 스키마
+상향 없음: 날짜와 제품별 phase 라벨을 무손실로 저장하고(D13), `isEol` 불린은 의도적으로
+저장하지 '않습니다' — 그것은 피드가 생성되는 시점에 계산된 값이라 발행된 아티팩트 안에서는
+낡아 버리므로, EOL은 시계에 대고 스캔 시점에 유도됩니다, 경계는 배타적입니다
+(endoflife.date 자신의 의미론이고, 자체 테스트로 고정되어 있습니다). 이 fetch는 세
+번째 출처 모양입니다 — `EOLSource`, Provider/Annotator/Enricher 옆에 — Rating은
+CVE로 키가 잡히고 Enrichment 버킷은 D29로 벗겨지고 실패에 관대하기 때문인데, 둘 다
+게이트를 먹이는 데이터에는 맞지 않습니다. EOL_ENABLE은 기본으로 켜져 있습니다; 실패하면
+빌드가 실패합니다.
+
+**phase 라벨이 정직함의 메커니즘입니다.** "EOL"은 제품마다 다른 어휘입니다: Debian 12는
+2026년 7월에 Debian Security Support 종료에 도달했지만 2028년까지 Debian LTS 아래서
+유지보수됩니다 — 무조건적인 "EOL ⇒ 신뢰 불가"는 모든 oldstable에서 오작동할 것입니다.
+표의 줄은 phase와 아직 유지보수 중이라는 사실 둘 다 이름 붙입니다:
+`EOL: debian 11 reached end of Debian Security Support on 2024-08-14; still under Debian
+LTS until 2026-08-31`. cycle은 ecosystem 키 자신의 release 접미사에서 다시 파싱해
+꺼냅니다 — Ecosystem()이 적용한 것과 같은 절단이므로, 두 읽기가 어긋날 수 없습니다 —
+SLES의 `.SP` 접기는 endoflife.date의 점 찍힌 이름에 맞게 다시 모양을 잡습니다(리뷰
+라운드가 SLES 15.x에 대해 정직한 무-데이터 구멍으로 처음 출하됐던 것을 닫았습니다).
+
+**게이트와 부재.** `--fail-on-eol`은 verdict()를 거쳐 exit 1합니다(D11: 스캔은 실제
+데이터에 대고 올바르게 '실행됐습니다' — 이것은 정책이지 신뢰 불가가 아니므로, 결코
+exit 2가 아닙니다). 플래그가 물었을 때 답이 없는 모든 경우는 시끄럽습니다: distro가
+없는 SBOM(D84), 알 수 없는 release, EOL 표가 없는 오래된 데이터베이스는 각각 왜
+답이 없는지를 찍고, 결코 잘못 걸리지 않습니다. 실전: debian:11은 그 줄을 그려내고
+exit 1입니다; debian:12는 유지보수 중이라는 사실을 그려내고 exit 0입니다;
+rockylinux:9는 아무것도 그려내지 않습니다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

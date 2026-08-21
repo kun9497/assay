@@ -194,6 +194,30 @@ func (f fakeEnricher) Enrich(_ context.Context, emit func(advisory.Enrichment) e
 	return prov, nil
 }
 
+// fakeEOLSource stands in for provider/eol (D87): it never touches the
+// network, so a test using it proves Update's own wiring — that it calls
+// Fetch at all and writes what comes back into Meta.EOL/Meta.EOLProvenance —
+// without depending on internal/provider/eol, which has its own tests and
+// whose New() defaults URL to the live endoflife.date endpoint.
+type fakeEOLSource struct {
+	name string
+	rows []store.EOLRelease
+	err  error // returned by Fetch instead of any rows, if set
+}
+
+func (f fakeEOLSource) Name() string { return f.name }
+
+func (f fakeEOLSource) Fetch(_ context.Context) ([]store.EOLRelease, store.Provenance, error) {
+	if f.err != nil {
+		return nil, store.Provenance{}, f.err
+	}
+	return f.rows, store.Provenance{
+		Source:   "https://example.test/eol",
+		DataAsOf: time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC),
+		Records:  len(f.rows),
+	}, nil
+}
+
 func TestUpdateThenStatus(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vulnerability.db")
 	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
@@ -202,7 +226,7 @@ func TestUpdateThenStatus(t *testing.T) {
 	}}}
 
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, nil, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, nil, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
@@ -260,7 +284,7 @@ func TestUpdate_RunsAnnotatorsAndPersistsRatings(t *testing.T) {
 	}}
 
 	var out, errOut bytes.Buffer
-	code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, []provider.Annotator{a}, nil, &out, &errOut)
+	code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, []provider.Annotator{a}, nil, nil, &out, &errOut)
 	if code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
@@ -320,7 +344,7 @@ func TestUpdate_InstallUsesReplacesRetrySchedule(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	code := Update(context.Background(), path, "", "", false,
-		[]provider.Provider{p}, nil, nil, &out, &errOut)
+		[]provider.Provider{p}, nil, nil, nil, &out, &errOut)
 	if code != 2 {
 		t.Fatalf("Update with a permanently failing rename = %d, want 2 (stderr: %s)", code, errOut.String())
 	}
@@ -364,7 +388,7 @@ func TestUpdate_AnnotatorFailureLeavesAnExistingDatabaseUntouched(t *testing.T) 
 		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
 	}}}
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), path, "", "", false, []provider.Provider{first}, nil, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), path, "", "", false, []provider.Provider{first}, nil, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("initial Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
@@ -379,7 +403,7 @@ func TestUpdate_AnnotatorFailureLeavesAnExistingDatabaseUntouched(t *testing.T) 
 	a := fakeAnnotator{name: "NVD", err: errBoom}
 	out.Reset()
 	errOut.Reset()
-	code := Update(context.Background(), path, "", "", false, []provider.Provider{second}, []provider.Annotator{a}, nil, &out, &errOut)
+	code := Update(context.Background(), path, "", "", false, []provider.Provider{second}, []provider.Annotator{a}, nil, nil, &out, &errOut)
 	if code != 2 {
 		t.Fatalf("second Update = %d, want 2 (stderr: %s)", code, errOut.String())
 	}
@@ -431,7 +455,7 @@ func TestUpdate_ReportsTimingWhenAnAnnotatorFails(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	code := Update(context.Background(), path, "", "", false,
-		[]provider.Provider{p}, []provider.Annotator{a}, nil, &out, &errOut)
+		[]provider.Provider{p}, []provider.Annotator{a}, nil, nil, &out, &errOut)
 	if code != 2 {
 		t.Fatalf("Update with a failing annotator = %d, want 2 (stderr: %s)", code, errOut.String())
 	}
@@ -454,10 +478,10 @@ func TestUpdateReplacesAtomically(t *testing.T) {
 		}}}
 	}
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), path, "", "", false, []provider.Provider{mk("first")}, nil, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), path, "", "", false, []provider.Provider{mk("first")}, nil, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("first Update = %d: %s", code, errOut.String())
 	}
-	if code := Update(context.Background(), path, "", "", false, []provider.Provider{mk("second")}, nil, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), path, "", "", false, []provider.Provider{mk("second")}, nil, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("second Update = %d: %s", code, errOut.String())
 	}
 
@@ -651,7 +675,7 @@ func TestStatus_ShowsRatingSources(t *testing.T) {
 	}}
 
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, []provider.Annotator{a}, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, []provider.Annotator{a}, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
@@ -721,7 +745,7 @@ func TestStatus_RatingSourceDisclosesTheWindowItCovered(t *testing.T) {
 			}
 
 			var out, errOut bytes.Buffer
-			if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, []provider.Annotator{a}, nil, &out, &errOut); code != 0 {
+			if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, []provider.Annotator{a}, nil, nil, &out, &errOut); code != 0 {
 				t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 			}
 			out.Reset()
@@ -773,7 +797,7 @@ func TestStatus_AnAnnotatorThatRatesNothingIsNotClaimedAsASource(t *testing.T) {
 	a := fakeAnnotator{name: "NVD", ratings: nil}
 
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, []provider.Annotator{a}, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, []provider.Annotator{a}, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
@@ -829,7 +853,7 @@ func TestStatus_AnAuthorityThatNeverRanHasNoRow(t *testing.T) {
 	}}}
 
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, nil, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, nil, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
@@ -901,7 +925,7 @@ func TestUpdate_SeedCarriesRatingsButNotAdvisories(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
 	if code := Update(context.Background(), dst, seed, "",
-		false, []provider.Provider{p}, []provider.Annotator{a}, nil, &out, &errOut); code != 0 {
+		false, []provider.Provider{p}, []provider.Annotator{a}, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
@@ -980,7 +1004,7 @@ func TestUpdate_SeedExcludesPerishableRatingSources(t *testing.T) {
 
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), dst, seed, "", false, nil, nil, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), dst, seed, "", false, nil, nil, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
@@ -1048,7 +1072,7 @@ func TestUpdate_SeedExcludedPerishableRatingIsReplacedByAFreshFetch(t *testing.T
 
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), dst, seed, "", false, nil, []provider.Annotator{a}, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), dst, seed, "", false, nil, []provider.Annotator{a}, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
@@ -1167,7 +1191,7 @@ func TestUpdate_SeedsRatingsFromASchemaOneBehindArtifact(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
 	code := Update(context.Background(), dst, seed, "", false,
-		[]provider.Provider{p}, nil, nil, &out, &errOut)
+		[]provider.Provider{p}, nil, nil, nil, &out, &errOut)
 	if code != 0 {
 		t.Fatalf("Update with a schema-%d seed = %d, want 0 (stderr: %s)",
 			store.SchemaVersion-1, code, errOut.String())
@@ -1221,7 +1245,7 @@ func TestUpdate_RatingsOnlyRefusesASeedOneSchemaBehind(t *testing.T) {
 
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
-	code := Update(context.Background(), dst, seed, "", true, nil, []provider.Annotator{a}, nil, &out, &errOut)
+	code := Update(context.Background(), dst, seed, "", true, nil, []provider.Annotator{a}, nil, nil, &out, &errOut)
 	if code != 2 {
 		t.Errorf("Update --ratings-only with a schema-%d seed = %d, want 2 (stderr: %s)",
 			store.SchemaVersion-1, code, errOut.String())
@@ -1245,7 +1269,7 @@ func TestUpdate_RefusesASeedTwoSchemasBehind(t *testing.T) {
 
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
-	code := Update(context.Background(), dst, seed, "", false, nil, nil, nil, &out, &errOut)
+	code := Update(context.Background(), dst, seed, "", false, nil, nil, nil, nil, &out, &errOut)
 	if code != 2 {
 		t.Errorf("Update with a schema-%d seed = %d, want 2 (stderr: %s)",
 			store.SchemaVersion-2, code, errOut.String())
@@ -1272,7 +1296,7 @@ func TestUpdate_SeededBuildDisclosesWhatItCarriedForward(t *testing.T) {
 
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), dst, seed, "", false, nil, nil, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), dst, seed, "", false, nil, nil, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	s := errOut.String()
@@ -1302,7 +1326,7 @@ func TestUpdate_SeededDisclosureNamesTheGivenReferenceNotTheScratchPath(t *testi
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
 	ref := "ghcr.io/kun9497/assay-db:v6"
-	if code := Update(context.Background(), dst, seed, ref, false, nil, nil, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), dst, seed, ref, false, nil, nil, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	s := errOut.String()
@@ -1326,7 +1350,7 @@ func TestUpdate_AnUnreadableSeedFailsRatherThanBuildingFromEmpty(t *testing.T) {
 	a := fakeAnnotator{name: "NVD", ratings: []advisory.Rating{{CVE: "CVE-2026-NEW", Source: "NVD"}}}
 
 	var out, errOut bytes.Buffer
-	code := Update(context.Background(), dst, missing, "", false, nil, []provider.Annotator{a}, nil, &out, &errOut)
+	code := Update(context.Background(), dst, missing, "", false, nil, []provider.Annotator{a}, nil, nil, &out, &errOut)
 	if code != 2 {
 		t.Errorf("Update with an unreadable seed = %d, want 2", code)
 	}
@@ -1379,7 +1403,7 @@ func TestUpdate_SeededRunReportsTheWindowItActuallyFetched(t *testing.T) {
 
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), dst, seed, "", false, nil, []provider.Annotator{a}, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), dst, seed, "", false, nil, []provider.Annotator{a}, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	out.Reset()
@@ -1438,7 +1462,7 @@ func TestUpdate_SeededMetaSurvivesWhenThisRunsAnnotatorDidNotRun(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
 	// No annotators at all this run -- NVD_ENABLE unset for the night.
-	if code := Update(context.Background(), dst, seed, "", false, nil, nil, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), dst, seed, "", false, nil, nil, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	out.Reset()
@@ -1486,7 +1510,7 @@ func TestUpdate_RunsEnrichers(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, nil,
-		[]provider.Enricher{e}, &out, &errOut); code != 0 {
+		[]provider.Enricher{e}, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
@@ -1510,6 +1534,173 @@ func TestUpdate_RunsEnrichers(t *testing.T) {
 	// half of the same build must still be there.
 	if advs, err := db.Lookup("Go", "github.com/a/b"); err != nil || len(advs) != 1 {
 		t.Errorf("Lookup(Go, github.com/a/b) = %v, %v; the enricher displaced the advisory build", advs, err)
+	}
+}
+
+// TestUpdate_RunsEOLSourceAndPersistsRows is the direct wiring check (D87),
+// on TestUpdate_RunsAnnotatorsAndPersistsRatings' own precedent: Update must
+// actually call Fetch, not just accept the eolSource argument and never
+// touch it, and what Fetch returns must be readable back through
+// db.Meta().EOL — the same database a scan will later open (D14).
+func TestUpdate_RunsEOLSourceAndPersistsRows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+		ID: "GHSA-eol", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
+	}}}
+	want := store.EOLRelease{
+		DistroID: "debian", Release: "12", EOLFrom: "2026-07-11", EOESFrom: "2028-06-30",
+		IsMaintained: true, EOLLabel: "Debian Security Support", EOESLabel: "Debian LTS",
+	}
+	src := fakeEOLSource{name: "endoflife.date", rows: []store.EOLRelease{want}}
+
+	var out, errOut bytes.Buffer
+	code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, nil, nil, src, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+
+	db, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	m, err := db.Meta()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Asserted field by field rather than just a length check: a mutation
+	// that runs Fetch but discards what it returns, or writes it to the
+	// wrong Meta field, would still pass a bare "len == 1".
+	if len(m.EOL) != 1 {
+		t.Fatalf("Meta.EOL = %d row(s), want 1 - Fetch ran but its output was never persisted: %+v", len(m.EOL), m.EOL)
+	}
+	if m.EOL[0] != want {
+		t.Errorf("Meta.EOL[0] = %+v, want %+v", m.EOL[0], want)
+	}
+	if m.EOLProvenance == nil {
+		t.Fatal("Meta.EOLProvenance = nil, want the eolSource's self-reported Provenance")
+	}
+	if m.EOLProvenance.Source != "https://example.test/eol" {
+		t.Errorf("Meta.EOLProvenance.Source = %q, want %q", m.EOLProvenance.Source, "https://example.test/eol")
+	}
+}
+
+// TestUpdate_EOLSourceFailureFailsTheBuild: unlike an enricher (D3), a
+// failing EOLSource must fail the whole build (D87) — the data feeds
+// `--fail-on-eol` directly and is meant to ride the published artifact, so
+// a database that silently shipped without it would leave the gate unable
+// to answer at all rather than loudly refusing to publish.
+func TestUpdate_EOLSourceFailureFailsTheBuild(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+		ID: "GHSA-eol-fail", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
+	}}}
+	src := fakeEOLSource{name: "endoflife.date", err: errBoom}
+
+	var out, errOut bytes.Buffer
+	code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, nil, nil, src, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("Update with a failing eolSource = %d, want 2 (stderr: %s)", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "boom") {
+		t.Errorf("stderr does not carry the eolSource's error:\n%s", errOut.String())
+	}
+	// The failed build must not have replaced any existing database (there
+	// is none here, but the temp file must not be left as the live path).
+	if _, err := os.Stat(path); err == nil {
+		t.Error("a failed eolSource must not leave a database at the live path")
+	}
+}
+
+// TestUpdate_NilEOLSourceLeavesMetaEOLNil: the D87 field must default to
+// nil, not an empty-but-non-nil slice, when no eolSource is configured —
+// store.Meta.EOL's own doc comment says nil is what "no EOL data" means to
+// a scan, and TestUpdateThenStatus already exercises this path without ever
+// asserting it (a gap this test closes directly, on CLAUDE.md's own "guards
+// that exist but are not held" caution).
+func TestUpdate_NilEOLSourceLeavesMetaEOLNil(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+		ID: "GHSA-noeol", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
+	}}}
+	var out, errOut bytes.Buffer
+	if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, nil, nil, nil, &out, &errOut); code != 0 {
+		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	db, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	m, err := db.Meta()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.EOL != nil {
+		t.Errorf("Meta.EOL = %+v, want nil when no eolSource is configured", m.EOL)
+	}
+	if m.EOLProvenance != nil {
+		t.Errorf("Meta.EOLProvenance = %+v, want nil when no eolSource is configured", m.EOLProvenance)
+	}
+}
+
+// TestStatus_ReportsEOLCoverage is db status's own EOL row (D87): a count
+// and a DataAsOf, visible without running a scan, on databasesSummary's own
+// "visible without a scan" precedent.
+func TestStatus_ReportsEOLCoverage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+		ID: "GHSA-eolstatus", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
+	}}}
+	src := fakeEOLSource{name: "endoflife.date", rows: []store.EOLRelease{
+		{DistroID: "debian", Release: "12"},
+		{DistroID: "alpine", Release: "3.19"},
+	}}
+
+	var out, errOut bytes.Buffer
+	if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, nil, nil, src, &out, &errOut); code != 0 {
+		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := Status(path, &out, &errOut); code != 0 {
+		t.Fatalf("Status = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	s := out.String()
+	if !strings.Contains(s, "eol:") || !strings.Contains(s, "2 release(s)") || !strings.Contains(s, "2 distro(s)") {
+		t.Errorf("status does not report EOL coverage:\n%s", s)
+	}
+	if !strings.Contains(s, "2026-08-21") {
+		t.Errorf("status does not report EOL DataAsOf:\n%s", s)
+	}
+}
+
+// TestStatus_NoEOLSourceDisclosesRatherThanStayingSilent: a database with no
+// EOL data must say so plainly (databasesSummary's/ratingsSummary's own
+// "nothing" convention), not omit the line or print an empty value that
+// reads as zero coverage rather than as "never fetched".
+func TestStatus_NoEOLSourceDisclosesRatherThanStayingSilent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+		ID: "GHSA-noeolstatus", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
+	}}}
+	var out, errOut bytes.Buffer
+	if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, nil, nil, nil, &out, &errOut); code != 0 {
+		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := Status(path, &out, &errOut); code != 0 {
+		t.Fatalf("Status = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	s := out.String()
+	if !strings.Contains(s, "eol:") || !strings.Contains(s, "nothing") {
+		t.Errorf("status does not disclose the absence of EOL data:\n%s", s)
 	}
 }
 
@@ -1538,7 +1729,7 @@ func TestUpdate_AFailingEnricherIsReportedButDoesNotFailTheBuild(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, nil,
-		[]provider.Enricher{e}, &out, &errOut)
+		[]provider.Enricher{e}, nil, &out, &errOut)
 	if code != 0 {
 		t.Fatalf("Update with a failing enricher = %d, want 0 — an unreachable enrichment "+
 			"source must not stop a database being built (stderr: %s)", code, errOut.String())
@@ -1593,7 +1784,7 @@ func TestUpdate_TimingMarksAFailingEnricher(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	code := Update(context.Background(), path, "", "", false,
-		[]provider.Provider{p}, nil, []provider.Enricher{e}, &out, &errOut)
+		[]provider.Provider{p}, nil, []provider.Enricher{e}, nil, &out, &errOut)
 	if code != 0 {
 		t.Fatalf("Update with a failing enricher = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
@@ -1637,7 +1828,7 @@ func TestStatus_EnrichmentCountsAreDerivedFromTheBucketNotTheEnricher(t *testing
 
 	var out, errOut bytes.Buffer
 	if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, nil,
-		[]provider.Enricher{e}, &out, &errOut); code != 0 {
+		[]provider.Enricher{e}, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	out.Reset()
@@ -1702,7 +1893,7 @@ func TestStatus_AnEnricherThatEnrichedNothingIsNotClaimedAsASource(t *testing.T)
 
 	var out, errOut bytes.Buffer
 	if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, nil,
-		[]provider.Enricher{e}, &out, &errOut); code != 0 {
+		[]provider.Enricher{e}, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	out.Reset()
@@ -1735,7 +1926,7 @@ func TestStatus_NoEnricherMeansNoEnrichmentTable(t *testing.T) {
 	}}}
 
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, nil, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, nil, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	out.Reset()
@@ -1816,7 +2007,7 @@ func TestStatus_AFailedEnricherIsVisibleWhetherOrNotItWroteAnything(t *testing.T
 
 			var out, errOut bytes.Buffer
 			if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, nil,
-				[]provider.Enricher{e}, &out, &errOut); code != 0 {
+				[]provider.Enricher{e}, nil, &out, &errOut); code != 0 {
 				t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 			}
 			out.Reset()
@@ -1907,7 +2098,7 @@ func TestStatus_HeaderSaysWhetherAnythingIsEnriched(t *testing.T) {
 		}}
 		var out, errOut bytes.Buffer
 		if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, nil,
-			[]provider.Enricher{e}, &out, &errOut); code != 0 {
+			[]provider.Enricher{e}, nil, &out, &errOut); code != 0 {
 			t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 		}
 		out.Reset()
@@ -1927,7 +2118,7 @@ func TestStatus_HeaderSaysWhetherAnythingIsEnriched(t *testing.T) {
 	t.Run("when nothing is", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "vulnerability.db")
 		var out, errOut bytes.Buffer
-		if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, nil, nil,
+		if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, nil, nil, nil,
 			&out, &errOut); code != 0 {
 			t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 		}
@@ -2069,7 +2260,7 @@ func mergedNVDCoverage(t *testing.T, seed string, a fakeAnnotator) store.Provena
 	t.Helper()
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
-	if code := Update(context.Background(), dst, seed, "", false, nil, []provider.Annotator{a}, nil, &out, &errOut); code != 0 {
+	if code := Update(context.Background(), dst, seed, "", false, nil, []provider.Annotator{a}, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	db, err := store.Open(dst)
@@ -2216,7 +2407,7 @@ func TestUpdate_RatingsOnlyCarriesAdvisoriesVerbatimAndReRates(t *testing.T) {
 	// providers is nil: a ratings-only build must not need one to do
 	// anything, since it never calls Fetch on it.
 	code := Update(context.Background(), dst, seed, "", true,
-		nil, []provider.Annotator{a}, nil, &out, &errOut)
+		nil, []provider.Annotator{a}, nil, nil, &out, &errOut)
 	if code != 0 {
 		t.Fatalf("Update --ratings-only = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
@@ -2266,7 +2457,7 @@ func TestUpdate_RatingsOnlyRefusesWithoutASeed(t *testing.T) {
 	a := fakeAnnotator{name: "NVD", ratings: []advisory.Rating{{CVE: "CVE-2026-X", Source: "NVD"}}}
 
 	var out, errOut bytes.Buffer
-	code := Update(context.Background(), dst, "", "", true, nil, []provider.Annotator{a}, nil, &out, &errOut)
+	code := Update(context.Background(), dst, "", "", true, nil, []provider.Annotator{a}, nil, nil, &out, &errOut)
 	if code != 2 {
 		t.Errorf("Update --ratings-only with no seed = %d, want 2", code)
 	}
@@ -2300,7 +2491,7 @@ func TestUpdate_RatingsOnlyRefusesWithoutAnAnnotator(t *testing.T) {
 
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
-	code := Update(context.Background(), dst, seed, "", true, nil, nil, nil, &out, &errOut)
+	code := Update(context.Background(), dst, seed, "", true, nil, nil, nil, nil, &out, &errOut)
 	if code != 2 {
 		t.Errorf("Update --ratings-only with no annotator = %d, want 2", code)
 	}
@@ -2334,7 +2525,7 @@ func TestUpdate_RatingsOnlyDoesNotRunProviders(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
 	code := Update(context.Background(), dst, seed, "", true,
-		[]provider.Provider{panicProvider{name: "osv"}}, []provider.Annotator{a}, nil, &out, &errOut)
+		[]provider.Provider{panicProvider{name: "osv"}}, []provider.Annotator{a}, nil, nil, &out, &errOut)
 	if code != 0 {
 		t.Fatalf("Update --ratings-only = %d, want 0 (stderr: %s) -- if this failed by panicking, "+
 			"the provider ran when it must not have", code, errOut.String())
@@ -2361,7 +2552,7 @@ func TestUpdate_RatingsOnlyKeepsTheSeedsCoverageClaim(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
 	if code := Update(context.Background(), dst, seed, "", true, nil,
-		[]provider.Annotator{slice}, nil, &out, &errOut); code != 0 {
+		[]provider.Annotator{slice}, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 

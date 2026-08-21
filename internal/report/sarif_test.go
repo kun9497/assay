@@ -21,7 +21,7 @@ import (
 func sarifOf(t *testing.T, res matcher.Result, cat cyclonedx.Stats) map[string]any {
 	t.Helper()
 	var buf bytes.Buffer
-	if _, err := SARIF(&buf, res, cat, "example.com/img:1", "v0.0.0-test"); err != nil {
+	if _, err := SARIF(&buf, res, cat, "example.com/img:1", "v0.0.0-test", EOLStatus{}); err != nil {
 		t.Fatalf("SARIF: %v", err)
 	}
 	var doc map[string]any

@@ -16,6 +16,7 @@ import (
 	"github.com/kun9497/assay/internal/dbcmd"
 	"github.com/kun9497/assay/internal/provider"
 	"github.com/kun9497/assay/internal/provider/amazon"
+	"github.com/kun9497/assay/internal/provider/eol"
 	"github.com/kun9497/assay/internal/provider/epss"
 	"github.com/kun9497/assay/internal/provider/fedora"
 	"github.com/kun9497/assay/internal/provider/kev"
@@ -85,6 +86,13 @@ Scan flags (any order, before or after the target):
   --fail-on-epss <n>    Exit 1 if any finding's EPSS exploit-probability
                         (0..1) is at or above <n>. A finding EPSS has not
                         scored never trips this - absent stays absent.
+  --fail-on-eol         Exit 1 if the scanned target's distro release is past
+                        its end-of-life date (endoflife.date). Never a
+                        silent skip: when there is no answer - the target
+                        carries no distro identity, its release is not one
+                        the data covers, or the database has no EOL data at
+                        all - a one-line stderr warning names why, and this
+                        never trips on its own.
   --fail-on-incomplete[=any|target]
                         Exit 2 if any package's evaluation was incomplete.
                         =target narrows it to causes you can act on (a version
@@ -227,6 +235,17 @@ Environment (db build only — a scan reads no environment and no network):
                         vulnerability) is never stored.
                         Set this to 0 for a local build that does not want
                         the fetch.
+  EOL_ENABLE=0          Skip endoflife.date's distro end-of-life catalog. ON
+                        BY DEFAULT (D87), for the mixed reason EPSS_ENABLE
+                        and REDHAT_ENABLE each are: one file, ~2.7 MB,
+                        fetched and parsed in seconds, AND meant to ride the
+                        published artifact the way KISA's prose (D29)
+                        deliberately does not. Feeds --fail-on-eol; a
+                        database built with this off carries no EOL data at
+                        all, and the flag warns rather than gates when that
+                        happens.
+                        Set this to 0 for a local build that does not want
+                        the fetch.
 `
 
 func main() {
@@ -332,6 +351,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 				dbUpdateProviders(stderr),
 				dbUpdateAnnotators(stderr),
 				dbUpdateEnrichers(stderr),
+				dbUpdateEOLSource(stderr),
 				stdout, stderr)
 		case "update":
 			ref, ok := resolveUpdateRef(args, stderr)
@@ -768,6 +788,38 @@ func dbUpdateEnrichers(stderr io.Writer) []provider.Enricher {
 	return []provider.Enricher{newKNVDEnricher(knvd.Options{Progress: stderr})}
 }
 
+// newEOLSource constructs the endoflife.date EOL source (D87). A package
+// variable for the same reason newKNVDEnricher is: a test can substitute a
+// spy and observe the Options that reached construction, without eol.New's
+// default URL — the live endoflife.date catalog — ever being fetched from.
+var newEOLSource = eol.New
+
+// dbUpdateEOLSource is the provider.EOLSource `db build` runs, or nil when
+// EOL_ENABLE=0.
+//
+// ON BY DEFAULT (D87), unlike NVD's and KISA's opt-in, for a mix of their
+// two reasons: cost, like EPSS/KEV (one ~2.7 MB request, not NVD's seven
+// hours) — and meant to ride the published artifact, like every distro
+// provider's own default (D51's precedent), never held back local-only the
+// way KISA's Korean prose is (D29). A build that shipped without this data
+// by default would leave `--fail-on-eol` unable to answer on a pulled
+// artifact for anyone who did not know to opt in.
+//
+// Disabling it is disclosed on stderr, unlike REDHAT_ENABLE=0 and its
+// siblings: this is the one source whose absence changes what a FLAG can
+// do (`--fail-on-eol` degrades to its own "EOL unknown" warning rather than
+// gating, see scancmd), so a build run with it off should say so plainly
+// rather than leave a reader to notice only when the flag they configured
+// never fires.
+func dbUpdateEOLSource(stderr io.Writer) provider.EOLSource {
+	if !envFlag(stderr, "EOL_ENABLE", true) {
+		fmt.Fprintln(stderr, "eol: EOL_ENABLE=0, skipping end-of-life data — "+
+			"a database built this way carries none, and --fail-on-eol will warn rather than gate on it")
+		return nil
+	}
+	return newEOLSource(eol.Options{Progress: stderr})
+}
+
 // resolveUpdateRef decides which reference `db update` pulls from: the
 // default, schema-derived ref (dbcmd.Ref(dbcmd.DefaultRef)), or an explicit
 // override via `--from <ref>`. Pulled out of the "update" case as its own,
@@ -1017,6 +1069,12 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 		// severity threshold can express, the same shape as D48's gate.
 		case a == "--fail-on-kev":
 			opts.FailOnKEV = true
+
+		// D87. Beside --fail-on-kev above: a property of the TARGET, not of
+		// any one finding, but the same "no severity threshold expresses
+		// this" shape that earns its own boolean flag rather than a value.
+		case a == "--fail-on-eol":
+			opts.FailOnEOL = true
 
 		case a == "--fail-on-epss":
 			i++

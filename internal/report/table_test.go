@@ -126,7 +126,7 @@ func TestCellAt_AnEmptyCellDoesNotShiftTheColumns(t *testing.T) {
 		// answer for that finding and the wrong subject for this test.
 		Ratings: []matcher.Rating{{Database: "GHSA", AdvisoryID: "GHSA-empty", Fixed: "2.0.0"}},
 	}}}
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -161,7 +161,7 @@ func TestCellAt_PicksTheRowByItsAdvisoryCell(t *testing.T) {
 			Severity: severity.High, Score: 7.5,
 		},
 	}}
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 2, Cataloged: 2}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 2, Cataloged: 2}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -188,7 +188,7 @@ func TestTable_Findings(t *testing.T) {
 		Score:    7.5,
 	}}}
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -208,7 +208,7 @@ func TestTable_SkippedCountsAreVisible(t *testing.T) {
 	var buf bytes.Buffer
 	if _, err := Table(&buf, res, cyclonedx.Stats{
 		Components: 42, Cataloged: 1, SkippedUnsupportedEcosystem: 40, SkippedNoPURL: 1,
-	}); err != nil {
+	}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -227,7 +227,7 @@ func TestTable_NothingEvaluatedIsNotReportedAsClean(t *testing.T) {
 	var buf bytes.Buffer
 	if _, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{
 		Components: 42, Cataloged: 0, SkippedUnsupportedEcosystem: 42,
-	}); err != nil {
+	}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -247,7 +247,7 @@ func TestTable_CountsAddUp(t *testing.T) {
 		Reason:  "no version comparer",
 	}}}
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 3, Cataloged: 1, SkippedNoPURL: 2}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 3, Cataloged: 1, SkippedNoPURL: 2}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(buf.String(),
@@ -262,7 +262,7 @@ func TestTable_SummaryDrivesTheExitCode(t *testing.T) {
 	var buf bytes.Buffer
 	sum, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{
 		Components: 5, Cataloged: 0, SkippedUnsupportedEcosystem: 5,
-	})
+	}, EOLStatus{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestTable_SummaryDrivesTheExitCode(t *testing.T) {
 
 	// An empty document is vacuously fine, and the wording must agree with that.
 	buf.Reset()
-	sum, err = Table(&buf, matcher.Result{}, cyclonedx.Stats{})
+	sum, err = Table(&buf, matcher.Result{}, cyclonedx.Stats{}, EOLStatus{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +297,7 @@ func TestTable_FindingCarriesItsAliases(t *testing.T) {
 		Score:       7.5,
 	}}}
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(buf.String(), "CVE-2020-28493") {
@@ -315,7 +315,7 @@ func TestTable_AdvisoryScopedSkipIsAlwaysShown(t *testing.T) {
 		Reason:     `the advisory's range bound "not-a-version" could not be read: invalid version`,
 	}}}
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -329,7 +329,7 @@ func TestTable_AdvisoryScopedSkipIsAlwaysShown(t *testing.T) {
 
 func TestTable_NoFindings(t *testing.T) {
 	var buf bytes.Buffer
-	if _, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{Components: 3, Cataloged: 3}); err != nil {
+	if _, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{Components: 3, Cataloged: 3}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -346,10 +346,10 @@ func TestTable_Deterministic(t *testing.T) {
 			Advisory: advisory.Advisory{ID: "GHSA-2"}, Severity: severity.Medium, Score: 5.0},
 	}}
 	var first, second bytes.Buffer
-	if _, err := Table(&first, res, cyclonedx.Stats{}); err != nil {
+	if _, err := Table(&first, res, cyclonedx.Stats{}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Table(&second, res, cyclonedx.Stats{}); err != nil {
+	if _, err := Table(&second, res, cyclonedx.Stats{}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	if first.String() != second.String() {
@@ -376,7 +376,7 @@ func TestTable_ShowsTheSourcePackageWhenItIsWhatMatched(t *testing.T) {
 	}}}
 
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -401,7 +401,7 @@ func TestTable_DoesNotRepeatTheNameWhenItMatchedDirectly(t *testing.T) {
 	}}}
 
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(buf.String(), "busybox (busybox)") {
@@ -456,7 +456,7 @@ func TestTable_FindingCarriesIdentifiersFromAliasesAndUpstream(t *testing.T) {
 				Score:       7.5,
 			}}}
 			var buf bytes.Buffer
-			if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+			if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 				t.Fatal(err)
 			}
 			if !strings.Contains(buf.String(), tt.want) {
@@ -488,7 +488,7 @@ func TestTable_OtherIdentifiersAreDeduplicated(t *testing.T) {
 		Score:    7.5,
 	}}}
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	if n := strings.Count(buf.String(), "CVE-2025-46394"); n != 2 {
@@ -511,7 +511,7 @@ func TestTable_UncheckedPackagesBreakTheCleanHeadline(t *testing.T) {
 	}}
 	var buf bytes.Buffer
 	// Three cataloged; two the matcher never checked, so one was evaluated.
-	sum, err := Table(&buf, res, cyclonedx.Stats{Components: 3, Cataloged: 3})
+	sum, err := Table(&buf, res, cyclonedx.Stats{Components: 3, Cataloged: 3}, EOLStatus{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -538,7 +538,7 @@ func TestTable_ComponentsTheCatalogerDroppedBreakTheCleanHeadline(t *testing.T) 
 	var buf bytes.Buffer
 	sum, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{
 		Components: 17, Cataloged: 2, SkippedNoPURL: 15,
-	})
+	}, EOLStatus{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -580,7 +580,7 @@ func TestTable_SeverityColumn(t *testing.T) {
 		Score:    9.8,
 	}}}
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -610,7 +610,7 @@ func TestTable_ColumnOrderMatchesHeader(t *testing.T) {
 		Score:       9.8,
 	}}}
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -637,7 +637,7 @@ func TestTable_ColumnOrderMatchesHeader(t *testing.T) {
 // silently excludes what it could not judge.
 func TestTable_UnknownSeverityCountIsAlwaysPrinted(t *testing.T) {
 	var buf bytes.Buffer
-	sum, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{Components: 1, Cataloged: 1})
+	sum, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -661,7 +661,7 @@ func TestTable_UnknownSeverityCountReflectsFindings(t *testing.T) {
 			Advisory: advisory.Advisory{ID: "GHSA-2"}, Severity: severity.Critical, Score: 9.8},
 	}}
 	var buf bytes.Buffer
-	sum, err := Table(&buf, res, cyclonedx.Stats{Components: 2, Cataloged: 2})
+	sum, err := Table(&buf, res, cyclonedx.Stats{Components: 2, Cataloged: 2}, EOLStatus{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -744,7 +744,7 @@ func TestTable_MarksSeverityWhenSourcesDisagree(t *testing.T) {
 		},
 	}}}
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -792,7 +792,7 @@ func TestTable_NoMarkerWhenSourcesAgree(t *testing.T) {
 		},
 	}}
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 2, Cataloged: 2}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 2, Cataloged: 2}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -821,7 +821,7 @@ func TestTable_NoMarkerWithASingleRating(t *testing.T) {
 		},
 	}}}
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -862,7 +862,7 @@ func TestTable_FootnoteOnlyWhenSomeoneDisagrees(t *testing.T) {
 		},
 	}}
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 2, Cataloged: 2}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 2, Cataloged: 2}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -909,7 +909,7 @@ func TestSummary_TargetIncompleteExcludesUnsupportedEcosystem(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			sum, err := Table(&buf, matcher.Result{}, tc.cat)
+			sum, err := Table(&buf, matcher.Result{}, tc.cat, EOLStatus{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -946,7 +946,7 @@ func TestTable_NoFixIsDistinctFromNotRecordedHere(t *testing.T) {
 			{Database: "GHSA", AdvisoryID: "GHSA-x", Fixed: "1:3.5.5-8.el9_8"},
 		}),
 	}}
-	sum, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1})
+	sum, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -983,7 +983,7 @@ func TestTable_NoFixFootnoteOnlyWhenEarned(t *testing.T) {
 		Severity: severity.Low,
 		Ratings:  []matcher.Rating{{Database: "GHSA", AdvisoryID: "GHSA-fixed", Fixed: "2.0.0"}},
 	}}}
-	sum, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1})
+	sum, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1068,7 +1068,7 @@ func TestTable_FixedInColumnRendersEachFixState(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			res := matcher.Result{Findings: []matcher.Finding{tt.finding}}
 			var buf bytes.Buffer
-			if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}); err != nil {
+			if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 				t.Fatal(err)
 			}
 			out := buf.String()
@@ -1101,7 +1101,7 @@ func TestTable_NoFixFootnotesOnlyWhenEarned(t *testing.T) {
 		},
 	}}
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 2, Cataloged: 2}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 2, Cataloged: 2}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -1148,7 +1148,7 @@ func TestTable_NoFixFootnoteOrderIsFixed(t *testing.T) {
 		},
 	}}
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 3, Cataloged: 3}); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 3, Cataloged: 3}, EOLStatus{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -1195,7 +1195,7 @@ func TestSummary_WontFixCountsOnlyWontFixFindings(t *testing.T) {
 		},
 	}}
 	var buf bytes.Buffer
-	sum, err := Table(&buf, res, cyclonedx.Stats{Components: 5, Cataloged: 5})
+	sum, err := Table(&buf, res, cyclonedx.Stats{Components: 5, Cataloged: 5}, EOLStatus{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1214,7 +1214,7 @@ func TestSummary_WontFixCountsOnlyWontFixFindings(t *testing.T) {
 // learns to stop checking for.
 func TestTable_WillNotBeFixedCountIsAlwaysPrinted(t *testing.T) {
 	var buf bytes.Buffer
-	sum, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{Components: 1, Cataloged: 1})
+	sum, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1233,7 +1233,7 @@ func TestTable_WillNotBeFixedCountIsAlwaysPrinted(t *testing.T) {
 		Score:    7.5,
 		Ratings:  []matcher.Rating{{Database: "REDHAT", AdvisoryID: "RH-WONTFIX-1", FixState: advisory.FixStateWontFix}},
 	}}}
-	sum, err = Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1})
+	sum, err = Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1290,7 +1290,7 @@ func TestSummary_KnownExploitedCountsOnlyKEVFindings(t *testing.T) {
 		},
 	}}
 	var buf bytes.Buffer
-	sum, err := Table(&buf, res, cyclonedx.Stats{Components: 3, Cataloged: 3})
+	sum, err := Table(&buf, res, cyclonedx.Stats{Components: 3, Cataloged: 3}, EOLStatus{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1308,7 +1308,7 @@ func TestSummary_KnownExploitedCountsOnlyKEVFindings(t *testing.T) {
 // noise readers learn to stop reading.
 func TestTable_KnownExploitedCountAppearsOnlyWhenNonZero(t *testing.T) {
 	var buf bytes.Buffer
-	sum, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{Components: 1, Cataloged: 1})
+	sum, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1331,7 +1331,7 @@ func TestTable_KnownExploitedCountAppearsOnlyWhenNonZero(t *testing.T) {
 				KEV: true, KEVDateAdded: "2026-01-01", KEVRansomware: "Known"},
 		},
 	}}}
-	sum, err = Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1})
+	sum, err = Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{})
 	if err != nil {
 		t.Fatal(err)
 	}
