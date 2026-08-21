@@ -2,6 +2,8 @@
 // independent of where it came from.
 package pkgmeta
 
+import "strings"
+
 type Target struct {
 	// Distro belongs to the target, not to each package (D7): an image is
 	// Alpine 3.19, its packages are not. nil for language-only targets.
@@ -44,4 +46,38 @@ type SourcePackage struct {
 type Location struct {
 	Path        string
 	LayerDigest string // empty outside image scans
+}
+
+// SourceRPMName strips a SOURCERPM-shaped filename back to the bare source
+// package name: "audit-3.0.7-104.el9.src.rpm" -> "audit". This is the one
+// core both rpm readers share (D83) — the rpmdb cataloger reads it off an
+// installed header's SOURCERPM tag, and the cyclonedx cataloger reads the
+// same string off a purl's "upstream" qualifier, which syft writes in the
+// identical shape. A single function here is what keeps the two readings
+// from drifting apart; it used to live only in rpmdb, taking a parsed header,
+// before the cyclonedx cataloger needed the same stripping logic on a plain
+// string with no header to read it from.
+//
+// The last TWO hyphen-separated fields are the version and release, so they
+// are what comes off — not everything after the first hyphen, which would
+// turn "python3-perf-3.10.0-1.el9.src.rpm" into "python3". Roughly a third of
+// the names in a real image carry an interior hyphen, so that is the common
+// case rather than the edge one.
+//
+// Returns "" for anything that is not that shape, including gpg-pubkey's
+// literal "(none)".
+func SourceRPMName(s string) string {
+	s, ok := strings.CutSuffix(s, ".src.rpm")
+	if !ok {
+		return ""
+	}
+	i := strings.LastIndexByte(s, '-')
+	if i < 0 {
+		return ""
+	}
+	j := strings.LastIndexByte(s[:i], '-')
+	if j <= 0 {
+		return ""
+	}
+	return s[:j]
 }

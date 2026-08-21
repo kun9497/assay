@@ -421,6 +421,321 @@ func TestParse_DistroFallsBackToComponentFieldsWithoutSyftProperties(t *testing.
 	}
 }
 
+// D83: CycloneDX ingestion maps rpm and deb purls, mirroring the apk branch —
+// bare Name, ecosystem key from the resolved distro, never the purl namespace
+// (D6/D7/D8; the namespace itself drifts "rhel"->"redhat" between syft
+// generations, so it must never be load-bearing).
+
+func TestParse_RPMKeyedViaOSComponent(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+	  {"type":"library","name":"audit-libs","version":"3.0.7-104.el9",
+	   "purl":"pkg:rpm/rhel/audit-libs@3.0.7-104.el9?arch=x86_64&distro=rhel-9.8"},
+	  {"type":"operating-system","name":"rhel","version":"9.8",
+	   "properties":[
+	     {"name":"syft:distro:id","value":"rhel"},
+	     {"name":"syft:distro:versionID","value":"9.8"}
+	   ]}]}`
+	target, _, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1", len(target.Packages))
+	}
+	if got := target.Packages[0].Ecosystem; got != "Red Hat:9" {
+		t.Errorf("Ecosystem = %q, want %q (keyed from the operating-system component)",
+			got, "Red Hat:9")
+	}
+}
+
+// No operating-system component at all: the ecosystem key must come from the
+// purl's own "distro" qualifier instead of being left empty.
+func TestParse_RPMKeyedViaQualifierFallback_NoOSComponent(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+	  {"type":"library","name":"audit-libs","version":"3.0.7-104.el9",
+	   "purl":"pkg:rpm/rhel/audit-libs@3.0.7-104.el9?arch=x86_64&distro=rhel-9.8"}]}`
+	target, _, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1", len(target.Packages))
+	}
+	if got := target.Packages[0].Ecosystem; got != "Red Hat:9" {
+		t.Errorf("Ecosystem = %q, want %q (keyed from the purl's own distro qualifier)",
+			got, "Red Hat:9")
+	}
+}
+
+// TestParse_QualifierFallbackSplitsOnTheLastHyphen pins WHICH hyphen the
+// fallback splits on. Every other fallback fixture in this file carries
+// exactly one hyphen (rhel-9.8, debian-12), where first and last coincide —
+// so without this row, flipping LastIndexByte to IndexByte stayed green while
+// live it would shred "opensuse-leap-15.6" into ID "opensuse" and VersionID
+// "leap-15.6", a key nothing was stored under: a silent clean verdict.
+func TestParse_QualifierFallbackSplitsOnTheLastHyphen(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+	  {"type":"library","name":"bash","version":"4.4-150400.27.6.1",
+	   "purl":"pkg:rpm/opensuse/bash@4.4-150400.27.6.1?arch=x86_64&distro=opensuse-leap-15.6"}]}`
+	target, _, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1", len(target.Packages))
+	}
+	if got := target.Packages[0].Ecosystem; got != "openSUSE Leap:15.6" {
+		t.Errorf("Ecosystem = %q, want %q — the qualifier's ID part itself contains "+
+			"a hyphen, and only a last-hyphen split preserves it",
+			got, "openSUSE Leap:15.6")
+	}
+}
+
+// When both an operating-system component and a package's own distro
+// qualifier exist and disagree, the OS component wins — a per-package
+// fallback would let one document disagree with itself.
+func TestParse_OSComponentWinsOverDisagreeingQualifier(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+	  {"type":"library","name":"audit-libs","version":"3.0.7-104.el9",
+	   "purl":"pkg:rpm/ol/audit-libs@3.0.7-104.el9?arch=x86_64&distro=ol-9.8"},
+	  {"type":"operating-system","name":"rhel","version":"9.8",
+	   "properties":[
+	     {"name":"syft:distro:id","value":"rhel"},
+	     {"name":"syft:distro:versionID","value":"9.8"}
+	   ]}]}`
+	target, _, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1", len(target.Packages))
+	}
+	// The purl's own qualifier says "ol-9.8" (Oracle Linux, which would key
+	// "Oracle Linux:9"); the document's operating-system component says rhel.
+	if got := target.Packages[0].Ecosystem; got != "Red Hat:9" {
+		t.Errorf("Ecosystem = %q, want %q: the operating-system component must win "+
+			"over a disagreeing purl qualifier", got, "Red Hat:9")
+	}
+}
+
+// Neither an operating-system component nor a usable distro qualifier:
+// unkeyed, exactly like the apk branch's no-distro path — counted and kept,
+// never dropped, so the matcher can report it as skipped rather than the
+// package vanishing from every counter.
+func TestParse_RPMNeitherOSNorQualifier_UnkeyedAndCounted(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+	  {"type":"library","name":"audit-libs","version":"3.0.7-104.el9",
+	   "purl":"pkg:rpm/rhel/audit-libs@3.0.7-104.el9?arch=x86_64"}]}`
+	target, stats, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if stats.Cataloged != 1 {
+		t.Errorf("Cataloged = %d, want 1: an unkeyable rpm package is still cataloged", stats.Cataloged)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1", len(target.Packages))
+	}
+	if got := target.Packages[0].Ecosystem; got != "" {
+		t.Errorf("Ecosystem = %q, want empty: no operating-system component and no distro qualifier", got)
+	}
+}
+
+// The purl's @version is version-release WITHOUT the epoch (evr()'s shape,
+// rpmdb/header.go); Qualifiers["epoch"] is prepended only when present and
+// non-"0" — "0:" is never emitted, matching the installed side's own
+// omission.
+func TestParse_RPMEpochPrefixedIffNonZero(t *testing.T) {
+	for _, tc := range []struct {
+		name, purl, want string
+	}{
+		{"noepoch", "pkg:rpm/rhel/noepoch@1.0-1.el9?arch=x86_64", "1.0-1.el9"},
+		{"epoch1", "pkg:rpm/rhel/epoch1@1.0-1.el9?arch=x86_64&epoch=1", "1:1.0-1.el9"},
+		{"epoch0", "pkg:rpm/rhel/epoch0@1.0-1.el9?arch=x86_64&epoch=0", "1.0-1.el9"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bom := `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+			  {"type":"library","name":"` + tc.name + `","version":"1.0-1.el9","purl":"` + tc.purl + `"}]}`
+			target, _, err := Parse(strings.NewReader(bom))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if len(target.Packages) != 1 {
+				t.Fatalf("Packages = %d, want 1", len(target.Packages))
+			}
+			if got := target.Packages[0].Version; got != tc.want {
+				t.Errorf("Version = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// gpg-pubkey is a keyring entry, not an installed package (mirrors rpmdb's
+// isPubkey). It must be filtered out entirely rather than cataloged as a
+// package literally named "gpg-pubkey", while still being counted somewhere
+// so the component total is not silently short.
+func TestParse_GPGPubkeyFiltered(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+	  {"type":"library","name":"audit-libs","version":"3.0.7-104.el9",
+	   "purl":"pkg:rpm/rhel/audit-libs@3.0.7-104.el9?arch=x86_64&distro=rhel-9.8"},
+	  {"type":"library","name":"gpg-pubkey","version":"5a6340b3-6229229e",
+	   "purl":"pkg:rpm/rhel/gpg-pubkey@5a6340b3-6229229e?distro=rhel-9.8"},
+	  {"type":"operating-system","name":"rhel","version":"9.8",
+	   "properties":[
+	     {"name":"syft:distro:id","value":"rhel"},
+	     {"name":"syft:distro:versionID","value":"9.8"}
+	   ]}]}`
+	target, stats, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if stats.Components != 2 {
+		t.Errorf("Components = %d, want 2 (gpg-pubkey counted, not silently absent)", stats.Components)
+	}
+	if stats.Cataloged != 1 {
+		t.Errorf("Cataloged = %d, want 1", stats.Cataloged)
+	}
+	if stats.SkippedUnsupportedEcosystem != 1 {
+		t.Errorf("SkippedUnsupportedEcosystem = %d, want 1 (gpg-pubkey routed there)", stats.SkippedUnsupportedEcosystem)
+	}
+	for _, p := range target.Packages {
+		if p.Name == "gpg-pubkey" {
+			t.Error("a gpg-pubkey keyring entry was cataloged as an installed package")
+		}
+	}
+}
+
+// Ubuntu's OSV keys carry an ":LTS" suffix read from PRETTY_NAME (D53); the
+// full key is asserted, not a Contains check, because "Ubuntu:22.04" is a
+// substring of "Ubuntu:22.04:LTS" and would pass on the wrong column.
+func TestParse_DebUbuntuKeyedViaOSComponent_LTSSuffix(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+	  {"type":"library","name":"bash","version":"5.1-6ubuntu1.1",
+	   "purl":"pkg:deb/ubuntu/bash@5.1-6ubuntu1.1?arch=amd64&distro=ubuntu-22.04"},
+	  {"type":"operating-system","name":"ubuntu","version":"22.04",
+	   "properties":[
+	     {"name":"syft:distro:id","value":"ubuntu"},
+	     {"name":"syft:distro:versionID","value":"22.04"},
+	     {"name":"syft:distro:prettyName","value":"Ubuntu 22.04.5 LTS"}
+	   ]}]}`
+	target, _, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1", len(target.Packages))
+	}
+	const want = "Ubuntu:22.04:LTS"
+	if got := target.Packages[0].Ecosystem; got != want {
+		t.Errorf("Ecosystem = %q, want %q (exact match — %q is a substring of it)",
+			got, want, "Ubuntu:22.04")
+	}
+}
+
+// The qualifier-fallback path for deb, mirroring the rpm one above but
+// through the "deb" case of the same switch.
+func TestParse_DebViaQualifierFallback_Debian12(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+	  {"type":"library","name":"bash","version":"5.2.15-2+b13",
+	   "purl":"pkg:deb/debian/bash@5.2.15-2+b13?arch=amd64&distro=debian-12"}]}`
+	target, _, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1", len(target.Packages))
+	}
+	if got := target.Packages[0].Ecosystem; got != "Debian:12" {
+		t.Errorf("Ecosystem = %q, want %q (keyed from the purl's own distro qualifier)",
+			got, "Debian:12")
+	}
+}
+
+// Modern syft's purl-less "file" components must not land in any counter,
+// including SkippedNoPURL — they are files, not packages, and counting them
+// there is what used to drive --fail-on-incomplete=target to exit 2 on an
+// otherwise-complete scan.
+func TestParse_TypeFileNotCounted(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+	  {"type":"library","name":"lodash","version":"1.0","purl":"pkg:npm/lodash@1.0"},
+	  {"type":"file","name":"/usr/bin/something"},
+	  {"type":"file","name":"/usr/lib/somelib.so"}]}`
+	_, stats, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if stats.Components != 1 {
+		t.Errorf("Components = %d, want 1 (the two file components must not be counted at all)", stats.Components)
+	}
+	if stats.SkippedNoPURL != 0 {
+		t.Errorf("SkippedNoPURL = %d, want 0: file components have no purl but must not land here either",
+			stats.SkippedNoPURL)
+	}
+	if stats.Cataloged != 1 {
+		t.Errorf("Cataloged = %d, want 1", stats.Cataloged)
+	}
+}
+
+// D80's modularityLabel reading, mirrored from rpmdb/header.go: only the
+// first two colon-separated fields become ModuleStream, and fewer than four
+// fields leaves it "" rather than guessed at.
+func TestParse_ModularityLabelToModuleStream(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+	  {"type":"library","name":"nodejs","version":"1:18.20.8-1.module+el8.10.0+23091+f8fc3a53",
+	   "purl":"pkg:rpm/rhel/nodejs@18.20.8-1.module%2Bel8.10.0%2B23091%2Bf8fc3a53?arch=x86_64&epoch=1&distro=rhel-8.10",
+	   "properties":[{"name":"syft:metadata:modularityLabel","value":"nodejs:18:8100020250506132245:489197e6"}]},
+	  {"type":"library","name":"shortlabel","version":"1.0-1.el8",
+	   "purl":"pkg:rpm/rhel/shortlabel@1.0-1.el8?arch=x86_64&distro=rhel-8.10",
+	   "properties":[{"name":"syft:metadata:modularityLabel","value":"nodejs:18:onlythree"}]}]}`
+	target, _, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	byName := map[string]pkgmeta.Package{}
+	for _, p := range target.Packages {
+		byName[p.Name] = p
+	}
+	if got := byName["nodejs"].ModuleStream; got != "nodejs:18" {
+		t.Errorf("nodejs ModuleStream = %q, want %q", got, "nodejs:18")
+	}
+	if got := byName["shortlabel"].ModuleStream; got != "" {
+		t.Errorf("shortlabel ModuleStream = %q, want empty: fewer than four colon fields", got)
+	}
+}
+
+// D83: the "upstream" qualifier for rpm is a source-RPM filename, stripped
+// back to the bare name; for deb it is "name" or "name@version", and only
+// the name half is taken.
+func TestParse_SourceFromUpstreamQualifier(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+	  {"type":"library","name":"audit-libs","version":"3.0.7-104.el9",
+	   "purl":"pkg:rpm/rhel/audit-libs@3.0.7-104.el9?arch=x86_64&upstream=audit-3.0.7-104.el9.src.rpm&distro=rhel-9.8"},
+	  {"type":"library","name":"bash","version":"5.2.15-2+b13",
+	   "purl":"pkg:deb/debian/bash@5.2.15-2+b13?arch=amd64&upstream=bash%405.2.15-2&distro=debian-12"}]}`
+	target, _, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	byName := map[string]pkgmeta.Package{}
+	for _, p := range target.Packages {
+		byName[p.Name] = p
+	}
+	auditLibs, ok := byName["audit-libs"]
+	if !ok {
+		t.Fatal("audit-libs not cataloged")
+	}
+	if auditLibs.Source == nil || auditLibs.Source.Name != "audit" {
+		t.Errorf("audit-libs Source = %+v, want Name %q", auditLibs.Source, "audit")
+	}
+	bash, ok := byName["bash"]
+	if !ok {
+		t.Fatal("bash not cataloged")
+	}
+	if bash.Source == nil || bash.Source.Name != "bash" {
+		t.Errorf("bash Source = %+v, want Name %q (the name half of \"bash@5.2.15-2\")", bash.Source, "bash")
+	}
+}
+
 // An SBOM with apk packages but no distro cannot be keyed. The packages must
 // still be cataloged so they are counted and reported as skipped — dropping
 // them would shrink the denominator and make the scan look complete.

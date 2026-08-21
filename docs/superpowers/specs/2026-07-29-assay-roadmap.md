@@ -3262,6 +3262,38 @@ slice named (150 gate-less Oracle EVRs, 15+96 unresolvable OSV records).
 
 ---
 
+### D83 — rpm and deb purls reach the matcher, and the SBOM path stops lying
+
+**Decision.** CycloneDX `rpm` and `deb` components map the way `apk` always has: bare
+component name (never the purl namespace — syft renamed `rhel`→`redhat` between
+generations, so the namespace is not identity), keyed through the same `Distro.Ecosystem()`
+the image path uses — the document's operating-system component first, the purl's own
+`distro` qualifier as fallback (split on the LAST hyphen: `opensuse-leap-15.6` is ID
+`opensuse-leap`), and neither → catalogued unkeyed, reported not evaluated (D17). The OS
+component wins a disagreement: a document's declaration outranks one package's qualifier,
+and it carries the PrettyName Ubuntu's LTS key needs. Epoch is a qualifier on syft purls,
+never in the version — prefixed back iff non-zero (8.3% of measured packages carry one, and
+epoch dominates rpmvercmp). Source (D8) from the `upstream` qualifier through the same
+stripping core rpmdb's SOURCERPM read uses, now shared. gpg-pubkey pseudo-packages are
+filtered by name, as the image path always did.
+
+**Three bundled fixes the measurement surfaced.** ① The qualifier parser decoded `+` as a
+space (url.ParseQuery semantics), shredding module EVRs and SLES `+git` versions in
+pre-2024 syft purls — replaced with percent-decoding that leaves `+` literal. ② Modern
+syft emits thousands of purl-less `type:"file"` components (6,161 of 6,306 on a bare
+rockylinux:9) that all counted as skipped packages and drove `--fail-on-incomplete=target`
+to exit 2 on every such SBOM — files are not packages and are now excluded like the OS
+component. ③ syft ≥1.x writes `syft:metadata:modularityLabel` as a component property —
+read into `Package.ModuleStream` (first two fields, D80's rule), so SBOM scans of module
+packages stream-match; older SBOMs carry nothing and D80's loud not-evaluated stands.
+
+**E2E, both generations.** rockylinux:9 as SBOM and as image: **169 findings both ways**.
+ubi8/nodejs-18 as a syft-1.51 SBOM: module packages stream-match (5,477 findings, 2 not
+evaluated); the same image as a syft-0.84 SBOM: 8 module packages loudly not evaluated —
+the honest degradation. `--fail-on-incomplete=target` exits 0 on modern SBOMs again.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

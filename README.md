@@ -601,6 +601,10 @@ exited 0 while 24 findings went unmentioned.
 - [x] Rocky/Alma module streams from summary prose (D82) — 21,540 entries streamed
       under the one-token rule; 15+96 unresolvable records stay stream-less and loud; the
       MODULARITYLABEL trilogy closes
+- [x] rpm and deb purls from SBOMs (D83) — keyed through the same Distro.Ecosystem() the
+      image path uses, epoch restored from its qualifier; a rockylinux:9 SBOM and the
+      image agree at 169 findings, and modern syft SBOMs stop tripping
+      --fail-on-incomplete=target
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a

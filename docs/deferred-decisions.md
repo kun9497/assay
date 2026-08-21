@@ -976,7 +976,7 @@ architecture.
 
 ---
 
-### CycloneDX maps no `rpm` purl type
+### ~~CycloneDX maps no `rpm` purl type~~ — resolved in D83, deb included
 
 Found by D78's E2E, not by a reader: `purlTypeToEcosystem` has no `rpm` entry, so an SBOM
 naming an RPM-family package (`pkg:rpm/amzn/containerd@...`) never reaches the matcher —
@@ -988,9 +988,10 @@ ecosystem keys (D6) needs the same os-release normalization the image path gets 
 as not evaluated, presumably, D17's register). Until then RPM-family scanning is image-
 and directory-only; D78 verified its extras findings at the matcher seam instead.
 
-**Revisit trigger:** the first user scanning distro SBOMs (syft emits exactly these purls),
-or SPDX ingestion above landing first — the mapping should be built once, shared by both
-parsers.
+**Resolved 2026-08-21 (D83).** The trigger fired as the user's own request. rpm AND deb
+map through the apk pattern (OS component first, distro qualifier fallback, unkeyed-else),
+epoch restored from its qualifier, Source from `upstream` via the shared SOURCERPM core.
+The SPDX note stands: when SPDX ingestion lands, it reuses this mapping.
 
 ---
 

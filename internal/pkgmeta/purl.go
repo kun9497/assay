@@ -30,15 +30,34 @@ func ParsePURL(s string) (PURL, error) {
 
 	var p PURL
 	if i := strings.IndexByte(rest, '?'); i >= 0 {
-		q, err := url.ParseQuery(rest[i+1:])
-		if err != nil {
-			return PURL{}, fmt.Errorf("parse purl %q qualifiers: %w", s, err)
-		}
-		p.Qualifiers = make(map[string]string, len(q))
-		for k, v := range q {
-			if len(v) > 0 {
-				p.Qualifiers[strings.ToLower(k)] = v[0]
+		// Parsed by hand rather than url.ParseQuery: that function decodes '+'
+		// as a space (the application/x-www-form-urlencoded convention), and
+		// old-syft purls carry a raw, unencoded '+' in qualifier values — RPM
+		// module EVRs ("module+el8.10.0+23091+...") and SLES upstream
+		// filenames ("aaa_base-84.87+git20180409...") both do, measured
+		// against real syft 0.84.1 output. url.PathUnescape leaves '+' alone,
+		// which is what a purl qualifier needs.
+		p.Qualifiers = make(map[string]string)
+		for _, pair := range strings.Split(rest[i+1:], "&") {
+			if pair == "" {
+				continue
 			}
+			rawKey, rawVal, _ := strings.Cut(pair, "=")
+			key, err := url.PathUnescape(rawKey)
+			if err != nil {
+				return PURL{}, fmt.Errorf("parse purl %q qualifier key: %w", s, err)
+			}
+			key = strings.ToLower(key)
+			if _, dup := p.Qualifiers[key]; dup {
+				// First value wins, matching url.Values' v[0] semantics — the
+				// behavior this replaces.
+				continue
+			}
+			val, err := url.PathUnescape(rawVal)
+			if err != nil {
+				return PURL{}, fmt.Errorf("parse purl %q qualifier %q: %w", s, key, err)
+			}
+			p.Qualifiers[key] = val
 		}
 		rest = rest[:i]
 	}
