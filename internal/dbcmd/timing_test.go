@@ -169,7 +169,7 @@ func TestUpdate_ReportsTimingWhenAProviderFails(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
 	code := Update(context.Background(), path, "", "",
-		false, []provider.Provider{dyingProvider{name: "doomed"}}, nil, nil, &out, &errOut)
+		false, []provider.Provider{dyingProvider{name: "doomed"}}, nil, nil, nil, &out, &errOut)
 	if code != 2 {
 		t.Fatalf("Update = %d, want 2 for a provider that failed", code)
 	}
@@ -254,7 +254,7 @@ func TestUpdate_ReportsTheStoreSplit(t *testing.T) {
 		},
 	}
 	if code := Update(context.Background(), path, "", "",
-		false, []provider.Provider{p}, nil, nil, &out, &errOut); code != 0 {
+		false, []provider.Provider{p}, nil, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	s := errOut.String()
@@ -305,7 +305,7 @@ func TestUpdate_RecordsSurviveBatchBoundaries(t *testing.T) {
 	// and a correct one differ in how many times the store is entered.
 	const n = putBatchSize*2 + 7
 	if code := Update(context.Background(), path, "", "",
-		false, []provider.Provider{countingProvider{name: "counter", n: n}}, nil, nil,
+		false, []provider.Provider{countingProvider{name: "counter", n: n}}, nil, nil, nil,
 		&out, &errOut); code != 0 {
 		t.Fatalf("Update = %d (stderr: %s)", code, errOut.String())
 	}

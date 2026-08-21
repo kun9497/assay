@@ -121,6 +121,18 @@ type Options struct {
 	// verdict check must read ok, never just compare the returned float
 	// against zero.
 	FailOnEPSS *float64
+	// FailOnEOL makes a scan whose TARGET distro release is past its own
+	// end-of-life date trip exit 1 (D87) — a fact about the target rather
+	// than about any one finding, the same shape FailOnKEV and FailOnUnfixable
+	// already are one level up: no severity threshold expresses "this base
+	// image is unsupported".
+	//
+	// Never trips on its own when there is no answer: Target.Distro nil (every
+	// SPDX SBOM, D84), a release this build cannot key, or a database with no
+	// EOL data at all (built before D87, or EOL_ENABLE=0) all warn on stderr
+	// instead (verdict's own doc comment) — the D17 "absent stays absent"
+	// discipline applied to a target-level fact instead of a per-finding one.
+	FailOnEOL bool
 	// Output selects the renderer: "" and "table" both mean the human table
 	// (Options{}'s zero value must reproduce today's behaviour exactly, the
 	// same rule Options.FailOn* already follows), "json" means the stable
@@ -437,15 +449,21 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 	}
 	defer db.Close()
 
+	// Read once, unconditionally: DBMaxAge below and the D87 EOL lookup
+	// further down both need it, and openReadOnly already proved this
+	// exact read succeeds once before store.Open ever returns (its own doc
+	// comment) — there is no cheaper "only if a flag needs it" version that
+	// does not cost a second round trip through the same bucket.
+	m, err := db.Meta()
+	if err != nil {
+		fmt.Fprintf(stderr, "error: read database metadata: %v\n", err)
+		return 2
+	}
+
 	// D59. Before matching, not after: a scan that will be refused for age
 	// should not spend the time, and a summary printed first would be a
 	// verdict from data the next line calls untrustworthy.
 	if opts.DBMaxAge > 0 {
-		m, merr := db.Meta()
-		if merr != nil {
-			fmt.Fprintf(stderr, "error: read database metadata: %v\n", merr)
-			return 2
-		}
 		if code := checkDBAge(m, opts.DBMaxAge, time.Now(), stderr); code != 0 {
 			return code
 		}
@@ -456,6 +474,14 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		fmt.Fprintf(stderr, "error: match: %v\n", err)
 		return 2
 	}
+
+	// D87. Computed unconditionally — not only when --fail-on-eol is set —
+	// because the table/JSON/SARIF renderers surface the fact regardless of
+	// the gate (the same shape KEV membership already is: the table marks
+	// it whether or not --fail-on-kev was ever passed). clockNow(), not
+	// time.Now() directly, is the seam a test pins to drive both sides of
+	// the EOLFrom boundary without waiting for a real date to pass.
+	eolStatus := lookupEOL(inventory.Distro, m.EOL, clockNow())
 
 	// Three renderers, exactly one chosen: --explain replaces the report
 	// with one advisory's evidence, --output json replaces it with the
@@ -501,7 +527,7 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 				sum.NotEvaluated, sum.IncompleteChecks)
 		}
 	case opts.Output == "json":
-		sum, err = report.JSON(stdout, res, cat)
+		sum, err = report.JSON(stdout, res, cat, eolStatus)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: write report: %v\n", err)
 			return 2
@@ -511,17 +537,28 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		// scanned: a SARIF file is read in a web UI detached from the
 		// command that produced it, where "libc6 is affected" alone does
 		// not say which image.
-		sum, err = report.SARIF(stdout, res, cat, target, opts.Version)
+		sum, err = report.SARIF(stdout, res, cat, target, opts.Version, eolStatus)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: write report: %v\n", err)
 			return 2
 		}
 	default:
-		sum, err = report.Table(stdout, res, cat)
+		sum, err = report.Table(stdout, res, cat, eolStatus)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: write report: %v\n", err)
 			return 2
 		}
+	}
+	// D87: --fail-on-eol asked a question this scan could not answer.
+	// Naming WHY, never a silent skip and never treated as a false trip —
+	// the gate itself (verdict, below) simply does not fire when
+	// eolStatus.Known is false, and this is the only place that says so.
+	// Gated on the FLAG, unlike the Red Hat mainline-errata note above: an
+	// SBOM with no distro identity is routine and not worth a caveat on
+	// every scan, but a caller who explicitly asked this question and got
+	// no answer needs to know their gate is not doing anything.
+	if opts.FailOnEOL && !eolStatus.Known {
+		fmt.Fprintf(stderr, "warning: EOL unknown: %s\n", eolStatus.Reason)
 	}
 	// D47's debt, paid on stderr so `--output json | jq` stays clean.
 	//
@@ -580,7 +617,7 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 			return 2
 		}
 	}
-	return verdict(opts, sum, res.Findings)
+	return verdict(opts, sum, res.Findings, eolStatus)
 }
 
 // article returns the indefinite article to pair with kind.String() so the
@@ -611,7 +648,7 @@ func article(kind source.TargetKind) string {
 // is meant to read it directly. Re-deriving the same fact a second way here
 // would be the identical two-paths-can-drift hazard the brief calls out for
 // AtOrAbove, one field over — so the loop below exists only for FailOn.
-func verdict(opts Options, sum report.Summary, findings []matcher.Finding) int {
+func verdict(opts Options, sum report.Summary, findings []matcher.Finding, eol report.EOLStatus) int {
 	if opts.FailOnIncomplete && (sum.NotEvaluated > 0 || sum.IncompleteChecks > 0) {
 		return 2
 	}
@@ -643,6 +680,16 @@ func verdict(opts Options, sum report.Summary, findings []matcher.Finding) int {
 	// own "known-exploited" count and this gate must not drift apart on what
 	// counts as one.
 	if opts.FailOnKEV && sum.KnownExploited > 0 {
+		return 1
+	}
+	// D87. Fires only when eol.Known is true AND eol.EOL is true — never on
+	// an unanswered lookup (Run's own disclosure already warned about that
+	// case on stderr, before verdict was ever called), which is the D17
+	// "absent stays absent" discipline applied to a target-level fact
+	// instead of a per-finding one: a flag that could trip on "we don't
+	// know" would punish every SBOM with no distro identity the same as an
+	// image that is genuinely unsupported.
+	if opts.FailOnEOL && eol.Known && eol.EOL {
 		return 1
 	}
 	// D86. No precomputed count to read here, unlike FailOnKEV just above:

@@ -113,7 +113,7 @@ import (
 // from providers every time and so reports THIS run's fetch), a
 // ratings-only build never fetched an advisory at all, so `db status` must
 // report the freshness the seed actually had.
-func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly bool, providers []provider.Provider, annotators []provider.Annotator, enrichers []provider.Enricher, stdout, stderr io.Writer) int {
+func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly bool, providers []provider.Provider, annotators []provider.Annotator, enrichers []provider.Enricher, eolSource provider.EOLSource, stdout, stderr io.Writer) int {
 	// Both refusals are the D60 class: an empty-advisory database published
 	// over a real one, or a build that changes nothing arriving as success.
 	// Checked first, before MkdirAll or anything else touches disk — a
@@ -468,6 +468,33 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 		meta.Enrichment[e.Name()] = prov
 	}
 
+	// EOLSource runs last, after enrichers, and — unlike an enricher — its
+	// failure DOES fail the build (D87). The two enricher-loop paragraphs
+	// above explain why KISA's failure must not: nothing it writes can ever
+	// reach a verdict. End-of-life data is the opposite: it feeds
+	// `--fail-on-eol` directly, and it is meant to ride the published
+	// artifact the way KISA's prose deliberately never does (D29) — a build
+	// that shipped without it would leave the gate silently unable to
+	// answer, rather than loudly refusing to publish a database that cannot
+	// back up the flag it advertises.
+	if eolSource != nil {
+		fmt.Fprintf(stderr, "fetching end-of-life data from %s…\n", eolSource.Name())
+		started := time.Now()
+		rows, prov, err := eolSource.Fetch(ctx)
+		timings = append(timings, stageTiming{
+			Kind: "eol", Name: eolSource.Name(), Elapsed: time.Since(started),
+			Records: prov.Records, Failed: err != nil})
+		if err != nil {
+			w.Close()
+			os.Remove(tmp)
+			fmt.Fprintf(stderr, "error: eol source %s: %v\n", eolSource.Name(), err)
+			reportTimings(stderr, timings, buildStarted)
+			return 2
+		}
+		meta.EOL = rows
+		meta.EOLProvenance = &prov
+	}
+
 	if err := w.SetMeta(meta); err != nil {
 		w.Close()
 		os.Remove(tmp)
@@ -664,6 +691,13 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 	// point — a user wondering why no finding shows a Korean title gets the
 	// answer here rather than from a missing table.
 	fmt.Fprintf(stdout, "enrichment: %s\n", enrichmentLine(m.EnrichmentCounts))
+	// Distro end-of-life coverage (D87), on the same "visible without a scan"
+	// reasoning every line above follows, and read straight from Meta.EOL —
+	// there is no derived-vs-self-reported split to make here the way
+	// Ratings/Enrichment need: eol.Fetch returns its rows and its Provenance
+	// together, in one call, so there is nothing for a partial run to
+	// under- or over-claim about a bucket a scan reads independently.
+	fmt.Fprintf(stdout, "eol:        %s\n", eolSummary(m.EOL, m.EOLProvenance))
 	fmt.Fprintln(stdout)
 
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
@@ -976,6 +1010,32 @@ func enrichmentLine(counts map[string]int) string {
 		parts = append(parts, fmt.Sprintf("%s (%d)", name, counts[name]))
 	}
 	return strings.Join(parts, ", ")
+}
+
+// eolSummary reports what Meta.EOL holds (D87): how many releases across how
+// many distros, and when endoflife.date generated the data (D12) — the same
+// "visible without running a scan" reasoning every other db status line
+// above follows.
+//
+// Nil is the "no EOL data" state, and it reads differently from any count:
+// a database built before D87, or built with EOL_ENABLE=0, decodes this
+// field to nil (store.Meta.EOL's own doc comment), and a scan's
+// `--fail-on-eol` warns about exactly this state rather than silently
+// treating it as "not EOL" (scancmd's own EOL lookup).
+func eolSummary(rows []store.EOLRelease, prov *store.Provenance) string {
+	if len(rows) == 0 {
+		return "nothing - this database carries no end-of-life data; run `assay db update`, " +
+			"or build with EOL_ENABLE=1 (on by default)"
+	}
+	distros := map[string]struct{}{}
+	for _, r := range rows {
+		distros[r.DistroID] = struct{}{}
+	}
+	asOf := "unknown"
+	if prov != nil && !prov.DataAsOf.IsZero() {
+		asOf = prov.DataAsOf.Format("2006-01-02")
+	}
+	return fmt.Sprintf("%d release(s) across %d distro(s), generated %s", len(rows), len(distros), asOf)
 }
 
 // compareRelease orders "v3.9" below "v3.10". Anything it cannot parse sorts

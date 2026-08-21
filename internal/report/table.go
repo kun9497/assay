@@ -77,7 +77,16 @@ func (s Summary) Trustworthy() bool {
 	return s.Components == 0 || s.Evaluated > 0
 }
 
-func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats) (Summary, error) {
+func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus) (Summary, error) {
+	// D87: one line, only when the target's distro release is actually EOL
+	// — Line() itself returns ok=false for both "nothing to say" (Known is
+	// false) and "current release" (Known but not EOL), so this is the only
+	// gate this renderer needs.
+	if line, ok := eol.Line(); ok {
+		fmt.Fprintln(w, line)
+		fmt.Fprintln(w)
+	}
+
 	sum := Summarize(res, cat)
 	evaluated := sum.Evaluated
 	notEvaluated := sum.NotEvaluated

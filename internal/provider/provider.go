@@ -44,3 +44,21 @@ type Enricher interface {
 	Name() string
 	Enrich(ctx context.Context, emit func(advisory.Enrichment) error) (store.Provenance, error)
 }
+
+// EOLSource is an upstream that says when a distro RELEASE stops being
+// supported, rather than which package is affected (Provider) or what a CVE
+// is worth (Annotator) or in prose about a CVE (Enricher). None of the three
+// fits (D87): end-of-life data is keyed on (distro, release) rather than a
+// CVE or a package, it is meant to gate a scan (`--fail-on-eol`) rather than
+// stay inert like an Enricher's prose, and — unlike KISA/KNVD (D29) — it IS
+// meant to ride the published artifact, so it cannot share Enricher's
+// failure-is-not-fatal treatment either: a build that silently shipped
+// without EOL data would leave the gate unable to answer at all.
+//
+// Fetch returns the whole small corpus (~200 rows) as a slice rather than
+// streaming through an emit callback the way Provider does — there is no
+// multi-hundred-megabyte corpus here to avoid holding in memory.
+type EOLSource interface {
+	Name() string
+	Fetch(ctx context.Context) ([]store.EOLRelease, store.Provenance, error)
+}

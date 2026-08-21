@@ -112,6 +112,79 @@ func TestPush_WritesAPullableArtifact(t *testing.T) {
 	}
 }
 
+// TestPushPull_RoundTripsEOLData is the D87 artifact guarantee: dbartifact
+// is byte-level (Pack/Unpack move the whole database file, never parsing
+// its buckets), so Meta.EOL should ride through a real push-then-pull for
+// free -- this proves it rather than assuming it, the same way
+// TestPush_WritesAPullableArtifact proves the schema/DataAsOf annotations
+// round-trip rather than trusting Pack/Unpack's own doc comment alone.
+func TestPushPull_RoundTripsEOLData(t *testing.T) {
+	srv := httptest.NewServer(registry.New())
+	defer srv.Close()
+	u, err := url.Parse(srv.URL)
+	host := must(t, u, err).Host
+	ref := host + "/assay-db:v" + itoa(store.SchemaVersion)
+
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []store.EOLRelease{
+		{DistroID: "debian", Release: "12", EOLFrom: "2026-07-11", EOLLabel: "Debian Security Support",
+			EOESFrom: "2028-06-30", EOESLabel: "Debian LTS", IsMaintained: true},
+		{DistroID: "alpine", Release: "3.19", EOLFrom: "2028-06-01", EOLLabel: "Security Support"},
+	}
+	prov := store.Provenance{Source: "https://endoflife.date/api/v1/products/full", Records: len(want)}
+	if err := w.SetMeta(store.Meta{
+		BuiltAt:       testBuiltAt,
+		Providers:     map[string]store.Provenance{"osv": {Source: "https://example.test"}},
+		EOL:           want,
+		EOLProvenance: &prov,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	if code := Push(context.Background(), path, ref, false, &out, &errOut); code != 0 {
+		t.Fatalf("Push = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+
+	dst := filepath.Join(t.TempDir(), "pulled.db")
+	out.Reset()
+	errOut.Reset()
+	if code := Pull(context.Background(), dst, ref, &out, &errOut); code != 0 {
+		t.Fatalf("Pull = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+
+	db, err := store.Open(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	m, err := db.Meta()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.EOL) != len(want) {
+		t.Fatalf("pulled Meta.EOL = %d row(s), want %d: %+v", len(m.EOL), len(want), m.EOL)
+	}
+	for i, row := range want {
+		if m.EOL[i] != row {
+			t.Errorf("pulled Meta.EOL[%d] = %+v, want %+v", i, m.EOL[i], row)
+		}
+	}
+	if m.EOLProvenance == nil {
+		t.Fatal("pulled Meta.EOLProvenance = nil, want the pushed provenance")
+	}
+	if m.EOLProvenance.Source != prov.Source || m.EOLProvenance.Records != prov.Records {
+		t.Errorf("pulled Meta.EOLProvenance = %+v, want %+v", *m.EOLProvenance, prov)
+	}
+}
+
 // An artifact is only as fresh as its stalest provider. Reporting the
 // newest would let one recently-synced source vouch for a stale one.
 func TestPush_DataAsOfIsTheOldestProvider(t *testing.T) {

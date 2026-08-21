@@ -422,7 +422,7 @@ func TestPush_ASecondSeededDeltaIsStillPublishable(t *testing.T) {
 		out.Reset()
 		errOut.Reset()
 		if code := Update(context.Background(), built, seedPath, ref, false, nil,
-			[]provider.Annotator{a}, nil, &out, &errOut); code != 0 {
+			[]provider.Annotator{a}, nil, nil, &out, &errOut); code != 0 {
 			t.Fatalf("day %d: Update = %d (%s)", i+1, code, errOut.String())
 		}
 
@@ -468,7 +468,7 @@ func TestPush_ADeltaSeededFromTheWholeFeedStaysWhole(t *testing.T) {
 	out.Reset()
 	errOut.Reset()
 	if code := Update(context.Background(), built, seedPath, ref, false, nil,
-		[]provider.Annotator{a}, nil, &out, &errOut); code != 0 {
+		[]provider.Annotator{a}, nil, nil, &out, &errOut); code != 0 {
 		t.Fatalf("Update = %d (%s)", code, errOut.String())
 	}
 

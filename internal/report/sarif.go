@@ -29,7 +29,7 @@ import (
 // toolExecutionNotifications[] — and GitHub does not support it. So the skips
 // go BOTH places (D55): the notification for a consumer that honours the spec,
 // and a note-level result so the one consumer that matters actually shows them.
-func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, target, version string) (Summary, error) {
+func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, target, version string, eol EOLStatus) (Summary, error) {
 	sum := Summarize(res, cat)
 
 	rules := make([]sarifRule, 0, len(res.Findings)+1)
@@ -101,6 +101,11 @@ func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, target, version
 	// exitSignalling one below is what says whether the run is worth trusting.
 	run.Invocations = []sarifInvocation{{
 		ExecutionSuccessful: sum.Trustworthy(),
+		// D87: nil when there is no EOL answer (Properties' own doc
+		// comment), which Go's json package then drops entirely under
+		// sarifInvocation.Properties' own "properties,omitempty" tag — the
+		// SARIF-native way to say nothing rather than assert "not EOL".
+		Properties: eol.Properties(),
 		ToolExecutionNotifications: append([]sarifNotification{{
 			Level: summaryLevel(sum),
 			Message: sarifText{Text: fmt.Sprintf(
@@ -429,7 +434,13 @@ type sarifRegion struct {
 }
 
 type sarifInvocation struct {
-	ExecutionSuccessful        bool                `json:"executionSuccessful"`
+	ExecutionSuccessful bool `json:"executionSuccessful"`
+	// Properties is the natural SARIF-native home for a run-level fact that
+	// is not itself a result or a rule (D87): the spec's own propertyBag,
+	// already used at the rule level by findingRule/notEvaluatedRule above,
+	// applies equally at invocation level. nil (omitted) when there is
+	// nothing to say — see EOLStatus.Properties' own doc comment.
+	Properties                 map[string]any      `json:"properties,omitempty"`
 	ToolExecutionNotifications []sarifNotification `json:"toolExecutionNotifications,omitempty"`
 }
 

@@ -614,6 +614,9 @@ exited 0 while 24 findings went unmentioned.
 - [x] EPSS and KEV (D86) — typed rating fields that band ordering cannot see,
       seed-excluded and refetched daily, --fail-on-kev and --fail-on-epss; log4j-core
       draws 2 known-exploited and Log4Shell trips both gates
+- [x] Distro EOL from endoflife.date (D87) — Meta-carried with per-product phase labels,
+      derived at scan time against the clock, --fail-on-eol; debian:11 draws the
+      LTS-qualified line and the last grype enrichment gap closes
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a

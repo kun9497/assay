@@ -3396,6 +3396,40 @@ draws "2 known-exploited", Log4Shell scores 0.99999, both gates exit 1.
 
 ---
 
+### D87 — end of life is a fact about the target, and the scan now says it
+
+**Decision.** Distro EOL data from endoflife.date closes the last grype enrichment gap —
+keyed on (product, release), not CVE, which shaped everything. One bulk fetch at db build
+(the v1 `/products/full` endpoint, 2.7MB, 464 products of which our 11 distro families are
+kept via a mandatory static slug table — the API's aliases cover neither `amzn` nor `ol`).
+Storage is Meta-carried, ~219 rows, no schema bump: dates and per-product phase labels
+stored losslessly (D13), the `isEol` boolean deliberately NOT stored — it is computed at
+the feed's generation time and goes stale inside a shipped artifact, so EOL derives at
+scan time against the clock, with the boundary exclusive (endoflife.date's own
+semantics, pinned by its own test). The fetch is a third source shape — `EOLSource`,
+beside Provider/Annotator/Enricher — because Ratings are CVE-keyed and the Enrichment
+bucket is D29-stripped and failure-tolerant, both wrong for data that feeds a gate.
+EOL_ENABLE defaults on; failure fails the build.
+
+**The phase labels are the honesty mechanism.** "EOL" is per-product vocabulary: Debian 12
+reached end of Debian Security Support in July 2026 yet is maintained under Debian LTS
+until 2028 — an unconditional "EOL ⇒ untrusted" would misfire on every oldstable. The
+table line names the phase and the still-maintained fact:
+`EOL: debian 11 reached end of Debian Security Support on 2024-08-14; still under Debian
+LTS until 2026-08-31`. The cycle is parsed back out of the ecosystem key's own release
+suffix — the same truncation Ecosystem() applied, so the two reads cannot drift — with
+SLES's `.SP` fold reshaped to endoflife.date's dotted names (the review round closed what
+first shipped as an honest no-data gap for SLES 15.x).
+
+**Gate and absences.** `--fail-on-eol` exits 1 through verdict() (D11: the scan RAN
+correctly against real data — this is policy, not untrustworthiness, so never exit 2).
+Every no-answer case is loud when the flag asks: a distro-less SBOM (D84), an unknown
+release, an old database with no EOL table each print WHY there is no answer and never
+false-trip. Live: debian:11 draws the line and exit 1; debian:12 draws the maintained
+fact and exit 0; rockylinux:9 draws nothing.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes
