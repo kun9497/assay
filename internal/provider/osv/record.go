@@ -202,18 +202,23 @@ func vendorSeverityWord(summary string) (string, bool) {
 // err is non-nil only when the record is malformed. Distinguishing the two
 // keeps "we chose to skip this" from looking like "the database is broken".
 //
-// A thin wrapper over convert with a nil *stats: every pre-D82 caller (and
-// every existing test in this package) calls Convert and does not want to
-// know about module-stream counting, so the signature that answers "did this
-// record convert" stays exactly as it always was. fetchOne is the one caller
-// that wants the counts and calls convert directly with a real *stats.
+// A thin wrapper over convert with a nil *stats and a nil *ubuntuTracker:
+// every pre-D82 caller (and every existing test in this package) calls
+// Convert and does not want to know about module-stream counting or D85's
+// Ubuntu fix-state stamping, so the signature that answers "did this record
+// convert" stays exactly as it always was. fetchOne is the one caller that
+// wants the counts and the tracker, and calls convert directly with both.
 func Convert(data []byte, wantEcosystem string) (advisory.Advisory, bool, error) {
-	return convert(data, wantEcosystem, nil)
+	return convert(data, wantEcosystem, nil, nil)
 }
 
-// convert is Convert's real body, plus D82's module-stream attachment. st is
-// nil from every caller that does not care about the counts (see Convert).
-func convert(data []byte, wantEcosystem string, st *stats) (advisory.Advisory, bool, error) {
+// convert is Convert's real body, plus D82's module-stream attachment and
+// D85's Ubuntu fix-state stamping. st is nil from every caller that does not
+// care about either's counts, and tracker is nil from every caller that has
+// not fetched (or does not want) the Ubuntu CVE tracker (see Convert) --
+// stampUbuntuFixState and ubuntuTracker.lookup both treat a nil tracker as
+// "nothing to stamp" rather than panicking.
+func convert(data []byte, wantEcosystem string, st *stats, tracker *ubuntuTracker) (advisory.Advisory, bool, error) {
 	var r rawRecord
 	if err := json.Unmarshal(data, &r); err != nil {
 		return advisory.Advisory{}, false, fmt.Errorf("decode osv record: %w", err)
@@ -284,6 +289,14 @@ func convert(data []byte, wantEcosystem string, st *stats) (advisory.Advisory, b
 		}
 	}
 
+	// D85: resolved once per record, from the SAME field D3 already reads for
+	// the CVE join (Upstream), rather than once per Affected entry -- every
+	// entry in one record shares one CVE. ok is discarded: a record with no
+	// CVE-shaped upstream identifier (0.01% measured) simply has nothing for
+	// stampUbuntuFixState to key a lookup on, which its own empty-cve guard
+	// already handles.
+	ubuntuCVE, _ := firstUbuntuCVE(out.Upstream)
+
 	var matchesWanted bool
 	for _, ra := range r.Affected {
 		// Every entry is kept, including other ecosystems'. Stripping them made
@@ -353,6 +366,18 @@ func convert(data []byte, wantEcosystem string, st *stats) (advisory.Advisory, b
 			if len(rng.Events) > 0 {
 				aff.Ranges = append(aff.Ranges, rng)
 			}
+		}
+		// D85: stamped before the empty check below, not after -- a fix-less
+		// entry with Versions but no Ranges has nothing to stamp anyway
+		// (stampUbuntuFixState only ever touches aff.Ranges), so the order is
+		// only for reading top-to-bottom as "build the entry, then annotate
+		// it" rather than any correctness reason. tracker == nil (Ubuntu not
+		// fetched, or UBUNTU_TRACKER_ENABLE=0) makes this a no-op via
+		// ubuntuTracker.lookup's own nil check; ubuntuReleaseFromEcosystem's
+		// own false return is what makes it a no-op for every non-Ubuntu
+		// entry convert() ever builds, Ubuntu fetch or not.
+		if tracker != nil {
+			stampUbuntuFixState(&aff, ubuntuCVE, tracker, st)
 		}
 		if len(aff.Ranges) == 0 && len(aff.Versions) == 0 {
 			continue // nothing left to match on
@@ -512,11 +537,24 @@ type stats struct {
 	ModuleEntriesStreamed   int // module-tagged Rocky/AlmaLinux entries that got a summary-derived ModuleStream (D82)
 	ModuleRecordsZeroToken  int // qualifying records whose summary yielded no stream token
 	ModuleRecordsMultiToken int // qualifying records whose summary yielded 2+ distinct stream tokens
+
+	// D85: the Ubuntu CVE tracker's own counts. The first three are set once,
+	// while parseUbuntuTracker walks active/+retired/ (before any archive is
+	// fetched); the last two accumulate across every Ubuntu record convert()
+	// stamps, the same way the D82 fields above accumulate across every
+	// Rocky/AlmaLinux one.
+	UbuntuTuplesLoaded    int // (CVE, srcpkg, release) tuples parsed from active/+retired/
+	UbuntuFilesUnparsed   int // tracker files with no readable Candidate: CVE line
+	UbuntuUnknownCodename int // stanza lines naming a codename outside ubuntuCodenameRelease
+	UbuntuStampedWontFix  int // fix-less ranges stamped wont-fix from an `ignored` tuple
+	UbuntuStampedNotFixed int // fix-less ranges stamped not-fixed from needed/needs-triage/pending/deferred
 }
 
 func (s stats) String() string {
 	return fmt.Sprintf(
 		"module streams (D82): %d module-tagged Rocky/AlmaLinux entr(y/ies) streamed from summary prose, "+
-			"%d record(s) left stream-less for no token, %d record(s) left stream-less for 2+ tokens",
-		s.ModuleEntriesStreamed, s.ModuleRecordsZeroToken, s.ModuleRecordsMultiToken)
+			"%d record(s) left stream-less for no token, %d record(s) left stream-less for 2+ tokens; "+
+			"ubuntu fix state (D85): %d range(s) stamped wont-fix, %d range(s) stamped not-fixed",
+		s.ModuleEntriesStreamed, s.ModuleRecordsZeroToken, s.ModuleRecordsMultiToken,
+		s.UbuntuStampedWontFix, s.UbuntuStampedNotFixed)
 }

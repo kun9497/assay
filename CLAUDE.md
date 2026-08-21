@@ -29,7 +29,10 @@ to end for Alpine, Debian, Ubuntu mainline (D53), RHEL, Rocky (D71), AlmaLinux (
 Amazon Linux 2/2023 (D73), Oracle Linux 5–10 (D74), Fedora (D75), and SLES/openSUSE Leap
 (D77) — across three rpmdb backends: BerkeleyDB, SQLite and ndb (D44, D76). Installed
 Ubuntu ESM/FIPS and Oracle Ksplice/FIPS lineage packages are reported not evaluated rather
-than judged against mainline data (D53, D79). Module streams are matched via
+than judged against mainline data (D53, D79). Ubuntu findings carry Canonical's own fix
+states since D85 — the CVE tracker is consulted at OSV conversion, for which `db build`
+shells out to `git` (the project's first build-time tool dependency, gated by
+`UBUNTU_TRACKER_ENABLE`; the scan path never needs it, D14). Module streams are matched via
 RPMTAG_MODULARITYLABEL since D80 (Red Hat's CSAF streams; Oracle's arrive in D81,
 Rocky/Alma's in D82). SBOMs reach the distro side since D83: rpm and deb purls key
 through the same `Distro.Ecosystem()` the image path uses — in CycloneDX and, since D84,

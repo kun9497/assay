@@ -191,6 +191,16 @@ Environment (db build only — a scan reads no environment and no network):
                         never delivers it. Set this to 0 when the result is
                         going to be pushed anyway, which is why the publish
                         workflow does.
+  UBUNTU_TRACKER_ENABLE=0
+                        Skip Canonical's own ubuntu-cve-tracker git repository, the only source
+                        that can say an Ubuntu package is affected and WILL NOT BE FIXED (an
+                        "ignored" tuple) rather than merely unrated. ON BY DEFAULT (D85), for the
+                        same reason as Red Hat: the published artifact carries it, so a build
+                        without it produces a narrower database than db update delivers.
+                        Requires a git binary on PATH -- a missing one fails the build naming
+                        this flag as the off switch, rather than silently building without
+                        Ubuntu fix-state data. Set this to 0 for a local build that does not scan
+                        Ubuntu, or has no git installed.
 `
 
 func main() {
@@ -628,7 +638,13 @@ func dbUpdateProviders(stderr io.Writer) []provider.Provider {
 	// narrows what it attaches (a record with zero or 2+ summary tokens stays
 	// stream-less), and a run that printed nothing about it would be
 	// indistinguishable from one that was broken.
-	ps := []provider.Provider{osv.New(osv.Ecosystems, "").WithProgress(stderr)}
+	// UBUNTU_TRACKER_ENABLE gates D85's Ubuntu CVE tracker sub-fetch, on by
+	// default (the published artifact carries it, D51's precedent). It is
+	// threaded through WithUbuntuTracker rather than left at osv.New's own
+	// default (false) — see that method's own doc comment for why the
+	// PACKAGE default has to stay off while PRODUCTION's does not.
+	ps := []provider.Provider{osv.New(osv.Ecosystems, "").WithProgress(stderr).
+		WithUbuntuTracker(envFlag(stderr, "UBUNTU_TRACKER_ENABLE", true))}
 	if envFlag(stderr, "REDHAT_ENABLE", true) {
 		// Progress goes to stderr for nvd's reason: this provider discards the
 		// large majority of what it reads, and a run that printed nothing
