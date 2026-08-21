@@ -906,7 +906,7 @@ CycloneDX가 먼저입니다. SPDX는 이미 검증된 파이프라인에 파서
 
 ---
 
-### CycloneDX는 `rpm` purl 타입을 매핑하지 않는다
+### ~~CycloneDX는 `rpm` purl 타입을 매핑하지 않는다~~ — D83에서 해결, deb도 포함
 
 D78의 E2E가 찾아냈지, 읽다가 찾은 게 아닙니다: `purlTypeToEcosystem`에 `rpm` 항목이 없어서,
 RPM 계열 패키지를 이름으로 담은 SBOM(`pkg:rpm/amzn/containerd@...`)은 matcher에 결코 닿지
@@ -918,8 +918,11 @@ RPM 계열 패키지를 이름으로 담은 SBOM(`pkg:rpm/amzn/containerd@...`)�
 평가되지 않음으로 보고, D17의 등록부). 그때까지 RPM 계열 스캔은 이미지와 디렉터리 전용입니다;
 D78은 대신 matcher 이음매에서 extras finding을 검증했습니다.
 
-**다시 볼 계기:** 배포판 SBOM을 스캔하는 첫 사용자(syft는 정확히 이런 purl을 냅니다), 또는
-위의 SPDX 수용이 먼저 들어오는 경우 — 매핑은 한 번만 만들어 두 파서가 공유해야 합니다.
+**2026-08-21에 해결(D83).** 계기는 사용자 자신의 요청으로 발동했습니다. rpm과 deb
+둘 다 apk 패턴을 통해 매핑됩니다(OS 컴포넌트 우선, distro qualifier가 대체 수단, 그마저
+없으면 키 없음), epoch는 자신의 qualifier에서 복원되고, Source는 공유되는 SOURCERPM
+core를 거쳐 `upstream`에서 옵니다. SPDX 관련 언급은 그대로 유효합니다: SPDX 수용이
+들어오면 이 매핑을 재사용합니다.
 
 ---
 

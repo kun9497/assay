@@ -270,34 +270,16 @@ func evr(h header, version, release string) string {
 }
 
 // sourceName strips a SOURCERPM filename back to the source package name:
-// "audit-3.1.5-8.el9.src.rpm" -> "audit".
-//
-// The last TWO hyphen-separated fields are the version and release, so they
-// are what comes off — not everything after the first hyphen, which would turn
-// "python3-perf-3.10.0-1.el9.src.rpm" into "python3". Roughly a third of the
-// names in a real image carry an interior hyphen, so that is the common case
-// rather than the edge one.
-//
-// Returns "" for anything that is not that shape, including gpg-pubkey's
-// literal "(none)".
+// "audit-3.1.5-8.el9.src.rpm" -> "audit". The stripping itself is
+// pkgmeta.SourceRPMName (D83) — shared with the cyclonedx cataloger, which
+// reads the identical shape off a purl's "upstream" qualifier — so this is
+// left as the thin header-reading half.
 func sourceName(h header) string {
 	s, ok := h.str(tagSourceRPM)
 	if !ok {
 		return ""
 	}
-	s, ok = strings.CutSuffix(s, ".src.rpm")
-	if !ok {
-		return ""
-	}
-	i := strings.LastIndexByte(s, '-')
-	if i < 0 {
-		return ""
-	}
-	j := strings.LastIndexByte(s[:i], '-')
-	if j <= 0 {
-		return ""
-	}
-	return s[:j]
+	return pkgmeta.SourceRPMName(s)
 }
 
 // isPubkey reports whether a header is a gpg-pubkey row rather than an

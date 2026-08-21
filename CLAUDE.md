@@ -31,7 +31,8 @@ Amazon Linux 2/2023 (D73), Oracle Linux 5–10 (D74), Fedora (D75), and SLES/ope
 Ubuntu ESM/FIPS and Oracle Ksplice/FIPS lineage packages are reported not evaluated rather
 than judged against mainline data (D53, D79). Module streams are matched via
 RPMTAG_MODULARITYLABEL since D80 (Red Hat's CSAF streams; Oracle's arrive in D81,
-Rocky/Alma's in D82). Not built: pep440 leniency and the CycloneDX `rpm` purl mapping (see
+Rocky/Alma's in D82). SBOMs reach the distro side since D83: rpm and deb purls key
+through the same `Distro.Ecosystem()` the image path uses. Not built: pep440 leniency (see
 `README.md` and `docs/deferred-decisions.md`).
 
 **Check what exists before assuming — this paragraph has been wrong six times.** It claimed

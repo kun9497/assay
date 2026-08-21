@@ -3043,6 +3043,41 @@ stream 없는 module 경계는 D80의 matcher 가드를 통해 계속 시끄럽�
 
 ---
 
+### D83 — rpm과 deb purl이 matcher에 닿고, SBOM 경로가 거짓말을 멈춘다
+
+**결정.** CycloneDX의 `rpm`과 `deb` 컴포넌트는 `apk`가 항상 해 온 방식대로 매핑됩니다:
+purl 네임스페이스가 아니라 컴포넌트 이름 그대로입니다(syft는 세대 사이에 `rhel`을
+`redhat`으로 바꿔 불렀으므로, 네임스페이스는 신원이 아닙니다), 이미지 경로가 쓰는 것과
+같은 `Distro.Ecosystem()`으로 키를 잡습니다 — 문서의 operating-system 컴포넌트가
+우선이고, purl 자신의 `distro` qualifier가 대체 수단입니다(마지막 하이픈에서 나눕니다:
+`opensuse-leap-15.6`은 ID `opensuse-leap`). 둘 다 없으면 → 키 없이 카탈로그하고 평가되지
+않음으로 보고합니다(D17). 불일치가 나면 OS 컴포넌트가 이깁니다: 문서의 선언이 패키지 하나의
+qualifier보다 순위가 높고, Ubuntu의 LTS 키가 필요로 하는 PrettyName도 그것이 담고
+있습니다. epoch는 syft purl에서 qualifier이지 버전 안에 있지 않습니다 — 0이 아닐 때만
+앞에 다시 붙입니다(측정된 패키지의 8.3%가 epoch를 달고, epoch가 rpmvercmp를 지배합니다).
+Source(D8)는 `upstream` qualifier에서, rpmdb의 SOURCERPM 읽기가 쓰는 것과 같은 벗기기
+core를 거쳐 오며, 이제 공유됩니다. gpg-pubkey 가짜 패키지는 이미지 경로가 항상 그래
+왔듯 이름으로 걸러냅니다.
+
+**측정이 드러낸 묶음 수정 셋.** ① qualifier 파서가 `+`를 공백으로 디코딩했습니다
+(url.ParseQuery 의미론입니다), 2024년 이전 syft purl에서 module EVR과 SLES의 `+git`
+버전을 조각냈습니다 — `+`를 그대로 남기는 percent-decoding으로 바꿨습니다. ② 최신 syft는
+purl 없는 `type:"file"` 컴포넌트를 수천 개 냅니다(맨 rockylinux:9 기준 6,306개 중
+6,161개), 이것들은 전부 skip된 패키지로 세어져 그런 SBOM마다
+`--fail-on-incomplete=target`을 exit 2로 몰아갔습니다 — 파일은 패키지가 아니므로 이제
+OS 컴포넌트처럼 제외됩니다. ③ syft 1.x 이상은 `syft:metadata:modularityLabel`을
+컴포넌트 속성으로 씁니다 — `Package.ModuleStream`으로 읽어 들입니다(처음 두 필드, D80의
+규칙), 그래서 module 패키지의 SBOM 스캔도 stream-match됩니다; 오래된 SBOM은 아무것도
+담고 있지 않고 D80의 시끄러운 not-evaluated가 그대로 적용됩니다.
+
+**E2E, 두 세대 다.** rockylinux:9를 SBOM으로도 이미지로도: **양쪽 다 finding 169건**.
+ubi8/nodejs-18을 syft-1.51 SBOM으로: module 패키지가 stream-match됩니다(finding
+5,477건, 2건 not evaluated); 같은 이미지를 syft-0.84 SBOM으로: module 패키지 8개가
+시끄럽게 not evaluated입니다 — 정직한 성능 저하입니다. `--fail-on-incomplete=target`은
+최신 SBOM에서는 다시 exit 0입니다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

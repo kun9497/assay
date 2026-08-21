@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/kun9497/assay/internal/pkgmeta"
 )
@@ -101,6 +102,19 @@ func catalogOne(c component, distroEcosystem string, target *pkgmeta.Target, sta
 		// scan, and counting it here would inflate the component total.
 		return
 	}
+	if c.Type == "file" {
+		// Modern syft emits thousands of purl-less "file" components per
+		// image — content-scanned files, not packages (6,161 of 6,306
+		// top-level components measured on a real rockylinux:9 syft 1.51.0
+		// SBOM). Counting them as SkippedNoPURL used to inflate Components
+		// enough on its own to trip --fail-on-incomplete=target on a scan
+		// that was otherwise complete. Excluded here the same way the
+		// operating-system component is above: not counted anywhere, rather
+		// than adding a Stats field for a bucket nothing needs to gate on —
+		// the least new machinery, and consistent with the one exclusion
+		// this file already had.
+		return
+	}
 	stats.Components++
 	if c.PURL == "" {
 		stats.SkippedNoPURL++
@@ -113,14 +127,31 @@ func catalogOne(c component, distroEcosystem string, target *pkgmeta.Target, sta
 	}
 
 	var eco string
-	if p.Type == "apk" {
+	switch p.Type {
+	case "apk":
 		// The purl carries no release (D6); apk's ecosystem key comes from the
 		// target's distro instead. purlTypeToEcosystem deliberately has no apk
 		// entry for the same reason. An apk package is never dropped for
 		// lacking a distro — it is cataloged unkeyed so it is still counted and
 		// later reported as skipped, rather than silently absent.
 		eco = distroEcosystem
-	} else {
+	case "rpm", "deb":
+		// D83. Same reasoning as apk above: no release on the purl itself, so
+		// the ecosystem key comes from the target's distro — with a
+		// document-level fallback to the purl's own "distro" qualifier for the
+		// (D7) documents that carry no operating-system component at all.
+		if p.Type == "rpm" && isPubkeyPURL(p) {
+			// gpg-pubkey is a keyring entry, not an installed package (mirrors
+			// rpmdb's isPubkey, header.go). Routed into the existing
+			// "unsupported ecosystem" bucket rather than a new Stats field —
+			// the least new machinery, and it is, like an unsupported purl
+			// type, a component this cataloger deliberately never turns into
+			// a package.
+			stats.SkippedUnsupportedEcosystem++
+			return
+		}
+		eco = distroEcosystemFor(p, target, distroEcosystem)
+	default:
 		var ok bool
 		eco, ok = pkgmeta.EcosystemForPURLType(p.Type)
 		if !ok {
@@ -132,6 +163,15 @@ func catalogOne(c component, distroEcosystem string, target *pkgmeta.Target, sta
 	version := p.Version
 	if version == "" {
 		version = c.Version
+	} else if p.Type == "rpm" || p.Type == "deb" {
+		// The purl's own @version is version-release WITHOUT the epoch —
+		// evr()'s shape (rpmdb/header.go) omits it the same way when zero —
+		// and Qualifiers["epoch"] carries it separately, written only when
+		// present and non-zero. Prepending it here, in that same condition,
+		// is what makes the two sides comparable.
+		if epoch, ok := p.Qualifiers["epoch"]; ok && epoch != "" && epoch != "0" {
+			version = epoch + ":" + version
+		}
 	}
 	if version == "" {
 		// Nothing for a comparer to place inside a range. Counting it as
@@ -140,12 +180,15 @@ func catalogOne(c component, distroEcosystem string, target *pkgmeta.Target, sta
 		return
 	}
 
-	// apk purls carry the distro name as their namespace (pkg:apk/alpine/...),
-	// which is not part of the package identity: OSV's Alpine advisories name
-	// the bare package ("openssl", not "alpine/openssl"). Prefixing it here
-	// would make every apk lookup miss its advisory.
+	// apk, rpm and deb purls carry the distro name as their namespace
+	// (pkg:apk/alpine/..., pkg:rpm/rhel/...), which is not part of the
+	// package identity: OSV's advisories name the bare package ("openssl",
+	// not "alpine/openssl"), and the rpm namespace itself is not even stable
+	// — syft 0.84.1 writes "rhel", syft 1.51.0 writes "redhat", for the same
+	// distro. Prefixing either into the name here would make every distro
+	// lookup miss its advisory, or miss it only on some SBOMs.
 	name := p.Name
-	if p.Type != "apk" && p.Namespace != "" {
+	if p.Namespace != "" && p.Type != "apk" && p.Type != "rpm" && p.Type != "deb" {
 		// The purl spec always separates namespace and name with "/"
 		// (pkg:maven/group/artifact), but OSV's Maven advisories name the
 		// package "group:artifact" — measured 12,457/12,457 live records.
@@ -174,7 +217,8 @@ func catalogOne(c component, distroEcosystem string, target *pkgmeta.Target, sta
 		PURL:      c.PURL,
 		Locations: []pkgmeta.Location{loc},
 	}
-	if p.Type == "apk" {
+	switch p.Type {
+	case "apk":
 		// syft reports the origin package name only (D8). Alpine binary
 		// packages carry their source package's version, so leaving Version
 		// empty here is correct rather than a gap: the binary's own version is
@@ -182,9 +226,98 @@ func catalogOne(c component, distroEcosystem string, target *pkgmeta.Target, sta
 		if origin := propValue(c, "syft:metadata:originPackage"); origin != "" {
 			pkg.Source = &pkgmeta.SourcePackage{Name: origin}
 		}
+	case "rpm":
+		// D8/D83. The "upstream" qualifier is a source-RPM filename
+		// ("audit-3.0.7-104.el9.src.rpm"), stripped back to the bare name by
+		// the same core rpmdb's own cataloger uses (pkgmeta.SourceRPMName).
+		if upstream := p.Qualifiers["upstream"]; upstream != "" {
+			if src := pkgmeta.SourceRPMName(upstream); src != "" {
+				pkg.Source = &pkgmeta.SourcePackage{Name: src}
+			}
+		}
+		// D80. Only NAME:STREAM is kept, exactly as rpmdb/header.go reads it
+		// off RPMTAG_MODULARITYLABEL: the label's VERSION and CONTEXT differ
+		// between builds of one installed stream. Fewer than four
+		// colon-separated fields leaves ModuleStream "" rather than guessed
+		// at, so the D80 matcher still refuses to judge a module build it
+		// cannot name a stream for.
+		if label := propValue(c, "syft:metadata:modularityLabel"); label != "" {
+			parts := strings.SplitN(label, ":", 4)
+			if len(parts) == 4 && parts[0] != "" && parts[1] != "" {
+				pkg.ModuleStream = parts[0] + ":" + parts[1]
+			}
+		}
+	case "deb":
+		// D8/D83. syft's "upstream" qualifier is "name" or "name@version"
+		// (percent-encoded '@'); only the name half identifies the source
+		// package, the same as dpkgdb's own Source: field reading (D8).
+		if upstream := p.Qualifiers["upstream"]; upstream != "" {
+			srcName, _, _ := strings.Cut(upstream, "@")
+			if srcName != "" {
+				pkg.Source = &pkgmeta.SourcePackage{Name: srcName}
+			}
+		}
 	}
 	target.Packages = append(target.Packages, pkg)
 	stats.Cataloged++
+}
+
+// isPubkeyPURL mirrors rpmdb's isPubkey (header.go): a gpg-pubkey row is a
+// keyring entry, not an installed package, and the "arch" qualifier is what
+// tells it apart from a hypothetical real package of that name — a real one
+// always carries an architecture, syft's own gpg-pubkey purls never do.
+func isPubkeyPURL(p pkgmeta.PURL) bool {
+	if p.Name != "gpg-pubkey" {
+		return false
+	}
+	_, hasArch := p.Qualifiers["arch"]
+	return !hasArch
+}
+
+// distroEcosystemFor resolves the ecosystem key for an rpm or deb package
+// (D83). docEcosystem is the document-wide key already resolved once from the
+// operating-system component (D6, D7) — mirroring how the apk branch uses it
+// — with a per-package fallback for documents that carry no such component at
+// all: syft's own purl "distro" qualifier is the only place the release
+// survives there.
+//
+// An operating-system component that IS present always wins, even when its
+// own Ecosystem() resolution failed and left docEcosystem "" — falling back
+// to the qualifier at that point would let one document disagree with
+// itself, keying some of its own packages on a release the document's own
+// stated distro does not have.
+func distroEcosystemFor(p pkgmeta.PURL, target *pkgmeta.Target, docEcosystem string) string {
+	if target.Distro != nil {
+		return docEcosystem
+	}
+	dq, ok := p.Qualifiers["distro"]
+	if !ok {
+		return ""
+	}
+	d, ok := distroFromQualifier(dq)
+	if !ok {
+		return ""
+	}
+	eco, err := d.Ecosystem()
+	if err != nil {
+		return ""
+	}
+	return eco
+}
+
+// distroFromQualifier builds a Distro from a purl's "distro" qualifier. syft
+// writes it "id-versionID" — "rhel-9.8", "amzn-2023", and "opensuse-leap-15.6"
+// where the id itself is hyphenated — so it is split on the LAST hyphen
+// rather than the first: everything before is the id, everything after is
+// the release. A value with no hyphen (or one ending in a hyphen) has no
+// release to split off and fails rather than building a Distro with an empty
+// half.
+func distroFromQualifier(s string) (pkgmeta.Distro, bool) {
+	i := strings.LastIndexByte(s, '-')
+	if i <= 0 || i == len(s)-1 {
+		return pkgmeta.Distro{}, false
+	}
+	return pkgmeta.Distro{ID: s[:i], VersionID: s[i+1:]}, true
 }
 
 // propValue returns the value of the first property named name, or "" if the

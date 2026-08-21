@@ -47,6 +47,26 @@ func TestParsePURL_Qualifiers(t *testing.T) {
 	}
 }
 
+// D83 bundled fix. url.ParseQuery decodes '+' as a space (the
+// application/x-www-form-urlencoded convention); old-syft purls carry a raw
+// '+' in qualifier values (RPM module EVRs, SLES "+git..." upstream
+// filenames), measured against real syft 0.84.1 output, and a space in place
+// of it turns a real SOURCERPM-shaped string into one pkgmeta.SourceRPMName
+// no longer recognizes.
+func TestParsePURL_QualifierPlusIsLiteral(t *testing.T) {
+	const in = "pkg:rpm/sles/aaa_base@84.87+git20180409.04c9dae-150300.10.28.2" +
+		"?upstream=aaa_base-84.87+git20180409.04c9dae-150300.10.28.2.src.rpm"
+	got, err := ParsePURL(in)
+	if err != nil {
+		t.Fatalf("ParsePURL(%q) error: %v", in, err)
+	}
+	const want = "aaa_base-84.87+git20180409.04c9dae-150300.10.28.2.src.rpm"
+	if got.Qualifiers["upstream"] != want {
+		t.Errorf("upstream qualifier = %q, want %q (literal '+', not decoded to space)",
+			got.Qualifiers["upstream"], want)
+	}
+}
+
 func TestParsePURL_Invalid(t *testing.T) {
 	for _, in := range []string{"", "golang/foo@v1", "pkg:", "pkg:golang", "pkg:/foo@v1"} {
 		if _, err := ParsePURL(in); err == nil {

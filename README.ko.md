@@ -575,6 +575,10 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] Rocky/Alma module stream을 summary 산문에서 (D82) — 항목 21,540건이 하나-토큰
       규칙 아래 stream을 얻음; 풀리지 않는 레코드 15+96건은 stream 없이 계속 시끄러움;
       MODULARITYLABEL 삼부작이 닫힘
+- [x] SBOM의 rpm과 deb purl (D83) — 이미지 경로가 쓰는 것과 같은 Distro.Ecosystem()으로
+      키를 잡고, epoch는 자신의 qualifier에서 복원; rockylinux:9는 SBOM과 이미지가
+      finding 169건으로 일치하고, 최신 syft SBOM은 더 이상
+      --fail-on-incomplete=target에 걸리지 않음
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건
