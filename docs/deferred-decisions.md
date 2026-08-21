@@ -145,7 +145,7 @@ no measured demand is corpus size paid for nothing — the Ubuntu archive alone 
 
 ---
 
-### Ubuntu findings carry no fix state
+### ~~Ubuntu findings carry no fix state~~ — resolved in D85
 
 D52 distinguishes "the vendor will never fix this" from "no fix yet" and D53 brought Ubuntu
 in, but every Ubuntu finding reports `unknown`. On a real ubuntu:22.04 scan that is all 104 of
@@ -157,16 +157,15 @@ per-package pocket annotation rather than anything OSV represents. D17's discipl
 the finding says `unknown` rather than guessing, and that is the right answer for the data —
 but the information exists and assay is not reading it.
 
-**What it would take is a D1 question, not an implementation one.** D1 says every provider
-normalizes into OSV shape, and that is what made the KISA and Red Hat providers possible.
-Reading Launchpad means a second Ubuntu source whose native shape is not OSV's, alongside an
-OSV Ubuntu ingest that already works — either two providers for one distro, or replacing the
-OSV path with a Launchpad one and inheriting a scraper nobody else in this project maintains.
-
-**Revisit when** the wont-fix distinction matters on Ubuntu the way it did on RHEL. The
-measured share is what to check first: 15 of 104 findings on ubi-equivalent Ubuntu against
-59 of 505 on ubi8 — similar enough that the case is probably as strong, and worth measuring
-properly before reopening D1.
+**Resolved 2026-08-21 (D85), and the D1 question answered itself smaller than posed.**
+Neither of the two options this entry weighed was taken: not a second provider (Ubuntu's
+OSV records carry no aliases, so D25 grouping had nothing to join on) and not a
+replacement. The OSV provider itself consults the tracker at conversion and stamps
+`Range.FixState` on fix-less mainline ranges — the D52 seam Red Hat and SUSE already
+write, zero new render/gate code. The tracker is fetched by shelling out to `git`
+(Launchpad's cgit refuses snapshots; the Security API bulk-syncs in ~33h and cannot
+bootstrap) — the project's first build-time tool dependency, db build only, D14 untouched.
+Result: grype parity exact on ubuntu:22.04 (the same 15 wont-fix pairs, 8 CVEs).
 
 ---
 

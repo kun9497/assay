@@ -94,7 +94,7 @@ func TestConvert_ModuleStream_ZeroTokensStaysStreamless(t *testing.T) {
 	  ]
 	}`
 	var st stats
-	got, ok, err := convert([]byte(rec), "Rocky Linux", &st)
+	got, ok, err := convert([]byte(rec), "Rocky Linux", &st, nil)
 	if err != nil || !ok {
 		t.Fatalf("convert: ok=%v err=%v", ok, err)
 	}
@@ -125,7 +125,7 @@ func TestConvert_ModuleStream_TwoStreamsOfOneModuleStaysStreamless(t *testing.T)
 	  ]
 	}`
 	var st stats
-	got, ok, err := convert([]byte(rec), "Rocky Linux", &st)
+	got, ok, err := convert([]byte(rec), "Rocky Linux", &st, nil)
 	if err != nil || !ok {
 		t.Fatalf("convert: ok=%v err=%v", ok, err)
 	}
@@ -155,7 +155,7 @@ func TestConvert_ModuleStream_TwoDifferentModulesStaysStreamless(t *testing.T) {
 	  ]
 	}`
 	var st stats
-	got, ok, err := convert([]byte(rec), "Rocky Linux", &st)
+	got, ok, err := convert([]byte(rec), "Rocky Linux", &st, nil)
 	if err != nil || !ok {
 		t.Fatalf("convert: ok=%v err=%v", ok, err)
 	}

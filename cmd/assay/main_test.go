@@ -21,11 +21,13 @@ import (
 	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/dbartifact"
 	"github.com/kun9497/assay/internal/dbcmd"
+	"github.com/kun9497/assay/internal/provider"
 	"github.com/kun9497/assay/internal/provider/amazon"
 	"github.com/kun9497/assay/internal/provider/fedora"
 	"github.com/kun9497/assay/internal/provider/knvd"
 	"github.com/kun9497/assay/internal/provider/nvd"
 	"github.com/kun9497/assay/internal/provider/oracle"
+	"github.com/kun9497/assay/internal/provider/osv"
 	"github.com/kun9497/assay/internal/provider/redhat"
 	"github.com/kun9497/assay/internal/provider/suse"
 	"github.com/kun9497/assay/internal/report"
@@ -1658,6 +1660,55 @@ func TestDBUpdateProviders_SUSEDisabledViaEnv(t *testing.T) {
 		if p.Name() == "SUSE CSAF VEX" {
 			t.Errorf("dbUpdateProviders() = %+v, want no SUSE provider with SUSE_ENABLE=0", ps)
 		}
+	}
+}
+
+// osvProviderFrom finds the *osv.Provider dbUpdateProviders always
+// constructs (it is the one entry with no on/off env var of its own -- OSV
+// itself is never optional), by type rather than by index: relying on ps[0]
+// would silently stop testing anything the day the construction order
+// changes.
+func osvProviderFrom(t *testing.T, ps []provider.Provider) *osv.Provider {
+	t.Helper()
+	for _, p := range ps {
+		if o, ok := p.(*osv.Provider); ok {
+			return o
+		}
+	}
+	t.Fatal("dbUpdateProviders() did not include an *osv.Provider at all")
+	return nil
+}
+
+// TestDBUpdateProviders_UbuntuTrackerOnByDefault is the caller-first proof
+// for D85's wiring: dbUpdateProviders must actually pass an enabled tracker
+// to the osv provider it always constructs, not merely have
+// WithUbuntuTracker sitting unused. Unlike REDHAT_ENABLE and its siblings,
+// there is no separate provider to construct or skip -- UBUNTU_TRACKER_ENABLE
+// gates a sub-feature of the osv provider that is built either way, so this
+// reads the boolean back through UbuntuTrackerEnabled() (osv.Provider's own
+// test-observability getter) instead of checking which providers came back.
+func TestDBUpdateProviders_UbuntuTrackerOnByDefault(t *testing.T) {
+	t.Setenv("UBUNTU_TRACKER_ENABLE", "")
+
+	ps := dbUpdateProviders(io.Discard)
+	o := osvProviderFrom(t, ps)
+	if !o.UbuntuTrackerEnabled() {
+		t.Error("osv provider's UbuntuTrackerEnabled() = false, want true -- " +
+			"UBUNTU_TRACKER_ENABLE defaults ON (D85)")
+	}
+}
+
+// TestDBUpdateProviders_UbuntuTrackerDisabledViaEnv is the other half: an
+// operator with no git installed, or who does not want the extra fetch, must
+// be able to turn it off, exactly as REDHAT_ENABLE=0 and its siblings let
+// them skip their own providers entirely.
+func TestDBUpdateProviders_UbuntuTrackerDisabledViaEnv(t *testing.T) {
+	t.Setenv("UBUNTU_TRACKER_ENABLE", "0")
+
+	ps := dbUpdateProviders(io.Discard)
+	o := osvProviderFrom(t, ps)
+	if o.UbuntuTrackerEnabled() {
+		t.Error("osv provider's UbuntuTrackerEnabled() = true, want false with UBUNTU_TRACKER_ENABLE=0")
 	}
 }
 

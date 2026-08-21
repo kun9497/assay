@@ -608,6 +608,9 @@ exited 0 while 24 findings went unmentioned.
 - [x] SPDX 2.2/2.3 JSON (D84) — the shared purl core reads syft and Red Hat vendor SBOMs
       alike (repository_id, rpmmod, arch=src); rocky9 SPDX and CycloneDX scan
       identically, and Red Hat's own ubi9-micro SBOM keys 20/20
+- [x] Ubuntu fix states from Canonical's CVE tracker (D85) — stamped on the D52 seam at
+      OSV conversion; grype parity exact on ubuntu:22.04 (the same 15 wont-fix pairs),
+      and the build's first tool dependency (git) fails loud, never silent
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a

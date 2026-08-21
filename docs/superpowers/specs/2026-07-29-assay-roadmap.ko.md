@@ -3116,6 +3116,45 @@ evaluated입니다 — D80의 거부가 정확히 제 할 일을 하는 것입�
 
 ---
 
+### D85 — Ubuntu fix state, Canonical이 실제로 유지하는 tracker에서
+
+**결정.** Ubuntu finding이 더 이상 `unknown` fix state를 보고하지 않습니다. OSV의 Ubuntu
+export는 그것을 말할 수 없습니다 — 거기서는 "needed"와 "ignored"가 바이트 단위로
+동일합니다(fix 없는 range일 뿐, 그 이상은 없습니다) — 그래서 OSV provider가 변환 시점에
+Canonical의 ubuntu-cve-tracker를 참조해 fix 없는 메인라인 range에 `Range.FixState`를
+찍습니다: Red Hat과 SUSE가 이미 쓰고 있는 바로 그 D52 이음매이므로, matcher, 렌더러,
+`--fail-on-unfixable[=wont-fix]`가 새 코드 하나 없이 그것을 나르고, 발행되는 아티팩트도
+그것을 싣습니다(D51). 대안들은 스스로 측정을 통해 탈락했습니다: Canonical의 OVAL은
+ignored를 needed와 같은 문장으로 뭉개버립니다(wont-fix는 그 260MB 안에서 표현 불가능합니다),
+Security API는 페이지를 20개로 제한하고 각각 10–52초가 걸립니다 — 잘해야 델타 출처이지,
+대량 출처는 아닙니다.
+
+**이 fetch는 프로젝트의 첫 빌드 시점 도구 의존성입니다.** tracker는 오직 Launchpad git
+저장소로만 존재합니다(cgit 스냅샷은 400을 답합니다), 그래서 `db build`가 `git`을
+셸아웃합니다 — D64의 스풀로 shallow clone하고(전송 ~193MB, 트리 2.2GB), 그 뒤로는 델타
+fetch하며, HEAD 커밋 시각을 DataAsOf로 씁니다(D12). `git`이 없으면 빌드가 실패하며
+`UBUNTU_TRACKER_ENABLE=0`을 끄는 스위치로 이름 붙입니다 — 결코 조용한 축소가 아닙니다.
+스캔 경로는 그대로입니다(D14).
+
+**매핑, 확인된 그대로**: `ignored` → wont-fix로 전부 매핑됩니다 — Canonical 자신의
+상태이자 grype 자신의 매핑입니다 — 괄호 안 이유는 파싱은 하지만 저장하지 않는데, Red
+Hat의 remediation 카테고리가 상태 하나로만 귀결되는 것과 같은 모양입니다; 메인라인
+ignored 줄 대부분은 이유가 아예 없습니다(5,352건이 맨줄, 194건만 산문을 답니다), Red
+Hat의 모든 튜플이 이유 하나씩 갖는 것과의 차이를 그 자리에 문서화해 둡니다.
+`needed`/`needs-triage`/`pending`/`deferred` → not-fixed-yet입니다. `^codename_` 앵커가
+계보 접두사가 붙은 모든 행을 떨어뜨립니다(esm-infra/, fips/) — D53이 요구하는 그대로
+정규식 하나로, 블랙리스트 없이 합니다. kernel 변형 ignored 홍수("superseded by linux-*"
+장부 정리 튜플 ~418k개)는 정직하게 그대로 실려 들어오고 어떤 컨테이너 스캔도 건드리지
+않습니다: 이미지는 kernel을 담지 않으니까요.
+
+**E2E: grype와 정확히 일치.** ubuntu:22.04는 finding 95건을 스캔하고, `15건이 will not
+be fixed`입니다 — grype가 표시하는 것과 같은 CVE 8개에 걸친 같은 패키지/CVE 쌍 15개이고,
+coreutils의 CVE-2016-2781도 그 안에 있습니다; `--fail-on-unfixable=wont-fix`는 exit
+1입니다. tracker에서 튜플 2,280만 개를 로드합니다; 코퍼스 전체에서 range 1,415,900개가
+wont-fix를, 192,727개가 not-fixed를 찍습니다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

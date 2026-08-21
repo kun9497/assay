@@ -3330,6 +3330,42 @@ D80's refusal doing exactly its job. debian:12 SPDX scans keyed, with the one
 
 ---
 
+### D85 — Ubuntu fix states, from the tracker Canonical actually maintains
+
+**Decision.** Ubuntu findings stop reporting `unknown` fix state. The OSV Ubuntu export
+cannot say it — "needed" and "ignored" are byte-identical there (a fix-less range, nothing
+more) — so the OSV provider consults Canonical's ubuntu-cve-tracker at conversion time and
+stamps `Range.FixState` on fix-less mainline ranges: the exact D52 seam Red Hat and SUSE
+already write, so the matcher, renderers and `--fail-on-unfixable[=wont-fix]` carry it with
+zero new code, and the published artifact ships it (D51). The alternatives measured
+themselves out: Canonical's OVAL collapses ignored into the same sentence as needed (wont-fix
+is unrepresentable in 260MB of it), and the Security API caps pages at 20 with 10–52s
+each — a delta source at best, not a bulk one.
+
+**The fetch is the project's first build-time tool dependency.** The tracker exists only as
+a Launchpad git repository (cgit snapshots answer 400), so `db build` shells out to `git` —
+shallow clone into the D64 spool (~193MB transferred, 2.2GB tree), delta fetch afterwards,
+HEAD commit time as DataAsOf (D12). No `git` fails the build naming
+`UBUNTU_TRACKER_ENABLE=0` as the off switch — never a silent narrowing. The scan path is
+untouched (D14).
+
+**Mapping, as confirmed**: `ignored` → wont-fix wholesale — Canonical's own state, grype's
+own mapping — with the parenthesized reason parsed but not stored, mirroring how Red Hat's
+remediation categories resolve to a state and nothing else; most mainline ignored lines
+carry no reason at all (5,352 bare vs 194 with prose), the divergence from Red Hat's
+every-tuple-has-one documented in place. `needed`/`needs-triage`/`pending`/`deferred` →
+not-fixed-yet. The `^codename_` anchor drops every lineage-prefixed row (esm-infra/,
+fips/) exactly as D53 requires — one regexp, no blacklist. The kernel-variant ignored
+flood (~418k tuples of "superseded by linux-*" bookkeeping) rides in honestly and touches
+no container scan: images carry no kernel.
+
+**E2E: grype parity, exactly.** ubuntu:22.04 scans 95 findings, `15 will not be fixed` —
+the same 15 package/CVE pairs across the same 8 CVEs grype flags, coreutils'
+CVE-2016-2781 among them; `--fail-on-unfixable=wont-fix` exits 1. 22.8M tuples load from
+the tracker; 1,415,900 ranges stamp wont-fix and 192,727 not-fixed across the corpus.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

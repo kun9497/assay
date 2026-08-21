@@ -86,6 +86,15 @@ type Provider struct {
 	// .Progress serves for their own providers, just set after construction
 	// instead of at it.
 	progress io.Writer
+	// ubuntuTrackerEnabled, ubuntuTrackerURL and ubuntuSpoolDir are D85's
+	// fields. See WithUbuntuTracker's own comment (ubuntu_spool.go) for why
+	// the enabled flag defaults false here rather than true, and ubuntuSpool
+	// / ubuntuURL for the other two's defaults -- both are test-only
+	// overrides, set directly rather than through an exported setter because
+	// every test that needs them lives in this package.
+	ubuntuTrackerEnabled bool
+	ubuntuTrackerURL     string
+	ubuntuSpoolDir       string
 }
 
 func New(ecosystems []string, baseURL string) *Provider {
@@ -124,9 +133,31 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 	// still gets an honest (zero-for-the-other) line rather than one line per
 	// archive most of which would read "0, 0, 0".
 	var st stats
+
+	// D85: built once, up front, so it is available to fetchOne/convert
+	// regardless of where "Ubuntu" falls in p.ecosystems -- not per-eco,
+	// which would either re-sync the tracker once per archive for no reason
+	// or require tracking "have we already done this" state that a
+	// once-before-the-loop call makes unnecessary. Skipped entirely (no git,
+	// no network) when this build is not fetching Ubuntu at all, so every
+	// existing test that constructs a Provider without "Ubuntu" in its
+	// ecosystems is unaffected.
+	var tracker *ubuntuTracker
+	if slices.Contains(p.ecosystems, "Ubuntu") {
+		if p.ubuntuTrackerEnabled {
+			t, err := p.loadUbuntuTracker(ctx, &st)
+			if err != nil {
+				return store.Provenance{}, fmt.Errorf("ubuntu tracker: %w", err)
+			}
+			tracker = t
+		} else {
+			fmt.Fprintln(p.progress, ubuntuTrackerDisabledDisclosure)
+		}
+	}
+
 	for _, eco := range p.ecosystems {
 		u := fmt.Sprintf("%s/%s/all.zip", p.baseURL, url.PathEscape(eco))
-		n, asOf, covered, err := p.fetchOne(ctx, u, eco, emit, &st)
+		n, asOf, covered, err := p.fetchOne(ctx, u, eco, emit, &st, tracker)
 		if err != nil {
 			return store.Provenance{}, fmt.Errorf("fetch %s: %w", eco, err)
 		}
@@ -181,7 +212,7 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 // keys this archive actually covered. The third is not the same as `ecosystem`:
 // the Alpine archive is fetched as "Alpine" and covers Alpine:v3.2 through
 // Alpine:v3.24 (D20).
-func (p *Provider) fetchOne(ctx context.Context, u, ecosystem string, emit func(advisory.Advisory) error, st *stats) (int, time.Time, map[string]struct{}, error) {
+func (p *Provider) fetchOne(ctx context.Context, u, ecosystem string, emit func(advisory.Advisory) error, st *stats, tracker *ubuntuTracker) (int, time.Time, map[string]struct{}, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return 0, time.Time{}, nil, err
@@ -230,7 +261,7 @@ func (p *Provider) fetchOne(ctx context.Context, u, ecosystem string, emit func(
 		if err != nil {
 			return kept, asOf, covered, fmt.Errorf("read %s: %w", f.Name, err)
 		}
-		a, ok, err := convert(data, ecosystem, st)
+		a, ok, err := convert(data, ecosystem, st, tracker)
 		if err != nil {
 			return kept, asOf, covered, fmt.Errorf("convert %s: %w", f.Name, err)
 		}
