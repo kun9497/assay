@@ -19,6 +19,7 @@ import (
 	"github.com/kun9497/assay/internal/cataloger/jar"
 	"github.com/kun9497/assay/internal/cataloger/osrelease"
 	"github.com/kun9497/assay/internal/cataloger/rpmdb"
+	"github.com/kun9497/assay/internal/cataloger/spdx"
 	"github.com/kun9497/assay/internal/matcher"
 	"github.com/kun9497/assay/internal/pkgmeta"
 	"github.com/kun9497/assay/internal/report"
@@ -333,6 +334,12 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		inventory, cat, manifests = t, stats, mf
 
 	default: // source.TargetSBOM
+		// Classify only decided "this is some kind of SBOM" (D84) — CycloneDX
+		// and SPDX share one TargetKind, whether that kind came from content
+		// sniffing or from an explicit sbom: prefix, which bypasses content
+		// sniffing entirely (:53's table). So the choice of parser is made
+		// again here, by the same content sniff LooksLikeSPDX exports for
+		// exactly this, before the file is opened for real.
 		f, err := os.Open(path)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: open %s: %v\n", path, err)
@@ -340,7 +347,15 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		}
 		defer f.Close()
 
-		t, stats, err := cyclonedx.Parse(f)
+		var (
+			t     pkgmeta.Target
+			stats cyclonedx.Stats
+		)
+		if source.LooksLikeSPDX(path) {
+			t, stats, err = spdx.Parse(f)
+		} else {
+			t, stats, err = cyclonedx.Parse(f)
+		}
 		if err != nil {
 			fmt.Fprintf(stderr, "error: parse %s: %v\n", path, err)
 			return 2

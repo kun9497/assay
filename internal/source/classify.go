@@ -18,22 +18,31 @@ import (
 // sending the reader after a broken file rather than a misread target.
 //
 // A bare path is now decided by CONTENT: directory, then Go binary, then jar,
-// then CycloneDX. Each test is cheap — buildinfo reads a header and fails
-// immediately on anything that is not a Go binary, looksLikeJar reads four
-// magic bytes before opening the central directory, and the CycloneDX test
-// reads a 512-byte prefix before falling back to a streaming scan for the
-// top-level key.
+// then an SBOM (CycloneDX or SPDX, D84). Each test is cheap — buildinfo reads
+// a header and fails immediately on anything that is not a Go binary,
+// looksLikeJar reads four magic bytes before opening the central directory,
+// and each SBOM test reads a 512-byte prefix before falling back to a
+// streaming scan for its own top-level key.
 //
-// The four are mutually exclusive on any real input, so their order is not
-// observable today: a Go binary's header cannot contain `"bomFormat"` or the
-// zip magic, and a JSON document cannot satisfy buildinfo or start with zip
-// magic bytes. Swapping sniffs among themselves is a true equivalent,
-// verified as a surviving mutation rather than assumed for the original
-// three. The order is fixed anyway, because the day a fifth format is added
-// the exclusivity stops holding and an unordered sniff would change
+// The five are mutually exclusive on any real input, so their order is not
+// observable today: a Go binary's header cannot contain `"bomFormat"`,
+// `"spdxVersion"`, or the zip magic, a JSON document cannot satisfy
+// buildinfo or start with zip magic bytes, and CycloneDX's and SPDX's own
+// marker keys cannot both appear as top-level keys of one well-formed
+// document of either shape. Swapping sniffs among themselves is a true
+// equivalent, verified as a surviving mutation rather than assumed for the
+// original three — and D84's own addition, landing a fifth without
+// disturbing that, is the case the day-it-happens caution below was written
+// for. The order is fixed anyway: were a sixth format ever added on top,
+// exclusivity might not hold for IT, and an unordered sniff would change
 // behaviour silently.
 //
-// A file matching none of them is an error naming all four and the prefixes
+// This only decides "some kind of SBOM" for the CycloneDX/SPDX pair —
+// scancmd's own TargetSBOM branch re-sniffs a resolved file's content by the
+// exported LooksLikeSPDX (mirroring looksLikeCycloneDX below) to pick the
+// parser, the same way it already had to open the file itself to read it.
+//
+// A file matching none of them is an error naming all five and the prefixes
 // that override them, never a silent fallthrough to whichever branch happens
 // to be last — which is what produced "malformed JSON" for a binary.
 //
@@ -80,9 +89,12 @@ func Classify(target string) (TargetKind, string, error) {
 	if looksLikeCycloneDX(target) {
 		return TargetSBOM, target, nil
 	}
+	if LooksLikeSPDX(target) {
+		return TargetSBOM, target, nil
+	}
 	return 0, "", fmt.Errorf(
-		"%s is a file, but not a Go binary, not a CycloneDX document, and not a jar; "+
-			"prefix it with file:, sbom:, dir: or jar: to say which it is", target)
+		"%s is a file, but not a Go binary, not a CycloneDX document, not an SPDX document, "+
+			"and not a jar; prefix it with file:, sbom:, dir: or jar: to say which it is", target)
 }
 
 // jarMagic is the four bytes every ZIP-format file begins with, "PK\x03\x04" —
@@ -180,6 +192,37 @@ func looksLikeCycloneDX(path string) bool {
 		return false
 	}
 	return hasTopLevelKey(f, "bomFormat")
+}
+
+// LooksLikeSPDX reports whether a file opens like an SPDX JSON document —
+// exported, unlike looksLikeCycloneDX above, because scancmd's own
+// TargetSBOM branch re-sniffs a resolved file's content by this same test to
+// choose between the two SBOM parsers (D84): Classify only decides "this is
+// some kind of SBOM", not which one, so the choice has to be made again at
+// the point the file is actually opened for parsing.
+//
+// Same two-pass strategy as looksLikeCycloneDX, for the identical reason:
+// JSON member order is arbitrary, so "spdxVersion" is no more guaranteed to
+// sit near the front of the document than "bomFormat" was.
+func LooksLikeSPDX(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	var head [512]byte
+	n, err := io.ReadFull(f, head[:])
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return false
+	}
+	if bytes.Contains(head[:n], []byte(`"spdxVersion"`)) {
+		return true
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return false
+	}
+	return hasTopLevelKey(f, "spdxVersion")
 }
 
 // hasTopLevelKey reports whether a JSON object has the given key at depth 1.

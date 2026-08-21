@@ -108,6 +108,11 @@ func TestClassify_BarePathsAreSniffed(t *testing.T) {
 		[]byte(`{"bomFormat":"CycloneDX","specVersion":"1.5","version":1}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	spdxDoc := filepath.Join(dir, "s.spdx.json")
+	if err := os.WriteFile(spdxDoc,
+		[]byte(`{"spdxVersion":"SPDX-2.3","SPDXID":"SPDXRef-DOCUMENT","packages":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	self, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -129,6 +134,7 @@ func TestClassify_BarePathsAreSniffed(t *testing.T) {
 	}{
 		{"a Go binary", self, TargetGoBinary},
 		{"a CycloneDX document", sbom, TargetSBOM},
+		{"an SPDX document", spdxDoc, TargetSBOM},
 		{"a directory", dir, TargetDirectory},
 		{"a jar recognized by its .jar name", byName, TargetJar},
 		{"a jar recognized by its META-INF/ content", byContent, TargetJar},
@@ -189,7 +195,7 @@ func TestClassify_AnUnrecognisedFileIsAnErrorNamingWhatWasTried(t *testing.T) {
 	}
 	// The message has to name what was tried AND how to override, because
 	// those are the user's two next questions.
-	for _, want := range []string{"Go binary", "CycloneDX", "jar", "sbom:", "file:", "dir:", "jar:"} {
+	for _, want := range []string{"Go binary", "CycloneDX", "SPDX", "jar", "sbom:", "file:", "dir:", "jar:"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q - the user cannot tell what to do next", err, want)
 		}
@@ -239,6 +245,27 @@ func TestClassify_ACycloneDXDocumentWithALateBomFormat(t *testing.T) {
 	pad := strings.Repeat("x", 900)
 	body := `{"metadata":{"tools":[{"vendor":"` + pad + `","name":"syft"}]},` +
 		`"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[]}`
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := Classify(p)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	if got != TargetSBOM {
+		t.Errorf("Classify = %v, want sbom", got)
+	}
+}
+
+// The SPDX analogue of the late-bomFormat test above: LooksLikeSPDX needs the
+// identical order-independent fallback, since SPDX's own top-level key order
+// is exactly as arbitrary as CycloneDX's.
+func TestClassify_AnSPDXDocumentWithALateSpdxVersion(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "late.spdx.json")
+	pad := strings.Repeat("x", 900)
+	body := `{"SPDXID":"SPDXRef-DOCUMENT","name":"` + pad + `",` +
+		`"spdxVersion":"SPDX-2.3","packages":[]}`
 	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}

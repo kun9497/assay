@@ -42,6 +42,23 @@ type Distro struct {
 // than concatenated into a key that would look plausible and match nothing.
 var ubuntuRelease = regexp.MustCompile(`^[0-9]{2}\.[0-9]{2}$`)
 
+// ubuntuEvenYearLTS reports whether an Ubuntu VERSION_ID names an April
+// release of an even year — Canonical's LTS cadence, unbroken since 6.06
+// (which is also the one historical exception this rule tolerates: it
+// predates every release OSV keys). Consulted ONLY when no PRETTY_NAME
+// exists to say so directly (D84); see the ubuntu case's own comment.
+func ubuntuEvenYearLTS(versionID string) bool {
+	yy, mm, ok := strings.Cut(versionID, ".")
+	if !ok || mm != "04" {
+		return false
+	}
+	n, err := strconv.Atoi(yy)
+	if err != nil {
+		return false
+	}
+	return n%2 == 0
+}
+
 func (d Distro) Ecosystem() (string, error) {
 	if d.ID == "" {
 		return "", fmt.Errorf("%w: distro has no ID", ErrNoEcosystem)
@@ -74,17 +91,21 @@ func (d Distro) Ecosystem() (string, error) {
 	case "ubuntu":
 		// D53. OSV keys Ubuntu as "Ubuntu:22.04:LTS" for a long-term release and
 		// "Ubuntu:25.10" for an interim one, so the suffix is part of the key
-		// rather than decoration. It is read from PRETTY_NAME, which is the
-		// system's own statement about itself — the alternative, inferring
-		// LTS from an even year and an .04 month, is a rule Canonical has
-		// never promised and every key would silently move the day they
-		// break it.
+		// rather than decoration. It is read from PRETTY_NAME first — the
+		// system's own statement about itself — and only when no PRETTY_NAME
+		// exists at all (an SBOM purl's distro qualifier carries just
+		// "ubuntu-22.04", D84) is LTS derived from the even-year .04 rule
+		// below. That derivation is Canonical's release cadence, unbroken
+		// since 6.06; it stays a fallback rather than the primary read
+		// because a statement beats a policy, and it fires only where no
+		// statement was ever available.
 		//
 		// Getting the suffix wrong is safe in the way that matters: the key
 		// would name an ecosystem the database does not hold, and D20's
 		// coverage check turns that into a whole-package skip and exit 2,
-		// never a clean verdict. That is why this reads a free-text field at
-		// all: the failure is loud.
+		// never a clean verdict. That holds for the derivation too — if
+		// Canonical ever ships an even-year .04 that is not LTS, the wrong
+		// key finds no data and the failure is loud.
 		//
 		// Only the mainline lineage is keyed here. Ubuntu's Pro, FIPS and
 		// Realtime lineages have OSV keys of their own describing the SAME
@@ -100,6 +121,9 @@ func (d Distro) Ecosystem() (string, error) {
 				ErrNoEcosystem, d.ID, d.VersionID)
 		}
 		if strings.Contains(d.PrettyName, "LTS") {
+			return "Ubuntu:" + d.VersionID + ":LTS", nil
+		}
+		if d.PrettyName == "" && ubuntuEvenYearLTS(d.VersionID) {
 			return "Ubuntu:" + d.VersionID + ":LTS", nil
 		}
 		return "Ubuntu:" + d.VersionID, nil

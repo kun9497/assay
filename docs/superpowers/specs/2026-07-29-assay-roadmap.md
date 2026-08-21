@@ -3294,6 +3294,42 @@ the honest degradation. `--fail-on-incomplete=target` exits 0 on modern SBOMs ag
 
 ---
 
+### D84 — SPDX, the format vendors actually publish
+
+**Decision.** SPDX 2.2/2.3 JSON is the second SBOM parser, stdlib-only (no fourth
+dependency), sniffed by its top-level `spdxVersion` key through the same classify seam —
+the "fifth format" that seam's comment predicted. The purl→Package mapping D83 built moved
+to `pkgmeta` as the shared core; every CycloneDX test passed unmoved, which is the proof
+the extraction preserved behavior. The move also fixed a discovered gap on both parsers:
+the apk branch had no per-purl distro-qualifier fallback (and no Source from `upstream` —
+the D8 libssl3→openssl join was silently absent from any document without syft's
+originPackage property).
+
+**SPDX lies where CycloneDX told the truth, so the rules are inverted.** `versionInfo`
+lies three ways (Red Hat containers omit the release, product SBOMs write ""/"UNKNOWN",
+syft includes the epoch the purl omits) — the purl is the only version read.
+`referenceCategory` is spelled both `PACKAGE-MANAGER` and `PACKAGE_MANAGER` by the same
+vendor — only `referenceType=="purl"` is matched. There is no operating-system entity, so
+every package keys from its own qualifier; Ubuntu's LTS suffix derives from the even-year
+.04 cadence ONLY when no PRETTY_NAME exists to say so (a statement beats a policy). The
+document-root pseudo-package is excluded via the DESCRIBES relationship, files[] ignored,
+multiple purls per package deduped on the mapped tuple.
+
+**Red Hat's own SBOMs carry their signals in their own spelling**: no `distro` qualifier
+at all — `repository_id=rhel-9-for-x86_64-baseos-rpms` derives `Red Hat:9` (prefix-only,
+anything else stays loudly unkeyed); `rpmmod=NSVC` carries the module stream D80 matches
+on; `arch=src` SRPM packages are skipped and counted. Live: a real ubi9-micro vendor SBOM
+scans 20/20 rpm packages keyed via repository_id, 57 findings; a delve module SBOM
+stream-matches `go-toolset:rhel8` from `rpmmod`.
+
+**E2E and the honest degradation.** rocky9 SPDX ≡ CycloneDX (144/144/169/0 identical);
+ubi8/nodejs-18 SPDX loses syft's modularityLabel property (SPDX has nowhere to put it), so
+its 8 module packages are loudly not evaluated where the CycloneDX twin stream-matches —
+D80's refusal doing exactly its job. debian:12 SPDX scans keyed, with the one
+`distro=Debian` versionless ELF-note purl correctly refused rather than guessed.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

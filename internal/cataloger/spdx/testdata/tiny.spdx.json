@@ -1,0 +1,22 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "tiny",
+  "documentNamespace": "https://example.com/tiny",
+  "creationInfo": {"created": "2026-08-21T00:00:00Z", "creators": ["Tool: hand"]},
+  "packages": [
+    {
+      "name": "openssl",
+      "SPDXID": "SPDXRef-Package-openssl",
+      "versionInfo": "3.0.7-1.el9",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": "pkg:rpm/rhel/openssl@3.0.7-1.el9?arch=x86_64&distro=rhel-9.2&epoch=1&upstream=openssl-3.0.7-1.el9.src.rpm"}
+      ]
+    }
+  ],
+  "relationships": [
+    {"spdxElementId": "SPDXRef-DOCUMENT", "relatedSpdxElement": "SPDXRef-Package-openssl", "relationshipType": "DESCRIBES"}
+  ]
+}

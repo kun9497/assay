@@ -969,10 +969,13 @@ the encoding is fully hidden behind it.
 
 ---
 
-### SPDX ingestion
+### ~~SPDX ingestion~~ — resolved in D84
 
-CycloneDX first. SPDX is a second parser against an already-proven pipeline, adding no new
-architecture.
+CycloneDX first, SPDX second — which is what happened: D84 parses SPDX 2.2/2.3 JSON
+against the shared purl→Package core D83 built, adding no new architecture and no new
+dependency. Still deferred: SPDX tag-value and SPDX 3.0, both unobserved in the measured
+wild (two syft generations and Red Hat's 319 published SBOMs are all 2.3 JSON); the
+trigger is the first real document in either shape.
 
 ---
 
