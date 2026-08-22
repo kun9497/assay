@@ -367,8 +367,57 @@ func (d Distro) Ecosystem() (string, error) {
 		// 2026-08-20: VERSION_ID is a build date ("20260818"), not a release —
 		// even if that happened to parse as an X.Y version it must never resolve
 		// a key, so this is refused before the version is even inspected.
+		//
+		// This is NOT the same refusal the "wolfi"/"chainguard" cases below
+		// decline to make, even though both distros ship no stable release
+		// axis. Tumbleweed is a rolling TARGET measured against a
+		// release-keyed feed — SUSE's CSAF product tree has no "openSUSE
+		// Tumbleweed" entry at all, so there is no key a Tumbleweed package
+		// could ever be looked up under, and inventing one would be
+		// concatenating a build date into a shape that only coincidentally
+		// looks like a version. Wolfi and Chainguard are the opposite: OSV's
+		// own archive keys them bare too ("Wolfi", "Chainguard", no release
+		// suffix at all, D88) — a rolling PUBLISHER keying one stream per
+		// ecosystem, not a release-keyed feed being asked to describe a
+		// rolling target. D6 ("the ecosystem key includes the release,
+		// because the fixed version differs per release") is satisfied
+		// vacuously there: there is no release axis on either side to omit,
+		// so nothing is lost by keying bare the way there would be for a
+		// real distro with real per-release fixed versions.
 		return "", fmt.Errorf("%w: distro %q is a rolling release with no stable "+
 			"release to key advisories on", ErrNoEcosystem, d.ID)
+	case "wolfi":
+		// D88. OSV keys Wolfi bare ("Wolfi", no release suffix) because Wolfi
+		// itself ships no release axis — it is a single rolling stream, and
+		// the fixed version of a package does not differ "per release" the
+		// way it does for Alpine or Debian because there is only ever one
+		// release. VERSION_ID is deliberately never consulted: every cgr.dev
+		// image measured (wolfi-base and Chainguard's own statically-linked
+		// images alike, 2026-08-22) ships the same frozen
+		// VERSION_ID="20230201" — a build-tooling artifact, not a release —
+		// so reading it would either always resolve the same stale-looking
+		// key (harmless, since it is ignored) or, worse, invite a future
+		// change to start trusting it and silently stop matching.
+		//
+		// See the "opensuse-tumbleweed" case above for why a bare key here
+		// satisfies D6 rather than being the same refusal Tumbleweed gets:
+		// this is a rolling PUBLISHER with no release axis on the ADVISORY
+		// side either, not a rolling target measured against a release-keyed
+		// feed.
+		return "Wolfi", nil
+	case "chainguard":
+		// D88. Symmetric with "wolfi" above, and UNVERIFIED: every real
+		// cgr.dev image measured (2026-08-22), including Chainguard's own
+		// static base images, reports ID=wolfi in /etc/os-release, never
+		// ID=chainguard. No public image has been found that would exercise
+		// this branch. It is kept because the OSV archive genuinely does key
+		// a "Chainguard" ecosystem family (distinct from "Wolfi", D88's own
+		// "one feed, two keys" fetch), and an os-release ID this project has
+		// simply never seen is a more honest gap than a distro this package
+		// cannot key advisories for at all — but treat the routing itself,
+		// not just the version handling, as a guess until a real image is
+		// found that sets it.
+		return "Chainguard", nil
 	default:
 		return "", fmt.Errorf("%w: distro %q is not supported yet", ErrNoEcosystem, d.ID)
 	}

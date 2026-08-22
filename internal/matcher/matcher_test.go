@@ -200,6 +200,66 @@ func TestMatch_Miss(t *testing.T) {
 	}
 }
 
+// TestMatch_ChainguardFixedZeroSentinelNeverYieldsAFinding pins D88's
+// fixed:"0" safety net through the whole matcher, not just the comparer: 20.2%
+// of Chainguard/Wolfi's OSV affected entries pair introduced:"0" with
+// fixed:"0" -- Chainguard's own "this package was never affected" assertion
+// (verified 99.5% against Wolfi's secdb secfixes["0"], measured 2026-08-22)
+// -- rather than omitting the affected entry for that package altogether. It
+// is safe by an accident of ordering, not a special case: "0" parses as a
+// real, minimal APK version (see rangeeval.go's Fixed-branch comment), so the
+// window [introduced 0, fixed 0) is empty for any real installed version and
+// InRange never reports a hit.
+//
+// A real Wolfi advisory (TestMatch_Hit-shaped, a genuine fixed version) sits
+// in the SAME store so this cannot pass merely because the fixture matches
+// nothing at all -- deleting the matcher's window-closing logic on a fixed
+// bound would turn the zero-fixed package into a false positive while
+// leaving the real one alone, and only a fixture with both present can catch
+// that.
+func TestMatch_ChainguardFixedZeroSentinelNeverYieldsAFinding(t *testing.T) {
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Wolfi\x00never-affected": {
+			advWithRange("CGA-never-affected", "Wolfi", "never-affected", "0", "0", advisory.RangeEcosystem),
+		},
+		"Wolfi\x00really-vulnerable": {
+			advWithRange("CGA-really-vulnerable", "Wolfi", "really-vulnerable", "0", "2.0.0-r0", advisory.RangeEcosystem),
+		},
+	}}
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{
+			pkg("never-affected", "9.9.9-r9", "Wolfi"),
+			pkg("really-vulnerable", "1.0.0-r0", "Wolfi"),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want exactly 1 (the real one); a fixed:\"0\" range "+
+			"must never contribute a finding: %+v", len(res.Findings), res.Findings)
+	}
+	f := res.Findings[0]
+	if f.Advisory.ID != "CGA-really-vulnerable" {
+		t.Errorf("Advisory.ID = %q, want CGA-really-vulnerable -- the fixed:\"0\" "+
+			"advisory (CGA-never-affected) must not have matched", f.Advisory.ID)
+	}
+	// Whatever renders "FIXED IN" reads Evidence.Fixed and Rating.Fixed
+	// (internal/report/table.go, explain.go, json.go, sarif.go); neither may
+	// ever carry the sentinel as if it were a real remediation version.
+	if f.Evidence.Fixed == "0" {
+		t.Errorf("Evidence.Fixed = %q; a sentinel must never render as a remediation version", f.Evidence.Fixed)
+	}
+	for _, r := range f.Ratings {
+		if r.Fixed == "0" {
+			t.Errorf("Rating.Fixed = %q; a sentinel must never render as a remediation version", r.Fixed)
+		}
+	}
+	if len(res.Skipped) != 0 {
+		t.Errorf("Skipped = %+v, want none: a fixed:\"0\" miss is a clean miss, not a skip", res.Skipped)
+	}
+}
+
 func TestMatch_UnparseableVersionIsSkippedNotClean(t *testing.T) {
 	s := fakeStore{byKey: map[string][]advisory.Advisory{
 		"Go\x00github.com/foo/bar": {

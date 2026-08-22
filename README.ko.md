@@ -15,7 +15,7 @@
 
 ## 현재 상태
 
-🚧 **활발히 개발 중입니다. 배포판 계열 11개와 언어 생태계 8개가 끝에서 끝까지 스캔되며,
+🚧 **활발히 개발 중입니다. 배포판 계열 13개와 언어 생태계 8개가 끝에서 끝까지 스캔되며,
 [로드맵](#로드맵) 체크박스가 가장 확실한 목록입니다.**
 
 `assay db update`가 배포된 데이터베이스를 받아옵니다 — OSV의 언어 생태계(Go, npm, PyPI,
@@ -591,6 +591,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] 배포판 EOL을 endoflife.date에서 (D87) — Meta에 실리고 제품별 phase 라벨을 달며,
       시계에 대고 스캔 시점에 유도, --fail-on-eol; debian:11은 LTS 조건이 붙은 줄을
       그려내고 grype 대비 마지막 보강 격차가 닫힘
+- [x] Wolfi와 Chainguard (D88) — Chainguard fetch 한 번이 무-릴리스 키 둘 다를 커버,
+      CGA는 related로 조인, usr/lib apk 경로 probe가 하드 exit 2를 wolfi-base의
+      15/15 evaluated로 바꿈
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건

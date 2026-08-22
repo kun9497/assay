@@ -69,6 +69,20 @@ VERSION_ID=3.19.9
 PRETTY_NAME="Alpine Linux v3.19"
 `
 
+// osReleaseWolfi is verbatim from a real cgr.dev/chainguard/wolfi-base:latest
+// pull (measured 2026-08-22). VERSION_ID is a frozen build-tooling artifact
+// ("20230201") every cgr.dev image ships, deliberately included here rather
+// than omitted, so a test using this fixture cannot pass by accident of
+// VERSION_ID being empty -- distro.go's "wolfi" case (D88) must ignore it
+// outright, not merely tolerate its absence.
+const osReleaseWolfi = `ID=wolfi
+NAME="Wolfi"
+PRETTY_NAME="Wolfi"
+VERSION_ID="20230201"
+HOME_URL="https://wolfi.dev"
+BUG_REPORT_URL="https://github.com/wolfi-dev/os/issues"
+`
+
 // One apk record, minimal but real-shaped: name, version, architecture, and
 // origin (D8). The name deliberately differs from the origin — busybox-binsh
 // -> busybox is one of the six real alpine:3.19 packages that diverge from
@@ -383,6 +397,84 @@ func TestCatalogFromImage_SetsLayerDigestFromTheLayer(t *testing.T) {
 	// coincidence of source and binary sharing a name.
 	if p.Source == nil || p.Source.Name != "busybox" {
 		t.Errorf("Source = %+v, want Name busybox (D8, through catalogFromImage)", p.Source)
+	}
+}
+
+// TestCatalogFromImage_ApkDBUnderUsrLibPhysicalPath is D88's caller-first
+// test: Wolfi and Chainguard images physically store the apk database at
+// usr/lib/apk/db/installed behind a `lib -> usr/lib` symlink, and
+// Image.Files follows a symlink that IS the requested tar entry but never
+// one on a DIRECTORY COMPONENT of a requested path (the same limitation
+// rpmDBDirs' own comment names for /var/lib/rpm) -- so `lib/apk/db/installed`
+// alone finds nothing in these images' layers. Before D88, this exact
+// fixture hard-errored "no supported package database found" (exit 2); this
+// pins that it now catalogs. Deleting apkDBPathUsrLib from apkDBPaths (or
+// the findAPKDB probe that reads it) turns this red while every existing
+// Alpine test in this file — which never has anything under usr/lib/apk —
+// stays green, proving the traditional path is unaffected.
+func TestCatalogFromImage_ApkDBUnderUsrLibPhysicalPath(t *testing.T) {
+	img := &source.Image{Layers: []source.Layer{
+		imageLayer(t, "sha256:wolfi", map[string]string{
+			osReleasePath:   osReleaseWolfi,
+			apkDBPathUsrLib: apkOneRecord, // no lib/apk/db/installed at all
+		}),
+	}}
+	target, stats, err := catalogFromImage("test-image", img)
+	if err != nil {
+		t.Fatalf("catalogFromImage: %v (want the physical usr/lib path to be found)", err)
+	}
+	if target.Distro == nil || target.Distro.ID != "wolfi" {
+		t.Fatalf("Distro = %+v, want ID wolfi", target.Distro)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1", len(target.Packages))
+	}
+	p := target.Packages[0]
+	if p.Ecosystem != "Wolfi" {
+		t.Errorf("Ecosystem = %q, want Wolfi (D88's distro.go routing)", p.Ecosystem)
+	}
+	if p.Locations[0].LayerDigest != "sha256:wolfi" {
+		t.Errorf("LayerDigest = %q, want sha256:wolfi", p.Locations[0].LayerDigest)
+	}
+	// D8 rides free: the apk cataloger reads the same `o:` field regardless
+	// of which of the two paths the database was found under.
+	if p.Source == nil || p.Source.Name != "busybox" {
+		t.Errorf("Source = %+v, want Name busybox (D8)", p.Source)
+	}
+	if stats.Cataloged != 1 {
+		t.Errorf("stats = %+v, want Cataloged=1", stats)
+	}
+}
+
+// TestCatalogFromImage_ApkDBPrefersTraditionalPathOverPhysical: an image
+// carrying both is not a shape anything ships, but the probe order should
+// still be deterministic and match the preference dpkgStatusDir's own
+// comment states for the single-file-vs-directory case -- the traditional
+// path first, so a mutation that reordered apkDBPaths would be silent on
+// every other test here (none of them supplies both paths at once).
+func TestCatalogFromImage_ApkDBPrefersTraditionalPathOverPhysical(t *testing.T) {
+	const usrLibRecord = `P:usrlib-record
+V:9.9.9-r9
+A:x86_64
+o:usrlib-origin
+
+`
+	img := &source.Image{Layers: []source.Layer{
+		imageLayer(t, "sha256:both", map[string]string{
+			apkDBPath:       apkOneRecord, // busybox-binsh / busybox
+			apkDBPathUsrLib: usrLibRecord, // usrlib-record / usrlib-origin
+		}),
+	}}
+	target, _, err := catalogFromImage("test-image", img)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1 -- exactly one of the two databases should be read", len(target.Packages))
+	}
+	if got := target.Packages[0].Name; got != "busybox-binsh" {
+		t.Errorf("Packages[0].Name = %q, want busybox-binsh (the traditional lib/apk/db/installed "+
+			"path), not the usr/lib physical one", got)
 	}
 }
 

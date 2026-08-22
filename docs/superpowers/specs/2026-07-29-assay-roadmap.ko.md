@@ -3223,6 +3223,46 @@ rockylinux:9는 아무것도 그려내지 않습니다.
 
 ---
 
+### D88 — Wolfi와 Chainguard: 피드 하나, 키 둘, 그리고 첫 무-릴리스 배포판
+
+**결정.** 두 배포판 모두 fetch 한 번으로 끝에서 끝까지 스캔됩니다: `Chainguard/all.zip`은
+측정 결과 `Wolfi/all.zip`의 엄격한 상위집합입니다(모든 CGA-* 레코드가 바이트 단위로
+동일합니다; 레코드 하나가 두 생태계 모두의 affected 항목을 담습니다), 그래서 그것만
+fetch하고 `familyMatches`가 의도적으로 한 방향으로만 Wolfi 항목을 Chainguard fetch가
+커버한다고 표시합니다 — 둘 다 fetch하면 동일한 레코드 23,961개를 이중 수집하게 됩니다.
+`related`이 CVE를 조인합니다: CGA 레코드는 alias를 0.2%에서, upstream을 0%에서 답니다,
+그런데 `related` 안의 CVE는 95.9%에서 답니다 — 그래서 "CGA"는 `distroAuthored`에
+합류했고, D71 결정 ①을 정확히 그 취지대로 확장합니다.
+
+**키는 그냥 "Wolfi"와 "Chainguard"입니다 — 첫 무-릴리스 배포판 키입니다**, 그리고
+그것은 D6를 어기는 게 아니라 '만족'시킵니다: D6가 존재하는 이유는 fixed 버전이
+릴리스마다 다르기 때문인데, 여기서는 발행자가 생태계당 정확히 하나의 롤링 스트림에만
+advisory를 키로 잡습니다 — 뺄 릴리스 축 자체가 없습니다. Tumbleweed의 거부(릴리스로
+키를 잡는 피드에 대한 롤링 '타깃')와는 다르며, 이제 두 코드 지점 모두에 그렇게
+문서화되어 있습니다. os-release 라우팅은 모든 cgr.dev 이미지가 싣는 얼어붙은
+`VERSION_ID="20230201"`을 무시합니다; `ID=chainguard`도 대칭적으로 경로를 잡지만
+검증되지 않음으로 표시됩니다 — 그것을 담은 공개 이미지가 없습니다.
+
+**측정으로 찾은 함정 둘을 닫았습니다.** apk 데이터베이스는 물리적으로
+`usr/lib/apk/db/installed`에 살아 있고, 이미지 walker가 따라가지 않는 `lib → usr/lib`
+심볼릭 링크 뒤에 숨어 있습니다 — 그래서 D88 이전에는 모든 wolfi 스캔이 하드 exit
+2였습니다, deferred-decisions가 주장했던 "시끄러운 거부"가 아니라(그 잘못된 서술은
+거기서 정정됩니다). 경로 probe는 이제 둘 다 커버합니다, rpmDBDirs 방식으로요, 그
+probe만 되돌리면 실제 이미지에 대고 예전 오류를 그대로 재현합니다. 그리고
+`fixed:"0"` — affected 항목의 20.2% — 은 Chainguard의 not-affected sentinel입니다(Wolfi
+자신의 secdb 대비 99.5% 검증됨): (introduced 0, fixed 0) 창은 apk comparer 아래서
+비어 있으므로 오늘은 안전하고, 이제 matcher 수준 테스트로 고정되어 있으며 ingestion과
+비교 지점 둘 다에 주석으로 이름 붙어 있어서 이후 어떤 변경도 그것을 remediation
+버전으로 재해석할 수 없습니다.
+
+**실전**: D16 이후 CGA 레코드 10,098개(코퍼스의 76.9%가 철회됨 — 2026-01의 대량
+정리): `db status`가 fetch 한 번으로 키 둘 다를 커버합니다; `cgr.dev/chainguard/wolfi-base`는
+15/15 evaluated로 스캔되고 exit 0입니다 — 활발히 재빌드되는 이미지에서 finding 0건은
+정직한 결과이고, D16과 심각도 0의 현실(피드 어디에도 CVSS가 없음; rating은 오직
+related를 거친 NVD 조인으로만) 함께 기록해 둡니다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

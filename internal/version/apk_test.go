@@ -233,3 +233,33 @@ func TestForAlpine(t *testing.T) {
 		t.Errorf(`For("PyPI") = %T, want PEP440`, c)
 	}
 }
+
+// TestForWolfiAndChainguard: D88. Unlike Alpine above, "Wolfi" and
+// "Chainguard" resolve BARE -- that is the whole key OSV publishes for
+// either (no release axis to qualify, D6 satisfied vacuously), not a
+// truncated one. A miss here means every Wolfi or Chainguard package
+// silently falls through to "no comparer" and every package on those images
+// reports skipped rather than evaluated.
+func TestForWolfiAndChainguard(t *testing.T) {
+	for _, eco := range []string{"Wolfi", "Chainguard"} {
+		c, ok := For(eco)
+		if !ok {
+			t.Errorf("For(%q) not found", eco)
+			continue
+		}
+		if _, isAPK := c.(APK); !isAPK {
+			t.Errorf("For(%q) = %T, want APK", eco, c)
+		}
+	}
+	// Unlike every OTHER apk/rpm distro's bare family name (Alpine, Debian,
+	// Red Hat, Rocky Linux, AlmaLinux, ...), a release-qualified spelling of
+	// either must NOT resolve -- there is no such key, since OSV never
+	// publishes one, and letting a fabricated "Wolfi:1.0" resolve would
+	// silently accept a shape nothing populates or looks up.
+	for _, eco := range []string{"Wolfi:1.0", "Chainguard:1.0"} {
+		if _, ok := For(eco); ok {
+			t.Errorf("For(%q) resolved; neither ecosystem has a release axis, "+
+				"and a release-qualified spelling of either is not a key anything builds", eco)
+		}
+	}
+}

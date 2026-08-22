@@ -126,10 +126,12 @@ rhel, secureos, sles, ubuntu, wolfi.
 **Why this entry stays.** The differential runs in this repo were all taken on ecosystems
 assay covers — a selected sample. The 2026-08-13 version of this entry said assay found
 nothing on Amazon Linux, Oracle, SLES, or a Java/Ruby/Rust/.NET/PHP application; D68–D79
-closed every one of those (language ecosystems D68–D70, the RPM family D71–D79). What is
-STILL true: on Photon, Wolfi, Chainguard, Mariner/Azure Linux, Arch, or the other boutique
-apk-family distros, **assay finds nothing at all** — those images are catalogued and
-reported as not evaluated, a loud refusal, not support. grype also ships enrichment feeds
+closed every one of those (language ecosystems D68–D70, the RPM family D71–D79). Wolfi and
+Chainguard left this list in D88 (which also corrected this entry's own claim: their images
+were never "catalogued and reported as not evaluated" — the apk database hides behind a
+usr/lib symlink and the scan hard-errored at exit 2 until D88's path probe). What is STILL
+true: on Photon, Mariner/Azure Linux, Arch, MinimOS, Echo and the remaining boutiques,
+**assay finds nothing at all**. grype also ships enrichment feeds
 assay had no equivalent for; D86 ingested EPSS and KEV (typed rating fields, both gates)
 and D87 the EOL data — the enrichment-feed gap against grype is closed.
 

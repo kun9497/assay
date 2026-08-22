@@ -225,16 +225,23 @@ func TestFetch_AlpineZeroRecordsIsAnError(t *testing.T) {
 }
 
 // The same hard-fail as Alpine's above (TestFetch_AlpineZeroRecordsIsAnError),
-// extended to Debian, Ubuntu, Rocky Linux (D71) and AlmaLinux (D72): an
-// archive fetched under any family name that names no matching record is the
-// exact regression the guard's own comment records happening to Debian when
-// it first joined this list, and only the Alpine arm was ever held by a
-// test. Narrowing the guard's condition to "eco == Alpine" alone leaves the
-// whole suite green, because nothing else in this file, or anywhere in the
-// package, drives a Debian, Ubuntu, Rocky Linux or AlmaLinux fetch through
-// zero matching records.
-func TestFetch_DebianUbuntuRockyAndAlmaZeroRecordsIsAnError(t *testing.T) {
-	for _, eco := range []string{"Debian", "Ubuntu", "Rocky Linux", "AlmaLinux"} {
+// extended to Debian, Ubuntu, Rocky Linux (D71), AlmaLinux (D72) and
+// Chainguard (D88): an archive fetched under any family name that names no
+// matching record is the exact regression the guard's own comment records
+// happening to Debian when it first joined this list, and only the Alpine
+// arm was ever held by a test. Narrowing the guard's condition to "eco ==
+// Alpine" alone leaves the whole suite green, because nothing else in this
+// file, or anywhere in the package, drives a Debian, Ubuntu, Rocky Linux,
+// AlmaLinux or Chainguard fetch through zero matching records.
+//
+// "Wolfi" is deliberately NOT one of the rows here: nothing in this
+// package's default Ecosystems ever fetches under that literal name (D88),
+// so New([]string{"Wolfi"}, ...) is not a shape production code produces --
+// it is still covered in the guard's own condition in fetch.go, for any
+// caller that constructs a Provider directly with it, but there is no
+// end-to-end path through this test to drive it.
+func TestFetch_DebianUbuntuRockyAlmaAndChainguardZeroRecordsIsAnError(t *testing.T) {
+	for _, eco := range []string{"Debian", "Ubuntu", "Rocky Linux", "AlmaLinux", "Chainguard"} {
 		t.Run(eco, func(t *testing.T) {
 			body := zipWith(t, map[string]string{
 				// Well-formed, but names an ecosystem this archive would never
@@ -548,5 +555,93 @@ func TestFetch_AlmaLinuxDropsBugfixAndEnhancementErrata(t *testing.T) {
 	if len(got) != 1 || got[0].ID != "ALSA-2026-0001" {
 		t.Fatalf("Fetch emitted %v, want only the ALSA record -- ALBA and ALEA name no "+
 			"vulnerability and must never be emitted", got)
+	}
+}
+
+// TestEcosystems_ChainguardIsTheOnlyFetch pins D88's "one feed, two keys":
+// "Chainguard" is in the default fetch list and "Wolfi" is deliberately NOT
+// -- fetching Wolfi/all.zip too would be a second, redundant network request
+// for data the Chainguard archive already carries in full (measured
+// 2026-08-22: every one of Wolfi's 23,961 records is a byte-identical member
+// of Chainguard's 43,650; 0 wolfi-only records exist).
+func TestEcosystems_ChainguardIsTheOnlyFetch(t *testing.T) {
+	if !slices.Contains(Ecosystems, "Chainguard") {
+		t.Error(`Ecosystems does not contain "Chainguard"`)
+	}
+	if slices.Contains(Ecosystems, "Wolfi") {
+		t.Error(`Ecosystems contains "Wolfi" -- D88 fetches it only via the ` +
+			`Chainguard archive, never as a separate request`)
+	}
+}
+
+// TestFetch_ChainguardCoversWolfiToo is the end-to-end shape D88 rests on,
+// built from the real live-both-ecosystems record measured 2026-08-22
+// (CGA-224q-ccj5-2p53, trimmed to two package streams): one CGA record whose
+// `affected` list carries entries for BOTH "Chainguard" and "Wolfi", fetched
+// under the single archive name "Chainguard". Both ecosystems' entries must
+// survive into the emitted advisory, and BOTH keys must land in
+// Provenance.Ecosystems from this ONE fetch -- not just "Chainguard", the
+// literal name requested. Deleting familyMatches' Chainguard/Wolfi clause
+// turns this red on the coverage assertion while every other test in this
+// package (which never checks for "Wolfi" specifically) stays green -- the
+// exact measured hazard this slice exists to close: a Wolfi image scanned
+// against a database built this way would find "Wolfi" absent from
+// Meta.Ecosystems and hit D20's uncovered-ecosystem skip despite the record
+// being right there in the store.
+func TestFetch_ChainguardCoversWolfiToo(t *testing.T) {
+	body := zipWith(t, map[string]string{
+		"CGA-224q-ccj5-2p53.json": `{"id":"CGA-224q-ccj5-2p53",
+			"related":["CVE-2025-32464","GHSA-frg5-h47x-75j9"],
+			"affected":[
+				{"package":{"name":"haproxy-3.0","ecosystem":"Chainguard","purl":"pkg:apk/chainguard/haproxy-3.0"},
+				 "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"3.0.10-r0"}]}]},
+				{"package":{"name":"haproxy-3.0","ecosystem":"Wolfi","purl":"pkg:apk/wolfi/haproxy-3.0"},
+				 "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"3.0.10-r0"}]}]}
+			]}`,
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/Chainguard/all.zip" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	p := New([]string{"Chainguard"}, srv.URL)
+	var got []advisory.Advisory
+	prov, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
+		got = append(got, a)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "CGA-224q-ccj5-2p53" {
+		t.Fatalf("Fetch emitted %d advisories (%v), want only CGA-224q-ccj5-2p53", len(got), got)
+	}
+	if len(got[0].Related) != 2 || got[0].Related[0] != "CVE-2025-32464" {
+		t.Errorf("Related = %v, want [CVE-2025-32464 GHSA-frg5-h47x-75j9] -- D88's CGA "+
+			"scope extension (distroAuthored)", got[0].Related)
+	}
+
+	var ecos []string
+	for _, aff := range got[0].Affected {
+		ecos = append(ecos, aff.Ecosystem)
+	}
+	sort.Strings(ecos)
+	if !slices.Equal(ecos, []string{"Chainguard", "Wolfi"}) {
+		t.Errorf("Affected ecosystems = %v, want both Chainguard and Wolfi entries kept", ecos)
+	}
+
+	if !slices.Contains(prov.Ecosystems, "Chainguard") {
+		t.Errorf("Provenance.Ecosystems = %v, want it to include Chainguard -- the "+
+			"family actually fetched", prov.Ecosystems)
+	}
+	if !slices.Contains(prov.Ecosystems, "Wolfi") {
+		t.Errorf("Provenance.Ecosystems = %v, want it to ALSO include Wolfi -- the "+
+			"one fetch under \"Chainguard\" must mark both keys covered (D88), or "+
+			"every Wolfi scan hits D20's uncovered-ecosystem skip despite this "+
+			"exact record sitting in the store", prov.Ecosystems)
 	}
 }

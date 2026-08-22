@@ -3430,6 +3430,43 @@ fact and exit 0; rockylinux:9 draws nothing.
 
 ---
 
+### D88 — Wolfi and Chainguard: one feed, two keys, and the first release-less distro
+
+**Decision.** Both distros scan end to end from one fetch: `Chainguard/all.zip` is a
+measured strict superset of `Wolfi/all.zip` (every CGA-* record byte-identical; one record
+carries affected entries for both ecosystems), so only it is fetched and `familyMatches`
+deliberately one-directionally marks a Wolfi entry as covered by a Chainguard fetch —
+fetching both would double-ingest 23,961 identical records. `related` joins the CVE: CGA
+records carry aliases on 0.2% and upstream on 0%, but a CVE in `related` on 95.9% — so
+"CGA" joined `distroAuthored`, extending D71 decision ① exactly in its own spirit.
+
+**The keys are bare "Wolfi" and "Chainguard" — the first release-less distro keys**, and
+that SATISFIES D6 rather than violating it: D6 exists because fixed versions differ per
+release, and here the publisher keys advisories to exactly one rolling stream per
+ecosystem — there is no release axis to omit. Distinct from Tumbleweed's refusal (a
+rolling TARGET against a release-keyed feed), now documented at both code sites. os-release
+routing ignores the frozen `VERSION_ID="20230201"` every cgr.dev image ships;
+`ID=chainguard` routes symmetrically but is marked unverified — no public image carries it.
+
+**Two measured traps closed.** The apk database physically lives at
+`usr/lib/apk/db/installed` behind a `lib → usr/lib` symlink the image walker does not
+follow — so before D88 every wolfi scan was a hard exit 2, not the "loud refusal"
+deferred-decisions claimed (that misstatement is corrected there). The path probe now
+covers both, rpmDBDirs-style, and reverting just that probe reproduces the old error
+verbatim against the live image. And `fixed:"0"` — 20.2% of affected entries — is
+Chainguard's not-affected sentinel (verified 99.5% against Wolfi's own secdb): safe today
+because an (introduced 0, fixed 0) window is empty under the apk comparer, now pinned by a
+matcher-level test and named in comments at both the ingestion and comparison points so no
+later change can reinterpret it as a remediation version.
+
+**Live**: 10,098 CGA records after D16 (76.9% of the corpus is withdrawn — a 2026-01 mass
+prune); `db status` covers both keys from the one fetch; `cgr.dev/chainguard/wolfi-base`
+scans 15/15 evaluated, exit 0 — zero findings being honest for an actively-rebuilt image,
+and the D16/zero-severity realities (no CVSS anywhere in the feed; ratings only via the
+NVD join through related) recorded with it.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

@@ -115,10 +115,13 @@ sles, ubuntu, wolfi.
 **이 항목이 남아 있는 이유.** 이 저장소의 차분 실행은 전부 assay가 다루는 생태계에서 잰
 것입니다 — 선택된 표본입니다. 이 항목의 2026-08-13판은 Amazon Linux, Oracle, SLES, 또는
 Java/Ruby/Rust/.NET/PHP 애플리케이션에서 assay가 아무것도 찾지 못한다고 말했습니다; D68–D79가
-그 전부를 닫았습니다(언어 생태계는 D68–D70, RPM 계열은 D71–D79). 여전히 사실인 것: Photon,
-Wolfi, Chainguard, Mariner/Azure Linux, Arch, 그리고 그 밖의 소규모 apk 계열 배포판에서는
-**assay가 정말로 아무것도 찾지 못합니다** — 그 이미지들은 카탈로그되고 평가되지 않음으로
-보고됩니다, 시끄러운 거부이지 지원이 아닙니다. grype는 또한 assay에 대응물이 없던 보강
+그 전부를 닫았습니다(언어 생태계는 D68–D70, RPM 계열은 D71–D79). Wolfi와
+Chainguard는 D88에서 이 목록을 벗어났습니다(이 항목 자신의 주장도 함께 정정했습니다:
+그 이미지들은 "카탈로그되고 평가되지 않음으로 보고됨"이었던 적이 결코 없습니다 —
+apk 데이터베이스가 usr/lib 심볼릭 링크 뒤에 숨어 있어서 D88의 경로 probe가 나오기
+전까지는 스캔이 하드 exit 2로 에러났습니다). 여전히 사실인 것: Photon, Mariner/Azure
+Linux, Arch, MinimOS, Echo, 그리고 남은 소규모 배포판들에서는 **assay가 정말로
+아무것도 찾지 못합니다**. grype는 또한 assay에 대응물이 없던 보강
 피드도 싣습니다; D86이 EPSS와 KEV를 수집했고(typed rating 필드, 게이트 둘) D87이 EOL
 데이터를 수집했습니다 — grype 대비 보강 피드 격차가 닫혔습니다.
 

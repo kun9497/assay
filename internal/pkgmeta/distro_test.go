@@ -654,3 +654,55 @@ func TestDistroEcosystem_OpenSUSELeap(t *testing.T) {
 		t.Error("opensuse-tumbleweed resolved an ecosystem with a release-shaped VERSION_ID; it must always be refused")
 	}
 }
+
+// TestDistroEcosystem_WolfiAndChainguard: D88. Both keys are release-less --
+// OSV publishes "Wolfi" and "Chainguard" bare, with no per-release archive at
+// all -- so VERSION_ID is ignored entirely rather than truncated or parsed.
+// Pinned with the REAL frozen VERSION_ID every cgr.dev image ships
+// ("20230201", measured 2026-08-22 against both wolfi-base and Chainguard's
+// own statically-linked images), which would fail every other distro's X.Y
+// or bare-major parse above -- proving the ecosystem does not depend on it
+// parsing at all, not merely that it happens to survive a value that does.
+func TestDistroEcosystem_WolfiAndChainguard(t *testing.T) {
+	for _, tc := range []struct {
+		id, versionID string
+		want          string
+	}{
+		{"wolfi", "20230201", "Wolfi"},
+		{"chainguard", "20230201", "Chainguard"},
+		// No VERSION_ID at all, and an ordinary X.Y shape, must resolve
+		// identically -- the field is never consulted, not merely tolerant of
+		// one shape over another.
+		{"wolfi", "", "Wolfi"},
+		{"chainguard", "", "Chainguard"},
+		{"wolfi", "3.19", "Wolfi"},
+	} {
+		got, err := Distro{ID: tc.id, VersionID: tc.versionID}.Ecosystem()
+		if err != nil {
+			t.Errorf("id=%q VERSION_ID=%q: %v", tc.id, tc.versionID, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("id=%q VERSION_ID=%q -> %q, want %q", tc.id, tc.versionID, got, tc.want)
+		}
+	}
+	// Wolfi and Chainguard's keys must not converge with any other distro's,
+	// or with each other -- a change that collapsed them would make one
+	// ecosystem's advisories reachable under another's key.
+	for _, tc := range []struct{ id, versionID, want string }{
+		{"alpine", "3.19", "Alpine:v3.19"},
+		{"rhel", "9.8", "Red Hat:9"},
+		{"wolfi", "20230201", "Wolfi"},
+		{"chainguard", "20230201", "Chainguard"},
+	} {
+		if got, err := (Distro{ID: tc.id, VersionID: tc.versionID}).Ecosystem(); err != nil || got != tc.want {
+			t.Errorf("%s %s -> %q, %v; want %q", tc.id, tc.versionID, got, err, tc.want)
+		}
+	}
+	// opensuse-tumbleweed must still be refused (D77) -- Wolfi and
+	// Chainguard leaving VERSION_ID unconsulted must not have loosened the
+	// switch's other rolling-release refusal into resolving too.
+	if _, err := (Distro{ID: "opensuse-tumbleweed", VersionID: "20260818"}).Ecosystem(); err == nil {
+		t.Error("opensuse-tumbleweed resolved an ecosystem; it must always be refused")
+	}
+}
