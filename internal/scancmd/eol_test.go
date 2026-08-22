@@ -269,6 +269,32 @@ func TestLookupEOL_UnexpiredEOESAloneAlsoCountsAsMaintained(t *testing.T) {
 	}
 }
 
+// TestLookupEOL_DistroIDDisambiguatesSameRelease pins the OTHER half of the
+// row-match guard: bare major release numbers collide across distro
+// families ("9" is Release for rhel, almalinux, rocky and ol rows alike),
+// so a row must match on DistroID as well as Release, not Release alone.
+// TestLookupEOL_NoRowMatches above only ever exercises a mismatched
+// Release; every fixture in this file otherwise builds Meta.EOL rows for a
+// single scanned distro, so nothing before this test could tell a wrong
+// DistroID from a right one. The wrong-distro row is placed FIRST here
+// deliberately: a lookup keyed on Release alone would return it immediately
+// and never reach the rhel row below it.
+func TestLookupEOL_DistroIDDisambiguatesSameRelease(t *testing.T) {
+	rows := []store.EOLRelease{
+		{DistroID: "almalinux", Release: "9", EOLFrom: "2099-01-01"},
+		{DistroID: "rhel", Release: "9", EOLFrom: "2032-05-31"},
+	}
+	distro := &pkgmeta.Distro{ID: "rhel", VersionID: "9.4"}
+	st := lookupEOL(distro, rows, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	if !st.Known {
+		t.Fatalf("lookupEOL = %+v, want Known true (the rhel row matches)", st)
+	}
+	if st.DistroID != "rhel" || st.EOLFrom != "2032-05-31" {
+		t.Errorf("lookupEOL = %+v, want the rhel row (EOLFrom 2032-05-31), not almalinux's "+
+			"same-release row (EOLFrom 2099-01-01)", st)
+	}
+}
+
 // TestLookupEOL_NoRowMatchesNames the reason, distro and cycle both, so a
 // reader of the --fail-on-eol warning can tell which lookup failed.
 func TestLookupEOL_NoRowMatches(t *testing.T) {

@@ -187,9 +187,14 @@ survived); `--db-max-age` parsed and dropped; knvd's URL tie-break; D3's `upstre
 identifiers and D41's source-version comparison unheld on the consumer side; one substring
 assertion in the test written for the substring-assertion class.
 
-**Still open: 14 unverified medium/low findings** (SARIF renderer arm, the D11 interaction
-matrices, PullSeed contract arms, OpenSeedRatings pin, reportTimings wiring, others) — the
-next pass's starting list, recorded in the QA workflow journal. The original entry follows.
+**Round 2 (2026-08-20) closed all 14 of round 1's leftovers test-only (#65).** Round 3
+(2026-08-22) swept the D77–D87 surface: 24 findings, the 12 high/medium adversarially
+verified by mutation in isolated worktrees — and **12 of 12 survived**, every one a real
+unheld guard (the EOL slug table, D52's fixless-only stamping invariant, Oracle's stream
+unescape, D12's stalest-wins, two D20 coverage writes, lookupEOL's DistroID half among
+them); all 12 closed test-only (#76). Still open: 7 low findings and 5 unverified mediums
+from round 3 — the round-4 starting list, in the wf_2ad094bc-fba workflow journal. The
+original entry follows.
 
 **Why this is written down rather than assumed.** Every slice in this project has shipped
 with its own tests and its own mutation round, and mutation testing still found real defects

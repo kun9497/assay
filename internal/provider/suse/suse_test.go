@@ -310,6 +310,53 @@ func TestFetch_DeltaFetchesChangedDocuments(t *testing.T) {
 	}
 }
 
+// TestFetch_DeltaOnlyEcosystemSatisfiesTheCoverageGuard is the caller-first
+// proof that the delta pass's own covered[a.Ecosystem] write (D20) actually
+// feeds Fetch's zero-coverage guard: an archive that yields NOTHING
+// (archive_no_records.tar.bz2, the same fixture TestFetch_NoRecordsIsAnError
+// uses) paired with a delta document that DOES name a covered platform must
+// succeed, with that platform in Provenance.Ecosystems -- not trip the D20
+// guard the way an archive-only zero-coverage build would. Every other delta
+// test in this file (TestFetch_DeltaFetchesChangedDocuments) starts from an
+// archive that already covers something on its own, so none of them can
+// tell whether the delta's own write to `covered` did anything at all.
+func TestFetch_DeltaOnlyEcosystemSatisfiesTheCoverageGuard(t *testing.T) {
+	newDoc := docJSONForTest("CVE-2026-0004",
+		[]string{"openSUSE Leap 15.6"},
+		map[string]string{"newpkg-1.0-1.1": "pkg:rpm/suse/newpkg@1.0-1.1?upstream=newpkg-1.0-1.1.src.rpm"},
+		[]string{"openSUSE Leap 15.6:newpkg-1.0-1.1"}, nil)
+
+	f := &feed{
+		archive:         fixture(t, "archive_no_records.tar.bz2"),
+		archiveModified: archiveBuilt2026,
+		changes: changesCSV(
+			[2]string{"cve-2026-0004.json", archiveBuilt2026.Add(time.Hour).Format(time.RFC3339)},
+		),
+		docs: map[string]string{
+			"cve-2026-0004.json": newDoc,
+		},
+	}
+	s := serve(t, f)
+
+	p := New(Options{BaseURL: s.URL})
+	var got []advisory.Advisory
+	prov, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
+		got = append(got, a)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v -- a delta-only ecosystem must satisfy D20's coverage guard, not trip it", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("emitted %d advisories, want 1 (the delta document): %+v", len(got), got)
+	}
+	want := []string{"openSUSE Leap:15.6"}
+	if fmt.Sprint(prov.Ecosystems) != fmt.Sprint(want) {
+		t.Errorf("Ecosystems = %v, want %v -- the delta-only platform must reach D20's coverage set",
+			prov.Ecosystems, want)
+	}
+}
+
 // changes.csv is read start to finish, not stopped at the first row before
 // the cutoff -- SUSE's own file sorts OLDEST first (verified live), so an
 // early exit borrowed from Red Hat's newest-first assumption would return
