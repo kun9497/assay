@@ -3467,6 +3467,25 @@ NVD join through related) recorded with it.
 
 ---
 
+### D89 — one fsync per batch, not per rating
+
+**Decision.** `Writer.PutRatings` writes a whole batch in one bbolt transaction; dbcmd
+accumulates emissions in 10,000-record chunks at both call sites — the annotator loop and
+the seed copy (NVD's ~357k seeded ratings were paying the same per-record fsync). Semantics
+are pinned identical to per-record writes: order preserved, same-key replaces, within and
+across batches. Measured: EPSS's annotator step fell from ~11 minutes to **2.217 seconds**
+(363,376 records, 37 transactions) — the whole build now runs in the time OSV alone takes.
+The existing dbcmd suite already held the wiring (severing the final flush turned three
+tests red before any new test was written), plus a batch-semantics unit test.
+
+Alongside: the nightly db-publish workflow caches the D85 Ubuntu tracker spool
+(actions/cache, deliberately rolling key so a hit is never exact and the post-job save
+always uploads the refreshed clone) — an ephemeral runner re-cloned ~193MB nightly;
+now it delta-fetches. The cache path is /tmp, where Go's os.TempDir() actually points on a
+Linux runner (RUNNER_TEMP is a different directory).
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

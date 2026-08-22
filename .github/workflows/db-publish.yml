@@ -37,6 +37,22 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
+      # D89: the D85 Ubuntu tracker spool is a git clone (~193 MB transfer,
+      # 2.2 GB tree) that an ephemeral runner would otherwise re-clone every
+      # night. A cached spool turns that into a delta fetch. The key is
+      # deliberately rolling (never an exact hit): restore-keys always brings
+      # back the newest snapshot and the post-job save uploads the refreshed
+      # one, because the tracker updates continuously and an exact-match hit
+      # would freeze it.
+      - name: Cache the Ubuntu CVE tracker spool
+        uses: actions/cache@v4
+        with:
+          # Go's os.TempDir() on a Linux runner is /tmp (RUNNER_TEMP is a
+          # different directory and TMPDIR is unset), so the spool lands here.
+          path: /tmp/assay-ubuntu-cve-tracker
+          key: ubuntu-cve-tracker-${{ github.run_id }}
+          restore-keys: |
+            ubuntu-cve-tracker-
       - run: make build
       - name: Log in to ghcr.io
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin

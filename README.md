@@ -620,6 +620,9 @@ exited 0 while 24 findings went unmentioned.
 - [x] Wolfi and Chainguard (D88) — one Chainguard fetch covers both release-less keys,
       CGA joins by related, the usr/lib apk path probe turns a hard exit 2 into 15/15
       evaluated on wolfi-base
+- [x] Batched rating writes and a cached tracker spool (D89) — EPSS 11 minutes to 2.2
+      seconds (one fsync per 10,000-record chunk), the seed copy rides too, and the
+      nightly stops re-cloning 193MB
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a

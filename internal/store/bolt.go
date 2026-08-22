@@ -292,6 +292,28 @@ func (b *Bolt) Put(a advisory.Advisory) error {
 // same source replaces its record rather than duplicating it. Severity is
 // stored exactly as given -- a CVSS vector, never a computed band (D13) -- so
 // a scoring fix later is a code change, not a database rebuild.
+// PutRatings writes the whole batch under one bbolt Update -- one fsync
+// instead of len(rs) of them. See the Writer interface's own comment for the
+// measured cost this removes (D89).
+func (b *Bolt) PutRatings(rs []advisory.Rating) error {
+	if len(rs) == 0 {
+		return nil
+	}
+	return b.db.Update(func(tx *bolt.Tx) error {
+		bk := tx.Bucket(bucketRatings)
+		for _, r := range rs {
+			blob, err := json.Marshal(r)
+			if err != nil {
+				return fmt.Errorf("marshal rating %s/%s: %w", r.CVE, r.Source, err)
+			}
+			if err := bk.Put([]byte(r.CVE+keySep+r.Source), blob); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func (b *Bolt) PutRating(r advisory.Rating) error {
 	blob, err := json.Marshal(r)
 	if err != nil {
