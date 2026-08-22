@@ -85,6 +85,19 @@ var registry = map[string]Comparer{
 	"Packagist": Composer{},
 	"NuGet":     NuGet{},
 	"Maven":     Maven{},
+	// D88. Wolfi and Chainguard are apk distros, so APK{} (the same comparer
+	// Alpine uses) orders their versions -- measured 2026-08-22 against the
+	// live archive: plain apk shapes throughout (X.Y.Z-rN), no epochs, no
+	// exotic suffixes. Unlike Alpine's "Alpine:vX.Y" they are plain map
+	// entries here, not a prefix rule, because OSV keys them bare with no
+	// release at all (D6, satisfied vacuously -- see
+	// pkgmeta.Distro.Ecosystem's "wolfi"/"chainguard" cases). The bare
+	// "Alpine" comment two entries up already explains why a distro whose
+	// key DOES carry a release must never resolve unqualified; that reasoning
+	// does not apply here because "Wolfi" and "Chainguard" ARE the whole key
+	// this project ever builds for them, not a truncated one.
+	"Wolfi":      APK{},
+	"Chainguard": APK{},
 }
 
 // mainlineUbuntu matches the two shapes OSV gives a mainline Ubuntu release:

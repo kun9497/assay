@@ -131,7 +131,24 @@ func familyMatches(ecosystem, want string) bool {
 	//
 	// Harmless for the language ecosystems: there is no "Go:1.22" key, so the
 	// prefix clause never fires for them.
-	return ecosystem == want || strings.HasPrefix(ecosystem, want+":")
+	if ecosystem == want || strings.HasPrefix(ecosystem, want+":") {
+		return true
+	}
+	// D88: "one feed, two keys". Chainguard/all.zip is fetched under
+	// "Chainguard" and is a measured STRICT superset of Wolfi/all.zip — every
+	// CGA-* record is byte-identical between the two archives, and 23,961 of
+	// them (2026-08-22) carry affected entries for BOTH ecosystems in one
+	// document, with the Wolfi package set always a subset of that same
+	// record's Chainguard package set (0 counterexamples). Wolfi/all.zip is
+	// therefore never fetched at all (see Ecosystems), and a "Wolfi" affected
+	// entry reached while fetching "Chainguard" has to be treated as belonging
+	// to the family being fetched too — otherwise fetchOne's covered-keys loop
+	// never marks "Wolfi" covered, Meta.Ecosystems omits it, and D20's
+	// coverage check sends every Wolfi image straight to a skip despite the
+	// data sitting in the store under exactly the key a Wolfi scan looks up.
+	// Deliberately one-directional (a "Chainguard" want covers a "Wolfi" key,
+	// never the reverse): nothing in this codebase ever fetches under "Wolfi".
+	return want == "Chainguard" && ecosystem == "Wolfi"
 }
 
 // databaseOf returns the database that authored an advisory, read from its
@@ -168,9 +185,21 @@ func databaseOf(id string) string {
 // vulnerability reports at all) — but a database prefix is cheap to name
 // correctly and a future caller of distroAuthored should not have to
 // rediscover that AlmaLinux's three namespaces are siblings.
+//
+// "CGA" is D88's addition, user-confirmed as a scope extension of the same
+// D71 decision 1 rather than a new one: Chainguard's own advisories carry no
+// CVE anywhere else. Measured 2026-08-22 across the live (non-withdrawn)
+// corpus: aliases 0.2%, upstream 0% (the field is never populated at all,
+// the same shape AlmaLinux's ALSA records have), related 99.7% with a CVE
+// reachable on 95.9% of those. Without this, a CGA finding carries no CVE
+// and no NVD/KISA rating join ever reaches it. related also carries sibling
+// CGA ids and GHSA ids alongside the CVE — harmless to lookupIDs, since
+// siblings and a record's own GHSA twin all describe the SAME advisory, not
+// a different one the way a GHSA record's own `related` can (the hazard
+// distroAuthored's scope exists to avoid in the first place).
 func distroAuthored(database string) bool {
 	switch database {
-	case "ALPINE", "DEBIAN", "UBUNTU", "RLSA", "ALSA", "ALBA", "ALEA":
+	case "ALPINE", "DEBIAN", "UBUNTU", "RLSA", "ALSA", "ALBA", "ALEA", "CGA":
 		return true
 	default:
 		return false
@@ -355,7 +384,11 @@ func convert(data []byte, wantEcosystem string, st *stats, tracker *ubuntuTracke
 			for _, re := range rr.Events {
 				// D35 repairs one documented Alpine typo here, at ingestion,
 				// so no query path can forget it (D16's rule). Everything else
-				// is stored exactly as published.
+				// is stored exactly as published — including Chainguard/Wolfi's
+				// fixed:"0" "never affected" sentinel (D88), stored losslessly
+				// rather than dropped or special-cased here; see rangeeval.go's
+				// Fixed-branch comment for why it is safe at the point that
+				// actually reads it.
 				rng.Events = append(rng.Events, advisory.Event{
 					Introduced:   repairBound(ra.Package.Ecosystem, re.Introduced),
 					Fixed:        repairBound(ra.Package.Ecosystem, re.Fixed),

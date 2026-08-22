@@ -444,6 +444,13 @@ func TestFamilyMatches_IsGeneralNotAName(t *testing.T) {
 		{"Rocky Linux:9", "Rocky Linux", true}, // and again for Rocky Linux (D71)
 		{"AlmaLinux:9", "AlmaLinux", true},     // and again for AlmaLinux (D72)
 		{"Go", "Go", true},
+		// D88: fetching "Chainguard" also covers a "Wolfi" entry in the SAME
+		// record (one feed, two keys) -- but the reverse never happens,
+		// because nothing in this codebase ever fetches under "Wolfi".
+		{"Wolfi", "Chainguard", true},
+		{"Chainguard", "Wolfi", false},
+		{"Chainguard", "Chainguard", true},
+		{"Wolfi", "Wolfi", true},
 		// A family must not swallow a differently named one that starts the
 		// same way. Without the colon in the prefix test, "Debian" would match
 		// a hypothetical "DebianExtra".
@@ -519,6 +526,23 @@ func TestConvert_RelatedIsScopedToDistroAuthoredRecords(t *testing.T) {
 	if len(got.Related) != 1 || got.Related[0] != "CVE-2026-40004" {
 		t.Errorf("Related = %v, want [CVE-2026-40004] -- ALSA IS distro-authored, "+
 			"and this is the only field carrying its CVE", got.Related)
+	}
+
+	// D88: CGA (Chainguard's own namespace) joins the same scope. `related`
+	// carries both the CVE and a GHSA sibling id in real records (measured
+	// shape) -- both must survive, since lookupIDs treats a shared identifier
+	// as the SAME advisory here, unlike GHSA's own `related` above.
+	const cga = `{"id":"CGA-224q-ccj5-2p53","related":["CVE-2025-32464","GHSA-frg5-h47x-75j9"],
+	  "affected":[{"package":{"name":"haproxy-3.0","ecosystem":"Chainguard"},
+	    "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"3.0.10-r0"}]}]}]}`
+	got, ok, err = Convert([]byte(cga), "Chainguard")
+	if err != nil || !ok {
+		t.Fatalf("Convert: ok=%v err=%v", ok, err)
+	}
+	if len(got.Related) != 2 || got.Related[0] != "CVE-2025-32464" || got.Related[1] != "GHSA-frg5-h47x-75j9" {
+		t.Errorf("Related = %v, want [CVE-2025-32464 GHSA-frg5-h47x-75j9] -- CGA IS "+
+			"distro-authored, and `related` is the only field carrying its CVE "+
+			"(measured 2026-08-22: aliases 0.2%%, upstream 0%%)", got.Related)
 	}
 }
 
@@ -597,6 +621,10 @@ func TestDistroAuthored(t *testing.T) {
 	for db, want := range map[string]bool{
 		"ALPINE": true, "DEBIAN": true, "UBUNTU": true, "RLSA": true,
 		"ALSA": true, "ALBA": true, "ALEA": true,
+		// D88: Chainguard's own advisory namespace joins the same scope --
+		// its records carry the CVE nowhere else at all (measured 2026-08-22:
+		// aliases 0.2%, upstream 0%, related 99.7% with a CVE on 95.9%).
+		"CGA":  true,
 		"GHSA": false, "PYSEC": false, "GO": false, "RUSTSEC": false,
 		"CVE": false, "BIT": false, "MAL": false, "": false,
 		// Adversarial: a namespace that merely starts with a distro one's
@@ -604,7 +632,7 @@ func TestDistroAuthored(t *testing.T) {
 		// the whole string, not a prefix test, but a mutation that changed
 		// it to strings.HasPrefix would pass every row above and only this
 		// one would catch it).
-		"ALSAX": false, "AL": false,
+		"ALSAX": false, "AL": false, "CGAX": false, "CG": false,
 	} {
 		if got := distroAuthored(db); got != want {
 			t.Errorf("distroAuthored(%q) = %v, want %v", db, got, want)

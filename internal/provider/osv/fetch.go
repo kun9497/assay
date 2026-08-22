@@ -69,9 +69,24 @@ const DefaultBaseURL = "https://osv-vulnerabilities.storage.googleapis.com"
 // joins the CVE read, scoped to distro-authored records) and decision 2
 // (vendor severity words, stored losslessly) load-bearing rather than
 // optional for this feed specifically.
+//
+// "Chainguard" is D88's entry, and it is deliberately alone: "one feed, two
+// keys". Chainguard/all.zip is a measured STRICT superset of Wolfi/all.zip
+// (23,961 of Wolfi's own 23,961 records are byte-identical members of
+// Chainguard's 43,650 — 0 wolfi-only records, measured 2026-08-22), so
+// Wolfi/all.zip is never fetched at all. familyMatches' own Chainguard/Wolfi
+// clause (record.go) is what makes the one fetch mark BOTH "Chainguard" and
+// "Wolfi" covered (D20) — omitting "Wolfi" from this list is not lost
+// coverage, it is the whole point: fetching it too would be a second,
+// redundant network request for data this build already has. Release-less
+// keys, both of them — the first ecosystems this project keys with no
+// release axis at all (see pkgmeta.Distro.Ecosystem's "wolfi"/"chainguard"
+// cases for why that satisfies D6 rather than violating it). Live yield is
+// small relative to the raw archive: 76.9% of Chainguard's 43,650 records
+// are withdrawn and D16 drops them at ingestion, leaving ~10,085 live.
 var Ecosystems = []string{
 	"Go", "npm", "PyPI", "crates.io", "RubyGems", "Packagist", "NuGet", "Maven",
-	"Alpine", "Debian", "Ubuntu", "Rocky Linux", "AlmaLinux",
+	"Alpine", "Debian", "Ubuntu", "Rocky Linux", "AlmaLinux", "Chainguard",
 }
 
 type Provider struct {
@@ -174,9 +189,20 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		// broke or the archive's shape changed, not that the distro has no
 		// advisories — and a database that silently has none turns every
 		// later scan of that distro into a clean report at exit 0.
-		if (eco == "Alpine" || eco == "Debian" || eco == "Ubuntu" || eco == "Rocky Linux" || eco == "AlmaLinux") && n == 0 {
+		if (eco == "Alpine" || eco == "Debian" || eco == "Ubuntu" || eco == "Rocky Linux" ||
+			eco == "AlmaLinux" || eco == "Chainguard" || eco == "Wolfi") && n == 0 {
 			return store.Provenance{}, fmt.Errorf("fetch %s: archive yielded no %s:* records", eco, eco)
 		}
+		// "Wolfi" above is not dead weight even though nothing in
+		// Ecosystems ever fetches under that literal name (D88's "one
+		// feed, two keys" -- Ecosystems' own comment explains why only
+		// "Chainguard" is fetched). QA on this slice constructed a
+		// Provider directly with p.ecosystems = []string{"Wolfi"} and
+		// found this guard silently did not apply to it, because eco is
+		// only ever compared against the names listed and "Wolfi" was
+		// never one of them. Listing it costs nothing today and closes
+		// that gap for any caller that hands Fetch an ecosystems list
+		// this package's own default does not build.
 		prov.Records += n
 		for e := range covered {
 			allCovered[e] = struct{}{}

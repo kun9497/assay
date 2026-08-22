@@ -312,10 +312,25 @@ func TestNoUnbackedDistroComparer(t *testing.T) {
 	want := map[string]bool{
 		"Go": true, "npm": true, "PyPI": true, "crates.io": true,
 		"RubyGems": true, "Packagist": true, "NuGet": true, "Maven": true,
+		// D88: "Wolfi" and "Chainguard" are plain registry entries too, even
+		// though both are apk DISTROS, not language ecosystems -- unlike
+		// every distro above (Alpine, Debian, Red Hat, Rocky Linux,
+		// AlmaLinux, Amazon Linux, Oracle Linux, Fedora), OSV keys them bare
+		// with no release suffix at all, so "Wolfi"/"Chainguard" IS the whole
+		// key this project ever builds for them (D6, satisfied vacuously --
+		// see pkgmeta.Distro.Ecosystem's "wolfi"/"chainguard" cases), not a
+		// truncated one a prefix rule needs to guard against. The guard this
+		// test exists for still holds: the apk cataloger already populates
+		// Package.Source from apk's own `o:` field for every apk package
+		// regardless of distro (D8, measured to ride free for Wolfi and
+		// Chainguard's own packages too), so no new plumbing was needed
+		// alongside this comparer the way dpkg/rpm needed their own.
+		"Wolfi": true, "Chainguard": true,
 	}
 	for eco := range registry {
 		if !want[eco] {
-			t.Errorf("comparer registered for %q, which is not a known language ecosystem", eco)
+			t.Errorf("comparer registered for %q, which is not a known language ecosystem "+
+				"or one of D88's release-less apk distros", eco)
 		}
 	}
 	if len(registry) != len(want) {

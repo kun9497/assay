@@ -153,6 +153,25 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 			}
 
 		case e.Fixed != "":
+			// D88: Chainguard/Wolfi pair introduced:"0" with fixed:"0" on 20.2%
+			// of affected entries — the OSV shape their build uses to assert a
+			// package was NEVER affected, rather than omitting the affected
+			// entry outright (verified 99.5% against Wolfi's own secdb
+			// secfixes["0"], measured 2026-08-22). "0" is not treated as a
+			// sentinel here the way it is in atLeast below: it is compared as
+			// an ordinary version, and it works out safe for an unrelated
+			// reason rather than by a special case. "0" parses as a real,
+			// minimal version under every comparer currently registered for an
+			// ecosystem OSV publishes it in (APK's leading apkInitialDigit
+			// token, zero), so cmp is always >= 0 against any real installed
+			// version and the branch below always fires: the window opened by
+			// introduced:"0" closes again on the very same version, [0, 0) is
+			// empty, and InRange reports no hit — never a false positive, and
+			// ev.Fixed is never set to "0" either, since that only happens in
+			// the untaken branch. TestMatch_ChainguardFixedZeroSentinelNever-
+			// YieldsAFinding (matcher package) pins this end to end; if a
+			// future ecosystem's comparer ever fails to parse "0" the failure
+			// mode is still safe (an advisory-data skip, D30), never a match.
 			cmp, err := c.Compare(v, e.Fixed)
 			if err != nil {
 				return false, Evidence{}, unreadablePackageVersion(v, "fixed", e.Fixed, err)

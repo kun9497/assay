@@ -16,7 +16,7 @@ affecting it.
 
 ## Status
 
-🚧 **Active development. Eleven distro families and eight language ecosystems scan end to
+🚧 **Active development. Thirteen distro families and eight language ecosystems scan end to
 end; the [Roadmap](#roadmap) checkboxes are the authoritative list.**
 
 `assay db update` downloads the published database — OSV's language ecosystems (Go, npm,
@@ -617,6 +617,9 @@ exited 0 while 24 findings went unmentioned.
 - [x] Distro EOL from endoflife.date (D87) — Meta-carried with per-product phase labels,
       derived at scan time against the clock, --fail-on-eol; debian:11 draws the
       LTS-qualified line and the last grype enrichment gap closes
+- [x] Wolfi and Chainguard (D88) — one Chainguard fetch covers both release-less keys,
+      CGA joins by related, the usr/lib apk path probe turns a hard exit 2 into 15/15
+      evaluated on wolfi-base
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a

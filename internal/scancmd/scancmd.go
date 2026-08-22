@@ -183,7 +183,20 @@ const (
 	// is not a shape anything ships, and preferring the file keeps the
 	// ordinary Debian path exactly as it was.
 	dpkgStatusDir = "var/lib/dpkg/status.d"
+	// apkDBPathUsrLib is where Wolfi and Chainguard images physically store
+	// the apk database (D88), behind a `lib -> usr/lib` symlink. Image.Files
+	// follows a symlink that IS the requested tar entry; it does not follow
+	// one on a DIRECTORY COMPONENT of a requested path, the same limitation
+	// rpmDBDirs' own comment below names for /var/lib/rpm on RHEL 10 and
+	// Fedora 36+. A probe of apkDBPath alone therefore finds nothing at all
+	// in these images' layers, and without apkDBPaths below, "no supported
+	// package database found" is D43's failure one distro further in.
+	apkDBPathUsrLib = "usr/lib/apk/db/installed"
 )
+
+// apkDBPaths is every tar entry the apk probe asks for, traditional path
+// first.
+var apkDBPaths = []string{apkDBPath, apkDBPathUsrLib}
 
 // rpmDBDirs are the two places an RPM database lives, newest convention first.
 //
@@ -268,6 +281,20 @@ func findRPMDB(files map[string]source.FileFromLayer) (foundRPMDB, bool) {
 		}
 	}
 	return foundRPMDB{}, false
+}
+
+// findAPKDB picks the apk database out of the probed files, preferring the
+// traditional path over the physical usr/lib one D88 added -- an image
+// carrying both is not a shape anything ships, and preferring the
+// traditional path keeps the ordinary Alpine path exactly as it was, the
+// same call dpkgStatusDir's own comment makes for status vs status.d.
+func findAPKDB(files map[string]source.FileFromLayer) (source.FileFromLayer, string, bool) {
+	for _, p := range apkDBPaths {
+		if f, ok := files[p]; ok && f.Data != nil {
+			return f, p, true
+		}
+	}
+	return source.FileFromLayer{}, "", false
 }
 
 // Run scans whatever one target argument names — an SBOM, a container image
@@ -751,7 +778,8 @@ func catalogImage(ctx context.Context, ref string) (pkgmeta.Target, cyclonedx.St
 // error naming what was looked for is the honest answer, and Run already maps
 // a catalog error to exit 2 with stdout untouched.
 func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.Stats, error) {
-	files, err := img.Files(append([]string{osReleasePath, apkDBPath, dpkgDBPath}, rpmDBPaths()...))
+	wantPaths := append([]string{osReleasePath, dpkgDBPath}, apkDBPaths...)
+	files, err := img.Files(append(wantPaths, rpmDBPaths()...))
 	if err != nil {
 		return pkgmeta.Target{}, cyclonedx.Stats{}, err
 	}
@@ -797,14 +825,14 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 	var diffID string
 	var skippedRecords int
 	rpmFound, hasRPM := findRPMDB(files)
+	apkFound, apkPath, hasAPK := findAPKDB(files)
 	switch {
-	case files[apkDBPath].Data != nil:
-		f := files[apkDBPath]
-		p, err := apkdb.Parse(bytes.NewReader(f.Data), ecosystem)
+	case hasAPK:
+		p, err := apkdb.Parse(bytes.NewReader(apkFound.Data), ecosystem)
 		if err != nil {
-			return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("parse %s: %w", apkDBPath, err)
+			return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("parse %s: %w", apkPath, err)
 		}
-		pkgs, diffID = p, f.DiffID
+		pkgs, diffID = p, apkFound.DiffID
 	case files[dpkgDBPath].Data != nil:
 		f := files[dpkgDBPath]
 		p, err := dpkgdb.Parse(bytes.NewReader(f.Data), ecosystem)
@@ -908,8 +936,8 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 				ref, target.Distro.ID, rpmDBPaths())
 		}
 		return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf(
-			"no supported package database found in %s (looked for %s, %s, %s/ and an rpm "+
-				"database under %v)", ref, apkDBPath, dpkgDBPath, dpkgStatusDir, rpmDBDirs)
+			"no supported package database found in %s (looked for %v, %s, %s/ and an rpm "+
+				"database under %v)", ref, apkDBPaths, dpkgDBPath, dpkgStatusDir, rpmDBDirs)
 	}
 	for i := range pkgs {
 		for j := range pkgs[i].Locations {
