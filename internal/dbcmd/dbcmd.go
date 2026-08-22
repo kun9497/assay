@@ -327,6 +327,7 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 			return 2
 		}
 		seeded := 0
+		batch := ratingBatch{w: w}
 		copyErr := src.EachRating(func(r advisory.Rating) error {
 			// D86: EPSS and KEV are excluded from the seed copy -- see
 			// perishableRatingSources' own doc comment for why a
@@ -337,8 +338,11 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 				return nil
 			}
 			seeded++
-			return w.PutRating(r)
+			return batch.add(r)
 		})
+		if err := batch.flush(); err != nil && copyErr == nil {
+			copyErr = err
+		}
 		seedMeta, metaErr := src.Meta()
 		src.Close()
 		if copyErr != nil {
@@ -407,7 +411,11 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 	for _, a := range annotators {
 		fmt.Fprintf(stderr, "annotating with %s…\n", a.Name())
 		started := time.Now()
-		prov, err := a.Annotate(ctx, func(r advisory.Rating) error { return w.PutRating(r) })
+		batch := ratingBatch{w: w}
+		prov, err := a.Annotate(ctx, func(r advisory.Rating) error { return batch.add(r) })
+		if ferr := batch.flush(); ferr != nil && err == nil {
+			err = ferr
+		}
 		timings = append(timings, stageTiming{
 			Kind: "annotator", Name: a.Name(), Elapsed: time.Since(started),
 			Records: prov.Records, Failed: err != nil})
@@ -1214,3 +1222,32 @@ func coverageLabel(since time.Time) string {
 // thousand is about 10 MB of pending write against a build that already
 // streams a 6 GB corpus.
 const putBatchSize = 1000
+
+// ratingBatch accumulates ratings and writes them through Writer.PutRatings
+// in chunks (D89) -- one fsync per chunk instead of per record. Semantics are
+// identical to per-record PutRating: order preserved, same-key replaces. The
+// chunk size trades memory (~150 B/record -> ~1.5 MB) against transaction
+// count; EPSS's 362,881 records land in 37 transactions.
+type ratingBatch struct {
+	w   store.Writer
+	buf []advisory.Rating
+}
+
+const ratingBatchSize = 10000
+
+func (b *ratingBatch) add(r advisory.Rating) error {
+	b.buf = append(b.buf, r)
+	if len(b.buf) >= ratingBatchSize {
+		return b.flush()
+	}
+	return nil
+}
+
+func (b *ratingBatch) flush() error {
+	if len(b.buf) == 0 {
+		return nil
+	}
+	err := b.w.PutRatings(b.buf)
+	b.buf = b.buf[:0]
+	return err
+}

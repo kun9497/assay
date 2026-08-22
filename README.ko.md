@@ -594,6 +594,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] Wolfi와 Chainguard (D88) — Chainguard fetch 한 번이 무-릴리스 키 둘 다를 커버,
       CGA는 related로 조인, usr/lib apk 경로 probe가 하드 exit 2를 wolfi-base의
       15/15 evaluated로 바꿈
+- [x] rating 쓰기를 배치로 묶고 tracker 스풀을 캐시 (D89) — EPSS가 11분에서 2.2초로
+      (10,000레코드 청크당 fsync 한 번), seed 복사도 함께 빨라짐, 그리고 야간 작업이
+      193MB를 다시 clone하지 않게 됨
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건

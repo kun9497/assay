@@ -130,6 +130,13 @@ type Writer interface {
 	// loses records is not one anyone should publish, which is what makes
 	// that the right trade.
 	PutMany(as []advisory.Advisory) error
+	// PutRatings stores a batch of ratings in ONE transaction. Semantically
+	// identical to calling PutRating per record in order (same key replaces,
+	// last write in the batch wins) -- it exists because a bbolt Update
+	// fsyncs per transaction, and the D86 feeds emit hundreds of thousands
+	// of records: written one-per-transaction they cost ~11 minutes of a
+	// build that otherwise takes three (D89, measured on EPSS's 362,881).
+	PutRatings(rs []advisory.Rating) error
 	// PutRating stores one authority's CVSS opinion about a CVE, keyed on
 	// (CVE, Source) so re-putting the same source replaces rather than
 	// duplicates.

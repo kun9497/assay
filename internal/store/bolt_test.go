@@ -1352,3 +1352,39 @@ func countInFile(t *testing.T, path, text string) int {
 	}
 	return bytes.Count(raw, []byte(text))
 }
+
+// TestPutRatings_BatchSemanticsMatchPutRating holds D89's contract: a batch
+// is byte-for-byte what the same records written one-per-call produce —
+// same-key replace applies within one batch (last wins) and across batches.
+func TestPutRatings_BatchSemanticsMatchPutRating(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Create(dir + "/b.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	if err := w.PutRatings([]advisory.Rating{
+		{CVE: "CVE-2099-1", Source: "EPSS", EPSS: 0.10, EPSSModel: "m1"},
+		{CVE: "CVE-2099-1", Source: "EPSS", EPSS: 0.20, EPSSModel: "m1"}, // same key, later wins
+		{CVE: "CVE-2099-2", Source: "KEV", KEV: true},
+	}); err != nil {
+		t.Fatalf("PutRatings: %v", err)
+	}
+	// Across batches: a later batch replaces too.
+	if err := w.PutRatings([]advisory.Rating{
+		{CVE: "CVE-2099-2", Source: "KEV", KEV: true, KEVRansomware: "Known"},
+	}); err != nil {
+		t.Fatalf("PutRatings 2: %v", err)
+	}
+	if err := w.PutRatings(nil); err != nil {
+		t.Fatalf("PutRatings(nil): %v", err)
+	}
+	rs, err := w.RatingsFor("CVE-2099-1")
+	if err != nil || len(rs) != 1 || rs[0].EPSS != 0.20 {
+		t.Fatalf("CVE-2099-1 ratings = %+v, %v; want one EPSS row at 0.20 (last write wins)", rs, err)
+	}
+	rs2, err := w.RatingsFor("CVE-2099-2")
+	if err != nil || len(rs2) != 1 || rs2[0].KEVRansomware != "Known" {
+		t.Fatalf("CVE-2099-2 ratings = %+v, %v; want the second batch's record", rs2, err)
+	}
+}
