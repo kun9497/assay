@@ -295,6 +295,52 @@ func TestFetch_ResolvesIndirectionAndEmitsAdvisories(t *testing.T) {
 	}
 }
 
+// TestFetch_AggregateDataAsOfIsTheStalestRepo is the caller-first proof for
+// D12's own rule on this branch (Fetch's comment: "The stalest repo wins ...
+// reporting the newest would hide that"): two core repos with distinct
+// dates, driven through the real Fetch path, must report the EARLIER
+// (stalest) of the two as the aggregate DataAsOf, never the later one.
+// TestFetch_ResolvesIndirectionAndEmitsAdvisories above is single-repo and
+// cannot tell min from max; TestFetch_SeverityCasingBothNormalize's two
+// repos carry no dates at all. A newer AL2023 repo silently hiding a stale
+// AL2 core feed's own staleness is exactly the over-claim D12 exists to
+// prevent.
+func TestFetch_AggregateDataAsOfIsTheStalestRepo(t *testing.T) {
+	mux := http.NewServeMux()
+	mountRepo(t, mux, "/stale", []updateFixture{{
+		id: "ALAS2-2026-0002", title: "stale repo update",
+		issued: "2026-01-05 10:00:00", updated: "2026-01-06 11:00:00",
+		severity: "important",
+		pkgs:     []pkgFixture{{name: "curl", epoch: "0", version: "7.0", release: "1.amzn2"}},
+	}})
+	mountRepo(t, mux, "/fresh", []updateFixture{{
+		id: "ALAS2023-2026-0003", title: "fresh repo update",
+		issued: "2026-06-01 10:00:00", updated: "2026-06-02 11:00:00",
+		severity: "important",
+		pkgs:     []pkgFixture{{name: "openssl", epoch: "0", version: "3.0", release: "1.amzn2023"}},
+	}})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := New(Options{
+		Repos: []Repo{
+			{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/stale/mirror.list"},
+			{Ecosystem: "Amazon Linux:2023", MirrorListURL: srv.URL + "/fresh/mirror.list"},
+		},
+		ExtrasBaseURL: quietExtrasServer(t),
+	})
+	prov, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil })
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	wantAsOf := time.Date(2026, 1, 6, 11, 0, 0, 0, time.UTC)
+	if !prov.DataAsOf.Equal(wantAsOf) {
+		t.Errorf("DataAsOf = %v, want %v -- the stalest repo's own date, not the fresher repo's "+
+			"(D12: reporting the newest would hide that the database is only as fresh as its "+
+			"least current source)", prov.DataAsOf, wantAsOf)
+	}
+}
+
 // TestFetch_SeverityCasingBothNormalize proves AL2's lowercase and AL2023's
 // Title-case severities land on the identical VENDOR_WORD score, so a
 // finding from either repo bands the same way (severity.Highest compares by

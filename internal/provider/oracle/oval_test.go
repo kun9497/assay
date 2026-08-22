@@ -684,6 +684,84 @@ func TestParseOVAL_ModuleStreamCollisionWithinOneStreamStillDropped(t *testing.T
 	}
 }
 
+// TestParseOVAL_ModuleStreamWithADotUnescapesCorrectly is the caller-first
+// proof for unescapeRegexLiteral: every module-stream fixture elsewhere in
+// this file uses a digits-only stream ("18", "20", "1", "2"), which
+// regexp.QuoteMeta leaves unchanged, so none of them ever puts an escaped
+// character in front of moduleStreamFromStateText. "kvm_utils3:1.4" is that
+// function's own doc-comment example, measured on the live archive:
+// moduleGateCriterion (via regexp.QuoteMeta) escapes the dot to "1\.4" in
+// the state's pattern text, exactly as the real archive does, and
+// unescapeRegexLiteral must strip that backslash back out so the stored
+// ModuleStream matches Package.ModuleStream's own un-escaped spelling at
+// match time (internal/matcher/matcher.go's stream comparison).
+func TestParseOVAL_ModuleStreamWithADotUnescapesCorrectly(t *testing.T) {
+	o := &ovalBuilder{}
+	crit := o.platformCriterion(8) + o.moduleGateCriterion("kvm_utils3", "1.4") +
+		o.fixCriterion("kvm_utils3", "1:1.4.0-1.module+el8+1+aaaaaaaa")
+	doc := o.doc(definitionXML("ELSA-2026-9401", "elsa", "kvm_utils3:1.4 update",
+		[]cveFixture{{"CVE-2026-9401", ""}}, "MODERATE", crit))
+
+	var st stats
+	defs, _, err := parseOVAL(strings.NewReader(doc), &st)
+	if err != nil {
+		t.Fatalf("parseOVAL: %v", err)
+	}
+	advs := normalize(defs, &st)
+	a, ok := findAdvisory(advs, "ELSA-2026-9401")
+	if !ok {
+		t.Fatalf("advisory ELSA-2026-9401 missing among %+v", advs)
+	}
+	aff, ok := affectedFor(a, "Oracle Linux:8", "kvm_utils3")
+	if !ok {
+		t.Fatalf("no Affected entry for kvm_utils3: %+v", a.Affected)
+	}
+	if aff.ModuleStream != "kvm_utils3:1.4" {
+		t.Errorf("ModuleStream = %q, want %q -- the escaped dot in the state's pattern text must be "+
+			"unescaped back to a literal one, or a host on kvm_utils3:1.4 never matches this fix",
+			aff.ModuleStream, "kvm_utils3:1.4")
+	}
+}
+
+// TestParseOVAL_NoCVEDefinitionIntraDefinitionAmbiguityStillCaught is the
+// caller-first proof for joinKeysFor's no-CVE fallback: a definition with NO
+// CVE references at all, whose own criteria tree yields two DIFFERENT fixed
+// EVRs for the same (major, package, stream) -- the exact self-contradiction
+// dropAmbiguous exists to catch, and joinKeysFor's own doc comment names as
+// the reason the fallback returns []string{d.id} rather than an empty set:
+// "two branches of ITS OWN criteria tree naming the same package at two
+// different EVRs under one major" must still be dropped, even with nothing
+// but the definition's own id to key on. TestParseOVAL_NoCVERefsStillEmits
+// above is the well-behaved half (one fix, no ambiguity at all); this is the
+// unheld other half.
+func TestParseOVAL_NoCVEDefinitionIntraDefinitionAmbiguityStillCaught(t *testing.T) {
+	o := &ovalBuilder{}
+	branchA := o.fixCriterion("bash", "0:5.1.8-9.el9")
+	branchB := o.fixCriterion("bash", "0:5.1.8-10.el9")
+	crit := o.platformCriterion(9) + fmt.Sprintf(
+		`<criteria operator="OR"><criteria operator="AND">%s</criteria><criteria operator="AND">%s</criteria></criteria>`,
+		branchA, branchB)
+	doc := o.doc(definitionXML("ELSA-2026-0007", "elsa", "bash bug fix and enhancement update", nil, "LOW", crit))
+
+	var st stats
+	defs, _, err := parseOVAL(strings.NewReader(doc), &st)
+	if err != nil {
+		t.Fatalf("parseOVAL: %v", err)
+	}
+	advs := normalize(defs, &st)
+	if _, ok := findAdvisory(advs, "ELSA-2026-0007"); ok {
+		t.Errorf("ELSA-2026-0007 survived; its own two branches disagree on bash's fixed EVR and " +
+			"must be dropped even with no CVE to key on")
+	}
+	if st.AmbiguousGroups != 1 {
+		t.Errorf("AmbiguousGroups = %d, want 1", st.AmbiguousGroups)
+	}
+	if st.SkippedAmbiguousFixes != 1 {
+		t.Errorf("SkippedAmbiguousFixes = %d, want 1 -- one (definition, major, package, stream) "+
+			"quadruple dropped, not one per branch (both branches belong to the same definition)", st.SkippedAmbiguousFixes)
+	}
+}
+
 // TestParseOVAL_UngatedModuleEVRStoredStreamless is the measured 150-EVR
 // case (full archive, 2026-08-20): a fixed EVR whose release string carries
 // the "module+el" marker but has NO textfilecontent54_test criterion

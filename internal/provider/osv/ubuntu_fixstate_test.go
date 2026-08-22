@@ -98,6 +98,63 @@ func TestConvert_UbuntuIgnoredStampsWontFix(t *testing.T) {
 	}
 }
 
+// ubuntuFixedRecord is one OSV record shaped like a real Ubuntu record that
+// DOES carry a fixed version -- unlike ubuntuFixlessRecord above, the range's
+// events include a "fixed" entry, the D52 shape that must never receive a
+// FixState: "a range with a Fixed event is fixed by construction"
+// (rangeIsFixless's own doc comment).
+func ubuntuFixedRecord(id, cve, ecosystem, pkg, fixed string) string {
+	return `{"id":"` + id + `","upstream":["` + cve + `"],"affected":[` +
+		`{"package":{"name":"` + pkg + `","ecosystem":"` + ecosystem + `"},` +
+		`"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"` + fixed + `"}]}]}]}`
+}
+
+// TestConvert_UbuntuFixedRangeIsNeverStamped is the D52 invariant applied to
+// Ubuntu, held for the first time: even when the tracker names a tuple
+// `ignored` (wont-fix), a range that already carries a Fixed event must
+// never receive a FixState. The tracker/OSV skew this guards against is
+// real -- the export is regenerated from the tracker independently of this
+// build's own tracker clone, so a package whose fix landed in one but not
+// (yet) the other is exactly the seam this must not mis-stamp: a finding
+// with a fix classified unfixable, reachable by --fail-on-unfixable=wont-fix,
+// and a report that contradicts itself.
+func TestConvert_UbuntuFixedRangeIsNeverStamped(t *testing.T) {
+	dir := t.TempDir()
+	writeUbuntuTrackerFile(t, dir, "active", "CVE-2026-9008", "Candidate: CVE-2026-9008\n\n"+
+		"Patches_zlib:\njammy_zlib: ignored (no fix will be provided)\n")
+	var st stats
+	tracker := buildUbuntuTracker(t, dir, &st)
+
+	rec := ubuntuFixedRecord("UBUNTU-CVE-2026-9008", "CVE-2026-9008", "Ubuntu:22.04:LTS", "zlib", "1:1.2.11.dfsg-2ubuntu9.2")
+	got, ok, err := convert([]byte(rec), "Ubuntu", &st, tracker)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	if !ok {
+		t.Fatal("convert returned ok=false")
+	}
+	if len(got.Affected) != 1 || len(got.Affected[0].Ranges) != 1 {
+		t.Fatalf("Affected = %+v, want one entry with one range", got.Affected)
+	}
+	rng := got.Affected[0].Ranges[0]
+	if rng.FixState != "" {
+		t.Errorf("FixState = %q, want empty (unknown) -- a fixed range must never be stamped even "+
+			"when the tracker names the tuple ignored", rng.FixState)
+	}
+	var fixedVersion string
+	for _, ev := range rng.Events {
+		if ev.Fixed != "" {
+			fixedVersion = ev.Fixed
+		}
+	}
+	if fixedVersion != "1:1.2.11.dfsg-2ubuntu9.2" {
+		t.Errorf("Fixed event = %q, want the fixed version preserved regardless of FixState", fixedVersion)
+	}
+	if st.UbuntuStampedWontFix != 0 {
+		t.Errorf("UbuntuStampedWontFix = %d, want 0 -- a fixed range must not be counted as stamped", st.UbuntuStampedWontFix)
+	}
+}
+
 // TestConvert_UbuntuNeededStampsNotFixed covers the "not fixed yet" half of
 // the mapping, and needs-triage/pending/deferred alongside it -- all four are
 // the "no fix yet" instructions D85's brief separates from `ignored`.
@@ -202,6 +259,36 @@ func TestConvert_UbuntuBareIgnoredHasEmptyReason(t *testing.T) {
 	}
 }
 
+// TestConvert_UbuntuInterimReleaseStampsWithoutLTSSuffix drives
+// stampUbuntuFixState through an interim-release ecosystem key
+// ("Ubuntu:25.10", no ":LTS" suffix) -- every other test in this file uses
+// "Ubuntu:22.04:LTS", so this is the first to exercise
+// ubuntuMainlineReleaseRe's optional ":LTS" group and ubuntuReleaseFromEcosystem
+// on a non-LTS key at all. questing (25.10) is one of the interim releases
+// ubuntuCodenameRelease's own doc comment names as confirmed live in the
+// tracker on 2026-08-21.
+func TestConvert_UbuntuInterimReleaseStampsWithoutLTSSuffix(t *testing.T) {
+	dir := t.TempDir()
+	writeUbuntuTrackerFile(t, dir, "active", "CVE-2026-9009",
+		"Candidate: CVE-2026-9009\n\nPatches_openssl:\nquesting_openssl: ignored (no fix will be provided)\n")
+	var st stats
+	tracker := buildUbuntuTracker(t, dir, &st)
+
+	rec := ubuntuFixlessRecord("UBUNTU-CVE-2026-9009", "CVE-2026-9009", "Ubuntu:25.10", "openssl")
+	got, ok, err := convert([]byte(rec), "Ubuntu", &st, tracker)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	if !ok {
+		t.Fatal("convert returned ok=false")
+	}
+	rng := got.Affected[0].Ranges[0]
+	if rng.FixState != advisory.FixStateWontFix {
+		t.Errorf("FixState = %q, want %q -- an interim release's ecosystem key (no :LTS suffix) "+
+			"must still resolve a release and stamp", rng.FixState, advisory.FixStateWontFix)
+	}
+}
+
 // TestConvert_UbuntuCVEInRetiredResolvesSameAsActive drives the "one
 // namespace" property (D85's brief) through convert(): a CVE file that
 // migrated to retired/ must stamp identically to one still in active/.
@@ -223,6 +310,64 @@ func TestConvert_UbuntuCVEInRetiredResolvesSameAsActive(t *testing.T) {
 	if fs := got.Affected[0].Ranges[0].FixState; fs != advisory.FixStateWontFix {
 		t.Errorf("FixState = %q, want %q -- a retired/ CVE must resolve the same as an active/ one",
 			fs, advisory.FixStateWontFix)
+	}
+}
+
+// wantCodenameRelease is an INDEPENDENT copy of the codename -> release
+// pairs ubuntuCodenameRelease itself promises, deliberately not derived from
+// that map: ranging over ubuntuCodenameRelease directly and asserting
+// against its own value would compare the mutated map to itself and could
+// never fail (the exact self-referential shape CLAUDE.md's "helper is
+// covered" section warns about -- caught during development: the first
+// draft of this test did exactly that and stayed green under the noble ->
+// 24.10 mutation because the loop read "24.10" as both the input and the
+// expectation).
+var wantCodenameRelease = map[string]string{
+	"trusty":   "14.04",
+	"xenial":   "16.04",
+	"bionic":   "18.04",
+	"focal":    "20.04",
+	"jammy":    "22.04",
+	"noble":    "24.04",
+	"oracular": "24.10",
+	"plucky":   "25.04",
+	"questing": "25.10",
+	"resolute": "26.04",
+}
+
+// TestParseUbuntuTrackerFile_CodenameReleaseTable is the caller-first proof
+// for ubuntuCodenameRelease itself: one lookup per table entry, through the
+// real parse path (parseUbuntuTrackerFile via buildUbuntuTracker), against
+// the independent wantCodenameRelease table above -- not against
+// ubuntuCodenameRelease's own values. Every other test in this file resolves
+// through jammy alone (focal appears only in TestParseUbuntuTrackerLine,
+// which asserts the raw codename string, never the mapped release), so a
+// mis-mapped codename anywhere else in the table -- right length, wrong
+// value, like "noble" pointing at oracular's own "24.10" -- would compile
+// and pass every other test silently: the tuple would still load, just
+// keyed under the wrong release, with UbuntuUnknownCodename staying 0
+// either way.
+func TestParseUbuntuTrackerFile_CodenameReleaseTable(t *testing.T) {
+	if len(wantCodenameRelease) != len(ubuntuCodenameRelease) {
+		t.Fatalf("wantCodenameRelease has %d entries, ubuntuCodenameRelease has %d -- keep them in sync",
+			len(wantCodenameRelease), len(ubuntuCodenameRelease))
+	}
+	for codename, wantRelease := range wantCodenameRelease {
+		t.Run(codename, func(t *testing.T) {
+			dir := t.TempDir()
+			writeUbuntuTrackerFile(t, dir, "active", "CVE-2026-9100",
+				"Candidate: CVE-2026-9100\n\nPatches_pkg:\n"+codename+"_pkg: ignored\n")
+			var st stats
+			tracker := buildUbuntuTracker(t, dir, &st)
+
+			if _, found := tracker.lookup("CVE-2026-9100", "pkg", wantRelease); !found {
+				t.Errorf("%s did not resolve to release %q -- table entries: %+v", codename, wantRelease, tracker.entries)
+			}
+			if st.UbuntuUnknownCodename != 0 {
+				t.Errorf("UbuntuUnknownCodename = %d, want 0 -- %q must be a recognized codename",
+					st.UbuntuUnknownCodename, codename)
+			}
+		})
 	}
 }
 

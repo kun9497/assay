@@ -374,6 +374,44 @@ func TestParse_EdgeDistroLeavesPackagesUnkeyed(t *testing.T) {
 	}
 }
 
+// TestParse_DocumentDistroFailureIsNotOverriddenByAResolvablePURLQualifier
+// pins ecosystemForQualifiedDistro's own "document cannot disagree with
+// itself" rule (distropurl.go's doc comment): the document-level distro
+// wins whenever the document carried a distro entity AT ALL, even one whose
+// own Ecosystem() resolution failed -- it must NOT fall through to a
+// per-purl "distro" qualifier just because that qualifier happens to
+// resolve cleanly. TestParse_EdgeDistroLeavesPackagesUnkeyed above proves
+// the shape where the purl carries no "distro" qualifier at all; every
+// fixture in this file with a document distro either resolves successfully
+// or (that test) has nothing on the purl to fall through to, so neither
+// tells apart "the document's own failure wins" from "there was simply
+// nothing else to try". This purl DOES carry a qualifier that resolves on
+// its own (alpine-3.19), and the document's edge identity must still win,
+// leaving the package unkeyed rather than judged against a different
+// release than the one the document itself names.
+func TestParse_DocumentDistroFailureIsNotOverriddenByAResolvablePURLQualifier(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+	  {"type":"library","name":"libssl3","version":"3.1.4-r5",
+	   "purl":"pkg:apk/alpine/libssl3@3.1.4-r5?arch=x86_64&distro=alpine-3.19"},
+	  {"type":"operating-system","name":"alpine","version":"edge",
+	   "properties":[
+	     {"name":"syft:distro:id","value":"alpine"},
+	     {"name":"syft:distro:versionID","value":"edge"}
+	   ]}]}`
+	target, _, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1", len(target.Packages))
+	}
+	if eco := target.Packages[0].Ecosystem; eco != "" {
+		t.Errorf("Ecosystem = %q, want empty: the document's own edge identity failed to resolve "+
+			"and must win over the purl's own resolvable distro=alpine-3.19 qualifier -- a document "+
+			"must not disagree with itself", eco)
+	}
+}
+
 // syft omits syft:metadata:originPackage on nothing in the real fixture, but
 // the field is documented as present only when it differs from — or the
 // property set is simply absent for — the package. Package.Source is now a

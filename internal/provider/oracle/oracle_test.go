@@ -140,6 +140,44 @@ func TestFetch_PrintsSummary(t *testing.T) {
 	}
 }
 
+// zeroAdvisoriesFixturePath is REGENERABLE the same way fixturePath's own
+// doc comment describes: the plain XML is one <definition> with a real
+// ELSA id and one package-fix criterion but NO platform ("Oracle Linux N is
+// installed") criterion anywhere above it -- the exact shape
+// oval_test.go's TestParseOVAL_NoMajorContextIsSkippedNotGuessed proves
+// yields zero packages for that definition (NoMajorContext, D17's "never
+// coerce an absence into a plausible default"). One real <definition> means
+// parseOVAL's own zero-DEFINITIONS guard does not fire; zero surviving
+// packages after normalize means Fetch's OWN "len(advs) == 0" guard
+// (oracle.go) is the only thing that can catch it. Compressed the same way:
+//
+//	bzip2 -k -9 -c zero-advisories.xml > zero-advisories.xml.bz2
+const zeroAdvisoriesFixturePath = "testdata/zero-advisories.xml.bz2"
+
+// TestFetch_AllDefinitionsSkippedTripsTheCoverageGuard is the caller-first
+// proof for oracle.go's own D20 guard, which oval_test.go's extensive
+// criteria-walk coverage cannot reach (it drives parseOVAL/normalize
+// directly, never Fetch): a real archive that decodes fine and carries a
+// real <definition> -- so nothing upstream of Fetch objects -- but whose
+// only definition resolves to zero packages must fail the build, exactly
+// the way a shape change in the criteria walk (a renamed element, a test
+// this parser stops recognizing) would silently ship a database that
+// answers every Oracle Linux scan "no advisories for this ecosystem",
+// indistinguishable from a clean image.
+func TestFetch_AllDefinitionsSkippedTripsTheCoverageGuard(t *testing.T) {
+	srv := serveFixture(t, zeroAdvisoriesFixturePath)
+	defer srv.Close()
+
+	p := New(Options{URL: srv.URL})
+	_, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil })
+	if err == nil {
+		t.Fatal("Fetch succeeded against an archive whose one definition yielded zero advisories, want an error")
+	}
+	if !strings.Contains(err.Error(), "yielded no advisories") {
+		t.Errorf("error = %v, want it to name the zero-advisories refusal", err)
+	}
+}
+
 // TestFetch_HTTPErrorPropagates needs no bz2 fixture at all: a 404 must
 // surface as an error before anything tries to spool or decompress a body
 // that was never the archive.
