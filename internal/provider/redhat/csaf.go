@@ -517,10 +517,10 @@ type stats struct {
 // convert turns one CSAF document into at most one advisory.
 //
 // One document is one CVE, so the whole document collapses to a single record
-// with one Affected entry per (ecosystem, package). That is what lets D25's
-// grouping work unchanged: the record's own ID is the CVE, so it joins to
-// every other database's record for the same vulnerability without an alias
-// lookup.
+// with one Affected entry per (ecosystem, package). D25's grouping works
+// through the CVE carried in Aliases (see the ID field below), not through
+// the record's own ID: that ID is now REDHAT-prefixed, so two records for one
+// CVE join by sharing an identifier rather than by having the same one.
 func convert(d *document, st *stats) (advisory.Advisory, bool) {
 	st.Documents++
 
@@ -664,16 +664,24 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 	}
 
 	adv := advisory.Advisory{
-		ID:       cve,
+		// D90: prefixed, following DEBIAN-CVE-*/UBUNTU-CVE-*/ALPINE-CVE-*'s
+		// convention. Before this, ID was the bare CVE, and so was SUSE's
+		// (D77) — the store's by-id bucket is last-writer-wins on ID, so a
+		// full multi-provider build had one vendor's record silently clobber
+		// the other's for every CVE both name (measured: ubi9 lost 91% of its
+		// Red Hat tuples). Aliases carries the bare CVE instead of Upstream:
+		// D25 grouping (matcher.identifiers) reads ID+Aliases, not Upstream,
+		// so this is what keeps Red Hat's and SUSE's records for one CVE
+		// joining into a single finding, and annotate()'s
+		// HasPrefix(id, "CVE-") walk over Identifiers (built from Aliases
+		// too) still finds the bare CVE for NVD/EPSS/KEV/KISA joins.
+		ID:       "REDHAT-" + cve,
 		Database: "REDHAT",
 		Source:   SourceName,
 		Kind:     advisory.KindVulnerability,
 		Summary:  d.Document.Title,
 		Severity: dedupeSeverity(sev),
-		// The record's own ID is the CVE, so Upstream carries it too rather
-		// than being left empty: D3's join reads `aliases` and `upstream`, and
-		// a reader grepping for the CVE in either should find it.
-		Upstream: []string{cve},
+		Aliases:  []string{cve},
 	}
 	for _, k := range order {
 		// ModuleStream carries D80's stream, or "" for an ordinary entry —

@@ -623,6 +623,10 @@ exited 0 while 24 findings went unmentioned.
 - [x] Batched rating writes and a cached tracker spool (D89) — EPSS 11 minutes to 2.2
       seconds (one fsync per 10,000-record chunk), the seed copy rides too, and the
       nightly stops re-cloning 193MB
+- [x] The CSAF ID collision (D90) — both vendors stored bare-CVE IDs and by-id is
+      last-writer-wins; a 13-target grype differential caught 91% of ubi9 findings
+      silently gone; prefixed IDs with CVE aliases restore 38→415, and the differential
+      ledger is on record
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a

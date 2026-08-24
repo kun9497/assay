@@ -3486,6 +3486,46 @@ Linux runner (RUNNER_TEMP is a different directory).
 
 ---
 
+### D90 — two vendors, one CVE, one bucket: the collision the differential caught
+
+**The bug.** Both CSAF providers stored advisories with `Advisory.ID` = the bare CVE, and
+the store's by-id bucket is last-writer-wins on ID — so on any full multi-provider build,
+SUSE's record clobbered Red Hat's for every shared CVE (or vice versa by run order). The
+index rows for both ecosystems survived; the record behind them held only one vendor's
+affected entries. Measured by the 13-target grype differential that found it: ubi9 lost
+377 of 415 tuples (91%), ubi8/nodejs-18 lost ~4.6k findings. Every E2E to date had built
+single-provider databases — the exact blind spot — and the nightly full-provider artifact
+is presumed affected since D77. The differential run was priced as a parity check; it paid
+as a bug hunt.
+
+**The fix.** Both providers now emit vendor-prefixed IDs — `REDHAT-CVE-*`, `SUSE-CVE-*`,
+the DEBIAN-CVE-*/UBUNTU-CVE-* convention — with the bare CVE moved from Upstream to
+ALIASES, which is what keeps everything else standing: D25 grouping reads ID+aliases, so
+the two vendors' records for one CVE still merge into one finding, and the NVD/EPSS/KEV/
+KISA joins walk identifiers that now reach the CVE through the alias. The downstream audit
+found nothing else to change — every join was already identifier-based, every renderer
+treats the ID as opaque. A store-level collision regression test (both vendors' records
+for one CVE, each ecosystem's Lookup returning its own affected entries) reproduces the
+bug verbatim when the prefix is reverted.
+
+**Verified live**: a two-provider build scans ubi9 at **415 findings where the broken
+build gave 38**; bci-base holds its 121; `--explain` on a shared CVE resolves
+`REDHAT-CVE-2026-18477` and `SUSE-CVE-2026-18477` independently, each with its own
+version, severity and evidence. The next nightly publish self-heals the artifact.
+
+**The differential's full ledger** (13 targets, recorded in deferred-decisions): parity is
+excellent everywhere the data allows — alpine 10/10 with identical fixed versions, ubuntu
+96/96 with wont-fix 15/15, rocky 99.4% on fixables, alma exact set-equality on fixables,
+fedora 30/30 at advisory level, amazonlinux/wolfi genuine 0=0, leap an outright win (grype
+carries no Leap data). The remaining divergence classes are grype's CPE-fallback false
+positives (a matcher assay deliberately lacks), syft's binary-classifier duplicates, and
+four data facts now on record: one defective Rocky OSV record (RLSA-2023:6699), the
+zlib1g/CVE-2023-45853 curated-exclusion question, Fedora's bidirectional CVE-extraction
+gaps, and SLES SP6 fixes shipping through a post-EOL LTSS channel our feed slice does not
+carry (a research candidate).
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

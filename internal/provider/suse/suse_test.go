@@ -141,7 +141,8 @@ func TestFetch(t *testing.T) {
 	for _, a := range got {
 		byID[a.ID] = a
 	}
-	fix := byID["CVE-2024-6387"]
+	// D90: emitted IDs are SUSE-prefixed.
+	fix := byID["SUSE-CVE-2024-6387"]
 	if len(fix.Affected) != 1 || fix.Affected[0].Ecosystem != "SLES:15.SP6" || fix.Affected[0].Name != "openssh" {
 		t.Errorf("CVE-2024-6387 affected = %+v", fix.Affected)
 	}
@@ -149,7 +150,7 @@ func TestFetch(t *testing.T) {
 		t.Errorf("CVE-2024-6387 identity = %q/%q", fix.Database, fix.Source)
 	}
 
-	unfixed := byID["CVE-2002-2439"]
+	unfixed := byID["SUSE-CVE-2002-2439"]
 	if len(unfixed.Affected) != 1 || unfixed.Affected[0].Ecosystem != "openSUSE Leap:15.6" || unfixed.Affected[0].Name != "gcc" {
 		t.Fatalf("CVE-2002-2439 affected = %+v", unfixed.Affected)
 	}
@@ -288,12 +289,13 @@ func TestFetch_DeltaFetchesChangedDocuments(t *testing.T) {
 	for _, a := range got {
 		byID[a.ID] = a
 	}
-	if _, ok := byID["CVE-2026-0001"]; !ok {
+	// D90: emitted IDs are SUSE-prefixed.
+	if _, ok := byID["SUSE-CVE-2026-0001"]; !ok {
 		t.Fatalf("the delta document was not fetched: %+v", got)
 	}
 	// Last write wins: the delta's fixed version must be the one that
 	// survives, not the archive's.
-	fix := byID["CVE-2024-6387"]
+	fix := byID["SUSE-CVE-2024-6387"]
 	found := false
 	for _, r := range fix.Affected[0].Ranges {
 		if r.Events[1].Fixed == "9.6p1-2.1" {
