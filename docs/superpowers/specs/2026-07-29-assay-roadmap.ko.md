@@ -3284,6 +3284,48 @@ clone하고 있었습니다; 이제는 델타로 fetch합니다. 캐시 경로�
 
 ---
 
+### D90 — 벤더 둘, CVE 하나, 버킷 하나: 차등이 잡은 충돌
+
+**버그.** CSAF provider 둘 다 advisory를 `Advisory.ID` = 맨 CVE로 저장했고, store의
+by-id 버킷은 ID 기준으로 last-writer-wins입니다 — 그래서 여러 provider를 한꺼번에
+쓰는 전체 빌드에서는, 공유된 CVE마다 SUSE의 레코드가 Red Hat의 것을 덮어썼습니다(또는
+실행 순서에 따라 그 반대). 두 생태계의 인덱스 행은 살아남았습니다; 그 뒤에 있는
+레코드는 벤더 하나의 affected 항목만 담고 있었습니다. 그것을 찾아낸 13-타깃 grype
+차등으로 측정: ubi9는 튜플 415개 중 377개(91%)를 잃었고, ubi8/nodejs-18은 finding
+~4,600개를 잃었습니다. 지금까지의 모든 E2E는 provider 하나짜리 데이터베이스를
+빌드해 왔습니다 — 정확히 그 사각지대이고 — 야간 전체-provider 아티팩트는 D77 이후로
+영향받았을 것으로 추정됩니다. 차등 실행은 동등성 점검으로 값을 매겼지만, 버그
+사냥으로 값을 했습니다.
+
+**고침.** 두 provider 모두 이제 벤더 접두사가 붙은 ID를 냅니다 — `REDHAT-CVE-*`,
+`SUSE-CVE-*`, DEBIAN-CVE-*/UBUNTU-CVE-* 관례입니다 — 맨 CVE는 Upstream에서 ALIASES로
+옮겨졌고, 이것이 나머지 전부를 그대로 세워 두는 이유입니다: D25 그룹핑은 ID+alias를
+읽으므로, 한 CVE에 대한 두 벤더의 레코드는 여전히 finding 하나로 합쳐지고,
+NVD/EPSS/KEV/KISA 조인은 이제 alias를 거쳐 CVE에 닿는 identifier를 훑습니다. 하류
+감사에서는 바꿀 게 더 없었습니다 — 모든 조인은 이미 identifier 기반이었고, 모든
+렌더러는 ID를 불투명하게 다룹니다. store 수준의 충돌 회귀 테스트(한 CVE에 대한 두
+벤더의 레코드, 각 생태계의 Lookup이 자기 affected 항목을 돌려줌)는 접두사를 되돌리면
+버그를 그대로 재현합니다.
+
+**실전 검증**: 두-provider 빌드는 ubi9를 **finding 415건**으로 스캔합니다, 망가진
+빌드는 38건을 냈던 자리에서요; bci-base는 자신의 121건을 유지합니다; 공유되는 CVE에
+대한 `--explain`은 `REDHAT-CVE-2026-18477`과 `SUSE-CVE-2026-18477`을 독립적으로
+풀어내고, 각자 자기만의 버전, 심각도, evidence를 답니다. 다음 야간 발행이 아티팩트를
+스스로 고칩니다.
+
+**차등의 전체 장부**(13개 타깃, deferred-decisions에 기록): 데이터가 허용하는 곳
+어디서나 동등성이 훌륭합니다 — alpine은 fixed 버전까지 동일하게 10/10, ubuntu는
+wont-fix 15/15를 포함해 96/96, rocky는 fixable 기준 99.4%, alma는 fixable
+집합이 정확히 일치, fedora는 advisory 수준에서 30/30, amazonlinux/wolfi는 진짜
+0=0, leap은 완승입니다(grype는 Leap 데이터를 전혀 담지 않습니다). 남은 발산 부류는
+grype의 CPE-fallback 오탐(assay가 의도적으로 갖지 않은 matcher입니다), syft의
+binary-classifier 중복, 그리고 이제 기록해 둔 데이터 사실 넷입니다: 결함 있는
+Rocky OSV 레코드 하나(RLSA-2023:6699), zlib1g/CVE-2023-45853의 큐레이션-제외
+질문, Fedora의 양방향 CVE-추출 구멍, 그리고 우리 피드 슬라이스가 담지 않는
+post-EOL LTSS 채널을 거쳐 나가는 SLES SP6 fix(연구 후보입니다).
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

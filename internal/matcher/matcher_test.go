@@ -501,6 +501,75 @@ func TestMatch_AliasedAdvisoriesReportOnce(t *testing.T) {
 	}
 }
 
+// TestMatch_RedHatAndSUSERecordsGroupOnSharedCVEAlias is D90's grouping pin.
+//
+// Both CSAF providers' records for one CVE now carry vendor-prefixed IDs
+// (REDHAT-CVE-*, SUSE-CVE-*, D90) rather than the bare CVE, so the two
+// records no longer share an ID the way TestMatch_AliasedAdvisoriesReportOnce's
+// GHSA/GO- pair does. What still has to join them into one Finding is the
+// bare CVE each carries in Aliases — this test pins that identifiers() (D25)
+// reads Aliases, not the ID, for that join. Deleting either record's Aliases
+// entry must turn this back into two findings.
+func TestMatch_RedHatAndSUSERecordsGroupOnSharedCVEAlias(t *testing.T) {
+	redhat := advisory.Advisory{
+		ID:       "REDHAT-CVE-2026-73566",
+		Database: "REDHAT",
+		Kind:     advisory.KindVulnerability,
+		Aliases:  []string{"CVE-2026-73566"},
+		Affected: []advisory.Affected{{
+			Ecosystem: "Red Hat:9", Name: "tar",
+			Ranges: []advisory.Range{{
+				Type:   advisory.RangeEcosystem,
+				Events: []advisory.Event{{Introduced: "0"}, {Fixed: "1.34-7.el9"}},
+			}},
+		}},
+	}
+	// Filed under the SAME ecosystem/package key as the Red Hat record on
+	// purpose. A real scan never looks up two distros' records through one
+	// Lookup call (a target is one distro), but the fake store's byKey slice
+	// is what exercises the grouping code itself — the same construction
+	// TestMatch_AliasedAdvisoriesReportOnce uses for its GHSA/GO- pair — and
+	// that code path is ecosystem-agnostic.
+	suse := advisory.Advisory{
+		ID:       "SUSE-CVE-2026-73566",
+		Database: "SUSE",
+		Kind:     advisory.KindVulnerability,
+		Aliases:  []string{"CVE-2026-73566"},
+		Affected: []advisory.Affected{{
+			Ecosystem: "Red Hat:9", Name: "tar",
+			Ranges: []advisory.Range{{
+				Type:   advisory.RangeEcosystem,
+				Events: []advisory.Event{{Introduced: "0"}, {Fixed: "1.34-7.el9"}},
+			}},
+		}},
+	}
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Red Hat:9\x00tar": {redhat, suse},
+	}}
+
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("tar", "1.30-5.el9", "Red Hat:9")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1: REDHAT-CVE-2026-73566 and SUSE-CVE-2026-73566 "+
+			"share the CVE-2026-73566 alias and must group (D25); got %+v", len(res.Findings), res.Findings)
+	}
+	f := res.Findings[0]
+	if len(f.Ratings) != 2 {
+		t.Fatalf("Ratings = %d, want 2 -- one per database (D25); got %+v", len(f.Ratings), f.Ratings)
+	}
+	dbs := map[string]bool{}
+	for _, r := range f.Ratings {
+		dbs[r.Database] = true
+	}
+	if !dbs["REDHAT"] || !dbs["SUSE"] {
+		t.Errorf("Ratings databases = %v, want both REDHAT and SUSE represented", dbs)
+	}
+}
+
 func TestMatch_ForeignEcosystemEntryNeverReachesTheComparer(t *testing.T) {
 	// Records are now stored whole, so one advisory can carry entries for
 	// several ecosystems and a PyPI lookup can return a record holding npm

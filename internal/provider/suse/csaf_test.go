@@ -234,11 +234,20 @@ func TestConvert(t *testing.T) {
 	if !ok {
 		t.Fatal("convert dropped a document that names SLES/Leap packages")
 	}
-	if adv.ID != "CVE-2024-3094" || adv.Database != "SUSE" || adv.Source != SourceName {
+	// D90: the ID is SUSE-prefixed so it never collides with Red Hat's record
+	// for the same CVE in the store's by-id bucket. The exact ID is asserted
+	// (not a Contains check) because "SUSE-CVE-2024-3094" contains
+	// "CVE-2024-3094" as a substring — CLAUDE.md's substring-assertion trap.
+	if adv.ID != "SUSE-CVE-2024-3094" || adv.Database != "SUSE" || adv.Source != SourceName {
 		t.Errorf("identity = %q/%q/%q", adv.ID, adv.Database, adv.Source)
 	}
-	if len(adv.Upstream) != 1 || adv.Upstream[0] != "CVE-2024-3094" {
-		t.Errorf("Upstream = %v, want the CVE", adv.Upstream)
+	// D25 grouping runs on ID+aliases, not upstream: the bare CVE has to be
+	// here for a Red Hat record naming the same CVE to join this one.
+	if len(adv.Aliases) != 1 || adv.Aliases[0] != "CVE-2024-3094" {
+		t.Errorf("Aliases = %v, want the CVE", adv.Aliases)
+	}
+	if len(adv.Upstream) != 0 {
+		t.Errorf("Upstream = %v, want empty -- the CVE now lives in Aliases (D90)", adv.Upstream)
 	}
 	if len(adv.Severity) != 1 || !strings.HasPrefix(adv.Severity[0].Score, "CVSS:3.1/") {
 		t.Errorf("Severity = %+v, want the document's CVSS v3 vector", adv.Severity)

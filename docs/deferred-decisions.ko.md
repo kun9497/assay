@@ -103,6 +103,32 @@ D63부터 읽습니다. 바로 위 항목을 틀리게 썼기 때문에 남겨�
 나쁩니다. "세 번째 의존성이 필요하다"는 결론처럼 읽혀서 아무도 다시 안 보게 만들지만, "아무도 안
 썼다"는 실제로 걸린 20분을 부릅니다. 제약을 근거로 미루기 전에 그 제약을 측정하십시오.
 
+### 2026-08-24 grype 차등 — 타깃 13개, 진짜 버그 하나
+
+D89 뒤에 동등성 재점검으로 실행했습니다; D90의 CSAF ID 충돌을 찾아냈습니다(로드맵
+참조). 계열별 동등성: alpine은 distro 데이터가 10/10 동일합니다(grype의 나머지 4건은
+자신의 CPE-fallback이고, assay가 의도적으로 갖지 않은 matcher입니다); debian은
+167건이 일치하고 assay 전용 튜플 6건은 grype DB의 구멍이며 assay의 오탐이라고 주장할
+만한 것 하나가 있습니다(zlib1g/CVE-2023-45853 — grype의 DB 행은 존재하지만 anchore는
+MiniZip이 Debian의 zlib1g에 빌드되어 있지 않다는 이유로 제외를 큐레이션합니다; 더
+쌓이면 match-exclusion을 고민해 볼 값이 있습니다); ubuntu는 wont-fix 15/15를 포함해
+96/96입니다(D85와 정확히 동등); rocky는 fixable 기준 99.4%이고 assay 전용 튜플 2건은
+결함 있는 업스트림 레코드로 거슬러 올라갑니다(RLSA-2023:6699는 지나치게 넓은 fixed
+이벤트를 담고 있습니다 — matcher가 아니라 업스트림 데이터 문제입니다); alma는 fixable
+집합이 정확히 일치합니다; oracle의 grype 전용 튜플은 grype가 FIPS 계보 ELSA를
+메인라인에 대고 매칭한 것입니다 — D79의 거부가 옳은 쪽입니다; fedora는 advisory
+수준에서 30/30이고 양방향 CVE-추출 구멍이 있습니다(우리 Bodhi 산문이 놓치는 것을
+grype가 잡고, 그 반대도 있습니다 — D75의 81.7% 한계이고, 이제 비교점이 생겼습니다);
+amazonlinux와 wolfi는 진짜 0=0입니다(downgrade probe로 공허하지 않음을 검증); leap은
+완승입니다 — grype v6는 openSUSE Leap 데이터를 아예 담지 않습니다; bci-base는 데이터
+모델 때문에 양쪽 방향 모두로 갈립니다: assay는 grype가 표현할 수 없는
+affected-no-fix 항목 108개를 담고 있고, grype는 우리 아카이브 슬라이스가 포함하지
+않는 post-EOL LTSS 채널을 거쳐 나온 SP6 fix를 담고 있습니다 — **LTSS 채널은 기록해
+둔 연구 후보입니다**(SUSE가 LTSS CSAF를 따로 발행하는가, 그리고 EOL된 SP는 그것을
+참조해야 하는가?).
+
+---
+
 ### grype 대비 생태계 커버리지 — 격차, 재측정
 
 grype는 **provider 26개**를 싣고, assay는 이 항목을 쓴 시점(2026-08-13)에는 **4개**였다가

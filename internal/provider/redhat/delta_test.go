@@ -58,7 +58,8 @@ func TestDelta_FetchesDocumentsNewerThanTheArchive(t *testing.T) {
 	for _, a := range got {
 		ids[a.ID] = true
 	}
-	for _, want := range []string{"CVE-2024-0001", "CVE-2026-8458", "CVE-2026-18839"} {
+	// D90: emitted IDs are REDHAT-prefixed.
+	for _, want := range []string{"REDHAT-CVE-2024-0001", "REDHAT-CVE-2026-8458", "REDHAT-CVE-2026-18839"} {
 		if !ids[want] {
 			t.Errorf("%s missing; got %v", want, ids)
 		}
@@ -102,7 +103,7 @@ func TestDelta_TheNewerDocumentReplacesTheArchivesCopy(t *testing.T) {
 	// Order is what the store relies on: the LAST one emitted is the record
 	// that survives, so it has to be the newer document.
 	last := got[len(got)-1]
-	if last.ID != "CVE-2026-0001" {
+	if last.ID != "REDHAT-CVE-2026-0001" {
 		t.Fatalf("last emitted = %s", last.ID)
 	}
 	ev := last.Affected[0].Ranges[0].Events
@@ -314,7 +315,8 @@ func TestDelta_EmitsInOrderDespiteConcurrency(t *testing.T) {
 	for _, a := range got {
 		ids = append(ids, a.ID)
 	}
-	want := []string{"CVE-2024-0001", "CVE-2026-3003", "CVE-2026-3002", "CVE-2026-3001"}
+	// D90: emitted IDs are REDHAT-prefixed.
+	want := []string{"REDHAT-CVE-2024-0001", "REDHAT-CVE-2026-3003", "REDHAT-CVE-2026-3002", "REDHAT-CVE-2026-3001"}
 	if len(ids) != len(want) {
 		t.Fatalf("emitted %v, want %v", ids, want)
 	}

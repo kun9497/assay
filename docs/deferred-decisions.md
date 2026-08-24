@@ -114,6 +114,29 @@ wrong constraint is worse than one that names none: "needs a third dependency" r
 and stops anyone looking, where "nobody has written it" invites the twenty minutes it actually
 took. Before deferring on a constraint, measure the constraint.
 
+### The 2026-08-24 grype differential — thirteen targets, one real bug
+
+Run after D89 as a parity re-check; it found D90's CSAF ID collision (see the roadmap).
+Parity, per family: alpine 10/10 distro-data identical (grype's 4 extras are its
+CPE-fallback, a matcher assay deliberately lacks); debian 167 agreed with 6 assay-only
+tuples being grype DB gaps and one arguable assay FP (zlib1g/CVE-2023-45853 — grype's DB
+row exists but anchore curates an exclusion since MiniZip is not built into Debian's
+zlib1g; worth a match-exclusion think if more accumulate); ubuntu 96/96 with wont-fix
+15/15 (D85 exact parity); rocky 99.4% on fixables with 2 assay-only tuples tracing to a
+DEFECTIVE upstream record (RLSA-2023:6699 carries an over-broad fixed event — upstream
+data, not matcher); alma exact fixable set-equality; oracle's grype-only tuples are
+grype matching FIPS-lineage ELSAs against mainline — D79's refusal is the correct side;
+fedora 30/30 at advisory level with BIDIRECTIONAL CVE-extraction gaps (our Bodhi prose
+misses runs grype has, and vice versa — D75's 81.7% limit, now with a comparison point);
+amazonlinux and wolfi genuine 0=0 (verified non-vacuous by downgrade probes); leap an
+outright win — grype v6 carries no openSUSE Leap data at all; bci-base diverges in BOTH
+directions by data model: assay carries 108 affected-no-fix entries grype cannot express,
+grype carries SP6 fixes shipped through the post-EOL LTSS channel our archive slice does
+not include — **the LTSS channel is a recorded research candidate** (does SUSE publish
+LTSS CSAF separately, and should an EOL'd SP consult it?).
+
+---
+
 ### Ecosystem coverage against grype — the gap, remeasured
 
 grype ships **26 providers**; assay had **4** when this entry was written (2026-08-13) and

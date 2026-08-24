@@ -52,7 +52,7 @@ func TestAgainstTheLiveFeed(t *testing.T) {
 					}
 				case 2:
 					withFix++
-					if a.ID == "CVE-2024-3094" && af.Name == "xz" && r.Events[1].Fixed != "" {
+					if a.ID == "SUSE-CVE-2024-3094" && af.Name == "xz" && r.Events[1].Fixed != "" {
 						sawFixedOpenSSH = true
 					}
 				default:

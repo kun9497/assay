@@ -48,12 +48,12 @@ func TestAgainstTheLiveFeed(t *testing.T) {
 				switch len(r.Events) {
 				case 1:
 					withoutFix++
-					if a.ID == "CVE-2005-2541" && af.Name == "tar" {
+					if a.ID == "REDHAT-CVE-2005-2541" && af.Name == "tar" {
 						sawUnfixedTar = true
 					}
 				case 2:
 					withFix++
-					if a.ID == "CVE-2024-6387" && af.Name == "openssh" &&
+					if a.ID == "REDHAT-CVE-2024-6387" && af.Name == "openssh" &&
 						af.Ecosystem == "Red Hat:9" && r.Events[1].Fixed != "" {
 						sawFixedOpenSSH = true
 					}

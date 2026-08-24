@@ -221,11 +221,12 @@ func TestFetch(t *testing.T) {
 	for _, a := range got {
 		byID[a.ID] = a
 	}
-	fix := byID["CVE-2024-6387"]
+	// D90: emitted IDs are REDHAT-prefixed.
+	fix := byID["REDHAT-CVE-2024-6387"]
 	if len(fix.Affected) != 1 || fix.Affected[0].Ecosystem != "Red Hat:9" || fix.Affected[0].Name != "openssh" {
 		t.Errorf("CVE-2024-6387 affected = %+v", fix.Affected)
 	}
-	unfixed := byID["CVE-2002-2439"]
+	unfixed := byID["REDHAT-CVE-2002-2439"]
 	if len(unfixed.Affected) != 1 {
 		t.Fatalf("CVE-2002-2439 affected = %+v", unfixed.Affected)
 	}
