@@ -41,16 +41,25 @@ func TestFoldKey(t *testing.T) {
 		// Refused: Tumbleweed by name, rolling with no release axis.
 		{"openSUSE Tumbleweed", "", "rolling, no stable release to key on", false},
 
+		// D91: the plain "-LTSS" support channel on SLES's bare mainline
+		// product name folds to the SAME key as its bare/module twin --
+		// SLES 15 SP6 going EOL (2025-12-31) means its post-EOL fixes exist
+		// ONLY under this product name, so refusing it (as this function
+		// did before D91) reports every one of them as "no fix available"
+		// on a patched image.
+		{"SUSE Linux Enterprise Server 15 SP6-LTSS", "SLES:15.SP6", "the shape this slice exists for -- SP6's post-EOL LTSS fixes", true},
+		{"SUSE Linux Enterprise Server 12-LTSS", "SLES:12", "LTSS on a bare, pre-SP1-style major with no SP suffix", true},
+		{"SUSE Linux Enterprise Server 15-LTSS", "SLES:15", "LTSS on the bare 15 release", true},
+		{"SUSE Linux Enterprise Server 11 SP4-LTSS", "SLES:11.SP4", "", true},
+
 		// The rows that make the ANCHORS load-bearing -- every one of these
 		// is a REAL product name sampled from the live archive that shares
 		// SLES's or SUSE's namespace but must not fold into a SLES/Leap key,
 		// because none of them ships the same package set for the release.
 		{"SUSE Linux Enterprise Server for SAP Applications 15 SP4", "", "a different support channel/product (SAP)", false},
 		{"SUSE Linux Enterprise Server for SAP applications 16.0", "", "the lowercase-a variant seen live on 16.x", false},
-		{"SUSE Linux Enterprise Server 15 SP1-LTSS", "", "a different support channel (LTSS)", false},
 		{"SUSE Linux Enterprise Server 12 SP2-BCL", "", "a different support channel (BCL)", false},
 		{"SUSE Linux Enterprise Server 15 SP4-ESPOS", "", "a different support channel (ESPOS)", false},
-		{"SUSE Linux Enterprise Server 15-LTSS", "", "LTSS on the bare release", false},
 		{"SUSE Linux Enterprise Server Teradata 12 SP3", "", "Teradata is inserted before the version, not after", false},
 		{"SUSE Linux Enterprise Server 11 SP1 for Teradata", "", "trailing text after the SP number", false},
 		{"SUSE Linux Enterprise Server Business Critical Linux 15 SP1", "", "a different product", false},
@@ -68,8 +77,17 @@ func TestFoldKey(t *testing.T) {
 		// The trailing-content anchor: without it, a mutation that dropped
 		// the $ would let a suffix like "-LTSS" through on the SAME prefix
 		// TestFoldKey's SLES rows already exercise.
-		{"SUSE Linux Enterprise Server 15 SP6-LTSS", "", "a trailing suffix after a perfectly good SP number", false},
 		{"SUSE Linux Enterprise Server 15 SP6 EXTREME CORE", "", "trailing text after the SP number", false},
+
+		// D91's OWN anchors -- ltssSP is anchored the same way bareSP is,
+		// and every one of these is a REAL LTSS-family product name (of the
+		// 29 the live census counts) that must still refuse even though the
+		// plain shape above now folds, because none of them ships SLES's
+		// package set for the release either.
+		{"SLES-LTSS-TERADATA 15 SP2", "", "a different prefix entirely, not \"SUSE Linux Enterprise Server\"", false},
+		{"SUSE Linux Enterprise Server 12 SP3-LTSS-TERADATA", "", "trailing text after a perfectly good -LTSS suffix", false},
+		{"SUSE Linux Enterprise Server 12 SP5-LTSS Extended Security", "", "trailing text after a perfectly good -LTSS suffix", false},
+		{"SUSE Linux Enterprise High Performance Computing 15 SP5-LTSS", "", "HPC-LTSS is not SLES-LTSS", false},
 	} {
 		got, ok := foldKey(tc.name)
 		if got != tc.want || ok != tc.ok {
@@ -346,6 +364,110 @@ func TestConvert_TwoFixedVersionsKeepBoth(t *testing.T) {
 	}
 	if a.Ranges[0].Events[1].Fixed != "1.2.11-40.1" || a.Ranges[1].Events[1].Fixed != "1.2.11-41.1" {
 		t.Errorf("ranges are not in a stable order: %+v", a.Ranges)
+	}
+}
+
+// D91: SLES 15 SP6 going EOL (2025-12-31, under LTSS to 2028-12-31) means its
+// post-EOL fixes exist ONLY under the "-LTSS" product name in the real feed
+// -- curl CVE-2026-10536, fixed 8.14.1-150600.4.46.1, is exactly this shape,
+// verified live. With no bare or module entry anywhere in the document, the
+// LTSS entry is the sole source and must fold onto SLES:15.SP6 exactly like
+// a mainline entry would, not be refused as "no fix available" the way it
+// was before D91.
+func TestConvert_LTSSOnlyFixFoldsToMainlineKey(t *testing.T) {
+	d := buildDoc(t, "CVE-2026-10536",
+		[]string{"SUSE Linux Enterprise Server 15 SP6-LTSS"},
+		map[string]string{
+			"curl-8.14.1-150600.4.46.1": "pkg:rpm/suse/curl@8.14.1-150600.4.46.1?upstream=curl-8.14.1-150600.4.46.1.src.rpm",
+		},
+		[]string{"SUSE Linux Enterprise Server 15 SP6-LTSS:curl-8.14.1-150600.4.46.1"},
+		nil, nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped a document whose only fix is an LTSS-only entry")
+	}
+	fix, found := affectedByName(adv)["SLES:15.SP6/curl"]
+	if !found {
+		t.Fatal("the LTSS-only fix did not fold onto SLES:15.SP6 -- this is the SP6 post-EOL case D91 exists for")
+	}
+	if len(fix.Ranges) != 1 || len(fix.Ranges[0].Events) != 2 ||
+		fix.Ranges[0].Events[0].Introduced != "0" || fix.Ranges[0].Events[1].Fixed != "8.14.1-150600.4.46.1" {
+		t.Errorf("curl events = %+v, want introduced 0 then fixed 8.14.1-150600.4.46.1", fix.Ranges)
+	}
+	if st.SkippedLTSSShadowedByMainline != 0 {
+		t.Errorf("SkippedLTSSShadowedByMainline = %d, want 0 -- nothing in this document shadows this fix", st.SkippedLTSSShadowedByMainline)
+	}
+}
+
+// D91's tie-break: a document carrying BOTH a bare-SP6 fix and its SP6-LTSS
+// twin for the SAME package -- the real measured shape (kernel-default
+// 6.4.0-150600.21.3 mainline vs. 6.4.0-150600.23.84.1 LTSS, CVE-2023-42752,
+// one of 9,308 same-document pairs measured with differing fixed versions)
+// -- keeps only the MAINLINE entry and drops the LTSS twin, counted. Without
+// this, both fold onto the SAME key and the record would carry two EVRs for
+// one CVE and package, exactly the collision D25/D74 forbid.
+func TestConvert_LTSSShadowedByMainlineSameDocument(t *testing.T) {
+	d := buildDoc(t, "CVE-2023-42752",
+		[]string{"SUSE Linux Enterprise Server 15 SP6", "SUSE Linux Enterprise Server 15 SP6-LTSS"},
+		map[string]string{
+			"kernel-default-6.4.0-150600.21.3":    "pkg:rpm/suse/kernel-default@6.4.0-150600.21.3?upstream=kernel-source-6.4.0-150600.21.3.src.rpm",
+			"kernel-default-6.4.0-150600.23.84.1": "pkg:rpm/suse/kernel-default@6.4.0-150600.23.84.1?upstream=kernel-source-6.4.0-150600.23.84.1.src.rpm",
+		},
+		[]string{
+			"SUSE Linux Enterprise Server 15 SP6:kernel-default-6.4.0-150600.21.3",
+			"SUSE Linux Enterprise Server 15 SP6-LTSS:kernel-default-6.4.0-150600.23.84.1",
+		}, nil, nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped a document naming an SLES package")
+	}
+	got := affectedByName(adv)["SLES:15.SP6/kernel-default"]
+	if len(got.Ranges) != 1 {
+		t.Fatalf("kernel-default has %d ranges, want exactly 1 -- the LTSS twin must be DROPPED, not "+
+			"kept as a second range for the same key and package: %+v", len(got.Ranges), got.Ranges)
+	}
+	if got.Ranges[0].Events[1].Fixed != "6.4.0-150600.21.3" {
+		t.Errorf("kernel-default fixed version = %q, want the MAINLINE EVR 6.4.0-150600.21.3, not the LTSS one",
+			got.Ranges[0].Events[1].Fixed)
+	}
+	if st.SkippedLTSSShadowedByMainline != 1 {
+		t.Errorf("SkippedLTSSShadowedByMainline = %d, want 1", st.SkippedLTSSShadowedByMainline)
+	}
+}
+
+// D91 applies the identical rule to known_affected/no-fix entries: an
+// LTSS-only no-fix statement (with its remediation reason) folds onto the
+// mainline key exactly like a fixed one does.
+func TestConvert_LTSSOnlyKnownAffectedFoldsWithFixState(t *testing.T) {
+	d := buildDocWithRemediations(t, "CVE-2026-2001",
+		[]string{"SUSE Linux Enterprise Server 15 SP6-LTSS"},
+		map[string]string{"libltssnofix": "pkg:rpm/suse/libltssnofix@?upstream=libltssnofix.src.rpm"},
+		nil, []string{"SUSE Linux Enterprise Server 15 SP6-LTSS:libltssnofix"},
+		[]map[string]any{
+			{"category": "no_fix_planned", "product_ids": []string{"SUSE Linux Enterprise Server 15 SP6-LTSS:libltssnofix"}},
+		})
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped a document naming an SLES 15 SP6-LTSS package")
+	}
+	a := affectedByName(adv)["SLES:15.SP6/libltssnofix"]
+	if len(a.Ranges) != 1 {
+		t.Fatalf("libltssnofix has %d ranges, want 1: %+v", len(a.Ranges), a.Ranges)
+	}
+	if a.Ranges[0].FixState != advisory.FixStateWontFix {
+		t.Errorf("FixState = %q, want %q (no_fix_planned, folded from the LTSS-only entry)",
+			a.Ranges[0].FixState, advisory.FixStateWontFix)
+	}
+	if st.UnfixableWontFix != 1 {
+		t.Errorf("UnfixableWontFix = %d, want 1", st.UnfixableWontFix)
+	}
+	if st.SkippedLTSSShadowedByMainline != 0 {
+		t.Errorf("SkippedLTSSShadowedByMainline = %d, want 0 -- nothing in this document shadows this entry", st.SkippedLTSSShadowedByMainline)
 	}
 }
 

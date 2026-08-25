@@ -148,6 +148,25 @@ var (
 	// shape (D6's release qualifier is the whole VERSION_ID; no fold, unlike
 	// SLES's module spread).
 	leapName = regexp.MustCompile(`^openSUSE Leap (\d+\.\d+)$`)
+	// ltssSP matches ONLY the plain "-LTSS" support channel on SLES's bare
+	// mainline product name -- "SUSE Linux Enterprise Server 15 SP6-LTSS",
+	// "... 12-LTSS" -- and folds it to the SAME key its bare/module twin
+	// would (D91). This is the one shape in the whole LTSS family this
+	// project stores data under at all: LTSS EVRs continue mainline
+	// numbering with no version marker of their own (150600.4.28.1 ->
+	// 4.40.1 -> 4.46.1), so there is no separate key to give it, and once
+	// SLES 15 SP6 went EOL (2025-12-31) its post-EOL fixes exist ONLY under
+	// this product name -- a scanner that keeps refusing it reports every
+	// one of them as "no fix available" on an image that is, in fact,
+	// patched. Anchored exactly like bareSP, with one literal segment
+	// added ("-LTSS$"), so nothing AFTER "-LTSS" survives the match:
+	// "-LTSS-TERADATA", "-LTSS Extended Security" and every HPC/OpenStack/
+	// Teradata-prefixed LTSS name in the census below still fall through to
+	// refusal, because none of them ships the SLES package set this
+	// project's SLES key promises to describe. See collectPlatforms and
+	// convert's mainline-wins pass for what happens when a document
+	// carries BOTH a bare/module entry and this one for the same package.
+	ltssSP = regexp.MustCompile(`^SUSE Linux Enterprise Server (\d+)(?: SP(\d+))?-LTSS$`)
 	// purlRE splits a product_version leaf's purl into name and version.
 	// Unlike the OSV bucket's purls (measured malformed, D77 research: every
 	// one missing the '?' before its qualifiers), CSAF's are well-formed --
@@ -160,16 +179,35 @@ var (
 // COUNTED and skipped by the caller (collectPlatforms), never guessed (D77).
 //
 // Measured against the whole 2026-08-19 CSAF VEX archive (63,784 documents,
-// 8.14M platform-node occurrences): this folds 30 distinct keys (SLES 11
-// through 16.1, openSUSE Leap 15.0 through 16.0) covering 738,191
-// occurrences, and correctly refuses 808 distinct product names covering the
-// other 7,404,889 -- SAP ("for SAP Applications"/"applications", both case
-// variants seen live), HPC, Micro, Manager, Enterprise Storage, Teradata,
-// Real Time Module, "Public Cloud Module for SUSE Linux Enterprise" (a
-// DIFFERENT, older product from SLES's own "Module for Public Cloud"),
-// Liberty Linux, every LTSS/BCL/ESPOS-suffixed mainline release, and
-// Tumbleweed among them -- none of which shares SLES's or Leap's package set
-// for the affected release.
+// 8.14M platform-node occurrences), before D91: this folded 30 distinct keys
+// (SLES 11 through 16.1, openSUSE Leap 15.0 through 16.0) covering 738,191
+// occurrences, and refused 808 distinct product names covering the other
+// 7,404,889 -- SAP ("for SAP Applications"/"applications", both case variants
+// seen live), HPC, Micro, Manager, Enterprise Storage, Teradata, Real Time
+// Module, "Public Cloud Module for SUSE Linux Enterprise" (a DIFFERENT, older
+// product from SLES's own "Module for Public Cloud"), Liberty Linux, every
+// LTSS/BCL/ESPOS-suffixed mainline release, and Tumbleweed among them.
+//
+// D91 (2026-08-25) narrowed that refusal by exactly one shape: the plain
+// "-LTSS" suffix on SLES's bare mainline product name (ltssSP) now folds to
+// the SAME key its bare/module twin would, because SLES 15 SP6 going EOL
+// (2025-12-31, under LTSS to 2028-12-31) means its post-EOL fixes exist ONLY
+// under that product name in the archive -- refusing it, as this function did
+// before D91, reported every one of them as "no fix available" on a patched
+// image. A fresh, anchored count against a 2026-08-25 archive snapshot
+// (64,231 documents) found 203,614 platform-node occurrences across the 17
+// distinct plain-Server-LTSS names this shape actually covers (SLES 11 SP1
+// through 15 SP6, plus the bare pre-SP1 12 and 15 releases) -- the other 12
+// of the 29 LTSS-family names measured (Teradata- and HPC-prefixed, "-LTSS
+// Extended Security", "-LTSS-TERADATA", OpenStack's "-LTSS") still refuse,
+// because none of them ships SLES's package set for the release either. A
+// non-anchored version of this same count over-matches by 12,958 -- it lets
+// "...12 SP3-LTSS-TERADATA" and "...15 SP2-LTSS-TERADATA" through on the
+// bare-SP prefix they happen to share, the exact hazard the trailing "$"
+// exists to close. Every other exclusion this comment already named -- SAP,
+// HPC, Micro, Manager, Storage, Teradata, Real Time Module, the
+// reversed-order Public Cloud Module, Liberty Linux, Tumbleweed -- is
+// unaffected by D91 and still refuses.
 func foldKey(name string) (string, bool) {
 	if name == tumbleweedName {
 		return "", false
@@ -193,7 +231,28 @@ func foldKey(name string) (string, bool) {
 	if m := leapName.FindStringSubmatch(name); m != nil {
 		return "openSUSE Leap:" + m[1], true
 	}
+	if m := ltssSP.FindStringSubmatch(name); m != nil {
+		major := m[1]
+		if n, err := strconv.Atoi(major); err != nil || n >= 16 {
+			// No SLES 16+ "-LTSS" name has been observed on the live feed
+			// (mirrors bareSP's identical guard immediately above); a
+			// hypothetical one is refused rather than guessed at.
+			return "", false
+		}
+		return slesKey(major, m[2]), true
+	}
 	return "", false
+}
+
+// isLTSSOrigin reports whether a platform NAME (the part of a
+// "platform:component" product id before the colon) is the plain-Server LTSS
+// shape foldKey also folds. It is the only LTSS-family shape that ever
+// shares a folded key with another platform's entries, which is what makes
+// convert's mainline-wins tie-break (D91) necessary in the first place --
+// every other LTSS-family name is refused by foldKey and never reaches a
+// point where this distinction matters.
+func isLTSSOrigin(name string) bool {
+	return ltssSP.MatchString(name)
 }
 
 // slesKey builds "SLES:15.SP6", or "SLES:15" when sp is empty or "0" -- the
@@ -421,6 +480,17 @@ type stats struct {
 	SkippedNoCVE              int
 	SkippedBadDoc             int
 
+	// SkippedLTSSShadowedByMainline is D91's tie-break firing: a document
+	// carries BOTH a bare/module (mainline) product_status entry AND an
+	// LTSS one for the SAME folded key and package, and the LTSS one is
+	// the one dropped -- counted once per product_status entry shadowed,
+	// the same per-entry granularity as the Skipped* group above. It is
+	// the common case (11,955 same-document bare+LTSS pairs measured
+	// across the whole archive); the SP6 post-EOL fixes this slice exists
+	// for are the OPPOSITE case -- no mainline entry to shadow them, so
+	// they are kept and never touch this counter at all.
+	SkippedLTSSShadowedByMainline int
+
 	// The delta pass (delta.go), identical in meaning to redhat.stats'.
 	DeltaListed     int
 	DeltaFetched    int
@@ -458,35 +528,21 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 	remedy := map[productKey]map[string]bool{}
 	order := []productKey{}
 	seen := map[productKey]bool{}
+	// mainline marks every key a BARE or MODULE (non-LTSS) product_status
+	// entry covered in THIS document -- D91's tie-break line. Always fully
+	// populated for one vulnerability's recommended+known_affected arrays
+	// before any LTSS entry for the same vulnerability is resolved against
+	// it (see the pendingLTSS loop below), so array order within either
+	// array never matters: a mainline entry appearing after its LTSS twin
+	// in the JSON still wins.
+	mainline := map[productKey]bool{}
 	note := func(k productKey) {
 		if !seen[k] {
 			seen[k] = true
 			order = append(order, k)
 		}
 	}
-
-	add := func(id string, isFixed bool) {
-		k, version, why := resolveProduct(id, folded, declared, packages)
-		switch why {
-		case skipNoColon:
-			st.SkippedNoColon++
-			return
-		case skipEmptyComponent:
-			st.SkippedEmptyComponent++
-			return
-		case skipTumbleweedRef:
-			st.SkippedTumbleweedRef++
-			return
-		case skipUnknownPlatform:
-			st.SkippedUnknownPlatform++
-			return
-		case skipUnfoldablePlatform:
-			st.SkippedUnfoldablePlatform++
-			return
-		case skipUnknownPackage:
-			st.SkippedUnknownPackage++
-			return
-		}
+	store := func(k productKey, version string, isFixed bool) {
 		note(k)
 		if isFixed && version != "" {
 			if fixed[k] == nil {
@@ -501,16 +557,87 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 		// fallback).
 		unfixed[k] = true
 	}
+	// countSkip records the counter for a resolveProduct refusal and reports
+	// whether the id resolved at all. Shared by the mainline and LTSS
+	// resolution below so one id is counted exactly once, however many
+	// passes look at it.
+	countSkip := func(why skipReason) bool {
+		switch why {
+		case skipNoColon:
+			st.SkippedNoColon++
+		case skipEmptyComponent:
+			st.SkippedEmptyComponent++
+		case skipTumbleweedRef:
+			st.SkippedTumbleweedRef++
+		case skipUnknownPlatform:
+			st.SkippedUnknownPlatform++
+		case skipUnfoldablePlatform:
+			st.SkippedUnfoldablePlatform++
+		case skipUnknownPackage:
+			st.SkippedUnknownPackage++
+		default:
+			return true
+		}
+		return false
+	}
+
+	type ltssEntry struct {
+		key     productKey
+		version string
+		isFixed bool
+	}
 
 	var sev []advisory.Severity
 	for i := range d.Vulnerabilities {
 		v := &d.Vulnerabilities[i]
+
+		// D91: every recommended/known_affected id is resolved exactly
+		// once. A bare/module (mainline) platform stores immediately, same
+		// as before this slice. An LTSS platform's id is buffered instead,
+		// because whether it survives depends on whether a mainline entry
+		// for the SAME key turns up anywhere else in this vulnerability's
+		// arrays -- knowable only once both loops below finish.
+		var pendingLTSS []ltssEntry
 		for _, id := range v.ProductStatus.Recommended {
-			add(id, true)
+			plat, _, _ := strings.Cut(id, ":")
+			k, version, why := resolveProduct(id, folded, declared, packages)
+			if !countSkip(why) {
+				continue
+			}
+			if isLTSSOrigin(plat) {
+				pendingLTSS = append(pendingLTSS, ltssEntry{k, version, true})
+				continue
+			}
+			store(k, version, true)
+			mainline[k] = true
 		}
 		for _, id := range v.ProductStatus.KnownAffected {
-			add(id, false)
+			plat, _, _ := strings.Cut(id, ":")
+			k, version, why := resolveProduct(id, folded, declared, packages)
+			if !countSkip(why) {
+				continue
+			}
+			if isLTSSOrigin(plat) {
+				pendingLTSS = append(pendingLTSS, ltssEntry{k, version, false})
+				continue
+			}
+			store(k, version, false)
+			mainline[k] = true
 		}
+		// Resolve every buffered LTSS entry now that this vulnerability's
+		// mainline coverage is final: shadowed (a mainline entry already
+		// covers the key -- drop the LTSS twin, counted) or kept (no
+		// mainline entry ever named this key -- the SP6 post-EOL case this
+		// slice exists for, stored exactly like a mainline entry would
+		// be).
+		for _, p := range pendingLTSS {
+			if mainline[p.key] {
+				st.SkippedLTSSShadowedByMainline++
+				continue
+			}
+			store(p.key, p.version, p.isFixed)
+		}
+
 		for _, r := range v.Remediations {
 			if r.Category != remedyNoFixPlanned && r.Category != remedyNoneAvailable {
 				continue
@@ -519,9 +646,17 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 				// Skips are not counted here, for the reason resolveProduct's
 				// doc comment gives: a remediation naming a product this
 				// store does not hold is not a discard, it is a statement
-				// about something never stored.
+				// about something never stored. An LTSS remediation for a
+				// key mainline already covers is the identical statement
+				// about the SAME shadow the product_status loop above
+				// already dropped -- explaining a discard is not itself a
+				// second one.
+				plat, _, _ := strings.Cut(id, ":")
 				k, _, why := resolveProduct(id, folded, declared, packages)
 				if why != skipNone {
+					continue
+				}
+				if isLTSSOrigin(plat) && mainline[k] {
 					continue
 				}
 				if remedy[k] == nil {
