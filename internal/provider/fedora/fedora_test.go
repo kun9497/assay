@@ -364,6 +364,51 @@ func TestFetch_RetriesOn429ThenSucceeds(t *testing.T) {
 	}
 }
 
+// TestFetch_RetriesAMidBodyTruncationThenSucceeds pins the 2026-08-25
+// widening: three consecutive nightly publishes died on Bodhi resetting the
+// connection mid-body, a transport failure the original 429/5xx-only policy
+// deliberately excluded and reality overruled. The first response declares a
+// large Content-Length and writes a fragment, so the client's decode dies
+// with an unexpected EOF -- the truncation twin of a peer reset, and the
+// only one an httptest server can stage portably. The retry must then
+// succeed, exactly as TestFetch_RetriesOn429ThenSucceeds does for a status.
+func TestFetch_RetriesAMidBodyTruncationThenSucceeds(t *testing.T) {
+	var calls int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&calls, 1)
+		if n == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Length", "100000")
+			w.Write([]byte(`{"updates": [`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(bodhiPageJSON(t, []updateFixture{{
+			alias: "FEDORA-2026-5001", title: "CVE-2026-5001 truncated-once package update",
+			severity: "low", dateStable: "2026-05-01 00:00:00",
+			builds: []buildFixture{{nvr: "truncpkg-1.0-1.fc43"}},
+		}}, 1, 1, 1))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := New(Options{Releases: []Release{{Name: "F43", Ecosystem: "Fedora:43"}}, BaseURL: srv.URL})
+	var got []advisory.Advisory
+	if _, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
+		got = append(got, a)
+		return nil
+	}); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if atomic.LoadInt32(&calls) < 2 {
+		t.Fatalf("server saw %d call(s), want at least 2 (a truncation then a retry)", calls)
+	}
+	if len(got) != 1 || got[0].ID != "FEDORA-2026-5001" {
+		t.Fatalf("emitted %+v, want exactly the one advisory that succeeded after retry", got)
+	}
+}
+
 // TestFetch_NonRetryable404FailsFast is the other half: a permanent error
 // must not be retried at all -- "honest retry ONLY on 429/5xx" means a 404
 // exhausts no attempts and fails immediately.

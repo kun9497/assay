@@ -2,9 +2,12 @@ package fedora
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -35,7 +38,15 @@ func TestRetryable(t *testing.T) {
 		// all) is NOT retried here -- the narrower policy this package's
 		// own doc comment names.
 		{"network failure with no status", errors.New("connection reset"), 0, false},
-		{"truncated body with a 200", io.ErrUnexpectedEOF, http.StatusOK, false},
+		// Flipped 2026-08-25: three consecutive nightly publishes died on
+		// mid-body transport failures (retry.go's own comment has the dates).
+		// A truncated read and a peer reset are transport, not an Anubis
+		// challenge -- the challenge case is the syntax-error row below, and
+		// it stays non-retryable.
+		{"truncated body with a 200", io.ErrUnexpectedEOF, http.StatusOK, true},
+		{"connection reset mid-body", syscall.ECONNRESET, http.StatusOK, true},
+		{"wrapped connection reset", fmt.Errorf("decode page: %w", syscall.ECONNRESET), http.StatusOK, true},
+		{"anubis challenge: HTML body decodes as a JSON syntax error", &json.SyntaxError{}, http.StatusOK, false},
 		{"no error at all", nil, 0, false},
 
 		// Cancellation outranks everything, checked before the status --
