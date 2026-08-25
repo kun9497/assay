@@ -627,6 +627,9 @@ exited 0 while 24 findings went unmentioned.
       last-writer-wins; a 13-target grype differential caught 91% of ubi9 findings
       silently gone; prefixed IDs with CVE aliases restore 38→415, and the differential
       ledger is on record
+- [x] SLES LTSS folded with a mainline-wins tie-break (D91) — post-EOL fixes surface
+      under the same key (bci-base 121→286 findings, curl shows its real FIXED IN),
+      385,621 shadowed twins dropped and counted
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a

@@ -123,9 +123,10 @@ amazonlinux와 wolfi는 진짜 0=0입니다(downgrade probe로 공허하지 않�
 완승입니다 — grype v6는 openSUSE Leap 데이터를 아예 담지 않습니다; bci-base는 데이터
 모델 때문에 양쪽 방향 모두로 갈립니다: assay는 grype가 표현할 수 없는
 affected-no-fix 항목 108개를 담고 있고, grype는 우리 아카이브 슬라이스가 포함하지
-않는 post-EOL LTSS 채널을 거쳐 나온 SP6 fix를 담고 있습니다 — **LTSS 채널은 기록해
-둔 연구 후보입니다**(SUSE가 LTSS CSAF를 따로 발행하는가, 그리고 EOL된 SP는 그것을
-참조해야 하는가?).
+않는 post-EOL LTSS 채널을 거쳐 나온 SP6 fix를 담고 있습니다 — LTSS 문제는 D91에서
+조사되고 해결되었습니다(그 항목들은 같은 아카이브 안에 `-LTSS` 제품 이름으로 살아
+있습니다; mainline-wins 동점 처리로 접었습니다) — bci-base의 오해 소지 있는 no-fix
+행이 실제 fixed 버전이 되었습니다.
 
 ---
 

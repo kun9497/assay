@@ -3526,6 +3526,36 @@ carry (a research candidate).
 
 ---
 
+### D91 — LTSS is the same release after the lights went out
+
+**Decision.** `SUSE Linux Enterprise Server <N>[ SP<M>]-LTSS` folds onto the same key as
+its bare form — and ONLY that shape: Teradata, Extended Security, HPC-LTSS and the other
+26 LTSS-family variants stay refused, which is why the regex anchor is load-bearing (an
+unanchored count over-matched by 12,958 through `-LTSS-TERADATA`). A separate key was
+impossible on the merits: LTSS fixed versions continue mainline numbering with no marker
+(150600.4.28.1 → 4.40.1 → 4.46.1), so an installed package cannot say which channel built
+it — the D53/D79 lineage treatment has nothing to hook.
+
+**The tie-break is what makes the fold safe.** The corpus carries 11,955 same-document
+bare+LTSS pairs for one (SP, package), 9,308 with DIFFERING fixed versions
+(kernel-dominated) — folded naively, that is the same-CVE-two-EVRs collision D25/D74
+forbid. Within one document, a mainline entry shadows its LTSS twin (dropped and counted:
+385,621 across the archive); when only the LTSS entry exists — the post-EOL situation
+this slice exists for — it becomes the fix. grype's vunnel documents the identical rule.
+
+**Live, before/after against one archive**: unfoldable platforms 7,453,989 → 7,250,375
+(the plain-Server-LTSS share exactly); bci-base:15.6 goes 121 → 286 findings — not +3 but
++165, because LTSS-only entries were previously not even no-fix rows, they were ABSENT:
+every SP6 package whose only post-EOL fix lives under -LTSS now surfaces, the three curl
+CVEs showing FIXED IN 8.14.1-150600.4.46.1/.43.1 where the scan said "no fix available".
+Three findings also disappeared, and the trace made them an improvement: an upstream
+authoring quirk writes `pkg:rpm/suse/libglib@2_0-0` for libglib-2_0-0, so the mainline
+entry never occupied its own key and the old result was a stale source-bridge no-fix —
+the correctly-authored LTSS leaf now supersedes it with the real fixed version. The
+misleading-remediation finding from the 2026-08-24 differential is closed.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

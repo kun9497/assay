@@ -600,6 +600,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] CSAF ID 충돌 (D90) — 두 벤더 모두 맨 CVE를 ID로 저장했고 by-id는
       last-writer-wins; 13-타깃 grype 차등이 ubi9 finding의 91%가 조용히 사라진 것을
       잡음; CVE를 alias로 둔 접두사 ID가 38→415로 복원하고, 차등 장부가 기록됨
+- [x] SLES LTSS를 mainline-wins 동점 처리로 접음 (D91) — post-EOL fix가 같은 키
+      아래서 드러남(bci-base finding 121→286건, curl이 진짜 FIXED IN을 보여줌),
+      가려졌던 쌍둥이 385,621건을 버려서 셈
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건

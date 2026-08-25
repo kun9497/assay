@@ -132,8 +132,9 @@ amazonlinux and wolfi genuine 0=0 (verified non-vacuous by downgrade probes); le
 outright win — grype v6 carries no openSUSE Leap data at all; bci-base diverges in BOTH
 directions by data model: assay carries 108 affected-no-fix entries grype cannot express,
 grype carries SP6 fixes shipped through the post-EOL LTSS channel our archive slice does
-not include — **the LTSS channel is a recorded research candidate** (does SUSE publish
-LTSS CSAF separately, and should an EOL'd SP consult it?).
+not include — the LTSS question was researched and resolved in D91 (the entries live in
+the same archive under `-LTSS` product names; folded with a mainline-wins tie-break) —
+bci-base's misleading no-fix rows became real fixed versions.
 
 ---
 
