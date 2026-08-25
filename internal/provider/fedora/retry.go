@@ -3,7 +3,9 @@ package fedora
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
+	"syscall"
 	"time"
 )
 
@@ -35,15 +37,25 @@ func pageBackoff(attempt int) time.Duration {
 // status, because retrying through the caller's own "stop" would ignore the
 // one instruction that outranks this.
 //
-// Retried: 429 (Bodhi/Anubis said slow down) and 5xx (the server could not
-// answer this time).
+// Retried: 429 (Bodhi/Anubis said slow down), 5xx (the server could not
+// answer this time), and -- since three consecutive nightly publishes died
+// on it (2026-08-24/25, pages 3, 7 and 8, different backend IPs each time)
+// -- a TRANSPORT failure mid-body: connection reset or an unexpectedly
+// truncated read. Those are not the Anubis case this policy was narrowed
+// against: a challenge arrives as a well-formed 200 whose HTML body fails
+// JSON decoding (a *json.SyntaxError), and that still surfaces immediately.
+// A peer reset carries no challenge to miss.
 //
 // Not retried: any other 4xx (the request is wrong and will be wrong
-// again), a network-level failure with no status at all (status 0), a
-// decode error, and context cancellation/deadline.
+// again), a connection that never got a status at all (status 0 without a
+// reset), a decode error on a body that arrived intact, and context
+// cancellation/deadline.
 func retryable(err error, status int) bool {
 	if err != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
 		return false
+	}
+	if err != nil && (errors.Is(err, syscall.ECONNRESET) || errors.Is(err, io.ErrUnexpectedEOF)) {
+		return true
 	}
 	return status == http.StatusTooManyRequests || status >= 500
 }
