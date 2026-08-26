@@ -390,6 +390,12 @@ func comparerName(ecosystem string) string {
 	if rel, ok := strings.CutPrefix(ecosystem, "openSUSE Leap:"); ok && rel != "" {
 		return "rpm"
 	}
+	// Azure Linux is RPM too (D94), added in the same commit that taught
+	// version.For about it, for the same reason -- this is the exact drift
+	// D92's review found and this function's own doc comment warns about.
+	if rel, ok := strings.CutPrefix(ecosystem, "Azure Linux:"); ok && rel != "" {
+		return "rpm"
+	}
 	switch ecosystem {
 	// crates.io joins here in the same commit that taught version.For about
 	// it, which is the rule the comment above was written for.

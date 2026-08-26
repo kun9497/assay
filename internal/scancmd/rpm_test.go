@@ -50,6 +50,26 @@ VERSION_ID="8.10"
 PRETTY_NAME="Red Hat Enterprise Linux 8.10 (Ootpa)"
 `
 
+// osReleaseMariner2 is verbatim from a real mcr.microsoft.com/cbl-mariner/base/core:2.0
+// pull (measured 2026-08-26). ID is "mariner" -- D94's routing case.
+const osReleaseMariner2 = `NAME="Common Base Linux Mariner"
+VERSION="2.0.20260304"
+ID=mariner
+VERSION_ID="2.0"
+PRETTY_NAME="CBL-Mariner/Linux"
+`
+
+// osReleaseAzureLinux3 is verbatim from a real mcr.microsoft.com/azurelinux/base/core:3.0
+// pull (measured 2026-08-26). ID is "azurelinux" -- Microsoft's mid-2024
+// rename of the same lineage, routed to the same "Azure Linux:" key family
+// as mariner above (D94).
+const osReleaseAzureLinux3 = `NAME="Microsoft Azure Linux"
+VERSION="3.0.20260809"
+ID=azurelinux
+VERSION_ID="3.0"
+PRETTY_NAME="Microsoft Azure Linux 3.0"
+`
+
 func fixtureBytes(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(filepath.FromSlash(path))
@@ -134,6 +154,76 @@ func TestCatalogFromImage_RPMPackagesAreKeyed(t *testing.T) {
 		if p.Source == nil || p.Source.Name == "" {
 			t.Errorf("%s has no Source; SOURCERPM is what D8 looks the advisory up under", p.Name)
 		}
+	}
+}
+
+// TestCatalogFromImage_AzureLinuxPackagesAreKeyed is D94's own version of
+// TestCatalogFromImage_RPMPackagesAreKeyed: the same real sqlite rpmdb
+// fixture, read through the identical generic pipeline, but behind BOTH of
+// Azure Linux's os-release IDs -- proving distro.go's "mariner"/"azurelinux"
+// routing is what actually reaches a cataloged package's Ecosystem field,
+// not just what Distro.Ecosystem() returns in isolation (pkgmeta's own
+// TestDistroEcosystem_AzureLinux already covers that half).
+func TestCatalogFromImage_AzureLinuxPackagesAreKeyed(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		osRelease string
+		wantEco   string
+	}{
+		{"mariner 2.0", osReleaseMariner2, "Azure Linux:2"},
+		{"azurelinux 3.0", osReleaseAzureLinux3, "Azure Linux:3"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			img := rpmImage(t, map[string]string{
+				osReleasePath:              tc.osRelease,
+				"var/lib/rpm/rpmdb.sqlite": fixtureBytes(t, rpmFixture),
+			})
+			target, stats, err := catalogFromImage("test-image", img)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stats.Cataloged != 6 {
+				t.Fatalf("cataloged %d packages, want 6", stats.Cataloged)
+			}
+			for _, p := range target.Packages {
+				if p.Ecosystem != tc.wantEco {
+					t.Errorf("%s has ecosystem %q, want %q", p.Name, p.Ecosystem, tc.wantEco)
+				}
+				// D8 rides free here too: the rpmdb cataloger reads SOURCERPM
+				// regardless of distro ID.
+				if p.Source == nil || p.Source.Name == "" {
+					t.Errorf("%s has no Source; SOURCERPM is what D8 looks the advisory up under", p.Name)
+				}
+			}
+		})
+	}
+}
+
+// TestCatalogFromImage_AzureLinuxDistroWithNoDatabase closes the gap left
+// since D43 (commit 15d611d): rpmFamilies has carried "mariner" and
+// "azurelinux" since the very first RPM-family error message existed, years
+// before either had a real ecosystem or provider, and nothing ever drove a
+// scan through those two map entries specifically. Mirrors
+// TestCatalogFromImage_RPMDistroWithNoDatabase's own rhel case.
+func TestCatalogFromImage_AzureLinuxDistroWithNoDatabase(t *testing.T) {
+	for _, tc := range []struct {
+		name, id, osRelease string
+	}{
+		{"mariner", "mariner", osReleaseMariner2},
+		{"azurelinux", "azurelinux", osReleaseAzureLinux3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			img := rpmImage(t, map[string]string{osReleasePath: tc.osRelease})
+			_, _, err := catalogFromImage("test-image", img)
+			if err == nil {
+				t.Fatal("an RPM image with no database was catalogued without error")
+			}
+			for _, want := range []string{tc.id, "usr/lib/sysimage/rpm/rpmdb.sqlite", "var/lib/rpm/rpmdb.sqlite"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not mention %q", err, want)
+				}
+			}
+		})
 	}
 }
 

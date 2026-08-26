@@ -3628,6 +3628,44 @@ output that parses as JSON is authoritative over the exit code. The tool never c
 divergence (CPE fallback, binary-classifier dupes) — floors absorb known noise, humans read
 the uploaded capture artifact when a floor trips.
 
+---
+
+### D94 — Azure Linux: the rename is cosmetic, the release axis is not
+
+**Decision.** CBL-Mariner 2.0 and Azure Linux 3.0 (one lineage, renamed mid-2024) scan end
+to end through the existing OSV generic path in the D71/D72 shape: ecosystem "Azure Linux"
+added to the fetch list (url.PathEscape already handles the space, as with "Rocky Linux"),
+os-release IDs `mariner` AND `azurelinux` both routed to `Azure Linux:<major>`, the
+existing RPM comparer reused via one prefix clause, and the zero-record guard extended on
+Rocky/Alma's terms. No new provider, no new comparer, no cataloger work at all.
+
+**Why this shape.** Measured 2026-08-26: 12,016 AZL-* records; `affected[].package.ecosystem`
+is release-qualified on every one ("Azure Linux:2" 6,614 / "Azure Linux:3" 5,402, bare
+never) — D6 applies with full force, unlike the release-less D88/D92 boutiques. CVE linkage
+is `upstream` on 100% of records, so D3's existing read covers it and no related-join was
+needed (unlike Alma, D71). The OSV export strips both the epoch (measured "0" on 15,105 of
+15,105 raw OVAL evr values) and the `.azl3`/`.cm2` dist tag from fixed bounds; rpmvercmp's
+trailing-segment rule orders an installed `1.42.0-7.azl3` at-or-above a stripped `1.42.0-7`
+correctly, held by a both-directions boundary test.
+
+**What the slice surfaced.** `scancmd`'s rpm-family map has carried `mariner`/`azurelinux`
+since D43 — seeded years before any routing existed and never tested until now; the
+caller-first pass closed that as a byproduct. Live E2E on both mcr base images (both SQLite
+rpmdb at `var/lib/rpm`) found one genuine upstream defect: AZL-31332 ships `"fixed": " 1.57.0-1"`
+with a leading space, which the comparer refuses to guess at (D9) and the scan surfaces as
+one incomplete — the correct verdict, recorded here in case it ever becomes a measured
+pattern worth a D35-style repair. EOL enrichment is impossible today: endoflife.date has no
+azure-linux/cbl-mariner product at all (checked live), so D87's slug map is deliberately
+untouched.
+
+**The differential holds it from day one.** Two digest-pinned aged images joined
+`grype-diff-targets.json`: cbl-mariner 2.0.20230107 (assay 198 / grype 134 / agree 132 —
+98.5% of grype's tuples) and azurelinux 3.0.20240727 (114 / 246 / agree 106). Non-vacuous
+by construction — both images carry real findings, so a keying regression cannot hide
+behind a clean 0=0.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

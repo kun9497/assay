@@ -291,6 +291,11 @@ func TestRPM_Routing(t *testing.T) {
 		// updates feed is release-qualified the same way ("Fedora:44"), and
 		// rpmvercmp does not care which distro built the package.
 		"Fedora:43", "Fedora:44",
+		// Azure Linux left this list under D94, for the same reason: its own
+		// OSV archive is release-qualified the same way ("Azure Linux:2",
+		// "Azure Linux:3"), and rpmvercmp does not care which distro built
+		// the package.
+		"Azure Linux:2", "Azure Linux:3",
 	} {
 		c, ok := For(eco)
 		if !ok {
@@ -319,6 +324,9 @@ func TestRPM_Routing(t *testing.T) {
 	}
 	if _, ok := For("Fedora"); ok {
 		t.Error(`For("Fedora") resolves; the provider only ever writes "Fedora:<VERSION_ID>"`)
+	}
+	if _, ok := For("Azure Linux"); ok {
+		t.Error(`For("Azure Linux") resolves; the provider only ever writes "Azure Linux:<major>"`)
 	}
 	// And the rest still do not: Red Hat's errata describe Red Hat's own
 	// builds (D50), Rocky's own feed is ingested only under "Rocky Linux:N"

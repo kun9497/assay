@@ -289,6 +289,11 @@ func TestNoUnbackedDistroComparer(t *testing.T) {
 	// the critical path here: Bodhi's builds[] name only the SOURCE package
 	// Koji built, never the binary subpackages a real install carries, so
 	// LookupBySource is what makes a Fedora finding reachable at all.
+	// Azure Linux left it under D94, for the identical reason again — its own
+	// OSV archive is what arrived, and D8 source indirection is not needed
+	// for it: the rpmdb cataloger already populates Package.Source from
+	// SOURCERPM regardless of distro ID, the same free ride Rocky and
+	// AlmaLinux already ride.
 	for _, eco := range []string{
 		"Alpine",       // unversioned: not a key we ever build (D6)
 		"Debian",       // likewise
@@ -298,6 +303,7 @@ func TestNoUnbackedDistroComparer(t *testing.T) {
 		"Amazon Linux", // likewise -- the provider writes "Amazon Linux:2"
 		"Oracle Linux", // likewise -- the provider writes "Oracle Linux:9"
 		"Fedora",       // likewise -- the provider writes "Fedora:44"
+		"Azure Linux",  // likewise -- the provider writes "Azure Linux:2"
 	} {
 		if _, ok := For(eco); ok {
 			t.Errorf("For(%q) resolves, but nothing populates Package.Source for it. "+

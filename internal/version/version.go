@@ -210,6 +210,21 @@ func For(ecosystem string) (Comparer, bool) {
 	if rel, ok := strings.CutPrefix(ecosystem, "openSUSE Leap:"); ok && rel != "" {
 		return RPM{}, true
 	}
+	// D94. Azure Linux (CBL-Mariner through 2.0, renamed Azure Linux at 3.0)
+	// is RPM too -- its own OSV archive is release-qualified the same way
+	// ("Azure Linux:2", "Azure Linux:3"), and rpmvercmp does not care which
+	// distro built the package. No new comparer logic was needed: OSV's
+	// export already strips both the epoch and the release's .azl3/.cm2 dist
+	// tag from every `fixed` bound, and rpmvercmp's own trailing-segment rule
+	// ("2.0.1a" > "2.0.1") is what makes an installed "1.42.0-7.azl3" still
+	// order at-or-above the stripped fixed "1.42.0-7" correctly. Same rule,
+	// same reason as the clauses above: "Azure Linux" bare is not a key this
+	// project ever builds -- distro.go writes "Azure Linux:"+major -- and
+	// resolving it would make a bug that drops the release look like it
+	// worked.
+	if rel, ok := strings.CutPrefix(ecosystem, "Azure Linux:"); ok && rel != "" {
+		return RPM{}, true
+	}
 	// D53. Ubuntu is dpkg, so the comparer D40 wrote for Debian handles its
 	// revisions (2.4.4-2ubuntu17.10) unchanged — the version scheme was never
 	// the blocker. The KEY was.

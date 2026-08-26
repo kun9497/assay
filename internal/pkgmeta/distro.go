@@ -419,6 +419,44 @@ func (d Distro) Ecosystem() (string, error) {
 		// not just the version handling, as a guess until a real image is
 		// found that sets it.
 		return "Echo", nil
+	case "mariner", "azurelinux":
+		// D94. One distro lineage, two os-release IDs: Microsoft shipped it as
+		// "CBL-Mariner" through 2.0 (ID=mariner) and renamed it "Azure Linux"
+		// starting with 3.0 (ID=azurelinux) mid-2024. OSV keeps both releases
+		// in ONE ecosystem family, "Azure Linux" — verified against the live
+		// archive, 2026-08-26: every affected entry's ecosystem is
+		// release-qualified ("Azure Linux:2": 6,614 entries, "Azure Linux:3":
+		// 5,402, 0 bare) — so both os-release IDs route to the SAME key
+		// family here, the rename is cosmetic on the advisory side, and
+		// nothing about the fixed versions differs because of which name a
+		// given release shipped under.
+		//
+		// The key is release-qualified at the major, following the D71/D72
+		// shape (Rocky, AlmaLinux) rather than D88/D92's release-less one
+		// (Wolfi, Chainguard, MinimOS, Echo): unlike those, Azure Linux
+		// genuinely has a release axis and OSV genuinely keys on it, so D6
+		// applies with full force here, not vacuously.
+		//
+		// VERIFIED against real images, 2026-08-26: CBL-Mariner 2.0
+		// (mcr.microsoft.com/cbl-mariner/base/core:2.0) reports ID=mariner,
+		// VERSION_ID="2.0"; Azure Linux 3.0
+		// (mcr.microsoft.com/azurelinux/base/core:3.0) reports ID=azurelinux,
+		// VERSION_ID="3.0". Truncating at the first '.' the same way
+		// rhel/rocky/almalinux/ol do above resolves both correctly. A
+		// mariner 1.0 image (VERSION_ID "1.0", CBL-Mariner's first release)
+		// resolves to "Azure Linux:1" by the identical rule — a key this
+		// build holds no data for, which is D20's ordinary coverage skip, not
+		// a routing failure; the case does not need to know which majors the
+		// archive actually populated.
+		if d.VersionID == "" {
+			return "", fmt.Errorf("%w: distro %q has no VERSION_ID", ErrNoEcosystem, d.ID)
+		}
+		major, _, _ := strings.Cut(d.VersionID, ".")
+		if !allDigits(major) {
+			return "", fmt.Errorf("%w: distro %q version %q is not a numbered release",
+				ErrNoEcosystem, d.ID, d.VersionID)
+		}
+		return "Azure Linux:" + major, nil
 	case "wolfi":
 		// D88. OSV keys Wolfi bare ("Wolfi", no release suffix) because Wolfi
 		// itself ships no release axis — it is a single rolling stream, and

@@ -345,6 +345,8 @@ func TestComparerName_ExactNamePerEcosystem(t *testing.T) {
 		{"Amazon Linux:2023", "rpm"}, // D73
 		{"Oracle Linux:9", "rpm"},    // D74
 		{"Fedora:44", "rpm"},         // D75
+		{"Azure Linux:2", "rpm"},     // D94
+		{"Azure Linux:3", "rpm"},     // D94
 		// D92's review closed the D88 gap: the release-less keys printed
 		// "unknown" while version.For ordered them fine — the exact drift
 		// this test exists to catch.
@@ -705,14 +707,15 @@ func TestComparerName_AgreesWithVersionFor(t *testing.T) {
 		"Fedora:43", "Fedora:44",
 		"SLES:15.SP6", "SLES:12.SP5", "SLES:16.0",
 		"openSUSE Leap:15.6", "openSUSE Leap:16.0",
+		"Azure Linux:2", "Azure Linux:3",
 		// Bare family names and empty releases resolve nowhere, by D6:
 		// letting one through would make a bug that dropped the release
 		// look like it worked.
 		"Alpine:", "Debian:", "Red Hat:", "Rocky Linux:", "AlmaLinux:", "Amazon Linux:", "Oracle Linux:", "Fedora:",
-		"SLES:", "openSUSE Leap:",
+		"SLES:", "openSUSE Leap:", "Azure Linux:",
 		"Ubuntu:", "Ubuntu:Pro:22.04:LTS", "Ubuntu:Pro:FIPS-updates:18.04:LTS",
 		"Alpine", "Debian", "Red Hat", "Rocky Linux", "AlmaLinux", "Amazon Linux", "Oracle Linux", "Fedora",
-		"SLES", "openSUSE Leap", "bogus-eco",
+		"SLES", "openSUSE Leap", "Azure Linux", "bogus-eco",
 	} {
 		_, ok := version.For(eco)
 		name := comparerName(eco)

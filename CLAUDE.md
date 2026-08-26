@@ -26,8 +26,10 @@ verdict CI can gate on; SARIF is an output format (D55). A finding carries every
 rating and the gate takes the highest (D25); incompleteness carries a cause and
 `--fail-on-incomplete=target` gates only on what the caller can fix (D36). Images scan end
 to end for Alpine, Debian, Ubuntu mainline (D53), RHEL, Rocky (D71), AlmaLinux (D72),
-Amazon Linux 2/2023 (D73), Oracle Linux 5–10 (D74), Fedora (D75), and SLES/openSUSE Leap
-(D77) — across three rpmdb backends: BerkeleyDB, SQLite and ndb (D44, D76). Installed
+Amazon Linux 2/2023 (D73), Oracle Linux 5–10 (D74), Fedora (D75), SLES/openSUSE Leap
+(D77), Wolfi/Chainguard (D88), MinimOS and Echo (D92), and Azure Linux/CBL-Mariner (D94) —
+across three rpmdb backends: BerkeleyDB, SQLite and ndb (D44, D76). A weekly digest-pinned
+grype differential gates regressions in CI (D93). Installed
 Ubuntu ESM/FIPS and Oracle Ksplice/FIPS lineage packages are reported not evaluated rather
 than judged against mainline data (D53, D79). Ubuntu findings carry Canonical's own fix
 states since D85 — the CVE tracker is consulted at OSV conversion, for which `db build`
