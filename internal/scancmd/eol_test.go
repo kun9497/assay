@@ -234,10 +234,17 @@ func TestEOLCycle_RefusesUnparseable(t *testing.T) {
 // side of this with the identical fixture; this proves the DERIVATION):
 // EOL is true (past EOLFrom) yet StillMaintained is true too, because the
 // row's own IsMaintained says so.
+// EOESFrom is deliberately EXPIRED relative to the pinned `now` below
+// (2020-01-01 has already passed by 2026-08-21) — the fixture used to carry
+// an unexpired EOESFrom (2028-06-30) alongside IsMaintained: true, so both
+// halves of StillMaintained's OR were satisfied at once and the "because the
+// row's own IsMaintained says so" assertion below could not fail on that
+// half at all (CLAUDE.md's fixture-collision shape). With eoesUnexpired
+// forced false here, StillMaintained can only come from IsMaintained.
 func TestLookupEOL_DebianLTSShape(t *testing.T) {
 	rows := []store.EOLRelease{{
 		DistroID: "debian", Release: "12", EOLFrom: "2026-07-11", EOLLabel: "Debian Security Support",
-		EOESFrom: "2028-06-30", EOESLabel: "Debian LTS", IsMaintained: true,
+		EOESFrom: "2020-01-01", EOESLabel: "Debian LTS", IsMaintained: true,
 	}}
 	distro := &pkgmeta.Distro{ID: "debian", VersionID: "12"}
 	st := lookupEOL(distro, rows, time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC))
@@ -245,9 +252,10 @@ func TestLookupEOL_DebianLTSShape(t *testing.T) {
 		t.Fatalf("lookupEOL = %+v, want Known and EOL", st)
 	}
 	if !st.StillMaintained {
-		t.Errorf("lookupEOL = %+v, want StillMaintained (IsMaintained was true on the row)", st)
+		t.Errorf("lookupEOL = %+v, want StillMaintained (IsMaintained was true on the row, "+
+			"and EOESFrom has already expired so that leg alone cannot explain it)", st)
 	}
-	if st.EOESLabel != "Debian LTS" || st.EOESFrom != "2028-06-30" {
+	if st.EOESLabel != "Debian LTS" || st.EOESFrom != "2020-01-01" {
 		t.Errorf("lookupEOL = %+v, missing the LTS phase detail", st)
 	}
 }

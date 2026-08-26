@@ -120,6 +120,43 @@ func TestAnnotate_EmitsTypedRatingsFromRealShapedFeed(t *testing.T) {
 	}
 }
 
+// TestAnnotate_EntryWithNoCveIDIsSkippedNotEmitted holds the guard that
+// mirrors nvd.convert's identical "no id" skip: an entry the feed carries
+// with an empty cveID would otherwise store under a key RatingsFor can never
+// read back (it only asks about "CVE-" identifiers), yet still be counted in
+// Provenance.Records -- over-claiming coverage nothing can look up. No other
+// fixture in this file carries such a row, so nothing before this test could
+// tell the guard from its absence.
+func TestAnnotate_EntryWithNoCveIDIsSkippedNotEmitted(t *testing.T) {
+	body := `{"dateReleased":"2026-08-20T17:00:27Z","count":2,"vulnerabilities":[
+		{"cveID":"","dateAdded":"2026-08-20","knownRansomwareCampaignUse":"Unknown"},
+		{"cveID":"CVE-2026-3","dateAdded":"2026-08-20","knownRansomwareCampaignUse":"Unknown"}
+	]}`
+	srv := serveJSON(t, body)
+	defer srv.Close()
+
+	p := New(Options{URL: srv.URL})
+	var got []advisory.Rating
+	prov, err := p.Annotate(context.Background(), func(r advisory.Rating) error {
+		got = append(got, r)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("emitted %d rating(s), want 1 -- the empty-cveID entry must not be emitted: %+v",
+			len(got), got)
+	}
+	if got[0].CVE != "CVE-2026-3" {
+		t.Errorf("emitted rating CVE = %q, want CVE-2026-3", got[0].CVE)
+	}
+	if prov.Records != 1 {
+		t.Errorf("Provenance.Records = %d, want 1 -- the skipped entry must not be counted either",
+			prov.Records)
+	}
+}
+
 // TestAnnotate_RefusesACountMismatch is the integrity check: a catalog whose
 // declared count disagrees with how many entries it actually carries is
 // refused rather than trusted, because either number could be the wrong one

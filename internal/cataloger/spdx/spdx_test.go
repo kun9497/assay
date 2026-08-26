@@ -264,6 +264,44 @@ func TestParse_RootPseudoPackageExcluded_RHOCIShape(t *testing.T) {
 	}
 }
 
+// TestParse_UnanchoredDescribesExcludesNothing holds findRootPackageID's
+// anchor condition: the DESCRIBES relationship only names a document root
+// when it originates at the document's OWN SPDXID. Every other
+// root-exclusion fixture in this file happens to have its only DESCRIBES
+// relationship anchored there, so dropping the anchor check entirely would
+// leave them green — this fixture's DESCRIBES instead runs
+// package-to-package (bash "describing" coreutils), which is spec-legal but
+// says nothing about which package is the document root. Treating it as a
+// root anyway would silently exclude coreutils from the scan: uncounted in
+// every Stats bucket, invisible to --fail-on-incomplete.
+func TestParse_UnanchoredDescribesExcludesNothing(t *testing.T) {
+	const doc = `{"spdxVersion":"SPDX-2.3","SPDXID":"SPDXRef-DOCUMENT","packages":[
+	  {"name":"bash","SPDXID":"SPDXRef-Package-bash","versionInfo":"5.2.15-2",
+	   "externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl",
+	     "referenceLocator":"pkg:deb/debian/bash@5.2.15-2?arch=amd64&distro=debian-12"}]},
+	  {"name":"coreutils","SPDXID":"SPDXRef-Package-coreutils","versionInfo":"9.1-1",
+	   "externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl",
+	     "referenceLocator":"pkg:deb/debian/coreutils@9.1-1?arch=amd64&distro=debian-12"}]}],
+	  "relationships":[{"spdxElementId":"SPDXRef-Package-bash",
+	    "relatedSpdxElement":"SPDXRef-Package-coreutils","relationshipType":"DESCRIBES"}]}`
+	target, stats, err := Parse(strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if stats.Components != 2 {
+		t.Errorf("Components = %d, want 2 — a DESCRIBES not anchored at the document's own "+
+			"SPDXID names no root, so nothing should be excluded", stats.Components)
+	}
+	names := map[string]bool{}
+	for _, p := range target.Packages {
+		names[p.Name] = true
+	}
+	if !names["bash"] || !names["coreutils"] {
+		t.Fatalf("Packages = %+v, want both bash and coreutils — coreutils must not be "+
+			"silently dropped as a false root", target.Packages)
+	}
+}
+
 func TestParse_NoPURLPackageCounted(t *testing.T) {
 	const doc = `{"spdxVersion":"SPDX-2.3","packages":[
 	  {"name":"mystery","SPDXID":"SPDXRef-mystery","versionInfo":"1.0"}]}`

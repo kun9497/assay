@@ -756,6 +756,42 @@ func TestTable_MarksSeverityWhenSourcesDisagree(t *testing.T) {
 	}
 }
 
+// TestTable_OpinionlessAnnotationDoesNotMarkDisagreement pins D86's filter
+// inside sourcesDisagree: an EPSS/KEV annotation carries NoSeverityOpinion
+// because it expresses no CVSS opinion at all, and that must not be read as
+// "disagreeing" with a rated source's band just because the annotation's own
+// (necessarily Unknown) Severity differs from it. Without the filter, every
+// finding annotated with EPSS or KEV would wear the "*" marker and earn the
+// scan-level footnote purely from the annotation's absence of an opinion —
+// TestSourcesDisagree's unit table has no NoSeverityOpinion row at all, and
+// this is the one test that reads the rendered SEVERITY cell and footnote
+// rather than calling sourcesDisagree directly.
+func TestTable_OpinionlessAnnotationDoesNotMarkDisagreement(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:  pkgmeta.Package{Name: "django", Version: "3.2.12", Ecosystem: "PyPI"},
+		Advisory: advisory.Advisory{ID: "GHSA-w24h-v9qh-8gxj"},
+		Severity: severity.Critical,
+		Score:    9.8,
+		Ratings: []matcher.Rating{
+			{Database: "GHSA", AdvisoryID: "GHSA-w24h-v9qh-8gxj", Severity: severity.Critical, Score: 9.8, Fixed: "2.2.28"},
+			{Database: "EPSS", AdvisoryID: "CVE-2022-28347", Severity: severity.Unknown,
+				NoSeverityOpinion: true, EPSS: 0.94},
+		},
+	}}}
+	var buf bytes.Buffer
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if got := cellAt(t, out, "GHSA-w24h-v9qh-8gxj", "SEVERITY"); got != "critical (9.8)" {
+		t.Errorf("SEVERITY column = %q, want %q — an opinionless EPSS row must not earn the "+
+			"disagreement marker", got, "critical (9.8)")
+	}
+	if strings.Contains(out, "disagree on severity") {
+		t.Errorf("output wrongly claims sources disagree on severity:\n%s", out)
+	}
+}
+
 // TestTable_NoMarkerWhenSourcesAgree: a difference in score or fixed version
 // alone is not the disagreement this marker exists to flag — only the two
 // sources landing on different bands is. Marking every finding with more

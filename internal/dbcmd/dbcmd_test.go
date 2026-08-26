@@ -1656,8 +1656,14 @@ func TestStatus_ReportsEOLCoverage(t *testing.T) {
 		ID: "GHSA-eolstatus", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
 		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
 	}}}
+	// Three rows across two distros -- debian contributes two releases -- so
+	// the release count and the distro count cannot collide (CLAUDE.md's
+	// substring/fixture-collision rule): a fixture with equal counts (the
+	// prior 2-and-2 shape) cannot tell "%d release(s) across %d distro(s)"
+	// from its own arguments swapped.
 	src := fakeEOLSource{name: "endoflife.date", rows: []store.EOLRelease{
 		{DistroID: "debian", Release: "12"},
+		{DistroID: "debian", Release: "11"},
 		{DistroID: "alpine", Release: "3.19"},
 	}}
 
@@ -1671,8 +1677,8 @@ func TestStatus_ReportsEOLCoverage(t *testing.T) {
 		t.Fatalf("Status = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	s := out.String()
-	if !strings.Contains(s, "eol:") || !strings.Contains(s, "2 release(s)") || !strings.Contains(s, "2 distro(s)") {
-		t.Errorf("status does not report EOL coverage:\n%s", s)
+	if !strings.Contains(s, "eol:") || !strings.Contains(s, "3 release(s)") || !strings.Contains(s, "2 distro(s)") {
+		t.Errorf("status does not report EOL coverage (want 3 release(s) across 2 distro(s)):\n%s", s)
 	}
 	if !strings.Contains(s, "2026-08-21") {
 		t.Errorf("status does not report EOL DataAsOf:\n%s", s)
