@@ -3666,6 +3666,48 @@ behind a clean 0=0.
 
 ---
 
+### D95 — Alpaquita, and the name only a sibling's provides clause can reach
+
+**Decision.** BellSoft Alpaquita Linux and BellSoft Hardened Containers scan via the OSV
+generic path — one fetch ("Alpaquita", 13,627 records; BHC's 635-file archive re-verified a
+byte-identical subset, covered via familyMatches, the D88 shape) — release-qualified keys
+(`:stream`/`:23`/`:25`, bare never occurs), both os-release IDs (`alpaquita`,
+`bellsoft-hardened-containers`) routed, apk comparer unchanged, `upstream` 100% CVE. Plus
+one genuinely new mechanism: **the apk `p:` provides bridge.** `Package.Provides` (+
+`ProvidesVersion`) is populated by the apk cataloger only — bare names, `so:`/`cmd:`/`pc:`
+capabilities dropped; the matcher looks advisories up under each provide (deduped against
+Name and Source), compares the provide's own `=version` when carried and the package's
+version otherwise, and both Evidence and the report say the join was via provides —
+`Finding.MatchedViaProvides`, carried by explain, SARIF and the JSON document alike, so a
+provides join can never be mislabelled as D8's source indirection.
+
+**Why the bridge.** Measured: Liberica advisories name `openjdk26-lite`-shaped packages
+that are never an installed Name and never an `o:` origin — reachable ONLY through a
+sibling package's `p:` clause (`p:java-jdk java26-jdk openjdk26-lite-jdk=26.0.2.1_p1-r0`,
+verbatim from a real image), 10.74% of the corpus. Without it every Liberica JDK package
+scores zero findings, silently, while ordinary apk packages look perfectly healthy — a
+false-negative class no name/origin test would ever see.
+
+**What review added.** Two guards found unheld by independent mutations and closed: the
+provide-equals-Source dedup was invisible to a fixture whose provide equaled Name AND
+Source (a discriminating Name≠Source row now pins it), and nothing asserted a D8 source
+join does NOT carry the provides annotation (widening the condition survived the suite; an
+inverse-assertion test now holds it). A third genuine find: the apk db lives at
+`var/lib/apk/db/installed` with no `/lib` sibling at all on these images — a third
+`apkDBPaths` entry, alongside Alpine's `lib/` and Wolfi's `usr/lib/`.
+
+**Recorded, not built.** No LTS-tagged (`:23`/`:25`) base image exists on Docker Hub to
+pull, so LTS routing is held by the archive's own keys, not a live image (the D92 honesty
+gap, again). The old-Liberica probe surfaced the LTS backport semantics working as
+designed — a 2023 `:23`-line image's packages sit above that line's 1.35.0-rN backport
+fixes and correctly report clean, while grype reads the same image as `alpine:23` through
+ID_LIKE and answers from CPE fallback. Two digest-pinned targets joined the weekly
+differential (alpaquita agree 2/2 of assay's, liberica21 agree 2) — floors are small but
+the keying and cataloging guards (`minFindings ≥ 1`, `notEvaluated == 0`) are the point;
+the bridge's live-data guard arms itself with BellSoft's next Liberica CVE wave.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

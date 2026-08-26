@@ -192,11 +192,22 @@ const (
 	// in these images' layers, and without apkDBPaths below, "no supported
 	// package database found" is D43's failure one distro further in.
 	apkDBPathUsrLib = "usr/lib/apk/db/installed"
+	// apkDBPathVarLib is where BellSoft's Alpaquita Linux and Hardened
+	// Containers images store the apk database (D95) — a real regular file
+	// at the FHS-standard location, NOT a directory-component symlink the
+	// way apkDBPathUsrLib's target is: these images ship no /lib at all
+	// (verified against a real pulled bellsoft/alpaquita-linux-base image,
+	// 2026-08-26), so a probe of apkDBPath or apkDBPathUsrLib alone finds
+	// nothing in their layers — the identical "no supported package
+	// database found" failure D88 fixed for Wolfi/Chainguard one path over,
+	// for a distro that does not even need the symlink-following workaround
+	// that path needed.
+	apkDBPathVarLib = "var/lib/apk/db/installed"
 )
 
 // apkDBPaths is every tar entry the apk probe asks for, traditional path
 // first.
-var apkDBPaths = []string{apkDBPath, apkDBPathUsrLib}
+var apkDBPaths = []string{apkDBPath, apkDBPathUsrLib, apkDBPathVarLib}
 
 // rpmDBDirs are the two places an RPM database lives, newest convention first.
 //

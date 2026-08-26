@@ -3475,6 +3475,53 @@ agree 106). 구조적으로 공허하지 않습니다 — 두 이미지 모두 �
 
 ---
 
+### D95 — Alpaquita, 그리고 형제 패키지의 provides 절로만 닿을 수 있는 이름
+
+**결정.** BellSoft Alpaquita Linux와 BellSoft Hardened Containers는 OSV 범용 경로를
+거쳐 스캔됩니다 — fetch 한 번("Alpaquita", 레코드 13,627개; BHC의 635-파일 아카이브가
+바이트 단위로 동일한 부분집합임을 재확인했고, familyMatches를 거쳐 커버합니다, D88
+모양입니다) — 릴리스 한정 키(`:stream`/`:23`/`:25`, 맨 형태는 절대 나오지 않음), 두
+os-release ID(`alpaquita`, `bellsoft-hardened-containers`) 모두 라우팅, apk comparer는
+그대로, CVE는 `upstream`에서 100%. 거기에 진짜로 새로운 메커니즘 하나: **apk `p:`
+provides 다리입니다.** `Package.Provides`(+ `ProvidesVersion`)는 apk cataloger만
+채웁니다 — 맨 이름만이고, `so:`/`cmd:`/`pc:` capability는 버립니다; matcher는 각
+provide 아래서 advisory를 찾고(Name과 Source에 대고 중복 제거), provide 자신의
+`=version`이 있으면 그것을, 없으면 패키지의 버전을 비교하며, Evidence와 리포트 둘
+다 그 조인이 provides를 거쳤다고 말합니다 — `Finding.MatchedViaProvides`이고,
+explain, SARIF, JSON 문서 모두에 실려서, provides 조인이 D8의 source 간접 참조로
+잘못 이름 붙는 일이 결코 없습니다.
+
+**왜 이 다리가 필요한가.** 측정: Liberica advisory는 `openjdk26-lite` 모양의
+패키지를 지목하는데, 이는 설치된 Name도 아니고 `o:` origin도 결코 아닙니다 —
+오직 형제 패키지의 `p:` 절을 거쳐서만 닿을 수 있습니다(`p:java-jdk java26-jdk
+openjdk26-lite-jdk=26.0.2.1_p1-r0`, 실제 이미지에서 그대로 가져온 것), 코퍼스의
+10.74%입니다. 이것이 없으면 모든 Liberica JDK 패키지가 조용히 finding 0건을
+얻고, 그동안 보통의 apk 패키지는 완전히 건강해 보입니다 — name/origin 테스트로는
+결코 볼 수 없는 미탐 부류입니다.
+
+**리뷰가 더한 것.** 독립적인 mutation으로 미보증임이 드러나 닫은 가드 둘: provide가
+Source와 같을 때의 중복 제거는 provide가 Name '그리고' Source 둘 다와 같은
+픽스처에서는 보이지 않았습니다(Name≠Source인 판별 행이 이제 그것을 고정합니다),
+그리고 D8의 source 조인이 provides annotation을 '싣지 않는다'는 것을 단언하는
+곳이 없었습니다(조건을 넓혀도 스위트가 살아남았습니다; 이제 역-단언 테스트가 그것을
+붙듭니다). 진짜 발견 세 번째: apk db는 `var/lib/apk/db/installed`에 살아 있고
+이 이미지들에는 `/lib` 형제가 아예 없습니다 — Alpine의 `lib/`, Wolfi의
+`usr/lib/`에 이은 세 번째 `apkDBPaths` 항목입니다.
+
+**기록만 하고, 만들지는 않았습니다.** Docker Hub에는 pull할 수 있는 LTS 태그
+(`:23`/`:25`) 베이스 이미지가 없어서, LTS 라우팅은 실제 이미지가 아니라 아카이브
+자신의 키로만 지탱됩니다(D92의 정직함 구멍이 또 나타난 것입니다). old-Liberica
+probe는 LTS backport 의미론이 설계대로 동작하는 것을 드러냈습니다 — 2023년
+`:23`-라인 이미지의 패키지는 그 라인의 1.35.0-rN backport fix보다 위에 있고
+올바르게 clean으로 보고되는 반면, grype는 같은 이미지를 ID_LIKE를 거쳐
+`alpine:23`으로 읽고 CPE fallback에서 답을 냅니다. digest로 고정된 타깃 둘이
+주간 차등에 합류했습니다(alpaquita는 assay의 2/2 agree, liberica21은 agree
+2) — floor는 작지만 키잡기와 카탈로징 가드(`minFindings ≥ 1`, `notEvaluated
+== 0`)가 요점입니다; 이 다리의 실전-데이터 가드는 BellSoft의 다음 Liberica
+CVE 물결로 스스로 무장합니다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

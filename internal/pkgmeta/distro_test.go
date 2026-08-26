@@ -846,3 +846,63 @@ func TestDistroEcosystem_AzureLinux(t *testing.T) {
 	// The no-VERSION_ID and non-numeric-VERSION_ID refusals are pinned in
 	// TestDistroEcosystem_Unsupported, alongside rhel's identical two rows.
 }
+
+// TestDistroEcosystem_Alpaquita: D95. BellSoft Alpaquita Linux and Hardened
+// Containers are apk distros with a genuine release axis (measured on the
+// live OSV archive, 2026-08-26: every affected entry on both families is
+// release-qualified, 0 bare occurrences), but an unusual one -- "stream" is
+// a literal rolling-channel name sitting beside numbered LTS releases
+// "23"/"25", so VERSION_ID is used verbatim once validated rather than
+// truncated at a dot the way Rocky/AlmaLinux/Azure Linux's numeric majors
+// are.
+func TestDistroEcosystem_Alpaquita(t *testing.T) {
+	for _, tc := range []struct {
+		id, versionID string
+		want          string
+	}{
+		{"alpaquita", "stream", "Alpaquita:stream"},
+		{"alpaquita", "23", "Alpaquita:23"},
+		{"alpaquita", "25", "Alpaquita:25"},
+		{"bellsoft-hardened-containers", "stream", "BellSoft Hardened Containers:stream"},
+		{"bellsoft-hardened-containers", "23", "BellSoft Hardened Containers:23"},
+		{"bellsoft-hardened-containers", "25", "BellSoft Hardened Containers:25"},
+	} {
+		got, err := Distro{ID: tc.id, VersionID: tc.versionID}.Ecosystem()
+		if err != nil {
+			t.Errorf("id=%q VERSION_ID=%q: %v", tc.id, tc.versionID, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("id=%q VERSION_ID=%q -> %q, want %q", tc.id, tc.versionID, got, tc.want)
+		}
+	}
+	// No VERSION_ID at all, and a channel this build has never measured, must
+	// both be refused -- D6's discipline: a key nothing is stored under
+	// matches nothing, and a scan that matches nothing must not look clean.
+	for _, tc := range []struct{ id, versionID string }{
+		{"alpaquita", ""},
+		{"alpaquita", "edge"},
+		{"bellsoft-hardened-containers", ""},
+		{"bellsoft-hardened-containers", "edge"},
+	} {
+		if got, err := (Distro{ID: tc.id, VersionID: tc.versionID}).Ecosystem(); err == nil {
+			t.Errorf("id=%q VERSION_ID=%q -> %q, want an error", tc.id, tc.versionID, got)
+		}
+	}
+	// The two families must not converge with each other or with Alpine --
+	// ID_LIKE=alpine (present on every real Alpaquita/BHC os-release, not
+	// read anywhere in this path: Distro carries no such field and
+	// osrelease.Parse never populates one) must never leak an Alpaquita or
+	// BellSoft Hardened Containers package into an Alpine key, which would
+	// silently compare it against Alpine's OWN fixed versions rather than
+	// BellSoft's.
+	for _, tc := range []struct{ id, versionID, want string }{
+		{"alpine", "3.19", "Alpine:v3.19"},
+		{"alpaquita", "stream", "Alpaquita:stream"},
+		{"bellsoft-hardened-containers", "stream", "BellSoft Hardened Containers:stream"},
+	} {
+		if got, err := (Distro{ID: tc.id, VersionID: tc.versionID}).Ecosystem(); err != nil || got != tc.want {
+			t.Errorf("%s %s -> %q, %v; want %q", tc.id, tc.versionID, got, err, tc.want)
+		}
+	}
+}

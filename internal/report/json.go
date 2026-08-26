@@ -72,8 +72,16 @@ type FindingRecord struct {
 	// Package.Name (a direct match): a field that only appears for the D8
 	// indirection case would make its own absence ambiguous between "matched
 	// directly" and "this document predates the field".
-	MatchedName string         `json:"matchedName"`
-	Advisory    AdvisoryRecord `json:"advisory"`
+	MatchedName string `json:"matchedName"`
+	// MatchedViaProvides distinguishes the apk provides join (D95) from D8's
+	// source-package indirection — both leave matchedName != package.name,
+	// and a consumer cannot tell them apart from the names alone (explain.go
+	// and sarif.go each carry the same distinction for the same reason). No
+	// omitempty, on MatchedName's own reasoning above: an absent bool would
+	// be ambiguous between "direct or D8 match" and "this document predates
+	// the field".
+	MatchedViaProvides bool           `json:"matchedViaProvides"`
+	Advisory           AdvisoryRecord `json:"advisory"`
 	// Severity is severity.Band's String() form (D17's own
 	// none/low/medium/high/critical/unknown), never the numeric iota — a
 	// numeric band would make the document depend on Band's declaration
@@ -363,8 +371,9 @@ func findingRecord(f matcher.Finding) FindingRecord {
 		})
 	}
 	return FindingRecord{
-		Package:     packageRecord(f.Package),
-		MatchedName: f.MatchedName,
+		Package:            packageRecord(f.Package),
+		MatchedName:        f.MatchedName,
+		MatchedViaProvides: f.MatchedViaProvides,
 		Advisory: AdvisoryRecord{
 			ID:       f.Advisory.ID,
 			Aliases:  f.Advisory.Aliases,

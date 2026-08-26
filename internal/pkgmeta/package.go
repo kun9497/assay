@@ -22,6 +22,38 @@ type Package struct {
 	// packages; without this the miss is a false negative, which is silent.
 	Source    *SourcePackage
 	Locations []Location
+	// Provides is the bare package names this package's apk `p:` (provides)
+	// clause declares (D95) — e.g. a BellSoft Alpaquita "liberica26-lite" apk
+	// package provides "openjdk26-lite", the name BellSoft's own Alpaquita
+	// advisories are written against. Measured against a real Liberica JDK
+	// image and the live Alpaquita OSV feed, 2026-08-26: every Liberica CVE
+	// names a package (e.g. "openjdk26-lite") that is never an installed
+	// package's own Name, and the apk `o:` origin (D8's Source field, below)
+	// does not bridge it either — the installed "liberica26-lite-jdk"
+	// package's own origin is "liberica26-lite", not "openjdk26-lite". The
+	// advisory's name is reachable ONLY through a sibling package's provides
+	// clause, accounting for 10.74% of the measured corpus.
+	//
+	// cmd:/so:/pc:-prefixed entries are command, shared-library-soname and
+	// pkg-config capabilities, not package names, and are dropped by the apk
+	// cataloger before this field is populated — no advisory is ever authored
+	// against a soname, and joining on one would be a different, unsound
+	// mechanism from the name join this field exists for.
+	//
+	// Populated ONLY by the apk cataloger (internal/cataloger/apkdb). dpkg's
+	// and rpm's own "Provides" concepts are virtual-package capabilities
+	// resolved at install time, a different mechanism entirely, and are out
+	// of scope for this field.
+	Provides []string
+	// ProvidesVersion carries the version a Provides entry named, keyed by
+	// entry (D95). An apk `p:` clause may write a provide bare
+	// ("java-jdk") or version-qualified ("openjdk26-lite=26.0.2.1_p1-r0"),
+	// and both shapes appear side by side in one real package's own provides
+	// clause (measured on a Liberica JDK image's "liberica26-lite-jdk"
+	// package). A name absent from this map carried no version at all; the
+	// matcher falls back to this package's own Version for those, the same
+	// way an empty Source.Version means "same as the binary version" (D8).
+	ProvidesVersion map[string]string
 	// ModuleStream is the RPM module stream this package was installed from,
 	// as "name:stream" — the first two fields of RPMTAG_MODULARITYLABEL
 	// (tag 5096) — or "" for a non-modular package (D80). Only those two

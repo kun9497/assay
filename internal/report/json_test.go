@@ -739,3 +739,56 @@ func TestJSON_EmptyResultHasEmptyArraysNotNull(t *testing.T) {
 		t.Errorf("output contains a null where jq expects an array:\n%s", out)
 	}
 }
+
+// TestJSON_MatchedViaProvidesIsInTheDocument holds D95's rendering promise on
+// the JSON side the same way explain.go's and sarif.go's own tests hold
+// theirs: a consumer reading matchedName != package.name must be able to
+// tell the apk-provides join from D8's source-package indirection, and the
+// distinction must be a typed field, not something inferred from prose. No
+// omitempty, on MatchedName's own reasoning one field up: an absent bool
+// would be ambiguous between "direct or D8 match" and "this document
+// predates the field".
+func TestJSON_MatchedViaProvidesIsInTheDocument(t *testing.T) {
+	res := matcher.Result{
+		Findings: []matcher.Finding{{
+			Package: pkgmeta.Package{Name: "liberica26-lite-jdk", Version: "26.0.2.1_p1-r0",
+				Ecosystem: "Alpaquita:stream"},
+			Advisory: advisory.Advisory{ID: "BELL-TEST-90001", Database: "BELL",
+				Upstream: []string{"CVE-2026-73001"}},
+			Evidence: version.Evidence{RangeType: advisory.RangeEcosystem,
+				Introduced: "0", Fixed: "26.0.2.1_p1-r1",
+				Reason: "below the fix"},
+			MatchedName:        "openjdk26-lite-jdk",
+			MatchedViaProvides: true,
+			Severity:           severity.High,
+			Ratings: []matcher.Rating{{Database: "BELL", AdvisoryID: "BELL-TEST-90001",
+				Severity: severity.High, Fixed: "26.0.2.1_p1-r1"}},
+		}},
+	}
+	var buf bytes.Buffer
+	if _, err := JSON(&buf, res, cyclonedx.Stats{}, EOLStatus{}); err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+	var doc Document
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(doc.Findings) != 1 {
+		t.Fatalf("findings = %d, want 1", len(doc.Findings))
+	}
+	if !doc.Findings[0].MatchedViaProvides {
+		t.Error("matchedViaProvides = false, want true — the JSON document cannot " +
+			"tell a provides join from a D8 source join without it")
+	}
+	// The key itself must be present even when false (shape must not vary):
+	// serialize a direct match and look for the literal key.
+	res.Findings[0].MatchedViaProvides = false
+	buf.Reset()
+	if _, err := JSON(&buf, res, cyclonedx.Stats{}, EOLStatus{}); err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte(`"matchedViaProvides":`)) {
+		t.Error(`document omits "matchedViaProvides" when false — an absent bool is ` +
+			"ambiguous between a direct match and a pre-D95 document")
+	}
+}

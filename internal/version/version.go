@@ -225,6 +225,26 @@ func For(ecosystem string) (Comparer, bool) {
 	if rel, ok := strings.CutPrefix(ecosystem, "Azure Linux:"); ok && rel != "" {
 		return RPM{}, true
 	}
+	// D95. Alpaquita and BellSoft Hardened Containers are apk distros too --
+	// APK{} (the same comparer Alpine, Wolfi, Chainguard and MinimOS use)
+	// orders their versions, and rpmvercmp-shaped concerns do not apply.
+	// Unlike Wolfi/Chainguard/MinimOS's bare keys, both families genuinely
+	// have a release axis and OSV genuinely keys it ("Alpaquita:stream",
+	// "Alpaquita:23", "BellSoft Hardened Containers:25", ... — measured
+	// 2026-08-26, 0 bare occurrences on either family), so this is a prefix
+	// rule following the D71/D72/D94 shape, not a plain map entry. Same rule,
+	// same reason as the clauses above: neither bare family name is a key
+	// this project ever builds — pkgmeta.Distro.Ecosystem's "alpaquita"/
+	// "bellsoft-hardened-containers" case writes VERSION_ID (verbatim, not
+	// truncated — "stream" is not a dotted version) after the colon — and
+	// resolving the bare form would make a bug that dropped the release look
+	// like it worked.
+	if rel, ok := strings.CutPrefix(ecosystem, "Alpaquita:"); ok && rel != "" {
+		return APK{}, true
+	}
+	if rel, ok := strings.CutPrefix(ecosystem, "BellSoft Hardened Containers:"); ok && rel != "" {
+		return APK{}, true
+	}
 	// D53. Ubuntu is dpkg, so the comparer D40 wrote for Debian handles its
 	// revisions (2.4.4-2ubuntu17.10) unchanged — the version scheme was never
 	// the blocker. The KEY was.

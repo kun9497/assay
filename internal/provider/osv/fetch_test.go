@@ -239,14 +239,15 @@ func TestFetch_AlpineZeroRecordsIsAnError(t *testing.T) {
 // fetch.go turns its own row red here, while every pre-existing row (Debian,
 // Ubuntu, ...) stays green.
 //
-// "Wolfi" is deliberately NOT one of the rows here: nothing in this
-// package's default Ecosystems ever fetches under that literal name (D88),
-// so New([]string{"Wolfi"}, ...) is not a shape production code produces --
-// it is still covered in the guard's own condition in fetch.go, for any
-// caller that constructs a Provider directly with it, but there is no
-// end-to-end path through this test to drive it.
-func TestFetch_DebianUbuntuRockyAlmaChainguardMinimOSEchoAndAzureLinuxZeroRecordsIsAnError(t *testing.T) {
-	for _, eco := range []string{"Debian", "Ubuntu", "Rocky Linux", "AlmaLinux", "Chainguard", "MinimOS", "Echo", "Azure Linux"} {
+// "Wolfi" and "BellSoft Hardened Containers" are deliberately NOT rows
+// here: nothing in this package's default Ecosystems ever fetches under
+// either literal name (D88, D95), so New([]string{"Wolfi"}, ...) is not a
+// shape production code produces -- both are still covered in the guard's
+// own condition in fetch.go, for any caller that constructs a Provider
+// directly with one, but there is no end-to-end path through this test to
+// drive them.
+func TestFetch_DebianUbuntuRockyAlmaChainguardMinimOSEchoAzureLinuxAndAlpaquitaZeroRecordsIsAnError(t *testing.T) {
+	for _, eco := range []string{"Debian", "Ubuntu", "Rocky Linux", "AlmaLinux", "Chainguard", "MinimOS", "Echo", "Azure Linux", "Alpaquita"} {
 		t.Run(eco, func(t *testing.T) {
 			body := zipWith(t, map[string]string{
 				// Well-formed, but names an ecosystem this archive would never
@@ -794,5 +795,141 @@ func TestFetch_AzureLinuxBoundedIntroduced(t *testing.T) {
 	events := got[0].Affected[0].Ranges[0].Events
 	if len(events) != 2 || events[0].Introduced != "1.18.0" || events[1].Fixed != "1.19.0" {
 		t.Errorf("Events = %+v, want [Introduced:1.18.0 Fixed:1.19.0] carried through unchanged", events)
+	}
+}
+
+// TestEcosystems_AlpaquitaIsTheOnlyFetch is D95's presence guard, on
+// TestEcosystems_ChainguardIsTheOnlyFetch's own shape: "Alpaquita" must be
+// fetched, "BellSoft Hardened Containers" must not be -- the archive is a
+// measured byte-identical superset, so a second fetch would only be a
+// redundant network request for data this build already has.
+func TestEcosystems_AlpaquitaIsTheOnlyFetch(t *testing.T) {
+	if !slices.Contains(Ecosystems, "Alpaquita") {
+		t.Error(`Ecosystems does not contain "Alpaquita"`)
+	}
+	if slices.Contains(Ecosystems, "BellSoft Hardened Containers") {
+		t.Error(`Ecosystems contains "BellSoft Hardened Containers" -- D95 fetches it only via the ` +
+			`Alpaquita archive, never as a separate request`)
+	}
+}
+
+// TestFetch_Alpaquita pins the ordinary shape: an ID naming its CVE only in
+// upstream (not related), a release-qualified ecosystem key, and a CVSS
+// vector carried through unchanged. Modeled on a real BELL-CVE record's
+// affected-entry shape (measured 2026-08-26): "openjdk26-lite" is the
+// package name BellSoft's own advisories use, which is never an installed
+// package's own apk name -- the D95 provides bridge internal/matcher's own
+// tests cover, not this package's job.
+func TestFetch_Alpaquita(t *testing.T) {
+	body := zipWith(t, map[string]string{
+		"BELL-CVE-2026-90001.json": `{"id":"BELL-CVE-2026-90001","upstream":["CVE-2026-90001"],
+			"severity":[{"type":"CVSS_V3","score":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}],
+			"affected":[{"package":{"name":"openjdk26-lite","ecosystem":"Alpaquita:stream"},
+				"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"26.0.2.1_p1-r0"}]}]}]}`,
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/Alpaquita/all.zip" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	p := New([]string{"Alpaquita"}, srv.URL)
+	var got []advisory.Advisory
+	prov, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
+		got = append(got, a)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "BELL-CVE-2026-90001" {
+		t.Fatalf("Fetch emitted %d advisories (%v), want only BELL-CVE-2026-90001", len(got), got)
+	}
+	if len(got[0].Upstream) != 1 || got[0].Upstream[0] != "CVE-2026-90001" {
+		t.Errorf("Upstream = %v, want [CVE-2026-90001] -- D3 reads this field for the CVE join", got[0].Upstream)
+	}
+	if len(got[0].Related) != 0 {
+		t.Errorf("Related = %v, want empty -- Alpaquita carries its CVE in upstream and never "+
+			"needed the related-join AlmaLinux's shape required", got[0].Related)
+	}
+	if len(got[0].Affected) != 1 || got[0].Affected[0].Ecosystem != "Alpaquita:stream" {
+		t.Fatalf("Affected = %v, want one entry keyed Alpaquita:stream", got[0].Affected)
+	}
+	if len(got[0].Severity) != 1 || got[0].Severity[0].Type != "CVSS_V3" {
+		t.Errorf("Severity = %v, want the CVSS_V3 vector carried through", got[0].Severity)
+	}
+	if !slices.Contains(prov.Ecosystems, "Alpaquita:stream") {
+		t.Errorf("Provenance.Ecosystems = %v, want it to include Alpaquita:stream", prov.Ecosystems)
+	}
+}
+
+// TestFetch_AlpaquitaCoversBellSoftHardenedContainersToo is the end-to-end
+// shape D95 rests on, TestFetch_ChainguardCoversWolfiToo's own pattern: one
+// record whose `affected` list carries entries for BOTH "Alpaquita" and
+// "BellSoft Hardened Containers", fetched under the single archive name
+// "Alpaquita". Both ecosystems' entries must survive into the emitted
+// advisory, and BOTH keys must land in Provenance.Ecosystems from this ONE
+// fetch. Deleting familyMatches' Alpaquita/BellSoft Hardened Containers
+// clause turns this red on the coverage assertion while every other test in
+// this package (which never checks for "BellSoft Hardened Containers"
+// specifically) stays green -- exactly the measured hazard this slice
+// exists to close: a BHC image scanned against a database built this way
+// would find "BellSoft Hardened Containers:25" absent from Meta.Ecosystems
+// and hit D20's uncovered-ecosystem skip despite the record being right
+// there in the store.
+func TestFetch_AlpaquitaCoversBellSoftHardenedContainersToo(t *testing.T) {
+	body := zipWith(t, map[string]string{
+		"BELL-CVE-2026-90002.json": `{"id":"BELL-CVE-2026-90002","upstream":["CVE-2026-90002"],
+			"affected":[
+				{"package":{"name":"openjdk26-lite","ecosystem":"Alpaquita:25"},
+				 "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"26.0.2.1_p1-r0"}]}]},
+				{"package":{"name":"openjdk26-lite","ecosystem":"BellSoft Hardened Containers:25"},
+				 "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"26.0.2.1_p1-r0"}]}]}
+			]}`,
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/Alpaquita/all.zip" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	p := New([]string{"Alpaquita"}, srv.URL)
+	var got []advisory.Advisory
+	prov, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
+		got = append(got, a)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("Fetch emitted %d advisories, want 1", len(got))
+	}
+
+	var ecos []string
+	for _, aff := range got[0].Affected {
+		ecos = append(ecos, aff.Ecosystem)
+	}
+	sort.Strings(ecos)
+	if !slices.Equal(ecos, []string{"Alpaquita:25", "BellSoft Hardened Containers:25"}) {
+		t.Errorf("Affected ecosystems = %v, want both Alpaquita:25 and BellSoft Hardened "+
+			"Containers:25 entries kept", ecos)
+	}
+
+	if !slices.Contains(prov.Ecosystems, "Alpaquita:25") {
+		t.Errorf("Provenance.Ecosystems = %v, want it to include Alpaquita:25 -- the family "+
+			"actually fetched", prov.Ecosystems)
+	}
+	if !slices.Contains(prov.Ecosystems, "BellSoft Hardened Containers:25") {
+		t.Errorf("Provenance.Ecosystems = %v, want it to ALSO include BellSoft Hardened "+
+			"Containers:25 -- the one fetch under \"Alpaquita\" must mark both keys covered "+
+			"(D95), or every BHC scan hits D20's uncovered-ecosystem skip despite this exact "+
+			"record sitting in the store", prov.Ecosystems)
 	}
 }

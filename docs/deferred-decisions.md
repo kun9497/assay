@@ -166,11 +166,11 @@ were never "catalogued and reported as not evaluated" — the apk database hides
 usr/lib symlink and the scan hard-errored at exit 2 until D88's path probe). MinimOS and Echo
 left the list in D92 (the D88 template held; Echo image-unverified — no public registry).
 Azure Linux/CBL-Mariner left the list in D94 (the D71/D72 shape held; two aged images
-joined the weekly differential the same day). What is STILL true: on Photon, Arch,
-CleanStart and BellSoft Hardened Containers, **assay finds nothing at all** — Photon, Arch
-and BellSoft are decided-and-sequenced (the 2026-08-26 five-boutique research round;
-BellSoft next, then Photon, then Arch), while CleanStart is deferred with a trigger (next
-entry). grype also ships enrichment feeds
+joined the weekly differential the same day), and Alpaquita/BellSoft Hardened Containers
+left it in D95 (which also brought the apk provides bridge). What is STILL true: on Photon
+and Arch, **assay finds nothing at all** — both decided-and-sequenced (the 2026-08-26
+five-boutique research round; Photon next, then Arch), while CleanStart is deferred with a
+trigger (next entry). grype also ships enrichment feeds
 assay had no equivalent for; D86 ingested EPSS and KEV (typed rating fields, both gates)
 and D87 the EOL data — the enrichment-feed gap against grype is closed.
 

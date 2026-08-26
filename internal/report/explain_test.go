@@ -204,6 +204,43 @@ func TestExplain_ShowsSourcePackageIndirection(t *testing.T) {
 	}
 }
 
+// TestExplain_ShowsProvidesIndirectionNotSourcePackage is D95's own
+// distinction: a finding reached through the apk provides bridge shares the
+// "MatchedName != Package.Name" shape D8's source-package join has, and
+// printing the D8 wording for it would claim the installed package's own
+// apk origin is the name that matched -- wrong for a Liberica JDK package,
+// whose own origin is itself. Deleting the MatchedViaProvides branch (or
+// deleting the field on Finding) collapses this back to the D8 wording,
+// which is what this test exists to catch.
+func TestExplain_ShowsProvidesIndirectionNotSourcePackage(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package: pkgmeta.Package{
+			Name: "liberica26-lite-explain", Version: "26.0.2.1_p1-r0", Ecosystem: "Alpaquita:stream",
+		},
+		Advisory:           advisory.Advisory{ID: "BELL-CVE-explain-provides"},
+		MatchedName:        "openjdk26-lite-explain",
+		MatchedViaProvides: true,
+		Severity:           severity.High, Score: 7.5,
+	}}}
+	var buf bytes.Buffer
+	if _, err := Explain(&buf, res, "BELL-CVE-explain-provides"); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "liberica26-lite-explain") {
+		t.Errorf("output does not name the installed package:\n%s", out)
+	}
+	if !strings.Contains(out, "openjdk26-lite-explain") {
+		t.Errorf("output does not name the provide the advisory was written against (D95):\n%s", out)
+	}
+	if !strings.Contains(out, "apk provides") {
+		t.Errorf("output does not explain the D95 provides indirection in words:\n%s", out)
+	}
+	if strings.Contains(out, "source package") {
+		t.Errorf("output claims a D8 source-package indirection for a D95 provides join:\n%s", out)
+	}
+}
+
 // A direct match (MatchedName == Package.Name) must not claim a source
 // package indirection that did not happen — the mirror-image mistake table.go
 // itself already guards against (TestTable_DoesNotRepeatTheNameWhenItMatchedDirectly).
@@ -339,14 +376,17 @@ func TestComparerName_ExactNamePerEcosystem(t *testing.T) {
 		{"Alpine:v3.99", "apk"},
 		{"Alpine:", "unknown"}, // no release -> not a key version.For ever builds
 		{"Red Hat:9", "rpm"},
-		{"Rocky Linux:9", "rpm"},     // D71
-		{"AlmaLinux:9", "rpm"},       // D72
-		{"Amazon Linux:2", "rpm"},    // D73
-		{"Amazon Linux:2023", "rpm"}, // D73
-		{"Oracle Linux:9", "rpm"},    // D74
-		{"Fedora:44", "rpm"},         // D75
-		{"Azure Linux:2", "rpm"},     // D94
-		{"Azure Linux:3", "rpm"},     // D94
+		{"Rocky Linux:9", "rpm"},                       // D71
+		{"AlmaLinux:9", "rpm"},                         // D72
+		{"Amazon Linux:2", "rpm"},                      // D73
+		{"Amazon Linux:2023", "rpm"},                   // D73
+		{"Oracle Linux:9", "rpm"},                      // D74
+		{"Fedora:44", "rpm"},                           // D75
+		{"Azure Linux:2", "rpm"},                       // D94
+		{"Azure Linux:3", "rpm"},                       // D94
+		{"Alpaquita:stream", "apk"},                    // D95
+		{"Alpaquita:23", "apk"},                        // D95
+		{"BellSoft Hardened Containers:stream", "apk"}, // D95
 		// D92's review closed the D88 gap: the release-less keys printed
 		// "unknown" while version.For ordered them fine — the exact drift
 		// this test exists to catch.
@@ -708,14 +748,16 @@ func TestComparerName_AgreesWithVersionFor(t *testing.T) {
 		"SLES:15.SP6", "SLES:12.SP5", "SLES:16.0",
 		"openSUSE Leap:15.6", "openSUSE Leap:16.0",
 		"Azure Linux:2", "Azure Linux:3",
+		"Alpaquita:stream", "Alpaquita:23", "Alpaquita:25",
+		"BellSoft Hardened Containers:stream", "BellSoft Hardened Containers:23", "BellSoft Hardened Containers:25",
 		// Bare family names and empty releases resolve nowhere, by D6:
 		// letting one through would make a bug that dropped the release
 		// look like it worked.
 		"Alpine:", "Debian:", "Red Hat:", "Rocky Linux:", "AlmaLinux:", "Amazon Linux:", "Oracle Linux:", "Fedora:",
-		"SLES:", "openSUSE Leap:", "Azure Linux:",
+		"SLES:", "openSUSE Leap:", "Azure Linux:", "Alpaquita:", "BellSoft Hardened Containers:",
 		"Ubuntu:", "Ubuntu:Pro:22.04:LTS", "Ubuntu:Pro:FIPS-updates:18.04:LTS",
 		"Alpine", "Debian", "Red Hat", "Rocky Linux", "AlmaLinux", "Amazon Linux", "Oracle Linux", "Fedora",
-		"SLES", "openSUSE Leap", "Azure Linux", "bogus-eco",
+		"SLES", "openSUSE Leap", "Azure Linux", "Alpaquita", "BellSoft Hardened Containers", "bogus-eco",
 	} {
 		_, ok := version.For(eco)
 		name := comparerName(eco)

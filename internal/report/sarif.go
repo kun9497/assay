@@ -241,9 +241,14 @@ func findingMessage(f matcher.Finding, target string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s affects %s %s", f.Advisory.ID, f.Package.Name, f.Package.Version)
 	if f.MatchedName != "" && f.MatchedName != f.Package.Name {
-		// D8. Without this the reader looks up an advisory that never mentions
-		// the installed package and cannot tell a real finding from a bug.
-		fmt.Fprintf(&b, " (matched through source package %s)", f.MatchedName)
+		// D8 (or D95's apk provides bridge — see MatchedViaProvides). Without
+		// this the reader looks up an advisory that never mentions the
+		// installed package and cannot tell a real finding from a bug.
+		if f.MatchedViaProvides {
+			fmt.Fprintf(&b, " (matched through apk provides %s)", f.MatchedName)
+		} else {
+			fmt.Fprintf(&b, " (matched through source package %s)", f.MatchedName)
+		}
 	}
 	if target != "" {
 		fmt.Fprintf(&b, " in %s", target)
@@ -291,7 +296,11 @@ func helpText(f matcher.Finding) string {
 	fmt.Fprintf(&b, "Version: %s\n", f.Package.Version)
 	fmt.Fprintf(&b, "Ecosystem: %s\n", f.Package.Ecosystem)
 	if f.MatchedName != "" && f.MatchedName != f.Package.Name {
-		fmt.Fprintf(&b, "Matched through source package: %s\n", f.MatchedName)
+		if f.MatchedViaProvides {
+			fmt.Fprintf(&b, "Matched through apk provides: %s\n", f.MatchedName)
+		} else {
+			fmt.Fprintf(&b, "Matched through source package: %s\n", f.MatchedName)
+		}
 	}
 	// Spelled out rather than left as an empty "Fix Version:", which is what
 	// grype's SARIF prints for every unfixed finding.

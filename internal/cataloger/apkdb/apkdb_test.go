@@ -2,6 +2,7 @@ package apkdb
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -178,5 +179,88 @@ func TestParse_RecordWithoutNameIsSkipped(t *testing.T) {
 	}
 	if pkgs[0].Name != "b" {
 		t.Errorf("pkgs[0].Name = %q, want b", pkgs[0].Name)
+	}
+}
+
+// D95. Modeled on a real Liberica JDK package's p: line
+// ("liberica26-lite-jdk", measured on a BellSoft image 2026-08-26): a mix of
+// bare provides, one version-qualified provide, and the three capability
+// prefixes (cmd:/so:/pc:) that must be dropped rather than mistaken for
+// package names.
+func TestParse_ProvidesField(t *testing.T) {
+	const rec = "P:liberica26-lite-jdk\nV:26.0.2.1_p1-r0\no:liberica26-lite\n" +
+		"p:java-jdk java26-jdk openjdk26-lite-jdk=26.0.2.1_p1-r0 cmd:java=26.0.2.1_p1-r0 so:libjvm.so=1 pc:jdk.pc=1\n"
+
+	pkgs, err := Parse(strings.NewReader(rec), testEcosystem)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(pkgs) != 1 {
+		t.Fatalf("len(pkgs) = %d, want 1", len(pkgs))
+	}
+	p := pkgs[0]
+
+	wantProvides := []string{"java-jdk", "java26-jdk", "openjdk26-lite-jdk"}
+	if !slices.Equal(p.Provides, wantProvides) {
+		t.Errorf("Provides = %v, want %v -- cmd:/so:/pc:-prefixed entries are file/command "+
+			"capabilities, not package names, and must be dropped (D95)", p.Provides, wantProvides)
+	}
+	if got := p.ProvidesVersion["openjdk26-lite-jdk"]; got != "26.0.2.1_p1-r0" {
+		t.Errorf(`ProvidesVersion["openjdk26-lite-jdk"] = %q, want "26.0.2.1_p1-r0" -- this is `+
+			"the shape a real Liberica advisory join compares against", got)
+	}
+	if _, ok := p.ProvidesVersion["java-jdk"]; ok {
+		t.Errorf(`ProvidesVersion["java-jdk"] should be absent: the p: entry carried no version, ` +
+			"and the matcher must fall back to the package's own Version for it")
+	}
+	for _, dropped := range []string{"cmd:java", "so:libjvm.so", "pc:jdk.pc", "java"} {
+		if slices.Contains(p.Provides, dropped) {
+			t.Errorf("Provides = %v, must not contain %q (a capability, not a package name)", p.Provides, dropped)
+		}
+	}
+}
+
+// A package with no p: line at all -- the common case, most apk records
+// provide nothing beyond their own name -- must leave Provides nil rather
+// than an empty-but-non-nil slice, matching pkgmeta.Package's zero value.
+func TestParse_ProvidesAbsentWhenNoPLine(t *testing.T) {
+	const rec = "P:plain\nV:1-r0\no:plain\n"
+
+	pkgs, err := Parse(strings.NewReader(rec), testEcosystem)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(pkgs) != 1 {
+		t.Fatalf("len(pkgs) = %d, want 1", len(pkgs))
+	}
+	if pkgs[0].Provides != nil {
+		t.Errorf("Provides = %v, want nil", pkgs[0].Provides)
+	}
+	if pkgs[0].ProvidesVersion != nil {
+		t.Errorf("ProvidesVersion = %v, want nil", pkgs[0].ProvidesVersion)
+	}
+}
+
+// A bare, non-prefixed token that is not shaped like a package name either
+// ("/bin/sh", busybox-binsh's real provides entry) is kept rather than
+// special-cased out -- D95 enumerates exactly three capability prefixes to
+// drop (so:/cmd:/pc:), and this is neither. Harmless dead weight, the same
+// call D92's own record.go comment makes for Echo's unreachable
+// "Echo:PyPi"/"Echo:Maven"/"Echo:npm" keys: no advisory is ever authored
+// against "/bin/sh" as a package name, so it is never looked up, but
+// filtering it would need a shape guess this project has not measured a
+// reason to make.
+func TestParse_ProvidesKeepsUnprefixedNonPackageShapedToken(t *testing.T) {
+	const rec = "P:busybox-binsh\nV:1.38.0-r2\no:busybox\np:/bin/sh cmd:sh=1.38.0-r2\n"
+
+	pkgs, err := Parse(strings.NewReader(rec), testEcosystem)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(pkgs) != 1 {
+		t.Fatalf("len(pkgs) = %d, want 1", len(pkgs))
+	}
+	if want := []string{"/bin/sh"}; !slices.Equal(pkgs[0].Provides, want) {
+		t.Errorf("Provides = %v, want %v", pkgs[0].Provides, want)
 	}
 }

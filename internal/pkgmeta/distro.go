@@ -457,6 +457,65 @@ func (d Distro) Ecosystem() (string, error) {
 				ErrNoEcosystem, d.ID, d.VersionID)
 		}
 		return "Azure Linux:" + major, nil
+	case "alpaquita", "bellsoft-hardened-containers":
+		// D95. BellSoft's two apk distros share one release axis and one
+		// ecosystem-family shape, verified against the live OSV archive,
+		// 2026-08-26: every affected entry on both "Alpaquita" (13,627
+		// records) and "BellSoft Hardened Containers" (635 records, a
+		// measured byte-identical filename subset of Alpaquita's own zip —
+		// see fetch.go's Ecosystems comment) is release-qualified —
+		// "Alpaquita:stream" (14,470 entries), "Alpaquita:25" (10,946),
+		// "Alpaquita:23" (9,659), and the three BellSoft Hardened Containers
+		// equivalents — 0 occurrences of a bare, unqualified key on either
+		// family. So unlike Wolfi/Chainguard/MinimOS/Echo below, D6 applies
+		// with full force here, the same as it does for Rocky/AlmaLinux/
+		// Azure Linux: the release is genuinely part of the key.
+		//
+		// The release axis itself is unusual, though: "stream" is a literal
+		// channel name, not a truncatable X.Y version, sitting alongside
+		// numbered LTS releases "23"/"25" — so VERSION_ID is used VERBATIM
+		// once validated, rather than truncated at the first dot the way
+		// Rocky/AlmaLinux/Azure Linux's numeric majors are. Verified against
+		// real images, 2026-08-26: bellsoft/alpaquita-linux-base:musl and
+		// :glibc both report ID=alpaquita, ID_LIKE=alpine,
+		// VERSION_ID=stream, PRETTY_NAME="BellSoft Alpaquita Linux Stream
+		// (musl)"/"(glibc)"; a Liberica JDK image built on Alpaquita
+		// (bellsoft/liberica-runtime-container) reports the identical
+		// ID/VERSION_ID, and BellSoft Hardened Containers images
+		// (bellsoft/hardened-base, bellsoft/hardened-liberica-runtime-
+		// container) report ID=bellsoft-hardened-containers with the same
+		// VERSION_ID shape.
+		//
+		// ID_LIKE=alpine is never read on this path — Distro carries no such
+		// field, and osrelease.Parse never populates one — so there is no
+		// code path by which an Alpaquita or BellSoft Hardened Containers
+		// package could be routed into an Alpine key by accident (D6's
+		// "release differs per distro" reasoning would be silently violated
+		// if it were: Alpaquita's own fixed versions are BellSoft's, not
+		// Alpine's, even where a package shares Alpine's name).
+		//
+		// No LIBC_TYPE distinction is made, and none is needed: the feed
+		// measured 0 affected entries keyed or qualified by musl versus
+		// glibc. A "glibc" package genuinely exists as its own advisory
+		// subject on every release key (BellSoft ships glibc itself as an
+		// apk package on the glibc variant), ordinary D8 source/binary
+		// matching the same way any other package name is — the musl/glibc
+		// split is which packages an image HAS installed, never a second
+		// axis on the advisory key.
+		switch {
+		case d.VersionID == "stream":
+			// fine
+		case d.VersionID != "" && allDigits(d.VersionID):
+			// fine
+		default:
+			return "", fmt.Errorf(
+				"%w: distro %q version %q is neither \"stream\" nor a numbered release",
+				ErrNoEcosystem, d.ID, d.VersionID)
+		}
+		if d.ID == "alpaquita" {
+			return "Alpaquita:" + d.VersionID, nil
+		}
+		return "BellSoft Hardened Containers:" + d.VersionID, nil
 	case "wolfi":
 		// D88. OSV keys Wolfi bare ("Wolfi", no release suffix) because Wolfi
 		// itself ships no release axis — it is a single rolling stream, and
