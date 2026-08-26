@@ -62,6 +62,20 @@ func eolCycle(ecosystem string) (cycle string, ok bool) {
 			release += ".0"
 		}
 	}
+	// D96: Photon OS's own ecosystem key truncates VERSION_ID to the bare
+	// major (pkgmeta.Distro.Ecosystem's "photon" case, following the D71/
+	// D72/D94 shape) because that is the granularity Photon's own CVE feed
+	// publishes at -- one file per major, never per minor. endoflife.date
+	// names the SAME releases with the trailing ".0" kept ("3.0", "4.0",
+	// "5.0", verified live 2026-08-26), the identical mismatch SLES's own
+	// bare-major GA release has against "15.0" above. The fix is the same
+	// shape: append ".0" when the key carried no dot, reshaping at the READ
+	// side rather than widening the ecosystem key itself (which would
+	// require every advisory range in the store to carry the redundant
+	// ".0" too, for a key Photon never needs it for otherwise).
+	if strings.HasPrefix(ecosystem, "Photon OS:") && !strings.Contains(release, ".") {
+		release += ".0"
+	}
 	return release, true
 }
 

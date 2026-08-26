@@ -66,6 +66,69 @@ func alpine319Image(t *testing.T, dbPath string, opts Options) (stdout, stderr s
 	return out.String(), errOut.String(), c
 }
 
+// testDBWithEOLPhoton is testDBWithEOL's own twin for a Photon OS target:
+// Ecosystems must cover "Photon OS:5" or the scan itself would refuse
+// before ever reaching the EOL gate (D20's uncovered-ecosystem exit).
+func testDBWithEOLPhoton(t *testing.T, rows []store.EOLRelease) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := w.SetMeta(store.Meta{
+		Providers: map[string]store.Provenance{"photon": {Ecosystems: []string{"Photon OS:5"}}},
+		EOL:       rows,
+	}); err != nil {
+		t.Fatalf("SetMeta: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	return path
+}
+
+// photon5Image scans a real-shaped Photon OS 5.0 rpm image (the same
+// fixture TestCatalogFromImage_PhotonPackagesAreKeyed drives) through a real
+// Run() call, mirroring alpine319Image's own role for the Alpine EOL gate
+// tests below.
+func photon5Image(t *testing.T, dbPath string, opts Options) (stdout, stderr string, code int) {
+	t.Helper()
+	tarPath := filepath.Join(t.TempDir(), "image.tar")
+	writeImageTar(t, tarPath, map[string]string{
+		osReleasePath:              osReleasePhoton5,
+		"var/lib/rpm/rpmdb.sqlite": fixtureBytes(t, rpmFixture),
+	})
+	var out, errOut bytes.Buffer
+	c := Run(context.Background(), dbPath, "docker-archive:"+tarPath, opts, &out, &errOut)
+	return out.String(), errOut.String(), c
+}
+
+// TestRun_EOLGateReachesPhotonTarget is D96's own caller-first proof: the
+// "Photon OS:" reshape eolCycle gained (ecosystem "Photon OS:5" -> cycle
+// "5.0") must actually reach Run's rendered output through a real Photon OS
+// rpm image, not merely agree with TestEOLCycle's direct table in
+// isolation. Deleting the "Photon OS:" branch in eolCycle would make it
+// return "5" instead of "5.0"; lookupEOL's row match (which compares
+// against endoflife.date's own "5.0" spelling) would then fail, and this
+// test would stop seeing the EOL line at all -- the exact "helper is
+// covered, nothing calls it" gap CLAUDE.md warns about, closed here by
+// driving the real Run() path rather than eolCycle alone.
+func TestRun_EOLGateReachesPhotonTarget(t *testing.T) {
+	db := testDBWithEOLPhoton(t, []store.EOLRelease{
+		{DistroID: "photon", Release: "5.0", EOLFrom: "2026-01-01", EOLLabel: "Security Support"},
+	})
+	pinClock(t, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)) // well after EOLFrom
+
+	out, errOut, code := photon5Image(t, db, Options{FailOnEOL: true})
+	if code != 1 {
+		t.Fatalf("Run() = %d, want 1 (stdout: %s, stderr: %s)", code, out, errOut)
+	}
+	if !strings.Contains(out, "EOL: photon 5.0 reached end of Security Support on 2026-01-01") {
+		t.Errorf("stdout does not carry the EOL line:\n%s", out)
+	}
+}
+
 // TestRun_EOLGateFiresWhenTargetIsEOL is the caller-first test (CLAUDE.md's
 // own rule): it proves Run actually calls lookupEOL and threads what comes
 // back all the way to both the table renderer and verdict's exit code, not
@@ -208,6 +271,7 @@ func TestEOLCycle(t *testing.T) {
 		"SLES:15":            "15.0", // GA fold: no dot means SP0, endoflife.date's "15.0"
 		"SLES:16.0":          "16.0", // 16+ keys carry VersionID verbatim already
 		"openSUSE Leap:15.6": "15.6",
+		"Photon OS:5":        "5.0", // bare major reshaped to endoflife.date's own "5.0" name
 	} {
 		t.Run(eco, func(t *testing.T) {
 			got, ok := eolCycle(eco)

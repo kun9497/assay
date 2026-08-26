@@ -516,6 +516,43 @@ func (d Distro) Ecosystem() (string, error) {
 			return "Alpaquita:" + d.VersionID, nil
 		}
 		return "BellSoft Hardened Containers:" + d.VersionID, nil
+	case "photon":
+		// D96. VMware/Broadcom Photon OS ingests from its own CVE metadata
+		// feed (internal/provider/photon) -- there is no OSV archive for it
+		// at all, verified absent from
+		// osv-vulnerabilities.storage.googleapis.com/ecosystems.txt,
+		// 2026-08-26. The key is the mainline MAJOR, following the same
+		// D71/D72/D74/D94 shape as Rocky/AlmaLinux/Oracle Linux/Azure Linux:
+		// Photon's feed is published one FILE per major
+		// (cve_data_photon{3.0,4.0,5.0}.json), never per minor, and every
+		// VERSION_ID measured against a real image is already an X.0 shape
+		// with no minor variance to lose ("3.0", "4.0", "5.0" -- Photon does
+		// not ship point releases the way RHEL does), so truncating at the
+		// first '.' the way rhel/rocky/almalinux/ol/azurelinux do is exact,
+		// not lossy, here.
+		//
+		// Verified against real images, 2026-08-26 (mirror.gcr.io/library/
+		// photon:{3.0,4.0,5.0}): all three report ID=photon, VERSION_ID
+		// verbatim "3.0"/"4.0"/"5.0", and no ID_LIKE at all -- unlike
+		// mariner/azurelinux, there is no sibling os-release ID to route
+		// here alongside this one.
+		//
+		// endoflife.date's own Photon release names ("3.0", "4.0", "5.0",
+		// verified live) are NOT what this key uses -- scancmd.eolCycle
+		// reshapes the truncated major back to the dotted form before
+		// looking an EOL row up, the same "reshape at the READ side, not the
+		// key side" convention SLES's ".SP" fold already established, kept
+		// here so the ecosystem key stays release-qualified at the same
+		// granularity the feed itself publishes at.
+		if d.VersionID == "" {
+			return "", fmt.Errorf("%w: distro %q has no VERSION_ID", ErrNoEcosystem, d.ID)
+		}
+		major, _, _ := strings.Cut(d.VersionID, ".")
+		if !allDigits(major) {
+			return "", fmt.Errorf("%w: distro %q version %q is not a numbered release",
+				ErrNoEcosystem, d.ID, d.VersionID)
+		}
+		return "Photon OS:" + major, nil
 	case "wolfi":
 		// D88. OSV keys Wolfi bare ("Wolfi", no release suffix) because Wolfi
 		// itself ships no release axis — it is a single rolling stream, and

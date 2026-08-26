@@ -615,6 +615,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] Alpaquita와 BellSoft Hardened Containers (D95) — fetch 한 번이 두 계열 모두를
       커버하고, apk `p:` provides 다리가 설치된 어떤 패키지도 담지 않는 Liberica
       JDK 이름에 닿음(코퍼스의 10.74%); 그 과정에서 세 번째 apk db 경로(`var/lib`)
+- [x] Photon OS (D96) — 새 flat-JSON provider이고 D90의 충돌을 구조적으로 처음부터
+      피함(major 셋을 가로질러 CVE당 advisory 하나), Fixed-wins와 BDSA-drop 정책을
+      측정하고 셈; 첫 차등이 완벽한 동등성(22/22, 7/7)
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건

@@ -31,6 +31,7 @@ import (
 	"github.com/kun9497/assay/internal/provider/nvd"
 	"github.com/kun9497/assay/internal/provider/oracle"
 	"github.com/kun9497/assay/internal/provider/osv"
+	"github.com/kun9497/assay/internal/provider/photon"
 	"github.com/kun9497/assay/internal/provider/redhat"
 	"github.com/kun9497/assay/internal/provider/suse"
 	"github.com/kun9497/assay/internal/report"
@@ -1964,6 +1965,76 @@ func TestDBUpdateProviders_SUSEDisabledViaEnv(t *testing.T) {
 	for _, p := range ps {
 		if p.Name() == "SUSE CSAF VEX" {
 			t.Errorf("dbUpdateProviders() = %+v, want no SUSE provider with SUSE_ENABLE=0", ps)
+		}
+	}
+}
+
+// TestDBUpdateProviders_PhotonOnByDefault is the caller-first proof for
+// D96's wiring: dbUpdateProviders must actually construct the Photon OS
+// provider when PHOTON_ENABLE is unset, not merely have photon.New sitting
+// unused in the import list. Mirrors TestDBUpdateProviders_SUSEOnByDefault
+// exactly, for the identical reason its own doc comment gives: mutating the
+// call site to drop the provider (or its Options) compiles and would leave
+// every other test in this package green.
+func TestDBUpdateProviders_PhotonOnByDefault(t *testing.T) {
+	t.Setenv("PHOTON_ENABLE", "")
+	t.Setenv("REDHAT_ENABLE", "0") // isolate: only Photon's own wiring is under test here
+	t.Setenv("AMAZON_ENABLE", "0")
+	t.Setenv("ORACLE_ENABLE", "0")
+	t.Setenv("FEDORA_ENABLE", "0")
+	t.Setenv("SUSE_ENABLE", "0")
+
+	orig := newPhotonProvider
+	sawCall := false
+	var gotOpts photon.Options
+	newPhotonProvider = func(opts photon.Options) *photon.Provider {
+		sawCall, gotOpts = true, opts
+		return orig(opts)
+	}
+	defer func() { newPhotonProvider = orig }()
+
+	ps := dbUpdateProviders(io.Discard)
+	if !sawCall {
+		t.Fatal("dbUpdateProviders never constructed the Photon OS provider -- PHOTON_ENABLE defaults ON (D96)")
+	}
+	if gotOpts.Progress == nil {
+		t.Error("photon.New was constructed with a nil Progress -- Fetch's own drop counts would go nowhere")
+	}
+	var found bool
+	for _, p := range ps {
+		if p.Name() == "Photon OS CVE metadata" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("dbUpdateProviders() = %+v, want it to include the Photon OS provider", ps)
+	}
+}
+
+// TestDBUpdateProviders_PhotonDisabledViaEnv is the other half: an operator
+// who does not want to scan Photon OS must be able to turn the fetch off
+// entirely, exactly as REDHAT_ENABLE=0, AMAZON_ENABLE=0, ORACLE_ENABLE=0,
+// FEDORA_ENABLE=0 and SUSE_ENABLE=0 already let them.
+func TestDBUpdateProviders_PhotonDisabledViaEnv(t *testing.T) {
+	t.Setenv("PHOTON_ENABLE", "0")
+	t.Setenv("REDHAT_ENABLE", "0")
+	t.Setenv("AMAZON_ENABLE", "0")
+	t.Setenv("ORACLE_ENABLE", "0")
+	t.Setenv("FEDORA_ENABLE", "0")
+	t.Setenv("SUSE_ENABLE", "0")
+
+	orig := newPhotonProvider
+	sawCall := false
+	newPhotonProvider = func(opts photon.Options) *photon.Provider { sawCall = true; return orig(opts) }
+	defer func() { newPhotonProvider = orig }()
+
+	ps := dbUpdateProviders(io.Discard)
+	if sawCall {
+		t.Error("photon.New was constructed even though PHOTON_ENABLE=0")
+	}
+	for _, p := range ps {
+		if p.Name() == "Photon OS CVE metadata" {
+			t.Errorf("dbUpdateProviders() = %+v, want no Photon OS provider with PHOTON_ENABLE=0", ps)
 		}
 	}
 }

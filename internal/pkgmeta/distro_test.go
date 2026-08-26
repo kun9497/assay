@@ -133,6 +133,11 @@ func TestDistroEcosystem_Unsupported(t *testing.T) {
 		{"mariner with a non-numeric version", Distro{ID: "mariner", VersionID: "beta"}},
 		{"azurelinux with no VERSION_ID", Distro{ID: "azurelinux", VersionID: ""}},
 		{"azurelinux with a non-numeric version", Distro{ID: "azurelinux", VersionID: "beta"}},
+		// D96 gave Photon OS its decision, so the same no-VERSION_ID and
+		// non-numeric-VERSION_ID edge cases every other truncated-major RPM
+		// distro's decision needed apply to it too.
+		{"photon with no VERSION_ID", Distro{ID: "photon", VersionID: ""}},
+		{"photon with a non-numeric version", Distro{ID: "photon", VersionID: "beta"}},
 		// Tumbleweed is refused by NAME, not by version shape (D77) — pinned
 		// here with a version that would otherwise parse as a perfectly good
 		// X.Y release, and again with its REAL VERSION_ID (a build date,
@@ -840,6 +845,61 @@ func TestDistroEcosystem_AzureLinux(t *testing.T) {
 	// centos must still not resolve (D50) -- Azure Linux leaving the
 	// not-evaluated list must not have been a change to the switch's default
 	// case that accidentally let every RPM ID through.
+	if _, err := (Distro{ID: "centos", VersionID: "9"}).Ecosystem(); err == nil {
+		t.Error("centos resolved an ecosystem; D50 still excludes it")
+	}
+	// The no-VERSION_ID and non-numeric-VERSION_ID refusals are pinned in
+	// TestDistroEcosystem_Unsupported, alongside rhel's identical two rows.
+}
+
+// TestDistroEcosystem_Photon: D96. VMware/Broadcom Photon OS keys on the
+// mainline major, the same D71/D72/D74/D94 shape Rocky/AlmaLinux/Oracle
+// Linux/Azure Linux already use -- Photon's own CVE metadata feed is
+// published one file per major, and every real image's VERSION_ID measured
+// is already an X.0 shape with nothing to lose by truncating at the dot.
+func TestDistroEcosystem_Photon(t *testing.T) {
+	for _, tc := range []struct {
+		id, versionID string
+		want          string
+	}{
+		{"photon", "3.0", "Photon OS:3"},
+		{"photon", "4.0", "Photon OS:4"},
+		{"photon", "5.0", "Photon OS:5"},
+		// A bare major (no dot at all) is accepted the same way rhel/rocky/
+		// almalinux/ol/azurelinux accept one -- strings.Cut on a string with
+		// no separator returns the whole string as the first half.
+		{"photon", "5", "Photon OS:5"},
+	} {
+		got, err := Distro{ID: tc.id, VersionID: tc.versionID}.Ecosystem()
+		if err != nil {
+			t.Errorf("id=%q VERSION_ID=%q: %v", tc.id, tc.versionID, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("id=%q VERSION_ID=%q -> %q, want %q", tc.id, tc.versionID, got, tc.want)
+		}
+	}
+	// Photon's key must not converge with any other RPM distro's, or with
+	// Alpine's -- a change that collapsed them would make one distro's
+	// advisories reachable under another's key.
+	for _, tc := range []struct{ id, versionID, want string }{
+		{"alpine", "3.19", "Alpine:v3.19"},
+		{"rhel", "9.8", "Red Hat:9"},
+		{"rocky", "9.4", "Rocky Linux:9"},
+		{"almalinux", "9.6", "AlmaLinux:9"},
+		{"amzn", "2023", "Amazon Linux:2023"},
+		{"ol", "9.8", "Oracle Linux:9"},
+		{"fedora", "44", "Fedora:44"},
+		{"mariner", "2.0", "Azure Linux:2"},
+		{"photon", "5.0", "Photon OS:5"},
+	} {
+		if got, err := (Distro{ID: tc.id, VersionID: tc.versionID}).Ecosystem(); err != nil || got != tc.want {
+			t.Errorf("%s %s -> %q, %v; want %q", tc.id, tc.versionID, got, err, tc.want)
+		}
+	}
+	// centos must still not resolve (D50) -- Photon leaving the not-evaluated
+	// list must not have been a change to the switch's default case that
+	// accidentally let every RPM ID through.
 	if _, err := (Distro{ID: "centos", VersionID: "9"}).Ecosystem(); err == nil {
 		t.Error("centos resolved an ecosystem; D50 still excludes it")
 	}

@@ -24,6 +24,7 @@ import (
 	"github.com/kun9497/assay/internal/provider/nvd"
 	"github.com/kun9497/assay/internal/provider/oracle"
 	"github.com/kun9497/assay/internal/provider/osv"
+	"github.com/kun9497/assay/internal/provider/photon"
 	"github.com/kun9497/assay/internal/provider/redhat"
 	"github.com/kun9497/assay/internal/provider/suse"
 	"github.com/kun9497/assay/internal/scancmd"
@@ -195,6 +196,22 @@ Environment (db build only — a scan reads no environment and no network):
                         rather than hidden.
                         Set this to 0 for a local build that does not scan
                         Fedora.
+  PHOTON_ENABLE=0       Skip VMware/Broadcom Photon OS's own CVE metadata
+                        feed (Photon OS 3.0/4.0/5.0). ON BY DEFAULT (D96),
+                        for the same reason as Red Hat, Amazon Linux, Oracle
+                        Linux and Fedora: the published artifact carries it,
+                        so a build without it produces a narrower database
+                        than db update delivers. Three small JSON files,
+                        ~31.6 MB combined - this does not shorten a build the
+                        way REDHAT_ENABLE=0 does.
+                        Severity has no CVSS vector anywhere in this feed -
+                        only a bare score with nothing to derive a band
+                        from - so a Photon finding's band comes entirely
+                        from another source's rating of the same CVE, joined
+                        through the finding's alias, exactly as an
+                        unscored KISA record already does.
+                        Set this to 0 for a local build that does not scan
+                        Photon OS.
   KISA_ENABLE=0         Skip KISA/KNVD's Korean security notices. ON BY
                         DEFAULT (D37): attaching them is what this project was
                         built for, and leaving it to a flag meant the flagship
@@ -693,21 +710,28 @@ var newFedoraProvider = fedora.New
 // default BaseURL — the live 445 MB archive — ever being fetched from.
 var newSUSEProvider = suse.New
 
+// newPhotonProvider constructs the Photon OS CVE metadata provider (D96). A
+// package variable for the same reason every other newXProvider above is:
+// a test can substitute a spy and observe the Options that reached
+// construction, without photon.New's default majors/BaseURL — the live
+// packages.broadcom.com host — ever being fetched from.
+var newPhotonProvider = photon.New
+
 // dbUpdateProviders is every provider.Provider `db build` runs.
 //
-// All six are on by default. Red Hat was opt-in when it landed, on the
+// All seven are on by default. Red Hat was opt-in when it landed, on the
 // grounds that it adds ~1.9 million affected entries for people who may
 // never scan a RHEL image — and D51 reversed that once the published
-// artifact started carrying it. Amazon Linux, Oracle Linux, Fedora and SUSE
-// followed the same reasoning from the start (D73, D74, D75, D77) rather
-// than repeating Red Hat's opt-in-then-reverse path: the published artifact
-// is meant to carry each of them, and a default that disagreed with the
-// artifact would mean `db build` and `db update` produce different
-// databases, and `db push` would refuse the narrower one.
+// artifact started carrying it. Amazon Linux, Oracle Linux, Fedora, SUSE and
+// Photon OS followed the same reasoning from the start (D73, D74, D75, D77,
+// D96) rather than repeating Red Hat's opt-in-then-reverse path: the
+// published artifact is meant to carry each of them, and a default that
+// disagreed with the artifact would mean `db build` and `db update` produce
+// different databases, and `db push` would refuse the narrower one.
 //
-// REDHAT_ENABLE=0, AMAZON_ENABLE=0, ORACLE_ENABLE=0, FEDORA_ENABLE=0 and
-// SUSE_ENABLE=0 still turn each off, for a local build that wants to be
-// shorter and does not care about that distro.
+// REDHAT_ENABLE=0, AMAZON_ENABLE=0, ORACLE_ENABLE=0, FEDORA_ENABLE=0,
+// SUSE_ENABLE=0 and PHOTON_ENABLE=0 still turn each off, for a local build
+// that wants to be shorter and does not care about that distro.
 func dbUpdateProviders(stderr io.Writer) []provider.Provider {
 	// Progress goes to stderr for the same reason every provider below sends
 	// theirs there: D82's Rocky Linux/AlmaLinux module-stream attachment
@@ -752,6 +776,14 @@ func dbUpdateProviders(stderr io.Writer) []provider.Provider {
 		// Storage and every other product sharing SLES's namespace), the
 		// identical shape Red Hat's own discard line exists for.
 		ps = append(ps, newSUSEProvider(suse.Options{Progress: stderr}))
+	}
+	if envFlag(stderr, "PHOTON_ENABLE", true) {
+		// Progress goes to stderr for the same reason: the per-major
+		// missing-Last-Modified warning and the Fixed-wins/BDSA/sentinel
+		// drop counts in Fetch's own summary line are exactly the "silently
+		// drops/narrows part of its input" case every other provider's
+		// Progress line exists for.
+		ps = append(ps, newPhotonProvider(photon.Options{Progress: stderr}))
 	}
 	return ps
 }

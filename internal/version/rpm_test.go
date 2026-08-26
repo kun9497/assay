@@ -296,6 +296,12 @@ func TestRPM_Routing(t *testing.T) {
 		// "Azure Linux:3"), and rpmvercmp does not care which distro built
 		// the package.
 		"Azure Linux:2", "Azure Linux:3",
+		// Photon OS left this list under D96, for the same reason: its own
+		// CVE metadata feed is release-qualified the same way
+		// ("Photon OS:5"), and rpmvercmp does not care which distro built
+		// the package -- res_ver's ".phN" dist tag orders by the same
+		// trailing-segment rule every other RPM family's own dist tag does.
+		"Photon OS:3", "Photon OS:4", "Photon OS:5",
 	} {
 		c, ok := For(eco)
 		if !ok {
@@ -327,6 +333,9 @@ func TestRPM_Routing(t *testing.T) {
 	}
 	if _, ok := For("Azure Linux"); ok {
 		t.Error(`For("Azure Linux") resolves; the provider only ever writes "Azure Linux:<major>"`)
+	}
+	if _, ok := For("Photon OS"); ok {
+		t.Error(`For("Photon OS") resolves; the provider only ever writes "Photon OS:<major>"`)
 	}
 	// And the rest still do not: Red Hat's errata describe Red Hat's own
 	// builds (D50), Rocky's own feed is ingested only under "Rocky Linux:N"

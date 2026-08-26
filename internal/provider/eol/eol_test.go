@@ -183,7 +183,7 @@ func TestFetch_EmitsTypedRowsFromRealShapedCatalog(t *testing.T) {
 	}
 }
 
-// allSlugsFixture carries one product per wantSlugs entry (all 11), each
+// allSlugsFixture carries one product per wantSlugs entry (all 12), each
 // with a release name distinct enough to prove which slug it came from, plus
 // one non-distro product to keep the filter exercised alongside the mapping.
 // This is the only fixture in the package that reaches every row of
@@ -192,7 +192,7 @@ func TestFetch_EmitsTypedRowsFromRealShapedCatalog(t *testing.T) {
 const allSlugsFixture = `{
   "schema_version": "1.2.1",
   "generated_at": "2026-08-21T07:44:48+00:00",
-  "total": 12,
+  "total": 13,
   "result": [
     {"name": "adonisjs", "labels": {"eoas": null, "discontinued": null, "eol": "x", "eoes": null},
      "releases": [{"name": "7", "eolFrom": null, "isEol": false, "isMaintained": true, "isLts": false}]},
@@ -217,7 +217,9 @@ const allSlugsFixture = `{
     {"name": "sles", "labels": {"eoas": null, "discontinued": null, "eol": "x", "eoes": null},
      "releases": [{"name": "sles-release", "eolFrom": "2031-07-31", "isEol": false, "isMaintained": true, "isLts": false}]},
     {"name": "opensuse", "labels": {"eoas": null, "discontinued": null, "eol": "x", "eoes": null},
-     "releases": [{"name": "opensuse-release", "eolFrom": "2026-12-01", "isEol": false, "isMaintained": true, "isLts": false}]}
+     "releases": [{"name": "opensuse-release", "eolFrom": "2026-12-01", "isEol": false, "isMaintained": true, "isLts": false}]},
+    {"name": "photon", "labels": {"eoas": null, "discontinued": null, "eol": "x", "eoes": null},
+     "releases": [{"name": "photon-release", "eolFrom": "2027-10-11", "isEol": false, "isMaintained": true, "isLts": false}]}
   ]
 }`
 
@@ -250,6 +252,7 @@ func TestFetch_MapsEverySlugToItsDistroID(t *testing.T) {
 		"fedora":        "fedora-release",
 		"sles":          "sles-release",
 		"opensuse-leap": "opensuse-release",
+		"photon":        "photon-release",
 	}
 	for distroID, release := range want {
 		// rowFor itself fails the test (t.Fatalf) if the row is missing --
@@ -286,7 +289,7 @@ func TestFetch_RefusesATotalMismatch(t *testing.T) {
 
 // TestFetch_RefusesAnEmptyDistroSubset is the D78 zero-topics register,
 // applied here: total and len(result) agree, but none of the products in
-// the payload are among the 11 this package keeps (an upstream rename or a
+// the payload are among the 12 this package keeps (an upstream rename or a
 // reshaped slug would look exactly like this). A shape change must not ship
 // a silently EOL-less database that then answers every EOL lookup with "not
 // EOL" instead of "unknown".

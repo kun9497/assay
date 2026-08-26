@@ -33,8 +33,9 @@ const SourceName = "endoflife.date"
 // the per-product v0 endpoints or the lighter v1 index/summary endpoints:
 // the summary omits labels.eol/labels.eoes prose (D87's own reason the
 // isEol boolean is not trustworthy enough to store on its own), and one
-// request for everything is cheaper to keep correct than 11 (one per distro
-// this package keeps) that could each fail independently.
+// request for everything is cheaper to keep correct than 12 (one per distro
+// this package keeps, D96 added Photon as the 12th) that could each fail
+// independently.
 const DefaultURL = "https://endoflife.date/api/v1/products/full"
 
 // wantSlugs maps endoflife.date's own product slug to the os-release ID a
@@ -55,6 +56,12 @@ var wantSlugs = map[string]string{
 	"fedora":       "fedora",
 	"sles":         "sles",
 	"opensuse":     "opensuse-leap",
+	// D96: endoflife.date's own slug IS "photon" (verified live 2026-08-26),
+	// unlike amazon-linux/oracle-linux above -- an identity mapping, but
+	// still a deliberate entry in this table rather than trusted from the
+	// v1 payload's own "aliases" list, for the same reason every row here
+	// is: aliases is not consulted at all (this table's own doc comment).
+	"photon": "photon",
 }
 
 // Options configures New, on epss.Options'/kev.Options' own shape: a URL
@@ -141,7 +148,7 @@ func strOrEmpty(s *string) string {
 	return *s
 }
 
-// Fetch downloads the full product catalog, keeps only the 11 distro
+// Fetch downloads the full product catalog, keeps only the 12 distro
 // products wantSlugs names, and returns one store.EOLRelease per release
 // those products publish.
 func (p *Provider) Fetch(ctx context.Context) ([]store.EOLRelease, store.Provenance, error) {

@@ -387,6 +387,8 @@ func TestComparerName_ExactNamePerEcosystem(t *testing.T) {
 		{"Alpaquita:stream", "apk"},                    // D95
 		{"Alpaquita:23", "apk"},                        // D95
 		{"BellSoft Hardened Containers:stream", "apk"}, // D95
+		{"Photon OS:3", "rpm"},                         // D96
+		{"Photon OS:5", "rpm"},                         // D96
 		// D92's review closed the D88 gap: the release-less keys printed
 		// "unknown" while version.For ordered them fine — the exact drift
 		// this test exists to catch.
@@ -750,14 +752,15 @@ func TestComparerName_AgreesWithVersionFor(t *testing.T) {
 		"Azure Linux:2", "Azure Linux:3",
 		"Alpaquita:stream", "Alpaquita:23", "Alpaquita:25",
 		"BellSoft Hardened Containers:stream", "BellSoft Hardened Containers:23", "BellSoft Hardened Containers:25",
+		"Photon OS:3", "Photon OS:4", "Photon OS:5",
 		// Bare family names and empty releases resolve nowhere, by D6:
 		// letting one through would make a bug that dropped the release
 		// look like it worked.
 		"Alpine:", "Debian:", "Red Hat:", "Rocky Linux:", "AlmaLinux:", "Amazon Linux:", "Oracle Linux:", "Fedora:",
-		"SLES:", "openSUSE Leap:", "Azure Linux:", "Alpaquita:", "BellSoft Hardened Containers:",
+		"SLES:", "openSUSE Leap:", "Azure Linux:", "Alpaquita:", "BellSoft Hardened Containers:", "Photon OS:",
 		"Ubuntu:", "Ubuntu:Pro:22.04:LTS", "Ubuntu:Pro:FIPS-updates:18.04:LTS",
 		"Alpine", "Debian", "Red Hat", "Rocky Linux", "AlmaLinux", "Amazon Linux", "Oracle Linux", "Fedora",
-		"SLES", "openSUSE Leap", "Azure Linux", "Alpaquita", "BellSoft Hardened Containers", "bogus-eco",
+		"SLES", "openSUSE Leap", "Azure Linux", "Alpaquita", "BellSoft Hardened Containers", "Photon OS", "bogus-eco",
 	} {
 		_, ok := version.For(eco)
 		name := comparerName(eco)

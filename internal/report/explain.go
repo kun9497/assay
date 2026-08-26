@@ -419,6 +419,11 @@ func comparerName(ecosystem string) string {
 	if rel, ok := strings.CutPrefix(ecosystem, "BellSoft Hardened Containers:"); ok && rel != "" {
 		return "apk"
 	}
+	// Photon OS is RPM too (D96), added in the same commit that taught
+	// version.For about it, for the same reason.
+	if rel, ok := strings.CutPrefix(ecosystem, "Photon OS:"); ok && rel != "" {
+		return "rpm"
+	}
 	switch ecosystem {
 	// crates.io joins here in the same commit that taught version.For about
 	// it, which is the rule the comment above was written for.
