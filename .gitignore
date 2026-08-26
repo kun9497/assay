@@ -45,3 +45,5 @@ Thumbs.db
 # Windows shell crash dumps, which land in the working directory
 *.stackdump
 .claude/
+/grypediff
+/grypediff.exe

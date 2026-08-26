@@ -1,0 +1,98 @@
+# D93: the grype differential that caught D90, running weekly instead of by
+# hand. It scans the same 13 targets with both assay and grype, reduces each
+# side to (package, CVE) tuples, and judges the result against the committed
+# floors in .github/grype-diff-targets.json -- see cmd/grypediff's own
+# top-of-file comment for why floors, not an exact-match snapshot.
+#
+# The assay database comes from `assay db update` (the published OCI
+# artifact), not a local build: that is what makes this run also a check on
+# the artifact itself, which is how a D90-class corruption in what gets
+# published gets caught, not just a regression in the matcher code.
+name: grype differential
+
+on:
+  # 0 21 * * 0 = Sunday 21:00 UTC = Monday 06:00 KST.
+  schedule:
+    - cron: "0 21 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    # 13 targets, each an image pull plus two scans. Measured locally at a
+    # few minutes per target on a cold cache; a hosted runner and Docker Hub
+    # anonymous rate limits (mitigated by mirror.gcr.io, but not eliminated)
+    # both push this well past that, so the cap here is generous rather than
+    # tight the way db-publish.yml's is.
+    timeout-minutes: 90
+    env:
+      # A workspace-local database, never the developer cache path: this job
+      # must always validate a freshly pulled artifact, not whatever a
+      # previous run or a runner image happened to leave behind.
+      ASSAY_DB_DIR: ${{ github.workspace }}/.assay-db
+      # Same reasoning as db-publish.yml's own use of this flag: a scheduled
+      # job asking grype's CLI to check for its own updates is one more
+      # network call for no benefit to a run that reports its own pinned
+      # version below.
+      GRYPE_CHECK_FOR_APP_UPDATE: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Build assay
+        run: go build -o ./bin/assay ./cmd/assay
+
+      - name: Build grypediff
+        run: go build -o ./bin/grypediff ./cmd/grypediff
+
+      # Pinned, not "latest": a moving grype version would make a floor
+      # breach ambiguous between "assay regressed" and "grype changed
+      # underneath this workflow". Bump this deliberately, in the same
+      # commit as a re-seed of the floors file, when there is a reason to.
+      - name: Install grype v0.116.1
+        run: |
+          curl -sSfL https://get.anchore.io/grype | sh -s -- -b ./bin v0.116.1
+          ./bin/grype version
+
+      - name: Update grype's vulnerability database
+        run: ./bin/grype db update
+
+      - name: Pull the published assay database
+        run: ./bin/assay db update
+
+      - name: Run the differential
+        id: diff
+        run: |
+          set +e
+          # The shell opens the report redirect before grypediff's own
+          # MkdirAll ever runs, so the directory must exist first.
+          mkdir -p ./grype-diff-capture
+          ./bin/grypediff \
+            -targets .github/grype-diff-targets.json \
+            -assay ./bin/assay \
+            -grype ./bin/grype \
+            -capture ./grype-diff-capture \
+            > ./grype-diff-capture/report.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      # Captures go up whether the run held its floors or not -- a passing
+      # week's numbers are exactly what next week's regression gets compared
+      # against by eye, and a failing week is what a human re-judges locally
+      # with `grypediff -targets ... -offline ./grype-diff-capture`.
+      - name: Upload captures and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grype-diff-capture
+          path: ./grype-diff-capture
+          retention-days: 30
+
+      - name: Fail the job on a breach or an untrustworthy target
+        run: exit ${{ steps.diff.outputs.exit_code }}

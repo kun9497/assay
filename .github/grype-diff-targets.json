@@ -1,0 +1,106 @@
+[
+  {
+    "name": "alpine319",
+    "tag": "alpine:3.19",
+    "ref": "mirror.gcr.io/library/alpine@sha256:6baf43584bcb78f2e5847d1de515f23499913ac9f12bdf834811a3145eb11ca1",
+    "minAgree": 8,
+    "minFindings": 8,
+    "maxFindings": 25
+  },
+  {
+    "name": "debian12",
+    "tag": "debian:12",
+    "ref": "mirror.gcr.io/library/debian@sha256:6ebd97fa83deb272194a2cf015b3d26a4d538e9ad3a7a79d544c8af5b0a01443",
+    "minAgree": 143,
+    "minFindings": 147,
+    "maxFindings": 348
+  },
+  {
+    "name": "ubuntu2204",
+    "tag": "ubuntu:22.04",
+    "ref": "mirror.gcr.io/library/ubuntu@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc",
+    "minAgree": 81,
+    "minFindings": 81,
+    "maxFindings": 192
+  },
+  {
+    "name": "ubi8n18",
+    "tag": "ubi8/nodejs-18:latest",
+    "ref": "registry.access.redhat.com/ubi8/nodejs-18@sha256:77d47e5c63e2a45a5d6a5546b145278f04a1a20fcf01b8a3ffaeb1f49056cf11",
+    "minAgree": 917,
+    "minFindings": 4746,
+    "maxFindings": 11168
+  },
+  {
+    "name": "ubi9",
+    "tag": "ubi9/ubi:latest",
+    "ref": "registry.access.redhat.com/ubi9/ubi@sha256:b8c53f907b7ea8934d6bb23b319ca7b5ab567e61a0806ffc80170631cabc7563",
+    "minAgree": 350,
+    "minFindings": 359,
+    "maxFindings": 846
+  },
+  {
+    "name": "rocky9",
+    "tag": "rockylinux:9",
+    "ref": "mirror.gcr.io/library/rockylinux@sha256:d7be1c094cc5845ee815d4632fe377514ee6ebcf8efaed6892889657e5ddaaa6",
+    "minAgree": 273,
+    "minFindings": 275,
+    "maxFindings": 648
+  },
+  {
+    "name": "alma9",
+    "tag": "almalinux:9",
+    "ref": "mirror.gcr.io/library/almalinux@sha256:d2515c769e7b73f95c4fde38c0a505336ff38f14990c0b7253b77060a049a743",
+    "minAgree": 90,
+    "minFindings": 90,
+    "maxFindings": 212
+  },
+  {
+    "name": "ol9",
+    "tag": "oraclelinux:9",
+    "ref": "mirror.gcr.io/library/oraclelinux@sha256:3adbd4f3b22d816c90e78a9c9c2e0ddf65fc1bbadd816dc202054471a85f38b2",
+    "minAgree": 31,
+    "minFindings": 33,
+    "maxFindings": 78
+  },
+  {
+    "name": "fedora",
+    "tag": "fedora:latest",
+    "ref": "mirror.gcr.io/library/fedora@sha256:6c75d5bf57cb0fa5aa4b92c6a83c86c791644496d9ac230de7711f5b8ec3b898",
+    "minAgree": 26,
+    "minFindings": 47,
+    "maxFindings": 112
+  },
+  {
+    "name": "az2023",
+    "tag": "amazonlinux:2023",
+    "ref": "mirror.gcr.io/library/amazonlinux@sha256:181f98c48832fe926f8ca3b6ffeafcce128e96e77b93d08fbe9a9bc9403ce284",
+    "minAgree": 0,
+    "minFindings": 0,
+    "maxFindings": 25
+  },
+  {
+    "name": "wolfi",
+    "tag": "wolfi-base:latest",
+    "ref": "cgr.dev/chainguard/wolfi-base@sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72",
+    "minAgree": 0,
+    "minFindings": 0,
+    "maxFindings": 25
+  },
+  {
+    "name": "leap156",
+    "tag": "opensuse/leap:15.6",
+    "ref": "registry.opensuse.org/opensuse/leap@sha256:e4d84bbc5e0fa0df64381e95ad7ea8e3867cc34f3b1d174e9948d0f559d223e2",
+    "minAgree": 0,
+    "minFindings": 10,
+    "maxFindings": 25
+  },
+  {
+    "name": "bci156",
+    "tag": "bci/bci-base:15.6",
+    "ref": "registry.suse.com/bci/bci-base@sha256:c4bd6f1a43a3d80e9345e75a0e115e9a34daee55120ad4ba2f14d71bd29ba1eb",
+    "minAgree": 15,
+    "minFindings": 102,
+    "maxFindings": 242
+  }
+]

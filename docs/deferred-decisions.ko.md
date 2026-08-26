@@ -105,6 +105,16 @@ D63부터 읽습니다. 바로 위 항목을 틀리게 썼기 때문에 남겨�
 
 ### 2026-08-24 grype 차등 — 타깃 13개, 진짜 버그 하나
 
+**D93에서 제도화됨(2026-08-26)**: 같은 타깃 13개가 digest로 고정되어 CI에서 매주
+돌고, 발행된 아티팩트에 대고 커밋된 floor로 판정받습니다
+(`.github/grype-diff-targets.json`) — 왜 스냅샷이 아니라 floor인지는 로드맵 항목
+참조. D93의 시드 작업은 또한 ALSA/ELSA finding이 CVE를 JSON 문서 안의 NVD/EPSS
+annotation의 `advisoryId`를 통해서'만' 적는다는 것을 찾아냈습니다(D71이 읽는 OSV
+`related` 필드는 `AdvisoryRecord`가 노출하지 않습니다); `grypediff`가 ratings
+컬럼을 읽는 이유가 그것입니다. JSON 문서 자체에 `related`를 노출하는 것은 ratings
+컬럼을 쓸 수 없는 소비자가 나타날 때까지 미룹니다 — annotation은 발행된-아티팩트
+스캔마다 함께 실려 오므로, 오늘은 CVE가 항상 문서 어딘가에 있습니다.
+
 D89 뒤에 동등성 재점검으로 실행했습니다; D90의 CSAF ID 충돌을 찾아냈습니다(로드맵
 참조). 계열별 동등성: alpine은 distro 데이터가 10/10 동일합니다(grype의 나머지 4건은
 자신의 CPE-fallback이고, assay가 의도적으로 갖지 않은 matcher입니다); debian은
