@@ -18,6 +18,12 @@ on:
 
 permissions:
   contents: read
+  # The published artifact lives on ghcr.io as a PRIVATE package: an
+  # anonymous `assay db update` gets UNAUTHORIZED (measured on this
+  # workflow's first dispatch, 2026-08-26). db update reads the standard
+  # Docker keychain (authn.DefaultKeychain, internal/dbcmd/pull.go), so the
+  # same docker-login step db-publish.yml uses for its push covers the pull.
+  packages: read
 
 jobs:
   diff:
@@ -63,6 +69,9 @@ jobs:
 
       - name: Update grype's vulnerability database
         run: ./bin/grype db update
+
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
       - name: Pull the published assay database
         run: ./bin/assay db update
