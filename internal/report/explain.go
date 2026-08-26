@@ -108,9 +108,20 @@ func explainOne(w io.Writer, f matcher.Finding) error {
 	lines := []string{
 		fmt.Sprintf("package:  %s %s [%s]", f.Package.Name, f.Package.Version, f.Package.Ecosystem),
 	}
-	if f.MatchedName == "" || f.MatchedName == f.Package.Name {
+	switch {
+	case f.MatchedName == "" || f.MatchedName == f.Package.Name:
 		lines = append(lines, fmt.Sprintf("matched:  %s (direct match)", f.Package.Name))
-	} else {
+	case f.MatchedViaProvides:
+		// D95: an apk provides join, NOT a D8 source-package one -- both
+		// leave MatchedName != Package.Name, and printing the D8 wording
+		// here would claim the installed package's own apk origin is the
+		// name that matched, which BellSoft's Liberica JDK packages
+		// disprove (their own origin is themselves; the join is through a
+		// sibling package's `p:` clause instead).
+		lines = append(lines, fmt.Sprintf(
+			"matched:  %s (apk provides, D95 — declared by installed package %s)",
+			f.MatchedName, f.Package.Name))
+	default:
 		// D8: the advisory names the source package, not the installed one.
 		// Spelled out in words as well as names, because a reader who only
 		// sees two names side by side has no way to tell which one is the
@@ -395,6 +406,18 @@ func comparerName(ecosystem string) string {
 	// D92's review found and this function's own doc comment warns about.
 	if rel, ok := strings.CutPrefix(ecosystem, "Azure Linux:"); ok && rel != "" {
 		return "rpm"
+	}
+	// Alpaquita and BellSoft Hardened Containers are apk too (D95), added in
+	// the same commit that taught version.For about them, for the same
+	// reason -- both have a genuine release axis (measured 2026-08-26: 0
+	// bare-key occurrences on either family), so this is a prefix rule like
+	// Rocky/AlmaLinux/Azure Linux's above, not a plain-name case like
+	// Wolfi/Chainguard/MinimOS below.
+	if rel, ok := strings.CutPrefix(ecosystem, "Alpaquita:"); ok && rel != "" {
+		return "apk"
+	}
+	if rel, ok := strings.CutPrefix(ecosystem, "BellSoft Hardened Containers:"); ok && rel != "" {
+		return "apk"
 	}
 	switch ecosystem {
 	// crates.io joins here in the same commit that taught version.For about

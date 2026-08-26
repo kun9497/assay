@@ -19,6 +19,7 @@
         ]
       },
       "matchedName": "openssl",
+      "matchedViaProvides": false,
       "advisory": {
         "id": "CVE-2024-12345",
         "aliases": [
@@ -65,6 +66,7 @@
         "purl": "pkg:golang/example.com/bar@v1.2.3"
       },
       "matchedName": "example.com/bar",
+      "matchedViaProvides": false,
       "advisory": {
         "id": "GHSA-abcd",
         "upstream": [
@@ -102,6 +104,7 @@
         "purl": "pkg:pypi/django@3.2.12"
       },
       "matchedName": "django",
+      "matchedViaProvides": false,
       "advisory": {
         "id": "GHSA-w24h-v9qh-8gxj",
         "aliases": [

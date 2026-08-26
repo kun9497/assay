@@ -159,12 +159,12 @@ apk 데이터베이스가 usr/lib 심볼릭 링크 뒤에 숨어 있어서 D88�
 전까지는 스캔이 하드 exit 2로 에러났습니다). MinimOS와 Echo는 D92에서 이 목록을
 벗어났습니다(D88 템플릿이 그대로 통했습니다; Echo는 공개 레지스트리가 없어 라우팅이
 미검증입니다). Azure Linux/CBL-Mariner는 D94에서 이 목록을 벗어났습니다(D71/D72
-모양이 그대로 통했습니다; 오래된 이미지 둘이 같은 날 주간 차등에 합류했습니다).
-여전히 사실인 것: Photon, Arch, CleanStart, BellSoft Hardened Containers에서는
-**assay가 정말로 아무것도 찾지 못합니다** — Photon, Arch, BellSoft는 이미
-결정되고 순서가 잡혀 있습니다(2026-08-26의 다섯-소규모배포판 조사 라운드; BellSoft가
-다음, 그다음 Photon, 그다음 Arch), 반면 CleanStart는 트리거를 달고 미뤄져 있습니다(다음
-항목). grype는 또한 assay에 대응물이 없던 보강
+모양이 그대로 통했습니다; 오래된 이미지 둘이 같은 날 주간 차등에 합류했습니다), 그리고
+Alpaquita/BellSoft Hardened Containers는 D95에서 벗어났습니다(apk provides 다리도
+함께 가져왔습니다). 여전히 사실인 것: Photon과 Arch에서는 **assay가 정말로 아무것도
+찾지 못합니다** — 둘 다 이미 결정되고 순서가 잡혀 있습니다(2026-08-26의
+다섯-소규모배포판 조사 라운드; Photon이 다음, 그다음 Arch), 반면 CleanStart는 트리거를
+달고 미뤄져 있습니다(다음 항목). grype는 또한 assay에 대응물이 없던 보강
 피드도 싣습니다; D86이 EPSS와 KEV를 수집했고(typed rating 필드, 게이트 둘) D87이 EOL
 데이터를 수집했습니다 — grype 대비 보강 피드 격차가 닫혔습니다.
 

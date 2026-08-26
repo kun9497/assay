@@ -409,3 +409,27 @@ func TestSARIF_SourcePackageMatchIsNamed(t *testing.T) {
 		t.Errorf("message = %q, want it to name the scanned target", msg)
 	}
 }
+
+// TestSARIF_ProvidesMatchIsNamedNotAsSourcePackage is D95's own distinction
+// from the D8 test above: a provides-bridged finding shares the same
+// "MatchedName != Package.Name" shape, and the message must say "apk
+// provides", not "source package" -- a wrong label here would tell a
+// reviewer to go check the apk database's `o:` origin field, which for a
+// Liberica JDK package is not where the indirection actually lives.
+func TestSARIF_ProvidesMatchIsNamedNotAsSourcePackage(t *testing.T) {
+	f := findingFixture("BELL-CVE-2026-7", "liberica26-lite", severity.High, 7.5, "", advisory.FixStateNotFixed)
+	f.MatchedName = "openjdk26-lite"
+	f.MatchedViaProvides = true
+	run := run0(t, sarifOf(t, matcher.Result{Findings: []matcher.Finding{f}},
+		cyclonedx.Stats{Components: 1, Cataloged: 1}))
+	msg := resultsOf(t, run)[0]["message"].(map[string]any)["text"].(string)
+	if !strings.Contains(msg, "openjdk26-lite") || !strings.Contains(msg, "liberica26-lite") {
+		t.Errorf("message = %q, want both the installed package and the provide", msg)
+	}
+	if !strings.Contains(msg, "apk provides") {
+		t.Errorf("message = %q, want it to say \"apk provides\" (D95)", msg)
+	}
+	if strings.Contains(msg, "source package") {
+		t.Errorf("message = %q, must not claim a D8 source-package indirection for a D95 provides join", msg)
+	}
+}

@@ -31,6 +31,21 @@ type Finding struct {
 	// It lives here rather than on version.Evidence because the version package
 	// compares versions; which name reached the advisory is a matcher fact.
 	MatchedName string
+	// MatchedViaProvides reports whether MatchedName was reached through the
+	// apk provides bridge (D95) rather than through D8's source-package
+	// indirection. Both leave MatchedName != Package.Name, and a renderer
+	// that cannot tell them apart mislabels one as the other — explain.go's
+	// and sarif.go's own "(source package, D8 ...)" wording would otherwise
+	// say so for a Liberica JDK finding whose installed package's own D8
+	// origin is itself, not the name that matched.
+	//
+	// A typed bool rather than inferred from Evidence.Reason's free text:
+	// Reason is prose for a human, not a signal a renderer should parse, and
+	// grepping it for "provides" would be the exact "helper is covered,
+	// nothing calls it" shape one layer further in if the wording ever
+	// changed. Match is the only legitimate constructor; the zero value
+	// (false) is correct for every finding that is not a provides join.
+	MatchedViaProvides bool
 	// Severity and Score are derived from the advisory's own CVSS vectors at
 	// match time (D13), never read from a value baked in when the database
 	// was built. A record carrying several vectors is banded by the highest
@@ -672,6 +687,32 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 		if p.Source != nil && p.Source.Name != "" && p.Source.Name != p.Name {
 			names = append(names, p.Source.Name)
 		}
+		// D95: the apk provides bridge. BellSoft's Alpaquita advisories
+		// name Liberica JDK packages ("openjdk26-lite-jdk") that are
+		// unreachable through either name above — the installed apk
+		// package is "liberica26-lite-jdk", and its own D8 origin is
+		// "liberica26-lite", neither of which is the string the advisory
+		// was written against. The name is reachable ONLY through a
+		// sibling package's `p:` provides clause
+		// (pkgmeta.Package.Provides' own doc comment carries the
+		// measurement). Deduped against the two names already collected
+		// — a provide that merely repeats the package's own Name or
+		// Source name must not queue a second lookup.
+		//
+		// viaProvide records which of `names` came from here, because
+		// both the version to compare against and the Evidence text
+		// depend on it (below).
+		viaProvide := make(map[string]bool, len(p.Provides))
+		for _, provide := range p.Provides {
+			if provide == "" || provide == p.Name || viaProvide[provide] {
+				continue
+			}
+			if p.Source != nil && provide == p.Source.Name {
+				continue
+			}
+			names = append(names, provide)
+			viaProvide[provide] = true
+		}
 
 		// The dedup maps below are per package, not per lookup name, so an
 		// advisory reachable under both names is still one finding.
@@ -731,7 +772,19 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 			// dpkg-gencontrol omits the field to say and what apk's origin
 			// always implies — so Alpine reaches the same answer it did before.
 			compareVersion := p.Version
-			if lookupName != p.Name && p.Source != nil && p.Source.Version != "" {
+			switch {
+			case viaProvide[lookupName]:
+				// D95, rule 3: the provide's own "=version" when the p:
+				// entry carried one — a real Liberica package carries both
+				// a versioned and a bare provide side by side
+				// (pkgmeta.Package.ProvidesVersion's own doc comment) — else
+				// compareVersion stays p.Version, the package's own
+				// installed version, exactly as an apk origin with no
+				// version implies for the D8 branch above.
+				if v, ok := p.ProvidesVersion[lookupName]; ok && v != "" {
+					compareVersion = v
+				}
+			case lookupName != p.Name && p.Source != nil && p.Source.Version != "":
 				compareVersion = p.Source.Version
 			}
 			candidates, err := m.store.Lookup(p.Ecosystem, lookupName)
@@ -856,6 +909,20 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 						// advisories nor the fact that this one was unevaluable.
 						if !skipped[a.ID] {
 							skipped[a.ID] = true
+							reason := err.Error()
+							// D95, rule 5: the compareVersion that failed to parse
+							// came from a provides clause, not the package's own
+							// V: field — name the provide, or a reader has no way
+							// to tell "your installed version is malformed" from
+							// "a sibling package's provides metadata is". The
+							// underlying error already names the STRING that
+							// would not parse (unreadablePackageVersion); this
+							// only adds which apk field it was read from.
+							if viaProvide[lookupName] {
+								reason = fmt.Sprintf(
+									"%s (this version was read from apk provides %q on package %q, not %q's own V: field)",
+									reason, lookupName, p.Name, p.Name)
+							}
 							res.Skipped = append(res.Skipped, Skipped{
 								Package:    p,
 								AdvisoryID: a.ID,
@@ -867,13 +934,23 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 								// front of every message including the ones
 								// whose cause is the advisory, which is the
 								// confusion being removed.
-								Reason: err.Error(),
+								Reason: reason,
 								Cause:  skipCauseOf(err),
 							})
 						}
 						continue
 					}
 					if hit {
+						// D95, rule 3: the Evidence must say the join was via
+						// provides and name the provide (D10) — without this a
+						// Liberica finding reads exactly like an ordinary direct
+						// match, and a reader has no way to check the claim
+						// against the apk database's own provides clause.
+						if viaProvide[lookupName] {
+							ev.Reason = fmt.Sprintf(
+								"%s (matched via apk provides %q, declared by installed package %q)",
+								ev.Reason, lookupName, p.Name)
+						}
 						seen[a.ID] = true
 						ids := identifiers(a)
 						band, score := severity.Highest(vectorsOf(a))
@@ -896,14 +973,15 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 						if idx == -1 {
 							idx = len(res.Findings)
 							res.Findings = append(res.Findings, Finding{
-								Package:     p,
-								Advisory:    a,
-								Evidence:    ev,
-								MatchedName: lookupName,
-								Severity:    band,
-								Score:       score,
-								Ratings:     []Rating{r},
-								Identifiers: lookupIDs(a),
+								Package:            p,
+								Advisory:           a,
+								Evidence:           ev,
+								MatchedName:        lookupName,
+								MatchedViaProvides: viaProvide[lookupName],
+								Severity:           band,
+								Score:              score,
+								Ratings:            []Rating{r},
+								Identifiers:        lookupIDs(a),
 							})
 						} else {
 							f := &res.Findings[idx]
@@ -912,6 +990,7 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 							if beats(r, winnerOf(*f)) {
 								f.Advisory, f.Evidence = a, ev
 								f.MatchedName = lookupName
+								f.MatchedViaProvides = viaProvide[lookupName]
 								f.Severity, f.Score = band, score
 							}
 						}

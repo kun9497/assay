@@ -31,6 +31,11 @@ type fakeStore struct {
 	// degenerate one: the measured overlap is 2.4% of the corpus.
 	enrichment      map[string][]advisory.Enrichment
 	enrichmentCalls map[string]int
+	// lookupCalls counts Lookup asks per (ecosystem, name) key, mirroring
+	// ratingCalls/enrichmentCalls below -- nil in every fixture that does not
+	// care, so an uncounted fixture is silent rather than a panic (D95: this
+	// is what proves a deduped provides name is not looked up a second time).
+	lookupCalls map[string]int
 }
 
 func (f fakeStore) Covers() (map[string]bool, error) {
@@ -52,7 +57,11 @@ func (f fakeStore) Lookup(ecosystem, name string) ([]advisory.Advisory, error) {
 	// Normalizes like the real store does, so a test can hand the matcher a
 	// raw (un-normalized) package name and still get a hit — matching the
 	// contract Bolt.Lookup actually implements.
-	return f.byKey[ecosystem+"\x00"+pkgmeta.NormalizeName(ecosystem, name)], nil
+	key := ecosystem + "\x00" + pkgmeta.NormalizeName(ecosystem, name)
+	if f.lookupCalls != nil {
+		f.lookupCalls[key]++
+	}
+	return f.byKey[key], nil
 }
 func (f fakeStore) Meta() (store.Meta, error) { return store.Meta{}, nil }
 func (f fakeStore) Close() error              { return nil }
@@ -736,6 +745,12 @@ func TestMatch_SourcePackageReachesTheAdvisory(t *testing.T) {
 	if got := res.Findings[0].MatchedName; got != "openssl" {
 		t.Errorf("MatchedName = %q, want %q", got, "openssl")
 	}
+	// D95: a D8 source-package join must NOT be mislabeled as a provides
+	// join -- the two share the "MatchedName != Package.Name" shape and a
+	// renderer needs this field to tell them apart correctly.
+	if res.Findings[0].MatchedViaProvides {
+		t.Error("MatchedViaProvides = true, want false: this is a D8 source-package join, not a provides one")
+	}
 }
 
 // The binary name still matches when it is the one the advisory names, and
@@ -920,6 +935,268 @@ func TestMatch_IndirectLookupComparesTheSourceVersion(t *testing.T) {
 	}
 	if got := res.Findings[0].Advisory.ID; got != "DEBIAN-CVE-2026-1" {
 		t.Errorf("Advisory.ID = %q, want DEBIAN-CVE-2026-1", got)
+	}
+}
+
+// --- D95: the apk provides bridge ---
+//
+// BellSoft's Alpaquita advisories name a Liberica JDK package
+// ("openjdk26-lite-jdk") that is never an installed package's own Name and
+// never its D8 Source (apk `o:` origin) either — the origin of the real
+// installed package "liberica26-lite-jdk" is "liberica26-lite", not
+// "openjdk26-lite-jdk". The name is reachable ONLY through the apk `p:`
+// provides clause. Fixture names below are deliberately non-nesting
+// (BELL-9001 etc. never contain each other, or "openjdk26-lite-jdk"/
+// "liberica26-lite-jdk"/"java-jdk" as a substring of one another) per
+// CLAUDE.md's substring-collision rule.
+
+// TestMatch_ViaProvidesUsesTheProvidesOwnVersion is the sharp version of
+// "the join happened" — rather than merely asserting a Finding appeared, it
+// pins WHICH version was compared. The advisory's fix bound equals the
+// PACKAGE's own installed Version exactly (so comparing that would report
+// clean), while the PROVIDE's own carried version sits below the fix (so
+// comparing that reports vulnerable). Only reading ProvidesVersion produces
+// a finding here; falling back to Package.Version would silently produce
+// none.
+func TestMatch_ViaProvidesUsesTheProvidesOwnVersion(t *testing.T) {
+	adv := advWithRange("BELL-9001", "Alpaquita:stream", "openjdk26-lite-jdk",
+		"0", "26.0.2.1_p1-r0", advisory.RangeEcosystem)
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Alpaquita:stream\x00openjdk26-lite-jdk": {adv},
+	}}
+
+	p := pkg("liberica26-lite-jdk", "26.0.2.1_p1-r0", "Alpaquita:stream") // == the fix
+	p.Source = &pkgmeta.SourcePackage{Name: "liberica26-lite"}
+	p.Provides = []string{"openjdk26-lite-jdk"}
+	p.ProvidesVersion = map[string]string{"openjdk26-lite-jdk": "26.0.1.0_p1-r0"} // < the fix
+
+	res, err := New(s).Match(pkgmeta.Target{Packages: []pkgmeta.Package{p}})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1: comparing the PROVIDE's own version (below the fix) "+
+			"must reach the advisory even though the package's own installed version equals "+
+			"the fix exactly; got %+v (skipped %+v)", len(res.Findings), res.Findings, res.Skipped)
+	}
+	f := res.Findings[0]
+	if f.MatchedName != "openjdk26-lite-jdk" {
+		t.Errorf("MatchedName = %q, want openjdk26-lite-jdk", f.MatchedName)
+	}
+	if !f.MatchedViaProvides {
+		t.Error("MatchedViaProvides = false, want true -- a renderer distinguishing this from " +
+			"a D8 source-package join reads this field, not Evidence.Reason's free text")
+	}
+	if f.Evidence.Fixed != "26.0.2.1_p1-r0" {
+		t.Errorf("Evidence.Fixed = %q, want 26.0.2.1_p1-r0", f.Evidence.Fixed)
+	}
+	// D10/D95: the Reason must say the join was via provides and name the
+	// provide, not just restate the range like an ordinary direct match.
+	if !strings.Contains(f.Evidence.Reason, "provides") {
+		t.Errorf("Evidence.Reason = %q, does not mention \"provides\"", f.Evidence.Reason)
+	}
+	if !strings.Contains(f.Evidence.Reason, "openjdk26-lite-jdk") {
+		t.Errorf("Evidence.Reason = %q, does not name the provide \"openjdk26-lite-jdk\"", f.Evidence.Reason)
+	}
+}
+
+// TestMatch_ViaProvidesBareFallsBackToPackageVersion covers rule 3's other
+// required row: a `p:` entry with no "=version" at all (measured
+// side-by-side with a versioned one on a real Liberica package's own
+// provides clause — "java-jdk java26-jdk openjdk26-lite-jdk=...") must fall
+// back to the package's own installed Version, not fail or silently skip.
+func TestMatch_ViaProvidesBareFallsBackToPackageVersion(t *testing.T) {
+	adv := advWithRange("BELL-9002", "Alpaquita:stream", "java-jdk",
+		"0", "26.0.3.0_p1-r0", advisory.RangeEcosystem)
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Alpaquita:stream\x00java-jdk": {adv},
+	}}
+
+	p := pkg("liberica26-lite-jdk", "26.0.2.1_p1-r0", "Alpaquita:stream") // < the fix
+	p.Provides = []string{"java-jdk"}                                     // bare: no ProvidesVersion entry
+
+	res, err := New(s).Match(pkgmeta.Target{Packages: []pkgmeta.Package{p}})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1: a bare provide (no \"=version\") must fall back to the "+
+			"package's own installed Version; got %+v (skipped %+v)", len(res.Findings), res.Findings, res.Skipped)
+	}
+	if got := res.Findings[0].Evidence.Introduced; got != "0" {
+		t.Errorf("Evidence.Introduced = %q, want 0", got)
+	}
+}
+
+// TestMatch_ProvidesDedupedAgainstNameAndSource is rule 3's dedup clause: a
+// provide equal to the package's own Name (or its D8 Source name) must not
+// trigger a second store.Lookup call for the same key.
+func TestMatch_ProvidesDedupedAgainstNameAndSource(t *testing.T) {
+	adv := advWithRange("BELL-9003", "Alpaquita:stream", "liberica26-lite",
+		"0", "26.0.3.0_p1-r0", advisory.RangeEcosystem)
+	calls := map[string]int{}
+	s := fakeStore{
+		byKey: map[string][]advisory.Advisory{
+			"Alpaquita:stream\x00liberica26-lite": {adv},
+		},
+		lookupCalls: calls,
+	}
+
+	p := pkg("liberica26-lite", "26.0.2.1_p1-r0", "Alpaquita:stream")
+	p.Source = &pkgmeta.SourcePackage{Name: "liberica26-lite"} // apk's o: often equals the name
+	// One provide redundantly repeats the package's own Name; apk's real
+	// provides lists do exactly this shape (liberica26-lite itself provides
+	// "openjdk26-lite", but a sibling subpackage's list can repeat the base
+	// name too).
+	p.Provides = []string{"liberica26-lite"}
+
+	res, err := New(s).Match(pkgmeta.Target{Packages: []pkgmeta.Package{p}})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1; got %+v", len(res.Findings), res.Findings)
+	}
+	if got := calls["Alpaquita:stream\x00liberica26-lite"]; got != 1 {
+		t.Errorf("Lookup(Alpaquita:stream, liberica26-lite) called %d times, want 1 -- a "+
+			"provides entry equal to the package's own Name/Source name must be deduped "+
+			"before lookup, not merely deduplicated after the fact (D95)", got)
+	}
+
+	// Second shape: the provide equals the SOURCE name while differing from
+	// the package's own Name. The first fixture cannot see the Source-side
+	// guard at all -- its provide equals Name and Source alike, so the Name
+	// guard alone absorbs it, and removing ONLY the Source guard stayed
+	// green (found by an independent mutation, 2026-08-26). Here Name and
+	// Source differ, the provide repeats Source, and the Source key must
+	// still be looked up exactly once -- through the D8 path, not a second
+	// time through provides.
+	calls2 := map[string]int{}
+	s2 := fakeStore{
+		byKey: map[string][]advisory.Advisory{
+			"Alpaquita:stream\x00liberica26-lite": {adv},
+		},
+		lookupCalls: calls2,
+	}
+	p2 := pkg("liberica26-lite-jdk", "26.0.2.1_p1-r0", "Alpaquita:stream")
+	p2.Source = &pkgmeta.SourcePackage{Name: "liberica26-lite"}
+	p2.Provides = []string{"liberica26-lite"}
+	res2, err := New(s2).Match(pkgmeta.Target{Packages: []pkgmeta.Package{p2}})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(res2.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1; got %+v", len(res2.Findings), res2.Findings)
+	}
+	if got := calls2["Alpaquita:stream\x00liberica26-lite"]; got != 1 {
+		t.Errorf("Lookup(Alpaquita:stream, liberica26-lite) called %d times, want 1 -- a "+
+			"provide equal to the SOURCE name (but not the package Name) must be deduped "+
+			"against the D8 lookup, which the first fixture cannot check (D95)", got)
+	}
+}
+
+// TestMatch_ViaProvidesAndDirectNameDoNotDoubleReport is rule 4: the SAME
+// advisory reachable through both the package's own name and a provide must
+// be one finding, the existing grouping already relied on for D8's
+// source/binary dedup (TestMatch_SourceAndBinaryNameDoNotDoubleReport).
+//
+// Verified by mutation to test what its own name says: removing the
+// pre-lookup dedup guard (the TestMatch_ProvidesDedupedAgainstNameAndSource
+// mutation) leaves this one green, because `seen[a.ID]` already absorbs a
+// SAME advisory object returned from two lookups regardless of whether the
+// second lookup should have happened at all — a documented equivalent, not
+// a gap: this test's own job is proving rule 4 (grouping), not rule 3
+// (dedup-before-lookup), and it does that job even under that mutation.
+func TestMatch_ViaProvidesAndDirectNameDoNotDoubleReport(t *testing.T) {
+	adv := advWithRange("BELL-9004", "Alpaquita:stream", "liberica26-lite-jdk",
+		"0", "26.0.3.0_p1-r0", advisory.RangeEcosystem)
+	// The same advisory is ALSO reachable under the provide name.
+	adv.Affected = append(adv.Affected, advisory.Affected{
+		Ecosystem: "Alpaquita:stream",
+		Name:      "openjdk26-lite-jdk",
+		Ranges:    adv.Affected[0].Ranges,
+	})
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Alpaquita:stream\x00liberica26-lite-jdk": {adv},
+		"Alpaquita:stream\x00openjdk26-lite-jdk":  {adv},
+	}}
+
+	p := pkg("liberica26-lite-jdk", "26.0.2.1_p1-r0", "Alpaquita:stream")
+	p.Provides = []string{"openjdk26-lite-jdk"}
+	p.ProvidesVersion = map[string]string{"openjdk26-lite-jdk": "26.0.2.1_p1-r0"}
+
+	res, err := New(s).Match(pkgmeta.Target{Packages: []pkgmeta.Package{p}})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Errorf("Findings = %d, want 1: the same advisory reached under both the package's "+
+			"own name and a provide is one finding, not two; got %+v", len(res.Findings), res.Findings)
+	}
+}
+
+// TestMatch_UnparseableProvideVersionIsSkipped is rule 5: an unparseable
+// provides version must surface in the existing skipped machinery, with the
+// provide named in the reason, never silently dropped (D9).
+func TestMatch_UnparseableProvideVersionIsSkipped(t *testing.T) {
+	adv := advWithRange("BELL-9005", "Alpaquita:stream", "openjdk26-lite-jdk",
+		"0", "26.0.3.0_p1-r0", advisory.RangeEcosystem)
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Alpaquita:stream\x00openjdk26-lite-jdk": {adv},
+	}}
+
+	p := pkg("liberica26-lite-jdk", "26.0.2.1_p1-r0", "Alpaquita:stream")
+	p.Provides = []string{"openjdk26-lite-jdk"}
+	p.ProvidesVersion = map[string]string{"openjdk26-lite-jdk": "not a version at all!!"}
+
+	res, err := New(s).Match(pkgmeta.Target{Packages: []pkgmeta.Package{p}})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(res.Findings) != 0 {
+		t.Errorf("Findings = %d, want 0: an unparseable provides version must never be treated "+
+			"as not-vulnerable; got %+v", len(res.Findings), res.Findings)
+	}
+	if len(res.Skipped) != 1 {
+		t.Fatalf("Skipped = %d, want 1; got %+v", len(res.Skipped), res.Skipped)
+	}
+	sk := res.Skipped[0]
+	if !strings.Contains(sk.Reason, "openjdk26-lite-jdk") {
+		t.Errorf("Skipped[0].Reason = %q, want it to name the provide %q", sk.Reason, "openjdk26-lite-jdk")
+	}
+	if sk.Cause != SkipTarget {
+		t.Errorf("Skipped[0].Cause = %q, want %q: the unparseable string is this package's own "+
+			"provides metadata, not the advisory's", sk.Cause, SkipTarget)
+	}
+}
+
+// TestMatch_ViaProvidesRespectsEcosystemIsolation: D6, exercised through the
+// new lookup path specifically. An advisory stored ONLY under Alpaquita:23
+// must not reach a package on Alpaquita:stream even when a provide name
+// matches exactly -- the ecosystem boundary the direct-name path already
+// respects must hold for the provides path too. covers is set explicitly so
+// this test reaches the lookup itself rather than stopping at D20's
+// database-coverage skip.
+func TestMatch_ViaProvidesRespectsEcosystemIsolation(t *testing.T) {
+	adv := advWithRange("BELL-9006", "Alpaquita:23", "openjdk26-lite-jdk",
+		"0", "26.0.3.0_p1-r0", advisory.RangeEcosystem)
+	s := fakeStore{
+		byKey: map[string][]advisory.Advisory{
+			"Alpaquita:23\x00openjdk26-lite-jdk": {adv},
+		},
+		covers: []string{"Alpaquita:stream", "Alpaquita:23"},
+	}
+
+	p := pkg("liberica26-lite-jdk", "26.0.2.1_p1-r0", "Alpaquita:stream")
+	p.Provides = []string{"openjdk26-lite-jdk"}
+
+	res, err := New(s).Match(pkgmeta.Target{Packages: []pkgmeta.Package{p}})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(res.Findings) != 0 {
+		t.Errorf("Findings = %d, want 0: an Alpaquita:23 advisory must not reach a package on "+
+			"Alpaquita:stream even through a matching provide name (D6); got %+v", len(res.Findings), res.Findings)
 	}
 }
 
@@ -1426,5 +1703,37 @@ func TestMatch_FixStateFlowsFromRangeThroughToRating_SUSE(t *testing.T) {
 	if got := res.Findings[0].Ratings[0].FixState; got != advisory.FixStateWontFix {
 		t.Errorf("Rating.FixState = %q, want %q: the range's stored state must "+
 			"reach the rating unchanged", got, advisory.FixStateWontFix)
+	}
+}
+
+// TestMatch_SourceJoinCarriesNoProvidesAnnotation is the inverse guard on
+// D95's Evidence text: a D8 source-package join must NOT read as a provides
+// join. An independent mutation (2026-08-26) widened the annotation's
+// condition from viaProvide[lookupName] to lookupName != p.Name and the
+// whole suite stayed green -- every D8 test asserts what the Reason
+// contains, none asserted what it must not, so factually wrong prose on
+// every source-join finding was invisible. Same family as CLAUDE.md's
+// "asserting presence when order is the point".
+func TestMatch_SourceJoinCarriesNoProvidesAnnotation(t *testing.T) {
+	adv := advWithRange("BELL-9004", "Alpaquita:stream", "openssl",
+		"0", "3.5.4-r0", advisory.RangeEcosystem)
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Alpaquita:stream" + string(rune(0)) + "openssl": {adv},
+	}}
+	p := pkg("libssl3", "3.5.3-r0", "Alpaquita:stream")
+	p.Source = &pkgmeta.SourcePackage{Name: "openssl"}
+	res, err := New(s).Match(pkgmeta.Target{Packages: []pkgmeta.Package{p}})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1", len(res.Findings))
+	}
+	f := res.Findings[0]
+	if f.MatchedViaProvides {
+		t.Error("MatchedViaProvides = true on a D8 source join")
+	}
+	if strings.Contains(f.Evidence.Reason, "provides") {
+		t.Errorf("Evidence.Reason = %q -- a source join must not claim a provides join", f.Evidence.Reason)
 	}
 }

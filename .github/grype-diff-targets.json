@@ -118,5 +118,21 @@
     "minAgree": 90,
     "minFindings": 96,
     "maxFindings": 228
+  },
+  {
+    "name": "alpaquita",
+    "tag": "bellsoft/alpaquita-linux-base:stream-musl",
+    "ref": "mirror.gcr.io/bellsoft/alpaquita-linux-base@sha256:d0bf46cb446f36eccacad2604d858537e4455ee2b663729c1f588ca6bb5eca33",
+    "minAgree": 1,
+    "minFindings": 1,
+    "maxFindings": 25
+  },
+  {
+    "name": "liberica21",
+    "tag": "bellsoft/liberica-runtime-container:jdk-21.0.12.1-slim-glibc",
+    "ref": "mirror.gcr.io/bellsoft/liberica-runtime-container@sha256:70963584a7d778c7f3470b92bdef477f50fe3baba3a4cd388654a2b9c8f0e031",
+    "minAgree": 1,
+    "minFindings": 1,
+    "maxFindings": 25
   }
 ]

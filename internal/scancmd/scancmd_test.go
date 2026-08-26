@@ -96,6 +96,25 @@ HOME_URL="https://minimus.io"
 BUG_REPORT_URL="https://support.minimus.io"
 `
 
+// osReleaseAlpaquita is verbatim from a real bellsoft/alpaquita-linux-base:musl
+// pull (measured 2026-08-26; the :glibc tag and BellSoft's Liberica JDK and
+// Hardened Containers images all report the identical ID/ID_LIKE/VERSION_ID
+// shape, only PRETTY_NAME's libc parenthetical and LIBC_TYPE differ).
+// ID_LIKE=alpine is included deliberately, not omitted: distro.go's
+// "alpaquita" case (D95) must route on ID alone and never be tempted into
+// treating this as an Alpine image via ID_LIKE, which Distro does not even
+// carry a field for.
+const osReleaseAlpaquita = `NAME="BellSoft Alpaquita Linux"
+ID=alpaquita
+ID_LIKE=alpine
+VERSION="Stream"
+VERSION_ID=stream
+PRETTY_NAME="BellSoft Alpaquita Linux Stream (musl)"
+HOME_URL="https://bell-sw.com/"
+BUG_REPORT_URL="https://bell-sw.com/support/"
+LIBC_TYPE=musl
+`
+
 // One apk record, minimal but real-shaped: name, version, architecture, and
 // origin (D8). The name deliberately differs from the origin — busybox-binsh
 // -> busybox is one of the six real alpine:3.19 packages that diverge from
@@ -528,6 +547,54 @@ o:usrlib-origin
 	if got := target.Packages[0].Name; got != "busybox-binsh" {
 		t.Errorf("Packages[0].Name = %q, want busybox-binsh (the traditional lib/apk/db/installed "+
 			"path), not the usr/lib physical one", got)
+	}
+}
+
+// TestCatalogFromImage_ApkDBUnderVarLibPhysicalPath_Alpaquita is D95's
+// caller-first test, on TestCatalogFromImage_ApkDBUnderUsrLibPhysicalPath's
+// own shape but a THIRD path, not the same one: BellSoft's Alpaquita and
+// Hardened Containers images ship no /lib at all (verified against a real
+// pulled bellsoft/alpaquita-linux-base image, 2026-08-26 -- unlike Wolfi and
+// Chainguard, this is a real regular file at the FHS-standard location, not
+// a directory-component symlink), so the apk database is only ever found at
+// var/lib/apk/db/installed. Before this constant is added to apkDBPaths,
+// this exact fixture hard-errors "no supported package database found"
+// (exit 2) the identical way the pre-D88 Wolfi fixture did. Deleting
+// apkDBPathVarLib from apkDBPaths (or the probe that reads it) turns this
+// red while every existing Alpine/Wolfi/MinimOS test in this file — none of
+// which has anything under var/lib/apk — stays green.
+func TestCatalogFromImage_ApkDBUnderVarLibPhysicalPath_Alpaquita(t *testing.T) {
+	img := &source.Image{Layers: []source.Layer{
+		imageLayer(t, "sha256:alpaquita", map[string]string{
+			osReleasePath:   osReleaseAlpaquita,
+			apkDBPathVarLib: apkOneRecord, // no lib/apk/db/installed, no usr/lib/apk/db/installed
+		}),
+	}}
+	target, stats, err := catalogFromImage("test-image", img)
+	if err != nil {
+		t.Fatalf("catalogFromImage: %v (want the physical var/lib path to be found)", err)
+	}
+	if target.Distro == nil || target.Distro.ID != "alpaquita" {
+		t.Fatalf("Distro = %+v, want ID alpaquita", target.Distro)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1", len(target.Packages))
+	}
+	p := target.Packages[0]
+	if p.Ecosystem != "Alpaquita:stream" {
+		t.Errorf("Ecosystem = %q, want Alpaquita:stream (D95's distro.go routing)", p.Ecosystem)
+	}
+	if p.Locations[0].LayerDigest != "sha256:alpaquita" {
+		t.Errorf("LayerDigest = %q, want sha256:alpaquita", p.Locations[0].LayerDigest)
+	}
+	// D8 rides free here too: the apk cataloger reads the same `o:` field
+	// regardless of distro or which of the three paths the database was
+	// found under.
+	if p.Source == nil || p.Source.Name != "busybox" {
+		t.Errorf("Source = %+v, want Name busybox (D8)", p.Source)
+	}
+	if stats.Cataloged != 1 {
+		t.Errorf("stats = %+v, want Cataloged=1", stats)
 	}
 }
 

@@ -148,7 +148,27 @@ func familyMatches(ecosystem, want string) bool {
 	// data sitting in the store under exactly the key a Wolfi scan looks up.
 	// Deliberately one-directional (a "Chainguard" want covers a "Wolfi" key,
 	// never the reverse): nothing in this codebase ever fetches under "Wolfi".
-	return want == "Chainguard" && ecosystem == "Wolfi"
+	if want == "Chainguard" && ecosystem == "Wolfi" {
+		return true
+	}
+	// D95: the identical shape, for BellSoft's two apk distros. Alpaquita's
+	// archive is a measured byte-identical superset of BellSoft Hardened
+	// Containers' own (635/635 records, 0 diffs, re-verified 2026-08-26), so
+	// "BellSoft Hardened Containers" is never fetched (see Ecosystems' own
+	// comment in fetch.go). Unlike Chainguard/Wolfi's bare keys, both
+	// families here are release-qualified, so the match has to cover the
+	// WHOLE "BellSoft Hardened Containers:*" prefix, not one bare name — the
+	// same prefix rule the top of this function already applies to Alpine,
+	// applied here to one specific cross-family pair instead of to every
+	// key of the family being fetched.
+	//
+	// One-directional for the same reason Chainguard/Wolfi's is: nothing in
+	// this codebase ever fetches under "BellSoft Hardened Containers".
+	if want == "Alpaquita" &&
+		(ecosystem == "BellSoft Hardened Containers" || strings.HasPrefix(ecosystem, "BellSoft Hardened Containers:")) {
+		return true
+	}
+	return false
 }
 
 // echoNotAffectedSentinel reports whether a range is Echo's own "this

@@ -134,10 +134,36 @@ const DefaultBaseURL = "https://osv-vulnerabilities.storage.googleapis.com"
 // rpm_test.go's own row) is what makes an installed "1.42.0-7.azl3" still
 // order at-or-above the stripped fixed "1.42.0-7" correctly, with no new
 // comparer clause beyond the ecosystem-prefix routing.
+// "Alpaquita" is D95's entry, and it is D88's "one feed, two keys" shape
+// again, not D94's plain-addition one: "BellSoft Hardened Containers" is
+// deliberately absent from this list. Re-verified from the zips 2026-08-26
+// (the same measurement D88 ran for Chainguard/Wolfi): every one of BHC's
+// own 635 records is a byte-identical file, by name and content, to a
+// member of Alpaquita's 13,627 — 0 diffs, 0 BHC-only records — so
+// BellSoft%20Hardened%20Containers/all.zip is never fetched at all.
+// familyMatches' own Alpaquita/BellSoft Hardened Containers clause
+// (record.go) is what makes the one fetch mark BOTH families covered (D20),
+// mirroring D88's direction exactly: an "Alpaquita" want covers a
+// "BellSoft Hardened Containers" key, never the reverse, because nothing in
+// this codebase ever fetches under the BHC name.
+//
+// Unlike Chainguard/Wolfi's release-less keys, both families here ARE
+// release-qualified (D6 applies with full force, the Rocky/AlmaLinux/Azure
+// Linux shape): measured 2026-08-26, every affected entry on both archives
+// carries "Alpaquita:stream"/"Alpaquita:23"/"Alpaquita:25" or the three
+// BellSoft Hardened Containers equivalents, 0 bare occurrences of either
+// family name. IDs are BELL-CVE-YYYY-NNNN, CVE linkage is via `upstream` on
+// 14,262 of 14,262 (100%) — no related-join needed, osv.distroAuthored
+// untouched — and 0 withdrawn.
+//
+// The Liberica JDK provides bridge (internal/matcher, D95) is a separate
+// concern from this fetch: it is why a BellSoft image scores any findings
+// at all for its JDK packages, not why this archive is fetched under one
+// name instead of two.
 var Ecosystems = []string{
 	"Go", "npm", "PyPI", "crates.io", "RubyGems", "Packagist", "NuGet", "Maven",
 	"Alpine", "Debian", "Ubuntu", "Rocky Linux", "AlmaLinux", "Chainguard",
-	"MinimOS", "Echo", "Azure Linux",
+	"MinimOS", "Echo", "Azure Linux", "Alpaquita",
 }
 
 type Provider struct {
@@ -244,17 +270,19 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		// turns every later scan of that distro into a clean report at exit 0.
 		if (eco == "Alpine" || eco == "Debian" || eco == "Ubuntu" || eco == "Rocky Linux" ||
 			eco == "AlmaLinux" || eco == "Chainguard" || eco == "Wolfi" ||
-			eco == "MinimOS" || eco == "Echo" || eco == "Azure Linux") && n == 0 {
+			eco == "MinimOS" || eco == "Echo" || eco == "Azure Linux" ||
+			eco == "Alpaquita" || eco == "BellSoft Hardened Containers") && n == 0 {
 			return store.Provenance{}, fmt.Errorf("fetch %s: archive yielded no %s:* records", eco, eco)
 		}
-		// "Wolfi" above is not dead weight even though nothing in
-		// Ecosystems ever fetches under that literal name (D88's "one
-		// feed, two keys" -- Ecosystems' own comment explains why only
-		// "Chainguard" is fetched). QA on this slice constructed a
+		// "Wolfi" and "BellSoft Hardened Containers" above are not dead
+		// weight even though nothing in Ecosystems ever fetches under either
+		// literal name (D88's and D95's own "one feed, two keys" shapes --
+		// Ecosystems' own comments explain why only "Chainguard" and
+		// "Alpaquita" are fetched). QA on this slice constructed a
 		// Provider directly with p.ecosystems = []string{"Wolfi"} and
 		// found this guard silently did not apply to it, because eco is
 		// only ever compared against the names listed and "Wolfi" was
-		// never one of them. Listing it costs nothing today and closes
+		// never one of them. Listing both costs nothing today and closes
 		// that gap for any caller that hands Fetch an ecosystems list
 		// this package's own default does not build.
 		prov.Records += n

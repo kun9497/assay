@@ -5,6 +5,13 @@
 // here, at catalog time, exactly as it is from cyclonedx's
 // syft:metadata:originPackage property. Nothing downstream — matcher, store,
 // comparer — changes for this being a different Cataloger.
+//
+// D95 adds a second, narrower join for the same reason: apk's "provides"
+// field (p:) is populated here too, because BellSoft's Alpaquita advisories
+// are written against names (e.g. "openjdk26-lite") that are neither an
+// installed package's own name nor its D8 origin — only reachable through a
+// sibling package's provides clause. See pkgmeta.Package.Provides' own doc
+// comment for the measurement, and internal/matcher for the join itself.
 package apkdb
 
 import (
@@ -27,10 +34,11 @@ const installedPath = "/lib/apk/db/installed"
 // accident, if a file's permission string happened to overwrite a field
 // Package actually exposes.
 type record struct {
-	name    string // P: package name
-	version string // V: package version
-	arch    string // A: architecture — recorded, but never part of a lookup key
-	origin  string // o: origin/source package (D8)
+	name     string // P: package name
+	version  string // V: package version
+	arch     string // A: architecture — recorded, but never part of a lookup key
+	origin   string // o: origin/source package (D8)
+	provides string // p: provides clause, raw and unparsed (D95)
 }
 
 // Parse reads an apk installed-database (/lib/apk/db/installed) and returns
@@ -73,7 +81,66 @@ func toPackage(rec record, ecosystem string) pkgmeta.Package {
 		// correct here, not a gap — the comparer uses rec.version above.
 		p.Source = &pkgmeta.SourcePackage{Name: rec.origin}
 	}
+	if provides, versions := parseProvides(rec.provides); len(provides) > 0 {
+		p.Provides = provides
+		p.ProvidesVersion = versions
+	}
 	return p
+}
+
+// provideCapabilityPrefixes are the apk provides-clause prefixes that name a
+// file, command or pkg-config capability rather than a package (D95): so:
+// (shared-library soname), cmd: (an executable on PATH), pc: (a pkg-config
+// module). No advisory this project has measured is ever authored against
+// one of these — joining on them would be a different, unsound mechanism
+// from the plain package-name join Package.Provides exists for — so every
+// token carrying one is dropped entirely rather than stored stripped of its
+// prefix, which would make it indistinguishable from a real package name.
+var provideCapabilityPrefixes = []string{"so:", "cmd:", "pc:"}
+
+func isCapabilityProvide(token string) bool {
+	for _, prefix := range provideCapabilityPrefixes {
+		if strings.HasPrefix(token, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// parseProvides splits one apk `p:` clause's raw value into the bare package
+// names it declares and, for the entries that carried one, the version
+// alongside each (D95). Order is preserved and duplicates are not folded —
+// this is a straight per-token parse, not a set; the matcher is what dedupes
+// against a package's own Name and Source name.
+//
+// A single real provides clause carries both a bare name ("java-jdk") and a
+// version-qualified one ("openjdk26-lite-jdk=26.0.2.1_p1-r0") side by side —
+// measured on a Liberica JDK package's own installed record — so both shapes
+// have to be handled, not just whichever this project's first measured
+// example happened to show.
+func parseProvides(raw string) ([]string, map[string]string) {
+	if raw == "" {
+		return nil, nil
+	}
+	var names []string
+	var versions map[string]string
+	for _, tok := range strings.Fields(raw) {
+		if isCapabilityProvide(tok) {
+			continue
+		}
+		name, version, hasVersion := strings.Cut(tok, "=")
+		if name == "" {
+			continue
+		}
+		names = append(names, name)
+		if hasVersion && version != "" {
+			if versions == nil {
+				versions = make(map[string]string)
+			}
+			versions[name] = version
+		}
+	}
+	return names, versions
 }
 
 // parseRecords splits the file on blank lines and reads the four fields this
@@ -130,6 +197,8 @@ func parseRecords(r io.Reader) ([]record, error) {
 			cur.arch = value
 		case 'o':
 			cur.origin = value
+		case 'p':
+			cur.provides = value
 		}
 	}
 	if err := sc.Err(); err != nil {

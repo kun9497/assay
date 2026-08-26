@@ -294,16 +294,27 @@ func TestNoUnbackedDistroComparer(t *testing.T) {
 	// for it: the rpmdb cataloger already populates Package.Source from
 	// SOURCERPM regardless of distro ID, the same free ride Rocky and
 	// AlmaLinux already ride.
+	// Alpaquita and BellSoft Hardened Containers left it under D95, for a
+	// different reason from every RPM distro above: D8 source indirection
+	// was ALREADY free (the apk cataloger's `o:` read is distro-agnostic),
+	// but neither family's advisories are reachable through it — BellSoft's
+	// own Liberica JDK advisories name a THIRD name that is neither the
+	// installed package nor its apk origin, only a sibling package's
+	// `p:` provides clause (Package.Provides' own doc comment). What
+	// arrived with the comparer here was the provides join itself
+	// (internal/matcher), not new Package.Source plumbing.
 	for _, eco := range []string{
-		"Alpine",       // unversioned: not a key we ever build (D6)
-		"Debian",       // likewise
-		"Red Hat",      // likewise -- the provider writes "Red Hat:9"
-		"Rocky Linux",  // likewise -- the provider writes "Rocky Linux:9"
-		"AlmaLinux",    // likewise -- the provider writes "AlmaLinux:9"
-		"Amazon Linux", // likewise -- the provider writes "Amazon Linux:2"
-		"Oracle Linux", // likewise -- the provider writes "Oracle Linux:9"
-		"Fedora",       // likewise -- the provider writes "Fedora:44"
-		"Azure Linux",  // likewise -- the provider writes "Azure Linux:2"
+		"Alpine",                       // unversioned: not a key we ever build (D6)
+		"Debian",                       // likewise
+		"Red Hat",                      // likewise -- the provider writes "Red Hat:9"
+		"Rocky Linux",                  // likewise -- the provider writes "Rocky Linux:9"
+		"AlmaLinux",                    // likewise -- the provider writes "AlmaLinux:9"
+		"Amazon Linux",                 // likewise -- the provider writes "Amazon Linux:2"
+		"Oracle Linux",                 // likewise -- the provider writes "Oracle Linux:9"
+		"Fedora",                       // likewise -- the provider writes "Fedora:44"
+		"Azure Linux",                  // likewise -- the provider writes "Azure Linux:2"
+		"Alpaquita",                    // likewise -- the provider writes "Alpaquita:stream"
+		"BellSoft Hardened Containers", // likewise -- "BellSoft Hardened Containers:stream"
 	} {
 		if _, ok := For(eco); ok {
 			t.Errorf("For(%q) resolves, but nothing populates Package.Source for it. "+
