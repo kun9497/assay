@@ -3747,6 +3747,46 @@ full-VERSION_ID key, dropped aliases).
 
 ---
 
+### D97 — Arch: a distro with no release axis, and a comparer that only looks like rpm
+
+**Decision.** Arch Linux scans end to end under the release-less sentinel key
+`Arch:rolling` (vunnel's and syft's shared convention — os-release carries no VERSION_ID at
+all): a new provider reading security.archlinux.org's AVG groups, a new pacman cataloger
+(`/var/lib/pacman/local/*/desc`, via the new `source.FilesNamed` one-level-deeper walk that
+excludes ALPM_DB_VERSION by construction), `%BASE%` → `Package.Source` (D8's exact
+analogue, 25 of 137 live packages differ, six of them reachable ONLY through their base),
+and a NEW `Pacman{}` comparer written in the main loop per D9's delegation rule.
+
+**The comparer is not RPM, and a test now enforces that.** libalpm's vercmp shares rpm's
+ancestry and disagrees in exactly the places that decide fix reachability: a remaining
+alpha tail LOSES (`1.0rc < 1.0`; rpm's own `2.0.1a > 2.0.1` rules the other way — the
+measured tensorflow `2.4.0rc4` false negative that forbade aliasing), separator run length
+decides when it differs (`1..0 > 1.0`, no rpm equivalent), `~`/`^` are ordinary separators
+(`1.0~1 > 1.0` — the tilde direction FLIPS against rpm), and the pkgrel leg runs only when
+both sides carry one (`1.0-2 == 1.0`). vercmp(8)'s documented chains replay in both
+directions, and `TestPacman_DivergesFromRPMWhereMeasured` calls both comparers on the same
+inputs asserting the signs DIFFER — a future refactor that quietly aliases one onto the
+other goes red on the divergence itself.
+
+**Status policy, measured.** Fixed 2,151 / Not-affected 193 / Vulnerable 85 / Unknown 15.
+Fixed and Testing (documented by the tracker, zero live occurrences — implemented per spec,
+flagged as synthetic-only) emit a fixed range; Vulnerable is a fix-less range with
+FixState not-fixed — the tracker's own status word is D52's positive evidence; Not-affected
+and Unknown skip with counts. Severity is a word, never a vector — the Photon/KNVD
+precedent, bands arrive via NVD through the CVE aliases (100% CVE-shaped, 8,036/8,036).
+AVG ids never nest a CVE, so no D90 prefix is needed — recorded in the comment rather than
+assumed.
+
+**Recorded tensions.** The feed has no Last-Modified and no date field anywhere — the only
+provider whose Provenance.DataAsOf falls back to time.Now() on EVERY run, a real D12 gap
+owned by upstream (revisit if the tracker ever adds a header). The SBOM path landed too:
+syft's `pkg:alpm` purls (upstream = BASE, unconditional) route through the same generic
+qualifier machinery as apk/deb/rpm. Differential seeded at agree 9 of assay's 11 tuples
+against grype's own arch namespace (20 targets now); the archlinux tag is digest-pinned but
+the tracker is rolling, so maxFindings carries 4× headroom where other targets carry 2×.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

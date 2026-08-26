@@ -150,5 +150,13 @@
     "minAgree": 5,
     "minFindings": 5,
     "maxFindings": 25
+  },
+  {
+    "name": "archlinux",
+    "tag": "archlinux:latest",
+    "ref": "mirror.gcr.io/library/archlinux@sha256:b860afd5823683f7ea389ba5f00d812f4fe55f6f286dea329d2abeefa535e309",
+    "minAgree": 7,
+    "minFindings": 9,
+    "maxFindings": 44
   }
 ]

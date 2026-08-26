@@ -16,6 +16,7 @@ import (
 	"github.com/kun9497/assay/internal/dbcmd"
 	"github.com/kun9497/assay/internal/provider"
 	"github.com/kun9497/assay/internal/provider/amazon"
+	"github.com/kun9497/assay/internal/provider/arch"
 	"github.com/kun9497/assay/internal/provider/eol"
 	"github.com/kun9497/assay/internal/provider/epss"
 	"github.com/kun9497/assay/internal/provider/fedora"
@@ -212,6 +213,21 @@ Environment (db build only — a scan reads no environment and no network):
                         unscored KISA record already does.
                         Set this to 0 for a local build that does not scan
                         Photon OS.
+  ARCH_ENABLE=0         Skip Arch Linux's own security tracker feed
+                        (security.archlinux.org's AVG groups). ON BY DEFAULT
+                        (D97), for the same reason as every distro provider
+                        above: the published artifact carries it, so a build
+                        without it produces a narrower database than
+                        db update delivers. One JSON file, under 1 MB - this
+                        does not shorten a build the way REDHAT_ENABLE=0
+                        does.
+                        Severity is a WORD in this feed (Critical/High/
+                        Medium/Low), never a CVSS vector, so an Arch
+                        finding's band comes entirely from another source's
+                        rating of the same CVE, joined through the finding's
+                        alias, the same KISA/Photon precedent.
+                        Set this to 0 for a local build that does not scan
+                        Arch Linux.
   KISA_ENABLE=0         Skip KISA/KNVD's Korean security notices. ON BY
                         DEFAULT (D37): attaching them is what this project was
                         built for, and leaving it to a flag meant the flagship
@@ -717,21 +733,30 @@ var newSUSEProvider = suse.New
 // packages.broadcom.com host — ever being fetched from.
 var newPhotonProvider = photon.New
 
+// newArchProvider constructs the Arch Linux Security Tracker provider
+// (D97). A package variable for the same reason every other newXProvider
+// above is: a test can substitute a spy and observe the Options that
+// reached construction, without arch.New's default URL — the live
+// security.archlinux.org host — ever being fetched from.
+var newArchProvider = arch.New
+
 // dbUpdateProviders is every provider.Provider `db build` runs.
 //
-// All seven are on by default. Red Hat was opt-in when it landed, on the
+// All eight are on by default. Red Hat was opt-in when it landed, on the
 // grounds that it adds ~1.9 million affected entries for people who may
 // never scan a RHEL image — and D51 reversed that once the published
-// artifact started carrying it. Amazon Linux, Oracle Linux, Fedora, SUSE and
-// Photon OS followed the same reasoning from the start (D73, D74, D75, D77,
-// D96) rather than repeating Red Hat's opt-in-then-reverse path: the
-// published artifact is meant to carry each of them, and a default that
-// disagreed with the artifact would mean `db build` and `db update` produce
-// different databases, and `db push` would refuse the narrower one.
+// artifact started carrying it. Amazon Linux, Oracle Linux, Fedora, SUSE,
+// Photon OS and Arch followed the same reasoning from the start (D73, D74,
+// D75, D77, D96, D97) rather than repeating Red Hat's opt-in-then-reverse
+// path: the published artifact is meant to carry each of them, and a
+// default that disagreed with the artifact would mean `db build` and
+// `db update` produce different databases, and `db push` would refuse the
+// narrower one.
 //
 // REDHAT_ENABLE=0, AMAZON_ENABLE=0, ORACLE_ENABLE=0, FEDORA_ENABLE=0,
-// SUSE_ENABLE=0 and PHOTON_ENABLE=0 still turn each off, for a local build
-// that wants to be shorter and does not care about that distro.
+// SUSE_ENABLE=0, PHOTON_ENABLE=0 and ARCH_ENABLE=0 still turn each off, for
+// a local build that wants to be shorter and does not care about that
+// distro.
 func dbUpdateProviders(stderr io.Writer) []provider.Provider {
 	// Progress goes to stderr for the same reason every provider below sends
 	// theirs there: D82's Rocky Linux/AlmaLinux module-stream attachment
@@ -784,6 +809,14 @@ func dbUpdateProviders(stderr io.Writer) []provider.Provider {
 		// drops/narrows part of its input" case every other provider's
 		// Progress line exists for.
 		ps = append(ps, newPhotonProvider(photon.Options{Progress: stderr}))
+	}
+	if envFlag(stderr, "ARCH_ENABLE", true) {
+		// Progress goes to stderr for the same reason: the dropped-row
+		// summary (status words this build does not recognize, unusable
+		// fixed versions, non-CVE issues[] entries) is exactly the
+		// "silently drops/narrows part of its input" case every other
+		// provider's Progress line exists for.
+		ps = append(ps, newArchProvider(arch.Options{Progress: stderr}))
 	}
 	return ps
 }

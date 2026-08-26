@@ -117,6 +117,16 @@ var registry = map[string]Comparer{
 	// satisfied vacuously -- see pkgmeta.Distro.Ecosystem's "echo" case), so
 	// "Echo" IS the whole key this project ever builds for it.
 	"Echo": Deb{},
+	// D97. Arch Linux is rolling, release-less on both sides — the tracker's
+	// own AVG groups carry no release axis, and neither does the distro
+	// itself — so unlike every "X:"-prefixed RPM/apk/deb family above, "Arch"
+	// never needs a prefix rule: pkgmeta.Distro.Ecosystem's "arch" case
+	// writes the literal sentinel "Arch:rolling" (vunnel's and syft's own
+	// shared convention), never a truncated one, so a plain map entry for
+	// that EXACT string is the whole key this project ever builds for it —
+	// the same shape "Wolfi"/"MinimOS"/"Echo" already use, just with a colon
+	// baked into the literal itself rather than a bare name.
+	"Arch:rolling": Pacman{},
 }
 
 // mainlineUbuntu matches the two shapes OSV gives a mainline Ubuntu release:

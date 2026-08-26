@@ -585,6 +585,31 @@ func (d Distro) Ecosystem() (string, error) {
 		// not just the version handling, as a guess until a real image is
 		// found that sets it.
 		return "Chainguard", nil
+	case "arch":
+		// D97. Arch Linux is rolling — there is no VERSION_ID at all in its
+		// os-release (only BUILD_ID=rolling, verified against a real image,
+		// mirror.gcr.io/library/archlinux, pulled 2026-08-26), so this routes
+		// on ID alone and ignores VersionID entirely rather than requiring it
+		// the way every release-qualified case above does.
+		//
+		// The key is the literal sentinel "Arch:rolling" — vunnel's and
+		// syft's own shared convention for a distro with no release axis at
+		// all, NOT a bare unqualified name like "Wolfi"/"MinimOS" above:
+		// those are release-less because OSV never gave them a release
+		// dimension; Arch is release-less because the distro itself has
+		// none, and "rolling" is written into the key so a reader cannot
+		// mistake it for a truncated one the way a bare "Arch" might read.
+		// internal/version's registry entry and internal/provider/arch's own
+		// advisory keys must spell the identical string.
+		//
+		// Distro carries no BuildID field — only ID, VersionID and
+		// PrettyName — so even if this case wanted to distinguish "rolling"
+		// from some hypothetical other BUILD_ID, there is nowhere on this
+		// struct to read it from today; os-release's BUILD_ID is simply not
+		// parsed. That is fine here: Arch Linux has shipped exactly one
+		// rolling stream for as long as this project has looked, so there is
+		// nothing a second value would need to distinguish.
+		return "Arch:rolling", nil
 	default:
 		return "", fmt.Errorf("%w: distro %q is not supported yet", ErrNoEcosystem, d.ID)
 	}

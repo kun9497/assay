@@ -132,8 +132,8 @@ func catalogOne(c component, distroEcosystem string, target *pkgmeta.Target, sta
 		moduleStream string
 	)
 	switch p.Type {
-	case "apk", "rpm", "deb":
-		// D83/D84. The shared core (internal/pkgmeta/distropurl.go): ecosystem
+	case "apk", "rpm", "deb", "alpm":
+		// D83/D84/D97. The shared core (internal/pkgmeta/distropurl.go): ecosystem
 		// resolution from the target's distro with a per-purl "distro"
 		// qualifier fallback (and, for rpm, a further repository_id
 		// fallback), epoch prefixing, upstream->Source, the gpg-pubkey
@@ -174,15 +174,16 @@ func catalogOne(c component, distroEcosystem string, target *pkgmeta.Target, sta
 		return
 	}
 
-	// apk, rpm and deb purls carry the distro name as their namespace
-	// (pkg:apk/alpine/..., pkg:rpm/rhel/...), which is not part of the
-	// package identity: OSV's advisories name the bare package ("openssl",
-	// not "alpine/openssl"), and the rpm namespace itself is not even stable
-	// — syft 0.84.1 writes "rhel", syft 1.51.0 writes "redhat", for the same
+	// apk, rpm, deb and alpm purls carry the distro name as their namespace
+	// (pkg:apk/alpine/..., pkg:rpm/rhel/..., pkg:alpm/arch/...), which is not
+	// part of the package identity: OSV's/Arch's own advisories name the
+	// bare package ("openssl", not "alpine/openssl"; "libelf", not
+	// "arch/libelf"), and the rpm namespace itself is not even stable —
+	// syft 0.84.1 writes "rhel", syft 1.51.0 writes "redhat", for the same
 	// distro. Prefixing either into the name here would make every distro
 	// lookup miss its advisory, or miss it only on some SBOMs.
 	name := p.Name
-	if p.Namespace != "" && p.Type != "apk" && p.Type != "rpm" && p.Type != "deb" {
+	if p.Namespace != "" && p.Type != "apk" && p.Type != "rpm" && p.Type != "deb" && p.Type != "alpm" {
 		// The purl spec always separates namespace and name with "/"
 		// (pkg:maven/group/artifact), but OSV's Maven advisories name the
 		// package "group:artifact" — measured 12,457/12,457 live records.

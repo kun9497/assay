@@ -72,3 +72,28 @@ func TestFor_ResolvesEachLanguageEcosystemToItsOwnComparer(t *testing.T) {
 		})
 	}
 }
+
+// TestFor_ArchRollingResolvesPacman is D97's caller-first proof that
+// "Arch:rolling" resolves Pacman{}, not merely that Pacman{} exists and is
+// well tested on its own (pacman_test.go). The pair below is one
+// pacman.go's own doc comment names as load-bearing: libalpm's "remaining
+// alpha string never beats an empty one" rule orders "1.0rc" BELOW "1.0",
+// the opposite of RPM{}'s "2.0.1a" > "2.0.1" rule — so wiring "Arch:rolling"
+// to RPM{} by mistake (an easy slip, since every other RPM-family distro in
+// this registry resolves RPM{}) would get this exact comparison backwards
+// while every table in pacman_test.go, which calls the type directly, stays
+// green.
+func TestFor_ArchRollingResolvesPacman(t *testing.T) {
+	c, ok := For("Arch:rolling")
+	if !ok {
+		t.Fatal(`For("Arch:rolling") = not ok, want a comparer`)
+	}
+	got, err := c.Compare("1.0rc-1", "1.0-1")
+	if err != nil {
+		t.Fatalf("Compare: error %v, want -1 with no error", err)
+	}
+	if got != -1 {
+		t.Errorf("Compare(%q, %q) via For(\"Arch:rolling\") = %d, want -1 -- "+
+			"RPM{} would answer +1 here, the exact divergence pacman.go's own doc comment measured", "1.0rc-1", "1.0-1", got)
+	}
+}

@@ -18,7 +18,8 @@ local only because `db push` strips it, D29); `assay db update` pulls the publis
 artifact (D28) rather than rebuilding. Five more providers are on by default and carried by
 the artifact: Red Hat CSAF VEX (D47–D52 — fix states with reasons, `--fail-on-unfixable`
 and `=wont-fix`), Amazon ALAS core plus AL2 extras (D73, D78), Oracle ELSA OVAL (D74,
-Ksplice/FIPS lineage-filtered since D79), Fedora Bodhi (D75), Photon's flat-JSON CVE metadata (D96) and SUSE CSAF VEX (D77, whose
+Ksplice/FIPS lineage-filtered since D79), Fedora Bodhi (D75), Photon's flat-JSON CVE metadata (D96), Arch's AVG tracker (D97, with
+its own pacman comparer and cataloger) and SUSE CSAF VEX (D77, whose
 no-fix entries are 99.96% reason-unstated — the inverse of Red Hat). `assay scan` reads
 SBOMs, container images (distroless via `status.d`, D54), Go binaries and directories
 (eight lockfile formats, two refused by name, plus jars — D61–D63, D68–D70), and returns a
@@ -28,7 +29,8 @@ rating and the gate takes the highest (D25); incompleteness carries a cause and
 to end for Alpine, Debian, Ubuntu mainline (D53), RHEL, Rocky (D71), AlmaLinux (D72),
 Amazon Linux 2/2023 (D73), Oracle Linux 5–10 (D74), Fedora (D75), SLES/openSUSE Leap
 (D77), Wolfi/Chainguard (D88), MinimOS and Echo (D92), Azure Linux/CBL-Mariner (D94), Alpaquita/BellSoft (D95, which
-added the apk `p:` provides bridge), and Photon OS 3/4/5 (D96) —
+added the apk `p:` provides bridge), Photon OS 3/4/5 (D96), and Arch Linux (D97, the
+release-less `Arch:rolling` key) —
 across three rpmdb backends: BerkeleyDB, SQLite and ndb (D44, D76). A weekly digest-pinned
 grype differential gates regressions in CI (D93). Installed
 Ubuntu ESM/FIPS and Oracle Ksplice/FIPS lineage packages are reported not evaluated rather

@@ -563,3 +563,59 @@ func TestParse_EveryComponentLandsInExactlyOneCounter(t *testing.T) {
 		t.Errorf("Components = %d, want 6", stats.Components)
 	}
 }
+
+// TestParse_AlpmKeyedViaDistroQualifier is D97's own version of
+// TestParse_APKKeyedViaDistroQualifier: SPDX never has a document-level
+// distro (D84), so an alpm package's purl "distro" qualifier is the only
+// place the ecosystem key survives at all.
+func TestParse_AlpmKeyedViaDistroQualifier(t *testing.T) {
+	const doc = `{"spdxVersion":"SPDX-2.3","packages":[
+	  {"name":"acl","SPDXID":"SPDXRef-acl","versionInfo":"2.4.0-1",
+	   "externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl",
+	     "referenceLocator":"pkg:alpm/arch/acl@2.4.0-1?arch=x86_64&upstream=acl&distro=arch-rolling"}]}]}`
+	target, _, err := Parse(strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1", len(target.Packages))
+	}
+	p := target.Packages[0]
+	if p.Ecosystem != "Arch:rolling" {
+		t.Errorf("Ecosystem = %q, want %q", p.Ecosystem, "Arch:rolling")
+	}
+	if p.Name != "acl" {
+		t.Errorf("Name = %q, want bare %q (namespace \"arch\" must not be joined in)", p.Name, "acl")
+	}
+	// upstream repeats the bare name here (acl is not a split package) --
+	// Source must stay nil, the same D8 boundary
+	// TestParse_AlpmSourceNilWhenUpstreamEqualsName pins on the CycloneDX
+	// side.
+	if p.Source != nil {
+		t.Errorf("Source = %+v, want nil (upstream repeats the bare name)", p.Source)
+	}
+}
+
+// TestParse_AlpmSourceFromUpstreamQualifier holds D8's join on the SPDX
+// path, mirroring TestParse_APKSourceFromUpstreamQualifier: Arch's own
+// tracker keys advisories on pkgbase (elfutils), which differs from the
+// installed libelf package's own name, and SPDX has no property mechanism
+// to carry it any other way — the purl's "upstream" qualifier is the only
+// carrier.
+func TestParse_AlpmSourceFromUpstreamQualifier(t *testing.T) {
+	const doc = `{"spdxVersion":"SPDX-2.3","packages":[
+	  {"name":"libelf","SPDXID":"SPDXRef-libelf","versionInfo":"0.196-1",
+	   "externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl",
+	     "referenceLocator":"pkg:alpm/arch/libelf@0.196-1?arch=x86_64&upstream=elfutils&distro=arch-rolling"}]}]}`
+	target, _, err := Parse(strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1", len(target.Packages))
+	}
+	src := target.Packages[0].Source
+	if src == nil || src.Name != "elfutils" {
+		t.Errorf("Source = %+v, want Name elfutils from the upstream qualifier", src)
+	}
+}

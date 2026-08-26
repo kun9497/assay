@@ -110,6 +110,31 @@ func ResolveDistroPURL(p PURL, componentVersion, docEcosystem string, hasDocDist
 				res.Source = &SourcePackage{Name: srcName}
 			}
 		}
+	case "alpm":
+		// D97. Arch Linux's pacman purl type. Ecosystem resolves the same
+		// document-then-qualifier chain apk and deb use — an alpm purl's
+		// "distro" qualifier is ALWAYS present when syft emits a purl at all
+		// (its own packageURL bails to an empty purl string otherwise, so
+		// there is no alpm purl with a document distro but no qualifier one
+		// the way an apk purl can occasionally lack it), and it is always
+		// "arch-rolling" (Distro.Ecosystem's "arch" case ignores VersionID
+		// entirely, so distroFromQualifier's split VersionID half is never
+		// even read).
+		res.Ecosystem = ecosystemForQualifiedDistro(p, docEcosystem, hasDocDistro)
+		// D8/D97. syft's alpm purl carries an "upstream" qualifier for
+		// EVERY package, not only split ones (arch_package.go's own
+		// packageURL sets it whenever BasePackage != "", and BASE is
+		// present on every real record, even non-split ones where it
+		// simply repeats NAME — measured against a real image, D97). Set
+		// ONLY when it differs from the bare name, unlike apk's and deb's
+		// unconditional read above: storing a self-referential Source
+		// would make --explain's D8 wording ("matched via source package")
+		// print for a package whose "source" is itself, the same
+		// reasoning pacmandb.ParseDesc's own doc comment gives for the
+		// image-scan path.
+		if upstream := p.Qualifiers["upstream"]; upstream != "" && upstream != p.Name {
+			res.Source = &SourcePackage{Name: upstream}
+		}
 	}
 
 	version := p.Version
