@@ -158,8 +158,13 @@ Chainguard는 D88에서 이 목록을 벗어났습니다(이 항목 자신의 �
 apk 데이터베이스가 usr/lib 심볼릭 링크 뒤에 숨어 있어서 D88의 경로 probe가 나오기
 전까지는 스캔이 하드 exit 2로 에러났습니다). MinimOS와 Echo는 D92에서 이 목록을
 벗어났습니다(D88 템플릿이 그대로 통했습니다; Echo는 공개 레지스트리가 없어 라우팅이
-미검증입니다). 여전히 사실인 것: Photon, Mariner/Azure Linux, Arch, CleanStart,
-BellSoft Hardened Containers에서는 **assay가 정말로 아무것도 찾지 못합니다**. grype는 또한 assay에 대응물이 없던 보강
+미검증입니다). Azure Linux/CBL-Mariner는 D94에서 이 목록을 벗어났습니다(D71/D72
+모양이 그대로 통했습니다; 오래된 이미지 둘이 같은 날 주간 차등에 합류했습니다).
+여전히 사실인 것: Photon, Arch, CleanStart, BellSoft Hardened Containers에서는
+**assay가 정말로 아무것도 찾지 못합니다** — Photon, Arch, BellSoft는 이미
+결정되고 순서가 잡혀 있습니다(2026-08-26의 다섯-소규모배포판 조사 라운드; BellSoft가
+다음, 그다음 Photon, 그다음 Arch), 반면 CleanStart는 트리거를 달고 미뤄져 있습니다(다음
+항목). grype는 또한 assay에 대응물이 없던 보강
 피드도 싣습니다; D86이 EPSS와 KEV를 수집했고(typed rating 필드, 게이트 둘) D87이 EOL
 데이터를 수집했습니다 — grype 대비 보강 피드 격차가 닫혔습니다.
 
@@ -173,6 +178,26 @@ EOL 데이터는 D87에서 들어왔습니다(Meta에 실리고, phase로 라벨
 **언제 다시 볼까.** 커버리지 숫자가 아니라 특정 생태계에 존재 이유가 생겼을 때. 뒤에 provider가 없는
 comparer는 D46이 RPM에 대해 거부한 모양이고, 측정된 수요 없는 provider는 값 없이 치르는 코퍼스
 비용입니다 — 우분투 아카이브 하나가 6 GB와 빌드 36분을 더했습니다(D53, D56).
+
+---
+
+### CleanStart 라우팅 — 보고 있다는 것을 알 방법이 없는 OSV 피드
+
+**2026-08-26에 미룸**(다섯-소규모배포판 조사 라운드). CleanStart의 OSV 피드는 D92
+템플릿에 깔끔하게 들어맞습니다 — 맨 무-릴리스 `CleanStart` 키 아래 레코드 1,988개,
+기존 comparer가 이미 순서를 매기는 apk `-rN` 버전, identifier 연결의 100%가
+`upstream`에 있음(CVE 90.3%, GHSA 전용 9.7%). 수집 절반은 당일 clone입니다. 만들지
+'않은' 것은 라우팅입니다: 표본 이미지 중 어느 것도 어느 레이어에도 `/etc/os-release`를
+담고 있지 않아서, 오늘 스캔이 읽는 어떤 것도 "이것은 CleanStart다"라고 말할 수
+없습니다 — 완전히 새로운 탐지 메커니즘(apk 마커 패키지, 또는
+`/etc/apk/repositories` URL을 sniffing)은 이 코드베이스에서 그런 종류의 첫
+사례가 될 것이고, 그 발견의 배경이 된 표본은 1,200개 넘는 카탈로그 중 이미지
+3개였습니다.
+
+**다시 볼 때는** 탐지 마커를 카탈로그의 넓은 조각에 대고 검증할 수 있을 때(또는
+CleanStart가 os-release를 발행하기 시작할 때, 어떤 pull에서든 다시 확인할 값이
+있습니다), 또는 사용자가 이미지를 손에 들고 요청할 때입니다. **기반 작업은
+갖춰져 있습니다:** 위의 피드 측정, 그리고 수집 절반이 들어갈 D88/D92 템플릿입니다.
 
 ---
 

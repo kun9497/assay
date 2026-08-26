@@ -125,6 +125,14 @@ func TestDistroEcosystem_Unsupported(t *testing.T) {
 		{"sles major only, no minor to read the SP number from", Distro{ID: "sles", VersionID: "15"}},
 		{"opensuse-leap with no VERSION_ID", Distro{ID: "opensuse-leap", VersionID: ""}},
 		{"opensuse-leap with a non-numeric version", Distro{ID: "opensuse-leap", VersionID: "beta"}},
+		// D94 gave Azure Linux (CBL-Mariner and its 2024 rename) its
+		// decision, so the same no-VERSION_ID and non-numeric-VERSION_ID
+		// edge cases every other RPM distro's decision needed apply to
+		// both of its os-release IDs too.
+		{"mariner with no VERSION_ID", Distro{ID: "mariner", VersionID: ""}},
+		{"mariner with a non-numeric version", Distro{ID: "mariner", VersionID: "beta"}},
+		{"azurelinux with no VERSION_ID", Distro{ID: "azurelinux", VersionID: ""}},
+		{"azurelinux with a non-numeric version", Distro{ID: "azurelinux", VersionID: "beta"}},
 		// Tumbleweed is refused by NAME, not by version shape (D77) — pinned
 		// here with a version that would otherwise parse as a perfectly good
 		// X.Y release, and again with its REAL VERSION_ID (a build date,
@@ -762,4 +770,79 @@ func TestDistroEcosystem_MinimOSAndEcho(t *testing.T) {
 	if _, err := (Distro{ID: "opensuse-tumbleweed", VersionID: "20260818"}).Ecosystem(); err == nil {
 		t.Error("opensuse-tumbleweed resolved an ecosystem; it must always be refused")
 	}
+}
+
+// TestDistroEcosystem_AzureLinux: D94. CBL-Mariner (through 2.0) and Azure
+// Linux (3.0 on, Microsoft's mid-2024 rename of the same lineage) share ONE
+// OSV ecosystem family -- both os-release IDs route to the same
+// "Azure Linux:<major>" key, following the D71/D72 shape (Rocky, AlmaLinux):
+// a genuine release axis, release-qualified at the major, not D88/D92's
+// release-less one.
+func TestDistroEcosystem_AzureLinux(t *testing.T) {
+	for _, tc := range []struct {
+		id, versionID string
+		want          string
+	}{
+		{"mariner", "2.0", "Azure Linux:2"},
+		{"mariner", "2", "Azure Linux:2"},
+		{"azurelinux", "3.0", "Azure Linux:3"},
+		{"azurelinux", "3", "Azure Linux:3"},
+		// A mariner 1.0 image (CBL-Mariner's first release) resolves a KEY
+		// this build holds no data for -- that is D20's ordinary coverage
+		// skip, not a routing failure, and the case must not special-case
+		// which majors the archive happens to populate.
+		{"mariner", "1.0", "Azure Linux:1"},
+	} {
+		got, err := Distro{ID: tc.id, VersionID: tc.versionID}.Ecosystem()
+		if err != nil {
+			t.Errorf("id=%q VERSION_ID=%q: %v", tc.id, tc.versionID, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("id=%q VERSION_ID=%q -> %q, want %q", tc.id, tc.versionID, got, tc.want)
+		}
+	}
+	// Both os-release IDs must land on the SAME key for the same major --
+	// the rename is cosmetic on the advisory side, and a change that let them
+	// diverge would split one distro's advisories across two unreachable
+	// halves.
+	m, err := (Distro{ID: "mariner", VersionID: "2.0"}).Ecosystem()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := (Distro{ID: "azurelinux", VersionID: "2.0"}).Ecosystem()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m != a {
+		t.Errorf("mariner 2.0 -> %q, azurelinux 2.0 -> %q; both os-release IDs must resolve the SAME key family", m, a)
+	}
+	// Azure Linux's key must not converge with any other RPM distro's, or
+	// with Alpine's -- a change that collapsed them would make one distro's
+	// advisories reachable under another's key.
+	for _, tc := range []struct{ id, versionID, want string }{
+		{"alpine", "3.19", "Alpine:v3.19"},
+		{"rhel", "9.8", "Red Hat:9"},
+		{"rocky", "9.4", "Rocky Linux:9"},
+		{"almalinux", "9.6", "AlmaLinux:9"},
+		{"amzn", "2023", "Amazon Linux:2023"},
+		{"ol", "9.8", "Oracle Linux:9"},
+		{"fedora", "44", "Fedora:44"},
+		{"sles", "15.6", "SLES:15.SP6"},
+		{"opensuse-leap", "15.6", "openSUSE Leap:15.6"},
+		{"mariner", "2.0", "Azure Linux:2"},
+		{"azurelinux", "3.0", "Azure Linux:3"},
+	} {
+		if got, err := (Distro{ID: tc.id, VersionID: tc.versionID}).Ecosystem(); err != nil || got != tc.want {
+			t.Errorf("%s %s -> %q, %v; want %q", tc.id, tc.versionID, got, err, tc.want)
+		}
+	}
+	// centos must still not resolve (D50) -- Azure Linux leaving the
+	// not-evaluated list must not have been a change to the switch's default
+	// case that accidentally let every RPM ID through.
+	if _, err := (Distro{ID: "centos", VersionID: "9"}).Ecosystem(); err == nil {
+		t.Error("centos resolved an ecosystem; D50 still excludes it")
+	}
+	// The no-VERSION_ID and non-numeric-VERSION_ID refusals are pinned in
+	// TestDistroEcosystem_Unsupported, alongside rhel's identical two rows.
 }

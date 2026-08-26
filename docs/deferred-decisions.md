@@ -165,8 +165,12 @@ Chainguard left this list in D88 (which also corrected this entry's own claim: t
 were never "catalogued and reported as not evaluated" — the apk database hides behind a
 usr/lib symlink and the scan hard-errored at exit 2 until D88's path probe). MinimOS and Echo
 left the list in D92 (the D88 template held; Echo image-unverified — no public registry).
-What is STILL true: on Photon, Mariner/Azure Linux, Arch, CleanStart and BellSoft Hardened
-Containers, **assay finds nothing at all**. grype also ships enrichment feeds
+Azure Linux/CBL-Mariner left the list in D94 (the D71/D72 shape held; two aged images
+joined the weekly differential the same day). What is STILL true: on Photon, Arch,
+CleanStart and BellSoft Hardened Containers, **assay finds nothing at all** — Photon, Arch
+and BellSoft are decided-and-sequenced (the 2026-08-26 five-boutique research round;
+BellSoft next, then Photon, then Arch), while CleanStart is deferred with a trigger (next
+entry). grype also ships enrichment feeds
 assay had no equivalent for; D86 ingested EPSS and KEV (typed rating fields, both gates)
 and D87 the EOL data — the enrichment-feed gap against grype is closed.
 
@@ -181,6 +185,25 @@ A comparer with no provider behind it is the shape D46 refused for RPM, and a pr
 no measured demand is corpus size paid for nothing — the Ubuntu archive alone added 6 GB and
 36 minutes of build (D53, D56).
 
+---
+
+
+### CleanStart routing — an OSV feed with no way to know you are looking at it
+
+**Deferred 2026-08-26** (the five-boutique research round). CleanStart's OSV feed is a
+clean D92-template fit — 1,988 records under a bare release-less `CleanStart` key, apk
+`-rN` versions the existing comparer already orders, 100% of identifier linkage in
+`upstream` (90.3% CVE, 9.7% GHSA-only). The ingestion half is a same-day clone. What is
+NOT built is routing: none of the sampled images carries `/etc/os-release` in ANY layer,
+so nothing a scan reads today can say "this is CleanStart" — a brand-new detection
+mechanism (an apk marker package, or sniffing `/etc/apk/repositories` URLs) would be the
+first of its kind in this codebase, and the sample behind that finding was 3 images out of
+a 1,200+ catalog.
+
+**Revisit when** a detection marker can be validated against a broad slice of the catalog
+(or CleanStart starts shipping os-release, worth re-checking on any pull), or a user asks
+for it with images in hand. **Groundwork in place:** the feed measurement above, and the
+D88/D92 template the ingestion half would drop into.
 ---
 
 ### ~~Ubuntu findings carry no fix state~~ — resolved in D85

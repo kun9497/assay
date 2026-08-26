@@ -3434,6 +3434,47 @@ probe도 합니다: JSON으로 파싱되는 출력이 exit code보다 우선합�
 발산을 분류하지 않습니다(CPE fallback, binary-classifier 중복) — floor가 알려진
 잡음을 흡수하고, floor가 걸리면 사람이 업로드된 캡처 아티팩트를 읽습니다.
 
+---
+
+### D94 — Azure Linux: 이름은 겉치레지만, 릴리스 축은 아니다
+
+**결정.** CBL-Mariner 2.0과 Azure Linux 3.0(하나의 계보이고, 2024년 중반에 이름이
+바뀌었습니다)은 D71/D72 모양의 기존 OSV 범용 경로를 통해 끝에서 끝까지 스캔됩니다:
+ecosystem "Azure Linux"가 fetch 목록에 추가되고("Rocky Linux"처럼 공백은
+url.PathEscape가 이미 처리합니다), os-release ID `mariner`와 `azurelinux` 둘 다
+`Azure Linux:<major>`로 라우팅되며, 기존 RPM comparer를 접두사 절 하나로 재사용하고,
+0-레코드 가드는 Rocky/Alma의 방식대로 확장됩니다. 새 provider도, 새 comparer도, 새
+cataloger 작업도 전혀 없습니다.
+
+**왜 이 모양인가.** 2026-08-26 측정: AZL-* 레코드 12,016개; `affected[].package.ecosystem`은
+전부 릴리스 한정입니다("Azure Linux:2" 6,614건 / "Azure Linux:3" 5,402건, 맨 형태는
+전혀 없음) — 무-릴리스인 D88/D92의 소규모 배포판과 달리 D6가 온전히 적용됩니다. CVE
+연결은 레코드의 100%에서 `upstream`이므로 D3의 기존 읽기가 그것을 커버하고
+related-조인이 필요 없습니다(D71의 Alma와는 다릅니다). OSV export는 fixed 경계에서
+epoch(원본 OVAL evr 값 15,105개 중 15,105개에서 "0"으로 측정됨)와 `.azl3`/`.cm2`
+dist 태그를 둘 다 벗겨냅니다; rpmvercmp의 후행-세그먼트 규칙은 설치된
+`1.42.0-7.azl3`을 벗겨낸 `1.42.0-7`과 같거나 그 위로 올바르게 정렬하며, 양방향
+경계 테스트로 고정되어 있습니다.
+
+**이 슬라이스가 드러낸 것.** `scancmd`의 rpm 계열 맵은 D43 이후로 `mariner`/`azurelinux`를
+계속 담고 있었습니다 — 어떤 라우팅도 존재하기 몇 년 전에 심어 두고 지금까지 테스트한 적이
+없었던 것입니다; caller-first 패스가 그것을 부산물로 닫았습니다. mcr 베이스 이미지
+둘 다에 대한 실전 E2E(둘 다 `var/lib/rpm`의 SQLite rpmdb)는 진짜 업스트림 결함
+하나를 찾았습니다: AZL-31332는 `"fixed": " 1.57.0-1"`을 앞에 공백을 붙여 냅니다,
+comparer는 그것을 추측하기를 거부하고(D9) 스캔은 이를 미완료 하나로 드러냅니다 —
+올바른 판정이며, 언젠가 D35 방식의 수리를 할 값이 있는 측정된 패턴이 될 경우를
+대비해 여기 기록해 둡니다. EOL 보강은 오늘은 불가능합니다: endoflife.date에는
+azure-linux/cbl-mariner 제품이 아예 없습니다(실전 확인함), 그래서 D87의 slug
+맵은 의도적으로 건드리지 않았습니다.
+
+**차등이 첫날부터 이를 붙듭니다.** digest로 고정된 오래된 이미지 둘이
+`grype-diff-targets.json`에 합류했습니다: cbl-mariner 2.0.20230107(assay 198 /
+grype 134 / agree 132 — grype 튜플의 98.5%)와 azurelinux 3.0.20240727(114 / 246 /
+agree 106). 구조적으로 공허하지 않습니다 — 두 이미지 모두 실제 finding을 담고
+있으므로, 키잡기 퇴보는 깨끗한 0=0 뒤에 숨을 수 없습니다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

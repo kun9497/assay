@@ -102,10 +102,42 @@ const DefaultBaseURL = "https://osv-vulnerabilities.storage.googleapis.com"
 // a real Python/npm/Java package catalogs as PyPI/npm/Maven, never as
 // "Echo:PyPi" etc., since its own purl is a plain pkg:pypi/... one, not a
 // deb purl. Harmless dead entries, not special-cased out.
+//
+// "Azure Linux" is D94's entry, and it is the D71/D72 shape again, not
+// D88/D92's release-less one: unlike Wolfi/Chainguard/MinimOS/Echo, Azure
+// Linux genuinely has a release axis and OSV genuinely keys it (D6) -- one
+// archive path ("Azure%20Linux/all.zip", the same url.PathEscape treatment
+// "Rocky Linux" already needed, since the family name has a space),
+// release-qualified keys inside it. Measured 2026-08-26: 12,016 records,
+// AZL-* ids, 0 withdrawn. affected[].package.ecosystem is ALWAYS
+// release-qualified -- "Azure Linux:2" (6,614 entries) / "Azure Linux:3"
+// (5,402 entries), 0 occurrences of a bare "Azure Linux" -- so D6 is
+// mandatory here exactly as it is for Rocky and Alma, not satisfied
+// vacuously the way it is for the release-less distros above.
+//
+// CVE linkage is via `upstream` on 12,016 of 12,016 records (100%) --
+// `aliases` and `related` are never populated at all. D3's existing upstream
+// read covers this with no code change, and — unlike AlmaLinux (D71 decision
+// 1) — no related-join was needed: distroAuthored's own list is untouched by
+// this slice, because there is nothing distro-authored-shaped for it to
+// unlock here.
+//
+// Two os-release IDs key into this ONE ecosystem family: `mariner` (CBL-Mariner
+// 2.0) and `azurelinux` (Azure Linux 3.0, Microsoft's mid-2024 rename of the
+// same distro lineage) -- see pkgmeta.Distro.Ecosystem's "mariner"/"azurelinux"
+// cases for the routing, and version.go's "Azure Linux:" clause for why the
+// existing RPM{} comparer needed no changes: the OSV export already strips
+// both the epoch and the release's .azl3/.cm2 dist tag from every `fixed`
+// bound (raw OVAL "0:1.42.0-7.azl3" becomes OSV "1.42.0-7"), and epoch was
+// measured "0" on 15,105 of 15,105 raw evr values, so nothing is lost by the
+// strip. rpmvercmp's own trailing-segment rule ("2.0.1a" > "2.0.1",
+// rpm_test.go's own row) is what makes an installed "1.42.0-7.azl3" still
+// order at-or-above the stripped fixed "1.42.0-7" correctly, with no new
+// comparer clause beyond the ecosystem-prefix routing.
 var Ecosystems = []string{
 	"Go", "npm", "PyPI", "crates.io", "RubyGems", "Packagist", "NuGet", "Maven",
 	"Alpine", "Debian", "Ubuntu", "Rocky Linux", "AlmaLinux", "Chainguard",
-	"MinimOS", "Echo",
+	"MinimOS", "Echo", "Azure Linux",
 }
 
 type Provider struct {
@@ -204,13 +236,15 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		// later Alpine scan into a clean report at exit 0 — the same failure
 		// discovery's hard-fail existed to prevent, one layer further in.
 		// The same guard for every distro archive, Rocky Linux and AlmaLinux
-		// included (D71, D72). Zero matching records means the family match
-		// broke or the archive's shape changed, not that the distro has no
-		// advisories — and a database that silently has none turns every
-		// later scan of that distro into a clean report at exit 0.
+		// included (D71, D72), and Azure Linux (D94) on the identical terms —
+		// it has a real release axis, the same shape Rocky/Alma do, not the
+		// release-less one MinimOS/Echo have. Zero matching records means the
+		// family match broke or the archive's shape changed, not that the
+		// distro has no advisories — and a database that silently has none
+		// turns every later scan of that distro into a clean report at exit 0.
 		if (eco == "Alpine" || eco == "Debian" || eco == "Ubuntu" || eco == "Rocky Linux" ||
 			eco == "AlmaLinux" || eco == "Chainguard" || eco == "Wolfi" ||
-			eco == "MinimOS" || eco == "Echo") && n == 0 {
+			eco == "MinimOS" || eco == "Echo" || eco == "Azure Linux") && n == 0 {
 			return store.Provenance{}, fmt.Errorf("fetch %s: archive yielded no %s:* records", eco, eco)
 		}
 		// "Wolfi" above is not dead weight even though nothing in

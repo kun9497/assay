@@ -636,6 +636,9 @@ exited 0 while 24 findings went unmentioned.
 - [x] The differential runs itself (D93) — weekly, 13 digest-pinned targets against the
       published artifact, judged by committed floors (`cmd/grypediff`, stdlib-only);
       reading the ratings column revived two dead agreements (alma 0→106, oracle 0→37)
+- [x] Azure Linux and CBL-Mariner (D94) — one OSV family, two os-release IDs, the
+      existing rpm comparer; scancmd's family map had carried both IDs untested since
+      D43; two aged digest-pinned images joined the weekly differential (agree 132/106)
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a

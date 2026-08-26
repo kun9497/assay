@@ -609,6 +609,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] 차등이 스스로 돎 (D93) — 매주, digest로 고정된 타깃 13개를 발행된 아티팩트에
       대고, 커밋된 floor로 판정(`cmd/grypediff`, stdlib만 사용); ratings 컬럼을
       읽어서 죽어 있던 동의 둘을 되살림(alma 0→106, oracle 0→37)
+- [x] Azure Linux와 CBL-Mariner (D94) — OSV 계열 하나, os-release ID 둘, 기존 rpm
+      comparer; scancmd의 계열 맵은 D43 이후로 두 ID를 테스트 없이 담고 있었음; 오래된
+      digest 고정 이미지 둘이 주간 차등에 합류(agree 132/106)
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건

@@ -102,5 +102,21 @@
     "minAgree": 15,
     "minFindings": 102,
     "maxFindings": 242
+  },
+  {
+    "name": "mariner2",
+    "tag": "cbl-mariner/base/core:2.0.20230107",
+    "ref": "mcr.microsoft.com/cbl-mariner/base/core@sha256:2f22cfda5793fe3e3c09cdee10e54b198efc5bea6a266bd2c0f921f2b10767a6",
+    "minAgree": 112,
+    "minFindings": 168,
+    "maxFindings": 396
+  },
+  {
+    "name": "azl3",
+    "tag": "azurelinux/base/core:3.0.20240727",
+    "ref": "mcr.microsoft.com/azurelinux/base/core@sha256:02004412d6133fba772fd88dd45ea99b61258722bfc796c156937df4a5d75c6c",
+    "minAgree": 90,
+    "minFindings": 96,
+    "maxFindings": 228
   }
 ]
