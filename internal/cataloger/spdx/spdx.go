@@ -209,7 +209,7 @@ func resolvePURL(p pkgmeta.PURL, raw string) (pkgmeta.Package, purlStatus) {
 	loc := []pkgmeta.Location{{Path: "sbom"}}
 
 	switch p.Type {
-	case "apk", "rpm", "deb":
+	case "apk", "rpm", "deb", "alpm":
 		res := pkgmeta.ResolveDistroPURL(p, "", "", false)
 		if res.Skip {
 			return pkgmeta.Package{}, statusSkip

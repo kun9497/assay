@@ -355,6 +355,16 @@ func TestNoUnbackedDistroComparer(t *testing.T) {
 		// for every dpkg-based system regardless of distro ID (the same free
 		// ride D53 recorded for Ubuntu).
 		"Echo": true,
+		// D97: "Arch:rolling" is a plain registry entry too, even though the
+		// string itself carries a colon — it is the literal sentinel key
+		// pkgmeta.Distro.Ecosystem's "arch" case writes (vunnel's and syft's
+		// own shared convention for a distro with no release axis at all),
+		// not a truncated release-qualified one a prefix rule would need to
+		// guard against. Arch's own advisory provider
+		// (internal/provider/arch) writes affected entries under this exact
+		// string, so it is the whole key this project ever builds for Arch,
+		// the same as Wolfi/MinimOS/Echo above.
+		"Arch:rolling": true,
 	}
 	for eco := range registry {
 		if !want[eco] {

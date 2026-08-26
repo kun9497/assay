@@ -210,6 +210,168 @@ func TestFilesUnder_RefusesTheImageRoot(t *testing.T) {
 	}
 }
 
+// TestFilesNamed_MatchesOneLevelDeeper is D97's caller-first proof: pacman's
+// local database nests one directory per package
+// (var/lib/pacman/local/<name>-<version>/desc), and FilesNamed must find the
+// desc files while (a) ignoring a sibling FILE directly inside the parent
+// directory that happens to share the same middle path component depth, and
+// (b) ignoring a file one level too deep. Both are exactly the shapes
+// TestFilesUnder_DirectChildrenOnly pins for FilesUnder's own boundary.
+func TestFilesNamed_MatchesOneLevelDeeper(t *testing.T) {
+	img := imageOf(layerOfOrdered(t, "sha256:one",
+		entry{name: "var/lib/pacman/local/acl-2.4.0-1/desc", body: "%NAME%\nacl\n"},
+		entry{name: "var/lib/pacman/local/bash-5.3.15-1/desc", body: "%NAME%\nbash\n"},
+		// ALPM_DB_VERSION: a direct child FILE of local/, not one level
+		// deeper, and not named "desc" either — must not be matched by
+		// either rule alone, let alone both together.
+		entry{name: "var/lib/pacman/local/ALPM_DB_VERSION", body: "9\n"},
+		// A file one level too deep (inside a package dir's own
+		// subdirectory) must not be matched.
+		entry{name: "var/lib/pacman/local/acl-2.4.0-1/files/deeper", body: "nope"},
+		// A same-named file directly under local/, not inside a package
+		// subdirectory, must not be matched either — filename alone is not
+		// enough, the directory nesting has to match too.
+		entry{name: "var/lib/pacman/local/desc", body: "nope"},
+	))
+	got, links, err := img.FilesNamed("var/lib/pacman/local", "desc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if links != 0 {
+		t.Errorf("symlinks = %d, want 0", links)
+	}
+	want := []string{
+		"var/lib/pacman/local/acl-2.4.0-1/desc",
+		"var/lib/pacman/local/bash-5.3.15-1/desc",
+	}
+	if g := namesOf(got); len(g) != 2 || g[0] != want[0] || g[1] != want[1] {
+		t.Errorf("FilesNamed = %v, want exactly %v", g, want)
+	}
+}
+
+// TestFilesNamed_NewestLayerWins mirrors TestFilesUnder_NewestLayerWins: a
+// package upgraded in a later layer must report that layer's desc, not an
+// earlier one's.
+func TestFilesNamed_NewestLayerWins(t *testing.T) {
+	img := imageOf(
+		layerOfOrdered(t, "sha256:base",
+			entry{name: "var/lib/pacman/local/bash-5.3.14-1/desc", body: "%VERSION%\n5.3.14-1\n"},
+		),
+		layerOfOrdered(t, "sha256:top",
+			entry{name: "var/lib/pacman/local/bash-5.3.15-1/desc", body: "%VERSION%\n5.3.15-1\n"},
+		),
+	)
+	got, _, err := img.FilesNamed("var/lib/pacman/local", "desc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("FilesNamed = %v, want both package versions (different directories, not an upgrade in place)",
+			namesOf(got))
+	}
+	if got["var/lib/pacman/local/bash-5.3.15-1/desc"].DiffID != "sha256:top" {
+		t.Errorf("bash-5.3.15-1/desc DiffID = %q, want sha256:top",
+			got["var/lib/pacman/local/bash-5.3.15-1/desc"].DiffID)
+	}
+}
+
+// TestFilesNamed_WhiteoutHidesTheWholePackageDirectory mirrors
+// TestFilesUnder_WhiteoutHidesLowerLayers, but for a whiteout on the
+// PACKAGE DIRECTORY itself (pacman removing a package deletes its whole
+// local/<name>-<version>/ directory, not a single file inside it) — proving
+// isDeleted's directory-prefix match, not just an exact-path one, still
+// applies at this deeper nesting level.
+func TestFilesNamed_WhiteoutHidesTheWholePackageDirectory(t *testing.T) {
+	img := imageOf(
+		layerOfOrdered(t, "sha256:base",
+			entry{name: "var/lib/pacman/local/removed-1.0-1/desc", body: "%NAME%\nremoved\n"},
+			entry{name: "var/lib/pacman/local/kept-1.0-1/desc", body: "%NAME%\nkept\n"},
+		),
+		layerOfOrdered(t, "sha256:top",
+			entry{name: "var/lib/pacman/local/.wh.removed-1.0-1", body: ""},
+		),
+	)
+	got, _, err := img.FilesNamed("var/lib/pacman/local", "desc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g := namesOf(got); len(g) != 1 || g[0] != "var/lib/pacman/local/kept-1.0-1/desc" {
+		t.Errorf("FilesNamed = %v, want only the kept package's desc", g)
+	}
+}
+
+// TestFilesNamed_SymlinksAreCountedNotFollowed mirrors
+// TestFilesUnder_SymlinksAreCountedNotFollowed.
+func TestFilesNamed_SymlinksAreCountedNotFollowed(t *testing.T) {
+	img := imageOf(layerOfOrdered(t, "sha256:one",
+		entry{name: "var/lib/pacman/local/linked-1.0-1/desc", link: "../real/desc"},
+		entry{name: "var/lib/pacman/local/real-1.0-1/desc", body: "%NAME%\nreal\n"},
+	))
+	got, links, err := img.FilesNamed("var/lib/pacman/local", "desc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if links != 1 {
+		t.Errorf("symlinks = %d, want 1", links)
+	}
+	if g := namesOf(got); len(g) != 1 || g[0] != "var/lib/pacman/local/real-1.0-1/desc" {
+		t.Errorf("FilesNamed = %v, want only the regular file", g)
+	}
+}
+
+// TestFilesNamed_AbsentDirectoryIsEmptyNotAnError mirrors
+// TestFilesUnder_AbsentDirectoryIsEmptyNotAnError: an image with no pacman
+// database at all is an ordinary image.
+func TestFilesNamed_AbsentDirectoryIsEmptyNotAnError(t *testing.T) {
+	img := imageOf(layerOfOrdered(t, "sha256:one",
+		entry{name: "etc/os-release", body: "ID=debian"},
+	))
+	got, links, err := img.FilesNamed("var/lib/pacman/local", "desc")
+	if err != nil {
+		t.Fatalf("FilesNamed: %v, want no error for an image without the directory", err)
+	}
+	if len(got) != 0 || links != 0 {
+		t.Errorf("FilesNamed = %v (%d links), want empty", namesOf(got), links)
+	}
+}
+
+// TestFilesNamed_RefusesTheImageRootOrEmptyFilename mirrors
+// TestFilesUnder_RefusesTheImageRoot, plus the one new argument this
+// function has that FilesUnder does not.
+func TestFilesNamed_RefusesTheImageRootOrEmptyFilename(t *testing.T) {
+	img := imageOf(layerOfOrdered(t, "sha256:one", entry{name: "etc/os-release", body: "ID=debian"}))
+	for _, dir := range []string{"", ".", "/", "./"} {
+		if _, _, err := img.FilesNamed(dir, "desc"); err == nil {
+			t.Errorf("FilesNamed(%q, \"desc\") returned no error; the image root must be refused", dir)
+		}
+	}
+	if _, _, err := img.FilesNamed("var/lib/pacman/local", ""); err == nil {
+		t.Error(`FilesNamed("var/lib/pacman/local", "") returned no error; an empty filename must be refused`)
+	}
+}
+
+// TestFilesNamed_NormalisesTheDirectory mirrors
+// TestFilesUnder_NormalisesTheDirectory.
+func TestFilesNamed_NormalisesTheDirectory(t *testing.T) {
+	img := imageOf(layerOfOrdered(t, "sha256:one",
+		entry{name: "var/lib/pacman/local/acl-2.4.0-1/desc", body: "%NAME%\nacl\n"},
+	))
+	for _, dir := range []string{
+		"var/lib/pacman/local",
+		"/var/lib/pacman/local",
+		"var/lib/pacman/local/",
+		"var/lib/./pacman/local",
+	} {
+		got, _, err := img.FilesNamed(dir, "desc")
+		if err != nil {
+			t.Fatalf("FilesNamed(%q, \"desc\"): %v", dir, err)
+		}
+		if len(got) != 1 {
+			t.Errorf("FilesNamed(%q, \"desc\") = %v, want the one desc file", dir, namesOf(got))
+		}
+	}
+}
+
 // TestFilesUnder_NormalisesTheDirectory. Callers spell paths the way the tar
 // entries do (no leading slash), but a leading or trailing one must not turn
 // into a silent empty result — that is a clean verdict for an image this build

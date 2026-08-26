@@ -3564,6 +3564,50 @@ Not-Affected-wins, EOL 재구성 접두사, full-VERSION_ID 키, 버려진 alias
 
 ---
 
+### D97 — Arch: 릴리스 축이 없는 배포판, 그리고 rpm처럼 보이기만 하는 comparer
+
+**결정.** Arch Linux는 릴리스 없는 sentinel 키 `Arch:rolling` 아래서 끝에서 끝까지
+스캔됩니다(vunnel과 syft가 공유하는 관례입니다 — os-release에는 VERSION_ID가 아예
+없습니다): security.archlinux.org의 AVG 그룹을 읽는 새 provider, 새 pacman
+cataloger(`/var/lib/pacman/local/*/desc`, 구조적으로 ALPM_DB_VERSION을 제외하는
+새로운 `source.FilesNamed` 한 단계 더 깊은 walk을 거칩니다), `%BASE%` →
+`Package.Source`(D8의 정확한 대응물이고, 실전 패키지 137개 중 25개가 다르며, 그중
+여섯 개는 오직 자신의 base를 거쳐야만 닿을 수 있습니다), 그리고 D9의 위임 규칙에
+따라 main loop에서 작성한 새 `Pacman{}` comparer입니다.
+
+**이 comparer는 RPM이 아니고, 이제 테스트가 그것을 강제합니다.** libalpm의 vercmp는
+rpm과 같은 혈통을 공유하지만 fix 도달 가능성을 가르는 바로 그 지점에서 어긋납니다:
+남은 alpha 꼬리는 '집니다'(`1.0rc < 1.0`; rpm 자신의 `2.0.1a > 2.0.1`은 반대로
+판정합니다 — aliasing을 금지하게 만든, 측정된 tensorflow `2.4.0rc4` 미탐입니다),
+구분자 연속 길이가 다를 때 그것이 순서를 정합니다(`1..0 > 1.0`, rpm에는 대응물이
+없습니다), `~`/`^`는 그냥 평범한 구분자입니다(`1.0~1 > 1.0` — 물결표 방향이 rpm에
+대해 '뒤집힙니다'), 그리고 pkgrel 다리는 양쪽 다 그것을 가질 때만 작동합니다
+(`1.0-2 == 1.0`). vercmp(8)이 문서화한 체인은 양방향으로 재생되고,
+`TestPacman_DivergesFromRPMWhereMeasured`는 같은 입력에 두 comparer를 모두 호출해
+부호가 '다름'을 단언합니다 — 나중에 리팩터가 조용히 하나를 다른 하나에 alias해도
+바로 그 발산 자체에서 red가 됩니다.
+
+**Status 정책, 측정으로 확인.** Fixed 2,151 / Not-affected 193 / Vulnerable 85 /
+Unknown 15. Fixed와 Testing(tracker가 문서화했지만 실전 발생 0건 — 스펙대로
+구현했고 synthetic-only로 표시)은 fixed range를 냅니다; Vulnerable은
+FixState가 not-fixed인 fix 없는 range입니다 — tracker 자신의 status 단어가 D52의
+긍정 증거입니다; Not-affected와 Unknown은 세면서 skip합니다. 심각도는 벡터가
+아니라 단어입니다 — Photon/KNVD 선례이고, 밴드는 CVE alias를 거쳐 NVD를 통해
+도착합니다(CVE 모양 100%, 8,036/8,036). AVG id는 CVE를 절대 안에 담지 않으므로
+D90 접두사가 필요 없습니다 — 가정하는 대신 주석에 기록해 둡니다.
+
+**기록해 둔 긴장.** 이 피드에는 Last-Modified도 날짜 필드도 어디에도 없습니다 —
+`Provenance.DataAsOf`가 '모든' 실행에서 `time.Now()`로 폴백하는 유일한
+provider이고, 업스트림이 안고 있는 진짜 D12 구멍입니다(tracker가 언젠가 헤더를
+더하면 다시 볼 값이 있습니다). SBOM 경로도 함께 들어왔습니다: syft의 `pkg:alpm`
+purl(upstream = BASE, 무조건)은 apk/deb/rpm과 같은 범용 qualifier 장치를 거쳐
+라우팅됩니다. 차등은 assay 튜플 11개 중 agree 9로 grype 자신의 arch
+네임스페이스(이제 타깃 20개)에 대고 시드됐습니다; archlinux 태그는 digest로
+고정되지만 tracker는 rolling이므로, 다른 타깃이 2배 여유를 갖는 곳에서
+maxFindings는 4배 여유를 갖습니다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

@@ -454,6 +454,10 @@ func comparerName(ecosystem string) string {
 		return "apk"
 	case "Echo":
 		return "deb"
+	// D97: "Arch:rolling" is the literal sentinel version.For's registry
+	// carries too, not a prefix — see that map's own comment.
+	case "Arch:rolling":
+		return "pacman"
 	default:
 		return "unknown"
 	}

@@ -966,3 +966,41 @@ func TestDistroEcosystem_Alpaquita(t *testing.T) {
 		}
 	}
 }
+
+// TestDistroEcosystem_Arch: D97. Arch has no VERSION_ID at all (only
+// BUILD_ID=rolling, which Distro does not even carry a field for) — routed
+// on ID alone, into the literal sentinel key "Arch:rolling" rather than a
+// bare "Arch" the way Wolfi/MinimOS's genuinely release-less keys are, so
+// that a reader cannot mistake the key for a truncated release-qualified
+// one.
+func TestDistroEcosystem_Arch(t *testing.T) {
+	for _, tc := range []struct{ id, versionID, want string }{
+		// The real shape: no VERSION_ID at all.
+		{"arch", "", "Arch:rolling"},
+		// VersionID is never consulted, not merely tolerant of one shape over
+		// another — any stray value must resolve identically.
+		{"arch", "rolling", "Arch:rolling"},
+		{"arch", "3.19", "Arch:rolling"},
+	} {
+		got, err := Distro{ID: tc.id, VersionID: tc.versionID}.Ecosystem()
+		if err != nil {
+			t.Errorf("id=%q VERSION_ID=%q: %v", tc.id, tc.versionID, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("id=%q VERSION_ID=%q -> %q, want %q", tc.id, tc.versionID, got, tc.want)
+		}
+	}
+	// Arch's key must not converge with any other distro's, or with
+	// Wolfi/MinimOS's bare release-less keys.
+	for _, tc := range []struct{ id, versionID, want string }{
+		{"alpine", "3.19", "Alpine:v3.19"},
+		{"wolfi", "20230201", "Wolfi"},
+		{"minimos", "20241031", "MinimOS"},
+		{"arch", "", "Arch:rolling"},
+	} {
+		if got, err := (Distro{ID: tc.id, VersionID: tc.versionID}).Ecosystem(); err != nil || got != tc.want {
+			t.Errorf("%s %s -> %q, %v; want %q", tc.id, tc.versionID, got, err, tc.want)
+		}
+	}
+}

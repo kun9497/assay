@@ -23,6 +23,7 @@ import (
 	"github.com/kun9497/assay/internal/dbcmd"
 	"github.com/kun9497/assay/internal/provider"
 	"github.com/kun9497/assay/internal/provider/amazon"
+	"github.com/kun9497/assay/internal/provider/arch"
 	"github.com/kun9497/assay/internal/provider/eol"
 	"github.com/kun9497/assay/internal/provider/epss"
 	"github.com/kun9497/assay/internal/provider/fedora"
@@ -2035,6 +2036,76 @@ func TestDBUpdateProviders_PhotonDisabledViaEnv(t *testing.T) {
 	for _, p := range ps {
 		if p.Name() == "Photon OS CVE metadata" {
 			t.Errorf("dbUpdateProviders() = %+v, want no Photon OS provider with PHOTON_ENABLE=0", ps)
+		}
+	}
+}
+
+// TestDBUpdateProviders_ArchOnByDefault is D97's caller-first proof,
+// mirroring TestDBUpdateProviders_PhotonOnByDefault exactly: dbUpdateProviders
+// must actually construct the Arch Linux Security Tracker provider when
+// ARCH_ENABLE is unset, not merely have arch.New sitting unused in the
+// import list. Mutating the call site to drop the provider (or its Options)
+// compiles and would leave every other test in this package green.
+func TestDBUpdateProviders_ArchOnByDefault(t *testing.T) {
+	t.Setenv("ARCH_ENABLE", "")
+	t.Setenv("REDHAT_ENABLE", "0") // isolate: only Arch's own wiring is under test here
+	t.Setenv("AMAZON_ENABLE", "0")
+	t.Setenv("ORACLE_ENABLE", "0")
+	t.Setenv("FEDORA_ENABLE", "0")
+	t.Setenv("SUSE_ENABLE", "0")
+	t.Setenv("PHOTON_ENABLE", "0")
+
+	orig := newArchProvider
+	sawCall := false
+	var gotOpts arch.Options
+	newArchProvider = func(opts arch.Options) *arch.Provider {
+		sawCall, gotOpts = true, opts
+		return orig(opts)
+	}
+	defer func() { newArchProvider = orig }()
+
+	ps := dbUpdateProviders(io.Discard)
+	if !sawCall {
+		t.Fatal("dbUpdateProviders never constructed the Arch provider -- ARCH_ENABLE defaults ON (D97)")
+	}
+	if gotOpts.Progress == nil {
+		t.Error("arch.New was constructed with a nil Progress -- Fetch's own drop-count summary would go nowhere")
+	}
+	var found bool
+	for _, p := range ps {
+		if p.Name() == "Arch Linux Security Tracker" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("dbUpdateProviders() = %+v, want it to include the Arch provider", ps)
+	}
+}
+
+// TestDBUpdateProviders_ArchDisabledViaEnv is the other half: an operator
+// who does not want to scan Arch Linux must be able to turn the fetch off
+// entirely, exactly as PHOTON_ENABLE=0 and the others already let them.
+func TestDBUpdateProviders_ArchDisabledViaEnv(t *testing.T) {
+	t.Setenv("ARCH_ENABLE", "0")
+	t.Setenv("REDHAT_ENABLE", "0")
+	t.Setenv("AMAZON_ENABLE", "0")
+	t.Setenv("ORACLE_ENABLE", "0")
+	t.Setenv("FEDORA_ENABLE", "0")
+	t.Setenv("SUSE_ENABLE", "0")
+	t.Setenv("PHOTON_ENABLE", "0")
+
+	orig := newArchProvider
+	sawCall := false
+	newArchProvider = func(opts arch.Options) *arch.Provider { sawCall = true; return orig(opts) }
+	defer func() { newArchProvider = orig }()
+
+	ps := dbUpdateProviders(io.Discard)
+	if sawCall {
+		t.Error("arch.New was constructed even though ARCH_ENABLE=0")
+	}
+	for _, p := range ps {
+		if p.Name() == "Arch Linux Security Tracker" {
+			t.Errorf("dbUpdateProviders() = %+v, want no Arch provider with ARCH_ENABLE=0", ps)
 		}
 	}
 }

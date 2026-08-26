@@ -18,6 +18,7 @@ import (
 	"github.com/kun9497/assay/internal/cataloger/gobinary"
 	"github.com/kun9497/assay/internal/cataloger/jar"
 	"github.com/kun9497/assay/internal/cataloger/osrelease"
+	"github.com/kun9497/assay/internal/cataloger/pacmandb"
 	"github.com/kun9497/assay/internal/cataloger/rpmdb"
 	"github.com/kun9497/assay/internal/cataloger/spdx"
 	"github.com/kun9497/assay/internal/matcher"
@@ -203,6 +204,17 @@ const (
 	// for a distro that does not even need the symlink-following workaround
 	// that path needed.
 	apkDBPathVarLib = "var/lib/apk/db/installed"
+	// pacmanLocalDir is Arch Linux's pacman local package database (D97): a
+	// DIRECTORY OF DIRECTORIES, one subdirectory per installed package
+	// (var/lib/pacman/local/<name>-<version>-<pkgrel>/desc), unlike every
+	// other database probed here. Its contents are named after the
+	// packages, the same reason dpkgStatusDir cannot be asked for by name
+	// either — source.FilesNamed discovers the desc files one level deeper
+	// than source.FilesUnder reaches. The directory also carries a sibling
+	// FILE, ALPM_DB_VERSION, which FilesNamed excludes by construction: it
+	// is a direct child of local/, not one level deeper, and is not named
+	// "desc" either.
+	pacmanLocalDir = "var/lib/pacman/local"
 )
 
 // apkDBPaths is every tar entry the apk probe asks for, traditional path
@@ -801,6 +813,14 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 	if err != nil {
 		return pkgmeta.Target{}, cyclonedx.Stats{}, err
 	}
+	// rpm and apk detection is cheap (map lookups against the single-shot
+	// Files() result above), computed here rather than just before the
+	// switch below, so it can also gate the pacman probe further down
+	// without paying for a second full layer pass on every image that is
+	// neither Debian nor Arch.
+	rpmFound, hasRPM := findRPMDB(files)
+	apkFound, apkPath, hasAPK := findAPKDB(files)
+
 	// Only when the single-file database is absent, so an ordinary Debian
 	// image pays nothing for this: FilesUnder is a second full pass over
 	// every layer (D54).
@@ -814,6 +834,20 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 	}
 	if err != nil {
 		return pkgmeta.Target{}, cyclonedx.Stats{}, err
+	}
+
+	// D97. Only when nothing else has already been found: FilesNamed is
+	// another full pass over every layer, the identical cost D54's own
+	// comment above accepts for status.d, paid here only by an image that
+	// is not apk-, dpkg- or rpm-based -- which an Arch image, by
+	// construction, never is.
+	var pacmanFiles map[string]source.FileFromLayer
+	var pacmanLinks int
+	if !hasAPK && files[dpkgDBPath].Data == nil && len(statusD) == 0 && !hasRPM {
+		pacmanFiles, pacmanLinks, err = img.FilesNamed(pacmanLocalDir, "desc")
+		if err != nil {
+			return pkgmeta.Target{}, cyclonedx.Stats{}, err
+		}
 	}
 
 	var (
@@ -842,8 +876,6 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 	var pkgs []pkgmeta.Package
 	var diffID string
 	var skippedRecords int
-	rpmFound, hasRPM := findRPMDB(files)
-	apkFound, apkPath, hasAPK := findAPKDB(files)
 	switch {
 	case hasAPK:
 		p, err := apkdb.Parse(bytes.NewReader(apkFound.Data), ecosystem)
@@ -935,6 +967,34 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 			return pkgmeta.Target{}, cyclonedx.Stats{}, err
 		}
 		pkgs, diffID, skippedRecords = res.Packages, f.DiffID, len(res.Skipped)
+	case len(pacmanFiles) > 0:
+		// D97. One desc file per package, parsed in sorted order for the
+		// same reason status.d's own loop above is: FilesNamed returns a
+		// map, and a map's iteration order reaching the report would make
+		// every run a different document.
+		//
+		// diffID is taken from the layer the FIRST desc file came from —
+		// status.d's own reasoning applies unchanged: a pacman database is
+		// written by one image build, so in practice every desc file shares
+		// a layer; where it does not, the per-package Location already
+		// carries the file it came from, the finer-grained answer a reader
+		// wants anyway.
+		for _, name := range source.SortedNames(pacmanFiles) {
+			f := pacmanFiles[name]
+			p, err := pacmandb.ParseDesc(bytes.NewReader(f.Data), ecosystem, name)
+			if err != nil {
+				return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("parse %s: %w", name, err)
+			}
+			if diffID == "" {
+				diffID = f.DiffID
+			}
+			pkgs = append(pkgs, p...)
+		}
+		// A symlink under a pacman package directory is a desc file this
+		// build did not read, so it is counted as a package whose version
+		// is unknown rather than dropped — status.d's own reasoning again
+		// (D54, D36).
+		skippedRecords += pacmanLinks
 	}
 	if len(pkgs) == 0 {
 		// Naming the shapes that were looked for, and the ones that are known
@@ -954,8 +1014,9 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 				ref, target.Distro.ID, rpmDBPaths())
 		}
 		return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf(
-			"no supported package database found in %s (looked for %v, %s, %s/ and an rpm "+
-				"database under %v)", ref, apkDBPaths, dpkgDBPath, dpkgStatusDir, rpmDBDirs)
+			"no supported package database found in %s (looked for %v, %s, %s/, %s/*/desc "+
+				"and an rpm database under %v)",
+			ref, apkDBPaths, dpkgDBPath, dpkgStatusDir, pacmanLocalDir, rpmDBDirs)
 	}
 	for i := range pkgs {
 		for j := range pkgs[i].Locations {

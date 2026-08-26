@@ -618,6 +618,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] Photon OS (D96) — 새 flat-JSON provider이고 D90의 충돌을 구조적으로 처음부터
       피함(major 셋을 가로질러 CVE당 advisory 하나), Fixed-wins와 BDSA-drop 정책을
       측정하고 셈; 첫 차등이 완벽한 동등성(22/22, 7/7)
+- [x] Arch Linux (D97) — 릴리스 없는 `Arch:rolling` 키, `%BASE%`를 D8의 source로
+      쓰는 새 pacman cataloger, 그리고 rpm에 절대 alias되지 못하도록 테스트가
+      막는 `Pacman{}` comparer(측정된 tensorflow `2.4.0rc4` 미탐)
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건

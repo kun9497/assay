@@ -151,8 +151,8 @@ bci-base's misleading no-fix rows became real fixed versions.
 ### Ecosystem coverage against grype — the gap, remeasured
 
 grype ships **26 providers**; assay had **4** when this entry was written (2026-08-13) and
-has **9** since D96 (OSV, Red Hat CSAF, Amazon ALAS, Oracle ELSA
-OVAL, Fedora Bodhi, SUSE CSAF, Photon, NVD ratings, KISA enrichment). grype's list for reference:
+has **10** since D97 (OSV, Red Hat CSAF, Amazon ALAS, Oracle ELSA
+OVAL, Fedora Bodhi, SUSE CSAF, Photon, Arch AVG, NVD ratings, KISA enrichment). grype's list for reference:
 alma, alpine, amazon, arch, bitnami, chainguard, chainguard-libraries, debian, echo, eol,
 epss, fedora, github, govulndb, hummingbird, kev, mariner, minimos, nvd, oracle, photon,
 rhel, secureos, sles, ubuntu, wolfi.
@@ -167,10 +167,15 @@ usr/lib symlink and the scan hard-errored at exit 2 until D88's path probe). Min
 left the list in D92 (the D88 template held; Echo image-unverified — no public registry).
 Azure Linux/CBL-Mariner left the list in D94 (the D71/D72 shape held; two aged images
 joined the weekly differential the same day), and Alpaquita/BellSoft Hardened Containers
-left it in D95 (which also brought the apk provides bridge), and Photon left it in D96 (a
-new provider, first differential at exact parity). What is STILL true: on Arch, **assay
-finds nothing at all** — decided-and-sequenced (the 2026-08-26 five-boutique research
-round, last slice standing), while CleanStart is deferred with a trigger (next entry). grype also ships enrichment feeds
+left it in D95 (which also brought the apk provides bridge), Photon left it in D96 (a
+new provider, first differential at exact parity), and Arch closed the round in D97 (a new
+comparer, a new cataloger, a release-less key). **The distro list this entry existed to
+track is now empty**: every distro family grype ships a provider for either scans end to
+end in assay or is deferred with a recorded trigger (CleanStart, next entry — its OSV feed
+is measured and template-ready, only routing detection blocks it). What grype still has
+that assay does not: the bitnami and hummingbird feeds (neither measured yet), its
+CPE/NVD fallback matcher (deliberately absent — the differential classifies its output as
+the main false-positive class), and the binary classifier (syft-side, out of scope). grype also ships enrichment feeds
 assay had no equivalent for; D86 ingested EPSS and KEV (typed rating fields, both gates)
 and D87 the EOL data — the enrichment-feed gap against grype is closed.
 

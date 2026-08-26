@@ -823,3 +823,108 @@ func TestParse_APKWithoutDistroIsKeptUnkeyed(t *testing.T) {
 		t.Errorf("Ecosystem = %q, want empty: there is no distro to derive a release from", eco)
 	}
 }
+
+// TestParse_AlpmKeyedViaQualifierFallback_NoOSComponent is D97's own version
+// of TestParse_APKKeyedViaQualifierFallback_NoOSComponent: syft's own alpm
+// purl shape (arch_package.go's packageURL, researched against syft
+// source) writes "distro=arch-rolling" — release.ID with no VersionID, so
+// PURLQualifiers falls back to BuildID ("rolling") — and this must resolve
+// the shared "Arch:rolling" sentinel with no operating-system component in
+// the document at all, exactly the shape a real syft SPDX document (and
+// some CycloneDX ones) produces.
+func TestParse_AlpmKeyedViaQualifierFallback_NoOSComponent(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+	  {"type":"library","name":"acl","version":"2.4.0-1",
+	   "purl":"pkg:alpm/arch/acl@2.4.0-1?arch=x86_64&upstream=acl&distro=arch-rolling"}]}`
+	target, _, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1", len(target.Packages))
+	}
+	if got := target.Packages[0].Ecosystem; got != "Arch:rolling" {
+		t.Errorf("Ecosystem = %q, want %q (keyed from the purl's own distro qualifier)", got, "Arch:rolling")
+	}
+	// The purl's namespace ("arch", the distro id) must never be joined into
+	// the name — OSV/Arch's tracker name the bare package, the same rule
+	// apk/rpm/deb already follow.
+	if got := target.Packages[0].Name; got != "acl" {
+		t.Errorf("Name = %q, want bare %q (namespace must not be joined in)", got, "acl")
+	}
+}
+
+// TestParse_AlpmSourceFromUpstreamQualifierWhenDiffers is D8's exact
+// analogue for the SBOM path: syft's alpm purl always carries an "upstream"
+// qualifier (arch_package.go sets it whenever BasePackage != "", which is
+// every real record measured), so this is set ONLY when it differs from
+// the bare package name — libelf's own BASE, elfutils, is where Arch's
+// tracker actually files libelf's CVEs.
+func TestParse_AlpmSourceFromUpstreamQualifierWhenDiffers(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+	  {"type":"library","name":"libelf","version":"0.196-1",
+	   "purl":"pkg:alpm/arch/libelf@0.196-1?arch=x86_64&upstream=elfutils&distro=arch-rolling"}]}`
+	target, _, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1", len(target.Packages))
+	}
+	p := target.Packages[0]
+	if p.Source == nil || p.Source.Name != "elfutils" {
+		t.Fatalf("libelf Source = %+v, want Name elfutils", p.Source)
+	}
+}
+
+// TestParse_AlpmSourceNilWhenUpstreamEqualsName is the boundary
+// TestParse_AlpmSourceFromUpstreamQualifierWhenDiffers approaches from the
+// other side: syft's alpm purl carries "upstream=acl" for a non-split
+// package too (its own BASE simply repeats NAME), and setting Source there
+// as well would make --explain's D8 wording ("matched via source package")
+// print for a package whose "source" is itself — the same reasoning
+// pacmandb.ParseDesc's own doc comment gives for the image-scan path, kept
+// consistent here on the SBOM path.
+func TestParse_AlpmSourceNilWhenUpstreamEqualsName(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+	  {"type":"library","name":"acl","version":"2.4.0-1",
+	   "purl":"pkg:alpm/arch/acl@2.4.0-1?arch=x86_64&upstream=acl&distro=arch-rolling"}]}`
+	target, _, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1", len(target.Packages))
+	}
+	if got := target.Packages[0].Source; got != nil {
+		t.Errorf("Source = %+v, want nil (upstream repeats the bare name)", got)
+	}
+}
+
+// TestParse_AlpmWithoutDistroIsKeptUnkeyed mirrors
+// TestParse_APKWithoutDistroIsKeptUnkeyed: an alpm package with no distro
+// anywhere (no operating-system component, no purl "distro" qualifier) must
+// still be cataloged, unkeyed, so it is counted and reported as skipped
+// rather than silently shrinking the denominator.
+func TestParse_AlpmWithoutDistroIsKeptUnkeyed(t *testing.T) {
+	const doc = `{
+	  "bomFormat": "CycloneDX", "specVersion": "1.5", "version": 1,
+	  "components": [{
+	    "type": "library", "name": "acl", "version": "2.4.0-1",
+	    "purl": "pkg:alpm/arch/acl@2.4.0-1?arch=x86_64"
+	  }]
+	}`
+	target, cat, err := Parse(strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cat.Components != 1 {
+		t.Errorf("Components = %d, want 1", cat.Components)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1: an unkeyable package is still a package", len(target.Packages))
+	}
+	if eco := target.Packages[0].Ecosystem; eco != "" {
+		t.Errorf("Ecosystem = %q, want empty: there is no distro to derive a release from", eco)
+	}
+}
