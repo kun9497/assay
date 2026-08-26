@@ -263,3 +263,27 @@ func TestForWolfiAndChainguard(t *testing.T) {
 		}
 	}
 }
+
+// TestForMinimOS: D92, a clean clone of TestForWolfiAndChainguard above.
+// "MinimOS" resolves BARE -- that is the whole key OSV publishes (no release
+// axis to qualify, D6 satisfied vacuously) -- not a truncated one. A miss
+// here means every MinimOS package silently falls through to "no comparer"
+// and every package on a MinimOS image reports skipped rather than
+// evaluated.
+func TestForMinimOS(t *testing.T) {
+	c, ok := For("MinimOS")
+	if !ok {
+		t.Fatal(`For("MinimOS") not found`)
+	}
+	if _, isAPK := c.(APK); !isAPK {
+		t.Errorf(`For("MinimOS") = %T, want APK`, c)
+	}
+	// Unlike every OTHER apk/rpm distro's bare family name, a
+	// release-qualified spelling must NOT resolve -- there is no such key,
+	// since OSV never publishes one, and letting a fabricated "MinimOS:1.0"
+	// resolve would silently accept a shape nothing populates or looks up.
+	if _, ok := For("MinimOS:1.0"); ok {
+		t.Error(`For("MinimOS:1.0") resolved; MinimOS has no release axis, and a ` +
+			`release-qualified spelling of it is not a key anything builds`)
+	}
+}

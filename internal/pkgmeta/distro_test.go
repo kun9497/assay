@@ -706,3 +706,60 @@ func TestDistroEcosystem_WolfiAndChainguard(t *testing.T) {
 		t.Error("opensuse-tumbleweed resolved an ecosystem; it must always be refused")
 	}
 }
+
+// TestDistroEcosystem_MinimOSAndEcho: D92, a clean clone of D88's own test
+// above. Both keys are release-less too -- OSV publishes "MinimOS" and
+// "Echo" bare, no per-release archive for either -- so VERSION_ID is ignored
+// entirely.
+//
+// MinimOS is pinned with the REAL frozen VERSION_ID reg.mini.dev/nginx:latest
+// ships (measured 2026-08-26: "20241031", a wolfi-style build-tooling
+// artifact), the same "would fail every other distro's parse" proof D88's
+// test uses. Echo has no real image to measure a VERSION_ID from (the
+// "echo" case in distro.go is UNVERIFIED) -- covered anyway with an
+// ordinary X.Y-shaped value and an empty one, since the case ignores
+// VERSION_ID unconditionally regardless of what it contains.
+func TestDistroEcosystem_MinimOSAndEcho(t *testing.T) {
+	for _, tc := range []struct {
+		id, versionID string
+		want          string
+	}{
+		{"minimos", "20241031", "MinimOS"},
+		{"echo", "12", "Echo"},
+		// No VERSION_ID at all must resolve identically -- the field is never
+		// consulted, not merely tolerant of one shape over another.
+		{"minimos", "", "MinimOS"},
+		{"echo", "", "Echo"},
+		{"minimos", "3.19", "MinimOS"},
+	} {
+		got, err := Distro{ID: tc.id, VersionID: tc.versionID}.Ecosystem()
+		if err != nil {
+			t.Errorf("id=%q VERSION_ID=%q: %v", tc.id, tc.versionID, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("id=%q VERSION_ID=%q -> %q, want %q", tc.id, tc.versionID, got, tc.want)
+		}
+	}
+	// MinimOS and Echo's keys must not converge with any other distro's, or
+	// with Wolfi/Chainguard's, or with each other -- a change that collapsed
+	// them would make one ecosystem's advisories reachable under another's
+	// key.
+	for _, tc := range []struct{ id, versionID, want string }{
+		{"alpine", "3.19", "Alpine:v3.19"},
+		{"wolfi", "20230201", "Wolfi"},
+		{"chainguard", "20230201", "Chainguard"},
+		{"minimos", "20241031", "MinimOS"},
+		{"echo", "12", "Echo"},
+	} {
+		if got, err := (Distro{ID: tc.id, VersionID: tc.versionID}).Ecosystem(); err != nil || got != tc.want {
+			t.Errorf("%s %s -> %q, %v; want %q", tc.id, tc.versionID, got, err, tc.want)
+		}
+	}
+	// opensuse-tumbleweed must still be refused (D77) -- MinimOS and Echo
+	// leaving VERSION_ID unconsulted must not have loosened the switch's
+	// other rolling-release refusal into resolving too.
+	if _, err := (Distro{ID: "opensuse-tumbleweed", VersionID: "20260818"}).Ecosystem(); err == nil {
+		t.Error("opensuse-tumbleweed resolved an ecosystem; it must always be refused")
+	}
+}

@@ -411,6 +411,15 @@ func comparerName(ecosystem string) string {
 		return "nuget"
 	case "Maven":
 		return "maven"
+	// The release-less distro keys (D88 Wolfi/Chainguard, D92 MinimOS —
+	// apk; D92 Echo — deb). Wolfi and Chainguard shipped in D88 WITHOUT
+	// these cases, so --explain printed "comparer: unknown" for two
+	// ecosystems version.For orders perfectly well — the drift this
+	// function's own doc comment warns about, caught by D92's review.
+	case "Wolfi", "Chainguard", "MinimOS":
+		return "apk"
+	case "Echo":
+		return "deb"
 	default:
 		return "unknown"
 	}

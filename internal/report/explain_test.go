@@ -345,6 +345,13 @@ func TestComparerName_ExactNamePerEcosystem(t *testing.T) {
 		{"Amazon Linux:2023", "rpm"}, // D73
 		{"Oracle Linux:9", "rpm"},    // D74
 		{"Fedora:44", "rpm"},         // D75
+		// D92's review closed the D88 gap: the release-less keys printed
+		// "unknown" while version.For ordered them fine — the exact drift
+		// this test exists to catch.
+		{"Wolfi", "apk"},      // D88
+		{"Chainguard", "apk"}, // D88
+		{"MinimOS", "apk"},    // D92
+		{"Echo", "deb"},       // D92
 		{"bogus-eco", "unknown"},
 	} {
 		if got := comparerName(tt.ecosystem); got != tt.want {
@@ -686,6 +693,7 @@ func TestComparerName_AgreesWithVersionFor(t *testing.T) {
 	for _, eco := range []string{
 		"Go", "npm", "PyPI", "crates.io",
 		"RubyGems", "Packagist", "NuGet", "Maven",
+		"Wolfi", "Chainguard", "MinimOS", "Echo",
 		"Alpine:v3.19", "Alpine:v3.99",
 		"Debian:12", "Debian:forky",
 		"Red Hat:8", "Red Hat:9", "Red Hat:10",

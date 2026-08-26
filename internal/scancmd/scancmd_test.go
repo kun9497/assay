@@ -83,6 +83,19 @@ HOME_URL="https://wolfi.dev"
 BUG_REPORT_URL="https://github.com/wolfi-dev/os/issues"
 `
 
+// osReleaseMinimOS is verbatim from a real reg.mini.dev/nginx:latest pull
+// (measured 2026-08-26). VERSION_ID is a frozen build-tooling artifact
+// ("20241031"), the same wolfi-style shape osReleaseWolfi carries above --
+// included for the identical reason: distro.go's "minimos" case (D92) must
+// ignore it outright, not merely tolerate its absence.
+const osReleaseMinimOS = `ID=minimos
+NAME="MinimOS"
+PRETTY_NAME="MinimOS"
+VERSION_ID="20241031"
+HOME_URL="https://minimus.io"
+BUG_REPORT_URL="https://support.minimus.io"
+`
+
 // One apk record, minimal but real-shaped: name, version, architecture, and
 // origin (D8). The name deliberately differs from the origin — busybox-binsh
 // -> busybox is one of the six real alpine:3.19 packages that diverge from
@@ -438,6 +451,46 @@ func TestCatalogFromImage_ApkDBUnderUsrLibPhysicalPath(t *testing.T) {
 	}
 	// D8 rides free: the apk cataloger reads the same `o:` field regardless
 	// of which of the two paths the database was found under.
+	if p.Source == nil || p.Source.Name != "busybox" {
+		t.Errorf("Source = %+v, want Name busybox (D8)", p.Source)
+	}
+	if stats.Cataloged != 1 {
+		t.Errorf("stats = %+v, want Cataloged=1", stats)
+	}
+}
+
+// TestCatalogFromImage_ApkDBUnderUsrLibPhysicalPath_MinimOS is D92's own
+// cheap row on the same fixture pattern: the usr/lib apk path trap the test
+// above closed for Wolfi/Chainguard was already closed generically by D88's
+// apkDBPaths probe -- nothing in findAPKDB is Wolfi/Chainguard-specific --
+// but nothing had exercised it with a MinimOS os-release until now. A real
+// reg.mini.dev/nginx image was verified live to use exactly this layout.
+func TestCatalogFromImage_ApkDBUnderUsrLibPhysicalPath_MinimOS(t *testing.T) {
+	img := &source.Image{Layers: []source.Layer{
+		imageLayer(t, "sha256:minimos", map[string]string{
+			osReleasePath:   osReleaseMinimOS,
+			apkDBPathUsrLib: apkOneRecord, // no lib/apk/db/installed at all
+		}),
+	}}
+	target, stats, err := catalogFromImage("test-image", img)
+	if err != nil {
+		t.Fatalf("catalogFromImage: %v (want the physical usr/lib path to be found)", err)
+	}
+	if target.Distro == nil || target.Distro.ID != "minimos" {
+		t.Fatalf("Distro = %+v, want ID minimos", target.Distro)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1", len(target.Packages))
+	}
+	p := target.Packages[0]
+	if p.Ecosystem != "MinimOS" {
+		t.Errorf("Ecosystem = %q, want MinimOS (D92's distro.go routing)", p.Ecosystem)
+	}
+	if p.Locations[0].LayerDigest != "sha256:minimos" {
+		t.Errorf("LayerDigest = %q, want sha256:minimos", p.Locations[0].LayerDigest)
+	}
+	// D8 rides free here too: the apk cataloger reads the same `o:` field
+	// regardless of distro.
 	if p.Source == nil || p.Source.Name != "busybox" {
 		t.Errorf("Source = %+v, want Name busybox (D8)", p.Source)
 	}

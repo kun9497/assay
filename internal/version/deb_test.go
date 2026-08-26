@@ -73,6 +73,14 @@ var debTests = []struct {
 	{"2.38.1-5+deb12u3", "1:2.38.1-5+deb12u3", -1, "real bookworm bsdutils: the source carries an epoch the binary does not"},
 	{"2.4.4-2ubuntu17.4", "2.4.4-2ubuntu17.10", -1, "Ubuntu 24.04 gpgv: 4 < 10 numerically inside the revision"},
 	{"12.2.0-14+deb12u1", "12.2.0-14+deb12u1", 0, "real bookworm gcc-12-base"},
+
+	// D92: Echo's own two build-suffix idioms, real values from the live
+	// Echo/all.zip (measured 2026-08-26). Neither needs a comparer change --
+	// '+' is already a legal upstream/revision character (deb.go's
+	// firstNotIn) -- these rows pin that the existing algorithm orders them
+	// correctly rather than merely accepting them.
+	{"3.7.4-4+e5", "3.7.4-4", 1, "Echo's \"+eN\" revision suffix (real libarchive fix, ECHO-0051-e755-e08e): '+' (299) > end-of-part (0)"},
+	{"5.2.1+echo.1", "5.2.1", 1, "Echo's \"+echo.N\" upstream suffix (real django fix, ECHO-01ac-8821-274a), no hyphen so it lands in the upstream compare, same '+' > end-of-part rule"},
 }
 
 func TestDebCompare(t *testing.T) {
@@ -173,6 +181,30 @@ func TestDebValidButUnusual(t *testing.T) {
 // every pair rather than only neighbours. A comparer can be right about
 // neighbours and wrong about transitivity, and InRange's event sort depends on
 // the latter.
+// TestForEcho: D92, the deb-based sibling of TestForMinimOS (apk_test.go).
+// "Echo" resolves BARE -- OSV keys it with no release axis at all, the same
+// shape "Wolfi"/"Chainguard"/"MinimOS" have -- not a "Debian:"-style
+// truncated prefix. A miss here means every Echo package silently falls
+// through to "no comparer" and every package on an Echo image reports
+// skipped rather than evaluated.
+func TestForEcho(t *testing.T) {
+	c, ok := For("Echo")
+	if !ok {
+		t.Fatal(`For("Echo") not found`)
+	}
+	if _, isDeb := c.(Deb); !isDeb {
+		t.Errorf(`For("Echo") = %T, want Deb`, c)
+	}
+	// Unlike Debian/Ubuntu's bare family names, a release-qualified spelling
+	// of Echo must NOT resolve -- there is no such key, since OSV never
+	// publishes one, and letting a fabricated "Echo:12" resolve would
+	// silently accept a shape nothing populates or looks up.
+	if _, ok := For("Echo:12"); ok {
+		t.Error(`For("Echo:12") resolved; Echo has no release axis, and a ` +
+			`release-qualified spelling of it is not a key anything builds`)
+	}
+}
+
 func TestDeb_PolicyChain(t *testing.T) {
 	chain := []string{
 		"1.0~~",

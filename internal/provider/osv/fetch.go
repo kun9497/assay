@@ -84,9 +84,28 @@ const DefaultBaseURL = "https://osv-vulnerabilities.storage.googleapis.com"
 // cases for why that satisfies D6 rather than violating it). Live yield is
 // small relative to the raw archive: 76.9% of Chainguard's 43,650 records
 // are withdrawn and D16 drops them at ingestion, leaving ~10,085 live.
+//
+// "MinimOS" is D92's clone of that same shape: one archive path, no release
+// axis on either side (pkgmeta.Distro.Ecosystem's "minimos" case), fetched
+// directly rather than through a Wolfi/Chainguard-style "one feed, two keys"
+// arrangement -- no cross-feed duplication was measured, so it needs no
+// familyMatches special case. Measured 2026-08-26: 129,979 records, MINI-*
+// ids, every affected entry ecosystem the bare string "MinimOS".
+//
+// "Echo" joins on the same terms -- deb-based rather than apk, but still one
+// archive path with no release axis (pkgmeta.Distro.Ecosystem's "echo"
+// case). Measured 2026-08-26: 8,136 records, ECHO-* ids. Most affected
+// entries carry the bare "Echo" key (7,957); a minority carry a
+// language-qualified one -- "Echo:PyPi" (495), "Echo:Maven" (34), "Echo:npm"
+// (16) -- which the generic familyMatches prefix rule (below) auto-ingests
+// alongside the bare ones. Those qualified keys are stored but UNREACHABLE:
+// a real Python/npm/Java package catalogs as PyPI/npm/Maven, never as
+// "Echo:PyPi" etc., since its own purl is a plain pkg:pypi/... one, not a
+// deb purl. Harmless dead entries, not special-cased out.
 var Ecosystems = []string{
 	"Go", "npm", "PyPI", "crates.io", "RubyGems", "Packagist", "NuGet", "Maven",
 	"Alpine", "Debian", "Ubuntu", "Rocky Linux", "AlmaLinux", "Chainguard",
+	"MinimOS", "Echo",
 }
 
 type Provider struct {
@@ -190,7 +209,8 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		// advisories — and a database that silently has none turns every
 		// later scan of that distro into a clean report at exit 0.
 		if (eco == "Alpine" || eco == "Debian" || eco == "Ubuntu" || eco == "Rocky Linux" ||
-			eco == "AlmaLinux" || eco == "Chainguard" || eco == "Wolfi") && n == 0 {
+			eco == "AlmaLinux" || eco == "Chainguard" || eco == "Wolfi" ||
+			eco == "MinimOS" || eco == "Echo") && n == 0 {
 			return store.Provenance{}, fmt.Errorf("fetch %s: archive yielded no %s:* records", eco, eco)
 		}
 		// "Wolfi" above is not dead weight even though nothing in

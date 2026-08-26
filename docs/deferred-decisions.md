@@ -153,9 +153,10 @@ nothing on Amazon Linux, Oracle, SLES, or a Java/Ruby/Rust/.NET/PHP application;
 closed every one of those (language ecosystems D68–D70, the RPM family D71–D79). Wolfi and
 Chainguard left this list in D88 (which also corrected this entry's own claim: their images
 were never "catalogued and reported as not evaluated" — the apk database hides behind a
-usr/lib symlink and the scan hard-errored at exit 2 until D88's path probe). What is STILL
-true: on Photon, Mariner/Azure Linux, Arch, MinimOS, Echo and the remaining boutiques,
-**assay finds nothing at all**. grype also ships enrichment feeds
+usr/lib symlink and the scan hard-errored at exit 2 until D88's path probe). MinimOS and Echo
+left the list in D92 (the D88 template held; Echo image-unverified — no public registry).
+What is STILL true: on Photon, Mariner/Azure Linux, Arch, CleanStart and BellSoft Hardened
+Containers, **assay finds nothing at all**. grype also ships enrichment feeds
 assay had no equivalent for; D86 ingested EPSS and KEV (typed rating fields, both gates)
 and D87 the EOL data — the enrichment-feed gap against grype is closed.
 

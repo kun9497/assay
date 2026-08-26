@@ -225,14 +225,18 @@ func TestFetch_AlpineZeroRecordsIsAnError(t *testing.T) {
 }
 
 // The same hard-fail as Alpine's above (TestFetch_AlpineZeroRecordsIsAnError),
-// extended to Debian, Ubuntu, Rocky Linux (D71), AlmaLinux (D72) and
-// Chainguard (D88): an archive fetched under any family name that names no
-// matching record is the exact regression the guard's own comment records
-// happening to Debian when it first joined this list, and only the Alpine
-// arm was ever held by a test. Narrowing the guard's condition to "eco ==
-// Alpine" alone leaves the whole suite green, because nothing else in this
-// file, or anywhere in the package, drives a Debian, Ubuntu, Rocky Linux,
-// AlmaLinux or Chainguard fetch through zero matching records.
+// extended to Debian, Ubuntu, Rocky Linux (D71), AlmaLinux (D72), Chainguard
+// (D88) and now MinimOS and Echo (D92): an archive fetched under any family
+// name that names no matching record is the exact regression the guard's own
+// comment records happening to Debian when it first joined this list, and
+// only the Alpine arm was ever held by a test. Narrowing the guard's
+// condition to "eco == Alpine" alone leaves the whole suite green, because
+// nothing else in this file, or anywhere in the package, drives a Debian,
+// Ubuntu, Rocky Linux, AlmaLinux, Chainguard, MinimOS or Echo fetch through
+// zero matching records. This is what makes the MinimOS/Echo rows
+// caller-first for fetch.go's guard condition specifically: deleting either
+// name from the "eco == ..." chain in fetch.go turns its own row red here,
+// while every pre-existing row (Debian, Ubuntu, ...) stays green.
 //
 // "Wolfi" is deliberately NOT one of the rows here: nothing in this
 // package's default Ecosystems ever fetches under that literal name (D88),
@@ -240,8 +244,8 @@ func TestFetch_AlpineZeroRecordsIsAnError(t *testing.T) {
 // it is still covered in the guard's own condition in fetch.go, for any
 // caller that constructs a Provider directly with it, but there is no
 // end-to-end path through this test to drive it.
-func TestFetch_DebianUbuntuRockyAlmaAndChainguardZeroRecordsIsAnError(t *testing.T) {
-	for _, eco := range []string{"Debian", "Ubuntu", "Rocky Linux", "AlmaLinux", "Chainguard"} {
+func TestFetch_DebianUbuntuRockyAlmaChainguardMinimOSAndEchoZeroRecordsIsAnError(t *testing.T) {
+	for _, eco := range []string{"Debian", "Ubuntu", "Rocky Linux", "AlmaLinux", "Chainguard", "MinimOS", "Echo"} {
 		t.Run(eco, func(t *testing.T) {
 			body := zipWith(t, map[string]string{
 				// Well-formed, but names an ecosystem this archive would never
@@ -571,6 +575,22 @@ func TestEcosystems_ChainguardIsTheOnlyFetch(t *testing.T) {
 	if slices.Contains(Ecosystems, "Wolfi") {
 		t.Error(`Ecosystems contains "Wolfi" -- D88 fetches it only via the ` +
 			`Chainguard archive, never as a separate request`)
+	}
+}
+
+// TestEcosystems_ContainsMinimOSAndEcho is D92's presence guard: unlike
+// Wolfi/Chainguard's "one feed, two keys" arrangement above, MinimOS and
+// Echo are each fetched directly under their own name (no cross-feed
+// duplication was measured), so both must be plain entries in the default
+// fetch list. Deleting either turns this red while leaving every other
+// Ecosystems-derived test in this file green, since none of them iterate
+// the real package-level Ecosystems slice the way this one does.
+func TestEcosystems_ContainsMinimOSAndEcho(t *testing.T) {
+	if !slices.Contains(Ecosystems, "MinimOS") {
+		t.Error(`Ecosystems does not contain "MinimOS"`)
+	}
+	if !slices.Contains(Ecosystems, "Echo") {
+		t.Error(`Ecosystems does not contain "Echo"`)
 	}
 }
 

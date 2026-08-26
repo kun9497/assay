@@ -15,7 +15,7 @@
 
 ## 현재 상태
 
-🚧 **활발히 개발 중입니다. 배포판 계열 13개와 언어 생태계 8개가 끝에서 끝까지 스캔되며,
+🚧 **활발히 개발 중입니다. 배포판 계열 15개와 언어 생태계 8개가 끝에서 끝까지 스캔되며,
 [로드맵](#로드맵) 체크박스가 가장 확실한 목록입니다.**
 
 `assay db update`가 배포된 데이터베이스를 받아옵니다 — OSV의 언어 생태계(Go, npm, PyPI,
@@ -603,6 +603,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] SLES LTSS를 mainline-wins 동점 처리로 접음 (D91) — post-EOL fix가 같은 키
       아래서 드러남(bci-base finding 121→286건, curl이 진짜 FIXED IN을 보여줌),
       가려졌던 쌍둥이 385,621건을 버려서 셈
+- [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
+      변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
+      아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건

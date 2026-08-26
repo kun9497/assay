@@ -98,6 +98,25 @@ var registry = map[string]Comparer{
 	// this project ever builds for them, not a truncated one.
 	"Wolfi":      APK{},
 	"Chainguard": APK{},
+	// D92. MinimOS is an apk distro too, and a clean clone of the "wolfi"
+	// entry above for the identical reason: OSV keys it bare ("MinimOS", no
+	// release), so it is a plain map entry rather than a prefix rule (D6
+	// satisfied vacuously -- see pkgmeta.Distro.Ecosystem's "minimos" case).
+	// Measured 2026-08-26: 10 live versions, all plain apk X.Y.Z-rN shapes.
+	"MinimOS": APK{},
+	// D92. Echo is deb-based, so Deb{} (the same comparer Debian and Ubuntu
+	// use) orders its versions -- measured 2026-08-26: Debian-standard shapes
+	// throughout (epochs, ~debNuN backports), plus two custom build suffixes
+	// this project has not seen on Debian or Ubuntu itself: "+eN" (898
+	// events, e.g. "3.7.4-4+e5") and "+echo.N" (104 events, e.g.
+	// "5.2.1+echo.1"). Both are ordinary dpkg revision/upstream characters
+	// (deb.go's firstNotIn already allows '+'), so verrevcmp orders them
+	// correctly with no comparer change -- deb_test.go pins both shapes.
+	// Bare map entry, not a prefix rule, for the same reason "Wolfi" and
+	// "Chainguard" are: OSV keys Echo with no release axis at all (D6
+	// satisfied vacuously -- see pkgmeta.Distro.Ecosystem's "echo" case), so
+	// "Echo" IS the whole key this project ever builds for it.
+	"Echo": Deb{},
 }
 
 // mainlineUbuntu matches the two shapes OSV gives a mainline Ubuntu release:

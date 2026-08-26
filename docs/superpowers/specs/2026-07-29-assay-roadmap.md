@@ -3556,6 +3556,40 @@ misleading-remediation finding from the 2026-08-24 differential is closed.
 
 ---
 
+### D92 — MinimOS and Echo: one template, one exception per distro
+
+**Decision.** Both boutiques scan from their OSV feeds via the D88 template — bare
+release-less keys, VERSION_ID ignored, zero-record guards — and neither needed the CGA
+related-join: both carry their CVE in `upstream` (94.9% / 98.9%), the field D3 has always
+read, now pinned by an adversarial "MINI/ECHO are NOT distro-authored-related" row.
+
+**MinimOS is the clean clone**: MINI-* 129,979 records, apk `-rN`, the `fixed:"0"`
+sentinel at 5.7%, live-verified routing (ID=minimos, frozen VERSION_ID="20241031") and the
+usr/lib apk path already covered by D88's generic probe. One business fact rides in the
+routing comment: Minimus announced shutdown for 2026-10-22 — the registry stops, the feed
+freezes, and coverage still ships because images pulled before then keep their scan value.
+
+**Echo is the exception collection**: dpkg-based (`pkg:deb/echo/*`), the Deb comparer with
+two custom build suffixes pinned in its table (`+eN`, `+echo.N`); the routing is UNVERIFIED
+(no public image exists — registry demands real credentials, the Docker Hub org is empty),
+marked exactly like D88's chainguard case; the language-qualified `Echo:PyPi/Maven/npm`
+keys (545 entries) ingest harmlessly and are unreachable by construction. And its
+not-affected sentinel is **`"1"`, not `"0"`** — a constant that is NOT safe by accident
+the way apk's zero was: an epoch-less 0.x version would falsely match an
+(introduced 0, fixed 1) window. Dropped at conversion, Echo-scoped, counted (2,134 live),
+with the epoch negative pinned: a genuine `1:1.0-1` fix survives, only the bare string is
+the sentinel.
+
+**The review round closed a D88 leftover**: `--explain`'s comparerName mirror had no
+release-less cases, so Wolfi and Chainguard printed "comparer: unknown" since D88 — all
+four now name their comparer, with exact-name table rows.
+
+**Live**: 128,671 + 7,959 records after D16; db status covers both keys;
+`reg.mini.dev/nginx` scans 15/15 evaluated through the anonymous-token registry with zero
+puller changes. Echo verifies feed-side only, and says so.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes
