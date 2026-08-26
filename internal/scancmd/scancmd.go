@@ -242,6 +242,13 @@ var rpmFamilies = map[string]bool{
 	"rocky": true, "ol": true, "amzn": true, "openEuler": true,
 	"sles": true, "opensuse-leap": true, "opensuse-tumbleweed": true,
 	"azurelinux": true, "mariner": true,
+	// D96: unlike "mariner"/"azurelinux" (pre-seeded since D43, years before
+	// either had a real ecosystem or provider), "photon" was genuinely
+	// absent here until this slice -- verified by grep before adding it,
+	// per D94's own review finding that a pre-seeded entry can sit
+	// unexercised for years. TestCatalogFromImage_PhotonDistroWithNoDatabase
+	// is the held test that proves this entry is actually reached.
+	"photon": true,
 }
 
 // rpmDBPaths is every tar entry the RPM probe asks for.

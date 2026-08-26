@@ -134,5 +134,21 @@
     "minAgree": 1,
     "minFindings": 1,
     "maxFindings": 25
+  },
+  {
+    "name": "photon4",
+    "tag": "photon:4.0",
+    "ref": "mirror.gcr.io/library/photon@sha256:b2425ecf9abbaa7d073b8650c80afa97f1d7952debd4f5a0560c38e41c933fe8",
+    "minAgree": 18,
+    "minFindings": 18,
+    "maxFindings": 44
+  },
+  {
+    "name": "photon5",
+    "tag": "photon:5.0",
+    "ref": "mirror.gcr.io/library/photon@sha256:ab4b68e15c8ff6b9c79ba525f696260f772c711761d576dd53bf43c351c9a504",
+    "minAgree": 5,
+    "minFindings": 5,
+    "maxFindings": 25
   }
 ]

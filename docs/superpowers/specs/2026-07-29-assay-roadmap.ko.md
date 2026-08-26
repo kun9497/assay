@@ -3522,6 +3522,48 @@ CVE 물결로 스스로 무장합니다.
 
 ---
 
+### D96 — Photon: 키 여섯 개짜리 피드, 그리고 D90이 이미 가르쳐 준 충돌
+
+**결정.** VMware/Broadcom Photon OS 3.0/4.0/5.0은 새 provider
+(`internal/provider/photon`)를 거쳐 스캔됩니다, 이것은 Broadcom의 flat major별 JSON
+피드를 읽습니다(행 189,368개, 행마다 키 여섯 개, 날짜 없음, 중첩 없음). `status=="Fixed"`
+행만 advisory가 됩니다 — 이 스키마에는 affected-no-fix 상태가 없습니다; "Not
+Affected"는 never-affected를 뜻하고 range를 만들지 않습니다. advisory 하나가 CVE'당'
+major와 패키지를 가로질러 전역으로 병합됩니다, ID는 `PHOTON-<CVE>`이고 맨 CVE는
+Aliases에 담깁니다: CVE 14,341개 중 5,865개가 major를 하나 넘게 걸치고 피드는 맨
+cve_id 하나를 어디서나 재사용하므로, major별로 내보내면 '자기 자신과'
+last-writer-win 충돌이 났을 것입니다 — 이번에는 차등이 잡아낸 뒤 수리한 것이
+아니라 구조적으로 처음부터 피한 D90 위험입니다. 기존 RPM comparer(165,850개의
+Fixed 행에서 epoch 0 측정), `photon` os-release가 `Photon OS:<major>`로 라우팅,
+EOL slug 연결(endoflife.date는 키가 ":3"이라고 말하는 릴리스를 "3.0"이라고
+부릅니다 — SLES의 `.SP` 재구성 선례이고, 읽는 쪽에 적용합니다).
+
+**세 가지 사용자 결정 정책, 측정으로 확인.** 충돌하는 (cve, pkg) 키에서는 Fixed가
+Not-Affected를 이깁니다 — 충돌 1,019건(그중 1,008건이 5.0 피드에 있습니다); 반대로
+기울였다면 진짜 fix를 조용히 떨어뜨렸을 것입니다. BDSA-* 행(783건, CVE가 어디에도
+없고 공개 URL도 없음)과 sentinel id("Re"/"UNK-*", 17건)는 세면서 버립니다 — BDSA
+advisory는 D25의 공유-identifier 조인으로 그룹핑하는 store 안에서 영구히 조인
+불가능한 채로 남았을 것입니다. 정책이 예상하지 못했던 모양 하나는 선례로
+해결했습니다: (cve, pkg) 키 14,939개가 서로 다른 fixed 버전을 하나 넘게 담고
+있습니다 — Affected당 Range 항목이 여러 개이고, redhat.convert 자신의 fixed[k]
+패턴이며, 수집을 comparer 없이 유지합니다(D9).
+
+**데이터가 말할 수 없는 것.** cve_score는 벡터 없는 맨 CVSS 숫자입니다 — 저장하지도,
+밴드화하지도 않습니다(D13/D17, KNVD 선례): Photon finding은 NVD/OSV rating이 CVE
+alias를 거쳐 조인될 때까지 심각도-미상입니다, 설계 그대로입니다. 날짜 필드는
+어디에도 없어서, `Provenance.DataAsOf`는 가장 오래된 major의 HTTP Last-Modified를
+읽습니다(세 엔드포인트 전부 실전 확인함); no-fix 사각지대는 구조적입니다 —
+Broadcom이 인지했지만 고치지 않은 CVE는 아예 심사한 적 없는 CVE와 구분되지
+않습니다.
+
+**차등, 첫날부터, 정확히.** photon:4.0과 photon:5.0(digest로 고정, 현재)이
+**완벽한 동등성**으로 시드됐습니다 — 22/22/22와 7/7/7 agree/assay/grype, 어느
+이미지에도 한쪽만의 튜플이 0건, 이 프로젝트의 어떤 provider도 낸 적 없는 가장
+깔끔한 첫 차등입니다. 독립 리뷰 mutation 5개 중 5개가 red입니다(bare-CVE ID,
+Not-Affected-wins, EOL 재구성 접두사, full-VERSION_ID 키, 버려진 alias).
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

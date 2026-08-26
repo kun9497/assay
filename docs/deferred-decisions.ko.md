@@ -143,8 +143,8 @@ affected-no-fix 항목 108개를 담고 있고, grype는 우리 아카이브 슬
 ### grype 대비 생태계 커버리지 — 격차, 재측정
 
 grype는 **provider 26개**를 싣고, assay는 이 항목을 쓴 시점(2026-08-13)에는 **4개**였다가
-RPM 계열 시리즈가 닫힌 뒤로는 **8개**입니다(OSV, Red Hat CSAF, Amazon ALAS, Oracle ELSA
-OVAL, Fedora Bodhi, SUSE CSAF, NVD 등급, KISA 보강). 참고로 grype의 목록: alma, alpine,
+D96 이후로는 **9개**입니다(OSV, Red Hat CSAF, Amazon ALAS, Oracle ELSA
+OVAL, Fedora Bodhi, SUSE CSAF, Photon, NVD 등급, KISA 보강). 참고로 grype의 목록: alma, alpine,
 amazon, arch, bitnami, chainguard, chainguard-libraries, debian, echo, eol, epss, fedora,
 github, govulndb, hummingbird, kev, mariner, minimos, nvd, oracle, photon, rhel, secureos,
 sles, ubuntu, wolfi.
@@ -161,10 +161,11 @@ apk 데이터베이스가 usr/lib 심볼릭 링크 뒤에 숨어 있어서 D88�
 미검증입니다). Azure Linux/CBL-Mariner는 D94에서 이 목록을 벗어났습니다(D71/D72
 모양이 그대로 통했습니다; 오래된 이미지 둘이 같은 날 주간 차등에 합류했습니다), 그리고
 Alpaquita/BellSoft Hardened Containers는 D95에서 벗어났습니다(apk provides 다리도
-함께 가져왔습니다). 여전히 사실인 것: Photon과 Arch에서는 **assay가 정말로 아무것도
-찾지 못합니다** — 둘 다 이미 결정되고 순서가 잡혀 있습니다(2026-08-26의
-다섯-소규모배포판 조사 라운드; Photon이 다음, 그다음 Arch), 반면 CleanStart는 트리거를
-달고 미뤄져 있습니다(다음 항목). grype는 또한 assay에 대응물이 없던 보강
+함께 가져왔습니다), 그리고 Photon은 D96에서 벗어났습니다(새 provider이고, 첫 차등이
+정확한 동등성이었습니다). 여전히 사실인 것: Arch에서는 **assay가 정말로 아무것도
+찾지 못합니다** — 이미 결정되고 순서가 잡혀 있습니다(2026-08-26의
+다섯-소규모배포판 조사 라운드에서 마지막으로 남은 슬라이스입니다), 반면 CleanStart는
+트리거를 달고 미뤄져 있습니다(다음 항목). grype는 또한 assay에 대응물이 없던 보강
 피드도 싣습니다; D86이 EPSS와 KEV를 수집했고(typed rating 필드, 게이트 둘) D87이 EOL
 데이터를 수집했습니다 — grype 대비 보강 피드 격차가 닫혔습니다.
 

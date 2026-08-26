@@ -642,6 +642,9 @@ exited 0 while 24 findings went unmentioned.
 - [x] Alpaquita and BellSoft Hardened Containers (D95) — one fetch covers both families,
       and the apk `p:` provides bridge reaches the Liberica JDK names no installed
       package carries (10.74% of the corpus); a third apk db path (`var/lib`) en route
+- [x] Photon OS (D96) — a new flat-JSON provider with the D90 collision avoided by
+      construction (one advisory per CVE across three majors), Fixed-wins and BDSA-drop
+      policies measured and counted; first differential at perfect parity (22/22, 7/7)
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a

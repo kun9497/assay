@@ -70,6 +70,17 @@ VERSION_ID="3.0"
 PRETTY_NAME="Microsoft Azure Linux 3.0"
 `
 
+// osReleasePhoton5 is verbatim from a real
+// mirror.gcr.io/library/photon:5.0 pull (measured 2026-08-26). ID is
+// "photon" -- D96's routing case, with no ID_LIKE at all (unlike mariner/
+// azurelinux, there is no sibling os-release ID to route alongside it).
+const osReleasePhoton5 = `NAME="VMware Photon OS"
+VERSION="5.0"
+ID=photon
+VERSION_ID=5.0
+PRETTY_NAME="VMware Photon OS/Linux"
+`
+
 func fixtureBytes(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(filepath.FromSlash(path))
@@ -224,6 +235,60 @@ func TestCatalogFromImage_AzureLinuxDistroWithNoDatabase(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestCatalogFromImage_PhotonPackagesAreKeyed is D96's own version of
+// TestCatalogFromImage_RPMPackagesAreKeyed/AzureLinuxPackagesAreKeyed: the
+// same real sqlite rpmdb fixture, read through the identical generic
+// pipeline, but behind Photon's os-release ID -- proving distro.go's
+// "photon" routing is what actually reaches a cataloged package's Ecosystem
+// field, not just what Distro.Ecosystem() returns in isolation (pkgmeta's
+// own TestDistroEcosystem_Photon already covers that half).
+func TestCatalogFromImage_PhotonPackagesAreKeyed(t *testing.T) {
+	img := rpmImage(t, map[string]string{
+		osReleasePath:              osReleasePhoton5,
+		"var/lib/rpm/rpmdb.sqlite": fixtureBytes(t, rpmFixture),
+	})
+	target, stats, err := catalogFromImage("test-image", img)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Cataloged != 6 {
+		t.Fatalf("cataloged %d packages, want 6", stats.Cataloged)
+	}
+	for _, p := range target.Packages {
+		if p.Ecosystem != "Photon OS:5" {
+			t.Errorf("%s has ecosystem %q, want %q", p.Name, p.Ecosystem, "Photon OS:5")
+		}
+		// D8 rides free here too: the rpmdb cataloger reads SOURCERPM
+		// regardless of distro ID.
+		if p.Source == nil || p.Source.Name == "" {
+			t.Errorf("%s has no Source; SOURCERPM is what D8 looks the advisory up under", p.Name)
+		}
+	}
+	if target.Distro == nil || target.Distro.ID != "photon" {
+		t.Errorf("Distro = %+v, want ID photon", target.Distro)
+	}
+}
+
+// TestCatalogFromImage_PhotonDistroWithNoDatabase is the "photon" entry's
+// held test (CLAUDE.md: a rpmFamilies row added without one is exactly the
+// D43 gap TestCatalogFromImage_AzureLinuxDistroWithNoDatabase closed for
+// mariner/azurelinux years after those entries were seeded) -- "photon" was
+// genuinely absent from rpmFamilies before this slice, verified by grep, so
+// there is no multi-year gap to close here, only the same guard every other
+// entry in the map already carries.
+func TestCatalogFromImage_PhotonDistroWithNoDatabase(t *testing.T) {
+	img := rpmImage(t, map[string]string{osReleasePath: osReleasePhoton5})
+	_, _, err := catalogFromImage("test-image", img)
+	if err == nil {
+		t.Fatal("a Photon OS image with no database was catalogued without error")
+	}
+	for _, want := range []string{"photon", "usr/lib/sysimage/rpm/rpmdb.sqlite", "var/lib/rpm/rpmdb.sqlite"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
 	}
 }
 

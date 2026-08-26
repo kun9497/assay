@@ -3708,6 +3708,45 @@ the bridge's live-data guard arms itself with BellSoft's next Liberica CVE wave.
 
 ---
 
+### D96 — Photon: a feed with six keys, and the collision D90 already taught
+
+**Decision.** VMware/Broadcom Photon OS 3.0/4.0/5.0 scans via a new provider
+(`internal/provider/photon`) reading Broadcom's flat per-major JSON feeds (189,368 rows,
+six keys per row, no dates, no nesting). Only `status=="Fixed"` rows become advisories —
+the schema has no affected-no-fix state; "Not Affected" means never-affected and produces
+no range. One advisory PER CVE merged globally across majors and packages, ID
+`PHOTON-<CVE>` with the bare CVE in Aliases: 5,865 of 14,341 CVEs span more than one major
+and the feed reuses one bare cve_id everywhere, so per-major emission would last-writer-win
+collide with ITSELF — the D90 hazard avoided by construction this time, not repaired after
+a differential caught it. Existing RPM comparer (0 epochs measured on 165,850 Fixed rows),
+`photon` os-release routing to `Photon OS:<major>`, EOL slug wired (endoflife.date names
+releases "3.0" where the key says ":3" — the SLES `.SP` reshape precedent, applied at the
+read side).
+
+**The three user-decided policies, measured.** Fixed beats Not-Affected on a conflicted
+(cve, pkg) key — 1,019 conflicts (1,008 of them in the 5.0 feed); leaning the other way
+would silently drop real fixes. BDSA-* rows (783, no CVE anywhere, no public URL) and
+sentinel ids ("Re"/"UNK-*", 17) drop with counts — a BDSA advisory would sit permanently
+unjoinable in a store whose grouping is D25's shared-identifier join. One shape the
+policies did not anticipate, resolved by precedent: 14,939 (cve, pkg) keys carry more than
+one distinct fixed version — multiple Range entries per Affected, redhat.convert's own
+fixed[k] pattern, keeping ingestion comparer-free (D9).
+
+**What the data cannot say.** cve_score is a bare CVSS number with no vector — never
+stored, never banded (D13/D17, the KNVD precedent): Photon findings are severity-unknown
+until NVD/OSV ratings join through the CVE alias, exactly as designed. No date field exists
+anywhere, so Provenance.DataAsOf reads the HTTP Last-Modified of the stalest major
+(verified live on all three endpoints); the no-fix blind spot is structural — a CVE
+Broadcom has acknowledged but not fixed is indistinguishable from one never triaged.
+
+**Differential, day one, exact.** photon:4.0 and photon:5.0 (digest-pinned, current)
+seeded at **perfect parity** — 22/22/22 and 7/7/7 agree/assay/grype, zero one-sided tuples
+on either image, the cleanest first differential any provider in this project has posted.
+Independent review mutations 5/5 red (bare-CVE ID, Not-Affected-wins, EOL reshape prefix,
+full-VERSION_ID key, dropped aliases).
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes
