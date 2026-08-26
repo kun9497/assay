@@ -219,8 +219,11 @@ assertion in the test written for the substring-assertion class.
 verified by mutation in isolated worktrees — and **12 of 12 survived**, every one a real
 unheld guard (the EOL slug table, D52's fixless-only stamping invariant, Oracle's stream
 unescape, D12's stalest-wins, two D20 coverage writes, lookupEOL's DistroID half among
-them); all 12 closed test-only (#76). Still open: 7 low findings and 5 unverified mediums
-from round 3 — the round-4 starting list, in the wf_2ad094bc-fba workflow journal. The
+them); all 12 closed test-only (#76). Round 4 (2026-08-26) closed all 12 leftovers test-only (#83) — and found that round 3's
+journal misrecorded its own verification: two matcher findings (D80's streamMatched
+empty-vs-empty among them, a high) were logged as verified but never actually closed by
+#76; the round-4 agent derived its working set from #76's real diff instead of the
+journal, which is now the recorded rule for future rounds. QA backlog: empty. The
 original entry follows.
 
 **Why this is written down rather than assumed.** Every slice in this project has shipped

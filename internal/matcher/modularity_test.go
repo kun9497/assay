@@ -238,3 +238,72 @@ func TestMatch_ModuleBuildWithNoStreamIsNotEvaluated(t *testing.T) {
 			res.Findings)
 	}
 }
+
+// TestMatch_NonModularPackageAgainstModuleBoundIsSkippedNotEvaluated holds the
+// pairing D80's streamMatched equality must NOT treat as a match: a
+// genuinely non-modular package (ModuleStream == "") against a stream-blind
+// advisory entry (aff.ModuleStream == "") whose own fixed bound is a
+// module-tagged RPM build (Rocky/Alma's OSV shape until D82). Both sides are
+// empty, so a bare equality (aff.ModuleStream == p.ModuleStream) reads as
+// "same stream" and lets the guard below fall through — comparing the
+// package's plain EVR against the fix's MODULE-TAIL-TRUNCATED EVR, a
+// question the version alone cannot answer, instead of reporting it
+// skipped. rocky_module_test.go's identical-looking fixture always sets
+// ModuleStream on the package (D80 rewrote it that way), so it cannot
+// exercise this branch: that is the coverage gap this test closes.
+func TestMatch_NonModularPackageAgainstModuleBoundIsSkippedNotEvaluated(t *testing.T) {
+	const eco = "Rocky Linux:9"
+	store := &fakeStore{
+		covers: []string{eco},
+		byKey: map[string][]advisory.Advisory{
+			eco + "\x00vim": {{
+				ID:       "RLSA-2026:0099",
+				Database: "RLSA",
+				Affected: []advisory.Affected{{
+					Ecosystem: eco,
+					Name:      "vim",
+					Ranges: []advisory.Range{{
+						Type: advisory.RangeEcosystem,
+						Events: []advisory.Event{
+							{Introduced: "0"},
+							{Fixed: "2:8.2.2637-20.module+el9.6.0+24220+c44c288d"},
+						},
+					}},
+				}},
+			}},
+		},
+	}
+	target := pkgmeta.Target{
+		Distro: &pkgmeta.Distro{ID: "rocky", VersionID: "9.4"},
+		Packages: []pkgmeta.Package{{
+			// No ModuleStream at all — a genuinely non-modular install. The
+			// version sits below the fix's PREFIX (2637-16 < 2637-20), so a
+			// module-tail-truncated comparison (the wrong path) would call it
+			// vulnerable; the right answer is "cannot tell", not a finding.
+			Name: "vim", Version: "2:8.2.2637-16.el9", Ecosystem: eco,
+			Source: &pkgmeta.SourcePackage{Name: "vim"},
+		}},
+	}
+	res, err := New(store).Match(target)
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(res.Findings) != 0 {
+		t.Errorf("Findings = %+v, want none — a non-modular package cannot be judged "+
+			"against a module-tagged bound", res.Findings)
+	}
+	if len(res.Skipped) != 1 {
+		t.Fatalf("Skipped = %+v, want exactly 1 (the module-tagged bound is unevaluable)",
+			res.Skipped)
+	}
+	s := res.Skipped[0]
+	if s.Package.Name != "vim" {
+		t.Errorf("skipped %q, want vim", s.Package.Name)
+	}
+	if s.Cause != SkipAdvisory {
+		t.Errorf("Cause = %q, want %q", s.Cause, SkipAdvisory)
+	}
+	if !strings.Contains(s.Reason, "module+el9.6.0") {
+		t.Errorf("Reason = %q, want it to quote the module-tagged bound", s.Reason)
+	}
+}

@@ -83,6 +83,24 @@ func TestMatch_EPSSAndKEVAttachWithoutTouchingSeverity(t *testing.T) {
 			t.Errorf("%s rating must be marked NoSeverityOpinion — it carried no vectors", r.Database)
 		}
 	}
+	// EPSSPercentile is a SEPARATE FIRST.org number from EPSS itself (a
+	// probability vs. where that probability ranks against every other
+	// scored CVE) — the store's own ingestion test guards against the two
+	// columns swapping on the way in, and this is the matching guard on the
+	// way out: annotate() must copy r.EPSSPercentile, not r.EPSS again, into
+	// the rating it attaches. The fixture's two values (0.94432 vs 0.99871)
+	// are chosen not to collide, so a copy-paste of the wrong field is
+	// visible here even though nothing before this line ever read the field.
+	var epss Rating
+	for _, r := range f.Ratings {
+		if r.Database == "EPSS" {
+			epss = r
+		}
+	}
+	if epss.EPSSPercentile != 0.99871 {
+		t.Errorf("EPSS rating's EPSSPercentile = %v, want 0.99871 — the probability must not "+
+			"be published as the percentile", epss.EPSSPercentile)
+	}
 }
 
 // TestMatch_NoEPSSMeansAbsentNotZero holds D17's shape on the new accessor:

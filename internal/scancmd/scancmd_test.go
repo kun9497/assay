@@ -1190,6 +1190,21 @@ func TestRun_FailOnKEVAndEPSSGates(t *testing.T) {
 		sbom = buildMatrixSBOM(t, []matrixPkg{{name: "lowepss", purlType: "golang"}})
 		return db, sbom
 	}
+	// atThresholdEPSS: EPSS-scored EXACTLY at the 0.5 threshold every row
+	// here uses. Options.FailOnEPSS's own doc comment promises "at or above
+	// this threshold" — highEPSS (0.94) and lowEPSS (0.1) both sit well off
+	// the boundary, so neither can tell >= from > apart; this fixture is the
+	// one row that can.
+	atThresholdEPSS := func(t *testing.T) (db, sbom string) {
+		db = buildMatrixDB(t, []matrixAdv{
+			{id: "PYSEC-atepss", pkg: "atepss", fixed: "2.0.0",
+				aliases: []string{"CVE-2025-9005"}, vectors: []string{vecMedium}},
+		})
+		putRating(t, db, advisory.Rating{CVE: "CVE-2025-9005", Source: "EPSS",
+			EPSS: 0.5, EPSSPercentile: 0.5, EPSSModel: "v-test"})
+		sbom = buildMatrixSBOM(t, []matrixPkg{{name: "atepss", purlType: "golang"}})
+		return db, sbom
+	}
 	// noEPSS: a finding with no EPSS rating at all -- D17's "absent stays
 	// absent" case. Even the loosest possible threshold (0.0, "fail on
 	// anything EPSS has scored") must not trip on a finding EPSS never
@@ -1233,6 +1248,8 @@ func TestRun_FailOnKEVAndEPSSGates(t *testing.T) {
 
 		{"--fail-on-epss 0.5 trips at 0.94", highEPSS, Options{FailOnEPSS: &threshold}, 1},
 		{"--fail-on-epss 0.5 does not trip at 0.1", lowEPSS, Options{FailOnEPSS: &threshold}, 0},
+		{"--fail-on-epss 0.5 trips AT the threshold -- \"at or above\", not \"above\"",
+			atThresholdEPSS, Options{FailOnEPSS: &threshold}, 1},
 		{"--fail-on-epss never trips on a finding EPSS never scored, even at the loosest threshold (D17)",
 			noEPSS, Options{FailOnEPSS: &zeroThreshold}, 0},
 

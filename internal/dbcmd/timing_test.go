@@ -195,6 +195,47 @@ func TestUpdate_ReportsTimingWhenAProviderFails(t *testing.T) {
 	}
 }
 
+// TestUpdate_ReportsTimingWhenTheEOLSourceFails is
+// TestUpdate_ReportsTimingWhenAProviderFails's D87 counterpart: the eol
+// failure branch (added after D56 shipped) has its own, separate call to
+// reportTimings, and TestUpdate_EOLSourceFailureFailsTheBuild — the only
+// other test with a failing eolSource — asserts exit 2 and "boom" on stderr
+// but never "timing (". Deleting the eol branch's reportTimings call compiles
+// and survives every other test in this package, recreating for the newest
+// stage exactly the gap D56's table row records: a build that dies fetching
+// EOL data after the providers already ran prints no account of where the
+// time went.
+func TestUpdate_ReportsTimingWhenTheEOLSourceFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+		ID: "GHSA-eol-timing", Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
+	}}}
+	src := fakeEOLSource{name: "endoflife.date", err: errBoom}
+
+	var out, errOut bytes.Buffer
+	code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, nil, nil, src, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("Update with a failing eolSource = %d, want 2", code)
+	}
+	s := errOut.String()
+	if !strings.Contains(s, "timing (") {
+		t.Errorf("a build that died in the eol fetch printed no timing table:\n%s", s)
+	}
+	// The osv provider that finished BEFORE the eol fetch failed must still
+	// appear in the table -- a build that ran for an hour of providers and
+	// then died on eol must not lose that hour's account just because the
+	// failure happened one stage later.
+	header := lineIndex(s, "timing (")
+	if header < 0 {
+		t.Fatalf("no timing header found:\n%s", s)
+	}
+	table := strings.Join(strings.Split(s, "\n")[header:], "\n")
+	if lineIndex(table, "osv") < 0 {
+		t.Errorf("the completed osv provider is absent from the table:\n%s", table)
+	}
+}
+
 // TestReportTimings_StoreSplitIsShownWhenMeasured is the row this table gained
 // to answer a question its totals could not: OSV was 48m16s of a 50m51s build,
 // and nothing in that number said whether to add concurrency or to batch the

@@ -342,6 +342,45 @@ func TestConvert_FixedAndUnfixedTogether(t *testing.T) {
 	}
 }
 
+// TestConvert_VulnerabilityCVEWinsOverTrackingID pins the fallback order no
+// other fixture can: buildDoc, docJSONForTest and the checked-in archives all
+// set document.tracking.id and vulnerabilities[0].cve to the identical
+// string, so nothing before this test can tell which column feeds
+// Advisory.ID and Aliases. Real SUSE documents can disagree -- tracking.id is
+// the document's own name (often a SUSE-SU advisory ID, not a CVE at all),
+// while vulnerabilities[0].cve is the CSAF-specified CVE -- and the
+// vulnerability's own field must win: it is the one CSAF actually promises is
+// a CVE, and D90's ID/Aliases split (see convert's own doc comment) only
+// joins with Red Hat's record for the same CVE if it is fed a real one.
+func TestConvert_VulnerabilityCVEWinsOverTrackingID(t *testing.T) {
+	d := buildDoc(t, "CVE-2026-20001",
+		[]string{"SUSE Linux Enterprise Server 15 SP6"},
+		map[string]string{
+			"curl-8.0.0-1.1": "pkg:rpm/suse/curl@8.0.0-1.1?upstream=curl-8.0.0-1.1.src.rpm",
+		},
+		[]string{"SUSE Linux Enterprise Server 15 SP6:curl-8.0.0-1.1"}, nil, nil)
+	// A real SUSE-SU advisory tracking ID, deliberately NOT the
+	// vulnerability's own CVE -- buildDoc sets both fields to the same
+	// string, so this overwrite is what creates the disagreement no fixture
+	// otherwise has.
+	d.Document.Tracking.ID = "SUSE-SU-2026:0001-1"
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatalf("convert refused the document (SkippedNoCVE=%d), want it to use the "+
+			"vulnerability's own CVE field rather than the non-CVE tracking ID", st.SkippedNoCVE)
+	}
+	if adv.ID != "SUSE-CVE-2026-20001" {
+		t.Errorf("Advisory.ID = %q, want %q -- the vulnerability's own CVE, not the "+
+			"document's SUSE-SU tracking ID", adv.ID, "SUSE-CVE-2026-20001")
+	}
+	if len(adv.Aliases) != 1 || adv.Aliases[0] != "CVE-2026-20001" {
+		t.Errorf("Aliases = %v, want [CVE-2026-20001] -- D25's cross-database grouping "+
+			"joins on this", adv.Aliases)
+	}
+}
+
 // Two fixed versions for one (release, package): both are kept, mirroring
 // redhat_test.go's TestConvert_TwoFixedVersionsKeepBoth.
 func TestConvert_TwoFixedVersionsKeepBoth(t *testing.T) {

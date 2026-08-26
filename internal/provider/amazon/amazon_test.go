@@ -632,9 +632,17 @@ func TestFetch_ExtrasTopicsEnumeratedAndAdvisoriesLand(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
+	// Progress wired here (unlike before) so the extras-advisories COUNT
+	// itself, not just the emitted advisory, is asserted: the only other test
+	// where the count is non-zero is this one, and every test that reads the
+	// stats line (TestFetch_ExtrasEmptyTopicCountedNotError,
+	// TestFetch_ExtrasTopicWithNoUpdateinfoEntryCountedNotError) does so in a
+	// scenario where "0 advisories ingested" is right either way.
+	var progress strings.Builder
 	p := New(Options{
 		Repos:         []Repo{{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/core-al2/mirror.list"}},
 		ExtrasBaseURL: srv.URL,
+		Progress:      &progress,
 	})
 	var got []advisory.Advisory
 	prov, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
@@ -643,6 +651,11 @@ func TestFetch_ExtrasTopicsEnumeratedAndAdvisoriesLand(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
+	}
+	if want := "extras: 2 topics enumerated, 1 with zero advisories, 1 advisories ingested"; !strings.Contains(progress.String(), want) {
+		t.Errorf("progress output = %q, want it to contain %q -- the one extras advisory that "+
+			"landed must be counted in st.ExtrasAdvisories, not just ride the undifferentiated total",
+			progress.String(), want)
 	}
 
 	var extrasAdv *advisory.Advisory

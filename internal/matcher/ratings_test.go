@@ -530,6 +530,55 @@ func TestMatch_AnNVDRatingRaisesAnOtherwiseUnratedFinding(t *testing.T) {
 	}
 }
 
+// TestMatch_ARatedNVDAnnotationIsNotMarkedNoSeverityOpinion pins the
+// direction of NoSeverityOpinion: it marks an ANNOTATION that expressed no
+// severity opinion (D86: EPSS/KEV rows), not one that did. Both an NVD row
+// and an EPSS row are attached the same way, through annotate()'s single
+// loop over RatingsFor — nvdRating's vector gives annotate() a real Severity
+// slice, so len(r.Severity) == 0 is false there, while the EPSS row carries
+// none. report.sourcesDisagree treats NoSeverityOpinion=true as "skip this
+// row when comparing bands", so marking the RATED NVD row as opinionless
+// too would silently hide it from the disagreement check it exists to feed.
+// No test before this one reads NoSeverityOpinion at all:
+// TestMatch_AnNVDRatingRaisesAnOtherwiseUnratedFinding above checks
+// Severity, Score, Fixed and URL on the same NVD rating but never this
+// field, and epsskev_test.go's only assertion is that EPSS/KEV rows ARE
+// marked — true either way under this mutation, since it can only turn a
+// false into a true, never the reverse.
+func TestMatch_ARatedNVDAnnotationIsNotMarkedNoSeverityOpinion(t *testing.T) {
+	s := twoSources(pysecRec(), pysecRec())
+	s.ratings = map[string][]advisory.Rating{
+		"CVE-2022-28347": {
+			nvdRating("CVE-2022-28347", vecCritical),
+			{CVE: "CVE-2022-28347", Source: "EPSS", EPSS: 0.94432, EPSSModel: "v-test"},
+		},
+	}
+	res, err := New(s).Match(djangoTarget())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("got %d findings, want 1", len(res.Findings))
+	}
+	var nvd, epss Rating
+	for _, r := range res.Findings[0].Ratings {
+		switch r.Database {
+		case "NVD":
+			nvd = r
+		case "EPSS":
+			epss = r
+		}
+	}
+	if nvd.NoSeverityOpinion {
+		t.Errorf("NVD rating has NoSeverityOpinion = true, want false — it carries a real "+
+			"CVSS vector (%s) and must count in report.sourcesDisagree's band comparison", vecCritical)
+	}
+	if !epss.NoSeverityOpinion {
+		t.Errorf("EPSS rating has NoSeverityOpinion = false, want true — it carries no " +
+			"severity vector at all, the actual case the field exists to mark")
+	}
+}
+
 // ...and it is never the displayed record, however high it scores. An NVD
 // rating carries no Evidence, no matched range and no fixed version, because
 // the match came from OSV and NIST was only asked for a score. Displaying it
