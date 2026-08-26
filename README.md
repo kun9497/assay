@@ -16,7 +16,7 @@ affecting it.
 
 ## Status
 
-🚧 **Active development. Thirteen distro families and eight language ecosystems scan end to
+🚧 **Active development. Fifteen distro families and eight language ecosystems scan end to
 end; the [Roadmap](#roadmap) checkboxes are the authoritative list.**
 
 `assay db update` downloads the published database — OSV's language ecosystems (Go, npm,
@@ -630,6 +630,9 @@ exited 0 while 24 findings went unmentioned.
 - [x] SLES LTSS folded with a mainline-wins tie-break (D91) — post-EOL fixes surface
       under the same key (bci-base 121→286 findings, curl shows its real FIXED IN),
       385,621 shadowed twins dropped and counted
+- [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
+      changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
+      sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a

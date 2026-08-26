@@ -633,9 +633,113 @@ func TestDistroAuthored(t *testing.T) {
 		// it to strings.HasPrefix would pass every row above and only this
 		// one would catch it).
 		"ALSAX": false, "AL": false, "CGAX": false, "CG": false,
+		// D92: MinimOS and Echo deliberately did NOT join this scope -- both
+		// carry their CVE in `upstream` (measured 2026-08-26: 94.9% and 98.9%
+		// respectively), which D3's existing read already covers, so neither
+		// needed the `related` join Chainguard/AlmaLinux needed. Asserted here
+		// so a future change cannot add either without it being a deliberate,
+		// reviewed edit to this table.
+		"MINI": false, "ECHO": false,
 	} {
 		if got := distroAuthored(db); got != want {
 			t.Errorf("distroAuthored(%q) = %v, want %v", db, got, want)
 		}
+	}
+}
+
+// TestConvert_MinimOSAndEchoUpstreamCVEReachesStoredAdvisory is D92's
+// caller-first test for both new distros: unlike Chainguard/AlmaLinux
+// (TestConvert_RelatedIsScopedToDistroAuthoredRecords above), neither needed
+// a distroAuthored scope change -- the CVE lives in `upstream` on 94.9% of
+// MinimOS's MINI-* records and 98.9% of Echo's ECHO-* records (measured
+// 2026-08-26), and D3 already reads that field for every record regardless
+// of database. This proves the field actually survives Convert for both new
+// ecosystems rather than merely for the ones distroAuthored already covered
+// -- deleting either family's Ecosystems entry (fetch.go) does not touch
+// this test at all, since Convert takes no ecosystems list; that half is
+// covered separately by the zero-record guard test in fetch_test.go.
+//
+// Fixtures are real, trimmed records: MINI-2222-4958-pc3h and
+// ECHO-0066-dd81-6847 (measured 2026-08-26 against the live archives).
+func TestConvert_MinimOSAndEchoUpstreamCVEReachesStoredAdvisory(t *testing.T) {
+	const mini = `{"id":"MINI-2222-4958-pc3h","upstream":["CVE-2026-56865"],
+	  "affected":[{"package":{"name":"buildpacks-lifecycle-0.21","ecosystem":"MinimOS"},
+	    "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"0.21.6-r1"}]}]}]}`
+	got, ok, err := Convert([]byte(mini), "MinimOS")
+	if err != nil || !ok {
+		t.Fatalf("Convert: ok=%v err=%v", ok, err)
+	}
+	if len(got.Upstream) != 1 || got.Upstream[0] != "CVE-2026-56865" {
+		t.Errorf("Upstream = %v, want [CVE-2026-56865]", got.Upstream)
+	}
+
+	const echo = `{"id":"ECHO-0051-e755-e08e","upstream":["CVE-2026-4424"],
+	  "affected":[{"package":{"name":"libarchive","ecosystem":"Echo","purl":"pkg:deb/echo/libarchive"},
+	    "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"3.7.4-4+e5"}]}]}]}`
+	got, ok, err = Convert([]byte(echo), "Echo")
+	if err != nil || !ok {
+		t.Fatalf("Convert: ok=%v err=%v", ok, err)
+	}
+	if len(got.Upstream) != 1 || got.Upstream[0] != "CVE-2026-4424" {
+		t.Errorf("Upstream = %v, want [CVE-2026-4424]", got.Upstream)
+	}
+}
+
+// TestConvert_EchoNotAffectedSentinel drives convert directly (unexported,
+// same package) so the D92 stats counter can be asserted -- Convert itself
+// (the public, stats-less wrapper) cannot show it, the same reason
+// TestConvert_ModuleStream_ZeroTokensStaysStreamless (modulestream_test.go)
+// does the same for D82's counters.
+//
+// The first half is the real record ECHO-0066-dd81-6847 (measured
+// 2026-08-26): its only affected entry is package `linux` with a range
+// whose sole Fixed event is the bare sentinel "1". Dropping that range
+// leaves the entry with no ranges and no enumerated versions, which the
+// existing "nothing left to match on" guard (record.go) then drops too --
+// so the whole record must convert with ok=false, not merely a
+// shorter-than-expected Affected list. Deleting the sentinel drop in
+// convert() turns this red on both ok and the counter, while
+// TestConvert_MinimOSAndEchoUpstreamCVEReachesStoredAdvisory above (which
+// never builds a fixed:"1" fixture) stays green.
+//
+// The second half is the negative row D92 explicitly asked for: a GENUINE
+// Echo fix at epoch 1 ("1:1.0-1") is a different string entirely and must
+// survive untouched, proving the guard matches the exact sentinel string
+// rather than "any fixed version starting with 1" -- a version-agnostic
+// drop would wrongly discard every real epoch-1 fix Echo ever publishes.
+func TestConvert_EchoNotAffectedSentinel(t *testing.T) {
+	const linuxSentinel = `{"id":"ECHO-0066-dd81-6847","upstream":["CVE-2025-38090"],
+	  "affected":[{"package":{"name":"linux","ecosystem":"Echo","purl":"pkg:deb/echo/linux"},
+	    "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1"}]}]}]}`
+	var st stats
+	got, ok, err := convert([]byte(linuxSentinel), "Echo", &st, nil)
+	if err != nil {
+		t.Fatalf("convert: err=%v", err)
+	}
+	if ok {
+		t.Fatalf("convert: ok=true, want false -- the record's only affected "+
+			"entry is a not-affected sentinel with nothing left to match on, got %+v", got)
+	}
+	if st.EchoNotAffectedSentinel != 1 {
+		t.Errorf("EchoNotAffectedSentinel = %d, want 1", st.EchoNotAffectedSentinel)
+	}
+
+	const epochOneFix = `{"id":"ECHO-003f-2632-599c","upstream":["CVE-2026-99999"],
+	  "affected":[{"package":{"name":"openssh","ecosystem":"Echo","purl":"pkg:deb/echo/openssh"},
+	    "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1:1.0-1"}]}]}]}`
+	st = stats{}
+	got, ok, err = convert([]byte(epochOneFix), "Echo", &st, nil)
+	if err != nil || !ok {
+		t.Fatalf("convert: ok=%v err=%v, want the genuine epoch-1 fix kept", ok, err)
+	}
+	if len(got.Affected) != 1 || len(got.Affected[0].Ranges) != 1 {
+		t.Fatalf("Affected = %+v, want one entry with its range intact", got.Affected)
+	}
+	events := got.Affected[0].Ranges[0].Events
+	if fixed := events[len(events)-1].Fixed; fixed != "1:1.0-1" {
+		t.Errorf("Fixed = %q, want %q -- the sentinel guard must not touch a genuine epoch fix", fixed, "1:1.0-1")
+	}
+	if st.EchoNotAffectedSentinel != 0 {
+		t.Errorf("EchoNotAffectedSentinel = %d, want 0 -- a real fix must never increment the sentinel counter", st.EchoNotAffectedSentinel)
 	}
 }

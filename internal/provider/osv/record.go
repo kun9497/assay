@@ -151,6 +151,38 @@ func familyMatches(ecosystem, want string) bool {
 	return want == "Chainguard" && ecosystem == "Wolfi"
 }
 
+// echoNotAffectedSentinel reports whether a range is Echo's own "this
+// package was never affected" marker rather than a real vulnerable window --
+// exactly one Fixed event in the range, and its value is the bare string
+// "1". Measured 2026-08-26 against the live Echo/all.zip: 2,135 of Echo's
+// fixed events carry this exact string (2,132 of them on package `linux`,
+// e.g. ECHO-0066-dd81-6847, always paired with introduced:"0").
+//
+// Unlike Chainguard/Wolfi's fixed:"0" sentinel (D88), which is safe to keep
+// and evaluate because "0" parses as the minimal real version under every
+// registered comparer, Echo's "1" is NOT safe by the same accident: a
+// genuine epoch-less 0.x deb version legitimately compares BELOW "1", so
+// keeping the range would make [introduced 0, fixed 1) wrongly report that
+// version as vulnerable and then fixed. convert (below) drops the whole
+// range on this signal instead, with a counter.
+//
+// Deliberately exact string equality rather than a numeric or prefix
+// comparison: a genuine fix at epoch 1 ("1:1.0-1") is a completely different
+// string and must never match this, or every real epoch-1 fix Echo ever
+// publishes would be discarded along with the sentinel.
+func echoNotAffectedSentinel(rr rawRange) bool {
+	var only string
+	var n int
+	for _, e := range rr.Events {
+		if e.Fixed == "" {
+			continue
+		}
+		n++
+		only = e.Fixed
+	}
+	return n == 1 && only == "1"
+}
+
 // databaseOf returns the database that authored an advisory, read from its
 // identifier's namespace.
 //
@@ -380,6 +412,21 @@ func convert(data []byte, wantEcosystem string, st *stats, tracker *ubuntuTracke
 			if typ == advisory.RangeGit {
 				continue
 			}
+			// D92: Echo's not-affected sentinel is dropped whole, at
+			// conversion (D16's spirit) -- see echoNotAffectedSentinel's own
+			// comment for why "1" cannot be kept and evaluated the way
+			// Chainguard/Wolfi's "0" is below. Scoped to Echo-family entries
+			// only (familyMatches also matches "Echo:PyPi" etc., harmless: the
+			// sentinel has only ever been measured on the bare "Echo" key). 165
+			// SEMVER-typed Echo ranges also exist (Go modules under
+			// pkg:deb/echo purls, introduced-only) -- dead weight, untouched
+			// here, since they carry no Fixed event at all and never match.
+			if familyMatches(ra.Package.Ecosystem, "Echo") && echoNotAffectedSentinel(rr) {
+				if st != nil {
+					st.EchoNotAffectedSentinel++
+				}
+				continue
+			}
 			rng := advisory.Range{Type: typ}
 			for _, re := range rr.Events {
 				// D35 repairs one documented Alpine typo here, at ingestion,
@@ -581,13 +628,20 @@ type stats struct {
 	UbuntuUnknownCodename int // stanza lines naming a codename outside ubuntuCodenameRelease
 	UbuntuStampedWontFix  int // fix-less ranges stamped wont-fix from an `ignored` tuple
 	UbuntuStampedNotFixed int // fix-less ranges stamped not-fixed from needed/needs-triage/pending/deferred
+
+	// EchoNotAffectedSentinel is D92's own count: Echo ranges whose sole
+	// Fixed event was the bare string "1" and were dropped at conversion
+	// (echoNotAffectedSentinel's own comment). A build that stops seeing
+	// this count on an Echo fetch is a build whose upstream shape changed.
+	EchoNotAffectedSentinel int
 }
 
 func (s stats) String() string {
 	return fmt.Sprintf(
 		"module streams (D82): %d module-tagged Rocky/AlmaLinux entr(y/ies) streamed from summary prose, "+
 			"%d record(s) left stream-less for no token, %d record(s) left stream-less for 2+ tokens; "+
-			"ubuntu fix state (D85): %d range(s) stamped wont-fix, %d range(s) stamped not-fixed",
+			"ubuntu fix state (D85): %d range(s) stamped wont-fix, %d range(s) stamped not-fixed; "+
+			"echo not-affected sentinel (D92): %d range(s) dropped for fixed:\"1\"",
 		s.ModuleEntriesStreamed, s.ModuleRecordsZeroToken, s.ModuleRecordsMultiToken,
-		s.UbuntuStampedWontFix, s.UbuntuStampedNotFixed)
+		s.UbuntuStampedWontFix, s.UbuntuStampedNotFixed, s.EchoNotAffectedSentinel)
 }

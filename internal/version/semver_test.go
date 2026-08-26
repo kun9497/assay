@@ -326,6 +326,18 @@ func TestNoUnbackedDistroComparer(t *testing.T) {
 		// Chainguard's own packages too), so no new plumbing was needed
 		// alongside this comparer the way dpkg/rpm needed their own.
 		"Wolfi": true, "Chainguard": true,
+		// D92: "MinimOS" is a clean clone of the Wolfi/Chainguard reasoning
+		// above -- same apk distro shape, same bare no-release OSV key, same
+		// free ride on the apk cataloger's existing Package.Source population.
+		"MinimOS": true,
+		// D92: "Echo" is the deb-based sibling -- OSV keys it bare too, with
+		// no release axis (pkgmeta.Distro.Ecosystem's "echo" case), so it is
+		// a plain registry entry rather than a "Debian:"-style prefix rule.
+		// Unlike MinimOS it needed no new Package.Source plumbing either: the
+		// dpkg cataloger already populates Source from the `Source:` field
+		// for every dpkg-based system regardless of distro ID (the same free
+		// ride D53 recorded for Ubuntu).
+		"Echo": true,
 	}
 	for eco := range registry {
 		if !want[eco] {

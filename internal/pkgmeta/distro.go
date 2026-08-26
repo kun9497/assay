@@ -386,6 +386,39 @@ func (d Distro) Ecosystem() (string, error) {
 		// real distro with real per-release fixed versions.
 		return "", fmt.Errorf("%w: distro %q is a rolling release with no stable "+
 			"release to key advisories on", ErrNoEcosystem, d.ID)
+	case "minimos":
+		// D92. Same shape as "wolfi"/"chainguard" below: OSV keys MinimOS bare
+		// ("MinimOS", no release suffix), because MinimOS itself ships no
+		// release axis to qualify -- one rolling stream, so D6 is satisfied
+		// vacuously the same way it is for Wolfi and Chainguard. VERSION_ID is
+		// ignored entirely rather than parsed.
+		//
+		// VERIFIED against a real image: reg.mini.dev/nginx:latest, pulled
+		// 2026-08-26, reports ID=minimos and a frozen VERSION_ID="20241031" --
+		// a wolfi-style build-tooling artifact, not a release, so reading it
+		// would either always resolve the same stale-looking (but ignored) key
+		// or invite a future change to start trusting it and silently stop
+		// matching -- the same hazard the "wolfi" case's own comment gives for
+		// its two frozen VERSION_IDs.
+		//
+		// Minimus (the org behind MinimOS) announced it is shutting down
+		// 2026-10-22: the registry goes away and the feed freezes after that
+		// date. That does not retire this case -- an image already pulled
+		// before the shutdown keeps whatever scan value the frozen feed can
+		// still provide, which is the whole reason this coverage ships despite
+		// the sunset date being known in advance.
+		return "MinimOS", nil
+	case "echo":
+		// D92. Symmetric with "minimos" above -- OSV genuinely keys an "Echo"
+		// family, bare, with no release axis -- but UNVERIFIED in the same way
+		// the "chainguard" case below is: no public Echo image has been found
+		// (the registry requires real credentials and Echo's Docker Hub org is
+		// empty, checked 2026-08-26). Kept because an os-release ID this
+		// project has never seen firsthand is a more honest gap than a distro
+		// it cannot key advisories for at all -- but treat the routing itself,
+		// not just the version handling, as a guess until a real image is
+		// found that sets it.
+		return "Echo", nil
 	case "wolfi":
 		// D88. OSV keys Wolfi bare ("Wolfi", no release suffix) because Wolfi
 		// itself ships no release axis — it is a single rolling stream, and
