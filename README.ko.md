@@ -606,6 +606,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨
+- [x] 차등이 스스로 돎 (D93) — 매주, digest로 고정된 타깃 13개를 발행된 아티팩트에
+      대고, 커밋된 floor로 판정(`cmd/grypediff`, stdlib만 사용); ratings 컬럼을
+      읽어서 죽어 있던 동의 둘을 되살림(alma 0→106, oracle 0→37)
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건
@@ -928,8 +931,10 @@ SUSE에서는 `--fail-on-unfixable`이 동작하지만 `=wont-fix`는 SUSE가 �
 `org.opencontainers.image.source`를 실어 나르므로 워크플로가 만든 패키지는 스스로 연결됩니다.
 그 이전에 손으로 만든 것은 그렇지 않습니다.
 
-정확성은 매 단계 **grype와의 대조 테스트**로 검증합니다. 데이터 소스가 다르므로 완전한 일치는
-기대하지 않지만, **큰 차이가 나면 우리 매처가 틀린 것입니다.** 슬라이스 ①은 대조한 두 SBOM 모두에서
+정확성은 매 단계 **grype와의 대조 테스트**로 검증합니다 — D93부터는 매주 일정으로
+돕니다(`grype-diff.yml`: digest로 고정된 타깃 13개, 발행된 아티팩트, 퇴보하면 걸리는
+커밋된 floor). 데이터 소스가 다르므로 완전한 일치는 기대하지 않지만, **큰 차이가
+나면 우리 매처가 틀린 것입니다.** 슬라이스 ①은 대조한 두 SBOM 모두에서
 집합이 정확히 일치했습니다:
 
 | 대상 | assay | grype | 미탐 | 오탐 |

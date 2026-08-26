@@ -2680,7 +2680,7 @@ why the flag's own usage text says so rather than leaving it to this document.
 
 ### D67 — One index key per (package, advisory)
 
-**Decision.** The `advisories` index maps `<eco> <name> <advisoryID>` to nothing,
+**Decision.** The `advisories` index maps `<eco>\x00<name>\x00<advisoryID>` to nothing,
 one key per pair, replacing per-package JSON arrays of IDs. Schema 8 → 9.
 
 **Why.** Measured three times: the OSV stage spends ~47–54 minutes storing against ~1.5
@@ -3589,6 +3589,44 @@ four now name their comparer, with exact-name table rows.
 puller changes. Echo verifies feed-side only, and says so.
 
 ---
+
+### D93 — The differential runs itself: weekly, floored, against the published artifact
+
+**Decision.** The 13-target grype differential becomes a weekly GitHub Actions workflow
+(`grype-diff.yml`, Monday 06:00 KST + `workflow_dispatch`) driven by `cmd/grypediff`, a
+stdlib-only tool that reduces both scanners' JSON to (package, CVE) tuple sets and judges
+each target against a committed floors file (`.github/grype-diff-targets.json`): `minAgree`
+on |assay ∩ grype|, `minFindings`/`maxFindings` on assay's own count, `maxNotEvaluated`
+(omitted = must stay 0). Floors are seeded from a real run at 85% of measured (2× for the
+ceiling), refs are pinned by digest, and the database is the published OCI artifact via
+`assay db update` — never a local build.
+
+**Why floors, not snapshots or reports.** The two databases legitimately diverge and both
+move weekly, so an exact-snapshot gate would demand a refresh PR every run and stop being
+read — while a report with no gate is exactly as silent as the nothing that let D90 sit in
+the published artifact until a manual differential caught it. A floor only trips when a
+number regresses past the worst it was seeded to tolerate: agreement collapsing (the D90
+shape — ubi9 went 415 → 38 against a healthy grype), findings draining away (a provider
+falling out of the build), an FP explosion (the inverse), or packages silently going
+unevaluated. `minAgree` is the load-bearing one: D90 would have tripped it on the first
+Monday.
+
+**Why the published artifact.** A scan-time regression and a publish-time corruption are
+different failures; building fresh in the workflow would test only the former. D90 lived in
+the *published* artifact — `db update` is the only path that would have seen it.
+
+**The seeding run found a real extraction gap.** ALSA/ELSA advisories spell their CVE only
+in OSV `related` (D71), which the JSON document does not expose — so the first seed
+measured agree=0 on both AlmaLinux and Oracle Linux. The CVEs are in the document anyway:
+the NVD/EPSS annotations that attach *through* `related` carry them as their own
+`advisoryId`, so `grypediff` reads the ratings column too. That turned alma9 0 → 106
+(onlyAssay 0), ol9 0 → 37, fedora agree 12 → 31, and made both previously-dead floors live.
+Exit contract mirrors assay's own: 0 clean, 1 floor breach, 2 untrustworthy, 2 > 1 > 0.
+
+**Out of scope, recorded.** grype's exit-0-with-findings default is relied on but probed:
+output that parses as JSON is authoritative over the exit code. The tool never classifies
+divergence (CPE fallback, binary-classifier dupes) — floors absorb known noise, humans read
+the uploaded capture artifact when a floor trips.
 
 ## 3. Architecture
 

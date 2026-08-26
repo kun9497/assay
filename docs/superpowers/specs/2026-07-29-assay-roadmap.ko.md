@@ -3395,6 +3395,45 @@ evaluated로 스캔됩니다. Echo는 피드 쪽만 검증됐고, 그렇게 말�
 
 ---
 
+### D93 — 차등은 스스로 돈다: 매주, floor를 걸고, 발행된 아티팩트에 대고
+
+**결정.** 13-타깃 grype 차등이 매주 도는 GitHub Actions 워크플로가 됩니다
+(`grype-diff.yml`, 월요일 06:00 KST + `workflow_dispatch`), `cmd/grypediff`가
+구동합니다 — 이것은 stdlib만 쓰는 도구로 두 스캐너의 JSON을 (package, CVE) 튜플
+집합으로 줄이고, 각 타깃을 커밋된 floor 파일(`.github/grype-diff-targets.json`)에
+대고 판정합니다: `|assay ∩ grype|`에 대한 `minAgree`, assay 자신의 개수에 대한
+`minFindings`/`maxFindings`, `maxNotEvaluated`(생략하면 반드시 0이어야 함). floor는
+실제 실행 값의 85%에서 시드되고(상한은 2배), ref는 digest로 고정되며, 데이터베이스는
+`assay db update`를 거친 발행된 OCI 아티팩트입니다 — 결코 로컬 빌드가 아닙니다.
+
+**왜 스냅샷이나 리포트가 아니라 floor인가.** 두 데이터베이스는 정당하게 서로
+갈라지고 둘 다 매주 움직이므로, 정확한-스냅샷 게이트는 실행마다 refresh PR을
+요구하다가 결국 아무도 읽지 않게 될 것입니다 — 게이트 없는 리포트는 D90이 수동
+차등이 잡아낼 때까지 발행된 아티팩트에 그대로 앉아 있게 뒀던 그 '아무것도 없음'과
+정확히 똑같이 조용합니다. floor는 숫자가 시드될 때 견디도록 정해 둔 최악의 값을
+넘어 퇴보할 때만 걸립니다: 동의가 무너지는 것(D90 모양입니다 — ubi9가 건강한
+grype 대비 415 → 38로 갔습니다), finding이 빠져나가는 것(provider가 빌드에서
+빠지는 것), FP 폭발(그 반대), 또는 패키지가 조용히 평가되지 않게 되는 것. `minAgree`가
+핵심을 지탱합니다: D90은 첫 월요일에 이것을 걸었을 것입니다.
+
+**왜 발행된 아티팩트인가.** 스캔 시점의 퇴보와 발행 시점의 오염은 서로 다른 실패이며,
+워크플로에서 새로 빌드하면 전자만 테스트하게 됩니다. D90은 '발행된' 아티팩트 안에
+살고 있었습니다 — `db update`만이 그것을 봤을 유일한 경로입니다.
+
+**시드 실행이 진짜 추출 구멍을 찾아냈습니다.** ALSA/ELSA advisory는 CVE를 오직 OSV
+`related`(D71)에만 적는데, JSON 문서는 그것을 노출하지 않습니다 — 그래서 첫 시드는
+AlmaLinux와 Oracle Linux 둘 다에서 agree=0을 측정했습니다. CVE는 어쨌든 문서 안에
+있습니다: `related`를 '거쳐' 붙는 NVD/EPSS annotation이 그것을 자신의
+`advisoryId`로 담고 있어서, `grypediff`도 ratings 컬럼을 읽습니다. 그것으로
+alma9는 0 → 106(onlyAssay 0)이 되고, ol9는 0 → 37, fedora agree는 12 → 31이
+되어, 전에는 죽어 있던 floor 둘 다 살아났습니다. Exit 계약은 assay 자신의 것을
+그대로 반영합니다: 0은 clean, 1은 floor 위반, 2는 신뢰 불가, 2 > 1 > 0.
+
+**범위 밖, 기록해 둡니다.** grype의 exit-0-with-findings 기본값을 신뢰하지만
+probe도 합니다: JSON으로 파싱되는 출력이 exit code보다 우선합니다. 이 도구는 결코
+발산을 분류하지 않습니다(CPE fallback, binary-classifier 중복) — floor가 알려진
+잡음을 흡수하고, floor가 걸리면 사람이 업로드된 캡처 아티팩트를 읽습니다.
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모
