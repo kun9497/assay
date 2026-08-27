@@ -107,6 +107,8 @@ assay scan alpine:3.19 --fail-on high
   것과 그 이유, 각각 재방문 트리거와 함께. ([한국어](docs/deferred-decisions.ko.md))
 - **[docs/integrations.md](docs/integrations.md)** — CI 통합: 복사해 쓰는 GitHub Actions·
   GitLab CI 예제, SARIF 업로드, 종료 코드 게이팅. ([한국어](docs/integrations.ko.md))
+- **[docs/comparison.md](docs/comparison.md)** — grype(주간 실측)·trivy(스펙 수준)와의
+  비교, 그리고 각 도구의 정책이 의도적으로 갈리는 지점. ([한국어](docs/comparison.ko.md))
 - **[docs/superpowers/specs/2026-07-29-assay-roadmap.md](docs/superpowers/specs/2026-07-29-assay-roadmap.md)**
   — 레퍼런스 설계, 모든 결정을 `D1`…`D102`로 근거와 함께 기록.
 

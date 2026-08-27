@@ -108,6 +108,8 @@ cannot be trusted — with `2` outranking `1` outranking `0`.
   built, and why, each with a revisit trigger.
 - **[docs/integrations.md](docs/integrations.md)** — CI integration: copy-pasteable GitHub
   Actions and GitLab CI examples, SARIF upload, and exit-code gating.
+- **[docs/comparison.md](docs/comparison.md)** — how assay compares to grype (measured,
+  weekly) and trivy (spec-level), and where each tool's policy deliberately differs.
 - **[docs/superpowers/specs/2026-07-29-assay-roadmap.md](docs/superpowers/specs/2026-07-29-assay-roadmap.md)**
   — the reference design, every decision recorded as `D1`…`D102` with its reasoning.
 
