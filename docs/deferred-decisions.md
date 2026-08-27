@@ -230,8 +230,7 @@ correct against a wrong input.
 would fit if a class emerges — that is the revisit trigger: a second Rocky record with the
 regenerated-fixed-version pattern). Report channel: github.com/rocky-linux/peridot issues
 (Apollo lives there; precedent issues #79/#82; no existing report found under any related
-search) — a draft was prepared, and the user decided 2026-08-27 to record only, not
-send.
+search) — reported 2026-08-27 as rocky-linux/peridot#204, from the prepared draft.
 
 ---
 
