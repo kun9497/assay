@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -43,10 +44,12 @@ func Push(ctx context.Context, dbPath, ref string, force bool, stdout, stderr io
 	}
 	db.Close()
 
+	dataAsOf, dataAsOfSource := oldestDataAsOf(meta)
 	incoming := dbartifact.Meta{
 		SchemaVersion:     store.SchemaVersion,
 		BuiltAt:           meta.BuiltAt,
-		DataAsOf:          oldestDataAsOf(meta),
+		DataAsOf:          dataAsOf,
+		DataAsOfSource:    dataAsOfSource,
 		RatingsSince:      ratingBound(meta),
 		RatingsSinceKnown: ratingBoundKnown(meta),
 		RatingCount:       totalRatings(meta),
@@ -238,23 +241,43 @@ func stagedCopy(dbPath string) (path string, cleanup func(), err error) {
 // below). A stale KISA fetch dragging the published DataAsOf backwards would
 // make every puller believe the advisories they did receive are older than
 // they are, on the strength of data they did not.
-func oldestDataAsOf(m store.Meta) time.Time {
+// It also reports WHICH source set the floor (the 2026-08-27 investigation:
+// "2023-09-25" was six dead AL2 extras topics inside amazon's own fold, and
+// without attribution the line read as "the whole database is three years
+// stale"). Iteration is over SORTED keys so a tie between two sources
+// resolves to the lexicographically first name every build, not to whichever
+// map key Go happened to walk first — a nondeterministic annotation would
+// make byte-identical builds publish differing manifests.
+func oldestDataAsOf(m store.Meta) (time.Time, string) {
 	var oldest time.Time
-	consider := func(p store.Provenance) {
+	var source string
+	consider := func(name string, p store.Provenance) {
 		if p.DataAsOf.IsZero() {
 			return
 		}
 		if oldest.IsZero() || p.DataAsOf.Before(oldest) {
 			oldest = p.DataAsOf
+			source = name
 		}
 	}
-	for _, p := range m.Providers {
-		consider(p)
+	for _, name := range sortedKeys(m.Providers) {
+		consider(name, m.Providers[name])
 	}
-	for _, p := range m.Ratings {
-		consider(p)
+	for _, name := range sortedKeys(m.Ratings) {
+		consider(name, m.Ratings[name])
 	}
-	return oldest
+	return oldest, source
+}
+
+// sortedKeys is the deterministic-iteration helper oldestDataAsOf needs;
+// generic because Providers and Ratings share value type but not identity.
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // narrowestRatingBound is the latest bound across rating sources, which is

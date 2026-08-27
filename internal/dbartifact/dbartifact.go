@@ -64,6 +64,11 @@ const (
 	AnnotationSchema   = "dev.assay.schema-version"
 	AnnotationBuiltAt  = "dev.assay.built-at"
 	AnnotationDataAsOf = "dev.assay.data-as-of"
+	// AnnotationDataAsOfSource names the provider whose DataAsOf set the
+	// floor above — attribution, not data: absent on artifacts published
+	// before it existed, and a reader treats absence as "unattributed", never
+	// as an error (the D12 date alone is still the promise).
+	AnnotationDataAsOfSource = "dev.assay.data-as-of-source"
 	// RatingsSince and RatingCount exist so a publisher can tell, from the
 	// manifest alone, whether the artifact it is about to push covers LESS
 	// than the one already published. Reading that from the layer would
@@ -87,6 +92,9 @@ type Meta struct {
 	// the former reports stale data as fresh.
 	BuiltAt  time.Time
 	DataAsOf time.Time
+	// DataAsOfSource is which provider's Provenance set DataAsOf ("amazon").
+	// Empty on artifacts published before the annotation existed.
+	DataAsOfSource string
 	// RatingsSince is the narrowest bound across rating sources: the
 	// latest date any of them was limited to. Zero WITH RatingsSinceKnown
 	// means no rating source was bounded at all.
@@ -141,6 +149,12 @@ func Pack(dbPath string, m Meta) (v1.Image, error) {
 		AnnotationDataAsOf:    m.DataAsOf.UTC().Format(time.RFC3339),
 		AnnotationRatingCount: strconv.Itoa(m.RatingCount),
 	}
+	// Attribution rides only when known: an empty value would be
+	// indistinguishable from a malformed one to a reader, and the field is
+	// optional by design (see its constant's comment).
+	if m.DataAsOfSource != "" {
+		anns[AnnotationDataAsOfSource] = m.DataAsOfSource
+	}
 	// Omitted rather than guessed when the database does not record it.
 	if m.RatingsSinceKnown {
 		anns[AnnotationRatingsSince] = ratingsSinceValue(m.RatingsSince)
@@ -193,6 +207,7 @@ func MetaOf(img v1.Image) (Meta, error) {
 	if t, err := time.Parse(time.RFC3339, mf.Annotations[AnnotationDataAsOf]); err == nil {
 		m.DataAsOf = t
 	}
+	m.DataAsOfSource = mf.Annotations[AnnotationDataAsOfSource]
 	if raw, ok := mf.Annotations[AnnotationRatingsSince]; ok {
 		if raw == unboundedRatings {
 			m.RatingsSinceKnown = true

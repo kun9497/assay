@@ -274,11 +274,12 @@ amazon.Fetch's fold and again across ~20 providers, lets one near-dead add-on ch
 the single number for a ~427,000-record artifact that is days-fresh everywhere else.
 `db status` already discloses the per-provider truth.
 
-**Deferred improvement, not a bug**: attribute the floor in the one-liner (print which
-provider set it, e.g. "(amazon)") and/or nudge the reader to `db status` when DataAsOf
-trails BuiltAt by months. The date itself must not change — D12's "never hide staleness"
-is working exactly as designed; only the attribution is missing. Do it the next time
-pull.go is open for another reason, or when a user actually misreads the line.
+**Done 2026-08-27** (the trigger-audit round — "next time pull.go is open" fired the same
+day it was written): `db push` now records which source set the floor in a
+`dev.assay.data-as-of-source` annotation, and `db update`'s line reads "upstream data as
+of 2023-09-25 (stalest source: amazon; per-source dates: assay db status)". The date
+itself is unchanged — D12's floor stays the floor — and artifacts published before the
+annotation keep the bare line rather than an empty attribution.
 ### ~~Ubuntu findings carry no fix state~~ — resolved in D85
 
 D52 distinguishes "the vendor will never fix this" from "no fix yet" and D53 brought Ubuntu
