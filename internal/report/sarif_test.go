@@ -453,3 +453,38 @@ func TestSARIF_ProvidesMatchIsNamedInHelpTextToo(t *testing.T) {
 		t.Errorf("help text = %q, must not claim a D8 source join for a provides match", help)
 	}
 }
+
+// TestSARIF_SuppressedFindingCarriesASuppression holds the VEX/ignore
+// contract on the SARIF side: a waived finding is emitted as a result WITH a
+// suppressions entry (SARIF's own mechanism), so GitHub shows it dismissed
+// rather than the finding vanishing. The justification is the rule's reason.
+func TestSARIF_SuppressedFindingCarriesASuppression(t *testing.T) {
+	f := findingFixture("CVE-2024-1234", "openssl", severity.High, 7.5, "1.0.1", "")
+	res := matcher.Result{Suppressed: []matcher.Suppressed{{Finding: f, Reason: "not in our build path"}}}
+	run := run0(t, sarifOf(t, res, cyclonedx.Stats{Components: 1, Cataloged: 1}))
+	results := resultsOf(t, run)
+	if len(results) != 1 {
+		t.Fatalf("results = %d, want 1 (the suppressed finding is still emitted)", len(results))
+	}
+	sup, ok := results[0]["suppressions"].([]any)
+	if !ok || len(sup) != 1 {
+		t.Fatalf("result has no suppressions array; a waived finding must be marked suppressed, not dropped: %+v", results[0])
+	}
+	s := sup[0].(map[string]any)
+	if s["kind"] != "external" || s["justification"] != "not in our build path" {
+		t.Errorf("suppression = %+v, want kind external and the rule's reason as justification", s)
+	}
+}
+
+// TestSARIF_ActiveFindingHasNoSuppressions is the inverse: an ordinary
+// finding must NOT carry a suppressions key, or GitHub would dismiss a real
+// alert. Collapsing the two would be the exact "silently waived" failure.
+func TestSARIF_ActiveFindingHasNoSuppressions(t *testing.T) {
+	f := findingFixture("CVE-2024-5678", "curl", severity.High, 7.5, "1.0.1", "")
+	res := matcher.Result{Findings: []matcher.Finding{f}}
+	run := run0(t, sarifOf(t, res, cyclonedx.Stats{Components: 1, Cataloged: 1}))
+	results := resultsOf(t, run)
+	if _, present := results[0]["suppressions"]; present {
+		t.Error("an active finding carries a suppressions key — it would show as dismissed on GitHub")
+	}
+}

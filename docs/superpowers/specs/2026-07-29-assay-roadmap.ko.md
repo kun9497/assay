@@ -3774,6 +3774,43 @@ mutation 3개 중 3개가 red입니다(접두사 마커 매치, if-not-else-if �
 
 ---
 
+### D102 — Ignore 규칙: waiver는 세어지고 이유가 있으며, 결코 조용하지 않다
+
+**결정.** 사용자는 `.assay.yaml` ignore 파일을 통해 finding을 waive합니다(grype의
+관례입니다; yaml.v3는 이미 모듈 그래프에 있었으므로, 승격해도 새 코드가
+들지 않았습니다). 규칙은 `vulnerability`(CVE/advisory id, finding의
+identifier에 대고 확인하므로 alias도 셈), `package`, `ecosystem`에 대고
+매칭합니다 — 이름 붙인 것 전부가 매칭돼야 합니다(규칙 안에서는 AND, 규칙
+사이에서는 OR). `reason`은 '필수'이고 `expires`(YYYY-MM-DD, 포함)는
+선택입니다. matcher는 규칙을 결코 보지 않습니다: 억제는 Match '뒤에' 오는
+scancmd 단계이고, waive된 finding을 `Result.Findings`에서
+`Result.Suppressed`로 옮깁니다, 그래서 matcher는 (target, store)의 순수
+함수로 남습니다.
+
+**이것을 그냥 suppress-list가 아니라 assay의 것으로 만드는 규율.** waive된
+finding은 결코 조용히 사라지지 않습니다 — 이 프로젝트 전체의 척추는 스캔이
+"아무것도 못 찾음"과 "waive됨"을 혼동해서는 안 된다는 것입니다(D11, D36).
+그래서: 이유 없는 규칙은 로드 시점에 거부됩니다(`reason` 필수); 매칭 필드를
+하나도 이름 붙이지 않은 규칙은 거부됩니다(스캔 전체를 waive하게 됩니다);
+오타 난 키는 거부됩니다(KnownFields); 만료된 규칙은 waive를 멈추고
+stderr에 경고합니다(waiver는 자신의 정당화보다 눈에 띄지 않게 더 오래 살
+수 없습니다). 그리고 모든 렌더러는 억제를 '보여줍니다' — table은 "N
+suppressed"를 세고 finding과 이유 하나하나를 이름 붙인 블록을 찍으며,
+JSON은 이유를 담은 `suppressed[]` 배열을 나릅니다(스키마 9), SARIF는 그
+finding을 표준 `suppressions` 항목을 가진 result로 내보내서 GitHub가 그것을
+사라진 게 아니라 기각된 것으로 보여줍니다. 억제된 finding은 정확히
+Findings를 떠났기 때문에 `--fail-on`을 걸지 않지만, 여전히 눈에 보입니다.
+
+**범위.** 로컬 ignore 규칙만입니다 — OpenVEX 문서-입력 절반(스캐너가 읽고
+적용하는 생산자-서명 VEX)은 의도적으로 나중 슬라이스이고, 그래야 80% 사례가
+자체 완결적으로 출하됩니다. `--config <path>`가 파일을 이름 붙입니다; 기본값은
+작업 디렉터리에서 `.assay.yaml`을 찾고 없으면 그것 없이 돕니다, 그래서 한
+번도 그것을 써 본 적 없는 프로젝트는 정확히 전과 똑같이 스캔됩니다. 독립
+리뷰: 핵심 가드 5개 중 5개가 delete하면 red입니다(no-apply, reasonless-accept,
+expiry-ignored, table-hidden, sarif-active-mismarked).
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

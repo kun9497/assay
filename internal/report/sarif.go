@@ -33,7 +33,7 @@ func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, target, version
 	sum := Summarize(res, cat)
 
 	rules := make([]sarifRule, 0, len(res.Findings)+1)
-	results := make([]sarifResult, 0, len(res.Findings)+len(res.Skipped))
+	results := make([]sarifResult, 0, len(res.Findings)+len(res.Suppressed)+len(res.Skipped))
 	seen := map[string]bool{}
 
 	for _, f := range res.Findings {
@@ -55,6 +55,31 @@ func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, target, version
 			// Required by GitHub, and derived from what a finding IS rather
 			// than from where it sits: a fingerprint keyed on a file offset
 			// would make every alert new again the moment a package moved.
+			PartialFingerprints: map[string]string{fingerprintKey: fingerprint(f)},
+		})
+	}
+
+	// Suppressed findings become results too, marked with SARIF suppressions
+	// so they show as dismissed rather than lost. They reuse the same rule the
+	// finding would have had, so the Security tab links them the same way.
+	for _, s := range res.Suppressed {
+		f := s.Finding
+		id := ruleID(f)
+		if !seen[id] {
+			seen[id] = true
+			rules = append(rules, findingRule(id, f))
+		}
+		results = append(results, sarifResult{
+			RuleID:       id,
+			Level:        sarifLevel(f.Severity),
+			Message:      sarifText{Text: findingMessage(f, target)},
+			Suppressions: []sarifSuppression{{Kind: "external", Justification: s.Reason}},
+			Locations: []sarifLocation{{
+				PhysicalLocation: sarifPhysical{
+					ArtifactLocation: sarifArtifact{URI: locationURI(f)},
+					Region:           &sarifRegion{StartLine: 1},
+				},
+			}},
 			PartialFingerprints: map[string]string{fingerprintKey: fingerprint(f)},
 		})
 	}
@@ -418,11 +443,26 @@ type sarifText struct {
 }
 
 type sarifResult struct {
-	RuleID              string            `json:"ruleId"`
-	Level               string            `json:"level"`
-	Message             sarifText         `json:"message"`
-	Locations           []sarifLocation   `json:"locations"`
-	PartialFingerprints map[string]string `json:"partialFingerprints"`
+	RuleID  string    `json:"ruleId"`
+	Level   string    `json:"level"`
+	Message sarifText `json:"message"`
+	// Suppressions is SARIF's own mechanism for a finding a user has waived
+	// (the VEX/ignore feature): GitHub code scanning reads it and shows the
+	// alert as dismissed rather than active, so a suppressed finding stays in
+	// the SARIF — visible, with its justification — instead of vanishing.
+	// omitempty so an ordinary active finding carries no suppressions key.
+	Suppressions        []sarifSuppression `json:"suppressions,omitempty"`
+	Locations           []sarifLocation    `json:"locations"`
+	PartialFingerprints map[string]string  `json:"partialFingerprints"`
+}
+
+// sarifSuppression is one entry of a result's suppressions array. Kind
+// "external" is SARIF's value for "suppressed outside the tool" — a user's
+// .assay.yaml, not the scanner's own judgment; the justification is the
+// reason the ignore rule gave.
+type sarifSuppression struct {
+	Kind          string `json:"kind"`
+	Justification string `json:"justification,omitempty"`
 }
 
 type sarifLocation struct {

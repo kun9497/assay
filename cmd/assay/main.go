@@ -109,6 +109,11 @@ Scan flags (any order, before or after the target):
                         that could not be evaluated are emitted as note-level
                         results as well as tool notifications, because a partial
                         scan must not read as a complete one (D55).
+  --config <path>       Ignore rules to apply (default: .assay.yaml in the
+                        working directory, if present). Each rule waives a
+                        matching finding with a stated reason; waived findings
+                        are shown as suppressed and counted apart, never hidden,
+                        and never trip --fail-on.
   --explain <id>        Print one advisory's full Evidence (its own ID, or
                         any alias/upstream identifier) instead of the report
 
@@ -1186,6 +1191,16 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 			if err := setOutput(&opts, strings.TrimPrefix(a, "--output=")); err != nil {
 				return "", scancmd.Options{}, err
 			}
+
+		case a == "--config":
+			i++
+			if i >= len(args) {
+				return "", scancmd.Options{}, fmt.Errorf("--config requires a value")
+			}
+			opts.IgnoreFile = args[i]
+
+		case strings.HasPrefix(a, "--config="):
+			opts.IgnoreFile = strings.TrimPrefix(a, "--config=")
 
 		case a == "--explain":
 			i++

@@ -635,6 +635,10 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       `clnstrt-baselayout` 마커 패키지에서 옴(정확한 이름, os-release가 있으면
       여전히 그것이 이김), 맨 rolling 키; 차등은 grype의 CPE fallback에 대한
       역방향 점검
+- [x] Ignore 규칙 (D102) — `.assay.yaml`을 거쳐 finding을 waive함,
+      vulnerability/package/ecosystem에 매칭하며 reason은 필수, expiry는 선택;
+      waive된 finding은 세어지고, 보여지고, SARIF에서 suppressed로 표시됨,
+      결코 조용히 사라지지 않음
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건

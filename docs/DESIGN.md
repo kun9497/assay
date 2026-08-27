@@ -661,6 +661,9 @@ exited 0 while 24 findings went unmentioned.
       the `clnstrt-baselayout` marker package in the apk db (exact name, os-release still
       wins when present), bare rolling key; the differential is a reverse check on grype's
       CPE fallback
+- [x] Ignore rules (D102) — waive a finding via `.assay.yaml`, matched on
+      vulnerability/package/ecosystem with a mandatory reason and optional expiry; waived
+      findings are counted, shown, and SARIF-marked suppressed, never silently dropped
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a

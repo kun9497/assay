@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 8,
+  "schemaVersion": 9,
   "findings": [
     {
       "package": {
@@ -185,6 +185,7 @@
       "cause": "target"
     }
   ],
+  "suppressed": [],
   "summary": {
     "components": 6,
     "evaluated": 4,
@@ -192,6 +193,7 @@
     "incompleteChecks": 2,
     "targetIncomplete": 2,
     "findings": 3,
+    "suppressed": 0,
     "unknownSeverity": 1,
     "unfixable": 1,
     "wontFix": 0,

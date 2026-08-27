@@ -35,6 +35,12 @@ type Summary struct {
 	// appears when non-zero is not one a caller can rely on.
 	TargetIncomplete int `json:"targetIncomplete"`
 	Findings         int `json:"findings"`
+	// Suppressed is the number of findings a user ignore rule waived
+	// (matcher.Result.Suppressed). Populated whether or not it is zero, like
+	// the counts around it, and NEVER folded into Findings: a waived finding
+	// is counted apart and shown with its reason, never hidden — a suppressed
+	// count of zero and an absent one must not look alike.
+	Suppressed int `json:"suppressed"`
 	// UnknownSeverity is the number of findings whose severity could not be
 	// rated — no vector scored (D17). It is populated whether or not it is
 	// zero, because a --fail-on-unknown gate reads it directly and a count
@@ -278,10 +284,25 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus) 
 	if sum.KnownExploited > 0 {
 		noFixParen += fmt.Sprintf(", %d known-exploited", sum.KnownExploited)
 	}
+	suppressedParen := ""
+	if len(res.Suppressed) > 0 {
+		suppressedParen = fmt.Sprintf(", %d suppressed", len(res.Suppressed))
+	}
 	fmt.Fprintf(w, "\n%d component(s) seen, %d evaluated, %d finding(s), %d not evaluated, "+
-		"%d unknown severity, %d with no fix available (%s)\n",
+		"%d unknown severity, %d with no fix available (%s)%s\n",
 		cat.Components, evaluated, len(res.Findings), notEvaluated, unknownSeverity,
-		sum.Unfixable, noFixParen)
+		sum.Unfixable, noFixParen, suppressedParen)
+
+	// Suppressed findings are shown, never dropped (matcher.Result.Suppressed's
+	// own reasoning): a distinct block naming each waived finding and the
+	// reason its rule gave, so a reader sees exactly what was waived and why.
+	if len(res.Suppressed) > 0 {
+		fmt.Fprintf(w, "\nSuppressed (%d) — waived by .assay.yaml, not counted toward the verdict:\n", len(res.Suppressed))
+		for _, s := range res.Suppressed {
+			fmt.Fprintf(w, "  %s  %s  %s  (%s)\n",
+				s.Finding.Package.Name, s.Finding.Package.Ecosystem, s.Finding.Advisory.ID, s.Reason)
+		}
+	}
 
 	// Gated on both counts. Keying only on notEvaluated hid every
 	// advisory-scoped skip whenever the rest of the document was fully
@@ -400,6 +421,7 @@ func Summarize(res matcher.Result, cat cyclonedx.Stats) Summary {
 		IncompleteChecks: incompleteChecks,
 		TargetIncomplete: targetIncomplete,
 		Findings:         len(res.Findings),
+		Suppressed:       len(res.Suppressed),
 		UnknownSeverity:  unknownSeverity,
 		Unfixable:        unfixable,
 		WontFix:          wontFix,

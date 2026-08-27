@@ -1357,11 +1357,17 @@ backport hazard that is the reason.
 
 ---
 
-### VEX and ignore rules
+### ~~VEX and ignore rules~~ — the ignore half resolved in D102
 
-Suppressing known-irrelevant findings. Both grype and trivy support this, and it becomes
-necessary once the tool is used against real projects with accepted risks. No architectural
-preparation needed — it is a filter between `Matcher` and `Reporter`.
+Suppressing known-irrelevant findings. The ignore-rules half shipped in D102: a `.assay.yaml`
+of waivers, applied as the recorded filter between `Matcher` and `Reporter` (a scancmd step
+after Match, so the matcher stays pure), with the project's own discipline layered on —
+every waiver states a reason, may expire, and is counted and shown rather than silently
+dropped. What is STILL deferred is the OpenVEX document-input half: reading a
+producer-signed VEX (OpenVEX/CSAF/CycloneDX VEX) and applying its not-affected statements
+automatically. Deferred on scope, not architecture — the same Match→Reporter filter and the
+same suppressed-finding plumbing D102 built would carry it. **Revisit when** a user has a
+VEX document to apply, or an image ships one alongside itself.
 
 ---
 

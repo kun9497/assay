@@ -293,7 +293,7 @@ func TestParse_NoGoModIsAnError(t *testing.T) {
 }
 
 // Parsing this repository's own go.mod pins D23's measured claim: the require
-// blocks name 11 modules (2 direct, 9 indirect), including a test-only
+// blocks name 12 modules (4 direct, 8 indirect), including a test-only
 // dependency, gotest.tools/v3, that never links into the built binary. That
 // gap between "requires" and "links" is the documented limitation this slice
 // is honest about - a test that pins the number is what keeps the README's
@@ -303,11 +303,11 @@ func TestParse_ThisRepositorysOwnGoMod(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tgt.Packages) != 11 {
-		t.Fatalf("got %d modules, want 11: %+v", len(tgt.Packages), tgt.Packages)
+	if len(tgt.Packages) != 12 {
+		t.Fatalf("got %d modules, want 12: %+v", len(tgt.Packages), tgt.Packages)
 	}
-	if stats.Cataloged != 11 || stats.Components != 11 {
-		t.Errorf("stats = %+v, want 11 cataloged of 11 components", stats)
+	if stats.Cataloged != 12 || stats.Components != 12 {
+		t.Errorf("stats = %+v, want 12 cataloged of 12 components", stats)
 	}
 	if got := find(t, tgt, "gotest.tools/v3"); got.Version == "" {
 		t.Errorf("gotest.tools/v3 has no version: %+v", got)

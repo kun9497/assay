@@ -1378,3 +1378,49 @@ func TestTable_KnownExploitedCountAppearsOnlyWhenNonZero(t *testing.T) {
 		t.Errorf("Summary.KnownExploited = %d, want 1", sum.KnownExploited)
 	}
 }
+
+// TestTable_SuppressedFindingsAreShownAndCounted is the core VEX/ignore
+// contract on the table: a waived finding must appear in the summary count
+// ("N suppressed") AND in a distinct block naming the finding and the rule's
+// reason — never silently dropped. It must NOT appear in the "finding(s)"
+// count, because it is no longer a finding for the verdict.
+func TestTable_SuppressedFindingsAreShownAndCounted(t *testing.T) {
+	waived := matcher.Finding{
+		Package:  pkgmeta.Package{Name: "busybox", Ecosystem: "Alpine:v3.19"},
+		Advisory: advisory.Advisory{ID: "ALPINE-CVE-2024-58251"},
+		Severity: severity.Low,
+	}
+	res := matcher.Result{
+		Suppressed: []matcher.Suppressed{{Finding: waived, Reason: "not in our build path"}},
+	}
+	var buf bytes.Buffer
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "0 finding(s)") {
+		t.Errorf("summary = %q, want 0 finding(s) — a waived finding is not counted as a finding", out)
+	}
+	if !strings.Contains(out, "1 suppressed") {
+		t.Errorf("summary = %q, want it to count 1 suppressed", out)
+	}
+	if !strings.Contains(out, "Suppressed (1)") || !strings.Contains(out, "not in our build path") {
+		t.Errorf("output = %q, want a Suppressed block naming the finding and its reason", out)
+	}
+	if !strings.Contains(out, "busybox") || !strings.Contains(out, "ALPINE-CVE-2024-58251") {
+		t.Errorf("output = %q, want the suppressed finding's package and advisory named", out)
+	}
+}
+
+// TestTable_NoSuppressedBlockWhenNoneWaived: the block and the count appear
+// only when something was waived — an ordinary scan reads exactly as before.
+func TestTable_NoSuppressedBlockWhenNoneWaived(t *testing.T) {
+	var buf bytes.Buffer
+	if _, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "suppressed") || strings.Contains(out, "Suppressed") {
+		t.Errorf("output = %q, want no suppressed mention when nothing was waived", out)
+	}
+}
