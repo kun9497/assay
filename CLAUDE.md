@@ -278,7 +278,14 @@ Two rules come out of it, and the first is the one that matters:
 
 - **Commit first.** A committed baseline turns every revert an agent can invent — `stash`,
   `checkout --`, `restore`, `reset --hard` — from a data-loss event into a no-op. This costs
-  one commit and removes the whole class.
+  one commit and removes the whole class. **This applies to the main loop mutating its own
+  uncommitted code too, not just to agents.** When you apply a mutation to verify a test and
+  revert it with `git checkout -- <file>`, that revert restores the file to `HEAD` — so any
+  uncommitted implementation in that same file is destroyed, not just the mutation. It
+  happened three times on 2026-08-27 during QA round 5, each caught and reapplied only
+  because the loss was noticed immediately. Commit the implementation before running a single
+  mutation against it, every time — the `checkout --` you will reach for to undo the mutation
+  cannot tell your work from the mutation.
 - **Never let several agents mutate shared implementation files at once.** Even with a
   baseline, agent A's revert lands on top of agent B's live mutation, so B's "caught" or
   "survived" is measuring a file it did not write. Mutation testing is a main-loop job for
