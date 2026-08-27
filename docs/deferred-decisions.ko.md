@@ -278,12 +278,12 @@ Oracle, SUSE 전부에 걸쳐 실전 확인함). D12의 stalest-wins 규칙이
 ~427,000-레코드 아티팩트 전체의 숫자 하나를 정하게 둡니다. `db status`는
 이미 provider별 진실을 공개하고 있습니다.
 
-**버그가 아니라 미뤄 둔 개선**: 한 줄 요약에서 그 하한을 귀속시키기(어느
-provider가 그것을 정했는지 찍기, 예: "(amazon)") 그리고/또는 DataAsOf가
-BuiltAt보다 몇 달 뒤처질 때 독자를 `db status`로 슬쩍 안내하기. 날짜 자체는
-바뀌면 안 됩니다 — D12의 "낡음을 절대 숨기지 않는다"는 설계 그대로 동작하고
-있습니다; 빠진 것은 귀속뿐입니다. `pull.go`가 다른 이유로 다시 열릴 때, 또는
-사용자가 실제로 그 줄을 잘못 읽었을 때 하면 됩니다.
+**2026-08-27에 완료**(트리거-감사 라운드 — "pull.go가 다음에 열릴 때"가 쓰인 바로
+그날 발동했습니다): `db push`는 이제 어느 출처가 그 하한을 정했는지를
+`dev.assay.data-as-of-source` annotation에 기록하고, `db update`의 줄은 "upstream
+data as of 2023-09-25 (stalest source: amazon; per-source dates: assay db status)"로
+읽힙니다. 날짜 자체는 바뀌지 않았습니다 — D12의 하한은 여전히 하한입니다 — 그리고
+이 annotation 이전에 발행된 아티팩트는 빈 귀속 대신 맨 줄을 그대로 유지합니다.
 
 ---
 

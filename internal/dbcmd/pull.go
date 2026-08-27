@@ -114,7 +114,18 @@ func Pull(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer) int
 	}
 	fmt.Fprintf(stderr, "database installed at %s\n", dbPath)
 	if !m.DataAsOf.IsZero() {
-		fmt.Fprintf(stderr, "upstream data as of %s\n", m.DataAsOf.Format("2006-01-02"))
+		// The date is D12's floor -- the MINIMUM across every source -- and
+		// without attribution it reads as "the whole database is this old"
+		// (the 2026-08-27 misreading: six dead AL2 extras topics pinned it
+		// to 2023 while every other source was days-fresh). Name the source
+		// when the artifact says which; older artifacts carry no attribution
+		// and keep the bare line.
+		if m.DataAsOfSource != "" {
+			fmt.Fprintf(stderr, "upstream data as of %s (stalest source: %s; per-source dates: assay db status)\n",
+				m.DataAsOf.Format("2006-01-02"), m.DataAsOfSource)
+		} else {
+			fmt.Fprintf(stderr, "upstream data as of %s\n", m.DataAsOf.Format("2006-01-02"))
+		}
 	}
 	return 0
 }
@@ -240,7 +251,18 @@ func PullSeed(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer)
 	}
 	fmt.Fprintf(stderr, "database installed at %s\n", dbPath)
 	if !m.DataAsOf.IsZero() {
-		fmt.Fprintf(stderr, "upstream data as of %s\n", m.DataAsOf.Format("2006-01-02"))
+		// The date is D12's floor -- the MINIMUM across every source -- and
+		// without attribution it reads as "the whole database is this old"
+		// (the 2026-08-27 misreading: six dead AL2 extras topics pinned it
+		// to 2023 while every other source was days-fresh). Name the source
+		// when the artifact says which; older artifacts carry no attribution
+		// and keep the bare line.
+		if m.DataAsOfSource != "" {
+			fmt.Fprintf(stderr, "upstream data as of %s (stalest source: %s; per-source dates: assay db status)\n",
+				m.DataAsOf.Format("2006-01-02"), m.DataAsOfSource)
+		} else {
+			fmt.Fprintf(stderr, "upstream data as of %s\n", m.DataAsOf.Format("2006-01-02"))
+		}
 	}
 	return 0
 }

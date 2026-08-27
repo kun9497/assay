@@ -358,3 +358,77 @@ func TestRef_EndsInTheCurrentSchemaVersion(t *testing.T) {
 		t.Errorf("Ref(%q) = %q, want it to end in %q", DefaultRef, ref, want)
 	}
 }
+
+// TestPull_AttributesTheStalestSource holds the D12 attribution added after
+// the 2026-08-27 investigation: "upstream data as of 2023-09-25" was genuine
+// (six dead AL2 extras topics) but READ as "the whole database is three
+// years stale" because the one-liner never said which provider set the
+// floor. The line must name the stalest source and point at `db status` for
+// the rest -- and the name must be the one that actually produced the
+// minimum, not whichever map key happened to iterate first (the fixture's
+// two providers are chosen so getting either wrong is visible).
+func TestPull_AttributesTheStalestSource(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(store.Meta{
+		BuiltAt: testBuiltAt,
+		Providers: map[string]store.Provenance{
+			"osv":    {Source: "https://example.test/osv", DataAsOf: time.Date(2026, 8, 26, 0, 0, 0, 0, time.UTC)},
+			"amazon": {Source: "https://example.test/alas", DataAsOf: time.Date(2023, 9, 25, 22, 0, 0, 0, time.UTC)},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Through the REAL Push, not publishedFrom -- that helper hand-builds
+	// the artifact Meta and would bypass the very computation under test
+	// (which provider set the floor is Push's job to record).
+	srv := httptest.NewServer(registry.New())
+	t.Cleanup(srv.Close)
+	u, err := url.Parse(srv.URL)
+	host := must(t, u, err).Host
+	ref := host + "/assay-db:v" + itoa(store.SchemaVersion)
+	var out, errOut bytes.Buffer
+	if code := Push(context.Background(), path, ref, false, &out, &errOut); code != 0 {
+		t.Fatalf("Push = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+
+	dst := filepath.Join(t.TempDir(), "vulnerability.db")
+	out.Reset()
+	errOut.Reset()
+	if code := Pull(context.Background(), dst, ref, &out, &errOut); code != 0 {
+		t.Fatalf("Pull = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	got := errOut.String()
+	want := "upstream data as of 2023-09-25 (stalest source: amazon; per-source dates: assay db status)"
+	if !strings.Contains(got, want) {
+		t.Errorf("stderr = %q, want it to contain %q", got, want)
+	}
+}
+
+// TestPull_UnattributedArtifactKeepsTheBareLine is the backward-compat half:
+// an artifact published before the source annotation existed (publishedFrom
+// hand-builds exactly that shape) must print the original line, not an
+// attribution with an empty name — "(stalest source: ;" would read as a
+// formatting bug and teach readers to distrust the attribution when present.
+func TestPull_UnattributedArtifactKeepsTheBareLine(t *testing.T) {
+	ref := published(t, store.SchemaVersion)
+	dst := filepath.Join(t.TempDir(), "vulnerability.db")
+
+	var out, errOut bytes.Buffer
+	if code := Pull(context.Background(), dst, ref, &out, &errOut); code != 0 {
+		t.Fatalf("Pull = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	got := errOut.String()
+	if !strings.Contains(got, "upstream data as of 2026-08-03\n") {
+		t.Errorf("stderr = %q, want the bare dated line", got)
+	}
+	if strings.Contains(got, "stalest source") {
+		t.Errorf("stderr = %q, must not attribute when the artifact carries no source", got)
+	}
+}
