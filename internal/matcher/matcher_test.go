@@ -1781,3 +1781,111 @@ func TestMatch_SourceJoinCarriesNoProvidesAnnotation(t *testing.T) {
 		t.Errorf("Evidence.Reason = %q -- a source join must not claim a provides join", f.Evidence.Reason)
 	}
 }
+
+// TestMatch_BellSoftHardenedContainersUsesAPKComparer is the QA-round-5 close
+// for D95's least-exercised wiring: version.For("BellSoft Hardened
+// Containers:*") returns APK{}, but nothing drove Match for a BHC ecosystem,
+// so swapping that registry entry to RPM{} left the whole suite green
+// (Alpaquita was covered end to end; its sibling family never was). apk's
+// `-rN` revision (`1.2.3-r5` below the fix `1.2.3-r6`) orders one way under
+// APK and cannot even parse under RPM as the same relation — a wrong comparer
+// turns this finding into a coverage skip, which is the only thing that
+// distinguishes the two here.
+func TestMatch_BellSoftHardenedContainersUsesAPKComparer(t *testing.T) {
+	const eco = "BellSoft Hardened Containers:25"
+	// The fixed bound and installed version are chosen so APK and RPM give
+	// OPPOSITE verdicts: apk ranks a "_alpha" pre-release BELOW the bare
+	// release (1.0_alpha1 < 1.0, in range -> a finding), while rpm treats
+	// "_" as a separator and ranks the alpha segment ABOVE (1.0_alpha1 > 1.0,
+	// out of range -> no finding). So a wrong comparer type flips the finding
+	// count from 1 to 0 -- the only thing that distinguishes them here.
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		eco + "\x00openssl": {advWithRange("BELL-CVE-2099-70001", eco, "openssl", "0", "1.0", advisory.RangeEcosystem)},
+	}}
+	res, err := New(s).Match(pkgmeta.Target{
+		Distro:   &pkgmeta.Distro{ID: "bellsoft-hardened-containers", VersionID: "25"},
+		Packages: []pkgmeta.Package{pkg("openssl", "1.0_alpha1", eco)},
+	})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	for _, sk := range res.Skipped {
+		if sk.Cause == SkipCoverage {
+			t.Fatalf("openssl skipped for coverage (%q) — version.For(%q) is not APK{}", sk.Reason, eco)
+		}
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1 (3.1.4-r5 is below the fix 3.1.4-r6): %+v", len(res.Findings), res.Findings)
+	}
+}
+
+// TestMatch_ProvidesDedupedAgainstNameWhenSourceDiffers isolates the
+// `provide == p.Name` half of the provides dedup (D95). The existing dedup
+// test's fixtures both let the Source guard absorb the case, so dropping the
+// Name disjunct stayed green. Here Source differs from Name and a provide
+// repeats Name: the Name key must be looked up exactly once, not a second
+// time through provides.
+func TestMatch_ProvidesDedupedAgainstNameWhenSourceDiffers(t *testing.T) {
+	const eco = "Alpaquita:stream"
+	adv := advWithRange("BELL-9101", eco, "liberica21-lite-jdk", "0", "21.0.9_p1-r0", advisory.RangeEcosystem)
+	calls := map[string]int{}
+	s := fakeStore{
+		byKey:       map[string][]advisory.Advisory{eco + "\x00liberica21-lite-jdk": {adv}},
+		lookupCalls: calls,
+	}
+	p := pkg("liberica21-lite-jdk", "21.0.8_p1-r0", eco)
+	p.Source = &pkgmeta.SourcePackage{Name: "liberica21-lite"} // differs from Name
+	p.Provides = []string{"liberica21-lite-jdk"}               // repeats Name
+	res, err := New(s).Match(pkgmeta.Target{Packages: []pkgmeta.Package{p}})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1", len(res.Findings))
+	}
+	if got := calls[eco+"\x00liberica21-lite-jdk"]; got != 1 {
+		t.Errorf("Lookup(%q, liberica21-lite-jdk) called %d times, want 1 — a provide equal to "+
+			"the package's own Name must be deduped even when Source differs (D95)", eco, got)
+	}
+}
+
+// TestMatch_MatchedViaProvidesSurvivesABeatsUpdate holds the beats()-winner
+// branch's MatchedViaProvides assignment (D95). Two DIFFERENT advisory IDs
+// share one CVE, so they group into one finding; the first reaches it by the
+// package's own name (direct), the second, higher-scored one reaches it
+// through a provide and wins via beats(). The winning record was matched via
+// provides, so the finding must say so — deleting that assignment on the
+// beats path leaves the flag reading `false` (direct), which no other test
+// on this path notices.
+func TestMatch_MatchedViaProvidesSurvivesABeatsUpdate(t *testing.T) {
+	const eco = "Alpaquita:stream"
+	// Direct match: lower score (medium), against the installed package's own name.
+	direct := advWithRange("BELL-9200", eco, "liberica-runtime", "0", "1.2.0-r1", advisory.RangeEcosystem)
+	direct.Aliases = []string{"CVE-2099-72000"}
+	direct.Severity = []advisory.Severity{{Type: "CVSS_V3", Score: "CVSS:3.1/AV:L/AC:H/PR:H/UI:R/S:U/C:L/I:N/A:N"}}
+	// Provides match: same CVE, higher score (critical) — wins beats().
+	viaProv := advWithRange("BELL-9201", eco, "openjdk-lts", "0", "1.2.0-r1", advisory.RangeEcosystem)
+	viaProv.Aliases = []string{"CVE-2099-72000"}
+	viaProv.Severity = []advisory.Severity{{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		eco + "\x00liberica-runtime": {direct},
+		eco + "\x00openjdk-lts":      {viaProv},
+	}}
+	p := pkg("liberica-runtime", "1.2.0-r0", eco)
+	p.Provides = []string{"openjdk-lts"}
+	res, err := New(s).Match(pkgmeta.Target{Packages: []pkgmeta.Package{p}})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1 (grouped on the shared CVE): %+v", len(res.Findings), res.Findings)
+	}
+	f := res.Findings[0]
+	if f.Advisory.ID != "BELL-9201" {
+		t.Fatalf("winning advisory = %q, want BELL-9201 (the critical, provides-matched one)", f.Advisory.ID)
+	}
+	if !f.MatchedViaProvides {
+		t.Error("MatchedViaProvides = false after a provides-matched record won via beats() — the flag " +
+			"was not updated on the beats path (D95)")
+	}
+}

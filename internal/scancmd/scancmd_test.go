@@ -2574,3 +2574,115 @@ func TestVerdict_FailOnIncompleteTargetCountsWholePackageSkips(t *testing.T) {
 		t.Errorf("verdict = %d, want 2: a whole-package skip the caller caused must gate", got)
 	}
 }
+
+// TestCatalogFromImage_ApkDBUsrLibWinsOverVarLib is the QA-round-5 close for
+// apkDBPaths' three-way priority. findAPKDB returns the FIRST path present,
+// and the order is lib -> usr/lib -> var/lib, so an image carrying both
+// usr/lib (Wolfi's relocated path) and var/lib (Alpaquita's physical path)
+// must be read from usr/lib. Existing tests supply only lib+usr/lib or
+// var/lib alone; none supplies usr/lib AND var/lib together, so swapping the
+// last two entries stayed green. Different package names per db make the
+// winner observable.
+func TestCatalogFromImage_ApkDBUsrLibWinsOverVarLib(t *testing.T) {
+	const usrLibPkg = "P:from-usrlib\nV:1.0-r0\nA:x86_64\no:from-usrlib\n\n"
+	const varLibPkg = "P:from-varlib\nV:2.0-r0\nA:x86_64\no:from-varlib\n\n"
+	img := &source.Image{Layers: []source.Layer{
+		imageLayer(t, "sha256:twoapk", map[string]string{
+			apkDBPathUsrLib: usrLibPkg,
+			apkDBPathVarLib: varLibPkg,
+		}),
+	}}
+	target, _, err := catalogFromImage("test-image", img)
+	if err != nil {
+		t.Fatalf("catalogFromImage: %v", err)
+	}
+	names := map[string]bool{}
+	for _, p := range target.Packages {
+		names[p.Name] = true
+	}
+	if !names["from-usrlib"] {
+		t.Errorf("usr/lib package not cataloged; findAPKDB read the wrong path. Packages: %+v", target.Packages)
+	}
+	if names["from-varlib"] {
+		t.Errorf("var/lib package was cataloged; usr/lib must win the priority, not var/lib. Packages: %+v", target.Packages)
+	}
+}
+
+// layerWithSymlinks builds one image layer from regular files plus named
+// symlinks — the shape imageLayer's map cannot express — for the
+// QA-round-5 skip-count tests, which need a database marker that is a
+// symlink (counted, never followed) alongside a real one.
+func layerWithSymlinks(t *testing.T, diffID string, files map[string]string, symlinks map[string]string) source.Layer {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for name, body := range files {
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Typeflag: tar.TypeReg, Size: int64(len(body))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, link := range symlinks {
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o777, Typeflag: tar.TypeSymlink, Linkname: link}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw := buf.Bytes()
+	return source.Layer{DiffID: diffID, Open: func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(raw)), nil }}
+}
+
+// TestCatalogFromImage_PacmanSymlinkedDescIsCountedNotSilent holds that a
+// symlinked desc file under the pacman db is counted into the report's
+// skipped total, not dropped (D97, QA round 5). source.FilesNamed counts the
+// symlink; catalogFromImage's `skippedRecords += pacmanLinks` is what plumbs
+// that into stats — and nothing exercised it, so dropping the line stayed
+// green. A real desc file keeps the scan cataloging normally while the
+// symlinked sibling is the thing counted.
+func TestCatalogFromImage_PacmanSymlinkedDescIsCountedNotSilent(t *testing.T) {
+	img := &source.Image{Layers: []source.Layer{layerWithSymlinks(t, "sha256:pac",
+		map[string]string{
+			"var/lib/pacman/local/real-1.0-1/desc": "%NAME%\nreal\n\n%VERSION%\n1.0-1\n\n%ARCH%\nx86_64\n\n",
+		},
+		map[string]string{
+			"var/lib/pacman/local/linked-2.0-1/desc": "../real-1.0-1/desc",
+		},
+	)}}
+	_, stats, err := catalogFromImage("test-image", img)
+	if err != nil {
+		t.Fatalf("catalogFromImage: %v", err)
+	}
+	if stats.SkippedNoVersion < 1 {
+		t.Errorf("SkippedNoVersion = %d, want >= 1 — the symlinked desc file must be counted, not silently dropped", stats.SkippedNoVersion)
+	}
+}
+
+// TestCatalogFromImage_BitnamiSymlinkedMarkerIsCountedNotSilent is the
+// Bitnami half of the same skip-count plumbing (D99, QA round 5): a
+// symlinked .spdx-*.spdx marker is counted by source.FilesMatching, and
+// catalogFromImage's `skippedRecords += bitnamiSkipped` must carry that into
+// the report. A real marker keeps the app cataloging; the symlinked sibling
+// is the counted one. Dropping the plumbing line stayed green until here.
+func TestCatalogFromImage_BitnamiSymlinkedMarkerIsCountedNotSilent(t *testing.T) {
+	img := &source.Image{Layers: []source.Layer{layerWithSymlinks(t, "sha256:bit",
+		map[string]string{
+			osReleasePath:              osReleasePhoton5,
+			"var/lib/rpm/rpmdb.sqlite": string(fixtureBytes(t, rpmFixture)),
+			"opt/bitnami/postgresql/.spdx-postgresql.spdx": bitnamiSPDXDoc("postgresql", "18.6.0-3", "photon-5"),
+		},
+		map[string]string{
+			"opt/bitnami/common/.spdx-wait-for-port.spdx": "../postgresql/.spdx-postgresql.spdx",
+		},
+	)}}
+	_, stats, err := catalogFromImage("test-image", img)
+	if err != nil {
+		t.Fatalf("catalogFromImage: %v", err)
+	}
+	if stats.SkippedNoVersion < 1 {
+		t.Errorf("SkippedNoVersion = %d, want >= 1 — the symlinked Bitnami marker must be counted, not silently dropped", stats.SkippedNoVersion)
+	}
+}

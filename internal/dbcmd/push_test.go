@@ -271,6 +271,58 @@ func TestPush_DataAsOfIsTheOldestAcrossProvidersAndRatings(t *testing.T) {
 		t.Errorf("DataAsOf = %v, want the stale RATINGS provenance %v, not the fresher Providers one",
 			m.DataAsOf, staleRatings)
 	}
+	// QA round 5: the floor's SOURCE must be attributed too, and correctly
+	// when a Ratings entry (not a Provider) set it. Blanking the name on the
+	// Ratings loop left this green because no test read DataAsOfSource on a
+	// ratings-driven floor.
+	if m.DataAsOfSource != "nvd" {
+		t.Errorf("DataAsOfSource = %q, want nvd -- the ratings entry that set the floor", m.DataAsOfSource)
+	}
+}
+
+// TestPush_DataAsOfSourceIsDeterministicOnATie holds sortedKeys' own stated
+// purpose (QA round 5): when two providers carry the IDENTICAL oldest
+// DataAsOf, the attributed source must be the lexicographically first name
+// every build, so byte-identical inputs never publish differing manifests.
+// Reverting to direct map iteration passed every other test because no
+// fixture had a tie; this one does, and asserts the stable winner.
+func TestPush_DataAsOfSourceIsDeterministicOnATie(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tie := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	if err := w.SetMeta(store.Meta{
+		BuiltAt: testBuiltAt,
+		Providers: map[string]store.Provenance{
+			"zebra":  {DataAsOf: tie},
+			"amazon": {DataAsOf: tie},
+			"osv":    {DataAsOf: time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+
+	srv := httptest.NewServer(registry.New())
+	defer srv.Close()
+	u, err := url.Parse(srv.URL)
+	ref := must(t, u, err).Host + "/assay-db:v6"
+	var out, errOut bytes.Buffer
+	if code := Push(context.Background(), path, ref, false, &out, &errOut); code != 0 {
+		t.Fatalf("Push = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	parsedRef, refErr := name.ParseReference(ref)
+	img, err := remote.Image(must(t, parsedRef, refErr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, _ := dbartifact.MetaOf(img)
+	if m.DataAsOfSource != "amazon" {
+		t.Errorf("DataAsOfSource = %q, want amazon (lexicographically first of the tied sources) -- "+
+			"a tie must resolve deterministically, not by map-iteration order", m.DataAsOfSource)
+	}
 }
 
 // Pushing a database that is not there is a 2 that says so, not a panic

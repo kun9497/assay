@@ -451,6 +451,14 @@ func TestFamilyMatches_IsGeneralNotAName(t *testing.T) {
 		{"Chainguard", "Wolfi", false},
 		{"Chainguard", "Chainguard", true},
 		{"Wolfi", "Wolfi", true},
+		// D95 (QA round 5): fetching "Alpaquita" also covers a BellSoft
+		// Hardened Containers entry in the same record, in BOTH the bare and
+		// the release-qualified spellings. The bare form is unreachable in
+		// today's archive (0 occurrences measured) but is a live branch, and
+		// dropping its disjunct stayed green until this row.
+		{"BellSoft Hardened Containers", "Alpaquita", true},
+		{"BellSoft Hardened Containers:25", "Alpaquita", true},
+		{"Alpaquita", "Alpaquita", true},
 		// A family must not swallow a differently named one that starts the
 		// same way. Without the colon in the prefix test, "Debian" would match
 		// a hypothetical "DebianExtra".

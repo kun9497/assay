@@ -433,3 +433,23 @@ func TestSARIF_ProvidesMatchIsNamedNotAsSourcePackage(t *testing.T) {
 		t.Errorf("message = %q, must not claim a D8 source-package indirection for a D95 provides join", msg)
 	}
 }
+
+// TestSARIF_ProvidesMatchIsNamedInHelpTextToo is the QA-round-5 close for the
+// D95 distinction in the rule's help text (the message form is held by
+// TestSARIF_ProvidesMatchIsNamedNotAsSourcePackage above; the help block is a
+// second, independent if/else that no test read). Collapsing the help block
+// to always say "source package" left the suite green.
+func TestSARIF_ProvidesMatchIsNamedInHelpTextToo(t *testing.T) {
+	f := findingFixture("BELL-CVE-2026-8", "liberica26-lite", severity.High, 7.5, "", advisory.FixStateNotFixed)
+	f.MatchedName = "openjdk26-lite"
+	f.MatchedViaProvides = true
+	run := run0(t, sarifOf(t, matcher.Result{Findings: []matcher.Finding{f}},
+		cyclonedx.Stats{Components: 1, Cataloged: 1}))
+	help := rulesOf(t, run)[0]["help"].(map[string]any)["text"].(string)
+	if !strings.Contains(help, "apk provides") {
+		t.Errorf("help text = %q, want it to say \"apk provides\" (D95)", help)
+	}
+	if strings.Contains(help, "Matched through source package") {
+		t.Errorf("help text = %q, must not claim a D8 source join for a provides match", help)
+	}
+}

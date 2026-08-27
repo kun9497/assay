@@ -605,3 +605,29 @@ func TestRun_TableColumnsKeepDirection(t *testing.T) {
 		t.Errorf("row = %v, want %v", got, want)
 	}
 }
+
+// TestRun_AssayScanExitsUnexpectedCode_ExitError is the QA-round-5 close for
+// runAssay's "unexpected code" guard (D93). Exit 0, 1, and 2 are all handled
+// by other tests; a code OUTSIDE {0,1,2} — a scanner that died on a signal
+// (137) or returned a wrapper's own error code — must be treated as
+// untrustworthy, not silently trusted as a scan whose result can be read.
+// Deleting the guard entirely left the suite green.
+func TestRun_AssayScanExitsUnexpectedCode_ExitError(t *testing.T) {
+	target := Target{Name: "assay-137", Ref: "ref-assay-137"}
+	targetsPath := writeTargetsFile(t, []Target{target})
+
+	exec := newFakeExec(t,
+		map[string]stub{"ref-assay-137": {out: nil, code: 137}},
+		map[string]stub{"ref-assay-137": {out: grypeDoc(nil), code: 0}},
+	)
+
+	var stdout, stderr bytes.Buffer
+	got := run([]string{"-targets", targetsPath, "-assay", "a", "-grype", "g", "-capture", t.TempDir()}, &stdout, &stderr, exec)
+
+	if got != exitError {
+		t.Fatalf("exit = %d, want %d (stderr=%q)", got, exitError, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "target=assay-137") || !strings.Contains(stderr.String(), "unexpected code 137") {
+		t.Errorf("stderr = %q, want it to name the target and the unexpected exit code", stderr.String())
+	}
+}
