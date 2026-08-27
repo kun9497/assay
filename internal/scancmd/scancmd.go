@@ -216,6 +216,17 @@ const (
 	// is a direct child of local/, not one level deeper, and is not named
 	// "desc" either.
 	pacmanLocalDir = "var/lib/pacman/local"
+	// cleanStartMarkerPackage is D101's marker probe: CleanStart (apk-based
+	// hardened containers) ships NO /etc/os-release at all — verified
+	// against 11/11 real pulled images -- so its presence in the apk
+	// installed database (the same file every Alpine-family image is
+	// already read from) is the only signal available to route a
+	// no-os-release image here. Measured present, by this exact name, in
+	// 11/11 images (busybox, kafka, mariadb, mysql, nginx, node, postgres,
+	// python, redis, ruby, rust). Narrow on purpose: the probe below matches
+	// this literal name only, never a "clnstrt-*" prefix, so a plain Alpine
+	// image that happens to ship no such package is never misrouted.
+	cleanStartMarkerPackage = "clnstrt-baselayout"
 	// bitnamiDir is where Bitnami installs every application it packages
 	// (D99). Its own markers are discovered rather than asked for by exact
 	// name (source.FilesMatching, below) for the same reason
@@ -894,6 +905,28 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 		// so the matcher reports them as skipped with a reason. Guessing a
 		// substitute key here would turn "we cannot check this" into "this is
 		// clean" — exactly the false negative D11 exists to prevent.
+	} else if hasAPK {
+		// D101. No /etc/os-release at all is CleanStart's ordinary shape, not
+		// an error — but ONLY when there is truly no os-release entry: this
+		// branch is `else if`, reached only when the `if` above found none,
+		// so an image that legitimately has a real os-release is always
+		// routed by it and never by this marker, even if it happened to also
+		// carry the marker package. That precedence is deliberate: CleanStart
+		// itself never ships both, so this is a "which wins" decision for a
+		// shape that should not occur, resolved in favor of never letting a
+		// heuristic override a real, positive statement the image made about
+		// itself.
+		isCleanStart, err := apkdb.HasPackage(bytes.NewReader(apkFound.Data), cleanStartMarkerPackage)
+		if err != nil {
+			return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("probe %s for CleanStart marker: %w", apkPath, err)
+		}
+		if isCleanStart {
+			d := pkgmeta.Distro{ID: "cleanstart"}
+			target.Distro = &d
+			if eco, err := d.Ecosystem(); err == nil {
+				ecosystem = eco
+			}
+		}
 	}
 
 	// Dispatched on which database the image actually carries, not on what

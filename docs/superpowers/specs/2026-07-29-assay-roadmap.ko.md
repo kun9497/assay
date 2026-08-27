@@ -3728,6 +3728,52 @@ provider의 기존 관례입니다. 독립 리뷰 mutation 3개 중 3개가 red�
 
 ---
 
+### D101 — CleanStart, 그리고 읽을 os-release가 없는 배포판
+
+**결정.** CleanStart(apk 기반 강화 컨테이너)는 끝에서 끝까지 스캔됩니다 — assay가
+지원하는 배포판 중 `/etc/os-release`를 아예 싣지 않는 첫 배포판입니다. 신원은 apk
+설치 데이터베이스의 마커 패키지 `clnstrt-baselayout`에서 옵니다(정확히 그
+이름으로 실전 이미지 11/11에서 존재함을 측정함): 이미지에 os-release가 없으면
+`scancmd`가 새 `apkdb.HasPackage`를 통해 apk db에서 마커를 probe하고, 적중하면
+`Distro{ID:"cleanstart"}`를 세팅해서 보통의 `Distro.Ecosystem()` 경로가 맨,
+릴리스 없는 "CleanStart" 키를 풀도록 합니다(D88/D92 rolling 템플릿 — OSV 피드는
+1988/1988이 맨 형태이고 버전 축이 없습니다). OSV 절반, apk comparer, D95의
+provides 다리는 모두 수정 없이 재사용됩니다.
+
+**이 이음매는 os-release를 여전히 최우선으로 둡니다.** 마커 probe는 os-release
+항목이 없을 때만 도달하는 `else if hasAPK` 분기입니다 — 진짜 os-release는 항상
+이깁니다, 그래서 이 휴리스틱은 이미지가 자기 자신에 대해 한 긍정적인 진술을
+결코 뒤집을 수 없습니다(CleanStart는 어느 쪽도 발행하지 않지만, 그래도
+우선순위는 정해져 있고 테스트됩니다). probe는 어떤 `clnstrt*` 접두사가 아니라
+`clnstrt-baselayout`을 정확히 매칭합니다, 그래서 그런 패키지가 없는 평범한
+Alpine 이미지는 결코 잘못 라우팅되지 않습니다 — 맨 apk db는 CleanStart가
+'아니라는' 적대적 테스트가 그것을 붙들고, 접두사 매칭으로 바꾸면 잡히는
+mutation입니다. `Distro.Ecosystem()`은 여전히 ecosystem 키 진실의 단일
+출처입니다; probe는 ID만 제공합니다.
+
+**측정.** GCS 버킷은 오늘 레코드 1,988개를 냅니다(실전 GitHub 트리는 더 크지만,
+`db build`는 버킷을 받습니다 — 기록해 두고, 쫓지는 않습니다), upstream에서 CVE
+90.3% / GHSA 전용 9.66%입니다(GHSA id는 소문자입니다 — 측정 함정이지, 코드에
+영향은 없습니다). provides 다리는 진짜로 발동합니다: `postgresql18`의 apk
+패키지는 `p:postgresql`을 선언하는데, 이 이름은 advisory 11건이 그것을 대고
+쓰여 있고 설치된 어떤 이름도 D8 origin도 담지 않는 이름입니다 — D95의 apk 범용
+다리가 CleanStart 전용 matcher 코드 없이 그것을 잡았습니다. 실전 이미지
+3개(postgres, nginx, kafka)에 대한 E2E: 마커 감지됨, 모든 패키지 평가됨,
+not-evaluated 0건, finding 0건(현재 이미지는 모든 fix를 지나 패치되어
+있습니다 — 발췌 확인함, 구멍이 아니라 진짜 clean입니다).
+
+**이 차등은 역방향 점검입니다.** cleanstart/postgres가 주간 타깃(23개)에
+합류했습니다: assay 0 / grype 55 / agree 0 — 하지만 grype 튜플 55개 전부가
+`nvd:cpe` fallback 매치입니다(grype는 배포판을 `busybox`로 오인하고
+CPE/NVD에서 답을 내는데, 이는 assay가 의도적으로 갖지 않은 오탐 부류입니다).
+assay의 0이 배포판을 올바르게 인지한 답입니다. 여기서 중요한 floor는
+`notEvaluated == 0`입니다: 마커 감지를 깨뜨리는 퇴보가 있으면 apk 패키지가
+키 없이 카탈로그되고 not-evaluated로 드러나 그것을 걸 것입니다. 독립
+mutation 3개 중 3개가 red입니다(접두사 마커 매치, if-not-else-if 우선순위,
+파편화된 ecosystem 키).
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

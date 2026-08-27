@@ -610,6 +610,31 @@ func (d Distro) Ecosystem() (string, error) {
 		// rolling stream for as long as this project has looked, so there is
 		// nothing a second value would need to distinguish.
 		return "Arch:rolling", nil
+	case "cleanstart":
+		// D101. CleanStart (apk-based hardened containers) ships NO
+		// /etc/os-release at all — verified against 11/11 real pulled images
+		// (busybox, kafka, mariadb, mysql, nginx, node, postgres, python,
+		// redis, ruby, rust), every one reporting zero bytes at that path.
+		// Distro.ID here is therefore never set by osrelease.Parse the way
+		// every other case in this switch is: scancmd's own marker probe
+		// (the apk installed-db package "clnstrt-baselayout", present 11/11)
+		// is what sets it to the literal "cleanstart" before Ecosystem() is
+		// ever called, only when no real os-release was found at all — see
+		// that probe's own comment for why a real os-release always wins.
+		//
+		// The key is the bare, release-less "CleanStart" sentinel, the same
+		// shape as Wolfi/Chainguard/MinimOS/Echo/Bitnami (D88/D92/D99):
+		// measured against the live OSV archive 2026-08-27 (the GCS bucket
+		// still serves the same 1,988-record snapshot Last-Modified
+		// 2026-08-19 that a five-times-larger live upstream git tree has
+		// since outgrown — this build ingests whatever that bucket serves,
+		// so 1,988 is the number that matters here), every one of the
+		// archive's affected entries carries the bare "CleanStart" key, 0
+		// release-qualified occurrences — apk-repo "v3.20" and VERSION_ID
+		// are real facts about a CleanStart image but neither is a release
+		// axis OSV keys advisories on, so VersionID is not consulted at all
+		// (D6 satisfied vacuously, not violated).
+		return "CleanStart", nil
 	case "hummingbird":
 		// D98. Red Hat's Project Hummingbird (a minimal hardened container
 		// line, April 2026) ingests from the SAME CSAF VEX feed as mainline

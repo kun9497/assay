@@ -450,7 +450,11 @@ func comparerName(ecosystem string) string {
 	// these cases, so --explain printed "comparer: unknown" for two
 	// ecosystems version.For orders perfectly well — the drift this
 	// function's own doc comment warns about, caught by D92's review.
-	case "Wolfi", "Chainguard", "MinimOS":
+	// D101: CleanStart is release-less too, and apk-based, so it joins the
+	// same case as Wolfi/Chainguard/MinimOS above rather than getting its
+	// own -- for the identical drift reason every case above this comment
+	// warns about.
+	case "Wolfi", "Chainguard", "MinimOS", "CleanStart":
 		return "apk"
 	case "Echo":
 		return "deb"

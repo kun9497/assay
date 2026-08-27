@@ -3892,6 +3892,45 @@ standing convention. Independent review mutations 3/3 red.
 
 ---
 
+### D101 — CleanStart, and a distro with no os-release to read
+
+**Decision.** CleanStart (apk-based hardened containers) scans end to end — the first distro
+assay supports that ships NO `/etc/os-release` at all. Identity comes from a marker package
+in the apk installed database, `clnstrt-baselayout` (measured present by that exact name in
+11/11 real images): when the image carries no os-release, `scancmd` probes the apk db for
+the marker via a new `apkdb.HasPackage`, and on a hit sets `Distro{ID:"cleanstart"}` so the
+ordinary `Distro.Ecosystem()` path resolves the bare, release-less "CleanStart" key
+(D88/D92 rolling template — the OSV feed is 1988/1988 bare, no version axis). The OSV half,
+apk comparer, and D95 provides bridge are all reused unchanged.
+
+**The seam keeps os-release authoritative.** The marker probe is an `else if hasAPK` branch
+reached ONLY when no os-release entry exists — a real os-release always wins, so the
+heuristic can never override a positive statement an image made about itself (CleanStart
+ships neither-both, but the precedence is decided and tested regardless). The probe matches
+`clnstrt-baselayout` exactly, not any `clnstrt*` prefix, so a plain Alpine image with no
+such package is never misrouted — the adversarial test that a bare apk db is NOT CleanStart
+holds it, and prefix-matching it is a caught mutation. `Distro.Ecosystem()` stays the single
+source of ecosystem-key truth; the probe only supplies an ID.
+
+**Measured.** The GCS bucket serves 1,988 records today (the live GitHub tree is larger, but
+`db build` gets the bucket — recorded, not chased), 90.3% CVE / 9.66% GHSA-only in upstream
+(the GHSA ids are lowercase — a measurement trap, no code impact). The provides bridge fires
+for real: `postgresql18`'s apk package declares `p:postgresql`, the name 11 advisories are
+written against and that no installed name or D8 origin carries — D95's apk-generic bridge
+caught it with zero CleanStart-specific matcher code. E2E on three real images (postgres,
+nginx, kafka): marker detected, every package evaluated, 0 not-evaluated, 0 findings (the
+current images are patched past every fix — spot-checked, a genuine clean, not a gap).
+
+**The differential is a reverse check.** cleanstart/postgres joined the weekly targets (23):
+assay 0 / grype 55 / agree 0 — but all 55 grype tuples are `nvd:cpe` fallback matches
+(grype misidentifies the distro as `busybox` and answers from CPE/NVD, the FP class assay
+deliberately lacks). assay's 0 is the correct distro-aware answer. The floor that matters is
+`notEvaluated == 0`: a regression breaking marker detection would catalog the apk packages
+unkeyed and they would surface as not-evaluated, tripping it. Independent mutations 3/3 red
+(prefix marker match, if-not-else-if precedence, fragmented ecosystem key).
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

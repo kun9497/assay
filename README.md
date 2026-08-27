@@ -657,6 +657,10 @@ exited 0 while 24 findings went unmentioned.
 - [x] AL2023 NVIDIA and livepatch advisories (D100) — two fixed repos on the chain the
       provider already parses (the deferral's DNF-module premise was wrong); +592
       advisories, +58 net-new CVEs fully disjoint from every other feed
+- [x] CleanStart (D101) — the first distro with no /etc/os-release: identity comes from
+      the `clnstrt-baselayout` marker package in the apk db (exact name, os-release still
+      wins when present), bare rolling key; the differential is a reverse check on grype's
+      CPE fallback
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a

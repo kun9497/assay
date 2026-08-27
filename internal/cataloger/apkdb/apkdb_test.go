@@ -1,6 +1,7 @@
 package apkdb
 
 import (
+	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -264,3 +265,70 @@ func TestParse_ProvidesKeepsUnprefixedNonPackageShapedToken(t *testing.T) {
 		t.Errorf("Provides = %v, want %v", pkgs[0].Provides, want)
 	}
 }
+
+// TestHasPackage_Found is D101's marker-probe direct test: the caller-first
+// proof lives in internal/scancmd's TestCatalogFromImage_
+// CleanStartMarkerRoutesEcosystem, which drives HasPackage through
+// catalogFromImage; this covers the branch that caller reaches only on the
+// happy path -- an exact name match anywhere in a multi-record db.
+func TestHasPackage_Found(t *testing.T) {
+	const doc = "P:busybox\nV:1.36.1-r15\no:busybox\n\n" +
+		"P:clnstrt-baselayout\nV:1.0-r0\no:clnstrt-baselayout\n\n"
+	got, err := HasPackage(strings.NewReader(doc), "clnstrt-baselayout")
+	if err != nil {
+		t.Fatalf("HasPackage: %v", err)
+	}
+	if !got {
+		t.Error("HasPackage = false, want true: the marker record is present")
+	}
+}
+
+// TestHasPackage_NotFound is the other half of the branch above: an
+// ordinary Alpine-shaped db with no marker package must answer false, not
+// error -- absence is the overwhelmingly common, non-error case.
+func TestHasPackage_NotFound(t *testing.T) {
+	const plainAlpineRecord = "P:busybox-binsh\nV:1.36.1-r15\no:busybox\n\n"
+	got, err := HasPackage(strings.NewReader(plainAlpineRecord), "clnstrt-baselayout")
+	if err != nil {
+		t.Fatalf("HasPackage: %v", err)
+	}
+	if got {
+		t.Error("HasPackage = true, want false: a plain Alpine record carries no clnstrt-baselayout record")
+	}
+}
+
+// TestHasPackage_ExactNameOnly guards the "narrow, never a prefix" rule the
+// scancmd wiring's own doc comment states: a package whose name merely
+// STARTS WITH the marker (clnstrt-baselayout-data, a real sibling package
+// measured on every pulled CleanStart image) must not satisfy the probe by
+// itself -- only an exact match may.
+func TestHasPackage_ExactNameOnly(t *testing.T) {
+	const doc = "P:clnstrt-baselayout-data\nV:1.0-r0\no:clnstrt-baselayout-data\n\n"
+	got, err := HasPackage(strings.NewReader(doc), "clnstrt-baselayout")
+	if err != nil {
+		t.Fatalf("HasPackage: %v", err)
+	}
+	if got {
+		t.Error("HasPackage = true, want false: clnstrt-baselayout-data must not satisfy an exact match on clnstrt-baselayout")
+	}
+}
+
+// TestHasPackage_PropagatesParseError proves HasPackage does not swallow a
+// genuine read error into a false "not found" answer -- scancmd's own
+// wiring must fail the whole scan on this, not silently miss CleanStart.
+func TestHasPackage_PropagatesParseError(t *testing.T) {
+	_, err := HasPackage(errReader{}, "clnstrt-baselayout")
+	if err == nil {
+		t.Fatal("HasPackage returned no error for a reader that always fails")
+	}
+}
+
+// errReader is an io.Reader whose Read always fails, for
+// TestHasPackage_PropagatesParseError.
+type errReader struct{}
+
+func (errReader) Read(p []byte) (int, error) {
+	return 0, errAlwaysFails
+}
+
+var errAlwaysFails = fmt.Errorf("simulated read failure")

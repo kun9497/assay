@@ -174,5 +174,13 @@
     "minAgree": 412,
     "minFindings": 422,
     "maxFindings": 994
+  },
+  {
+    "name": "cleanstart-postgres",
+    "tag": "cleanstart/postgres:latest",
+    "ref": "docker.io/cleanstart/postgres@sha256:579b4bbd12020eb8a1121f6387ac0e338c8bd695f90895dc1798631b6bd59129",
+    "minAgree": 0,
+    "minFindings": 0,
+    "maxFindings": 25
   }
 ]

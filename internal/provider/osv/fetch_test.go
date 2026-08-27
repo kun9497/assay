@@ -650,6 +650,91 @@ func TestFetch_BitnamiRecordEndToEnd(t *testing.T) {
 	}
 }
 
+// TestEcosystems_ContainsCleanStart is D101's presence guard, the same shape
+// as TestEcosystems_ContainsBitnami above: CleanStart is not sharing an
+// archive with any sibling family the way Chainguard/Wolfi and
+// Alpaquita/BellSoft Hardened Containers do, so it is fetched directly
+// under its own name.
+func TestEcosystems_ContainsCleanStart(t *testing.T) {
+	if !slices.Contains(Ecosystems, "CleanStart") {
+		t.Error(`Ecosystems does not contain "CleanStart"`)
+	}
+}
+
+// TestFetch_CleanStartRecordEndToEnd is D101's own end-to-end fetch proof,
+// the same shape TestFetch_BitnamiRecordEndToEnd pins for Bitnami: a
+// synthetic record shaped like the real CLEANSTART-2026-AI42483 (upstream
+// carrying a CVE, per D3 -- 90.34% of the live archive has one) must be
+// emitted with its "CleanStart" ecosystem entry intact and that key present
+// in Provenance.Ecosystems, so a CleanStart image scan can find coverage.
+func TestFetch_CleanStartRecordEndToEnd(t *testing.T) {
+	body := zipWith(t, map[string]string{
+		"CLEANSTART-2026-AI42483.json": `{"id":"CLEANSTART-2026-AI42483",
+			"upstream":["CVE-2023-5870"],
+			"affected":[
+				{"package":{"name":"postgresql","ecosystem":"CleanStart"},
+				 "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"17.6-r0"}]}]}
+			]}`,
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/CleanStart/all.zip" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	p := New([]string{"CleanStart"}, srv.URL)
+	var got []advisory.Advisory
+	prov, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
+		got = append(got, a)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "CLEANSTART-2026-AI42483" {
+		t.Fatalf("Fetch emitted %v, want exactly the one CleanStart record", got)
+	}
+	if len(got[0].Affected) != 1 || got[0].Affected[0].Ecosystem != "CleanStart" {
+		t.Errorf("Affected = %+v, want one entry keyed \"CleanStart\"", got[0].Affected)
+	}
+	if !slices.Contains(prov.Ecosystems, "CleanStart") {
+		t.Errorf("Provenance.Ecosystems = %v, want it to include CleanStart", prov.Ecosystems)
+	}
+}
+
+// TestFetch_CleanStartArchiveYieldingNoRecordsFails is D101's own version of
+// the zero-record guard every other distro archive above gets: an archive
+// containing only a record for some OTHER ecosystem must fail the whole
+// fetch rather than silently build a database with no CleanStart coverage
+// at all (Ecosystems' own comment: a database that silently has none turns
+// every later CleanStart scan into a clean report at exit 0).
+func TestFetch_CleanStartArchiveYieldingNoRecordsFails(t *testing.T) {
+	body := zipWith(t, map[string]string{
+		"OTHER-1.json": `{"id":"OTHER-1",
+			"upstream":["CVE-2023-0001"],
+			"affected":[
+				{"package":{"name":"foo","ecosystem":"SomeOtherEcosystem"},
+				 "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1.0"}]}]}
+			]}`,
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	p := New([]string{"CleanStart"}, srv.URL)
+	_, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil })
+	if err == nil {
+		t.Fatal("Fetch succeeded with zero CleanStart:* records; want an error")
+	}
+	if !strings.Contains(err.Error(), "CleanStart") {
+		t.Errorf("error %q does not name CleanStart", err)
+	}
+}
+
 // TestFetch_ChainguardCoversWolfiToo is the end-to-end shape D88 rests on,
 // built from the real live-both-ecosystems record measured 2026-08-22
 // (CGA-224q-ccj5-2p53, trimmed to two package streams): one CGA record whose
