@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/pkgmeta"
+	"github.com/kun9497/assay/internal/version"
 )
 
 // Every product ID, CPE and package name below was taken from the live
@@ -70,6 +72,19 @@ func TestEcosystemFor(t *testing.T) {
 		{"cpe:/o:redhat:enterprise_linux:9:beta", "", "a trailing component that is not a :: repository"},
 		{"cpe:/o:redhat:enterprise_linux:9-preview", "", "a suffix on the version"},
 		{"x cpe:/o:redhat:enterprise_linux:9", "", "a CPE with something before it is not a CPE"},
+
+		// D98: Project Hummingbird. The one shape measured live on the
+		// 2026-08-27 archive (125 confirmed documents).
+		{"cpe:/a:redhat:hummingbird:1", "Hummingbird", "the measured live shape"},
+		// The trailing digit is matched, not pinned to "1" -- see
+		// hummingbirdCPE's own doc comment for why a future CPE version bump
+		// must still resolve the same release-less key.
+		{"cpe:/a:redhat:hummingbird:2", "Hummingbird", "a hypothetical future CPE version"},
+		// The anchors matter here too, the same way they matter for
+		// mainlineCPE above: a name that merely shares the prefix is a
+		// different product.
+		{"cpe:/a:redhat:hummingbirdx:1", "", "shares a prefix but is not Hummingbird"},
+		{"cpe:/a:redhat:hummingbird:1:beta", "", "a trailing component"},
 	} {
 		got, ok := ecosystemFor(tc.cpe)
 		if got != tc.want || ok != (tc.want != "") {
@@ -1023,9 +1038,20 @@ func TestConvert_MalformedModuleContextIsDroppedAndCounted(t *testing.T) {
 // row's output.
 func TestResolveProduct(t *testing.T) {
 	cpe := map[string]string{
-		"BaseOS-9":    "cpe:/o:redhat:enterprise_linux:9::baseos",
-		"AppStream-8": "cpe:/a:redhat:enterprise_linux:8::appstream",
-		"EUS-9.4":     "cpe:/a:redhat:rhel_eus:9.4::appstream",
+		"BaseOS-9":                "cpe:/o:redhat:enterprise_linux:9::baseos",
+		"AppStream-8":             "cpe:/a:redhat:enterprise_linux:8::appstream",
+		"EUS-9.4":                 "cpe:/a:redhat:rhel_eus:9.4::appstream",
+		"Red Hat Hardened Images": "cpe:/a:redhat:hummingbird:1",
+	}
+	// D98: the real purls TestConvert_Hummingbird* draws from, keyed the way
+	// collectHummingbirdPackages would populate them.
+	hbPkgs := map[string]packageInfo{
+		"freetype-main@x86_64": {name: "freetype", version: "2.14.3-1.2.hum1"},
+		"nodejs25.src":         {name: "nodejs25", version: ""}, // D47's bare-name convention
+		// "hi/opentofu" is deliberately ABSENT: a real "pkg:oci/opentofu?..."
+		// purl is never inserted here at all (hummingbirdPackageOf refuses
+		// it), so its absence from this map is what a real document
+		// produces, not a gap in the fixture.
 	}
 	for _, tc := range []struct {
 		name       string
@@ -1058,9 +1084,19 @@ func TestResolveProduct(t *testing.T) {
 			"", "", "", "", skipWholeProduct},
 		{"no CPE for platform", "Undeclared-9:openssh-0:1-1.el9.x86_64",
 			"", "", "", "", skipNoCPE},
+
+		// D98: Project Hummingbird. The component is a stream label, not an
+		// NEVRA, so the name and version come from hbPkgs (the purl-derived
+		// map), never from splitContext/splitNEVRA.
+		{"hummingbird fixed, versioned purl", "Red Hat Hardened Images:freetype-main@x86_64",
+			"Hummingbird", "freetype", "", "2.14.3-1.2.hum1", skipNone},
+		{"hummingbird known_affected, bare purl (D47)", "Red Hat Hardened Images:nodejs25.src",
+			"Hummingbird", "nodejs25", "", "", skipNone},
+		{"hummingbird component with no matching purl leaf", "Red Hat Hardened Images:hi/opentofu",
+			"", "", "", "", skipNoPurl},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			k, evr, why := resolveProduct(tc.id, cpe)
+			k, evr, why := resolveProduct(tc.id, cpe, hbPkgs)
 			if why != tc.wantWhy {
 				t.Fatalf("resolveProduct(%q) skipReason = %v, want %v", tc.id, why, tc.wantWhy)
 			}
@@ -1072,5 +1108,366 @@ func TestResolveProduct(t *testing.T) {
 					tc.id, k, evr, tc.wantEco, tc.wantPkg, tc.wantStream, tc.wantEVR)
 			}
 		})
+	}
+}
+
+// buildHummingbirdDoc extends buildDoc with product-tree leaves carrying
+// purls (D98): the shape a Hummingbird package's real name and version live
+// in, since its product id is a stream label rather than an NEVRA. purls
+// maps a product-tree leaf's product id to its purl string; cpes and the
+// fixed/known_affected/remediations arguments are otherwise identical to
+// buildDoc's and buildDocWithRemediations', so one document can carry both
+// mainline RHEL and Hummingbird content side by side (both are just
+// "platform:component" strings -- only resolveProduct's own CPE-driven
+// branch tells them apart).
+func buildHummingbirdDoc(t *testing.T, cve string, cpes, purls map[string]string,
+	fixed, affected []string, remediations []map[string]any) *document {
+	t.Helper()
+	type prod struct {
+		ProductID string `json:"product_id"`
+		Helper    struct {
+			CPE  string `json:"cpe"`
+			Purl string `json:"purl"`
+		} `json:"product_identification_helper"`
+	}
+	var kids []map[string]any
+	for id, c := range cpes {
+		p := prod{ProductID: id}
+		p.Helper.CPE = c
+		kids = append(kids, map[string]any{"category": "product_name", "name": id, "product": p})
+	}
+	for id, purl := range purls {
+		p := prod{ProductID: id}
+		p.Helper.Purl = purl
+		kids = append(kids, map[string]any{"category": "product_version", "name": id, "product": p})
+	}
+	raw := map[string]any{
+		"document": map[string]any{
+			"title":    "a test advisory",
+			"tracking": map[string]any{"id": cve},
+		},
+		"product_tree": map[string]any{
+			"branches": []any{map[string]any{
+				"category": "vendor", "name": "Red Hat",
+				"branches": []any{map[string]any{
+					"category": "product_family", "name": "fam", "branches": kids,
+				}},
+			}},
+		},
+		"vulnerabilities": []any{map[string]any{
+			"cve": cve,
+			"product_status": map[string]any{
+				"fixed":          fixed,
+				"known_affected": affected,
+			},
+			"remediations": remediations,
+			"scores": []any{map[string]any{
+				"cvss_v3": map[string]any{"vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H"},
+			}},
+		}},
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d document
+	if err := json.Unmarshal(b, &d); err != nil {
+		t.Fatal(err)
+	}
+	return &d
+}
+
+// TestConvert_HummingbirdFixed is D98's caller-first proof: convert() itself
+// -- not resolveProduct or hummingbirdPackageOf in isolation -- must read a
+// Hummingbird purl and produce a Hummingbird-ecosystem Affected entry.
+// Deleting the eco == hummingbirdEcosystem branch this test drives (back to
+// always running splitContext/splitNEVRA) turns this red: "freetype-main"
+// has no epoch colon for splitNEVRA to find, so the whole component would be
+// read as a bare name called "freetype-main@x86_64", not "freetype".
+//
+// The purl is real, trimmed from cve-2026-50811.json.
+func TestConvert_HummingbirdFixed(t *testing.T) {
+	d := buildHummingbirdDoc(t, "CVE-2026-50811",
+		map[string]string{"Red Hat Hardened Images": "cpe:/a:redhat:hummingbird:1"},
+		map[string]string{
+			"freetype-main@x86_64": "pkg:rpm/redhat/freetype@2.14.3-1.2.hum1?arch=x86_64&distro=hummingbird-20251124&repository_id=public-hummingbird-x86_64-rpms",
+		},
+		[]string{"Red Hat Hardened Images:freetype-main@x86_64"},
+		nil, nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped a document naming a Hummingbird package")
+	}
+	by := affectedByName(adv)
+	a, ok := by["Hummingbird/freetype"]
+	if !ok {
+		t.Fatalf("no Hummingbird/freetype entry, got: %+v", adv.Affected)
+	}
+	if len(a.Ranges) != 1 || len(a.Ranges[0].Events) != 2 ||
+		a.Ranges[0].Events[0].Introduced != "0" || a.Ranges[0].Events[1].Fixed != "2.14.3-1.2.hum1" {
+		t.Errorf("freetype ranges = %+v, want introduced 0 then fixed 2.14.3-1.2.hum1", a.Ranges)
+	}
+}
+
+// TestConvert_HummingbirdStreamLabelFansOutToTwoPackages is the shape D98's
+// whole purl-based path exists for: "perl-main" is a STREAM LABEL, and its
+// two architecture-scoped ids resolve to two DIFFERENT real packages
+// (perl-main@noarch ships perl-Attribute-Handlers, not perl) -- not one
+// package fixed at two architectures the way mainline's stripArch/splitNEVRA
+// path would collapse them. Real purls, trimmed from cve-2017-12837.json.
+func TestConvert_HummingbirdStreamLabelFansOutToTwoPackages(t *testing.T) {
+	d := buildHummingbirdDoc(t, "CVE-2017-12837",
+		map[string]string{"Red Hat Hardened Images": "cpe:/a:redhat:hummingbird:1"},
+		map[string]string{
+			"perl-main@x86_64": "pkg:rpm/redhat/perl@5.42.2-524.hum1?arch=x86_64&distro=hummingbird-20251124&repository_id=public-hummingbird-x86_64-rpms",
+			"perl-main@noarch": "pkg:rpm/redhat/perl-Attribute-Handlers@1.03-524.hum1?arch=noarch&distro=hummingbird-20251124&repository_id=public-hummingbird-x86_64-rpms",
+		},
+		[]string{
+			"Red Hat Hardened Images:perl-main@x86_64",
+			"Red Hat Hardened Images:perl-main@noarch",
+		},
+		nil, nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped a document naming Hummingbird packages")
+	}
+	by := affectedByName(adv)
+	if len(by) != 2 {
+		t.Fatalf("produced %d affected entries, want 2 (one per real package): %+v", len(by), adv.Affected)
+	}
+	perl, ok := by["Hummingbird/perl"]
+	if !ok || len(perl.Ranges) != 1 || perl.Ranges[0].Events[1].Fixed != "5.42.2-524.hum1" {
+		t.Errorf("Hummingbird/perl = %+v, want a fixed range at 5.42.2-524.hum1", perl.Ranges)
+	}
+	handlers, ok := by["Hummingbird/perl-Attribute-Handlers"]
+	if !ok || len(handlers.Ranges) != 1 || handlers.Ranges[0].Events[1].Fixed != "1.03-524.hum1" {
+		t.Errorf("Hummingbird/perl-Attribute-Handlers = %+v, want a fixed range at 1.03-524.hum1", handlers.Ranges)
+	}
+	// The stream label itself must never surface as a package name -- that
+	// would be the pre-D98 mainline path misreading it as an NEVRA.
+	if _, ok := by["Hummingbird/perl-main"]; ok {
+		t.Error("stored a finding against \"perl-main\", which is the stream label, not a real package")
+	}
+}
+
+// TestConvert_HummingbirdBareNamePurl_WontFix covers two D98 facts at once
+// with one real fixture, trimmed from cve-2026-8723.json: 11 of 544 measured
+// Hummingbird purls carry no version at all (D47's "affected at every
+// version" convention, read here off a purl rather than a bare NEVRA
+// string), and the underscore platform spelling ("red_hat_hardened_images")
+// resolves exactly like the space-separated one, because ecosystemFor keys
+// on the CPE, not the label.
+func TestConvert_HummingbirdBareNamePurl_WontFix(t *testing.T) {
+	d := buildHummingbirdDoc(t, "CVE-2026-8723",
+		map[string]string{"red_hat_hardened_images": "cpe:/a:redhat:hummingbird:1"},
+		map[string]string{
+			"nodejs25.src": "pkg:rpm/redhat/nodejs25?arch=src",
+		},
+		nil,
+		[]string{"red_hat_hardened_images:nodejs25.src"},
+		[]map[string]any{
+			{"category": "no_fix_planned", "product_ids": []string{"red_hat_hardened_images:nodejs25.src"}},
+		})
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped a document naming a Hummingbird package")
+	}
+	a, ok := affectedByName(adv)["Hummingbird/nodejs25"]
+	if !ok {
+		t.Fatalf("no Hummingbird/nodejs25 entry, got: %+v", adv.Affected)
+	}
+	if len(a.Ranges) != 1 || len(a.Ranges[0].Events) != 1 || a.Ranges[0].Events[0].Introduced != "0" {
+		t.Fatalf("nodejs25 ranges = %+v, want one introduced-0 event and no fixed event", a.Ranges)
+	}
+	if a.Ranges[0].Events[0].Fixed != "" {
+		t.Error("nodejs25 carries a fixed version; the bare purl says there is none")
+	}
+	if a.Ranges[0].FixState != advisory.FixStateWontFix {
+		t.Errorf("FixState = %q, want %q (no_fix_planned)", a.Ranges[0].FixState, advisory.FixStateWontFix)
+	}
+}
+
+// TestConvert_HummingbirdRemediationNoneAvailable is the other D52 state,
+// checked against Hummingbird's own path the same way
+// TestConvert_RemediationNoneAvailable checks it against mainline's.
+func TestConvert_HummingbirdRemediationNoneAvailable(t *testing.T) {
+	d := buildHummingbirdDoc(t, "CVE-2026-9001",
+		map[string]string{"Red Hat Hardened Images": "cpe:/a:redhat:hummingbird:1"},
+		map[string]string{
+			"cups-main@x86_64": "pkg:rpm/redhat/cups@2.4.11-3.hum1?arch=x86_64&distro=hummingbird-20251124&repository_id=public-hummingbird-x86_64-rpms",
+		},
+		nil,
+		[]string{"Red Hat Hardened Images:cups-main@x86_64"},
+		[]map[string]any{
+			{"category": "none_available", "product_ids": []string{"Red Hat Hardened Images:cups-main@x86_64"}},
+		})
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped a document naming a Hummingbird package")
+	}
+	a, ok := affectedByName(adv)["Hummingbird/cups"]
+	if !ok {
+		t.Fatalf("no Hummingbird/cups entry, got: %+v", adv.Affected)
+	}
+	if a.Ranges[0].FixState != advisory.FixStateNotFixed {
+		t.Errorf("FixState = %q, want %q (none_available)", a.Ranges[0].FixState, advisory.FixStateNotFixed)
+	}
+}
+
+// TestConvert_HummingbirdBothPlatformSpellingsResolve pins the adversarial
+// shape measured live IN A SINGLE DOCUMENT (cve-2026-8723.json declares both
+// "red_hat_hardened_images" and "Red Hat Hardened Images" as sibling
+// product_name nodes carrying the identical CPE): a scan must never depend
+// on which spelling a given document happened to use, because ecosystemFor
+// keys on the CPE alone. Each spelling here names a DIFFERENT real package,
+// so a row silently failing to resolve is distinguishable from one that
+// merely collided with the other.
+func TestConvert_HummingbirdBothPlatformSpellingsResolve(t *testing.T) {
+	d := buildHummingbirdDoc(t, "CVE-2026-9002",
+		map[string]string{
+			"red_hat_hardened_images": "cpe:/a:redhat:hummingbird:1",
+			"Red Hat Hardened Images": "cpe:/a:redhat:hummingbird:1",
+		},
+		map[string]string{
+			"nodejs25.src":     "pkg:rpm/redhat/nodejs25?arch=src",
+			"cups-main@x86_64": "pkg:rpm/redhat/cups@2.4.11-3.hum1?arch=x86_64&distro=hummingbird-20251124&repository_id=public-hummingbird-x86_64-rpms",
+		},
+		[]string{"Red Hat Hardened Images:cups-main@x86_64"},
+		[]string{"red_hat_hardened_images:nodejs25.src"},
+		nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped a document naming Hummingbird packages under both platform spellings")
+	}
+	by := affectedByName(adv)
+	if _, ok := by["Hummingbird/nodejs25"]; !ok {
+		t.Errorf("the underscore spelling did not resolve: %+v", adv.Affected)
+	}
+	if _, ok := by["Hummingbird/cups"]; !ok {
+		t.Errorf("the space-separated spelling did not resolve: %+v", adv.Affected)
+	}
+	if st.SkippedNoCPE != 0 || st.SkippedNonRHEL != 0 {
+		t.Errorf("SkippedNoCPE=%d SkippedNonRHEL=%d, want 0/0 -- both spellings share the same CPE",
+			st.SkippedNoCPE, st.SkippedNonRHEL)
+	}
+}
+
+// TestConvert_MainlineAndHummingbirdSameCVE is D98's proof of the D90 hazard:
+// a CVE affecting both RHEL mainline and Hummingbird must produce ONE record
+// with affected entries under BOTH ecosystem keys, never two records with
+// the same ID (which would be a last-writer-wins collision against the
+// store's own by-id bucket). No new merge code makes this true -- one CSAF
+// document is one CVE (convert's own doc comment), and both ecosystems'
+// entries already land in the same document's product_status arrays, so
+// they fall into the same adv.Affected slice for free. This test is what
+// proves that stays true now that resolveProduct branches on eco: the
+// mainline entry must be unaffected by the branch existing at all, alongside
+// the Hummingbird one landing correctly.
+func TestConvert_MainlineAndHummingbirdSameCVE(t *testing.T) {
+	d := buildHummingbirdDoc(t, "CVE-2026-9003",
+		map[string]string{
+			"BaseOS-9":                "cpe:/o:redhat:enterprise_linux:9::baseos",
+			"Red Hat Hardened Images": "cpe:/a:redhat:hummingbird:1",
+		},
+		map[string]string{
+			"openssh-main@x86_64": "pkg:rpm/redhat/openssh@9.9p2-3.hum1?arch=x86_64&distro=hummingbird-20251124&repository_id=public-hummingbird-x86_64-rpms",
+		},
+		[]string{
+			"BaseOS-9:openssh-0:8.7p1-38.el9_4.1.x86_64",
+			"Red Hat Hardened Images:openssh-main@x86_64",
+		},
+		nil, nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped a document naming mainline and Hummingbird packages")
+	}
+	// D90: exactly one record for this CVE.
+	if adv.ID != "REDHAT-CVE-2026-9003" {
+		t.Errorf("ID = %q, want a single REDHAT-CVE-2026-9003 record", adv.ID)
+	}
+	by := affectedByName(adv)
+	if len(by) != 2 {
+		t.Fatalf("produced %d affected entries, want 2 (one per ecosystem): %+v", len(by), adv.Affected)
+	}
+	mainline, ok := by["Red Hat:9/openssh"]
+	if !ok || len(mainline.Ranges) != 1 || mainline.Ranges[0].Events[1].Fixed != "0:8.7p1-38.el9_4.1" {
+		t.Errorf("Red Hat:9/openssh = %+v, want a fixed range at 0:8.7p1-38.el9_4.1", mainline.Ranges)
+	}
+	hummingbird, ok := by["Hummingbird/openssh"]
+	if !ok || len(hummingbird.Ranges) != 1 || hummingbird.Ranges[0].Events[1].Fixed != "9.9p2-3.hum1" {
+		t.Errorf("Hummingbird/openssh = %+v, want a fixed range at 9.9p2-3.hum1", hummingbird.Ranges)
+	}
+}
+
+// TestHummingbirdPackageOf is the unit-level table for the helper the tests
+// above already drive through convert(). Fixture purls are real, sampled
+// from the archive; the rejected shapes are real too (measured live: an OCI
+// purl names a container image, and there is no measured malformed purl
+// shape on the archive at all -- unlike SUSE's csaf.go, which measured 28
+// stray leaves, D98's own measurement found 0 of 544 sampled purls failing
+// to parse).
+func TestHummingbirdPackageOf(t *testing.T) {
+	for _, tc := range []struct {
+		purl          string
+		name, version string
+		ok            bool
+	}{
+		{"pkg:rpm/redhat/freetype@2.14.3-1.2.hum1?arch=x86_64&distro=hummingbird-20251124&repository_id=public-hummingbird-x86_64-rpms",
+			"freetype", "2.14.3-1.2.hum1", true},
+		{"pkg:rpm/redhat/perl-Attribute-Handlers@1.03-524.hum1?arch=noarch&distro=hummingbird-20251124&repository_id=public-hummingbird-x86_64-rpms",
+			"perl-Attribute-Handlers", "1.03-524.hum1", true},
+		// D47's bare-name convention, read off a purl with no "@" at all.
+		{"pkg:rpm/redhat/nodejs25?arch=src", "nodejs25", "", true},
+		{"pkg:rpm/redhat/opentofu1.10?arch=src", "opentofu1.10", "", true},
+		// Not an rpm at all -- an OCI image reference.
+		{"pkg:oci/opentofu?repository_url=registry.redhat.io/hi/opentofu", "", "", false},
+		// Not Hummingbird's namespace.
+		{"pkg:rpm/suse/xz@5.6.2-1.1", "", "", false},
+		{"", "", "", false},
+	} {
+		name, version, ok := hummingbirdPackageOf(tc.purl)
+		if name != tc.name || version != tc.version || ok != tc.ok {
+			t.Errorf("hummingbirdPackageOf(%q) = (%q, %q, %v), want (%q, %q, %v)",
+				tc.purl, name, version, ok, tc.name, tc.version, tc.ok)
+		}
+	}
+}
+
+// TestEcosystemAgreesWithCataloger_Hummingbird is D98's byte-for-byte
+// cross-check, the same discipline D77's TestKeyAgreesWithCataloger holds
+// for SLES's fold: distro.go (internal/pkgmeta) derives "Hummingbird" from
+// /etc/os-release alone, this package derives it from the CPE, and the two
+// are computed by completely independent code. A mismatch is silent -- both
+// sides would still produce a plausible-looking string, and only a scan
+// finding nothing stored under one of them would ever reveal the drift.
+func TestEcosystemAgreesWithCataloger_Hummingbird(t *testing.T) {
+	catalogerKey, err := (pkgmeta.Distro{ID: "hummingbird", VersionID: "20251124"}).Ecosystem()
+	if err != nil {
+		t.Fatalf("pkgmeta.Distro.Ecosystem() = %v, want a resolved key", err)
+	}
+	providerKey, ok := ecosystemFor("cpe:/a:redhat:hummingbird:1")
+	if !ok {
+		t.Fatal("ecosystemFor refused the real, live Hummingbird CPE")
+	}
+	if catalogerKey != providerKey {
+		t.Errorf("cataloger key %q != provider key %q -- a SCAN would look up one string "+
+			"and the DATABASE would hold the other, reporting clean with no error at all",
+			catalogerKey, providerKey)
+	}
+	if _, ok := version.For(catalogerKey); !ok {
+		t.Errorf("version.For(%q) has no comparer -- the matcher could never evaluate a "+
+			"Hummingbird package even if the lookup found something", catalogerKey)
 	}
 }

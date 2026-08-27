@@ -29,8 +29,9 @@ rating and the gate takes the highest (D25); incompleteness carries a cause and
 to end for Alpine, Debian, Ubuntu mainline (D53), RHEL, Rocky (D71), AlmaLinux (D72),
 Amazon Linux 2/2023 (D73), Oracle Linux 5–10 (D74), Fedora (D75), SLES/openSUSE Leap
 (D77), Wolfi/Chainguard (D88), MinimOS and Echo (D92), Azure Linux/CBL-Mariner (D94), Alpaquita/BellSoft (D95, which
-added the apk `p:` provides bridge), Photon OS 3/4/5 (D96), and Arch Linux (D97, the
-release-less `Arch:rolling` key) —
+added the apk `p:` provides bridge), Photon OS 3/4/5 (D96), Arch Linux (D97, the
+release-less `Arch:rolling` key), and Red Hat's Hummingbird (D98, carved out of the CSAF
+feed already fetched) —
 across three rpmdb backends: BerkeleyDB, SQLite and ndb (D44, D76). A weekly digest-pinned
 grype differential gates regressions in CI (D93). Installed
 Ubuntu ESM/FIPS and Oracle Ksplice/FIPS lineage packages are reported not evaluated rather

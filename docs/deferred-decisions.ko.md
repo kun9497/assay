@@ -169,7 +169,9 @@ comparer, 새 cataloger, 릴리스 없는 키). **이 항목이 추적하려고 
 assay에서 끝에서 끝까지 스캔되거나, 기록된 트리거를 달고 미뤄져 있습니다
 (CleanStart, 다음 항목 — 그 OSV 피드는 측정됐고 템플릿에 낄 준비가 됐으며,
 라우팅 탐지만이 그것을 막고 있습니다). grype가 여전히 갖고 있지만 assay는 갖지
-않은 것: bitnami와 hummingbird 피드(둘 다 아직 측정하지 않음), grype의
+않은 것: bitnami 피드(2026-08-27에 측정함, 다음 슬라이스로 이미 결정되고 순서가
+잡힘 — hummingbird는 같은 날 D98로 이 목록을 벗어났습니다, 그것은 assay가 이미
+받아오던 CSAF 피드 안에 숨어 있던 Red Hat의 강화 라인이었습니다), grype의
 CPE/NVD fallback matcher(의도적으로 없음 — 차등은 그 출력을 주된 오탐 부류로
 분류합니다), 그리고 binary classifier(syft 쪽이라 범위 밖). grype는 또한 assay에
 대응물이 없던 보강 피드도 싣습니다; D86이 EPSS와 KEV를 수집했고(typed rating

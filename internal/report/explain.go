@@ -458,6 +458,11 @@ func comparerName(ecosystem string) string {
 	// carries too, not a prefix — see that map's own comment.
 	case "Arch:rolling":
 		return "pacman"
+	// D98: "Hummingbird" is a bare, release-less RPM registry entry too,
+	// added in the same commit that taught version.For about it, for the
+	// same reason every case above this comment's own doc warns about.
+	case "Hummingbird":
+		return "rpm"
 	default:
 		return "unknown"
 	}

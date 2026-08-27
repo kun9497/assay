@@ -97,3 +97,27 @@ func TestFor_ArchRollingResolvesPacman(t *testing.T) {
 			"RPM{} would answer +1 here, the exact divergence pacman.go's own doc comment measured", "1.0rc-1", "1.0-1", got)
 	}
 }
+
+// TestFor_HummingbirdResolvesRPM is D98's caller-first proof that
+// "Hummingbird" resolves RPM{} through the registry -- not merely that
+// RPM{} orders a ".humN" dist tag correctly in isolation (rpm_test.go has no
+// such row of its own; this IS that row, driven through the caller). Before
+// the registry entry existed, For("Hummingbird") reported not-ok and this
+// test failed for that reason alone; the version pair below (real EVRs,
+// trimmed from cve-2026-50811.json) is what a Hummingbird point release
+// looks like, ordered by rpmvercmp's ordinary trailing-segment rule with no
+// new comparer logic -- the same rule Photon's ".phN" and Azure Linux's
+// ".azl3" tags already ride.
+func TestFor_HummingbirdResolvesRPM(t *testing.T) {
+	c, ok := For("Hummingbird")
+	if !ok {
+		t.Fatal(`For("Hummingbird") = not ok, want a comparer`)
+	}
+	got, err := c.Compare("2.14.3-1.hum1", "2.14.3-1.2.hum1")
+	if err != nil {
+		t.Fatalf("Compare: error %v, want -1 with no error", err)
+	}
+	if got != -1 {
+		t.Errorf(`Compare("2.14.3-1.hum1", "2.14.3-1.2.hum1") via For("Hummingbird") = %d, want -1`, got)
+	}
+}

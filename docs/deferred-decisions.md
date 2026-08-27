@@ -173,9 +173,11 @@ comparer, a new cataloger, a release-less key). **The distro list this entry exi
 track is now empty**: every distro family grype ships a provider for either scans end to
 end in assay or is deferred with a recorded trigger (CleanStart, next entry — its OSV feed
 is measured and template-ready, only routing detection blocks it). What grype still has
-that assay does not: the bitnami and hummingbird feeds (neither measured yet), its
-CPE/NVD fallback matcher (deliberately absent — the differential classifies its output as
-the main false-positive class), and the binary classifier (syft-side, out of scope). grype also ships enrichment feeds
+that assay does not: the bitnami feed (measured 2026-08-27, decided-and-sequenced as the
+next slice — hummingbird left this list in D98 the same day, it was Red Hat's hardened
+line hiding inside the CSAF feed assay already fetched), its CPE/NVD fallback matcher
+(deliberately absent — the differential classifies its output as the main false-positive
+class), and the binary classifier (syft-side, out of scope). grype also ships enrichment feeds
 assay had no equivalent for; D86 ingested EPSS and KEV (typed rating fields, both gates)
 and D87 the EOL data — the enrichment-feed gap against grype is closed.
 

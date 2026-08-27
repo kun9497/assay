@@ -1004,3 +1004,54 @@ func TestDistroEcosystem_Arch(t *testing.T) {
 		}
 	}
 }
+
+// TestDistroEcosystem_Hummingbird: D98. Red Hat's Project Hummingbird is
+// rolling and release-less on the cataloger side, the same shape D88 gave
+// Wolfi/Chainguard and D92 gave MinimOS/Echo -- VERSION_ID is a dated build
+// snapshot ("20251124", the real value a Hummingbird package's purl
+// qualifier carries), never a release axis, so it is ignored entirely
+// rather than tolerated in one shape over another.
+func TestDistroEcosystem_Hummingbird(t *testing.T) {
+	for _, tc := range []struct{ id, versionID, want string }{
+		{"hummingbird", "20251124", "Hummingbird"},
+		// No VERSION_ID at all, and an RHEL-shaped one, must resolve
+		// identically -- the field is never consulted.
+		{"hummingbird", "", "Hummingbird"},
+		{"hummingbird", "9.8", "Hummingbird"},
+	} {
+		got, err := Distro{ID: tc.id, VersionID: tc.versionID}.Ecosystem()
+		if err != nil {
+			t.Errorf("id=%q VERSION_ID=%q: %v", tc.id, tc.versionID, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("id=%q VERSION_ID=%q -> %q, want %q", tc.id, tc.versionID, got, tc.want)
+		}
+	}
+	// Hummingbird's key must not converge with any other distro's, or with
+	// Wolfi/MinimOS/Arch's bare release-less keys.
+	for _, tc := range []struct{ id, versionID, want string }{
+		{"alpine", "3.19", "Alpine:v3.19"},
+		{"wolfi", "20230201", "Wolfi"},
+		{"minimos", "20241031", "MinimOS"},
+		{"arch", "", "Arch:rolling"},
+		{"hummingbird", "20251124", "Hummingbird"},
+	} {
+		if got, err := (Distro{ID: tc.id, VersionID: tc.versionID}).Ecosystem(); err != nil || got != tc.want {
+			t.Errorf("%s %s -> %q, %v; want %q", tc.id, tc.versionID, got, err, tc.want)
+		}
+	}
+	// The guard shape the task description asks for: a real Hummingbird
+	// image's ID_LIKE reads "fedora rhel", but Distro carries no ID_LIKE
+	// field at all and Ecosystem() switches on ID alone, so neither
+	// direction can leak -- a genuine rhel image resolves its own key
+	// regardless of what its PrettyName happens to say, and a hummingbird
+	// image resolves its own key regardless of an RHEL-shaped VersionID.
+	if got, err := (Distro{ID: "rhel", VersionID: "9.8",
+		PrettyName: "Red Hat Enterprise Linux 9.8 (hardened, hummingbird-based)"}).Ecosystem(); err != nil || got != "Red Hat:9" {
+		t.Errorf("rhel with a hummingbird-like PrettyName -> %q, %v, want %q", got, err, "Red Hat:9")
+	}
+	if got, err := (Distro{ID: "hummingbird", VersionID: "9.8"}).Ecosystem(); err != nil || got != "Hummingbird" {
+		t.Errorf("hummingbird with an RHEL-shaped VersionID -> %q, %v, want %q", got, err, "Hummingbird")
+	}
+}

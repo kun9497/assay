@@ -505,6 +505,31 @@ func TestParse_RPMKeyedViaQualifierFallback_NoOSComponent(t *testing.T) {
 	}
 }
 
+// TestParse_HummingbirdKeyedViaQualifierFallback_NoOSComponent is D98's free
+// ride on D83/D84's SBOM plumbing: distroFromQualifier's generic
+// "id-version" split reads "hummingbird-20251124" into ID "hummingbird" and
+// VersionID "20251124" without any Hummingbird-specific code here, and
+// pkgmeta.Distro.Ecosystem's "hummingbird" case ignores VersionID entirely
+// (D98's own dated-build-snapshot reasoning), so the dated snapshot in the
+// qualifier never fragments the key the way it would for a distro that kept
+// it. The purl is real, trimmed from cve-2026-50811.json.
+func TestParse_HummingbirdKeyedViaQualifierFallback_NoOSComponent(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+	  {"type":"library","name":"freetype","version":"2.14.3-1.2.hum1",
+	   "purl":"pkg:rpm/redhat/freetype@2.14.3-1.2.hum1?arch=x86_64&distro=hummingbird-20251124"}]}`
+	target, _, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1", len(target.Packages))
+	}
+	if got := target.Packages[0].Ecosystem; got != "Hummingbird" {
+		t.Errorf("Ecosystem = %q, want %q (keyed from the purl's own distro qualifier)",
+			got, "Hummingbird")
+	}
+}
+
 // TestParse_QualifierFallbackSplitsOnTheLastHyphen pins WHICH hyphen the
 // fallback splits on. Every other fallback fixture in this file carries
 // exactly one hyphen (rhel-9.8, debian-12), where first and last coincide —

@@ -621,6 +621,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] Arch Linux (D97) — 릴리스 없는 `Arch:rolling` 키, `%BASE%`를 D8의 source로
       쓰는 새 pacman cataloger, 그리고 rpm에 절대 alias되지 못하도록 테스트가
       막는 `Pacman{}` comparer(측정된 tensorflow `2.4.0rc4` 미탐)
+- [x] Hummingbird (D98) — Red Hat의 강화 라인이고, assay가 이미 받아오는 CSAF
+      피드에서 추출함: CPE 범위, purl로 읽음(stream label이 갈라짐), 맨 rolling
+      키; 첫날 차등이 grype 전용 튜플 전부를 grype 자신의 낡은 스냅샷으로 추적함
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건

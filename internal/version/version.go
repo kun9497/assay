@@ -127,6 +127,23 @@ var registry = map[string]Comparer{
 	// the same shape "Wolfi"/"MinimOS"/"Echo" already use, just with a colon
 	// baked into the literal itself rather than a bare name.
 	"Arch:rolling": Pacman{},
+	// D98. Project Hummingbird is RPM too -- Red Hat's own CSAF VEX feed
+	// (internal/provider/redhat) scopes Hummingbird content by CPE within
+	// the SAME archive mainline RHEL ingests, and rpmvercmp does not care
+	// which distro built the package: measured live, every Hummingbird
+	// fixed version is a standard RPM EVR carrying a ".humN" dist tag
+	// (e.g. "2.14.3-1.2.hum1"), ordered by rpmvercmp's ordinary
+	// trailing-segment rule with no new comparer logic needed, the same way
+	// Photon's ".phN" and Azure Linux's ".azl3"/".cm2" tags already are.
+	//
+	// A bare, plain registry entry rather than a "Hummingbird:"-prefixed
+	// rule, following the D88/D92/D97 shape (Wolfi, Chainguard, MinimOS,
+	// Echo, Arch:rolling) rather than the D71/D72/D94 release-qualified one
+	// (Rocky, AlmaLinux, Azure Linux): Hummingbird is rolling, ships one
+	// stream, and pkgmeta.Distro.Ecosystem's "hummingbird" case writes the
+	// literal bare string with no release suffix at all — "Hummingbird" IS
+	// the whole key this project ever builds for it, not a truncated one.
+	"Hummingbird": RPM{},
 }
 
 // mainlineUbuntu matches the two shapes OSV gives a mainline Ubuntu release:

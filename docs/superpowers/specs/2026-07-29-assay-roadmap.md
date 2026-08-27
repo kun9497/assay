@@ -3787,6 +3787,42 @@ the tracker is rolling, so maxFindings carries 4× headroom where other targets 
 
 ---
 
+### D98 — Hummingbird: Red Hat's boutique, already inside a feed we fetch
+
+**Decision.** Red Hat's Project Hummingbird (the minimal hardened container line, April
+2026, `ID=hummingbird`) scans end to end by EXTENDING the existing Red Hat CSAF provider —
+no new provider, comparer, or cataloger. The same per-CVE documents assay already downloads
+carry Hummingbird content scoped by `cpe:/a:redhat:hummingbird:1` (~1,200–1,400 of 49,462
+documents); a new CPE-scoped extraction path reads name and version from each product's
+`purl` — the SUSE D77 pattern — because Hummingbird's product ids are STREAM LABELS
+(`perl-main` fans out to `perl` AND `perl-Attribute-Handlers`), not NEVRAs, and
+splitNEVRA would parse them wrong. The ecosystem key is bare `Hummingbird`: VERSION_ID
+(`20251124`) is a dated build snapshot that changes per rebuild, not a release axis —
+keying on it would fragment one rolling stream into phantom releases (the MinimOS frozen-
+VERSION_ID reasoning, and grype's own rolling flag).
+
+**Measured hazards, held by tests.** The platform label spells itself BOTH
+`"Red Hat Hardened Images"` and `"red_hat_hardened_images"` — in one document, even — so
+resolution keys on the CPE alone. One CVE's document carries mainline AND Hummingbird
+entries; convert() already merges them into one REDHAT-CVE-* record (proven, not assumed —
+a second record would be D90's last-writer-wins against ourselves). Bare purls (no
+@version) follow D47's affected-at-every-version convention; `pkg:oci/...` leaves are
+rejected by the namespace regex. rpmdb (SQLite at `usr/lib/sysimage/rpm`), the
+os-release symlink (`etc → usr/lib`), the RPM comparer (`.hum1` EVRs) and the SBOM purl
+qualifier (`distro=hummingbird-20251124`) all ride existing machinery — the last one
+test-proven rather than claimed.
+
+**The differential explains itself on day one.** quay.io/hummingbird/nginx joined the
+weekly targets (21): assay 3 / grype 22 / agree 3, onlyAssay 0. The 19 grype-only tuples
+were traced to their live documents: every one is a CVE Red Hat has since marked FIXED at
+exactly the installed build (glibc 2.43-8.2.hum1, openssl 3.5.8-0.1.hum1) — a rolling
+line that rebuilds on fix means a current image sits at-or-above every fix, and grype's
+2026-08-25 snapshot still carries the pre-fix no-fix rows. assay's smaller answer is the
+correct one, verified against the feed itself. Independent review mutations 3/3 red
+(CPE→mainline key, fabricated package on missing purl, VERSION_ID fragmentation).
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

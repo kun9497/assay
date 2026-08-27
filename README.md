@@ -648,6 +648,9 @@ exited 0 while 24 findings went unmentioned.
 - [x] Arch Linux (D97) — a release-less `Arch:rolling` key, a new pacman cataloger with
       `%BASE%` as the D8 source, and a `Pacman{}` comparer that a test forbids from ever
       being aliased onto rpm (the tensorflow `2.4.0rc4` false negative, measured)
+- [x] Hummingbird (D98) — Red Hat's hardened line, extracted from the CSAF feed assay
+      already fetches: CPE-scoped, purl-read (stream labels fan out), bare rolling key;
+      day-one differential traced every grype-only tuple to grype's own stale snapshot
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a

@@ -158,5 +158,13 @@
     "minAgree": 7,
     "minFindings": 9,
     "maxFindings": 44
+  },
+  {
+    "name": "hummingbird",
+    "tag": "hummingbird/nginx:1.30.4",
+    "ref": "quay.io/hummingbird/nginx@sha256:6c6c6e7fd1cb655a6ff9066f04adef078b4b6ba3adf91dbd9a52ce71f83d6f18",
+    "minAgree": 2,
+    "minFindings": 2,
+    "maxFindings": 25
   }
 ]

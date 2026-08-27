@@ -95,6 +95,15 @@ type branch struct {
 		ProductID string `json:"product_id"`
 		Helper    struct {
 			CPE string `json:"cpe"`
+			// Purl is read only for Hummingbird content (D98). Mainline RHEL
+			// leaf nodes carry one too on the live 2026-08-27 archive (e.g.
+			// "pkg:rpm/redhat/freetype-devel", no version at all — the
+			// mainline EVR lives in the "platform:component-EVR" string, not
+			// here), but mainline's resolveProduct path never reads this
+			// field: it still parses that compound string directly
+			// (splitContext/splitNEVRA), so an unused mainline purl changes
+			// nothing on that path.
+			Purl string `json:"purl"`
 		} `json:"product_identification_helper"`
 	} `json:"product"`
 }
@@ -114,6 +123,34 @@ type branch struct {
 // the host is on EUS. Restricting to mainline drops the fixed-version
 // ambiguity from 25.1% of (CVE, package, major) groups to 6.1%.
 var mainlineCPE = regexp.MustCompile(`^cpe:/[oa]:redhat:enterprise_linux:(\d+)(?:\.\d+)?(?:::.*)?$`)
+
+// hummingbirdCPE matches Project Hummingbird, Red Hat's minimal hardened
+// container line (D98). Every document sampled from the 2026-08-27 archive
+// carries exactly one shape, "cpe:/a:redhat:hummingbird:1" — measured across
+// 125 confirmed Hummingbird-scoped documents (of ~1,200-1,400 estimated in
+// the full ~49,462-document archive) — but the trailing digit is matched
+// rather than pinned to "1" on the same reasoning mainlineCPE anchors on a
+// captured major: if Red Hat ever bumps it, this project's own key stays the
+// bare "Hummingbird" sentinel regardless (D98 — Hummingbird is rolling, and
+// that digit is not a release axis this project keys on, the same way
+// Arch's rolling BUILD_ID carries no version D97 reads).
+var hummingbirdCPE = regexp.MustCompile(`^cpe:/a:redhat:hummingbird:\d+$`)
+
+// hummingbirdEcosystem is the store key ecosystemFor returns for a
+// Hummingbird-scoped product (D98). It must byte-for-byte match what
+// pkgmeta.Distro.Ecosystem's "hummingbird" case returns — release-less
+// ("Hummingbird", not "Hummingbird:1" or "Hummingbird:20251124") because
+// Hummingbird ships one rolling stream: the CPE's trailing "1" is a CPE
+// versioning artifact and the purl's "distro=hummingbird-20251124"
+// qualifier (surfaced as os-release VERSION_ID too) is a dated build
+// snapshot that changes every rebuild, not a release. Keying on either would
+// fragment one rolling stream into phantom per-snapshot releases — the same
+// reasoning D92 gives for MinimOS's frozen VERSION_ID, and the shape
+// grype's own vunnel already assigns Hummingbird ({Alias: "hummingbird",
+// Rolling: true}). TestEcosystemAgreesWithCataloger_Hummingbird
+// cross-checks this constant against pkgmeta directly, the same discipline
+// D77's TestKeyAgreesWithCataloger holds for SLES's fold.
+const hummingbirdEcosystem = "Hummingbird"
 
 // arches are stripped from a product ID's component half. A `fixed` entry is a
 // full NEVRA with an architecture (`openssh-0:8.7p1-38.el9_4.1.x86_64`) and
@@ -229,7 +266,17 @@ func isModule(evr string) bool {
 
 // ecosystemFor maps a platform CPE to the store's ecosystem key, or reports
 // false for a product this provider does not ingest.
+//
+// Hummingbird is checked first (D98): its CPE never matches mainlineCPE's
+// "enterprise_linux" name, so the order between the two checks does not
+// matter for correctness today, but checking the narrower, single-purpose
+// pattern first keeps this function reading as "what IS this platform"
+// rather than "what is this platform NOT", the same order resolveProduct's
+// own doc comment already keeps between its checks.
 func ecosystemFor(cpe string) (string, bool) {
+	if hummingbirdCPE.MatchString(cpe) {
+		return hummingbirdEcosystem, true
+	}
 	m := mainlineCPE.FindStringSubmatch(cpe)
 	if m == nil {
 		return "", false
@@ -245,6 +292,68 @@ func collectCPE(bs []branch, out map[string]string) {
 			out[p.ProductID] = p.Helper.CPE
 		}
 		collectCPE(bs[i].Branches, out)
+	}
+}
+
+// hummingbirdPurlRE splits a Hummingbird leaf's purl into a package name and
+// version, copy-adapted from SUSE's identical-shaped purlRE (D77's proven
+// pattern, internal/provider/suse/csaf.go) rather than reused from splitNEVRA
+// — Hummingbird's product id is a STREAM LABEL ("perl-main@x86_64"), not an
+// NEVRA, and fans out to more than one real package under one label
+// ("perl-main@noarch" resolves to perl-Attribute-Handlers, not perl), so the
+// only place the real name and version live is here.
+//
+// Unlike SUSE's purls, a Hummingbird purl's version half is OPTIONAL: 533 of
+// 544 sampled carry one ("pkg:rpm/redhat/perl@5.42.2-524.hum1?arch=..."), but
+// 11 are bare names with no "@" at all
+// ("pkg:rpm/redhat/opentofu1.10?arch=src") — D47's "affected at every
+// version" convention, read here as SUSE's own packageOf reads a bare
+// component: an empty version is the statement, not missing data. The
+// version group is therefore optional in the pattern rather than assumed
+// present the way SUSE's purlRE (fed only by "recommended"/fixed entries,
+// always versioned) can assume.
+var hummingbirdPurlRE = regexp.MustCompile(`^pkg:rpm/redhat/([^@?]+)(?:@([^?]*))?`)
+
+// packageInfo is one Hummingbird leaf's package name and version, read off
+// its purl rather than guessed from the product id string (SUSE's
+// packageInfo, copy-adapted).
+type packageInfo struct{ name, version string }
+
+// hummingbirdPackageOf splits a Hummingbird leaf's purl into a package name
+// and version, or reports false — for a purl this provider does not read at
+// all (measured live: "pkg:oci/opentofu?repository_url=..." names an OCI
+// image, not an rpm, and nothing installed by rpm could ever match one) or
+// for no purl at all.
+func hummingbirdPackageOf(purl string) (name, version string, ok bool) {
+	m := hummingbirdPurlRE.FindStringSubmatch(purl)
+	if m == nil {
+		return "", "", false
+	}
+	return m[1], m[2], true
+}
+
+// collectHummingbirdPackages walks the WHOLE product tree's leaf nodes,
+// mapping every product id whose purl reads as an installable Hummingbird rpm
+// to its package name and version.
+//
+// Walked over the whole tree rather than restricted to the subtree under the
+// Hummingbird platform branch, mirroring SUSE's collectPackages (D77): a
+// document's product ids are unique within that one document regardless of
+// which platform declares them, and mainline RHEL's own leaf nodes carry a
+// purl too on the live 2026-08-27 archive but never one hummingbirdPackageOf
+// accepts as an rpm with a "redhat" namespace AND a shape this map's callers
+// ever look up under (mainline's product ids are the full "platform:NEVRA"
+// compound the fixed/known_affected arrays name directly, not a bare
+// product-tree leaf id) — so a mainline leaf populating this map is inert,
+// never reached by a lookup a Hummingbird-scoped resolveProduct call makes.
+func collectHummingbirdPackages(bs []branch, out map[string]packageInfo) {
+	for i := range bs {
+		if p := bs[i].Product; p != nil && p.Helper.Purl != "" {
+			if name, version, ok := hummingbirdPackageOf(p.Helper.Purl); ok {
+				out[p.ProductID] = packageInfo{name: name, version: version}
+			}
+		}
+		collectHummingbirdPackages(bs[i].Branches, out)
 	}
 }
 
@@ -276,6 +385,15 @@ const (
 	skipFlatpak
 	skipModuleContext
 	skipModule
+	// skipNoPurl is Hummingbird-specific (D98): the component half of a
+	// "platform:component" id resolved to a real Hummingbird platform but no
+	// leaf in the product tree carries a purl this provider reads for it —
+	// either the id names no leaf at all, or the leaf's purl is not an
+	// installable rpm ("pkg:oci/..." names a container image, not a
+	// package). Distinguished from skipBadProduct because the mainline
+	// shape that reason names (an unparsable NEVRA string) cannot occur
+	// here: Hummingbird's component is never parsed as a string at all.
+	skipNoPurl
 )
 
 // resolveProduct turns "platform:component" into a key and an EVR.
@@ -294,7 +412,16 @@ const (
 // RPMTAG_MODULARITYLABEL carries the same "name:stream" shape (D80's cataloger
 // half) — so an entry that carries one is now kept, with the stream attached,
 // rather than dropped for lacking exactly the information it names.
-func resolveProduct(id string, cpe map[string]string) (productKey, string, skipReason) {
+//
+// D98 branches once eco is known: a Hummingbird component is a STREAM LABEL
+// ("perl-main@x86_64"), never an NEVRA, so splitContext/splitNEVRA — written
+// for Red Hat's "name-EPOCH:VERSION-RELEASE.ARCH" compound string — would
+// either misparse it or silently invent a package name that happens to share
+// a prefix, the exact D80 hazard splitContext's own doc comment names. The
+// purl-based lookup this project already trusts for that shape (SUSE's
+// packageOf, D77) reads the real name and version instead, so Hummingbird
+// never reaches splitContext, isModule or splitNEVRA at all.
+func resolveProduct(id string, cpe map[string]string, hummingbirdPkgs map[string]packageInfo) (productKey, string, skipReason) {
 	plat, comp, ok := strings.Cut(id, ":")
 	if !ok {
 		// No separator means the entry names a whole product and no package.
@@ -316,6 +443,13 @@ func resolveProduct(id string, cpe map[string]string) (productKey, string, skipR
 	eco, ok := ecosystemFor(c)
 	if !ok {
 		return productKey{}, "", skipNonRHEL
+	}
+	if eco == hummingbirdEcosystem {
+		pkg, ok := hummingbirdPkgs[comp]
+		if !ok {
+			return productKey{}, "", skipNoPurl
+		}
+		return productKey{eco: eco, pkg: pkg.name}, pkg.version, skipNone
 	}
 	comp, context := splitContext(comp)
 	var stream string
@@ -497,6 +631,15 @@ type stats struct {
 	// checks.
 	SkippedBadProduct int
 	SkippedBadDoc     int
+	// SkippedNoPurl is D98's Hummingbird-specific discard: a component that
+	// resolved to the Hummingbird ecosystem but named no leaf this provider
+	// reads a package out of — either the id names no product-tree leaf at
+	// all, or the leaf's purl is not an installable rpm ("pkg:oci/..."
+	// content). Counted separately from SkippedBadProduct because the two
+	// name genuinely different failures: SkippedBadProduct is a string this
+	// provider could not parse, and Hummingbird's component is never parsed
+	// as a string.
+	SkippedNoPurl int
 	// The delta pass (delta.go). Counted apart from the archive's numbers
 	// because they answer different questions: the archive's say what the
 	// snapshot held, these say how far behind it was.
@@ -526,6 +669,13 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 
 	cpe := map[string]string{}
 	collectCPE(d.ProductTree.Branches, cpe)
+	// D98: read unconditionally, not gated on whether this document mentions
+	// Hummingbird at all. The overwhelming majority of documents carry no
+	// Hummingbird content and this walk finds nothing to add, at the cost of
+	// one cheap tree walk alongside collectCPE's own — the same trade every
+	// other per-document map here already makes.
+	hummingbirdPkgs := map[string]packageInfo{}
+	collectHummingbirdPackages(d.ProductTree.Branches, hummingbirdPkgs)
 
 	cve := d.Document.Tracking.ID
 	if len(d.Vulnerabilities) > 0 && d.Vulnerabilities[0].CVE != "" {
@@ -559,7 +709,7 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 	}
 
 	add := func(id string, isFixed bool) {
-		k, evr, why := resolveProduct(id, cpe)
+		k, evr, why := resolveProduct(id, cpe, hummingbirdPkgs)
 		switch why {
 		case skipWholeProduct:
 			st.SkippedWholeProduct++
@@ -584,6 +734,9 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 			return
 		case skipModule:
 			st.SkippedModule++
+			return
+		case skipNoPurl:
+			st.SkippedNoPurl++
 			return
 		}
 		note(k)
@@ -640,7 +793,7 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 				// no_fix_planned/none_available reason reaches a module
 				// package's range exactly as it already did for an ordinary
 				// one.
-				k, _, why := resolveProduct(id, cpe)
+				k, _, why := resolveProduct(id, cpe, hummingbirdPkgs)
 				if why != skipNone {
 					continue
 				}
