@@ -230,7 +230,8 @@ correct against a wrong input.
 would fit if a class emerges — that is the revisit trigger: a second Rocky record with the
 regenerated-fixed-version pattern). Report channel: github.com/rocky-linux/peridot issues
 (Apollo lives there; precedent issues #79/#82; no existing report found under any related
-search) — a draft is prepared, sending is the user's call.
+search) — a draft was prepared, and the user decided 2026-08-27 to record only, not
+send.
 
 ---
 
@@ -254,7 +255,7 @@ that references a glued id directly would compute a wrong (name, version) with n
 disclosure. **Revisit when** a scan-side symptom traces to a glued id again (the D91 trace
 is the template), or SUSE fixes the generator. No existing upstream report found anywhere
 (vunnel/trustify/vuln-list-update consumers included); a draft for SUSE's security contact
-is prepared, sending is the user's call.
+was prepared, and the user decided 2026-08-27 to record only, not send.
 
 ---
 
