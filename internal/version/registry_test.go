@@ -108,6 +108,35 @@ func TestFor_ArchRollingResolvesPacman(t *testing.T) {
 // looks like, ordered by rpmvercmp's ordinary trailing-segment rule with no
 // new comparer logic -- the same rule Photon's ".phN" and Azure Linux's
 // ".azl3" tags already ride.
+// TestFor_BitnamiResolvesBitnamiComparer is D99's caller-first proof that
+// "Bitnami" resolves Bitnami{} through the registry, not merely that
+// Bitnami{} orders a revision correctly in isolation (bitnami_test.go has no
+// such row of its own; this IS that row, driven through the caller). Before
+// the registry entry existed, For("Bitnami") reported not-ok and this test
+// failed for that reason alone.
+//
+// The pair is D99's own worked example: an installed "18.6.0-3" against a
+// bare fixed "18.6.0" resolves EQUAL (0) under Bitnami{}'s own rule that a
+// revision is packaging metadata, not a version regression -- SemVer{}
+// directly would instead read "-3" as a pre-release marker and rank it BELOW
+// 18.6.0 (the opposite direction), so this fails if "Bitnami" were ever
+// wired to SemVer{} by mistake.
+func TestFor_BitnamiResolvesBitnamiComparer(t *testing.T) {
+	c, ok := For("Bitnami")
+	if !ok {
+		t.Fatal(`For("Bitnami") = not ok, want a comparer`)
+	}
+	got, err := c.Compare("18.6.0-3", "18.6.0")
+	if err != nil {
+		t.Fatalf("Compare: error %v, want 0 with no error", err)
+	}
+	if got != 0 {
+		t.Errorf(`Compare("18.6.0-3", "18.6.0") via For("Bitnami") = %d, want 0 -- `+
+			"SemVer{} would answer -1 here (reading \"-3\" as a pre-release marker), "+
+			"the exact divergence Bitnami{}'s own doc comment measures", got)
+	}
+}
+
 func TestFor_HummingbirdResolvesRPM(t *testing.T) {
 	c, ok := For("Hummingbird")
 	if !ok {

@@ -72,6 +72,31 @@ func TestParse(t *testing.T) {
 	}
 }
 
+// TestParse_BitnamiPurlType is D99's own version of the Go/npm/PyPI purl
+// routing this file's own TestParse already pins: a pkg:bitnami purl must
+// route through EcosystemForPURLType to "Bitnami" the same generic way, not
+// through the apk/rpm/deb/alpm distro core -- proven through Parse itself,
+// so deleting the "bitnami" map entry fails here, not only in
+// purl_test.go's own direct table.
+func TestParse_BitnamiPurlType(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5",
+	  "components":[{"type":"library","name":"postgresql","version":"18.6.0-3",
+	                 "purl":"pkg:bitnami/postgresql@18.6.0-3?arch=amd64&distro=photon-5"}]}`
+	target, _, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1", len(target.Packages))
+	}
+	if got := target.Packages[0].Ecosystem; got != "Bitnami" {
+		t.Errorf("Ecosystem = %q, want Bitnami", got)
+	}
+	if got := target.Packages[0].Version; got != "18.6.0-3" {
+		t.Errorf("Version = %q, want 18.6.0-3", got)
+	}
+}
+
 func TestParse_DistroFromSyftProperties(t *testing.T) {
 	// syft emits the distro as a component of type "operating-system" inside
 	// components, not on metadata.component — confirmed against the real

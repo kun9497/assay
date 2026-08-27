@@ -112,6 +112,16 @@ var purlTypeToEcosystem = map[string]string{
 	"nuget":    "NuGet",
 	"composer": "Packagist",
 	"maven":    "Maven",
+	// D99: Bitnami is a purl-type-keyed ecosystem, not a distro, even though
+	// it names applications rather than a language package manager — it has
+	// no os-release of its own (current images are Photon-based, frozen
+	// legacy images Debian-based, D96/D7), so a Bitnami app package keys the
+	// same way a Go or npm one does: by its purl type alone, with no release
+	// axis (D6 does not apply, the same way it does not for Wolfi/Echo).
+	// Measured 2026-08-27: OSV's own "Bitnami" ecosystem string is bare on
+	// 100% of the 9,059-record archive, and syft's own purl type for these
+	// packages is "bitnami" (pkg:bitnami/postgresql@18.6.0-3).
+	"bitnami": "Bitnami",
 }
 
 func EcosystemForPURLType(typ string) (string, bool) {

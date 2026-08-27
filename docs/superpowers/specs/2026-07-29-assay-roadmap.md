@@ -3823,6 +3823,45 @@ correct one, verified against the feed itself. Independent review mutations 3/3 
 
 ---
 
+### D99 — Bitnami: an app layer riding on someone else's distro
+
+**Decision.** Bitnami-packaged applications scan end to end: OSV "Bitnami" ingestion
+(9,059 records, bare release-less key), a `Bitnami{}` comparer, and a new image cataloger
+for the `/opt/bitnami` SPDX markers. Bitnami is NOT a distro — no os-release of its own
+(current images are Photon 5.0-based since Broadcom's 2025 "Secure Images" transition;
+frozen `bitnamilegacy/*` images are Debian 12) — so it routes purl-type-keyed like a
+language ecosystem (`pkg:bitnami/<name>` → "Bitnami"), never through Distro.Ecosystem(),
+and the cataloger runs ALONGSIDE the distro cataloger: one scan reports Photon (or Debian)
+OS packages AND Bitnami app packages — the dual inventory D7 was written for.
+
+**The comparer is SemVer plus one measured convention.** An installed Bitnami component
+carries a trailing numeric build revision its advisory bounds do not (`18.6.0-3` installed
+vs fixed `18.6.0`); under plain SemVer the `-3` would read as a PRE-release and rank the
+patched build below its own fix. `Bitnami{}` strips one trailing `-<digits>` from EITHER
+side (31 of 4,375 advisory strings carry the shape too), orders same-core revisions
+numerically, and treats a bare bound as naming the whole build train. The 44 build-train
+labels SemVer refuses ("7.4-update41.0") surface as skipped-with-count (D9) — and the E2E
+run proved the class live, unprompted: json-c's `"0.15-20200726.0"` bound skipped with
+cause=advisory rather than silently clean. 86 records carry no aliases at all (CVE only in
+the ID text) — left unjoined by D3's discipline, counted, not parsed.
+
+**The cataloger reuses D84 nearly whole.** Markers are SPDX 2.3 JSON despite the `.spdx`
+extension; `spdx.Parse` runs per marker unmodified (purl-only versions, bundled libs like
+geos/proj/gdal included), filtered to Bitnami purls. One new source primitive —
+`FilesMatching(dir, prefix, suffix)`, any depth, FilesUnder's layer semantics verbatim —
+because real images put several markers in one directory and the sibling `.spdx-*.json` is
+a symlink the suffix filter alone excludes. The legacy `.bitnami_components.json` is read
+alongside and deduped by (name, version), SPDX winning — a real legacy image carries the
+identical pair in both places.
+
+**Differential, day one.** The frozen bitnamilegacy/postgresql (digest-pinned, Debian 12 +
+Bitnami apps, 51 Bitnami findings) joined the weekly targets (22): **assay 497 / grype 497
+/ agree 485**, a symmetric 12/12 residue — the largest-corpus near-parity any target has
+posted. Independent review mutations 5/5 red (asymmetric strip, lexicographic revisions,
+unregistered purl key, dropped suffix check, replaced-not-appended inventory).
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

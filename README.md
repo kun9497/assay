@@ -651,6 +651,9 @@ exited 0 while 24 findings went unmentioned.
 - [x] Hummingbird (D98) — Red Hat's hardened line, extracted from the CSAF feed assay
       already fetches: CPE-scoped, purl-read (stream labels fan out), bare rolling key;
       day-one differential traced every grype-only tuple to grype's own stale snapshot
+- [x] Bitnami (D99) — an app layer riding on someone else's distro: purl-type routing,
+      a revision-stripping SemVer wrapper, and a marker cataloger that reuses the D84
+      SPDX reader; day-one differential 497/497 with agree 485, dual inventory proven
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a

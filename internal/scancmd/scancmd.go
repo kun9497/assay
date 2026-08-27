@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kun9497/assay/internal/cataloger/apkdb"
+	"github.com/kun9497/assay/internal/cataloger/bitnamidb"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"github.com/kun9497/assay/internal/cataloger/dirscan"
 	"github.com/kun9497/assay/internal/cataloger/dpkgdb"
@@ -215,6 +216,25 @@ const (
 	// is a direct child of local/, not one level deeper, and is not named
 	// "desc" either.
 	pacmanLocalDir = "var/lib/pacman/local"
+	// bitnamiDir is where Bitnami installs every application it packages
+	// (D99). Its own markers are discovered rather than asked for by exact
+	// name (source.FilesMatching, below) for the same reason
+	// dpkgStatusDir's and pacmanLocalDir's contents are: they are named
+	// after the component they describe.
+	bitnamiDir = "opt/bitnami"
+	// bitnamiSPDXPrefix and bitnamiSPDXSuffix are D99's own marker shape:
+	// "/opt/bitnami/**/.spdx-<component>.spdx", an SPDX 2.3 JSON document
+	// despite the ".spdx" extension. A same-named ".json" symlink sits
+	// beside every real marker on a real image; it is excluded by this
+	// pattern alone (its suffix is ".json"), with no symlink-specific
+	// handling needed on top.
+	bitnamiSPDXPrefix = ".spdx-"
+	bitnamiSPDXSuffix = ".spdx"
+	// bitnamiLegacyPath is the frozen-image fallback (D99): a flat
+	// name -> {version, ...} map with no bundled-library detail, carried
+	// only by older "bitnamilegacy" images alongside their own SPDX
+	// markers.
+	bitnamiLegacyPath = "opt/bitnami/.bitnami_components.json"
 )
 
 // apkDBPaths is every tar entry the apk probe asks for, traditional path
@@ -1032,16 +1052,85 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 	}
 	target.Packages = pkgs
 
+	// D99: Bitnami app packages are catalogued ALONGSIDE the distro
+	// inventory above, not instead of it (D7) — a Bitnami image is a real
+	// distro (Photon for current images, Debian for frozen legacy ones)
+	// PLUS whatever applications Bitnami installed under /opt/bitnami, and
+	// both halves belong in one Target. Unlike the distro switch above,
+	// finding no Bitnami markers is not an error: the overwhelming majority
+	// of images this build scans are not Bitnami images at all, and
+	// /opt/bitnami simply does not exist in them.
+	bitnamiPkgs, bitnamiSkipped, err := catalogBitnami(img)
+	if err != nil {
+		return pkgmeta.Target{}, cyclonedx.Stats{}, err
+	}
+	target.Packages = append(target.Packages, bitnamiPkgs...)
+	skippedRecords += bitnamiSkipped
+
 	// A record whose header could not be read is a package whose version we do
 	// not know, which is the field that already means exactly that and already
 	// feeds Summary.TargetIncomplete (D36). Counting it anywhere else, or not
 	// counting it, would let an image with three damaged headers report the
 	// same as one with none.
 	return target, cyclonedx.Stats{
-		Cataloged:        len(pkgs),
-		Components:       len(pkgs) + skippedRecords,
+		Cataloged:        len(target.Packages),
+		Components:       len(target.Packages) + skippedRecords,
 		SkippedNoVersion: skippedRecords,
 	}, nil
+}
+
+// catalogBitnami discovers and parses every Bitnami marker in img (D99),
+// merging the SPDX-derived and legacy-JSON-derived inventories into one. It
+// always probes for both marker shapes, regardless of what the distro
+// switch in catalogFromImage found — an image can be Bitnami-flavoured or
+// not independent of which distro backs it, so this is unconditional rather
+// than gated on a prior case matching.
+//
+// The returned int is a symlinked-marker count, counted the same way
+// dpkgStatusDir's and pacmanLocalDir's own symlinks are (D54, D36): a marker
+// this build did not read is a package whose version is unknown, not a
+// package silently dropped from the inventory.
+func catalogBitnami(img *source.Image) ([]pkgmeta.Package, int, error) {
+	markerFiles, markerLinks, err := img.FilesMatching(bitnamiDir, bitnamiSPDXPrefix, bitnamiSPDXSuffix)
+	if err != nil {
+		return nil, 0, err
+	}
+	var spdxPkgs []pkgmeta.Package
+	for _, name := range source.SortedNames(markerFiles) {
+		f := markerFiles[name]
+		pkgs, err := bitnamidb.ParseSPDXMarker(bytes.NewReader(f.Data), name)
+		if err != nil {
+			return nil, 0, fmt.Errorf("parse %s: %w", name, err)
+		}
+		for i := range pkgs {
+			for j := range pkgs[i].Locations {
+				pkgs[i].Locations[j].LayerDigest = f.DiffID
+			}
+		}
+		spdxPkgs = append(spdxPkgs, pkgs...)
+	}
+
+	// The legacy fallback is a single exact path, unlike the markers above,
+	// so it is asked for by name (source.Image.Files) rather than
+	// discovered.
+	var legacyPkgs []pkgmeta.Package
+	legacyFiles, err := img.Files([]string{bitnamiLegacyPath})
+	if err != nil {
+		return nil, 0, err
+	}
+	if f, ok := legacyFiles[bitnamiLegacyPath]; ok {
+		legacyPkgs, err = bitnamidb.ParseLegacyComponents(bytes.NewReader(f.Data), bitnamiLegacyPath)
+		if err != nil {
+			return nil, 0, fmt.Errorf("parse %s: %w", bitnamiLegacyPath, err)
+		}
+		for i := range legacyPkgs {
+			for j := range legacyPkgs[i].Locations {
+				legacyPkgs[i].Locations[j].LayerDigest = f.DiffID
+			}
+		}
+	}
+
+	return bitnamidb.Merge(spdxPkgs, legacyPkgs), markerLinks, nil
 }
 
 // redHatFindings reports whether any finding was matched under a Red Hat

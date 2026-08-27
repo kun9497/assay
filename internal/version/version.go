@@ -144,6 +144,15 @@ var registry = map[string]Comparer{
 	// literal bare string with no release suffix at all — "Hummingbird" IS
 	// the whole key this project ever builds for it, not a truncated one.
 	"Hummingbird": RPM{},
+	// D99. Bitnami is release-less like Wolfi/MinimOS/Echo/Arch:rolling
+	// above -- OSV keys its own archive with the bare string "Bitnami" on
+	// 100% of affected entries (measured 2026-08-27, 9,059 records), and
+	// pkgmeta.EcosystemForPURLType's "bitnami" case writes that identical
+	// literal with no release suffix, since Bitnami is not a distro at all
+	// (D6 satisfied vacuously) -- an application vendor whose own packaging
+	// revision (Bitnami{}'s own doc comment) is the only thing that needed a
+	// new Comparer, not a new key shape.
+	"Bitnami": Bitnami{},
 }
 
 // mainlineUbuntu matches the two shapes OSV gives a mainline Ubuntu release:

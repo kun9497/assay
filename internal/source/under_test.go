@@ -395,3 +395,214 @@ func TestFilesUnder_NormalisesTheDirectory(t *testing.T) {
 		}
 	}
 }
+
+// TestFilesMatching_MultipleMarkersInOneDirectory is D99's caller-first proof:
+// a real redis image carries TWO markers in the same directory
+// (common/.spdx-nss-wrapper.spdx and common/.spdx-wait-for-port.spdx, measured
+// 2026-08-27), which neither FilesUnder (matches any direct-child FILE,
+// including the ".json" symlink siblings this fixture also carries) nor
+// FilesNamed (which needs ONE exact filename per subdirectory, and the
+// filename here varies by component) can express on its own.
+func TestFilesMatching_MultipleMarkersInOneDirectory(t *testing.T) {
+	img := imageOf(layerOfOrdered(t, "sha256:one",
+		entry{name: "opt/bitnami/common/.spdx-nss-wrapper.spdx", body: "doc-1"},
+		entry{name: "opt/bitnami/common/.spdx-wait-for-port.spdx", body: "doc-2"},
+		// A same-named ".json" symlink sits beside every real marker on a
+		// real image (basename ".spdx-nss-wrapper.json"), but its suffix is
+		// ".json", not ".spdx" -- so it is excluded by the pattern itself,
+		// not by symlink handling, and must not appear in the result.
+		entry{name: "opt/bitnami/common/.spdx-nss-wrapper.json", link: ".spdx-nss-wrapper.spdx"},
+		// A file matching the suffix but not the prefix, and vice versa,
+		// must both be excluded -- basename matching needs BOTH ends.
+		entry{name: "opt/bitnami/common/notes.spdx", body: "wrong prefix"},
+		entry{name: "opt/bitnami/common/.spdx-readme.txt", body: "wrong suffix"},
+	))
+	got, links, err := img.FilesMatching("opt/bitnami", ".spdx-", ".spdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if links != 0 {
+		t.Errorf("symlinks = %d, want 0 -- the .json sibling fails the suffix match before "+
+			"symlink handling is even reached", links)
+	}
+	want := []string{
+		"opt/bitnami/common/.spdx-nss-wrapper.spdx",
+		"opt/bitnami/common/.spdx-wait-for-port.spdx",
+	}
+	if g := namesOf(got); len(g) != 2 || g[0] != want[0] || g[1] != want[1] {
+		t.Errorf("FilesMatching = %v, want exactly %v", g, want)
+	}
+}
+
+// TestFilesMatching_SymlinksAreCountedNotFollowed mirrors FilesUnder's and
+// FilesNamed's own tests of the identical rule, using a symlink whose
+// basename DOES match the pattern (unlike the ".json" sibling above, which
+// is excluded by the pattern itself).
+func TestFilesMatching_SymlinksAreCountedNotFollowed(t *testing.T) {
+	img := imageOf(
+		layerOfOrdered(t, "sha256:base",
+			entry{name: "opt/bitnami/redis/.spdx-redis.spdx", body: "real doc"},
+		),
+		layerOfOrdered(t, "sha256:top",
+			entry{name: "opt/bitnami/redis/.spdx-redis.spdx", link: "../common/.spdx-shared.spdx"},
+		),
+	)
+	got, links, err := img.FilesMatching("opt/bitnami", ".spdx-", ".spdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if links != 1 {
+		t.Errorf("symlinks = %d, want 1", links)
+	}
+	if _, ok := got["opt/bitnami/redis/.spdx-redis.spdx"]; ok {
+		t.Errorf("the newer layer replaced the marker with a symlink, so the lower layer's "+
+			"regular file must not be returned in its place: %q",
+			bodiesOf(t, got)["opt/bitnami/redis/.spdx-redis.spdx"])
+	}
+	if len(got) != 0 {
+		t.Errorf("FilesMatching = %v, want empty", namesOf(got))
+	}
+}
+
+// TestFilesMatching_NestedAtVaryingDepths proves the recursive-any-depth
+// choice: one marker sits directly one level under the root
+// (opt/bitnami/postgresql/.spdx-postgresql.spdx, the shape every real image
+// measured 2026-08-27 actually uses) and another sits two levels down
+// (opt/bitnami/postgresql/extensions/.spdx-postgis.spdx, a shape no real
+// image has shown yet but that FilesMatching must not silently drop the day
+// one does) -- both must be found in one call.
+func TestFilesMatching_NestedAtVaryingDepths(t *testing.T) {
+	img := imageOf(layerOfOrdered(t, "sha256:one",
+		entry{name: "opt/bitnami/postgresql/.spdx-postgresql.spdx", body: "main app"},
+		entry{name: "opt/bitnami/postgresql/extensions/.spdx-postgis.spdx", body: "nested"},
+		// A marker directly at the root itself (depth zero) must also be
+		// found -- "any depth" includes zero.
+		entry{name: "opt/bitnami/.spdx-root.spdx", body: "root level"},
+	))
+	got, _, err := img.FilesMatching("opt/bitnami", ".spdx-", ".spdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"opt/bitnami/.spdx-root.spdx",
+		"opt/bitnami/postgresql/.spdx-postgresql.spdx",
+		"opt/bitnami/postgresql/extensions/.spdx-postgis.spdx",
+	}
+	if g := namesOf(got); len(g) != 3 || g[0] != want[0] || g[1] != want[1] || g[2] != want[2] {
+		t.Errorf("FilesMatching = %v, want exactly %v", g, want)
+	}
+}
+
+// TestFilesMatching_DoesNotMatchASiblingDirectoryWithASharedPrefix pins the
+// path-segment boundary: "opt/bitnami2" must not be treated as being under
+// "opt/bitnami" merely because it shares the string as a prefix -- the same
+// hazard TestFilesUnder_DirectChildrenOnly guards for status.d/status.d.old.
+func TestFilesMatching_DoesNotMatchASiblingDirectoryWithASharedPrefix(t *testing.T) {
+	img := imageOf(layerOfOrdered(t, "sha256:one",
+		entry{name: "opt/bitnami2/other/.spdx-other.spdx", body: "wrong tree"},
+		entry{name: "opt/bitnami/redis/.spdx-redis.spdx", body: "right tree"},
+	))
+	got, _, err := img.FilesMatching("opt/bitnami", ".spdx-", ".spdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g := namesOf(got); len(g) != 1 || g[0] != "opt/bitnami/redis/.spdx-redis.spdx" {
+		t.Errorf("FilesMatching = %v, want only the file under the real opt/bitnami tree", g)
+	}
+}
+
+// TestFilesMatching_NewestLayerWins mirrors FilesUnder's and FilesNamed's own
+// tests of the identical rule.
+func TestFilesMatching_NewestLayerWins(t *testing.T) {
+	img := imageOf(
+		layerOfOrdered(t, "sha256:base",
+			entry{name: "opt/bitnami/redis/.spdx-redis.spdx", body: "old doc"},
+		),
+		layerOfOrdered(t, "sha256:top",
+			entry{name: "opt/bitnami/redis/.spdx-redis.spdx", body: "new doc"},
+		),
+	)
+	got, _, err := img.FilesMatching("opt/bitnami", ".spdx-", ".spdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := bodiesOf(t, got)["opt/bitnami/redis/.spdx-redis.spdx"]; b != "new doc" {
+		t.Errorf("body = %q, want the newer layer's doc", b)
+	}
+	if got["opt/bitnami/redis/.spdx-redis.spdx"].DiffID != "sha256:top" {
+		t.Errorf("DiffID = %q, want sha256:top", got["opt/bitnami/redis/.spdx-redis.spdx"].DiffID)
+	}
+}
+
+// TestFilesMatching_WhiteoutHidesLowerLayers mirrors FilesUnder's own test of
+// the identical rule.
+func TestFilesMatching_WhiteoutHidesLowerLayers(t *testing.T) {
+	img := imageOf(
+		layerOfOrdered(t, "sha256:base",
+			entry{name: "opt/bitnami/redis/.spdx-redis.spdx", body: "removed"},
+			entry{name: "opt/bitnami/postgresql/.spdx-postgresql.spdx", body: "kept"},
+		),
+		layerOfOrdered(t, "sha256:top",
+			entry{name: "opt/bitnami/redis/.wh..spdx-redis.spdx", body: ""},
+		),
+	)
+	got, _, err := img.FilesMatching("opt/bitnami", ".spdx-", ".spdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "opt/bitnami/postgresql/.spdx-postgresql.spdx"
+	if g := namesOf(got); len(g) != 1 || g[0] != want {
+		t.Errorf("FilesMatching = %v, want only %v", g, want)
+	}
+}
+
+// TestFilesMatching_OpaqueHidesEverythingBelow mirrors FilesUnder's own test
+// of the identical rule -- an opaque marker replaces the WHOLE subtree below
+// it, not just its own directory level, which is the case any-depth matching
+// has to get right that a fixed-depth-one rule would not exercise at all.
+func TestFilesMatching_OpaqueHidesEverythingBelow(t *testing.T) {
+	img := imageOf(
+		layerOfOrdered(t, "sha256:base",
+			entry{name: "opt/bitnami/postgresql/extensions/.spdx-old.spdx", body: "old"},
+		),
+		layerOfOrdered(t, "sha256:top",
+			entry{name: "opt/bitnami/postgresql/.wh..wh..opq", body: ""},
+			entry{name: "opt/bitnami/postgresql/.spdx-postgresql.spdx", body: "new"},
+		),
+	)
+	got, _, err := img.FilesMatching("opt/bitnami", ".spdx-", ".spdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "opt/bitnami/postgresql/.spdx-postgresql.spdx"
+	if g := namesOf(got); len(g) != 1 || g[0] != want {
+		t.Errorf("FilesMatching = %v, want only %v (the opaque directory's old nested file must be hidden)", g, want)
+	}
+}
+
+// TestFilesMatching_AbsentDirectoryIsEmptyNotAnError mirrors FilesUnder's own
+// test of the identical rule.
+func TestFilesMatching_AbsentDirectoryIsEmptyNotAnError(t *testing.T) {
+	img := imageOf(layerOfOrdered(t, "sha256:one", entry{name: "etc/os-release", body: "ID=photon"}))
+	got, links, err := img.FilesMatching("opt/bitnami", ".spdx-", ".spdx")
+	if err != nil {
+		t.Fatalf("FilesMatching: %v, want no error for an image without the directory", err)
+	}
+	if len(got) != 0 || links != 0 {
+		t.Errorf("FilesMatching = %v (%d links), want empty", namesOf(got), links)
+	}
+}
+
+// TestFilesMatching_RefusesTheImageRootOrEmptyPattern mirrors FilesNamed's
+// own refusal tests.
+func TestFilesMatching_RefusesTheImageRootOrEmptyPattern(t *testing.T) {
+	img := imageOf(layerOfOrdered(t, "sha256:one", entry{name: "etc/os-release", body: "ID=photon"}))
+	for _, dir := range []string{"", ".", "/", "./"} {
+		if _, _, err := img.FilesMatching(dir, ".spdx-", ".spdx"); err == nil {
+			t.Errorf("FilesMatching(%q, ...) returned no error; the image root must be refused", dir)
+		}
+	}
+	if _, _, err := img.FilesMatching("opt/bitnami", "", ""); err == nil {
+		t.Error(`FilesMatching("opt/bitnami", "", "") returned no error; an empty prefix and suffix must be refused`)
+	}
+}

@@ -119,6 +119,10 @@ func TestEcosystemForPURLType(t *testing.T) {
 	cases := map[string]string{
 		"golang": "Go", "npm": "npm", "pypi": "PyPI", "cargo": "crates.io",
 		"gem": "RubyGems", "nuget": "NuGet", "composer": "Packagist", "maven": "Maven",
+		// D99: bitnami is release-less like cargo/gem/etc, not release-qualified
+		// like apk/rpm/deb, so it belongs in this map rather than in
+		// ResolveDistroPURL.
+		"bitnami": "Bitnami",
 	}
 	for typ, want := range cases {
 		got, ok := EcosystemForPURLType(typ)

@@ -3648,6 +3648,51 @@ fix-이전의 no-fix 행을 담고 있습니다. assay의 더 작은 답이 옳�
 
 ---
 
+### D99 — Bitnami: 남의 배포판 위에 올라탄 애플리케이션 레이어
+
+**결정.** Bitnami로 패키징된 애플리케이션은 끝에서 끝까지 스캔됩니다: OSV
+"Bitnami" 수집(레코드 9,059개, 맨 무-릴리스 키), `Bitnami{}` comparer, 그리고
+`/opt/bitnami` SPDX 마커를 위한 새 이미지 cataloger입니다. Bitnami는 배포판이
+'아닙니다' — 자기만의 os-release가 없습니다(현재 이미지는 Broadcom의 2025년
+"Secure Images" 전환 이후 Photon 5.0 기반입니다; 얼어붙은 `bitnamilegacy/*`
+이미지는 Debian 12입니다) — 그래서 언어 생태계처럼 purl-type으로 키를 잡고
+(`pkg:bitnami/<name>` → "Bitnami"), 결코 `Distro.Ecosystem()`을 거치지 않으며,
+cataloger는 distro cataloger와 '나란히' 돕니다: 스캔 하나가 Photon(또는
+Debian) OS 패키지'와' Bitnami 앱 패키지를 함께 보고합니다 — D7이 쓰인 바로 그
+이중 인벤토리입니다.
+
+**이 comparer는 SemVer에 측정된 관례 하나를 더한 것입니다.** 설치된 Bitnami
+컴포넌트는 그 advisory 경계에는 없는 후행 숫자 빌드 리비전을 답니다(설치됨
+`18.6.0-3` 대 fixed `18.6.0`); 순수 SemVer 아래서는 `-3`이 PRE-release로 읽혀서
+패치된 빌드가 자신의 fix보다 아래로 매겨집니다. `Bitnami{}`는 '양쪽' 어느
+쪽에서든 후행 `-<digits>` 하나를 벗겨내고(advisory 문자열 4,375개 중 31개도
+이 모양을 답니다), 같은 core의 리비전은 숫자로 순서를 매기며, 맨 경계는 빌드
+트레인 전체를 가리키는 것으로 취급합니다. SemVer가 거부하는 빌드 트레인
+레이블 44개("7.4-update41.0")는 세면서 skip으로 드러납니다(D9) — 그리고 E2E
+실행이 그 부류가 실전임을 요청 없이 증명했습니다: json-c의
+`"0.15-20200726.0"` 경계가 조용히 clean이 되는 대신 cause=advisory로
+skip됐습니다. 레코드 86개는 alias가 아예 없습니다(CVE가 ID 텍스트에만 있음) —
+D3의 규율에 따라 조인하지 않은 채 남겨두고, 세기만 하지 파싱하지 않습니다.
+
+**cataloger는 D84를 거의 통째로 재사용합니다.** 마커는 `.spdx` 확장자에도
+불구하고 SPDX 2.3 JSON입니다; `spdx.Parse`가 마커마다 수정 없이 돕니다(purl만
+있는 버전, geos/proj/gdal 같은 번들 라이브러리 포함), Bitnami purl로
+필터링합니다. 새 source primitive 하나 — `FilesMatching(dir, prefix, suffix)`,
+깊이 무관, FilesUnder의 레이어 의미론 그대로 — 왜냐하면 실제 이미지는 마커
+여러 개를 한 디렉터리에 두고 형제 `.spdx-*.json`은 심볼릭 링크라서 suffix
+필터만으로는 제외되기 때문입니다. 레거시 `.bitnami_components.json`도 함께
+읽고 (name, version)으로 중복 제거하며 SPDX가 이깁니다 — 실제 레거시
+이미지는 두 곳 모두에 동일한 쌍을 담고 있습니다.
+
+**차등, 첫날부터.** 얼어붙은 bitnamilegacy/postgresql(digest로 고정, Debian 12
++ Bitnami 앱, Bitnami finding 51건)이 주간 타깃(22개)에 합류했습니다: **assay
+497 / grype 497 / agree 485**, 대칭적인 12/12 잔여 — 어떤 타깃도 낸 적 없는
+가장 큰 코퍼스의 근접 동등성입니다. 독립 리뷰 mutation 5개 중 5개가
+red입니다(비대칭 strip, 사전식 리비전, 등록되지 않은 purl 키, 빠진 suffix
+검사, 추가 대신 교체된 인벤토리).
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모
