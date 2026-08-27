@@ -101,6 +101,8 @@ cannot be trusted — with `2` outranking `1` outranking `0`.
   are the authoritative record of what is built.
 - **[docs/deferred-decisions.md](docs/deferred-decisions.md)** — what is deliberately *not*
   built, and why, each with a revisit trigger.
+- **[docs/integrations.md](docs/integrations.md)** — CI integration: copy-pasteable GitHub
+  Actions and GitLab CI examples, SARIF upload, and exit-code gating.
 - **[docs/superpowers/specs/2026-07-29-assay-roadmap.md](docs/superpowers/specs/2026-07-29-assay-roadmap.md)**
   — the reference design, every decision recorded as `D1`…`D101` with its reasoning.
 

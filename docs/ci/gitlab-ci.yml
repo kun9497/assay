@@ -1,0 +1,36 @@
+# Example: scan a container image with assay in GitLab CI, keep the report as
+# a job artifact, and fail the pipeline on a high-or-worse finding.
+#
+# Copy the `assay_scan` job into your own .gitlab-ci.yml and adjust IMAGE.
+#
+# GitLab has no built-in SARIF ingestion the way GitHub's Security tab does,
+# so this keeps the JSON report as a downloadable artifact (and a SARIF one
+# for tools that read it). The build verdict comes from assay's exit code.
+assay_scan:
+  image: alpine:3.20
+  variables:
+    IMAGE: alpine:3.19 # <-- the image to scan
+  before_script:
+    - apk add --no-cache curl docker-cli
+    - curl -sSfL https://raw.githubusercontent.com/kun9497/assay/main/install.sh | sh -s -- -b /usr/local/bin
+    - assay --version
+  script:
+    # assay db update pulls the published database from ghcr.io. It needs read
+    # access to that artifact — log in with a token that has it, or run
+    # `assay db build` instead (slower, needs no external artifact).
+    - echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+    - assay db update
+    # Produce both reports; the exit code (captured) decides the verdict.
+    - assay scan "$IMAGE" --output json  > assay.json
+    - |
+      set +e
+      assay scan "$IMAGE" --output sarif --fail-on high > assay.sarif
+      code=$?
+      # exit 1 = finding at/above threshold, 2 = scan untrustworthy; both fail.
+      exit $code
+  artifacts:
+    when: always # keep the report even when the gate fails the job
+    paths:
+      - assay.json
+      - assay.sarif
+    expire_in: 30 days

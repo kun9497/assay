@@ -1,0 +1,67 @@
+# Example: scan a container image with assay on every push, record the
+# findings in GitHub's Security tab (SARIF), and fail the build on a
+# high-or-worse finding.
+#
+# Copy this into .github/workflows/ in your own repo and adjust IMAGE. It is
+# an EXAMPLE, not an active workflow in the assay repo itself.
+#
+# The scan and the gate are ONE step run so the SARIF is always written and
+# always uploaded — even when the gate fails — so a failed build still leaves
+# the findings recorded in the Security tab, not lost.
+name: vulnerability scan
+
+on:
+  push:
+    branches: [main]
+  # A weekly re-scan catches vulnerabilities disclosed after the image was
+  # last built, without a code change.
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+  security-events: write # upload the SARIF to code scanning
+  packages: read # assay db update pulls the published database (see note below)
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: alpine:3.19 # <-- the image to scan
+    steps:
+      - name: Install assay
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/kun9497/assay/main/install.sh | sh -s -- -b /usr/local/bin
+          assay --version
+
+      # assay db update pulls the published OCI database from
+      # ghcr.io/kun9497/assay-db. That artifact needs read access, which this
+      # login grants for a repo in the same org (packages: read, above). If
+      # you cannot reach it, run `assay db build` instead — slower, but it
+      # needs no external artifact.
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Update the vulnerability database
+        run: assay db update
+
+      - name: Scan
+        id: scan
+        run: |
+          set +e
+          assay scan "$IMAGE" --output sarif --fail-on high > assay.sarif
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      # Always upload, even when the gate below fails — the point of code
+      # scanning is to keep the record regardless of the build verdict.
+      - name: Upload SARIF to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: assay.sarif
+          category: assay
+
+      # Now let the exit code decide the build: 1 = a finding at or above the
+      # threshold, 2 = the scan could not run or its result cannot be trusted.
+      - name: Fail on findings
+        run: exit ${{ steps.scan.outputs.exit_code }}
