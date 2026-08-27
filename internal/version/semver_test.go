@@ -365,6 +365,15 @@ func TestNoUnbackedDistroComparer(t *testing.T) {
 		// string, so it is the whole key this project ever builds for Arch,
 		// the same as Wolfi/MinimOS/Echo above.
 		"Arch:rolling": true,
+		// D98: "Hummingbird" is a bare, release-less RPM registry entry too
+		// -- Red Hat's own CSAF VEX provider (internal/provider/redhat)
+		// scopes Hummingbird content by CPE within the SAME feed mainline
+		// RHEL already ingests, so what arrived with the comparer here was
+		// the CPE-driven purl read (hummingbirdCPE, hummingbirdPackageOf),
+		// not new Package.Source plumbing: the rpmdb cataloger already
+		// populates it from SOURCERPM regardless of distro ID, the same
+		// free ride Rocky/AlmaLinux/Azure Linux/Photon OS already ride.
+		"Hummingbird": true,
 	}
 	for eco := range registry {
 		if !want[eco] {

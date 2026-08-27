@@ -261,6 +261,13 @@ var rpmFamilies = map[string]bool{
 	// unexercised for years. TestCatalogFromImage_PhotonDistroWithNoDatabase
 	// is the held test that proves this entry is actually reached.
 	"photon": true,
+	// D98: same discipline as "photon" -- verified by grep before adding it
+	// rather than assumed pre-seeded. Project Hummingbird's rpmdb is SQLite
+	// at usr/lib/sysimage/rpm, the same path/backend RHEL 9+ uses, and
+	// os-release lives at usr/lib/os-release with the ordinary etc symlink
+	// -- no new probe path was needed, only this entry so a missing
+	// database reports the specific error rather than the vaguer one.
+	"hummingbird": true,
 }
 
 // rpmDBPaths is every tar entry the RPM probe asks for.

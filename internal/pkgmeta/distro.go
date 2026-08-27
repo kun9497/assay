@@ -610,6 +610,42 @@ func (d Distro) Ecosystem() (string, error) {
 		// rolling stream for as long as this project has looked, so there is
 		// nothing a second value would need to distinguish.
 		return "Arch:rolling", nil
+	case "hummingbird":
+		// D98. Red Hat's Project Hummingbird (a minimal hardened container
+		// line, April 2026) ingests from the SAME CSAF VEX feed as mainline
+		// RHEL (internal/provider/redhat), scoped by its own CPE
+		// ("cpe:/a:redhat:hummingbird:1") rather than routed here by
+		// VERSION_ID the way rhel/rocky/almalinux/ol truncate a dotted
+		// major — there is no dotted major to truncate.
+		//
+		// VersionID is deliberately ignored entirely, the same shape D88 gave
+		// Wolfi/Chainguard and D92 gave MinimOS/Echo: os-release's own
+		// VERSION_ID ("20251124", verified against the purl qualifier a real
+		// Hummingbird package carries, distro=hummingbird-20251124) and that
+		// purl qualifier itself are both DATED BUILD SNAPSHOTS, not a release
+		// axis — they change on every rebuild the way MinimOS's frozen
+		// VERSION_ID never does, so reading either would fragment one
+		// rolling stream into phantom per-snapshot releases (D92's own
+		// MinimOS reasoning, restated for a snapshot that actually DOES
+		// change rather than one that happens to stay frozen). This is also
+		// grype's own convention: vunnel assigns Hummingbird
+		// {Alias: "hummingbird", Rolling: true}, the identical shape it gives
+		// Wolfi and Chainguard.
+		//
+		// The key is the bare "Hummingbird" sentinel, not "Hummingbird:1" or
+		// "Hummingbird:20251124" — internal/provider/redhat's own
+		// hummingbirdEcosystem constant must spell the identical string, and
+		// TestEcosystemAgreesWithCataloger_Hummingbird (in that package)
+		// cross-checks the two directly, the same discipline D77's
+		// TestKeyAgreesWithCataloger holds for SLES's fold.
+		//
+		// ID_LIKE on a real Hummingbird image reads "fedora rhel" (Red Hat's
+		// hardened images inherit RHEL's os-release lineage fields), but
+		// Distro carries no ID_LIKE field at all and this switch keys on ID
+		// alone, so a real rhel image can never be misrouted here by sharing
+		// that lineage, nor can a hummingbird image fall through to the
+		// "rhel" case above it.
+		return "Hummingbird", nil
 	default:
 		return "", fmt.Errorf("%w: distro %q is not supported yet", ErrNoEcosystem, d.ID)
 	}

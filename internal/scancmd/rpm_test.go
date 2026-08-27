@@ -81,6 +81,35 @@ VERSION_ID=5.0
 PRETTY_NAME="VMware Photon OS/Linux"
 `
 
+// osReleaseHummingbird is verbatim from a real quay.io/hummingbird/nginx:1.30.4
+// pull (measured 2026-08-27; a Go puller against go-containerregistry, not
+// docker/skopeo, since neither is installed on this box). ID is
+// "hummingbird" -- D98's routing case. ID_LIKE carries "fedora rhel", which
+// Distro has no field to read at all, so it cannot leak this image into
+// RHEL's key the way a routing bug based on ID_LIKE could.
+//
+// VERSION_ID is the dated build snapshot ("20251124") the CPE-scoped purl
+// qualifier also carries (distro=hummingbird-20251124) -- ignored entirely
+// by pkgmeta.Distro.Ecosystem's "hummingbird" case, the same way Wolfi's and
+// MinimOS's frozen VERSION_IDs are.
+//
+// Verified live: usr/lib/os-release carries this content and etc/os-release
+// is present but empty in the tar stream (a symlink, the same "etc/os-release
+// -> ../usr/lib/os-release" shape D88/D92/D95 already resolve via
+// source/walk.go's symlink-following read).
+const osReleaseHummingbird = `NAME="Hummingbird OS"
+VERSION="20251124"
+VERSION_ID="20251124"
+ID="hummingbird"
+ID_LIKE="fedora rhel"
+CPE_NAME="cpe:/a:redhat:hummingbird:1"
+HOME_URL="https://project-hummingbird.io/"
+VENDOR_NAME="Red Hat"
+VENDOR_URL="https://project-hummingbird.io/"
+BUG_REPORT_URL="https://issues.redhat.com/"
+PRETTY_NAME="Hummingbird OS 20251124"
+`
+
 func fixtureBytes(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(filepath.FromSlash(path))
@@ -286,6 +315,25 @@ func TestCatalogFromImage_PhotonDistroWithNoDatabase(t *testing.T) {
 		t.Fatal("a Photon OS image with no database was catalogued without error")
 	}
 	for _, want := range []string{"photon", "usr/lib/sysimage/rpm/rpmdb.sqlite", "var/lib/rpm/rpmdb.sqlite"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
+// TestCatalogFromImage_HummingbirdDistroWithNoDatabase is "hummingbird"'s
+// held test, the same discipline "photon"'s own comment names: verified
+// absent from rpmFamilies by grep before this slice added it, so this is
+// what proves the entry is actually reached rather than sitting unexercised
+// the way mariner/azurelinux did for years before D94's own review found
+// them.
+func TestCatalogFromImage_HummingbirdDistroWithNoDatabase(t *testing.T) {
+	img := rpmImage(t, map[string]string{osReleasePath: osReleaseHummingbird})
+	_, _, err := catalogFromImage("test-image", img)
+	if err == nil {
+		t.Fatal("a Hummingbird image with no database was catalogued without error")
+	}
+	for _, want := range []string{"hummingbird", "usr/lib/sysimage/rpm/rpmdb.sqlite", "var/lib/rpm/rpmdb.sqlite"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}

@@ -3608,6 +3608,46 @@ maxFindings는 4배 여유를 갖습니다.
 
 ---
 
+### D98 — Hummingbird: Red Hat의 소규모 배포판, 이미 우리가 받아오는 피드 안에
+
+**결정.** Red Hat의 Project Hummingbird(최소 강화 컨테이너 라인, 2026년 4월,
+`ID=hummingbird`)는 기존 Red Hat CSAF provider를 '확장'해서 끝에서 끝까지
+스캔됩니다 — 새 provider도, comparer도, cataloger도 없습니다. assay가 이미 받고
+있는 바로 그 CVE별 문서가 `cpe:/a:redhat:hummingbird:1`로 범위가 정해진
+Hummingbird 콘텐츠를 담고 있습니다(문서 49,462개 중 ~1,200–1,400개); 새 CPE 범위
+추출 경로가 각 product의 `purl`에서 이름과 버전을 읽습니다 — SUSE D77 패턴입니다 —
+Hummingbird의 product id는 NEVRA가 아니라 STREAM LABEL이기 때문입니다
+(`perl-main`은 `perl`과 `perl-Attribute-Handlers`로 갈라집니다), 그래서
+splitNEVRA는 그것을 잘못 파싱할 것입니다. ecosystem 키는 맨 `Hummingbird`입니다:
+VERSION_ID(`20251124`)는 재빌드마다 바뀌는 날짜 붙은 빌드 스냅샷이지 릴리스
+축이 아닙니다 — 그것으로 키를 잡으면 롤링 스트림 하나를 유령 릴리스들로
+쪼개게 됩니다(MinimOS의 얼어붙은-VERSION_ID 논거와, grype 자신의 rolling
+플래그입니다).
+
+**측정된 위험, 테스트로 붙듦.** platform 레이블은 스스로를 `"Red Hat Hardened
+Images"`와 `"red_hat_hardened_images"` 둘 다로 씁니다 — 한 문서 안에서도요 — 그래서
+해석은 오직 CPE에만 키를 겁니다. CVE 하나의 문서가 mainline과 Hummingbird 항목을
+둘 다 담습니다; `convert()`는 이미 그것들을 REDHAT-CVE-* 레코드 하나로
+합칩니다(증명된 것이지 가정이 아닙니다 — 레코드가 두 개였다면 자기 자신에 대한
+D90의 last-writer-wins가 됐을 것입니다). 맨 purl(`@version` 없음)은 D47의
+affected-at-every-version 관례를 따릅니다; `pkg:oci/...` leaf는 namespace 정규식이
+거부합니다. rpmdb(`usr/lib/sysimage/rpm`의 SQLite), os-release
+심볼릭 링크(`etc → usr/lib`), RPM comparer(`.hum1` EVR), SBOM purl
+qualifier(`distro=hummingbird-20251124`) 모두 기존 장치를 그대로 탑니다 — 마지막
+것은 주장이 아니라 테스트로 증명됐습니다.
+
+**차등이 첫날부터 스스로를 설명합니다.** quay.io/hummingbird/nginx가 주간
+타깃(21개)에 합류했습니다: assay 3 / grype 22 / agree 3, onlyAssay 0. grype 전용
+튜플 19개를 실전 문서까지 추적했습니다: 전부 Red Hat이 그 뒤 설치된 빌드와
+정확히 같은 지점에서 FIXED로 표시한 CVE입니다(glibc 2.43-8.2.hum1, openssl
+3.5.8-0.1.hum1) — fix가 나오면 재빌드되는 rolling 라인이라는 것은 현재 이미지가
+모든 fix와 같거나 그 위에 있다는 뜻이고, grype의 2026-08-25 스냅샷은 여전히
+fix-이전의 no-fix 행을 담고 있습니다. assay의 더 작은 답이 옳은 답이고, 피드
+자체로 검증됩니다. 독립 리뷰 mutation 3개 중 3개가 red입니다(CPE→mainline 키,
+누락된 purl에 지어낸 패키지, VERSION_ID 파편화).
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모
