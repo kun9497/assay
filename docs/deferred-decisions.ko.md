@@ -124,7 +124,8 @@ MiniZip이 Debian의 zlib1g에 빌드되어 있지 않다는 이유로 제외를
 쌓이면 match-exclusion을 고민해 볼 값이 있습니다); ubuntu는 wont-fix 15/15를 포함해
 96/96입니다(D85와 정확히 동등); rocky는 fixable 기준 99.4%이고 assay 전용 튜플 2건은
 결함 있는 업스트림 레코드로 거슬러 올라갑니다(RLSA-2023:6699는 지나치게 넓은 fixed
-이벤트를 담고 있습니다 — matcher가 아니라 업스트림 데이터 문제입니다); alma는 fixable
+이벤트를 담고 있습니다 — matcher가 아니라 업스트림 데이터 문제입니다; 2026-08-27에
+조사함, 아래 "Rocky's regenerated erratum" 참조); alma는 fixable
 집합이 정확히 일치합니다; oracle의 grype 전용 튜플은 grype가 FIPS 계보 ELSA를
 메인라인에 대고 매칭한 것입니다 — D79의 거부가 옳은 쪽입니다; fedora는 advisory
 수준에서 30/30이고 양방향 CVE-추출 구멍이 있습니다(우리 Bodhi 산문이 놓치는 것을
@@ -205,6 +206,78 @@ comparer는 D46이 RPM에 대해 거부한 모양이고, 측정된 수요 없는
 CleanStart가 os-release를 발행하기 시작할 때, 어떤 pull에서든 다시 확인할 값이
 있습니다), 또는 사용자가 이미지를 손에 들고 요청할 때입니다. **기반 작업은
 갖춰져 있습니다:** 위의 피드 측정, 그리고 수집 절반이 들어갈 D88/D92 템플릿입니다.
+
+---
+
+### Rocky의 재생성된 erratum — fix보다 3년 더 새로운 fixed 버전
+
+**2026-08-27에 조사함**(캐시된 차등 캡처가 아니라 실전 재-fetch). RLSA-2023:6699의
+OSV 레코드는 krb5 `0:1.21.1-10.el9_8`을 요구하는데, AlmaLinux의 동시대 ALSA-2023:6699와
+Red Hat 자신의 CSAF VEX는 두 CVE(CVE-2023-36054/39975) 모두에서 진짜 fix가
+`1.21.1-1.el9`라는 데 동의합니다. 단서는 Rocky 자신의 Apollo API에 있습니다: 그
+레코드는 `created_at` 2026-05-28을 달고 있습니다 — 2023년 erratum 이후 2년 반이
+지나 '재생성'된 것이고, 그 77-NEVRA 패키지 목록은 한결같이 그날 저장소에 있던
+krb5 빌드입니다. Apollo는 advisory의 패키지 목록을 fix가 나온 빌드가 아니라
+(재)생성 시점의 현재 저장소 상태에 묶습니다. 주간 차등의 rocky9 타깃에 있는
+assay 전용 튜플 두 개는 바로 이 레코드가 이미 고쳐진 `1.21.1-1.el9`를 취약하다고
+판정하는 것입니다 — assay의 comparer와 D8 연결 둘 다 잘못된 입력에 대해서는
+올바릅니다.
+
+**assay 쪽 변경 없음.** 나쁜 레코드 하나로는 override 메커니즘을 정당화할 수
+없습니다(부류가 나타나면 D16의 모양이 맞을 것입니다 — 그것이 재방문 트리거입니다:
+재생성된-fixed-버전 패턴을 가진 두 번째 Rocky 레코드). 신고 채널:
+github.com/rocky-linux/peridot issues(Apollo가 거기 있습니다; 선례 이슈
+#79/#82; 관련 검색 어디에서도 기존 신고를 찾지 못함) — 초안은 준비돼 있고,
+보내는 것은 사용자의 판단입니다.
+
+---
+
+### SUSE의 뒤엉킨 purl — libglib 하나가 아니라 패키지 계열 82개짜리 부류
+
+**2026-08-27에 조사함**(실전 csaf-vex 아카이브의 처음 12.65%, 문서 8,073개).
+D91의 로드맵 항목은 `pkg:rpm/suse/libglib@2_0-0`을 작성 특이점으로 기록했습니다;
+전수 조사는 그것이 하나의 '부류'임을 보여줍니다: 서로 다른 뒤엉킨 (name, version)
+쌍 102개가 **패키지 계열 82개**에 걸쳐 있습니다 — GNOME/WebKit/GStreamer 공유
+라이브러리 스택(libjavascriptcoregtk 138회, libwebkit2gtk 90회, libgst* module
+약 40개)과 도구(ca-certificates, permissions, chkstat)입니다. 근본 원인: SUSE의
+생성기(`generate-csaf-vex.pl`, 모든 문서 자신의 메타데이터에 이름이 있습니다)가
+맨, 릴리스 없는 product_version 계열 이름을 숫자 앞의 마지막 하이픈에서 쪼개서,
+soname 접미사(`-2_0-0`)를 버전으로 착각합니다. 모든 계열은 진짜 릴리스가 붙으면
+올바르게 철자된 형제 노드도 함께 담습니다.
+
+**오늘 assay를 바꾸지 않는 이유.** 전체 표본에서, 뒤엉킨 id를 참조하는
+`product_status`나 remediation은 0건입니다 — resolver 입장에서는 무해한 카탈로그
+비계일 뿐이고, 차등이 봤던 유일한 실전 사례(libglib)는 D91의 접기에서
+올바르게 작성된 LTSS leaf로 대체됐습니다. 위험한 것은 그 메커니즘 자체가
+손대지 않은 채 남아 있다는 점입니다: 앞으로 나올 문서가 뒤엉킨 id를 직접
+참조하면 아무 공개 없이 잘못된 (name, version)을 계산하게 됩니다. **다시 볼
+때는** 스캔 쪽 증상이 다시 뒤엉킨 id로 거슬러 올라갈 때(D91의 추적이
+템플릿입니다), 또는 SUSE가 생성기를 고칠 때입니다. 어디에서도(vunnel/trustify/
+vuln-list-update 소비자 포함) 기존 업스트림 신고를 찾지 못했습니다; SUSE
+보안 담당 연락처로 보낼 초안은 준비돼 있고, 보내는 것은 사용자의 판단입니다.
+
+---
+
+### 신선도 한 줄 요약과 죽은 Amazon extras topic 6개
+
+**2026-08-27에 조사함.** `assay db update`가 "upstream data as of 2023-09-25"를
+찍는 것은 결함이 아니라 '진짜' 데이터입니다: AL2 extras topic 6개(selinux-ng,
+ruby2.6, postgresql11, mono, httpd_modules, golang1.19)는 정확히 그 날짜 이후로
+ALAS advisory를 하나도 발행하지 않았습니다 — selinux-ng의 평생 단 한 번뿐인
+업데이트, 2023-09-25T22:00:00Z가 코퍼스의 최솟값입니다 — 그동안 다른 모든
+피드는 며칠 이내로 최신입니다(Amazon 하위 피드 75개, OSV zip 18개, Red Hat,
+Oracle, SUSE 전부에 걸쳐 실전 확인함). D12의 stalest-wins 규칙이
+`amazon.Fetch`의 fold 안에서 한 번, 그리고 ~20개 provider에 걸쳐 다시 한 번
+적용되어, 거의 죽은 부가 채널 하나가 다른 곳에서는 며칠 단위로 신선한
+~427,000-레코드 아티팩트 전체의 숫자 하나를 정하게 둡니다. `db status`는
+이미 provider별 진실을 공개하고 있습니다.
+
+**버그가 아니라 미뤄 둔 개선**: 한 줄 요약에서 그 하한을 귀속시키기(어느
+provider가 그것을 정했는지 찍기, 예: "(amazon)") 그리고/또는 DataAsOf가
+BuiltAt보다 몇 달 뒤처질 때 독자를 `db status`로 슬쩍 안내하기. 날짜 자체는
+바뀌면 안 됩니다 — D12의 "낡음을 절대 숨기지 않는다"는 설계 그대로 동작하고
+있습니다; 빠진 것은 귀속뿐입니다. `pull.go`가 다른 이유로 다시 열릴 때, 또는
+사용자가 실제로 그 줄을 잘못 읽었을 때 하면 됩니다.
 
 ---
 
