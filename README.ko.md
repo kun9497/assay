@@ -85,7 +85,8 @@ assay scan alpine:3.19 --fail-on high
 - **보이는 채로 남는 면제** — 수용하기로 한 finding은 `.assay.yaml` ignore 파일로
   억제합니다. 사유는 필수, 만료일은 선택. 억제된 finding은 게이트를 건드리지 않지만 모든
   출력 형식에서 개수와 함께 표시되며, GitHub code scanning에는 사라진 것이 아니라
-  dismissed로 보입니다.
+  dismissed로 보입니다. 사용법은
+  [docs/integrations.ko.md](docs/integrations.ko.md#받아들인-finding-waive하기)에.
 
 ## 어떻게 맞물리나
 
