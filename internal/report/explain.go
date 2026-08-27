@@ -463,6 +463,12 @@ func comparerName(ecosystem string) string {
 	// same reason every case above this comment's own doc warns about.
 	case "Hummingbird":
 		return "rpm"
+	// D99: "Bitnami" is a bare, release-less registry entry too -- not a
+	// distro at all, but named here for the same drift reason as every case
+	// above: version.For carries a real Comparer (Bitnami{}) for it, and
+	// this function must say so rather than fall through to "unknown".
+	case "Bitnami":
+		return "bitnami"
 	default:
 		return "unknown"
 	}

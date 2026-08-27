@@ -596,6 +596,60 @@ func TestEcosystems_ContainsMinimOSAndEcho(t *testing.T) {
 	}
 }
 
+// TestEcosystems_ContainsBitnami is D99's presence guard, the same shape as
+// TestEcosystems_ContainsMinimOSAndEcho above: Bitnami is not a distro at all
+// (no cross-family duplication to dodge), so it is fetched directly under
+// its own name.
+func TestEcosystems_ContainsBitnami(t *testing.T) {
+	if !slices.Contains(Ecosystems, "Bitnami") {
+		t.Error(`Ecosystems does not contain "Bitnami"`)
+	}
+}
+
+// TestFetch_BitnamiRecordEndToEnd is D99's own end-to-end fetch proof, the
+// same shape TestFetch_ChainguardCoversWolfiToo pins for Chainguard/Wolfi: a
+// synthetic record shaped like a real BIT-* one (aliases carrying the CVE,
+// per D3 -- 99.1% of the live archive has one) must be emitted with its
+// "Bitnami" ecosystem entry intact and that key present in
+// Provenance.Ecosystems, so a Bitnami image scan can find coverage.
+func TestFetch_BitnamiRecordEndToEnd(t *testing.T) {
+	body := zipWith(t, map[string]string{
+		"BIT-postgresql-2026-90005.json": `{"id":"BIT-postgresql-2026-90005",
+			"aliases":["CVE-2026-90005"],
+			"affected":[
+				{"package":{"name":"postgresql","ecosystem":"Bitnami","purl":"pkg:bitnami/postgresql"},
+				 "ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"18.6.0"}]}]}
+			]}`,
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/Bitnami/all.zip" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	p := New([]string{"Bitnami"}, srv.URL)
+	var got []advisory.Advisory
+	prov, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
+		got = append(got, a)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "BIT-postgresql-2026-90005" {
+		t.Fatalf("Fetch emitted %v, want exactly the one Bitnami record", got)
+	}
+	if len(got[0].Affected) != 1 || got[0].Affected[0].Ecosystem != "Bitnami" {
+		t.Errorf("Affected = %+v, want one entry keyed \"Bitnami\"", got[0].Affected)
+	}
+	if !slices.Contains(prov.Ecosystems, "Bitnami") {
+		t.Errorf("Provenance.Ecosystems = %v, want it to include Bitnami", prov.Ecosystems)
+	}
+}
+
 // TestFetch_ChainguardCoversWolfiToo is the end-to-end shape D88 rests on,
 // built from the real live-both-ecosystems record measured 2026-08-22
 // (CGA-224q-ccj5-2p53, trimmed to two package streams): one CGA record whose

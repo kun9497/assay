@@ -160,10 +160,22 @@ const DefaultBaseURL = "https://osv-vulnerabilities.storage.googleapis.com"
 // concern from this fetch: it is why a BellSoft image scores any findings
 // at all for its JDK packages, not why this archive is fetched under one
 // name instead of two.
+//
+// "Bitnami" is D99's entry, and it is not a distro at all -- Bitnami packages
+// applications (postgresql, redis, ...), not an operating system, so it has
+// no release axis and joins the release-less shapes above (Wolfi, MinimOS,
+// Echo, one archive path, no per-release keys) rather than the
+// release-qualified ones (Rocky Linux, Azure Linux, Alpaquita). Measured
+// 2026-08-27: 9,059 records, BIT-<pkg>-<year>-<num> ids, every affected
+// entry's ecosystem the bare string "Bitnami" (100%), CVE linkage via
+// `aliases` on 99.1% (the remaining 86 records carry no aliases and no
+// upstream at all -- D3 already reads both fields, and per that decision
+// nothing parses the CVE out of the ID text, so those 86 simply join
+// nothing), withdrawn 1.11% (D16's existing machinery drops them).
 var Ecosystems = []string{
 	"Go", "npm", "PyPI", "crates.io", "RubyGems", "Packagist", "NuGet", "Maven",
 	"Alpine", "Debian", "Ubuntu", "Rocky Linux", "AlmaLinux", "Chainguard",
-	"MinimOS", "Echo", "Azure Linux", "Alpaquita",
+	"MinimOS", "Echo", "Azure Linux", "Alpaquita", "Bitnami",
 }
 
 type Provider struct {
@@ -271,7 +283,8 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		if (eco == "Alpine" || eco == "Debian" || eco == "Ubuntu" || eco == "Rocky Linux" ||
 			eco == "AlmaLinux" || eco == "Chainguard" || eco == "Wolfi" ||
 			eco == "MinimOS" || eco == "Echo" || eco == "Azure Linux" ||
-			eco == "Alpaquita" || eco == "BellSoft Hardened Containers") && n == 0 {
+			eco == "Alpaquita" || eco == "BellSoft Hardened Containers" ||
+			eco == "Bitnami") && n == 0 {
 			return store.Provenance{}, fmt.Errorf("fetch %s: archive yielded no %s:* records", eco, eco)
 		}
 		// "Wolfi" and "BellSoft Hardened Containers" above are not dead

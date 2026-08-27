@@ -32,7 +32,9 @@ Amazon Linux 2/2023 (D73), Oracle Linux 5–10 (D74), Fedora (D75), SLES/openSUS
 added the apk `p:` provides bridge), Photon OS 3/4/5 (D96), Arch Linux (D97, the
 release-less `Arch:rolling` key), and Red Hat's Hummingbird (D98, carved out of the CSAF
 feed already fetched) —
-across three rpmdb backends: BerkeleyDB, SQLite and ndb (D44, D76). A weekly digest-pinned
+across three rpmdb backends: BerkeleyDB, SQLite and ndb (D44, D76). Bitnami app layers
+catalog from their /opt/bitnami SPDX markers alongside the base distro (D99, dual
+inventory). A weekly digest-pinned
 grype differential gates regressions in CI (D93). Installed
 Ubuntu ESM/FIPS and Oracle Ksplice/FIPS lineage packages are reported not evaluated rather
 than judged against mainline data (D53, D79). Ubuntu findings carry Canonical's own fix

@@ -166,5 +166,13 @@
     "minAgree": 2,
     "minFindings": 2,
     "maxFindings": 25
+  },
+  {
+    "name": "bitnami-legacy-pg",
+    "tag": "bitnamilegacy/postgresql:latest (frozen 2025-07)",
+    "ref": "mirror.gcr.io/bitnamilegacy/postgresql@sha256:42a8200d35971f931b869ef5252d996e137c6beb4b8f1b6d2181dc7d1b6f62e0",
+    "minAgree": 412,
+    "minFindings": 422,
+    "maxFindings": 994
   }
 ]

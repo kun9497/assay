@@ -172,12 +172,14 @@ new provider, first differential at exact parity), and Arch closed the round in 
 comparer, a new cataloger, a release-less key). **The distro list this entry existed to
 track is now empty**: every distro family grype ships a provider for either scans end to
 end in assay or is deferred with a recorded trigger (CleanStart, next entry — its OSV feed
-is measured and template-ready, only routing detection blocks it). What grype still has
-that assay does not: the bitnami feed (measured 2026-08-27, decided-and-sequenced as the
-next slice — hummingbird left this list in D98 the same day, it was Red Hat's hardened
-line hiding inside the CSAF feed assay already fetched), its CPE/NVD fallback matcher
-(deliberately absent — the differential classifies its output as the main false-positive
-class), and the binary classifier (syft-side, out of scope). grype also ships enrichment feeds
+is measured and template-ready, only routing detection blocks it). **As of D99 (2026-08-27) the feed gap is CLOSED**: every advisory feed grype ships a
+provider for is either ingested by assay or deferred with a recorded trigger (CleanStart).
+Bitnami left this list in D99, hummingbird in D98 (Red Hat's hardened line hiding inside
+the CSAF feed assay already fetched — measured and shipped the same day). What grype still
+has that assay deliberately does not: its CPE/NVD fallback matcher (the differential
+classifies its output as the main false-positive class) and the binary classifier
+(syft-side, out of scope). This entry, opened 2026-08-13 at "grype 26 providers, assay 4",
+is done. grype also ships enrichment feeds
 assay had no equivalent for; D86 ingested EPSS and KEV (typed rating fields, both gates)
 and D87 the EOL data — the enrichment-feed gap against grype is closed.
 

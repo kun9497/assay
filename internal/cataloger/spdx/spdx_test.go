@@ -534,6 +534,33 @@ func TestParse_NonDistroPurlType(t *testing.T) {
 	}
 }
 
+// TestParse_BitnamiPurlType is D99's own version of
+// TestParse_NonDistroPurlType: a pkg:bitnami purl must route through
+// EcosystemForPURLType to "Bitnami" the same way pkg:golang routes to "Go" --
+// proven through Parse itself, not only through purl_test.go's own table
+// (which calls EcosystemForPURLType directly and would stay green even if
+// this cataloger's default branch never reached it at all).
+func TestParse_BitnamiPurlType(t *testing.T) {
+	const doc = `{"spdxVersion":"SPDX-2.3","packages":[
+	  {"name":"postgresql","SPDXID":"SPDXRef-postgresql","versionInfo":"18.6.0-3",
+	   "externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl",
+	     "referenceLocator":"pkg:bitnami/postgresql@18.6.0-3?arch=amd64&distro=photon-5"}]}]}`
+	target, _, err := Parse(strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(target.Packages) != 1 {
+		t.Fatalf("Packages = %d, want 1", len(target.Packages))
+	}
+	p := target.Packages[0]
+	if p.Ecosystem != "Bitnami" {
+		t.Errorf("Ecosystem = %q, want Bitnami", p.Ecosystem)
+	}
+	if p.Version != "18.6.0-3" {
+		t.Errorf("Version = %q, want 18.6.0-3 (from the purl, never versionInfo -- D84's rule)", p.Version)
+	}
+}
+
 // TestParse_EveryComponentLandsInExactlyOneCounter is the SPDX analogue of
 // cyclonedx's own invariant test: the summary line is only trustworthy if
 // the buckets add up, across every outcome this cataloger has.

@@ -374,6 +374,11 @@ func TestNoUnbackedDistroComparer(t *testing.T) {
 		// populates it from SOURCERPM regardless of distro ID, the same
 		// free ride Rocky/AlmaLinux/Azure Linux/Photon OS already ride.
 		"Hummingbird": true,
+		// D99: "Bitnami" is a bare, release-less registry entry too --
+		// Bitnami is not a distro (no os-release of its own), so it needed
+		// no "Bitnami:"-prefixed rule, only a new Comparer for its own
+		// packaging-revision suffix (Bitnami{}'s own doc comment).
+		"Bitnami": true,
 	}
 	for eco := range registry {
 		if !want[eco] {
