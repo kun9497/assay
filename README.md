@@ -82,6 +82,10 @@ code scanning) and `table` (the default). `--explain` shows one finding's full e
   never folded silently into a clean verdict.
 - **Enrichment carried by the artifact** — NVD ratings, EPSS scores, CISA KEV membership,
   and end-of-life status. KISA's Korean prose is available locally via `assay db build`.
+- **Waivers that stay visible** — an `.assay.yaml` ignore file suppresses a finding you
+  have accepted, with a mandatory reason and an optional expiry. Suppressed findings never
+  trip the gate but are counted and shown in every output format, and GitHub code scanning
+  sees them as dismissed, not gone.
 
 ## How it fits together
 
@@ -104,7 +108,7 @@ cannot be trusted — with `2` outranking `1` outranking `0`.
 - **[docs/integrations.md](docs/integrations.md)** — CI integration: copy-pasteable GitHub
   Actions and GitLab CI examples, SARIF upload, and exit-code gating.
 - **[docs/superpowers/specs/2026-07-29-assay-roadmap.md](docs/superpowers/specs/2026-07-29-assay-roadmap.md)**
-  — the reference design, every decision recorded as `D1`…`D101` with its reasoning.
+  — the reference design, every decision recorded as `D1`…`D102` with its reasoning.
 
 Every document ships bilingually (`X.md` / `X.ko.md`); English is canonical.
 
