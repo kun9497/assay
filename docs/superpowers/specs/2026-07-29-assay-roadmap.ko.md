@@ -3693,6 +3693,41 @@ red입니다(비대칭 strip, 사전식 리비전, 등록되지 않은 purl 키,
 
 ---
 
+### D100 — AL2023의 NVIDIA와 livepatch 저장소, 그리고 전제가 틀렸던 보류
+
+**결정.** AL2023의 NVIDIA와 kernel-livepatch advisory 저장소가 기존 "Amazon
+Linux:2023" 키 아래 고정된 `DefaultRepos` 항목 두 개로 Amazon provider에
+합류합니다. 2026-08-27의 트리거-감사가 그 보류가 조사하지 않은 채로 남겨 뒀던
+레이아웃을 측정했고 그 전제를 뒤집었습니다: 이것들은 새 코드가 필요한
+DNF-module 레이아웃이 '아닙니다' — provider가 이미 AL2/AL2023 core에 대해
+파싱하는 것과 '동일한' mirror.list → repomd.xml → updateinfo.xml.gz 체인을
+쓰고, 100% 수정 없이 재사용됩니다. AWS는 AL2023에 대해 정확히 이름 붙은 extra
+저장소 두 개만 냅니다(AL2의 topic 73개와 달리 열거 가능한 카탈로그가 없습니다),
+그래서 이것은 카탈로그-fetch 작업이 아니라 `Repo{}` 리터럴 두 개일 뿐입니다 —
+D78보다 쌉니다.
+
+**왜 Extras가 아닌가.** 둘 다 측정할 때마다 advisory를 수백 건씩
+담습니다(NVIDIA 306건 / livepatch 286건), 그래서 두 core 항목처럼 `Extras:
+false`입니다: 0건이면 반드시 빌드를 'FAIL'시켜야 합니다(family match가
+깨진 것입니다), 빈 AL2 topic이 정당하게 그러듯 용인되어서는 안 됩니다. 이들은
+기존 AMAZON_ENABLE 게이트를 타며, 기본으로 켜져 있고, 아티팩트가 나릅니다.
+
+**실전 측정, 2026-08-27.** 전체 DefaultRepos 대 core만 있는 기준선: advisory
++592건(306+286 정확히), **서로 다른 CVE +58건 순증**, core advisory 변경 0건.
+NVIDIA의 CVE 58건(cuda-*, nvidia-driver*, libnvidia-container*)은 다른 모든
+피드와 완전히 서로소입니다 — core만 있는 데이터베이스에서는 보이지 않습니다.
+감사의 "CVE 61건 구멍"은 빌드에서 58건으로 정정됐습니다: core에 없다고 셌던
+livepatch CVE 3건은 이미 AL2 자신의 별도 ALAS2LIVEPATCH topic을 거쳐
+도착합니다(AL2와 AL2023 livepatch 빌드가 공유하는 kernel CVE입니다), 그래서
+전체 아티팩트에서 진짜로 빠진 적이 없었습니다. livepatch 패키지 이름은
+완전히 한정된 채로 남습니다(`kernel-livepatch-<kernelver>-<patchver>`) — 맨
+`kernel`과의 충돌이 없습니다, AL2 livepatch finding은 이미 amazon.go 자신의
+doc comment에 있습니다. aarch64 mirror.list는 풀리지만 두 저장소 모두 그
+repomd.xml이 403을 답합니다(실전 데이터 없음), 그래서 x86_64 전용이고, 이는
+provider의 기존 관례입니다. 독립 리뷰 mutation 3개 중 3개가 red입니다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

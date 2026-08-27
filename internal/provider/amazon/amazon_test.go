@@ -550,6 +550,13 @@ func TestFetch_EpochIncludedOnlyWhenNonZero(t *testing.T) {
 // the only thing that notices, the same way CLAUDE.md's "the helper is
 // covered; nothing calls it" warns a wiring line needs a test that actually
 // observes the call, not just that the string constant exists somewhere.
+//
+// D100 closed the AL2023 extras gap this disclosure used to name -- the
+// assertion now proves the line describes NVIDIA and kernel-livepatch as
+// FETCHED, not as a remaining gap. If DefaultRepos' two new entries were
+// ever removed without updating this string, this line would be actively
+// lying about coverage, which is exactly what extrasDisclosure exists to
+// prevent.
 func TestFetch_PrintsExtrasDisclosure(t *testing.T) {
 	srv := repoServer(t, []updateFixture{{
 		id: "ALAS2-2026-0010", severity: "low",
@@ -566,10 +573,146 @@ func TestFetch_PrintsExtrasDisclosure(t *testing.T) {
 		t.Fatalf("Fetch: %v", err)
 	}
 	out := progress.String()
-	// D78 closed the AL2 extras gap; the disclosure now names the ONE that
-	// remains, AL2023's NVIDIA/livepatch repos.
-	if !strings.Contains(out, "AL2023") || !strings.Contains(out, "NVIDIA") {
-		t.Errorf("progress output = %q, want it to disclose the remaining AL2023 extras gap", out)
+	if !strings.Contains(out, "NVIDIA") || !strings.Contains(out, "kernel-livepatch") {
+		t.Errorf("progress output = %q, want it to disclose AL2023's NVIDIA and kernel-livepatch "+
+			"repos as fetched (D100)", out)
+	}
+}
+
+// TestDefaultRepos_IncludesAL2023NvidiaAndLivepatch is the caller-first pin
+// for D100's whole slice: New's only caller of DefaultRepos is its own
+// zero-value fallback (New(Options{}) with Repos unset), and that path
+// cannot be driven through Fetch in a hermetic test without reaching
+// cdn.amazonlinux.com -- DefaultRepos is itself the exported contract
+// (Options.Repos' own doc comment already treats it as one: "the same role
+// redhat.Options.BaseURL plays"). Deleting either entry below silently drops
+// an entire class of advisories (306 NVIDIA / 58 CVEs, 286 kernel-livepatch /
+// 85 CVEs, zero overlap with core on the NVIDIA side) from a real `assay db
+// build`, with nothing else in this file able to notice -- every other test
+// in this file substitutes Options.Repos and never reads DefaultRepos at all.
+func TestDefaultRepos_IncludesAL2023NvidiaAndLivepatch(t *testing.T) {
+	want := []Repo{
+		{Ecosystem: "Amazon Linux:2023", MirrorListURL: "https://cdn.amazonlinux.com/al2023/nvidia/mirrors/latest/x86_64/mirror.list"},
+		{Ecosystem: "Amazon Linux:2023", MirrorListURL: "https://cdn.amazonlinux.com/al2023/kernel-livepatch/mirrors/latest/x86_64/mirror.list"},
+	}
+	for _, w := range want {
+		var found bool
+		for _, r := range DefaultRepos {
+			if r == w {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("DefaultRepos missing %+v -- a real `assay db build` would silently drop this "+
+				"repo's advisories (D100)", w)
+		}
+	}
+}
+
+// TestFetch_NvidiaAndLivepatchParticipateInDataAsOfFold is the caller-first
+// proof for item 4: the stalest-repo-wins fold in Fetch (D12,
+// TestFetch_AggregateDataAsOfIsTheStalestRepo's own proof for two repos) must
+// also apply when NVIDIA and kernel-livepatch are among the repos being
+// folded, not just the two CORE repos every existing test exercises. Here
+// the STALEST date belongs to the kernel-livepatch-shaped repo; if fetchRepo
+// or Fetch's fold ever special-cased which repos contribute a date, this
+// would report one of the fresher repos' dates instead and go unnoticed by
+// every pre-D100 test in this file.
+func TestFetch_NvidiaAndLivepatchParticipateInDataAsOfFold(t *testing.T) {
+	mux := http.NewServeMux()
+	mountRepo(t, mux, "/core", []updateFixture{{
+		id: "ALAS2023-2026-0100", severity: "important",
+		issued: "2026-03-01 10:00:00", updated: "2026-03-02 10:00:00",
+		pkgs: []pkgFixture{{name: "openssl", epoch: "0", version: "3.0", release: "1.amzn2023"}},
+	}})
+	mountRepo(t, mux, "/nvidia", []updateFixture{{
+		id: "ALAS2023NVIDIA-2026-0001", severity: "important",
+		issued: "2026-04-01 10:00:00", updated: "2026-04-02 10:00:00",
+		cves: []string{"CVE-2026-9001"},
+		pkgs: []pkgFixture{{name: "cuda-toolkit-12-8", epoch: "0", version: "12.8.0", release: "1"}},
+	}})
+	mountRepo(t, mux, "/lp", []updateFixture{{
+		id: "ALAS2023LIVEPATCH-2026-0001", severity: "important",
+		// The STALEST date of the three -- this one must win the fold.
+		issued: "2026-01-01 10:00:00", updated: "2026-01-02 10:00:00",
+		cves: []string{"CVE-2026-9002"},
+		pkgs: []pkgFixture{{name: "kernel-livepatch-6.1.12-19.43", epoch: "0", version: "1.0", release: "1.amzn2023"}},
+	}})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := New(Options{
+		Repos: []Repo{
+			{Ecosystem: "Amazon Linux:2023", MirrorListURL: srv.URL + "/core/mirror.list"},
+			{Ecosystem: "Amazon Linux:2023", MirrorListURL: srv.URL + "/nvidia/mirror.list"},
+			{Ecosystem: "Amazon Linux:2023", MirrorListURL: srv.URL + "/lp/mirror.list"},
+		},
+		ExtrasBaseURL: quietExtrasServer(t),
+	})
+	prov, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil })
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	wantAsOf := time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC)
+	if !prov.DataAsOf.Equal(wantAsOf) {
+		t.Errorf("DataAsOf = %v, want %v -- the kernel-livepatch-shaped repo's own (stalest) date "+
+			"must win the fold across all three AL2023 repos, not just the two CORE repos every "+
+			"pre-D100 test exercised", prov.DataAsOf, wantAsOf)
+	}
+}
+
+// TestFetch_LivepatchPackageNamesStayFullyQualified is the fixture-driven
+// guard for the hazard amazon.go's own doc comment measures away for AL2023's
+// kernel-livepatch repo (D100): package names trimmed from the real
+// updateinfo-lp.xml artifact must land in Affected exactly as qualified
+// ("kernel-livepatch-<kernelver>-<patchver>"), never collapsed to a bare
+// "kernel" or merged across distinct kernel versions. Two DIFFERENT kernel
+// versions are fixtured deliberately (buildAffected dedupes by exact name,
+// not by prefix) -- if a future change ever truncated or generalized the
+// name, this is what would notice; deleting the qualified names below and
+// substituting a bare "kernel" turns this red.
+func TestFetch_LivepatchPackageNamesStayFullyQualified(t *testing.T) {
+	srv := repoServer(t, []updateFixture{
+		{
+			id: "ALAS2023LIVEPATCH-2023-001", severity: "important",
+			cves: []string{"CVE-2023-26545"},
+			pkgs: []pkgFixture{{name: "kernel-livepatch-6.1.12-19.43", epoch: "0", version: "1.0", release: "1.amzn2023"}},
+		},
+		{
+			id: "ALAS2023LIVEPATCH-2023-002", severity: "important",
+			cves: []string{"CVE-2023-28466"},
+			pkgs: []pkgFixture{{name: "kernel-livepatch-6.1.19-30.43", epoch: "0", version: "1.0", release: "1.amzn2023"}},
+		},
+	})
+	defer srv.Close()
+	p := New(Options{
+		Repos:         []Repo{{Ecosystem: "Amazon Linux:2023", MirrorListURL: srv.URL + "/mirror.list"}},
+		ExtrasBaseURL: quietExtrasServer(t),
+	})
+	var got []advisory.Advisory
+	if _, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
+		got = append(got, a)
+		return nil
+	}); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("emitted %d advisories, want 2: %+v", len(got), got)
+	}
+	names := map[string]bool{}
+	for _, a := range got {
+		for _, aff := range a.Affected {
+			names[aff.Name] = true
+			if aff.Name == "kernel" {
+				t.Fatalf("advisory %s named bare \"kernel\" -- the exact collision hazard this "+
+					"repo's own measurement (0/120 names) found nothing to guard against", a.ID)
+			}
+		}
+	}
+	for _, want := range []string{"kernel-livepatch-6.1.12-19.43", "kernel-livepatch-6.1.19-30.43"} {
+		if !names[want] {
+			t.Errorf("Affected names = %v, want %q present and fully qualified", names, want)
+		}
 	}
 }
 

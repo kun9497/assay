@@ -1140,19 +1140,19 @@ The SPDX note stands: when SPDX ingestion lands, it reuses this mapping.
 
 ---
 
-### AL2023's NVIDIA and livepatch repos
+### ~~AL2023's NVIDIA and livepatch repos~~ — resolved in D100
 
-D78 closed AL2's extras gap; AL2023's equivalent stays open and disclosed. 306
-ALAS2023NVIDIA + 286 ALAS2023LIVEPATCH advisories (measured 2026-08-19 from the ALAS RSS)
-live outside AL2023 core, and the AL2 approach does not transfer: AL2023 publishes no
-extras catalog at the parallel URL (403, verified 2026-08-20) — its extra repos are DNF
-modules with a different layout that was not researched in D78's slice. The Fetch
-disclosure line names this remainder, so a core-plus-AL2-extras build cannot read as
-covering AL2023 completely.
-
-**Revisit trigger:** someone scans an AL2023 image with NVIDIA drivers or livepatches
-installed, or the AL2023 repo layout gets measured the way `amazon-research.json` measured
-AL2's.
+D78 closed AL2's extras gap and left AL2023's open on a premise that turned out to be
+wrong. The 2026-08-27 trigger-audit ("the AL2023 repo layout gets measured") fired and
+overturned the reasoning: the NVIDIA and kernel-livepatch repos are NOT DNF modules with a
+different layout — they use the identical mirror.list → repomd.xml → updateinfo.xml.gz
+chain the provider already parses for core. It IS true that AL2023 publishes no enumerable
+extras catalog (the 403 was real), but it does not need one: AWS ships exactly two named
+extra repos, so D100 added them as two fixed `DefaultRepos` entries reusing the existing
+chain 100%. Live: +592 advisories, +58 net-new disjoint CVEs (NVIDIA's cuda/driver stack),
+0 core advisories changed. The "DNF module, not researched" framing was the deferral's own
+guess, never a measurement — recorded here as the correction, since a wrong stated premise
+that sits for two weeks is worse than an honest "unmeasured".
 
 ---
 

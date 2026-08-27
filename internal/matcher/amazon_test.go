@@ -142,3 +142,113 @@ func TestMatch_AmazonVendorWordSeverityIsDerivedAndGates(t *testing.T) {
 		t.Errorf("Identifiers = %v, want CVE-2026-4", f.Identifiers)
 	}
 }
+
+// TestMatch_AmazonNvidiaAdvisoryReachableUnderAL2023Key is the caller-first
+// proof for D100: an ALAS2023NVIDIA advisory (real ID and CVE, measured live
+// 2026-08-27 against cdn.amazonlinux.com/al2023/nvidia) must produce a
+// finding under the SAME "Amazon Linux:2023" ecosystem key core uses -- an
+// NVIDIA advisory is a source of advisories for AL2023, not a separate
+// ecosystem (amazon.DefaultRepos' own doc comment). Measured zero CVE and
+// package-name overlap between NVIDIA and AL2023 core (58 distinct CVEs,
+// entirely disjoint), so this CVE would be invisible to a core-only database
+// -- deleting the NVIDIA entry from amazon.DefaultRepos removes exactly this
+// coverage from a real `assay db build`, and nothing else in this package
+// would notice.
+func TestMatch_AmazonNvidiaAdvisoryReachableUnderAL2023Key(t *testing.T) {
+	const eco = "Amazon Linux:2023"
+	a := advisory.Advisory{
+		ID:       "ALAS2023NVIDIA-2025-001",
+		Database: "ALAS2023NVIDIA",
+		Kind:     advisory.KindVulnerability,
+		Related:  []string{"CVE-2025-23359"},
+		Severity: []advisory.Severity{{Type: "VENDOR_WORD", Score: "Important"}},
+		Affected: []advisory.Affected{{
+			Ecosystem: eco,
+			Name:      "libnvidia-container1",
+			Ranges: []advisory.Range{{
+				Type:   advisory.RangeEcosystem,
+				Events: []advisory.Event{{Introduced: "0"}, {Fixed: "1.17.4-1"}},
+			}},
+		}},
+	}
+	s := fakeStore{
+		covers: []string{eco},
+		byKey: map[string][]advisory.Advisory{
+			eco + "\x00libnvidia-container1": {a},
+		},
+	}
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("libnvidia-container1", "1.17.3-1", eco)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1 -- an NVIDIA advisory must be reachable through the SAME "+
+			"Amazon Linux:2023 key core uses, not a separate ecosystem", len(res.Findings))
+	}
+	f := res.Findings[0]
+	if f.Advisory.ID != "ALAS2023NVIDIA-2025-001" {
+		t.Errorf("Advisory.ID = %q, want ALAS2023NVIDIA-2025-001", f.Advisory.ID)
+	}
+	var gotCVE bool
+	for _, id := range f.Identifiers {
+		if id == "CVE-2025-23359" {
+			gotCVE = true
+		}
+	}
+	if !gotCVE {
+		t.Errorf("Identifiers = %v, want CVE-2025-23359 -- invisible to a core-only database "+
+			"(measured zero CVE overlap between NVIDIA's 58 CVEs and AL2023 core's own)", f.Identifiers)
+	}
+}
+
+// TestMatch_AmazonLivepatchQualifiedPackageMatchesItsOwnName pins the other
+// half of D100's livepatch guard from the matcher side: an installed
+// kernel-livepatch package below its advisory's fixed version must produce a
+// finding keyed on its own fully-qualified name, and a DIFFERENT installed
+// kernel-livepatch build (a different kernel/patch version, still not the
+// bare "kernel" collision the amazon package doc comment measures away) must
+// not be flagged by an advisory that never names it.
+func TestMatch_AmazonLivepatchQualifiedPackageMatchesItsOwnName(t *testing.T) {
+	const eco = "Amazon Linux:2023"
+	a := advisory.Advisory{
+		ID:       "ALAS2023LIVEPATCH-2023-001",
+		Database: "ALAS2023LIVEPATCH",
+		Kind:     advisory.KindVulnerability,
+		Related:  []string{"CVE-2023-26545"},
+		Severity: []advisory.Severity{{Type: "VENDOR_WORD", Score: "Important"}},
+		Affected: []advisory.Affected{{
+			Ecosystem: eco,
+			Name:      "kernel-livepatch-6.1.12-19.43",
+			Ranges: []advisory.Range{{
+				Type:   advisory.RangeEcosystem,
+				Events: []advisory.Event{{Introduced: "0"}, {Fixed: "1.0-1.amzn2023"}},
+			}},
+		}},
+	}
+	s := fakeStore{
+		covers: []string{eco},
+		byKey: map[string][]advisory.Advisory{
+			eco + "\x00kernel-livepatch-6.1.12-19.43": {a},
+		},
+	}
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{
+			// Below the fixed release for the package the advisory actually names.
+			pkg("kernel-livepatch-6.1.12-19.43", "1.0-0.amzn2023", eco),
+			// A DIFFERENTLY-qualified livepatch build for another kernel version --
+			// no advisory names it, so it must not be flagged.
+			pkg("kernel-livepatch-6.1.19-30.43", "1.0-0.amzn2023", eco),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1: %+v", len(res.Findings), res.Findings)
+	}
+	if got := res.Findings[0].Package.Name; got != "kernel-livepatch-6.1.12-19.43" {
+		t.Errorf("finding is for %q, want kernel-livepatch-6.1.12-19.43", got)
+	}
+}
