@@ -1,0 +1,37 @@
+# Cut a release from a pushed semver tag: cross-build every platform's binary
+# with GoReleaser and attach them, plus a checksums file, to the GitHub
+# Release. install.sh downloads those assets.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# The workflow needs no secrets beyond the automatic GITHUB_TOKEN — it writes
+# a Release in this same repo, nothing external.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # GoReleaser needs full history for the changelog
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

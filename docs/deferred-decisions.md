@@ -6,7 +6,7 @@ Everything here was considered and postponed on purpose — none of it was overl
 Each entry records why it was deferred, what should trigger revisiting it, and any
 groundwork already in place so that picking it up later stays cheap.
 
-Read alongside the Architecture section of the [README](../README.md).
+Read alongside the Architecture section of [the design doc](DESIGN.md).
 
 ---
 

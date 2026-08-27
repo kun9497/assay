@@ -47,7 +47,7 @@ Rocky/Alma's in D82). SBOMs reach the distro side since D83: rpm and deb purls k
 through the same `Distro.Ecosystem()` the image path uses — in CycloneDX and, since D84,
 SPDX 2.2/2.3 JSON, including Red Hat's own published SBOMs (repository_id/rpmmod
 spellings). Not built: pep440 leniency (see
-`README.md` and `docs/deferred-decisions.md`).
+`docs/DESIGN.md` and `docs/deferred-decisions.md`).
 
 **Check what exists before assuming — this paragraph has been wrong six times.** It claimed
 `scan` was unimplemented after slice 1 shipped it, claimed binaries and directories were
@@ -57,8 +57,10 @@ npm/PyPI directory scanning were unbuilt after all three shipped, and claimed di
 `status.d` and SARIF were not built for nine days after D54 and D55 shipped both — found by
 a documentation sweep, not by a reader — and claimed the ndb backend unbuilt and five RPM
 distros not evaluated after D71–D79 had shipped every one of them, caught 2026-08-20 only
-because the user asked for a freshness sweep. `README.md`'s roadmap checkboxes are the more
+because the user asked for a freshness sweep. `docs/DESIGN.md`'s roadmap checkboxes are the more
 reliable record because they are edited task by task; this paragraph is edited from memory.
+(The roadmap lived in `README.md` until 2026-08-27, when the README became a lean landing
+page and the design/roadmap content moved to `docs/DESIGN.md`.)
 
 **Read these before proposing anything structural:**
 
@@ -212,7 +214,7 @@ where false negatives originate.
 ## Documentation is bilingual
 
 Every document ships as a pair: `X.md` (English) and `X.ko.md` (Korean). Currently
-`README`, `docs/deferred-decisions`, and the roadmap spec.
+`README`, `docs/DESIGN`, `docs/deferred-decisions`, and the roadmap spec.
 
 **English is canonical.** Decisions are written there first; the Korean version follows.
 When they disagree, English is correct and the Korean copy is stale.
@@ -230,7 +232,7 @@ of its life stale, and they are mostly Go code blocks, which are never translate
 Specs and user-facing documentation stay bilingual; plans do not.
 
 **Delete a plan once its slice has merged.** The durable record is the roadmap's `D`
-decisions and the README's checkboxes, both of which are edited as the work lands; an
+decisions and `docs/DESIGN.md`'s checkboxes, both of which are edited as the work lands; an
 executed plan describes an intent that the review loop usually revised, so it survives as a
 slightly wrong second account of the same slice. Ten of them were removed in one pass on
 2026-08-06 for exactly that reason. Git history keeps them if a plan is ever wanted back.
