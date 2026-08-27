@@ -1200,6 +1200,50 @@ func TestMatch_ViaProvidesRespectsEcosystemIsolation(t *testing.T) {
 	}
 }
 
+// TestMatch_ViaProvidesFiresForCleanStart is D101's own proof that the D95
+// provides bridge, built for BellSoft's Liberica JDK, is genuinely
+// apk-generic and needed no CleanStart-specific matcher code: the bridge
+// mechanism above is only ever exercised in these tests against
+// "Alpaquita:*" fixtures, so a hidden "want == Alpaquita" check anywhere in
+// this join would pass every test above while silently never firing for any
+// other ecosystem.
+//
+// The shape is a real one, measured on a pulled docker.io/cleanstart/postgres
+// image 2026-08-27: the installed apk package is "postgresql18" (never named
+// "postgresql" on its own record, and its own D8 origin is "postgresql18"
+// too), but its `p:` provides clause declares the bare, unversioned name
+// "postgresql" -- the exact package name CleanStart's live OSV feed authors
+// advisory CLEANSTART-2026-AI42483 against (11 total "postgresql" advisories
+// measured in the archive).
+func TestMatch_ViaProvidesFiresForCleanStart(t *testing.T) {
+	adv := advWithRange("CLEANSTART-2026-AI42483", "CleanStart", "postgresql",
+		"0", "17.6-r0", advisory.RangeEcosystem)
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"CleanStart\x00postgresql": {adv},
+	}}
+
+	p := pkg("postgresql18", "16.4-r0", "CleanStart") // < the fix
+	p.Source = &pkgmeta.SourcePackage{Name: "postgresql18"}
+	p.Provides = []string{"postgresql"} // bare: no ProvidesVersion entry, matching the real record
+
+	res, err := New(s).Match(pkgmeta.Target{Packages: []pkgmeta.Package{p}})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1: \"postgresql\" is reachable only through postgresql18's "+
+			"own provides clause, neither its Name nor its D8 Source name; got %+v (skipped %+v)",
+			len(res.Findings), res.Findings, res.Skipped)
+	}
+	f := res.Findings[0]
+	if f.MatchedName != "postgresql" {
+		t.Errorf("MatchedName = %q, want postgresql", f.MatchedName)
+	}
+	if !f.MatchedViaProvides {
+		t.Error("MatchedViaProvides = false, want true")
+	}
+}
+
 // identifiers() feeds the dedup map, and it must NOT include Upstream. OSV
 // defines upstream as "derived from", not "the same as", so collapsing on it
 // suppresses a genuinely distinct advisory — a false negative, where an extra

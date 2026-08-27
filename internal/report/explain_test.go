@@ -399,6 +399,7 @@ func TestComparerName_ExactNamePerEcosystem(t *testing.T) {
 		{"Arch:rolling", "pacman"}, // D97
 		{"Hummingbird", "rpm"},     // D98
 		{"Bitnami", "bitnami"},     // D99
+		{"CleanStart", "apk"},      // D101
 		{"bogus-eco", "unknown"},
 	} {
 		if got := comparerName(tt.ecosystem); got != tt.want {
@@ -759,6 +760,7 @@ func TestComparerName_AgreesWithVersionFor(t *testing.T) {
 		"Arch:rolling", // D97
 		"Hummingbird",  // D98
 		"Bitnami",      // D99
+		"CleanStart",   // D101
 		// Bare family names and empty releases resolve nowhere, by D6:
 		// letting one through would make a bug that dropped the release
 		// look like it worked.

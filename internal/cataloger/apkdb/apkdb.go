@@ -67,6 +67,33 @@ func Parse(r io.Reader, ecosystem string) ([]pkgmeta.Package, error) {
 	return pkgs, nil
 }
 
+// HasPackage reports whether an apk installed-database contains a package
+// named exactly want (case-sensitive, exact match — never a prefix: an
+// image carrying "clnstrt-baselayout-data" but not "clnstrt-baselayout"
+// itself must not match).
+//
+// D101's marker probe: CleanStart ships no /etc/os-release at all, so the
+// only signal scancmd has for routing a no-os-release apk image to
+// CleanStart is a specific package's presence inside the SAME database
+// Parse would otherwise ingest — "clnstrt-baselayout", measured present in
+// 11/11 real pulled CleanStart images. This is deliberately narrower than a
+// full Parse: the caller needs a yes/no answer BEFORE it knows what
+// ecosystem key to hand Parse, so building full pkgmeta.Package values here
+// would be wasted work on the (overwhelmingly common) path where the
+// answer is no.
+func HasPackage(r io.Reader, want string) (bool, error) {
+	recs, err := parseRecords(r)
+	if err != nil {
+		return false, err
+	}
+	for _, rec := range recs {
+		if rec.name == want {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func toPackage(rec record, ecosystem string) pkgmeta.Package {
 	p := pkgmeta.Package{
 		Name:      rec.name,

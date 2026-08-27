@@ -631,6 +631,10 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] AL2023 NVIDIA와 livepatch advisory (D100) — provider가 이미 파싱하는 체인
       위의 고정 저장소 둘(보류의 DNF-module 전제가 틀렸음); advisory +592건,
       다른 모든 피드와 완전히 서로소인 순증 CVE +58건
+- [x] CleanStart (D101) — /etc/os-release가 없는 첫 배포판: 신원은 apk db의
+      `clnstrt-baselayout` 마커 패키지에서 옴(정확한 이름, os-release가 있으면
+      여전히 그것이 이김), 맨 rolling 키; 차등은 grype의 CPE fallback에 대한
+      역방향 점검
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건

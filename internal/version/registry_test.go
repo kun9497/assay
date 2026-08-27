@@ -150,3 +150,26 @@ func TestFor_HummingbirdResolvesRPM(t *testing.T) {
 		t.Errorf(`Compare("2.14.3-1.hum1", "2.14.3-1.2.hum1") via For("Hummingbird") = %d, want -1`, got)
 	}
 }
+
+// TestFor_CleanStartResolvesAPK is D101's caller-first proof that
+// "CleanStart" resolves APK{} through the registry -- the matcher calls
+// version.For(p.Ecosystem) directly (internal/matcher/matcher.go), so
+// before this registry entry existed, For("CleanStart") reported not-ok and
+// every CleanStart package would have been reported as skipped rather than
+// evaluated, no matter how correct apk.go's own Compare logic is in
+// isolation. The pair is a real one, trimmed from CLEANSTART-2026-AI42483's
+// own advisory: fixed "17.6-r0" against an installed "18.6-r0" (a later,
+// already-patched release) orders above it.
+func TestFor_CleanStartResolvesAPK(t *testing.T) {
+	c, ok := For("CleanStart")
+	if !ok {
+		t.Fatal(`For("CleanStart") = not ok, want a comparer`)
+	}
+	got, err := c.Compare("18.6-r0", "17.6-r0")
+	if err != nil {
+		t.Fatalf("Compare: error %v, want 1 with no error", err)
+	}
+	if got != 1 {
+		t.Errorf(`Compare("18.6-r0", "17.6-r0") via For("CleanStart") = %d, want 1`, got)
+	}
+}

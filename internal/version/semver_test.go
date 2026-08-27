@@ -379,6 +379,17 @@ func TestNoUnbackedDistroComparer(t *testing.T) {
 		// no "Bitnami:"-prefixed rule, only a new Comparer for its own
 		// packaging-revision suffix (Bitnami{}'s own doc comment).
 		"Bitnami": true,
+		// D101: "CleanStart" is a bare, release-less apk registry entry too --
+		// the same shape as Wolfi/Chainguard/MinimOS above (OSV keys it bare,
+		// pkgmeta.Distro.Ecosystem's "cleanstart" case writes the identical
+		// literal), and D8 source indirection rides free for the same reason:
+		// the apk cataloger's `o:` read is distro-agnostic. What arrived with
+		// this comparer was new plumbing of a different kind -- scancmd's own
+		// marker probe (internal/cataloger/apkdb.HasPackage, keyed on the apk
+		// installed-db package "clnstrt-baselayout"), since CleanStart is the
+		// first distro this project supports that ships no /etc/os-release at
+		// all for the ordinary os-release read to key off of.
+		"CleanStart": true,
 	}
 	for eco := range registry {
 		if !want[eco] {

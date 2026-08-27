@@ -153,6 +153,18 @@ var registry = map[string]Comparer{
 	// revision (Bitnami{}'s own doc comment) is the only thing that needed a
 	// new Comparer, not a new key shape.
 	"Bitnami": Bitnami{},
+	// D101. CleanStart is an apk distro too, so APK{} (the same comparer
+	// Alpine, Wolfi, Chainguard and MinimOS use) orders its versions --
+	// measured 2026-08-27 against the live archive: plain apk shapes
+	// throughout (X.Y.Z-rN), the same family MinimOS's own comment
+	// describes, plus a handful (10 of ~1,988 fixed bounds) of malformed
+	// upstream data APK{} correctly refuses rather than guesses at (D9).
+	// A bare, release-less map entry rather than a prefix rule, for the
+	// same reason as Wolfi/Chainguard/MinimOS/Echo/Bitnami above:
+	// pkgmeta.Distro.Ecosystem's "cleanstart" case writes the literal bare
+	// string with no release suffix at all -- "CleanStart" IS the whole key
+	// this project ever builds for it, not a truncated one.
+	"CleanStart": APK{},
 }
 
 // mainlineUbuntu matches the two shapes OSV gives a mainline Ubuntu release:

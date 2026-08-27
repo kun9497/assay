@@ -172,10 +172,39 @@ const DefaultBaseURL = "https://osv-vulnerabilities.storage.googleapis.com"
 // upstream at all -- D3 already reads both fields, and per that decision
 // nothing parses the CVE out of the ID text, so those 86 simply join
 // nothing), withdrawn 1.11% (D16's existing machinery drops them).
+//
+// "CleanStart" is D101's entry, and it joins the release-less shapes too
+// (Wolfi, MinimOS, Echo, Bitnami) -- CleanStart is an apk-based hardened
+// container distro that ships NO /etc/os-release at all (scancmd's own
+// marker probe, keyed on the apk installed-db package
+// "clnstrt-baselayout", is what routes an image here in the first place),
+// and its own OSV archive keys every affected entry with the bare
+// "CleanStart" string, 0 release-qualified occurrences, even though a real
+// image's apk-repo path does carry a release-shaped component ("v3.20") --
+// that string is not a key OSV ever puts on the advisory side, so D6 is
+// satisfied vacuously here exactly as it is for the other release-less
+// distros. Re-measured 2026-08-27 against
+// osv-vulnerabilities.storage.googleapis.com/CleanStart/all.zip: 1,988
+// records (Last-Modified 2026-08-19 -- the same stale snapshot an earlier
+// measurement found, even though the live upstream git tree has grown to
+// roughly 4,109 advisory files since; this build ingests whatever the
+// bucket actually serves, not the git tree, so 1,988 is the number that
+// matters). IDs are CLEANSTART-YYYY-XXNNNNN. CVE linkage is 90.34% via
+// `upstream` carrying an uppercase "CVE-" identifier and a further 9.66%
+// via a LOWERCASE "ghsa-..." identifier in that same field (0% of records
+// have neither) -- D3's existing upstream read needs no case-folding
+// change to find either shape, since nothing here filters on the prefix's
+// case. `introduced` is always the sentinel "0"; there is no
+// fixed:"0"/"1" sentinel to special-case the way some other distro feeds
+// need. A small number of `fixed` bounds (10 of ~1,988, all in the
+// version.APK{} comparer's own decision) are malformed upstream data
+// (e.g. "3.1.8.-r0", "3.17-4-r1") that version.APK{} correctly refuses
+// rather than guesses at (D9) -- those packages report as skipped, not
+// silently ordered wrong.
 var Ecosystems = []string{
 	"Go", "npm", "PyPI", "crates.io", "RubyGems", "Packagist", "NuGet", "Maven",
 	"Alpine", "Debian", "Ubuntu", "Rocky Linux", "AlmaLinux", "Chainguard",
-	"MinimOS", "Echo", "Azure Linux", "Alpaquita", "Bitnami",
+	"MinimOS", "Echo", "Azure Linux", "Alpaquita", "Bitnami", "CleanStart",
 }
 
 type Provider struct {
@@ -284,7 +313,7 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 			eco == "AlmaLinux" || eco == "Chainguard" || eco == "Wolfi" ||
 			eco == "MinimOS" || eco == "Echo" || eco == "Azure Linux" ||
 			eco == "Alpaquita" || eco == "BellSoft Hardened Containers" ||
-			eco == "Bitnami") && n == 0 {
+			eco == "Bitnami" || eco == "CleanStart") && n == 0 {
 			return store.Provenance{}, fmt.Errorf("fetch %s: archive yielded no %s:* records", eco, eco)
 		}
 		// "Wolfi" and "BellSoft Hardened Containers" above are not dead

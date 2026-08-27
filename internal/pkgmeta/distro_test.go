@@ -1055,3 +1055,45 @@ func TestDistroEcosystem_Hummingbird(t *testing.T) {
 		t.Errorf("hummingbird with an RHEL-shaped VersionID -> %q, %v, want %q", got, err, "Hummingbird")
 	}
 }
+
+// TestDistroEcosystem_CleanStart: D101. CleanStart ships no /etc/os-release
+// at all, so Distro.ID is never set to "cleanstart" by osrelease.Parse the
+// way every other case's own real image is — scancmd's own marker probe is
+// what would set it, before Ecosystem() is ever called. This test only
+// covers Ecosystem()'s own half: given ID "cleanstart" (however it got
+// there), the key resolves bare and release-less, the same shape
+// Wolfi/MinimOS/Echo/Bitnami use, and VersionID is never consulted.
+func TestDistroEcosystem_CleanStart(t *testing.T) {
+	for _, tc := range []struct{ id, versionID, want string }{
+		{"cleanstart", "", "CleanStart"},
+		// VersionID is never consulted -- any stray value (a real image's apk
+		// repo path carries "v3.20", which is not even a value osrelease ever
+		// reads into this field, but stray input elsewhere must not change
+		// the answer either) must resolve identically.
+		{"cleanstart", "v3.20", "CleanStart"},
+		{"cleanstart", "3.19", "CleanStart"},
+	} {
+		got, err := Distro{ID: tc.id, VersionID: tc.versionID}.Ecosystem()
+		if err != nil {
+			t.Errorf("id=%q VERSION_ID=%q: %v", tc.id, tc.versionID, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("id=%q VERSION_ID=%q -> %q, want %q", tc.id, tc.versionID, got, tc.want)
+		}
+	}
+	// CleanStart's key must not converge with any other distro's, or with
+	// Wolfi/MinimOS/Arch/Hummingbird's bare release-less keys.
+	for _, tc := range []struct{ id, versionID, want string }{
+		{"alpine", "3.19", "Alpine:v3.19"},
+		{"wolfi", "20230201", "Wolfi"},
+		{"minimos", "20241031", "MinimOS"},
+		{"arch", "", "Arch:rolling"},
+		{"hummingbird", "20251124", "Hummingbird"},
+		{"cleanstart", "", "CleanStart"},
+	} {
+		if got, err := (Distro{ID: tc.id, VersionID: tc.versionID}).Ecosystem(); err != nil || got != tc.want {
+			t.Errorf("%s %s -> %q, %v; want %q", tc.id, tc.versionID, got, err, tc.want)
+		}
+	}
+}
