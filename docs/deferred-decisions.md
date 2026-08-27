@@ -134,7 +134,7 @@ row exists but anchore curates an exclusion since MiniZip is not built into Debi
 zlib1g; worth a match-exclusion think if more accumulate); ubuntu 96/96 with wont-fix
 15/15 (D85 exact parity); rocky 99.4% on fixables with 2 assay-only tuples tracing to a
 DEFECTIVE upstream record (RLSA-2023:6699 carries an over-broad fixed event — upstream
-data, not matcher); alma exact fixable set-equality; oracle's grype-only tuples are
+data, not matcher; investigated 2026-08-27, see "Rocky's regenerated erratum" below); alma exact fixable set-equality; oracle's grype-only tuples are
 grype matching FIPS-lineage ELSAs against mainline — D79's refusal is the correct side;
 fedora 30/30 at advisory level with BIDIRECTIONAL CVE-extraction gaps (our Bodhi prose
 misses runs grype has, and vice versa — D75's 81.7% limit, now with a comparison point);
@@ -211,6 +211,70 @@ for it with images in hand. **Groundwork in place:** the feed measurement above,
 D88/D92 template the ingestion half would drop into.
 ---
 
+
+### Rocky's regenerated erratum — a fixed version three years newer than the fix
+
+**Investigated 2026-08-27** (live re-fetch, not the cached differential capture).
+RLSA-2023:6699's OSV record demands krb5 `0:1.21.1-10.el9_8` while AlmaLinux's
+contemporaneous ALSA-2023:6699 and Red Hat's own CSAF VEX for both CVEs
+(CVE-2023-36054/39975) agree the true fix is `1.21.1-1.el9`. The tell is in Rocky's own
+Apollo API: the record carries `created_at` 2026-05-28 — it was REGENERATED two and a half
+years after the 2023 erratum, and its 77-NEVRA package list is uniformly the krb5 build
+current in the repo that day. Apollo binds an advisory's package list to the current repo
+state at (re)generation time rather than the build that shipped with the fix. The two
+assay-only tuples in the weekly differential's rocky9 target are this record judging an
+already-fixed `1.21.1-1.el9` as vulnerable — assay's comparer and D8 linkage are both
+correct against a wrong input.
+
+**No assay change.** One bad record does not justify an override mechanism (D16's shape
+would fit if a class emerges — that is the revisit trigger: a second Rocky record with the
+regenerated-fixed-version pattern). Report channel: github.com/rocky-linux/peridot issues
+(Apollo lives there; precedent issues #79/#82; no existing report found under any related
+search) — a draft is prepared, sending is the user's call.
+
+---
+
+### SUSE's glued purls — a class of 82 package families, not a libglib one-off
+
+**Investigated 2026-08-27** (first 12.65% of the live csaf-vex archive, 8,073 documents).
+D91's roadmap entry recorded `pkg:rpm/suse/libglib@2_0-0` as an authoring quirk; the sweep
+shows it is a CLASS: 102 distinct glued (name, version) pairs across **82 package
+families** — the GNOME/WebKit/GStreamer shared-library stack (libjavascriptcoregtk 138
+occurrences, libwebkit2gtk 90, ~40 libgst* modules) plus tooling (ca-certificates,
+permissions, chkstat). Root cause: SUSE's generator (`generate-csaf-vex.pl`, named in every
+document's own metadata) splits a bare, release-less product_version family name at the
+last hyphen-before-digits, mistaking the soname suffix (`-2_0-0`) for a version. Every
+family also carries correctly-spelled sibling nodes once a real release is attached.
+
+**Why no assay change today.** In the full sample, zero glued ids are referenced by any
+`product_status` or remediation — they are inert catalog scaffolding to the resolver, and
+the one live case the differential saw (libglib) was superseded by a correctly-authored
+LTSS leaf in D91's fold. The hazard is that the mechanism is untouched: a future document
+that references a glued id directly would compute a wrong (name, version) with no
+disclosure. **Revisit when** a scan-side symptom traces to a glued id again (the D91 trace
+is the template), or SUSE fixes the generator. No existing upstream report found anywhere
+(vunnel/trustify/vuln-list-update consumers included); a draft for SUSE's security contact
+is prepared, sending is the user's call.
+
+---
+
+### The freshness one-liner and six dead Amazon extras topics
+
+**Investigated 2026-08-27.** `assay db update` printing "upstream data as of 2023-09-25"
+is GENUINE data, not a defect: six AL2 extras topics (selinux-ng, ruby2.6, postgresql11,
+mono, httpd_modules, golang1.19) have published no ALAS advisory since exactly that date —
+selinux-ng's single lifetime update, 2023-09-25T22:00:00Z, is the corpus minimum — while
+every other feed is current within days (live-checked across all 75 Amazon sub-feeds, 18
+OSV zips, Red Hat, Oracle, SUSE). D12's stalest-wins rule, applied once inside
+amazon.Fetch's fold and again across ~20 providers, lets one near-dead add-on channel set
+the single number for a ~427,000-record artifact that is days-fresh everywhere else.
+`db status` already discloses the per-provider truth.
+
+**Deferred improvement, not a bug**: attribute the floor in the one-liner (print which
+provider set it, e.g. "(amazon)") and/or nudge the reader to `db status` when DataAsOf
+trails BuiltAt by months. The date itself must not change — D12's "never hide staleness"
+is working exactly as designed; only the attribution is missing. Do it the next time
+pull.go is open for another reason, or when a user actually misreads the line.
 ### ~~Ubuntu findings carry no fix state~~ — resolved in D85
 
 D52 distinguishes "the vendor will never fix this" from "no fix yet" and D53 brought Ubuntu
