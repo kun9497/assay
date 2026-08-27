@@ -3862,6 +3862,36 @@ unregistered purl key, dropped suffix check, replaced-not-appended inventory).
 
 ---
 
+### D100 — AL2023's NVIDIA and livepatch repos, and a deferral whose premise was wrong
+
+**Decision.** AL2023's NVIDIA and kernel-livepatch advisory repos join the Amazon provider
+as two fixed `DefaultRepos` entries under the existing "Amazon Linux:2023" key. The
+2026-08-27 trigger-audit measured the layout the deferral had left unresearched and
+overturned its premise: these are NOT a DNF-module layout needing new code — they use the
+IDENTICAL mirror.list → repomd.xml → updateinfo.xml.gz chain the provider already parses
+for AL2/AL2023 core, reused 100% unmodified. AWS ships exactly two named extra repos for
+AL2023 (no enumerable catalog, unlike AL2's 73 topics), so this is two `Repo{}` literals,
+not catalog-fetch work — cheaper than D78 was.
+
+**Why not Extras.** Both carry hundreds of advisories every measurement (306 NVIDIA / 286
+livepatch), so they are `Extras: false` like the two core entries: a zero must FAIL the
+build (the family match broke), not be tolerated the way an empty AL2 topic legitimately
+is. They ride the existing AMAZON_ENABLE gate, on by default, carried by the artifact.
+
+**Measured, live 2026-08-27.** Full DefaultRepos vs a core-only baseline: +592 advisories
+(306+286 exact), **+58 net-new distinct CVEs**, 0 core advisories changed. NVIDIA's 58 CVEs
+(cuda-*, nvidia-driver*, libnvidia-container*) are fully disjoint from every other feed —
+invisible to a core-only database. The audit's "61-CVE gap" corrected to 58 in the build:
+the 3 livepatch CVEs it counted as core-absent already arrive through AL2's own separate
+ALAS2LIVEPATCH topic (kernel CVEs shared across the AL2 and AL2023 livepatch builds), so
+they were never truly missing from the full artifact. Livepatch package names stay fully
+qualified (`kernel-livepatch-<kernelver>-<patchver>`) — no bare-`kernel` collision, the AL2
+livepatch finding already in amazon.go's own doc comment. aarch64 mirror.lists resolve but
+their repomd.xml 403s for both repos (no live data), so x86_64-only, the provider's
+standing convention. Independent review mutations 3/3 red.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

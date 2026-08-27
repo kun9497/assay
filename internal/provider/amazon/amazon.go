@@ -42,6 +42,16 @@
 // dropAmbiguous (D74) rather than Ubuntu's report-as-not-evaluated (D53) —
 // this feed can tell a livepatch package from a mainline one by name alone,
 // which Ubuntu's +esmN/+FipsN suffix convention cannot.
+//
+// D100 measured the same hazard for AL2023's OWN kernel-livepatch repo (a
+// fixed DefaultRepos entry, not an AL2 extras topic — see DefaultRepos' own
+// doc comment): 286 ALAS2023LIVEPATCH advisories name 120 distinct package
+// names, ALL qualified "kernel-livepatch-<kernel-version>-<patch-version>",
+// measured 2026-08-27. 107 of those 120 names also appear in AL2023 CORE's
+// own updateinfo (a core kernel CVE that also affects the livepatch build for
+// it, the same non-hazard AL2's 73/277 overlap already established above) —
+// never a bare "kernel". Same conclusion, independently measured rather than
+// assumed to carry over from AL2.
 package amazon
 
 import (
@@ -83,26 +93,40 @@ type Repo struct {
 
 // DefaultRepos is AL2 and AL2023's CORE repos, unchanged since D73: 2,320 AL2
 // advisories and 2,010 AL2023 advisories measured 2026-08-19, both 100%
-// type=security/status=final, 100% severity-banded, 98%+ CVE-referenced.
+// type=security/status=final, 100% severity-banded, 98%+ CVE-referenced --
+// plus, since D100, AL2023's NVIDIA and kernel-livepatch repos.
 //
 // AL2's 73 "extras" topic repos (docker, ecs, livepatch, nitro-enclaves,
 // firefox and more) are deliberately NOT in this list — Fetch enumerates and
 // fetches them separately, from AL2's own extras catalog (D78; see
 // fetchExtrasTopics in extras.go), because that list is neither fixed nor
-// small enough to hardcode the way these two entries are. Extras topics carry
+// small enough to hardcode the way these entries are. Extras topics carry
 // the same Ecosystem key as core, "Amazon Linux:2": a package installed from
 // extras runs on the same OS core does, not a different release.
 //
-// AL2023 keeps its own extras-shaped gap open, and D78 does not close it:
-// NVIDIA and livepatch repos live outside AL2023 core the way AL2's used to
-// before D78, but AL2023 uses a different (DNF-module) repo layout that this
-// slice's research did not extend the catalog-enumeration approach to.
-// Fetch's own disclosure line names this — see extrasDisclosure below —
-// rather than let a core-plus-AL2-extras database read as covering AL2023
-// completely too.
+// AL2023's own extras-shaped gap, left open by D78, is closed by D100 —
+// NVIDIA and kernel-livepatch repos live outside AL2023 core, and the D78-era
+// research assumed a DNF-module layout without checking (this package's
+// extrasDisclosure const said so for a year). Measured directly against both
+// live feeds 2026-08-27: they use the IDENTICAL mirror.list -> repomd.xml ->
+// updateinfo.xml.gz chain this file already parses for every other repo
+// (updateinfo.go) — not a DNF-module layout at all. AL2023 also publishes no
+// enumerable catalog the way AL2's extras-catalog-x86_64.json does (the
+// equivalent path 403s, measured the same day) — AWS ships exactly these two
+// named extra repos for AL2023, so they are two more fixed Repo{} entries
+// below, Extras:false like the two CORE entries, rather than a second
+// catalog-enumeration path: each carries hundreds of advisories on every
+// measurement (306 NVIDIA/58 CVEs, 286 kernel-livepatch/85 CVEs, both
+// 2026-08-27), so a zero from either is exactly as fatal as a zero from CORE
+// (Repo.Extras' own doc comment), not the legitimate zero an AL2 topic's zero
+// is. x86_64 only, matching every other repo in this package: an aarch64
+// mirror.list resolves for both (200) but the repomd.xml it points at 403s
+// for both, measured the same day — there is no live aarch64 data to add.
 var DefaultRepos = []Repo{
 	{Ecosystem: "Amazon Linux:2", MirrorListURL: "https://cdn.amazonlinux.com/2/core/latest/x86_64/mirror.list"},
 	{Ecosystem: "Amazon Linux:2023", MirrorListURL: "https://cdn.amazonlinux.com/al2023/core/mirrors/latest/x86_64/mirror.list"},
+	{Ecosystem: "Amazon Linux:2023", MirrorListURL: "https://cdn.amazonlinux.com/al2023/nvidia/mirrors/latest/x86_64/mirror.list"},
+	{Ecosystem: "Amazon Linux:2023", MirrorListURL: "https://cdn.amazonlinux.com/al2023/kernel-livepatch/mirrors/latest/x86_64/mirror.list"},
 }
 
 // extrasDisclosure is printed once per Fetch, mirroring dbcmd.Update's own
@@ -113,14 +137,15 @@ var DefaultRepos = []Repo{
 // reasoning applied to its container/module skips).
 //
 // D78 closed the AL2 half of the gap D73 disclosed here: AL2's 73 extras
-// topics are now enumerated and fetched alongside core. What remains is
-// AL2023's own — NVIDIA (306 advisories) and livepatch (286 advisories) live
-// outside AL2023 core, in a different DNF-module repo layout this slice did
-// not extend to, so a package installed from either is still evaluated only
-// against AL2023 core data.
-const extrasDisclosure = "amazon: fetching AL2 core + all extras topics, and AL2023 core -- " +
-	"AL2023's NVIDIA (306 advisories) and livepatch (286 advisories) repos are NOT fetched; " +
-	"a package installed from either is evaluated only against AL2023 core data (D78)"
+// topics are now enumerated and fetched alongside core. D100 closed what
+// remained — AL2023's own NVIDIA and kernel-livepatch repos are fetched too,
+// as two more DefaultRepos entries (see DefaultRepos' own doc comment for
+// why they are fixed entries rather than a second catalog-enumeration path).
+// No known Amazon Linux coverage gap remains; this line stays as a positive
+// disclosure of what IS fetched, on the same reasoning as before — a reader
+// should not have to infer coverage from a diff against a prior release.
+const extrasDisclosure = "amazon: fetching AL2 core + all extras topics, and " +
+	"AL2023 core + NVIDIA + kernel-livepatch (D100)"
 
 type Options struct {
 	// Repos defaults to DefaultRepos. A test seam, the same role

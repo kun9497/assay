@@ -1095,17 +1095,21 @@ core를 거쳐 `upstream`에서 옵니다. SPDX 관련 언급은 그대로 유�
 
 ---
 
-### AL2023의 NVIDIA와 livepatch 저장소
+### ~~AL2023의 NVIDIA와 livepatch 저장소~~ — D100에서 해결
 
-D78이 AL2의 extras 구멍을 닫았습니다; AL2023의 대응물은 여전히 열려 있고 공개돼 있습니다.
-ALAS2023NVIDIA 306건 + ALAS2023LIVEPATCH 286건(ALAS RSS에서 2026-08-19 측정)이 AL2023
-core 바깥에 살고 있고, AL2 방식은 그대로 옮겨오지 않습니다: AL2023은 대응하는 URL에 extras
-카탈로그를 전혀 발행하지 않습니다(403, 2026-08-20 확인) — 그 extra 저장소는 D78 슬라이스에서
-조사하지 않은 다른 레이아웃의 DNF module입니다. Fetch 공개 줄이 이 나머지를 이름으로 밝히므로,
-core-plus-AL2-extras 빌드가 AL2023을 완전히 커버하는 것처럼 읽히지 않습니다.
-
-**다시 볼 계기:** 누군가 NVIDIA 드라이버나 livepatch가 설치된 AL2023 이미지를 스캔하거나,
-AL2023 저장소 레이아웃이 `amazon-research.json`이 AL2의 것을 측정했던 방식으로 측정될 때.
+D78은 AL2의 extras 구멍을 닫았고 AL2023의 것은 나중에 틀린 것으로 드러난 전제
+위에 열어 뒀습니다. 2026-08-27의 트리거-감사("AL2023 저장소 레이아웃이
+측정될 때")가 발동해 그 근거를 뒤집었습니다: NVIDIA와 kernel-livepatch
+저장소는 다른 레이아웃의 DNF module이 '아닙니다' — provider가 이미 core에
+대해 파싱하는 것과 동일한 mirror.list → repomd.xml → updateinfo.xml.gz
+체인을 씁니다. AL2023이 열거 가능한 extras 카탈로그를 발행하지 않는다는 것
+자체는 '사실입니다'(403은 진짜였습니다), 하지만 그것이 필요 없습니다: AWS는
+이름 붙은 extra 저장소를 정확히 두 개만 내므로, D100은 기존 체인을 100%
+재사용하는 고정 `DefaultRepos` 항목 둘로 그것들을 추가했습니다. 실전: advisory
++592건, 서로소인 순증 CVE +58건(NVIDIA의 cuda/driver 스택), core advisory
+변경 0건. "DNF module, 조사 안 됨"이라는 틀은 보류 자신의 추측이었을 뿐 결코
+측정이 아니었습니다 — 2주 동안 그대로 앉아 있던 틀린 진술 전제는 정직한
+"미측정"보다 나쁘므로, 그 정정을 여기 기록해 둡니다.
 
 ---
 

@@ -628,6 +628,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       라우팅, 리비전을 벗겨내는 SemVer wrapper, 그리고 D84의 SPDX 리더를
       재사용하는 마커 cataloger; 첫날 차등 497/497에 agree 485, 이중 인벤토리를
       증명함
+- [x] AL2023 NVIDIA와 livepatch advisory (D100) — provider가 이미 파싱하는 체인
+      위의 고정 저장소 둘(보류의 DNF-module 전제가 틀렸음); advisory +592건,
+      다른 모든 피드와 완전히 서로소인 순증 CVE +58건
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건
@@ -916,7 +919,11 @@ SUSE에서는 `--fail-on-unfixable`이 동작하지만 `=wont-fix`는 SUSE가 �
 - [ ] 경계 하나가 읽히지 않는 range의 부분 평가 — **기각**, D35 참조. Alpine imagemagick이
       `introduced 7.0.0-0`을 `fixed 6.9.6.8-r0` 위에 갖고 있어서, 나쁜 경계를 `0`으로 보면
       창이 넓어지는 게 아니라 뒤집힙니다
-- [ ] pep440 관용 — 보류. 후보 규칙 둘을 합쳐도 advisory 경계 2건을 살립니다
+- [ ] pep440 관용 — 보류; 2026-08-27에 재측정, 기록해 둔 규칙 하나(`p3`
+      패치 접미사)가 여전히 경계 하나만 살립니다(buildbot의 `0.7.11p3`), 변화
+      없음. 남은 것에는 이제 `torch`의 맨 문자열 `"NA"` sentinel 경계가
+      포함됩니다 — 문법 관용 문제가 아니라 업스트림 데이터 품질 구멍이라서,
+      관용을 늘려도 이것들은 구제되지 않습니다
 - [x] apk는 apk-tools 자신의 738개 비교 벡터 파일로 CI에서 재생하며 검증
 - [x] semver가 npm/node-semver 자신의 비교 픽스처를 재생하고, 그 31개 느슨한 입력 형태를 음성
       픽스처로 거부합니다 (D39)

@@ -654,6 +654,9 @@ exited 0 while 24 findings went unmentioned.
 - [x] Bitnami (D99) — an app layer riding on someone else's distro: purl-type routing,
       a revision-stripping SemVer wrapper, and a marker cataloger that reuses the D84
       SPDX reader; day-one differential 497/497 with agree 485, dual inventory proven
+- [x] AL2023 NVIDIA and livepatch advisories (D100) — two fixed repos on the chain the
+      provider already parses (the deferral's DNF-module premise was wrong); +592
+      advisories, +58 net-new CVEs fully disjoint from every other feed
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a
@@ -963,7 +966,10 @@ day: `alpine:3.14` skipped `libretls 3.3.3p1-r3` and with it CVE-2022-0778.
 - [ ] Partial evaluation of a range with one unreadable bound — **rejected**, see D35.
       Alpine's imagemagick carries `introduced 7.0.0-0` above `fixed 6.9.6.8-r0`, so treating
       the bad bound as `0` inverts the window rather than widening it
-- [ ] pep440 leniency — deferred; the two candidate rules rescue 2 advisory bounds between them
+- [ ] pep440 leniency — deferred; re-measured 2026-08-27, the one recorded rule (a `p3`
+      patch suffix) still rescues a single bound (buildbot's `0.7.11p3`), unchanged. The
+      residue now includes `torch`'s literal `"NA"` sentinel bounds — an upstream
+      data-quality gap, not a grammar-leniency question, so leniency would not rescue them
 - [x] apk checked against apk-tools' own 738-comparison vector file, replayed in CI
 - [x] semver replays npm/node-semver's own comparison fixtures, and rejects its 31 loose-input
       forms as a negative fixture (D39)
