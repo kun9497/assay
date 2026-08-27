@@ -85,6 +85,10 @@ func TestEcosystemFor(t *testing.T) {
 		// different product.
 		{"cpe:/a:redhat:hummingbirdx:1", "", "shares a prefix but is not Hummingbird"},
 		{"cpe:/a:redhat:hummingbird:1:beta", "", "a trailing component"},
+		// QA round 5: the FRONT anchor specifically. hummingbirdx above tests
+		// a different name; only garbage BEFORE a real hummingbird CPE
+		// exercises the ^, and dropping it survived the table until this row.
+		{"xcpe:/a:redhat:hummingbird:1", "", "something before the cpe is not a cpe (front anchor)"},
 	} {
 		got, ok := ecosystemFor(tc.cpe)
 		if got != tc.want || ok != (tc.want != "") {
@@ -1436,6 +1440,11 @@ func TestHummingbirdPackageOf(t *testing.T) {
 		// Not Hummingbird's namespace.
 		{"pkg:rpm/suse/xz@5.6.2-1.1", "", "", false},
 		{"", "", "", false},
+		// QA round 5: the FRONT anchor. A real redhat purl with anything
+		// before it must not match -- dropping the ^ on hummingbirdPurlRE
+		// survived the table until this row (every other reject fails because
+		// it lacks the substring entirely, not because of anchoring).
+		{"junk pkg:rpm/redhat/freetype@2.14.3-1.2.hum1?arch=x86_64", "", "", false},
 	} {
 		name, version, ok := hummingbirdPackageOf(tc.purl)
 		if name != tc.name || version != tc.version || ok != tc.ok {
@@ -1469,5 +1478,39 @@ func TestEcosystemAgreesWithCataloger_Hummingbird(t *testing.T) {
 	if _, ok := version.For(catalogerKey); !ok {
 		t.Errorf("version.For(%q) has no comparer -- the matcher could never evaluate a "+
 			"Hummingbird package even if the lookup found something", catalogerKey)
+	}
+}
+
+// TestConvert_HummingbirdMissingPurlIsCountedNotSilent is the QA-round-5
+// close for the SkippedNoPurl counter (D98). resolveProduct returning
+// skipNoPurl is unit-tested directly, but that path bypasses convert's own
+// stats entirely, so dropping the `st.SkippedNoPurl++` inside convert's add
+// closure left every test green. Here a product_status names a Hummingbird
+// component whose id has NO matching purl leaf in the product tree: it must
+// produce no affected entry AND register in the count, not vanish silently.
+func TestConvert_HummingbirdMissingPurlIsCountedNotSilent(t *testing.T) {
+	d := buildHummingbirdDoc(t, "CVE-2099-40001",
+		map[string]string{"Red Hat Hardened Images": "cpe:/a:redhat:hummingbird:1"},
+		// One resolvable purl leaf...
+		map[string]string{
+			"freetype-main@x86_64": "pkg:rpm/redhat/freetype@2.14.3-1.2.hum1?arch=x86_64&distro=hummingbird-20251124&repository_id=public-hummingbird-x86_64-rpms",
+		},
+		// ...but product_status names TWO components, the second with no leaf.
+		[]string{
+			"Red Hat Hardened Images:freetype-main@x86_64",
+			"Red Hat Hardened Images:ghost-main@x86_64",
+		},
+		nil, nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped a document naming a resolvable Hummingbird package")
+	}
+	if _, present := affectedByName(adv)["Hummingbird/ghost-main"]; present {
+		t.Error("the purl-less component produced an affected entry; it should have been skipped")
+	}
+	if st.SkippedNoPurl != 1 {
+		t.Errorf("SkippedNoPurl = %d, want 1 — a component with no purl leaf must be counted, not silently dropped", st.SkippedNoPurl)
 	}
 }

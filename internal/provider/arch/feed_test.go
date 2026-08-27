@@ -93,3 +93,25 @@ func TestBuildAdvisories_SortedByID(t *testing.T) {
 		t.Errorf("out = %+v, want [AVG-100, AVG-200] in that order", out)
 	}
 }
+
+// TestBuildAdvisories_FixedAndTestingCountSeparately holds the D97 status
+// counters (QA round 5): a "Fixed" row must increment FixedRows and a
+// "Testing" row TestingRows, not the reverse. Nothing read these counters, so
+// swapping the two branches stayed green. Both statuses still emit a range
+// (Testing's fix is installable from the testing repo), so finding count
+// alone cannot tell them apart — the counters are the only signal.
+func TestBuildAdvisories_FixedAndTestingCountSeparately(t *testing.T) {
+	_, st := buildAdvisories([]row{
+		{Name: "AVG-1", Packages: []string{"a"}, Status: "Fixed", Fixed: strPtr("1.0-1")},
+		{Name: "AVG-2", Packages: []string{"b"}, Status: "Fixed", Fixed: strPtr("1.5-1")},
+		{Name: "AVG-3", Packages: []string{"c"}, Status: "Testing", Fixed: strPtr("2.0-1")},
+	})
+	// Two Fixed, one Testing -- asymmetric so a swap of the two branches is
+	// visible (1+1 would tie under the swap and hide it).
+	if st.FixedRows != 2 {
+		t.Errorf("FixedRows = %d, want 2", st.FixedRows)
+	}
+	if st.TestingRows != 1 {
+		t.Errorf("TestingRows = %d, want 1", st.TestingRows)
+	}
+}

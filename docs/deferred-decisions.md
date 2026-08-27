@@ -324,8 +324,21 @@ them); all 12 closed test-only (#76). Round 4 (2026-08-26) closed all 12 leftove
 journal misrecorded its own verification: two matcher findings (D80's streamMatched
 empty-vs-empty among them, a high) were logged as verified but never actually closed by
 #76; the round-4 agent derived its working set from #76's real diff instead of the
-journal, which is now the recorded rule for future rounds. QA backlog: empty. The
-original entry follows.
+journal, which is now the recorded rule for future rounds. Round 5 (2026-08-27) swept
+D93-D101 (the differential-institutionalization, the five boutiques, Hummingbird, Bitnami,
+the two extras/marker slices and the DataAsOf-attribution fix) and closed **17** unheld
+guards test-only (#98) — the largest round yet, run with read-only analysis agents
+proposing candidate mutations in parallel while the main loop applied, verified and wrote
+every test single-writer (the one-writer-at-a-time rule). All 17 confirmed red under their
+own mutation before the round closed; two first-draft fixtures passed without catching
+(an arch counter swap that was symmetric at 1+1, a BellSoft comparer test whose version
+pair happened to agree under both APK and RPM) and were repaired until they genuinely
+caught — the round-3 "named the right thing, could not fail on it" trap, avoided by
+verifying delete-goes-red on every one. Highlights: a whole distro family (BellSoft
+Hardened Containers) was never driven through Match so its comparer type was unchecked;
+PullSeed carried its own untested copy of the freshness-attribution line; the DataAsOf
+tie-break determinism the code comment promised had no fixture with an actual tie. QA
+backlog: empty. The original entry follows.
 
 **Why this is written down rather than assumed.** Every slice in this project has shipped
 with its own tests and its own mutation round, and mutation testing still found real defects

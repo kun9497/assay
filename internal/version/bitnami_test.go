@@ -32,6 +32,14 @@ func TestBitnami_Compare(t *testing.T) {
 		{"same core, revisions order numerically (3 < 10)", "18.6.0-3", "18.6.0-10", -1},
 		{"same core, revisions order numerically, reversed", "18.6.0-10", "18.6.0-3", 1},
 		{"same core, same revision", "18.6.0-3", "18.6.0-3", 0},
+		// QA round 5: a leading zero must be trimmed before the numeric
+		// tie-break. "03" and "3" are the same revision, but compareNumeric
+		// is length-first, so WITHOUT trimLeadingZeros "18.6.0-03" (revision
+		// length 2) sorts above "18.6.0-3" (length 1) -- a phantom ordering
+		// between two identical builds. This pair ties only once the zero is
+		// trimmed.
+		{"leading-zero revision equals its bare form", "18.6.0-03", "18.6.0-3", 0},
+		{"leading-zero revision, reversed", "18.6.0-3", "18.6.0-03", 0},
 		// A bundled library never carries a revision at all in real Bitnami
 		// SPDX docs (geos, proj, gdal all measured bare) -- ordinary SemVer
 		// compare once neither side has one.

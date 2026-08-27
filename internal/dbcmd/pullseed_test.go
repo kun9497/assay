@@ -261,3 +261,46 @@ func TestPullSeed_DoesNotFallBackOnANonManifestError(t *testing.T) {
 		t.Error("a refused PullSeed installed a file from the stale fallback")
 	}
 }
+
+// TestPullSeed_AttributesTheStalestSource is the QA-round-5 close for
+// PullSeed's own copy of the freshness-attribution line. Pull got two tests
+// for it; PullSeed's identical if/else, added in the same commit, had none,
+// so collapsing it to the bare line (or always-attribute) stayed green. This
+// drives the real Push -> PullSeed chain so the source annotation is computed
+// by Push and read back by PullSeed, not hand-built.
+func TestPullSeed_AttributesTheStalestSource(t *testing.T) {
+	host := registryHost(t)
+	ref := fmt.Sprintf("%s/assay-db:v%d", host, store.SchemaVersion)
+
+	path := filepath.Join(t.TempDir(), "src.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(store.Meta{
+		BuiltAt: testBuiltAt,
+		Providers: map[string]store.Provenance{
+			"osv":    {DataAsOf: time.Date(2026, 8, 26, 0, 0, 0, 0, time.UTC)},
+			"amazon": {DataAsOf: time.Date(2023, 9, 25, 22, 0, 0, 0, time.UTC)},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+
+	var out, errOut bytes.Buffer
+	if code := Push(context.Background(), path, ref, false, &out, &errOut); code != 0 {
+		t.Fatalf("Push = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+
+	dst := filepath.Join(t.TempDir(), "seed.db")
+	out.Reset()
+	errOut.Reset()
+	if code := PullSeed(context.Background(), dst, ref, &out, &errOut); code != 0 {
+		t.Fatalf("PullSeed = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	want := "upstream data as of 2023-09-25 (stalest source: amazon; per-source dates: assay db status)"
+	if !strings.Contains(errOut.String(), want) {
+		t.Errorf("stderr = %q, want it to contain %q", errOut.String(), want)
+	}
+}
