@@ -6,6 +6,7 @@ require (
 	github.com/google/go-containerregistry v0.21.7
 	github.com/klauspost/compress v1.18.6
 	go.etcd.io/bbolt v1.5.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

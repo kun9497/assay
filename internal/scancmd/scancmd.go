@@ -22,6 +22,7 @@ import (
 	"github.com/kun9497/assay/internal/cataloger/pacmandb"
 	"github.com/kun9497/assay/internal/cataloger/rpmdb"
 	"github.com/kun9497/assay/internal/cataloger/spdx"
+	"github.com/kun9497/assay/internal/ignore"
 	"github.com/kun9497/assay/internal/matcher"
 	"github.com/kun9497/assay/internal/pkgmeta"
 	"github.com/kun9497/assay/internal/report"
@@ -163,6 +164,14 @@ type Options struct {
 	// carry. It does not change the --fail-on* verdict below: explain mode
 	// picks the renderer, not the exit code.
 	Explain string
+	// IgnoreFile is the path to a .assay.yaml ignore config, from --config.
+	// Empty means "discover .assay.yaml in the working directory, and run
+	// without one if there is none" — a project that has never written an
+	// ignore file scans exactly as before. A file that is named but cannot
+	// be read or parsed fails the scan (exit 2): a malformed waiver list is
+	// a mistake the caller wants told about, not one that silently waives
+	// nothing.
+	IgnoreFile string
 }
 
 // The two files an image cataloger reads, named as they appear as tar entries
@@ -570,6 +579,16 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		return 2
 	}
 
+	// Ignore rules (the VEX/ignore feature) waive findings the user has
+	// judged irrelevant, moving them into res.Suppressed. This runs BEFORE
+	// the renderers and the verdict: a waived finding must not reach the
+	// table or trip --fail-on, but every renderer still shows it as a
+	// counted, reasoned block — the matcher stayed pure, and suppression is
+	// visible, never silent (matcher.Result.Suppressed's own doc comment).
+	if code := applyIgnoreRules(&res, opts.IgnoreFile, stderr); code != 0 {
+		return code
+	}
+
 	// D87. Computed unconditionally — not only when --fail-on-eol is set —
 	// because the table/JSON/SARIF renderers surface the fact regardless of
 	// the gate (the same shape KEV membership already is: the table marks
@@ -743,6 +762,43 @@ func article(kind source.TargetKind) string {
 // is meant to read it directly. Re-deriving the same fact a second way here
 // would be the identical two-paths-can-drift hazard the brief calls out for
 // AtOrAbove, one field over — so the loop below exists only for FailOn.
+
+// applyIgnoreRules loads the ignore config and moves waived findings from
+// res.Findings into res.Suppressed. It is a no-op (exit 0, nothing changed)
+// when no config is named and none is discovered — a project with no
+// .assay.yaml scans exactly as before. A named-but-unreadable or malformed
+// config fails the scan at exit 2, on IgnoreFile's own reasoning: a broken
+// waiver list is a mistake to surface, not one to run past.
+func applyIgnoreRules(res *matcher.Result, ignoreFile string, stderr io.Writer) int {
+	path := ignoreFile
+	if path == "" {
+		// No --config: look for the default in the working directory, and
+		// run without one if there is none.
+		wd, err := os.Getwd()
+		if err != nil {
+			return 0 // cannot look; behave as if there is no config
+		}
+		p, ok := ignore.Discover(wd)
+		if !ok {
+			return 0
+		}
+		path = p
+	}
+	cfg, err := ignore.Load(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 2
+	}
+	warn := func(msg string) { fmt.Fprintf(stderr, "warning: %s\n", msg) }
+	kept, suppressed := cfg.Apply(res.Findings, time.Now(), warn)
+	res.Findings = kept
+	res.Suppressed = suppressed
+	if len(suppressed) > 0 {
+		fmt.Fprintf(stderr, "%d finding(s) suppressed by %s\n", len(suppressed), path)
+	}
+	return 0
+}
+
 func verdict(opts Options, sum report.Summary, findings []matcher.Finding, eol report.EOLStatus) int {
 	if opts.FailOnIncomplete && (sum.NotEvaluated > 0 || sum.IncompleteChecks > 0) {
 		return 2

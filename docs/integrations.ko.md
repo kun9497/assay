@@ -60,6 +60,33 @@ GitHub 예제는 스캔을 한 번 돌려 SARIF를 파일로 쓴 뒤, 종료 코
 데이터베이스는 스캔과 직교합니다: 잡마다 한 번 갱신(또는 캐시)하면, 이후 모든 `assay
 scan`은 읽기만 합니다. SBOM이나 로컬 tarball 스캔은 네트워크 호출을 전혀 하지 않습니다.
 
+## 받아들인 finding waive하기
+
+어떤 finding은 진짜이지만 당신의 프로젝트와는 무관합니다 — CVE가 쓰지 않는
+코드 경로에 있거나, 완화 조치를 했거나, 위험을 감수하기로 했을 수 있습니다.
+그런 것들은 저장소의 `.assay.yaml`에 넣으세요(기본으로 스캔됨;
+`--config <path>`로 다른 파일을 지정할 수 있습니다):
+
+```yaml
+ignore:
+  - vulnerability: CVE-2024-58251   # CVE나 advisory id (alias도 셈)
+    package: busybox                # 선택: 이 패키지에만 적용
+    reason: not reachable in our build path   # 필수 — 이유 없는 waiver는 거부됨
+    expires: 2026-12-31             # 선택: 이 날짜 이후로는 규칙이 waive를 멈추고 경고함
+```
+
+규칙은 이름 붙인 필드 '전부'가 매칭될 때만 finding을 waive합니다(`reason`은
+필수입니다; 매칭 필드가 없는 규칙은 모든 것을 waive하게 되므로 거부됩니다).
+waive된 finding은 **보여지지, 결코 숨겨지지 않습니다**: 리포트가 그것들을
+세고("N suppressed"), 각각을 이유와 함께 이름 붙이며, `--fail-on`을 걸지
+않습니다 — 하지만 출력에는 남습니다(SARIF는 그것들을 표준 `suppressions`로
+표시하고, GitHub는 이를 기각된 것으로 보여줍니다). 만료된 규칙은 waive를
+멈추고 경고하므로, waiver는 눈에 띄지 않게 자신의 정당화보다 오래 살 수
+없습니다.
+
+이것은 VEX/ignore의 ignore-규칙 절반입니다; 생산자-서명 OpenVEX 문서를
+읽는 것은 별개의, 나중 기능입니다.
+
 ## `--output json | jq`로 충분하지 않은 이유
 
 충분합니다 — JSON은 각 소스의 등급, 소스별 수정 버전, skip 개수를 모두 담고, 스트림 규율

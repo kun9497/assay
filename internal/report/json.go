@@ -31,7 +31,7 @@ import (
 // what it does mean is that a consumer reading 2 or later can rely on every
 // field below being present, which is the guarantee the constant exists to
 // give.
-const schemaVersion = 8
+const schemaVersion = 9 // 9: adds the suppressed[] array and summary.suppressed (VEX/ignore)
 
 // Document is the stable shape of `assay scan --output json` (design goal
 // #3). It carries what Table shows plus what Table cannot: the full
@@ -49,7 +49,13 @@ type Document struct {
 	SchemaVersion int             `json:"schemaVersion"`
 	Findings      []FindingRecord `json:"findings"`
 	Skipped       []SkippedRecord `json:"skipped"`
-	Summary       Summary         `json:"summary"`
+	// Suppressed is the findings a user ignore rule waived, each with the
+	// reason its rule gave (the VEX/ignore feature). Present and empty
+	// rather than omitted when nothing was waived, the same shape
+	// discipline Skipped follows: a consumer must be able to tell "no
+	// waivers" from "this document predates the field".
+	Suppressed []SuppressedRecord `json:"suppressed"`
+	Summary    Summary            `json:"summary"`
 	// EOL is the scanned target's distro end-of-life status (D87), nil when
 	// there is no answer — see EOLRecord's own doc comment for the three
 	// reasons and why nil, not a zero-value object, is what "no answer"
@@ -281,6 +287,15 @@ type EvidenceRecord struct {
 // whole package was skipped (matcher.Skipped's own contract), which is also
 // what Table's "Not evaluated:" block relies on to tell the two skip kinds
 // apart.
+// SuppressedRecord is one waived finding (the VEX/ignore feature): the
+// full finding, inlined, plus the reason the ignore rule gave. Inlined
+// rather than nested so a consumer already reading FindingRecord fields
+// finds them in the same place here, with one extra key.
+type SuppressedRecord struct {
+	FindingRecord
+	Reason string `json:"reason"`
+}
+
 type SkippedRecord struct {
 	Package    PackageRecord `json:"package"`
 	AdvisoryID string        `json:"advisoryId,omitempty"`
@@ -313,11 +328,18 @@ func JSON(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus) (
 		SchemaVersion: schemaVersion,
 		Findings:      make([]FindingRecord, 0, len(res.Findings)),
 		Skipped:       make([]SkippedRecord, 0, len(res.Skipped)),
+		Suppressed:    make([]SuppressedRecord, 0, len(res.Suppressed)),
 		Summary:       sum,
 		EOL:           eol.Record(),
 	}
 	for _, f := range res.Findings {
 		doc.Findings = append(doc.Findings, findingRecord(f))
+	}
+	for _, s := range res.Suppressed {
+		doc.Suppressed = append(doc.Suppressed, SuppressedRecord{
+			FindingRecord: findingRecord(s.Finding),
+			Reason:        s.Reason,
+		})
 	}
 	for _, s := range res.Skipped {
 		doc.Skipped = append(doc.Skipped, SkippedRecord{

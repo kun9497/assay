@@ -3931,6 +3931,38 @@ unkeyed and they would surface as not-evaluated, tripping it. Independent mutati
 
 ---
 
+### D102 — Ignore rules: a waiver is counted and reasoned, never silent
+
+**Decision.** A user waives a finding through a `.assay.yaml` ignore file (grype's
+convention; yaml.v3 was already in the module graph, so promoting it added no code). A rule
+matches on `vulnerability` (a CVE/advisory id, checked against the finding's identifiers so
+an alias counts), `package`, and `ecosystem` — all it names must match (AND within a rule,
+OR across). `reason` is MANDATORY and `expires` (YYYY-MM-DD, inclusive) is optional. The
+matcher never sees the rules: suppression is a scancmd step AFTER Match that moves waived
+findings from `Result.Findings` into `Result.Suppressed`, so the matcher stays a pure
+function of (target, store).
+
+**The discipline that makes it assay's, not a suppress-list.** A waived finding is never
+silently dropped — the project's whole spine is that a scan must not confuse "found
+nothing" with "was waived" (D11, D36). So: an unexplained rule is refused at load
+(`reason` required); a rule that names no match field is refused (it would waive the whole
+scan); a mistyped key is refused (KnownFields); an expired rule stops waiving AND warns on
+stderr (a waiver cannot outlive its justification unnoticed). And every renderer SHOWS the
+suppression — the table counts "N suppressed" and prints a block naming each finding and
+its reason, JSON carries a `suppressed[]` array (schema 9) with the reason, and SARIF emits
+the finding as a result with a standard `suppressions` entry so GitHub shows it dismissed
+rather than gone. A suppressed finding does not trip `--fail-on` precisely because it left
+Findings, but it stays visible.
+
+**Scope.** Local ignore rules only — the OpenVEX document-input half (a producer-signed VEX
+the scanner reads and applies) is a later slice, deliberately, so the 80% case ships
+self-contained. `--config <path>` names the file; the default discovers `.assay.yaml` in
+the working directory and runs without one if there is none, so a project that has never
+written one scans exactly as before. Independent review: 5/5 core guards delete-goes-red
+(no-apply, reasonless-accept, expiry-ignored, table-hidden, sarif-active-mismarked).
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

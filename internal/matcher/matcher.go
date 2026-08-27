@@ -533,6 +533,28 @@ func skipCauseOf(err error) SkipCause {
 type Result struct {
 	Findings []Finding
 	Skipped  []Skipped
+	// Suppressed is findings a user's ignore rules waived (the VEX/ignore
+	// feature). Match NEVER populates it — the matcher does not know about
+	// user config, and keeping it that way is what lets the matcher stay a
+	// pure function of (target, store). The scan path applies the ignore
+	// rules to Findings after Match returns, moves the waived ones here, and
+	// every renderer shows them as a counted, reasoned block rather than
+	// dropping them: a suppressed finding is not the same as no finding, and
+	// hiding it silently is exactly the "found nothing" vs "was waived"
+	// confusion the exit-code contract (D11) exists to prevent. A suppressed
+	// finding does not trip --fail-on precisely because it is no longer in
+	// Findings, but it stays visible in the report.
+	Suppressed []Suppressed
+}
+
+// Suppressed is one finding a user ignore rule waived, paired with the
+// reason that rule gave. The reason is mandatory on the rule (an ignore
+// with no stated reason is refused at load time), so it is always present
+// here — an auditor reading the report sees not just that a finding was
+// waived but why.
+type Suppressed struct {
+	Finding Finding
+	Reason  string
 }
 
 type Matcher struct {

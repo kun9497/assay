@@ -792,3 +792,45 @@ func TestJSON_MatchedViaProvidesIsInTheDocument(t *testing.T) {
 			"ambiguous between a direct match and a pre-D95 document")
 	}
 }
+
+// TestJSON_SuppressedFindingsAreASeparateArray holds the VEX/ignore contract
+// on the JSON side: waived findings go in a `suppressed` array (each carrying
+// the finding fields plus its reason), NOT in `findings`, and `summary.suppressed`
+// counts them — a consumer can act on the waivers without them polluting the
+// active-findings list, and can never mistake "no waivers" for "field absent".
+func TestJSON_SuppressedFindingsAreASeparateArray(t *testing.T) {
+	waived := matcher.Finding{
+		Package:  pkgmeta.Package{Name: "busybox", Ecosystem: "Alpine:v3.19"},
+		Advisory: advisory.Advisory{ID: "ALPINE-CVE-2024-58251"},
+		Severity: severity.Low,
+	}
+	res := matcher.Result{Suppressed: []matcher.Suppressed{{Finding: waived, Reason: "accepted risk"}}}
+	var buf bytes.Buffer
+	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
+		t.Fatal(err)
+	}
+	var doc Document
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(doc.Findings) != 0 {
+		t.Errorf("findings = %d, want 0 (the waived one is not a finding)", len(doc.Findings))
+	}
+	if len(doc.Suppressed) != 1 {
+		t.Fatalf("suppressed = %d, want 1", len(doc.Suppressed))
+	}
+	if doc.Suppressed[0].Reason != "accepted risk" || doc.Suppressed[0].Advisory.ID != "ALPINE-CVE-2024-58251" {
+		t.Errorf("suppressed[0] = %+v, want the reason and the finding's advisory id", doc.Suppressed[0])
+	}
+	if doc.Summary.Suppressed != 1 {
+		t.Errorf("summary.suppressed = %d, want 1", doc.Summary.Suppressed)
+	}
+	// The key must be present even when empty (shape must not vary).
+	buf.Reset()
+	if _, err := JSON(&buf, matcher.Result{}, cyclonedx.Stats{}, EOLStatus{}); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte(`"suppressed": []`)) {
+		t.Error(`document omits the "suppressed" array when nothing is waived — its absence would be ambiguous`)
+	}
+}

@@ -63,6 +63,30 @@ The database is orthogonal to the scan: update it once per job (or cache it), an
 `assay scan` after that only reads it. A scan of an SBOM or a local tarball makes no network
 call at all.
 
+## Waiving findings you have accepted
+
+Some findings are real but not relevant to your project — the CVE is in a code path you do
+not use, you have a mitigation, or you have accepted the risk. Put those in a `.assay.yaml`
+in your repo (scanned by default; `--config <path>` names another):
+
+```yaml
+ignore:
+  - vulnerability: CVE-2024-58251   # a CVE or advisory id (an alias counts)
+    package: busybox                # optional: only on this package
+    reason: not reachable in our build path   # required — an unexplained waiver is refused
+    expires: 2026-12-31             # optional: after this date the rule stops waiving and warns
+```
+
+A rule waives a finding only if EVERY field it names matches (`reason` is mandatory; a rule
+with no match field is refused because it would waive everything). Waived findings are
+**shown, never hidden**: the report counts them ("N suppressed"), names each with its
+reason, and they do not trip `--fail-on` — but they stay in the output (SARIF marks them as
+standard `suppressions`, which GitHub shows as dismissed). An expired rule stops waiving and
+warns, so a waiver cannot outlive its justification unnoticed.
+
+This is the ignore-rules half of VEX/ignore; reading a producer-signed OpenVEX document is a
+separate, later capability.
+
 ## Why not just `--output json | jq`
 
 You can — the JSON carries every source's rating, the per-source fixed versions, and the

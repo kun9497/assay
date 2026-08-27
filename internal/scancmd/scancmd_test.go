@@ -1359,8 +1359,8 @@ func TestRun_OutputJSON(t *testing.T) {
 		if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
 			t.Fatalf("stdout is not valid JSON: %v\n%s", err, out.String())
 		}
-		if doc.SchemaVersion != 8 {
-			t.Errorf("SchemaVersion = %d, want 8", doc.SchemaVersion)
+		if doc.SchemaVersion != 9 {
+			t.Errorf("SchemaVersion = %d, want 9", doc.SchemaVersion)
 		}
 		if len(doc.Findings) != 1 || doc.Findings[0].Advisory.ID != "GHSA-json-medium" {
 			t.Errorf("Findings = %+v, want the one medium finding", doc.Findings)
@@ -2684,5 +2684,101 @@ func TestCatalogFromImage_BitnamiSymlinkedMarkerIsCountedNotSilent(t *testing.T)
 	}
 	if stats.SkippedNoVersion < 1 {
 		t.Errorf("SkippedNoVersion = %d, want >= 1 — the symlinked Bitnami marker must be counted, not silently dropped", stats.SkippedNoVersion)
+	}
+}
+
+// alpineDBWithBusyboxFinding builds a store with one Alpine advisory that the
+// alpine319Image fixture's busybox package matches, so a scan of that image
+// produces exactly one finding — the thing an ignore rule then waives.
+func alpineDBWithBusyboxFinding(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Put(advisory.Advisory{
+		ID:       "ALPINE-CVE-2024-58251",
+		Kind:     advisory.KindVulnerability,
+		Aliases:  []string{"CVE-2024-58251"},
+		Database: "ALPINE",
+		Affected: []advisory.Affected{{
+			Ecosystem: "Alpine:v3.19",
+			Name:      "busybox", // apkOneRecord's origin (o:busybox)
+			Ranges: []advisory.Range{{
+				Type:   advisory.RangeEcosystem,
+				Events: []advisory.Event{{Introduced: "0"}, {Fixed: "1.36.1-r21"}},
+			}},
+		}},
+		// A real vector so the finding has a band and --fail-on low can trip
+		// it — an unrated finding never satisfies any threshold (D17), which
+		// would make the gate a no-op and this test prove nothing.
+		Severity: []advisory.Severity{{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:N/A:N"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(store.Meta{
+		Providers: map[string]store.Provenance{"osv": {Ecosystems: []string{"Alpine:v3.19"}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// TestRun_IgnoreRuleSuppressesAFindingAndClearsTheGate is the caller-first
+// proof for the whole VEX/ignore wiring (D-VEX): a real Run() over an image
+// with one finding, gated on --fail-on low, exits 1 — until a .assay.yaml
+// waives that finding, at which point the scan exits 0, the finding is gone
+// from the table's finding count, and it is shown as suppressed instead.
+// Deleting the applyIgnoreRules call in Run turns the second scan back to
+// exit 1, which no other test would catch.
+func TestRun_IgnoreRuleSuppressesAFindingAndClearsTheGate(t *testing.T) {
+	dbPath := alpineDBWithBusyboxFinding(t)
+	low := severity.Low
+	gate := Options{FailOn: &low}
+
+	// Without an ignore file: the finding trips --fail-on low, exit 1.
+	out, _, code := alpine319Image(t, dbPath, gate)
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (the busybox finding trips --fail-on low)\n%s", code, out)
+	}
+
+	// With an ignore file waiving it: exit 0, and it shows as suppressed.
+	cfg := filepath.Join(t.TempDir(), ".assay.yaml")
+	if err := os.WriteFile(cfg, []byte("ignore:\n  - vulnerability: CVE-2024-58251\n    reason: not in our build path\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gate.IgnoreFile = cfg
+	out, errOut, code := alpine319Image(t, dbPath, gate)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (the finding is waived, so --fail-on has nothing to trip)\n%s\n%s", code, out, errOut)
+	}
+	if !strings.Contains(out, "0 finding(s)") || !strings.Contains(out, "1 suppressed") {
+		t.Errorf("summary = %q, want 0 finding(s) and 1 suppressed", out)
+	}
+	if !strings.Contains(out, "Suppressed (1)") || !strings.Contains(out, "not in our build path") {
+		t.Errorf("output = %q, want the suppressed finding shown with its reason — never silently dropped", out)
+	}
+}
+
+// TestRun_MalformedIgnoreFileExitsTwo: a named ignore file that is broken
+// fails the scan (exit 2), not silently waives nothing — a bad waiver list is
+// a mistake to surface.
+func TestRun_MalformedIgnoreFileExitsTwo(t *testing.T) {
+	dbPath := alpineDBWithBusyboxFinding(t)
+	cfg := filepath.Join(t.TempDir(), ".assay.yaml")
+	// A rule with no reason — refused at load.
+	if err := os.WriteFile(cfg, []byte("ignore:\n  - vulnerability: CVE-2024-58251\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, errOut, code := alpine319Image(t, dbPath, Options{IgnoreFile: cfg})
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2 (a malformed ignore file is untrustworthy input)", code)
+	}
+	if !strings.Contains(errOut, "reason") {
+		t.Errorf("stderr = %q, want it to name the malformed rule's problem", errOut)
 	}
 }

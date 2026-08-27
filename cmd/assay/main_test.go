@@ -1024,8 +1024,8 @@ func TestRun_ScanOutputJSONReachesRealExitCode(t *testing.T) {
 	// cannot notice that the shape changed under it. Bumping this is meant to
 	// be the deliberate act that accompanies a schema change (D33 was the
 	// third).
-	if doc.SchemaVersion != 8 {
-		t.Errorf("SchemaVersion = %d, want 8", doc.SchemaVersion)
+	if doc.SchemaVersion != 9 {
+		t.Errorf("SchemaVersion = %d, want 9", doc.SchemaVersion)
 	}
 	// buildRunSeamFixture's critical, unrated and no-fix findings; somecrate
 	// is dropped by the cataloger and never reaches a Finding at all.
@@ -3318,5 +3318,27 @@ func TestNvdOptionsFromEnv_WindowSpanCap(t *testing.T) {
 				t.Errorf("stderr = %q, want it to contain %q", s, tc.wantWarn)
 			}
 		})
+	}
+}
+
+// TestParseScanArgs_Config holds that --config (both forms) sets
+// opts.IgnoreFile, so the CLI actually plumbs the ignore-config path through
+// to the scan — deleting either case in the flag switch leaves this red.
+func TestParseScanArgs_Config(t *testing.T) {
+	for _, args := range [][]string{
+		{"alpine:3.19", "--config", ".assay.yaml"},
+		{"alpine:3.19", "--config=.assay.yaml"},
+	} {
+		_, opts, err := parseScanArgs(args)
+		if err != nil {
+			t.Fatalf("parseScanArgs(%v): %v", args, err)
+		}
+		if opts.IgnoreFile != ".assay.yaml" {
+			t.Errorf("parseScanArgs(%v): IgnoreFile = %q, want .assay.yaml", args, opts.IgnoreFile)
+		}
+	}
+	// The bare flag with no value is an error, like the other value flags.
+	if _, _, err := parseScanArgs([]string{"alpine:3.19", "--config"}); err == nil {
+		t.Error("--config with no value should error")
 	}
 }
