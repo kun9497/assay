@@ -1,0 +1,72 @@
+# GoReleaser cross-builds and publishes assay's release binaries. The project
+# is CGO_ENABLED=0 pure Go (D4), so every target below cross-compiles from one
+# host with no C toolchain — the same constraint that makes the Docker image
+# small also makes releases trivial.
+#
+# A release is cut by pushing a semver tag (`git tag v0.1.0 && git push
+# --tags`); .github/workflows/release.yml runs this file. Locally,
+# `goreleaser release --snapshot --clean` builds everything without publishing.
+version: 2
+
+project_name: assay
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: assay
+    main: ./cmd/assay
+    binary: assay
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      # Same three vars main.go reads (cmd/assay/main.go: version/commit/date),
+      # matching the Makefile's own -X flags so a released binary reports its
+      # version the way a `make build` one does.
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: assay
+    # tar.gz everywhere except Windows, which gets a zip — the shape the
+    # install.sh downloader expects (it derives the extension from the OS).
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  # One SHA256SUMS file the installer verifies the downloaded archive against.
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^wip:"
+      - "^chore:"
+
+release:
+  github:
+    owner: kun9497
+    name: assay
+  draft: false
+  prerelease: auto

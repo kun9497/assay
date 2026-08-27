@@ -36,8 +36,12 @@ var srcArtifactTagPattern = regexp.MustCompile(`[\w.\-]+/[\w.\-/]+:v(\d+)`)
 // fixed by hand alongside everything else in this file, but deliberately not
 // matched here -- see the doc comment below on why this guard stays narrow.
 var docsClaimingTheCacheDir = []string{
-	"README.md",
-	"README.ko.md",
+	// The cache-directory table lived in README until 2026-08-27, when the
+	// README became a lean landing page and the design/reference content
+	// moved to docs/DESIGN.md. These are the files that still state where the
+	// versioned cache lives, so a schema bump has to touch each one.
+	"docs/DESIGN.md",
+	"docs/DESIGN.ko.md",
 	"docs/superpowers/specs/2026-07-29-assay-roadmap.md",
 	"docs/superpowers/specs/2026-07-29-assay-roadmap.ko.md",
 }

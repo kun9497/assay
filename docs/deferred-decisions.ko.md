@@ -6,7 +6,7 @@
 
 *[English](deferred-decisions.md) · 한국어*
 
-[README](../README.ko.md)의 아키텍처 절과 함께 읽으십시오.
+[설계 문서](DESIGN.ko.md)의 아키텍처 절과 함께 읽으십시오.
 
 ---
 
