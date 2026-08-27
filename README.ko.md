@@ -82,6 +82,10 @@ assay scan alpine:3.19 --fail-on high
   판정에 섞이는 일이 없습니다.
 - **아티팩트가 실어 나르는 보강 데이터** — NVD 등급, EPSS 점수, CISA KEV 등재, EOL 상태.
   KISA의 한국어 산문은 `assay db build`로 로컬에서 얻습니다.
+- **보이는 채로 남는 면제** — 수용하기로 한 finding은 `.assay.yaml` ignore 파일로
+  억제합니다. 사유는 필수, 만료일은 선택. 억제된 finding은 게이트를 건드리지 않지만 모든
+  출력 형식에서 개수와 함께 표시되며, GitHub code scanning에는 사라진 것이 아니라
+  dismissed로 보입니다.
 
 ## 어떻게 맞물리나
 
@@ -103,7 +107,7 @@ assay scan alpine:3.19 --fail-on high
 - **[docs/integrations.md](docs/integrations.md)** — CI 통합: 복사해 쓰는 GitHub Actions·
   GitLab CI 예제, SARIF 업로드, 종료 코드 게이팅. ([한국어](docs/integrations.ko.md))
 - **[docs/superpowers/specs/2026-07-29-assay-roadmap.md](docs/superpowers/specs/2026-07-29-assay-roadmap.md)**
-  — 레퍼런스 설계, 모든 결정을 `D1`…`D101`로 근거와 함께 기록.
+  — 레퍼런스 설계, 모든 결정을 `D1`…`D102`로 근거와 함께 기록.
 
 모든 문서는 `X.md` / `X.ko.md` 짝으로 배포되며, 영어가 정본입니다.
 

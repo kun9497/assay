@@ -36,7 +36,10 @@ ships no os-release) —
 across three rpmdb backends: BerkeleyDB, SQLite and ndb (D44, D76). Bitnami app layers
 catalog from their /opt/bitnami SPDX markers alongside the base distro (D99, dual
 inventory). A weekly digest-pinned
-grype differential gates regressions in CI (D93). Installed
+grype differential gates regressions in CI (D93). Findings can be waived through a
+`.assay.yaml` ignore file (D102) — reason mandatory, expiry optional, applied after Match in
+scancmd so the matcher stays pure, and every renderer shows the suppression rather than
+hiding it. Installed
 Ubuntu ESM/FIPS and Oracle Ksplice/FIPS lineage packages are reported not evaluated rather
 than judged against mainline data (D53, D79). Ubuntu findings carry Canonical's own fix
 states since D85 — the CVE tracker is consulted at OSV conversion, for which `db build`
@@ -431,13 +434,16 @@ true, all of which happened while building D27:
 
 ## Conventions
 
-- **Three direct dependencies, deliberately**: `go.etcd.io/bbolt` (the store, D4),
+- **Four direct dependencies, deliberately**: `go.etcd.io/bbolt` (the store, D4),
   `github.com/google/go-containerregistry` (registry, tarball and OCI-layout image reading),
-  and `github.com/klauspost/compress` (zstd, for Red Hat's archive — it was already linked
+  `github.com/klauspost/compress` (zstd, for Red Hat's archive — it was already linked
   transitively through go-containerregistry, so promoting it moved one line in `go.mod` and
-  added no code). Everything else in `go.mod` is indirect. Adding a fourth is a real
-  decision — prefer the stdlib, and check the cgo constraint above. The pnpm/yarn-berry
-  YAML question in `docs/deferred-decisions.md` is exactly such a decision, still open.
+  added no code), and `gopkg.in/yaml.v3` (ignore rules, D102 — the same already-in-the-graph
+  promotion, via docker-cli). Everything else in `go.mod` is indirect. Adding a fifth is a
+  real decision — prefer the stdlib, and check the cgo constraint above. The pnpm/yarn-berry
+  YAML question in `docs/deferred-decisions.md` was exactly such a decision; the yaml.v3
+  promotion has since dissolved its dependency barrier, though the entry itself is still
+  open on its own merits.
 
   This line said "no third-party dependencies, `go.mod` has no `require` block" until
   2026-08-04, long after both landed. It is worth knowing what is already there before
