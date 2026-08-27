@@ -85,7 +85,8 @@ code scanning) and `table` (the default). `--explain` shows one finding's full e
 - **Waivers that stay visible** — an `.assay.yaml` ignore file suppresses a finding you
   have accepted, with a mandatory reason and an optional expiry. Suppressed findings never
   trip the gate but are counted and shown in every output format, and GitHub code scanning
-  sees them as dismissed, not gone.
+  sees them as dismissed, not gone. Usage in
+  [docs/integrations.md](docs/integrations.md#waiving-findings-you-have-accepted).
 
 ## How it fits together
 
