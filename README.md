@@ -83,9 +83,10 @@ code scanning) and `table` (the default). `--explain` shows one finding's full e
 - **Enrichment carried by the artifact** — NVD ratings, EPSS scores, CISA KEV membership,
   and end-of-life status. KISA's Korean prose is available locally via `assay db build`.
 - **Waivers that stay visible** — an `.assay.yaml` ignore file suppresses a finding you
-  have accepted, with a mandatory reason and an optional expiry. Suppressed findings never
-  trip the gate but are counted and shown in every output format, and GitHub code scanning
-  sees them as dismissed, not gone. Usage in
+  have accepted (mandatory reason, optional expiry), and `--vex` applies a producer's
+  OpenVEX document the same way. Suppressed findings never trip the gate but are counted
+  and shown in every output format, each labelled with where its waiver came from, and
+  GitHub code scanning sees them as dismissed, not gone. Usage in
   [docs/integrations.md](docs/integrations.md#waiving-findings-you-have-accepted).
 
 ## How it fits together

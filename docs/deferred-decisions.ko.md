@@ -1317,19 +1317,22 @@ NVD가 보강하지 않기로 결정한 상태입니다(12건 중 9건, `Awaitin
 
 ---
 
-### ~~VEX와 무시 규칙~~ — ignore 절반은 D102에서 해결
+### ~~VEX와 무시 규칙~~ — D102와 D104에 걸쳐 해결
 
 이미 무관하다고 확인된 finding을 억제하는 것. ignore-규칙 절반은 D102에서
 출하됐습니다: waiver를 담은 `.assay.yaml`이 `Matcher`와 `Reporter` 사이의
 기록된 필터로 적용됩니다(Match 뒤에 오는 scancmd 단계이고, 그래서 matcher는
 순수하게 남습니다), 이 프로젝트 자신의 규율을 그 위에 얹었습니다 — 모든
 waiver는 이유를 밝히고, 만료될 수 있고, 조용히 사라지는 대신 세어지고
-보여집니다. 여전히 미뤄져 있는 것은 OpenVEX 문서-입력 절반입니다:
-생산자-서명 VEX(OpenVEX/CSAF/CycloneDX VEX)를 읽고 그 not-affected 진술을
-자동으로 적용하는 것입니다. 아키텍처가 아니라 범위 때문에 미뤘습니다 —
-D102가 만든 같은 Match→Reporter 필터와 같은 suppressed-finding 배관이 그것을
-나를 것입니다. **다시 볼 때는** 사용자가 적용할 VEX 문서를 갖고 있을 때,
-또는 이미지가 그것을 자기 자신과 함께 실어 나를 때입니다.
+보여집니다. OpenVEX 문서-입력 절반은 D104(2026-08-28)에서 출하됐습니다:
+반복 가능한 `--vex <path>`가 생산자의 `not_affected`/`fixed` statement를
+같은 suppressed-finding 배관을 거쳐 적용하며, 이 항목이 예측한 그대로입니다
+("아키텍처가 아니라 범위 때문에 미뤘다"). *입력 문서로서의* CSAF VEX와
+CycloneDX VEX는 여전히 미구현입니다 — assay는 이미 Red Hat과 SUSE의
+CSAF VEX를 *데이터베이스 provider*로서 소비하고 있고, 이것이 실제 세계에서
+그것들이 등장하는 주된 경로를 이미 덮습니다; 사용자가 스캔에 적용할 독립된
+CSAF/CycloneDX VEX 문서를 갖게 되면 그때 다시 보되, 그 시점의 목표는
+D104의 statement 모델로 정규화하는 것입니다.
 
 ---
 

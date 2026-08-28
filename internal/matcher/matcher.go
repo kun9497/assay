@@ -547,14 +547,23 @@ type Result struct {
 	Suppressed []Suppressed
 }
 
-// Suppressed is one finding a user ignore rule waived, paired with the
-// reason that rule gave. The reason is mandatory on the rule (an ignore
-// with no stated reason is refused at load time), so it is always present
-// here — an auditor reading the report sees not just that a finding was
-// waived but why.
+// Suppressed is one finding a user waiver exonerated, paired with the reason
+// that waiver gave. The reason is mandatory (an ignore rule with no stated
+// reason is refused at load time, D102; a VEX statement with neither
+// justification nor impact_statement is skipped rather than suppressing,
+// D104), so it is always present here — an auditor reading the report sees
+// not just that a finding was waived but why.
 type Suppressed struct {
 	Finding Finding
 	Reason  string
+	// Source is which waiver mechanism suppressed this finding —
+	// "ignore-file" for a .assay.yaml rule (D102), "vex" for an OpenVEX
+	// document statement (D104). Two sources routinely disagree in scope
+	// (a VEX statement rarely names a whole ecosystem the way an ignore rule
+	// can), so a reader — and the table's own suppressed block — needs to
+	// tell them apart rather than reading every suppression as coming from
+	// the same file.
+	Source string
 }
 
 type Matcher struct {

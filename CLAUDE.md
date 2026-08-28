@@ -38,9 +38,11 @@ across three rpmdb backends: BerkeleyDB, SQLite and ndb (D44, D76). Bitnami app 
 catalog from their /opt/bitnami SPDX markers alongside the base distro (D99, dual
 inventory). A weekly digest-pinned
 grype differential gates regressions in CI (D93). Findings can be waived through a
-`.assay.yaml` ignore file (D102) — reason mandatory, expiry optional, applied after Match in
-scancmd so the matcher stays pure, and every renderer shows the suppression rather than
-hiding it. Installed
+`.assay.yaml` ignore file (D102 — reason mandatory, expiry optional) or a producer's
+OpenVEX document (`--vex`, repeatable, D104 — not_affected/fixed suppress, a reasonless
+not_affected is skipped with a warning, latest statement wins); both apply after Match in
+scancmd so the matcher stays pure, and every renderer shows each suppression with its
+source rather than hiding it. Installed
 Ubuntu ESM/FIPS and Oracle Ksplice/FIPS lineage packages are reported not evaluated rather
 than judged against mainline data (D53, D79). Ubuntu findings carry Canonical's own fix
 states since D85 — the CVE tracker is consulted at OSV conversion, for which `db build`

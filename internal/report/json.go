@@ -23,7 +23,12 @@ import (
 // 6 when both gained `fixState` and RatingRecord gained one too (D52), and to
 // 7 when RatingRecord gained `epss`/`epssPercentile`/`epssModel`/`kev`/
 // `kevDateAdded`/`kevRansomware` and Summary gained `knownExploited` (D86),
-// and to 8 when Document gained the target-level `eol` object (D87).
+// and to 8 when Document gained the target-level `eol` object (D87), and to
+// 9 when Document gained the suppressed[] array and summary.suppressed
+// (D102's ignore rules), and to 10 when SuppressedRecord gained `source`
+// (D104: an OpenVEX document is a second waiver mechanism alongside
+// .assay.yaml, and a consumer needs to tell which one suppressed a given
+// finding without guessing from the reason text's own wording).
 // Two earlier additions should have bumped it and did not — `ratings` (D25)
 // and RatingRecord.URL (D27) both changed the shape while this constant
 // stayed at 1 — so version 1 in the wild denotes three different documents.
@@ -31,7 +36,7 @@ import (
 // what it does mean is that a consumer reading 2 or later can rely on every
 // field below being present, which is the guarantee the constant exists to
 // give.
-const schemaVersion = 9 // 9: adds the suppressed[] array and summary.suppressed (VEX/ignore)
+const schemaVersion = 10
 
 // Document is the stable shape of `assay scan --output json` (design goal
 // #3). It carries what Table shows plus what Table cannot: the full
@@ -288,12 +293,18 @@ type EvidenceRecord struct {
 // what Table's "Not evaluated:" block relies on to tell the two skip kinds
 // apart.
 // SuppressedRecord is one waived finding (the VEX/ignore feature): the
-// full finding, inlined, plus the reason the ignore rule gave. Inlined
-// rather than nested so a consumer already reading FindingRecord fields
-// finds them in the same place here, with one extra key.
+// full finding, inlined, plus the reason the waiver gave. Inlined rather
+// than nested so a consumer already reading FindingRecord fields finds them
+// in the same place here, with two extra keys.
 type SuppressedRecord struct {
 	FindingRecord
 	Reason string `json:"reason"`
+	// Source is which waiver mechanism suppressed this finding —
+	// "ignore-file" or "vex" (matcher.Suppressed.Source's own values, D104).
+	// No omitempty: an absent source and an empty one would look alike to a
+	// consumer, and every SuppressedRecord this package emits sets it, so
+	// there is nothing for omitempty to usefully hide.
+	Source string `json:"source"`
 }
 
 type SkippedRecord struct {
@@ -339,6 +350,7 @@ func JSON(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus) (
 		doc.Suppressed = append(doc.Suppressed, SuppressedRecord{
 			FindingRecord: findingRecord(s.Finding),
 			Reason:        s.Reason,
+			Source:        s.Source,
 		})
 	}
 	for _, s := range res.Skipped {

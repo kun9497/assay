@@ -137,7 +137,11 @@ func (c *Config) Apply(findings []matcher.Finding, now time.Time, warn func(stri
 
 	for _, f := range findings {
 		if r, ok := firstMatch(live, f); ok {
-			suppressed = append(suppressed, matcher.Suppressed{Finding: f, Reason: r.Reason})
+			// Source "ignore-file" (D104): the table and JSON both show which
+			// waiver mechanism suppressed a finding, since a .assay.yaml rule
+			// and an OpenVEX document statement are read by different people
+			// for different reasons.
+			suppressed = append(suppressed, matcher.Suppressed{Finding: f, Reason: r.Reason, Source: "ignore-file"})
 		} else {
 			kept = append(kept, f)
 		}

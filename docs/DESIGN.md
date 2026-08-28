@@ -671,6 +671,10 @@ exited 0 while 24 findings went unmentioned.
 - [x] Ignore rules (D102) — waive a finding via `.assay.yaml`, matched on
       vulnerability/package/ecosystem with a mandatory reason and optional expiry; waived
       findings are counted, shown, and SARIF-marked suppressed, never silently dropped
+- [x] OpenVEX input (D104) — repeatable `--vex <path>` applies a producer's
+      not_affected/fixed statements through the same suppression pipeline (Source-labelled,
+      schema 10); reasonless not_affected skipped with a warning, latest statement wins,
+      go-vex's whole-image subcomponent short-circuit deliberately not copied
 - [x] `requirements.txt` (D38) — the lines that name exactly one version become packages;
       the rest are counted and named. Follows pip-audit, not syft, whose `guessVersion`
       rewrites `*` to `0` and takes the maximum of a `>=` bound. Measured: 23 findings on a

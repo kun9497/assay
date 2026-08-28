@@ -56,7 +56,7 @@ D93입니다.
 | CPE/NVD 폴백 매처 | 없음 (의도) | 있음 | 벤더 어드바이저리 중심 | 차등에서 grype의 주요 false-positive 원천으로 분류 |
 | FIPS/Ksplice/ESM 계열 | not evaluated로 보고 | 메인라인 데이터로 판정 | 구분 없음 | 맞는 데이터가 없으면 판정하지 않는다 (D53, D79) — 오라클 차등이 이 거부가 옳았음을 확인 |
 | ignore 규칙 | 사유 필수 + 만료 경고 (D102) | 있음 | `.trivyignore` — CVE 나열, 사유 불요 | assay만 이유 없는 면제를 로드 단계에서 거부하고 억제를 모든 출력에 표시 |
-| VEX 문서 입력 | 보류 (트리거 기록) | 있음 | 4가지 방식 (repo·파일·OCI attestation·SBOM 참조) | 이 영역은 trivy가 가장 앞섬 — assay는 배관(D102)만 깔린 상태 |
+| VEX 문서 입력 | OpenVEX 파일, `--vex` (D104) | 있음 | 4가지 방식 (repo·파일·OCI attestation·SBOM 참조) | 셋 다 OpenVEX 파일을 읽음; trivy는 repo/attestation 전달 방식을 추가로 갖춤. assay는 이유 없는 `not_affected`를 경고와 함께 건너뛰는 반면 grype는 조용히 받아들이고, 충돌하는 statement는 assay가 최신 우선으로, grype는 가장 이른 것으로 해소함 |
 | 여러 소스의 등급 | 전부 보존, 최고치로 게이트 (D25) | 단일 표시 | 소스 우선순위로 하나 선택 | 19,715개 CVE 그룹 중 8,893개가 복수 레코드 — assay는 불일치 자체를 보여줌 |
 | exit 코드 계약 | `2 > 1 > 0` 고정 (D11) | 유사하나 계약 명시 없음 | `--exit-code`로 사용자 지정 | assay는 "못 믿을 결과(2)"가 "발견(1)"보다 항상 우선 — CI가 고장과 clean을 혼동하지 못함 |
 | 플래그 이름 | 의미가 같으면 grype와 동일 (D18) | — | 독자 체계 | 마이그레이션과 차등 스크립트를 위해 — 조용한 의미 차이는 금지 |

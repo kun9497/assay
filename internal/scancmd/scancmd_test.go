@@ -1359,8 +1359,8 @@ func TestRun_OutputJSON(t *testing.T) {
 		if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
 			t.Fatalf("stdout is not valid JSON: %v\n%s", err, out.String())
 		}
-		if doc.SchemaVersion != 9 {
-			t.Errorf("SchemaVersion = %d, want 9", doc.SchemaVersion)
+		if doc.SchemaVersion != 10 {
+			t.Errorf("SchemaVersion = %d, want 10", doc.SchemaVersion)
 		}
 		if len(doc.Findings) != 1 || doc.Findings[0].Advisory.ID != "GHSA-json-medium" {
 			t.Errorf("Findings = %+v, want the one medium finding", doc.Findings)
@@ -2780,5 +2780,169 @@ func TestRun_MalformedIgnoreFileExitsTwo(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "reason") {
 		t.Errorf("stderr = %q, want it to name the malformed rule's problem", errOut)
+	}
+}
+
+// vexFixtureDoc is a one-statement, one-product OpenVEX v0.2.0 document
+// whose product purl matches buildMatrixSBOM's "vexpkg" package exactly
+// (pkg:golang/example.com/vexpkg@1.0.0) and whose vulnerability name matches
+// the GHSA id every test in this section puts in the database — the
+// smallest fixture that exercises the real Load -> Apply path end to end,
+// through a real Run() call rather than internal/vex's own unit tests.
+const vexFixtureDoc = `{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://example.com/vex/e2e",
+  "author": "Example VEX Author",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {"name": "GHSA-vex-e2e"},
+      "products": [{"@id": "pkg:golang/example.com/vexpkg@1.0.0"}],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present"
+    }
+  ]
+}`
+
+// TestRun_VEXSuppressesAFindingAndClearsTheGate is the caller-first proof
+// for the whole D104 wiring, mirroring
+// TestRun_IgnoreRuleSuppressesAFindingAndClearsTheGate's own shape for
+// --config: a real Run() over an SBOM with one finding, gated on --fail-on
+// critical, exits 1 -- until a --vex document exonerates that finding, at
+// which point the scan exits 0, the finding is gone from the table's
+// finding count, and it is shown as suppressed with a VEX-flavoured reason
+// instead. Deleting the applyVEX call in Run turns the second scan back to
+// exit 1, which no other test would catch.
+func TestRun_VEXSuppressesAFindingAndClearsTheGate(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-vex-e2e", pkg: "vexpkg", fixed: "2.0.0", vectors: []string{vecCritical}},
+	})
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "vexpkg", purlType: "golang"}})
+	critical := severity.Critical
+
+	// Without --vex: the finding trips --fail-on critical, exit 1.
+	var out, errOut bytes.Buffer
+	code := Run(context.Background(), db, sbom, Options{FailOn: &critical}, &out, &errOut)
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (the finding trips --fail-on critical)\nstdout:\n%s\nstderr:\n%s",
+			code, out.String(), errOut.String())
+	}
+
+	// With --vex exonerating it: exit 0, and it shows as suppressed.
+	vexPath := filepath.Join(t.TempDir(), "vex.json")
+	if err := os.WriteFile(vexPath, []byte(vexFixtureDoc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	code = Run(context.Background(), db, sbom, Options{FailOn: &critical, VEXFiles: []string{vexPath}}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (the finding is exonerated, so --fail-on has nothing to trip)\nstdout:\n%s\nstderr:\n%s",
+			code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "0 finding(s)") || !strings.Contains(out.String(), "1 suppressed") {
+		t.Errorf("summary = %q, want 0 finding(s) and 1 suppressed", out.String())
+	}
+	// "(vex: " and not just the reason text: the table prints each line's
+	// Source label in front of its reason, and asserting the pair is what
+	// holds Suppressed.Source actually being set to "vex" — a mutation
+	// blanking the field left the whole suite green until this anchor
+	// (2026-08-28), because every other assertion matched on reason text
+	// the Source does not feed.
+	if !strings.Contains(out.String(), "Suppressed (1)") ||
+		!strings.Contains(out.String(), "(vex: VEX: not_affected (vulnerable_code_not_present)") {
+		t.Errorf("output = %q, want the suppressed finding shown with its vex source label and reason", out.String())
+	}
+	if !strings.Contains(errOut.String(), "1 finding(s) suppressed by VEX") || !strings.Contains(errOut.String(), vexPath) {
+		t.Errorf("stderr = %q, want a per-file suppression count naming %s", errOut.String(), vexPath)
+	}
+}
+
+// TestRun_IgnoreRulesRunBeforeVEX proves the D104 ordering rule directly: a
+// finding .assay.yaml already waived is removed from res.Findings before
+// applyVEX ever runs, so a --vex document that would ALSO exonerate the same
+// finding never gets the chance -- exactly one suppression reaches the
+// report, and its Source is "ignore-file", not "vex". Reversing the call
+// order in Run (or deleting either apply* call) would let this finding be
+// suppressed twice or attribute it to the wrong source, and this is the
+// only test that would notice.
+func TestRun_IgnoreRulesRunBeforeVEX(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-vex-e2e", pkg: "vexpkg", fixed: "2.0.0", vectors: []string{vecCritical}},
+	})
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "vexpkg", purlType: "golang"}})
+
+	cfg := filepath.Join(t.TempDir(), ".assay.yaml")
+	if err := os.WriteFile(cfg, []byte("ignore:\n  - vulnerability: GHSA-vex-e2e\n    reason: waived by the ignore file first\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	vexPath := filepath.Join(t.TempDir(), "vex.json")
+	if err := os.WriteFile(vexPath, []byte(vexFixtureDoc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	code := Run(context.Background(), db, sbom, Options{IgnoreFile: cfg, VEXFiles: []string{vexPath}}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "1 suppressed") {
+		t.Errorf("summary = %q, want exactly 1 suppressed (never double-processed)", out.String())
+	}
+	if !strings.Contains(out.String(), "waived by the ignore file first") {
+		t.Errorf("output = %q, want the ignore rule's own reason, not the VEX statement's", out.String())
+	}
+	if strings.Contains(out.String(), "VEX: not_affected") {
+		t.Errorf("output = %q, want no VEX reason -- the ignore file already claimed this finding", out.String())
+	}
+	// The VEX document had nothing left to suppress by the time applyVEX
+	// ran, so it must not print a per-file suppression line at all.
+	if strings.Contains(errOut.String(), "suppressed by VEX") {
+		t.Errorf("stderr = %q, want no VEX suppression line -- the finding was already gone", errOut.String())
+	}
+}
+
+// TestRun_UnreadableVEXFileExitsTwo: a --vex path that does not exist fails
+// the scan (exit 2) with the path named, the same "untrustworthy input"
+// reasoning as a missing --config file.
+func TestRun_UnreadableVEXFileExitsTwo(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-vex-e2e", pkg: "vexpkg", fixed: "2.0.0", vectors: []string{vecCritical}},
+	})
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "vexpkg", purlType: "golang"}})
+	missing := filepath.Join(t.TempDir(), "does-not-exist.json")
+
+	var out, errOut bytes.Buffer
+	code := Run(context.Background(), db, sbom, Options{VEXFiles: []string{missing}}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
+	}
+	if !strings.Contains(errOut.String(), missing) {
+		t.Errorf("stderr = %q, want the missing path named", errOut.String())
+	}
+}
+
+// TestRun_GarbageVEXFileExitsTwo: a --vex path that parses as JSON but names
+// no recognized @context is exactly as untrustworthy as one that is not
+// JSON at all (D11) -- both fail the scan rather than silently applying
+// zero statements.
+func TestRun_GarbageVEXFileExitsTwo(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-vex-e2e", pkg: "vexpkg", fixed: "2.0.0", vectors: []string{vecCritical}},
+	})
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "vexpkg", purlType: "golang"}})
+	bad := filepath.Join(t.TempDir(), "vex.json")
+	if err := os.WriteFile(bad, []byte(`{"hello": "world"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	code := Run(context.Background(), db, sbom, Options{VEXFiles: []string{bad}}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
+	}
+	if !strings.Contains(errOut.String(), "@context") {
+		t.Errorf("stderr = %q, want it to name the missing/unrecognized @context", errOut.String())
 	}
 }

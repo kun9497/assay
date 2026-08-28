@@ -296,11 +296,28 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus) 
 	// Suppressed findings are shown, never dropped (matcher.Result.Suppressed's
 	// own reasoning): a distinct block naming each waived finding and the
 	// reason its rule gave, so a reader sees exactly what was waived and why.
+	//
+	// D104: the header used to read "waived by .assay.yaml" — true when
+	// .assay.yaml was the only waiver mechanism, wrong once an OpenVEX
+	// document (--vex) can suppress a finding too. Rather than guess at a
+	// file to name (a scan can carry one ignore file AND several --vex
+	// documents at once), the header stays generic and each line names its
+	// own source — the honest form, since provenance is a per-suppression
+	// fact, not a per-scan one.
 	if len(res.Suppressed) > 0 {
-		fmt.Fprintf(w, "\nSuppressed (%d) — waived by .assay.yaml, not counted toward the verdict:\n", len(res.Suppressed))
+		fmt.Fprintf(w, "\nSuppressed (%d), not counted toward the verdict:\n", len(res.Suppressed))
 		for _, s := range res.Suppressed {
-			fmt.Fprintf(w, "  %s  %s  %s  (%s)\n",
-				s.Finding.Package.Name, s.Finding.Package.Ecosystem, s.Finding.Advisory.ID, s.Reason)
+			src := s.Source
+			if src == "" {
+				// Zero value only reaches here from a Suppressed built
+				// outside applyIgnoreRules/applyVEX (a hand-built test
+				// fixture, or a future caller that forgets to set it) — a
+				// label rather than a blank keeps the line honest about not
+				// knowing, instead of implying a source that was checked.
+				src = "unspecified source"
+			}
+			fmt.Fprintf(w, "  %s  %s  %s  (%s: %s)\n",
+				s.Finding.Package.Name, s.Finding.Package.Ecosystem, s.Finding.Advisory.ID, src, s.Reason)
 		}
 	}
 

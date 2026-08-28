@@ -84,8 +84,17 @@ waive된 finding은 **보여지지, 결코 숨겨지지 않습니다**: 리포�
 멈추고 경고하므로, waiver는 눈에 띄지 않게 자신의 정당화보다 오래 살 수
 없습니다.
 
-이것은 VEX/ignore의 ignore-규칙 절반입니다; 생산자-서명 OpenVEX 문서를
-읽는 것은 별개의, 나중 기능입니다.
+waiver가 당신이 아니라 소프트웨어의 '생산자'로부터 온 것이라면, 그것을
+받아 적는 대신 그들의 OpenVEX 문서를 넘기세요: `--vex <path>`(반복 가능)가
+그 문서의 `not_affected`와 `fixed` statement를 같은 방식으로 적용합니다 —
+억제된 finding은 세어지고, statement 자신의 justification과 author를
+이유로 삼아 표시되며, 이유가 없는 statement는 받아들여지는 대신 경고와
+함께 건너뛰어집니다. `affected`와 `under_investigation` statement는
+결코 아무것도 억제하지 않습니다.
+
+```sh
+assay scan my-image.tar --vex vendor.openvex.json --fail-on high
+```
 
 ## `--output json | jq`로 충분하지 않은 이유
 
