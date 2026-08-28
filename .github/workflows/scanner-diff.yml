@@ -88,10 +88,10 @@ jobs:
       # caches the binary. The version is spelled right here rather than
       # implied by whatever the runner image happens to carry; bump
       # deliberately, in the same commit as a re-seed of any trivy floor.
-      - name: Install trivy v0.62.1
+      - name: Install trivy v0.74.0
         uses: aquasecurity/setup-trivy@v0.3.1
         with:
-          version: v0.62.1
+          version: v0.74.0
       - name: Symlink trivy into ./bin
         # scandiff is invoked with -trivy ./bin/trivy below, matching how
         # assay and grype already live in ./bin — one place to look when a
@@ -115,9 +115,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/trivy
-          key: trivy-db-v0.62.1-${{ steps.trivy-cache-key.outputs.week }}
+          key: trivy-db-v0.74.0-${{ steps.trivy-cache-key.outputs.week }}
           restore-keys: |
-            trivy-db-v0.62.1-
+            trivy-db-v0.74.0-
 
       - name: Update trivy's vulnerability database
         run: ./bin/trivy image --download-db-only
