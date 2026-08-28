@@ -4050,9 +4050,16 @@ trivy's output and prints them as a ready-to-paste JSON snippet, but never breac
 the first workflow_dispatch run seeds real floors, which then get committed and gate from
 the next weekly run on. trivy's own `minFindings`/`maxFindings` bound trivy's tuple count
 (a stale or broken trivy DB is what that catches), not assay's, which the grype-side
-floors already hold. The join stays CVE-only; trivy normalizes its IDs to CVEs upstream,
-so unlike the assay/grype normalizers there is no bare-ID fallback — a trivy-only
-advisory ID can never agree with anything and would only inflate noise. trivy is pinned
+floors already hold. The join stays CVE-only with no bare-ID fallback — a trivy-only
+advisory ID can never agree with anything and would only inflate noise — but "trivy
+normalizes its IDs to CVEs upstream" turned out FALSE for SUSE: SLE findings are keyed by
+SUSE-SU patch advisory with the CVE only inside References URLs, and the first seeding
+run's 58 real bci156 findings joined as zero tuples, misread as "trivy found nothing"
+until the capture was re-examined (2026-08-28). The normalizer now extracts CVEs from a
+non-CVE entry's references — D93's ALSA/ELSA lesson again, the CVE living in a column the
+primary ID does not carry — which took bci156 from an informational zero to a gating
+agree of 182/188. Leap 15.6 remains a genuine empty: trivy flags it EOSL and returns no
+vulnerability list at all where assay reports 12. trivy is pinned
 (v0.74.0, bumped deliberately in the same commit as any floor re-seed) with its DB cached
 per version+week. Independent review: 5/5 mutations red — one first attempt was a sed
 no-op that "survived" until re-applied properly, the check-your-mutation-mutates trap

@@ -20,7 +20,7 @@ D105에서 주간 차등에 합류했으며(23개 타깃 중 16개, 우선 infor
 | OS 패밀리 공통부 | ✓ | ✓ | ✓ | Alpine·Debian·Ubuntu·RHEL·Rocky·Alma·Amazon·Oracle·SLES/Leap·Wolfi·Chainguard·MinimOS·Echo·Azure Linux·Photon — 셋 다 커버 |
 | Fedora · Arch | ✓ (D75, D97) | ✓ | ✗ | trivy 지원 목록에 둘 다 없음 (CentOS Stream도 명시적 미지원) |
 | Alpaquita · Hummingbird · CleanStart | ✓ (D95, D98, D101) | 일부만 | ✗ | grype는 Hummingbird 프로바이더 보유; Alpaquita·CleanStart는 assay 단독 |
-| openSUSE Leap | ✓ | ✗ v6에 데이터 없음 | 주장은 지원, 실측은 0 | 차등에서 assay의 실측 우위로 기록. trivy 문서는 Leap·SLE를 지원 목록에 올리지만, 차등의 digest 고정 Leap·SLE BCI 이미지에서 assay가 12건·286건을 보고하는 동안 trivy는 **0건**을 반환 (D105 시딩 실행, 2026-08-28) — 이 두 타깃은 게이트 없이 정보 모드로 유지 |
+| openSUSE Leap · SLE | ✓ | ✗ v6에 데이터 없음 | SLE ✓, Leap은 실측 공백 | SLE BCI에서 trivy는 실재하되 다른 어휘를 씁니다: finding을 SUSE-SU 패치 advisory로 키 잡고 CVE는 References URL 안에만 실어, D105 첫 측정이 "trivy가 아무것도 못 찾았다"로 오독됐다가 차등이 그 CVE를 추출하도록 배우고서야 바로잡혔습니다(추출 후 assay와 agree 182/188). Leap 15.6 이미지에서는 trivy가 진짜로 빈 취약점 목록을 반환하며(릴리스를 EOSL로 표시) assay는 12건을 보고 — 이 타깃은 정보 모드 유지 |
 | Bottlerocket · CoreOS | ✗ | ✗ | ✓ | trivy 단독 |
 | 언어 생태계 | 8종 | 8종 | 더 넓음 | 공통 8종(Go·npm·PyPI·crates.io·Maven·RubyGems·NuGet·Packagist); 셋 다 pnpm과 yarn berry 락파일을 읽습니다(assay는 D103부터); trivy는 여기에 더해 Conan·Dart·Swift·Elixir까지 다룹니다 |
 | 보강 피드 게이트 | NVD · EPSS · KEV · EOL | NVD · EPSS · KEV · EOL | 내장 없음 | trivy는 심각도 중심 — EPSS/KEV/EOL을 게이트로 내장하지 않음 |

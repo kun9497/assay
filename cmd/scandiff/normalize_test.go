@@ -323,15 +323,56 @@ func TestTrivyTuples_MultipleResultClassesCombine(t *testing.T) {
 	}
 }
 
+// TestTrivyTuples_SUSEAdvisoryIDFallsBackToReferenceCVEs holds the SUSE
+// join: trivy keys SLE findings by patch advisory (SUSE-SU-...), never a
+// CVE, and the CVE appears only inside References URLs. Measured on the
+// D105 seeding run: bci156's 58 real trivy findings joined as ZERO tuples
+// under CVE-only extraction, and the differential wrongly read as "trivy
+// found nothing" -- this test is what makes that misreading impossible to
+// reintroduce. Two CVEs in one entry's references become two tuples; a
+// reference with no CVE contributes nothing.
+func TestTrivyTuples_SUSEAdvisoryIDFallsBackToReferenceCVEs(t *testing.T) {
+	const doc = `{
+		"Results": [
+			{"Class": "os-pkgs", "Vulnerabilities": [
+				{"PkgName": "libopenssl3", "VulnerabilityID": "SUSE-SU-2026:0319-1",
+				 "References": [
+					"https://www.suse.com/security/cve/CVE-2026-41337.html",
+					"https://lists.suse.com/pipermail/sle-security-updates/2026-January/023978.html",
+					"https://www.suse.com/security/cve/CVE-2026-52208.html"
+				 ]}
+			]}
+		]
+	}`
+	var d trivyDocument
+	if err := json.Unmarshal([]byte(doc), &d); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	set := trivyTuples(d)
+	wantA := tuple{Subject: "libopenssl3", ID: "CVE-2026-41337"}
+	wantB := tuple{Subject: "libopenssl3", ID: "CVE-2026-52208"}
+	if _, ok := set[wantA]; !ok {
+		t.Errorf("trivyTuples = %v, want it to contain %v (CVE from the first reference URL)", set, wantA)
+	}
+	if _, ok := set[wantB]; !ok {
+		t.Errorf("trivyTuples = %v, want it to contain %v (CVE from the third reference URL)", set, wantB)
+	}
+	if len(set) != 2 {
+		t.Errorf("trivyTuples = %v, want exactly 2 tuples (the CVE-less mailing-list URL contributes nothing)", set)
+	}
+}
+
 func TestTrivyTuples_DropsNonCVEShapedIDs(t *testing.T) {
 	// Trivy sometimes carries its own non-CVE advisory ID (a GHSA it chose
 	// not to resolve to a CVE). Unlike assayTuples/grypeTuples, there is no
-	// bare-ID fallback here -- a non-CVE trivy ID can never agree with
-	// anything assay reports, so keeping it would only inflate noise.
+	// bare-ID fallback here -- a non-CVE trivy ID whose references also name
+	// no CVE can never agree with anything assay reports, so keeping it
+	// would only inflate noise.
 	const doc = `{
 		"Results": [
 			{"Class": "lang-pkgs", "Vulnerabilities": [
-				{"PkgName": "example-lib", "VulnerabilityID": "GHSA-aaaa-bbbb-cccc"},
+				{"PkgName": "example-lib", "VulnerabilityID": "GHSA-aaaa-bbbb-cccc",
+				 "References": ["https://github.com/advisories/GHSA-aaaa-bbbb-cccc"]},
 				{"PkgName": "example-lib", "VulnerabilityID": "CVE-2026-1234"}
 			]}
 		]
