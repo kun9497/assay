@@ -22,7 +22,8 @@ Ksplice/FIPS lineage-filtered since D79), Fedora Bodhi (D75), Photon's flat-JSON
 its own pacman comparer and cataloger) and SUSE CSAF VEX (D77, whose
 no-fix entries are 99.96% reason-unstated — the inverse of Red Hat). `assay scan` reads
 SBOMs, container images (distroless via `status.d`, D54), Go binaries and directories
-(eight lockfile formats, two refused by name, plus jars — D61–D63, D68–D70), and returns a
+(ten lockfile formats — pnpm and yarn berry read since D103 — plus jars; D61–D63,
+D68–D70), and returns a
 verdict CI can gate on; SARIF is an output format (D55). A finding carries every source's
 rating and the gate takes the highest (D25); incompleteness carries a cause and
 `--fail-on-incomplete=target` gates only on what the caller can fix (D36). Images scan end
@@ -442,8 +443,7 @@ true, all of which happened while building D27:
   promotion, via docker-cli). Everything else in `go.mod` is indirect. Adding a fifth is a
   real decision — prefer the stdlib, and check the cgo constraint above. The pnpm/yarn-berry
   YAML question in `docs/deferred-decisions.md` was exactly such a decision; the yaml.v3
-  promotion has since dissolved its dependency barrier, though the entry itself is still
-  open on its own merits.
+  promotion dissolved its dependency barrier and D103 then read both formats.
 
   This line said "no third-party dependencies, `go.mod` has no `require` block" until
   2026-08-04, long after both landed. It is worth knowing what is already there before

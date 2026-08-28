@@ -72,7 +72,7 @@ assay scan alpine:3.19 --fail-on high
   Hummingbird, CleanStart — 여기에 Bitnami 애플리케이션 레이어까지, 세 가지 rpmdb
   백엔드(BerkeleyDB, SQLite, ndb)에 걸쳐.
 - **8개 언어 생태계** — Go, npm, PyPI, crates.io, Maven, RubyGems, NuGet, Packagist —
-  바이너리·디렉터리·여덟 가지 lockfile 형식에서.
+  바이너리·디렉터리·열 가지 lockfile 형식에서. pnpm과 yarn berry도 포함됩니다.
 - **모든 소스의 등급을 보존** — 두 데이터베이스가 한 CVE를 두고 흔히 엇갈립니다. finding은
   각 소스의 밴드·점수·수정 버전을 모두 담고 게이트는 그 최고치를 취하므로, 리포트가 자기
   판정과 어긋나지 않습니다.

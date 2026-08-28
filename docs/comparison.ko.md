@@ -21,7 +21,7 @@ assay↔grype 수치는 **실측값**입니다: 같은 digest 고정 이미지�
 | Alpaquita · Hummingbird · CleanStart | ✓ (D95, D98, D101) | 일부만 | ✗ | grype는 Hummingbird 프로바이더 보유; Alpaquita·CleanStart는 assay 단독 |
 | openSUSE Leap | ✓ | ✗ v6에 데이터 없음 | ✓ (+Tumbleweed) | 차등에서 assay의 실측 우위로 기록 |
 | Bottlerocket · CoreOS | ✗ | ✗ | ✓ | trivy 단독 |
-| 언어 생태계 | 8종 | 8종 | 더 넓음 | 공통 8종(Go·npm·PyPI·crates.io·Maven·RubyGems·NuGet·Packagist); trivy는 Conan·Dart·Swift·Elixir와 pnpm/yarn 락파일까지 (assay는 그 둘을 이름 들어 거부, 트리거 기록됨) |
+| 언어 생태계 | 8종 | 8종 | 더 넓음 | 공통 8종(Go·npm·PyPI·crates.io·Maven·RubyGems·NuGet·Packagist); 셋 다 pnpm과 yarn berry 락파일을 읽습니다(assay는 D103부터); trivy는 여기에 더해 Conan·Dart·Swift·Elixir까지 다룹니다 |
 | 보강 피드 게이트 | NVD · EPSS · KEV · EOL | NVD · EPSS · KEV · EOL | 내장 없음 | trivy는 심각도 중심 — EPSS/KEV/EOL을 게이트로 내장하지 않음 |
 | KISA / KNVD | ✓ 1급 소스 | ✗ | ✗ | assay가 기존 도구 재사용 대신 존재하는 이유 |
 | 취약점 외 스캔 | ✗ (의도) | ✗ (의도) | 설정오류 · 시크릿 · 라이선스 | trivy는 멀티 스캐너 — 격차가 아니라 범위의 차이 |

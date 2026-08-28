@@ -3961,6 +3961,44 @@ the working directory and runs without one if there is none, so a project that h
 written one scans exactly as before. Independent review: 5/5 core guards delete-goes-red
 (no-apply, reasonless-accept, expiry-ignored, table-hidden, sarif-active-mismarked).
 
+### D103 — pnpm and yarn berry: the two lockfiles refused by name are read
+
+**Decision.** `pnpm-lock.yaml` (lockfileVersion 5.4, 6.0 and 9.0, dispatched by RANGE on
+the parsed version, never equality) and yarn berry's YAML `yarn.lock` (v2+, `__metadata`
+versions 4/6/8/10 — one entry shape across all four) are parsed, in one slice, replacing
+the by-name refusals D61 recorded. The deferral's only substance was the YAML-parser
+dependency, and D102's yaml.v3 promotion dissolved it — what remained was the parser work
+itself. Non-registry entries are a THREE-way classification: `local`
+(workspace/link/portal/file/exec/directory — nothing published to evaluate, shown via
+Unusable but never counted into Stats, so it cannot reach `--fail-on-incomplete=target`),
+`git`/non-registry (a real package the matcher could not place in an advisory range —
+counted, target-gateable), and `malformed` (counted, target-gateable). That split is D36's
+cause discipline applied to lockfiles: workspace noise must not spam the target gate, and
+an unevaluated git dependency must not hide behind a clean verdict.
+
+**The rules are measured, not recalled.** Every parsing rule was machine-verified against
+~11,000 entries from real lockfiles (pnpm/pnpm, yarnpkg/berry, babel/babel, syft fixtures)
+before implementation. The five that prevent false negatives: read pnpm's `packages:`
+section ONLY (importers never adds a package, snapshots is a strict subset — 0 misses in
+3,322 entries); take the berry NAME from `resolution:`, never the key (the key carries
+aliases that do not exist on npm — `@babel-baseline/cli` naming `@babel/cli` is real);
+stream pnpm with `yaml.NewDecoder` in a loop (multi-document lockfiles are real, and
+`Unmarshal` silently reads document 0 only — losing the entire project); walk `yaml.Node`
+mappings by hand, never decode into a map (yaml.v3 hard-errors on duplicate keys, which
+real merge-damaged berry files carry — one repeated key would discard the whole file); and
+classify from the `resolution` object, never a version-shape heuristic (a git commit hash
+starting with a digit passes every guard the key alone offers). syft was checked and three
+of its behaviours deliberately NOT copied: it emits berry workspace members as packages (163
+of them from babel's lockfile), takes the berry name from the key via a regex that fails on
+`$`-prefixed names, and emits pnpm v5 git deps as bogus packages. `patch:` entries are the
+one silent skip: the patched package is always present as its own `npm:` entry (17/17
+verified — an empirical invariant, noted as such in the code). A `yarn.lock` carrying
+neither the v1 banner nor `__metadata` is refused as an unknown dialect rather than
+guessed at — the old fall-back-to-v1 default was itself a silent-zero-packages path.
+Independent review: 8/8 mutations red (packages discarded, berry-as-v1, name-from-key,
+v5 suffix uncut, git-as-registry, local-counted, later-documents-dropped, dedupe-by-name),
+each caught by a caller-level or table test.
+
 ---
 
 ## 3. Architecture

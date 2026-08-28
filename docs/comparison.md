@@ -22,7 +22,7 @@ trivy has been run.*
 | Alpaquita · Hummingbird · CleanStart | ✓ (D95, D98, D101) | partial | ✗ | grype ships a Hummingbird provider; Alpaquita and CleanStart are assay-only |
 | openSUSE Leap | ✓ | ✗ no data in v6 | ✓ (+Tumbleweed) | Recorded as a measured assay win in the differential |
 | Bottlerocket · CoreOS | ✗ | ✗ | ✓ | trivy-only |
-| Language ecosystems | 8 | 8 | broader | The common eight (Go, npm, PyPI, crates.io, Maven, RubyGems, NuGet, Packagist); trivy adds Conan, Dart, Swift, Elixir and reads pnpm/yarn lockfiles (assay refuses those two by name, trigger recorded) |
+| Language ecosystems | 8 | 8 | broader | The common eight (Go, npm, PyPI, crates.io, Maven, RubyGems, NuGet, Packagist); all three read pnpm and yarn berry lockfiles (assay since D103); trivy additionally covers Conan, Dart, Swift, Elixir |
 | Enrichment gates | NVD · EPSS · KEV · EOL | NVD · EPSS · KEV · EOL | none built in | trivy is severity-centric; it does not gate on EPSS/KEV/EOL natively |
 | KISA / KNVD | ✓ first-class | ✗ | ✗ | The reason assay exists rather than reusing an existing tool |
 | Beyond vulnerabilities | ✗ (deliberate) | ✗ (deliberate) | misconfig · secrets · licenses | trivy is a multi-scanner — a different scope, not a gap |

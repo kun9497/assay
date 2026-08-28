@@ -33,17 +33,20 @@ const (
 	KindYarnLock      Kind = "yarn.lock"
 	KindCargoLock     Kind = "Cargo.lock"
 
-	// KindPnpmLock and KindUVLock are recognized and NOT read. Both are
-	// formats assay has no parser for - pnpm's is YAML, uv's is TOML, and the
-	// standard library parses neither - so reading them would need a third
-	// direct dependency, which is a decision rather than a detail (see the
-	// conventions section of CLAUDE.md).
+	// KindPnpmLock is read since D103 (dirscan.go's dispatch calls
+	// pnpmlock.Parse) - gopkg.in/yaml.v3 became a direct dependency for the
+	// D102 ignore file, which removed the reason it was ever left unread.
 	//
-	// They are named anyway, and that is the whole point of this entry: before
-	// it, a repository whose only lockfile was pnpm-lock.yaml scanned to
-	// completion, found nothing, and exited 0. Nothing in the report said a
+	// KindUVLock stays recognized and NOT read: uv.lock is TOML, and the
+	// standard library parses none, so reading it would need a fourth direct
+	// dependency, which is a decision rather than a detail (see the
+	// conventions section of CLAUDE.md). It is named anyway, and that is the
+	// whole point of keeping this entry at all: before KindPnpmLock had a
+	// parser, a repository whose only lockfile was pnpm-lock.yaml scanned to
+	// completion, found nothing, and exited 0 - nothing in the report said a
 	// lockfile had been passed over. "Found nothing" and "did not look" are
-	// the two facts this project exists to keep apart.
+	// the two facts this project exists to keep apart, and uv.lock is the
+	// shape that still needs it.
 	KindPnpmLock Kind = "pnpm-lock.yaml"
 	KindUVLock   Kind = "uv.lock"
 

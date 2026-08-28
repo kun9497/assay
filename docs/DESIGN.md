@@ -181,12 +181,16 @@ a constraint, not a version, and matching a range against advisory ranges would 
 answer "not vulnerable" for anything unpinned), and a lockfile that fails to parse says so
 rather than disappearing.
 
-`pnpm-lock.yaml` and yarn berry lockfiles are recognized and **exit 2** (D61). Reading them
-needs a YAML parser, which is a third direct dependency this project has not taken; until it
-does, a repository whose only lockfile is one of these has had none of its
-dependencies looked at, and that is an untrustworthy result rather than a clean one. Yarn
-berry is sniffed rather than attempted, because the v1 parser does not fail on it — it
-succeeds and finds nothing.
+`pnpm-lock.yaml` and yarn berry lockfiles are read since D103 (they were recognized and
+refused by name from D61, when reading them would have cost a YAML dependency — D102's
+yaml.v3 promotion removed that cost). pnpm is read from its `packages:` section only,
+across lockfileVersion 5.4/6.0/9.0 and multi-document files; berry names come from each
+entry's `resolution:`, never its key, which is what makes an aliased entry match the
+package actually on disk. Workspace/link entries are shown but do not gate; git and
+malformed entries are genuine incompleteness and do. A `yarn.lock` that is neither the v1
+grammar nor berry is refused as an unknown dialect — the v1 parser does not fail on
+unfamiliar input, it succeeds and finds nothing, which is the confusion this project
+refuses everywhere.
 
 That disclosure is the point. A manifest that is never read produces no package, so the
 summary's "not evaluated" count has nothing to count — the omission is invisible to the very
@@ -552,6 +556,9 @@ exited 0 while 24 findings went unmentioned.
 - [x] `yarn.lock` (v1), `Pipfile.lock` and `npm-shrinkwrap.json` catalogers (D61); an
       aliased yarn entry resolves to the package installed, not the local name
 - [x] `pnpm-lock.yaml` and yarn berry recognized, named and exited 2 on (D61)
+- [x] pnpm and yarn berry read (D103) — pnpm 5.4/6.0/9.0 from `packages:` only, berry
+      names from `resolution:`; local entries shown but not target-gating, git/malformed
+      gating; rules machine-verified against ~11,000 real entries, 8/8 mutations red
 - [x] `Cargo.lock` and the OSV crates.io archive (D62) — 2,725 records, 62% of them rated,
       and the first ecosystem whose key (`crates.io`) is not its purl type (`cargo`)
 - [x] `uv.lock` (D63), correcting D61's claim that it needed a TOML reader — 77 of 77 packages

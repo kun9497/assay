@@ -3809,6 +3809,43 @@ Findings를 떠났기 때문에 `--fail-on`을 걸지 않지만, 여전히 눈�
 리뷰: 핵심 가드 5개 중 5개가 delete하면 red입니다(no-apply, reasonless-accept,
 expiry-ignored, table-hidden, sarif-active-mismarked).
 
+### D103 — pnpm과 yarn berry: 이름으로 거부하던 두 락파일을 읽는다
+
+**결정.** `pnpm-lock.yaml`(lockfileVersion 5.4, 6.0, 9.0을 파싱된 버전에 대한 RANGE로
+분기하며 결코 동등 비교로 하지 않음)과 yarn berry의 YAML `yarn.lock`(v2+, `__metadata`
+버전 4/6/8/10 — 네 버전 모두 항목 형태가 하나)을 한 슬라이스에서 파싱하여, D61이 기록한
+이름 거부를 대체합니다. 이 유예의 실체는 YAML 파서 의존성 하나뿐이었고, D102의 yaml.v3
+승격이 그것을 없앴습니다 — 남은 건 파서 작업 자체뿐이었습니다. 레지스트리가 아닌 항목은
+세 갈래로 분류됩니다: `local`(workspace/link/portal/file/exec/directory — 평가할 게시물이
+전혀 없어 Unusable로 보여지되 Stats에는 결코 셈해지지 않으므로 `--fail-on-incomplete=target`에
+닿을 수 없음), `git`/비레지스트리(matcher가 advisory 범위에 놓을 수 없었던 실재하는 패키지 —
+셈해지고 target 게이트 대상), `malformed`(셈해지고 target 게이트 대상). 이 분리는 D36의 원인
+규율을 락파일에 적용한 것입니다: workspace 잡음이 target 게이트를 어지럽혀서는 안 되고,
+평가되지 않은 git 의존성이 깨끗한 판정 뒤에 숨어서도 안 됩니다.
+
+**규칙은 기억이 아니라 측정에서 나왔습니다.** 모든 파싱 규칙은 구현에 앞서 실제 락파일
+(pnpm/pnpm, yarnpkg/berry, babel/babel, syft fixtures)에서 나온 약 11,000개 항목에 대고
+기계적으로 검증했습니다. 거짓 음성을 막는 다섯 가지: pnpm의 `packages:` 섹션'만' 읽기
+(importers는 결코 패키지를 추가하지 않고, snapshots는 엄격한 부분집합입니다 — 3,322개
+항목에서 누락 0건); berry의 '이름'은 키가 아니라 `resolution:`에서 가져오기 (키는 npm에
+존재하지 않는 별칭을 담습니다 — `@babel-baseline/cli`가 `@babel/cli`를 가리키는 것이 실제
+사례입니다); pnpm은 루프 안에서 `yaml.NewDecoder`로 스트리밍하기(다중 문서 락파일은
+실재하고, `Unmarshal`은 조용히 첫 번째 문서만 읽어 프로젝트 전체를 잃습니다); `yaml.Node`
+매핑을 손으로 순회하고 맵으로 디코드하지 않기(yaml.v3는 중복 키에서 하드 에러를 내는데,
+실제로 병합이 망가진 berry 파일은 그런 키를 담고 있어 반복된 키 하나가 파일 전체를
+버리게 됩니다); 그리고 버전 모양 휴리스틱이 아니라 `resolution` 객체에서 분류하기(숫자로
+시작하는 git 커밋 해시는 키만 보는 가드를 전부 통과합니다). syft를 확인했고 그 동작 세
+가지는 일부러 베끼지 '않았습니다': berry의 workspace 멤버를 패키지로 내보내는 것(babel의
+락파일에서만 163개), 정규식으로 키에서 berry 이름을 가져와 `$`로 시작하는 이름에서
+실패하는 것, pnpm v5의 git 의존성을 가짜 패키지로 내보내는 것입니다. `patch:` 항목은
+유일하게 조용히 건너뛰는 경우입니다 — 패치된 패키지는 언제나 자신의 `npm:` 항목으로도
+존재합니다(17/17 검증 — 코드에도 그렇게 적어 둔 경험적 불변식입니다). v1 배너도
+`__metadata`도 없는 `yarn.lock`은 추측하지 않고 알 수 없는 방언으로 거부합니다 — 예전의
+v1로 되돌아가는 기본값 자체가 조용히 패키지 0개가 되는 경로였습니다. 독립 리뷰: 뮤테이션
+8개 중 8개가 red입니다(packages 버려짐, berry를 v1로 취급, 이름을 키에서 가져옴, v5
+접미사 안 자름, git을 레지스트리로 취급, local을 셈함, 이후 문서 버려짐, 이름으로
+중복제거), 각각 호출부 수준 테스트 또는 표 테스트에 걸렸습니다.
+
 ---
 
 ## 3. 아키텍처

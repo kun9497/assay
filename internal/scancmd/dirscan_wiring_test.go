@@ -250,3 +250,58 @@ func TestRun_AnUnreadableManifestReachesTheExitCode(t *testing.T) {
 		}
 	})
 }
+
+// D103's local/git/malformed split, driven end to end through the same
+// --fail-on-incomplete=target gate TestRun_AnUnreadableManifestReachesTheExitCode
+// checks for requirements.txt. A pnpm workspace member is nothing to
+// evaluate at all (clean, even under the narrow gate); a git dependency is a
+// real package the scan could not reach, which is exactly the caller's own
+// file to fix.
+func TestRun_PnpmLocalVersusGitSkipsReachTheTargetGateDifferently(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{})
+
+	t.Run("a local workspace member is clean, even under the narrow gate", func(t *testing.T) {
+		dir := t.TempDir()
+		writeManifest(t, dir, "pnpm-lock.yaml", "lockfileVersion: '9.0'\n\npackages:\n\n"+
+			"  '@fixture-scope/workspace-only@0.0.0-use.local':\n"+
+			"    resolution: {directory: packages/workspace-only, type: directory}\n")
+
+		var out, errOut bytes.Buffer
+		if code := Run(context.Background(), db, "dir:"+dir,
+			Options{FailOnIncompleteTarget: true}, &out, &errOut); code != 0 {
+			t.Errorf("Run(--fail-on-incomplete=target) = %d, want 0 — a workspace member "+
+				"is nothing to evaluate, not a gap; stderr: %s", code, errOut.String())
+		}
+		// Still shown, even though it does not gate.
+		if !strings.Contains(errOut.String(), "workspace-only") {
+			t.Errorf("the workspace member was not disclosed at all:\n%s", errOut.String())
+		}
+	})
+
+	t.Run("a git dependency is the caller's own file to fix", func(t *testing.T) {
+		dir := t.TempDir()
+		writeManifest(t, dir, "pnpm-lock.yaml", "lockfileVersion: '9.0'\n\npackages:\n\n"+
+			"  forked-only-dep@0.0.0:\n"+
+			"    resolution: {type: git, repo: 'https://github.com/acme-org/forked-only-dep', commit: deadbeef1234}\n")
+
+		var out, errOut bytes.Buffer
+		if code := Run(context.Background(), db, "dir:"+dir,
+			Options{FailOnIncompleteTarget: true}, &out, &errOut); code != 2 {
+			t.Errorf("Run(--fail-on-incomplete=target) = %d, want 2 — a git dependency is "+
+				"a real package this scan could not reach; stderr: %s", code, errOut.String())
+		}
+		if !strings.Contains(errOut.String(), "forked-only-dep") {
+			t.Errorf("the git dependency was not disclosed:\n%s", errOut.String())
+		}
+
+		// The broad --fail-on-incomplete gate must fire too - narrowing to
+		// =target only restricts WHICH incompleteness gates, not whether the
+		// broad one still does.
+		out.Reset()
+		errOut.Reset()
+		if code := Run(context.Background(), db, "dir:"+dir,
+			Options{FailOnIncomplete: true}, &out, &errOut); code != 2 {
+			t.Errorf("Run(--fail-on-incomplete) = %d, want 2; stderr: %s", code, errOut.String())
+		}
+	})
+}
