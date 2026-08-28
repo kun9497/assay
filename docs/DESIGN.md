@@ -644,6 +644,10 @@ exited 0 while 24 findings went unmentioned.
       published artifact, judged by committed floors (the tool now lives at `cmd/scandiff`,
       D105; stdlib-only); reading the ratings column revived two dead agreements
       (alma 0→106, oracle 0→37)
+- [x] Azure Linux off the dead feed (D106) — a dedicated provider parses Microsoft's
+      daily OVAL (the D74 shape) after the audit traced 140 missing findings to
+      Microsoft's stalled OSV export being served frozen by OSV.dev; all 140 recovered,
+      verified live; both upstreams notified (AzureLinuxVulnerabilityData#4, osv.dev#5935)
 - [x] trivy joins the differential (D105) — `cmd/grypediff` renamed `cmd/scandiff`,
       workflow `scanner-diff.yml`; 16 of the 23 targets carry an optional `trivy` floors
       block (the other 7 are distros trivy does not support), seeded

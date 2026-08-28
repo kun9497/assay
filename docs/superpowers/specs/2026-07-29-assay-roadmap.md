@@ -4065,6 +4065,38 @@ per version+week. Independent review: 5/5 mutations red — one first attempt wa
 no-op that "survived" until re-applied properly, the check-your-mutation-mutates trap
 CLAUDE.md records, not a coverage gap.
 
+### D106 — Azure Linux moves off a dead feed: OVAL direct, like the scanners that were right
+
+**Decision.** Azure Linux/CBL-Mariner leaves the OSV.dev ecosystem dump (where D94 put
+it) for a dedicated provider parsing Microsoft's own OVAL files
+(`azurelinux-3.0-oval.xml` → `Azure Linux:3`, `cbl-mariner-2.0-oval.xml` →
+`Azure Linux:2` — the D94 family keys unchanged, so the scan path notices nothing). The
+audit's 140 doubly-confirmed missing findings traced to a THREE-party chain: Microsoft's
+own OSV export bot ran exactly once (2026-03-10, "Added latest version of OSV files")
+and stopped; OSV.dev onboarded that directory as a production source three weeks later
+(google/osv.dev#5175) and has served the frozen snapshot since — its importer sees "no
+new commits" and fails silently; assay inherited the freeze. The living feed is the
+OVAL the bot still updates daily — what grype and trivy consume, which is why they were
+right and assay was not. Both upstreams were told, with the evidence chain
+(microsoft/AzureLinuxVulnerabilityData#4, google/osv.dev#5935). The first fix attempted
+— consuming Microsoft's native `osv/` files — was caught mid-implementation by
+verification: that directory IS the dead snapshot, older than OSV.dev's copy.
+
+**The provider is D74's shape with Azure Linux's measured facts.** Flat criteria (zero
+nesting live, recursed anyway and counted if it appears), one CVE per definition, fixed
+bounds verbatim with epoch and dist tag (more precise than OSV.dev's old stripped
+form), `less than or equal` → last_affected (cbl-mariner only), Microsoft's
+`patchable=false` as D52's positive no-fix evidence (106 stamped NotFixed) and
+`patchable=Not Applicable` as a vendor retraction dropped at ingestion (139, D16's
+discipline). Record IDs follow D90 (`AZURELINUX-<release>-<advisory_id>`, CVE in
+Aliases) because one CVE spans multiple definitions per file (325/364 measured) and D25
+regroups them at match time. DataAsOf from each file's own generator timestamp, oldest
+wins (D12). Verified live end to end: 12,535 records fetched, and all 140 audit tuples
+recovered — 83 under the exact package name, 57 under the source name the D8 bridge
+resolves at scan time, 0 absent. Independent review: 5/5 mutations red (bound-kind
+confusion, retraction kept, CVE moved off Aliases, NotFixed unstamped, provider
+defaulted off).
+
 ---
 
 ## 3. Architecture

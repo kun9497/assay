@@ -47,7 +47,7 @@ record lives in deferred-decisions). Where trivy corroborates a side, the row sa
 | Fedora | 16/16 at advisory level | one-sided CVE tuples sit 100% inside shared advisories; the bare-advisory bridge (2026-08-28) recovered 11 of them (agree 49→60) | bidirectional, bounded |
 | openSUSE Leap | — | grype v6 carries no Leap data at all (re-verified: zero matches) | assay only |
 | SLES (bci-base) | fixable-restricted 180/0/65 | D91's fold did its job (assay's misleading no-fix rows are gone from the fixable view); 104/63 divergence remains by data model — assay expresses no-fix entries grype cannot, grype carries 33 go-module matches | data-model split |
-| Azure Linux 3.0 | 106 agree, 140 grype-only | grype AND trivy both report 140 tuples assay lacks (135 are 2026 CVEs, all with real .azl3 fixes) — the audit's one probable assay false-negative class, under investigation (deferred-decisions) | **assay behind** |
+| Azure Linux 3.0 | 106 agree, 140 grype-only (pre-D106) | The audit's one real assay gap, root-caused same-day: Microsoft's OSV export bot stalled 2026-03-10 and OSV.dev served the frozen snapshot — D106 moves the family to Microsoft's daily OVAL, recovering all 140 (verified live; lands with the next artifact build). Both upstreams notified | **fixed in D106** |
 | RHEL (ubi8-nodejs) | 1090 agree, 4531 assay-only | 98% of assay's extras are `kernel-headers`, which Red Hat's CSAF product tree lists for kernel CVEs; grype never emits the package and trivy confirms 4,078 of assay's tuples — grype is the outlier | assay ahead |
 
 The takeaway: most divergence was **data-source difference**, not matcher bugs, and the

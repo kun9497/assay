@@ -191,7 +191,19 @@ The one genuinely open item the audit surfaced is Azure Linux 3.0, next entry.
 
 ---
 
-### Azure Linux 3.0 — 140 advisories two other scanners see and assay does not
+### ~~Azure Linux 3.0 — 140 advisories two other scanners see and assay does not~~ — resolved in D106
+
+**Resolved the same day (2026-08-28).** The investigation this entry asked for ran
+immediately and found a three-party chain, none of it assay's matcher: Microsoft's own
+OSV export bot wrote the `osv/` directory exactly once (2026-03-10) and stopped, while
+its OVAL export stayed daily; OSV.dev onboarded that dead directory as a production
+source three weeks later (google/osv.dev#5175) and has served the frozen snapshot since;
+assay consumed OSV.dev and inherited the freeze. D106 moves the family to a dedicated
+provider parsing Microsoft's OVAL directly — verified live: all 140 tuples recovered (83
+exact-name, 57 via the D8 source-package bridge, 0 absent). Both upstreams were notified
+with the evidence chain: microsoft/AzureLinuxVulnerabilityData#4 (the export bot
+stalled), google/osv.dev#5935 (their source is dead and the failure is silent on their
+side). Watch both for responses. The paragraphs below are the entry as opened.
 
 The 2026-08-28 audit's only probable real false-negative class: on the azl3 target,
 grype and trivy BOTH report 140 (package, CVE) tuples assay lacks — 140/140
