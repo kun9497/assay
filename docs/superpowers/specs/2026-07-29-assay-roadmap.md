@@ -4032,6 +4032,32 @@ an unparseable document purl warns and never becomes a wildcard. Independent rev
 mutations red — the eighth (blanking `Source`) survived until a caller-level anchor on
 the table's per-line source label was added, the round doing exactly what it exists for.
 
+### D105 — trivy joins the weekly differential, and the tool stops lying about its name
+
+**Decision.** The weekly differential (D93) gains trivy as a second comparison scanner.
+`cmd/grypediff` is renamed `cmd/scandiff` (git mv, history kept), the workflow becomes
+`scanner-diff.yml` ("scanner differential") and the floors file
+`.github/scanner-diff-targets.json` — a tool named after grype comparing trivy would be a
+permanent confusion, and the rename is cheapest now. Each target's entry may carry an
+optional `trivy` block: absent means trivy is not run for that target (the honest state
+for the seven distros trivy does not support — Fedora, Arch, Alpaquita and the Liberica
+image on it, Photon 5, Hummingbird, CleanStart — verified against trivy's own docs), and
+sixteen targets carry one. One file stays the single source of truth for the digest pins.
+
+**Floors are measured, never guessed (D93's own rule, applied to the new scanner).** An
+empty `trivy: {}` block is INFORMATIONAL: scandiff measures agree/findings against
+trivy's output and prints them as a ready-to-paste JSON snippet, but never breaches — so
+the first workflow_dispatch run seeds real floors, which then get committed and gate from
+the next weekly run on. trivy's own `minFindings`/`maxFindings` bound trivy's tuple count
+(a stale or broken trivy DB is what that catches), not assay's, which the grype-side
+floors already hold. The join stays CVE-only; trivy normalizes its IDs to CVEs upstream,
+so unlike the assay/grype normalizers there is no bare-ID fallback — a trivy-only
+advisory ID can never agree with anything and would only inflate noise. trivy is pinned
+(v0.62.1, bumped deliberately in the same commit as any floor re-seed) with its DB cached
+per version+week. Independent review: 5/5 mutations red — one first attempt was a sed
+no-op that "survived" until re-applied properly, the check-your-mutation-mutates trap
+CLAUDE.md records, not a coverage gap.
+
 ---
 
 ## 3. Architecture

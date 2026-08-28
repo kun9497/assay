@@ -614,8 +614,13 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨
 - [x] 차등이 스스로 돎 (D93) — 매주, digest로 고정된 타깃 13개를 발행된 아티팩트에
-      대고, 커밋된 floor로 판정(`cmd/grypediff`, stdlib만 사용); ratings 컬럼을
-      읽어서 죽어 있던 동의 둘을 되살림(alma 0→106, oracle 0→37)
+      대고, 커밋된 floor로 판정(도구는 이제 `cmd/scandiff`에 있음, D105; stdlib만
+      사용); ratings 컬럼을 읽어서 죽어 있던 동의 둘을 되살림(alma 0→106, oracle 0→37)
+- [x] trivy가 차등에 합류함 (D105) — `cmd/grypediff`가 `cmd/scandiff`로 이름이
+      바뀌고, 워크플로는 `scanner-diff.yml`; 23개 타깃 중 16개가 선택적인 `trivy`
+      floors 블록을 가짐(나머지 7개는 trivy가 지원하지 않는 distro), 붙여넣기
+      가능한 floor를 출력하는 informational 모드를 통해 measure-then-commit으로
+      씨앗을 심음
 - [x] Azure Linux와 CBL-Mariner (D94) — OSV 계열 하나, os-release ID 둘, 기존 rpm
       comparer; scancmd의 계열 맵은 D43 이후로 두 ID를 테스트 없이 담고 있었음; 오래된
       digest 고정 이미지 둘이 주간 차등에 합류(agree 132/106)
@@ -977,11 +982,12 @@ SUSE에서는 `--fail-on-unfixable`이 동작하지만 `=wont-fix`는 SUSE가 �
 `org.opencontainers.image.source`를 실어 나르므로 워크플로가 만든 패키지는 스스로 연결됩니다.
 그 이전에 손으로 만든 것은 그렇지 않습니다.
 
-정확성은 매 단계 **grype와의 대조 테스트**로 검증합니다 — D93부터는 매주 일정으로
-돕니다(`grype-diff.yml`: digest로 고정된 타깃 13개, 발행된 아티팩트, 퇴보하면 걸리는
-커밋된 floor). 데이터 소스가 다르므로 완전한 일치는 기대하지 않지만, **큰 차이가
-나면 우리 매처가 틀린 것입니다.** 슬라이스 ①은 대조한 두 SBOM 모두에서
-집합이 정확히 일치했습니다:
+정확성은 매 단계 **grype 및 trivy와의 대조 테스트**로 검증합니다 — D93부터는 매주
+일정으로 돌고, D105에서 trivy로 확장되었습니다(`scanner-diff.yml`: digest로 고정된
+타깃 23개, 발행된 아티팩트, 퇴보하면 걸리는 커밋된 floor; 그중 16개 타깃은 trivy와도
+비교합니다 — 나머지 7개는 trivy가 지원하지 않는 distro입니다). 데이터 소스가 다르므로
+완전한 일치는 기대하지 않지만, **큰 차이가 나면 우리 매처가 틀린 것입니다.** 슬라이스
+①은 대조한 두 SBOM 모두에서 집합이 정확히 일치했습니다:
 
 | 대상 | assay | grype | 미탐 | 오탐 |
 |---|---:|---:|---:|---:|

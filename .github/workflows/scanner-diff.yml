@@ -1,0 +1,152 @@
+# D93: the assay-vs-grype comparison that caught D90, running weekly instead
+# of by hand; extended by D105 to a second comparison scanner, trivy. It
+# scans the same 23 targets with assay and grype (every target), plus trivy
+# where a target's entry opts in, reduces each side to (package, CVE)
+# tuples, and judges the result against the committed floors in
+# .github/scanner-diff-targets.json -- see cmd/scandiff's own top-of-file
+# comment for why floors, not an exact-match snapshot, and for why trivy's
+# own floors are optional and can start out informational.
+#
+# The assay database comes from `assay db update` (the published OCI
+# artifact), not a local build: that is what makes this run also a check on
+# the artifact itself, which is how a D90-class corruption in what gets
+# published gets caught, not just a regression in the matcher code.
+name: scanner differential
+
+on:
+  # 0 21 * * 0 = Sunday 21:00 UTC = Monday 06:00 KST.
+  schedule:
+    - cron: "0 21 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # The published artifact lives on ghcr.io as a PRIVATE package: an
+  # anonymous `assay db update` gets UNAUTHORIZED (measured on this
+  # workflow's first dispatch, 2026-08-26). db update reads the standard
+  # Docker keychain (authn.DefaultKeychain, internal/dbcmd/pull.go), so the
+  # same docker-login step db-publish.yml uses for its push covers the pull.
+  packages: read
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    # 23 targets, each an image pull plus two scans (three for the 16 that
+    # carry a trivy block, D105). Measured locally at a few minutes per
+    # target on a cold cache; a hosted runner, Docker Hub anonymous rate
+    # limits (mitigated by mirror.gcr.io, but not eliminated), and now a
+    # third scanner per target all push this well past that, so the cap here
+    # is generous rather than tight the way db-publish.yml's is.
+    timeout-minutes: 120
+    env:
+      # A workspace-local database, never the developer cache path: this job
+      # must always validate a freshly pulled artifact, not whatever a
+      # previous run or a runner image happened to leave behind.
+      ASSAY_DB_DIR: ${{ github.workspace }}/.assay-db
+      # Same reasoning as db-publish.yml's own use of this flag: a scheduled
+      # job asking grype's CLI to check for its own updates is one more
+      # network call for no benefit to a run that reports its own pinned
+      # version below.
+      GRYPE_CHECK_FOR_APP_UPDATE: "false"
+      # trivy prints a one-time notice about its VEX handling on every
+      # invocation unless this is set; with 16 targets running trivy, that
+      # notice would otherwise repeat 16 times in the log for no benefit --
+      # this workflow does not consume VEX at all (see D104's OpenVEX
+      # support, which lives on the assay side, not trivy's).
+      TRIVY_DISABLE_VEX_NOTICE: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Build assay
+        run: go build -o ./bin/assay ./cmd/assay
+
+      - name: Build scandiff
+        run: go build -o ./bin/scandiff ./cmd/scandiff
+
+      # Pinned, not "latest": a moving grype version would make a floor
+      # breach ambiguous between "assay regressed" and "grype changed
+      # underneath this workflow". Bump this deliberately, in the same
+      # commit as a re-seed of the floors file, when there is a reason to.
+      - name: Install grype v0.116.1
+        run: |
+          curl -sSfL https://get.anchore.io/grype | sh -s -- -b ./bin v0.116.1
+          ./bin/grype version
+
+      - name: Update grype's vulnerability database
+        run: ./bin/grype db update
+
+      # Same pinning reasoning as grype above, via the same install.sh
+      # pattern trivy's own docs recommend over a package manager (no extra
+      # apt repo to trust, and the version is spelled right here rather than
+      # implied by whatever the runner image happens to carry). Bump
+      # deliberately, in the same commit as a re-seed of any trivy floor.
+      - name: Install trivy v0.62.1
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b ./bin v0.62.1
+          ./bin/trivy version
+
+      # trivy's own default cache dir (TRIVY_CACHE_DIR unset): keyed on the
+      # pinned version so a version bump never reuses a stale-schema cache,
+      # and on the ISO week so the DB itself still gets a fresh pull once a
+      # week the way grype's `db update` step above always does -- a cache
+      # that never expired would silently drift the differential's trivy
+      # side away from "this week's" vulnerability data.
+      - name: Determine trivy DB cache key
+        id: trivy-cache-key
+        run: echo "week=$(date -u +%G-w%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache trivy vulnerability DB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-v0.62.1-${{ steps.trivy-cache-key.outputs.week }}
+          restore-keys: |
+            trivy-db-v0.62.1-
+
+      - name: Update trivy's vulnerability database
+        run: ./bin/trivy image --download-db-only
+
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Pull the published assay database
+        run: ./bin/assay db update
+
+      - name: Run the differential
+        id: diff
+        run: |
+          set +e
+          # The shell opens the report redirect before scandiff's own
+          # MkdirAll ever runs, so the directory must exist first.
+          mkdir -p ./scanner-diff-capture
+          ./bin/scandiff \
+            -targets .github/scanner-diff-targets.json \
+            -assay ./bin/assay \
+            -grype ./bin/grype \
+            -trivy ./bin/trivy \
+            -capture ./scanner-diff-capture \
+            > ./scanner-diff-capture/report.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      # Captures go up whether the run held its floors or not -- a passing
+      # week's numbers are exactly what next week's regression gets compared
+      # against by eye, and a failing week is what a human re-judges locally
+      # with `scandiff -targets ... -offline ./scanner-diff-capture`. This is
+      # also where an INFORMATIONAL trivy target's measured numbers land
+      # (report.txt's stdout, D105) for a human to paste into
+      # scanner-diff-targets.json.
+      - name: Upload captures and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scanner-diff-capture
+          path: ./scanner-diff-capture
+          retention-days: 30
+
+      - name: Fail the job on a breach or an untrustworthy target
+        run: exit ${{ steps.diff.outputs.exit_code }}

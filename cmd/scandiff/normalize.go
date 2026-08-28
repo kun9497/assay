@@ -165,6 +165,57 @@ func grypeTuples(doc grypeDocument) map[tuple]struct{} {
 	return set
 }
 
+// --- trivy's `--format json` shape (D105) ---
+//
+// trivy's document is Results[]{Class, Vulnerabilities[]{PkgName,
+// VulnerabilityID}}, read from https://trivy.dev's JSON output spec, not
+// guessed. Class distinguishes "os-pkgs" from "lang-pkgs" (and other
+// non-vulnerability result kinds such as "secret" or "config"); this tool
+// does not need to switch on it because only Vulnerabilities is read, and a
+// Class with no vulnerabilities in it (or none at all) simply contributes
+// nothing.
+
+type trivyDocument struct {
+	Results []trivyResult `json:"Results"`
+}
+
+type trivyResult struct {
+	Class           string      `json:"Class"`
+	Vulnerabilities []trivyVuln `json:"Vulnerabilities"`
+}
+
+type trivyVuln struct {
+	PkgName         string `json:"PkgName"`
+	VulnerabilityID string `json:"VulnerabilityID"`
+}
+
+// trivyTuples extracts the (package, CVE) set from one trivy document.
+// Unlike assayTuples and grypeTuples, there is no bare-ID fallback: trivy
+// normalizes its own VulnerabilityID to a CVE wherever an upstream advisory
+// maps to one, so a VulnerabilityID that is not CVE-shaped is trivy's own
+// non-CVE advisory ID (e.g. a GHSA trivy chose not to resolve) and is
+// dropped rather than joined on, the same "CVE is the only vocabulary both
+// sides reliably speak" reasoning cveRe's own doc comment gives -- keeping a
+// fallback here would let a trivy-only advisory ID inflate onlyAssay-style
+// noise against a scanner it can never actually agree with.
+//
+// A document with no Results at all (a clean image) and a Result whose
+// Vulnerabilities is null or absent both contribute zero tuples, not an
+// error -- ranging over a nil slice is simply zero iterations, so no
+// explicit nil check is needed for either.
+func trivyTuples(doc trivyDocument) map[tuple]struct{} {
+	set := make(map[tuple]struct{})
+	for _, res := range doc.Results {
+		for _, v := range res.Vulnerabilities {
+			if !isCVE(v.VulnerabilityID) {
+				continue
+			}
+			set[tuple{Subject: v.PkgName, ID: v.VulnerabilityID}] = struct{}{}
+		}
+	}
+	return set
+}
+
 // compareSets computes the differential's three headline numbers: how many
 // tuples both tools reported, and how many each reported alone. Neither
 // input is mutated, and the result does not depend on map iteration order

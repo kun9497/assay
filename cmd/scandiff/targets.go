@@ -7,7 +7,7 @@ import (
 )
 
 // Target is one row of the committed floors file
-// (.github/grype-diff-targets.json). Floors, not snapshots (D93): a floor is
+// (.github/scanner-diff-targets.json). Floors, not snapshots (D93): a floor is
 // a one-way ratchet against regression, so a database update that finds one
 // MORE real vulnerability than last week does not itself fail the build the
 // way an exact-match comparison would have.
@@ -45,6 +45,50 @@ type Target struct {
 	// comment history: a boolean here would let the count grow without
 	// limit once any not-evaluated packages were expected at all).
 	MaxNotEvaluated int `json:"maxNotEvaluated,omitempty"`
+	// Trivy is D105's second comparison, OPTIONAL per target: nil means the
+	// key is absent from the file, and trivy is simply not run for this
+	// target at all -- not run-and-ignored, not run-and-zero-floored. Trivy
+	// does not cover every distro assay does (see scanner-diff-targets.json's
+	// own comment for the list), so absence has to be distinguishable from a
+	// committed all-zero floor, which is why this is a pointer and not a
+	// plain TrivyFloors value.
+	Trivy *TrivyFloors `json:"trivy,omitempty"`
+}
+
+// TrivyFloors is the trivy counterpart to Target's own MinAgree/MinFindings/
+// MaxFindings, kept as a separate type (rather than three more fields
+// directly on Target) so a target with no `"trivy"` key round-trips through
+// Trivy == nil instead of a Target that merely happens to have every trivy
+// floor at its zero value -- see Target.Trivy's own comment.
+//
+// MinAgree floors |assay tuples ∩ trivy tuples|, the same role grype's
+// MinAgree plays in the primary comparison. MinFindings and MaxFindings,
+// though, floor TRIVY's OWN tuple count, not assay's -- assay's own count is
+// already floored by Target's MinFindings/MaxFindings regardless of which
+// second scanner is configured, so re-checking it here a second time would
+// only duplicate that guard with a second, independently-drifting number.
+// Bounding trivy's own count instead catches trivy itself degrading: a
+// stale or empty cached vulnerability DB reporting suspiciously few (or a
+// broken one reporting suspiciously many) findings, the same failure mode
+// the DB-dir cache in scanner-diff.yml exists to make LESS likely but not
+// impossible.
+//
+// All three floors at zero (an EMPTY `"trivy": {}` block) is INFORMATIONAL,
+// not a committed floor: measure and print the numbers, never breach. This
+// is what lets a `workflow_dispatch` run seed real floors for a target
+// before anyone commits them -- see judgeTrivy.
+type TrivyFloors struct {
+	MinAgree    int `json:"minAgree"`
+	MinFindings int `json:"minFindings"`
+	MaxFindings int `json:"maxFindings"`
+}
+
+// isZero reports whether every floor in f is at its zero value -- D105's
+// definition of "informational" (see TrivyFloors' own doc comment). A block
+// this evaluates true for never produces a breach, no matter what gets
+// measured.
+func (f TrivyFloors) isZero() bool {
+	return f.MinAgree == 0 && f.MinFindings == 0 && f.MaxFindings == 0
 }
 
 // loadTargets reads and validates the floors file. Every failure here is
