@@ -21,12 +21,13 @@ on:
 
 permissions:
   contents: read
-  # The published artifact lives on ghcr.io as a PRIVATE package: an
-  # anonymous `assay db update` gets UNAUTHORIZED (measured on this
-  # workflow's first dispatch, 2026-08-26). db update reads the standard
-  # Docker keychain (authn.DefaultKeychain, internal/dbcmd/pull.go), so the
-  # same docker-login step db-publish.yml uses for its push covers the pull.
-  packages: read
+  # No packages permission and no docker login: the published artifact went
+  # PUBLIC on 2026-08-28 (a private ghcr package contradicted the README's
+  # "anyone runs `assay db update` in seconds" and walled off every outside
+  # user), so this job's pull is the same anonymous pull any user makes --
+  # which also makes the weekly run a standing check that the package STAYS
+  # public: if visibility ever regresses, `assay db update` below fails the
+  # run loudly with UNAUTHORIZED, exactly what an outside user would hit.
 
 jobs:
   diff:
@@ -122,10 +123,8 @@ jobs:
       - name: Update trivy's vulnerability database
         run: ./bin/trivy image --download-db-only
 
-      - name: Log in to ghcr.io
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-
       - name: Pull the published assay database
+        # Anonymous, deliberately -- see the permissions comment at the top.
         run: ./bin/assay db update
 
       - name: Run the differential
