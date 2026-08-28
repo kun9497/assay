@@ -441,13 +441,14 @@ true, all of which happened while building D27:
 
 ## Conventions
 
-- **Four direct dependencies, deliberately**: `go.etcd.io/bbolt` (the store, D4),
+- **Five direct dependencies, deliberately**: `go.etcd.io/bbolt` (the store, D4),
   `github.com/google/go-containerregistry` (registry, tarball and OCI-layout image reading),
   `github.com/klauspost/compress` (zstd, for Red Hat's archive — it was already linked
   transitively through go-containerregistry, so promoting it moved one line in `go.mod` and
-  added no code), and `gopkg.in/yaml.v3` (ignore rules, D102 — the same already-in-the-graph
-  promotion, via docker-cli). Everything else in `go.mod` is indirect. Adding a fifth is a
-  real decision — prefer the stdlib, and check the cgo constraint above. The pnpm/yarn-berry
+  added no code), `gopkg.in/yaml.v3` (ignore rules, D102 — the same already-in-the-graph
+  promotion, via docker-cli), and `golang.org/x/sys` (Windows virtual-terminal enablement
+  for D107's colors — the same promotion again). Everything else in `go.mod` is indirect.
+  Adding a sixth is a real decision — prefer the stdlib, and check the cgo constraint above. The pnpm/yarn-berry
   YAML question in `docs/deferred-decisions.md` was exactly such a decision; the yaml.v3
   promotion dissolved its dependency barrier and D103 then read both formats.
 

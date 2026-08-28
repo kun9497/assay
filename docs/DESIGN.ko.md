@@ -617,6 +617,10 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       발행된 아티팩트에 대고, 커밋된 floor로 판정(도구는 이제 `cmd/scandiff`에 있음,
       D105; stdlib만 사용); ratings 컬럼을 읽어서 죽어 있던 동의 둘을
       되살림(alma 0→106, oracle 0→37)
+- [x] 심각도 색상 (D107) — stdout이 실제 터미널일 때 테이블이 밴드별로 심각도를
+      색칠함(NO_COLOR 존중; Windows에서는 x/sys로 VT를 켜거나 아니면 색상을 끔);
+      파이프는 바이트 단위로 동일하게 유지되고, tabwriter의 Flush 이후에 색을
+      입혀서 정렬이 보존됨
 - [x] Azure Linux가 죽은 feed를 벗어남 (D106) — 전용 provider가 Microsoft의
       일일 OVAL(D74의 형태)을 파싱함, 감사가 누락 finding 140건을 Microsoft의
       멈춰 버린 OSV export가 OSV.dev에 의해 얼어붙은 채로 서빙되던 것으로

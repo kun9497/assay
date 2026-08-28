@@ -1431,6 +1431,55 @@ func TestRun_OutputSARIF(t *testing.T) {
 	}
 }
 
+// TestRun_Colorize is the caller-first check for D107: Options.Colorize must
+// actually reach report.Table, and its DEFAULT must reproduce today's output
+// byte-for-byte. Written before any renderer-level color test (table_test.go
+// and color_test.go's own per-band checks in internal/report) on the same
+// discipline TestRun_OutputJSON/TestRun_OutputSARIF already establish for
+// their own flags: a dropped `opts.Colorize` argument at the report.Table
+// call site in Run -- CLAUDE.md's "the helper is covered; nothing calls it"
+// hazard -- must turn THIS test red. If only report's own per-band tests
+// existed, that exact drop would leave the whole suite green: every color
+// assertion would still be true of report.Table called directly, and
+// nothing would prove Run ever passes the bool through.
+func TestRun_Colorize(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-color-critical", pkg: "colorcritical", fixed: "2.0.0", vectors: []string{vecCritical}},
+	})
+	sbom := buildMatrixSBOM(t, []matrixPkg{{name: "colorcritical", purlType: "golang"}})
+
+	t.Run("Colorize true wraps the severity word and the finding count in ANSI codes", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		code := Run(context.Background(), db, sbom, Options{Colorize: true}, &out, &errOut)
+		if code != 0 {
+			t.Fatalf("Run() = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, out.String(), errOut.String())
+		}
+		got := out.String()
+		if !strings.Contains(got, "\x1b[1;31mcritical") {
+			t.Errorf("stdout does not bracket the critical severity word in bold red:\n%q", got)
+		}
+		if !strings.Contains(got, "\x1b[1m1 finding(s)\x1b[0m") {
+			t.Errorf("stdout does not bold the finding count:\n%q", got)
+		}
+	})
+
+	// The default proof: not just "no visible color", but literally no ESC
+	// byte anywhere in stdout. A weaker assertion (say, "table still has a
+	// PACKAGE header") would pass even if some OTHER color leaked in by
+	// mistake; this is the same byte-identical bar CLAUDE.md's escape-
+	// sequence rule holds Go source to, applied to the program's own output.
+	t.Run("Colorize unset (default) has no ESC byte anywhere in stdout", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		code := Run(context.Background(), db, sbom, Options{}, &out, &errOut)
+		if code != 0 {
+			t.Fatalf("Run() = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, out.String(), errOut.String())
+		}
+		if strings.ContainsRune(out.String(), '\x1b') {
+			t.Errorf("stdout contains an ESC byte with Colorize unset (default must be off):\n%q", out.String())
+		}
+	})
+}
+
 // TestRun_Explain is the wiring test for Options.Explain: Run must call
 // report.Explain instead of report.Table/JSON, the verdict (--fail-on* gates,
 // D11) must still apply on top of it, and an identifier matching nothing

@@ -173,6 +173,20 @@ type Options struct {
 	// a mistake the caller wants told about, not one that silently waives
 	// nothing.
 	IgnoreFile string
+	// Colorize turns on D107's ANSI severity colors in the table renderer.
+	// Set by cmd/assay, never derived here: whether stdout is a real
+	// terminal and whether NO_COLOR is set are facts about the real
+	// process's stdout (os.Stdout.Stat()), which this package never touches
+	// on principle — stdout, stderr are Run's own parameters precisely so a
+	// test can drive them with a bytes.Buffer that is never a character
+	// device, and a package that queried os.Stdout directly to decide this
+	// would defeat that seam for the one flag that most needs it tested.
+	//
+	// Only report.Table consults it (Options' own package doc: "Only the
+	// table output path consults it"). --output json and --output sarif
+	// never receive this bool at all, which is what keeps `| jq` clean
+	// without either renderer needing its own opt-out.
+	Colorize bool
 	// VEXFiles is every path passed via --vex (D104), repeatable and applied
 	// in the order given — grype's own flag name (D18), so migrating a
 	// pipeline that already gates on grype's VEX support costs nothing but
@@ -676,7 +690,7 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 			return 2
 		}
 	default:
-		sum, err = report.Table(stdout, res, cat, eolStatus)
+		sum, err = report.Table(stdout, res, cat, eolStatus, opts.Colorize)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: write report: %v\n", err)
 			return 2

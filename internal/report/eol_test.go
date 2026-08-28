@@ -26,7 +26,7 @@ var debianBookwormEOL = EOLStatus{
 // "the helper is covered; nothing calls it" hazard) must turn this red.
 func TestTable_PrintsEOLLineWhenEOL(t *testing.T) {
 	var buf bytes.Buffer
-	if _, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{}, debianBookwormEOL); err != nil {
+	if _, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{}, debianBookwormEOL, false); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -50,7 +50,7 @@ func TestTable_NoEOLLineWhenNotEOL(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			var buf bytes.Buffer
-			if _, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{}, st); err != nil {
+			if _, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{}, st, false); err != nil {
 				t.Fatal(err)
 			}
 			if out := buf.String(); strings.Contains(out, "EOL:") {

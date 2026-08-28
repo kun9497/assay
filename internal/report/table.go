@@ -3,6 +3,7 @@
 package report
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"slices"
@@ -83,7 +84,16 @@ func (s Summary) Trustworthy() bool {
 	return s.Components == 0 || s.Evaluated > 0
 }
 
-func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus) (Summary, error) {
+// colorize, when true, turns on D107's ANSI severity colors. Default false
+// (every pre-existing caller and test in this package passes false, or wrote
+// no argument at all before this parameter existed and has since been
+// updated to say so explicitly) reproduces today's byte-identical output —
+// the policy decision of WHEN true is allowed to reach here (a real
+// terminal, and NO_COLOR unset) lives in cmd/assay, the layer that owns the
+// real stdout (D107's own split of "would the terminal take colors" from
+// "does policy allow them"). This renderer only ever asks "should I", never
+// "am I allowed to".
+func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus, colorize bool) (Summary, error) {
 	// D87: one line, only when the target's distro release is actually EOL
 	// — Line() itself returns ok=false for both "nothing to say" (Known is
 	// false) and "current release" (Known but not EOL), so this is the only
@@ -101,8 +111,26 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus) 
 
 	switch {
 	case len(res.Findings) > 0:
-		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		// tabwriter writes into an intermediate buffer, not w directly, so
+		// colorizeSeverityColumn below can inject ANSI codes AFTER every
+		// column's width is already fixed. tabwriter counts bytes to decide
+		// padding (the same reason a Korean title cannot sit in the ADVISORY
+		// cell, per enrichmentMarker's own comment below) — an escape
+		// sequence written into a cell BEFORE Flush would inflate that cell's
+		// counted width by invisible bytes and misalign every column after
+		// it, differently per row depending on which band's code is longer.
+		// Coloring only the fully-padded text sidesteps that: the bytes we
+		// add are appended within a row's own line, after the tab stops for
+		// every column on that line have already been decided, so they
+		// cannot move where any column starts.
+		var tbl bytes.Buffer
+		tw := tabwriter.NewWriter(&tbl, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(tw, "PACKAGE\tVERSION\tECOSYSTEM\tADVISORY\tSEVERITY\tALIASES\tFIXED IN")
+		// bands is one entry per row, in the same order res.Findings is
+		// ranged over below, so colorizeSeverityColumn can pair line i+1
+		// (line 0 is the header) with bands[i] without re-parsing the
+		// SEVERITY cell's text back into a band.
+		bands := make([]severity.Band, 0, len(res.Findings))
 		// disagreement tracks whether any row got the marker, so the footnote
 		// that explains it is printed at most once and only when it applies —
 		// a footnote nobody's row earned is worse than no footnote.
@@ -192,8 +220,16 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus) 
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				name, f.Package.Version, f.Package.Ecosystem,
 				advisoryID, sev, aliases, fixed)
+			bands = append(bands, f.Severity)
 		}
 		if err := tw.Flush(); err != nil {
+			return Summary{}, err
+		}
+		out := tbl.String()
+		if colorize {
+			out = colorizeSeverityColumn(out, bands)
+		}
+		if _, err := io.WriteString(w, out); err != nil {
 			return Summary{}, err
 		}
 		// Ranged over a fixed slice rather than the map, so two runs over one
@@ -288,9 +324,18 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus) 
 	if len(res.Suppressed) > 0 {
 		suppressedParen = fmt.Sprintf(", %d suppressed", len(res.Suppressed))
 	}
-	fmt.Fprintf(w, "\n%d component(s) seen, %d evaluated, %d finding(s), %d not evaluated, "+
+	// D107: the one number on this line a reader's eye should land on first.
+	// Bold only, not banded by severity — this count mixes every band
+	// together, so no single band's color would be honest here — and only
+	// when non-zero: a bold "0 finding(s)" on a clean scan would draw the eye
+	// to the one line that most needs to read as unremarkable.
+	findingsText := fmt.Sprintf("%d finding(s)", len(res.Findings))
+	if len(res.Findings) > 0 {
+		findingsText = wrapSGR(ansiBold, findingsText, colorize)
+	}
+	fmt.Fprintf(w, "\n%d component(s) seen, %d evaluated, %s, %d not evaluated, "+
 		"%d unknown severity, %d with no fix available (%s)%s\n",
-		cat.Components, evaluated, len(res.Findings), notEvaluated, unknownSeverity,
+		cat.Components, evaluated, findingsText, notEvaluated, unknownSeverity,
 		sum.Unfixable, noFixParen, suppressedParen)
 
 	// Suppressed findings are shown, never dropped (matcher.Result.Suppressed's
@@ -305,7 +350,12 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus) 
 	// own source — the honest form, since provenance is a per-suppression
 	// fact, not a per-scan one.
 	if len(res.Suppressed) > 0 {
-		fmt.Fprintf(w, "\nSuppressed (%d), not counted toward the verdict:\n", len(res.Suppressed))
+		// D107: the header is dimmed, the per-finding lines under it are not
+		// — a suppression's reason is exactly the thing a reader is meant to
+		// read carefully, and dimming it alongside the header would work
+		// against that.
+		header := fmt.Sprintf("Suppressed (%d), not counted toward the verdict:", len(res.Suppressed))
+		fmt.Fprintf(w, "\n%s\n", wrapSGR(ansiDim, header, colorize))
 		for _, s := range res.Suppressed {
 			src := s.Source
 			if src == "" {
@@ -326,16 +376,24 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus) 
 	// evaluated — reintroducing, one advisory at a time, the silence this
 	// block exists to break.
 	if notEvaluated > 0 || incompleteChecks > 0 {
-		fmt.Fprintln(w, "\nNot evaluated:")
+		// D107: the header and the three aggregate counts below are dimmed —
+		// they are a caveat about coverage, not a finding. The per-package
+		// lines under res.Skipped are left plain, on the Suppressed block's
+		// own reasoning just above: each one names a reason a reader has to
+		// actually read, and dimming it alongside the header would work
+		// against that.
+		fmt.Fprintln(w, "\n"+wrapSGR(ansiDim, "Not evaluated:", colorize))
 		if cat.SkippedUnsupportedEcosystem > 0 {
-			fmt.Fprintf(w, "  %d package(s) in an unsupported ecosystem\n",
-				cat.SkippedUnsupportedEcosystem)
+			fmt.Fprintln(w, wrapSGR(ansiDim, fmt.Sprintf(
+				"  %d package(s) in an unsupported ecosystem", cat.SkippedUnsupportedEcosystem), colorize))
 		}
 		if cat.SkippedNoPURL > 0 {
-			fmt.Fprintf(w, "  %d component(s) without a usable purl\n", cat.SkippedNoPURL)
+			fmt.Fprintln(w, wrapSGR(ansiDim, fmt.Sprintf(
+				"  %d component(s) without a usable purl", cat.SkippedNoPURL), colorize))
 		}
 		if cat.SkippedNoVersion > 0 {
-			fmt.Fprintf(w, "  %d package(s) with no version to compare\n", cat.SkippedNoVersion)
+			fmt.Fprintln(w, wrapSGR(ansiDim, fmt.Sprintf(
+				"  %d package(s) with no version to compare", cat.SkippedNoVersion), colorize))
 		}
 		for _, s := range res.Skipped {
 			if s.AdvisoryID != "" {

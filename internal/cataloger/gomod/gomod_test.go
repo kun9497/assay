@@ -293,7 +293,10 @@ func TestParse_NoGoModIsAnError(t *testing.T) {
 }
 
 // Parsing this repository's own go.mod pins D23's measured claim: the require
-// blocks name 12 modules (4 direct, 8 indirect), including a test-only
+// blocks name 12 modules (5 direct, 7 indirect -- golang.org/x/sys moved from
+// indirect to direct for D107's Windows console-mode call, the same zero-cost
+// promotion yaml.v3's own D102 comment describes; the TOTAL module count is
+// unchanged, only which require() block each line sits in), including a test-only
 // dependency, gotest.tools/v3, that never links into the built binary. That
 // gap between "requires" and "links" is the documented limitation this slice
 // is honest about - a test that pins the number is what keeps the README's
