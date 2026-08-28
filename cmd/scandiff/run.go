@@ -162,10 +162,11 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 
 		aSet := assayTuples(adoc)
 		gSet := grypeTuples(gdoc)
+		bridgeBareIDs(adoc, gdoc, aSet, gSet)
 		agree, onlyAssay, onlyGrype := compareSets(aSet, gSet)
 		notEvaluated := adoc.Summary.NotEvaluated
 
-		breaches := judge(t, agree, len(aSet), notEvaluated)
+		breaches := judge(t, agree, len(aSet), notEvaluated, adoc.Summary.Components)
 		r := row{
 			Target:       t.Name,
 			AssayTuples:  len(aSet),

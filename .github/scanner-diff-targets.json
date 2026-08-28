@@ -107,7 +107,7 @@
     "name": "fedora",
     "tag": "fedora:latest",
     "ref": "mirror.gcr.io/library/fedora@sha256:6c75d5bf57cb0fa5aa4b92c6a83c86c791644496d9ac230de7711f5b8ec3b898",
-    "minAgree": 26,
+    "minAgree": 50,
     "minFindings": 47,
     "maxFindings": 112
   },
@@ -118,7 +118,8 @@
     "minAgree": 0,
     "minFindings": 0,
     "maxFindings": 25,
-    "trivy": {}
+    "trivy": {},
+    "minComponents": 90
   },
   {
     "name": "wolfi",
@@ -127,7 +128,8 @@
     "minAgree": 0,
     "minFindings": 0,
     "maxFindings": 25,
-    "trivy": {}
+    "trivy": {},
+    "minComponents": 12
   },
   {
     "name": "leap156",
@@ -249,6 +251,7 @@
     "ref": "docker.io/cleanstart/postgres@sha256:579b4bbd12020eb8a1121f6387ac0e338c8bd695f90895dc1798631b6bd59129",
     "minAgree": 0,
     "minFindings": 0,
-    "maxFindings": 25
+    "maxFindings": 25,
+    "minComponents": 40
   }
 ]

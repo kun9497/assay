@@ -976,3 +976,31 @@ func TestRun_Offline_TargetWithTrivyBlock_MissingCaptureFile_ExitError(t *testin
 		t.Errorf("stderr = %q, want it to name the target and explain the missing trivy capture", stderr.String())
 	}
 }
+
+// TestRun_Offline_BridgeRecoversABareAdvisoryJoin drives run() itself
+// through the bridge: assay falls back bare on FEDORA-2026-dddd (no CVE
+// anywhere in its record) while grype names that advisory beside its own
+// CVE. Without bridgeBareIDs in run's flow, agree is 0 and the minAgree
+// floor breaches -- so deleting the call site turns THIS test red, which
+// the direct bridge unit tests cannot do.
+func TestRun_Offline_BridgeRecoversABareAdvisoryJoin(t *testing.T) {
+	target := Target{Name: "off-bridge", Ref: "unused-in-offline-mode", MinAgree: 1, MinFindings: 1, MaxFindings: 5}
+	targetsPath := writeTargetsFile(t, []Target{target})
+
+	dir := t.TempDir()
+	assayBytes := assayDoc(0, []assayFinding{{Package: assayPackage{Name: "vim-data"}, Advisory: assayAdvisory{ID: "FEDORA-2026-dddd"}}})
+	grypeBytes := grypeDoc([]grypeMatch{{Artifact: grypeArtifact{Name: "vim-data"}, Vulnerability: grypeVuln{
+		ID: "CVE-2026-77002", Advisories: []grypeAdvisory{{ID: "FEDORA-2026-dddd"}}}}})
+	if err := os.WriteFile(filepath.Join(dir, "off-bridge.assay.json"), assayBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "off-bridge.grype.json"), grypeBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := run([]string{"-targets", targetsPath, "-offline", dir}, &stdout, &stderr, noExec(t))
+	if got != exitOK {
+		t.Fatalf("exit = %d, want %d -- the bridged advisory join must satisfy minAgree (stderr=%q)", got, exitOK, stderr.String())
+	}
+}

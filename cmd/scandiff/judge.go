@@ -23,8 +23,11 @@ func (b breach) String() string {
 // floors. It never looks at the previous run and never looks at any other
 // target -- purely a function of (Target, measured numbers) so it is
 // testable without a scan, a capture, or a file on disk.
-func judge(t Target, agree, findings, notEvaluated int) []breach {
+func judge(t Target, agree, findings, notEvaluated, components int) []breach {
 	var out []breach
+	if components < t.MinComponents {
+		out = append(out, breach{t.Name, "minComponents", fmt.Sprintf(">=%d", t.MinComponents), components})
+	}
 	if agree < t.MinAgree {
 		out = append(out, breach{t.Name, "minAgree", fmt.Sprintf(">=%d", t.MinAgree), agree})
 	}

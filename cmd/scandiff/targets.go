@@ -45,6 +45,14 @@ type Target struct {
 	// comment history: a boolean here would let the count grow without
 	// limit once any not-evaluated packages were expected at all).
 	MaxNotEvaluated int `json:"maxNotEvaluated,omitempty"`
+	// MinComponents floors assay's summary.components -- how much of the
+	// image the scan actually cataloged. It exists for targets whose
+	// EXPECTED finding count is zero (cleanstart): there, minFindings 0 and
+	// minAgree 0 enforce nothing, so a cataloger that silently saw an empty
+	// inventory would still report "ok". Findings can honestly be zero;
+	// an inventory of a real image cannot. Omitted means 0, which keeps
+	// every pre-existing target's judgement byte-identical.
+	MinComponents int `json:"minComponents,omitempty"`
 	// Trivy is D105's second comparison, OPTIONAL per target: nil means the
 	// key is absent from the file, and trivy is simply not run for this
 	// target at all -- not run-and-ignored, not run-and-zero-floored. Trivy
