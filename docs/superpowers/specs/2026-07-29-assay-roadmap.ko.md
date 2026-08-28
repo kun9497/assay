@@ -3908,7 +3908,7 @@ CleanStart — 에 대한 정직한 상태로, trivy 자신의 문서에 대고 
 유지됩니다; trivy는 자신의 ID를 upstream에서 CVE로 정규화하므로,
 assay/grype 정규화기와 달리 bare-ID fallback이 없습니다 — trivy 전용
 advisory ID는 결코 아무것과도 agree할 수 없고 노이즈만 부풀릴 것입니다.
-trivy는 버전이 고정되어 있고(v0.62.1, floors를 다시 심는 것과 같은 커밋에서
+trivy는 버전이 고정되어 있고(v0.74.0, floors를 다시 심는 것과 같은 커밋에서
 의도적으로 올립니다) DB는 버전+주 단위로 캐시됩니다. 독립 리뷰: 뮤테이션
 5개 중 5개가 red입니다 — 첫 시도 하나는 sed no-op이라 제대로 재적용될
 때까지 "살아남았고", 이는 CLAUDE.md가 기록하는 뮤테이션이 실제로 뮤테이션을

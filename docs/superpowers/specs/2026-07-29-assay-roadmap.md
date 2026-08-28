@@ -4053,7 +4053,7 @@ the next weekly run on. trivy's own `minFindings`/`maxFindings` bound trivy's tu
 floors already hold. The join stays CVE-only; trivy normalizes its IDs to CVEs upstream,
 so unlike the assay/grype normalizers there is no bare-ID fallback — a trivy-only
 advisory ID can never agree with anything and would only inflate noise. trivy is pinned
-(v0.62.1, bumped deliberately in the same commit as any floor re-seed) with its DB cached
+(v0.74.0, bumped deliberately in the same commit as any floor re-seed) with its DB cached
 per version+week. Independent review: 5/5 mutations red — one first attempt was a sed
 no-op that "survived" until re-applied properly, the check-your-mutation-mutates trap
 CLAUDE.md records, not a coverage gap.
