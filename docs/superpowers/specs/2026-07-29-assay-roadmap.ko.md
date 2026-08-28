@@ -3846,6 +3846,43 @@ v1로 되돌아가는 기본값 자체가 조용히 패키지 0개가 되는 경
 접미사 안 자름, git을 레지스트리로 취급, local을 셈함, 이후 문서 버려짐, 이름으로
 중복제거), 각각 호출부 수준 테스트 또는 표 테스트에 걸렸습니다.
 
+### D104 — OpenVEX 입력: 생산자의 면책 선언을, assay의 규율로 적용한다
+
+**결정.** 반복 가능한 `--vex <path>`가 OpenVEX 문서를 읽습니다 — v0.2.0과, vexctl 자신의
+testdata가 여전히 담고 있어서 지원하는 예전 v0.0.1 모양(문자열 vulnerability,
+`[]string` products) 둘 다입니다; 알 수 없는 `@context`는 exit 2입니다, 읽을 수 없는
+waiver 파일이 "신뢰할 수 없음"이지 결코 "아무것도 waive되지 않음"이 아니기 때문입니다
+(D11) — 그리고 그 문서가 면책하는 finding들을 D102의 파이프라인을 통해 억제합니다:
+`Result.Suppressed`, 모든 렌더러에서 세어지고 보여지며, 결코 `--fail-on`을 걸지
+않습니다. `Suppressed`는 `Source` 필드(`"ignore-file"` | `"vex"`)를 얻어서 출처가 억제
+건별 사실이 됩니다 — table은 각 줄의 출처를 이름 붙이고 JSON 문서도 그것을 나릅니다
+(스키마 10); table의 블록 헤더는 더 이상 모든 waiver를 `.assay.yaml` 탓으로 돌리지
+않습니다. ignore 규칙이 먼저 적용됩니다; 규칙이 waive한 finding은 다시 평가되지
+않습니다. `not_affected`와 `fixed`만 억제합니다 — `affected`/`under_investigation`은
+정상적으로 보고되며, annotate 경로가 없습니다.
+
+**assay가 참조 구현들과 의도적으로 갈라지는 지점, 각각 원본 소스에 대고
+검증했습니다.** go-vex는 빈 subcomponent 질의를 MATCH로 단락(short-circuit) 처리합니다
+— 자신을 라이브러리 하나로 좁힌 statement가 이미지 전체를 억제하게 됩니다; assay는
+'제시할 것이 없음'을 매치 없음으로 취급합니다. grype는 충돌하는 statement를
+'가장 이른 것'을 취해 해소합니다; 스펙의 사실상 규칙(go-vex 자신의
+`EffectiveStatement`)은 최신 우선이고, assay는 최신 것 — 벤더의 가장 최근 판단 —
+을 취하며 타임스탬프가 같으면 문서 순서 쪽으로 tie-break합니다. grype는
+justification도 impact_statement도 없는 `not_affected`를 억제 처리합니다; assay는
+그 statement를 경고와 함께 건너뛰며, 나머지 문서는 그대로 유효한 채로 D102의
+이유 없는 waiver 규율을 statement 단위로 적용합니다. Vulnerability identity는
+name, `@id`, 그리고 모든 alias를 finding의 identifier 전체 집합에 대고 대소문자
+구분 없이 매칭합니다 — Chainguard의 실제 피드는 CGA id에 이름을 붙이고 CVE는
+alias에만 두므로, name 하나만 보는 매칭(grype는 ID 하나를 넘깁니다)은 이를
+놓칩니다. Product 매칭은 package purl을 product로 보고 go-vex의 패턴 규칙을
+따릅니다(버전 없는 문서 purl은 모든 버전에 매칭합니다 — reason 문자열이 그것을
+드러냅니다 — qualifier는 단방향 부분집합으로, subpath는 무시); purl이 아닌
+`@id`는 정확한 문자열 일치로만 매칭합니다; 파싱할 수 없는 문서 purl은 경고하고
+결코 와일드카드가 되지 않습니다. 독립 리뷰: 뮤테이션 8개 중 8개가 red입니다 —
+여덟 번째(`Source`를 비우는 것)는 table의 줄별 출처 라벨에 대한 호출부 수준
+anchor가 추가될 때까지 살아남았고, 그 라운드가 정확히 존재 이유대로
+작동했습니다.
+
 ---
 
 ## 3. 아키텍처

@@ -804,7 +804,7 @@ func TestJSON_SuppressedFindingsAreASeparateArray(t *testing.T) {
 		Advisory: advisory.Advisory{ID: "ALPINE-CVE-2024-58251"},
 		Severity: severity.Low,
 	}
-	res := matcher.Result{Suppressed: []matcher.Suppressed{{Finding: waived, Reason: "accepted risk"}}}
+	res := matcher.Result{Suppressed: []matcher.Suppressed{{Finding: waived, Reason: "accepted risk", Source: "ignore-file"}}}
 	var buf bytes.Buffer
 	if _, err := JSON(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
 		t.Fatal(err)
@@ -821,6 +821,12 @@ func TestJSON_SuppressedFindingsAreASeparateArray(t *testing.T) {
 	}
 	if doc.Suppressed[0].Reason != "accepted risk" || doc.Suppressed[0].Advisory.ID != "ALPINE-CVE-2024-58251" {
 		t.Errorf("suppressed[0] = %+v, want the reason and the finding's advisory id", doc.Suppressed[0])
+	}
+	// D104: source flows through unchanged, so a consumer can tell a
+	// .assay.yaml waiver apart from an OpenVEX one without parsing Reason's
+	// own prose.
+	if doc.Suppressed[0].Source != "ignore-file" {
+		t.Errorf("suppressed[0].Source = %q, want %q", doc.Suppressed[0].Source, "ignore-file")
 	}
 	if doc.Summary.Suppressed != 1 {
 		t.Errorf("summary.suppressed = %d, want 1", doc.Summary.Suppressed)

@@ -84,8 +84,16 @@ reason, and they do not trip `--fail-on` — but they stay in the output (SARIF 
 standard `suppressions`, which GitHub shows as dismissed). An expired rule stops waiving and
 warns, so a waiver cannot outlive its justification unnoticed.
 
-This is the ignore-rules half of VEX/ignore; reading a producer-signed OpenVEX document is a
-separate, later capability.
+When the waiver comes from the software's *producer* rather than from you, pass their
+OpenVEX document instead of transcribing it: `--vex <path>` (repeatable) applies its
+`not_affected` and `fixed` statements the same way — suppressed findings are counted and
+shown with the statement's own justification and author as the reason, and a statement
+with no stated reason is skipped with a warning rather than honoured. `affected` and
+`under_investigation` statements never suppress anything.
+
+```sh
+assay scan my-image.tar --vex vendor.openvex.json --fail-on high
+```
 
 ## Why not just `--output json | jq`
 

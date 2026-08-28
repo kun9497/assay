@@ -3999,6 +3999,39 @@ Independent review: 8/8 mutations red (packages discarded, berry-as-v1, name-fro
 v5 suffix uncut, git-as-registry, local-counted, later-documents-dropped, dedupe-by-name),
 each caught by a caller-level or table test.
 
+### D104 — OpenVEX input: a producer's exoneration, applied with assay's discipline
+
+**Decision.** A repeatable `--vex <path>` reads OpenVEX documents — both v0.2.0 and the
+legacy v0.0.1 shape (string vulnerability, `[]string` products), because vexctl's own
+testdata still carries the latter; an unknown `@context` is exit 2, an unreadable waiver
+file being "cannot be trusted", never "nothing waived" (D11) — and suppresses the findings
+they exonerate through D102's pipeline: `Result.Suppressed`, counted and shown in every
+renderer, never tripping `--fail-on`. `Suppressed` gained a `Source` field
+("ignore-file" | "vex") so provenance is a per-suppression fact — the table names each
+line's source and the JSON document carries it (schemaVersion 10); the table's block
+header no longer attributes every waiver to `.assay.yaml`. Ignore rules apply first;
+a finding they waived is not re-evaluated. Only `not_affected` and `fixed` suppress —
+`affected`/`under_investigation` report normally, with no annotate path.
+
+**Where assay deliberately diverges from the reference implementations, each verified
+against their source.** go-vex short-circuits an empty subcomponent query to a MATCH — a
+statement that narrowed itself to one library would suppress a whole image; assay treats
+nothing-to-offer as no match. grype resolves conflicting statements by taking the
+EARLIEST; the spec's de-facto rule (go-vex's own EffectiveStatement) is latest-wins, and
+assay takes the latest — a vendor's most recent judgment — with equal timestamps broken
+toward document order. grype suppresses a `not_affected` that carries neither
+justification nor impact_statement; assay skips that statement with a warning, D102's
+reasonless-waiver discipline applied per-statement while the rest of the document still
+stands. Vulnerability identity is matched case-insensitively across name, `@id` and every
+alias against the finding's whole identifier set — Chainguard's real feed names a CGA id
+with the CVE only in aliases, so name-only matching (grype passes one ID) misses it.
+Product matching is package-purl-as-product with go-vex's pattern rules (version-less
+document purl matches every version — the reason string discloses that — qualifiers as a
+one-directional subset, subpath ignored); a non-purl `@id` matches only by exact string;
+an unparseable document purl warns and never becomes a wildcard. Independent review: 8/8
+mutations red — the eighth (blanking `Source`) survived until a caller-level anchor on
+the table's per-line source label was added, the round doing exactly what it exists for.
+
 ---
 
 ## 3. Architecture

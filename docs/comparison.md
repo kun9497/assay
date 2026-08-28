@@ -57,7 +57,7 @@ measurement weekly is D93.
 | CPE/NVD fallback matcher | none (deliberate) | yes | vendor-advisory-centric | Classified in the differential as grype's main false-positive class |
 | FIPS/Ksplice/ESM lineages | reported not evaluated | judged against mainline data | no distinction | No verdict without the right data (D53, D79) — the Oracle differential confirmed this refusal is the correct side |
 | Ignore rules | reason mandatory + expiry warns (D102) | yes | `.trivyignore` — a bare CVE list, no reason | Only assay refuses an unexplained waiver at load and shows every suppression in every output |
-| VEX document input | deferred (trigger recorded) | yes | four methods (repo, file, OCI attestation, SBOM ref) | trivy leads here — assay has only the plumbing (D102) |
+| VEX document input | OpenVEX files, `--vex` (D104) | yes | four methods (repo, file, OCI attestation, SBOM ref) | all three read OpenVEX files; trivy adds repo/attestation delivery. assay skips a reasonless `not_affected` with a warning where grype honours it silently, and resolves conflicting statements latest-first where grype takes the earliest |
 | Multiple sources' ratings | all kept, gate takes the highest (D25) | single display | one source chosen by precedence | 8,893 of 19,715 CVE groups carry more than one record — assay shows the disagreement itself |
 | Exit-code contract | `2 > 1 > 0` fixed (D11) | similar but not a stated contract | user-assigned via `--exit-code` | assay's "untrustworthy (2)" always outranks "findings (1)" — CI cannot confuse broken with clean |
 | Flag names | same as grype where semantics match (D18) | — | its own scheme | For migration and scriptable differentials; silent divergence forbidden |

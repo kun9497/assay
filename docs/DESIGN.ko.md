@@ -646,6 +646,11 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       vulnerability/package/ecosystem에 매칭하며 reason은 필수, expiry는 선택;
       waive된 finding은 세어지고, 보여지고, SARIF에서 suppressed로 표시됨,
       결코 조용히 사라지지 않음
+- [x] OpenVEX 입력 (D104) — 반복 가능한 `--vex <path>`가 생산자의
+      not_affected/fixed statement를 같은 억제 파이프라인을 거쳐 적용함(Source로
+      라벨링, 스키마 10); 이유 없는 not_affected는 경고와 함께 건너뛰고, 최신
+      statement가 우선하며, go-vex의 이미지 전체 subcomponent 단락 처리는
+      의도적으로 베끼지 않음
 - [x] `requirements.txt` (D38) — 정확히 한 버전을 지목하는 줄만 패키지가 되고, 나머지는 세고
       이름을 밝힙니다. `*`를 `0`으로 바꾸고 `>=`의 최댓값을 취하는 syft가 아니라 pip-audit를
       따릅니다. 실측: 일곱 줄짜리 파일에서 없던 finding 23건

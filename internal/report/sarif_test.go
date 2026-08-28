@@ -476,6 +476,33 @@ func TestSARIF_SuppressedFindingCarriesASuppression(t *testing.T) {
 	}
 }
 
+// TestSARIF_VEXSuppressedFindingCarriesASuppressionToo is D104's own check
+// on the SARIF side: a finding an OpenVEX document exonerated (Source ==
+// "vex", rather than D102's "ignore-file") must flow through identically —
+// SARIF has no field for Source at all, so the two waiver mechanisms are
+// indistinguishable here on purpose, and this is what proves that rather
+// than assuming it from TestSARIF_SuppressedFindingCarriesASuppression's own
+// ignore-file-shaped fixture.
+func TestSARIF_VEXSuppressedFindingCarriesASuppressionToo(t *testing.T) {
+	f := findingFixture("CVE-2024-9999", "curl", severity.High, 7.5, "1.0.1", "")
+	res := matcher.Result{Suppressed: []matcher.Suppressed{
+		{Finding: f, Reason: "VEX: fixed — Example Author (statement 2026-01-01T00:00:00Z)", Source: "vex"},
+	}}
+	run := run0(t, sarifOf(t, res, cyclonedx.Stats{Components: 1, Cataloged: 1}))
+	results := resultsOf(t, run)
+	if len(results) != 1 {
+		t.Fatalf("results = %d, want 1 (the VEX-suppressed finding is still emitted)", len(results))
+	}
+	sup, ok := results[0]["suppressions"].([]any)
+	if !ok || len(sup) != 1 {
+		t.Fatalf("result has no suppressions array; a VEX-exonerated finding must be marked suppressed, not dropped: %+v", results[0])
+	}
+	s := sup[0].(map[string]any)
+	if s["kind"] != "external" || s["justification"] != "VEX: fixed — Example Author (statement 2026-01-01T00:00:00Z)" {
+		t.Errorf("suppression = %+v, want kind external and the VEX statement's own reason as justification", s)
+	}
+}
+
 // TestSARIF_ActiveFindingHasNoSuppressions is the inverse: an ordinary
 // finding must NOT carry a suppressions key, or GitHub would dismiss a real
 // alert. Collapsing the two would be the exact "silently waived" failure.

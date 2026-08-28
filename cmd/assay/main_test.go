@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -117,7 +119,11 @@ func TestParseScanArgs(t *testing.T) {
 		if target != "alpine:3.19" {
 			t.Errorf("target = %q, want %q", target, "alpine:3.19")
 		}
-		if opts != (scancmd.Options{}) {
+		// D104's VEXFiles []string makes Options non-comparable with `==`
+		// (it was, until this field), so the zero-value check moves to
+		// reflect.DeepEqual — behaviourally identical for every field this
+		// struct had before.
+		if !reflect.DeepEqual(opts, scancmd.Options{}) {
 			t.Errorf("opts = %+v, want the zero value", opts)
 		}
 	})
@@ -1024,8 +1030,8 @@ func TestRun_ScanOutputJSONReachesRealExitCode(t *testing.T) {
 	// cannot notice that the shape changed under it. Bumping this is meant to
 	// be the deliberate act that accompanies a schema change (D33 was the
 	// third).
-	if doc.SchemaVersion != 9 {
-		t.Errorf("SchemaVersion = %d, want 9", doc.SchemaVersion)
+	if doc.SchemaVersion != 10 {
+		t.Errorf("SchemaVersion = %d, want 10", doc.SchemaVersion)
 	}
 	// buildRunSeamFixture's critical, unrated and no-fix findings; somecrate
 	// is dropped by the cataloger and never reaches a Finding at all.
@@ -3340,5 +3346,41 @@ func TestParseScanArgs_Config(t *testing.T) {
 	// The bare flag with no value is an error, like the other value flags.
 	if _, _, err := parseScanArgs([]string{"alpine:3.19", "--config"}); err == nil {
 		t.Error("--config with no value should error")
+	}
+}
+
+// TestParseScanArgs_VEX holds D104's CLI contract: --vex (both forms) sets
+// opts.VEXFiles, it is REPEATABLE — each occurrence appends rather than
+// overwriting — and a bare --vex with no value is an error like every other
+// value flag. Deleting the flag switch's --vex case, or turning the append
+// into an assignment, leaves this red.
+func TestParseScanArgs_VEX(t *testing.T) {
+	for _, args := range [][]string{
+		{"alpine:3.19", "--vex", "a.json"},
+		{"alpine:3.19", "--vex=a.json"},
+	} {
+		_, opts, err := parseScanArgs(args)
+		if err != nil {
+			t.Fatalf("parseScanArgs(%v): %v", args, err)
+		}
+		if want := []string{"a.json"}; !slices.Equal(opts.VEXFiles, want) {
+			t.Errorf("parseScanArgs(%v): VEXFiles = %v, want %v", args, opts.VEXFiles, want)
+		}
+	}
+
+	// Repeatable: two occurrences accumulate into one slice, in the order
+	// given -- applyVEX's own doc comment relies on this order to decide
+	// which document gets first refusal at a finding.
+	_, opts, err := parseScanArgs([]string{"alpine:3.19", "--vex", "a.json", "--vex=b.json"})
+	if err != nil {
+		t.Fatalf("parseScanArgs: %v", err)
+	}
+	if want := []string{"a.json", "b.json"}; !slices.Equal(opts.VEXFiles, want) {
+		t.Errorf("VEXFiles = %v, want %v (both occurrences, in order)", opts.VEXFiles, want)
+	}
+
+	// The bare flag with no value is an error, like every other value flag.
+	if _, _, err := parseScanArgs([]string{"alpine:3.19", "--vex"}); err == nil {
+		t.Error("--vex with no value should error")
 	}
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/kun9497/assay/internal/severity"
 	"github.com/kun9497/assay/internal/source"
 	"github.com/kun9497/assay/internal/store"
+	"github.com/kun9497/assay/internal/vex"
 )
 
 // Options are the --fail-on* gates that turn a completed, trustworthy scan's
@@ -172,6 +173,15 @@ type Options struct {
 	// a mistake the caller wants told about, not one that silently waives
 	// nothing.
 	IgnoreFile string
+	// VEXFiles is every path passed via --vex (D104), repeatable and applied
+	// in the order given — grype's own flag name (D18), so migrating a
+	// pipeline that already gates on grype's VEX support costs nothing but
+	// the binary. Each document's not_affected/fixed statements suppress the
+	// findings they exonerate, moving them into res.Suppressed exactly like
+	// an ignore rule does; a document that cannot be read or parsed fails
+	// the scan (exit 2) on IgnoreFile's own reasoning above — an unreadable
+	// waiver is untrustworthy input, not "nothing waived".
+	VEXFiles []string
 }
 
 // The two files an image cataloger reads, named as they appear as tar entries
@@ -589,6 +599,15 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		return code
 	}
 
+	// D104. Runs AFTER applyIgnoreRules, deliberately: a finding
+	// .assay.yaml already waived is gone from res.Findings by this point, so
+	// no VEX document re-evaluates it — one suppression, one reason, and
+	// whichever mechanism ran first wins, rather than a finding silently
+	// carrying two waivers or the second one overwriting the first's reason.
+	if code := applyVEX(&res, opts.VEXFiles, stderr); code != 0 {
+		return code
+	}
+
 	// D87. Computed unconditionally — not only when --fail-on-eol is set —
 	// because the table/JSON/SARIF renderers surface the fact regardless of
 	// the gate (the same shape KEV membership already is: the table marks
@@ -795,6 +814,38 @@ func applyIgnoreRules(res *matcher.Result, ignoreFile string, stderr io.Writer) 
 	res.Suppressed = suppressed
 	if len(suppressed) > 0 {
 		fmt.Fprintf(stderr, "%d finding(s) suppressed by %s\n", len(suppressed), path)
+	}
+	return 0
+}
+
+// applyVEX loads every --vex document in order and moves the findings each
+// one exonerates from res.Findings into res.Suppressed, the same shape
+// applyIgnoreRules already established. It is a no-op when no --vex was
+// given — VEXFiles is nil and the loop below never runs, so a scan with no
+// VEX input behaves exactly as before D104. A document that cannot be read
+// or parsed fails the scan at exit 2 with its path named in the error, on
+// the identical "an unreadable waiver is untrustworthy input" reasoning
+// applyIgnoreRules already applies to a malformed .assay.yaml (D11).
+//
+// Each document is applied against whatever res.Findings still holds after
+// the documents processed before it — so a later --vex path can only
+// suppress what an earlier one left behind, never re-suppress what it
+// already waived, matching applyIgnoreRules' own "ignore rules run first"
+// ordering one level down.
+func applyVEX(res *matcher.Result, paths []string, stderr io.Writer) int {
+	warn := func(msg string) { fmt.Fprintf(stderr, "warning: %s\n", msg) }
+	for _, path := range paths {
+		doc, err := vex.Load(path)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 2
+		}
+		kept, suppressed := doc.Apply(res.Findings, warn)
+		res.Findings = kept
+		res.Suppressed = append(res.Suppressed, suppressed...)
+		if len(suppressed) > 0 {
+			fmt.Fprintf(stderr, "%d finding(s) suppressed by VEX (%s)\n", len(suppressed), path)
+		}
 	}
 	return 0
 }

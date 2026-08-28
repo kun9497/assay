@@ -114,6 +114,15 @@ Scan flags (any order, before or after the target):
                         matching finding with a stated reason; waived findings
                         are shown as suppressed and counted apart, never hidden,
                         and never trip --fail-on.
+  --vex <path>          An OpenVEX document (v0.2.0 or legacy v0.0.1) whose
+                        not_affected/fixed statements suppress the findings
+                        they exonerate, the same shown-and-counted way
+                        --config's ignore rules do. Repeatable; applies in
+                        the order given, after --config's rules. A statement
+                        with no stated justification/impact is skipped with
+                        a warning rather than suppressing, and a document
+                        that cannot be read or parsed fails the scan
+                        (exit 2) rather than silently waiving nothing.
   --explain <id>        Print one advisory's full Evidence (its own ID, or
                         any alias/upstream identifier) instead of the report
 
@@ -1201,6 +1210,19 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 
 		case strings.HasPrefix(a, "--config="):
 			opts.IgnoreFile = strings.TrimPrefix(a, "--config=")
+
+		// D104. Repeatable — grype's own flag name and shape (D18) — so
+		// --vex a.json --vex b.json applies both documents, in the order
+		// given, one after another (applyVEX's own doc comment).
+		case a == "--vex":
+			i++
+			if i >= len(args) {
+				return "", scancmd.Options{}, fmt.Errorf("--vex requires a value")
+			}
+			opts.VEXFiles = append(opts.VEXFiles, args[i])
+
+		case strings.HasPrefix(a, "--vex="):
+			opts.VEXFiles = append(opts.VEXFiles, strings.TrimPrefix(a, "--vex="))
 
 		case a == "--explain":
 			i++

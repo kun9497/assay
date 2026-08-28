@@ -1365,17 +1365,20 @@ backport hazard that is the reason.
 
 ---
 
-### ~~VEX and ignore rules~~ — the ignore half resolved in D102
+### ~~VEX and ignore rules~~ — resolved across D102 and D104
 
 Suppressing known-irrelevant findings. The ignore-rules half shipped in D102: a `.assay.yaml`
 of waivers, applied as the recorded filter between `Matcher` and `Reporter` (a scancmd step
 after Match, so the matcher stays pure), with the project's own discipline layered on —
 every waiver states a reason, may expire, and is counted and shown rather than silently
-dropped. What is STILL deferred is the OpenVEX document-input half: reading a
-producer-signed VEX (OpenVEX/CSAF/CycloneDX VEX) and applying its not-affected statements
-automatically. Deferred on scope, not architecture — the same Match→Reporter filter and the
-same suppressed-finding plumbing D102 built would carry it. **Revisit when** a user has a
-VEX document to apply, or an image ships one alongside itself.
+dropped. The OpenVEX document-input half shipped in D104 (2026-08-28): a repeatable
+`--vex <path>` applies a producer's `not_affected`/`fixed` statements through the same
+suppressed-finding plumbing, exactly as this entry predicted ("deferred on scope, not
+architecture"). CSAF VEX and CycloneDX VEX as *input documents* remain unbuilt — assay
+already consumes Red Hat's and SUSE's CSAF VEX as *database providers*, which covers the
+main real-world source of them; revisit if a user has a standalone CSAF/CycloneDX VEX
+document to apply to a scan, at which point D104's statement model is the target to
+normalize into.
 
 ---
 
