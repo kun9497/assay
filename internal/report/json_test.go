@@ -266,7 +266,7 @@ func TestJSON_Deterministic(t *testing.T) {
 func TestJSON_CountsMatchTable(t *testing.T) {
 	res, cat := goldenFixture()
 	var tableBuf, jsonBuf bytes.Buffer
-	tableSum, err := Table(&tableBuf, res, cat, EOLStatus{})
+	tableSum, err := Table(&tableBuf, res, cat, EOLStatus{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

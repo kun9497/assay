@@ -644,6 +644,9 @@ exited 0 while 24 findings went unmentioned.
       today, against the published artifact, judged by committed floors (the tool now
       lives at `cmd/scandiff`, D105; stdlib-only); reading the ratings column revived two
       dead agreements (alma 0→106, oracle 0→37)
+- [x] Severity colors (D107) — the table colors severity by band when stdout is a real
+      terminal (NO_COLOR honoured; Windows VT enabled via x/sys or colors stay off);
+      pipes stay byte-identical, colored post-tabwriter-Flush so alignment survives
 - [x] Azure Linux off the dead feed (D106) — a dedicated provider parses Microsoft's
       daily OVAL (the D74 shape) after the audit traced 140 missing findings to
       Microsoft's stalled OSV export being served frozen by OSV.dev; all 140 recovered,

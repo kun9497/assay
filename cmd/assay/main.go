@@ -351,6 +351,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprint(stderr, usage)
 			return exitError
 		}
+		// D107. Decided here, not in parseScanArgs: this is the one place in
+		// the CLI that has stdout as the real io.Writer Run will render into,
+		// which is what stdoutIsTerminal's own type assertion needs to see
+		// whether it is actually os.Stdout (a real terminal) or a test's
+		// bytes.Buffer (never colorable). parseScanArgs stays pure argument
+		// parsing with no I/O of its own, on the same seam separation
+		// resolveUpdateRef/resolveBuildSeed's own doc comments describe for
+		// db update/build — a bug in this decision must be provable without
+		// a real terminal or a real network call.
+		opts.Colorize = wantColor(stdoutIsTerminalFunc(stdout), os.Getenv("NO_COLOR"))
 		return scan(context.Background(), target, opts, stdout, stderr)
 
 	case "db":

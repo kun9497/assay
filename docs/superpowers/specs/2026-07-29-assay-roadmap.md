@@ -4097,6 +4097,31 @@ resolves at scan time, 0 absent. Independent review: 5/5 mutations red (bound-ki
 confusion, retraction kept, CVE moved off Aliases, NotFixed unstamped, provider
 defaulted off).
 
+### D107 — severity colors: the demo's look becomes the product's truth
+
+**Decision.** The table renderer colors severity by band (critical bold red, high red,
+medium yellow, low/unknown dim), bolds a non-zero finding count, and dims the
+suppressed/not-evaluated headers — prompted by a user running the real binary next to
+the README demo and seeing an all-white table. Colors are strictly gated at the CLI
+layer, which owns the real stdout: on only when stdout is a character device AND
+`NO_COLOR` is unset/empty (the no-color.org convention — presence disables, "0" is not
+special-cased) AND, on Windows, virtual-terminal processing could actually be enabled
+(`golang.org/x/sys` promoted from indirect to direct — the fifth dependency, the same
+already-in-the-graph promotion as compress and yaml.v3; if SetConsoleMode fails, colors
+stay off, never garbage in cmd.exe). Piped and redirected output is byte-identical to
+before — the stream discipline holds, and the default-off renderer parameter means
+every pre-existing test passes unchanged, which is the proof.
+
+**The implementation detail that matters:** coloring happens AFTER tabwriter's Flush,
+on the already-padded text. tabwriter counts bytes to decide column widths, so an
+escape sequence injected before Flush inflates its cell by invisible bytes and
+misaligns every column after it, differently per row by band. Post-flush, each row's
+bytes land inside a line whose tab stops are already fixed. Independent review: 5/5
+mutations red — the third first appeared to survive twice, once as a compile error
+counted as zero failures and once behind Go's test cache, both re-run properly
+(CLAUDE.md's check-your-mutation-mutates trap, again), landing at 9 red tests including
+the caller-level scancmd anchor.
+
 ---
 
 ## 3. Architecture
