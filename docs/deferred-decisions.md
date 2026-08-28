@@ -126,10 +126,12 @@ took. Before deferring on a constraint, measure the constraint.
 
 **Institutionalized in D93 (2026-08-26)**: the same 13 targets, digest-pinned, run weekly
 in CI against the published artifact and are judged by committed floors
-(`.github/grype-diff-targets.json`) — see the roadmap entry for why floors, not snapshots.
+(`.github/grype-diff-targets.json` then; D105 renamed it `scanner-diff-targets.json` and
+grew it to 23 targets) — see the roadmap entry for why floors, not snapshots.
 Seeding D93 also found that ALSA/ELSA findings spell their CVE **only** through the
 NVD/EPSS annotations' `advisoryId` in the JSON document (the OSV `related` field D71 reads
-is not exposed by `AdvisoryRecord`); `grypediff` reads the ratings column for that reason.
+is not exposed by `AdvisoryRecord`); `grypediff` (now `cmd/scandiff`, D105) reads the
+ratings column for that reason.
 Exposing `related` in the JSON document itself is deferred until a consumer that cannot use
 the ratings column appears — the annotations ride on every published-artifact scan, so
 today the CVE is always in the document somewhere.

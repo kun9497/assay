@@ -21,7 +21,6 @@ on:
 permissions:
   contents: read
   security-events: write # upload the SARIF to code scanning
-  packages: read # assay db update pulls the published database (see note below)
 
 jobs:
   scan:
@@ -34,14 +33,10 @@ jobs:
           curl -sSfL https://raw.githubusercontent.com/kun9497/assay/main/install.sh | sh -s -- -b /usr/local/bin
           assay --version
 
-      # assay db update pulls the published OCI database from
-      # ghcr.io/kun9497/assay-db. That artifact needs read access, which this
-      # login grants for a repo in the same org (packages: read, above). If
-      # you cannot reach it, run `assay db build` instead — slower, but it
-      # needs no external artifact.
-      - name: Log in to ghcr.io
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-
+      # Pulls the published OCI database from ghcr.io/kun9497/assay-db — a
+      # public artifact, no login or packages permission needed. If your
+      # network cannot reach ghcr.io, run `assay db build` instead — slower,
+      # but it needs no external artifact.
       - name: Update the vulnerability database
         run: assay db update
 

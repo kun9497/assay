@@ -640,10 +640,10 @@ exited 0 while 24 findings went unmentioned.
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15
-- [x] The differential runs itself (D93) — weekly, 13 digest-pinned targets against the
-      published artifact, judged by committed floors (the tool now lives at `cmd/scandiff`,
-      D105; stdlib-only); reading the ratings column revived two dead agreements
-      (alma 0→106, oracle 0→37)
+- [x] The differential runs itself (D93) — weekly, 13 digest-pinned targets then, 23
+      today, against the published artifact, judged by committed floors (the tool now
+      lives at `cmd/scandiff`, D105; stdlib-only); reading the ratings column revived two
+      dead agreements (alma 0→106, oracle 0→37)
 - [x] Azure Linux off the dead feed (D106) — a dedicated provider parses Microsoft's
       daily OVAL (the D74 shape) after the audit traced 140 missing findings to
       Microsoft's stalled OSV export being served frozen by OSV.dev; all 140 recovered,

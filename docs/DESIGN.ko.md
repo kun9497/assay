@@ -613,9 +613,10 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨
-- [x] 차등이 스스로 돎 (D93) — 매주, digest로 고정된 타깃 13개를 발행된 아티팩트에
-      대고, 커밋된 floor로 판정(도구는 이제 `cmd/scandiff`에 있음, D105; stdlib만
-      사용); ratings 컬럼을 읽어서 죽어 있던 동의 둘을 되살림(alma 0→106, oracle 0→37)
+- [x] 차등이 스스로 돎 (D93) — 매주, digest로 고정된 타깃을 당시 13개, 지금은 23개를
+      발행된 아티팩트에 대고, 커밋된 floor로 판정(도구는 이제 `cmd/scandiff`에 있음,
+      D105; stdlib만 사용); ratings 컬럼을 읽어서 죽어 있던 동의 둘을
+      되살림(alma 0→106, oracle 0→37)
 - [x] Azure Linux가 죽은 feed를 벗어남 (D106) — 전용 provider가 Microsoft의
       일일 OVAL(D74의 형태)을 파싱함, 감사가 누락 finding 140건을 Microsoft의
       멈춰 버린 OSV export가 OSV.dev에 의해 얼어붙은 채로 서빙되던 것으로
