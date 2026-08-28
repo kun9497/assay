@@ -125,5 +125,16 @@ chmod +x "${BINDIR}/assay"
 echo "assay: installed ${VERSION} to ${BINDIR}/assay" >&2
 case ":$PATH:" in
 *":${BINDIR}:"*) ;;
-*) echo "assay: add ${BINDIR} to your PATH, or move ${BINDIR}/assay somewhere on it" >&2 ;;
+*)
+	# Not on PATH: hand the user a copy-pasteable next step instead of a
+	# description of one -- "assay: command not found" right after a
+	# successful install is this script's most likely support question.
+	case "$BINDIR" in
+	/*) absdir="$BINDIR" ;;
+	*) absdir="$(pwd)/${BINDIR#./}" ;;
+	esac
+	echo "assay: ${BINDIR} is not on your PATH. Either:" >&2
+	echo "assay:   sudo install ${absdir}/assay /usr/local/bin/" >&2
+	echo "assay:   # or: export PATH=\"${absdir}:\$PATH\"" >&2
+	;;
 esac

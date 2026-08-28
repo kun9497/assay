@@ -22,12 +22,12 @@
 ## 설치
 
 ```bash
-# 사전 빌드 바이너리 (Linux/macOS, amd64/arm64) — ./bin 에 설치
-curl -sSfL https://raw.githubusercontent.com/kun9497/assay/main/install.sh | sh
+# 사전 빌드 바이너리 (Linux/macOS, amd64/arm64) — PATH 위로 바로 설치
+curl -sSfL https://raw.githubusercontent.com/kun9497/assay/main/install.sh | sudo sh -s -- -b /usr/local/bin
 ```
 
-스크립트가 OS/arch에 맞는 릴리스 에셋을 골라 체크섬까지 검증합니다. 설치 위치는
-`sh -s -- -b /usr/local/bin`, 버전 고정은 `-s -- vX.Y.Z`로 바꿉니다.
+스크립트가 OS/arch에 맞는 릴리스 에셋을 골라 체크섬까지 검증합니다. `-b` 없이 실행하면
+`./bin`에 설치되며(sudo 불필요 — PATH 등록은 직접), 버전 고정은 `-s -- vX.Y.Z`입니다.
 
 <details>
 <summary>다른 설치 방법</summary>

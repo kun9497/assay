@@ -22,12 +22,13 @@ advisory data is the reason it exists rather than reusing grype.
 ## Install
 
 ```bash
-# Prebuilt binary (Linux/macOS, amd64/arm64) — installs to ./bin
-curl -sSfL https://raw.githubusercontent.com/kun9497/assay/main/install.sh | sh
+# Prebuilt binary (Linux/macOS, amd64/arm64) — onto your PATH
+curl -sSfL https://raw.githubusercontent.com/kun9497/assay/main/install.sh | sudo sh -s -- -b /usr/local/bin
 ```
 
 The script picks the right release asset for your OS/arch and verifies its checksum.
-Point it elsewhere with `sh -s -- -b /usr/local/bin`, or pin a version with `-s -- vX.Y.Z`.
+Without `-b` it installs to `./bin` (no sudo needed — add it to your PATH yourself);
+pin a version with `-s -- vX.Y.Z`.
 
 <details>
 <summary>Other ways to install</summary>
