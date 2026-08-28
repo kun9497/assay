@@ -47,7 +47,7 @@ D105에서 주간 차등에 합류했으며(23개 타깃 중 16개, 우선 infor
 | Fedora | 16/16 (어드바이저리 수준) | 한쪽에만 있는 CVE 튜플은 100% 공유 어드바이저리 안에 있음; bare-advisory bridge(2026-08-28)가 그중 11건을 회수 (일치 49→60) | 양방향, 제한적 |
 | openSUSE Leap | — | grype v6에는 Leap 데이터 자체가 없음 (재검증: 매칭 0건) | assay 단독 |
 | SLES (bci-base) | fixable 한정 180/0/65 | D91의 병합이 제 역할을 함(assay의 오해 소지 있는 no-fix 행이 fixable 시야에서 사라짐); 데이터 모델 차이로 104/63 divergence는 남음 — assay는 grype가 표현할 수 없는 no-fix 항목을 표현하고, grype는 go-module 매칭 33건을 담음 | 데이터 모델 차이 |
-| Azure Linux 3.0 | 106건 일치, grype-only 140건 | grype와 trivy 둘 다 assay에 없는 튜플 140건을 보고함(135건이 2026년 CVE이고 전부 실제 .azl3 fix 보유) — 이번 감사에서 나온 유일한 assay 위양성(false-negative) 후보 부류, 조사 중 (deferred-decisions 참조) | **assay 열세** |
+| Azure Linux 3.0 | 106건 일치, grype-only 140건 (D106 이전) | 감사가 근본 원인을 같은 날 추적함: Microsoft의 OSV export bot이 2026-03-10에 멈췄고 OSV.dev는 그 얼어붙은 스냅샷을 그대로 서빙해왔음 — D106은 이 계열을 Microsoft의 일일 OVAL로 옮겨, 140건 전부를 회복함(라이브로 검증됨; 다음 아티팩트 빌드에 반영). 두 upstream 모두 통보함 | **D106에서 해소** |
 | RHEL (ubi8-nodejs) | 1090건 일치, assay-only 4531건 | assay 추가분의 98%는 `kernel-headers`로, Red Hat의 CSAF product tree가 커널 CVE에 대해 이 패키지를 명시하지만 grype는 해당 패키지를 전혀 내지 않고 trivy는 assay 튜플 중 4,078건을 확인함 — grype가 예외 쪽 | assay 우세 |
 
 요지: 차이의 대부분은 매처 버그가 아니라 **데이터 소스의 차이**였고, 이 작업이 찾아낸

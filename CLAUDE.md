@@ -15,12 +15,14 @@ database from OSV (Go, npm, PyPI, crates.io, Maven, RubyGems, NuGet, Packagist, 
 Debian, Ubuntu, Rocky, Alma) with NVD ratings (D27, opt-in via `NVD_ENABLE`, windowed on
 both ends since D65) and KISA's Korean prose as enrichment (⑤, on by default since D37,
 local only because `db push` strips it, D29); `assay db update` pulls the published OCI
-artifact (D28) rather than rebuilding. Five more providers are on by default and carried by
+artifact (D28) rather than rebuilding. More providers are on by default and carried by
 the artifact: Red Hat CSAF VEX (D47–D52 — fix states with reasons, `--fail-on-unfixable`
 and `=wont-fix`), Amazon ALAS core plus AL2 extras (D73, D78), Oracle ELSA OVAL (D74,
 Ksplice/FIPS lineage-filtered since D79), Fedora Bodhi (D75), Photon's flat-JSON CVE metadata (D96), Arch's AVG tracker (D97, with
-its own pacman comparer and cataloger) and SUSE CSAF VEX (D77, whose
-no-fix entries are 99.96% reason-unstated — the inverse of Red Hat). `assay scan` reads
+its own pacman comparer and cataloger), SUSE CSAF VEX (D77, whose
+no-fix entries are 99.96% reason-unstated — the inverse of Red Hat), and Azure
+Linux/CBL-Mariner OVAL (D106 — moved off OSV.dev after its imported snapshot proved
+frozen since 2026-03; the 2026-08-28 audit's 140 missing findings all recovered). `assay scan` reads
 SBOMs, container images (distroless via `status.d`, D54), Go binaries and directories
 (ten lockfile formats — pnpm and yarn berry read since D103 — plus jars; D61–D63,
 D68–D70), and returns a

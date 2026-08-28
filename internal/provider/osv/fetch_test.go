@@ -226,18 +226,18 @@ func TestFetch_AlpineZeroRecordsIsAnError(t *testing.T) {
 
 // The same hard-fail as Alpine's above (TestFetch_AlpineZeroRecordsIsAnError),
 // extended to Debian, Ubuntu, Rocky Linux (D71), AlmaLinux (D72), Chainguard
-// (D88), MinimOS and Echo (D92), and now Azure Linux (D94): an archive
-// fetched under any family name that names no matching record is the exact
-// regression the guard's own comment records happening to Debian when it
-// first joined this list, and only the Alpine arm was ever held by a test.
-// Narrowing the guard's condition to "eco == Alpine" alone leaves the whole
-// suite green, because nothing else in this file, or anywhere in the
-// package, drives a Debian, Ubuntu, Rocky Linux, AlmaLinux, Chainguard,
-// MinimOS, Echo or Azure Linux fetch through zero matching records. This is
-// what makes the Azure Linux row caller-first for fetch.go's guard condition
-// specifically: deleting "Azure Linux" from the "eco == ..." chain in
-// fetch.go turns its own row red here, while every pre-existing row (Debian,
-// Ubuntu, ...) stays green.
+// (D88), and MinimOS and Echo (D92): an archive fetched under any family name
+// that names no matching record is the exact regression the guard's own
+// comment records happening to Debian when it first joined this list, and
+// only the Alpine arm was ever held by a test. Narrowing the guard's
+// condition to "eco == Alpine" alone leaves the whole suite green, because
+// nothing else in this file, or anywhere in the package, drives a Debian,
+// Ubuntu, Rocky Linux, AlmaLinux, Chainguard, MinimOS or Echo fetch through
+// zero matching records. "Azure Linux" was a row here through D94; D106
+// removed it from this package's own Ecosystems list entirely (see fetch.go's
+// own comment), so it is no longer a shape this package's Fetch can be driven
+// through at all, and internal/provider/azurelinux carries its own version of
+// this exact guard on its own two files instead.
 //
 // "Wolfi" and "BellSoft Hardened Containers" are deliberately NOT rows
 // here: nothing in this package's default Ecosystems ever fetches under
@@ -246,8 +246,8 @@ func TestFetch_AlpineZeroRecordsIsAnError(t *testing.T) {
 // own condition in fetch.go, for any caller that constructs a Provider
 // directly with one, but there is no end-to-end path through this test to
 // drive them.
-func TestFetch_DebianUbuntuRockyAlmaChainguardMinimOSEchoAzureLinuxAndAlpaquitaZeroRecordsIsAnError(t *testing.T) {
-	for _, eco := range []string{"Debian", "Ubuntu", "Rocky Linux", "AlmaLinux", "Chainguard", "MinimOS", "Echo", "Azure Linux", "Alpaquita"} {
+func TestFetch_DebianUbuntuRockyAlmaChainguardMinimOSEchoAndAlpaquitaZeroRecordsIsAnError(t *testing.T) {
+	for _, eco := range []string{"Debian", "Ubuntu", "Rocky Linux", "AlmaLinux", "Chainguard", "MinimOS", "Echo", "Alpaquita"} {
 		t.Run(eco, func(t *testing.T) {
 			body := zipWith(t, map[string]string{
 				// Well-formed, but names an ecosystem this archive would never
@@ -807,133 +807,19 @@ func TestFetch_ChainguardCoversWolfiToo(t *testing.T) {
 	}
 }
 
-// TestEcosystems_ContainsAzureLinux is D94's presence guard, on the same
-// pattern TestEcosystems_ContainsMinimOSAndEcho holds for D92: "Azure Linux"
-// has a genuine release axis (unlike MinimOS/Echo), so unlike Wolfi's
-// deliberate absence there is no "one feed, two keys" reason to leave it out
-// -- it must be a plain entry in the default fetch list.
-func TestEcosystems_ContainsAzureLinux(t *testing.T) {
-	if !slices.Contains(Ecosystems, "Azure Linux") {
-		t.Error(`Ecosystems does not contain "Azure Linux"`)
-	}
-}
-
-// TestFetch_AzureLinuxPathIsURLEncoded mirrors
-// TestFetch_RockyLinuxPathIsURLEncoded exactly: "Azure Linux" has a space in
-// its archive family name too, and an unescaped one is a different URL than
-// the one GCS actually serves the archive under.
-func TestFetch_AzureLinuxPathIsURLEncoded(t *testing.T) {
-	body := zipWith(t, map[string]string{
-		"AZL-2026-0001.json": `{"id":"AZL-2026-0001","affected":[{"package":{"name":"x","ecosystem":"Azure Linux:3"},
-			"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"}]}]}]}`,
-	})
-	var gotPath string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.EscapedPath()
-		w.Write(body)
-	}))
-	defer srv.Close()
-
-	p := New([]string{"Azure Linux"}, srv.URL)
-	if _, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil }); err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
-	if gotPath != "/Azure%20Linux/all.zip" {
-		t.Errorf("request path = %q, want /Azure%%20Linux/all.zip -- the archive "+
-			"name has a space, and an unescaped one is a different URL that GCS "+
-			"does not serve", gotPath)
-	}
-}
-
-// TestFetch_AzureLinux is the end-to-end shape D94 rests on: one AZL record,
-// keyed "Azure Linux:3" the way the real archive is (measured 2026-08-26), a
-// CVE reachable through `upstream` (D3 -- Azure Linux's own linkage, at 100%
-// coverage, unlike AlmaLinux's `related`-only shape) and a real CVSS v3
-// vector (58% of the archive carries one). Fetch must emit it with all three
-// intact and report the release-qualified key as covered (D20), not the bare
-// archive name.
-func TestFetch_AzureLinux(t *testing.T) {
-	body := zipWith(t, map[string]string{
-		"AZL-2026-0001.json": `{"id":"AZL-2026-0001","upstream":["CVE-2026-61001"],
-			"severity":[{"type":"CVSS_V3","score":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}],
-			"affected":[{"package":{"name":"grpc","ecosystem":"Azure Linux:3"},
-				"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1.42.0-7"}]}]}]}`,
-	})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/Azure Linux/all.zip" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Write(body)
-	}))
-	defer srv.Close()
-
-	p := New([]string{"Azure Linux"}, srv.URL)
-	var got []advisory.Advisory
-	prov, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
-		got = append(got, a)
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
-	if len(got) != 1 || got[0].ID != "AZL-2026-0001" {
-		t.Fatalf("Fetch emitted %d advisories (%v), want only AZL-2026-0001", len(got), got)
-	}
-	if len(got[0].Upstream) != 1 || got[0].Upstream[0] != "CVE-2026-61001" {
-		t.Errorf("Upstream = %v, want [CVE-2026-61001] -- D3 reads this field for the CVE join", got[0].Upstream)
-	}
-	if len(got[0].Related) != 0 {
-		t.Errorf("Related = %v, want empty -- Azure Linux carries its CVE in upstream, "+
-			"unlike AlmaLinux, and never needed the related-join", got[0].Related)
-	}
-	if len(got[0].Affected) != 1 || got[0].Affected[0].Ecosystem != "Azure Linux:3" {
-		t.Fatalf("Affected = %v, want one entry keyed Azure Linux:3", got[0].Affected)
-	}
-	if len(got[0].Severity) != 1 || got[0].Severity[0].Type != "CVSS_V3" {
-		t.Errorf("Severity = %v, want the CVSS_V3 vector carried through", got[0].Severity)
-	}
-	if !slices.Contains(prov.Ecosystems, "Azure Linux:3") {
-		t.Errorf("Provenance.Ecosystems = %v, want it to include Azure Linux:3", prov.Ecosystems)
-	}
-}
-
-// TestFetch_AzureLinuxBoundedIntroduced pins the 1.2% of records D94 measured
-// with a real (non-"0") introduced bound -- an ordinary OSV event needing no
-// special handling, but never previously exercised end to end through this
-// package's Fetch/Convert path for Azure Linux specifically. The range must
-// survive conversion with both events intact, which is what a matcher-level
-// test (internal/matcher's own TestMatch_AzureLinuxBoundedIntroduced) then
-// checks actually gets ENFORCED as a bound rather than merely stored.
-func TestFetch_AzureLinuxBoundedIntroduced(t *testing.T) {
-	body := zipWith(t, map[string]string{
-		"AZL-2026-0002.json": `{"id":"AZL-2026-0002","upstream":["CVE-2026-61002"],
-			"affected":[{"package":{"name":"golang","ecosystem":"Azure Linux:3"},
-				"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"1.18.0"},{"fixed":"1.19.0"}]}]}]}`,
-	})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/Azure Linux/all.zip" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Write(body)
-	}))
-	defer srv.Close()
-
-	p := New([]string{"Azure Linux"}, srv.URL)
-	var got []advisory.Advisory
-	if _, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
-		got = append(got, a)
-		return nil
-	}); err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
-	if len(got) != 1 || len(got[0].Affected) != 1 || len(got[0].Affected[0].Ranges) != 1 {
-		t.Fatalf("Fetch emitted %+v, want one record with one range", got)
-	}
-	events := got[0].Affected[0].Ranges[0].Events
-	if len(events) != 2 || events[0].Introduced != "1.18.0" || events[1].Fixed != "1.19.0" {
-		t.Errorf("Events = %+v, want [Introduced:1.18.0 Fixed:1.19.0] carried through unchanged", events)
+// TestEcosystems_DoesNotContainAzureLinux is D106's regression guard, the
+// opposite of what TestEcosystems_ContainsAzureLinux (D94) used to assert
+// here: "Azure Linux" fetched through OSV.dev's own converter, which is
+// measured stalled, so this family moved to Microsoft's own OVAL feeds
+// (internal/provider/azurelinux) and must never be re-added to this
+// package's Ecosystems list -- doing so would fetch the same stale archive
+// this move exists to stop consuming, silently, alongside the live one the
+// other provider already fetches.
+func TestEcosystems_DoesNotContainAzureLinux(t *testing.T) {
+	if slices.Contains(Ecosystems, "Azure Linux") {
+		t.Error(`Ecosystems contains "Azure Linux" -- D106 moved this family to ` +
+			`internal/provider/azurelinux; re-adding it here would re-fetch OSV.dev's ` +
+			`stalled converter output alongside the live feed`)
 	}
 }
 

@@ -616,6 +616,11 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] 차등이 스스로 돎 (D93) — 매주, digest로 고정된 타깃 13개를 발행된 아티팩트에
       대고, 커밋된 floor로 판정(도구는 이제 `cmd/scandiff`에 있음, D105; stdlib만
       사용); ratings 컬럼을 읽어서 죽어 있던 동의 둘을 되살림(alma 0→106, oracle 0→37)
+- [x] Azure Linux가 죽은 feed를 벗어남 (D106) — 전용 provider가 Microsoft의
+      일일 OVAL(D74의 형태)을 파싱함, 감사가 누락 finding 140건을 Microsoft의
+      멈춰 버린 OSV export가 OSV.dev에 의해 얼어붙은 채로 서빙되던 것으로
+      추적한 뒤; 140건 전부 회복, 라이브로 검증됨; 양쪽 upstream 모두 통보함
+      (AzureLinuxVulnerabilityData#4, osv.dev#5935)
 - [x] trivy가 차등에 합류함 (D105) — `cmd/grypediff`가 `cmd/scandiff`로 이름이
       바뀌고, 워크플로는 `scanner-diff.yml`; 23개 타깃 중 16개가 선택적인 `trivy`
       floors 블록을 가짐(나머지 7개는 trivy가 지원하지 않는 distro), 붙여넣기

@@ -26,6 +26,7 @@ import (
 	"github.com/kun9497/assay/internal/provider"
 	"github.com/kun9497/assay/internal/provider/amazon"
 	"github.com/kun9497/assay/internal/provider/arch"
+	"github.com/kun9497/assay/internal/provider/azurelinux"
 	"github.com/kun9497/assay/internal/provider/eol"
 	"github.com/kun9497/assay/internal/provider/epss"
 	"github.com/kun9497/assay/internal/provider/fedora"
@@ -2112,6 +2113,79 @@ func TestDBUpdateProviders_ArchDisabledViaEnv(t *testing.T) {
 	for _, p := range ps {
 		if p.Name() == "Arch Linux Security Tracker" {
 			t.Errorf("dbUpdateProviders() = %+v, want no Arch provider with ARCH_ENABLE=0", ps)
+		}
+	}
+}
+
+// TestDBUpdateProviders_AzureLinuxOnByDefault is D106's caller-first proof,
+// mirroring TestDBUpdateProviders_ArchOnByDefault exactly: dbUpdateProviders
+// must actually construct the Azure Linux OVAL provider when
+// AZURELINUX_ENABLE is unset, not merely have azurelinux.New sitting unused
+// in the import list. Mutating the call site to drop the provider (or its
+// Options) compiles and would leave every other test in this package green.
+func TestDBUpdateProviders_AzureLinuxOnByDefault(t *testing.T) {
+	t.Setenv("AZURELINUX_ENABLE", "")
+	t.Setenv("REDHAT_ENABLE", "0") // isolate: only Azure Linux's own wiring is under test here
+	t.Setenv("AMAZON_ENABLE", "0")
+	t.Setenv("ORACLE_ENABLE", "0")
+	t.Setenv("FEDORA_ENABLE", "0")
+	t.Setenv("SUSE_ENABLE", "0")
+	t.Setenv("PHOTON_ENABLE", "0")
+	t.Setenv("ARCH_ENABLE", "0")
+
+	orig := newAzureLinuxProvider
+	sawCall := false
+	var gotOpts azurelinux.Options
+	newAzureLinuxProvider = func(opts azurelinux.Options) *azurelinux.Provider {
+		sawCall, gotOpts = true, opts
+		return orig(opts)
+	}
+	defer func() { newAzureLinuxProvider = orig }()
+
+	ps := dbUpdateProviders(io.Discard)
+	if !sawCall {
+		t.Fatal("dbUpdateProviders never constructed the Azure Linux provider -- AZURELINUX_ENABLE defaults ON (D106)")
+	}
+	if gotOpts.Progress == nil {
+		t.Error("azurelinux.New was constructed with a nil Progress -- the not-applicable/not-fixed skip counts would go nowhere")
+	}
+	var found bool
+	for _, p := range ps {
+		if p.Name() == "Azure Linux OVAL" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("dbUpdateProviders() = %+v, want it to include the Azure Linux provider", ps)
+	}
+}
+
+// TestDBUpdateProviders_AzureLinuxDisabledViaEnv is the other half: an
+// operator who does not want to scan Azure Linux/CBL-Mariner must be able to
+// turn the fetch off entirely, exactly as ARCH_ENABLE=0 and the others
+// already let them.
+func TestDBUpdateProviders_AzureLinuxDisabledViaEnv(t *testing.T) {
+	t.Setenv("AZURELINUX_ENABLE", "0")
+	t.Setenv("REDHAT_ENABLE", "0")
+	t.Setenv("AMAZON_ENABLE", "0")
+	t.Setenv("ORACLE_ENABLE", "0")
+	t.Setenv("FEDORA_ENABLE", "0")
+	t.Setenv("SUSE_ENABLE", "0")
+	t.Setenv("PHOTON_ENABLE", "0")
+	t.Setenv("ARCH_ENABLE", "0")
+
+	orig := newAzureLinuxProvider
+	sawCall := false
+	newAzureLinuxProvider = func(opts azurelinux.Options) *azurelinux.Provider { sawCall = true; return orig(opts) }
+	defer func() { newAzureLinuxProvider = orig }()
+
+	ps := dbUpdateProviders(io.Discard)
+	if sawCall {
+		t.Error("azurelinux.New was constructed even though AZURELINUX_ENABLE=0")
+	}
+	for _, p := range ps {
+		if p.Name() == "Azure Linux OVAL" {
+			t.Errorf("dbUpdateProviders() = %+v, want no Azure Linux provider with AZURELINUX_ENABLE=0", ps)
 		}
 	}
 }

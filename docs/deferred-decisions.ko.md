@@ -187,7 +187,23 @@ affected-no-fix 항목 108개를 담고 있고, grype는 우리 아카이브 슬
 
 ---
 
-### Azure Linux 3.0 — 다른 두 스캐너는 보는데 assay는 못 보는 140개 advisory
+### ~~Azure Linux 3.0 — 다른 두 스캐너는 보는데 assay는 못 보는 140개 advisory~~ — D106에서 해소
+
+**같은 날(2026-08-28) 해소됐습니다.** 이 항목이 요청한 조사가 곧바로
+실행되어 세 당사자로 이어지는 사슬을 찾아냈고, 그 어느 쪽도 assay의
+matcher가 아니었습니다: Microsoft 자신의 OSV export bot이 `osv/`
+디렉터리를 정확히 한 번(2026-03-10) 쓰고 멈춘 반면, 그 OVAL export는
+계속 매일 갱신됐습니다; OSV.dev는 그 죽은 디렉터리를 3주 뒤 production
+source로 온보딩했고(google/osv.dev#5175) 그 이후로 그 얼어붙은
+스냅샷을 계속 서빙해왔습니다; assay는 OSV.dev를 소비했고 그 freeze를
+그대로 물려받았습니다. D106은 이 계열을 Microsoft의 OVAL을 직접
+파싱하는 전용 provider로 옮깁니다 — 라이브로 검증됨: 140개 튜플 전부
+회복(83건 정확한 이름 일치, 57건 D8의 source-package 다리를 통해,
+0건 없음). 두 upstream 모두에게 증거 사슬과 함께 알렸습니다:
+microsoft/AzureLinuxVulnerabilityData#4(export bot이 멈췄다는 것),
+google/osv.dev#5935(그들의 source가 죽어 있고 그 실패가 자신들 쪽에서는
+조용하다는 것). 둘 다 응답을 지켜봐야 합니다. 아래 문단들은 이 항목이
+처음 열렸을 때의 본문입니다.
 
 2026-08-28 감사에서 나온 유일한 진짜 위양성(false-negative) 후보 부류입니다:
 azl3 타깃에서 grype와 trivy 둘 다 assay에 없는 (패키지, CVE) 튜플 140건을

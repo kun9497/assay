@@ -17,6 +17,7 @@ import (
 	"github.com/kun9497/assay/internal/provider"
 	"github.com/kun9497/assay/internal/provider/amazon"
 	"github.com/kun9497/assay/internal/provider/arch"
+	"github.com/kun9497/assay/internal/provider/azurelinux"
 	"github.com/kun9497/assay/internal/provider/eol"
 	"github.com/kun9497/assay/internal/provider/epss"
 	"github.com/kun9497/assay/internal/provider/fedora"
@@ -242,6 +243,23 @@ Environment (db build only — a scan reads no environment and no network):
                         alias, the same KISA/Photon precedent.
                         Set this to 0 for a local build that does not scan
                         Arch Linux.
+  AZURELINUX_ENABLE=0   Skip Azure Linux's and CBL-Mariner's own OVAL feeds
+                        (azurelinux-3.0-oval.xml, cbl-mariner-2.0-oval.xml,
+                        Microsoft's own github.com/microsoft/
+                        AzureLinuxVulnerabilityData). ON BY DEFAULT (D106),
+                        for the same reason as every distro provider above:
+                        the published artifact carries it, so a build
+                        without it produces a narrower database than
+                        db update delivers. This replaced OSV.dev's own
+                        "Azure Linux" archive (D94), whose converter for
+                        this ecosystem is measured stalled.
+                        Severity is a WORD in this feed (Critical/High/
+                        Medium/Low), never a CVSS vector, so an Azure Linux
+                        finding's band comes entirely from another source's
+                        rating of the same CVE, joined through the finding's
+                        alias, the same KISA/Photon/Arch precedent.
+                        Set this to 0 for a local build that does not scan
+                        Azure Linux or CBL-Mariner.
   KISA_ENABLE=0         Skip KISA/KNVD's Korean security notices. ON BY
                         DEFAULT (D37): attaching them is what this project was
                         built for, and leaving it to a flag meant the flagship
@@ -754,23 +772,31 @@ var newPhotonProvider = photon.New
 // security.archlinux.org host — ever being fetched from.
 var newArchProvider = arch.New
 
+// newAzureLinuxProvider constructs the Azure Linux / CBL-Mariner OVAL
+// provider (D106). A package variable for the same reason every other
+// newXProvider above is: a test can substitute a spy and observe the
+// Options that reached construction, without azurelinux.New's two default
+// URLs — Microsoft's live raw.githubusercontent.com files — ever being
+// fetched from.
+var newAzureLinuxProvider = azurelinux.New
+
 // dbUpdateProviders is every provider.Provider `db build` runs.
 //
-// All eight are on by default. Red Hat was opt-in when it landed, on the
+// All nine are on by default. Red Hat was opt-in when it landed, on the
 // grounds that it adds ~1.9 million affected entries for people who may
 // never scan a RHEL image — and D51 reversed that once the published
 // artifact started carrying it. Amazon Linux, Oracle Linux, Fedora, SUSE,
-// Photon OS and Arch followed the same reasoning from the start (D73, D74,
-// D75, D77, D96, D97) rather than repeating Red Hat's opt-in-then-reverse
-// path: the published artifact is meant to carry each of them, and a
-// default that disagreed with the artifact would mean `db build` and
-// `db update` produce different databases, and `db push` would refuse the
-// narrower one.
+// Photon OS, Arch and Azure Linux followed the same reasoning from the start
+// (D73, D74, D75, D77, D96, D97, D106) rather than repeating Red Hat's
+// opt-in-then-reverse path: the published artifact is meant to carry each of
+// them, and a default that disagreed with the artifact would mean
+// `db build` and `db update` produce different databases, and `db push`
+// would refuse the narrower one.
 //
 // REDHAT_ENABLE=0, AMAZON_ENABLE=0, ORACLE_ENABLE=0, FEDORA_ENABLE=0,
-// SUSE_ENABLE=0, PHOTON_ENABLE=0 and ARCH_ENABLE=0 still turn each off, for
-// a local build that wants to be shorter and does not care about that
-// distro.
+// SUSE_ENABLE=0, PHOTON_ENABLE=0, ARCH_ENABLE=0 and AZURELINUX_ENABLE=0
+// still turn each off, for a local build that wants to be shorter and does
+// not care about that distro.
 func dbUpdateProviders(stderr io.Writer) []provider.Provider {
 	// Progress goes to stderr for the same reason every provider below sends
 	// theirs there: D82's Rocky Linux/AlmaLinux module-stream attachment
@@ -831,6 +857,14 @@ func dbUpdateProviders(stderr io.Writer) []provider.Provider {
 		// "silently drops/narrows part of its input" case every other
 		// provider's Progress line exists for.
 		ps = append(ps, newArchProvider(arch.Options{Progress: stderr}))
+	}
+	if envFlag(stderr, "AZURELINUX_ENABLE", true) {
+		// Progress goes to stderr for the same reason: skipped-definition and
+		// stamped-not-fixed counts (Not Applicable retractions, D52's
+		// patchable=false stamping) are exactly the "silently drops/narrows
+		// part of its input" case every other provider's Progress line
+		// exists for.
+		ps = append(ps, newAzureLinuxProvider(azurelinux.Options{Progress: stderr}))
 	}
 	return ps
 }

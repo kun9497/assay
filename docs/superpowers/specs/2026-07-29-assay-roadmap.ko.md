@@ -3922,6 +3922,46 @@ trivy는 버전이 고정되어 있고(v0.74.0, floors를 다시 심는 것과 �
 때까지 "살아남았고", 이는 CLAUDE.md가 기록하는 뮤테이션이 실제로 뮤테이션을
 일으키는지 확인하라는 함정이지 커버리지 공백이 아닙니다.
 
+### D106 — Azure Linux가 죽은 feed를 벗어나다: OVAL 직결, 옳았던 스캐너들과 같은 방식으로
+
+**결정.** Azure Linux/CBL-Mariner는 (D94가 그것을 들여놓았던) OSV.dev
+생태계 덤프를 떠나, Microsoft 자신의 OVAL 파일을 파싱하는 전용 provider로
+옮겨갑니다(`azurelinux-3.0-oval.xml` → `Azure Linux:3`,
+`cbl-mariner-2.0-oval.xml` → `Azure Linux:2` — D94의 계열 key는 그대로라
+scan 경로는 아무것도 눈치채지 못합니다). 감사에서 나온, 두 스캐너가 모두
+확인한 140건의 누락된 finding은 세 당사자로 이어지는 사슬로 근원이
+추적됐습니다: Microsoft 자신의 OSV export bot이 정확히 한 번(2026-03-10,
+"Added latest version of OSV files") 실행되고 멈췄고; OSV.dev는 그
+디렉터리를 3주 뒤 production source로 온보딩했으며(google/osv.dev#5175)
+그 이후로 그 얼어붙은 스냅샷을 계속 서빙해왔습니다 — importer는 "새
+커밋 없음"으로 보고 조용히 실패합니다; assay는 그 freeze를 그대로
+물려받았습니다. 살아 있는 feed는 그 bot이 여전히 매일 갱신하는
+OVAL입니다 — grype와 trivy가 소비하는 바로 그것이며, 그래서 그들이
+옳았고 assay는 그렇지 못했습니다. 두 upstream 모두에게 증거 사슬과
+함께 알렸습니다(microsoft/AzureLinuxVulnerabilityData#4,
+google/osv.dev#5935). 처음 시도된 수정 — Microsoft의 네이티브 `osv/`
+파일을 소비하는 것 — 은 구현 도중 검증에서 붙잡혔습니다: 그 디렉터리가
+바로 그 죽은 스냅샷이고, OSV.dev의 사본보다도 더 오래된 것이었습니다.
+
+**이 provider는 D74의 형태에 Azure Linux의 실측 사실을 얹은 것입니다.**
+평평한 criteria(중첩이 실제로는 없지만 재귀는 그대로 두고 나타나면
+셈), definition당 CVE 하나, fixed 경계는 epoch와 dist tag까지 그대로
+가져옴(OSV.dev의 옛 stripped 형태보다 더 정밀함), `less than or equal`은
+last_affected로(cbl-mariner에서만), Microsoft의 `patchable=false`는
+D52의 positive no-fix 증거로(106건이 NotFixed로 찍힘), 그리고
+`patchable=Not Applicable`은 ingestion 시점에 폐기되는 vendor
+retraction으로(139건, D16의 규율) 처리합니다. Record ID는 D90을
+따릅니다(`AZURELINUX-<release>-<advisory_id>`, CVE는 Aliases에) — 하나의
+CVE가 파일당 여러 definition에 걸치기 때문이며(측정치로 325/364), D25가
+match 시점에 이들을 다시 묶습니다. DataAsOf는 각 파일 자신의 generator
+timestamp에서 가져오고, 가장 오래된 쪽이 이깁니다(D12). 끝에서 끝까지
+라이브로 검증했습니다: 12,535건의 레코드를 fetch했고, 감사의 140개
+튜플 전부가 회복됐습니다 — 83건은 정확한 패키지 이름으로, 57건은
+D8 다리가 scan 시점에 풀어주는 source 이름으로, 0건이 여전히 없습니다.
+독립 리뷰: 뮤테이션 5개 중 5개가 red입니다(bound 종류 혼동, retraction이
+그대로 유지됨, CVE가 Aliases 밖으로 옮겨짐, NotFixed가 찍히지 않음,
+provider가 기본으로 꺼짐).
+
 ---
 
 ## 3. 아키텍처
