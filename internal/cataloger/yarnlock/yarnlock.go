@@ -1,9 +1,14 @@
 // Package yarnlock turns a yarn.lock file into the normalized package
 // inventory the matcher consumes.
 //
-// Only yarn v1 is read. Yarn berry (v2+) writes YAML under the same filename,
-// and reading it is deferred rather than attempted: see ErrBerry below for why
-// a refusal is the only safe answer when two incompatible formats share a name.
+// Two incompatible formats share the filename "yarn.lock": yarn v1's own
+// line-oriented grammar, and yarn berry (v2+), which writes YAML. Parse
+// classifies which one a file is (classifyDialect) before reading it, rather
+// than trying the v1 parser and hoping it fails loudly on a berry file - it
+// does not. Berry writes `version: 1.3.0` where v1 writes `version "1.3.0"`,
+// so the v1 parser finds no `version "x"` line anywhere and reports a clean
+// zero-package file, which is the exact "found nothing" vs. "did not look"
+// confusion this project exists to keep apart.
 package yarnlock
 
 import (
@@ -16,36 +21,53 @@ import (
 
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"github.com/kun9497/assay/internal/pkgmeta"
+	"gopkg.in/yaml.v3"
 )
 
-// ErrBerry reports that the file is a yarn berry lockfile, which this parser
-// does not read.
-//
-// It is a distinct error rather than a generic parse failure because the two
-// formats share the filename "yarn.lock", and the v1 parser does not FAIL on a
-// berry file - it succeeds and finds nothing. Berry writes `version: 1.3.0`
-// where v1 writes `version "1.3.0"`, so every entry silently yields no version
-// and the file reports zero packages. That is a clean verdict over a lockfile
-// nobody read, which is the exact failure mode this repo refuses everywhere
-// else. Detecting the format and refusing is the only honest option until a
-// YAML parser is a dependency this project is willing to take.
-var ErrBerry = errors.New("yarn berry (v2+) lockfile: assay reads yarn v1 only")
+// ErrUnknownDialect reports that a yarn.lock carries neither yarn v1's
+// banner comment nor berry's __metadata block. Both are real markers every
+// yarn.lock this parser has been checked against carries; a file with
+// neither is a dialect this parser cannot identify, and guessing v1 for it
+// (the previous behaviour) risked the same silent zero-package read berry
+// itself used to produce.
+var ErrUnknownDialect = errors.New("yarn.lock: neither a yarn v1 banner nor a berry __metadata block found")
 
-// Parse reads the yarn.lock at path and returns the packages it resolves.
-// path is what every returned Package's single Location names and what any
-// returned error names, the same as npmlock.Parse - a directory scan reads
-// several lockfiles and a bare "yarn.lock" would not say which.
-func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, error) {
+// Skipped is one berry lockfile entry this parser saw and declined to
+// catalog, with why. The v1 path never produces one - see Parse.
+type Skipped struct {
+	Name   string
+	Reason string
+}
+
+// Parse reads the yarn.lock at path and returns the packages it resolves,
+// alongside every entry a berry file's parse declined to catalog (always nil
+// for a v1 file - the v1 grammar's own skips are counted into Stats only, the
+// same as before this package read berry at all). path is what every
+// returned Package's single Location names and what any returned error
+// names, the same as npmlock.Parse - a directory scan reads several
+// lockfiles and a bare "yarn.lock" would not say which.
+func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, []Skipped, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		// os.ReadFile's error already carries the full path.
-		return nil, cyclonedx.Stats{}, err
+		return nil, cyclonedx.Stats{}, nil, err
 	}
 
-	if isBerry(data) {
-		return nil, cyclonedx.Stats{}, fmt.Errorf("parse %s: %w", path, ErrBerry)
+	switch classifyDialect(data) {
+	case dialectBerry:
+		return parseBerry(path, data)
+	case dialectV1:
+		pkgs, stats, perr := parseV1(path, data)
+		return pkgs, stats, nil, perr
+	default:
+		return nil, cyclonedx.Stats{}, nil, fmt.Errorf("parse %s: %w", path, ErrUnknownDialect)
 	}
+}
 
+// parseV1 is the original yarn v1 line-oriented parser, unchanged in
+// behaviour from before berry was read at all - only its signature moved,
+// to make room for Parse's dialect dispatch above.
+func parseV1(path string, data []byte) ([]pkgmeta.Package, cyclonedx.Stats, error) {
 	var (
 		pkgs  []pkgmeta.Package
 		stats cyclonedx.Stats
@@ -127,26 +149,37 @@ func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, error) {
 	return pkgs, stats, nil
 }
 
-// isBerry reports whether data is a yarn berry lockfile rather than a v1 one.
+// dialect is which of the two incompatible yarn.lock grammars a file is.
+type dialect int
+
+const (
+	dialectUnknown dialect = iota
+	dialectV1
+	dialectBerry
+)
+
+// classifyDialect decides which of the two incompatible yarn.lock grammars
+// data is.
 //
 // __metadata is written at the top of every berry lockfile and appears in no
-// v1 file. The v1 banner is checked in the same pass and settles the question
-// the other way, so whichever marker comes first decides - a file carrying
-// neither is treated as v1, which is the status quo for the hand-written
-// fixtures and older files that omit the banner.
-func isBerry(data []byte) bool {
+// v1 file; the v1 banner is checked in the same pass and settles the question
+// the other way, so whichever marker comes first decides. A file carrying
+// neither marker used to be treated as v1 by default - that default is what
+// let a berry file that slipped past this classification (or any other
+// yarn.lock dialect this parser has never seen) parse as a silent
+// zero-package v1 file, so Parse now refuses it instead (ErrUnknownDialect).
+func classifyDialect(data []byte) dialect {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		switch {
 		case strings.HasPrefix(line, "__metadata:"):
-			return true
+			return dialectBerry
 		case strings.HasPrefix(line, "# yarn lockfile v1"):
-			// The explicit v1 banner settles it. Berry never writes this line.
-			return false
+			return dialectV1
 		}
 	}
-	return false
+	return dialectUnknown
 }
 
 // nameFromSpecs turns an entry header into the package name it describes.
@@ -197,7 +230,8 @@ func nameFromSpecs(header string) string {
 // versionField extracts the resolved version from a v1 `version "1.2.3"` line.
 // Berry's unquoted `version: 1.2.3` is deliberately NOT accepted: a file
 // mixing the two is not something this parser can claim to understand, and
-// isBerry has already refused the whole file by the time this runs.
+// classifyDialect has already routed a berry file to parseBerry instead of
+// here by the time this runs.
 func versionField(trimmed string) (string, bool) {
 	const key = "version "
 	if !strings.HasPrefix(trimmed, key) {
@@ -212,4 +246,212 @@ func versionField(trimmed string) (string, bool) {
 		return "", false
 	}
 	return v, true
+}
+
+// parseBerry reads a yarn berry (v2+) lockfile. Berry is YAML, and __metadata
+// is the only reserved top-level key; every other key is one package entry,
+// however the file happened to write it - keys are not always quoted, and a
+// multi-descriptor key ("a@npm:^1, a@npm:^2":) still names exactly one
+// package. Rather than parse any of that, the name and version come from two
+// FIELDS inside the entry (resolution:, version:), which is what makes an
+// aliased entry read correctly: an alias only changes the KEY, never the
+// resolution.
+//
+// Decoded with a plain yaml.Node walk of the top-level mapping, the same
+// duplicate-key reasoning as pnpmlock: yaml.v3 hard-errors a document with a
+// repeated key into a map, and a botched merge-conflict resolution is a real
+// way for one to appear in a berry lockfile.
+func parseBerry(path string, data []byte) ([]pkgmeta.Package, cyclonedx.Stats, []Skipped, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, cyclonedx.Stats{}, nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		// A __metadata: line was seen (classifyDialect would not have routed
+		// here otherwise), but the document as a whole is not a mapping -
+		// nothing this parser can read a package entry out of.
+		return nil, cyclonedx.Stats{}, nil, fmt.Errorf("parse %s: not a mapping at the top level", path)
+	}
+	root := doc.Content[0]
+
+	var (
+		pkgs    []pkgmeta.Package
+		stats   cyclonedx.Stats
+		skipped []Skipped
+		seen    = map[string]bool{}
+	)
+
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		key, entry := root.Content[i], root.Content[i+1]
+		if key.Value == "__metadata" {
+			continue
+		}
+		if entry.Kind != yaml.MappingNode {
+			stats.Components++
+			stats.SkippedNoPURL++
+			skipped = append(skipped, Skipped{Name: key.Value, Reason: "entry is not a mapping"})
+			continue
+		}
+
+		resNode := findMapValue(entry, "resolution")
+		if resNode == nil || resNode.Value == "" {
+			stats.Components++
+			stats.SkippedNoPURL++
+			skipped = append(skipped, Skipped{Name: key.Value, Reason: "no resolution: field"})
+			continue
+		}
+
+		name, proto, _, ok := splitResolution(resNode.Value)
+		if !ok {
+			stats.Components++
+			stats.SkippedNoPURL++
+			skipped = append(skipped, Skipped{
+				Name:   key.Value,
+				Reason: "resolution has no recognizable protocol boundary: " + resNode.Value,
+			})
+			continue
+		}
+
+		switch {
+		case proto == "npm":
+			version := findScalar(entry, "version")
+			if version == "" {
+				// Not observed across 8,700+ real entries checked against
+				// this reader (version: always agreed with resolution's own
+				// version where both were present), so this is a defensive
+				// arm rather than a shape the corpus has actually shown.
+				stats.Components++
+				stats.SkippedNoVersion++
+				skipped = append(skipped, Skipped{Name: name, Reason: "resolves through npm but has no version: field"})
+				continue
+			}
+			dedupeKey := name + "@" + version
+			if seen[dedupeKey] {
+				continue
+			}
+			seen[dedupeKey] = true
+			stats.Components++
+			stats.Cataloged++
+			pkgs = append(pkgs, pkgmeta.Package{
+				Name:      name,
+				Version:   version,
+				Type:      "npm",
+				Ecosystem: "npm",
+				PURL:      "pkg:npm/" + name + "@" + version,
+				Locations: []pkgmeta.Location{{Path: path}},
+			})
+
+		case isLocalProtocol(proto):
+			// A workspace member, or a link:/portal:/file:/exec: dependency
+			// resolved to something local to this checkout. Nothing
+			// published behind it to place in an advisory range - shown so
+			// it is not silently absent, but deliberately not counted into
+			// Stats (see pnpmlock's identical causeLocal for why: this is
+			// not incompleteness the target gate should trip on).
+			skipped = append(skipped, Skipped{
+				Name:   name,
+				Reason: "a local " + proto + ": dependency, nothing to evaluate",
+			})
+
+		case proto == "https":
+			// Yarn normalizes a git dependency into an https: resolution
+			// (e.g. a GitHub shorthand becomes a full clone URL). Its own
+			// version: field is the FORK's self-declared version, not a
+			// registry release - reporting it risks both a false positive
+			// (this exact string never had that CVE fixed) and a false
+			// negative (the real fix landed under a different version
+			// entirely), so it is skipped as a reachable gap rather than
+			// trusted.
+			stats.Components++
+			stats.SkippedNoVersion++
+			skipped = append(skipped, Skipped{
+				Name:   name,
+				Reason: "resolution normalizes to a git URL, not a registry version",
+			})
+
+		case proto == "patch":
+			// Silent, deliberately, unlike every other skip above: the
+			// package a patch: entry patches is ALWAYS also present as its
+			// own separate npm: entry (verified 17/17 across two real
+			// lockfiles - an empirical invariant observed in the corpus,
+			// not a guarantee the berry format documents). Reporting this as
+			// a skip would just be noise duplicating what that npm: twin
+			// already reports for the same name and version.
+			continue
+
+		default:
+			stats.Components++
+			stats.SkippedNoPURL++
+			skipped = append(skipped, Skipped{
+				Name:   name,
+				Reason: "resolution uses an unrecognized protocol " + proto + ":",
+			})
+		}
+	}
+
+	return pkgs, stats, skipped, nil
+}
+
+// isLocalProtocol reports whether proto resolves to something local to this
+// checkout rather than a package assay could look up anywhere else.
+func isLocalProtocol(proto string) bool {
+	switch proto {
+	case "workspace", "link", "portal", "file", "exec":
+		return true
+	}
+	return false
+}
+
+// splitResolution splits a berry resolution string into the real package
+// name, its protocol, and everything after the protocol's colon.
+//
+// Splitting at the LAST "@" is wrong: a patch: resolution embeds a second
+// locator of its own ("typescript@patch:typescript@npm%3A5.9.2#..."), so the
+// last "@" lands inside that nested locator rather than at the real
+// boundary. The correct rule is the FIRST "@" that is followed by one or
+// more lowercase letters and then a literal ":" - scanning from index 1
+// (rather than 0) is what lets a scoped name's own leading "@" survive,
+// requiring a literal ":" is what keeps a URL-encoded "npm%3A" from
+// matching, and requiring the letters to be lowercase is what a real
+// protocol name always is even when the package name itself is not
+// (JSONStream@npm:1.3.5, a real package).
+func splitResolution(res string) (name, proto, rest string, ok bool) {
+	for i := 1; i < len(res); i++ { // start at 1: index 0 may be a scope '@'
+		if res[i] != '@' {
+			continue
+		}
+		j := i + 1
+		for j < len(res) && res[j] >= 'a' && res[j] <= 'z' {
+			j++
+		}
+		if j > i+1 && j < len(res) && res[j] == ':' {
+			return res[:i], res[i+1 : j], res[j+1:], true
+		}
+	}
+	return "", "", "", false
+}
+
+// findMapValue returns the value node paired with key in a MappingNode's
+// Content, or nil if n is not a mapping or carries no such key. See
+// pnpmlock.findMapValue for the duplicate-key reasoning this mirrors.
+func findMapValue(n *yaml.Node, key string) *yaml.Node {
+	if n == nil || n.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == key {
+			return n.Content[i+1]
+		}
+	}
+	return nil
+}
+
+// findScalar is findMapValue plus unwrapping the raw scalar text, or "" if
+// the key is absent.
+func findScalar(n *yaml.Node, key string) string {
+	v := findMapValue(n, key)
+	if v == nil {
+		return ""
+	}
+	return v.Value
 }

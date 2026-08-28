@@ -72,7 +72,7 @@ code scanning) and `table` (the default). `--explain` shows one finding's full e
   Hummingbird, and CleanStart — plus Bitnami application layers, across three rpmdb backends
   (BerkeleyDB, SQLite, ndb).
 - **8 language ecosystems** — Go, npm, PyPI, crates.io, Maven, RubyGems, NuGet, Packagist,
-  from binaries, directories, and eight lockfile formats.
+  from binaries, directories, and ten lockfile formats — pnpm and yarn berry included.
 - **Every source's rating is kept** — two databases routinely disagree about one CVE; a
   finding carries each source's band, score, and fixed version, and the gate takes the
   highest, so the report agrees with its own verdict.

@@ -60,9 +60,17 @@ measurement against a full NVD-enabled database. Today's run — ubi9, 9 of 783 
 none marked solely because an unrated source counted as disagreeing — was taken against these
 3,081 ratings. That number says NVD is nearly absent, not that the marker is quiet.
 
-### Reading pnpm lockfiles — a YAML parser as a third dependency
+### ~~Reading pnpm lockfiles — a YAML parser as a third dependency~~ — resolved in D103
 
-`pnpm-lock.yaml` is recognized, named, and exits 2 (D61). Reading it is deferred on one
+**Resolved 2026-08-28.** Both revisit triggers fired: yaml.v3 became a direct dependency
+for the D102 ignore file (the marginal cost dropped to zero, exactly as this entry
+predicted), and the trivy comparison (docs/comparison.md) made the two by-name refusals
+the only lockfiles a peer tool read and assay did not. D103 reads pnpm 5.4/6.0/9.0 and
+yarn berry in one slice, from rules machine-verified against ~11,000 real entries — see
+the roadmap entry for the five rules that prevent false negatives and the three syft
+behaviours deliberately not copied. The paragraphs below are the deferral as it stood.
+
+`pnpm-lock.yaml` was recognized, named, and exited 2 (D61). Reading it was deferred on one
 question: whether this project takes a third direct dependency.
 
 **This entry said "and uv" when it was written, and that was wrong.** See the entry below —
