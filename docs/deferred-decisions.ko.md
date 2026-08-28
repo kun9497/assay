@@ -147,6 +147,65 @@ affected-no-fix 항목 108개를 담고 있고, grype는 우리 아카이브 슬
 있습니다; mainline-wins 동점 처리로 접었습니다) — bci-base의 오해 소지 있는 no-fix
 행이 실제 fixed 버전이 되었습니다.
 
+**2026-08-28 재감사** — 23개 타깃 전체 캡처 세트를 대상으로, SUSE-SU 오독(D105의
+정정)이 더 많은 어휘 불일치가 숨어 있는지에 대한 의문을 불러일으킨 뒤 수행했습니다.
+각 결과는 join을 독립 구현으로 재구성해 실행 결과 표를 그대로 재현함으로써
+검증했습니다:
+
+- **어휘 불일치 사례가 하나 더 있었고, 지금은 고쳤습니다**: Fedora와 Debian은
+  한쪽에만 있는 튜플을 갖고 있었는데, 그 advisory ID를 상대 쪽이 join이 읽지 않는
+  컬럼에 담고 있었습니다(grype의 `vulnerability.advisories[]`, assay의 advisory
+  id/aliases/upstream). scandiff의 `bridgeBareIDs`가 이를 닫습니다 — fedora 일치
+  49→60, bitnami-legacy-pg 488→489, 나머지 모든 타깃은 바이트 단위로 동일합니다.
+  무조건 enrichment는 측정 후 기각했습니다(같은 십여 건의 튜플을 회수하려고
+  ubi8n18의 onlyAssay를 4,531에서 10,152로 부풀립니다).
+- **위 문단들은 수치가 흘러갔고**, 08-24 기록 그대로 남겨 둡니다: Ubuntu는 이제
+  98건 일치에 assay-only 5건입니다(더 이상 집합 동등이 아니라 assay 우세; wont-fix는
+  CVE 10건 기준 17/17), Debian은 171건 일치(6-구멍+1-논쟁 FP 구성은 변동 없음),
+  Fedora는 어드바이저리 수준에서 16/16이고 한쪽에만 있는 튜플은 100% 공유
+  어드바이저리 안에 있습니다. 현재 수치는 docs/comparison.md가 담고 있습니다.
+- **Rocky의 "fixable 기준 99.4%"는 한 방향입니다**: grype-only FIXABLE 튜플이
+  68건 존재하며, 전부 grype가 Rocky 대신 `redhat:distro:redhat:9` 데이터를 대입한
+  것이고 trivy는 이 중 0건을 확인합니다 — assay와 trivy가 grype에 맞서 일치합니다.
+  Alma의 grype-only 512건은 전부 not-fixed/wont-fix입니다("fixable 집합 동등"
+  주장은 정확히 재검증됐습니다).
+- **ubi8n18의 onlyAssay 4,531건 중 98%는 `kernel-headers`입니다** — Red Hat의 CSAF
+  product tree가 커널 CVE에 대해 kernel-headers를 명시하지만 grype는 이 패키지를
+  전혀 내지 않고, trivy는 assay 튜플 중 4,078건을 확인합니다: 예외 쪽은 grype이지
+  assay가 아닙니다. 이 finding 중 273건은 fixed 상태이며 실제 조치 대상입니다.
+- **cleanstart의 floor는 공허했습니다**(minAgree/minFindings 0은 클린 이미지에
+  아무것도 강제하지 않습니다): 이제 `minComponents` floor가 인벤토리 자체를
+  검증합니다 — finding은 정직하게 0일 수 있어도, 실제 이미지의 인벤토리는 그럴 수
+  없습니다. az2023과 wolfi도 같은 가드를 받았습니다.
+- alpaquita/liberica/cleanstart의 grype 출력은 100% 자신의 CPE 폴백입니다(뒤에
+  provider가 없습니다), leap156의 grype 0건은 재검증됐고, trivy가 누락한 non-CVE
+  항목은 각각 확인했습니다: 진짜로 CVE가 없습니다(BDSA-*, TEMP-*, DLA 갱신 1건).
+  캡처 세트에 더 이상 남은 어휘 불일치 사례는 없습니다.
+
+감사가 드러낸 진짜로 열려 있는 유일한 항목은 Azure Linux 3.0이며, 다음 항목에서
+다룹니다.
+
+---
+
+### Azure Linux 3.0 — 다른 두 스캐너는 보는데 assay는 못 보는 140개 advisory
+
+2026-08-28 감사에서 나온 유일한 진짜 위양성(false-negative) 후보 부류입니다:
+azl3 타깃에서 grype와 trivy 둘 다 assay에 없는 (패키지, CVE) 튜플 140건을
+보고합니다 — 140/140 전부 trivy가 확인했고, 전부 fix state가 fixed이며 실제
+`.azl3` fixed 버전을 갖고 있습니다(예: curl 8.8.0→8.11.1-10.azl3). 140건 중
+135건이 2026년 CVE인 반면, assay 자신의 azl3 세트는 2026년 CVE를 12건만 담고
+있습니다. ecosystem key와 matcher는 문제가 없습니다 — 106건은 일치하고,
+mariner2(같은 provider, 더 오래된 이미지)는 grype보다 오히려 66건 앞섭니다 —
+따라서 이는 라우팅이 아니라 provider의 fetch window나 Azure Linux 3.0 최신
+advisory에 대한 레코드 필터링 쪽을 가리킵니다. 독립된 두 스캐너가 assay에
+맞서 일치하는 것은 이 차등 테스트가 낼 수 있는 가장 강한 위양성 신호입니다.
+
+**조사할 것**: 2026-08-28 시점에 Azure Linux OSV/vulnerability feed가 그 140개
+CVE에 대해 무엇을 담고 있었는지, provider의 fetch가 이를 봤는지, ingestion이
+이를 걸러냈는지. 그때까지 azl3 floor는 시드된 값 그대로 둡니다 — floor는 assay가
+실제로 보고하는 것을 측정하므로, 고쳐지면 breach가 아니라 agree 상승으로 나타날
+것입니다.
+
 ---
 
 ### grype 대비 생태계 커버리지 — 격차, 재측정

@@ -66,6 +66,12 @@ type assayAdvisory struct {
 type assaySummary struct {
 	NotEvaluated int `json:"notEvaluated"`
 	Findings     int `json:"findings"`
+	// Components backs the minComponents floor: on a target whose expected
+	// finding count is genuinely zero (cleanstart), zero findings and "the
+	// cataloger silently saw nothing" are indistinguishable through every
+	// other number this tool reads -- the component count is the one that
+	// still separates them.
+	Components int `json:"components"`
 }
 
 // assayTuples extracts the (package, CVE) set from one assay document (D93's
@@ -126,6 +132,16 @@ type grypeMatch struct {
 }
 
 type grypeVuln struct {
+	ID string `json:"id"`
+	// Advisories carries the upstream advisory IDs grype attaches to a
+	// CVE-keyed vulnerability (a Bodhi FEDORA-*, a Debian DSA-*). Read for
+	// the bare-ID bridge below: when assay could extract no CVE and fell
+	// back to that same advisory ID, this column is the only place the two
+	// documents' vocabularies still meet.
+	Advisories []grypeAdvisory `json:"advisories"`
+}
+
+type grypeAdvisory struct {
 	ID string `json:"id"`
 }
 
@@ -252,4 +268,76 @@ func compareSets(a, g map[tuple]struct{}) (agree, onlyAssay, onlyGrype int) {
 		}
 	}
 	return agree, onlyAssay, onlyGrype
+}
+
+// bridgeBareIDs is the third instance of one lesson: when a tool cannot
+// spell a CVE, the identifier that CAN join the two documents lives in a
+// column the primary extraction does not read. D93's seeding found it in
+// assay's ratings (ALSA/ELSA), D105's correction in trivy's References
+// (SUSE-SU), and the 2026-08-28 audit found it between assay and grype on
+// Fedora and Debian: one side falls back to a bare advisory ID
+// (FEDORA-..., DSA-...) because its own record extracts no CVE, while the
+// OTHER side carries that exact advisory ID in a secondary column
+// (grype's vulnerability.advisories[], assay's advisory id/aliases/
+// upstream) next to the CVE it did extract.
+//
+// The bridge is deliberately one-way per tuple and keyed on the ids a side
+// ACTUALLY fell back to: only a bare (non-CVE) tuple already present in one
+// set earns the other side a matching tuple, and only when the other
+// document names that id for the same subject. Unconditional enrichment --
+// emitting every advisory id on both sides -- was measured on the audit's
+// captures and rejected: it inflates ubi8n18's onlyAssay from 4531 to
+// 10152 while recovering the same dozen tuples this recovers.
+func bridgeBareIDs(adoc assayDocument, gdoc grypeDocument, aSet, gSet map[tuple]struct{}) {
+	assayNames := make(map[tuple]struct{})
+	for _, f := range adoc.Findings {
+		add := func(id string) {
+			if id != "" && !isCVE(id) {
+				assayNames[tuple{Subject: f.Package.Name, ID: id}] = struct{}{}
+			}
+		}
+		add(f.Advisory.ID)
+		for _, a := range f.Advisory.Aliases {
+			add(a)
+		}
+		for _, u := range f.Advisory.Upstream {
+			add(u)
+		}
+	}
+
+	grypeNames := make(map[tuple]struct{})
+	for _, m := range gdoc.Matches {
+		add := func(id string) {
+			if id != "" && !isCVE(id) {
+				grypeNames[tuple{Subject: m.Artifact.Name, ID: id}] = struct{}{}
+			}
+		}
+		add(m.Vulnerability.ID)
+		for _, a := range m.Vulnerability.Advisories {
+			add(a.ID)
+		}
+		for _, r := range m.RelatedVulnerabilities {
+			add(r.ID)
+			for _, a := range r.Advisories {
+				add(a.ID)
+			}
+		}
+	}
+
+	for t := range aSet {
+		if isCVE(t.ID) {
+			continue
+		}
+		if _, ok := grypeNames[t]; ok {
+			gSet[t] = struct{}{}
+		}
+	}
+	for t := range gSet {
+		if isCVE(t.ID) {
+			continue
+		}
+		if _, ok := assayNames[t]; ok {
+			aSet[t] = struct{}{}
+		}
+	}
 }

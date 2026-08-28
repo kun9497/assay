@@ -27,25 +27,28 @@ D105에서 주간 차등에 합류했으며(23개 타깃 중 16개, 우선 infor
 | KISA / KNVD | ✓ 1급 소스 | ✗ | ✗ | assay가 기존 도구 재사용 대신 존재하는 이유 |
 | 취약점 외 스캔 | ✗ (의도) | ✗ (의도) | 설정오류 · 시크릿 · 라이선스 | trivy는 멀티 스캐너 — 격차가 아니라 범위의 차이 |
 
-## 실측 패리티 — 2026-08-24 차등 (assay ↔ grype 한정)
+## 실측 패리티 — 패밀리별, 2026-08-28 감사로 갱신
 
-같은 digest 고정 이미지를 두 스캐너에 넣고 튜플 단위로 비교했습니다. 이 13개 타깃은
-이후 23개로 늘어 매주 CI에서 실행됩니다. trivy는 D105에서 자신이 지원하는 16개
-타깃에 대해 실행에 합류했습니다; trivy의 첫 실측 floor는 지금 씨앗을 심는 중이라,
-이 표는 여전히 assay↔grype 한정입니다.
+같은 digest 고정 이미지를 두 스캐너에 넣고 튜플 단위로 비교했습니다 — 2026-08-24에
+13개 타깃으로 처음 측정했고, 지금은 trivy와 함께 23개 타깃으로 매주 실행되며
+(D105), 2026-08-28에 전체를 다시 감사했습니다(한쪽에만 있는 튜플을 전부 분류했고,
+감사 기록은 deferred-decisions에 있습니다). trivy가 한쪽을 뒷받침하는 경우 해당
+행에 표시했습니다.
 
 | 패밀리 | 결과 | 차이의 원인 | 판정 |
 |---|---|---|---|
 | Alpine | 10/10 동일 | grype의 +4는 CPE 폴백 매처 산출 — assay가 의도적으로 갖지 않는 것 | 완전 일치 |
-| Ubuntu | 96/96, wont-fix 15/15 | Canonical 트래커 fix state까지 정확 일치 (D85) | 완전 일치 |
-| AlmaLinux | fixable 집합 동등 | — | 완전 일치 |
-| Amazon · Wolfi | 0 = 0 | 다운그레이드 프로브로 비공허 검증 | 완전 일치 |
-| Debian | 167 일치 | assay-only 6건은 grype DB 누락; 1건은 논쟁 여지 있는 assay FP (zlib1g/MiniZip) | assay 우세 |
-| Rocky | fixable 99.4% | assay-only 2건은 결함 있는 업스트림 레코드 (RLSA-2023:6699, peridot#204로 제보) | 업스트림 결함 |
+| Ubuntu | 98건 일치, assay-only 5건 | assay의 5건 추가분은 grype에 없는 최신 USN; wont-fix 17/17(CVE 10건 기준)은 여전히 정확히 일치 (D85) | assay 우세 |
+| AlmaLinux | fixable 집합 동등 (110/0/0) | grype의 512건 추가분은 전부 Alma 대신 대입된 Red Hat 데이터의 not-fixed/wont-fix — "fixable" 조건이 전부를 제외함 (2026-08-28 재검증) | 완전 일치 |
+| Amazon · Wolfi | 0 = 0 | trivy도 0; components floor가 이제 인벤토리 자체를 지킴 | 완전 일치 |
+| Debian | 171건 일치 | assay-only 6건은 grype DB 누락; 1건은 논쟁 여지 있는 assay FP (zlib1g/MiniZip) — 6+1 구성은 08-24 이후 변동 없음 | assay 우세 |
+| Rocky | fixable 기준 99.4% (assay 쪽) | assay-only 2건은 결함 있는 RLSA-2023:6699에서 기인 (peridot#204); grype의 fixable 추가분 68건은 Rocky 대신 대입된 Red Hat 데이터이며 trivy는 이 중 0건을 확인 — assay와 trivy가 grype에 맞서 일치 | assay 우세 |
 | Oracle | — | grype-only 튜플은 FIPS 계열 ELSA의 메인라인 오매칭 — assay의 거부(D79)가 옳은 쪽 | assay 우세 |
-| Fedora | 30/30 (어드바이저리) | CVE 추출 격차는 양방향 — Bodhi 산문의 한계 (D75, 81.7%) | 양방향 격차 |
-| openSUSE Leap | — | grype v6에 Leap 데이터 자체가 없음 | assay 단독 |
-| SLES (bci-base) | 양방향 차이 | 데이터 모델 차이: assay는 affected-no-fix 108건 표현, grype는 LTSS 채널 픽스 — D91의 LTSS 병합으로 해소 | D91로 해소 |
+| Fedora | 16/16 (어드바이저리 수준) | 한쪽에만 있는 CVE 튜플은 100% 공유 어드바이저리 안에 있음; bare-advisory bridge(2026-08-28)가 그중 11건을 회수 (일치 49→60) | 양방향, 제한적 |
+| openSUSE Leap | — | grype v6에는 Leap 데이터 자체가 없음 (재검증: 매칭 0건) | assay 단독 |
+| SLES (bci-base) | fixable 한정 180/0/65 | D91의 병합이 제 역할을 함(assay의 오해 소지 있는 no-fix 행이 fixable 시야에서 사라짐); 데이터 모델 차이로 104/63 divergence는 남음 — assay는 grype가 표현할 수 없는 no-fix 항목을 표현하고, grype는 go-module 매칭 33건을 담음 | 데이터 모델 차이 |
+| Azure Linux 3.0 | 106건 일치, grype-only 140건 | grype와 trivy 둘 다 assay에 없는 튜플 140건을 보고함(135건이 2026년 CVE이고 전부 실제 .azl3 fix 보유) — 이번 감사에서 나온 유일한 assay 위양성(false-negative) 후보 부류, 조사 중 (deferred-decisions 참조) | **assay 열세** |
+| RHEL (ubi8-nodejs) | 1090건 일치, assay-only 4531건 | assay 추가분의 98%는 `kernel-headers`로, Red Hat의 CSAF product tree가 커널 CVE에 대해 이 패키지를 명시하지만 grype는 해당 패키지를 전혀 내지 않고 trivy는 assay 튜플 중 4,078건을 확인함 — grype가 예외 쪽 | assay 우세 |
 
 요지: 차이의 대부분은 매처 버그가 아니라 **데이터 소스의 차이**였고, 이 작업이 찾아낸
 진짜 버그 하나(D90 CSAF ID 충돌)는 수정됐습니다. 이 실측을 매주 반복하는 것이

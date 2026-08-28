@@ -493,3 +493,55 @@ func TestAssayTuples_ExtractsCVEFromRatingAdvisoryIDs(t *testing.T) {
 		t.Errorf("len(set) = %d, want 2", len(set))
 	}
 }
+
+// TestBridgeBareIDs_JoinsAcrossAdvisoryColumns holds the third instance of
+// the vocabulary lesson (see bridgeBareIDs' own comment). Both directions in
+// one fixture: assay extracts no CVE for FEDORA-2026-aaaa (bare-ID tuple)
+// while grype names that advisory in vulnerability.advisories[] beside the
+// CVE it extracted; grype falls back bare on FEDORA-2026-bbbb while assay's
+// finding carries that id as its advisory id beside a ratings CVE.
+func TestBridgeBareIDs_JoinsAcrossAdvisoryColumns(t *testing.T) {
+	adoc := assayDocument{Findings: []assayFinding{
+		{Package: assayPackage{Name: "vim-data"}, Advisory: assayAdvisory{ID: "FEDORA-2026-aaaa"}},
+		{Package: assayPackage{Name: "libxml2"}, Advisory: assayAdvisory{ID: "FEDORA-2026-bbbb"},
+			Ratings: []assayRating{{AdvisoryID: "CVE-2026-77001"}}},
+	}}
+	gdoc := grypeDocument{Matches: []grypeMatch{
+		{Artifact: grypeArtifact{Name: "vim-data"}, Vulnerability: grypeVuln{
+			ID: "CVE-2026-77000", Advisories: []grypeAdvisory{{ID: "FEDORA-2026-aaaa"}}}},
+		{Artifact: grypeArtifact{Name: "libxml2"}, Vulnerability: grypeVuln{ID: "FEDORA-2026-bbbb"}},
+	}}
+	aSet, gSet := assayTuples(adoc), grypeTuples(gdoc)
+	bridgeBareIDs(adoc, gdoc, aSet, gSet)
+
+	if _, ok := gSet[tuple{Subject: "vim-data", ID: "FEDORA-2026-aaaa"}]; !ok {
+		t.Errorf("gSet = %v, want the bridge to hand grype assay's bare FEDORA-2026-aaaa tuple", gSet)
+	}
+	if _, ok := aSet[tuple{Subject: "libxml2", ID: "FEDORA-2026-bbbb"}]; !ok {
+		t.Errorf("aSet = %v, want the bridge to hand assay grype's bare FEDORA-2026-bbbb tuple", aSet)
+	}
+	agree, _, _ := compareSets(aSet, gSet)
+	if agree != 2 {
+		t.Errorf("agree = %d, want 2 -- both advisories join once the bridge runs", agree)
+	}
+}
+
+// TestBridgeBareIDs_DoesNotEnrichUnconditionally: an advisory id present in
+// a secondary column that NEITHER side fell back to must not become a tuple
+// -- the audit measured unconditional enrichment inflating ubi8n18's
+// onlyAssay from 4531 to 10152 for zero extra agreement.
+func TestBridgeBareIDs_DoesNotEnrichUnconditionally(t *testing.T) {
+	adoc := assayDocument{Findings: []assayFinding{
+		{Package: assayPackage{Name: "openssh"}, Advisory: assayAdvisory{
+			ID: "FEDORA-2026-cccc", Aliases: []string{"CVE-2026-88000"}}},
+	}}
+	gdoc := grypeDocument{Matches: []grypeMatch{
+		{Artifact: grypeArtifact{Name: "openssh"}, Vulnerability: grypeVuln{
+			ID: "CVE-2026-88000", Advisories: []grypeAdvisory{{ID: "FEDORA-2026-cccc"}}}},
+	}}
+	aSet, gSet := assayTuples(adoc), grypeTuples(gdoc)
+	bridgeBareIDs(adoc, gdoc, aSet, gSet)
+	if len(aSet) != 1 || len(gSet) != 1 {
+		t.Errorf("aSet=%v gSet=%v, want 1 tuple each -- the CVE already joins them and the advisory id must not be added", aSet, gSet)
+	}
+}

@@ -28,25 +28,27 @@ trivy numbers will accumulate from its first seeded run onward.*
 | KISA / KNVD | ✓ first-class | ✗ | ✗ | The reason assay exists rather than reusing an existing tool |
 | Beyond vulnerabilities | ✗ (deliberate) | ✗ (deliberate) | misconfig · secrets · licenses | trivy is a multi-scanner — a different scope, not a gap |
 
-## Measured parity — the 2026-08-24 differential (assay ↔ grype only)
+## Measured parity — per family, updated from the 2026-08-28 audit
 
-The same digest-pinned images through both scanners, compared tuple by tuple. These 13
-targets have since grown to 23 and run weekly in CI. trivy joined the run in D105 on the
-16 targets it supports; its first measured floors are being seeded, so this table is
-still assay↔grype only.
+The same digest-pinned images through both scanners, compared tuple by tuple — first
+measured 2026-08-24 over 13 targets, now 23 targets weekly with trivy alongside (D105),
+and re-audited in full on 2026-08-28 (every one-sided tuple classified; the audit's
+record lives in deferred-decisions). Where trivy corroborates a side, the row says so.
 
 | Family | Result | Cause of divergence | Verdict |
 |---|---|---|---|
 | Alpine | 10/10 identical | grype's +4 are its CPE-fallback matcher — a thing assay deliberately lacks | exact parity |
-| Ubuntu | 96/96, wont-fix 15/15 | Canonical-tracker fix states match exactly (D85) | exact parity |
-| AlmaLinux | fixable set-equality | — | exact parity |
-| Amazon · Wolfi | 0 = 0 | verified non-vacuous by downgrade probes | exact parity |
-| Debian | 167 agreed | 6 assay-only tuples are grype DB gaps; 1 arguable assay FP (zlib1g/MiniZip) | assay ahead |
-| Rocky | 99.4% on fixables | 2 assay-only tuples trace to a defective upstream record (RLSA-2023:6699, reported as peridot#204) | upstream defect |
+| Ubuntu | 98 agreed, 5 assay-only | assay's 5 extras are recent USNs grype lacks; wont-fix 17/17 over 10 CVEs still exact (D85) | assay ahead |
+| AlmaLinux | fixable set-equality (110/0/0) | grype's 512 extras are all not-fixed/wont-fix Red Hat data substituted for Alma — the "fixable" qualifier excludes every one (re-verified 2026-08-28) | exact parity |
+| Amazon · Wolfi | 0 = 0 | trivy also 0; components floors now guard the inventory itself | exact parity |
+| Debian | 171 agreed | 6 assay-only tuples are grype DB gaps; 1 arguable assay FP (zlib1g/MiniZip) — the 6+1 split unchanged since 08-24 | assay ahead |
+| Rocky | 99.4% on fixables (assay side) | 2 assay-only from the defective RLSA-2023:6699 (peridot#204); grype's 68 fixable extras are Red Hat data substituted for Rocky, trivy confirms zero of them — assay+trivy agree against grype | assay ahead |
 | Oracle | — | grype-only tuples are FIPS-lineage ELSAs matched against mainline — assay's refusal (D79) is the correct side | assay ahead |
-| Fedora | 30/30 at advisory level | CVE-extraction gaps are bidirectional — the Bodhi-prose limit (D75, 81.7%) | bidirectional gap |
-| openSUSE Leap | — | grype v6 carries no Leap data at all | assay only |
-| SLES (bci-base) | divergence both ways | data-model difference: assay expresses 108 affected-no-fix entries, grype carries LTSS-channel fixes — resolved by the D91 LTSS fold | resolved in D91 |
+| Fedora | 16/16 at advisory level | one-sided CVE tuples sit 100% inside shared advisories; the bare-advisory bridge (2026-08-28) recovered 11 of them (agree 49→60) | bidirectional, bounded |
+| openSUSE Leap | — | grype v6 carries no Leap data at all (re-verified: zero matches) | assay only |
+| SLES (bci-base) | fixable-restricted 180/0/65 | D91's fold did its job (assay's misleading no-fix rows are gone from the fixable view); 104/63 divergence remains by data model — assay expresses no-fix entries grype cannot, grype carries 33 go-module matches | data-model split |
+| Azure Linux 3.0 | 106 agree, 140 grype-only | grype AND trivy both report 140 tuples assay lacks (135 are 2026 CVEs, all with real .azl3 fixes) — the audit's one probable assay false-negative class, under investigation (deferred-decisions) | **assay behind** |
+| RHEL (ubi8-nodejs) | 1090 agree, 4531 assay-only | 98% of assay's extras are `kernel-headers`, which Red Hat's CSAF product tree lists for kernel CVEs; grype never emits the package and trivy confirms 4,078 of assay's tuples — grype is the outlier | assay ahead |
 
 The takeaway: most divergence was **data-source difference**, not matcher bugs, and the
 one real bug the exercise found (the D90 CSAF ID collision) was fixed. Repeating this

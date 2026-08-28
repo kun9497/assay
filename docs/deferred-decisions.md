@@ -154,6 +154,60 @@ not include — the LTSS question was researched and resolved in D91 (the entrie
 the same archive under `-LTSS` product names; folded with a mainline-wins tie-break) —
 bci-base's misleading no-fix rows became real fixed versions.
 
+**Re-audited 2026-08-28** against the full 23-target capture set, after the SUSE-SU
+misreading (D105's correction) raised the question of whether more vocabulary mismatches
+were hiding. Findings, each verified by reconstructing the join in an independent
+implementation that reproduced the run's table exactly:
+
+- **One more vocabulary case, now fixed**: Fedora and Debian carried one-sided tuples
+  whose advisory ID the other side names in a column the join did not read (grype's
+  `vulnerability.advisories[]`, assay's advisory id/aliases/upstream). scandiff's
+  `bridgeBareIDs` closes it — fedora agree 49→60, bitnami-legacy-pg 488→489, every other
+  target byte-identical. Unconditional enrichment was measured and rejected (it inflates
+  ubi8n18's onlyAssay from 4,531 to 10,152 for the same dozen recovered tuples).
+- **The paragraphs above have drifted numerically** and are left as the 08-24 record:
+  Ubuntu is now 98 agreed with 5 assay-only (no longer set-equal — assay ahead;
+  wont-fix 17/17 over 10 CVEs), Debian 171 agreed (the 6-gaps+1-arguable-FP split
+  unchanged), Fedora 16/16 at advisory level with the one-sided tuples 100% inside
+  shared advisories. docs/comparison.md carries the current numbers.
+- **Rocky's "99.4% on fixables" is one-directional**: 68 grype-only FIXABLE tuples exist,
+  all from grype substituting `redhat:distro:redhat:9` data for Rocky, and trivy confirms
+  zero of them — assay+trivy agree against grype. Alma's 512 grype-only are entirely
+  not-fixed/wont-fix (the "fixable set-equality" claim re-verified exactly).
+- **ubi8n18's onlyAssay 4,531 is 98% `kernel-headers`** — Red Hat's CSAF product tree
+  lists kernel-headers for kernel CVEs, grype never emits the package, and trivy
+  confirms 4,078 of assay's tuples: grype is the outlier, not assay. 273 of those
+  findings are fixed-state and actionable.
+- **cleanstart's floors were vacuous** (minAgree/minFindings 0 enforce nothing on a
+  clean image): a `minComponents` floor now asserts the inventory itself — findings can
+  honestly be zero, an inventory of a real image cannot. az2023 and wolfi got the same
+  guard.
+- The alpaquita/liberica/cleanstart grype outputs are 100% its CPE fallback (no provider
+  behind them), leap156's grype zero re-verified, and trivy's dropped non-CVE entries
+  were each checked: genuinely CVE-less (BDSA-*, TEMP-*, one DLA refresh). No further
+  vocabulary case remains in the capture set.
+
+The one genuinely open item the audit surfaced is Azure Linux 3.0, next entry.
+
+---
+
+### Azure Linux 3.0 — 140 advisories two other scanners see and assay does not
+
+The 2026-08-28 audit's only probable real false-negative class: on the azl3 target,
+grype and trivy BOTH report 140 (package, CVE) tuples assay lacks — 140/140
+trivy-confirmed, all fix-state fixed with real `.azl3` fixed versions (e.g. curl
+8.8.0→8.11.1-10.azl3), and 135 of the 140 are 2026 CVEs while assay's own azl3 set
+holds only 12 CVEs from 2026. The ecosystem key and matcher are fine — 106 tuples agree,
+and mariner2 (same provider, older image) runs 66 tuples AHEAD of grype — so this points
+at the provider's fetch window or record filtering for recent Azure Linux 3.0
+advisories, not routing. Two independent scanners agreeing against assay is the
+strongest false-negative signal the differential can produce.
+
+**Investigate**: what the Azure Linux OSV/vulnerability feed carried for those 140 CVEs
+on 2026-08-28, whether the provider's fetch saw them, and whether ingestion filtered
+them. Until then the azl3 floors stay as seeded — they measure what assay does report,
+so a fix will show up as agree rising, not as a breach.
+
 ---
 
 ### Ecosystem coverage against grype — the gap, remeasured

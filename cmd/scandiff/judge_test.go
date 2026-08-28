@@ -7,7 +7,7 @@ func TestJudge_AllFloorsHeldExactlyAtBoundary(t *testing.T) {
 	// inside them: minAgree/minFindings are >=, maxFindings/maxNotEvaluated
 	// are <=.
 	target := Target{Name: "boundary", MinAgree: 3, MinFindings: 3, MaxFindings: 3, MaxNotEvaluated: 3}
-	if breaches := judge(target, 3, 3, 3); len(breaches) != 0 {
+	if breaches := judge(target, 3, 3, 3, 50); len(breaches) != 0 {
 		t.Errorf("judge at exact boundaries = %v, want no breaches", breaches)
 	}
 }
@@ -15,23 +15,23 @@ func TestJudge_AllFloorsHeldExactlyAtBoundary(t *testing.T) {
 func TestJudge_OneUnderEachFloorBreachesOnlyThatFloor(t *testing.T) {
 	target := Target{Name: "t", MinAgree: 5, MinFindings: 5, MaxFindings: 5, MaxNotEvaluated: 5}
 
-	if b := judge(target, 4, 5, 5); len(b) != 1 || b[0].Floor != "minAgree" {
+	if b := judge(target, 4, 5, 5, 50); len(b) != 1 || b[0].Floor != "minAgree" {
 		t.Errorf("agree=4: judge = %v, want exactly one minAgree breach", b)
 	}
-	if b := judge(target, 5, 4, 5); len(b) != 1 || b[0].Floor != "minFindings" {
+	if b := judge(target, 5, 4, 5, 50); len(b) != 1 || b[0].Floor != "minFindings" {
 		t.Errorf("findings=4: judge = %v, want exactly one minFindings breach", b)
 	}
-	if b := judge(target, 5, 6, 5); len(b) != 1 || b[0].Floor != "maxFindings" {
+	if b := judge(target, 5, 6, 5, 50); len(b) != 1 || b[0].Floor != "maxFindings" {
 		t.Errorf("findings=6: judge = %v, want exactly one maxFindings breach", b)
 	}
-	if b := judge(target, 5, 5, 6); len(b) != 1 || b[0].Floor != "maxNotEvaluated" {
+	if b := judge(target, 5, 5, 6, 50); len(b) != 1 || b[0].Floor != "maxNotEvaluated" {
 		t.Errorf("notEvaluated=6: judge = %v, want exactly one maxNotEvaluated breach", b)
 	}
 }
 
 func TestJudge_MultipleFloorsCanBreachTogether(t *testing.T) {
 	target := Target{Name: "multi", MinAgree: 10, MinFindings: 10, MaxFindings: 20, MaxNotEvaluated: 0}
-	breaches := judge(target, 0, 0, 5)
+	breaches := judge(target, 0, 0, 5, 50)
 	if len(breaches) != 3 {
 		t.Fatalf("judge = %v, want 3 simultaneous breaches (minAgree, minFindings, maxNotEvaluated)", breaches)
 	}
@@ -121,5 +121,18 @@ func TestTrivyFloors_IsZero(t *testing.T) {
 		if got := c.f.isZero(); got != c.want {
 			t.Errorf("%s: isZero() = %v, want %v", c.name, got, c.want)
 		}
+	}
+}
+
+// TestJudge_MinComponentsCatchesAnEmptyInventory holds the guard for
+// zero-finding targets: findings can honestly be zero, an inventory of a
+// real image cannot (targets.go's MinComponents comment).
+func TestJudge_MinComponentsCatchesAnEmptyInventory(t *testing.T) {
+	target := Target{Name: "guarded", MinComponents: 40}
+	if b := judge(target, 0, 0, 0, 0); len(b) != 1 || b[0].Floor != "minComponents" {
+		t.Fatalf("judge = %v, want exactly one minComponents breach for an empty inventory", b)
+	}
+	if b := judge(target, 0, 0, 0, 49); len(b) != 0 {
+		t.Fatalf("judge = %v, want no breach when the inventory is real", b)
 	}
 }
