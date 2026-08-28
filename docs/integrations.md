@@ -53,11 +53,10 @@ The `security-events: write` permission is what lets the workflow upload to code
 ## The database
 
 `assay db update` pulls the published database from `ghcr.io/kun9497/assay-db` — an OCI
-artifact, seconds not hours. It is currently **private to the maintainer's namespace**, so
-a job pulling it needs read access: the `docker login ghcr.io` step in both examples grants
-it for a repo in the same organization (`packages: read` permission). If your pipeline
-cannot reach that artifact, run `assay db build` instead — it builds the database from
-upstream sources with no external artifact, at the cost of time.
+artifact, seconds not hours, **public** since 2026-08-28, so the pull needs no login and no
+packages permission. If your pipeline cannot reach ghcr.io at all, run `assay db build`
+instead — it builds the database from upstream sources with no external artifact, at the
+cost of time.
 
 The database is orthogonal to the scan: update it once per job (or cache it), and every
 `assay scan` after that only reads it. A scan of an SBOM or a local tarball makes no network
