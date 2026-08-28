@@ -3904,10 +3904,18 @@ CleanStart — 에 대한 정직한 상태로, trivy 자신의 문서에 대고 
 실행이 실제 floors를 심고, 그것이 커밋되어 다음 주간 실행부터 게이트로
 작동합니다. trivy 자신의 `minFindings`/`maxFindings`는 trivy의 tuple 개수를
 경계 짓는 것이지(오래되었거나 깨진 trivy DB를 잡아내는 것), assay의 것이
-아니며, assay 쪽은 이미 grype 쪽 floors가 잡고 있습니다. 합치는 CVE 전용으로
-유지됩니다; trivy는 자신의 ID를 upstream에서 CVE로 정규화하므로,
-assay/grype 정규화기와 달리 bare-ID fallback이 없습니다 — trivy 전용
-advisory ID는 결코 아무것과도 agree할 수 없고 노이즈만 부풀릴 것입니다.
+아니며, assay 쪽은 이미 grype 쪽 floors가 잡고 있습니다. 합치는 CVE 전용으로 유지되고 bare-ID
+fallback도 없습니다 — trivy 전용 advisory ID는 결코 아무것과도 agree할 수
+없고 노이즈만 부풀릴 것입니다 — 다만 "trivy는 자신의 ID를 upstream에서
+CVE로 정규화한다"는 전제는 SUSE에서 거짓으로 판명됐습니다: SLE finding은
+SUSE-SU 패치 advisory로 키가 잡히고 CVE는 References URL 안에만 있어, 첫
+시딩 실행에서 bci156의 실제 trivy finding 58건이 tuple 0개로 합쳐져 "trivy가
+아무것도 못 찾았다"로 오독됐고, 캡처를 재검토(2026-08-28)하고서야
+드러났습니다. 정규화기는 이제 비-CVE 엔트리의 references에서 CVE를
+추출합니다 — CVE가 primary ID가 싣지 않는 컬럼에 사는, D93의 ALSA/ELSA
+교훈 그대로 — 그 결과 bci156은 정보 모드의 0에서 agree 182/188의 게이트로
+전환됐습니다. Leap 15.6은 진짜 공백으로 남습니다: trivy는 EOSL로 표시하고
+취약점 목록 자체를 반환하지 않는데 assay는 12건을 보고합니다.
 trivy는 버전이 고정되어 있고(v0.74.0, floors를 다시 심는 것과 같은 커밋에서
 의도적으로 올립니다) DB는 버전+주 단위로 캐시됩니다. 독립 리뷰: 뮤테이션
 5개 중 5개가 red입니다 — 첫 시도 하나는 sed no-op이라 제대로 재적용될

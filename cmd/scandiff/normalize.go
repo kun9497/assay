@@ -185,19 +185,31 @@ type trivyResult struct {
 }
 
 type trivyVuln struct {
-	PkgName         string `json:"PkgName"`
-	VulnerabilityID string `json:"VulnerabilityID"`
+	PkgName         string   `json:"PkgName"`
+	VulnerabilityID string   `json:"VulnerabilityID"`
+	References      []string `json:"References"`
 }
 
+// refCVERe finds a CVE identifier EMBEDDED in a reference URL, where cveRe's
+// whole-string anchors cannot reach it. \d+ is greedy, so an ID is never
+// truncated mid-number; a digit directly after a real CVE in a URL would be
+// part of the ID anyway.
+var refCVERe = regexp.MustCompile(`CVE-\d{4}-\d+`)
+
 // trivyTuples extracts the (package, CVE) set from one trivy document.
-// Unlike assayTuples and grypeTuples, there is no bare-ID fallback: trivy
-// normalizes its own VulnerabilityID to a CVE wherever an upstream advisory
-// maps to one, so a VulnerabilityID that is not CVE-shaped is trivy's own
-// non-CVE advisory ID (e.g. a GHSA trivy chose not to resolve) and is
-// dropped rather than joined on, the same "CVE is the only vocabulary both
-// sides reliably speak" reasoning cveRe's own doc comment gives -- keeping a
-// fallback here would let a trivy-only advisory ID inflate onlyAssay-style
-// noise against a scanner it can never actually agree with.
+//
+// trivy normalizes its VulnerabilityID to a CVE for most ecosystems, but NOT
+// for SUSE: SLE findings are keyed by patch advisory (SUSE-SU-YYYY:NNNN-N),
+// with the CVE appearing only inside References URLs -- measured on the D105
+// seeding run, where bci156's 58 real trivy findings joined as zero tuples
+// and the differential wrongly read as "trivy found nothing". So a
+// non-CVE-shaped VulnerabilityID falls back to every CVE named in its
+// References, the same lesson D93's seeding taught for ALSA/ELSA (the CVE
+// lives in a column the primary ID field does not carry). An entry with no
+// CVE anywhere is still dropped rather than joined on its bare ID: unlike
+// assayTuples/grypeTuples there is no bare-ID fallback, because a
+// trivy-only advisory ID can never agree with anything and would only
+// inflate onlyAssay-style noise.
 //
 // A document with no Results at all (a clean image) and a Result whose
 // Vulnerabilities is null or absent both contribute zero tuples, not an
@@ -207,10 +219,15 @@ func trivyTuples(doc trivyDocument) map[tuple]struct{} {
 	set := make(map[tuple]struct{})
 	for _, res := range doc.Results {
 		for _, v := range res.Vulnerabilities {
-			if !isCVE(v.VulnerabilityID) {
+			if isCVE(v.VulnerabilityID) {
+				set[tuple{Subject: v.PkgName, ID: v.VulnerabilityID}] = struct{}{}
 				continue
 			}
-			set[tuple{Subject: v.PkgName, ID: v.VulnerabilityID}] = struct{}{}
+			for _, ref := range v.References {
+				for _, cve := range refCVERe.FindAllString(ref, -1) {
+					set[tuple{Subject: v.PkgName, ID: cve}] = struct{}{}
+				}
+			}
 		}
 	}
 	return set

@@ -145,7 +145,11 @@
     "minAgree": 15,
     "minFindings": 102,
     "maxFindings": 430,
-    "trivy": {}
+    "trivy": {
+      "minAgree": 154,
+      "minFindings": 159,
+      "maxFindings": 376
+    }
   },
   {
     "name": "mariner2",
