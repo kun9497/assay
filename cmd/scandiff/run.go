@@ -19,26 +19,36 @@ const (
 	exitError    = 2 // a target could not be run or its result could not be trusted
 )
 
-const usage = `grypediff — deterministic assay/grype differential (D93)
+const usage = `scandiff — deterministic assay/grype/trivy differential (D93, D105)
 
 Usage:
-  grypediff -targets <file> -assay <bin> -grype <bin> -capture <dir>
-      Live mode: scans every target in <file> with both binaries, judges the
+  scandiff -targets <file> -assay <bin> -grype <bin> -capture <dir> [-trivy <bin>]
+      Live mode: scans every target in <file> with assay and grype, judges the
       result against that target's committed floors, and writes every raw
       JSON document into <dir> as <name>.assay.json / <name>.grype.json.
+      -trivy is only needed for targets whose entry carries a "trivy" block
+      (D105); a target with no such block never invokes it, and -trivy may
+      be omitted entirely if no target in the file has one.
 
-  grypediff -targets <file> -offline <dir>
+  scandiff -targets <file> -offline <dir>
       Offline mode: reads <dir>/<name>.assay.json and <dir>/<name>.grype.json
-      instead of running either scanner. Same judging path as live mode --
-      this is how floors are seeded and how tests get integration-shaped
-      coverage without a network call.
+      (and <dir>/<name>.trivy.json for a target with a trivy block) instead
+      of running any scanner. Same judging path as live mode -- this is how
+      floors are seeded and how tests get integration-shaped coverage
+      without a network call.
 
 Exit codes:
   0  every target held its floors
   1  a floor was breached (regression signal)
   2  a target could not be run, or its result could not be trusted
-     (an assay scan that exited 2, a grype hard failure, malformed JSON, or
-     an unreadable/invalid targets file)
+     (an assay scan that exited 2, a grype or trivy hard failure, malformed
+     JSON, or an unreadable/invalid targets file)
+
+A target's trivy block with every floor at zero ("trivy": {}) is
+INFORMATIONAL, not a committed floor: scandiff measures and prints the
+numbers on stdout in ready-to-paste JSON form but never breaches on them.
+Run with -trivy and workflow_dispatch to seed real floors before committing
+them.
 `
 
 // execFunc is the seam that stands between run and the real scanners: a
@@ -68,11 +78,17 @@ type row struct {
 // os.Exit. execScan is the additional seam D93 asks for, so no test here
 // ever launches a real scanner.
 func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
-	fs := flag.NewFlagSet("grypediff", flag.ContinueOnError)
+	fs := flag.NewFlagSet("scandiff", flag.ContinueOnError)
 	fs.SetOutput(io.Discard) // we print our own usage, once, on our own terms
 	targetsPath := fs.String("targets", "", "path to the floors JSON file (required)")
 	assayBin := fs.String("assay", "", "path to the assay binary (live mode)")
 	grypeBin := fs.String("grype", "", "path to the grype binary (live mode)")
+	// trivyBin is deliberately NOT part of the "live mode requires..." check
+	// below: most targets carry no "trivy" block at all (D105), and the ones
+	// that do are judged one target at a time -- see runTrivy, which reports
+	// a missing binary as that target's own fatal reason rather than
+	// refusing to run the whole tool.
+	trivyBin := fs.String("trivy", "", "path to the trivy binary (live mode; only needed for targets with a trivy block)")
 	captureDir := fs.String("capture", "", "directory to write raw scan JSON into (live mode)")
 	offlineDir := fs.String("offline", "", "directory of previously captured JSON to replay")
 
@@ -169,6 +185,25 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 				fmt.Fprintln(stderr, b.String())
 			}
 		}
+
+		// D105: the optional second comparison against trivy. Nothing here
+		// runs, and no <name>.trivy.json capture is ever written, for a
+		// target whose entry carries no "trivy" key at all.
+		if t.Trivy != nil {
+			switch trivyPhase(execScan, *trivyBin, *captureDir, *offlineDir, live, t, aSet, stdout, stderr) {
+			case trivyError:
+				r.Verdict = "ERROR"
+				worst = exitError
+			case trivyBreached:
+				if r.Verdict == "ok" {
+					r.Verdict = "BREACH"
+				}
+				if worst < exitFindings {
+					worst = exitFindings
+				}
+			}
+		}
+
 		rows = append(rows, r)
 	}
 
@@ -255,6 +290,125 @@ func readOffline(dir string, t Target) (assayRaw, grypeRaw []byte, fatal string)
 		return nil, nil, fmt.Sprintf("read offline grype capture: %v", err)
 	}
 	return assayRaw, grypeRaw, ""
+}
+
+// trivyOutcome is trivyPhase's result: whether the target's verdict needs
+// upgrading because of what the trivy comparison found (or failed to find).
+type trivyOutcome int
+
+const (
+	trivyOK       trivyOutcome = iota // nothing to report -- held, or informational
+	trivyBreached                     // a committed trivy floor tripped
+	trivyError                        // trivy itself could not be trusted (committed-floor targets only)
+)
+
+// trivyPhase runs (live) or replays (offline) the trivy comparison for one
+// target that carries a "trivy" block, judges it against that block, and
+// reports on stderr/stdout the same way the primary assay/grype comparison
+// does -- see run's own call site for how the returned outcome folds into
+// that target's row and the tool's overall exit code.
+//
+// D105's informational/committed split is entirely inside this function: a
+// trivy failure (could not launch, hard failure, malformed JSON) on an
+// INFORMATIONAL target (every floor at zero) is reported as a warning and
+// never escalates past trivyOK -- there is nothing committed to have
+// broken. The identical failure on a target with a real floor is
+// trivyError, the same "this target's result cannot be trusted" treatment
+// runAssay/runGrype's own fatal paths get.
+func trivyPhase(execScan execFunc, trivyBin, captureDir, offlineDir string, live bool, t Target, aSet map[tuple]struct{}, stdout, stderr io.Writer) trivyOutcome {
+	informational := t.Trivy.isZero()
+
+	var trivyRaw []byte
+	var fatal string
+	if live {
+		trivyRaw, fatal = runTrivy(execScan, trivyBin, t)
+		writeCapture(stderr, captureDir, t.Name, "trivy", trivyRaw)
+	} else {
+		trivyRaw, fatal = readOfflineTrivy(offlineDir, t)
+	}
+
+	if fatal != "" {
+		if informational {
+			fmt.Fprintf(stderr, "warning: target=%s trivy (informational): %s\n", t.Name, fatal)
+			return trivyOK
+		}
+		fmt.Fprintf(stderr, "error: target=%s trivy %s\n", t.Name, fatal)
+		return trivyError
+	}
+
+	var tdoc trivyDocument
+	if err := json.Unmarshal(trivyRaw, &tdoc); err != nil {
+		msg := fmt.Sprintf("malformed trivy JSON: %v", err)
+		if informational {
+			fmt.Fprintf(stderr, "warning: target=%s trivy (informational): %s\n", t.Name, msg)
+			return trivyOK
+		}
+		fmt.Fprintf(stderr, "error: target=%s %s\n", t.Name, msg)
+		return trivyError
+	}
+
+	tSet := trivyTuples(tdoc)
+	agree, _, _ := compareSets(aSet, tSet)
+	findings := len(tSet)
+
+	if informational {
+		snippet, _ := json.Marshal(TrivyFloors{MinAgree: agree, MinFindings: findings, MaxFindings: findings})
+		fmt.Fprintf(stderr, "info: target=%s trivy measured (informational; paste into scanner-diff-targets.json):\n", t.Name)
+		fmt.Fprintf(stdout, "%s\n", snippet)
+		return trivyOK
+	}
+
+	breaches := judgeTrivy(t, agree, findings)
+	if len(breaches) == 0 {
+		return trivyOK
+	}
+	for _, b := range breaches {
+		fmt.Fprintln(stderr, b.String())
+	}
+	return trivyBreached
+}
+
+// runTrivy runs `trivy image --format json --quiet <ref>`. Same
+// probe-before-trusting-the-exit-code shape as runGrype (see its own
+// comment): trivy is run with no --exit-code gate configured here, so 0 is
+// the expected exit, but output that parses as JSON is trusted regardless
+// of the exit code, and a nonzero exit is only a hard failure once parsing
+// has already failed.
+//
+// An empty bin is a configuration fault, not a launch failure, and is
+// reported without ever calling execScan: -trivy may legitimately be
+// omitted when no target needs it, so this has to be a per-target fatal
+// reason (checked here, where a target that DOES need it is known), not a
+// blanket "live mode requires -trivy" refusal at the top of run.
+func runTrivy(execScan execFunc, bin string, t Target) (out []byte, fatal string) {
+	if bin == "" {
+		return nil, "-trivy binary not configured"
+	}
+	out, code, err := execScan(bin, "image", "--format", "json", "--quiet", t.Ref)
+	if err != nil {
+		return out, fmt.Sprintf("trivy: could not run: %v", err)
+	}
+	var probe json.RawMessage
+	if uerr := json.Unmarshal(out, &probe); uerr != nil {
+		if code != 0 {
+			return out, fmt.Sprintf("trivy hard failure (exit %d)", code)
+		}
+		return out, "malformed trivy JSON"
+	}
+	return out, ""
+}
+
+// readOfflineTrivy replays a previously captured trivy JSON document,
+// mirroring readOffline. A target with a trivy block but no captured
+// <name>.trivy.json is reported exactly like a missing assay/grype capture
+// -- named by target, not silently treated as zero findings, which would
+// let a committed-floor target quietly go unjudged.
+func readOfflineTrivy(dir string, t Target) (out []byte, fatal string) {
+	out, err := os.ReadFile(filepath.Join(dir, t.Name+".trivy.json"))
+	if err != nil {
+		return nil, fmt.Sprintf("read offline trivy capture: %v", err)
+	}
+	return out, ""
 }
 
 // writeCapture persists one raw scan document for later human review

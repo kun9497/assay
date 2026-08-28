@@ -39,3 +39,35 @@ func judge(t Target, agree, findings, notEvaluated int) []breach {
 	}
 	return out
 }
+
+// judgeTrivy is judge's D105 counterpart for the optional trivy comparison.
+// It is a separate function rather than a parameterized call into judge:
+// there is no notEvaluated counterpart (trivy carries no such concept), and
+// an all-zero TrivyFloors block is INFORMATIONAL rather than a committed
+// floor -- see TrivyFloors.isZero -- which judge itself has no notion of. A
+// nil t.Trivy (the block is absent from the file) and an informational
+// block both produce no breaches; the caller is expected not to call this
+// at all when t.Trivy is nil, since there is nothing to have measured, but
+// it is nil-safe regardless so a caller cannot forget the check and panic.
+//
+// agree and findings are the caller's to compute (run.go: agree =
+// |assay tuples ∩ trivy tuples|, findings = len(trivy tuples) -- see
+// TrivyFloors' own doc comment for why findings is trivy's own count and
+// not assay's).
+func judgeTrivy(t Target, agree, findings int) []breach {
+	if t.Trivy == nil || t.Trivy.isZero() {
+		return nil
+	}
+	f := *t.Trivy
+	var out []breach
+	if agree < f.MinAgree {
+		out = append(out, breach{t.Name, "trivy.minAgree", fmt.Sprintf(">=%d", f.MinAgree), agree})
+	}
+	if findings < f.MinFindings {
+		out = append(out, breach{t.Name, "trivy.minFindings", fmt.Sprintf(">=%d", f.MinFindings), findings})
+	}
+	if findings > f.MaxFindings {
+		out = append(out, breach{t.Name, "trivy.maxFindings", fmt.Sprintf("<=%d", f.MaxFindings), findings})
+	}
+	return out
+}

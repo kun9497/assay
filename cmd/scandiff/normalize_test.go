@@ -260,6 +260,150 @@ func TestCompareSets_EmptyBothSides(t *testing.T) {
 	}
 }
 
+// --- D105: trivy's own document shape --------------------------------------
+
+func TestTrivyTuples_ExtractsFromOSPkgsResult(t *testing.T) {
+	const doc = `{
+		"Results": [
+			{
+				"Class": "os-pkgs",
+				"Vulnerabilities": [
+					{"PkgName": "busybox", "VulnerabilityID": "CVE-2025-60876"}
+				]
+			}
+		]
+	}`
+	var d trivyDocument
+	if err := json.Unmarshal([]byte(doc), &d); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	set := trivyTuples(d)
+	want := tuple{Subject: "busybox", ID: "CVE-2025-60876"}
+	if _, ok := set[want]; !ok || len(set) != 1 {
+		t.Fatalf("trivyTuples = %v, want exactly {%v}", set, want)
+	}
+}
+
+func TestTrivyTuples_ExtractsFromLangPkgsResult(t *testing.T) {
+	const doc = `{
+		"Results": [
+			{
+				"Class": "lang-pkgs",
+				"Vulnerabilities": [
+					{"PkgName": "lodash", "VulnerabilityID": "CVE-2021-23337"}
+				]
+			}
+		]
+	}`
+	var d trivyDocument
+	if err := json.Unmarshal([]byte(doc), &d); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	set := trivyTuples(d)
+	want := tuple{Subject: "lodash", ID: "CVE-2021-23337"}
+	if _, ok := set[want]; !ok || len(set) != 1 {
+		t.Fatalf("trivyTuples = %v, want exactly {%v}", set, want)
+	}
+}
+
+func TestTrivyTuples_MultipleResultClassesCombine(t *testing.T) {
+	const doc = `{
+		"Results": [
+			{"Class": "os-pkgs", "Vulnerabilities": [{"PkgName": "openssl", "VulnerabilityID": "CVE-2026-0001"}]},
+			{"Class": "lang-pkgs", "Vulnerabilities": [{"PkgName": "requests", "VulnerabilityID": "CVE-2026-0002"}]}
+		]
+	}`
+	var d trivyDocument
+	if err := json.Unmarshal([]byte(doc), &d); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	set := trivyTuples(d)
+	if len(set) != 2 {
+		t.Fatalf("trivyTuples = %v, want 2 tuples across both result classes", set)
+	}
+}
+
+func TestTrivyTuples_DropsNonCVEShapedIDs(t *testing.T) {
+	// Trivy sometimes carries its own non-CVE advisory ID (a GHSA it chose
+	// not to resolve to a CVE). Unlike assayTuples/grypeTuples, there is no
+	// bare-ID fallback here -- a non-CVE trivy ID can never agree with
+	// anything assay reports, so keeping it would only inflate noise.
+	const doc = `{
+		"Results": [
+			{"Class": "lang-pkgs", "Vulnerabilities": [
+				{"PkgName": "example-lib", "VulnerabilityID": "GHSA-aaaa-bbbb-cccc"},
+				{"PkgName": "example-lib", "VulnerabilityID": "CVE-2026-1234"}
+			]}
+		]
+	}`
+	var d trivyDocument
+	if err := json.Unmarshal([]byte(doc), &d); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	set := trivyTuples(d)
+	if len(set) != 1 {
+		t.Fatalf("trivyTuples = %v, want exactly 1 tuple (the non-CVE GHSA id must be dropped)", set)
+	}
+	want := tuple{Subject: "example-lib", ID: "CVE-2026-1234"}
+	if _, ok := set[want]; !ok {
+		t.Errorf("missing tuple %+v", want)
+	}
+}
+
+func TestTrivyTuples_DedupsRepeatedTuple(t *testing.T) {
+	const doc = `{
+		"Results": [
+			{"Class": "os-pkgs", "Vulnerabilities": [
+				{"PkgName": "curl", "VulnerabilityID": "CVE-2026-5000"}
+			]},
+			{"Class": "os-pkgs", "Vulnerabilities": [
+				{"PkgName": "curl", "VulnerabilityID": "CVE-2026-5000"}
+			]}
+		]
+	}`
+	var d trivyDocument
+	if err := json.Unmarshal([]byte(doc), &d); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	set := trivyTuples(d)
+	if len(set) != 1 {
+		t.Fatalf("trivyTuples = %v, want exactly one deduped tuple", set)
+	}
+}
+
+func TestTrivyTuples_NoResultsIsZeroTuplesNotError(t *testing.T) {
+	// A clean image: trivy's document has no Results key at all.
+	const doc = `{}`
+	var d trivyDocument
+	if err := json.Unmarshal([]byte(doc), &d); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	set := trivyTuples(d)
+	if len(set) != 0 {
+		t.Fatalf("trivyTuples = %v, want zero tuples for a document with no Results", set)
+	}
+}
+
+func TestTrivyTuples_NullVulnerabilitiesIsZeroTuplesNotError(t *testing.T) {
+	// A Result present (e.g. a "secret" or "config" class, or an os-pkgs
+	// class that simply found nothing) but its Vulnerabilities key is
+	// explicitly null rather than an empty array or absent.
+	const doc = `{
+		"Results": [
+			{"Class": "os-pkgs", "Vulnerabilities": null},
+			{"Class": "secret"}
+		]
+	}`
+	var d trivyDocument
+	if err := json.Unmarshal([]byte(doc), &d); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	set := trivyTuples(d)
+	if len(set) != 0 {
+		t.Fatalf("trivyTuples = %v, want zero tuples, not an error, for null/absent Vulnerabilities", set)
+	}
+}
+
 func TestAssayTuples_ExtractsCVEFromRatingAdvisoryIDs(t *testing.T) {
 	// Trimmed from the real alma9 seeding capture (seed-capture/alma9.assay.json):
 	// AlmaLinux's ALSA records carry NO aliases or upstream at all -- the CVE

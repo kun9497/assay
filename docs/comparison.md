@@ -3,8 +3,9 @@
 *Snapshot taken 2026-08-27, against assay v0.2.0, grype v6, and the trivy.dev
 documentation as read that day. The assay↔grype numbers are **measured** — the same
 digest-pinned images run through both scanners in the weekly differential (D93). The trivy
-column is a **spec comparison** from its official documentation; no differential against
-trivy has been run.*
+column is a **spec comparison** from its official documentation — trivy joined the weekly
+differential in D105 (16 of the 23 targets, informational floors first), so measured
+trivy numbers will accumulate from its first seeded run onward.*
 
 ## Structure and character
 
@@ -30,8 +31,9 @@ trivy has been run.*
 ## Measured parity — the 2026-08-24 differential (assay ↔ grype only)
 
 The same digest-pinned images through both scanners, compared tuple by tuple. These 13
-targets have since grown to 23 and run weekly in CI. trivy is not yet a differential
-target, so it does not appear here.
+targets have since grown to 23 and run weekly in CI. trivy joined the run in D105 on the
+16 targets it supports; its first measured floors are being seeded, so this table is
+still assay↔grype only.
 
 | Family | Result | Cause of divergence | Verdict |
 |---|---|---|---|

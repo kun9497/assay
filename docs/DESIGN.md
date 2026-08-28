@@ -641,8 +641,13 @@ exited 0 while 24 findings went unmentioned.
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15
 - [x] The differential runs itself (D93) — weekly, 13 digest-pinned targets against the
-      published artifact, judged by committed floors (`cmd/grypediff`, stdlib-only);
-      reading the ratings column revived two dead agreements (alma 0→106, oracle 0→37)
+      published artifact, judged by committed floors (the tool now lives at `cmd/scandiff`,
+      D105; stdlib-only); reading the ratings column revived two dead agreements
+      (alma 0→106, oracle 0→37)
+- [x] trivy joins the differential (D105) — `cmd/grypediff` renamed `cmd/scandiff`,
+      workflow `scanner-diff.yml`; 16 of the 23 targets carry an optional `trivy` floors
+      block (the other 7 are distros trivy does not support), seeded
+      measure-then-commit via an informational mode that prints paste-ready floors
 - [x] Azure Linux and CBL-Mariner (D94) — one OSV family, two os-release IDs, the
       existing rpm comparer; scancmd's family map had carried both IDs untested since
       D43; two aged digest-pinned images joined the weekly differential (agree 132/106)
@@ -1021,10 +1026,12 @@ permissions are declared. Link it once on the package page: *Package settings �
 access → add the repository with Write*. Pushes carry `org.opencontainers.image.source`, so a
 package created by the workflow links itself; one created by hand before that does not.
 
-Correctness is checked by **differential testing against grype** at every stage — since
-D93 on a weekly schedule (`grype-diff.yml`: 13 digest-pinned targets, the published
-artifact, committed floors that trip on regression). Exact agreement is not expected — the
-data sources differ — but a large divergence means the matcher is wrong. Slice ① came out set-identical on both SBOMs it was run against:
+Correctness is checked by **differential testing against grype and trivy** at every stage —
+since D93 on a weekly schedule, extended to trivy in D105 (`scanner-diff.yml`: 23
+digest-pinned targets, the published artifact, committed floors that trip on regression;
+16 targets also compare against trivy — the other 7 are distros trivy does not support).
+Exact agreement is not expected — the data sources differ — but a large divergence means
+the matcher is wrong. Slice ① came out set-identical on both SBOMs it was run against:
 
 | Target | assay | grype | missed | extra |
 |---|---:|---:|---:|---:|

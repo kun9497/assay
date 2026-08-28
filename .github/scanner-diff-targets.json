@@ -5,7 +5,8 @@
     "ref": "mirror.gcr.io/library/alpine@sha256:6baf43584bcb78f2e5847d1de515f23499913ac9f12bdf834811a3145eb11ca1",
     "minAgree": 8,
     "minFindings": 8,
-    "maxFindings": 25
+    "maxFindings": 25,
+    "trivy": {}
   },
   {
     "name": "debian12",
@@ -13,7 +14,8 @@
     "ref": "mirror.gcr.io/library/debian@sha256:6ebd97fa83deb272194a2cf015b3d26a4d538e9ad3a7a79d544c8af5b0a01443",
     "minAgree": 143,
     "minFindings": 147,
-    "maxFindings": 348
+    "maxFindings": 348,
+    "trivy": {}
   },
   {
     "name": "ubuntu2204",
@@ -21,7 +23,8 @@
     "ref": "mirror.gcr.io/library/ubuntu@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc",
     "minAgree": 81,
     "minFindings": 81,
-    "maxFindings": 192
+    "maxFindings": 192,
+    "trivy": {}
   },
   {
     "name": "ubi8n18",
@@ -29,7 +32,8 @@
     "ref": "registry.access.redhat.com/ubi8/nodejs-18@sha256:77d47e5c63e2a45a5d6a5546b145278f04a1a20fcf01b8a3ffaeb1f49056cf11",
     "minAgree": 917,
     "minFindings": 4746,
-    "maxFindings": 11168
+    "maxFindings": 11168,
+    "trivy": {}
   },
   {
     "name": "ubi9",
@@ -37,7 +41,8 @@
     "ref": "registry.access.redhat.com/ubi9/ubi@sha256:b8c53f907b7ea8934d6bb23b319ca7b5ab567e61a0806ffc80170631cabc7563",
     "minAgree": 350,
     "minFindings": 359,
-    "maxFindings": 846
+    "maxFindings": 846,
+    "trivy": {}
   },
   {
     "name": "rocky9",
@@ -45,7 +50,8 @@
     "ref": "mirror.gcr.io/library/rockylinux@sha256:d7be1c094cc5845ee815d4632fe377514ee6ebcf8efaed6892889657e5ddaaa6",
     "minAgree": 273,
     "minFindings": 275,
-    "maxFindings": 648
+    "maxFindings": 648,
+    "trivy": {}
   },
   {
     "name": "alma9",
@@ -53,7 +59,8 @@
     "ref": "mirror.gcr.io/library/almalinux@sha256:d2515c769e7b73f95c4fde38c0a505336ff38f14990c0b7253b77060a049a743",
     "minAgree": 90,
     "minFindings": 90,
-    "maxFindings": 212
+    "maxFindings": 212,
+    "trivy": {}
   },
   {
     "name": "ol9",
@@ -61,7 +68,8 @@
     "ref": "mirror.gcr.io/library/oraclelinux@sha256:3adbd4f3b22d816c90e78a9c9c2e0ddf65fc1bbadd816dc202054471a85f38b2",
     "minAgree": 31,
     "minFindings": 33,
-    "maxFindings": 78
+    "maxFindings": 78,
+    "trivy": {}
   },
   {
     "name": "fedora",
@@ -77,7 +85,8 @@
     "ref": "mirror.gcr.io/library/amazonlinux@sha256:181f98c48832fe926f8ca3b6ffeafcce128e96e77b93d08fbe9a9bc9403ce284",
     "minAgree": 0,
     "minFindings": 0,
-    "maxFindings": 25
+    "maxFindings": 25,
+    "trivy": {}
   },
   {
     "name": "wolfi",
@@ -85,7 +94,8 @@
     "ref": "cgr.dev/chainguard/wolfi-base@sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72",
     "minAgree": 0,
     "minFindings": 0,
-    "maxFindings": 25
+    "maxFindings": 25,
+    "trivy": {}
   },
   {
     "name": "leap156",
@@ -93,7 +103,8 @@
     "ref": "registry.opensuse.org/opensuse/leap@sha256:e4d84bbc5e0fa0df64381e95ad7ea8e3867cc34f3b1d174e9948d0f559d223e2",
     "minAgree": 0,
     "minFindings": 10,
-    "maxFindings": 25
+    "maxFindings": 25,
+    "trivy": {}
   },
   {
     "name": "bci156",
@@ -101,7 +112,8 @@
     "ref": "registry.suse.com/bci/bci-base@sha256:c4bd6f1a43a3d80e9345e75a0e115e9a34daee55120ad4ba2f14d71bd29ba1eb",
     "minAgree": 15,
     "minFindings": 102,
-    "maxFindings": 242
+    "maxFindings": 242,
+    "trivy": {}
   },
   {
     "name": "mariner2",
@@ -109,7 +121,8 @@
     "ref": "mcr.microsoft.com/cbl-mariner/base/core@sha256:2f22cfda5793fe3e3c09cdee10e54b198efc5bea6a266bd2c0f921f2b10767a6",
     "minAgree": 112,
     "minFindings": 168,
-    "maxFindings": 396
+    "maxFindings": 396,
+    "trivy": {}
   },
   {
     "name": "azl3",
@@ -117,7 +130,8 @@
     "ref": "mcr.microsoft.com/azurelinux/base/core@sha256:02004412d6133fba772fd88dd45ea99b61258722bfc796c156937df4a5d75c6c",
     "minAgree": 90,
     "minFindings": 96,
-    "maxFindings": 228
+    "maxFindings": 228,
+    "trivy": {}
   },
   {
     "name": "alpaquita",
@@ -141,7 +155,8 @@
     "ref": "mirror.gcr.io/library/photon@sha256:b2425ecf9abbaa7d073b8650c80afa97f1d7952debd4f5a0560c38e41c933fe8",
     "minAgree": 18,
     "minFindings": 18,
-    "maxFindings": 44
+    "maxFindings": 44,
+    "trivy": {}
   },
   {
     "name": "photon5",
@@ -173,7 +188,8 @@
     "ref": "mirror.gcr.io/bitnamilegacy/postgresql@sha256:42a8200d35971f931b869ef5252d996e137c6beb4b8f1b6d2181dc7d1b6f62e0",
     "minAgree": 412,
     "minFindings": 422,
-    "maxFindings": 994
+    "maxFindings": 994,
+    "trivy": {}
   },
   {
     "name": "cleanstart-postgres",

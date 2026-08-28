@@ -3883,6 +3883,37 @@ alias에만 두므로, name 하나만 보는 매칭(grype는 ID 하나를 넘깁
 anchor가 추가될 때까지 살아남았고, 그 라운드가 정확히 존재 이유대로
 작동했습니다.
 
+### D105 — trivy가 주간 차등 테스트에 합류하고, 도구는 더 이상 자기 이름을 속이지 않는다
+
+**결정.** 주간 차등 테스트(D93)가 두 번째 비교 스캐너로 trivy를 얻습니다.
+`cmd/grypediff`는 `cmd/scandiff`로 이름이 바뀌고(git mv, 히스토리는 유지),
+워크플로는 `scanner-diff.yml`("scanner differential")이 되며 floors 파일은
+`.github/scanner-diff-targets.json`이 됩니다 — grype의 이름을 딴 도구가 trivy를
+비교한다는 것은 영구적인 혼란이 될 것이고, 지금 이름을 바꾸는 것이 가장 쌉니다.
+각 target 항목은 선택적인 `trivy` 블록을 가질 수 있습니다: 없으면 그 target에
+대해 trivy를 실행하지 않는다는 뜻이며(trivy가 지원하지 않는 일곱 distro —
+Fedora, Arch, Alpaquita와 그 위의 Liberica 이미지, Photon 5, Hummingbird,
+CleanStart — 에 대한 정직한 상태로, trivy 자신의 문서에 대고 검증했습니다),
+16개 target은 하나씩 가지고 있습니다. 파일 하나가 digest pin들의 단일
+진실 공급원으로 남습니다.
+
+**Floors는 측정되는 것이지 결코 추측되지 않습니다(D93 자신의 규칙을 새 스캐너에
+적용한 것).** 빈 `trivy: {}` 블록은 INFORMATIONAL입니다: scandiff는 trivy의
+출력에 대고 agree/findings를 측정해 붙여넣기 바로 가능한 JSON 조각으로
+출력하지만, 결코 실패로 이어지지는 않습니다 — 그래서 첫 workflow_dispatch
+실행이 실제 floors를 심고, 그것이 커밋되어 다음 주간 실행부터 게이트로
+작동합니다. trivy 자신의 `minFindings`/`maxFindings`는 trivy의 tuple 개수를
+경계 짓는 것이지(오래되었거나 깨진 trivy DB를 잡아내는 것), assay의 것이
+아니며, assay 쪽은 이미 grype 쪽 floors가 잡고 있습니다. 합치는 CVE 전용으로
+유지됩니다; trivy는 자신의 ID를 upstream에서 CVE로 정규화하므로,
+assay/grype 정규화기와 달리 bare-ID fallback이 없습니다 — trivy 전용
+advisory ID는 결코 아무것과도 agree할 수 없고 노이즈만 부풀릴 것입니다.
+trivy는 버전이 고정되어 있고(v0.62.1, floors를 다시 심는 것과 같은 커밋에서
+의도적으로 올립니다) DB는 버전+주 단위로 캐시됩니다. 독립 리뷰: 뮤테이션
+5개 중 5개가 red입니다 — 첫 시도 하나는 sed no-op이라 제대로 재적용될
+때까지 "살아남았고", 이는 CLAUDE.md가 기록하는 뮤테이션이 실제로 뮤테이션을
+일으키는지 확인하라는 함정이지 커버리지 공백이 아닙니다.
+
 ---
 
 ## 3. 아키텍처

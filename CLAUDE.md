@@ -37,7 +37,9 @@ ships no os-release) —
 across three rpmdb backends: BerkeleyDB, SQLite and ndb (D44, D76). Bitnami app layers
 catalog from their /opt/bitnami SPDX markers alongside the base distro (D99, dual
 inventory). A weekly digest-pinned
-grype differential gates regressions in CI (D93). Findings can be waived through a
+scanner differential gates regressions in CI (D93: 23 targets vs grype; D105 added trivy
+on the 16 targets trivy supports — the tool is `cmd/scandiff`, floors in
+`.github/scanner-diff-targets.json`). Findings can be waived through a
 `.assay.yaml` ignore file (D102 — reason mandatory, expiry optional) or a producer's
 OpenVEX document (`--vex`, repeatable, D104 — not_affected/fixed suppress, a reasonless
 not_affected is skipped with a warning, latest statement wins); both apply after Match in
