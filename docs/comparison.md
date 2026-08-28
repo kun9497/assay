@@ -21,7 +21,7 @@ trivy numbers will accumulate from its first seeded run onward.*
 | Common OS families | ✓ | ✓ | ✓ | Alpine, Debian, Ubuntu, RHEL, Rocky, Alma, Amazon, Oracle, SLES/Leap, Wolfi, Chainguard, MinimOS, Echo, Azure Linux, Photon — all three cover these |
 | Fedora · Arch | ✓ (D75, D97) | ✓ | ✗ | Both absent from trivy's supported list (CentOS Stream explicitly unsupported too) |
 | Alpaquita · Hummingbird · CleanStart | ✓ (D95, D98, D101) | partial | ✗ | grype ships a Hummingbird provider; Alpaquita and CleanStart are assay-only |
-| openSUSE Leap | ✓ | ✗ no data in v6 | ✓ (+Tumbleweed) | Recorded as a measured assay win in the differential |
+| openSUSE Leap | ✓ | ✗ no data in v6 | claimed, measured empty | Recorded as a measured assay win. trivy's docs list Leap and SLE, but on the differential's digest-pinned Leap and SLE BCI images it returned **zero findings** where assay reports 12 and 286 (D105 seeding run, 2026-08-28) — those two targets stay informational rather than gating |
 | Bottlerocket · CoreOS | ✗ | ✗ | ✓ | trivy-only |
 | Language ecosystems | 8 | 8 | broader | The common eight (Go, npm, PyPI, crates.io, Maven, RubyGems, NuGet, Packagist); all three read pnpm and yarn berry lockfiles (assay since D103); trivy additionally covers Conan, Dart, Swift, Elixir |
 | Enrichment gates | NVD · EPSS · KEV · EOL | NVD · EPSS · KEV · EOL | none built in | trivy is severity-centric; it does not gate on EPSS/KEV/EOL natively |
