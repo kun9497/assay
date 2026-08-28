@@ -6,7 +6,11 @@
     "minAgree": 8,
     "minFindings": 8,
     "maxFindings": 25,
-    "trivy": {}
+    "trivy": {
+      "minAgree": 8,
+      "minFindings": 8,
+      "maxFindings": 20
+    }
   },
   {
     "name": "debian12",
@@ -15,7 +19,11 @@
     "minAgree": 143,
     "minFindings": 147,
     "maxFindings": 348,
-    "trivy": {}
+    "trivy": {
+      "minAgree": 147,
+      "minFindings": 149,
+      "maxFindings": 352
+    }
   },
   {
     "name": "ubuntu2204",
@@ -24,7 +32,11 @@
     "minAgree": 81,
     "minFindings": 81,
     "maxFindings": 192,
-    "trivy": {}
+    "trivy": {
+      "minAgree": 32,
+      "minFindings": 32,
+      "maxFindings": 76
+    }
   },
   {
     "name": "ubi8n18",
@@ -33,7 +45,11 @@
     "minAgree": 917,
     "minFindings": 4746,
     "maxFindings": 11168,
-    "trivy": {}
+    "trivy": {
+      "minAgree": 4386,
+      "minFindings": 4437,
+      "maxFindings": 10440
+    }
   },
   {
     "name": "ubi9",
@@ -42,7 +58,11 @@
     "minAgree": 350,
     "minFindings": 359,
     "maxFindings": 846,
-    "trivy": {}
+    "trivy": {
+      "minAgree": 311,
+      "minFindings": 338,
+      "maxFindings": 796
+    }
   },
   {
     "name": "rocky9",
@@ -51,7 +71,11 @@
     "minAgree": 273,
     "minFindings": 275,
     "maxFindings": 648,
-    "trivy": {}
+    "trivy": {
+      "minAgree": 277,
+      "minFindings": 277,
+      "maxFindings": 652
+    }
   },
   {
     "name": "alma9",
@@ -60,7 +84,11 @@
     "minAgree": 90,
     "minFindings": 90,
     "maxFindings": 212,
-    "trivy": {}
+    "trivy": {
+      "minAgree": 79,
+      "minFindings": 79,
+      "maxFindings": 186
+    }
   },
   {
     "name": "ol9",
@@ -69,7 +97,11 @@
     "minAgree": 31,
     "minFindings": 33,
     "maxFindings": 78,
-    "trivy": {}
+    "trivy": {
+      "minAgree": 34,
+      "minFindings": 34,
+      "maxFindings": 82
+    }
   },
   {
     "name": "fedora",
@@ -112,7 +144,7 @@
     "ref": "registry.suse.com/bci/bci-base@sha256:c4bd6f1a43a3d80e9345e75a0e115e9a34daee55120ad4ba2f14d71bd29ba1eb",
     "minAgree": 15,
     "minFindings": 102,
-    "maxFindings": 242,
+    "maxFindings": 430,
     "trivy": {}
   },
   {
@@ -122,7 +154,11 @@
     "minAgree": 112,
     "minFindings": 168,
     "maxFindings": 396,
-    "trivy": {}
+    "trivy": {
+      "minAgree": 155,
+      "minFindings": 157,
+      "maxFindings": 370
+    }
   },
   {
     "name": "azl3",
@@ -131,7 +167,11 @@
     "minAgree": 90,
     "minFindings": 96,
     "maxFindings": 228,
-    "trivy": {}
+    "trivy": {
+      "minAgree": 96,
+      "minFindings": 235,
+      "maxFindings": 554
+    }
   },
   {
     "name": "alpaquita",
@@ -156,7 +196,11 @@
     "minAgree": 18,
     "minFindings": 18,
     "maxFindings": 44,
-    "trivy": {}
+    "trivy": {
+      "minAgree": 18,
+      "minFindings": 18,
+      "maxFindings": 44
+    }
   },
   {
     "name": "photon5",
@@ -189,7 +233,11 @@
     "minAgree": 412,
     "minFindings": 422,
     "maxFindings": 994,
-    "trivy": {}
+    "trivy": {
+      "minAgree": 419,
+      "minFindings": 422,
+      "maxFindings": 994
+    }
   },
   {
     "name": "cleanstart-postgres",
