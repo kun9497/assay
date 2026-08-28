@@ -2,9 +2,11 @@ module github.com/kun9497/assay
 
 go 1.26
 
+toolchain go1.26.7
+
 require (
 	github.com/google/go-containerregistry v0.21.7
-	github.com/klauspost/compress v1.18.6
+	github.com/klauspost/compress v1.18.7
 	go.etcd.io/bbolt v1.5.0
 	golang.org/x/sys v0.46.0
 	gopkg.in/yaml.v3 v3.0.1
