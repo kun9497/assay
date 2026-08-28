@@ -89,7 +89,7 @@ jobs:
       # implied by whatever the runner image happens to carry; bump
       # deliberately, in the same commit as a re-seed of any trivy floor.
       - name: Install trivy v0.62.1
-        uses: aquasecurity/setup-trivy@v0.2.3
+        uses: aquasecurity/setup-trivy@v0.3.1
         with:
           version: v0.62.1
       - name: Symlink trivy into ./bin
