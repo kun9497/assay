@@ -80,14 +80,25 @@ jobs:
       - name: Update grype's vulnerability database
         run: ./bin/grype db update
 
-      # Same pinning reasoning as grype above, via the same install.sh
-      # pattern trivy's own docs recommend over a package manager (no extra
-      # apt repo to trust, and the version is spelled right here rather than
-      # implied by whatever the runner image happens to carry). Bump
+      # Same pinning reasoning as grype above. The official setup action
+      # rather than install.sh: the script's unauthenticated release-asset
+      # download failed silently on this run's first dispatch (2026-08-28,
+      # exit 1 straight after "found version", no message past curl -s),
+      # while the action authenticates with the workflow's own token and
+      # caches the binary. The version is spelled right here rather than
+      # implied by whatever the runner image happens to carry; bump
       # deliberately, in the same commit as a re-seed of any trivy floor.
       - name: Install trivy v0.62.1
+        uses: aquasecurity/setup-trivy@v0.2.3
+        with:
+          version: v0.62.1
+      - name: Symlink trivy into ./bin
+        # scandiff is invoked with -trivy ./bin/trivy below, matching how
+        # assay and grype already live in ./bin — one place to look when a
+        # capture needs reproducing locally.
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b ./bin v0.62.1
+          mkdir -p ./bin
+          ln -sf "$(command -v trivy)" ./bin/trivy
           ./bin/trivy version
 
       # trivy's own default cache dir (TRIVY_CACHE_DIR unset): keyed on the
