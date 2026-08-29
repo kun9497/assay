@@ -205,7 +205,12 @@ provider parsing Microsoft's OVAL directly — verified live: all 140 tuples rec
 exact-name, 57 via the D8 source-package bridge, 0 absent). Both upstreams were notified
 with the evidence chain: microsoft/AzureLinuxVulnerabilityData#4 (the export bot
 stalled), google/osv.dev#5935 (their source is dead and the failure is silent on their
-side). Watch both for responses. The paragraphs below are the entry as opened.
+side). Both resolved within a day (2026-08-29 check): Microsoft's Azure Linux contact
+confirmed the root cause — the osv/ directory had been **accidentally gitignored** since
+2026-03-10 — and resumed publishing (b6b529c); OSV.dev re-imported immediately (curl's
+Azure Linux:3 records went 14→32 with fresh timestamps, verified). D106's OVAL-direct
+choice stands regardless: assay no longer depends on that two-hop pipeline at all. The
+paragraphs below are the entry as opened.
 
 The 2026-08-28 audit's only probable real false-negative class: on the azl3 target,
 grype and trivy BOTH report 140 (package, CVE) tuples assay lacks — 140/140

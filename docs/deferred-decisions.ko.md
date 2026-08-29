@@ -203,7 +203,12 @@ source로 온보딩했고(google/osv.dev#5175) 그 이후로 그 얼어붙은
 0건 없음). 두 upstream 모두에게 증거 사슬과 함께 알렸습니다:
 microsoft/AzureLinuxVulnerabilityData#4(export bot이 멈췄다는 것),
 google/osv.dev#5935(그들의 source가 죽어 있고 그 실패가 자신들 쪽에서는
-조용하다는 것). 둘 다 응답을 지켜봐야 합니다. 아래 문단들은 이 항목이
+조용하다는 것). 둘 다 하루 만에 해소됐습니다(2026-08-29 확인): Microsoft의 Azure
+Linux 담당자가 원인을 확인해 주었고 — osv/ 디렉토리가 2026-03-10부터 **실수로
+gitignore되어 있었음** — 발행을 재개했으며(b6b529c), OSV.dev는 즉시
+재임포트했습니다(curl의 Azure Linux:3 레코드가 14→32건, 최신 타임스탬프로 실측
+확인). D106의 OVAL 직수집 선택은 그와 무관하게 유효합니다: assay는 그 2단
+파이프라인에 더는 전혀 의존하지 않습니다. 아래 문단들은 이 항목이
 처음 열렸을 때의 본문입니다.
 
 2026-08-28 감사에서 나온 유일한 진짜 위양성(false-negative) 후보 부류입니다:
