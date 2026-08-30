@@ -170,11 +170,11 @@
     "name": "azl3",
     "tag": "azurelinux/base/core:3.0.20240727",
     "ref": "mcr.microsoft.com/azurelinux/base/core@sha256:02004412d6133fba772fd88dd45ea99b61258722bfc796c156937df4a5d75c6c",
-    "minAgree": 90,
-    "minFindings": 96,
-    "maxFindings": 228,
+    "minAgree": 215,
+    "minFindings": 235,
+    "maxFindings": 554,
     "trivy": {
-      "minAgree": 96,
+      "minAgree": 235,
       "minFindings": 235,
       "maxFindings": 554
     }
