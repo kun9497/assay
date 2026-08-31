@@ -337,6 +337,26 @@ was prepared, and the user decided 2026-08-27 to record only, not send.
 
 ---
 
+### A KEV mirror fallback — deferred until the nightly actually fails on it
+
+The KEV provider fetches CISA's catalog from cisa.gov alone. Production ops elsewhere
+(the user's own CWPP pipeline, hitting this exact endpoint with curl) sees intermittent
+403s from its CDN — bot-filtering on bare library User-Agents — and works around it by
+preferring CISA's official GitHub mirror
+(`cisagov/kev-data`, `jsonFiles/knownExploitedVulnerabilitiesCatalog.json`) with cisa.gov
+as fallback. assay took the cheap preventive half of that experience (a named User-Agent
+on the request, 2026-08-31) and deliberately NOT the mirror-fallback half: this
+project's nightly has zero observed KEV fetch failures (the one provider that HAS bitten
+the nightly is Fedora Bodhi, connection reset, 2026-08-24), kev.go already carries the
+D58 retry/backoff, and a fallback path costs a second URL seam, ordering tests, and a
+mask-prevention warning for a failure never seen here. If it ships, order it cisa.gov
+first, mirror second — the mirror commits only when the catalog changes and can lag —
+and warn loudly on every fallback use so a long-dead primary cannot hide behind it.
+
+**Revisit when** the nightly db-publish fails on the KEV fetch for the first time.
+
+---
+
 ### The freshness one-liner and six dead Amazon extras topics
 
 **Investigated 2026-08-27.** `assay db update` printing "upstream data as of 2023-09-25"
