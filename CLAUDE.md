@@ -205,6 +205,8 @@ confident answer about a scan that did not finish.
 
 **Stream discipline**: results to stdout, diagnostics to stderr, so
 `assay scan ... --output json | jq` stays clean. `main_test.go` enforces both directions.
+The table colors severity on a real terminal only (D107: TTY + `NO_COLOR` empty + Windows
+VT actually enabled) — piped output is byte-identical, so the discipline survives colors.
 
 **`run(args, stdout, stderr) int` is the testable seam** — `main()` only translates its
 return into `os.Exit`. New commands go in the `run` switch and take writers, never touching

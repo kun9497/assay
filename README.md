@@ -113,7 +113,7 @@ cannot be trusted — with `2` outranking `1` outranking `0`.
 - **[docs/comparison.md](docs/comparison.md)** — how assay compares to grype (measured,
   weekly) and trivy (spec-level), and where each tool's policy deliberately differs.
 - **[docs/superpowers/specs/2026-07-29-assay-roadmap.md](docs/superpowers/specs/2026-07-29-assay-roadmap.md)**
-  — the reference design, every decision recorded as `D1`…`D106` with its reasoning.
+  — the reference design, every decision recorded as `D1`…`D107` with its reasoning.
 
 Every document ships bilingually (`X.md` / `X.ko.md`); English is canonical.
 
