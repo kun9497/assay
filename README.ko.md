@@ -111,7 +111,7 @@ assay scan alpine:3.19 --fail-on high
 - **[docs/comparison.md](docs/comparison.md)** — grype(주간 실측)·trivy(스펙 수준)와의
   비교, 그리고 각 도구의 정책이 의도적으로 갈리는 지점. ([한국어](docs/comparison.ko.md))
 - **[docs/superpowers/specs/2026-07-29-assay-roadmap.md](docs/superpowers/specs/2026-07-29-assay-roadmap.md)**
-  — 레퍼런스 설계, 모든 결정을 `D1`…`D106`으로 근거와 함께 기록.
+  — 레퍼런스 설계, 모든 결정을 `D1`…`D107`로 근거와 함께 기록.
 
 모든 문서는 `X.md` / `X.ko.md` 짝으로 배포되며, 영어가 정본입니다.
 
