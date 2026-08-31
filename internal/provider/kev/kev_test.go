@@ -3,6 +3,7 @@ package kev
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -330,4 +331,26 @@ func fetchBackoffForTest() func() {
 	orig := fetchBackoff
 	fetchBackoff = func(int) time.Duration { return time.Millisecond }
 	return func() { fetchBackoff = orig }
+}
+
+// TestFetch_SendsANamedUserAgent holds the 403-prevention header: cisa.gov's
+// CDN intermittently rejects bare library UAs (production-observed against
+// this endpoint), so the request must never go out with Go's default. The
+// wire is the only honest place to assert it -- a header set on a request a
+// test never sends proves nothing.
+func TestFetch_SendsANamedUserAgent(t *testing.T) {
+	var gotUA string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		io.WriteString(w, `{"catalogVersion":"ua-check","dateReleased":"2026-08-31T00:00:00Z","count":1,"vulnerabilities":[{"cveID":"CVE-2026-11111"}]}`)
+	}))
+	defer srv.Close()
+
+	p := New(Options{URL: srv.URL})
+	if _, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil }); err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+	if !strings.Contains(gotUA, "assay") {
+		t.Errorf("User-Agent = %q, want it to name assay rather than a bare library default", gotUA)
+	}
 }

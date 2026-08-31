@@ -258,6 +258,14 @@ func (p *Provider) get(ctx context.Context) (io.ReadCloser, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
+	// cisa.gov's CDN intermittently 403s clients whose User-Agent looks like
+	// a bare library default (Go's "Go-http-client/1.1" included) -- reported
+	// from production ops against this exact endpoint, where a named UA is
+	// what made the 403s stop (2026-08-31). Never observed from this
+	// project's own nightly yet, so this is the cheap preventive half only;
+	// the mirror-fallback half is recorded in docs/deferred-decisions.md
+	// with "first observed nightly KEV fetch failure" as its trigger.
+	req.Header.Set("User-Agent", "assay-db-build (+https://github.com/kun9497/assay)")
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return nil, 0, err

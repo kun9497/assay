@@ -349,6 +349,27 @@ vuln-list-update 소비자 포함) 기존 업스트림 신고를 찾지 못했�
 
 ---
 
+### KEV mirror fallback — nightly가 실제로 그것 때문에 실패할 때까지 보류
+
+KEV provider는 CISA 카탈로그를 cisa.gov 한 곳에서만 받습니다. 다른 곳의 운영
+경험(사용자 자신의 CWPP 파이프라인이 curl로 같은 endpoint를 치는 환경)에서는 그
+CDN이 간헐적으로 403을 냅니다 — 맨몸 라이브러리 User-Agent에 대한 봇 필터링 —
+그리고 CISA의 공식 GitHub mirror(`cisagov/kev-data`,
+`jsonFiles/knownExploitedVulnerabilitiesCatalog.json`)를 우선으로 두고 cisa.gov를
+fallback으로 삼아 우회합니다. assay는 그 경험에서 값싼 예방 절반만
+취했습니다(요청에 이름 있는 User-Agent, 2026-08-31). mirror-fallback 절반은
+의도적으로 취하지 않았습니다: 이 프로젝트의 nightly에서 KEV fetch 실패는 관측
+0건이고(nightly를 실제로 문 provider는 Fedora Bodhi의 connection reset,
+2026-08-24), kev.go에는 이미 D58 retry/backoff가 있으며, fallback 경로는 한 번도
+본 적 없는 실패를 위해 두 번째 URL seam, 순서 테스트, 은폐 방지 경고까지
+치러야 합니다. 만약 만든다면 cisa.gov 1차, mirror 2차 순서로 — mirror는
+카탈로그가 바뀔 때만 커밋되어 뒤처질 수 있음 — 그리고 fallback을 쓸 때마다
+크게 경고해서 오래 죽은 primary가 그 뒤에 숨지 못하게 해야 합니다.
+
+**재검토 시점**: nightly db-publish가 KEV fetch로 처음 실패하는 날.
+
+---
+
 ### 신선도 한 줄 요약과 죽은 Amazon extras topic 6개
 
 **2026-08-27에 조사함.** `assay db update`가 "upstream data as of 2023-09-25"를
