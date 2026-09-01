@@ -349,6 +349,37 @@ vuln-list-update 소비자 포함) 기존 업스트림 신고를 찾지 못했�
 
 ---
 
+### 2026-09-01 성능 감사 — 취한 것, 반박된 것, 기다리는 것
+
+스캔·빌드 경로의 프로파일 기반 감사(실제 3.75 GB 아티팩트, finding 12,742건을 내는
+4,656-컴포넌트 스트레스 SBOM; pprof CPU+alloc). 기준선: 스트레스 스캔당 Match 660 ms /
+449 MB / 4.94M allocs; 빌드 24m47s의 98.8%는 provider 다섯 개. 무위험 항목 넷을 같은 날
+채택: severity.Highest의 Match별 memo(33,305회 CVSS 채점의 89.9%가 이미 채점된 vector
+집합의 재파싱 — Match의 ~7%, 할당 ~200 MB 절감, 쓰레기 vector가 cache key를 공유할 수
+없도록 구분자-앨리어싱 우회 포함), SARIF rule help를 두 번 대신 한 번 계산(실측 렌더
+−7.7% / 할당 −20%, 바이트 동일), pep440의 SubexpIndex 선형 탐색을 init 시점 map으로
+호이스팅, OSV 아카이브를 RAM 대신 임시 파일로 스풀(Ubuntu의 601 MB 압축 아카이브가 빌드
+최대 단일 RSS 항목이었음; D64 스풀 형태는 이미 저장소에 세 번 존재).
+
+**숫자로 반박됨, 재논의 방지를 위해 기록:** Match 전체에 bbolt View 하나를 공유하는 것은
+1.4%의 가치(트랜잭션 28,063 × ~330 ns)에 freelist 고정 위험 — 불채택; json.Unmarshal을
+Decoder로 바꾸는 것은 실측상 더 느림(+10% 시간, +71% 할당); `GOEXPERIMENT=jsonv2`는 판
+위에서 가장 큰 지렛대(Match −25%)이나 Fedora의 body 중단 재시도 분류를 깨므로 —
+2026-08-24/25 nightly를 죽인 바로 그 실패 — **거부**; jsonv2가 기본값이 되고 재시도
+분류를 다시 도출하면 재검토; 렌더러 들여쓰기 제거는 렌더러 할당을 반으로 줄이지만 계약인
+바이트를 바꿈(jq, code scanning); 빈 enrichment 버킷 가드는 3.9 ms 절약 — 불채택.
+
+**트리거와 함께 보류, 불변식 사전 기록:** Bodhi 페이지 병렬 fetch(2,158 레코드에 6m02s,
+빌드 벽시계의 ~20% — 비동기화 공유 `*stats`와 페이지별 재시도 분류가 불변식); serial
+emit을 유지한 provider 아카이브 prefetch(emit 순서가 중복-ID 승자를 결정 —
+osv/record.go 자체 이력의 실측된 clobbering 버그); KISA enrichment 쓰기 배칭(~30 s,
+로컬 빌드만 해당, 배칭은 중도 실패 시 살아남는 레코드를 바꿈). **재검토 시점**: 빌드
+벽시계가 실제로 아플 때 — 오늘의 nightly에는 수 분의 여유가 있음. 정직한 스캔 천장:
+Match의 59%는 advisory blob의 encoding/json 디코딩이고, 무버그 지렛대로는 닿지 않음;
+스키마 쪽 해법(패키지별 affected slice)은 D6/D13 영역이고 전체 재빌드임.
+
+---
+
 ### KEV mirror fallback — nightly가 실제로 그것 때문에 실패할 때까지 보류
 
 KEV provider는 CISA 카탈로그를 cisa.gov 한 곳에서만 받습니다. 다른 곳의 운영

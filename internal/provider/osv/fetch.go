@@ -2,13 +2,13 @@ package osv
 
 import (
 	"archive/zip"
-	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"maps"
 	"net/http"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -367,13 +367,26 @@ func (p *Provider) fetchOne(ctx context.Context, u, ecosystem string, emit func(
 		}
 	}
 
-	// archive/zip needs a ReaderAt, so the archive is buffered. Records are
-	// still streamed to emit one at a time.
-	raw, err := io.ReadAll(resp.Body)
+	// archive/zip needs a ReaderAt, and an *os.File is one — so the archive
+	// spools to a temp file instead of RAM (the D64 shape redhat/spool.go,
+	// suse/spool.go and ubuntu_spool.go already use). This was io.ReadAll
+	// into memory until 2026-09-01, which held the whole archive for the
+	// entire conversion: Ubuntu's alone is 601 MB compressed, the largest
+	// single RSS item in a database build. Records are still streamed to
+	// emit one at a time.
+	spool, err := os.CreateTemp("", "assay-osv-*.zip")
 	if err != nil {
 		return 0, time.Time{}, nil, err
 	}
-	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	defer func() {
+		spool.Close()
+		os.Remove(spool.Name())
+	}()
+	size, err := io.Copy(spool, resp.Body)
+	if err != nil {
+		return 0, time.Time{}, nil, err
+	}
+	zr, err := zip.NewReader(spool, size)
 	if err != nil {
 		return 0, time.Time{}, nil, fmt.Errorf("open zip: %w", err)
 	}
