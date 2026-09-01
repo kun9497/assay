@@ -574,6 +574,9 @@ func New(s store.Store) *Matcher { return &Matcher{store: s} }
 
 func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 	var res Result
+	// One severity cache per Match call — memoHighest's own comment carries
+	// the measurement and the D13 reasoning for this exact scope.
+	sevMemo := make(map[string]sevScore)
 
 	// Which ecosystems this database actually holds (D20). Read once, before
 	// any lookup, because a lookup cannot answer the question: an ecosystem
@@ -984,7 +987,7 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 						}
 						seen[a.ID] = true
 						ids := identifiers(a)
-						band, score := severity.Highest(vectorsOf(a))
+						band, score := memoHighest(sevMemo, vectorsOf(a))
 						r := Rating{
 							Database:   a.Database,
 							AdvisoryID: a.ID,
@@ -1047,7 +1050,7 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 
 	for i := range res.Findings {
 		res.Findings[i].Identifiers = dedupSorted(res.Findings[i].Identifiers)
-		if err := m.annotate(&res.Findings[i]); err != nil {
+		if err := m.annotate(&res.Findings[i], sevMemo); err != nil {
 			return Result{}, err
 		}
 		sortRatings(res.Findings[i].Ratings)
@@ -1079,7 +1082,7 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 // Identifiers is already deduplicated, so one CVE is one store read even when a
 // record names it in both aliases and upstream (D3). On a real scan this is one
 // read per finding rather than one per alias.
-func (m *Matcher) annotate(f *Finding) error {
+func (m *Matcher) annotate(f *Finding, sevMemo map[string]sevScore) error {
 	for _, id := range f.Identifiers {
 		if !strings.HasPrefix(id, "CVE-") {
 			continue
@@ -1092,7 +1095,7 @@ func (m *Matcher) annotate(f *Finding) error {
 			return fmt.Errorf("ratings for %s: %w", id, err)
 		}
 		for _, r := range rs {
-			band, score := severity.Highest(vectorsOf(advisory.Advisory{Severity: r.Severity}))
+			band, score := memoHighest(sevMemo, vectorsOf(advisory.Advisory{Severity: r.Severity}))
 			f.Ratings = append(f.Ratings, Rating{
 				Database:          r.Source,
 				AdvisoryID:        r.CVE,
@@ -1296,6 +1299,45 @@ func winnerOf(f Finding) Rating {
 // picking of its own — severity.Highest already skips what does not score
 // and takes the worst of what does — this only exists because Advisory.Severity
 // is a slice of (type, value) pairs and Highest wants the values alone.
+// sevScore caches one severity.Highest answer for memoHighest below.
+type sevScore struct {
+	band  severity.Band
+	score float64
+}
+
+// memoHighest is severity.Highest with a per-Match cache keyed on the joined
+// vector text. Measured 2026-09-01: a 12,742-finding scan called Highest
+// 33,305 times over only 3,368 distinct vector sets — 89.9% of the CVSS
+// parsing was re-parsing strings already scored in the same scan, ~7% of
+// Match's CPU and ~200 MB of its allocation. D13's derive-at-query-time
+// discipline is untouched: nothing is stored, the cache lives exactly as
+// long as one Match call.
+//
+// The "|" separator cannot appear in a well-formed CVSS vector, but a
+// malformed upstream vector could carry one and make two different vector
+// LISTS share a key — so any vector containing the separator bypasses the
+// cache entirely rather than risking an aliased answer. Correct-but-slower
+// on garbage input beats fast-but-possibly-wrong.
+func memoHighest(memo map[string]sevScore, vectors []string) (severity.Band, float64) {
+	for _, v := range vectors {
+		if strings.ContainsRune(v, '|') {
+			return severity.Highest(vectors)
+		}
+	}
+	var key string
+	if len(vectors) == 1 {
+		key = vectors[0] // the common case: no join allocation
+	} else {
+		key = strings.Join(vectors, "|")
+	}
+	if v, ok := memo[key]; ok {
+		return v.band, v.score
+	}
+	b, s := severity.Highest(vectors)
+	memo[key] = sevScore{band: b, score: s}
+	return b, s
+}
+
 func vectorsOf(a advisory.Advisory) []string {
 	vectors := make([]string, 0, len(a.Severity))
 	for _, s := range a.Severity {

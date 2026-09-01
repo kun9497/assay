@@ -337,6 +337,43 @@ was prepared, and the user decided 2026-08-27 to record only, not send.
 
 ---
 
+### The 2026-09-01 performance audit — what was taken, what was refuted, what waits
+
+A profile-driven audit of the scan and build paths (real 3.75 GB artifact, a
+4,656-component stress SBOM producing 12,742 findings; pprof CPU + alloc). Baseline:
+Match 660 ms / 449 MB / 4.94 M allocs per stress scan; the build's 24m47s is 98.8% five
+providers. Four zero-risk items were adopted the same day: a per-Match memo for
+severity.Highest (89.9% of 33,305 CVSS scorings were re-parses of already-scored vector
+sets — ~7% of Match, ~200 MB less allocation, with a separator-aliasing bypass so garbage
+vectors can never share a cache key), the SARIF rule help computed once instead of twice
+(measured −7.7% render / −20% allocation, byte-identical), pep440's SubexpIndex linear
+scans hoisted to an init-time map, and the OSV archive spooled to a temp file instead of
+RAM (Ubuntu's 601 MB compressed archive was the largest single RSS item in a build; the
+D64 spool shape already existed three times in-repo).
+
+**Refuted with numbers, recorded so they are not re-litigated:** sharing one bbolt View
+across a Match is worth 1.4% (28,063 txns × ~330 ns) against a freelist-pinning risk —
+no; swapping json.Unmarshal for a Decoder is measured SLOWER (+10% time, +71% alloc);
+`GOEXPERIMENT=jsonv2` is the biggest lever on the board (Match −25%) and is REFUSED
+because it breaks Fedora's mid-body-truncation retry classification — the exact failure
+that killed the 2026-08-24/25 nightlies — revisit when jsonv2 is default and the retry
+classification is re-derived; dropping renderer indentation would halve renderer
+allocation but changes bytes that are contract (jq, code scanning); guarding the empty
+enrichment bucket saves 3.9 ms — no.
+
+**Deferred with triggers, invariants pre-documented:** parallel Bodhi page fetches
+(6m02s for 2,158 records, ~20% of build wall — the shared unsynchronised `*stats` and
+per-page retry classification are the invariants); provider archive prefetch with serial
+emit (emit order decides duplicate-ID winners, a measured clobbering bug in
+osv/record.go's own history); batching KISA enrichment writes (~30 s, local builds only,
+and batching changes which records survive a mid-run failure). **Revisit when** build
+wall time actually hurts — the nightly has minutes of headroom today. The honest scan
+ceiling: 59% of Match is encoding/json decoding advisory blobs, and no bug-free lever
+reaches it; a schema-side fix (per-package affected slices) is D6/D13 territory and a
+full rebuild.
+
+---
+
 ### A KEV mirror fallback — deferred until the nightly actually fails on it
 
 The KEV provider fetches CISA's catalog from cisa.gov alone. Production ops elsewhere

@@ -515,3 +515,21 @@ func TestSARIF_ActiveFindingHasNoSuppressions(t *testing.T) {
 		t.Error("an active finding carries a suppressions key — it would show as dismissed on GitHub")
 	}
 }
+
+// TestSARIF_RuleHelpMarkdownCarriesTheHelpText holds the fence: Markdown is
+// the same help text inside a code fence, and a mutation that empties the
+// fenced body (found surviving 2026-09-01) left every other SARIF assertion
+// green because nothing read the Markdown field at all.
+func TestSARIF_RuleHelpMarkdownCarriesTheHelpText(t *testing.T) {
+	f := findingFixture("CVE-2026-70001", "helpfixture", severity.High, 8.1, "2.0.0", advisory.FixStateFixed)
+	r := findingRule("assay/helpfixture", f)
+	if r.Help == nil || r.Help.Text == "" {
+		t.Fatalf("rule help text is empty")
+	}
+	if !strings.Contains(r.Help.Markdown, r.Help.Text) {
+		t.Errorf("Help.Markdown = %q, want it to contain Help.Text %q inside the fence", r.Help.Markdown, r.Help.Text)
+	}
+	if !strings.HasPrefix(r.Help.Markdown, "```") || !strings.HasSuffix(r.Help.Markdown, "```\n") {
+		t.Errorf("Help.Markdown = %q, want a fenced block", r.Help.Markdown)
+	}
+}
