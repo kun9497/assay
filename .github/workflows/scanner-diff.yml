@@ -158,5 +158,53 @@ jobs:
           path: ./scanner-diff-capture
           retention-days: 30
 
+      - name: Publish the report to the job log and summary
+        if: always()
+        # The weekly review routine reads this run through the GitHub API,
+        # whose cloud sandbox cannot reach the Azure Blob host the uploaded
+        # artifact lives on (measured 2026-09-07: CONNECT 403). The job LOG
+        # is reachable, so the full report table is echoed here between
+        # sentinels for the routine to extract, and mirrored to the run's
+        # summary page for a human. The artifact upload above stays -- it is
+        # the reproducible offline capture; this is only a second,
+        # API-readable copy of the one table.
+        run: |
+          if [ -f ./scanner-diff-capture/report.txt ]; then
+            echo "===SCANDIFF-REPORT-BEGIN==="
+            cat ./scanner-diff-capture/report.txt
+            echo "===SCANDIFF-REPORT-END==="
+            {
+              echo '## scanner differential'
+              echo '```'
+              cat ./scanner-diff-capture/report.txt
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "===SCANDIFF-REPORT-BEGIN==="
+            echo "(report.txt was not produced -- the differential step did not reach it)"
+            echo "===SCANDIFF-REPORT-END==="
+          fi
+
+      - name: govulncheck, surfaced for the weekly review
+        if: always()
+        # Runs on the GitHub runner, which CAN reach vuln.go.dev -- the
+        # review routine's cloud sandbox cannot (measured 2026-09-07: 403),
+        # so the routine reads the marker line below instead of running the
+        # tool itself. Informational: a finding is surfaced for a human to
+        # act on, it does not fail this differential job, whose own verdict
+        # is about matcher regressions, a separate concern. The project still
+        # treats govulncheck as the release-time gate (run by hand at tag);
+        # this only makes the weekly result visible without a human present.
+        run: |
+          set +e
+          go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "GOVULNCHECK-RESULT: clean"
+          else
+            echo "GOVULNCHECK-RESULT: not-clean (govulncheck exit $rc)"
+          fi
+
       - name: Fail the job on a breach or an untrustworthy target
         run: exit ${{ steps.diff.outputs.exit_code }}
