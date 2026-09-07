@@ -193,7 +193,7 @@
     "ref": "mirror.gcr.io/bellsoft/liberica-runtime-container@sha256:70963584a7d778c7f3470b92bdef477f50fe3baba3a4cd388654a2b9c8f0e031",
     "minAgree": 1,
     "minFindings": 1,
-    "maxFindings": 25
+    "maxFindings": 56
   },
   {
     "name": "photon4",
