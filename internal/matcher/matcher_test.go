@@ -209,6 +209,92 @@ func TestMatch_Miss(t *testing.T) {
 	}
 }
 
+// D108: a mirrored openSUSE Leap advisory (CrossMappedFrom set by the SUSE
+// provider) matches an installed Leap package on the shared 150600 codestream
+// via the rpm comparer, and the Finding surfaces the origin so a renderer can
+// disclose that the fixed version is the SLE codestream build.
+func TestMatch_CrossMappedLeapFinding_IsFixableAndDisclosed(t *testing.T) {
+	adv := advisory.Advisory{
+		ID:       "SUSE-CVE-2026-5773",
+		Database: "SUSE",
+		Source:   "suse",
+		Kind:     advisory.KindVulnerability,
+		Aliases:  []string{"CVE-2026-5773"},
+		Affected: []advisory.Affected{{
+			Ecosystem:       "openSUSE Leap:15.6",
+			Name:            "curl",
+			CrossMappedFrom: "SLES:15.SP6",
+			Ranges: []advisory.Range{{
+				Type:   advisory.RangeEcosystem,
+				Events: []advisory.Event{{Introduced: "0"}, {Fixed: "8.14.1-150600.4.51.1"}},
+			}},
+		}},
+	}
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"openSUSE Leap:15.6\x00curl": {adv},
+	}}
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("curl", "8.14.1-150600.4.40.1", "openSUSE Leap:15.6")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1 (installed 4.40.1 < mirrored fix 4.51.1)", len(res.Findings))
+	}
+	if got := res.Findings[0].CrossMappedFrom; got != "SLES:15.SP6" {
+		t.Fatalf("Finding.CrossMappedFrom = %q, want SLES:15.SP6", got)
+	}
+}
+
+// D108, winner-swap path: when a mirrored SUSE record and another source's
+// record for the same CVE+package group into one finding (D25) and the
+// mirrored, rated record beats the first-appended unrated one, the swap must
+// carry CrossMappedFrom to the winner -- otherwise the finding would display
+// the SUSE advisory as its authority while claiming no cross-map origin. This
+// exercises the SECOND construction site, which the single-record test above
+// cannot reach.
+func TestMatch_CrossMappedFrom_FollowsWinnerOnSwap(t *testing.T) {
+	other := advisory.Advisory{ // appended first, unrated
+		ID: "OTHER-CVE-2026-5773", Database: "OTHER", Kind: advisory.KindVulnerability,
+		Aliases: []string{"CVE-2026-5773"},
+		Affected: []advisory.Affected{{
+			Ecosystem: "openSUSE Leap:15.6", Name: "curl",
+			Ranges: []advisory.Range{{Type: advisory.RangeEcosystem,
+				Events: []advisory.Event{{Introduced: "0"}, {Fixed: "8.14.1-150600.4.51.1"}}}},
+		}},
+	}
+	mirrored := advisory.Advisory{ // rated, so it beats the unrated one and wins the swap
+		ID: "SUSE-CVE-2026-5773", Database: "SUSE", Source: "suse", Kind: advisory.KindVulnerability,
+		Aliases:  []string{"CVE-2026-5773"},
+		Severity: []advisory.Severity{{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}},
+		Affected: []advisory.Affected{{
+			Ecosystem: "openSUSE Leap:15.6", Name: "curl", CrossMappedFrom: "SLES:15.SP6",
+			Ranges: []advisory.Range{{Type: advisory.RangeEcosystem,
+				Events: []advisory.Event{{Introduced: "0"}, {Fixed: "8.14.1-150600.4.51.1"}}}},
+		}},
+	}
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"openSUSE Leap:15.6\x00curl": {other, mirrored}, // order: unrated first
+	}}
+	res, err := New(s).Match(pkgmeta.Target{
+		Packages: []pkgmeta.Package{pkg("curl", "8.14.1-150600.4.40.1", "openSUSE Leap:15.6")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1 (the two records group on CVE-2026-5773)", len(res.Findings))
+	}
+	f := res.Findings[0]
+	if f.Advisory.ID != "SUSE-CVE-2026-5773" {
+		t.Fatalf("winner = %q, want the rated SUSE record to win the swap", f.Advisory.ID)
+	}
+	if f.CrossMappedFrom != "SLES:15.SP6" {
+		t.Fatalf("Finding.CrossMappedFrom = %q, want SLES:15.SP6 carried by the swap", f.CrossMappedFrom)
+	}
+}
+
 // TestMatch_ChainguardFixedZeroSentinelNeverYieldsAFinding pins D88's
 // fixed:"0" safety net through the whole matcher, not just the comparer: 20.2%
 // of Chainguard/Wolfi's OSV affected entries pair introduced:"0" with

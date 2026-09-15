@@ -46,6 +46,14 @@ type Finding struct {
 	// changed. Match is the only legitimate constructor; the zero value
 	// (false) is correct for every finding that is not a provides join.
 	MatchedViaProvides bool
+	// CrossMappedFrom is the ecosystem key the matched advisory entry was
+	// mirrored from (D108), e.g. "SLES:15.SP6", or "" for an ordinary match.
+	// A matcher fact like MatchedName: read off the matched Affected at match
+	// time so a renderer can disclose that a Leap finding's fixed version is
+	// the SLE codestream (often LTSS-channel) build. Match is the only
+	// constructor that sets it; the zero value ("") is correct for every
+	// non-mirrored finding.
+	CrossMappedFrom string
 	// Severity and Score are derived from the advisory's own CVSS vectors at
 	// match time (D13), never read from a value baked in when the database
 	// was built. A record carrying several vectors is banded by the highest
@@ -1012,6 +1020,7 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 								Evidence:           ev,
 								MatchedName:        lookupName,
 								MatchedViaProvides: viaProvide[lookupName],
+								CrossMappedFrom:    aff.CrossMappedFrom,
 								Severity:           band,
 								Score:              score,
 								Ratings:            []Rating{r},
@@ -1025,6 +1034,7 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 								f.Advisory, f.Evidence = a, ev
 								f.MatchedName = lookupName
 								f.MatchedViaProvides = viaProvide[lookupName]
+								f.CrossMappedFrom = aff.CrossMappedFrom
 								f.Severity, f.Score = band, score
 							}
 						}
