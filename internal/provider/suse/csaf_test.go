@@ -803,13 +803,13 @@ func TestLeapMirrorKey(t *testing.T) {
 		in, want string
 		ok       bool
 	}{
-		{"SLES:15", "openSUSE Leap:15.0", true},        // SP0/GA
-		{"SLES:15.SP6", "openSUSE Leap:15.6", true},    // the aging-out case
-		{"SLES:16.0", "openSUSE Leap:16.0", true},      // dotted 16.x
-		{"SLES:15.SP7", "", false},                     // SLE 15 SP7 exists; Leap 15.7 never did
-		{"SLES:12.SP5", "", false},                     // no openSUSE Leap 12.x
-		{"SLES:16.1", "", false},                       // not yet published as Leap 16.1 (census M1)
-		{"openSUSE Leap:15.6", "", false},              // already a Leap key
+		{"SLES:15", "openSUSE Leap:15.0", true},     // SP0/GA
+		{"SLES:15.SP6", "openSUSE Leap:15.6", true}, // the aging-out case
+		{"SLES:16.0", "openSUSE Leap:16.0", true},   // dotted 16.x
+		{"SLES:15.SP7", "", false},                  // SLE 15 SP7 exists; Leap 15.7 never did
+		{"SLES:12.SP5", "", false},                  // no openSUSE Leap 12.x
+		{"SLES:16.1", "", false},                    // not yet published as Leap 16.1 (census M1)
+		{"openSUSE Leap:15.6", "", false},           // already a Leap key
 		{"", "", false},
 	}
 	for _, c := range cases {
