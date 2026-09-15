@@ -141,10 +141,22 @@ func TestFetch(t *testing.T) {
 	for _, a := range got {
 		byID[a.ID] = a
 	}
-	// D90: emitted IDs are SUSE-prefixed.
+	// D90: emitted IDs are SUSE-prefixed. D108: the SLES:15.SP6 openssh fix is
+	// also mirrored onto openSUSE Leap:15.6 (no native Leap openssh entry in
+	// the fixture), disclosing its SLE codestream origin.
 	fix := byID["SUSE-CVE-2024-6387"]
-	if len(fix.Affected) != 1 || fix.Affected[0].Ecosystem != "SLES:15.SP6" || fix.Affected[0].Name != "openssh" {
-		t.Errorf("CVE-2024-6387 affected = %+v", fix.Affected)
+	fixByEco := map[string]advisory.Affected{}
+	for _, a := range fix.Affected {
+		fixByEco[a.Ecosystem] = a
+	}
+	if len(fix.Affected) != 2 {
+		t.Errorf("CVE-2024-6387 affected = %+v, want 2 (SLES:15.SP6 openssh + its D108 Leap mirror)", fix.Affected)
+	}
+	if a := fixByEco["SLES:15.SP6"]; a.Name != "openssh" || a.CrossMappedFrom != "" {
+		t.Errorf("CVE-2024-6387 SLES entry = %+v, want native openssh", a)
+	}
+	if a, ok := fixByEco["openSUSE Leap:15.6"]; !ok || a.Name != "openssh" || a.CrossMappedFrom != "SLES:15.SP6" {
+		t.Errorf("CVE-2024-6387 Leap mirror = %+v (present=%v), want openssh cross-mapped from SLES:15.SP6", a, ok)
 	}
 	if fix.Database != "SUSE" || fix.Source != SourceName {
 		t.Errorf("CVE-2024-6387 identity = %q/%q", fix.Database, fix.Source)

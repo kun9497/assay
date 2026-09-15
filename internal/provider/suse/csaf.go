@@ -269,6 +269,52 @@ func slesKey(major, sp string) string {
 	return "SLES:" + major + ".SP" + sp
 }
 
+// leapReleases is the set of openSUSE Leap releases the archive actually
+// publishes, measured 2026-09-14 (D108 census M1): 15.0-15.6 and 16.0. The
+// mirror (leapMirrorKey) emits ONLY to a release in this set, so an SLE
+// codestream with no corresponding Leap release -- SLE 15 SP7, whose Leap
+// jumped straight to 16.0 -- never fabricates a phantom "openSUSE Leap:15.7"
+// key nothing scans as. Same "refuse unknown shapes, never guess" discipline
+// foldKey's anchored patterns enforce. Revisit when the census shows a new
+// Leap release (e.g. 16.1); a Leap image keyed to a release absent here
+// under-reporting is the trace.
+var leapReleases = map[string]bool{
+	"openSUSE Leap:15.0": true,
+	"openSUSE Leap:15.1": true,
+	"openSUSE Leap:15.2": true,
+	"openSUSE Leap:15.3": true,
+	"openSUSE Leap:15.4": true,
+	"openSUSE Leap:15.5": true,
+	"openSUSE Leap:15.6": true,
+	"openSUSE Leap:16.0": true,
+}
+
+// leapMirrorKey maps a folded SLE key to the openSUSE Leap key built from the
+// same codestream (D108): SLES:15 -> Leap:15.0 (SP0/GA), SLES:15.SP{n} ->
+// Leap:15.{n}, SLES:16.{m} -> Leap:16.{m}. Reports ok=false when the key is
+// not a mirrorable SLES Server release, or when the resulting Leap release is
+// not one the feed publishes (leapReleases). openSUSE Leap 15.x is binary-built
+// from SLE 15 SPx on the shared 150600 codestream with the same EVR numbering,
+// which is what makes the resulting key answer a Leap query for a shared
+// package soundly and lets the rpm comparer judge it (no new Comparer, D9).
+func leapMirrorKey(sleKey string) (string, bool) {
+	var leap string
+	switch {
+	case sleKey == "SLES:15":
+		leap = "openSUSE Leap:15.0"
+	case strings.HasPrefix(sleKey, "SLES:15.SP"):
+		leap = "openSUSE Leap:15." + strings.TrimPrefix(sleKey, "SLES:15.SP")
+	case strings.HasPrefix(sleKey, "SLES:16."):
+		leap = "openSUSE Leap:16." + strings.TrimPrefix(sleKey, "SLES:16.")
+	default:
+		return "", false
+	}
+	if !leapReleases[leap] {
+		return "", false
+	}
+	return leap, true
+}
+
 // packageOf splits a CSAF product_version leaf's purl into a package name
 // and version, or reports false. See the package doc comment for the
 // measured reliability of this shape.
@@ -490,6 +536,19 @@ type stats struct {
 	// for are the OPPOSITE case -- no mainline entry to shadow them, so
 	// they are kept and never touch this counter at all.
 	SkippedLTSSShadowedByMainline int
+
+	// MirroredToLeap and SkippedLeapNativeWins are D108's mirror pass firing.
+	// MirroredToLeap counts affected entries emitted onto an openSUSE Leap key
+	// from a folded SLE codestream key (the aging-out gap this slice fills, as
+	// SUSE drops Leap product entries when it regenerates a document while the
+	// SLE codestream stays maintained). SkippedLeapNativeWins counts the
+	// gap-fill tie-break declining to mirror because the document already
+	// carries a native Leap entry for that package -- native wins, so no
+	// installed-package finding is ever hidden. Same per-entry granularity as
+	// the Skipped* group above. Neither touches Affected/Unfixable: a mirror is
+	// a derived duplicate of an entry those already counted.
+	MirroredToLeap        int
+	SkippedLeapNativeWins int
 
 	// The delta pass (delta.go), identical in meaning to redhat.stats'.
 	DeltaListed     int
@@ -722,6 +781,47 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 		adv.Affected = append(adv.Affected, a)
 		st.Affected++
 	}
+
+	// D108: mirror each folded SLE codestream entry onto the openSUSE Leap key
+	// built from the same 150600 codestream, gap-fill -- only where this
+	// document produced no native Leap entry for that package. Native wins, so
+	// no installed-package finding is ever hidden; the aging-out case (SUSE
+	// dropping a document's Leap product entries on regeneration) has no native
+	// entry, so the mirror fills it. See leapMirrorKey / leapReleases. Built
+	// from adv.Affected (already assembled above) so it sees the fully folded,
+	// D91-shadowed result rather than re-resolving product ids.
+	native := map[productKey]bool{}
+	for i := range adv.Affected {
+		if a := &adv.Affected[i]; strings.HasPrefix(a.Ecosystem, "openSUSE Leap:") {
+			native[productKey{eco: a.Ecosystem, pkg: a.Name}] = true
+		}
+	}
+	var mirrors []advisory.Affected
+	for i := range adv.Affected {
+		a := &adv.Affected[i]
+		leap, ok := leapMirrorKey(a.Ecosystem)
+		if !ok {
+			continue
+		}
+		if native[productKey{eco: leap, pkg: a.Name}] {
+			st.SkippedLeapNativeWins++
+			continue
+		}
+		// Ranges is aliased, not copied: the store treats every emitted
+		// advisory as immutable, and nothing mutates a range after convert
+		// returns. ModuleStream carries over so a modular SLE entry mirrors as
+		// a modular Leap entry.
+		mirrors = append(mirrors, advisory.Affected{
+			Ecosystem:       leap,
+			Name:            a.Name,
+			Ranges:          a.Ranges,
+			ModuleStream:    a.ModuleStream,
+			CrossMappedFrom: a.Ecosystem,
+		})
+		st.MirroredToLeap++
+	}
+	adv.Affected = append(adv.Affected, mirrors...)
+
 	st.Advisories++
 	return adv, true
 }

@@ -303,7 +303,9 @@ func (s stats) String() string {
 			"directly, %d naming an undeclared platform, %d naming a platform the key fold does not "+
 			"cover, %d naming a package with no readable purl, %d documents with no CVE id, "+
 			"%d unreadable documents, %d LTSS entries shadowed by a mainline entry for the same "+
-			"release and package (D91); delta: %d changed since the archive, %d fetched, %d already "+
+			"release and package (D91); %d mirrored onto an openSUSE Leap key from its SLE "+
+			"codestream, %d not mirrored because a native Leap entry already covers the package "+
+			"(D108); delta: %d changed since the archive, %d fetched, %d already "+
 			"withdrawn, %d yielded a record, %d retried, %d rescued by a retry",
 		s.Documents, s.Advisories, s.Affected, s.Unfixable,
 		s.UnfixableWontFix, s.UnfixableNotFixed, s.UnfixableUnstated, s.UnfixableBothReasons,
@@ -311,6 +313,7 @@ func (s stats) String() string {
 		s.SkippedNoColon, s.SkippedEmptyComponent, s.SkippedTumbleweedRef,
 		s.SkippedUnknownPlatform, s.SkippedUnfoldablePlatform, s.SkippedUnknownPackage,
 		s.SkippedNoCVE, s.SkippedBadDoc, s.SkippedLTSSShadowedByMainline,
+		s.MirroredToLeap, s.SkippedLeapNativeWins,
 		s.DeltaListed, s.DeltaFetched, s.DeltaGone, s.DeltaAdvisories,
 		s.DeltaRetried, s.DeltaRescued)
 }
