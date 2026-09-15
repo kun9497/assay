@@ -337,6 +337,47 @@ was prepared, and the user decided 2026-08-27 to record only, not send.
 
 ---
 
+### The SLE → openSUSE Leap union (D108's deferred half)
+
+**Deferred 2026-09-15, with D108.** D108 mirrors a folded SLE codestream advisory onto the
+openSUSE Leap key it shares a codestream with, gap-fill: only where a document carries no
+native Leap entry for the package. When a document carries BOTH — a transitional document —
+native wins and the SLE entry is not merged in. The census sized the transitional set at
+18,769 documents (of 24,091 carrying any native Leap 15.x entry, in an archive of 67,110),
+so this is the common case, not a rare one.
+
+**Why native-wins is right, not just cheap.** In a transitional document a native Leap entry
+saying "affected, no fix" while the SLE SP entry is fixed is SUSE stating that Leap's own
+repos have not shipped the fix yet even though SLE's have. Unioning the SLE fixed range onto
+the Leap key would then tell a free Leap user a fix is available that their `zypper up`
+cannot reach — a worse error than the no-fix the native entry honestly reports. So the union
+is not merely deferred for cost; for the no-fix-native case it would be wrong.
+
+**What is actually deferred** is the one sub-case where union would add real information: a
+native Leap entry that is no-fix AND an SLE entry that is fixed AND the fix genuinely did
+reach Leap's repos (SUSE simply did not regenerate the Leap entry). That subset was not
+sized separately — the transitional count above does not split it out. Building union means
+per-range provenance (a fixed range from SLE and a no-fix range from Leap on one `Affected`,
+each carrying its own `CrossMappedFrom`) and a matcher that reconciles them; D108's gap-fill
+already satisfies what it was built for — no installed-package finding disappears. **Revisit
+when** a real Leap image is found reporting no-fix for a package the same-codestream SLE
+fixed AND whose fix is confirmed present in Leap's repos; measure that subset first, the D91
+census being the template.
+
+**A related non-deferral: the LTSS-channel remediation nuance.** A mirrored fix version is
+the SLE build, often from the LTSS (paid) channel, which a free Leap user may not obtain
+directly. This is NOT hidden and NOT deferred: `Affected.CrossMappedFrom` carries the origin
+and every renderer discloses it. The finding itself is true — the installed binary is
+vulnerable — and the disclosure is what lets the reader judge the remediation.
+
+**The allowlist revisit trigger.** D108's `leapReleases` is a hardcoded set {15.0–15.6,
+16.0}, confirmed by the 2026-09-15 census (the archive also publishes `openSUSE Leap X.Y
+NonFree` and `openSUSE Leap Micro 5.x` names, both already refused by the fold and never a
+mirror target). Revisit when the census shows a new mainline Leap release (16.1 and up); a
+Leap image keyed to a release absent from the set, silently under-reporting, is the trace.
+
+---
+
 ### The 2026-09-01 performance audit — what was taken, what was refuted, what waits
 
 A profile-driven audit of the scan and build paths (real 3.75 GB artifact, a

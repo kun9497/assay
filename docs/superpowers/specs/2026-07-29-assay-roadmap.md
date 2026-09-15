@@ -4124,6 +4124,45 @@ the caller-level scancmd anchor.
 
 ---
 
+### D108 — openSUSE Leap is the SLE codestream it was built from, even after Leap ages out
+
+**Decision.** A folded `SLES:15.SP{n}` / `SLES:16.{m}` affected entry is mirrored onto the
+corresponding `openSUSE Leap:15.{n}` / `16.{m}` key, because openSUSE Leap 15.x is
+binary-built from SLE 15 SPx on the shared 150600 codestream with the same EVR numbering —
+the installed Leap `curl 8.14.1-150600.4.40.1` and the SLE-SP6-LTSS fix `...4.51.1` sort
+under the same rpm comparer (no new Comparer, D9). Prompted by the first live weekly
+routine flagging leap156's minFindings floor (8 < 10, PR #130): the drop was not a
+regression but SUSE aging Leap 15.6 out of its CSAF — regenerating the CVE-2026-5773 and
+-7168 documents (09-09/09-11) dropped their `openSUSE Leap 15.6` product entries, leaving
+the SP6 curl fix only under the `-LTSS` name D91 folds to `SLES:15.SP6`, which a Leap image
+keyed `openSUSE Leap:15.6` no longer matches. The mirror closes exactly that gap.
+
+**Gap-fill, not union — and the census made native-wins the correct policy, not just the
+cheap one.** The mirror emits only where a document has no native Leap entry for the package
+(native wins), so no installed-package finding disappears. Measured across the archive
+(67,110 docs): 24,091 carry a native Leap 15.x entry and 18,769 of those are transitional —
+they also carry an SLE-15 entry for the same package family. In a transitional document a
+native Leap entry saying "affected, no fix" while SLE SP6 is fixed is SUSE stating that
+Leap's own repos have not shipped the fix yet even though SLE's have; unioning the SLE fixed
+range onto it would overstate fix availability to a free Leap user. Native-wins reports
+Leap's actual patch state; enriching the no-fix-native/fixed-SLE subset by union is deferred
+(deferred-decisions), a subset this census did not size separately.
+
+**Scope and disclosure.** For Leap 15.6 specifically, 14,781 documents drop the Leap entry
+while keeping SLE SP6 data (10,815 distinct package families) — the mirror restores every
+one whose package is installed, so a leap156 scan recovers far more than the two curl CVEs
+that surfaced it (T8 re-bands the floor after the DB rebuild; the ceiling may rise too). The
+fix version a mirror carries is the SLE, often LTSS-channel, build a free Leap user may not
+pull directly, so `Affected.CrossMappedFrom` records the origin and every renderer discloses
+it (a `~` marker and footnote in the table, `crossMappedFrom` in JSON, a line in SARIF and
+`--explain`). An allowlist {15.0–15.6, 16.0}, confirmed by the census (the `NonFree` and
+`Leap Micro` product names it also saw are refused, as the existing fold already refuses
+them), keeps the mirror from fabricating a phantom key: SLE 15 SP7 exists but Leap jumped to
+16.0, so `SLES:15.SP7` mirrors nowhere. The scan path is unchanged (D14) — this is a
+db-build change; a mirrored advisory reaches the store like any other.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes
