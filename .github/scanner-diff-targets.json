@@ -136,8 +136,8 @@
     "tag": "opensuse/leap:15.6",
     "ref": "registry.opensuse.org/opensuse/leap@sha256:e4d84bbc5e0fa0df64381e95ad7ea8e3867cc34f3b1d174e9948d0f559d223e2",
     "minAgree": 0,
-    "minFindings": 4,
-    "maxFindings": 25,
+    "minFindings": 100,
+    "maxFindings": 500,
     "trivy": {}
   },
   {
