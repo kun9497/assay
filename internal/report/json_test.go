@@ -399,6 +399,43 @@ func TestJSON_CarriesFullRatingsArray(t *testing.T) {
 // carries a plain GHSA rating, a separate EPSS rating and a separate KEV
 // rating — the shape a real scan produces once EPSS_ENABLE/KEV_ENABLE have
 // run (each source keyed under its own "<CVE>\x00<Source>" in the store).
+// D108: a finding matched through the Leap<->SLE codestream mirror carries
+// CrossMappedFrom, and the JSON must disclose it (the fixed version is the SLE
+// codestream build) -- omitted entirely for an ordinary finding.
+func TestJSON_DisclosesCrossMappedFrom(t *testing.T) {
+	mapped := matcher.Result{Findings: []matcher.Finding{{
+		Package:         pkgmeta.Package{Name: "curl", Version: "8.14.1-150600.4.40.1", Ecosystem: "openSUSE Leap:15.6"},
+		Advisory:        advisory.Advisory{ID: "SUSE-CVE-2026-5773"},
+		MatchedName:     "curl",
+		CrossMappedFrom: "SLES:15.SP6",
+		Severity:        severity.High,
+		Score:           7.5,
+		Ratings:         []matcher.Rating{{Database: "SUSE", AdvisoryID: "SUSE-CVE-2026-5773", Severity: severity.High, Score: 7.5, Fixed: "8.14.1-150600.4.51.1"}},
+	}}}
+	var buf bytes.Buffer
+	if _, err := JSON(&buf, mapped, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
+		t.Fatal(err)
+	}
+	if out := buf.String(); !strings.Contains(out, `"crossMappedFrom": "SLES:15.SP6"`) {
+		t.Fatalf("json did not disclose the cross-map origin:\n%s", out)
+	}
+
+	ordinary := matcher.Result{Findings: []matcher.Finding{{
+		Package:     pkgmeta.Package{Name: "p", Version: "1", Ecosystem: "Go"},
+		Advisory:    advisory.Advisory{ID: "GHSA-ordinary"},
+		MatchedName: "p",
+		Severity:    severity.Low,
+		Ratings:     []matcher.Rating{{Database: "GHSA", AdvisoryID: "GHSA-ordinary", Severity: severity.Low}},
+	}}}
+	buf.Reset()
+	if _, err := JSON(&buf, ordinary, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}); err != nil {
+		t.Fatal(err)
+	}
+	if out := buf.String(); strings.Contains(out, "crossMappedFrom") {
+		t.Fatalf("ordinary finding must omit crossMappedFrom:\n%s", out)
+	}
+}
+
 func TestJSON_RatingRecordCarriesEPSSAndKEVFields(t *testing.T) {
 	res := matcher.Result{Findings: []matcher.Finding{{
 		Package:  pkgmeta.Package{Name: "libfoo", Version: "1.0.0", Ecosystem: "Go"},

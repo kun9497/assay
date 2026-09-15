@@ -131,6 +131,16 @@ func explainOne(w io.Writer, f matcher.Finding) error {
 			f.MatchedName, f.Package.Name))
 	}
 	lines = append(lines, fmt.Sprintf("advisory: %s", f.Advisory.ID))
+	if f.CrossMappedFrom != "" {
+		// D108: this Leap finding was mirrored from the SLE codestream the
+		// release is built from. Spelled out because the fixed version below
+		// is the SLE (often LTSS-channel) build, which a free openSUSE Leap
+		// user may not obtain directly -- a reader who saw only the version
+		// would go looking for it in the wrong repos.
+		lines = append(lines, fmt.Sprintf(
+			"cross-mapped: from %s (D108 — openSUSE Leap shares this SLE codestream; the fixed version is the SLE, often LTSS-channel, build)",
+			f.CrossMappedFrom))
+	}
 	if ids := otherIDs(f); len(ids) > 0 {
 		lines = append(lines, fmt.Sprintf("also known as: %s", strings.Join(ids, ", ")))
 	}

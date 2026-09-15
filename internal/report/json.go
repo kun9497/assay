@@ -91,8 +91,16 @@ type FindingRecord struct {
 	// omitempty, on MatchedName's own reasoning above: an absent bool would
 	// be ambiguous between "direct or D8 match" and "this document predates
 	// the field".
-	MatchedViaProvides bool           `json:"matchedViaProvides"`
-	Advisory           AdvisoryRecord `json:"advisory"`
+	MatchedViaProvides bool `json:"matchedViaProvides"`
+	// CrossMappedFrom names the ecosystem key this finding was mirrored from
+	// (D108), e.g. "SLES:15.SP6", so a consumer sees that the fixed version is
+	// the SLE codestream (often LTSS-channel) build a free openSUSE Leap user
+	// may not pull directly. omitempty, unlike matchedName above: the
+	// overwhelming majority of findings are not cross-mapped, and an empty
+	// string on every one of them would be noise a consumer must read nothing
+	// into.
+	CrossMappedFrom string         `json:"crossMappedFrom,omitempty"`
+	Advisory        AdvisoryRecord `json:"advisory"`
 	// Severity is severity.Band's String() form (D17's own
 	// none/low/medium/high/critical/unknown), never the numeric iota — a
 	// numeric band would make the document depend on Band's declaration
@@ -408,6 +416,7 @@ func findingRecord(f matcher.Finding) FindingRecord {
 		Package:            packageRecord(f.Package),
 		MatchedName:        f.MatchedName,
 		MatchedViaProvides: f.MatchedViaProvides,
+		CrossMappedFrom:    f.CrossMappedFrom,
 		Advisory: AdvisoryRecord{
 			ID:       f.Advisory.ID,
 			Aliases:  f.Advisory.Aliases,
