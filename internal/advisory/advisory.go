@@ -62,6 +62,16 @@ type Affected struct {
 	// Additive like Related (D71) — advisories are rebuilt from providers on
 	// every db build, so no schema bump.
 	ModuleStream string `json:"module_stream,omitempty"`
+	// CrossMappedFrom names the ecosystem key this entry was mirrored from
+	// (D108), e.g. "SLES:15.SP6", or "" for an ordinary entry. openSUSE Leap
+	// 15.x is built from the SLE 15 SPx binaries on the same 150600
+	// codestream with the same EVR numbering, so an SLE codestream advisory
+	// answers a Leap query for a shared package; this field discloses that the
+	// fixed version named is the SLE (often LTSS-channel) build, which a free
+	// openSUSE Leap user may not obtain directly. Additive like
+	// ModuleStream/Related — advisories rebuild from providers on every db
+	// build, so no schema bump.
+	CrossMappedFrom string `json:"cross_mapped_from,omitempty"`
 }
 
 // RangeType mirrors OSV. GIT ranges carry commit SHAs, not versions, and must
