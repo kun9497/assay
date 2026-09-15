@@ -272,9 +272,12 @@ func TestConvert(t *testing.T) {
 	}
 
 	by := affectedByName(adv)
-	if len(by) != 3 {
-		t.Fatalf("produced %d affected entries, want 3 (xz on SLES 16.0, liblzma5 folded onto SLES "+
-			"15.SP6, libfoo on openSUSE Leap 15.6): %+v", len(by), adv.Affected)
+	// Three native entries (xz on SLES 16.0, liblzma5 folded onto SLES 15.SP6,
+	// libfoo on openSUSE Leap 15.6) PLUS D108's two gap-fill mirrors: xz onto
+	// openSUSE Leap:16.0 and liblzma5 onto openSUSE Leap:15.6, since neither
+	// Leap release carries a native entry for that package in this document.
+	if len(by) != 5 {
+		t.Fatalf("produced %d affected entries, want 5 (3 native + 2 D108 mirrors): %+v", len(by), adv.Affected)
 	}
 
 	fix := by["SLES:16.0/xz"]
@@ -298,6 +301,31 @@ func TestConvert(t *testing.T) {
 	if len(unfixed.Ranges) != 1 || len(unfixed.Ranges[0].Events) != 1 ||
 		unfixed.Ranges[0].Events[0].Introduced != "0" || unfixed.Ranges[0].Events[0].Fixed != "" {
 		t.Errorf("libfoo events = %+v, want exactly one introduced-0 event and no fixed event", unfixed.Ranges)
+	}
+	if unfixed.CrossMappedFrom != "" {
+		t.Errorf("libfoo is a native Leap entry, must not be marked cross-mapped: %q", unfixed.CrossMappedFrom)
+	}
+
+	// D108: the two SLE codestream fixes are also mirrored onto their Leap
+	// keys, each disclosing its origin, because neither Leap release carries a
+	// native entry for that package here.
+	xzMirror, ok := by["openSUSE Leap:16.0/xz"]
+	if !ok || xzMirror.CrossMappedFrom != "SLES:16.0" ||
+		len(xzMirror.Ranges) != 1 || xzMirror.Ranges[0].Events[1].Fixed != "5.8.1-160000.2.2" {
+		t.Errorf("xz mirror onto openSUSE Leap:16.0 = %+v (CrossMappedFrom %q), want the SLES:16.0 fix",
+			xzMirror.Ranges, xzMirror.CrossMappedFrom)
+	}
+	lzMirror, ok := by["openSUSE Leap:15.6/liblzma5"]
+	if !ok || lzMirror.CrossMappedFrom != "SLES:15.SP6" ||
+		len(lzMirror.Ranges) != 1 || lzMirror.Ranges[0].Events[1].Fixed != "5.6.2-1.1" {
+		t.Errorf("liblzma5 mirror onto openSUSE Leap:15.6 = %+v (CrossMappedFrom %q), want the SLES:15.SP6 fix",
+			lzMirror.Ranges, lzMirror.CrossMappedFrom)
+	}
+	if st.MirroredToLeap != 2 {
+		t.Errorf("MirroredToLeap = %d, want 2 (xz and liblzma5)", st.MirroredToLeap)
+	}
+	if st.SkippedLeapNativeWins != 0 {
+		t.Errorf("SkippedLeapNativeWins = %d, want 0", st.SkippedLeapNativeWins)
 	}
 
 	// Every discard is counted.
@@ -764,5 +792,130 @@ func TestConvert_NoPurlIsCountedAndSkipped(t *testing.T) {
 	}
 	if st.SkippedUnknownPackage != 1 {
 		t.Errorf("SkippedUnknownPackage = %d, want 1 -- the product_status entry referencing the no-purl leaf", st.SkippedUnknownPackage)
+	}
+}
+
+// D108: leapMirrorKey maps a folded SLE key to the openSUSE Leap key built
+// from the same codestream, refusing any Leap release the feed does not
+// publish (leapReleases) so no phantom key is ever emitted.
+func TestLeapMirrorKey(t *testing.T) {
+	cases := []struct {
+		in, want string
+		ok       bool
+	}{
+		{"SLES:15", "openSUSE Leap:15.0", true},     // SP0/GA
+		{"SLES:15.SP6", "openSUSE Leap:15.6", true}, // the aging-out case
+		{"SLES:16.0", "openSUSE Leap:16.0", true},   // dotted 16.x
+		{"SLES:15.SP7", "", false},                  // SLE 15 SP7 exists; Leap 15.7 never did
+		{"SLES:12.SP5", "", false},                  // no openSUSE Leap 12.x
+		{"SLES:16.1", "", false},                    // not yet published as Leap 16.1 (census M1)
+		{"openSUSE Leap:15.6", "", false},           // already a Leap key
+		{"", "", false},
+	}
+	for _, c := range cases {
+		got, ok := leapMirrorKey(c.in)
+		if got != c.want || ok != c.ok {
+			t.Errorf("leapMirrorKey(%q) = (%q,%v), want (%q,%v)", c.in, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+// D108 gap-fill: a document whose SP6 fix lives only under the SP6-LTSS name
+// (folded to SLES:15.SP6) and carries NO native openSUSE Leap 15.6 entry --
+// the aging-out shape this slice exists for -- is mirrored onto
+// openSUSE Leap:15.6 so the installed-package finding does not vanish.
+func TestConvert_MirrorsSLEOntoLeap_WhenNoNativeLeap(t *testing.T) {
+	d := buildDoc(t, "CVE-2026-5773",
+		[]string{"SUSE Linux Enterprise Server 15 SP6-LTSS"},
+		map[string]string{
+			"curl-8.14.1-150600.4.51.1": "pkg:rpm/suse/curl@8.14.1-150600.4.51.1?upstream=curl-8.14.1-150600.4.51.1.src.rpm",
+		},
+		[]string{"SUSE Linux Enterprise Server 15 SP6-LTSS:curl-8.14.1-150600.4.51.1"},
+		nil, nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped a document whose only fix is an SP6-LTSS entry")
+	}
+	by := affectedByName(adv)
+	// The LTSS fold onto SLES:15.SP6 is unchanged (D91).
+	if _, found := by["SLES:15.SP6/curl"]; !found {
+		t.Fatal("the LTSS-only fix did not fold onto SLES:15.SP6 (D91)")
+	}
+	// D108: mirrored onto openSUSE Leap:15.6, disclosing its origin.
+	m, found := by["openSUSE Leap:15.6/curl"]
+	if !found {
+		t.Fatal("no mirrored openSUSE Leap:15.6 curl entry produced (D108)")
+	}
+	if m.CrossMappedFrom != "SLES:15.SP6" {
+		t.Fatalf("CrossMappedFrom = %q, want SLES:15.SP6", m.CrossMappedFrom)
+	}
+	if len(m.Ranges) != 1 || len(m.Ranges[0].Events) != 2 ||
+		m.Ranges[0].Events[1].Fixed != "8.14.1-150600.4.51.1" {
+		t.Fatalf("mirrored entry lost the fixed version: %+v", m.Ranges)
+	}
+	if st.MirroredToLeap != 1 {
+		t.Fatalf("MirroredToLeap = %d, want 1", st.MirroredToLeap)
+	}
+	if st.SkippedLeapNativeWins != 0 {
+		t.Errorf("SkippedLeapNativeWins = %d, want 0 -- there is no native Leap entry to win", st.SkippedLeapNativeWins)
+	}
+}
+
+// D108 gap-fill tie-break: when a document DOES carry a native openSUSE Leap
+// 15.6 entry for the package, native wins and no mirror is emitted -- the
+// finding is present natively, so nothing disappears, and the native entry is
+// never mislabelled as cross-mapped.
+func TestConvert_DoesNotMirror_WhenNativeLeapPresent(t *testing.T) {
+	d := buildDoc(t, "CVE-2026-9999",
+		[]string{"SUSE Linux Enterprise Server 15 SP6-LTSS", "openSUSE Leap 15.6"},
+		map[string]string{
+			"curl-8.14.1-150600.4.51.1": "pkg:rpm/suse/curl@8.14.1-150600.4.51.1?upstream=curl-8.14.1-150600.4.51.1.src.rpm",
+			"curl":                      "pkg:rpm/suse/curl@?upstream=curl.src.rpm",
+		},
+		[]string{"SUSE Linux Enterprise Server 15 SP6-LTSS:curl-8.14.1-150600.4.51.1"},
+		[]string{"openSUSE Leap 15.6:curl"}, // native known_affected, no fix
+		nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped the document")
+	}
+	got, found := affectedByName(adv)["openSUSE Leap:15.6/curl"]
+	if !found {
+		t.Fatal("native openSUSE Leap:15.6 curl finding disappeared -- gap-fill must never hide one")
+	}
+	if got.CrossMappedFrom != "" {
+		t.Fatalf("native entry must not be marked cross-mapped: %q", got.CrossMappedFrom)
+	}
+	if st.MirroredToLeap != 0 || st.SkippedLeapNativeWins != 1 {
+		t.Fatalf("tie-break wrong: MirroredToLeap=%d SkippedLeapNativeWins=%d, want 0 and 1",
+			st.MirroredToLeap, st.SkippedLeapNativeWins)
+	}
+}
+
+// D108 allowlist: SLE 15 SP7 has no corresponding openSUSE Leap 15.7 (Leap
+// jumped to 16), so the mirror must never fabricate a phantom Leap:15.7 key.
+func TestConvert_DoesNotMirror_SP7_NoLeap157(t *testing.T) {
+	d := buildDoc(t, "CVE-2026-8888",
+		[]string{"SUSE Linux Enterprise Server 15 SP7"},
+		map[string]string{
+			"curl-8.14.1-150700.7.23.1": "pkg:rpm/suse/curl@8.14.1-150700.7.23.1?upstream=curl-8.14.1-150700.7.23.1.src.rpm",
+		},
+		[]string{"SUSE Linux Enterprise Server 15 SP7:curl-8.14.1-150700.7.23.1"},
+		nil, nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped a document naming an SLES package")
+	}
+	if _, found := affectedByName(adv)["openSUSE Leap:15.7/curl"]; found {
+		t.Fatal("mirrored onto a phantom openSUSE Leap:15.7 key")
+	}
+	if st.MirroredToLeap != 0 {
+		t.Fatalf("MirroredToLeap = %d, want 0", st.MirroredToLeap)
 	}
 }

@@ -146,6 +146,11 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus, 
 		// earned, so the three no-fix footnotes each appear at most once and
 		// only when something on the table needs them (D52).
 		noFix := map[advisory.FixState]bool{}
+		// crossMappedFrom is the enrichedBy idea again for D108: the distinct
+		// SLE keys any cross-mapped row was mirrored from, in first-seen order,
+		// so the footnote names them and appears at most once. A slice, not a
+		// map, for the same determinism reason (design goal #3).
+		var crossMappedFrom []string
 		for _, f := range res.Findings {
 			fixed := f.Evidence.Fixed
 			if fixed == "" {
@@ -217,8 +222,21 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus, 
 					}
 				}
 			}
+			// D108: a Leap finding mirrored from its SLE codestream earns a
+			// marker on the ECOSYSTEM cell (no other marker lands there, so no
+			// collision) and a footnote naming the SLE key. An ASCII marker,
+			// appended before Flush like disagreementMarker, so it counts as one
+			// column rather than misaligning the row the way a multi-byte glyph
+			// would.
+			eco := f.Package.Ecosystem
+			if f.CrossMappedFrom != "" {
+				eco += " " + crossMapMarker
+				if !slices.Contains(crossMappedFrom, f.CrossMappedFrom) {
+					crossMappedFrom = append(crossMappedFrom, f.CrossMappedFrom)
+				}
+			}
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				name, f.Package.Version, f.Package.Ecosystem,
+				name, f.Package.Version, eco,
 				advisoryID, sev, aliases, fixed)
 			bands = append(bands, f.Severity)
 		}
@@ -248,6 +266,15 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus, 
 			sort.Strings(enrichedBy)
 			fmt.Fprintf(w, "%s also described by %s; see --explain <id> for the text\n",
 				enrichmentMarker, strings.Join(enrichedBy, ", "))
+		}
+		if len(crossMappedFrom) > 0 {
+			// Sorted for the same determinism reason as enrichedBy. Names the
+			// SLE key(s) so the reader knows the fixed version is the SLE (often
+			// LTSS-channel) build that openSUSE Leap shares the codestream with
+			// (D108), not one necessarily in the free Leap repos.
+			sort.Strings(crossMappedFrom)
+			fmt.Fprintf(w, "%s matched via the SLE codestream it is built from (%s); the fixed version is the SLE (LTSS-channel) build — see --explain <id>\n",
+				crossMapMarker, strings.Join(crossMappedFrom, ", "))
 		}
 
 	case cat.Components == 0:
@@ -562,6 +589,11 @@ const disagreementMarker = "*"
 // the table instructs a reader to run a command that fails on the cell the
 // footnote is pointing at.
 const enrichmentMarker = "+"
+
+// crossMapMarker flags a row whose finding was mirrored from the SLE codestream
+// the openSUSE Leap release is built from (D108). ASCII and single-column like
+// the two markers above, so appending it before Flush cannot misalign the row.
+const crossMapMarker = "~"
 
 // sourcesDisagree reports whether a finding's sources gave different
 // severity bands for the same vulnerability — the disagreement the table's

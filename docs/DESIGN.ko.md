@@ -610,6 +610,16 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] SLES LTSS를 mainline-wins 동점 처리로 접음 (D91) — post-EOL fix가 같은 키
       아래서 드러남(bci-base finding 121→286건, curl이 진짜 FIXED IN을 보여줌),
       가려졌던 쌍둥이 385,621건을 버려서 셈
+- [x] openSUSE Leap를 SLE codestream으로부터 미러링 (D108) — SUSE가 CSAF에서 Leap
+      릴리스를 노후화시키면(재생성된 문서가 Leap product entry를 빼버려서, fix가
+      D91이 `SLES:15.SP6`로 접는 SLE-SP6-LTSS 이름 아래에만 남음) Leap 이미지가
+      조용히 매칭을 멈춘다; provider는 이제 접힌 `SLES:15.SP{n}` / `SLES:16.{m}`
+      항목마다 `openSUSE Leap:15.{n}` / `16.{m}`으로 gap-fill 미러링해서, native
+      Leap 항목이 항상 이기고 설치된 패키지의 finding이 사라지지 않게 한다
+      (전이 문서 18,769건 측정, native가 이김). 공유된 150600 codestream에서 rpm
+      comparer를 재사용(새 comparer 없음, D9); allowlist {15.0–15.6, 16.0}가 유령
+      키를 거부함(SLE 15 SP7 → Leap 15.7 없음); `Affected.CrossMappedFrom`이 모든
+      renderer에서 SLE(LTSS-channel) fix 버전을 공개함
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨

@@ -284,6 +284,12 @@ func findingMessage(f matcher.Finding, target string) string {
 	if target != "" {
 		fmt.Fprintf(&b, " in %s", target)
 	}
+	if f.CrossMappedFrom != "" {
+		// D108: this Leap finding was mirrored from the SLE codestream the
+		// release is built from, so the fixed version below is the SLE (often
+		// LTSS-channel) build a free openSUSE Leap user may not pull directly.
+		fmt.Fprintf(&b, " (cross-mapped from %s: the fixed version is the SLE codestream build)", f.CrossMappedFrom)
+	}
 	switch f.FixState() {
 	case advisory.FixStateFixed:
 		if f.Evidence.Fixed != "" {

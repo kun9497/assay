@@ -204,6 +204,31 @@ func TestExplain_ShowsSourcePackageIndirection(t *testing.T) {
 	}
 }
 
+// TestExplain_DisclosesCrossMappedFrom is D108: a finding reached through the
+// Leap<->SLE codestream mirror must explain, in words, that the fixed version
+// shown is the SLE codestream build -- otherwise a reader chases a version that
+// is not in the free Leap repos. Deleting the disclosure line collapses this.
+func TestExplain_DisclosesCrossMappedFrom(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:         pkgmeta.Package{Name: "curl", Version: "8.14.1-150600.4.40.1", Ecosystem: "openSUSE Leap:15.6"},
+		Advisory:        advisory.Advisory{ID: "SUSE-CVE-2026-5773"},
+		MatchedName:     "curl",
+		CrossMappedFrom: "SLES:15.SP6",
+		Severity:        severity.High, Score: 7.5,
+	}}}
+	var buf bytes.Buffer
+	if _, err := Explain(&buf, res, "SUSE-CVE-2026-5773"); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "SLES:15.SP6") {
+		t.Errorf("--explain did not disclose the cross-map origin:\n%s", out)
+	}
+	if !strings.Contains(strings.ToLower(out), "codestream") {
+		t.Errorf("--explain did not explain the SLE codestream origin in words:\n%s", out)
+	}
+}
+
 // TestExplain_ShowsProvidesIndirectionNotSourcePackage is D95's own
 // distinction: a finding reached through the apk provides bridge shares the
 // "MatchedName != Package.Name" shape D8's source-package join has, and

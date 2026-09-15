@@ -349,6 +349,54 @@ vuln-list-update 소비자 포함) 기존 업스트림 신고를 찾지 못했�
 
 ---
 
+### SLE → openSUSE Leap union (D108의 미뤄둔 절반)
+
+**2026-09-15에 D108과 함께 미뤄짐.** D108은 접힌 SLE codestream advisory를 같은
+codestream을 공유하는 openSUSE Leap 키로 미러링하되, gap-fill 방식이다: 해당
+패키지에 native Leap entry가 없는 문서에만 적용된다. 문서가 둘 다 가지고
+있으면 — 전이(transitional) 문서 — native가 이기고 SLE entry는 병합되지
+않는다. census는 전이 집합의 크기를 18,769개 문서로 쟀다(67,110개 아카이브
+중 native Leap 15.x entry를 갖는 24,091개 중에서), 즉 이는 드문 경우가 아니라
+흔한 경우다.
+
+**Native-wins가 그저 값싸서가 아니라 옳은 이유.** 전이 문서에서 native Leap
+entry가 "affected, no fix"라고 말하는데 SLE SP entry는 fixed라면, 이는 SUSE가
+Leap 자신의 저장소는 아직 fix를 내놓지 않았다고(SLE는 냈어도) 말하는 것이다.
+여기에 SLE의 fixed range를 Leap 키로 union하면, 무료 Leap 사용자에게 자신의
+`zypper up`으로는 닿을 수 없는 fix가 있다고 말하게 된다 — native entry가
+정직하게 보고하는 no-fix보다 더 나쁜 오류다. 그러므로 이 union은 단순히
+비용 때문에 미뤄진 게 아니다; no-fix-native 케이스에서는 애초에 틀린
+접근이다.
+
+**실제로 미뤄진 것**은 union이 실질적인 정보를 더해줄 단 하나의 하위
+사례다: native Leap entry가 no-fix이면서 SLE entry는 fixed이고 그 fix가
+실제로 Leap의 저장소에도 도달한 경우(SUSE가 그저 Leap entry를 재생성하지
+않았을 뿐인 경우)다. 이 부분집합은 따로 크기를 재지 않았다 — 위의 전이
+집합 개수는 이를 나누어 보여주지 않는다. union을 구현한다는 것은 range별
+provenance(하나의 `Affected` 위에 SLE에서 온 fixed range와 Leap에서 온
+no-fix range를 각각 자신의 `CrossMappedFrom`과 함께 두는 것)와 이를
+조정하는 matcher를 뜻한다; D108의 gap-fill은 이미 만들어진 목적—설치된
+패키지의 finding이 사라지지 않는 것—을 충족하고 있다. **다시 볼 때는**
+같은 codestream의 SLE가 고친 패키지에 대해 실제 Leap 이미지가 no-fix를
+보고하는 것이 발견되고, 그 fix가 Leap 저장소에 실재함이 확인될 때다; 먼저
+그 부분집합을 재되, D91 census를 템플릿으로 삼는다.
+
+**관련되었지만 미뤄지지 않은 것: LTSS-channel remediation의 뉘앙스.** 미러링된
+fix 버전은 SLE 빌드이며, 종종 LTSS(유료) channel에서 나온 것이라 무료 Leap
+사용자가 직접 얻지 못할 수 있다. 이것은 숨겨지지도, 미뤄지지도 않았다:
+`Affected.CrossMappedFrom`이 출처를 실어 나르고 모든 renderer가 이를
+공개한다. finding 자체는 참이다 — 설치된 바이너리는 취약하다 — 그리고 이
+공개가 독자로 하여금 remediation을 스스로 판단하게 해준다.
+
+**Allowlist를 다시 볼 계기.** D108의 `leapReleases`는 하드코딩된 집합
+{15.0–15.6, 16.0}이며, 2026-09-15 census로 확인되었다(아카이브는 `openSUSE
+Leap X.Y NonFree`와 `openSUSE Leap Micro 5.x` 이름도 함께 발행하는데, 둘 다
+이미 fold에서 거부되고 있고 미러 대상이 된 적이 없다). census가 새로운
+mainline Leap 릴리스(16.1 이상)를 보여줄 때 다시 본다; 이 집합에 없는
+릴리스로 키가 잡힌 Leap 이미지가 조용히 과소 보고하는 것이 그 흔적이다.
+
+---
+
 ### 2026-09-01 성능 감사 — 취한 것, 반박된 것, 기다리는 것
 
 스캔·빌드 경로의 프로파일 기반 감사(실제 3.75 GB 아티팩트, finding 12,742건을 내는

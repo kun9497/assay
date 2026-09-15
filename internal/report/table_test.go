@@ -199,6 +199,27 @@ func TestTable_Findings(t *testing.T) {
 	}
 }
 
+// D108: a finding matched through the Leap<->SLE codestream mirror earns a
+// marker on its ecosystem cell and a footnote naming the SLE key, so the
+// scannable view still discloses that the fixed version is the SLE build.
+func TestTable_DisclosesCrossMappedFrom(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:         pkgmeta.Package{Name: "curl", Version: "8.14.1-150600.4.40.1", Ecosystem: "openSUSE Leap:15.6"},
+		Advisory:        advisory.Advisory{ID: "SUSE-CVE-2026-5773"},
+		Evidence:        version.Evidence{Introduced: "0", Fixed: "8.14.1-150600.4.51.1", Reason: "below the fix"},
+		MatchedName:     "curl",
+		CrossMappedFrom: "SLES:15.SP6",
+		Severity:        severity.High, Score: 7.5,
+	}}}
+	var buf bytes.Buffer
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}, false); err != nil {
+		t.Fatal(err)
+	}
+	if out := buf.String(); !strings.Contains(out, "SLES:15.SP6") {
+		t.Fatalf("table did not disclose the cross-map origin:\n%s", out)
+	}
+}
+
 func TestTable_SkippedCountsAreVisible(t *testing.T) {
 	// A scan that could not evaluate 40 packages must not read as clean.
 	res := matcher.Result{Skipped: []matcher.Skipped{{

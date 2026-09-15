@@ -3992,6 +3992,51 @@ red입니다 — 세 번째는 처음에 두 번 살아남은 것처럼 보였�
 
 ---
 
+### D108 — openSUSE Leap은 Leap이 노후화된 뒤에도 자신이 빌드되어 나온 SLE codestream이다
+
+**결정.** 접힌 `SLES:15.SP{n}` / `SLES:16.{m}` affected entry를 대응하는
+`openSUSE Leap:15.{n}` / `16.{m}` 키로 미러링한다. openSUSE Leap 15.x가 공유된 150600
+codestream 위에서 SLE 15 SPx로부터 binary-built되어 같은 EVR 번호 체계를 쓰기
+때문이다 — 설치된 Leap `curl 8.14.1-150600.4.40.1`과 SLE-SP6-LTSS의 fix
+`...4.51.1`이 같은 rpm comparer 아래서 정렬된다(새 Comparer 없음, D9). 최초로
+실전 운영된 weekly routine이 leap156의 minFindings floor를 걸었던 것(8 < 10,
+PR #130)이 계기다: 그 하락은 회귀가 아니라 SUSE가 Leap 15.6을 CSAF에서
+노후화시킨 것이었다 — CVE-2026-5773과 -7168 문서를 재생성하면서(09-09/09-11)
+`openSUSE Leap 15.6` product entry가 빠졌고, SP6의 curl fix는 D91이
+`SLES:15.SP6`로 접는 `-LTSS` 이름 아래에만 남아, `openSUSE Leap:15.6`로 키가
+잡힌 Leap 이미지가 더 이상 매칭하지 못하게 됐다. 이 미러가 정확히 그 gap을
+메운다.
+
+**Gap-fill이지 union이 아니다 — 그리고 census가 native-wins를 그저 값싼 선택이
+아니라 올바른 정책으로 만들었다.** 미러는 문서에 해당 패키지의 native Leap
+entry가 없는 곳에만 생성되므로(native가 이김), 설치된 패키지의 finding은
+사라지지 않는다. 아카이브 전체(67,110개 문서)에서 측정: 24,091건이 native
+Leap 15.x entry를 갖고 있고, 그중 18,769건이 전이(transitional) 문서다 — 같은
+패키지 계열에 대해 SLE-15 entry도 함께 갖고 있다는 뜻이다. 전이 문서에서
+native Leap entry가 "affected, no fix"라고 말하는데 SLE SP6는 fixed라면, 이는
+SUSE가 Leap 자신의 저장소는 아직 fix를 내놓지 않았다고(SLE는 냈어도) 말하고
+있는 것이다; 여기에 SLE의 fixed range를 union하면 무료 Leap 사용자에게 fix
+가용성을 과장하게 된다. Native-wins는 Leap의 실제 패치 상태를 보고한다;
+no-fix-native/fixed-SLE 부분집합을 union으로 보강하는 일은 미뤄졌고
+(deferred-decisions), 이번 census는 이 부분집합의 크기를 따로 재지 않았다.
+
+**범위와 공개.** Leap 15.6만 놓고 보면, 14,781개 문서가 SLE SP6 데이터는 유지한
+채 Leap entry를 빼버렸다(서로 다른 패키지 계열 10,815개) — 미러는 설치된
+패키지에 해당하는 모든 항목을 복원하므로, leap156 스캔은 이 문제를 드러낸
+curl CVE 두 건보다 훨씬 많은 것을 되찾는다(T8은 DB 재빌드 후 floor를 다시
+band하며, ceiling도 오를 수 있다). 미러가 실어 나르는 fix 버전은 SLE의, 종종
+LTSS-channel 빌드로, 무료 Leap 사용자가 직접 받을 수 없는 것일 수 있으므로
+`Affected.CrossMappedFrom`이 출처를 기록하고 모든 renderer가 이를
+공개한다(테이블의 `~` 표시와 각주, JSON의 `crossMappedFrom`, SARIF와
+`--explain`의 한 줄). census가 확인한 allowlist {15.0–15.6, 16.0}은(census가
+함께 목격한 `NonFree`와 `Leap Micro` product 이름도 거부되는데, 기존 fold가
+이미 이들을 거부하고 있었다) 미러가 유령 키를 만들어내지 못하게 막는다: SLE
+15 SP7은 존재하지만 Leap은 16.0으로 건너뛰었으므로, `SLES:15.SP7`은 아무 데도
+미러링되지 않는다. 스캔 경로는 변경되지 않았고(D14) 이는 db-build 변경이다;
+미러링된 advisory는 다른 것과 똑같이 store에 도달한다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

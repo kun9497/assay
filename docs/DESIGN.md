@@ -637,6 +637,16 @@ exited 0 while 24 findings went unmentioned.
 - [x] SLES LTSS folded with a mainline-wins tie-break (D91) — post-EOL fixes surface
       under the same key (bci-base 121→286 findings, curl shows its real FIXED IN),
       385,621 shadowed twins dropped and counted
+- [x] openSUSE Leap mirrored from its SLE codestream (D108) — as SUSE ages a Leap release
+      out of its CSAF (a regenerated document drops the Leap product entries, leaving the
+      fix only under the SLE-SP6-LTSS name D91 folds to `SLES:15.SP6`), a Leap image
+      silently stops matching; the provider now mirrors each folded `SLES:15.SP{n}` /
+      `SLES:16.{m}` entry onto `openSUSE Leap:15.{n}` / `16.{m}`, gap-fill so a native Leap
+      entry always wins and no installed-package finding disappears (18,769 transitional
+      docs measured, where native wins). Reuses the rpm comparer on the shared 150600
+      codestream (no new comparer, D9); an allowlist {15.0–15.6, 16.0} refuses phantom keys
+      (SLE 15 SP7 → no Leap 15.7); `Affected.CrossMappedFrom` discloses the SLE
+      (LTSS-channel) fix version in every renderer
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15

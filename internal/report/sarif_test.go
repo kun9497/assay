@@ -81,6 +81,26 @@ func findingFixture(id, pkg string, band severity.Band, score float64, fixed str
 // refuses a document without. They are not stylistic: a result with no
 // partialFingerprints is not tracked across commits, so every push reopens
 // every alert.
+// D108: a finding reached through the Leap<->SLE codestream mirror must
+// disclose its origin in the SARIF a consumer ingests, so the fixed version is
+// not mistaken for one in the free Leap repos.
+func TestSARIF_DisclosesCrossMappedFrom(t *testing.T) {
+	res := matcher.Result{Findings: []matcher.Finding{{
+		Package:         pkgmeta.Package{Name: "curl", Version: "8.14.1-150600.4.40.1", Ecosystem: "openSUSE Leap:15.6"},
+		Advisory:        advisory.Advisory{ID: "SUSE-CVE-2026-5773"},
+		MatchedName:     "curl",
+		CrossMappedFrom: "SLES:15.SP6",
+		Severity:        severity.High, Score: 7.5,
+	}}}
+	var buf bytes.Buffer
+	if _, err := SARIF(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, "example.com/img:1", "v0.0.0-test", EOLStatus{}); err != nil {
+		t.Fatal(err)
+	}
+	if out := buf.String(); !strings.Contains(out, "SLES:15.SP6") {
+		t.Fatalf("sarif did not disclose the cross-map origin:\n%s", out)
+	}
+}
+
 func TestSARIF_ShapeGitHubRequires(t *testing.T) {
 	res := matcher.Result{Findings: []matcher.Finding{
 		findingFixture("CVE-2026-1", "libc6", severity.High, 7.5, "1.0.1", advisory.FixStateFixed),
