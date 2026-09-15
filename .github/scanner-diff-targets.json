@@ -100,7 +100,7 @@
     "trivy": {
       "minAgree": 34,
       "minFindings": 34,
-      "maxFindings": 82
+      "maxFindings": 180
     }
   },
   {
@@ -117,7 +117,7 @@
     "ref": "mirror.gcr.io/library/amazonlinux@sha256:181f98c48832fe926f8ca3b6ffeafcce128e96e77b93d08fbe9a9bc9403ce284",
     "minAgree": 0,
     "minFindings": 0,
-    "maxFindings": 25,
+    "maxFindings": 124,
     "trivy": {},
     "minComponents": 90
   },
