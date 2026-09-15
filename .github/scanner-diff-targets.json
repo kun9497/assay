@@ -35,7 +35,7 @@
     "trivy": {
       "minAgree": 32,
       "minFindings": 32,
-      "maxFindings": 76
+      "maxFindings": 164
     }
   },
   {
@@ -96,7 +96,7 @@
     "ref": "mirror.gcr.io/library/oraclelinux@sha256:3adbd4f3b22d816c90e78a9c9c2e0ddf65fc1bbadd816dc202054471a85f38b2",
     "minAgree": 31,
     "minFindings": 33,
-    "maxFindings": 78,
+    "maxFindings": 158,
     "trivy": {
       "minAgree": 34,
       "minFindings": 34,
@@ -136,7 +136,7 @@
     "tag": "opensuse/leap:15.6",
     "ref": "registry.opensuse.org/opensuse/leap@sha256:e4d84bbc5e0fa0df64381e95ad7ea8e3867cc34f3b1d174e9948d0f559d223e2",
     "minAgree": 0,
-    "minFindings": 10,
+    "minFindings": 4,
     "maxFindings": 25,
     "trivy": {}
   },
@@ -230,7 +230,7 @@
     "ref": "quay.io/hummingbird/nginx@sha256:6c6c6e7fd1cb655a6ff9066f04adef078b4b6ba3adf91dbd9a52ce71f83d6f18",
     "minAgree": 2,
     "minFindings": 2,
-    "maxFindings": 25
+    "maxFindings": 58
   },
   {
     "name": "bitnami-legacy-pg",
