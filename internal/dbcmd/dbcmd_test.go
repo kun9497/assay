@@ -2254,7 +2254,7 @@ func seedCovering(t *testing.T, since time.Time, ratings int) string {
 		}
 	}
 	if err := w.SetMeta(store.Meta{Ratings: map[string]store.Provenance{
-		"NVD": {CoversSince: since, CoversSinceKnown: true, Window: coverageLabel(since)},
+		"NVD": {CoversSince: since, CoversSinceKnown: true, Window: coverageLabel(since), DataAsOf: time.Now().UTC()},
 	}}); err != nil {
 		t.Fatal(err)
 	}

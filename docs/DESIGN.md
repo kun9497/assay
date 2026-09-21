@@ -412,6 +412,30 @@ The narrower coverage is disclosed rather than assumed: `db status` prints the r
 pushing — an artifact with zero ratings becomes the seed every later delta builds on, and the
 daily runs would never fill in what it is missing.
 
+### Database build and publication safeguards
+
+Seeded nightly NVD updates resume from the previous successful request endpoint with
+one day of overlap, widening the configured window when needed. Recovery ranges over
+120 days are split into contiguous API windows. Explicit `NVD_UNTIL_DAYS` backfills
+keep their requested bounds. Legacy seeds use NVD's `DataAsOf` as the checkpoint;
+an undated seed is refused instead of silently skipping an unknown interval.
+
+`--ratings-only` clears seeded EPSS and KEV rows before fetching their current snapshots,
+including when either annotator is disabled. NVD ratings remain incremental.
+
+`db push` compares actual advisory counts, declared providers and ecosystems, and rating
+counts per source. Missing advisory providers/releases, an empty replacement, or an
+advisory drop greater than 20% overall or within an ecosystem require `--force`.
+Smaller withdrawals and shrinking EPSS/KEV snapshots are allowed; losing a rating source
+or reducing NVD ratings is refused. Legacy artifacts without counts are downloaded for
+comparison. Registry read/metadata errors stop publication unless `--force` explicitly
+overrides the check. These counts detect large losses, not every semantic regression.
+
+Ubuntu tracker clone/fetch retries transient network errors up to four attempts, with
+1/3/10-second backoff and a ten-minute timeout per attempt. Failed clones are discarded
+from private staging directories. Both database workflows use `queue: max` so additional
+pending runs do not replace each other; a full queue and job timeouts can still fail runs.
+
 ### Exit codes
 
 | Code | Meaning |

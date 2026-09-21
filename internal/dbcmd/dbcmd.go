@@ -69,17 +69,10 @@ import (
 // and re-fetched fresh by their own annotator every build (EPSS_ENABLE/
 // KEV_ENABLE default ON, main.go).
 //
-// NOT excluded from ratingsOnly's own copy just below, which is a whole-FILE
-// copy rather than a record-by-record one and so has no per-record hook to
-// exclude anything at. In the ordinary case that is harmless: EPSS_ENABLE
-// and KEV_ENABLE default ON, so their annotators re-run and overwrite every
-// carried-forward row with a fresh fetch regardless. It stops being
-// harmless only if a `--ratings-only` build ALSO sets EPSS_ENABLE=0 or
-// KEV_ENABLE=0 — a build asking to re-rate with NVD alone would then still
-// carry the seed's stale EPSS/KEV rows forward verbatim. Narrow enough
-// (--ratings-only is D65's own backfill-only flag) that it is recorded here
-// rather than fixed: closing it needs bucket-level surgery on the copied
-// file, not a filter on a stream this path never reads record by record.
+// Ratings-only builds remove both snapshot sources from the copied temporary
+// file before re-fetching. Upserts alone cannot remove entries absent from a
+// newer feed. Disabling either annotator leaves that source absent instead
+// of silently preserving old scores or catalog membership.
 //
 // seedRef is what every message about the seed NAMES it as, instead of
 // seedPath. The CLI's `db build --seed <ref>` pulls the reference to a
@@ -208,6 +201,15 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 		// annotator that does not run this time keeps the seed's window, one
 		// that does run merges with it instead of replacing it.
 		maps.Copy(meta.Ratings, seedMeta.Ratings)
+		for name := range perishableRatingSources {
+			if err := w.DeleteRatings(name); err != nil {
+				w.Close()
+				os.Remove(tmp)
+				fmt.Fprintf(stderr, "error: clear seeded %s snapshot: %v\n", name, err)
+				return 2
+			}
+			delete(meta.Ratings, name)
+		}
 	}
 
 	// D56. Which stage a build spends its time in is not guessable from the
@@ -409,6 +411,21 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 	// configured annotator was supposed to add would look complete and
 	// quietly under-report every band it would otherwise have raised.
 	for _, a := range annotators {
+		if resume, ok := a.(provider.ResumableAnnotator); ok {
+			coverage := meta.Ratings[a.Name()]
+			// Migrate legacy open-ended checkpoints before merging a
+			// historical backfill's response timestamp into their provenance.
+			if coverage.CoversUntil.IsZero() && !coverage.DataAsOf.IsZero() {
+				coverage.CoversUntil, coverage.CoversUntilKnown = coverage.DataAsOf, true
+				meta.Ratings[a.Name()] = coverage
+			}
+			if err := resume.ResumeFrom(coverage); err != nil {
+				w.Close()
+				os.Remove(tmp)
+				fmt.Fprintf(stderr, "error: resume %s: %v\n", a.Name(), err)
+				return 2
+			}
+		}
 		fmt.Fprintf(stderr, "annotating with %s…\n", a.Name())
 		started := time.Now()
 		batch := ratingBatch{w: w}
@@ -1146,6 +1163,16 @@ func mergeRatingCoverage(seeded, fetched store.Provenance) store.Provenance {
 		// merged against the seed's.
 		return merged
 	case !fetched.CoversSince.IsZero() && seeded.CoversSince.Before(fetched.CoversSince):
+		end := seeded.CoversUntil
+		if end.IsZero() {
+			end = seeded.DataAsOf
+		}
+		if end.IsZero() || end.Before(fetched.CoversSince) {
+			// Retain the new contiguous span; older rows are still stored,
+			// but the gap must not become a claim of continuous coverage.
+			merged.Window += " (earlier seed does not reach this window)"
+			return merged
+		}
 		// An unbounded seed needs no case of its own: its zero CoversSince
 		// sorts before every real date, so it wins here. An explicit branch
 		// for it was written first and removed after a mutation proved it a
@@ -1154,6 +1181,9 @@ func mergeRatingCoverage(seeded, fetched store.Provenance) store.Provenance {
 		// result. An untestable branch reads as an untested one forever.
 		merged.CoversSince = seeded.CoversSince
 		merged.Window = coverageLabel(seeded.CoversSince)
+		if seeded.CoversUntil.After(fetched.CoversUntil) && !fetched.CoversUntil.IsZero() {
+			merged.CoversUntil, merged.CoversUntilKnown = seeded.CoversUntil, seeded.CoversUntilKnown
+		}
 	case fetched.CoversSince.Before(seeded.CoversSince):
 		// A backfill slice (D65): this run asked for an OLDER range than the
 		// seed already covers. Whether that EXTENDS the covered span depends
@@ -1169,8 +1199,9 @@ func mergeRatingCoverage(seeded, fetched store.Provenance) store.Provenance {
 			merged.Window = coverageLabel(fetched.CoversSince)
 		} else {
 			merged.CoversSince = seeded.CoversSince
-			merged.Window = coverageLabel(seeded.CoversSince) +
-				" (an earlier slice is held but does not reach it)"
+			merged.CoversUntil, merged.CoversUntilKnown = seeded.CoversUntil, seeded.CoversUntilKnown
+			merged.Window = coverageWindow(merged) + " (an earlier slice is held but does not reach it)"
+			return merged
 		}
 		// Either way the span now runs to wherever the SEED reached, not to
 		// where this slice stopped. Leaving the slice's end in place would
@@ -1180,7 +1211,24 @@ func mergeRatingCoverage(seeded, fetched store.Provenance) store.Provenance {
 		// artifact through.
 		merged.CoversUntil, merged.CoversUntilKnown = seeded.CoversUntil, seeded.CoversUntilKnown
 	}
+	// A connected window may extend either endpoint, including when both
+	// starts are equal or a backfill also reaches beyond the seed's end.
+	if !seeded.CoversUntil.IsZero() && !fetched.CoversUntil.IsZero() {
+		merged.CoversUntil = seeded.CoversUntil
+		if fetched.CoversUntil.After(merged.CoversUntil) {
+			merged.CoversUntil = fetched.CoversUntil
+		}
+		merged.CoversUntilKnown = seeded.CoversUntilKnown && fetched.CoversUntilKnown
+	}
+	merged.Window = coverageWindow(merged)
 	return merged
+}
+
+func coverageWindow(p store.Provenance) string {
+	if p.CoversUntil.IsZero() || p.CoversSince.IsZero() {
+		return coverageLabel(p.CoversSince)
+	}
+	return fmt.Sprintf("modified %s..%s", p.CoversSince.UTC().Format("2006-01-02"), p.CoversUntil.UTC().Format("2006-01-02"))
 }
 
 // touches reports whether a slice's window reaches the range the seed already

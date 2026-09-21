@@ -388,8 +388,9 @@ type Provenance struct {
 	// The two ends together are what decide whether a slice EXTENDS the
 	// covered range or leaves a hole in it, and a hole is the difference
 	// between a database that covers a span and one that merely holds
-	// ratings from both sides of it. Zero means "up to when the run
-	// happened".
+	// ratings from both sides of it. NVD records the actual request endpoint.
+	// Zero on legacy NVD data means "up to when the run happened"; its
+	// DataAsOf supplies a migration checkpoint with overlap on the next fetch.
 	CoversUntil time.Time `json:"covers_until,omitempty"`
 	// CoversUntilKnown separates "ran up to now" from "not recorded", the
 	// same distinction CoversSinceKnown draws at the other end.

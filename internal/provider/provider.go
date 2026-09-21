@@ -28,6 +28,13 @@ type Annotator interface {
 	Annotate(ctx context.Context, emit func(advisory.Rating) error) (store.Provenance, error)
 }
 
+// ResumableAnnotator can extend a delta to cover changes since the seed's
+// last successful request. Explicit historical backfills retain their bounds.
+type ResumableAnnotator interface {
+	Annotator
+	ResumeFrom(store.Provenance) error
+}
+
 // Enricher is an upstream that describes a CVE in prose, rather than saying
 // which package is affected or what the CVE is worth. KISA/KNVD is the first
 // and the reason the interface exists (D3): much of its corpus names a CVE

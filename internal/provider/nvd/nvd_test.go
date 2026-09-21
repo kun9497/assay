@@ -585,7 +585,10 @@ func TestAnnotate_ReportsProgressPerPage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	lines := strings.Count(progress.String(), "nvd: ")
+	// Counted on " records, " rather than the "nvd: " prefix: Annotate's
+	// window line shares that prefix but is not a page, so counting prefixes
+	// would measure one line that has nothing to do with paging.
+	lines := strings.Count(progress.String(), " records, ")
 	if lines != 2 {
 		t.Errorf("progress has %d line(s), want one per page (2):\n%s", lines, progress.String())
 	}
@@ -1157,9 +1160,13 @@ func TestAnnotate_UntilBoundsTheRequestedWindow(t *testing.T) {
 	}
 }
 
-// A run with no Until still reaches the present and says so: a zero
-// CoversUntil WITH CoversUntilKnown, which the merge reads as "up to now".
-func TestAnnotate_NoUntilRecordsAnOpenEnd(t *testing.T) {
+// Even an ordinary nightly records the actual request endpoint so the next
+// run can distinguish a recent seed from one that missed several days.
+func TestAnnotate_NoUntilRecordsTheRequestEndpoint(t *testing.T) {
+	now := time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC)
+	oldNow := nowUTC
+	nowUTC = func() time.Time { return now }
+	t.Cleanup(func() { nowUTC = oldNow })
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"totalResults":0,"timestamp":"2026-01-01T00:00:00.000","vulnerabilities":[]}`)
 	}))
@@ -1170,8 +1177,8 @@ func TestAnnotate_NoUntilRecordsAnOpenEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Annotate: %v", err)
 	}
-	if !prov.CoversUntilKnown || !prov.CoversUntil.IsZero() {
-		t.Errorf("CoversUntil = %v, known = %v; want zero and known", prov.CoversUntil, prov.CoversUntilKnown)
+	if !prov.CoversUntilKnown || !prov.CoversUntil.Equal(now) {
+		t.Errorf("CoversUntil = %v, known = %v; want %v and known", prov.CoversUntil, prov.CoversUntilKnown, now)
 	}
 }
 
@@ -1190,12 +1197,7 @@ func TestAnnotate_NoUntilRecordsAnOpenEnd(t *testing.T) {
 // at all when since is non-zero -- with no Since, both assertions below would
 // be vacuously satisfied by an absent parameter regardless of the clamp.
 //
-// prov.CoversUntil is deliberately NOT asserted here: it is set from the RAW
-// p.until, unclamped, by design (nvd.go's own comment: "the end is recorded
-// whether or not it was asked for"), so it does not observe this guard at
-// all. prov.Window does -- windowLabel(since, until) uses the same clamped
-// local `until` the wire request does -- which is why both assertions below
-// read from the wire request and prov.Window, never from prov.CoversUntil.
+// Both the wire request and the checkpoint must record the clamped endpoint.
 func TestAnnotate_FutureUntilIsClampedToNow(t *testing.T) {
 	restore := nowUTC
 	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
@@ -1226,5 +1228,8 @@ func TestAnnotate_FutureUntilIsClampedToNow(t *testing.T) {
 	if prov.Window != "modified 2026-07-03..2026-08-03" {
 		t.Errorf("Window = %q, want the recorded window clamped to now, "+
 			"not the future Until that was given", prov.Window)
+	}
+	if !prov.CoversUntil.Equal(now) {
+		t.Fatalf("checkpoint=%v, want %v", prov.CoversUntil, now)
 	}
 }

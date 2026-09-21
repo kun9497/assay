@@ -12,6 +12,7 @@ on:
 # backfill slice and the nightly must both eventually run.
 concurrency:
   group: db-artifact-writer
+  queue: max
   cancel-in-progress: false
 
 permissions:
@@ -22,8 +23,10 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     # Comfortably inside the 6h job cap, because this run never does a full
-    # NVD pass. It seeds from the published artifact and fetches three days
-    # of NVD changes on top -- minutes, not hours. The one full pass is a
+    # NVD pass. It seeds from the published artifact and normally fetches
+    # three days of NVD changes. After missed runs the seed's checkpoint
+    # extends that window automatically, split into <=120-day requests.
+    # The one full pass is a
     # local bootstrap, run once by a human; see the README's "Bootstrapping
     # the first artifact".
     #
@@ -66,9 +69,8 @@ jobs:
       - name: Build
         env:
           NVD_ENABLE: "1"
-          # Three days, not one: a run that fails leaves no gap, because the
-          # next day's window still covers what it missed. One day would
-          # make every skipped run a permanent hole in the ratings.
+          # Three days of normal overlap. The NVD annotator resumes from the
+          # seed checkpoint if an outage lasted longer than this window.
           NVD_SINCE_DAYS: "3"
           # Off here, on by default everywhere else (D37). db push strips
           # enrichment before publishing, so fetching it would mean 41 requests

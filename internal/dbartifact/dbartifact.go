@@ -12,6 +12,7 @@ package dbartifact
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -80,6 +81,8 @@ const (
 	// "unknown" rather than "unbounded"; see dbcmd.Push.
 	AnnotationRatingsSince = "dev.assay.ratings-since"
 	AnnotationRatingCount  = "dev.assay.rating-count"
+	AnnotationRatingCounts = "dev.assay.rating-counts"
+	AnnotationAdvisories   = "dev.assay.advisory-coverage"
 )
 
 // Meta is what a puller can learn before committing to the download.
@@ -111,7 +114,18 @@ type Meta struct {
 	// publishable value -- a database with no rating source is legitimate
 	// -- but publishing zero OVER a non-zero artifact destroys the seed
 	// every later delta builds on.
-	RatingCount int
+	RatingCount  int
+	RatingCounts map[string]int
+	Advisories   *AdvisoryCoverage
+}
+
+// AdvisoryCoverage separates stored record counts from declared coverage.
+// Nil on legacy manifests; publishers derive a baseline from their layer.
+type AdvisoryCoverage struct {
+	Total      int            `json:"total"`
+	Counts     map[string]int `json:"counts"`
+	Ecosystems []string       `json:"ecosystems"`
+	Providers  []string       `json:"providers"`
 }
 
 // Pack reads the database at dbPath and returns a single-layer OCI image.
@@ -158,6 +172,20 @@ func Pack(dbPath string, m Meta) (v1.Image, error) {
 	// Omitted rather than guessed when the database does not record it.
 	if m.RatingsSinceKnown {
 		anns[AnnotationRatingsSince] = ratingsSinceValue(m.RatingsSince)
+	}
+	if m.Advisories != nil {
+		data, err := json.Marshal(m.Advisories)
+		if err != nil {
+			return nil, fmt.Errorf("encode advisory coverage: %w", err)
+		}
+		anns[AnnotationAdvisories] = string(data)
+	}
+	if m.RatingCounts != nil {
+		data, err := json.Marshal(m.RatingCounts)
+		if err != nil {
+			return nil, err
+		}
+		anns[AnnotationRatingCounts] = string(data)
 	}
 	annotated := mutate.Annotations(img, anns)
 	out, ok := annotated.(v1.Image)
@@ -217,6 +245,29 @@ func MetaOf(img v1.Image) (Meta, error) {
 	}
 	if n, err := strconv.Atoi(mf.Annotations[AnnotationRatingCount]); err == nil {
 		m.RatingCount = n
+	}
+	if raw, ok := mf.Annotations[AnnotationRatingCounts]; ok {
+		if err := json.Unmarshal([]byte(raw), &m.RatingCounts); err != nil || m.RatingCounts == nil {
+			return Meta{}, fmt.Errorf("invalid %s annotation", AnnotationRatingCounts)
+		}
+		for _, n := range m.RatingCounts {
+			if n < 0 {
+				return Meta{}, fmt.Errorf("invalid rating count %d", n)
+			}
+		}
+	}
+	if raw, ok := mf.Annotations[AnnotationAdvisories]; ok {
+		if err := json.Unmarshal([]byte(raw), &m.Advisories); err != nil || m.Advisories == nil {
+			return Meta{}, fmt.Errorf("invalid %s annotation", AnnotationAdvisories)
+		}
+		if m.Advisories.Total < 0 || m.Advisories.Counts == nil {
+			return Meta{}, fmt.Errorf("invalid advisory counts")
+		}
+		for _, n := range m.Advisories.Counts {
+			if n < 0 || n > m.Advisories.Total {
+				return Meta{}, fmt.Errorf("invalid advisory count %d", n)
+			}
+		}
 	}
 	return m, nil
 }
