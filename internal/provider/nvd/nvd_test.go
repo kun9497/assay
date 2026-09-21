@@ -585,7 +585,10 @@ func TestAnnotate_ReportsProgressPerPage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	lines := strings.Count(progress.String(), "nvd: ")
+	// Counted on " records, " rather than the "nvd: " prefix: Annotate's
+	// window line shares that prefix but is not a page, so counting prefixes
+	// would measure one line that has nothing to do with paging.
+	lines := strings.Count(progress.String(), " records, ")
 	if lines != 2 {
 		t.Errorf("progress has %d line(s), want one per page (2):\n%s", lines, progress.String())
 	}

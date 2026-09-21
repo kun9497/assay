@@ -302,11 +302,31 @@ func totalRatings(m store.Meta) int {
 // refuseCoverageRegression stops a push that would publish less than what is
 // already published. Returns 0 to proceed, 2 to stop.
 //
-// Absent or unreadable published metadata is not a regression: the tag may
-// not exist yet (the first push), the registry may be unreachable, or the
-// artifact may predate these annotations. None of those is evidence that
-// coverage is shrinking, and refusing on them would make the guard fail
-// closed against a first publish -- so it proceeds and says why.
+// A typed 404 on the target tag -- MANIFEST_UNKNOWN or NAME_UNKNOWN, see
+// missingArtifact -- is not by itself a free pass. It says only that this tag
+// holds nothing yet (the first push, or the first push after a schema bump),
+// so the previous schema's tag is tried; if that one resolves, ITS image is
+// the baseline, and every check below runs against it and can still refuse
+// the push. Only when there is no comparison target at all -- no predecessor
+// ref to derive, or the predecessor answers with a typed 404 too -- does this
+// return 0 with the "no published artifact to compare against" note.
+//
+// The other absence that is not a regression is a published artifact
+// predating the advisory-coverage and rating-count annotations. Its layer is
+// unpacked once, so even that comparison runs against real bytes rather than
+// being skipped over a missing field.
+//
+// Two different failures exit 2, and they are not the same thing. A check
+// that could not be PERFORMED goes through coverageCheckFailed: an
+// unreachable registry, an auth or server error, any lookup failure that is
+// not a typed 404, unreadable published metadata, a baseline that cannot be
+// unpacked. A check that WAS performed and failed -- a detected advisory or
+// rating-count regression, or a narrowed rating window -- is refused instead
+// by the block at the end of this function, which names the artifact compared
+// against and the drop it found. Both honour --force, so both exit 2 unless
+// --force was given explicitly. The guard used to proceed on any lookup
+// error, which made a registry outage indistinguishable from a first publish
+// and let a push through with no check at all.
 func refuseCoverageRegression(ctx context.Context, target name.Reference, incoming dbartifact.Meta, force bool, stderr io.Writer) int {
 	published, err := remote.Image(target,
 		remote.WithContext(ctx),
@@ -365,6 +385,12 @@ func refuseCoverageRegression(ctx context.Context, target name.Reference, incomi
 		if err != nil {
 			return coverageCheckFailed(err, force, stderr)
 		}
+		// Said out loud: this is the one branch a post-merge job log could
+		// not otherwise prove ran, and the first publish after the
+		// annotations landed is exactly when a reader wants to know the
+		// baseline came from real bytes rather than a missing field.
+		fmt.Fprintf(stderr, "%s carries no advisory-coverage annotation; comparing against a baseline unpacked from its layer (%d advisories, %d rating source(s))\n",
+			compared, baseline.Advisories.Total, len(baseline.RatingCounts))
 		cur.Advisories = baseline.Advisories
 		cur.RatingCounts = baseline.RatingCounts
 	}
@@ -381,9 +407,13 @@ func refuseCoverageRegression(ctx context.Context, target name.Reference, incomi
 		// not the only one.
 		//
 		// A drop is not ambiguous in normal operation. A seeded build
-		// carries the published ratings forward and adds to them, so the
-		// count only ever grows; a smaller number means the seed was not
-		// used, or covered less. Both are exactly what this refuses.
+		// carries the published NVD ratings forward and adds to them, so
+		// that count only ever grows; a smaller number means the seed was
+		// not used, or covered less. Both are exactly what this refuses.
+		// The EPSS and KEV snapshots are the one exception
+		// ratingCountRegression makes (perishableRatingSources): they are
+		// re-fetched whole every build and may legitimately shrink, but a
+		// source that vanishes altogether is still refused.
 		why = ratingCountRegression(cur, incoming)
 	case cur.RatingCount == 0:
 		// A published artifact with NO ratings has no coverage window to

@@ -102,6 +102,10 @@ type Provider struct {
 	client      *http.Client
 	progress    io.Writer
 	resumeSince time.Time
+	// resumeSource names which seed field resumeSince was derived from, so
+	// Annotate's window line can say whether a delta was widened from the
+	// seed's recorded request end or from a legacy response timestamp.
+	resumeSource string
 }
 
 func New(opts Options) *Provider {
@@ -342,6 +346,39 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 	// to now" and "not recorded" are different facts and the merge below
 	// has to tell a slice that ENDS in the past from one that does not.
 	prov.CoversUntil, prov.CoversUntilKnown = until, true
+	// Announced before the first request, because a job log is the only place
+	// a post-merge check can see which window was actually asked for and why
+	// its start landed there. Provenance records the window, but not the
+	// reason — a delta widened back to the seed's checkpoint and one that kept
+	// its configured start are indistinguishable in the artifact — and the
+	// only other place the window leaks at all is the retry path's error
+	// string, which a healthy run never prints. So the one nightly that
+	// exercises the resume logic for real would otherwise leave no evidence
+	// that it ran.
+	var origin string
+	switch {
+	case since.IsZero():
+		origin = "whole feed"
+	case !p.resumeSince.IsZero() && since.Equal(p.resumeSince):
+		origin = fmt.Sprintf("start widened to %s minus 24h; configured start was %s",
+			p.resumeSource, p.since.UTC().Format("2006-01-02"))
+	case !p.resumeSince.IsZero() && !since.Equal(p.resumeSince):
+		origin = fmt.Sprintf("configured start kept; %s minus 24h (%s) is not earlier",
+			p.resumeSource, p.resumeSince.UTC().Format("2006-01-02"))
+	case p.resumeSince.IsZero() && !p.since.IsZero() && !since.Equal(p.since):
+		origin = "configured start clamped to NVD's 120-day maximum"
+	default:
+		origin = "configured start"
+	}
+	// The same split the loop below makes, stated up front: knowing a span is
+	// three requests rather than one is what tells a stalled sync from a slow
+	// one while it is still running.
+	windows := 1
+	if !since.IsZero() {
+		windows = int((until.Sub(since) + maxWindow - 1) / maxWindow)
+	}
+	fmt.Fprintf(p.progress, nlFmt("nvd: requesting %s in %d window(s) of at most 120 days -- %s"),
+		prov.Window, windows, origin)
 	for start := since; ; {
 		end := until
 		if !start.IsZero() && until.Sub(start) > maxWindow {
@@ -369,14 +406,15 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 // ResumeFrom widens a nightly delta to the seed's last successful request,
 // including a day of overlap. It never changes an explicit backfill window.
 func (p *Provider) ResumeFrom(seed store.Provenance) error {
-	p.resumeSince = time.Time{}
+	p.resumeSince, p.resumeSource = time.Time{}, ""
 	if p.since.IsZero() || !p.until.IsZero() {
 		return nil
 	}
 	end := seed.CoversUntil
+	source := "the seed's recorded request end (CoversUntil)"
 	if end.IsZero() {
 		// Legacy artifacts stored the response timestamp only.
-		end = seed.DataAsOf
+		end, source = seed.DataAsOf, "the seed's legacy response timestamp (DataAsOf)"
 	}
 	if end.IsZero() {
 		if seed.CoversSinceKnown || seed.Window != "" {
@@ -384,7 +422,10 @@ func (p *Provider) ResumeFrom(seed store.Provenance) error {
 		}
 		return nil
 	}
-	p.resumeSince = end.Add(-24 * time.Hour)
+	// Assigned together, on the one path that actually widens: a source left
+	// behind by a seed that did not produce a checkpoint would have the
+	// window line describe a widening that never happened.
+	p.resumeSince, p.resumeSource = end.Add(-24*time.Hour), source
 	return nil
 }
 
