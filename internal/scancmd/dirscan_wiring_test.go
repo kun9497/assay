@@ -3,6 +3,8 @@ package scancmd
 import (
 	"bytes"
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -247,6 +249,115 @@ func TestRun_AnUnreadableManifestReachesTheExitCode(t *testing.T) {
 			t.Errorf("Run(--fail-on-incomplete=target) = %d, want 0 — the requirement "+
 				"is pinned; what is missing is PyPI coverage, which the caller "+
 				"cannot pin their way out of; stderr: %s", code, errOut.String())
+		}
+	})
+}
+
+// A SUBDIRECTORY that could not be read has to reach the exit code too, and it
+// is the harder half: an unreadable manifest is at least a manifest the walk
+// found, while an unreadable directory is a tree the walk never entered. Every
+// lockfile inside it is invisible to Parse, so nothing downstream - not
+// Components, not the skip counters, not Manifests.Unread as it was populated
+// before this fix - carried any trace of it. A repository with a vulnerable
+// package-lock.json inside a directory the scanner could not open scanned to
+// completion, printed "0 not evaluated", and exited 0 with --fail-on high and
+// --fail-on-incomplete both armed.
+//
+// The fixture pairs the unreadable directory with a READABLE, matched go.mod so
+// the scan is otherwise complete and trustworthy: without that, the whole
+// directory would be unevaluated and exit 2 for a reason that has nothing to do
+// with the subject, and both subtests below would pass on a scanner that never
+// noticed the subdirectory at all.
+func TestRun_AnUnreadableSubdirectoryReachesTheExitCode(t *testing.T) {
+	db := buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-critical", pkg: "critical", fixed: "2.0.0", vectors: []string{vecCritical}},
+	})
+	const goodMod = "module example.com/poly\n\ngo 1.22\n\nrequire example.com/critical v1.0.0\n"
+
+	// stage builds the tree and returns its root plus the bare operating-system
+	// reason os.ReadDir gives for the locked directory ("permission denied",
+	// "The process cannot access the file..."). That string is what the
+	// disclosure has to carry, and asserting on it rather than on the whole
+	// error avoids passing from the path echoed elsewhere in the same output.
+	stage := func(t *testing.T) (string, string) {
+		t.Helper()
+		dir := t.TempDir()
+		writeManifest(t, dir, "go.mod", goodMod)
+		sub := filepath.Join(dir, "locked")
+		if err := os.Mkdir(sub, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// Written before the directory is locked: this is the vulnerable
+		// lockfile the scan must not be able to claim it looked at.
+		writeManifest(t, sub, "package-lock.json",
+			`{"lockfileVersion":3,"packages":{"":{"version":"1.0.0"},`+
+				`"node_modules/example.com/critical":{"version":"1.0.0"}}}`)
+		makeUnreadable(t, sub)
+
+		// The precondition, verified rather than assumed. If this platform (or
+		// this user) can still enumerate the directory, the fixture does not
+		// reproduce the hazard and the test must say so instead of reporting a
+		// pass it did not earn.
+		_, rerr := os.ReadDir(sub)
+		if rerr == nil {
+			t.Skip("os.ReadDir still succeeds on the locked directory; this environment cannot stage the hazard")
+		}
+		reason := rerr.Error()
+		var pathErr *fs.PathError
+		if errors.As(rerr, &pathErr) {
+			reason = pathErr.Err.Error()
+		}
+		// strings.Contains(x, "") is true for every x, so an empty reason would
+		// turn both assertions that use it below into documentation.
+		if reason == "" {
+			t.Fatalf("the operating system gave no message for %v; the reason "+
+				"assertions below would hold vacuously", rerr)
+		}
+		return dir, reason
+	}
+
+	t.Run("--fail-on-incomplete sees the subtree the walk could not enter", func(t *testing.T) {
+		dir, reason := stage(t)
+		var out, errOut bytes.Buffer
+		code := Run(context.Background(), db, "dir:"+dir,
+			Options{FailOnIncomplete: true}, &out, &errOut)
+		if code != 2 {
+			t.Errorf("Run(--fail-on-incomplete) = %d, want 2 — a subtree this scan "+
+				"could not enter is exactly the partial coverage that flag asks "+
+				"about;\nstdout: %s\nstderr: %s", code, out.String(), errOut.String())
+		}
+		// Named, with its reason. Matched on the rendered pair rather than on
+		// "locked" alone, which appears in the scanned path this scan echoes.
+		if !strings.Contains(errOut.String(), "not read: locked (") {
+			t.Errorf("the unreadable directory was not named:\n%s", errOut.String())
+		}
+		if !strings.Contains(errOut.String(), reason) {
+			t.Errorf("the disclosure does not carry the reason %q:\n%s", reason, errOut.String())
+		}
+	})
+
+	// Disclosure is not conditional on the gate. Without --fail-on-incomplete a
+	// partial failure stays a normal scan (the same opt-in reasoning an
+	// unreadable MANIFEST already gets), but a reader still has to be told which
+	// tree went unseen — that is the half that is true whatever the exit code.
+	t.Run("the disclosure does not depend on the gate", func(t *testing.T) {
+		dir, reason := stage(t)
+		var out, errOut bytes.Buffer
+		code := Run(context.Background(), db, "dir:"+dir, Options{}, &out, &errOut)
+		if code != 0 {
+			t.Errorf("Run = %d, want 0 — with no coverage flag set, an unreadable "+
+				"subtree must not change the verdict;\nstdout: %s\nstderr: %s",
+				code, out.String(), errOut.String())
+		}
+		if !strings.Contains(errOut.String(), "not read: locked (") ||
+			!strings.Contains(errOut.String(), reason) {
+			t.Errorf("the unreadable directory was not disclosed without the gate:\n%s",
+				errOut.String())
+		}
+		// The readable half of the tree still produced its result, so recording
+		// the skipped subtree did not cost the rest of the scan.
+		if !strings.Contains(out.String(), "example.com/critical") {
+			t.Errorf("the readable go.mod's finding was lost:\n%s", out.String())
 		}
 	})
 }

@@ -116,25 +116,47 @@ var manifestKinds = map[string]Kind{
 // arbitrarily slow.
 const maxDepth = 6
 
-// Walk returns every recognized manifest under root, sorted by Path.
+// Walk returns every recognized manifest under root, sorted by Path, together
+// with every entry it could not read, also sorted by Path.
 //
-// A per-entry error - an unreadable subdirectory, most often - is swallowed
-// so that one bad subtree does not abandon the rest of an otherwise-readable
-// scan; only a failure reading root itself is returned, since at that point
-// there is nothing to report at all.
-func Walk(root string) ([]Manifest, error) {
+// A per-entry error - an unreadable subdirectory, most often - does not abort
+// the walk, so that one bad subtree does not cost the rest of an
+// otherwise-readable scan; only a failure reading root itself is returned as an
+// error, since at that point there is nothing to report at all.
+//
+// It is RECORDED rather than swallowed, which is the whole reason for the
+// second return value. filepath.WalkDir reports a directory's own ReadDir
+// failure as a second callback call on that directory, and continuing from
+// there means continuing over an empty entry list: the entire subtree is never
+// visited. Returning only the manifests would state, with no qualification,
+// that these are the manifests under root - a claim about coverage this scan
+// cannot stand behind, and the silent kind of wrong. A lockfile holding a
+// critical finding, inside a directory the scanner could not open, made the
+// scan exit 0 with "0 not evaluated" and an explicitly armed
+// --fail-on-incomplete. Each entry here becomes an Unread{Failed: true} in
+// Parse, which is what reaches both the "not read:" disclosure and the exit
+// code.
+func Walk(root string) ([]Manifest, []Unread, error) {
 	var manifests []Manifest
+	var skipped []Unread
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if path == root {
 				return err
 			}
-			// An entry below root could not even be stat'd (a permission
-			// error surfacing here rather than on a later ReadDir, on some
-			// platforms). Skip just this entry rather than aborting the walk
-			// - the rest of the tree may still be readable and worth
-			// reporting.
+			// An entry below root could not be read: either a directory whose
+			// contents WalkDir could not list (the second callback call it
+			// makes for exactly that, and the case that loses a whole subtree),
+			// or a single entry that could not even be stat'd. Both are the
+			// same fact - we looked and could not see it - so both are
+			// recorded, and neither aborts the walk: the rest of the tree may
+			// still be readable and worth reporting.
+			skipped = append(skipped, Unread{
+				Path:   relOrRaw(root, path),
+				Reason: err.Error(),
+				Failed: true,
+			})
 			return nil
 		}
 
@@ -185,11 +207,32 @@ func Walk(root string) ([]Manifest, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	sort.Slice(manifests, func(i, j int) bool { return manifests[i].Path < manifests[j].Path })
-	return manifests, nil
+	sort.Slice(skipped, func(i, j int) bool { return skipped[i].Path < skipped[j].Path })
+	return manifests, skipped, nil
+}
+
+// relOrRaw is path relative to root, forward-slashed, falling back to path
+// itself when filepath.Rel cannot express one.
+//
+// Rel fails on inputs a walk should never produce - a different Windows volume,
+// or one path absolute and the other relative - but "should never" is not a
+// guarantee, and the caller is an error path that must not lose its entry. The
+// manifest side can afford to give up on an unrelatable path (it would only
+// drop a file the scan was going to report anyway); this side cannot, because
+// dropping it is precisely the silent loss of coverage the entry exists to
+// announce. An absolute path is a worse Path than a relative one - it names the
+// scanning machine rather than the tree - but a named subtree with an ugly path
+// is strictly better than an unnamed one.
+func relOrRaw(root, path string) string {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return filepath.ToSlash(path)
+	}
+	return filepath.ToSlash(rel)
 }
 
 // isJarOrWar reports whether name ends in .jar or .war, case-insensitively —
