@@ -325,6 +325,48 @@ func (b *Bolt) PutRating(r advisory.Rating) error {
 	})
 }
 
+// DeleteRatings removes a snapshot source before reloading it in a build's
+// temporary database. Upserts alone cannot notice withdrawn KEV/EPSS rows.
+func (b *Bolt) DeleteRatings(source string) error {
+	return b.db.Update(func(tx *bolt.Tx) error {
+		c := tx.Bucket(bucketRatings).Cursor()
+		suffix := []byte(keySep + source)
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			if bytes.HasSuffix(k, suffix) {
+				if err := c.Delete(); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+}
+
+// AdvisoryCounts counts records actually present, once per ecosystem per
+// advisory. It also works for older seeds that predate manifest counts.
+func (b *Bolt) AdvisoryCounts() (int, map[string]int, error) {
+	total := 0
+	counts := map[string]int{}
+	err := b.db.View(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketByID).ForEach(func(id, blob []byte) error {
+			var a advisory.Advisory
+			if err := json.Unmarshal(blob, &a); err != nil {
+				return fmt.Errorf("decode advisory %q: %w", id, err)
+			}
+			total++
+			seen := map[string]bool{}
+			for _, aff := range a.Affected {
+				if !seen[aff.Ecosystem] {
+					counts[aff.Ecosystem]++
+					seen[aff.Ecosystem] = true
+				}
+			}
+			return nil
+		})
+	})
+	return total, counts, err
+}
+
 // PutEnrichment stores one authority's prose about a CVE, keyed on (CVE,
 // Source) exactly like PutRating -- so several authorities can describe the
 // same CVE and a re-Put of the same source replaces its record rather than

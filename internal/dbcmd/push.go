@@ -2,8 +2,10 @@ package dbcmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,6 +14,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 
 	"github.com/kun9497/assay/internal/dbartifact"
 	"github.com/kun9497/assay/internal/store"
@@ -36,24 +39,7 @@ func Push(ctx context.Context, dbPath, ref string, force bool, stdout, stderr io
 		fmt.Fprintf(stderr, "error: open database: %v\n", err)
 		return 2
 	}
-	meta, err := db.Meta()
-	if err != nil {
-		db.Close()
-		fmt.Fprintf(stderr, "error: read database metadata: %v\n", err)
-		return 2
-	}
 	db.Close()
-
-	dataAsOf, dataAsOfSource := oldestDataAsOf(meta)
-	incoming := dbartifact.Meta{
-		SchemaVersion:     store.SchemaVersion,
-		BuiltAt:           meta.BuiltAt,
-		DataAsOf:          dataAsOf,
-		DataAsOfSource:    dataAsOfSource,
-		RatingsSince:      ratingBound(meta),
-		RatingsSinceKnown: ratingBoundKnown(meta),
-		RatingCount:       totalRatings(meta),
-	}
 	// D29: enrichment is built locally and never published.
 	//
 	// KISA's site is all-rights-reserved with no 공공누리 mark. That does not
@@ -109,6 +95,12 @@ func Push(ctx context.Context, dbPath, ref string, force bool, stdout, stderr io
 		return 2
 	}
 
+	// Read metadata and counts from the exact snapshot being published.
+	incoming, err := artifactMetaFromDB(packPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: read staged database metadata: %v\n", err)
+		return 2
+	}
 	img, err := dbartifact.Pack(packPath, incoming)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: pack database: %v\n", err)
@@ -321,6 +313,9 @@ func refuseCoverageRegression(ctx context.Context, target name.Reference, incomi
 		remote.WithAuthFromKeychain(authn.DefaultKeychain))
 	compared := target.String()
 	if err != nil {
+		if !missingArtifact(err) {
+			return coverageCheckFailed(err, force, stderr)
+		}
 		// D60. A schema bump moves the tag, so the FIRST push to :vN has
 		// nothing at its own tag to compare against — and every check below
 		// is skipped at exactly the moment a bootstrap is most likely to be
@@ -340,6 +335,9 @@ func refuseCoverageRegression(ctx context.Context, target name.Reference, incomi
 			remote.WithContext(ctx),
 			remote.WithAuthFromKeychain(authn.DefaultKeychain))
 		if err != nil {
+			if !missingArtifact(err) {
+				return coverageCheckFailed(err, force, stderr)
+			}
 			fmt.Fprintf(stderr, "no published artifact to compare against (%v); publishing\n", err)
 			return 0
 		}
@@ -349,13 +347,33 @@ func refuseCoverageRegression(ctx context.Context, target name.Reference, incomi
 	}
 	cur, err := dbartifact.MetaOf(published)
 	if err != nil {
-		fmt.Fprintf(stderr, "published artifact carries no readable metadata (%v); publishing\n", err)
-		return 0
+		return coverageCheckFailed(err, force, stderr)
+	}
+	if cur.Advisories == nil || cur.RatingCounts == nil {
+		// Existing schema tags predate these annotations. Read their bytes
+		// once so the first upgraded publisher has a real baseline too.
+		dir, err := os.MkdirTemp("", "assay-coverage-")
+		if err != nil {
+			return coverageCheckFailed(err, force, stderr)
+		}
+		defer os.RemoveAll(dir)
+		path := filepath.Join(dir, "baseline.db")
+		if err := dbartifact.Unpack(published, path); err != nil {
+			return coverageCheckFailed(err, force, stderr)
+		}
+		baseline, err := artifactMetaFromDB(path)
+		if err != nil {
+			return coverageCheckFailed(err, force, stderr)
+		}
+		cur.Advisories = baseline.Advisories
+		cur.RatingCounts = baseline.RatingCounts
 	}
 
 	var why string
 	switch {
-	case incoming.RatingCount < cur.RatingCount:
+	case advisoryRegression(cur.Advisories, incoming.Advisories) != "":
+		why = advisoryRegression(cur.Advisories, incoming.Advisories)
+	case ratingCountRegression(cur, incoming) != "":
 		// Fewer, not merely none. The first version only refused zero, and
 		// that hole was found by walking into it: a 2,903-rating artifact
 		// replaced a 23,433-rating one on the live registry, during the very
@@ -366,8 +384,7 @@ func refuseCoverageRegression(ctx context.Context, target name.Reference, incomi
 		// carries the published ratings forward and adds to them, so the
 		// count only ever grows; a smaller number means the seed was not
 		// used, or covered less. Both are exactly what this refuses.
-		why = fmt.Sprintf("the published artifact holds %d rating(s) and this one holds %d",
-			cur.RatingCount, incoming.RatingCount)
+		why = ratingCountRegression(cur, incoming)
 	case cur.RatingCount == 0:
 		// A published artifact with NO ratings has no coverage window to
 		// narrow, whatever its RatingsSince says. Zero means "no lower
@@ -420,6 +437,123 @@ func refuseCoverageRegression(ctx context.Context, target name.Reference, incomi
 	fmt.Fprintln(stderr, "  so what it drops is not recovered by the next run")
 	fmt.Fprintln(stderr, "  pass --force if you mean to replace it")
 	return 2
+}
+
+func missingArtifact(err error) bool {
+	var e *transport.Error
+	if !errors.As(err, &e) || e.StatusCode != http.StatusNotFound || len(e.Errors) == 0 {
+		return false
+	}
+	for _, d := range e.Errors {
+		if string(d.Code) != "MANIFEST_UNKNOWN" && string(d.Code) != "NAME_UNKNOWN" {
+			return false
+		}
+	}
+	return true
+}
+
+func coverageCheckFailed(err error, force bool, stderr io.Writer) int {
+	if force {
+		fmt.Fprintf(stderr, "warning: cannot verify published coverage: %v; publishing because --force was given\n", err)
+		return 0
+	}
+	fmt.Fprintf(stderr, "error: push: cannot verify published coverage: %v\n", err)
+	return 2
+}
+
+func artifactMetaFromDB(path string) (dbartifact.Meta, error) {
+	db, err := store.OpenSeedRatings(path)
+	if err != nil {
+		return dbartifact.Meta{}, err
+	}
+	defer db.Close()
+	m, err := db.Meta()
+	if err != nil {
+		return dbartifact.Meta{}, err
+	}
+	total, counts, err := db.AdvisoryCounts()
+	if err != nil {
+		return dbartifact.Meta{}, err
+	}
+	// Stored records may mention ecosystems not fetched by this build (D20).
+	coveredCounts := make(map[string]int, len(m.Ecosystems))
+	for _, eco := range m.Ecosystems {
+		coveredCounts[eco] = counts[eco]
+	}
+	ratingCounts := make(map[string]int, len(m.RatingCounts))
+	for name := range m.Ratings {
+		ratingCounts[name] = 0
+	}
+	for name, n := range m.RatingCounts {
+		ratingCounts[name] = n
+	}
+	asOf, source := oldestDataAsOf(m)
+	return dbartifact.Meta{
+		SchemaVersion: m.Schema, BuiltAt: m.BuiltAt, DataAsOf: asOf, DataAsOfSource: source,
+		RatingsSince: ratingBound(m), RatingsSinceKnown: ratingBoundKnown(m), RatingCount: totalRatings(m), RatingCounts: ratingCounts,
+		Advisories: &dbartifact.AdvisoryCoverage{Total: total, Counts: coveredCounts, Ecosystems: m.Ecosystems, Providers: sortedKeys(m.Providers)},
+	}, nil
+}
+
+func ratingCountRegression(cur, incoming dbartifact.Meta) string {
+	if cur.RatingCounts == nil || incoming.RatingCounts == nil {
+		if incoming.RatingCount < cur.RatingCount {
+			return fmt.Sprintf("the published artifact holds %d rating(s) and this one holds %d", cur.RatingCount, incoming.RatingCount)
+		}
+		return ""
+	}
+	for _, name := range sortedKeys(cur.RatingCounts) {
+		before := cur.RatingCounts[name]
+		after, present := incoming.RatingCounts[name]
+		if before == 0 {
+			continue
+		}
+		if perishableRatingSources[name] && present {
+			// Current snapshots may legitimately shrink.
+			continue
+		}
+		if after < before {
+			return fmt.Sprintf("the published artifact holds %d rating(s) and this one holds %d from %s", before, after, name)
+		}
+	}
+	return ""
+}
+
+// Small withdrawals are normal. Losing a source, a release, all records, or
+// more than 20% of a corpus requires an explicit --force publish instead.
+func advisoryRegression(cur, incoming *dbartifact.AdvisoryCoverage) string {
+	if cur == nil || cur.Total == 0 {
+		return ""
+	}
+	if incoming == nil {
+		return "incoming artifact has no advisory coverage"
+	}
+	if incoming.Total == 0 || float64(incoming.Total) < float64(cur.Total)*0.8 {
+		return fmt.Sprintf("advisories dropped from %d to %d (more than 20%%)", cur.Total, incoming.Total)
+	}
+	for _, pair := range []struct {
+		kind          string
+		before, after []string
+	}{
+		{"provider", cur.Providers, incoming.Providers}, {"ecosystem", cur.Ecosystems, incoming.Ecosystems},
+	} {
+		present := map[string]bool{}
+		for _, name := range pair.after {
+			present[name] = true
+		}
+		for _, name := range pair.before {
+			if !present[name] {
+				return fmt.Sprintf("published %s %q is missing", pair.kind, name)
+			}
+		}
+	}
+	for _, eco := range sortedKeys(cur.Counts) {
+		before, after := cur.Counts[eco], incoming.Counts[eco]
+		if before > 0 && (after == 0 || float64(after) < float64(before)*0.8) {
+			return fmt.Sprintf("%s advisories dropped from %d to %d (more than 20%%)", eco, before, after)
+		}
+	}
+	return ""
 }
 
 // ratingBoundKnown reports whether the bound above can be substantiated.

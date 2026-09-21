@@ -41,7 +41,7 @@ func bounded(t *testing.T, since time.Time, ratings int) string {
 	if err := w.SetMeta(store.Meta{
 		BuiltAt:   time.Date(2026, 8, 4, 6, 0, 0, 0, time.UTC),
 		Providers: map[string]store.Provenance{"osv": {DataAsOf: time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)}},
-		Ratings:   map[string]store.Provenance{"NVD": {CoversSince: since, CoversSinceKnown: true}},
+		Ratings:   map[string]store.Provenance{"NVD": {CoversSince: since, CoversSinceKnown: true, CoversUntil: time.Now().UTC(), CoversUntilKnown: true}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -418,6 +418,7 @@ func TestPush_ASecondSeededDeltaIsStillPublishable(t *testing.T) {
 			ratings:     []advisory.Rating{{CVE: fmt.Sprintf("CVE-2026-new%d", i), Source: "NVD"}},
 			window:      "modified narrow",
 			coversSince: fetched,
+			coversUntil: time.Now().UTC(),
 		}
 		out.Reset()
 		errOut.Reset()

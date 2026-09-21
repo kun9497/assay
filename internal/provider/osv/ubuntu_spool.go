@@ -48,6 +48,8 @@ func ubuntuTrackerMissingGit(err error) error {
 // git's own stderr rather than just an exit code.
 func gitRun(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.WaitDelay = 5 * time.Second
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -56,6 +58,55 @@ func gitRun(ctx context.Context, dir string, args ...string) ([]byte, error) {
 		return out, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return out, nil
+}
+
+var trackerGitRun = gitRun
+var trackerGitTimeout = 10 * time.Minute
+var trackerRetryWaits = []time.Duration{time.Second, 3 * time.Second, 10 * time.Second}
+
+// Only network operations retry. An authentication or repository error needs
+// an operator, while a timed-out request or upstream 5xx can recover by itself.
+func retryTrackerGit(ctx context.Context, action func(context.Context) error) error {
+	for attempt := 0; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		request, cancel := context.WithTimeout(ctx, trackerGitTimeout)
+		err := action(request)
+		timedOut := request.Err() == context.DeadlineExceeded
+		cancel()
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if attempt >= len(trackerRetryWaits) || (!timedOut && !transientTrackerGit(err)) {
+			return err
+		}
+		timer := time.NewTimer(trackerRetryWaits[attempt])
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func transientTrackerGit(err error) bool {
+	s := strings.ToLower(err.Error())
+	for _, permanent := range []string{"authentication failed", "permission denied", "repository not found", "returned error: 401", "returned error: 403", "returned error: 404"} {
+		if strings.Contains(s, permanent) {
+			return false
+		}
+	}
+	for _, transient := range []string{"returned error: 5", "http 5", "returned error: 429", "timed out", "connection reset", "could not resolve host", "couldn't connect", "failed to connect", "remote end hung up", "early eof", "tls connection was non-properly terminated"} {
+		if strings.Contains(s, transient) {
+			return true
+		}
+	}
+	return false
 }
 
 // ubuntuTrackerSync brings dir to the tracker's current HEAD and returns
@@ -76,7 +127,10 @@ func ubuntuTrackerSync(ctx context.Context, dir, url string) (time.Time, error) 
 	}
 
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-		if _, err := gitRun(ctx, dir, "fetch", "--depth", "1", "origin", "HEAD"); err != nil {
+		if err := retryTrackerGit(ctx, func(request context.Context) error {
+			_, err := trackerGitRun(request, dir, "fetch", "--depth", "1", "origin", "HEAD")
+			return err
+		}); err != nil {
 			return time.Time{}, fmt.Errorf("ubuntu tracker: %w", err)
 		}
 		if _, err := gitRun(ctx, dir, "reset", "--hard", "FETCH_HEAD"); err != nil {
@@ -86,7 +140,28 @@ func ubuntuTrackerSync(ctx context.Context, dir, url string) (time.Time, error) 
 		if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
 			return time.Time{}, fmt.Errorf("ubuntu tracker: create spool root: %w", err)
 		}
-		if _, err := gitRun(ctx, "", "clone", "--depth", "1", url, dir); err != nil {
+		// Each clone owns a new sibling directory. A partial failed clone
+		// never becomes the cached spool or gets reused by the next attempt.
+		if err := retryTrackerGit(ctx, func(request context.Context) error {
+			staged, err := os.MkdirTemp(filepath.Dir(dir), ".assay-tracker-")
+			if err != nil {
+				return err
+			}
+			defer os.RemoveAll(staged)
+			if _, err := trackerGitRun(request, "", "clone", "--depth", "1", url, staged); err != nil {
+				return err
+			}
+			// Existing empty destinations are accepted by git clone too.
+			if info, err := os.Lstat(dir); err == nil && !info.IsDir() {
+				return fmt.Errorf("ubuntu tracker destination is not a directory: %s", dir)
+			} else if err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			if err := os.Remove(dir); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			return os.Rename(staged, dir)
+		}); err != nil {
 			return time.Time{}, fmt.Errorf("ubuntu tracker: %w", err)
 		}
 	}

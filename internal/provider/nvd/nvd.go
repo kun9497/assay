@@ -93,14 +93,15 @@ type Options struct {
 }
 
 type Provider struct {
-	since    time.Time
-	until    time.Time
-	apiKey   string
-	baseURL  string
-	pageSize int
-	pause    time.Duration
-	client   *http.Client
-	progress io.Writer
+	since       time.Time
+	until       time.Time
+	apiKey      string
+	baseURL     string
+	pageSize    int
+	pause       time.Duration
+	client      *http.Client
+	progress    io.Writer
+	resumeSince time.Time
 }
 
 func New(opts Options) *Provider {
@@ -297,18 +298,7 @@ func windowLabel(since, until time.Time) string {
 // limit is per source IP, so concurrency would not buy throughput and would
 // risk a block.
 func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) error) (store.Provenance, error) {
-	prov := store.Provenance{Source: p.baseURL}
-	var (
-		startIndex int
-		total      int
-		records    int
-		asOf       time.Time
-		first      = true
-		// Read once, before the first request, and held for the whole sync:
-		// see fetchPage on why the window must not move underneath the
-		// pagination.
-		until = nowUTC()
-	)
+	until := nowUTC()
 	// A slice with an explicit end asks for a range that closed in the past.
 	// A future or zero end stays "now": clamping to now rather than refusing
 	// keeps a clock skew from turning into a failed seven-hour build.
@@ -330,13 +320,17 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 	// windowLabel below records the range actually requested, and db status
 	// prints it, so a clamped run cannot report coverage it does not have.
 	since := p.since
-	if !since.IsZero() && until.Sub(since) > maxWindow {
+	if !p.resumeSince.IsZero() && p.resumeSince.Before(since) {
+		since = p.resumeSince
+	}
+	if p.resumeSince.IsZero() && !since.IsZero() && until.Sub(since) > maxWindow {
 		since = until.Add(-maxWindow)
 	}
-	// What this run actually covered, recorded so a windowed database cannot
-	// present itself as a complete one (D20). Update rebuilds from empty, so
-	// a bounded run's window IS the database's entire NVD coverage — there is
-	// no earlier pass underneath it.
+	if !since.IsZero() && !since.Before(until) {
+		return store.Provenance{}, fmt.Errorf("nvd: window start must precede end")
+	}
+	prov := store.Provenance{Source: p.baseURL}
+	// Record this fetch's actual span; dbcmd merges it with seed coverage.
 	prov.Window = windowLabel(since, until)
 	// The same bound in comparable form. `since` here is the CLAMPED
 	// value, so what is recorded is what was actually requested, not
@@ -347,7 +341,57 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 	// The end is recorded whether or not it was asked for, because "ran up
 	// to now" and "not recorded" are different facts and the merge below
 	// has to tell a slice that ENDS in the past from one that does not.
-	prov.CoversUntil, prov.CoversUntilKnown = p.until, true
+	prov.CoversUntil, prov.CoversUntilKnown = until, true
+	for start := since; ; {
+		end := until
+		if !start.IsZero() && until.Sub(start) > maxWindow {
+			end = start.Add(maxWindow)
+		}
+		part, err := p.annotateWindow(ctx, emit, start, end)
+		if err != nil {
+			return store.Provenance{}, err
+		}
+		prov.Records += part.Records
+		if prov.DataAsOf.IsZero() || (!part.DataAsOf.IsZero() && part.DataAsOf.Before(prov.DataAsOf)) {
+			prov.DataAsOf = part.DataAsOf
+		}
+		if end.Equal(until) {
+			break
+		}
+		if err := sleep(ctx, p.pause); err != nil {
+			return store.Provenance{}, err
+		}
+		start = end // NVD endpoints are inclusive; repeating the boundary is safe.
+	}
+	return prov, nil
+}
+
+// ResumeFrom widens a nightly delta to the seed's last successful request,
+// including a day of overlap. It never changes an explicit backfill window.
+func (p *Provider) ResumeFrom(seed store.Provenance) error {
+	p.resumeSince = time.Time{}
+	if p.since.IsZero() || !p.until.IsZero() {
+		return nil
+	}
+	end := seed.CoversUntil
+	if end.IsZero() {
+		// Legacy artifacts stored the response timestamp only.
+		end = seed.DataAsOf
+	}
+	if end.IsZero() {
+		if seed.CoversSinceKnown || seed.Window != "" {
+			return fmt.Errorf("seed has no NVD checkpoint; rebuild or explicitly backfill its missing interval")
+		}
+		return nil
+	}
+	p.resumeSince = end.Add(-24 * time.Hour)
+	return nil
+}
+
+func (p *Provider) annotateWindow(ctx context.Context, emit func(advisory.Rating) error, since, until time.Time) (store.Provenance, error) {
+	var startIndex, total, records int
+	var asOf time.Time
+	first := true
 	// A do-while shape: the total is unknown before the first response, so
 	// the loop condition alone cannot gate the first request.
 	for first || startIndex < total {
@@ -435,9 +479,7 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 		// pacing signal -- lines that stop arriving mean stalled, not slow.
 		fmt.Fprintf(p.progress, nlFmt("nvd: %d/%d records, %d rated"), startIndex, total, records)
 	}
-	prov.Records = records
-	prov.DataAsOf = asOf
-	return prov, nil
+	return store.Provenance{Records: records, DataAsOf: asOf}, nil
 }
 
 // apiResponse is one page of NVD's CVE 2.0 API.

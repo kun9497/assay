@@ -35,6 +35,7 @@ on:
 # backfill slice and the nightly must both eventually run.
 concurrency:
   group: db-artifact-writer
+  queue: max
   cancel-in-progress: false
 
 permissions:
