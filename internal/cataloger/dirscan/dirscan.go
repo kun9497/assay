@@ -137,11 +137,15 @@ func (m Manifests) GoMod() (Read, bool) {
 // read as an error, not as a clean scan of zero packages, matching what
 // gomod.Parse already does for a directory with no go.mod.
 func Parse(root string) (pkgmeta.Target, cyclonedx.Stats, Manifests, error) {
-	manifests, err := Walk(root)
+	manifests, skipped, err := Walk(root)
 	if err != nil {
 		return pkgmeta.Target{}, cyclonedx.Stats{}, Manifests{}, err
 	}
 	if len(manifests) == 0 {
+		// Still an error even when skipped is non-empty: nothing here was read,
+		// so there is no result to qualify. The caller's exit code is 2 either
+		// way, which is the right answer for both spellings of "this scan
+		// produced nothing".
 		return pkgmeta.Target{}, cyclonedx.Stats{}, Manifests{},
 			fmt.Errorf("%s: no recognized manifest found", root)
 	}
@@ -151,6 +155,15 @@ func Parse(root string) (pkgmeta.Target, cyclonedx.Stats, Manifests, error) {
 		stats  cyclonedx.Stats
 		found  Manifests
 	)
+
+	// The walk's own skips come first, before any manifest is dispatched. They
+	// are the same fact as a manifest that would not parse - we looked and could
+	// not read it - and they carry Failed: true from Walk, so AnyFailed() and
+	// the "not read:" disclosure both see them without either learning a second
+	// notion of what went unread. Prepended rather than merged by path: Walk
+	// sorted them, parseManifest appends in manifest order, and concatenating
+	// two deterministic lists keeps the output deterministic.
+	found.Unread = append(found.Unread, skipped...)
 
 	for _, m := range manifests {
 		pkgs, s, un, u := parseManifest(root, m)

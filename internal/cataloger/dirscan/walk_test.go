@@ -3,7 +3,6 @@ package dirscan
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -42,7 +41,7 @@ func TestWalk_FindsManifestsInSubdirectories(t *testing.T) {
 		"services/api/poetry.lock":      "",
 		"services/api/requirements.txt": "",
 	})
-	got, err := Walk(root)
+	got, _, err := Walk(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +76,7 @@ func TestWalk_ResultsAreSorted(t *testing.T) {
 		"a/package-lock.json":   "{}",
 		"a-b/package-lock.json": "{}",
 	})
-	got, err := Walk(root)
+	got, _, err := Walk(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,13 +99,22 @@ func TestWalk_SkipsDependencyAndVCSDirectories(t *testing.T) {
 				"package-lock.json":            "{}",
 				dir + "/dep/package-lock.json": "{}",
 			})
-			got, err := Walk(root)
+			got, unread, err := Walk(root)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if len(got) != 1 || got[0].Path != "package-lock.json" {
 				t.Errorf("found %v, want only the root manifest — %s must not be "+
 					"descended into", paths(got), dir)
+			}
+			// A prune is a DECISION, not a failure, and the two must not reach
+			// the exit code as the same thing. Walk records what it could not
+			// read; node_modules is something it chose not to read, and every
+			// repository with dependencies installed has one - reporting it
+			// would fail --fail-on-incomplete on essentially every scan.
+			if len(unread) != 0 {
+				t.Errorf("unread = %+v, want none — skipping %s is a decision, not a "+
+					"coverage failure", unread, dir)
 			}
 		})
 	}
@@ -119,7 +127,7 @@ func TestWalk_DepthIsCappedAtItsBoundary(t *testing.T) {
 	atLimit := "a/b/c/d/e/f/package-lock.json"     // 6 directories deep
 	pastLimit := "a/b/c/d/e/f/g/package-lock.json" // 7 — one too far
 	root := mkdir(t, map[string]string{atLimit: "{}", pastLimit: "{}"})
-	got, err := Walk(root)
+	got, unread, err := Walk(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,13 +135,21 @@ func TestWalk_DepthIsCappedAtItsBoundary(t *testing.T) {
 		t.Errorf("found %v, want exactly %q — the cap must admit its own limit "+
 			"and exclude one past it", paths(got), atLimit)
 	}
+	// The depth cap is the same kind of decision as excludedDirs: a bounded
+	// walk, not a walk that hit something it could not read. Emitting an unread
+	// entry here would make every deeply nested repository report incomplete
+	// coverage it does not have.
+	if len(unread) != 0 {
+		t.Errorf("unread = %+v, want none — the depth cap is a decision, not a "+
+			"coverage failure", unread)
+	}
 }
 
 // Recognized but never read (D26). It must appear in the walk so the
 // disclosure can name it; Task 2 is what refuses to parse it.
 func TestWalk_RecognizesRequirementsTxtWithoutTreatingItAsALockfile(t *testing.T) {
 	root := mkdir(t, map[string]string{"requirements.txt": "Django==3.2.12\n"})
-	got, err := Walk(root)
+	got, _, err := Walk(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +170,7 @@ func TestWalk_MatchesTheWholeFilenameNotASubstring(t *testing.T) {
 		"my-go.mod":             "",
 		"go.mod.orig":           "",
 	})
-	got, err := Walk(root)
+	got, _, err := Walk(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,29 +181,56 @@ func TestWalk_MatchesTheWholeFilenameNotASubstring(t *testing.T) {
 
 // A directory that cannot be read is a fact about coverage, not a reason to
 // abandon the scan: the rest of the tree is still worth reporting. It must not
-// silently vanish either, which is what Task 2's unread list is for.
-func TestWalk_AnUnreadableSubdirectoryDoesNotAbortTheWalk(t *testing.T) {
+// silently vanish either — every manifest inside it is invisible to the walk,
+// so the only trace it can leave is the unread entry asserted here.
+//
+// This test used to skip on Windows and assert only that the walk continued,
+// with a comment saying the unread list was a later task's job. It is that
+// task's test now: makeUnreadable stages the hazard on both platforms (an
+// exclusive handle on Windows, mode 0o000 elsewhere), so there is one test of
+// this behaviour rather than one that runs and one that documents.
+func TestWalk_AnUnreadableSubdirectoryIsReportedAndDoesNotAbortTheWalk(t *testing.T) {
 	root := mkdir(t, map[string]string{
 		"package-lock.json":     "{}",
 		"sub/package-lock.json": "{}",
 	})
-	// Windows does not honour a 0o000 directory mode, so this cannot assert
-	// anything there. The skip is deliberate and it is confined to this
-	// function, which asserts nothing else - a skip wrapping other assertions
-	// is how seven of eight mutations survived in slice 3 (CLAUDE.md). CI runs
-	// on ubuntu, so the mutation below must be verified there, not here.
-	if runtime.GOOS == "windows" {
-		t.Skip("directory permissions are not enforced on Windows; CI covers this")
+	sub := filepath.Join(root, "sub")
+	makeUnreadable(t, sub)
+	// Verified, not assumed: if this environment can still enumerate the
+	// directory, the fixture does not stage the hazard and the test must say so
+	// rather than report a pass it did not earn.
+	if _, err := os.ReadDir(sub); err == nil {
+		t.Skip("os.ReadDir still succeeds on the locked directory; this environment cannot stage the hazard")
 	}
-	if err := os.Chmod(filepath.Join(root, "sub"), 0o000); err != nil {
-		t.Fatalf("could not drop directory permissions: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(filepath.Join(root, "sub"), 0o700) })
-	got, err := Walk(root)
+
+	got, unread, err := Walk(root)
 	if err != nil {
 		t.Fatalf("Walk returned %v; an unreadable subdirectory must not abort the walk", err)
 	}
-	if len(got) == 0 {
-		t.Error("the readable root manifest was lost")
+	// The walk continued: the readable sibling manifest is still here. Without
+	// this, a Walk that gave up at the first error would pass every assertion
+	// below.
+	if len(got) != 1 || got[0].Path != "package-lock.json" {
+		t.Errorf("manifests = %v, want the readable root manifest — the walk must "+
+			"continue past a subtree it could not enter", paths(got))
+	}
+	if len(unread) != 1 {
+		t.Fatalf("unread = %+v, want exactly one entry for %q", unread, "sub")
+	}
+	if unread[0].Path != "sub" {
+		t.Errorf("unread[0].Path = %q, want %q (root-relative, forward-slashed)",
+			unread[0].Path, "sub")
+	}
+	// Failed is what AnyFailed() reads and what --fail-on-incomplete gates on.
+	// An entry that is merely listed changes nothing about the exit code, which
+	// is the half of this defect that let a scan of an unreadable tree exit 0.
+	if !unread[0].Failed {
+		t.Errorf("unread[0].Failed = false, want true — a subtree that could not be " +
+			"read is coverage this scan cannot stand behind, not a decision")
+	}
+	// The reason has to travel with it: "sub was skipped" is not something a
+	// reader can act on without knowing why.
+	if unread[0].Reason == "" {
+		t.Error("unread[0].Reason is empty; the disclosure would name a directory and no cause")
 	}
 }
