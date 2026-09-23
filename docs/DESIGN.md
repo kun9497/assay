@@ -431,6 +431,15 @@ or reducing NVD ratings is refused. Legacy artifacts without counts are download
 comparison. Registry read/metadata errors stop publication unless `--force` explicitly
 overrides the check. These counts detect large losses, not every semantic regression.
 
+A build run with `EPSS_ENABLE=0` or `KEV_ENABLE=0` carries no key for that source at all —
+its annotator is the only writer of those rows, and neither the seeded copy nor
+`--ratings-only` preserves them — so `db push` refuses that artifact against a baseline that
+held them. This is not confined to `--ratings-only`: any build does it. An annotator that
+runs and rates nothing is a different state and is allowed, because it leaves a present entry
+with a count of 0. The nightly is unaffected, both sources being on by default. `--force` is
+the explicit escape; a build cannot fail earlier on this, because it is given no push
+reference and so cannot know what it will be compared against.
+
 Ubuntu tracker clone/fetch retries transient network errors up to four attempts, with
 1/3/10-second backoff and a ten-minute timeout per attempt. Failed clones are discarded
 from private staging directories. Both database workflows use `queue: max` so additional
