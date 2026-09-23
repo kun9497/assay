@@ -397,6 +397,75 @@ mainline Leap 릴리스(16.1 이상)를 보여줄 때 다시 본다; 이 집합�
 
 ---
 
+### 정상적인 은퇴와 배포 가드
+
+**2026-09-23, #135 가드가 들어온 뒤에 미뤄짐.** `refuseCoverageRegression`
+(`internal/dbcmd/push.go:330`)은 자신의 기준선을 오직 이미 발행된 것에서만 가져옵니다 — 대상
+태그의 `dev.assay.advisory-coverage`와 `dev.assay.rating-counts` manifest annotation, 혹은 그
+annotation이 생기기 전의 아티팩트라면 그 레이어를 한 번 scratch 파일로 풀어 실제 바이트에서 센
+값(`push.go:372`–`push.go:396`)입니다. 그래서 기준선은 항상 "어제의 커버리지"이고, 정당하게
+**줄어드는** 코퍼스는 그것을 말할 방법이 없습니다. `advisoryRegression`(`push.go:554`)은 들어온
+총합이 0이거나 기준선의 80% 이하일 때, 기준선에 있던 provider나 ecosystem이 들어온 아티팩트에서
+사라졌을 때(`published ecosystem %q is missing`), 그리고 ecosystem별 건수가 0이거나 그 기준선의
+80% 이하일 때 거부합니다. `ratingCountRegression`(`push.go:528`)은 기준선이 0건이었던 출처는
+건너뛰고, 소모성 스냅샷인 EPSS와 KEV(`perishableRatingSources`, `internal/dbcmd/dbcmd.go:1125`)는
+**존재하는 동안에만** 줄어드는 것을 허용하며, 소모성 출처가 아예 사라지는 것과 NVD 같은 비-소모성
+출처의 감소는 무엇이든 거부합니다.
+
+**그래서 진짜 은퇴는 운영자가 개입할 때까지 매일 밤 거부됩니다.** 배포판이 EOL이 되어 피드에서
+그 키가 사라지는 것처럼, 상류가 어느 릴리스의 발행을 멈추면 그 뒤 모든 nightly 아티팩트는 이미
+발행된 것에 있는 ecosystem 하나를 잃게 되고, 이는 정확히 `advisoryRegression`의 "ecosystem 누락"
+거부입니다: exit 2, 그리고 다음날 또 exit 2. 2026-09-21 리뷰 때 실제 레지스트리로 4단계로
+확인했습니다: 발행 → exit 0; ecosystem 하나를 제거하고 다시 발행 → exit 2, `published ecosystem
+"retired" is missing`; 같은 push를 `--force`로 → exit 0; `--force` 없이 같은 push를 다시 → exit
+0, 강제로 발행된 아티팩트가 이제 기준선이 되었기 때문입니다.
+
+**어떤 workflow도 대신할 수 없기에 필요한 운영 절차.** `.github/workflows` 아래 어디에도
+`--force`를 넘기는 곳이 없습니다: `db-publish.yml`과 `db-backfill.yml` 둘 다 `assay db push
+<ref>`를 맨몸으로 실행하고, `db-publish.yml`의 `workflow_dispatch`는 입력을 하나도 선언하지
+않습니다. 그래서 이 한 번뿐인 전환은 **사람이 손으로 하는** 조치입니다. (1) 은퇴가 진짜인지
+확인합니다 — 달력상 EOL 날짜를 지난 것이 아니라 그 키가 실제로 상류 피드에서 사라졌는지. (2)
+ghcr 쓰기 권한이 있는 머신에서 전체 로컬 데이터베이스를 빌드합니다; nightly와 동급인 빌드는 한
+시간 이상 걸립니다. (3) `assay db push <ref> --force`를 한 번 실행합니다. (4) 그 강제 아티팩트가
+새 기준선이 되고, 다음 평범한 nightly는 플래그 없이 통과합니다. 3단계가 일어나기 전까지는 예약된
+발행이 매일 거부되며, 그때마다 사라진 키의 이름이 메시지에 담깁니다.
+
+**`--force`가 하지 않는 일.** 아무것도 검사하지 않습니다. `dbartifact.Pack`은 가드가 돌기 전에
+스테이징된 데이터베이스로부터 커버리지 annotation을 씁니다(`push.go:104`와 `push.go:125`를 비교)
+그리고 force 파라미터를 받지 않으므로, 강제 발행된 아티팩트도 자신이 계산한 숫자를 그대로
+발행합니다; force는 오직 `coverageCheckFailed`와 함수 끝의 거부를 `warning:` 한 줄로 바꿀
+뿐입니다(`push.go:486`, `push.go:460`). 그래서 한 번의 강제 발행은 그 로컬 빌드가 우연히 만들어낸
+숫자를 이후 모든 빌드가 비교당하는 바닥으로 그대로 채택합니다 — 그러므로 이것은 **다른 숫자들을
+먼저 살펴본** 아티팩트에만 실행해야 합니다. 다른 provider를 함께 잃은 빌드나 `NVD_ENABLE`을
+설정하지 않고 돌린 빌드도, 은퇴와 똑같이 조용히 새로운 정상이 됩니다.
+
+**은퇴는 날짜가 아니라 데이터로 판단되며, 바로 그 점이 오경보를 그럴듯하게 만듭니다.** Fedora와
+Photon provider는 자신이 가져올 릴리스를 코드에 명시적으로 나열하므로(`fedora.DefaultReleases`,
+`photon.DefaultMajors`), 상류의 EOL 날짜 하나만으로는 아무것도 사라지지 않습니다 — 이미 저장된
+것은 그대로 남습니다. Red Hat과 SUSE는 실행할 때마다 피드에서 자신이 커버하는 집합을 다시
+계산하므로(`Ecosystems: sortedKeys(covered)`, `internal/provider/redhat/redhat.go:212`,
+`internal/provider/suse/suse.go:240`, D20), 두 아카이브 스냅샷 사이에서 흔들리는 키 하나가 진짜
+은퇴와 똑같은 거부를 만들어냅니다. 어느 한 번의 실행에서만 꺼진 provider(`REDHAT_ENABLE`,
+`SUSE_ENABLE`, `FEDORA_ENABLE` 등은 `cmd/assay/main.go`에서 기본으로 켜져 있습니다)도, 우연히
+평소보다 적게 가져온 fetch도 마찬가지입니다. 가드는 이들을 진짜 은퇴와 구별하지 못합니다;
+구별할 수 있는 것은 운영자뿐이고, 그래서 위 1단계가 중요한 단계입니다.
+
+**D108의 특수 사정.** 미러링된 openSUSE Leap 키(`leapReleases`와
+`internal/provider/suse/csaf.go`의 gap-fill)는 같은 SLE codestream이 그 문서에서 그 패키지
+항목을 여전히 담고 있는 동안에만 살아남으므로, SLE codestream이 잠잠해진 Leap 릴리스는 상류에서
+아무것도 은퇴하지 않았는데도 미러링된 키를 잃습니다. native entry를 가진 Leap 릴리스는 자신의
+몫으로 키를 지킵니다. 다른 배포판에는 이런 보호막이 없습니다.
+
+**다시 볼 때는** `db-publish.yml`의 `workflow_dispatch`에 `force` 입력이 추가되어 이 전환이
+원클릭 운영자 조치가 되고 이 항목이 runbook 한 문단이 될 때, 혹은 첫 진짜 은퇴가 일어날 때 중
+먼저 오는 쪽입니다. 이 가드가 평상시 운영에서 오작동한다고 의심되지는 않습니다: #135의 코드에서,
+run 35597572338(2026-09-21)은 `ghcr.io/kun9497/assay-db:v9 carries no advisory-coverage
+annotation; comparing against a baseline unpacked from its layer (1508914 advisories, 3
+rating source(s))`를 찍은 뒤 발행되었고, run 35719130610(2026-09-22)은 그런 줄 없이
+발행되었는데, 그 기준선을 앞선 실행이 써둔 annotation에서 읽었기 때문입니다.
+
+---
+
 ### 2026-09-01 성능 감사 — 취한 것, 반박된 것, 기다리는 것
 
 스캔·빌드 경로의 프로파일 기반 감사(실제 3.75 GB 아티팩트, finding 12,742건을 내는
@@ -1354,6 +1423,44 @@ status --bogus`도 마찬가지입니다. `db` 쪽은 플래그를 파싱한 적
 
 ---
 
+### 디렉터리 스캔의 의도적인 가지치기(prune)를 공개하기
+
+디렉터리 스캔은 루트 아래의 모든 것을 훑지 않으며, 무엇을 빼놓았는지도 전혀 말하지 않습니다.
+`internal/cataloger/dirscan/walk.go`는 이름이 정확히 일치하는 디렉터리 셋 — `node_modules`,
+`vendor`, `.git`(`excludedDirs`, `walk.go:82`) — 을 가지치기하고, 루트에서 여섯 단계 아래로는
+더 내려가지 않으며(`maxDepth`, `walk.go:117`), 둘 다 walk 콜백에서 `fs.SkipDir`를 반환하는
+방식으로 이루어집니다(`walk.go:173`, `walk.go:182`). 이 둘을 아래쪽 어디에서도 언급하지
+않습니다: `internal/scancmd`는 찾았지만 쓸 수 없었던 매니페스트에 대해 `not pinned:`와
+`not read:` 줄을 찍고(`scancmd.go:559`–`scancmd.go:564`), `internal/report`는 미평가 건수를
+렌더링하지만, 어떤 renderer도 가지치기된 디렉터리나 깊이 제한 자체는 전혀 찍지 않습니다.
+`docs/DESIGN.md`는 이 두 제한을 산문으로 서술할 뿐이며, 오늘 존재하는 공개는 그것이 전부이고,
+그것은 스캔 출력이 아니라 문서입니다.
+
+**이 가지치기는 의도적으로 불완전성(incompleteness)이 아닙니다.** #136은 `ReadDir`이 실패하는
+하위 트리를 `not read:` 줄과 `--fail-on-incomplete`에 닿는 `Unread{Failed: true}`로 만들었고,
+가지치기는 구조적으로 그 채널 밖에 두었습니다: `excludedDirs`와 `maxDepth`는 어떤 디렉터리에
+대한 **첫** 콜백에서 바로 `fs.SkipDir`를 반환하므로 `ReadDir`은 아예 시도되지 않고 오류 분기는
+발화할 수 없습니다. 각 가지치기 테스트는 이제 unread 목록이 비어 있음을 단언해서 이것이 계속
+유지되게 합니다. "우리가 보지 않기로 했다"와 "우리가 봤지만 볼 수 없었다"는 exit code에서 같은
+것으로 합쳐져서는 안 됩니다 — 의존성을 설치한 저장소는 거의 전부 `node_modules`를 갖고
+있으므로, 이를 `Unread`로 보내면 사실상 모든 스캔이 `--fail-on-incomplete`에 걸리게 됩니다.
+
+**세 번째 누락은 아직 결정조차 아닙니다.** `filepath.WalkDir`는 심볼릭 링크로 된 디렉터리를
+따라가지 않으므로, 심볼릭 링크를 통해서만 닿을 수 있는 매니페스트는 가지치기도, 오류도, 어떤
+항목도 없이 그냥 보이지 않게 됩니다.
+
+**열려 있는 것은 공개할지, 한다면 어떻게 할지입니다.** 내려가지 않은 디렉터리의 이름을 알려주는
+stderr 한 줄은 구조적으로 공짜지만 `--output json`이나 SARIF에는 자리가 없습니다; 기계
+판독기에 정직한 형태는 `Summary` 필드이고, 이는 스키마 변경입니다. `--output json`은 버전이
+매겨져 있고 golden 파일로 테스트되기 때문입니다. 이는 #136이 읽지 않은 매니페스트에 대해
+명시적으로 미룬 것과 같은 질문이므로("읽지 않은 매니페스트를 위한 Summary/JSON/SARIF 필드 …
+별도 결정"), 둘을 함께 답해야 합니다. 무엇을 고르든, 평범한 `node_modules` 스킵이 스캔이 갖지
+못한 커버리지처럼 읽혀서는 안 됩니다. **다시 볼 때는** 사용자가 디렉터리 스캔에서 매니페스트가
+빠졌다고 신고했는데 그것이 `node_modules`/`vendor` 아래나 여섯 단계 아래에 있던 것으로 드러날
+때, 또는 읽지 않은 매니페스트를 위한 renderer 채널이 설계될 때입니다.
+
+---
+
 ### npm과 PyPI 디렉터리 스캔
 
 `package-lock.json`과 `poetry.lock` / `requirements.txt`를, 지금 `go.mod`을 읽는 것과 같은
@@ -1557,6 +1664,36 @@ degrade해야 합니다** — 해당 패키지를 건너뛴 것으로 보고할 
 약 90개짜리 버전 목록 4벌에 썼습니다. 무손실 저장(D13)이 기본이지만, 배포판 데이터가 들어오면
 데이터베이스 크기를 지배할 수 있습니다. `ranges`가 있으면 나열은 파생 가능하지만, 없으면 그것이
 유일한 매칭 데이터이므로 **어떤 정리든 조건부여야 합니다.** 슬라이스 2에서 측정 후 결정.
+
+**동시에 실행되는 `db build`와 `db update` writer가 `<dbPath>.tmp`를 공유한다.** 하나의
+`ASSAY_DB_DIR`를 가리키는 두 데이터베이스 writer가 똑같은 임시 파일 이름을 씁니다.
+`dbcmd.Update`(`internal/dbcmd/dbcmd.go:139`, `assay db build` 뒤에 있음)와 `dbcmd.Pull`
+(`internal/dbcmd/pull.go:83`, `assay db update` 뒤에 있음)은 각각 `tmp := dbPath + ".tmp"`를
+계산하고, 각각 `_ = os.Remove(tmp)`로 열면서 오류를 버립니다. 이 경로 어디에도 lock 파일도,
+flock도, mutex도, 고유한 임시 이름도 없습니다; bbolt 자신의 lock은 파일을 연 뒤에야, 그리고
+오직 그 파일에 대해서만 걸리므로 다른 프로세스를 전혀 보지 못합니다; `replace`는 짧은
+`os.Rename` 재시도(`replaceWaits`, 총 850 ms 정도)일 뿐이고, 이는 Windows에서 실행 중인
+데이터베이스를 열어 둔 동시 **리더**를 겨냥한 것이지 동시 writer를 겨냥한 것이 아닙니다.
+
+추적된 결과는 모두 조용합니다. 어느 쪽 writer가 마지막에 rename하든 그쪽이 이기므로, 한
+프로세스의 빌드 전체가 버려지면서도 그 프로세스 자신은 자기 exit-0 성공 줄을 찍을 수 있습니다;
+또는 두 번째 writer의 `os.Remove`가 첫 번째가 아직 채우고 있는 임시 파일을 지워 버려서, 첫
+번째가 자기 발밑에서 사라진 파일을 두고 실패합니다. 어느 쪽이든 스캔은 fail-closed로 남습니다
+— `store.Open`은 메타데이터 레코드가 없는 데이터베이스에 대해 `ErrIncomplete`를
+돌려주므로(`internal/store/bolt.go:72`), 부분적으로 쓰인 파일은 clean으로 읽히지 않고
+거부됩니다. 두 데이터베이스 워크플로가 함께 쓰는 `concurrency: db-artifact-writer` 그룹은
+워크플로 **실행**끼리는 서로 보호하지만, 한 머신 위의 두 CLI 프로세스와는 아무 상관이 없습니다.
+
+`PullSeed`(`internal/dbcmd/pull.go:227`)도 똑같은 `".tmp"` 이름을 만들지만 충돌할 수 없습니다:
+유일한 호출자가 갓 만든 `os.MkdirTemp("", "assay-seed-")` 디렉터리 안의 경로를 넘기기
+때문입니다(`cmd/assay/main.go:396`).
+
+세 지점 모두 #135 publish guard보다 앞서 있습니다 — `git blame`은 2026-07-30, 2026-08-04,
+2026-08-18로 날짜를 매깁니다 — 그래서 이것은 회귀가 아니라 원래부터 있던 것이고, 실제로 재현된
+적은 아직 없습니다: 오늘은 운영자 한 명이 머신 한 대에서 빌드하고 CI가 스스로를 직렬화합니다.
+고쳐야 할 모양은 더 긴 rename 재시도가 아니라 프로세스별 고유 임시 이름과 데이터베이스 옆의
+명시적 writer lock입니다. **다시 볼 때는** 두 번째 운영자나 두 번째 머신이 하나의
+`ASSAY_DB_DIR`에 쓰게 될 때, 또는 첫 충돌이 재현될 때입니다.
 
 ---
 

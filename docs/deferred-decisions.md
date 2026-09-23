@@ -378,6 +378,81 @@ Leap image keyed to a release absent from the set, silently under-reporting, is 
 
 ---
 
+### Normal retirement and the publish guard
+
+**Deferred 2026-09-23, after the #135 guard landed.** `refuseCoverageRegression`
+(`internal/dbcmd/push.go:330`) takes its baseline ONLY from what is already published — the
+target tag's `dev.assay.advisory-coverage` and `dev.assay.rating-counts` manifest
+annotations, or, for an artifact predating those annotations, its layer unpacked once into a
+scratch file and counted from real bytes (`push.go:372`–`push.go:396`). The baseline is
+therefore always yesterday's coverage, and a corpus that legitimately SHRINKS has no way to
+say so. `advisoryRegression` (`push.go:554`) refuses when the incoming total is 0 or below
+80% of the baseline's, when any provider or ecosystem present in the baseline is absent from
+the incoming artifact (`published ecosystem %q is missing`), and when any per-ecosystem count
+is 0 or below 80% of its baseline. `ratingCountRegression` (`push.go:528`) skips a source the
+baseline held 0 of, lets the perishable snapshots EPSS and KEV (`perishableRatingSources`,
+`internal/dbcmd/dbcmd.go:1125`) shrink only while still PRESENT, refuses a perishable source
+that is absent altogether, and refuses any decrease for a non-perishable source such as NVD.
+
+**So a real retirement is refused every night until an operator intervenes.** An upstream
+that stops publishing a release — a distro going EOL and its key disappearing from the feed —
+makes every later nightly's artifact miss an ecosystem the published one has, which is
+`advisoryRegression`'s missing-ecosystem refusal: exit 2, and again tomorrow. Confirmed
+against the live registry during the 2026-09-21 review, in four steps: publish → exit 0;
+publish again with one ecosystem removed → exit 2, `published ecosystem "retired" is
+missing`; the same push with `--force` → exit 0; the same push again WITHOUT `--force` →
+exit 0, because the forced artifact is now the baseline.
+
+**The operating procedure, because no workflow can perform it.** Nothing under
+`.github/workflows` passes `--force`: `db-publish.yml` and `db-backfill.yml` both run
+`assay db push <ref>` bare, and `db-publish.yml`'s `workflow_dispatch` declares no inputs. The
+one-time transition is a MANUAL operator action. (1) Confirm the retirement is real — the key
+is absent from the upstream feed, not merely past an EOL date on a calendar. (2) Build a full
+local database on a machine with ghcr write access; the nightly-equivalent build takes on the
+order of an hour and more. (3) Run `assay db push <ref> --force` once. (4) The forced artifact
+becomes the new baseline, and the next ordinary nightly passes with no flag. Until step 3
+happens the scheduled publish is refused daily, each time with the message naming the missing
+key.
+
+**What `--force` does not do.** It checks nothing. `dbartifact.Pack` writes the coverage
+annotations from the staged database before the guard runs (`push.go:104` against
+`push.go:125`) and takes no force parameter, so a forced artifact publishes exactly the
+numbers it computed; force only turns `coverageCheckFailed` and the end-of-function refusal
+into a `warning:` line (`push.go:486`, `push.go:460`). One forced publish therefore adopts
+whatever that local build happened to produce as the floor every later build is measured
+against — so it must only ever be run on an artifact whose OTHER numbers were examined first.
+A build that also lost an unrelated provider, or ran with `NVD_ENABLE` unset, becomes the new
+normal exactly as quietly as the retirement does.
+
+**Retirement is data-driven, not date-driven, which is what makes a false alarm likely.** The
+Fedora and Photon providers enumerate the releases they fetch explicitly in code
+(`fedora.DefaultReleases`, `photon.DefaultMajors`), so an upstream EOL date alone removes
+nothing — what is already stored stays stored. Red Hat and SUSE recompute their covered set
+from the feed on every run (`Ecosystems: sortedKeys(covered)`,
+`internal/provider/redhat/redhat.go:212`, `internal/provider/suse/suse.go:240`, D20), so a key
+that flaps between two archive snapshots produces precisely the refusal a retirement does. So
+does a provider switched off for a single run (`REDHAT_ENABLE`, `SUSE_ENABLE`,
+`FEDORA_ENABLE` and the rest default ON in `cmd/assay/main.go`), and so does one whose fetch
+happened to cover less than usual. The guard cannot tell these apart from a genuine
+retirement; only the operator can, which is why step 1 above is the step that matters.
+
+**The D108 nuance.** A mirrored openSUSE Leap key (`leapReleases` and the gap-fill in
+`internal/provider/suse/csaf.go`) survives only while the same SLE codestream still carries an
+entry for that package in that document, so a Leap release whose SLE codestream goes quiet
+loses mirrored keys with nothing upstream having been retired. A Leap release carrying native
+entries keeps its key on its own account. No other distro has that shielding.
+
+**Revisit when** a `force` input is added to `db-publish.yml`'s `workflow_dispatch` — which
+would turn the transition into a one-click operator action and this entry into a runbook
+paragraph — or on the first real retirement, whichever comes first. The guard is not suspected
+of misfiring in normal operation: on #135's code, run 35597572338 (2026-09-21) published after
+printing `ghcr.io/kun9497/assay-db:v9 carries no advisory-coverage annotation; comparing
+against a baseline unpacked from its layer (1508914 advisories, 3 rating source(s))`, and run
+35719130610 (2026-09-22) published with no such line, its baseline read from the annotations
+the previous run had written.
+
+---
+
 ### The 2026-09-01 performance audit — what was taken, what was refuted, what waits
 
 A profile-driven audit of the scan and build paths (real 3.75 GB artifact, a
@@ -1385,6 +1460,44 @@ directory is an addition rather than a signature change.
 
 ---
 
+### Disclosing the deliberate directory-scan prunes
+
+A directory scan does not walk everything under the root, and says nothing about what it left
+out. `internal/cataloger/dirscan/walk.go` prunes three directory names by exact match —
+`node_modules`, `vendor` and `.git` (`excludedDirs`, `walk.go:82`) — and stops descending six
+levels below the root (`maxDepth`, `walk.go:117`), both by returning `fs.SkipDir` from the
+walk callback (`walk.go:173`, `walk.go:182`). Nothing downstream mentions either one:
+`internal/scancmd` prints `not pinned:` and `not read:` lines for manifests it found and could
+not use (`scancmd.go:559`–`scancmd.go:564`), `internal/report` renders the not-evaluated
+counts, and no renderer prints a pruned directory or the depth cap at all. `docs/DESIGN.md`
+states the two limits in prose; that is the whole of the disclosure today, and it is a
+document, not scan output.
+
+**The prunes are deliberately NOT incompleteness.** #136 made a subtree whose `ReadDir` fails
+into an `Unread{Failed: true}` that reaches the `not read:` line and `--fail-on-incomplete`,
+and kept the prunes out of that channel by construction: `excludedDirs` and `maxDepth` return
+`fs.SkipDir` on the FIRST callback for a directory, so `ReadDir` is never attempted and the
+error branch cannot fire. Each prune test now asserts the empty unread list so that stays
+true. "We decided not to look" and "we looked and could not see" must not reach the exit code
+as the same thing — every repository with its dependencies installed has a `node_modules`, and
+routing it into `Unread` would fail `--fail-on-incomplete` on essentially every scan.
+
+**A third omission is not even a decision yet.** `filepath.WalkDir` does not follow symlinked
+directories, so a manifest reachable only through a symlink is invisible with no prune, no
+error and no entry anywhere.
+
+**What is open is whether and how to disclose.** A stderr line naming the directories not
+descended into costs nothing structural but has no place in `--output json` or SARIF; a
+`Summary` field is the honest shape for a machine reader and is a schema bump, `--output json`
+being versioned and golden-tested. That is the same question #136 left explicitly untaken for
+unread manifests ("a Summary/JSON/SARIF field for unread manifests … a separate decision"), so
+the two should be answered together. Whatever is chosen must not make a routine `node_modules`
+skip read as coverage the scan does not have. **Revisit when** a user reports a manifest
+missing from a directory scan that turns out to sit under `node_modules`/`vendor` or below six
+levels, or when the renderer channel for unread manifests is designed.
+
+---
+
 ### npm and PyPI directory scanning
 
 `package-lock.json` and `poetry.lock` / `requirements.txt`, the same way `go.mod` is read now.
@@ -1596,6 +1709,35 @@ them losslessly (D13) is the default, but they may dominate database size once d
 lands. Where `ranges` is present the enumeration is derivable; where it is absent it is the
 only matching data, so any pruning must be conditional. Measure during slice 2 before
 deciding.
+
+**Concurrent `db build` and `db update` writers share `<dbPath>.tmp`.** Two database
+writers pointed at one `ASSAY_DB_DIR` use the SAME temporary filename. `dbcmd.Update` (`internal/dbcmd/dbcmd.go:139`, behind `assay db build`) and `dbcmd.Pull`
+(`internal/dbcmd/pull.go:83`, behind `assay db update`) each compute `tmp := dbPath + ".tmp"`
+and each open with `_ = os.Remove(tmp)`, discarding the error. There is no lock file, no
+flock, no mutex and no unique temp name anywhere on that path; bbolt's own lock is taken only
+after a file is opened and only on that file, so it never sees the other process; and
+`replace` is a short `os.Rename` retry (`replaceWaits`, ~850 ms in total) aimed at a
+concurrent READER holding the live database open on Windows, not at a concurrent writer.
+
+The traced outcomes are all quiet. Whichever writer renames last wins, so one process's entire
+build can be discarded while that process prints its own exit-0 success line; alternatively
+the second writer's `os.Remove` deletes a temp file the first is still filling, and the first
+fails on a file that vanished under it. Scans stay fail-closed either way — `store.Open`
+returns `ErrIncomplete` for a database with no metadata record (`internal/store/bolt.go:72`),
+so a partially written file is refused rather than read as clean. The
+`concurrency: db-artifact-writer` group both database workflows share protects workflow RUNS
+from each other and has no bearing on two CLI processes on one machine.
+
+`PullSeed` (`internal/dbcmd/pull.go:227`) builds the same `".tmp"` name but cannot collide:
+its only caller passes a path inside a fresh `os.MkdirTemp("", "assay-seed-")` directory
+(`cmd/assay/main.go:396`).
+
+All three sites predate the #135 publish guard — `git blame` dates them 2026-07-30,
+2026-08-04 and 2026-08-18 — so this is old rather than a regression, and it has never been
+reproduced live: today one operator builds on one machine and CI serializes itself. The fix
+shape is a per-process unique temp name plus an explicit writer lock beside the database, not
+a longer rename retry. **Revisit when** a second operator or a second machine ever writes one
+`ASSAY_DB_DIR`, or on the first reproduced collision.
 
 ---
 

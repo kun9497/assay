@@ -665,7 +665,12 @@ decision of its own rather than being folded in here.
 down, in a repository shape that is completely ordinary. The walk skips `node_modules`,
 `vendor` and `.git`, because a lockfile inside a dependency tree describes that dependency's
 own requirements rather than this project's, and depth is bounded so a scan cannot be made
-arbitrarily slow by directory nesting. Both limits are disclosed the way D23's is.
+arbitrarily slow by directory nesting. Both limits are fixed and documented in
+`docs/DESIGN.md`, and neither is disclosed at scan time: a pruned directory produces no
+output of any kind, deliberately, because "we decided not to look" must not reach the exit
+code the way "we looked and could not see" does. Whether to disclose them anyway is an open
+decision — see *Disclosing the deliberate directory-scan prunes* in
+`docs/deferred-decisions.md`.
 
 **The disclosure names the file, not just a count.** "1 manifest not read" tells a reader
 that something is missing without telling them what to do; `requirements.txt (not read: not a
