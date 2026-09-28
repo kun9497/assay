@@ -283,6 +283,11 @@ const ln = string(rune(10))
 // mutation dropping Stored from the row Update builds left every other test in
 // this package green. reportTimings rendering a split correctly proves nothing
 // if the value reaching it is always zero.
+//
+// What it pins: a stage that wrote through emit reports a split, whatever the
+// clock's resolution. Two records can be stored inside one Windows clock tick,
+// which failed about one full-package run in six until flush floored its
+// measure.
 func TestUpdate_ReportsTheStoreSplit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
@@ -300,8 +305,9 @@ func TestUpdate_ReportsTheStoreSplit(t *testing.T) {
 	}
 	s := errOut.String()
 	if !strings.Contains(s, "store]") {
-		t.Errorf("the provider row carries no store split, so Update never "+
-			"measured one:"+ln+"%s", s)
+		t.Errorf("the provider row carries no store split although the stage "+
+			"wrote two advisories through emit; a stage that wrote must report "+
+			"a split regardless of clock resolution:"+ln+"%s", s)
 	}
 }
 

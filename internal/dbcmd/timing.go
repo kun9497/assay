@@ -15,7 +15,8 @@ type stageTiming struct {
 	Records int
 	// Stored is how much of Elapsed went into the store rather than into
 	// fetching and parsing. Zero for a stage that does not write through an
-	// emit callback, and rendered only when it is not.
+	// emit callback, and rendered only when it is not. A stage that wrote is
+	// never zero, even when the clock could not resolve the write.
 	//
 	// It exists because a provider's total cannot tell you which half to
 	// fix, and the two answers call for opposite work: a download-bound
