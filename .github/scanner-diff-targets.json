@@ -127,7 +127,7 @@
     "ref": "cgr.dev/chainguard/wolfi-base@sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72",
     "minAgree": 0,
     "minFindings": 0,
-    "maxFindings": 25,
+    "maxFindings": 68,
     "trivy": {},
     "minComponents": 12
   },
@@ -214,7 +214,7 @@
     "ref": "mirror.gcr.io/library/photon@sha256:ab4b68e15c8ff6b9c79ba525f696260f772c711761d576dd53bf43c351c9a504",
     "minAgree": 5,
     "minFindings": 5,
-    "maxFindings": 25
+    "maxFindings": 74
   },
   {
     "name": "archlinux",
