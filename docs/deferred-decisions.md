@@ -442,9 +442,30 @@ entry for that package in that document, so a Leap release whose SLE codestream 
 loses mirrored keys with nothing upstream having been retired. A Leap release carrying native
 entries keeps its key on its own account. No other distro has that shielding.
 
-**Revisit when** a `force` input is added to `db-publish.yml`'s `workflow_dispatch` — which
-would turn the transition into a one-click operator action and this entry into a runbook
-paragraph — or on the first real retirement, whichever comes first. The guard is not suspected
+**A `force` input on `db-publish.yml` is a stopgap, not the fix — recorded 2026-09-28 so the
+question is not reopened.** Adding `inputs.force` to the `workflow_dispatch` and passing
+`--force` through to the Publish step would remove steps 2–3 above: the transition would run on
+the nightly's own runner, environment and token instead of an operator's machine, and a
+scheduled run, where the input is always empty, would never carry the flag. That is all it
+removes. It does nothing for the judgement in step 1 — the guard cannot tell a retirement from
+a provider that fetched less than usual or a key that flaps between snapshots, and a one-click
+override makes the wrong call cheaper, where today the hour-long local build is an accidental
+brake. `--force` still checks nothing, so a night on which an unrelated provider also fell
+short becomes the baseline exactly as quietly. A refused nightly is still noticed only when
+someone reads the failed run. And a key that flaps needs a force each time it disappears, each
+one resetting the baseline and hiding whatever else was lost in between. The shape that closes
+those is a committed retirement list: an ecosystem or provider named there is allowed to be
+absent, so a retirement becomes a reviewed one-line PR carrying its evidence, `--force` is
+left for emergencies only, and a flapping key, being on no list, keeps being refused. That
+changes the guard's meaning and adds a committed file, so it deserves a D-number — and it is
+not designed now because no retirement has happened yet, and the list's granularity (key,
+provider, release, with or without an expiry) should come from the first real case rather than
+be guessed. The `force` input alone buys little before then; added as an explicitly
+emergency-only switch it is harmless.
+
+**Revisit when** the first real retirement happens, and design the retirement list from it.
+A `force` `workflow_dispatch` input added before then is the emergency switch above, not this
+entry's resolution. The guard is not suspected
 of misfiring in normal operation: on #135's code, run 35597572338 (2026-09-21) published after
 printing `ghcr.io/kun9497/assay-db:v9 carries no advisory-coverage annotation; comparing
 against a baseline unpacked from its layer (1508914 advisories, 3 rating source(s))`, and run
