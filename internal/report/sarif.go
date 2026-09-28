@@ -10,6 +10,7 @@ import (
 
 	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
+	"github.com/kun9497/assay/internal/cataloger/dirscan"
 	"github.com/kun9497/assay/internal/matcher"
 	"github.com/kun9497/assay/internal/severity"
 )
@@ -29,8 +30,8 @@ import (
 // toolExecutionNotifications[] — and GitHub does not support it. So the skips
 // go BOTH places (D55): the notification for a consumer that honours the spec,
 // and a note-level result so the one consumer that matters actually shows them.
-func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, target, version string, eol EOLStatus) (Summary, error) {
-	sum := Summarize(res, cat)
+func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirscan.Unread, target, version string, eol EOLStatus) (Summary, error) {
+	sum := Summarize(res, cat, unread)
 
 	rules := make([]sarifRule, 0, len(res.Findings)+1)
 	results := make([]sarifResult, 0, len(res.Findings)+len(res.Suppressed)+len(res.Skipped))
@@ -112,6 +113,46 @@ func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, target, version
 		}
 	}
 
+	// D109: one result per manifest the scan found and could not read, on the
+	// not-evaluated block's own shape just above - a result AND a
+	// notification, for the same reason (GitHub reads only the first).
+	// The rule is appended in the same branch that emits its results, so
+	// neither can exist without the other: a result naming an undeclared
+	// rule is invalid SARIF, which is the D55 lesson.
+	//
+	// warning, not note: unlike a not-evaluated package, which the scan did
+	// see and could not judge, nothing inside an unread file was seen at all,
+	// and the caller can fix it (D109 counts it toward targetIncomplete).
+	if recs := unreadRecords(unread); len(recs) > 0 {
+		rules = append(rules, notReadRule())
+		for _, u := range recs {
+			msg := fmt.Sprintf("%s could not be read: %s", u.Path, u.Reason)
+			results = append(results, sarifResult{
+				RuleID:  notReadRuleID,
+				Level:   "warning",
+				Message: sarifText{Text: msg},
+				// No region: the path may be a directory the walk could not
+				// enter, where a line number would be a claim about a file
+				// that is not there.
+				Locations: []sarifLocation{{
+					PhysicalLocation: sarifPhysical{
+						ArtifactLocation: sarifArtifact{URI: u.Path},
+					},
+				}},
+				// Keyed on the path alone, not the reason: the OS or parser
+				// wording can change between runs while the file stays the
+				// same unread file, and the alert should stay the same alert.
+				PartialFingerprints: map[string]string{
+					fingerprintKey: hash(notReadRuleID, u.Path),
+				},
+			})
+			notes = append(notes, sarifNotification{
+				Level:   "warning",
+				Message: sarifText{Text: msg},
+			})
+		}
+	}
+
 	run := sarifRun{
 		Tool: sarifTool{Driver: sarifDriver{
 			Name:           "assay",
@@ -156,6 +197,7 @@ func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, target, version
 
 const (
 	notEvaluatedRuleID = "assay/not-evaluated"
+	notReadRuleID      = "assay/not-read"
 	// fingerprintKey names the scheme, so a later change to what a fingerprint
 	// is made of can ship as a new key rather than silently re-identifying
 	// every existing alert.
@@ -236,6 +278,27 @@ func notEvaluatedRule() sarifRule {
 	}
 }
 
+// notReadRule is D109's rule, mirroring notEvaluatedRule: declared whenever at
+// least one assay/not-read result is emitted, and never otherwise.
+func notReadRule() sarifRule {
+	return sarifRule{
+		ID:               notReadRuleID,
+		Name:             "NotRead",
+		ShortDescription: sarifText{Text: "A manifest the scan could not read"},
+		FullDescription: sarifText{Text: "The scan found this manifest, or a directory that " +
+			"may hold manifests, and could not read it. Nothing inside it was evaluated, so " +
+			"it may hold findings this run did not see: a partial scan must not read as a " +
+			"complete one."},
+		Help: &sarifHelp{
+			Text: "The reason is on the result itself. Regenerate a lockfile that would not " +
+				"parse, or grant the scanning user access to a directory it could not enter. " +
+				"Use --fail-on-incomplete=target to make this fail a build.",
+		},
+		// No security-severity: this is not a security claim.
+		Properties: map[string]any{"tags": []string{"security", "not-read"}},
+	}
+}
+
 // sarifLevel maps a band onto SARIF's four levels.
 //
 // Unknown lands on "warning" rather than "none". A finding nobody rated is
@@ -261,7 +324,7 @@ func summaryLevel(s Summary) string {
 	switch {
 	case !s.Trustworthy():
 		return "error"
-	case s.NotEvaluated > 0 || s.IncompleteChecks > 0:
+	case s.NotEvaluated > 0 || s.IncompleteChecks > 0 || s.UnreadManifests > 0:
 		return "warning"
 	default:
 		return "note"

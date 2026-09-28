@@ -239,7 +239,9 @@ vector in the live database.
 result that cannot be trusted outranks the content of the result. It fires when packages
 were never checked *or* when a check could not be completed — the same pair of counts the
 report always discloses, in the summary line and under "Not evaluated", so the gate can
-never fire over something the output did not show you.
+never fire over something the output did not show you. Since D109 a manifest the scan could
+not read counts too, disclosed in its own `unread[]` / `not read:` list rather than folded
+into "Not evaluated".
 
 Flag names follow grype where the semantics match, so anything you already run against
 grype should mean the same thing here. Where behaviour diverges it is documented rather than

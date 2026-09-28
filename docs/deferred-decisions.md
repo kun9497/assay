@@ -1489,12 +1489,14 @@ error and no entry anywhere.
 **What is open is whether and how to disclose.** A stderr line naming the directories not
 descended into costs nothing structural but has no place in `--output json` or SARIF; a
 `Summary` field is the honest shape for a machine reader and is a schema bump, `--output json`
-being versioned and golden-tested. That is the same question #136 left explicitly untaken for
-unread manifests ("a Summary/JSON/SARIF field for unread manifests … a separate decision"), so
-the two should be answered together. Whatever is chosen must not make a routine `node_modules`
-skip read as coverage the scan does not have. **Revisit when** a user reports a manifest
-missing from a directory scan that turns out to sit under `node_modules`/`vendor` or below six
-levels, or when the renderer channel for unread manifests is designed.
+being versioned and golden-tested. That was the same question #136 left explicitly untaken for
+unread manifests ("a Summary/JSON/SARIF field for unread manifests … a separate decision"); D109
+has since answered it — `unread[]`, `summary.unreadManifests`, the `assay/not-read` SARIF rule
+and the table's `not read:` list are that channel — but, per the paragraph above, it
+deliberately carries only `Unread{Failed: true}`, not the prunes. Whatever is chosen for the
+prunes must not make a routine `node_modules` skip read as coverage the scan does not have.
+**Revisit when** a user reports a manifest missing from a directory scan that turns out to sit
+under `node_modules`/`vendor` or below six levels.
 
 ---
 

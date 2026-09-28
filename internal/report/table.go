@@ -13,6 +13,7 @@ import (
 
 	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
+	"github.com/kun9497/assay/internal/cataloger/dirscan"
 	"github.com/kun9497/assay/internal/matcher"
 	"github.com/kun9497/assay/internal/severity"
 )
@@ -30,12 +31,21 @@ type Summary struct {
 	// scanned artifact rather than to the vulnerability data (D36) — an
 	// installed version that will not parse, not an advisory whose bound will
 	// not. Counted across BOTH kinds above, so it is a subtotal of neither.
+	// Since D109 it also counts every UnreadManifests entry, which is in
+	// neither of the two above either: an unread manifest yields no package to
+	// count as not evaluated.
 	//
 	// Populated whether or not it is zero, for the reason UnknownSeverity is:
 	// `--fail-on-incomplete=target` reads it directly, and a count that only
 	// appears when non-zero is not one a caller can rely on.
 	TargetIncomplete int `json:"targetIncomplete"`
-	Findings         int `json:"findings"`
+	// UnreadManifests is how many manifests a directory scan found and could
+	// not read (D109) - the length of the JSON document's unread[] array, and
+	// already included in TargetIncomplete above. Populated whether or not it
+	// is zero, like TargetIncomplete, and counted apart from NotEvaluated: an
+	// unread file produced no component to be evaluated or not.
+	UnreadManifests int `json:"unreadManifests"`
+	Findings        int `json:"findings"`
 	// Suppressed is the number of findings a user ignore rule waived
 	// (matcher.Result.Suppressed). Populated whether or not it is zero, like
 	// the counts around it, and NEVER folded into Findings: a waived finding
@@ -93,7 +103,12 @@ func (s Summary) Trustworthy() bool {
 // real stdout (D107's own split of "would the terminal take colors" from
 // "does policy allow them"). This renderer only ever asks "should I", never
 // "am I allowed to".
-func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus, colorize bool) (Summary, error) {
+//
+// unread is the directory scan's Manifests.Unread, nil for any other target
+// (D109); its Failed entries are listed beneath everything else as
+// "not read: <path> (<reason>)" - the same words stderr prints, so a reader
+// grepping either stream finds the same line.
+func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirscan.Unread, eol EOLStatus, colorize bool) (Summary, error) {
 	// D87: one line, only when the target's distro release is actually EOL
 	// — Line() itself returns ok=false for both "nothing to say" (Known is
 	// false) and "current release" (Known but not EOL), so this is the only
@@ -103,7 +118,7 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus, 
 		fmt.Fprintln(w)
 	}
 
-	sum := Summarize(res, cat)
+	sum := Summarize(res, cat, unread)
 	evaluated := sum.Evaluated
 	notEvaluated := sum.NotEvaluated
 	incompleteChecks := sum.IncompleteChecks
@@ -351,6 +366,14 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus, 
 	if len(res.Suppressed) > 0 {
 		suppressedParen = fmt.Sprintf(", %d suppressed", len(res.Suppressed))
 	}
+	// D109, on the suppressed count's own pattern: shown only when non-zero,
+	// because only a directory scan can have one at all and "0 manifest(s)
+	// not read" on every image scan would name a thing that cannot happen
+	// there. The JSON's summary.unreadManifests is the always-present form.
+	unreadParen := ""
+	if sum.UnreadManifests > 0 {
+		unreadParen = fmt.Sprintf(", %d manifest(s) not read", sum.UnreadManifests)
+	}
 	// D107: the one number on this line a reader's eye should land on first.
 	// Bold only, not banded by severity — this count mixes every band
 	// together, so no single band's color would be honest here — and only
@@ -361,9 +384,9 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus, 
 		findingsText = wrapSGR(ansiBold, findingsText, colorize)
 	}
 	fmt.Fprintf(w, "\n%d component(s) seen, %d evaluated, %s, %d not evaluated, "+
-		"%d unknown severity, %d with no fix available (%s)%s\n",
+		"%d unknown severity, %d with no fix available (%s)%s%s\n",
 		cat.Components, evaluated, findingsText, notEvaluated, unknownSeverity,
-		sum.Unfixable, noFixParen, suppressedParen)
+		sum.Unfixable, noFixParen, suppressedParen, unreadParen)
 
 	// Suppressed findings are shown, never dropped (matcher.Result.Suppressed's
 	// own reasoning): a distinct block naming each waived finding and the
@@ -431,6 +454,19 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus, 
 			fmt.Fprintf(w, "  %s %s: %s\n", s.Package.Name, s.Package.Version, s.Reason)
 		}
 	}
+
+	// D109: every manifest the scan found and could not read, named with its
+	// reason, beneath everything else. Stderr already printed these lines, but
+	// a reader of stdout alone - a CI log that captured only it, a file the
+	// report was redirected into - would otherwise see a scan that could not
+	// read half its manifests exactly as it sees a clean one. Plain, never
+	// colored: each line is an action the reader has to take.
+	if recs := unreadRecords(unread); len(recs) > 0 {
+		fmt.Fprintln(w)
+		for _, u := range recs {
+			fmt.Fprintf(w, "not read: %s (%s)\n", u.Path, u.Reason)
+		}
+	}
 	return sum, nil
 }
 
@@ -449,7 +485,11 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus, 
 // top of Table, moved verbatim, and the existing table_test.go suite (which
 // asserts on Table's output, never on this function directly) passes
 // unmodified after the move — the proof that nothing observable shifted.
-func Summarize(res matcher.Result, cat cyclonedx.Stats) Summary {
+//
+// unread is the directory scan's Manifests.Unread (nil for every other target
+// kind). Only its Failed entries count, and unreadRecords is where that line
+// is drawn.
+func Summarize(res matcher.Result, cat cyclonedx.Stats, unread []dirscan.Unread) Summary {
 	// A package counts as evaluated only if it was cataloged AND the matcher
 	// could judge it. A whole-package matcher skip (empty AdvisoryID) was
 	// cataloged but never checked, so counting it as scanned would inflate the
@@ -474,6 +514,16 @@ func Summarize(res matcher.Result, cat cyclonedx.Stats) Summary {
 	// action the caller can take. SkippedUnsupportedEcosystem is deliberately
 	// NOT here: that one is assay's coverage, not their file.
 	targetIncomplete := cat.SkippedNoVersion + cat.SkippedNoPURL
+	// D109: a manifest the scan found and could not read is the target's
+	// incompleteness too. D36's test is whether the caller can act, and here
+	// they can - regenerate the truncated lockfile, or grant the permission on
+	// the directory the walk could not enter. Counted here, the one place
+	// every renderer and --explain's verdict derive the summary from, so
+	// --fail-on-incomplete=target reaches exit 2 on it exactly as the broad
+	// flag's own AnyFailed gate in scancmd already did; counting it anywhere
+	// later would leave the JSON's summary disagreeing with the exit code.
+	unreadManifests := len(unreadRecords(unread))
+	targetIncomplete += unreadManifests
 	var unevaluated, incompleteChecks int
 	for _, s := range res.Skipped {
 		if s.Cause == matcher.SkipTarget {
@@ -522,6 +572,7 @@ func Summarize(res matcher.Result, cat cyclonedx.Stats) Summary {
 		NotEvaluated:     notEvaluated,
 		IncompleteChecks: incompleteChecks,
 		TargetIncomplete: targetIncomplete,
+		UnreadManifests:  unreadManifests,
 		Findings:         len(res.Findings),
 		Suppressed:       len(res.Suppressed),
 		UnknownSeverity:  unknownSeverity,
