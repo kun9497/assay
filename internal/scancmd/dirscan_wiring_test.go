@@ -3,12 +3,15 @@ package scancmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kun9497/assay/internal/severity"
 )
 
 func writeManifest(t *testing.T, dir, name, body string) {
@@ -413,6 +416,292 @@ func TestRun_PnpmLocalVersusGitSkipsReachTheTargetGateDifferently(t *testing.T) 
 		if code := Run(context.Background(), db, "dir:"+dir,
 			Options{FailOnIncomplete: true}, &out, &errOut); code != 2 {
 			t.Errorf("Run(--fail-on-incomplete) = %d, want 2; stderr: %s", code, errOut.String())
+		}
+	})
+}
+
+// D109: a manifest the scan could not read is the TARGET's incompleteness, and
+// every renderer names it - not only stderr, which `--output json | jq` and a
+// CI job reading SARIF never see.
+//
+// Two fixtures, because Failed: true arrives from two different places: a
+// lockfile whose parser refused it (parseManifest) and a subtree the walk
+// could not enter (Walk, #136). Both sit beside a readable, matched go.mod so
+// the scan is otherwise complete and trustworthy - without it the scan exits 2
+// for having evaluated nothing, and every assertion below would pass on a
+// scanner that never noticed the unread entry at all.
+//
+// Fixture names are chosen not to collide as substrings with anything else the
+// scan prints: "frontend-app" and "sealed-subtree" appear in no package name,
+// advisory ID or reason, and each assertion matches the rendered pair
+// ("not read: <path> (") rather than the path alone, because t.TempDir()'s
+// path - derived from this test's name - is echoed on stderr.
+type unreadFixture struct {
+	name string
+	// stage builds the tree and returns its root and the relative,
+	// slash-separated path the scan must report as unread.
+	stage func(t *testing.T) (root, unreadPath string)
+}
+
+const d109GoodMod = "module example.com/poly\n\ngo 1.22\n\nrequire example.com/critical v1.0.0\n"
+
+func d109Fixtures() []unreadFixture {
+	return []unreadFixture{
+		{
+			name: "a lockfile that will not parse",
+			stage: func(t *testing.T) (string, string) {
+				dir := t.TempDir()
+				writeManifest(t, dir, "go.mod", d109GoodMod)
+				sub := filepath.Join(dir, "frontend-app")
+				if err := os.Mkdir(sub, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				writeManifest(t, sub, "package-lock.json", `{"lockfileVersion":3, "packages": `)
+				return dir, "frontend-app/package-lock.json"
+			},
+		},
+		{
+			name: "a subtree the walk could not enter",
+			stage: func(t *testing.T) (string, string) {
+				dir := t.TempDir()
+				writeManifest(t, dir, "go.mod", d109GoodMod)
+				sub := filepath.Join(dir, "sealed-subtree")
+				if err := os.Mkdir(sub, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				writeManifest(t, sub, "package-lock.json",
+					`{"lockfileVersion":3,"packages":{"":{"version":"1.0.0"},`+
+						`"node_modules/example.com/critical":{"version":"1.0.0"}}}`)
+				makeUnreadable(t, sub)
+				if _, err := os.ReadDir(sub); err == nil {
+					t.Skip("os.ReadDir still succeeds on the locked directory; this environment cannot stage the hazard")
+				}
+				return dir, "sealed-subtree"
+			},
+		},
+	}
+}
+
+func d109DB(t *testing.T) string {
+	return buildMatrixDB(t, []matrixAdv{
+		{id: "GHSA-critical", pkg: "critical", fixed: "2.0.0", vectors: []string{vecCritical}},
+	})
+}
+
+// (a) The gate. --fail-on-incomplete=target reaches exit 2 on an unread
+// manifest, which it did not before D109: the broad flag had its own AnyFailed
+// gate, the narrow one read only Summary.TargetIncomplete, and nothing put an
+// unread manifest there.
+func TestRun_D109_AnUnreadManifestTripsTheTargetGate(t *testing.T) {
+	db := d109DB(t)
+	high := severity.High
+	for _, fx := range d109Fixtures() {
+		t.Run(fx.name, func(t *testing.T) {
+			dir, path := fx.stage(t)
+			disclosed := "not read: " + path + " ("
+
+			var out, errOut bytes.Buffer
+			if code := Run(context.Background(), db, "dir:"+dir,
+				Options{FailOnIncompleteTarget: true}, &out, &errOut); code != 2 {
+				t.Errorf("Run(--fail-on-incomplete=target) = %d, want 2 - the caller can "+
+					"regenerate the file or grant the permission (D36's test);\nstdout: %s\nstderr: %s",
+					code, out.String(), errOut.String())
+			}
+			if !strings.Contains(errOut.String(), disclosed) {
+				t.Errorf("stderr does not name %q:\n%s", path, errOut.String())
+			}
+
+			// D11: 2 outranks 1. The critical Go finding would trip --fail-on
+			// high on its own; the incompleteness must win.
+			out.Reset()
+			errOut.Reset()
+			if code := Run(context.Background(), db, "dir:"+dir,
+				Options{FailOn: &high, FailOnIncompleteTarget: true}, &out, &errOut); code != 2 {
+				t.Errorf("Run(--fail-on high --fail-on-incomplete=target) = %d, want 2 (D11: 2 > 1)", code)
+			}
+			// ...and without the narrow flag the same findings are a 1, so
+			// the 2 above is the gate's and not something else's.
+			out.Reset()
+			errOut.Reset()
+			if code := Run(context.Background(), db, "dir:"+dir,
+				Options{FailOn: &high}, &out, &errOut); code != 1 {
+				t.Errorf("Run(--fail-on high) = %d, want 1", code)
+			}
+
+			// --explain runs neither Table nor JSON; its verdict comes from
+			// Summarize on its own, which therefore must see the unread list
+			// too.
+			out.Reset()
+			errOut.Reset()
+			if code := Run(context.Background(), db, "dir:"+dir,
+				Options{Explain: "GHSA-critical", FailOnIncompleteTarget: true}, &out, &errOut); code != 2 {
+				t.Errorf("Run(--explain, --fail-on-incomplete=target) = %d, want 2;\nstderr: %s",
+					code, errOut.String())
+			}
+
+			// Opt-in, and disclosed regardless.
+			out.Reset()
+			errOut.Reset()
+			if code := Run(context.Background(), db, "dir:"+dir, Options{}, &out, &errOut); code != 0 {
+				t.Errorf("Run() = %d, want 0 - with no coverage flag an unread manifest "+
+					"does not change the verdict;\nstderr: %s", code, errOut.String())
+			}
+			if !strings.Contains(errOut.String(), disclosed) {
+				t.Errorf("stderr does not name %q without the gate:\n%s", path, errOut.String())
+			}
+		})
+	}
+}
+
+// (b) JSON carries the list and the count - the only channel `| jq` reads.
+func TestRun_D109_JSONCarriesUnreadAndItsCount(t *testing.T) {
+	db := d109DB(t)
+	for _, fx := range d109Fixtures() {
+		t.Run(fx.name, func(t *testing.T) {
+			dir, path := fx.stage(t)
+			var out, errOut bytes.Buffer
+			if code := Run(context.Background(), db, "dir:"+dir,
+				Options{Output: "json"}, &out, &errOut); code != 0 {
+				t.Fatalf("Run = %d, want 0;\nstderr: %s", code, errOut.String())
+			}
+			var doc struct {
+				SchemaVersion int `json:"schemaVersion"`
+				Unread        []struct {
+					Path   string `json:"path"`
+					Reason string `json:"reason"`
+				} `json:"unread"`
+				Summary struct {
+					UnreadManifests  *int `json:"unreadManifests"`
+					TargetIncomplete int  `json:"targetIncomplete"`
+				} `json:"summary"`
+			}
+			if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+				t.Fatalf("stdout is not one JSON document: %v\n%s", err, out.String())
+			}
+			if doc.SchemaVersion != 11 {
+				t.Errorf("schemaVersion = %d, want 11", doc.SchemaVersion)
+			}
+			if len(doc.Unread) != 1 || doc.Unread[0].Path != path {
+				t.Fatalf("unread = %+v, want exactly one entry for %q", doc.Unread, path)
+			}
+			if doc.Unread[0].Reason == "" {
+				t.Errorf("unread[0].reason is empty - the action is per file, and needs the why")
+			}
+			if doc.Summary.UnreadManifests == nil {
+				t.Fatalf("summary.unreadManifests is absent:\n%s", out.String())
+			}
+			if *doc.Summary.UnreadManifests != len(doc.Unread) {
+				t.Errorf("summary.unreadManifests = %d, want %d", *doc.Summary.UnreadManifests, len(doc.Unread))
+			}
+			if doc.Summary.TargetIncomplete < len(doc.Unread) {
+				t.Errorf("summary.targetIncomplete = %d, want >= %d - an unread manifest is "+
+					"the target's incompleteness (D109)", doc.Summary.TargetIncomplete, len(doc.Unread))
+			}
+		})
+	}
+}
+
+// (c) SARIF declares the rule and emits one result per unread file. The rule
+// declaration is asserted on its own (D55: a result naming an undeclared rule
+// is invalid SARIF, and asserting only the results let exactly that ship).
+func TestRun_D109_SARIFDeclaresNotReadAndEmitsAResultPerFile(t *testing.T) {
+	db := d109DB(t)
+	for _, fx := range d109Fixtures() {
+		t.Run(fx.name, func(t *testing.T) {
+			dir, path := fx.stage(t)
+			var out, errOut bytes.Buffer
+			if code := Run(context.Background(), db, "dir:"+dir,
+				Options{Output: "sarif"}, &out, &errOut); code != 0 {
+				t.Fatalf("Run = %d, want 0;\nstderr: %s", code, errOut.String())
+			}
+			var doc struct {
+				Runs []struct {
+					Tool struct {
+						Driver struct {
+							Rules []struct {
+								ID string `json:"id"`
+							} `json:"rules"`
+						} `json:"driver"`
+					} `json:"tool"`
+					Results []struct {
+						RuleID    string `json:"ruleId"`
+						Level     string `json:"level"`
+						Locations []struct {
+							PhysicalLocation struct {
+								ArtifactLocation struct {
+									URI string `json:"uri"`
+								} `json:"artifactLocation"`
+							} `json:"physicalLocation"`
+						} `json:"locations"`
+						PartialFingerprints map[string]string `json:"partialFingerprints"`
+					} `json:"results"`
+				} `json:"runs"`
+			}
+			if err := json.Unmarshal(out.Bytes(), &doc); err != nil || len(doc.Runs) != 1 {
+				t.Fatalf("stdout is not a one-run SARIF document (%v):\n%s", err, out.String())
+			}
+			run := doc.Runs[0]
+			declared := 0
+			for _, r := range run.Tool.Driver.Rules {
+				if r.ID == "assay/not-read" {
+					declared++
+				}
+			}
+			if declared != 1 {
+				t.Errorf("driver.rules declares assay/not-read %d time(s), want 1", declared)
+			}
+			n := 0
+			for _, r := range run.Results {
+				if r.RuleID != "assay/not-read" {
+					continue
+				}
+				n++
+				if len(r.Locations) != 1 || r.Locations[0].PhysicalLocation.ArtifactLocation.URI != path {
+					t.Errorf("not-read result locations = %+v, want one at %q", r.Locations, path)
+				}
+				if r.Level != "warning" {
+					t.Errorf("not-read result level = %q, want warning", r.Level)
+				}
+				if len(r.PartialFingerprints) == 0 {
+					t.Errorf("not-read result has no partialFingerprints - GitHub cannot track it")
+				}
+			}
+			if n != 1 {
+				t.Errorf("%d assay/not-read result(s), want 1", n)
+			}
+		})
+	}
+}
+
+// (d) The table lists them beneath the findings and counts them on the
+// summary line; a scan with nothing unread prints neither.
+func TestRun_D109_TableListsUnreadManifests(t *testing.T) {
+	db := d109DB(t)
+	for _, fx := range d109Fixtures() {
+		t.Run(fx.name, func(t *testing.T) {
+			dir, path := fx.stage(t)
+			var out, errOut bytes.Buffer
+			if code := Run(context.Background(), db, "dir:"+dir, Options{}, &out, &errOut); code != 0 {
+				t.Fatalf("Run = %d, want 0;\nstderr: %s", code, errOut.String())
+			}
+			if !strings.Contains(out.String(), "not read: "+path+" (") {
+				t.Errorf("the table does not list %q:\n%s", path, out.String())
+			}
+			if !strings.Contains(out.String(), ", 1 manifest(s) not read\n") {
+				t.Errorf("the summary line does not count the unread manifest:\n%s", out.String())
+			}
+		})
+	}
+
+	t.Run("nothing unread, nothing listed", func(t *testing.T) {
+		dir := t.TempDir()
+		writeManifest(t, dir, "go.mod", d109GoodMod)
+		var out, errOut bytes.Buffer
+		if code := Run(context.Background(), db, "dir:"+dir, Options{}, &out, &errOut); code != 0 {
+			t.Fatalf("Run = %d, want 0;\nstderr: %s", code, errOut.String())
+		}
+		if strings.Contains(out.String(), "not read") {
+			t.Errorf("a scan that read every manifest printed a not-read block or count:\n%s", out.String())
 		}
 	})
 }

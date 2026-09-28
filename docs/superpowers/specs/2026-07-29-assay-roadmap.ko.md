@@ -4042,6 +4042,43 @@ LTSS-channel 빌드로, 무료 Leap 사용자가 직접 받을 수 없는 것일
 
 ---
 
+### D109 — 스캔이 읽지 못한 매니페스트는 타깃의 불완전성이고, 모든 renderer가 이를 이름으로 밝힌다
+
+**결정.** `Failed: true`인 `Manifests.Unread` entry — parse에 실패한 lockfile, 그리고 #136
+이후로는 `ReadDir`이 들어갈 수 없었던 subtree — 는 `Summary.TargetIncomplete`로 집계되어,
+`--fail-on-incomplete=target`이 기존의 광범위한 `--fail-on-incomplete`가 이미 그래왔던 것과
+똑같이 이를 두고 exit 2를 낸다. 그리고 이는 stderr뿐 아니라 모든 renderer에도 닿는다: JSON은
+최상위 `unread[]`(`path`, `reason`)와 `summary.unreadManifests`를 얻고, SARIF는
+`driver.rules`에 선언되는(D55의 교훈) `assay/not-read` rule을 얻어 파일마다 result 하나씩을
+내며, 테이블은 finding 아래에 `not read:` 목록을 찍는다. 둘 다 항상 존재하고 `omitempty`가
+아니므로 `schemaVersion`은 10 → 11.
+
+**왜 target인가.** D36의 시험대는 caller가 조치할 수 있느냐다. `Failed: true`가 가리키는 것은
+모두 스캔된 artifact 자신의 상태다 — 잘리거나 손으로 고친 lockfile, 스캔하는 사용자가 열 수
+없는 디렉터리 — 이고, caller는 파일을 재생성하거나 권한을 부여해서 고친다. D38의 "pin하거나
+lockfile을 달라"와 같은 모양이다. parser의 한계는 이 경우가 아니다: "우리가 보지 않았다"는
+`Failed: false`(requirements.txt류의 한계)이고 두 게이트 모두의 밖에 머문다. 남는 잔여는
+지원되는 포맷에서 parser 버그가 타깃의 잘못으로 보고되는 것 — reason 텍스트의 오귀속이지,
+놓친 finding이 아니며, exit code는 여전히 2다. OS 수준 오류만 target으로 세는 대안(논의에서의
+A2)은 손상된 lockfile이 `=target`을 exit 0으로 통과하게 두는데, 이는 #136이 넓은 게이트를
+위해 닫았던 false negative를 좁은 게이트에서 다시 여는 셈이다.
+
+**왜 모든 renderer인가.** Stream discipline: `--output json | jq`와 SARIF를 읽는 CI job은
+stderr를 전혀 보지 않으므로, 매니페스트 절반을 읽지 못한 스캔이 consumer가 읽는 유일한
+채널에서는 깨끗한 스캔과 똑같아 보였다 — CLI contract가 금지하는 "아무것도 찾지 못함"과
+"고장남"의 혼동이다(D20, D21). 개수만 주는 방식(B1)은 consumer에게 몇 개인지는 말해주지만
+어느 것인지는 말해주지 않고, 조치는 파일 단위다. 이 채널은 `skipped[]`와 `suppressed[]`가
+이미 갖고 있는 모양을 따른다: 따로 세고, `findings`에 접어 넣지 않으며, 0일 때도 채워지고,
+누군가 우연히 테스트한 것 하나가 아니라 세 renderer 모두가 렌더링한다.
+
+**빠지는 것.** 의도적인 가지치기 — `node_modules`, `vendor`, `.git`, depth cap — 와 walk가
+따라가지 않는 심볼릭 링크 디렉터리는 `Unread`가 아니며 이 채널에 들어오지 않는다. 이는
+#136의 구분, "우리가 보지 않기로 했다"와 "우리가 봤지만 볼 수 없었다"이고, 전자를 공개하는
+일은 여전히 `docs/deferred-decisions.md`에 열린 항목으로 남아 있다; 만약 그것이 채택된다면,
+이 채널은 그것을 두 번째 목록이 아니라 자신만의 kind로 실어 나를 수 있다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

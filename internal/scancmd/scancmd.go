@@ -638,13 +638,20 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 	// because explain/json pick a RENDERER, not a different notion of
 	// what the scan found (D11's precedence is a property of the scan, not
 	// of how it is displayed).
+	//
+	// manifests.Unread goes to every one of them, --explain's Summarize
+	// included (D109): Summarize counts its Failed entries into
+	// TargetIncomplete, so --fail-on-incomplete=target sees them through the
+	// same sum verdict() reads, whichever renderer ran. The stderr
+	// "not read:" lines above stay - stderr is still the human channel - but
+	// they are no longer the only one.
 	var sum report.Summary
 	switch {
 	case opts.Explain != "":
 		// Summarize, not Table: Table would also print to stdout, and
 		// --explain must be the ONLY thing written there, the same
 		// discipline --output json owes `| jq`.
-		sum = report.Summarize(res, cat)
+		sum = report.Summarize(res, cat, manifests.Unread)
 		n, werr := report.Explain(stdout, res, opts.Explain)
 		if werr != nil {
 			fmt.Fprintf(stderr, "error: write report: %v\n", werr)
@@ -674,7 +681,7 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 				sum.NotEvaluated, sum.IncompleteChecks)
 		}
 	case opts.Output == "json":
-		sum, err = report.JSON(stdout, res, cat, eolStatus)
+		sum, err = report.JSON(stdout, res, cat, manifests.Unread, eolStatus)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: write report: %v\n", err)
 			return 2
@@ -684,13 +691,13 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		// scanned: a SARIF file is read in a web UI detached from the
 		// command that produced it, where "libc6 is affected" alone does
 		// not say which image.
-		sum, err = report.SARIF(stdout, res, cat, target, opts.Version, eolStatus)
+		sum, err = report.SARIF(stdout, res, cat, manifests.Unread, target, opts.Version, eolStatus)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: write report: %v\n", err)
 			return 2
 		}
 	default:
-		sum, err = report.Table(stdout, res, cat, eolStatus, opts.Colorize)
+		sum, err = report.Table(stdout, res, cat, manifests.Unread, eolStatus, opts.Colorize)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: write report: %v\n", err)
 			return 2
@@ -872,6 +879,10 @@ func verdict(opts Options, sum report.Summary, findings []matcher.Finding, eol r
 	// condition rather than a mode on the first — the two are independent
 	// questions ("did anything go unchecked" and "did MY data go unchecked"),
 	// and a pipeline may reasonably ask both.
+	//
+	// D109: a manifest the scan could not read arrives here too, through
+	// Summarize, rather than through a second AnyFailed branch beside the
+	// broad flag's - one count, read by the JSON, the table and this gate.
 	if opts.FailOnIncompleteTarget && sum.TargetIncomplete > 0 {
 		return 2
 	}

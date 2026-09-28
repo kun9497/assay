@@ -228,7 +228,9 @@ assay scan alpine:3.19 --explain CVE-2025-46394
 `--fail-on-incomplete`는 1이 아니라 **2**를 반환하고, `--fail-on`과 함께 걸리면 2가 이깁니다.
 신뢰할 수 없는 결과가 결과의 내용보다 앞섭니다. 이 플래그는 패키지를 아예 검사하지 못했을 때
 *또는* 검사를 끝내지 못했을 때 발동합니다 — 리포트가 요약 줄과 "Not evaluated"에 항상 표시하는
-바로 그 두 카운트이므로, 출력이 보여주지 않은 것 때문에 게이트가 걸리는 일은 없습니다.
+바로 그 두 카운트이므로, 출력이 보여주지 않은 것 때문에 게이트가 걸리는 일은 없습니다. D109부터는
+스캔이 읽지 못한 매니페스트도 함께 집계되지만, "Not evaluated"에 접혀 들어가지 않고 그 자신의
+`unread[]` / `not read:` 목록으로 공개됩니다.
 
 플래그 이름은 의미가 같은 한 grype를 따릅니다. grype에서 쓰던 것이 여기서도 같은 뜻이라는
 의미입니다. 동작이 다른 부분은 발견하도록 방치하지 않고 문서에 명시합니다:
@@ -641,6 +643,13 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] SLES LTSS를 mainline-wins 동점 처리로 접음 (D91) — post-EOL fix가 같은 키
       아래서 드러남(bci-base finding 121→286건, curl이 진짜 FIXED IN을 보여줌),
       가려졌던 쌍둥이 385,621건을 버려서 셈
+- [x] 읽지 못한 매니페스트가 target 게이트와 모든 renderer에 닿음 (D109) — parse에
+      실패한 lockfile이나 walk가 들어갈 수 없었던 subtree(#136)가 이제
+      `summary.targetIncomplete`로 집계되어, `--fail-on-incomplete=target`이 이를 두고
+      exit 2를 낸다; JSON은 `unread[]`와 `summary.unreadManifests`를 실어 나르고, SARIF는
+      파일마다 `assay/not-read` result를 하나씩 내며, 테이블은 `not read:` 목록을 찍는다 —
+      `skipped[]`와 같은, 따로 세는 모양이다. 의도적인 가지치기는 빠진다
+      (deferred-decisions). `schemaVersion` 11.
 - [x] openSUSE Leap를 SLE codestream으로부터 미러링 (D108) — SUSE가 CSAF에서 Leap
       릴리스를 노후화시키면(재생성된 문서가 Leap product entry를 빼버려서, fix가
       D91이 `SLES:15.SP6`로 접는 SLE-SP6-LTSS 이름 아래에만 남음) Leap 이미지가

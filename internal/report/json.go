@@ -7,6 +7,7 @@ import (
 
 	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
+	"github.com/kun9497/assay/internal/cataloger/dirscan"
 	"github.com/kun9497/assay/internal/matcher"
 	"github.com/kun9497/assay/internal/pkgmeta"
 )
@@ -28,7 +29,11 @@ import (
 // (D102's ignore rules), and to 10 when SuppressedRecord gained `source`
 // (D104: an OpenVEX document is a second waiver mechanism alongside
 // .assay.yaml, and a consumer needs to tell which one suppressed a given
-// finding without guessing from the reason text's own wording).
+// finding without guessing from the reason text's own wording), and to 11
+// when Document gained the unread[] array and Summary gained unreadManifests
+// and unread manifests began counting toward targetIncomplete (D109: a
+// consumer reading only stdout could not tell a scan that failed to read half
+// its manifests from a clean one).
 // Two earlier additions should have bumped it and did not — `ratings` (D25)
 // and RatingRecord.URL (D27) both changed the shape while this constant
 // stayed at 1 — so version 1 in the wild denotes three different documents.
@@ -36,7 +41,7 @@ import (
 // what it does mean is that a consumer reading 2 or later can rely on every
 // field below being present, which is the guarantee the constant exists to
 // give.
-const schemaVersion = 10
+const schemaVersion = 11
 
 // Document is the stable shape of `assay scan --output json` (design goal
 // #3). It carries what Table shows plus what Table cannot: the full
@@ -60,7 +65,14 @@ type Document struct {
 	// discipline Skipped follows: a consumer must be able to tell "no
 	// waivers" from "this document predates the field".
 	Suppressed []SuppressedRecord `json:"suppressed"`
-	Summary    Summary            `json:"summary"`
+	// Unread is every manifest a directory scan found and could not read
+	// (D109), each with its reason - counted apart and never folded into
+	// Findings or Skipped, on Suppressed's own shape: present and empty
+	// rather than omitted, so "every manifest was read" and "this document
+	// predates the field" do not look alike. Only Failed entries appear; a
+	// deliberate parser limit is not the target's incompleteness.
+	Unread  []UnreadRecord `json:"unread"`
+	Summary Summary        `json:"summary"`
 	// EOL is the scanned target's distro end-of-life status (D87), nil when
 	// there is no answer — see EOLRecord's own doc comment for the three
 	// reasons and why nil, not a zero-value object, is what "no answer"
@@ -340,14 +352,15 @@ type SkippedRecord struct {
 // this file. The counts come from Summarize, the exact function Table calls
 // for the same numbers, so JSON and the table cannot drift apart on what
 // "evaluated" means.
-func JSON(w io.Writer, res matcher.Result, cat cyclonedx.Stats, eol EOLStatus) (Summary, error) {
-	sum := Summarize(res, cat)
+func JSON(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirscan.Unread, eol EOLStatus) (Summary, error) {
+	sum := Summarize(res, cat, unread)
 
 	doc := Document{
 		SchemaVersion: schemaVersion,
 		Findings:      make([]FindingRecord, 0, len(res.Findings)),
 		Skipped:       make([]SkippedRecord, 0, len(res.Skipped)),
 		Suppressed:    make([]SuppressedRecord, 0, len(res.Suppressed)),
+		Unread:        unreadRecords(unread),
 		Summary:       sum,
 		EOL:           eol.Record(),
 	}

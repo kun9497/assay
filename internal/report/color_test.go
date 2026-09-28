@@ -40,7 +40,7 @@ func TestTable_ColorizesSeverityByBand(t *testing.T) {
 				Score:    tc.score,
 			}}}
 			var buf bytes.Buffer
-			if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}, true); err != nil {
+			if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, nil, EOLStatus{}, true); err != nil {
 				t.Fatal(err)
 			}
 			out := buf.String()
@@ -66,7 +66,7 @@ func TestTable_ColorizeFalseNeverEmitsAnEscapeByte(t *testing.T) {
 		Score:    9.8,
 	}}}
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}, false); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, nil, EOLStatus{}, false); err != nil {
 		t.Fatal(err)
 	}
 	if strings.ContainsRune(buf.String(), '\x1b') {
@@ -86,7 +86,7 @@ func TestTable_FindingsCountIsBoldOnlyWhenNonZero(t *testing.T) {
 		Score:    2.0,
 	}}}
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}, true); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, nil, EOLStatus{}, true); err != nil {
 		t.Fatal(err)
 	}
 	if want := ansiBold + "1 finding(s)" + ansiReset; !strings.Contains(buf.String(), want) {
@@ -94,7 +94,7 @@ func TestTable_FindingsCountIsBoldOnlyWhenNonZero(t *testing.T) {
 	}
 
 	buf.Reset()
-	if _, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}, true); err != nil {
+	if _, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{Components: 1, Cataloged: 1}, nil, EOLStatus{}, true); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(buf.String(), ansiBold) {
@@ -117,7 +117,7 @@ func TestTable_DimsSuppressedAndNotEvaluatedHeaders(t *testing.T) {
 		Source: "ignore-file",
 	}}}
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}, true); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, nil, EOLStatus{}, true); err != nil {
 		t.Fatal(err)
 	}
 	if want := ansiDim + "Suppressed (1), not counted toward the verdict:" + ansiReset; !strings.Contains(buf.String(), want) {
@@ -127,7 +127,7 @@ func TestTable_DimsSuppressedAndNotEvaluatedHeaders(t *testing.T) {
 	buf.Reset()
 	if _, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{
 		Components: 3, Cataloged: 1, SkippedUnsupportedEcosystem: 2,
-	}, EOLStatus{}, true); err != nil {
+	}, nil, EOLStatus{}, true); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -156,7 +156,7 @@ func TestTable_SuppressedDetailLinesStayPlain(t *testing.T) {
 		Source: "ignore-file",
 	}}}
 	var buf bytes.Buffer
-	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, EOLStatus{}, true); err != nil {
+	if _, err := Table(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, nil, EOLStatus{}, true); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(buf.String(), "a reason worth reading") {

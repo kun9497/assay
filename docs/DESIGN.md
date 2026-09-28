@@ -239,7 +239,9 @@ vector in the live database.
 result that cannot be trusted outranks the content of the result. It fires when packages
 were never checked *or* when a check could not be completed — the same pair of counts the
 report always discloses, in the summary line and under "Not evaluated", so the gate can
-never fire over something the output did not show you.
+never fire over something the output did not show you. Since D109 a manifest the scan could
+not read counts too, disclosed in its own `unread[]` / `not read:` list rather than folded
+into "Not evaluated".
 
 Flag names follow grype where the semantics match, so anything you already run against
 grype should mean the same thing here. Where behaviour diverges it is documented rather than
@@ -670,6 +672,12 @@ exited 0 while 24 findings went unmentioned.
 - [x] SLES LTSS folded with a mainline-wins tie-break (D91) — post-EOL fixes surface
       under the same key (bci-base 121→286 findings, curl shows its real FIXED IN),
       385,621 shadowed twins dropped and counted
+- [x] Unread manifests reach the target gate and every renderer (D109) — a lockfile that
+      would not parse or a subtree the walk could not enter (#136) now counts toward
+      `summary.targetIncomplete`, so `--fail-on-incomplete=target` exits 2 on it; JSON
+      carries `unread[]` and `summary.unreadManifests`, SARIF an `assay/not-read` result per
+      file, the table a `not read:` list — the same counted-apart shape as `skipped[]`.
+      Deliberate prunes stay out (deferred-decisions). `schemaVersion` 11.
 - [x] openSUSE Leap mirrored from its SLE codestream (D108) — as SUSE ages a Leap release
       out of its CSAF (a regenerated document drops the Leap product entries, leaving the
       fix only under the SLE-SP6-LTSS name D91 folds to `SLES:15.SP6`), a Leap image
