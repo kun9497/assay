@@ -4168,6 +4168,44 @@ db-build change; a mirrored advisory reaches the store like any other.
 
 ---
 
+### D109 — A manifest the scan could not read is the target's incompleteness, and every renderer names it
+
+**Decision.** A `Manifests.Unread` entry with `Failed: true` — a lockfile that would not
+parse, and since #136 a subtree `ReadDir` could not enter — counts toward
+`Summary.TargetIncomplete`, so `--fail-on-incomplete=target` exits 2 on it exactly as the
+broad `--fail-on-incomplete` already did. And it reaches every renderer, not only stderr:
+JSON gains a top-level `unread[]` (`path`, `reason`) and `summary.unreadManifests`; SARIF
+gains an `assay/not-read` rule, declared in `driver.rules` (the D55 lesson) with one result
+per file; the table prints a `not read:` list beneath the findings. `schemaVersion` 10 → 11,
+because both additions are always present, not `omitempty`.
+
+**Why target.** D36's test is whether the caller can act. Everything `Failed: true` denotes is
+the scanned artifact's own state — a truncated or hand-edited lockfile, a directory the
+scanning user cannot open — and the caller fixes it by regenerating the file or granting the
+permission, the same shape as D38's "pin it or give us a lockfile". A parser limitation is
+not this case: "we did not look" is `Failed: false` (the requirements.txt-class limits) and
+stays out of both gates. The residual is a parser bug on a supported format being reported
+as the target's fault — a mis-attribution in the reason text, not a missed finding, and the
+exit code is still 2. The alternative of counting only OS-level errors as target (A2 in the
+discussion) would let a damaged lockfile pass `=target` with exit 0, which is the false
+negative #136 closed for the broad gate reopening for the narrow one.
+
+**Why every renderer.** Stream discipline: `--output json | jq` and a CI job reading SARIF
+never see stderr, so a scan that could not read half its manifests looked identical to a
+clean one in the only channel the consumer reads — the "found nothing" versus "was broken"
+confusion the CLI contract forbids (D20, D21). A count alone (B1) tells a consumer how many
+files, not which, and the action is per file. The channel takes the shape `skipped[]` and
+`suppressed[]` already have: counted apart, never folded into `findings`, populated when
+zero, and rendered by all three renderers rather than by the one someone happened to test.
+
+**What stays out.** Deliberate prunes — `node_modules`, `vendor`, `.git`, the depth cap — and
+symlinked directories the walk does not follow are not `Unread` and do not enter this channel.
+That is #136's distinction, "we decided not to look" against "we looked and could not see",
+and disclosing the former remains the open entry in `docs/deferred-decisions.md`; if it is
+ever taken, this channel can carry it under its own kind rather than as a second list.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

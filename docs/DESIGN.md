@@ -670,6 +670,12 @@ exited 0 while 24 findings went unmentioned.
 - [x] SLES LTSS folded with a mainline-wins tie-break (D91) — post-EOL fixes surface
       under the same key (bci-base 121→286 findings, curl shows its real FIXED IN),
       385,621 shadowed twins dropped and counted
+- [x] Unread manifests reach the target gate and every renderer (D109) — a lockfile that
+      would not parse or a subtree the walk could not enter (#136) now counts toward
+      `summary.targetIncomplete`, so `--fail-on-incomplete=target` exits 2 on it; JSON
+      carries `unread[]` and `summary.unreadManifests`, SARIF an `assay/not-read` result per
+      file, the table a `not read:` list — the same counted-apart shape as `skipped[]`.
+      Deliberate prunes stay out (deferred-decisions). `schemaVersion` 11.
 - [x] openSUSE Leap mirrored from its SLE codestream (D108) — as SUSE ages a Leap release
       out of its CSAF (a regenerated document drops the Leap product entries, leaving the
       fix only under the SLE-SP6-LTSS name D91 folds to `SLES:15.SP6`), a Leap image
