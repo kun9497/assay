@@ -258,7 +258,13 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 				}
 				t0 := time.Now()
 				err := w.PutMany(batch)
-				stored += time.Since(t0)
+				// Floored at a nanosecond because a batch that wrote must never
+				// read as one that did not. Windows' clock ticks at about half a
+				// millisecond, so a small batch can finish inside one tick and
+				// measure zero — and Stored == 0 is how the timing table says a
+				// stage never touched the store. The floor renders as "0s store",
+				// which is honest: the split is shown, the number is tiny.
+				stored += max(time.Since(t0), time.Nanosecond)
 				batch = batch[:0]
 				return err
 			}
