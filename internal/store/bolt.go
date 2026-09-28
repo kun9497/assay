@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -789,6 +790,107 @@ func (b *Bolt) Meta() (Meta, error) {
 		return nil
 	})
 	return m, err
+}
+
+// EachAdvisoryUnder walks every advisory indexed under ecosystem, once per
+// advisory even when it names several packages there, decoded whole — every
+// Affected entry, not only the ones under ecosystem. Filtering to the key is
+// the caller's decision, because what to keep of a record's OTHER entries is a
+// policy (D16) and not something the store can know.
+//
+// The prefix is ecosystem+keySep, so "Alpine:v3.1" never walks
+// "Alpine:v3.19"'s keys. It exists for whole-key carry-forward (D110
+// candidate): the seed is asked for everything under a key its provider has
+// stopped emitting, without knowing the package names ahead of time.
+func (b *Bolt) EachAdvisoryUnder(ecosystem string, fn func(advisory.Advisory) error) error {
+	prefix := []byte(ecosystem + keySep)
+	return b.db.View(func(tx *bolt.Tx) error {
+		byID := tx.Bucket(bucketByID)
+		c := tx.Bucket(bucketAdvisories).Cursor()
+		seen := map[string]bool{}
+		for k, _ := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, _ = c.Next() {
+			// The key is "<eco>\x00<name>\x00<id>": the ID is everything after
+			// the LAST separator. Package names never contain NUL (keySep's own
+			// comment), so the last one is the one before the ID.
+			i := bytes.LastIndex(k, []byte(keySep))
+			id := string(k[i+1:])
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			blob := byID.Get([]byte(id))
+			if blob == nil {
+				return fmt.Errorf("index %q references missing advisory %q", k, id)
+			}
+			var a advisory.Advisory
+			if err := json.Unmarshal(blob, &a); err != nil {
+				return fmt.Errorf("decode advisory %q: %w", id, err)
+			}
+			if err := fn(a); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// MergeAffected stores a batch like PutMany, except that a record whose ID is
+// already stored is not replaced: the incoming Affected entries not already
+// present on it are appended, and everything else about the stored record
+// (this build's fresh summary, severity, aliases) is kept.
+//
+// That is the only difference, and it is why this exists beside PutMany
+// rather than as a flag on it. A carried-forward entry must land on the SAME
+// record the provider just re-emitted for its live keys — Put would replace
+// that fresh record with the seed's stale copy, reintroducing exactly the
+// withdrawn live-key entries D16 forbids. One transaction, all or nothing,
+// for PutMany's reason.
+func (b *Bolt) MergeAffected(as []advisory.Advisory) error {
+	if len(as) == 0 {
+		return nil
+	}
+	return b.db.Update(func(tx *bolt.Tx) error {
+		byID := tx.Bucket(bucketByID)
+		idx := tx.Bucket(bucketAdvisories)
+		for _, in := range as {
+			merged := in
+			if blob := byID.Get([]byte(in.ID)); blob != nil {
+				// Decoded into a FRESH value, never into merged while it still
+				// aliases in: json.Unmarshal reuses a non-nil slice's backing
+				// array, so decoding over a copy of in overwrote in.Affected
+				// with the stored entries and the carried ones vanished. The
+				// first run of this spike's T1 caught exactly that.
+				merged = advisory.Advisory{}
+				if err := json.Unmarshal(blob, &merged); err != nil {
+					return fmt.Errorf("decode advisory %q: %w", in.ID, err)
+				}
+				for _, aff := range in.Affected {
+					if !slices.ContainsFunc(merged.Affected, func(x advisory.Affected) bool {
+						return reflect.DeepEqual(x, aff)
+					}) {
+						merged.Affected = append(merged.Affected, aff)
+					}
+				}
+			}
+			blob, err := json.Marshal(merged)
+			if err != nil {
+				return fmt.Errorf("marshal %s: %w", in.ID, err)
+			}
+			if err := byID.Put([]byte(in.ID), blob); err != nil {
+				return err
+			}
+			for _, aff := range in.Affected {
+				if aff.Ecosystem == "" || aff.Name == "" {
+					continue
+				}
+				key := advisoryIndexPrefix(aff.Ecosystem, aff.Name) + in.ID
+				if err := idx.Put([]byte(key), nil); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }
 
 // RecordCount reports how many advisories are stored, independent of how many

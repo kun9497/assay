@@ -416,6 +416,20 @@ type Provenance struct {
 	// source's error said, flattened to one line so it cannot break the table
 	// it is rendered into.
 	Error string `json:"error,omitempty"`
+	// Frozen names the ecosystem keys in Ecosystems whose advisories this
+	// provider did NOT emit in the build that wrote this entry, but which a
+	// seeded build carried forward from the seed (D110 candidate, whole-key
+	// carry-forward): the upstream stopped serving the key, and a database
+	// must not lose coverage it once had just because the source went quiet
+	// — EOL images still run. The value is when that key's data was last
+	// current: the seed provider's DataAsOf the first night the key went
+	// missing, carried unchanged on every later night rather than refreshed
+	// (D12 — a frozen key must not read as fresher than its data).
+	//
+	// Additive Meta JSON with no schema bump, the D87 EOL precedent: a
+	// database built before this field decodes it nil, and nil is the true
+	// answer for one — nothing was ever carried before the field existed.
+	Frozen map[string]time.Time `json:"frozen,omitempty"`
 }
 
 // DefaultPath returns <user cache>/assay/db/v<schema>/vulnerability.db,

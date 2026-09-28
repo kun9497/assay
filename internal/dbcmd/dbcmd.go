@@ -352,8 +352,8 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 			copyErr = err
 		}
 		seedMeta, metaErr := src.Meta()
-		src.Close()
 		if copyErr != nil {
+			src.Close()
 			w.Close()
 			os.Remove(tmp)
 			fmt.Fprintf(stderr, "error: read seed ratings: %v\n", copyErr)
@@ -372,9 +372,21 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 			// no error at all -- the exact silent freshness loss D12 exists
 			// to catch elsewhere, reintroduced here by a swallowed error
 			// instead of a missing field.
+			src.Close()
 			w.Close()
 			os.Remove(tmp)
 			fmt.Fprintf(stderr, "error: read seed metadata %s: %v\n", label, metaErr)
+			return 2
+		}
+		// D110 candidate: whole-key carry-forward. Runs here, after every
+		// provider has returned without error (a failing one already aborted
+		// the build above -- R1) and while the seed is still open.
+		carryErr := carryFrozenKeys(src, w, seedMeta, meta.Providers, label, stderr)
+		src.Close()
+		if carryErr != nil {
+			w.Close()
+			os.Remove(tmp)
+			fmt.Fprintf(stderr, "error: carry frozen keys from seed %s: %v\n", label, carryErr)
 			return 2
 		}
 		// The seed's rating provenance is the starting point, so an annotator
@@ -568,6 +580,121 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 	return 0
 }
 
+// carryFrozenKeys is whole-key carry-forward (D110 candidate). For each
+// provider that RAN this build, a key the seed says it covered and this run
+// did not emit has its advisories copied from the seed, and the key stays
+// declared, marked Frozen.
+//
+// Why at all: the database must not lose data it once had. The day an
+// upstream stops serving a release (ALAS2 going quiet, a SUSE CSAF regenerated
+// without a Leap product) the rebuilt database would otherwise hold nothing
+// under that key, every later scan of an image still running that release
+// would go quieter, and the publish guard would refuse every night.
+//
+// What is deliberately NOT carried:
+//
+//   - Anything for a provider absent from this build (R1). Only providers in
+//     running are consulted, and running holds only providers whose Fetch
+//     returned without error -- a failed one aborted the build before this is
+//     reached. A broken or disabled run must stay visible, as a key the guard
+//     refuses, rather than be papered over with yesterday's data.
+//   - Any key some provider DID emit this run. Its fresh data wins outright
+//     (R3: a key that flaps back heals the next night) and its seed records
+//     are never consulted, so a withdrawal under a live key stays withdrawn
+//     (D16).
+//   - Any Affected entry outside the frozen key. A carried record is cut down
+//     to its entries under that key before it is merged, so a record the
+//     provider stopped emitting under a live key does not come back there.
+//
+// The freeze time is the seed's existing Frozen[K] if it had one, otherwise
+// the seed provider's DataAsOf -- when the data was last current, carried
+// unchanged on every later night rather than refreshed (D12).
+//
+// A seed one schema behind (OpenSeedRatings accepts it for its ratings) is
+// refused for advisories: its index has the pre-D67 "<eco>\x00<name>" shape,
+// which the prefix walk misreads -- the package name is taken for an ID and
+// the build dies on "references missing advisory" (observed by removing this
+// check). Nothing is carried from it and the build says so; the keys then
+// vanish and the guard refuses, which is visible. The cost is that a schema
+// bump drops every frozen key unless the bootstrap handles it.
+func carryFrozenKeys(src, w *store.Bolt, seedMeta store.Meta, running map[string]store.Provenance, label string, stderr io.Writer) error {
+	live := map[string]bool{}
+	for _, prov := range running {
+		for _, eco := range prov.Ecosystems {
+			live[eco] = true
+		}
+	}
+	for _, name := range sortedKeys(running) {
+		seedProv, ok := seedMeta.Providers[name]
+		if !ok {
+			continue
+		}
+		prov := running[name]
+		var absent []string
+		for _, eco := range seedProv.Ecosystems {
+			if !live[eco] {
+				absent = append(absent, eco)
+			}
+		}
+		if len(absent) == 0 {
+			continue
+		}
+		if seedMeta.Schema != store.SchemaVersion {
+			fmt.Fprintf(stderr, "warning: %s no longer emits %s, but seed %s is schema v%d and its advisories cannot be carried; not carried\n",
+				name, strings.Join(absent, ", "), label, seedMeta.Schema)
+			continue
+		}
+		ecos := slices.Clone(prov.Ecosystems)
+		frozen := map[string]time.Time{}
+		for _, eco := range absent {
+			var batch []advisory.Advisory
+			err := src.EachAdvisoryUnder(eco, func(a advisory.Advisory) error {
+				var keep []advisory.Affected
+				for _, aff := range a.Affected {
+					if aff.Ecosystem == eco {
+						keep = append(keep, aff)
+					}
+				}
+				a.Affected = keep
+				batch = append(batch, a)
+				return nil
+			})
+			if err != nil {
+				return fmt.Errorf("read %s: %w", eco, err)
+			}
+			if err := w.MergeAffected(batch); err != nil {
+				return fmt.Errorf("write %s: %w", eco, err)
+			}
+			since, ok := seedProv.Frozen[eco]
+			if !ok {
+				since = seedProv.DataAsOf
+			}
+			frozen[eco] = since
+			ecos = append(ecos, eco)
+			fmt.Fprintf(stderr, "%s emitted nothing for %s; carried %d advisories from seed %s, frozen since %s\n",
+				name, eco, len(batch), label, since.Format("2006-01-02"))
+		}
+		slices.Sort(ecos)
+		prov.Ecosystems = ecos
+		prov.Frozen = frozen
+		running[name] = prov
+	}
+	return nil
+}
+
+// frozenSummary renders every frozen key as "K since YYYY-MM-DD (provider)",
+// sorted so the line is diffable across runs.
+func frozenSummary(providers map[string]store.Provenance) string {
+	var parts []string
+	for _, name := range sortedKeys(providers) {
+		for _, eco := range sortedKeys(providers[name].Frozen) {
+			parts = append(parts, fmt.Sprintf("%s since %s (%s)", eco, providers[name].Frozen[eco].Format("2006-01-02"), name))
+		}
+	}
+	slices.Sort(parts)
+	return strings.Join(parts, ", ")
+}
+
 // readSeedMeta opens seedPath just long enough to read its Meta record, for
 // a ratings-only build (D66): this has to happen BEFORE copyFile below
 // duplicates the file and BEFORE store.Create reopens the copy read-write,
@@ -729,6 +856,13 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 	// together, in one call, so there is nothing for a partial run to
 	// under- or over-claim about a bucket a scan reads independently.
 	fmt.Fprintf(stdout, "eol:        %s\n", eolSummary(m.EOL, m.EOLProvenance))
+	// Frozen keys (D110 candidate): coverage this database still declares but
+	// whose upstream went quiet, so its data is as old as the date shown, not
+	// as fresh as the PROVIDER table's DATA AS OF says. Printed only when there
+	// is one -- a line saying "none" on every healthy database would be noise.
+	if s := frozenSummary(m.Providers); s != "" {
+		fmt.Fprintf(stdout, "frozen:     %s\n", s)
+	}
 	fmt.Fprintln(stdout)
 
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
