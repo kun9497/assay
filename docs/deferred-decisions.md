@@ -442,9 +442,45 @@ entry for that package in that document, so a Leap release whose SLE codestream 
 loses mirrored keys with nothing upstream having been retired. A Leap release carrying native
 entries keeps its key on its own account. No other distro has that shielding.
 
-**Revisit when** a `force` input is added to `db-publish.yml`'s `workflow_dispatch` — which
-would turn the transition into a one-click operator action and this entry into a runbook
-paragraph — or on the first real retirement, whichever comes first. The guard is not suspected
+**A `force` input on `db-publish.yml` is a stopgap, not the fix — recorded 2026-09-28 so the
+question is not reopened.** Adding `inputs.force` to the `workflow_dispatch` and passing
+`--force` through to the Publish step would remove steps 2–3 above: the transition would run on
+the nightly's own runner, environment and token instead of an operator's machine, and a
+scheduled run, where the input is always empty, would never carry the flag. That is all it
+removes. It does nothing for the judgement in step 1 — the guard cannot tell a retirement from
+a provider that fetched less than usual or a key that flaps between snapshots, and a one-click
+override makes the wrong call cheaper, where today the hour-long local build is an accidental
+brake. `--force` still checks nothing, so a night on which an unrelated provider also fell
+short becomes the baseline exactly as quietly. A refused nightly is still noticed only when
+someone reads the failed run. And a key that flaps needs a force each time it disappears, each
+one resetting the baseline and hiding whatever else was lost in between.
+
+**And forcing the guard open is the wrong resolution anyway, because the guard is only the
+symptom.** A scan does not know in advance which image it will be pointed at, and an image of
+a release whose upstream has stopped publishing still runs — the reason D108 exists. Today a
+seeded nightly carries forward RATINGS only; advisories are rebuilt from what each provider
+emits that day (`dbcmd.go:42`, so that an advisory upstream has withdrawn does not linger,
+D16). So the day an upstream stops serving a release key, the next build holds no advisories
+for it at all, and every later scan of that release reports fewer findings than the day
+before — quieter, which is the wrong direction. A retirement list that merely lets the key be
+absent would make the guard pass while keeping exactly that loss. The shape that honours the
+principle is whole-key carry-forward: when a provider's run emits nothing at all for a key the
+seed holds, that key's advisories are copied forward from the seed and frozen. D16's concern
+is about keys still alive — an upstream that publishes nothing for a release withdraws nothing
+for it either — so freezing a whole absent key is sound where carrying single records forward
+is not. A frozen key records "frozen as of" in its provenance (D12: freshness is the
+upstream's, and here the upstream stopped) and every renderer says so on the findings it
+yields, the way D108 discloses a mirrored origin and D87 an EOL release. Then the guard needs
+no exception — the key never disappears — and `--force` stays what it is, an emergency
+override. D108 becomes the special case of this where a better substitute source exists;
+freezing is the general one. It is a D-number, not designed yet: no retirement has happened,
+and the first real one (Amazon Linux 2, whose EOL date has passed and whose ALAS2 feed is the
+kind that can simply stop, is the likeliest) should decide the granularity — key, provider or
+release — and how a frozen key is later retired for good.
+
+**Revisit when** the first real retirement happens, and design the carry-forward from it.
+A `force` `workflow_dispatch` input added before then is the emergency switch above, not this
+entry's resolution. The guard is not suspected
 of misfiring in normal operation: on #135's code, run 35597572338 (2026-09-21) published after
 printing `ghcr.io/kun9497/assay-db:v9 carries no advisory-coverage annotation; comparing
 against a baseline unpacked from its layer (1508914 advisories, 3 rating source(s))`, and run
