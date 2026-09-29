@@ -672,6 +672,15 @@ exited 0 while 24 findings went unmentioned.
 - [x] SLES LTSS folded with a mainline-wins tie-break (D91) — post-EOL fixes surface
       under the same key (bci-base 121→286 findings, curl shows its real FIXED IN),
       385,621 shadowed twins dropped and counted
+- [x] A release the upstream stops serving is frozen, not lost (D110) — a seeded build
+      carries forward, from the seed's JSON records, any key a provider that ran no longer
+      emits (whole-key) and, for releases past their D87 EOL date, any key entry the upstream
+      dropped from a record it still publishes (entry-level); live keys are never restored,
+      a provider that did not run freezes nothing, a reappearing key heals. Measured on three
+      ghcr snapshots: `Debian:11` lost 43,802 of 46,365 entries when bullseye's LTS ended
+      (2026-08-31) while the key stayed — recovered by seeding once from the 08-30 digest.
+      Frozen keys carry `Provenance.Frozen`, are disclosed by every renderer and `db status`,
+      and the guard needs no exception.
 - [x] Unread manifests reach the target gate and every renderer (D109) — a lockfile that
       would not parse or a subtree the walk could not enter (#136) now counts toward
       `summary.targetIncomplete`, so `--fail-on-incomplete=target` exits 2 on it; JSON
@@ -810,6 +819,14 @@ becomes the bottleneck" — the measurement above fired. grype and trivy both wo
       scheduled publish fits GitHub Actions' six-hour job cap against the seven-hour full
       NVD pass above; the seed carries its ratings forward but rebuilds every advisory from
       source, so an advisory upstream withdraws still gets removed
+
+Since D110, "rebuilds every advisory from source" has one carve-out: a release key a provider
+declared in the seed but emitted nothing for this run is copied from the seed whole-key, and,
+for a release past its D87 EOL date, an entry the seed held under that key which this run
+re-emitted without it is restored entry-level. A live key's entries are never restored — that
+would undo a legitimate upstream correction, not recover a loss. Every restored finding is
+disclosed as frozen (table, JSON, SARIF, `--explain`), and `db status` lists the frozen keys
+alongside the window `NVD_SINCE_DAYS` covered.
 
 **⑤ KISA enrichment** ✅ — Korean title, description and remediation joined onto matched
 findings by CVE.

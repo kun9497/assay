@@ -353,6 +353,11 @@ func findingMessage(f matcher.Finding, target string) string {
 		// LTSS-channel) build a free openSUSE Leap user may not pull directly.
 		fmt.Fprintf(&b, " (cross-mapped from %s: the fixed version is the SLE codestream build)", f.CrossMappedFrom)
 	}
+	if !f.FrozenSince.IsZero() {
+		// D110: the data behind this result will not be refreshed; a
+		// Security-tab reader sees only this message, so it says so here.
+		fmt.Fprintf(&b, " (%s)", frozenSentence(f.Package.Ecosystem, f.FrozenSince))
+	}
 	switch f.FixState() {
 	case advisory.FixStateFixed:
 		if f.Evidence.Fixed != "" {

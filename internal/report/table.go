@@ -6,10 +6,12 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
@@ -166,6 +168,11 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 		// so the footnote names them and appears at most once. A slice, not a
 		// map, for the same determinism reason (design goal #3).
 		var crossMappedFrom []string
+		// frozenKeys is the same idea for D110, keyed by ecosystem so the
+		// footnote can print each key's own freeze date. A map for the dates,
+		// but the footnote ranges over its keys sorted, so the output order
+		// never depends on map iteration (design goal #3).
+		frozenKeys := map[string]time.Time{}
 		for _, f := range res.Findings {
 			fixed := f.Evidence.Fixed
 			if fixed == "" {
@@ -250,6 +257,14 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 					crossMappedFrom = append(crossMappedFrom, f.CrossMappedFrom)
 				}
 			}
+			// D110: the key this finding matched under was carried forward
+			// from an earlier database because the upstream stopped
+			// publishing it. Same cell as the D108 marker, a different glyph,
+			// because the ecosystem key is exactly what is frozen.
+			if !f.FrozenSince.IsZero() {
+				eco += " " + frozenMarker
+				frozenKeys[f.Package.Ecosystem] = f.FrozenSince
+			}
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				name, f.Package.Version, eco,
 				advisoryID, sev, aliases, fixed)
@@ -290,6 +305,12 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 			sort.Strings(crossMappedFrom)
 			fmt.Fprintf(w, "%s matched via the SLE codestream it is built from (%s); the fixed version is the SLE (LTSS-channel) build — see --explain <id>\n",
 				crossMapMarker, strings.Join(crossMappedFrom, ", "))
+		}
+		// One line per frozen key, because each carries its own date: one
+		// line listing several keys would have to pick a date or drop them,
+		// and the date is the disclosure (D12).
+		for _, key := range slices.Sorted(maps.Keys(frozenKeys)) {
+			fmt.Fprintf(w, "%s %s\n", frozenMarker, frozenSentence(key, frozenKeys[key]))
 		}
 
 	case cat.Components == 0:
@@ -645,6 +666,20 @@ const enrichmentMarker = "+"
 // the openSUSE Leap release is built from (D108). ASCII and single-column like
 // the two markers above, so appending it before Flush cannot misalign the row.
 const crossMapMarker = "~"
+
+// frozenMarker flags a row whose ecosystem key is frozen (D110): its data was
+// carried forward from an earlier database because the upstream stopped
+// publishing for that release. Not "*", which is disagreementMarker, and not
+// "~" or "+": four glyphs, four meanings. "@" reads as "as of", which is what
+// the footnote's date says. ASCII and single-column like the others.
+const frozenMarker = "@"
+
+// frozenSentence is the one wording every renderer uses for D110, so the
+// table, SARIF and --explain cannot drift apart on what "frozen" means.
+func frozenSentence(key string, since time.Time) string {
+	return fmt.Sprintf("advisory data for %s frozen since %s: the upstream stopped publishing for this release",
+		key, since.UTC().Format(time.DateOnly))
+}
 
 // sourcesDisagree reports whether a finding's sources gave different
 // severity bands for the same vulnerability — the disagreement the table's

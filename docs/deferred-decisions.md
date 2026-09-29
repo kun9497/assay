@@ -380,6 +380,16 @@ Leap image keyed to a release absent from the set, silently under-reporting, is 
 
 ### Normal retirement and the publish guard
 
+**Resolved 2026-09-29 as D110.** The census that followed the analysis below (three ghcr daily
+snapshots) found the loss already happening — `Debian:11` dropped from 46,365 to 2,562
+advisories when bullseye's LTS ended, the key staying — and showed that erosion is entry
+removal from records the upstream still publishes, which D16 does not forbid carrying. D110
+freezes a whole key its provider stopped emitting and, past EOL, restores dropped entries from
+the seed; live keys are never restored (Canonical's fix-state narrowing is legitimate), a
+provider that did not run freezes nothing, and the guard keeps its strictness because a key
+never disappears. The `force` input and the retirement list below are superseded, kept as the
+record of why they were not the answer.
+
 **Deferred 2026-09-23, after the #135 guard landed.** `refuseCoverageRegression`
 (`internal/dbcmd/push.go:330`) takes its baseline ONLY from what is already published — the
 target tag's `dev.assay.advisory-coverage` and `dev.assay.rating-counts` manifest

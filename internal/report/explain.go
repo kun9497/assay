@@ -141,6 +141,11 @@ func explainOne(w io.Writer, f matcher.Finding) error {
 			"cross-mapped: from %s (D108 — openSUSE Leap shares this SLE codestream; the fixed version is the SLE, often LTSS-channel, build)",
 			f.CrossMappedFrom))
 	}
+	if !f.FrozenSince.IsZero() {
+		// D110: the one view that answers "why" must also say the answer
+		// rests on data the upstream stopped publishing (D12).
+		lines = append(lines, "frozen:   "+frozenSentence(f.Package.Ecosystem, f.FrozenSince))
+	}
 	if ids := otherIDs(f); len(ids) > 0 {
 		lines = append(lines, fmt.Sprintf("also known as: %s", strings.Join(ids, ", ")))
 	}

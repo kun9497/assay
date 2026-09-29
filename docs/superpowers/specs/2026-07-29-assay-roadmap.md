@@ -4206,6 +4206,75 @@ ever taken, this channel can carry it under its own kind rather than as a second
 
 ---
 
+### D110 — A release the upstream stops serving is frozen, not lost
+
+**Decision.** A seeded build no longer lets a release key's advisories vanish because the
+upstream stopped emitting them. Two carry-forward rules run after the providers, reading the
+seed's `by-id` records (JSON, never the index — so a schema bump that reshapes the index cannot
+drop what was frozen): **whole-key** — a key a provider that ran declared in the seed and
+emitted nothing for this run is copied from the seed in full and marked
+`Provenance.Frozen[key] = <first freeze time>`; and **entry-level, past EOL only** — for a key
+whose release is past the last of its EOL dates (`EOLFrom`/`EOASFrom`/`EOESFrom`) in the D87
+catalog — i.e. after any extended support, because Debian 12 is past `EOLFrom` yet still
+maintained under LTS — (matched by building the key through `Distro.Ecosystem()` from each
+catalog row, never by string surgery), an advisory the
+seed carried under that key which this run re-emitted WITHOUT the key's `Affected` entry gets
+that entry restored from the seed. A live key's entries are never restored: a record narrowing
+on a maintained release is the upstream correcting itself. A provider that did not run, or
+whose fetch failed, freezes nothing — the guard's refusal is the right answer to a broken run.
+A key that reappears takes the fresh data and drops `Frozen`. Two providers declaring one key
+is refused at build time, so "the key is live" always means one provider's word. Merges are
+batched (D57's `putBatchSize`). Every renderer discloses a finding under a frozen key with the
+freeze date, the way D108 discloses a mirrored origin; `db status` lists frozen keys; the
+nightly log prints each key's advisory count against the seed's, so erosion on a live key is
+visible even though it is deliberately not reversed.
+
+**Why.** A scan does not know which image it will be pointed at, and an image of a release
+whose upstream went quiet still runs — the principle behind D108, which handled one upstream
+(SUSE) by substitution. The general case has no substitute; what it has is yesterday's
+artifact. D16's reason for rebuilding advisories every night — a withdrawn record must not
+linger — is about records the upstream withdrew, and neither rule touches those: whole-key
+carry-forward moves a key nobody publishes for any more, and entry-level carry-forward moves
+an entry out of a record the upstream is still publishing today. The census below is what
+made the second rule safe to state.
+
+**Measured (2026-09-28/29, three ghcr daily snapshots 08-30, 09-20, 09-27, all schema 9).**
+Erosion is entry removal, not record removal: over 28 days the distro keys lost 913 records
+outright and 45,603 key entries. Of the entries, 43,802 belong to ONE event — `Debian:11` went
+from 46,365 to 2,562 between 08-30 and 09-20 (`[Debian:11,12,13,14] → [12,13,14]` on every
+record, e.g. `DEBIAN-CVE-2022-22844`), which is bullseye's LTS ending on 2026-08-31 and OSV's
+Debian export dropping it: the key stayed, 94% of its data left, and a Debian 11 scan today
+finds 94% less than a month ago. The 20% guard (#135) would have refused it, but it merged
+on 09-21, one day after the loss became the baseline. Every other live-key entry removal —
+901 in 28 days, spread across the Ubuntu LTS keys — is Canonical's tracker narrowing a record
+from every release to the one or two still affected (D85): legitimate, and the reason live
+keys are never restored. Past-EOL keys lost 171 entries in 28 days, all small aging-out. No
+two providers share a key today (136 keys, 9 providers, disjoint). Whole-key carry-forward
+was prototyped and tested through `Update`/`Push` before this text was written: retirement
+carried and the publish accepted without `--force`, flapping healing, a provider that did not
+run still refused, the freeze time stable across generations, live keys untouched. Cost:
+a release key of 40k records walks and merges in about ten seconds; the largest key in the
+database (Chainguard, 1.02M, not a release) cannot be merged in one transaction, which is why
+merges are batched.
+
+**Recovery.** The 08-30 snapshot (`sha256:54a29e02…`) still carries `Debian:11` intact.
+`db build --seed` on that digest, once, restores the 43,802 entries as frozen since
+2026-08-30 and the nightly carries them from then on; the guard accepts it because coverage
+grows. `db-publish.yml` gains a `seed` `workflow_dispatch` input so that one build runs on the
+nightly's own runner and token rather than an operator's machine — it selects the seed only,
+never `--force`.
+
+**What this does not do.** A frozen record is never refreshed: the upstream stopped, so there
+is nothing to refresh it from, and the disclosure is the honest substitute. A schema bump that
+changes the advisory RECORD's JSON (not the index) would need a converter before the frozen
+keys survive it; the test that reads a previous-schema seed pins the index case, and the
+comment beside `SchemaVersion` names the other. Erosion on a live key is reported, not
+reversed. The retirement-list idea and the `force` dispatch input (deferred-decisions,
+"Normal retirement and the publish guard") are superseded: the guard needs no exception when
+the key never disappears.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

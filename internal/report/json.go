@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
@@ -111,8 +112,16 @@ type FindingRecord struct {
 	// overwhelming majority of findings are not cross-mapped, and an empty
 	// string on every one of them would be noise a consumer must read nothing
 	// into.
-	CrossMappedFrom string         `json:"crossMappedFrom,omitempty"`
-	Advisory        AdvisoryRecord `json:"advisory"`
+	CrossMappedFrom string `json:"crossMappedFrom,omitempty"`
+	// FrozenSince is the date (RFC 3339 full-date, YYYY-MM-DD) since which
+	// this finding's ecosystem key has been carried forward from an earlier
+	// database because the upstream stopped publishing it (D110), so a
+	// consumer can tell data that will never be refreshed from live data
+	// (D12). omitempty on crossMappedFrom's reasoning: almost no finding is
+	// frozen. Additive and optional, so no schemaVersion bump, the D108
+	// crossMappedFrom precedent.
+	FrozenSince string         `json:"frozenSince,omitempty"`
+	Advisory    AdvisoryRecord `json:"advisory"`
 	// Severity is severity.Band's String() form (D17's own
 	// none/low/medium/high/critical/unknown), never the numeric iota — a
 	// numeric band would make the document depend on Band's declaration
@@ -430,6 +439,7 @@ func findingRecord(f matcher.Finding) FindingRecord {
 		MatchedName:        f.MatchedName,
 		MatchedViaProvides: f.MatchedViaProvides,
 		CrossMappedFrom:    f.CrossMappedFrom,
+		FrozenSince:        frozenDate(f),
 		Advisory: AdvisoryRecord{
 			ID:       f.Advisory.ID,
 			Aliases:  f.Advisory.Aliases,
@@ -484,4 +494,14 @@ func ratingFixState(r matcher.Rating) string {
 		return advisory.FixStateFixed.String()
 	}
 	return r.FixState.String()
+}
+
+// frozenDate renders Finding.FrozenSince as a full-date, or "" for a live key
+// so omitempty drops it. A date, not a timestamp: the freeze time is a
+// provider's DataAsOf, and the day is what a reader weighs (D110).
+func frozenDate(f matcher.Finding) string {
+	if f.FrozenSince.IsZero() {
+		return ""
+	}
+	return f.FrozenSince.UTC().Format(time.DateOnly)
 }
