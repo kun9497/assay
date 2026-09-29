@@ -74,6 +74,16 @@ import (
 // to turn into a loud one. Ratings and enrichment are unaffected -- neither
 // bucket's shape moved -- which is what lets a schema-8 seed's RATINGS still
 // be read forward by this version (see store.OpenSeedRatings).
+//
+// Frozen keys (D110) ride on this too. A seeded build carries a retired or
+// past-EOL key forward by reading the seed's by-id RECORDS (OpenSeedRecords,
+// EachAdvisory), never its index, and accepts a seed one schema behind. So the
+// index may change freely in a bump; a bump that changes the advisory
+// RECORD's JSON (advisory.Advisory's encoding, not the index or a bucket's
+// key) needs a converter in OpenSeedRecords' caller before frozen keys
+// survive it -- otherwise the first build under the new schema decodes the
+// seed's frozen records wrongly or not at all, and every key held only by
+// the seed is lost at once.
 const SchemaVersion = 9
 
 var (
@@ -416,12 +426,13 @@ type Provenance struct {
 	// source's error said, flattened to one line so it cannot break the table
 	// it is rendered into.
 	Error string `json:"error,omitempty"`
-	// Frozen names the ecosystem keys in Ecosystems whose advisories this
-	// provider did NOT emit in the build that wrote this entry, but which a
-	// seeded build carried forward from the seed (D110 candidate, whole-key
-	// carry-forward): the upstream stopped serving the key, and a database
-	// must not lose coverage it once had just because the source went quiet
-	// — EOL images still run. The value is when that key's data was last
+	// Frozen names the ecosystem keys in Ecosystems holding data this
+	// provider did NOT emit in the build that wrote this entry, carried
+	// forward from the seed instead (D110): either the whole key (the
+	// upstream stopped serving it) or entries the upstream dropped from
+	// records it still publishes under a past-EOL key. A database must not
+	// lose coverage it once had just because the source went quiet -- EOL
+	// images still run. The value is when that key's data was last
 	// current: the seed provider's DataAsOf the first night the key went
 	// missing, carried unchanged on every later night rather than refreshed
 	// (D12 — a frozen key must not read as fresher than its data).

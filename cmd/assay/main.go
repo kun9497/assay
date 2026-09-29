@@ -134,9 +134,10 @@ db update flags:
 
 db build flags:
   --seed <ref>    Layer onto a previously published database (D-seed): its
-                  RATINGS are carried forward, its advisories are not --
-                  every advisory is rebuilt from the providers below
-                  regardless, so one upstream withdraws stays gone. This is
+                  RATINGS are carried forward, and its advisories are
+                  rebuilt from the providers below -- except a release key
+                  the upstream stopped serving, which is carried from the
+                  seed and marked frozen instead of dropped (D110). This is
                   what lets a scheduled build fit a six-hour job cap instead
                   of repeating the seven-hour full pass. A seed that cannot
                   be read fails the build rather than silently building from

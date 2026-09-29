@@ -3,7 +3,6 @@ package dbcmd
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,14 +11,12 @@ import (
 	"testing"
 	"time"
 
-	bolt "go.etcd.io/bbolt"
-
 	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/provider"
 	"github.com/kun9497/assay/internal/store"
 )
 
-// D110 spike: whole-key carry-forward. Every test here drives dbcmd.Update (and
+// D110: whole-key carry-forward. Every test here drives dbcmd.Update (and
 // Push where the claim is about the publish guard) — the caller — rather than
 // the store helper the carry uses, because a helper covered and a call site
 // nothing holds is the most repeated defect on this project (CLAUDE.md).
@@ -392,52 +389,5 @@ func TestCarryForward_T7_UnseededBuildCarriesNothing(t *testing.T) {
 	}
 	if len(m.Providers["osv"].Frozen) != 0 {
 		t.Errorf("Frozen = %v on an unseeded build", m.Providers["osv"].Frozen)
-	}
-}
-
-// A schema-one-behind seed is accepted for its ratings (OpenSeedRatings), but
-// its advisory index has the pre-D67 shape, so its advisories are never
-// carried: the build says so and succeeds, and the key vanishes — which the
-// publish guard then refuses, visibly — rather than guessing at an old index.
-func TestCarryForward_OldSchemaSeedCarriesNothing(t *testing.T) {
-	seedPath := filepath.Join(t.TempDir(), "seed.db")
-	buildOldShapedSeed(t, seedPath, []advisory.Advisory{
-		adv("OSV-GO-1", affects("Go", "alpha")),
-		adv("OSV-RET-1", affects("Retired-Eco", "beta")),
-	}, nil, store.SchemaVersion-1)
-	// buildOldShapedSeed writes no provider provenance; add the one the carry
-	// consults, keeping the old schema number and the old index shape.
-	db, err := bolt.Open(seedPath, 0o600, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = db.Update(func(tx *bolt.Tx) error {
-		blob, err := json.Marshal(store.Meta{Schema: store.SchemaVersion - 1, Providers: map[string]store.Provenance{
-			"osv": {Ecosystems: []string{"Go", "Retired-Eco"}, DataAsOf: seedFreezeTime},
-		}})
-		if err != nil {
-			return err
-		}
-		return tx.Bucket([]byte("meta")).Put([]byte("meta"), blob)
-	})
-	db.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	dst, code, logs := build(t, seedPath, goOnly())
-	if code != 0 {
-		t.Fatalf("Update = %d, want 0:\n%s", code, logs)
-	}
-	const warn = "advisories cannot be carried; not carried"
-	if !strings.Contains(logs, warn) {
-		t.Errorf("no %q warning:\n%s", warn, logs)
-	}
-	out, m := openOut(t, dst)
-	if got := lookupIDs(t, out, "Retired-Eco", "beta"); len(got) != 0 {
-		t.Errorf("Lookup(Retired-Eco, beta) = %v from an old-schema seed", got)
-	}
-	if slices.Contains(m.Ecosystems, "Retired-Eco") {
-		t.Errorf("Meta.Ecosystems = %v, want no Retired-Eco", m.Ecosystems)
 	}
 }

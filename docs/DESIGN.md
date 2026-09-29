@@ -820,6 +820,14 @@ becomes the bottleneck" — the measurement above fired. grype and trivy both wo
       NVD pass above; the seed carries its ratings forward but rebuilds every advisory from
       source, so an advisory upstream withdraws still gets removed
 
+Since D110, "rebuilds every advisory from source" has one carve-out: a release key a provider
+declared in the seed but emitted nothing for this run is copied from the seed whole-key, and,
+for a release past its D87 EOL date, an entry the seed held under that key which this run
+re-emitted without it is restored entry-level. A live key's entries are never restored — that
+would undo a legitimate upstream correction, not recover a loss. Every restored finding is
+disclosed as frozen (table, JSON, SARIF, `--explain`), and `db status` lists the frozen keys
+alongside the window `NVD_SINCE_DAYS` covered.
+
 **⑤ KISA enrichment** ✅ — Korean title, description and remediation joined onto matched
 findings by CVE.
 

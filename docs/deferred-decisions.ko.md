@@ -399,6 +399,16 @@ mainline Leap 릴리스(16.1 이상)를 보여줄 때 다시 본다; 이 집합�
 
 ### 정상적인 은퇴와 배포 가드
 
+**2026-09-29, D110으로 해결됨.** 아래 분석 뒤에 이어진 census(ghcr 일일 스냅샷 세 개)는 그
+손실이 이미 벌어지고 있음을 발견했다 — bullseye의 LTS가 끝나며 `Debian:11`이 46,365건에서
+2,562건으로 떨어졌는데 키는 그대로 남았다 — 그리고 erosion이 상류가 여전히 발행 중인
+레코드에서의 항목 삭제이며, 이는 D16이 이월을 금지하는 대상이 아님을 보여줬다. D110은
+provider가 더 이상 내지 않는 키 전체를 동결하고, EOL을 지난 뒤로는 seed에서 빠진 항목을
+복원한다; 살아 있는 키는 결코 복원하지 않으며(Canonical의 fix-state narrowing은 정당하다),
+돌지 않은 provider는 아무것도 동결하지 않고, 키가 결코 사라지지 않으므로 가드는 엄격함을
+유지한다. 아래의 `force` 입력과 retirement 목록은 이걸로 대체되며, 왜 그것들이 답이 아니었는지
+기록으로 남겨 둔다.
+
 **2026-09-23, #135 가드가 들어온 뒤에 미뤄짐.** `refuseCoverageRegression`
 (`internal/dbcmd/push.go:330`)은 자신의 기준선을 오직 이미 발행된 것에서만 가져옵니다 — 대상
 태그의 `dev.assay.advisory-coverage`와 `dev.assay.rating-counts` manifest annotation, 혹은 그

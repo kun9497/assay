@@ -4214,8 +4214,10 @@ seed's `by-id` records (JSON, never the index — so a schema bump that reshapes
 drop what was frozen): **whole-key** — a key a provider that ran declared in the seed and
 emitted nothing for this run is copied from the seed in full and marked
 `Provenance.Frozen[key] = <first freeze time>`; and **entry-level, past EOL only** — for a key
-whose release is past its `EOLFrom` date in the D87 catalog (matched by building the key
-through `Distro.Ecosystem()` from each catalog row, never by string surgery), an advisory the
+whose release is past the last of its EOL dates (`EOLFrom`/`EOASFrom`/`EOESFrom`) in the D87
+catalog — i.e. after any extended support, because Debian 12 is past `EOLFrom` yet still
+maintained under LTS — (matched by building the key through `Distro.Ecosystem()` from each
+catalog row, never by string surgery), an advisory the
 seed carried under that key which this run re-emitted WITHOUT the key's `Affected` entry gets
 that entry restored from the seed. A live key's entries are never restored: a record narrowing
 on a maintained release is the upstream correcting itself. A provider that did not run, or

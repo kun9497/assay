@@ -137,6 +137,32 @@ func OpenSeedRatings(path string) (*Bolt, error) {
 	return b, nil
 }
 
+// OpenSeedRecords opens a seed for carry-forward (D110): its metadata and its
+// advisory RECORDS through EachAdvisory, never its index, never Lookup. It
+// accepts the current schema or the one before it, OpenSeedRatings' N-1 rule,
+// and for the parallel reason: the bump to 9 moved the index and nothing in a
+// record's JSON, so a v8 seed's by-id bucket is exactly as readable as a v9's.
+// Refusing it would drop every frozen key the night a schema bump ships, the
+// one night the operator bootstraps from the last published artifact anyway.
+//
+// Lookup, Covers and anything else that walks the index is NOT safe on what
+// this returns when the seed is one schema behind -- the same "enforced by
+// this doc comment, not by the type system" contract OpenSeedRatings states.
+// And the N-1 acceptance holds only while record JSON stays put: see the note
+// beside SchemaVersion for the bump that would need a converter here.
+func OpenSeedRecords(path string) (*Bolt, error) {
+	b, m, err := openReadOnly(path)
+	if err != nil {
+		return nil, err
+	}
+	if m.Schema != SchemaVersion && m.Schema != SchemaVersion-1 {
+		b.Close()
+		return nil, fmt.Errorf("%w: found v%d, want v%d (records) or v%d",
+			ErrSchemaMismatch, m.Schema, SchemaVersion-1, SchemaVersion)
+	}
+	return b, nil
+}
+
 // Create makes a fresh database for writing. Callers build into a temporary
 // path and rename over the live database so a concurrent scan never observes a
 // partial write.
@@ -792,46 +818,50 @@ func (b *Bolt) Meta() (Meta, error) {
 	return m, err
 }
 
-// EachAdvisoryUnder walks every advisory indexed under ecosystem, once per
-// advisory even when it names several packages there, decoded whole — every
-// Affected entry, not only the ones under ecosystem. Filtering to the key is
-// the caller's decision, because what to keep of a record's OTHER entries is a
-// policy (D16) and not something the store can know.
+// EachAdvisory walks every stored advisory once, in ID order, decoded whole.
+// It reads the by-id bucket and never the advisories index, and that is the
+// point: it exists for carry-forward out of a seed (D110), and a seed may be
+// one schema behind this binary (OpenSeedRecords). The index is what schema
+// bumps reshape -- the bump to 9 turned "<eco>\x00<name>" -> [IDs] into
+// "<eco>\x00<name>\x00<id>" -> nil, and a prefix walk of the new shape over
+// an old-shaped index takes a package name for an advisory ID -- while the
+// record's own JSON has not moved since Database was added (v5). Reading the
+// records makes a frozen key survive an index change for free.
 //
-// The prefix is ecosystem+keySep, so "Alpine:v3.1" never walks
-// "Alpine:v3.19"'s keys. It exists for whole-key carry-forward (D110
-// candidate): the seed is asked for everything under a key its provider has
-// stopped emitting, without knowing the package names ahead of time.
-func (b *Bolt) EachAdvisoryUnder(ecosystem string, fn func(advisory.Advisory) error) error {
-	prefix := []byte(ecosystem + keySep)
+// One pass over every record rather than a walk per key: the caller collects
+// what both carry rules need in a single read (measured ~18.6 s for 1.5M
+// records on SSD), instead of one index walk per key it might carry.
+func (b *Bolt) EachAdvisory(fn func(advisory.Advisory) error) error {
 	return b.db.View(func(tx *bolt.Tx) error {
-		byID := tx.Bucket(bucketByID)
-		c := tx.Bucket(bucketAdvisories).Cursor()
-		seen := map[string]bool{}
-		for k, _ := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, _ = c.Next() {
-			// The key is "<eco>\x00<name>\x00<id>": the ID is everything after
-			// the LAST separator. Package names never contain NUL (keySep's own
-			// comment), so the last one is the one before the ID.
-			i := bytes.LastIndex(k, []byte(keySep))
-			id := string(k[i+1:])
-			if seen[id] {
-				continue
-			}
-			seen[id] = true
-			blob := byID.Get([]byte(id))
-			if blob == nil {
-				return fmt.Errorf("index %q references missing advisory %q", k, id)
-			}
+		return tx.Bucket(bucketByID).ForEach(func(id, blob []byte) error {
 			var a advisory.Advisory
 			if err := json.Unmarshal(blob, &a); err != nil {
 				return fmt.Errorf("decode advisory %q: %w", id, err)
 			}
-			if err := fn(a); err != nil {
-				return err
-			}
+			return fn(a)
+		})
+	})
+}
+
+// Advisory returns the stored record with this ID, and false when there is
+// none. Entry-level carry-forward (D110) asks it one question per seed record
+// under a past-EOL key: did this run re-emit the record at all? A record it
+// did not re-emit is a withdrawal (D16) and must not come back.
+func (b *Bolt) Advisory(id string) (advisory.Advisory, bool, error) {
+	var a advisory.Advisory
+	found := false
+	err := b.db.View(func(tx *bolt.Tx) error {
+		blob := tx.Bucket(bucketByID).Get([]byte(id))
+		if blob == nil {
+			return nil
+		}
+		found = true
+		if err := json.Unmarshal(blob, &a); err != nil {
+			return fmt.Errorf("decode advisory %q: %w", id, err)
 		}
 		return nil
 	})
+	return a, found, err
 }
 
 // MergeAffected stores a batch like PutMany, except that a record whose ID is
@@ -843,23 +873,34 @@ func (b *Bolt) EachAdvisoryUnder(ecosystem string, fn func(advisory.Advisory) er
 // rather than as a flag on it. A carried-forward entry must land on the SAME
 // record the provider just re-emitted for its live keys — Put would replace
 // that fresh record with the seed's stale copy, reintroducing exactly the
-// withdrawn live-key entries D16 forbids. One transaction, all or nothing,
-// for PutMany's reason.
-func (b *Bolt) MergeAffected(as []advisory.Advisory) error {
+// withdrawn live-key entries D16 forbids. One transaction per call, all or
+// nothing, for PutMany's reason -- and so the CALLER batches (D57): a whole
+// key in one call is a transaction the size of the key, and the largest key
+// in the database (Chainguard, 1.02M records) cannot be merged that way.
+//
+// It returns how many records it ADDED -- IDs not stored before the call --
+// so a build's advisory total can count carried records that are new to it
+// without counting a merged-into record twice.
+func (b *Bolt) MergeAffected(as []advisory.Advisory) (int, error) {
 	if len(as) == 0 {
-		return nil
+		return 0, nil
 	}
-	return b.db.Update(func(tx *bolt.Tx) error {
+	added := 0
+	err := b.db.Update(func(tx *bolt.Tx) error {
+		added = 0
 		byID := tx.Bucket(bucketByID)
 		idx := tx.Bucket(bucketAdvisories)
 		for _, in := range as {
 			merged := in
-			if blob := byID.Get([]byte(in.ID)); blob != nil {
+			blob := byID.Get([]byte(in.ID))
+			if blob == nil {
+				added++
+			} else {
 				// Decoded into a FRESH value, never into merged while it still
 				// aliases in: json.Unmarshal reuses a non-nil slice's backing
 				// array, so decoding over a copy of in overwrote in.Affected
 				// with the stored entries and the carried ones vanished. The
-				// first run of this spike's T1 caught exactly that.
+				// first run of the D110 prototype's T1 caught exactly that.
 				merged = advisory.Advisory{}
 				if err := json.Unmarshal(blob, &merged); err != nil {
 					return fmt.Errorf("decode advisory %q: %w", in.ID, err)
@@ -872,11 +913,11 @@ func (b *Bolt) MergeAffected(as []advisory.Advisory) error {
 					}
 				}
 			}
-			blob, err := json.Marshal(merged)
+			out, err := json.Marshal(merged)
 			if err != nil {
 				return fmt.Errorf("marshal %s: %w", in.ID, err)
 			}
-			if err := byID.Put([]byte(in.ID), blob); err != nil {
+			if err := byID.Put([]byte(in.ID), out); err != nil {
 				return err
 			}
 			for _, aff := range in.Affected {
@@ -891,6 +932,7 @@ func (b *Bolt) MergeAffected(as []advisory.Advisory) error {
 		}
 		return nil
 	})
+	return added, err
 }
 
 // RecordCount reports how many advisories are stored, independent of how many

@@ -36,6 +36,13 @@ type fakeStore struct {
 	// care, so an uncounted fixture is silent rather than a panic (D95: this
 	// is what proves a deduped provides name is not looked up a second time).
 	lookupCalls map[string]int
+	// meta is what Meta serves -- zero in every fixture that predates D110,
+	// which is the honest default: nothing frozen. metaCalls counts the asks
+	// through a pointer (the fake is a value), nil when a fixture does not
+	// care, so a test can pin that Match reads Meta once rather than once
+	// per finding.
+	meta      store.Meta
+	metaCalls *int
 }
 
 func (f fakeStore) Covers() (map[string]bool, error) {
@@ -63,8 +70,13 @@ func (f fakeStore) Lookup(ecosystem, name string) ([]advisory.Advisory, error) {
 	}
 	return f.byKey[key], nil
 }
-func (f fakeStore) Meta() (store.Meta, error) { return store.Meta{}, nil }
-func (f fakeStore) Close() error              { return nil }
+func (f fakeStore) Meta() (store.Meta, error) {
+	if f.metaCalls != nil {
+		*f.metaCalls++
+	}
+	return f.meta, nil
+}
+func (f fakeStore) Close() error { return nil }
 
 // RatingsFor serves the ratings a fixture supplied and counts the asks, so a
 // test can pin that the matcher resolves one CVE once rather than once per

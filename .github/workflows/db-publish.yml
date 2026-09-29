@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
+    inputs:
+      seed:
+        description: "Seed reference for a one-time recovery build, a ghcr digest; empty = the published tag"
+        type: string
+        default: ""
 
 # One writer to the artifact at a time, across BOTH workflows (same group
 # name in each): on 2026-08-14 two backfill walkers raced the same slice and
@@ -95,7 +100,10 @@ jobs:
         # remedy is printed next to the error rather than left to be rederived.
         run: |
           set -o pipefail
-          if ! ./bin/assay db build --seed ${{ steps.ref.outputs.ref }} 2>&1 | tee /tmp/build.log; then
+          # D110 recovery: dispatching with `seed` set to a ghcr digest (e.g.
+          # the 08-30 snapshot that still carries Debian:11) reruns tonight's
+          # build from that snapshot instead of an operator's machine -- selects the seed only, never --force.
+          if ! ./bin/assay db build --seed ${{ inputs.seed != '' && inputs.seed || steps.ref.outputs.ref }} 2>&1 | tee /tmp/build.log; then
             if grep -q DENIED /tmp/build.log; then
               echo "::error::GITHUB_TOKEN cannot reach ${{ steps.ref.outputs.ref }}."
               echo "::error::Link the package to this repository once: the ghcr.io package page ->"

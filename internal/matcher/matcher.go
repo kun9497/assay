@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/pkgmeta"
@@ -54,6 +55,18 @@ type Finding struct {
 	// constructor that sets it; the zero value ("") is correct for every
 	// non-mirrored finding.
 	CrossMappedFrom string
+	// FrozenSince is when the matched entry's ecosystem key was last current,
+	// if a seeded build carried that key forward from yesterday's database
+	// because the upstream stopped serving it (D110), or the zero time for a
+	// live key. It is the D108 disclosure again for a different reason: the
+	// finding is real, but the data behind it will never be refreshed, and a
+	// reader must not take it for as-current as the rest of the report (D12).
+	//
+	// Unlike CrossMappedFrom it is not on the record. The build writes it to
+	// Meta.Providers[*].Frozen keyed by ecosystem, so Match reads it from the
+	// store's Meta once and looks the matched entry's key up. Match is the
+	// only constructor that sets it.
+	FrozenSince time.Time
 	// Severity and Score are derived from the advisory's own CVSS vectors at
 	// match time (D13), never read from a value baked in when the database
 	// was built. A record carrying several vectors is banded by the highest
@@ -599,6 +612,12 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("read database coverage: %w", err)
 	}
+	// Frozen keys (D110), read once for the same reason as coverage: Meta is
+	// one record, and a per-finding read would decode it once per match.
+	frozen, err := frozenKeys(m.store)
+	if err != nil {
+		return Result{}, err
+	}
 
 	for _, p := range t.Packages {
 		cmp, ok := version.For(p.Ecosystem)
@@ -1021,6 +1040,7 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 								MatchedName:        lookupName,
 								MatchedViaProvides: viaProvide[lookupName],
 								CrossMappedFrom:    aff.CrossMappedFrom,
+								FrozenSince:        frozen[aff.Ecosystem],
 								Severity:           band,
 								Score:              score,
 								Ratings:            []Rating{r},
@@ -1035,6 +1055,14 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 								f.MatchedName = lookupName
 								f.MatchedViaProvides = viaProvide[lookupName]
 								f.CrossMappedFrom = aff.CrossMappedFrom
+								// Paired with Advisory like CrossMappedFrom. Today
+								// it cannot change here: a finding groups one
+								// package's records, and every matched entry's
+								// Ecosystem equals the package's (the filter
+								// above), so the loser's key is the winner's.
+								// Kept so the disclosure follows the displayed
+								// record if matching ever crosses keys.
+								f.FrozenSince = frozen[aff.Ecosystem]
 								f.Severity, f.Score = band, score
 							}
 						}
@@ -1068,6 +1096,27 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 	sortFindings(res.Findings)
 	sortSkipped(res.Skipped)
 	return res, nil
+}
+
+// frozenKeys flattens every provider's Frozen map (D110) into one lookup by
+// ecosystem key. The build refuses two providers declaring one key, so no two
+// entries can disagree; if a hand-built database ever did, the earlier date
+// is kept, because a disclosure that understates staleness is the one that
+// misleads (D12).
+func frozenKeys(s store.Store) (map[string]time.Time, error) {
+	meta, err := s.Meta()
+	if err != nil {
+		return nil, fmt.Errorf("read database metadata: %w", err)
+	}
+	out := map[string]time.Time{}
+	for _, p := range meta.Providers {
+		for key, since := range p.Frozen {
+			if cur, ok := out[key]; !ok || since.Before(cur) {
+				out[key] = since
+			}
+		}
+	}
+	return out, nil
 }
 
 // annotate attaches what other authorities said about this finding's CVEs:

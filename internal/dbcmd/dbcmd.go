@@ -53,6 +53,14 @@ import (
 // copying advisories forward would not be. This is the seven-hour half a
 // six-hour scheduled build cannot otherwise afford.
 //
+// D110 narrows "ratings only" without contradicting the reason for it.
+// After every source has run, carryForward copies from the seed what the
+// upstream stopped serving rather than withdrew: a whole key a provider that
+// ran no longer emits, and -- for a release past the last of its end dates
+// in this build's D87 catalog only -- an entry dropped from a record the provider still
+// emits. A record no provider re-emitted is still never brought back, so a
+// withdrawal stays withdrawn (D16); see carryForward for both rules.
+//
 // Ratings have no such failure — NVD does not delete CVEs, a revised score
 // changes lastModified so the next delta overwrites it, and a rating for a
 // CVE no advisory matches is unreachable (Matcher.annotate only asks about
@@ -222,6 +230,10 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 	// only on success would always be missing.
 	buildStarted := time.Now()
 	var timings []stageTiming
+	// seeded counts the ratings copied from the seed below. It is reported
+	// after carry-forward, which runs later (it needs this build's EOL rows),
+	// so that one line can say what happened to the seed's advisories too.
+	seeded := 0
 	// D66: providers do not run at all in a ratings-only build — the seed's
 	// advisories, already sitting in tmp from the file copy above, are what
 	// this build carries forward.
@@ -302,6 +314,24 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 			}
 			meta.Providers[p.Name()] = prov
 		}
+		// D110: two providers declaring one key is refused, the D60 class --
+		// a build that would publish as healthy while one provider's word
+		// hides another's loss. Carry-forward judges a key "live" by whether
+		// a provider declared it this run; with two owners, one provider
+		// going quiet on the key would look live because the other still
+		// declares it, and neither rule would ever fire for it. Measured
+		// 2026-09-29: 136 keys over 9 providers, disjoint, so this refuses
+		// nothing today and only a future provider could trip it.
+		if shared := sharedKeys(meta.Providers); len(shared) > 0 {
+			w.Close()
+			os.Remove(tmp)
+			for _, line := range shared {
+				fmt.Fprintf(stderr, "error: %s\n", line)
+			}
+			fmt.Fprintln(stderr, "a key must have exactly one provider, or carry-forward cannot tell a live key from a lost one (D110)")
+			reportTimings(stderr, timings, buildStarted)
+			return 2
+		}
 	}
 
 	// Seeding, if requested: ratings only, copied BEFORE the annotators run
@@ -334,7 +364,6 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 			fmt.Fprintf(stderr, "error: open seed %s: %v\n", label, err)
 			return 2
 		}
-		seeded := 0
 		batch := ratingBatch{w: w}
 		copyErr := src.EachRating(func(r advisory.Rating) error {
 			// D86: EPSS and KEV are excluded from the seed copy -- see
@@ -351,9 +380,10 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 		if err := batch.flush(); err != nil && copyErr == nil {
 			copyErr = err
 		}
-		seedMeta, metaErr := src.Meta()
+		var metaErr error
+		seedMeta, metaErr = src.Meta()
+		src.Close()
 		if copyErr != nil {
-			src.Close()
 			w.Close()
 			os.Remove(tmp)
 			fmt.Fprintf(stderr, "error: read seed ratings: %v\n", copyErr)
@@ -372,21 +402,9 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 			// no error at all -- the exact silent freshness loss D12 exists
 			// to catch elsewhere, reintroduced here by a swallowed error
 			// instead of a missing field.
-			src.Close()
 			w.Close()
 			os.Remove(tmp)
 			fmt.Fprintf(stderr, "error: read seed metadata %s: %v\n", label, metaErr)
-			return 2
-		}
-		// D110 candidate: whole-key carry-forward. Runs here, after every
-		// provider has returned without error (a failing one already aborted
-		// the build above -- R1) and while the seed is still open.
-		carryErr := carryFrozenKeys(src, w, seedMeta, meta.Providers, label, stderr)
-		src.Close()
-		if carryErr != nil {
-			w.Close()
-			os.Remove(tmp)
-			fmt.Fprintf(stderr, "error: carry frozen keys from seed %s: %v\n", label, carryErr)
 			return 2
 		}
 		// The seed's rating provenance is the starting point, so an annotator
@@ -419,7 +437,6 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 			}
 			meta.Ratings[name] = p
 		}
-		fmt.Fprintf(stderr, "seeded %d rating(s) from %s; advisories rebuilt from source\n", seeded, label)
 	}
 
 	// Annotators run after the advisory providers (see Update's own doc
@@ -538,6 +555,37 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 		meta.EOLProvenance = &prov
 	}
 
+	// D110: carry-forward, then the seeded-build summary line. It runs here,
+	// last before SetMeta, rather than in the seed block above, because the
+	// entry-level rule judges "past EOL" against THIS build's D87 catalog,
+	// fetched just above. Every provider has returned without error by now --
+	// a failing one aborted the build (R1) -- and the shared-key refusal has
+	// already run.
+	var carry carryResult
+	if seedPath != "" && !ratingsOnly {
+		var err error
+		carry, err = carryForward(seedPath, label, w, meta.Providers, seedMeta, meta.EOL, stderr)
+		if err != nil {
+			w.Close()
+			os.Remove(tmp)
+			fmt.Fprintf(stderr, "error: carry forward from seed %s: %v\n", label, err)
+			reportTimings(stderr, timings, buildStarted)
+			return 2
+		}
+		if carry.records == 0 {
+			fmt.Fprintf(stderr, "seeded %d rating(s) from %s; advisories rebuilt from source, none carried\n", seeded, label)
+		} else {
+			fmt.Fprintf(stderr, "seeded %d rating(s) from %s; advisories rebuilt from source, then %d carried from the seed (%d added, %d merged into re-emitted records): frozen keys, D110\n",
+				seeded, label, carry.records, carry.added, carry.records-carry.added)
+		}
+		if err := printKeyCounts(w, carry, meta.Providers, stderr); err != nil {
+			w.Close()
+			os.Remove(tmp)
+			fmt.Fprintf(stderr, "error: count advisories per key: %v\n", err)
+			return 2
+		}
+	}
+
 	if err := w.SetMeta(meta); err != nil {
 		w.Close()
 		os.Remove(tmp)
@@ -562,14 +610,21 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 		return 2
 	}
 
-	total := 0
+	// Records carried from the seed that this run did not emit at all are
+	// part of the database too (D110), so they count; a record carry-forward
+	// only merged entries into was already counted by its provider.
+	total := carry.added
 	for _, p := range meta.Providers {
 		total += p.Records
 	}
 	// Before the stdout line, so a reader watching a terminal sees the timing
 	// attached to the run that produced it rather than after the result.
 	reportTimings(stderr, timings, buildStarted)
-	fmt.Fprintf(stdout, "database updated: %d advisories at %s\n", total, dbPath)
+	if carry.added > 0 {
+		fmt.Fprintf(stdout, "database updated: %d advisories at %s (%d of them carried from the seed, frozen)\n", total, dbPath, carry.added)
+	} else {
+		fmt.Fprintf(stdout, "database updated: %d advisories at %s\n", total, dbPath)
+	}
 	// No second "N ratings from N source(s)" line here: the only trustworthy
 	// rating count is the one Bolt.SetMeta just derived from the stored
 	// bucket (Meta.RatingCounts), and Writer does not expose a way to read
@@ -578,108 +633,6 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 	// (see Meta.Ratings' own doc comment) — `assay db status` is where the
 	// derived, accurate count belongs, and it already shows it.
 	return 0
-}
-
-// carryFrozenKeys is whole-key carry-forward (D110 candidate). For each
-// provider that RAN this build, a key the seed says it covered and this run
-// did not emit has its advisories copied from the seed, and the key stays
-// declared, marked Frozen.
-//
-// Why at all: the database must not lose data it once had. The day an
-// upstream stops serving a release (ALAS2 going quiet, a SUSE CSAF regenerated
-// without a Leap product) the rebuilt database would otherwise hold nothing
-// under that key, every later scan of an image still running that release
-// would go quieter, and the publish guard would refuse every night.
-//
-// What is deliberately NOT carried:
-//
-//   - Anything for a provider absent from this build (R1). Only providers in
-//     running are consulted, and running holds only providers whose Fetch
-//     returned without error -- a failed one aborted the build before this is
-//     reached. A broken or disabled run must stay visible, as a key the guard
-//     refuses, rather than be papered over with yesterday's data.
-//   - Any key some provider DID emit this run. Its fresh data wins outright
-//     (R3: a key that flaps back heals the next night) and its seed records
-//     are never consulted, so a withdrawal under a live key stays withdrawn
-//     (D16).
-//   - Any Affected entry outside the frozen key. A carried record is cut down
-//     to its entries under that key before it is merged, so a record the
-//     provider stopped emitting under a live key does not come back there.
-//
-// The freeze time is the seed's existing Frozen[K] if it had one, otherwise
-// the seed provider's DataAsOf -- when the data was last current, carried
-// unchanged on every later night rather than refreshed (D12).
-//
-// A seed one schema behind (OpenSeedRatings accepts it for its ratings) is
-// refused for advisories: its index has the pre-D67 "<eco>\x00<name>" shape,
-// which the prefix walk misreads -- the package name is taken for an ID and
-// the build dies on "references missing advisory" (observed by removing this
-// check). Nothing is carried from it and the build says so; the keys then
-// vanish and the guard refuses, which is visible. The cost is that a schema
-// bump drops every frozen key unless the bootstrap handles it.
-func carryFrozenKeys(src, w *store.Bolt, seedMeta store.Meta, running map[string]store.Provenance, label string, stderr io.Writer) error {
-	live := map[string]bool{}
-	for _, prov := range running {
-		for _, eco := range prov.Ecosystems {
-			live[eco] = true
-		}
-	}
-	for _, name := range sortedKeys(running) {
-		seedProv, ok := seedMeta.Providers[name]
-		if !ok {
-			continue
-		}
-		prov := running[name]
-		var absent []string
-		for _, eco := range seedProv.Ecosystems {
-			if !live[eco] {
-				absent = append(absent, eco)
-			}
-		}
-		if len(absent) == 0 {
-			continue
-		}
-		if seedMeta.Schema != store.SchemaVersion {
-			fmt.Fprintf(stderr, "warning: %s no longer emits %s, but seed %s is schema v%d and its advisories cannot be carried; not carried\n",
-				name, strings.Join(absent, ", "), label, seedMeta.Schema)
-			continue
-		}
-		ecos := slices.Clone(prov.Ecosystems)
-		frozen := map[string]time.Time{}
-		for _, eco := range absent {
-			var batch []advisory.Advisory
-			err := src.EachAdvisoryUnder(eco, func(a advisory.Advisory) error {
-				var keep []advisory.Affected
-				for _, aff := range a.Affected {
-					if aff.Ecosystem == eco {
-						keep = append(keep, aff)
-					}
-				}
-				a.Affected = keep
-				batch = append(batch, a)
-				return nil
-			})
-			if err != nil {
-				return fmt.Errorf("read %s: %w", eco, err)
-			}
-			if err := w.MergeAffected(batch); err != nil {
-				return fmt.Errorf("write %s: %w", eco, err)
-			}
-			since, ok := seedProv.Frozen[eco]
-			if !ok {
-				since = seedProv.DataAsOf
-			}
-			frozen[eco] = since
-			ecos = append(ecos, eco)
-			fmt.Fprintf(stderr, "%s emitted nothing for %s; carried %d advisories from seed %s, frozen since %s\n",
-				name, eco, len(batch), label, since.Format("2006-01-02"))
-		}
-		slices.Sort(ecos)
-		prov.Ecosystems = ecos
-		prov.Frozen = frozen
-		running[name] = prov
-	}
-	return nil
 }
 
 // frozenSummary renders every frozen key as "K since YYYY-MM-DD (provider)",
@@ -856,7 +809,7 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 	// together, in one call, so there is nothing for a partial run to
 	// under- or over-claim about a bucket a scan reads independently.
 	fmt.Fprintf(stdout, "eol:        %s\n", eolSummary(m.EOL, m.EOLProvenance))
-	// Frozen keys (D110 candidate): coverage this database still declares but
+	// Frozen keys (D110): coverage this database still declares but
 	// whose upstream went quiet, so its data is as old as the date shown, not
 	// as fresh as the PROVIDER table's DATA AS OF says. Printed only when there
 	// is one -- a line saying "none" on every healthy database would be noise.

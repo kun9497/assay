@@ -643,6 +643,15 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] SLES LTSS를 mainline-wins 동점 처리로 접음 (D91) — post-EOL fix가 같은 키
       아래서 드러남(bci-base finding 121→286건, curl이 진짜 FIXED IN을 보여줌),
       가려졌던 쌍둥이 385,621건을 버려서 셈
+- [x] 상류가 더 이상 서비스하지 않는 릴리스는 사라진 것이 아니라 동결된 것 (D110) — seed로
+      지어진 빌드가, seed의 JSON 레코드로부터, 돈 provider가 더 이상 내지 않는 키를
+      통째로(whole-key), 그리고 D87 EOL 날짜를 지난 릴리스에 대해서는 상류가 여전히 발행
+      중인 레코드에서 빠진 키 항목을(entry-level) 이월한다; 살아 있는 키는 결코 복원하지
+      않고, 돌지 않은 provider는 아무것도 동결하지 않으며, 다시 나타난 키는 치유된다. ghcr
+      스냅샷 세 개로 측정: bullseye의 LTS가 끝나며(2026-08-31) 키는 남은 채
+      `Debian:11`이 46,365개 항목 중 43,802개를 잃었고 — 08-30 digest에서 한 번 seed해서
+      복구했다. 동결된 키는 `Provenance.Frozen`을 지니고, 모든 renderer와 `db status`가
+      이를 공개하며, 가드에는 예외가 필요 없다.
 - [x] 읽지 못한 매니페스트가 target 게이트와 모든 renderer에 닿음 (D109) — parse에
       실패한 lockfile이나 walk가 들어갈 수 없었던 subtree(#136)가 이제
       `summary.targetIncomplete`로 집계되어, `--fail-on-incomplete=target`이 이를 두고
@@ -782,6 +791,14 @@ grype와 trivy 모두 이렇게 동작합니다.
       위의 7시간짜리 전체 NVD 패스에 맞서 GitHub Actions의 6시간 잡 상한 안에 들어감. seed는
       rating은 가져오지만 advisory는 매번 소스에서 다시 빌드하므로, 업스트림이 철회하는
       advisory는 여전히 제거됨
+
+D110부터는 "advisory는 매번 소스에서 다시 빌드"에 예외가 하나 생겼다: 어떤 provider가 seed에
+선언했던 릴리스 키를 이번 실행에서 아무것도 내지 않았다면 그 키는 seed에서 통째로(whole-key)
+복사되고, D87 EOL 날짜를 지난 릴리스라면 seed가 그 키 아래 갖고 있었지만 이번 실행이 항목
+없이 다시 낸 것은 항목 단위(entry-level)로 복원된다. 살아 있는 키의 항목은 결코 복원하지
+않는다 — 그건 손실을 되찾는 게 아니라 상류의 정당한 수정을 되돌리는 일이기 때문이다. 복원된
+모든 finding은 동결된 것으로 공개되고(테이블, JSON, SARIF, `--explain`), `db status`는
+`NVD_SINCE_DAYS`가 덮은 범위와 함께 동결된 키도 나열한다.
 
 **⑤ KISA 보강** ✅ — 매칭된 finding에 CVE로 한국어 제목·설명·조치 정보를 결합합니다.
 
