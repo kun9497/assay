@@ -22,7 +22,7 @@ D105에서 주간 차등에 합류했으며(23개 타깃 중 16개, 우선 infor
 | Alpaquita · Hummingbird · CleanStart | ✓ (D95, D98, D101) | 일부만 | ✗ | grype는 Hummingbird 프로바이더 보유; Alpaquita·CleanStart는 assay 단독 |
 | openSUSE Leap · SLE | ✓ | ✗ v6에 데이터 없음 | SLE ✓, Leap은 실측 공백 | SLE BCI에서 trivy는 실재하되 다른 어휘를 씁니다: finding을 SUSE-SU 패치 advisory로 키 잡고 CVE는 References URL 안에만 실어, D105 첫 측정이 "trivy가 아무것도 못 찾았다"로 오독됐다가 차등이 그 CVE를 추출하도록 배우고서야 바로잡혔습니다(추출 후 assay와 agree 182/188). Leap 15.6 이미지에서는 trivy가 진짜로 빈 취약점 목록을 반환하며(릴리스를 EOSL로 표시) assay는 12건을 보고 — 이 타깃은 정보 모드 유지 |
 | Bottlerocket · CoreOS | ✗ | ✗ | ✓ | trivy 단독 |
-| 언어 생태계 | 8종 | 8종 | 더 넓음 | 공통 8종(Go·npm·PyPI·crates.io·Maven·RubyGems·NuGet·Packagist); 셋 다 pnpm과 yarn berry 락파일을 읽습니다(assay는 D103부터); trivy는 여기에 더해 Conan·Dart·Swift·Elixir까지 다룹니다 |
+| 언어 생태계 | 8종 | 8종 | 더 넓음 | 공통 8종(Go·npm·PyPI·crates.io·Maven·RubyGems·NuGet·Packagist); 셋 다 pnpm과 yarn berry 락파일을 읽습니다(assay는 D103부터); trivy는 여기에 더해 Conan·Dart·Swift·Elixir까지 다룹니다. assay는 이 8종을 대상으로 지정된 디렉터리·락파일·jar·Go 바이너리에서만 읽으며 — **컨테이너 이미지 내부에서는 읽지 않습니다**(D70, 미룸). grype는 이미지 안에 설치된 언어 패키지를 카탈로그화하고(측정: 아래 SLES·RHEL 행), trivy 문서는 이미지 대상에 대해 이를 다룬다고 명시합니다 — 다만 차등이 호출하는 방식으로 돌리면 trivy는 두 이미지 모두 OS 결과만 돌려주어 어느 쪽도 뒷받침하지 않습니다 |
 | 보강 피드 게이트 | NVD · EPSS · KEV · EOL | NVD · EPSS · KEV · EOL | 내장 없음 | trivy는 심각도 중심 — EPSS/KEV/EOL을 게이트로 내장하지 않음 |
 | KISA / KNVD | ✓ 1급 소스 | ✗ | ✗ | assay가 기존 도구 재사용 대신 존재하는 이유 |
 | 취약점 외 스캔 | ✗ (의도) | ✗ (의도) | 설정오류 · 시크릿 · 라이선스 | trivy는 멀티 스캐너 — 격차가 아니라 범위의 차이 |
@@ -46,9 +46,9 @@ D105에서 주간 차등에 합류했으며(23개 타깃 중 16개, 우선 infor
 | Oracle | — | grype-only 튜플은 FIPS 계열 ELSA의 메인라인 오매칭 — assay의 거부(D79)가 옳은 쪽 | assay 우세 |
 | Fedora | 16/16 (어드바이저리 수준) | 한쪽에만 있는 CVE 튜플은 100% 공유 어드바이저리 안에 있음; bare-advisory bridge(2026-08-28)가 그중 11건을 회수 (일치 49→60) | 양방향, 제한적 |
 | openSUSE Leap | — | grype v6에는 Leap 데이터 자체가 없음 (재검증: 매칭 0건) | assay 단독 |
-| SLES (bci-base) | fixable 한정 180/0/65 | D91의 병합이 제 역할을 함(assay의 오해 소지 있는 no-fix 행이 fixable 시야에서 사라짐); 데이터 모델 차이로 104/63 divergence는 남음 — assay는 grype가 표현할 수 없는 no-fix 항목을 표현하고, grype는 go-module 매칭 33건을 담음 | 데이터 모델 차이 |
+| SLES (bci-base) | fixable 한정 180/0/65 | D91의 병합이 제 역할을 함(assay의 오해 소지 있는 no-fix 행이 fixable 시야에서 사라짐); 104/63 divergence는 남음 — assay는 grype가 표현할 수 없는 no-fix 항목을 표현하고(데이터 모델), grype의 go-module 매칭 33건은 이미지 안의 `/usr/bin/container-suseconnect` 바이너리에 컴파일된 Go 표준 라이브러리(go1.24.11)이며, 이는 이미지 스캔이 읽지 않는 바이너리입니다(D70 — 데이터 모델이 아니라 인벤토리). 2026-09-27 주간 실행에서 이 33건이 해당 대상의 유일한 grype-only 튜플이었음 | 데이터 모델 차이 + 인벤토리 공백 |
 | Azure Linux 3.0 | 254건 일치, assay-only 23, grype-only 0 (2026-08-31) | 감사의 유일한 진짜 assay 공백이었던 곳(일치 106, grype-only 140): Microsoft의 OSV export bot이 2026-03-10에 멈췄고 OSV.dev가 그 동결 스냅샷을 서빙해왔음. D106이 이 계열을 Microsoft의 일일 OVAL로 옮겼고, 직후 첫 주간 실행이 완전 회복을 확인 — 이제 assay가 grype보다 23건 앞서고 trivy와는 277/277 완전 일치. 두 upstream 모두 통보 하루 만에 파이프라인을 고침 | **assay 우세** |
-| RHEL (ubi8-nodejs) | 1090건 일치, assay-only 4531건 | assay 추가분의 98%는 `kernel-headers`로, Red Hat의 CSAF product tree가 커널 CVE에 대해 이 패키지를 명시하지만 grype는 해당 패키지를 전혀 내지 않고 trivy는 assay 튜플 중 4,078건을 확인함 — grype가 예외 쪽 | assay 우세 |
+| RHEL (ubi8-nodejs) | 1090건 일치, assay-only 4531건 | assay 추가분의 98%는 `kernel-headers`로, Red Hat의 CSAF product tree가 커널 CVE에 대해 이 패키지를 명시하지만 grype는 해당 패키지를 전혀 내지 않고 trivy는 assay 튜플 중 4,078건을 확인함 — grype가 예외 쪽. 반대 방향은 인벤토리 공백임: 2026-09-27 주간 실행에서 grype-only 튜플 22건은 모두 npm이며 — `/usr/lib/node_modules/{npm,nodemon}/node_modules` 아래 패키지 11개, Critical인 `tar` 6.2.1 포함 — 이미지 스캔이 읽지 않는 부분(D70), SLES 행과 같은 공백 | OS 패키지는 assay 우세; npm은 인벤토리 공백 |
 
 요지: 차이의 대부분은 매처 버그가 아니라 **데이터 소스의 차이**였고, 이 작업이 찾아낸
 진짜 버그 하나(D90 CSAF ID 충돌)는 수정됐습니다. 이 실측을 매주 반복하는 것이

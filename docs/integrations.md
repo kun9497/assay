@@ -48,6 +48,12 @@ Security tab exists to keep.
   run: exit ${{ steps.scan.outputs.exit_code }}
 ```
 
+This gate covers the image's operating-system packages. npm, Python, Java and Go
+dependencies installed inside the image are not inventoried by an image scan (D70,
+[deferred](deferred-decisions.md)), so a pass here says nothing about them — for those, gate
+the application's own lockfile or source directory (`assay scan dir:.`), its built binary or
+jar, or an SBOM of the image.
+
 The `security-events: write` permission is what lets the workflow upload to code scanning.
 
 ## The database

@@ -73,7 +73,10 @@ code scanning) and `table` (the default). `--explain` shows one finding's full e
   Hummingbird, and CleanStart — plus Bitnami application layers, across three rpmdb backends
   (BerkeleyDB, SQLite, ndb).
 - **8 language ecosystems** — Go, npm, PyPI, crates.io, Maven, RubyGems, NuGet, Packagist,
-  from binaries, directories, and ten lockfile formats — pnpm and yarn berry included.
+  from binaries, directories, and ten lockfile formats — pnpm and yarn berry included. Not
+  from inside a container image: an image scan inventories the OS packages and Bitnami layers
+  above, not the language packages installed in it (D70,
+  [deferred](docs/deferred-decisions.md)).
 - **Every source's rating is kept** — two databases routinely disagree about one CVE; a
   finding carries each source's band, score, and fixed version, and the gate takes the
   highest, so the report agrees with its own verdict.

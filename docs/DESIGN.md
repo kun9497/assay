@@ -24,8 +24,18 @@ PyPI, crates.io, Maven, RubyGems, NuGet, Packagist) alongside Alpine, Debian, Ub
 and Alma; Red Hat's CSAF VEX with fix states; Amazon's ALAS (core and AL2 extras); Oracle's
 ELSA; Fedora's Bodhi; and SUSE's CSAF VEX — built centrally and refreshed daily, with NVD
 ratings joined on — and `assay scan` matches container images, Go binaries, directories and
-SBOMs against it. It reads container images directly, so syft is not in the loop. On real
-targets it reports the same findings as grype: same CVEs, not just the same count.
+SBOMs against it. It reads a container image's operating-system packages directly, so syft is
+not in the loop for those; the weekly differential (D93) compares the findings with grype's
+tuple by tuple — the same CVEs, not just the same count — and [the comparison](comparison.md)
+classifies every family's divergence. Application packages installed inside an image are not
+inventoried: an image scan reads no `node_modules/*/package.json`, no Python `*.dist-info`, no
+jar and no Go binary in the image, and its one application inventory is Bitnami's own
+`/opt/bitnami` markers (D99). The same files are read when the target is a directory, a jar or
+a binary; inside an image they are deferred (D70 — "Application packages inside container
+images" in [`docs/deferred-decisions.md`](deferred-decisions.md)). The differential measures
+what that costs on two of its targets: on the 2026-09-27 weekly run, all 22 tuples grype
+reported on `ubi8/nodejs-18` and assay did not are npm packages under `/usr/lib/node_modules`,
+and all 33 on SLE BCI 15.6 are the Go standard library compiled into one binary.
 
 Distro packages match through their *source* package, so an `openssl` advisory reaches the
 installed `libssl3`, and the report names both. That indirection is where distro scanners
@@ -44,11 +54,15 @@ verdict is the highest band across them. On a real Django 3.2.12 scan that is 15
 findings described by two sources, 14 of which only one of the two rated at all — so before
 this, 14 verdicts turned on which record the package index happened to list first.
 
-Everything else below is still the design target, not the build. Non-Alpine images are read,
-but their packages cannot be matched: `assay scan debian:12` reports that it found no
-supported package database and exits 2, rather than reporting a clean image it never
+An image whose distro assay does not route — CentOS 7 (D50), or an `/etc/os-release` it does
+not recognise — is still read: every OS package in it is cataloged and reported not
+evaluated, with the cause `coverage`. So is a release assay does route but whose key the
+database lacks — Fedora 42, since the Fedora provider fetches F43 and F44 only. When nothing
+else in the image could be evaluated, either one exits 2 ("none of the N component(s) could be
+evaluated; this result cannot be trusted") rather than reporting a clean image it never
 checked.
 
+Everything else below is still the design target, not the build.
 [`docs/superpowers/specs/2026-07-29-assay-roadmap.md`](superpowers/specs/2026-07-29-assay-roadmap.md)
 carries the full design and the reasoning behind each decision.
 
