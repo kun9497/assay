@@ -39,13 +39,35 @@ func pinCarryClock(t *testing.T) {
 	t.Cleanup(func() { carryNow = prev })
 }
 
-// debianEOL is this build's D87 catalog: bullseye (Debian:11) with the given
-// EOLFrom, bookworm (Debian:12) not past EOL as of carryToday.
-func debianEOL(eol11 string) fakeEOLSource {
-	return fakeEOLSource{name: "endoflife.date", rows: []store.EOLRelease{
-		{DistroID: "debian", Release: "11", EOLFrom: eol11},
-		{DistroID: "debian", Release: "12", EOLFrom: "2028-06-10"},
-	}}
+// The D87 rows the entry-level tests judge against, as endoflife.date
+// published them (read from the ghcr artifacts 2026-09-29) except rhel6,
+// which is a shape. Real rows rather than minimal ones, because the defect
+// this suite was rewritten for was a rule fitted to a remembered row: D110
+// first gated on the latest of a row's three dates on the claim that Debian
+// 12 was past EOLFrom -- it is not; only EOASFrom had passed -- and the
+// recovery build then restored nothing on Debian:11.
+//
+// Debian 11 is held in BOTH shapes the catalog has given it, because
+// endoflife.date reshaped the Debian product between the 08-30 and 09-20
+// artifacts: on 08-30 EOLFrom was the end of security support and EOESFrom
+// the end of LTS; from 09-20 EOLFrom is the end of LTS, EOASFrom the end of
+// security support and EOESFrom Freexian's ELTS. A rule that pins meaning to
+// a column or a label per distro breaks on the next such reshape, which is
+// why the rule reads EOLFrom -- the earliest "the distro itself stopped" in
+// every shape seen -- and asks the data whether the key is still growing.
+var (
+	debian11Aug = store.EOLRelease{DistroID: "debian", Release: "11", EOLFrom: "2024-08-14", EOESFrom: "2026-08-31"}
+	debian11Sep = store.EOLRelease{DistroID: "debian", Release: "11", EOLFrom: "2026-08-31", EOASFrom: "2024-08-14", EOESFrom: "2031-06-30"}
+	debian12    = store.EOLRelease{DistroID: "debian", Release: "12", EOLFrom: "2028-06-30", EOASFrom: "2026-07-11", EOESFrom: "2033-06-30"}
+	rhel6       = store.EOLRelease{DistroID: "rhel", Release: "6", EOLFrom: "2020-11-30", EOESFrom: "2024-06-30"}
+	rhel7       = store.EOLRelease{DistroID: "rhel", Release: "7", EOLFrom: "2024-06-30", EOASFrom: "2019-08-06", EOESFrom: "2029-05-31"}
+	amzn2       = store.EOLRelease{DistroID: "amzn", Release: "2", EOLFrom: "2026-06-30", EOASFrom: "2026-06-30"}
+	ubuntu1604  = store.EOLRelease{DistroID: "ubuntu", Release: "16.04", EOLFrom: "2021-04-02", EOESFrom: "2026-04-02"}
+)
+
+// catalog is this build's EOL source holding rows.
+func catalog(rows ...store.EOLRelease) fakeEOLSource {
+	return fakeEOLSource{name: "endoflife.date", rows: rows}
 }
 
 func buildWithEOL(t *testing.T, seedPath string, eol provider.EOLSource, ps ...provider.Provider) (string, int, string) {
@@ -56,50 +78,63 @@ func buildWithEOL(t *testing.T, seedPath string, eol provider.EOLSource, ps ...p
 	return dst, code, errOut.String()
 }
 
-// erosionSeed is the Debian:11 shape measured 2026-09-20: every record carried
-// [Debian:11, Debian:12] until OSV's export dropped bullseye's entries.
-// KEEP stays on Debian:11 so the key remains live. extra is T10's record to
-// withdraw -- kept out of T8, whose Push would otherwise be refused for the
-// withdrawal's own Debian:12 drop (25% of four), which is the guard working.
-func erosionSeed(t *testing.T, extra ...advisory.Advisory) string {
+// erosionSeedOn is the Debian:11 shape measured 2026-09-20, for any provider
+// and pair of release keys: every record carried [gone, stays] until the
+// upstream dropped gone's entries. KEEP stays on gone so the key remains live.
+// extra is T10's record to withdraw -- kept out of T8, whose Push would
+// otherwise be refused for the withdrawal's own stays-key drop (25% of four),
+// which is the guard working.
+func erosionSeedOn(t *testing.T, name, gone, stays string, extra ...advisory.Advisory) string {
 	return carrySeed(t, map[string]store.Provenance{
-		"osv": {Ecosystems: []string{"Debian:11", "Debian:12"}, DataAsOf: seedFreezeTime},
+		name: {Ecosystems: []string{gone, stays}, DataAsOf: seedFreezeTime},
 	}, append([]advisory.Advisory{
-		adv("DEBIAN-R1", affects("Debian:11", "libfoo"), affects("Debian:12", "libfoo")),
-		adv("DEBIAN-R2", affects("Debian:11", "libfoo"), affects("Debian:12", "libfoo")),
-		adv("DEBIAN-R3", affects("Debian:11", "libfoo"), affects("Debian:12", "libfoo")),
-		adv("DEBIAN-KEEP", affects("Debian:11", "libbar")),
+		adv("REC-R1", affects(gone, "libfoo"), affects(stays, "libfoo")),
+		adv("REC-R2", affects(gone, "libfoo"), affects(stays, "libfoo")),
+		adv("REC-R3", affects(gone, "libfoo"), affects(stays, "libfoo")),
+		adv("REC-KEEP", affects(gone, "libbar")),
 	}, extra...)...)
 }
 
-// eroded is the provider after the export dropped Debian:11: R1..R3 come back
-// with Debian:12 only, KEEP is untouched, and nothing else is emitted.
-func eroded() fakeProvider {
-	return fakeProvider{name: "osv", covers: []string{"Debian:11", "Debian:12"}, advs: []advisory.Advisory{
-		adv("DEBIAN-R1", affects("Debian:12", "libfoo")),
-		adv("DEBIAN-R2", affects("Debian:12", "libfoo")),
-		adv("DEBIAN-R3", affects("Debian:12", "libfoo")),
-		adv("DEBIAN-KEEP", affects("Debian:11", "libbar")),
-	}}
+// erodedOn is the provider after the upstream dropped gone: R1..R3 come back
+// with stays only, KEEP is untouched, and nothing else is emitted but extra.
+// With no extra, every record it stores under gone the seed already held
+// there -- the key is flat, which is what the entry-level rule requires.
+func erodedOn(name, gone, stays string, extra ...advisory.Advisory) fakeProvider {
+	return fakeProvider{name: name, covers: []string{gone, stays}, advs: append([]advisory.Advisory{
+		adv("REC-R1", affects(stays, "libfoo")),
+		adv("REC-R2", affects(stays, "libfoo")),
+		adv("REC-R3", affects(stays, "libfoo")),
+		adv("REC-KEEP", affects(gone, "libbar")),
+	}, extra...)}
 }
 
-// T8. Debian:11-shaped erosion on a past-EOL key: every entry the export
-// dropped is restored onto the record it was dropped from, the key is marked
-// frozen from the seed's DataAsOf, and the publish guard accepts the result.
+// erosionSeed and eroded are the event itself: OSV's Debian export dropping
+// bullseye (Debian:11) from records that keep bookworm (Debian:12).
+func erosionSeed(t *testing.T, extra ...advisory.Advisory) string {
+	return erosionSeedOn(t, "osv", "Debian:11", "Debian:12", extra...)
+}
+
+func eroded() fakeProvider { return erodedOn("osv", "Debian:11", "Debian:12") }
+
+// T8. The Debian:11 event itself, against the current catalog rows: every
+// entry the export dropped is restored onto the record it was dropped from,
+// the key is marked frozen from the seed's DataAsOf, the line names EOLFrom
+// and says why the key counts as stopped, and the publish guard accepts the
+// result.
 func TestCarryForward_T8_PastEOLErosionIsRestored(t *testing.T) {
 	pinCarryClock(t)
 	seedPath := erosionSeed(t)
-	dst, code, logs := buildWithEOL(t, seedPath, debianEOL("2024-08-14"), eroded())
+	dst, code, logs := buildWithEOL(t, seedPath, catalog(debian11Sep, debian12), eroded())
 	if code != 0 {
 		t.Fatalf("Update = %d, want 0:\n%s", code, logs)
 	}
 	t.Logf("Update stderr:\n%s", logs)
 	db, m := openOut(t, dst)
 
-	if got, want := lookupIDs(t, db, "Debian:11", "libfoo"), []string{"DEBIAN-R1", "DEBIAN-R2", "DEBIAN-R3"}; !slices.Equal(got, want) {
+	if got, want := lookupIDs(t, db, "Debian:11", "libfoo"), []string{"REC-R1", "REC-R2", "REC-R3"}; !slices.Equal(got, want) {
 		t.Errorf("Lookup(Debian:11, libfoo) = %v, want %v", got, want)
 	}
-	for _, id := range []string{"DEBIAN-R1", "DEBIAN-R2", "DEBIAN-R3"} {
+	for _, id := range []string{"REC-R1", "REC-R2", "REC-R3"} {
 		a, ok := record(t, db, "Debian:12", "libfoo", id)
 		if !ok {
 			t.Errorf("%s is not reachable under Debian:12", id)
@@ -115,7 +150,7 @@ func TestCarryForward_T8_PastEOLErosionIsRestored(t *testing.T) {
 	if _, ok := m.Providers["osv"].Frozen["Debian:12"]; ok {
 		t.Error("Debian:12 is live and not past EOL; it must not be frozen")
 	}
-	const restored = "Debian:11 (past EOL since 2024-08-14): restored its entry on 3 advisories re-emitted without it"
+	const restored = "Debian:11 (past EOL since 2026-08-31, no record new to it this run): restored its entry on 3 advisories re-emitted without it, frozen since 2026-06-30\n"
 	if !strings.Contains(logs, restored) {
 		t.Errorf("stderr lacks %q:\n%s", restored, logs)
 	}
@@ -131,94 +166,129 @@ func TestCarryForward_T8_PastEOLErosionIsRestored(t *testing.T) {
 	}
 }
 
-// T9. The same narrowing on a key NOT past EOL is the upstream correcting
-// itself (Canonical's tracker, D85): nothing is restored and nothing is
-// frozen. Both shapes of "not past EOL" are held -- a future EOLFrom, and no
-// catalog row for the key at all.
-func TestCarryForward_T9_LiveKeyNarrowingIsNotRestored(t *testing.T) {
+// T9. A key with no catalog row at all is not past EOL: a missing row is not
+// evidence the release ended, so the narrowing stands as the upstream's own
+// correction and nothing is frozen -- even though the key is flat.
+func TestCarryForward_T9_KeyWithNoCatalogRowIsNotRestored(t *testing.T) {
 	pinCarryClock(t)
-	for _, tc := range []struct {
-		name string
-		eol  fakeEOLSource
-	}{
-		{"future EOLFrom", debianEOL("2031-06-30")},
-		{"no row for the key", fakeEOLSource{name: "endoflife.date", rows: []store.EOLRelease{
-			{DistroID: "debian", Release: "12", EOLFrom: "2028-06-10"},
-		}}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dst, code, logs := buildWithEOL(t, erosionSeed(t), tc.eol, eroded())
-			if code != 0 {
-				t.Fatalf("Update = %d, want 0:\n%s", code, logs)
-			}
-			db, m := openOut(t, dst)
-			if got := lookupIDs(t, db, "Debian:11", "libfoo"); len(got) != 0 {
-				t.Errorf("Lookup(Debian:11, libfoo) = %v, want none: the key is not past EOL", got)
-			}
-			if f := m.Providers["osv"].Frozen; len(f) != 0 {
-				t.Errorf("Frozen = %v, want empty", f)
-			}
-		})
-	}
-}
-
-// T8b. "Past EOL" is past the LAST of a row's end dates, not past EOLFrom
-// alone. Debian 11's shape: security support ended 2024-08-14, Debian LTS
-// carried it to 2026-08-31, and only after that did its OSV entries leave --
-// both past, so the erosion is restored, and the line names the LTS end as
-// the day the upstream stopped, not the earlier EOLFrom.
-func TestCarryForward_T8b_PastEveryEndDateIsRestored(t *testing.T) {
-	pinCarryClock(t)
-	eol := fakeEOLSource{name: "endoflife.date", rows: []store.EOLRelease{
-		{DistroID: "debian", Release: "11", EOLFrom: "2024-08-14", EOESFrom: "2026-08-31"},
-		{DistroID: "debian", Release: "12", EOLFrom: "2028-06-10"},
-	}}
-	dst, code, logs := buildWithEOL(t, erosionSeed(t), eol, eroded())
+	dst, code, logs := buildWithEOL(t, erosionSeed(t), catalog(debian12), eroded())
 	if code != 0 {
 		t.Fatalf("Update = %d, want 0:\n%s", code, logs)
 	}
 	db, m := openOut(t, dst)
-	if got, want := lookupIDs(t, db, "Debian:11", "libfoo"), []string{"DEBIAN-R1", "DEBIAN-R2", "DEBIAN-R3"}; !slices.Equal(got, want) {
-		t.Errorf("Lookup(Debian:11, libfoo) = %v, want %v", got, want)
+	if got := lookupIDs(t, db, "Debian:11", "libfoo"); len(got) != 0 {
+		t.Errorf("Lookup(Debian:11, libfoo) = %v, want none: the key has no catalog row", got)
 	}
-	if _, ok := m.Providers["osv"].Frozen["Debian:11"]; !ok {
-		t.Errorf("Frozen = %v, want Debian:11", m.Providers["osv"].Frozen)
-	}
-	const restored = "Debian:11 (past EOL since 2026-08-31): restored its entry on 3 advisories re-emitted without it"
-	if !strings.Contains(logs, restored) {
-		t.Errorf("stderr lacks %q:\n%s", restored, logs)
+	if f := m.Providers["osv"].Frozen; len(f) != 0 {
+		t.Errorf("Frozen = %v, want empty", f)
 	}
 }
 
-// T9c. A release past EOLFrom but still inside a later end date is still
-// maintained -- Debian 12's shape: bookworm's security support ends
-// 2026-06-10, its Debian LTS runs to 2028 -- so a narrowing on it is the
-// upstream correcting itself and is not restored. Held for both later
-// phases, EOES and EOAS.
-func TestCarryForward_T9c_PastEOLFromButInsideLaterPhaseIsNotRestored(t *testing.T) {
+// T9b. A key's narrowing is restored only when BOTH hold: the catalog puts
+// the release past EOLFrom, and this run stored no record under the key that
+// the seed did not already hold there. The second is the data saying whether
+// the provider's feed still serves the release, which no column of the
+// catalog says reliably across distros or across endoflife.date's reshapes.
+// Measured on the first recovery run (36541185015): Debian:11 was flat at
+// 2,562 records while Amazon Linux:2 (+119), Ubuntu:16.04:LTS (+2,526), Red
+// Hat:6 (+752), SLES:15.SP3 (+1,799) and openSUSE Leap:15.6 (+14,963) were
+// all still growing past their EOLFrom -- and every one of those five had its
+// corrections "restored" by a dates-only rule.
+//
+// Each case is T8's erosion on that distro's keys; runExtra is what the
+// provider emitted beyond it, seedExtra what the seed held beyond it. since
+// is the date the stderr line must name; "" means nothing may be restored,
+// frozen, or reported as past EOL.
+func TestCarryForward_T9b_PastEOLFromAndFlat(t *testing.T) {
 	pinCarryClock(t)
 	for _, tc := range []struct {
-		name string
-		row  store.EOLRelease
+		name, provider, gone, stays string
+		row                         store.EOLRelease
+		seedExtra, runExtra         []advisory.Advisory
+		since                       string
 	}{
-		{"EOESFrom in the future", store.EOLRelease{DistroID: "debian", Release: "11", EOLFrom: "2024-08-14", EOESFrom: "2028-06-30"}},
-		{"EOASFrom in the future", store.EOLRelease{DistroID: "debian", Release: "11", EOLFrom: "2024-08-14", EOASFrom: "2028-06-30"}},
+		{
+			name: "debian 11, 08-30 catalog shape, flat", provider: "osv",
+			gone: "Debian:11", stays: "Debian:12", row: debian11Aug, since: "2024-08-14",
+		},
+		{
+			name: "debian 11, 09-29 catalog shape, flat", provider: "osv",
+			gone: "Debian:11", stays: "Debian:12", row: debian11Sep, since: "2026-08-31",
+		},
+		{
+			name: "debian 11, one record new to the key", provider: "osv",
+			gone: "Debian:11", stays: "Debian:12", row: debian11Sep,
+			runExtra: []advisory.Advisory{adv("REC-NEW-1", affects("Debian:11", "libnew"))},
+		},
+		{
+			// A record the seed held under another key only, re-emitted with
+			// an entry under this one: new to the key, so the key is live.
+			name: "debian 11, a held record gains the key", provider: "osv",
+			gone: "Debian:11", stays: "Debian:12", row: debian11Sep,
+			seedExtra: []advisory.Advisory{adv("REC-S1", affects("Debian:12", "libnew"))},
+			runExtra:  []advisory.Advisory{adv("REC-S1", affects("Debian:11", "libnew"), affects("Debian:12", "libnew"))},
+		},
+		{
+			name: "debian 12, EOLFrom 2028, flat", provider: "osv",
+			gone: "Debian:12", stays: "Debian:13", row: debian12,
+		},
+		{
+			name: "rhel 7, one record new to the key", provider: "Red Hat CSAF VEX",
+			gone: "Red Hat:7", stays: "Red Hat:8", row: rhel7,
+			runExtra: []advisory.Advisory{adv("REC-NEW-1", affects("Red Hat:7", "libnew"))},
+		},
+		{
+			name: "rhel 6, flat", provider: "Red Hat CSAF VEX",
+			gone: "Red Hat:6", stays: "Red Hat:8", row: rhel6, since: "2020-11-30",
+		},
+		{
+			name: "amzn 2, flat", provider: "Amazon Linux ALAS",
+			gone: "Amazon Linux:2", stays: "Amazon Linux:2023", row: amzn2, since: "2026-06-30",
+		},
+		{
+			name: "amzn 2, one record new to the key", provider: "Amazon Linux ALAS",
+			gone: "Amazon Linux:2", stays: "Amazon Linux:2023", row: amzn2,
+			runExtra: []advisory.Advisory{adv("REC-NEW-1", affects("Amazon Linux:2", "libnew"))},
+		},
+		{
+			name: "ubuntu 16.04, records new to the key", provider: "osv",
+			gone: "Ubuntu:16.04:LTS", stays: "Ubuntu:18.04:LTS", row: ubuntu1604,
+			runExtra: []advisory.Advisory{
+				adv("REC-NEW-1", affects("Ubuntu:16.04:LTS", "libnew")),
+				adv("REC-NEW-2", affects("Ubuntu:16.04:LTS", "libnew")),
+			},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			eol := fakeEOLSource{name: "endoflife.date", rows: []store.EOLRelease{
-				tc.row,
-				{DistroID: "debian", Release: "12", EOLFrom: "2028-06-10"},
-			}}
-			dst, code, logs := buildWithEOL(t, erosionSeed(t), eol, eroded())
+			seedPath := erosionSeedOn(t, tc.provider, tc.gone, tc.stays, tc.seedExtra...)
+			dst, code, logs := buildWithEOL(t, seedPath, catalog(tc.row), erodedOn(tc.provider, tc.gone, tc.stays, tc.runExtra...))
 			if code != 0 {
 				t.Fatalf("Update = %d, want 0:\n%s", code, logs)
 			}
 			db, m := openOut(t, dst)
-			if got := lookupIDs(t, db, "Debian:11", "libfoo"); len(got) != 0 {
-				t.Errorf("Lookup(Debian:11, libfoo) = %v, want none: the release is still maintained", got)
+			got := lookupIDs(t, db, tc.gone, "libfoo")
+			frozen := m.Providers[tc.provider].Frozen
+			if tc.since == "" {
+				if len(got) != 0 {
+					t.Errorf("Lookup(%s, libfoo) = %v, want none: the narrowing is a correction", tc.gone, got)
+				}
+				if len(frozen) != 0 {
+					t.Errorf("Frozen = %v, want empty", frozen)
+				}
+				if strings.Contains(logs, "(past EOL since ") {
+					t.Errorf("stderr reports a restored past-EOL key:\n%s", logs)
+				}
+				return
 			}
-			if f := m.Providers["osv"].Frozen; len(f) != 0 {
-				t.Errorf("Frozen = %v, want empty", f)
+			if want := []string{"REC-R1", "REC-R2", "REC-R3"}; !slices.Equal(got, want) {
+				t.Errorf("Lookup(%s, libfoo) = %v, want %v", tc.gone, got, want)
+			}
+			if since, ok := frozen[tc.gone]; !ok || !since.Equal(seedFreezeTime) || len(frozen) != 1 {
+				t.Errorf("Frozen = %v, want only %s at the seed's DataAsOf %v", frozen, tc.gone, seedFreezeTime)
+			}
+			line := tc.gone + " (past EOL since " + tc.since + ", no record new to it this run): restored its entry on 3 advisories re-emitted without it"
+			if !strings.Contains(logs, line) {
+				t.Errorf("stderr lacks %q:\n%s", line, logs)
 			}
 		})
 	}
@@ -229,18 +299,18 @@ func TestCarryForward_T9c_PastEOLFromButInsideLaterPhaseIsNotRestored(t *testing
 // dropped entries are still restored.
 func TestCarryForward_T10_WithdrawalUnderPastEOLKeyStaysWithdrawn(t *testing.T) {
 	pinCarryClock(t)
-	r4 := adv("DEBIAN-R4", affects("Debian:11", "libfoo"), affects("Debian:12", "libfoo"))
-	dst, code, logs := buildWithEOL(t, erosionSeed(t, r4), debianEOL("2024-08-14"), eroded())
+	r4 := adv("REC-R4", affects("Debian:11", "libfoo"), affects("Debian:12", "libfoo"))
+	dst, code, logs := buildWithEOL(t, erosionSeed(t, r4), catalog(debian11Sep, debian12), eroded())
 	if code != 0 {
 		t.Fatalf("Update = %d, want 0:\n%s", code, logs)
 	}
 	db, _ := openOut(t, dst)
 	for _, eco := range []string{"Debian:11", "Debian:12"} {
-		if _, ok := record(t, db, eco, "libfoo", "DEBIAN-R4"); ok {
-			t.Errorf("DEBIAN-R4 is back under %s; a record not re-emitted must stay withdrawn", eco)
+		if _, ok := record(t, db, eco, "libfoo", "REC-R4"); ok {
+			t.Errorf("REC-R4 is back under %s; a record not re-emitted must stay withdrawn", eco)
 		}
 	}
-	if got, want := lookupIDs(t, db, "Debian:11", "libfoo"), []string{"DEBIAN-R1", "DEBIAN-R2", "DEBIAN-R3"}; !slices.Equal(got, want) {
+	if got, want := lookupIDs(t, db, "Debian:11", "libfoo"), []string{"REC-R1", "REC-R2", "REC-R3"}; !slices.Equal(got, want) {
 		t.Errorf("Lookup(Debian:11, libfoo) = %v, want %v", got, want)
 	}
 	const withdrawn = "1 not re-emitted at all, left withdrawn (D16)"
@@ -355,7 +425,9 @@ func TestCarryForward_T13_PreviousSchemaSeedIsCarried(t *testing.T) {
 
 // T14. The nightly log prints one line per seed key whose count moved -- a
 // live key's erosion is reported even though it is not reversed -- and
-// nothing for a key that held still.
+// nothing for a key that held still. Debian:11 is flat and past EOLFrom, so
+// DEBIAN-R1's dropped entry is restored and the key frozen; DEBIAN-R6 is not
+// re-emitted at all, a withdrawal, so the frozen key's count still moves.
 func TestCarryForward_T14_PerKeyCountLines(t *testing.T) {
 	pinCarryClock(t)
 	seedPath := carrySeed(t, map[string]store.Provenance{
@@ -367,6 +439,7 @@ func TestCarryForward_T14_PerKeyCountLines(t *testing.T) {
 		adv("OSV-NPM-1", affects("npm", "left-pad")),
 		adv("DEBIAN-R1", affects("Debian:11", "libfoo"), affects("npm", "left-pad-2")),
 		adv("DEBIAN-R2", affects("Debian:11", "libfoo")),
+		adv("DEBIAN-R6", affects("Debian:11", "libfoo")),
 	)
 	p := fakeProvider{name: "osv", covers: []string{"Debian:11", "Go", "npm"}, advs: []advisory.Advisory{
 		adv("OSV-GO-1", affects("Go", "alpha")),
@@ -374,16 +447,14 @@ func TestCarryForward_T14_PerKeyCountLines(t *testing.T) {
 		adv("OSV-NPM-1", affects("npm", "left-pad")),
 		adv("DEBIAN-R1", affects("npm", "left-pad-2")),
 		adv("DEBIAN-R2", affects("Debian:11", "libfoo")),
-		adv("DEBIAN-R5", affects("Debian:11", "libfoo")),
 	}}
-	eol := fakeEOLSource{name: "endoflife.date", rows: []store.EOLRelease{{DistroID: "debian", Release: "11", EOLFrom: "2024-08-14"}}}
-	_, code, logs := buildWithEOL(t, seedPath, eol, p)
+	_, code, logs := buildWithEOL(t, seedPath, catalog(debian11Sep), p)
 	if code != 0 {
 		t.Fatalf("Update = %d, want 0:\n%s", code, logs)
 	}
 	for _, want := range []string{
 		"\nGo: 3 -> 2 advisories (-1)\n",
-		"\nDebian:11: 2 -> 3 advisories (+1, frozen since 2026-06-30)\n",
+		"\nDebian:11: 3 -> 2 advisories (-1, frozen since 2026-06-30)\n",
 	} {
 		if !strings.Contains(logs, want) {
 			t.Errorf("stderr lacks %q:\n%s", want, logs)

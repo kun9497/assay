@@ -4212,15 +4212,23 @@ ever taken, this channel can carry it under its own kind rather than as a second
 upstream stopped emitting them. Two carry-forward rules run after the providers, reading the
 seed's `by-id` records (JSON, never the index — so a schema bump that reshapes the index cannot
 drop what was frozen): **whole-key** — a key a provider that ran declared in the seed and
-emitted nothing for this run is copied from the seed in full and marked
-`Provenance.Frozen[key] = <first freeze time>`; and **entry-level, past EOL only** — for a key
-whose release is past the last of its EOL dates (`EOLFrom`/`EOASFrom`/`EOESFrom`) in the D87
-catalog — i.e. after any extended support, because Debian 12 is past `EOLFrom` yet still
-maintained under LTS — (matched by building the key through `Distro.Ecosystem()` from each
-catalog row, never by string surgery), an advisory the
-seed carried under that key which this run re-emitted WITHOUT the key's `Affected` entry gets
-that entry restored from the seed. A live key's entries are never restored: a record narrowing
-on a maintained release is the upstream correcting itself. A provider that did not run, or
+emitted nothing for this run is copied from the seed and marked
+`Provenance.Frozen[key] = <first freeze time>`, except a record that also affects a key the
+same provider still serves and was not re-emitted: its absence is a withdrawal the provider
+made observable (D16), not the key going quiet; and **entry-level, past EOL and flat only** —
+for a key whose release is past `EOLFrom` in the D87 catalog (matched by building the key
+through `Distro.Ecosystem()` from each catalog row, never by string surgery) AND under which
+this run stored no record the seed did not already hold there, an advisory the seed carried
+under that key which this run re-emitted WITHOUT the key's `Affected` entry gets that entry
+restored from the seed. `EOLFrom` is read in whatever shape the catalog gives it, and no later
+phase is consulted: endoflife.date reshaped the Debian product between the 08-30 and 09-20
+artifacts — bullseye's `EOLFrom` moved from the end of security support (2024-08-14) to the
+end of LTS (2026-08-31), and `EOESFrom` from the end of LTS to Freexian's ELTS (2031) — so a
+rule that pins meaning to a column or label per distro breaks on the next reshape. Whether
+the feed still serves the release is asked of the data instead: a provider still adding
+records under a key is still publishing for it, whatever the dates say. A live key's entries
+are never restored: a record narrowing on a release the provider still serves is the upstream
+correcting itself. A provider that did not run, or
 whose fetch failed, freezes nothing — the guard's refusal is the right answer to a broken run.
 A key that reappears takes the fresh data and drops `Frozen`. Two providers declaring one key
 is refused at build time, so "the key is live" always means one provider's word. Merges are
@@ -4255,7 +4263,13 @@ carried and the publish accepted without `--force`, flapping healing, a provider
 run still refused, the freeze time stable across generations, live keys untouched. Cost:
 a release key of 40k records walks and merges in about ten seconds; the largest key in the
 database (Chainguard, 1.02M, not a release) cannot be merged in one transaction, which is why
-merges are batched.
+merges are batched. The first recovery run (36541185015, 2026-09-29) restored nothing on
+`Debian:11` and 190 entries on live keys, because the gate had been changed to the latest of
+a row's three dates on an unverified claim about Debian 12 (its `EOLFrom` is 2028-06-30; only
+`EOASFrom` had passed). That run's own data separates the two: `Debian:11` was flat at 2,562
+records, while `Amazon Linux:2` (+119), `Ubuntu:16.04:LTS` (+2,526), `Red Hat:6` (+752),
+`SLES:15.SP3` (+1,799) and `openSUSE Leap:15.6` (+14,963) were all still growing past their
+`EOLFrom` — and a dates-only rule restored corrections on, and froze, every one of those five.
 
 **Recovery.** The 08-30 snapshot (`sha256:54a29e02…`) still carries `Debian:11` intact.
 `db build --seed` on that digest, once, restores the 43,802 entries as frozen since
@@ -4269,7 +4283,10 @@ is nothing to refresh it from, and the disclosure is the honest substitute. A sc
 changes the advisory RECORD's JSON (not the index) would need a converter before the frozen
 keys survive it; the test that reads a previous-schema seed pins the index case, and the
 comment beside `SchemaVersion` names the other. Erosion on a live key is reported, not
-reversed. The retirement-list idea and the `force` dispatch input (deferred-decisions,
+reversed. A live key that gains no record on the same night it narrows one reads as flat, so
+that narrowing is restored and the key marked frozen for a night; the next record it gains
+makes it live again and the restored entry is not carried — accepted. The retirement-list
+idea and the `force` dispatch input (deferred-decisions,
 "Normal retirement and the publish guard") are superseded: the guard needs no exception when
 the key never disappears.
 

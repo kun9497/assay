@@ -138,7 +138,8 @@ func OpenSeedRatings(path string) (*Bolt, error) {
 }
 
 // OpenSeedRecords opens a seed for carry-forward (D110): its metadata and its
-// advisory RECORDS through EachAdvisory, never its index, never Lookup. It
+// advisory RECORDS through EachAdvisory and Advisory, never its index, never
+// Lookup or IDsUnder. It
 // accepts the current schema or the one before it, OpenSeedRatings' N-1 rule,
 // and for the parallel reason: the bump to 9 moved the index and nothing in a
 // record's JSON, so a v8 seed's by-id bucket is exactly as readable as a v9's.
@@ -844,9 +845,11 @@ func (b *Bolt) EachAdvisory(fn func(advisory.Advisory) error) error {
 }
 
 // Advisory returns the stored record with this ID, and false when there is
-// none. Entry-level carry-forward (D110) asks it one question per seed record
-// under a past-EOL key: did this run re-emit the record at all? A record it
-// did not re-emit is a withdrawal (D16) and must not come back.
+// none. Carry-forward (D110) asks it of the database being built -- did this
+// run re-emit the record at all? A record it did not is a withdrawal (D16)
+// and must not come back -- and of the seed: did the seed already hold this
+// run's record under the key? It reads the by-id bucket only, so it is safe
+// on a seed one schema behind (OpenSeedRecords).
 func (b *Bolt) Advisory(id string) (advisory.Advisory, bool, error) {
 	var a advisory.Advisory
 	found := false
@@ -862,6 +865,38 @@ func (b *Bolt) Advisory(id string) (advisory.Advisory, bool, error) {
 		return nil
 	})
 	return a, found, err
+}
+
+// IDsUnder returns the ID of every advisory the index holds under ecosystem,
+// each once however many of its packages that key names, in index order.
+// Entry-level carry-forward (D110) asks it what THIS run stored under a key,
+// to tell a key the provider is still adding to from one it has stopped
+// serving.
+//
+// It walks the index, so it holds the same contract OpenSeedRecords states
+// in reverse: call it on the database being built, never on a seed, whose
+// index may be one schema behind. The walk reads keys only -- no record is
+// decoded -- and the prefix ends in keySep, so "Debian:1" does not run on
+// into "Debian:11"'s keys (the substring class Lookup's own prefix guards).
+func (b *Bolt) IDsUnder(ecosystem string) ([]string, error) {
+	prefix := []byte(ecosystem + keySep)
+	seen := map[string]bool{}
+	var out []string
+	err := b.db.View(func(tx *bolt.Tx) error {
+		c := tx.Bucket(bucketAdvisories).Cursor()
+		for k, _ := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, _ = c.Next() {
+			_, id, ok := bytes.Cut(k[len(prefix):], []byte(keySep))
+			if !ok {
+				return fmt.Errorf("index key %q names no advisory", k)
+			}
+			if s := string(id); !seen[s] {
+				seen[s] = true
+				out = append(out, s)
+			}
+		}
+		return nil
+	})
+	return out, err
 }
 
 // MergeAffected stores a batch like PutMany, except that a record whose ID is

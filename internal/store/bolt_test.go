@@ -1388,3 +1388,43 @@ func TestPutRatings_BatchSemanticsMatchPutRating(t *testing.T) {
 		t.Fatalf("CVE-2099-2 ratings = %+v, %v; want the second batch's record", rs2, err)
 	}
 }
+
+// IDsUnder answers entry-level carry-forward's "what did this run store under
+// the key" (D110) from the index: each advisory once however many of its
+// packages the key holds, and nothing from a key that merely shares a prefix
+// -- Debian:1 must not see Debian:11's records, the index's own substring
+// class (D67).
+func TestIDsUnder(t *testing.T) {
+	w, err := Create(filepath.Join(t.TempDir(), "vulnerability.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	two := sample("ADV-TWO", "Debian:11", "alpha")
+	two.Affected = append(two.Affected, advisory.Affected{Ecosystem: "Debian:11", Name: "beta"})
+	if err := w.PutMany([]advisory.Advisory{
+		two,
+		sample("ADV-ONE", "Debian:11", "gamma"),
+		sample("ADV-PREFIX", "Debian:1", "alpha"),
+		sample("ADV-OTHER", "Debian:12", "alpha"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		eco  string
+		want []string
+	}{
+		{"Debian:11", []string{"ADV-ONE", "ADV-TWO"}},
+		{"Debian:1", []string{"ADV-PREFIX"}},
+		{"Debian:13", nil},
+	} {
+		got, err := w.IDsUnder(tc.eco)
+		if err != nil {
+			t.Fatal(err)
+		}
+		slices.Sort(got)
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("IDsUnder(%s) = %v, want %v", tc.eco, got, tc.want)
+		}
+	}
+}

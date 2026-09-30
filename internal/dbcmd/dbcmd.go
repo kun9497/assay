@@ -56,10 +56,11 @@ import (
 // D110 narrows "ratings only" without contradicting the reason for it.
 // After every source has run, carryForward copies from the seed what the
 // upstream stopped serving rather than withdrew: a whole key a provider that
-// ran no longer emits, and -- for a release past the last of its end dates
-// in this build's D87 catalog only -- an entry dropped from a record the provider still
-// emits. A record no provider re-emitted is still never brought back, so a
-// withdrawal stays withdrawn (D16); see carryForward for both rules.
+// ran no longer emits, and -- for a release past EOLFrom in this build's D87
+// catalog, under which this run stored nothing new -- an entry dropped from
+// a record the provider still emits. A record no provider re-emitted is still
+// never brought back, so a withdrawal stays withdrawn (D16); see carryForward
+// for both rules.
 //
 // Ratings have no such failure — NVD does not delete CVEs, a revised score
 // changes lastModified so the next delta overwrites it, and a rating for a
