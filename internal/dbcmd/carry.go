@@ -14,8 +14,8 @@ import (
 
 // carryNow is the seam for "today" in the entry-level rule's past-EOL
 // judgement (D110), the same shape as scancmd's clockNow (D87): EOL is derived
-// by comparing a catalog row's last end date against the moment the build
-// runs, so a test pins it to drive both sides of the boundary.
+// by comparing a catalog row's EOLFrom against the moment the build runs, so
+// a test pins it to drive both sides of the boundary.
 var carryNow = time.Now
 
 // mergeAffected is the one write carry-forward makes, held in a variable so a
@@ -64,32 +64,34 @@ func sharedKeys(providers map[string]store.Provenance) []string {
 	return out
 }
 
-// pastEOLKeys builds the set of ecosystem keys whose release is past the LAST
-// of its end dates (EOLFrom, EOASFrom, EOESFrom) as of now, from this build's
-// D87 catalog rows, each mapped to that latest date. Each row is turned
-// into a key through pkgmeta.Distro.Ecosystem() -- the function a scan keys
-// its own packages with -- and never by string surgery on key names: a key
-// spelled here any other way could drift from the one advisories are stored
-// under (SLES's ".SP" fold, Ubuntu's ":LTS", Alpine's "v") and silently
-// restore nothing, or restore the wrong release.
+// pastEOLKeys builds the set of ecosystem keys whose release is past its
+// EOLFrom as of now, from this build's D87 catalog rows, each mapped to that
+// date. Each row is turned into a key through pkgmeta.Distro.Ecosystem() --
+// the function a scan keys its own packages with -- and never by string
+// surgery on key names: a key spelled here any other way could drift from
+// the one advisories are stored under (SLES's ".SP" fold, Ubuntu's ":LTS",
+// Alpine's "v") and silently restore nothing, or restore the wrong release.
 //
-// The question here is "has the upstream fully stopped", not "did standard
-// support end", so EOLFrom alone is the wrong date. Debian 12 is past its
-// EOLFrom (security support, 2026-06-10) yet Debian LTS maintains it to 2028,
-// and a narrowing on it is a correction that must stand; Debian 11's LTS
-// ended 2026-08-31, and only then did its OSV entries leave. The latest
-// published phase end tells the two apart where EOLFrom cannot. A row with
-// only EOLFrom (Amazon Linux 2's shape) is judged by that one date.
-// IsMaintained is deliberately not consulted: endoflife.date sets it under a
-// third party's extended support too (see store.EOLRelease), which is exactly
-// the misfire that would freeze a key the upstream still serves.
+// Past EOLFrom is only the first half of the entry-level rule's test, and on
+// purpose the half the catalog answers: EOLFrom is the earliest "the distro
+// itself stopped" in every shape the catalog has published, while which
+// LATER phase a provider's feed keeps publishing through is not something
+// any column says. endoflife.date reshaped the Debian product between the
+// 2026-08-30 and 09-20 artifacts -- bullseye's EOLFrom moved from the end of
+// security support (2024-08-14) to the end of LTS (2026-08-31), and EOESFrom
+// from the end of LTS to Freexian's ELTS (2031) -- so a rule pinning meaning
+// to a column or label per distro breaks on the next reshape; D110 first
+// shipped gating on the latest of the three dates, which put Debian:11 out
+// of reach until 2031. The second half, whether the provider is still
+// adding records to the key, is asked of the data (see newUnder).
+// EOASFrom, EOESFrom and IsMaintained are not consulted; IsMaintained is set
+// under a third party's extended support too (see store.EOLRelease).
 //
-// A row Ecosystem() rejects is skipped and counted, not guessed at. A date
-// that is empty or does not parse is ignored, and a row with none that
-// parses is not past EOL: an unpublished date is not evidence the release
-// ended, and a live key's entries are never restored. "Past" is strictly
-// after, endoflife.date's own isEol semantics, the same comparison
-// scancmd.eolStatusFromRow makes.
+// A row Ecosystem() rejects is skipped and counted, not guessed at. An
+// EOLFrom that is empty or does not parse leaves the row not past EOL: an
+// unpublished date is not evidence the release ended, and a live key's
+// entries are never restored. "Past" is strictly after, endoflife.date's own
+// isEol semantics, the same comparison scancmd.eolStatusFromRow makes.
 func pastEOLKeys(rows []store.EOLRelease, now time.Time) (map[string]string, int) {
 	past := map[string]string{}
 	rejected := 0
@@ -99,23 +101,48 @@ func pastEOLKeys(rows []store.EOLRelease, now time.Time) (map[string]string, int
 			rejected++
 			continue
 		}
-		var last time.Time
-		lastRaw := ""
-		for _, raw := range []string{row.EOLFrom, row.EOASFrom, row.EOESFrom} {
-			d, err := time.Parse("2006-01-02", raw)
-			if err != nil {
-				continue
-			}
-			if lastRaw == "" || d.After(last) {
-				last, lastRaw = d, raw
-			}
-		}
-		if lastRaw == "" || !now.After(last) {
+		d, err := time.Parse("2006-01-02", row.EOLFrom)
+		if err != nil || !now.After(d) {
 			continue
 		}
-		past[key] = lastRaw
+		past[key] = row.EOLFrom
 	}
 	return past, rejected
+}
+
+// newUnder reports whether this run stored, under key, any record the seed
+// did not already hold under key -- a record new to the seed, or one the seed
+// held only under other keys. Either is the provider still adding to the
+// release, which makes the key live whatever the catalog's dates say: its
+// narrowings are the upstream correcting itself, and the entry-level rule
+// must leave them alone.
+//
+// It is the half of the rule the data answers, measured on the first
+// recovery build (run 36541185015, 2026-09-29): Debian:11 was flat at 2,562
+// records, while Amazon Linux:2 (+119), Ubuntu:16.04:LTS (+2,526), Red Hat:6
+// (+752), SLES:15.SP3 (+1,799) and openSUSE Leap:15.6 (+14,963) all kept
+// growing past their EOLFrom -- and a dates-only rule "restored" the
+// corrections on every one of them.
+//
+// This run's side comes from w's index (IDsUnder), read before carry-forward
+// writes anything; the seed's side from its by-id records (seed.Advisory),
+// never its index, which may be a schema behind. It stops at the first new
+// record, so a live key costs little and only a flat key is read in full.
+func newUnder(w, seed *store.Bolt, key string) (bool, error) {
+	ids, err := w.IDsUnder(key)
+	if err != nil {
+		return false, err
+	}
+	for _, id := range ids {
+		held, found, err := seed.Advisory(id)
+		if err != nil {
+			return false, err
+		}
+		if !found || !slices.ContainsFunc(held.Affected, func(x advisory.Affected) bool { return x.Ecosystem == key }) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // freezeSince is the freeze time for key: the seed's existing Frozen[key] if
@@ -148,25 +175,40 @@ func freezeSince(seedMeta store.Meta, name, key string) time.Time {
 // carryForward is D110. Two rules, one read of the seed's records:
 //
 //   - Whole-key. A key a provider that RAN declared in the seed and did not
-//     declare this run is copied from the seed in full -- each seed record cut
-//     down to its entries under that key, so a record the provider stopped
+//     declare this run is copied from the seed -- each seed record cut down
+//     to its entries under that key, so a record the provider stopped
 //     emitting under a live key does not come back there (D16) -- and stays
-//     declared, marked Frozen. A provider that did not run, or whose fetch
-//     failed (that aborted the build before this, R1), carries nothing: the
-//     publish guard's refusal is the right answer to a broken run.
-//   - Entry-level, past EOL only. For a key this run's provider still
-//     declares whose release is past the last of its end dates (see
-//     pastEOLKeys) in THIS build's D87 catalog, a
-//     seed record carrying an entry under it that this run re-emitted
-//     WITHOUT one gets the seed's entries for that key back. A seed record
-//     this run did not re-emit at all is a withdrawal (D16) and is not
-//     inserted. A live key not past EOL is never touched: a record narrowing
-//     on a maintained release is the upstream correcting itself (Canonical's
-//     tracker, D85), measured as every live-key entry removal but Debian:11's
-//     in 28 days.
+//     declared, marked Frozen. A seed record that ALSO affects a key the same
+//     provider still serves, and that this run did not re-emit, is not
+//     copied: the provider would have emitted it for that live key, so its
+//     absence is a withdrawal the provider made observable (D16), not the
+//     key going quiet. A record under the frozen key alone is carried --
+//     nothing tonight tells its withdrawal from the key's retirement. A
+//     provider that did not run, or whose fetch failed (that aborted the
+//     build before this, R1), carries nothing: the publish guard's refusal
+//     is the right answer to a broken run.
 //
-// The seed is read by its by-id records, never its index (store.EachAdvisory),
-// so a seed one schema behind is carried from like a current one. It is read
+//   - Entry-level, past EOL and flat only. For a key this run's provider
+//     still declares whose release is past EOLFrom in THIS build's D87
+//     catalog (pastEOLKeys) AND under which this run stored no record the
+//     seed did not already hold there (newUnder), a seed record carrying an
+//     entry under it that this run re-emitted WITHOUT one gets the seed's
+//     entries for that key back. A seed record this run did not re-emit at
+//     all is a withdrawal (D16) and is not inserted. Every other live key is
+//     left alone: a record narrowing on a release the provider still serves
+//     is the upstream correcting itself (Canonical's tracker, D85), measured
+//     as every live-key entry removal but Debian:11's in 28 days.
+//
+//     Known limit, accepted: a live key that gains no record on some night
+//     and narrows a record that same night reads as flat, so that narrowing
+//     is restored and the key marked Frozen for the night. The next night it
+//     gains a record the key is judged live again, the restored entry is not
+//     carried, and the provider's fresh provenance holds no Frozen for it --
+//     the same healing T2 holds for a key that reappears.
+//
+// The seed is read by its by-id records, never its index (store.EachAdvisory,
+// store.Advisory), so a seed one schema behind is carried from like a current
+// one. It is read
 // on every call, even when no key needs carrying, because the per-key count
 // lines take their old counts from this pass; a 1.5M-record pass costs
 // ~18.6 s, accepted for a signal that must not go silent. Writes go
@@ -198,7 +240,14 @@ func carryForward(seedPath, label string, w *store.Bolt, running map[string]stor
 		}
 	}
 
-	entry := map[string]string{} // live, past-EOL key -> its last end date
+	// Opened before the entry-level judgement, which reads it (newUnder).
+	src, err := store.OpenSeedRecords(seedPath)
+	if err != nil {
+		return carryResult{}, fmt.Errorf("open seed %s: %w", label, err)
+	}
+	defer src.Close()
+
+	entry := map[string]string{} // live, past-EOL, flat key -> its EOLFrom
 	if len(eolRows) == 0 {
 		// EOL_ENABLE=0 (a failed EOL fetch aborts the build, D87, so it never
 		// reaches here). Without a catalog no key can be judged past EOL, and
@@ -209,9 +258,18 @@ func carryForward(seedPath, label string, w *store.Bolt, running map[string]stor
 		if rejected > 0 {
 			fmt.Fprintf(stderr, "entry-level carry-forward: %d end-of-life row(s) name no ecosystem key this build can derive; skipped\n", rejected)
 		}
-		for key, from := range past {
-			if _, live := owner[key]; live {
-				entry[key] = from
+		// Judged before the pass below writes anything: newUnder reads this
+		// run's records under the key, and a restored entry is not one.
+		for _, key := range sortedKeys(past) {
+			if _, live := owner[key]; !live {
+				continue
+			}
+			grew, err := newUnder(w, src, key)
+			if err != nil {
+				return carryResult{}, fmt.Errorf("compare %s with seed %s: %w", key, label, err)
+			}
+			if !grew {
+				entry[key] = past[key]
 			}
 		}
 	}
@@ -220,14 +278,9 @@ func carryForward(seedPath, label string, w *store.Bolt, running map[string]stor
 	// seed counts printKeyCounts reports against, and those lines are the
 	// nightly's erosion signal on every seeded build, not only on one that
 	// carried.
-	src, err := store.OpenSeedRecords(seedPath)
-	if err != nil {
-		return carryResult{}, fmt.Errorf("open seed %s: %w", label, err)
-	}
-	defer src.Close()
-
 	res := carryResult{ran: true, seedCounts: map[string]int{}}
 	wholeN := map[string]int{}
+	wholeWithdrawn := map[string]int{}
 	restored := map[string]int{}
 	withdrawn := map[string]int{}
 	pending := make([]advisory.Advisory, 0, putBatchSize)
@@ -251,35 +304,59 @@ func carryForward(seedPath, label string, w *store.Bolt, running map[string]stor
 				keys = append(keys, aff.Ecosystem)
 			}
 		}
+		// cur is this run's record under a's ID, read at most once and only
+		// when a rule asks whether the record was re-emitted.
+		var cur advisory.Advisory
+		looked, found := false, false
+		reEmitted := func() (bool, error) {
+			if !looked {
+				var err error
+				if cur, found, err = w.Advisory(a.ID); err != nil {
+					return false, err
+				}
+				looked = true
+			}
+			return found, nil
+		}
 		var carried []advisory.Affected
 		for _, key := range keys {
 			res.seedCounts[key]++
-			if _, ok := whole[key]; ok {
-				wholeN[key]++
-				carried = append(carried, entriesUnder(a, key)...)
+			name, ok := whole[key]
+			if !ok {
+				continue
 			}
+			// Observable only by the provider that ran: a live key of ANOTHER
+			// provider was never this provider's record to re-emit, so it says
+			// nothing about whether this one was withdrawn.
+			if slices.ContainsFunc(keys, func(k string) bool { return owner[k] == name }) {
+				ok, err := reEmitted()
+				if err != nil {
+					return err
+				}
+				if !ok {
+					wholeWithdrawn[key]++
+					continue
+				}
+			}
+			wholeN[key]++
+			carried = append(carried, entriesUnder(a, key)...)
 		}
-		var eol []string
 		for _, key := range keys {
-			if _, ok := entry[key]; ok {
-				eol = append(eol, key)
+			if _, ok := entry[key]; !ok {
+				continue
 			}
-		}
-		if len(eol) > 0 {
-			cur, found, err := w.Advisory(a.ID)
+			ok, err := reEmitted()
 			if err != nil {
 				return err
 			}
-			for _, key := range eol {
-				switch {
-				case !found:
-					withdrawn[key]++
-				case slices.ContainsFunc(cur.Affected, func(x advisory.Affected) bool { return x.Ecosystem == key }):
-					// Re-emitted with the key: the fresh entry wins.
-				default:
-					restored[key]++
-					carried = append(carried, entriesUnder(a, key)...)
-				}
+			switch {
+			case !ok:
+				withdrawn[key]++
+			case slices.ContainsFunc(cur.Affected, func(x advisory.Affected) bool { return x.Ecosystem == key }):
+				// Re-emitted with the key: the fresh entry wins.
+			default:
+				restored[key]++
+				carried = append(carried, entriesUnder(a, key)...)
 			}
 		}
 		if len(carried) == 0 {
@@ -320,8 +397,12 @@ func carryForward(seedPath, label string, w *store.Bolt, running map[string]stor
 		prov.Ecosystems = ecos
 		running[name] = prov
 		since := setFrozen(name, key)
-		fmt.Fprintf(stderr, "%s emitted nothing for %s; carried %d advisories from seed %s, frozen since %s\n",
+		line := fmt.Sprintf("%s emitted nothing for %s; carried %d advisories from seed %s, frozen since %s",
 			name, key, wholeN[key], label, since.Format("2006-01-02"))
+		if n := wholeWithdrawn[key]; n > 0 {
+			line += fmt.Sprintf("; %d not re-emitted despite affecting a key %s still serves, left withdrawn (D16)", n, name)
+		}
+		fmt.Fprintln(stderr, line)
 	}
 	for _, key := range sortedKeys(entry) {
 		if restored[key] == 0 && withdrawn[key] == 0 {
@@ -336,7 +417,7 @@ func carryForward(seedPath, label string, w *store.Bolt, running map[string]stor
 		if withdrawn[key] > 0 {
 			parts = append(parts, fmt.Sprintf("%d not re-emitted at all, left withdrawn (D16)", withdrawn[key]))
 		}
-		fmt.Fprintf(stderr, "%s (past EOL since %s): %s\n", key, entry[key], strings.Join(parts, "; "))
+		fmt.Fprintf(stderr, "%s (past EOL since %s, no record new to it this run): %s\n", key, entry[key], strings.Join(parts, "; "))
 	}
 	return res, nil
 }

@@ -343,14 +343,18 @@ func TestCarryForward_T5_StatusListsFrozenKeys(t *testing.T) {
 	}
 }
 
-// T6. D16: a live key is never carried. A record the provider stopped emitting
-// under Go is gone from Go — including one that ALSO affected the frozen key,
-// which survives there with its frozen entry only.
+// T6. D16: a live key is never carried, and neither is a withdrawal the
+// provider made observable. A record the provider stopped emitting under Go
+// is gone from Go. OSV-WD-BOTH ALSO affected the frozen key, but it affected
+// Go too, which the provider still serves -- so its absence tonight is the
+// provider withdrawing it, not the key going quiet, and it is not carried
+// under Retired-Eco either. OSV-RET-1 affected only the frozen key: nothing
+// tonight could say whether it was withdrawn, so it is carried.
 //
-// OSV-WD-BOTH is this spike's addition to the scenario as specified: without a
-// record affecting both keys that the provider did NOT re-emit, "carry the
-// live-key entries too" (m4) cannot be told apart from the design, because a
-// Go-only withdrawn record is never enumerated under Retired-Eco at all.
+// OSV-MOVED is what keeps "carry the live-key entries too" (m4) visible now
+// that OSV-WD-BOTH is not carried at all: it is re-emitted with its Go entry
+// moved to another package, so carrying the seed's Go entry would put it back
+// under Go/alpha.
 func TestCarryForward_T6_LiveKeysAreNeverCarried(t *testing.T) {
 	seedPath := carrySeed(t, map[string]store.Provenance{
 		"osv": {Ecosystems: []string{"Go", "Retired-Eco"}, DataAsOf: seedFreezeTime},
@@ -358,22 +362,57 @@ func TestCarryForward_T6_LiveKeysAreNeverCarried(t *testing.T) {
 		adv("OSV-GO-1", affects("Go", "alpha")),
 		adv("GHSA-withdrawn", affects("Go", "alpha")),
 		adv("OSV-WD-BOTH", affects("Go", "alpha"), affects("Retired-Eco", "beta")),
+		adv("OSV-MOVED", affects("Go", "alpha"), affects("Retired-Eco", "beta")),
 		adv("OSV-RET-1", affects("Retired-Eco", "beta")),
 	)
 	p := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{
 		adv("OSV-GO-1", affects("Go", "alpha")),
+		adv("OSV-MOVED", affects("Go", "gamma")),
 	}}
-	dst := mustBuild(t, seedPath, p)
+	dst, code, logs := build(t, seedPath, p)
+	if code != 0 {
+		t.Fatalf("Update = %d, want 0:\n%s", code, logs)
+	}
 	db, _ := openOut(t, dst)
 
 	if got, want := lookupIDs(t, db, "Go", "alpha"), []string{"OSV-GO-1"}; !slices.Equal(got, want) {
 		t.Errorf("Lookup(Go, alpha) = %v, want only the re-emitted %v", got, want)
 	}
-	if got, want := lookupIDs(t, db, "Retired-Eco", "beta"), []string{"OSV-RET-1", "OSV-WD-BOTH"}; !slices.Equal(got, want) {
-		t.Errorf("Lookup(Retired-Eco, beta) = %v, want %v", got, want)
+	if got, want := lookupIDs(t, db, "Retired-Eco", "beta"), []string{"OSV-MOVED", "OSV-RET-1"}; !slices.Equal(got, want) {
+		t.Errorf("Lookup(Retired-Eco, beta) = %v, want %v: OSV-WD-BOTH was withdrawn under a key osv still serves", got, want)
 	}
-	if both, ok := record(t, db, "Retired-Eco", "beta", "OSV-WD-BOTH"); ok && !slices.Equal(ecosOf(both), []string{"Retired-Eco"}) {
-		t.Errorf("OSV-WD-BOTH carried with %v, want its frozen Retired-Eco entry only", ecosOf(both))
+	if _, ok := record(t, db, "Go", "alpha", "OSV-WD-BOTH"); ok {
+		t.Error("OSV-WD-BOTH is back under Go")
+	}
+	const line = "osv emitted nothing for Retired-Eco; carried 2 advisories from seed"
+	const withdrawn = "; 1 not re-emitted despite affecting a key osv still serves, left withdrawn (D16)\n"
+	if !strings.Contains(logs, line) || !strings.Contains(logs, withdrawn) {
+		t.Errorf("stderr lacks %q ... %q:\n%s", line, withdrawn, logs)
+	}
+}
+
+// T6b. The withdrawal T6 drops has to be observable by the provider that ran:
+// a seed record whose other entry is under ANOTHER provider's live key was
+// never that provider's to re-emit, so its absence says nothing and it is
+// carried like any record under the frozen key.
+func TestCarryForward_T6b_OtherProvidersLiveKeyIsNotAWithdrawal(t *testing.T) {
+	seedPath := carrySeed(t, map[string]store.Provenance{
+		"osv":      {Ecosystems: []string{"Go", "Retired-Eco"}, DataAsOf: seedFreezeTime},
+		"beta-src": {Ecosystems: []string{"Other-Eco"}, DataAsOf: seedFreezeTime},
+	},
+		adv("OSV-GO-1", affects("Go", "alpha")),
+		adv("OSV-CROSS", affects("Retired-Eco", "beta"), affects("Other-Eco", "delta")),
+		adv("BETA-1", affects("Other-Eco", "delta")),
+	)
+	osv := fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{adv("OSV-GO-1", affects("Go", "alpha"))}}
+	beta := fakeProvider{name: "beta-src", covers: []string{"Other-Eco"}, advs: []advisory.Advisory{adv("BETA-1", affects("Other-Eco", "delta"))}}
+	dst, code, logs := build(t, seedPath, osv, beta)
+	if code != 0 {
+		t.Fatalf("Update = %d, want 0:\n%s", code, logs)
+	}
+	db, _ := openOut(t, dst)
+	if got, want := lookupIDs(t, db, "Retired-Eco", "beta"), []string{"OSV-CROSS"}; !slices.Equal(got, want) {
+		t.Errorf("Lookup(Retired-Eco, beta) = %v, want %v", got, want)
 	}
 }
 
