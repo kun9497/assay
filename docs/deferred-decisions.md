@@ -1485,6 +1485,113 @@ skip it, and reject a repeat rather than take the last.
 
 ---
 
+### Application packages inside container images
+
+An image scan inventories the operating system, not what was installed on top of it.
+`catalogFromImage` (`internal/scancmd/scancmd.go:980`) reads `etc/os-release`; the apk database
+under `lib/`, `usr/lib/` (D88) or `var/lib/` (D95), probed for CleanStart's marker package when
+there is no os-release (D101); dpkg's `status` file or its `status.d/` directory (D54); an
+rpmdb in any of its three backends (D44, D76); pacman's `local/*/desc` (D97); and Bitnami's
+`opt/bitnami/**/.spdx-*.spdx` markers with `.bitnami_components.json` (D99) — the probes at
+`scancmd.go:982`, `:1000`, `:1017`, `:1051` and `:1228`. Nothing reads a
+`node_modules/*/package.json`, a Python `*.dist-info`, a jar or a Go binary inside an image.
+Bitnami's markers are the one application inventory, and they keep only `pkg:bitnami`
+packages, dropping the Maven purls the same documents carry
+(`internal/cataloger/bitnamidb/bitnamidb.go:42`–`:46`). The same files are read when they ARE
+the target: `dir:`, `jar:` and `file:` reach `internal/cataloger/dirscan`, `jar` and
+`gobinary`.
+
+**Why it is not built.** D70 recorded the gap and stopped: "jars inside container images need
+a whole-tree walk the Source interface does not expose yet — the image path still catalogs OS
+packages only" (roadmap, D70). D99 has since added Bitnami's markers, but the reason still
+holds. The three discovery primitives an image offers refuse its root — `FilesUnder`,
+`FilesNamed` and `FilesMatching` return an error for `""` or `"."`
+(`internal/source/under.go:42`, `:148`, `:257`) — so a `node_modules` or a jar at a path nobody
+named in advance cannot be found, and a Go binary has no name to match on at all. Every
+lockfile, jar and binary cataloger takes an OS path rather than bytes (`npmlock.go:56`
+`os.ReadFile`, `jar.go:79` `zip.OpenReader`, `gobinary.go:29` `buildinfo.ReadFile`). And no
+cataloger for *installed* packages exists for any target kind: `npmlock` reads a lockfile's
+`node_modules/...` keys, never an installed `package.json`, and nothing reads `*.dist-info`.
+The deferral lived in the roadmap alone; until this entry it had no record here and no
+revisit trigger.
+
+**Why it matters: it is silent.** A probe in the 2026-09-30 review built an image holding
+`app/package-lock.json` and `app/node_modules/demo/package.json` beside a one-package OS
+database, against a database with an npm advisory matching `demo`. The scan exits 0 with 0
+findings, `targetIncomplete` 0 and `unreadManifests` 0 — in table, JSON and SARIF, with
+`--fail-on-incomplete` and with `=target` — and the table says "No known vulnerabilities found
+in 1 package(s)." Nothing in the output says an npm tree was there. CI must never confuse
+"found nothing" with "was broken" (CLAUDE.md), and this is D26's shape one target kind over —
+the "npm and PyPI directory scanning" entry below: "A trigger that waits for a report is the
+wrong shape for a silent failure." D109's channel for manifests a scan could not read does not
+reach images: `manifests` "stays zero for every target that is not a directory"
+(`scancmd.go:412`–`:414`) and is assigned only on the directory path (`scancmd.go:493`). An
+image with no package database at all is not silent — `catalogFromImage` refuses an empty
+inventory with "no supported package database found" and exit 2 (`scancmd.go:1191`) — so the
+silence falls on images that carry a distro as well, as both real images below do.
+
+**Measured on real images.** The weekly differential of 2026-09-27 (run 36359686086, artifact
+`scanner-diff-capture` 10945426619) shows the residue on two targets. On `ubi8n18`
+(`ubi8/nodejs-18`) all 22 grype-only tuples are npm: 11 packages under
+`/usr/lib/node_modules/{npm,nodemon}/node_modules`, every one an `exact-direct-match`,
+including a Critical in `tar` 6.2.1. On `bci156` (SLE BCI 15.6) all 33 grype-only tuples are
+the Go standard library, go1.24.11, compiled into `/usr/bin/container-suseconnect`, including
+a Critical (GO-2026-4337). assay's own summaries report nothing missing: 289 components, 289
+evaluated, `targetIncomplete` 0 on the first; 138, 138 and 0 on the second. Fed the same
+packages as a CycloneDX SBOM, assay matched every one of grype's advisory IDs — the data is
+there, the inventory is not. `scandiff` cannot see it: `judge` floors components, agreement,
+the findings range and not-evaluated, and has no ceiling on grype-only tuples
+(`cmd/scandiff/judge.go:26`–`:44`), so both targets were judged `ok` in that run. Nor does
+trivy corroborate anything: invoked the way `scandiff` runs it (`image --format json
+--quiet`), it returned only `os-pkgs` results on both.
+
+**What the SBOM route keeps and loses.** Scanning an SBOM of the image instead is today's
+workaround, and it is not free. Measured in the same review with syft 0.84.1 on a synthetic
+image: CycloneDX keeps the distro (`syft:distro:*`,
+`internal/cataloger/cyclonedx/cyclonedx.go:272`) and with it EOL, `Package.Source` through the
+purl's `upstream` qualifier, and the module stream (`syft:metadata:modularityLabel`,
+`cyclonedx.go:237`). SPDX never sets `Target.Distro` (`internal/cataloger/spdx/spdx.go:72`,
+D84), so EOL is lost. Both formats lose three things the image path has: the apk provides
+bridge, because `Package.Provides` is populated only by the apk cataloger
+(`internal/pkgmeta/package.go:43`, D95); the empty-inventory refusal, because an SBOM of zero
+components is `Trustworthy` (`internal/report/table.go:96`) and exits 0 where an image with no
+package database exits 2 (D43's rule for the RPM case); and D36's count of unreadable package
+records, which the image path adds to `SkippedNoVersion` (`scancmd.go:1243`) and an SBOM
+cannot carry — a record its generator could not read is simply absent. Architecture is not
+among the losses that matter: it is not a matching input (`pkgmeta.Package` has no
+architecture field).
+
+**Options, by size — none chosen; choosing one is a D-decision.**
+
+- **A scan-time disclosure line (S, no schema change).** One stderr line on every image scan
+  stating the scope — OS packages and Bitnami markers read, application packages inside the
+  image not — beside the `scanned … as an image` line `Run` already prints
+  (`scancmd.go:436`). Honest for a human reader; invisible to `--output json` and SARIF.
+- **A machine-readable `inventoryScope` in JSON and SARIF (M, schema bump).** To be designed
+  together with the target-level coverage object the same review proposes, under one
+  D-number: two schema bumps that each describe half of what a scan covered would leave the
+  reader to assemble the answer.
+- **A service-side hybrid with a pinned SBOM generator (CycloneDX only).** Application
+  packages come from an SBOM a pinned generator makes of the same image; CycloneDX only,
+  because SPDX loses the distro. What it contributes carries no D36 count of records the
+  generator could not read.
+- **Native in-image catalogers (L/XL).** A whole-tree primitive that does not refuse the root,
+  byte-based entry points for the lockfile, jar and Go-binary catalogers, and installed-package
+  catalogers (`node_modules/*/package.json`, `*.dist-info`) that exist for no target kind
+  today.
+
+**Revisit when** the first scan-time disclosure of the image's scope lands, or a per-type
+grype-only ceiling in `scandiff` (npm, go-module) is added and trips, or a user reports an
+application CVE an image scan missed. The third alone would repeat D26's mistake — a trigger
+that waits for a report — which is why it is not the only one.
+
+**Groundwork.** `FilesMatching` already matches at any depth under a named directory and hands
+back bytes with their layer (`under.go:222`–`:223`, D99), so a probe of a fixed location —
+`usr/lib/node_modules`, where both npm trees above sit — needs no new primitive. What it cannot
+do is find a tree at a path nobody named, which is the whole-tree walk D70 asked for.
+
+---
+
 ### What a directory scan does not read
 
 `vendor/`, `go.sum`, and the module cache. A directory scan reads `go.mod` and stops (D23).

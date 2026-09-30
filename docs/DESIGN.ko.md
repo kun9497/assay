@@ -23,8 +23,18 @@ crates.io, Maven, RubyGems, NuGet, Packagist)와 함께 Alpine, Debian, Ubuntu, 
 fix 상태를 담은 Red Hat의 CSAF VEX; Amazon의 ALAS(core와 AL2 extras); Oracle의 ELSA;
 Fedora의 Bodhi; 그리고 SUSE의 CSAF VEX까지 — 중앙에서 빌드해 매일 갱신하고 NVD 등급까지
 조인한 것입니다 — 그리고 `assay scan`이 컨테이너 이미지, Go 바이너리, 디렉터리, SBOM을
-거기에 매칭합니다. 컨테이너 이미지를 직접 읽으므로 syft는 필요 없습니다. 실제 대상에서
-grype와 동일한 finding을 보고합니다: 개수만 같은 것이 아니라 CVE 집합이 같습니다.
+거기에 매칭합니다. 컨테이너 이미지는 운영체제 패키지만 직접 읽으므로, 그 범위에서는 syft가
+필요 없습니다. 주간 차등 비교(D93)는 grype의 finding과 튜플 단위로 비교하며 — 개수만 같은
+것이 아니라 CVE 집합이 같습니다 — [비교 문서](comparison.ko.md)가 계열별 차이를 모두
+분류합니다. 이미지 안에 설치된 애플리케이션 패키지는 인벤토리화되지 않습니다: 이미지 스캔은
+이미지 안의 `node_modules/*/package.json`도, Python `*.dist-info`도, jar도, Go 바이너리도
+읽지 않으며, 유일한 애플리케이션 인벤토리는 Bitnami 자체의 `/opt/bitnami` 마커입니다(D99).
+대상이 디렉터리·jar·바이너리일 때는 같은 파일들을 읽지만, 이미지 안에서는 미룹니다(D70 —
+[`docs/deferred-decisions.ko.md`](deferred-decisions.ko.md)의 "컨테이너 이미지 안의
+애플리케이션 패키지" 항목). 그 대가는 두 대상에서 차등 비교로 측정됩니다: 2026-09-27 주간
+실행에서 grype가 `ubi8/nodejs-18`에서 보고했지만 assay는 보고하지 않은 22개 튜플은 모두
+`/usr/lib/node_modules` 아래의 npm 패키지이고, SLE BCI 15.6의 33개는 모두 하나의 바이너리에
+컴파일된 Go 표준 라이브러리입니다.
 
 배포판 패키지는 **소스 패키지를 거쳐** 매칭됩니다. `openssl` 권고가 설치된 `libssl3`에
 도달하고, 리포트가 둘 다 표시합니다. distro 스캐너가 조용히 놓치는 지점이 바로 이 간접 참조입니다.
@@ -41,10 +51,15 @@ finding은 처음 매칭된 하나가 아니라 **모든** 데이터베이스의
 그중 14건은 둘 중 하나만 평가를 매깁니다. 이 변경 전에는 판정 14건이 패키지 인덱스가 어느
 레코드를 먼저 나열했는지에 달려 있었다는 뜻입니다.
 
-그 아래 내용은 여전히 구현이 아니라 설계 목표입니다. Alpine이 아닌 이미지는 **읽기는 하지만
-매칭할 수 없습니다** — `assay scan debian:12`는 지원하는 패키지 데이터베이스를 찾지 못했다고
-말하고 2를 반환합니다. 검사한 적 없는 이미지를 깨끗하다고 보고하지 않습니다.
+assay가 라우팅하지 않는 배포판을 가진 이미지 — CentOS 7(D50)이나 인식하지 못하는
+`/etc/os-release` — 도 여전히 읽습니다: 그 안의 모든 OS 패키지를 카탈로그화하고 원인
+`coverage`로 미평가 보고합니다. assay가 라우팅은 하지만 데이터베이스에 그 키가 없는
+릴리스도 마찬가지입니다 — Fedora provider가 F43과 F44만 가져오므로 Fedora 42가 그렇습니다.
+이미지 안에서 그 밖에 평가할 수 있는 것이 전혀 없으면 둘 다 검사한 적 없는 이미지를
+깨끗하다고 보고하는 대신 2를 반환합니다("none of the N component(s) could be evaluated;
+this result cannot be trusted").
 
+그 아래 내용은 여전히 구현이 아니라 설계 목표입니다.
 [`docs/superpowers/specs/2026-07-29-assay-roadmap.ko.md`](superpowers/specs/2026-07-29-assay-roadmap.ko.md)에
 전체 설계와 각 결정의 근거가 담겨 있습니다.
 

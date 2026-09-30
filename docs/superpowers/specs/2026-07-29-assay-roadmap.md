@@ -4251,9 +4251,10 @@ Erosion is entry removal, not record removal: over 28 days the distro keys lost 
 outright and 45,603 key entries. Of the entries, 43,802 belong to ONE event — `Debian:11` went
 from 46,365 to 2,562 between 08-30 and 09-20 (`[Debian:11,12,13,14] → [12,13,14]` on every
 record, e.g. `DEBIAN-CVE-2022-22844`), which is bullseye's LTS ending on 2026-08-31 and OSV's
-Debian export dropping it: the key stayed, 94% of its data left, and a Debian 11 scan today
-finds 94% less than a month ago. The 20% guard (#135) would have refused it, but it merged
-on 09-21, one day after the loss became the baseline. Every other live-key entry removal —
+Debian export dropping it: the key stayed and 94% of its advisory records left. What that
+cost a given Debian 11 image was not measured — the 94% counts records, not CVEs or
+detections. The 20% guard (#135) would have refused it, but it merged on 09-21, one day after
+the loss became the baseline. Every other live-key entry removal —
 901 in 28 days, spread across the Ubuntu LTS keys — is Canonical's tracker narrowing a record
 from every release to the one or two still affected (D85): legitimate, and the reason live
 keys are never restored. Past-EOL keys lost 171 entries in 28 days, all small aging-out. No
@@ -4271,12 +4272,18 @@ records, while `Amazon Linux:2` (+119), `Ubuntu:16.04:LTS` (+2,526), `Red Hat:6`
 `SLES:15.SP3` (+1,799) and `openSUSE Leap:15.6` (+14,963) were all still growing past their
 `EOLFrom` — and a dates-only rule restored corrections on, and froze, every one of those five.
 
-**Recovery.** The 08-30 snapshot (`sha256:54a29e02…`) still carries `Debian:11` intact.
-`db build --seed` on that digest, once, restores the 43,802 entries as frozen since
-2026-08-30 and the nightly carries them from then on; the guard accepts it because coverage
-grows. `db-publish.yml` gains a `seed` `workflow_dispatch` input so that one build runs on the
+**Recovery.** The 08-30 snapshot (`sha256:54a29e02…`) still carries `Debian:11` intact, and
+`db-publish.yml` gained a `seed` `workflow_dispatch` input so a build seeded from it runs on the
 nightly's own runner and token rather than an operator's machine — it selects the seed only,
-never `--force`.
+never `--force`. The first dispatch (36541185015) restored no `Debian:11` entry, for the reason
+the Measured paragraph gives. The second (36651409018, 2026-09-30, on `e103a6f`, seeded from
+`ghcr.io/kun9497/assay-db:snapshot-2026-08-30`) did: "restored its entry on 43802 advisories
+re-emitted without it, frozen since 2026-08-19; 1 not re-emitted at all, left withdrawn (D16)".
+`Debian:11` went from 46,365 advisories in the seed to 46,364, and the 36m25s build published
+as `sha256:ba60414f…` without `--force`. The freeze date is the seed's osv `DataAsOf`
+(`freezeSince`, `internal/dbcmd/carry.go:148`), not the 2026-08-30 this paragraph had planned.
+`Debian:11` was that run's only restore line: none of the twelve keys whose 190 entries the
+first run restored got one.
 
 **What this does not do.** A frozen record is never refreshed: the upstream stopped, so there
 is nothing to refresh it from, and the disclosure is the honest substitute. A schema bump that

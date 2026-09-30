@@ -1448,6 +1448,114 @@ status --bogus`도 마찬가지입니다. `db` 쪽은 플래그를 파싱한 적
 
 ---
 
+### 컨테이너 이미지 안의 애플리케이션 패키지
+
+이미지 스캔은 운영체제를 인벤토리화할 뿐, 그 위에 설치된 것은 인벤토리화하지 않습니다.
+`catalogFromImage`(`internal/scancmd/scancmd.go:980`)는 `etc/os-release`를 읽고; `lib/`,
+`usr/lib/`(D88) 또는 `var/lib/`(D95) 아래의 apk 데이터베이스를 읽으며, os-release가 없을
+때는 CleanStart의 마커 패키지를 탐지합니다(D101); dpkg의 `status` 파일이나 그 `status.d/`
+디렉터리(D54); 세 가지 백엔드 중 어느 것이든 rpmdb(D44, D76); pacman의 `local/*/desc`(D97);
+그리고 Bitnami의 `opt/bitnami/**/.spdx-*.spdx` 마커와 `.bitnami_components.json`(D99) —
+탐지 지점은 `scancmd.go:982`, `:1000`, `:1017`, `:1051`, `:1228`입니다.
+`node_modules/*/package.json`, Python `*.dist-info`, jar, 또는 이미지 안의 Go 바이너리는
+아무것도 읽지 않습니다. Bitnami의 마커가 유일한 애플리케이션 인벤토리이며, `pkg:bitnami` 패키지만
+남기고 같은 문서가 담고 있는 Maven purl은 버립니다
+(`internal/cataloger/bitnamidb/bitnamidb.go:42`–`:46`). 같은 파일들은 그것들이 바로
+대상일 때는 읽힙니다: `dir:`, `jar:`, `file:`는 `internal/cataloger/dirscan`, `jar`,
+`gobinary`에 도달합니다.
+
+**왜 만들지 않았나.** D70이 이 공백을 기록하고 멈췄습니다: "jars inside container images
+need a whole-tree walk the Source interface does not expose yet — the image path still
+catalogs OS packages only"(로드맵, D70). 그 뒤 D99가 Bitnami의 마커를 추가했지만 그 이유는
+여전히 유효합니다. 이미지가 제공하는 세 가지 탐색 원시 함수는 자신의 루트를 거부합니다 —
+`FilesUnder`, `FilesNamed`, `FilesMatching`은 `""`나 `"."`에 대해 오류를 반환하므로
+(`internal/source/under.go:42`, `:148`, `:257`) 미리 이름 붙여두지 않은 경로의
+`node_modules`나 jar는 찾을 수 없고, Go 바이너리는 애초에 매칭할 이름 자체가 없습니다.
+모든 lockfile·jar·바이너리 cataloger는 바이트가 아니라 OS 경로를 받습니다(`npmlock.go:56`의
+`os.ReadFile`, `jar.go:79`의 `zip.OpenReader`, `gobinary.go:29`의 `buildinfo.ReadFile`).
+그리고 *설치된* 패키지를 위한 cataloger는 어떤 대상 종류에도 존재하지 않습니다: `npmlock`은
+lockfile의 `node_modules/...` 키를 읽을 뿐 설치된 `package.json`은 절대 읽지 않고,
+`*.dist-info`는 아무것도 읽지 않습니다. 이 미룸은 로드맵에만 존재했고, 이 항목이 생기기
+전까지는 여기에 기록도 재방문 트리거도 없었습니다.
+
+**왜 중요한가: 조용하기 때문입니다.** 2026-09-30 검토에서의 한 탐침은 `app/package-lock.json`과
+`app/node_modules/demo/package.json`을 패키지 하나짜리 OS 데이터베이스 옆에 담은 이미지를
+만들어, `demo`와 일치하는 npm 권고가 있는 데이터베이스로 스캔했습니다. 스캔은 finding 0건,
+`targetIncomplete` 0, `unreadManifests` 0으로 종료 코드 0을 반환합니다 — table, JSON, SARIF
+모두에서, `--fail-on-incomplete`와 `=target`을 걸어도 — 그리고 table은 "No known
+vulnerabilities found in 1 package(s)."라고 말합니다. 출력 어디에도 npm 트리가 있었다는
+말은 없습니다. CI는 "found nothing"과 "was broken"을 절대 혼동해서는 안 되며(CLAUDE.md),
+이는 D26의 모양이 대상 종류 하나만 건너뛴 것입니다 — 아래 "npm과 PyPI 디렉터리 스캔" 항목의
+말대로: "신고를 기다리는 조건은 조용한 실패에 맞지 않는 모양입니다." D109가 마련한, 스캔이
+읽지 못한 매니페스트를 위한 채널은 이미지에 닿지 않습니다: `manifests`는 "디렉터리가 아닌
+모든 대상에 대해 0으로 남고"(`scancmd.go:412`–`:414`) 디렉터리 경로에서만 값이 채워집니다
+(`scancmd.go:493`). 패키지 데이터베이스가 아예 없는 이미지는 조용하지 않습니다 —
+`catalogFromImage`는 빈 인벤토리를 "no supported package database found"로 거부하고 2를
+반환합니다(`scancmd.go:1191`) — 그래서 그 조용함은 아래의 두 실제 이미지처럼 distro도 함께
+가진 이미지에만 떨어집니다.
+
+**실제 이미지에서 측정.** 2026-09-27 주간 차등 비교(실행 36359686086, 아티팩트
+`scanner-diff-capture` 10945426619)는 이 잔여물을 두 대상에서 보여줍니다. `ubi8n18`
+(`ubi8/nodejs-18`)에서는 grype-only 튜플 22건 전부가 npm입니다:
+`/usr/lib/node_modules/{npm,nodemon}/node_modules` 아래의 패키지 11개, 전부
+`exact-direct-match`이며, Critical인 `tar` 6.2.1을 포함합니다. `bci156`(SLE BCI 15.6)에서는
+grype-only 튜플 33건 전부가 `/usr/bin/container-suseconnect`에 컴파일된 Go 표준
+라이브러리 go1.24.11이며, Critical(GO-2026-4337)을 포함합니다. assay 자신의 요약은
+누락을 전혀 보고하지 않습니다: 첫 번째는 컴포넌트 289개, 평가 289개, `targetIncomplete`
+0; 두 번째는 138, 138, 0입니다. 같은 패키지를 CycloneDX SBOM으로 넣으면 assay는 grype의
+권고 ID를 하나도 빠짐없이 매칭했습니다 — 데이터는 있고, 인벤토리가 없을 뿐입니다.
+`scandiff`는 이를 보지 못합니다: `judge`는 컴포넌트 수, 일치, finding 범위, not-evaluated에
+바닥값(floor)을 두지만 grype-only 튜플에는 상한이 없어서
+(`cmd/scandiff/judge.go:26`–`:44`) 그 실행에서 두 대상 모두 `ok`로 판정됐습니다. trivy도
+아무것도 뒷받침하지 않습니다: `scandiff`가 실행하는 방식(`image --format json --quiet`)으로
+호출하면 둘 다 `os-pkgs` 결과만 반환했습니다.
+
+**SBOM 경로가 지키는 것과 잃는 것.** 대신 이미지의 SBOM을 스캔하는 것이 오늘의 우회로이며,
+공짜가 아닙니다. 같은 검토에서 syft 0.84.1로 합성 이미지를 측정한 결과: CycloneDX는 distro를
+유지하고(`syft:distro:*`, `internal/cataloger/cyclonedx/cyclonedx.go:272`) 그와 함께 EOL,
+purl의 `upstream` qualifier를 통한 `Package.Source`, 모듈 스트림
+(`syft:metadata:modularityLabel`, `cyclonedx.go:237`)도 유지합니다. SPDX는 `Target.Distro`를
+전혀 설정하지 않으므로(`internal/cataloger/spdx/spdx.go:72`, D84) EOL을 잃습니다. 두 형식
+모두 이미지 경로가 가진 세 가지를 잃습니다: apk provides 브리지 — `Package.Provides`는 apk
+cataloger만 채우기 때문(`internal/pkgmeta/package.go:43`, D95); 빈 인벤토리 거부 — 컴포넌트
+0개짜리 SBOM은 `Trustworthy`이고(`internal/report/table.go:96`) 패키지 데이터베이스가 없는
+이미지는 2를 반환하는 것과 달리 0을 반환하기 때문(RPM 사례에 대한 D43의 규칙); 그리고 D36의
+읽지 못한 패키지 레코드 수 — 이미지 경로는 이를 `SkippedNoVersion`에 더하지만
+(`scancmd.go:1243`) SBOM은 이를 담을 수 없습니다 — 생성기가 읽지 못한 레코드는 그냥
+존재하지 않는 셈이기 때문입니다. 아키텍처는 중요한 손실에 들지 않습니다: 매칭 입력이
+아니기 때문입니다(`pkgmeta.Package`에는 아키텍처 필드가 없습니다).
+
+**규모별 옵션 — 아직 아무것도 선택하지 않았고, 하나를 고르는 것은 D-결정입니다.**
+
+- **스캔 시점 공개 문구(S, 스키마 변경 없음).** 모든 이미지 스캔에서 stderr에 한 줄로 범위를
+  밝힙니다 — OS 패키지와 Bitnami 마커는 읽었고 이미지 안의 애플리케이션 패키지는 읽지
+  않았다고 — `Run`이 이미 찍는 `scanned … as an image` 줄 옆에(`scancmd.go:436`). 사람이
+  읽기에는 정직하지만 `--output json`과 SARIF에는 보이지 않습니다.
+- **JSON과 SARIF의 기계 판독 가능한 `inventoryScope`(M, 스키마 변경).** 같은 검토가 제안하는
+  대상 수준 커버리지 객체와 함께, 하나의 D-번호 아래 설계해야 합니다: 스캔이 커버한 것의
+  절반씩을 각각 기술하는 두 번의 스키마 변경은 답을 조립하는 일을 읽는 사람에게 떠넘기게
+  됩니다.
+- **고정된 SBOM 생성기를 쓰는 서비스 쪽 하이브리드(CycloneDX 한정).** 애플리케이션 패키지는
+  고정된 생성기가 같은 이미지로 만든 SBOM에서 가져옵니다; CycloneDX 한정인 이유는 SPDX가
+  distro를 잃기 때문입니다. 이것이 기여하는 부분은 생성기가 읽지 못한 레코드에 대한 D36
+  카운트를 전혀 담지 않습니다.
+- **네이티브 in-image cataloger(L/XL).** 루트를 거부하지 않는 전체 트리 원시 함수, lockfile·
+  jar·Go-바이너리 cataloger를 위한 바이트 기반 진입점, 그리고 오늘날 어떤 대상 종류에도
+  존재하지 않는 설치된 패키지용 cataloger(`node_modules/*/package.json`, `*.dist-info`).
+
+**언제 다시 볼까.** 이미지 범위에 대한 첫 스캔 시점 공개가 들어오거나, `scandiff`에 타입별
+grype-only 상한(npm, go-module)이 추가되어 걸리거나, 사용자가 이미지 스캔이 놓친
+애플리케이션 CVE를 보고할 때. 세 번째 조건 하나만으로는 D26의 실수 — 신고를 기다리는
+조건 — 를 반복하는 셈이라, 그것만이 유일한 조건이 아닙니다.
+
+**해둔 대비.** `FilesMatching`은 이름 붙은 디렉터리 아래 어떤 깊이에서든 이미 매칭되고
+레이어와 함께 바이트를 돌려주므로(`under.go:222`–`:223`, D99), 위의 두 npm 트리가 모두
+자리한 고정 위치 — `usr/lib/node_modules` — 를 탐지하는 데는 새 원시 함수가 필요 없습니다.
+할 수 없는 것은 아무도 이름 붙이지 않은 경로의 트리를 찾는 일이며, 이것이 D70이 요구한
+전체 트리 walk입니다.
+
+---
+
 ### 디렉터리 스캔이 읽지 않는 것
 
 `vendor/`, `go.sum`, 그리고 모듈 캐시. 디렉터리 스캔은 `go.mod`을 읽고 거기서 멈춥니다(D23).

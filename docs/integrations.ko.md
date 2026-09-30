@@ -46,6 +46,12 @@ GitHub 예제는 스캔을 한 번 돌려 SARIF를 파일로 쓴 뒤, 종료 코
   run: exit ${{ steps.scan.outputs.exit_code }}
 ```
 
+이 게이트는 이미지의 운영체제 패키지만 다룹니다. 이미지 안에 설치된 npm·Python·Java·Go
+의존성은 이미지 스캔이 인벤토리화하지 않으므로(D70, [미룸](deferred-decisions.ko.md)),
+여기서 통과해도 그것들에 대해서는 아무것도 말해주지 않습니다 — 그런 경우에는 애플리케이션
+자체의 락파일이나 소스 디렉터리(`assay scan dir:.`), 빌드된 바이너리나 jar, 혹은 이미지의
+SBOM을 게이팅하십시오.
+
 코드 스캐닝 업로드를 가능하게 하는 것은 `security-events: write` 권한입니다.
 
 ## 데이터베이스
