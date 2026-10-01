@@ -21,7 +21,7 @@ import (
 func sarifOf(t *testing.T, res matcher.Result, cat cyclonedx.Stats) map[string]any {
 	t.Helper()
 	var buf bytes.Buffer
-	if _, err := SARIF(&buf, res, cat, nil, "example.com/img:1", "v0.0.0-test", EOLStatus{}); err != nil {
+	if _, err := SARIF(&buf, res, cat, nil, "example.com/img:1", "v0.0.0-test", EOLStatus{}, Coverage{}); err != nil {
 		t.Fatalf("SARIF: %v", err)
 	}
 	var doc map[string]any
@@ -93,7 +93,7 @@ func TestSARIF_DisclosesCrossMappedFrom(t *testing.T) {
 		Severity:        severity.High, Score: 7.5,
 	}}}
 	var buf bytes.Buffer
-	if _, err := SARIF(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, nil, "example.com/img:1", "v0.0.0-test", EOLStatus{}); err != nil {
+	if _, err := SARIF(&buf, res, cyclonedx.Stats{Components: 1, Cataloged: 1}, nil, "example.com/img:1", "v0.0.0-test", EOLStatus{}, Coverage{}); err != nil {
 		t.Fatal(err)
 	}
 	if out := buf.String(); !strings.Contains(out, "SLES:15.SP6") {

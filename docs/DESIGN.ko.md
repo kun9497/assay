@@ -294,6 +294,15 @@ severity: high (7.8)   [highest of 2 sources]
 `--explain <id>`를 가리켜 자세한 내용을 안내합니다. `--output json`은 이긴 하나로 접지 않고
 모든 소스를 `ratings` 배열에 담습니다.
 
+D111부터는 `--output json`이 각 생태계 키에 대해 데이터베이스가 낸 finding뿐 아니라
+무엇을 할 수 있었는지도 말합니다: `coverage[]` 배열(state `live`, `frozen`,
+`not-in-database` 또는 `no-comparer`, provider와 그 데이터의 age, 키가 frozen일 때는
+D110 동결 날짜), 인식된 릴리스의 이름을 대거나 인식되지 않았다고 말하는 `distro` 객체,
+그리고 이미지 타깃에 한해 — 위의 application-package 한계를 이 문서에 맡기는 대신
+직접 명시하는 `inventoryScope` 객체(`osPackages`, `bitnami`, `applicationPackages`)가
+그것입니다. `summary.frozenKeys`는 frozen 상태 개수를 세고, `schemaVersion`은 11에서
+12로 올라갑니다. 전부 공개일 뿐입니다 — 종료 코드 변경은 없습니다.
+
 ### 데이터베이스
 
 권고 데이터는 로컬에 저장되고 스캔과 별개로 갱신됩니다. **스캔은 아무것도 다운로드하지
@@ -658,6 +667,15 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] SLES LTSS를 mainline-wins 동점 처리로 접음 (D91) — post-EOL fix가 같은 키
       아래서 드러남(bci-base finding 121→286건, curl이 진짜 FIXED IN을 보여줌),
       가려졌던 쌍둥이 385,621건을 버려서 셈
+- [x] 스캔은 무엇을 찾았든 아니든 키별로 자신이 커버한 것을 말한다 (D111) — JSON이
+      `coverage[]`(ecosystem, packages, evaluated, state live/frozen/not-in-database/no-comparer,
+      provider, dataAsOf, frozenSince), `distro`(id, versionId, ecosystem, recognized),
+      이미지 타깃을 위한 `inventoryScope`(osPackages, bitnami, applicationPackages),
+      `summary.frozenKeys`를 얻는다; 테이블은 finding이 0건이어도 frozen 키에 D110
+      각주를 찍고 live가 아닌 모든 상태를 나열한다; SARIF는 invocation properties
+      안에 `coverage`를 싣고 frozen 키마다 `assay/frozen-data` result를 하나씩 낸다.
+      `scancmd.Run`에서 인벤토리, Meta, `res.Skipped`로부터 계산되며 Matcher는 손대지
+      않는다. `schemaVersion` 12. 공개할 뿐 — 종료 코드 변경 없음.
 - [x] 상류가 더 이상 서비스하지 않는 릴리스는 사라진 것이 아니라 동결된 것 (D110) — seed로
       지어진 빌드가, seed의 JSON 레코드로부터, 돈 provider가 더 이상 내지 않는 키를
       통째로(whole-key), 그리고 D87 `EOLFrom`을 지났고 이번 실행이 seed에 없던 레코드를 하나도

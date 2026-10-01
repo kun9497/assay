@@ -413,6 +413,10 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		// its disclosure loop below is guarded on kind, so an image or SBOM
 		// scan cannot start printing directory diagnostics.
 		manifests dirscan.Manifests
+		// scope is set only by the image branch (D111): what the image's
+		// inventory was read from. nil for every other kind, which the JSON
+		// then omits — a directory has no OS database to have read or not.
+		scope *report.InventoryScopeRecord
 	)
 
 	kind, path, err := source.Classify(target)
@@ -443,7 +447,7 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 	// image-loader syntax, not a stripped prefix), so it keeps getting target.
 	switch kind {
 	case source.TargetImage:
-		t, stats, err := catalogImage(ctx, target)
+		t, stats, sc, err := catalogImage(ctx, target)
 		if err != nil {
 			// No "open %s:" wrapper. Every error reaching here already names
 			// the target, and the one that matters most is not an open failure
@@ -453,7 +457,7 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 			fmt.Fprintf(stderr, "error: %v\n", err)
 			return 2
 		}
-		inventory, cat = t, stats
+		inventory, cat, scope = t, stats, &sc
 
 	case source.TargetGoBinary:
 		t, stats, err := gobinary.Parse(path)
@@ -630,6 +634,20 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 	// the EOLFrom boundary without waiting for a real date to pass.
 	eolStatus := lookupEOL(inventory.Distro, m.EOL, clockNow())
 
+	// D111. Computed here, from what Run already holds — the inventory, the
+	// Meta read above for --db-max-age, and the matcher's skips — and threaded
+	// to every renderer the way eolStatus is, so the table, the JSON and the
+	// SARIF state one answer. Not a matcher.Result field: the Matcher is a core
+	// type, and these are facts about the target, not about the match.
+	// After the waivers above on purpose: they move findings, never skips, so
+	// the per-key evaluated counts are the same either way, and computing it
+	// last keeps it beside the renderers that read it.
+	cov := report.Coverage{
+		Keys:           report.CoverageOf(inventory, m, res.Skipped),
+		Distro:         report.DistroOf(inventory.Distro),
+		InventoryScope: scope,
+	}
+
 	// Three renderers, exactly one chosen: --explain replaces the report
 	// with one advisory's evidence, --output json replaces it with the
 	// stable document, and the default remains the human table. None of the
@@ -651,7 +669,7 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		// Summarize, not Table: Table would also print to stdout, and
 		// --explain must be the ONLY thing written there, the same
 		// discipline --output json owes `| jq`.
-		sum = report.Summarize(res, cat, manifests.Unread)
+		sum = report.Summarize(res, cat, manifests.Unread, cov)
 		n, werr := report.Explain(stdout, res, opts.Explain)
 		if werr != nil {
 			fmt.Fprintf(stderr, "error: write report: %v\n", werr)
@@ -681,7 +699,7 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 				sum.NotEvaluated, sum.IncompleteChecks)
 		}
 	case opts.Output == "json":
-		sum, err = report.JSON(stdout, res, cat, manifests.Unread, eolStatus)
+		sum, err = report.JSON(stdout, res, cat, manifests.Unread, eolStatus, cov)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: write report: %v\n", err)
 			return 2
@@ -691,13 +709,13 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		// scanned: a SARIF file is read in a web UI detached from the
 		// command that produced it, where "libc6 is affected" alone does
 		// not say which image.
-		sum, err = report.SARIF(stdout, res, cat, manifests.Unread, target, opts.Version, eolStatus)
+		sum, err = report.SARIF(stdout, res, cat, manifests.Unread, target, opts.Version, eolStatus, cov)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: write report: %v\n", err)
 			return 2
 		}
 	default:
-		sum, err = report.Table(stdout, res, cat, manifests.Unread, eolStatus, opts.Colorize)
+		sum, err = report.Table(stdout, res, cat, manifests.Unread, eolStatus, cov, opts.Colorize)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: write report: %v\n", err)
 			return 2
@@ -947,10 +965,10 @@ func verdict(opts Options, sum report.Summary, findings []matcher.Finding, eol r
 // around catalogFromImage so tests can drive the cataloging logic directly,
 // against a hand-built *source.Image, without going through a real registry,
 // tarball, or layout.
-func catalogImage(ctx context.Context, ref string) (pkgmeta.Target, cyclonedx.Stats, error) {
+func catalogImage(ctx context.Context, ref string) (pkgmeta.Target, cyclonedx.Stats, report.InventoryScopeRecord, error) {
 	img, err := source.Open(ctx, ref)
 	if err != nil {
-		return pkgmeta.Target{}, cyclonedx.Stats{}, err
+		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
 	}
 	return catalogFromImage(ref, img)
 }
@@ -977,11 +995,16 @@ func catalogImage(ctx context.Context, ref string) (pkgmeta.Target, cyclonedx.St
 // becomes indistinguishable from one with no vulnerabilities. An explicit
 // error naming what was looked for is the honest answer, and Run already maps
 // a catalog error to exit 2 with stdout untouched.
-func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.Stats, error) {
+//
+// The InventoryScopeRecord is what this function found while it was looking
+// (D111), returned rather than re-derived by a second walk of the layers: the
+// probes below are the only place that knows whether /opt/bitnami held
+// anything.
+func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.Stats, report.InventoryScopeRecord, error) {
 	wantPaths := append([]string{osReleasePath, dpkgDBPath}, apkDBPaths...)
 	files, err := img.Files(append(wantPaths, rpmDBPaths()...))
 	if err != nil {
-		return pkgmeta.Target{}, cyclonedx.Stats{}, err
+		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
 	}
 	// rpm and apk detection is cheap (map lookups against the single-shot
 	// Files() result above), computed here rather than just before the
@@ -999,11 +1022,11 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 	if files[dpkgDBPath].Data == nil {
 		statusD, statusDLinks, err = img.FilesUnder(dpkgStatusDir)
 		if err != nil {
-			return pkgmeta.Target{}, cyclonedx.Stats{}, err
+			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
 		}
 	}
 	if err != nil {
-		return pkgmeta.Target{}, cyclonedx.Stats{}, err
+		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
 	}
 
 	// D97. Only when nothing else has already been found: FilesNamed is
@@ -1016,7 +1039,7 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 	if !hasAPK && files[dpkgDBPath].Data == nil && len(statusD) == 0 && !hasRPM {
 		pacmanFiles, pacmanLinks, err = img.FilesNamed(pacmanLocalDir, "desc")
 		if err != nil {
-			return pkgmeta.Target{}, cyclonedx.Stats{}, err
+			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
 		}
 	}
 
@@ -1027,7 +1050,7 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 	if f, ok := files[osReleasePath]; ok {
 		d, err := osrelease.Parse(bytes.NewReader(f.Data))
 		if err != nil {
-			return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("parse %s: %w", osReleasePath, err)
+			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, fmt.Errorf("parse %s: %w", osReleasePath, err)
 		}
 		target.Distro = &d
 		if eco, err := d.Ecosystem(); err == nil {
@@ -1050,7 +1073,7 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 		// itself.
 		isCleanStart, err := apkdb.HasPackage(bytes.NewReader(apkFound.Data), cleanStartMarkerPackage)
 		if err != nil {
-			return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("probe %s for CleanStart marker: %w", apkPath, err)
+			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, fmt.Errorf("probe %s for CleanStart marker: %w", apkPath, err)
 		}
 		if isCleanStart {
 			d := pkgmeta.Distro{ID: "cleanstart"}
@@ -1072,14 +1095,14 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 	case hasAPK:
 		p, err := apkdb.Parse(bytes.NewReader(apkFound.Data), ecosystem)
 		if err != nil {
-			return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("parse %s: %w", apkPath, err)
+			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, fmt.Errorf("parse %s: %w", apkPath, err)
 		}
 		pkgs, diffID = p, apkFound.DiffID
 	case files[dpkgDBPath].Data != nil:
 		f := files[dpkgDBPath]
 		p, err := dpkgdb.Parse(bytes.NewReader(f.Data), ecosystem)
 		if err != nil {
-			return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("parse %s: %w", dpkgDBPath, err)
+			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, fmt.Errorf("parse %s: %w", dpkgDBPath, err)
 		}
 		pkgs, diffID = p, f.DiffID
 	case len(statusD) > 0:
@@ -1096,7 +1119,7 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 			f := statusD[name]
 			p, err := dpkgdb.ParseStanza(bytes.NewReader(f.Data), ecosystem, name)
 			if err != nil {
-				return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("parse %s: %w", name, err)
+				return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, fmt.Errorf("parse %s: %w", name, err)
 			}
 			if diffID == "" {
 				diffID = f.DiffID
@@ -1156,7 +1179,7 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 			res, err = rpmdb.ReadSQLite(f.Data, rpmFound.walSize, ecosystem, path)
 		}
 		if err != nil {
-			return pkgmeta.Target{}, cyclonedx.Stats{}, err
+			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
 		}
 		pkgs, diffID, skippedRecords = res.Packages, f.DiffID, len(res.Skipped)
 	case len(pacmanFiles) > 0:
@@ -1175,7 +1198,7 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 			f := pacmanFiles[name]
 			p, err := pacmandb.ParseDesc(bytes.NewReader(f.Data), ecosystem, name)
 			if err != nil {
-				return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("parse %s: %w", name, err)
+				return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, fmt.Errorf("parse %s: %w", name, err)
 			}
 			if diffID == "" {
 				diffID = f.DiffID
@@ -1200,12 +1223,12 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 		// missed the relocated directory would find nothing — and without this
 		// error, "nothing" is a clean image.
 		if target.Distro != nil && rpmFamilies[target.Distro.ID] {
-			return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf(
+			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, fmt.Errorf(
 				"%s reports itself as %q, an RPM distribution, but none of %v holds an rpm "+
 					"database; this result cannot be trusted",
 				ref, target.Distro.ID, rpmDBPaths())
 		}
-		return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf(
+		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, fmt.Errorf(
 			"no supported package database found in %s (looked for %v, %s, %s/, %s/*/desc "+
 				"and an rpm database under %v)",
 			ref, apkDBPaths, dpkgDBPath, dpkgStatusDir, pacmanLocalDir, rpmDBDirs)
@@ -1225,12 +1248,26 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 	// finding no Bitnami markers is not an error: the overwhelming majority
 	// of images this build scans are not Bitnami images at all, and
 	// /opt/bitnami simply does not exist in them.
-	bitnamiPkgs, bitnamiSkipped, err := catalogBitnami(img)
+	bitnamiPkgs, bitnamiSkipped, bitnamiScope, err := catalogBitnami(img)
 	if err != nil {
-		return pkgmeta.Target{}, cyclonedx.Stats{}, err
+		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
 	}
 	target.Packages = append(target.Packages, bitnamiPkgs...)
 	skippedRecords += bitnamiSkipped
+
+	// D111. OSPackages is always read here, and that is not a shortcut: an
+	// image whose OS package database was not found, or held nothing, never
+	// reaches this line — the len(pkgs) == 0 refusal above (D43) returns an
+	// error, Run exits 2 before any renderer runs, and so "none" is a value
+	// this build's image path cannot produce for it. ApplicationPackages is
+	// not-read always: an image scan does not read the language manifests
+	// installed inside it (D70, deferred), and this field is where the
+	// document says so.
+	scope := report.InventoryScopeRecord{
+		OSPackages:          report.ScopeRead,
+		Bitnami:             bitnamiScope,
+		ApplicationPackages: report.ScopeNotRead,
+	}
 
 	// A record whose header could not be read is a package whose version we do
 	// not know, which is the field that already means exactly that and already
@@ -1241,7 +1278,7 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 		Cataloged:        len(target.Packages),
 		Components:       len(target.Packages) + skippedRecords,
 		SkippedNoVersion: skippedRecords,
-	}, nil
+	}, scope, nil
 }
 
 // catalogBitnami discovers and parses every Bitnami marker in img (D99),
@@ -1255,17 +1292,23 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 // dpkgStatusDir's and pacmanLocalDir's own symlinks are (D54, D36): a marker
 // this build did not read is a package whose version is unknown, not a
 // package silently dropped from the inventory.
-func catalogBitnami(img *source.Image) ([]pkgmeta.Package, int, error) {
+//
+// The returned string is D111's inventoryScope.bitnami: read when at least one
+// marker was parsed, none when the image carries no marker at all, and
+// not-read when its only markers are symlinks this build does not follow —
+// Bitnami content was there and none of it reached the inventory, which
+// "none" would deny and "read" would overstate.
+func catalogBitnami(img *source.Image) ([]pkgmeta.Package, int, string, error) {
 	markerFiles, markerLinks, err := img.FilesMatching(bitnamiDir, bitnamiSPDXPrefix, bitnamiSPDXSuffix)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, "", err
 	}
 	var spdxPkgs []pkgmeta.Package
 	for _, name := range source.SortedNames(markerFiles) {
 		f := markerFiles[name]
 		pkgs, err := bitnamidb.ParseSPDXMarker(bytes.NewReader(f.Data), name)
 		if err != nil {
-			return nil, 0, fmt.Errorf("parse %s: %w", name, err)
+			return nil, 0, "", fmt.Errorf("parse %s: %w", name, err)
 		}
 		for i := range pkgs {
 			for j := range pkgs[i].Locations {
@@ -1281,12 +1324,20 @@ func catalogBitnami(img *source.Image) ([]pkgmeta.Package, int, error) {
 	var legacyPkgs []pkgmeta.Package
 	legacyFiles, err := img.Files([]string{bitnamiLegacyPath})
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, "", err
+	}
+	scope := report.ScopeNone
+	switch {
+	case len(markerFiles) > 0:
+		scope = report.ScopeRead
+	case markerLinks > 0:
+		scope = report.ScopeNotRead
 	}
 	if f, ok := legacyFiles[bitnamiLegacyPath]; ok {
+		scope = report.ScopeRead
 		legacyPkgs, err = bitnamidb.ParseLegacyComponents(bytes.NewReader(f.Data), bitnamiLegacyPath)
 		if err != nil {
-			return nil, 0, fmt.Errorf("parse %s: %w", bitnamiLegacyPath, err)
+			return nil, 0, "", fmt.Errorf("parse %s: %w", bitnamiLegacyPath, err)
 		}
 		for i := range legacyPkgs {
 			for j := range legacyPkgs[i].Locations {
@@ -1295,7 +1346,7 @@ func catalogBitnami(img *source.Image) ([]pkgmeta.Package, int, error) {
 		}
 	}
 
-	return bitnamidb.Merge(spdxPkgs, legacyPkgs), markerLinks, nil
+	return bitnamidb.Merge(spdxPkgs, legacyPkgs), markerLinks, scope, nil
 }
 
 // redHatFindings reports whether any finding was matched under a Red Hat

@@ -4174,6 +4174,64 @@ schema의 seed를 읽는 테스트는 index 쪽 경우를 고정하고, `SchemaV
 
 ---
 
+### D111 — 스캔은 무엇을 찾았든 아니든 키별로 자신이 커버한 것을 말한다
+
+**결정.** 모든 renderer는 인벤토리가 건드린 생태계 키마다, 그 키가 낸 finding뿐 아니라
+데이터베이스가 그 키에 대해 할 수 있었던 일 전체를 공개한다. JSON 문서는 최상위
+`coverage[]`를 얻는다 — 스캔된 인벤토리가 가진 키마다 레코드 하나씩이며: `ecosystem`,
+`packages`(그 아래 놓인 인벤토리 개수), `evaluated`(matcher가 판정한 개수), `state` —
+`live`, `frozen`, `not-in-database` 또는 `no-comparer` — `provider`(그 키를 선언하는
+`Meta.Providers` 항목), `dataAsOf`(그 provider의 `Provenance.DataAsOf`, D12), `frozenSince`
+(`Provenance.Frozen[key]`, D110; 키가 live이면 생략)로 이뤄진다. 또한 `distro` —
+`id`, `versionId`, `ecosystem`, `recognized` — 도 얻는데, 이는 assay가 라우팅하지 않는
+`/etc/os-release`(CentOS, D50)가 데이터베이스에 마침 없는 라우팅된 릴리스(Fedora 42)와
+똑같은 `cause=coverage`로 뭉개지지 않고 결과에 이름으로 남게 하기 위해서다. 이미지
+타깃에 대해서는 `inventoryScope` — `osPackages`, `bitnami`, `applicationPackages`, 각각
+`read`, `none` 또는 `not-read` — 도 얻는데, 이는 D70이 기록한 의도적 한계
+("Application packages inside container images", deferred-decisions)가 문서를 읽는
+사람에게도 닿게 하기 위해서다 — 지금까지는 문서(docs)를 읽는 사람에게만 닿았다.
+`summary.frozenKeys`는 frozen 상태 개수를 센다. 표는 커버되는 키들을 한 줄로 유지하고
+그 외 모든 상태는 각각 나열하며, finding이 그 밑에 있든 없든 frozen 키에는 D110 각주를
+찍는다; SARIF는 invocation properties 안에 `eol` 곁에 `coverage`를 싣고, frozen 키마다
+`driver.rules`에 선언된 note 수준 `assay/frozen-data` 결과와 그에 맞는 notification을
+싣는다(D55의 '양쪽 모두' 규칙 — GitHub는 result만 보여주기 때문이다). `schemaVersion`은
+11에서 12로: 새 필드들은 항상 존재한다. 종료 코드 변경은 없다 — 이 결정은 공개할 뿐이고,
+오래된 키가 실패가 되는 지점은 D59의 개정판(target 범위의 `--db-max-age`가 `Frozen`도
+읽는 것)이며, 그것도 요청했을 때만이다.
+
+**왜.** 2026-09-30 서비스 리뷰가 이 구멍을 재현했다: 유일한 키가 frozen이고 패키지들이
+아무 finding도 내지 않는 이미지는 `findings 0`, `targetIncomplete 0`, exit 0으로 스캔되고
+표에는 "No known vulnerabilities found"라고 찍힌다 — 이는 최신 데이터로 돌린 clean 스캔과
+구별되지 않는데, D110의 `frozenSince`가 finding의 속성이고 clean 스캔에는 그것을 실어
+나를 finding이 하나도 없기 때문이다. 같은 리뷰는 데이터의 age가 어떤 renderer에도 전혀
+닿지 않는다는 것(`db status`와 실패한 `--db-max-age`만이 그것을 말한다), 인식되지 않는
+distro가 이유 텍스트 `no version comparer for ecosystem ""`로만 보인다는 것(D36은 정책이
+이것으로 매칭하는 것을 금한다), 그리고 이미지 스캔이 application 패키지에 대해 침묵하는
+것이 출력이 표현할 수 없는 유일한 불완전성이라는 것을 발견했다. 넷 모두 같은 모양이다 —
+TARGET의 coverage에 관한 사실인데 그것이 살 필드가 없다는 것 — 그리고 D87은 바로 그
+모양을 위한 target 수준 객체(`eol`)의 선례를 이미 세워 뒀다. 상태들은 matcher가 이미
+갖고 있는 어휘를 재사용한다: `covered[key]`와 `SkipCoverage`(D20), `version.For`(D9),
+`Provenance.Frozen`(D110).
+
+**어디서 계산되는지.** `scancmd.Run` 안에서, renderer들이 호출될 때 이미 들고 있는 것들 —
+인벤토리, `--db-max-age`를 위해 읽은 `Meta`, `res.Skipped` — 로부터 계산되어, `eolStatus`와
+같은 방식으로 세 renderer에 꿰어진다. Matcher는 손대지 않는다: `Result` 필드가 자연스러운
+자리였겠지만, Matcher는 core type이고 여기 담긴 사실은 match의 것이 아니라 target의
+것이다.
+
+**빠지는 것.** 살아 있지만 릴리스가 EOL에 들어간 뒤로 바뀌지 않은 키(Alpine 3.19:
+`Alpine:v3.19`는 08-30과 09-27 사이에 레코드가 0건 움직였다)는 스캔 시점에 live 키와
+구별할 수 없다 — `Meta`는 키가 언제 frozen됐는지는 기록하지만 마지막으로 언제 자랐는지는
+기록하지 않는다. 그것은 빌드 쪽 추가 사항(`Provenance.LastGrew[key]`, nightly 자신의 키별
+개수 집계 패스가 설정할 수 있다)이고 그 자체로 별도의 작은 결정이다. 이미지 스캔이 보긴
+했지만 읽지는 않은 application manifest의 census도 빠진다: 그것들에 이름을 붙이는 일은
+D70이 미루는 application-inventory 결정의 절반이고, `inventoryScope`는 그것 없이도 그
+한계를 명시한다. 게이트는 없다: `--fail-on-eol`은 lifecycle을 위해 있고, D59의 개정판은
+데이터 age를 위해 있을 것이며, 같은 질문에 대한 세 번째 플래그는 D18의 divergence
+table이 경고하는 바로 그것이다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

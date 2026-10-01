@@ -30,8 +30,8 @@ import (
 // toolExecutionNotifications[] — and GitHub does not support it. So the skips
 // go BOTH places (D55): the notification for a consumer that honours the spec,
 // and a note-level result so the one consumer that matters actually shows them.
-func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirscan.Unread, target, version string, eol EOLStatus) (Summary, error) {
-	sum := Summarize(res, cat, unread)
+func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirscan.Unread, target, version string, eol EOLStatus, cov Coverage) (Summary, error) {
+	sum := Summarize(res, cat, unread, cov)
 
 	rules := make([]sarifRule, 0, len(res.Findings)+1)
 	results := make([]sarifResult, 0, len(res.Findings)+len(res.Suppressed)+len(res.Skipped))
@@ -153,6 +153,53 @@ func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 		}
 	}
 
+	// D111: one result per frozen ecosystem key, whether or not a finding
+	// sits under it — the case the finding messages' own D110 sentence cannot
+	// reach, because a clean frozen key has no finding to carry it. A result
+	// AND a notification, the not-read block's shape just above, and the rule
+	// declared in this same branch so neither can exist without the other
+	// (D55).
+	//
+	// note, not warning: the packages under the key WERE evaluated, so this is
+	// not a gap in the scan the way an unread manifest is; it says how
+	// current the data that judged them is. summaryLevel is unchanged for the
+	// same reason — the run is no less trustworthy than a live one.
+	if frozen := frozenCoverage(cov); len(frozen) > 0 {
+		rules = append(rules, frozenDataRule())
+		for _, k := range frozen {
+			msg := frozenSentence(k.Ecosystem, k.FrozenSince)
+			// The scanned target as the location, with no region. There is no
+			// file to point at — the fact is the database's, about a key — but
+			// SARIF's schema allows a result without locations and GitHub code
+			// scanning does not display one (locationURI's own comment), and
+			// D111 emits this result precisely because GitHub shows only
+			// results. The target is the artifact the invocation scanned, which
+			// is what the frozen key is a fact about.
+			uri := target
+			if uri == "" {
+				uri = k.Ecosystem
+			}
+			results = append(results, sarifResult{
+				RuleID:  frozenDataRuleID,
+				Level:   "note",
+				Message: sarifText{Text: msg},
+				Locations: []sarifLocation{{
+					PhysicalLocation: sarifPhysical{ArtifactLocation: sarifArtifact{URI: uri}},
+				}},
+				// Keyed on the key alone: the date is fixed once a key freezes
+				// (Provenance.Frozen's own contract), but if a rebuild ever moved
+				// it the alert should stay the same alert.
+				PartialFingerprints: map[string]string{
+					fingerprintKey: hash(frozenDataRuleID, k.Ecosystem),
+				},
+			})
+			notes = append(notes, sarifNotification{
+				Level:   "note",
+				Message: sarifText{Text: msg},
+			})
+		}
+	}
+
 	run := sarifRun{
 		Tool: sarifTool{Driver: sarifDriver{
 			Name:           "assay",
@@ -171,7 +218,8 @@ func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 		// comment), which Go's json package then drops entirely under
 		// sarifInvocation.Properties' own "properties,omitempty" tag — the
 		// SARIF-native way to say nothing rather than assert "not EOL".
-		Properties: eol.Properties(),
+		// D111's coverage sits beside it (invocationProperties).
+		Properties: invocationProperties(eol, cov),
 		ToolExecutionNotifications: append([]sarifNotification{{
 			Level: summaryLevel(sum),
 			Message: sarifText{Text: fmt.Sprintf(
@@ -198,6 +246,7 @@ func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 const (
 	notEvaluatedRuleID = "assay/not-evaluated"
 	notReadRuleID      = "assay/not-read"
+	frozenDataRuleID   = "assay/frozen-data"
 	// fingerprintKey names the scheme, so a later change to what a fingerprint
 	// is made of can ship as a new key rather than silently re-identifying
 	// every existing alert.
@@ -299,6 +348,57 @@ func notReadRule() sarifRule {
 	}
 }
 
+// frozenDataRule is D111's rule, mirroring notReadRule: declared whenever at
+// least one assay/frozen-data result is emitted, and never otherwise.
+func frozenDataRule() sarifRule {
+	return sarifRule{
+		ID:               frozenDataRuleID,
+		Name:             "FrozenData",
+		ShortDescription: sarifText{Text: "Advisory data for this ecosystem is frozen"},
+		FullDescription: sarifText{Text: "The database holds data for this ecosystem key that " +
+			"was carried forward from an earlier build, because the upstream stopped publishing " +
+			"some or all of it. Packages under the key were evaluated, against data that will not " +
+			"be refreshed: a clean result there is clean as of the date on this result, not as of " +
+			"today."},
+		Help: &sarifHelp{
+			Text: "The date on the result is when the carried-forward data was last current. " +
+				"Run `assay scan` without --output sarif for the coverage block, or read the " +
+				"coverage array of --output json. Current data for these packages needs a release " +
+				"the upstream still publishes.",
+		},
+		// No security-severity: this is not a security claim.
+		Properties: map[string]any{"tags": []string{"security", "frozen-data"}},
+	}
+}
+
+// frozenCoverage is the frozen records among cov's keys, in key order.
+func frozenCoverage(cov Coverage) []CoverageRecord {
+	var out []CoverageRecord
+	for _, k := range cov.Keys {
+		if k.State == CoverageFrozen {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// invocationProperties is the invocation's property bag: D87's eol entry and
+// D111's coverage entry beside it, under their own keys for the reason
+// EOLStatus.Properties gives (the bag is shared ground). nil when neither has
+// anything to say, so the bag is omitted rather than empty — an empty
+// inventory has no key to report, the same as an unanswered EOL lookup.
+func invocationProperties(eol EOLStatus, cov Coverage) map[string]any {
+	props := eol.Properties()
+	if len(cov.Keys) == 0 {
+		return props
+	}
+	if props == nil {
+		props = map[string]any{}
+	}
+	props["coverage"] = cov.Keys
+	return props
+}
+
 // sarifLevel maps a band onto SARIF's four levels.
 //
 // Unknown lands on "warning" rather than "none". A finding nobody rated is
@@ -356,7 +456,7 @@ func findingMessage(f matcher.Finding, target string) string {
 	if !f.FrozenSince.IsZero() {
 		// D110: the data behind this result will not be refreshed; a
 		// Security-tab reader sees only this message, so it says so here.
-		fmt.Fprintf(&b, " (%s)", frozenSentence(f.Package.Ecosystem, f.FrozenSince))
+		fmt.Fprintf(&b, " (%s)", frozenSentence(f.Package.Ecosystem, frozenDate(f)))
 	}
 	switch f.FixState() {
 	case advisory.FixStateFixed:

@@ -43,7 +43,7 @@ func TestSummarize_D109_OnlyFailedUnreadCounts(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			sum := Summarize(matcher.Result{}, cleanCat, tc.unread)
+			sum := Summarize(matcher.Result{}, cleanCat, tc.unread, Coverage{})
 			if sum.UnreadManifests != tc.wantUnread {
 				t.Errorf("UnreadManifests = %d, want %d", sum.UnreadManifests, tc.wantUnread)
 			}
@@ -60,7 +60,7 @@ func TestSummarize_D109_OnlyFailedUnreadCounts(t *testing.T) {
 
 	// Added to, not replacing, the cataloger's own target skips (D38).
 	sum := Summarize(matcher.Result{}, cyclonedx.Stats{Components: 3, Cataloged: 1, SkippedNoVersion: 2},
-		[]dirscan.Unread{failedUnread})
+		[]dirscan.Unread{failedUnread}, Coverage{})
 	if sum.TargetIncomplete != 3 {
 		t.Errorf("TargetIncomplete = %d, want 3 (2 unversioned + 1 unread)", sum.TargetIncomplete)
 	}
@@ -69,7 +69,7 @@ func TestSummarize_D109_OnlyFailedUnreadCounts(t *testing.T) {
 func TestJSON_D109_UnreadArray(t *testing.T) {
 	t.Run("always present, [] when nothing went unread", func(t *testing.T) {
 		var buf bytes.Buffer
-		if _, err := JSON(&buf, matcher.Result{}, cleanCat, nil, EOLStatus{}); err != nil {
+		if _, err := JSON(&buf, matcher.Result{}, cleanCat, nil, EOLStatus{}, Coverage{}); err != nil {
 			t.Fatal(err)
 		}
 		if !strings.Contains(buf.String(), `"unread": []`) {
@@ -82,7 +82,7 @@ func TestJSON_D109_UnreadArray(t *testing.T) {
 
 	t.Run("a deliberate skip stays out", func(t *testing.T) {
 		var buf bytes.Buffer
-		if _, err := JSON(&buf, matcher.Result{}, cleanCat, []dirscan.Unread{deliberate, failedUnread}, EOLStatus{}); err != nil {
+		if _, err := JSON(&buf, matcher.Result{}, cleanCat, []dirscan.Unread{deliberate, failedUnread}, EOLStatus{}, Coverage{}); err != nil {
 			t.Fatal(err)
 		}
 		var doc Document
@@ -106,7 +106,7 @@ func TestJSON_D109_UnreadArray(t *testing.T) {
 func TestTable_D109_NotReadBlock(t *testing.T) {
 	t.Run("a deliberate skip is neither listed nor counted", func(t *testing.T) {
 		var buf bytes.Buffer
-		if _, err := Table(&buf, matcher.Result{}, cleanCat, []dirscan.Unread{deliberate}, EOLStatus{}, false); err != nil {
+		if _, err := Table(&buf, matcher.Result{}, cleanCat, []dirscan.Unread{deliberate}, EOLStatus{}, Coverage{}, false); err != nil {
 			t.Fatal(err)
 		}
 		if strings.Contains(buf.String(), "not read") || strings.Contains(buf.String(), deliberate.Path) {
@@ -120,7 +120,7 @@ func TestTable_D109_NotReadBlock(t *testing.T) {
 		line := "not read: " + failedUnread.Path + " (" + failedUnread.Reason + ")" + nl
 		for _, colorize := range []bool{false, true} {
 			var buf bytes.Buffer
-			if _, err := Table(&buf, matcher.Result{}, cleanCat, []dirscan.Unread{failedUnread}, EOLStatus{}, colorize); err != nil {
+			if _, err := Table(&buf, matcher.Result{}, cleanCat, []dirscan.Unread{failedUnread}, EOLStatus{}, Coverage{}, colorize); err != nil {
 				t.Fatal(err)
 			}
 			if !strings.HasSuffix(buf.String(), nl+line) {
@@ -148,7 +148,7 @@ type d109SARIF struct {
 func renderSARIF(t *testing.T, unread []dirscan.Unread) d109SARIF {
 	t.Helper()
 	var buf bytes.Buffer
-	if _, err := SARIF(&buf, matcher.Result{}, cleanCat, unread, "dir:.", "v0", EOLStatus{}); err != nil {
+	if _, err := SARIF(&buf, matcher.Result{}, cleanCat, unread, "dir:.", "v0", EOLStatus{}, Coverage{}); err != nil {
 		t.Fatal(err)
 	}
 	var doc d109SARIF

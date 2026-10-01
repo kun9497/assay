@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
@@ -34,7 +33,12 @@ import (
 // when Document gained the unread[] array and Summary gained unreadManifests
 // and unread manifests began counting toward targetIncomplete (D109: a
 // consumer reading only stdout could not tell a scan that failed to read half
-// its manifests from a clean one).
+// its manifests from a clean one), and to 12 when Document gained coverage[],
+// distro and inventoryScope and Summary gained frozenKeys (D111: a scan whose
+// only ecosystem key was frozen and held no finding read as findings 0 on
+// current data, an unrouted distro was visible only as skip-reason text, and
+// an image scan's silence about application packages had no field at all —
+// every one a fact about the target's coverage with nowhere to live).
 // Two earlier additions should have bumped it and did not — `ratings` (D25)
 // and RatingRecord.URL (D27) both changed the shape while this constant
 // stayed at 1 — so version 1 in the wild denotes three different documents.
@@ -42,7 +46,7 @@ import (
 // what it does mean is that a consumer reading 2 or later can rely on every
 // field below being present, which is the guarantee the constant exists to
 // give.
-const schemaVersion = 11
+const schemaVersion = 12
 
 // Document is the stable shape of `assay scan --output json` (design goal
 // #3). It carries what Table shows plus what Table cannot: the full
@@ -83,6 +87,20 @@ type Document struct {
 	// to distinguish "absent key" from "null value" — both already mean
 	// the same thing here.
 	EOL *EOLRecord `json:"eol,omitempty"`
+	// Coverage is one record per ecosystem key the inventory holds (D111),
+	// sorted by key, saying what the database could do for it whether or not
+	// a finding sits under it. Present and empty rather than omitted for an
+	// empty inventory, on Suppressed's reasoning: "no keys" and "this document
+	// predates the field" must not look alike.
+	Coverage []CoverageRecord `json:"coverage"`
+	// Distro is the target's /etc/os-release identity and whether assay
+	// routes it (D111). Omitted, like EOL, when the target carries no distro
+	// identity at all — an SPDX SBOM, a directory, a binary.
+	Distro *DistroRecord `json:"distro,omitempty"`
+	// InventoryScope is which halves of an IMAGE the inventory was read from
+	// (D111). Omitted for every other target kind, which has no OS database or
+	// /opt/bitnami to have read or not.
+	InventoryScope *InventoryScopeRecord `json:"inventoryScope,omitempty"`
 }
 
 // FindingRecord is one matcher.Finding, reshaped for stable JSON rather than
@@ -361,17 +379,20 @@ type SkippedRecord struct {
 // this file. The counts come from Summarize, the exact function Table calls
 // for the same numbers, so JSON and the table cannot drift apart on what
 // "evaluated" means.
-func JSON(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirscan.Unread, eol EOLStatus) (Summary, error) {
-	sum := Summarize(res, cat, unread)
+func JSON(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirscan.Unread, eol EOLStatus, cov Coverage) (Summary, error) {
+	sum := Summarize(res, cat, unread, cov)
 
 	doc := Document{
-		SchemaVersion: schemaVersion,
-		Findings:      make([]FindingRecord, 0, len(res.Findings)),
-		Skipped:       make([]SkippedRecord, 0, len(res.Skipped)),
-		Suppressed:    make([]SuppressedRecord, 0, len(res.Suppressed)),
-		Unread:        unreadRecords(unread),
-		Summary:       sum,
-		EOL:           eol.Record(),
+		SchemaVersion:  schemaVersion,
+		Findings:       make([]FindingRecord, 0, len(res.Findings)),
+		Skipped:        make([]SkippedRecord, 0, len(res.Skipped)),
+		Suppressed:     make([]SuppressedRecord, 0, len(res.Suppressed)),
+		Unread:         unreadRecords(unread),
+		Summary:        sum,
+		EOL:            eol.Record(),
+		Coverage:       cov.records(),
+		Distro:         cov.Distro,
+		InventoryScope: cov.InventoryScope,
 	}
 	for _, f := range res.Findings {
 		doc.Findings = append(doc.Findings, findingRecord(f))
@@ -500,8 +521,5 @@ func ratingFixState(r matcher.Rating) string {
 // so omitempty drops it. A date, not a timestamp: the freeze time is a
 // provider's DataAsOf, and the day is what a reader weighs (D110).
 func frozenDate(f matcher.Finding) string {
-	if f.FrozenSince.IsZero() {
-		return ""
-	}
-	return f.FrozenSince.UTC().Format(time.DateOnly)
+	return dateOnly(f.FrozenSince)
 }

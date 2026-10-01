@@ -307,6 +307,15 @@ when its sources land on different bands, with a footnote pointing at `--explain
 the detail; `--output json` carries every source in a `ratings` array rather than collapsing
 to the one that won.
 
+Since D111, `--output json` also states what the database could do with each ecosystem key,
+not only the findings it produced: a `coverage[]` array (state `live`, `frozen`,
+`not-in-database` or `no-comparer`, the provider and its data age, and the D110 freeze date
+when the key is frozen), a `distro` object naming the recognized release or saying it was not
+recognized, and — for image targets only — an `inventoryScope` object (`osPackages`,
+`bitnami`, `applicationPackages`) that states the application-package limit above instead of
+leaving it to this document. `summary.frozenKeys` counts the frozen states, and
+`schemaVersion` moves from 11 to 12. All of it is disclosure only — no exit code changes.
+
 ### The database
 
 Advisories are stored locally and refreshed out of band. A scan never downloads anything:

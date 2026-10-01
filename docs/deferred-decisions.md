@@ -1567,10 +1567,11 @@ architecture field).
   stating the scope — OS packages and Bitnami markers read, application packages inside the
   image not — beside the `scanned … as an image` line `Run` already prints
   (`scancmd.go:436`). Honest for a human reader; invisible to `--output json` and SARIF.
-- **A machine-readable `inventoryScope` in JSON and SARIF (M, schema bump).** To be designed
-  together with the target-level coverage object the same review proposes, under one
-  D-number: two schema bumps that each describe half of what a scan covered would leave the
-  reader to assemble the answer.
+- **A machine-readable `inventoryScope` in JSON and SARIF (M, schema bump).** Done 2026-10-01
+  as D111: JSON (not SARIF) gained `inventoryScope` (`osPackages`, `bitnami`,
+  `applicationPackages`) on image targets, alongside the target-level `coverage[]` object this
+  option proposed designing it with, in one `schemaVersion` 12 bump — one bump, not two
+  that each describe half of what a scan covered.
 - **A service-side hybrid with a pinned SBOM generator (CycloneDX only).** Application
   packages come from an SBOM a pinned generator makes of the same image; CycloneDX only,
   because SPDX loses the distro. What it contributes carries no D36 count of records the

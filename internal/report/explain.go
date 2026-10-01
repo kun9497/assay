@@ -144,7 +144,7 @@ func explainOne(w io.Writer, f matcher.Finding) error {
 	if !f.FrozenSince.IsZero() {
 		// D110: the one view that answers "why" must also say the answer
 		// rests on data the upstream stopped publishing (D12).
-		lines = append(lines, "frozen:   "+frozenSentence(f.Package.Ecosystem, f.FrozenSince))
+		lines = append(lines, "frozen:   "+frozenSentence(f.Package.Ecosystem, frozenDate(f)))
 	}
 	if ids := otherIDs(f); len(ids) > 0 {
 		lines = append(lines, fmt.Sprintf("also known as: %s", strings.Join(ids, ", ")))

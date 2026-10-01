@@ -26,7 +26,7 @@ var debianBookwormEOL = EOLStatus{
 // "the helper is covered; nothing calls it" hazard) must turn this red.
 func TestTable_PrintsEOLLineWhenEOL(t *testing.T) {
 	var buf bytes.Buffer
-	if _, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{}, nil, debianBookwormEOL, false); err != nil {
+	if _, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{}, nil, debianBookwormEOL, Coverage{}, false); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -50,7 +50,7 @@ func TestTable_NoEOLLineWhenNotEOL(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			var buf bytes.Buffer
-			if _, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{}, nil, st, false); err != nil {
+			if _, err := Table(&buf, matcher.Result{}, cyclonedx.Stats{}, nil, st, Coverage{}, false); err != nil {
 				t.Fatal(err)
 			}
 			if out := buf.String(); strings.Contains(out, "EOL:") {
@@ -65,7 +65,7 @@ func TestTable_NoEOLLineWhenNotEOL(t *testing.T) {
 // above proves is being consulted, not merely accepted and dropped.
 func TestJSON_AttachesEOLRecordWhenKnown(t *testing.T) {
 	var buf bytes.Buffer
-	if _, err := JSON(&buf, matcher.Result{}, cyclonedx.Stats{}, nil, debianBookwormEOL); err != nil {
+	if _, err := JSON(&buf, matcher.Result{}, cyclonedx.Stats{}, nil, debianBookwormEOL, Coverage{}); err != nil {
 		t.Fatal(err)
 	}
 	var doc Document
@@ -91,7 +91,7 @@ func TestJSON_AttachesEOLRecordWhenKnown(t *testing.T) {
 // thing Document.EOL's own omitempty tag exists for.
 func TestJSON_OmitsEOLKeyWhenUnknown(t *testing.T) {
 	var buf bytes.Buffer
-	if _, err := JSON(&buf, matcher.Result{}, cyclonedx.Stats{}, nil, EOLStatus{}); err != nil {
+	if _, err := JSON(&buf, matcher.Result{}, cyclonedx.Stats{}, nil, EOLStatus{}, Coverage{}); err != nil {
 		t.Fatal(err)
 	}
 	var raw map[string]any
@@ -108,7 +108,7 @@ func TestJSON_OmitsEOLKeyWhenUnknown(t *testing.T) {
 // actually carry what EOLStatus.Properties() computes.
 func TestSARIF_AttachesEOLProperties(t *testing.T) {
 	var buf bytes.Buffer
-	if _, err := SARIF(&buf, matcher.Result{}, cyclonedx.Stats{}, nil, "img:1", "v0", debianBookwormEOL); err != nil {
+	if _, err := SARIF(&buf, matcher.Result{}, cyclonedx.Stats{}, nil, "img:1", "v0", debianBookwormEOL, Coverage{}); err != nil {
 		t.Fatal(err)
 	}
 	var doc map[string]any
@@ -143,7 +143,7 @@ func TestSARIF_AttachesEOLProperties(t *testing.T) {
 // EOL must not carry an empty or null properties key either.
 func TestSARIF_OmitsPropertiesWhenEOLUnknown(t *testing.T) {
 	var buf bytes.Buffer
-	if _, err := SARIF(&buf, matcher.Result{}, cyclonedx.Stats{}, nil, "img:1", "v0", EOLStatus{}); err != nil {
+	if _, err := SARIF(&buf, matcher.Result{}, cyclonedx.Stats{}, nil, "img:1", "v0", EOLStatus{}, Coverage{}); err != nil {
 		t.Fatal(err)
 	}
 	var doc map[string]any
