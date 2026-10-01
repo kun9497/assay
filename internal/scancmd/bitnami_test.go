@@ -44,7 +44,7 @@ func TestCatalogFromImage_BitnamiPackagesAlongsideDistro(t *testing.T) {
 		"var/lib/rpm/rpmdb.sqlite": fixtureBytes(t, rpmFixture),
 		"opt/bitnami/postgresql/.spdx-postgresql.spdx": bitnamiSPDXDoc("postgresql", "18.6.0-3", "photon-5"),
 	})
-	target, stats, err := catalogFromImage("test-image", img)
+	target, stats, _, err := catalogFromImage("test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestCatalogFromImage_BitnamiLegacyFallbackDedupedAgainstSPDX(t *testing.T) 
 		"opt/bitnami/postgresql/.spdx-postgresql.spdx": bitnamiSPDXDoc("postgresql", "17.5.0-14", "debian-12"),
 		bitnamiLegacyPath: `{"postgresql":{"arch":"amd64","distro":"debian-12","type":"NAMI","version":"17.5.0-14"}}`,
 	})
-	target, _, err := catalogFromImage("test-image", img)
+	target, _, _, err := catalogFromImage("test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestCatalogFromImage_BitnamiAbsentIsNotAnError(t *testing.T) {
 		osReleasePath:              osReleasePhoton5,
 		"var/lib/rpm/rpmdb.sqlite": fixtureBytes(t, rpmFixture),
 	})
-	target, stats, err := catalogFromImage("test-image", img)
+	target, stats, _, err := catalogFromImage("test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1531,10 +1531,11 @@ cataloger만 채우기 때문(`internal/pkgmeta/package.go:43`, D95); 빈 인벤
   밝힙니다 — OS 패키지와 Bitnami 마커는 읽었고 이미지 안의 애플리케이션 패키지는 읽지
   않았다고 — `Run`이 이미 찍는 `scanned … as an image` 줄 옆에(`scancmd.go:436`). 사람이
   읽기에는 정직하지만 `--output json`과 SARIF에는 보이지 않습니다.
-- **JSON과 SARIF의 기계 판독 가능한 `inventoryScope`(M, 스키마 변경).** 같은 검토가 제안하는
-  대상 수준 커버리지 객체와 함께, 하나의 D-번호 아래 설계해야 합니다: 스캔이 커버한 것의
-  절반씩을 각각 기술하는 두 번의 스키마 변경은 답을 조립하는 일을 읽는 사람에게 떠넘기게
-  됩니다.
+- **JSON과 SARIF의 기계 판독 가능한 `inventoryScope`(M, 스키마 변경).** 2026-10-01에 D111로
+  완료: JSON은(SARIF는 아님) 이미지 타깃에 `inventoryScope`(`osPackages`, `bitnami`,
+  `applicationPackages`)를 얻었고, 이 옵션이 함께 설계하자고 제안한 대상 수준 `coverage[]`
+  객체와 나란히 하나의 `schemaVersion` 12 변경으로 들어왔습니다 — 스캔이 커버한 것의
+  절반씩을 기술하는 두 번의 변경이 아니라 한 번의 변경으로.
 - **고정된 SBOM 생성기를 쓰는 서비스 쪽 하이브리드(CycloneDX 한정).** 애플리케이션 패키지는
   고정된 생성기가 같은 이미지로 만든 SBOM에서 가져옵니다; CycloneDX 한정인 이유는 SPDX가
   distro를 잃기 때문입니다. 이것이 기여하는 부분은 생성기가 읽지 못한 레코드에 대한 D36

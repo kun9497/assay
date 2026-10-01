@@ -106,9 +106,10 @@ func TestRun_D110_JSONCarriesFrozenSinceOnlyOnTheFrozenKey(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &doc); err != nil {
 		t.Fatalf("stdout is not one JSON document: %v\n%s", err, out)
 	}
-	// Additive and omitempty, the D108 crossMappedFrom precedent: no bump.
-	if doc.SchemaVersion != 11 {
-		t.Errorf("schemaVersion = %d, want 11", doc.SchemaVersion)
+	// frozenSince itself was additive and omitempty, the D108 crossMappedFrom
+	// precedent, and bumped nothing; 12 is D111's coverage[], which is not.
+	if doc.SchemaVersion != 12 {
+		t.Errorf("schemaVersion = %d, want 12", doc.SchemaVersion)
 	}
 	seen := map[string]bool{}
 	for _, f := range doc.Findings {
@@ -151,7 +152,8 @@ func TestRun_D110_TableMarksTheFrozenRowAndFootnotesTheDate(t *testing.T) {
 	if strings.Contains(liveRow, "@") {
 		t.Errorf("live row carries the frozen marker: %q", liveRow)
 	}
-	want := "\n@ advisory data for npm frozen since 2026-06-30: the upstream stopped publishing for this release\n"
+	want := "\n@ advisory data for npm includes entries carried forward since 2026-06-30: " +
+		"the upstream stopped publishing some or all of it\n"
 	if !strings.Contains(out, want) {
 		t.Errorf("table lacks the footnote line %q:\n%s", want, out)
 	}
@@ -189,17 +191,17 @@ func TestRun_D110_SARIFMessageSaysFrozenSince(t *testing.T) {
 			liveMsg = r.Message.Text
 		}
 	}
-	if !strings.Contains(frozenMsg, "advisory data for npm frozen since 2026-06-30") {
+	if !strings.Contains(frozenMsg, "advisory data for npm includes entries carried forward since 2026-06-30") {
 		t.Errorf("%s message lacks the frozen sentence: %q", frozenID, frozenMsg)
 	}
-	if liveMsg == "" || strings.Contains(liveMsg, "frozen since") {
+	if liveMsg == "" || strings.Contains(liveMsg, "carried forward") {
 		t.Errorf("%s message = %q, want present and without a frozen sentence", liveID, liveMsg)
 	}
 }
 
 func TestRun_D110_ExplainPrintsTheFrozenLine(t *testing.T) {
 	out, _ := runFrozen(t, Options{Explain: frozenID})
-	want := "frozen:   advisory data for npm frozen since 2026-06-30"
+	want := "frozen:   advisory data for npm includes entries carried forward since 2026-06-30"
 	if !strings.Contains(out, want) {
 		t.Errorf("--explain %s lacks %q:\n%s", frozenID, want, out)
 	}

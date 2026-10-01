@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
-	"time"
 
 	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
@@ -86,6 +85,13 @@ type Summary struct {
 	// directly, and a count that only appears when non-zero is not one a
 	// caller can rely on.
 	KnownExploited int `json:"knownExploited"`
+	// FrozenKeys is how many of the inventory's ecosystem keys the database
+	// holds only as data carried forward (D111) — the coverage records whose
+	// state is frozen. A count of keys, not of findings: the case D111 exists
+	// for is a frozen key with no finding under it. Populated whether or not
+	// it is zero, so a policy can read `.summary.frozenKeys > 0` without first
+	// asking whether the key exists.
+	FrozenKeys int `json:"frozenKeys"`
 }
 
 // Trustworthy reports whether the run produced a result worth acting on. A scan
@@ -110,7 +116,10 @@ func (s Summary) Trustworthy() bool {
 // (D109); its Failed entries are listed beneath everything else as
 // "not read: <path> (<reason>)" - the same words stderr prints, so a reader
 // grepping either stream finds the same line.
-func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirscan.Unread, eol EOLStatus, colorize bool) (Summary, error) {
+//
+// cov is D111's per-key coverage: a block under the summary line, and the
+// '@' footnote for every frozen key whether or not a row carries the marker.
+func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirscan.Unread, eol EOLStatus, cov Coverage, colorize bool) (Summary, error) {
 	// D87: one line, only when the target's distro release is actually EOL
 	// — Line() itself returns ok=false for both "nothing to say" (Known is
 	// false) and "current release" (Known but not EOL), so this is the only
@@ -120,7 +129,7 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 		fmt.Fprintln(w)
 	}
 
-	sum := Summarize(res, cat, unread)
+	sum := Summarize(res, cat, unread, cov)
 	evaluated := sum.Evaluated
 	notEvaluated := sum.NotEvaluated
 	incompleteChecks := sum.IncompleteChecks
@@ -162,17 +171,12 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 		// noFix is the same idea again, one entry per FIXED IN cell a row
 		// earned, so the three no-fix footnotes each appear at most once and
 		// only when something on the table needs them (D52).
+		//
+		// The D108 '~' and D110 '@' footnotes are not collected here: a
+		// suppressed row can earn either marker too, and the '@' footnote is
+		// owed to every frozen key in the coverage whether or not any row
+		// earned it (D111), so both are printed after this switch.
 		noFix := map[advisory.FixState]bool{}
-		// crossMappedFrom is the enrichedBy idea again for D108: the distinct
-		// SLE keys any cross-mapped row was mirrored from, in first-seen order,
-		// so the footnote names them and appears at most once. A slice, not a
-		// map, for the same determinism reason (design goal #3).
-		var crossMappedFrom []string
-		// frozenKeys is the same idea for D110, keyed by ecosystem so the
-		// footnote can print each key's own freeze date. A map for the dates,
-		// but the footnote ranges over its keys sorted, so the output order
-		// never depends on map iteration (design goal #3).
-		frozenKeys := map[string]time.Time{}
 		for _, f := range res.Findings {
 			fixed := f.Evidence.Fixed
 			if fixed == "" {
@@ -244,29 +248,8 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 					}
 				}
 			}
-			// D108: a Leap finding mirrored from its SLE codestream earns a
-			// marker on the ECOSYSTEM cell (no other marker lands there, so no
-			// collision) and a footnote naming the SLE key. An ASCII marker,
-			// appended before Flush like disagreementMarker, so it counts as one
-			// column rather than misaligning the row the way a multi-byte glyph
-			// would.
-			eco := f.Package.Ecosystem
-			if f.CrossMappedFrom != "" {
-				eco += " " + crossMapMarker
-				if !slices.Contains(crossMappedFrom, f.CrossMappedFrom) {
-					crossMappedFrom = append(crossMappedFrom, f.CrossMappedFrom)
-				}
-			}
-			// D110: the key this finding matched under was carried forward
-			// from an earlier database because the upstream stopped
-			// publishing it. Same cell as the D108 marker, a different glyph,
-			// because the ecosystem key is exactly what is frozen.
-			if !f.FrozenSince.IsZero() {
-				eco += " " + frozenMarker
-				frozenKeys[f.Package.Ecosystem] = f.FrozenSince
-			}
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				name, f.Package.Version, eco,
+				name, f.Package.Version, ecosystemCell(f),
 				advisoryID, sev, aliases, fixed)
 			bands = append(bands, f.Severity)
 		}
@@ -296,21 +279,6 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 			sort.Strings(enrichedBy)
 			fmt.Fprintf(w, "%s also described by %s; see --explain <id> for the text\n",
 				enrichmentMarker, strings.Join(enrichedBy, ", "))
-		}
-		if len(crossMappedFrom) > 0 {
-			// Sorted for the same determinism reason as enrichedBy. Names the
-			// SLE key(s) so the reader knows the fixed version is the SLE (often
-			// LTSS-channel) build that openSUSE Leap shares the codestream with
-			// (D108), not one necessarily in the free Leap repos.
-			sort.Strings(crossMappedFrom)
-			fmt.Fprintf(w, "%s matched via the SLE codestream it is built from (%s); the fixed version is the SLE (LTSS-channel) build — see --explain <id>\n",
-				crossMapMarker, strings.Join(crossMappedFrom, ", "))
-		}
-		// One line per frozen key, because each carries its own date: one
-		// line listing several keys would have to pick a date or drop them,
-		// and the date is the disclosure (D12).
-		for _, key := range slices.Sorted(maps.Keys(frozenKeys)) {
-			fmt.Fprintf(w, "%s %s\n", frozenMarker, frozenSentence(key, frozenKeys[key]))
 		}
 
 	case cat.Components == 0:
@@ -356,6 +324,28 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 
 	default:
 		fmt.Fprintf(w, "No known vulnerabilities found in %d package(s).\n", evaluated)
+	}
+
+	// The two ecosystem-cell footnotes, printed after the switch rather than
+	// inside the findings branch: right under the table when there is one,
+	// which is where they always were, and under the headline when there is
+	// not. That second case is D111's. A frozen key with no finding under it
+	// used to print "No known vulnerabilities found" and nothing else — a
+	// clean scan on current data, as far as any reader could tell.
+	if keys := crossMappedKeys(res); len(keys) > 0 {
+		// Names the SLE key(s) so the reader knows the fixed version is the
+		// SLE (often LTSS-channel) build that openSUSE Leap shares the
+		// codestream with (D108), not one necessarily in the free Leap repos.
+		fmt.Fprintf(w, "%s matched via the SLE codestream it is built from (%s); the fixed version is the SLE (LTSS-channel) build — see --explain <id>\n",
+			crossMapMarker, strings.Join(keys, ", "))
+	}
+	// One line per frozen key, because each carries its own date: one line
+	// listing several keys would have to pick a date or drop them, and the
+	// date is the disclosure (D12). Sorted, so the order never depends on map
+	// iteration (design goal #3).
+	frozen := frozenFootnotes(res, cov)
+	for _, key := range slices.Sorted(maps.Keys(frozen)) {
+		fmt.Fprintf(w, "%s %s\n", frozenMarker, frozenSentence(key, frozen[key]))
 	}
 
 	// The summary keeps a partial scan from reading as a clean one, so its
@@ -408,6 +398,12 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 		"%d unknown severity, %d with no fix available (%s)%s%s\n",
 		cat.Components, evaluated, findingsText, notEvaluated, unknownSeverity,
 		sum.Unfixable, noFixParen, suppressedParen, unreadParen)
+	// D111, directly under the counts it qualifies. Never colored: the
+	// lines are the same bytes on a terminal and in a pipe, so a CI log and a
+	// grep agree on them.
+	for _, line := range coverageLines(cov.Keys) {
+		fmt.Fprintln(w, line)
+	}
 
 	// Suppressed findings are shown, never dropped (matcher.Result.Suppressed's
 	// own reasoning): a distinct block naming each waived finding and the
@@ -437,8 +433,11 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 				// knowing, instead of implying a source that was checked.
 				src = "unspecified source"
 			}
+			// The ecosystem cell the active row would have had, markers and
+			// all: a waived finding still matched under a frozen or
+			// cross-mapped key, and the waiver was granted against that data.
 			fmt.Fprintf(w, "  %s  %s  %s  (%s: %s)\n",
-				s.Finding.Package.Name, s.Finding.Package.Ecosystem, s.Finding.Advisory.ID, src, s.Reason)
+				s.Finding.Package.Name, ecosystemCell(s.Finding), s.Finding.Advisory.ID, src, s.Reason)
 		}
 	}
 
@@ -509,8 +508,8 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 //
 // unread is the directory scan's Manifests.Unread (nil for every other target
 // kind). Only its Failed entries count, and unreadRecords is where that line
-// is drawn.
-func Summarize(res matcher.Result, cat cyclonedx.Stats, unread []dirscan.Unread) Summary {
+// is drawn. cov is D111's coverage, read only for FrozenKeys.
+func Summarize(res matcher.Result, cat cyclonedx.Stats, unread []dirscan.Unread, cov Coverage) Summary {
 	// A package counts as evaluated only if it was cataloged AND the matcher
 	// could judge it. A whole-package matcher skip (empty AdvisoryID) was
 	// cataloged but never checked, so counting it as scanned would inflate the
@@ -550,7 +549,7 @@ func Summarize(res matcher.Result, cat cyclonedx.Stats, unread []dirscan.Unread)
 		if s.Cause == matcher.SkipTarget {
 			targetIncomplete++
 		}
-		if s.AdvisoryID == "" {
+		if wholePackage(s) {
 			unevaluated++
 			continue
 		}
@@ -600,6 +599,7 @@ func Summarize(res matcher.Result, cat cyclonedx.Stats, unread []dirscan.Unread)
 		Unfixable:        unfixable,
 		WontFix:          wontFix,
 		KnownExploited:   knownExploited,
+		FrozenKeys:       cov.frozenCount(),
 	}
 }
 
@@ -675,10 +675,60 @@ const crossMapMarker = "~"
 const frozenMarker = "@"
 
 // frozenSentence is the one wording every renderer uses for D110, so the
-// table, SARIF and --explain cannot drift apart on what "frozen" means.
-func frozenSentence(key string, since time.Time) string {
-	return fmt.Sprintf("advisory data for %s frozen since %s: the upstream stopped publishing for this release",
-		key, since.UTC().Format(time.DateOnly))
+// table, SARIF and --explain cannot drift apart on what "frozen" means. since
+// is a full-date (dateOnly).
+//
+// "includes entries carried forward", not "frozen since": D110 freezes a key
+// in two shapes — the whole key, when the upstream stops serving the release,
+// and individual entries the upstream dropped from records it still publishes
+// under a past-EOL key. The earlier wording ("the upstream stopped publishing
+// for this release") was true only of the first, and on the second it told a
+// reader the whole key was dead while most of it was still being refreshed.
+func frozenSentence(key, since string) string {
+	return fmt.Sprintf("advisory data for %s includes entries carried forward since %s: "+
+		"the upstream stopped publishing some or all of it", key, since)
+}
+
+// ecosystemCell is the ECOSYSTEM text for one finding, with the markers the
+// key earned: '~' when the finding was mirrored from an SLE codestream (D108),
+// '@' when its key is frozen (D110). The findings table and the suppressed
+// block both use it, so a waived finding wears exactly the markers its active
+// row would have.
+//
+// ASCII markers appended before tabwriter's Flush, like disagreementMarker, so
+// each counts as one column rather than misaligning the row the way a
+// multi-byte glyph would. Both land in this cell because the ecosystem key is
+// exactly what is cross-mapped or frozen; the glyphs differ so they cannot be
+// confused.
+func ecosystemCell(f matcher.Finding) string {
+	eco := f.Package.Ecosystem
+	if f.CrossMappedFrom != "" {
+		eco += " " + crossMapMarker
+	}
+	if !f.FrozenSince.IsZero() {
+		eco += " " + frozenMarker
+	}
+	return eco
+}
+
+// crossMappedKeys is the distinct SLE keys any active or suppressed row was
+// mirrored from (D108), sorted so two runs over one result print the same
+// footnote (design goal #3).
+func crossMappedKeys(res matcher.Result) []string {
+	var keys []string
+	add := func(f matcher.Finding) {
+		if f.CrossMappedFrom != "" && !slices.Contains(keys, f.CrossMappedFrom) {
+			keys = append(keys, f.CrossMappedFrom)
+		}
+	}
+	for _, f := range res.Findings {
+		add(f)
+	}
+	for _, s := range res.Suppressed {
+		add(s.Finding)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // sourcesDisagree reports whether a finding's sources gave different

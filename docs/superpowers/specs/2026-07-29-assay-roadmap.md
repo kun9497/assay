@@ -4299,6 +4299,61 @@ the key never disappears.
 
 ---
 
+### D111 — A scan states what it covered, per key, whether or not it found anything
+
+**Decision.** Every renderer discloses, for each ecosystem key the inventory touched, what the
+database could do for it — not only on the findings it produced. The JSON document gains a
+top-level `coverage[]`, one record per key the scanned inventory holds: `ecosystem`,
+`packages` (how many of the inventory sit under it), `evaluated` (how many the matcher
+judged), `state` — `live`, `frozen`, `not-in-database` or `no-comparer` — `provider` (the
+`Meta.Providers` entry that declares the key), `dataAsOf` (that provider's `Provenance.DataAsOf`,
+D12) and `frozenSince` (`Provenance.Frozen[key]`, D110; omitted when the key is live). It also
+gains `distro` — `id`, `versionId`, `ecosystem` and `recognized` — so an `/etc/os-release` assay
+does not route (CentOS, D50) is named in the result instead of collapsing into the same
+`cause=coverage` as a routed release the database happens to lack (Fedora 42). For image
+targets it gains `inventoryScope` — `osPackages`, `bitnami`, `applicationPackages` — each
+`read`, `none` or `not-read`, so the deliberate limit D70 recorded ("Application packages
+inside container images", deferred-decisions) reaches the reader of the document instead of
+only the reader of the docs. `summary.frozenKeys` counts the frozen states. The table keeps
+one line for the covered keys and lists every other state, and prints the D110 footnote for a
+frozen key whether or not a finding sits under it; SARIF carries `coverage` in the invocation
+properties beside `eol` and, for each frozen key, a note-level `assay/frozen-data` result
+declared in `driver.rules` plus the matching notification (D55's both-places rule, because
+GitHub shows only results). `schemaVersion` 11 → 12: the new fields are always present. No
+exit code changes: this decision discloses; D59's revision (a target-scoped `--db-max-age`
+that also reads `Frozen`) is where a stale key becomes a failure, and only on request.
+
+**Why.** The 2026-09-30 service review reproduced the hole: an image whose only key is frozen
+and whose packages carry no finding scans as `findings 0`, `targetIncomplete 0`, exit 0, with
+the table reading "No known vulnerabilities found" — indistinguishable from a clean scan on
+current data, because D110's `frozenSince` is a property of a finding and a clean scan has
+none to carry it. The same review found that the data's age reaches no renderer at all (only
+`db status` and a failed `--db-max-age` say it), that an unrecognised distro is visible only
+as the reason text `no version comparer for ecosystem ""` (which D36 forbids a policy to match
+on), and that an image scan's silence about application packages is the one incompleteness
+the output cannot express. All four are the same shape — a fact about the TARGET's coverage
+with no field to live in — and D87 already set the precedent of a target-level object (`eol`)
+for exactly that shape. The states reuse vocabulary the matcher already has:
+`covered[key]` and `SkipCoverage` (D20), `version.For` (D9), `Provenance.Frozen` (D110).
+
+**Where it is computed.** In `scancmd.Run`, from what it already holds when the renderers are
+called — the inventory, the `Meta` it read for `--db-max-age`, and `res.Skipped` — threaded to
+the three renderers the way `eolStatus` is. The Matcher is untouched: a `Result` field would
+have been the natural home, but the Matcher is a core type and the facts here are the
+target's, not the match's.
+
+**What stays out.** A key that is alive but has not changed since its release went EOL
+(Alpine 3.19: `Alpine:v3.19` moved by zero records between 08-30 and 09-27) cannot be told
+from a live one at scan time — `Meta` records when a key was frozen, not when it last grew.
+That is a build-side addition (`Provenance.LastGrew[key]`, which the nightly's own per-key
+count pass can set) and its own small decision. The census of application manifests an image
+scan saw but did not read is also out: naming them is half of the application-inventory
+decision D70 defers, and `inventoryScope` states the limit without it. No gate: `--fail-on-eol`
+exists for lifecycle, D59's revision will exist for data age, and a third flag for the same
+question is what D18's divergence table warns against.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

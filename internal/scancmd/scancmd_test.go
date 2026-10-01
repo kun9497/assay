@@ -407,7 +407,7 @@ func TestCatalogFromImage_SetsLayerDigestFromTheLayer(t *testing.T) {
 			apkDBPath: apkOneRecord,
 		}),
 	}}
-	target, _, err := catalogFromImage("test-image", img)
+	target, _, _, err := catalogFromImage("test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,7 +451,7 @@ func TestCatalogFromImage_ApkDBUnderUsrLibPhysicalPath(t *testing.T) {
 			apkDBPathUsrLib: apkOneRecord, // no lib/apk/db/installed at all
 		}),
 	}}
-	target, stats, err := catalogFromImage("test-image", img)
+	target, stats, _, err := catalogFromImage("test-image", img)
 	if err != nil {
 		t.Fatalf("catalogFromImage: %v (want the physical usr/lib path to be found)", err)
 	}
@@ -491,7 +491,7 @@ func TestCatalogFromImage_ApkDBUnderUsrLibPhysicalPath_MinimOS(t *testing.T) {
 			apkDBPathUsrLib: apkOneRecord, // no lib/apk/db/installed at all
 		}),
 	}}
-	target, stats, err := catalogFromImage("test-image", img)
+	target, stats, _, err := catalogFromImage("test-image", img)
 	if err != nil {
 		t.Fatalf("catalogFromImage: %v (want the physical usr/lib path to be found)", err)
 	}
@@ -537,7 +537,7 @@ o:usrlib-origin
 			apkDBPathUsrLib: usrLibRecord, // usrlib-record / usrlib-origin
 		}),
 	}}
-	target, _, err := catalogFromImage("test-image", img)
+	target, _, _, err := catalogFromImage("test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -570,7 +570,7 @@ func TestCatalogFromImage_ApkDBUnderVarLibPhysicalPath_Alpaquita(t *testing.T) {
 			apkDBPathVarLib: apkOneRecord, // no lib/apk/db/installed, no usr/lib/apk/db/installed
 		}),
 	}}
-	target, stats, err := catalogFromImage("test-image", img)
+	target, stats, _, err := catalogFromImage("test-image", img)
 	if err != nil {
 		t.Fatalf("catalogFromImage: %v (want the physical var/lib path to be found)", err)
 	}
@@ -607,7 +607,7 @@ func TestCatalogFromImage_NoOSReleaseStillCatalogsPackages(t *testing.T) {
 			apkDBPath: apkOneRecord,
 		}),
 	}}
-	target, stats, err := catalogFromImage("test-image", img)
+	target, stats, _, err := catalogFromImage("test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -634,7 +634,7 @@ func TestCatalogFromImage_UnsupportedEcosystemIsNotGuessed(t *testing.T) {
 			apkDBPath:     apkOneRecord,
 		}),
 	}}
-	target, _, err := catalogFromImage("test-image", img)
+	target, _, _, err := catalogFromImage("test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -658,7 +658,7 @@ func TestCatalogFromImage_NoApkDBReturnsError(t *testing.T) {
 			osReleasePath: osReleaseAlpine319,
 		}),
 	}}
-	target, stats, err := catalogFromImage("test-image", img)
+	target, stats, _, err := catalogFromImage("test-image", img)
 	if err == nil {
 		t.Fatal("catalogFromImage succeeded with no apk database; want an error")
 	}
@@ -1359,8 +1359,8 @@ func TestRun_OutputJSON(t *testing.T) {
 		if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
 			t.Fatalf("stdout is not valid JSON: %v\n%s", err, out.String())
 		}
-		if doc.SchemaVersion != 11 {
-			t.Errorf("SchemaVersion = %d, want 11", doc.SchemaVersion)
+		if doc.SchemaVersion != 12 {
+			t.Errorf("SchemaVersion = %d, want 12", doc.SchemaVersion)
 		}
 		if len(doc.Findings) != 1 || doc.Findings[0].Advisory.ID != "GHSA-json-medium" {
 			t.Errorf("Findings = %+v, want the one medium finding", doc.Findings)
@@ -2641,7 +2641,7 @@ func TestCatalogFromImage_ApkDBUsrLibWinsOverVarLib(t *testing.T) {
 			apkDBPathVarLib: varLibPkg,
 		}),
 	}}
-	target, _, err := catalogFromImage("test-image", img)
+	target, _, _, err := catalogFromImage("test-image", img)
 	if err != nil {
 		t.Fatalf("catalogFromImage: %v", err)
 	}
@@ -2701,7 +2701,7 @@ func TestCatalogFromImage_PacmanSymlinkedDescIsCountedNotSilent(t *testing.T) {
 			"var/lib/pacman/local/linked-2.0-1/desc": "../real-1.0-1/desc",
 		},
 	)}}
-	_, stats, err := catalogFromImage("test-image", img)
+	_, stats, _, err := catalogFromImage("test-image", img)
 	if err != nil {
 		t.Fatalf("catalogFromImage: %v", err)
 	}
@@ -2727,7 +2727,7 @@ func TestCatalogFromImage_BitnamiSymlinkedMarkerIsCountedNotSilent(t *testing.T)
 			"opt/bitnami/common/.spdx-wait-for-port.spdx": "../postgresql/.spdx-postgresql.spdx",
 		},
 	)}}
-	_, stats, err := catalogFromImage("test-image", img)
+	_, stats, _, err := catalogFromImage("test-image", img)
 	if err != nil {
 		t.Fatalf("catalogFromImage: %v", err)
 	}

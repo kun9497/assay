@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 11,
+  "schemaVersion": 12,
   "findings": [
     {
       "package": {
@@ -199,6 +199,45 @@
     "unknownSeverity": 1,
     "unfixable": 1,
     "wontFix": 0,
-    "knownExploited": 0
+    "knownExploited": 0,
+    "frozenKeys": 1
+  },
+  "coverage": [
+    {
+      "ecosystem": "Alpine:v3.19",
+      "packages": 1,
+      "evaluated": 1,
+      "state": "frozen",
+      "provider": "osv",
+      "dataAsOf": "2026-09-27",
+      "frozenSince": "2026-06-30"
+    },
+    {
+      "ecosystem": "Go",
+      "packages": 3,
+      "evaluated": 2,
+      "state": "live",
+      "provider": "osv",
+      "dataAsOf": "2026-09-27"
+    },
+    {
+      "ecosystem": "PyPI",
+      "packages": 1,
+      "evaluated": 1,
+      "state": "live",
+      "provider": "osv",
+      "dataAsOf": "2026-09-27"
+    }
+  ],
+  "distro": {
+    "id": "alpine",
+    "versionId": "3.19.9",
+    "ecosystem": "Alpine:v3.19",
+    "recognized": true
+  },
+  "inventoryScope": {
+    "osPackages": "read",
+    "bitnami": "none",
+    "applicationPackages": "not-read"
   }
 }

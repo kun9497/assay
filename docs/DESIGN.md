@@ -307,6 +307,15 @@ when its sources land on different bands, with a footnote pointing at `--explain
 the detail; `--output json` carries every source in a `ratings` array rather than collapsing
 to the one that won.
 
+Since D111, `--output json` also states what the database could do with each ecosystem key,
+not only the findings it produced: a `coverage[]` array (state `live`, `frozen`,
+`not-in-database` or `no-comparer`, the provider and its data age, and the D110 freeze date
+when the key is frozen), a `distro` object naming the recognized release or saying it was not
+recognized, and — for image targets only — an `inventoryScope` object (`osPackages`,
+`bitnami`, `applicationPackages`) that states the application-package limit above instead of
+leaving it to this document. `summary.frozenKeys` counts the frozen states, and
+`schemaVersion` moves from 11 to 12. All of it is disclosure only — no exit code changes.
+
 ### The database
 
 Advisories are stored locally and refreshed out of band. A scan never downloads anything:
@@ -686,6 +695,15 @@ exited 0 while 24 findings went unmentioned.
 - [x] SLES LTSS folded with a mainline-wins tie-break (D91) — post-EOL fixes surface
       under the same key (bci-base 121→286 findings, curl shows its real FIXED IN),
       385,621 shadowed twins dropped and counted
+- [x] A scan states what it covered, per key (D111) — JSON gains `coverage[]` (ecosystem,
+      packages, evaluated, state live/frozen/not-in-database/no-comparer, provider,
+      dataAsOf, frozenSince), `distro` (id, versionId, ecosystem, recognized),
+      `inventoryScope` for image targets (osPackages, bitnami, applicationPackages) and
+      `summary.frozenKeys`; the table prints the D110 footnote for a frozen key even with
+      zero findings and lists every non-live state; SARIF carries `coverage` in the
+      invocation properties and an `assay/frozen-data` result per frozen key. Computed in
+      `scancmd.Run` from the inventory, Meta and `res.Skipped`; the Matcher is untouched.
+      `schemaVersion` 12. Discloses only — no exit code changes.
 - [x] A release the upstream stops serving is frozen, not lost (D110) — a seeded build
       carries forward, from the seed's JSON records, any key a provider that ran no longer
       emits (whole-key) and, for releases past their D87 `EOLFrom` under which this run added no
