@@ -686,6 +686,15 @@ exited 0 while 24 findings went unmentioned.
 - [x] SLES LTSS folded with a mainline-wins tie-break (D91) — post-EOL fixes surface
       under the same key (bci-base 121→286 findings, curl shows its real FIXED IN),
       385,621 shadowed twins dropped and counted
+- [x] A scan states what it covered, per key (D111) — JSON gains `coverage[]` (ecosystem,
+      packages, evaluated, state live/frozen/not-in-database/no-comparer, provider,
+      dataAsOf, frozenSince), `distro` (id, versionId, ecosystem, recognized),
+      `inventoryScope` for image targets (osPackages, bitnami, applicationPackages) and
+      `summary.frozenKeys`; the table prints the D110 footnote for a frozen key even with
+      zero findings and lists every non-live state; SARIF carries `coverage` in the
+      invocation properties and an `assay/frozen-data` result per frozen key. Computed in
+      `scancmd.Run` from the inventory, Meta and `res.Skipped`; the Matcher is untouched.
+      `schemaVersion` 12. Discloses only — no exit code changes.
 - [x] A release the upstream stops serving is frozen, not lost (D110) — a seeded build
       carries forward, from the seed's JSON records, any key a provider that ran no longer
       emits (whole-key) and, for releases past their D87 `EOLFrom` under which this run added no
