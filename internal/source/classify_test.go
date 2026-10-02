@@ -3,6 +3,7 @@ package source
 import (
 	"archive/zip"
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -275,6 +276,159 @@ func TestClassify_AnSPDXDocumentWithALateSpdxVersion(t *testing.T) {
 	}
 	if got != TargetSBOM {
 		t.Errorf("Classify = %v, want sbom", got)
+	}
+}
+
+// D112's per-file limit holds the sniff, not only the decode after it. The
+// sniff is a read of the target too, and on a bare path it runs before
+// decodeSBOM's bound ever does: before this, a document whose marker sat
+// behind a padding string longer than the limit was streamed all the way to
+// the marker and called an SBOM. Under the bound the marker is never reached,
+// and the error says why in the same words an image's file and a decoded
+// SBOM get — the exact rendered sentence, path and limit together, because
+// "not a CycloneDX document" would be wrong about a file that may well be
+// one. scancmd.Run reports it as exit 2, never a scan that kept reading.
+//
+// The inside-the-limit document is what makes the past-the-limit one mean
+// something: the same shape, its marker past the 512-byte fast path but
+// inside the limit, still classifies, so the error below comes from the
+// limit and not from the fixture.
+func TestClassify_AMarkerPastTheFileLimitIsTheLimitsError(t *testing.T) {
+	const limit = 4 << 10
+	for _, tt := range []struct {
+		name string
+		doc  func(pad string) string
+	}{
+		{"CycloneDX", func(pad string) string {
+			return `{"metadata":{"tools":[{"vendor":"` + pad + `","name":"syft"}]},` +
+				`"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[]}`
+		}},
+		{"SPDX", func(pad string) string {
+			return `{"SPDXID":"SPDXRef-DOCUMENT","name":"` + pad + `",` +
+				`"spdxVersion":"SPDX-2.3","packages":[]}`
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			lowerLimit(t, &MaxFileBytes, limit)
+			dir := t.TempDir()
+
+			inside := filepath.Join(dir, "inside.json")
+			if err := os.WriteFile(inside, []byte(tt.doc(strings.Repeat("x", limit/2))), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if got, _, err := Classify(inside); err != nil || got != TargetSBOM {
+				t.Fatalf("Classify(marker inside the limit) = %v, %v; want sbom", got, err)
+			}
+
+			past := filepath.Join(dir, "past.json")
+			if err := os.WriteFile(past, []byte(tt.doc(strings.Repeat("x", 4*limit))), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, _, err := Classify(past)
+			if err == nil {
+				t.Fatalf("Classify(marker past the limit) = %v, want D112's per-file limit error - "+
+					"the sniff read past the limit to find the marker", got)
+			}
+			if want := past + " exceeds the 4 KiB per-file limit (D112)"; err.Error() != want {
+				t.Errorf("err = %q, want %q", err, want)
+			}
+		})
+	}
+
+	// The limit's error is for a sniff that REACHED the limit, not for any file
+	// longer than it, and not for one shorter than it. Each of these is a file
+	// the sniff could tell apart without reaching the limit, so each keeps the
+	// sentence naming what was tried — a flag set on size alone, or on any
+	// failed sniff, turns one of them red.
+	for _, tt := range []struct{ name, body string }{
+		{"a small JSON document with no marker", `{"pad":"` + strings.Repeat("x", limit/2) + `","name":"x"}`},
+		{"a file past the limit that is not JSON at all", strings.Repeat("q", 4*limit)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			lowerLimit(t, &MaxFileBytes, limit)
+			p := filepath.Join(t.TempDir(), "mystery.bin")
+			if err := os.WriteFile(p, []byte(tt.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, _, err := Classify(p)
+			if err == nil {
+				t.Fatalf("Classify(%s) = %v, want the unrecognised-file error", tt.name, got)
+			}
+			if want := p + " is a file, but not a Go binary"; !strings.HasPrefix(err.Error(), want) {
+				t.Errorf("err = %q, want it to start %q", err, want)
+			}
+		})
+	}
+}
+
+// The bound is on what the sniff PULLS, not on what it concludes. A sniff that
+// read a whole file and then said no would pass the Classify test above and
+// still have buffered the token D112 exists to refuse — json.Decoder holds a
+// string token whole — so this counts the bytes served to it. The padding is
+// one string 256 times the limit, ahead of the marker.
+//
+// The exactly-the-limit rows are the other edge, and where hitLimit's +1
+// lives. A document decodeSBOM would accept, its marker as near the end as
+// JSON lets it sit, is still found, so the bound refuses nothing the decoder
+// after it would have read. The same size with no marker is judged on its
+// content — no hitLimit, so Classify keeps the old sentence for it — and one
+// byte more is the first size that reports the limit.
+func TestSniffTopLevelKey_PullsNoMoreThanTheFileLimit(t *testing.T) {
+	const limit = 4 << 10
+	lowerLimit(t, &MaxFileBytes, limit)
+	pad := strings.Repeat("x", 1<<20)
+
+	// sized is a JSON object of exactly size bytes ending in tail.
+	sized := func(t *testing.T, size int, tail string) string {
+		t.Helper()
+		doc := `{"pad":"` + strings.Repeat("x", size-len(`{"pad":"`)-len(`"`)-len(tail)) + `"` + tail
+		if len(doc) != size {
+			t.Fatalf("fixture is %d bytes, want %d", len(doc), size)
+		}
+		return doc
+	}
+
+	for _, tt := range []struct{ key, doc string }{
+		{"bomFormat", `{"metadata":{"tools":[{"vendor":"` + pad + `","name":"syft"}]},` +
+			`"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[]}`},
+		{"spdxVersion", `{"SPDXID":"SPDXRef-DOCUMENT","name":"` + pad + `",` +
+			`"spdxVersion":"SPDX-2.3","packages":[]}`},
+	} {
+		t.Run(tt.key+" past the limit", func(t *testing.T) {
+			var n int64
+			r := &countingReadCloser{ReadCloser: io.NopCloser(strings.NewReader(tt.doc)), n: &n}
+			found, hitLimit := sniffTopLevelKey(r, tt.key)
+			if found {
+				t.Errorf("sniff found %q %d bytes into the document, past a %d-byte limit",
+					tt.key, strings.Index(tt.doc, `"`+tt.key+`"`), limit)
+			}
+			if !hitLimit {
+				t.Errorf("sniff stopped at the limit without finding %q but did not say so", tt.key)
+			}
+			if n > limit+1 {
+				t.Errorf("sniff pulled %d bytes of a %d-byte document for a %d-byte limit",
+					n, len(tt.doc), limit)
+			}
+		})
+
+		for _, row := range []struct {
+			name          string
+			size          int
+			tail          string
+			found, atEdge bool
+		}{
+			{"marker last in a document of exactly the limit", limit, `,"` + tt.key + `":1}`, true, false},
+			{"no marker in a document of exactly the limit", limit, `,"other":1}`, false, false},
+			{"no marker in a document one byte over the limit", limit + 1, `,"other":1}`, false, true},
+		} {
+			t.Run(tt.key+": "+row.name, func(t *testing.T) {
+				found, hitLimit := sniffTopLevelKey(strings.NewReader(sized(t, row.size, row.tail)), tt.key)
+				if found != row.found || hitLimit != row.atEdge {
+					t.Errorf("sniff(%d bytes) = found %v, hitLimit %v; want %v, %v under a %d-byte limit",
+						row.size, found, hitLimit, row.found, row.atEdge, limit)
+				}
+			})
+		}
 	}
 }
 

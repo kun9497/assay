@@ -85,10 +85,12 @@ func classify(ref string) kind {
 // network; the other two never do (D14).
 //
 // The context is honoured on the registry path, so a caller that sets a
-// deadline gets one. Note that nothing in this program sets one today:
-// go-containerregistry's default transport has no overall deadline either, so
-// a black-holed registry can still hang a scan. The plumbing is here; the
-// policy is not.
+// deadline gets one; `assay scan --timeout` is what sets it (D112), and the
+// layer walks check the same context between tar entries, so it bounds a
+// local archive's decompression as well as a registry's fetch. Without the
+// flag there is still no deadline — go-containerregistry's default transport
+// has no overall one either, so a black-holed registry can hang a scan that
+// did not ask for a limit.
 func Open(ctx context.Context, ref string) (*Image, error) {
 	img, err := load(ctx, ref)
 	if err != nil {

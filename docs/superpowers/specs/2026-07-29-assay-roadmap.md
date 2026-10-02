@@ -4354,6 +4354,68 @@ question is what D18's divergence table warns against.
 
 ---
 
+### D112 — Every byte a scan reads from a target is bounded, and a scan can be told when to stop
+
+**Decision.** Three bounds, all failing closed. (1) **Per file:** every file a scan reads out
+of an image layer — the package databases `Files` resolves (`internal/source/walk.go`) and
+everything `FilesUnder`, `FilesNamed` and `FilesMatching` collect (`internal/source/under.go`)
+— and every SBOM a scan decodes (`internal/cataloger/cyclonedx`, `internal/cataloger/spdx`)
+is read through a limit of **512 MiB** of decompressed bytes, the cap the jar cataloger has
+used since D61 (`jar.go` `maxEntrySize`). A file past the limit is an error that names the
+path and the limit, and the scan exits 2: the result cannot be trusted, which is the CLI
+contract's word for it (D11). (2) **Per scan:** the bytes those reads return are summed across
+every layer pass, and a scan that collects more than **2 GiB** stops with the same kind of
+error. (3) **In time:** the layer walks take the scan's `context.Context` and check it between
+tar entries, so a cancelled or expired context ends the walk at the next entry rather than at
+the end of the layer; `assay scan` gains `--timeout <duration>` (none when unset, so the CLI
+behaves as before), which derives the context `main` hands to `Run` from `context.Background`
+today and turns expiry into exit 2 with a message naming the flag. Both size limits are
+package-level variables, not constants, so a test can lower them and prove the bound without
+a half-gigabyte fixture — the `carryNow` pattern.
+
+**Why these numbers, and why exit 2 rather than skipping.** The largest legitimate reads are
+rpm databases on big enterprise images (tens of megabytes, a Berkeley DB `Packages` file in the
+low hundreds at the extreme), dpkg `status` on a full Ubuntu (a few megabytes), and an SBOM of
+a large image (tens of megabytes); 512 MiB clears every one by an order of magnitude and is
+already the number one cataloger lives with. 2 GiB per scan is four such files and far more
+than any image this project has measured — the weekly differential's 23 targets stay inside a
+fraction of it — while still ending a layer built to exhaust memory. An over-limit file is
+not folded into `targetIncomplete` and reported as a partial scan, because for the only file
+kinds this path reads a partial answer is worse than none: a truncated package database is
+a smaller inventory presented as complete, and the D43 rule already refuses an image whose
+package database could not be read rather than reporting it clean. Loud and early is the
+contract (2 > 1 > 0); the fix for a legitimate over-limit file, should one ever appear, is to
+raise the number with the measurement that justified it, the way the jar cap was set.
+
+**Why now.** The 2026-09-30 service review read the four `io.ReadAll` sites and the two
+decoders and found no bound of any kind between them (`walk.go:137`, `under.go:94`, `:200`,
+`:308`, `cyclonedx.go:52`, `spdx.go:64`), no total across a scan, and a context that reached
+the registry fetch (`remote.WithContext`, `image.go:131`) but never the decompression loop —
+`image.go:86-91` had already written the gap down ("The plumbing is here; the policy is
+not"). None of that is a documented decision: the CLI was designed for a developer's own
+images, where a hostile layer is not a threat model. An externally supplied target makes it
+one, and it is the one class of input-safety defect that belongs in this repository rather
+than in a service wrapper: a wrapper can bound a process's memory and time, but only the
+reader knows which file it was reading when it stopped. The jar caps (`jar.go:37`, `:45`) do
+not help here — `jar.Parse` runs only for a `jar:` target, never inside an image.
+
+**What stays out.** No bound on the number of layers or on the number of full layer passes a
+scan makes (`Files` up to eight symlink hops, then `status.d`, then Bitnami's two — four full
+passes on a minimal Alpine image); those multiply time, which `--timeout` now bounds, not
+memory, which the two size limits bound. `--timeout` reaches the registry fetch and the layer
+walks and nothing else: an SBOM, directory, binary or jar target never consults the context,
+so a deadline that expires after the walk has finished does not fail the scan — the flag
+bounds the one phase an untrusted layer can stretch, and the usage text says so. No per-file limit on `dir:` targets: a directory the
+operator points at is theirs, and D109 already reports what in it could not be read. No
+configurable limits: a number that moves per deployment is a number nobody can reason about
+in a bug report; the service wrapper that needs a smaller envelope sets it on the process.
+Registry-side controls — which hosts a target may name, DNS resolution to private ranges, the
+first request of a chain — stay with the deployment: the library already refuses redirects to
+private IP literals, and the rest needs a notion of "internal" only a deployment has
+(deferred-decisions, "Safe handling of externally supplied targets").
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

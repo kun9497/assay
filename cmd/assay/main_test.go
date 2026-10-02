@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -18,7 +19,10 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/registry"
+	"github.com/google/go-containerregistry/pkg/v1/empty"
+	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/google/go-containerregistry/pkg/v1/tarball"
 
 	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/dbartifact"
@@ -811,6 +815,171 @@ func TestRun_ScanDBMaxAgeReachesRealExitCode(t *testing.T) {
 	if code := run([]string{"scan", sbom}, &stdout, &stderr); code != exitOK {
 		t.Errorf("run without --db-max-age = %d, want %d (exitOK)\nstderr:\n%s",
 			code, exitOK, stderr.String())
+	}
+}
+
+// writeD112Image writes a one-layer Alpine 3.19 docker-archive with one apk
+// package, built in-process (never pkg/v1/daemon), so a scan of it reaches
+// the layer walk with no network at any point.
+func writeD112Image(t *testing.T, path string) {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for _, f := range []struct{ name, body string }{
+		{"etc/os-release", "ID=alpine\nVERSION_ID=3.19.9\n"},
+		{"lib/apk/db/installed", "P:busybox\nV:1.36.1-r15\nA:x86_64\no:busybox\n\n"},
+	} {
+		if err := tw.WriteHeader(&tar.Header{
+			Name: f.name, Mode: 0o644, Size: int64(len(f.body)), Typeflag: tar.TypeReg,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte(f.body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw := buf.Bytes()
+	layer, err := tarball.LayerFromOpener(func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(raw)), nil
+	})
+	if err != nil {
+		t.Fatalf("LayerFromOpener: %v", err)
+	}
+	img, err := mutate.AppendLayers(empty.Image, layer)
+	if err != nil {
+		t.Fatalf("AppendLayers: %v", err)
+	}
+	ref, err := name.ParseReference("assay-d112:latest")
+	if err != nil {
+		t.Fatalf("ParseReference: %v", err)
+	}
+	if err := tarball.WriteToFile(path, ref, img); err != nil {
+		t.Fatalf("WriteToFile: %v", err)
+	}
+}
+
+// TestRun_ScanTimeoutReachesRealExitCode is the run()-seam wiring check for
+// --timeout (D112). scancmd's own tests drive Run with a context built by
+// hand, which holds the layer walk's check but not the one line in run() that
+// turns the parsed duration into the context's deadline: parsing the flag and
+// then handing scan context.Background() type-checks, and a docker-archive
+// scan never touches the network, so nothing else would notice the deadline
+// was never set.
+//
+// The rows that scan clean are what make the 1ns rows mean something: the
+// same image, with no flag or a generous one, exits 0, so an exit 2 can only
+// be the deadline.
+func TestRun_ScanTimeoutReachesRealExitCode(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ASSAY_DB_DIR", dir)
+	w, err := store.Create(filepath.Join(dir, "vulnerability.db"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := w.SetMeta(store.Meta{Providers: map[string]store.Provenance{
+		"osv": {Ecosystems: []string{"Alpine:v3.19"}},
+	}}); err != nil {
+		t.Fatalf("SetMeta: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	tarPath := filepath.Join(dir, "image.tar")
+	writeD112Image(t, tarPath)
+	target := "docker-archive:" + tarPath
+
+	cases := []struct {
+		name    string
+		flags   []string
+		want    int
+		timeout string // the duration the message must name, when one is expected
+	}{
+		{"no --timeout: the scan behaves as it did before the flag", nil, exitOK, ""},
+		{"a generous --timeout= changes nothing", []string{"--timeout=10m"}, exitOK, ""},
+		{"a generous --timeout, space form, changes nothing", []string{"--timeout", "10m"}, exitOK, ""},
+		{"--timeout=1ns expires before the walk", []string{"--timeout=1ns"}, exitError, "1ns"},
+		{"--timeout 1ns, space form, expires too", []string{"--timeout", "1ns"}, exitError, "1ns"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append([]string{"scan", target}, tc.flags...)
+			var stdout, stderr bytes.Buffer
+			code := run(args, &stdout, &stderr)
+			if code != tc.want {
+				t.Fatalf("run(%v) = %d, want %d\nstdout:\n%s\nstderr:\n%s",
+					args, code, tc.want, stdout.String(), stderr.String())
+			}
+			if tc.timeout == "" {
+				return
+			}
+			want := "error: scan did not finish within " + tc.timeout + " (--timeout)"
+			if !strings.Contains(stderr.String(), want) {
+				t.Errorf("stderr does not say %q:\n%s", want, stderr.String())
+			}
+			// Stream discipline: a scan that did not finish wrote no report.
+			if stdout.Len() != 0 {
+				t.Errorf("a timed-out scan wrote to stdout:\n%s", stdout.String())
+			}
+		})
+	}
+}
+
+// TestParseScan_Timeout pins --timeout's parsing: both spellings, and every
+// value that must be refused rather than read as "no limit". A zero or
+// negative duration would expire the context before the scan began, which
+// reads as a strict setting and behaves as a broken one.
+func TestParseScan_Timeout(t *testing.T) {
+	for _, args := range [][]string{
+		{"alpine:3.19", "--timeout=90s"},
+		{"alpine:3.19", "--timeout", "90s"},
+		{"--timeout", "90s", "alpine:3.19"},
+	} {
+		target, opts, err := parseScanArgs(args)
+		if err != nil {
+			t.Fatalf("parseScanArgs(%v): %v", args, err)
+		}
+		if target != "alpine:3.19" {
+			t.Errorf("parseScanArgs(%v) target = %q, want alpine:3.19", args, target)
+		}
+		if opts.Timeout != 90*time.Second {
+			t.Errorf("parseScanArgs(%v) Timeout = %v, want 1m30s", args, opts.Timeout)
+		}
+	}
+
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"x", "--timeout=abc"}, `--timeout: "abc" is not a duration (try 10m, 1h)`},
+		{[]string{"x", "--timeout", "abc"}, `--timeout: "abc" is not a duration (try 10m, 1h)`},
+		{[]string{"x", "--timeout=0"}, `--timeout: "0" must be positive`},
+		{[]string{"x", "--timeout=-5s"}, `--timeout: "-5s" must be positive`},
+		{[]string{"x", "--timeout"}, "--timeout requires a value"},
+	} {
+		if _, _, err := parseScanArgs(tc.args); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("parseScanArgs(%v) err = %v, want it to contain %q", tc.args, err, tc.want)
+		}
+	}
+
+	// The same refusal through run(): exit 2, the wording on stderr, nothing
+	// on stdout — a typo in the flag must never become a scan with no limit.
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"scan", "docker-archive:/does/not/exist.tar", "--timeout=abc"},
+		&stdout, &stderr); code != exitError {
+		t.Errorf("run(--timeout=abc) = %d, want %d", code, exitError)
+	}
+	if want := `error: --timeout: "abc" is not a duration (try 10m, 1h)`; !strings.Contains(stderr.String(), want) {
+		t.Errorf("stderr does not say %q:\n%s", want, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("a refused flag wrote to stdout:\n%s", stdout.String())
+	}
+
+	if !strings.Contains(usage, "--timeout <dur>") {
+		t.Error("usage does not document --timeout")
 	}
 }
 

@@ -407,7 +407,7 @@ func TestCatalogFromImage_SetsLayerDigestFromTheLayer(t *testing.T) {
 			apkDBPath: apkOneRecord,
 		}),
 	}}
-	target, _, _, err := catalogFromImage("test-image", img)
+	target, _, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,7 +451,7 @@ func TestCatalogFromImage_ApkDBUnderUsrLibPhysicalPath(t *testing.T) {
 			apkDBPathUsrLib: apkOneRecord, // no lib/apk/db/installed at all
 		}),
 	}}
-	target, stats, _, err := catalogFromImage("test-image", img)
+	target, stats, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatalf("catalogFromImage: %v (want the physical usr/lib path to be found)", err)
 	}
@@ -491,7 +491,7 @@ func TestCatalogFromImage_ApkDBUnderUsrLibPhysicalPath_MinimOS(t *testing.T) {
 			apkDBPathUsrLib: apkOneRecord, // no lib/apk/db/installed at all
 		}),
 	}}
-	target, stats, _, err := catalogFromImage("test-image", img)
+	target, stats, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatalf("catalogFromImage: %v (want the physical usr/lib path to be found)", err)
 	}
@@ -537,7 +537,7 @@ o:usrlib-origin
 			apkDBPathUsrLib: usrLibRecord, // usrlib-record / usrlib-origin
 		}),
 	}}
-	target, _, _, err := catalogFromImage("test-image", img)
+	target, _, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -570,7 +570,7 @@ func TestCatalogFromImage_ApkDBUnderVarLibPhysicalPath_Alpaquita(t *testing.T) {
 			apkDBPathVarLib: apkOneRecord, // no lib/apk/db/installed, no usr/lib/apk/db/installed
 		}),
 	}}
-	target, stats, _, err := catalogFromImage("test-image", img)
+	target, stats, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatalf("catalogFromImage: %v (want the physical var/lib path to be found)", err)
 	}
@@ -607,7 +607,7 @@ func TestCatalogFromImage_NoOSReleaseStillCatalogsPackages(t *testing.T) {
 			apkDBPath: apkOneRecord,
 		}),
 	}}
-	target, stats, _, err := catalogFromImage("test-image", img)
+	target, stats, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -634,7 +634,7 @@ func TestCatalogFromImage_UnsupportedEcosystemIsNotGuessed(t *testing.T) {
 			apkDBPath:     apkOneRecord,
 		}),
 	}}
-	target, _, _, err := catalogFromImage("test-image", img)
+	target, _, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -658,7 +658,7 @@ func TestCatalogFromImage_NoApkDBReturnsError(t *testing.T) {
 			osReleasePath: osReleaseAlpine319,
 		}),
 	}}
-	target, stats, _, err := catalogFromImage("test-image", img)
+	target, stats, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err == nil {
 		t.Fatal("catalogFromImage succeeded with no apk database; want an error")
 	}
@@ -2641,7 +2641,7 @@ func TestCatalogFromImage_ApkDBUsrLibWinsOverVarLib(t *testing.T) {
 			apkDBPathVarLib: varLibPkg,
 		}),
 	}}
-	target, _, _, err := catalogFromImage("test-image", img)
+	target, _, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatalf("catalogFromImage: %v", err)
 	}
@@ -2701,7 +2701,7 @@ func TestCatalogFromImage_PacmanSymlinkedDescIsCountedNotSilent(t *testing.T) {
 			"var/lib/pacman/local/linked-2.0-1/desc": "../real-1.0-1/desc",
 		},
 	)}}
-	_, stats, _, err := catalogFromImage("test-image", img)
+	_, stats, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatalf("catalogFromImage: %v", err)
 	}
@@ -2727,7 +2727,7 @@ func TestCatalogFromImage_BitnamiSymlinkedMarkerIsCountedNotSilent(t *testing.T)
 			"opt/bitnami/common/.spdx-wait-for-port.spdx": "../postgresql/.spdx-postgresql.spdx",
 		},
 	)}}
-	_, stats, _, err := catalogFromImage("test-image", img)
+	_, stats, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatalf("catalogFromImage: %v", err)
 	}

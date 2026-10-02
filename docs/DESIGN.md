@@ -485,6 +485,13 @@ Separating "found something" from "could not run" matters in CI — a broken sca
 never look like a clean build. Packages `assay` cannot evaluate are reported as skipped
 with a count, never folded silently into a clean verdict.
 
+Since D112, the same exit 2 also covers a target that did not stay inside its bounds: an
+image-layer file read past 512 MiB, more than 2 GiB read in total across a scan, or — when
+`--timeout <duration>` is set — a layer walk still going at the deadline. Each case names
+what tripped it (the path, the limit, or the flag) on stderr, because a truncated package
+database reported as a smaller but complete inventory is exactly the untrustworthy result
+this exit code exists to catch.
+
 ## Architecture
 
 The pipeline is five interfaces. Each is independently testable, and supporting a new
@@ -695,6 +702,13 @@ exited 0 while 24 findings went unmentioned.
 - [x] SLES LTSS folded with a mainline-wins tie-break (D91) — post-EOL fixes surface
       under the same key (bci-base 121→286 findings, curl shows its real FIXED IN),
       385,621 shadowed twins dropped and counted
+- [x] Every byte a scan reads from a target is bounded (D112) — each file read out of an
+      image layer and each SBOM decoded passes through a 512 MiB limit (the jar cataloger's
+      cap since D61), a scan stops past 2 GiB in total, and the layer walks honour the
+      scan's context, which `--timeout <duration>` now bounds; an over-limit file or an
+      expired timeout is exit 2 naming the path or the flag, never a smaller inventory
+      presented as complete. Found by the 2026-09-30 service review: six unbounded reads
+      and a context that never reached the decompression loop.
 - [x] A scan states what it covered, per key (D111) — JSON gains `coverage[]` (ecosystem,
       packages, evaluated, state live/frozen/not-in-database/no-comparer, provider,
       dataAsOf, frozenSince), `distro` (id, versionId, ecosystem, recognized),

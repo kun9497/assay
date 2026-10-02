@@ -1593,6 +1593,45 @@ do is find a tree at a path nobody named, which is the whole-tree walk D70 asked
 
 ---
 
+### Safe handling of externally supplied targets
+
+D112 bounds what a scan reads once it already has a target in hand: a file read out of an
+image layer or SBOM past 512 MiB, more than 2 GiB read in total across a scan, and — when
+`--timeout <duration>` is set — a layer walk still running past the deadline, are all exit 2.
+All three are repository-side on purpose: only the code doing the read knows which file it
+was reading when it should stop, which a process-level limit imposed from outside cannot know
+(roadmap, D112, "Why now").
+
+**What stays with the deployment.** D112 has nothing to say about anything upstream of the
+first byte read. Which hosts a target may name — there is no host allow-list; `assay` resolves
+and scans whatever registry reference it is given. DNS resolution to a private range — a name
+that resolves to `169.254.169.254` or a `10.0.0.0/8` address is fetched the same as any other.
+And the first request of a redirect chain: `go-containerregistry` v0.21.7 ships
+`checkRedirectSSRF` (`remote/fetcher.go`), which refuses a *redirect* from a public host to a
+private or link-local IP literal, but only compares each hop against `via[0]` — the host the
+caller already named — so a target whose own host directly resolves to, or is served from,
+internal infrastructure is never stopped by it, and same-host redirects and plain DNS names
+(as opposed to IP literals) are explicitly let through. Process or container isolation,
+CPU/memory/disk quotas, a cap on concurrent scans, and per-customer registry credentials are
+out of scope for the same reason: each needs a notion of "this deployment's network" or "this
+customer's budget" that only the deployment has — the same boundary D112's own "What stays
+out" draws around `--timeout`, which bounds one scan's wall clock and nothing about the
+process running it.
+
+**A possible small repo-side helper.** `Classify` (`internal/source/classify.go`) already
+decides a target's kind — image, directory, Go binary, jar, or SBOM — before anything is
+opened, falling back to `os.Stat` on a bare string to tell a local path from a registry
+reference (`classify.go:72`). A service wrapper that wants to refuse a class of target
+entirely — no bare local paths, no `docker-archive:`/`oci-dir:` reads, registry references
+only, or the reverse — has a `TargetKind` to act on already rather than re-deriving one from
+the raw argument. Nothing like this exists yet; it is sized here only because the primitive it
+would sit on top of is already built for a different reason.
+
+**Revisit when** a service wrapper exists to carry this policy, or the first externally
+supplied target — one the operator running `assay` did not type themselves — is accepted.
+
+---
+
 ### What a directory scan does not read
 
 `vendor/`, `go.sum`, and the module cache. A directory scan reads `go.mod` and stops (D23).

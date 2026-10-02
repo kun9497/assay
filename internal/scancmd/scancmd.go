@@ -156,6 +156,14 @@ type Options struct {
 	// number depends on how the caller runs `db update`, and inventing one
 	// here would be a policy nobody chose.
 	DBMaxAge time.Duration
+	// Timeout is the --timeout the caller derived Run's context from (D112),
+	// carried so an expired deadline can be reported as the flag's, with its
+	// value. Run never applies it: the context is Run's own parameter and
+	// cmd/assay's run() sets the deadline on it, so a second clock here would
+	// be a second place for the limit to disagree with itself. Zero means no
+	// --timeout was given, and an expiry is then reported as the plain error
+	// it is.
+	Timeout time.Duration
 	// Explain, when non-empty, selects one advisory to explain instead of
 	// rendering the table or JSON: its own ID, or any alias/upstream
 	// identifier it carries (D3) — whatever a reader would have grepped the
@@ -449,6 +457,14 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 	case source.TargetImage:
 		t, stats, sc, err := catalogImage(ctx, target)
 		if err != nil {
+			// D112. An expired --timeout is named as the flag's, with its
+			// value, so the reader knows which setting stopped the scan; the
+			// underlying error follows because only the walk knows which
+			// layer it was in when it stopped.
+			if timedOut(ctx, opts, err) {
+				fmt.Fprintf(stderr, "error: scan did not finish within %s (--timeout): %v\n", opts.Timeout, err)
+				return 2
+			}
 			// No "open %s:" wrapper. Every error reaching here already names
 			// the target, and the one that matters most is not an open failure
 			// at all — "no supported package database found" comes from an
@@ -510,17 +526,9 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		}
 		defer f.Close()
 
-		var (
-			t     pkgmeta.Target
-			stats cyclonedx.Stats
-		)
-		if source.LooksLikeSPDX(path) {
-			t, stats, err = spdx.Parse(f)
-		} else {
-			t, stats, err = cyclonedx.Parse(f)
-		}
+		t, stats, err := decodeSBOM(path, f)
 		if err != nil {
-			fmt.Fprintf(stderr, "error: parse %s: %v\n", path, err)
+			fmt.Fprintf(stderr, "error: %v\n", err)
 			return 2
 		}
 		inventory, cat = t, stats
@@ -961,6 +969,71 @@ func verdict(opts Options, sum report.Summary, findings []matcher.Finding, eol r
 	return 0
 }
 
+// timedOut reports whether err ended the scan because the deadline --timeout
+// set expired (D112). The error chain is asked first; the context itself is
+// asked too, because a registry client is free to flatten the context's error
+// into a message of its own, and a scan that failed after its deadline passed
+// is one that did not finish within it either way. Zero opts.Timeout means the
+// deadline, if any, is not the flag's, so it is not named as the flag's.
+func timedOut(ctx context.Context, opts Options, err error) bool {
+	if opts.Timeout <= 0 {
+		return false
+	}
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded)
+}
+
+// countingReader counts the bytes it returns. decodeSBOM reads through one
+// to learn whether the document reached the limit, which neither decoder can
+// say: a LimitReader that stops mid-document leaves them reporting a syntax
+// error, not a size.
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
+// decodeSBOM picks the SBOM's decoder and runs it under D112's per-file limit,
+// source.MaxFileBytes — the same variable an image's files are read under.
+//
+// The bound sits here, around both decoders, rather than inside each: this is
+// the one place a scan hands them a reader nothing has bounded yet (the other
+// caller, bitnamidb, decodes bytes source already read under the same limit),
+// so one wrapper bounds both with one number, and a test that lowers the
+// per-file limit lowers it for every file a scan reads rather than for one
+// package's.
+//
+// Over the limit is detected by count, not by the decoder's error: limit+1
+// bytes read means the file is longer than the limit wherever the decoder
+// stopped. A document that decodes cleanly is still drained to the limit, so
+// a file whose JSON value ends early but whose bytes run on past it is refused
+// as well — the limit is on the file, as it is for an image's files, not on
+// how much of it one decoder happened to buffer.
+func decodeSBOM(path string, r io.Reader) (pkgmeta.Target, cyclonedx.Stats, error) {
+	cr := &countingReader{r: io.LimitReader(r, source.MaxFileBytes+1)}
+	parse := cyclonedx.Parse
+	if source.LooksLikeSPDX(path) {
+		parse = spdx.Parse
+	}
+	t, stats, err := parse(cr)
+	if err == nil {
+		if _, derr := io.Copy(io.Discard, cr); derr != nil {
+			err = fmt.Errorf("read: %w", derr)
+		}
+	}
+	if cr.n > source.MaxFileBytes {
+		return pkgmeta.Target{}, cyclonedx.Stats{}, source.FileLimitError(path)
+	}
+	if err != nil {
+		return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return t, stats, nil
+}
+
 // catalogImage opens ref and builds a Target from it. It is a thin wrapper
 // around catalogFromImage so tests can drive the cataloging logic directly,
 // against a hand-built *source.Image, without going through a real registry,
@@ -970,7 +1043,7 @@ func catalogImage(ctx context.Context, ref string) (pkgmeta.Target, cyclonedx.St
 	if err != nil {
 		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
 	}
-	return catalogFromImage(ref, img)
+	return catalogFromImage(ctx, ref, img)
 }
 
 // catalogFromImage builds a Target the way syft does for the same image: the
@@ -1000,9 +1073,13 @@ func catalogImage(ctx context.Context, ref string) (pkgmeta.Target, cyclonedx.St
 // (D111), returned rather than re-derived by a second walk of the layers: the
 // probes below are the only place that knows whether /opt/bitnami held
 // anything.
-func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.Stats, report.InventoryScopeRecord, error) {
+//
+// ctx reaches every layer pass below (D112): a cancelled or expired scan
+// stops at the next tar entry of whichever pass it is in, and its error comes
+// back unchanged for Run to name.
+func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgmeta.Target, cyclonedx.Stats, report.InventoryScopeRecord, error) {
 	wantPaths := append([]string{osReleasePath, dpkgDBPath}, apkDBPaths...)
-	files, err := img.Files(append(wantPaths, rpmDBPaths()...))
+	files, err := img.Files(ctx, append(wantPaths, rpmDBPaths()...))
 	if err != nil {
 		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
 	}
@@ -1020,7 +1097,7 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 	var statusD map[string]source.FileFromLayer
 	var statusDLinks int
 	if files[dpkgDBPath].Data == nil {
-		statusD, statusDLinks, err = img.FilesUnder(dpkgStatusDir)
+		statusD, statusDLinks, err = img.FilesUnder(ctx, dpkgStatusDir)
 		if err != nil {
 			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
 		}
@@ -1037,7 +1114,7 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 	var pacmanFiles map[string]source.FileFromLayer
 	var pacmanLinks int
 	if !hasAPK && files[dpkgDBPath].Data == nil && len(statusD) == 0 && !hasRPM {
-		pacmanFiles, pacmanLinks, err = img.FilesNamed(pacmanLocalDir, "desc")
+		pacmanFiles, pacmanLinks, err = img.FilesNamed(ctx, pacmanLocalDir, "desc")
 		if err != nil {
 			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
 		}
@@ -1248,7 +1325,7 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 	// finding no Bitnami markers is not an error: the overwhelming majority
 	// of images this build scans are not Bitnami images at all, and
 	// /opt/bitnami simply does not exist in them.
-	bitnamiPkgs, bitnamiSkipped, bitnamiScope, err := catalogBitnami(img)
+	bitnamiPkgs, bitnamiSkipped, bitnamiScope, err := catalogBitnami(ctx, img)
 	if err != nil {
 		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
 	}
@@ -1298,8 +1375,8 @@ func catalogFromImage(ref string, img *source.Image) (pkgmeta.Target, cyclonedx.
 // not-read when its only markers are symlinks this build does not follow —
 // Bitnami content was there and none of it reached the inventory, which
 // "none" would deny and "read" would overstate.
-func catalogBitnami(img *source.Image) ([]pkgmeta.Package, int, string, error) {
-	markerFiles, markerLinks, err := img.FilesMatching(bitnamiDir, bitnamiSPDXPrefix, bitnamiSPDXSuffix)
+func catalogBitnami(ctx context.Context, img *source.Image) ([]pkgmeta.Package, int, string, error) {
+	markerFiles, markerLinks, err := img.FilesMatching(ctx, bitnamiDir, bitnamiSPDXPrefix, bitnamiSPDXSuffix)
 	if err != nil {
 		return nil, 0, "", err
 	}
@@ -1322,7 +1399,7 @@ func catalogBitnami(img *source.Image) ([]pkgmeta.Package, int, string, error) {
 	// so it is asked for by name (source.Image.Files) rather than
 	// discovered.
 	var legacyPkgs []pkgmeta.Package
-	legacyFiles, err := img.Files([]string{bitnamiLegacyPath})
+	legacyFiles, err := img.Files(ctx, []string{bitnamiLegacyPath})
 	if err != nil {
 		return nil, 0, "", err
 	}

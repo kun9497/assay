@@ -48,6 +48,11 @@ Security tab exists to keep.
   run: exit ${{ steps.scan.outputs.exit_code }}
 ```
 
+If `$IMAGE` can name a target this pipeline does not fully trust — a tag a PR supplies, a
+registry outside the org — add `--timeout <duration>` (D112): reads are already size-bounded,
+but `--timeout` is what turns a pull or layer walk that simply will not finish into exit 2
+instead of a hung job.
+
 This gate covers the image's operating-system packages. npm, Python, Java and Go
 dependencies installed inside the image are not inventoried by an image scan (D70,
 [deferred](deferred-decisions.md)), so a pass here says nothing about them — for those, gate
