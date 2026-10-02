@@ -702,6 +702,13 @@ exited 0 while 24 findings went unmentioned.
 - [x] SLES LTSS folded with a mainline-wins tie-break (D91) — post-EOL fixes surface
       under the same key (bci-base 121→286 findings, curl shows its real FIXED IN),
       385,621 shadowed twins dropped and counted
+- [x] Data age is judged for the keys a scan uses (D113) — `--db-max-age` folds only the
+      providers that declare an ecosystem key the inventory holds (D59's stalest-wins
+      inside that set), a frozen key counts as old as its freeze and the refusal names it,
+      and a new `--db-max-rating-age` gates NVD/EPSS/KEV age on request while
+      `--db-max-age` keeps its advisory-only meaning. The Amazon provider's floor is the
+      oldest ACTIVE repository: an extras topic silent for two years is closed and listed by
+      `db status`; core is never closed. Neither flag has a default.
 - [x] Every byte a scan reads from a target is bounded (D112) — each file read out of an
       image layer and each SBOM decoded passes through a 512 MiB limit (the jar cataloger's
       cap since D61), a scan stops past 2 GiB in total, and the layer walks honour the
