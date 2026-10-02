@@ -39,12 +39,17 @@ import (
 //
 // This only decides "some kind of SBOM" for the CycloneDX/SPDX pair —
 // scancmd's own TargetSBOM branch re-sniffs a resolved file's content by the
-// exported LooksLikeSPDX (mirroring looksLikeCycloneDX below) to pick the
-// parser, the same way it already had to open the file itself to read it.
+// exported LooksLikeSPDX (the same fileHasTopLevelKey test this runs) to pick
+// the parser, the same way it already had to open the file itself to read it.
 //
 // A file matching none of them is an error naming all five and the prefixes
 // that override them, never a silent fallthrough to whichever branch happens
-// to be last — which is what produced "malformed JSON" for a binary.
+// to be last — which is what produced "malformed JSON" for a binary. The one
+// exception is a file the SBOM sniffs stopped reading at D112's per-file
+// limit before they could tell: that error is the limit's, in the words an
+// image's file and a decoded SBOM get, because the file may well be an SBOM
+// and no prefix would get it scanned — sbom: reaches decodeSBOM's refusal of
+// the same file.
 //
 // It returns the kind and the path with any file: / dir: / sbom: prefix
 // stripped. The image prefixes are returned INTACT, because Open parses them
@@ -86,11 +91,22 @@ func Classify(target string) (TargetKind, string, error) {
 	if looksLikeJar(target) {
 		return TargetJar, target, nil
 	}
-	if looksLikeCycloneDX(target) {
+	isCycloneDX, cdxHitLimit := fileHasTopLevelKey(target, "bomFormat")
+	if isCycloneDX {
 		return TargetSBOM, target, nil
 	}
-	if LooksLikeSPDX(target) {
+	isSPDX, spdxHitLimit := fileHasTopLevelKey(target, "spdxVersion")
+	if isSPDX {
 		return TargetSBOM, target, nil
+	}
+	// Neither marker found, and a sniff that stopped at D112's per-file limit
+	// could not have found one: the error is the limit's. When neither finds
+	// its marker the two walks read the same tokens and stop at the same one,
+	// so the flags agree and either alone would do — dropping one from this
+	// condition is a surviving mutation for that reason, verified. Both are
+	// read so the error does not rest on that argument.
+	if cdxHitLimit || spdxHitLimit {
+		return 0, "", FileLimitError(target)
 	}
 	return 0, "", fmt.Errorf(
 		"%s is a file, but not a Go binary, not a CycloneDX document, not an SPDX document, "+
@@ -154,7 +170,11 @@ func looksLikeJar(target string) bool {
 	return false
 }
 
-// looksLikeCycloneDX reports whether a file opens like a CycloneDX document.
+// fileHasTopLevelKey reports whether a file opens like the SBOM its key marks —
+// "bomFormat" for CycloneDX, "spdxVersion" for SPDX (D84) — and, when it does
+// not, whether that is because the sniff stopped at D112's per-file limit
+// before it could tell (sniffTopLevelKey). Both SBOM sniffs are this one
+// function, so the bound cannot be on one of them and not the other.
 //
 // It deliberately does not validate: the classifier's job is to pick a parser,
 // and the parser it picks reports the real errors. Deciding "not an SBOM" for
@@ -172,57 +192,73 @@ func looksLikeJar(target string) bool {
 //
 // The fallback walks top-level keys with a streaming decoder rather than
 // unmarshalling, and stops at the first one that matches, so it reads no more
-// of a 40 MB SBOM than it has to.
-func looksLikeCycloneDX(path string) bool {
+// of a 40 MB SBOM than it has to — and never more of any file than D112's
+// per-file limit (sniffTopLevelKey).
+func fileHasTopLevelKey(path, key string) (found, hitLimit bool) {
 	f, err := os.Open(path)
 	if err != nil {
-		return false
+		return false, false
 	}
 	defer f.Close()
-
-	var head [512]byte
-	n, err := io.ReadFull(f, head[:])
-	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
-		return false
-	}
-	if bytes.Contains(head[:n], []byte(`"bomFormat"`)) {
-		return true
-	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return false
-	}
-	return hasTopLevelKey(f, "bomFormat")
+	return sniffTopLevelKey(f, key)
 }
 
 // LooksLikeSPDX reports whether a file opens like an SPDX JSON document —
-// exported, unlike looksLikeCycloneDX above, because scancmd's own
-// TargetSBOM branch re-sniffs a resolved file's content by this same test to
-// choose between the two SBOM parsers (D84): Classify only decides "this is
-// some kind of SBOM", not which one, so the choice has to be made again at
-// the point the file is actually opened for parsing.
+// exported, unlike the CycloneDX sniff, because scancmd's own TargetSBOM
+// branch re-sniffs a resolved file's content by this same test to choose
+// between the two SBOM parsers (D84): Classify only decides "this is some
+// kind of SBOM", not which one, so the choice has to be made again at the
+// point the file is actually opened for parsing.
 //
-// Same two-pass strategy as looksLikeCycloneDX, for the identical reason:
+// Same two-pass strategy as the CycloneDX sniff, for the identical reason:
 // JSON member order is arbitrary, so "spdxVersion" is no more guaranteed to
 // sit near the front of the document than "bomFormat" was.
+//
+// It drops hitLimit: decodeSBOM, its one caller, reads the file under the same
+// limit and names an over-limit file itself, whichever parser this picks.
 func LooksLikeSPDX(path string) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
+	found, _ := fileHasTopLevelKey(path, "spdxVersion")
+	return found
+}
 
+// sniffTopLevelKey is the two passes: the quoted key in the first 512 bytes,
+// else a streaming walk of the top-level keys.
+//
+// Everything it reads comes through one LimitedReader of MaxFileBytes+1
+// (D112). The sniff is a read of the target as much as the decode after it
+// is, and on a bare path it runs first, before decodeSBOM's bound applies —
+// so without a bound of its own it was the one read of an uploaded SBOM
+// D112's per-file limit did not reach. A walk that never finds its key reads
+// to the end of the document, and json.Decoder buffers a string token whole,
+// so one multi-gigabyte string ahead of the key was held in memory entire
+// before the sniff could say no. Bounded, it pulls at most limit+1 bytes, the
+// same reach decodeSBOM has — every document the decoder would accept is one
+// the sniff sees to its end — and a key past that is not found.
+//
+// hitLimit says the walk ended because that reader ran dry, all limit+1 bytes
+// served, rather than because the document itself said no. Classify turns it
+// into the limit's own error instead of "not a CycloneDX document", which
+// would be wrong about a file that may well be one. The +1 is what tells the
+// two apart, as in readEntry: a document of exactly the limit leaves one byte
+// unserved and is judged on its content; one byte more drains the reader.
+//
+// The head is replayed in front of the rest rather than re-read after a Seek,
+// so the bytes the fast path took count against the same limit as everything
+// after them.
+func sniffTopLevelKey(r io.Reader, key string) (found, hitLimit bool) {
+	lr := &io.LimitedReader{R: r, N: MaxFileBytes + 1}
 	var head [512]byte
-	n, err := io.ReadFull(f, head[:])
+	n, err := io.ReadFull(lr, head[:])
 	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
-		return false
+		return false, false
 	}
-	if bytes.Contains(head[:n], []byte(`"spdxVersion"`)) {
-		return true
+	if bytes.Contains(head[:n], []byte(`"`+key+`"`)) {
+		return true, false
 	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return false
+	if hasTopLevelKey(io.MultiReader(bytes.NewReader(head[:n]), lr), key) {
+		return true, false
 	}
-	return hasTopLevelKey(f, "spdxVersion")
+	return false, lr.N == 0
 }
 
 // hasTopLevelKey reports whether a JSON object has the given key at depth 1.

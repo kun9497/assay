@@ -46,6 +46,11 @@ GitHub 예제는 스캔을 한 번 돌려 SARIF를 파일로 쓴 뒤, 종료 코
   run: exit ${{ steps.scan.outputs.exit_code }}
 ```
 
+`$IMAGE`가 이 파이프라인이 온전히 신뢰하지 않는 타깃을 댈 수 있다면 — PR이 넘기는 태그,
+조직 바깥의 레지스트리 — `--timeout <duration>`을 추가하십시오(D112): 읽기는 이미 크기로
+상한이 걸려 있지만, 끝나지 않는 pull이나 레이어 walk를 멈춘 job 대신 exit 2로 바꾸는
+것은 `--timeout`입니다.
+
 이 게이트는 이미지의 운영체제 패키지만 다룹니다. 이미지 안에 설치된 npm·Python·Java·Go
 의존성은 이미지 스캔이 인벤토리화하지 않으므로(D70, [미룸](deferred-decisions.ko.md)),
 여기서 통과해도 그것들에 대해서는 아무것도 말해주지 않습니다 — 그런 경우에는 애플리케이션

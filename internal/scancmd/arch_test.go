@@ -1,6 +1,7 @@
 package scancmd
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -49,7 +50,7 @@ func TestCatalogFromImage_PacmanPackagesAreKeyed(t *testing.T) {
 		"var/lib/pacman/local/bash-5.3.15-1/desc": archDesc("bash", "5.3.15-1", "bash"),
 		"var/lib/pacman/local/ALPM_DB_VERSION":    "9\n",
 	})
-	target, stats, _, err := catalogFromImage("test-image", img)
+	target, stats, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +86,7 @@ func TestCatalogFromImage_PacmanBaseDiffersSetsSource(t *testing.T) {
 		osReleasePath: osReleaseArch,
 		"var/lib/pacman/local/libelf-0.196-1/desc": archDesc("libelf", "0.196-1", "elfutils"),
 	})
-	target, _, _, err := catalogFromImage("test-image", img)
+	target, _, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +110,7 @@ func TestCatalogFromImage_PacmanSetsLayerDigest(t *testing.T) {
 		osReleasePath:                           osReleaseArch,
 		"var/lib/pacman/local/acl-2.4.0-1/desc": archDesc("acl", "2.4.0-1", "acl"),
 	})
-	target, _, _, err := catalogFromImage("test-image", img)
+	target, _, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +131,7 @@ func TestCatalogFromImage_PacmanSetsLayerDigest(t *testing.T) {
 // looked for, never silently catalog zero packages as a clean scan (D11).
 func TestCatalogFromImage_PacmanDistroWithNoDatabase(t *testing.T) {
 	img := archImage(t, map[string]string{osReleasePath: osReleaseArch})
-	_, _, _, err := catalogFromImage("test-image", img)
+	_, _, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err == nil {
 		t.Fatal("an Arch image with no pacman database was catalogued without error")
 	}

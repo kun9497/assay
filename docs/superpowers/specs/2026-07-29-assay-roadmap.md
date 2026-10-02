@@ -4402,7 +4402,10 @@ not help here — `jar.Parse` runs only for a `jar:` target, never inside an ima
 **What stays out.** No bound on the number of layers or on the number of full layer passes a
 scan makes (`Files` up to eight symlink hops, then `status.d`, then Bitnami's two — four full
 passes on a minimal Alpine image); those multiply time, which `--timeout` now bounds, not
-memory, which the two size limits bound. No per-file limit on `dir:` targets: a directory the
+memory, which the two size limits bound. `--timeout` reaches the registry fetch and the layer
+walks and nothing else: an SBOM, directory, binary or jar target never consults the context,
+so a deadline that expires after the walk has finished does not fail the scan — the flag
+bounds the one phase an untrusted layer can stretch, and the usage text says so. No per-file limit on `dir:` targets: a directory the
 operator points at is theirs, and D109 already reports what in it could not be read. No
 configurable limits: a number that moves per deployment is a number nobody can reason about
 in a bug report; the service wrapper that needs a smaller envelope sets it on the process.

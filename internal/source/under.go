@@ -2,6 +2,7 @@ package source
 
 import (
 	"archive/tar"
+	"context"
 	"fmt"
 	"io"
 	"path"
@@ -37,7 +38,12 @@ import (
 //
 // Nothing is written to disk, for Files's reason: not extracting removes the
 // path-traversal class rather than defending against it.
-func (img *Image) FilesUnder(dir string) (map[string]FileFromLayer, int, error) {
+//
+// D112's bounds hold here exactly as in Files: each file through MaxFileBytes,
+// the image's MaxScanBytes budget, and ctx checked between tar entries. A
+// distroless status.d is a directory of files an image author chose the size
+// and number of.
+func (img *Image) FilesUnder(ctx context.Context, dir string) (map[string]FileFromLayer, int, error) {
 	prefix := normaliseEntry(dir)
 	if prefix == "" || prefix == "." {
 		// The image root. Refused rather than served: nothing wants every
@@ -57,7 +63,7 @@ func (img *Image) FilesUnder(dir string) (map[string]FileFromLayer, int, error) 
 		layerDeleted := map[string]bool{}
 		var layerOpaque []string
 
-		err := readLayer(l, func(name string, h *tar.Header, r io.Reader) error {
+		err := readLayer(ctx, l, func(name string, h *tar.Header, r io.Reader) error {
 			d, base := path.Split(name)
 			switch {
 			case base == whiteoutOpaque:
@@ -91,7 +97,7 @@ func (img *Image) FilesUnder(dir string) (map[string]FileFromLayer, int, error) 
 				found[name] = true
 				return nil
 			case tar.TypeReg:
-				b, err := io.ReadAll(r)
+				b, err := img.readEntry(name, r)
 				if err != nil {
 					return err
 				}
@@ -143,7 +149,9 @@ func (img *Image) FilesUnder(dir string) (map[string]FileFromLayer, int, error) 
 // Symlinks are counted and NOT followed, for FilesUnder's reason: no real
 // pacman database measured carries one, and a silent skip of a package's
 // desc file is the failure this project ranks worst.
-func (img *Image) FilesNamed(dir, filename string) (map[string]FileFromLayer, int, error) {
+//
+// D112's bounds hold here for FilesUnder's reason.
+func (img *Image) FilesNamed(ctx context.Context, dir, filename string) (map[string]FileFromLayer, int, error) {
 	prefix := normaliseEntry(dir)
 	if prefix == "" || prefix == "." {
 		return nil, 0, fmt.Errorf("source: FilesNamed needs a directory, got %q", dir)
@@ -163,7 +171,7 @@ func (img *Image) FilesNamed(dir, filename string) (map[string]FileFromLayer, in
 		layerDeleted := map[string]bool{}
 		var layerOpaque []string
 
-		err := readLayer(l, func(name string, h *tar.Header, r io.Reader) error {
+		err := readLayer(ctx, l, func(name string, h *tar.Header, r io.Reader) error {
 			d, base := path.Split(name)
 			switch {
 			case base == whiteoutOpaque:
@@ -197,7 +205,7 @@ func (img *Image) FilesNamed(dir, filename string) (map[string]FileFromLayer, in
 				found[name] = true
 				return nil
 			case tar.TypeReg:
-				b, err := io.ReadAll(r)
+				b, err := img.readEntry(name, r)
 				if err != nil {
 					return err
 				}
@@ -252,7 +260,10 @@ func (img *Image) FilesNamed(dir, filename string) (map[string]FileFromLayer, in
 // marker are exactly this shape — a same-named symlink pointing at the real
 // file — so a scan that silently followed them would double-catalog every
 // marker under two different keys pointing at the same bytes.
-func (img *Image) FilesMatching(dir, prefix, suffix string) (map[string]FileFromLayer, int, error) {
+//
+// D112's bounds hold here for FilesUnder's reason, and matter more: this pass
+// runs on every image scanned, Bitnami or not, and matches at any depth.
+func (img *Image) FilesMatching(ctx context.Context, dir, prefix, suffix string) (map[string]FileFromLayer, int, error) {
 	root := normaliseEntry(dir)
 	if root == "" || root == "." {
 		return nil, 0, fmt.Errorf("source: FilesMatching needs a directory, got %q", dir)
@@ -272,7 +283,7 @@ func (img *Image) FilesMatching(dir, prefix, suffix string) (map[string]FileFrom
 		layerDeleted := map[string]bool{}
 		var layerOpaque []string
 
-		err := readLayer(l, func(name string, h *tar.Header, r io.Reader) error {
+		err := readLayer(ctx, l, func(name string, h *tar.Header, r io.Reader) error {
 			d, base := path.Split(name)
 			switch {
 			case base == whiteoutOpaque:
@@ -305,7 +316,7 @@ func (img *Image) FilesMatching(dir, prefix, suffix string) (map[string]FileFrom
 				found[name] = true
 				return nil
 			case tar.TypeReg:
-				b, err := io.ReadAll(r)
+				b, err := img.readEntry(name, r)
 				if err != nil {
 					return err
 				}

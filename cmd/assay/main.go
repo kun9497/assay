@@ -105,6 +105,10 @@ Scan flags (any order, before or after the target):
                         (24h, 168h). Measured from the UPSTREAM data, not from
                         when the database was built, so a mirror serving a stale
                         snapshot does not read as fresh. Off by default.
+  --timeout <dur>       Stop an image scan still fetching or reading its layers
+                        after <dur> (10m, 1h), and exit 2. The layer reads
+                        stop at the next file, not the end of the layer. Off
+                        by default.
   --output <format>     table (default), json, or sarif
                         sarif is SARIF 2.1.0 for GitHub code scanning. Packages
                         that could not be evaluated are emitted as note-level
@@ -362,7 +366,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 		// db update/build — a bug in this decision must be provable without
 		// a real terminal or a real network call.
 		opts.Colorize = wantColor(stdoutIsTerminalFunc(stdout), os.Getenv("NO_COLOR"))
-		return scan(context.Background(), target, opts, stdout, stderr)
+		// D112. The deadline is set here, on the context Run receives, rather
+		// than by Run from opts.Timeout: Run already takes its context from
+		// its caller, and this is the one caller that knows the user asked
+		// for a limit. opts.Timeout still travels to Run so an expiry can be
+		// reported as this flag's. No flag, no deadline: the scan behaves as
+		// it did before --timeout existed.
+		ctx := context.Background()
+		if opts.Timeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
+			defer cancel()
+		}
+		return scan(ctx, target, opts, stdout, stderr)
 
 	case "db":
 		if len(args) < 2 {
@@ -1171,6 +1187,23 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 			return "", scancmd.Options{}, fmt.Errorf(
 				"--db-max-age needs a duration, e.g. --db-max-age=48h")
 
+		// D112. Both spellings, where --db-max-age takes only `=`: the
+		// decision writes this flag `--timeout <duration>`, so the form a
+		// reader copies from it has to work.
+		case a == "--timeout":
+			i++
+			if i >= len(args) {
+				return "", scancmd.Options{}, fmt.Errorf("--timeout requires a value")
+			}
+			if err := setTimeout(&opts, args[i]); err != nil {
+				return "", scancmd.Options{}, err
+			}
+
+		case strings.HasPrefix(a, "--timeout="):
+			if err := setTimeout(&opts, strings.TrimPrefix(a, "--timeout=")); err != nil {
+				return "", scancmd.Options{}, err
+			}
+
 		case a == "--fail-on-unfixable":
 			opts.FailOnUnfixable = true
 
@@ -1310,6 +1343,24 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 			"--explain cannot be combined with --output %s: pick one renderer", opts.Output)
 	}
 	return target, opts, nil
+}
+
+// setTimeout validates a --timeout value and stores it on opts.Timeout, in
+// --db-max-age's idiom and wording: Go's own duration syntax, and a refusal
+// that names what to type instead.
+func setTimeout(opts *scancmd.Options, v string) error {
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return fmt.Errorf("--timeout: %q is not a duration (try 10m, 1h): %w", v, err)
+	}
+	// A zero or negative deadline has expired before the scan begins, so
+	// accepting one would make the flag look like a strict setting and behave
+	// as a scan that can never succeed.
+	if d <= 0 {
+		return fmt.Errorf("--timeout: %q must be positive; omit the flag to scan without a time limit", v)
+	}
+	opts.Timeout = d
+	return nil
 }
 
 // setOutput validates value and stores it on opts.Output, the same

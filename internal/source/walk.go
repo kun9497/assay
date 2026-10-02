@@ -2,6 +2,7 @@ package source
 
 import (
 	"archive/tar"
+	"context"
 	"fmt"
 	"io"
 	"path"
@@ -54,7 +55,12 @@ const maxSymlinkHops = 8
 // A wanted path that no layer carries is absent from the result and is not an
 // error: an image with no apk database is a real image, and what that means is
 // the caller's decision.
-func (img *Image) Files(want []string) (map[string]FileFromLayer, error) {
+//
+// Every file copied out is bounded by MaxFileBytes and counted against the
+// image's MaxScanBytes budget, and ctx is checked between tar entries (D112):
+// an over-limit file, an exhausted budget or a cancelled context is an error,
+// never a shorter result.
+func (img *Image) Files(ctx context.Context, want []string) (map[string]FileFromLayer, error) {
 	// requested keeps the caller's names so the result is keyed the way they
 	// asked, even when the bytes came from a link target several hops away.
 	requested := make(map[string]string, len(want)) // resolved path -> caller's name
@@ -67,7 +73,7 @@ func (img *Image) Files(want []string) (map[string]FileFromLayer, error) {
 
 	out := make(map[string]FileFromLayer, len(want))
 	for hop := 0; hop < maxSymlinkHops && len(pending) > 0; hop++ {
-		links, err := img.resolvePass(pending, requested, out)
+		links, err := img.resolvePass(ctx, pending, requested, out)
 		if err != nil {
 			return nil, err
 		}
@@ -88,6 +94,7 @@ func (img *Image) Files(want []string) (map[string]FileFromLayer, error) {
 // resolvePass reads every layer once, filling out[] for pending paths that are
 // regular files and returning the ones that turned out to be symlinks.
 func (img *Image) resolvePass(
+	ctx context.Context,
 	pending map[string]bool,
 	requested map[string]string,
 	out map[string]FileFromLayer,
@@ -104,7 +111,7 @@ func (img *Image) resolvePass(
 		layerDeleted := map[string]bool{}
 		var layerOpaque []string
 
-		err := readLayer(l, func(name string, h *tar.Header, r io.Reader) error {
+		err := readLayer(ctx, l, func(name string, h *tar.Header, r io.Reader) error {
 			dir, base := path.Split(name)
 			switch {
 			case base == whiteoutOpaque:
@@ -134,7 +141,7 @@ func (img *Image) resolvePass(
 				resolved[name] = true
 				return nil
 			case tar.TypeReg:
-				b, err := io.ReadAll(r)
+				b, err := img.readEntry(name, r)
 				if err != nil {
 					return err
 				}
@@ -208,7 +215,23 @@ func normaliseEntry(name string) string {
 	return strings.TrimPrefix(n, "/")
 }
 
-func readLayer(l Layer, visit func(name string, h *tar.Header, r io.Reader) error) error {
+// readLayer streams one layer's tar entries to visit.
+//
+// ctx is checked before every entry (D112), so a cancelled or expired scan
+// stops at the next entry rather than at the end of the layer — a layer is
+// the unit an attacker controls the size of, and a scan makes several full
+// passes over every one. The error is ctx's own, unwrapped here, so
+// errors.Is still recognises it after each caller's "read layer <diff id>"
+// wrapping names where the walk was.
+//
+// A single entry is not interrupted part-way. A wanted one is bounded in
+// size by MaxFileBytes; an unwanted one is skipped by tar.Reader.Next, which
+// reads through it before the next check runs, so a docker-archive or
+// oci-dir layer holding one enormous entry delays an expired context by
+// however long that entry takes to decompress. A registry layer does not
+// have that gap: its blob is fetched on a request carrying the same context,
+// so the read itself fails once the context is done.
+func readLayer(ctx context.Context, l Layer, visit func(name string, h *tar.Header, r io.Reader) error) error {
 	rc, err := l.Open()
 	if err != nil {
 		return err
@@ -217,6 +240,9 @@ func readLayer(l Layer, visit func(name string, h *tar.Header, r io.Reader) erro
 
 	tr := tar.NewReader(rc)
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		h, err := tr.Next()
 		if err == io.EOF {
 			return nil

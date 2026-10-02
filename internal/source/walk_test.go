@@ -3,6 +3,7 @@ package source
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"io"
 	"testing"
 )
@@ -81,7 +82,7 @@ func TestFiles_TakesTheNewestLayerThatHasIt(t *testing.T) {
 		layerOf(t, "sha256:base", map[string]string{"etc/os-release": "old"}),
 		layerOf(t, "sha256:top", map[string]string{"etc/os-release": "new"}),
 	)
-	got, err := img.Files([]string{"etc/os-release"})
+	got, err := img.Files(context.Background(), []string{"etc/os-release"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +106,7 @@ func TestFiles_FallsThroughToLowerLayers(t *testing.T) {
 		layerOf(t, "sha256:base", map[string]string{"lib/apk/db/installed": "db"}),
 		layerOf(t, "sha256:top", map[string]string{"usr/bin/thing": "x"}),
 	)
-	got, err := img.Files([]string{"lib/apk/db/installed"})
+	got, err := img.Files(context.Background(), []string{"lib/apk/db/installed"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +123,7 @@ func TestFiles_WhiteoutHidesLowerLayer(t *testing.T) {
 		layerOf(t, "sha256:base", map[string]string{"lib/apk/db/installed": "db"}),
 		layerOf(t, "sha256:top", map[string]string{"lib/apk/db/.wh.installed": ""}),
 	)
-	got, err := img.Files([]string{"lib/apk/db/installed"})
+	got, err := img.Files(context.Background(), []string{"lib/apk/db/installed"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +143,7 @@ func TestFiles_OpaqueWhiteoutHidesEveryChild(t *testing.T) {
 		}),
 		layerOf(t, "sha256:top", map[string]string{"lib/apk/db/.wh..wh..opq": ""}),
 	)
-	got, err := img.Files([]string{"lib/apk/db/installed", "lib/apk/db/scripts"})
+	got, err := img.Files(context.Background(), []string{"lib/apk/db/installed", "lib/apk/db/scripts"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +158,7 @@ func TestFiles_OpaqueWhiteoutIsRecursive(t *testing.T) {
 		layerOf(t, "sha256:base", map[string]string{"a/b/c/deep": "x"}),
 		layerOf(t, "sha256:top", map[string]string{"a/.wh..wh..opq": ""}),
 	)
-	got, err := img.Files([]string{"a/b/c/deep"})
+	got, err := img.Files(context.Background(), []string{"a/b/c/deep"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +171,7 @@ func TestFiles_OpaqueWhiteoutIsRecursive(t *testing.T) {
 // apk parser the literal bytes of a marker file.
 func TestFiles_WhiteoutEntriesAreNeverReturned(t *testing.T) {
 	img := imageOf(layerOf(t, "sha256:top", map[string]string{"lib/apk/db/.wh.installed": ""}))
-	got, err := img.Files([]string{"lib/apk/db/.wh.installed"})
+	got, err := img.Files(context.Background(), []string{"lib/apk/db/.wh.installed"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +187,7 @@ func TestFiles_WhiteoutDoesNotApplyUpward(t *testing.T) {
 		layerOf(t, "sha256:base", map[string]string{"etc/.wh.os-release": ""}),
 		layerOf(t, "sha256:top", map[string]string{"etc/os-release": "present"}),
 	)
-	got, err := img.Files([]string{"etc/os-release"})
+	got, err := img.Files(context.Background(), []string{"etc/os-release"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +208,7 @@ func TestFiles_WhiteoutDoesNotApplyWithinItsOwnLayer(t *testing.T) {
 		entry{name: "etc/.wh.os-release", body: ""},
 		entry{name: "etc/os-release", body: "present"},
 	))
-	got, err := img.Files([]string{"etc/os-release"})
+	got, err := img.Files(context.Background(), []string{"etc/os-release"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +223,7 @@ func TestFiles_OpaqueWhiteoutDoesNotApplyWithinItsOwnLayer(t *testing.T) {
 		entry{name: "etc/.wh..wh..opq", body: ""},
 		entry{name: "etc/os-release", body: "present"},
 	))
-	got, err := img.Files([]string{"etc/os-release"})
+	got, err := img.Files(context.Background(), []string{"etc/os-release"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +238,7 @@ func TestFiles_OpaqueWhiteoutDoesNotApplyWithinItsOwnLayer(t *testing.T) {
 // inventory rather than an error.
 func TestFiles_NormalisesEntryNames(t *testing.T) {
 	img := imageOf(layerOf(t, "sha256:one", map[string]string{"./etc/os-release": "x"}))
-	got, err := img.Files([]string{"etc/os-release"})
+	got, err := img.Files(context.Background(), []string{"etc/os-release"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +251,7 @@ func TestFiles_NormalisesEntryNames(t *testing.T) {
 // database is a real image, and the caller decides what that means.
 func TestFiles_MissingIsNotAnError(t *testing.T) {
 	img := imageOf(layerOf(t, "sha256:one", map[string]string{"a": "b"}))
-	got, err := img.Files([]string{"etc/os-release"})
+	got, err := img.Files(context.Background(), []string{"etc/os-release"})
 	if err != nil {
 		t.Fatalf("Files: %v", err)
 	}
@@ -269,7 +270,7 @@ func TestFiles_FollowsRelativeSymlink(t *testing.T) {
 		sym("etc/os-release", "../usr/lib/os-release"),
 		entry{name: "usr/lib/os-release", body: "ID=alpine"},
 	))
-	got, err := img.Files([]string{"etc/os-release"})
+	got, err := img.Files(context.Background(), []string{"etc/os-release"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +289,7 @@ func TestFiles_FollowsAbsoluteSymlink(t *testing.T) {
 		sym("etc/os-release", "/usr/lib/os-release"),
 		entry{name: "usr/lib/os-release", body: "ID=debian"},
 	))
-	got, err := img.Files([]string{"etc/os-release"})
+	got, err := img.Files(context.Background(), []string{"etc/os-release"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +304,7 @@ func TestFiles_FollowsSymlinkAcrossLayers(t *testing.T) {
 		layerOf(t, "sha256:base", map[string]string{"usr/lib/os-release": "ID=alpine"}),
 		layerOfOrdered(t, "sha256:top", sym("etc/os-release", "../usr/lib/os-release")),
 	)
-	got, err := img.Files([]string{"etc/os-release"})
+	got, err := img.Files(context.Background(), []string{"etc/os-release"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +319,7 @@ func TestFiles_SymlinkCycleTerminates(t *testing.T) {
 		sym("a", "b"),
 		sym("b", "a"),
 	))
-	got, err := img.Files([]string{"a"})
+	got, err := img.Files(context.Background(), []string{"a"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +336,7 @@ func TestFiles_WhiteoutOnADirectoryRemovesItsContents(t *testing.T) {
 		layerOf(t, "sha256:base", map[string]string{"lib/apk/db/installed": "db"}),
 		layerOf(t, "sha256:top", map[string]string{"lib/.wh.apk": ""}),
 	)
-	got, err := img.Files([]string{"lib/apk/db/installed"})
+	got, err := img.Files(context.Background(), []string{"lib/apk/db/installed"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +352,7 @@ func TestFiles_DirectoryWhiteoutIsNotAPrefixMatch(t *testing.T) {
 		layerOf(t, "sha256:base", map[string]string{"lib/apktool/data": "keep"}),
 		layerOf(t, "sha256:top", map[string]string{"lib/.wh.apk": ""}),
 	)
-	got, err := img.Files([]string{"lib/apktool/data"})
+	got, err := img.Files(context.Background(), []string{"lib/apktool/data"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -371,7 +372,7 @@ func TestFiles_RelativeSymlinkIsJoinedToTheLinksDirectory(t *testing.T) {
 		entry{name: "etc/alpine-release", body: "3.19.9"},
 		entry{name: "alpine-release", body: "WRONG: this is the root copy"},
 	))
-	got, err := img.Files([]string{"etc/os-release"})
+	got, err := img.Files(context.Background(), []string{"etc/os-release"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,7 +394,7 @@ func TestFiles_HardlinkTargetIsRootRelative(t *testing.T) {
 		hard("etc/os-release", "usr/lib/os-release"),
 		entry{name: "usr/lib/os-release", body: "ID=alpine"},
 	))
-	got, err := img.Files([]string{"etc/os-release"})
+	got, err := img.Files(context.Background(), []string{"etc/os-release"})
 	if err != nil {
 		t.Fatal(err)
 	}

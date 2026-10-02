@@ -620,7 +620,7 @@ func TestCatalogFromImage_D111_SymlinkOnlyBitnamiMarkersAreNotRead(t *testing.T)
 		map[string]string{osReleasePath: osReleaseAlpine319, apkDBPath: apkOneRecord},
 		map[string]string{"opt/bitnami/common/.spdx-wait-for-port.spdx": "/nowhere/.spdx-x.spdx"},
 	)}}
-	_, _, scope, err := catalogFromImage("test-image", img)
+	_, _, scope, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatalf("catalogFromImage: %v", err)
 	}
@@ -639,7 +639,7 @@ func TestCatalogFromImage_D111_LegacyOnlyBitnamiIsRead(t *testing.T) {
 		apkDBPath:         apkOneRecord,
 		bitnamiLegacyPath: `{"postgresql":{"arch":"amd64","distro":"debian-12","type":"NAMI","version":"17.5.0-14"}}`,
 	})
-	_, _, scope, err := catalogFromImage("test-image", img)
+	_, _, scope, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatalf("catalogFromImage: %v", err)
 	}

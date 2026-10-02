@@ -466,6 +466,13 @@ CI에서는 "뭔가 찾았다"와 "돌지 못했다"를 구분하는 것이 중�
 빌드처럼 보여서는 안 됩니다. `assay`가 평가할 수 없는 패키지는 건너뛴 개수로 보고되며, 클린 판정에
 조용히 섞이지 않습니다.
 
+D112부터는 타깃이 상한 안에 머무르지 못했을 때도 같은 exit 2가 적용됩니다: 이미지 레이어
+파일을 512 MiB 넘게 읽거나, 스캔 전체에서 2 GiB 넘게 읽거나, `--timeout <duration>`을
+설정했을 때 데드라인에서도 레이어 walk가 아직 돌고 있는 경우입니다. 각각은 무엇이
+걸렸는지(경로, 한도, 또는 플래그)를 stderr에 이름으로 남기는데, 잘린 패키지 데이터베이스를
+더 작지만 완전한 인벤토리처럼 보고하는 것이야말로 이 종료 코드가 잡으려는 바로 그 신뢰할
+수 없는 결과이기 때문입니다.
+
 ## 아키텍처
 
 파이프라인은 다섯 개의 인터페이스입니다. 각각 독립적으로 테스트 가능하며, 새 생태계를 지원한다는
@@ -667,6 +674,13 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] SLES LTSS를 mainline-wins 동점 처리로 접음 (D91) — post-EOL fix가 같은 키
       아래서 드러남(bci-base finding 121→286건, curl이 진짜 FIXED IN을 보여줌),
       가려졌던 쌍둥이 385,621건을 버려서 셈
+- [x] 스캔이 타깃에서 읽는 모든 바이트는 상한이 있다 (D112) — 이미지 레이어에서 읽는
+      각 파일과 디코드되는 각 SBOM이 512 MiB 한도(D61부터 jar cataloger가 써온 한도)를
+      통과하고, 스캔은 전체 2 GiB를 넘기면 멈추며, 레이어 walk는 스캔의 context를
+      따르는데 이제 `--timeout <duration>`이 그것을 제한한다; 한도를 넘는 파일이나
+      만료된 timeout은 경로나 플래그를 이름으로 대며 exit 2이고, 완전한 것처럼 보이는
+      더 작은 인벤토리를 내놓는 일은 없다. 2026-09-30 서비스 리뷰가 찾아냈다: 상한
+      없는 읽기 여섯 곳과 압축 해제 루프까지 닿지 않는 context.
 - [x] 스캔은 무엇을 찾았든 아니든 키별로 자신이 커버한 것을 말한다 (D111) — JSON이
       `coverage[]`(ecosystem, packages, evaluated, state live/frozen/not-in-database/no-comparer,
       provider, dataAsOf, frozenSince), `distro`(id, versionId, ecosystem, recognized),

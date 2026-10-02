@@ -29,4 +29,20 @@ type Layer struct {
 // nothing else should iterate this slice directly.
 type Image struct {
 	Layers []Layer
+
+	// read is the bytes Files, FilesUnder, FilesNamed and FilesMatching have
+	// copied out of this image so far, against MaxScanBytes (D112).
+	//
+	// It lives on the Image because the Image is the scan: scancmd opens one
+	// per scan and every pass of that scan is a method on it, so the counter's
+	// lifetime is exactly the bound's. A package-level counter would carry
+	// one scan's total into the next in any process that runs two, and a
+	// budget passed as a parameter would add an argument to all four methods
+	// to carry what the receiver already does. The zero value is a fresh
+	// budget, so an Image built by hand — every test fixture — starts at 0
+	// like one from Open.
+	//
+	// Not safe for concurrent use, like the rest of a scan's reads: one scan
+	// reads its image from one goroutine.
+	read int64
 }

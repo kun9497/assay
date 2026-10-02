@@ -1,6 +1,7 @@
 package source
 
 import (
+	"context"
 	"testing"
 )
 
@@ -33,7 +34,7 @@ func TestFilesUnder_DirectChildrenOnly(t *testing.T) {
 		entry{name: "var/lib/dpkg/status.d.old/libssl", body: "Package: nope"},
 		entry{name: "var/lib/dpkg/status", body: "Package: nope"},
 	))
-	got, links, err := img.FilesUnder("var/lib/dpkg/status.d")
+	got, links, err := img.FilesUnder(context.Background(), "var/lib/dpkg/status.d")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +61,7 @@ func TestFilesUnder_NewestLayerWins(t *testing.T) {
 			entry{name: "var/lib/dpkg/status.d/libc6", body: "Version: 2.0"},
 		),
 	)
-	got, _, err := img.FilesUnder("var/lib/dpkg/status.d")
+	got, _, err := img.FilesUnder(context.Background(), "var/lib/dpkg/status.d")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +94,7 @@ func TestFilesUnder_WhiteoutHidesLowerLayers(t *testing.T) {
 			entry{name: "var/lib/dpkg/status.d/.wh.removed", body: ""},
 		),
 	)
-	got, _, err := img.FilesUnder("var/lib/dpkg/status.d")
+	got, _, err := img.FilesUnder(context.Background(), "var/lib/dpkg/status.d")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +118,7 @@ func TestFilesUnder_WhiteoutDoesNotHideItsOwnLayer(t *testing.T) {
 			entry{name: "var/lib/dpkg/status.d/libc6", body: "Version: 2.0"},
 		),
 	)
-	got, _, err := img.FilesUnder("var/lib/dpkg/status.d")
+	got, _, err := img.FilesUnder(context.Background(), "var/lib/dpkg/status.d")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +140,7 @@ func TestFilesUnder_OpaqueHidesEverythingBelow(t *testing.T) {
 			entry{name: "var/lib/dpkg/status.d/new-one", body: "Package: new-one"},
 		),
 	)
-	got, _, err := img.FilesUnder("var/lib/dpkg/status.d")
+	got, _, err := img.FilesUnder(context.Background(), "var/lib/dpkg/status.d")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +166,7 @@ func TestFilesUnder_SymlinksAreCountedNotFollowed(t *testing.T) {
 			entry{name: "var/lib/dpkg/status.d/real", body: "Package: real"},
 		),
 	)
-	got, links, err := img.FilesUnder("var/lib/dpkg/status.d")
+	got, links, err := img.FilesUnder(context.Background(), "var/lib/dpkg/status.d")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +190,7 @@ func TestFilesUnder_AbsentDirectoryIsEmptyNotAnError(t *testing.T) {
 	img := imageOf(layerOfOrdered(t, "sha256:one",
 		entry{name: "etc/os-release", body: "ID=debian"},
 	))
-	got, links, err := img.FilesUnder("var/lib/dpkg/status.d")
+	got, links, err := img.FilesUnder(context.Background(), "var/lib/dpkg/status.d")
 	if err != nil {
 		t.Fatalf("FilesUnder: %v, want no error for an image without the directory", err)
 	}
@@ -204,7 +205,7 @@ func TestFilesUnder_AbsentDirectoryIsEmptyNotAnError(t *testing.T) {
 func TestFilesUnder_RefusesTheImageRoot(t *testing.T) {
 	img := imageOf(layerOfOrdered(t, "sha256:one", entry{name: "etc/os-release", body: "ID=debian"}))
 	for _, dir := range []string{"", ".", "/", "./"} {
-		if _, _, err := img.FilesUnder(dir); err == nil {
+		if _, _, err := img.FilesUnder(context.Background(), dir); err == nil {
 			t.Errorf("FilesUnder(%q) returned no error; the image root must be refused", dir)
 		}
 	}
@@ -233,7 +234,7 @@ func TestFilesNamed_MatchesOneLevelDeeper(t *testing.T) {
 		// enough, the directory nesting has to match too.
 		entry{name: "var/lib/pacman/local/desc", body: "nope"},
 	))
-	got, links, err := img.FilesNamed("var/lib/pacman/local", "desc")
+	got, links, err := img.FilesNamed(context.Background(), "var/lib/pacman/local", "desc")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +262,7 @@ func TestFilesNamed_NewestLayerWins(t *testing.T) {
 			entry{name: "var/lib/pacman/local/bash-5.3.15-1/desc", body: "%VERSION%\n5.3.15-1\n"},
 		),
 	)
-	got, _, err := img.FilesNamed("var/lib/pacman/local", "desc")
+	got, _, err := img.FilesNamed(context.Background(), "var/lib/pacman/local", "desc")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +292,7 @@ func TestFilesNamed_WhiteoutHidesTheWholePackageDirectory(t *testing.T) {
 			entry{name: "var/lib/pacman/local/.wh.removed-1.0-1", body: ""},
 		),
 	)
-	got, _, err := img.FilesNamed("var/lib/pacman/local", "desc")
+	got, _, err := img.FilesNamed(context.Background(), "var/lib/pacman/local", "desc")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +308,7 @@ func TestFilesNamed_SymlinksAreCountedNotFollowed(t *testing.T) {
 		entry{name: "var/lib/pacman/local/linked-1.0-1/desc", link: "../real/desc"},
 		entry{name: "var/lib/pacman/local/real-1.0-1/desc", body: "%NAME%\nreal\n"},
 	))
-	got, links, err := img.FilesNamed("var/lib/pacman/local", "desc")
+	got, links, err := img.FilesNamed(context.Background(), "var/lib/pacman/local", "desc")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +327,7 @@ func TestFilesNamed_AbsentDirectoryIsEmptyNotAnError(t *testing.T) {
 	img := imageOf(layerOfOrdered(t, "sha256:one",
 		entry{name: "etc/os-release", body: "ID=debian"},
 	))
-	got, links, err := img.FilesNamed("var/lib/pacman/local", "desc")
+	got, links, err := img.FilesNamed(context.Background(), "var/lib/pacman/local", "desc")
 	if err != nil {
 		t.Fatalf("FilesNamed: %v, want no error for an image without the directory", err)
 	}
@@ -341,11 +342,11 @@ func TestFilesNamed_AbsentDirectoryIsEmptyNotAnError(t *testing.T) {
 func TestFilesNamed_RefusesTheImageRootOrEmptyFilename(t *testing.T) {
 	img := imageOf(layerOfOrdered(t, "sha256:one", entry{name: "etc/os-release", body: "ID=debian"}))
 	for _, dir := range []string{"", ".", "/", "./"} {
-		if _, _, err := img.FilesNamed(dir, "desc"); err == nil {
+		if _, _, err := img.FilesNamed(context.Background(), dir, "desc"); err == nil {
 			t.Errorf("FilesNamed(%q, \"desc\") returned no error; the image root must be refused", dir)
 		}
 	}
-	if _, _, err := img.FilesNamed("var/lib/pacman/local", ""); err == nil {
+	if _, _, err := img.FilesNamed(context.Background(), "var/lib/pacman/local", ""); err == nil {
 		t.Error(`FilesNamed("var/lib/pacman/local", "") returned no error; an empty filename must be refused`)
 	}
 }
@@ -362,7 +363,7 @@ func TestFilesNamed_NormalisesTheDirectory(t *testing.T) {
 		"var/lib/pacman/local/",
 		"var/lib/./pacman/local",
 	} {
-		got, _, err := img.FilesNamed(dir, "desc")
+		got, _, err := img.FilesNamed(context.Background(), dir, "desc")
 		if err != nil {
 			t.Fatalf("FilesNamed(%q, \"desc\"): %v", dir, err)
 		}
@@ -386,7 +387,7 @@ func TestFilesUnder_NormalisesTheDirectory(t *testing.T) {
 		"var/lib/dpkg/status.d/",
 		"var/lib/./dpkg/status.d",
 	} {
-		got, _, err := img.FilesUnder(dir)
+		got, _, err := img.FilesUnder(context.Background(), dir)
 		if err != nil {
 			t.Fatalf("FilesUnder(%q): %v", dir, err)
 		}
@@ -417,7 +418,7 @@ func TestFilesMatching_MultipleMarkersInOneDirectory(t *testing.T) {
 		entry{name: "opt/bitnami/common/notes.spdx", body: "wrong prefix"},
 		entry{name: "opt/bitnami/common/.spdx-readme.txt", body: "wrong suffix"},
 	))
-	got, links, err := img.FilesMatching("opt/bitnami", ".spdx-", ".spdx")
+	got, links, err := img.FilesMatching(context.Background(), "opt/bitnami", ".spdx-", ".spdx")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +448,7 @@ func TestFilesMatching_SymlinksAreCountedNotFollowed(t *testing.T) {
 			entry{name: "opt/bitnami/redis/.spdx-redis.spdx", link: "../common/.spdx-shared.spdx"},
 		),
 	)
-	got, links, err := img.FilesMatching("opt/bitnami", ".spdx-", ".spdx")
+	got, links, err := img.FilesMatching(context.Background(), "opt/bitnami", ".spdx-", ".spdx")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -479,7 +480,7 @@ func TestFilesMatching_NestedAtVaryingDepths(t *testing.T) {
 		// found -- "any depth" includes zero.
 		entry{name: "opt/bitnami/.spdx-root.spdx", body: "root level"},
 	))
-	got, _, err := img.FilesMatching("opt/bitnami", ".spdx-", ".spdx")
+	got, _, err := img.FilesMatching(context.Background(), "opt/bitnami", ".spdx-", ".spdx")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -502,7 +503,7 @@ func TestFilesMatching_DoesNotMatchASiblingDirectoryWithASharedPrefix(t *testing
 		entry{name: "opt/bitnami2/other/.spdx-other.spdx", body: "wrong tree"},
 		entry{name: "opt/bitnami/redis/.spdx-redis.spdx", body: "right tree"},
 	))
-	got, _, err := img.FilesMatching("opt/bitnami", ".spdx-", ".spdx")
+	got, _, err := img.FilesMatching(context.Background(), "opt/bitnami", ".spdx-", ".spdx")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -522,7 +523,7 @@ func TestFilesMatching_NewestLayerWins(t *testing.T) {
 			entry{name: "opt/bitnami/redis/.spdx-redis.spdx", body: "new doc"},
 		),
 	)
-	got, _, err := img.FilesMatching("opt/bitnami", ".spdx-", ".spdx")
+	got, _, err := img.FilesMatching(context.Background(), "opt/bitnami", ".spdx-", ".spdx")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -546,7 +547,7 @@ func TestFilesMatching_WhiteoutHidesLowerLayers(t *testing.T) {
 			entry{name: "opt/bitnami/redis/.wh..spdx-redis.spdx", body: ""},
 		),
 	)
-	got, _, err := img.FilesMatching("opt/bitnami", ".spdx-", ".spdx")
+	got, _, err := img.FilesMatching(context.Background(), "opt/bitnami", ".spdx-", ".spdx")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -570,7 +571,7 @@ func TestFilesMatching_OpaqueHidesEverythingBelow(t *testing.T) {
 			entry{name: "opt/bitnami/postgresql/.spdx-postgresql.spdx", body: "new"},
 		),
 	)
-	got, _, err := img.FilesMatching("opt/bitnami", ".spdx-", ".spdx")
+	got, _, err := img.FilesMatching(context.Background(), "opt/bitnami", ".spdx-", ".spdx")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -584,7 +585,7 @@ func TestFilesMatching_OpaqueHidesEverythingBelow(t *testing.T) {
 // test of the identical rule.
 func TestFilesMatching_AbsentDirectoryIsEmptyNotAnError(t *testing.T) {
 	img := imageOf(layerOfOrdered(t, "sha256:one", entry{name: "etc/os-release", body: "ID=photon"}))
-	got, links, err := img.FilesMatching("opt/bitnami", ".spdx-", ".spdx")
+	got, links, err := img.FilesMatching(context.Background(), "opt/bitnami", ".spdx-", ".spdx")
 	if err != nil {
 		t.Fatalf("FilesMatching: %v, want no error for an image without the directory", err)
 	}
@@ -598,11 +599,11 @@ func TestFilesMatching_AbsentDirectoryIsEmptyNotAnError(t *testing.T) {
 func TestFilesMatching_RefusesTheImageRootOrEmptyPattern(t *testing.T) {
 	img := imageOf(layerOfOrdered(t, "sha256:one", entry{name: "etc/os-release", body: "ID=photon"}))
 	for _, dir := range []string{"", ".", "/", "./"} {
-		if _, _, err := img.FilesMatching(dir, ".spdx-", ".spdx"); err == nil {
+		if _, _, err := img.FilesMatching(context.Background(), dir, ".spdx-", ".spdx"); err == nil {
 			t.Errorf("FilesMatching(%q, ...) returned no error; the image root must be refused", dir)
 		}
 	}
-	if _, _, err := img.FilesMatching("opt/bitnami", "", ""); err == nil {
+	if _, _, err := img.FilesMatching(context.Background(), "opt/bitnami", "", ""); err == nil {
 		t.Error(`FilesMatching("opt/bitnami", "", "") returned no error; an empty prefix and suffix must be refused`)
 	}
 }

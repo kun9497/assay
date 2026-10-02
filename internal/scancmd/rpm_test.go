@@ -136,7 +136,7 @@ func TestCatalogFromImage_RPMAtEitherLocation(t *testing.T) {
 				osReleasePath:         osReleaseRHEL9,
 				dir + "/rpmdb.sqlite": db,
 			})
-			target, stats, _, err := catalogFromImage("test-image", img)
+			target, stats, _, err := catalogFromImage(context.Background(), "test-image", img)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -181,7 +181,7 @@ func TestCatalogFromImage_RPMPackagesAreKeyed(t *testing.T) {
 		osReleasePath:              osReleaseRHEL9,
 		"var/lib/rpm/rpmdb.sqlite": fixtureBytes(t, rpmFixture),
 	})
-	target, _, _, err := catalogFromImage("test-image", img)
+	target, _, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestCatalogFromImage_AzureLinuxPackagesAreKeyed(t *testing.T) {
 				osReleasePath:              tc.osRelease,
 				"var/lib/rpm/rpmdb.sqlite": fixtureBytes(t, rpmFixture),
 			})
-			target, stats, _, err := catalogFromImage("test-image", img)
+			target, stats, _, err := catalogFromImage(context.Background(), "test-image", img)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -254,7 +254,7 @@ func TestCatalogFromImage_AzureLinuxDistroWithNoDatabase(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			img := rpmImage(t, map[string]string{osReleasePath: tc.osRelease})
-			_, _, _, err := catalogFromImage("test-image", img)
+			_, _, _, err := catalogFromImage(context.Background(), "test-image", img)
 			if err == nil {
 				t.Fatal("an RPM image with no database was catalogued without error")
 			}
@@ -279,7 +279,7 @@ func TestCatalogFromImage_PhotonPackagesAreKeyed(t *testing.T) {
 		osReleasePath:              osReleasePhoton5,
 		"var/lib/rpm/rpmdb.sqlite": fixtureBytes(t, rpmFixture),
 	})
-	target, stats, _, err := catalogFromImage("test-image", img)
+	target, stats, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func TestCatalogFromImage_PhotonPackagesAreKeyed(t *testing.T) {
 // entry in the map already carries.
 func TestCatalogFromImage_PhotonDistroWithNoDatabase(t *testing.T) {
 	img := rpmImage(t, map[string]string{osReleasePath: osReleasePhoton5})
-	_, _, _, err := catalogFromImage("test-image", img)
+	_, _, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err == nil {
 		t.Fatal("a Photon OS image with no database was catalogued without error")
 	}
@@ -329,7 +329,7 @@ func TestCatalogFromImage_PhotonDistroWithNoDatabase(t *testing.T) {
 // them.
 func TestCatalogFromImage_HummingbirdDistroWithNoDatabase(t *testing.T) {
 	img := rpmImage(t, map[string]string{osReleasePath: osReleaseHummingbird})
-	_, _, _, err := catalogFromImage("test-image", img)
+	_, _, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err == nil {
 		t.Fatal("a Hummingbird image with no database was catalogued without error")
 	}
@@ -407,7 +407,7 @@ func TestCatalogFromImage_DirectorySymlinkIsNotFollowed(t *testing.T) {
 	}}}
 
 	// The traditional path resolves to nothing…
-	files, err := img.Files([]string{"var/lib/rpm/rpmdb.sqlite", "usr/lib/sysimage/rpm/rpmdb.sqlite"})
+	files, err := img.Files(context.Background(), []string{"var/lib/rpm/rpmdb.sqlite", "usr/lib/sysimage/rpm/rpmdb.sqlite"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -416,7 +416,7 @@ func TestCatalogFromImage_DirectorySymlinkIsNotFollowed(t *testing.T) {
 			"probe in rpmDBDirs is documented as necessary because it does not")
 	}
 	// …and the scan still finds the database, because both are probed.
-	target, stats, _, err := catalogFromImage("test-image", img)
+	target, stats, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatalf("an image whose /var/lib/rpm is a symlink was not catalogued: %v", err)
 	}
@@ -434,7 +434,7 @@ func TestCatalogFromImage_LiveWALIsRefused(t *testing.T) {
 		"var/lib/rpm/rpmdb.sqlite":     fixtureBytes(t, rpmWALFixture),
 		"var/lib/rpm/rpmdb.sqlite-wal": fixtureBytes(t, rpmWALSidecar),
 	}
-	if _, _, _, err := catalogFromImage("test-image", rpmImage(t, files)); err == nil {
+	if _, _, _, err := catalogFromImage(context.Background(), "test-image", rpmImage(t, files)); err == nil {
 		t.Fatal("an image carrying a live write-ahead log was catalogued from the main file alone")
 	} else if !strings.Contains(err.Error(), "write-ahead log") {
 		t.Errorf("error = %v, want one naming the write-ahead log", err)
@@ -443,7 +443,7 @@ func TestCatalogFromImage_LiveWALIsRefused(t *testing.T) {
 	// The same image WITHOUT the log is read normally, so the refusal above is
 	// caused by the sibling and not by the database.
 	delete(files, "var/lib/rpm/rpmdb.sqlite-wal")
-	if _, stats, _, err := catalogFromImage("test-image", rpmImage(t, files)); err != nil {
+	if _, stats, _, err := catalogFromImage(context.Background(), "test-image", rpmImage(t, files)); err != nil {
 		t.Errorf("the same database with no log was refused: %v", err)
 	} else if stats.Cataloged != 2 {
 		t.Errorf("cataloged %d packages, want 2", stats.Cataloged)
@@ -459,7 +459,7 @@ func TestCatalogFromImage_BerkeleyDBIsRead(t *testing.T) {
 		osReleasePath:          osReleaseRHEL8,
 		"var/lib/rpm/Packages": fixtureBytes(t, bdbFixture),
 	})
-	target, stats, _, err := catalogFromImage("test-image", img)
+	target, stats, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -497,7 +497,7 @@ func TestCatalogFromImage_BerkeleyDBAtTheRelocatedPath(t *testing.T) {
 		osReleasePath:                   osReleaseRHEL8,
 		"usr/lib/sysimage/rpm/Packages": fixtureBytes(t, bdbFixture),
 	})
-	_, stats, _, err := catalogFromImage("test-image", img)
+	_, stats, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -521,7 +521,7 @@ func TestCatalogFromImage_NDBIsRouted(t *testing.T) {
 		osReleasePath:                      osReleaseSLES15,
 		"usr/lib/sysimage/rpm/Packages.db": string(db),
 	})
-	target, stats, _, err := catalogFromImage("test-image", img)
+	target, stats, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatalf("an ndb database was refused rather than read: %v", err)
 	}
@@ -572,7 +572,7 @@ func TestCatalogFromImage_DamagedNDBIsRefused(t *testing.T) {
 		osReleasePath:                      osReleaseSLES15,
 		"usr/lib/sysimage/rpm/Packages.db": string(db),
 	})
-	if _, _, _, err := catalogFromImage("test-image", img); err == nil {
+	if _, _, _, err := catalogFromImage(context.Background(), "test-image", img); err == nil {
 		t.Fatal("a damaged ndb database was catalogued")
 	} else if !strings.Contains(err.Error(), "corrupt") {
 		t.Errorf("error = %v, want it to say the slot table is corrupt", err)
@@ -746,7 +746,7 @@ func TestCatalogFromImage_DamagedBerkeleyDBIsRefused(t *testing.T) {
 		osReleasePath:          osReleaseRHEL8,
 		"var/lib/rpm/Packages": truncated,
 	})
-	if _, _, _, err := catalogFromImage("test-image", img); err == nil {
+	if _, _, _, err := catalogFromImage(context.Background(), "test-image", img); err == nil {
 		t.Fatal("a truncated BerkeleyDB database was catalogued")
 	} else if !strings.Contains(err.Error(), "truncated") {
 		t.Errorf("error = %v, want it to say the database is truncated", err)
@@ -759,7 +759,7 @@ func TestCatalogFromImage_DamagedBerkeleyDBIsRefused(t *testing.T) {
 // find nothing on RHEL 10, and "nothing" from a scanner reads as a clean image.
 func TestCatalogFromImage_RPMDistroWithNoDatabase(t *testing.T) {
 	img := rpmImage(t, map[string]string{osReleasePath: osReleaseRHEL9})
-	_, _, _, err := catalogFromImage("test-image", img)
+	_, _, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err == nil {
 		t.Fatal("an RPM image with no database was catalogued without error")
 	}
@@ -810,7 +810,7 @@ func TestCatalogFromImage_UnreadableHeaderIsCounted(t *testing.T) {
 		osReleasePath:              osReleaseRHEL9,
 		"var/lib/rpm/rpmdb.sqlite": string(db),
 	})
-	_, stats, _, err := catalogFromImage("test-image", img)
+	_, stats, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatalf("one damaged record failed the whole scan: %v", err)
 	}

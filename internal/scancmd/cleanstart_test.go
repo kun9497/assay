@@ -1,6 +1,7 @@
 package scancmd
 
 import (
+	"context"
 	"testing"
 
 	"github.com/kun9497/assay/internal/pkgmeta"
@@ -52,7 +53,7 @@ func TestCatalogFromImage_CleanStartMarkerRoutesEcosystem(t *testing.T) {
 			apkDBPath: apkRecordCleanStartMarker + apkRecordCleanStartPostgres,
 		}),
 	}}
-	target, stats, _, err := catalogFromImage("test-image", img)
+	target, stats, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatalf("catalogFromImage: %v (want a no-os-release CleanStart image to catalog cleanly)", err)
 	}
@@ -104,7 +105,7 @@ func TestCatalogFromImage_PlainApkDBIsNotCleanStart(t *testing.T) {
 			apkDBPath: apkOneRecord, // no clnstrt-baselayout anywhere in this db
 		}),
 	}}
-	target, _, _, err := catalogFromImage("test-image", img)
+	target, _, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +133,7 @@ func TestCatalogFromImage_RealOSReleaseWinsOverCleanStartMarker(t *testing.T) {
 			apkDBPath:     apkRecordCleanStartMarker + apkOneRecord,
 		}),
 	}}
-	target, _, _, err := catalogFromImage("test-image", img)
+	target, _, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatal(err)
 	}
