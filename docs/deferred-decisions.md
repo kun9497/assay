@@ -558,6 +558,15 @@ and warn loudly on every fallback use so a long-dead primary cannot hide behind 
 
 ### The freshness one-liner and six dead Amazon extras topics
 
+**Resolved 2026-10-02 as D113.** The Amazon provider's `DataAsOf` is now the oldest among
+its *active* repositories: an extras topic whose updateinfo has published nothing for more
+than two years is closed and does not set the floor, while the core repository is never
+closed, so a core that goes quiet still drags the date down — the one failure this
+stalest-wins rule exists to catch. `db status` lists which topics are closed. The
+2023-09-25 date below was `selinux-ng`'s own closed topic; the next nightly build moves the
+artifact's `data-as-of` to core's own date now that the six dead extras topics no longer
+set it.
+
 **Investigated 2026-08-27.** `assay db update` printing "upstream data as of 2023-09-25"
 is GENUINE data, not a defect: six AL2 extras topics (selinux-ng, ruby2.6, postgresql11,
 mono, httpd_modules, golang1.19) have published no ALAS advisory since exactly that date —

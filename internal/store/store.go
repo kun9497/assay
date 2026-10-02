@@ -441,6 +441,21 @@ type Provenance struct {
 	// database built before this field decodes it nil, and nil is the true
 	// answer for one — nothing was ever carried before the field existed.
 	Frozen map[string]time.Time `json:"frozen,omitempty"`
+	// Closed names the channels inside this provider -- Amazon's AL2 extras
+	// topics, today the only ones -- that published nothing for so long they
+	// no longer take part in DataAsOf (D113), with each one's newest
+	// advisory date. Their advisories are still stored and still matched;
+	// only their DATE is left out, because a finished add-on channel would
+	// otherwise set the provider's floor (2023-09-25 for the whole artifact,
+	// from one topic with a single lifetime advisory) and make every
+	// --db-max-age scan that touches the provider fail over a feed that did
+	// not die. Listed so `db status` can say what the provider's date leaves
+	// out rather than the exclusion being silent.
+	//
+	// Additive Meta JSON with no schema bump, Frozen's precedent: nil is the
+	// true answer for a database built before the field -- nothing was
+	// excluded then.
+	Closed map[string]time.Time `json:"closed,omitempty"`
 }
 
 // DefaultPath returns <user cache>/assay/db/v<schema>/vulnerability.db,

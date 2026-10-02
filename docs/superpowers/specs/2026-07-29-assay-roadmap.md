@@ -4430,7 +4430,9 @@ that set a frozen key contributes `min(DataAsOf, frozenSince)`, and the refusal 
 and the freeze date. (3) **Ratings:** a new `--db-max-rating-age <duration>` exits 2 when the
 oldest `DataAsOf` among the rating sources (NVD, EPSS, KEV — the fold `db push` already
 performs for the artifact's `data-as-of` annotation) is older than the duration; off by
-default, and `--db-max-age` keeps D59's advisory-only meaning unchanged. (4) **Amazon:** the
+default, and `--db-max-age` keeps D59's advisory-only meaning unchanged. A database with no
+rating source at all is refused under that flag too: its rating age is not fresh, it is
+absent, and nothing else in the scan would name the cause (D17's rule for silence). (4) **Amazon:** the
 provider's `DataAsOf` is the oldest among its *active* repositories; an extras topic whose
 updateinfo has published nothing for more than two years is *closed* and does not set the
 floor, while the core repository is never closed — if core stops, the floor falls, which is

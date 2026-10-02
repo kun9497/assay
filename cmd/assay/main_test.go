@@ -818,6 +818,126 @@ func TestRun_ScanDBMaxAgeReachesRealExitCode(t *testing.T) {
 	}
 }
 
+// TestRun_ScanDBMaxRatingAgeReachesRealExitCode is the run()-seam wiring check
+// for D113's --db-max-rating-age, written before the flag existed: scancmd's own
+// tests build Options{DBMaxRatingAge: ...} by hand, so dropping the
+// parseScanArgs assignment would leave them green while `assay scan
+// --db-max-rating-age=24h` performed no rating check at all.
+//
+// The advisory provider is fresh and --db-max-age is not given, so the only
+// thing that can refuse this scan is the rating gate.
+func TestRun_ScanDBMaxRatingAgeReachesRealExitCode(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ASSAY_DB_DIR", dir)
+
+	w, err := store.Create(filepath.Join(dir, "vulnerability.db"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	stale := time.Now().AddDate(0, 0, -90)
+	if err := w.SetMeta(store.Meta{
+		Providers: map[string]store.Provenance{
+			"osv": {Ecosystems: []string{"Go"}, DataAsOf: time.Now()},
+		},
+		Ratings: map[string]store.Provenance{"NVD": {DataAsOf: stale}},
+	}); err != nil {
+		t.Fatalf("SetMeta: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	sbom := filepath.Join(dir, "s.cdx.json")
+	doc := `{"bomFormat":"CycloneDX","specVersion":"1.5","version":1,"components":[` +
+		`{"type":"library","name":"x","version":"1.0.0","purl":"pkg:golang/example.com/x@1.0.0"}]}`
+	if err := os.WriteFile(sbom, []byte(doc), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"scan", sbom, "--db-max-rating-age=24h"}
+	if code := run(args, &stdout, &stderr); code != exitError {
+		t.Fatalf("run(%v) = %d, want %d (exitError) -- NVD is 90 days old\nstdout:\n%s\nstderr:\n%s",
+			args, code, exitError, stdout.String(), stderr.String())
+	}
+	want := "error: rating data is 90 days old (NVD, as of " + stale.UTC().Format("2006-01-02") +
+		"), past the 24h0m0s allowed by --db-max-rating-age"
+	if !strings.Contains(stderr.String(), want) {
+		t.Errorf("stderr does not carry the rating refusal\nwant: %s\ngot:\n%s", want, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("a refused scan wrote a report to stdout:\n%s", stdout.String())
+	}
+
+	// --db-max-age alone against the same database still scans: D59's gate
+	// judges advisories only, and D113 left that meaning unchanged.
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"scan", sbom, "--db-max-age=24h"}, &stdout, &stderr); code != exitOK {
+		t.Errorf("run --db-max-age=24h = %d, want %d (exitOK) -- stale ratings must not trip it\nstderr:\n%s",
+			code, exitOK, stderr.String())
+	}
+}
+
+// TestParseScan_DBMaxRatingAge pins the new flag's parsing to --db-max-age's
+// exactly: the = form only, a positive Go duration, last one wins, and every
+// refusal names the flag — a typo must never become a scan with no gate.
+func TestParseScan_DBMaxRatingAge(t *testing.T) {
+	_, opts, err := parseScanArgs([]string{"alpine:3.19", "--db-max-rating-age=48h", "--db-max-rating-age=168h"})
+	if err != nil {
+		t.Fatalf("parseScanArgs: %v", err)
+	}
+	if opts.DBMaxRatingAge != 168*time.Hour {
+		t.Errorf("DBMaxRatingAge = %v, want 168h0m0s (the last one given)", opts.DBMaxRatingAge)
+	}
+	// Two flags, two fields: neither may land in the other's.
+	if opts.DBMaxAge != 0 {
+		t.Errorf("DBMaxAge = %v, want 0 -- only --db-max-rating-age was given", opts.DBMaxAge)
+	}
+	_, opts, err = parseScanArgs([]string{"alpine:3.19", "--db-max-age=36h"})
+	if err != nil {
+		t.Fatalf("parseScanArgs: %v", err)
+	}
+	if opts.DBMaxAge != 36*time.Hour || opts.DBMaxRatingAge != 0 {
+		t.Errorf("--db-max-age=36h gave DBMaxAge=%v DBMaxRatingAge=%v, want 36h and 0",
+			opts.DBMaxAge, opts.DBMaxRatingAge)
+	}
+
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"x", "--db-max-rating-age=abc"}, `--db-max-rating-age: "abc" is not a duration (try 24h, 168h)`},
+		{[]string{"x", "--db-max-rating-age=0"}, `--db-max-rating-age: "0" must be positive; omit the flag to scan without the check`},
+		{[]string{"x", "--db-max-rating-age=-1h"}, `--db-max-rating-age: "-1h" must be positive`},
+		{[]string{"x", "--db-max-rating-age"}, "--db-max-rating-age needs a duration, e.g. --db-max-rating-age=168h"},
+		// The shared helper must not have changed --db-max-age's own wording.
+		{[]string{"x", "--db-max-age=abc"}, `--db-max-age: "abc" is not a duration (try 24h, 168h)`},
+		{[]string{"x", "--db-max-age=0"}, `--db-max-age: "0" must be positive; omit the flag to scan without the check`},
+		{[]string{"x", "--db-max-age"}, "--db-max-age needs a duration, e.g. --db-max-age=48h"},
+	} {
+		if _, _, err := parseScanArgs(tc.args); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("parseScanArgs(%v) err = %v, want it to contain %q", tc.args, err, tc.want)
+		}
+	}
+
+	// Through run(): exit 2, the wording on stderr, nothing on stdout.
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"scan", "x", "--db-max-rating-age=abc"}, &stdout, &stderr); code != exitError {
+		t.Errorf("run(--db-max-rating-age=abc) = %d, want %d", code, exitError)
+	}
+	if want := `error: --db-max-rating-age: "abc" is not a duration (try 24h, 168h)`; !strings.Contains(stderr.String(), want) {
+		t.Errorf("stderr does not say %q:\n%s", want, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("a refused flag wrote to stdout:\n%s", stdout.String())
+	}
+
+	if !strings.Contains(usage, "--db-max-rating-age=<dur>") {
+		t.Error("usage does not document --db-max-rating-age")
+	}
+}
+
 // writeD112Image writes a one-layer Alpine 3.19 docker-archive with one apk
 // package, built in-process (never pkg/v1/daemon), so a scan of it reaches
 // the layer walk with no network at any point.

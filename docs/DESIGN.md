@@ -492,6 +492,14 @@ what tripped it (the path, the limit, or the flag) on stderr, because a truncate
 database reported as a smaller but complete inventory is exactly the untrustworthy result
 this exit code exists to catch.
 
+Since D113, `--db-max-age` (D59) is scoped: its oldest-`DataAsOf` check considers only the
+providers that declare an ecosystem key the scanned inventory actually holds, not every
+provider in the database, and a key `Provenance.Frozen` names counts as old as its freeze
+rather than as fresh as the provider's last run. A separate `--db-max-rating-age <duration>`
+gates NVD/EPSS/KEV staleness on request — D59 keeps ratings out of `--db-max-age` on purpose,
+so a second flag with its own scope answers for them instead of widening the first. Neither
+flag has a default.
+
 ## Architecture
 
 The pipeline is five interfaces. Each is independently testable, and supporting a new
