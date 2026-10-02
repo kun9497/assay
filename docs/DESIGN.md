@@ -710,6 +710,14 @@ exited 0 while 24 findings went unmentioned.
 - [x] SLES LTSS folded with a mainline-wins tie-break (D91) — post-EOL fixes surface
       under the same key (bci-base 121→286 findings, curl shows its real FIXED IN),
       385,621 shadowed twins dropped and counted
+- [x] A candidate database holds the regression floors before it is published (D114) —
+      `db-publish.yml` runs `scandiff -regressions-only` against the candidate (via
+      `ASSAY_DB_DIR`) between `db build` and `db push`; a `minAgree`/`minFindings`/
+      `minComponents`/`maxNotEvaluated`/trivy-minimum breach or an ERROR verdict fails the
+      job before anything is pushed, while ceilings stay the weekly review's. The grype/trivy
+      setup is one composite action shared by both workflows. The target list gains its
+      first end-of-support releases, `debian:11` and `amazonlinux:2`, seeded from a measured
+      run.
 - [x] Data age is judged for the keys a scan uses (D113) — `--db-max-age` folds only the
       providers that declare an ecosystem key the inventory holds (D59's stalest-wins
       inside that set), a frozen key counts as old as its freeze and the refusal names it,
