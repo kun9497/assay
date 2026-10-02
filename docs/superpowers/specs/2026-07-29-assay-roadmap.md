@@ -4480,6 +4480,60 @@ annotations. Enrichment age (D3's display copy, as D59 said).
 
 ---
 
+### D114 — A candidate database holds the differential's regression floors before it is published
+
+**Decision.** The nightly publish gains a gate between `db build` and `db push`: the
+candidate database the build just wrote is scanned through `cmd/scandiff` against the same
+23-plus targets and the same committed floors the weekly differential uses (D93, D105), and
+a breach of a **regression** floor — `minAgree`, `minFindings`, `minComponents`,
+`maxNotEvaluated`, a trivy minimum, or an `ERROR` verdict — fails the job before anything is
+pushed. The **ceilings** (`maxFindings`, trivy's `maxFindings`) are not consulted by the gate:
+`scandiff` gains a `-regressions-only` mode for it, because a ceiling measures upstream growth,
+which the weekly review re-bands by hand and which must never stop a nightly from shipping
+new advisories. The scanner setup the two workflows share (pinned grype and trivy, their
+database caches) moves into one composite action so a version bump happens in one place. The
+differential's target list gains its first end-of-support releases — `debian:11` and
+`amazonlinux:2`, digest-pinned — seeded the way D93 seeds every target: one measured run,
+floors at 85% of the measurement, ceilings at twice it.
+
+**Why.** Until now a defective candidate reached the public tag the moment `db push` accepted
+it, and the first thing that could notice was the weekly differential — up to six days later,
+after six nightlies had each seeded from the bad artifact. The publish guard (#135) catches a
+database that *shrank*; it cannot catch one whose counts held while its matches moved, which
+is the D90 shape (`agree` collapsing toward the other tool while findings stayed flat) and the
+reason `minAgree` exists. The 2026-09-30 service review listed the missing gate as the one
+operational gap with no recorded deferral at all. It is cheap: the weekly run takes nine to
+twelve minutes against a thirty-minute build and a 120-minute timeout, and it needs no new
+code in `scandiff` beyond the mode — `store.DefaultPath` reads `ASSAY_DB_DIR`, `scandiff`
+spawns `assay` with its own environment, so pointing the gate at the candidate is one
+variable.
+
+**Why regressions only.** A ceiling breach is the nightly saying "upstream published more
+than the floor file expected" — the wolfi and photon5 cases of 2026-09-28 — and every one of
+them so far has been benign growth that a human confirmed and re-banded on Monday. Letting it
+block the publish would turn a review signal into an outage: the database would stop updating
+until someone edited a JSON file, which is the retirement-shaped failure D110 was built to
+avoid. The weekly job keeps judging ceilings; the gate judges what a bad candidate would
+break.
+
+**Why EOS targets now.** None of the 23 targets was a release past its upstream's support,
+so a loss like `Debian:11`'s (46,365 → 2,562, D110) had no floor to trip — the differential
+would have stayed green through it, and did. `debian:11` and `amazonlinux:2` are the two the
+review named first: the one that already lost its data and was recovered, and the one whose
+upstream is past EOS yet still publishing. Their floors are seeded from a measured run, not
+estimated; a measured run is also what tells whether grype's own Debian 11 data degraded the
+same way, which would make `minAgree` on that target a weak floor and `minFindings` the one
+that matters.
+
+**What stays out.** No automatic re-band on a ceiling breach, and no automatic retry. The
+gate's failure is loud (the job fails, the capture is uploaded like the weekly's), and the
+remedy is a human reading the breach line. No gate on `db-backfill.yml`: a backfill is an
+operator action with its own eyes on it. No second publish tag (`candidate`/`staging`): the
+gate makes the candidate pass before the one tag moves, which is the same guarantee with one
+fewer moving part.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

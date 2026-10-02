@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestJudge_AllFloorsHeldExactlyAtBoundary(t *testing.T) {
 	// Boundary values themselves must hold, not just values comfortably
@@ -134,5 +137,65 @@ func TestJudge_MinComponentsCatchesAnEmptyInventory(t *testing.T) {
 	}
 	if b := judge(target, 0, 0, 0, 49); len(b) != 0 {
 		t.Fatalf("judge = %v, want no breach when the inventory is real", b)
+	}
+}
+
+// --- D114: ceilings, and the mode that demotes them -------------------------
+
+// TestJudge_OnlyMaxFindingsIsTaggedCeiling pins the tag demoteCeilings acts
+// on: tripping every floor at once, exactly maxFindings is a ceiling. A
+// regression floor tagged as one would be silently skipped by the gate.
+func TestJudge_OnlyMaxFindingsIsTaggedCeiling(t *testing.T) {
+	// Two targets because no single measurement can be both under
+	// minFindings and over maxFindings.
+	lowT := Target{Name: "tags-low", MinComponents: 9, MinAgree: 9, MinFindings: 9, MaxFindings: 50, MaxNotEvaluated: 0}
+	highT := Target{Name: "tags-high", MaxFindings: 1}
+	low := judge(lowT, 0, 0, 5, 0)   // under every minimum, over maxNotEvaluated
+	high := judge(highT, 0, 4, 0, 0) // over maxFindings only
+	for _, b := range append(low, high...) {
+		if want := b.Floor == "maxFindings"; b.Ceiling != want {
+			t.Errorf("floor %s: Ceiling = %v, want %v", b.Floor, b.Ceiling, want)
+		}
+	}
+	if len(low) != 4 || len(high) != 1 {
+		t.Fatalf("low = %v, high = %v; want 4 regression breaches and 1 ceiling", low, high)
+	}
+}
+
+func TestJudgeTrivy_OnlyMaxFindingsIsTaggedCeiling(t *testing.T) {
+	lowT := Target{Name: "tags-low", Trivy: &TrivyFloors{MinAgree: 9, MinFindings: 9, MaxFindings: 50}}
+	highT := Target{Name: "tags-high", Trivy: &TrivyFloors{MaxFindings: 1}}
+	got := append(judgeTrivy(lowT, 0, 0), judgeTrivy(highT, 0, 4)...)
+	if len(got) != 3 {
+		t.Fatalf("judgeTrivy = %v, want trivy.minAgree, trivy.minFindings and trivy.maxFindings", got)
+	}
+	for _, b := range got {
+		if want := b.Floor == "trivy.maxFindings"; b.Ceiling != want {
+			t.Errorf("floor %s: Ceiling = %v, want %v", b.Floor, b.Ceiling, want)
+		}
+	}
+}
+
+func TestDemoteCeilings(t *testing.T) {
+	floor := breach{Target: "x", Floor: "minAgree", Want: ">=3", Got: 1}
+	ceil := breach{Target: "x", Floor: "maxFindings", Want: "<=3", Got: 7, Ceiling: true}
+	all := []breach{floor, ceil}
+
+	judged, info := demoteCeilings(all, false)
+	if !slices.Equal(judged, all) || len(info) != 0 {
+		t.Errorf("default mode: judged=%v info=%v, want every breach judged and none demoted", judged, info)
+	}
+
+	judged, info = demoteCeilings(all, true)
+	if !slices.Equal(judged, []breach{floor}) || !slices.Equal(info, []breach{ceil}) {
+		t.Errorf("-regressions-only: judged=%v info=%v, want the floor judged and the ceiling demoted", judged, info)
+	}
+}
+
+func TestBreach_InfoStringNamesCeilingAndMode(t *testing.T) {
+	b := breach{Target: "photon5", Floor: "trivy.maxFindings", Want: "<=40", Got: 51, Ceiling: true}
+	want := "info: target=photon5 ceiling=trivy.maxFindings want=<=40 got=51 (not judged: -regressions-only)"
+	if got := b.infoString(); got != want {
+		t.Errorf("infoString() = %q, want %q", got, want)
 	}
 }

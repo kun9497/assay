@@ -1004,3 +1004,283 @@ func TestRun_Offline_BridgeRecoversABareAdvisoryJoin(t *testing.T) {
 		t.Fatalf("exit = %d, want %d -- the bridged advisory join must satisfy minAgree (stderr=%q)", got, exitOK, stderr.String())
 	}
 }
+
+// --- D114: -regressions-only, the nightly publish gate's mode ---------------
+
+// rowFields returns the table row whose FIRST column is exactly name, split
+// into fields. Matching the first field rather than Contains keeps one
+// target's row from being found through another target whose name happens to
+// contain it (CLAUDE.md's substring rule).
+func rowFields(t *testing.T, stdout, name string) []string {
+	t.Helper()
+	for line := range strings.Lines(stdout) {
+		f := strings.Fields(line)
+		if len(f) > 0 && f[0] == name {
+			return f
+		}
+	}
+	t.Fatalf("no table row for target %q; stdout=%q", name, stdout)
+	return nil
+}
+
+// writeOffline writes one target's captures into dir for an offline run.
+func writeOffline(t *testing.T, dir string, files map[string][]byte) {
+	t.Helper()
+	for name, b := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// ceilingOverFixture is ONE target whose only problem is a ceiling: two assay
+// findings against maxFindings=1, every regression floor comfortably held
+// (minAgree 1 met by the shared CVE, minFindings 1, minComponents 0,
+// notEvaluated 0). The flagged and the default-mode tests below read the very
+// same bytes, so the only thing that differs between their verdicts is the
+// flag.
+func ceilingOverFixture(t *testing.T) (targetsPath, dir string) {
+	t.Helper()
+	target := Target{Name: "ceil-over", Ref: "unused-in-offline-mode", MinAgree: 1, MinFindings: 1, MaxFindings: 1}
+	targetsPath = writeTargetsFile(t, []Target{target})
+	dir = t.TempDir()
+	writeOffline(t, dir, map[string][]byte{
+		"ceil-over.assay.json": assayDoc(0, []assayFinding{
+			{Package: assayPackage{Name: "libgrow"}, Advisory: assayAdvisory{ID: "OSV-G-1", Aliases: []string{"CVE-2026-61001"}}},
+			{Package: assayPackage{Name: "libgrow"}, Advisory: assayAdvisory{ID: "OSV-G-2", Aliases: []string{"CVE-2026-61002"}}},
+		}),
+		"ceil-over.grype.json": grypeDoc([]grypeMatch{
+			{Artifact: grypeArtifact{Name: "libgrow"}, Vulnerability: grypeVuln{ID: "CVE-2026-61001"}},
+		}),
+	})
+	return targetsPath, dir
+}
+
+func TestRun_RegressionsOnly_CeilingOverIsOKAndPrintedAsInfo(t *testing.T) {
+	targetsPath, dir := ceilingOverFixture(t)
+
+	var stdout, stderr bytes.Buffer
+	got := run([]string{"-targets", targetsPath, "-offline", dir, "-regressions-only"}, &stdout, &stderr, noExec(t))
+
+	if got != exitOK {
+		t.Fatalf("exit = %d, want %d -- a ceiling must not block the gate (stderr=%q)", got, exitOK, stderr.String())
+	}
+	if f := rowFields(t, stdout.String(), "ceil-over"); f[len(f)-1] != "ok" {
+		t.Errorf("row = %v, want verdict ok", f)
+	}
+	wantInfo := "info: target=ceil-over ceiling=maxFindings want=<=1 got=2 (not judged: -regressions-only)"
+	if !slices.Contains(strings.Split(strings.TrimRight(stderr.String(), "\r\n"), "\n"), wantInfo) {
+		t.Errorf("stderr = %q, want the exact line %q", stderr.String(), wantInfo)
+	}
+	if strings.Contains(stderr.String(), "breach:") {
+		t.Errorf("stderr = %q, want no breach: line when only a ceiling was over", stderr.String())
+	}
+	// stdout is the workflow's report.txt, which the Monday routine parses
+	// between sentinels as a table. The stderr check above holds even if the
+	// line is ALSO written to stdout, so stdout needs its own assertion.
+	assertNoInfoOnStdout(t, stdout.String())
+}
+
+// TestRun_DefaultMode_CeilingStillBreaches pins that the mode is opt-in: the
+// weekly differential runs without the flag and must keep judging ceilings,
+// because the weekly review is the place growth gets re-banded (D114).
+func TestRun_DefaultMode_CeilingStillBreaches(t *testing.T) {
+	targetsPath, dir := ceilingOverFixture(t)
+
+	var stdout, stderr bytes.Buffer
+	got := run([]string{"-targets", targetsPath, "-offline", dir}, &stdout, &stderr, noExec(t))
+
+	if got != exitFindings {
+		t.Fatalf("exit = %d, want %d (stderr=%q)", got, exitFindings, stderr.String())
+	}
+	want := "breach: target=ceil-over floor=maxFindings want=<=1 got=2"
+	if !strings.Contains(stderr.String(), want) {
+		t.Errorf("stderr = %q, want it to contain %q", stderr.String(), want)
+	}
+	if strings.Contains(stderr.String(), "not judged") {
+		t.Errorf("stderr = %q, want no demotion notice outside -regressions-only", stderr.String())
+	}
+	if f := rowFields(t, stdout.String(), "ceil-over"); f[len(f)-1] != "BREACH" {
+		t.Errorf("row = %v, want verdict BREACH", f)
+	}
+}
+
+func TestRun_RegressionsOnly_FloorUnderStillBreaches(t *testing.T) {
+	// Two targets, one regression floor each, both with ceilings far away so
+	// nothing here can be explained by the ceiling path.
+	short := Target{Name: "short-findings", Ref: "ref-short-findings", MinFindings: 3, MaxFindings: 50}
+	split := Target{Name: "split-agree", Ref: "ref-split-agree", MinAgree: 2, MaxFindings: 50}
+	targetsPath := writeTargetsFile(t, []Target{short, split})
+
+	exec := newFakeExec(t,
+		map[string]stub{
+			"ref-short-findings": {out: assayDoc(0, []assayFinding{{Package: assayPackage{Name: "libshort"}, Advisory: assayAdvisory{ID: "OSV-S-1", Aliases: []string{"CVE-2026-62001"}}}}), code: 0},
+			"ref-split-agree": {out: assayDoc(0, []assayFinding{
+				{Package: assayPackage{Name: "libsplit"}, Advisory: assayAdvisory{ID: "OSV-P-1", Aliases: []string{"CVE-2026-63001"}}},
+				{Package: assayPackage{Name: "libsplit"}, Advisory: assayAdvisory{ID: "OSV-P-2", Aliases: []string{"CVE-2026-63002"}}},
+			}), code: 1},
+		},
+		map[string]stub{
+			"ref-short-findings": {out: grypeDoc(nil), code: 0},
+			"ref-split-agree":    {out: grypeDoc([]grypeMatch{{Artifact: grypeArtifact{Name: "libother"}, Vulnerability: grypeVuln{ID: "CVE-2026-63009"}}}), code: 0},
+		},
+	)
+
+	var stdout, stderr bytes.Buffer
+	got := run([]string{"-targets", targetsPath, "-assay", "a", "-grype", "g", "-capture", t.TempDir(), "-regressions-only"}, &stdout, &stderr, exec)
+
+	if got != exitFindings {
+		t.Fatalf("exit = %d, want %d (stderr=%q)", got, exitFindings, stderr.String())
+	}
+	for _, want := range []string{
+		"breach: target=short-findings floor=minFindings want=>=3 got=1",
+		"breach: target=split-agree floor=minAgree want=>=2 got=0",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("stderr = %q, want it to contain %q", stderr.String(), want)
+		}
+	}
+	for _, name := range []string{"short-findings", "split-agree"} {
+		if f := rowFields(t, stdout.String(), name); f[len(f)-1] != "BREACH" {
+			t.Errorf("row = %v, want verdict BREACH", f)
+		}
+	}
+}
+
+func TestRun_RegressionsOnly_NotEvaluatedGrowthStillBreaches(t *testing.T) {
+	target := Target{Name: "noteval-up", Ref: "unused-in-offline-mode", MaxFindings: 50, MaxNotEvaluated: 1}
+	targetsPath := writeTargetsFile(t, []Target{target})
+	dir := t.TempDir()
+	writeOffline(t, dir, map[string][]byte{
+		"noteval-up.assay.json": assayDoc(2, nil),
+		"noteval-up.grype.json": grypeDoc(nil),
+	})
+
+	var stdout, stderr bytes.Buffer
+	got := run([]string{"-targets", targetsPath, "-offline", dir, "-regressions-only"}, &stdout, &stderr, noExec(t))
+
+	if got != exitFindings {
+		t.Fatalf("exit = %d, want %d -- maxNotEvaluated is a regression floor, not a ceiling (stderr=%q)", got, exitFindings, stderr.String())
+	}
+	want := "breach: target=noteval-up floor=maxNotEvaluated want=<=1 got=2"
+	if !strings.Contains(stderr.String(), want) {
+		t.Errorf("stderr = %q, want it to contain %q", stderr.String(), want)
+	}
+}
+
+func TestRun_RegressionsOnly_TrivyCeilingOverIsOK_TrivyMinimumStillBreaches(t *testing.T) {
+	// tv-growth: trivy reports two tuples against trivy.maxFindings=1, one of
+	// which agrees with assay (trivy.minAgree=1 held) -- only the ceiling is
+	// over. tv-shrink: trivy agrees with nothing, so trivy.minAgree trips.
+	growth := Target{
+		Name: "tv-growth", Ref: "ref-tv-growth", MaxFindings: 50,
+		Trivy: &TrivyFloors{MinAgree: 1, MinFindings: 1, MaxFindings: 1},
+	}
+	shrink := Target{
+		Name: "tv-shrink", Ref: "ref-tv-shrink", MaxFindings: 50,
+		Trivy: &TrivyFloors{MinAgree: 1, MinFindings: 1, MaxFindings: 50},
+	}
+	targetsPath := writeTargetsFile(t, []Target{growth, shrink})
+
+	exec := newFakeExecWithTrivy(t,
+		map[string]stub{
+			"ref-tv-growth": {out: assayDoc(0, []assayFinding{{Package: assayPackage{Name: "libtvg"}, Advisory: assayAdvisory{ID: "OSV-T-1", Aliases: []string{"CVE-2026-64001"}}}}), code: 0},
+			"ref-tv-shrink": {out: assayDoc(0, []assayFinding{{Package: assayPackage{Name: "libtvs"}, Advisory: assayAdvisory{ID: "OSV-T-2", Aliases: []string{"CVE-2026-65001"}}}}), code: 0},
+		},
+		map[string]stub{
+			"ref-tv-growth": {out: grypeDoc(nil), code: 0},
+			"ref-tv-shrink": {out: grypeDoc(nil), code: 0},
+		},
+		map[string]stub{
+			"ref-tv-growth": {out: trivyDocBytes([]trivyResult{{Class: "os-pkgs", Vulnerabilities: []trivyVuln{
+				{PkgName: "libtvg", VulnerabilityID: "CVE-2026-64001"},
+				{PkgName: "libtvg", VulnerabilityID: "CVE-2026-64002"},
+			}}}), code: 0},
+			"ref-tv-shrink": {out: trivyDocBytes([]trivyResult{{Class: "os-pkgs", Vulnerabilities: []trivyVuln{
+				{PkgName: "libunrelated", VulnerabilityID: "CVE-2026-65009"},
+			}}}), code: 0},
+		},
+	)
+
+	var stdout, stderr bytes.Buffer
+	got := run([]string{"-targets", targetsPath, "-assay", "a", "-grype", "g", "-trivy", "tv", "-capture", t.TempDir(), "-regressions-only"}, &stdout, &stderr, exec)
+
+	if got != exitFindings {
+		t.Fatalf("exit = %d, want %d (stderr=%q)", got, exitFindings, stderr.String())
+	}
+	if f := rowFields(t, stdout.String(), "tv-growth"); f[len(f)-1] != "ok" {
+		t.Errorf("row = %v, want verdict ok -- only trivy's ceiling was over", f)
+	}
+	if f := rowFields(t, stdout.String(), "tv-shrink"); f[len(f)-1] != "BREACH" {
+		t.Errorf("row = %v, want verdict BREACH", f)
+	}
+	wantInfo := "info: target=tv-growth ceiling=trivy.maxFindings want=<=1 got=2 (not judged: -regressions-only)"
+	if !slices.Contains(strings.Split(strings.TrimRight(stderr.String(), "\r\n"), "\n"), wantInfo) {
+		t.Errorf("stderr = %q, want the exact line %q", stderr.String(), wantInfo)
+	}
+	if strings.Contains(stderr.String(), "breach: target=tv-growth") {
+		t.Errorf("stderr = %q, want no breach line for tv-growth", stderr.String())
+	}
+	wantBreach := "breach: target=tv-shrink floor=trivy.minAgree want=>=1 got=0"
+	if !strings.Contains(stderr.String(), wantBreach) {
+		t.Errorf("stderr = %q, want it to contain %q", stderr.String(), wantBreach)
+	}
+	// The trivy comparison prints its info lines from its own call site, so
+	// the grype test's stdout check does not cover this one.
+	assertNoInfoOnStdout(t, stdout.String())
+}
+
+// assertNoInfoOnStdout holds -regressions-only's info lines to stderr. The
+// table is the only thing on stdout (report.txt in both workflows), and a
+// line the sentinel-delimited parser does not expect would land in it.
+func assertNoInfoOnStdout(t *testing.T, stdout string) {
+	t.Helper()
+	for _, leak := range []string{"info:", "not judged"} {
+		if strings.Contains(stdout, leak) {
+			t.Errorf("stdout = %q, want no %q -- info lines belong on stderr", stdout, leak)
+		}
+	}
+}
+
+func TestRun_RegressionsOnly_ErrorStillExitTwo(t *testing.T) {
+	target := Target{Name: "gate-fatal", Ref: "ref-gate-fatal", MaxFindings: 50}
+	targetsPath := writeTargetsFile(t, []Target{target})
+
+	exec := newFakeExec(t,
+		map[string]stub{"ref-gate-fatal": {out: nil, code: 2}},
+		map[string]stub{"ref-gate-fatal": {out: grypeDoc(nil), code: 0}},
+	)
+
+	var stdout, stderr bytes.Buffer
+	got := run([]string{"-targets", targetsPath, "-assay", "a", "-grype", "g", "-capture", t.TempDir(), "-regressions-only"}, &stdout, &stderr, exec)
+
+	if got != exitError {
+		t.Fatalf("exit = %d, want %d -- an untrustworthy candidate is never demoted (stderr=%q)", got, exitError, stderr.String())
+	}
+	if f := rowFields(t, stdout.String(), "gate-fatal"); f[len(f)-1] != "ERROR" {
+		t.Errorf("row = %v, want verdict ERROR", f)
+	}
+}
+
+func TestRun_Usage_MentionsRegressionsOnly(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	got := run([]string{"-no-such-flag"}, &stdout, &stderr, noExec(t))
+
+	if got != exitError {
+		t.Fatalf("exit = %d, want %d", got, exitError)
+	}
+	// Each form the flag is valid in, and the paragraph naming what it skips.
+	// One bare Contains("[-regressions-only]") was satisfied by either form
+	// alone, so dropping the flag from the live form survived it (mutation,
+	// D114). The parse error above names "-no-such-flag", which can satisfy
+	// none of these.
+	for _, want := range []string{
+		"-capture <dir> [-trivy <bin>] [-regressions-only]",
+		"-offline <dir> [-regressions-only]",
+		"skips the ceilings, maxFindings and trivy.maxFindings",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("stderr = %q, want the usage to contain %q", stderr.String(), want)
+		}
+	}
+}

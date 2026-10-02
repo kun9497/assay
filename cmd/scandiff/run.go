@@ -22,7 +22,7 @@ const (
 const usage = `scandiff — deterministic assay/grype/trivy differential (D93, D105)
 
 Usage:
-  scandiff -targets <file> -assay <bin> -grype <bin> -capture <dir> [-trivy <bin>]
+  scandiff -targets <file> -assay <bin> -grype <bin> -capture <dir> [-trivy <bin>] [-regressions-only]
       Live mode: scans every target in <file> with assay and grype, judges the
       result against that target's committed floors, and writes every raw
       JSON document into <dir> as <name>.assay.json / <name>.grype.json.
@@ -30,12 +30,18 @@ Usage:
       (D105); a target with no such block never invokes it, and -trivy may
       be omitted entirely if no target in the file has one.
 
-  scandiff -targets <file> -offline <dir>
+  scandiff -targets <file> -offline <dir> [-regressions-only]
       Offline mode: reads <dir>/<name>.assay.json and <dir>/<name>.grype.json
       (and <dir>/<name>.trivy.json for a target with a trivy block) instead
       of running any scanner. Same judging path as live mode -- this is how
       floors are seeded and how tests get integration-shaped coverage
       without a network call.
+
+  -regressions-only (either mode) is the nightly publish gate's mode (D114):
+      it skips the ceilings, maxFindings and trivy.maxFindings, and prints any
+      that would have breached as an "info:" line instead. A ceiling measures
+      upstream growth, which must never stop a new database from shipping;
+      every other floor, and every ERROR, is judged exactly as without it.
 
 Exit codes:
   0  every target held its floors
@@ -91,6 +97,10 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 	trivyBin := fs.String("trivy", "", "path to the trivy binary (live mode; only needed for targets with a trivy block)")
 	captureDir := fs.String("capture", "", "directory to write raw scan JSON into (live mode)")
 	offlineDir := fs.String("offline", "", "directory of previously captured JSON to replay")
+	// regressionsOnly is D114's publish-gate mode, valid live or offline.
+	// Off by default so the weekly differential keeps judging every floor;
+	// see demoteCeilings for which floors it skips and why only those.
+	regressionsOnly := fs.Bool("regressions-only", false, "judge every floor except the ceilings (maxFindings, trivy.maxFindings), which print as info")
 
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
@@ -166,7 +176,8 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 		agree, onlyAssay, onlyGrype := compareSets(aSet, gSet)
 		notEvaluated := adoc.Summary.NotEvaluated
 
-		breaches := judge(t, agree, len(aSet), notEvaluated, adoc.Summary.Components)
+		breaches, info := demoteCeilings(judge(t, agree, len(aSet), notEvaluated, adoc.Summary.Components), *regressionsOnly)
+		printInfo(stderr, info)
 		r := row{
 			Target:       t.Name,
 			AssayTuples:  len(aSet),
@@ -191,7 +202,7 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 		// runs, and no <name>.trivy.json capture is ever written, for a
 		// target whose entry carries no "trivy" key at all.
 		if t.Trivy != nil {
-			switch trivyPhase(execScan, *trivyBin, *captureDir, *offlineDir, live, t, aSet, stdout, stderr) {
+			switch trivyPhase(execScan, *trivyBin, *captureDir, *offlineDir, live, *regressionsOnly, t, aSet, stdout, stderr) {
 			case trivyError:
 				r.Verdict = "ERROR"
 				worst = exitError
@@ -316,7 +327,7 @@ const (
 // broken. The identical failure on a target with a real floor is
 // trivyError, the same "this target's result cannot be trusted" treatment
 // runAssay/runGrype's own fatal paths get.
-func trivyPhase(execScan execFunc, trivyBin, captureDir, offlineDir string, live bool, t Target, aSet map[tuple]struct{}, stdout, stderr io.Writer) trivyOutcome {
+func trivyPhase(execScan execFunc, trivyBin, captureDir, offlineDir string, live, regressionsOnly bool, t Target, aSet map[tuple]struct{}, stdout, stderr io.Writer) trivyOutcome {
 	informational := t.Trivy.isZero()
 
 	var trivyRaw []byte
@@ -359,7 +370,8 @@ func trivyPhase(execScan execFunc, trivyBin, captureDir, offlineDir string, live
 		return trivyOK
 	}
 
-	breaches := judgeTrivy(t, agree, findings)
+	breaches, info := demoteCeilings(judgeTrivy(t, agree, findings), regressionsOnly)
+	printInfo(stderr, info)
 	if len(breaches) == 0 {
 		return trivyOK
 	}
@@ -410,6 +422,16 @@ func readOfflineTrivy(dir string, t Target) (out []byte, fatal string) {
 		return nil, fmt.Sprintf("read offline trivy capture: %v", err)
 	}
 	return out, ""
+}
+
+// printInfo writes one line per ceiling -regressions-only did not judge. Both
+// comparisons call it, so a demoted grype-side and trivy-side ceiling read the
+// same in a nightly log. It prints before the target's breach lines so a
+// reader scanning one target's block sees what was set aside first.
+func printInfo(stderr io.Writer, info []breach) {
+	for _, b := range info {
+		fmt.Fprintln(stderr, b.infoString())
+	}
 }
 
 // writeCapture persists one raw scan document for later human review

@@ -1,6 +1,6 @@
 # D93: the assay-vs-grype comparison that caught D90, running weekly instead
 # of by hand; extended by D105 to a second comparison scanner, trivy. It
-# scans the same 23 targets with assay and grype (every target), plus trivy
+# scans the same 25 targets with assay and grype (every target), plus trivy
 # where a target's entry opts in, reduces each side to (package, CVE)
 # tuples, and judges the result against the committed floors in
 # .github/scanner-diff-targets.json -- see cmd/scandiff's own top-of-file
@@ -8,9 +8,14 @@
 # own floors are optional and can start out informational.
 #
 # The assay database comes from `assay db update` (the published OCI
-# artifact), not a local build: that is what makes this run also a check on
-# the artifact itself, which is how a D90-class corruption in what gets
-# published gets caught, not just a regression in the matcher code.
+# artifact), not a local build. Since D114 this is no longer the first check
+# on what gets published: db-publish.yml's gate holds every candidate to the
+# regression floors before `db push`, so a D90-class corruption that moves
+# these targets stops short of the tag. This run remains the check that the
+# PUBLIC artifact, pulled anonymously the way a user pulls it, still holds
+# those floors -- and the only place the ceilings (maxFindings) are judged,
+# because the gate skips them: a ceiling measures upstream growth, which a
+# human re-bands here, by hand, on Monday.
 name: scanner differential
 
 on:
@@ -32,7 +37,7 @@ permissions:
 jobs:
   diff:
     runs-on: ubuntu-latest
-    # 23 targets, each an image pull plus two scans (three for the 16 that
+    # 25 targets, each an image pull plus two scans (three for the 18 that
     # carry a trivy block, D105). Measured locally at a few minutes per
     # target on a cold cache; a hosted runner, Docker Hub anonymous rate
     # limits (mitigated by mirror.gcr.io, but not eliminated), and now a
@@ -50,8 +55,8 @@ jobs:
       # version below.
       GRYPE_CHECK_FOR_APP_UPDATE: "false"
       # trivy prints a one-time notice about its VEX handling on every
-      # invocation unless this is set; with 16 targets running trivy, that
-      # notice would otherwise repeat 16 times in the log for no benefit --
+      # invocation unless this is set; with 18 targets running trivy, that
+      # notice would otherwise repeat 18 times in the log for no benefit --
       # this workflow does not consume VEX at all (see D104's OpenVEX
       # support, which lives on the assay side, not trivy's).
       TRIVY_DISABLE_VEX_NOTICE: "true"
@@ -69,59 +74,10 @@ jobs:
       - name: Build scandiff
         run: go build -o ./bin/scandiff ./cmd/scandiff
 
-      # Pinned, not "latest": a moving grype version would make a floor
-      # breach ambiguous between "assay regressed" and "grype changed
-      # underneath this workflow". Bump this deliberately, in the same
-      # commit as a re-seed of the floors file, when there is a reason to.
-      - name: Install grype v0.116.1
-        run: |
-          curl -sSfL https://get.anchore.io/grype | sh -s -- -b ./bin v0.116.1
-          ./bin/grype version
-
-      - name: Update grype's vulnerability database
-        run: ./bin/grype db update
-
-      # Same pinning reasoning as grype above. The official setup action
-      # rather than install.sh: the script's unauthenticated release-asset
-      # download failed silently on this run's first dispatch (2026-08-28,
-      # exit 1 straight after "found version", no message past curl -s),
-      # while the action authenticates with the workflow's own token and
-      # caches the binary. The version is spelled right here rather than
-      # implied by whatever the runner image happens to carry; bump
-      # deliberately, in the same commit as a re-seed of any trivy floor.
-      - name: Install trivy v0.74.0
-        uses: aquasecurity/setup-trivy@v0.3.1
-        with:
-          version: v0.74.0
-      - name: Symlink trivy into ./bin
-        # scandiff is invoked with -trivy ./bin/trivy below, matching how
-        # assay and grype already live in ./bin — one place to look when a
-        # capture needs reproducing locally.
-        run: |
-          mkdir -p ./bin
-          ln -sf "$(command -v trivy)" ./bin/trivy
-          ./bin/trivy version
-
-      # trivy's own default cache dir (TRIVY_CACHE_DIR unset): keyed on the
-      # pinned version so a version bump never reuses a stale-schema cache,
-      # and on the ISO week so the DB itself still gets a fresh pull once a
-      # week the way grype's `db update` step above always does -- a cache
-      # that never expired would silently drift the differential's trivy
-      # side away from "this week's" vulnerability data.
-      - name: Determine trivy DB cache key
-        id: trivy-cache-key
-        run: echo "week=$(date -u +%G-w%V)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache trivy vulnerability DB
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/trivy
-          key: trivy-db-v0.74.0-${{ steps.trivy-cache-key.outputs.week }}
-          restore-keys: |
-            trivy-db-v0.74.0-
-
-      - name: Update trivy's vulnerability database
-        run: ./bin/trivy image --download-db-only
+      # Pinned grype and trivy plus their vulnerability databases, shared with
+      # db-publish.yml's gate (D114) so both judge with the same versions;
+      # the pinning and caching reasoning lives with the steps, in the action.
+      - uses: ./.github/actions/setup-scanners
 
       - name: Pull the published assay database
         # Anonymous, deliberately -- see the permissions comment at the top.

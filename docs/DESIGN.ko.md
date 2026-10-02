@@ -683,6 +683,13 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] SLES LTSS를 mainline-wins 동점 처리로 접음 (D91) — post-EOL fix가 같은 키
       아래서 드러남(bci-base finding 121→286건, curl이 진짜 FIXED IN을 보여줌),
       가려졌던 쌍둥이 385,621건을 버려서 셈
+- [x] 후보 데이터베이스는 발행되기 전에 회귀 floor를 통과해야 한다 (D114) —
+      `db-publish.yml`이 `db build`와 `db push` 사이에서 후보를 대상으로(`ASSAY_DB_DIR`을
+      통해) `scandiff -regressions-only`를 실행한다; `minAgree`/`minFindings`/
+      `minComponents`/`maxNotEvaluated`/trivy 하한 위반이나 ERROR 판정은 아무것도
+      push되기 전에 job을 실패시키고, ceiling은 주간 리뷰의 몫으로 남는다. grype/trivy
+      설치는 두 워크플로가 공유하는 composite action 하나다. 타깃 목록은 첫 EOS
+      릴리스인 `debian:11`과 `amazonlinux:2`를 얻는데, 측정 실행에서 시드됐다.
 - [x] 데이터 나이는 스캔이 쓰는 키들에 대해서만 판단된다 (D113) — `--db-max-age`는
       인벤토리가 가진 ecosystem 키를 선언하는 provider만 접고(그 집합 안에서의 D59
       stalest-wins), 동결된 키는 동결 시점만큼 오래된 것으로 세고 거부 메시지가 그 키를
@@ -736,7 +743,7 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨
-- [x] 차등이 스스로 돎 (D93) — 매주, digest로 고정된 타깃을 당시 13개, 지금은 23개를
+- [x] 차등이 스스로 돎 (D93) — 매주, digest로 고정된 타깃을 당시 13개, 지금은 25개를
       발행된 아티팩트에 대고, 커밋된 floor로 판정(도구는 이제 `cmd/scandiff`에 있음,
       D105; stdlib만 사용); ratings 컬럼을 읽어서 죽어 있던 동의 둘을
       되살림(alma 0→106, oracle 0→37)
@@ -1125,10 +1132,30 @@ SUSE에서는 `--fail-on-unfixable`이 동작하지만 `=wont-fix`는 SUSE가 �
 
 정확성은 매 단계 **grype 및 trivy와의 대조 테스트**로 검증합니다 — D93부터는 매주
 일정으로 돌고, D105에서 trivy로 확장되었습니다(`scanner-diff.yml`: digest로 고정된
-타깃 23개, 발행된 아티팩트, 퇴보하면 걸리는 커밋된 floor; 그중 16개 타깃은 trivy와도
+타깃 25개, 발행된 아티팩트, 퇴보하면 걸리는 커밋된 floor; 그중 18개 타깃은 trivy와도
 비교합니다 — 나머지 7개는 trivy가 지원하지 않는 distro입니다). 데이터 소스가 다르므로
-완전한 일치는 기대하지 않지만, **큰 차이가 나면 우리 매처가 틀린 것입니다.** 슬라이스
-①은 대조한 두 SBOM 모두에서 집합이 정확히 일치했습니다:
+완전한 일치는 기대하지 않지만, **큰 차이가 나면 우리 매처가 틀린 것입니다.**
+
+**야간 발행은 push하기 전에 같은 floor를 지킵니다 (D114).** `db build`와 `db push`
+사이에서 `db-publish.yml`은 `ASSAY_DB_DIR`을 후보로 향하게 하고 같은 타깃과 floor
+파일로 `scandiff -regressions-only`를 실행합니다: `minAgree`, `minFindings`,
+`minComponents`, `maxNotEvaluated` 또는 커밋된 trivy 하한 위반, 혹은 `ERROR` 판정은
+job을 실패시키고 아무것도 push되지 않습니다 — 다음 야간이 마지막으로 정상이었던
+아티팩트에서 시드해 다시 시도합니다. 이것이 D90의 모양, 즉 개수는 유지된 채 매치가
+움직이는 경우를 잡는데, `db push`의 커버리지 가드는 그것을 보지 못합니다.
+ceiling(`maxFindings`)은 거기서 `info:` 줄로만 출력되는데, 사람이 다시 band하는
+upstream 성장에 걸리기 때문입니다; 공개 아티팩트에 대한 주간 실행이 ceiling을 판정하는
+유일한 곳으로 남습니다. 같은 변경으로 타깃 목록이 첫 EOS 릴리스인 `debian:11`과
+`amazonlinux:2`를 얻었으므로, `Debian:11`의 손실(D110) 같은 것에도 걸릴 floor가
+생겼습니다. 이들의 floor는 2026-10-02의 측정 실행 한 번(발행된 v9 아티팩트, grype
+v0.116.1, trivy v0.74.0)에서 D93의 85% / 2x로 나왔습니다: `debian11`은 assay tuple
+216개, grype 226개, 일치 211개로 측정됐고 — grype 자신의 Debian 11 데이터는 퇴화하지
+않았으므로 그 타깃의 `minAgree`는 진짜 floor입니다 — 같은 capture를 D110에서 살아남은
+비율로 잘라 내면 `minAgree`, `minFindings`, `trivy.minAgree`가 한꺼번에 걸립니다.
+`amazonlinux2`는 component 106개에서 17 / 17 / 17로 측정됐으므로, 그 타깃의 무게는
+대부분 `minComponents`가 집니다.
+
+슬라이스 ①은 대조한 두 SBOM 모두에서 집합이 정확히 일치했습니다:
 
 | 대상 | assay | grype | 미탐 | 오탐 |
 |---|---:|---:|---:|---:|
