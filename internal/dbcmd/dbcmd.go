@@ -649,6 +649,34 @@ func frozenSummary(providers map[string]store.Provenance) string {
 	return strings.Join(parts, ", ")
 }
 
+// closedSummary renders each provider's closed topics (D113) as
+// "P: N topic(s) closed (no advisory since YYYY-MM-DD), not counted in its
+// DATA AS OF: a, b", providers and topics sorted so the line is diffable.
+//
+// One date per provider, the newest of its closed topics' last advisories:
+// "nothing since" that date is true of every topic listed, and the six
+// topics the rule was written for all stopped on the same day. Naming the
+// PROVIDER table's column is the point of the line — the date there leaves
+// these topics out, and a reader comparing it with the feed should know.
+func closedSummary(providers map[string]store.Provenance) string {
+	var parts []string
+	for _, name := range sortedKeys(providers) {
+		closed := providers[name].Closed
+		if len(closed) == 0 {
+			continue
+		}
+		var newest time.Time
+		for _, at := range closed {
+			if at.After(newest) {
+				newest = at
+			}
+		}
+		parts = append(parts, fmt.Sprintf("%s: %d topic(s) closed (no advisory since %s), not counted in its DATA AS OF: %s",
+			name, len(closed), newest.UTC().Format("2006-01-02"), strings.Join(sortedKeys(closed), ", ")))
+	}
+	return strings.Join(parts, "; ")
+}
+
 // readSeedMeta opens seedPath just long enough to read its Meta record, for
 // a ratings-only build (D66): this has to happen BEFORE copyFile below
 // duplicates the file and BEFORE store.Create reopens the copy read-write,
@@ -816,6 +844,13 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 	// is one -- a line saying "none" on every healthy database would be noise.
 	if s := frozenSummary(m.Providers); s != "" {
 		fmt.Fprintf(stdout, "frozen:     %s\n", s)
+	}
+	// Closed topics (D113): channels a provider left out of its DATA AS OF
+	// below because they finished publishing. Their advisories are still in
+	// the database; only their date is not in the column. Printed only when
+	// there is one, frozen:'s rule.
+	if s := closedSummary(m.Providers); s != "" {
+		fmt.Fprintf(stdout, "closed:     %s\n", s)
 	}
 	fmt.Fprintln(stdout)
 

@@ -2386,7 +2386,9 @@ reason this can be honest. A mirror serving a six-month-old snapshot fetched an 
 a recent `BuiltAt` and an ancient `DataAsOf`, and judging by the former would call it fresh.
 D12 stored the two separately from the start for exactly this.
 
-**The age is the OLDEST provider's.** A database is only as fresh as its stalest source, and
+**The age is the OLDEST provider's** *(revised by D113: the oldest among the providers that
+declare a key the scanned inventory holds, and a frozen key is as old as its freeze)*. A
+database is only as fresh as its stalest source, and
 taking the newest would let one daily provider vouch for another that stopped updating in
 March. The error names which one, because "the data is old" leaves the reader to work out
 which feed died.
@@ -4413,6 +4415,68 @@ Registry-side controls — which hosts a target may name, DNS resolution to priv
 first request of a chain — stay with the deployment: the library already refuses redirects to
 private IP literals, and the rest needs a notion of "internal" only a deployment has
 (deferred-decisions, "Safe handling of externally supplied targets").
+
+---
+
+### D113 — Data age is judged for the keys a scan uses, a frozen key is as old as its freeze, and ratings get their own gate
+
+**Decision.** `--db-max-age` (D59) is revised in two ways and joined by a second flag; the
+provider that sets the published artifact's floor is corrected underneath them. (1) **Scope:**
+the age is the oldest `DataAsOf` among the providers that declare an ecosystem key the
+scanned inventory holds — D59's stalest-wins rule applied inside that set rather than across
+every provider in the database. A key no provider declares is not measured (D20 already
+reports it). (2) **Frozen:** a key `Provenance.Frozen` names is as old as its freeze, so inside
+that set a frozen key contributes `min(DataAsOf, frozenSince)`, and the refusal names the key
+and the freeze date. (3) **Ratings:** a new `--db-max-rating-age <duration>` exits 2 when the
+oldest `DataAsOf` among the rating sources (NVD, EPSS, KEV — the fold `db push` already
+performs for the artifact's `data-as-of` annotation) is older than the duration; off by
+default, and `--db-max-age` keeps D59's advisory-only meaning unchanged. A database with no
+rating source at all is refused under that flag too: its rating age is not fresh, it is
+absent, and nothing else in the scan would name the cause (D17's rule for silence). (4) **Amazon:** the
+provider's `DataAsOf` is the oldest among its *active* repositories; an extras topic whose
+updateinfo has published nothing for more than two years is *closed* and does not set the
+floor, while the core repository is never closed — if core stops, the floor falls, which is
+the failure D59 exists to catch. `db status` lists the closed topics. Neither flag gains a
+default (D59's reasoning stands), and the documentation for CI and service callers says to
+pass both.
+
+**Why.** The 2026-09-30 service review measured all three gaps against the published
+artifact. The global scope made the flag unusable: the artifact's floor is Amazon's
+2023-09-25 — one extras topic, `selinux-ng`, with a single lifetime advisory — so an Alpine
+scan with `--db-max-age 24h` exited 2 for a feed it never consulted. The Frozen blindness
+contradicted the store's own invariant ("a frozen key must not read as fresher than its
+data", D110): a key frozen a hundred days passed a 24-hour gate because the provider's
+`DataAsOf` was that morning's. And a service that promises "severity and exploitability no
+older than N" had no flag to enforce it, because D59 kept ratings out of `--db-max-age` for
+a reason that still holds — stale prose must not fail a build — which is why the answer is a
+second flag with its own scope rather than a wider first one.
+
+**Why the Amazon rule is not the hole D59 warned about.** D59's fear is a provider whose
+feed died vouched for by the others; here the provider is alive — its core repository was
+current within a day on every artifact measured — and the number is set by an add-on channel
+that finished, not failed. The 2026-08-27 investigation listed the six topics by name and
+found no advisory from any of them since the same date; a channel with one advisory in its
+lifetime is not a channel that will publish tomorrow. Two years is the line because the
+longest gap any *active* Amazon repository showed in that investigation was days, and
+because a rule that closes a channel after a year would have to reopen it on the first
+late advisory — at two years, reopening is the surprise, and a reopened topic simply counts
+again. Core is exempt by construction so the rule cannot be used to hide the one failure
+that matters.
+
+**Why a frozen key counts against the gate rather than beside it.** D110 and D111 disclose
+a frozen key and leave the exit code alone, because the default posture is to show the
+reader the age and let them judge. `--db-max-age` is the reader having judged: an operator
+who asked for data no older than a day has said what they think of a key frozen in August,
+and a scan of Debian 11 under that flag should exit 2 naming `Debian:11` and
+`2026-08-19` — which D111's `coverage[]` also prints — rather than pass on the provider's
+fresh-looking date. The operator who wants EOS images through a freshness gate sets the gate
+to the age they accept; a third flag for the same question is what D18's divergence table
+warns against, and D111 already declined one.
+
+**What stays out.** A per-key `DataAsOf` in the store (the Amazon core/extras split would
+still land on one key, so it would not have fixed the floor; it waits for a provider whose
+keys genuinely age at different rates). A recommended duration in the artifact's
+annotations. Enrichment age (D3's display copy, as D59 said).
 
 ---
 

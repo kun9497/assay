@@ -53,6 +53,13 @@ registry outside the org — add `--timeout <duration>` (D112): reads are alread
 but `--timeout` is what turns a pull or layer walk that simply will not finish into exit 2
 instead of a hung job.
 
+Add `--db-max-age <duration>` and `--db-max-rating-age <duration>` (D113) if the pipeline
+wants a freshness guarantee: neither flag defaults to anything, so a service or CI gate that
+cares has to name the age it accepts. `--db-max-age` judges only the ecosystem keys the
+scan's inventory actually uses and stays blind to ratings on purpose (D59); pass
+`--db-max-rating-age` separately to cover NVD/EPSS/KEV, since ratings are additive and get
+their own gate rather than widening the first one.
+
 This gate covers the image's operating-system packages. npm, Python, Java and Go
 dependencies installed inside the image are not inventoried by an image scan (D70,
 [deferred](deferred-decisions.md)), so a pass here says nothing about them — for those, gate

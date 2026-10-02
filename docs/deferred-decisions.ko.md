@@ -565,6 +565,15 @@ fallback으로 삼아 우회합니다. assay는 그 경험에서 값싼 예방 �
 
 ### 신선도 한 줄 요약과 죽은 Amazon extras topic 6개
 
+**2026-10-02에 D113으로 해결함.** Amazon provider의 `DataAsOf`는 이제 그 *활성(active)*
+저장소들 중 가장 오래된 것입니다: updateinfo가 2년 넘게 아무것도 발행하지 않은 extras
+topic은 closed로 치고 하한을 정하지 않으며, core 저장소는 결코 closed되지 않으므로
+core가 조용해지면 여전히 날짜를 끌어내립니다 — 이 stalest-wins 규칙이 애초에 잡으려는
+바로 그 실패입니다. `db status`는 어느 topic이 closed인지 나열합니다. 아래의
+2023-09-25 날짜는 `selinux-ng` 자신의 closed topic이었던 것이고, 죽은 extras topic
+여섯 개가 더 이상 하한을 정하지 않게 된 지금, 다음 nightly 빌드에서 아티팩트의
+`data-as-of`는 core 자신의 날짜로 옮겨갑니다.
+
 **2026-08-27에 조사함.** `assay db update`가 "upstream data as of 2023-09-25"를
 찍는 것은 결함이 아니라 '진짜' 데이터입니다: AL2 extras topic 6개(selinux-ng,
 ruby2.6, postgresql11, mono, httpd_modules, golang1.19)는 정확히 그 날짜 이후로

@@ -492,6 +492,14 @@ what tripped it (the path, the limit, or the flag) on stderr, because a truncate
 database reported as a smaller but complete inventory is exactly the untrustworthy result
 this exit code exists to catch.
 
+Since D113, `--db-max-age` (D59) is scoped: its oldest-`DataAsOf` check considers only the
+providers that declare an ecosystem key the scanned inventory actually holds, not every
+provider in the database, and a key `Provenance.Frozen` names counts as old as its freeze
+rather than as fresh as the provider's last run. A separate `--db-max-rating-age <duration>`
+gates NVD/EPSS/KEV staleness on request — D59 keeps ratings out of `--db-max-age` on purpose,
+so a second flag with its own scope answers for them instead of widening the first. Neither
+flag has a default.
+
 ## Architecture
 
 The pipeline is five interfaces. Each is independently testable, and supporting a new
@@ -702,6 +710,13 @@ exited 0 while 24 findings went unmentioned.
 - [x] SLES LTSS folded with a mainline-wins tie-break (D91) — post-EOL fixes surface
       under the same key (bci-base 121→286 findings, curl shows its real FIXED IN),
       385,621 shadowed twins dropped and counted
+- [x] Data age is judged for the keys a scan uses (D113) — `--db-max-age` folds only the
+      providers that declare an ecosystem key the inventory holds (D59's stalest-wins
+      inside that set), a frozen key counts as old as its freeze and the refusal names it,
+      and a new `--db-max-rating-age` gates NVD/EPSS/KEV age on request while
+      `--db-max-age` keeps its advisory-only meaning. The Amazon provider's floor is the
+      oldest ACTIVE repository: an extras topic silent for two years is closed and listed by
+      `db status`; core is never closed. Neither flag has a default.
 - [x] Every byte a scan reads from a target is bounded (D112) — each file read out of an
       image layer and each SBOM decoded passes through a 512 MiB limit (the jar cataloger's
       cap since D61), a scan stops past 2 GiB in total, and the layer walks honour the

@@ -156,6 +156,12 @@ type Options struct {
 	// number depends on how the caller runs `db update`, and inventing one
 	// here would be a policy nobody chose.
 	DBMaxAge time.Duration
+	// DBMaxRatingAge refuses a scan whose rating data (NVD, EPSS, KEV) is
+	// older than this (D113). A second flag rather than a wider DBMaxAge,
+	// because D59's reason for leaving ratings out of that one still holds:
+	// stale ratings must not fail a build that never asked about them. Zero
+	// disables it, the default, for DBMaxAge's own reason.
+	DBMaxRatingAge time.Duration
 	// Timeout is the --timeout the caller derived Run's context from (D112),
 	// carried so an expired deadline can be reported as the flag's, with its
 	// value. Run never applies it: the context is Run's own parameter and
@@ -589,8 +595,8 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 	}
 	defer db.Close()
 
-	// Read once, unconditionally: DBMaxAge below and the D87 EOL lookup
-	// further down both need it, and openReadOnly already proved this
+	// Read once, unconditionally: the age gates below and the D87 EOL lookup
+	// further down all need it, and openReadOnly already proved this
 	// exact read succeeds once before store.Open ever returns (its own doc
 	// comment) — there is no cheaper "only if a flag needs it" version that
 	// does not cost a second round trip through the same bucket.
@@ -603,8 +609,20 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 	// D59. Before matching, not after: a scan that will be refused for age
 	// should not spend the time, and a summary printed first would be a
 	// verdict from data the next line calls untrustworthy.
+	//
+	// D113: judged for the keys this inventory holds, which are known here
+	// because cataloging finished above — a provider the matcher will not
+	// consult for this target does not set the age it is judged by.
 	if opts.DBMaxAge > 0 {
-		if code := checkDBAge(m, opts.DBMaxAge, time.Now(), stderr); code != 0 {
+		if code := checkDBAge(m, scanKeys(inventory), opts.DBMaxAge, time.Now(), stderr); code != 0 {
+			return code
+		}
+	}
+	// D113. After the advisory check, so a scan failing both names the
+	// advisory age first — that is the one that can make a clean result
+	// untrustworthy; stale ratings only leave findings under-scored.
+	if opts.DBMaxRatingAge > 0 {
+		if code := checkRatingAge(m, opts.DBMaxRatingAge, time.Now(), stderr); code != 0 {
 			return code
 		}
 	}

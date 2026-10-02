@@ -104,7 +104,15 @@ Scan flags (any order, before or after the target):
   --db-max-age=<dur>    Exit 2 if the vulnerability data is older than <dur>
                         (24h, 168h). Measured from the UPSTREAM data, not from
                         when the database was built, so a mirror serving a stale
-                        snapshot does not read as fresh. Off by default.
+                        snapshot does not read as fresh, and only for the
+                        providers holding the scanned packages' ecosystems; a
+                        frozen ecosystem is as old as its freeze. Advisories
+                        only - ratings have the flag below. Off by default.
+  --db-max-rating-age=<dur>
+                        Exit 2 if the severity and exploit ratings (NVD, EPSS,
+                        KEV) are older than <dur>, measured the same way. Off
+                        by default; pass it with --db-max-age when a service
+                        promises how current both are.
   --timeout <dur>       Stop an image scan still fetching or reading its layers
                         after <dur> (10m, 1h), and exit 2. The layer reads
                         stop at the next file, not the end of the layer. Off
@@ -1164,28 +1172,31 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 
 		// D48. Beside --fail-on-unknown because it is the same shape of ask:
 		// a property of the finding that no severity threshold can express.
-		// D59. A duration, not a day count: CI cadences are not all daily,
-		// and Go's own parser already spells 36h and 7d-equivalent 168h
-		// without this inventing a unit.
+		// D59. parseMaxAge holds the rules both age gates share.
 		case strings.HasPrefix(a, "--db-max-age="):
-			v := strings.TrimPrefix(a, "--db-max-age=")
-			d, perr := time.ParseDuration(v)
-			if perr != nil {
-				return "", scancmd.Options{}, fmt.Errorf(
-					"--db-max-age: %q is not a duration (try 24h, 168h): %w", v, perr)
-			}
-			// Zero disables the check, so accepting it from the command line
-			// would make --db-max-age=0 look like a strict setting and be the
-			// opposite. A negative one is nonsense the same way.
-			if d <= 0 {
-				return "", scancmd.Options{}, fmt.Errorf(
-					"--db-max-age: %q must be positive; omit the flag to scan without the check", v)
+			d, err := parseMaxAge("--db-max-age", strings.TrimPrefix(a, "--db-max-age="))
+			if err != nil {
+				return "", scancmd.Options{}, err
 			}
 			opts.DBMaxAge = d
 
 		case a == "--db-max-age":
 			return "", scancmd.Options{}, fmt.Errorf(
 				"--db-max-age needs a duration, e.g. --db-max-age=48h")
+
+		// D113. Spelled and parsed exactly like --db-max-age beside it,
+		// through the same helper, so the two gates a service is told to pass
+		// together cannot drift apart in what they accept.
+		case strings.HasPrefix(a, "--db-max-rating-age="):
+			d, err := parseMaxAge("--db-max-rating-age", strings.TrimPrefix(a, "--db-max-rating-age="))
+			if err != nil {
+				return "", scancmd.Options{}, err
+			}
+			opts.DBMaxRatingAge = d
+
+		case a == "--db-max-rating-age":
+			return "", scancmd.Options{}, fmt.Errorf(
+				"--db-max-rating-age needs a duration, e.g. --db-max-rating-age=168h")
 
 		// D112. Both spellings, where --db-max-age takes only `=`: the
 		// decision writes this flag `--timeout <duration>`, so the form a
@@ -1343,6 +1354,24 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 			"--explain cannot be combined with --output %s: pick one renderer", opts.Output)
 	}
 	return target, opts, nil
+}
+
+// parseMaxAge reads an age gate's value (--db-max-age, D59; --db-max-rating-age,
+// D113). A duration, not a day count: CI cadences are not all daily, and Go's
+// own parser already spells 36h and the 7-day 168h without this inventing a
+// unit.
+func parseMaxAge(flag, v string) (time.Duration, error) {
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %q is not a duration (try 24h, 168h): %w", flag, v, err)
+	}
+	// Zero disables the check, so accepting it from the command line would
+	// make --db-max-age=0 look like a strict setting and be the opposite. A
+	// negative one is nonsense the same way.
+	if d <= 0 {
+		return 0, fmt.Errorf("%s: %q must be positive; omit the flag to scan without the check", flag, v)
+	}
+	return d, nil
 }
 
 // setTimeout validates a --timeout value and stores it on opts.Timeout, in

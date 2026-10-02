@@ -88,8 +88,27 @@ type Repo struct {
 	// error. Also what lets fetchRepo treat "repomd.xml names no updateinfo
 	// entry at all" (errNoUpdateinfo) as the same kind of legitimate zero,
 	// which 14 of those 28 topics take.
+	//
+	// It is also what makes a repo closable (D113): only an extras topic can
+	// be closed, so core -- and AL2023's fixed NVIDIA and kernel-livepatch
+	// entries, which are not topics -- always take part in the DataAsOf fold.
 	Extras bool
+	// Topic is the extras catalog's name for an Extras repo ("selinux-ng"),
+	// "" otherwise -- what Provenance.Closed lists, because the mirror.list
+	// URL is not a name a reader of `db status` would recognise.
+	Topic string
 }
+
+// closedAfter is how long an extras topic may publish nothing before it is
+// closed and stops setting the provider's DataAsOf (D113). Two years, because
+// the longest gap any ACTIVE Amazon repository showed in the 2026-08-27
+// investigation was days, while the six topics that set the floor had been
+// silent since 2023-09-25 -- one of them with a single lifetime advisory. A
+// shorter line would have to reopen a slow channel on its first late
+// advisory; at two years a reopening is the surprise, and a reopened topic
+// simply counts again. "More than": a topic exactly two years quiet still
+// counts.
+const closedAfter = 730 * 24 * time.Hour
 
 // DefaultRepos is AL2 and AL2023's CORE repos, unchanged since D73: 2,320 AL2
 // advisories and 2,010 AL2023 advisories measured 2026-08-19, both 100%
@@ -160,12 +179,17 @@ type Options struct {
 	// Progress is where the disclosure line and the fetch summary go, or nil
 	// for io.Discard.
 	Progress io.Writer
+	// Now is the fetch time an extras topic's age is measured from (D113),
+	// time.Now when nil. A test seam: fixture dates are fixed, and a closed
+	// topic is one more than two years older than the fetch.
+	Now func() time.Time
 }
 
 type Provider struct {
 	repos         []Repo
 	extrasBaseURL string
 	progress      io.Writer
+	now           func() time.Time
 	client        *http.Client
 }
 
@@ -182,10 +206,15 @@ func New(opts Options) *Provider {
 	if progress == nil {
 		progress = io.Discard
 	}
+	now := opts.Now
+	if now == nil {
+		now = time.Now
+	}
 	return &Provider{
 		repos:         repos,
 		extrasBaseURL: extrasBaseURL,
 		progress:      progress,
+		now:           now,
 		// Generous but bounded: two core repos, ~1.5 MB gzip each measured
 		// 2026-08-19, and up to 73 extras topics whose combined updateinfo is
 		// smaller still (most carry zero advisories) — this is a per-request
@@ -231,13 +260,19 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 			Ecosystem:     "Amazon Linux:2",
 			MirrorListURL: p.extrasMirrorListURL(topic),
 			Extras:        true,
+			Topic:         topic,
 		})
 	}
 
+	// Read once, before any repo: every topic's age is measured from the same
+	// instant, so a slow fetch cannot close a topic the first repo would
+	// have kept.
+	fetchedAt := p.now()
 	var st stats
 	st.ExtrasTopics = len(topics)
 	var sources []string
 	covered := map[string]bool{}
+	var closed map[string]time.Time
 	var asOf time.Time
 	haveAsOf := true
 	total := 0
@@ -289,6 +324,23 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 			haveAsOf = false
 			continue
 		}
+		// D113. A topic whose newest advisory is more than two years older
+		// than this fetch is a channel that finished, not a feed that died,
+		// and its date stays out of the fold: the 2026-08-27 investigation
+		// found six such topics setting the whole artifact's floor at
+		// 2023-09-25. Its advisories were emitted above all the same. Only
+		// an extras topic qualifies -- if core stops publishing, the floor
+		// must fall, because that is the failure --db-max-age exists to
+		// catch. Checked after the zero-date branch, so a topic with no
+		// date at all stays an unknown rather than reading as closed.
+		if r.Extras && fetchedAt.Sub(repoAsOf) > closedAfter {
+			if closed == nil {
+				closed = map[string]time.Time{}
+			}
+			closed[r.Topic] = repoAsOf
+			st.ExtrasClosedTopics++
+			continue
+		}
 		// The stalest repo wins (osv.Provider.Fetch's own reasoning, applied
 		// here across dozens of repos instead of many ecosystems): a
 		// database is only as fresh as its least current source, and
@@ -324,6 +376,7 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		DataAsOf:   asOf,
 		Records:    total,
 		Ecosystems: ecos,
+		Closed:     closed,
 	}, nil
 }
 
@@ -488,14 +541,20 @@ type stats struct {
 	ExtrasTopics             int
 	ExtrasZeroAdvisoryTopics int
 	ExtrasAdvisories         int
+	// ExtrasClosedTopics is how many topics D113 left out of the DataAsOf
+	// fold. Printed even at zero, so a build log says the rule ran and found
+	// nothing rather than leaving its absence to be inferred.
+	ExtrasClosedTopics int
 }
 
 func (s stats) String() string {
 	return fmt.Sprintf(
 		"%d updates -> %d advisories, %d package entries; skipped %d non-security, "+
 			"%d with no id, %d with no packages; %d advisories carried no recognized severity word; "+
-			"extras: %d topics enumerated, %d with zero advisories, %d advisories ingested",
+			"extras: %d topics enumerated, %d with zero advisories, %d advisories ingested, "+
+			"%d closed (no advisory in over %d days; not counted toward the data date)",
 		s.Updates, s.Advisories, s.Packages,
 		s.SkippedNonSecurity, s.SkippedNoID, s.SkippedNoPackages, s.UnrecognizedSeverity,
-		s.ExtrasTopics, s.ExtrasZeroAdvisoryTopics, s.ExtrasAdvisories)
+		s.ExtrasTopics, s.ExtrasZeroAdvisoryTopics, s.ExtrasAdvisories,
+		s.ExtrasClosedTopics, int(closedAfter.Hours()/24))
 }

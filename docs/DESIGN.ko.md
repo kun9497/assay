@@ -473,6 +473,15 @@ D112부터는 타깃이 상한 안에 머무르지 못했을 때도 같은 exit 
 더 작지만 완전한 인벤토리처럼 보고하는 것이야말로 이 종료 코드가 잡으려는 바로 그 신뢰할
 수 없는 결과이기 때문입니다.
 
+D113부터는 `--db-max-age`(D59)에 범위가 생깁니다: 가장 오래된 `DataAsOf`를 보는 검사는
+데이터베이스의 모든 provider가 아니라 스캔된 인벤토리가 실제로 가진 ecosystem 키를
+선언하는 provider만 봅니다. 그리고 `Provenance.Frozen`이 이름을 댄 키는 provider의
+마지막 실행만큼 신선한 것이 아니라 그 동결 시점만큼 오래된 것으로 칩니다. 별도의
+`--db-max-rating-age <duration>`이 요청 시 NVD/EPSS/KEV의 노후를 게이트합니다 —
+D59는 의도적으로 등급을 `--db-max-age`에서 뺐으므로, 첫 번째 플래그를 넓히는 대신
+자신만의 범위를 가진 두 번째 플래그가 그것을 대신 답합니다. 두 플래그 모두 기본값이
+없습니다.
+
 ## 아키텍처
 
 파이프라인은 다섯 개의 인터페이스입니다. 각각 독립적으로 테스트 가능하며, 새 생태계를 지원한다는
@@ -674,6 +683,13 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] SLES LTSS를 mainline-wins 동점 처리로 접음 (D91) — post-EOL fix가 같은 키
       아래서 드러남(bci-base finding 121→286건, curl이 진짜 FIXED IN을 보여줌),
       가려졌던 쌍둥이 385,621건을 버려서 셈
+- [x] 데이터 나이는 스캔이 쓰는 키들에 대해서만 판단된다 (D113) — `--db-max-age`는
+      인벤토리가 가진 ecosystem 키를 선언하는 provider만 접고(그 집합 안에서의 D59
+      stalest-wins), 동결된 키는 동결 시점만큼 오래된 것으로 세고 거부 메시지가 그 키를
+      이름으로 대며, 새 `--db-max-rating-age`가 요청 시 NVD/EPSS/KEV 나이를 게이트하는
+      동안 `--db-max-age`는 advisory 전용 의미를 그대로 유지한다. Amazon provider의
+      하한은 가장 오래된 ACTIVE 저장소다: 2년간 조용한 extras 토픽은 closed로 치고
+      `db status`가 나열하며, core는 결코 closed되지 않는다. 두 플래그 모두 기본값이 없다.
 - [x] 스캔이 타깃에서 읽는 모든 바이트는 상한이 있다 (D112) — 이미지 레이어에서 읽는
       각 파일과 디코드되는 각 SBOM이 512 MiB 한도(D61부터 jar cataloger가 써온 한도)를
       통과하고, 스캔은 전체 2 GiB를 넘기면 멈추며, 레이어 walk는 스캔의 context를
