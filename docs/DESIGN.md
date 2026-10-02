@@ -770,7 +770,7 @@ exited 0 while 24 findings went unmentioned.
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15
-- [x] The differential runs itself (D93) — weekly, 13 digest-pinned targets then, 23
+- [x] The differential runs itself (D93) — weekly, 13 digest-pinned targets then, 25
       today, against the published artifact, judged by committed floors (the tool now
       lives at `cmd/scandiff`, D105; stdlib-only); reading the ratings column revived two
       dead agreements (alma 0→106, oracle 0→37)
@@ -1173,11 +1173,31 @@ access → add the repository with Write*. Pushes carry `org.opencontainers.imag
 package created by the workflow links itself; one created by hand before that does not.
 
 Correctness is checked by **differential testing against grype and trivy** at every stage —
-since D93 on a weekly schedule, extended to trivy in D105 (`scanner-diff.yml`: 23
+since D93 on a weekly schedule, extended to trivy in D105 (`scanner-diff.yml`: 25
 digest-pinned targets, the published artifact, committed floors that trip on regression;
-16 targets also compare against trivy — the other 7 are distros trivy does not support).
+18 targets also compare against trivy — the other 7 are distros trivy does not support).
 Exact agreement is not expected — the data sources differ — but a large divergence means
-the matcher is wrong. Slice ① came out set-identical on both SBOMs it was run against:
+the matcher is wrong.
+
+**The nightly publish holds the same floors before it pushes (D114).** Between `db build`
+and `db push`, `db-publish.yml` points `ASSAY_DB_DIR` at the candidate and runs
+`scandiff -regressions-only` over the same targets and floors file: a `minAgree`,
+`minFindings`, `minComponents`, `maxNotEvaluated` or committed trivy-minimum breach, or an
+`ERROR` verdict, fails the job and nothing is pushed — the next nightly seeds from the last
+good artifact and tries again. That catches the D90 shape, matches moving while counts hold,
+which `db push`'s coverage guard cannot see. The ceilings (`maxFindings`) only print as
+`info:` lines there, because they trip on upstream growth that a human re-bands; the weekly
+run against the public artifact stays the one place they are judged. The same change gave the
+target list its first end-of-support releases, `debian:11` and `amazonlinux:2`, so a loss
+like `Debian:11`'s (D110) has a floor to trip. Their floors come from one measured run on
+2026-10-02 (the published v9 artifact, grype v0.116.1, trivy v0.74.0) at D93's 85% / 2x:
+`debian11` measured 216 assay tuples, 226 grype and 211 agreeing — grype's own Debian 11
+data had not degraded, so `minAgree` there is a real floor — and the same capture cut to
+D110's surviving share trips `minAgree`, `minFindings` and `trivy.minAgree` at once.
+`amazonlinux2` measured 17 / 17 / 17 over 106 components, so `minComponents` carries most
+of that target's weight.
+
+Slice ① came out set-identical on both SBOMs it was run against:
 
 | Target | assay | grype | missed | extra |
 |---|---:|---:|---:|---:|

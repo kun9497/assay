@@ -39,7 +39,24 @@ jobs:
     # on a developer machine the Red Hat pass alone is about 27 minutes, most
     # of it bbolt writing 1.9 million affected entries, and a hosted runner is
     # slower. 120 leaves room for that to grow without leaving room for a hang.
-    timeout-minutes: 120
+    #
+    # Raised to 150 for the D114 gate: the weekly differential over the same
+    # targets measures 9-12 minutes, so 150 keeps the headroom 120 had.
+    timeout-minutes: 150
+    env:
+      # D114. store.DefaultPath honours this, and `db build`, `db push` and
+      # `assay scan` all resolve the database through it, so the build, the
+      # gate and the push below see one file: the candidate the gate judges
+      # is the file `db push` packs, not a copy or a cache that could differ.
+      ASSAY_DB_DIR: ${{ github.workspace }}/.assay-db
+      # The gate runs grype: a scheduled job asking grype's CLI to check for
+      # its own updates is one more network call for no benefit to a run
+      # whose grype version is pinned in the setup-scanners action.
+      GRYPE_CHECK_FOR_APP_UPDATE: "false"
+      # trivy prints a one-time notice about its VEX handling on every
+      # invocation unless this is set; this workflow consumes no trivy VEX,
+      # so the notice would only repeat once per trivy target in the log.
+      TRIVY_DISABLE_VEX_NOTICE: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -62,6 +79,12 @@ jobs:
           restore-keys: |
             ubuntu-cve-tracker-
       - run: make build
+      - name: Build scandiff
+        run: go build -o ./bin/scandiff ./cmd/scandiff
+      # D114: the same pinned grype and trivy the weekly differential uses.
+      # Set up before the build, so a scanner that fails to install fails
+      # the job in a minute rather than after a thirty-minute build.
+      - uses: ./.github/actions/setup-scanners
       - name: Log in to ghcr.io
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
       - name: Resolve the artifact reference
@@ -113,5 +136,76 @@ jobs:
             fi
             exit 2
           fi
+      # D114. The candidate the Build step just wrote is scanned through
+      # scandiff against the weekly differential's targets and committed
+      # floors, so a database whose matches moved while its counts held --
+      # the D90 shape, which the #135 coverage guard in `db push` cannot see
+      # -- fails here instead of reaching the tag. -regressions-only skips
+      # the ceilings: a ceiling measures upstream growth, which a human
+      # re-bands on Monday and which must never stop new advisories from
+      # shipping. No retry: the next nightly seeds from the last GOOD
+      # artifact, since nothing past it was pushed, and tries again.
+      # A seed-input recovery build is gated the same way -- it reaches
+      # this step through the same Build step.
+      - name: Gate the candidate on the differential's regression floors (D114)
+        id: gate
+        run: |
+          set +e
+          # The shell opens the report redirect before scandiff's own
+          # MkdirAll ever runs, so the directory must exist first.
+          mkdir -p ./scanner-diff-capture
+          # Disk headroom on the nightly runner is unmeasured: this job now
+          # holds the seed, the candidate, the tracker spool, two scanner
+          # databases and 25 image pulls. Printed so the first gated run
+          # records the number instead of a human guessing it.
+          df -h . | tail -1
+          ./bin/scandiff -regressions-only \
+            -targets .github/scanner-diff-targets.json \
+            -assay ./bin/assay \
+            -grype ./bin/grype \
+            -trivy ./bin/trivy \
+            -capture ./scanner-diff-capture \
+            > ./scanner-diff-capture/report.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+      # Uploaded whether the gate held or not, the way the weekly run does:
+      # a breach is re-judged locally with
+      # `scandiff -targets ... -offline <capture> -regressions-only`.
+      # if-no-files-found: ignore, because a failed Build never reaches the
+      # gate and a missing capture must not add a second error to that run.
+      - name: Upload the gate's captures and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: promotion-gate-capture
+          path: ./scanner-diff-capture
+          retention-days: 30
+          if-no-files-found: ignore
+      - name: Publish the gate's report to the job log and summary
+        if: always()
+        # Same sentinels as scanner-diff.yml, unchanged, so the weekly
+        # review routine -- which reads job logs through the GitHub API and
+        # cannot reach the artifact's blob host -- can read either run.
+        run: |
+          if [ -f ./scanner-diff-capture/report.txt ]; then
+            echo "===SCANDIFF-REPORT-BEGIN==="
+            cat ./scanner-diff-capture/report.txt
+            echo "===SCANDIFF-REPORT-END==="
+            {
+              echo '## promotion gate (scanner differential, regressions only)'
+              echo '```'
+              cat ./scanner-diff-capture/report.txt
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "===SCANDIFF-REPORT-BEGIN==="
+            echo "(report.txt was not produced -- the gate step did not reach it)"
+            echo "===SCANDIFF-REPORT-END==="
+          fi
+      - name: Refuse to publish on a regression or an untrustworthy target
+        # `|| 2` fails closed: an empty output would make this a bare `exit`,
+        # which returns 0 and lets Publish run on a gate that never judged.
+        # The output is the string "0" on a pass, which is truthy, so a
+        # passing gate still exits 0.
+        run: exit ${{ steps.gate.outputs.exit_code || 2 }}
       - name: Publish
         run: ./bin/assay db push ${{ steps.ref.outputs.ref }}
