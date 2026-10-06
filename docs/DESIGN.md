@@ -1237,10 +1237,12 @@ enough metadata to recover a dependency list; Rust does only when built with
 `cargo-auditable`; stripped C/C++ leaves nothing reliable. Support is decided per language
 rather than promised as a category.
 
-Notable absences — Debian and RHEL support, VEX suppression, prebuilt database artifacts,
-database age enforcement — are deliberate.
+What is still absent — application packages inside container images (D70), pep440
+leniency, a lock on the database's `.tmp` writer — is deliberate.
 [`docs/deferred-decisions.md`](deferred-decisions.md) records what was postponed, why,
-what should trigger revisiting it, and which groundwork is already in place.
+what should trigger revisiting it, and which groundwork is already in place; most of its
+early entries (Debian and RHEL support, VEX, the prebuilt artifact, age enforcement) have
+since been built and are kept there as resolved, with the decision that closed each.
 
 ## Contributing
 
