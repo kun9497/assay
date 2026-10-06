@@ -1184,7 +1184,10 @@ and `db push`, `db-publish.yml` points `ASSAY_DB_DIR` at the candidate and runs
 `scandiff -regressions-only` over the same targets and floors file: a `minAgree`,
 `minFindings`, `minComponents`, `maxNotEvaluated` or committed trivy-minimum breach, or an
 `ERROR` verdict, fails the job and nothing is pushed — the next nightly seeds from the last
-good artifact and tries again. That catches the D90 shape, matches moving while counts hold,
+good artifact and tries again. An assay scan that exits 2 is re-run once first (revision of
+2026-10-06, after a registry `BLOB_UNKNOWN` transient refused a sound candidate): a target
+scan is idempotent, so the retry can only produce a result that was missing, never change
+one; a second exit 2 is the same `ERROR`. That catches the D90 shape, matches moving while counts hold,
 which `db push`'s coverage guard cannot see. The ceilings (`maxFindings`) only print as
 `info:` lines there, because they trip on upstream growth that a human re-bands; the weekly
 run against the public artifact stays the one place they are judged. The same change gave the
