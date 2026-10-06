@@ -79,11 +79,12 @@ page and the design/roadmap content moved to `docs/DESIGN.md`.)
 - `docs/superpowers/specs/2026-07-29-assay-roadmap.md` — the reference design. Every
   decision is recorded as `D1`…`D36` with its reasoning. Cite the decision ID when
   discussing one.
-- `docs/deferred-decisions.md` — **required before suggesting a feature.** Most obvious
-  gaps (Debian support, RHEL support, VEX, prebuilt database artifacts, database age
-  enforcement) are deliberate deferrals with recorded reasoning, a revisit trigger, and
-  groundwork already in place. It also lists known hazards and the unverified assumptions
-  the design rests on. Do not re-litigate an entry without new information; add to it when
+- `docs/deferred-decisions.md` — **required before suggesting a feature.** The obvious
+  gaps are either built already (Debian and RHEL support, VEX, the prebuilt artifact, age
+  enforcement — each entry stays, marked resolved by its D decision) or deliberate
+  deferrals with recorded reasoning, a revisit trigger, and groundwork already in place
+  (application packages inside images, pep440 leniency, the `.tmp` writer lock). It also
+  lists known hazards and the unverified assumptions the design rests on. Do not re-litigate an entry without new information; add to it when
   deferring something new.
 
 ## Commands

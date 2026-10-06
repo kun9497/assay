@@ -759,8 +759,9 @@ func replace(src, dst string) error {
 }
 
 // Status reports what is in the database and how current it is. It states
-// facts and does not judge staleness — age enforcement is deferred, and the
-// metadata it would need is already recorded.
+// facts and does not judge staleness: that judgement belongs to the scan,
+// where --db-max-age and --db-max-rating-age (D59, D113) read the same
+// Provenance this prints, scoped to the keys the scan actually uses.
 func Status(dbPath string, stdout, stderr io.Writer) int {
 	db, err := store.Open(dbPath)
 	if err != nil {

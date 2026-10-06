@@ -1389,7 +1389,16 @@ upstream changes start moving verdicts.
 
 ---
 
-### Database age enforcement
+### ~~Database age enforcement~~ — resolved in D59, revised by D113
+
+**Resolved as D59, then revised by D113 (2026-10-02).** `--db-max-age <duration>` exits 2
+when the oldest `DataAsOf` among the providers that declare a key the scanned inventory
+holds is older than the duration; a frozen key (D110) counts as old as its freeze; and
+`--db-max-rating-age` gates NVD/EPSS/KEV age separately, because D59's reason for keeping
+ratings out of the first flag still holds. Neither flag has a default — the threshold
+question below was answered by leaving it to the caller, which is what the service review
+asked for. The groundwork listed below is what made it one flag rather than a rebuild. The
+original entry follows as written.
 
 `assay db status` reports each provider's `DataAsOf` as a plain fact. Nothing warns, and
 nothing fails.
