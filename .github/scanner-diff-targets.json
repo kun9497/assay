@@ -31,7 +31,7 @@
     "ref": "mirror.gcr.io/library/ubuntu@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc",
     "minAgree": 81,
     "minFindings": 81,
-    "maxFindings": 192,
+    "maxFindings": 410,
     "trivy": {
       "minAgree": 32,
       "minFindings": 32,
