@@ -1141,7 +1141,10 @@ SUSE에서는 `--fail-on-unfixable`이 동작하지만 `=wont-fix`는 SUSE가 �
 파일로 `scandiff -regressions-only`를 실행합니다: `minAgree`, `minFindings`,
 `minComponents`, `maxNotEvaluated` 또는 커밋된 trivy 하한 위반, 혹은 `ERROR` 판정은
 job을 실패시키고 아무것도 push되지 않습니다 — 다음 야간이 마지막으로 정상이었던
-아티팩트에서 시드해 다시 시도합니다. 이것이 D90의 모양, 즉 개수는 유지된 채 매치가
+아티팩트에서 시드해 다시 시도합니다. exit 2로 끝난 assay 스캔은 먼저 한 번 다시
+실행됩니다(2026-10-06 개정, 레지스트리의 `BLOB_UNKNOWN` 일시적 오류가 멀쩡한 후보를
+거부한 뒤): 타깃 스캔은 멱등이므로 재시도는 없던 결과를 만들어 낼 수 있을 뿐 있던
+결과를 바꿀 수 없고, 두 번째 exit 2는 같은 `ERROR`입니다. 이것이 D90의 모양, 즉 개수는 유지된 채 매치가
 움직이는 경우를 잡는데, `db push`의 커버리지 가드는 그것을 보지 못합니다.
 ceiling(`maxFindings`)은 거기서 `info:` 줄로만 출력되는데, 사람이 다시 band하는
 upstream 성장에 걸리기 때문입니다; 공개 아티팩트에 대한 주간 실행이 ceiling을 판정하는

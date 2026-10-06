@@ -4525,9 +4525,29 @@ estimated; a measured run is also what tells whether grype's own Debian 11 data 
 same way, which would make `minAgree` on that target a weak floor and `minFindings` the one
 that matters.
 
-**What stays out.** No automatic re-band on a ceiling breach, and no automatic retry. The
-gate's failure is loud (the job fails, the capture is uploaded like the weekly's), and the
-remedy is a human reading the breach line. No gate on `db-backfill.yml`: a backfill is an
+**What stays out.** No automatic re-band on a ceiling breach, and no automatic retry of a
+*verdict* — a breach is final. The gate's failure is loud (the job fails, the capture is
+uploaded like the weekly's), and the remedy is a human reading the breach line.
+
+**Revised 2026-10-06 — one retry for an assay scan that exits 2.** The third gated nightly
+(2026-10-05, run 37318964276) was refused by the gate on no defect at all: `mirror.gcr.io`
+answered `BLOB_UNKNOWN` for one layer of `bitnami-legacy-pg`, assay exited 2 as D11 requires
+of an untrustworthy result, scandiff recorded the target as `ERROR`, and the publish stopped
+with a candidate that was fine. The same nightly saw the mirror refuse a trivy-db blob and
+recover on its own. The artifact was a day stale for a transient. So `scandiff` in live mode
+now re-runs an assay scan that exited 2 exactly once, after a short pause, and says so on
+stderr (`retry: target=<name> assay scan exited 2, retrying once`); a second exit 2 is the
+same `ERROR` as before. Only assay's exit 2 is retried: it is the one code that means "could
+not finish", and a target scan is read-only and idempotent, so repeating it cannot change
+what the gate measures — it can only let a result that was never produced be produced. A
+launch failure (`could not run`), an unexpected exit code, and malformed JSON are not
+transients and are not retried; grype's and trivy's hard failures are left as they were,
+because the gate's question is about assay's candidate and the comparison tools have their
+own caches — if a comparison-tool transient blocks a publish, that is the trigger to extend
+the retry to them, not a reason to pre-empt it. The weekly run gains the same retry, since
+it is the same code path. One retry rather than a budget, because the measured failure was
+a single blob on a single pull: the second attempt is what shows whether it was a
+transient, and a third would only mean the first two were not. No gate on `db-backfill.yml`: a backfill is an
 operator action with its own eyes on it. No second publish tag (`candidate`/`staging`): the
 gate makes the candidate pass before the one tag moves, which is the same guarantee with one
 fewer moving part.

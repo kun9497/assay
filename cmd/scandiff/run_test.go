@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1282,5 +1283,341 @@ func TestRun_Usage_MentionsRegressionsOnly(t *testing.T) {
 		if !strings.Contains(stderr.String(), want) {
 			t.Errorf("stderr = %q, want the usage to contain %q", stderr.String(), want)
 		}
+	}
+}
+
+// --- D114 revised (2026-10-06): one retry for an assay scan that exits 2 ----
+
+// TestMain stubs retryPause for the whole package. Several tests above drive an
+// assay exit 2, which now earns a retry, and the real pause would only add wall
+// clock -- the kind that once stood in for an assertion while D27 was built
+// (CLAUDE.md). A test that needs to see the pause installs its own via
+// observeRetryPause.
+func TestMain(m *testing.M) {
+	retryPause = func() {}
+	os.Exit(m.Run())
+}
+
+// execLog records what a seqFakeExec was asked to do: calls counts each
+// invocation by its exact (bin, args), and events keeps the order of scanner
+// calls and retry pauses, so a test can place the pause BETWEEN two attempts
+// rather than merely somewhere in the run.
+type execLog struct {
+	calls  map[string]int
+	events []string
+}
+
+func (l *execLog) count(bin string, args ...string) int {
+	return l.calls[bin+" "+strings.Join(args, " ")]
+}
+
+// newSeqFakeExec is newFakeExec with an assay response SEQUENCE per ref: the
+// n-th assay call for a ref gets assaySeq[ref][n]. A call past the end gets the
+// last entry again rather than failing the fixture, so an extra attempt shows
+// up as a call count the test asserts on -- the thing being tested -- instead
+// of as a t.Fatalf from inside the fake.
+func newSeqFakeExec(t *testing.T, assaySeq map[string][]stub, grypeStubs map[string]stub) (execFunc, *execLog) {
+	t.Helper()
+	log := &execLog{calls: map[string]int{}}
+	assayN := map[string]int{}
+	return func(bin string, args ...string) ([]byte, int, error) {
+		log.calls[bin+" "+strings.Join(args, " ")]++
+		if len(args) > 0 && args[0] == "scan" {
+			ref := args[1]
+			seq, ok := assaySeq[ref]
+			if !ok || len(seq) == 0 {
+				t.Fatalf("no assay stub sequence registered for ref %q (args=%v)", ref, args)
+			}
+			log.events = append(log.events, "assay "+ref)
+			i := min(assayN[ref], len(seq)-1)
+			assayN[ref]++
+			return seq[i].out, seq[i].code, seq[i].err
+		}
+		ref := args[0]
+		s, ok := grypeStubs[ref]
+		if !ok {
+			t.Fatalf("no grype stub registered for ref %q (args=%v)", ref, args)
+		}
+		log.events = append(log.events, "grype "+ref)
+		return s.out, s.code, s.err
+	}, log
+}
+
+// observeRetryPause replaces TestMain's no-op with one that records itself in
+// log's event order, and restores the no-op when the test ends.
+func observeRetryPause(t *testing.T, log *execLog) {
+	t.Helper()
+	prev := retryPause
+	retryPause = func() { log.events = append(log.events, "pause") }
+	t.Cleanup(func() { retryPause = prev })
+}
+
+// liveArgs is the live-mode argv every retry test uses: assay is "a", grype is
+// "g", so execLog.count can name an exact invocation.
+func liveArgs(targetsPath, captureDir string) []string {
+	return []string{"-targets", targetsPath, "-assay", "a", "-grype", "g", "-capture", captureDir}
+}
+
+// heldPair is one assay finding and the grype match that agrees with it, so a
+// target with MinAgree/MinFindings 1 holds on exactly these bytes.
+func heldPair(pkg, cve string) (assayBytes, grypeBytes []byte) {
+	return assayDoc(0, []assayFinding{{Package: assayPackage{Name: pkg}, Advisory: assayAdvisory{ID: "OSV-" + cve, Aliases: []string{cve}}}}),
+		grypeDoc([]grypeMatch{{Artifact: grypeArtifact{Name: pkg}, Vulnerability: grypeVuln{ID: cve}}})
+}
+
+// The measured case: the first pull hits a registry transient, assay exits 2,
+// the second attempt completes. The target must be judged on the second
+// result exactly as if it had been the first.
+func TestRun_Live_AssayExitTwoOnce_RetriedAndTrusted(t *testing.T) {
+	target := Target{Name: "blob-flake", Ref: "ref-blob-flake", MinAgree: 1, MinFindings: 1, MaxFindings: 5}
+	targetsPath := writeTargetsFile(t, []Target{target})
+	assayBytes, grypeBytes := heldPair("zlib", "CVE-2026-81001")
+	exec, log := newSeqFakeExec(t,
+		map[string][]stub{"ref-blob-flake": {{out: nil, code: 2}, {out: assayBytes, code: 0}}},
+		map[string]stub{"ref-blob-flake": {out: grypeBytes, code: 0}},
+	)
+
+	var stdout, stderr bytes.Buffer
+	got := run(liveArgs(targetsPath, t.TempDir()), &stdout, &stderr, exec)
+
+	if got != exitOK {
+		t.Fatalf("exit = %d, want %d -- a transient exit 2 followed by a clean scan is a trusted result (stderr=%q)", got, exitOK, stderr.String())
+	}
+	if f := rowFields(t, stdout.String(), "blob-flake"); f[len(f)-1] != "ok" || f[3] != "1" {
+		t.Errorf("row = %v, want verdict ok with AGREE 1 from the second attempt", f)
+	}
+	const retryLine = "retry: target=blob-flake assay scan exited 2, retrying once\n"
+	if n := strings.Count(stderr.String(), retryLine); n != 1 {
+		t.Errorf("stderr = %q, want exactly one %q", stderr.String(), retryLine)
+	}
+	if n := strings.Count(stderr.String(), "retry:"); n != 1 {
+		t.Errorf("stderr has %d retry lines, want 1 (stderr=%q)", n, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "error:") {
+		t.Errorf("stderr = %q, want no error line once the retry produced a result", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "retry") {
+		t.Errorf("stdout = %q, the retry line is a diagnostic and belongs on stderr", stdout.String())
+	}
+	if n := log.count("a", "scan", "ref-blob-flake", "--output", "json"); n != 2 {
+		t.Errorf("assay invoked %d times, want 2 (one attempt, one retry)", n)
+	}
+	if n := log.count("g", "ref-blob-flake", "-o", "json"); n != 1 {
+		t.Errorf("grype invoked %d times, want 1 -- only assay's exit 2 is retried", n)
+	}
+}
+
+// A second exit 2 is the same ERROR the target always got: the retry can
+// supply a missing result, never excuse one. And exactly one retry -- a third
+// attempt would only mean the first two were not transients.
+func TestRun_Live_AssayExitTwoTwice_StillError(t *testing.T) {
+	target := Target{Name: "blob-dead", Ref: "ref-blob-dead"}
+	targetsPath := writeTargetsFile(t, []Target{target})
+	exec, log := newSeqFakeExec(t,
+		map[string][]stub{"ref-blob-dead": {{out: nil, code: 2}, {out: nil, code: 2}}},
+		map[string]stub{"ref-blob-dead": {out: grypeDoc(nil), code: 0}},
+	)
+
+	var stdout, stderr bytes.Buffer
+	got := run(liveArgs(targetsPath, t.TempDir()), &stdout, &stderr, exec)
+
+	if got != exitError {
+		t.Fatalf("exit = %d, want %d (stderr=%q)", got, exitError, stderr.String())
+	}
+	if f := rowFields(t, stdout.String(), "blob-dead"); f[len(f)-1] != "ERROR" {
+		t.Errorf("row = %v, want verdict ERROR", f)
+	}
+	errOut := stderr.String()
+	retryAt := strings.Index(errOut, "retry: target=blob-dead assay scan exited 2, retrying once\n")
+	errorAt := strings.Index(errOut, "error: target=blob-dead assay scan exited 2 (untrustworthy result)\n")
+	if retryAt < 0 || errorAt < 0 || retryAt > errorAt {
+		t.Errorf("stderr = %q, want the retry line and THEN the error line (retry at %d, error at %d)", errOut, retryAt, errorAt)
+	}
+	if n := strings.Count(errOut, "retry:"); n != 1 {
+		t.Errorf("stderr has %d retry lines, want 1 (stderr=%q)", n, errOut)
+	}
+	if n := log.count("a", "scan", "ref-blob-dead", "--output", "json"); n != 2 {
+		t.Errorf("assay invoked %d times, want exactly 2", n)
+	}
+}
+
+// A launch failure is not a transient: the binary is missing or not
+// executable, and running it again changes nothing. The second entry in the
+// sequence is a clean scan so that retrying here would flip the verdict too,
+// not only the count.
+func TestRun_Live_AssayCouldNotRun_NotRetried(t *testing.T) {
+	target := Target{Name: "launch-fail", Ref: "ref-launch-fail"}
+	targetsPath := writeTargetsFile(t, []Target{target})
+	exec, log := newSeqFakeExec(t,
+		map[string][]stub{"ref-launch-fail": {{out: nil, code: -1, err: errors.New("exec: no such file")}, {out: assayDoc(0, nil), code: 0}}},
+		map[string]stub{"ref-launch-fail": {out: grypeDoc(nil), code: 0}},
+	)
+
+	var stdout, stderr bytes.Buffer
+	got := run(liveArgs(targetsPath, t.TempDir()), &stdout, &stderr, exec)
+
+	if got != exitError {
+		t.Fatalf("exit = %d, want %d (stderr=%q)", got, exitError, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "error: target=launch-fail assay: could not run: exec: no such file") {
+		t.Errorf("stderr = %q, want the could-not-run reason", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "retry:") {
+		t.Errorf("stderr = %q, want no retry for a launch failure", stderr.String())
+	}
+	if n := log.count("a", "scan", "ref-launch-fail", "--output", "json"); n != 1 {
+		t.Errorf("assay invoked %d times, want 1", n)
+	}
+}
+
+// An exit code outside assay's contract is a wrapper or a kill, not "could
+// not finish" -- only 2 means that. Same clean second entry as above.
+func TestRun_Live_AssayUnexpectedCode_NotRetried(t *testing.T) {
+	target := Target{Name: "odd-exit", Ref: "ref-odd-exit"}
+	targetsPath := writeTargetsFile(t, []Target{target})
+	exec, log := newSeqFakeExec(t,
+		map[string][]stub{"ref-odd-exit": {{out: nil, code: 3}, {out: assayDoc(0, nil), code: 0}}},
+		map[string]stub{"ref-odd-exit": {out: grypeDoc(nil), code: 0}},
+	)
+
+	var stdout, stderr bytes.Buffer
+	got := run(liveArgs(targetsPath, t.TempDir()), &stdout, &stderr, exec)
+
+	if got != exitError {
+		t.Fatalf("exit = %d, want %d (stderr=%q)", got, exitError, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "error: target=odd-exit assay scan exited unexpected code 3") {
+		t.Errorf("stderr = %q, want the unexpected-code reason", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "retry:") {
+		t.Errorf("stderr = %q, want no retry for an unexpected exit code", stderr.String())
+	}
+	if n := log.count("a", "scan", "ref-odd-exit", "--output", "json"); n != 1 {
+		t.Errorf("assay invoked %d times, want 1", n)
+	}
+}
+
+// The revision retries assay only: the gate's question is about assay's
+// candidate, and a comparison-tool transient that blocks a publish is the
+// trigger to extend the retry, not a reason to pre-empt it.
+func TestRun_Live_GrypeHardFailure_NotRetried(t *testing.T) {
+	target := Target{Name: "grype-down", Ref: "ref-grype-down"}
+	targetsPath := writeTargetsFile(t, []Target{target})
+	exec, log := newSeqFakeExec(t,
+		map[string][]stub{"ref-grype-down": {{out: assayDoc(0, nil), code: 0}}},
+		map[string]stub{"ref-grype-down": {out: nil, code: 1}},
+	)
+
+	var stdout, stderr bytes.Buffer
+	got := run(liveArgs(targetsPath, t.TempDir()), &stdout, &stderr, exec)
+
+	if got != exitError {
+		t.Fatalf("exit = %d, want %d (stderr=%q)", got, exitError, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "grype hard failure (exit 1)") {
+		t.Errorf("stderr = %q, want the grype hard-failure reason", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "retry:") {
+		t.Errorf("stderr = %q, want no retry for a grype failure", stderr.String())
+	}
+	if n := log.count("g", "ref-grype-down", "-o", "json"); n != 1 {
+		t.Errorf("grype invoked %d times, want 1", n)
+	}
+	if n := log.count("a", "scan", "ref-grype-down", "--output", "json"); n != 1 {
+		t.Errorf("assay invoked %d times, want 1", n)
+	}
+}
+
+// The pause is what gives a registry transient time to clear; it must sit
+// between the two attempts, happen once, and never happen for a scan that did
+// not need a retry -- a pause on every target would add minutes to every
+// nightly for nothing.
+func TestRun_Live_RetryPauseIsCalledOnceBetweenAttempts(t *testing.T) {
+	t.Run("exit 0 never pauses", func(t *testing.T) {
+		target := Target{Name: "steady", Ref: "ref-steady", MinAgree: 1, MinFindings: 1, MaxFindings: 5}
+		targetsPath := writeTargetsFile(t, []Target{target})
+		assayBytes, grypeBytes := heldPair("bzip2", "CVE-2026-82002")
+		exec, log := newSeqFakeExec(t,
+			map[string][]stub{"ref-steady": {{out: assayBytes, code: 0}}},
+			map[string]stub{"ref-steady": {out: grypeBytes, code: 0}},
+		)
+		observeRetryPause(t, log)
+
+		var stdout, stderr bytes.Buffer
+		if got := run(liveArgs(targetsPath, t.TempDir()), &stdout, &stderr, exec); got != exitOK {
+			t.Fatalf("exit = %d, want %d (stderr=%q)", got, exitOK, stderr.String())
+		}
+		want := []string{"assay ref-steady", "grype ref-steady"}
+		if !slices.Equal(log.events, want) {
+			t.Errorf("events = %v, want %v (no pause)", log.events, want)
+		}
+	})
+	t.Run("exit 2 then 0 pauses once between the attempts", func(t *testing.T) {
+		target := Target{Name: "flaky-pull", Ref: "ref-flaky-pull", MinAgree: 1, MinFindings: 1, MaxFindings: 5}
+		targetsPath := writeTargetsFile(t, []Target{target})
+		assayBytes, grypeBytes := heldPair("xz-utils", "CVE-2026-83003")
+		exec, log := newSeqFakeExec(t,
+			map[string][]stub{"ref-flaky-pull": {{out: nil, code: 2}, {out: assayBytes, code: 0}}},
+			map[string]stub{"ref-flaky-pull": {out: grypeBytes, code: 0}},
+		)
+		observeRetryPause(t, log)
+
+		var stdout, stderr bytes.Buffer
+		if got := run(liveArgs(targetsPath, t.TempDir()), &stdout, &stderr, exec); got != exitOK {
+			t.Fatalf("exit = %d, want %d (stderr=%q)", got, exitOK, stderr.String())
+		}
+		want := []string{"assay ref-flaky-pull", "pause", "assay ref-flaky-pull", "grype ref-flaky-pull"}
+		if !slices.Equal(log.events, want) {
+			t.Errorf("events = %v, want %v", log.events, want)
+		}
+	})
+}
+
+// The capture is what a human re-judges from when the gate fails, so it must
+// hold the attempt the verdict was computed from -- the last one -- not the
+// output of a pull that never finished.
+func TestRun_Live_CaptureHoldsTheRetriedAttempt(t *testing.T) {
+	target := Target{Name: "capture-last", Ref: "ref-capture-last", MinAgree: 1, MinFindings: 1, MaxFindings: 5}
+	targetsPath := writeTargetsFile(t, []Target{target})
+	firstBytes := []byte(`{"attempt":"first-incomplete"}`)
+	secondBytes, grypeBytes := heldPair("libpng", "CVE-2026-84004")
+	exec, _ := newSeqFakeExec(t,
+		map[string][]stub{"ref-capture-last": {{out: firstBytes, code: 2}, {out: secondBytes, code: 0}}},
+		map[string]stub{"ref-capture-last": {out: grypeBytes, code: 0}},
+	)
+
+	captureDir := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	if got := run(liveArgs(targetsPath, captureDir), &stdout, &stderr, exec); got != exitOK {
+		t.Fatalf("exit = %d, want %d (stderr=%q)", got, exitOK, stderr.String())
+	}
+	captured, err := os.ReadFile(filepath.Join(captureDir, "capture-last.assay.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(captured, secondBytes) {
+		t.Errorf("capture = %q, want the second attempt's bytes %q", captured, secondBytes)
+	}
+}
+
+// Offline mode replays a capture and launches nothing, so there is nothing to
+// retry and retryPause must never run there.
+func TestRun_Offline_NeverPauses(t *testing.T) {
+	target := Target{Name: "replayed", Ref: "unused-in-offline-mode"}
+	targetsPath := writeTargetsFile(t, []Target{target})
+	dir := t.TempDir()
+	writeOffline(t, dir, map[string][]byte{
+		"replayed.assay.json": assayDoc(0, nil),
+		"replayed.grype.json": grypeDoc(nil),
+	})
+	log := &execLog{calls: map[string]int{}}
+	observeRetryPause(t, log)
+
+	var stdout, stderr bytes.Buffer
+	if got := run([]string{"-targets", targetsPath, "-offline", dir}, &stdout, &stderr, noExec(t)); got != exitOK {
+		t.Fatalf("exit = %d, want %d (stderr=%q)", got, exitOK, stderr.String())
+	}
+	if len(log.events) != 0 || strings.Contains(stderr.String(), "retry:") {
+		t.Errorf("events = %v, stderr = %q, want no pause and no retry line offline", log.events, stderr.String())
 	}
 }
