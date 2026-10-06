@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"text/tabwriter"
+	"time"
 )
 
 // Exit codes, same 2 > 1 > 0 precedence as assay's own CLI contract
@@ -47,8 +48,9 @@ Exit codes:
   0  every target held its floors
   1  a floor was breached (regression signal)
   2  a target could not be run, or its result could not be trusted
-     (an assay scan that exited 2, a grype or trivy hard failure, malformed
-     JSON, or an unreadable/invalid targets file)
+     (an assay scan that still exited 2 after live mode's one retry, a
+     grype or trivy hard failure, malformed JSON, or an unreadable/invalid
+     targets file)
 
 A target's trivy block with every floor at zero ("trivy": {}) is
 INFORMATIONAL, not a committed floor: scandiff measures and prints the
@@ -66,6 +68,17 @@ them.
 // at all (binary missing, permission denied) -- a nonzero exit from a
 // process that DID run is reported via exitCode, not err.
 type execFunc func(bin string, args ...string) (out []byte, exitCode int, err error)
+
+// retryPause is the wait between an assay scan that exited 2 and its one
+// retry (D114, revised 2026-10-06), held in a variable for the same reason as
+// dbcmd's carryNow: a test replaces it with a no-op, or with one that records
+// when it ran, so the suite neither sleeps nor has to guess whether the pause
+// sat between the two attempts. Five seconds is sized to the measured case,
+// not tuned: enough to stop the retry landing on the very same momentary
+// registry state, short against a gate that already spends minutes per
+// target. If a transient outlasts it, that is new information for D114, not
+// a reason to grow the number unasked.
+var retryPause = func() { time.Sleep(5 * time.Second) }
 
 // row is one line of the summary table written to stdout.
 type row struct {
@@ -141,7 +154,7 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 		var fatal string
 
 		if live {
-			assayRaw, grypeRaw, fatal = scanLive(execScan, *assayBin, *grypeBin, t)
+			assayRaw, grypeRaw, fatal = scanLive(execScan, *assayBin, *grypeBin, t, stderr)
 			writeCapture(stderr, *captureDir, t.Name, "assay", assayRaw)
 			writeCapture(stderr, *captureDir, t.Name, "grype", grypeRaw)
 		} else {
@@ -227,8 +240,8 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 // even if the first already failed: D93's -capture directory exists so a
 // human can re-judge a failed target locally, and that needs whatever
 // either side produced, not just the one that failed first.
-func scanLive(execScan execFunc, assayBin, grypeBin string, t Target) (assayRaw, grypeRaw []byte, fatal string) {
-	assayRaw, assayFatal := runAssay(execScan, assayBin, t)
+func scanLive(execScan execFunc, assayBin, grypeBin string, t Target, stderr io.Writer) (assayRaw, grypeRaw []byte, fatal string) {
+	assayRaw, assayFatal := runAssay(execScan, assayBin, t, stderr)
 	grypeRaw, grypeFatal := runGrype(execScan, grypeBin, t)
 	switch {
 	case assayFatal != "" && grypeFatal != "":
@@ -245,8 +258,29 @@ func scanLive(execScan execFunc, assayBin, grypeBin string, t Target) (assayRaw,
 // scan completed and its result can be trusted (D93's own framing of
 // assay's exit contract); only exit 2 -- or a failure to even launch --
 // makes this target's result untrustworthy.
-func runAssay(execScan execFunc, bin string, t Target) (out []byte, fatal string) {
-	out, code, err := execScan(bin, "scan", t.Ref, "--output", "json")
+//
+// An exit 2 is run once more before it is believed (D114, revised
+// 2026-10-06). A target scan is read-only and idempotent against the same
+// candidate database, so a second attempt cannot change what the gate
+// measures; it can only produce a result the first attempt never finished.
+// Exit 2 is the one code that means "could not finish" -- a launch failure,
+// an unexpected code or malformed JSON is not a transient, and running it
+// again would only repeat it, so none of those is retried. One retry, not a
+// budget: the measured failure (2026-10-05, mirror.gcr.io answering
+// BLOB_UNKNOWN for one layer) was a single blob on a single pull, so the
+// second attempt is what tells a transient from a fault, and a third would
+// only mean the first two were not transients. The second attempt's result
+// is then used exactly as the first's would have been -- its output too,
+// which is what run writes to the capture, so a human re-judging the target
+// reads the bytes the verdict came from.
+func runAssay(execScan execFunc, bin string, t Target, stderr io.Writer) (out []byte, fatal string) {
+	args := []string{"scan", t.Ref, "--output", "json"}
+	out, code, err := execScan(bin, args...)
+	if err == nil && code == exitError {
+		fmt.Fprintf(stderr, "retry: target=%s assay scan exited 2, retrying once\n", t.Name)
+		retryPause()
+		out, code, err = execScan(bin, args...)
+	}
 	if err != nil {
 		return out, fmt.Sprintf("assay: could not run: %v", err)
 	}

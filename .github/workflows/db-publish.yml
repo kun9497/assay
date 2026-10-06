@@ -143,8 +143,12 @@ jobs:
       # -- fails here instead of reaching the tag. -regressions-only skips
       # the ceilings: a ceiling measures upstream growth, which a human
       # re-bands on Monday and which must never stop new advisories from
-      # shipping. No retry: the next nightly seeds from the last GOOD
-      # artifact, since nothing past it was pushed, and tries again.
+      # shipping. An assay scan that exits 2 is retried once inside
+      # scandiff (the 2026-10-06 revision, after a mirror.gcr.io
+      # BLOB_UNKNOWN transient refused a sound candidate). A target that
+      # fails twice, or any breach, still stops the publish with no further
+      # retry: the next nightly seeds from the last GOOD artifact, since
+      # nothing past it was pushed, and tries again.
       # A seed-input recovery build is gated the same way -- it reaches
       # this step through the same Build step.
       - name: Gate the candidate on the differential's regression floors (D114)
