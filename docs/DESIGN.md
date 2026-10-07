@@ -710,6 +710,10 @@ exited 0 while 24 findings went unmentioned.
 - [x] SLES LTSS folded with a mainline-wins tie-break (D91) — post-EOL fixes surface
       under the same key (bci-base 121→286 findings, curl shows its real FIXED IN),
       385,621 shadowed twins dropped and counted
+- [x] One database writer at a time (D116) — `db build` and `db update` take an OS file
+      lock on `<dbPath>.lock` (flock / LockFileEx via `x/sys`) before touching
+      `<dbPath>.tmp` and hold it through the rename; a second writer exits 2 at once naming
+      the lock; readers never look at it; a crashed writer releases it by dying.
 - [x] A provider declares an upstream key rename (D115) — `Provenance.Renamed` from a
       static table in the provider (`Echo:PyPi` → `Echo:PyPI` first); the carry-forward
       does not freeze a declared-renamed key whose successor is live, and the publish guard

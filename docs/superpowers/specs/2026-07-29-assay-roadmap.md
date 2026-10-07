@@ -4629,6 +4629,56 @@ retirement would not, and that is the line.
 
 ---
 
+### D116 — One database writer at a time: a lock beside the database, held by the operating system, refused rather than waited for
+
+**Decision.** Every command that writes the database — `db build` (`dbcmd.Update`) and
+`db update` (`dbcmd.Pull`) — takes an exclusive lock on `<dbPath>.lock` before it touches
+`<dbPath>.tmp`, and holds it until the rename over the live database has happened or
+failed. The lock is the operating system's own file lock (`flock` on Unix,
+`LockFileEx` on Windows through `golang.org/x/sys`, already a direct dependency since
+D107), so a writer that crashes releases it without cleanup and no stale lock can ever
+outlive its process. A second writer that cannot take the lock does not wait: it exits 2
+at once, naming the lock file and saying another writer holds it. Readers are untouched —
+a scan opens the database read-only and never looks at the lock. `PullSeed` is untouched
+too: it already writes into a private temporary directory. The temp name stays
+`<dbPath>.tmp`; under the lock nothing else can be writing it, and a `.tmp` a crashed
+writer left behind is removed by the next one exactly as today.
+
+**Why.** Two writers pointed at one `ASSAY_DB_DIR` used the same temporary filename with no
+lock between them (deferred-decisions, "Concurrent `db build` and `db update` writers
+share `<dbPath>.tmp`"), and every traced outcome was quiet: whichever process renamed last
+won, and the loser printed its own success line; on Linux the second writer's `os.Remove`
+could unlink a file the first was still filling; on Windows that remove fails silently and
+the second writer's `bolt.Open` then waits on the first's lock with no timeout — forever.
+Scans stayed fail-closed throughout (`ErrIncomplete` refuses a database with no metadata
+record), so no wrong result was ever read; what was at risk was a thirty-minute build
+discarded without a word, or a process that never returns. A lock the OS holds closes all
+three paths with one mechanism: a writer that cannot take it never reaches the temp file,
+and a writer that dies leaves nothing for the next one to interpret.
+
+**Why refuse rather than wait.** A build runs for half an hour or more. A second process
+that quietly queued behind it would look hung for exactly as long as the first takes, and
+the operator who started it would have no way to tell that from the Windows deadlock this
+decision removes. A refusal that names the lock file and the holder is something a person
+or a CI step can act on in a second; if a use ever needs queuing, a `--wait` flag is a
+later, smaller decision than a default that blocks.
+
+**Why not a lock file created `O_EXCL`.** It is pure standard library, and it leaves a
+lock behind whenever its holder crashes. Every remedy for that — a pid written inside and
+checked for liveness, an age after which the lock is presumed dead — is a second rule
+whose failure mode is the first problem back: two writers racing because one of them
+decided the other's lock was stale. The OS lock has no such rule because it has no such
+state. Why not a unique temp name per process: under the lock there is no second writer
+to collide with, and the one case a unique name helps — a crashed writer's leftover —
+is already handled by the remove at the start of every run.
+
+**What stays out.** No lock for readers (a scan's read-only open needs none and must never
+wait on a build). No cross-machine lock: a shared filesystem between two machines is a
+deployment the project has never run, and file locks on network filesystems are their own
+problem; the lock documents its scope as one machine. No `--wait`.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes
