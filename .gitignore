@@ -9,7 +9,9 @@
 # Test / coverage
 *.test
 *.out
-coverage.*
+# Anchored for the reason at the top: a bare "coverage.*" also ignored any
+# coverage.go source file at any depth, internal/report/ included.
+/coverage.*
 
 # Local vulnerability DB and scan artifacts
 /.assay/

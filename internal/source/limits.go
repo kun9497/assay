@@ -12,8 +12,9 @@ import (
 // about in a bug report (D112, "What stays out").
 
 // MaxFileBytes is the most decompressed bytes a scan reads out of any one
-// file. 512 MiB is the cap the jar cataloger has lived with since D61
-// (jar.go maxEntrySize), and the largest legitimate reads this path makes —
+// file. 512 MiB is the cap the jar cataloger has lived with since D61 — and
+// since D112's 2026-10-07 revision it reads this variable, for a jar archive
+// and for each entry in it — and the largest legitimate reads this path makes —
 // an rpm Berkeley DB Packages file on a big enterprise image, a full Ubuntu's
 // dpkg status, a large image's SBOM — sit an order of magnitude below it.
 //

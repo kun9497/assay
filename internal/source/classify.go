@@ -20,8 +20,8 @@ import (
 // A bare path is now decided by CONTENT: directory, then Go binary, then jar,
 // then an SBOM (CycloneDX or SPDX, D84). Each test is cheap — buildinfo reads
 // a header and fails immediately on anything that is not a Go binary,
-// looksLikeJar reads four magic bytes before opening the central directory,
-// and each SBOM test reads a 512-byte prefix before falling back to a
+// looksLikeJar reads four magic bytes and checks the size before opening the
+// central directory, and each SBOM test reads a 512-byte prefix before falling back to a
 // streaming scan for its own top-level key.
 //
 // The five are mutually exclusive on any real input, so their order is not
@@ -44,12 +44,14 @@ import (
 //
 // A file matching none of them is an error naming all five and the prefixes
 // that override them, never a silent fallthrough to whichever branch happens
-// to be last — which is what produced "malformed JSON" for a binary. The one
-// exception is a file the SBOM sniffs stopped reading at D112's per-file
-// limit before they could tell: that error is the limit's, in the words an
-// image's file and a decoded SBOM get, because the file may well be an SBOM
-// and no prefix would get it scanned — sbom: reaches decodeSBOM's refusal of
-// the same file.
+// to be last — which is what produced "malformed JSON" for a binary. The two
+// exceptions are files a sniff stopped short of at D112's per-file limit
+// before it could tell: an archive past the limit that looksLikeJar would have
+// had to open, and a file the SBOM sniffs stopped reading at the limit. Either
+// error is the limit's, in the words an image's file and a decoded SBOM get,
+// because the file may well be what the sniff was looking for and no prefix
+// would get it scanned — jar: reaches jar.Parse's refusal of the same file,
+// sbom: decodeSBOM's.
 //
 // It returns the kind and the path with any file: / dir: / sbom: prefix
 // stripped. The image prefixes are returned INTACT, because Open parses them
@@ -88,8 +90,15 @@ func Classify(target string) (TargetKind, string, error) {
 	if _, err := buildinfo.ReadFile(target); err == nil {
 		return TargetGoBinary, target, nil
 	}
-	if looksLikeJar(target) {
+	isJar, jarHitLimit := looksLikeJar(target)
+	if isJar {
 		return TargetJar, target, nil
+	}
+	// A ZIP past the limit is refused here rather than handed on to the SBOM
+	// sniffs: it starts with the zip magic, so it cannot be JSON, and they
+	// would read up to the limit of it only to say so.
+	if jarHitLimit {
+		return 0, "", FileLimitError(target)
 	}
 	isCycloneDX, cdxHitLimit := fileHasTopLevelKey(target, "bomFormat")
 	if isCycloneDX {
@@ -122,7 +131,9 @@ func Classify(target string) (TargetKind, string, error) {
 var jarMagic = []byte{0x50, 0x4b, 0x03, 0x04}
 
 // looksLikeJar reports whether target looks like a Java archive (D70): ZIP
-// magic, AND either a .jar/.war name or a META-INF/ entry inside it.
+// magic, AND either a .jar/.war name or a META-INF/ entry inside it — and,
+// when it cannot say, whether that is because the archive is past D112's
+// per-file limit (hitLimit), the fileHasTopLevelKey precedent.
 //
 // Neither signal alone is enough. The name alone would misclassify an
 // ordinary .zip that happens to be named "release.jar" by something that is
@@ -131,43 +142,60 @@ var jarMagic = []byte{0x50, 0x4b, 0x03, 0x04}
 // jar and war are themselves just the ZIP format with different intended
 // contents. META-INF/ is the one thing every real jar carries — at minimum
 // a MANIFEST.MF — that a plain zip does not.
-func looksLikeJar(target string) bool {
+//
+// The name check comes before the size check on purpose. A .jar or .war past
+// the limit is still classified as a jar: the name settles it without any
+// open, and jar.Parse — which every jar target reaches, jar: prefix or not —
+// refuses the same file with the same FileLimitError. Refusing it here as
+// well would be a second copy of a check jar.Parse cannot drop anyway, and
+// the user sees the limit's sentence once either way.
+func looksLikeJar(target string) (isJar, hitLimit bool) {
 	f, err := os.Open(target)
 	if err != nil {
-		return false
+		return false, false
 	}
 	defer f.Close()
 
 	var head [4]byte
 	if _, err := io.ReadFull(f, head[:]); err != nil {
-		return false
+		return false, false
 	}
 	if !bytes.Equal(head[:], jarMagic) {
-		return false
+		return false, false
 	}
 
 	lower := strings.ToLower(target)
 	if strings.HasSuffix(lower, ".jar") || strings.HasSuffix(lower, ".war") {
-		return true
+		return true, false
 	}
 
-	// The name did not settle it — open the central directory and look for a
-	// META-INF/ entry. zip.OpenReader re-reads the file from the start (it
-	// does not reuse f, which has already consumed 4 bytes), which is fine:
-	// this path is only reached for a file that already passed the magic-byte
-	// check above, so the extra open is not paid by every random file on the
-	// classifier's most common (non-jar) inputs.
-	zr, err := zip.OpenReader(target)
+	// The name did not settle it — look for a META-INF/ entry in the central
+	// directory. Reading it puts every entry header in memory at once (D112's
+	// 2026-10-07 revision), so the archive's size is checked against the
+	// per-file limit first, the same check jar.Parse makes before the same
+	// read. The size is the open handle's, and the reader below reads through
+	// that handle too, so the file measured is the file read; a ReaderAt does
+	// not care that f has already consumed 4 bytes. This path is only reached
+	// for a file that already passed the magic-byte check above, so the stat
+	// is not paid by every random file on the classifier's most common
+	// (non-jar) inputs.
+	info, err := f.Stat()
 	if err != nil {
-		return false
+		return false, false
 	}
-	defer zr.Close()
+	if info.Size() > MaxFileBytes {
+		return false, true
+	}
+	zr, err := zip.NewReader(f, info.Size())
+	if err != nil {
+		return false, false
+	}
 	for _, e := range zr.File {
 		if strings.HasPrefix(e.Name, "META-INF/") {
-			return true
+			return true, false
 		}
 	}
-	return false
+	return false, false
 }
 
 // fileHasTopLevelKey reports whether a file opens like the SBOM its key marks —

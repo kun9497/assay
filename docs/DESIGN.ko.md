@@ -703,7 +703,8 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       동안 `--db-max-age`는 advisory 전용 의미를 그대로 유지한다. Amazon provider의
       하한은 가장 오래된 ACTIVE 저장소다: 2년간 조용한 extras 토픽은 closed로 치고
       `db status`가 나열하며, core는 결코 closed되지 않는다. 두 플래그 모두 기본값이 없다.
-- [x] 스캔이 타깃에서 읽는 모든 바이트는 상한이 있다 (D112) — 이미지 레이어에서 읽는
+- [x] 스캔이 타깃에서 읽는 모든 바이트는 상한이 있다 (D112; central directory를 읽기 전에
+      jar 아카이브에 상한을 두는 것은 2026-10-07 개정부터) — 이미지 레이어에서 읽는
       각 파일과 디코드되는 각 SBOM이 512 MiB 한도(D61부터 jar cataloger가 써온 한도)를
       통과하고, 스캔은 전체 2 GiB를 넘기면 멈추며, 레이어 walk는 스캔의 context를
       따르는데 이제 `--timeout <duration>`이 그것을 제한한다; 한도를 넘는 파일이나

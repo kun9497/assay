@@ -4416,6 +4416,23 @@ first request of a chain — stay with the deployment: the library already refus
 private IP literals, and the rest needs a notion of "internal" only a deployment has
 (deferred-decisions, "Safe handling of externally supplied targets").
 
+**Revised 2026-10-07 — a jar archive is bounded before its central directory is read.** The
+jar cataloger's own caps (D61) bound what it reads *out of* an archive — each entry's
+decompressed bytes, the nesting depth — but nothing bounded the archive itself:
+`zip.OpenReader` reads the whole central directory into memory first, one header per entry,
+and a crafted archive can carry millions of entries in a few hundred megabytes, so the
+memory `jar.Parse` committed was proportional to a file size no limit had looked at. The same
+open runs in the classifier's content sniff for a file whose name does not say `.jar`. Both
+now check the archive's size on disk against `MaxFileBytes` before opening it, and a file
+past the limit is the same `FileLimitError` any other over-limit file produces — for a `jar:`
+target that is exit 2 naming the file and the number; for a jar met inside a `dir:` scan it is
+the counted skip D109 reports, because a directory the operator points at is still theirs.
+The entry cap the cataloger has carried since D61 now reads the same variable instead of a
+constant of equal value, so there is one number, not two that happen to agree. The
+`dir:` exemption above stands for everything but archives: a plain file in a directory is
+read by a cataloger that knows its format; an archive is opened by a library that trusts its
+index.
+
 ---
 
 ### D113 — Data age is judged for the keys a scan uses, a frozen key is as old as its freeze, and ratings get their own gate

@@ -731,7 +731,8 @@ exited 0 while 24 findings went unmentioned.
       `--db-max-age` keeps its advisory-only meaning. The Amazon provider's floor is the
       oldest ACTIVE repository: an extras topic silent for two years is closed and listed by
       `db status`; core is never closed. Neither flag has a default.
-- [x] Every byte a scan reads from a target is bounded (D112) — each file read out of an
+- [x] Every byte a scan reads from a target is bounded (D112; jar archives bounded before
+      their central directory is read since the 2026-10-07 revision) — each file read out of an
       image layer and each SBOM decoded passes through a 512 MiB limit (the jar cataloger's
       cap since D61), a scan stops past 2 GiB in total, and the layer walks honour the
       scan's context, which `--timeout <duration>` now bounds; an over-limit file or an
