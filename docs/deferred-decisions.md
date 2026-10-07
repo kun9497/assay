@@ -1923,6 +1923,14 @@ lands. Where `ranges` is present the enumeration is derivable; where it is absen
 only matching data, so any pruning must be conditional. Measure during slice 2 before
 deciding.
 
+**Resolved 2026-10-07 as D116.** An OS file lock on `<dbPath>.lock` now serialises the two
+writers: `db build` and `db update` take it before touching `<dbPath>.tmp` and hold it
+through the rename, and a second writer exits 2 at once rather than waiting. `PullSeed`
+stays unlocked, since it writes into a private temporary directory. The entry below is
+kept as the record of what was traced before the fix; its closing "fix shape" — a
+per-process unique temp name plus a writer lock — is superseded, since D116 took the lock
+alone and says why the unique name adds nothing under it.
+
 **Concurrent `db build` and `db update` writers share `<dbPath>.tmp`.** Two database
 writers pointed at one `ASSAY_DB_DIR` use the SAME temporary filename. `dbcmd.Update` (`internal/dbcmd/dbcmd.go:139`, behind `assay db build`) and `dbcmd.Pull`
 (`internal/dbcmd/pull.go:83`, behind `assay db update`) each compute `tmp := dbPath + ".tmp"`

@@ -2589,3 +2589,152 @@ func TestUpdate_RatingsOnlyKeepsTheSeedsCoverageClaim(t *testing.T) {
 		t.Errorf("stderr = %q, must NOT contain the rebuilt-from-source line in a ratings-only build", s)
 	}
 }
+
+// lockTestProvider is one advisory under the given ID, so each D116 test's
+// database carries its own identifiable record.
+func lockTestProvider(id string) provider.Provider {
+	return fakeProvider{name: "osv", covers: []string{"Go"}, advs: []advisory.Advisory{{
+		ID: id, Database: "GHSA", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Go", Name: "github.com/a/b"}},
+	}}}
+}
+
+// D116: a second `db build` against a database another writer is building
+// refuses at once, and touches neither the live database nor the holder's
+// in-flight temp file. Before D116 it removed that temp file on the way in
+// (Linux: unlinked under the first writer; Windows: then waited forever on
+// bbolt's lock) and, if it got as far as the rename, discarded the first
+// writer's build while both printed success.
+func TestUpdate_RefusesWhenAnotherWriterHoldsTheLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	var out, errOut bytes.Buffer
+	if code := Update(context.Background(), path, "", "", false,
+		[]provider.Provider{lockTestProvider("GHSA-live-before-lock")}, nil, nil, nil, &out, &errOut); code != 0 {
+		t.Fatalf("seeding Update = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	live, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	holdWriterLock(t, path)
+	inFlight := plantInFlightTemp(t, path)
+
+	out.Reset()
+	errOut.Reset()
+	code := within(t, 10*time.Second, func() int {
+		return Update(context.Background(), path, "", "", false,
+			[]provider.Provider{lockTestProvider("GHSA-refused-writer")}, nil, nil, nil, &out, &errOut)
+	})
+	if code != 2 {
+		t.Fatalf("Update while another writer holds the lock = %d, want 2 (stderr: %s)", code, errOut.String())
+	}
+	want := "error: another assay process is writing this database (lock held: " + path +
+		".lock); wait for it to finish or stop it, then rerun"
+	if !strings.Contains(errOut.String(), want) {
+		t.Errorf("stderr does not carry the busy refusal naming the lock file:\n%s\nwant a line containing:\n%s",
+			errOut.String(), want)
+	}
+	if out.Len() != 0 {
+		t.Errorf("a refused build wrote to stdout: %q", out.String())
+	}
+	assertUnchanged(t, path, live, "the live database")
+	assertUnchanged(t, path+".tmp", inFlight, "the lock holder's temp file")
+}
+
+// The lock spans the build and is let go when the build is done: a lock
+// that outlived a successful Update would refuse every later build in the
+// same process. The lock FILE stays -- it is never deleted, only unlocked.
+// The database directory does not exist yet, as on a first `db build`: the
+// lock file sits beside the database, so a lock taken before MkdirAll fails
+// to open it, and only this test sees that ordering from inside the package.
+func TestUpdate_ReleasesTheLockAfterInstall(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fresh", "sub", "vulnerability.db")
+	var out, errOut bytes.Buffer
+	if code := Update(context.Background(), path, "", "", false,
+		[]provider.Provider{lockTestProvider("GHSA-installed-then-released")}, nil, nil, nil, &out, &errOut); code != 0 {
+		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	if _, err := os.Stat(path + ".lock"); err != nil {
+		t.Errorf("the lock file is gone after a successful build: %v -- it is never deleted, "+
+			"because unlinking a lock file another writer may be opening splits the lock in two", err)
+	}
+	release, err := acquireWriterLock(path)
+	if err != nil {
+		t.Fatalf("the writer lock is still held after a successful Update: %v", err)
+	}
+	release()
+}
+
+// failingRenameThatProbesTheLock stands in for renameFn: every attempt fails,
+// and every attempt first tries to take dbPath's writer lock, failing the
+// test unless that is refused as busy. It is what holds D116's "until the
+// rename has happened or failed" -- the lock must still be held WHILE the
+// rename runs, not merely be free once the command returns. The release
+// tests alone could not see a release() moved to just before replace(): the
+// lock is free afterwards either way, and the busy tests refuse long before
+// any rename. The returned counter lets the caller confirm the rename was
+// reached at all, so a run that never got there cannot pass by probing
+// nothing. The probe is a second writer like any other, so it goes through
+// within: a lock that waited instead of refusing would otherwise block here
+// on a lock its own process holds, and the suite would sit out go test's
+// whole timeout and die with nothing else in the package run. It runs on
+// the test goroutine (renameFn is called inside Update/Pull, which the
+// tests call directly), so within's t.Fatalf is safe here.
+func failingRenameThatProbesTheLock(t *testing.T, dbPath string) (fn func(src, dst string) error, attempts *int) {
+	t.Helper()
+	attempts = new(int)
+	type acquired struct {
+		release func()
+		err     error
+	}
+	fn = func(string, string) error {
+		*attempts++
+		got := within(t, 10*time.Second, func() acquired {
+			release, err := acquireWriterLock(dbPath)
+			return acquired{release, err}
+		})
+		release, err := got.release, got.err
+		var busy *writerBusyError
+		if !errors.As(err, &busy) {
+			if err == nil {
+				release()
+			}
+			t.Errorf("rename attempt %d: taking the writer lock = %v, want *writerBusyError -- "+
+				"the writer let go of the lock before the rename over the live database (D116)", *attempts, err)
+		}
+		return fmt.Errorf("simulated rename failure")
+	}
+	return fn, attempts
+}
+
+// The failure path releases too: a rename that fails after the build (a
+// scan holding the live file open on Windows) must not leave the next
+// `db build` refused by a writer that has already returned. The rename
+// itself runs under the lock, which the probing stub checks at every one of
+// replace()'s attempts.
+func TestUpdate_ReleasesTheLockAfterAFailedInstall(t *testing.T) {
+	origWaits, origRename := replaceWaits, renameFn
+	t.Cleanup(func() { replaceWaits, renameFn = origWaits, origRename })
+	replaceWaits = make([]time.Duration, len(replaceWaits))
+
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	var attempts *int
+	renameFn, attempts = failingRenameThatProbesTheLock(t, path)
+
+	var out, errOut bytes.Buffer
+	code := Update(context.Background(), path, "", "", false,
+		[]provider.Provider{lockTestProvider("GHSA-failed-install")}, nil, nil, nil, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("Update with a failing rename = %d, want 2 (stderr: %s)", code, errOut.String())
+	}
+	if *attempts == 0 {
+		t.Fatalf("Update never reached the rename, so nothing checked the lock was held across it (stderr: %s)",
+			errOut.String())
+	}
+	release, err := acquireWriterLock(path)
+	if err != nil {
+		t.Fatalf("the writer lock is still held after a failed install: %v", err)
+	}
+	release()
+}

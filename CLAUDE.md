@@ -83,8 +83,8 @@ page and the design/roadmap content moved to `docs/DESIGN.md`.)
   gaps are either built already (Debian and RHEL support, VEX, the prebuilt artifact, age
   enforcement — each entry stays, marked resolved by its D decision) or deliberate
   deferrals with recorded reasoning, a revisit trigger, and groundwork already in place
-  (application packages inside images, pep440 leniency, the `.tmp` writer lock). It also
-  lists known hazards and the unverified assumptions the design rests on. Do not re-litigate an entry without new information; add to it when
+  (application packages inside images, pep440 leniency). It also lists known hazards and
+  the unverified assumptions the design rests on. Do not re-litigate an entry without new information; add to it when
   deferring something new.
 
 ## Commands

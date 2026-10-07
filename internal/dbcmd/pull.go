@@ -77,6 +77,16 @@ func Pull(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer) int
 		fmt.Fprintf(stderr, "error: create database directory: %v\n", err)
 		return 2
 	}
+	// D116, as Update takes it: after the manifest checks, so a pull refused
+	// for its schema has written nothing and never touched the lock, and
+	// before the temp file, so a second writer never reaches it. Held until
+	// the rename has happened or failed.
+	release, err := acquireWriterLock(dbPath)
+	if err != nil {
+		writerLockFailed(stderr, err)
+		return 2
+	}
+	defer release()
 	// Written to a temp file and renamed, exactly as Update does. A pull
 	// that dies halfway must not leave a truncated database where a scan
 	// will find it and report a confident, wrong, clean result.

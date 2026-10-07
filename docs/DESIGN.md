@@ -1248,8 +1248,8 @@ enough metadata to recover a dependency list; Rust does only when built with
 `cargo-auditable`; stripped C/C++ leaves nothing reliable. Support is decided per language
 rather than promised as a category.
 
-What is still absent — application packages inside container images (D70), pep440
-leniency, a lock on the database's `.tmp` writer — is deliberate.
+What is still absent — application packages inside container images (D70) and pep440
+leniency — is deliberate.
 [`docs/deferred-decisions.md`](deferred-decisions.md) records what was postponed, why,
 what should trigger revisiting it, and which groundwork is already in place; most of its
 early entries (Debian and RHEL support, VEX, the prebuilt artifact, age enforcement) have
