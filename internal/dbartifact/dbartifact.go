@@ -126,6 +126,14 @@ type AdvisoryCoverage struct {
 	Counts     map[string]int `json:"counts"`
 	Ecosystems []string       `json:"ecosystems"`
 	Providers  []string       `json:"providers"`
+	// Renamed is every provider's Provenance.Renamed (D115), old key ->
+	// new key. It rides in the annotation because the publish guard reads
+	// the artifacts, not the providers' code: a key the published artifact
+	// covers and the candidate lacks is accepted only when the CANDIDATE
+	// declares it renamed here. Omitted when empty, so an artifact with no
+	// declaration annotates byte-identically to one published before the
+	// field, and an older artifact reads as nil -- nothing declared.
+	Renamed map[string]string `json:"renamed,omitempty"`
 }
 
 // Pack reads the database at dbPath and returns a single-layer OCI image.

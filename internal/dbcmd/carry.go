@@ -37,6 +37,21 @@ type carryResult struct {
 	// seedCounts is the seed's advisory count per key, once per record per
 	// key -- AdvisoryCounts' rule, gathered in the same pass.
 	seedCounts map[string]int
+	// renamed is every seed key carry-forward left behind because its
+	// provider declared it renamed to a key it serves this run (D115), for
+	// printKeyCounts' line in place of the count line that would otherwise
+	// read as the key losing everything.
+	renamed map[string]renamedKey
+}
+
+// renamedKey is one applied D115 declaration: the successor, the provider
+// that declared it, and how many of the seed's records under the old key
+// this run also stored under the successor by the same ID -- the measure of
+// how much of the old key the new one already holds, so a reader of the
+// nightly log can see the rename was a respelling and not a loss.
+type renamedKey struct {
+	to, by  string
+	overlap int
 }
 
 // sharedKeys names every ecosystem key more than one provider declared this
@@ -206,6 +221,12 @@ func freezeSince(seedMeta store.Meta, name, key string) time.Time {
 //     carried, and the provider's fresh provenance holds no Frozen for it --
 //     the same healing T2 holds for a key that reappears.
 //
+// A whole-key key the provider declares renamed (Provenance.Renamed, D115)
+// to a key the SAME provider declares this run is neither: it is not
+// carried, not frozen and no longer declared, and printKeyCounts says so in
+// place of its count line. A declaration whose successor is not live under
+// that provider is inert -- the key is carried and frozen as above.
+//
 // The seed is read by its by-id records, never its index (store.EachAdvisory,
 // store.Advisory), so a seed one schema behind is carried from like a current
 // one. It is read
@@ -238,6 +259,35 @@ func carryForward(seedPath, label string, w *store.Bolt, running map[string]stor
 				whole[eco] = name
 			}
 		}
+	}
+
+	// D115: a whole-key key its provider declares renamed is a respelling,
+	// not a stopped feed, so it is neither carried nor frozen -- but only
+	// when the successor is live under that SAME provider this run. The
+	// declaration says where the provider's own data went; a successor
+	// nobody serves tonight, or one another provider serves, is not that
+	// data, and dropping the old key on its word would be a retirement with
+	// a label. Such a declaration is inert, said so, and the key is carried
+	// and frozen exactly as D110 would without it.
+	renamed := map[string]renamedKey{}
+	for _, key := range sortedKeys(whole) {
+		name := whole[key]
+		to, ok := running[name].Renamed[key]
+		if !ok {
+			continue
+		}
+		if owner[to] != name {
+			fmt.Fprintf(stderr, "%s declares %s renamed to %s, which %s does not declare this run; carried and frozen as a stopped key instead (D115)\n",
+				name, key, to, name)
+			// Dropped, not kept for the record: a declaration this build did
+			// not apply would otherwise be written into the provenance, the
+			// annotation and `db status`, where "renamed" beside "frozen" for
+			// one key reads as both and means neither.
+			delete(running[name].Renamed, key)
+			continue
+		}
+		renamed[key] = renamedKey{to: to, by: name}
+		delete(whole, key)
 	}
 
 	// Opened before the entry-level judgement, which reads it (newUnder).
@@ -278,7 +328,7 @@ func carryForward(seedPath, label string, w *store.Bolt, running map[string]stor
 	// seed counts printKeyCounts reports against, and those lines are the
 	// nightly's erosion signal on every seeded build, not only on one that
 	// carried.
-	res := carryResult{ran: true, seedCounts: map[string]int{}}
+	res := carryResult{ran: true, seedCounts: map[string]int{}, renamed: renamed}
 	wholeN := map[string]int{}
 	wholeWithdrawn := map[string]int{}
 	restored := map[string]int{}
@@ -321,6 +371,18 @@ func carryForward(seedPath, label string, w *store.Bolt, running map[string]stor
 		var carried []advisory.Affected
 		for _, key := range keys {
 			res.seedCounts[key]++
+			if r, ok := res.renamed[key]; ok {
+				// Read from this run's record by ID, the same lookup the
+				// whole-key rule makes, so "also under" means what the new
+				// database holds rather than what the seed did.
+				if ok, err := reEmitted(); err != nil {
+					return err
+				} else if ok && slices.ContainsFunc(cur.Affected, func(x advisory.Affected) bool { return x.Ecosystem == r.to }) {
+					r.overlap++
+					res.renamed[key] = r
+				}
+				continue
+			}
 			name, ok := whole[key]
 			if !ok {
 				continue
@@ -449,7 +511,25 @@ func printKeyCounts(w *store.Bolt, carry carryResult, providers map[string]store
 	if err != nil {
 		return err
 	}
-	for _, key := range sortedKeys(carry.seedCounts) {
+	// The renamed keys join the seed's: a declared key the seed held no
+	// record under still leaves the declared coverage tonight, and that must
+	// not happen without a line.
+	keys := sortedKeys(carry.seedCounts)
+	for key := range carry.renamed {
+		if _, ok := carry.seedCounts[key]; !ok {
+			keys = append(keys, key)
+		}
+	}
+	slices.Sort(keys)
+	for _, key := range keys {
+		// A renamed key's count line would read "N -> 0", a key losing
+		// everything, which is the misreading D115 exists to end. It says
+		// what happened instead, once per key, whatever the counts.
+		if r, ok := carry.renamed[key]; ok {
+			fmt.Fprintf(stderr, "%s: renamed to %s by %s, not carried (%d seed records, %d also under %s) (D115)\n",
+				key, r.to, r.by, carry.seedCounts[key], r.overlap, r.to)
+			continue
+		}
 		old, now := carry.seedCounts[key], counts[key]
 		if old == now {
 			continue

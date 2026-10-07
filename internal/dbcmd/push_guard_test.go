@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1167,5 +1168,155 @@ func TestPush_SubSecondPrecisionIsNotANarrowing(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Push = %d, want 0 — identical coverage must not read as a narrowing\nstderr: %s",
 			code, errOut.String())
+	}
+}
+
+// D115: the publish guard accepts a missing published key only when the
+// candidate's annotation declares it renamed, the successor is in the
+// candidate, and the successor holds at least as many records. Base: Go 90,
+// Old:Spelling 10 -- the old key's loss is 10% of the total, inside the 20%
+// total rule, so every refusal below comes from the rename rule or the
+// missing-key rule and not from the total.
+func TestAdvisoryRegression_D115_RenameIsAcceptedOnlyWhenTheSuccessorHoldsTheRecords(t *testing.T) {
+	cur := &dbartifact.AdvisoryCoverage{Total: 100, Counts: map[string]int{"Go": 90, "Old:Spelling": 10},
+		Ecosystems: []string{"Go", "Old:Spelling"}, Providers: []string{"osv"}}
+	next := func(counts map[string]int, renamed map[string]string) *dbartifact.AdvisoryCoverage {
+		total := 0
+		var ecos []string
+		for _, k := range sortedKeys(counts) {
+			total += counts[k]
+			ecos = append(ecos, k)
+		}
+		return &dbartifact.AdvisoryCoverage{Total: total, Counts: counts, Ecosystems: ecos, Providers: []string{"osv"}, Renamed: renamed}
+	}
+	const (
+		notDeclared = `published ecosystem "Old:Spelling" is missing`
+		absent      = `published ecosystem "Old:Spelling" is missing; the candidate declares it renamed to "New:Spelling", which the candidate does not cover`
+		fewer       = `published ecosystem "Old:Spelling" is missing; the candidate declares it renamed to "New:Spelling", which holds 9 advisories against the 10 published under "Old:Spelling"`
+		elsewhere   = `published ecosystem "Old:Spelling" is missing; the candidate declares it renamed to "Elsewhere:Spelling", which the candidate does not cover`
+	)
+	for _, tc := range []struct {
+		name string
+		next *dbartifact.AdvisoryCoverage
+		want string
+	}{
+		// The per-key count loop would refuse this on Old:Spelling's 10 -> 0
+		// if the accepted rename were not skipped there.
+		{"declared, successor holds as many", next(map[string]int{"Go": 90, "New:Spelling": 10}, map[string]string{"Old:Spelling": "New:Spelling"}), ""},
+		{"declared, successor holds more", next(map[string]int{"Go": 90, "New:Spelling": 12}, map[string]string{"Old:Spelling": "New:Spelling"}), ""},
+		{"declared, successor holds fewer", next(map[string]int{"Go": 90, "New:Spelling": 9}, map[string]string{"Old:Spelling": "New:Spelling"}), fewer},
+		{"declared, successor absent", next(map[string]int{"Go": 90}, map[string]string{"Old:Spelling": "New:Spelling"}), absent},
+		{"declared to a key the candidate lacks", next(map[string]int{"Go": 90, "New:Spelling": 10}, map[string]string{"Old:Spelling": "Elsewhere:Spelling"}), elsewhere},
+		{"not declared", next(map[string]int{"Go": 90, "New:Spelling": 10}, nil), notDeclared},
+		{"a different key declared", next(map[string]int{"Go": 90, "New:Spelling": 10}, map[string]string{"Other:Spelling": "New:Spelling"}), notDeclared},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := advisoryRegression(cur, tc.next); got != tc.want {
+				t.Errorf("advisoryRegression = %q\nwant %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// renameDB is a database whose one provider "osv" declares Go plus key, nine
+// Go records and n under key, and the given rename declaration; three NVD
+// ratings so the rating guard never refuses (retirementDB's reasoning).
+func renameDB(t *testing.T, key string, n int, renamed map[string]string, extra map[string]store.Provenance) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 9; i++ {
+		if err := w.Put(advisory.Advisory{ID: fmt.Sprintf("OSV-2026-%04d", i), Affected: []advisory.Affected{{Ecosystem: "Go", Name: "alpha"}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < n; i++ {
+		if err := w.Put(advisory.Advisory{ID: fmt.Sprintf("ECHO-2026-%04d", i), Affected: []advisory.Affected{{Ecosystem: key, Name: "requests"}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		if err := w.PutRating(advisory.Rating{CVE: fmt.Sprintf("CVE-2026-%d", i), Source: "NVD"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	providers := map[string]store.Provenance{"osv": {Ecosystems: []string{"Go", key}, Renamed: renamed}}
+	for k, v := range extra {
+		providers[k] = v
+	}
+	if err := w.SetMeta(store.Meta{Providers: providers}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// D115 through Push, the caller: the declaration has to reach the published
+// annotation from the database's provenance (artifactMetaFromDB) AND the
+// guard has to read it from the candidate. advisoryRegression's table above
+// proves neither half of that wiring.
+func TestPush_D115_DeclaredRenamePublishesWithoutForce(t *testing.T) {
+	const old, new = "Old:Spelling", "New:Spelling"
+	for _, tc := range []struct {
+		name    string
+		n       int
+		renamed map[string]string
+		code    int
+		want    string
+	}{
+		{"declared, as many records", 2, map[string]string{old: new}, 0, ""},
+		{"undeclared", 2, nil, 2, `published ecosystem "Old:Spelling" is missing` + "\n"},
+		{"declared, fewer records", 1, map[string]string{old: new}, 2, `which holds 1 advisories against the 2 published under "Old:Spelling"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ref := liveRegistry(t)
+			var out, errOut bytes.Buffer
+			if code := Push(context.Background(), renameDB(t, old, 2, nil, nil), ref, false, &out, &errOut); code != 0 {
+				t.Fatalf("Push(before) = %d, want 0:\n%s", code, errOut.String())
+			}
+			errOut.Reset()
+			code := Push(context.Background(), renameDB(t, new, tc.n, tc.renamed, nil), ref, false, &out, &errOut)
+			if code != tc.code {
+				t.Fatalf("Push(after) = %d, want %d:\n%s", code, tc.code, errOut.String())
+			}
+			if tc.want != "" && !strings.Contains(errOut.String(), tc.want) {
+				t.Errorf("stderr lacks %q:\n%s", tc.want, errOut.String())
+			}
+			if tc.code != 0 {
+				return
+			}
+			m := publishedMeta(t, ref)
+			if m.Advisories == nil || !reflect.DeepEqual(m.Advisories.Renamed, tc.renamed) {
+				t.Errorf("published advisory-coverage Renamed = %+v, want %v", m.Advisories, tc.renamed)
+			}
+			// And the next ordinary push measures against the renamed state.
+			errOut.Reset()
+			if code := Push(context.Background(), renameDB(t, new, tc.n, tc.renamed, nil), ref, false, &out, &errOut); code != 0 {
+				t.Errorf("the push after the rename = %d, want 0:\n%s", code, errOut.String())
+			}
+		})
+	}
+}
+
+// Two providers declaring the same old key renamed is a contradiction the
+// annotation cannot carry -- one map, one successor per key -- so the push is
+// refused before anything is compared, naming both providers.
+func TestPush_D115_OneKeyRenamedByTwoProvidersIsRefused(t *testing.T) {
+	const old = "Old:Spelling"
+	path := renameDB(t, "New:Spelling", 2, map[string]string{old: "New:Spelling"}, map[string]store.Provenance{
+		"other-src": {Ecosystems: []string{"Elsewhere:Spelling"}, Renamed: map[string]string{old: "Elsewhere:Spelling"}},
+	})
+	var out, errOut bytes.Buffer
+	if code := Push(context.Background(), path, liveRegistry(t), false, &out, &errOut); code != 2 {
+		t.Fatalf("Push = %d, want 2:\n%s", code, errOut.String())
+	}
+	const want = `"Old:Spelling" is declared renamed by both osv and other-src`
+	if !strings.Contains(errOut.String(), want) {
+		t.Errorf("stderr lacks %q:\n%s", want, errOut.String())
 	}
 }

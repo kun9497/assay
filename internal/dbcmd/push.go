@@ -517,12 +517,40 @@ func artifactMetaFromDB(path string) (dbartifact.Meta, error) {
 	for name, n := range m.RatingCounts {
 		ratingCounts[name] = n
 	}
+	renamed, err := renamedKeys(m.Providers)
+	if err != nil {
+		return dbartifact.Meta{}, err
+	}
 	asOf, source := oldestDataAsOf(m)
 	return dbartifact.Meta{
 		SchemaVersion: m.Schema, BuiltAt: m.BuiltAt, DataAsOf: asOf, DataAsOfSource: source,
 		RatingsSince: ratingBound(m), RatingsSinceKnown: ratingBoundKnown(m), RatingCount: totalRatings(m), RatingCounts: ratingCounts,
-		Advisories: &dbartifact.AdvisoryCoverage{Total: total, Counts: coveredCounts, Ecosystems: m.Ecosystems, Providers: sortedKeys(m.Providers)},
+		Advisories: &dbartifact.AdvisoryCoverage{Total: total, Counts: coveredCounts, Ecosystems: m.Ecosystems, Providers: sortedKeys(m.Providers), Renamed: renamed},
 	}, nil
+}
+
+// renamedKeys is the union of every provider's rename declaration (D115),
+// for the advisory-coverage annotation the publish guard reads. Nil when no
+// provider declared one, so the annotation stays what it was before the
+// field. One old key declared by two providers is refused rather than
+// resolved: the annotation holds one successor per key, and picking one
+// would let the guard accept the old key's absence on the strength of a
+// claim the other provider contradicts.
+func renamedKeys(providers map[string]store.Provenance) (map[string]string, error) {
+	var out map[string]string
+	by := map[string]string{}
+	for _, name := range sortedKeys(providers) {
+		for old, to := range providers[name].Renamed {
+			if prev, ok := by[old]; ok {
+				return nil, fmt.Errorf("ecosystem key %q is declared renamed by both %s and %s; a key has one successor (D115)", old, prev, name)
+			}
+			if out == nil {
+				out = map[string]string{}
+			}
+			out[old], by[old] = to, name
+		}
+	}
+	return out, nil
 }
 
 func ratingCountRegression(cur, incoming dbartifact.Meta) string {
@@ -561,6 +589,11 @@ func advisoryRegression(cur, incoming *dbartifact.AdvisoryCoverage) string {
 	if incoming.Total == 0 || float64(incoming.Total) < float64(cur.Total)*0.8 {
 		return fmt.Sprintf("advisories dropped from %d to %d (more than 20%%)", cur.Total, incoming.Total)
 	}
+	// renamedAway is each published ecosystem the candidate lacks but
+	// legitimately renamed (D115); the per-key count loop below skips them,
+	// since an old key's count in the candidate is always 0 and the
+	// rename's own count check has already compared it with its successor.
+	renamedAway := map[string]bool{}
 	for _, pair := range []struct {
 		kind          string
 		before, after []string
@@ -572,16 +605,53 @@ func advisoryRegression(cur, incoming *dbartifact.AdvisoryCoverage) string {
 			present[name] = true
 		}
 		for _, name := range pair.before {
-			if !present[name] {
-				return fmt.Sprintf("published %s %q is missing", pair.kind, name)
+			if present[name] {
+				continue
 			}
+			if pair.kind == "ecosystem" {
+				if why := renameRegression(cur, incoming, name, present); why != "" {
+					return why
+				}
+				renamedAway[name] = true
+				continue
+			}
+			return fmt.Sprintf("published %s %q is missing", pair.kind, name)
 		}
 	}
 	for _, eco := range sortedKeys(cur.Counts) {
+		if renamedAway[eco] {
+			continue
+		}
 		before, after := cur.Counts[eco], incoming.Counts[eco]
 		if before > 0 && (after == 0 || float64(after) < float64(before)*0.8) {
 			return fmt.Sprintf("%s advisories dropped from %d to %d (more than 20%%)", eco, before, after)
 		}
+	}
+	return ""
+}
+
+// renameRegression judges one published ecosystem the candidate does not
+// cover (D115): "" when the candidate declares it renamed to a key it does
+// cover and holds at least as many advisories under, otherwise the refusal.
+//
+// The condition is narrow on purpose. A declaration naming a key the
+// candidate does not hold is a narrowing with a label, and a successor
+// holding fewer records than the old key published is a rename that lost
+// some -- both are refused like any other narrowing. Each failure names
+// both keys, so the nightly log says which half of the declaration failed.
+// Without a declaration the message is the guard's original one: the key is
+// simply missing.
+func renameRegression(cur, incoming *dbartifact.AdvisoryCoverage, old string, present map[string]bool) string {
+	to, declared := incoming.Renamed[old]
+	if !declared {
+		return fmt.Sprintf("published ecosystem %q is missing", old)
+	}
+	if !present[to] {
+		return fmt.Sprintf("published ecosystem %q is missing; the candidate declares it renamed to %q, which the candidate does not cover", old, to)
+	}
+	if before, after := cur.Counts[old], incoming.Counts[to]; after < before {
+		return fmt.Sprintf("published ecosystem %q is missing; the candidate declares it renamed to %q, which holds %d advisories against the %d published under %q",
+			old, to, after, before, old)
 	}
 	return ""
 }

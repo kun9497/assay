@@ -649,6 +649,19 @@ func frozenSummary(providers map[string]store.Provenance) string {
 	return strings.Join(parts, ", ")
 }
 
+// renamedSummary renders every provider's rename declarations (D115) as
+// "old -> new (provider)", sorted so the line is diffable across runs.
+func renamedSummary(providers map[string]store.Provenance) string {
+	var parts []string
+	for _, name := range sortedKeys(providers) {
+		for _, old := range sortedKeys(providers[name].Renamed) {
+			parts = append(parts, fmt.Sprintf("%s -> %s (%s)", old, providers[name].Renamed[old], name))
+		}
+	}
+	slices.Sort(parts)
+	return strings.Join(parts, ", ")
+}
+
 // closedSummary renders each provider's closed topics (D113) as
 // "P: N topic(s) closed (no advisory since YYYY-MM-DD), not counted in its
 // DATA AS OF: a, b", providers and topics sorted so the line is diffable.
@@ -845,6 +858,14 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 	// is one -- a line saying "none" on every healthy database would be noise.
 	if s := frozenSummary(m.Providers); s != "" {
 		fmt.Fprintf(stdout, "frozen:     %s\n", s)
+	}
+	// Renamed keys (D115): spellings a provider declares the upstream
+	// replaced. A key a build applied the declaration to leaves frozen:
+	// above by itself -- carry-forward never froze it -- and this line says
+	// where it went, so its disappearance from coverage reads as a rename
+	// rather than a loss. Printed only when there is one, frozen:'s rule.
+	if s := renamedSummary(m.Providers); s != "" {
+		fmt.Fprintf(stdout, "renamed:    %s\n", s)
 	}
 	// Closed topics (D113): channels a provider left out of its DATA AS OF
 	// below because they finished publishing. Their advisories are still in

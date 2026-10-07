@@ -456,6 +456,25 @@ type Provenance struct {
 	// true answer for a database built before the field -- nothing was
 	// excluded then.
 	Closed map[string]time.Time `json:"closed,omitempty"`
+	// Renamed maps an ecosystem key this provider used to emit to the key
+	// the upstream now publishes the same data under (D115) -- OSV's
+	// "Echo:PyPi" -> "Echo:PyPI" first. The provider declares it from a
+	// static table in its own code, never from a flag: a rename is a fact
+	// about the upstream, written once in the place that knows it, and a
+	// flag would make it something an operator types per run.
+	//
+	// It has effect in exactly two places. The seeded build's carry-forward
+	// (D110) does not carry or freeze an old key the seed declared when this
+	// map renames it to a key the same provider declares live this run; and
+	// the publish guard accepts the old key's absence only when the
+	// candidate's advisory-coverage annotation, built from this map, names a
+	// successor it holds at least as many records under. A declaration whose
+	// successor is not live changes nothing in either.
+	//
+	// Additive Meta JSON with no schema bump, Frozen's precedent: nil is the
+	// true answer for a database built before the field -- nothing had been
+	// declared renamed then.
+	Renamed map[string]string `json:"renamed,omitempty"`
 }
 
 // DefaultPath returns <user cache>/assay/db/v<schema>/vulnerability.db,

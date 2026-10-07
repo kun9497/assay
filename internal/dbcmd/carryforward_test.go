@@ -430,3 +430,228 @@ func TestCarryForward_T7_UnseededBuildCarriesNothing(t *testing.T) {
 		t.Errorf("Frozen = %v on an unseeded build", m.Providers["osv"].Frozen)
 	}
 }
+
+// D115. A rename the provider declares is not a stopped feed. Every test here
+// drives Update, the caller, for the reason this file's header gives.
+//
+// "Old:Spelling" and "New:Spelling" share no substring with each other or
+// with any ID, package or provider name asserted on here; the real
+// "Echo:PyPi"/"Echo:PyPI" pair gets its own test below, asserted on whole
+// rendered lines so the one-letter difference cannot be satisfied by the
+// other spelling.
+
+// renamingProvider is fakeProvider plus a Provenance.Renamed, the shape
+// osv.Fetch returns when its static table names a key it now emits.
+type renamingProvider struct {
+	fakeProvider
+	renamed map[string]string
+}
+
+func (r renamingProvider) Fetch(ctx context.Context, emit func(advisory.Advisory) error) (store.Provenance, error) {
+	prov, err := r.fakeProvider.Fetch(ctx, emit)
+	prov.Renamed = r.renamed
+	return prov, err
+}
+
+// renameSeed is the seed the night after the upstream renamed old to new:
+// the provider declared both, two records carry an entry under each (the
+// 445 of the 2026-10-04 measurement) and one only under old (the 22).
+func renameSeed(t *testing.T, old, new string) string {
+	return carrySeed(t, map[string]store.Provenance{
+		"osv": {Ecosystems: []string{"Go", new, old}, DataAsOf: seedFreezeTime},
+	},
+		adv("OSV-GO-1", affects("Go", "alpha")),
+		adv("ECHO-DUP-1", affects(old, "requests"), affects(new, "requests")),
+		adv("ECHO-DUP-2", affects(old, "urllib3"), affects(new, "urllib3")),
+		adv("ECHO-ORPHAN-1", affects(old, "gitpython")),
+	)
+}
+
+// renamedRun is the provider after the rename: new only, the two shared
+// records re-emitted without their old entries, the orphan gone.
+func renamedRun(old, new string, renamed map[string]string) renamingProvider {
+	return renamingProvider{
+		fakeProvider: fakeProvider{name: "osv", covers: []string{"Go", new}, advs: []advisory.Advisory{
+			adv("OSV-GO-1", affects("Go", "alpha")),
+			adv("ECHO-DUP-1", affects(new, "requests")),
+			adv("ECHO-DUP-2", affects(new, "urllib3")),
+		}},
+		renamed: renamed,
+	}
+}
+
+// T15. The declaration with its successor live: the old key is not carried,
+// not frozen, no longer declared, and the count line says why with the seed's
+// count and how many of those records the successor already holds.
+func TestCarryForward_T15_DeclaredRenameIsNotCarried(t *testing.T) {
+	const old, new = "Old:Spelling", "New:Spelling"
+	dst, code, logs := build(t, renameSeed(t, old, new), renamedRun(old, new, map[string]string{old: new}))
+	if code != 0 {
+		t.Fatalf("Update = %d, want 0:\n%s", code, logs)
+	}
+	t.Logf("Update stderr:\n%s", logs)
+	db, m := openOut(t, dst)
+
+	for _, pkg := range []string{"requests", "urllib3", "gitpython"} {
+		if got := lookupIDs(t, db, old, pkg); len(got) != 0 {
+			t.Errorf("Lookup(%s, %s) = %v, want none: a declared rename is not carried", old, pkg, got)
+		}
+	}
+	if a, ok := record(t, db, new, "requests", "ECHO-DUP-1"); !ok || !slices.Equal(ecosOf(a), []string{new}) {
+		t.Errorf("ECHO-DUP-1 = %v (found=%v), want only its fresh %s entry", ecosOf(a), ok, new)
+	}
+	if f, ok := m.Providers["osv"].Frozen[old]; ok {
+		t.Errorf("Frozen[%s] = %v, want no entry: a spelling is not a stopped feed", old, f)
+	}
+	if slices.Contains(m.Providers["osv"].Ecosystems, old) || slices.Contains(m.Ecosystems, old) {
+		t.Errorf("osv still declares %s: Providers=%v Meta=%v", old, m.Providers["osv"].Ecosystems, m.Ecosystems)
+	}
+	if got := m.Providers["osv"].Renamed[old]; got != new {
+		t.Errorf("stored Renamed[%s] = %q, want %q (db status and the annotation read it)", old, got, new)
+	}
+	const line = "\nOld:Spelling: renamed to New:Spelling by osv, not carried (3 seed records, 2 also under New:Spelling) (D115)\n"
+	if !strings.Contains(logs, line) {
+		t.Errorf("stderr lacks %q:\n%s", line, logs)
+	}
+	for _, not := range []string{"osv emitted nothing for Old:Spelling", "\nOld:Spelling: 3 -> "} {
+		if strings.Contains(logs, not) {
+			t.Errorf("stderr still reports the rename as %q:\n%s", not, logs)
+		}
+	}
+}
+
+// T15b. The same fixture with no declaration: the key is carried and frozen
+// exactly as D110 always did. This pins that the declaration -- not anything
+// else about the fixture -- is what T15's behaviour depends on.
+func TestCarryForward_T15b_UndeclaredRenameIsCarriedAndFrozen(t *testing.T) {
+	const old, new = "Old:Spelling", "New:Spelling"
+	dst, code, logs := build(t, renameSeed(t, old, new), renamedRun(old, new, nil))
+	if code != 0 {
+		t.Fatalf("Update = %d, want 0:\n%s", code, logs)
+	}
+	db, m := openOut(t, dst)
+	if got, want := lookupIDs(t, db, old, "gitpython"), []string{"ECHO-ORPHAN-1"}; !slices.Equal(got, want) {
+		t.Errorf("Lookup(%s, gitpython) = %v, want %v", old, got, want)
+	}
+	if got := m.Providers["osv"].Frozen[old]; !got.Equal(seedFreezeTime) {
+		t.Errorf("Frozen[%s] = %v, want %v", old, got, seedFreezeTime)
+	}
+	if strings.Contains(logs, "renamed to") {
+		t.Errorf("an undeclared key reports a rename:\n%s", logs)
+	}
+}
+
+// T15c. A declaration whose successor is not live under the declaring provider
+// is inert: the key is carried and frozen as a stopped feed, and the log says
+// the declaration was not applied. Two shapes -- the successor declared by
+// nobody this run, and declared by another provider -- because "renamed" is a
+// claim the declaring provider makes about its OWN keys; a successor someone
+// else serves says nothing about where this provider's data went.
+func TestCarryForward_T15c_DeclarationWithoutLiveSuccessorIsInert(t *testing.T) {
+	const old, new = "Old:Spelling", "New:Spelling"
+	for _, tc := range []struct {
+		name   string
+		target string
+		extra  []provider.Provider
+	}{
+		{"successor not live at all", "Gone:Spelling", nil},
+		{"successor live under another provider", "Elsewhere:Spelling", []provider.Provider{
+			fakeProvider{name: "other-src", covers: []string{"Elsewhere:Spelling"}, advs: []advisory.Advisory{
+				adv("OTHER-1", affects("Elsewhere:Spelling", "delta")),
+			}},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ps := append([]provider.Provider{renamedRun(old, new, map[string]string{old: tc.target})}, tc.extra...)
+			dst, code, logs := build(t, renameSeed(t, old, new), ps...)
+			if code != 0 {
+				t.Fatalf("Update = %d, want 0:\n%s", code, logs)
+			}
+			db, m := openOut(t, dst)
+			if got, want := lookupIDs(t, db, old, "gitpython"), []string{"ECHO-ORPHAN-1"}; !slices.Equal(got, want) {
+				t.Errorf("Lookup(%s, gitpython) = %v, want %v: an inert declaration carries as before", old, got, want)
+			}
+			if got := m.Providers["osv"].Frozen[old]; !got.Equal(seedFreezeTime) {
+				t.Errorf("Frozen[%s] = %v, want %v", old, got, seedFreezeTime)
+			}
+			line := "osv declares Old:Spelling renamed to " + tc.target + ", which osv does not declare this run; carried and frozen as a stopped key instead (D115)\n"
+			if !strings.Contains(logs, line) {
+				t.Errorf("stderr lacks %q:\n%s", line, logs)
+			}
+			if strings.Contains(logs, "not carried (") {
+				t.Errorf("an inert declaration was applied:\n%s", logs)
+			}
+			// An unapplied declaration must not outlive the build that declined
+			// it: left in the provenance it would reach the annotation and
+			// `db status`, which would then list the key as renamed on the
+			// same line as it is frozen.
+			if to, ok := m.Providers["osv"].Renamed[old]; ok {
+				t.Errorf("Renamed[%s] = %q survived an inert declaration; want it dropped", old, to)
+			}
+		})
+	}
+}
+
+// T15d. The real pair, end to end: Update applies OSV's Echo declaration and
+// db status then lists it under renamed: and no longer under frozen:, which
+// is where the seed (frozen since 2026-08-19 in production) had it.
+func TestCarryForward_T15d_EchoRenameLeavesFrozenForRenamed(t *testing.T) {
+	const old, new = "Echo:PyPi", "Echo:PyPI"
+	seedPath := carrySeed(t, map[string]store.Provenance{
+		"osv": {Ecosystems: []string{"Go", new, old}, DataAsOf: seedFreezeTime,
+			Frozen: map[string]time.Time{old: seedFreezeTime}},
+	},
+		adv("OSV-GO-1", affects("Go", "alpha")),
+		adv("ECHO-DUP-1", affects(old, "requests"), affects(new, "requests")),
+		adv("ECHO-ORPHAN-1", affects(old, "gitpython")),
+	)
+	p := renamingProvider{
+		fakeProvider: fakeProvider{name: "osv", covers: []string{"Go", new}, advs: []advisory.Advisory{
+			adv("OSV-GO-1", affects("Go", "alpha")),
+			adv("ECHO-DUP-1", affects(new, "requests")),
+		}},
+		renamed: map[string]string{old: new},
+	}
+	dst, code, logs := build(t, seedPath, p)
+	if code != 0 {
+		t.Fatalf("Update = %d, want 0:\n%s", code, logs)
+	}
+	if want := "\nEcho:PyPi: renamed to Echo:PyPI by osv, not carried (2 seed records, 1 also under Echo:PyPI) (D115)\n"; !strings.Contains(logs, want) {
+		t.Errorf("stderr lacks %q:\n%s", want, logs)
+	}
+	var out, errOut bytes.Buffer
+	if code := Status(dst, &out, &errOut); code != 0 {
+		t.Fatalf("Status = %d:\n%s", code, errOut.String())
+	}
+	if want := "\nrenamed:    Echo:PyPi -> Echo:PyPI (osv)\n"; !strings.Contains(out.String(), want) {
+		t.Errorf("status lacks %q:\n%s", want, out.String())
+	}
+	if strings.Contains(out.String(), "frozen:") {
+		t.Errorf("status still lists a frozen key after the rename was applied:\n%s", out.String())
+	}
+}
+
+// T15e. A renamed key the seed declared but held no record under still
+// leaves the declared coverage, and that is said rather than silent -- no
+// count line would otherwise mention a key with no seed records at all.
+func TestCarryForward_T15e_RenamedKeyWithNoSeedRecordsIsStillReported(t *testing.T) {
+	const old, new = "Old:Spelling", "New:Spelling"
+	seedPath := carrySeed(t, map[string]store.Provenance{
+		"osv": {Ecosystems: []string{"Go", new, old}, DataAsOf: seedFreezeTime},
+	}, adv("OSV-GO-1", affects("Go", "alpha")))
+	p := renamingProvider{
+		fakeProvider: fakeProvider{name: "osv", covers: []string{"Go", new}, advs: []advisory.Advisory{
+			adv("OSV-GO-1", affects("Go", "alpha")),
+			adv("ECHO-NEW-1", affects(new, "requests")),
+		}},
+		renamed: map[string]string{old: new},
+	}
+	_, code, logs := build(t, seedPath, p)
+	if code != 0 {
+		t.Fatalf("Update = %d, want 0:\n%s", code, logs)
+	}
+	const line = "\nOld:Spelling: renamed to New:Spelling by osv, not carried (0 seed records, 0 also under New:Spelling) (D115)\n"
+	if !strings.Contains(logs, line) {
+		t.Errorf("stderr lacks %q:\n%s", line, logs)
+	}
+}

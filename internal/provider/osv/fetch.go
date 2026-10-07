@@ -101,7 +101,10 @@ const DefaultBaseURL = "https://osv-vulnerabilities.storage.googleapis.com"
 // alongside the bare ones. Those qualified keys are stored but UNREACHABLE:
 // a real Python/npm/Java package catalogs as PyPI/npm/Maven, never as
 // "Echo:PyPi" etc., since its own purl is a plain pkg:pypi/... one, not a
-// deb purl. Harmless dead entries, not special-cased out.
+// deb purl. Harmless dead entries, not special-cased out. OSV has since
+// respelled "Echo:PyPi" as "Echo:PyPI" (August 2026); the old spelling is
+// declared renamed in renamedKeys below and retired by D115 rather than
+// carried forward as a frozen key.
 //
 // "Azure Linux" was D94's entry (one archive, "Azure%20Linux/all.zip",
 // release-qualified "Azure Linux:2"/"Azure Linux:3" keys) and is GONE as of
@@ -185,6 +188,26 @@ var Ecosystems = []string{
 	"Go", "npm", "PyPI", "crates.io", "RubyGems", "Packagist", "NuGet", "Maven",
 	"Alpine", "Debian", "Ubuntu", "Rocky Linux", "AlmaLinux", "Chainguard",
 	"MinimOS", "Echo", "Alpaquita", "Bitnami", "CleanStart",
+}
+
+// renamedKeys is D115's static table: ecosystem keys this provider used to
+// emit, mapped to the key the upstream now publishes the same data under.
+// Fetch declares an entry in Provenance.Renamed only when it covered the new
+// key this run (see there). It is code, not a flag, because a rename is a
+// fact about the upstream that holds on every run, and the publish guard
+// must be able to read it from the artifact without anyone typing it.
+//
+// "Echo:PyPi" -> "Echo:PyPI": OSV respelled Echo's PyPI-qualified key in
+// August 2026 and stopped emitting the old one, which D110 then carried as a
+// frozen key from 2026-08-19. Measured on the 2026-10-04 artifact: of the 467
+// records under the old key, 445 also sit under the new key by the same ID;
+// of the 22 that do not, 21 the upstream either no longer emits at all or
+// re-homed under the bare "Echo" key with the deb package name, and 1 is
+// covered elsewhere in its own record. Both spellings are unreachable from a
+// scan anyway (a Python package catalogs as PyPI), so retiring the old key
+// loses nothing a scan could find.
+var renamedKeys = map[string]string{
+	"Echo:PyPi": "Echo:PyPI",
 }
 
 type Provider struct {
@@ -332,6 +355,21 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		prov.DataAsOf = time.Time{}
 	}
 	prov.Ecosystems = slices.Sorted(maps.Keys(allCovered))
+	// D115: a rename is declared only when its successor is a key this run
+	// covers. A declaration names where the old key's data now lives; one
+	// whose successor this database does not hold -- an Echo archive that
+	// yielded no "Echo:PyPI" record, or a build not fetching Echo at all --
+	// would tell the carry-forward to drop the old key and the publish guard
+	// to accept its absence with nothing standing in for it.
+	for old, successor := range renamedKeys {
+		if _, ok := allCovered[successor]; !ok {
+			continue
+		}
+		if prov.Renamed == nil {
+			prov.Renamed = map[string]string{}
+		}
+		prov.Renamed[old] = successor
+	}
 	// Printed unconditionally, the same discipline redhat/oracle's own stats
 	// lines follow: a build that ran with neither Rocky Linux nor AlmaLinux
 	// enabled prints an honest all-zero line rather than staying silent,
