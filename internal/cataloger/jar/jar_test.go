@@ -3,12 +3,15 @@ package jar
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kun9497/assay/internal/source"
 )
 
 // zipEntry is one file to write into a fixture archive.
@@ -380,7 +383,7 @@ func TestReadEntryCapped_RefusesADeclaredSizePastTheCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := zr.File[0]
-	f.UncompressedSize64 = maxEntrySize + 1
+	f.UncompressedSize64 = uint64(source.MaxFileBytes) + 1
 
 	if _, err := readEntryCapped(f); err == nil {
 		t.Fatal("readEntryCapped did not refuse a declared size past the cap")
@@ -388,7 +391,7 @@ func TestReadEntryCapped_RefusesADeclaredSizePastTheCap(t *testing.T) {
 }
 
 // zeroReader streams n zero bytes without ever materializing them all at
-// once, so a fixture larger than maxEntrySize can be built without holding a
+// once, so a fixture larger than source.MaxFileBytes can be built without holding a
 // 512+ MiB []byte in the test process.
 type zeroReader struct{ n int64 }
 
@@ -446,7 +449,7 @@ func TestParse_RefusesAPomPropertiesPastTheSizeCap(t *testing.T) {
 	// bufio.Scanner's default line-length limit, so a CAPPED read never
 	// gets far enough to notice that, while an UNCAPPED one reads it all
 	// and still finds the three valid lines already scanned above it.
-	if _, err := io.Copy(w, &zeroReader{n: maxEntrySize + 1 - int64(len(valid))}); err != nil {
+	if _, err := io.Copy(w, &zeroReader{n: source.MaxFileBytes + 1 - int64(len(valid))}); err != nil {
 		t.Fatal(err)
 	}
 	if err := zw.Close(); err != nil {
@@ -467,5 +470,231 @@ func TestParse_RefusesAPomPropertiesPastTheSizeCap(t *testing.T) {
 	if stats.SkippedNoVersion != 1 {
 		t.Errorf("SkippedNoVersion = %d, want 1 -- the size cap must count as a "+
 			"skip, the same as any other unreadable pom.properties", stats.SkippedNoVersion)
+	}
+}
+
+// lowerFileLimit lowers D112's per-file limit for one test and restores it
+// after — internal/source's lowerLimit, which this package cannot reach.
+func lowerFileLimit(t *testing.T, v int64) {
+	t.Helper()
+	prev := source.MaxFileBytes
+	source.MaxFileBytes = v
+	t.Cleanup(func() { source.MaxFileBytes = prev })
+}
+
+// D112's revision: the archive itself is bounded before zip.OpenReader reads
+// its central directory, not only the entries read out of it. The fixture is
+// a real archive; only the limit moves.
+//
+// The exactly-the-limit row is the boundary: a file the size of the limit is
+// inside it, as readEntry's limit+1 read already treats one, so a check
+// written >= refuses an archive the limit allows. And the error is the
+// limit's own sentence, whole — FileLimitError already names the path, so a
+// wrapper of "open <path>: " in front of it says the path twice and turns a
+// size refusal into what reads like an I/O failure.
+func TestParse_RefusesAnArchivePastTheFileLimit(t *testing.T) {
+	path := writeZip(t, "app.jar", []zipEntry{
+		{"META-INF/maven/com.example.archivelimit/limit/pom.properties",
+			pomProps("com.example.archivelimit", "limit", "1.0.0")},
+	})
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("exactly the limit is read", func(t *testing.T) {
+		lowerFileLimit(t, info.Size())
+		pkgs, _, err := Parse(path)
+		if err != nil {
+			t.Fatalf("Parse(archive of exactly the limit): %v", err)
+		}
+		if len(pkgs) != 1 || pkgs[0].Name != "com.example.archivelimit:limit" {
+			t.Errorf("pkgs = %+v, want the one component", pkgs)
+		}
+	})
+
+	t.Run("one byte past the limit is refused", func(t *testing.T) {
+		lowerFileLimit(t, info.Size()-1)
+		pkgs, _, err := Parse(path)
+		if err == nil {
+			t.Fatalf("Parse(archive past the limit) = %+v, nil; want D112's per-file limit error", pkgs)
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "exceeds the") || !strings.Contains(msg, path) {
+			t.Errorf("err = %q, want the limit's error naming %s", msg, path)
+		}
+		if strings.Contains(msg, "open ") {
+			t.Errorf("err = %q, want the limit's sentence unwrapped - it already names the path", msg)
+		}
+		if want := source.FileLimitError(path).Error(); msg != want {
+			t.Errorf("err = %q, want %q", msg, want)
+		}
+	})
+
+	// Order is the subject of the revision, not only presence: the size is
+	// checked BEFORE zip.NewReader, because the central directory is the read
+	// it bounds. Both rows above use a valid archive, so a check moved to after
+	// a successful open still refuses it with the same sentence and they stay
+	// green. This file has the local-header magic and no central directory, so
+	// only a check made first answers with the limit — one made after the open
+	// never runs, and the open's "not a valid zip file" comes out instead.
+	t.Run("past the limit is refused before the central directory is read", func(t *testing.T) {
+		junk := filepath.Join(t.TempDir(), "junk.jar")
+		body := append([]byte{0x50, 0x4b, 0x03, 0x04}, make([]byte, 4096)...)
+		if err := os.WriteFile(junk, body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// Within the limit the open is what fails, which is what makes the row
+		// below able to tell the two orders apart.
+		if _, _, err := Parse(junk); !errors.Is(err, zip.ErrFormat) {
+			t.Fatalf("Parse(fixture within the limit) err = %v, want zip.ErrFormat - the fixture must "+
+				"have no readable central directory", err)
+		}
+
+		lowerFileLimit(t, int64(len(body))-1)
+		_, _, err := Parse(junk)
+		if want := source.FileLimitError(junk).Error(); err == nil || err.Error() != want {
+			t.Errorf("err = %v, want %q - the central directory was read before the size was checked", err, want)
+		}
+	})
+}
+
+// One number, not two that happen to agree (D112's revision): the cap on an
+// entry's decompressed bytes is the same variable as the cap on the archive.
+// Lowering MaxFileBytes alone must move it. A private constant of 512 MiB —
+// what the cap was until the revision — reads this entry in full and catalogs
+// it, because a few KiB is nowhere near 512 MiB.
+//
+// Driven through Parse first, so addComponent's call is held and not only the
+// helper; then readEntryCapped directly for the read-time check's boundary,
+// which Parse's skip count cannot tell apart from the declared-size one.
+func TestEntryCap_IsTheFileLimit(t *testing.T) {
+	const limit = 4 << 10
+	valid := pomProps("com.example.onenumber", "one-number", "1.0.0")
+	body := append(append([]byte{}, valid...), bytes.Repeat([]byte{0}, limit+1-len(valid))...)
+	path := writeZip(t, "one-number.jar", []zipEntry{
+		{"META-INF/maven/com.example.onenumber/one-number/pom.properties", body},
+	})
+	lowerFileLimit(t, limit)
+
+	// Zeros compress to almost nothing, so the archive is far inside the
+	// limit its entry exceeds — the archive check passes and the entry's is
+	// the one under test.
+	if info, err := os.Stat(path); err != nil {
+		t.Fatalf("stat fixture archive: %v", err)
+	} else if info.Size() >= limit {
+		t.Fatalf("fixture archive is %d bytes, want it under the %d limit", info.Size(), limit)
+	}
+	pkgs, stats, err := Parse(path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(pkgs) != 0 || stats.SkippedNoVersion != 1 {
+		t.Errorf("pkgs = %+v, stats = %+v; want the entry past MaxFileBytes refused and "+
+			"counted, not read in full and cataloged", pkgs, stats)
+	}
+
+	data := buildZip(t, []zipEntry{
+		{"at", bytes.Repeat([]byte{'a'}, limit)},
+		{"past", bytes.Repeat([]byte{'a'}, limit+1)},
+	})
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readEntryCapped(zr.File[0]); err != nil {
+		t.Errorf("readEntryCapped(entry of exactly MaxFileBytes): %v, want it read", err)
+	}
+	if _, err := readEntryCapped(zr.File[1]); err == nil {
+		t.Error("readEntryCapped(entry one byte past MaxFileBytes) = nil error, want the cap")
+	}
+}
+
+// The nested half of the same number. recurseIntoNested's readEntryCapped is
+// the only thing that bounds a jar-in-jar before zip.NewReader reads ITS
+// central directory into memory — the archive check in Parse sees only the
+// outer file on disk, and a nested archive is never on disk. So the call is
+// held here, through Parse, and not only the helper: TestEntryCap_IsTheFileLimit
+// drives addComponent's call, and deleting this one left every test green.
+//
+// The inner jar is padded with its zip comment to an exact size, so the two
+// rows sit either side of the limit by one byte: the at-limit one is read and
+// its component cataloged, which is what proves the over-limit one was refused
+// by the cap and not by anything else about the fixture. The outer archive
+// carries an identity of its own so the counts are exact: the inner refusal
+// is the only skip, counted once — a silent drop reads 0, a double count 2.
+// The outer is deflated, so a few KiB of comment costs it almost nothing and
+// Parse's archive check passes in both rows.
+func TestNestedArchive_EntryCapIsTheFileLimit(t *testing.T) {
+	const limit = 4 << 10
+	innerOfSize := func(t *testing.T, size int) []byte {
+		t.Helper()
+		build := func(comment string) []byte {
+			var buf bytes.Buffer
+			zw := zip.NewWriter(&buf)
+			w, err := zw.Create("META-INF/maven/com.example.nestedcap/inner/pom.properties")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := w.Write(pomProps("com.example.nestedcap", "inner", "2.0.0")); err != nil {
+				t.Fatal(err)
+			}
+			if err := zw.SetComment(comment); err != nil {
+				t.Fatal(err)
+			}
+			if err := zw.Close(); err != nil {
+				t.Fatal(err)
+			}
+			return buf.Bytes()
+		}
+		bare := build("")
+		data := build(strings.Repeat("a", size-len(bare)))
+		if len(data) != size {
+			t.Fatalf("inner jar is %d bytes, want exactly %d", len(data), size)
+		}
+		return data
+	}
+
+	for _, tc := range []struct {
+		name          string
+		innerSize     int
+		wantInner     bool
+		wantCataloged int
+		wantSkipped   int
+	}{
+		{"exactly the limit", limit, true, 2, 0},
+		{"one byte past the limit", limit + 1, false, 1, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeZip(t, "outer.jar", []zipEntry{
+				{"META-INF/maven/com.example.nestedcap/outer/pom.properties",
+					pomProps("com.example.nestedcap", "outer", "1.0.0")},
+				{"lib/inner.jar", innerOfSize(t, tc.innerSize)},
+			})
+			lowerFileLimit(t, limit)
+			if info, err := os.Stat(path); err != nil {
+				t.Fatalf("stat fixture archive: %v", err)
+			} else if info.Size() >= limit {
+				t.Fatalf("fixture archive is %d bytes, want it under the %d limit", info.Size(), limit)
+			}
+
+			pkgs, stats, err := Parse(path)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			gotInner := false
+			for _, p := range pkgs {
+				if p.Name == "com.example.nestedcap:inner" {
+					gotInner = true
+				}
+			}
+			if gotInner != tc.wantInner {
+				t.Errorf("inner component cataloged = %v, want %v (pkgs %+v)", gotInner, tc.wantInner, pkgs)
+			}
+			if stats.Components != 2 || stats.Cataloged != tc.wantCataloged || stats.SkippedNoVersion != tc.wantSkipped {
+				t.Errorf("stats = %+v, want Components 2, Cataloged %d, SkippedNoVersion %d",
+					stats, tc.wantCataloged, tc.wantSkipped)
+			}
+		})
 	}
 }

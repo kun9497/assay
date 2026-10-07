@@ -1527,7 +1527,7 @@ holds. The three discovery primitives an image offers refuse its root — `Files
 (`internal/source/under.go:42`, `:148`, `:257`) — so a `node_modules` or a jar at a path nobody
 named in advance cannot be found, and a Go binary has no name to match on at all. Every
 lockfile, jar and binary cataloger takes an OS path rather than bytes (`npmlock.go:56`
-`os.ReadFile`, `jar.go:79` `zip.OpenReader`, `gobinary.go:29` `buildinfo.ReadFile`). And no
+`os.ReadFile`, `jar.go:85` `os.Open`, `gobinary.go:29` `buildinfo.ReadFile`). And no
 cataloger for *installed* packages exists for any target kind: `npmlock` reads a lockfile's
 `node_modules/...` keys, never an installed `package.json`, and nothing reads `*.dist-info`.
 The deferral lived in the roadmap alone; until this entry it had no record here and no

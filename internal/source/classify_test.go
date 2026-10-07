@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -500,4 +501,96 @@ func TestTargetKindString(t *testing.T) {
 	if got := TargetKind(99).String(); !strings.Contains(got, "99") {
 		t.Errorf("TargetKind(99).String() = %q, want something naming the value", got)
 	}
+}
+
+// D112's revision, at the classifier: a file whose name does not say .jar is
+// sniffed by opening its central directory to look for META-INF/, and that
+// open reads every entry header into memory — so the archive's size is checked
+// against the per-file limit first, and a file past it is the limit's error,
+// not the "not a jar" sentence (which would send the reader after a prefix
+// that cannot help: jar: reaches jar.Parse's refusal of the same file).
+//
+// A .jar-named archive past the limit is still classified as a jar: the name
+// settles it without any open, and jar.Parse then refuses it with the same
+// error — so the user sees the limit's sentence exactly once whichever way in.
+//
+// The fixture is padded well past the SBOM sniffs' 512-byte head on purpose.
+// A smaller archive is drained by that head read alone, so with the limit one
+// byte under its size the SBOM sniff reports the limit too, and a classifier
+// that ignored the jar sniff's own verdict would pass here by accident.
+func TestClassify_AnArchivePastTheFileLimitIsTheLimitsError(t *testing.T) {
+	dir := t.TempDir()
+	// writeZip deflates, and a run of one byte deflates to nearly nothing, so
+	// the padding is varied enough to keep the archive past 512 bytes.
+	var pad strings.Builder
+	for i := 0; pad.Len() < 4<<10; i++ {
+		pad.WriteString(strconv.Itoa(i * 7919))
+	}
+	entries := map[string]string{
+		"META-INF/MANIFEST.MF": "Manifest-Version: 1.0\n",
+		"META-INF/pad.txt":     pad.String(),
+	}
+	byContent := filepath.Join(dir, "app.bin")
+	writeZip(t, byContent, entries)
+	byName := filepath.Join(dir, "app.jar")
+	writeZip(t, byName, entries)
+	info, err := os.Stat(byContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() <= 2*512 {
+		t.Fatalf("fixture is %d bytes, want it well past the SBOM sniffs' 512-byte head", info.Size())
+	}
+
+	t.Run("exactly the limit is sniffed", func(t *testing.T) {
+		lowerLimit(t, &MaxFileBytes, info.Size())
+		if got, _, err := Classify(byContent); err != nil || got != TargetJar {
+			t.Fatalf("Classify(archive of exactly the limit) = %v, %v; want jar", got, err)
+		}
+	})
+
+	t.Run("one byte past the limit is the limit's error", func(t *testing.T) {
+		lowerLimit(t, &MaxFileBytes, info.Size()-1)
+		got, _, err := Classify(byContent)
+		if err == nil {
+			t.Fatalf("Classify(archive past the limit) = %v, want D112's per-file limit error", got)
+		}
+		if want := FileLimitError(byContent).Error(); err.Error() != want {
+			t.Errorf("err = %q, want %q", err, want)
+		}
+	})
+
+	t.Run("a .jar name past the limit is left to jar.Parse", func(t *testing.T) {
+		lowerLimit(t, &MaxFileBytes, 1)
+		if got, _, err := Classify(byName); err != nil || got != TargetJar {
+			t.Errorf("Classify(.jar past the limit) = %v, %v; want jar - the name settles it "+
+				"without opening the archive, and jar.Parse refuses it", got, err)
+		}
+	})
+
+	// Order, not only presence: the size is checked BEFORE zip.NewReader reads
+	// the central directory. The rows above use a valid archive, so a check
+	// moved to after a successful open still sees it and they stay green. This
+	// file has the ZIP magic and no central directory: only a check made first
+	// reports the limit; one made after the open never runs, the sniff answers
+	// "not a jar", and Classify falls through to its catch-all sentence.
+	t.Run("past the limit is refused before the central directory is read", func(t *testing.T) {
+		junk := filepath.Join(dir, "junk.bin")
+		body := append([]byte{0x50, 0x4b, 0x03, 0x04}, make([]byte, 4096)...)
+		if err := os.WriteFile(junk, body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// Within the limit the sniff opens it and finds no jar, which is what
+		// makes the row below able to tell the two orders apart.
+		if got, _, err := Classify(junk); err == nil || !strings.Contains(err.Error(), "and not a jar") {
+			t.Fatalf("Classify(fixture within the limit) = %v, %v; want the catch-all - the fixture "+
+				"must have no readable central directory", got, err)
+		}
+
+		lowerLimit(t, &MaxFileBytes, int64(len(body))-1)
+		_, _, err := Classify(junk)
+		if want := FileLimitError(junk).Error(); err == nil || err.Error() != want {
+			t.Errorf("err = %v, want %q - the central directory was read before the size was checked", err, want)
+		}
+	})
 }

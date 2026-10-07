@@ -1489,7 +1489,7 @@ catalogs OS packages only"(로드맵, D70). 그 뒤 D99가 Bitnami의 마커를 
 (`internal/source/under.go:42`, `:148`, `:257`) 미리 이름 붙여두지 않은 경로의
 `node_modules`나 jar는 찾을 수 없고, Go 바이너리는 애초에 매칭할 이름 자체가 없습니다.
 모든 lockfile·jar·바이너리 cataloger는 바이트가 아니라 OS 경로를 받습니다(`npmlock.go:56`의
-`os.ReadFile`, `jar.go:79`의 `zip.OpenReader`, `gobinary.go:29`의 `buildinfo.ReadFile`).
+`os.ReadFile`, `jar.go:85`의 `os.Open`, `gobinary.go:29`의 `buildinfo.ReadFile`).
 그리고 *설치된* 패키지를 위한 cataloger는 어떤 대상 종류에도 존재하지 않습니다: `npmlock`은
 lockfile의 `node_modules/...` 키를 읽을 뿐 설치된 `package.json`은 절대 읽지 않고,
 `*.dist-info`는 아무것도 읽지 않습니다. 이 미룸은 로드맵에만 존재했고, 이 항목이 생기기

@@ -18,32 +18,24 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"github.com/kun9497/assay/internal/pkgmeta"
+	"github.com/kun9497/assay/internal/source"
 )
 
-const (
-	// maxNestedDepth caps how many levels of jar-in-jar nesting Parse follows.
-	// The outer archive Parse opens is depth 0; a nested jar found inside it is
-	// depth 1, and so on. An entry that would be depth 4 or deeper (a jar
-	// found inside a jar inside a jar inside the outer one) is a counted skip
-	// rather than followed forever — Spring Boot's BOOT-INF/lib/*.jar is depth
-	// 1, so 3 levels covers every real packaging shape seen and still bounds a
-	// crafted or accidentally self-referential archive to a fixed amount of
-	// work.
-	maxNestedDepth = 3
-
-	// maxEntrySize caps how large a single zip entry's DECOMPRESSED content
-	// may be before Parse reads it into memory. A zip entry's declared and
-	// actual size are both attacker-controlled — a small compressed entry can
-	// claim, or actually inflate to, an enormous decompressed size (a "zip
-	// bomb") — so this is checked against the entry's declared size before
-	// allocating, and enforced again while copying in case the header lied.
-	maxEntrySize = 512 * 1024 * 1024 // 512 MiB
-)
+// maxNestedDepth caps how many levels of jar-in-jar nesting Parse follows.
+// The outer archive Parse opens is depth 0; a nested jar found inside it is
+// depth 1, and so on. An entry that would be depth 4 or deeper (a jar
+// found inside a jar inside a jar inside the outer one) is a counted skip
+// rather than followed forever — Spring Boot's BOOT-INF/lib/*.jar is depth
+// 1, so 3 levels covers every real packaging shape seen and still bounds a
+// crafted or accidentally self-referential archive to a fixed amount of
+// work.
+const maxNestedDepth = 3
 
 // jarLocationSeparator joins an outer archive's path with the path of a
 // nested archive entry inside it, one level at a time, so a component found
@@ -75,18 +67,43 @@ const (
 // a false negative clearing one they do, either way silent. It is counted
 // instead, the same "loud skip, not a guess" rule pom.properties missing one
 // of its three required keys gets below.
+//
+// The archive itself is bounded before its central directory is read (D112's
+// 2026-10-07 revision). The cataloger's own caps — maxNestedDepth and
+// readEntryCapped's — bound what is read OUT of an archive, and nothing
+// bounded the archive: zip.NewReader (what zip.OpenReader wraps) reads the
+// whole central directory into memory, one header per entry, and a crafted
+// archive carries millions of entries in a few hundred megabytes, so the
+// memory committed here was proportional to a size nothing had looked at. An
+// archive past source.MaxFileBytes is the same FileLimitError any over-limit
+// file is, returned bare: it already names the path, and an "open <path>:" in
+// front would say the path twice and dress a size refusal as an I/O failure.
+//
+// The size comes from the open handle rather than a Stat of the name, so the
+// file measured is the file read.
 func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, error) {
-	zrc, err := zip.OpenReader(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, cyclonedx.Stats{}, fmt.Errorf("open %s: %w", path, err)
 	}
-	defer zrc.Close()
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, cyclonedx.Stats{}, fmt.Errorf("open %s: %w", path, err)
+	}
+	if info.Size() > source.MaxFileBytes {
+		return nil, cyclonedx.Stats{}, source.FileLimitError(path)
+	}
+	zr, err := zip.NewReader(f, info.Size())
+	if err != nil {
+		return nil, cyclonedx.Stats{}, fmt.Errorf("open %s: %w", path, err)
+	}
 
 	var (
 		pkgs  []pkgmeta.Package
 		stats cyclonedx.Stats
 	)
-	parseArchive(&zrc.Reader, path, 0, &pkgs, &stats)
+	parseArchive(zr, path, 0, &pkgs, &stats)
 
 	sortPackages(pkgs)
 	return pkgs, stats, nil
@@ -139,8 +156,8 @@ func parseArchive(zr *zip.Reader, location string, depth int, pkgs *[]pkgmeta.Pa
 // rather than a silent drop or a truncated read — "exceeding either [cap] is
 // a counted skip naming the entry, never silent truncation" is D70's own
 // requirement, and f.Name is what the surrounding doc comments on
-// maxNestedDepth and maxEntrySize name when explaining why a given entry hit
-// one.
+// maxNestedDepth and readEntryCapped name when explaining why a given entry
+// hit one.
 //
 // A successful recursion does NOT increment stats.Components for the nested
 // entry itself: parseArchive's own recursive call already accounts for
@@ -220,16 +237,26 @@ func addComponent(f *zip.File, location string, pkgs *[]pkgmeta.Package, stats *
 }
 
 // readEntryCapped reads f's full decompressed content, refusing anything
-// larger than maxEntrySize. The check runs twice: once against f's declared
+// larger than source.MaxFileBytes. A zip entry's declared and actual size are
+// both attacker-controlled — a small compressed entry can claim, or actually
+// inflate to, an enormous decompressed size (a "zip bomb").
+//
+// The cap is the same variable the archive is checked against in Parse, not
+// a constant of equal value (D112's revision): it was 512 MiB here since D61
+// and D112 adopted that number for every file a scan reads, so two spellings
+// of it could only ever drift apart.
+//
+// The check runs twice: once against f's declared
 // UncompressedSize64 before any allocation (cheap, and enough to refuse an
 // entry that is honest about being oversized), and again while copying, in
 // case the declared size understates what actually comes out — never
 // silently truncated in either case, an oversized entry is always an error
 // the caller turns into a counted skip.
 func readEntryCapped(f *zip.File) ([]byte, error) {
-	if f.UncompressedSize64 > maxEntrySize {
+	limit := source.MaxFileBytes
+	if f.UncompressedSize64 > uint64(limit) {
 		return nil, fmt.Errorf("%s: declared decompressed size %d exceeds the %d byte cap",
-			f.Name, f.UncompressedSize64, maxEntrySize)
+			f.Name, f.UncompressedSize64, limit)
 	}
 
 	rc, err := f.Open()
@@ -241,16 +268,16 @@ func readEntryCapped(f *zip.File) ([]byte, error) {
 	// io.LimitReader lets one byte past the cap through and then stops (with
 	// a plain io.EOF, indistinguishable from a genuinely short stream) rather
 	// than erroring on its own — so the length is what is checked below, not
-	// whether ReadAll returned an error. Reading maxEntrySize+1 rather than
-	// exactly maxEntrySize is what makes an entry whose actual output exceeds
+	// whether ReadAll returned an error. Reading limit+1 rather than
+	// exactly limit is what makes an entry whose actual output exceeds
 	// the declared size (a lying header) still detectable instead of being
 	// silently truncated to precisely the cap.
-	data, err := io.ReadAll(io.LimitReader(rc, maxEntrySize+1))
+	data, err := io.ReadAll(io.LimitReader(rc, limit+1))
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", f.Name, err)
 	}
-	if int64(len(data)) > maxEntrySize {
-		return nil, fmt.Errorf("%s: decompressed size exceeds the %d byte cap", f.Name, maxEntrySize)
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%s: decompressed size exceeds the %d byte cap", f.Name, limit)
 	}
 	return data, nil
 }

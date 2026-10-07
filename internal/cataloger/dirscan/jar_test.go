@@ -10,7 +10,10 @@ import (
 	"archive/zip"
 	"bytes"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/kun9497/assay/internal/source"
 )
 
 // buildJar returns the raw bytes of a minimal jar archive naming one Maven
@@ -208,5 +211,57 @@ func TestParse_NestedJarLocationKeepsItsCompositeSuffixAfterRelocation(t *testin
 	if location != wantLoc {
 		t.Errorf("location = %q, want %q - the repo-relative outer path with the "+
 			"nested entry's path still appended", location, wantLoc)
+	}
+}
+
+// D112's revision, met inside a dir: scan: a jar past the per-file limit is
+// the counted skip D109 reports — Unread, Failed, the limit's own sentence as
+// the reason — and the rest of the tree is still read. The directory is the
+// operator's, so one oversized archive in it costs that archive, not the scan's
+// other manifests; Failed is what still carries the scan to exit 2, because
+// a jar nobody looked inside is dependencies nobody judged.
+//
+// The limit sits between the two files' sizes, so the requirements.txt beside
+// the jar is a file the same limit lets through: a check that refused every
+// file, or none, turns one half of this red.
+func TestParse_AJarPastTheFileLimitIsAFailedSkipAndTheRestIsRead(t *testing.T) {
+	jarBody := buildJar(t, "com.example.dirscanlimit", "limit-fixture", "1.0.0")
+	root := writeTree(t, map[string]string{
+		"lib/big.jar":      string(jarBody),
+		"requirements.txt": "Django==3.2.12\n",
+	})
+	prev := source.MaxFileBytes
+	source.MaxFileBytes = int64(len(jarBody)) - 1
+	t.Cleanup(func() { source.MaxFileBytes = prev })
+
+	target, _, found, err := Parse(root)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(found.Unread) != 1 {
+		t.Fatalf("Unread = %+v, want exactly the oversized jar", found.Unread)
+	}
+	u := found.Unread[0]
+	if u.Path != "lib/big.jar" {
+		t.Errorf("Unread path = %q, want lib/big.jar", u.Path)
+	}
+	if !u.Failed {
+		t.Error("Failed = false; an oversized jar is one this scan saw none of the " +
+			"dependencies of, which must reach exit 2 (AnyFailed -> scancmd)")
+	}
+	if want := source.FileLimitError(filepath.Join(root, "lib", "big.jar")).Error(); u.Reason != want {
+		t.Errorf("Unread reason = %q, want %q", u.Reason, want)
+	}
+	var sawDjango bool
+	for _, p := range target.Packages {
+		if strings.EqualFold(p.Name, "django") && p.Version == "3.2.12" {
+			sawDjango = true
+		}
+		if strings.Contains(p.Name, "limit-fixture") {
+			t.Errorf("the oversized jar was read anyway: %+v", p)
+		}
+	}
+	if !sawDjango {
+		t.Errorf("requirements.txt beside the oversized jar was not read: %+v", target.Packages)
 	}
 }

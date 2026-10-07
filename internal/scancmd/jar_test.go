@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/source"
 	"github.com/kun9497/assay/internal/store"
 )
 
@@ -166,4 +167,89 @@ func TestRun_APlainZipTargetErrorsNamingJarAmongTheCandidateKinds(t *testing.T) 
 	if !strings.Contains(errOut.String(), "jar:") {
 		t.Errorf("stderr does not name the jar: override prefix:\n%s", errOut.String())
 	}
+}
+
+// D112's revision: a jar past the per-file limit is refused before its central
+// directory is read, and the scan says so as exit 2 naming the file and the
+// number — the limit's own sentence, once. Three ways in, because each reaches
+// the check by a different route: jar: skips the classifier, a .jar name is
+// settled by the classifier without opening the archive (so jar.Parse is what
+// refuses it), and a name that says nothing is refused by the classifier's
+// own content sniff before it opens the central directory to look for
+// META-INF/.
+//
+// The limit is the fixture's own size minus one, so nothing about the fixture
+// but its size is what is refused. The fixture carries a stored padding entry
+// that keeps it well past the SBOM sniffs' 512-byte head: a smaller archive
+// is drained by that head read alone, the SBOM sniff then reports the limit
+// too, and the third row would pass with the jar sniff's size check gone.
+func TestRun_AJarPastTheFileLimitExitsTwoNamingTheLimit(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		file   string
+		prefix string
+	}{
+		{"an explicit jar: prefix", "component.bin", "jar:"},
+		{"a bare path named .jar", "app.jar", ""},
+		{"a bare path whose name says nothing", "app.bin", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writePaddedJarFixture(t, tt.file)
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Size() <= 2*512 {
+				t.Fatalf("fixture is %d bytes, want it well past the SBOM sniffs' 512-byte head", info.Size())
+			}
+			lowerLimit(t, &source.MaxFileBytes, info.Size()-1)
+			want := source.FileLimitError(path).Error()
+
+			db := buildMavenDB(t, "com.example.limitfixture:limit-fixture")
+			var out, errOut bytes.Buffer
+			if code := Run(context.Background(), db, tt.prefix+path, Options{}, &out, &errOut); code != 2 {
+				t.Fatalf("Run = %d, want 2 - a jar past the per-file limit is a scan that "+
+					"could not run; stderr:\n%s", code, errOut.String())
+			}
+			// The whole line, not the sentence alone: a wrapper in front of
+			// it ("open <path>: ...") still contains the sentence once.
+			if got := strings.Count(errOut.String(), "error: "+want); got != 1 {
+				t.Errorf("stderr carries the line %q %d time(s), want exactly once:\n%s", want, got, errOut.String())
+			}
+			if strings.Contains(out.String(), "exceeds the") {
+				t.Errorf("the limit error leaked onto stdout:\n%s", out.String())
+			}
+		})
+	}
+}
+
+// writePaddedJarFixture is writeJarFixture's archive plus a 2 KiB entry stored
+// uncompressed, for TestRun_AJarPastTheFileLimitExitsTwoNamingTheLimit — see
+// its comment for why the size matters.
+func writePaddedJarFixture(t *testing.T, name string) string {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create("META-INF/maven/com.example.limitfixture/limit-fixture/pom.properties")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("groupId=com.example.limitfixture\nartifactId=limit-fixture\nversion=1.0.0\n")); err != nil {
+		t.Fatal(err)
+	}
+	w, err = zw.CreateHeader(&zip.FileHeader{Name: "META-INF/pad", Method: zip.Store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write(bytes.Repeat([]byte{'x'}, 2<<10)); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, buf.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
