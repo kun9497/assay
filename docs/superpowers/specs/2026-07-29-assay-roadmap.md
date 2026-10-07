@@ -4554,6 +4554,64 @@ fewer moving part.
 
 ---
 
+### D115 — A provider declares an upstream key rename, and the carry-forward and the publish guard both honour the declaration
+
+**Decision.** A provider may declare that an ecosystem key it used to emit has been
+*renamed* upstream: `Provenance.Renamed` maps the old key to the new one, filled from a
+static table inside the provider (the OSV provider's first entry is `Echo:PyPi` →
+`Echo:PyPI`), never from a flag. The declaration has effect in exactly two places. (1) The
+seeded build's carry-forward (D110): a key the provider declared in the seed and emits
+nothing for this run — the whole-key condition, the one that would otherwise freeze it — is
+*not* carried when the provider declares it renamed and the new key is live under the same
+provider this run; the per-key count line says so, with the seed's record count and how many
+of those records also sit under the new key. (2) The publish guard (#135): a key the
+published artifact covers and the candidate lacks is accepted — not refused as a narrowing —
+only when the candidate's coverage annotation declares it renamed, the new key is present in
+the candidate, and the new key's record count is at least the old key's. Every other missing
+key is refused exactly as before. `db status` prints a `renamed:` line; the key leaves the
+`frozen:` line on the first build that applies the declaration. The artifact's
+`advisory-coverage` annotation gains the `renamed` map (additive; no schema bump on either
+side).
+
+**Why.** OSV renamed Echo's language-qualified key from `Echo:PyPi` to `Echo:PyPI` in
+August; the provider stopped emitting the old spelling and D110, seeing a declared key with
+nothing emitted, carried it forward as frozen since 2026-08-19 — the mechanism working as
+designed on a case it was not designed for. The result is a key that `db status` reports as a
+stopped feed when it is a spelling, 467 records that are dead weight (both spellings are
+unreachable from a scan: a Python package catalogs as `PyPI`, never as `Echo:PyPi`), and a
+guard that would refuse any build without it. Measured on the 2026-10-04 artifact: of the
+467 records under the old key, 445 also sit under the new key by the same ID; of the 22 that
+do not, 21 are records the upstream either no longer emits at all (gitpython, last modified
+before the freeze) or re-homed under the bare `Echo` key with the deb package name
+(`Echo/python-aiohttp`, the key an Echo image scan actually reaches), and 1 is covered
+elsewhere in its own record. Nothing a scan can reach is lost by retiring the old key.
+
+**Why a declaration and not a merge, a force, or a drop list.** Merging the old key's
+entries into the new one (the first shape considered) would re-add entries the upstream
+withdrew or moved, against D16's spirit — the measurement above is what ruled it out. A
+one-time `db push --force` would solve this instance and record nothing; the next rename
+would be manual again, and #135 exists so that force is never the routine. A provider-side
+drop list alone would stop the carry but still trip the guard, because the guard reads the
+artifact's annotations, not the provider's code. The declaration is one fact written once
+in the place that knows it (the provider), read by both mechanisms that need it, and
+auditable in the published annotation.
+
+**Why the guard's condition is narrow.** The guard accepts the missing key only when the
+candidate names its replacement and the replacement holds at least as many records: a
+rename that lost records would be refused like any other narrowing, and a declaration
+pointing at a key the candidate does not hold is a narrowing with a label. The condition
+the carry-forward applies — old key declared in the seed, nothing emitted for it, new key
+live — is the same "upstream stopped serving the old spelling" fact the guard is checking
+from the other side.
+
+**What stays out.** Pure retirement — dropping a key with no successor — is not opened by
+this decision. D110's position stands: a database that must scan images of unknown age
+keeps every release it ever covered, and `Ubuntu:23.10`'s 28 records are not a cost worth
+a mechanism that could also drop `Debian:11`'s 46,364. A rename declares a successor; a
+retirement would not, and that is the line.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

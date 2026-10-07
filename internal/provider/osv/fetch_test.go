@@ -958,3 +958,51 @@ func TestFetch_AlpaquitaCoversBellSoftHardenedContainersToo(t *testing.T) {
 			"record sitting in the store", prov.Ecosystems)
 	}
 }
+
+// D115: Fetch declares the Echo rename from the static table, and only when
+// the successor is a key this run actually covers. An Echo archive that
+// yields only bare "Echo" records has no "Echo:PyPI" to name as a successor,
+// and declaring one anyway would tell the carry-forward and the publish guard
+// that the old key's data lives somewhere this database does not hold.
+func TestFetch_D115_DeclaresEchoRenameOnlyWhenTheSuccessorIsCovered(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		records map[string]string
+		want    map[string]string
+	}{
+		{"successor covered", map[string]string{
+			"ECHO-1.json": `{"id":"ECHO-1","affected":[{"package":{"name":"requests","ecosystem":"Echo:PyPI"},
+				"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"2.32.0"}]}]}]}`,
+			"ECHO-2.json": `{"id":"ECHO-2","affected":[{"package":{"name":"curl","ecosystem":"Echo"},
+				"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"8.0.0"}]}]}]}`,
+		}, map[string]string{"Echo:PyPi": "Echo:PyPI"}},
+		{"successor not covered", map[string]string{
+			"ECHO-2.json": `{"id":"ECHO-2","affected":[{"package":{"name":"curl","ecosystem":"Echo"},
+				"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"8.0.0"}]}]}]}`,
+		}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := zipWith(t, tc.records)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/Echo/all.zip" {
+					http.NotFound(w, r)
+					return
+				}
+				w.Write(body)
+			}))
+			defer srv.Close()
+			prov, err := New([]string{"Echo"}, srv.URL).Fetch(context.Background(), func(advisory.Advisory) error { return nil })
+			if err != nil {
+				t.Fatalf("Fetch: %v", err)
+			}
+			if len(prov.Renamed) != len(tc.want) {
+				t.Fatalf("Provenance.Renamed = %v, want %v", prov.Renamed, tc.want)
+			}
+			for k, v := range tc.want {
+				if prov.Renamed[k] != v {
+					t.Errorf("Provenance.Renamed = %v, want %v", prov.Renamed, tc.want)
+				}
+			}
+		})
+	}
+}

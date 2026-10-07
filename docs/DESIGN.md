@@ -710,6 +710,12 @@ exited 0 while 24 findings went unmentioned.
 - [x] SLES LTSS folded with a mainline-wins tie-break (D91) — post-EOL fixes surface
       under the same key (bci-base 121→286 findings, curl shows its real FIXED IN),
       385,621 shadowed twins dropped and counted
+- [x] A provider declares an upstream key rename (D115) — `Provenance.Renamed` from a
+      static table in the provider (`Echo:PyPi` → `Echo:PyPI` first); the carry-forward
+      does not freeze a declared-renamed key whose successor is live, and the publish guard
+      accepts the missing key only when the candidate's annotation declares the successor
+      and the successor holds at least as many records. `db status` prints `renamed:`.
+      Pure retirement (no successor) stays closed.
 - [x] A candidate database holds the regression floors before it is published (D114) —
       `db-publish.yml` runs `scandiff -regressions-only` against the candidate (via
       `ASSAY_DB_DIR`) between `db build` and `db push`; a `minAgree`/`minFindings`/

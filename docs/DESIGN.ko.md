@@ -683,6 +683,12 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] SLES LTSS를 mainline-wins 동점 처리로 접음 (D91) — post-EOL fix가 같은 키
       아래서 드러남(bci-base finding 121→286건, curl이 진짜 FIXED IN을 보여줌),
       가려졌던 쌍둥이 385,621건을 버려서 셈
+- [x] provider가 upstream의 키 이름 변경을 선언한다 (D115) — provider 안의 정적 테이블에서
+      채워지는 `Provenance.Renamed`(`Echo:PyPi` → `Echo:PyPI`가 첫 항목); carry-forward는
+      후속 키가 live인, 이름 변경이 선언된 키를 동결하지 않고, publish 가드는 후보의
+      annotation이 후속 키를 선언하고 후속 키가 최소한 같은 수의 레코드를 가질 때에만 빠진
+      키를 받아들인다. `db status`는 `renamed:`를 출력한다. 순수한 퇴역(후속 키 없음)은
+      닫힌 채로 남는다.
 - [x] 후보 데이터베이스는 발행되기 전에 회귀 floor를 통과해야 한다 (D114) —
       `db-publish.yml`이 `db build`와 `db push` 사이에서 후보를 대상으로(`ASSAY_DB_DIR`을
       통해) `scandiff -regressions-only`를 실행한다; `minAgree`/`minFindings`/
