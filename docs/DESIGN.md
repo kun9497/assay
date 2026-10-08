@@ -710,6 +710,10 @@ exited 0 while 24 findings went unmentioned.
 - [x] SLES LTSS folded with a mainline-wins tie-break (D91) — post-EOL fixes surface
       under the same key (bci-base 121→286 findings, curl shows its real FIXED IN),
       385,621 shadowed twins dropped and counted
+- [x] One database writer at a time (D116) — `db build` and `db update` take an OS file
+      lock on `<dbPath>.lock` (flock / LockFileEx via `x/sys`) before touching
+      `<dbPath>.tmp` and hold it through the rename; a second writer exits 2 at once naming
+      the lock; readers never look at it; a crashed writer releases it by dying.
 - [x] A provider declares an upstream key rename (D115) — `Provenance.Renamed` from a
       static table in the provider (`Echo:PyPi` → `Echo:PyPI` first); the carry-forward
       does not freeze a declared-renamed key whose successor is live, and the publish guard
@@ -1244,8 +1248,8 @@ enough metadata to recover a dependency list; Rust does only when built with
 `cargo-auditable`; stripped C/C++ leaves nothing reliable. Support is decided per language
 rather than promised as a category.
 
-What is still absent — application packages inside container images (D70), pep440
-leniency, a lock on the database's `.tmp` writer — is deliberate.
+What is still absent — application packages inside container images (D70) and pep440
+leniency — is deliberate.
 [`docs/deferred-decisions.md`](deferred-decisions.md) records what was postponed, why,
 what should trigger revisiting it, and which groundwork is already in place; most of its
 early entries (Debian and RHEL support, VEX, the prebuilt artifact, age enforcement) have

@@ -1877,6 +1877,13 @@ degrade해야 합니다** — 해당 패키지를 건너뛴 것으로 보고할 
 데이터베이스 크기를 지배할 수 있습니다. `ranges`가 있으면 나열은 파생 가능하지만, 없으면 그것이
 유일한 매칭 데이터이므로 **어떤 정리든 조건부여야 합니다.** 슬라이스 2에서 측정 후 결정.
 
+**2026-10-07에 D116으로 해결됨.** `<dbPath>.lock`의 OS 파일 락이 이제 두 writer를 직렬화한다:
+`db build`와 `db update`는 `<dbPath>.tmp`를 건드리기 전에 락을 잡고 rename이 끝날 때까지
+쥐며, 두 번째 writer는 기다리지 않고 즉시 종료 코드 2로 끝난다. `PullSeed`는 private 임시
+디렉터리에 쓰므로 락 없이 그대로이다. 아래 항목은 수정 전에 추적한 내용의 기록으로 남겨 둔다;
+끝부분의 "수정 모양" — 프로세스별 고유 임시 이름 더하기 writer 락 — 은 대체되었다. D116은
+락만 택했고 락 아래에서는 고유 이름이 보태는 것이 없다고 말한다.
+
 **동시에 실행되는 `db build`와 `db update` writer가 `<dbPath>.tmp`를 공유한다.** 하나의
 `ASSAY_DB_DIR`를 가리키는 두 데이터베이스 writer가 똑같은 임시 파일 이름을 씁니다.
 `dbcmd.Update`(`internal/dbcmd/dbcmd.go:139`, `assay db build` 뒤에 있음)와 `dbcmd.Pull`

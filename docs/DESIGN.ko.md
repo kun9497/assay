@@ -683,6 +683,10 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] SLES LTSS를 mainline-wins 동점 처리로 접음 (D91) — post-EOL fix가 같은 키
       아래서 드러남(bci-base finding 121→286건, curl이 진짜 FIXED IN을 보여줌),
       가려졌던 쌍둥이 385,621건을 버려서 셈
+- [x] 데이터베이스 writer는 한 번에 하나 (D116) — `db build`와 `db update`는
+      `<dbPath>.tmp`를 건드리기 전에 `<dbPath>.lock`의 OS 파일 락(`x/sys`를 통한 flock /
+      LockFileEx)을 잡고 rename까지 쥔다; 두 번째 writer는 락 이름을 밝히며 즉시 종료 코드 2로
+      끝난다; 리더는 락을 보지 않는다; 죽은 writer는 죽으면서 락을 놓는다.
 - [x] provider가 upstream의 키 이름 변경을 선언한다 (D115) — provider 안의 정적 테이블에서
       채워지는 `Provenance.Renamed`(`Echo:PyPi` → `Echo:PyPI`가 첫 항목); carry-forward는
       후속 키가 live인, 이름 변경이 선언된 키를 동결하지 않고, publish 가드는 후보의
@@ -1200,8 +1204,8 @@ Alpine 발견 10건 중 **6건**은 소스 패키지를 거쳐야만 도달합�
 C/C++는 신뢰할 만한 것을 남기지 않습니다. 지원 여부는 카테고리로 약속하지 않고 언어별로
 판단합니다.
 
-아직 없는 것들 — 컨테이너 이미지 안의 애플리케이션 패키지(D70), pep440 관용, 데이터베이스
-`.tmp` writer의 잠금 — 은 의도된 것입니다.
+아직 없는 것들 — 컨테이너 이미지 안의 애플리케이션 패키지(D70)와 pep440 관용 — 은
+의도된 것입니다.
 [`docs/deferred-decisions.ko.md`](deferred-decisions.ko.md)에 무엇을 왜 미뤘는지, 무엇이
 재검토를 촉발해야 하는지, 어떤 사전 작업이 이미 되어 있는지가 기록되어 있습니다; 초기
 항목 대부분(Debian·RHEL 지원, VEX, 사전 빌드된 아티팩트, 나이 강제)은 그 뒤로 구현되었고,

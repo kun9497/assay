@@ -432,3 +432,132 @@ func TestPull_UnattributedArtifactKeepsTheBareLine(t *testing.T) {
 		t.Errorf("stderr = %q, must not attribute when the artifact carries no source", got)
 	}
 }
+
+// D116 for `db update`: a pull into a database another writer holds is
+// refused at once, after the manifest is read but before anything is
+// written -- neither the live database nor the holder's temp file changes.
+func TestPull_RefusesWhenAnotherWriterHoldsTheLock(t *testing.T) {
+	ref := published(t, store.SchemaVersion)
+	dst := pushable(t, time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC))
+	live, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	holdWriterLock(t, dst)
+	inFlight := plantInFlightTemp(t, dst)
+
+	var out, errOut bytes.Buffer
+	code := within(t, 10*time.Second, func() int {
+		return Pull(context.Background(), dst, ref, &out, &errOut)
+	})
+	if code != 2 {
+		t.Fatalf("Pull while another writer holds the lock = %d, want 2 (stderr: %s)", code, errOut.String())
+	}
+	want := "error: another assay process is writing this database (lock held: " + dst +
+		".lock); wait for it to finish or stop it, then rerun"
+	if !strings.Contains(errOut.String(), want) {
+		t.Errorf("stderr does not carry the busy refusal naming the lock file:\n%s\nwant a line containing:\n%s",
+			errOut.String(), want)
+	}
+	assertUnchanged(t, dst, live, "the live database")
+	assertUnchanged(t, dst+".tmp", inFlight, "the lock holder's temp file")
+}
+
+// A pull lets go of the lock once the database is installed. The database
+// directory does not exist yet, as on a machine's first `assay db update`:
+// the lock file sits beside the database, so a lock taken before MkdirAll
+// fails to open it and refuses the very first pull. Every other Pull test
+// writes into an existing t.TempDir(), where that ordering is invisible.
+func TestPull_ReleasesTheLockAfterInstall(t *testing.T) {
+	ref := published(t, store.SchemaVersion)
+	dst := filepath.Join(t.TempDir(), "fresh", "sub", "vulnerability.db")
+	var out, errOut bytes.Buffer
+	if code := Pull(context.Background(), dst, ref, &out, &errOut); code != 0 {
+		t.Fatalf("Pull = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	if _, err := os.Stat(dst + ".lock"); err != nil {
+		t.Errorf("the lock file is gone after a successful pull: %v", err)
+	}
+	release, err := acquireWriterLock(dst)
+	if err != nil {
+		t.Fatalf("the writer lock is still held after a successful Pull: %v", err)
+	}
+	release()
+}
+
+// Pull's failure path releases too, and the rename runs under the lock:
+// the same two holds as TestUpdate_ReleasesTheLockAfterAFailedInstall. Its
+// own test because the release is Pull's own defer, not Update's. Without
+// it, a Pull that let go only on success stayed green on Linux: the one
+// signal on Windows was t.TempDir's cleanup failing to delete the lock file
+// a leaked handle still held open, and Linux unlinks an open file happily.
+func TestPull_ReleasesTheLockAfterAFailedInstall(t *testing.T) {
+	origWaits, origRename := replaceWaits, renameFn
+	t.Cleanup(func() { replaceWaits, renameFn = origWaits, origRename })
+	replaceWaits = make([]time.Duration, len(replaceWaits))
+
+	ref := published(t, store.SchemaVersion)
+	dst := filepath.Join(t.TempDir(), "vulnerability.db")
+	var attempts *int
+	renameFn, attempts = failingRenameThatProbesTheLock(t, dst)
+
+	var out, errOut bytes.Buffer
+	if code := Pull(context.Background(), dst, ref, &out, &errOut); code != 2 {
+		t.Fatalf("Pull with a failing rename = %d, want 2 (stderr: %s)", code, errOut.String())
+	}
+	if *attempts == 0 {
+		t.Fatalf("Pull never reached the rename, so nothing checked the lock was held across it (stderr: %s)",
+			errOut.String())
+	}
+	release, err := acquireWriterLock(dst)
+	if err != nil {
+		t.Fatalf("the writer lock is still held after a failed Pull: %v", err)
+	}
+	release()
+}
+
+// The lock is taken after the manifest checks, not before: a pull refused
+// for a schema mismatch has written nothing, so it has no business creating
+// the lock file.
+func TestPull_ASchemaRefusalNeverReachesTheLock(t *testing.T) {
+	ref := published(t, store.SchemaVersion+1)
+	dst := filepath.Join(t.TempDir(), "vulnerability.db")
+	var out, errOut bytes.Buffer
+	if code := Pull(context.Background(), dst, ref, &out, &errOut); code != 2 {
+		t.Fatalf("Pull of a foreign schema = %d, want 2 (stderr: %s)", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "but this assay reads v") {
+		t.Errorf("stderr does not carry the schema refusal:\n%s", errOut.String())
+	}
+	if _, err := os.Stat(dst + ".lock"); !os.IsNotExist(err) {
+		t.Errorf("a pull refused for its schema created the lock file (stat err: %v)", err)
+	}
+}
+
+// PullSeed is not a writer of the live database: its only caller hands it a
+// path inside a fresh private temp directory (cmd/assay), so D116 leaves it
+// alone. Driven for real with the lock held on the very path it writes --
+// the strongest form of "does not consult the lock" -- because a seed fetch
+// that refused here would fail the nightly build over a lock it can never
+// actually contend on.
+func TestPullSeed_DoesNotTakeTheWriterLock(t *testing.T) {
+	host := registryHost(t)
+	curRef := fmt.Sprintf("%s/assay-db:v%d", host, store.SchemaVersion)
+	seed(t, curRef, time.Time{}, 5)
+
+	dst := filepath.Join(t.TempDir(), "seed.db")
+	holdWriterLock(t, dst)
+
+	var out, errOut bytes.Buffer
+	code := within(t, 10*time.Second, func() int {
+		return PullSeed(context.Background(), dst, curRef, &out, &errOut)
+	})
+	if code != 0 {
+		t.Fatalf("PullSeed with a writer lock held on its path = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	db, err := store.Open(dst)
+	if err != nil {
+		t.Fatalf("the seed did not land: %v", err)
+	}
+	db.Close()
+}

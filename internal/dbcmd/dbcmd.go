@@ -145,6 +145,16 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 		fmt.Fprintf(stderr, "error: create database directory: %v\n", err)
 		return 2
 	}
+	// D116: one writer at a time, taken before the first touch of tmp --
+	// the os.Remove below is exactly the call that, unguarded, unlinked
+	// another writer's in-flight build on Linux. Released by defer, so it
+	// spans the rename and every failure return in between.
+	release, err := acquireWriterLock(dbPath)
+	if err != nil {
+		writerLockFailed(stderr, err)
+		return 2
+	}
+	defer release()
 	tmp := dbPath + ".tmp"
 	_ = os.Remove(tmp)
 
