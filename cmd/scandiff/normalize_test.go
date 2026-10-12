@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"maps"
 	"testing"
 )
 
@@ -543,5 +544,128 @@ func TestBridgeBareIDs_DoesNotEnrichUnconditionally(t *testing.T) {
 	bridgeBareIDs(adoc, gdoc, aSet, gSet)
 	if len(aSet) != 1 || len(gSet) != 1 {
 		t.Errorf("aSet=%v gSet=%v, want 1 tuple each -- the CVE already joins them and the advisory id must not be added", aSet, gSet)
+	}
+}
+
+func TestGrypeOnlyAppCounts(t *testing.T) {
+	m := func(name, typ, id string) grypeMatch {
+		return grypeMatch{Artifact: grypeArtifact{Name: name, Type: typ}, Vulnerability: grypeVuln{ID: id}}
+	}
+	cases := []struct {
+		name    string
+		matches []grypeMatch
+		assay   []tuple
+		want    map[string]int
+	}{
+		{"OS types are never counted",
+			[]grypeMatch{m("a", "apk", "CVE-2026-1"), m("b", "deb", "CVE-2026-2"), m("c", "rpm", "CVE-2026-3"), m("d", "alpm", "CVE-2026-4")},
+			nil, map[string]int{}},
+		{"bitnami is inventoried (D99), never counted",
+			[]grypeMatch{m("postgresql", "bitnami", "CVE-2026-5"), m("postgresql", "bitnami", "CVE-2026-6")},
+			nil, map[string]int{}},
+		{"application types counted per type",
+			[]grypeMatch{m("lp", "npm", "CVE-2026-1"), m("lp", "npm", "CVE-2026-2"), m("std", "go-module", "CVE-2026-3"), m("j", "java-archive", "CVE-2026-4")},
+			nil, map[string]int{"npm": 2, "go-module": 1, "java-archive": 1}},
+		{"a tuple assay also has is not grype-only",
+			[]grypeMatch{m("lp", "npm", "CVE-2026-1"), m("lp", "npm", "CVE-2026-2")},
+			[]tuple{{"lp", "CVE-2026-1"}}, map[string]int{"npm": 1}},
+		{"one tuple under two app types counts under each",
+			[]grypeMatch{m("dual", "npm", "CVE-2026-1"), m("dual", "go-module", "CVE-2026-1")},
+			nil, map[string]int{"npm": 1, "go-module": 1}},
+		{"one tuple under an app and an OS type counts under the app type only",
+			[]grypeMatch{m("mixed", "rpm", "CVE-2026-1"), m("mixed", "npm", "CVE-2026-1")},
+			nil, map[string]int{"npm": 1}},
+		{"the same tuple matched twice under one type counts once",
+			[]grypeMatch{m("lp", "npm", "CVE-2026-1"), m("lp", "npm", "CVE-2026-1")},
+			nil, map[string]int{"npm": 1}},
+		{"empty type is an application type under the empty key",
+			[]grypeMatch{m("mystery", "", "CVE-2026-1")},
+			nil, map[string]int{"": 1}},
+		{"CVEs from relatedVulnerabilities carry the match's type",
+			[]grypeMatch{{Artifact: grypeArtifact{Name: "lp", Type: "npm"}, Vulnerability: grypeVuln{ID: "GHSA-xxxx-yyyy-zzzz"},
+				RelatedVulnerabilities: []grypeVuln{{ID: "CVE-2026-1"}, {ID: "CVE-2026-2"}}}},
+			nil, map[string]int{"npm": 2}},
+		{"a bare-ID tuple carries the match's type",
+			[]grypeMatch{m("lp", "npm", "GHSA-xxxx-yyyy-zzzz")},
+			nil, map[string]int{"npm": 1}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			gdoc := grypeDocument{Matches: c.matches}
+			aSet := make(map[tuple]struct{})
+			for _, tp := range c.assay {
+				aSet[tp] = struct{}{}
+			}
+			got := grypeOnlyAppCounts(gdoc, aSet, grypeTuples(gdoc))
+			if !maps.Equal(got, c.want) {
+				t.Errorf("grypeOnlyAppCounts = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// The sets run passes are the bridged ones: a grype-only bare-ID tuple is
+// counted under its match's type, and once bridgeBareIDs has joined it to an
+// assay alias it is not grype-only any more.
+func TestGrypeOnlyAppCounts_BridgedTuples(t *testing.T) {
+	gdoc := grypeDocument{Matches: []grypeMatch{{
+		Artifact:      grypeArtifact{Name: "lp", Type: "npm"},
+		Vulnerability: grypeVuln{ID: "GHSA-qqqq-rrrr-ssss"},
+	}}}
+
+	unjoined := assayDocument{}
+	aSet, gSet := assayTuples(unjoined), grypeTuples(gdoc)
+	bridgeBareIDs(unjoined, gdoc, aSet, gSet)
+	if got, want := grypeOnlyAppCounts(gdoc, aSet, gSet), map[string]int{"npm": 1}; !maps.Equal(got, want) {
+		t.Errorf("unjoined: grypeOnlyAppCounts = %v, want %v", got, want)
+	}
+
+	joined := assayDocument{Findings: []assayFinding{{Package: assayPackage{Name: "lp"},
+		Advisory: assayAdvisory{ID: "OSV-LP-1", Aliases: []string{"CVE-2026-9", "GHSA-qqqq-rrrr-ssss"}}}}}
+	aSet, gSet = assayTuples(joined), grypeTuples(gdoc)
+	bridgeBareIDs(joined, gdoc, aSet, gSet)
+	if got := grypeOnlyAppCounts(gdoc, aSet, gSet); len(got) != 0 {
+		t.Errorf("joined: grypeOnlyAppCounts = %v, want empty -- the bridge joined the only grype tuple", got)
+	}
+}
+
+// A non-CVE id another match only names in its advisories[] does not take
+// that match's type. Match A is an rpm whose only id is RHSA-2026:1, so its
+// tuple is grype-only and rpm; match B is npm, agreed on its CVE, and merely
+// lists RHSA-2026:1 as an advisory. Typing the RHSA tuple from B's
+// advisories (the bridge's vocabulary) would charge an rpm-only tuple to npm.
+func TestGrypeOnlyAppCounts_AdvisoryNameDoesNotLendType(t *testing.T) {
+	gdoc := grypeDocument{Matches: []grypeMatch{
+		{Artifact: grypeArtifact{Name: "foo", Type: "rpm"}, Vulnerability: grypeVuln{ID: "RHSA-2026:1"}},
+		{Artifact: grypeArtifact{Name: "foo", Type: "npm"}, Vulnerability: grypeVuln{
+			ID: "CVE-2026-1", Advisories: []grypeAdvisory{{ID: "RHSA-2026:1"}}}},
+	}}
+	adoc := assayDocument{Findings: []assayFinding{{Package: assayPackage{Name: "foo"},
+		Advisory: assayAdvisory{ID: "OSV-FOO-1", Aliases: []string{"CVE-2026-1"}}}}}
+	aSet, gSet := assayTuples(adoc), grypeTuples(gdoc)
+	bridgeBareIDs(adoc, gdoc, aSet, gSet)
+
+	// The fixture must really leave the RHSA tuple grype-only, or "no npm"
+	// would hold vacuously.
+	if _, inA := aSet[tuple{"foo", "RHSA-2026:1"}]; inA {
+		t.Fatalf("aSet = %v, want the RHSA tuple grype-only", aSet)
+	}
+	if _, inG := gSet[tuple{"foo", "RHSA-2026:1"}]; !inG {
+		t.Fatalf("gSet = %v, want the RHSA tuple present", gSet)
+	}
+	got := grypeOnlyAppCounts(gdoc, aSet, gSet)
+	if n, ok := got["npm"]; ok {
+		t.Errorf("grypeOnlyAppCounts = %v, want no npm entry (got npm=%d) -- the RHSA tuple is A's, an rpm", got, n)
+	}
+}
+
+// The artifact type is read from grype's own field spelling.
+func TestGrypeArtifact_TypeIsRead(t *testing.T) {
+	var doc grypeDocument
+	if err := json.Unmarshal([]byte(`{"matches":[{"artifact":{"name":"lp","type":"npm"},"vulnerability":{"id":"CVE-2026-1"}}]}`), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if got := doc.Matches[0].Artifact.Type; got != "npm" {
+		t.Errorf("Artifact.Type = %q, want npm", got)
 	}
 }

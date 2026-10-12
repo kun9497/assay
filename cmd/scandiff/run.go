@@ -39,10 +39,11 @@ Usage:
       without a network call.
 
   -regressions-only (either mode) is the nightly publish gate's mode (D114):
-      it skips the ceilings, maxFindings and trivy.maxFindings, and prints any
-      that would have breached as an "info:" line instead. A ceiling measures
-      upstream growth, which must never stop a new database from shipping;
-      every other floor, and every ERROR, is judged exactly as without it.
+      it skips the ceilings, maxFindings, trivy.maxFindings and
+      maxGrypeOnlyApp (D117), and prints any that would have breached as an
+      "info:" line instead. A ceiling measures upstream growth, which must
+      never stop a new database from shipping; every other floor, and every
+      ERROR, is judged exactly as without it.
 
 Exit codes:
   0  every target held its floors
@@ -113,7 +114,7 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 	// regressionsOnly is D114's publish-gate mode, valid live or offline.
 	// Off by default so the weekly differential keeps judging every floor;
 	// see demoteCeilings for which floors it skips and why only those.
-	regressionsOnly := fs.Bool("regressions-only", false, "judge every floor except the ceilings (maxFindings, trivy.maxFindings), which print as info")
+	regressionsOnly := fs.Bool("regressions-only", false, "judge every floor except the ceilings (maxFindings, trivy.maxFindings, maxGrypeOnlyApp), which print as info")
 
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
@@ -189,7 +190,12 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 		agree, onlyAssay, onlyGrype := compareSets(aSet, gSet)
 		notEvaluated := adoc.Summary.NotEvaluated
 
-		breaches, info := demoteCeilings(judge(t, agree, len(aSet), notEvaluated, adoc.Summary.Components), *regressionsOnly)
+		// D117's ceiling joins judge's breaches BEFORE demoteCeilings, so the
+		// one place that decides what -regressions-only skips decides it for
+		// this ceiling too.
+		measured := judge(t, agree, len(aSet), notEvaluated, adoc.Summary.Components)
+		measured = append(measured, judgeGrypeOnlyApp(t, grypeOnlyAppCounts(gdoc, aSet, gSet))...)
+		breaches, info := demoteCeilings(measured, *regressionsOnly)
 		printInfo(stderr, info)
 		r := row{
 			Target:       t.Name,

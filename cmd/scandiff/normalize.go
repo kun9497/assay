@@ -147,6 +147,72 @@ type grypeAdvisory struct {
 
 type grypeArtifact struct {
 	Name string `json:"name"`
+	// Type is grype's package type (apk, deb, rpm, npm, go-module, ...).
+	// Read only by grypeOnlyAppCounts (D117): it is what tells a grype-only
+	// tuple that is a data-source divergence on an OS package from one that
+	// sits in an application package assay never inventoried (D70).
+	Type string `json:"type"`
+}
+
+// inventoriedTypes are grype's artifact types for packages an image scan
+// inventories, so a grype-only tuple under one is a data-source divergence
+// rather than the gap D70 waits for: the OS package types assay's image
+// catalogers read (apk, deb, rpm, alpm), and bitnami, the SPDX markers
+// Bitnami images carry, which assay reads into its dual inventory (D99).
+// Every other type is an application type for D117, by exclusion rather than
+// by a list of application types: grype adding a type nobody listed must land
+// on the side that is judged (a ceiling of zero), not on the side that is
+// ignored.
+var inventoriedTypes = map[string]bool{"apk": true, "deb": true, "rpm": true, "alpm": true, "bitnami": true}
+
+func isInventoriedType(typ string) bool { return inventoriedTypes[typ] }
+
+// grypeOnlyAppCounts counts, per application artifact type, the grype-only
+// tuples of one target (D117). It takes the FINAL sets -- after
+// bridgeBareIDs -- so a tuple the bridge joined is not grype-only here
+// either, and the numbers are a slice of the ONLY_GRYPE column.
+//
+// A tuple has no type of its own; it inherits the type of every match that
+// could have produced it, so a tuple grype matched under several types
+// counts once under each application type it carries (an npm and a
+// go-module package of one name, both matched to one CVE, are two
+// inventories assay missed, not one). The ids a match can produce are
+// recomputed with grypeTuples itself, so this cannot drift from how gSet was
+// built. grypeTuples alone types every tuple this can count: bridgeBareIDs
+// only adds to gSet a tuple already in aSet, so every grype-only tuple came
+// out of grypeTuples.
+//
+// An EMPTY type counts as an application type, under the key "": a match
+// grype could not type is not known to be an OS package, and the loader
+// refuses an empty key, so its ceiling is always zero and it trips loudly
+// rather than hiding among the inventoried types.
+func grypeOnlyAppCounts(gdoc grypeDocument, aSet, gSet map[tuple]struct{}) map[string]int {
+	types := make(map[tuple]map[string]bool)
+	note := func(t tuple, typ string) {
+		if types[t] == nil {
+			types[t] = make(map[string]bool)
+		}
+		types[t][typ] = true
+	}
+	for _, m := range gdoc.Matches {
+		typ := m.Artifact.Type
+		for t := range grypeTuples(grypeDocument{Matches: []grypeMatch{m}}) {
+			note(t, typ)
+		}
+	}
+
+	counts := make(map[string]int)
+	for t := range gSet {
+		if _, ok := aSet[t]; ok {
+			continue
+		}
+		for typ := range types[t] {
+			if !isInventoriedType(typ) {
+				counts[typ]++
+			}
+		}
+	}
+	return counts
 }
 
 // grypeTuples extracts the (artifact, CVE) set from one grype document,
