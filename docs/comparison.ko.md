@@ -1,10 +1,12 @@
 # assay · grype · trivy — 비교
 
-*2026-08-27 시점 스냅샷 — assay v0.2.0, grype v6, 그리고 그날 읽은 trivy.dev 문서 기준.
-assay↔grype 수치는 **실측값**입니다: 같은 digest 고정 이미지를 두 스캐너에 넣는 주간
-차등(D93)의 결과입니다. trivy 열은 공식 문서 기준의 **스펙 비교**입니다 — trivy는
-D105에서 주간 차등에 합류했으며(23개 타깃 중 16개, 우선 informational floors), trivy의
-실측값은 첫 씨앗 실행부터 쌓여 갈 것입니다.*
+*기능 열은 2026-08-27 시점 스냅샷 — assay v0.2.0, grype v6, 그리고 그날 읽은 trivy.dev
+문서 기준. 패리티 표의 assay↔grype 수치는 assay v0.8.0, grype v0.116.1, trivy v0.74.0
+대상의 **2026-10-12 주간 실행**(GitHub Actions run 38187900074)으로 갱신한 **실측값**입니다:
+같은 digest 고정 이미지를 두 스캐너에 넣는 주간 차등(D93)의 결과이며, 튜플 수는 도구의
+정규화를 거친 값입니다. trivy 열은 2026-08-27 시점 공식 문서 기준의 **스펙 비교**로
+남아 있습니다 — trivy는 D105에서 주간 차등에 합류했으며 지금은 25개 타깃 중 18개에서
+실행됩니다. 행별 trivy 수치는 원래 날짜를 유지합니다.*
 
 ## 구조와 성격
 
@@ -27,28 +29,43 @@ D105에서 주간 차등에 합류했으며(23개 타깃 중 16개, 우선 infor
 | KISA / KNVD | ✓ 1급 소스 | ✗ | ✗ | assay가 기존 도구 재사용 대신 존재하는 이유 |
 | 취약점 외 스캔 | ✗ (의도) | ✗ (의도) | 설정오류 · 시크릿 · 라이선스 | trivy는 멀티 스캐너 — 격차가 아니라 범위의 차이 |
 
-## 실측 패리티 — 패밀리별, 2026-08-28 감사로 갱신
+## 실측 패리티 — 패밀리별, 수치는 2026-10-12 주간 실행
 
 같은 digest 고정 이미지를 두 스캐너에 넣고 튜플 단위로 비교했습니다 — 2026-08-24에
-13개 타깃으로 처음 측정했고, 지금은 trivy와 함께 23개 타깃으로 매주 실행되며
-(D105), 2026-08-28에 전체를 다시 감사했습니다(한쪽에만 있는 튜플을 전부 분류했고,
-감사 기록은 deferred-decisions에 있습니다). trivy가 한쪽을 뒷받침하는 경우 해당
-행에 표시했습니다.
+13개 타깃으로 처음 측정했고, 지금은 25개 타깃으로 매주 실행되며 그중 18개에는
+trivy가 함께합니다(D105, D114). 2026-08-28에 전체를 다시 감사했습니다(한쪽에만 있는
+튜플을 전부 분류했고, 감사 기록은 deferred-decisions에 있습니다). **결과** 열은
+2026-10-12 주간 실행의 수치(일치 / assay-only / grype-only)이고, **차이의 원인** 열은
+2026-08-28 감사의 분류를 유지하며, 수치가 이번 실행보다 오래된 곳에는 날짜를 붙였습니다 —
+수치는 그 뒤로 움직였지만 분류를 다시 하지는 않았습니다. trivy가 한쪽을 뒷받침하는 경우
+해당 행에 표시했습니다.
 
 | 패밀리 | 결과 | 차이의 원인 | 판정 |
 |---|---|---|---|
-| Alpine | 10/10 동일 | grype의 +4는 CPE 폴백 매처 산출 — assay가 의도적으로 갖지 않는 것 | 완전 일치 |
-| Ubuntu | 98건 일치, assay-only 5건 | assay의 5건 추가분은 grype에 없는 최신 USN; wont-fix 17/17(CVE 10건 기준)은 여전히 정확히 일치 (D85) | assay 우세 |
-| AlmaLinux | fixable 집합 동등 (110/0/0) | grype의 512건 추가분은 전부 Alma 대신 대입된 Red Hat 데이터의 not-fixed/wont-fix — "fixable" 조건이 전부를 제외함 (2026-08-28 재검증) | 완전 일치 |
-| Amazon · Wolfi | 0 = 0 | trivy도 0; components floor가 이제 인벤토리 자체를 지킴 | 완전 일치 |
-| Debian | 171건 일치 | assay-only 6건은 grype DB 누락; 1건은 논쟁 여지 있는 assay FP (zlib1g/MiniZip) — 6+1 구성은 08-24 이후 변동 없음 | assay 우세 |
-| Rocky | fixable 기준 99.4% (assay 쪽) | assay-only 2건은 결함 있는 RLSA-2023:6699에서 기인 (peridot#204); grype의 fixable 추가분 68건은 Rocky 대신 대입된 Red Hat 데이터이며 trivy는 이 중 0건을 확인 — assay와 trivy가 grype에 맞서 일치 | assay 우세 |
-| Oracle | — | grype-only 튜플은 FIPS 계열 ELSA의 메인라인 오매칭 — assay의 거부(D79)가 옳은 쪽 | assay 우세 |
-| Fedora | 16/16 (어드바이저리 수준) | 한쪽에만 있는 CVE 튜플은 100% 공유 어드바이저리 안에 있음; bare-advisory bridge(2026-08-28)가 그중 11건을 회수 (일치 49→60) | 양방향, 제한적 |
-| openSUSE Leap | — | grype v6에는 Leap 데이터 자체가 없음 (재검증: 매칭 0건) | assay 단독 |
-| SLES (bci-base) | fixable 한정 180/0/65 | D91의 병합이 제 역할을 함(assay의 오해 소지 있는 no-fix 행이 fixable 시야에서 사라짐); 104/63 divergence는 남음 — assay는 grype가 표현할 수 없는 no-fix 항목을 표현하고(데이터 모델), grype의 go-module 매칭 33건은 이미지 안의 `/usr/bin/container-suseconnect` 바이너리에 컴파일된 Go 표준 라이브러리(go1.24.11)이며, 이는 이미지 스캔이 읽지 않는 바이너리입니다(D70 — 데이터 모델이 아니라 인벤토리). 2026-09-27 주간 실행에서 이 33건이 해당 대상의 유일한 grype-only 튜플이었음 | 데이터 모델 차이 + 인벤토리 공백 |
-| Azure Linux 3.0 | 254건 일치, assay-only 23, grype-only 0 (2026-08-31) | 감사의 유일한 진짜 assay 공백이었던 곳(일치 106, grype-only 140): Microsoft의 OSV export bot이 2026-03-10에 멈췄고 OSV.dev가 그 동결 스냅샷을 서빙해왔음. D106이 이 계열을 Microsoft의 일일 OVAL로 옮겼고, 직후 첫 주간 실행이 완전 회복을 확인 — 이제 assay가 grype보다 23건 앞서고 trivy와는 277/277 완전 일치. 두 upstream 모두 통보 하루 만에 파이프라인을 고침 | **assay 우세** |
-| RHEL (ubi8-nodejs) | 1090건 일치, assay-only 4531건 | assay 추가분의 98%는 `kernel-headers`로, Red Hat의 CSAF product tree가 커널 CVE에 대해 이 패키지를 명시하지만 grype는 해당 패키지를 전혀 내지 않고 trivy는 assay 튜플 중 4,078건을 확인함 — grype가 예외 쪽. 반대 방향은 인벤토리 공백임: 2026-09-27 주간 실행에서 grype-only 튜플 22건은 모두 npm이며 — `/usr/lib/node_modules/{npm,nodemon}/node_modules` 아래 패키지 11개, Critical인 `tar` 6.2.1 포함 — 이미지 스캔이 읽지 않는 부분(D70), SLES 행과 같은 공백 | OS 패키지는 assay 우세; npm은 인벤토리 공백 |
+| Alpine | 10건 일치, assay-only 0, grype-only 4 (alpine319) | grype의 +4는 CPE 폴백 매처 산출 — assay가 의도적으로 갖지 않는 것 (2026-08-24 분류) | 완전 일치 |
+| Ubuntu | 168건 일치, assay-only 38, grype-only 0 (ubuntu2204) | assay-only가 5건(2026-08-28 감사에서는 grype에 없는 최신 USN)에서 이번 실행에서는 38건으로 늘었고, 38건은 재분류하지 않았습니다. wont-fix 17/17(CVE 10건 기준)은 2026-08-28에 정확히 일치했고(D85) 이번에는 다시 측정하지 않았습니다 | assay 우세 |
+| AlmaLinux | 202건 일치, assay-only 1, grype-only 592 (alma9) | 592건은 OS 타입 튜플입니다. 2026-08-28에는 fixable 집합이 동등(110/0/0)했고 당시 grype의 512건 추가분은 전부 Alma 대신 대입된 Red Hat 데이터의 not-fixed/wont-fix였습니다. fixable 한정 수치는 2026-10-12 기준으로 다시 도출하지 않았습니다 | fixable 기준 완전 일치 (08-28) |
+| Amazon Linux 2023 | 83건 일치, assay-only 0, grype-only 1 (az2023) | 2026-08-28 감사의 0 = 0은 더 이상 성립하지 않습니다; 하나뿐인 grype-only 튜플은 분류하지 않았습니다 | 거의 일치 |
+| Wolfi | 12건 일치, assay-only 34, grype-only 44 (wolfi) | 2026-08-28 감사의 0 = 0은 더 이상 성립하지 않습니다(assay 46, grype 56); 양쪽 추가분 모두 아직 분류하지 않았습니다 | 미분류 |
+| Debian | 242건 일치, assay-only 5, grype-only 0 (debian12) | 2026-08-28에는 당시 assay-only 6건이 grype DB 누락이었고 1건은 논쟁 여지 있는 assay FP (zlib1g/MiniZip)였습니다; 현재의 5건은 재분류하지 않았습니다 | assay 우세 |
+| Rocky | 407건 일치, assay-only 2, grype-only 631 (rocky9) | assay-only 2건은 2026-08-28 기준 결함 있는 RLSA-2023:6699에서 기인 (peridot#204; 재검증하지 않음); grype-only 631건은 OS 타입 튜플이며, 2026-08-28 감사는 grype의 *fixable* 추가분 68건이 Rocky 대신 대입된 Red Hat 데이터이고 trivy는 이 중 0건을 확인함을 밝혔습니다 — 이 fixable 수치는 다시 도출하지 않았습니다 | assay 우세 (08-28) |
+| Oracle | 143건 일치, assay-only 0, grype-only 84 (ol9) | grype-only 튜플은 FIPS 계열 ELSA의 메인라인 오매칭 — assay의 거부(D79)가 옳은 쪽 (2026-08-28 분류; 84건을 다시 나누지는 않음) | assay 우세 |
+| Fedora | 82건 일치, assay-only 26, grype-only 32 (fedora) | 2026-08-28에 어드바이저리 수준 16/16, 한쪽에만 있는 CVE 튜플의 100%가 공유 어드바이저리 안; bare-advisory bridge가 그때 11건을 회수. 이번 실행은 어드바이저리 수준으로 다시 확인하지 않았습니다 | 양방향, 제한적 (08-28) |
+| openSUSE Leap | 일치 0, assay-only 284, grype-only 0 (leap156) | grype v6에는 Leap 데이터 자체가 없음 (2026-08-28에 매칭 0건, 2026-10-12에도 다시 0건) | assay 단독 |
+| SLES (bci-base) | 395건 일치, assay-only 8, grype-only 46 (bci156) | grype-only 튜플 46건 전부가 `go-module`입니다 — 이미지 안의 `/usr/bin/container-suseconnect` 바이너리에 컴파일된 Go 표준 라이브러리로, 이미지 스캔이 읽지 않는 부분입니다(D70 — 데이터 모델이 아니라 인벤토리); 2026-09-27 실행에서는 33건, 2026-10-12에는 46건. D117이 이제 이를 제한합니다: 이 타깃의 `maxGrypeOnlyApp.go-module`은 92이므로, 증가는 `ok`로 판정되지 않고 주간 실행에서 드러납니다. 2026-08-28의 데이터 모델 차이(fixable 한정 180/0/65: assay는 grype가 표현할 수 없는 no-fix 항목을 표현함; D91의 병합)는 다시 도출하지 않았습니다 | 데이터 모델 차이 + 인벤토리 공백 |
+| Azure Linux 3.0 | 294건 일치, assay-only 31, grype-only 0 (azl3) | 감사의 유일한 진짜 assay 공백이었던 곳(2026-08-28 기준 일치 106, grype-only 140): Microsoft의 OSV export bot이 2026-03-10에 멈췄고 OSV.dev가 그 동결 스냅샷을 서빙해왔음. D106이 이 계열을 Microsoft의 일일 OVAL로 옮겼고, 이제 assay가 grype보다 31건 앞섭니다. trivy와의 277/277 일치는 2026-08-31에 측정한 값이며 다시 측정하지 않았습니다. 두 upstream 모두 통보 하루 만에 파이프라인을 고침 | **assay 우세** |
+| RHEL (ubi8-nodejs) | 1319건 일치, assay-only 5008, grype-only 47 (ubi8n18) | 2026-08-28에는 assay 추가분의 98%가 `kernel-headers`였습니다 — Red Hat의 CSAF product tree가 커널 CVE에 대해 이 패키지를 명시하지만 grype는 해당 패키지를 전혀 내지 않고, trivy는 그때 assay 튜플 중 4,078건을 확인했습니다(둘 다 다시 측정하지 않았고, 추가분은 4531에서 5008로 늘었습니다). 반대 방향은 인벤토리 공백입니다: grype-only 튜플 47건 중 41건은 npm(2026-09-27에는 22건), 6건은 rpm이며 — npm은 `/usr/lib/node_modules/{npm,nodemon}/node_modules` 아래에 있어 이미지 스캔이 읽지 않는 부분(D70), SLES 행과 같은 공백입니다. D117이 이를 제한합니다: 이 타깃의 `maxGrypeOnlyApp.npm`은 82입니다 | OS 패키지는 assay 우세; npm은 인벤토리 공백 |
+| RHEL 9 (ubi9) | 592건 일치, assay-only 3, grype-only 0 (ubi9) | 분류하지 않음; assay-only 3건은 살펴보지 않았습니다 | 거의 일치 |
+| Debian 11 (지원 종료) | 211건 일치, assay-only 5, grype-only 0 (debian11) | D114가 지원 종료 타깃으로 차등에 추가; 5건은 분류하지 않았습니다 | assay 우세, 미분류 |
+| Amazon Linux 2 (지원 종료) | 17 = 17, 전부 일치 (amazonlinux2) | D114가 추가 | 완전 일치 |
+| Photon OS | 22 = 22 (photon4), 42 = 42 (photon5), 전부 일치 | 두 타깃 모두 한쪽에만 있는 튜플 없음 | 완전 일치 |
+| Arch Linux | 9건 일치, assay-only 2, grype-only 0 (archlinux) | assay-only 2건은 분류하지 않았습니다 | assay 우세, 미분류 |
+| Mariner 2.0 | 134건 일치, assay-only 53, grype-only 0 (mariner2) | 53건은 분류하지 않았습니다 | assay 우세, 미분류 |
+| Bitnami (legacy postgresql) | 597건 일치, assay-only 6, grype-only 0 (bitnami-legacy-pg) | 이중 인벤토리(D99); 6건은 분류하지 않았습니다 | assay 우세, 미분류 |
+| Hummingbird | 32건 일치, assay-only 7, grype-only 31 (hummingbird) | 양쪽 추가분 모두 분류하지 않았습니다 | 양방향, 미분류 |
+| Alpaquita | 47건 일치, assay-only 0, grype-only 9 (alpaquita) | grype-only 9건 모두 grype의 CPE 폴백입니다(`nvd:cpe`에 대한 `cpe-match`, 뒤에 프로바이더 없음) — 2026-08-28 감사의 분류이며 2026-10-12 캡처에서 재확인했습니다 | 프로바이더 데이터 기준 완전 일치 |
+| Liberica (BellSoft) | 61건 일치, assay-only 0, grype-only 29 (liberica21) | grype-only 29건 모두 Alpaquita와 마찬가지로 grype의 CPE 폴백입니다(2026-08-28 감사, 2026-10-12 재확인). 2026-10-12 실행은 이 타깃의 `maxFindings` ceiling(≤56, 실측 61)을 넘었습니다: 2026-10-04 이후 +26 튜플, BellSoft 피드의 `libcrypto3`·`libssl3`에 대한 2026년 OpenSSL CVE 13건이며, 제거된 것은 없고 61건 모두 grype도 보고합니다 — 무해한 upstream 성장이므로 재밴딩했습니다 | 프로바이더 데이터 기준 완전 일치 |
+| CleanStart (postgres) | 일치 0, assay-only 0, grype-only 101 (cleanstart-postgres) | grype의 101건 중 100건은 `apk` 패키지에 대한 grype의 CPE 폴백입니다(2026-08-28 감사, 2026-10-12 재확인) — assay가 의도적으로 갖지 않는 매처입니다; CleanStart 자체 피드는 이 이미지에 대해 아무것도 보고하지 않으며, `minComponents` floor가 인벤토리가 실재함을 지킵니다. 101번째는 `go-module`(`/usr/bin/gosu`의 `github.com/moby/sys/user`)입니다: 이미지 스캔이 읽지 않는 이미지 내부 Go 바이너리(D70)이며, D117의 상한 2로 제한됩니다 | 프로바이더 데이터 기준 패리티; Go 바이너리 하나에 인벤토리 공백 |
 
 요지: 차이의 대부분은 매처 버그가 아니라 **데이터 소스의 차이**였고, 이 작업이 찾아낸
 진짜 버그 하나(D90 CSAF ID 충돌)는 수정됐습니다. 이 실측을 매주 반복하는 것이

@@ -4501,7 +4501,7 @@ annotations. Enrichment age (D3's display copy, as D59 said).
 
 **Decision.** The nightly publish gains a gate between `db build` and `db push`: the
 candidate database the build just wrote is scanned through `cmd/scandiff` against the same
-23-plus targets and the same committed floors the weekly differential uses (D93, D105), and
+25 targets and the same committed floors the weekly differential uses (D93, D105), and
 a breach of a **regression** floor — `minAgree`, `minFindings`, `minComponents`,
 `maxNotEvaluated`, a trivy minimum, or an `ERROR` verdict — fails the job before anything is
 pushed. The **ceilings** (`maxFindings`, trivy's `maxFindings`) are not consulted by the gate:
@@ -4676,6 +4676,65 @@ is already handled by the remove at the start of every run.
 wait on a build). No cross-machine lock: a shared filesystem between two machines is a
 deployment the project has never run, and file locks on network filesystems are their own
 problem; the lock documents its scope as one machine. No `--wait`.
+
+---
+
+### D117 — The differential bounds what grype finds inside an image's application packages, per package type
+
+**Decision.** A target in `.github/scanner-diff-targets.json` gains an optional
+`maxGrypeOnlyApp` map, keyed by grype's `artifact.type`, and `cmd/scandiff` judges it:
+for every artifact type an image scan does not inventory — every type but the OS package
+types `apk`, `deb`, `rpm`, `alpm` and `bitnami`, whose markers assay reads (D99) — the
+number of grype-only tuples matched under that type must not exceed the map's value, and a
+type the map does not name has a ceiling of **zero**. A tuple grype matched under more than
+one type counts once under each application type it carries. The breach line names the
+type — `floor=maxGrypeOnlyApp.npm`. It is a ceiling in D114's sense: the weekly
+differential judges it, and the nightly gate's `-regressions-only` mode prints it as an
+`info:` line. The loader refuses a map that names one of those inventoried types (a ceiling the judge would
+never consult), a negative value or an empty key. The seeds are twice the 2026-10-12
+weekly measurement, the precedent every `maxFindings` re-band has followed: `ubi8n18`
+`npm` 41 → 82, `bci156` `go-module` 46 → 92, `cleanstart-postgres` `go-module` 1 → 2.
+Every other target carries no map, so any application-type grype-only tuple on it trips.
+
+**Why.** An image scan inventories OS packages and Bitnami markers, not the language
+packages installed inside the image (D70), and since D111 says so in JSON; but the
+differential could not see the gap at all. `judge` floored components, agreement, the
+findings range and not-evaluated, and nothing about tuples only grype reported — so on the
+2026-09-27 weekly run `ubi8n18`'s 22 npm tuples (a Critical in `tar` among them) and
+`bci156`'s 33 Go-standard-library tuples were judged `ok`. Deferred-decisions' D70 entry
+named this ceiling as one of its revisit triggers, because the third trigger — a user
+reporting a missed application CVE — is D26's mistake, a trigger that waits for a report.
+Measured on the 2026-10-12 capture, the split is clean: application-type grype-only tuples
+exist on exactly the three targets above (`npm` 41; `go-module` 46 and 1), and the other 22
+targets' grype-only tuples are all OS types.
+
+**Why per type, and why zero for an unnamed type.** One application-wide number would let
+a new kind of in-image inventory hide inside an old one's headroom: an image that starts
+shipping a Python tree next to its npm tree would be absorbed by the npm allowance. A ceiling
+of zero for a type nobody measured is what makes the trigger fire on the case D70 is
+actually waiting for — application packages appearing where none were — while the seeded
+types only trip on growth past twice today's count.
+
+**Why only application types.** Grype-only tuples on a type assay inventories are a
+data-source divergence,
+not an inventory one, and they are large and already classified: Rocky's 631 and Alma's
+592 are Red Hat data grype substitutes for the rebuild, Oracle's are FIPS lineages assay
+refuses on purpose (D79). A ceiling on them would re-band every week and say nothing the
+audit has not. `bitnami` sits on the same side: grype emits it as an artifact type for
+the SPDX markers Bitnami images carry, which assay reads into its dual inventory (D99), so a
+grype-only `bitnami` tuple is a data divergence, not the gap D70 waits for (all 96 of
+`bitnami-legacy-pg`'s were agreed on 2026-10-12). The judge refuses an OS key rather than accepting it silently, because a
+ceiling that is written down and never consulted reads as a guard.
+
+**Why a ceiling, not a regression floor.** The number grows when grype's database learns a
+new advisory for a package assay does not inventory — upstream growth, exactly what D114
+keeps from blocking a nightly. It cannot be moved by the candidate database the gate is
+judging, because assay never reaches these packages to match them.
+
+**What stays out.** No ceiling on assay-only tuples (that is `maxFindings`), no ceiling on
+OS-type grype-only tuples, and no change to the summary table's columns. When the
+ceiling trips, D70's entry is revisited; the ceiling itself decides nothing about how the
+gap is closed.
 
 ---
 
