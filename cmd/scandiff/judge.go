@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 // breach is one floor a target failed to hold. Kept as a struct rather than
 // a preformatted string so a test can assert on the fields (target, floor,
@@ -119,6 +122,41 @@ func judgeTrivy(t Target, agree, findings int) []breach {
 	}
 	if findings > f.MaxFindings {
 		out = append(out, breach{t.Name, "trivy.maxFindings", fmt.Sprintf("<=%d", f.MaxFindings), findings, true})
+	}
+	return out
+}
+
+// judgeGrypeOnlyApp is D117's ceiling: per application artifact type, the
+// grype-only tuples counted by grypeOnlyAppCounts must not exceed the
+// target's maxGrypeOnlyApp value for that type, and a type the map does not
+// name has a ceiling of zero -- what D70's revisit trigger waits for is
+// application packages appearing where none were, so an unmeasured type must
+// trip on its first tuple rather than borrow another type's headroom. A
+// ceiling, not a floor: the count grows when grype's database learns an
+// advisory for a package assay does not inventory, which the candidate
+// database cannot move, so -regressions-only demotes it like maxFindings.
+//
+// Types are judged in sorted order so the stderr lines are byte-stable
+// across runs of the same capture. The empty type (see grypeOnlyAppCounts)
+// is named "(untyped)" in the floor, because "maxGrypeOnlyApp." with nothing
+// after the dot reads as a truncated line.
+func judgeGrypeOnlyApp(t Target, counts map[string]int) []breach {
+	typs := make([]string, 0, len(counts))
+	for typ := range counts {
+		typs = append(typs, typ)
+	}
+	sort.Strings(typs)
+	var out []breach
+	for _, typ := range typs {
+		got, ceiling := counts[typ], t.MaxGrypeOnlyApp[typ]
+		if got <= ceiling {
+			continue
+		}
+		label := typ
+		if label == "" {
+			label = "(untyped)"
+		}
+		out = append(out, breach{t.Name, "maxGrypeOnlyApp." + label, fmt.Sprintf("<=%d", ceiling), got, true})
 	}
 	return out
 }

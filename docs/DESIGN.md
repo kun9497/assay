@@ -710,6 +710,12 @@ exited 0 while 24 findings went unmentioned.
 - [x] SLES LTSS folded with a mainline-wins tie-break (D91) — post-EOL fixes surface
       under the same key (bci-base 121→286 findings, curl shows its real FIXED IN),
       385,621 shadowed twins dropped and counted
+- [x] The differential bounds grype-only tuples on application package types (D117) —
+      `maxGrypeOnlyApp` per target, keyed by grype's `artifact.type` (every type but `apk`,
+      `deb`, `rpm`, `alpm` and `bitnami`, which an image scan inventories), zero for a type
+      not named; a ceiling, so the nightly gate prints
+      it as `info:` and the weekly run judges it. Seeded `ubi8n18` npm 82, `bci156`
+      go-module 92, `cleanstart-postgres` go-module 2; arms D70's revisit trigger.
 - [x] One database writer at a time (D116) — `db build` and `db update` take an OS file
       lock on `<dbPath>.lock` (flock / LockFileEx via `x/sys`) before touching
       `<dbPath>.tmp` and hold it through the rename; a second writer exits 2 at once naming

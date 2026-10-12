@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 )
 
 // Target is one row of the committed floors file
@@ -61,6 +62,17 @@ type Target struct {
 	// committed all-zero floor, which is why this is a pointer and not a
 	// plain TrivyFloors value.
 	Trivy *TrivyFloors `json:"trivy,omitempty"`
+	// MaxGrypeOnlyApp is D117's per-type ceiling on grype-only tuples in
+	// APPLICATION packages (grype's artifact.type outside the
+	// inventoried types: apk/deb/rpm/alpm and bitnami, see inventoriedTypes).
+	// An image scan does not inventory the language packages inside an image
+	// (D70), and these tuples are the one place the differential can see that
+	// gap: without a ceiling it judged ubi8n18's npm tree, a Critical among
+	// it, "ok". Keyed per type so a new kind of in-image inventory cannot hide
+	// in an old one's headroom; a type the map does not name has a ceiling of
+	// zero (see judgeGrypeOnlyApp). Absent on most targets, which is exactly
+	// "no application-type grype-only tuple is expected here".
+	MaxGrypeOnlyApp map[string]int `json:"maxGrypeOnlyApp,omitempty"`
 }
 
 // TrivyFloors is the trivy counterpart to Target's own MinAgree/MinFindings/
@@ -125,6 +137,36 @@ func loadTargets(path string) ([]Target, error) {
 		if t.Ref == "" {
 			return nil, fmt.Errorf("targets file %s: target %q has no ref", path, t.Name)
 		}
+		if err := validateGrypeOnlyApp(t.MaxGrypeOnlyApp); err != nil {
+			return nil, fmt.Errorf("targets file %s: target %q: %w", path, t.Name, err)
+		}
 	}
 	return targets, nil
+}
+
+// validateGrypeOnlyApp refuses a maxGrypeOnlyApp map the judge could not
+// honour as written (D117). A key naming a type an image scan inventories
+// (an OS package type, or bitnami -- see inventoriedTypes) is refused rather
+// than ignored: judgeGrypeOnlyApp never consults one, and a ceiling that
+// is written down and never consulted reads as a guard. A negative value is
+// a ceiling no count can meet, and an empty key names no type -- the untyped
+// case is held at zero on purpose (see grypeOnlyAppCounts). Keys are checked
+// in sorted order so the error names the same key on every run.
+func validateGrypeOnlyApp(m map[string]int) error {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		switch {
+		case k == "":
+			return fmt.Errorf("maxGrypeOnlyApp has an empty type key")
+		case isInventoriedType(k):
+			return fmt.Errorf("maxGrypeOnlyApp key %q is a type an image scan inventories, which this ceiling never judges", k)
+		case m[k] < 0:
+			return fmt.Errorf("maxGrypeOnlyApp.%s is negative (%d)", k, m[k])
+		}
+	}
+	return nil
 }

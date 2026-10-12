@@ -199,3 +199,46 @@ func TestBreach_InfoStringNamesCeilingAndMode(t *testing.T) {
 		t.Errorf("infoString() = %q, want %q", got, want)
 	}
 }
+
+func TestJudgeGrypeOnlyApp(t *testing.T) {
+	target := Target{Name: "tgt", MaxGrypeOnlyApp: map[string]int{"npm": 3, "go-module": 0}}
+	cases := []struct {
+		name   string
+		counts map[string]int
+		want   []breach
+	}{
+		{"nothing counted", nil, nil},
+		{"at the ceiling holds", map[string]int{"npm": 3}, nil},
+		{"one over trips, tagged ceiling", map[string]int{"npm": 4},
+			[]breach{{"tgt", "maxGrypeOnlyApp.npm", "<=3", 4, true}}},
+		{"explicit zero trips on one", map[string]int{"go-module": 1},
+			[]breach{{"tgt", "maxGrypeOnlyApp.go-module", "<=0", 1, true}}},
+		{"unnamed type has ceiling zero", map[string]int{"python": 1},
+			[]breach{{"tgt", "maxGrypeOnlyApp.python", "<=0", 1, true}}},
+		{"a zero count for an unnamed type holds", map[string]int{"python": 0}, nil},
+		{"empty type is named untyped", map[string]int{"": 2},
+			[]breach{{"tgt", "maxGrypeOnlyApp.(untyped)", "<=0", 2, true}}},
+		{"sorted by type, held ones skipped", map[string]int{"python": 1, "npm": 3, "java-archive": 2, "go-module": 5},
+			[]breach{
+				{"tgt", "maxGrypeOnlyApp.go-module", "<=0", 5, true},
+				{"tgt", "maxGrypeOnlyApp.java-archive", "<=0", 2, true},
+				{"tgt", "maxGrypeOnlyApp.python", "<=0", 1, true},
+			}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := judgeGrypeOnlyApp(target, c.counts); !slices.Equal(got, c.want) {
+				t.Errorf("judgeGrypeOnlyApp = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// A target with no map at all: every application type is at zero.
+func TestJudgeGrypeOnlyApp_NilMapIsAllZero(t *testing.T) {
+	got := judgeGrypeOnlyApp(Target{Name: "bare"}, map[string]int{"npm": 1})
+	want := []breach{{"bare", "maxGrypeOnlyApp.npm", "<=0", 1, true}}
+	if !slices.Equal(got, want) {
+		t.Errorf("judgeGrypeOnlyApp = %v, want %v", got, want)
+	}
+}

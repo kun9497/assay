@@ -1557,11 +1557,15 @@ the Go standard library, go1.24.11, compiled into `/usr/bin/container-suseconnec
 a Critical (GO-2026-4337). assay's own summaries report nothing missing: 289 components, 289
 evaluated, `targetIncomplete` 0 on the first; 138, 138 and 0 on the second. Fed the same
 packages as a CycloneDX SBOM, assay matched every one of grype's advisory IDs — the data is
-there, the inventory is not. `scandiff` cannot see it: `judge` floors components, agreement,
-the findings range and not-evaluated, and has no ceiling on grype-only tuples
+there, the inventory is not. `scandiff` could not see it: `judge` floored components, agreement,
+the findings range and not-evaluated, and had no ceiling on grype-only tuples
 (`cmd/scandiff/judge.go:26`–`:44`), so both targets were judged `ok` in that run. Nor does
 trivy corroborate anything: invoked the way `scandiff` runs it (`image --format json
---quiet`), it returned only `os-pkgs` results on both.
+--quiet`), it returned only `os-pkgs` results on both. Since D117 (2026-10-12) the
+differential does see it: `maxGrypeOnlyApp` bounds grype-only tuples per application artifact
+type, seeded at twice the 2026-10-12 measurement (`ubi8n18` `npm` 82, `bci156` `go-module`
+92, `cleanstart-postgres` `go-module` 2) and zero for every type and target not named, so the
+second revisit trigger below is armed.
 
 **What the SBOM route keeps and loses.** Scanning an SBOM of the image instead is today's
 workaround, and it is not free. Measured in the same review with syft 0.84.1 on a synthetic
@@ -1599,8 +1603,8 @@ architecture field).
   catalogers (`node_modules/*/package.json`, `*.dist-info`) that exist for no target kind
   today.
 
-**Revisit when** the first scan-time disclosure of the image's scope lands, or a per-type
-grype-only ceiling in `scandiff` (npm, go-module) is added and trips, or a user reports an
+**Revisit when** the first scan-time disclosure of the image's scope lands, or the per-type
+grype-only ceiling in `scandiff` (`maxGrypeOnlyApp`, D117 — added 2026-10-12) trips, or a user reports an
 application CVE an image scan missed. The third alone would repeat D26's mistake — a trigger
 that waits for a report — which is why it is not the only one.
 

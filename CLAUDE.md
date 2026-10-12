@@ -43,7 +43,10 @@ scanner differential gates regressions in CI (D93: 25 targets vs grype, the last
 first end-of-support ones, D114; D105 added trivy on the 18 targets trivy supports — the
 tool is `cmd/scandiff`, floors in `.github/scanner-diff-targets.json`). Since D114 the
 nightly publish runs the same tool with `-regressions-only` against the candidate before
-`db push`, so a regression floor is held before anything reaches the tag. Findings can be waived through a
+`db push`, so a regression floor is held before anything reaches the tag. Since D117 a per-type
+ceiling (`maxGrypeOnlyApp`) bounds the grype-only tuples on application package types —
+the in-image language packages an image scan does not read (D70) — so that gap shows up in
+the weekly run instead of being judged `ok`. Findings can be waived through a
 `.assay.yaml` ignore file (D102 — reason mandatory, expiry optional) or a producer's
 OpenVEX document (`--vex`, repeatable, D104 — not_affected/fixed suppress, a reasonless
 not_affected is skipped with a warning, latest statement wins); both apply after Match in

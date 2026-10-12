@@ -1521,11 +1521,15 @@ grype-only 튜플 33건 전부가 `/usr/bin/container-suseconnect`에 컴파일�
 누락을 전혀 보고하지 않습니다: 첫 번째는 컴포넌트 289개, 평가 289개, `targetIncomplete`
 0; 두 번째는 138, 138, 0입니다. 같은 패키지를 CycloneDX SBOM으로 넣으면 assay는 grype의
 권고 ID를 하나도 빠짐없이 매칭했습니다 — 데이터는 있고, 인벤토리가 없을 뿐입니다.
-`scandiff`는 이를 보지 못합니다: `judge`는 컴포넌트 수, 일치, finding 범위, not-evaluated에
-바닥값(floor)을 두지만 grype-only 튜플에는 상한이 없어서
+`scandiff`는 이를 보지 못했습니다: `judge`는 컴포넌트 수, 일치, finding 범위, not-evaluated에
+바닥값(floor)을 두었지만 grype-only 튜플에는 상한이 없었어서
 (`cmd/scandiff/judge.go:26`–`:44`) 그 실행에서 두 대상 모두 `ok`로 판정됐습니다. trivy도
 아무것도 뒷받침하지 않습니다: `scandiff`가 실행하는 방식(`image --format json --quiet`)으로
-호출하면 둘 다 `os-pkgs` 결과만 반환했습니다.
+호출하면 둘 다 `os-pkgs` 결과만 반환했습니다. D117(2026-10-12) 이후 차등은 이를 봅니다:
+`maxGrypeOnlyApp`이 애플리케이션 artifact 타입별로 grype-only 튜플에 상한을 두며, 씨앗은
+2026-10-12 측정값의 두 배(`ubi8n18` `npm` 82, `bci156` `go-module` 92,
+`cleanstart-postgres` `go-module` 2)이고 이름 없는 모든 타입과 타깃은 0이므로, 아래의 두 번째
+재검토 조건이 무장되었습니다.
 
 **SBOM 경로가 지키는 것과 잃는 것.** 대신 이미지의 SBOM을 스캔하는 것이 오늘의 우회로이며,
 공짜가 아닙니다. 같은 검토에서 syft 0.84.1로 합성 이미지를 측정한 결과: CycloneDX는 distro를
@@ -1561,8 +1565,8 @@ cataloger만 채우기 때문(`internal/pkgmeta/package.go:43`, D95); 빈 인벤
   jar·Go-바이너리 cataloger를 위한 바이트 기반 진입점, 그리고 오늘날 어떤 대상 종류에도
   존재하지 않는 설치된 패키지용 cataloger(`node_modules/*/package.json`, `*.dist-info`).
 
-**언제 다시 볼까.** 이미지 범위에 대한 첫 스캔 시점 공개가 들어오거나, `scandiff`에 타입별
-grype-only 상한(npm, go-module)이 추가되어 걸리거나, 사용자가 이미지 스캔이 놓친
+**언제 다시 볼까.** 이미지 범위에 대한 첫 스캔 시점 공개가 들어오거나, `scandiff`의 타입별
+grype-only 상한(`maxGrypeOnlyApp`, D117 — 2026-10-12 추가)이 걸리거나, 사용자가 이미지 스캔이 놓친
 애플리케이션 CVE를 보고할 때. 세 번째 조건 하나만으로는 D26의 실수 — 신고를 기다리는
 조건 — 를 반복하는 셈이라, 그것만이 유일한 조건이 아닙니다.
 

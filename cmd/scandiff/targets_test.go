@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -136,5 +137,47 @@ func TestLoadTargets_TrivyBlockPopulated_FieldsParse(t *testing.T) {
 	want := TrivyFloors{MinAgree: 8, MinFindings: 8, MaxFindings: 25}
 	if *targets[0].Trivy != want {
 		t.Errorf("Trivy = %+v, want %+v", *targets[0].Trivy, want)
+	}
+}
+
+func TestLoadTargets_MaxGrypeOnlyAppParses(t *testing.T) {
+	path := writeFile(t, `[{"name": "app", "ref": "example.com/x@sha256:aaa", "maxGrypeOnlyApp": {"npm": 82, "go-module": 0}}]`)
+	targets, err := loadTargets(path)
+	if err != nil {
+		t.Fatalf("loadTargets: %v", err)
+	}
+	if got := targets[0].MaxGrypeOnlyApp; len(got) != 2 || got["npm"] != 82 || got["go-module"] != 0 {
+		t.Errorf("MaxGrypeOnlyApp = %v, want map[go-module:0 npm:82]", got)
+	}
+}
+
+// Each refusal is asserted on the reason AND the target name, not on the
+// "targets file <path>" wrapper, which every loader error carries
+// (CLAUDE.md, "A wrapper satisfying the assertion").
+func TestLoadTargets_MaxGrypeOnlyAppRefusals(t *testing.T) {
+	cases := []struct {
+		name, body, want string
+	}{
+		{"OS type key", `{"rpm": 3}`, `target "refuse-me": maxGrypeOnlyApp key "rpm" is a type an image scan inventories`},
+		{"alpm is an OS type too", `{"npm": 1, "alpm": 1}`, `target "refuse-me": maxGrypeOnlyApp key "alpm" is a type an image scan inventories`},
+		{"bitnami is inventoried (D99)", `{"bitnami": 5, "npm": 1}`, `target "refuse-me": maxGrypeOnlyApp key "bitnami" is a type an image scan inventories`},
+		{"negative value", `{"npm": -1}`, `target "refuse-me": maxGrypeOnlyApp.npm is negative (-1)`},
+		{"empty key", `{"": 1}`, `target "refuse-me": maxGrypeOnlyApp has an empty type key`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := writeFile(t, `[{"name": "fine", "ref": "example.com/a@sha256:aaa"},
+				{"name": "refuse-me", "ref": "example.com/x@sha256:aaa", "maxGrypeOnlyApp": `+c.body+`}]`)
+			_, err := loadTargets(path)
+			if err == nil {
+				t.Fatal("loadTargets: want an error, got nil")
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Errorf("err = %q, want it to contain %q", err, c.want)
+			}
+			if !strings.Contains(err.Error(), path) {
+				t.Errorf("err = %q, want it to name the file %s", err, path)
+			}
+		})
 	}
 }

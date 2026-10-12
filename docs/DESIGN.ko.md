@@ -683,6 +683,11 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] SLES LTSS를 mainline-wins 동점 처리로 접음 (D91) — post-EOL fix가 같은 키
       아래서 드러남(bci-base finding 121→286건, curl이 진짜 FIXED IN을 보여줌),
       가려졌던 쌍둥이 385,621건을 버려서 셈
+- [x] 차등은 애플리케이션 패키지 타입의 grype-only 튜플에 상한을 둔다 (D117) —
+      타깃별 `maxGrypeOnlyApp`, grype의 `artifact.type`을 키로 하며(`apk`, `deb`, `rpm`,
+      `alpm`, 그리고 이미지 스캔이 인벤토리하는 `bitnami`를 뺀 모든 타입), 이름 없는 타입은 0; ceiling이므로 야간 게이트는 `info:`로
+      출력하고 주간 실행이 판정한다. 씨앗은 `ubi8n18` npm 82, `bci156` go-module 92,
+      `cleanstart-postgres` go-module 2; D70의 재검토 조건을 무장시킨다.
 - [x] 데이터베이스 writer는 한 번에 하나 (D116) — `db build`와 `db update`는
       `<dbPath>.tmp`를 건드리기 전에 `<dbPath>.lock`의 OS 파일 락(`x/sys`를 통한 flock /
       LockFileEx)을 잡고 rename까지 쥔다; 두 번째 writer는 락 이름을 밝히며 즉시 종료 코드 2로
