@@ -52,6 +52,8 @@ assay db update
 
 # 2. 스캔
 assay scan alpine:3.19                    # 레지스트리 이미지
+assay scan --platform linux/arm64 alpine:3.19   # 멀티 플랫폼 이미지의 다른 플랫폼
+ASSAY_REGISTRY_AUTH_TOKEN=$TOKEN assay scan registry.example.com/team/app:1.0   # 프라이빗 레지스트리
 assay scan docker-archive:image.tar       # 로컬 tarball — 네트워크 없음
 assay scan sbom.cdx.json                  # CycloneDX 또는 SPDX SBOM
 assay scan ./my-service                   # Go 바이너리, 또는 lockfile이 있는 디렉터리
@@ -63,6 +65,16 @@ assay scan alpine:3.19 --fail-on high
 `assay scan`은 결과를 stdout, 진단을 stderr로 보내므로
 `assay scan … --output json | jq`가 깨끗하게 유지됩니다. `--output`은 `sarif`(GitHub 코드
 스캐닝용)와 `table`(기본값)도 지원하고, `--explain`은 한 finding의 전체 근거를 보여줍니다.
+
+**프라이빗 레지스트리.** 레지스트리 이미지를 스캔할 때 자격증명은 다음 순서로 시도합니다.
+`ASSAY_REGISTRY_AUTH_USERNAME` + `ASSAY_REGISTRY_AUTH_PASSWORD`(또는
+`ASSAY_REGISTRY_AUTH_TOKEN`), 그다음 `docker login`(`DOCKER_CONFIG` 또는
+`~/.docker/config.json`, 자격증명 헬퍼 포함), 그다음 podman의 것(`REGISTRY_AUTH_FILE` 또는
+`$XDG_RUNTIME_DIR/containers/auth.json`)입니다. 환경 변수 자격증명은
+`ASSAY_REGISTRY_AUTH_AUTHORITY`로 다른 레지스트리를 지정하지 않는 한 타깃 자신의 레지스트리에만
+제시되고, 반쪽만 설정되면 exit 2이며, 값은 출력되지 않습니다. `--platform os/arch[/variant]`로
+플랫폼을 고르며, 기본값은 컨테이너 런타임이 고르는 방식 그대로 이 호스트의 플랫폼입니다. 스캔한
+플랫폼과 digest는 stderr에 출력되고 JSON `image` 객체에 기록됩니다.
 
 ## 무엇을 커버하나
 
