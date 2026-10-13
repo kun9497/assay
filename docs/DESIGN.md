@@ -710,6 +710,11 @@ exited 0 while 24 findings went unmentioned.
 - [x] SLES LTSS folded with a mainline-wins tie-break (D91) — post-EOL fixes surface
       under the same key (bci-base 121→286 findings, curl shows its real FIXED IN),
       385,621 shadowed twins dropped and counted
+- [ ] A scan reads registry credentials (D118) — `ASSAY_REGISTRY_AUTH_*` (bound to the
+      target's registry unless an authority is named; a half-set credential is exit 2),
+      then the docker login (`DefaultKeychain`, helpers included), then podman's
+      `auth.json` read directly; 401/403 names the registry and the source tried; a stderr
+      line names the source used; no value in any output.
 - [x] The differential bounds grype-only tuples on application package types (D117) —
       `maxGrypeOnlyApp` per target, keyed by grype's `artifact.type` (every type but `apk`,
       `deb`, `rpm`, `alpm` and `bitnami`, which an image scan inventories), zero for a type

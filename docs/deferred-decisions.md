@@ -1638,7 +1638,12 @@ CPU/memory/disk quotas, a cap on concurrent scans, and per-customer registry cre
 out of scope for the same reason: each needs a notion of "this deployment's network" or "this
 customer's budget" that only the deployment has — the same boundary D112's own "What stays
 out" draws around `--timeout`, which bounds one scan's wall clock and nothing about the
-process running it.
+process running it. Since D118 (2026-10-13) a scan does read registry credentials, from
+`ASSAY_REGISTRY_AUTH_*`, the docker login and the podman login in that order. That makes the
+credential boundary concrete rather than moving it: a job that does not get its own
+`DOCKER_CONFIG`, `REGISTRY_AUTH_FILE`/`XDG_RUNTIME_DIR` and `ASSAY_REGISTRY_AUTH_*` scans
+with whatever login the host user holds. A per-job empty `DOCKER_CONFIG` was measured not to
+fall back to `~/.docker`, and the scan's stderr names the source a credential came from.
 
 **A possible small repo-side helper.** `Classify` (`internal/source/classify.go`) already
 decides a target's kind — image, directory, Go binary, jar, or SBOM — before anything is
