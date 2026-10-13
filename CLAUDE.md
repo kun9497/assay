@@ -48,7 +48,9 @@ ceiling (`maxGrypeOnlyApp`) bounds the grype-only tuples on application package 
 the in-image language packages an image scan does not read (D70) — so that gap shows up in
 the weekly run instead of being judged `ok`. Since D118 a registry image scan reads
 credentials — `ASSAY_REGISTRY_AUTH_*` first, then the docker login, then podman's — and
-never prints one; before it, the scan path was anonymous-only. Findings can be waived through a
+never prints one; before it, the scan path was anonymous-only. Since D119 `--platform` picks an
+image's platform with containerd's normalisation and compatibility order on every image path,
+and the report records the platform and digest that were scanned. Findings can be waived through a
 `.assay.yaml` ignore file (D102 — reason mandatory, expiry optional) or a producer's
 OpenVEX document (`--vex`, repeatable, D104 — not_affected/fixed suppress, a reasonless
 not_affected is skipped with a warning, latest statement wins); both apply after Match in

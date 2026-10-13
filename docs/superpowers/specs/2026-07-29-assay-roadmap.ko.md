@@ -280,6 +280,7 @@ alias로 갖는 경우가 흔합니다. NVD 심각도를 보강 소스로 조인
 | `--fail-on-incomplete` | grype에 대응물 없음. 1이 아니라 **2**를 반환함 — 검사되지 않은 패키지는 finding이 아니라 커버리지에 대한 진술이기 때문(D21). |
 | 다중 출처 finding의 심각도 | grype는 매치당 밴드 하나를 보고하지만, assay는 모든 출처의 평가를 보고하고 그중 가장 높은 것으로 게이트를 겁니다(D25). Django 3.2.12, finding 19건으로 측정: grype는 assay의 집계와 19/19 일치하고, assay의 GHSA 평가와도 19/19 일치하지만 PYSEC 평가와는 1/15만 일치합니다. 밴드가 같을 때만 일치로 세었으므로, 어긋난 14건은 grype의 실제 밴드와 PYSEC의 `unknown`을 견준 결과입니다. 이 표본에서는 "grype가 가장 높은 것을 취한다"와 "grype가 GHSA를 따른다"를 구분할 수 없습니다. PYSEC가 어느 것에도 평가를 매기지 않기 때문입니다. 둘을 가르려면 GHSA가 아닌 출처가 더 높게 매긴 사례가 필요합니다. |
 | `ASSAY_REGISTRY_AUTH_{AUTHORITY,USERNAME,PASSWORD,TOKEN}` | grype의 `GRYPE_REGISTRY_AUTH_*` 단일 항목 형태와 같고, 토큰/기본 인증의 상호 배타도 같습니다. 차이는 둘입니다. authority가 없으면 자격증명은 스캔 타깃의 레지스트리에 묶이고, 반쪽만 설정된 자격증명은 익명으로 넘어가지 않고 종료 코드 2입니다. grype의 `INSECURE_*`, TLS 클라이언트 인증서, 다중 항목 목록에는 대응물이 없습니다(D118). |
+| `--platform` | 문법과 containerd 정규화가 grype와 같고, 단일 플랫폼 이미지가 일치하지 않는 명시적 플랫폼은 양쪽 모두 거부합니다. 차이는 다음과 같습니다. 플래그가 없을 때 단일 플랫폼 이미지가 일치하지 않으면 stderr 경고와 함께 스캔합니다(grype는 아무 말도 하지 않습니다). 이미지가 아닌 타깃에 플래그를 주면 종료 코드 2입니다. OS 버전 접미사는 거부합니다. 선택된 플랫폼과 digest는 JSON `image` 객체에 기록됩니다(D119). |
 
 공유된 이름이 다른 의미를 갖게 될 때마다 이 표에 행을 추가하십시오. **조용히 달라진 플래그가
 이름이 다른 플래그보다 나쁩니다.**
@@ -4678,6 +4679,79 @@ IP 리터럴이면 거부하지만 DNS 이름은 거부하지 않으므로, (1)�
 이미 각 클라우드에 닿으며, SDK는 helper가 하는 일을 위해 여섯 번째 직접 의존성이 될 것이기
 때문입니다. 에어갭 경로는 건드리지 않습니다 — SBOM, `docker-archive:`, `oci-dir:` 스캔은 이
 체인을 전혀 참조하지 않습니다. 스키마 변경은 없습니다.
+
+---
+
+### D119 — `--platform`은 컨테이너 런타임이 하듯 이미지의 플랫폼을 고르고, 스캔은 무엇을 골랐는지 기록한다
+
+**결정.** `assay scan`에 `--platform os/arch[/variant]`(grype의 이름, D18)가 추가되고, 모든
+이미지 경로 — 레지스트리 참조, `oci-dir:`, `docker-archive:` — 가 하나의 선택기로 플랫폼을
+해석합니다:
+
+- **정규화는 containerd의 것.** `x86_64`/`x86-64`는 `amd64`이고 `amd64/v1`도 `amd64`입니다.
+  `aarch64`는 `arm64`이고 `arm64/v8`은 variant 없는 `arm64`입니다. `armhf`는 `arm/v7`,
+  `armel`은 `arm/v6`, variant 없는 `arm`은 `arm/v7`이며, `i386`은 `386`입니다. 요청과 모든
+  후보를 비교하기 전에 둘 다 정규화합니다. 후보의 OS 버전(`linux/arm64:cbl-mariner-2.0`)은
+  비교하지 않으며, OS 버전을 담은 요청이나 variant 뒤에 무언가 더 붙은 요청은 거부합니다.
+- **정확 일치가 먼저, 그다음 런타임의 호환성 순서.** 정확히 일치하는 후보가 없으면 32비트 arm
+  요청은 요청된 variant에서 시작해 사다리를 따라 `v8` → `v7` → `v6` → `v5`로 내려가고,
+  `amd64/vN` 요청은 `amd64` 쪽으로 내려갑니다. 그런 종류의 호스트가 실제로 돌릴 이미지가
+  그것이기 때문입니다. 그 밖의 것은 폴백하지 않습니다.
+- **중첩까지 포함한 인덱스 전체.** 자식이 인덱스인 인덱스도 따라 들어갑니다(깊이 4, `oci-dir:`가
+  이미 하던 대로이며 이제 레지스트리 경로도 같습니다). attestation 항목(`unknown/unknown`)은
+  건너뛰고, 플랫폼이 없는 descriptor는 해당 이미지의 config로 판단합니다.
+- **불일치는 종료 코드 2**이며, 지금처럼 인덱스가 제공하는 것을 밝힙니다.
+- **단일 이미지**(인덱스가 아닌 레지스트리 매니페스트, `docker-archive:` tarball, 이미지
+  하나짜리 layout)는 config로 비교합니다. 일치하지 않는데 `--platform`이 주어졌다면 스캔은
+  종료 코드 2입니다. 호출자가 이 이미지가 아닌 플랫폼을 요청한 것이기 때문입니다. 일치하지
+  않는데 플랫폼이 호스트 기본값이었다면 두 플랫폼과 플래그를 밝히는 stderr 경고와 함께
+  진행합니다. 이미지가 다른 선택지를 제공하지 않으므로, 배포될 이미지가 바로 그것입니다. OS나
+  아키텍처가 없는 config는 확인할 수 없었다는 경고와 함께 스캔합니다.
+- **기본값은 호스트 그대로**: `linux/` 더하기 바이너리의 `GOARCH`를 정규화한 것입니다(그래서
+  arm 빌드는 `arm/v7`을 요청합니다). 하나의 함수가 레지스트리 경로와 layout 경로 양쪽에 이를
+  공급합니다. 지금까지 layout 경로는 `runtime.GOARCH`를 직접 읽었고 테스트 seam이 거기까지
+  닿지 않았습니다.
+- **스캔한 대상을 기록한다.** stderr 한 줄 — `image <ref>: <platform>, manifest <digest>`,
+  인덱스를 해석했다면 `, from index <digest>`, 사다리가 골랐다면 `(compatible with
+  <request>)`가 붙습니다 — 과, JSON 보고서 최상위의 `image` 객체가 `platform`,
+  `requestedPlatform`, `match`(`exact`, `compatible`, `unchecked`, `mismatch`),
+  `manifestDigest`, `indexDigest`를 담습니다. 스키마 13. 이미지가 아닌 타깃(SBOM, 디렉터리,
+  바이너리)에 `--platform`을 주면 무시되지 않고 종료 코드 2입니다.
+
+**왜.** 2026-10-13에 인메모리 인덱스, 일회용 `registry:2`에 푸시해 docker 29로 pull한
+fixture, 그리고 실제 이미지 44개(차등 타깃 25개와 흔한 이미지 19개)의 인덱스를 대상으로
+측정한 결과, go-containerregistry 자체의 `remote.WithPlatform`은 네 가지 면에서 틀렸고, 각각
+실제로 도는 이미지와 다른 이미지를 스캔하거나 도는 이미지를 거부합니다:
+
+- `linux/arm`은 **첫 번째** arm 항목을 집습니다. `alpine`, `node`, `registry`에서는 `v6`이고
+  `nginx`, `python`, `postgres`, `busybox`에서는 `v5`입니다. docker와 grype는 `v7`을 고릅니다.
+  오늘의 기본값(`linux/arm`, variant 없음)으로 스캔하는 arm 호스트는 v7 이미지가 도는 동안 v5
+  또는 v6 이미지를 스캔합니다.
+- `linux/arm64/v8` — `docker`가 출력하고 사람들이 복사하는 값 — 은 arm64 항목에 variant가 없는
+  인덱스를 **놓치며**, 조사한 44개 중 10개가 그렇습니다: `ubi8/nodejs-18`, `wolfi-base`,
+  `alpaquita`, `liberica`, `hummingbird/nginx`, `bitnamilegacy/postgresql`, `chainguard/static`,
+  `node-exporter`, `dotnet/runtime`, `cbl-mariner`. docker와 grype는 둘 다 일치시킵니다.
+- 인덱스 안의 인덱스는 레지스트리에서 **실패합니다** — remote.Image가 최상위만 보기 때문이며
+  — 반면 `oci-dir:`는 이미 따라 들어갔습니다. docker는 해석합니다.
+- 단일 플랫폼 이미지는 요청된 플랫폼이 **무엇이든** 반환됩니다. docker는 플랫폼이 명시적이었을
+  때도 경고하고, grype는 명시적이었을 때 거부하며 기본값에서는 아무 말도 하지 않습니다.
+
+또한 docker는 `v6`만 제공하는 인덱스에서 `arm/v7` 요청에 `arm/v6`을 골랐습니다. 이것이 이
+결정이 채택하는 호환성 순서이며, 선택기가 허용하는 단 하나의 폴백의 측정된 근거입니다. v7
+CPU는 v6 이미지를 돌리므로, 그 이미지가 v7 호스트가 배포할 것입니다.
+
+**왜 명시적 불일치는 거부하고 기본값 불일치는 경고하는가.** 명시적인
+`--platform linux/amd64`가 arm64 전용 이미지로 해석되면, 호출자가 묻지 않은 질문에 답하는
+것입니다 — grype도 이를 거부합니다. 플래그가 없을 때 arm64 전용 이미지를 스캔하는 amd64 CI
+러너는 존재하는 유일한 이미지를 스캔하는 것이며, 거부하면 오늘의 올바른 답이 그런 모든
+파이프라인에서 종료 코드 2로 바뀝니다. D11의 계약은 그만큼 강한 이유 없이는 이를 허용하지
+않습니다. 경고와 기록된 `match: mismatch`가 그 사실을 계속 보이게 합니다.
+
+**빠지는 것.** `--platform all`(한 번의 실행에서 모든 플랫폼을 스캔하고 각각 결과를 내는
+것)은 요청이 있을 때까지 미룹니다. 보고서를 하나의 타깃에서 여러 타깃으로 바꾸기 때문입니다.
+Windows 이미지와 OS 버전 요청은 반쪽만 지원하는 대신 거부합니다. 호스트 variant 감지(docker가
+하듯 CPU 플래그로 `amd64/v3`를 알아내는 것)는 하지 않습니다 — 기본값은 기본 variant를 요청하며,
+모든 amd64 인덱스가 이를 담고 있습니다.
 
 ---
 

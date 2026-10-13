@@ -1659,6 +1659,24 @@ supplied target — one the operator running `assay` did not type themselves —
 
 ---
 
+### Scanning every platform of a multi-platform image in one run
+
+`--platform all`, as some scanners offer: resolve every platform an index carries and
+report each. D119 scans exactly one platform per run and records which, and a pipeline
+that ships several architectures runs the scan once per `--platform`.
+
+**Why deferred.** Every renderer, the verdict and the exit code are built around one target
+per run. "All" turns one report into N, and every question D11 and D21 answer once — which
+platform's findings set the exit code, whether one unreachable platform makes the whole run
+incomplete — needs a second answer. The per-platform loop a caller writes today costs one
+line of shell and gives the same information without any of those decisions.
+
+**Revisit when** a user asks for one combined verdict across platforms, or the differential
+needs to compare a non-host platform weekly (it would then want the loop inside `scandiff`,
+not in `assay scan`).
+
+---
+
 ### What a directory scan does not read
 
 `vendor/`, `go.sum`, and the module cache. A directory scan reads `go.mod` and stops (D23).
