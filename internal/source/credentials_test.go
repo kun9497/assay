@@ -294,3 +294,102 @@ func TestAsAuthError(t *testing.T) {
 		}
 	}
 }
+
+// A docker config that does not parse must not echo its content. encoding/json
+// quotes the offending character, and docker/cli passes that text through with
+// %w, so a stray quote inside an auth field or a password puts a byte of the
+// secret on stderr. The sentinel 'Z' is the character the decoder would quote.
+func TestKeychain_DockerConfigErrorCarriesNoContent(t *testing.T) {
+	cases := []struct {
+		name, body string
+		leaks      []string // text the error must not contain
+		want       string
+	}{
+		{"syntax error in auth", `{"auths":{"ghcr.io":{"auth":"QUJD"Zm9v"}}}`,
+			[]string{"'Z'", "Zm9v", "QUJD"}, "not valid JSON at byte"},
+		{"syntax error in password", `{"auths":{"ghcr.io":{"password":"s3cr"Zet"}}}`,
+			[]string{"'Z'", "Zet", "s3cr"}, "not valid JSON at byte"},
+		// A type mismatch's Value is the literal for a number.
+		{"numeric password", `{"auths":{"ghcr.io":{"username":"u","password":98765}}}`,
+			[]string{"98765"}, "not docker's config format at byte"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateEnv(t)
+			dc := t.TempDir()
+			t.Setenv("DOCKER_CONFIG", dc)
+			if err := os.WriteFile(filepath.Join(dc, "config.json"), []byte(tc.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			target, _ := name.ParseReference("ghcr.io/x/y:1")
+			kc, err := newKeychain(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = kc.Resolve(target.Context())
+			if err == nil {
+				t.Fatal("err = nil, want a docker config error")
+			}
+			if !strings.Contains(err.Error(), "read docker config: "+tc.want) {
+				t.Errorf("err = %v, want %q", err, tc.want)
+			}
+			for _, s := range tc.leaks {
+				if strings.Contains(err.Error(), s) {
+					t.Errorf("the error carries %q from the file: %v", s, err)
+				}
+			}
+		})
+	}
+}
+
+// The home-directory half of dockerConfigExists: a `docker login` without
+// DOCKER_CONFIG exported writes ~/.docker/config.json, and missing it would
+// skip DefaultKeychain and pull anonymously — a 401 on D118's main case.
+//
+// The helper is driven directly rather than through Run: docker/cli caches
+// config.Dir() per process, so an end-to-end scan with DOCKER_CONFIG unset
+// could read a directory cached by an earlier test in the binary.
+func TestDockerConfigExists_HomeDirectory(t *testing.T) {
+	isolateEnv(t)
+	t.Setenv("DOCKER_CONFIG", "")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dockerConfigExists() {
+		t.Fatal("dockerConfigExists() = true with no config anywhere")
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".docker"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".docker", "config.json"), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !dockerConfigExists() {
+		t.Error("dockerConfigExists() = false with ~/.docker/config.json present and DOCKER_CONFIG unset")
+	}
+}
+
+// An auth field that decodes to ":pw" or "user:" has the colon, so only the
+// emptiness check stands between it and an authn.Basic with a blank field
+// reported as the podman login.
+func TestPodmanCredential_EmptyUserOrPassword(t *testing.T) {
+	for _, tc := range []struct{ name, user, pass string }{
+		{"empty user", "", "s3cr3t-Vq8"},
+		{"empty password", "u-Zq", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateEnv(t)
+			p := filepath.Join(t.TempDir(), "auth.json")
+			body := fmt.Sprintf(`{"auths":{"ghcr.io":{"auth":%q}}}`, encAuth(tc.user, tc.pass))
+			if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("REGISTRY_AUTH_FILE", p)
+			a, err := podmanCredential(repo(t, "ghcr.io/x/y"))
+			if err == nil || !strings.Contains(err.Error(), "is not user:password") {
+				t.Fatalf("podmanCredential = %v, %v; want the user:password error", a, err)
+			}
+		})
+	}
+}

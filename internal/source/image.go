@@ -109,6 +109,19 @@ func Open(ctx context.Context, ref string) (*Image, error) {
 	}
 	if creds.kc != nil {
 		out.Credentials = Credentials{Registry: creds.kc.target, Source: creds.kc.source()}
+		// A layer blob is fetched when the cataloger opens the layer, after
+		// this function has returned, and a registry can refuse that request
+		// as well (D118).
+		for i := range out.Layers {
+			open := out.Layers[i].Open
+			out.Layers[i].Open = func() (io.ReadCloser, error) {
+				rc, err := open()
+				if err != nil {
+					return nil, asAuthError(err, ref, creds.kc)
+				}
+				return rc, nil
+			}
+		}
 	}
 	return out, nil
 }

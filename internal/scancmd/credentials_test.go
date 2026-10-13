@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/registry"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
@@ -56,16 +57,37 @@ type authRegistry struct {
 
 func newAuthRegistry(t *testing.T, accept func(authz string) bool) *authRegistry {
 	t.Helper()
+	return newAuthRegistryFunc(t, func(r *http.Request) int {
+		if accept(r.Header.Get("Authorization")) {
+			return 0
+		}
+		return http.StatusUnauthorized
+	})
+}
+
+// newAuthRegistryFunc is newAuthRegistry with a per-request gate: refuse
+// returns 0 to admit the request, or the status to answer it with. It is what
+// lets a test admit the manifest while refusing a blob — the refusals that
+// arrive after the pull has started.
+func newAuthRegistryFunc(t *testing.T, refuse func(r *http.Request) int) *authRegistry {
+	t.Helper()
 	ar := &authRegistry{}
 	inner := registry.New(registry.Logger(log.New(io.Discard, "", 0)))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if ar.locked.Load() {
 			ar.requests.Add(1)
-			if !accept(r.Header.Get("Authorization")) {
+			switch code := refuse(r); code {
+			case 0:
+			case http.StatusUnauthorized:
 				w.Header().Set("WWW-Authenticate", `Basic realm="assay-test"`)
 				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusUnauthorized)
+				w.WriteHeader(code)
 				_, _ = io.WriteString(w, `{"errors":[{"code":"UNAUTHORIZED","message":"authentication required"}]}`)
+				return
+			default:
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(code)
+				_, _ = io.WriteString(w, `{"errors":[{"code":"DENIED","message":"requested access to the resource is denied"}]}`)
 				return
 			}
 		}
@@ -496,4 +518,138 @@ func TestRun_LocalImagesNeverConsultTheChain(t *testing.T) {
 	if code != 2 || !strings.Contains(errOut, "ASSAY_REGISTRY_AUTH_USERNAME is set without") {
 		t.Errorf("Run(registry) = %d, want 2 on the half-set check\nstderr: %s", code, errOut)
 	}
+}
+
+// A public image pulled anonymously says nothing about credentials: the
+// source line is for a pull that used one, and an anonymous pull printing
+// "from " (CredentialsNone's empty name) would read as a credential with no
+// source.
+func TestRun_RegistryAnonymousPublicScansWithNoSourceLine(t *testing.T) {
+	isolateCredentials(t)
+	ar := newAuthRegistry(t, func(string) bool { return true })
+	ref := ar.push(t)
+
+	out, errOut, code := runScan(t, ref)
+	wantScanned(t, out, errOut, code)
+	if strings.Contains(errOut, "registry credentials for") {
+		t.Errorf("an anonymous pull printed a credential source line:\n%s", errOut)
+	}
+	if ar.requests.Load() == 0 {
+		t.Fatal("no request reached the registry; the scan did not pull")
+	}
+}
+
+// requireCredOnBlobs admits every manifest request and requires the right
+// Basic credential on everything else, so the manifest is served and the
+// config blob — fetched while Open lists the layers — is refused.
+func requireCredOnBlobs(r *http.Request) int {
+	if strings.Contains(r.URL.Path, "/manifests/") || acceptBasic(r.Header.Get("Authorization")) {
+		return 0
+	}
+	return http.StatusUnauthorized
+}
+
+// A refusal after the manifest has been served still carries D118's guidance:
+// the config blob is fetched inside Open, past the point where the manifest
+// fetch's own error handling ran.
+func TestRun_RegistryBlobRefusedAfterManifestIsAuthError(t *testing.T) {
+	t.Run("anonymous", func(t *testing.T) {
+		isolateCredentials(t)
+		ar := newAuthRegistryFunc(t, requireCredOnBlobs)
+		ref := ar.push(t)
+
+		out, errOut, code := runScan(t, ref)
+		if code != 2 {
+			t.Fatalf("Run = %d, want 2\nstderr: %s", code, errOut)
+		}
+		for _, want := range []string{
+			"registry " + ar.host + " answered 401 Unauthorized",
+			"no credentials were offered",
+			"`docker login " + ar.host + "`",
+		} {
+			if !strings.Contains(errOut, want) {
+				t.Errorf("stderr lacks %q:\n%s", want, errOut)
+			}
+		}
+		if out != "" {
+			t.Errorf("stdout = %q, want nothing on an exit-2 scan", out)
+		}
+	})
+	t.Run("wrong password", func(t *testing.T) {
+		isolateCredentials(t)
+		ar := newAuthRegistryFunc(t, requireCredOnBlobs)
+		ref := ar.push(t)
+		t.Setenv("ASSAY_REGISTRY_AUTH_USERNAME", regUser)
+		t.Setenv("ASSAY_REGISTRY_AUTH_PASSWORD", regWrongPass)
+
+		out, errOut, code := runScan(t, ref)
+		if code != 2 {
+			t.Fatalf("Run = %d, want 2\nstderr: %s", code, errOut)
+		}
+		if want := "registry " + ar.host + " answered 401 Unauthorized to the credentials offered from the environment"; !strings.Contains(errOut, want) {
+			t.Errorf("stderr lacks %q:\n%s", want, errOut)
+		}
+		assertNoSecrets(t, out, errOut)
+	})
+}
+
+// A layer blob is fetched later still — when the cataloger opens the layer,
+// after Open has returned and the credential line has been printed. A
+// registry that refuses blob pulls by policy (or a credential revoked
+// mid-scan) answers there, and the reader must get the same guidance.
+func TestRun_RegistryLayerBlobRefusedIsAuthError(t *testing.T) {
+	isolateCredentials(t)
+	// The layer's digest is read back from the pushed image, not rebuilt:
+	// alpineImage is not byte-reproducible, and a gate keyed on a digest the
+	// registry never holds refuses nothing.
+	var layerBlob atomic.Value
+	layerBlob.Store("")
+	ar := newAuthRegistryFunc(t, func(r *http.Request) int {
+		if !acceptBasic(r.Header.Get("Authorization")) {
+			return http.StatusUnauthorized
+		}
+		if lb := layerBlob.Load().(string); lb != "" && strings.HasSuffix(r.URL.Path, lb) {
+			return http.StatusForbidden
+		}
+		return 0
+	})
+	ref := ar.push(t)
+	pushed, err := remote.Image(mustRef(t, ref), remote.WithAuth(&authn.Basic{Username: regUser, Password: regPass}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ls, err := pushed.Layers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ld, err := ls[0].Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	layerBlob.Store("/blobs/" + ld.String())
+	t.Setenv("ASSAY_REGISTRY_AUTH_USERNAME", regUser)
+	t.Setenv("ASSAY_REGISTRY_AUTH_PASSWORD", regPass)
+
+	out, errOut, code := runScan(t, ref)
+	if code != 2 {
+		t.Fatalf("Run = %d, want 2\nstderr: %s", code, errOut)
+	}
+	for _, want := range []string{
+		"registry " + ar.host + " answered 403 Forbidden to the credentials offered from the environment",
+		"`docker login " + ar.host + "`",
+	} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("stderr lacks %q:\n%s", want, errOut)
+		}
+	}
+	assertNoSecrets(t, out, errOut)
+}
+
+func mustRef(t *testing.T, s string) name.Reference {
+	t.Helper()
+	r, err := name.ParseReference(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
 }

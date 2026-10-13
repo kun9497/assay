@@ -166,7 +166,7 @@ func (k *keychain) resolve(r authn.Resource) (authn.Authenticator, CredentialSou
 	if dockerConfigExists() {
 		a, err := authn.DefaultKeychain.Resolve(r)
 		if err != nil {
-			return nil, CredentialsNone, fmt.Errorf("read docker config: %w", err)
+			return nil, CredentialsNone, dockerConfigError(err)
 		}
 		if a != authn.Anonymous {
 			return a, CredentialsDockerConfig, nil
@@ -181,6 +181,31 @@ func (k *keychain) resolve(r authn.Resource) (authn.Authenticator, CredentialSou
 		return a, CredentialsPodmanFile, nil
 	}
 	return authn.Anonymous, CredentialsNone, nil
+}
+
+// dockerConfigError reduces DefaultKeychain's error to text that cannot carry
+// a credential. The library hands back docker/cli's config error unchanged,
+// and that wraps encoding/json's decode error with %w: a syntax error quotes
+// the offending character, which in a hand-edited config can be a byte of a
+// password or of the encoded auth field — the same reason podmanCredential
+// prints only the offset.
+//
+// A type mismatch is rewritten too: its Value is the literal for a number
+// ("number 12345"), so an unquoted numeric password would be echoed.
+//
+// Every other failure keeps its text, because that text is the diagnosis: a
+// credential helper missing from PATH, an unreadable file, an auth field that
+// is not base64 (whose error gives a byte offset, not the data).
+func dockerConfigError(err error) error {
+	var se *json.SyntaxError
+	if errors.As(err, &se) {
+		return fmt.Errorf("read docker config: not valid JSON at byte %d", se.Offset)
+	}
+	var te *json.UnmarshalTypeError
+	if errors.As(err, &te) {
+		return fmt.Errorf("read docker config: not docker's config format at byte %d", te.Offset)
+	}
+	return fmt.Errorf("read docker config: %w", err)
 }
 
 // envScope is the registry the environment credential answers for.
@@ -356,9 +381,12 @@ func (e *AuthError) Error() string {
 func (e *AuthError) Unwrap() error { return e.Err }
 
 // asAuthError rewrites a registry's 401/403 into an AuthError and leaves every
-// other error alone. It is applied to the whole of Open, not only the manifest
-// fetch, because the config blob is fetched while the layers are listed and a
-// registry can refuse that request too.
+// other error alone. It is applied at every point a registry request can be
+// refused, not only the manifest fetch: the config blob is fetched while Open
+// lists the layers, and each layer blob is fetched later still, when the
+// cataloger opens the layer — after Open has returned. A credential rotated
+// mid-scan or a registry that refuses blob pulls by policy answers there, so
+// Open wraps each registry layer's opener too.
 func asAuthError(err error, ref string, kc *keychain) error {
 	var te *transport.Error
 	if !errors.As(err, &te) {
