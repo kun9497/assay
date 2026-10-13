@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 12,
+  "schemaVersion": 13,
   "findings": [
     {
       "package": {
@@ -239,5 +239,12 @@
     "osPackages": "read",
     "bitnami": "none",
     "applicationPackages": "not-read"
+  },
+  "image": {
+    "platform": "linux/arm/v6",
+    "requestedPlatform": "linux/arm/v7",
+    "match": "compatible",
+    "manifestDigest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+    "indexDigest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
   }
 }

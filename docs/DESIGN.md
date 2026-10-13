@@ -710,7 +710,7 @@ exited 0 while 24 findings went unmentioned.
 - [x] SLES LTSS folded with a mainline-wins tie-break (D91) — post-EOL fixes surface
       under the same key (bci-base 121→286 findings, curl shows its real FIXED IN),
       385,621 shadowed twins dropped and counted
-- [ ] `--platform` and one platform selector for every image path (D119) — containerd
+- [x] `--platform` and one platform selector for every image path (D119) — containerd
       normalisation (`arm64/v8` = `arm64`, bare `arm` = `arm/v7`), exact match then the
       runtime's compatibility ladder, nested indexes from a registry too; a single-platform
       mismatch is exit 2 when the flag was given and a warning on the host default; the

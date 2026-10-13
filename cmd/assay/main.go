@@ -31,6 +31,7 @@ import (
 	"github.com/kun9497/assay/internal/provider/suse"
 	"github.com/kun9497/assay/internal/scancmd"
 	"github.com/kun9497/assay/internal/severity"
+	"github.com/kun9497/assay/internal/source"
 	"github.com/kun9497/assay/internal/store"
 )
 
@@ -117,6 +118,14 @@ Scan flags (any order, before or after the target):
                         after <dur> (10m, 1h), and exit 2. The layer reads
                         stop at the next file, not the end of the layer. Off
                         by default.
+  --platform <os/arch[/variant]>
+                        Which platform's image to scan from a multi-platform
+                        index (linux/arm64, linux/arm/v7), chosen as the
+                        container runtime would: an exact match first, then
+                        an older variant the platform also runs. Images only.
+                        Default: this host's platform. A single-platform image
+                        that is not the platform asked for is refused (exit 2)
+                        with this flag, and scanned with a warning without it.
   --output <format>     table (default), json, or sarif
                         sarif is SARIF 2.1.0 for GitHub code scanning. Packages
                         that could not be evaluated are emitted as note-level
@@ -1215,6 +1224,22 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 				return "", scancmd.Options{}, err
 			}
 
+		// D119. Both spellings, like --timeout: grype writes this flag
+		// `--platform <platform>`, and that is the form people copy (D18).
+		case a == "--platform":
+			i++
+			if i >= len(args) {
+				return "", scancmd.Options{}, fmt.Errorf("--platform requires a value")
+			}
+			if err := setPlatform(&opts, args[i]); err != nil {
+				return "", scancmd.Options{}, err
+			}
+
+		case strings.HasPrefix(a, "--platform="):
+			if err := setPlatform(&opts, strings.TrimPrefix(a, "--platform=")); err != nil {
+				return "", scancmd.Options{}, err
+			}
+
 		case a == "--fail-on-unfixable":
 			opts.FailOnUnfixable = true
 
@@ -1389,6 +1414,23 @@ func setTimeout(opts *scancmd.Options, v string) error {
 		return fmt.Errorf("--timeout: %q must be positive; omit the flag to scan without a time limit", v)
 	}
 	opts.Timeout = d
+	return nil
+}
+
+// setPlatform validates a --platform value and stores it on opts.Platform
+// (D119). Validated here, so a malformed value is exit 2 before any target is
+// touched, and once only: a second --platform is two answers to one question,
+// and letting the last one win would scan a platform the first one did not
+// ask for. Whether the target is an image is Run's to judge — only it
+// classifies the target.
+func setPlatform(opts *scancmd.Options, v string) error {
+	if opts.Platform != "" {
+		return fmt.Errorf("--platform given more than once (%q, then %q): a scan reads one platform", opts.Platform, v)
+	}
+	if _, err := source.ParsePlatform(v); err != nil {
+		return err
+	}
+	opts.Platform = v
 	return nil
 }
 

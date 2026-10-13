@@ -683,7 +683,7 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] SLES LTSS를 mainline-wins 동점 처리로 접음 (D91) — post-EOL fix가 같은 키
       아래서 드러남(bci-base finding 121→286건, curl이 진짜 FIXED IN을 보여줌),
       가려졌던 쌍둥이 385,621건을 버려서 셈
-- [ ] `--platform`과 모든 이미지 경로를 위한 하나의 플랫폼 선택기 (D119) — containerd
+- [x] `--platform`과 모든 이미지 경로를 위한 하나의 플랫폼 선택기 (D119) — containerd
       정규화(`arm64/v8` = `arm64`, 맨 `arm` = `arm/v7`), 정확 일치 후 런타임의 호환성
       사다리, 레지스트리에서도 중첩 인덱스 처리; 단일 플랫폼 불일치는 플래그를 준 경우
       종료 코드 2, 호스트 기본값이면 경고; 선택된 플랫폼과 digest는 stderr와 JSON `image`
