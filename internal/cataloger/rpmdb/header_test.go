@@ -343,3 +343,23 @@ func TestHeaderI32_RejectsWrongType(t *testing.T) {
 		t.Errorf("an epoch with only one byte left in the store read as %d", n)
 	}
 }
+
+// D121: ARCH and the SOURCERPM file name are kept verbatim, because syft's
+// purl writes both and neither is recoverable from the other fields — the
+// stripped Source.Name drops the version and release the file name carries.
+func TestToPackage_KeepsArchAndSourceRPMForThePURL(t *testing.T) {
+	h := mustParse(t, buildHeader(
+		strTag(tagName, "audit-libs"),
+		strTag(tagVersion, "3.1.5"),
+		strTag(tagRelease, "8.el9"),
+		strTag(tagArch, "x86_64"),
+		strTag(tagSourceRPM, "audit-3.1.5-8.el9.src.rpm"),
+	))
+	p, err := toPackage(h, "", "/var/lib/rpm/rpmdb.sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Arch != "x86_64" || p.Upstream != "audit-3.1.5-8.el9.src.rpm" {
+		t.Errorf("Arch, Upstream = %q, %q; want x86_64, audit-3.1.5-8.el9.src.rpm", p.Arch, p.Upstream)
+	}
+}

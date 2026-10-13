@@ -18,7 +18,7 @@
 // lines, sections separated by a blank line -- MEASURED verbatim against a
 // real image (mirror.gcr.io/library/archlinux, pulled 2026-08-26; see this
 // package's testdata for the captures). Most sections are single-valued
-// (%NAME%, %VERSION%, %BASE%, %ARCH%, all read here), but %DEPENDS% and a
+// (%NAME%, %VERSION%, %BASE%, %ARCH%, all read here; %ARCH% only since D121), but %DEPENDS% and a
 // multi-license %LICENSE% carry one value per line (measured on bash's own
 // desc: DEPENDS lists readline, libreadline.so=8-64, glibc, ncurses on four
 // separate lines; gcc-libs' own desc carries two LICENSE lines) -- neither
@@ -94,12 +94,18 @@ func ParseDesc(r io.Reader, ecosystem, path string) ([]pkgmeta.Package, error) {
 		Ecosystem: ecosystem,
 		Locations: []pkgmeta.Location{{Path: path}},
 	}
-	if base := firstValue(fields, "BASE"); base != "" && base != name {
+	base := firstValue(fields, "BASE")
+	if base != "" && base != name {
 		// D8, D97: only Name is set, never Version -- like apk's origin, a
 		// split package's base carries no version of its own; the comparer
 		// uses the binary's own Version above, not BASE's.
 		p.Source = &pkgmeta.SourcePackage{Name: base}
 	}
+	// D121: read only to spell the purl. syft's alpm purl writes
+	// upstream=%BASE% even when it equals the name (112 of 137 packages on
+	// a real image), which the Source rule above deliberately does not keep.
+	p.Upstream = base
+	p.Arch = firstValue(fields, "ARCH")
 	return []pkgmeta.Package{p}, nil
 }
 

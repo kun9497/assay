@@ -683,6 +683,16 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] SLES LTSS를 mainline-wins 동점 처리로 접음 (D91) — post-EOL fix가 같은 키
       아래서 드러남(bci-base finding 121→286건, curl이 진짜 FIXED IN을 보여줌),
       가려졌던 쌍둥이 385,621건을 버려서 셈
+- [x] 이미지의 OS 패키지는 purl을 갖고, 이미지를 지목하는 VEX 문장은 그 이미지에만
+      적용됨 (D121) — 측정한 네임스페이스 표에 따른 syft 표기 purl; 이미지를 지목하는
+      문장은 그 문장의 모든 product에 범위를 지정; `arch=src`/`arch=source` 소스 문장은 그
+      소스의 모든 바이너리에 도달; Ubuntu는 `distro=<codename>`에도 응답; stderr 한 줄이
+      아무것과도 매칭되지 않은 문장 수를 셈.
+- [x] 스캔은 자기 판정을 만든 것이 무엇인지 기록한다 (D120) — JSON(스키마 14)과 SARIF의
+      결정적 `provenance` 객체: 도구, 데이터베이스(`<dbPath>.artifact.json`의 아티팩트
+      digest), 타깃 콘텐츠 식별, 모든 게이트, 해시와 건수를 담은 ignore 규칙과 VEX 문서;
+      `--provenance <path>`는 실행 시각, 종료 코드, 보고서 sha256을 더해 모든 종료
+      경로에서 기록됨.
 - [x] `--platform`과 모든 이미지 경로를 위한 하나의 플랫폼 선택기 (D119) — containerd
       정규화(`arm64/v8` = `arm64`, 맨 `arm` = `arm/v7`), 정확 일치 후 런타임의 호환성
       사다리, 레지스트리에서도 중첩 인덱스 처리; 단일 플랫폼 불일치는 플래그를 준 경우

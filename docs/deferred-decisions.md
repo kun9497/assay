@@ -1347,6 +1347,36 @@ that changes the moment a third party's `db update` trusts this registry by defa
 through `go-containerregistry`'s `remote` package, so a `cosign.Verify`-shaped step is
 additive to `Pull` later, not a rewrite.
 
+**Scan attestations belong to the same decision.** Since D120 (2026-10-13) a scan writes an
+unsigned provenance record — tool, database artifact digest, target content identity, gates,
+waivers, and in the `--provenance` sidecar the run time and exit code. An in-toto / cosign
+vulnerability-scan attestation is that record in a fixed predicate plus a signature, so it
+needs the same answers this entry is waiting on (scheme, identity, what verifies) and is
+decided with them rather than separately.
+
+---
+
+### Applying a VEX statement written against an unmarked source package name
+
+Docker Hardened Images' OpenVEX versions its statements under **source** names
+(`pkg:deb/debian/glibc@2.41-12+deb13u4+dhi1`, `pkg:apk/alpine/openssl@3.5.9-r1`) and lists
+binary names (`libc6`, `libssl3`) only without a version. D121 applies a source statement
+only when it marks itself (`arch=src`, `arch=source`), so these versioned statements reach
+no binary, and the finding stays reported.
+
+**Why deferred.** An unmarked name is ambiguous wherever the source also ships a binary of the
+same name — `openssl` on Rocky, `busybox` on Alpine, `openssl`, `perl` and `bash` across
+Debian — and the wrong reading hides a real finding (a statement about the `openssl` command
+suppressing `libssl3`). The direction of the current error is reporting too much, which a
+user can waive; the other direction is silent.
+
+**Revisit when** a user relies on DHI's (or another producer's) unmarked source statements.
+The guarded rule measured on 2026-10-13: apply it only when the document purl carries a
+version equal to the package's source version, its name equals `Package.Source.Name` and
+differs from the package's own name, and **no installed package in the target is named after
+that source** — otherwise apply it to that binary alone and warn naming the siblings left
+unsuppressed. Image scope (D121) already keeps DHI's statements to DHI images.
+
 ---
 
 ### Splitting KISA data into a separate artifact
@@ -1986,6 +2016,17 @@ reproduced live: today one operator builds on one machine and CI serializes itse
 shape is a per-process unique temp name plus an explicit writer lock beside the database, not
 a longer rename retry. **Revisit when** a second operator or a second machine ever writes one
 `ASSAY_DB_DIR`, or on the first reproduced collision.
+
+**CSAF VEX scope lives on the product tree, not on the purl.** Red Hat's and SUSE's CSAF
+documents name what a status applies to through a relationship id
+(`red_hat_ceph_storage_5:openssh.src`); the purl is on the component leaf
+(`pkg:rpm/redhat/openssh?arch=src`, version-less). In Red Hat's CVE-2024-6387 document, all
+36 `known_not_affected` entries that resolve to an rpm purl resolve to a version-less one. A
+converter that flattens a CSAF statement to its leaf purl therefore turns "not affected in
+Ceph Storage 5" into "not affected anywhere", which with D121's purls would suppress the
+finding on every RHEL image. Any path that reads CSAF as a waiver source (directly, or through
+a CSAF→OpenVEX conversion) must carry the relationship's platform as a scope. assay's own
+Red Hat and SUSE providers read CSAF as advisory data, where this does not arise.
 
 ---
 

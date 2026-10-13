@@ -61,6 +61,9 @@ func Parse(r io.Reader) (pkgmeta.Distro, error) {
 			d.VersionID = unquote(value)
 		case "PRETTY_NAME":
 			d.PrettyName = unquote(value)
+		case "VERSION_CODENAME":
+			// D121: the spelling Canonical's OpenVEX uses for distro=.
+			d.VersionCodename = unquote(value)
 		}
 	}
 	if err := sc.Err(); err != nil {

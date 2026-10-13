@@ -36,11 +36,18 @@ var justificationEnum = map[string]bool{
 // expiry, only a timestamp used for precedence between statements about the
 // SAME finding (see resolve below), which is a comparison between two
 // statements, not against the clock.
-func (d *Document) Apply(findings []matcher.Finding, warn func(string)) (kept []matcher.Finding, suppressed []matcher.Suppressed) {
-	live := d.liveStatements(warn)
+//
+// target is what was scanned (D121): a statement whose products include an
+// image applies only when one of those images is the target, and target's
+// Ubuntu codename is the second distro spelling an Ubuntu package answers
+// to. stats counts what became of this document's statements, so a caller
+// can say how many applied to nothing rather than let them vanish.
+func (d *Document) Apply(findings []matcher.Finding, target Target, warn func(string)) (kept []matcher.Finding, suppressed []matcher.Suppressed, stats Stats) {
+	live, stats := d.liveStatements(target, warn)
+	matched := make([]bool, len(d.Statements))
 
 	for _, f := range findings {
-		st, ok := resolve(live, f)
+		st, ok := resolve(live, f, target, matched)
 		if !ok {
 			kept = append(kept, f)
 			continue
@@ -55,7 +62,27 @@ func (d *Document) Apply(findings []matcher.Finding, warn func(string)) (kept []
 			Source: "vex",
 		})
 	}
-	return kept, suppressed
+	stats.Applied = len(suppressed)
+	for _, m := range matched {
+		if !m {
+			stats.Unmatched++
+		}
+	}
+	return kept, suppressed, stats
+}
+
+// Stats is what became of one document's statements in one scan (D121).
+// Unmatched counts every statement that matched no finding, for whatever
+// reason — including the ones also counted in Skipped (refused with a
+// warning) and OutOfScope (naming an image that is not the target) — so
+// Statements - Unmatched is the number that matched something.
+type Stats struct {
+	Statements int
+	Unmatched  int
+	Skipped    int
+	OutOfScope int
+	// Applied is how many findings this document suppressed.
+	Applied int
 }
 
 // liveProduct is a Product with its purl-or-exact matching precomputed once
@@ -65,9 +92,21 @@ func (d *Document) Apply(findings []matcher.Finding, warn func(string)) (kept []
 // avoids one warning per finding for a scan with many findings and one bad
 // statement.
 type liveProduct struct {
-	isPURL        bool
-	purl          pkgmeta.PURL
-	exactID       string
+	isPURL  bool
+	purl    pkgmeta.PURL
+	exactID string
+	// isSource marks a package product that declares itself a SOURCE
+	// package — arch=src on an rpm purl (Red Hat), arch=source on a deb purl
+	// (Canonical) — which applies to every installed binary built from it
+	// (D121). No binary carries either arch, so the marker cannot be
+	// mistaken. An unmarked name is never read as a source, even where it
+	// is one: "openssl" on Rocky is both the source and a binary, and
+	// reading the statement the wide way would hide openssl-libs' finding
+	// behind a statement about the command.
+	isSource bool
+	// image is set for a product naming an image rather than a package
+	// (D121): it never matches a finding itself, it scopes its statement.
+	image         *imageRef
 	subcomponents []liveProduct
 }
 
@@ -85,6 +124,18 @@ func buildLiveProduct(p Product, warn func(string)) (liveProduct, bool) {
 	if docPurlStr != "" {
 		parsed, err := pkgmeta.ParsePURL(docPurlStr)
 		if err != nil {
+			if isImagePURLType(docPurlStr) {
+				// D121: an image product that cannot be read still names an
+				// image. Dropping it would unscope its statement, and the
+				// bare top-level duplicates beside it (the Docker Hardened
+				// Images shape) would then apply to every image. It scopes
+				// the statement to an image no target matches instead — when
+				// in doubt, skipped, never applied. Its subcomponents go with
+				// it: they could only ever apply inside that image.
+				warn(fmt.Sprintf("vex product purl %q names an image but could not be parsed; its statement applies to no target: %v",
+					docPurlStr, err))
+				return liveProduct{image: &imageRef{}}, true
+			}
 			// Row 33: an unparseable DOC purl must not become a wildcard —
 			// this product contributes no match, ever, rather than falling
 			// back to exact-string comparison against a purl-shaped literal
@@ -94,8 +145,15 @@ func buildLiveProduct(p Product, warn func(string)) (liveProduct, bool) {
 		}
 		lp.isPURL = true
 		lp.purl = parsed
+		if img, ok := imageFromPURL(parsed); ok {
+			lp.image = &img
+		}
+		lp.isSource = isSourcePURL(parsed)
 	} else {
 		lp.exactID = p.ID
+		if img, ok := imageFromReference(p.ID); ok {
+			lp.image = &img
+		}
 	}
 	for _, sc := range p.Subcomponents {
 		if built, ok := buildLiveProduct(sc, warn); ok {
@@ -106,42 +164,174 @@ func buildLiveProduct(p Product, warn func(string)) (liveProduct, bool) {
 }
 
 // matches reports whether this product (or, failing that, one of its
-// subcomponents) identifies the finding's own package — pkgPURL, the raw
-// purl string, and pkgParsed/pkgOK its parsed form (parsed once per finding
-// by resolve, not once per product). versionless reports whether the WINNING
-// purl match was against a version-less document purl, for the reason
-// string's own footnote (D104's rule: such a match must say so).
+// subcomponents) identifies the finding's own package — s, the purl as
+// written and its parsed form (parsed once per finding by resolve, not once
+// per product). versionless reports whether the WINNING purl match was
+// against a version-less document purl, for the reason string's own footnote
+// (D104's rule: such a match must say so).
 //
-// pkgPURL == "" — no purl on the finding at all — is the "nothing to offer"
+// s.raw == "" — no purl on the finding at all — is the "nothing to offer"
 // case the rules doc calls out by name (row 23): go-vex short-circuits an
 // empty subcomponent identifier to a match (suppressing the WHOLE product).
-// The explicit `pkgPURL != ""` guard below is redundant on the current
-// shape of this function — a purl-typed subcomponent already refuses via
-// pkgOK (ParsePURL("") errors, so pkgOK is false), and an exact-string one
-// already refuses via `exactID != ""` — but it is kept as the guard that
-// makes the "never default to a match" rule true BY CONSTRUCTION rather
-// than as an emergent property of two unrelated checks; a mutation
-// deleting it (verified 2026-08-28) does not turn row 23 red, which is
-// recorded here rather than left as an unexplained survivor.
-
-func (lp liveProduct) matches(pkgPURL string, pkgParsed pkgmeta.PURL, pkgOK bool) (matched, versionless bool) {
-	if lp.isPURL {
-		if pkgOK {
-			if m, vl := purlPatternMatches(lp.purl, pkgParsed); m {
-				return true, vl
+// The explicit `s.raw != ""` guard below is redundant on the current shape
+// of this function — a purl-typed subcomponent already refuses via s.ok
+// (ParsePURL("") errors, so s.ok is false), and an exact-string one already
+// refuses via `exactID != ""` — but it is kept as the guard that makes the
+// "never default to a match" rule true BY CONSTRUCTION rather than as an
+// emergent property of two unrelated checks; a mutation deleting it
+// (verified 2026-08-28) does not turn row 23 red, which is recorded here
+// rather than left as an unexplained survivor.
+//
+// viaSource names the source package when the match was a marked source
+// statement's (D121), so the reason can say the binary was exonerated
+// through its source rather than by its own name.
+func (lp liveProduct) matches(s subject) (matched, versionless bool, viaSource string) {
+	switch {
+	case lp.image != nil:
+		// An image is not a package; it scoped the statement instead.
+	case lp.isPURL && lp.isSource:
+		if s.ok {
+			if m, vl := sourcePatternMatches(lp.purl, s); m {
+				return true, vl, lp.purl.Name
 			}
 		}
-	} else if lp.exactID != "" && lp.exactID == pkgPURL {
-		return true, false
+	case lp.isPURL:
+		if s.ok {
+			if m, vl := purlPatternMatches(lp.purl, s.parsed, s.codename); m {
+				return true, vl, ""
+			}
+		}
+	case lp.exactID != "" && lp.exactID == s.raw:
+		return true, false, ""
 	}
-	if len(lp.subcomponents) > 0 && pkgPURL != "" {
+	if len(lp.subcomponents) > 0 && s.raw != "" {
 		for _, sc := range lp.subcomponents {
-			if m, vl := sc.matches(pkgPURL, pkgParsed, pkgOK); m {
-				return true, vl
+			if m, vl, via := sc.matches(s); m {
+				return true, vl, via
 			}
 		}
 	}
-	return false, false
+	return false, false, ""
+}
+
+// subject is one finding's package as a product is matched against it: the
+// purl as written, parsed once per finding (ok false when there is none or
+// it does not parse), the package itself for a source statement's
+// Source.Name, and the target's Ubuntu codename.
+type subject struct {
+	raw      string
+	parsed   pkgmeta.PURL
+	ok       bool
+	pkg      pkgmeta.Package
+	codename string
+}
+
+// isSourcePURL reports whether a document purl marks itself a source
+// package: arch=src on rpm, arch=source on deb (D121). apk has no such
+// convention among the producers measured, so an apk product is always a
+// binary one.
+func isSourcePURL(p pkgmeta.PURL) bool {
+	switch p.Type {
+	case "rpm":
+		return p.Qualifiers["arch"] == "src"
+	case "deb":
+		return p.Qualifiers["arch"] == "source"
+	}
+	return false
+}
+
+// sourcePatternMatches applies a marked source statement (D121) to an
+// installed binary built from that source: the type and namespace as any
+// purl match, the document's name against the package's Source.Name, its
+// version against the source version, and its other qualifiers as the usual
+// one-directional subset — arch excluded, since the marker is the one value
+// no binary carries.
+//
+// The source version is Source.Version, falling back to the binary's own
+// (D8's "empty means same as the binary"), except on rpm, where Source.Version
+// is the binary's EVR and the SRPM's own version is read off its file name
+// instead (rpmSourceVersions). An rpm document writes the epoch as a
+// qualifier, so it is joined to the version before comparing and left out of
+// the subset check.
+func sourcePatternMatches(doc pkgmeta.PURL, s subject) (matched, versionless bool) {
+	pkg := s.parsed
+	if doc.Type != pkg.Type || !namespaceEqual(doc.Type, doc.Namespace, pkg.Namespace) {
+		return false, false
+	}
+	if s.pkg.Source == nil || s.pkg.Source.Name == "" || s.pkg.Source.Name != doc.Name {
+		return false, false
+	}
+	versionless = doc.Version == ""
+	if !versionless {
+		want, got := doc.Version, s.pkg.Source.Version
+		if got == "" {
+			got = s.pkg.Version
+		}
+		if doc.Type == "rpm" {
+			want, got = rpmSourceVersions(doc, s)
+		}
+		if got == "" || want != got {
+			return false, false
+		}
+	}
+	for k, v := range doc.Qualifiers {
+		if k == "arch" || (doc.Type == "rpm" && k == "epoch") {
+			continue
+		}
+		if !qualifierMatches(pkg, k, v, s.codename) {
+			return false, false
+		}
+	}
+	return true, versionless
+}
+
+// rpmSourceVersions is the pair a marked rpm source statement compares: the
+// document's version and the version of the SRPM the binary was built from,
+// each with its epoch.
+//
+// The SRPM's version-release comes from its file name — Package.Upstream as
+// the rpmdb cataloger records SOURCERPM, else the purl's upstream qualifier
+// (an SBOM's package) — and not from Source.Version, which the rpm catalogers
+// set to the binary's own EVR because the matcher compares source-keyed
+// advisories at it. The two differ whenever a binary is versioned apart from
+// its source: device-mapper-libs 1.02.181 is built from lvm2 2.03.14, and
+// Red Hat's statement names lvm2@2.03.14-15.el8_10?arch=src.
+//
+// The file name carries no epoch, so the document's epoch is compared with
+// the binary's, a missing one on either side reading as 0 (syft writes
+// epoch=0 where the rpmdb holds an explicit zero). An epoch the source and
+// binary do not share therefore errs toward reporting. With no SOURCERPM the
+// binary is its own source and its full EVR is compared, as before.
+func rpmSourceVersions(doc pkgmeta.PURL, s subject) (want, got string) {
+	docEpoch := rpmEpoch(doc.Qualifiers["epoch"])
+	srpm := s.pkg.Upstream
+	if srpm == "" {
+		srpm = s.parsed.Qualifiers["upstream"]
+	}
+	if vr := pkgmeta.SourceRPMVersion(srpm); vr != "" {
+		binEpoch := s.parsed.Qualifiers["epoch"]
+		if e, _, ok := strings.Cut(s.pkg.Version, ":"); ok {
+			binEpoch = e
+		}
+		return docEpoch + ":" + doc.Version, rpmEpoch(binEpoch) + ":" + vr
+	}
+	want = doc.Version
+	if docEpoch != "0" {
+		want = docEpoch + ":" + want
+	}
+	got = s.pkg.Source.Version
+	if got == "" {
+		got = s.pkg.Version
+	}
+	return want, got
+}
+
+// rpmEpoch spells an absent epoch as the zero it means.
+func rpmEpoch(e string) string {
+	if e == "" {
+		return "0"
+	}
+	return e
 }
 
 // purlPatternMatches implements the doc-purl-as-pattern rule (D104): type,
@@ -155,8 +345,14 @@ func (lp liveProduct) matches(pkgPURL string, pkgParsed pkgmeta.PURL, pkgOK bool
 // it during parsing — so two purls differing only in #subpath compare equal
 // here, which row 19 of the rules table asserts is the intended behavior,
 // not an oversight.
-func purlPatternMatches(doc, pkg pkgmeta.PURL) (matched, versionless bool) {
-	if doc.Type != pkg.Type || doc.Namespace != pkg.Namespace || doc.Name != pkg.Name {
+//
+// D121 relaxes two comparisons, each to a spelling the same package already
+// has: the namespace compares case-insensitively for apk, deb and rpm
+// (syft's own ELF-note cataloger writes pkg:deb/Debian/…), and qualifiers go
+// through qualifierMatches, where an rpm epoch of 0 equals no epoch and an
+// Ubuntu package's distro also answers to the release codename.
+func purlPatternMatches(doc, pkg pkgmeta.PURL, codename string) (matched, versionless bool) {
+	if doc.Type != pkg.Type || !namespaceEqual(doc.Type, doc.Namespace, pkg.Namespace) || doc.Name != pkg.Name {
 		return false, false
 	}
 	versionless = doc.Version == ""
@@ -166,11 +362,44 @@ func purlPatternMatches(doc, pkg pkgmeta.PURL) (matched, versionless bool) {
 		}
 	}
 	for k, v := range doc.Qualifiers {
-		if pkg.Qualifiers[k] != v {
+		if !qualifierMatches(pkg, k, v, codename) {
 			return false, false
 		}
 	}
 	return true, versionless
+}
+
+// namespaceEqual compares purl namespaces: case-insensitively for the three
+// distro types (D121), where the namespace is a vendor name some producers
+// capitalise, and exactly for everything else, where it can be a
+// case-sensitive Go module path or Maven group.
+func namespaceEqual(typ, a, b string) bool {
+	switch typ {
+	case "apk", "deb", "rpm":
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
+// qualifierMatches reports whether the package purl satisfies one document
+// qualifier. Two equivalences, both D121's:
+//   - rpm epoch: absent and "0" are the same epoch. syft writes epoch=0 when
+//     the rpmdb holds an explicit zero; the rpmdb cataloger does not.
+//   - Ubuntu distro: a deb purl in the ubuntu namespace also answers to
+//     distro=<VERSION_CODENAME>, Canonical's own spelling (distro=jammy).
+func qualifierMatches(pkg pkgmeta.PURL, k, v, codename string) bool {
+	got, ok := pkg.Qualifiers[k]
+	if ok && got == v {
+		return true
+	}
+	if pkg.Type == "rpm" && k == "epoch" && v == "0" && (!ok || got == "") {
+		return true
+	}
+	if k == "distro" && codename != "" && v == codename &&
+		pkg.Type == "deb" && strings.EqualFold(pkg.Namespace, "ubuntu") {
+		return true
+	}
+	return false
 }
 
 // vulnerabilityMatches tests a statement's vulnerability identity — its
@@ -210,6 +439,9 @@ func vulnerabilityMatches(v Vulnerability, identifiers []string) bool {
 // ordering timestamp resolved (statement timestamp, else document
 // timestamp, else zero — resolveTimestamp's own doc comment).
 type liveStatement struct {
+	// index is the statement's position in Document.Statements, for Apply's
+	// count of statements that matched nothing.
+	index     int
 	stmt      Statement
 	products  []liveProduct
 	timestamp time.Time
@@ -234,9 +466,10 @@ type liveStatement struct {
 // rest into liveStatement. This runs once per Apply call, not once per
 // finding — a document with 500 statements and 500 findings must produce a
 // bounded number of warnings, not 250,000.
-func (d *Document) liveStatements(warn func(string)) []liveStatement {
+func (d *Document) liveStatements(target Target, warn func(string)) ([]liveStatement, Stats) {
 	live := make([]liveStatement, 0, len(d.Statements))
-	for _, s := range d.Statements {
+	stats := Stats{Statements: len(d.Statements)}
+	for i, s := range d.Statements {
 		label := statementLabel(s)
 
 		if len(s.Products) == 0 {
@@ -246,6 +479,7 @@ func (d *Document) liveStatements(warn func(string)) []liveStatement {
 			// nothing to suppress and is refused rather than treated as
 			// "applies to everything".
 			warn(fmt.Sprintf("vex statement %s names no product and is skipped", label))
+			stats.Skipped++
 			continue
 		}
 
@@ -257,6 +491,7 @@ func (d *Document) liveStatements(warn func(string)) []liveStatement {
 				// applied per-statement — the rest of the document still
 				// stands, only this statement is skipped.
 				warn(fmt.Sprintf("vex statement %s is not_affected with neither justification nor impact_statement and is skipped", label))
+				stats.Skipped++
 				continue
 			}
 			if s.Justification != "" && !justificationEnum[s.Justification] {
@@ -286,14 +521,37 @@ func (d *Document) liveStatements(warn func(string)) []liveStatement {
 			// would suppress something the document never actually said was
 			// safe.
 			warn(fmt.Sprintf("vex statement %s has unrecognized status %q and is skipped", label, s.Status))
+			stats.Skipped++
 			continue
 		}
 
-		var products []liveProduct
+		var (
+			products []liveProduct
+			scoped   bool // the statement names at least one image
+			inScope  bool // and one of them is the target
+		)
 		for _, p := range s.Products {
 			if lp, ok := buildLiveProduct(p, warn); ok {
 				products = append(products, lp)
+				if lp.image != nil {
+					scoped = true
+					inScope = inScope || lp.image.matches(target)
+				}
 			}
+		}
+		// D121. A statement that names an image speaks for that image as a
+		// whole — every product it lists, top-level or subcomponent, is
+		// read as "in this image". Docker Hardened Images' documents list
+		// each package under the image AND again as a bare, version-less
+		// top-level product; applied without this, a DHI statement that its
+		// own build mitigates libgssapi-krb5-2 suppresses that package on a
+		// stock Debian image. Scoping only the subcomponents would not stop
+		// it, because the bare duplicates name no image. Not warned per
+		// statement — a DHI document holds thousands — but counted, and the
+		// caller's summary line says how many.
+		if scoped && !inScope {
+			stats.OutOfScope++
+			continue
 		}
 		// A statement whose every product purl was unparseable ends up with
 		// zero live products here — it simply matches nothing, which is
@@ -315,11 +573,11 @@ func (d *Document) liveStatements(warn func(string)) []liveStatement {
 		}
 
 		live = append(live, liveStatement{
-			stmt: s, products: products, timestamp: ts,
+			index: i, stmt: s, products: products, timestamp: ts,
 			author: d.Author, docID: d.ID, suppresses: suppresses,
 		})
 	}
-	return live
+	return live, stats
 }
 
 // resolve finds the statement (if any) that exonerates f, applying
@@ -334,14 +592,22 @@ func (d *Document) liveStatements(warn func(string)) []liveStatement {
 // earlier, superseded one would let it silently un-suppress nothing while
 // reporting a finding a vendor has since said is not_affected — or the
 // inverse, keep something suppressed a vendor has since retracted.
-func resolve(live []liveStatement, f matcher.Finding) (result, bool) {
+//
+// matched[i] is set for every statement i whose vulnerability and product
+// both match f, whether or not it wins — Apply's count of statements that
+// matched nothing reads it.
+func resolve(live []liveStatement, f matcher.Finding, target Target, matched []bool) (result, bool) {
 	pkgPURL := f.Package.PURL
 	pkgParsed, pkgErr := pkgmeta.ParsePURL(pkgPURL)
-	pkgOK := pkgPURL != "" && pkgErr == nil
+	s := subject{
+		raw: pkgPURL, parsed: pkgParsed, ok: pkgPURL != "" && pkgErr == nil,
+		pkg: f.Package, codename: target.UbuntuCodename,
+	}
 
 	var (
 		best     liveStatement
 		bestVL   bool
+		bestVia  string
 		haveBest bool
 	)
 	for _, ls := range live {
@@ -349,18 +615,20 @@ func resolve(live []liveStatement, f matcher.Finding) (result, bool) {
 			continue
 		}
 		var (
-			matched     bool
+			hit         bool
 			versionless bool
+			via         string
 		)
 		for _, p := range ls.products {
-			if m, vl := p.matches(pkgPURL, pkgParsed, pkgOK); m {
-				matched, versionless = true, vl
+			if m, vl, v := p.matches(s); m {
+				hit, versionless, via = true, vl, v
 				break
 			}
 		}
-		if !matched {
+		if !hit {
 			continue
 		}
+		matched[ls.index] = true
 		// live is built and walked in document order (liveStatements never
 		// reorders), so "not before" rather than strictly "after" is what
 		// makes an equal-timestamp statement overwrite the earlier one —
@@ -368,7 +636,7 @@ func resolve(live []liveStatement, f matcher.Finding) (result, bool) {
 		// consequence of scanning forward, with no separate Order
 		// comparison needed.
 		if !haveBest || !ls.timestamp.Before(best.timestamp) {
-			best, bestVL, haveBest = ls, versionless, true
+			best, bestVL, bestVia, haveBest = ls, versionless, via, true
 		}
 	}
 	// The winning statement may be a valid "affected"/"under_investigation"
@@ -379,7 +647,7 @@ func resolve(live []liveStatement, f matcher.Finding) (result, bool) {
 	if !haveBest || !best.suppresses {
 		return result{}, false
 	}
-	return result{reason: reasonFor(best, bestVL)}, true
+	return result{reason: reasonFor(best, bestVL, bestVia)}, true
 }
 
 // result carries what resolve found, kept separate from liveStatement itself

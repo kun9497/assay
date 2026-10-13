@@ -81,6 +81,12 @@ func classify(ref string) kind {
 	return kindRegistry
 }
 
+// IsRegistryReference reports whether an image target is a registry
+// reference rather than a docker-archive: tarball or an oci-dir: layout. Only
+// a registry reference has a repository and tag that a VEX statement's image
+// product can name (D121); the other two are identified by digest alone.
+func IsRegistryReference(ref string) bool { return classify(ref) == kindRegistry }
+
 // Open resolves a target to its layers. A registry reference reaches the
 // network; the other two never do (D14).
 //

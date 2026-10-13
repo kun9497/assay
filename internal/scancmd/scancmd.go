@@ -4,6 +4,8 @@ package scancmd
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -151,6 +153,14 @@ type Options struct {
 	// document has to say what scanned. The TARGET is Run's own parameter
 	// and needs no option.
 	Version string
+	// Commit and BuildDate are the other two ldflags values `assay version`
+	// prints. With Version they are the provenance record's tool (D120); a
+	// development build's defaults are recorded as they are.
+	Commit    string
+	BuildDate string
+	// ProvenanceFile is --provenance's path (D120): where the sidecar is
+	// written, on every exit Run takes. Empty writes none.
+	ProvenanceFile string
 	// DBMaxAge refuses a scan against vulnerability data older than this
 	// (D59). Zero disables the check, which is the default: the right
 	// number depends on how the caller runs `db update`, and inventing one
@@ -426,7 +436,21 @@ func findAPKDB(files map[string]source.FileFromLayer) (source.FileFromLayer, str
 // scan completes and the result is judged trustworthy (D11), opts decides
 // the exit code; Options{} reproduces the pre-slice-4 behaviour of always
 // exiting 0 on a trustworthy scan, findings or not.
-func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stderr io.Writer) int {
+//
+// D120: every exit records what produced it. The provenance object is built
+// before anything can fail and filled as each stage learns its part; the
+// renderers carry it in the report, and when --provenance names a file the
+// deferred finish writes the sidecar whichever return was taken — and turns
+// the exit into 2 if it cannot.
+func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stderr io.Writer) (code int) {
+	r := newRecorder(dbPath, target, opts, stdout, stderr)
+	defer func() { code = r.finish(code) }()
+	return runStages(ctx, dbPath, target, opts, r.stdout, r.stderr, r)
+}
+
+// runStages is Run's body; r is where it records provenance as it goes.
+func runStages(ctx context.Context, dbPath, target string, opts Options, stdout, stderr io.Writer, r *recorder) int {
+	prov := r.prov
 	var (
 		inventory pkgmeta.Target
 		cat       cyclonedx.Stats
@@ -462,6 +486,10 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 	// (internal/source/image.go) says Classify exists to prevent. stderr,
 	// never stdout, so `--output json | jq` stays clean.
 	fmt.Fprintf(stderr, "scanned %s as %s %s\n", target, article(kind), kind)
+	prov.Target.Kind = kind.String()
+	if kind == source.TargetImage && opts.Platform == "" {
+		prov.Policy.Platform = defaultPlatformPolicy()
+	}
 
 	// D119. After the classification line, so the refusal reads against what
 	// the target was taken to be.
@@ -485,7 +513,12 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 	// image-loader syntax, not a stripped prefix), so it keeps getting target.
 	switch kind {
 	case source.TargetImage:
-		t, stats, sc, rec, err := catalogImage(ctx, target, opts.Platform, stderr)
+		t, stats, sc, rec, creds, err := catalogImage(ctx, target, opts.Platform, stderr)
+		// D118's source name, never a value; only a registry pull has one.
+		if source.IsRegistryReference(target) {
+			prov.Target.RegistryCredentials = credentialName(creds)
+		}
+		prov.Target.Image = rec
 		if err != nil {
 			// D112. An expired --timeout is named as the flag's, with its
 			// value, so the reader knows which setting stopped the scan; the
@@ -506,6 +539,7 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		inventory, cat, scope, image = t, stats, &sc, rec
 
 	case source.TargetGoBinary:
+		prov.Target.SHA256 = fileSHA256(path)
 		t, stats, err := gobinary.Parse(path)
 		if err != nil {
 			// gobinary.Parse's own error already names path (buildinfo's own
@@ -521,6 +555,7 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		// dirscan dispatches to) - wrapped here the same way dirscan.Parse's
 		// own callers never see, since a jar scan has exactly one manifest
 		// and no merge to do.
+		prov.Target.SHA256 = fileSHA256(path)
 		pkgs, stats, err := jar.Parse(path)
 		if err != nil {
 			// jar.Parse's own error already names path.
@@ -541,6 +576,10 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 			return 2
 		}
 		inventory, cat, manifests = t, stats, mf
+		for _, m := range mf.Read {
+			prov.Target.Manifests = append(prov.Target.Manifests,
+				report.ManifestProvenance{Path: m.Path, SHA256: m.SHA256})
+		}
 
 	default: // source.TargetSBOM
 		// Classify only decided "this is some kind of SBOM" (D84) — CycloneDX
@@ -556,12 +595,19 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		}
 		defer f.Close()
 
-		t, stats, err := decodeSBOM(path, f)
+		// Hashed as decodeSBOM reads it, which is the whole file whenever
+		// it decodes (decodeSBOM drains to the limit): the bytes judged are
+		// the bytes hashed, with no second read.
+		h := sha256.New()
+		t, stats, err := decodeSBOM(path, io.TeeReader(f, h))
 		if err != nil {
 			fmt.Fprintf(stderr, "error: %v\n", err)
 			return 2
 		}
 		inventory, cat = t, stats
+		prov.Target.SHA256 = hex.EncodeToString(h.Sum(nil))
+		prov.Target.SerialNumber = stats.SerialNumber
+		prov.Target.DocumentNamespace = stats.DocumentNamespace
 	}
 
 	if kind == source.TargetDirectory {
@@ -629,6 +675,18 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		fmt.Fprintf(stderr, "error: read database metadata: %v\n", err)
 		return 2
 	}
+	// D120. Read here, beside Meta, so the record names the artifact before
+	// any gate below can refuse the scan. A record that will not read names
+	// no artifact rather than one it cannot vouch for, and says so.
+	art, hasArt, aerr := store.ReadArtifactRecord(dbPath)
+	if aerr != nil {
+		fmt.Fprintf(stderr, "warning: the database's artifact record is unreadable, so no artifact is named: %v\n", aerr)
+	}
+	var artp *store.ArtifactRecord
+	if hasArt {
+		artp = &art
+	}
+	prov.Database = report.NewDatabaseProvenance(m, artp)
 
 	// D59. Before matching, not after: a scan that will be refused for age
 	// should not spend the time, and a summary printed first would be a
@@ -663,7 +721,7 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 	// table or trip --fail-on, but every renderer still shows it as a
 	// counted, reasoned block — the matcher stayed pure, and suppression is
 	// visible, never silent (matcher.Result.Suppressed's own doc comment).
-	if code := applyIgnoreRules(&res, opts.IgnoreFile, stderr); code != 0 {
+	if code := applyIgnoreRules(&res, opts.IgnoreFile, stderr, &prov.Waivers); code != 0 {
 		return code
 	}
 
@@ -672,7 +730,7 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 	// no VEX document re-evaluates it — one suppression, one reason, and
 	// whichever mechanism ran first wins, rather than a finding silently
 	// carrying two waivers or the second one overwriting the first's reason.
-	if code := applyVEX(&res, opts.VEXFiles, stderr); code != 0 {
+	if code := applyVEX(&res, opts.VEXFiles, vexTarget(kind, target, image, inventory.Distro), stderr, &prov.Waivers); code != 0 {
 		return code
 	}
 
@@ -697,6 +755,7 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		Distro:         report.DistroOf(inventory.Distro),
 		InventoryScope: scope,
 		Image:          image,
+		Provenance:     prov,
 	}
 
 	// Three renderers, exactly one chosen: --explain replaces the report
@@ -840,7 +899,12 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 			return 2
 		}
 	}
-	return verdict(opts, sum, res.Findings, eolStatus)
+	code := verdict(opts, sum, res.Findings, eolStatus)
+	if code == 2 {
+		// The one exit 2 that prints no error line: the sidecar still says why.
+		r.reason = "evaluation incomplete (--fail-on-incomplete)"
+	}
+	return code
 }
 
 // article returns the indefinite article to pair with kind.String() so the
@@ -878,8 +942,13 @@ func article(kind source.TargetKind) string {
 // .assay.yaml scans exactly as before. A named-but-unreadable or malformed
 // config fails the scan at exit 2, on IgnoreFile's own reasoning: a broken
 // waiver list is a mistake to surface, not one to run past.
-func applyIgnoreRules(res *matcher.Result, ignoreFile string, stderr io.Writer) int {
+//
+// w receives the file's provenance (D120): the path as given, or the default
+// name when it was discovered — never the absolute path discovery resolved,
+// which names the working directory — its hash, and what each rule did.
+func applyIgnoreRules(res *matcher.Result, ignoreFile string, stderr io.Writer, w *report.WaiversProvenance) int {
 	path := ignoreFile
+	rec := &report.IgnoreFileProvenance{Path: ignoreFile, Rules: []report.IgnoreRuleProvenance{}}
 	if path == "" {
 		// No --config: look for the default in the working directory, and
 		// run without one if there is none.
@@ -892,14 +961,30 @@ func applyIgnoreRules(res *matcher.Result, ignoreFile string, stderr io.Writer) 
 			return 0
 		}
 		path = p
+		rec.Path, rec.Discovered = ignore.DefaultFile, true
 	}
+	w.IgnoreFile = rec
 	cfg, err := ignore.Load(path)
 	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
+		msg := err.Error()
+		if rec.Discovered {
+			// D120: the discovered path is absolute — the working directory,
+			// the username inside it — and this line becomes the sidecar's
+			// run.error. The file is by definition in the directory the scan
+			// ran from, so its default name says where it is.
+			msg = strings.ReplaceAll(msg, path, ignore.DefaultFile)
+		}
+		fmt.Fprintf(stderr, "error: %s\n", msg)
 		return 2
 	}
 	warn := func(msg string) { fmt.Fprintf(stderr, "warning: %s\n", msg) }
-	kept, suppressed := cfg.Apply(res.Findings, time.Now(), warn)
+	rec.SHA256 = cfg.SHA256
+	kept, suppressed, rules := cfg.Apply(res.Findings, time.Now(), warn)
+	for _, rr := range rules {
+		rec.Rules = append(rec.Rules, report.IgnoreRuleProvenance{
+			Rule: rr.Rule, Expires: rr.Expires, Expired: rr.Expired, Matched: rr.Matched,
+		})
+	}
 	res.Findings = kept
 	res.Suppressed = suppressed
 	if len(suppressed) > 0 {
@@ -922,22 +1007,79 @@ func applyIgnoreRules(res *matcher.Result, ignoreFile string, stderr io.Writer) 
 // suppress what an earlier one left behind, never re-suppress what it
 // already waived, matching applyIgnoreRules' own "ignore rules run first"
 // ordering one level down.
-func applyVEX(res *matcher.Result, paths []string, stderr io.Writer) int {
+//
+// D121: target scopes every statement that names an image, and after the
+// last document one line says what applied to nothing — the statements
+// that matched no finding, and the findings that carried no purl for any
+// statement to match. Before D121 an image's OS packages had no purl, so a
+// statement about one matched nothing and the scan said nothing about it;
+// the line exists so that state can never again be silent. It is printed
+// whenever --vex was given, zeros included, so its absence means no VEX.
+//
+// w receives each document's provenance (D120), appended before it is read so
+// a document that fails to load is still named in the record.
+func applyVEX(res *matcher.Result, paths []string, target vex.Target, stderr io.Writer, w *report.WaiversProvenance) int {
+	if len(paths) == 0 {
+		return 0
+	}
 	warn := func(msg string) { fmt.Fprintf(stderr, "warning: %s\n", msg) }
+	noPURL := 0
+	for _, f := range res.Findings {
+		if f.Package.PURL == "" {
+			noPURL++
+		}
+	}
+	var total vex.Stats
 	for _, path := range paths {
+		w.VEX = append(w.VEX, report.VEXProvenance{Path: path})
+		rec := &w.VEX[len(w.VEX)-1]
 		doc, err := vex.Load(path)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: %v\n", err)
 			return 2
 		}
-		kept, suppressed := doc.Apply(res.Findings, warn)
+		kept, suppressed, st := doc.Apply(res.Findings, target, warn)
+		rec.SHA256, rec.ID = doc.SHA256, doc.ID
+		rec.Statements, rec.Applied, rec.Skipped = st.Statements, st.Applied, st.Skipped
+		rec.OutOfScope, rec.Unmatched = st.OutOfScope, st.Unmatched
 		res.Findings = kept
 		res.Suppressed = append(res.Suppressed, suppressed...)
 		if len(suppressed) > 0 {
 			fmt.Fprintf(stderr, "%d finding(s) suppressed by VEX (%s)\n", len(suppressed), path)
 		}
+		total.Statements += st.Statements
+		total.Unmatched += st.Unmatched
+		total.Skipped += st.Skipped
+		total.OutOfScope += st.OutOfScope
 	}
+	fmt.Fprintf(stderr, "vex: %d of %d statement(s) matched no finding (%d name an image that is not this target, "+
+		"%d skipped); %d finding(s) carry no purl to match against\n",
+		total.Unmatched, total.Statements, total.OutOfScope, total.Skipped, noPURL)
 	return 0
+}
+
+// vexTarget describes what was scanned for VEX scope (D121). An image of any
+// loader is an image and is identified by the digests D119 recorded; only a
+// registry reference also has a repository and tag, taken from the reference
+// as typed. Everything else is the zero Target, so a statement naming an
+// image is skipped in an SBOM, directory or binary scan: the scan cannot
+// know it is that image.
+func vexTarget(kind source.TargetKind, target string, image *report.ImageRecord, d *pkgmeta.Distro) vex.Target {
+	var t vex.Target
+	if d != nil && d.ID == "ubuntu" {
+		t.UbuntuCodename = d.VersionCodename
+	}
+	if kind != source.TargetImage {
+		return t
+	}
+	t.Image = true
+	if source.IsRegistryReference(target) {
+		t.Repository, t.Tag = vex.TargetFromReference(target)
+	}
+	if image != nil {
+		t.Digests = []string{image.ManifestDigest, image.IndexDigest}
+	}
+	return t
 }
 
 func verdict(opts Options, sum report.Summary, findings []matcher.Finding, eol report.EOLStatus) int {
@@ -1091,17 +1233,27 @@ func decodeSBOM(path string, r io.Reader) (pkgmeta.Target, cyclonedx.Stats, erro
 // record line naming the platform scanned and its digests, a warning when a
 // single image is not the host's platform or could not be checked, and the
 // JSON record returned for Run to hand the renderers.
-func catalogImage(ctx context.Context, ref, platform string, stderr io.Writer) (pkgmeta.Target, cyclonedx.Stats, report.InventoryScopeRecord, *report.ImageRecord, error) {
+//
+// The credential source is returned too, for the provenance record (D120).
+func catalogImage(ctx context.Context, ref, platform string, stderr io.Writer) (pkgmeta.Target, cyclonedx.Stats, report.InventoryScopeRecord, *report.ImageRecord, source.CredentialSource, error) {
 	img, err := source.Open(ctx, ref, platform)
 	if err != nil {
-		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, nil, err
+		// A 401 or 403 on the manifest is still the D118 source that was
+		// offered, and the error says which; D120's record must agree with
+		// it rather than read "none" for a credential that was sent.
+		creds := source.CredentialsNone
+		var ae *source.AuthError
+		if errors.As(err, &ae) {
+			creds = ae.Source
+		}
+		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, nil, creds, err
 	}
 	if c := img.Credentials; c.Source != source.CredentialsNone {
 		fmt.Fprintf(stderr, "registry credentials for %s: from %s\n", c.Registry, c.Source)
 	}
 	rec := reportPlatform(ref, img.Platform, stderr)
 	t, stats, scope, err := catalogFromImage(ctx, ref, img)
-	return t, stats, scope, rec, err
+	return t, stats, scope, rec, img.Credentials.Source, err
 }
 
 // reportPlatform prints D119's record line and any warning for one image
@@ -1411,6 +1563,7 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 			pkgs[i].Locations[j].LayerDigest = diffID
 		}
 	}
+	assignOSPURLs(target.Distro, pkgs)
 	target.Packages = pkgs
 
 	// D99: Bitnami app packages are catalogued ALONGSIDE the distro
@@ -1452,6 +1605,26 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 		Components:       len(target.Packages) + skippedRecords,
 		SkippedNoVersion: skippedRecords,
 	}, scope, nil
+}
+
+// assignOSPURLs gives each OS package an image scan cataloged the purl syft
+// would write for it (D121), so a VEX statement written against a syft SBOM
+// of the image names the package the scan reports. Before D121 none of these
+// packages carried a purl, so a not_affected statement about one never
+// applied and said nothing about not applying.
+//
+// Only where none exists: a package that arrives with a purl keeps it
+// verbatim. No OS cataloger sets one today, so the guard holds the rule for
+// the next one that does rather than a case that occurs. Bitnami's packages
+// are appended after this runs and keep their marker's own purl. A distro
+// without a measured namespace row leaves its packages without a purl, which
+// the VEX summary line then counts (OSPackagePURL's own comment).
+func assignOSPURLs(d *pkgmeta.Distro, pkgs []pkgmeta.Package) {
+	for i := range pkgs {
+		if pkgs[i].PURL == "" {
+			pkgs[i].PURL = pkgmeta.OSPackagePURL(d, pkgs[i])
+		}
+	}
 }
 
 // catalogBitnami discovers and parses every Bitnami marker in img (D99),

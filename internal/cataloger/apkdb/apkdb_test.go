@@ -57,6 +57,10 @@ func TestParse_RealDatabase(t *testing.T) {
 	if bl.Type != "apk" {
 		t.Errorf("alpine-baselayout Type = %q, want apk", bl.Type)
 	}
+	// D121: the A: line, read for the purl's arch qualifier.
+	if bl.Arch != "x86_64" {
+		t.Errorf("alpine-baselayout Arch = %q, want x86_64", bl.Arch)
+	}
 	// Location.Path is part of Evidence (D10): a finding that cannot point back
 	// at the file it came from is not explainable.
 	if len(bl.Locations) != 1 || bl.Locations[0].Path != "/lib/apk/db/installed" {

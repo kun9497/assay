@@ -281,6 +281,8 @@ alias로 갖는 경우가 흔합니다. NVD 심각도를 보강 소스로 조인
 | 다중 출처 finding의 심각도 | grype는 매치당 밴드 하나를 보고하지만, assay는 모든 출처의 평가를 보고하고 그중 가장 높은 것으로 게이트를 겁니다(D25). Django 3.2.12, finding 19건으로 측정: grype는 assay의 집계와 19/19 일치하고, assay의 GHSA 평가와도 19/19 일치하지만 PYSEC 평가와는 1/15만 일치합니다. 밴드가 같을 때만 일치로 세었으므로, 어긋난 14건은 grype의 실제 밴드와 PYSEC의 `unknown`을 견준 결과입니다. 이 표본에서는 "grype가 가장 높은 것을 취한다"와 "grype가 GHSA를 따른다"를 구분할 수 없습니다. PYSEC가 어느 것에도 평가를 매기지 않기 때문입니다. 둘을 가르려면 GHSA가 아닌 출처가 더 높게 매긴 사례가 필요합니다. |
 | `ASSAY_REGISTRY_AUTH_{AUTHORITY,USERNAME,PASSWORD,TOKEN}` | grype의 `GRYPE_REGISTRY_AUTH_*` 단일 항목 형태와 같고, 토큰/기본 인증의 상호 배타도 같습니다. 차이는 둘입니다. authority가 없으면 자격증명은 스캔 타깃의 레지스트리에 묶이고, 반쪽만 설정된 자격증명은 익명으로 넘어가지 않고 종료 코드 2입니다. grype의 `INSECURE_*`, TLS 클라이언트 인증서, 다중 항목 목록에는 대응물이 없습니다(D118). |
 | `--platform` | 문법과 containerd 정규화가 grype와 같고, 단일 플랫폼 이미지가 일치하지 않는 명시적 플랫폼은 양쪽 모두 거부합니다. 차이는 다음과 같습니다. 플래그가 없을 때 단일 플랫폼 이미지가 일치하지 않으면 stderr 경고와 함께 스캔합니다(grype는 아무 말도 하지 않습니다). 이미지가 아닌 타깃에 플래그를 주면 종료 코드 2입니다. OS 버전 접미사는 거부합니다. 선택된 플랫폼과 digest는 JSON `image` 객체에 기록됩니다(D119). |
+| `--vex` (D121) | grype는 문서가 어떤 이미지를 지목하든 패키지 purl 문장을 적용하고 바이너리 이름만 매칭합니다. assay는 이미지를 지목하는 문장을 그 이미지에만 적용하고(최상위 product와 하위 컴포넌트 product 모두), `arch=src` / `arch=source`로 표시된 소스 문장은 그 소스에서 빌드된 모든 바이너리에 적용합니다. 패키지 purl은 syft의 표기이므로 syft SBOM 기반 문장은 어느 쪽이든 매칭됩니다. |
+| `--provenance <path>` (D120) | grype에는 대응 기능이 없습니다. grype는 자신의 descriptor(타임스탬프와 로컬 경로 포함)를 보고서 안에 넣지만, assay는 보고서를 바이트 단위로 결정적으로 유지하고 실행 시각과 종료 코드는 sidecar에 둡니다. |
 
 공유된 이름이 다른 의미를 갖게 될 때마다 이 표에 행을 추가하십시오. **조용히 달라진 플래그가
 이름이 다른 플래그보다 나쁩니다.**
@@ -4752,6 +4754,149 @@ CPU는 v6 이미지를 돌리므로, 그 이미지가 v7 호스트가 배포할 
 Windows 이미지와 OS 버전 요청은 반쪽만 지원하는 대신 거부합니다. 호스트 variant 감지(docker가
 하듯 CPU 플래그로 `amd64/v3`를 알아내는 것)는 하지 않습니다 — 기본값은 기본 variant를 요청하며,
 모든 amd64 인덱스가 이를 담고 있습니다.
+
+---
+
+### D120 — 스캔은 자기 판정을 만든 것이 무엇인지 기록한다: 결정적인 부분은 보고서에, 실행 자체는 모든 종료 경로에서 쓰이는 sidecar에
+
+**결정.** 스캔이 이미 가진 것으로 스캔마다 한 번 만들어지는 provenance 레코드 하나를 두 곳에
+씁니다:
+
+- **JSON 보고서에 최상위 `provenance` 객체가 추가됩니다(스키마 14).** 같은 입력을 스캔하면
+  매번 같은 사실만 담습니다:
+  - `tool` — 이름, 버전, 커밋, 빌드 날짜(`assay version`이 이미 출력하는 ldflags 값이며,
+    `dev` 빌드는 값을 지어내지 않고 그렇다고 밝힙니다).
+  - `database` — 저장소 스키마, `builtAt`, 데이터베이스가 `db update`에서 왔다면 게시된
+    아티팩트의 참조와 매니페스트 digest(로컬 `db build`라면 없음), 모든 등급 출처(NVD,
+    EPSS, KEV)와 EOL 카탈로그의 data-as-of, 그리고 frozen 키와 renamed 키의 이름.
+  - `target` — 입력한 그대로의 인자, 그 종류, 콘텐츠 식별: 파일 타깃(SBOM, Go 바이너리,
+    jar)의 sha256; SBOM 자체의 `serialNumber`(CycloneDX) 또는 `documentNamespace`(SPDX);
+    디렉터리라면 읽은 모든 매니페스트의 루트 상대 경로와 sha256; 이미지라면 기존 D119
+    `image` 객체 옆에 레지스트리 자격증명 출처의 이름(D118).
+  - `policy` — 종료 코드를 움직일 수 있는 모든 입력: 각 `--fail-on*` 게이트,
+    `--db-max-age`, `--db-max-rating-age`, `--timeout`, 그리고 `--platform`과 그것이 주어진
+    것인지 기본값인지.
+  - `waivers` — ignore 파일(주어진 경로 또는 `.assay.yaml`, 자동 탐색되었는지, sha256, 규칙별
+    만료일, 만료되었는지, 몇 건의 finding과 매칭되었는지)과 각 `--vex` 문서(순서대로, 주어진
+    경로, sha256, 문서 `@id`, 읽은 문장 수, 적용된 수, 건너뛴 수, 아무것과도 매칭되지 않은 수).
+- **`--provenance <path>`는 sidecar를 씁니다.** 같은 객체에 실행마다 달라지는 사실이 더해집니다:
+  `startedAt`과 `finishedAt`(UTC), 종료 코드, 종료 코드 2의 오류 메시지, stdout에 쓴 보고서
+  바이트의 sha256. 인자 파싱 이후의 **모든** 종료 경로에서 쓰입니다 — 나이 게이트 거부, 없는
+  VEX 파일, 타임아웃, 401 — 그리고 이것을 쓰지 못하는 것 자체가 종료 코드 2입니다. 호출자가
+  레코드를 요청했는데 받지 못했기 때문입니다.
+- **SARIF**는 같은 객체를 `run.properties.provenance`에, 그리고
+  `tool.driver.semanticVersion`을 담습니다. 타임스탬프가 없으므로 이것도 결정적입니다. 표
+  렌더러는 바뀌지 않습니다.
+- **`db update`는 무엇을 받았는지 기록합니다**: `<dbPath>.artifact.json`(참조, 매니페스트
+  digest, pull 시각)을 데이터베이스 옆에 D116의 lock 아래서 쓰고 `db build`가 지우므로, 스캔이
+  데이터베이스가 어느 아티팩트에서 왔는지 말할 수 있습니다. 그런 파일이 없는 데이터베이스는
+  추측하지 않고 없다고 보고합니다.
+- **머신이나 사용자를 식별하는 것은 없습니다**: 입력하지 않은 절대 경로, 데이터베이스 경로,
+  호스트명, 사용자명, 작업 디렉터리, 업스트림 오류 텍스트(`Provenance.Error`가 내부 주소를
+  담을 수 있습니다), 자격증명 값(D118)은 모두 넣지 않습니다.
+
+**왜, 측정으로.** 2026-10-13에 판정을 바꾸는 시나리오 스무 개를 v0.8.0과 v0.9.0 바이너리로
+각각 두 번씩 실행했습니다. "이 두 실행이 왜 달랐는가"에 보고서가 답한 경우는 거의 없었습니다:
+
+- `--fail-on critical`과 `--fail-on low`는 종료 코드 0과 1인데도 **바이트 단위로 동일한
+  JSON**을 냈습니다.
+- 만료일이 지난 ignore 규칙은 만료 전 규칙이 0을 준 곳에서 종료 코드 1을 냈는데, JSON은 ignore
+  파일이 아예 없을 때와 **바이트 단위로 동일**했습니다.
+- 같은 파일 이름의 VEX 문서 둘 — 하나는 억제하고 하나는 아님 — 에서 두 번째 실행은 `--vex`가
+  전혀 없는 실행과 바이트 단위로 동일했습니다.
+- 제자리에서 바뀐 SBOM이나 lockfile은 다른 finding을 냈지만 입력을 식별하는 것은 아무것도
+  없었습니다.
+- 어느 바이너리의 JSON도 도구를 이름으로 밝히지 않고, 어떤 출력도 데이터베이스의 빌드 시각,
+  스키마, 아티팩트를 밝히지 않습니다: `db update`는 받은 digest를 출력하지도 보관하지도
+  않습니다.
+- 종료 코드 2 경로 일곱 개(나이 게이트, 없는 VEX 파일, 깨진 config, 데이터베이스 없음,
+  타임아웃)는 보고서를 **0바이트** 썼습니다.
+
+**왜 두 곳인가.** 이 시나리오들에 대해 여섯 가지 설계를 점수 매겼습니다. JSON만 쓰는 설계(보고서
+안에 타임스탬프가 있는 provenance)는 두 가지만 빼고 모두 풀었는데, 그 두 가지는 풀 수 없습니다.
+보고서의 바이트 결정성을 잃는다는 것 — 오늘은 같은 입력이 같은 바이트를 내며, 게이트
+시나리오를 진단할 수 있었던 것이 바로 그 덕분입니다 — 과, 보고서가 존재하기 전에 끝난 실행에
+대해서는 할 말이 없다는 것입니다. sidecar만 쓰면 둘 다 지키지만, 보고서만 받은 소비자는
+아무것도 알 수 없습니다. 같은 입력의 두 실행 사이에서 달라지는 것은 시각과 결과뿐이므로, 보고서
+밖으로 옮기는 것은 이 둘뿐입니다. SARIF만 쓰는 설계는 모든 JSON 소비자에게 실패하고
+`--output`은 두 번 줄 수 없습니다. CI 로그에 의존하면 종료 코드 2의 원인은 남지만 콘텐츠 식별은
+남지 않습니다.
+
+**빠지는 것.** 서명된 attestation(in-toto / cosign 취약점 predicate)은 같은 레코드에 서명과 키
+관리를 더한 것이며, 여기서가 아니라 deferred-decisions의 데이터베이스 서명 항목과 함께
+결정합니다. `--config`가 덮어쓴 설정 파일의 기록은 남기지 않습니다. 두 실행이 같은 파일을
+썼으므로 어떤 차이도 설명하지 않기 때문입니다.
+
+---
+
+### D121 — 이미지의 OS 패키지는 purl을 갖고, 이미지를 지목하는 VEX 문장은 그 이미지에만 적용된다
+
+**결정.** 네 가지 변경을 함께 합니다. 첫 번째만 하면 거짓 억제 경로가 열리기 때문입니다:
+
+1. **이미지 스캔이 카탈로그하는 모든 OS 패키지는 syft 표기의 purl을 갖습니다** —
+   `pkg:<type>/<namespace>/<binary name>@<version>?arch=…&distro=<id>-<VERSION_ID>`(여기서
+   `<id>`는 grype의 distro 이름이 아니라 os-release ID — `alpaquita-stream`,
+   `opensuse-leap-15.6`)에 `upstream=<source>`(apk: 바이너리와 다를 때의 origin; deb: 소스,
+   소스 버전이 바이너리와 다르면 `name@version`; rpm: SRPM 파일 이름
+   `openssl-3.5.5-2.el9_8.src.rpm`; alpm: `%BASE%`, 항상)가 붙고, rpm은 epoch가 0이 아니면
+   `epoch=`가 붙습니다 — syft는 명시적인 0에도 `epoch=0`을 쓰며, VEX 매칭은 둘을 같은 epoch로
+   봅니다. deb은 epoch를 version 안에 두고 rpm은 절대 그러지 않습니다.
+   네임스페이스는 syft와 일치하는 distro별 표(`alpine`, `debian`, `redhat`, `rocky`, …)에서
+   오며, 각 행은 추가하기 전에 syft 실행과 대조해 측정합니다. 행이 없는 distro는 별칭을 쓰지
+   않고 purl을 갖지 않습니다. purl은 아직 없을 때만 생성되므로 SBOM 자체의 purl과 Bitnami
+   마커의 purl은 그대로 남습니다. purl은 JSON과 SARIF에 보고됩니다. VEX 네임스페이스 비교는
+   `apk`, `deb`, `rpm`에 대해 대소문자를 구분하지 않습니다.
+2. **product에 이미지(`pkg:oci` 또는 `pkg:docker` purl, 또는 이미지 참조)를 포함하는 문장은
+   그 이미지 전체로 범위가 지정됩니다**: 이미지 product 중 하나가 스캔한 타깃의 참조나 digest와
+   일치하지 않는 한 그 문장의 어떤 product도 — 최상위든 하위 컴포넌트든 — 적용되지 않습니다.
+   다른 이미지로 범위가 지정된 문장, 또는 이미지가 아닌 것을 스캔할 때의 이미지 범위 문장은
+   건너뜁니다.
+3. **소스 패키지 문장은 스스로를 소스로 표시할 때 적용됩니다** — `arch=src`(Red Hat) 또는
+   `arch=source`(Canonical) — 그 소스 버전에서 빌드된 설치된 모든 바이너리에. Ubuntu 패키지는
+   추가로 `distro=<VERSION_CODENAME>`에도 응답하며, os-release 파싱이 이를 읽기 시작합니다.
+   표시 없는 소스 이름은 소스로 취급하지 않습니다.
+4. **조용한 미적용은 없습니다**: 스캔마다 stderr 한 줄이 어떤 finding과도 매칭되지 않은 문장
+   수와, 매칭할 purl이 없던 finding 수를 밝히며, D120의 waiver 레코드가 문서별로 같은 건수를
+   담습니다.
+
+**왜, 측정으로.** 이 결정 이전에는 Bitnami 외에 purl을 설정하는 이미지 cataloger가 없었으므로,
+이미지의 OS 패키지에 대한 `not_affected` 문장은 한 번도 적용되지 않았고, 아무 경고도 없었으며,
+출력은 `--vex` 없는 스캔과 바이트 단위로 동일했습니다(2026-10-13). 그것만 고치는 것 — grype의
+동작 — 을 같은 날 실제 피드 세 개로 측정했습니다:
+
+- **Canonical의 OpenVEX**는 모든 product를 `distro=<codename>`(`jammy`, `noble`,
+  `esm-infra/focal`, …)으로 이름 짓고 버전을 붙입니다. syft의 `distro=ubuntu-22.04`는 표본
+  1,163개 product 중 **하나도** 일치하지 않습니다. 그래서 codename 형태입니다.
+- **Docker Hardened Images의 OpenVEX**(Python 이미지 문서에 문장 2,358개)는 모든 패키지 purl을
+  이미지 아래에, 그리고 **다시 맨 최상위 product로** 나열하며, 바이너리 이름만 버전 없이
+  씁니다: `pkg:deb/debian/libgssapi-krb5-2`, `not_affected`, justification
+  `inline_mitigations_already_exist` — DHI 자체 빌드에 대한 주장입니다. 패키지 purl을 product로
+  매칭하면(D104, 그리고 grype 안의 go-vex의 두 번째 패스) 그 문장이 일반 Debian 이미지의 같은
+  패키지를 억제합니다. 이를 막는 것이 이미지 범위이며, 하위 컴포넌트만 범위로 잡아서는 막을 수
+  없습니다. 맨 중복본은 어떤 이미지도 지목하지 않기 때문입니다.
+- **Red Hat의 CSAF**는 소스 패키지를 `arch=src`로, Canonical은 `arch=source`로 표시합니다.
+  표시된 소스 문장은 바이너리 문장으로 오인될 수 없습니다. 어떤 바이너리도 그 arch 값을 갖지
+  않기 때문입니다.
+
+`upstream`, `arch`, `distro` 값이 syft의 것인 이유는, 가장 흔한 생산자 입력인 syft SBOM에 대해
+쓰인 문장이 같은 이미지의 이미지 스캔과도 일치하게 하기 위해서입니다.
+
+**왜 표시 없는 소스 이름은 소스가 아닌가.** DHI는 문장을 소스 이름(`pkg:deb/debian/glibc@…`,
+`pkg:apk/alpine/openssl@…`) 아래 버전과 함께 쓰고 바이너리는 버전 없이만 나열합니다. 소스
+이름이 설치된 바이너리이기도 한 곳 — Rocky의 `openssl`, Alpine의 `busybox`, Debian 전반의
+`openssl`, `perl`, `bash` — 에서는 문장이 바이너리를 뜻할 수도, 그 소스에서 빌드된 모든
+패키지를 뜻할 수도 있으며, 더 넓게 읽으면 `openssl` 명령에 대한 문장 뒤에 `libssl3`의 finding이
+가려집니다. 적용하지 않는 쪽은 보고하는 쪽으로 틀립니다. deferred-decisions 항목에 나중에
+적용할 수 있는 보호 규칙이 기록되어 있습니다.
+
+**차이.** grype는 문서가 어떤 이미지를 지목하든 패키지 문장을 적용하고 바이너리 이름만
+매칭합니다. 두 차이 모두 D18 표의 행입니다.
+
+**빠지는 것.** Red Hat이나 SUSE의 CSAF를 `--vex` 입력으로 읽는 것: CSAF 문장의 범위는 product
+tree 관계(`red_hat_ceph_storage_5:openssh.src`)에 있고, 이를 leaf purl로 평탄화하면 "Ceph
+Storage 5에서는 영향 없음"이 "어디서도 영향 없음"이 됩니다 — deferred-decisions에 hazard로
+기록되어 있습니다. 네임스페이스 별칭(Rocky 이미지의 `redhat`, Chainguard의 `wolfi`): 벤더가
+자기 빌드에 대해 한 문장은 재빌드에 대한 문장이 아닙니다.
 
 ---
 

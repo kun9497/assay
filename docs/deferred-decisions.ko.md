@@ -1314,6 +1314,35 @@ GitHub Actions ID가 빌드하고 push하므로 아직 공격할 공급망이 �
 `go-containerregistry`의 `remote` 패키지 하나로 통과시키므로, 나중에 `cosign.Verify` 모양의
 단계를 추가하는 것은 `Pull`에 덧붙이는 일이지 다시 쓰는 일이 아닙니다.
 
+**스캔 attestation도 같은 결정에 속합니다.** D120(2026-10-13)부터 스캔은 서명되지 않은
+provenance 레코드를 씁니다 — 도구, 데이터베이스 아티팩트 digest, 타깃 콘텐츠 식별, 게이트,
+waiver, 그리고 `--provenance` sidecar에는 실행 시각과 종료 코드. in-toto / cosign 취약점 스캔
+attestation은 그 레코드를 고정된 predicate에 담고 서명을 더한 것이므로, 이 항목이 기다리고 있는
+것과 같은 답(방식, 신원, 무엇이 검증하는가)이 필요하며 따로가 아니라 함께 결정합니다.
+
+---
+
+### 표시 없는 소스 패키지 이름에 대해 쓰인 VEX 문장 적용
+
+Docker Hardened Images의 OpenVEX는 문장의 버전을 **소스** 이름
+(`pkg:deb/debian/glibc@2.41-12+deb13u4+dhi1`, `pkg:apk/alpine/openssl@3.5.9-r1`) 아래 붙이고,
+바이너리 이름(`libc6`, `libssl3`)은 버전 없이만 나열합니다. D121은 소스 문장이 스스로를
+표시할 때(`arch=src`, `arch=source`)만 적용하므로, 이 버전 붙은 문장들은 어떤 바이너리에도
+닿지 않고 finding은 계속 보고됩니다.
+
+**왜 미뤘나.** 표시 없는 이름은 소스가 같은 이름의 바이너리도 제공하는 곳 — Rocky의
+`openssl`, Alpine의 `busybox`, Debian 전반의 `openssl`, `perl`, `bash` — 어디서나 모호하며,
+잘못 읽으면 실제 finding이 가려집니다(`openssl` 명령에 대한 문장이 `libssl3`를 억제함). 현재
+오류의 방향은 너무 많이 보고하는 쪽이고 이는 사용자가 waive할 수 있지만, 반대 방향은
+조용합니다.
+
+**언제 다시 볼까.** 사용자가 DHI(또는 다른 생산자)의 표시 없는 소스 문장에 의존하게 될 때.
+2026-10-13에 측정한 보호 규칙은 이렇습니다: 문서 purl이 패키지의 소스 버전과 같은 버전을 담고,
+그 이름이 `Package.Source.Name`과 같으면서 패키지 자신의 이름과는 다르고, **타깃에 설치된
+패키지 중 그 소스의 이름을 가진 것이 없을 때만** 적용합니다 — 그렇지 않으면 그 바이너리 하나에만
+적용하고, 억제되지 않은 형제 패키지를 이름으로 밝히는 경고를 냅니다. 이미지 범위(D121)가 이미
+DHI의 문장을 DHI 이미지로 한정합니다.
+
 ---
 
 ### KISA 데이터를 별도 아티팩트로 분리
@@ -1940,6 +1969,16 @@ flock도, mutex도, 고유한 임시 이름도 없습니다; bbolt 자신의 loc
 고쳐야 할 모양은 더 긴 rename 재시도가 아니라 프로세스별 고유 임시 이름과 데이터베이스 옆의
 명시적 writer lock입니다. **다시 볼 때는** 두 번째 운영자나 두 번째 머신이 하나의
 `ASSAY_DB_DIR`에 쓰게 될 때, 또는 첫 충돌이 재현될 때입니다.
+
+**CSAF VEX의 범위는 purl이 아니라 product tree에 있다.** Red Hat과 SUSE의 CSAF 문서는 상태가
+무엇에 적용되는지를 관계 id(`red_hat_ceph_storage_5:openssh.src`)로 이름 짓고, purl은 컴포넌트
+leaf(`pkg:rpm/redhat/openssh?arch=src`, 버전 없음)에 있습니다. Red Hat의 CVE-2024-6387 문서에서,
+rpm purl로 해석되는 `known_not_affected` 항목 36개는 모두 버전 없는 purl로 해석됩니다. 따라서
+CSAF 문장을 leaf purl로 평탄화하는 변환기는 "Ceph Storage 5에서는 영향 없음"을 "어디서도 영향
+없음"으로 바꾸며, D121의 purl과 함께라면 모든 RHEL 이미지의 finding을 억제하게 됩니다. CSAF를
+waiver 출처로 읽는 모든 경로(직접이든 CSAF→OpenVEX 변환을 거치든)는 관계의 플랫폼을 범위로
+가져가야 합니다. assay 자신의 Red Hat과 SUSE provider는 CSAF를 advisory 데이터로 읽으므로 이
+문제가 생기지 않습니다.
 
 ---
 

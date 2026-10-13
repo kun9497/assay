@@ -297,6 +297,8 @@ Where assay differs, the difference is documented rather than left to be discove
 | severity of a multi-source finding | grype reports one band per match; assay reports every source's and gates on the highest (D25). Measured on Django 3.2.12, 19 findings: grype agrees with assay's aggregate on 19/19 — and with assay's GHSA rating on 19/19, but with its PYSEC rating on 1/15 — counting a band as agreeing only when it is equal, so the 14 misses are grype's real band against PYSEC's `unknown`. On this sample "grype takes the highest" and "grype follows GHSA" cannot be told apart, because PYSEC rates none of them. Separating the two needs a case where a non-GHSA source rates higher. |
 | `ASSAY_REGISTRY_AUTH_{AUTHORITY,USERNAME,PASSWORD,TOKEN}` | grype's `GRYPE_REGISTRY_AUTH_*` single-entry form, same token/basic exclusivity. Two differences: an absent authority binds the credential to the scan target's registry, and a half-set credential is exit 2 rather than anonymous. grype's `INSECURE_*`, TLS client certificates and multi-entry list have no counterpart (D118). |
 | `--platform` | Same syntax and containerd normalisation as grype; an explicit platform that a single-platform image does not match is refused by both. Differences: without the flag, a mismatched single-platform image is scanned with a stderr warning (grype says nothing); the flag on a non-image target is exit 2; an OS-version suffix is refused; and the chosen platform and digests are recorded in the JSON `image` object (D119). |
+| `--vex` (D121) | grype applies a package-purl statement whatever image the document names, and matches binary names only. assay applies a statement that names an image only to that image (its top-level and subcomponent products alike), and applies a source statement marked `arch=src` / `arch=source` to every binary built from that source. Package purls are syft's spelling, so a syft-SBOM-based statement matches either way. |
+| `--provenance <path>` (D120) | No grype equivalent. grype puts its descriptor (with a timestamp and local paths) inside the report; assay keeps the report byte-deterministic and puts run time and exit code in the sidecar. |
 
 Add a row here whenever a shared name gains different semantics. A silently divergent flag
 is worse than a differently named one.
@@ -4895,6 +4897,156 @@ waits for a request: it changes the report from one target to many. Windows imag
 OS-version request are refused rather than half-supported. Host variant detection
 (`amd64/v3` from CPU flags, as docker does) is not done — the default asks for the base
 variant, which every amd64 index carries.
+
+---
+
+### D120 — A scan records what produced its verdict: the deterministic part in the report, the run itself in a sidecar written on every exit
+
+**Decision.** One provenance record, built once per scan from what the scan already holds,
+is written in two places:
+
+- **The JSON report gains a top-level `provenance` object (schema 14)** carrying only facts
+  that are the same every time the same inputs are scanned:
+  - `tool` — name, version, commit and build date (the ldflags values `assay version`
+    already prints; a `dev` build says so rather than inventing one).
+  - `database` — store schema, `builtAt`, the published artifact's reference and manifest
+    digest when the database came from `db update` (absent for a local `db build`), the
+    data-as-of of every rating source (NVD, EPSS, KEV) and of the EOL catalogue, and the
+    frozen and renamed keys by name.
+  - `target` — the argument as typed, its kind, and its content identity: the sha256 of a
+    file target (SBOM, Go binary, jar); an SBOM's own `serialNumber` (CycloneDX) or
+    `documentNamespace` (SPDX); for a directory, every manifest read, by root-relative path
+    and sha256; for an image, the registry-credential source name (D118) next to the
+    existing D119 `image` object.
+  - `policy` — every input that can move the exit code: each `--fail-on*` gate,
+    `--db-max-age`, `--db-max-rating-age`, `--timeout`, and `--platform` with whether it was
+    given or defaulted.
+  - `waivers` — the ignore file (path as given or `.assay.yaml`, whether it was
+    auto-discovered, sha256, and per rule its expiry, whether it had expired and how many
+    findings it matched) and each `--vex` document in order (path as given, sha256,
+    document `@id`, statements read, applied, skipped and matching nothing).
+- **`--provenance <path>` writes a sidecar** holding the same object plus the facts that
+  differ per run: `startedAt` and `finishedAt` (UTC), the exit code, the error message of an
+  exit 2, and the sha256 of the report bytes written to stdout. It is written on **every**
+  exit path that follows argument parsing — an age-gate refusal, a missing VEX file, a
+  timeout, a 401 — and failing to write it is itself exit 2, since the caller asked for a
+  record and did not get one.
+- **SARIF** carries the same object in `run.properties.provenance`, and
+  `tool.driver.semanticVersion`; no timestamps, so it stays deterministic too. The table
+  renderer is unchanged.
+- **`db update` records what it pulled**: `<dbPath>.artifact.json` (reference, manifest
+  digest, pull time), written under D116's lock beside the database and removed by
+  `db build`, so a scan can name the artifact a database came from. A database with no such
+  file reports none rather than guessing.
+- **Nothing that identifies the machine or its user**: no absolute path that was not typed,
+  no database path, no hostname, no username, no working directory, no upstream error text
+  (`Provenance.Error` can carry internal addresses), and no credential value (D118).
+
+**Why, measured.** On 2026-10-13 twenty verdict-changing scenarios were run twice each
+with the v0.8.0 and v0.9.0 binaries. The report answered "why did these two runs differ"
+in almost none of them:
+
+- `--fail-on critical` and `--fail-on low` produced **byte-identical JSON** with exit 0 and 1.
+- An ignore rule past its expiry produced JSON **byte-identical to having no ignore file**,
+  with exit 1 where the unexpired rule gave 0.
+- Two VEX documents with the same file name, one suppressing and one not, left the second
+  run byte-identical to a run with no `--vex` at all.
+- An SBOM or a lockfile changed in place produced different findings and nothing that
+  identified the input.
+- Neither binary's JSON names the tool, and no output names the database's build time,
+  schema or artifact: `db update` neither prints nor keeps the digest it pulled.
+- Seven exit-2 paths (age gates, a missing VEX file, a broken config, no database, a
+  timeout) wrote **zero bytes of report**.
+
+**Why both places.** Six designs were scored against those scenarios. The JSON-only design
+(provenance with a timestamp inside the report) solved everything except two things it
+cannot: it loses the report's byte-determinism — today the same inputs produce the same
+bytes, which is what made the gate scenarios diagnosable at all — and it has nothing to say
+about a run that ended before a report existed. The sidecar alone keeps both, but a consumer
+handed only the report would learn nothing. Only time and outcome differ between two runs of
+the same inputs, so they are the only things moved out of the report. A SARIF-only design
+fails every JSON consumer, and `--output` cannot be given twice; relying on CI logs keeps
+the exit-2 cause but no content identity.
+
+**What stays out.** A signed attestation (in-toto / cosign vulnerability predicate) is the
+same record plus a signature and key management; it is decided with the database-signing
+entry in deferred-decisions, not here. A record of a configuration file `--config`
+overrode is not kept: both runs used the same file, so it explains no difference.
+
+---
+
+### D121 — An image's OS packages carry purls, and a VEX statement that names an image applies only to that image
+
+**Decision.** Four changes, made together because the first alone opens a false-suppression
+path:
+
+1. **Every OS package an image scan catalogs gets a purl in syft's spelling** —
+   `pkg:<type>/<namespace>/<binary name>@<version>?arch=…&distro=<id>-<VERSION_ID>`, where
+   `<id>` is the os-release ID (`alpaquita-stream`, `opensuse-leap-15.6` — not grype's distro
+   name), plus `upstream=<source>` (apk: the origin, when it differs from the binary; deb: the
+   source, as `name@version` when the source version differs from the binary's; rpm: the SRPM
+   file name, `openssl-3.5.5-2.el9_8.src.rpm`; alpm: `%BASE%`, always) and, for rpm, `epoch=`
+   when the epoch is non-zero — syft also writes `epoch=0` for an explicit zero, and VEX
+   matching treats the two as one epoch. deb keeps its epoch inside the version, rpm
+   never does. The namespace comes from a per-distro table matching syft's (`alpine`,
+   `debian`, `redhat`, `rocky`, …), each row measured against a syft run before it is
+   added; a distro without a row gets no purl rather than an alias. A purl is generated only
+   where none exists, so an SBOM's own purl and a Bitnami marker's stay verbatim. The purl is
+   reported in JSON and SARIF. VEX namespace comparison is case-insensitive for `apk`, `deb`
+   and `rpm`.
+2. **A statement whose products include an image** (a `pkg:oci` or `pkg:docker` purl, or an
+   image reference) **is scoped to that image as a whole**: none of its products — top-level
+   or subcomponent — apply unless one of its image products matches the scanned target's
+   reference or digest. A statement scoped to another image, or any image-scoped statement
+   in a scan of something that is not an image, is skipped.
+3. **A source-package statement applies when it marks itself as one** — `arch=src` (Red Hat)
+   or `arch=source` (Canonical) — to every installed binary built from that source, at the
+   source version. Ubuntu packages additionally answer to `distro=<VERSION_CODENAME>`, which
+   os-release parsing starts reading. An unmarked source name is not treated as a source.
+4. **No silent non-application**: one stderr line per scan says how many statements matched
+   no finding and how many findings carried no purl to match against, and D120's waiver
+   record carries the same counts per document.
+
+**Why, measured.** Before this decision no image cataloger except Bitnami's set a purl, so a
+`not_affected` statement about an image's OS package never applied, warned about nothing,
+and left the output byte-identical to a scan without `--vex` (2026-10-13). Fixing only that —
+the grype behaviour — was measured against three live feeds the same day:
+
+- **Canonical's OpenVEX** names every product with `distro=<codename>` (`jammy`, `noble`,
+  `esm-infra/focal`, …) and versions it; syft's `distro=ubuntu-22.04` matches **none** of
+  its 1,163 sampled products. Hence the codename form.
+- **Docker Hardened Images' OpenVEX** (2,358 statements in the Python image's document)
+  lists every package purl both under the image and **again as a bare top-level product**,
+  binary names only version-less: `pkg:deb/debian/libgssapi-krb5-2`, `not_affected`,
+  justification `inline_mitigations_already_exist` — a claim about DHI's own build. With
+  package-purl-as-product matching (D104, and go-vex's second pass in grype) that statement
+  suppresses the same package on a stock Debian image. Image scope is what stops it, and
+  scoping only subcomponents would not, because the bare duplicates name no image.
+- **Red Hat's CSAF** marks source packages `arch=src`; Canonical marks them `arch=source`.
+  A marked source statement cannot be mistaken for a binary one because no binary carries
+  those arch values.
+
+The `upstream`, `arch` and `distro` values are syft's so that a statement written against
+a syft SBOM, the most common producer input, matches the image scan of the same image.
+
+**Why an unmarked source name is not a source.** DHI versions its statements under source
+names (`pkg:deb/debian/glibc@…`, `pkg:apk/alpine/openssl@…`) and lists binaries only
+version-less. Where a source name is also an installed binary — `openssl` on Rocky,
+`busybox` on Alpine, `openssl`, `perl` and `bash` across Debian — a statement can mean the
+binary or every package built from the source, and reading it the wider way hides
+`libssl3`'s finding behind a statement about the `openssl` command. Not applying it errs
+toward reporting; the deferred-decisions entry records the guarded rule that could apply
+it later.
+
+**Divergence.** grype applies a package statement whatever image the document names, and
+matches only binary names. Both differences are rows in D18's table.
+
+**What stays out.** Reading Red Hat's or SUSE's CSAF as `--vex` input: a CSAF statement's
+scope lives on its product-tree relationship (`red_hat_ceph_storage_5:openssh.src`), and
+flattening it to the leaf purl turns "not affected in Ceph Storage 5" into "not affected
+anywhere" — recorded as a hazard in deferred-decisions. Namespace aliases (`redhat` on a
+Rocky image, `wolfi` for Chainguard): a vendor's statement about its build is not a
+statement about a rebuild.
 
 ---
 

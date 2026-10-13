@@ -16,7 +16,22 @@ type Package struct {
 	Version   string
 	Type      string // purl type: golang | npm | pypi | apk | deb
 	Ecosystem string // OSV ecosystem key, resolved at catalog time
-	PURL      string
+	// PURL is the package's purl: an SBOM's own, verbatim, or a Bitnami
+	// marker's, or — for an image's OS packages, which carry none of their
+	// own — the one OSPackagePURL spells in syft's form (D121), so a VEX
+	// statement written against a syft SBOM of the image matches its scan.
+	PURL string
+	// Arch is the architecture the package database records (apk A:, dpkg
+	// Architecture:, rpm ARCH, pacman %ARCH%). Read only to spell the purl's
+	// "arch" qualifier (D121); never part of a lookup key.
+	Arch string
+	// Upstream is the source identity exactly as the package database spells
+	// it, where Source cannot reproduce it: rpm's SOURCERPM file name
+	// ("openssl-3.5.5-2.el9_8.src.rpm") and pacman's %BASE%, which syft
+	// writes even when it equals the name. Empty for apk and deb, whose
+	// Source already carries what their purl needs. Read only by
+	// OSPackagePURL (D121).
+	Upstream string
 	// Source is the source package an advisory may be keyed on (D8). Distro
 	// advisories target source packages while installed packages are binary
 	// packages; without this the miss is a false negative, which is silent.
@@ -112,4 +127,18 @@ func SourceRPMName(s string) string {
 		return ""
 	}
 	return s[:j]
+}
+
+// SourceRPMVersion is SourceRPMName's other half: the version-release a
+// SOURCERPM file name carries ("lvm2-2.03.14-15.el8_10.src.rpm" gives
+// "2.03.14-15.el8_10"), with no epoch, because the file name has none. It is
+// the source version a binary was built at, which is not the binary's own
+// when the two are versioned apart — device-mapper-libs 1.02.181 is built
+// from lvm2 2.03.14. Returns "" for anything SourceRPMName refuses.
+func SourceRPMVersion(s string) string {
+	name := SourceRPMName(s)
+	if name == "" {
+		return ""
+	}
+	return strings.TrimSuffix(s[len(name)+1:], ".src.rpm")
 }

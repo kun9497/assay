@@ -3,6 +3,7 @@ package ignore
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -84,7 +85,7 @@ func TestApply_WaivesOnAllThreeFields(t *testing.T) {
 		finding("ALPINE-2024-0002", "CVE-2024-9999", "openssl", "Alpine:v3.19"), // wrong CVE
 		finding("ALPINE-2024-0001", "CVE-2024-1234", "openssl", "Debian:12"),    // wrong ecosystem
 	}
-	kept, sup := cfg.Apply(findings, time.Now(), func(string) {})
+	kept, sup, _ := cfg.Apply(findings, time.Now(), func(string) {})
 	if len(sup) != 1 {
 		t.Fatalf("suppressed %d, want 1 (only the finding matching all three fields)", len(sup))
 	}
@@ -101,7 +102,7 @@ func TestApply_WaivesOnAllThreeFields(t *testing.T) {
 func TestApply_CaseInsensitiveVulnerability(t *testing.T) {
 	p := writeConfig(t, "ignore:\n  - vulnerability: cve-2024-1234\n    reason: x\n")
 	cfg, _ := Load(p)
-	_, sup := cfg.Apply([]matcher.Finding{finding("A-1", "CVE-2024-1234", "p", "Go")}, time.Now(), func(string) {})
+	_, sup, _ := cfg.Apply([]matcher.Finding{finding("A-1", "CVE-2024-1234", "p", "Go")}, time.Now(), func(string) {})
 	if len(sup) != 1 {
 		t.Errorf("suppressed %d, want 1 — the match must be case-insensitive", len(sup))
 	}
@@ -118,14 +119,14 @@ func TestApply_ExpiredRuleStopsWaivingAndWarns(t *testing.T) {
 
 	// On the last valid day: still waived, no warning.
 	var warns []string
-	_, sup := cfg.Apply(f, time.Date(2026, 6, 30, 23, 0, 0, 0, time.UTC), func(m string) { warns = append(warns, m) })
+	_, sup, _ := cfg.Apply(f, time.Date(2026, 6, 30, 23, 0, 0, 0, time.UTC), func(m string) { warns = append(warns, m) })
 	if len(sup) != 1 || len(warns) != 0 {
 		t.Errorf("on the expiry date itself: suppressed %d warns %d, want 1 and 0 — the named date is inclusive", len(sup), len(warns))
 	}
 
 	// The day after: no longer waived, and it warns.
 	warns = nil
-	kept, sup := cfg.Apply(f, time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC), func(m string) { warns = append(warns, m) })
+	kept, sup, _ := cfg.Apply(f, time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC), func(m string) { warns = append(warns, m) })
 	if len(sup) != 0 || len(kept) != 1 {
 		t.Errorf("day after expiry: suppressed %d kept %d, want 0 and 1 — an expired rule must stop waiving", len(sup), len(kept))
 	}
@@ -141,7 +142,7 @@ func TestApply_FirstRuleWins(t *testing.T) {
 		"  - vulnerability: CVE-2024-1234\n    reason: first\n"+
 		"  - package: openssl\n    reason: second\n")
 	cfg, _ := Load(p)
-	_, sup := cfg.Apply([]matcher.Finding{finding("A-1", "CVE-2024-1234", "openssl", "Go")}, time.Now(), func(string) {})
+	_, sup, _ := cfg.Apply([]matcher.Finding{finding("A-1", "CVE-2024-1234", "openssl", "Go")}, time.Now(), func(string) {})
 	if len(sup) != 1 || sup[0].Reason != "first" {
 		t.Errorf("reason = %+v, want the first-listed rule's reason", sup)
 	}
@@ -159,5 +160,31 @@ func TestDiscover_FindsDefaultFile(t *testing.T) {
 	}
 	if p, ok := Discover(dir); !ok || filepath.Base(p) != DefaultFile {
 		t.Errorf("Discover = %q, %v; want the .assay.yaml path and true", p, ok)
+	}
+}
+
+// D120: Apply says, per rule in file order, whether it had expired and how
+// many findings it waived, and Load hashes the file it parsed.
+func TestApply_RuleResults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".assay.yaml")
+	body := "ignore:\n" +
+		"  - package: p\n    reason: gone\n    expires: 2026-06-30\n" +
+		"  - package: p\n    reason: live\n" +
+		"  - package: q\n    reason: never matches\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.SHA256) != 64 {
+		t.Errorf("SHA256 = %q, want a hex sha256", cfg.SHA256)
+	}
+	f := []matcher.Finding{finding("A-1", "CVE-2024-1", "p", "Go"), finding("A-2", "CVE-2024-2", "p", "Go")}
+	_, _, res := cfg.Apply(f, time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC), func(string) {})
+	want := []RuleResult{{1, "2026-06-30", true, 0}, {2, "", false, 2}, {3, "", false, 0}}
+	if !reflect.DeepEqual(res, want) {
+		t.Errorf("results = %+v, want %+v", res, want)
 	}
 }

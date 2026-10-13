@@ -24,6 +24,12 @@ type Distro struct {
 	// suffix and nothing else on this struct distinguishes a long-term
 	// release from an interim one.
 	PrettyName string
+	// VersionCodename is os-release VERSION_CODENAME ("jammy", "bookworm").
+	// Read for one purpose (D121): Canonical's OpenVEX names every product
+	// with distro=<codename>, so an Ubuntu package answers to that spelling
+	// as well as syft's distro=ubuntu-22.04. Never part of an ecosystem key,
+	// and never written into a purl — syft writes it into none.
+	VersionCodename string
 }
 
 // Ecosystem returns the OSV ecosystem key for this distro — "Alpine:v3.19".

@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 
 	"github.com/kun9497/assay/internal/dbartifact"
@@ -121,6 +123,14 @@ func Pull(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer) int
 		fmt.Fprintf(stderr, "the downloaded database is complete and left at %s\n", tmp)
 		fmt.Fprintln(stderr, "close any running scan and move it into place, or re-run `assay db update`")
 		return 2
+	}
+	// D120. After the rename, still under the lock: the record names the
+	// database now in place, and nothing else can install one in between. A
+	// record that cannot be written must not leave the previous pull's behind
+	// to name a database that is no longer there, so it is removed instead,
+	// and the run fails — the caller asked for a database a scan can name.
+	if code := recordArtifact(dbPath, target.String(), img, stderr); code != 0 {
+		return code
 	}
 	fmt.Fprintf(stderr, "database installed at %s\n", dbPath)
 	if !m.DataAsOf.IsZero() {
@@ -273,6 +283,26 @@ func PullSeed(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer)
 		} else {
 			fmt.Fprintf(stderr, "upstream data as of %s\n", m.DataAsOf.Format("2006-01-02"))
 		}
+	}
+	return 0
+}
+
+// recordArtifact writes <dbPath>.artifact.json for the image just installed
+// (D120): the reference pulled, its manifest digest and the time. On failure
+// it removes any record already there, so none names the wrong database, and
+// returns 2.
+func recordArtifact(dbPath, ref string, img v1.Image, stderr io.Writer) int {
+	d, err := img.Digest()
+	if err == nil {
+		err = store.WriteArtifactRecord(dbPath, store.ArtifactRecord{
+			Reference: ref, Digest: d.String(), PulledAt: time.Now().UTC(),
+		})
+	}
+	if err != nil {
+		_ = store.RemoveArtifactRecord(dbPath)
+		fmt.Fprintf(stderr, "error: record the pulled artifact: %v\n", err)
+		fmt.Fprintln(stderr, "the database is installed, but a scan cannot name the artifact it came from; re-run `assay db update`")
+		return 2
 	}
 	return 0
 }

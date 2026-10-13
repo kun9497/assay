@@ -1335,8 +1335,8 @@ func TestRun_ScanOutputJSONReachesRealExitCode(t *testing.T) {
 	// cannot notice that the shape changed under it. Bumping this is meant to
 	// be the deliberate act that accompanies a schema change (D33 was the
 	// third).
-	if doc.SchemaVersion != 13 {
-		t.Errorf("SchemaVersion = %d, want 13", doc.SchemaVersion)
+	if doc.SchemaVersion != 14 {
+		t.Errorf("SchemaVersion = %d, want 14", doc.SchemaVersion)
 	}
 	// buildRunSeamFixture's critical, unrated and no-fix findings; somecrate
 	// is dropped by the cataloger and never reaches a Finding at all.

@@ -225,6 +225,11 @@ func toPackage(h header, ecosystem, path string) (pkgmeta.Package, error) {
 		Ecosystem: ecosystem,
 		Locations: []pkgmeta.Location{{Path: path}},
 	}
+	// D121: read only to spell the purl. syft's rpm purl carries the
+	// SOURCERPM file name verbatim as "upstream", which SourceRPMName's
+	// stripped name below cannot give back.
+	p.Arch, _ = h.str(tagArch)
+	p.Upstream, _ = h.str(tagSourceRPM)
 	// D8. SOURCERPM names the source package an advisory may be keyed on, and
 	// unlike dpkg's Source: field it is a filename rather than a name, so the
 	// version has to be stripped back off it. Absent means the binary is its
