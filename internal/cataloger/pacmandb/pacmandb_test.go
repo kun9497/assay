@@ -166,3 +166,21 @@ func TestParseDesc_EmptyReaderProducesNoPackage(t *testing.T) {
 		t.Errorf("pkgs = %+v, want none", pkgs)
 	}
 }
+
+// D121: %ARCH% and %BASE% are kept for the purl, %BASE% even where it
+// repeats %NAME% — syft's alpm purl writes upstream=acl for acl — while
+// Source stays nil for that case (TestParseDesc_RealFile).
+func TestParseDesc_KeepsArchAndBaseForThePURL(t *testing.T) {
+	for _, tc := range []struct{ fixture, base string }{
+		{"acl-desc", "acl"},
+		{"libelf-desc", "elfutils"},
+	} {
+		pkgs, err := ParseDesc(openFixture(t, tc.fixture), testEcosystem, testPath)
+		if err != nil || len(pkgs) != 1 {
+			t.Fatalf("%s: ParseDesc = %v, %v", tc.fixture, pkgs, err)
+		}
+		if p := pkgs[0]; p.Arch != "x86_64" || p.Upstream != tc.base {
+			t.Errorf("%s: Arch, Upstream = %q, %q; want x86_64, %q", tc.fixture, p.Arch, p.Upstream, tc.base)
+		}
+	}
+}

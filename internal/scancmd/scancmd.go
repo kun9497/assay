@@ -672,7 +672,7 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 	// no VEX document re-evaluates it — one suppression, one reason, and
 	// whichever mechanism ran first wins, rather than a finding silently
 	// carrying two waivers or the second one overwriting the first's reason.
-	if code := applyVEX(&res, opts.VEXFiles, stderr); code != 0 {
+	if code := applyVEX(&res, opts.VEXFiles, vexTarget(kind, target, image, inventory.Distro), stderr); code != 0 {
 		return code
 	}
 
@@ -922,22 +922,71 @@ func applyIgnoreRules(res *matcher.Result, ignoreFile string, stderr io.Writer) 
 // suppress what an earlier one left behind, never re-suppress what it
 // already waived, matching applyIgnoreRules' own "ignore rules run first"
 // ordering one level down.
-func applyVEX(res *matcher.Result, paths []string, stderr io.Writer) int {
+//
+// D121: target scopes every statement that names an image, and after the
+// last document one line says what applied to nothing — the statements
+// that matched no finding, and the findings that carried no purl for any
+// statement to match. Before D121 an image's OS packages had no purl, so a
+// statement about one matched nothing and the scan said nothing about it;
+// the line exists so that state can never again be silent. It is printed
+// whenever --vex was given, zeros included, so its absence means no VEX.
+func applyVEX(res *matcher.Result, paths []string, target vex.Target, stderr io.Writer) int {
+	if len(paths) == 0 {
+		return 0
+	}
 	warn := func(msg string) { fmt.Fprintf(stderr, "warning: %s\n", msg) }
+	noPURL := 0
+	for _, f := range res.Findings {
+		if f.Package.PURL == "" {
+			noPURL++
+		}
+	}
+	var total vex.Stats
 	for _, path := range paths {
 		doc, err := vex.Load(path)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: %v\n", err)
 			return 2
 		}
-		kept, suppressed := doc.Apply(res.Findings, warn)
+		kept, suppressed, st := doc.Apply(res.Findings, target, warn)
 		res.Findings = kept
 		res.Suppressed = append(res.Suppressed, suppressed...)
 		if len(suppressed) > 0 {
 			fmt.Fprintf(stderr, "%d finding(s) suppressed by VEX (%s)\n", len(suppressed), path)
 		}
+		total.Statements += st.Statements
+		total.Unmatched += st.Unmatched
+		total.Skipped += st.Skipped
+		total.OutOfScope += st.OutOfScope
 	}
+	fmt.Fprintf(stderr, "vex: %d of %d statement(s) matched no finding (%d name an image that is not this target, "+
+		"%d skipped); %d finding(s) carry no purl to match against\n",
+		total.Unmatched, total.Statements, total.OutOfScope, total.Skipped, noPURL)
 	return 0
+}
+
+// vexTarget describes what was scanned for VEX scope (D121). An image of any
+// loader is an image and is identified by the digests D119 recorded; only a
+// registry reference also has a repository and tag, taken from the reference
+// as typed. Everything else is the zero Target, so a statement naming an
+// image is skipped in an SBOM, directory or binary scan: the scan cannot
+// know it is that image.
+func vexTarget(kind source.TargetKind, target string, image *report.ImageRecord, d *pkgmeta.Distro) vex.Target {
+	var t vex.Target
+	if d != nil && d.ID == "ubuntu" {
+		t.UbuntuCodename = d.VersionCodename
+	}
+	if kind != source.TargetImage {
+		return t
+	}
+	t.Image = true
+	if source.IsRegistryReference(target) {
+		t.Repository, t.Tag = vex.TargetFromReference(target)
+	}
+	if image != nil {
+		t.Digests = []string{image.ManifestDigest, image.IndexDigest}
+	}
+	return t
 }
 
 func verdict(opts Options, sum report.Summary, findings []matcher.Finding, eol report.EOLStatus) int {
@@ -1411,6 +1460,7 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 			pkgs[i].Locations[j].LayerDigest = diffID
 		}
 	}
+	assignOSPURLs(target.Distro, pkgs)
 	target.Packages = pkgs
 
 	// D99: Bitnami app packages are catalogued ALONGSIDE the distro
@@ -1452,6 +1502,26 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 		Components:       len(target.Packages) + skippedRecords,
 		SkippedNoVersion: skippedRecords,
 	}, scope, nil
+}
+
+// assignOSPURLs gives each OS package an image scan cataloged the purl syft
+// would write for it (D121), so a VEX statement written against a syft SBOM
+// of the image names the package the scan reports. Before D121 none of these
+// packages carried a purl, so a not_affected statement about one never
+// applied and said nothing about not applying.
+//
+// Only where none exists: a package that arrives with a purl keeps it
+// verbatim. No OS cataloger sets one today, so the guard holds the rule for
+// the next one that does rather than a case that occurs. Bitnami's packages
+// are appended after this runs and keep their marker's own purl. A distro
+// without a measured namespace row leaves its packages without a purl, which
+// the VEX summary line then counts (OSPackagePURL's own comment).
+func assignOSPURLs(d *pkgmeta.Distro, pkgs []pkgmeta.Package) {
+	for i := range pkgs {
+		if pkgs[i].PURL == "" {
+			pkgs[i].PURL = pkgmeta.OSPackagePURL(d, pkgs[i])
+		}
+	}
 }
 
 // catalogBitnami discovers and parses every Bitnami marker in img (D99),

@@ -4981,9 +4981,13 @@ overrode is not kept: both runs used the same file, so it explains no difference
 path:
 
 1. **Every OS package an image scan catalogs gets a purl in syft's spelling** —
-   `pkg:<type>/<namespace>/<binary name>@<version>?arch=…&distro=<id>-<VERSION_ID>` plus
-   `upstream=<source>` (apk and deb: when it differs from the binary; rpm: the SRPM name) and,
-   for rpm, `epoch=` when the epoch is non-zero. deb keeps its epoch inside the version, rpm
+   `pkg:<type>/<namespace>/<binary name>@<version>?arch=…&distro=<id>-<VERSION_ID>`, where
+   `<id>` is the os-release ID (`alpaquita-stream`, `opensuse-leap-15.6` — not grype's distro
+   name), plus `upstream=<source>` (apk: the origin, when it differs from the binary; deb: the
+   source, as `name@version` when the source version differs from the binary's; rpm: the SRPM
+   file name, `openssl-3.5.5-2.el9_8.src.rpm`; alpm: `%BASE%`, always) and, for rpm, `epoch=`
+   when the epoch is non-zero — syft also writes `epoch=0` for an explicit zero, and VEX
+   matching treats the two as one epoch. deb keeps its epoch inside the version, rpm
    never does. The namespace comes from a per-distro table matching syft's (`alpine`,
    `debian`, `redhat`, `rocky`, …), each row measured against a syft run before it is
    added; a distro without a row gets no purl rather than an alias. A purl is generated only

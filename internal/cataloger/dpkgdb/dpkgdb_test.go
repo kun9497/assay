@@ -256,3 +256,29 @@ func TestParse_MissingVersionIsEmittedNotDropped(t *testing.T) {
 		t.Errorf("Version = %q, want empty rather than invented", pkgs[0].Version)
 	}
 }
+
+// D121: the purl type and the architecture, for syft's deb purl. Type was
+// unset before D121, when nothing read it.
+func TestParse_TypeAndArchForThePURL(t *testing.T) {
+	in := stanzas(
+		"Package: libssl3",
+		"Status: install ok installed",
+		"Architecture: amd64",
+		"Source: openssl",
+		"Version: 3.0.20-1~deb12u2",
+	)
+	for _, parse := range []func() ([]pkgmeta.Package, error){
+		func() ([]pkgmeta.Package, error) { return Parse(strings.NewReader(in), "Debian:12") },
+		func() ([]pkgmeta.Package, error) {
+			return ParseStanza(strings.NewReader(in), "Debian:12", "var/lib/dpkg/status.d/libssl3")
+		},
+	} {
+		pkgs, err := parse()
+		if err != nil || len(pkgs) != 1 {
+			t.Fatalf("parse = %v, %v", pkgs, err)
+		}
+		if p := pkgs[0]; p.Type != "deb" || p.Arch != "amd64" {
+			t.Errorf("Type, Arch = %q, %q; want deb, amd64", p.Type, p.Arch)
+		}
+	}
+}

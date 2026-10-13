@@ -145,6 +145,12 @@ Scan flags (any order, before or after the target):
                         a warning rather than suppressing, and a document
                         that cannot be read or parsed fails the scan
                         (exit 2) rather than silently waiving nothing.
+                        A statement that names an image (pkg:oci,
+                        pkg:docker, or an image reference) applies only
+                        when the scan target is that image; a source
+                        statement marked arch=src or arch=source applies to
+                        every binary built from it. One stderr line counts
+                        the statements that matched no finding (D121).
   --explain <id>        Print one advisory's full Evidence (its own ID, or
                         any alias/upstream identifier) instead of the report
 

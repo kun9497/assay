@@ -17,7 +17,7 @@ const impactStatementTruncateAt = 120
 // prefix ("VEX: not_affected" / "VEX: fixed") is what keeps the floor rule —
 // never an empty reason — true regardless of how bare the statement's own
 // author/@id/timestamp fields are.
-func reasonFor(ls liveStatement, versionless bool) string {
+func reasonFor(ls liveStatement, versionless bool, viaSource string) string {
 	ts := formatTimestamp(ls.timestamp)
 
 	var reason string
@@ -33,6 +33,10 @@ func reasonFor(ls liveStatement, versionless bool) string {
 		// way a not_affected statement survives validation).
 		reason = fmt.Sprintf("VEX: not_affected — %q — %s, %s",
 			truncate(ls.stmt.ImpactStatement, impactStatementTruncateAt), authorOrUnknown(ls.author), ts)
+	}
+	if viaSource != "" {
+		// D121: the statement named the source, not this binary.
+		reason += " (via source package " + viaSource + ")"
 	}
 	if versionless {
 		reason += " (product purl has no version: applies to all versions)"

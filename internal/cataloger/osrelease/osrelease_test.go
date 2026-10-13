@@ -115,3 +115,25 @@ VERSION_ID=3.19.9
 		t.Errorf("Parse = %+v", d)
 	}
 }
+
+// D121. VERSION_CODENAME is read because Canonical's OpenVEX names its
+// products distro=<codename>; the real Ubuntu 22.04 file carries it beside an
+// UBUNTU_CODENAME holding the same value, which is not the key read.
+func TestParse_VersionCodename(t *testing.T) {
+	const real = `PRETTY_NAME="Ubuntu 22.04.5 LTS"
+NAME="Ubuntu"
+VERSION_ID="22.04"
+VERSION="22.04.5 LTS (Jammy Jellyfish)"
+VERSION_CODENAME=jammy
+ID=ubuntu
+ID_LIKE=debian
+UBUNTU_CODENAME=jammyx
+`
+	d, err := Parse(strings.NewReader(real))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.VersionCodename != "jammy" {
+		t.Errorf("VersionCodename = %q, want jammy", d.VersionCodename)
+	}
+}

@@ -4834,9 +4834,13 @@ Windows 이미지와 OS 버전 요청은 반쪽만 지원하는 대신 거부합
 **결정.** 네 가지 변경을 함께 합니다. 첫 번째만 하면 거짓 억제 경로가 열리기 때문입니다:
 
 1. **이미지 스캔이 카탈로그하는 모든 OS 패키지는 syft 표기의 purl을 갖습니다** —
-   `pkg:<type>/<namespace>/<binary name>@<version>?arch=…&distro=<id>-<VERSION_ID>`에
-   `upstream=<source>`(apk와 deb: 바이너리와 다를 때; rpm: SRPM 이름)가 붙고, rpm은 epoch가
-   0이 아니면 `epoch=`가 붙습니다. deb은 epoch를 version 안에 두고 rpm은 절대 그러지 않습니다.
+   `pkg:<type>/<namespace>/<binary name>@<version>?arch=…&distro=<id>-<VERSION_ID>`(여기서
+   `<id>`는 grype의 distro 이름이 아니라 os-release ID — `alpaquita-stream`,
+   `opensuse-leap-15.6`)에 `upstream=<source>`(apk: 바이너리와 다를 때의 origin; deb: 소스,
+   소스 버전이 바이너리와 다르면 `name@version`; rpm: SRPM 파일 이름
+   `openssl-3.5.5-2.el9_8.src.rpm`; alpm: `%BASE%`, 항상)가 붙고, rpm은 epoch가 0이 아니면
+   `epoch=`가 붙습니다 — syft는 명시적인 0에도 `epoch=0`을 쓰며, VEX 매칭은 둘을 같은 epoch로
+   봅니다. deb은 epoch를 version 안에 두고 rpm은 절대 그러지 않습니다.
    네임스페이스는 syft와 일치하는 distro별 표(`alpine`, `debian`, `redhat`, `rocky`, …)에서
    오며, 각 행은 추가하기 전에 syft 실행과 대조해 측정합니다. 행이 없는 distro는 별칭을 쓰지
    않고 purl을 갖지 않습니다. purl은 아직 없을 때만 생성되므로 SBOM 자체의 purl과 Bitnami

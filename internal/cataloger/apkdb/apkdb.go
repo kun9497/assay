@@ -36,7 +36,7 @@ const installedPath = "/lib/apk/db/installed"
 type record struct {
 	name     string // P: package name
 	version  string // V: package version
-	arch     string // A: architecture — recorded, but never part of a lookup key
+	arch     string // A: architecture — the purl's arch qualifier (D121), never part of a lookup key
 	origin   string // o: origin/source package (D8)
 	provides string // p: provides clause, raw and unparsed (D95)
 }
@@ -100,6 +100,8 @@ func toPackage(rec record, ecosystem string) pkgmeta.Package {
 		Version:   rec.version,
 		Type:      "apk",
 		Ecosystem: ecosystem,
+		// D121: only the purl's arch qualifier reads it.
+		Arch:      rec.arch,
 		Locations: []pkgmeta.Location{{Path: installedPath}},
 	}
 	if rec.origin != "" {

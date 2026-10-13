@@ -161,9 +161,14 @@ func toPackage(f map[string]string, ecosystem, path string) (pkgmeta.Package, bo
 	version := f["version"]
 
 	p := pkgmeta.Package{
-		Name:      name,
-		Version:   version,
+		Name:    name,
+		Version: version,
+		// D121: the purl type OSPackagePURL spells. Unset before D121, when
+		// nothing read it; apk, rpm and alpm already set theirs.
+		Type:      "deb",
 		Ecosystem: ecosystem,
+		// D121: only the purl's arch qualifier reads it.
+		Arch:      f["architecture"],
 		Locations: []pkgmeta.Location{{Path: path}},
 	}
 	p.Source = sourceOf(f, name, version)

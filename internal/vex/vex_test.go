@@ -43,12 +43,18 @@ func (c *collector) contains(sub string) bool {
 	return false
 }
 
+// adversarialTarget is the scan the D104 table's rows run against: an image
+// whose manifest digest is the one row 21's image product names, so that
+// statement stays in scope under D121 and rows 21-23 keep testing what they
+// were written for — subcomponent matching — rather than image scope.
+var adversarialTarget = Target{Image: true, Digests: []string{"sha256:deadbeef"}}
+
 // applyOne runs Apply against a single finding and reports whether it was
 // suppressed, its reason if so, and every warning collected — the shape
 // every row of the adversarial table below checks.
 func applyOne(doc *Document, f matcher.Finding) (suppressed bool, reason string, warnings *collector) {
 	c := &collector{}
-	kept, sup := doc.Apply([]matcher.Finding{f}, c.warn)
+	kept, sup, _ := doc.Apply([]matcher.Finding{f}, adversarialTarget, c.warn)
 	switch {
 	case len(sup) == 1 && len(kept) == 0:
 		return true, sup[0].Reason, c
@@ -618,7 +624,7 @@ func TestApply_AdversarialTable(t *testing.T) {
 			Vulnerability: Vulnerability{Name: "CVE-2031-0034"}, Status: "fixed",
 			Products: []Product{{PURLAttr: "pkg:deb/debian/row34pkg@1.0.0"}},
 		}}}
-		kept, sup := doc.Apply(nil, func(string) {})
+		kept, sup, _ := doc.Apply(nil, Target{}, func(string) {})
 		if len(kept) != 0 || len(sup) != 0 {
 			t.Errorf("Apply(nil) = kept %v, suppressed %v, want both empty", kept, sup)
 		}

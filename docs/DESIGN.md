@@ -710,7 +710,7 @@ exited 0 while 24 findings went unmentioned.
 - [x] SLES LTSS folded with a mainline-wins tie-break (D91) — post-EOL fixes surface
       under the same key (bci-base 121→286 findings, curl shows its real FIXED IN),
       385,621 shadowed twins dropped and counted
-- [ ] Image OS packages carry purls, and image-scoped VEX statements apply only to that
+- [x] Image OS packages carry purls, and image-scoped VEX statements apply only to that
       image (D121) — syft-spelled purls per a measured namespace table; a statement that
       names an image scopes all its products; `arch=src`/`arch=source` source statements
       reach every binary of that source; Ubuntu also answers to `distro=<codename>`; one
