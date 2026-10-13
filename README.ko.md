@@ -76,6 +76,12 @@ assay scan alpine:3.19 --fail-on high
 플랫폼을 고르며, 기본값은 컨테이너 런타임이 고르는 방식 그대로 이 호스트의 플랫폼입니다. 스캔한
 플랫폼과 digest는 stderr에 출력되고 JSON `image` 객체에 기록됩니다.
 
+**판정을 만든 것.** 모든 JSON·SARIF 리포트에는 `provenance` 객체가 들어갑니다. assay 빌드, 데이터베이스
+(그리고 `db update`가 받아 온 배포 아티팩트의 digest), 대상 내용의 해시, 모든 게이트 플래그, 각 ignore
+규칙과 VEX 문서의 해시와 일치한 finding 수를 담으며, 타임스탬프가 없어 같은 입력은 여전히 같은
+바이트를 냅니다. `--provenance <path>`는 실행 시작·종료 시각, exit code, 리포트의 sha256을 담은 별도
+파일도 씁니다. 리포트가 나오기 전에 exit 2로 끝난 스캔에서도 씁니다.
+
 ## 무엇을 커버하나
 
 - **grype가 provider를 제공하는 모든 OS 계열** — Alpine, Debian, Ubuntu, RHEL, Rocky,
@@ -99,7 +105,8 @@ assay scan alpine:3.19 --fail-on high
   KISA의 한국어 산문은 `assay db build`로 로컬에서 얻습니다.
 - **보이는 채로 남는 면제** — 수용하기로 한 finding은 `.assay.yaml` ignore 파일로
   억제합니다(사유는 필수, 만료일은 선택), 그리고 `--vex`는 생산자의 OpenVEX 문서를
-  같은 방식으로 적용합니다. 억제된 finding은 게이트를 건드리지 않지만 모든 출력
+  같은 방식으로 적용합니다. 이미지의 OS 패키지에도 적용되며, 이미지를 명시한 statement는 그
+  이미지에만 적용됩니다. 억제된 finding은 게이트를 건드리지 않지만 모든 출력
   형식에서 개수와 함께 표시되며, 각각 자신의 waiver가 어디서 왔는지 라벨이 붙고,
   GitHub code scanning에는 사라진 것이 아니라 dismissed로 보입니다. 사용법은
   [docs/integrations.ko.md](docs/integrations.ko.md#받아들인-finding-waive하기)에.
