@@ -710,6 +710,16 @@ exited 0 while 24 findings went unmentioned.
 - [x] SLES LTSS folded with a mainline-wins tie-break (D91) — post-EOL fixes surface
       under the same key (bci-base 121→286 findings, curl shows its real FIXED IN),
       385,621 shadowed twins dropped and counted
+- [ ] Image OS packages carry purls, and image-scoped VEX statements apply only to that
+      image (D121) — syft-spelled purls per a measured namespace table; a statement that
+      names an image scopes all its products; `arch=src`/`arch=source` source statements
+      reach every binary of that source; Ubuntu also answers to `distro=<codename>`; one
+      stderr line counts statements that matched nothing.
+- [ ] A scan records what produced its verdict (D120) — a deterministic `provenance` object
+      in JSON (schema 14) and SARIF: tool, database (artifact digest from
+      `<dbPath>.artifact.json`), target content identity, every gate, ignore rules and VEX
+      documents with hashes and counts; `--provenance <path>` adds run time, exit code and
+      report sha256, written on every exit path.
 - [x] `--platform` and one platform selector for every image path (D119) — containerd
       normalisation (`arm64/v8` = `arm64`, bare `arm` = `arm/v7`), exact match then the
       runtime's compatibility ladder, nested indexes from a registry too; a single-platform

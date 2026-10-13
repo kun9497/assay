@@ -50,7 +50,11 @@ the weekly run instead of being judged `ok`. Since D118 a registry image scan re
 credentials — `ASSAY_REGISTRY_AUTH_*` first, then the docker login, then podman's — and
 never prints one; before it, the scan path was anonymous-only. Since D119 `--platform` picks an
 image's platform with containerd's normalisation and compatibility order on every image path,
-and the report records the platform and digest that were scanned. Findings can be waived through a
+and the report records the platform and digest that were scanned. Since D120 the report carries a
+deterministic `provenance` object (tool, database artifact, target content, gates, waivers) and
+`--provenance` writes a sidecar with run time and exit code on every exit path; since D121 an
+image's OS packages carry syft-spelled purls so VEX reaches them, and a VEX statement that names
+an image applies only to that image. Findings can be waived through a
 `.assay.yaml` ignore file (D102 — reason mandatory, expiry optional) or a producer's
 OpenVEX document (`--vex`, repeatable, D104 — not_affected/fixed suppress, a reasonless
 not_affected is skipped with a warning, latest statement wins); both apply after Match in
