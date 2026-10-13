@@ -461,7 +461,7 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 	// image-loader syntax, not a stripped prefix), so it keeps getting target.
 	switch kind {
 	case source.TargetImage:
-		t, stats, sc, err := catalogImage(ctx, target)
+		t, stats, sc, err := catalogImage(ctx, target, stderr)
 		if err != nil {
 			// D112. An expired --timeout is named as the flag's, with its
 			// value, so the reader knows which setting stopped the scan; the
@@ -1056,10 +1056,18 @@ func decodeSBOM(path string, r io.Reader) (pkgmeta.Target, cyclonedx.Stats, erro
 // around catalogFromImage so tests can drive the cataloging logic directly,
 // against a hand-built *source.Image, without going through a real registry,
 // tarball, or layout.
-func catalogImage(ctx context.Context, ref string) (pkgmeta.Target, cyclonedx.Stats, report.InventoryScopeRecord, error) {
+//
+// It is also where a registry pull's credential source is said (D118): source
+// has no stderr, and a multi-tenant service that gives each job its own login
+// can only check the isolation held if the scan names which login answered.
+// The source's name, never a value — and nothing at all when anonymous.
+func catalogImage(ctx context.Context, ref string, stderr io.Writer) (pkgmeta.Target, cyclonedx.Stats, report.InventoryScopeRecord, error) {
 	img, err := source.Open(ctx, ref)
 	if err != nil {
 		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
+	}
+	if c := img.Credentials; c.Source != source.CredentialsNone {
+		fmt.Fprintf(stderr, "registry credentials for %s: from %s\n", c.Registry, c.Source)
 	}
 	return catalogFromImage(ctx, ref, img)
 }

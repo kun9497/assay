@@ -25,6 +25,9 @@ import (
 // a fake index cannot, because the bug is that the index-walking code is never
 // reached on this path at all.
 func TestOpen_RegistrySelectsTheHostPlatform(t *testing.T) {
+	// The pull now consults D118's chain; keep the developer's own docker
+	// login and its credential helper out of a test about platforms.
+	isolateEnv(t)
 	srv := httptest.NewServer(registry.New())
 	defer srv.Close()
 	host := strings.TrimPrefix(srv.URL, "http://")
