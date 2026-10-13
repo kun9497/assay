@@ -938,6 +938,21 @@ func TestParseScan_DBMaxRatingAge(t *testing.T) {
 	}
 }
 
+// TestUsage_DocumentsRegistryAuthEnvironment holds the help to D118: a scan of
+// a registry image reads ASSAY_REGISTRY_AUTH_*, so the old header claiming a
+// scan reads no environment must not return, and each variable must be named.
+func TestUsage_DocumentsRegistryAuthEnvironment(t *testing.T) {
+	for _, v := range []string{"ASSAY_REGISTRY_AUTH_USERNAME", "ASSAY_REGISTRY_AUTH_PASSWORD",
+		"ASSAY_REGISTRY_AUTH_TOKEN", "ASSAY_REGISTRY_AUTH_AUTHORITY"} {
+		if !strings.Contains(usage, v+"=") {
+			t.Errorf("usage does not document %s", v)
+		}
+	}
+	if strings.Contains(usage, "a scan reads no environment") {
+		t.Error("usage still claims a scan reads no environment")
+	}
+}
+
 // writeD112Image writes a one-layer Alpine 3.19 docker-archive with one apk
 // package, built in-process (never pkg/v1/daemon), so a scan of it reaches
 // the layer walk with no network at any point.

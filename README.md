@@ -53,6 +53,8 @@ assay db update
 
 # 2. Scan something
 assay scan alpine:3.19                    # a registry image
+assay scan --platform linux/arm64 alpine:3.19   # another platform of a multi-platform image
+ASSAY_REGISTRY_AUTH_TOKEN=$TOKEN assay scan registry.example.com/team/app:1.0   # a private registry
 assay scan docker-archive:image.tar       # a local tarball — no network
 assay scan sbom.cdx.json                  # a CycloneDX or SPDX SBOM
 assay scan ./my-service                   # a Go binary, or a directory with lockfiles
@@ -64,6 +66,16 @@ assay scan alpine:3.19 --fail-on high
 `assay scan` writes results to stdout and diagnostics to stderr, so
 `assay scan … --output json | jq` stays clean. `--output` also does `sarif` (for GitHub
 code scanning) and `table` (the default). `--explain` shows one finding's full evidence.
+
+**Private registries.** Scanning a registry image tries, in order:
+`ASSAY_REGISTRY_AUTH_USERNAME` + `ASSAY_REGISTRY_AUTH_PASSWORD` (or
+`ASSAY_REGISTRY_AUTH_TOKEN`), then your `docker login` (`DOCKER_CONFIG` or
+`~/.docker/config.json`, credential helpers included), then podman's (`REGISTRY_AUTH_FILE` or
+`$XDG_RUNTIME_DIR/containers/auth.json`). The environment credential is offered only to the
+target's own registry unless `ASSAY_REGISTRY_AUTH_AUTHORITY` names another; a half-set one is
+exit 2, and values are never printed. `--platform os/arch[/variant]` picks a platform; the default
+is this host's, chosen as the container runtime would, and the scanned platform and digest are
+printed on stderr and recorded in the JSON `image` object.
 
 ## What it covers
 

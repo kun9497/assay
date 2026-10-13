@@ -173,8 +173,28 @@ db build flags:
                   survives until the next full build: fine for a seed at
                   most a day old, wrong for anything older.
 
-Environment (db build only — a scan reads no environment and no network):
-  NVD_ENABLE=1          Also fetch NIST's CVSS scores, so findings whose
+Environment (scan of a registry image only — an SBOM, archive, layout, binary or
+directory scan reads none of it):
+  ASSAY_REGISTRY_AUTH_USERNAME=<user>
+  ASSAY_REGISTRY_AUTH_PASSWORD=<pass>
+                        Basic credentials for the registry the target names.
+                        Set both or neither: a half-set pair is exit 2, never
+                        an anonymous pull.
+  ASSAY_REGISTRY_AUTH_TOKEN=<token>
+                        A bearer token instead of a username and password.
+                        Setting it together with either is exit 2.
+  ASSAY_REGISTRY_AUTH_AUTHORITY=<host>
+                        Offer the credential to this registry only. Without it
+                        the credential is offered only to the target's own
+                        registry (D118).
+  Without these, the docker login is used (DOCKER_CONFIG, else
+  ~/.docker/config.json, with its credential helpers), then podman's
+  (REGISTRY_AUTH_FILE, else $XDG_RUNTIME_DIR/containers/auth.json); with none, the
+  pull is anonymous. Values are never printed; stderr names only which source
+  answered.
+
+Environment (db build only):
+  NVD_ENABLE=1         Also fetch NIST's CVSS scores, so findings whose
                         advisory carries no severity can still be rated.
                         Off by default: a full pass takes about seven hours.
   NVD_SINCE_DAYS=<n>    Bound that fetch to CVEs modified in the last n days
