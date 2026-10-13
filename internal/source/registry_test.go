@@ -54,9 +54,9 @@ func TestOpen_RegistrySelectsTheHostPlatform(t *testing.T) {
 	if runtime.GOARCH == "arm64" {
 		want = "amd64"
 	}
-	hostPlatform = func() v1.Platform { return v1.Platform{OS: "linux", Architecture: want} }
+	HostPlatform = func() v1.Platform { return v1.Platform{OS: "linux", Architecture: want} }
 	t.Cleanup(func() {
-		hostPlatform = func() v1.Platform {
+		HostPlatform = func() v1.Platform {
 			return v1.Platform{OS: "linux", Architecture: runtime.GOARCH}
 		}
 	})
@@ -79,7 +79,7 @@ func TestOpen_RegistrySelectsTheHostPlatform(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	img, err := Open(context.Background(), ref.String())
+	img, err := Open(context.Background(), ref.String(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestOpen_RegistryLayerBlobRefusalIsAuthError(t *testing.T) {
 	}
 	locked.Store(true)
 
-	out, err := Open(context.Background(), ref.String())
+	out, err := Open(context.Background(), ref.String(), "")
 	if err != nil {
 		t.Fatalf("Open: %v (the manifest and config are served; only the layer blob is refused)", err)
 	}

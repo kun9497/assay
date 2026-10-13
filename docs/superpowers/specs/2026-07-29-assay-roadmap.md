@@ -296,6 +296,7 @@ Where assay differs, the difference is documented rather than left to be discove
 | `--fail-on-incomplete` | No grype equivalent. Exits **2**, not 1: a package that was never checked is a statement about coverage, not a finding (D21). |
 | severity of a multi-source finding | grype reports one band per match; assay reports every source's and gates on the highest (D25). Measured on Django 3.2.12, 19 findings: grype agrees with assay's aggregate on 19/19 — and with assay's GHSA rating on 19/19, but with its PYSEC rating on 1/15 — counting a band as agreeing only when it is equal, so the 14 misses are grype's real band against PYSEC's `unknown`. On this sample "grype takes the highest" and "grype follows GHSA" cannot be told apart, because PYSEC rates none of them. Separating the two needs a case where a non-GHSA source rates higher. |
 | `ASSAY_REGISTRY_AUTH_{AUTHORITY,USERNAME,PASSWORD,TOKEN}` | grype's `GRYPE_REGISTRY_AUTH_*` single-entry form, same token/basic exclusivity. Two differences: an absent authority binds the credential to the scan target's registry, and a half-set credential is exit 2 rather than anonymous. grype's `INSECURE_*`, TLS client certificates and multi-entry list have no counterpart (D118). |
+| `--platform` | Same syntax and containerd normalisation as grype; an explicit platform that a single-platform image does not match is refused by both. Differences: without the flag, a mismatched single-platform image is scanned with a stderr warning (grype says nothing); the flag on a non-image target is exit 2; an OS-version suffix is refused; and the chosen platform and digests are recorded in the JSON `image` object (D119). |
 
 Add a row here whenever a shared name gains different semantics. A silently divergent flag
 is worse than a differently named one.
@@ -4815,6 +4816,85 @@ SDK keychains (ECR, GCR, ACR): a credential helper already reaches each cloud, a
 would be a sixth direct dependency for what a helper does. The air-gapped path is
 untouched — an SBOM, `docker-archive:` or `oci-dir:` scan never consults the chain. No
 schema change.
+
+---
+
+### D119 — `--platform` chooses an image's platform the way the container runtime would, and the scan records what it chose
+
+**Decision.** `assay scan` gains `--platform os/arch[/variant]` (grype's name, D18), and
+every image path — a registry reference, `oci-dir:` and `docker-archive:` — resolves the
+platform through one selector:
+
+- **Normalisation, containerd's.** `x86_64`/`x86-64` are `amd64` and `amd64/v1` is `amd64`;
+  `aarch64` is `arm64`, and `arm64/v8` is `arm64` with no variant; `armhf` is `arm/v7`,
+  `armel` is `arm/v6`, and `arm` with no variant is `arm/v7`; `i386` is `386`. Both the request
+  and every candidate are normalised before they are compared. An OS version on a candidate
+  (`linux/arm64:cbl-mariner-2.0`) is not compared; a request carrying one, or anything past a
+  variant, is refused.
+- **Exact first, then the runtime's compatibility order.** If no candidate matches exactly,
+  a 32-bit arm request falls back down its ladder — `v8` → `v7` → `v6` → `v5`, starting at
+  the requested variant — and an `amd64/vN` request falls back towards `amd64`, because that
+  is the image a host of that kind would actually run. Nothing else falls back.
+- **The whole index, nested included.** An index whose children are indexes is walked
+  (depth 4, as `oci-dir:` already did), on the registry path too. Attestation entries
+  (`unknown/unknown`) are skipped; a descriptor with no platform is judged by its image's
+  config.
+- **A miss is exit 2** naming what the index offers, as today.
+- **A single image** (a registry manifest that is not an index, a `docker-archive:` tarball, a
+  one-image layout) is compared by its config. If it does not match and `--platform` was
+  given, the scan is exit 2: the caller asked for a platform this image is not. If it does
+  not match and the platform was the host default, the scan proceeds with a stderr warning
+  naming both platforms and the flag: the image offers nothing else, so it is the image that
+  would be deployed. A config with no OS or architecture is scanned with a warning that it
+  could not be checked.
+- **The default stays the host**: `linux/` plus the binary's `GOARCH`, normalised (so an
+  arm build asks for `arm/v7`). One function supplies it to both the registry and the layout
+  path; until now the layout path read `runtime.GOARCH` directly and the test seam did not
+  reach it.
+- **What was scanned is recorded.** One stderr line — `image <ref>: <platform>, manifest
+  <digest>` with `, from index <digest>` when an index was resolved and `(compatible with
+  <request>)` when the ladder chose it — and a top-level `image` object in the JSON report
+  carrying `platform`, `requestedPlatform`, `match` (`exact`, `compatible`, `unchecked` or
+  `mismatch`), `manifestDigest` and `indexDigest`. Schema 13. `--platform` on a target that
+  is not an image (an SBOM, a directory, a binary) is exit 2 rather than ignored.
+
+**Why.** Measured on 2026-10-13 against an in-memory index, against fixtures pushed to a
+throwaway `registry:2` and pulled by docker 29, and across the indexes of 44 real images
+(the 25 differential targets and 19 common ones), go-containerregistry's own
+`remote.WithPlatform` is wrong in four ways that each scan a different image from the one
+that runs, or refuse one that runs:
+
+- `linux/arm` takes the **first** arm entry. On `alpine`, `node` and `registry` that is
+  `v6`; on `nginx`, `python`, `postgres` and `busybox` it is `v5`. docker and grype take `v7`.
+  An arm host scanning with today's default (`linux/arm`, no variant) scans a v5 or v6 image
+  while a v7 one runs.
+- `linux/arm64/v8` — what `docker` prints and what people copy — **misses** an index whose
+  arm64 entry carries no variant, which is 10 of the 44 surveyed: `ubi8/nodejs-18`,
+  `wolfi-base`, `alpaquita`, `liberica`, `hummingbird/nginx`, `bitnamilegacy/postgresql`,
+  `chainguard/static`, `node-exporter`, `dotnet/runtime` and `cbl-mariner`. docker and
+  grype both match it.
+- An index nested in an index **fails from a registry** — remote.Image looks only at the top
+  level — while `oci-dir:` already walked it. docker resolves it.
+- A single-platform image is returned for **any** requested platform. docker warns even when
+  the platform was explicit; grype refuses when it was explicit and says nothing by default.
+
+docker also chose `arm/v6` for an `arm/v7` request on an index offering only `v6`. That is
+the compatibility order this decision adopts, and it is the measured basis for the one
+fallback the selector allows: a v7 CPU runs a v6 image, so that image is what a v7 host
+would deploy.
+
+**Why refuse on an explicit mismatch but warn on the default.** An explicit
+`--platform linux/amd64` that resolves to an arm64-only image answers a question the caller
+did not ask — grype refuses it too. Without the flag, an amd64 CI runner scanning an
+arm64-only image is scanning the only image there is, and refusing would turn today's correct
+answer into exit 2 for every such pipeline, which D11's contract does not allow without a
+reason that strong. The warning and the recorded `match: mismatch` keep the fact visible.
+
+**What stays out.** `--platform all` (scan every platform in one run, one result each)
+waits for a request: it changes the report from one target to many. Windows images and an
+OS-version request are refused rather than half-supported. Host variant detection
+(`amd64/v3` from CPU flags, as docker does) is not done — the default asks for the base
+variant, which every amd64 index carries.
 
 ---
 

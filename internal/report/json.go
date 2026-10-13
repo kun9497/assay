@@ -38,7 +38,12 @@ import (
 // only ecosystem key was frozen and held no finding read as findings 0 on
 // current data, an unrouted distro was visible only as skip-reason text, and
 // an image scan's silence about application packages had no field at all —
-// every one a fact about the target's coverage with nowhere to live).
+// every one a fact about the target's coverage with nowhere to live), and to
+// 13 when Document gained the `image` object (D119: which platform's image an
+// image scan read, against which it was asked for, how they matched, and the
+// manifest and index digests that identify it — a scan of the wrong
+// architecture's image produces a full, plausible report, and nothing in the
+// document said which one it was).
 // Two earlier additions should have bumped it and did not — `ratings` (D25)
 // and RatingRecord.URL (D27) both changed the shape while this constant
 // stayed at 1 — so version 1 in the wild denotes three different documents.
@@ -46,7 +51,7 @@ import (
 // what it does mean is that a consumer reading 2 or later can rely on every
 // field below being present, which is the guarantee the constant exists to
 // give.
-const schemaVersion = 12
+const schemaVersion = 13
 
 // Document is the stable shape of `assay scan --output json` (design goal
 // #3). It carries what Table shows plus what Table cannot: the full
@@ -101,6 +106,34 @@ type Document struct {
 	// (D111). Omitted for every other target kind, which has no OS database or
 	// /opt/bitnami to have read or not.
 	InventoryScope *InventoryScopeRecord `json:"inventoryScope,omitempty"`
+	// Image is which platform's image an image scan read and how it was
+	// chosen (D119). Omitted for every other target kind, which has no
+	// platform to have chosen.
+	Image *ImageRecord `json:"image,omitempty"`
+}
+
+// The four values ImageRecord.Match takes (D119), the same strings
+// source.PlatformChoice carries.
+const (
+	ImageMatchExact      = "exact"
+	ImageMatchCompatible = "compatible"
+	ImageMatchUnchecked  = "unchecked"
+	ImageMatchMismatch   = "mismatch"
+)
+
+// ImageRecord is what an image scan chose (D119): the scanned image's platform
+// (empty when its config named none, Match "unchecked"), the platform asked
+// for — --platform, or the host's — how they matched (exact, compatible: an
+// older variant the runtime's compatibility order chose, unchecked, or
+// mismatch: a single image that is not the host's, scanned because the
+// platform was not asked for), and the digests. IndexDigest is the index the
+// manifest was listed in, omitted for a single image.
+type ImageRecord struct {
+	Platform          string `json:"platform"`
+	RequestedPlatform string `json:"requestedPlatform"`
+	Match             string `json:"match"`
+	ManifestDigest    string `json:"manifestDigest"`
+	IndexDigest       string `json:"indexDigest,omitempty"`
 }
 
 // FindingRecord is one matcher.Finding, reshaped for stable JSON rather than
@@ -393,6 +426,7 @@ func JSON(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirscan
 		Coverage:       cov.records(),
 		Distro:         cov.Distro,
 		InventoryScope: cov.InventoryScope,
+		Image:          cov.Image,
 	}
 	for _, f := range res.Findings {
 		doc.Findings = append(doc.Findings, findingRecord(f))

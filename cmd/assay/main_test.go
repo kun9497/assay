@@ -1320,8 +1320,8 @@ func TestRun_ScanOutputJSONReachesRealExitCode(t *testing.T) {
 	// cannot notice that the shape changed under it. Bumping this is meant to
 	// be the deliberate act that accompanies a schema change (D33 was the
 	// third).
-	if doc.SchemaVersion != 12 {
-		t.Errorf("SchemaVersion = %d, want 12", doc.SchemaVersion)
+	if doc.SchemaVersion != 13 {
+		t.Errorf("SchemaVersion = %d, want 13", doc.SchemaVersion)
 	}
 	// buildRunSeamFixture's critical, unrated and no-fix findings; somecrate
 	// is dropped by the cataloger and never reaches a Finding at all.
@@ -3745,5 +3745,82 @@ func TestParseScanArgs_VEX(t *testing.T) {
 	// The bare flag with no value is an error, like every other value flag.
 	if _, _, err := parseScanArgs([]string{"alpine:3.19", "--vex"}); err == nil {
 		t.Error("--vex with no value should error")
+	}
+}
+
+// TestRun_ScanPlatformReachesTheSelector is the run()-seam wiring check for
+// --platform (D119): the parsed value has to reach source, not only pass
+// validation. The image's config names no platform, so the scan proceeds
+// with a warning that names the platform it was checked against — riscv64,
+// which no machine running this test is, so a value parsed and then dropped
+// would name the host's instead.
+func TestRun_ScanPlatformReachesTheSelector(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ASSAY_DB_DIR", dir)
+	w, err := store.Create(filepath.Join(dir, "vulnerability.db"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := w.SetMeta(store.Meta{Providers: map[string]store.Provenance{
+		"osv": {Ecosystems: []string{"Alpine:v3.19"}},
+	}}); err != nil {
+		t.Fatalf("SetMeta: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	tarPath := filepath.Join(dir, "image.tar")
+	writeD112Image(t, tarPath)
+	target := "docker-archive:" + tarPath
+
+	for _, flags := range [][]string{{"--platform", "linux/riscv64"}, {"--platform=linux/riscv64"}} {
+		var stdout, stderr bytes.Buffer
+		args := append([]string{"scan", target}, flags...)
+		if code := run(args, &stdout, &stderr); code != exitOK {
+			t.Fatalf("run(%v) = %d, want 0\nstderr:\n%s", args, code, stderr.String())
+		}
+		if want := "could not be checked against linux/riscv64\n"; !strings.Contains(stderr.String(), want) {
+			t.Errorf("run(%v): stderr does not say %q - the flag did not reach the selector:\n%s",
+				args, want, stderr.String())
+		}
+		if strings.Contains(stdout.String(), "warning") || strings.Contains(stdout.String(), ", manifest ") {
+			t.Errorf("run(%v): a stderr line reached stdout:\n%s", args, stdout.String())
+		}
+	}
+}
+
+// TestParseScan_Platform pins --platform's refusals through run(): exit 2,
+// the reason on stderr, nothing on stdout, before any target is read.
+func TestParseScan_Platform(t *testing.T) {
+	_, opts, err := parseScanArgs([]string{"alpine:3.19", "--platform", "linux/arm64"})
+	if err != nil || opts.Platform != "linux/arm64" {
+		t.Fatalf("parseScanArgs: opts.Platform = %q, err = %v", opts.Platform, err)
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--platform"}, "--platform requires a value"},
+		{[]string{"--platform=linux"}, `--platform: "linux" is not os/arch[/variant]`},
+		{[]string{"--platform", "linux/arm/v7/x"}, "one variant at most"},
+		{[]string{"--platform=linux/arm64:10.0"}, "carries an OS version"},
+		{[]string{"--platform=linux/"}, "has an empty part"},
+		{[]string{"--platform=windows/amd64"}, "Windows images are not supported"},
+		{[]string{"--platform=linux/amd64", "--platform=linux/arm64"}, "--platform given more than once"},
+	} {
+		var stdout, stderr bytes.Buffer
+		args := append([]string{"scan", "docker-archive:/does/not/exist.tar"}, tc.args...)
+		if code := run(args, &stdout, &stderr); code != exitError {
+			t.Errorf("run(%v) = %d, want %d", args, code, exitError)
+		}
+		if !strings.Contains(stderr.String(), "error: ") || !strings.Contains(stderr.String(), tc.want) {
+			t.Errorf("run(%v): stderr does not say %q:\n%s", args, tc.want, stderr.String())
+		}
+		if strings.Contains(stderr.String(), "scanned ") {
+			t.Errorf("run(%v): the target was classified before the flag was refused:\n%s", args, stderr.String())
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("run(%v): a refused flag wrote to stdout:\n%s", args, stdout.String())
+		}
 	}
 }

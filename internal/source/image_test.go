@@ -117,7 +117,7 @@ func TestFromV1_UsesDiffIDNotDigest(t *testing.T) {
 // Falling back to the first entry would produce an empty package list and a
 // clean-looking report.
 func TestImageFromIndex_RefusesUnknownPlatformOnly(t *testing.T) {
-	_, err := imageFromIndex(fakeIndex{platforms: []string{"unknown/unknown"}}, "test")
+	_, err := pickHost(fakeIndex{platforms: []string{"unknown/unknown"}}, "test")
 	if err == nil {
 		t.Fatal("selected an unknown/unknown manifest; those carry no filesystem")
 	}
@@ -137,7 +137,7 @@ func TestImageFromIndex_RefusesUnknownPlatformOnly(t *testing.T) {
 // An index carrying a real platform alongside attestations must still list the
 // real one, so the operator learns what the image actually has.
 func TestImageFromIndex_ErrorNamesTheRealPlatformsOnly(t *testing.T) {
-	_, err := imageFromIndex(fakeIndex{platforms: []string{
+	_, err := pickHost(fakeIndex{platforms: []string{
 		"unknown/unknown", "linux/riscv64", "unknown/unknown",
 	}}, "test")
 	if err == nil {
@@ -183,7 +183,7 @@ func TestOpen_LocalTargetsMakeNoNetworkCall(t *testing.T) {
 	} {
 		// The load fails — the paths do not exist — but the point is where it
 		// fails. A network call would be counted before the error surfaced.
-		_, _ = Open(context.Background(), ref)
+		_, _ = Open(context.Background(), ref, "")
 	}
 	if reached != 0 {
 		t.Errorf("a local target made %d network call(s); D14 forbids any", reached)
@@ -200,7 +200,7 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { retu
 func TestImageFromIndex_DescendsIntoNestedIndexes(t *testing.T) {
 	inner := fakeIndex{platforms: []string{"linux/" + runtime.GOARCH}}
 	outer := fakeIndex{children: map[string]fakeIndex{strings.Repeat("a", 64): inner}}
-	if _, err := imageFromIndex(outer, "nested"); err != nil {
+	if _, err := pickHost(outer, "nested"); err != nil {
 		t.Errorf("imageFromIndex on a nested index: %v", err)
 	}
 }
@@ -214,7 +214,7 @@ func TestImageFromIndex_ReadsPlatformFromTheConfigWhenTheDescriptorHasNone(t *te
 		noPlatform: []string{hex},
 		images:     map[string]v1.Image{hex: configImage{os: "linux", arch: runtime.GOARCH}},
 	}
-	if _, err := imageFromIndex(idx, "single"); err != nil {
+	if _, err := pickHost(idx, "single"); err != nil {
 		t.Errorf("imageFromIndex on a platform-less descriptor: %v", err)
 	}
 }
@@ -226,11 +226,18 @@ func TestImageFromIndex_ConfigPlatformIsStillChecked(t *testing.T) {
 		noPlatform: []string{hex},
 		images:     map[string]v1.Image{hex: configImage{os: "linux", arch: "riscv64"}},
 	}
-	_, err := imageFromIndex(idx, "single")
+	_, err := pickHost(idx, "single")
 	if err == nil {
 		t.Fatal("accepted a riscv64 image on this host")
 	}
 	if !strings.Contains(err.Error(), "linux/riscv64") {
 		t.Errorf("error %q does not name what the layout actually holds", err)
 	}
+}
+
+// pickHost selects the host default out of idx, the way a scan without
+// --platform does.
+func pickHost(idx indexReader, what string) (v1.Image, error) {
+	img, _, err := imageFromIndex(idx, what, v1.Hash{}, DefaultPlatform(), false)
+	return img, err
 }

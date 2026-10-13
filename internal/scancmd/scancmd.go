@@ -170,6 +170,13 @@ type Options struct {
 	// --timeout was given, and an expiry is then reported as the plain error
 	// it is.
 	Timeout time.Duration
+	// Platform is the --platform value (D119): os/arch[/variant], the image's
+	// platform to scan. Empty means the host's (source.DefaultPlatform). Run
+	// validates it again rather than trusting the CLI layer did, and refuses
+	// it on a target that is not an image — an SBOM, a directory or a binary
+	// has no platform to choose, and ignoring the flag there would let a
+	// caller believe it had been honoured.
+	Platform string
 	// Explain, when non-empty, selects one advisory to explain instead of
 	// rendering the table or JSON: its own ID, or any alias/upstream
 	// identifier it carries (D3) — whatever a reader would have grepped the
@@ -431,6 +438,9 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		// inventory was read from. nil for every other kind, which the JSON
 		// then omits — a directory has no OS database to have read or not.
 		scope *report.InventoryScopeRecord
+		// image is D119's record of which platform an image scan read; nil
+		// for every other kind, which the JSON then omits.
+		image *report.ImageRecord
 	)
 
 	kind, path, err := source.Classify(target)
@@ -453,6 +463,20 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 	// never stdout, so `--output json | jq` stays clean.
 	fmt.Fprintf(stderr, "scanned %s as %s %s\n", target, article(kind), kind)
 
+	// D119. After the classification line, so the refusal reads against what
+	// the target was taken to be.
+	if opts.Platform != "" {
+		if kind != source.TargetImage {
+			fmt.Fprintf(stderr, "error: --platform applies only to an image; %s is %s %s\n",
+				target, article(kind), kind)
+			return 2
+		}
+		if _, err := source.ParsePlatform(opts.Platform); err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 2
+		}
+	}
+
 	// path has any file:/dir:/sbom: prefix stripped (source.Classify's own
 	// contract); target does not. The three filesystem catalogers below must
 	// get path — handing gobinary.Parse or gomod.Parse the raw target would
@@ -461,7 +485,7 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 	// image-loader syntax, not a stripped prefix), so it keeps getting target.
 	switch kind {
 	case source.TargetImage:
-		t, stats, sc, err := catalogImage(ctx, target, stderr)
+		t, stats, sc, rec, err := catalogImage(ctx, target, opts.Platform, stderr)
 		if err != nil {
 			// D112. An expired --timeout is named as the flag's, with its
 			// value, so the reader knows which setting stopped the scan; the
@@ -479,7 +503,7 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 			fmt.Fprintf(stderr, "error: %v\n", err)
 			return 2
 		}
-		inventory, cat, scope = t, stats, &sc
+		inventory, cat, scope, image = t, stats, &sc, rec
 
 	case source.TargetGoBinary:
 		t, stats, err := gobinary.Parse(path)
@@ -672,6 +696,7 @@ func Run(ctx context.Context, dbPath, target string, opts Options, stdout, stder
 		Keys:           report.CoverageOf(inventory, m, res.Skipped),
 		Distro:         report.DistroOf(inventory.Distro),
 		InventoryScope: scope,
+		Image:          image,
 	}
 
 	// Three renderers, exactly one chosen: --explain replaces the report
@@ -1061,15 +1086,60 @@ func decodeSBOM(path string, r io.Reader) (pkgmeta.Target, cyclonedx.Stats, erro
 // has no stderr, and a multi-tenant service that gives each job its own login
 // can only check the isolation held if the scan names which login answered.
 // The source's name, never a value — and nothing at all when anonymous.
-func catalogImage(ctx context.Context, ref string, stderr io.Writer) (pkgmeta.Target, cyclonedx.Stats, report.InventoryScopeRecord, error) {
-	img, err := source.Open(ctx, ref)
+//
+// And where the platform choice is said (D119), for the same reason: one
+// record line naming the platform scanned and its digests, a warning when a
+// single image is not the host's platform or could not be checked, and the
+// JSON record returned for Run to hand the renderers.
+func catalogImage(ctx context.Context, ref, platform string, stderr io.Writer) (pkgmeta.Target, cyclonedx.Stats, report.InventoryScopeRecord, *report.ImageRecord, error) {
+	img, err := source.Open(ctx, ref, platform)
 	if err != nil {
-		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
+		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, nil, err
 	}
 	if c := img.Credentials; c.Source != source.CredentialsNone {
 		fmt.Fprintf(stderr, "registry credentials for %s: from %s\n", c.Registry, c.Source)
 	}
-	return catalogFromImage(ctx, ref, img)
+	rec := reportPlatform(ref, img.Platform, stderr)
+	t, stats, scope, err := catalogFromImage(ctx, ref, img)
+	return t, stats, scope, rec, err
+}
+
+// reportPlatform prints D119's record line and any warning for one image
+// scan's platform choice, and returns its JSON record. stderr only: stdout
+// belongs to the report.
+//
+// The record line is printed for every choice, exact included — it is what
+// lets a reader of a CI log see which image of an index was scanned without
+// re-resolving the tag, whose index may have moved since.
+func reportPlatform(ref string, c source.PlatformChoice, stderr io.Writer) *report.ImageRecord {
+	plat := c.Platform
+	if plat == "" {
+		plat = "unknown platform"
+	}
+	line := fmt.Sprintf("image %s: %s, manifest %s", ref, plat, c.ManifestDigest)
+	if c.IndexDigest != "" {
+		line += ", from index " + c.IndexDigest
+	}
+	if c.Match == source.MatchCompatible {
+		line += " (compatible with " + c.Requested + ")"
+	}
+	fmt.Fprintln(stderr, line)
+	switch c.Match {
+	case source.MatchMismatch:
+		fmt.Fprintf(stderr, "warning: image %s is %s only, not this host's %s; scanning it, as it is the "+
+			"only image there - pass --platform %s to say that is intended, or --platform %s to refuse it\n",
+			ref, c.Platform, c.Requested, c.Platform, c.Requested)
+	case source.MatchUnchecked:
+		fmt.Fprintf(stderr, "warning: image %s: its config names no OS or architecture, so its platform "+
+			"could not be checked against %s\n", ref, c.Requested)
+	}
+	return &report.ImageRecord{
+		Platform:          c.Platform,
+		RequestedPlatform: c.Requested,
+		Match:             c.Match,
+		ManifestDigest:    c.ManifestDigest,
+		IndexDigest:       c.IndexDigest,
+	}
 }
 
 // catalogFromImage builds a Target the way syft does for the same image: the

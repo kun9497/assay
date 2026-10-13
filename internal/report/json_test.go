@@ -205,6 +205,13 @@ func goldenCoverage() Coverage {
 		InventoryScope: &InventoryScopeRecord{
 			OSPackages: ScopeRead, Bitnami: ScopeNone, ApplicationPackages: ScopeNotRead,
 		},
+		// D119: every field populated — a compatible pick out of an index —
+		// so the golden pins the image object's keys and their order.
+		Image: &ImageRecord{
+			Platform: "linux/arm/v6", RequestedPlatform: "linux/arm/v7", Match: ImageMatchCompatible,
+			ManifestDigest: "sha256:" + strings.Repeat("a1", 32),
+			IndexDigest:    "sha256:" + strings.Repeat("b2", 32),
+		},
 	}
 }
 

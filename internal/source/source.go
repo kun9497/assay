@@ -35,6 +35,13 @@ type Image struct {
 	// the zero value — no registry, no source — is every other target.
 	Credentials Credentials
 
+	// Platform is which platform's image was scanned, against what was asked,
+	// and the digests that identify it (D119). Set by Open for every image
+	// path; scancmd prints the record line and any warning from it and puts
+	// it in the JSON `image` object. The zero value (Match "") is an Image
+	// built by hand, which states no platform.
+	Platform PlatformChoice
+
 	// read is the bytes Files, FilesUnder, FilesNamed and FilesMatching have
 	// copied out of this image so far, against MaxScanBytes (D112).
 	//

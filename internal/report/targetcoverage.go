@@ -106,6 +106,12 @@ type Coverage struct {
 	Keys           []CoverageRecord
 	Distro         *DistroRecord
 	InventoryScope *InventoryScopeRecord
+	// Image is D119's record of which platform an image scan read, carried
+	// here beside InventoryScope because it is the same kind of fact: about
+	// the target, set only by the image branch, nil for every other kind.
+	// Only the JSON renders it; the table and SARIF leave it to the stderr
+	// record line scancmd prints.
+	Image *ImageRecord
 }
 
 // CoverageOf builds one record per ecosystem key in t's inventory, sorted by
