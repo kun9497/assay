@@ -146,3 +146,38 @@ func TestRun_D120_NoTargetStillWritesTheSidecar(t *testing.T) {
 		t.Errorf("sidecar run = %+v (err %v), want exit 2 and the error", sc.Run, err)
 	}
 }
+
+// The other exit before scancmd.Run: the database cannot even be located —
+// no ASSAY_DB_DIR and no user cache directory (XDG_CACHE_HOME and HOME unset
+// on Unix, LocalAppData on Windows). It too writes the sidecar.
+func TestRun_D120_UnlocatableDatabaseStillWritesTheSidecar(t *testing.T) {
+	for _, v := range []string{"ASSAY_DB_DIR", "XDG_CACHE_HOME", "HOME", "LocalAppData"} {
+		t.Setenv(v, "")
+	}
+	if _, err := os.UserCacheDir(); err == nil {
+		t.Skip("this platform finds a cache directory with every variable cleared")
+	}
+	side := filepath.Join(t.TempDir(), "prov.json")
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"scan", provSBOMFile(t), "--provenance", side}, &stdout, &stderr)
+	if code != exitError {
+		t.Fatalf("scan = %d, want %d\nstderr: %s", code, exitError, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "error: locate database: ") {
+		t.Errorf("stderr = %q, want the locate refusal", stderr.String())
+	}
+	data, err := os.ReadFile(side)
+	if err != nil {
+		t.Fatalf("no sidecar: %v", err)
+	}
+	var sc struct {
+		Run struct {
+			ExitCode int    `json:"exitCode"`
+			Error    string `json:"error"`
+		} `json:"run"`
+	}
+	if err := json.Unmarshal(data, &sc); err != nil || sc.Run.ExitCode != 2 ||
+		!strings.HasPrefix(sc.Run.Error, "locate database: ") {
+		t.Errorf("sidecar run = %+v (err %v), want exit 2 and the locate error", sc.Run, err)
+	}
+}

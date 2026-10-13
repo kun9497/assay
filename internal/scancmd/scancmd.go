@@ -966,7 +966,15 @@ func applyIgnoreRules(res *matcher.Result, ignoreFile string, stderr io.Writer, 
 	w.IgnoreFile = rec
 	cfg, err := ignore.Load(path)
 	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
+		msg := err.Error()
+		if rec.Discovered {
+			// D120: the discovered path is absolute — the working directory,
+			// the username inside it — and this line becomes the sidecar's
+			// run.error. The file is by definition in the directory the scan
+			// ran from, so its default name says where it is.
+			msg = strings.ReplaceAll(msg, path, ignore.DefaultFile)
+		}
+		fmt.Fprintf(stderr, "error: %s\n", msg)
 		return 2
 	}
 	warn := func(msg string) { fmt.Fprintf(stderr, "warning: %s\n", msg) }
@@ -1230,7 +1238,15 @@ func decodeSBOM(path string, r io.Reader) (pkgmeta.Target, cyclonedx.Stats, erro
 func catalogImage(ctx context.Context, ref, platform string, stderr io.Writer) (pkgmeta.Target, cyclonedx.Stats, report.InventoryScopeRecord, *report.ImageRecord, source.CredentialSource, error) {
 	img, err := source.Open(ctx, ref, platform)
 	if err != nil {
-		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, nil, source.CredentialsNone, err
+		// A 401 or 403 on the manifest is still the D118 source that was
+		// offered, and the error says which; D120's record must agree with
+		// it rather than read "none" for a credential that was sent.
+		creds := source.CredentialsNone
+		var ae *source.AuthError
+		if errors.As(err, &ae) {
+			creds = ae.Source
+		}
+		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, nil, creds, err
 	}
 	if c := img.Credentials; c.Source != source.CredentialsNone {
 		fmt.Fprintf(stderr, "registry credentials for %s: from %s\n", c.Registry, c.Source)

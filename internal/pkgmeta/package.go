@@ -128,3 +128,17 @@ func SourceRPMName(s string) string {
 	}
 	return s[:j]
 }
+
+// SourceRPMVersion is SourceRPMName's other half: the version-release a
+// SOURCERPM file name carries ("lvm2-2.03.14-15.el8_10.src.rpm" gives
+// "2.03.14-15.el8_10"), with no epoch, because the file name has none. It is
+// the source version a binary was built at, which is not the binary's own
+// when the two are versioned apart — device-mapper-libs 1.02.181 is built
+// from lvm2 2.03.14. Returns "" for anything SourceRPMName refuses.
+func SourceRPMVersion(s string) string {
+	name := SourceRPMName(s)
+	if name == "" {
+		return ""
+	}
+	return strings.TrimSuffix(s[len(name)+1:], ".src.rpm")
+}

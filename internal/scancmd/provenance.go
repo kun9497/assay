@@ -9,6 +9,8 @@ import (
 	"hash"
 	"io"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -110,8 +112,13 @@ func (r *recorder) finish(code int) int {
 }
 
 // errorText is an exit 2's cause for the sidecar: the first error line the
-// scan printed, without its "error: " prefix, and with the database path
-// replaced — store.Open's errors name it, and it names the user's home.
+// scan printed, without its "error: " prefix, and with every machine path it
+// may carry replaced by a name for what it is (D120: no absolute path that
+// was not typed, no username, no working directory). store.Open's errors name
+// the database path; a credential file's errors name the home directory or
+// the D118 locations the environment points at; anything relative the scan
+// resolved names the working directory. stderr keeps them all — it is the
+// human channel, and the record is the one that travels.
 func (r *recorder) errorText() string {
 	msg := r.stderr.first
 	if msg == "" {
@@ -120,10 +127,84 @@ func (r *recorder) errorText() string {
 	if msg == "" {
 		return "exit 2"
 	}
-	if r.dbPath != "" {
-		msg = strings.ReplaceAll(msg, r.dbPath, "<database>")
+	return redactMachinePaths(msg, r.dbPath)
+}
+
+// redactMachinePaths replaces the database path and each machine location in
+// msg with its placeholder, longest path first so a path inside another (the
+// database under the home directory, the working directory under it) is named
+// for the more specific one. A location that is not absolute, or is a
+// filesystem root, is left alone: replacing "/" or "." would mangle every
+// path in the message rather than hide one.
+func redactMachinePaths(msg, dbPath string) string {
+	type sub struct{ path, name string }
+	var subs []sub
+	add := func(p, name string) {
+		if p != "" && filepath.IsAbs(p) && filepath.Dir(p) != p {
+			subs = append(subs, sub{filepath.Clean(p), name})
+		}
+	}
+	if wd, err := os.Getwd(); err == nil {
+		add(wd, "<cwd>")
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		add(home, "<home>")
+	}
+	for _, v := range []string{"REGISTRY_AUTH_FILE", "DOCKER_CONFIG", "XDG_RUNTIME_DIR"} {
+		add(os.Getenv(v), "<"+v+">")
+	}
+	sort.SliceStable(subs, func(i, j int) bool { return len(subs[i].path) > len(subs[j].path) })
+	// The database path first, whatever its length or form: it was replaced
+	// before any of the others existed, and a relative ASSAY_DB_DIR is still
+	// a path the caller did not type on this command line.
+	if dbPath != "" {
+		msg = strings.ReplaceAll(msg, dbPath, "<database>")
+	}
+	for _, s := range subs {
+		msg = replacePath(msg, s.path, s.name)
 	}
 	return msg
+}
+
+// replacePath replaces each occurrence of the path p in msg that ends where a
+// path component ends, so "/home/al" is not read inside "/home/alice", while
+// a separator, a colon, a space or a sentence's closing period after it is a
+// boundary.
+func replacePath(msg, p, name string) string {
+	var b strings.Builder
+	for {
+		i := strings.Index(msg, p)
+		if i < 0 {
+			b.WriteString(msg)
+			return b.String()
+		}
+		end := i + len(p)
+		b.WriteString(msg[:i])
+		if componentEnds(msg, end) {
+			b.WriteString(name)
+		} else {
+			b.WriteString(p)
+		}
+		msg = msg[end:]
+	}
+}
+
+// componentEnds reports whether a path that stops at msg[end] stops at the
+// end of a path component.
+func componentEnds(msg string, end int) bool {
+	if end == len(msg) || os.IsPathSeparator(msg[end]) {
+		return true
+	}
+	if msg[end] == '.' {
+		return end+1 == len(msg) || !nameByte(msg[end+1])
+	}
+	return !nameByte(msg[end])
+}
+
+// nameByte reports whether c can continue a file name.
+func nameByte(c byte) bool {
+	return c == '-' || c == '_' || c == '.' || c >= 0x80 ||
+		'0' <= c && c <= '9' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
 }
 
 // outputName is the renderer a run asked for, as the sidecar names it.

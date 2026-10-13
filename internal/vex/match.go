@@ -124,6 +124,18 @@ func buildLiveProduct(p Product, warn func(string)) (liveProduct, bool) {
 	if docPurlStr != "" {
 		parsed, err := pkgmeta.ParsePURL(docPurlStr)
 		if err != nil {
+			if isImagePURLType(docPurlStr) {
+				// D121: an image product that cannot be read still names an
+				// image. Dropping it would unscope its statement, and the
+				// bare top-level duplicates beside it (the Docker Hardened
+				// Images shape) would then apply to every image. It scopes
+				// the statement to an image no target matches instead — when
+				// in doubt, skipped, never applied. Its subcomponents go with
+				// it: they could only ever apply inside that image.
+				warn(fmt.Sprintf("vex product purl %q names an image but could not be parsed; its statement applies to no target: %v",
+					docPurlStr, err))
+				return liveProduct{image: &imageRef{}}, true
+			}
 			// Row 33: an unparseable DOC purl must not become a wildcard —
 			// this product contributes no match, ever, rather than falling
 			// back to exact-string comparison against a purl-shaped literal
@@ -236,9 +248,11 @@ func isSourcePURL(p pkgmeta.PURL) bool {
 // no binary carries.
 //
 // The source version is Source.Version, falling back to the binary's own
-// (D8's "empty means same as the binary"). An rpm document writes the epoch
-// as a qualifier and the cataloger folds it into the version, so the two
-// are joined before comparing and epoch is left out of the subset check.
+// (D8's "empty means same as the binary"), except on rpm, where Source.Version
+// is the binary's EVR and the SRPM's own version is read off its file name
+// instead (rpmSourceVersions). An rpm document writes the epoch as a
+// qualifier, so it is joined to the version before comparing and left out of
+// the subset check.
 func sourcePatternMatches(doc pkgmeta.PURL, s subject) (matched, versionless bool) {
 	pkg := s.parsed
 	if doc.Type != pkg.Type || !namespaceEqual(doc.Type, doc.Namespace, pkg.Namespace) {
@@ -249,15 +263,12 @@ func sourcePatternMatches(doc pkgmeta.PURL, s subject) (matched, versionless boo
 	}
 	versionless = doc.Version == ""
 	if !versionless {
-		want := doc.Version
-		if doc.Type == "rpm" {
-			if e := doc.Qualifiers["epoch"]; e != "" && e != "0" {
-				want = e + ":" + want
-			}
-		}
-		got := s.pkg.Source.Version
+		want, got := doc.Version, s.pkg.Source.Version
 		if got == "" {
 			got = s.pkg.Version
+		}
+		if doc.Type == "rpm" {
+			want, got = rpmSourceVersions(doc, s)
 		}
 		if got == "" || want != got {
 			return false, false
@@ -272,6 +283,55 @@ func sourcePatternMatches(doc pkgmeta.PURL, s subject) (matched, versionless boo
 		}
 	}
 	return true, versionless
+}
+
+// rpmSourceVersions is the pair a marked rpm source statement compares: the
+// document's version and the version of the SRPM the binary was built from,
+// each with its epoch.
+//
+// The SRPM's version-release comes from its file name — Package.Upstream as
+// the rpmdb cataloger records SOURCERPM, else the purl's upstream qualifier
+// (an SBOM's package) — and not from Source.Version, which the rpm catalogers
+// set to the binary's own EVR because the matcher compares source-keyed
+// advisories at it. The two differ whenever a binary is versioned apart from
+// its source: device-mapper-libs 1.02.181 is built from lvm2 2.03.14, and
+// Red Hat's statement names lvm2@2.03.14-15.el8_10?arch=src.
+//
+// The file name carries no epoch, so the document's epoch is compared with
+// the binary's, a missing one on either side reading as 0 (syft writes
+// epoch=0 where the rpmdb holds an explicit zero). An epoch the source and
+// binary do not share therefore errs toward reporting. With no SOURCERPM the
+// binary is its own source and its full EVR is compared, as before.
+func rpmSourceVersions(doc pkgmeta.PURL, s subject) (want, got string) {
+	docEpoch := rpmEpoch(doc.Qualifiers["epoch"])
+	srpm := s.pkg.Upstream
+	if srpm == "" {
+		srpm = s.parsed.Qualifiers["upstream"]
+	}
+	if vr := pkgmeta.SourceRPMVersion(srpm); vr != "" {
+		binEpoch := s.parsed.Qualifiers["epoch"]
+		if e, _, ok := strings.Cut(s.pkg.Version, ":"); ok {
+			binEpoch = e
+		}
+		return docEpoch + ":" + doc.Version, rpmEpoch(binEpoch) + ":" + vr
+	}
+	want = doc.Version
+	if docEpoch != "0" {
+		want = docEpoch + ":" + want
+	}
+	got = s.pkg.Source.Version
+	if got == "" {
+		got = s.pkg.Version
+	}
+	return want, got
+}
+
+// rpmEpoch spells an absent epoch as the zero it means.
+func rpmEpoch(e string) string {
+	if e == "" {
+		return "0"
+	}
+	return e
 }
 
 // purlPatternMatches implements the doc-purl-as-pattern rule (D104): type,

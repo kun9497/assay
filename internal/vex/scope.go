@@ -141,12 +141,36 @@ func imageFromPURL(p pkgmeta.PURL) (imageRef, bool) {
 //
 // A reference with no tag is repository-only: go-containerregistry would
 // imply "latest", but a document that wrote no tag said nothing about one.
+//
+// An image named through a transport — "docker://ghcr.io/org/app:1.2", the
+// spelling skopeo and the containers tools use — is read as the reference
+// after it. One that names a file or a layout ("docker-archive:/srv/app.tar",
+// "oci-dir:./layout"), or a transport reference that does not parse, is still
+// an image product and identifies nothing: dropping it would unscope its
+// statement, so it scopes it to no target instead. The same holds for a
+// pkg:docker or pkg:oci purl spelled in a case ParsePURL does not read.
 func imageFromReference(s string) (imageRef, bool) {
+	lower := strings.ToLower(s)
+	for _, tr := range referenceTransports {
+		if strings.HasPrefix(lower, tr) {
+			if r, ok := imageFromReference(s[len(tr):]); ok {
+				return r, true
+			}
+			return imageRef{}, true
+		}
+	}
+	for _, tr := range fileTransports {
+		if strings.HasPrefix(lower, tr) {
+			return imageRef{}, true
+		}
+	}
+	if isImagePURLType(s) {
+		return imageRef{}, true
+	}
 	if s == "" || strings.ContainsAny(s, " \t\n") || strings.Contains(s, "://") ||
 		!strings.ContainsAny(s, "/:@") {
 		return imageRef{}, false
 	}
-	lower := strings.ToLower(s)
 	for _, scheme := range []string{"cpe:", "urn:", "pkg:"} {
 		if strings.HasPrefix(lower, scheme) {
 			return imageRef{}, false
@@ -175,6 +199,22 @@ func imageFromReference(s string) (imageRef, bool) {
 		return imageRef{}, false
 	}
 	return imageRef{repository: repo.Name()}, true
+}
+
+// referenceTransports prefix an image reference; fileTransports name an image
+// by a file or directory, which no scan target's digest or name can be
+// compared against. Both are lower case, compared case-insensitively.
+var (
+	referenceTransports = []string{"docker://", "oci://", "docker-daemon:"}
+	fileTransports      = []string{"docker-archive:", "oci-archive:", "oci-dir:", "oci:"}
+)
+
+// isImagePURLType reports whether s is spelled as a pkg:docker or pkg:oci
+// purl, in any case — true even when it does not parse, which is the point:
+// an unreadable image product must still scope its statement.
+func isImagePURLType(s string) bool {
+	lower := strings.ToLower(s)
+	return strings.HasPrefix(lower, "pkg:docker/") || strings.HasPrefix(lower, "pkg:oci/")
 }
 
 // TargetFromReference builds the registry half of a Target from a reference

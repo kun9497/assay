@@ -192,3 +192,20 @@ func TestOSPackagePURL_RoundTripsThroughResolveDistroPURL(t *testing.T) {
 		}
 	}
 }
+
+// SourceRPMVersion is the version-release half of a SOURCERPM file name, the
+// part SourceRPMName strips; D121 compares a source statement against it.
+func TestSourceRPMVersion(t *testing.T) {
+	for _, tt := range []struct{ in, want string }{
+		{"lvm2-2.03.14-15.el8_10.src.rpm", "2.03.14-15.el8_10"},
+		{"perl-5.26.3-422.el8.src.rpm", "5.26.3-422.el8"},
+		{"python3.11-3.11.9-1.el9.src.rpm", "3.11.9-1.el9"},
+		{"lvm2-2.03.14-15.el8_10", ""},
+		{"lvm2.src.rpm", ""},
+		{"", ""},
+	} {
+		if got := SourceRPMVersion(tt.in); got != tt.want {
+			t.Errorf("SourceRPMVersion(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
