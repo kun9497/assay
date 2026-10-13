@@ -279,6 +279,7 @@ alias로 갖는 경우가 흔합니다. NVD 심각도를 보강 소스로 조인
 | `--fail-on-unknown` | grype에 대응물 없음. assay의 심각도 순서 바깥에 unknown이 있기 때문에 존재함(D17). |
 | `--fail-on-incomplete` | grype에 대응물 없음. 1이 아니라 **2**를 반환함 — 검사되지 않은 패키지는 finding이 아니라 커버리지에 대한 진술이기 때문(D21). |
 | 다중 출처 finding의 심각도 | grype는 매치당 밴드 하나를 보고하지만, assay는 모든 출처의 평가를 보고하고 그중 가장 높은 것으로 게이트를 겁니다(D25). Django 3.2.12, finding 19건으로 측정: grype는 assay의 집계와 19/19 일치하고, assay의 GHSA 평가와도 19/19 일치하지만 PYSEC 평가와는 1/15만 일치합니다. 밴드가 같을 때만 일치로 세었으므로, 어긋난 14건은 grype의 실제 밴드와 PYSEC의 `unknown`을 견준 결과입니다. 이 표본에서는 "grype가 가장 높은 것을 취한다"와 "grype가 GHSA를 따른다"를 구분할 수 없습니다. PYSEC가 어느 것에도 평가를 매기지 않기 때문입니다. 둘을 가르려면 GHSA가 아닌 출처가 더 높게 매긴 사례가 필요합니다. |
+| `ASSAY_REGISTRY_AUTH_{AUTHORITY,USERNAME,PASSWORD,TOKEN}` | grype의 `GRYPE_REGISTRY_AUTH_*` 단일 항목 형태와 같고, 토큰/기본 인증의 상호 배타도 같습니다. 차이는 둘입니다. authority가 없으면 자격증명은 스캔 타깃의 레지스트리에 묶이고, 반쪽만 설정된 자격증명은 익명으로 넘어가지 않고 종료 코드 2입니다. grype의 `INSECURE_*`, TLS 클라이언트 인증서, 다중 항목 목록에는 대응물이 없습니다(D118). |
 
 공유된 이름이 다른 의미를 갖게 될 때마다 이 표에 행을 추가하십시오. **조용히 달라진 플래그가
 이름이 다른 플래그보다 나쁩니다.**
@@ -4599,6 +4600,84 @@ assay가 이 패키지들에 닿지 않으므로 매칭할 수도 없기 때문�
 **빠지는 것.** assay-only 튜플에 대한 상한은 없다(그것은 `maxFindings`다). OS 타입의
 grype-only 튜플에 대한 상한도 없고, 요약 표의 열도 바뀌지 않는다. 상한이 걸리면 D70의 항목을
 다시 검토하며, 상한 자체는 그 공백을 어떻게 메울지에 대해 아무것도 결정하지 않는다.
+
+---
+
+### D118 — 스캔은 레지스트리 자격증명을 읽는다: 환경 변수가 먼저, 그다음 docker와 podman 로그인, 어떤 출력에도 값은 남기지 않는다
+
+**결정.** 스캔 타깃이 레지스트리 참조이면 `assay scan`은 타깃 레지스트리의 자격증명을 하나의
+체인으로 해석하며, 먼저 답하는 쪽이 이깁니다:
+
+1. `ASSAY_REGISTRY_AUTH_USERNAME` + `ASSAY_REGISTRY_AUTH_PASSWORD`, 또는
+   `ASSAY_REGISTRY_AUTH_TOKEN`(베어러 토큰). 선택적으로 `ASSAY_REGISTRY_AUTH_AUTHORITY`로
+   범위를 정합니다. 이름은 grype의 것(`GRYPE_REGISTRY_AUTH_*`, D18)에 assay의 접두사를 붙인
+   것입니다. authority가 없으면 자격증명은 프로세스가 닿을 수 있는 모든 호스트가 아니라 **타깃
+   자신의 레지스트리**에 묶입니다. authority가 있으면 둘을 모두 `name.NewRegistry`에 통과시킨
+   뒤 비교하므로 `docker.io`와 `index.docker.io`는 같은 호스트입니다. 반쪽만 설정된
+   자격증명 — 비밀번호 없는 사용자 이름, 사용자 이름 없는 비밀번호, 또는 둘 중 하나와 함께
+   쓰인 토큰 — 은 변수 이름을 밝힌 종료 코드 2이며, 익명으로 조용히 되돌아가지 않습니다.
+   잘못된 설정이 익명으로 퇴화하면 나중에 변수가 아니라 레지스트리를 가리키는 401로 실패하기
+   때문입니다.
+2. docker 로그인: `go-containerregistry`의 `authn.DefaultKeychain` —
+   `$DOCKER_CONFIG/config.json` 또는 `~/.docker/config.json`이며, `PATH`의
+   `docker-credential-*` 실행 파일을 돌리는 `credHelpers`와 `credsStore`를 포함합니다.
+3. podman 로그인: `$REGISTRY_AUTH_FILE`, 없으면 `$XDG_RUNTIME_DIR/containers/auth.json`을
+   assay가 직접 읽습니다(`auths` 맵이며, 파일은 docker의 형식입니다).
+
+레지스트리의 401 또는 403은 여전히 종료 코드 2이며, 고쳐야 하는 사람을 위해 쓰입니다:
+레지스트리 이름, 자격증명이 제시되었는지와 세 출처 중 어느 것이었는지, 그리고 `docker login`과
+관련 변수를 밝힙니다. 자격증명이 쓰였을 때는 stderr 한 줄이 어느 레지스트리에 어느 출처가
+자격증명을 댔는지 말합니다. 어떤 자격증명 값도 — 사용자 이름, 비밀번호, 토큰, 인코딩된
+`auth` 필드 — stdout, stderr, 어떤 보고서에도 나타나지 않습니다. `db update`와 `db push`는
+기존의 `DefaultKeychain` 해석을 그대로 유지합니다.
+
+**왜.** 스캔 경로는 authenticator를 전혀 넘기지 않았고, 그래서 `docker login`을 한 뒤에도
+프라이빗 이미지를 스캔할 수 없었습니다. 같은 바이너리의 `db update`와 `db push`는 이미 docker
+로그인을 해석하고 있었는데도 말입니다. 우회책은 `docker save`한 뒤 `docker-archive:`로
+스캔하는 것이었고, 이는 스캔하는 호스트에 없을 수 있는 docker 데몬을 요구합니다. D19가
+go-containerregistry를 채택한 이유 중 하나가 자격증명 해석이 딸려 온다는 점이었는데, 스캔
+경로가 거기에 연결된 적이 없었을 뿐입니다.
+
+**왜 이 순서인가, 측정으로.** 2026-10-13에 htpasswd 인증을 켠 일회용 `registry:2`와, 격리된
+`DOCKER_CONFIG`로의 실제 `docker login`을 대상으로 모든 출처가 해석되는 것을 확인했고,
+`DefaultKeychain`의 세 가지 동작이 설계를 정했습니다:
+
+- **오래된 docker 로그인은 그 뒤에 오는 모든 것을 가립니다.** 환경 변수를 두 번째에 두었을
+  때, 같은 호스트에 대한 옛 비밀번호가 든 설정은 올바른 비밀번호가 환경 변수에 있는데도 401로
+  실패했고, 환경 변수를 첫 번째에 두자 성공했습니다. 환경 변수는 작업이 스스로를 위해 밝힌
+  자격증명이므로 앞에 옵니다.
+- **`DefaultKeychain`은 docker 설정이 아예 없을 때만 podman의 파일을 읽습니다.** 다른
+  레지스트리에 대한 `~/.docker/config.json` 하나만 있어도 `REGISTRY_AUTH_FILE`이 무시되었습니다
+  (401). 두 도구가 함께 있는 CI 호스트는 흔한 경우이므로, assay는 라이브러리의 폴백에 기대지
+  않고 podman의 파일을 세 번째 출처로 직접 읽습니다.
+- **작업별 `DOCKER_CONFIG`는 홈 디렉터리로 되돌아가지 않습니다.** root 자신의
+  `~/.docker/config.json`에 유효한 로그인이 있고 `DOCKER_CONFIG`가 빈 디렉터리를 가리키는
+  상태에서 pull은 401이었습니다. 이것은 다중 테넌트 서비스에 필요한 격리이며, assay가 더한
+  것이 아니라 라이브러리의 동작입니다.
+
+틀린 비밀번호는 에러 텍스트에 비밀번호의 흔적 없이 `UNAUTHORIZED: authentication required`를
+냈습니다. 테스트는 이를 믿는 대신 단언합니다.
+
+**자격증명이 닿을 수 있는 곳.** 베어러 챌린지로 답하는 레지스트리는 토큰 realm을 지목하고,
+자격증명은 그곳으로 보내집니다. docker도 같은 일을 하며, 프로토콜이 원래 그렇게 동작합니다.
+go-containerregistry v0.21.7은 realm이 레지스트리 자신의 호스트가 아닌 사설 또는 link-local
+IP 리터럴이면 거부하지만 DNS 이름은 거부하지 않으므로, (1)의 타깃 레지스트리에 대한 결속은
+어느 레지스트리의 자격증명이 제시되는지를 좁힐 뿐 어느 호스트가 그것을 받을 수 있는지를
+좁히지는 않습니다. credential helper는 설정 파일이 지목하는 실행 파일입니다. 설정을 읽는
+것은 그것을 실행하는 데 동의하는 것이며, `docker pull`이 전제하는 것과 같은 동의입니다.
+
+**배포가 맡는 것.** deferred-decisions의 서비스 하드닝 항목은 "고객별 자격증명"을 저장소 밖에
+두며, 이 결정은 그것을 옮기지 않습니다. 한 호스트에서 여러 고객을 위해 스캔하는 서비스는 작업마다
+고유한 `DOCKER_CONFIG`, `REGISTRY_AUTH_FILE`/`XDG_RUNTIME_DIR`, `ASSAY_REGISTRY_AUTH_*`를
+주어야 하며, 그렇지 않으면 한 고객의 로그인이 다른 고객의 이미지에 대해 답하게 됩니다. assay가
+더하는 것은 그 격리를 이제 검증할 수 있다는 점입니다 — stderr의 출처 줄이 어느 로그인이
+쓰였는지 말해 줍니다.
+
+**빠지는 것.** 평문 HTTP와 TLS 검증 덮어쓰기(grype의 `GRYPE_REGISTRY_INSECURE_*`), 클라이언트
+인증서, 다중 항목 자격증명 목록, 클라우드 SDK keychain(ECR, GCR, ACR)입니다. credential helper가
+이미 각 클라우드에 닿으며, SDK는 helper가 하는 일을 위해 여섯 번째 직접 의존성이 될 것이기
+때문입니다. 에어갭 경로는 건드리지 않습니다 — SBOM, `docker-archive:`, `oci-dir:` 스캔은 이
+체인을 전혀 참조하지 않습니다. 스키마 변경은 없습니다.
 
 ---
 

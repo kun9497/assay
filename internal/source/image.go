@@ -91,15 +91,47 @@ func classify(ref string) kind {
 // flag there is still no deadline — go-containerregistry's default transport
 // has no overall one either, so a black-holed registry can hang a scan that
 // did not ask for a limit.
+//
+// A registry pull offers credentials from D118's chain — ASSAY_REGISTRY_AUTH_*,
+// then the docker login, then the podman login — and the returned Image says
+// which answered. A 401 or 403 comes back as *AuthError.
 func Open(ctx context.Context, ref string) (*Image, error) {
-	img, err := load(ctx, ref)
+	img, creds, err := load(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
-	return fromV1(img)
+	out, err := fromV1(img)
+	if err != nil {
+		if creds.kc != nil {
+			err = asAuthError(err, ref, creds.kc)
+		}
+		return nil, err
+	}
+	if creds.kc != nil {
+		out.Credentials = Credentials{Registry: creds.kc.target, Source: creds.kc.source()}
+		// A layer blob is fetched when the cataloger opens the layer, after
+		// this function has returned, and a registry can refuse that request
+		// as well (D118).
+		for i := range out.Layers {
+			open := out.Layers[i].Open
+			out.Layers[i].Open = func() (io.ReadCloser, error) {
+				rc, err := open()
+				if err != nil {
+					return nil, asAuthError(err, ref, creds.kc)
+				}
+				return rc, nil
+			}
+		}
+	}
+	return out, nil
 }
 
-func load(ctx context.Context, ref string) (v1.Image, error) {
+// loaded carries the registry path's keychain out of load so Open can report
+// which source answered. It is nil for a tarball or a layout: those never
+// build a keychain, so they cannot consult one (D14, D118).
+type loaded struct{ kc *keychain }
+
+func load(ctx context.Context, ref string) (v1.Image, loaded, error) {
 	// Errors below name `ref`, not the path trimmed out of it: a user who typed
 	// docker-archive:x.tar should see that back, not a bare x.tar they never
 	// wrote.
@@ -108,22 +140,29 @@ func load(ctx context.Context, ref string) (v1.Image, error) {
 		p := strings.TrimPrefix(ref, schemeTarball)
 		img, err := tarball.ImageFromPath(p, nil)
 		if err != nil {
-			return nil, fmt.Errorf("read docker archive %s: %w", ref, err)
+			return nil, loaded{}, fmt.Errorf("read docker archive %s: %w", ref, err)
 		}
-		return img, nil
+		return img, loaded{}, nil
 
 	case kindLayout:
 		p := strings.TrimPrefix(ref, schemeLayout)
 		idx, err := layout.ImageIndexFromPath(p)
 		if err != nil {
-			return nil, fmt.Errorf("read oci layout %s: %w", ref, err)
+			return nil, loaded{}, fmt.Errorf("read oci layout %s: %w", ref, err)
 		}
-		return imageFromIndex(v1Index{idx}, p)
+		img, err := imageFromIndex(v1Index{idx}, p)
+		return img, loaded{}, err
 
 	default:
 		r, err := name.ParseReference(ref)
 		if err != nil {
-			return nil, fmt.Errorf("parse reference %q: %w", ref, err)
+			return nil, loaded{}, fmt.Errorf("parse reference %q: %w", ref, err)
+		}
+		// Built before any request, so a half-set ASSAY_REGISTRY_AUTH_*
+		// stops the scan without the registry ever being contacted (D118).
+		kc, err := newKeychain(r)
+		if err != nil {
+			return nil, loaded{}, fmt.Errorf("pull %s: %w", ref, err)
 		}
 		// remote.Image defaults to linux/amd64 and never consults the host, so
 		// on an arm64 machine `assay scan alpine:3.19` would quietly scan the
@@ -132,11 +171,15 @@ func load(ctx context.Context, ref string) (v1.Image, error) {
 		img, err := remote.Image(r,
 			remote.WithContext(ctx),
 			remote.WithPlatform(hostPlatform()),
+			remote.WithAuthFromKeychain(kc),
 		)
 		if err != nil {
-			return nil, fmt.Errorf("pull %s: %w", ref, err)
+			if ae := asAuthError(err, ref, kc); ae != err {
+				return nil, loaded{}, ae
+			}
+			return nil, loaded{}, fmt.Errorf("pull %s: %w", ref, err)
 		}
-		return img, nil
+		return img, loaded{kc: kc}, nil
 	}
 }
 

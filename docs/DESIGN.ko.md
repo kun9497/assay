@@ -683,6 +683,11 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] SLES LTSS를 mainline-wins 동점 처리로 접음 (D91) — post-EOL fix가 같은 키
       아래서 드러남(bci-base finding 121→286건, curl이 진짜 FIXED IN을 보여줌),
       가려졌던 쌍둥이 385,621건을 버려서 셈
+- [x] 스캔은 레지스트리 자격증명을 읽는다 (D118) — `ASSAY_REGISTRY_AUTH_*`(authority를
+      지정하지 않으면 타깃의 레지스트리에 묶이며, 반쪽만 설정된 자격증명은 종료 코드 2),
+      그다음 docker 로그인(`DefaultKeychain`, helper 포함), 그다음 podman의 `auth.json`을
+      직접 읽음; 401/403은 레지스트리와 시도한 출처를 밝힘; stderr 한 줄이 쓰인 출처를
+      밝힘; 어떤 출력에도 값은 없음.
 - [x] 차등은 애플리케이션 패키지 타입의 grype-only 튜플에 상한을 둔다 (D117) —
       타깃별 `maxGrypeOnlyApp`, grype의 `artifact.type`을 키로 하며(`apk`, `deb`, `rpm`,
       `alpm`, 그리고 이미지 스캔이 인벤토리하는 `bitnami`를 뺀 모든 타입), 이름 없는 타입은 0; ceiling이므로 야간 게이트는 `info:`로

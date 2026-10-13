@@ -30,6 +30,11 @@ type Layer struct {
 type Image struct {
 	Layers []Layer
 
+	// Credentials is which of D118's sources answered for a registry pull.
+	// source has no stderr, so it reports here and scancmd prints the line;
+	// the zero value — no registry, no source — is every other target.
+	Credentials Credentials
+
 	// read is the bytes Files, FilesUnder, FilesNamed and FilesMatching have
 	// copied out of this image so far, against MaxScanBytes (D112).
 	//

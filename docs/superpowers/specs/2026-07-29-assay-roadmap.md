@@ -295,6 +295,7 @@ Where assay differs, the difference is documented rather than left to be discove
 | `--fail-on-unknown` | No grype equivalent. Exists because unknown is not in assay's severity ordering (D17). |
 | `--fail-on-incomplete` | No grype equivalent. Exits **2**, not 1: a package that was never checked is a statement about coverage, not a finding (D21). |
 | severity of a multi-source finding | grype reports one band per match; assay reports every source's and gates on the highest (D25). Measured on Django 3.2.12, 19 findings: grype agrees with assay's aggregate on 19/19 — and with assay's GHSA rating on 19/19, but with its PYSEC rating on 1/15 — counting a band as agreeing only when it is equal, so the 14 misses are grype's real band against PYSEC's `unknown`. On this sample "grype takes the highest" and "grype follows GHSA" cannot be told apart, because PYSEC rates none of them. Separating the two needs a case where a non-GHSA source rates higher. |
+| `ASSAY_REGISTRY_AUTH_{AUTHORITY,USERNAME,PASSWORD,TOKEN}` | grype's `GRYPE_REGISTRY_AUTH_*` single-entry form, same token/basic exclusivity. Two differences: an absent authority binds the credential to the scan target's registry, and a half-set credential is exit 2 rather than anonymous. grype's `INSECURE_*`, TLS client certificates and multi-entry list have no counterpart (D118). |
 
 Add a row here whenever a shared name gains different semantics. A silently divergent flag
 is worse than a differently named one.
@@ -4735,6 +4736,85 @@ judging, because assay never reaches these packages to match them.
 OS-type grype-only tuples, and no change to the summary table's columns. When the
 ceiling trips, D70's entry is revisited; the ceiling itself decides nothing about how the
 gap is closed.
+
+---
+
+### D118 — A scan reads registry credentials: the environment first, then the docker and podman logins, never the value in any output
+
+**Decision.** When the scan target is a registry reference, `assay scan` resolves
+credentials for the target's registry through one chain, first answer wins:
+
+1. `ASSAY_REGISTRY_AUTH_USERNAME` + `ASSAY_REGISTRY_AUTH_PASSWORD`, or
+   `ASSAY_REGISTRY_AUTH_TOKEN` (a bearer token), optionally scoped by
+   `ASSAY_REGISTRY_AUTH_AUTHORITY`. The names are grype's (`GRYPE_REGISTRY_AUTH_*`, D18)
+   with assay's prefix. Without an authority the credential is bound to **the target's own
+   registry**, not to every host the process might reach; with one, the two are compared
+   after both go through `name.NewRegistry`, so `docker.io` and `index.docker.io` are one
+   host. A half-set credential — a username without a password, a password without a
+   username, or a token together with either — is exit 2 naming the variables, never a
+   silent fall back to anonymous: a misconfiguration that degrades to anonymous fails later
+   as a 401 that points at the registry rather than at the variable.
+2. The docker login: `go-containerregistry`'s `authn.DefaultKeychain` —
+   `$DOCKER_CONFIG/config.json` or `~/.docker/config.json`, including `credHelpers` and
+   `credsStore`, which run the named `docker-credential-*` executable from `PATH`.
+3. The podman login: `$REGISTRY_AUTH_FILE`, else `$XDG_RUNTIME_DIR/containers/auth.json`,
+   read by assay itself (its `auths` map; the file is docker's format).
+
+A 401 or 403 from the registry is still exit 2, worded for the person who has to fix it:
+it names the registry, says whether credentials were offered and from which of the three
+sources, and names `docker login` and the variables. When credentials were used, one stderr
+line says which source supplied them for which registry. No credential value — username,
+password, token or the encoded `auth` field — appears on stdout, stderr or in any report.
+`db update` and `db push` keep their existing `DefaultKeychain` resolution unchanged.
+
+**Why.** The scan path passed no authenticator at all, so a private image could not be
+scanned even after `docker login` — while `db update` and `db push`, in the same binary,
+already resolved the docker login. The workaround was `docker save` and a `docker-archive:`
+scan, which needs a docker daemon the scanning host may not have. D19 took
+go-containerregistry partly because credential resolution came with it; the scan path was
+simply never connected to it.
+
+**Why this order, measured.** On 2026-10-13, against a throwaway `registry:2` with htpasswd
+auth and a real `docker login` into an isolated `DOCKER_CONFIG`, every source resolved and
+three behaviours of `DefaultKeychain` set the design:
+
+- **A stale docker login shadows anything after it.** With the environment second, a
+  config carrying an old password for the same host failed 401 while the right password
+  sat in the environment; with the environment first it succeeded. The environment is the
+  credential a job states for itself, so it goes first.
+- **`DefaultKeychain` reads podman's file only when no docker config exists at all.** A
+  `~/.docker/config.json` for any other registry was enough for `REGISTRY_AUTH_FILE` to be
+  ignored (401). A CI host with both tools is the ordinary case, so assay reads podman's file
+  itself as the third source rather than relying on the library's fallback.
+- **A per-job `DOCKER_CONFIG` does not fall back to the home directory.** With root's own
+  `~/.docker/config.json` holding a valid login and `DOCKER_CONFIG` pointed at an empty
+  directory, the pull was 401. That is the isolation a multi-tenant service needs, and it
+  is the library's behaviour, not something assay adds.
+
+A wrong password produced `UNAUTHORIZED: authentication required` with no trace of the
+password in the error text; the test asserts that rather than trusting it.
+
+**What a credential can reach.** A registry that answers with a bearer challenge names a
+token realm, and the credential is sent there — docker does the same, and that is how the
+protocol works. go-containerregistry v0.21.7 refuses a realm that is a private or link-local
+IP literal unless it is the registry's own host, but not a DNS name, so the binding to the
+target's registry in (1) narrows which registry's credential is offered, not which hosts can
+receive it. A credential helper is an executable named by the config file; reading the
+config is consent to run it, the same consent `docker pull` assumes.
+
+**What stays with the deployment.** Deferred-decisions' service-hardening entry keeps
+"per-customer credentials" outside the repository, and this decision does not move it: a
+service that scans for several customers on one host must give each job its own
+`DOCKER_CONFIG`, `REGISTRY_AUTH_FILE`/`XDG_RUNTIME_DIR` and `ASSAY_REGISTRY_AUTH_*`, or
+one customer's login answers for another's image. What assay adds is that the isolation is
+now testable — the source line on stderr says which login was used.
+
+**What stays out.** Plain-HTTP and TLS-verification overrides (grype's
+`GRYPE_REGISTRY_INSECURE_*`), client certificates, a multi-entry credential list, and cloud
+SDK keychains (ECR, GCR, ACR): a credential helper already reaches each cloud, and an SDK
+would be a sixth direct dependency for what a helper does. The air-gapped path is
+untouched — an SBOM, `docker-archive:` or `oci-dir:` scan never consults the chain. No
+schema change.
 
 ---
 
