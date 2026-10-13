@@ -388,11 +388,8 @@ func (e *AuthError) Unwrap() error { return e.Err }
 // mid-scan or a registry that refuses blob pulls by policy answers there, so
 // Open wraps each registry layer's opener too.
 func asAuthError(err error, ref string, kc *keychain) error {
-	var te *transport.Error
-	if !errors.As(err, &te) {
-		return err
-	}
-	if te.StatusCode != http.StatusUnauthorized && te.StatusCode != http.StatusForbidden {
+	te := refusal(err)
+	if te == nil {
 		return err
 	}
 	ae := &AuthError{Ref: ref, Registry: kc.target, Status: te.StatusCode, Source: kc.source(), Err: err}
@@ -400,4 +397,19 @@ func asAuthError(err error, ref string, kc *keychain) error {
 		ae.EnvScopedTo = kc.envScope()
 	}
 	return ae
+}
+
+// refusal returns the registry's 401 or 403 inside err, or nil when err is
+// anything else. It is the one test of "the registry refused", shared by
+// asAuthError and by the index walk, which must propagate a refusal it would
+// otherwise skip as an unreadable entry (D118, D119).
+func refusal(err error) *transport.Error {
+	var te *transport.Error
+	if !errors.As(err, &te) {
+		return nil
+	}
+	if te.StatusCode != http.StatusUnauthorized && te.StatusCode != http.StatusForbidden {
+		return nil
+	}
+	return te
 }

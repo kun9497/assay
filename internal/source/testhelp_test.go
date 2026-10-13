@@ -52,9 +52,13 @@ type fakeIndex struct {
 	noPlatform []string             // descriptors with no platform: hex -> config os/arch
 	children   map[string]fakeIndex // hex -> nested index
 	images     map[string]v1.Image  // hex -> image, for the no-platform path
+	imageErrs  map[string]error     // hex -> what Image answers instead
 }
 
 func (f fakeIndex) Image(h v1.Hash) (v1.Image, error) {
+	if err, ok := f.imageErrs[h.Hex]; ok {
+		return nil, err
+	}
 	if img, ok := f.images[h.Hex]; ok {
 		return img, nil
 	}
@@ -92,12 +96,16 @@ func (f fakeIndex) IndexManifest() (*v1.IndexManifest, error) {
 }
 
 // configImage answers ConfigFile, which is how a descriptor with no platform
-// still reveals what it is.
+// still reveals what it is — or fails to, when err is set.
 type configImage struct {
 	v1.Image
-	os, arch string
+	os, arch, variant string
+	err               error
 }
 
 func (c configImage) ConfigFile() (*v1.ConfigFile, error) {
-	return &v1.ConfigFile{OS: c.os, Architecture: c.arch}, nil
+	if c.err != nil {
+		return nil, c.err
+	}
+	return &v1.ConfigFile{OS: c.os, Architecture: c.arch, Variant: c.variant}, nil
 }

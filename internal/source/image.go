@@ -356,7 +356,8 @@ func (w v1Index) ImageIndex(h v1.Hash) (indexReader, error) {
 // to the first entry.
 func imageFromIndex(idx indexReader, what string, parent v1.Hash, want v1.Platform, explicit bool) (v1.Image, PlatformChoice, error) {
 	var cands []candidate
-	if err := collectCandidates(idx, what, parent, 0, &cands); err != nil {
+	var skipped []unreadable
+	if err := collectCandidates(idx, what, parent, 0, &cands, &skipped); err != nil {
 		return nil, PlatformChoice{}, err
 	}
 	plats := make([]v1.Platform, len(cands))
@@ -366,6 +367,13 @@ func imageFromIndex(idx indexReader, what string, parent v1.Hash, want v1.Platfo
 	i, match, ok := choosePlatform(want, plats)
 	if !ok {
 		if len(cands) == 0 {
+			if len(skipped) > 0 {
+				// Nothing was offered because nothing could be read: that read
+				// failure is the cause, not a platform miss, so it is what the
+				// error names.
+				return nil, PlatformChoice{}, fmt.Errorf("%s offers no readable image: entry %s: %w",
+					what, skipped[0].digest, skipped[0].err)
+			}
 			return nil, PlatformChoice{}, &platformError{fmt.Sprintf(
 				"%s contains no image for any platform; wanted %s", what, PlatformString(want))}
 		}
@@ -374,7 +382,8 @@ func imageFromIndex(idx indexReader, what string, parent v1.Hash, want v1.Platfo
 			hint = "; pass --platform to scan one of them"
 		}
 		return nil, PlatformChoice{}, &platformError{fmt.Sprintf(
-			"%s has no %s image; it offers %s%s", what, PlatformString(want), offeredList(plats), hint)}
+			"%s has no %s image; it offers %s%s%s", what, PlatformString(want), offeredList(plats),
+			skippedNote(skipped), hint)}
 	}
 	c := cands[i]
 	img := c.img
@@ -409,6 +418,26 @@ type candidate struct {
 	img v1.Image
 }
 
+// unreadable is a platform-less index entry whose image or config could not
+// be read, and so was skipped rather than offered.
+type unreadable struct {
+	digest v1.Hash
+	err    error
+}
+
+// skippedNote tells a miss that entries were skipped, so "it offers X" is not
+// read as the index's whole contents when part of it could not be read.
+func skippedNote(skipped []unreadable) string {
+	switch len(skipped) {
+	case 0:
+		return ""
+	case 1:
+		return fmt.Sprintf(" (entry %s could not be read: %v)", skipped[0].digest, skipped[0].err)
+	}
+	return fmt.Sprintf(" (%d entries could not be read; the first, %s: %v)",
+		len(skipped), skipped[0].digest, skipped[0].err)
+}
+
 // maxIndexDepth bounds nesting. `skopeo copy --all` writes an index whose
 // children are themselves indexes, and a malformed one could cycle.
 const maxIndexDepth = 4
@@ -423,7 +452,7 @@ const maxIndexDepth = 4
 // whose descriptor carries only a ref-name annotation. The first is walked;
 // the second is judged by its image's config. Both used to fail with "it
 // offers " and an empty list — an error naming nothing.
-func collectCandidates(idx indexReader, what string, parent v1.Hash, depth int, out *[]candidate) error {
+func collectCandidates(idx indexReader, what string, parent v1.Hash, depth int, out *[]candidate, skipped *[]unreadable) error {
 	if depth >= maxIndexDepth {
 		return fmt.Errorf("%s nests indexes more than %d deep", what, maxIndexDepth)
 	}
@@ -437,7 +466,7 @@ func collectCandidates(idx indexReader, what string, parent v1.Hash, depth int, 
 			if err != nil {
 				return err
 			}
-			if err := collectCandidates(child, what, d.Digest, depth+1, out); err != nil {
+			if err := collectCandidates(child, what, d.Digest, depth+1, out, skipped); err != nil {
 				return err
 			}
 			continue
@@ -447,17 +476,31 @@ func collectCandidates(idx indexReader, what string, parent v1.Hash, depth int, 
 		if p == nil || p.OS == "" || p.Architecture == "" {
 			// No platform on the descriptor. The image's own config still
 			// carries one, so ask it rather than discarding the entry — a
-			// layout written by layout.Write lands here. An error reading it
-			// is returned, not skipped: on a registry it may be a refusal
-			// (D118), and skipping it would turn that into a "has no image"
-			// miss naming the wrong problem.
+			// layout written by layout.Write lands here.
+			//
+			// A registry's 401 or 403 reading it is returned: skipping it
+			// would turn a refusal into a "has no image" miss naming the wrong
+			// problem (D118). Any other read failure — a blob missing from a
+			// partial layout copy, a config that is not JSON, an artifact with
+			// no image config — skips the entry, as it did before D119: the
+			// whole tree is now walked before choosing, so returning it would
+			// let one broken entry sink an index that holds the exact match.
+			// The skip is recorded so a miss still says it happened.
 			img, err := idx.Image(d.Digest)
 			if err != nil {
-				return err
+				if refusal(err) != nil {
+					return err
+				}
+				*skipped = append(*skipped, unreadable{d.Digest, err})
+				continue
 			}
 			cf, err := img.ConfigFile()
 			if err != nil {
-				return err
+				if refusal(err) != nil {
+					return err
+				}
+				*skipped = append(*skipped, unreadable{d.Digest, err})
+				continue
 			}
 			if cf.OS == "" || cf.Architecture == "" || cf.OS == "unknown" || cf.Architecture == "unknown" {
 				continue
