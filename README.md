@@ -77,6 +77,13 @@ exit 2, and values are never printed. `--platform os/arch[/variant]` picks a pla
 is this host's, chosen as the container runtime would, and the scanned platform and digest are
 printed on stderr and recorded in the JSON `image` object.
 
+**What produced a verdict.** Every JSON and SARIF report carries a `provenance` object — the
+assay build, the database (and the published artifact digest `db update` pulled), the target's
+content hash, every gate flag, and each ignore rule and VEX document with its hash and how
+many findings it matched — with no timestamp, so the same inputs still produce the same
+bytes. `--provenance <path>` also writes a sidecar with the run's start and finish time, exit
+code and the report's sha256, even when the scan ends in exit 2 before any report exists.
+
 ## What it covers
 
 - **Every OS family grype ships a provider for** — Alpine, Debian, Ubuntu, RHEL, Rocky,
@@ -100,7 +107,8 @@ printed on stderr and recorded in the JSON `image` object.
   and end-of-life status. KISA's Korean prose is available locally via `assay db build`.
 - **Waivers that stay visible** — an `.assay.yaml` ignore file suppresses a finding you
   have accepted (mandatory reason, optional expiry), and `--vex` applies a producer's
-  OpenVEX document the same way. Suppressed findings never trip the gate but are counted
+  OpenVEX document the same way — including to an image's OS packages, and a statement that
+  names an image applies only to that image. Suppressed findings never trip the gate but are counted
   and shown in every output format, each labelled with where its waiver came from, and
   GitHub code scanning sees them as dismissed, not gone. Usage in
   [docs/integrations.md](docs/integrations.md#waiving-findings-you-have-accepted).
