@@ -18,6 +18,8 @@
 package vex
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -40,7 +42,10 @@ const (
 // the document carried a parseable one at all, since a document that means
 // "no timestamp" must not be confused with one meaning "timestamp 0001-01-01".
 type Document struct {
-	Path         string
+	Path string
+	// SHA256 is the hash of the bytes Load parsed (D120): two documents with
+	// one file name, one suppressing and one not, are told apart by it.
+	SHA256       string
 	ID           string
 	Author       string
 	Timestamp    time.Time
@@ -165,7 +170,8 @@ func Load(path string) (*Document, error) {
 		return nil, fmt.Errorf("parse vex document %s: %w", path, err)
 	}
 
-	doc := &Document{Path: path, ID: raw.ID, Author: raw.Author}
+	sum := sha256.Sum256(data)
+	doc := &Document{Path: path, SHA256: hex.EncodeToString(sum[:]), ID: raw.ID, Author: raw.Author}
 	if ts, ok := parseTimestamp(raw.Timestamp); ok {
 		doc.Timestamp, doc.HasTimestamp = ts, true
 	}

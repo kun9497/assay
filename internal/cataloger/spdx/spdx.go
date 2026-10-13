@@ -24,9 +24,12 @@ type document struct {
 	// SPDXID is the document's OWN identifier, almost always
 	// "SPDXRef-DOCUMENT" but read rather than assumed: it is what the
 	// DESCRIBES relationship below is anchored to.
-	SPDXID        string         `json:"SPDXID"`
-	Packages      []pkg          `json:"packages"`
-	Relationships []relationship `json:"relationships"`
+	SPDXID string `json:"SPDXID"`
+	// DocumentNamespace is the document's own URI identity, carried for the
+	// scan's provenance record (D120).
+	DocumentNamespace string         `json:"documentNamespace"`
+	Packages          []pkg          `json:"packages"`
+	Relationships     []relationship `json:"relationships"`
 }
 
 type pkg struct {
@@ -91,6 +94,7 @@ func Parse(r io.Reader) (pkgmeta.Target, cyclonedx.Stats, error) {
 		}
 		catalogPackage(p, &target, &stats)
 	}
+	stats.DocumentNamespace = doc.DocumentNamespace
 	return target, stats, nil
 }
 

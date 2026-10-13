@@ -11,7 +11,11 @@
 package dirscan
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -78,6 +82,12 @@ type Read struct {
 	Path       string
 	Kind       Kind
 	Components int
+	// SHA256 is the manifest file's content hash, for the scan's provenance
+	// record (D120): a lockfile changed in place produces different findings,
+	// and this is what tells the two runs' inputs apart. Empty only when the
+	// file could not be read a second time to hash it — it was parsed, so
+	// that is a file that changed or vanished in between.
+	SHA256 string
 }
 
 // Manifests is what a scan read and what it did not. The two travel together
@@ -172,7 +182,8 @@ func Parse(root string) (pkgmeta.Target, cyclonedx.Stats, Manifests, error) {
 			continue
 		}
 		found.Unusable = append(found.Unusable, un...)
-		found.Read = append(found.Read, Read{Path: m.Path, Kind: m.Kind, Components: s.Components})
+		found.Read = append(found.Read, Read{Path: m.Path, Kind: m.Kind, Components: s.Components,
+			SHA256: fileSHA256(filepath.Join(root, filepath.FromSlash(m.Path)))})
 		target.Packages = append(target.Packages, pkgs...)
 		addStats(&stats, s)
 	}
@@ -468,4 +479,23 @@ func locationPath(p pkgmeta.Package) string {
 		return ""
 	}
 	return p.Locations[0].Path
+}
+
+// fileSHA256 hashes one manifest by streaming it, so a large jar is never held
+// in memory twice. A second read rather than a hash of the bytes the parser
+// read: thirteen parsers each open their own file, and threading a hash
+// through every one of them would change every signature for one field. The
+// manifest was just parsed, and is under D112's per-file limit, so the second
+// read is bounded by the first. "" when it cannot be read again.
+func fileSHA256(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }

@@ -22,11 +22,18 @@ type Stats struct {
 	SkippedNoPURL               int
 	SkippedNoVersion            int
 	SkippedUnsupportedEcosystem int
+	// SerialNumber (CycloneDX) and DocumentNamespace (SPDX) are the SBOM's
+	// own identity as its producer wrote it, carried for the scan's
+	// provenance record (D120). Not counts: every other cataloger leaves both
+	// empty, and nothing sums them.
+	SerialNumber      string
+	DocumentNamespace string
 }
 
 type bom struct {
-	BOMFormat  string      `json:"bomFormat"`
-	Components []component `json:"components"`
+	BOMFormat    string      `json:"bomFormat"`
+	SerialNumber string      `json:"serialNumber"`
+	Components   []component `json:"components"`
 }
 
 type component struct {
@@ -82,6 +89,7 @@ func Parse(r io.Reader) (pkgmeta.Target, Stats, error) {
 	}
 
 	catalog(doc.Components, distroEcosystem, &target, &stats)
+	stats.SerialNumber = doc.SerialNumber
 	return target, stats, nil
 }
 

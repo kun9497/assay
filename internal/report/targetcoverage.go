@@ -112,6 +112,10 @@ type Coverage struct {
 	// Only the JSON renders it; the table and SARIF leave it to the stderr
 	// record line scancmd prints.
 	Image *ImageRecord
+	// Provenance is what produced the verdict (D120), carried here for the
+	// same reason Image is: a fact about the scan that every renderer reads
+	// from one place. The JSON and SARIF render it; the table does not.
+	Provenance *Provenance
 }
 
 // CoverageOf builds one record per ecosystem key in t's inventory, sorted by

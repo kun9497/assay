@@ -202,12 +202,18 @@ func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 
 	run := sarifRun{
 		Tool: sarifTool{Driver: sarifDriver{
-			Name:           "assay",
-			Version:        version,
-			InformationURI: "https://github.com/kun9497/assay",
-			Rules:          rules,
+			Name:            "assay",
+			Version:         version,
+			SemanticVersion: SemanticVersion(version),
+			InformationURI:  "https://github.com/kun9497/assay",
+			Rules:           rules,
 		}},
 		Results: results,
+	}
+	// D120. The same deterministic object the JSON carries, in the run's own
+	// property bag; no timestamp, so the document stays byte-stable too.
+	if cov.Provenance != nil {
+		run.Properties = map[string]any{"provenance": cov.Provenance}
 	}
 	// Emitted even when nothing was skipped, carrying the counts. A consumer
 	// that reads invocations gets the same summary the table prints, and the
@@ -587,6 +593,7 @@ type sarifRun struct {
 	Tool        sarifTool         `json:"tool"`
 	Results     []sarifResult     `json:"results"`
 	Invocations []sarifInvocation `json:"invocations,omitempty"`
+	Properties  map[string]any    `json:"properties,omitempty"`
 }
 
 type sarifTool struct {
@@ -594,10 +601,11 @@ type sarifTool struct {
 }
 
 type sarifDriver struct {
-	Name           string      `json:"name"`
-	Version        string      `json:"version,omitempty"`
-	InformationURI string      `json:"informationUri"`
-	Rules          []sarifRule `json:"rules"`
+	Name            string      `json:"name"`
+	Version         string      `json:"version,omitempty"`
+	SemanticVersion string      `json:"semanticVersion,omitempty"`
+	InformationURI  string      `json:"informationUri"`
+	Rules           []sarifRule `json:"rules"`
 }
 
 type sarifRule struct {

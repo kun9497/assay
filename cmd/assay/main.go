@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -151,6 +152,15 @@ Scan flags (any order, before or after the target):
                         statement marked arch=src or arch=source applies to
                         every binary built from it. One stderr line counts
                         the statements that matched no finding (D121).
+  --provenance <path>   Write a record of what produced this run's verdict:
+                        the same provenance object the JSON report carries
+                        (tool, database and the artifact it was pulled as,
+                        the target's content hash, every gate, every ignore
+                        rule and VEX document with its hash and counts),
+                        plus start and finish time, the exit code, the error
+                        of an exit 2 and the sha256 of the report. Written on
+                        every exit, a refusal included; failing to write it
+                        is exit 2 (D120).
   --explain <id>        Print one advisory's full Evidence (its own ID, or
                         any alias/upstream identifier) instead of the report
 
@@ -395,9 +405,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return exitError
 		}
 		if target == "" {
-			fmt.Fprintln(stderr, "error: scan requires a target")
+			// After argument parsing, so the sidecar is written (D120).
+			code := scancmd.Refuse("", withBuild(opts), errors.New("scan requires a target"), stderr)
 			fmt.Fprint(stderr, usage)
-			return exitError
+			return code
 		}
 		// D107. Decided here, not in parseScanArgs: this is the one place in
 		// the CLI that has stdout as the real io.Writer Run will render into,
@@ -1157,15 +1168,22 @@ func resolvePushRef(args []string, stderr io.Writer) (ref string, force bool, ok
 // scan is the pipeline entry point: parse the target into an inventory, match
 // it against the local database, and report.
 func scan(ctx context.Context, target string, opts scancmd.Options, stdout, stderr io.Writer) int {
+	opts = withBuild(opts)
 	path, err := store.DefaultPath()
 	if err != nil {
-		fmt.Fprintf(stderr, "error: locate database: %v\n", err)
-		return exitError
+		// Refuse rather than a bare return: --provenance is owed a record on
+		// every exit after argument parsing (D120), this one included.
+		return scancmd.Refuse(target, opts, fmt.Errorf("locate database: %w", err), stderr)
 	}
-	// The SARIF driver reports which build produced the document (D55);
-	// nothing else reads it.
-	opts.Version = version
 	return scancmd.Run(ctx, path, target, opts, stdout, stderr)
+}
+
+// withBuild stamps the ldflags values onto opts: the SARIF driver reports
+// which build produced the document (D55), and the provenance record names
+// the tool by all three (D120).
+func withBuild(opts scancmd.Options) scancmd.Options {
+	opts.Version, opts.Commit, opts.BuildDate = version, commit, date
+	return opts
 }
 
 // parseScanArgs splits a scan command's arguments into the target and the
@@ -1364,6 +1382,23 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 		case strings.HasPrefix(a, "--vex="):
 			opts.VEXFiles = append(opts.VEXFiles, strings.TrimPrefix(a, "--vex="))
 
+		// D120. Both spellings, and once only: two sidecar paths are two
+		// answers to one question, and writing only the last would leave the
+		// first one's reader with no record and no error.
+		case a == "--provenance":
+			i++
+			if i >= len(args) {
+				return "", scancmd.Options{}, fmt.Errorf("--provenance requires a value")
+			}
+			if err := setProvenance(&opts, args[i]); err != nil {
+				return "", scancmd.Options{}, err
+			}
+
+		case strings.HasPrefix(a, "--provenance="):
+			if err := setProvenance(&opts, strings.TrimPrefix(a, "--provenance=")); err != nil {
+				return "", scancmd.Options{}, err
+			}
+
 		case a == "--explain":
 			i++
 			if i >= len(args) {
@@ -1457,6 +1492,19 @@ func setPlatform(opts *scancmd.Options, v string) error {
 		return err
 	}
 	opts.Platform = v
+	return nil
+}
+
+// setProvenance stores --provenance's path on opts (D120), refusing an empty
+// path and a second --provenance.
+func setProvenance(opts *scancmd.Options, v string) error {
+	if opts.ProvenanceFile != "" {
+		return fmt.Errorf("--provenance given more than once (%q, then %q): a scan writes one record", opts.ProvenanceFile, v)
+	}
+	if v == "" {
+		return fmt.Errorf("--provenance requires a non-empty path")
+	}
+	opts.ProvenanceFile = v
 	return nil
 }
 

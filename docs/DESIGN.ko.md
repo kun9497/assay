@@ -688,7 +688,7 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       문장은 그 문장의 모든 product에 범위를 지정; `arch=src`/`arch=source` 소스 문장은 그
       소스의 모든 바이너리에 도달; Ubuntu는 `distro=<codename>`에도 응답; stderr 한 줄이
       아무것과도 매칭되지 않은 문장 수를 셈.
-- [ ] 스캔은 자기 판정을 만든 것이 무엇인지 기록한다 (D120) — JSON(스키마 14)과 SARIF의
+- [x] 스캔은 자기 판정을 만든 것이 무엇인지 기록한다 (D120) — JSON(스키마 14)과 SARIF의
       결정적 `provenance` 객체: 도구, 데이터베이스(`<dbPath>.artifact.json`의 아티팩트
       digest), 타깃 콘텐츠 식별, 모든 게이트, 해시와 건수를 담은 ignore 규칙과 VEX 문서;
       `--provenance <path>`는 실행 시각, 종료 코드, 보고서 sha256을 더해 모든 종료

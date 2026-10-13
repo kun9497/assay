@@ -43,7 +43,12 @@ import (
 // image scan read, against which it was asked for, how they matched, and the
 // manifest and index digests that identify it — a scan of the wrong
 // architecture's image produces a full, plausible report, and nothing in the
-// document said which one it was).
+// document said which one it was), and to 14 when Document gained
+// `provenance` (D120: --fail-on critical and --fail-on low produced
+// byte-identical documents with different exit codes, an expired ignore rule
+// was indistinguishable from no ignore file, and nothing named the tool, the
+// database or the input's content — the report could not say why two runs
+// differed).
 // Two earlier additions should have bumped it and did not — `ratings` (D25)
 // and RatingRecord.URL (D27) both changed the shape while this constant
 // stayed at 1 — so version 1 in the wild denotes three different documents.
@@ -51,7 +56,7 @@ import (
 // what it does mean is that a consumer reading 2 or later can rely on every
 // field below being present, which is the guarantee the constant exists to
 // give.
-const schemaVersion = 13
+const schemaVersion = 14
 
 // Document is the stable shape of `assay scan --output json` (design goal
 // #3). It carries what Table shows plus what Table cannot: the full
@@ -110,6 +115,13 @@ type Document struct {
 	// chosen (D119). Omitted for every other target kind, which has no
 	// platform to have chosen.
 	Image *ImageRecord `json:"image,omitempty"`
+	// Provenance is what produced this verdict (D120): the tool, the
+	// database, the target's content identity, every gate and every waiver.
+	// Deterministic by construction — no timestamp of the run, no exit code —
+	// so two scans of the same inputs stay byte-identical; those live in the
+	// --provenance sidecar. Omitted only by a renderer handed none, which a
+	// scan never does.
+	Provenance *Provenance `json:"provenance,omitempty"`
 }
 
 // The four values ImageRecord.Match takes (D119), the same strings
@@ -427,6 +439,7 @@ func JSON(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirscan
 		Distro:         cov.Distro,
 		InventoryScope: cov.InventoryScope,
 		Image:          cov.Image,
+		Provenance:     cov.Provenance,
 	}
 	for _, f := range res.Findings {
 		doc.Findings = append(doc.Findings, findingRecord(f))

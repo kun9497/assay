@@ -16,6 +16,8 @@
 package ignore
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,6 +39,20 @@ const DefaultFile = ".assay.yaml"
 // carries ignore rules.
 type Config struct {
 	Ignore []Rule `yaml:"ignore"`
+	// SHA256 is the file's content hash, set by Load from the bytes it
+	// parsed, for the scan's provenance record (D120): an ignore file edited
+	// between two runs is a different waiver list under the same name.
+	SHA256 string `yaml:"-"`
+}
+
+// RuleResult is what one rule did in one Apply (D120): its 1-based position,
+// its expiry, whether that had passed — an expired rule waives nothing — and
+// how many findings it waived.
+type RuleResult struct {
+	Rule    int
+	Expires string
+	Expired bool
+	Matched int
 }
 
 // Rule waives a finding that matches EVERY field it names (AND within a
@@ -106,6 +122,8 @@ func Load(path string) (*Config, error) {
 			}
 		}
 	}
+	sum := sha256.Sum256(data)
+	c.SHA256 = hex.EncodeToString(sum[:])
 	return &c, nil
 }
 
@@ -117,10 +135,16 @@ func Load(path string) (*Config, error) {
 //
 // now is passed in rather than read from the clock so the decision is
 // testable and a scan is reproducible within one run.
-func (c *Config) Apply(findings []matcher.Finding, now time.Time, warn func(string)) (kept []matcher.Finding, suppressed []matcher.Suppressed) {
+//
+// results has one entry per rule, in file order, saying whether it had
+// expired and how many findings it waived (D120) — an expired rule and a rule
+// that matched nothing both waive nothing, and only this tells them apart.
+func (c *Config) Apply(findings []matcher.Finding, now time.Time, warn func(string)) (kept []matcher.Finding, suppressed []matcher.Suppressed, results []RuleResult) {
 	// Filter the rules to the live ones once, warning about the expired.
-	live := make([]Rule, 0, len(c.Ignore))
+	live := make([]liveRule, 0, len(c.Ignore))
+	results = make([]RuleResult, len(c.Ignore))
 	for i, r := range c.Ignore {
+		results[i] = RuleResult{Rule: i + 1, Expires: r.Expires}
 		if r.Expires != "" {
 			// Parse cannot fail here: Load already validated every Expires.
 			exp, _ := time.Parse("2006-01-02", r.Expires)
@@ -129,14 +153,16 @@ func (c *Config) Apply(findings []matcher.Finding, now time.Time, warn func(stri
 			// is how a person reads "expires 2026-12-31".
 			if !now.Before(exp.AddDate(0, 0, 1)) {
 				warn(fmt.Sprintf("ignore rule %d expired %s and no longer applies: %s", i+1, r.Expires, ruleLabel(r)))
+				results[i].Expired = true
 				continue
 			}
 		}
-		live = append(live, r)
+		live = append(live, liveRule{Rule: r, index: i})
 	}
 
 	for _, f := range findings {
 		if r, ok := firstMatch(live, f); ok {
+			results[r.index].Matched++
 			// Source "ignore-file" (D104): the table and JSON both show which
 			// waiver mechanism suppressed a finding, since a .assay.yaml rule
 			// and an OpenVEX document statement are read by different people
@@ -146,20 +172,27 @@ func (c *Config) Apply(findings []matcher.Finding, now time.Time, warn func(stri
 			kept = append(kept, f)
 		}
 	}
-	return kept, suppressed
+	return kept, suppressed, results
+}
+
+// liveRule is an unexpired rule and its position in the file, so a match can
+// be counted against the rule that made it.
+type liveRule struct {
+	Rule
+	index int
 }
 
 // firstMatch returns the first live rule that waives f, if any. First rather
 // than best because reasons do not compose: a finding waived by two rules is
 // waived for the first-listed reason, which is the one the file's author put
 // first.
-func firstMatch(rules []Rule, f matcher.Finding) (Rule, bool) {
+func firstMatch(rules []liveRule, f matcher.Finding) (liveRule, bool) {
 	for _, r := range rules {
 		if r.matches(f) {
 			return r, true
 		}
 	}
-	return Rule{}, false
+	return liveRule{}, false
 }
 
 // matches reports whether every field the rule names is satisfied by f.
