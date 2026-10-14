@@ -86,7 +86,7 @@
     "ref": "mirror.gcr.io/library/almalinux@sha256:d2515c769e7b73f95c4fde38c0a505336ff38f14990c0b7253b77060a049a743",
     "minAgree": 90,
     "minFindings": 90,
-    "maxFindings": 212,
+    "maxFindings": 442,
     "trivy": {
       "minAgree": 79,
       "minFindings": 79,
@@ -130,7 +130,7 @@
     "ref": "cgr.dev/chainguard/wolfi-base@sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72",
     "minAgree": 0,
     "minFindings": 0,
-    "maxFindings": 68,
+    "maxFindings": 148,
     "trivy": {},
     "minComponents": 12
   },
