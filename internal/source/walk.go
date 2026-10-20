@@ -245,7 +245,10 @@ func readLayer(ctx context.Context, l Layer, visit func(name string, h *tar.Head
 		}
 		h, err := tr.Next()
 		if err == io.EOF {
-			return nil
+			// The archive's end marker is not the stream's end: drain to EOF
+			// so the layer's digest is checked before its entries count
+			// (D123). Returning here was a clean scan of unverified bytes.
+			return drainLayer(ctx, rc)
 		}
 		if err != nil {
 			return err

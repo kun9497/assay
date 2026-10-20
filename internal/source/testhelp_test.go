@@ -1,6 +1,9 @@
 package source
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -33,8 +36,50 @@ func (f fakeLayer) Size() (int64, error)                { return int64(len(f.bod
 func (f fakeLayer) MediaType() (types.MediaType, error) { return types.OCILayer, nil }
 
 type fakeImage struct {
-	v1.Image // embedded as an interface: only Layers is exercised
+	v1.Image // embedded as an interface: only what fromV1 reads is implemented
 	layers   []fakeLayer
+}
+
+// The config and manifest fromV1 checks before trusting a diff id (D123):
+// the config lists each layer's diff field, and the manifest names the
+// config's real digest, so the chain is consistent and only a layer's own
+// bytes can break it.
+func (f fakeImage) ConfigFile() (*v1.ConfigFile, error) {
+	cf := &v1.ConfigFile{RootFS: v1.RootFS{Type: "layers"}}
+	for _, l := range f.layers {
+		h, err := v1.NewHash(l.diff)
+		if err != nil {
+			return nil, err
+		}
+		cf.RootFS.DiffIDs = append(cf.RootFS.DiffIDs, h)
+	}
+	return cf, nil
+}
+
+func (f fakeImage) RawConfigFile() ([]byte, error) {
+	cf, err := f.ConfigFile()
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(cf)
+}
+
+func (f fakeImage) Manifest() (*v1.Manifest, error) {
+	raw, err := f.RawConfigFile()
+	if err != nil {
+		return nil, err
+	}
+	d, _, err := v1.SHA256(bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	return &v1.Manifest{Config: v1.Descriptor{Digest: d}}, nil
+}
+
+// sha256Of is the real diff id of body, for fixtures whose layers are read to
+// the end and so must hash to what their config says.
+func sha256Of(body string) string {
+	return fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(body)))
 }
 
 func (f fakeImage) Layers() ([]v1.Layer, error) {
