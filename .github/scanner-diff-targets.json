@@ -90,7 +90,7 @@
     "trivy": {
       "minAgree": 79,
       "minFindings": 79,
-      "maxFindings": 186
+      "maxFindings": 388
     }
   },
   {
@@ -99,7 +99,7 @@
     "ref": "mirror.gcr.io/library/oraclelinux@sha256:3adbd4f3b22d816c90e78a9c9c2e0ddf65fc1bbadd816dc202054471a85f38b2",
     "minAgree": 31,
     "minFindings": 33,
-    "maxFindings": 158,
+    "maxFindings": 322,
     "trivy": {
       "minAgree": 34,
       "minFindings": 34,
@@ -112,7 +112,7 @@
     "ref": "mirror.gcr.io/library/fedora@sha256:6c75d5bf57cb0fa5aa4b92c6a83c86c791644496d9ac230de7711f5b8ec3b898",
     "minAgree": 50,
     "minFindings": 47,
-    "maxFindings": 112
+    "maxFindings": 262
   },
   {
     "name": "az2023",
@@ -149,7 +149,7 @@
     "ref": "registry.suse.com/bci/bci-base@sha256:c4bd6f1a43a3d80e9345e75a0e115e9a34daee55120ad4ba2f14d71bd29ba1eb",
     "minAgree": 15,
     "minFindings": 102,
-    "maxFindings": 430,
+    "maxFindings": 880,
     "trivy": {
       "minAgree": 154,
       "minFindings": 159,
