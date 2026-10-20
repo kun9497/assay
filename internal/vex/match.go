@@ -151,8 +151,13 @@ func buildLiveProduct(p Product, warn func(string)) (liveProduct, bool) {
 		lp.isSource = isSourcePURL(parsed)
 	} else {
 		lp.exactID = p.ID
-		if img, ok := imageFromReference(p.ID); ok {
+		img, ok, err := imageFromReference(p.ID)
+		if ok {
 			lp.image = &img
+		}
+		if err != nil {
+			warn(fmt.Sprintf("vex product %q looks like an image reference but could not be parsed; its statement applies to no target: %v",
+				p.ID, err))
 		}
 	}
 	for _, sc := range p.Subcomponents {

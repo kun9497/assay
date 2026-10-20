@@ -27,6 +27,16 @@ func TestApply_UnreadImageProductStillScopes(t *testing.T) {
 		{"docker:// reference", Product{ID: "docker://dhi/python:3.13"}, ""},
 		{"docker-archive: file", Product{ID: "docker-archive:/srv/dhi-python.tar"}, ""},
 		{"oci-dir: layout", Product{ID: "oci-dir:./dhi-python"}, ""},
+		// D124: an image reference whose digest, tag or repository does not
+		// parse was read as a plain identifier, which unscoped the statement
+		// -- the 2026-10-20 external review's exit 1 -> 0 on another image.
+		{"truncated digest", Product{ID: "dhi/python@sha256:truncated"}, `"dhi/python@sha256:truncated" looks like an image reference`},
+		{"bad digest algorithm", Product{ID: "dhi/python@sha512:bad"}, `"dhi/python@sha512:bad" looks like an image reference`},
+		{"not a digest at all", Product{ID: "dhi/python@latest"}, `"dhi/python@latest" looks like an image reference`},
+		{"tag that does not parse", Product{ID: "dhi/python:3.13!"}, `"dhi/python:3.13!" looks like an image reference`},
+		{"repository that does not parse", Product{ID: "Dhi/Python"}, `"Dhi/Python" looks like an image reference`},
+		{"transport reference that does not parse", Product{ID: "docker://Dhi/Python:3.13"}, `"docker://Dhi/Python:3.13" looks like an image reference`},
+		{"transport followed by no reference", Product{ID: "docker://not a ref"}, `"docker://not a ref" looks like an image reference`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			img := tt.image
@@ -63,7 +73,6 @@ func TestImageFromReference_TransportPrefix(t *testing.T) {
 		{"oci://ghcr.io/org/app@" + testDigest, imageRef{repository: "ghcr.io/org/app", digest: testDigest}},
 		{"docker-archive:/srv/app.tar", imageRef{}},
 		{"oci-dir:./layout", imageRef{}},
-		{"docker://not a ref", imageRef{}},
 	} {
 		lp, ok := buildLiveProduct(Product{ID: tt.id}, func(m string) { t.Errorf("%s: warned %s", tt.id, m) })
 		if !ok || lp.image == nil {
