@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -652,4 +653,36 @@ func mustRef(t *testing.T, s string) name.Reference {
 		t.Fatal(err)
 	}
 	return r
+}
+
+// An unreachable http-scheme registry fails the scan with exit 2 and a pull
+// error. It used to panic inside source.Open (transport.multierrs compared
+// with !=), which exits 2 only by coincidence -- Go's own status for an
+// unrecovered panic -- and skipped every exit path that writes D120's
+// provenance sidecar.
+func TestRun_UnreachableRegistryIsExit2NotAPanic(t *testing.T) {
+	isolateCredentials(t)
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := l.Addr().String() + "/team/app:1"
+	l.Close()
+
+	sidecar := filepath.Join(t.TempDir(), "provenance.json")
+	var out, errOut bytes.Buffer
+	code := Run(context.Background(), testDB(t), ref, Options{ProvenanceFile: sidecar}, &out, &errOut)
+	if code != 2 {
+		t.Fatalf("Run = %d, want 2\nstderr: %s", code, errOut.String())
+	}
+	if want := "pull " + ref + ": "; !strings.Contains(errOut.String(), want) {
+		t.Errorf("stderr lacks %q:\n%s", want, errOut.String())
+	}
+	sc := readSidecar(t, sidecar)
+	if at(t, sc, "run", "exitCode") != 2.0 {
+		t.Errorf("sidecar run.exitCode = %v, want 2", at(t, sc, "run", "exitCode"))
+	}
+	if e, _ := at(t, sc, "run", "error").(string); !strings.Contains(e, "pull "+ref) {
+		t.Errorf("sidecar run.error = %q, want the pull failure", e)
+	}
 }

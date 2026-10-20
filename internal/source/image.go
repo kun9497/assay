@@ -234,8 +234,14 @@ func load(ctx context.Context, ref string, want v1.Platform, explicit bool) (v1.
 			if errors.As(err, &pe) {
 				return nil, loaded{}, err
 			}
-			if ae := asAuthError(err, ref, kc); ae != err {
-				return nil, loaded{}, ae
+			// Decided by refusal, never by comparing asAuthError's result
+			// with err: an error interface can hold a type == panics on,
+			// and the library's transport.multierrs (a slice, returned when
+			// both the https and http pings to an http-scheme registry
+			// fail) is one -- an unreachable internal registry crashed the
+			// scan instead of failing it.
+			if refusal(err) != nil {
+				return nil, loaded{}, asAuthError(err, ref, kc)
 			}
 			return nil, loaded{}, fmt.Errorf("pull %s: %w", ref, err)
 		}
