@@ -124,6 +124,22 @@ func Open(ctx context.Context, ref, platform string) (*Image, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The digest the report states (D120) and image-scoped VEX keys on
+	// (D121) is held to the manifest actually read, before anything below
+	// it is trusted (D123).
+	if md := creds.choice.ManifestDigest; md != "" {
+		h, err := v1.NewHash(md)
+		if err != nil {
+			return nil, fmt.Errorf("%s: manifest digest %q: %w", ref, md, err)
+		}
+		raw, err := img.RawManifest()
+		if err != nil {
+			return nil, fmt.Errorf("%s: read manifest: %w", ref, err)
+		}
+		if err := checkManifestDigest(raw, h); err != nil {
+			return nil, fmt.Errorf("%s: %w", ref, err)
+		}
+	}
 	out, err := fromV1(img)
 	if err != nil {
 		if creds.kc != nil {
@@ -347,6 +363,16 @@ func (w v1Index) Image(h v1.Hash) (v1.Image, error)         { return w.idx.Image
 func (w v1Index) ImageIndex(h v1.Hash) (indexReader, error) {
 	c, err := w.idx.ImageIndex(h)
 	if err != nil {
+		return nil, err
+	}
+	// A nested index chooses among manifests, so it is held to the digest it
+	// was listed under before its choices count (D123); a layout reads it
+	// from blobs/ without hashing it.
+	raw, err := c.RawManifest()
+	if err != nil {
+		return nil, err
+	}
+	if err := checkManifestDigest(raw, h); err != nil {
 		return nil, err
 	}
 	return v1Index{c}, nil

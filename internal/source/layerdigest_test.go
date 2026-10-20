@@ -330,3 +330,99 @@ func TestDrainLayer_StopsOnACancelledContext(t *testing.T) {
 		t.Fatalf("drainLayer = %v, want context.Canceled", err)
 	}
 }
+
+// The top of the chain: an oci-dir's index.json names the manifest's digest,
+// and that digest is what the report states (D120) and what image-scoped VEX
+// keys on (D121), but the library reads the blob at that path without hashing
+// it. A layout whose manifest blob was replaced by a self-consistent forgery
+// -- its own config, its own layer, every one stored under its real hash --
+// passed every check below the manifest and was reported as the genuine
+// digest (review of D123, 2026-10-20).
+func TestOpen_LayoutManifestNotMatchingItsDigestFails(t *testing.T) {
+	honest, forged, honestTar, mt := d123Blobs(t, "gzip")
+	img, _, _ := d123Image(t, honest, honestTar, mt)
+	forgedImg, _, _ := d123Image(t, forged, d123Tar(t, d123Forged), mt)
+
+	dir := filepath.Join(t.TempDir(), "layout")
+	lp, err := layout.Write(dir, empty.Index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lp.AppendImage(img); err != nil {
+		t.Fatal(err)
+	}
+	wantHonest(t, "oci-dir:"+dir)
+
+	// Every forged blob under its own hash; only the manifest blob the index
+	// names is swapped.
+	if err := lp.WriteImage(forgedImg); err != nil {
+		t.Fatal(err)
+	}
+	md, err := img.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := forgedImg.RawManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "blobs", md.Algorithm, md.Hex), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = readInstalled(t, "oci-dir:"+dir)
+	var mde *ManifestDigestError
+	if !errors.As(err, &mde) {
+		t.Fatalf("err = %v, want a *ManifestDigestError", err)
+	}
+	if mde.Want != md.String() {
+		t.Errorf("ManifestDigestError.Want = %s, want the index's %s", mde.Want, md)
+	}
+}
+
+// The same link one level up: a nested index inside a layout is read by
+// digest too, and a replaced one would choose among forged manifests.
+func TestOpen_LayoutNestedIndexNotMatchingItsDigestFails(t *testing.T) {
+	honest, _, honestTar, mt := d123Blobs(t, "gzip")
+	img, _, _ := d123Image(t, honest, honestTar, mt)
+	child := mutate.AppendManifests(empty.Index, mutate.IndexAddendum{
+		Add: img, Descriptor: v1.Descriptor{Platform: &v1.Platform{OS: "linux", Architecture: runtime.GOARCH}},
+	})
+	other := mutate.AppendManifests(empty.Index, mutate.IndexAddendum{
+		Add: img, Descriptor: v1.Descriptor{Platform: &v1.Platform{OS: "linux", Architecture: runtime.GOARCH, Variant: "x"}},
+	})
+
+	dir := filepath.Join(t.TempDir(), "layout")
+	lp, err := layout.Write(dir, empty.Index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lp.AppendIndex(child); err != nil {
+		t.Fatal(err)
+	}
+	// Two entries, so the layout is read as an index rather than one image.
+	if err := lp.AppendImage(img, layout.WithPlatform(v1.Platform{OS: "plan9", Architecture: "none"})); err != nil {
+		t.Fatal(err)
+	}
+	wantHonest(t, "oci-dir:"+dir)
+
+	cd, err := child.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := other.RawManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "blobs", cd.Algorithm, cd.Hex), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = readInstalled(t, "oci-dir:"+dir)
+	var mde *ManifestDigestError
+	if !errors.As(err, &mde) {
+		t.Fatalf("err = %v, want a *ManifestDigestError for the nested index", err)
+	}
+	if mde.Want != cd.String() {
+		t.Errorf("ManifestDigestError.Want = %s, want the nested index's %s", mde.Want, cd)
+	}
+}

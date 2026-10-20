@@ -154,3 +154,27 @@ func configDiffIDs(img v1.Image, layers int) ([]v1.Hash, error) {
 	}
 	return ids, nil
 }
+
+// ManifestDigestError is a manifest or index whose bytes are not the ones
+// the digest it was read under names -- the top link of the chain, which
+// the library leaves unchecked on the oci-dir path, where a blob is read
+// from blobs/<alg>/<hex> without being hashed.
+type ManifestDigestError struct {
+	Want, Got string
+}
+
+func (e *ManifestDigestError) Error() string {
+	return fmt.Sprintf("manifest %s does not match its digest: its bytes hash to %s (D123)", e.Want, e.Got)
+}
+
+// checkManifestDigest holds raw to want. On the registry path this repeats a
+// check the library already made; on oci-dir it is the only one.
+func checkManifestDigest(raw []byte, want v1.Hash) error {
+	if want.Algorithm != "sha256" {
+		return fmt.Errorf("manifest %s: digest algorithm %q cannot be verified (D123)", want, want.Algorithm)
+	}
+	if got := fmt.Sprintf("sha256:%x", sha256.Sum256(raw)); got != want.String() {
+		return &ManifestDigestError{Want: want.String(), Got: got}
+	}
+	return nil
+}
