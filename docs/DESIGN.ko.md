@@ -687,6 +687,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       읽어 해시하고, config는 manifest와, manifest(와 중첩 index)는
       자기 digest와 대조; registry, `oci-dir:`, `docker-archive:`를
       모두 덮음(뒤의 둘은 아무것도 검증하지 않았음); 불일치는 보고서 없이 exit 2.
+- [x] 파싱되지 않는 VEX 이미지 참조도 자기 문장의 범위를 정함 (D124) — 어떤 대상에도
+      맞지 않게, 경고와 함께; 잘못된 digest·tag·repository가 범위를 풀어 다른 이미지의
+      finding을 면제했었음.
 - [x] SUSE의 연도 접두사 CSAF VEX 구조 (D122) — 2026-10-15부터 `changes.csv`가
       `<year>/cve-….json`을 적고 평면 URL은 404; delta 단계는 그 모양만 받으며(평면 행은
       철회로 집계되어 완료된 것처럼 보임), 어느 정렬 순서든 파일 전체를 읽고, 경로 가드가

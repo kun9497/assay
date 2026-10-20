@@ -715,6 +715,9 @@ exited 0 while 24 findings went unmentioned.
       (and any nested index) against its digest; covers registry,
       `oci-dir:` and `docker-archive:` (the last two were verified by nothing); a mismatch
       is exit 2 with no report.
+- [x] A VEX image reference that does not parse still scopes its statement (D124) — to
+      no target, with a warning; a malformed digest, tag or repository had unscoped it and
+      suppressed findings on other images.
 - [x] SUSE's year-prefixed CSAF VEX layout (D122) — since 2026-10-15 `changes.csv` names
       `<year>/cve-….json` and the flat URLs 404; the delta pass accepts only that shape
       (a flat row would be counted withdrawn and look complete), reads the file in either

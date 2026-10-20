@@ -5151,6 +5151,35 @@ computed from the manifest's own bytes, so there it has nothing outside to disag
 **What stays out.** Whatever names the top digest is the root of trust: the reference the user
 typed, a layout's `index.json`, or an archive's own manifest. Signature verification (cosign
 and the like) is a separate decision.
+### D124 — An image reference that does not parse still scopes its statement, to no target
+
+**Decision.** D121's rule — a statement that names an image applies only to that image — now
+also holds when the image is named by a reference assay cannot parse. A product `@id` shaped
+like an image reference (it contains `/`, `:` or `@` and is not a CPE, URN, purl or URL) whose
+digest, tag or repository go-containerregistry rejects is an image product that matches no
+target. Examples: `app@sha256:truncated`, `app@sha512:bad`, `app@latest`, `Org/App`,
+`app:3.13!`, or a `docker://` reference whose remainder is any of those. Its statement is
+reported out of scope, with one stderr warning naming the product and the parse error.
+
+**Why, measured.** An external review on 2026-10-20 reported it, and it was re-measured here.
+`imageFromReference` returned "not an image" on every parse failure. The caller then kept the
+product as a plain identifier, so the statement had no image product at all. In the Docker
+Hardened Images shape (an image product plus bare package duplicates), the bare duplicate
+then suppressed its package on every image: exit 1 became exit 0 on an unrelated image, and
+there was no warning. D121 already closed the same hole for a malformed `pkg:oci` purl and for
+file transports. This is the same case reached through the reference spelling.
+
+**Why fail closed.** An identifier with `/`, `:` or `@` that is meant as an image and is
+misspelled has only two readings. Applied everywhere, it falsely suppresses findings on
+other images, the failure D121 exists to stop. Applied nowhere, it reports findings that the
+author meant to waive, with a warning that says why. The second error is visible and the
+first is not. A non-image identifier spelled that way and used only to group subcomponents
+also stops applying. That cost was accepted for the same reason: such an identifier never
+matched a finding itself, since `exactID` compares against purls, and only its unscoped
+subcomponents did.
+
+**Divergence.** grype applies package statements whatever image the document names (D121's
+row in D18's table already says so), so this changes no shared behaviour.
 
 ---
 
