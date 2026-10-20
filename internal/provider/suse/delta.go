@@ -26,22 +26,30 @@ const maxDelta = 20000
 // deltaRequestTimeout bounds ONE document fetch, matching redhat's.
 const deltaRequestTimeout = 3 * time.Minute
 
-// changesPath is the shape a row in changes.csv may have -- a FLAT filename,
-// unlike redhat.changesPath's year-prefixed one. Verified live 2026-08-20:
-// SUSE's own index.txt and changes.csv both list bare "cve-YYYY-NNNNN.json"
-// with no directory component, and the archive's own tar entries carry a
-// "csaf-vex/" prefix that changes.csv's rows do not -- the two are not the
-// same string and delta document fetches use changesPath's bare form
-// directly against "csaf-vex/<name>".
-var changesPath = regexp.MustCompile(`^cve-[0-9]{4}-[0-9]+\.json$`)
+// changesPath is the shape a row in changes.csv may have. Its contents become
+// a URL ("csaf-vex/<row>"), so it is validated for the same reason
+// redhat.changesPath is: a misrouted response, or a feed that started listing
+// absolute URLs, must not turn into a request somewhere else.
+//
+// D122: year-prefixed since 2026-10-15, the same shape as Red Hat's. Until
+// then SUSE listed bare "cve-YYYY-NNNNN.json" (verified live 2026-08-20); on
+// 2026-10-15 index.txt, changes.csv and the tree all moved under year
+// directories, the flat URLs began to 404, and the first nightly to see a row
+// newer than its archive failed on this check. The directory is not the
+// CVE's year ("2023/cve-2004-2541.json" is live), which is why the path is
+// taken from the row rather than rebuilt from the ID. The flat form is NOT
+// still accepted: its URLs 404, and document() reads a 404 as "withdrawn
+// between the two files", so a flat row would be counted gone and the delta
+// would look complete while having fetched nothing.
+var changesPath = regexp.MustCompile(`^[0-9]{4}/cve-[0-9]{4}-[0-9]+\.json$`)
 
 // deltaSince fetches every document that changed on or after the archive's
 // own Last-Modified, and emits what they convert to. Mirrors
 // redhat.deltaSince's shape (fetch the list, bound it, fetch concurrently in
 // order, emit AFTER the archive walk so last-write-wins keeps the newer
 // document) with one real difference: changedSince below reads changes.csv
-// start to finish rather than exiting early, because this feed's file sorts
-// the opposite way Red Hat's does.
+// start to finish rather than exiting early, because this feed's sort order
+// is not one it has kept (D122).
 func (p *Provider) deltaSince(ctx context.Context, cutoff time.Time,
 	emit func(advisory.Advisory) error, st *stats, covered map[string]bool) error {
 
@@ -144,15 +152,15 @@ func (p *Provider) eachDocument(ctx context.Context, paths []string,
 // cutoff.
 //
 // Read start to finish rather than stopped early the way redhat.changedSince
-// stops at the first old row. SUSE's own file is sorted OLDEST FIRST
-// (verified live, 2026-08-20 -- the opposite of Red Hat's, which sorts
-// newest first and documents the sort-order check that makes its early exit
-// safe). An early exit here on the same assumption would return NOTHING:
-// the very first row is from 2023, so a naive "stop at the first row older
-// than cutoff" would stop immediately. At 63,784 rows and a few megabytes, a
-// full scan costs nothing an early exit would have saved -- this is a COST
-// difference from redhat.changedSince, not a correctness one, the same
-// distinction that function's own doc comment draws about its early exit.
+// stops at the first old row. SUSE has sorted this file both ways: OLDEST
+// FIRST when it was verified live on 2026-08-20, NEWEST FIRST since the
+// 2026-10-15 layout change (D122). An early exit is only safe on a sort
+// order the feed promises, and this one has already changed once without
+// notice; under the old order it would have returned NOTHING, since the very
+// first row was from 2023. At ~71,600 rows and a few megabytes, a full scan
+// costs nothing an early exit would have saved -- a COST difference from
+// redhat.changedSince, not a correctness one, the same distinction that
+// function's own doc comment draws about its early exit.
 func (p *Provider) changedSince(ctx context.Context, cutoff time.Time) ([]string, error) {
 	body, err := p.get(ctx, p.baseURL+"/csaf-vex/"+changesFile)
 	if err != nil {
