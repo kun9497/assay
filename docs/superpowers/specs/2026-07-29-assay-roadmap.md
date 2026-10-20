@@ -5050,6 +5050,54 @@ statement about a rebuild.
 
 ---
 
+### D122 — SUSE's CSAF VEX feed is year-prefixed: the delta pass reads the new path, and only the new path
+
+**Decision.** A `changes.csv` row is accepted only as `<year>/cve-<year>-<n>.json` — the
+same shape as Red Hat's — and the document is fetched at `csaf-vex/<row>` exactly as the row
+spells it. The flat `cve-<year>-<n>.json` that D77 verified is **rejected**, not kept as an
+alternative. `changes.csv` is still read start to finish, now because its sort order is not
+one SUSE has kept.
+
+**Why, measured.** On 2026-10-15, around 09:36 UTC, SUSE moved the whole per-document tree
+into year directories (`csaf-vex/2023/` … `csaf-vex/2026/`). `index.txt` and `changes.csv`
+started naming documents with that prefix, and the flat URLs began to return 404. The
+directory is the year a document was first published, not the CVE's year
+(`2023/cve-2004-2541.json` is live), so a path cannot be rebuilt from the advisory ID; it has
+to come from the row. The 10-15 nightly (38723622339) was the first to see a row newer than
+its archive, and failed on D77's flat-name check: `changes.csv row 1 names
+"2026/cve-2026-79609.json", which is not a document path`. The 10-16, 10-18 and 10-19
+nightlies passed only because SUSE's archive happened to be newer than every row, so the
+delta was empty and the check never ran. With no change, the next nightly that ran while the
+archive lagged would have failed the same way.
+
+**Why the flat form is not still accepted.** The flat URLs 404, and `document()` reads a 404
+as "listed, then withdrawn before it could be fetched", which is a race it tolerates. A flat
+row would therefore be counted gone, and the delta would look complete while having fetched
+nothing. Rejecting it fails loudly instead. If SUSE ever goes back to flat names, that is a
+layout change to re-verify, not something to absorb quietly.
+
+**What did not need changing.** The bulk archive walk keeps any regular `.json` entry and
+never parses its path, so it already read the year directories. Measured on 2026-10-20, the
+archive (Last-Modified 2026-10-19 09:17 UTC) holds 71,711 documents: every one is under a
+year directory, no basename appears twice, and there are no flat leftovers. So no document
+can be emitted twice, and no stale copy can overwrite a newer one. It also holds 119
+documents that `index.txt` does not list; those are old CVEs whose documents are still served
+with 200. The archive, not the index, is the complete set, which is what the provider already
+reads. The 10-16, 10-18 and 10-19 databases each read the full archive with the delta empty,
+and their SUSE counts rose with no drop (71,142 → 71,489 → 71,711 documents), so no
+published database is missing SUSE data.
+
+**Sort order.** `changes.csv` was oldest first when D77 verified it, and has been newest first
+since 2026-10-15. An early exit is correct for at most one of those orders. The full read
+costs nothing at about 71,600 rows, so it stays, and the test feeds both orders.
+
+**Found by.** The 2026-10-19 weekly review, while it was ruling out an ingestion loss behind
+`p11-kit` CVE-2026-13757 leaving bci156 and leap156. That turned out to be SUSE moving SLE 15
+SP6 to `known_not_affected` on 10-15 (revision 9), an upstream change and not a loss. Before
+D122, nothing tested the path guard rejecting anything at all.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes
