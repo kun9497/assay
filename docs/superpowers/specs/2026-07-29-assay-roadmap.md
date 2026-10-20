@@ -5102,8 +5102,9 @@ D122, nothing tested the path guard rejecting anything at all.
 
 **Decision.** An image scan accepts a layer only once its whole uncompressed stream has been
 read to EOF and hashed to the diff id the image config lists for it. The config is accepted
-only once its bytes hash to the digest the manifest names. A mismatch at either link is an
-error, so the scan exits 2 (D11) and prints no report. This applies to every image path:
+only once its bytes hash to the digest the manifest names. The manifest and any nested index are held to the digests they
+were read under. A mismatch at any link is an error, so the scan exits 2 (D11) and prints no
+report. This applies to every image path:
 registry, `oci-dir:` and `docker-archive:`.
 
 **Why, measured.** An external review on 2026-10-20 reported that a registry serving
@@ -5138,10 +5139,18 @@ between 32 KiB chunks and discards the bytes, so it takes no memory and no `MaxS
 budget (D112). A layer that is never opened, because no wanted file lives in it, is never
 read and so is never trusted.
 
-**What stays out.** The manifest digest itself is checked only where something names it: a
-pinned registry reference, which the library verifies. A local `oci-dir:` or `docker-archive:`
-has no outside name to check its manifest against, so the file the user hands over is the
-root of trust. Signature verification (cosign and the like) is a separate decision.
+**The top of the chain.** The manifest read is hashed against the digest recorded for it (the
+digest the report states), and a nested index is hashed against the digest it was listed
+under. On the registry path this repeats a check the library already makes. On `oci-dir:` it
+is the only check, because the library reads `blobs/<alg>/<hex>` without hashing it. A review
+of this slice found that a layout whose manifest blob had been swapped for a self-consistent
+forgery (its own config and layer, each under its real hash) passed every check below the
+manifest and was reported under the genuine digest. A `docker-archive:` manifest digest is
+computed from the manifest's own bytes, so there it has nothing outside to disagree with.
+
+**What stays out.** Whatever names the top digest is the root of trust: the reference the user
+typed, a layout's `index.json`, or an archive's own manifest. Signature verification (cosign
+and the like) is a separate decision.
 
 ---
 

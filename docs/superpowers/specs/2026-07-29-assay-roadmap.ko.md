@@ -4949,7 +4949,7 @@ basename이 두 번 나오는 경우가 없으며, 평면 잔재도 없습니다
 
 **결정.** 이미지 스캔은 레이어의 압축 해제된 스트림 전체를 EOF까지 읽고, 그 해시가 이미지
 config가 그 레이어에 대해 적은 diff id와 같을 때만 레이어를 받아들입니다. config는 그 바이트의
-해시가 manifest가 지정한 digest와 같을 때만 받아들입니다. 어느 연결 고리에서든 불일치는
+해시가 manifest가 지정한 digest와 같을 때만 받아들입니다. manifest와 중첩 index도 자신이 읽힌 digest와 대조됩니다. 어느 연결 고리에서든 불일치는
 오류이므로, 스캔은 exit 2(D11)로 끝나고 보고서를 출력하지 않습니다. 이 규칙은 registry,
 `oci-dir:`, `docker-archive:` 등 모든 이미지 경로에 적용됩니다.
 
@@ -4983,10 +4983,16 @@ blob digest 검사도 실행되고, 보통은 그 오류가 먼저 보고됩니�
 바이트는 버리므로, 메모리도 `MaxScanBytes` 예산(D112)도 쓰지 않습니다. 원하는 파일이 없어 한 번도
 열리지 않는 레이어는 읽히지 않으므로, 신뢰받지도 않습니다.
 
-**범위 밖.** manifest digest 자체는 무언가가 그것을 지목할 때만 확인됩니다. 고정된 registry
-참조이며, 라이브러리가 검증합니다. 로컬 `oci-dir:`나 `docker-archive:`는 manifest를 대조할 외부
-이름이 없으므로, 사용자가 건넨 파일이 신뢰의 출발점입니다. 서명 검증(cosign 등)은 별도의
-결정입니다.
+**체인의 맨 위.** 읽은 manifest는 그것에 기록된 digest(보고서가 적는 digest)와 대조하고, 중첩
+index는 자신이 나열된 digest와 대조합니다. registry 경로에서는 라이브러리가 이미 하는 검사를 한 번
+더 하는 것입니다. `oci-dir:`에서는 라이브러리가 `blobs/<alg>/<hex>`를 해시하지 않고 읽으므로 이것이
+유일한 검사입니다. 이 슬라이스의 리뷰는, manifest blob을 스스로 일관된 위조본(자기 config와 레이어를
+각각 실제 해시 아래 저장)으로 바꾼 layout이 manifest 아래의 모든 검사를 통과하고 진짜 digest로
+보고된다는 것을 발견했습니다. `docker-archive:`의 manifest digest는 manifest 자신의 바이트로
+계산하므로, 그곳에는 어긋날 외부 값이 없습니다.
+
+**범위 밖.** 맨 위 digest를 지목하는 것이 신뢰의 출발점입니다. 사용자가 입력한 참조, layout의
+`index.json`, 또는 archive 자신의 manifest입니다. 서명 검증(cosign 등)은 별도의 결정입니다.
 
 ---
 
