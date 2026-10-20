@@ -710,6 +710,10 @@ exited 0 while 24 findings went unmentioned.
 - [x] SLES LTSS folded with a mainline-wins tie-break (D91) — post-EOL fixes surface
       under the same key (bci-base 121→286 findings, curl shows its real FIXED IN),
       385,621 shadowed twins dropped and counted
+- [x] Every image layer held to its config's diff id (D123) — read to EOF and hashed
+      before its files count, the config checked against the manifest; covers registry,
+      `oci-dir:` and `docker-archive:` (the last two were verified by nothing); a mismatch
+      is exit 2 with no report.
 - [x] SUSE's year-prefixed CSAF VEX layout (D122) — since 2026-10-15 `changes.csv` names
       `<year>/cve-….json` and the flat URLs 404; the delta pass accepts only that shape
       (a flat row would be counted withdrawn and look complete), reads the file in either

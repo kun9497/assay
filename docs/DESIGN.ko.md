@@ -683,6 +683,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] SLES LTSS를 mainline-wins 동점 처리로 접음 (D91) — post-EOL fix가 같은 키
       아래서 드러남(bci-base finding 121→286건, curl이 진짜 FIXED IN을 보여줌),
       가려졌던 쌍둥이 385,621건을 버려서 셈
+- [x] 모든 이미지 레이어를 config의 diff id와 대조 (D123) — 파일이 쓰이기 전에 EOF까지
+      읽어 해시하고, config는 manifest와 대조; registry, `oci-dir:`, `docker-archive:`를
+      모두 덮음(뒤의 둘은 아무것도 검증하지 않았음); 불일치는 보고서 없이 exit 2.
 - [x] SUSE의 연도 접두사 CSAF VEX 구조 (D122) — 2026-10-15부터 `changes.csv`가
       `<year>/cve-….json`을 적고 평면 URL은 404; delta 단계는 그 모양만 받으며(평면 행은
       철회로 집계되어 완료된 것처럼 보임), 어느 정렬 순서든 파일 전체를 읽고, 경로 가드가

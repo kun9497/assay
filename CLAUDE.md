@@ -55,7 +55,9 @@ and the report records the platform and digest that were scanned. Since D120 the
 deterministic `provenance` object (tool, database artifact, target content, gates, waivers) and
 `--provenance` writes a sidecar with run time and exit code on every exit path; since D121 an
 image's OS packages carry syft-spelled purls so VEX reaches them, and a VEX statement that names
-an image applies only to that image. Findings can be waived through a
+an image applies only to that image. Since D123 every image layer is read to EOF and held to its
+config's diff id (the config to the manifest) before its files count — `oci-dir:` and
+`docker-archive:` had been verified by nothing. Findings can be waived through a
 `.assay.yaml` ignore file (D102 — reason mandatory, expiry optional) or a producer's
 OpenVEX document (`--vex`, repeatable, D104 — not_affected/fixed suppress, a reasonless
 not_affected is skipped with a warning, latest statement wins); both apply after Match in
