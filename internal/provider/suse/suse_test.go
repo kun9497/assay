@@ -277,18 +277,19 @@ func TestFetch_DeltaFetchesChangedDocuments(t *testing.T) {
 	f := &feed{
 		archive:         fixture(t, "archive.tar.bz2"),
 		archiveModified: archiveBuilt2026,
-		// Ascending order, deliberately NOT sorted newest-first, matching
-		// SUSE's real changes.csv (verified live 2026-08-20) -- a row well
-		// AFTER the cutoff appears BEFORE an unrelated old row, which would
-		// break an early-exit implementation borrowed from Red Hat's.
+		// D122: SUSE's layout since 2026-10-15 -- every row year-prefixed,
+		// the newest first, and the directory not the CVE's own year (live:
+		// "2023/cve-2004-2541.json"), so the path has to be taken from the
+		// row rather than rebuilt from the CVE ID. The documents are served
+		// ONLY at the year path; the flat one 404s, as it does live.
 		changes: changesCSV(
-			[2]string{"cve-1999-0003.json", "1999-01-01T00:00:00Z"},
-			[2]string{"cve-2024-6387.json", archiveBuilt2026.Add(time.Hour).Format(time.RFC3339)},
-			[2]string{"cve-2026-0001.json", archiveBuilt2026.Add(2 * time.Hour).Format(time.RFC3339)},
+			[2]string{"2026/cve-2026-0001.json", archiveBuilt2026.Add(2 * time.Hour).Format(time.RFC3339)},
+			[2]string{"2025/cve-2024-6387.json", archiveBuilt2026.Add(time.Hour).Format(time.RFC3339)},
+			[2]string{"2023/cve-1999-0003.json", "1999-01-01T00:00:00Z"},
 		),
 		docs: map[string]string{
-			"cve-2024-6387.json": updatedOpenssh,
-			"cve-2026-0001.json": newDoc,
+			"2025/cve-2024-6387.json": updatedOpenssh,
+			"2026/cve-2026-0001.json": newDoc,
 		},
 	}
 	s := serve(t, f)
@@ -319,9 +320,67 @@ func TestFetch_DeltaFetchesChangedDocuments(t *testing.T) {
 			"the archive's own (9.6p1-1.1)", fix.Affected)
 	}
 	// The pre-1999 row, well before the cutoff, must not have been fetched.
-	if got := f.hitsFor("csaf-vex/cve-1999-0003.json"); got != 0 {
-		t.Errorf("cve-1999-0003.json was fetched %d times, want 0 -- it is well before the cutoff", got)
+	if got := f.hitsFor("csaf-vex/2023/cve-1999-0003.json"); got != 0 {
+		t.Errorf("2023/cve-1999-0003.json was fetched %d times, want 0 -- it is well before the cutoff", got)
 	}
+	// Each changed document fetched once, at the row's own year path.
+	for _, p := range []string{"csaf-vex/2025/cve-2024-6387.json", "csaf-vex/2026/cve-2026-0001.json"} {
+		if got := f.hitsFor(p); got != 1 {
+			t.Errorf("%s was fetched %d times, want 1", p, got)
+		}
+	}
+}
+
+// D122: a changes.csv row is turned into a URL, so a row on or after the
+// cutoff that is not exactly "<year>/cve-<year>-<n>.json" fails the build
+// rather than being fetched or skipped. The flat name SUSE used until
+// 2026-10-15 is rejected too: those URLs 404 now, and a delta that met one
+// would count it gone and look complete. A bad row BEFORE the cutoff is
+// never read past its timestamp, so it cannot fail anything.
+func TestChangedSince_RejectsRowsThatAreNotDocumentPaths(t *testing.T) {
+	cutoff := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
+	after := cutoff.Add(time.Hour).Format(time.RFC3339)
+	for _, bad := range []string{
+		"cve-2026-0001.json",                   // the pre-2026-10-15 flat layout
+		"../cve-2026-0001.json",                // escapes csaf-vex/
+		"2026/../../cve-2026-0001.json",        // escapes through a year
+		"/2026/cve-2026-0001.json",             // absolute
+		"https://example.com/cve-2026-01.json", // another host
+		"26/cve-2026-0001.json",                // not a four-digit year
+		"2026/2025/cve-2026-0001.json",         // nested
+		"2026/cve-2026-0001.json.asc",          // a signature sibling
+		"2026/CVE-2026-0001.json",              // not SUSE's spelling
+	} {
+		t.Run(bad, func(t *testing.T) {
+			s := serve(t, &feed{changes: changesCSV(
+				[2]string{"2026/cve-2026-0002.json", after},
+				[2]string{bad, after},
+			)})
+			paths, err := New(Options{BaseURL: s.URL}).changedSince(context.Background(), cutoff)
+			if err == nil {
+				t.Fatalf("changedSince accepted %q (returned %v), want an error", bad, paths)
+			}
+			// The row's own number and quoted name, so the assertion cannot
+			// pass on the format string's fixed text alone.
+			if want := fmt.Sprintf("row 2 names %q", bad); !strings.Contains(err.Error(), want) {
+				t.Errorf("error = %v, want it to contain %s", err, want)
+			}
+		})
+	}
+
+	t.Run("before the cutoff", func(t *testing.T) {
+		s := serve(t, &feed{changes: changesCSV(
+			[2]string{"2026/cve-2026-0002.json", after},
+			[2]string{"cve-2019-0001.json", "2019-01-01T00:00:00Z"},
+		)})
+		paths, err := New(Options{BaseURL: s.URL}).changedSince(context.Background(), cutoff)
+		if err != nil {
+			t.Fatalf("a malformed row before the cutoff failed the read: %v", err)
+		}
+		if fmt.Sprint(paths) != "[2026/cve-2026-0002.json]" {
+			t.Errorf("changedSince = %v, want [2026/cve-2026-0002.json]", paths)
+		}
+	})
 }
 
 // TestFetch_DeltaOnlyEcosystemSatisfiesTheCoverageGuard is the caller-first
@@ -344,10 +403,10 @@ func TestFetch_DeltaOnlyEcosystemSatisfiesTheCoverageGuard(t *testing.T) {
 		archive:         fixture(t, "archive_no_records.tar.bz2"),
 		archiveModified: archiveBuilt2026,
 		changes: changesCSV(
-			[2]string{"cve-2026-0004.json", archiveBuilt2026.Add(time.Hour).Format(time.RFC3339)},
+			[2]string{"2026/cve-2026-0004.json", archiveBuilt2026.Add(time.Hour).Format(time.RFC3339)},
 		),
 		docs: map[string]string{
-			"cve-2026-0004.json": newDoc,
+			"2026/cve-2026-0004.json": newDoc,
 		},
 	}
 	s := serve(t, f)
@@ -372,32 +431,41 @@ func TestFetch_DeltaOnlyEcosystemSatisfiesTheCoverageGuard(t *testing.T) {
 }
 
 // changes.csv is read start to finish, not stopped at the first row before
-// the cutoff -- SUSE's own file sorts OLDEST first (verified live), so an
-// early exit borrowed from Red Hat's newest-first assumption would return
-// NOTHING here: the very first row is always old.
-func TestChangedSince_ReadsAscendingFileWithNoEarlyExit(t *testing.T) {
-	s := serve(t, &feed{
-		changes: changesCSV(
-			[2]string{"cve-1999-0003.json", "1999-01-01T00:00:00Z"},
-			[2]string{"cve-2010-0001.json", "2010-01-01T00:00:00Z"},
-			[2]string{"cve-2026-0002.json", "2026-08-19T12:00:00Z"},
-			[2]string{"cve-2026-0003.json", "2026-08-19T13:00:00Z"},
-		),
-	})
-	p := New(Options{BaseURL: s.URL})
+// the cutoff. SUSE has shipped the file in both orders -- oldest first when
+// verified live on 2026-08-20, newest first since 2026-10-15 (D122) -- and an
+// early exit is correct for at most one of them: borrowed from Red Hat's
+// newest-first file it returns NOTHING on the ascending one, whose very first
+// row is always old. Both orders must yield the same rows.
+func TestChangedSince_ReadsWholeFileInEitherOrder(t *testing.T) {
+	ascending := [][2]string{
+		{"2023/cve-1999-0003.json", "1999-01-01T00:00:00Z"},
+		{"2024/cve-2010-0001.json", "2010-01-01T00:00:00Z"},
+		{"2026/cve-2026-0002.json", "2026-08-19T12:00:00Z"},
+		{"2026/cve-2026-0003.json", "2026-08-19T13:00:00Z"},
+	}
+	descending := make([][2]string, len(ascending))
+	for i, r := range ascending {
+		descending[len(ascending)-1-i] = r
+	}
 	cutoff := time.Date(2026, 8, 19, 0, 0, 0, 0, time.UTC)
-	paths, err := p.changedSince(context.Background(), cutoff)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]bool{"cve-2026-0002.json": true, "cve-2026-0003.json": true}
-	if len(paths) != len(want) {
-		t.Fatalf("changedSince = %v, want exactly %v", paths, want)
-	}
-	for _, p := range paths {
-		if !want[p] {
-			t.Errorf("changedSince returned %q, not one of the rows on or after the cutoff", p)
-		}
+	want := map[string]bool{"2026/cve-2026-0002.json": true, "2026/cve-2026-0003.json": true}
+
+	for name, rows := range map[string][][2]string{"ascending": ascending, "descending": descending} {
+		t.Run(name, func(t *testing.T) {
+			s := serve(t, &feed{changes: changesCSV(rows...)})
+			paths, err := New(Options{BaseURL: s.URL}).changedSince(context.Background(), cutoff)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(paths) != len(want) {
+				t.Fatalf("changedSince = %v, want exactly %v", paths, want)
+			}
+			for _, p := range paths {
+				if !want[p] {
+					t.Errorf("changedSince returned %q, not one of the rows on or after the cutoff", p)
+				}
+			}
+		})
 	}
 }
 

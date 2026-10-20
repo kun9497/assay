@@ -33,13 +33,23 @@
 //     instead (archiveLastModified). A response with no such header, or one
 //     that will not parse, fails the build rather than falling back to
 //     time.Now(), for the identical reason archiveDate's failure is fatal.
-//   - changes.csv sorts OLDEST FIRST, not newest first (verified live: the
-//     file's first rows are from 2023, its last from the day it was
-//     generated). redhat.changedSince's early exit on the first old row
-//     depends on newest-first order and would return NOTHING on this file;
+//   - changes.csv's sort order is not one SUSE has kept: OLDEST FIRST when
+//     verified live (the file's first rows were from 2023, its last from the
+//     day it was generated), NEWEST FIRST since the 2026-10-15 layout change
+//     (D122). redhat.changedSince's early exit on the first old row depends
+//     on newest-first order and would have returned NOTHING on the old file;
 //     changedSince here reads it start to finish instead, which costs
-//     nothing an early exit would have saved at 63,784 rows and a few
+//     nothing an early exit would have saved at ~71,600 rows and a few
 //     megabytes.
+//
+// D122: since 2026-10-15 the per-document tree is split into year
+// directories (csaf-vex/2023/ ... csaf-vex/2026/, the year of first
+// publication rather than the CVE's), index.txt and changes.csv name
+// documents with that prefix, and the flat URLs 404. Measured 2026-10-20:
+// the archive holds 71,711 documents, every one under a year directory, no
+// basename in two of them, and 119 more than index.txt lists (old CVEs whose
+// documents are still served) -- the archive, not the index, is the
+// complete set.
 //
 // The key SUSE's own product tree needs that Red Hat's never did: one SLES
 // release's mainline fixes are spread across roughly twenty per-module
@@ -183,10 +193,12 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		if err != nil {
 			return store.Provenance{}, fmt.Errorf("suse: read %s: %w", archiveName, err)
 		}
-		// The archive's entries are "csaf-vex/cve-YYYY-NNNNN.json" alongside
-		// "*.json.asc" and "*.json.sha256" siblings and directory entries
-		// (verified live); the .json suffix check alone excludes both
-		// siblings, since neither ends in ".json".
+		// The archive's entries are "csaf-vex/<year>/cve-YYYY-NNNNN.json"
+		// (flat "csaf-vex/cve-..." before 2026-10-15, D122 -- the walk reads
+		// either, since it never parses the path) alongside "*.json.asc" and
+		// "*.json.sha256" siblings and directory entries (verified live); the
+		// .json suffix check alone excludes both siblings, since neither ends
+		// in ".json".
 		if h.Typeflag != tar.TypeReg || !strings.HasSuffix(h.Name, ".json") {
 			continue
 		}
