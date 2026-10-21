@@ -353,6 +353,16 @@ the Leap key would then tell a free Leap user a fix is available that their `zyp
 cannot reach — a worse error than the no-fix the native entry honestly reports. So the union
 is not merely deferred for cost; for the no-fix-native case it would be wrong.
 
+**Native-wins includes a native "not affected" (D125, 2026-10-21).** The gap-fill above
+read "native" as a native *affected* entry only; `known_not_affected` was unread, so SUSE
+saying "Leap 15.6's libtiff6 is not affected" looked like SUSE saying nothing, and the mirror
+filled it with SLE SP6's "affected, no fix" (cve-2025-61144, found by the 2026-10-20 external
+review). A native verdict of either sign now wins: the mirror declines for that package on
+that release, nothing is stored from the not-affected bucket (the store has no shape for it,
+D1, and must not grow one for a claim only this tie-break consumes), and the count is on the
+progress line. This does not reopen the union question: it removes a derived claim, it never
+merges one.
+
 **What is actually deferred** is the one sub-case where union would add real information: a
 native Leap entry that is no-fix AND an SLE entry that is fixed AND the fix genuinely did
 reach Leap's repos (SUSE simply did not regenerate the Leap entry). That subset was not

@@ -816,6 +816,12 @@ exited 0 while 24 findings went unmentioned.
       codestream (no new comparer, D9); an allowlist {15.0–15.6, 16.0} refuses phantom keys
       (SLE 15 SP7 → no Leap 15.7); `Affected.CrossMappedFrom` discloses the SLE
       (LTSS-channel) fix version in every renderer
+- [x] Leap's own `known_not_affected` stops the D108 mirror (D125) — a native Leap
+      not-affected entry is SUSE's verdict on the package, not an absence; the mirror had
+      emitted an SLE-derived "affected at every version" entry over it (cve-2025-61144's
+      libtiff6 on Leap 15.6, a false positive on every Leap image with it installed).
+      Nothing is stored from the bucket (D1); the decline is per package and release,
+      checked after native-wins, and counted on the progress line
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15

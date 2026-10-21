@@ -368,6 +368,17 @@ Leap 자신의 저장소는 아직 fix를 내놓지 않았다고(SLE는 냈어�
 비용 때문에 미뤄진 게 아니다; no-fix-native 케이스에서는 애초에 틀린
 접근이다.
 
+**Native-wins에는 native "not affected"도 포함된다 (D125, 2026-10-21).** 위의
+gap-fill은 "native"를 native *affected* entry로만 읽었다; `known_not_affected`는
+읽지 않았으므로, SUSE가 "Leap 15.6의 libtiff6는 영향 없음"이라고 말한 것이
+SUSE가 아무 말도 하지 않은 것처럼 보였고, 미러가 그 자리를 SLE SP6의
+"affected, no fix"로 채웠다(cve-2025-61144, 2026-10-20 외부 검토가 발견). 이제
+어느 쪽이든 native 판정이 이긴다: 미러는 그 릴리스의 그 패키지에 대해
+물러나고, not-affected bucket에서 저장되는 것은 없으며(store에는 그런 모양이
+없고(D1), 이 tie-break만 소비하는 주장을 위해 모양을 늘려서는 안 된다),
+개수는 progress 줄에 나온다. 이것은 union 질문을 다시 열지 않는다: 끌어온
+주장을 하나 제거할 뿐, 병합하는 일은 없다.
+
 **실제로 미뤄진 것**은 union이 실질적인 정보를 더해줄 단 하나의 하위
 사례다: native Leap entry가 no-fix이면서 SLE entry는 fixed이고 그 fix가
 실제로 Leap의 저장소에도 도달한 경우(SUSE가 그저 Leap entry를 재생성하지

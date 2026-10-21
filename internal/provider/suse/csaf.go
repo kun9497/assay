@@ -721,7 +721,10 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 			// below: nothing from this bucket is ever stored, so an id that
 			// does not resolve is not a discard. Only a Leap key matters --
 			// an SLE not-affected entry has no consumer here, and a Leap one
-			// is read only by the mirror pass.
+			// is read only by the mirror pass. The Leap guard is intent, not
+			// behaviour: dropping it is an equivalent mutation (verified
+			// 2026-10-21), because the mirror pass looks up Leap keys only
+			// and an SLE key in this map is never read.
 			k, _, why := resolveProduct(id, folded, declared, packages)
 			if why != skipNone || !strings.HasPrefix(k.eco, "openSUSE Leap:") {
 				continue
