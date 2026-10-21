@@ -1,6 +1,7 @@
 package vex
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/google/go-containerregistry/pkg/name"
@@ -145,60 +146,83 @@ func imageFromPURL(p pkgmeta.PURL) (imageRef, bool) {
 // An image named through a transport — "docker://ghcr.io/org/app:1.2", the
 // spelling skopeo and the containers tools use — is read as the reference
 // after it. One that names a file or a layout ("docker-archive:/srv/app.tar",
-// "oci-dir:./layout"), or a transport reference that does not parse, is still
-// an image product and identifies nothing: dropping it would unscope its
-// statement, so it scopes it to no target instead. The same holds for a
-// pkg:docker or pkg:oci purl spelled in a case ParsePURL does not read.
-func imageFromReference(s string) (imageRef, bool) {
+// "oci-dir:./layout") is still an image product and identifies nothing:
+// dropping it would unscope its statement, so it scopes it to no target
+// instead. The same holds for a pkg:docker or pkg:oci purl spelled in a case
+// ParsePURL does not read.
+//
+// D124: so does a reference that is shaped like an image and does not parse —
+// a digest that is not one ("app@sha256:truncated", "app@sha512:bad"), a tag
+// or a repository go-containerregistry refuses ("Org/App"), or a transport
+// reference whose remainder is any of those. Before D124 these came back as
+// not-an-image, the caller made them a plain identifier, and the statement
+// lost its image scope: a bare package product beside such a reference then
+// suppressed that package on every image (2026-10-20 external review, exit 1
+// -> 0 on an unrelated image). The error says why, so the caller can warn
+// rather than drop the statement silently.
+//
+// "name@version" with no "algo:" after the "@" is not image-shaped at all —
+// it is npm's, Go's and Python's spelling of a package — so it stays a plain
+// identifier. The first D124 cut read it as a misspelled image and unscoped
+// the subcomponents it grouped.
+func imageFromReference(s string) (imageRef, bool, error) {
 	lower := strings.ToLower(s)
 	for _, tr := range referenceTransports {
 		if strings.HasPrefix(lower, tr) {
-			if r, ok := imageFromReference(s[len(tr):]); ok {
-				return r, true
+			r, ok, err := imageFromReference(s[len(tr):])
+			if ok {
+				return r, true, err
 			}
-			return imageRef{}, true
+			return imageRef{}, true, fmt.Errorf("%q after %s is not an image reference", s[len(tr):], tr)
 		}
 	}
 	for _, tr := range fileTransports {
 		if strings.HasPrefix(lower, tr) {
-			return imageRef{}, true
+			return imageRef{}, true, nil
 		}
 	}
 	if isImagePURLType(s) {
-		return imageRef{}, true
+		return imageRef{}, true, nil
 	}
 	if s == "" || strings.ContainsAny(s, " \t\n") || strings.Contains(s, "://") ||
 		!strings.ContainsAny(s, "/:@") {
-		return imageRef{}, false
+		return imageRef{}, false, nil
 	}
 	for _, scheme := range []string{"cpe:", "urn:", "pkg:"} {
 		if strings.HasPrefix(lower, scheme) {
-			return imageRef{}, false
+			return imageRef{}, false, nil
 		}
 	}
 	if repo, digest, ok := strings.Cut(s, "@"); ok {
+		if !strings.Contains(digest, ":") {
+			// "name@version" — lodash@4.17.21, github.com/org/mod@v1.2.0 —
+			// is how npm, Go and Python spell a package, and never how an
+			// image is spelled: an image's "@" is always followed by
+			// "algo:hex". Not an image, and not a misspelled one either.
+			return imageRef{}, false, nil
+		}
 		if !isDigest(digest) {
-			return imageRef{}, false
+			return imageRef{}, true, fmt.Errorf("%q is not a digest", digest)
 		}
 		ref, err := name.NewDigest(repo + "@" + digest)
 		if err != nil {
-			return imageRef{}, false
+			return imageRef{}, true, err
 		}
-		return imageRef{repository: ref.Context().Name(), digest: ref.DigestStr()}, true
+		return imageRef{repository: ref.Context().Name(), digest: ref.DigestStr()}, true, nil
 	}
 	last := s[strings.LastIndexByte(s, '/')+1:]
 	if strings.Contains(last, ":") {
 		tag, err := name.NewTag(s)
 		if err != nil {
-			return imageRef{}, false
+			return imageRef{}, true, err
 		}
-		return imageRef{repository: tag.Context().Name(), tag: tag.TagStr()}, true
+		return imageRef{repository: tag.Context().Name(), tag: tag.TagStr()}, true, nil
 	}
 	repo, err := name.NewRepository(s)
 	if err != nil {
-		return imageRef{}, false
+		return imageRef{}, true, err
 	}
-	return imageRef{repository: repo.Name()}, true
+	return imageRef{repository: repo.Name()}, true, nil
 }
 
 // referenceTransports prefix an image reference; fileTransports name an image
