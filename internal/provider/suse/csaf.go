@@ -488,7 +488,54 @@ func resolveProduct(id string, bare bool, folded map[string]string, declared map
 		}
 		return productKey{eco: key, pkg: comp}, "", skipNone
 	}
+	if pkg.version == "" {
+		// D131: the generator failed to split this build's purl at all --
+		// the whole NEVR is the purl's name and the version is empty. The
+		// bucket says it is a build (0 of 4,396,450 recommended ids name a
+		// bare product, D126), so the product_id is "name-ver-rel" by rpm's
+		// rule and is split here; stored as the purl spelt it, the entry
+		// sat unfixed under a name no installed rpm has, reaching nothing.
+		// Two guards keep the split to the measured shape: the purl's name
+		// must be the product_id verbatim (the generator copied it whole
+		// rather than cutting it somewhere else), and the product_id must
+		// read as a build (splitNEVR). An id failing either keeps exactly
+		// the pre-D131 behaviour below -- unfixed under the purl's name,
+		// never dropped -- and is counted, so a future shape is a visible
+		// no-fix entry rather than a name cut at the wrong hyphen.
+		if name, verrel, ok := splitNEVR(comp); ok && pkg.name == comp {
+			st.RecommendedNamedByNEVRSplit++
+			return productKey{eco: key, pkg: name}, verrel, skipNone
+		}
+		st.RecommendedEmptyVersionKept++
+	}
 	return productKey{eco: key, pkg: pkg.name}, pkg.version, skipNone
+}
+
+// splitNEVR reads a product_id as rpm does -- the release is everything
+// after the last hyphen, the version everything after the one before it,
+// the name the rest -- and reports false unless the result READS as a build:
+// a non-empty name, a version that starts with a digit, and a release that
+// contains a dot. The two shape checks are what keep a bare product name
+// that happens to carry two hyphens from being cut: "typelib-1_0-Vte" and
+// "libwmf-0_2-7" (D126's measured bare shapes) both fail on the release,
+// "cdparanoia-IIIalpha9.8-691.22" on the version. SUSE's own well-formed
+// splits were measured for the same two shapes across the whole 2026-10-19
+// archive before the checks were chosen (see D131); neither check refuses
+// any of the 16,736 ids the rule exists for.
+func splitNEVR(id string) (name, verrel string, ok bool) {
+	rel := strings.LastIndex(id, "-")
+	if rel < 0 {
+		return "", "", false
+	}
+	ver := strings.LastIndex(id[:rel], "-")
+	if ver <= 0 {
+		return "", "", false
+	}
+	name, version, release := id[:ver], id[ver+1:rel], id[rel+1:]
+	if version == "" || version[0] < '0' || version[0] > '9' || !strings.Contains(release, ".") {
+		return "", "", false
+	}
+	return name, version + "-" + release, true
 }
 
 // The one remediation category SUSE's own feed has been measured to use for
@@ -648,6 +695,36 @@ type stats struct {
 	// changed.
 	BareNamedByProductID int
 
+	// RecommendedNamedByNEVRSplit is D131's rule doing visible work: a
+	// recommended id whose leaf purl carried the whole build as its NAME
+	// with an empty version ("pkg:rpm/suse/kernel-coco-6.4.0-15061.9.coco15sp6.1@"),
+	// named and versioned by splitting its product_id by rpm's rule instead
+	// of being stored unfixed under a name no installed rpm has. Per id.
+	// 16,736 across the 2026-10-19 archive on folding keys, every one the
+	// Confidential Computing Technical Preview module's kernel-coco family
+	// (and 168 qemu builds) on SLES:15.SP6; the 91,704 more on Liberty,
+	// Teradata, HPC and Micro platforms never reach this counter because
+	// foldKey refuses those platforms first. A jump is the generator
+	// failing on a new product; a collapse is SUSE having fixed it.
+	RecommendedNamedByNEVRSplit int
+	// RecommendedEmptyVersionKept is the rule declining: a recommended id
+	// whose purl carried no version but which did not read as a build, or
+	// whose purl name was not the product_id verbatim, stored as before
+	// D131 -- unfixed under the purl's name. 0 on the 2026-10-19 archive;
+	// the day it is not is the day the generator produced a third shape.
+	RecommendedEmptyVersionKept int
+	// SkippedLeapMirrorSplitBuild counts SLE entries D108/D128 did NOT hand
+	// to an openSUSE Leap key because every fixed range they carried came
+	// from a D131 split. Such a build's release numbering is its own
+	// module's (15061.N.coco15sp6.1 for the Confidential Computing
+	// Technical Preview), not the codestream's 150600.N that Leap shares,
+	// so a Leap build compared against it would read as fixed by a number
+	// from a different lineage. 16,568 on the 2026-10-19 archive, the
+	// kernel-coco family, which no Leap release ships. An SLE entry that
+	// also carries a codestream fix mirrors those ranges alone (the 168
+	// qemu/ovmf builds, whose Leap twins are native anyway).
+	SkippedLeapMirrorSplitBuild int
+
 	// ArchiveSuperseded counts archive documents skipped because the delta
 	// pass, which runs first since D129, fetched a newer copy of the same
 	// document -- whatever that copy converted to. Only a FETCHED copy
@@ -716,6 +793,15 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 	// verdict. Keyed like native: per release and package, whether the id
 	// was the bare package or a shipped build.
 	leapNotAffected := map[productKey]bool{}
+	// splitBuild marks, per key, the fixed versions D131 derived by splitting
+	// a product_id (resolveProduct). Read by the D108 mirror and D128 passes
+	// only: such a version carries a module's own release numbering
+	// (15061.N.coco15sp6.1), not the codestream's, so it never crosses to a
+	// Leap key -- a Leap build compared against it would read as fixed by a
+	// number from a different lineage. On the SLE key itself it is stored
+	// like any fix: that is the module's own package on the release that
+	// ships it.
+	splitBuild := map[productKey]map[string]bool{}
 	note := func(k productKey) {
 		if !seen[k] {
 			seen[k] = true
@@ -779,10 +865,20 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 		// arrays -- knowable only once both loops below finish.
 		var pendingLTSS []ltssEntry
 		for _, id := range v.ProductStatus.Recommended {
-			plat, _, _ := strings.Cut(id, ":")
+			plat, comp, _ := strings.Cut(id, ":")
 			k, version, why := resolveProduct(id, false, folded, declared, packages, st)
 			if !countSkip(why) {
 				continue
+			}
+			// D131: a version the leaf did not carry came from splitting the
+			// product_id -- a build from a module with its own release
+			// numbering. Remembered per key so the Leap passes below can tell
+			// its range from a codestream fix.
+			if version != "" && packages[comp].version == "" {
+				if splitBuild[k] == nil {
+					splitBuild[k] = map[string]bool{}
+				}
+				splitBuild[k][version] = true
 			}
 			if isLTSSOrigin(plat) {
 				pendingLTSS = append(pendingLTSS, ltssEntry{k, version, true})
@@ -972,9 +1068,17 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 			// so len(fixed[nk]) == 0 already implies unfixed[nk]; dropping the
 			// clause is an equivalent mutation (verified 2026-10-21).
 			nk, sk := productKey{eco: leap, pkg: a.Name}, productKey{eco: a.Ecosystem, pkg: a.Name}
-			if unfixed[nk] && len(fixed[nk]) == 0 && len(fixed[sk]) > 0 {
+			// D131: only codestream fixes cross; a split build's range is
+			// dropped here before the fixed-range test, so an SLE twin whose
+			// ONLY fix is such a build offers nothing and native wins as if
+			// it carried no fix at all (counted below with the mirror's).
+			crossable := fixedRangesOf(withoutSplitBuilds(a.Ranges, splitBuild[sk]))
+			if unfixed[nk] && len(fixed[nk]) == 0 && len(fixed[sk]) > 0 && len(crossable) == 0 {
+				st.SkippedLeapMirrorSplitBuild++
+			}
+			if unfixed[nk] && len(fixed[nk]) == 0 && len(crossable) > 0 {
 				nat := &adv.Affected[ni]
-				nat.Ranges = fixedRangesOf(a.Ranges)
+				nat.Ranges = crossable
 				nat.CrossMappedFrom = a.Ecosystem
 				// The no-fix range it replaced is gone with it: out of the
 				// total AND out of the D52 split fixStateFor put it in, or the
@@ -1010,6 +1114,15 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 			st.SkippedLeapNotAffected++
 			continue
 		}
+		// D131: a split build's range never crosses (see splitBuild). An
+		// entry with nothing else to offer is not mirrored at all and
+		// counted; one that also carries a codestream fix or a no-fix range
+		// mirrors those alone.
+		rs := withoutSplitBuilds(a.Ranges, splitBuild[productKey{eco: a.Ecosystem, pkg: a.Name}])
+		if len(rs) == 0 {
+			st.SkippedLeapMirrorSplitBuild++
+			continue
+		}
 		// Ranges is aliased, not copied: the store treats every emitted
 		// advisory as immutable, and nothing mutates a range after convert
 		// returns. ModuleStream carries over so a modular SLE entry mirrors as
@@ -1017,7 +1130,7 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 		mirrors = append(mirrors, advisory.Affected{
 			Ecosystem:       leap,
 			Name:            a.Name,
-			Ranges:          a.Ranges,
+			Ranges:          rs,
 			ModuleStream:    a.ModuleStream,
 			CrossMappedFrom: a.Ecosystem,
 		})
@@ -1027,6 +1140,30 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 
 	st.Advisories++
 	return adv, true
+}
+
+// withoutSplitBuilds returns rs less every range whose fixed event is one of
+// the versions D131 derived by splitting a product_id (splitBuild[key]). The
+// input is returned as is when there is nothing to drop, which is every key
+// but the 16,736 measured, so the mirror still aliases the SLE entry's own
+// slice in the common case; a filtered result is a fresh slice.
+func withoutSplitBuilds(rs []advisory.Range, split map[string]bool) []advisory.Range {
+	if len(split) == 0 {
+		return rs
+	}
+	out := make([]advisory.Range, 0, len(rs))
+	for _, r := range rs {
+		keep := true
+		for _, e := range r.Events {
+			if e.Fixed != "" && split[e.Fixed] {
+				keep = false
+			}
+		}
+		if keep {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // fixedRangesOf returns the ranges that carry a fixed event, copied down to

@@ -338,7 +338,9 @@ func (s stats) String() string {
 			"the package (D125), %d native Leap no-fix entries given their SLE twin's fix (D128, "+
 			"%d of them with a stated fix-state reason dropped); "+
 			"%d bare entries named by their product id where the purl's name "+
-			"differed (D126); delta: %d changed since the archive, %d fetched, %d already "+
+			"differed (D126), %d recommended builds named by splitting their product id where "+
+			"the purl carried no version (D131, %d such ids kept as spelt, %d SLE entries not mirrored "+
+			"onto Leap because their only fix was such a build); delta: %d changed since the archive, %d fetched, %d already "+
 			"withdrawn, %d yielded a record, %d retried, %d rescued by a retry, "+
 			"%d archive documents superseded by a newer copy the delta fetched (D129)",
 		s.Documents, s.Advisories, s.Affected, s.Unfixable,
@@ -348,7 +350,8 @@ func (s stats) String() string {
 		s.SkippedUnknownPlatform, s.SkippedUnfoldablePlatform, s.SkippedUnknownPackage,
 		s.SkippedNoCVE, s.SkippedBadDoc, s.SkippedLTSSShadowedByMainline,
 		s.MirroredToLeap, s.SkippedLeapNativeWins, s.SkippedLeapNotAffected, s.LeapNoFixReplacedBySLEFix,
-		s.LeapNoFixReplacedWithReason, s.BareNamedByProductID,
+		s.LeapNoFixReplacedWithReason, s.BareNamedByProductID, s.RecommendedNamedByNEVRSplit,
+		s.RecommendedEmptyVersionKept, s.SkippedLeapMirrorSplitBuild,
 		s.DeltaListed, s.DeltaFetched, s.DeltaGone, s.DeltaAdvisories,
 		s.DeltaRetried, s.DeltaRescued, s.ArchiveSuperseded)
 }

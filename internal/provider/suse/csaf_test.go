@@ -1517,3 +1517,289 @@ func TestConvert_DoesNotMirror_SP7_NoLeap157(t *testing.T) {
 		t.Fatalf("MirroredToLeap = %d, want 0", st.MirroredToLeap)
 	}
 }
+
+// D131: a recommended id whose leaf purl carries the whole build as the NAME
+// with an empty version -- SUSE's generator failed to split it -- is a build
+// all the same, and the product_id it came from is "name-ver-rel" by rpm's
+// own rule. The entry is stored under the rpm name, fixed at ver-rel, not
+// under a name no installed rpm has with no fix at all. The measured case
+// (the whole 2026-10-19 archive, folding keys only): 16,736 ids, every one
+// the Confidential Computing Technical Preview module's kernel-coco family
+// on SLES:15.SP6, 16,568 of them the only entry their CVE carries for the
+// package -- a silent miss of 2,071 CVEs on a host running kernel-coco.
+func TestConvert_RecommendedNEVRNameIsSplit(t *testing.T) {
+	const plat = "SUSE Linux Enterprise Module for Confidential Computing Technical Preview 15 SP6"
+	d := buildDoc(t, "CVE-2024-50102",
+		[]string{plat},
+		map[string]string{
+			"kernel-coco-6.4.0-15061.9.coco15sp6.1": "pkg:rpm/suse/kernel-coco-6.4.0-15061.9.coco15sp6.1@",
+		},
+		[]string{plat + ":kernel-coco-6.4.0-15061.9.coco15sp6.1"},
+		nil, nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped the document")
+	}
+	by := affectedByName(adv)
+	got, found := by["SLES:15.SP6/kernel-coco"]
+	if !found || len(got.Ranges) != 1 || len(got.Ranges[0].Events) != 2 || got.Ranges[0].Events[1].Fixed != "6.4.0-15061.9.coco15sp6.1" {
+		t.Fatalf("not stored as kernel-coco fixed at 6.4.0-15061.9.coco15sp6.1: found=%v %+v", found, adv.Affected)
+	}
+	if _, junk := by["SLES:15.SP6/kernel-coco-6.4.0-15061.9.coco15sp6.1"]; junk {
+		t.Errorf("the NEVR-named entry is still stored beside the split one: %+v", adv.Affected)
+	}
+	if st.RecommendedNamedByNEVRSplit != 1 || st.Unfixable != 0 || st.Affected != 1 {
+		t.Errorf("counters: RecommendedNamedByNEVRSplit=%d Unfixable=%d Affected=%d, want 1, 0, 1",
+			st.RecommendedNamedByNEVRSplit, st.Unfixable, st.Affected)
+	}
+}
+
+// The split is for product_ids that READ as a build. One with no ver-rel tail
+// at all, or whose would-be release carries no digit (the typelib-1_0-Vte
+// shape D126 measured among bare names), keeps the behaviour it had: stored
+// as the purl spelt it, with no version to compare against -- unfixed, not
+// dropped, exactly as before D131. Neither shape appears among the 16,736
+// measured ids; the guard is what keeps a future one from being keyed under
+// a name cut at the wrong hyphen.
+func TestConvert_RecommendedEmptyVersionNotABuildStaysAsBefore(t *testing.T) {
+	const plat = "SUSE Linux Enterprise Server 15 SP6"
+	d := buildDoc(t, "CVE-2025-1002",
+		[]string{plat},
+		map[string]string{
+			"onedash-only":                  "pkg:rpm/suse/onedash-only@",
+			"typelib-1_0-Vte":               "pkg:rpm/suse/typelib-1_0-Vte@",
+			"cdparanoia-IIIalpha9.8-691.22": "pkg:rpm/suse/cdparanoia-IIIalpha9.8-691.22@",
+		},
+		[]string{plat + ":onedash-only", plat + ":typelib-1_0-Vte", plat + ":cdparanoia-IIIalpha9.8-691.22"},
+		nil, nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped the document")
+	}
+	by := affectedByName(adv)
+	for _, name := range []string{"SLES:15.SP6/onedash-only", "SLES:15.SP6/typelib-1_0-Vte", "SLES:15.SP6/cdparanoia-IIIalpha9.8-691.22"} {
+		a, found := by[name]
+		if !found {
+			t.Errorf("%s missing: %+v", name, adv.Affected)
+			continue
+		}
+		for _, r := range a.Ranges {
+			for _, e := range r.Events {
+				if e.Fixed != "" {
+					t.Errorf("%s has a fixed event %q, want none: the id does not read as a build", name, e.Fixed)
+				}
+			}
+		}
+	}
+	for _, cut := range []string{"SLES:15.SP6/typelib", "SLES:15.SP6/cdparanoia"} {
+		if _, split := by[cut]; split {
+			t.Errorf("%s: a non-build id was cut at a hyphen: %+v", cut, adv.Affected)
+		}
+	}
+	if st.RecommendedNamedByNEVRSplit != 0 || st.RecommendedEmptyVersionKept != 3 || st.Unfixable != 3 {
+		t.Errorf("counters: RecommendedNamedByNEVRSplit=%d RecommendedEmptyVersionKept=%d Unfixable=%d, want 0, 3, 3",
+			st.RecommendedNamedByNEVRSplit, st.RecommendedEmptyVersionKept, st.Unfixable)
+	}
+}
+
+// The purl's name must be the product_id verbatim. A build-shaped product_id
+// whose empty-version purl names something ELSE is a shape the generator has
+// not produced; it is kept as the purl spelt it (unfixed under "kernel"),
+// counted, and never split -- the split would trust a product_id the purl
+// disagrees with.
+func TestConvert_RecommendedEmptyVersionPurlNameDiffers_IsKept(t *testing.T) {
+	const plat = "SUSE Linux Enterprise Module for Confidential Computing Technical Preview 15 SP6"
+	d := buildDoc(t, "CVE-2025-1003",
+		[]string{plat},
+		map[string]string{"kernel-coco-6.4.0-15061.9.coco15sp6.1": "pkg:rpm/suse/kernel@"},
+		[]string{plat + ":kernel-coco-6.4.0-15061.9.coco15sp6.1"},
+		nil, nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped the document")
+	}
+	by := affectedByName(adv)
+	if _, split := by["SLES:15.SP6/kernel-coco"]; split {
+		t.Errorf("split despite the purl naming kernel, not the product_id: %+v", adv.Affected)
+	}
+	a, found := by["SLES:15.SP6/kernel"]
+	if !found || len(a.Ranges) != 1 || len(a.Ranges[0].Events) != 1 {
+		t.Fatalf("not kept as the purl spelt it (kernel, unfixed): found=%v %+v", found, adv.Affected)
+	}
+	if st.RecommendedNamedByNEVRSplit != 0 || st.RecommendedEmptyVersionKept != 1 {
+		t.Errorf("counters: RecommendedNamedByNEVRSplit=%d RecommendedEmptyVersionKept=%d, want 0, 1",
+			st.RecommendedNamedByNEVRSplit, st.RecommendedEmptyVersionKept)
+	}
+}
+
+// A well-formed recommended build and a bare known_affected are untouched by
+// D131: the first keeps its purl split, the second D126's product_id name,
+// and neither counter moves. Pinned beside the rule because both paths run
+// through the same function.
+func TestConvert_D131LeavesWellFormedAndBareAlone(t *testing.T) {
+	const plat = "SUSE Linux Enterprise Server 15 SP6"
+	d := buildDoc(t, "CVE-2025-1004",
+		[]string{plat},
+		map[string]string{
+			"libwmf-0_2-7-0.2.12-150000.4.4.1": "pkg:rpm/suse/libwmf-0_2-7@0.2.12-150000.4.4.1",
+			"libglib-2_0-0":                    "pkg:rpm/suse/libglib@2_0-0",
+		},
+		[]string{plat + ":libwmf-0_2-7-0.2.12-150000.4.4.1"},
+		[]string{plat + ":libglib-2_0-0"}, nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped the document")
+	}
+	by := affectedByName(adv)
+	if a, found := by["SLES:15.SP6/libwmf-0_2-7"]; !found || a.Ranges[0].Events[1].Fixed != "0.2.12-150000.4.4.1" {
+		t.Errorf("well-formed build changed: found=%v %+v", found, adv.Affected)
+	}
+	if a, found := by["SLES:15.SP6/libglib-2_0-0"]; !found || len(a.Ranges[0].Events) != 1 {
+		t.Errorf("bare known_affected changed: found=%v %+v", found, adv.Affected)
+	}
+	if st.RecommendedNamedByNEVRSplit != 0 || st.RecommendedEmptyVersionKept != 0 || st.BareNamedByProductID != 1 {
+		t.Errorf("counters: RecommendedNamedByNEVRSplit=%d RecommendedEmptyVersionKept=%d BareNamedByProductID=%d, want 0, 0, 1",
+			st.RecommendedNamedByNEVRSplit, st.RecommendedEmptyVersionKept, st.BareNamedByProductID)
+	}
+}
+
+// A split build's range never crosses to openSUSE Leap (D108): its release
+// numbering is the module's own, not the codestream's Leap shares, so a Leap
+// build compared against it would read as fixed by a number from another
+// lineage. An SLE entry whose only fix is such a build is not mirrored at
+// all, and counted.
+func TestConvert_SplitBuildIsNotMirroredOntoLeap(t *testing.T) {
+	const plat = "SUSE Linux Enterprise Module for Confidential Computing Technical Preview 15 SP6"
+	d := buildDoc(t, "CVE-2024-50102",
+		[]string{plat},
+		map[string]string{"kernel-coco-6.4.0-15061.9.coco15sp6.1": "pkg:rpm/suse/kernel-coco-6.4.0-15061.9.coco15sp6.1@"},
+		[]string{plat + ":kernel-coco-6.4.0-15061.9.coco15sp6.1"},
+		nil, nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped the document")
+	}
+	by := affectedByName(adv)
+	if _, mirrored := by["openSUSE Leap:15.6/kernel-coco"]; mirrored {
+		t.Errorf("split build mirrored onto Leap 15.6: %+v", adv.Affected)
+	}
+	if _, kept := by["SLES:15.SP6/kernel-coco"]; !kept {
+		t.Errorf("SLE entry itself missing: %+v", adv.Affected)
+	}
+	if st.SkippedLeapMirrorSplitBuild != 1 || st.MirroredToLeap != 0 {
+		t.Errorf("counters: SkippedLeapMirrorSplitBuild=%d MirroredToLeap=%d, want 1, 0", st.SkippedLeapMirrorSplitBuild, st.MirroredToLeap)
+	}
+}
+
+// An SLE entry carrying BOTH a codestream fix and a split build (the qemu
+// shape: Basesystem's 8.2.7-150600.3.20.1 beside the Confidential Computing
+// module's 8.2.7-15061.6.coco15sp6.1) mirrors the codestream range alone.
+// On the SLE key both stay: the module's own build on the release that
+// ships it.
+func TestConvert_MixedEntryMirrorsOnlyTheCodestreamFix(t *testing.T) {
+	const base = "SUSE Linux Enterprise Module for Basesystem 15 SP6"
+	const coco = "SUSE Linux Enterprise Module for Confidential Computing Technical Preview 15 SP6"
+	d := buildDoc(t, "CVE-2024-7730",
+		[]string{base, coco},
+		map[string]string{
+			"qemu-8.2.7-150600.3.20.1":       "pkg:rpm/suse/qemu@8.2.7-150600.3.20.1",
+			"qemu-8.2.7-15061.6.coco15sp6.1": "pkg:rpm/suse/qemu-8.2.7-15061.6.coco15sp6.1@",
+		},
+		[]string{base + ":qemu-8.2.7-150600.3.20.1", coco + ":qemu-8.2.7-15061.6.coco15sp6.1"},
+		nil, nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped the document")
+	}
+	by := affectedByName(adv)
+	sle := by["SLES:15.SP6/qemu"]
+	if len(sle.Ranges) != 2 {
+		t.Fatalf("SLE qemu has %d ranges, want 2 (codestream and split build): %+v", len(sle.Ranges), sle.Ranges)
+	}
+	leap, found := by["openSUSE Leap:15.6/qemu"]
+	if !found || len(leap.Ranges) != 1 || leap.Ranges[0].Events[1].Fixed != "8.2.7-150600.3.20.1" {
+		t.Fatalf("Leap mirror = found=%v %+v, want exactly the codestream range fixed at 8.2.7-150600.3.20.1", found, leap.Ranges)
+	}
+	if st.MirroredToLeap != 1 || st.SkippedLeapMirrorSplitBuild != 0 || st.RecommendedNamedByNEVRSplit != 1 {
+		t.Errorf("counters: MirroredToLeap=%d SkippedLeapMirrorSplitBuild=%d RecommendedNamedByNEVRSplit=%d, want 1, 0, 1",
+			st.MirroredToLeap, st.SkippedLeapMirrorSplitBuild, st.RecommendedNamedByNEVRSplit)
+	}
+}
+
+// D128 yields to the same rule: a native Leap no-fix entry whose SLE twin's
+// ONLY fix is a split build keeps its no-fix range -- the twin has no
+// codestream fix to lend. 0 such pairs on the 2026-10-19 archive; pinned so
+// the first one is judged on Leap's own numbering rather than the module's.
+func TestConvert_NativeLeapNoFix_DoesNotTakeASplitBuildsFix(t *testing.T) {
+	const coco = "SUSE Linux Enterprise Module for Confidential Computing Technical Preview 15 SP6"
+	d := buildDoc(t, "CVE-2024-50102",
+		[]string{coco, "openSUSE Leap 15.6"},
+		map[string]string{
+			"kernel-coco-6.4.0-15061.9.coco15sp6.1": "pkg:rpm/suse/kernel-coco-6.4.0-15061.9.coco15sp6.1@",
+			"kernel-coco":                           "pkg:rpm/suse/kernel-coco@",
+		},
+		[]string{coco + ":kernel-coco-6.4.0-15061.9.coco15sp6.1"},
+		[]string{"openSUSE Leap 15.6:kernel-coco"}, nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped the document")
+	}
+	leap := affectedByName(adv)["openSUSE Leap:15.6/kernel-coco"]
+	if len(leap.Ranges) != 1 || len(leap.Ranges[0].Events) != 1 || leap.CrossMappedFrom != "" {
+		t.Fatalf("native Leap entry = %+v, want its own no-fix range, nothing cross-mapped", leap)
+	}
+	if st.LeapNoFixReplacedBySLEFix != 0 || st.SkippedLeapMirrorSplitBuild != 1 || st.SkippedLeapNativeWins != 1 {
+		t.Errorf("counters: LeapNoFixReplacedBySLEFix=%d SkippedLeapMirrorSplitBuild=%d SkippedLeapNativeWins=%d, want 0, 1, 1",
+			st.LeapNoFixReplacedBySLEFix, st.SkippedLeapMirrorSplitBuild, st.SkippedLeapNativeWins)
+	}
+}
+
+// The D131 counter reaches the progress line, as a pair with its D126
+// neighbour so a doubled argument cannot pass.
+func TestStatsString_ReportsRecommendedNamedByNEVRSplit(t *testing.T) {
+	got := stats{BareNamedByProductID: 4, RecommendedNamedByNEVRSplit: 7, RecommendedEmptyVersionKept: 2, SkippedLeapMirrorSplitBuild: 5}.String()
+	want := "4 bare entries named by their product id where the purl's name differed (D126), " +
+		"7 recommended builds named by splitting their product id where the purl carried no version " +
+		"(D131, 2 such ids kept as spelt, 5 SLE entries not mirrored onto Leap because their only fix was such a build)"
+	if !strings.Contains(got, want) {
+		t.Errorf("stats.String() = %q, want it to contain %q", got, want)
+	}
+}
+
+// splitNEVR's branches the convert test cannot reach one by one.
+func TestSplitNEVR(t *testing.T) {
+	cases := []struct {
+		in, name, verrel string
+		ok               bool
+	}{
+		{"kernel-coco-6.4.0-15061.9.coco15sp6.1", "kernel-coco", "6.4.0-15061.9.coco15sp6.1", true},
+		{"kernel-coco_debug-devel-6.4.0-15061.21.coco15sp6.1", "kernel-coco_debug-devel", "6.4.0-15061.21.coco15sp6.1", true},
+		{"qemu-SLOF-8.2.10-150600.3.3.1", "qemu-SLOF", "8.2.10-150600.3.3.1", true},
+		{"onedash-only", "", "", false},
+		{"nodash", "", "", false},
+		{"typelib-1_0-Vte", "", "", false},               // would-be release "Vte" has no dot
+		{"libwmf-0_2-7", "", "", false},                  // D126's bare shape: would-be release "7" has no dot
+		{"cdparanoia-IIIalpha9.8-691.22", "", "", false}, // would-be version does not start with a digit
+		{"-1.0-1.1", "", "", false},                      // empty name
+	}
+	for _, c := range cases {
+		name, verrel, ok := splitNEVR(c.in)
+		if ok != c.ok || name != c.name || verrel != c.verrel {
+			t.Errorf("splitNEVR(%q) = (%q, %q, %v), want (%q, %q, %v)", c.in, name, verrel, ok, c.name, c.verrel, c.ok)
+		}
+	}
+}
