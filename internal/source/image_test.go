@@ -79,8 +79,8 @@ func TestClassify_APathIsNotARegistryReference(t *testing.T) {
 // plausible and is wrong, which no other test would catch.
 func TestFromV1_EachLayerOpensItsOwnBytes(t *testing.T) {
 	img, err := fromV1(fakeImage{layers: []fakeLayer{
-		{diff: "sha256:aaa", body: "layer-a"},
-		{diff: "sha256:bbb", body: "layer-b"},
+		{diff: sha256Of("layer-a"), body: "layer-a"},
+		{diff: sha256Of("layer-b"), body: "layer-b"},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -104,12 +104,13 @@ func TestFromV1_EachLayerOpensItsOwnBytes(t *testing.T) {
 // The diff ID is the uncompressed digest. Using Digest() instead would compile
 // and produce a plausible-looking hex string that matches nothing syft reports.
 func TestFromV1_UsesDiffIDNotDigest(t *testing.T) {
-	img, err := fromV1(fakeImage{layers: []fakeLayer{{diff: "sha256:diffid", body: "x"}}})
+	diff := sha256Of("x")
+	img, err := fromV1(fakeImage{layers: []fakeLayer{{diff: diff, body: "x"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := img.Layers[0].DiffID; got != "sha256:diffid" {
-		t.Errorf("DiffID = %q, want the uncompressed digest sha256:diffid", got)
+	if got := img.Layers[0].DiffID; got != diff {
+		t.Errorf("DiffID = %q, want the uncompressed digest %s", got, diff)
 	}
 }
 

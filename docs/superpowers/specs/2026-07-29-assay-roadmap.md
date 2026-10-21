@@ -5098,6 +5098,62 @@ D122, nothing tested the path guard rejecting anything at all.
 
 ---
 
+### D123 — Every image layer is held to its config's diff id before anything read from it counts
+
+**Decision.** An image scan accepts a layer only once its whole uncompressed stream has been
+read to EOF and hashed to the diff id the image config lists for it. The config is accepted
+only once its bytes hash to the digest the manifest names. The manifest and any nested index are held to the digests they
+were read under. A mismatch at any link is an error, so the scan exits 2 (D11) and prints no
+report. This applies to every image path:
+registry, `oci-dir:` and `docker-archive:`.
+
+**Why, measured.** An external review on 2026-10-20 reported that a registry serving
+different bytes under a pinned layer digest scanned clean, and it was re-measured here.
+`readLayer` returned at the tar end-of-archive marker. go-containerregistry verifies a blob
+only on the Read that returns the blob's own EOF, which comes after that marker, so the check
+never ran. The re-measurement found the hole wider than reported:
+
+- **No padding is needed.** A forged layer of the same length scanned clean for uncompressed,
+  gzip and zstd layers alike, including the ordinary output of stdlib tar.
+- **`oci-dir:` and `docker-archive:` are verified by nothing.** The library calls its
+  verifying reader only on the registry path. Its `v1.Layer.DiffID()` for such a layer is
+  computed from the layer's own bytes, so a forged blob reported the forged content's hash as
+  its diff id. Checking the bytes against that value checks them against themselves.
+
+A digest-pinned scan therefore reported "this digest is clean" about layers it had never
+checked. The report's `manifestDigest` (D120) and D121's image-scoped VEX both key on that
+claim. The direction that matters is a false negative: exit 0 where the real layers would
+give exit 1.
+
+**Why the diff id, and why from the config.** The diff id closes every path with one rule:
+manifest → config (checked here, because the library does not check it locally) → diff id →
+the uncompressed bytes. It is also what containerd checks when it unpacks a layer, so an image
+this rejects is one docker would not run either. Taking the diff id from `rootfs.diff_ids`
+rather than `l.DiffID()` is what makes the check mean anything on the local paths. On the
+registry path, the drain also lets the library's own blob-digest check fire, and that error is
+usually the one reported first.
+
+**Cost.** The rest of each layer is read after the archive end. In an honest image that is
+only padding. A hostile tail is bounded by `--timeout`, because the drain checks the context
+between 32 KiB chunks and discards the bytes, so it takes no memory and no `MaxScanBytes`
+budget (D112). A layer that is never opened, because no wanted file lives in it, is never
+read and so is never trusted.
+
+**The top of the chain.** The manifest read is hashed against the digest recorded for it (the
+digest the report states), and a nested index is hashed against the digest it was listed
+under. On the registry path this repeats a check the library already makes. On `oci-dir:` it
+is the only check, because the library reads `blobs/<alg>/<hex>` without hashing it. A review
+of this slice found that a layout whose manifest blob had been swapped for a self-consistent
+forgery (its own config and layer, each under its real hash) passed every check below the
+manifest and was reported under the genuine digest. A `docker-archive:` manifest digest is
+computed from the manifest's own bytes, so there it has nothing outside to disagree with.
+
+**What stays out.** Whatever names the top digest is the root of trust: the reference the user
+typed, a layout's `index.json`, or an archive's own manifest. Signature verification (cosign
+and the like) is a separate decision.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

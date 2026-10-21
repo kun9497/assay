@@ -124,6 +124,22 @@ func Open(ctx context.Context, ref, platform string) (*Image, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The digest the report states (D120) and image-scoped VEX keys on
+	// (D121) is held to the manifest actually read, before anything below
+	// it is trusted (D123).
+	if md := creds.choice.ManifestDigest; md != "" {
+		h, err := v1.NewHash(md)
+		if err != nil {
+			return nil, fmt.Errorf("%s: manifest digest %q: %w", ref, md, err)
+		}
+		raw, err := img.RawManifest()
+		if err != nil {
+			return nil, fmt.Errorf("%s: read manifest: %w", ref, err)
+		}
+		if err := checkManifestDigest(raw, h); err != nil {
+			return nil, fmt.Errorf("%s: %w", ref, err)
+		}
+	}
 	out, err := fromV1(img)
 	if err != nil {
 		if creds.kc != nil {
@@ -349,6 +365,16 @@ func (w v1Index) ImageIndex(h v1.Hash) (indexReader, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A nested index chooses among manifests, so it is held to the digest it
+	// was listed under before its choices count (D123); a layout reads it
+	// from blobs/ without hashing it.
+	raw, err := c.RawManifest()
+	if err != nil {
+		return nil, err
+	}
+	if err := checkManifestDigest(raw, h); err != nil {
+		return nil, err
+	}
 	return v1Index{c}, nil
 }
 
@@ -537,17 +563,29 @@ func fromV1(img v1.Image) (*Image, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read layers: %w", err)
 	}
+	ids, err := configDiffIDs(img, len(ls))
+	if err != nil {
+		return nil, err
+	}
 	out := &Image{Layers: make([]Layer, 0, len(ls))}
-	for _, l := range ls {
+	for i, l := range ls {
 		// DiffID, not Digest: Digest is the compressed blob's digest and is a
-		// different value for the same layer.
-		d, err := l.DiffID()
-		if err != nil {
-			return nil, fmt.Errorf("read layer diff id: %w", err)
-		}
+		// different value for the same layer. Taken from the config rather
+		// than l.DiffID(), which for a local layer may be computed from the
+		// very bytes it is meant to vouch for (D123).
+		d := ids[i]
 		out.Layers = append(out.Layers, Layer{
 			DiffID: d.String(),
-			Open:   func() (io.ReadCloser, error) { return l.Uncompressed() },
+			// Every image path opens its layers here, so every path is held
+			// to its diff id (D123) -- including oci-dir and docker-archive,
+			// whose blobs the library never verifies.
+			Open: func() (io.ReadCloser, error) {
+				rc, err := l.Uncompressed()
+				if err != nil {
+					return nil, err
+				}
+				return verifyDiffID(rc, d)
+			},
 		})
 	}
 	return out, nil
