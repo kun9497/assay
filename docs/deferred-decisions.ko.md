@@ -387,8 +387,16 @@ union 질문을 다시 열지 않는다: 끌어온 주장을 하나 제거할 �
 **실제로 미뤄진 것**은 union이 실질적인 정보를 더해줄 단 하나의 하위
 사례다: native Leap entry가 no-fix이면서 SLE entry는 fixed이고 그 fix가
 실제로 Leap의 저장소에도 도달한 경우(SUSE가 그저 Leap entry를 재생성하지
-않았을 뿐인 경우)다. 이 부분집합은 따로 크기를 재지 않았다 — 위의 전이
-집합 개수는 이를 나누어 보여주지 않는다. union을 구현한다는 것은 range별
+않았을 뿐인 경우)다. 당시에는 이 부분집합의 크기를 따로 재지 않았다 — 위의 전이
+집합 개수는 이를 나누어 보여주지 않는다. **2026-10-21에 Leap 16.1에 대해 쟀고, 아래의
+재검토 계기가 그 범위에서 충족됐다:** `SLES:16.1`→Leap 16.1 native-wins 2,323건 중 25건이
+SLE fixed / Leap bare `known_affected`(`glibc-2.40-160100.3.1`, `gdb-16.3-160100.3.1`,
+`NetworkManager-1.54.3-160100.3.1`, `wget-1.25.0-160100.4.1`, `util-linux`, `coreutils`,
+`buildah` ×4, `sdbootutil` ×7, …)이고, 실제 `distribution/leap/16.1/repo/oss` 목록이 바로 그
+빌드를 출하한다. 출하 빌드를 설치한 Leap 16.1 이미지는 `glibc`에서 fix 없는 affected로
+보고되고 같은 문서의 `glibc-devel`은 깨끗하게 미러링된다. 여전히 유보(별도 결정 필요:
+range별 provenance, 또는 SLE 쌍이 Leap이 출하한 빌드에서 fixed인 native no-fix 항목에 대한
+더 좁은 규칙); 15.x 부분집합은 아직 재지 않았다. union을 구현한다는 것은 range별
 provenance(하나의 `Affected` 위에 SLE에서 온 fixed range와 Leap에서 온
 no-fix range를 각각 자신의 `CrossMappedFrom`과 함께 두는 것)와 이를
 조정하는 matcher를 뜻한다; D108의 gap-fill은 이미 만들어진 목적—설치된

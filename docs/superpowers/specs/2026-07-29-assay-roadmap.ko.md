@@ -4056,6 +4056,15 @@ LTSS-channel 빌드로, 무료 Leap 사용자가 직접 받을 수 없는 것일
 미러링된다(native-wins 2,323). `leapMirrorKey`뿐 아니라 `convert`를 통해서도 지켜지며,
 테스트 표의 거부 행은 다음 재검토 대상인 16.2로 옮겼다.
 
+그 native-wins 2,323건 중 2,298건은 양쪽 모두 no-fix이고, **25건은 D108 유보가 말하는 union
+하위 사례**다: SLES 16.1은 fixed 빌드(`glibc-2.40-160100.3.1`, `gdb-16.3-160100.3.1`,
+`NetworkManager-1.54.3-160100.3.1`, `wget-1.25.0-160100.4.1`, …)를 지목하는데 Leap 16.1은
+bare `known_affected`만 들고 있고, 실제 `distribution/leap/16.1/repo/oss` 목록은 바로 그
+빌드를 출하한다. native-wins가 no-fix range를 유지하므로, 출하 빌드를 설치한 Leap 16.1
+이미지는 `glibc`에서는 fix 없는 affected로 보고되고 같은 문서에서 미러링된 `glibc-devel`은
+깨끗하다 — 유보의 재검토 계기가 2026-10-21에 충족됐고 부분집합의 크기도 쟀다. 여기서는
+바꾸지 않았고, 별도 결정을 위해 deferred-decisions에 기록했다.
+
 ---
 
 ### D109 — 스캔이 읽지 못한 매니페스트는 타깃의 불완전성이고, 모든 renderer가 이를 이름으로 밝힌다
@@ -5090,7 +5099,7 @@ advisory id를 얻지 못한 밤에 seed의 항목을 복원합니다; 판단은
 artifact에 그 항목이 복원될 수 있습니다 — 복원 줄이 키를 적고, 조용한 밤에만 반복됩니다. (2)
 피드가 이제 `openSUSE Leap 16.1`을 발행합니다(`cve-2026-7168`, 2026-10-16). deferred-decisions가
 D108에 대해 기록한 allowlist 재검토 계기이며, 추가되기 전까지 `SLES:16.1` 항목은 어디로도
-미러링되지 않습니다. (3) `packageOf`는 이름이 버전 비슷한 조각으로 끝나는 bare product purl
+미러링되지 않습니다(같은 날 추가 — D108의 2026-10-21 수정 문단 참조). (3) `packageOf`는 이름이 버전 비슷한 조각으로 끝나는 bare product purl
 (`libwmf-0_2-7` → `pkg:rpm/suse/libwmf@0_2-7`)을 잘못된 이름으로 쪼개므로, 그런 패키지의 bare
 항목은 — affected든 not affected든 — 설치된 어떤 rpm도 갖지 않는 이름 아래에 들어갑니다. D77부터
 있던 문제이고, 그 자체로 false-negative 부류라 deferred-decisions에 올렸습니다(같은 날 D126으로

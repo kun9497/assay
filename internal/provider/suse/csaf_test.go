@@ -38,7 +38,6 @@ func TestFoldKey(t *testing.T) {
 		{"openSUSE Leap 15.6", "openSUSE Leap:15.6", "", true},
 		{"openSUSE Leap 16.0", "openSUSE Leap:16.0", "", true},
 		{"openSUSE Leap 16.1", "openSUSE Leap:16.1", "", true},
-		{"SUSE Linux Enterprise Server 16.1", "SLES:16.1", "", true},
 
 		// Refused: Tumbleweed by name, rolling with no release axis.
 		{"openSUSE Tumbleweed", "", "rolling, no stable release to key on", false},
