@@ -4954,10 +4954,11 @@ is written in two places:
 - **SARIF** carries the same object in `run.properties.provenance`, and
   `tool.driver.semanticVersion`; no timestamps, so it stays deterministic too. The table
   renderer is unchanged.
-- **`db update` records what it pulled**: `<dbPath>.artifact.json` (reference, manifest
-  digest, pull time), written under D116's lock beside the database and removed by
-  `db build`, so a scan can name the artifact a database came from. A database with no such
-  file reports none rather than guessing.
+- **`db update` records what it pulled**: reference, manifest digest and pull time, so a
+  scan can name the artifact a database came from; a database with no record reports none
+  rather than guessing. Written as `<dbPath>.artifact.json` beside the database until D127
+  moved the record into the database's own `Meta` (2026-10-21), after the sidecar's second
+  rename proved to pair one pull's database with another's record.
 - **Nothing that identifies the machine or its user**: no absolute path that was not typed,
   no database path, no hostname, no username, no working directory, no upstream error text
   (`Provenance.Error` can carry internal addresses), and no credential value (D118).
@@ -5332,6 +5333,52 @@ Liberty Linux (≈46,000), Teradata (≈29,000), HPC 12 SP3 (16,597) and Micro 6
 Confidential Computing Technical Preview 15 SP6 module (16,736 ids in 2,077 documents) folds to
 `SLES:15.SP6`, where those entries are stored unfixed under a NEVR-shaped name and reach
 nothing. Listed in deferred-decisions as a known hazard with its own measurement to do.
+
+---
+
+### D127 — The artifact record lives in the database it names, written before the install rename
+
+**Decision.** What `db update` pulled — reference, manifest digest, pull time — is recorded
+in the database's own `Meta` (`Meta.Artifact`), written by `store.SetArtifactAt` into the
+unpacked, verified temp database *before* the single rename that installs it. A scan reads
+the record in the same open as the rest of `Meta`; `report.NewDatabaseProvenance` takes
+`Meta` alone. `db build` writes a fresh `Meta`, so a built database never carries a record,
+even when its advisories were file-copied from a pulled seed (D66). The D120 sidecar
+`<dbPath>.artifact.json` is written by nothing and read by nothing; `db update` and `db build`
+remove one left by an earlier binary so it cannot be taken for current. `SetArtifactAt` is a
+read-modify-write of the `Meta` blob in one transaction, not a `SetMeta` call (which decodes
+every stored advisory to re-derive `Databases` — a build's cost, not a pull's), opens the file
+read-write for this one write (`Open` stays read-only), refuses a record naming no digest and
+an unfinished database, and waits a bounded two seconds for bolt's file lock.
+
+**Why.** The 2026-10-20 external review (#7) showed the sidecar's two renames — database,
+then record — leave a window in which a scan reads the new database with the previous pull's
+digest, and that a pull dying between the renames, or the manual move the install-failure
+message tells the user to make, leaves that pairing in place for good. The writer lock (D116)
+does not help: scans do not take it, and were never meant to. The sidecar's reason for
+existing — the database inside the artifact is sealed before publishing and cannot know its
+own digest — is true of the *publisher*, but the pull unpacks and opens the database to verify
+it before installing it anyway, and a record written there is installed by the same rename as
+the data it describes. One file, one rename, no generation to mismatch. The alternative of
+stamping a generation id in both files and checking it at scan time would have kept two files
+and added a check that can fail; moving the record removes the pairing instead of guarding it.
+
+**Why no fallback to a sidecar.** A pre-D127 database with a sidecar beside it is exactly the
+pairing nothing can vouch for. Reading it would carry the hazard forward for the one `db
+update` cycle it takes to retire it; reporting no artifact for that cycle is the rule D120
+already states — none rather than a guess — and the next pull writes the record where it
+belongs. The sidecar is removed, not read.
+
+**Verified.** Caller-level: the installed database carries the record and the legacy sidecar
+is gone; with the install rename forced to fail (`renameFn`), the temp database the failure
+message points at already carries its own record — the manual-move case; a refused pull leaves
+the installed record alone; a built database over a pulled one names none; the scan names
+`Meta.Artifact` and ignores a sidecar that disagrees; the end-to-end `db update` → `scan` test
+writes no sidecar. Mutations caught: the record written into the live database after the rename
+instead of the temp one, the write skipped, the legacy removal dropped, provenance ignoring
+`Meta.Artifact`, the digest check dropped; dropping the lock timeout hangs the test, which is
+how the timeout was found — a mutation of the digest check blocked the store tests for 600 s
+on a handle the test still held.
 
 ---
 

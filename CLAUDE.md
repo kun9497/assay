@@ -55,7 +55,8 @@ never prints one; before it, the scan path was anonymous-only. Since D119 `--pla
 image's platform with containerd's normalisation and compatibility order on every image path,
 and the report records the platform and digest that were scanned. Since D120 the report carries a
 deterministic `provenance` object (tool, database artifact, target content, gates, waivers) and
-`--provenance` writes a sidecar with run time and exit code on every exit path; since D121 an
+`--provenance` writes a sidecar with run time and exit code on every exit path (the pulled
+artifact's own record lives inside the database since D127, not beside it); since D121 an
 image's OS packages carry syft-spelled purls so VEX reaches them, and a VEX statement that names
 an image applies only to that image — since D124 even when its image reference does not parse.
 Since D123 every image layer is read to EOF and held to its
