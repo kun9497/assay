@@ -5029,6 +5029,64 @@ subcomponent만 적용됐기 때문입니다.
 
 ---
 
+### D125 — native Leap의 `known_not_affected` 항목은 D108 미러의 no-fix range를 멈춘다
+
+**결정.** D108의 gap-fill은 "native"를 native Leap *affected* 항목으로만 읽었습니다;
+`known_not_affected`는 아무것도 하류에서 쓸 수 없다는 전제(D77)로 읽지 않았습니다. D108에서
+추가된 미러 pass가 바로 그 전제가 놓친 소비자입니다. SUSE provider는 이제 그 한 소비자를 위해
+이 bucket을 읽습니다: 문서가 어떤 패키지를 openSUSE Leap 릴리스의 `known_not_affected`에
+올리고, 그 릴리스로 미러링될 SLE codestream 항목이 *unfixed*(fix 없는 `known_affected` —
+OSV가 "모든 버전에서 affected"로 적는 range)이면, 미러는 그 릴리스의 그 패키지에 대해
+물러납니다. bucket에서 저장되는 것은 없습니다(store에 not-affected 모양이 없고(D1), 이
+tie-break만 소비하는 주장을 위해 모양을 늘려서는 안 됩니다); 거부는 `SkippedLeapNotAffected`로
+세어 D108의 두 카운터 옆 progress 줄에 찍힙니다. native-wins 다음에 검사하므로, 문서가 affected와
+not affected 양쪽에 올린 키는 native affected 항목을 유지합니다.
+
+**이유와 측정.** 2026-10-20 외부 검토가 보고했고(#6), `cve-2025-61144`가 실제로 재현합니다:
+SLE 15 SP6는 `libtiff6`를 fix 없는 `known_affected`로, openSUSE Leap 15.6는
+`known_not_affected`로 올리는데, 미러가 SUSE 자신의 판정 위에 Leap의 "모든 버전에서 affected"
+range를 내보냈습니다 — `libtiff6`를 설치한 모든 Leap 15.6 이미지에서 false positive. 2026-10-19
+아카이브(문서 71,711건, 그중 13,549건이 Leap `known_not_affected`를 가짐) 전체에서 겹침 — Leap
+미러 대상이 있는 SLE 항목이고, 같은 문서가 그 릴리스에서 그 패키지를 not affected로 표시했으며,
+native Leap affected 항목이 없는 경우 — 은 633개 문서의 4,463건이고, 내보낸 미러는 1,203,546건입니다.
+그중 이 결정이 거부하는 no-fix 모양은 67개 문서의 100건뿐입니다(Leap 15.6: 45, 16.0: 33, 15.5:
+22; `kernel-source` 30, `kernel-source-azure` 17, `pgadmin4` 3종 15, cve-2025-61143/61144의
+`libtiff` 4종 8).
+
+**왜 no-fix range만인가 — 첫 구현은 틀렸습니다.** 첫 구현은 Leap `known_not_affected`가 있기만
+하면 거부했고, 검토가 나머지 4,363건의 정체를 보여줬습니다: SUSE의 생성기는 tracker 상태
+"Already fixed"와 "Released"에도, "Not affected"와 마찬가지로 *bare* 패키지 id를
+`known_not_affected`에 쓰고, 출하된 빌드는 `recommended`로 보냅니다(`cve-2024-0450`:
+`openSUSE Leap 15.6:python311` not affected 옆에 `SUSE Linux Enterprise Server 15
+SP6:python311-3.11.9-150600.1.7` recommended; 490개 문서 표본에서 같은 플랫폼의 이런 쌍 878건).
+따라서 SLE `fixed@V` 옆의 Leap not-affected는 미러와 모순이 아니라 일치합니다: V 이상의 Leap
+빌드는 어느 쪽이든 finding이 없고, 미러는 같은 150600 바이너리의 더 오래된 빌드를 잡는 유일한
+range입니다. 이것을 거부했다면 assay가 하나의 바이너리를 `SLES:15.SP6`와 `openSUSE Leap:15.6`에서
+다르게 판정했을 것입니다. no-fix 미러에는 그런 해석이 없습니다: 모든 빌드가 affected라고 하는데
+SUSE는 출하된 빌드가 아니라고 하고, assay는 Leap이 언제부터 unaffected가 됐는지 버전을 댈 수
+없습니다 — 그래서 끌어온 주장이 native 주장에 양보합니다.
+
+**왜 vendor의 판정 쪽으로 실패하는가.** 틀린 not-affected 위에서 no-fix 미러를 거부하면 더
+오래된 Leap 빌드의 finding을 숨깁니다; 맞는 not-affected 위에 no-fix 미러를 유지하면 SUSE가
+부정하는 finding을 모든 Leap 이미지에서 보고합니다. 뒤의 경우가 흔한 경우이고(스캔되는 모든
+이미지는 출하된 빌드이거나 그보다 오래된 빌드), 앞의 경우는 SUSE의 tracker가 자기 배포판에 대해
+틀려야 생기며, D108이 같은 이유로 이미 "native wins"를 택했습니다. progress 줄의 카운터가
+추적선입니다: 주간 leap156 floor [100, 500]은 위험하지 않고(미러의 0.008%), 카운터가 뛰면 다시
+재야 한다는 신호입니다.
+
+**기록만 하고 여기서 고치지 않은 함정.** (1) D110의 항목 단위 carry는 EOL이 지난 키가 새
+advisory id를 얻지 못한 밤에 seed의 항목을 복원합니다; 판단은 *키* 단위라 다른 Leap 항목을
+하나라도 유지한 레코드는 "fresh wins"이지만, D125가 유일한 Leap 항목을 제거한 레코드는 그날
+artifact에 그 항목이 복원될 수 있습니다 — 복원 줄이 키를 적고, 조용한 밤에만 반복됩니다. (2)
+피드가 이제 `openSUSE Leap 16.1`을 발행합니다(`cve-2026-7168`, 2026-10-16). deferred-decisions가
+D108에 대해 기록한 allowlist 재검토 계기이며, 추가되기 전까지 `SLES:16.1` 항목은 어디로도
+미러링되지 않습니다. (3) `packageOf`는 이름이 버전 비슷한 조각으로 끝나는 bare product purl
+(`libwmf-0_2-7` → `pkg:rpm/suse/libwmf@0_2-7`)을 잘못된 이름으로 쪼개므로, 그런 패키지의 bare
+항목은 — affected든 not affected든 — 설치된 어떤 rpm도 갖지 않는 이름 아래에 들어갑니다. D77부터
+있던 문제이고, 그 자체로 false-negative 부류라 deferred-decisions에 올렸습니다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

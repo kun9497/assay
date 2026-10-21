@@ -5190,6 +5190,68 @@ row in D18's table already says so), so this changes no shared behaviour.
 
 ---
 
+### D125 — A native Leap `known_not_affected` entry stops the D108 mirror's no-fix range
+
+**Decision.** D108's gap-fill reads "native" as a native Leap *affected* entry only;
+`known_not_affected` was unread, on the premise (D77) that nothing downstream could use it.
+The mirror pass added in D108 is the consumer that premise missed. The SUSE provider now reads
+the bucket for that one consumer: when a document lists a package under `known_not_affected`
+for an openSUSE Leap release, and the SLE codestream entry that would mirror onto that release
+is *unfixed* (a `known_affected` with no fix — the range OSV spells "affected at every
+version"), the mirror declines for that package on that release. Nothing is stored from the
+bucket (the store has no not-affected shape, D1, and must not grow one for a claim only this
+tie-break consumes); the decline is counted as `SkippedLeapNotAffected` and printed on the
+progress line beside D108's two counters. It is checked after native-wins, so a key the
+document lists as both affected and not affected keeps its native affected entry.
+
+**Why, measured.** The 2026-10-20 external review reported it (#6) and `cve-2025-61144`
+reproduces it live: SLE 15 SP6 lists `libtiff6` as `known_affected` with no fix, openSUSE
+Leap 15.6 lists it as `known_not_affected`, and the mirror emitted a Leap "affected at every
+version" range over SUSE's own verdict — a false positive on every Leap 15.6 image with
+`libtiff6` installed. Across the 2026-10-19 archive (71,711 documents, of which 13,549 carry a
+Leap `known_not_affected` entry) the overlap — an SLE entry with a Leap mirror target whose
+package the same document marks not affected on that release, and no native Leap affected
+entry — is 4,463 entries in 633 documents, against 1,203,546 mirrors emitted. Only 100 of
+them, in 67 documents, are the no-fix shape this declines (Leap 15.6: 45, 16.0: 33, 15.5: 22;
+`kernel-source` 30, `kernel-source-azure` 17, the `pgadmin4` trio 15, the `libtiff` quartet 8
+across cve-2025-61143/61144).
+
+**Why only the no-fix range — the first cut was wrong.** The first implementation declined on
+any Leap `known_not_affected`, and review showed what the other 4,363 overlaps are: SUSE's
+generator writes the *bare* package id into `known_not_affected` for the tracker states
+"Already fixed" and "Released" as well as "Not affected", while the shipped build goes to
+`recommended` (`cve-2024-0450`: `openSUSE Leap 15.6:python311` not affected beside
+`SUSE Linux Enterprise Server 15 SP6:python311-3.11.9-150600.1.7` recommended; 878 such
+same-platform pairs in a 490-document sample). A Leap not-affected beside an SLE `fixed@V` is
+therefore consistent with the mirror, not contradicted by it: a Leap build at or past V gets no
+finding either way, and the mirror is the only range that flags an older build of the same
+150600 binary. Declining it would have made assay judge `SLES:15.SP6` and
+`openSUSE Leap:15.6` differently for one binary. A no-fix mirror has no such reading: it says
+every build is affected, SUSE says the shipped one is not, and assay cannot name the version
+at which Leap became unaffected — so the derived claim yields to the native one.
+
+**Why fail toward the vendor's verdict.** A no-fix mirror declined over a wrong not-affected
+hides a finding on an older Leap build; a no-fix mirror kept over a right not-affected reports
+a finding SUSE denies on every Leap image. The second is the common case (every scanned image
+runs the shipped build or an older one), the first requires SUSE's own tracker to be wrong
+about its own distribution, and D108 already chose "native wins" for the same reason. The
+count on the progress line is the trace: the weekly leap156 floor [100, 500] is not at risk
+(0.008% of mirrors), and a jump in the counter is the signal to re-measure.
+
+**Hazards recorded, not fixed here.** (1) D110's entry-level carry restores a seed's entries
+for a past-EOL key on a night that key gains no new advisory id; it judges per *key*, so a
+record that keeps any other Leap entry is "fresh wins", but a record whose only Leap entry
+D125 removes can have it restored for that night's artifact — the restoration line names the
+key, and it recurs only on quiet nights. (2) The feed now publishes `openSUSE Leap 16.1`
+(`cve-2026-7168`, 2026-10-16), which is the allowlist revisit trigger deferred-decisions
+records for D108; `SLES:16.1` entries mirror nowhere until it is added. (3) `packageOf` splits
+a bare product purl whose name ends in a version-like segment (`libwmf-0_2-7` →
+`pkg:rpm/suse/libwmf@0_2-7`) into the wrong name, so bare entries for such packages — affected
+or not affected — key under a name no installed rpm carries. Pre-existing since D77; it is a
+false-negative class of its own and is listed in deferred-decisions.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

@@ -368,6 +368,22 @@ Leap 자신의 저장소는 아직 fix를 내놓지 않았다고(SLE는 냈어�
 비용 때문에 미뤄진 게 아니다; no-fix-native 케이스에서는 애초에 틀린
 접근이다.
 
+**Native-wins에는 native "not affected"도 포함된다 (D125, 2026-10-21).** 위의
+gap-fill은 "native"를 native *affected* entry로만 읽었다; `known_not_affected`는
+읽지 않았으므로, SUSE가 "Leap 15.6의 libtiff6는 영향 없음"이라고 말한 것이
+SUSE가 아무 말도 하지 않은 것처럼 보였고, 미러가 그 자리를 SLE SP6의
+"affected, no fix"로 채웠다(cve-2025-61144, 2026-10-20 외부 검토가 발견). 이제
+미러는 그 릴리스의 그 패키지에 대한 no-fix range를 내보내지 않는다;
+not-affected bucket에서 저장되는 것은 없으며(store에는 그런 모양이 없고(D1),
+이 tie-break만 소비하는 주장을 위해 모양을 늘려서는 안 된다), 개수는
+progress 줄에 나온다. *fixed*인 SLE 출처는 그대로 미러링된다: SUSE는
+"Already fixed"와 "Released"에도 bare id를 `known_not_affected`에 쓰므로(출하된
+빌드는 `recommended`로 감), SLE `fixed@V` 옆의 Leap not-affected는 미러와
+일치한다 — 2026-10-21에 잰 겹침 4,463건 중 4,363건이 이 모양이고, 이것까지
+거부했다면 더 오래된 Leap 빌드를 잡는 유일한 range를 버렸을 것이다. 이것은
+union 질문을 다시 열지 않는다: 끌어온 주장을 하나 제거할 뿐, 병합하는 일은
+없다.
+
 **실제로 미뤄진 것**은 union이 실질적인 정보를 더해줄 단 하나의 하위
 사례다: native Leap entry가 no-fix이면서 SLE entry는 fixed이고 그 fix가
 실제로 Leap의 저장소에도 도달한 경우(SUSE가 그저 Leap entry를 재생성하지
@@ -394,6 +410,11 @@ Leap X.Y NonFree`와 `openSUSE Leap Micro 5.x` 이름도 함께 발행하는데,
 이미 fold에서 거부되고 있고 미러 대상이 된 적이 없다). census가 새로운
 mainline Leap 릴리스(16.1 이상)를 보여줄 때 다시 본다; 이 집합에 없는
 릴리스로 키가 잡힌 Leap 이미지가 조용히 과소 보고하는 것이 그 흔적이다.
+**2026-10-21에 계기가 발동했다**(D125 검토): 실제 피드가 `openSUSE Leap 16.1`을
+product로 올린다(`cve-2026-7168`, 2026-10-16, `known_affected`; 2026-10-19
+아카이브의 39개 문서). native Leap 16.1 항목은 fold를 통해 이미 들어오고 있다;
+`leapReleases`에 16.1이 들어가기 전까지 `SLES:16.1` 항목은 어디로도 미러링되지
+않는다. 미해결 — `SLES:16.1` 집합의 크기를 먼저 재고 나서 추가한다.
 
 ---
 
@@ -1909,6 +1930,18 @@ Go가 먼저입니다. 표준 라이브러리 `debug/buildinfo`가 모듈 목록
 ## 알려진 함정
 
 미룬 결정이 아니라, 해당 코드를 쓸 때 처리해야 할 덫입니다.
+
+**SUSE의 bare product purl은 버전 비슷한 조각으로 끝나는 이름을 잘못 쪼갭니다.** 2026-10-21
+D125 검토가 발견, D77부터 있던 문제. `packageOf`는 `pkg:rpm/suse/<name>@<version>`으로 읽는데
+SUSE의 생성기는 bare product `libwmf-0_2-7`을 `pkg:rpm/suse/libwmf@0_2-7`로 냅니다(버전 붙은
+leaf `libwmf-0_2-7-0.2.12-…`는 `pkg:rpm/suse/libwmf-0_2-7@0.2.12-…`로 정확함). 그래서 그런
+패키지의 bare `known_affected`나 `known_not_affected` id는 설치된 어떤 rpm도 갖지 않는 이름
+`libwmf` 아래에 들어갑니다: no-fix finding이 `libwmf-0_2-7` 패키지에 닿지 않고, 그것에 대한
+D125 거부도 미러 후보와 만나지 못합니다. 같은 부류: `libjavascriptcoregtk-4_0-18`,
+`libwebkit2gtk-4_0-37`, `typelib-1_0-*`. 그 자체로 false-negative 부류이며, 별도 측정(이렇게
+쪼개지는 bare id가 몇 개인지, 그중 그 패키지의 유일한 항목인 것이 몇 개인지)과 purl의 버전이
+빌드 버전이 아닐 때 purl 이름보다 product_id를 우선하는 분할이 필요합니다. 미러만 건드린
+D125에서는 고치지 않았습니다.
 
 **Windows에서의 원자적 데이터베이스 교체.** `db update`는 임시 파일에 빌드한 뒤 실행 중인
 데이터베이스 위로 rename합니다. 그래야 동시에 도는 스캔이 부분 기록을 보지 않습니다. 그런데

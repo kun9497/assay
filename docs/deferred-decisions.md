@@ -353,6 +353,20 @@ the Leap key would then tell a free Leap user a fix is available that their `zyp
 cannot reach — a worse error than the no-fix the native entry honestly reports. So the union
 is not merely deferred for cost; for the no-fix-native case it would be wrong.
 
+**Native-wins includes a native "not affected" (D125, 2026-10-21).** The gap-fill above
+read "native" as a native *affected* entry only; `known_not_affected` was unread, so SUSE
+saying "Leap 15.6's libtiff6 is not affected" looked like SUSE saying nothing, and the mirror
+filled it with SLE SP6's "affected, no fix" (cve-2025-61144, found by the 2026-10-20 external
+review). The mirror now declines the no-fix range for that package on that release; nothing
+is stored from the not-affected bucket (the store has no shape for it, D1, and must not grow
+one for a claim only this tie-break consumes), and the count is on the progress line. A
+*fixed* SLE source still mirrors: SUSE writes the bare id into `known_not_affected` for
+"Already fixed" and "Released" as well (the shipped build goes to `recommended`), so a Leap
+not-affected beside an SLE `fixed@V` agrees with the mirror — 4,363 of the 4,463 overlaps
+measured 2026-10-21 are that shape, and declining them would have dropped the only range that
+flags an older Leap build. This does not reopen the union question: it removes a derived
+claim, it never merges one.
+
 **What is actually deferred** is the one sub-case where union would add real information: a
 native Leap entry that is no-fix AND an SLE entry that is fixed AND the fix genuinely did
 reach Leap's repos (SUSE simply did not regenerate the Leap entry). That subset was not
@@ -375,6 +389,10 @@ vulnerable — and the disclosure is what lets the reader judge the remediation.
 NonFree` and `openSUSE Leap Micro 5.x` names, both already refused by the fold and never a
 mirror target). Revisit when the census shows a new mainline Leap release (16.1 and up); a
 Leap image keyed to a release absent from the set, silently under-reporting, is the trace.
+**Trigger fired 2026-10-21** (D125's review): the live feed names `openSUSE Leap 16.1` as a
+product (`cve-2026-7168`, 2026-10-16, `known_affected`; 39 documents in the 2026-10-19
+archive). Native Leap 16.1 entries ingest through the fold already; `SLES:16.1` entries mirror
+nowhere until `leapReleases` gains 16.1. Open — size the `SLES:16.1` set first, then add it.
 
 ---
 
@@ -1953,6 +1971,18 @@ Support is decided per language rather than promised as a category.
 ## Known hazards
 
 Not deferred decisions — traps to handle when the relevant code is written.
+
+**SUSE's bare product purl mis-splits a name that ends in a version-like segment.** Found
+2026-10-21 by D125's review, pre-existing since D77. `packageOf` reads `pkg:rpm/suse/<name>@<version>`
+and SUSE's generator emits the bare product `libwmf-0_2-7` as `pkg:rpm/suse/libwmf@0_2-7`
+(the versioned leaf `libwmf-0_2-7-0.2.12-…` is `pkg:rpm/suse/libwmf-0_2-7@0.2.12-…`, correct),
+so a bare `known_affected` or `known_not_affected` id for such a package keys under `libwmf`,
+a name no installed rpm carries: the no-fix finding never reaches a `libwmf-0_2-7` package,
+and the D125 decline for it never meets its mirror candidate. Same family: `libjavascriptcoregtk-4_0-18`,
+`libwebkit2gtk-4_0-37`, `typelib-1_0-*`. A false-negative class of its own; it needs its own
+measurement (how many bare ids split this way, how many are the only entry for the package)
+and a split that prefers the product_id over the purl's name when the purl's version is not
+a build version. Not fixed with D125, which touches the mirror only.
 
 **Atomic database replacement on Windows.** `db update` builds into a temporary file and
 renames over the live database, so a concurrent scan never sees a partial write. On

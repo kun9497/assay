@@ -21,7 +21,8 @@ and `=wont-fix`), Amazon ALAS core plus AL2 extras (D73, D78), Oracle ELSA OVAL 
 Ksplice/FIPS lineage-filtered since D79), Fedora Bodhi (D75), Photon's flat-JSON CVE metadata (D96), Arch's AVG tracker (D97, with
 its own pacman comparer and cataloger), SUSE CSAF VEX (D77, whose
 no-fix entries are 99.96% reason-unstated — the inverse of Red Hat; its delta pass reads
-the year-prefixed layout SUSE moved to on 2026-10-15, D122), and Azure
+the year-prefixed layout SUSE moved to on 2026-10-15, D122; its SLE→Leap mirror, D108,
+yields to Leap's own `known_not_affected` since D125), and Azure
 Linux/CBL-Mariner OVAL (D106 — moved off OSV.dev after its imported snapshot proved
 frozen since 2026-03; the 2026-08-28 audit's 140 missing findings all recovered). `assay scan` reads
 SBOMs, container images (distroless via `status.d`, D54), Go binaries and directories
