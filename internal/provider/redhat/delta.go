@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"regexp"
 	"time"
 
@@ -53,24 +54,32 @@ var changesPath = regexp.MustCompile(`^[0-9]{4}/cve-[0-9]{4}-[0-9]+\.json$`)
 // direction: a re-emitted advisory replaces its own record (Bolt.Put keys on
 // the ID) and the index append is idempotent.
 //
-// Emitted AFTER the archive walk, deliberately. Last write wins, so the newer
-// document is the one that survives.
+// Run BEFORE the archive walk since D129, returning the base names of the
+// documents it fetched so the walk skips their older copies. It used to run
+// after, relying on last-write-wins by ID to let the newer document replace
+// the archive's — which has nothing to win with when the newer document
+// converts to nothing (a finding Red Hat corrected away): the archive's stale
+// record stood until the archive was regenerated, about two days (2026-10-20
+// external review, #5). Only a FETCHED document supersedes; one listed and
+// gone (DeltaGone) keeps its archive copy, so a transient 404 never drops a
+// live advisory.
 func (p *Provider) deltaSince(ctx context.Context, cutoff time.Time,
-	emit func(advisory.Advisory) error, st *stats, covered map[string]bool) error {
+	emit func(advisory.Advisory) error, st *stats, covered map[string]bool) (map[string]bool, error) {
 
 	paths, err := p.changedSince(ctx, cutoff)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	st.DeltaListed = len(paths)
 	if len(paths) > maxDelta {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"redhat: %d documents have changed since the %s archive was built, past the %d this "+
 				"will fetch one at a time; the archive has stopped being rebuilt rather than "+
 				"merely lagging", len(paths), cutoff.Format("2006-01-02"), maxDelta)
 	}
 
-	return p.eachDocument(ctx, paths, func(rel string, d *document) error {
+	fetched := map[string]bool{}
+	err = p.eachDocument(ctx, paths, func(rel string, d *document) error {
 		if d == nil {
 			// The document is listed and no longer served. changes.csv and
 			// deletions.csv are written separately, so a document withdrawn
@@ -80,6 +89,9 @@ func (p *Provider) deltaSince(ctx context.Context, cutoff time.Time,
 			return nil
 		}
 		st.DeltaFetched++
+		// By base name, the one spelling the archive's entries and the
+		// row's path are sure to share.
+		fetched[path.Base(rel)] = true
 		adv, ok := convert(d, st)
 		if !ok {
 			return nil
@@ -93,6 +105,7 @@ func (p *Provider) deltaSince(ctx context.Context, cutoff time.Time,
 		st.DeltaAdvisories++
 		return nil
 	})
+	return fetched, err
 }
 
 // deltaWorkers is how many documents are fetched at once.

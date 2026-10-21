@@ -815,6 +815,10 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       fixed 빌드를 출하하는 Leap 16.1의 glibc가 fix 없는 affected로 보고됐었음); 15.6에
       659건, 16.1에 25건, 16.0에 10건, 15.3 아래는 없음; 양쪽 no-fix와 자체 fix를 가진
       native는 그대로
+- [x] delta가 먼저 돌고 아카이브 walk는 그것이 받아온 것을 건너뜀 (D129) — 두 CSAF provider
+      모두; 아무것도 affected 아닌 것으로 정정된 문서는 이제 레코드를 남기지 않음 — 아카이브
+      위의 last-write-wins는 낡은 것을 하루(SUSE)나 이틀(Red Hat) 남겼었음; 올라 있지만 404인
+      문서는 아카이브 사본을 유지; progress 줄에 `ArchiveSuperseded`
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨

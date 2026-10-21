@@ -79,9 +79,10 @@ func TestDelta_FetchesDocumentsNewerThanTheArchive(t *testing.T) {
 	}
 }
 
-// The newer document WINS. Bolt.Put keys on the advisory ID, so emitting the
-// delta after the archive is what makes last-write-wins the right answer — and
-// this asserts the ordering rather than trusting it.
+// The newer document WINS, and since D129 it wins by being the ONLY copy
+// emitted: the delta runs before the archive walk and the archive skips every
+// document the delta fetched. Last-write-wins by ID had nothing to win with
+// when the newer copy converted to nothing (the test after this one).
 func TestDelta_TheNewerDocumentReplacesTheArchivesCopy(t *testing.T) {
 	f := &feed{
 		pointer: "csaf_vex_2026-08-05.tar.zst",
@@ -93,23 +94,73 @@ func TestDelta_TheNewerDocumentReplacesTheArchivesCopy(t *testing.T) {
 			"2026/cve-2026-0001.json": rhel9Doc(t, "CVE-2026-0001", "openssh", "0:2-2.el9.x86_64"),
 		},
 	}
+	got, progress, err := fetchAll(t, serve(t, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("emitted %d advisories, want only the delta's copy: %+v", len(got), got)
+	}
+	ev := got[0].Affected[0].Ranges[0].Events
+	if got[0].ID != "REDHAT-CVE-2026-0001" || ev[1].Fixed != "0:2-2.el9" {
+		t.Errorf("the surviving copy is the archive's (fixed=%q), want the delta's 0:2-2.el9", ev[1].Fixed)
+	}
+	if !strings.Contains(progress, "1 archive documents superseded by a newer copy the delta fetched (D129)") {
+		t.Errorf("progress does not account for the superseded archive copy:\n%s", progress)
+	}
+}
+
+// D129's reason to exist (external review #5): Red Hat corrected a document to
+// nothing affected -- no fixed, no known_affected -- and before D129 the delta
+// emitted nothing for it, so the archive's stale affected range stood until the
+// archive was regenerated, about two days.
+func TestDelta_CorrectionToNothingAffectedLeavesNoRecord(t *testing.T) {
+	f := &feed{
+		pointer: "csaf_vex_2026-08-05.tar.zst",
+		archive: archiveOf(t, map[string]string{
+			"2026/cve-2026-0001.json": rhel9Doc(t, "CVE-2026-0001", "openssh", ""),
+			// A second document, untouched by the delta, so the D20 coverage
+			// guard has a record to count -- the correction must not be the
+			// only thing the archive held.
+			"2024/cve-2024-0001.json": rhel9Doc(t, "CVE-2024-0001", "curl", "0:1-1.el9.x86_64"),
+		}),
+		changes: changesCSV([2]string{"2026/cve-2026-0001.json", "2026-08-06T00:00:00+00:00"}),
+		docs: map[string]string{
+			"2026/cve-2026-0001.json": docJSON(t, "CVE-2026-0001", map[string]string{"R": "cpe:/o:redhat:enterprise_linux:9"}, nil, nil),
+		},
+	}
 	got, _, err := fetchAll(t, serve(t, f))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("emitted %d advisories, want the archive's and the delta's: %+v", len(got), got)
+	for _, a := range got {
+		if a.ID == "REDHAT-CVE-2026-0001" {
+			t.Fatalf("the archive's record survived the correction to nothing affected: %+v", a.Affected)
+		}
 	}
-	// Order is what the store relies on: the LAST one emitted is the record
-	// that survives, so it has to be the newer document.
-	last := got[len(got)-1]
-	if last.ID != "REDHAT-CVE-2026-0001" {
-		t.Fatalf("last emitted = %s", last.ID)
+}
+
+// The other direction: a document the delta listed but could not fetch keeps
+// its archive copy. Superseding on the listing alone would drop a live advisory
+// for a night on every transient 404.
+func TestDelta_GoneDocumentKeepsTheArchivesCopy(t *testing.T) {
+	f := &feed{
+		pointer: "csaf_vex_2026-08-05.tar.zst",
+		archive: archiveOf(t, map[string]string{
+			"2026/cve-2026-0001.json": rhel9Doc(t, "CVE-2026-0001", "openssh", "0:1-1.el9.x86_64"),
+		}),
+		changes: changesCSV([2]string{"2026/cve-2026-0001.json", "2026-08-06T00:00:00+00:00"}),
+		// Listed, not served.
 	}
-	ev := last.Affected[0].Ranges[0].Events
-	if ev[1].Fixed != "0:2-2.el9" {
-		t.Errorf("the archive's copy was emitted last (fixed=%q); the delta must come after it "+
-			"or the stale record wins", ev[1].Fixed)
+	got, progress, err := fetchAll(t, serve(t, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "REDHAT-CVE-2026-0001" {
+		t.Fatalf("the archive's record was dropped for a document the delta could not fetch: %+v", got)
+	}
+	if !strings.Contains(progress, "1 already withdrawn") || !strings.Contains(progress, "0 archive documents superseded") {
+		t.Errorf("progress should count the gone document and no superseded copy:\n%s", progress)
 	}
 }
 
@@ -287,7 +338,9 @@ func TestDelta_HonoursCancellation(t *testing.T) {
 // two behind it certainly finish first. An implementation that emitted results
 // as they arrived would put them the other way round — and since the store's
 // last-write-wins is what makes a re-emitted advisory replace its own record,
-// that would make which version survives depend on which request was quickest.
+// a document changes.csv lists twice would survive as whichever request was
+// quickest. Since D129 the delta is emitted BEFORE the archive walk, so the
+// archive's own record comes last.
 func TestDelta_EmitsInOrderDespiteConcurrency(t *testing.T) {
 	order := []string{"2026/cve-2026-3001.json", "2026/cve-2026-3002.json", "2026/cve-2026-3003.json"}
 	rows := make([][2]string, 0, len(order))
@@ -310,13 +363,13 @@ func TestDelta_EmitsInOrderDespiteConcurrency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The archive's advisory comes first, then the delta's in changes.csv order.
+	// The delta's advisories in changes.csv order, then the archive's (D129).
 	var ids []string
 	for _, a := range got {
 		ids = append(ids, a.ID)
 	}
 	// D90: emitted IDs are REDHAT-prefixed.
-	want := []string{"REDHAT-CVE-2024-0001", "REDHAT-CVE-2026-3003", "REDHAT-CVE-2026-3002", "REDHAT-CVE-2026-3001"}
+	want := []string{"REDHAT-CVE-2026-3003", "REDHAT-CVE-2026-3002", "REDHAT-CVE-2026-3001", "REDHAT-CVE-2024-0001"}
 	if len(ids) != len(want) {
 		t.Fatalf("emitted %v, want %v", ids, want)
 	}

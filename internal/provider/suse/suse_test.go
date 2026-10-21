@@ -331,6 +331,70 @@ func TestFetch_DeltaFetchesChangedDocuments(t *testing.T) {
 	}
 }
 
+// D129: a document the delta fetched supersedes the archive's copy entirely,
+// including when the newer document converts to nothing. SUSE corrected
+// CVE-2024-6387 to known_not_affected for the package the archive still
+// lists as fixed; the archive's record must not survive the build (external
+// review #5: before D129 the delta emitted nothing for it and the archive's
+// stale affected range stood until the archive was regenerated).
+func TestFetch_DeltaCorrectionToNotAffectedLeavesNoRecord(t *testing.T) {
+	corrected := docJSONWithNotAffected("CVE-2024-6387",
+		[]string{"SUSE Linux Enterprise Server 15 SP6"},
+		map[string]string{"openssh": "pkg:rpm/suse/openssh@?upstream=openssh.src.rpm"},
+		nil, nil,
+		[]string{"SUSE Linux Enterprise Server 15 SP6:openssh"})
+	f := &feed{
+		archive:         fixture(t, "archive.tar.bz2"),
+		archiveModified: archiveBuilt2026,
+		changes:         changesCSV([2]string{"2025/cve-2024-6387.json", archiveBuilt2026.Add(time.Hour).Format(time.RFC3339)}),
+		docs:            map[string]string{"2025/cve-2024-6387.json": corrected},
+	}
+	got, progress, err := fetchAll(t, serve(t, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range got {
+		if a.ID == "SUSE-CVE-2024-6387" {
+			t.Fatalf("the archive's record survived SUSE's correction to not affected: %+v", a.Affected)
+		}
+	}
+	if f.hitsFor("csaf-vex/2025/cve-2024-6387.json") != 1 {
+		t.Errorf("the corrected document was fetched %d times, want 1", f.hitsFor("csaf-vex/2025/cve-2024-6387.json"))
+	}
+	if !strings.Contains(progress, "1 archive documents superseded by a newer copy the delta fetched (D129)") {
+		t.Errorf("progress does not account for the superseded archive copy:\n%s", progress)
+	}
+}
+
+// The other direction of D129's rule: a document the delta LISTED but could
+// not fetch (404 -- the withdrawn-between-files race, or a stuck .json.new)
+// keeps its archive copy. Superseding on the listing alone would drop a live
+// advisory for a night on every transient.
+func TestFetch_DeltaGoneDocumentKeepsTheArchivesCopy(t *testing.T) {
+	f := &feed{
+		archive:         fixture(t, "archive.tar.bz2"),
+		archiveModified: archiveBuilt2026,
+		changes:         changesCSV([2]string{"2025/cve-2024-6387.json", archiveBuilt2026.Add(time.Hour).Format(time.RFC3339)}),
+		// Listed, not served.
+	}
+	got, progress, err := fetchAll(t, serve(t, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, a := range got {
+		if a.ID == "SUSE-CVE-2024-6387" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the archive's record was dropped for a document the delta listed but could not fetch")
+	}
+	if !strings.Contains(progress, "1 already withdrawn") || !strings.Contains(progress, "0 archive documents superseded") {
+		t.Errorf("progress should count the gone document and no superseded copy:\n%s", progress)
+	}
+}
+
 // D122: a changes.csv row is turned into a URL, so a row on or after the
 // cutoff that is not exactly "<year>/cve-<year>-<n>.json" fails the build
 // rather than being fetched or skipped. The flat name SUSE used until
@@ -496,6 +560,13 @@ func TestFetch_HonoursContextCancellation(t *testing.T) {
 // for tests that need to serve one over HTTP directly (the delta path)
 // rather than via a checked-in archive.
 func docJSONForTest(cve string, platforms []string, packages map[string]string, recommended, knownAffected []string) string {
+	return docJSONWithNotAffected(cve, platforms, packages, recommended, knownAffected, nil)
+}
+
+// docJSONWithNotAffected is docJSONForTest with the known_not_affected bucket
+// spelled by the caller: the shape a document takes once SUSE corrects a
+// finding away (D129).
+func docJSONWithNotAffected(cve string, platforms []string, packages map[string]string, recommended, knownAffected, knownNotAffected []string) string {
 	var kids []map[string]any
 	for _, name := range platforms {
 		kids = append(kids, map[string]any{
@@ -519,6 +590,7 @@ func docJSONForTest(cve string, platforms []string, packages map[string]string, 
 			"cve": cve,
 			"product_status": map[string]any{
 				"recommended": recommended, "known_affected": knownAffected,
+				"known_not_affected": knownNotAffected,
 			},
 		}},
 	})

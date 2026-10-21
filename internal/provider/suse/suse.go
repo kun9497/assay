@@ -77,6 +77,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -163,6 +164,24 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		return store.Provenance{}, err
 	}
 
+	var st stats
+	// covered accumulates the release-qualified keys actually seen, not the
+	// ones this provider hopes for -- identical reasoning to redhat.covered:
+	// SUSE adds and retires SLES/Leap releases on its own schedule.
+	covered := map[string]bool{}
+
+	// D129: the delta runs FIRST. The archive is a snapshot; documents
+	// changed since its own Last-Modified are fetched individually and
+	// emitted now, and the walk below skips the archive's older copy of each
+	// one the delta fetched -- so a document corrected to nothing affected
+	// leaves no record at all, where emitting the delta after the walk left
+	// the archive's stale record standing (nothing newer was emitted over it).
+	// Before the 445 MB spool as well: a delta that fails fails fast.
+	superseded, err := p.deltaSince(ctx, asOf, emit, &st, covered)
+	if err != nil {
+		return store.Provenance{}, err
+	}
+
 	// Spooled to disk first, then decompressed from there -- D64, the same
 	// trade redhat.spool documents: a 445 MB transfer held open while every
 	// record it produces is written to bbolt is the exact shape that lost a
@@ -176,11 +195,6 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		os.Remove(body.Name())
 	}()
 
-	var st stats
-	// covered accumulates the release-qualified keys actually seen, not the
-	// ones this provider hopes for -- identical reasoning to redhat.covered:
-	// SUSE adds and retires SLES/Leap releases on its own schedule.
-	covered := map[string]bool{}
 	tr := tar.NewReader(bzip2.NewReader(body))
 	for {
 		if err := ctx.Err(); err != nil {
@@ -200,6 +214,12 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		// .json suffix check alone excludes both siblings, since neither ends
 		// in ".json".
 		if h.Typeflag != tar.TypeReg || !strings.HasSuffix(h.Name, ".json") {
+			continue
+		}
+		if superseded[path.Base(h.Name)] {
+			// D129: the delta fetched a newer copy of this document and has
+			// already emitted whatever it converted to, which may be nothing.
+			st.ArchiveSuperseded++
 			continue
 		}
 		if h.Size > maxDocument {
@@ -224,13 +244,6 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		if err := emit(adv); err != nil {
 			return store.Provenance{}, err
 		}
-	}
-
-	// The archive is a snapshot; documents changed since its own
-	// Last-Modified are fetched individually and emitted on top, exactly
-	// mirroring redhat.Fetch's deltaSince call.
-	if err := p.deltaSince(ctx, asOf, emit, &st, covered); err != nil {
-		return store.Provenance{}, err
 	}
 
 	// D20's coverage guard, identical in shape to redhat.Fetch's: a build
@@ -321,7 +334,8 @@ func (s stats) String() string {
 			"the package (D125), %d native Leap no-fix entries given their SLE twin's fix (D128); "+
 			"%d bare entries named by their product id where the purl's name "+
 			"differed (D126); delta: %d changed since the archive, %d fetched, %d already "+
-			"withdrawn, %d yielded a record, %d retried, %d rescued by a retry",
+			"withdrawn, %d yielded a record, %d retried, %d rescued by a retry, "+
+			"%d archive documents superseded by a newer copy the delta fetched (D129)",
 		s.Documents, s.Advisories, s.Affected, s.Unfixable,
 		s.UnfixableWontFix, s.UnfixableNotFixed, s.UnfixableUnstated, s.UnfixableBothReasons,
 		s.PlatformsUnfoldable, s.PlatformsTumbleweed,
@@ -330,5 +344,5 @@ func (s stats) String() string {
 		s.SkippedNoCVE, s.SkippedBadDoc, s.SkippedLTSSShadowedByMainline,
 		s.MirroredToLeap, s.SkippedLeapNativeWins, s.SkippedLeapNotAffected, s.LeapNoFixReplacedBySLEFix, s.BareNamedByProductID,
 		s.DeltaListed, s.DeltaFetched, s.DeltaGone, s.DeltaAdvisories,
-		s.DeltaRetried, s.DeltaRescued)
+		s.DeltaRetried, s.DeltaRescued, s.ArchiveSuperseded)
 }

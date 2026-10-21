@@ -5455,6 +5455,44 @@ user could act on is lost.
 
 ---
 
+### D129 — The delta runs first, and the archive walk skips every document the delta fetched
+
+**Decision.** In both CSAF providers (Red Hat, SUSE) the delta pass — the documents
+`changes.csv` lists as changed since the archive was built — runs *before* the archive walk,
+and the walk skips the archive's copy of every document the delta actually fetched, whatever
+that copy converted to. A document the delta listed but could not fetch (a 404: the
+withdrawn-between-files race, or SUSE's stuck `.json.new`) keeps its archive copy. Matched by
+base name (`cve-YYYY-NNNNN.json`), the one spelling the archive entry and the `changes.csv` row
+are sure to share: SUSE's archive carried no year directory before D122, and the row's
+directory is not the CVE's year. Counted as `ArchiveSuperseded` on the progress line. The
+delta also fails before the archive is spooled now, which is the fast-failing order.
+
+**Why.** The 2026-10-20 external review (#5) showed the old order — archive first, delta
+emitted on top, last-write-wins by ID — has nothing to win with when the newer document
+converts to nothing: a finding SUSE or Red Hat corrected to `known_not_affected` emitted no
+record, so the archive's stale affected range stood until the archive was regenerated, about a
+day for SUSE and two for Red Hat. A correction the provider received over HTTP 200 and then
+discarded. The alternatives were a tombstone (a record with no affected entries) or a delete
+channel from provider to store; both add a store operation and a new shape for D110's carry to
+misread — a tombstone counts as "re-emitted without the key" and would have the seed's old
+entries *restored* on a quiet night, which is worse than today. Skipping the archive copy needs
+neither: the corrected document simply leaves no record, exactly as it will once the archive
+catches up.
+
+**Why only a fetched document supersedes.** Superseding on the listing alone would drop a live
+advisory for a night on every transient 404 — and SUSE's feed has shown stuck `.json.new`
+publishes (D122's review) that 404 the `.json` path for hours. A document that is listed and
+gone keeps the archive's copy, which is what the build did before; a document that is fetched
+and converts to nothing is a correction, and leaves none.
+
+**Verified.** Both providers, through `Fetch` with a served feed: a correction to nothing
+affected leaves no record; a listed-but-gone document keeps the archive's copy; the newer
+document is the only copy emitted (Red Hat's order test now expects the delta's records first,
+then the archive's). Mutations caught: the skip removed, the skip keyed on listed rather than
+fetched documents, the counter dropped.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

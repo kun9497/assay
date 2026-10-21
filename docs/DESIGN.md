@@ -845,6 +845,11 @@ exited 0 while 24 findings went unmentioned.
       version" (Leap 16.1's glibc, whose repo ships the fixed build, was reported affected
       with no fix); 659 cases on 15.6, 25 on 16.1, 10 on 16.0, none below 15.3; both-no-fix
       and native-with-own-fix stay native
+- [x] The delta runs first and the archive walk skips what it fetched (D129) — both CSAF
+      providers; a document corrected to nothing affected now leaves no record, where
+      last-write-wins on top of the archive had kept the stale one for a day (SUSE) or two
+      (Red Hat); a listed-but-404 document keeps its archive copy; `ArchiveSuperseded` on
+      the progress line
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15
