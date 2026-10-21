@@ -4046,6 +4046,16 @@ LTSS-channel 빌드로, 무료 Leap 사용자가 직접 받을 수 없는 것일
 미러링되지 않는다. 스캔 경로는 변경되지 않았고(D14) 이는 db-build 변경이다;
 미러링된 advisory는 다른 것과 똑같이 store에 도달한다.
 
+**Allowlist 재검토, 2026-10-21 — 16.1 추가.** 적어 둔 대로 재검토 계기가 발동했다: D125
+검토가 피드에서 `openSUSE Leap 16.1`을 발견했다(2026-10-19 아카이브의 3,165개 문서; native
+항목은 `known_affected` 3,059, `known_not_affected` 1,487뿐이고 `recommended`는 없음 — 아직
+만들어지는 릴리스로, endoflife.date에 없고 `distribution/leap/16.1/` 트리는 존재). 이것이
+바로 gap-fill 모양이다: Leap 자신의 항목에는 fix가 없는데 `SUSE Linux Enterprise Server
+16.1`(25,387개 문서)에는 공유 `160100` codestream 위에 있다(`kernel-default-6.12.0-160100.7.2`).
+키를 추가하면 22,078개 문서의 `SLES:16.1` 항목 fixed 279,603건과 no-fix 19,459건이
+미러링된다(native-wins 2,323). `leapMirrorKey`뿐 아니라 `convert`를 통해서도 지켜지며,
+테스트 표의 거부 행은 다음 재검토 대상인 16.2로 옮겼다.
+
 ---
 
 ### D109 — 스캔이 읽지 못한 매니페스트는 타깃의 불완전성이고, 모든 renderer가 이를 이름으로 밝힌다

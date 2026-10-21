@@ -410,11 +410,15 @@ Leap X.Y NonFree`와 `openSUSE Leap Micro 5.x` 이름도 함께 발행하는데,
 이미 fold에서 거부되고 있고 미러 대상이 된 적이 없다). census가 새로운
 mainline Leap 릴리스(16.1 이상)를 보여줄 때 다시 본다; 이 집합에 없는
 릴리스로 키가 잡힌 Leap 이미지가 조용히 과소 보고하는 것이 그 흔적이다.
-**2026-10-21에 계기가 발동했다**(D125 검토): 실제 피드가 `openSUSE Leap 16.1`을
-product로 올린다(`cve-2026-7168`, 2026-10-16, `known_affected`; 2026-10-19
-아카이브의 39개 문서). native Leap 16.1 항목은 fold를 통해 이미 들어오고 있다;
-`leapReleases`에 16.1이 들어가기 전까지 `SLES:16.1` 항목은 어디로도 미러링되지
-않는다. 미해결 — `SLES:16.1` 집합의 크기를 먼저 재고 나서 추가한다.
+**2026-10-21에 계기가 발동했고**(D125 검토) **같은 날 처리했다.** 피드는 2026-10-19
+아카이브의 3,165개 문서에서 `openSUSE Leap 16.1`을 product로 올린다(`cve-2026-7168`
+포함). native 항목은 `known_affected`(3,059)와 `known_not_affected`(1,487)뿐이고
+`recommended`는 없다 — 아직 만들어지고 있는 릴리스다(endoflife.date에 아직 없음;
+`distribution/leap/16.1/` 트리는 존재). `SUSE Linux Enterprise Server 16.1`은 25,387개
+문서에 나온다. `leapReleases`에 16.1을 넣으면 22,078개 문서의 `SLES:16.1` 항목 fixed
+279,603건과 no-fix 19,459건이 공유 `160100` codestream 위에서 `openSUSE Leap:16.1`로
+미러링된다(native-wins 2,323). 다음 재검토는 16.2이며, 테스트 표가 그것을 거부 행으로
+들고 있다.
 
 ---
 

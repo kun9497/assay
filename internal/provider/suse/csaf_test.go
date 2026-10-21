@@ -37,6 +37,8 @@ func TestFoldKey(t *testing.T) {
 		// openSUSE Leap: 1:1, no fold.
 		{"openSUSE Leap 15.6", "openSUSE Leap:15.6", "", true},
 		{"openSUSE Leap 16.0", "openSUSE Leap:16.0", "", true},
+		{"openSUSE Leap 16.1", "openSUSE Leap:16.1", "", true},
+		{"SUSE Linux Enterprise Server 16.1", "SLES:16.1", "", true},
 
 		// Refused: Tumbleweed by name, rolling with no release axis.
 		{"openSUSE Tumbleweed", "", "rolling, no stable release to key on", false},
@@ -822,7 +824,8 @@ func TestLeapMirrorKey(t *testing.T) {
 		{"SLES:16.0", "openSUSE Leap:16.0", true},   // dotted 16.x
 		{"SLES:15.SP7", "", false},                  // SLE 15 SP7 exists; Leap 15.7 never did
 		{"SLES:12.SP5", "", false},                  // no openSUSE Leap 12.x
-		{"SLES:16.1", "", false},                    // not yet published as Leap 16.1 (census M1)
+		{"SLES:16.1", "openSUSE Leap:16.1", true},   // published since the 2026-10-21 census (D108 revisit)
+		{"SLES:16.2", "", false},                    // not published as Leap 16.2 yet: the next revisit
 		{"openSUSE Leap:15.6", "", false},           // already a Leap key
 		{"", "", false},
 	}
@@ -1265,6 +1268,37 @@ func TestStatsString_ReportsBareNamedByProductID(t *testing.T) {
 		"4 bare entries named by their product id where the purl's name differed (D126)"
 	if !strings.Contains(got, want) {
 		t.Errorf("stats.String() = %q, want it to contain %q", got, want)
+	}
+}
+
+// D108 allowlist revisit, 2026-10-21: the feed publishes openSUSE Leap 16.1
+// (3,165 documents, native entries known_affected/known_not_affected only --
+// a release still being built), so SLES:16.1 fixes mirror onto it on the
+// shared 160100 codestream, the same gap-fill 16.0 gets. Through convert, so
+// the allowlist is held where it is consulted, not only in leapMirrorKey.
+func TestConvert_MirrorsSLE161OntoLeap161(t *testing.T) {
+	d := buildDoc(t, "CVE-2026-7168",
+		[]string{"SUSE Linux Enterprise Server 16.1"},
+		map[string]string{
+			"curl-8.14.1-160100.3.3.1": "pkg:rpm/suse/curl@8.14.1-160100.3.3.1?upstream=curl-8.14.1-160100.3.3.1.src.rpm",
+		},
+		[]string{"SUSE Linux Enterprise Server 16.1:curl-8.14.1-160100.3.3.1"},
+		nil, nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped a document naming an SLES 16.1 package")
+	}
+	m, found := affectedByName(adv)["openSUSE Leap:16.1/curl"]
+	if !found || m.CrossMappedFrom != "SLES:16.1" {
+		t.Fatalf("no mirror onto openSUSE Leap:16.1 (found=%v %+v): the allowlist still refuses 16.1", found, m)
+	}
+	if len(m.Ranges) != 1 || len(m.Ranges[0].Events) != 2 || m.Ranges[0].Events[1].Fixed != "8.14.1-160100.3.3.1" {
+		t.Errorf("mirror lost the fixed version: %+v", m.Ranges)
+	}
+	if st.MirroredToLeap != 1 {
+		t.Errorf("MirroredToLeap = %d, want 1", st.MirroredToLeap)
 	}
 }
 

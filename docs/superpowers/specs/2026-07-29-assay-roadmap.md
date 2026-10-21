@@ -4172,6 +4172,17 @@ them), keeps the mirror from fabricating a phantom key: SLE 15 SP7 exists but Le
 16.0, so `SLES:15.SP7` mirrors nowhere. The scan path is unchanged (D14) — this is a
 db-build change; a mirrored advisory reaches the store like any other.
 
+**Allowlist revisit, 2026-10-21 — 16.1 added.** The revisit trigger fired as written: D125's
+review found the feed naming `openSUSE Leap 16.1` (3,165 documents of the 2026-10-19 archive;
+native entries `known_affected` 3,059 and `known_not_affected` 1,487, no `recommended` — a
+release still being built, not yet on endoflife.date, its `distribution/leap/16.1/` tree
+present). That is the gap-fill shape exactly: Leap's own entries carry no fixes while
+`SUSE Linux Enterprise Server 16.1` (25,387 documents) does, on the shared `160100`
+codestream (`kernel-default-6.12.0-160100.7.2`). Adding the key mirrors 279,603 fixed and
+19,459 no-fix `SLES:16.1` entries across 22,078 documents (2,323 native-wins). Held through
+`convert` as well as `leapMirrorKey`; the refused row in the test table moves to 16.2, the
+next revisit.
+
 ---
 
 ### D109 — A manifest the scan could not read is the target's incompleteness, and every renderer names it

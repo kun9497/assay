@@ -389,10 +389,15 @@ vulnerable — and the disclosure is what lets the reader judge the remediation.
 NonFree` and `openSUSE Leap Micro 5.x` names, both already refused by the fold and never a
 mirror target). Revisit when the census shows a new mainline Leap release (16.1 and up); a
 Leap image keyed to a release absent from the set, silently under-reporting, is the trace.
-**Trigger fired 2026-10-21** (D125's review): the live feed names `openSUSE Leap 16.1` as a
-product (`cve-2026-7168`, 2026-10-16, `known_affected`; 39 documents in the 2026-10-19
-archive). Native Leap 16.1 entries ingest through the fold already; `SLES:16.1` entries mirror
-nowhere until `leapReleases` gains 16.1. Open — size the `SLES:16.1` set first, then add it.
+**Trigger fired 2026-10-21** (D125's review) **and acted on the same day.** The feed names
+`openSUSE Leap 16.1` as a product in 3,165 documents of the 2026-10-19 archive (`cve-2026-7168`
+among them), with native entries under `known_affected` (3,059) and `known_not_affected`
+(1,487) only — no `recommended`, a release still being built (not on endoflife.date yet; the
+`distribution/leap/16.1/` tree exists). `SUSE Linux Enterprise Server 16.1` appears in 25,387
+documents. Adding 16.1 to `leapReleases` mirrors 279,603 fixed and 19,459 no-fix `SLES:16.1`
+entries across 22,078 documents onto `openSUSE Leap:16.1` (2,323 native-wins), on the shared
+`160100` codestream. The next revisit is 16.2; the test table now carries it as the refused
+row.
 
 ---
 
