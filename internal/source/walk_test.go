@@ -406,3 +406,94 @@ func TestFiles_HardlinkTargetIsRootRelative(t *testing.T) {
 		t.Errorf("Data = %q, want the root-relative target's contents", f.Data)
 	}
 }
+
+// A hardlink is a second name for the inode AS IT WAS when the link was made,
+// in the layer that made it. Replacing the target by name in a later layer --
+// a whiteout and a new file -- does not reach the hardlinked name, which still
+// holds the old bytes. Resolving the target top-down like a symlink's handed
+// the hardlink the newest file instead (external review #4: a package database
+// hardlinked from a scratch path that a later layer rewrote reported the
+// rewritten database, and with it versions the image does not ship).
+func TestFiles_HardlinkKeepsTheInodeItWasMadeFrom(t *testing.T) {
+	img := imageOf(
+		layerOfOrdered(t, "sha256:base",
+			entry{name: "tmp/pkgdb", body: "vulnerable-1.0"},
+			hard("lib/apk/db/installed", "tmp/pkgdb"),
+		),
+		layerOfOrdered(t, "sha256:top",
+			entry{name: "tmp/.wh.pkgdb", body: ""},
+			entry{name: "tmp/pkgdb", body: "fixed-pkg-2.0"},
+		),
+	)
+	got, err := img.Files(context.Background(), []string{"lib/apk/db/installed", "tmp/pkgdb"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := got["lib/apk/db/installed"]; string(f.Data) != "vulnerable-1.0" || f.DiffID != "sha256:base" {
+		t.Errorf("hardlinked name = %q from %s, want the base layer's inode (vulnerable-1.0): the top layer replaced the TARGET'S NAME, not the link's inode", f.Data, f.DiffID)
+	}
+	// The name itself, asked for directly, is the newest file -- the whiteout
+	// and replacement are exactly what the top layer did to it.
+	if f := got["tmp/pkgdb"]; string(f.Data) != "fixed-pkg-2.0" || f.DiffID != "sha256:top" {
+		t.Errorf("tmp/pkgdb = %q from %s, want the top layer's replacement", f.Data, f.DiffID)
+	}
+}
+
+// The contrast that keeps the rule narrow: a SYMLINK resolves by name at
+// runtime, so the same whiteout-and-replace in a later layer does reach it.
+func TestFiles_SymlinkFollowsTheNewestTarget(t *testing.T) {
+	img := imageOf(
+		layerOfOrdered(t, "sha256:base",
+			entry{name: "tmp/pkgdb", body: "vulnerable-1.0"},
+			sym("lib/apk/db/installed", "../../../tmp/pkgdb"),
+		),
+		layerOfOrdered(t, "sha256:top",
+			entry{name: "tmp/.wh.pkgdb", body: ""},
+			entry{name: "tmp/pkgdb", body: "fixed-pkg-2.0"},
+		),
+	)
+	got, err := img.Files(context.Background(), []string{"lib/apk/db/installed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := got["lib/apk/db/installed"]; string(f.Data) != "fixed-pkg-2.0" || f.DiffID != "sha256:top" {
+		t.Errorf("symlinked name = %q from %s, want the top layer's replacement: a symlink follows the name", f.Data, f.DiffID)
+	}
+}
+
+// A hardlink's target may be in a lower layer than the link (a builder that
+// links across layers emits the link alone); lower is allowed, higher never.
+func TestFiles_HardlinkTargetMayBeInALowerLayer(t *testing.T) {
+	img := imageOf(
+		layerOf(t, "sha256:base", map[string]string{"usr/lib/os-release": "ID=alpine"}),
+		layerOfOrdered(t, "sha256:top", hard("etc/os-release", "usr/lib/os-release")),
+	)
+	got, err := img.Files(context.Background(), []string{"etc/os-release"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := got["etc/os-release"]; string(f.Data) != "ID=alpine" || f.DiffID != "sha256:base" {
+		t.Errorf("etc/os-release = %q from %s, want the lower layer's target", f.Data, f.DiffID)
+	}
+}
+
+// Two wanted names that resolve to one target both get their answer. The
+// first implementation keyed the pending target by path and kept only the
+// last requester, so the other came back absent -- "no such file" for a path
+// the image has.
+func TestFiles_TwoNamesResolvingToOneTargetBothResolve(t *testing.T) {
+	img := imageOf(layerOfOrdered(t, "sha256:one",
+		sym("etc/os-release", "../usr/lib/os-release"),
+		hard("etc/os-release.copy", "usr/lib/os-release"),
+		entry{name: "usr/lib/os-release", body: "ID=alpine"},
+	))
+	got, err := img.Files(context.Background(), []string{"etc/os-release", "etc/os-release.copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"etc/os-release", "etc/os-release.copy"} {
+		if f, ok := got[want]; !ok || string(f.Data) != "ID=alpine" {
+			t.Errorf("%s: got %q (present=%v), want ID=alpine", want, f.Data, ok)
+		}
+	}
+}
