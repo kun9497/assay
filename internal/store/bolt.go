@@ -585,6 +585,14 @@ func StripEnrichment(path string) error {
 			return fmt.Errorf("decode metadata: %w", err)
 		}
 		m.Enrichment, m.EnrichmentCounts = nil, nil
+		// D127: a database that was itself pulled carries the record of
+		// THAT pull. Published, it would name the upstream artifact inside
+		// a layer that is a different artifact, and a pre-D127 binary's
+		// `db update` installs the layer without touching Meta, so a later
+		// D127 scan would report the mirror's upstream rather than what it
+		// pulled. The published database names no artifact; the pull that
+		// installs it writes the right one.
+		m.Artifact = nil
 		blob, err := json.Marshal(m)
 		if err != nil {
 			return err
@@ -819,20 +827,30 @@ func SetArtifactAt(path string, rec ArtifactRecord) error {
 	if rec.Digest == "" {
 		return fmt.Errorf("artifact record names no digest")
 	}
+	// Stat first, as openReadOnly does: a read-write bolt.Open CREATES a
+	// missing file, and a typo'd path would otherwise leave an empty database
+	// behind with an error that says "no metadata record".
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("%w at %s", ErrNotFound, path)
+	}
 	db, err := bolt.Open(path, 0o600, &bolt.Options{Timeout: setArtifactLockWait})
 	if err != nil {
 		return fmt.Errorf("open %s for the artifact record: %w", path, err)
 	}
 	defer db.Close()
 	return db.Update(func(tx *bolt.Tx) error {
-		bk := tx.Bucket(bucketMeta)
-		if bk == nil {
-			return fmt.Errorf("%w at %s: no metadata record", ErrIncomplete, path)
+		// One check for both "no bucket" and "no record": Create always makes
+		// the bucket, so the bucket-less case is unreachable from any file
+		// this project writes, and a separate branch for it would be an
+		// untested one.
+		var raw []byte
+		if bk := tx.Bucket(bucketMeta); bk != nil {
+			raw = bk.Get([]byte("meta"))
 		}
-		raw := bk.Get([]byte("meta"))
 		if raw == nil {
 			return fmt.Errorf("%w at %s: no metadata record", ErrIncomplete, path)
 		}
+		bk := tx.Bucket(bucketMeta)
 		var m Meta
 		if err := json.Unmarshal(raw, &m); err != nil {
 			return fmt.Errorf("decode meta: %w", err)

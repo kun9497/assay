@@ -3,14 +3,17 @@ package dbcmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	bolt "go.etcd.io/bbolt"
 
 	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/provider"
@@ -108,12 +111,103 @@ func TestPull_TheTempDatabaseCarriesItsRecordBeforeInstall(t *testing.T) {
 		t.Fatalf("a database was installed although the rename failed (stat err = %v)", err)
 	}
 	tmp := dst + ".tmp"
+	// The message is the reason the record is in tmp: it tells the user to
+	// move that file into place by hand, so it must name the file.
+	if s := errOut.String(); !strings.Contains(s, tmp) || !strings.Contains(s, "move it into place") {
+		t.Errorf("the install-failure message does not point the user at the temp file:\n%s", s)
+	}
 	rec := artifactOf(t, tmp)
 	if rec == nil {
 		t.Fatalf("the complete database left at %s carries no artifact record; moved into place by hand it would name no artifact, or the previous pull's", tmp)
 	}
 	if _, want := digestOf(t, ref); rec.Digest != want {
 		t.Errorf("temp database's record digest = %s, want %s", rec.Digest, want)
+	}
+}
+
+// A record that cannot be written fails the pull with the previous database
+// still in place and no temp file left: the caller asked for a database a
+// scan can name, and one it cannot name must not be installed as if it could.
+// Forced through setArtifactFn -- nothing else can make the write fail.
+func TestPull_ARecordThatCannotBeWrittenFailsThePull(t *testing.T) {
+	dst := pushable(t, time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC))
+	before, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := setArtifactFn
+	setArtifactFn = func(string, store.ArtifactRecord) error { return errors.New("forced: record write failed") }
+	t.Cleanup(func() { setArtifactFn = saved })
+
+	var out, errOut bytes.Buffer
+	if code := Pull(context.Background(), dst, published(t, store.SchemaVersion), &out, &errOut); code != 2 {
+		t.Fatalf("Pull = %d, want 2 when the record cannot be written (stderr: %s)", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "record the pulled artifact") {
+		t.Errorf("stderr does not say the record failed:\n%s", errOut.String())
+	}
+	after, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("the live database is gone: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("a pull whose record failed replaced the live database")
+	}
+	if _, err := os.Stat(dst + ".tmp"); !errors.Is(err, os.ErrNotExist) {
+		t.Error("a pull whose record failed left the temp file behind")
+	}
+}
+
+// An artifact whose manifest annotation claims this binary's schema but whose
+// database inside is another is caught by nothing but Pull's store.Open(tmp)
+// -- the annotation check passes, and SetArtifactAt opens the file without
+// reading its schema. Before this test, deleting that open left the suite
+// green and such an artifact installed with exit 0, after which every scan
+// exited 2 on the mismatch. The lying database is made by rewriting the
+// metadata record's schema field directly, which pushable cannot do.
+func TestPull_AnArtifactWhoseDatabaseIsAnotherSchemaIsRefused(t *testing.T) {
+	lying := pushable(t, time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC))
+	raw, err := bolt.Open(lying, 0o600, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = raw.Update(func(tx *bolt.Tx) error {
+		bk := tx.Bucket([]byte("meta"))
+		var m map[string]any
+		if err := json.Unmarshal(bk.Get([]byte("meta")), &m); err != nil {
+			return err
+		}
+		m["schema"] = store.SchemaVersion - 1
+		blob, err := json.Marshal(m)
+		if err != nil {
+			return err
+		}
+		return bk.Put([]byte("meta"), blob)
+	})
+	raw.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := publishedFrom(t, lying, store.SchemaVersion, nil) // the annotation says current
+
+	dst := pushable(t, time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC))
+	before, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := Pull(context.Background(), dst, ref, &out, &errOut); code != 2 {
+		t.Fatalf("Pull of a mis-annotated artifact = %d, want 2 (stderr: %s)", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "not a usable database") {
+		t.Errorf("stderr does not say the database inside was refused:\n%s", errOut.String())
+	}
+	after, err := os.ReadFile(dst)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Error("the live database was replaced by one of another schema")
+	}
+	if _, err := os.Stat(dst + ".tmp"); !errors.Is(err, os.ErrNotExist) {
+		t.Error("the refused database was left behind as a temp file")
 	}
 }
 
@@ -134,6 +228,34 @@ func TestPull_ARefusedPullLeavesTheInstalledRecordAlone(t *testing.T) {
 	}
 	if rec := artifactOf(t, dst); rec == nil || rec.Digest != want {
 		t.Errorf("record after a refused pull = %+v, want the first pull's %s", rec, want)
+	}
+}
+
+// `db status` prints the record (D127): the first thing a user asking "is
+// this the nightly I think it is?" wants, and otherwise visible only by
+// running a scan. A built database prints no such line.
+func TestStatus_PrintsThePulledArtifact(t *testing.T) {
+	dst := filepath.Join(t.TempDir(), "vulnerability.db")
+	ref := published(t, store.SchemaVersion)
+	if code := Pull(context.Background(), dst, ref, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("Pull = %d, want 0", code)
+	}
+	r, digest := digestOf(t, ref)
+	var out, errOut bytes.Buffer
+	if code := Status(dst, &out, &errOut); code != 0 {
+		t.Fatalf("Status = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	if want := "pulled:     " + r.String() + "@" + digest + " at "; !strings.Contains(out.String(), want) {
+		t.Errorf("status does not name the pulled artifact as %q:\n%s", want, out.String())
+	}
+
+	built := pushable(t, time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC))
+	out.Reset()
+	if code := Status(built, &out, &errOut); code != 0 {
+		t.Fatalf("Status = %d, want 0", code)
+	}
+	if strings.Contains(out.String(), "pulled:") {
+		t.Errorf("a built database claims to have been pulled:\n%s", out.String())
 	}
 }
 

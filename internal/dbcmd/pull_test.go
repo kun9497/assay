@@ -116,9 +116,10 @@ func TestPull_LandsAUsableDatabase(t *testing.T) {
 // than asserted as if it were self-evidently non-redundant: for BOTH
 // directions tested here, it adds the ENTIRE guarantee, not merely an
 // efficiency win. pushable() can only ever build a database at the
-// CURRENTLY RUNNING binary's store.SchemaVersion -- there is no way, within
-// one test binary, to construct a database that is genuinely a different
-// schema on disk. So in every case below, the artifact's REAL content is
+// CURRENTLY RUNNING binary's store.SchemaVersion (one that is genuinely
+// another schema on disk takes rewriting the metadata record by hand, which
+// TestPull_AnArtifactWhoseDatabaseIsAnotherSchemaIsRefused does to hold the
+// store.Open(tmp) backstop). So in every case below, the artifact's REAL content is
 // always secretly compatible; only its ANNOTATION lies. store.Open(tmp)
 // checks the real, stamped Meta.Schema -- which is correct here regardless
 // of the annotation -- so it would pass every one of these artifacts through

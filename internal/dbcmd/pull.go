@@ -121,7 +121,7 @@ func Pull(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer) int
 	// caller asked for a database a scan can name.
 	d, err := img.Digest()
 	if err == nil {
-		err = store.SetArtifactAt(tmp, store.ArtifactRecord{
+		err = setArtifactFn(tmp, store.ArtifactRecord{
 			Reference: target.String(), Digest: d.String(), PulledAt: time.Now().UTC(),
 		})
 	}
@@ -304,6 +304,13 @@ func PullSeed(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer)
 	}
 	return 0
 }
+
+// setArtifactFn is store.SetArtifactAt by default, and the seam Pull writes
+// the record through, so a test can make the write fail: nothing else can --
+// img.Digest() is served from the manifest already fetched, and nothing holds
+// the temp file open -- and the branch that fails the pull on it would
+// otherwise be held by no test (renameFn's reasoning, one step earlier).
+var setArtifactFn = store.SetArtifactAt
 
 // removeLegacySidecar is what remains of the sidecar path (D120 before D127):
 // it removes a pre-D127 record beside dbPath, which nothing reads but which

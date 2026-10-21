@@ -823,6 +823,13 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "path:       %s\n", dbPath)
 	fmt.Fprintf(stdout, "schema:     v%d\n", m.Schema)
 	fmt.Fprintf(stdout, "built:      %s\n", m.BuiltAt.Format(time.RFC3339))
+	// Which published artifact this database came from (D120/D127), the
+	// first thing a user asking "is this the nightly I think it is?" wants
+	// and otherwise visible only by running a scan. Absent for a database
+	// built locally, which names none rather than guessing.
+	if a := m.Artifact; a != nil {
+		fmt.Fprintf(stdout, "pulled:     %s@%s at %s\n", a.Reference, a.Digest, a.PulledAt.UTC().Format(time.RFC3339))
+	}
 	// What this database covers decides which packages can be evaluated at
 	// all (D20). Without it here, coverage is discoverable only by running a
 	// scan and reading why it refused.

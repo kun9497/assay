@@ -427,6 +427,15 @@ func TestSetArtifactAt(t *testing.T) {
 	if waited := time.Since(started); waited > 10*time.Second {
 		t.Errorf("SetArtifactAt waited %v for the lock, want a bounded wait", waited)
 	}
+	// A path with nothing at it is ErrNotFound and stays empty: a read-write
+	// bolt.Open would otherwise create a file there.
+	absent := filepath.Join(t.TempDir(), "absent.db")
+	if err := SetArtifactAt(absent, rec); !errors.Is(err, ErrNotFound) {
+		t.Errorf("SetArtifactAt on an absent path: err = %v, want ErrNotFound", err)
+	}
+	if _, err := os.Stat(absent); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("SetArtifactAt created a file at an absent path (stat err = %v)", err)
+	}
 	// An unfinished database (no metadata record) is refused, as Open
 	// refuses it: there is nothing complete to name.
 	partial := filepath.Join(t.TempDir(), "partial.db")
