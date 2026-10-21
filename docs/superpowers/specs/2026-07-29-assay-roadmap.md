@@ -4172,6 +4172,26 @@ them), keeps the mirror from fabricating a phantom key: SLE 15 SP7 exists but Le
 16.0, so `SLES:15.SP7` mirrors nowhere. The scan path is unchanged (D14) — this is a
 db-build change; a mirrored advisory reaches the store like any other.
 
+**Allowlist revisit, 2026-10-21 — 16.1 added.** The revisit trigger fired as written: D125's
+review found the feed naming `openSUSE Leap 16.1` (3,165 documents of the 2026-10-19 archive;
+native entries `known_affected` 3,059 and `known_not_affected` 1,487, no `recommended` — a
+release still being built, not yet on endoflife.date, its `distribution/leap/16.1/` tree
+present). That is the gap-fill shape exactly: Leap's own entries carry no fixes while
+`SUSE Linux Enterprise Server 16.1` (25,387 documents) does, on the shared `160100`
+codestream (`kernel-default-6.12.0-160100.7.2`). Adding the key mirrors 279,603 fixed and
+19,459 no-fix `SLES:16.1` entries across 22,078 documents (2,323 native-wins). Held through
+`convert` as well as `leapMirrorKey`; the refused row in the test table moves to 16.2, the
+next revisit.
+
+Of those 2,323 native-wins, 2,298 are no-fix on both sides and **25 are the union sub-case the
+D108 deferral describes**: SLES 16.1 names a fixed build (`glibc-2.40-160100.3.1`,
+`gdb-16.3-160100.3.1`, `NetworkManager-1.54.3-160100.3.1`, `wget-1.25.0-160100.4.1`, …) while
+Leap 16.1 carries only a bare `known_affected`, and the live `distribution/leap/16.1/repo/oss`
+listing ships those exact builds. Native-wins keeps the no-fix range, so a Leap 16.1 image at
+the shipped build is reported affected with no fix on `glibc` while `glibc-devel`, mirrored
+from the same document, is clean — the deferral's revisit trigger, met on 2026-10-21 with the
+subset sized. Not changed here; recorded in deferred-decisions for its own decision.
+
 ---
 
 ### D109 — A manifest the scan could not read is the target's incompleteness, and every renderer names it
@@ -5244,7 +5264,8 @@ record that keeps any other Leap entry is "fresh wins", but a record whose only 
 D125 removes can have it restored for that night's artifact — the restoration line names the
 key, and it recurs only on quiet nights. (2) The feed now publishes `openSUSE Leap 16.1`
 (`cve-2026-7168`, 2026-10-16), which is the allowlist revisit trigger deferred-decisions
-records for D108; `SLES:16.1` entries mirror nowhere until it is added. (3) `packageOf` splits
+records for D108; `SLES:16.1` entries mirror nowhere until it is added (added the same day —
+see D108's 2026-10-21 amendment). (3) `packageOf` splits
 a bare product purl whose name ends in a version-like segment (`libwmf-0_2-7` →
 `pkg:rpm/suse/libwmf@0_2-7`) into the wrong name, so bare entries for such packages — affected
 or not affected — key under a name no installed rpm carries. Pre-existing since D77; it is a

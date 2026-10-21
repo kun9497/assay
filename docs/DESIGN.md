@@ -813,8 +813,9 @@ exited 0 while 24 findings went unmentioned.
       `SLES:16.{m}` entry onto `openSUSE Leap:15.{n}` / `16.{m}`, gap-fill so a native Leap
       entry always wins and no installed-package finding disappears (18,769 transitional
       docs measured, where native wins). Reuses the rpm comparer on the shared 150600
-      codestream (no new comparer, D9); an allowlist {15.0–15.6, 16.0} refuses phantom keys
-      (SLE 15 SP7 → no Leap 15.7); `Affected.CrossMappedFrom` discloses the SLE
+      codestream (no new comparer, D9); an allowlist {15.0–15.6, 16.0, 16.1 since the
+      2026-10-21 census} refuses phantom keys (SLE 15 SP7 → no Leap 15.7);
+      `Affected.CrossMappedFrom` discloses the SLE
       (LTSS-channel) fix version in every renderer
 - [x] Leap's own `known_not_affected` stops the D108 mirror (D125) — a native Leap
       not-affected entry is SUSE's verdict on the package, not an absence; the mirror had

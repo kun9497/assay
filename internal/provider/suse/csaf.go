@@ -280,13 +280,16 @@ func slesKey(major, sp string) string {
 }
 
 // leapReleases is the set of openSUSE Leap releases the archive actually
-// publishes, measured 2026-09-14 (D108 census M1): 15.0-15.6 and 16.0. The
+// publishes: 15.0-15.6 and 16.0 at the 2026-09-14 census (D108 M1), 16.1
+// since the 2026-10-21 census (3,165 documents name "openSUSE Leap 16.1",
+// native entries known_affected/known_not_affected only -- a release still
+// being built on the 160100 codestream, which is the gap-fill case). The
 // mirror (leapMirrorKey) emits ONLY to a release in this set, so an SLE
 // codestream with no corresponding Leap release -- SLE 15 SP7, whose Leap
 // jumped straight to 16.0 -- never fabricates a phantom "openSUSE Leap:15.7"
 // key nothing scans as. Same "refuse unknown shapes, never guess" discipline
 // foldKey's anchored patterns enforce. Revisit when the census shows a new
-// Leap release (e.g. 16.1); a Leap image keyed to a release absent here
+// Leap release (16.2 next); a Leap image keyed to a release absent here
 // under-reporting is the trace.
 var leapReleases = map[string]bool{
 	"openSUSE Leap:15.0": true,
@@ -297,6 +300,7 @@ var leapReleases = map[string]bool{
 	"openSUSE Leap:15.5": true,
 	"openSUSE Leap:15.6": true,
 	"openSUSE Leap:16.0": true,
+	"openSUSE Leap:16.1": true,
 }
 
 // leapMirrorKey maps a folded SLE key to the openSUSE Leap key built from the

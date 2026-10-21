@@ -784,8 +784,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       항목마다 `openSUSE Leap:15.{n}` / `16.{m}`으로 gap-fill 미러링해서, native
       Leap 항목이 항상 이기고 설치된 패키지의 finding이 사라지지 않게 한다
       (전이 문서 18,769건 측정, native가 이김). 공유된 150600 codestream에서 rpm
-      comparer를 재사용(새 comparer 없음, D9); allowlist {15.0–15.6, 16.0}가 유령
-      키를 거부함(SLE 15 SP7 → Leap 15.7 없음); `Affected.CrossMappedFrom`이 모든
+      comparer를 재사용(새 comparer 없음, D9); allowlist {15.0–15.6, 16.0, 2026-10-21
+      census부터 16.1}가 유령 키를 거부함(SLE 15 SP7 → Leap 15.7 없음);
+      `Affected.CrossMappedFrom`이 모든
       renderer에서 SLE(LTSS-channel) fix 버전을 공개함
 - [x] Leap 자신의 `known_not_affected`가 D108 미러를 멈춤 (D125) — native Leap의
       not-affected 항목은 부재가 아니라 그 패키지에 대한 SUSE의 판정이다; 미러는 그

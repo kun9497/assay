@@ -387,8 +387,16 @@ union 질문을 다시 열지 않는다: 끌어온 주장을 하나 제거할 �
 **실제로 미뤄진 것**은 union이 실질적인 정보를 더해줄 단 하나의 하위
 사례다: native Leap entry가 no-fix이면서 SLE entry는 fixed이고 그 fix가
 실제로 Leap의 저장소에도 도달한 경우(SUSE가 그저 Leap entry를 재생성하지
-않았을 뿐인 경우)다. 이 부분집합은 따로 크기를 재지 않았다 — 위의 전이
-집합 개수는 이를 나누어 보여주지 않는다. union을 구현한다는 것은 range별
+않았을 뿐인 경우)다. 당시에는 이 부분집합의 크기를 따로 재지 않았다 — 위의 전이
+집합 개수는 이를 나누어 보여주지 않는다. **2026-10-21에 Leap 16.1에 대해 쟀고, 아래의
+재검토 계기가 그 범위에서 충족됐다:** `SLES:16.1`→Leap 16.1 native-wins 2,323건 중 25건이
+SLE fixed / Leap bare `known_affected`(`glibc-2.40-160100.3.1`, `gdb-16.3-160100.3.1`,
+`NetworkManager-1.54.3-160100.3.1`, `wget-1.25.0-160100.4.1`, `util-linux`, `coreutils`,
+`buildah` ×4, `sdbootutil` ×7, …)이고, 실제 `distribution/leap/16.1/repo/oss` 목록이 바로 그
+빌드를 출하한다. 출하 빌드를 설치한 Leap 16.1 이미지는 `glibc`에서 fix 없는 affected로
+보고되고 같은 문서의 `glibc-devel`은 깨끗하게 미러링된다. 여전히 유보(별도 결정 필요:
+range별 provenance, 또는 SLE 쌍이 Leap이 출하한 빌드에서 fixed인 native no-fix 항목에 대한
+더 좁은 규칙); 15.x 부분집합은 아직 재지 않았다. union을 구현한다는 것은 range별
 provenance(하나의 `Affected` 위에 SLE에서 온 fixed range와 Leap에서 온
 no-fix range를 각각 자신의 `CrossMappedFrom`과 함께 두는 것)와 이를
 조정하는 matcher를 뜻한다; D108의 gap-fill은 이미 만들어진 목적—설치된
@@ -410,11 +418,15 @@ Leap X.Y NonFree`와 `openSUSE Leap Micro 5.x` 이름도 함께 발행하는데,
 이미 fold에서 거부되고 있고 미러 대상이 된 적이 없다). census가 새로운
 mainline Leap 릴리스(16.1 이상)를 보여줄 때 다시 본다; 이 집합에 없는
 릴리스로 키가 잡힌 Leap 이미지가 조용히 과소 보고하는 것이 그 흔적이다.
-**2026-10-21에 계기가 발동했다**(D125 검토): 실제 피드가 `openSUSE Leap 16.1`을
-product로 올린다(`cve-2026-7168`, 2026-10-16, `known_affected`; 2026-10-19
-아카이브의 39개 문서). native Leap 16.1 항목은 fold를 통해 이미 들어오고 있다;
-`leapReleases`에 16.1이 들어가기 전까지 `SLES:16.1` 항목은 어디로도 미러링되지
-않는다. 미해결 — `SLES:16.1` 집합의 크기를 먼저 재고 나서 추가한다.
+**2026-10-21에 계기가 발동했고**(D125 검토) **같은 날 처리했다.** 피드는 2026-10-19
+아카이브의 3,165개 문서에서 `openSUSE Leap 16.1`을 product로 올린다(`cve-2026-7168`
+포함). native 항목은 `known_affected`(3,059)와 `known_not_affected`(1,487)뿐이고
+`recommended`는 없다 — 아직 만들어지고 있는 릴리스다(endoflife.date에 아직 없음;
+`distribution/leap/16.1/` 트리는 존재). `SUSE Linux Enterprise Server 16.1`은 25,387개
+문서에 나온다. `leapReleases`에 16.1을 넣으면 22,078개 문서의 `SLES:16.1` 항목 fixed
+279,603건과 no-fix 19,459건이 공유 `160100` codestream 위에서 `openSUSE Leap:16.1`로
+미러링된다(native-wins 2,323). 다음 재검토는 16.2이며, 테스트 표가 그것을 거부 행으로
+들고 있다.
 
 ---
 
