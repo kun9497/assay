@@ -21,7 +21,9 @@ and `=wont-fix`), Amazon ALAS core plus AL2 extras (D73, D78), Oracle ELSA OVAL 
 Ksplice/FIPS lineage-filtered since D79), Fedora Bodhi (D75), Photon's flat-JSON CVE metadata (D96), Arch's AVG tracker (D97, with
 its own pacman comparer and cataloger), SUSE CSAF VEX (D77, whose
 no-fix entries are 99.96% reason-unstated — the inverse of Red Hat; its delta pass reads
-the year-prefixed layout SUSE moved to on 2026-10-15, D122; its SLE→Leap mirror, D108,
+the year-prefixed layout SUSE moved to on 2026-10-15, D122, and since D129 runs before the
+archive walk in both CSAF providers so a corrected document leaves no stale record; its
+SLE→Leap mirror, D108,
 yields to Leap's own `known_not_affected` since D125 and lends a no-fix Leap entry its SLE
 twin's fix since D128; a bare status id is named by its product_id since D126, because
 SUSE's own purl for `libwmf-0_2-7` says `libwmf`), and Azure

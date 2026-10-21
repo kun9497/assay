@@ -1103,7 +1103,11 @@ the comparison point is in hand.
 **Resolved 2026-08-07.** `changes.csv` is read after the archive and every document newer than
 the archive's own date is fetched individually. Only a 404 is survivable — a document withdrawn
 between `changes.csv` and `deletions.csv` being written is a race, and everything else fails
-the build rather than closing part of the gap and looking complete.
+the build rather than closing part of the gap and looking complete. **Since D129 (2026-10-21)
+the delta runs first** and the archive walk skips every document the delta fetched: a document
+corrected to nothing affected leaves no record, where last-write-wins on top of the archive
+had left the stale one standing (2026-10-20 external review, #5). A listed-but-gone document
+still keeps its archive copy.
 
 **What is NOT handled, and the measurement that says why.** A document present in the archive
 and DELETED afterwards still gets ingested: deleted paths are removed from `changes.csv`, so
