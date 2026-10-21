@@ -820,8 +820,10 @@ exited 0 while 24 findings went unmentioned.
       not-affected entry is SUSE's verdict on the package, not an absence; the mirror had
       emitted an SLE-derived "affected at every version" entry over it (cve-2025-61144's
       libtiff6 on Leap 15.6, a false positive on every Leap image with it installed).
-      Nothing is stored from the bucket (D1); the decline is per package and release,
-      checked after native-wins, and counted on the progress line
+      Only the no-fix mirror is declined: SUSE writes the bare id into `known_not_affected`
+      for "Already fixed"/"Released" too, so a fixed SLE source still mirrors (4,363 of
+      4,463 overlaps; the 100 no-fix ones are declined). Nothing is stored from the bucket
+      (D1); per package and release, after native-wins, counted on the progress line
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15

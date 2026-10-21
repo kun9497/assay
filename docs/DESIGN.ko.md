@@ -791,8 +791,10 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       not-affected 항목은 부재가 아니라 그 패키지에 대한 SUSE의 판정이다; 미러는 그
       위에 SLE에서 끌어온 "모든 버전에서 affected" 항목을 내보내고 있었다
       (cve-2025-61144의 Leap 15.6 libtiff6 — 그 패키지를 설치한 모든 Leap 이미지에서
-      false positive). 이 bucket에서 저장되는 것은 없다(D1); 거부는 패키지·릴리스
-      단위이고 native-wins 다음에 검사되며 progress 줄에 집계된다
+      false positive). 거부되는 것은 no-fix 미러뿐이다: SUSE는 "Already fixed"/"Released"
+      에도 bare id를 `known_not_affected`에 쓰므로, fixed인 SLE 출처는 그대로 미러링된다
+      (겹침 4,463건 중 4,363건; no-fix 100건이 거부됨). 이 bucket에서 저장되는 것은
+      없다(D1); 패키지·릴리스 단위, native-wins 다음, progress 줄에 집계
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨
