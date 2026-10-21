@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"path"
 	"regexp"
 	"time"
 
@@ -33,6 +32,18 @@ const maxDelta = 20000
 // hung rather than being slow.
 const deltaRequestTimeout = 3 * time.Minute
 
+// cveOf is the identity one document has: its vulnerability's CVE, else the
+// tracking id. convert keys the record on it, and D129's delta pass keys the
+// set of superseded archive documents on it too -- the spelling of a file
+// name is not shared between changes.csv and the archive, the document's own
+// id is. Identical to suse.cveOf.
+func cveOf(d *document) string {
+	if len(d.Vulnerabilities) > 0 && d.Vulnerabilities[0].CVE != "" {
+		return d.Vulnerabilities[0].CVE
+	}
+	return d.Document.Tracking.ID
+}
+
 // changesPath is the shape a row in changes.csv may have. Its contents become
 // a URL, so it is validated for the same reason archive_latest.txt's is: a
 // misrouted response, or a feed that started listing absolute URLs, must not
@@ -54,7 +65,7 @@ var changesPath = regexp.MustCompile(`^[0-9]{4}/cve-[0-9]{4}-[0-9]+\.json$`)
 // direction: a re-emitted advisory replaces its own record (Bolt.Put keys on
 // the ID) and the index append is idempotent.
 //
-// Run BEFORE the archive walk since D129, returning the base names of the
+// Run BEFORE the archive walk since D129, returning the CVE ids of the
 // documents it fetched so the walk skips their older copies. It used to run
 // after, relying on last-write-wins by ID to let the newer document replace
 // the archive's — which has nothing to win with when the newer document
@@ -89,9 +100,14 @@ func (p *Provider) deltaSince(ctx context.Context, cutoff time.Time,
 			return nil
 		}
 		st.DeltaFetched++
-		// By base name, the one spelling the archive's entries and the
-		// row's path are sure to share.
-		fetched[path.Base(rel)] = true
+		// By the document's own id, never by file name: keyed on the base
+		// name, any spelling drift between a changes.csv row and the archive
+		// entry would make the walk emit the archive's stale copy AFTER the
+		// delta's -- the failure direction the old order never had. The id
+		// is what convert keys the record on, so skip and record agree.
+		if id := cveOf(d); id != "" {
+			fetched[id] = true
+		}
 		adv, ok := convert(d, st)
 		if !ok {
 			return nil

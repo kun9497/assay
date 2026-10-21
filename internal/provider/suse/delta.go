@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"path"
 	"regexp"
 	"time"
 
@@ -45,8 +44,8 @@ const deltaRequestTimeout = 3 * time.Minute
 var changesPath = regexp.MustCompile(`^[0-9]{4}/cve-[0-9]{4}-[0-9]+\.json$`)
 
 // deltaSince fetches every document that changed on or after the archive's
-// own Last-Modified, emits what they convert to, and returns the base names
-// of the documents it actually fetched, so the archive walk that follows can
+// own Last-Modified, emits what they convert to, and returns the CVE ids of
+// the documents it actually fetched, so the archive walk that follows can
 // skip its older copies (D129). Mirrors redhat.deltaSince's shape (fetch the
 // list, bound it, fetch concurrently in order) with one real difference:
 // changedSince below reads changes.csv start to finish rather than exiting
@@ -85,10 +84,17 @@ func (p *Provider) deltaSince(ctx context.Context, cutoff time.Time,
 			return nil
 		}
 		st.DeltaFetched++
-		// By base name: the archive's entries carried no year directory
-		// before 2026-10-15 (D122) and the row's directory is not the CVE's
-		// year, so "cve-YYYY-NNNNN.json" is the one spelling both share.
-		fetched[path.Base(rel)] = true
+		// By the document's own id, never by file name. The first cut keyed
+		// on the base name, and its review showed that inverts the failure
+		// direction: any spelling drift between a changes.csv row and the
+		// archive entry (a case change, a directory) would make the walk
+		// emit the archive's stale copy AFTER the delta's, where the old
+		// order had let the delta win by ID regardless. The id is what
+		// convert keys the record on, so the skip and the record agree by
+		// construction.
+		if id := cveOf(d); id != "" {
+			fetched[id] = true
+		}
 		adv, ok := convert(d, st)
 		if !ok {
 			return nil

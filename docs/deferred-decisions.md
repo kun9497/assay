@@ -1100,8 +1100,9 @@ documents modified after the archive's own date would close the gap for a bounde
 extra requests. The provider already parses the archive date out of its filename for D12, so
 the comparison point is in hand.
 
-**Resolved 2026-08-07.** `changes.csv` is read after the archive and every document newer than
-the archive's own date is fetched individually. Only a 404 is survivable — a document withdrawn
+**Resolved 2026-08-07.** `changes.csv` was read after the archive (until D129 reversed the
+order) and every document newer than the archive's own date is fetched individually. Only a
+404 is survivable — a document withdrawn
 between `changes.csv` and `deletions.csv` being written is a race, and everything else fails
 the build rather than closing part of the gap and looking complete. **Since D129 (2026-10-21)
 the delta runs first** and the archive walk skips every document the delta fetched: a document

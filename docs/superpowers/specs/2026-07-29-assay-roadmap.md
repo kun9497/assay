@@ -5463,10 +5463,14 @@ user could act on is lost.
 and the walk skips the archive's copy of every document the delta actually fetched, whatever
 that copy converted to. A document the delta listed but could not fetch (a 404: the
 withdrawn-between-files race, or SUSE's stuck `.json.new`) keeps its archive copy. Matched by
-base name (`cve-YYYY-NNNNN.json`), the one spelling the archive entry and the `changes.csv` row
-are sure to share: SUSE's archive carried no year directory before D122, and the row's
-directory is not the CVE's year. Counted as `ArchiveSuperseded` on the progress line. The
-delta also fails before the archive is spooled now, which is the fast-failing order.
+the document's own CVE id — what `convert` keys the record on — never by file name: the first
+cut matched base names, and its review showed that inverts the failure direction, since any
+spelling drift between a `changes.csv` row and the archive entry (a case change, a year
+directory) would make the walk emit the archive's stale copy *after* the delta's, where the old
+order had let the delta win by id regardless. Keying on the id means the archive walk decodes a
+superseded document before dropping it, a few hundred documents' worth. Counted as
+`ArchiveSuperseded` on the progress line. The delta also fails before the archive is spooled
+now, which is the fast-failing order.
 
 **Why.** The 2026-10-20 external review (#5) showed the old order — archive first, delta
 emitted on top, last-write-wins by ID — has nothing to win with when the newer document

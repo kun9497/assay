@@ -664,6 +664,18 @@ type stats struct {
 	DeltaRescued    int
 }
 
+// cveOf is the identity one document has: its vulnerability's CVE, else the
+// tracking id. convert keys the record on it, and D129's delta pass keys the
+// set of superseded archive documents on it too -- the spelling of a file
+// name is not shared between changes.csv and the archive, the document's own
+// id is.
+func cveOf(d *document) string {
+	if len(d.Vulnerabilities) > 0 && d.Vulnerabilities[0].CVE != "" {
+		return d.Vulnerabilities[0].CVE
+	}
+	return d.Document.Tracking.ID
+}
+
 // convert turns one CSAF document into at most one advisory. One document is
 // one CVE (measured: 0 of 63,784 documents in the whole archive carry more
 // than one vulnerabilities[] entry), so the whole document collapses to a
@@ -678,10 +690,7 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 	folded, declared := collectPlatforms(d.ProductTree.Branches, st)
 	packages := collectPackages(d.ProductTree.Branches, st)
 
-	cve := d.Document.Tracking.ID
-	if len(d.Vulnerabilities) > 0 && d.Vulnerabilities[0].CVE != "" {
-		cve = d.Vulnerabilities[0].CVE
-	}
+	cve := cveOf(d)
 	if !strings.HasPrefix(cve, "CVE-") {
 		st.SkippedNoCVE++
 		return advisory.Advisory{}, false

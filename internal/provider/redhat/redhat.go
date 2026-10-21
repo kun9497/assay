@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -96,7 +95,9 @@ func New(opts Options) *Provider {
 
 func (p *Provider) Name() string { return "Red Hat CSAF VEX" }
 
-// Fetch streams the archive and emits one advisory per CVE.
+// Fetch emits one advisory per CVE: the delta pass first -- every document
+// changed since the archive was built, fetched individually (D129) -- then
+// the archive, streamed, skipping each document the delta already emitted.
 //
 // Nothing is written to disk and no document is held after it is converted.
 // That matters more here than for any other provider: 17.1 GB decompressed is
@@ -172,12 +173,6 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		if h.Typeflag != tar.TypeReg || !strings.HasSuffix(h.Name, ".json") {
 			continue
 		}
-		if superseded[path.Base(h.Name)] {
-			// D129: the delta fetched a newer copy of this document and has
-			// already emitted whatever it converted to, which may be nothing.
-			st.ArchiveSuperseded++
-			continue
-		}
 		if h.Size > maxDocument {
 			return store.Provenance{}, fmt.Errorf(
 				"redhat: %s in %s is %d bytes, past the %d-byte cap", h.Name, name, h.Size, maxDocument)
@@ -192,6 +187,16 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 			// skip in this project is counted: a number somebody can see beats
 			// both a silent drop and a sync that will not finish.
 			st.SkippedBadDoc++
+			continue
+		}
+		if superseded[cveOf(&d)] {
+			// D129: the delta fetched a newer copy of this document and has
+			// already emitted whatever it converted to, which may be nothing.
+			// After the decode, because the key is the document's own id,
+			// not its file name (see deltaSince); the few hundred documents
+			// this decodes only to drop are the price of a key both sides
+			// are sure to share.
+			st.ArchiveSuperseded++
 			continue
 		}
 		adv, ok := convert(&d, &st)

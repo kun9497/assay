@@ -140,6 +140,34 @@ func TestDelta_CorrectionToNothingAffectedLeavesNoRecord(t *testing.T) {
 	}
 }
 
+// The supersede key is the document's own CVE, not its file name: an archive
+// entry spelled differently from the changes.csv row (another year directory,
+// upper case) is still skipped. Keyed on a file name, that drift would have
+// made the walk emit the archive's stale copy AFTER the delta's -- the one
+// failure the old order could not have (D129's review).
+func TestDelta_SupersedeIsByDocumentIDNotFileName(t *testing.T) {
+	f := &feed{
+		pointer: "csaf_vex_2026-08-05.tar.zst",
+		archive: archiveOf(t, map[string]string{
+			"2025/CVE-2026-0001.json": rhel9Doc(t, "CVE-2026-0001", "openssh", "0:1-1.el9.x86_64"),
+		}),
+		changes: changesCSV([2]string{"2026/cve-2026-0001.json", "2026-08-06T00:00:00+00:00"}),
+		docs: map[string]string{
+			"2026/cve-2026-0001.json": rhel9Doc(t, "CVE-2026-0001", "openssh", "0:2-2.el9.x86_64"),
+		},
+	}
+	got, progress, err := fetchAll(t, serve(t, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Affected[0].Ranges[0].Events[1].Fixed != "0:2-2.el9" {
+		t.Fatalf("emitted %+v, want only the delta's copy: the respelled archive entry was not recognised as the same document", got)
+	}
+	if !strings.Contains(progress, "1 archive documents superseded") {
+		t.Errorf("progress does not count the superseded copy:\n%s", progress)
+	}
+}
+
 // The other direction: a document the delta listed but could not fetch keeps
 // its archive copy. Superseding on the listing alone would drop a live advisory
 // for a night on every transient 404.

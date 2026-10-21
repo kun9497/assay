@@ -366,6 +366,38 @@ func TestFetch_DeltaCorrectionToNotAffectedLeavesNoRecord(t *testing.T) {
 	}
 }
 
+// The supersede key is the document's own CVE, not its file name:
+// archive_respelled.tar.bz2 is archive.tar.bz2 with the openssh document at
+// "csaf-vex/2025/CVE-2024-6387.json" (a year directory and upper case the
+// changes.csv row does not have), and it is still skipped. Keyed on a file
+// name, that drift made the walk emit the archive's stale copy AFTER the
+// delta's -- the one failure the old order could not have (D129's review).
+func TestFetch_DeltaSupersedeIsByDocumentIDNotFileName(t *testing.T) {
+	corrected := docJSONWithNotAffected("CVE-2024-6387",
+		[]string{"SUSE Linux Enterprise Server 15 SP6"},
+		map[string]string{"openssh": "pkg:rpm/suse/openssh@?upstream=openssh.src.rpm"},
+		nil, nil,
+		[]string{"SUSE Linux Enterprise Server 15 SP6:openssh"})
+	f := &feed{
+		archive:         fixture(t, "archive_respelled.tar.bz2"),
+		archiveModified: archiveBuilt2026,
+		changes:         changesCSV([2]string{"2025/cve-2024-6387.json", archiveBuilt2026.Add(time.Hour).Format(time.RFC3339)}),
+		docs:            map[string]string{"2025/cve-2024-6387.json": corrected},
+	}
+	got, progress, err := fetchAll(t, serve(t, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range got {
+		if a.ID == "SUSE-CVE-2024-6387" {
+			t.Fatalf("the respelled archive entry escaped the supersede and its stale record survived: %+v", a.Affected)
+		}
+	}
+	if !strings.Contains(progress, "1 archive documents superseded") {
+		t.Errorf("progress does not count the superseded copy:\n%s", progress)
+	}
+}
+
 // The other direction of D129's rule: a document the delta LISTED but could
 // not fetch (404 -- the withdrawn-between-files race, or a stuck .json.new)
 // keeps its archive copy. Superseding on the listing alone would drop a live
