@@ -120,6 +120,8 @@ func TestPackageOf(t *testing.T) {
 		{"pkg:rpm/suse/xz@?upstream=xz.src.rpm", "xz", "", true, "a bare package: affected at every version"},
 		{"pkg:rpm/suse/liblzma5-x86-64-v3@5.8.1-160000.2.2?upstream=xz-5.8.1-160000.2.2.src.rpm",
 			"liblzma5-x86-64-v3", "5.8.1-160000.2.2", true, "a hyphenated package name that would defeat a hyphen-split heuristic"},
+		{"pkg:rpm/suse/libwmf@0_2-7?upstream=libwmf-0_2-7.src.rpm",
+			"libwmf", "0_2-7", true, "SUSE's own mis-split of the bare product libwmf-0_2-7 (D126): the helper returns what the purl says; the caller names a bare id by its product_id instead"},
 		{"", "", "", false, "no purl at all (the java-1_7_0-openjdk gap, D77 research)"},
 		{"pkg:deb/debian/xz@5.6.2-1", "", "", false, "a different ecosystem's purl shape"},
 		{"not-a-purl-at-all", "", "", false, ""},
@@ -919,17 +921,17 @@ func TestConvert_DoesNotMirror_WhenNativeLeapPresent(t *testing.T) {
 // The verdict is per package: libtiff5, which Leap does not mention, is still
 // mirrored, so the gap-fill D108 exists for is not lost.
 func TestConvert_DoesNotMirror_WhenNativeLeapNotAffected(t *testing.T) {
+	// One row: a status id always names the BARE product (0 of 726,722
+	// known_affected/known_not_affected ids across the 2026-10-19 archive
+	// name a build, D126). A build id in this bucket, should SUSE ever
+	// publish one, is named by its full product_id and meets no mirror
+	// candidate -- and shows on the progress line, since a build leaf's
+	// purl name never equals its product_id (BareNamedByProductID).
 	for _, tt := range []struct {
 		name        string
 		notAffected string
 	}{
 		{"bare package id", "openSUSE Leap 15.6:libtiff6"},
-		// A versioned id is the shipped build. Declining the mirror is the
-		// only effect either way: no "not affected" range is ever stored,
-		// so a versioned verdict is not widened to every version (the
-		// reviewer's caution), it just stops a derived claim about the
-		// same package.
-		{"versioned package id", "openSUSE Leap 15.6:libtiff6-4.5.0-150600.3.6.1"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			d := buildDocWith(t, "CVE-2025-61144",
@@ -1047,6 +1049,129 @@ func TestConvert_LeapNotAffected_DoesNotHideNativeAffected(t *testing.T) {
 	if st.MirroredToLeap != 0 || st.SkippedLeapNativeWins != 1 || st.SkippedLeapNotAffected != 0 {
 		t.Errorf("counters: MirroredToLeap=%d SkippedLeapNativeWins=%d SkippedLeapNotAffected=%d, want 0, 1, 0",
 			st.MirroredToLeap, st.SkippedLeapNativeWins, st.SkippedLeapNotAffected)
+	}
+}
+
+// D126: a bare status id is named by its product_id, not by its purl. SUSE's
+// generator cuts a bare product's purl FROM the product_id at the first
+// hyphen-digit boundary, so "libwmf-0_2-7" carries pkg:rpm/suse/libwmf@0_2-7
+// (cve-2006-3376, as served 2026-10-21) while its build leaf
+// "libwmf-0_2-7-0.2.12-150000.4.4.1" carries the correct
+// pkg:rpm/suse/libwmf-0_2-7@0.2.12-…. Keyed by the purl, the known_affected
+// entry landed under "libwmf" -- a name no installed rpm has -- and the
+// no_fix_planned remediation for the same id landed there too: a silent
+// false negative on every image with libwmf-0_2-7 installed (39,215 entries
+// in 2,794 documents, 31,494 of them the package's only entry; D8's class).
+// The bucket is the signal: 0 of 726,722 status ids names a build, 0 of
+// 4,396,450 recommended ids names a bare product.
+func TestConvert_BareStatusIDIsNamedByProductID(t *testing.T) {
+	d := buildDocWith(t, "CVE-2006-3376",
+		[]string{"SUSE Linux Enterprise Server 15 SP6"},
+		map[string]string{
+			"libwmf-0_2-7":                     "pkg:rpm/suse/libwmf@0_2-7?upstream=libwmf-0_2-7.src.rpm",
+			"libwmf-0_2-7-0.2.12-150000.4.4.1": "pkg:rpm/suse/libwmf-0_2-7@0.2.12-150000.4.4.1?upstream=libwmf-0.2.12-150000.4.4.1.src.rpm",
+		},
+		nil,
+		[]string{"SUSE Linux Enterprise Server 15 SP6:libwmf-0_2-7"},
+		nil,
+		[]map[string]any{{
+			"category":    "no_fix_planned",
+			"product_ids": []string{"SUSE Linux Enterprise Server 15 SP6:libwmf-0_2-7"},
+		}})
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped the document")
+	}
+	by := affectedByName(adv)
+	if _, wrong := by["SLES:15.SP6/libwmf"]; wrong {
+		t.Errorf("entry keyed under the purl's name %q, which no installed rpm carries: %+v", "libwmf", adv.Affected)
+	}
+	got, found := by["SLES:15.SP6/libwmf-0_2-7"]
+	if !found {
+		t.Fatalf("no entry under the product_id libwmf-0_2-7: %+v", adv.Affected)
+	}
+	if len(got.Ranges) != 1 || got.Ranges[0].Events[0].Introduced != "0" || len(got.Ranges[0].Events) != 1 {
+		t.Errorf("a bare known_affected is affected at every version: %+v", got.Ranges)
+	}
+	// The remediation id is the SAME bare id, so it must land on the same
+	// key -- otherwise the won't-fix reason is lost with the name.
+	if got.Ranges[0].FixState != advisory.FixStateWontFix {
+		t.Errorf("FixState = %v, want won't-fix: the no_fix_planned remediation did not reach the renamed key", got.Ranges[0].FixState)
+	}
+	if st.BareNamedByProductID != 2 {
+		t.Errorf("BareNamedByProductID = %d, want 2 (the known_affected id and the remediation id)", st.BareNamedByProductID)
+	}
+	if st.Affected != 1 {
+		t.Errorf("Affected = %d, want 1: one package, one entry", st.Affected)
+	}
+}
+
+// D126 x D125: the known_not_affected loop names the bare id the same way,
+// or a Leap verdict for a mis-split package never meets its mirror
+// candidate (both were "libwmf" before D126 only by coincidence; the
+// candidate built from a recommended sibling is "libwmf-0_2-7").
+func TestConvert_LeapNotAffected_MisSplitStillDeclines(t *testing.T) {
+	d := buildDocWith(t, "CVE-2006-3377",
+		[]string{"SUSE Linux Enterprise Server 15 SP6", "openSUSE Leap 15.6"},
+		map[string]string{
+			"libwmf-0_2-7": "pkg:rpm/suse/libwmf@0_2-7?upstream=libwmf-0_2-7.src.rpm",
+		},
+		nil,
+		[]string{"SUSE Linux Enterprise Server 15 SP6:libwmf-0_2-7"},
+		[]string{"openSUSE Leap 15.6:libwmf-0_2-7"},
+		nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped the document")
+	}
+	for name, a := range affectedByName(adv) {
+		if strings.HasPrefix(name, "openSUSE Leap:15.6/") {
+			t.Errorf("mirrored %s over Leap's known_not_affected: %+v", name, a)
+		}
+	}
+	if st.SkippedLeapNotAffected != 1 || st.MirroredToLeap != 0 {
+		t.Errorf("counters: SkippedLeapNotAffected=%d MirroredToLeap=%d, want 1, 0", st.SkippedLeapNotAffected, st.MirroredToLeap)
+	}
+}
+
+// A recommended id is a shipped build and keeps the purl split: its name
+// is the purl's (correct for builds) and its version is the fix. The bare
+// rule must not reach it, or a fix would be keyed "libwmf-0_2-7-0.2.12-…".
+func TestConvert_RecommendedKeepsPurlSplit(t *testing.T) {
+	d := buildDoc(t, "CVE-2006-3378",
+		[]string{"SUSE Linux Enterprise Server 15 SP6"},
+		map[string]string{
+			"libwmf-0_2-7-0.2.12-150000.4.4.1": "pkg:rpm/suse/libwmf-0_2-7@0.2.12-150000.4.4.1?upstream=libwmf-0.2.12-150000.4.4.1.src.rpm",
+		},
+		[]string{"SUSE Linux Enterprise Server 15 SP6:libwmf-0_2-7-0.2.12-150000.4.4.1"},
+		nil, nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped the document")
+	}
+	got, found := affectedByName(adv)["SLES:15.SP6/libwmf-0_2-7"]
+	if !found || len(got.Ranges) != 1 || len(got.Ranges[0].Events) != 2 || got.Ranges[0].Events[1].Fixed != "0.2.12-150000.4.4.1" {
+		t.Fatalf("recommended build not stored as libwmf-0_2-7 fixed at 0.2.12-150000.4.4.1: found=%v %+v", found, adv.Affected)
+	}
+	if st.BareNamedByProductID != 0 {
+		t.Errorf("BareNamedByProductID = %d, want 0: a recommended id is not bare", st.BareNamedByProductID)
+	}
+}
+
+// The D126 counter reaches the progress line, asserted as a pair with its
+// neighbour so a doubled argument cannot pass.
+func TestStatsString_ReportsBareNamedByProductID(t *testing.T) {
+	got := stats{SkippedLeapNotAffected: 3, BareNamedByProductID: 4}.String()
+	want := "3 not mirrored because a native Leap known_not_affected entry already judges the package (D125); " +
+		"4 bare entries named by their product id where the purl's name differed (D126)"
+	if !strings.Contains(got, want) {
+		t.Errorf("stats.String() = %q, want it to contain %q", got, want)
 	}
 }
 
