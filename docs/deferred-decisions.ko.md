@@ -349,7 +349,7 @@ vuln-list-update 소비자 포함) 기존 업스트림 신고를 찾지 못했�
 
 ---
 
-### SLE → openSUSE Leap union (D108의 미뤄둔 절반)
+### ~~SLE → openSUSE Leap union (D108의 미뤄둔 절반)~~ — D128로 좁게 해결(2026-10-21)
 
 **2026-09-15에 D108과 함께 미뤄짐.** D108은 접힌 SLE codestream advisory를 같은
 codestream을 공유하는 openSUSE Leap 키로 미러링하되, gap-fill 방식이다: 해당
@@ -394,9 +394,18 @@ SLE fixed / Leap bare `known_affected`(`glibc-2.40-160100.3.1`, `gdb-16.3-160100
 `NetworkManager-1.54.3-160100.3.1`, `wget-1.25.0-160100.4.1`, `util-linux`, `coreutils`,
 `buildah` ×4, `sdbootutil` ×7, …)이고, 실제 `distribution/leap/16.1/repo/oss` 목록이 바로 그
 빌드를 출하한다. 출하 빌드를 설치한 Leap 16.1 이미지는 `glibc`에서 fix 없는 affected로
-보고되고 같은 문서의 `glibc-devel`은 깨끗하게 미러링된다. 여전히 유보(별도 결정 필요:
-range별 provenance, 또는 SLE 쌍이 Leap이 출하한 빌드에서 fixed인 native no-fix 항목에 대한
-더 좁은 규칙); 15.x 부분집합은 아직 재지 않았다. union을 구현한다는 것은 range별
+보고되고 같은 문서의 `glibc-devel`은 깨끗하게 미러링된다. **같은 날 D128이 더 좁은 규칙으로
+해결했다:** bare `known_affected`인 native Leap 항목은 같은 codestream의 SLE 쌍이 가진 fixed
+range를 `CrossMappedFrom`으로 공개하며 자기 no-fix range 대신 갖는다 — range별 provenance도,
+일반 union도 아니다. 15.x 부분집합도 이제 쟀고(15.3: 6, 15.5: 4, 15.6: 659, 16.0: 10;
+15.0–15.2와 15.4: 0), 그 안의 모든 SLE fix는 이전 SP 것까지 포함해 공유 codestream release
+마커를 갖는다. **남는 것 — 유보가 아니라 함정:** SLE의 fix보다 *높은* upstream 버전의 Leap
+자체 빌드(`lp15x`/`bp` release)는 패치 없이도 깨끗으로 비교될 수 있다. 실제 15.5·15.6·16.0
+저장소에 대조한 171개 패키지 중 Leap 자체 빌드는 정확히 하나, 15.6의
+`perl-Text-CSV_XS-1.34-1.19`였고 upstream 버전이 *같아서* rpm은 fix 아래로 정렬한다 — 안전한
+방향. 나쁜 방향이 언젠가 나오면 해결책은 빌드 시점 규칙이 아니라
+매칭 시점의 계열 검사(codestream 마커 없는 설치 release는 `CrossMappedFrom` range에 대해 "평가
+안 함")다. union을 구현한다는 것은 range별
 provenance(하나의 `Affected` 위에 SLE에서 온 fixed range와 Leap에서 온
 no-fix range를 각각 자신의 `CrossMappedFrom`과 함께 두는 것)와 이를
 조정하는 matcher를 뜻한다; D108의 gap-fill은 이미 만들어진 목적—설치된
