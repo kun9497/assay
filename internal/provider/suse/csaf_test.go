@@ -880,19 +880,24 @@ func TestConvert_MirrorsSLEOntoLeap_WhenNoNativeLeap(t *testing.T) {
 }
 
 // D108 gap-fill tie-break: when a document DOES carry a native openSUSE Leap
-// 15.6 entry for the package, native wins and no mirror is emitted -- the
-// finding is present natively, so nothing disappears, and the native entry is
-// never mislabelled as cross-mapped.
+// 15.6 entry with Leap's OWN fix for the package, native wins and no mirror
+// is emitted -- Leap's patch state is the truth for a Leap image, and the
+// native entry is never mislabelled as cross-mapped. (A native entry with NO
+// fix beside a fixed SLE twin is D128's case, held by
+// TestConvert_NativeLeapNoFix_TakesTheSLEFix; before D128 this test used that
+// shape.)
 func TestConvert_DoesNotMirror_WhenNativeLeapPresent(t *testing.T) {
 	d := buildDoc(t, "CVE-2026-9999",
 		[]string{"SUSE Linux Enterprise Server 15 SP6-LTSS", "openSUSE Leap 15.6"},
 		map[string]string{
 			"curl-8.14.1-150600.4.51.1": "pkg:rpm/suse/curl@8.14.1-150600.4.51.1?upstream=curl-8.14.1-150600.4.51.1.src.rpm",
-			"curl":                      "pkg:rpm/suse/curl@?upstream=curl.src.rpm",
+			"curl-8.14.1-150600.4.40.1": "pkg:rpm/suse/curl@8.14.1-150600.4.40.1?upstream=curl-8.14.1-150600.4.40.1.src.rpm",
 		},
-		[]string{"SUSE Linux Enterprise Server 15 SP6-LTSS:curl-8.14.1-150600.4.51.1"},
-		[]string{"openSUSE Leap 15.6:curl"}, // native known_affected, no fix
-		nil)
+		[]string{
+			"SUSE Linux Enterprise Server 15 SP6-LTSS:curl-8.14.1-150600.4.51.1",
+			"openSUSE Leap 15.6:curl-8.14.1-150600.4.40.1", // native, Leap's own (older) fix
+		},
+		nil, nil)
 
 	var st stats
 	adv, ok := convert(d, &st)
@@ -905,6 +910,9 @@ func TestConvert_DoesNotMirror_WhenNativeLeapPresent(t *testing.T) {
 	}
 	if got.CrossMappedFrom != "" {
 		t.Fatalf("native entry must not be marked cross-mapped: %q", got.CrossMappedFrom)
+	}
+	if len(got.Ranges) != 1 || len(got.Ranges[0].Events) != 2 || got.Ranges[0].Events[1].Fixed != "8.14.1-150600.4.40.1" {
+		t.Fatalf("native fix replaced: %+v, want Leap's own 8.14.1-150600.4.40.1", got.Ranges)
 	}
 	if st.MirroredToLeap != 0 || st.SkippedLeapNativeWins != 1 {
 		t.Fatalf("tie-break wrong: MirroredToLeap=%d SkippedLeapNativeWins=%d, want 0 and 1",
@@ -1262,12 +1270,106 @@ func TestConvert_RecommendedKeepsPurlSplit(t *testing.T) {
 // The D126 counter reaches the progress line, asserted as a pair with its
 // neighbour so a doubled argument cannot pass.
 func TestStatsString_ReportsBareNamedByProductID(t *testing.T) {
-	got := stats{SkippedLeapNotAffected: 3, BareNamedByProductID: 4}.String()
-	want := "3 not mirrored because a native Leap known_not_affected entry already judges the package (D125); " +
+	got := stats{SkippedLeapNotAffected: 3, LeapNoFixReplacedBySLEFix: 5, BareNamedByProductID: 4}.String()
+	want := "3 not mirrored because a native Leap known_not_affected entry already judges the package (D125), " +
+		"5 native Leap no-fix entries given their SLE twin's fix (D128); " +
 		"4 bare entries named by their product id where the purl's name differed (D126)"
 	if !strings.Contains(got, want) {
 		t.Errorf("stats.String() = %q, want it to contain %q", got, want)
 	}
+}
+
+// D128: native-wins yields when the native Leap entry is a bare known_affected
+// (no fix) and its same-codestream SLE twin is fixed at V. The Leap key then
+// carries SLE's [0, V) fixed range, disclosed as CrossMappedFrom, instead of
+// the native "affected at every version": an image at or past V is clean (it
+// was a false positive -- cve-2026-18374's glibc on Leap 16.1, whose repo
+// ships the very build SLE calls fixed), an older one is affected with the
+// fix version named instead of no fix at all. The native entry is not
+// duplicated: one entry per package on the Leap key, the SLE ranges in it.
+func TestConvert_NativeLeapNoFix_TakesTheSLEFix(t *testing.T) {
+	d := buildDoc(t, "CVE-2026-18374",
+		[]string{"SUSE Linux Enterprise Server 16.1", "openSUSE Leap 16.1"},
+		map[string]string{
+			"glibc":                       "pkg:rpm/suse/glibc@?upstream=glibc.src.rpm",
+			"glibc-2.40-160100.3.1":       "pkg:rpm/suse/glibc@2.40-160100.3.1?upstream=glibc-2.40-160100.3.1.src.rpm",
+			"glibc-devel-2.40-160100.3.1": "pkg:rpm/suse/glibc-devel@2.40-160100.3.1?upstream=glibc-2.40-160100.3.1.src.rpm",
+		},
+		[]string{
+			"SUSE Linux Enterprise Server 16.1:glibc-2.40-160100.3.1",
+			"SUSE Linux Enterprise Server 16.1:glibc-devel-2.40-160100.3.1",
+		},
+		[]string{"openSUSE Leap 16.1:glibc"}, // native, bare, no fix
+		nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped the document")
+	}
+	by := affectedByName(adv)
+	got, found := by["openSUSE Leap:16.1/glibc"]
+	if !found {
+		t.Fatal("no openSUSE Leap:16.1 glibc entry at all")
+	}
+	if n := countByName(adv, "openSUSE Leap:16.1", "glibc"); n != 1 {
+		t.Fatalf("%d openSUSE Leap:16.1/glibc entries, want exactly one", n)
+	}
+	if len(got.Ranges) != 1 || len(got.Ranges[0].Events) != 2 || got.Ranges[0].Events[1].Fixed != "2.40-160100.3.1" {
+		t.Errorf("Leap glibc ranges = %+v, want SLE's single [0, 2.40-160100.3.1) fixed range and no unfixed one", got.Ranges)
+	}
+	if got.CrossMappedFrom != "SLES:16.1" {
+		t.Errorf("CrossMappedFrom = %q, want SLES:16.1: the fix version is SLE's build and must say so", got.CrossMappedFrom)
+	}
+	// The sibling with no native entry mirrors as before (D108).
+	if m, found := by["openSUSE Leap:16.1/glibc-devel"]; !found || m.CrossMappedFrom != "SLES:16.1" {
+		t.Errorf("glibc-devel mirror = found=%v %+v, want the plain D108 mirror", found, m)
+	}
+	if st.LeapNoFixReplacedBySLEFix != 1 || st.SkippedLeapNativeWins != 0 {
+		t.Errorf("counters: LeapNoFixReplacedBySLEFix=%d SkippedLeapNativeWins=%d, want 1, 0", st.LeapNoFixReplacedBySLEFix, st.SkippedLeapNativeWins)
+	}
+	// The no-fix range it replaced is no longer counted as one.
+	if st.Unfixable != 0 {
+		t.Errorf("Unfixable = %d, want 0: the replaced no-fix range must not be counted", st.Unfixable)
+	}
+}
+
+// D128 reaches only that shape. Both no-fix: native stays, nothing is
+// fabricated (2,298 of Leap 16.1's 2,323 native-wins). Both fixed: native
+// wins as D108 says (TestConvert_DoesNotMirror_WhenNativeLeapPresent holds
+// the fixed-native case; this holds the no-fix-both case).
+func TestConvert_NativeLeapNoFix_StaysWhenSLEHasNoFixEither(t *testing.T) {
+	d := buildDoc(t, "CVE-2026-72018",
+		[]string{"SUSE Linux Enterprise Server 16.1", "openSUSE Leap 16.1"},
+		map[string]string{"kernel-source": "pkg:rpm/suse/kernel-source@?upstream=kernel-source.src.rpm"},
+		nil,
+		[]string{"SUSE Linux Enterprise Server 16.1:kernel-source", "openSUSE Leap 16.1:kernel-source"},
+		nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped the document")
+	}
+	got, found := affectedByName(adv)["openSUSE Leap:16.1/kernel-source"]
+	if !found || got.CrossMappedFrom != "" || len(got.Ranges) != 1 || len(got.Ranges[0].Events) != 1 {
+		t.Errorf("native no-fix entry changed although SLE has no fix either: found=%v %+v", found, got)
+	}
+	if st.LeapNoFixReplacedBySLEFix != 0 || st.SkippedLeapNativeWins != 1 {
+		t.Errorf("counters: LeapNoFixReplacedBySLEFix=%d SkippedLeapNativeWins=%d, want 0, 1", st.LeapNoFixReplacedBySLEFix, st.SkippedLeapNativeWins)
+	}
+}
+
+// countByName counts the entries for one package on one key; affectedByName
+// keeps only the last, so a duplicate would hide behind it.
+func countByName(adv advisory.Advisory, eco, name string) int {
+	n := 0
+	for _, a := range adv.Affected {
+		if a.Ecosystem == eco && a.Name == name {
+			n++
+		}
+	}
+	return n
 }
 
 // D108 allowlist revisit, 2026-10-21: the feed publishes openSUSE Leap 16.1

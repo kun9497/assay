@@ -600,6 +600,13 @@ type stats struct {
 	// than contradict that verdict with an SLE-derived one. Per entry, like
 	// SkippedLeapNativeWins.
 	SkippedLeapNotAffected int
+	// LeapNoFixReplacedBySLEFix is D128's refinement of native-wins: the
+	// native Leap entry was a bare known_affected (no fix) while its
+	// same-codestream SLE twin is fixed at V, so the Leap key carries SLE's
+	// fixed range (disclosed as CrossMappedFrom) in place of "affected at
+	// every version". Per entry, like SkippedLeapNativeWins, which it is
+	// carved out of.
+	LeapNoFixReplacedBySLEFix int
 
 	// BareNamedByProductID is D126's rule doing visible work: a
 	// known_affected / known_not_affected / no-fix remediation id whose
@@ -882,10 +889,12 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 	// entry, so the mirror fills it. See leapMirrorKey / leapReleases. Built
 	// from adv.Affected (already assembled above) so it sees the fully folded,
 	// D91-shadowed result rather than re-resolving product ids.
-	native := map[productKey]bool{}
+	// native maps each Leap key's package to its entry's index in adv.Affected:
+	// D108 needs only presence, D128 below rewrites the entry in place.
+	native := map[productKey]int{}
 	for i := range adv.Affected {
 		if a := &adv.Affected[i]; strings.HasPrefix(a.Ecosystem, "openSUSE Leap:") {
-			native[productKey{eco: a.Ecosystem, pkg: a.Name}] = true
+			native[productKey{eco: a.Ecosystem, pkg: a.Name}] = i
 		}
 	}
 	var mirrors []advisory.Affected
@@ -895,7 +904,30 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 		if !ok {
 			continue
 		}
-		if native[productKey{eco: leap, pkg: a.Name}] {
+		if ni, ok := native[productKey{eco: leap, pkg: a.Name}]; ok {
+			// D128: native-wins yields in exactly one shape -- the native Leap
+			// entry is a bare known_affected (no fix, nothing else) while this
+			// SLE twin on the same codestream is fixed at V. Then the Leap key
+			// carries SLE's fixed ranges, disclosed as CrossMappedFrom, in
+			// place of "affected at every version": an image at or past V is
+			// clean, where native-wins reported it affected with no fix
+			// (cve-2026-18374's glibc on Leap 16.1, whose repo ships the very
+			// build SLE calls fixed -- 25 such packages on 16.1 alone), and an
+			// older image is affected with the fix version named. Both no-fix,
+			// or a native entry with a fix of its own, stay native (D108): the
+			// first has nothing to offer, the second is Leap's own patch state.
+			// Only the fixed ranges cross: an SLE entry that is both fixed and
+			// unfixed (0 measured) would otherwise bring the no-fix range back.
+			nk, sk := productKey{eco: leap, pkg: a.Name}, productKey{eco: a.Ecosystem, pkg: a.Name}
+			if unfixed[nk] && len(fixed[nk]) == 0 && len(fixed[sk]) > 0 {
+				nat := &adv.Affected[ni]
+				nat.Ranges = fixedRangesOf(a.Ranges)
+				nat.CrossMappedFrom = a.Ecosystem
+				// The no-fix range it replaced is gone with it.
+				st.Unfixable--
+				st.LeapNoFixReplacedBySLEFix++
+				continue
+			}
 			st.SkippedLeapNativeWins++
 			continue
 		}
@@ -937,6 +969,21 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 
 	st.Advisories++
 	return adv, true
+}
+
+// fixedRangesOf returns the ranges that carry a fixed event, copied: the
+// native entry D128 rewrites must not alias the SLE entry's slice.
+func fixedRangesOf(rs []advisory.Range) []advisory.Range {
+	var out []advisory.Range
+	for _, r := range rs {
+		for _, e := range r.Events {
+			if e.Fixed != "" {
+				out = append(out, r)
+				break
+			}
+		}
+	}
+	return out
 }
 
 func dedupeSeverity(in []advisory.Severity) []advisory.Severity {
