@@ -801,6 +801,47 @@ func (b *Bolt) EachEnrichment(fn func(advisory.Enrichment) error) error {
 	})
 }
 
+// SetArtifactAt records the artifact the database at path was pulled from
+// (D127) in its Meta blob, leaving every other field as SetMeta wrote it, and
+// refuses a record naming no digest. It opens path read-write for this one
+// write and closes it -- Open is read-only by design, and this is the only
+// write a database ever takes after its build, so it is kept to one function
+// rather than a writable Open that every reader could reach. A read-modify-
+// write in one transaction rather than a SetMeta call: SetMeta re-derives
+// Databases by decoding every stored advisory, a build's cost to pay once, not
+// a pull's. The database must be a finished one (its metadata record present,
+// the same rule openReadOnly applies).
+func SetArtifactAt(path string, rec ArtifactRecord) error {
+	if rec.Digest == "" {
+		return fmt.Errorf("artifact record names no digest")
+	}
+	db, err := bolt.Open(path, 0o600, nil)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", path, err)
+	}
+	defer db.Close()
+	return db.Update(func(tx *bolt.Tx) error {
+		bk := tx.Bucket(bucketMeta)
+		if bk == nil {
+			return fmt.Errorf("%w at %s: no metadata record", ErrIncomplete, path)
+		}
+		raw := bk.Get([]byte("meta"))
+		if raw == nil {
+			return fmt.Errorf("%w at %s: no metadata record", ErrIncomplete, path)
+		}
+		var m Meta
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return fmt.Errorf("decode meta: %w", err)
+		}
+		m.Artifact = &rec
+		blob, err := json.Marshal(m)
+		if err != nil {
+			return err
+		}
+		return bk.Put([]byte("meta"), blob)
+	})
+}
+
 func (b *Bolt) Meta() (Meta, error) {
 	var m Meta
 	err := b.db.View(func(tx *bolt.Tx) error {

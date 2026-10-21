@@ -11,7 +11,6 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
-	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 
 	"github.com/kun9497/assay/internal/dbartifact"
@@ -109,6 +108,28 @@ func Pull(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer) int
 		return 2
 	}
 	db.Close()
+	// D127. The record of what was pulled goes INTO the verified database
+	// before it is installed, so the record and the database it names are
+	// one file and one rename: a scan that opens the database has the record
+	// of the pull that produced it, never the previous pull's, and the temp
+	// file the failure message below tells the user to move into place
+	// already names its own artifact. The sidecar this replaced was written
+	// after the rename, and a scan between the two renames -- or after a
+	// pull that died between them -- paired the new database with the old
+	// digest (2026-10-20 external review, #7). A record that cannot be
+	// written fails the pull with the previous database still in place: the
+	// caller asked for a database a scan can name.
+	d, err := img.Digest()
+	if err == nil {
+		err = store.SetArtifactAt(tmp, store.ArtifactRecord{
+			Reference: target.String(), Digest: d.String(), PulledAt: time.Now().UTC(),
+		})
+	}
+	if err != nil {
+		os.Remove(tmp)
+		fmt.Fprintf(stderr, "error: record the pulled artifact: %v\n", err)
+		return 2
+	}
 
 	// The same retrying rename Update uses (dbcmd.go), not a bare os.Rename:
 	// on Windows a rename over a file a concurrent scan holds open fails
@@ -124,14 +145,11 @@ func Pull(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer) int
 		fmt.Fprintln(stderr, "close any running scan and move it into place, or re-run `assay db update`")
 		return 2
 	}
-	// D120. After the rename, still under the lock: the record names the
-	// database now in place, and nothing else can install one in between. A
-	// record that cannot be written must not leave the previous pull's behind
-	// to name a database that is no longer there, so it is removed instead,
-	// and the run fails — the caller asked for a database a scan can name.
-	if code := recordArtifact(dbPath, target.String(), img, stderr); code != 0 {
-		return code
-	}
+	// A pre-D127 pull's sidecar is read by nothing, but must not survive
+	// beside the database to be taken for current. After the rename, under
+	// the lock still; a failure here is a warning, not a failed pull -- the
+	// installed database carries its own record either way.
+	removeLegacySidecar(dbPath, stderr)
 	fmt.Fprintf(stderr, "database installed at %s\n", dbPath)
 	if !m.DataAsOf.IsZero() {
 		// The date is D12's floor -- the MINIMUM across every source -- and
@@ -287,22 +305,11 @@ func PullSeed(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer)
 	return 0
 }
 
-// recordArtifact writes <dbPath>.artifact.json for the image just installed
-// (D120): the reference pulled, its manifest digest and the time. On failure
-// it removes any record already there, so none names the wrong database, and
-// returns 2.
-func recordArtifact(dbPath, ref string, img v1.Image, stderr io.Writer) int {
-	d, err := img.Digest()
-	if err == nil {
-		err = store.WriteArtifactRecord(dbPath, store.ArtifactRecord{
-			Reference: ref, Digest: d.String(), PulledAt: time.Now().UTC(),
-		})
+// removeLegacySidecar is what remains of the sidecar path (D120 before D127):
+// it removes a pre-D127 record beside dbPath, which nothing reads but which
+// must not survive to be mistaken for current.
+func removeLegacySidecar(dbPath string, stderr io.Writer) {
+	if err := store.RemoveLegacyArtifactRecord(dbPath); err != nil {
+		fmt.Fprintf(stderr, "warning: remove the previous pull's sidecar record: %v\n", err)
 	}
-	if err != nil {
-		_ = store.RemoveArtifactRecord(dbPath)
-		fmt.Fprintf(stderr, "error: record the pulled artifact: %v\n", err)
-		fmt.Fprintln(stderr, "the database is installed, but a scan cannot name the artifact it came from; re-run `assay db update`")
-		return 2
-	}
-	return 0
 }

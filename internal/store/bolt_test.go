@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -362,6 +363,63 @@ func TestMeta(t *testing.T) {
 	}
 	if !m.BuiltAt.After(p.DataAsOf) {
 		t.Error("BuiltAt should be distinct from and later than DataAsOf in this fixture")
+	}
+}
+
+// D127: the artifact record is written into a finished database's Meta,
+// after the build, without disturbing what SetMeta wrote; a record naming no
+// digest, or a database with no metadata record, is refused.
+func TestSetArtifactAt(t *testing.T) {
+	path := buildTestDB(t, sample("GHSA-aaa", "Go", "x"))
+	before, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m0, err := before.Meta()
+	before.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m0.Artifact != nil {
+		t.Fatalf("a built database carries an artifact record: %+v", m0.Artifact)
+	}
+
+	rec := ArtifactRecord{Reference: "ghcr.io/example/assay-db:v9", Digest: "sha256:abc", PulledAt: time.Date(2026, 10, 21, 0, 0, 0, 0, time.UTC)}
+	if err := SetArtifactAt(path, rec); err != nil {
+		t.Fatalf("SetArtifactAt: %v", err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open after SetArtifactAt: %v", err)
+	}
+	defer db.Close()
+	m, err := db.Meta()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Artifact == nil || *m.Artifact != rec {
+		t.Errorf("Meta.Artifact = %+v, want %+v", m.Artifact, rec)
+	}
+	// Everything SetMeta derived is untouched: a pull must not have to pay a
+	// build's re-derivation, and must not lose it either.
+	m.Artifact = nil
+	if !reflect.DeepEqual(m, m0) {
+		t.Errorf("SetArtifactAt changed more than Artifact:\n got %+v\nwant %+v", m, m0)
+	}
+
+	if err := SetArtifactAt(path, ArtifactRecord{Reference: "r"}); err == nil {
+		t.Error("a record naming no digest was accepted")
+	}
+	// An unfinished database (no metadata record) is refused, as Open
+	// refuses it: there is nothing complete to name.
+	partial := filepath.Join(t.TempDir(), "partial.db")
+	w, err := Create(partial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	if err := SetArtifactAt(partial, rec); !errors.Is(err, ErrIncomplete) {
+		t.Errorf("SetArtifactAt on an unfinished database: err = %v, want ErrIncomplete", err)
 	}
 }
 

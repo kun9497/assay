@@ -675,18 +675,11 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 		fmt.Fprintf(stderr, "error: read database metadata: %v\n", err)
 		return 2
 	}
-	// D120. Read here, beside Meta, so the record names the artifact before
-	// any gate below can refuse the scan. A record that will not read names
-	// no artifact rather than one it cannot vouch for, and says so.
-	art, hasArt, aerr := store.ReadArtifactRecord(dbPath)
-	if aerr != nil {
-		fmt.Fprintf(stderr, "warning: the database's artifact record is unreadable, so no artifact is named: %v\n", aerr)
-	}
-	var artp *store.ArtifactRecord
-	if hasArt {
-		artp = &art
-	}
-	prov.Database = report.NewDatabaseProvenance(m, artp)
+	// D120/D127. The artifact record is part of the Meta just read, so the
+	// record and the database it names were read in the same open: there is
+	// no second file whose generation could differ. Built here, before any
+	// gate below can refuse the scan.
+	prov.Database = report.NewDatabaseProvenance(m)
 
 	// D59. Before matching, not after: a scan that will be refused for age
 	// should not spend the time, and a summary printed first would be a

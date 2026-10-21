@@ -393,8 +393,20 @@ func TestRun_D120_DatabaseRecord(t *testing.T) {
 		t.Errorf("a rating source's error text reached the report:\n%s", out)
 	}
 
-	// With a pull record beside the database, the artifact is named.
-	if err := store.WriteArtifactRecord(db, store.ArtifactRecord{
+	// A pre-D127 sidecar beside the database names nothing: it is exactly the
+	// pairing a scan cannot vouch for (the database may be another pull's).
+	if err := os.WriteFile(store.LegacyArtifactRecordPath(db),
+		[]byte(`{"reference":"ghcr.io/example/assay-db:v9","digest":"sha256:`+strings.Repeat("cd", 32)+`"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, _, _ = provRun(t, db, sbom, Options{Output: "json"})
+	if _, has := provenanceOf(t, out)["database"].(map[string]any)["artifact"]; has {
+		t.Errorf("a legacy sidecar named an artifact:\n%s", out)
+	}
+
+	// With the pull's record in the database itself (D127), the artifact is
+	// named -- and the sidecar beside it, which disagrees, is not what is read.
+	if err := store.SetArtifactAt(db, store.ArtifactRecord{
 		Reference: "ghcr.io/example/assay-db:v9", Digest: "sha256:" + strings.Repeat("ab", 32), PulledAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)

@@ -163,6 +163,16 @@ type Meta struct {
 	Schema    int                   `json:"schema"`
 	BuiltAt   time.Time             `json:"built_at"` // when this database was assembled locally
 	Providers map[string]Provenance `json:"providers"`
+	// Artifact is the published artifact this database was pulled from, or
+	// nil for one built locally (D127). Written by `db update` into the
+	// unpacked database before it is installed (Bolt.SetArtifact), so the
+	// record and the database it names are one file and one rename: a scan
+	// can never pair one pull's database with another pull's record, which
+	// the former sidecar allowed between its two renames and after an
+	// interrupted pull. Not written by SetMeta, which a build calls with a
+	// fresh Meta — a built database therefore never carries one, even when
+	// its advisories were file-copied from a pulled seed (D66).
+	Artifact *ArtifactRecord `json:"artifact,omitempty"`
 	// Ecosystems is the union of every provider's coverage, sorted (D20).
 	//
 	// It exists so a lookup that finds nothing can be told apart from a lookup
