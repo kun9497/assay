@@ -1270,9 +1270,9 @@ func TestConvert_RecommendedKeepsPurlSplit(t *testing.T) {
 // The D126 counter reaches the progress line, asserted as a pair with its
 // neighbour so a doubled argument cannot pass.
 func TestStatsString_ReportsBareNamedByProductID(t *testing.T) {
-	got := stats{SkippedLeapNotAffected: 3, LeapNoFixReplacedBySLEFix: 5, BareNamedByProductID: 4}.String()
+	got := stats{SkippedLeapNotAffected: 3, LeapNoFixReplacedBySLEFix: 5, LeapNoFixReplacedWithReason: 2, BareNamedByProductID: 4}.String()
 	want := "3 not mirrored because a native Leap known_not_affected entry already judges the package (D125), " +
-		"5 native Leap no-fix entries given their SLE twin's fix (D128); " +
+		"5 native Leap no-fix entries given their SLE twin's fix (D128, 2 of them with a stated fix-state reason dropped); " +
 		"4 bare entries named by their product id where the purl's name differed (D126)"
 	if !strings.Contains(got, want) {
 		t.Errorf("stats.String() = %q, want it to contain %q", got, want)
@@ -1328,9 +1328,15 @@ func TestConvert_NativeLeapNoFix_TakesTheSLEFix(t *testing.T) {
 	if st.LeapNoFixReplacedBySLEFix != 1 || st.SkippedLeapNativeWins != 0 {
 		t.Errorf("counters: LeapNoFixReplacedBySLEFix=%d SkippedLeapNativeWins=%d, want 1, 0", st.LeapNoFixReplacedBySLEFix, st.SkippedLeapNativeWins)
 	}
-	// The no-fix range it replaced is no longer counted as one.
-	if st.Unfixable != 0 {
-		t.Errorf("Unfixable = %d, want 0: the replaced no-fix range must not be counted", st.Unfixable)
+	// The no-fix range it replaced is no longer counted as one -- in the
+	// total AND in the D52 split fixStateFor bumped when the range was built,
+	// or the progress line's split exceeds its total (D128's review: on the
+	// 2026-10-19 archive every one of the 168 D128 documents did).
+	if st.Unfixable != 0 || st.UnfixableUnstated != 0 {
+		t.Errorf("Unfixable = %d, UnfixableUnstated = %d, want 0 and 0: the replaced no-fix range must not be counted anywhere", st.Unfixable, st.UnfixableUnstated)
+	}
+	if sum := st.UnfixableWontFix + st.UnfixableNotFixed + st.UnfixableUnstated; sum != st.Unfixable {
+		t.Errorf("D52 split %d != Unfixable %d", sum, st.Unfixable)
 	}
 }
 
@@ -1360,14 +1366,45 @@ func TestConvert_NativeLeapNoFix_StaysWhenSLEHasNoFixEither(t *testing.T) {
 	}
 }
 
-// D128's two edges, each the shape a comment promises to handle. A native
-// Leap entry that is both bare-affected and fixed (Leap's own recommended
-// build beside a bare known_affected -- 4 measured) has a fix of its own and
-// stays native, ranges and all. An SLE twin that is both fixed and
-// bare-affected (all 10 of Leap 16.0's cases, 12 of 16.1's 25) lends only its
-// fixed range: crossing all of them would bring the "affected at every
-// version" range back under a CrossMappedFrom label.
+// D128's edges, each the shape a comment promises to handle. A native Leap
+// entry that is both bare-affected and fixed (Leap's own recommended build
+// beside a bare known_affected -- not sized separately by the census) has a
+// fix of its own and stays native, ranges and all. An SLE twin that is both
+// fixed and bare-affected (all 10 of Leap 16.0's cases, 12 of 16.1's 25) lends
+// only its fixed range: crossing all of them would bring the "affected at
+// every version" range back under a CrossMappedFrom label. A native no-fix
+// entry that carries a stated reason (no_fix_planned -> won't fix) is still
+// replaced -- the installed build's state is what the verdict is about -- but
+// the dropped reason is counted, because it took the --fail-on-unfixable
+// gate with it (0 of 704 on the 2026-10-19 archive; latent, not silent).
 func TestConvert_NativeLeapNoFix_Edges(t *testing.T) {
+	t.Run("native with a stated reason is replaced and the drop counted", func(t *testing.T) {
+		d := buildDoc(t, "CVE-2026-18377",
+			[]string{"SUSE Linux Enterprise Server 16.1", "openSUSE Leap 16.1"},
+			map[string]string{
+				"glibc":                 "pkg:rpm/suse/glibc@?upstream=glibc.src.rpm",
+				"glibc-2.40-160100.3.1": "pkg:rpm/suse/glibc@2.40-160100.3.1?upstream=glibc-2.40-160100.3.1.src.rpm",
+			},
+			[]string{"SUSE Linux Enterprise Server 16.1:glibc-2.40-160100.3.1"},
+			[]string{"openSUSE Leap 16.1:glibc"},
+			[]map[string]any{{"category": "no_fix_planned", "product_ids": []string{"openSUSE Leap 16.1:glibc"}}})
+		var st stats
+		adv, ok := convert(d, &st)
+		if !ok {
+			t.Fatal("convert dropped the document")
+		}
+		got := affectedByName(adv)["openSUSE Leap:16.1/glibc"]
+		if got.CrossMappedFrom != "SLES:16.1" || len(got.Ranges) != 1 || len(got.Ranges[0].Events) != 2 {
+			t.Errorf("Leap glibc = %+v, want SLE's fixed range despite the won't-fix reason", got)
+		}
+		if st.LeapNoFixReplacedBySLEFix != 1 || st.LeapNoFixReplacedWithReason != 1 {
+			t.Errorf("counters: LeapNoFixReplacedBySLEFix=%d LeapNoFixReplacedWithReason=%d, want 1, 1", st.LeapNoFixReplacedBySLEFix, st.LeapNoFixReplacedWithReason)
+		}
+		// The won't-fix count fixStateFor made for the dropped range is undone.
+		if st.Unfixable != 0 || st.UnfixableWontFix != 0 {
+			t.Errorf("Unfixable = %d, UnfixableWontFix = %d, want 0 and 0", st.Unfixable, st.UnfixableWontFix)
+		}
+	})
 	t.Run("native with a fix of its own stays", func(t *testing.T) {
 		d := buildDoc(t, "CVE-2026-18375",
 			[]string{"SUSE Linux Enterprise Server 16.1", "openSUSE Leap 16.1"},

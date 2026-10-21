@@ -533,6 +533,27 @@ func fixStateFor(cats map[string]bool, st *stats) advisory.FixState {
 	}
 }
 
+// uncountFixState reverses fixStateFor's count for a no-fix range that is
+// not emitted after all (D128 replaced it with the SLE twin's fix), so the
+// D52 split still sums to Unfixable. Beside fixStateFor so the two cannot
+// drift: the same categories, the same branches, the opposite sign. It
+// reports whether the range carried a stated reason at all.
+func uncountFixState(cats map[string]bool, st *stats) (hadReason bool) {
+	never, pending := cats[remedyNoFixPlanned], cats[remedyNoneAvailable]
+	if never && pending {
+		st.UnfixableBothReasons--
+	}
+	switch {
+	case never:
+		st.UnfixableWontFix--
+	case pending:
+		st.UnfixableNotFixed--
+	default:
+		st.UnfixableUnstated--
+	}
+	return never || pending
+}
+
 // stats counts what one conversion pass discarded, so a sync can report it.
 // Mirrors redhat.stats field for field where the two providers share a
 // concept, with SUSE-specific counters (Platforms*, SkippedNoPurl,
@@ -607,6 +628,13 @@ type stats struct {
 	// every version". Per entry, like SkippedLeapNativeWins, which it is
 	// carved out of.
 	LeapNoFixReplacedBySLEFix int
+	// LeapNoFixReplacedWithReason is the subset of those whose native
+	// no-fix range carried a stated fix-state reason (no_fix_planned ->
+	// won't fix, none_available -> not fixed yet) that the replacement
+	// dropped, and with it the --fail-on-unfixable gate's view of the
+	// package. 0 of 704 on the 2026-10-19 archive; counted so the day it
+	// happens is visible rather than silent.
+	LeapNoFixReplacedWithReason int
 
 	// BareNamedByProductID is D126's rule doing visible work: a
 	// known_affected / known_not_affected / no-fix remediation id whose
@@ -919,21 +947,33 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 			// place of "affected at every version": an image at or past V is
 			// clean, where native-wins reported it affected with no fix
 			// (cve-2026-18374's glibc on Leap 16.1, whose repo ships the very
-			// build SLE calls fixed -- 25 such packages on 16.1 alone), and an
-			// older image is affected with the fix version named. Both no-fix,
-			// or a native entry with a fix of its own, stay native (D108): the
-			// first has nothing to offer, the second is Leap's own patch state.
-			// Only the fixed ranges cross: an SLE entry that is both fixed and
-			// bare-affected -- all 10 of Leap 16.0's cases and 12 of 16.1's 25
-			// are that mixed shape -- would otherwise bring the no-fix range
-			// back under a CrossMappedFrom label.
+			// build SLE calls fixed -- 25 such entries across 11 packages on
+			// 16.1 alone), and an older image is affected with the fix version
+			// named. Both no-fix, or a native entry with a fix of its own, stay
+			// native (D108): the first has nothing to offer, the second is
+			// Leap's own patch state. Only the fixed ranges cross: an SLE entry
+			// that is both fixed and bare-affected -- all 10 of Leap 16.0's
+			// cases and 12 of 16.1's 25 are that mixed shape -- would otherwise
+			// bring the no-fix range back under a CrossMappedFrom label. A
+			// native range with a stated reason (won't fix) is replaced too --
+			// the verdict is about the installed build -- and the drop counted.
+			//
+			// `unfixed[nk] &&` is intent, not behaviour: an entry exists only
+			// through store(), which records a fixed version or sets unfixed,
+			// so len(fixed[nk]) == 0 already implies unfixed[nk]; dropping the
+			// clause is an equivalent mutation (verified 2026-10-21).
 			nk, sk := productKey{eco: leap, pkg: a.Name}, productKey{eco: a.Ecosystem, pkg: a.Name}
 			if unfixed[nk] && len(fixed[nk]) == 0 && len(fixed[sk]) > 0 {
 				nat := &adv.Affected[ni]
 				nat.Ranges = fixedRangesOf(a.Ranges)
 				nat.CrossMappedFrom = a.Ecosystem
-				// The no-fix range it replaced is gone with it.
+				// The no-fix range it replaced is gone with it: out of the
+				// total AND out of the D52 split fixStateFor put it in, or the
+				// progress line's split exceeds its total.
 				st.Unfixable--
+				if uncountFixState(remedy[nk], st) {
+					st.LeapNoFixReplacedWithReason++
+				}
 				st.LeapNoFixReplacedBySLEFix++
 				continue
 			}
@@ -980,14 +1020,22 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 	return adv, true
 }
 
-// fixedRangesOf returns the ranges that carry a fixed event, copied: the
-// native entry D128 rewrites must not alias the SLE entry's slice.
+// fixedRangesOf returns the ranges that carry a fixed event, copied down to
+// their events: the native entry D128 rewrites must not share a backing
+// array with the SLE entry it took them from. (Nothing mutates a range after
+// convert returns, which is also why the D108 mirror aliases whole Ranges;
+// the copy here costs nothing and keeps the two entries independent by
+// construction.) The break is intent, not behaviour: every range this
+// provider builds carries at most one fixed event, so dropping it is an
+// equivalent mutation (verified 2026-10-21).
 func fixedRangesOf(rs []advisory.Range) []advisory.Range {
 	var out []advisory.Range
 	for _, r := range rs {
 		for _, e := range r.Events {
 			if e.Fixed != "" {
-				out = append(out, r)
+				c := r
+				c.Events = append([]advisory.Event(nil), r.Events...)
+				out = append(out, c)
 				break
 			}
 		}

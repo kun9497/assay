@@ -5247,12 +5247,13 @@ fixed range만 건너갑니다: fixed이면서 bare-affected이기도 한 SLE �
 **측정 (2026-10-19 아카이브, D126 이름, D91 fold).** Leap 릴리스별 native-wins와 그 안의 하위
 사례: 15.0 30,869/0, 15.1 17,501/0, 15.2 32,373/0, 15.3 50,828/6(kernel 문서 하나), 15.4
 56,297/0, 15.5 69,467/4, **15.6 112,360/659(문서 129건; MozillaFirefox 4개 패키지 128,
-go1.26 20)**, 16.0 116,716/10, 16.1 2,323/25. native-wins의 나머지는 양쪽 fixed(native fix
+go1.26 3개 패키지 30)**, 16.0 116,716/10, 16.1 2,323/25. native-wins의 나머지는 양쪽 fixed(native fix
 유지) 또는 양쪽 no-fix입니다. 실제 Leap 저장소(`download.opensuse.org`) 대조: 15.5의 4건은 모두
 공유 codestream에서 fix *미만*을 출하하므로 판정은 그대로이고 fix 버전이 이제 적힙니다; 16.0의
 4건(`php8`, `rpm`, `swtpm`, `qemu`)은 모두 fix *이상*을 출하 — 오늘은 false positive, D128에서는
-깨끗; 15.6의 상위 60개 패키지(659건 중 515건) 가운데 58개는 fix 미만, 2개(`erlang`,
-`erlang-epmd`)는 이상을 출하하고 상위 60 밖의 `podman`도 이상 — 659건의 fix 중 648건이
+깨끗; 15.6의 163개 패키지 가운데 156개는 fix 미만, 2개(`erlang`, `erlang-epmd`)는 이상, 4개(`podman`과
+세 형제)는 혼합 — fix 둘 중 하나보다는 위, 하나보다는 아래라 한 건은 affected로 남음 — 그리고
+1개는 Leap 자체 빌드(미만) — 659건의 fix 중 648건이
 SP6-LTSS 빌드이고 Leap 15.6은 EOL이 지났으므로, 거기서는 이 변경이 대체로 "affected"로 남는
 판정에 LTSS fix 버전을 적어 주는 것, 즉 D108의 공개 사례입니다. 15.6의 163개 패키지 전체에서
 Leap 자체 빌드는 정확히 하나, `perl-Text-CSV_XS-1.34-1.19`가 나왔고 rpm은 그것을 SLE fix *아래*로
