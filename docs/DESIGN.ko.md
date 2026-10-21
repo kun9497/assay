@@ -700,8 +700,8 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       소스의 모든 바이너리에 도달; Ubuntu는 `distro=<codename>`에도 응답; stderr 한 줄이
       아무것과도 매칭되지 않은 문장 수를 셈.
 - [x] 스캔은 자기 판정을 만든 것이 무엇인지 기록한다 (D120) — JSON(스키마 14)과 SARIF의
-      결정적 `provenance` 객체: 도구, 데이터베이스(`<dbPath>.artifact.json`의 아티팩트
-      digest), 타깃 콘텐츠 식별, 모든 게이트, 해시와 건수를 담은 ignore 규칙과 VEX 문서;
+      결정적 `provenance` 객체: 도구, 데이터베이스(D127부터 데이터베이스 자신의 `Meta`에
+      든 아티팩트 digest), 타깃 콘텐츠 식별, 모든 게이트, 해시와 건수를 담은 ignore 규칙과 VEX 문서;
       `--provenance <path>`는 실행 시각, 종료 코드, 보고서 sha256을 더해 모든 종료
       경로에서 기록됨.
 - [x] `--platform`과 모든 이미지 경로를 위한 하나의 플랫폼 선택기 (D119) — containerd
@@ -803,6 +803,12 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       않는 이름으로 키가 잡혔다: 조용한 false negative. bucket이 정한다 — 상태 id와 no-fix
       remediation id는 product_id를, `recommended` 빌드는 purl 분할을 쓴다 — 양방향 예외
       없이 측정됨; `BareNamedByProductID`가 progress 줄에 나옴
+- [x] 아티팩트 기록은 자기가 가리키는 데이터베이스 안에 산다 (D127) — `db update`가 참조,
+      digest, pull 시각을 검증된 임시 데이터베이스의 `Meta`에 단 한 번의 설치 rename 전에
+      쓰므로, 스캔이 한 pull의 데이터베이스를 다른 pull의 기록과 짝지을 수 없다(sidecar의
+      두 번째 rename은 그럴 수 있었고, 중단된 pull은 그 상태를 남겼다); sidecar는 읽지
+      않고 지운다; `SetArtifactAt`는 시간이 제한된 read-modify-write 한 번; `db push`는
+      발행 레이어에서 기록을 벗겨내고 `db status`는 기록을 찍는다
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨

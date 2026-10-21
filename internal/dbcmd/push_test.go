@@ -61,6 +61,16 @@ func TestPush_WritesAPullableArtifact(t *testing.T) {
 
 	asOf := time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)
 	path := pushable(t, asOf)
+	// D127: the database being pushed was itself pulled (a mirror
+	// operator's `db update` then `db push`). The published layer must not
+	// carry that pull's record: a pre-D127 `db update` installs the layer
+	// without touching Meta, and a D127 scan would then name the mirror's
+	// upstream rather than the artifact it pulled.
+	if err := store.SetArtifactAt(path, store.ArtifactRecord{
+		Reference: "ghcr.io/upstream/assay-db:v9", Digest: "sha256:" + strings.Repeat("aa", 32), PulledAt: asOf,
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	var out, errOut bytes.Buffer
 	if code := Push(context.Background(), path, ref, false, &out, &errOut); code != 0 {
@@ -72,6 +82,13 @@ func TestPush_WritesAPullableArtifact(t *testing.T) {
 	img, err := remote.Image(target)
 	if err != nil {
 		t.Fatalf("pushed artifact is not pullable: %v", err)
+	}
+	unpacked := filepath.Join(t.TempDir(), "unpacked.db")
+	if err := dbartifact.Unpack(img, unpacked); err != nil {
+		t.Fatal(err)
+	}
+	if rec := artifactOf(t, unpacked); rec != nil {
+		t.Errorf("the published database carries the source's own pull record: %+v", rec)
 	}
 	m, err := dbartifact.MetaOf(img)
 	if err != nil {

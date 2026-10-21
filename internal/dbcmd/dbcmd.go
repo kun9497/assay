@@ -610,12 +610,13 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 		fmt.Fprintf(stderr, "error: close database: %v\n", err)
 		return 2
 	}
-	// D120. A pulled database's record must not outlive it: this build is
-	// about to replace that database with one no artifact holds. Removed
-	// BEFORE the rename, so a failed removal leaves the old database and its
-	// still-true record in place, and a failed rename leaves the old database
-	// with no record, which reports none rather than guessing.
-	if err := store.RemoveArtifactRecord(dbPath); err != nil {
+	// D127. The record a pulled database carries lives in its Meta, and the
+	// one this build wrote into tmp is fresh, so the replace below retires it
+	// with the database. What is removed here is a pre-D127 sidecar, which
+	// nothing reads but which should not survive beside a built database to
+	// be taken for current. Before the rename, so a failed removal leaves the
+	// old database untouched.
+	if err := store.RemoveLegacyArtifactRecord(dbPath); err != nil {
 		fmt.Fprintf(stderr, "error: remove the previous pull's artifact record: %v\n", err)
 		fmt.Fprintf(stderr, "the new database is complete and left at %s\n", tmp)
 		return 2
@@ -822,6 +823,13 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "path:       %s\n", dbPath)
 	fmt.Fprintf(stdout, "schema:     v%d\n", m.Schema)
 	fmt.Fprintf(stdout, "built:      %s\n", m.BuiltAt.Format(time.RFC3339))
+	// Which published artifact this database came from (D120/D127), the
+	// first thing a user asking "is this the nightly I think it is?" wants
+	// and otherwise visible only by running a scan. Absent for a database
+	// built locally, which names none rather than guessing.
+	if a := m.Artifact; a != nil {
+		fmt.Fprintf(stdout, "pulled:     %s@%s at %s\n", a.Reference, a.Digest, a.PulledAt.UTC().Format(time.RFC3339))
+	}
 	// What this database covers decides which packages can be evaluated at
 	// all (D20). Without it here, coverage is discoverable only by running a
 	// scan and reading why it refused.

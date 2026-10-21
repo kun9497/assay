@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -362,6 +363,89 @@ func TestMeta(t *testing.T) {
 	}
 	if !m.BuiltAt.After(p.DataAsOf) {
 		t.Error("BuiltAt should be distinct from and later than DataAsOf in this fixture")
+	}
+}
+
+// D127: the artifact record is written into a finished database's Meta,
+// after the build, without disturbing what SetMeta wrote; a record naming no
+// digest, or a database with no metadata record, is refused.
+func TestSetArtifactAt(t *testing.T) {
+	path := buildTestDB(t, sample("GHSA-aaa", "Go", "x"))
+	before, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m0, err := before.Meta()
+	before.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m0.Artifact != nil {
+		t.Fatalf("a built database carries an artifact record: %+v", m0.Artifact)
+	}
+
+	rec := ArtifactRecord{Reference: "ghcr.io/example/assay-db:v9", Digest: "sha256:abc", PulledAt: time.Date(2026, 10, 21, 0, 0, 0, 0, time.UTC)}
+	if err := SetArtifactAt(path, rec); err != nil {
+		t.Fatalf("SetArtifactAt: %v", err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open after SetArtifactAt: %v", err)
+	}
+	m, err := db.Meta()
+	db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Artifact == nil || *m.Artifact != rec {
+		t.Errorf("Meta.Artifact = %+v, want %+v", m.Artifact, rec)
+	}
+	// Everything SetMeta derived is untouched: a pull must not have to pay a
+	// build's re-derivation, and must not lose it either.
+	m.Artifact = nil
+	if !reflect.DeepEqual(m, m0) {
+		t.Errorf("SetArtifactAt changed more than Artifact:\n got %+v\nwant %+v", m, m0)
+	}
+
+	// Refused before the file is touched, and for that reason -- not for a
+	// lock or an open error.
+	if err := SetArtifactAt(path, ArtifactRecord{Reference: "r"}); err == nil || !strings.Contains(err.Error(), "no digest") {
+		t.Errorf("a record naming no digest: err = %v, want a refusal naming the digest", err)
+	}
+	// A database another handle holds open fails fast rather than hanging on
+	// bolt's file lock (the default wait is forever).
+	held, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	err = SetArtifactAt(path, rec)
+	held.Close()
+	if err == nil {
+		t.Error("SetArtifactAt succeeded on a database another handle holds open")
+	}
+	if waited := time.Since(started); waited > 10*time.Second {
+		t.Errorf("SetArtifactAt waited %v for the lock, want a bounded wait", waited)
+	}
+	// A path with nothing at it is ErrNotFound and stays empty: a read-write
+	// bolt.Open would otherwise create a file there.
+	absent := filepath.Join(t.TempDir(), "absent.db")
+	if err := SetArtifactAt(absent, rec); !errors.Is(err, ErrNotFound) {
+		t.Errorf("SetArtifactAt on an absent path: err = %v, want ErrNotFound", err)
+	}
+	if _, err := os.Stat(absent); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("SetArtifactAt created a file at an absent path (stat err = %v)", err)
+	}
+	// An unfinished database (no metadata record) is refused, as Open
+	// refuses it: there is nothing complete to name.
+	partial := filepath.Join(t.TempDir(), "partial.db")
+	w, err := Create(partial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	if err := SetArtifactAt(partial, rec); !errors.Is(err, ErrIncomplete) {
+		t.Errorf("SetArtifactAt on an unfinished database: err = %v, want ErrIncomplete", err)
 	}
 }
 

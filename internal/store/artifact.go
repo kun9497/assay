@@ -1,77 +1,44 @@
 package store
 
 import (
-	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"time"
 )
 
 // ArtifactRecord is what `db update` pulled (D120): the reference it was asked
-// for, the manifest digest it got, and when. It lives beside the database as
-// <dbPath>.artifact.json, written under D116's writer lock by the pull that
-// installed the database and removed by `db build`, so a scan can name the
-// artifact its database came from — and a database with no such file reports
-// none rather than guessing.
+// for, the manifest digest it got, and when. Since D127 it lives in the
+// database's own Meta (Meta.Artifact, written by SetArtifact into the
+// unpacked database before it is installed), so the record and the database
+// it names are one file: a scan reads both in one open and can never pair a
+// database with a record from a different pull. A database with none reports
+// no artifact rather than guessing.
 //
-// A sidecar rather than a Meta field: the database inside the artifact was
-// sealed before it was published and cannot know the digest of the artifact
-// it was then packed into.
+// It used to be a sidecar, <dbPath>.artifact.json, on the reasoning that the
+// database inside the artifact was sealed before publishing and could not
+// know its own digest. True of the publisher — but the pull unpacks and opens
+// the database before installing it anyway, and that is where the record now
+// goes. The sidecar's two renames (database, then record) left a window in
+// which a scan read the new database with the old record, and an interrupted
+// pull, or the manual move the install-failure message suggests, left that
+// pairing in place for good (2026-10-20 external review, #7).
 type ArtifactRecord struct {
 	Reference string    `json:"reference"`
 	Digest    string    `json:"digest"`
 	PulledAt  time.Time `json:"pulledAt"`
 }
 
-// ArtifactRecordPath is where the record for dbPath lives.
-func ArtifactRecordPath(dbPath string) string { return dbPath + ".artifact.json" }
+// LegacyArtifactRecordPath is where a pull before D127 left its sidecar. It is
+// never read any more: a sidecar beside a database is exactly the pairing
+// nothing can vouch for, so it is only ever removed.
+func LegacyArtifactRecordPath(dbPath string) string { return dbPath + ".artifact.json" }
 
-// WriteArtifactRecord writes rec beside dbPath, through a temp file and a
-// rename so a reader never sees half of one.
-func WriteArtifactRecord(dbPath string, rec ArtifactRecord) error {
-	data, err := json.MarshalIndent(rec, "", "  ")
-	if err != nil {
-		return err
-	}
-	path := ArtifactRecordPath(dbPath)
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o644); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
+// RemoveLegacyArtifactRecord removes a pre-D127 sidecar beside dbPath. One that
+// is not there is not an error: the point is only that none survives to be
+// mistaken for current.
+func RemoveLegacyArtifactRecord(dbPath string) error {
+	if err := os.Remove(LegacyArtifactRecordPath(dbPath)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return nil
-}
-
-// RemoveArtifactRecord removes the record beside dbPath. One that is not there
-// is not an error: the point is only that none survives.
-func RemoveArtifactRecord(dbPath string) error {
-	if err := os.Remove(ArtifactRecordPath(dbPath)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return nil
-}
-
-// ReadArtifactRecord reads the record beside dbPath. ok is false, with a nil
-// error, when there is none. A record that exists and does not parse, or names
-// no digest, is an error: the caller reports no artifact and says why, rather
-// than naming one it cannot vouch for.
-func ReadArtifactRecord(dbPath string) (rec ArtifactRecord, ok bool, err error) {
-	data, err := os.ReadFile(ArtifactRecordPath(dbPath))
-	if errors.Is(err, os.ErrNotExist) {
-		return ArtifactRecord{}, false, nil
-	}
-	if err != nil {
-		return ArtifactRecord{}, false, err
-	}
-	if err := json.Unmarshal(data, &rec); err != nil {
-		return ArtifactRecord{}, false, fmt.Errorf("parse artifact record: %w", err)
-	}
-	if rec.Digest == "" {
-		return ArtifactRecord{}, false, errors.New("artifact record names no digest")
-	}
-	return rec, true, nil
 }

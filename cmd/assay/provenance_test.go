@@ -63,8 +63,11 @@ func TestRun_D120_DBUpdateDigestReachesTheScan(t *testing.T) {
 	if code := run([]string{"db", "update", "--from", ref}, &stdout, &stderr); code != exitOK {
 		t.Fatalf("db update = %d, want 0\n%s", code, stderr.String())
 	}
-	if _, err := os.Stat(filepath.Join(dbDir, "vulnerability.db.artifact.json")); err != nil {
-		t.Fatalf("db update wrote no artifact record: %v", err)
+	// D127: the record is in the database, not beside it. No sidecar is
+	// written, and the scan below is what proves the record reached the
+	// database that was installed.
+	if _, err := os.Stat(filepath.Join(dbDir, "vulnerability.db.artifact.json")); !os.IsNotExist(err) {
+		t.Fatalf("db update wrote a sidecar record (stat err = %v); since D127 the record lives in the database", err)
 	}
 
 	stdout.Reset()

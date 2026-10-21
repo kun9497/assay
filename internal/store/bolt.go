@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"time"
 
 	bolt "go.etcd.io/bbolt"
 
@@ -584,6 +585,14 @@ func StripEnrichment(path string) error {
 			return fmt.Errorf("decode metadata: %w", err)
 		}
 		m.Enrichment, m.EnrichmentCounts = nil, nil
+		// D127: a database that was itself pulled carries the record of
+		// THAT pull. Published, it would name the upstream artifact inside
+		// a layer that is a different artifact, and a pre-D127 binary's
+		// `db update` installs the layer without touching Meta, so a later
+		// D127 scan would report the mirror's upstream rather than what it
+		// pulled. The published database names no artifact; the pull that
+		// installs it writes the right one.
+		m.Artifact = nil
 		blob, err := json.Marshal(m)
 		if err != nil {
 			return err
@@ -800,6 +809,66 @@ func (b *Bolt) EachEnrichment(fn func(advisory.Enrichment) error) error {
 		return nil
 	})
 }
+
+// SetArtifactAt records the artifact the database at path was pulled from
+// (D127) in its Meta blob, leaving every other field as SetMeta wrote it, and
+// refuses a record naming no digest. It opens path read-write for this one
+// write and closes it -- Open is read-only by design, and this is the only
+// write a database ever takes after its build, so it is kept to one function
+// rather than a writable Open that every reader could reach. A read-modify-
+// write in one transaction rather than a SetMeta call: SetMeta re-derives
+// Databases by decoding every stored advisory, a build's cost to pay once, not
+// a pull's. The database must be a finished one (its metadata record present,
+// the same rule openReadOnly applies). The open carries a timeout: bolt waits
+// for the file lock indefinitely by default, and a database some reader holds
+// open would hang the pull rather than fail it -- found when a mutation of
+// this function blocked a test for its full 600 s.
+func SetArtifactAt(path string, rec ArtifactRecord) error {
+	if rec.Digest == "" {
+		return fmt.Errorf("artifact record names no digest")
+	}
+	// Stat first, as openReadOnly does: a read-write bolt.Open CREATES a
+	// missing file, and a typo'd path would otherwise leave an empty database
+	// behind with an error that says "no metadata record".
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("%w at %s", ErrNotFound, path)
+	}
+	db, err := bolt.Open(path, 0o600, &bolt.Options{Timeout: setArtifactLockWait})
+	if err != nil {
+		return fmt.Errorf("open %s for the artifact record: %w", path, err)
+	}
+	defer db.Close()
+	return db.Update(func(tx *bolt.Tx) error {
+		// One check for both "no bucket" and "no record": Create always makes
+		// the bucket, so the bucket-less case is unreachable from any file
+		// this project writes, and a separate branch for it would be an
+		// untested one.
+		var raw []byte
+		if bk := tx.Bucket(bucketMeta); bk != nil {
+			raw = bk.Get([]byte("meta"))
+		}
+		if raw == nil {
+			return fmt.Errorf("%w at %s: no metadata record", ErrIncomplete, path)
+		}
+		bk := tx.Bucket(bucketMeta)
+		var m Meta
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return fmt.Errorf("decode meta: %w", err)
+		}
+		m.Artifact = &rec
+		blob, err := json.Marshal(m)
+		if err != nil {
+			return err
+		}
+		return bk.Put([]byte("meta"), blob)
+	})
+}
+
+// setArtifactLockWait bounds SetArtifactAt's wait for bolt's file lock. The
+// file it writes is the pull's own temp database, which nothing else opens,
+// so any wait at all is a bug being reported, not contention being ridden
+// out.
+const setArtifactLockWait = 2 * time.Second
 
 func (b *Bolt) Meta() (Meta, error) {
 	var m Meta

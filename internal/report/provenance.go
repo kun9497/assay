@@ -60,8 +60,9 @@ func NewToolProvenance(version, commit, date string) ToolProvenance {
 }
 
 // DatabaseProvenance is the database the scan read. Artifact is set only when
-// `db update` left a record of what it pulled (<dbPath>.artifact.json); a
-// database built locally has none, and reports none rather than guessing.
+// `db update` wrote a record of what it pulled into the database's own Meta
+// (D127); a database built locally has none, and reports none rather than
+// guessing.
 type DatabaseProvenance struct {
 	Schema   int                 `json:"schema"`
 	BuiltAt  string              `json:"builtAt"`
@@ -107,9 +108,9 @@ type RenamedKey struct {
 	To   string `json:"to"`
 }
 
-// NewDatabaseProvenance builds the database record from the Meta a scan read
-// and the artifact record beside the database, if any.
-func NewDatabaseProvenance(m store.Meta, art *store.ArtifactRecord) *DatabaseProvenance {
+// NewDatabaseProvenance builds the database record from the Meta a scan read,
+// artifact record included (Meta.Artifact, D127).
+func NewDatabaseProvenance(m store.Meta) *DatabaseProvenance {
 	d := &DatabaseProvenance{
 		Schema:  m.Schema,
 		BuiltAt: timestamp(m.BuiltAt),
@@ -117,7 +118,7 @@ func NewDatabaseProvenance(m store.Meta, art *store.ArtifactRecord) *DatabasePro
 		Frozen:  []FrozenKey{},
 		Renamed: []RenamedKey{},
 	}
-	if art != nil {
+	if art := m.Artifact; art != nil {
 		d.Artifact = &ArtifactProvenance{Reference: art.Reference, Digest: art.Digest}
 	}
 	names := make([]string, 0, len(m.Ratings))

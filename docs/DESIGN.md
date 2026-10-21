@@ -728,8 +728,8 @@ exited 0 while 24 findings went unmentioned.
       reach every binary of that source; Ubuntu also answers to `distro=<codename>`; one
       stderr line counts statements that matched nothing.
 - [x] A scan records what produced its verdict (D120) — a deterministic `provenance` object
-      in JSON (schema 14) and SARIF: tool, database (artifact digest from
-      `<dbPath>.artifact.json`), target content identity, every gate, ignore rules and VEX
+      in JSON (schema 14) and SARIF: tool, database (artifact digest from the database's
+      own `Meta` since D127), target content identity, every gate, ignore rules and VEX
       documents with hashes and counts; `--provenance <path>` adds run time, exit code and
       report sha256, written on every exit path.
 - [x] `--platform` and one platform selector for every image path (D119) — containerd
@@ -833,6 +833,12 @@ exited 0 while 24 findings went unmentioned.
       has: a silent false negative. The bucket decides — status and no-fix remediation ids
       take the product_id, `recommended` builds keep the purl split — measured
       exception-free both ways; `BareNamedByProductID` on the progress line
+- [x] The artifact record lives in the database it names (D127) — `db update` writes
+      reference, digest and pull time into the verified temp database's `Meta` before the
+      one install rename, so a scan can never pair one pull's database with another's
+      record (the sidecar's second rename could, and an interrupted pull left it so); the
+      sidecar is read by nothing and removed; `SetArtifactAt` is one bounded read-modify-write;
+      `db push` strips the record from the published layer and `db status` prints it
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15
