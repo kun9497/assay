@@ -64,11 +64,11 @@ const maxSymlinkHops = 8
 // an over-limit file, an exhausted budget or a cancelled context is an error,
 // never a shorter result.
 func (img *Image) Files(ctx context.Context, want []string) (map[string]FileFromLayer, error) {
-	any := len(img.Layers) - 1
+	newest := len(img.Layers) - 1
 	qs := make([]query, 0, len(want))
 	for _, w := range want {
 		n := normaliseEntry(w)
-		qs = append(qs, query{path: n, want: n, top: any})
+		qs = append(qs, query{path: n, want: n, top: newest, dir: path.Dir(n)})
 	}
 
 	out := make(map[string]FileFromLayer, len(want))
@@ -97,10 +97,17 @@ func (img *Image) Files(ctx context.Context, want []string) (map[string]FileFrom
 // apply to it either. Found by the 2026-10-20 external review (#4): a package
 // database hardlinked from a scratch path that a later layer rewrote came
 // back as the rewritten database.
+//
+// dir is the directory the name was reached THROUGH, which is what a relative
+// symlink target resolves against: the kernel resolves it from the directory
+// of the name being opened, and for a hardlink to a relative symlink that is
+// the hardlink's directory, not the symlink entry's. For every chain without
+// a hardlink the two coincide.
 type query struct {
 	path string
 	want string
 	top  int
+	dir  string
 }
 
 // whiteout is one deletion marker and the layer that wrote it. A marker in
@@ -162,14 +169,22 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 				// and finds nothing. And a symlink's target is looked up from
 				// the newest layer, a hardlink's from this one down (see query).
 				hard := h.Typeflag == tar.TypeLink
-				target := resolveLink(name, h.Linkname, hard)
 				top := len(img.Layers) - 1
 				if hard {
 					top = i
 				}
+				// Per query, not per entry: two queries can reach one symlink
+				// through different hardlinks and resolve its relative
+				// target from different directories.
 				for _, k := range hits {
 					done[k] = true
-					next = append(next, query{path: target, want: qs[k].want, top: top})
+					q := qs[k]
+					target := resolveLink(q.dir, h.Linkname, hard)
+					dir := q.dir // a hardlink keeps the directory it was reached through
+					if !hard {
+						dir = path.Dir(target)
+					}
+					next = append(next, query{path: target, want: q.want, top: top, dir: dir})
 				}
 				return nil
 			case tar.TypeReg:
@@ -216,15 +231,16 @@ func hiddenFrom(name string, i, top int, deleted, opaque []whiteout) bool {
 
 // resolveLink turns a link target into a path from the image root.
 //
-// A SYMLINK's relative target is relative to the directory holding the link,
-// which is why the link's own path is needed and not just its target. A
-// HARDLINK's Linkname is always relative to the archive root instead, so
-// joining it to the link's directory would invent a path that does not exist.
-func resolveLink(from, target string, hard bool) string {
+// A SYMLINK's relative target is relative to the directory the link was
+// reached through (query.dir), which is why that directory is needed and not
+// just the target. A HARDLINK's Linkname is always relative to the archive
+// root instead, so joining it to any directory would invent a path that does
+// not exist.
+func resolveLink(dir, target string, hard bool) string {
 	if hard || strings.HasPrefix(target, "/") {
 		return normaliseEntry(target)
 	}
-	return normaliseEntry(path.Join(path.Dir(from), target))
+	return normaliseEntry(path.Join(dir, target))
 }
 
 // isDeleted reports whether a whiteout covers this path.

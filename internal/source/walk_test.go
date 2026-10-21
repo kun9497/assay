@@ -461,8 +461,99 @@ func TestFiles_SymlinkFollowsTheNewestTarget(t *testing.T) {
 	}
 }
 
-// A hardlink's target may be in a lower layer than the link (a builder that
-// links across layers emits the link alone); lower is allowed, higher never.
+// The ordinary shape of a hardlink in a multi-layer image: link and target
+// emitted together in a NON-base layer (a `RUN apk add` in layer two). The
+// ceiling must be that layer's index, not the base's -- this is the one test
+// whose answer differs when `top = i` is mistyped as `top = 0`.
+func TestFiles_HardlinkInAnUpperLayerResolvesWithinIt(t *testing.T) {
+	img := imageOf(
+		layerOf(t, "sha256:base", map[string]string{"etc/hostname": "box"}),
+		layerOfOrdered(t, "sha256:top",
+			entry{name: "tmp/pkgdb", body: "db"},
+			hard("lib/apk/db/installed", "tmp/pkgdb"),
+		),
+	)
+	got, err := img.Files(context.Background(), []string{"lib/apk/db/installed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f, ok := got["lib/apk/db/installed"]; !ok || string(f.Data) != "db" || f.DiffID != "sha256:top" {
+		t.Errorf("got %q (present=%v) from %q, want db from sha256:top: the ceiling is the link's own layer", f.Data, ok, f.DiffID)
+	}
+}
+
+// An OPAQUE whiteout above the hardlink's layer (`RUN rm -rf /tmp && mkdir
+// /tmp`) is ignored for the hardlink exactly as a plain one is: the inode the
+// link holds was never under the directory the later layer emptied.
+func TestFiles_HardlinkIgnoresAnOpaqueWhiteoutAboveItsLayer(t *testing.T) {
+	img := imageOf(
+		layerOfOrdered(t, "sha256:base",
+			entry{name: "tmp/pkgdb", body: "vulnerable-1.0"},
+			hard("lib/apk/db/installed", "tmp/pkgdb"),
+		),
+		layerOfOrdered(t, "sha256:top",
+			entry{name: "tmp/.wh..wh..opq", body: ""},
+			entry{name: "tmp/pkgdb", body: "fixed-pkg-2.0"},
+		),
+	)
+	got, err := img.Files(context.Background(), []string{"lib/apk/db/installed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := got["lib/apk/db/installed"]; string(f.Data) != "vulnerable-1.0" || f.DiffID != "sha256:base" {
+		t.Errorf("hardlinked name = %q from %s, want the base inode: an opaque whiteout above the link's layer does not reach it", f.Data, f.DiffID)
+	}
+}
+
+// A link whose target does not exist shadows a lower layer's regular file of
+// the same name: the image has a dangling link at that path, not the file a
+// lower layer once had, and reporting the shadowed file would report a
+// package database the image does not ship.
+func TestFiles_DanglingLinkShadowsALowerRegularFile(t *testing.T) {
+	img := imageOf(
+		layerOf(t, "sha256:base", map[string]string{"lib/apk/db/installed": "old"}),
+		layerOfOrdered(t, "sha256:top", sym("lib/apk/db/installed", "../../../nowhere/installed")),
+	)
+	got, err := img.Files(context.Background(), []string{"lib/apk/db/installed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f, ok := got["lib/apk/db/installed"]; ok {
+		t.Errorf("got %q from %s, want absent: the dangling link in the top layer shadows the base's file", f.Data, f.DiffID)
+	}
+}
+
+// A hardlink to a RELATIVE symlink: the hardlinked name is a second name for
+// the symlink inode, and the kernel resolves the relative target against the
+// directory of the name that was opened -- the hardlink's, not the symlink
+// entry's. open("/etc/os-release") here reads /etc/../share/os-release, not
+// usr/lib/../share/os-release (D130's review; latent, no plausible image does
+// this for the paths assay wants, but the walk must agree with the kernel).
+func TestFiles_HardlinkToRelativeSymlinkResolvesFromTheHardlinksDirectory(t *testing.T) {
+	img := imageOf(layerOfOrdered(t, "sha256:one",
+		entry{name: "share/os-release", body: "RUNTIME-ANSWER"},
+		entry{name: "usr/share/os-release", body: "OTHER-DIR-ANSWER"},
+		sym("usr/lib/os-release.lnk", "../share/os-release"),
+		hard("etc/os-release", "usr/lib/os-release.lnk"),
+	))
+	got, err := img.Files(context.Background(), []string{"etc/os-release", "usr/lib/os-release.lnk"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := got["etc/os-release"]; string(f.Data) != "RUNTIME-ANSWER" {
+		t.Errorf("etc/os-release = %q, want RUNTIME-ANSWER (share/os-release): the relative symlink resolves from the hardlink's directory", f.Data)
+	}
+	// The symlink under its own name resolves from its own directory.
+	if f := got["usr/lib/os-release.lnk"]; string(f.Data) != "OTHER-DIR-ANSWER" {
+		t.Errorf("usr/lib/os-release.lnk = %q, want OTHER-DIR-ANSWER (usr/share/os-release)", f.Data)
+	}
+}
+
+// A hardlink's target may be in a lower layer than the link. The OCI spec
+// says a layer's hardlink to a file outside the layer "may fail" to extract
+// and that builders record such a file in full rather than as a link, so no
+// known builder produces this shape; resolving it when met is a harmless
+// superset -- lower is allowed, higher never.
 func TestFiles_HardlinkTargetMayBeInALowerLayer(t *testing.T) {
 	img := imageOf(
 		layerOf(t, "sha256:base", map[string]string{"usr/lib/os-release": "ID=alpine"}),
