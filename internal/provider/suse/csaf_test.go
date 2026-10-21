@@ -1360,6 +1360,59 @@ func TestConvert_NativeLeapNoFix_StaysWhenSLEHasNoFixEither(t *testing.T) {
 	}
 }
 
+// D128's two edges, each the shape a comment promises to handle. A native
+// Leap entry that is both bare-affected and fixed (Leap's own recommended
+// build beside a bare known_affected -- 4 measured) has a fix of its own and
+// stays native, ranges and all. An SLE twin that is both fixed and unfixed (0
+// measured) lends only its fixed range: crossing all of them would bring the
+// "affected at every version" range back under a CrossMappedFrom label.
+func TestConvert_NativeLeapNoFix_Edges(t *testing.T) {
+	t.Run("native with a fix of its own stays", func(t *testing.T) {
+		d := buildDoc(t, "CVE-2026-18375",
+			[]string{"SUSE Linux Enterprise Server 16.1", "openSUSE Leap 16.1"},
+			map[string]string{
+				"glibc":                 "pkg:rpm/suse/glibc@?upstream=glibc.src.rpm",
+				"glibc-2.40-160100.3.1": "pkg:rpm/suse/glibc@2.40-160100.3.1?upstream=glibc-2.40-160100.3.1.src.rpm",
+				"glibc-2.40-160100.2.1": "pkg:rpm/suse/glibc@2.40-160100.2.1?upstream=glibc-2.40-160100.2.1.src.rpm",
+			},
+			[]string{"SUSE Linux Enterprise Server 16.1:glibc-2.40-160100.3.1", "openSUSE Leap 16.1:glibc-2.40-160100.2.1"},
+			[]string{"openSUSE Leap 16.1:glibc"},
+			nil)
+		var st stats
+		adv, ok := convert(d, &st)
+		if !ok {
+			t.Fatal("convert dropped the document")
+		}
+		got := affectedByName(adv)["openSUSE Leap:16.1/glibc"]
+		if got.CrossMappedFrom != "" || len(got.Ranges) != 2 {
+			t.Errorf("native entry with its own fix was rewritten: %+v", got)
+		}
+		if st.LeapNoFixReplacedBySLEFix != 0 || st.SkippedLeapNativeWins != 1 {
+			t.Errorf("counters: LeapNoFixReplacedBySLEFix=%d SkippedLeapNativeWins=%d, want 0, 1", st.LeapNoFixReplacedBySLEFix, st.SkippedLeapNativeWins)
+		}
+	})
+	t.Run("only the SLE twin's fixed range crosses", func(t *testing.T) {
+		d := buildDoc(t, "CVE-2026-18376",
+			[]string{"SUSE Linux Enterprise Server 16.1", "openSUSE Leap 16.1"},
+			map[string]string{
+				"glibc":                 "pkg:rpm/suse/glibc@?upstream=glibc.src.rpm",
+				"glibc-2.40-160100.3.1": "pkg:rpm/suse/glibc@2.40-160100.3.1?upstream=glibc-2.40-160100.3.1.src.rpm",
+			},
+			[]string{"SUSE Linux Enterprise Server 16.1:glibc-2.40-160100.3.1"},
+			[]string{"SUSE Linux Enterprise Server 16.1:glibc", "openSUSE Leap 16.1:glibc"}, // SLE both fixed and unfixed
+			nil)
+		var st stats
+		adv, ok := convert(d, &st)
+		if !ok {
+			t.Fatal("convert dropped the document")
+		}
+		got := affectedByName(adv)["openSUSE Leap:16.1/glibc"]
+		if got.CrossMappedFrom != "SLES:16.1" || len(got.Ranges) != 1 || len(got.Ranges[0].Events) != 2 {
+			t.Errorf("Leap glibc = %+v, want exactly SLE's one fixed range, never its unfixed one", got)
+		}
+	})
+}
+
 // countByName counts the entries for one package on one key; affectedByName
 // keeps only the last, so a duplicate would hide behind it.
 func countByName(adv advisory.Advisory, eco, name string) int {
