@@ -843,14 +843,23 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 			continue
 		}
 		// D125: SUSE's own "not affected" for this package on this Leap
-		// release is a verdict, not an absence. cve-2025-61144 (2026-10-21)
-		// lists libtiff6 as known_affected on SLE 15 SP6 and known_not_affected
-		// on Leap 15.6; before this check the mirror emitted an "affected at
-		// every version" Leap entry over it, a false positive on every Leap
-		// image with libtiff6 installed. Checked after native-wins so a key
-		// the document lists as both affected and not affected keeps its
-		// native affected entry and is counted there.
-		if leapNotAffected[productKey{eco: leap, pkg: a.Name}] {
+		// release is a verdict, not an absence -- but only against an
+		// "affected at every version" mirror. cve-2025-61144 (2026-10-21)
+		// lists libtiff6 as known_affected with no fix on SLE 15 SP6 and
+		// known_not_affected on Leap 15.6; before this check the mirror
+		// emitted the no-fix range over it, a false positive on every Leap
+		// image with libtiff6 installed. A FIXED source still mirrors: SUSE
+		// writes the bare id into known_not_affected for "Already fixed" and
+		// "Released" too (the shipped build goes to recommended), so a Leap
+		// not-affected beside an SLE fixed@V agrees with the mirror -- a
+		// build at or past V gets no finding either way, and the mirror is
+		// the only range that flags an older one. 4,363 of the 4,463
+		// overlaps in the archive are that fixed shape; the 100 no-fix ones
+		// are what this declines. Checked after native-wins so a key the
+		// document lists as both affected and not affected keeps its native
+		// affected entry and is counted there.
+		if unfixed[productKey{eco: a.Ecosystem, pkg: a.Name}] &&
+			leapNotAffected[productKey{eco: leap, pkg: a.Name}] {
 			st.SkippedLeapNotAffected++
 			continue
 		}
