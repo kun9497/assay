@@ -406,3 +406,185 @@ func TestFiles_HardlinkTargetIsRootRelative(t *testing.T) {
 		t.Errorf("Data = %q, want the root-relative target's contents", f.Data)
 	}
 }
+
+// A hardlink is a second name for the inode AS IT WAS when the link was made,
+// in the layer that made it. Replacing the target by name in a later layer --
+// a whiteout and a new file -- does not reach the hardlinked name, which still
+// holds the old bytes. Resolving the target top-down like a symlink's handed
+// the hardlink the newest file instead (external review #4: a package database
+// hardlinked from a scratch path that a later layer rewrote reported the
+// rewritten database, and with it versions the image does not ship).
+func TestFiles_HardlinkKeepsTheInodeItWasMadeFrom(t *testing.T) {
+	img := imageOf(
+		layerOfOrdered(t, "sha256:base",
+			entry{name: "tmp/pkgdb", body: "vulnerable-1.0"},
+			hard("lib/apk/db/installed", "tmp/pkgdb"),
+		),
+		layerOfOrdered(t, "sha256:top",
+			entry{name: "tmp/.wh.pkgdb", body: ""},
+			entry{name: "tmp/pkgdb", body: "fixed-pkg-2.0"},
+		),
+	)
+	got, err := img.Files(context.Background(), []string{"lib/apk/db/installed", "tmp/pkgdb"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := got["lib/apk/db/installed"]; string(f.Data) != "vulnerable-1.0" || f.DiffID != "sha256:base" {
+		t.Errorf("hardlinked name = %q from %s, want the base layer's inode (vulnerable-1.0): the top layer replaced the TARGET'S NAME, not the link's inode", f.Data, f.DiffID)
+	}
+	// The name itself, asked for directly, is the newest file -- the whiteout
+	// and replacement are exactly what the top layer did to it.
+	if f := got["tmp/pkgdb"]; string(f.Data) != "fixed-pkg-2.0" || f.DiffID != "sha256:top" {
+		t.Errorf("tmp/pkgdb = %q from %s, want the top layer's replacement", f.Data, f.DiffID)
+	}
+}
+
+// The contrast that keeps the rule narrow: a SYMLINK resolves by name at
+// runtime, so the same whiteout-and-replace in a later layer does reach it.
+func TestFiles_SymlinkFollowsTheNewestTarget(t *testing.T) {
+	img := imageOf(
+		layerOfOrdered(t, "sha256:base",
+			entry{name: "tmp/pkgdb", body: "vulnerable-1.0"},
+			sym("lib/apk/db/installed", "../../../tmp/pkgdb"),
+		),
+		layerOfOrdered(t, "sha256:top",
+			entry{name: "tmp/.wh.pkgdb", body: ""},
+			entry{name: "tmp/pkgdb", body: "fixed-pkg-2.0"},
+		),
+	)
+	got, err := img.Files(context.Background(), []string{"lib/apk/db/installed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := got["lib/apk/db/installed"]; string(f.Data) != "fixed-pkg-2.0" || f.DiffID != "sha256:top" {
+		t.Errorf("symlinked name = %q from %s, want the top layer's replacement: a symlink follows the name", f.Data, f.DiffID)
+	}
+}
+
+// The ordinary shape of a hardlink in a multi-layer image: link and target
+// emitted together in a NON-base layer (a `RUN apk add` in layer two). The
+// ceiling must be that layer's index, not the base's -- this is the one test
+// whose answer differs when `top = i` is mistyped as `top = 0`.
+func TestFiles_HardlinkInAnUpperLayerResolvesWithinIt(t *testing.T) {
+	img := imageOf(
+		layerOf(t, "sha256:base", map[string]string{"etc/hostname": "box"}),
+		layerOfOrdered(t, "sha256:top",
+			entry{name: "tmp/pkgdb", body: "db"},
+			hard("lib/apk/db/installed", "tmp/pkgdb"),
+		),
+	)
+	got, err := img.Files(context.Background(), []string{"lib/apk/db/installed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f, ok := got["lib/apk/db/installed"]; !ok || string(f.Data) != "db" || f.DiffID != "sha256:top" {
+		t.Errorf("got %q (present=%v) from %q, want db from sha256:top: the ceiling is the link's own layer", f.Data, ok, f.DiffID)
+	}
+}
+
+// An OPAQUE whiteout above the hardlink's layer (`RUN rm -rf /tmp && mkdir
+// /tmp`) is ignored for the hardlink exactly as a plain one is: the inode the
+// link holds was never under the directory the later layer emptied.
+func TestFiles_HardlinkIgnoresAnOpaqueWhiteoutAboveItsLayer(t *testing.T) {
+	img := imageOf(
+		layerOfOrdered(t, "sha256:base",
+			entry{name: "tmp/pkgdb", body: "vulnerable-1.0"},
+			hard("lib/apk/db/installed", "tmp/pkgdb"),
+		),
+		layerOfOrdered(t, "sha256:top",
+			entry{name: "tmp/.wh..wh..opq", body: ""},
+			entry{name: "tmp/pkgdb", body: "fixed-pkg-2.0"},
+		),
+	)
+	got, err := img.Files(context.Background(), []string{"lib/apk/db/installed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := got["lib/apk/db/installed"]; string(f.Data) != "vulnerable-1.0" || f.DiffID != "sha256:base" {
+		t.Errorf("hardlinked name = %q from %s, want the base inode: an opaque whiteout above the link's layer does not reach it", f.Data, f.DiffID)
+	}
+}
+
+// A link whose target does not exist shadows a lower layer's regular file of
+// the same name: the image has a dangling link at that path, not the file a
+// lower layer once had, and reporting the shadowed file would report a
+// package database the image does not ship.
+func TestFiles_DanglingLinkShadowsALowerRegularFile(t *testing.T) {
+	img := imageOf(
+		layerOf(t, "sha256:base", map[string]string{"lib/apk/db/installed": "old"}),
+		layerOfOrdered(t, "sha256:top", sym("lib/apk/db/installed", "../../../nowhere/installed")),
+	)
+	got, err := img.Files(context.Background(), []string{"lib/apk/db/installed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f, ok := got["lib/apk/db/installed"]; ok {
+		t.Errorf("got %q from %s, want absent: the dangling link in the top layer shadows the base's file", f.Data, f.DiffID)
+	}
+}
+
+// A hardlink to a RELATIVE symlink: the hardlinked name is a second name for
+// the symlink inode, and the kernel resolves the relative target against the
+// directory of the name that was opened -- the hardlink's, not the symlink
+// entry's. open("/etc/os-release") here reads /etc/../share/os-release, not
+// usr/lib/../share/os-release (D130's review; latent, no plausible image does
+// this for the paths assay wants, but the walk must agree with the kernel).
+func TestFiles_HardlinkToRelativeSymlinkResolvesFromTheHardlinksDirectory(t *testing.T) {
+	img := imageOf(layerOfOrdered(t, "sha256:one",
+		entry{name: "share/os-release", body: "RUNTIME-ANSWER"},
+		entry{name: "usr/share/os-release", body: "OTHER-DIR-ANSWER"},
+		sym("usr/lib/os-release.lnk", "../share/os-release"),
+		hard("etc/os-release", "usr/lib/os-release.lnk"),
+	))
+	got, err := img.Files(context.Background(), []string{"etc/os-release", "usr/lib/os-release.lnk"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := got["etc/os-release"]; string(f.Data) != "RUNTIME-ANSWER" {
+		t.Errorf("etc/os-release = %q, want RUNTIME-ANSWER (share/os-release): the relative symlink resolves from the hardlink's directory", f.Data)
+	}
+	// The symlink under its own name resolves from its own directory.
+	if f := got["usr/lib/os-release.lnk"]; string(f.Data) != "OTHER-DIR-ANSWER" {
+		t.Errorf("usr/lib/os-release.lnk = %q, want OTHER-DIR-ANSWER (usr/share/os-release)", f.Data)
+	}
+}
+
+// A hardlink's target may be in a lower layer than the link. The OCI spec
+// says a layer's hardlink to a file outside the layer "may fail" to extract
+// and that builders record such a file in full rather than as a link, so no
+// known builder produces this shape; resolving it when met is a harmless
+// superset -- lower is allowed, higher never.
+func TestFiles_HardlinkTargetMayBeInALowerLayer(t *testing.T) {
+	img := imageOf(
+		layerOf(t, "sha256:base", map[string]string{"usr/lib/os-release": "ID=alpine"}),
+		layerOfOrdered(t, "sha256:top", hard("etc/os-release", "usr/lib/os-release")),
+	)
+	got, err := img.Files(context.Background(), []string{"etc/os-release"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := got["etc/os-release"]; string(f.Data) != "ID=alpine" || f.DiffID != "sha256:base" {
+		t.Errorf("etc/os-release = %q from %s, want the lower layer's target", f.Data, f.DiffID)
+	}
+}
+
+// Two wanted names that resolve to one target both get their answer. The
+// first implementation keyed the pending target by path and kept only the
+// last requester, so the other came back absent -- "no such file" for a path
+// the image has.
+func TestFiles_TwoNamesResolvingToOneTargetBothResolve(t *testing.T) {
+	img := imageOf(layerOfOrdered(t, "sha256:one",
+		sym("etc/os-release", "../usr/lib/os-release"),
+		hard("etc/os-release.copy", "usr/lib/os-release"),
+		entry{name: "usr/lib/os-release", body: "ID=alpine"},
+	))
+	got, err := img.Files(context.Background(), []string{"etc/os-release", "etc/os-release.copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"etc/os-release", "etc/os-release.copy"} {
+		if f, ok := got[want]; !ok || string(f.Data) != "ID=alpine" {
+			t.Errorf("%s: got %q (present=%v), want ID=alpine", want, f.Data, ok)
+		}
+	}
+}

@@ -819,6 +819,11 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       모두; 아무것도 affected 아닌 것으로 정정된 문서는 이제 레코드를 남기지 않음 — 아카이브
       위의 last-write-wins는 낡은 것을 하루(SUSE)나 이틀(Red Hat) 남겼었음; 올라 있지만 404인
       문서는 아카이브 사본을 유지; progress 줄에 `ArchiveSuperseded`
+- [x] hardlink는 링크를 만든 레이어의 inode로 해석된다 (D130) — 대상을 그 레이어와 아래에서만
+      찾고 위는 절대 아니며, 나중 whiteout은 적용하지 않음; symlink는 가장 새 것 우선 유지.
+      나중 레이어가 다시 쓴 임시 경로에서 hardlink된 패키지 데이터베이스가 다시 쓴 것으로
+      돌아왔었음. query 단위 해석은 한 대상의 모든 요청자에게 답함 — 옛 pass는 마지막
+      요청자만 남겼음
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨

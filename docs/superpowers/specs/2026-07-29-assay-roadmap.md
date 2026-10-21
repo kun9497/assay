@@ -5498,6 +5498,53 @@ fetched documents, the counter dropped.
 
 ---
 
+### D130 — A hardlink resolves to the inode of the layer that made it, not to the newest file of that name
+
+**Decision.** When `Files` meets a hardlink in layer *i*, it resolves the link's target in
+layers ≤ *i* only — that layer and the ones beneath it, never a later one — and whiteouts
+written above layer *i* do not apply to that lookup. A symlink keeps the newest-first lookup it
+always had. Each pending path is a query carrying the caller's name and that layer ceiling; one
+tar entry may answer several queries.
+
+**Why.** A symlink is a name resolved at runtime, so the file a later layer put at that name is
+the file the image runs with — newest wins. A hardlink is a second name for an inode, fixed
+when the link was made: a later layer that whites out and rewrites the *target's* name has
+changed that name, and the hardlinked name still holds the old bytes. `Files` re-queued the
+target as a fresh path and resolved it newest-first, so a package database hardlinked from a
+scratch path that a later layer rewrote came back as the rewritten database, with versions the
+image does not ship (2026-10-20 external review, #4; the reviewer called it rare and did not
+size it — it is a valid layer construction, and the fix is narrow). A target in a *lower* layer
+than the link is resolved too: the OCI image-spec says a layer's hardlink to a file outside the
+layer "may fail" to extract and that a builder records such a file in full rather than as a
+link, so no known builder (docker, buildkit, buildah, kaniko, umoci — each keeps its inode map
+per tar) produces the shape; meeting it anyway is a harmless superset. Lower is allowed, higher
+never.
+
+**A hardlink to a relative symlink.** The hardlinked name is a second name for the symlink
+*inode*, and the kernel resolves the symlink's relative target against the directory of the
+name being opened — the hardlink's directory, not the symlink entry's. So a query carries the
+directory it was reached through: a symlink follow-up resolves its relative target from that
+directory and continues from the target's; a hardlink follow-up keeps it. For every chain
+without a hardlink the two coincide, so nothing else changes. Found by D130's review; latent
+for the paths assay wants, fixed so the walk agrees with the kernel.
+
+**What the restructuring also fixed.** The old pass keyed its pending targets by path and kept
+one requester per target, so two wanted names that resolved to the same file left one of them
+unanswered — "no such file" for a path the image has. Per-query resolution answers every
+requester from the one entry.
+
+**Verified.** The review's shape keeps the base inode while the scratch path itself, asked for
+directly, is the top layer's; the symlink contrast follows the newest; a hardlink in an upper
+layer resolves within it (the one test that observes the ceiling's *value*); an opaque whiteout
+above the link's layer is ignored like a plain one; a dangling link shadows a lower layer's
+file; a target in a lower layer resolves; two names to one target both resolve; a hardlink to a
+relative symlink resolves from the hardlink's directory; the root-relative hardlink test is
+unchanged. Mutations caught: a hardlink given a symlink's ceiling, the ceiling mistyped as the
+base layer, plain and opaque whiteouts above the ceiling applied, only the first requester
+answered, the ceiling check dropped, the link not marking its query done.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes
