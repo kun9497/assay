@@ -839,6 +839,12 @@ exited 0 while 24 findings went unmentioned.
       record (the sidecar's second rename could, and an interrupted pull left it so); the
       sidecar is read by nothing and removed; `SetArtifactAt` is one bounded read-modify-write;
       `db push` strips the record from the published layer and `db status` prints it
+- [x] A native Leap no-fix entry takes its SLE twin's fix (D128) — the D108 union sub-case,
+      narrowly: a bare `known_affected` on Leap beside a `recommended` fixed@V on the paired
+      SLE release carries SLE's fixed range as `CrossMappedFrom` instead of "affected at every
+      version" (Leap 16.1's glibc, whose repo ships the fixed build, was reported affected
+      with no fix); 659 cases on 15.6, 25 on 16.1, 10 on 16.0, none below 15.3; both-no-fix
+      and native-with-own-fix stay native
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15

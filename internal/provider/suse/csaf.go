@@ -917,7 +917,9 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 			// or a native entry with a fix of its own, stay native (D108): the
 			// first has nothing to offer, the second is Leap's own patch state.
 			// Only the fixed ranges cross: an SLE entry that is both fixed and
-			// unfixed (0 measured) would otherwise bring the no-fix range back.
+			// bare-affected -- all 10 of Leap 16.0's cases and 12 of 16.1's 25
+			// are that mixed shape -- would otherwise bring the no-fix range
+			// back under a CrossMappedFrom label.
 			nk, sk := productKey{eco: leap, pkg: a.Name}, productKey{eco: a.Ecosystem, pkg: a.Name}
 			if unfixed[nk] && len(fixed[nk]) == 0 && len(fixed[sk]) > 0 {
 				nat := &adv.Affected[ni]

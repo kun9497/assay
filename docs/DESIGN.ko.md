@@ -809,6 +809,12 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       두 번째 rename은 그럴 수 있었고, 중단된 pull은 그 상태를 남겼다); sidecar는 읽지
       않고 지운다; `SetArtifactAt`는 시간이 제한된 read-modify-write 한 번; `db push`는
       발행 레이어에서 기록을 벗겨내고 `db status`는 기록을 찍는다
+- [x] fix 없는 native Leap 항목은 SLE 쌍의 fix를 받는다 (D128) — D108 union 하위 사례를
+      좁게: 짝지은 SLE 릴리스에 `recommended` fixed@V가 있는 Leap의 bare `known_affected`는
+      "모든 버전에서 affected" 대신 SLE의 fixed range를 `CrossMappedFrom`으로 갖는다(저장소가
+      fixed 빌드를 출하하는 Leap 16.1의 glibc가 fix 없는 affected로 보고됐었음); 15.6에
+      659건, 16.1에 25건, 16.0에 10건, 15.3 아래는 없음; 양쪽 no-fix와 자체 fix를 가진
+      native는 그대로
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨

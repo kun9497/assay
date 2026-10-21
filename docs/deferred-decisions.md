@@ -337,7 +337,7 @@ was prepared, and the user decided 2026-08-27 to record only, not send.
 
 ---
 
-### The SLE → openSUSE Leap union (D108's deferred half)
+### ~~The SLE → openSUSE Leap union (D108's deferred half)~~ — resolved in D128 (2026-10-21), narrowly
 
 **Deferred 2026-09-15, with D108.** D108 mirrors a folded SLE codestream advisory onto the
 openSUSE Leap key it shares a codestream with, gap-fill: only where a document carries no
@@ -377,9 +377,19 @@ sized separately at the time — the transitional count above does not split it 
 `wget-1.25.0-160100.4.1`, `util-linux`, `coreutils`, `buildah` ×4, `sdbootutil` ×7, …), and the
 live `distribution/leap/16.1/repo/oss` listing ships those exact builds. A Leap 16.1 image at
 the shipped build is reported affected-no-fix on `glibc` while `glibc-devel` from the same
-document is mirrored clean. Still deferred (its own decision: per-range provenance, or a
-narrower rule for a native no-fix entry whose SLE twin is fixed at a build Leap ships); the
-15.x subset remains unsized. Building union means
+document is mirrored clean. **Resolved by D128 the same day, by the narrower rule:** a native
+Leap entry that is a bare `known_affected` takes its same-codestream SLE twin's fixed range,
+disclosed as `CrossMappedFrom`, in place of its no-fix range — no per-range provenance, no
+general union. The 15.x subset is now sized (15.3: 6, 15.5: 4, 15.6: 659, 16.0: 10; 15.0–15.2
+and 15.4: 0), and every SLE fix in it carries a shared-codestream release marker, older SPs'
+included. **What stays open — a hazard, not a deferral:** a Leap-own build (`lp15x`/`bp`
+release) at a *higher* upstream version than SLE's fix would compare as clean without the
+patch being present. Among the 171 packages checked against the live 15.5, 15.6 and 16.0
+repositories exactly one Leap-own build appeared, `perl-Text-CSV_XS-1.34-1.19` on 15.6, at the
+*same* upstream version — rpm orders it below the fix, the safe direction. If the bad
+direction is ever found, the fix is a lineage check at match time (an installed
+release with no codestream marker is "not evaluated" against a `CrossMappedFrom` range), not a
+build-time rule. Building union means
 per-range provenance (a fixed range from SLE and a no-fix range from Leap on one `Affected`,
 each carrying its own `CrossMappedFrom`) and a matcher that reconciles them; D108's gap-fill
 already satisfies what it was built for — no installed-package finding disappears. **Revisit

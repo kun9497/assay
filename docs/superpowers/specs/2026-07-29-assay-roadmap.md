@@ -5396,6 +5396,65 @@ move.
 
 ---
 
+### D128 — A native Leap entry with no fix takes its same-codestream SLE twin's fix
+
+**Decision.** D108's native-wins yields in exactly one shape. When a document's native
+openSUSE Leap entry for a package is a bare `known_affected` — affected, no fix, nothing else —
+and the SLE entry `leapMirrorKey` pairs with that Leap release is `recommended` fixed at V, the
+Leap key carries SLE's fixed ranges, disclosed as `CrossMappedFrom`, in place of the native
+"affected at every version" range. An image at or past V is clean; an older one is affected
+with the fix version named rather than no fix at all. Only the fixed ranges cross: an SLE twin
+that is both fixed and bare-affected (all 10 of Leap 16.0's cases, 12 of 16.1's 25) lends its
+fix, never its no-fix range. Everything else stays as D108 left it: both sides no-fix (the
+native has nothing to gain), a native entry with Leap's own fix (Leap's patch state is the
+truth for a Leap image), and D125's not-affected verdicts. Counted as
+`LeapNoFixReplacedBySLEFix` on the progress line, carved out of `SkippedLeapNativeWins`.
+
+**Why, and whose verdict this is.** This is the D108 deferral's "union sub-case", whose revisit
+trigger was met on 2026-10-21 (D108's amendment): `cve-2026-18374` lists `glibc` fixed at
+`2.40-160100.3.1` on SLES 16.1 and bare `known_affected` on Leap 16.1, Leap 16.1's repository
+ships exactly that build, and a Leap 16.1 image at it was reported affected with no fix while
+`glibc-devel` from the same document mirrored clean. The decision, taken with the user: the
+installed build's state is what the verdict is about, and Leap's advisory not yet carrying a
+fix version is a fact about the advisory, not the build. The information exists in the same
+document and assay already uses it for every package Leap does not name; declining it for the
+one it names as "affected, no fix" produced the only loud false positive on Leap. Neither
+grype (no Leap data at all) nor trivy (SUSE's patch CVRF only, so no "no fix" state exists to
+contradict) can produce this shape; assay can, and should say the right thing.
+
+**Measured (2026-10-19 archive, D126 naming, D91 fold).** Native-wins per Leap release, and the
+sub-case within it: 15.0 30,869/0, 15.1 17,501/0, 15.2 32,373/0, 15.3 50,828/6 (one kernel
+document), 15.4 56,297/0, 15.5 69,467/4, **15.6 112,360/659 (129 documents; MozillaFirefox's
+four packages 128, go1.26 20)**, 16.0 116,716/10, 16.1 2,323/25. The rest of native-wins is
+both-fixed (the native fix stays) or both-no-fix. Against the live Leap repositories
+(`download.opensuse.org`): 15.5's four all ship *below* the fix on the shared codestream, so the
+verdict is unchanged and the fix version is now named; 16.0's four (`php8`, `rpm`, `swtpm`,
+`qemu`) all ship *at or above* it — false positives today, clean under D128; of 15.6's top 60
+packages (515 of the 659 tuples) 58 ship below the fix and 2 (`erlang`, `erlang-epmd`) at or
+above, `podman` outside the top 60 likewise — 648 of the 659 fixes are SP6-LTSS builds and
+Leap 15.6 is past EOL, so there the change mostly names the LTSS fix on a verdict that stays
+"affected", which is D108's disclosure case. Across all 163 of 15.6's packages exactly one
+Leap-own build appeared, `perl-Text-CSV_XS-1.34-1.19`, and rpm orders it *below* the SLE fix
+(release `1.19` < `150000.3.3.1`): the hazard's bad direction occurred zero times.
+
+**Why no codestream-marker guard.** The narrower rule considered — cross the fix only when its
+release carries the Leap release's own marker (`150600` for 15.6) — would have excluded all
+659 of 15.6's cases: every one carries an *older* SP's marker (150200 ×354, 150000 ×182, 150400
+×55, …), because SUSE builds a package once on the SP it entered and ships that build to every
+later SP, Leap included. They are shared SLE builds all the same, and the rpm comparer orders
+them correctly. The residual hazard — a Leap-own build (`lp156.x`) at a *higher* upstream
+version than SLE's fix, which the comparer would call clean without the patch being present —
+was found in none of the packages checked and is recorded in deferred-decisions with the
+measurement rather than guarded against with a rule the data contradicts.
+
+**Why the native no-fix range is dropped, not kept beside the fix.** OSV's "affected at every
+version" range matches every installed build; kept beside [0, V) it would keep the false
+positive. The nuance it carried — Leap's own repos may not have shipped V — is what
+`CrossMappedFrom` already discloses on every renderer (D108's `~` footnote), so nothing the
+user could act on is lost.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

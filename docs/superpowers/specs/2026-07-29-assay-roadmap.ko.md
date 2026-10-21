@@ -5219,6 +5219,62 @@ status`는 `pulled:` 줄(`reference@digest at time`)을 찍고, 빌드된 데이
 
 ---
 
+### D128 — fix 없는 native Leap 항목은 같은 codestream의 SLE 쌍이 가진 fix를 받는다
+
+**결정.** D108의 native-wins는 정확히 한 모양에서 양보합니다. 문서의 native openSUSE Leap
+항목이 bare `known_affected` — affected, fix 없음, 그 외 아무것도 없음 — 이고, `leapMirrorKey`가
+그 Leap 릴리스와 짝지은 SLE 항목이 `recommended` fixed@V이면, Leap 키는 native의 "모든
+버전에서 affected" range 대신 SLE의 fixed range를 `CrossMappedFrom`으로 공개하며 갖습니다. V
+이상의 이미지는 깨끗하고, 더 오래된 이미지는 fix 없음 대신 fix 버전이 적힌 affected입니다.
+fixed range만 건너갑니다: fixed이면서 bare-affected이기도 한 SLE 쌍(Leap 16.0의 10건 전부,
+16.1의 25건 중 12건)은 fix만 빌려주고 no-fix range는 주지 않습니다. 나머지는 D108이 둔
+그대로입니다: 양쪽 다 no-fix(native가 얻을 것이 없음), Leap 자체 fix를 가진 native 항목(Leap의
+패치 상태가 Leap 이미지의 진실), D125의 not-affected 판정. progress 줄에
+`LeapNoFixReplacedBySLEFix`로 세며, `SkippedLeapNativeWins`에서 떼어낸 것입니다.
+
+**이유, 그리고 누구의 판정인가.** 이것이 D108 유보의 "union 하위 사례"이며, 그 재검토 계기는
+2026-10-21에 충족됐습니다(D108의 수정 문단): `cve-2026-18374`는 SLES 16.1에서 `glibc`를
+`2.40-160100.3.1`로 fixed, Leap 16.1에서 bare `known_affected`로 올리고, Leap 16.1 저장소는 바로
+그 빌드를 출하하며, 그 빌드의 Leap 16.1 이미지는 fix 없는 affected로 보고되는 동안 같은 문서의
+`glibc-devel`은 깨끗하게 미러링됐습니다. 사용자와 함께 내린 결정: 판정의 대상은 설치된 빌드의
+상태이고, Leap advisory에 fix 버전이 아직 없다는 것은 advisory에 대한 사실이지 빌드에 대한
+사실이 아닙니다. 정보는 같은 문서 안에 있고 assay는 Leap이 이름을 올리지 않은 모든 패키지에
+이미 그것을 씁니다; "affected, fix 없음"으로 이름을 올린 하나에만 거부한 것이 Leap에서 유일하게
+시끄러운 false positive를 만들었습니다. grype(Leap 데이터 없음)도 trivy(SUSE의 패치 CVRF만 읽어
+모순될 "fix 없음" 상태 자체가 없음)도 이 모양을 만들 수 없습니다; assay는 만들 수 있고, 맞는
+말을 해야 합니다.
+
+**측정 (2026-10-19 아카이브, D126 이름, D91 fold).** Leap 릴리스별 native-wins와 그 안의 하위
+사례: 15.0 30,869/0, 15.1 17,501/0, 15.2 32,373/0, 15.3 50,828/6(kernel 문서 하나), 15.4
+56,297/0, 15.5 69,467/4, **15.6 112,360/659(문서 129건; MozillaFirefox 4개 패키지 128,
+go1.26 20)**, 16.0 116,716/10, 16.1 2,323/25. native-wins의 나머지는 양쪽 fixed(native fix
+유지) 또는 양쪽 no-fix입니다. 실제 Leap 저장소(`download.opensuse.org`) 대조: 15.5의 4건은 모두
+공유 codestream에서 fix *미만*을 출하하므로 판정은 그대로이고 fix 버전이 이제 적힙니다; 16.0의
+4건(`php8`, `rpm`, `swtpm`, `qemu`)은 모두 fix *이상*을 출하 — 오늘은 false positive, D128에서는
+깨끗; 15.6의 상위 60개 패키지(659건 중 515건) 가운데 58개는 fix 미만, 2개(`erlang`,
+`erlang-epmd`)는 이상을 출하하고 상위 60 밖의 `podman`도 이상 — 659건의 fix 중 648건이
+SP6-LTSS 빌드이고 Leap 15.6은 EOL이 지났으므로, 거기서는 이 변경이 대체로 "affected"로 남는
+판정에 LTSS fix 버전을 적어 주는 것, 즉 D108의 공개 사례입니다. 15.6의 163개 패키지 전체에서
+Leap 자체 빌드는 정확히 하나, `perl-Text-CSV_XS-1.34-1.19`가 나왔고 rpm은 그것을 SLE fix *아래*로
+정렬합니다(release `1.19` < `150000.3.3.1`): 함정의 나쁜 방향은 0번 일어났습니다.
+
+**왜 codestream 마커 가드를 두지 않는가.** 검토한 더 좁은 규칙 — fix의 release가 그 Leap
+릴리스 자신의 마커(15.6이면 `150600`)를 가질 때만 건너가게 — 는 15.6의 659건 전부를 배제했을
+것입니다: 모두 *더 이전* SP의 마커(150200 ×354, 150000 ×182, 150400 ×55, …)를 갖는데, SUSE는
+패키지를 처음 들어온 SP에서 한 번 빌드해 그 빌드를 Leap을 포함한 이후의 모든 SP에 출하하기
+때문입니다. 그래도 공유 SLE 빌드이고 rpm comparer가 올바르게 순서를 매깁니다. 남는 함정 —
+SLE의 fix보다 *높은* upstream 버전의 Leap 자체 빌드(`lp156.x`)를 comparer가 패치 없이도
+깨끗하다고 할 수 있음 — 은 확인한 어떤 패키지에서도 나오지 않았고, 데이터가 반박하는 규칙으로
+막는 대신 측정값과 함께 deferred-decisions에 기록했습니다.
+
+**왜 native no-fix range를 fix 옆에 두지 않고 버리는가.** OSV의 "모든 버전에서 affected" range는
+설치된 모든 빌드와 맞으므로, [0, V) 옆에 두면 false positive가 그대로 남습니다. 그것이 담던
+뉘앙스 — Leap 자체 저장소가 V를 아직 출하하지 않았을 수 있음 — 는 `CrossMappedFrom`이 모든
+renderer에서 이미 공개하는 것(D108의 `~` 각주)이라, 사용자가 행동할 수 있는 정보는 잃지
+않습니다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

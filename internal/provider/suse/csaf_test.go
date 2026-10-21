@@ -1363,9 +1363,10 @@ func TestConvert_NativeLeapNoFix_StaysWhenSLEHasNoFixEither(t *testing.T) {
 // D128's two edges, each the shape a comment promises to handle. A native
 // Leap entry that is both bare-affected and fixed (Leap's own recommended
 // build beside a bare known_affected -- 4 measured) has a fix of its own and
-// stays native, ranges and all. An SLE twin that is both fixed and unfixed (0
-// measured) lends only its fixed range: crossing all of them would bring the
-// "affected at every version" range back under a CrossMappedFrom label.
+// stays native, ranges and all. An SLE twin that is both fixed and
+// bare-affected (all 10 of Leap 16.0's cases, 12 of 16.1's 25) lends only its
+// fixed range: crossing all of them would bring the "affected at every
+// version" range back under a CrossMappedFrom label.
 func TestConvert_NativeLeapNoFix_Edges(t *testing.T) {
 	t.Run("native with a fix of its own stays", func(t *testing.T) {
 		d := buildDoc(t, "CVE-2026-18375",
