@@ -12,10 +12,17 @@ import (
 )
 
 // verdictsOf drives one converted document through the REAL store and the
-// matcher, and returns the fixed version each installed package was judged
-// against ("" for no finding). This is the path a scan takes; a convert-level
-// assertion says what was stored, this says what a host running the package
-// would be told.
+// matcher, and returns what each installed package was told: "" for no
+// finding, the fixed version for a finding that names one, and
+// affectedNoFix for a finding that names none. The third value is what
+// keeps a "clean" row honest -- a package reported affected at every version
+// also carries no fixed version, and D131's review found the first draft
+// folding that into "" (every clean row then passed under a store that kept
+// the no-fix range beside the split one). This is the path a scan takes; a
+// convert-level assertion says what was stored, this says what a host
+// running the package would be told.
+const affectedNoFix = "<affected, no fix>"
+
 func verdictsOf(t *testing.T, adv advisory.Advisory, pkgs ...pkgmeta.Package) map[string]string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "v.db")
@@ -56,6 +63,9 @@ func verdictsOf(t *testing.T, adv advisory.Advisory, pkgs ...pkgmeta.Package) ma
 			out[key] = ""
 		case 1:
 			out[key] = res.Findings[0].Evidence.Fixed
+			if out[key] == "" {
+				out[key] = affectedNoFix
+			}
 		default:
 			t.Fatalf("Match(%s %s) = %d findings, want at most 1", p.Name, p.Version, len(res.Findings))
 		}

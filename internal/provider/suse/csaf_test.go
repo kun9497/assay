@@ -1762,9 +1762,48 @@ func TestConvert_NativeLeapNoFix_DoesNotTakeASplitBuildsFix(t *testing.T) {
 	if len(leap.Ranges) != 1 || len(leap.Ranges[0].Events) != 1 || leap.CrossMappedFrom != "" {
 		t.Fatalf("native Leap entry = %+v, want its own no-fix range, nothing cross-mapped", leap)
 	}
-	if st.LeapNoFixReplacedBySLEFix != 0 || st.SkippedLeapMirrorSplitBuild != 1 || st.SkippedLeapNativeWins != 1 {
-		t.Errorf("counters: LeapNoFixReplacedBySLEFix=%d SkippedLeapMirrorSplitBuild=%d SkippedLeapNativeWins=%d, want 0, 1, 1",
+	// Native-wins is the reason the entry was not mirrored; the split-build
+	// counter is the no-native path's alone, so the Leap counters still
+	// partition the mirrorable entries (the first draft counted this entry
+	// under both -- D131's review).
+	if st.LeapNoFixReplacedBySLEFix != 0 || st.SkippedLeapMirrorSplitBuild != 0 || st.SkippedLeapNativeWins != 1 {
+		t.Errorf("counters: LeapNoFixReplacedBySLEFix=%d SkippedLeapMirrorSplitBuild=%d SkippedLeapNativeWins=%d, want 0, 0, 1",
 			st.LeapNoFixReplacedBySLEFix, st.SkippedLeapMirrorSplitBuild, st.SkippedLeapNativeWins)
+	}
+}
+
+// D128 lending from a MIXED twin: the SLE qemu carries Basesystem's
+// codestream fix beside the module's split build, and Leap lists qemu as a
+// bare known_affected. The Leap entry takes the codestream range alone --
+// the one assignment that keeps a split build's range off a Leap key on
+// this path, held by no other test (D131's review: reverting it to the
+// pre-D131 line left the suite green).
+func TestConvert_NativeLeapNoFix_TakesOnlyTheCodestreamFixOfAMixedTwin(t *testing.T) {
+	const base = "SUSE Linux Enterprise Module for Basesystem 15 SP6"
+	const coco = "SUSE Linux Enterprise Module for Confidential Computing Technical Preview 15 SP6"
+	d := buildDoc(t, "CVE-2024-7730",
+		[]string{base, coco, "openSUSE Leap 15.6"},
+		map[string]string{
+			"qemu-8.2.7-150600.3.20.1":       "pkg:rpm/suse/qemu@8.2.7-150600.3.20.1",
+			"qemu-8.2.7-15061.6.coco15sp6.1": "pkg:rpm/suse/qemu-8.2.7-15061.6.coco15sp6.1@",
+			"qemu":                           "pkg:rpm/suse/qemu@",
+		},
+		[]string{base + ":qemu-8.2.7-150600.3.20.1", coco + ":qemu-8.2.7-15061.6.coco15sp6.1"},
+		[]string{"openSUSE Leap 15.6:qemu"}, nil)
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped the document")
+	}
+	leap := affectedByName(adv)["openSUSE Leap:15.6/qemu"]
+	if leap.CrossMappedFrom != "SLES:15.SP6" || len(leap.Ranges) != 1 ||
+		len(leap.Ranges[0].Events) != 2 || leap.Ranges[0].Events[1].Fixed != "8.2.7-150600.3.20.1" {
+		t.Fatalf("Leap qemu = %+v, want exactly the codestream range fixed at 8.2.7-150600.3.20.1, cross-mapped from SLES:15.SP6", leap)
+	}
+	if st.LeapNoFixReplacedBySLEFix != 1 || st.SkippedLeapMirrorSplitBuild != 0 {
+		t.Errorf("counters: LeapNoFixReplacedBySLEFix=%d SkippedLeapMirrorSplitBuild=%d, want 1, 0",
+			st.LeapNoFixReplacedBySLEFix, st.SkippedLeapMirrorSplitBuild)
 	}
 }
 

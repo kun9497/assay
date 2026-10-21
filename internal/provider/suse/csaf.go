@@ -713,16 +713,19 @@ type stats struct {
 	// D131 -- unfixed under the purl's name. 0 on the 2026-10-19 archive;
 	// the day it is not is the day the generator produced a third shape.
 	RecommendedEmptyVersionKept int
-	// SkippedLeapMirrorSplitBuild counts SLE entries D108/D128 did NOT hand
-	// to an openSUSE Leap key because every fixed range they carried came
-	// from a D131 split. Such a build's release numbering is its own
+	// SkippedLeapMirrorSplitBuild counts SLE entries with no native Leap
+	// twin that D108 did NOT mirror because every range they carried was a
+	// D131 split build's. Such a build's release numbering is its own
 	// module's (15061.N.coco15sp6.1 for the Confidential Computing
 	// Technical Preview), not the codestream's 150600.N that Leap shares,
 	// so a Leap build compared against it would read as fixed by a number
 	// from a different lineage. 16,568 on the 2026-10-19 archive, the
 	// kernel-coco family, which no Leap release ships. An SLE entry that
 	// also carries a codestream fix mirrors those ranges alone (the 168
-	// qemu/ovmf builds, whose Leap twins are native anyway).
+	// qemu/ovmf builds, whose Leap twins are native anyway). An entry WITH
+	// a native twin is counted native-wins, not here, even when D128
+	// declines to lend for the same reason: native-wins is why it was not
+	// mirrored, and the Leap counters partition the mirrorable entries.
 	SkippedLeapMirrorSplitBuild int
 
 	// ArchiveSuperseded counts archive documents skipped because the delta
@@ -873,7 +876,11 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 			// D131: a version the leaf did not carry came from splitting the
 			// product_id -- a build from a module with its own release
 			// numbering. Remembered per key so the Leap passes below can tell
-			// its range from a codestream fix.
+			// its range from a codestream fix. `version != "" &&` is intent,
+			// not behaviour: a kept empty-version id would record "" here and
+			// withoutSplitBuilds ignores "" through its own `e.Fixed != ""`,
+			// so dropping either clause alone is an equivalent mutation
+			// (verified 2026-10-21); only dropping both is a defect.
 			if version != "" && packages[comp].version == "" {
 				if splitBuild[k] == nil {
 					splitBuild[k] = map[string]bool{}
@@ -1071,11 +1078,12 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 			// D131: only codestream fixes cross; a split build's range is
 			// dropped here before the fixed-range test, so an SLE twin whose
 			// ONLY fix is such a build offers nothing and native wins as if
-			// it carried no fix at all (counted below with the mirror's).
+			// it carried no fix at all -- counted as native-wins below, which
+			// IS why the entry was not mirrored, so the Leap counters stay a
+			// partition of the mirrorable entries (SkippedLeapMirrorSplitBuild
+			// is the no-native path's alone; D131's review found the first
+			// draft counting such an entry under both).
 			crossable := fixedRangesOf(withoutSplitBuilds(a.Ranges, splitBuild[sk]))
-			if unfixed[nk] && len(fixed[nk]) == 0 && len(fixed[sk]) > 0 && len(crossable) == 0 {
-				st.SkippedLeapMirrorSplitBuild++
-			}
 			if unfixed[nk] && len(fixed[nk]) == 0 && len(crossable) > 0 {
 				nat := &adv.Affected[ni]
 				nat.Ranges = crossable
