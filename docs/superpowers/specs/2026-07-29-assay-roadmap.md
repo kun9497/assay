@@ -5380,6 +5380,20 @@ instead of the temp one, the write skipped, the legacy removal dropped, provenan
 how the timeout was found — a mutation of the digest check blocked the store tests for 600 s
 on a handle the test still held.
 
+**Review additions, the same day.** `db push` strips the record from the published layer
+(`StripEnrichment` clears `Meta.Artifact` on the staged copy): a mirror operator's `db update`
+then `db push` would otherwise publish a layer naming the *upstream* artifact, which a
+pre-D127 `db update` installs without touching `Meta`, and a D127 scan would then name the
+wrong artifact. `db status` prints a `pulled:` line (`reference@digest at time`), absent for a
+built database. `SetArtifactAt` stats the path first, since a read-write bolt open creates a
+missing file. And three guards the review showed held by nothing now have tests: an artifact
+annotated with this binary's schema whose database inside is another is refused by Pull's
+`store.Open(tmp)` (the lying database is made by rewriting the metadata record directly —
+the one thing `pushable` cannot do); a record that cannot be written fails the pull with the
+live database intact and no temp file (through a `setArtifactFn` seam, since nothing else can
+make the write fail); the install-failure message names the temp file it tells the user to
+move.
+
 ---
 
 ## 3. Architecture

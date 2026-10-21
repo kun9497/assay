@@ -5204,6 +5204,19 @@ provenance가 `Meta.Artifact` 무시, digest 검사 제거; lock timeout 제거�
 하며, 그것이 timeout을 찾은 경위입니다 — digest 검사 변이가 테스트가 아직 쥐고 있던 핸들
 위에서 store 테스트를 600초 동안 막았습니다.
 
+**같은 날 검토로 더해진 것.** `db push`는 발행 레이어에서 기록을 벗겨냅니다(`StripEnrichment`가
+staged 복사본의 `Meta.Artifact`를 지움): 미러 운영자의 `db update` 뒤 `db push`는 그렇지
+않으면 *상류* 아티팩트를 가리키는 레이어를 발행하고, D127 이전의 `db update`는 `Meta`를
+건드리지 않고 그 레이어를 설치하므로 D127 스캔이 엉뚱한 아티팩트를 말하게 됩니다. `db
+status`는 `pulled:` 줄(`reference@digest at time`)을 찍고, 빌드된 데이터베이스에는 없습니다.
+`SetArtifactAt`는 먼저 경로를 stat합니다 — read-write bolt open은 없는 파일을 만들기
+때문입니다. 그리고 검토가 아무것도 지키지 않는다고 보여준 가드 셋에 테스트가 생겼습니다: 이
+바이너리의 스키마로 주석됐지만 안의 데이터베이스는 다른 스키마인 아티팩트는 Pull의
+`store.Open(tmp)`가 거부함(거짓말하는 데이터베이스는 메타데이터 레코드를 직접 고쳐 만듦 —
+`pushable`이 유일하게 못 하는 일); 쓸 수 없는 기록은 실제 데이터베이스를 그대로 두고 임시
+파일 없이 pull을 실패시킴(`setArtifactFn` seam을 통해 — 그 외에는 쓰기를 실패시킬 방법이
+없음); 설치 실패 메시지는 사용자에게 옮기라고 하는 임시 파일의 이름을 댐.
+
 ---
 
 ## 3. 아키텍처

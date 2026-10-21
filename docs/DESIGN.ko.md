@@ -807,7 +807,8 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       digest, pull 시각을 검증된 임시 데이터베이스의 `Meta`에 단 한 번의 설치 rename 전에
       쓰므로, 스캔이 한 pull의 데이터베이스를 다른 pull의 기록과 짝지을 수 없다(sidecar의
       두 번째 rename은 그럴 수 있었고, 중단된 pull은 그 상태를 남겼다); sidecar는 읽지
-      않고 지운다; `SetArtifactAt`는 시간이 제한된 read-modify-write 한 번
+      않고 지운다; `SetArtifactAt`는 시간이 제한된 read-modify-write 한 번; `db push`는
+      발행 레이어에서 기록을 벗겨내고 `db status`는 기록을 찍는다
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨

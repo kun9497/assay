@@ -837,7 +837,8 @@ exited 0 while 24 findings went unmentioned.
       reference, digest and pull time into the verified temp database's `Meta` before the
       one install rename, so a scan can never pair one pull's database with another's
       record (the sidecar's second rename could, and an interrupted pull left it so); the
-      sidecar is read by nothing and removed; `SetArtifactAt` is one bounded read-modify-write
+      sidecar is read by nothing and removed; `SetArtifactAt` is one bounded read-modify-write;
+      `db push` strips the record from the published layer and `db status` prints it
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15
