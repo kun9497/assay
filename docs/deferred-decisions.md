@@ -1975,8 +1975,8 @@ Not deferred decisions — traps to handle when the relevant code is written.
 **~~SUSE's bare product purl mis-splits a name that ends in a version-like segment.~~ —
 resolved in D126 (2026-10-21, the same day it was found).** SUSE's generator emits the bare
 product `libwmf-0_2-7` as `pkg:rpm/suse/libwmf@0_2-7`, so `packageOf` keyed its
-`known_affected`/`known_not_affected` entries under `libwmf`: 11,753 status ids, 39,215
-entries, 31,494 of them the package's only entry — a silent false negative on
+`known_affected`/`known_not_affected` entries under `libwmf`: 11,753 document-and-package
+pairs, 39,215 entries, 31,494 of them the package's only entry — a silent false negative on
 `libwebkit2gtk-4_0-37`, `libglib-2_0-0` and 402 more. D126 names a bare id (status and no-fix
 remediation buckets) by its product_id and keeps the purl split for `recommended` builds; the
 bucket was measured exception-free in both directions, where every syntactic rule failed.
@@ -1986,8 +1986,9 @@ survey. 89,598 of 4,396,450 recommended ids carry `pkg:rpm/suse/<name-ver-rel>@`
 NEVR in the purl *name* and an empty version (`kernel-default-2.6.32.54-0.155.TDC.1@`,
 `httpd-2.4.37-51.module+el8…@`): Liberty Linux 7/8/9 (≈46,000), Confidential Computing TP 15
 SP6 (16,736), SLES 11/12 Teradata (≈29,000), HPC 12 SP3 (16,597), SUSE Linux Micro 6.1 (27).
-The fold refuses nearly all of these platforms; where one folds, the entry is stored unfixed
-under a NEVR-shaped name and reaches nothing — a miss with no finding, not a wrong finding.
+The fold refuses all but Confidential Computing, whose 16,736 ids (2,077 documents) fold to
+`SLES:15.SP6` and are stored unfixed under a NEVR-shaped name, reaching nothing — a miss with
+no finding, not a wrong finding.
 Needs its own measurement on folding keys only (the survey counted platforms, not keys), and a
 rule: a `recommended` id whose purl version is empty and whose product_id has NAME-VER-REL
 shape is a build whose name must come from somewhere else (the sibling bare leaf, or the

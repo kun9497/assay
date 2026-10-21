@@ -5096,7 +5096,9 @@ D108에 대해 기록한 allowlist 재검토 계기이며, 추가되기 전까�
 id는 출하된 빌드를 가리키며, 전처럼 purl이 이름과 fix 버전을 줍니다. leaf는 여전히 읽을 수 있는
 purl과 함께 존재해야 합니다 — leaf를 가리키지 않는 id나 purl 없는 leaf(`java-1_7_0-openjdk`
 공백)는 원시 문자열에서 추측한 이름이 아니라 집계되는 skip으로 남습니다. `BareNamedByProductID`는
-purl이 다른 이름을 줬을 bare id를 모두 세어 progress 줄에 찍습니다.
+purl이 다른 이름을 줬을 bare id를 모두 세어 progress 줄에 찍습니다 — id 단위이고 D91의 LTSS
+가림 이전입니다: 2026-10-19 아카이브에서 70,463(상태 id 69,697, remediation id 766)이며, 이는
+아래 조사가 세는 단위로는 문서·패키지 쌍 11,753개입니다.
 
 **이유와 측정.** D125 검토가 발견했습니다: SUSE 생성기는 bare product의 purl을 `product_id`*에서*
 첫 하이픈-숫자 경계로 잘라 만듭니다. `libwmf-0_2-7`은 `pkg:rpm/suse/libwmf@0_2-7`, `libglib-2_0-0`은
@@ -5104,23 +5106,25 @@ purl이 다른 이름을 줬을 bare id를 모두 세어 progress 줄에 찍습�
 갖는 반면, 각각의 빌드 leaf(`libwmf-0_2-7-0.2.12-150000.4.4.1`)는 올바른 이름을 갖습니다.
 `packageOf`는 모든 leaf에서 purl을 믿었으므로 bare 항목이 `libwmf`, `libglib`, `typelib-1_0` —
 설치된 어떤 rpm도 갖지 않는 이름 — 아래에 들어갔습니다. 2026-10-19 아카이브(문서 71,711건, leaf
-5,160,430개)를 독립적인 두 조사로 재고 조정한 결과: leaf로 해석되는 상태 id 726,722개(중복 제거)
-중 714,969개는 purl 버전이 비어 있고 purl 이름이 `product_id`와 같으며, **11,753개가 잘못 쪼개졌습니다**
-(product 404개, 잘못된 이름 190개, 문서 2,862건); 그 모두가 `purl_name-purl_version == product_id`를
+5,160,430개)를 독립적인 두 조사로 재고 조정한 결과: leaf로 해석되는 (문서, 패키지) 상태 id
+726,722개 중 714,969개는 purl 버전이 비어 있고 purl 이름이 `product_id`와 같으며, **11,753개가
+잘못 쪼개졌습니다**(product 404개, 잘못된 이름 190개, 문서 2,862건; 이 문단의 수치는 모두 그
+단위); 그 모두가 `purl_name-purl_version == product_id`를
 재구성하므로, D77의 측정("100%가 자기 product_id를 정확히 재구성")은 참이면서 동시에 오해를
 낳았습니다. 피해: **2,794개 문서의 39,215개 항목이 잘못된 이름으로 키가 잡혔고, 그중 31,494개(80%)는
 그 키에서 그 패키지의 유일한 항목** — `libwebkit2gtk-4_0-37`과 `libjavascriptcoregtk-4_0-18`(각
 3,318), `typelib-1_0-*` 계열, `libMagickCore-6_Q16-1`(1,785), `libsoup-2_4-1`,
 `libglib-2_0-0`/`libgio-2_0-0`/`libgmodule-2_0-0`(각 228)에 대한 D8 부류의 조용한 false negative.
-잘못된 이름 중 28개(`libsoup`, `libwmf`, `libyaml`, `librsvg`, `Mesa`, `pipewire`…)는 다른 곳에서
-실제 bare 패키지라서, 그 항목 311개는 다른 실제 패키지에 상태를 붙였습니다.
+잘못된 이름 190개 중 28개(`libsoup`, `libwmf`, `libyaml`, `librsvg`, `Mesa`, `pipewire`…)는 다른
+곳에서 실제 bare 패키지라서, 그 상태 id 311개 — fold되는 키의 항목 1,284개, `libsoup` 하나가
+676 — 는 다른 실제 패키지에 상태를 붙였습니다.
 
 **왜 더 영리한 분할이 아니라 bucket인가.** bucket은 양방향으로 예외 없이 측정된 유일한 신호입니다:
 상태 id 726,722개 중 빌드를 가리키는 것 0(형제 증명 없이 두 빌드 모양 regex를 통과하는 것 없음;
 recommended component 376,832종 중 어디서도 상태 component로 나타나는 것 없음), recommended id
 4,396,450개 중 bare product를 가리키는 것 0. no-fix remediation id도 같습니다 — 같은 이름을 쓰지
-않으면 won't-fix 이유가 붙지 않습니다(541,090개 중 230,566개가 상태 id와 글자까지 같음; 빌드를
-가리키는 것 0). 버전 문자열에 대한 문법 규칙은 모두 어딘가에서 실패합니다: 하이픈 하나 규칙은
+않으면 won't-fix 이유가 붙지 않습니다(541,090개 중 230,566개가 같은 취약점의 상태 bucket이 가리키는
+component를 가리키고, 그중 5,400개는 같은 플랫폼의 같은 id; 빌드를 가리키는 것 0). 버전 문자열에 대한 문법 규칙은 모두 어딘가에서 실패합니다: 하이픈 하나 규칙은
 아무것도 가르지 못하고; 점 또는 날짜 스탬프 release 규칙은 실제 빌드 버전 66,615개 전부와 잘못
 쪼개진 것 정확히 하나(`typelib-1_0-Vte-2.91`, 진짜 이름이 점 붙은 release로 끝남)에 맞으며; 숫자로
 시작하는 규칙은 잘못 쪼개진 것에는 맞지 않지만 실제 빌드 577개(`cdparanoia-IIIalpha9.8-691.22`,
@@ -5131,9 +5135,10 @@ texlive의 `svn15878.0-45.el7`)를 거부합니다. 같은 문서의 형제 증�
 빌드 leaf의 purl 이름은 절대 `product_id`와 같지 않으므로 progress 줄에 드러납니다.
 
 **여기서 고치지 않고 기록한 것.** `recommended` id 89,598개는 purl *이름*에 NEVR 전체를 넣고 버전을
-비워 둡니다(`pkg:rpm/suse/kernel-default-2.6.32.54-0.155.TDC.1@`) — Liberty Linux, Teradata, HPC 12
-SP3, Confidential Computing 플랫폼으로 거의 모두 fold가 거부합니다; fold되는 키의 것은 NEVR 모양
-이름으로 unfixed 저장되어 아무것도 닿지 않습니다. 별도 측정이 필요한 알려진 함정으로
+비워 둡니다(`pkg:rpm/suse/kernel-default-2.6.32.54-0.155.TDC.1@`). fold는 Liberty Linux(≈46,000),
+Teradata(≈29,000), HPC 12 SP3(16,597), Micro 6.1(27)을 거부합니다; Confidential Computing
+Technical Preview 15 SP6 모듈(2,077개 문서의 16,736개 id)은 `SLES:15.SP6`로 fold되어, 그 항목은
+NEVR 모양 이름으로 unfixed 저장되어 아무것도 닿지 않습니다. 별도 측정이 필요한 알려진 함정으로
 deferred-decisions에 올렸습니다.
 
 ---

@@ -826,8 +826,9 @@ exited 0 while 24 findings went unmentioned.
       (D1); per package and release, after native-wins, counted on the progress line
 - [x] A bare SUSE status id is named by its product_id (D126) — SUSE cuts a bare product's
       purl from the product_id at the wrong hyphen (`libwmf-0_2-7` → `libwmf@0_2-7`,
-      `libglib-2_0-0` → `libglib@2_0-0`), so 11,753 `known_affected`/`known_not_affected`
-      ids (39,215 entries, 31,494 the package's only entry) were keyed under names no rpm
+      `libglib-2_0-0` → `libglib@2_0-0`), so 11,753 document-and-package
+      `known_affected`/`known_not_affected` pairs (39,215 entries, 31,494 the package's
+      only entry) were keyed under names no rpm
       has: a silent false negative. The bucket decides — status and no-fix remediation ids
       take the product_id, `recommended` builds keep the purl split — measured
       exception-free both ways; `BareNamedByProductID` on the progress line

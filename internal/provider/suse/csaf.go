@@ -437,18 +437,23 @@ const (
 // The purl of a bare product is not trusted for the name because SUSE's
 // generator cuts it FROM the product_id at the first hyphen-digit boundary:
 // "libwmf-0_2-7" carries pkg:rpm/suse/libwmf@0_2-7, "libglib-2_0-0" carries
-// pkg:rpm/suse/libglib@2_0-0, so 11,753 of the 726,722 status ids in the
-// 2026-10-19 archive (404 products) were keyed under a name no installed rpm
-// has -- 39,215 entries in 2,794 documents, 31,494 of them the package's
-// only entry. The bucket is the only exception-free signal measured: 0 of
-// those status ids names a build and 0 of 4,396,450 recommended ids names a
-// bare product, whereas every syntactic rule on the version string either
-// keeps one mis-split (typelib-1_0-Vte-2.91) or loses 577 real builds
+// pkg:rpm/suse/libglib@2_0-0, so 11,753 of the 726,722 distinct
+// document-and-package status ids in the 2026-10-19 archive (404 products)
+// were keyed under a name no installed rpm has -- 39,215 entries in 2,794
+// documents, 31,494 of them the package's only entry. The bucket is the
+// only exception-free signal measured: 0 of those status ids names a build
+// and 0 of 4,396,450 recommended ids names a bare product, whereas every
+// syntactic rule on the version string either keeps one mis-split
+// (typelib-1_0-Vte-2.91) or loses 577 real builds
 // (cdparanoia-IIIalpha9.8-691.22). The leaf must still exist with a readable
 // purl: an id naming no leaf, or a leaf with no purl (the java-1_7_0-openjdk
 // gap), stays a counted skip rather than a name guessed from the raw id.
 // st counts the renames only; skips are the caller's to count, for the
-// reason the remediation loop gives.
+// reason the remediation loop gives. The bare branch's "" version is by
+// construction: no bare caller reads it (store ignores the version when
+// isFixed is false, the other two discard it), so returning pkg.version
+// instead is an equivalent mutation (verified 2026-10-21) -- the literal
+// states what a bare id carries, it does not decide anything.
 func resolveProduct(id string, bare bool, folded map[string]string, declared map[string]bool,
 	packages map[string]packageInfo, st *stats) (productKey, string, skipReason) {
 
@@ -596,9 +601,12 @@ type stats struct {
 	// known_affected / known_not_affected / no-fix remediation id whose
 	// leaf purl split the product_id into a different name
 	// ("libwmf-0_2-7" -> pkg:rpm/suse/libwmf@0_2-7), named by the
-	// product_id instead. 11,753 status ids across the 2026-10-19 archive;
-	// a jump or a collapse is the trace that SUSE's generator changed. Per
-	// entry, like the Skipped* group.
+	// product_id instead. Per id, like the Skipped* group, before D91's
+	// LTSS shadowing: 70,463 across the 2026-10-19 archive (69,697 status
+	// ids, 766 remediation ids), which are 11,753 distinct document-and-
+	// package pairs -- the survey's unit, not this counter's. A jump or a
+	// collapse against that baseline is the trace that SUSE's generator
+	// changed.
 	BareNamedByProductID int
 
 	// The delta pass (delta.go), identical in meaning to redhat.stats'.
@@ -785,11 +793,12 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 				// already dropped -- explaining a discard is not itself a
 				// second one.
 				plat, _, _ := strings.Cut(id, ":")
-				// bare: a no-fix remediation names the bare product, the
-				// same id the known_affected loop resolved (230,566 of
-				// 541,090 measured are that id verbatim; 0 name a build),
-				// so it must take the same name or the reason never
-				// attaches (D126).
+				// bare: a no-fix remediation names the bare product -- the
+				// component the known_affected loop resolved (230,566 of
+				// 541,090 measured name a component the same vulnerability's
+				// status buckets name, 5,400 of them the identical id on the
+				// same platform; 0 name a build), so it must take the same
+				// name or the reason never attaches (D126).
 				k, _, why := resolveProduct(id, true, folded, declared, packages, st)
 				if why != skipNone {
 					continue

@@ -1934,8 +1934,8 @@ Go가 먼저입니다. 표준 라이브러리 `debug/buildinfo`가 모듈 목록
 **~~SUSE의 bare product purl은 버전 비슷한 조각으로 끝나는 이름을 잘못 쪼갭니다.~~ — D126으로
 해결(2026-10-21, 발견한 그날).** SUSE의 생성기는 bare product `libwmf-0_2-7`을
 `pkg:rpm/suse/libwmf@0_2-7`로 내고, 그래서 `packageOf`가 그 `known_affected`/`known_not_affected`
-항목을 `libwmf` 아래에 넣었습니다: 상태 id 11,753개, 항목 39,215개, 그중 31,494개는 그 패키지의
-유일한 항목 — `libwebkit2gtk-4_0-37`, `libglib-2_0-0` 등 404개에 대한 조용한 false negative.
+항목을 `libwmf` 아래에 넣었습니다: 문서·패키지 쌍 11,753개, 항목 39,215개, 그중 31,494개는 그
+패키지의 유일한 항목 — `libwebkit2gtk-4_0-37`, `libglib-2_0-0` 등 404개에 대한 조용한 false negative.
 D126은 bare id(상태·no-fix remediation bucket)의 이름을 product_id로 정하고 `recommended`
 빌드는 purl 분할을 유지합니다; 문법 규칙은 모두 실패한 반면 bucket은 양방향으로 예외 없이
 측정됐습니다.
@@ -1944,9 +1944,10 @@ D126은 bare id(상태·no-fix remediation bucket)의 이름을 product_id로 �
 4,396,450개 중 89,598개가 `pkg:rpm/suse/<name-ver-rel>@` — 빌드의 NEVR이 purl *이름*에 있고
 버전은 비어 있음(`kernel-default-2.6.32.54-0.155.TDC.1@`, `httpd-2.4.37-51.module+el8…@`):
 Liberty Linux 7/8/9(≈46,000), Confidential Computing TP 15 SP6(16,736), SLES 11/12
-Teradata(≈29,000), HPC 12 SP3(16,597), SUSE Linux Micro 6.1(27). fold는 이 플랫폼을 거의
-모두 거부합니다; fold되는 경우 항목이 NEVR 모양 이름으로 unfixed 저장되어 아무것도 닿지
-않습니다 — 틀린 finding이 아니라 finding 없는 누락. fold되는 키에 한정한 별도 측정(조사는 키가
+Teradata(≈29,000), HPC 12 SP3(16,597), SUSE Linux Micro 6.1(27). fold는 Confidential
+Computing을 빼고 모두 거부합니다; 그 16,736개 id(문서 2,077건)는 `SLES:15.SP6`로 fold되어
+NEVR 모양 이름으로 unfixed 저장되고 아무것도 닿지 않습니다 — 틀린 finding이 아니라 finding
+없는 누락. fold되는 키에 한정한 별도 측정(조사는 키가
 아니라 플랫폼을 셌음)과 규칙이 필요합니다: purl 버전이 비어 있고 product_id가 NAME-VER-REL
 모양인 `recommended` id는 빌드이며 이름을 다른 곳(형제 bare leaf나 `upstream` qualifier)에서
 가져와야 합니다. bare bucket만 읽는 D126은 건드리지 않았습니다.
