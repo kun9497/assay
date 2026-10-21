@@ -896,6 +896,106 @@ func TestConvert_DoesNotMirror_WhenNativeLeapPresent(t *testing.T) {
 	}
 }
 
+// D125: a native openSUSE Leap known_not_affected entry is SUSE's own verdict
+// on the package, and the D108 mirror must not overwrite it with an
+// SLE-derived one. The shape is cve-2025-61144's as served 2026-10-21: SLE 15
+// SP6 lists libtiff6 and libtiff5 as known_affected with no fix, openSUSE Leap
+// 15.6 lists libtiff6 as known_not_affected and says nothing about libtiff5.
+// Before D125 the mirror emitted an "affected at every version" Leap entry for
+// libtiff6 over SUSE's explicit "not affected" -- a false positive on every
+// Leap 15.6 image with libtiff6 installed (2026-10-20 external review, #6).
+// The verdict is per package: libtiff5, which Leap does not mention, is still
+// mirrored, so the gap-fill D108 exists for is not lost.
+func TestConvert_DoesNotMirror_WhenNativeLeapNotAffected(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		notAffected string
+	}{
+		{"bare package id", "openSUSE Leap 15.6:libtiff6"},
+		// A versioned id is the shipped build. Declining the mirror is the
+		// only effect either way: no "not affected" range is ever stored,
+		// so a versioned verdict is not widened to every version (the
+		// reviewer's caution), it just stops a derived claim about the
+		// same package.
+		{"versioned package id", "openSUSE Leap 15.6:libtiff6-4.5.0-150600.3.6.1"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			d := buildDoc(t, "CVE-2025-61144",
+				[]string{"SUSE Linux Enterprise Server 15 SP6", "openSUSE Leap 15.6"},
+				map[string]string{
+					"libtiff6":                    "pkg:rpm/suse/libtiff6@?upstream=tiff.src.rpm",
+					"libtiff5":                    "pkg:rpm/suse/libtiff5@?upstream=tiff.src.rpm",
+					"libtiff6-4.5.0-150600.3.6.1": "pkg:rpm/suse/libtiff6@4.5.0-150600.3.6.1?upstream=tiff-4.5.0-150600.3.6.1.src.rpm",
+				},
+				nil,
+				[]string{"SUSE Linux Enterprise Server 15 SP6:libtiff6", "SUSE Linux Enterprise Server 15 SP6:libtiff5"},
+				nil)
+			d.Vulnerabilities[0].ProductStatus.KnownNotAffected = append(
+				d.Vulnerabilities[0].ProductStatus.KnownNotAffected, tt.notAffected)
+
+			var st stats
+			adv, ok := convert(d, &st)
+			if !ok {
+				t.Fatal("convert dropped the document")
+			}
+			by := affectedByName(adv)
+			if _, found := by["SLES:15.SP6/libtiff6"]; !found {
+				t.Fatal("the native SLES:15.SP6 libtiff6 entry is gone; D125 touches only the mirror")
+			}
+			if m, found := by["openSUSE Leap:15.6/libtiff6"]; found {
+				t.Errorf("mirrored libtiff6 onto openSUSE Leap:15.6 over SUSE's known_not_affected: %+v", m)
+			}
+			if m, found := by["openSUSE Leap:15.6/libtiff5"]; !found || m.CrossMappedFrom != "SLES:15.SP6" {
+				t.Errorf("libtiff5, which Leap does not mention, must still be mirrored (D108): found=%v %+v", found, m)
+			}
+			if st.MirroredToLeap != 1 || st.SkippedLeapNotAffected != 1 || st.SkippedLeapNativeWins != 0 {
+				t.Errorf("counters: MirroredToLeap=%d SkippedLeapNotAffected=%d SkippedLeapNativeWins=%d, want 1, 1, 0",
+					st.MirroredToLeap, st.SkippedLeapNotAffected, st.SkippedLeapNativeWins)
+			}
+		})
+	}
+}
+
+// The D125 counter reaches the progress line: a build that declines mirrors
+// on SUSE's verdicts must say so, or a Leap floor drop in the weekly
+// differential has no in-band explanation.
+func TestStatsString_ReportsLeapNotAffected(t *testing.T) {
+	got := stats{SkippedLeapNotAffected: 3}.String()
+	want := "3 not mirrored because a native Leap known_not_affected entry already judges the package (D125)"
+	if !strings.Contains(got, want) {
+		t.Errorf("stats.String() = %q, want it to contain %q", got, want)
+	}
+}
+
+// D125 does not widen: a known_not_affected entry for an SLE platform is
+// still read by nothing (buildDoc always carries one), and one for a Leap
+// release the document ALSO lists as known_affected changes nothing -- the
+// native affected entry already wins (D108) and is kept as is.
+func TestConvert_LeapNotAffected_DoesNotHideNativeAffected(t *testing.T) {
+	d := buildDoc(t, "CVE-2026-9998",
+		[]string{"SUSE Linux Enterprise Server 15 SP6", "openSUSE Leap 15.6"},
+		map[string]string{"curl": "pkg:rpm/suse/curl@?upstream=curl.src.rpm"},
+		nil,
+		[]string{"SUSE Linux Enterprise Server 15 SP6:curl", "openSUSE Leap 15.6:curl"},
+		nil)
+	d.Vulnerabilities[0].ProductStatus.KnownNotAffected = append(
+		d.Vulnerabilities[0].ProductStatus.KnownNotAffected, "openSUSE Leap 15.6:curl")
+
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped the document")
+	}
+	got, found := affectedByName(adv)["openSUSE Leap:15.6/curl"]
+	if !found || got.CrossMappedFrom != "" {
+		t.Fatalf("native openSUSE Leap:15.6 curl entry must survive untouched: found=%v %+v", found, got)
+	}
+	if st.MirroredToLeap != 0 || st.SkippedLeapNativeWins != 1 || st.SkippedLeapNotAffected != 0 {
+		t.Errorf("counters: MirroredToLeap=%d SkippedLeapNativeWins=%d SkippedLeapNotAffected=%d, want 0, 1, 0",
+			st.MirroredToLeap, st.SkippedLeapNativeWins, st.SkippedLeapNotAffected)
+	}
+}
+
 // D108 allowlist: SLE 15 SP7 has no corresponding openSUSE Leap 15.7 (Leap
 // jumped to 16), so the mirror must never fabricate a phantom Leap:15.7 key.
 func TestConvert_DoesNotMirror_SP7_NoLeap157(t *testing.T) {

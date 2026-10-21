@@ -67,12 +67,18 @@ type document struct {
 			// entries measured across the whole archive -- this is not a
 			// rare case, it is the majority of what this feed says.
 			KnownAffected []string `json:"known_affected"`
-			// known_not_affected, first_affected, last_affected and
-			// under_investigation are read by nothing here, mirroring
-			// redhat.document's own known_not_affected omission: nothing
-			// downstream can use a not-affected or under-investigation claim,
-			// and first/last_affected describe a range this store's
-			// introduced-at-0 shape does not need.
+			// KnownNotAffected is read for one consumer only: D108's Leap
+			// mirror. Nothing is stored from it -- the store has no shape for
+			// "not affected" and must not grow one (D1) -- but a native Leap
+			// entry here is SUSE's own verdict on the package, and the mirror
+			// must not overwrite it with a derived one (D125). Before D125
+			// this bucket was unread, on the premise that nothing downstream
+			// could use it; the mirror pass added in D108 was the consumer
+			// that premise missed. first_affected, last_affected and
+			// under_investigation stay unread, as in redhat.document: they
+			// describe ranges this store's introduced-at-0 shape does not
+			// need.
+			KnownNotAffected []string `json:"known_not_affected"`
 		} `json:"product_status"`
 		// Remediations is what makes D52's distinction possible here too:
 		// product_status says a package is affected, only this says whether
@@ -549,6 +555,12 @@ type stats struct {
 	// a derived duplicate of an entry those already counted.
 	MirroredToLeap        int
 	SkippedLeapNativeWins int
+	// SkippedLeapNotAffected is D125's refinement of the same tie-break: the
+	// document names the package under a native Leap known_not_affected
+	// entry, so SUSE has already judged it and the mirror declines rather
+	// than contradict that verdict with an SLE-derived one. Per entry, like
+	// SkippedLeapNativeWins.
+	SkippedLeapNotAffected int
 
 	// The delta pass (delta.go), identical in meaning to redhat.stats'.
 	DeltaListed     int
@@ -595,6 +607,13 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 	// array never matters: a mainline entry appearing after its LTSS twin
 	// in the JSON still wins.
 	mainline := map[productKey]bool{}
+	// leapNotAffected marks every openSUSE Leap key a known_not_affected
+	// entry names (D125). Nothing is stored from it; it only tells the D108
+	// mirror pass below that SUSE has already judged the package on that
+	// Leap release, so an SLE-derived entry must not be emitted over the
+	// verdict. Keyed like native: per release and package, whether the id
+	// was the bare package or a shipped build.
+	leapNotAffected := map[productKey]bool{}
 	note := func(k productKey) {
 		if !seen[k] {
 			seen[k] = true
@@ -695,6 +714,19 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 				continue
 			}
 			store(p.key, p.version, p.isFixed)
+		}
+
+		for _, id := range v.ProductStatus.KnownNotAffected {
+			// Not counted on refusal, for the remediation loop's reason
+			// below: nothing from this bucket is ever stored, so an id that
+			// does not resolve is not a discard. Only a Leap key matters --
+			// an SLE not-affected entry has no consumer here, and a Leap one
+			// is read only by the mirror pass.
+			k, _, why := resolveProduct(id, folded, declared, packages)
+			if why != skipNone || !strings.HasPrefix(k.eco, "openSUSE Leap:") {
+				continue
+			}
+			leapNotAffected[k] = true
 		}
 
 		for _, r := range v.Remediations {
@@ -805,6 +837,18 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 		}
 		if native[productKey{eco: leap, pkg: a.Name}] {
 			st.SkippedLeapNativeWins++
+			continue
+		}
+		// D125: SUSE's own "not affected" for this package on this Leap
+		// release is a verdict, not an absence. cve-2025-61144 (2026-10-21)
+		// lists libtiff6 as known_affected on SLE 15 SP6 and known_not_affected
+		// on Leap 15.6; before this check the mirror emitted an "affected at
+		// every version" Leap entry over it, a false positive on every Leap
+		// image with libtiff6 installed. Checked after native-wins so a key
+		// the document lists as both affected and not affected keeps its
+		// native affected entry and is counted there.
+		if leapNotAffected[productKey{eco: leap, pkg: a.Name}] {
+			st.SkippedLeapNotAffected++
 			continue
 		}
 		// Ranges is aliased, not copied: the store treats every emitted
