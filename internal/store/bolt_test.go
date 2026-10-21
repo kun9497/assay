@@ -392,8 +392,8 @@ func TestSetArtifactAt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open after SetArtifactAt: %v", err)
 	}
-	defer db.Close()
 	m, err := db.Meta()
+	db.Close()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,8 +407,25 @@ func TestSetArtifactAt(t *testing.T) {
 		t.Errorf("SetArtifactAt changed more than Artifact:\n got %+v\nwant %+v", m, m0)
 	}
 
-	if err := SetArtifactAt(path, ArtifactRecord{Reference: "r"}); err == nil {
-		t.Error("a record naming no digest was accepted")
+	// Refused before the file is touched, and for that reason -- not for a
+	// lock or an open error.
+	if err := SetArtifactAt(path, ArtifactRecord{Reference: "r"}); err == nil || !strings.Contains(err.Error(), "no digest") {
+		t.Errorf("a record naming no digest: err = %v, want a refusal naming the digest", err)
+	}
+	// A database another handle holds open fails fast rather than hanging on
+	// bolt's file lock (the default wait is forever).
+	held, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	err = SetArtifactAt(path, rec)
+	held.Close()
+	if err == nil {
+		t.Error("SetArtifactAt succeeded on a database another handle holds open")
+	}
+	if waited := time.Since(started); waited > 10*time.Second {
+		t.Errorf("SetArtifactAt waited %v for the lock, want a bounded wait", waited)
 	}
 	// An unfinished database (no metadata record) is refused, as Open
 	// refuses it: there is nothing complete to name.

@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"time"
 
 	bolt "go.etcd.io/bbolt"
 
@@ -810,14 +811,17 @@ func (b *Bolt) EachEnrichment(fn func(advisory.Enrichment) error) error {
 // write in one transaction rather than a SetMeta call: SetMeta re-derives
 // Databases by decoding every stored advisory, a build's cost to pay once, not
 // a pull's. The database must be a finished one (its metadata record present,
-// the same rule openReadOnly applies).
+// the same rule openReadOnly applies). The open carries a timeout: bolt waits
+// for the file lock indefinitely by default, and a database some reader holds
+// open would hang the pull rather than fail it -- found when a mutation of
+// this function blocked a test for its full 600 s.
 func SetArtifactAt(path string, rec ArtifactRecord) error {
 	if rec.Digest == "" {
 		return fmt.Errorf("artifact record names no digest")
 	}
-	db, err := bolt.Open(path, 0o600, nil)
+	db, err := bolt.Open(path, 0o600, &bolt.Options{Timeout: setArtifactLockWait})
 	if err != nil {
-		return fmt.Errorf("open %s: %w", path, err)
+		return fmt.Errorf("open %s for the artifact record: %w", path, err)
 	}
 	defer db.Close()
 	return db.Update(func(tx *bolt.Tx) error {
@@ -841,6 +845,12 @@ func SetArtifactAt(path string, rec ArtifactRecord) error {
 		return bk.Put([]byte("meta"), blob)
 	})
 }
+
+// setArtifactLockWait bounds SetArtifactAt's wait for bolt's file lock. The
+// file it writes is the pull's own temp database, which nothing else opens,
+// so any wait at all is a bug being reported, not contention being ridden
+// out.
+const setArtifactLockWait = 2 * time.Second
 
 func (b *Bolt) Meta() (Meta, error) {
 	var m Meta
