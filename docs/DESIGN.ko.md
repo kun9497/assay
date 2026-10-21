@@ -795,6 +795,13 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       에도 bare id를 `known_not_affected`에 쓰므로, fixed인 SLE 출처는 그대로 미러링된다
       (겹침 4,463건 중 4,363건; no-fix 100건이 거부됨). 이 bucket에서 저장되는 것은
       없다(D1); 패키지·릴리스 단위, native-wins 다음, progress 줄에 집계
+- [x] SUSE의 bare 상태 id는 product_id로 이름을 정함 (D126) — SUSE는 bare product의 purl을
+      product_id에서 잘못된 하이픈으로 잘라 만든다(`libwmf-0_2-7` → `libwmf@0_2-7`,
+      `libglib-2_0-0` → `libglib@2_0-0`). 그래서 `known_affected`/`known_not_affected`의
+      문서·패키지 쌍 11,753개(항목 39,215개, 그중 31,494개는 그 패키지의 유일한 항목)가 어떤 rpm도 갖지
+      않는 이름으로 키가 잡혔다: 조용한 false negative. bucket이 정한다 — 상태 id와 no-fix
+      remediation id는 product_id를, `recommended` 빌드는 purl 분할을 쓴다 — 양방향 예외
+      없이 측정됨; `BareNamedByProductID`가 progress 줄에 나옴
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨

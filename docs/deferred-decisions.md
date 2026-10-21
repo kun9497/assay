@@ -1972,17 +1972,27 @@ Support is decided per language rather than promised as a category.
 
 Not deferred decisions — traps to handle when the relevant code is written.
 
-**SUSE's bare product purl mis-splits a name that ends in a version-like segment.** Found
-2026-10-21 by D125's review, pre-existing since D77. `packageOf` reads `pkg:rpm/suse/<name>@<version>`
-and SUSE's generator emits the bare product `libwmf-0_2-7` as `pkg:rpm/suse/libwmf@0_2-7`
-(the versioned leaf `libwmf-0_2-7-0.2.12-…` is `pkg:rpm/suse/libwmf-0_2-7@0.2.12-…`, correct),
-so a bare `known_affected` or `known_not_affected` id for such a package keys under `libwmf`,
-a name no installed rpm carries: the no-fix finding never reaches a `libwmf-0_2-7` package,
-and the D125 decline for it never meets its mirror candidate. Same family: `libjavascriptcoregtk-4_0-18`,
-`libwebkit2gtk-4_0-37`, `typelib-1_0-*`. A false-negative class of its own; it needs its own
-measurement (how many bare ids split this way, how many are the only entry for the package)
-and a split that prefers the product_id over the purl's name when the purl's version is not
-a build version. Not fixed with D125, which touches the mirror only.
+**~~SUSE's bare product purl mis-splits a name that ends in a version-like segment.~~ —
+resolved in D126 (2026-10-21, the same day it was found).** SUSE's generator emits the bare
+product `libwmf-0_2-7` as `pkg:rpm/suse/libwmf@0_2-7`, so `packageOf` keyed its
+`known_affected`/`known_not_affected` entries under `libwmf`: 11,753 document-and-package
+pairs, 39,215 entries, 31,494 of them the package's only entry — a silent false negative on
+`libwebkit2gtk-4_0-37`, `libglib-2_0-0` and 402 more. D126 names a bare id (status and no-fix
+remediation buckets) by its product_id and keeps the purl split for `recommended` builds; the
+bucket was measured exception-free in both directions, where every syntactic rule failed.
+
+**SUSE `recommended` ids whose purl carries the whole NEVR as the name.** Found by D126's
+survey. 89,598 of 4,396,450 recommended ids carry `pkg:rpm/suse/<name-ver-rel>@` — the build's
+NEVR in the purl *name* and an empty version (`kernel-default-2.6.32.54-0.155.TDC.1@`,
+`httpd-2.4.37-51.module+el8…@`): Liberty Linux 7/8/9 (≈46,000), Confidential Computing TP 15
+SP6 (16,736), SLES 11/12 Teradata (≈29,000), HPC 12 SP3 (16,597), SUSE Linux Micro 6.1 (27).
+The fold refuses all but Confidential Computing, whose 16,736 ids (2,077 documents) fold to
+`SLES:15.SP6` and are stored unfixed under a NEVR-shaped name, reaching nothing — a miss with
+no finding, not a wrong finding.
+Needs its own measurement on folding keys only (the survey counted platforms, not keys), and a
+rule: a `recommended` id whose purl version is empty and whose product_id has NAME-VER-REL
+shape is a build whose name must come from somewhere else (the sibling bare leaf, or the
+`upstream` qualifier). Not touched by D126, which reads the bare buckets only.
 
 **Atomic database replacement on Windows.** `db update` builds into a temporary file and
 renames over the live database, so a concurrent scan never sees a partial write. On

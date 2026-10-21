@@ -7,14 +7,18 @@
 // product_status entries spell "platform:component-EVR" directly, with the
 // platform's CPE living on a branch and the component parsed by splitting
 // hyphens and colons (splitContext, splitNEVRA). SUSE's feed instead gives
-// every package a purl at the leaf ("pkg:rpm/suse/xz@5.6.2-1.1?..."), so the
-// name/version split is read structurally rather than guessed from a string
-// that would otherwise be ambiguous -- "liblzma5-x86-64-v3-5.8.1-160000.2.2"
+// every package a purl at the leaf ("pkg:rpm/suse/xz@5.6.2-1.1?..."), so a
+// BUILD's name/version split is read structurally rather than guessed from
+// a string that would otherwise be ambiguous -- "liblzma5-x86-64-v3-5.8.1-160000.2.2"
 // has no reliable hyphen boundary of its own. Measured across the whole
 // 2026-08-19 archive: 100% of 657,984 sampled leaf purls match this shape
 // and reconstruct their own product_id exactly; the tiny remainder (28 of
 // 657,984, all pre-2014 java-1_7_0-openjdk entries) are counted and skipped
-// rather than parsed out of the raw id.
+// rather than parsed out of the raw id. "Reconstruct exactly" was read as
+// "split correctly" until D126: it holds just as well for a BARE product
+// whose purl SUSE cut from the product_id at the wrong hyphen
+// ("libwmf-0_2-7" -> libwmf@0_2-7), which is why a bare id is now named by
+// its product_id and only a recommended build by its purl (resolveProduct).
 //
 // SUSE also has no module/flatpak "::" context to split off first the way
 // Red Hat's splitContext does (D47's own hazard): every product_status
@@ -425,8 +429,33 @@ const (
 // there is no module/flatpak context to split off first the way Red Hat's
 // splitContext has to before splitNEVRA runs -- D47's ordering hazard does
 // not exist on this feed.
-func resolveProduct(id string, folded map[string]string, declared map[string]bool,
-	packages map[string]packageInfo) (productKey, string, skipReason) {
+//
+// bare says which bucket the id came from, and the bucket decides the name
+// (D126). A known_affected, known_not_affected or no-fix remediation id names
+// a BARE product, whose product_id IS the rpm package name; a recommended id
+// names a shipped build, whose purl carries the name and the fix version.
+// The purl of a bare product is not trusted for the name because SUSE's
+// generator cuts it FROM the product_id at the first hyphen-digit boundary:
+// "libwmf-0_2-7" carries pkg:rpm/suse/libwmf@0_2-7, "libglib-2_0-0" carries
+// pkg:rpm/suse/libglib@2_0-0, so 11,753 of the 726,722 distinct
+// document-and-package status ids in the 2026-10-19 archive (404 products)
+// were keyed under a name no installed rpm has -- 39,215 entries in 2,794
+// documents, 31,494 of them the package's only entry. The bucket is the
+// only exception-free signal measured: 0 of those status ids names a build
+// and 0 of 4,396,450 recommended ids names a bare product, whereas every
+// syntactic rule on the version string either keeps one mis-split
+// (typelib-1_0-Vte-2.91) or loses 577 real builds
+// (cdparanoia-IIIalpha9.8-691.22). The leaf must still exist with a readable
+// purl: an id naming no leaf, or a leaf with no purl (the java-1_7_0-openjdk
+// gap), stays a counted skip rather than a name guessed from the raw id.
+// st counts the renames only; skips are the caller's to count, for the
+// reason the remediation loop gives. The bare branch's "" version is by
+// construction: no bare caller reads it (store ignores the version when
+// isFixed is false, the other two discard it), so returning pkg.version
+// instead is an equivalent mutation (verified 2026-10-21) -- the literal
+// states what a bare id carries, it does not decide anything.
+func resolveProduct(id string, bare bool, folded map[string]string, declared map[string]bool,
+	packages map[string]packageInfo, st *stats) (productKey, string, skipReason) {
 
 	plat, comp, ok := strings.Cut(id, ":")
 	if !ok {
@@ -448,6 +477,12 @@ func resolveProduct(id string, folded map[string]string, declared map[string]boo
 	pkg, ok := packages[comp]
 	if !ok {
 		return productKey{}, "", skipUnknownPackage
+	}
+	if bare {
+		if pkg.name != comp {
+			st.BareNamedByProductID++
+		}
+		return productKey{eco: key, pkg: comp}, "", skipNone
 	}
 	return productKey{eco: key, pkg: pkg.name}, pkg.version, skipNone
 }
@@ -561,6 +596,18 @@ type stats struct {
 	// than contradict that verdict with an SLE-derived one. Per entry, like
 	// SkippedLeapNativeWins.
 	SkippedLeapNotAffected int
+
+	// BareNamedByProductID is D126's rule doing visible work: a
+	// known_affected / known_not_affected / no-fix remediation id whose
+	// leaf purl split the product_id into a different name
+	// ("libwmf-0_2-7" -> pkg:rpm/suse/libwmf@0_2-7), named by the
+	// product_id instead. Per id, like the Skipped* group, before D91's
+	// LTSS shadowing: 70,463 across the 2026-10-19 archive (69,697 status
+	// ids, 766 remediation ids), which are 11,753 distinct document-and-
+	// package pairs -- the survey's unit, not this counter's. A jump or a
+	// collapse against that baseline is the trace that SUSE's generator
+	// changed.
+	BareNamedByProductID int
 
 	// The delta pass (delta.go), identical in meaning to redhat.stats'.
 	DeltaListed     int
@@ -678,7 +725,7 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 		var pendingLTSS []ltssEntry
 		for _, id := range v.ProductStatus.Recommended {
 			plat, _, _ := strings.Cut(id, ":")
-			k, version, why := resolveProduct(id, folded, declared, packages)
+			k, version, why := resolveProduct(id, false, folded, declared, packages, st)
 			if !countSkip(why) {
 				continue
 			}
@@ -691,7 +738,7 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 		}
 		for _, id := range v.ProductStatus.KnownAffected {
 			plat, _, _ := strings.Cut(id, ":")
-			k, version, why := resolveProduct(id, folded, declared, packages)
+			k, version, why := resolveProduct(id, true, folded, declared, packages, st)
 			if !countSkip(why) {
 				continue
 			}
@@ -725,7 +772,7 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 			// behaviour: dropping it is an equivalent mutation (verified
 			// 2026-10-21), because the mirror pass looks up Leap keys only
 			// and an SLE key in this map is never read.
-			k, _, why := resolveProduct(id, folded, declared, packages)
+			k, _, why := resolveProduct(id, true, folded, declared, packages, st)
 			if why != skipNone || !strings.HasPrefix(k.eco, "openSUSE Leap:") {
 				continue
 			}
@@ -746,7 +793,13 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 				// already dropped -- explaining a discard is not itself a
 				// second one.
 				plat, _, _ := strings.Cut(id, ":")
-				k, _, why := resolveProduct(id, folded, declared, packages)
+				// bare: a no-fix remediation names the bare product -- the
+				// component the known_affected loop resolved (230,566 of
+				// 541,090 measured name a component the same vulnerability's
+				// status buckets name, 5,400 of them the identical id on the
+				// same platform; 0 name a build), so it must take the same
+				// name or the reason never attaches (D126).
+				k, _, why := resolveProduct(id, true, folded, declared, packages, st)
 				if why != skipNone {
 					continue
 				}

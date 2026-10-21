@@ -22,7 +22,8 @@ Ksplice/FIPS lineage-filtered since D79), Fedora Bodhi (D75), Photon's flat-JSON
 its own pacman comparer and cataloger), SUSE CSAF VEX (D77, whose
 no-fix entries are 99.96% reason-unstated — the inverse of Red Hat; its delta pass reads
 the year-prefixed layout SUSE moved to on 2026-10-15, D122; its SLE→Leap mirror, D108,
-yields to Leap's own `known_not_affected` since D125), and Azure
+yields to Leap's own `known_not_affected` since D125; a bare status id is named by its
+product_id since D126, because SUSE's own purl for `libwmf-0_2-7` says `libwmf`), and Azure
 Linux/CBL-Mariner OVAL (D106 — moved off OSV.dev after its imported snapshot proved
 frozen since 2026-03; the 2026-08-28 audit's 140 missing findings all recovered). `assay scan` reads
 SBOMs, container images (distroless via `status.d`, D54), Go binaries and directories

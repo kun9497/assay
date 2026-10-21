@@ -1931,17 +1931,26 @@ Go가 먼저입니다. 표준 라이브러리 `debug/buildinfo`가 모듈 목록
 
 미룬 결정이 아니라, 해당 코드를 쓸 때 처리해야 할 덫입니다.
 
-**SUSE의 bare product purl은 버전 비슷한 조각으로 끝나는 이름을 잘못 쪼갭니다.** 2026-10-21
-D125 검토가 발견, D77부터 있던 문제. `packageOf`는 `pkg:rpm/suse/<name>@<version>`으로 읽는데
-SUSE의 생성기는 bare product `libwmf-0_2-7`을 `pkg:rpm/suse/libwmf@0_2-7`로 냅니다(버전 붙은
-leaf `libwmf-0_2-7-0.2.12-…`는 `pkg:rpm/suse/libwmf-0_2-7@0.2.12-…`로 정확함). 그래서 그런
-패키지의 bare `known_affected`나 `known_not_affected` id는 설치된 어떤 rpm도 갖지 않는 이름
-`libwmf` 아래에 들어갑니다: no-fix finding이 `libwmf-0_2-7` 패키지에 닿지 않고, 그것에 대한
-D125 거부도 미러 후보와 만나지 못합니다. 같은 부류: `libjavascriptcoregtk-4_0-18`,
-`libwebkit2gtk-4_0-37`, `typelib-1_0-*`. 그 자체로 false-negative 부류이며, 별도 측정(이렇게
-쪼개지는 bare id가 몇 개인지, 그중 그 패키지의 유일한 항목인 것이 몇 개인지)과 purl의 버전이
-빌드 버전이 아닐 때 purl 이름보다 product_id를 우선하는 분할이 필요합니다. 미러만 건드린
-D125에서는 고치지 않았습니다.
+**~~SUSE의 bare product purl은 버전 비슷한 조각으로 끝나는 이름을 잘못 쪼갭니다.~~ — D126으로
+해결(2026-10-21, 발견한 그날).** SUSE의 생성기는 bare product `libwmf-0_2-7`을
+`pkg:rpm/suse/libwmf@0_2-7`로 내고, 그래서 `packageOf`가 그 `known_affected`/`known_not_affected`
+항목을 `libwmf` 아래에 넣었습니다: 문서·패키지 쌍 11,753개, 항목 39,215개, 그중 31,494개는 그
+패키지의 유일한 항목 — `libwebkit2gtk-4_0-37`, `libglib-2_0-0` 등 404개에 대한 조용한 false negative.
+D126은 bare id(상태·no-fix remediation bucket)의 이름을 product_id로 정하고 `recommended`
+빌드는 purl 분할을 유지합니다; 문법 규칙은 모두 실패한 반면 bucket은 양방향으로 예외 없이
+측정됐습니다.
+
+**purl 이름에 NEVR 전체를 담은 SUSE `recommended` id.** D126 조사가 발견. recommended id
+4,396,450개 중 89,598개가 `pkg:rpm/suse/<name-ver-rel>@` — 빌드의 NEVR이 purl *이름*에 있고
+버전은 비어 있음(`kernel-default-2.6.32.54-0.155.TDC.1@`, `httpd-2.4.37-51.module+el8…@`):
+Liberty Linux 7/8/9(≈46,000), Confidential Computing TP 15 SP6(16,736), SLES 11/12
+Teradata(≈29,000), HPC 12 SP3(16,597), SUSE Linux Micro 6.1(27). fold는 Confidential
+Computing을 빼고 모두 거부합니다; 그 16,736개 id(문서 2,077건)는 `SLES:15.SP6`로 fold되어
+NEVR 모양 이름으로 unfixed 저장되고 아무것도 닿지 않습니다 — 틀린 finding이 아니라 finding
+없는 누락. fold되는 키에 한정한 별도 측정(조사는 키가
+아니라 플랫폼을 셌음)과 규칙이 필요합니다: purl 버전이 비어 있고 product_id가 NAME-VER-REL
+모양인 `recommended` id는 빌드이며 이름을 다른 곳(형제 bare leaf나 `upstream` qualifier)에서
+가져와야 합니다. bare bucket만 읽는 D126은 건드리지 않았습니다.
 
 **Windows에서의 원자적 데이터베이스 교체.** `db update`는 임시 파일에 빌드한 뒤 실행 중인
 데이터베이스 위로 rename합니다. 그래야 동시에 도는 스캔이 부분 기록을 보지 않습니다. 그런데
