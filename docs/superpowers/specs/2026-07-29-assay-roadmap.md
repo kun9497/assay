@@ -5545,6 +5545,106 @@ answered, the ceiling check dropped, the link not marking its query done.
 
 ---
 
+### D131 — A SUSE recommended build whose purl carries no version is named and versioned by splitting its product_id
+
+**Decision.** In `resolveProduct`, a `recommended` id whose leaf purl has an *empty* version is
+split by rpm's rule — the release is everything after the last hyphen, the version everything
+after the one before it, the name the rest — when, and only when, the purl's name is the
+product_id verbatim and the result reads as a build: a non-empty name, a version that starts
+with a digit, a release that contains a dot. The entry is stored under that name, fixed at
+`ver-rel`, and counted (`RecommendedNamedByNEVRSplit`). An empty-version id that fails either
+check keeps the behaviour it had — stored as the purl spelt it, unfixed, never dropped — and is
+counted too (`RecommendedEmptyVersionKept`). Bare ids (D126) and well-formed builds are not
+touched: the branch runs only after the bucket and the platform fold and only on an empty purl
+version.
+
+A split build's range never crosses to openSUSE Leap. D108's mirror and D128's lend both drop
+it (`withoutSplitBuilds`); an SLE entry with nothing else to offer is not mirrored at all and
+counted (`SkippedLeapMirrorSplitBuild`), one that also carries a codestream fix mirrors those
+ranges alone.
+
+**Why.** SUSE's generator fails to split some builds' purls at all: the whole NEVR becomes the
+purl's name and the version is empty — `pkg:rpm/suse/kernel-coco-6.4.0-15061.9.coco15sp6.1@`.
+Stored as spelt, the entry sat on `SLES:15.SP6` under a name no installed rpm has, with no fix,
+reaching nothing: not a wrong finding but no finding at all. The bucket says the id is a build
+(0 of 4,396,450 `recommended` ids name a bare product, D126's measurement), and a build's
+product_id is `name-ver-rel` by construction, so the information was there the whole time; the
+purl just did not carry it. The two shape checks are what keep a bare name that happens to hold
+two hyphens from being cut: `typelib-1_0-Vte` and `libwmf-0_2-7` fail on the release,
+`cdparanoia-IIIalpha9.8-691.22` on the version. Measured against the generator's own
+well-formed splits (4,347,013 leaves with a version, the whole 2026-10-19 archive): 4,334,151
+are digit-led version and dotted release; the 6,942 digit-led/undotted and 5,342
+non-digit/undotted are D126's mis-split bare shapes; 578 real builds carry a non-digit-led
+version (`IIIalpha9.8`, `s20121221`, `R14B`) and would be refused — visibly, into the kept
+counter — if one ever arrived unsplit. None has.
+
+The Leap exclusion is the lineage rule D108 already rests on, applied where it was about to
+be broken. The mirror's premise is that an SLE codestream and its Leap twin share one release
+numbering (`150600.N`), so an SLE fix version orders a Leap build correctly. A split build's
+release is its module's own — `15061.N.coco15sp6.1` for the Confidential Computing Technical
+Preview — and `15061` sorts *below* `150600`, so every Leap build would read as fixed by it.
+Nothing on Leap ships kernel-coco today; the rule is cheap, and the day something does, the
+verdict is on Leap's numbering, not the module's. The reviewer's condition for this slice was
+exactly that no install be judged fixed by another lineage's version.
+
+**Measured (2026-10-19 archive, 71,711 documents).** Empty-version `recommended` ids:
+108,440 in all (the deferred entry's "89,598" was a mis-sum of its own parts). On folding keys
+16,736, every one `SLES:15.SP6` through the Confidential Computing Technical Preview 15 SP6
+module, in 2,077 documents (one CVE each). The other 91,704 sit on platforms `foldKey` refuses
+— Liberty Linux 8 (37,003), SLES 12 SP3-TERADATA (16,604), HPC 12 SP3 (16,597), 11 SP3-TERADATA
+(7,233), Liberty 9 (6,041), 11 SP1-TERADATA (5,247), Liberty 9.6 EMS (2,943), Micro 6.1 (27),
+Liberty 7 (9) — and never reach the rule. Under the exact rule all 16,736 split and 0 are kept.
+Names, 52: the kernel-coco family (kernel-coco, -devel, _debug, _debug-devel, kernel-devel-coco,
+kernel-source-coco, kernel-syms-coco, reiserfs-kmp-coco: 2,071 each, 16,568), qemu and its 41
+subpackages (4 each, 152 — two at `8.2.71.16.3_3_ga95067eb`, the rest `8.2.7`), ovmf, ovmf-tools,
+qemu-ovmf-x86_64 and its -debug (2 each, 8, at `202308`). Versions: `6.4.0` 16,568, `8.2.7` 152,
+`202308` 8, `8.2.71.16.3_3_ga95067eb` 8.
+
+Coexistence: the 16,568 kernel-coco ids are the only entry their CVE carries for the package
+on the key — nothing else ships kernel-coco. The 168 qemu/ovmf ids each sit beside a
+codestream build of the same package in the same document (44 distinct pairs, e.g. qemu
+`8.2.7-15061.6.coco15sp6.1` beside `8.2.7-150600.3.20.1`), and in every pair the split
+build's release orders below the codestream's. The matcher takes the union of an entry's
+ranges, so a range that lies inside the codestream one changes no verdict: a codestream qemu
+below its fix is still found, one at its fix is clean, a module build below the module's fix
+is found. (A module build at the module's fix was judged affected by the codestream range
+before D131 and still is — pre-existing, not widened.) Leap: 0 of the 16,736 have a native
+Leap bare `known_affected` (D128 never fires), 168 have a native Leap *build* (native wins,
+no mirror), 16,568 have no native Leap entry at all — D108 mirrored the junk no-fix entry
+onto `openSUSE Leap:15.6` before and now mirrors nothing, counted.
+
+Before and after, the whole archive: 16,736 unfixed entries under NEVR-shaped names on
+`SLES:15.SP6` become fixed entries under 52 rpm names; `UnfixableUnstated` drops by 16,736;
+`MirroredToLeap` drops by 16,568 and `SkippedLeapMirrorSplitBuild` reports them;
+`RecommendedEmptyVersionKept` is 0. The 2,077 CVEs are the ones the restored records belong
+to — what a SLES 15 SP6 host with the Confidential Computing module's kernel-coco installed
+was being told nothing about — not a count of findings missed on every image; a container
+image does not carry a kernel, and no image in the weekly differential is affected.
+
+**Verified.** Convert: the kernel-coco shape splits and stores fixed, the NEVR-named entry
+gone; a one-hyphen id, `typelib-1_0-Vte` and `cdparanoia-IIIalpha9.8-691.22` stay as spelt,
+unfixed, counted kept; a build-shaped product_id whose purl names something else is kept; a
+well-formed build and a bare id beside the rule are untouched; a split build alone is not
+mirrored and a mixed entry mirrors only the codestream range; a native Leap no-fix does not
+take a split build's fix; the progress line carries all three counters as a triple.
+Convert → real store → matcher: kernel-coco `15061.8` is found and told `15061.9`, `15061.9`
+and `15061.21` are clean, the old NEVR name matches nothing; qemu `150600.3.15.1` is found,
+`150600.3.20.1` clean, `15061.5.coco` found. The whole-archive run
+(`TestD131_AgainstAnExtractedArchive`, opt-in via `ASSAY_SUSE_ARCHIVE_DIR`) asserts no
+NEVR-shaped name remains on a folded key, no split range reached a Leap key, every split
+stored its version, and nothing was kept. Mutations caught, eleven: the verbatim-purl guard,
+the dotted-release and digit-led checks (each at the caller), the split itself (the verdict
+test), both counters, the split record, the mirror's skip, the mirror aliasing unfiltered
+ranges, D128 lending them, and the filter keeping everything.
+
+**Remaining uncertainty.** The rule is measured on one product; a second empty-version shape
+would land in `RecommendedEmptyVersionKept`, visible on the progress line, and keep the old
+behaviour. Confidential Computing module builds of qemu/ovmf are still judged by the codestream
+range (pre-existing). Whether the module's builds are ever installed where assay scans is not
+known — the beneficiary is a host or VM SBOM, not a container image.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

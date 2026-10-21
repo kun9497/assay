@@ -855,6 +855,11 @@ exited 0 while 24 findings went unmentioned.
       symlink keeps newest-first. A package database hardlinked from a scratch path a later
       layer rewrote had come back as the rewritten one. Per-query resolution also answers
       every requester of one target, where the old pass kept only the last
+- [x] A SUSE recommended build with no purl version is split from its product_id (D131) —
+      16,736 kernel-coco/qemu/ovmf builds on SLES:15.SP6 whose purl was the whole NEVR
+      with an empty version sat unfixed under names no rpm has; now fixed under the rpm
+      name, with the split build's range never crossing to Leap (its release numbering
+      is the module's, not the codestream's). Verified convert → store → matcher
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15

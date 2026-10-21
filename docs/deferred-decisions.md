@@ -2010,18 +2010,20 @@ pairs, 39,215 entries, 31,494 of them the package's only entry — a silent fals
 remediation buckets) by its product_id and keeps the purl split for `recommended` builds; the
 bucket was measured exception-free in both directions, where every syntactic rule failed.
 
-**SUSE `recommended` ids whose purl carries the whole NEVR as the name.** Found by D126's
-survey. 89,598 of 4,396,450 recommended ids carry `pkg:rpm/suse/<name-ver-rel>@` — the build's
-NEVR in the purl *name* and an empty version (`kernel-default-2.6.32.54-0.155.TDC.1@`,
-`httpd-2.4.37-51.module+el8…@`): Liberty Linux 7/8/9 (≈46,000), Confidential Computing TP 15
-SP6 (16,736), SLES 11/12 Teradata (≈29,000), HPC 12 SP3 (16,597), SUSE Linux Micro 6.1 (27).
-The fold refuses all but Confidential Computing, whose 16,736 ids (2,077 documents) fold to
-`SLES:15.SP6` and are stored unfixed under a NEVR-shaped name, reaching nothing — a miss with
-no finding, not a wrong finding.
-Needs its own measurement on folding keys only (the survey counted platforms, not keys), and a
-rule: a `recommended` id whose purl version is empty and whose product_id has NAME-VER-REL
-shape is a build whose name must come from somewhere else (the sibling bare leaf, or the
-`upstream` qualifier). Not touched by D126, which reads the bare buckets only.
+**~~SUSE `recommended` ids whose purl carries the whole NEVR as the name.~~ — resolved in
+D131 (2026-10-21).** Found by D126's survey. 108,440 of 4,396,450 recommended ids carry
+`pkg:rpm/suse/<name-ver-rel>@` — the build's NEVR in the purl *name* and an empty version
+(`kernel-default-2.6.32.54-0.155.TDC.1@`, `httpd-2.4.37-51.module+el8…@`): Liberty Linux 7/8/9
+(45,996), Confidential Computing TP 15 SP6 (16,736), SLES 11/12 Teradata (29,084), HPC 12 SP3
+(16,597), SUSE Linux Micro 6.1 (27). (This entry first said "89,598", a mis-sum of those same
+parts; the per-key measurement that D131 records gives the total.) The fold refuses all but
+Confidential Computing, whose 16,736 ids (2,077 documents) fold to `SLES:15.SP6` and were
+stored unfixed under a NEVR-shaped name, reaching nothing — a miss with no finding, not a
+wrong finding. D131 splits such a product_id by rpm's rule when the purl's name is the
+product_id verbatim and the result reads as a build, keeps anything else as before and
+counted, and never lets a split build's range cross to Leap. The sibling bare leaf and the
+`upstream` qualifier this entry proposed as name sources were measured and found absent: 0 of
+the 16,736 purls carry `upstream`, 147 (the qemu builds) have a bare leaf in the document.
 
 **Atomic database replacement on Windows.** `db update` builds into a temporary file and
 renames over the live database, so a concurrent scan never sees a partial write. On
