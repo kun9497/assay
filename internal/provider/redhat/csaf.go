@@ -684,10 +684,7 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 	hummingbirdPkgs := map[string]packageInfo{}
 	collectHummingbirdPackages(d.ProductTree.Branches, hummingbirdPkgs)
 
-	cve := d.Document.Tracking.ID
-	if len(d.Vulnerabilities) > 0 && d.Vulnerabilities[0].CVE != "" {
-		cve = d.Vulnerabilities[0].CVE
-	}
+	cve := cveOf(d)
 	if !strings.HasPrefix(cve, "CVE-") {
 		// Red Hat tracks a few pre-CVE issues under their own IDs. They carry
 		// no identifier any other source shares, so a finding from one could

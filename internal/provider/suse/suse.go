@@ -77,7 +77,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -151,8 +150,9 @@ func New(opts Options) *Provider {
 
 func (p *Provider) Name() string { return "SUSE CSAF VEX" }
 
-// Fetch downloads the bulk archive, converts every document in it, then
-// closes the gap between the archive's build time and now with a delta pass.
+// Fetch runs the delta pass first -- every document changed since the bulk
+// archive's build time, fetched individually (D129) -- then downloads the
+// archive and converts each document in it the delta did not already emit.
 // Nothing is written to disk beyond the spooled archive itself, and no
 // converted document is held after it is emitted.
 func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error) (store.Provenance, error) {
@@ -216,12 +216,6 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		if h.Typeflag != tar.TypeReg || !strings.HasSuffix(h.Name, ".json") {
 			continue
 		}
-		if superseded[path.Base(h.Name)] {
-			// D129: the delta fetched a newer copy of this document and has
-			// already emitted whatever it converted to, which may be nothing.
-			st.ArchiveSuperseded++
-			continue
-		}
 		if h.Size > maxDocument {
 			return store.Provenance{}, fmt.Errorf(
 				"suse: %s in %s is %d bytes, past the %d-byte cap", h.Name, archiveName, h.Size, maxDocument)
@@ -232,6 +226,16 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 			// reported rather than failing the build, mirroring
 			// redhat.Fetch's identical choice.
 			st.SkippedBadDoc++
+			continue
+		}
+		if superseded[cveOf(&d)] {
+			// D129: the delta fetched a newer copy of this document and has
+			// already emitted whatever it converted to, which may be nothing.
+			// After the decode, because the key is the document's own id,
+			// not its file name (see deltaSince); the few hundred documents
+			// this decodes only to drop are the price of a key both sides
+			// are sure to share.
+			st.ArchiveSuperseded++
 			continue
 		}
 		adv, ok := convert(&d, &st)
