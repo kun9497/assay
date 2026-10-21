@@ -5425,13 +5425,14 @@ contradict) can produce this shape; assay can, and should say the right thing.
 **Measured (2026-10-19 archive, D126 naming, D91 fold).** Native-wins per Leap release, and the
 sub-case within it: 15.0 30,869/0, 15.1 17,501/0, 15.2 32,373/0, 15.3 50,828/6 (one kernel
 document), 15.4 56,297/0, 15.5 69,467/4, **15.6 112,360/659 (129 documents; MozillaFirefox's
-four packages 128, go1.26 20)**, 16.0 116,716/10, 16.1 2,323/25. The rest of native-wins is
+four packages 128, go1.26's three 30)**, 16.0 116,716/10, 16.1 2,323/25. The rest of native-wins is
 both-fixed (the native fix stays) or both-no-fix. Against the live Leap repositories
 (`download.opensuse.org`): 15.5's four all ship *below* the fix on the shared codestream, so the
 verdict is unchanged and the fix version is now named; 16.0's four (`php8`, `rpm`, `swtpm`,
-`qemu`) all ship *at or above* it — false positives today, clean under D128; of 15.6's top 60
-packages (515 of the 659 tuples) 58 ship below the fix and 2 (`erlang`, `erlang-epmd`) at or
-above, `podman` outside the top 60 likewise — 648 of the 659 fixes are SP6-LTSS builds and
+`qemu`) all ship *at or above* it — false positives today, clean under D128; of 15.6's 163
+packages 156 ship below the fix, 2 (`erlang`, `erlang-epmd`) at or above, 4 (`podman` and its
+three siblings) mixed — above one of their two fixes, below the other, so one tuple stays
+affected — and 1 is a Leap-own build (below) — 648 of the 659 fixes are SP6-LTSS builds and
 Leap 15.6 is past EOL, so there the change mostly names the LTSS fix on a verdict that stays
 "affected", which is D108's disclosure case. Across all 163 of 15.6's packages exactly one
 Leap-own build appeared, `perl-Text-CSV_XS-1.34-1.19`, and rpm orders it *below* the SLE fix

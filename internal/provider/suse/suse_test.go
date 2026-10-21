@@ -395,6 +395,49 @@ func TestFetch_DeltaGoneDocumentKeepsTheArchivesCopy(t *testing.T) {
 	}
 }
 
+// D128 through the provider's own Fetch path, not convert alone: a served
+// document in which SLE 15 SP6 fixes glibc and Leap 15.6 lists it bare
+// known_affected comes out with SLE's fix on the Leap key, disclosed, and
+// the progress line says so.
+func TestFetch_NativeLeapNoFixTakesTheSLEFix(t *testing.T) {
+	doc := docJSONForTest("CVE-2026-0002",
+		[]string{"SUSE Linux Enterprise Server 15 SP6", "openSUSE Leap 15.6"},
+		map[string]string{
+			"glibc":                 "pkg:rpm/suse/glibc@?upstream=glibc.src.rpm",
+			"glibc-2.40-150600.3.1": "pkg:rpm/suse/glibc@2.40-150600.3.1?upstream=glibc-2.40-150600.3.1.src.rpm",
+		},
+		[]string{"SUSE Linux Enterprise Server 15 SP6:glibc-2.40-150600.3.1"},
+		[]string{"openSUSE Leap 15.6:glibc"})
+	f := &feed{
+		archive:         fixture(t, "archive.tar.bz2"),
+		archiveModified: archiveBuilt2026,
+		changes:         changesCSV([2]string{"2026/cve-2026-0002.json", archiveBuilt2026.Add(time.Hour).Format(time.RFC3339)}),
+		docs:            map[string]string{"2026/cve-2026-0002.json": doc},
+	}
+	got, progress, err := fetchAll(t, serve(t, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var leap *advisory.Affected
+	for i := range got {
+		if got[i].ID != "SUSE-CVE-2026-0002" {
+			continue
+		}
+		for j := range got[i].Affected {
+			if a := &got[i].Affected[j]; a.Ecosystem == "openSUSE Leap:15.6" && a.Name == "glibc" {
+				leap = a
+			}
+		}
+	}
+	if leap == nil || leap.CrossMappedFrom != "SLES:15.SP6" || len(leap.Ranges) != 1 || len(leap.Ranges[0].Events) != 2 ||
+		leap.Ranges[0].Events[1].Fixed != "2.40-150600.3.1" {
+		t.Fatalf("openSUSE Leap:15.6/glibc = %+v, want SLE's fixed range as CrossMappedFrom (D128)", leap)
+	}
+	if !strings.Contains(progress, "1 native Leap no-fix entries given their SLE twin's fix (D128") {
+		t.Errorf("progress does not account for the D128 replacement:\n%s", progress)
+	}
+}
+
 // D122: a changes.csv row is turned into a URL, so a row on or after the
 // cutoff that is not exactly "<year>/cve-<year>-<n>.json" fails the build
 // rather than being fetched or skipped. The flat name SUSE used until
