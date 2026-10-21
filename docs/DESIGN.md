@@ -850,6 +850,11 @@ exited 0 while 24 findings went unmentioned.
       last-write-wins on top of the archive had kept the stale one for a day (SUSE) or two
       (Red Hat); a listed-but-404 document keeps its archive copy; `ArchiveSuperseded` on
       the progress line
+- [x] A hardlink resolves to the inode of the layer that made it (D130) — its target is
+      looked up in that layer and below, never above, and later whiteouts do not apply; a
+      symlink keeps newest-first. A package database hardlinked from a scratch path a later
+      layer rewrote had come back as the rewritten one. Per-query resolution also answers
+      every requester of one target, where the old pass kept only the last
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15

@@ -64,7 +64,9 @@ image's OS packages carry syft-spelled purls so VEX reaches them, and a VEX stat
 an image applies only to that image — since D124 even when its image reference does not parse.
 Since D123 every image layer is read to EOF and held to its
 config's diff id (the config to the manifest) before its files count — `oci-dir:` and
-`docker-archive:` had been verified by nothing. Findings can be waived through a
+`docker-archive:` had been verified by nothing. Since D130 a hardlink resolves to the inode of
+the layer that made it, not to the newest file of that name (a symlink still does). Findings
+can be waived through a
 `.assay.yaml` ignore file (D102 — reason mandatory, expiry optional) or a producer's
 OpenVEX document (`--vex`, repeatable, D104 — not_affected/fixed suppress, a reasonless
 not_affected is skipped with a warning, latest statement wins); both apply after Match in

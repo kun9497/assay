@@ -5498,6 +5498,38 @@ fetched documents, the counter dropped.
 
 ---
 
+### D130 — A hardlink resolves to the inode of the layer that made it, not to the newest file of that name
+
+**Decision.** When `Files` meets a hardlink in layer *i*, it resolves the link's target in
+layers ≤ *i* only — that layer and the ones beneath it, never a later one — and whiteouts
+written above layer *i* do not apply to that lookup. A symlink keeps the newest-first lookup it
+always had. Each pending path is a query carrying the caller's name and that layer ceiling; one
+tar entry may answer several queries.
+
+**Why.** A symlink is a name resolved at runtime, so the file a later layer put at that name is
+the file the image runs with — newest wins. A hardlink is a second name for an inode, fixed
+when the link was made: a later layer that whites out and rewrites the *target's* name has
+changed that name, and the hardlinked name still holds the old bytes. `Files` re-queued the
+target as a fresh path and resolved it newest-first, so a package database hardlinked from a
+scratch path that a later layer rewrote came back as the rewritten database, with versions the
+image does not ship (2026-10-20 external review, #4; the reviewer called it rare and did not
+size it — it is a valid layer construction, and the fix is narrow). The target may legitimately
+sit in a *lower* layer than the link (a builder that links across layers emits the link alone);
+lower is allowed, higher never.
+
+**What the restructuring also fixed.** The old pass keyed its pending targets by path and kept
+one requester per target, so two wanted names that resolved to the same file left one of them
+unanswered — "no such file" for a path the image has. Per-query resolution answers every
+requester from the one entry.
+
+**Verified.** The review's shape keeps the base inode while the scratch path itself, asked for
+directly, is the top layer's; the symlink contrast follows the newest; a target in a lower
+layer resolves; two names to one target both resolve; the root-relative hardlink test is
+unchanged. Mutations caught: a hardlink given a symlink's ceiling, whiteouts above the ceiling
+applied, only the first requester answered, the ceiling check dropped.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes
