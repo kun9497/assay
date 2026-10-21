@@ -5367,7 +5367,10 @@ bare id(D126)와 정상 빌드는 건드리지 않습니다: 이 분기는 bucke
 
 쪼갠 빌드의 범위는 openSUSE Leap으로 절대 건너가지 않습니다. D108 미러와 D128 대여 모두 그것을
 떨굽니다(`withoutSplitBuilds`); 달리 줄 것이 없는 SLE 항목은 아예 미러되지 않고 셉니다
-(`SkippedLeapMirrorSplitBuild`), codestream fix도 함께 가진 항목은 그 범위만 미러합니다.
+(`SkippedLeapMirrorSplitBuild`), codestream fix도 함께 가진 항목은 그 범위만 미러합니다. native
+Leap 쌍이 있는 항목은 D128이 같은 이유로 대여를 거절하더라도 전처럼 native 우선으로 셉니다 —
+미러되지 않은 이유가 native 우선이고, Leap 카운터들은 미러 가능한 항목의 분할로 남습니다(첫
+초안은 그런 항목을 양쪽에 셌음; D131의 검토).
 
 **이유.** SUSE의 생성기는 일부 빌드의 purl을 아예 못 쪼갭니다: NEVR 전체가 purl의 이름이 되고
 버전은 비어 있음 — `pkg:rpm/suse/kernel-coco-6.4.0-15061.9.coco15sp6.1@`. 적힌 대로 저장하면
@@ -5432,9 +5435,19 @@ store → matcher: kernel-coco `15061.8`은 잡히고 `15061.9`를 안내받으�
 깨끗하며 `15061.5.coco`는 잡힘. 아카이브 전체 실행(`TestD131_AgainstAnExtractedArchive`,
 `ASSAY_SUSE_ARCHIVE_DIR`로 opt-in)은 fold된 키에 NEVR 모양 이름이 남지 않고, 쪼갠 범위가 Leap
 키에 닿지 않으며, 모든 쪼갬이 버전을 저장했고, 아무것도 kept되지 않았음을 단언합니다. 잡힌 변이
-열하나: purl 그대로 가드, 점 있는 release와 숫자 시작 검사(각각 호출자에서), 쪼갬 자체(판정
-테스트), 두 카운터, 쪼갬 기록, 미러의 건너뜀, 미러가 거르지 않은 범위를 별칭함, D128이 그것을
-빌려줌, 필터가 전부 남김.
+열넷: purl 그대로 가드, 점 있는 release와 숫자 시작 검사(각각 호출자에서), 쪼갬 자체(판정
+테스트), 두 카운터, 쪼갬 기록, 미러의 건너뜀, 미러가 거르지 않은 범위를 별칭함, D128이 쪼갠
+것만 있는 쌍과 *섞인* 쌍에서 그것을 빌려줌, 필터가 전부 남김, 쪼갠 항목이 unfixed로도 저장됨,
+D128 경로가 쪼갬 카운터에 셈. 생존 변이 하나는 기록된 동치입니다: 쪼갬 기록 가드의
+`version != ""` 절반, 그 쌍은 `withoutSplitBuilds` 자신의 `e.Fixed != ""`.
+
+**검토 (wf_b6d19909-404, 두 관점, 발견당 반박자 하나: 5건 발견, 4건 확인).** 넷 중 셋은 첫
+초안의 "열하나 잡힘"이 덮지 않던 테스트 공백이었습니다: 섞인 쌍의 D128 대여를 붙드는 테스트가
+없었고(D131 이전 줄로 되돌려도 스위트가 녹색), 판정 하네스가 "affected, fix 없음"을 "finding
+없음"과 같은 `""`로 접어서 no-fix 범위를 쪼갠 범위 옆에 그대로 둔 store에서도 모든 clean 행이
+통과했을 것이며, 위의 동치 변이가 기록되지 않았습니다. 넷째는 지금 고친 카운터 겹침. 규칙, Leap
+제외, LTSS 보류 경로(탐침: LTSS kernel-coco는 쪼개져 저장되고 미러되지 않음), `15061.N`이
+`150600.N` 아래인 rpm 정렬, 변하지 않는 qemu 판정과 `Evidence.Fixed`는 모두 공격을 견뎠습니다.
 
 **남은 불확실성.** 규칙은 제품 하나에서 잰 것입니다; 두 번째 빈 버전 모양은
 `RecommendedEmptyVersionKept`에 떨어져 진행 줄에 보이고 옛 동작을 유지합니다. Confidential

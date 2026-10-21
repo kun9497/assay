@@ -5561,7 +5561,10 @@ version.
 A split build's range never crosses to openSUSE Leap. D108's mirror and D128's lend both drop
 it (`withoutSplitBuilds`); an SLE entry with nothing else to offer is not mirrored at all and
 counted (`SkippedLeapMirrorSplitBuild`), one that also carries a codestream fix mirrors those
-ranges alone.
+ranges alone. An entry with a native Leap twin is counted native-wins as before, even when
+D128 declines to lend for the same reason — native-wins is why it was not mirrored, and the
+Leap counters stay a partition of the mirrorable entries (the first draft counted such an
+entry under both; D131's review).
 
 **Why.** SUSE's generator fails to split some builds' purls at all: the whole NEVR becomes the
 purl's name and the version is empty — `pkg:rpm/suse/kernel-coco-6.4.0-15061.9.coco15sp6.1@`.
@@ -5632,10 +5635,23 @@ and `15061.21` are clean, the old NEVR name matches nothing; qemu `150600.3.15.1
 `150600.3.20.1` clean, `15061.5.coco` found. The whole-archive run
 (`TestD131_AgainstAnExtractedArchive`, opt-in via `ASSAY_SUSE_ARCHIVE_DIR`) asserts no
 NEVR-shaped name remains on a folded key, no split range reached a Leap key, every split
-stored its version, and nothing was kept. Mutations caught, eleven: the verbatim-purl guard,
+stored its version, and nothing was kept. Mutations caught, fourteen: the verbatim-purl guard,
 the dotted-release and digit-led checks (each at the caller), the split itself (the verdict
 test), both counters, the split record, the mirror's skip, the mirror aliasing unfiltered
-ranges, D128 lending them, and the filter keeping everything.
+ranges, D128 lending them from a split-only twin and from a *mixed* one, the filter keeping
+everything, the split entry also stored unfixed, and the D128 path counted under the split
+counter. One survivor is a documented equivalent: the `version != ""` half of the split-record
+guard, whose twin is `withoutSplitBuilds`' own `e.Fixed != ""`.
+
+**Review (wf_b6d19909-404, two lenses, one refuter per finding: 5 found, 4 confirmed).** Three
+of the four were test gaps the first draft's "eleven caught" did not cover: the mixed-twin
+D128 lend was held by no test (reverting it to the pre-D131 line left the suite green); the
+verdict harness mapped "affected, no fix" to the same `""` as "no finding", so every clean row
+would have passed under a store that kept the no-fix range beside the split one; and the
+equivalent mutation above was unrecorded. The fourth was the counter overlap now fixed. The
+rule, the Leap exclusion, the LTSS pending path (probed: an LTSS kernel-coco splits, stores,
+and is not mirrored), the rpm ordering of `15061.N` below `150600.N`, and the unchanged qemu
+verdicts and `Evidence.Fixed` all held under attack.
 
 **Remaining uncertainty.** The rule is measured on one product; a second empty-version shape
 would land in `RecommendedEmptyVersionKept`, visible on the progress line, and keep the old
