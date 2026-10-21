@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -116,6 +117,26 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		return store.Provenance{}, err
 	}
 
+	var st stats
+	// covered accumulates the release-qualified keys actually seen, not the
+	// ones this provider hopes for. Red Hat publishes for RHEL 3 through 10
+	// and the set changes as releases are added and retired, so a hardcoded
+	// list would claim coverage of a release the archive stopped carrying.
+	covered := map[string]bool{}
+
+	// D129: the delta runs FIRST. The archive is a snapshot; documents
+	// written since it was built are fetched individually and emitted now
+	// (see deltaSince — this is the only thing that separated assay from
+	// grype on either differential run), and the walk below skips the
+	// archive's older copy of each one the delta fetched — so a document
+	// corrected to nothing affected leaves no record at all, where emitting
+	// the delta after the walk left the archive's stale record standing.
+	// Before the 262 MB spool as well: a delta that fails fails fast.
+	superseded, err := p.deltaSince(ctx, asOf, emit, &st, covered)
+	if err != nil {
+		return store.Provenance{}, err
+	}
+
 	// Spooled to disk first, then decompressed from there. Streaming the
 	// archive while storing what it produced held one connection open for the
 	// whole build (D64) - the transfer takes two minutes and the store takes
@@ -136,12 +157,6 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 	}
 	defer zr.Close()
 
-	var st stats
-	// covered accumulates the release-qualified keys actually seen, not the
-	// ones this provider hopes for. Red Hat publishes for RHEL 3 through 10
-	// and the set changes as releases are added and retired, so a hardcoded
-	// list would claim coverage of a release the archive stopped carrying.
-	covered := map[string]bool{}
 	tr := tar.NewReader(zr)
 	for {
 		if err := ctx.Err(); err != nil {
@@ -155,6 +170,12 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 			return store.Provenance{}, fmt.Errorf("redhat: read %s: %w", name, err)
 		}
 		if h.Typeflag != tar.TypeReg || !strings.HasSuffix(h.Name, ".json") {
+			continue
+		}
+		if superseded[path.Base(h.Name)] {
+			// D129: the delta fetched a newer copy of this document and has
+			// already emitted whatever it converted to, which may be nothing.
+			st.ArchiveSuperseded++
 			continue
 		}
 		if h.Size > maxDocument {
@@ -183,13 +204,6 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		if err := emit(adv); err != nil {
 			return store.Provenance{}, err
 		}
-	}
-
-	// The archive is a snapshot; documents written since it was built are
-	// fetched individually and emitted on top. See deltaSince — this is the
-	// only thing that separated assay from grype on either differential run.
-	if err := p.deltaSince(ctx, asOf, emit, &st, covered); err != nil {
-		return store.Provenance{}, err
 	}
 
 	// D20's coverage set, and the guard beside it. A build that produced no
@@ -296,7 +310,8 @@ func (s stats) String() string {
 			"%d documents with no CVE id, "+
 			"%d unreadable documents; delta: %d changed since the archive, "+
 			"%d fetched, %d already withdrawn, %d yielded a record, "+
-			"%d retried, %d rescued by a retry",
+			"%d retried, %d rescued by a retry, "+
+			"%d archive documents superseded by a newer copy the delta fetched (D129)",
 		s.Documents, s.Advisories, s.Affected, s.ModuleKept, len(s.moduleStreams),
 		s.Unfixable, s.UnfixableWontFix, s.UnfixableNotFixed, s.UnfixableUnstated,
 		s.UnfixableBothReasons, s.RemediationGrouped,
@@ -304,5 +319,5 @@ func (s stats) String() string {
 		s.SkippedNonRHEL, s.SkippedImage,
 		s.SkippedNoCPE, s.SkippedWholeProduct, s.SkippedBadProduct, s.SkippedNoPurl, s.SkippedNoCVE, s.SkippedBadDoc,
 		s.DeltaListed, s.DeltaFetched, s.DeltaGone, s.DeltaAdvisories,
-		s.DeltaRetried, s.DeltaRescued)
+		s.DeltaRetried, s.DeltaRescued, s.ArchiveSuperseded)
 }

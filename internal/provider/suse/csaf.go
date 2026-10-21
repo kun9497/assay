@@ -620,6 +620,13 @@ type stats struct {
 	// changed.
 	BareNamedByProductID int
 
+	// ArchiveSuperseded counts archive documents skipped because the delta
+	// pass, which runs first since D129, fetched a newer copy of the same
+	// document -- whatever that copy converted to. Only a FETCHED copy
+	// supersedes: a listed-but-gone document (DeltaGone) keeps its archive
+	// copy, so a transient 404 never drops a live advisory.
+	ArchiveSuperseded int
+
 	// The delta pass (delta.go), identical in meaning to redhat.stats'.
 	DeltaListed     int
 	DeltaFetched    int

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"regexp"
 	"time"
 
@@ -44,28 +45,38 @@ const deltaRequestTimeout = 3 * time.Minute
 var changesPath = regexp.MustCompile(`^[0-9]{4}/cve-[0-9]{4}-[0-9]+\.json$`)
 
 // deltaSince fetches every document that changed on or after the archive's
-// own Last-Modified, and emits what they convert to. Mirrors
-// redhat.deltaSince's shape (fetch the list, bound it, fetch concurrently in
-// order, emit AFTER the archive walk so last-write-wins keeps the newer
-// document) with one real difference: changedSince below reads changes.csv
-// start to finish rather than exiting early, because this feed's sort order
-// is not one it has kept (D122).
+// own Last-Modified, emits what they convert to, and returns the base names
+// of the documents it actually fetched, so the archive walk that follows can
+// skip its older copies (D129). Mirrors redhat.deltaSince's shape (fetch the
+// list, bound it, fetch concurrently in order) with one real difference:
+// changedSince below reads changes.csv start to finish rather than exiting
+// early, because this feed's sort order is not one it has kept (D122).
+//
+// Run BEFORE the archive walk since D129. It used to run after, relying on
+// last-write-wins by ID to let the newer document replace the archive's --
+// which has nothing to win with when the newer document converts to nothing
+// (a finding SUSE corrected to known_not_affected): the archive's stale
+// record stood until the archive was regenerated, about a day (2026-10-20
+// external review, #5). Only a FETCHED document supersedes; one listed and
+// gone (DeltaGone) keeps its archive copy, so a transient 404 never drops a
+// live advisory.
 func (p *Provider) deltaSince(ctx context.Context, cutoff time.Time,
-	emit func(advisory.Advisory) error, st *stats, covered map[string]bool) error {
+	emit func(advisory.Advisory) error, st *stats, covered map[string]bool) (map[string]bool, error) {
 
 	paths, err := p.changedSince(ctx, cutoff)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	st.DeltaListed = len(paths)
 	if len(paths) > maxDelta {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"suse: %d documents have changed since the %s archive was built, past the %d this "+
 				"will fetch one at a time; the feed has stopped being rebuilt rather than merely "+
 				"lagging", len(paths), cutoff.Format("2006-01-02"), maxDelta)
 	}
 
-	return p.eachDocument(ctx, paths, func(rel string, d *document) error {
+	fetched := map[string]bool{}
+	err = p.eachDocument(ctx, paths, func(rel string, d *document) error {
 		if d == nil {
 			// Listed and no longer served -- changes.csv and the individual
 			// document being generated at slightly different times is a race,
@@ -74,6 +85,10 @@ func (p *Provider) deltaSince(ctx context.Context, cutoff time.Time,
 			return nil
 		}
 		st.DeltaFetched++
+		// By base name: the archive's entries carried no year directory
+		// before 2026-10-15 (D122) and the row's directory is not the CVE's
+		// year, so "cve-YYYY-NNNNN.json" is the one spelling both share.
+		fetched[path.Base(rel)] = true
 		adv, ok := convert(d, st)
 		if !ok {
 			return nil
@@ -87,6 +102,7 @@ func (p *Provider) deltaSince(ctx context.Context, cutoff time.Time,
 		st.DeltaAdvisories++
 		return nil
 	})
+	return fetched, err
 }
 
 // deltaWorkers is how many documents are fetched at once, matching
