@@ -5248,7 +5248,64 @@ records for D108; `SLES:16.1` entries mirror nowhere until it is added. (3) `pac
 a bare product purl whose name ends in a version-like segment (`libwmf-0_2-7` →
 `pkg:rpm/suse/libwmf@0_2-7`) into the wrong name, so bare entries for such packages — affected
 or not affected — key under a name no installed rpm carries. Pre-existing since D77; it is a
-false-negative class of its own and is listed in deferred-decisions.
+false-negative class of its own and is listed in deferred-decisions (resolved the same day
+by D126).
+
+---
+
+### D126 — A bare SUSE status id is named by its product_id; only a recommended build is named by its purl
+
+**Decision.** In the SUSE CSAF provider the *bucket* an id comes from decides how its package
+name is read. An id from `known_affected`, `known_not_affected` or a no-fix remediation names
+a bare product, and its component (the leaf's `product_id`) is the rpm package name, carrying
+no version. An id from `recommended` names a shipped build, and its purl carries the name and
+the fix version, as before. The leaf must still exist with a readable purl — an id naming no
+leaf, or a leaf with no purl (the `java-1_7_0-openjdk` gap), stays a counted skip rather than
+a name guessed from the raw string. `BareNamedByProductID` counts every bare id whose purl
+would have given a different name and is printed on the progress line.
+
+**Why, measured.** D125's review found that SUSE's generator cuts a bare product's purl *from*
+the `product_id* at the first hyphen-digit boundary: `libwmf-0_2-7` carries
+`pkg:rpm/suse/libwmf@0_2-7`, `libglib-2_0-0` carries `pkg:rpm/suse/libglib@2_0-0`,
+`typelib-1_0-WebKit2-4_0` carries `pkg:rpm/suse/typelib-1_0@WebKit2-4_0`, while each one's
+build leaf (`libwmf-0_2-7-0.2.12-150000.4.4.1`) carries the correct name. `packageOf` trusted
+the purl for every leaf, so the bare entries landed under `libwmf`, `libglib`, `typelib-1_0`
+— names no installed rpm has. Two independent surveys of the 2026-10-19 archive (71,711
+documents, 5,160,430 leaves), reconciled: of 726,722 distinct status ids that resolve to a
+leaf, 714,969 have an empty purl version and a purl name equal to the `product_id`, and
+**11,753 are mis-split** (404 products, 190 wrong names, 2,862 documents); every one of them
+reconstructs `purl_name-purl_version == product_id`, which is how the D77 measurement ("100%
+reconstruct their own product_id") was true and misleading at once. The damage: **39,215
+entries in 2,794 documents keyed under a wrong name, 31,494 of them (80%) the package's only
+entry on that key** — a silent false negative of D8's class on `libwebkit2gtk-4_0-37` and
+`libjavascriptcoregtk-4_0-18` (3,318 each), the `typelib-1_0-*` family, `libMagickCore-6_Q16-1`
+(1,785), `libsoup-2_4-1`, `libglib-2_0-0`/`libgio-2_0-0`/`libgmodule-2_0-0` (228 each).
+Twenty-eight of the wrong names (`libsoup`, `libwmf`, `libyaml`, `librsvg`, `Mesa`,
+`pipewire`…) are real bare packages elsewhere, so 311 of those entries attached a status to a
+different real package.
+
+**Why the bucket, not a smarter split.** The bucket is the only signal measured exception-free
+in both directions: 0 of the 726,722 status ids names a build (none passes either build-shape
+regex without a sibling proof; none of the 376,832 distinct recommended components appears as
+a status component anywhere), and 0 of the 4,396,450 recommended ids names a bare product.
+The same holds for no-fix remediation ids, which must take the same name or the won't-fix
+reason never attaches (230,566 of 541,090 are a status id verbatim; 0 name a build). Every
+syntactic rule on the version string fails somewhere: a one-hyphen rule separates nothing; a
+dotted-or-datestamp release rule matches all 66,615 real build versions and exactly one
+mis-split (`typelib-1_0-Vte-2.91`, whose real name ends in a dotted release); a digit-initial
+rule matches no mis-split but rejects 577 real builds (`cdparanoia-IIIalpha9.8-691.22`,
+texlive's `svn15878.0-45.el7`). A same-document sibling proof (a build leaf whose purl name
+equals the bare `product_id`) exists for only 7,144 of the 11,753. "Refuse unknown shapes,
+never guess" (D77's own discipline) points at the signal with no fitted pattern. What the rule
+would get wrong — a build published under `known_affected` — happens 0 times today, would be
+named by its full `product_id` and reach nothing, and would show on the progress line, since
+a build leaf's purl name never equals its `product_id`.
+
+**Not fixed here, recorded.** 89,598 `recommended` ids carry the whole NEVR in the purl *name*
+with an empty version (`pkg:rpm/suse/kernel-default-2.6.32.54-0.155.TDC.1@`) — Liberty Linux,
+Teradata, HPC 12 SP3 and Confidential Computing platforms, almost all of which the fold refuses;
+the ones on a folding key are stored unfixed under a NEVR-shaped name and reach nothing.
+Listed in deferred-decisions as a known hazard with its own measurement to do.
 
 ---
 

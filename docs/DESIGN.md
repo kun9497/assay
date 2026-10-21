@@ -824,6 +824,13 @@ exited 0 while 24 findings went unmentioned.
       for "Already fixed"/"Released" too, so a fixed SLE source still mirrors (4,363 of
       4,463 overlaps; the 100 no-fix ones are declined). Nothing is stored from the bucket
       (D1); per package and release, after native-wins, counted on the progress line
+- [x] A bare SUSE status id is named by its product_id (D126) — SUSE cuts a bare product's
+      purl from the product_id at the wrong hyphen (`libwmf-0_2-7` → `libwmf@0_2-7`,
+      `libglib-2_0-0` → `libglib@2_0-0`), so 11,753 `known_affected`/`known_not_affected`
+      ids (39,215 entries, 31,494 the package's only entry) were keyed under names no rpm
+      has: a silent false negative. The bucket decides — status and no-fix remediation ids
+      take the product_id, `recommended` builds keep the purl split — measured
+      exception-free both ways; `BareNamedByProductID` on the progress line
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15
