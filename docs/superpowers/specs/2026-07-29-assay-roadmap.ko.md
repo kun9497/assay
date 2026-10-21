@@ -4999,9 +4999,14 @@ index는 자신이 나열된 digest와 대조합니다. registry 경로에서는
 없는 참조로 이미지를 지목할 때에도 지켜집니다. 이미지 참조 모양인 product `@id`(`/`, `:` 또는
 `@`를 포함하고 CPE, URN, purl, URL이 아님) 중 go-containerregistry가 digest, tag 또는 repository를
 거부하는 것은, 어떤 대상과도 맞지 않는 이미지 product가 됩니다. 예: `app@sha256:truncated`,
-`app@sha512:bad`, `app@latest`, `Org/App`, `app:3.13!`, 그리고 나머지 부분이 이 중 하나인
-`docker://` 참조. 그 문장은 범위 밖으로 보고되고, product와 파싱 오류를 적은 stderr 경고가 한 줄
-나옵니다.
+`app@sha512:bad`, `Org/App`, `app:3.13!`, 그리고 나머지 부분이 이 중 하나인 `docker://` 참조.
+그 문장은 범위 밖으로 보고되고, product와 파싱 오류를 적은 stderr 경고가 한 줄 나옵니다.
+
+`name@version`은 이미지 모양이 아닙니다. 이미지의 `@` 뒤에는 언제나 `algo:hex`가 옵니다. `@` 뒤에
+`:` 없는 것이 오면(`lodash@4.17.21`, `github.com/org/mod@v1.2.0`, `app@latest`) npm, Go, Python이
+패키지를 적는 방식이므로 일반 식별자로 남고, 그것이 묶는 subcomponent는 여전히 모든 곳에
+적용됩니다. D124의 첫 구현은 이것들을 잘못 쓴 이미지로 읽어 면제를 소리 없이 잃었습니다. #167
+리뷰가 머지 전에 잡았습니다.
 
 **이유와 측정.** 2026-10-20 외부 검토가 보고했고, 여기서 다시 측정했습니다.
 `imageFromReference`는 파싱에 실패하면 언제나 "이미지가 아님"을 반환했습니다. 그러면 호출자가

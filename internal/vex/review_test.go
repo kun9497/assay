@@ -32,7 +32,7 @@ func TestApply_UnreadImageProductStillScopes(t *testing.T) {
 		// -- the 2026-10-20 external review's exit 1 -> 0 on another image.
 		{"truncated digest", Product{ID: "dhi/python@sha256:truncated"}, `"dhi/python@sha256:truncated" looks like an image reference`},
 		{"bad digest algorithm", Product{ID: "dhi/python@sha512:bad"}, `"dhi/python@sha512:bad" looks like an image reference`},
-		{"not a digest at all", Product{ID: "dhi/python@latest"}, `"dhi/python@latest" looks like an image reference`},
+		{"empty digest", Product{ID: "dhi/python@sha256:"}, `"dhi/python@sha256:" looks like an image reference`},
 		{"tag that does not parse", Product{ID: "dhi/python:3.13!"}, `"dhi/python:3.13!" looks like an image reference`},
 		{"repository that does not parse", Product{ID: "Dhi/Python"}, `"Dhi/Python" looks like an image reference`},
 		{"transport reference that does not parse", Product{ID: "docker://Dhi/Python:3.13"}, `"docker://Dhi/Python:3.13" looks like an image reference`},
@@ -56,6 +56,47 @@ func TestApply_UnreadImageProductStillScopes(t *testing.T) {
 			}
 			if tt.wantWarn != "" && !strings.Contains(strings.Join(warnings, "\n"), tt.wantWarn) {
 				t.Errorf("warnings = %q, want one saying the product %s", warnings, tt.wantWarn)
+			}
+		})
+	}
+}
+
+// TestApply_VersionedIdentifierIsNotAnImage: D124 must not read every
+// "name@version" as a misspelled image. "@" followed by anything but an
+// "algo:hex" digest is never an image reference — it is how npm, Go and
+// Python name a package at a version — so a statement that groups its
+// subcomponents under such an identifier stays unscoped and applies on every
+// target, with no warning. The first D124 cut scoped these to no target and
+// lost the suppression (2026-10-20 review of #167).
+func TestApply_VersionedIdentifierIsNotAnImage(t *testing.T) {
+	f := osFinding("CVE-2031-7001", "pkg:deb/debian/libgssapi-krb5-2@1.20.1-2+deb12u4?arch=amd64&distro=debian-12.11",
+		"libgssapi-krb5-2", "1.20.1-2+deb12u4", "krb5", "1.20.1-2+deb12u4")
+	repo, tag := TargetFromReference("debian:12")
+	stock := Target{Image: true, Repository: repo, Tag: tag}
+	for _, id := range []string{
+		"lodash@4.17.21",
+		"github.com/Azure/azure-sdk-for-go@v68.0.0",
+		"dhi/python@latest",
+	} {
+		t.Run(id, func(t *testing.T) {
+			group := Product{ID: id, Subcomponents: []Product{{PURLAttr: "pkg:deb/debian/libgssapi-krb5-2"}}}
+			d := &Document{Statements: []Statement{{
+				Vulnerability: Vulnerability{Name: "CVE-2031-7001"},
+				Status:        "not_affected", Justification: "inline_mitigations_already_exist",
+				Products: []Product{group},
+			}}}
+			var warnings []string
+			_, sup, st := d.Apply([]matcher.Finding{f}, stock, func(m string) { warnings = append(warnings, m) })
+			if len(sup) != 1 {
+				t.Errorf("suppressed %v, want the subcomponent's finding", suppressedNames(sup))
+			}
+			if st.OutOfScope != 0 {
+				t.Errorf("stats = %+v, want the statement in scope", st)
+			}
+			for _, w := range warnings {
+				if strings.Contains(w, "image") {
+					t.Errorf("warned %q, want no warning: the product is not an image", w)
+				}
 			}
 		})
 	}

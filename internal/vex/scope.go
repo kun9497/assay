@@ -152,14 +152,19 @@ func imageFromPURL(p pkgmeta.PURL) (imageRef, bool) {
 // ParsePURL does not read.
 //
 // D124: so does a reference that is shaped like an image and does not parse —
-// a digest that is not one ("app@sha256:truncated", "app@latest"), a tag or a
-// repository go-containerregistry refuses ("Org/App"), or a transport
+// a digest that is not one ("app@sha256:truncated", "app@sha512:bad"), a tag
+// or a repository go-containerregistry refuses ("Org/App"), or a transport
 // reference whose remainder is any of those. Before D124 these came back as
 // not-an-image, the caller made them a plain identifier, and the statement
 // lost its image scope: a bare package product beside such a reference then
 // suppressed that package on every image (2026-10-20 external review, exit 1
 // -> 0 on an unrelated image). The error says why, so the caller can warn
 // rather than drop the statement silently.
+//
+// "name@version" with no "algo:" after the "@" is not image-shaped at all —
+// it is npm's, Go's and Python's spelling of a package — so it stays a plain
+// identifier. The first D124 cut read it as a misspelled image and unscoped
+// the subcomponents it grouped.
 func imageFromReference(s string) (imageRef, bool, error) {
 	lower := strings.ToLower(s)
 	for _, tr := range referenceTransports {
@@ -189,6 +194,13 @@ func imageFromReference(s string) (imageRef, bool, error) {
 		}
 	}
 	if repo, digest, ok := strings.Cut(s, "@"); ok {
+		if !strings.Contains(digest, ":") {
+			// "name@version" — lodash@4.17.21, github.com/org/mod@v1.2.0 —
+			// is how npm, Go and Python spell a package, and never how an
+			// image is spelled: an image's "@" is always followed by
+			// "algo:hex". Not an image, and not a misspelled one either.
+			return imageRef{}, false, nil
+		}
 		if !isDigest(digest) {
 			return imageRef{}, true, fmt.Errorf("%q is not a digest", digest)
 		}

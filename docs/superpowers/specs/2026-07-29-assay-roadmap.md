@@ -5157,9 +5157,16 @@ and the like) is a separate decision.
 also holds when the image is named by a reference assay cannot parse. A product `@id` shaped
 like an image reference (it contains `/`, `:` or `@` and is not a CPE, URN, purl or URL) whose
 digest, tag or repository go-containerregistry rejects is an image product that matches no
-target. Examples: `app@sha256:truncated`, `app@sha512:bad`, `app@latest`, `Org/App`,
-`app:3.13!`, or a `docker://` reference whose remainder is any of those. Its statement is
-reported out of scope, with one stderr warning naming the product and the parse error.
+target. Examples: `app@sha256:truncated`, `app@sha512:bad`, `Org/App`, `app:3.13!`, or a
+`docker://` reference whose remainder is any of those. Its statement is reported out of
+scope, with one stderr warning naming the product and the parse error.
+
+`name@version` is not image-shaped. An image's `@` is always followed by `algo:hex`; an `@`
+followed by anything without a `:` (`lodash@4.17.21`, `github.com/org/mod@v1.2.0`,
+`app@latest`) is how npm, Go and Python spell a package, so it stays a plain identifier and
+the subcomponents it groups still apply everywhere. The first cut of D124 read these as
+misspelled images and silently lost their suppressions; the review of #167 caught it before
+merge.
 
 **Why, measured.** An external review on 2026-10-20 reported it, and it was re-measured here.
 `imageFromReference` returned "not an image" on every parse failure. The caller then kept the
