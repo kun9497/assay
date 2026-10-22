@@ -76,6 +76,18 @@ packages permission. If your pipeline cannot reach ghcr.io at all, run `assay db
 instead — it builds the database from upstream sources with no external artifact, at the
 cost of time.
 
+The published artifact is signed (D137), and `db update` verifies the signature against the
+keys built into the binary before it installs anything — so a database that reaches your
+pipeline through a mirror is only installed if the mirror copied the signature too. The
+signature is a second tag beside the artifact, `sha256-<digest>.sig`; a mirror that copies
+tags by name (`crane copy`, `oras cp`, a pull-through cache) has it already, one that copies
+the artifact by digest alone does not, and `db update --from <mirror>` then stops with
+`is not signed` and the tag name to copy. `--allow-unsigned` installs anyway, with a
+`WARNING` on stderr and `signed: NO (--allow-unsigned)` in `db status` and in every report's
+provenance; a signature that is present and does not verify is refused regardless, because
+that is the case the signature exists for. `db build --seed` applies the same check with no
+opt-out.
+
 The database is orthogonal to the scan: update it once per job (or cache it), and every
 `assay scan` after that only reads it. A scan of an SBOM or a local tarball makes no network
 call at all.

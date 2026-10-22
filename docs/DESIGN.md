@@ -358,9 +358,13 @@ without one, just slower.
 ref` prints exactly the tag a given binary reads, so an outdated binary gets a clean "not
 found" against an old tag rather than a database it would misinterpret.
 
-- **`assay db update [--from <ref>]`** — pulls the published artifact. This is the everyday
-  path: seconds, not hours, and it is what CI should run. `--from` points at a mirror or a
-  pinned digest instead of the default.
+- **`assay db update [--from <ref>] [--allow-unsigned]`** — pulls the published artifact.
+  This is the everyday path: seconds, not hours, and it is what CI should run. `--from`
+  points at a mirror or a pinned digest instead of the default. The artifact's signature is
+  verified against the keys built into the binary before anything is written (D137): an
+  unsigned artifact is refused with the `.sig` tag a mirror must copy, `--allow-unsigned`
+  installs it anyway and records the database as unverified, and a signature that is present
+  and does not verify is refused regardless.
 - **`assay db build [--seed <ref>]`** — builds from the upstream providers directly. This is
   the publisher's command, and it is also there for anyone who wants an independently built
   database rather than trusting `ghcr.io`. A full pass over Go, npm, PyPI, Alpine, and NVD
@@ -898,6 +902,13 @@ exited 0 while 24 findings went unmentioned.
       withdrawn before D136 need one `NVD_SINCE_DAYS=120` build (deferred-decisions)
 - [x] `--fail-on-epss=NaN` is refused at parse time (2026-10-22 review #6) — it had passed
       the range check and silently disabled the gate; exit 2 before any scan
+- [x] The published artifact is signed and verified on pull (D137) — cosign key-based
+      signing by digest after every `db push` (`sha256-<digest>.sig`, self-checked in the
+      workflow; `db-sign.yml` signs a hand push), stdlib ECDSA-P256 verification against keys
+      embedded in the binary before anything is written; unsigned → refused with the tag to
+      copy, `--allow-unsigned` installs and records `Unverified`, a wrong signature is
+      refused regardless, `db build --seed` has no opt-out; release checksums signed and the
+      installer verifies them with `openssl` (`install.sh`, pinned by commit in the README)
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15

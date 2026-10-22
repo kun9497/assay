@@ -344,9 +344,12 @@ OCI 아티팩트로 배포되며, 태그는 스키마 버전입니다 — `assay
 태그를 정확히 출력하므로, 오래된 바이너리는 잘못 해석할 데이터베이스 대신 옛 태그에 대한 깔끔한
 "찾을 수 없음"을 받습니다.
 
-- **`assay db update [--from <ref>]`** — 배포된 아티팩트를 받아옵니다. 평상시 경로입니다. 시간이
-  아니라 초 단위이고, CI가 실행해야 할 것도 이것입니다. `--from`은 기본값 대신 미러나 고정된
-  다이제스트를 가리킵니다.
+- **`assay db update [--from <ref>] [--allow-unsigned]`** — 배포된 아티팩트를 받아옵니다. 평상시
+  경로입니다. 시간이 아니라 초 단위이고, CI가 실행해야 할 것도 이것입니다. `--from`은 기본값 대신
+  미러나 고정된 다이제스트를 가리킵니다. 아티팩트의 서명은 무엇이든 쓰기 전에 바이너리에 내장된
+  키로 검증됩니다(D137): 서명 없는 아티팩트는 미러가 복사해야 할 `.sig` 태그를 내며 거부되고,
+  `--allow-unsigned`는 그래도 설치하되 데이터베이스를 미검증으로 기록하며, 서명이 있는데 검증되지
+  않으면 플래그와 무관하게 거부됩니다.
 - **`assay db build [--seed <ref>]`** — 업스트림 provider들로부터 직접 빌드합니다. 배포자의
   명령이고, `ghcr.io`를 신뢰하는 대신 독립적으로 빌드하고 싶은 사람을 위한 것이기도 합니다.
   Go, npm, PyPI, Alpine, NVD(`NVD_ENABLE=1`)를 전부 도는 전체 패스는 약 **7시간**이 걸립니다
@@ -864,6 +867,12 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       `NVD_SINCE_DAYS=120` 빌드 한 번이 필요(deferred-decisions)
 - [x] `--fail-on-epss=NaN`은 파싱 단계에서 거절 (2026-10-22 리뷰 #6) — 범위 검사를 통과해
       게이트를 조용히 껐었음; 스캔 전에 exit 2
+- [x] 발행된 아티팩트는 서명되고 pull 시 검증 (D137) — 모든 `db push` 뒤 digest 에 대한 cosign
+      키 기반 서명(`sha256-<digest>.sig`, 워크플로가 자기 검사; 손 push 는 `db-sign.yml`이 서명),
+      무엇이든 쓰기 전에 바이너리에 내장된 키로 stdlib ECDSA-P256 검증; 서명 없음 → 복사할 태그를
+      내며 거부, `--allow-unsigned`는 설치하되 `Unverified` 기록, 잘못된 서명은 플래그와 무관하게
+      거부, `db build --seed`는 건너뛸 수 없음; 릴리스 체크섬 서명과 설치기의 `openssl` 검증
+      (`install.sh`, README 에 커밋으로 고정)
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨

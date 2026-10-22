@@ -52,7 +52,8 @@ git clone https://github.com/kun9497/assay.git && cd assay && make build   # -> 
 ## 빠른 시작
 
 ```bash
-# 1. 취약점 데이터베이스 받기 (수 초 — 발행된 OCI 아티팩트를 당겨옴)
+# 1. 취약점 데이터베이스 받기 (수 초 — 발행된 OCI 아티팩트를 당겨오고
+#    assay 에 내장된 키로 서명을 검증)
 assay db update
 
 # 2. 스캔
