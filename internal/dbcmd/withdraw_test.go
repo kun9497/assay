@@ -194,12 +194,16 @@ func TestUpdate_WithdrawnCountIsThisRunsNotTheSeeds(t *testing.T) {
 		})
 	}
 	// A ratings-only build copies the seed's advisories AND ratings whole,
-	// so its counts cannot drop; its tolerance must be zero all the same.
-	t.Run("ratings-only build", func(t *testing.T) {
+	// so its counts cannot drop; its tolerance must be zero all the same --
+	// including for a source whose annotator is not the one being re-run.
+	t.Run("ratings-only build re-running another source", func(t *testing.T) {
+		other := fakeAnnotator{name: "OTHER", window: "modified 2026-08-03..2026-08-04",
+			coversSince: time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC),
+			ratings:     []advisory.Rating{{CVE: "CVE-2026-OTHER", Source: "OTHER"}}}
 		dst := filepath.Join(t.TempDir(), "vulnerability.db")
 		var out, errOut bytes.Buffer
 		if code := Update(context.Background(), dst, seed, "",
-			true, nil, []provider.Annotator{a}, nil, nil, &out, &errOut); code != 0 {
+			true, nil, []provider.Annotator{other}, nil, nil, &out, &errOut); code != 0 {
 			t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
 		}
 		db, err := store.Open(dst)
