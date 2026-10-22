@@ -252,7 +252,14 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 			// is converted and emitted after the delta's, and last write
 			// wins with the newer one. Unreadable or absent dates keep the
 			// skip: D129's rule is the one with a measured failure behind it.
-			if !revisionOf(&d).After(deltaRevision) {
+			//
+			// "Either side" is load-bearing: a zero DELTA date must keep the
+			// skip too. Written as `!archive.After(delta)` alone, any dated
+			// archive copy was After a zero delta date and the archive's
+			// stale copy won over a correction whose date did not parse --
+			// D129's hole back, through the undated side (D135's review).
+			archiveRevision := revisionOf(&d)
+			if deltaRevision.IsZero() || archiveRevision.IsZero() || !archiveRevision.After(deltaRevision) {
 				st.ArchiveSuperseded++
 				continue
 			}

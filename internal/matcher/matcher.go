@@ -1040,6 +1040,18 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 							ev.Reason = fmt.Sprintf(
 								"%s (matched via apk provides %q, declared by installed package %q)",
 								ev.Reason, lookupName, p.Name)
+						} else if compareVersion != p.Version {
+							// D41/D134: the version the Reason names is the
+							// SOURCE package's, which the package line never
+							// shows. Said here for the same reason the D95
+							// note above is: a util-linux at
+							// 1:2.38.1-5+deb12u3 found below a fix at
+							// 2.38.1-5+deb12u3 reads as a contradiction unless
+							// the Evidence says which version was compared
+							// and where it came from (D10).
+							ev.Reason = fmt.Sprintf(
+								"%s (compared the source package %s's version %q recorded by the package database, not the installed binary's %q)",
+								ev.Reason, lookupName, compareVersion, p.Version)
 						}
 						seen[a.ID] = true
 						ids := identifiers(a)

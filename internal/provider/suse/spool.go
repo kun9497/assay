@@ -170,7 +170,17 @@ func (p *Provider) download(ctx context.Context, url string, f *os.File, from in
 	}
 	modified, err := lastModifiedOf(resp, url)
 	if err != nil {
-		return from, whole, time.Time{}, err
+		if resp.StatusCode != http.StatusPartialContent || sameAs.IsZero() {
+			// The whole-file response is the one statement of the
+			// bytes' age (D12) and must carry it.
+			return from, whole, time.Time{}, err
+		}
+		// A resumed response without the header: RFC 9110 only SHOULD-
+		// requires it on a 206, and the generation was already recorded
+		// from the 200 this transfer began with. Read as the same
+		// generation rather than failing a download whose age is known
+		// (D135's review); a server that does send it is still compared.
+		modified = sameAs
 	}
 	if from > 0 && !sameAs.IsZero() && !modified.Equal(sameAs) {
 		if err := f.Truncate(0); err != nil {

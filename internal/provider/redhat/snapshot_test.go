@@ -106,6 +106,36 @@ func TestDelta_ArchiveCopyNewerThanTheDeltasCopyIsKept(t *testing.T) {
 	}
 }
 
+// A delta copy with no readable date keeps D129's skip against a dated
+// archive copy (see suse's test of the same name for the history).
+func TestDelta_UndatedDeltaCopyStillSupersedesADatedArchiveCopy(t *testing.T) {
+	t2 := time.Date(2026, 8, 6, 2, 0, 0, 0, time.UTC)
+	f := &feed{
+		pointer: "csaf_vex_2026-08-05.tar.zst",
+		archive: archiveOf(t, map[string]string{
+			"2024/cve-2024-0001.json": rhel9Doc(t, "CVE-2024-0001", "curl", "0:1-1.el9.x86_64"), // keeps D20's guard quiet
+			"2026/cve-2026-0001.json": docJSONDated(t, "CVE-2026-0001", t2, "openssh", "0:2-2.el9.x86_64"),
+		}),
+		changes: changesCSV([2]string{"2026/cve-2026-0001.json", t2.Add(time.Hour).Format(time.RFC3339)}),
+		docs: map[string]string{
+			// Undated, and corrected to nothing affected.
+			"2026/cve-2026-0001.json": docJSON(t, "CVE-2026-0001", map[string]string{"R": "cpe:/o:redhat:enterprise_linux:9"}, nil, nil),
+		},
+	}
+	got, progress, err := fetchAll(t, serve(t, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range got {
+		if a.ID == "REDHAT-CVE-2026-0001" {
+			t.Fatalf("the archive's stale record survived the delta's undated correction: %+v", a.Affected)
+		}
+	}
+	if !strings.Contains(progress, "1 archive documents superseded") || !strings.Contains(progress, "0 archive documents newer") {
+		t.Errorf("progress should count the archive copy as superseded, not newer:\n%s", progress)
+	}
+}
+
 // The control: a delta copy at least as new as the archive's still
 // supersedes it (D129).
 func TestDelta_CopyAsNewAsTheArchivesStillSupersedes(t *testing.T) {

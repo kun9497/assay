@@ -44,6 +44,10 @@ type resettingServer struct {
 	// restarts counts GETs with no Range header after the first attempt --
 	// a client that chose to start over rather than resume.
 	restarts atomic.Int32
+	// noModifiedOn206 drops the Last-Modified header from resumed (Range)
+	// responses only, the way a CDN that SHOULD-but-does-not send it on a
+	// partial response behaves.
+	noModifiedOn206 bool
 }
 
 func (s *resettingServer) handler(t *testing.T) http.Handler {
@@ -63,7 +67,7 @@ func (s *resettingServer) handler(t *testing.T) http.Handler {
 		if s.regenerateAfter > 0 && s.attempts.Load()+1 >= s.regenerateAfter {
 			modTime = modTime.Add(time.Hour)
 		}
-		if !modTime.IsZero() {
+		if !modTime.IsZero() && !(s.noModifiedOn206 && r.Header.Get("Range") != "") {
 			w.Header().Set("Last-Modified", modTime.Format(http.TimeFormat))
 		}
 		if r.Method == http.MethodGet && r.Header.Get("Range") == "" && s.attempts.Load() > 0 {
@@ -267,6 +271,31 @@ func TestFetch_ArchiveRegeneratedMidDownloadRestartsFromZero(t *testing.T) {
 	}
 	if want := archiveBuilt2026.Add(time.Hour); !prov.DataAsOf.Equal(want) {
 		t.Errorf("DataAsOf = %s, want the regenerated archive's %s", prov.DataAsOf, want)
+	}
+}
+
+// A resumed response that carries no Last-Modified is read as the same
+// generation, not as a failure: the age of the bytes was recorded from the
+// 200 the transfer began with, and RFC 9110 only SHOULD-requires the header
+// on a 206 (D135's review).
+func TestFetch_ResumeWithoutLastModifiedIsNotFatal(t *testing.T) {
+	s, srv := newResettingServer(t, &resettingServer{
+		body: fixture(t, "archive.tar.bz2"), failFirst: 1, noModifiedOn206: true,
+	})
+	p := New(Options{BaseURL: srv.URL})
+	var got []advisory.Advisory
+	prov, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
+		got = append(got, a)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v -- a 206 without Last-Modified must resume, not fail", err)
+	}
+	if len(got) != 2 || !s.ranged.Load() {
+		t.Fatalf("advisories = %d ranged = %v, want both documents through a resumed transfer", len(got), s.ranged.Load())
+	}
+	if !prov.DataAsOf.Equal(archiveBuilt2026) {
+		t.Errorf("DataAsOf = %s, want the generation the 200 reported, %s", prov.DataAsOf, archiveBuilt2026)
 	}
 }
 

@@ -88,6 +88,16 @@ func TestRun_NPMAliasIsMatchedAsTheRegistryPackage(t *testing.T) {
 			if got := doc.Findings[0].Package.PURL; got != "pkg:npm/lodash@4.17.20" {
 				t.Errorf("finding PURL = %q, want pkg:npm/lodash@4.17.20", got)
 			}
+			// The install path reaches the JSON report (D132's one promised
+			// renderer) -- and only for an alias.
+			locs := doc.Findings[0].Package.Locations
+			wantInstall := "node_modules/utility-alias"
+			if fixture.name == "regular" {
+				wantInstall = ""
+			}
+			if len(locs) != 1 || locs[0].Install != wantInstall {
+				t.Errorf("locations = %+v, want one with install %q", locs, wantInstall)
+			}
 		})
 	}
 }

@@ -128,6 +128,10 @@ func TestParse_V3AliasEntryIsNamedByItsRegistryIdentity(t *testing.T) {
 	    },
 	    "node_modules/plain": {
 	      "version": "3.0.0"
+	    },
+	    "node_modules/redundant": {
+	      "name": "redundant",
+	      "version": "4.0.0"
 	    }
 	  }
 	}`)
@@ -153,17 +157,24 @@ func TestParse_V3AliasEntryIsNamedByItsRegistryIdentity(t *testing.T) {
 			t.Errorf("%q was cataloged as a package: the install path is where lodash lives, not what it is", alias)
 		}
 	}
-	if len(pkgs) != 3 || stats.Cataloged != 3 {
-		t.Errorf("cataloged %d packages (stats %d), want 3", len(pkgs), stats.Cataloged)
+	if len(pkgs) != 4 || stats.Cataloged != 4 {
+		t.Errorf("cataloged %d packages (stats %d), want 4", len(pkgs), stats.Cataloged)
 	}
 	// The install path is kept as the location, beside the lockfile that
-	// recorded it, so --explain can still say where the aliased copy lives.
+	// recorded it, so the JSON report can still say where the aliased copy
+	// lives. A name field that merely repeats the folder name (npm never
+	// writes one, but a hand-edited lockfile may) is not an alias and gets
+	// no install path.
 	for _, pk := range pkgs {
-		if pk.Name != "lodash" {
-			continue
-		}
-		if len(pk.Locations) != 1 || pk.Locations[0].Path != p || pk.Locations[0].Install != "node_modules/utility-alias" {
-			t.Errorf("lodash Locations = %+v, want the lockfile %s with Install node_modules/utility-alias", pk.Locations, p)
+		switch pk.Name {
+		case "lodash":
+			if len(pk.Locations) != 1 || pk.Locations[0].Path != p || pk.Locations[0].Install != "node_modules/utility-alias" {
+				t.Errorf("lodash Locations = %+v, want the lockfile %s with Install node_modules/utility-alias", pk.Locations, p)
+			}
+		case "redundant":
+			if pk.Locations[0].Install != "" {
+				t.Errorf("redundant Install = %q, want empty: a name equal to the folder is not an alias", pk.Locations[0].Install)
+			}
 		}
 	}
 }

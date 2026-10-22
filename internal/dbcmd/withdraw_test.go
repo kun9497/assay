@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -169,7 +170,7 @@ func TestUpdate_WithdrawnCountIsThisRunsNotTheSeeds(t *testing.T) {
 		name       string
 		annotators []provider.Annotator
 	}{
-		{"the annotator ran and withdrew nothing", []provider.Annotator{a}},
+		{"the annotator ran and withdrew nothing", []provider.Annotator{fakeWithdrawingAnnotator{fakeAnnotator: a}}},
 		{"the annotator did not run this build", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -178,6 +179,12 @@ func TestUpdate_WithdrawnCountIsThisRunsNotTheSeeds(t *testing.T) {
 			if code := Update(context.Background(), dst, seed, "",
 				false, []provider.Provider{p}, tc.annotators, nil, nil, &out, &errOut); code != 0 {
 				t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+			}
+			// A withdrawing annotator that found nothing stale still reports
+			// its zero: the reconciliation run's measurement must be a line,
+			// not an absence (D136's review).
+			if len(tc.annotators) > 0 && !strings.Contains(errOut.String(), "NVD: 0 stored rating(s) withdrawn") {
+				t.Errorf("stderr lacks the zero withdrawn line:\n%s", errOut.String())
 			}
 			db, err := store.Open(dst)
 			if err != nil {

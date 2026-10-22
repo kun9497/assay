@@ -301,6 +301,12 @@ func windowLabel(since, until time.Time) string {
 // Requests are made one at a time, in order, never in parallel: NVD's rate
 // limit is per source IP, so concurrency would not buy throughput and would
 // risk a block.
+// The binding dbcmd's type assertion relies on, held at compile time: a
+// signature drift that kept every direct call compiling would otherwise make
+// the assertion fail quietly and NVD withdraw nothing in a real build (D136's
+// review).
+var _ provider.WithdrawingAnnotator = (*Provider)(nil)
+
 // Annotate is AnnotateWithdrawing with no one to tell about withdrawn
 // scores -- the shape provider.Annotator requires. dbcmd calls the other.
 func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) error) (store.Provenance, error) {

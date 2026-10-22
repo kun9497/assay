@@ -163,6 +163,54 @@ func TestFetch_ArchiveCopyNewerThanTheDeltasCopyIsKept(t *testing.T) {
 	}
 }
 
+// A delta copy whose date is missing or unreadable keeps D129's skip, even
+// against a dated archive copy -- the first draft compared `!archive.After(delta)`
+// alone, and any dated archive copy is After a zero, so an undated correction
+// to not-affected was overridden by the archive's stale record (D135's review).
+func TestFetch_UndatedDeltaCopyStillSupersedesADatedArchiveCopy(t *testing.T) {
+	for _, date := range []string{"", "not-a-date"} {
+		t.Run("date="+date, func(t *testing.T) {
+			var raw map[string]any
+			if err := json.Unmarshal([]byte(docJSONWithNotAffected("CVE-2024-6387",
+				[]string{"SUSE Linux Enterprise Server 15 SP6"},
+				map[string]string{"openssh": "pkg:rpm/suse/openssh@?upstream=openssh.src.rpm"},
+				nil, nil, []string{"SUSE Linux Enterprise Server 15 SP6:openssh"})), &raw); err != nil {
+				t.Fatal(err)
+			}
+			if date != "" {
+				raw["document"].(map[string]any)["tracking"].(map[string]any)["current_release_date"] = date
+			}
+			corrected, _ := json.Marshal(raw)
+			// A second, unrelated delta document keeps D20's "no records"
+			// guard quiet once the correction has emptied the first.
+			other := docJSONDated("CVE-2026-0001", regenT2,
+				[]string{"SUSE Linux Enterprise Server 15 SP6"},
+				map[string]string{"newpkg-1.0-1.1": "pkg:rpm/suse/newpkg@1.0-1.1?upstream=newpkg-1.0-1.1.src.rpm"},
+				[]string{"SUSE Linux Enterprise Server 15 SP6:newpkg-1.0-1.1"})
+			f := &feed{
+				archive:         fixture(t, "archive_regenerated.tar.bz2"), // dated regenT2, fixed 9.6p1-1.1
+				archiveModified: regenT1,
+				changes: changesCSV(
+					[2]string{"2024/cve-2024-6387.json", regenT2.Add(time.Hour).Format(time.RFC3339)},
+					[2]string{"2026/cve-2026-0001.json", regenT2.Format(time.RFC3339)}),
+				docs: map[string]string{"2024/cve-2024-6387.json": string(corrected), "2026/cve-2026-0001.json": other},
+			}
+			got, progress, err := fetchAll(t, serve(t, f))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, a := range got {
+				if a.ID == "SUSE-CVE-2024-6387" {
+					t.Fatalf("the archive's stale record survived the delta's undated correction: %+v", a.Affected)
+				}
+			}
+			if !strings.Contains(progress, "1 archive documents superseded") || !strings.Contains(progress, "0 archive documents newer") {
+				t.Errorf("progress should count the archive copy as superseded, not newer:\n%s", progress)
+			}
+		})
+	}
+}
+
 // The control D129 must keep: a delta copy at least as new as the archive's
 // still supersedes it, including when it converts to nothing.
 func TestFetch_DeltaCopyAsNewAsTheArchivesStillSupersedes(t *testing.T) {

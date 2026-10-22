@@ -210,7 +210,12 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 			// stale from a cache) is converted and emitted after the
 			// delta's, and last write wins with the newer one. Unreadable
 			// or absent dates keep the skip.
-			if !revisionOf(&d).After(deltaRevision) {
+			//
+			// A zero on EITHER side keeps the skip (see suse's identical
+			// note): `!archive.After(delta)` alone let a dated archive copy
+			// win over an undated delta correction.
+			archiveRevision := revisionOf(&d)
+			if deltaRevision.IsZero() || archiveRevision.IsZero() || !archiveRevision.After(deltaRevision) {
 				st.ArchiveSuperseded++
 				continue
 			}

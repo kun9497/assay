@@ -97,8 +97,10 @@ type Location struct {
 	// differ -- an npm alias's "node_modules/utility-alias" under the
 	// package-lock.json that recorded it. The package's Name is its registry
 	// identity (what advisories are written against); this is the one place
-	// the install name survives, so --explain can still say where the
-	// aliased copy is. Empty when the file at Path is the package itself.
+	// the install name survives. The JSON report carries it as
+	// locations[].install and the matcher's location key orders on it; the
+	// table, --explain and SARIF print no locations at all today. Empty when
+	// the file at Path is the package itself.
 	Install string
 }
 

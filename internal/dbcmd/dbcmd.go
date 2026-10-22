@@ -519,7 +519,11 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 		// must not accumulate.
 		merged.Withdrawn = batch.withdrawn
 		meta.Ratings[a.Name()] = merged
-		if batch.withdrawn > 0 {
+		if _, ok := a.(provider.WithdrawingAnnotator); ok {
+			// Printed for a zero too: a reconciliation run that found
+			// nothing stale is a measurement, and a line that only appears
+			// when the count is positive would make it indistinguishable
+			// from a build whose withdrawing path never ran (D136's review).
 			fmt.Fprintf(stderr, "%s: %d stored rating(s) withdrawn on the source's word (D136)\n", a.Name(), batch.withdrawn)
 		}
 	}

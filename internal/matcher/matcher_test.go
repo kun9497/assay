@@ -1067,6 +1067,16 @@ func TestMatch_SameNameLookupComparesTheSourceVersion(t *testing.T) {
 			"[0, 2.38.1-5+deb12u3); the binary's 1:2.38.1-5+deb12u3 sorts above the fix on "+
 			"its epoch alone; got %+v (skipped %+v)", len(res.Findings), res.Findings, res.Skipped)
 	}
+	// D10: the finding's own account says the SOURCE version was compared
+	// and where it came from. MatchedName equals the package name here, so
+	// no renderer's "(source package)" disclosure fires; the Evidence is the
+	// one place a reader can see why 1:2.38.1-5+deb12u3 is "below" a fix at
+	// 2.38.1-5+deb12u3 (D134's review).
+	reason := res.Findings[0].Evidence.Reason
+	if !strings.Contains(reason, `source package util-linux's version "2.38.1-5+deb12u2"`) ||
+		!strings.Contains(reason, `not the installed binary's "1:2.38.1-5+deb12u3"`) {
+		t.Errorf("Evidence.Reason = %q, want it to name the source version compared and the binary version it was not", reason)
+	}
 	// And the boundary from the other side: a source version AT the fix is
 	// clean even though the binary version, with its epoch, would also be.
 	p.Source.Version = "2.38.1-5+deb12u3"
@@ -1102,6 +1112,20 @@ func TestMatch_BinaryNameLookupKeepsTheBinaryVersion(t *testing.T) {
 	}
 	if len(res.Skipped) != 0 {
 		t.Errorf("Skipped = %+v, want none", res.Skipped)
+	}
+	// And a binary-version comparison carries no source-version note: the
+	// disclosure is for the compared version differing from the installed
+	// one, not for the existence of a source package.
+	p.Version = "1:2.38.1-5+deb12u2" // below the fix now
+	res, err = New(s).Match(pkgmeta.Target{Packages: []pkgmeta.Package{p}})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1", len(res.Findings))
+	}
+	if strings.Contains(res.Findings[0].Evidence.Reason, "compared the source package") {
+		t.Errorf("Evidence.Reason = %q: a binary-version comparison must not claim the source version was compared", res.Findings[0].Evidence.Reason)
 	}
 }
 
