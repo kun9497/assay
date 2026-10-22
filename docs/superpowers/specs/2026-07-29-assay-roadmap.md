@@ -5659,6 +5659,190 @@ behaviour. Confidential Computing module builds of qemu/ovmf are still judged by
 range (pre-existing). Whether the module's builds are ever installed where assay scans is not
 known — the beneficiary is a host or VM SBOM, not a container image.
 
+### The 2026-10-22 external review — six conditional defects, all reproduced, all fixed
+
+A second external review of `0164c94` (the D131 merge) reported six defects with fixtures and
+probes. Every one reproduced on that commit before anything was changed; none was already
+fixed. Five became decisions D132–D136 below; the sixth was a plain bug — `--fail-on-epss=NaN`
+parsed (`strconv.ParseFloat` accepts it), passed `v < 0 || v > 1` because NaN compares false
+against everything, and the gate's `score >= threshold` never fired: the finding printed, exit
+0, under a flag the user had set. It is refused at parse time now, with the infinities, and
+exits 2 before any scan runs; 0 and 1 stay valid boundaries. The review's probes, which
+asserted the *wrong* behaviour and passed, were rewritten to assert the intended result and
+live in the suite (`internal/scancmd/review_2026_10_22_test.go`, `cmd/assay/epss_nan_test.go`
+and the per-package tests each decision names). Mutations across the six: 29 caught, one
+documented equivalent (the explicit `math.IsNaN` beside the inside-the-range check). The
+response document is `docs/reviews/2026-10-22-source-review-response.md`.
+
+### D132 — An npm alias is cataloged under its registry identity; the install path is kept beside it
+
+**Decision.** `npmlock` reads the v2/v3 entry's own `name` field and, when it differs from the
+install path's last segment, catalogs the package under that name — the registry identity —
+with the purl spelt from it. The install path (`node_modules/utility-alias`) is kept as
+`Location.Install`, a new field beside the lockfile's `Path`, so the report can still say
+where the aliased copy lives; `Install` is part of the matcher's location key and of the JSON
+report's `locations[].install`. npm 6's spelling of the same alias — the v1 entry keyed by the
+alias with `"version": "npm:lodash@4.17.20"` — is read too, split on the *last* `@` so a scoped
+target keeps its scope; a spec with no version part is counted with the other versionless
+entries rather than cataloged under a made-up version. An entry with no `name` field keeps its
+path name exactly as before.
+
+**Why.** `npm install utility-alias@npm:lodash@4.17.20` installs lodash under
+`node_modules/utility-alias`, and the lockfile npm 11.16.0 writes records `"name": "lodash"`
+on that entry. The cataloger named the package by its install path alone, so the scan held a
+package `utility-alias` that no advisory is written against: Evaluated 1, NotEvaluated 0,
+zero findings, exit 0, with the vulnerable lodash installed and `--fail-on-incomplete` unable
+to object because nothing was incomplete. The registry identity is what npm itself documents as
+the package; the alias is where it was put.
+
+**Verified.** The generated lockfile, a scoped alias and a plain entry through `Parse`; the
+v1 shape with a nested alias (whose `Install` is its real path under its parent) and a
+version-less spec; the whole path through `Run` with a lodash advisory fixed at 4.17.21 —
+regular, v3 alias and v1 alias each one finding and exit 1 with purl `pkg:npm/lodash@4.17.20`.
+Mutations caught: ignoring the v3 name, dropping `Install`, ignoring the v1 spec, splitting on
+the first `@`, and the location key ignoring `Install`.
+
+### D133 — A lineage or module-build skip applies only where its version convention holds
+
+**Decision.** D53's Ubuntu detector (`+fipsN`, `+esmN`, `~esmN`) runs only on `Ubuntu:` keys,
+the way D79's Oracle detector already ran only on `Oracle Linux:` keys. D80's module-build
+detector (`module+el`, `module_el`) runs only where the ecosystem's comparer is `version.RPM`
+— the registry `version.For` resolves is the authority on which versions are RPM ones, so
+no second list of RPM ecosystems exists to drift. Everything else about both skips is
+unchanged: reason text, `SkipCoverage`, exit 2 through `--fail-on-incomplete`.
+
+**Why.** Both detectors read the version string and nothing else. A Go module at
+`1.0.0+fips1` (legal semver build metadata) was reported "an Ubuntu FIPS build" and skipped;
+`1.0.0-module+el9` (a legal semver pre-release) "a modular RPM build with no readable stream".
+Each skip is `SkipCoverage` — a limit of the database, which `--fail-on-incomplete=target`
+deliberately does not gate — so a vulnerable package left the scan with zero findings and exit
+0 under `--fail-on critical --fail-on-incomplete=target`. A marker means a lineage only under
+the convention that coined it.
+
+**Verified.** Through `Match`: Go `1.0.0+fips1`, `1.0.0+esm1`, `1.0.0+Fips1.2` and
+`1.0.0-module+el9`, npm `1.0.0-module+el9.6.0` all judged (one finding, no skip); the controls
+— Ubuntu 22.04 `+esm1` still the ESM skip, Rocky 9 `module+el9` with no stream still the
+module skip — held. Through `Run` with a clean sibling: Evaluated 2, one finding, exit 1.
+Mutations caught: each gate removed.
+
+### D134 — The lookup under the source identity compares the source version, whatever the binary is called
+
+**Decision.** D41's choice of version per lookup name is now about identity, not spelling:
+the lookup under `Source.Name` compares `Source.Version` when the cataloger recorded one, and
+the lookup under the binary's own name compares the binary version — whether or not the two
+names coincide. When they coincide, the names list dedups them into one lookup, and that one
+lookup serves the source identity, because the advisory it reaches is written against the
+source. Provides keep their own version (D95). Catalogers that record no source version
+(apk's origin, pacman's base, rpm's SOURCERPM, which carries the binary's own) are unaffected.
+
+**Why.** The rule was written as `lookupName != p.Name`, so a binary that *shares* its
+source's name — util-linux itself, bash, every package that is its own source — took the
+binary branch. With dpkg's `Source: util-linux (2.38.1-5+deb12u2)` saying the source was still
+short of a fix at `2.38.1-5+deb12u3`, the binary's `1:2.38.1-5+deb12u3` sorted above the fix
+on its epoch alone and the finding vanished: zero findings, zero skips, exit 0 — through the
+real dpkg catalog and an image. The differently named `bsdutils` from the same source was
+judged correctly the whole time, which is why the test that held D41 never saw this.
+
+**Verified.** Through `Match`: same-name util-linux found on the source version, clean when
+the source is at the fix; `bsdutils` under its own name keeps the binary version (an
+advisory keyed on the binary name at its fix stays clean); the D95 provides test holds.
+Through `Run` and the dpkg catalog: both `bsdutils` and `util-linux` one finding, exit 1.
+Mutations caught: the old inequality restored, and the source version applied unconditionally.
+
+### D135 — The archive is downloaded before the delta is consulted, and an archive copy newer than the delta's is kept
+
+**Decision.** Both CSAF providers spool the bulk archive *first*, then run D129's delta, then
+walk the spooled archive. SUSE's delta cutoff and the provenance's `DataAsOf` are the
+`Last-Modified` of the GET response that delivered the bytes — the pre-flight HEAD is gone,
+because its header and the GET's can describe different generations of a file SUSE rebuilds in
+place under one URL. Each delta copy records its `current_release_date`; the walk skips an
+archive copy only when the delta's copy is at least as new, and otherwise converts and emits
+the archive copy *after* the delta's (last write wins with the newer one) and counts it
+(`ArchiveNewerThanDelta`, "kept, D135" on the progress line). Dates absent or unreadable on
+either side keep D129's skip. A resumed download whose response names a different
+`Last-Modified` than the bytes already on disk is the archive rebuilt under the transfer: the
+partial file is discarded and the download restarts from byte 0 rather than splicing two
+generations (Red Hat's archive is dated by name, so its check fires only when both responses
+carry the header).
+
+**Why.** D129 ran the delta before the 445 MB spool so a failing delta failed fast, keyed on
+a HEAD's `Last-Modified`. An archive regenerated between that HEAD and the GET carried
+documents newer than the delta's copies, and the walk, trusting that a fetched copy supersedes,
+dropped them: the review's fixture had revision 1 of a CVE (01:00, fixed `9.6p1-1.0`) in the
+delta and revision 2 (02:00, fixed `9.6p1-1.1`) in the archive, and installed `9.6p1-1.0`
+was affected by the archive alone and clean once the delta had spoken. Downloading first makes
+every delta document a fetch *after* the snapshot it is compared with, so a delta copy cannot
+be the older one by construction; the revision comparison then covers the one way it still
+could (an individual document served stale from a cache in front of the feed). The cost
+accepted: a delta that fails now fails after the spool, not before it. D129's property is
+intact — the delta is still emitted before the walk, and a delta copy at least as new still
+supersedes, including when it converts to nothing.
+
+**Verified.** SUSE: with a HEAD saying 00:00, a changes row at 01:00 and the archive served at
+02:00, the archive GET precedes the changes GET, the row is never fetched, openssh's fix is
+the archive's `9.6p1-1.1` and `DataAsOf` is 02:00; with the row on the cutoff and the served
+document older than the archive's copy, the archive copy is the last word and counted; the
+D129 control (delta copy equally dated, superseding) holds; a mid-download regeneration
+restarts from zero and the provenance names the new generation. Red Hat: the archive GET
+precedes `changes.csv`; the newer-archive and equally-dated cases as above; the regeneration
+restart. Mutations caught: always skip, never skip, a zero delta revision (both providers), the
+regeneration check removed (both), and the delta cutoff ignoring the GET.
+
+**Remaining uncertainty.** A document changed after the archive was assembled but before the
+file's `Last-Modified` is in neither the archive nor the delta until the next rebuild — the
+pre-existing window D129 had, a day at most. When the archive copy is the newer one and
+converts to nothing, the delta's record stands until the next build (the inverse of the
+D129 hole, reachable only through a stale cache). A non-zero `ArchiveNewerThanDelta` on a
+nightly is the signal to look.
+
+### D136 — A rating the source withdraws is removed, and the publish guard tolerates exactly that many
+
+**Decision.** `provider.WithdrawingAnnotator` is an Annotator that can also say a CVE it
+returned no longer carries its rating. NVD implements it: a record the API returns with an id
+and no CVSS metrics at all — Rejected, or reset to Awaiting Analysis — is withdrawn, and only
+records the API actually returned are; a CVE outside the window is not mentioned and keeps
+what it had. `db build` prefers that method when offered, removes only the source's own
+`(CVE, Source)` key through the new `store.Writer.WithdrawRating` (a queued put for the same
+CVE is flushed first, so the source's later word wins), and counts the removals that found a
+stored rating as `Provenance.Withdrawn` — this build's number only, never carried forward from
+a seed, zeroed on every seed copy including a ratings-only build's. `db push` reads it as
+`RatingWithdrawals` on the candidate (derived from the database, never an annotation) and lets
+a source's count drop by exactly that many — and never to zero, whatever the withdrawals say.
+The progress line says `N returned without a score (rating withdrawn)`, and the build prints
+the stored count it removed.
+
+**Why.** A seeded build carries NVD's ratings forward (D66). A delta that returned a CVE with
+`metrics={}` converted to nothing and emitted nothing, so the seed's CVSS 9.8 for it rode
+forward under every later artifact while the checkpoint advanced: a critical NVD had withdrawn,
+presented as current, and gating a build on it. The publish guard refusing *any* drop in a
+source's count (the hole it was written for) would then have refused the fix, so the drop a
+build can justify is now exactly the number of stored ratings it removed on the source's word.
+
+**Verified.** At the call site: a seed with NVD and KISA ratings on one CVE, an annotator
+that withdraws it plus a never-rated CVE plus one it rated earlier in the same run — only
+NVD's rating goes, KISA's stays, the rated-then-withdrawn CVE ends absent, `Withdrawn` is 2
+and the artifact-side view agrees; a seed's `Withdrawn` of 7 is 0 after a run that withdrew
+nothing, after a run with no NVD annotator, and in a ratings-only build re-running another
+source. At the provider, Rejected and Awaiting Analysis: the seeded NVD rating gone, KISA's
+kept, the rated CVE on the same page not withdrawn, the matcher's finding carrying no NVD
+rating; `Annotate` without a callback still rates. At the store: the exact key, not a prefix
+(`CVE-2026-1` does not reach `CVE-2026-10`), and existence reported. At the guard: a drop
+covered by withdrawals passes, one larger is refused, one with none is refused, another
+source's withdrawals do not excuse NVD's, and all-withdrawn is still a vanished source.
+Mutations caught, eleven: every withdrawal counted, the seed's count kept (both copy paths),
+the guard ignoring withdrawals, the guard allowing zero, the artifact view dropping them, NVD
+never withdrawing, `db build` ignoring the interface, the store reporting existence always,
+withdrawing without flushing, and the override lost.
+
+**What the code alone does not repair.** Ratings NVD withdrew *before* D136 are still in the
+published artifact, and a nightly window re-requests only CVEs modified since the last
+checkpoint — a CVE rejected in September is not modified again. One build with
+`NVD_SINCE_DAYS=120` (the API's maximum window, which reaches behind the 2026-08-14 start of
+the seed chain) re-returns every CVE modified since and withdraws the stale ones; its
+`withdrawn` line is the first measurement of how many there were, and the publish guard admits
+the drop by that number. Recorded in `docs/deferred-decisions.md` as the one operation this
+review leaves to run.
+
 ---
 
 ## 3. Architecture

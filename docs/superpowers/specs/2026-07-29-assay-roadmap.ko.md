@@ -5455,6 +5455,166 @@ Computing 모듈의 qemu/ovmf 빌드는 여전히 codestream 범위로 판정됩
 assay가 스캔하는 곳에 설치되는지는 알 수 없습니다 — 수혜자는 컨테이너 이미지가 아니라 호스트나
 VM SBOM입니다.
 
+### 2026-10-22 외부 리뷰 — 조건부 결함 6건, 전부 재현, 전부 수정
+
+`0164c94`(D131 머지)에 대한 두 번째 외부 리뷰가 fixture 와 probe 를 갖춘 결함 6건을 보고했다.
+어떤 것도 손대기 전에 그 커밋에서 6건 모두 재현됐고, 이미 고쳐진 것은 없었다. 다섯 건은 아래
+D132–D136 결정이 됐고, 여섯째는 단순 버그였다 — `--fail-on-epss=NaN` 이 파싱되고
+(`strconv.ParseFloat` 가 받아들인다), NaN 은 무엇과 비교해도 false 라 `v < 0 || v > 1` 를
+통과했으며, 게이트의 `score >= threshold` 는 영영 발화하지 않았다: finding 은 찍히는데 exit 0,
+사용자가 분명히 켠 플래그 아래서. 이제 파싱 단계에서 무한대와 함께 거절하고 스캔 전에 exit 2
+로 끝낸다; 0 과 1 은 여전히 유효한 경계값이다. 리뷰의 probe 들은 *잘못된* 동작을 단언하고
+통과하는 것이었는데, 의도한 결과를 단언하도록 고쳐 스위트에 넣었다
+(`internal/scancmd/review_2026_10_22_test.go`, `cmd/assay/epss_nan_test.go`, 그리고 각 결정이
+이름 대는 패키지별 테스트). 6건 통틀어 변이 29건 잡힘, 기록된 동치 1건(범위 안쪽 검사 옆의 명시적
+`math.IsNaN`). 응답 문서는 `docs/reviews/2026-10-22-source-review-response.md`.
+
+### D132 — npm 별칭은 레지스트리 identity 로 카탈로그하고, 설치 경로는 그 옆에 보존한다
+
+**결정.** `npmlock` 은 v2/v3 엔트리 자신의 `name` 필드를 읽고, 그것이 설치 경로의 마지막 세그먼트와
+다르면 그 이름 — 레지스트리 identity — 으로 패키지를 카탈로그하고 purl 도 그 이름으로 쓴다. 설치
+경로(`node_modules/utility-alias`)는 lockfile 의 `Path` 옆에 새 필드 `Location.Install` 로 남겨
+리포트가 별칭 사본이 어디 있는지 여전히 말할 수 있게 한다; `Install` 은 matcher 의 location key 와
+JSON 리포트의 `locations[].install` 에도 들어간다. npm 6 이 같은 별칭을 적는 방식 — 별칭을 키로
+하고 `"version": "npm:lodash@4.17.20"` 을 적는 v1 엔트리 — 도 읽는데, scoped 대상이 scope 를
+잃지 않도록 *마지막* `@` 에서 자른다; 버전 부분이 없는 spec 은 지어낸 버전으로 카탈로그하지 않고
+다른 버전 없는 엔트리와 같이 센다. `name` 필드가 없는 엔트리는 전과 똑같이 경로 이름을 유지한다.
+
+**이유.** `npm install utility-alias@npm:lodash@4.17.20` 은 lodash 를 `node_modules/utility-alias`
+아래 설치하고, npm 11.16.0 이 쓰는 lockfile 은 그 엔트리에 `"name": "lodash"` 를 적는다. 카탈로거는
+설치 경로만으로 이름을 정했으므로 스캔은 어떤 advisory 도 겨냥하지 않는 `utility-alias` 라는
+패키지를 들고 있었다: Evaluated 1, NotEvaluated 0, finding 0, exit 0 — 취약한 lodash 가 설치된
+채로, 그리고 불완전한 것이 없으니 `--fail-on-incomplete` 도 이의를 제기할 수 없었다. 레지스트리
+identity 가 npm 자신이 문서화한 "그 패키지" 이고, 별칭은 그것을 둔 자리다.
+
+**검증.** 생성된 lockfile, scoped 별칭, 평범한 엔트리를 `Parse` 로; 중첩 별칭(그 `Install` 은
+부모 아래의 실제 경로)과 버전 없는 spec 이 있는 v1 모양; 4.17.21 에서 고쳐진 lodash advisory 로
+`Run` 전체 경로 — regular, v3 별칭, v1 별칭 각각 finding 1, exit 1, purl
+`pkg:npm/lodash@4.17.20`. 잡힌 변이: v3 name 무시, `Install` 누락, v1 spec 무시, 첫 `@` 에서
+자르기, location key 가 `Install` 을 무시.
+
+### D133 — 계보·모듈 빌드 skip 은 그 버전 관례가 유효한 생태계에만 적용한다
+
+**결정.** D53 의 Ubuntu 탐지기(`+fipsN`, `+esmN`, `~esmN`)는 D79 의 Oracle 탐지기가 이미
+`Oracle Linux:` 키에서만 돌듯 `Ubuntu:` 키에서만 돈다. D80 의 모듈 빌드 탐지기(`module+el`,
+`module_el`)는 생태계의 comparer 가 `version.RPM` 인 곳에서만 돈다 — `version.For` 가 푸는
+레지스트리가 어떤 버전이 RPM 것인지의 권위이므로, 어긋날 수 있는 RPM 생태계 목록을 따로 두지
+않는다. 두 skip 의 나머지는 전부 그대로다: 사유 문구, `SkipCoverage`, `--fail-on-incomplete`
+를 통한 exit 2.
+
+**이유.** 두 탐지기 모두 버전 문자열만 읽었다. `1.0.0+fips1`(적법한 semver 빌드 메타데이터)인
+Go 모듈이 "Ubuntu FIPS 빌드" 로 보고돼 skip 됐고, `1.0.0-module+el9`(적법한 semver 프리릴리스)는
+"스트림을 읽을 수 없는 모듈 RPM 빌드" 로. 각 skip 은 `SkipCoverage` — 데이터베이스의 한계로,
+`--fail-on-incomplete=target` 이 일부러 게이트하지 않는 것 — 이라 취약한 패키지가
+`--fail-on critical --fail-on-incomplete=target` 아래서 finding 0, exit 0 으로 스캔을 빠져나갔다.
+표식은 그것을 만든 관례 아래서만 계보를 뜻한다.
+
+**검증.** `Match` 를 통해: Go `1.0.0+fips1`, `1.0.0+esm1`, `1.0.0+Fips1.2`, `1.0.0-module+el9`,
+npm `1.0.0-module+el9.6.0` 모두 판정됨(finding 1, skip 없음); 대조군 — Ubuntu 22.04 `+esm1` 은
+여전히 ESM skip, 스트림 없는 Rocky 9 `module+el9` 은 여전히 모듈 skip — 유지. 깨끗한 sibling 과
+함께 `Run` 을 통해: Evaluated 2, finding 1, exit 1. 잡힌 변이: 각 게이트 제거.
+
+### D134 — 소스 identity 조회는 바이너리 이름이 무엇이든 소스 버전으로 비교한다
+
+**결정.** 조회 이름별로 버전을 고르는 D41 의 선택은 이제 철자가 아니라 identity 의 문제다:
+`Source.Name` 조회는 카탈로거가 기록해 둔 `Source.Version` 으로 비교하고, 바이너리 자신의 이름
+조회는 바이너리 버전으로 비교한다 — 두 이름이 같든 다르든. 같을 때는 이름 목록이 둘을 하나의
+조회로 합치고, 그 하나의 조회는 소스 identity 를 맡는다. 닿는 advisory 가 소스를 겨냥해 쓰였기
+때문이다. provides 는 자기 버전을 유지한다(D95). 소스 버전을 기록하지 않는 카탈로거(apk 의 origin,
+pacman 의 base, 바이너리 자신의 버전을 싣는 rpm 의 SOURCERPM)는 영향이 없다.
+
+**이유.** 규칙이 `lookupName != p.Name` 으로 쓰여 있어, 소스와 이름을 *공유하는* 바이너리 —
+util-linux 자신, bash, 스스로가 소스인 모든 패키지 — 는 바이너리 분기를 탔다. dpkg 의
+`Source: util-linux (2.38.1-5+deb12u2)` 가 소스는 아직 `2.38.1-5+deb12u3` 의 fix 에 못 미친다고
+말하는데, 바이너리의 `1:2.38.1-5+deb12u3` 은 epoch 하나만으로 fix 위로 정렬돼 finding 이 사라졌다:
+finding 0, skip 0, exit 0 — 실제 dpkg 카탈로그와 이미지를 통해서. 같은 소스에서 나온 이름이 다른
+`bsdutils` 는 내내 올바로 판정됐고, D41 을 붙들던 테스트가 이것을 못 본 이유가 그것이다.
+
+**검증.** `Match` 를 통해: 이름이 같은 util-linux 가 소스 버전으로 발견되고, 소스가 fix 에 있으면
+깨끗함; 자기 이름의 `bsdutils` 는 바이너리 버전을 유지(바이너리 이름으로 키된 advisory 가 fix 에
+있으면 깨끗함); D95 provides 테스트 유지. `Run` 과 dpkg 카탈로그를 통해: `bsdutils` 와 `util-linux`
+모두 finding 1, exit 1. 잡힌 변이: 옛 부등식 복원, 소스 버전 무조건 적용.
+
+### D135 — 아카이브를 먼저 내려받고 delta 를 조회하며, delta 사본보다 새 아카이브 사본은 유지한다
+
+**결정.** 두 CSAF 프로바이더는 벌크 아카이브를 *먼저* spool 하고, 그 다음 D129 의 delta 를 돌리고,
+그 다음 spool 된 아카이브를 걷는다. SUSE 의 delta 기준 시각과 provenance 의 `DataAsOf` 는 바이트를
+실제로 전달한 GET 응답의 `Last-Modified` 다 — 사전 HEAD 는 없앴다. SUSE 가 한 URL 아래 제자리에서
+다시 만드는 파일에 대해 HEAD 의 헤더와 GET 의 헤더가 서로 다른 세대를 가리킬 수 있기 때문이다.
+delta 사본마다 `current_release_date` 를 기록하고, 걷기는 delta 사본이 적어도 그만큼 새로울 때만
+아카이브 사본을 건너뛴다; 그렇지 않으면 아카이브 사본을 delta 사본 *뒤에* 변환·방출하고(마지막
+쓰기가 이기므로 더 새 것이 남는다) 센다(`ArchiveNewerThanDelta`, 진행줄의 "kept, D135"). 어느 쪽이든
+날짜가 없거나 읽을 수 없으면 D129 의 건너뛰기를 유지한다. 재개된 다운로드의 응답이 디스크에 이미
+있는 바이트와 다른 `Last-Modified` 를 대면 전송 도중 다시 만들어진 아카이브다: 부분 파일을 버리고
+두 세대를 이어 붙이는 대신 0 바이트부터 다시 받는다(Red Hat 아카이브는 이름에 날짜가 있으므로 그
+검사는 두 응답 모두 헤더를 실을 때만 발화한다).
+
+**이유.** D129 는 실패하는 delta 가 빨리 실패하도록 445 MB spool 전에 delta 를 돌렸고, HEAD 의
+`Last-Modified` 를 기준으로 삼았다. 그 HEAD 와 GET 사이에 다시 만들어진 아카이브는 delta 사본보다
+새 문서를 싣고 있었고, 걷기는 "가져온 사본이 대체한다" 를 믿고 그것들을 버렸다: 리뷰의 fixture 는
+한 CVE 의 revision 1(01:00, fixed `9.6p1-1.0`)을 delta 에, revision 2(02:00, fixed `9.6p1-1.1`)를
+아카이브에 두었고, 설치된 `9.6p1-1.0` 은 아카이브만으로는 affected 인데 delta 가 말하고 나면
+깨끗했다. 먼저 내려받으면 모든 delta 문서는 비교 대상 스냅샷 *뒤의* fetch 가 되므로 구성상 delta
+사본이 더 오래된 쪽일 수 없다; revision 비교는 그래도 남는 한 가지 길(피드 앞 캐시가 개별 문서를
+낡은 채로 내주는 경우)을 덮는다. 받아들인 비용: 실패하는 delta 는 이제 spool 앞이 아니라 뒤에서
+실패한다. D129 의 성질은 그대로다 — delta 는 여전히 걷기 전에 방출되고, 적어도 그만큼 새 delta
+사본은 여전히 대체한다, 아무것도 아닌 것으로 변환될 때를 포함해.
+
+**검증.** SUSE: HEAD 가 00:00 이라 하고 changes 행이 01:00, 아카이브가 02:00 으로 제공될 때
+아카이브 GET 이 changes GET 보다 앞서고, 그 행은 아예 fetch 되지 않으며, openssh 의 fix 는 아카이브의
+`9.6p1-1.1`, `DataAsOf` 는 02:00; 행이 기준 시각 위에 있고 제공된 문서가 아카이브 사본보다 오래됐을
+때 아카이브 사본이 마지막 말이 되고 세어짐; D129 대조군(같은 날짜의 delta 사본이 대체) 유지;
+다운로드 도중 재생성은 0 부터 다시 받고 provenance 는 새 세대를 가리킴. Red Hat: 아카이브 GET 이
+`changes.csv` 보다 앞섬; 위와 같은 더-새-아카이브 및 같은-날짜 사례; 재생성 재시작. 잡힌 변이: 항상
+건너뛰기, 절대 안 건너뛰기, delta revision 0(두 프로바이더), 재생성 검사 제거(둘 다), GET 을 무시하는
+delta 기준 시각.
+
+**남은 불확실성.** 아카이브가 조립된 뒤 파일의 `Last-Modified` 전에 바뀐 문서는 다음 재생성 전까지
+아카이브에도 delta 에도 없다 — D129 가 원래 갖고 있던, 길어야 하루의 창. 아카이브 사본이 더 새로운
+쪽이면서 아무것도 아닌 것으로 변환될 때는 delta 의 레코드가 다음 빌드까지 남는다(D129 구멍의 역방향,
+낡은 캐시를 통해서만 닿을 수 있음). 나이틀리에서 `ArchiveNewerThanDelta` 가 0 이 아니면 들여다볼
+신호다.
+
+### D136 — 출처가 철회한 rating 은 제거하고, 게시 게이트는 정확히 그만큼만 감소를 허용한다
+
+**결정.** `provider.WithdrawingAnnotator` 는 자기가 돌려준 CVE 가 더는 자기 rating 을 갖지 않는다고
+말할 수도 있는 Annotator 다. NVD 가 구현한다: API 가 id 는 있고 CVSS metrics 가 전혀 없는 레코드 —
+Rejected, 또는 Awaiting Analysis 로 되돌아간 — 를 돌려주면 철회하고, 실제로 API 가 돌려준 레코드만
+철회한다; 창 밖의 CVE 는 언급되지 않으며 갖고 있던 것을 유지한다. `db build` 는 이 메서드가 제공되면
+그쪽을 쓰고, 새 `store.Writer.WithdrawRating` 으로 그 출처 자신의 `(CVE, Source)` 키만 제거하며
+(같은 CVE 에 대해 큐에 있던 put 을 먼저 flush 하므로 출처의 나중 말이 이긴다), 저장된 rating 을 실제로
+찾아 제거한 수를 `Provenance.Withdrawn` 으로 센다 — 이 빌드의 수치일 뿐 seed 에서 넘어오지 않으며,
+ratings-only 빌드를 포함한 모든 seed 복사에서 0 으로 만든다. `db push` 는 이것을 후보의
+`RatingWithdrawals`(데이터베이스에서 유도, 절대 annotation 이 아님)로 읽어 출처의 수가 정확히 그만큼
+줄어드는 것을 허용한다 — 철회가 뭐라 하든 0 까지는 절대 아니다. 진행줄은 `N returned without a score
+(rating withdrawn)` 을 찍고, 빌드는 제거한 저장 수를 찍는다.
+
+**이유.** seed 된 빌드는 NVD 의 rating 을 이월한다(D66). `metrics={}` 로 돌아온 CVE 를 delta 가
+아무것도 아닌 것으로 변환하고 아무것도 방출하지 않았으므로, seed 의 CVSS 9.8 이 체크포인트가 전진하는
+동안 이후 모든 아티팩트 아래 이월됐다: NVD 가 철회한 critical 이 현재인 양 제시되고 빌드를 게이트했다.
+출처 수의 *어떤* 감소도 거부하는 게시 게이트(그것이 만들어진 이유인 구멍)는 그러면 수정 자체를 거부했을
+것이므로, 빌드가 정당화할 수 있는 감소는 이제 출처의 말에 따라 제거한 저장 rating 수와 정확히 같다.
+
+**검증.** 호출 지점에서: 한 CVE 에 NVD 와 KISA rating 이 있는 seed, 그것과 한 번도 rating 되지 않은
+CVE 와 같은 런 초반에 자기가 rating 한 CVE 를 철회하는 annotator — NVD rating 만 사라지고 KISA 는
+남으며, rating 됐다 철회된 CVE 는 없어진 채 끝나고, `Withdrawn` 은 2, 아티팩트 쪽 뷰도 일치; seed 의
+`Withdrawn` 7 은 아무것도 철회하지 않은 런 뒤, NVD annotator 가 없는 런 뒤, 다른 출처를 재실행하는
+ratings-only 빌드에서 0. 프로바이더에서, Rejected 와 Awaiting Analysis: seed 된 NVD rating 은 사라지고
+KISA 는 유지, 같은 페이지의 rating 된 CVE 는 철회되지 않음, matcher 의 finding 에 NVD rating 없음;
+콜백 없는 `Annotate` 도 여전히 rating 함. 스토어에서: 접두어가 아닌 정확한 키(`CVE-2026-1` 이
+`CVE-2026-10` 에 닿지 않음), 존재 여부 보고. 게이트에서: 철회로 덮이는 감소는 통과, 더 큰 감소는
+거부, 철회 없는 감소는 거부, 다른 출처의 철회는 NVD 를 변명하지 못함, 전부 철회도 여전히 사라진 출처.
+잡힌 변이 11건: 모든 철회를 셈, seed 의 수 유지(두 복사 경로), 게이트가 철회 무시, 게이트가 0 허용,
+아티팩트 뷰가 누락, NVD 가 절대 철회 안 함, `db build` 가 인터페이스 무시, 스토어가 항상 존재 보고,
+flush 없이 철회, 덮어쓰기 소실.
+
+**코드만으로 복구되지 않는 것.** D136 *이전에* NVD 가 철회한 rating 은 여전히 게시된 아티팩트에
+있고, 나이틀리 창은 마지막 체크포인트 이후 수정된 CVE 만 다시 요청한다 — 9월에 reject 된 CVE 는
+다시 수정되지 않는다. `NVD_SINCE_DAYS=120`(API 최대 창, seed 체인이 시작된 2026-08-14 보다 뒤로
+닿는다)으로 한 번 빌드하면 그 이후 수정된 모든 CVE 가 다시 돌아와 낡은 것이 철회된다; 그 `withdrawn`
+줄이 얼마나 있었는지의 첫 측정이고, 게시 게이트는 그 수만큼의 감소를 허용한다. 이 리뷰가 남겨 두는
+유일한 운영 작업으로 `docs/deferred-decisions.md` 에 기록했다.
+
 ---
 
 ## 3. 아키텍처

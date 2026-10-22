@@ -860,6 +860,26 @@ exited 0 while 24 findings went unmentioned.
       with an empty version sat unfixed under names no rpm has; now fixed under the rpm
       name, with the split build's range never crossing to Leap (its release numbering
       is the module's, not the codestream's). Verified convert → store → matcher
+- [x] An npm alias is cataloged under its registry identity (D132) — the v3 entry's own
+      `name` (and npm 6's `npm:<name>@<version>` spelling) names the package; the install
+      path is kept as `Location.Install`. `utility-alias: npm:lodash@4.17.20` had been
+      cataloged as `utility-alias`, Evaluated and clean
+- [x] Lineage and module-build skips apply only where their convention holds (D133) —
+      Ubuntu's `+fips`/`+esm` on Ubuntu keys, `module+el` where the comparer is RPM; a Go
+      `1.0.0+fips1` was skipped as a coverage limit and passed `--fail-on-incomplete=target`
+- [x] The source identity's lookup compares the source version even when the binary shares
+      its name (D134) — `lookupName != p.Name` had sent util-linux itself down the binary
+      branch, and its epoch sorted it above a fix the source was still short of
+- [x] The archive is downloaded before the delta is consulted (D135) — both CSAF providers;
+      SUSE's cutoff and `DataAsOf` come from the GET that delivered the bytes (no HEAD); an
+      archive copy newer than the delta's by `current_release_date` is kept and counted; a
+      download resumed onto a regenerated archive restarts from byte 0
+- [x] A rating the source withdraws is removed (D136) — NVD's `metrics={}` for a returned CVE
+      withdraws its seeded rating (only NVD's key); `Provenance.Withdrawn` is this build's
+      count and `db push` tolerates a drop of exactly that many, never to zero. Ratings
+      withdrawn before D136 need one `NVD_SINCE_DAYS=120` build (deferred-decisions)
+- [x] `--fail-on-epss=NaN` is refused at parse time (2026-10-22 review #6) — it had passed
+      the range check and silently disabled the gate; exit 2 before any scan
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15

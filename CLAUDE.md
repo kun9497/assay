@@ -67,7 +67,15 @@ an image applies only to that image — since D124 even when its image reference
 Since D123 every image layer is read to EOF and held to its
 config's diff id (the config to the manifest) before its files count — `oci-dir:` and
 `docker-archive:` had been verified by nothing. Since D130 a hardlink resolves to the inode of
-the layer that made it, not to the newest file of that name (a symlink still does). Findings
+the layer that made it, not to the newest file of that name (a symlink still does). The
+2026-10-22 external review's six defects are closed as D132–D136 plus a NaN fix: an npm alias
+is cataloged under its registry identity (D132); Ubuntu lineage and RPM module-build skips
+apply only to their own ecosystems (D133); a binary that shares its source's name is still
+judged on the source version (D134); both CSAF providers download the archive before consulting
+the delta and keep an archive copy newer than the delta's (D135); a CVE NVD returns without a
+score withdraws its seeded rating and `db push` tolerates exactly that drop (D136 — one
+`NVD_SINCE_DAYS=120` reconciliation build is still owed, see deferred-decisions); and
+`--fail-on-epss=NaN` is refused at parse. Findings
 can be waived through a
 `.assay.yaml` ignore file (D102 — reason mandatory, expiry optional) or a producer's
 OpenVEX document (`--vex`, repeatable, D104 — not_affected/fixed suppress, a reasonless

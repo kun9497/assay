@@ -829,6 +829,25 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       없는 이름 아래 unfixed로 놓여 있었음; 이제 rpm 이름 아래 fixed이고, 쪼갠 빌드의
       범위는 Leap으로 건너가지 않음(release 번호 체계가 codestream이 아니라 모듈의 것).
       convert → store → matcher로 검증
+- [x] npm 별칭은 레지스트리 identity로 카탈로그한다 (D132) — v3 엔트리 자신의 `name`(그리고
+      npm 6의 `npm:<name>@<version>` 표기)이 패키지 이름; 설치 경로는 `Location.Install`로
+      보존. `utility-alias: npm:lodash@4.17.20`이 `utility-alias`로 카탈로그돼 Evaluated·clean
+      이었음
+- [x] 계보·모듈 빌드 skip은 그 관례가 유효한 곳에만 (D133) — Ubuntu의 `+fips`/`+esm`은 Ubuntu
+      키에서만, `module+el`은 comparer가 RPM인 곳에서만; Go `1.0.0+fips1`이 coverage 한계로
+      skip돼 `--fail-on-incomplete=target`을 통과했었음
+- [x] 소스 identity 조회는 바이너리가 같은 이름이라도 소스 버전으로 비교 (D134) —
+      `lookupName != p.Name`이 util-linux 자신을 바이너리 분기로 보냈고, epoch이 소스가 아직
+      못 미친 fix 위로 정렬시켰음
+- [x] 아카이브를 먼저 내려받고 delta를 조회 (D135) — 두 CSAF 프로바이더; SUSE의 기준 시각과
+      `DataAsOf`는 바이트를 전달한 GET에서(HEAD 없음); `current_release_date`로 delta 사본보다
+      새 아카이브 사본은 유지하고 셈; 재생성된 아카이브로 재개된 다운로드는 0 바이트부터 재시작
+- [x] 출처가 철회한 rating은 제거 (D136) — 돌려준 CVE에 대한 NVD의 `metrics={}`가 seed된
+      rating을 철회(NVD 키만); `Provenance.Withdrawn`은 이 빌드의 수이고 `db push`는 정확히
+      그만큼의 감소만 허용, 0까지는 절대 아님. D136 이전에 철회된 rating은
+      `NVD_SINCE_DAYS=120` 빌드 한 번이 필요(deferred-decisions)
+- [x] `--fail-on-epss=NaN`은 파싱 단계에서 거절 (2026-10-22 리뷰 #6) — 범위 검사를 통과해
+      게이트를 조용히 껐었음; 스캔 전에 exit 2
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨
