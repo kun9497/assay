@@ -824,6 +824,11 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       나중 레이어가 다시 쓴 임시 경로에서 hardlink된 패키지 데이터베이스가 다시 쓴 것으로
       돌아왔었음. query 단위 해석은 한 대상의 모든 요청자에게 답함 — 옛 pass는 마지막
       요청자만 남겼음
+- [x] purl 버전이 없는 SUSE recommended 빌드는 product_id에서 쪼갠다 (D131) — purl이 NEVR
+      전체에 빈 버전이던 SLES:15.SP6의 kernel-coco/qemu/ovmf 빌드 16,736개가 어떤 rpm에도
+      없는 이름 아래 unfixed로 놓여 있었음; 이제 rpm 이름 아래 fixed이고, 쪼갠 빌드의
+      범위는 Leap으로 건너가지 않음(release 번호 체계가 codestream이 아니라 모듈의 것).
+      convert → store → matcher로 검증
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨

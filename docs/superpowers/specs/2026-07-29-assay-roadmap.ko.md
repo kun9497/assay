@@ -5354,6 +5354,109 @@ symlink 후속은 그 디렉터리에서 상대 대상을 풀고 대상의 디�
 
 ---
 
+### D131 — purl에 버전이 없는 SUSE recommended 빌드는 product_id를 쪼개서 이름과 버전을 정한다
+
+**결정.** `resolveProduct`에서, leaf purl의 버전이 *비어 있는* `recommended` id는 rpm 규칙으로
+쪼갭니다 — 마지막 하이픈 뒤가 release, 그 앞 하이픈 뒤가 version, 나머지가 이름 — 단, purl의
+이름이 product_id 그대로이고 결과가 빌드로 읽힐 때만: 비지 않은 이름, 숫자로 시작하는 version,
+점을 포함하는 release. 항목은 그 이름 아래 `ver-rel`에서 fixed로 저장되고 셉니다
+(`RecommendedNamedByNEVRSplit`). 둘 중 하나라도 통과하지 못한 빈 버전 id는 하던 대로 — purl이
+적은 대로, unfixed로, 절대 버리지 않고 — 저장되며 역시 셉니다(`RecommendedEmptyVersionKept`).
+bare id(D126)와 정상 빌드는 건드리지 않습니다: 이 분기는 bucket과 플랫폼 fold 뒤에, purl 버전이
+빈 경우에만 돕니다.
+
+쪼갠 빌드의 범위는 openSUSE Leap으로 절대 건너가지 않습니다. D108 미러와 D128 대여 모두 그것을
+떨굽니다(`withoutSplitBuilds`); 달리 줄 것이 없는 SLE 항목은 아예 미러되지 않고 셉니다
+(`SkippedLeapMirrorSplitBuild`), codestream fix도 함께 가진 항목은 그 범위만 미러합니다. native
+Leap 쌍이 있는 항목은 D128이 같은 이유로 대여를 거절하더라도 전처럼 native 우선으로 셉니다 —
+미러되지 않은 이유가 native 우선이고, Leap 카운터들은 미러 가능한 항목의 분할로 남습니다(첫
+초안은 그런 항목을 양쪽에 셌음; D131의 검토).
+
+**이유.** SUSE의 생성기는 일부 빌드의 purl을 아예 못 쪼갭니다: NEVR 전체가 purl의 이름이 되고
+버전은 비어 있음 — `pkg:rpm/suse/kernel-coco-6.4.0-15061.9.coco15sp6.1@`. 적힌 대로 저장하면
+항목은 `SLES:15.SP6`에 어떤 설치 rpm에도 없는 이름으로, fix 없이 놓여 아무것에도 닿지 않습니다:
+틀린 finding이 아니라 finding 자체가 없음. bucket이 이 id가 빌드라고 말하고(`recommended` id
+4,396,450개 중 bare product를 이름 짓는 것은 0, D126의 측정), 빌드의 product_id는 구성상
+`name-ver-rel`이므로 정보는 내내 거기 있었습니다; purl이 담지 않았을 뿐. 두 모양 검사는 우연히
+하이픈 둘을 가진 bare 이름이 잘리지 않게 하는 것입니다: `typelib-1_0-Vte`와 `libwmf-0_2-7`은
+release에서, `cdparanoia-IIIalpha9.8-691.22`는 version에서 떨어집니다. 생성기 자신의 정상 분리
+(버전 있는 leaf 4,347,013개, 2026-10-19 아카이브 전체)에 대해 잼: 4,334,151개가 숫자 시작
+version·점 있는 release; 숫자 시작/점 없음 6,942개와 숫자 아님/점 없음 5,342개는 D126의 잘못
+쪼개진 bare 모양; 578개의 실제 빌드가 숫자로 시작하지 않는 version(`IIIalpha9.8`, `s20121221`,
+`R14B`)을 가지며 쪼개지지 않은 채로 온다면 거부될 것 — 보이게, kept 카운터로. 그런 일은 없었습니다.
+
+Leap 제외는 D108이 이미 기대고 있는 계열 규칙을, 깨지기 직전인 곳에 적용한 것입니다. 미러의
+전제는 SLE codestream과 그 Leap 쌍이 하나의 release 번호 체계(`150600.N`)를 공유해서 SLE fix
+버전이 Leap 빌드를 올바르게 정렬한다는 것입니다. 쪼갠 빌드의 release는 그 모듈 자신의 것 —
+Confidential Computing Technical Preview는 `15061.N.coco15sp6.1` — 이고 `15061`은 `150600`보다
+*아래*로 정렬되므로, 모든 Leap 빌드가 그것으로 fixed로 읽힙니다. 오늘 Leap에서 kernel-coco를
+내는 것은 없습니다; 규칙은 싸고, 언젠가 무언가가 내는 날 판정은 모듈이 아니라 Leap의 번호 체계로
+이뤄집니다. 이 슬라이스에 대한 검토자의 조건이 정확히 이것 — 어떤 설치본도 다른 계열의 버전으로
+해결됐다고 판정되지 않을 것 — 이었습니다.
+
+**측정 (2026-10-19 아카이브, 문서 71,711건).** 빈 버전 `recommended` id: 전부 108,440개(deferred
+항목의 "89,598"은 자기 부분합을 잘못 더한 것). fold되는 키에 16,736개, 전부 Confidential Computing
+Technical Preview 15 SP6 모듈을 통한 `SLES:15.SP6`, 문서 2,077건(각 CVE 하나). 나머지 91,704개는
+`foldKey`가 거부하는 플랫폼에 있음 — Liberty Linux 8(37,003), SLES 12 SP3-TERADATA(16,604),
+HPC 12 SP3(16,597), 11 SP3-TERADATA(7,233), Liberty 9(6,041), 11 SP1-TERADATA(5,247), Liberty
+9.6 EMS(2,943), Micro 6.1(27), Liberty 7(9) — 규칙에 닿지 않습니다. 정확한 규칙 아래 16,736개
+전부 쪼개지고 0개가 kept. 이름 52개: kernel-coco 계열(kernel-coco, -devel, _debug, _debug-devel,
+kernel-devel-coco, kernel-source-coco, kernel-syms-coco, reiserfs-kmp-coco: 각 2,071, 합 16,568),
+qemu와 그 하위 패키지 41개(각 4, 합 152 — 둘은 `8.2.71.16.3_3_ga95067eb`, 나머지 `8.2.7`), ovmf,
+ovmf-tools, qemu-ovmf-x86_64와 그 -debug(각 2, 합 8, `202308`). 버전: `6.4.0` 16,568, `8.2.7` 152,
+`202308` 8, `8.2.71.16.3_3_ga95067eb` 8.
+
+공존: kernel-coco 16,568개는 그 CVE가 그 키에서 그 패키지에 대해 가진 유일한 항목 — 다른 무엇도
+kernel-coco를 내지 않습니다. qemu/ovmf 168개는 각각 같은 문서의 같은 패키지 codestream 빌드
+옆에 있고(서로 다른 쌍 44개, 예: qemu `8.2.7-15061.6.coco15sp6.1` 옆의 `8.2.7-150600.3.20.1`),
+모든 쌍에서 쪼갠 빌드의 release가 codestream 것보다 아래로 정렬됩니다. matcher는 한 항목의
+범위들의 합집합을 취하므로 codestream 범위 안에 놓이는 범위는 어떤 판정도 바꾸지 않습니다:
+fix 미만의 codestream qemu는 여전히 잡히고, fix인 것은 깨끗하며, 모듈 fix 미만의 모듈 빌드는
+잡힙니다. (모듈 fix인 모듈 빌드는 D131 전에도 codestream 범위로 affected 판정이었고 지금도
+그렇습니다 — 기존 그대로, 넓어지지 않음.) Leap: 16,736개 중 native Leap bare `known_affected`가
+있는 것 0(D128은 결코 안 돎), native Leap *빌드*가 있는 것 168(native 우선, 미러 없음), native
+Leap 항목이 전혀 없는 것 16,568 — D108은 전에 쓰레기 no-fix 항목을 `openSUSE Leap:15.6`에
+미러했고 이제 아무것도 미러하지 않으며 셉니다.
+
+전후, 아카이브 전체: `SLES:15.SP6`의 NEVR 모양 이름 아래 unfixed 항목 16,736개가 rpm 이름 52개
+아래 fixed 항목이 됨; `UnfixableUnstated`가 16,736 줄어듦; `MirroredToLeap`가 16,568 줄고
+`SkippedLeapMirrorSplitBuild`가 그것을 보고함; `RecommendedEmptyVersionKept`는 0. CVE 2,077건은
+복원된 레코드가 속한 CVE — Confidential Computing 모듈의 kernel-coco를 깐 SLES 15 SP6 호스트가
+아무 말도 듣지 못하던 것 — 이지, 모든 이미지에서 놓친 finding 수가 아닙니다; 컨테이너 이미지는
+커널을 담지 않고, 주간 differential의 어떤 이미지도 영향받지 않습니다.
+
+**검증.** Convert: kernel-coco 모양은 쪼개져 fixed로 저장되고 NEVR 이름 항목은 사라짐; 하이픈
+하나짜리 id, `typelib-1_0-Vte`, `cdparanoia-IIIalpha9.8-691.22`는 적힌 대로 unfixed로 남고 kept로
+셈; purl이 다른 것을 이름 짓는 빌드 모양 product_id는 kept; 규칙 옆의 정상 빌드와 bare id는
+그대로; 쪼갠 빌드만 있는 항목은 미러되지 않고 섞인 항목은 codestream 범위만 미러; native Leap
+no-fix는 쪼갠 빌드의 fix를 받지 않음; 진행 줄은 세 카운터를 한 묶음으로 실음. Convert → 실제
+store → matcher: kernel-coco `15061.8`은 잡히고 `15061.9`를 안내받으며, `15061.9`와 `15061.21`은
+깨끗하고, 옛 NEVR 이름은 아무것에도 맞지 않음; qemu `150600.3.15.1`은 잡히고 `150600.3.20.1`은
+깨끗하며 `15061.5.coco`는 잡힘. 아카이브 전체 실행(`TestD131_AgainstAnExtractedArchive`,
+`ASSAY_SUSE_ARCHIVE_DIR`로 opt-in)은 fold된 키에 NEVR 모양 이름이 남지 않고, 쪼갠 범위가 Leap
+키에 닿지 않으며, 모든 쪼갬이 버전을 저장했고, 아무것도 kept되지 않았음을 단언합니다. 잡힌 변이
+열넷: purl 그대로 가드, 점 있는 release와 숫자 시작 검사(각각 호출자에서), 쪼갬 자체(판정
+테스트), 두 카운터, 쪼갬 기록, 미러의 건너뜀, 미러가 거르지 않은 범위를 별칭함, D128이 쪼갠
+것만 있는 쌍과 *섞인* 쌍에서 그것을 빌려줌, 필터가 전부 남김, 쪼갠 항목이 unfixed로도 저장됨,
+D128 경로가 쪼갬 카운터에 셈. 생존 변이 하나는 기록된 동치입니다: 쪼갬 기록 가드의
+`version != ""` 절반, 그 쌍은 `withoutSplitBuilds` 자신의 `e.Fixed != ""`.
+
+**검토 (wf_b6d19909-404, 두 관점, 발견당 반박자 하나: 5건 발견, 4건 확인).** 넷 중 셋은 첫
+초안의 "열하나 잡힘"이 덮지 않던 테스트 공백이었습니다: 섞인 쌍의 D128 대여를 붙드는 테스트가
+없었고(D131 이전 줄로 되돌려도 스위트가 녹색), 판정 하네스가 "affected, fix 없음"을 "finding
+없음"과 같은 `""`로 접어서 no-fix 범위를 쪼갠 범위 옆에 그대로 둔 store에서도 모든 clean 행이
+통과했을 것이며, 위의 동치 변이가 기록되지 않았습니다. 넷째는 지금 고친 카운터 겹침. 규칙, Leap
+제외, LTSS 보류 경로(탐침: LTSS kernel-coco는 쪼개져 저장되고 미러되지 않음), `15061.N`이
+`150600.N` 아래인 rpm 정렬, 변하지 않는 qemu 판정과 `Evidence.Fixed`는 모두 공격을 견뎠습니다.
+
+**남은 불확실성.** 규칙은 제품 하나에서 잰 것입니다; 두 번째 빈 버전 모양은
+`RecommendedEmptyVersionKept`에 떨어져 진행 줄에 보이고 옛 동작을 유지합니다. Confidential
+Computing 모듈의 qemu/ovmf 빌드는 여전히 codestream 범위로 판정됩니다(기존 그대로). 모듈 빌드가
+assay가 스캔하는 곳에 설치되는지는 알 수 없습니다 — 수혜자는 컨테이너 이미지가 아니라 호스트나
+VM SBOM입니다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

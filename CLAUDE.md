@@ -26,7 +26,9 @@ archive walk in both CSAF providers so a corrected document leaves no stale reco
 SLE→Leap mirror, D108,
 yields to Leap's own `known_not_affected` since D125 and lends a no-fix Leap entry its SLE
 twin's fix since D128; a bare status id is named by its product_id since D126, because
-SUSE's own purl for `libwmf-0_2-7` says `libwmf`), and Azure
+SUSE's own purl for `libwmf-0_2-7` says `libwmf`, and a recommended build whose purl carries
+no version is split from its product_id since D131 — 16,736 kernel-coco builds had sat
+unfixed under NEVR-shaped names, and a split build's range never crosses to Leap), and Azure
 Linux/CBL-Mariner OVAL (D106 — moved off OSV.dev after its imported snapshot proved
 frozen since 2026-03; the 2026-08-28 audit's 140 missing findings all recovered). `assay scan` reads
 SBOMs, container images (distroless via `status.d`, D54), Go binaries and directories
