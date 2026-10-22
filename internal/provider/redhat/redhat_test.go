@@ -114,9 +114,19 @@ type feed struct {
 	// finish before an earlier one and see whether the order survives it.
 	delay map[string]time.Duration
 	// hits counts requests per path, so a test can assert what was and was not
-	// fetched rather than inferring it from the result.
-	mu   sync.Mutex
-	hits map[string]int
+	// fetched rather than inferring it from the result; order records every
+	// request as "METHOD path" as it arrived, so a test can assert what was
+	// fetched before what.
+	mu    sync.Mutex
+	hits  map[string]int
+	order []string
+}
+
+// requests is every request the feed answered, as "METHOD path", in order.
+func (f *feed) requests() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.order...)
 }
 
 // serve stands up a feed. Everything not otherwise routed serves the archive,
@@ -131,6 +141,7 @@ func serve(t *testing.T, f *feed) *httptest.Server {
 		p := strings.TrimPrefix(r.URL.Path, "/")
 		f.mu.Lock()
 		f.hits[p]++
+		f.order = append(f.order, r.Method+" "+p)
 		f.mu.Unlock()
 		if d := f.delay[p]; d != 0 {
 			time.Sleep(d)

@@ -644,11 +644,16 @@ type stats struct {
 	// because they answer different questions: the archive's say what the
 	// snapshot held, these say how far behind it was.
 	// ArchiveSuperseded counts archive documents skipped because the delta
-	// pass, which runs first since D129, fetched a newer copy of the same
-	// document -- whatever that copy converted to. Only a FETCHED copy
-	// supersedes: a listed-but-gone document (DeltaGone) keeps its archive
-	// copy, so a transient 404 never drops a live advisory.
+	// pass, which runs first since D129, fetched a copy of the same document
+	// at least as new as the archive's -- whatever that copy converted to.
+	// Only a FETCHED copy supersedes: a listed-but-gone document (DeltaGone)
+	// keeps its archive copy, so a transient 404 never drops a live advisory.
 	ArchiveSuperseded int
+	// ArchiveNewerThanDelta counts archive documents the delta had fetched
+	// a copy of whose archive copy is the NEWER revision by
+	// current_release_date; that copy is emitted after the delta's and
+	// stands (D135; suse.stats' field of the same name has the fuller note).
+	ArchiveNewerThanDelta int
 
 	DeltaListed     int // documents changes.csv named as newer than the archive
 	DeltaFetched    int // of those, how many were still published

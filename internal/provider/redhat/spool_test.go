@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kun9497/assay/internal/advisory"
 )
@@ -59,6 +60,14 @@ type resettingServer struct {
 	// caller with a nil error: net/http enforces Content-Length itself, so
 	// without this the short-read check can never fire and cannot be tested.
 	shortChunkedOn int32
+	// modified, when set, is sent as the archive's Last-Modified; from
+	// attempt regenerateAfter on it is one hour later -- the archive rebuilt
+	// under a download (D135). Red Hat's archive carries its date in its
+	// name, so most tests leave both unset.
+	modified        time.Time
+	regenerateAfter int32
+	// restarts counts GETs with no Range header after the first attempt.
+	restarts atomic.Int32
 }
 
 func (s *resettingServer) handler(t *testing.T) http.Handler {
@@ -74,6 +83,16 @@ func (s *resettingServer) handler(t *testing.T) http.Handler {
 		// real failure, just not the one under test.
 		if strings.HasSuffix(r.URL.Path, ".csv") {
 			return
+		}
+		if !s.modified.IsZero() {
+			modTime := s.modified
+			if s.regenerateAfter > 0 && s.attempts.Load()+1 >= s.regenerateAfter {
+				modTime = modTime.Add(time.Hour)
+			}
+			w.Header().Set("Last-Modified", modTime.Format(http.TimeFormat))
+		}
+		if r.Header.Get("Range") == "" && s.attempts.Load() > 0 {
+			s.restarts.Add(1)
 		}
 
 		start := 0
@@ -316,6 +335,32 @@ func TestFetch_ServerIgnoringRangeDoesNotCorruptTheSpool(t *testing.T) {
 // The spool is 261 MB in production. Leaving one behind per run fills a CI
 // runner, and leaving one per FAILED attempt does it faster — so both paths are
 // checked here rather than trusting the defer to be right.
+// D135: a resumed response naming a different Last-Modified than the bytes
+// on disk is the archive rebuilt under the download; the partial file is
+// discarded and the transfer restarts from byte 0. Mirrors suse's test; here
+// the header is optional, so the check only fires when both sides carry it.
+func TestFetch_ArchiveRegeneratedMidDownloadRestartsFromZero(t *testing.T) {
+	body := archiveOf(t, map[string]string{"2026/cve-2026-0001.json": vexDoc("CVE-2026-0001")})
+	s := &resettingServer{body: body, failFirst: 1, regenerateAfter: 2,
+		modified: time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)}
+	srv := httptest.NewServer(s.handler(t))
+	t.Cleanup(srv.Close)
+
+	got, err := fetchSpooled(t, srv)
+	if err != nil {
+		t.Fatalf("Fetch: %v -- a regenerated archive must be re-downloaded, not fatal", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("advisories = %d, want 1", len(got))
+	}
+	if !s.ranged.Load() {
+		t.Error("no Range request was made; the regeneration case was never reached")
+	}
+	if s.restarts.Load() == 0 {
+		t.Error("the download resumed onto a different generation instead of restarting from byte 0")
+	}
+}
+
 func TestFetch_SpoolIsRemoved(t *testing.T) {
 	count := func() int {
 		matches, err := filepath.Glob(filepath.Join(os.TempDir(), "assay-redhat-*.tar.zst"))

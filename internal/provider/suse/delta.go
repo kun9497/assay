@@ -43,24 +43,25 @@ const deltaRequestTimeout = 3 * time.Minute
 // would look complete while having fetched nothing.
 var changesPath = regexp.MustCompile(`^[0-9]{4}/cve-[0-9]{4}-[0-9]+\.json$`)
 
-// deltaSince fetches every document that changed on or after the archive's
-// own Last-Modified, emits what they convert to, and returns the CVE ids of
-// the documents it actually fetched, so the archive walk that follows can
-// skip its older copies (D129). Mirrors redhat.deltaSince's shape (fetch the
-// list, bound it, fetch concurrently in order) with one real difference:
+// deltaSince fetches every document that changed on or after the downloaded
+// archive's own Last-Modified, emits what they convert to, and returns the
+// CVE ids of the documents it actually fetched with each one's revision
+// date, so the archive walk that follows can skip its copies that are no
+// newer (D129, D135). Mirrors redhat.deltaSince's shape (fetch the list,
+// bound it, fetch concurrently in order) with one real difference:
 // changedSince below reads changes.csv start to finish rather than exiting
 // early, because this feed's sort order is not one it has kept (D122).
 //
-// Run BEFORE the archive walk since D129. It used to run after, relying on
-// last-write-wins by ID to let the newer document replace the archive's --
-// which has nothing to win with when the newer document converts to nothing
-// (a finding SUSE corrected to known_not_affected): the archive's stale
-// record stood until the archive was regenerated, about a day (2026-10-20
-// external review, #5). Only a FETCHED document supersedes; one listed and
-// gone (DeltaGone) keeps its archive copy, so a transient 404 never drops a
-// live advisory.
+// Run BEFORE the archive walk since D129, and AFTER the archive download
+// since D135. It used to run after the walk, relying on last-write-wins by
+// ID to let the newer document replace the archive's -- which has nothing to
+// win with when the newer document converts to nothing (a finding SUSE
+// corrected to known_not_affected): the archive's stale record stood until
+// the archive was regenerated, about a day (2026-10-20 external review, #5).
+// Only a FETCHED document supersedes; one listed and gone (DeltaGone) keeps
+// its archive copy, so a transient 404 never drops a live advisory.
 func (p *Provider) deltaSince(ctx context.Context, cutoff time.Time,
-	emit func(advisory.Advisory) error, st *stats, covered map[string]bool) (map[string]bool, error) {
+	emit func(advisory.Advisory) error, st *stats, covered map[string]bool) (map[string]time.Time, error) {
 
 	paths, err := p.changedSince(ctx, cutoff)
 	if err != nil {
@@ -74,7 +75,7 @@ func (p *Provider) deltaSince(ctx context.Context, cutoff time.Time,
 				"lagging", len(paths), cutoff.Format("2006-01-02"), maxDelta)
 	}
 
-	fetched := map[string]bool{}
+	fetched := map[string]time.Time{}
 	err = p.eachDocument(ctx, paths, func(rel string, d *document) error {
 		if d == nil {
 			// Listed and no longer served -- changes.csv and the individual
@@ -91,9 +92,10 @@ func (p *Provider) deltaSince(ctx context.Context, cutoff time.Time,
 		// emit the archive's stale copy AFTER the delta's, where the old
 		// order had let the delta win by ID regardless. The id is what
 		// convert keys the record on, so the skip and the record agree by
-		// construction.
+		// construction. The value is this copy's revision date, which the
+		// walk compares against the archive copy's (D135).
 		if id := cveOf(d); id != "" {
-			fetched[id] = true
+			fetched[id] = revisionOf(d)
 		}
 		adv, ok := convert(d, st)
 		if !ok {

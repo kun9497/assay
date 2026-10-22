@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -1581,8 +1582,14 @@ func setFailOnEPSS(opts *scancmd.Options, value string) error {
 	if err != nil {
 		return fmt.Errorf("--fail-on-epss: %q is not a number: %w", value, err)
 	}
-	if v < 0 || v > 1 {
-		return fmt.Errorf("--fail-on-epss: %q must be between 0 and 1 (EPSS is a probability)", value)
+	// ParseFloat accepts "NaN" and the infinities. NaN compares false
+	// against everything, so `v < 0 || v > 1` let it through and the gate's
+	// `score >= threshold` never fired -- the finding printed, exit 0, and
+	// the flag the user typed silently off (2026-10-22 external review, #6).
+	// Written as "inside the range" rather than "outside it" so the check
+	// cannot be satisfied by a value that refuses to order.
+	if math.IsNaN(v) || !(v >= 0 && v <= 1) {
+		return fmt.Errorf("--fail-on-epss: %q must be a number between 0 and 1 (EPSS is a probability)", value)
 	}
 	opts.FailOnEPSS = &v
 	return nil

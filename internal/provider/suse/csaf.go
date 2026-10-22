@@ -47,6 +47,11 @@ type document struct {
 	Document struct {
 		Tracking struct {
 			ID string `json:"id"`
+			// CurrentDate is the revision's own date. Read only to order two
+			// copies of one document (the delta's against the archive's) --
+			// never as a freshness statement, which is the archive's
+			// Last-Modified (D12).
+			CurrentDate string `json:"current_release_date"`
 		} `json:"tracking"`
 		Title string `json:"title"`
 	} `json:"document"`
@@ -729,11 +734,19 @@ type stats struct {
 	SkippedLeapMirrorSplitBuild int
 
 	// ArchiveSuperseded counts archive documents skipped because the delta
-	// pass, which runs first since D129, fetched a newer copy of the same
-	// document -- whatever that copy converted to. Only a FETCHED copy
-	// supersedes: a listed-but-gone document (DeltaGone) keeps its archive
-	// copy, so a transient 404 never drops a live advisory.
+	// pass, which runs first since D129, fetched a copy of the same document
+	// at least as new as the archive's -- whatever that copy converted to.
+	// Only a FETCHED copy supersedes: a listed-but-gone document (DeltaGone)
+	// keeps its archive copy, so a transient 404 never drops a live advisory.
 	ArchiveSuperseded int
+	// ArchiveNewerThanDelta counts archive documents the delta had fetched
+	// a copy of whose archive copy is the NEWER revision by
+	// current_release_date. The archive copy is emitted after the delta's,
+	// so the newer one is the record that stands. Since the archive is
+	// downloaded before the delta runs (D135) this needs an individual
+	// document served staler than the archive it sits beside -- a cache in
+	// front of the feed -- so a non-zero count is worth a look.
+	ArchiveNewerThanDelta int
 
 	// The delta pass (delta.go), identical in meaning to redhat.stats'.
 	DeltaListed     int

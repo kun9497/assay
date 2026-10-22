@@ -22,10 +22,10 @@ import (
 // connection open for as long as the whole parse-and-store pass takes,
 // which is the shape D64 exists to close on both feeds.
 //
-// Unlike Red Hat's server, this one must also answer the HEAD request
-// archiveLastModified makes BEFORE spool ever runs -- and that HEAD must
-// NOT count as a download attempt or be subject to the same reset/resume
-// simulation the GET path uses, since it carries no body at all.
+// Unlike Red Hat's server, this one must carry a Last-Modified on the
+// archive response: since D135 the GET that downloads the bytes is the only
+// statement of their age (the pre-flight HEAD is gone). A HEAD is still
+// answered harmlessly below, in case one is ever sent again.
 
 // resettingServer serves the archive but severs the connection partway
 // through the first N GET attempts, mirroring redhat's resettingServer.
@@ -37,6 +37,17 @@ type resettingServer struct {
 	ranged         atomic.Bool
 	ignoreRange    bool
 	shortChunkedOn int32
+	// regenerateAfter, when set, makes every GET from that attempt number
+	// on report a Last-Modified one hour later than archiveModTime: the
+	// archive rebuilt in place while a download was in flight (D135).
+	regenerateAfter int32
+	// restarts counts GETs with no Range header after the first attempt --
+	// a client that chose to start over rather than resume.
+	restarts atomic.Int32
+	// noModifiedOn206 drops the Last-Modified header from resumed (Range)
+	// responses only, the way a CDN that SHOULD-but-does-not send it on a
+	// partial response behaves.
+	noModifiedOn206 bool
 }
 
 func (s *resettingServer) handler(t *testing.T) http.Handler {
@@ -52,8 +63,15 @@ func (s *resettingServer) handler(t *testing.T) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		if !s.archiveModTime.IsZero() {
-			w.Header().Set("Last-Modified", s.archiveModTime.Format(http.TimeFormat))
+		modTime := s.archiveModTime
+		if s.regenerateAfter > 0 && s.attempts.Load()+1 >= s.regenerateAfter {
+			modTime = modTime.Add(time.Hour)
+		}
+		if !modTime.IsZero() && !(s.noModifiedOn206 && r.Header.Get("Range") != "") {
+			w.Header().Set("Last-Modified", modTime.Format(http.TimeFormat))
+		}
+		if r.Method == http.MethodGet && r.Header.Get("Range") == "" && s.attempts.Load() > 0 {
+			s.restarts.Add(1)
 		}
 		if r.Method == http.MethodHead {
 			// The pre-flight request archiveLastModified makes. It carries no
@@ -221,6 +239,63 @@ func TestFetch_ServerIgnoringRangeDoesNotCorruptTheSpool(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Fatalf("advisories = %d, want both", len(got))
+	}
+}
+
+// D135: a resumed response that names a different Last-Modified than the
+// bytes already on disk is the archive rebuilt under the download. The
+// partial file is discarded and the transfer restarts from byte 0, and the
+// provenance names the generation actually downloaded -- never a splice of
+// two generations bzip2 may or may not notice.
+func TestFetch_ArchiveRegeneratedMidDownloadRestartsFromZero(t *testing.T) {
+	s, srv := newResettingServer(t, &resettingServer{
+		body: fixture(t, "archive.tar.bz2"), failFirst: 1, regenerateAfter: 2,
+	})
+	p := New(Options{BaseURL: srv.URL})
+	var got []advisory.Advisory
+	prov, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
+		got = append(got, a)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v -- a regenerated archive must be re-downloaded, not fatal", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("advisories = %d, want both", len(got))
+	}
+	if !s.ranged.Load() {
+		t.Error("no Range request was made; the regeneration case was never reached")
+	}
+	if s.restarts.Load() == 0 {
+		t.Error("the download resumed onto a different generation instead of restarting from byte 0")
+	}
+	if want := archiveBuilt2026.Add(time.Hour); !prov.DataAsOf.Equal(want) {
+		t.Errorf("DataAsOf = %s, want the regenerated archive's %s", prov.DataAsOf, want)
+	}
+}
+
+// A resumed response that carries no Last-Modified is read as the same
+// generation, not as a failure: the age of the bytes was recorded from the
+// 200 the transfer began with, and RFC 9110 only SHOULD-requires the header
+// on a 206 (D135's review).
+func TestFetch_ResumeWithoutLastModifiedIsNotFatal(t *testing.T) {
+	s, srv := newResettingServer(t, &resettingServer{
+		body: fixture(t, "archive.tar.bz2"), failFirst: 1, noModifiedOn206: true,
+	})
+	p := New(Options{BaseURL: srv.URL})
+	var got []advisory.Advisory
+	prov, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
+		got = append(got, a)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v -- a 206 without Last-Modified must resume, not fail", err)
+	}
+	if len(got) != 2 || !s.ranged.Load() {
+		t.Fatalf("advisories = %d ranged = %v, want both documents through a resumed transfer", len(got), s.ranged.Load())
+	}
+	if !prov.DataAsOf.Equal(archiveBuilt2026) {
+		t.Errorf("DataAsOf = %s, want the generation the 200 reported, %s", prov.DataAsOf, archiveBuilt2026)
 	}
 }
 

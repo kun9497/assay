@@ -28,6 +28,21 @@ type Annotator interface {
 	Annotate(ctx context.Context, emit func(advisory.Rating) error) (store.Provenance, error)
 }
 
+// WithdrawingAnnotator is an Annotator whose source can also say that a CVE
+// it returned no longer carries a rating (D136). NVD answers a delta window
+// with every CVE modified in it, and a Rejected CVE -- or one reset to
+// Awaiting Analysis -- comes back with metrics={}: an explicit statement
+// that the score is gone, not an absence of data. An annotator that merely
+// emits nothing for such a record leaves whatever a seeded build carried
+// forward standing (2026-10-22 external review, #5), so this shape lets it
+// withdraw. The caller removes ONLY that source's rating for the CVE; other
+// authorities' opinions are not the source's to withdraw. Annotate stays the
+// shape every other annotator has; dbcmd prefers this one when offered.
+type WithdrawingAnnotator interface {
+	Annotator
+	AnnotateWithdrawing(ctx context.Context, emit func(advisory.Rating) error, withdraw func(cve string) error) (store.Provenance, error)
+}
+
 // ResumableAnnotator can extend a delta to cover changes since the seed's
 // last successful request. Explicit historical backfills retain their bounds.
 type ResumableAnnotator interface {

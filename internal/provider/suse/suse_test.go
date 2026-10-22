@@ -49,10 +49,17 @@ type feed struct {
 	docs map[string]string
 	// status overrides the response code for a path.
 	status map[string]int
+	// headModified, when set, is the Last-Modified a HEAD on the archive
+	// reports, so a test can serve an archive regenerated between a
+	// pre-flight HEAD and the GET that downloads it. Zero means the same as
+	// archiveModified.
+	headModified time.Time
 	// hits counts requests per path, so a test can assert what was and was
-	// not fetched.
-	mu   sync.Mutex
-	hits map[string]int
+	// not fetched; order records every request as "METHOD path" in the order
+	// it arrived, so a test can assert what was fetched before what.
+	mu    sync.Mutex
+	hits  map[string]int
+	order []string
 }
 
 func serve(t *testing.T, f *feed) *httptest.Server {
@@ -63,6 +70,7 @@ func serve(t *testing.T, f *feed) *httptest.Server {
 		p := strings.TrimPrefix(r.URL.Path, "/")
 		f.mu.Lock()
 		f.hits[p]++
+		f.order = append(f.order, r.Method+" "+p)
 		f.mu.Unlock()
 		if code := f.status[p]; code != 0 {
 			http.Error(w, "nope", code)
@@ -70,8 +78,12 @@ func serve(t *testing.T, f *feed) *httptest.Server {
 		}
 		switch {
 		case p == archiveName:
-			if !f.archiveModified.IsZero() {
-				w.Header().Set("Last-Modified", f.archiveModified.Format(http.TimeFormat))
+			modified := f.archiveModified
+			if r.Method == http.MethodHead && !f.headModified.IsZero() {
+				modified = f.headModified
+			}
+			if !modified.IsZero() {
+				w.Header().Set("Last-Modified", modified.Format(http.TimeFormat))
 			}
 			w.Write(f.archive)
 		case p == "csaf-vex/"+changesFile:
@@ -94,6 +106,13 @@ func (f *feed) hitsFor(p string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.hits[p]
+}
+
+// requests is every request the feed answered, as "METHOD path", in order.
+func (f *feed) requests() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.order...)
 }
 
 func changesCSV(rows ...[2]string) string {
@@ -212,9 +231,11 @@ func TestFetch_MissingLastModifiedIsAnError(t *testing.T) {
 	}
 }
 
-// A non-200 on the archive HEAD must fail the build before any of the 445 MB
-// (in production) is ever requested via GET.
-func TestFetch_ArchiveHeadFailureIsAnError(t *testing.T) {
+// A non-200 on the archive GET must fail the build. (Until D135 a pre-flight
+// HEAD caught this before the GET; the HEAD is gone because its
+// Last-Modified could describe a different generation of the file than the
+// GET delivered.)
+func TestFetch_ArchiveGetFailureIsAnError(t *testing.T) {
 	s := serve(t, &feed{
 		archive:         fixture(t, "archive.tar.bz2"),
 		archiveModified: archiveBuilt2026,

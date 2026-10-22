@@ -125,19 +125,13 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 	// list would claim coverage of a release the archive stopped carrying.
 	covered := map[string]bool{}
 
-	// D129: the delta runs FIRST. The archive is a snapshot; documents
-	// written since it was built are fetched individually and emitted now
-	// (see deltaSince — this is the only thing that separated assay from
-	// grype on either differential run), and the walk below skips the
-	// archive's older copy of each one the delta fetched — so a document
-	// corrected to nothing affected leaves no record at all, where emitting
-	// the delta after the walk left the archive's stale record standing.
-	// Before the 262 MB spool as well: a delta that fails fails fast.
-	superseded, err := p.deltaSince(ctx, asOf, emit, &st, covered)
-	if err != nil {
-		return store.Provenance{}, err
-	}
-
+	// D135: the archive is downloaded BEFORE the delta is consulted, so every
+	// delta document is fetched after the snapshot it is compared against
+	// and cannot be the older of the two copies -- the race the 2026-10-22
+	// external review (#4) reproduced on SUSE's in-place-rebuilt archive,
+	// and the same shape here on a same-day rebuild under one name. The
+	// walk below still compares revision dates rather than assuming it.
+	//
 	// Spooled to disk first, then decompressed from there. Streaming the
 	// archive while storing what it produced held one connection open for the
 	// whole build (D64) - the transfer takes two minutes and the store takes
@@ -151,6 +145,19 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		body.Close()
 		os.Remove(body.Name())
 	}()
+
+	// D129: the delta is emitted BEFORE the walk. Documents written since
+	// the archive was built are fetched individually and emitted now (see
+	// deltaSince — this is the only thing that separated assay from grype on
+	// either differential run), and the walk below skips the archive's copy
+	// of each one the delta fetched — so a document corrected to nothing
+	// affected leaves no record at all, where emitting the delta after the
+	// walk left the archive's stale record standing. The cost D135 accepts:
+	// a delta that fails now fails after the 262 MB spool, not before it.
+	superseded, err := p.deltaSince(ctx, asOf, emit, &st, covered)
+	if err != nil {
+		return store.Provenance{}, err
+	}
 
 	zr, err := zstd.NewReader(body)
 	if err != nil {
@@ -189,15 +196,30 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 			st.SkippedBadDoc++
 			continue
 		}
-		if superseded[cveOf(&d)] {
-			// D129: the delta fetched a newer copy of this document and has
-			// already emitted whatever it converted to, which may be nothing.
-			// After the decode, because the key is the document's own id,
-			// not its file name (see deltaSince); the few hundred documents
-			// this decodes only to drop are the price of a key both sides
-			// are sure to share.
-			st.ArchiveSuperseded++
-			continue
+		if deltaRevision, fetched := superseded[cveOf(&d)]; fetched {
+			// D129: the delta fetched a copy of this document and has
+			// already emitted whatever it converted to, which may be
+			// nothing. After the decode, because the key is the document's
+			// own id, not its file name (see deltaSince); the few hundred
+			// documents this decodes only to drop are the price of a key
+			// both sides are sure to share.
+			//
+			// D135: skipped only when the delta's copy is at least as new as
+			// this one by current_release_date. An archive copy that is the
+			// newer revision regardless (an individual document served
+			// stale from a cache) is converted and emitted after the
+			// delta's, and last write wins with the newer one. Unreadable
+			// or absent dates keep the skip.
+			//
+			// A zero on EITHER side keeps the skip (see suse's identical
+			// note): `!archive.After(delta)` alone let a dated archive copy
+			// win over an undated delta correction.
+			archiveRevision := revisionOf(&d)
+			if deltaRevision.IsZero() || archiveRevision.IsZero() || !archiveRevision.After(deltaRevision) {
+				st.ArchiveSuperseded++
+				continue
+			}
+			st.ArchiveNewerThanDelta++
 		}
 		adv, ok := convert(&d, &st)
 		if !ok {
@@ -316,7 +338,8 @@ func (s stats) String() string {
 			"%d unreadable documents; delta: %d changed since the archive, "+
 			"%d fetched, %d already withdrawn, %d yielded a record, "+
 			"%d retried, %d rescued by a retry, "+
-			"%d archive documents superseded by a newer copy the delta fetched (D129)",
+			"%d archive documents superseded by a newer copy the delta fetched (D129), "+
+			"%d archive documents newer than the copy the delta fetched (kept, D135)",
 		s.Documents, s.Advisories, s.Affected, s.ModuleKept, len(s.moduleStreams),
 		s.Unfixable, s.UnfixableWontFix, s.UnfixableNotFixed, s.UnfixableUnstated,
 		s.UnfixableBothReasons, s.RemediationGrouped,
@@ -324,5 +347,17 @@ func (s stats) String() string {
 		s.SkippedNonRHEL, s.SkippedImage,
 		s.SkippedNoCPE, s.SkippedWholeProduct, s.SkippedBadProduct, s.SkippedNoPurl, s.SkippedNoCVE, s.SkippedBadDoc,
 		s.DeltaListed, s.DeltaFetched, s.DeltaGone, s.DeltaAdvisories,
-		s.DeltaRetried, s.DeltaRescued, s.ArchiveSuperseded)
+		s.DeltaRetried, s.DeltaRescued, s.ArchiveSuperseded, s.ArchiveNewerThanDelta)
+}
+
+// revisionOf is the document's own revision date, zero when it carries none
+// or an unreadable one. Only ever compared between two copies of one
+// document (D135); a zero on either side keeps D129's skip. Identical to
+// suse.revisionOf.
+func revisionOf(d *document) time.Time {
+	t, err := time.Parse(time.RFC3339, d.Document.Tracking.CurrentDate)
+	if err != nil {
+		return time.Time{}
+	}
+	return t.UTC()
 }

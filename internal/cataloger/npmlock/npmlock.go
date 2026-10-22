@@ -32,6 +32,16 @@ type lockDoc struct {
 
 // packageEntry is one value in the v2/v3 "packages" object.
 type packageEntry struct {
+	// Name is the package's registry identity, written by npm only when it
+	// differs from the install path's last segment: an alias
+	// (`utility-alias: npm:lodash@4.17.20` installs lodash under
+	// node_modules/utility-alias and records "name": "lodash") or a
+	// workspace whose directory is not its package name. Advisories are
+	// written against this, never the alias -- a lockfile read by install
+	// path alone cataloged "utility-alias", a package nothing is written
+	// against, and judged the installed lodash clean (2026-10-22 external
+	// review, #1).
+	Name    string `json:"name"`
 	Version string `json:"version"`
 	// Link marks a workspace entry that points at a local directory rather
 	// than a registry-resolved package - there is no published version to
@@ -120,16 +130,43 @@ func catalogPackages(entries map[string]packageEntry, path string, pkgs *[]pkgme
 		}
 
 		name := nameFromInstallPath(key)
+		loc := pkgmeta.Location{Path: path}
+		if e.Name != "" && e.Name != name {
+			// The registry identity is what is matched and what the purl
+			// spells; the install path is kept beside the lockfile as the
+			// place the aliased copy lives, so the report can still say
+			// where it is.
+			name = e.Name
+			loc.Install = key
+		}
 		*pkgs = append(*pkgs, pkgmeta.Package{
 			Name:      name,
 			Version:   e.Version,
 			Type:      "npm",
 			Ecosystem: "npm",
 			PURL:      "pkg:npm/" + name + "@" + e.Version,
-			Locations: []pkgmeta.Location{{Path: path}},
+			Locations: []pkgmeta.Location{loc},
 		})
 		stats.Cataloged++
 	}
+}
+
+// aliasSpec reads npm 6's spelling of an alias, where the v1 "version" field
+// carries the whole target spec: "npm:lodash@4.17.20". It returns the
+// registry name and version, or ok=false when version is not an alias spec.
+// Split on the LAST '@', because a scoped target ("npm:@scope/real@2.0.0")
+// carries one in its name. A spec with no version part ("npm:lodash")
+// returns the name and an empty version, which the caller counts the way it
+// counts any versionless entry.
+func aliasSpec(version string) (name, ver string, ok bool) {
+	spec, ok := strings.CutPrefix(version, "npm:")
+	if !ok {
+		return "", "", false
+	}
+	if i := strings.LastIndex(spec, "@"); i > 0 {
+		return spec[:i], spec[i+1:], true
+	}
+	return spec, "", true
 }
 
 // catalogDependencies walks the v1 "dependencies" tree, recursing into each
@@ -138,26 +175,45 @@ func catalogPackages(entries map[string]packageEntry, path string, pkgs *[]pkgme
 // alone. Keys are sorted at every level for the same determinism reason as
 // catalogPackages.
 func catalogDependencies(entries map[string]depEntry, path string, pkgs *[]pkgmeta.Package, stats *cyclonedx.Stats) {
-	for _, name := range sortedKeys(entries) {
-		e := entries[name]
+	catalogDependenciesUnder("", entries, path, pkgs, stats)
+}
+
+// catalogDependenciesUnder is catalogDependencies with the install directory
+// the tree so far resolves to ("" at the top, "node_modules/a" for a's own
+// nested dependencies), so an alias's recorded location is its real path.
+func catalogDependenciesUnder(dir string, entries map[string]depEntry, path string, pkgs *[]pkgmeta.Package, stats *cyclonedx.Stats) {
+	for _, key := range sortedKeys(entries) {
+		e := entries[key]
 		stats.Components++
 
-		if name == "" || e.Version == "" {
+		// An alias in the v1 shape: the key is the install name and the
+		// version field carries "npm:<name>@<version>" (see aliasSpec). The
+		// registry identity is cataloged, the install name kept as the
+		// location, matching catalogPackages' reading of the v3 "name" field.
+		name, version := key, e.Version
+		loc := pkgmeta.Location{Path: path}
+		install := dir + "node_modules/" + key
+		if n, v, ok := aliasSpec(e.Version); ok {
+			name, version = n, v
+			loc.Install = install
+		}
+
+		if name == "" || version == "" {
 			stats.SkippedNoVersion++
 		} else {
 			*pkgs = append(*pkgs, pkgmeta.Package{
 				Name:      name,
-				Version:   e.Version,
+				Version:   version,
 				Type:      "npm",
 				Ecosystem: "npm",
-				PURL:      "pkg:npm/" + name + "@" + e.Version,
-				Locations: []pkgmeta.Location{{Path: path}},
+				PURL:      "pkg:npm/" + name + "@" + version,
+				Locations: []pkgmeta.Location{loc},
 			})
 			stats.Cataloged++
 		}
 
 		if len(e.Dependencies) > 0 {
-			catalogDependencies(e.Dependencies, path, pkgs, stats)
+			catalogDependenciesUnder(install+"/", e.Dependencies, path, pkgs, stats)
 		}
 	}
 }

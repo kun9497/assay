@@ -94,6 +94,166 @@ func TestParse_CatalogedPackageCarriesMatchableFields(t *testing.T) {
 	}
 }
 
+// The 2026-10-22 external review's #1. `npm install utility-alias@npm:lodash@4.17.20`
+// installs lodash under node_modules/utility-alias, and npm 7+ records the
+// registry identity in the entry's own "name" field -- which packageEntry did
+// not read, so the package was cataloged as "utility-alias", a name no
+// advisory is written against. The vulnerable lodash was Evaluated and clean.
+// The lockfile below is what npm 11.16.0 generated for that install
+// (--package-lock-only --ignore-scripts --no-audit --no-fund), verbatim.
+func TestParse_V3AliasEntryIsNamedByItsRegistryIdentity(t *testing.T) {
+	p := write(t, `{
+	  "name": "assay-review-fixture",
+	  "version": "1.0.0",
+	  "lockfileVersion": 3,
+	  "requires": true,
+	  "packages": {
+	    "": {
+	      "name": "assay-review-fixture",
+	      "version": "1.0.0",
+	      "dependencies": {
+	        "utility-alias": "npm:lodash@4.17.20"
+	      }
+	    },
+	    "node_modules/utility-alias": {
+	      "name": "lodash",
+	      "version": "4.17.20",
+	      "resolved": "https://registry.npmjs.org/lodash/-/lodash-4.17.20.tgz",
+	      "integrity": "sha512-PlhdFcillOINfeV7Ni6oF1TAEayyZBoZ8bcshTHqOYJYlrqzRK5hagpagky5o4HfCzzd1TRkXPMFq6cKk9rGmA==",
+	      "license": "MIT"
+	    },
+	    "node_modules/scoped-alias": {
+	      "name": "@scope/real",
+	      "version": "2.0.0"
+	    },
+	    "node_modules/plain": {
+	      "version": "3.0.0"
+	    },
+	    "node_modules/redundant": {
+	      "name": "redundant",
+	      "version": "4.0.0"
+	    }
+	  }
+	}`)
+	pkgs, stats, err := Parse(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, pk := range pkgs {
+		got[pk.Name] = pk.PURL
+	}
+	if got["lodash"] != "pkg:npm/lodash@4.17.20" {
+		t.Errorf("lodash = %q, want pkg:npm/lodash@4.17.20 (got %v)", got["lodash"], got)
+	}
+	if got["@scope/real"] != "pkg:npm/@scope/real@2.0.0" {
+		t.Errorf("@scope/real = %q, want pkg:npm/@scope/real@2.0.0 (got %v)", got["@scope/real"], got)
+	}
+	if got["plain"] != "pkg:npm/plain@3.0.0" {
+		t.Errorf("plain = %q, want pkg:npm/plain@3.0.0 -- an entry with no name field keeps its path name (got %v)", got["plain"], got)
+	}
+	for _, alias := range []string{"utility-alias", "scoped-alias"} {
+		if _, ok := got[alias]; ok {
+			t.Errorf("%q was cataloged as a package: the install path is where lodash lives, not what it is", alias)
+		}
+	}
+	if len(pkgs) != 4 || stats.Cataloged != 4 {
+		t.Errorf("cataloged %d packages (stats %d), want 4", len(pkgs), stats.Cataloged)
+	}
+	// The install path is kept as the location, beside the lockfile that
+	// recorded it, so the JSON report can still say where the aliased copy
+	// lives. A name field that merely repeats the folder name (npm never
+	// writes one, but a hand-edited lockfile may) is not an alias and gets
+	// no install path.
+	for _, pk := range pkgs {
+		switch pk.Name {
+		case "lodash":
+			if len(pk.Locations) != 1 || pk.Locations[0].Path != p || pk.Locations[0].Install != "node_modules/utility-alias" {
+				t.Errorf("lodash Locations = %+v, want the lockfile %s with Install node_modules/utility-alias", pk.Locations, p)
+			}
+		case "redundant":
+			if pk.Locations[0].Install != "" {
+				t.Errorf("redundant Install = %q, want empty: a name equal to the folder is not an alias", pk.Locations[0].Install)
+			}
+		}
+	}
+}
+
+// npm 6 spelt the same alias differently: the v1 entry is keyed by the alias
+// and its "version" field carries the whole spec, "npm:lodash@4.17.20". A
+// scoped target keeps its scope ("npm:@scope/real@2.0.0"), so the split is
+// on the LAST '@', never the first.
+func TestParse_V1AliasEntryIsNamedByItsRegistryIdentity(t *testing.T) {
+	p := write(t, `{
+	  "name": "app", "lockfileVersion": 1,
+	  "dependencies": {
+	    "utility-alias": {"version": "npm:lodash@4.17.20"},
+	    "scoped-alias": {"version": "npm:@scope/real@2.0.0"},
+	    "plain": {"version": "3.0.0", "dependencies": {
+	      "nested-alias": {"version": "npm:lodash@4.17.19"}
+	    }},
+	    "broken-alias": {"version": "npm:lodash"}
+	  }
+	}`)
+	pkgs, stats, err := Parse(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, pk := range pkgs {
+		got = append(got, pk.PURL)
+	}
+	want := []string{
+		"pkg:npm/lodash@4.17.19", // nested under plain, sorted after plain's own entry
+		"pkg:npm/plain@3.0.0",
+		"pkg:npm/@scope/real@2.0.0",
+		"pkg:npm/lodash@4.17.20",
+	}
+	// Order follows the sorted walk (broken-alias, plain, plain>nested-alias,
+	// scoped-alias, utility-alias); only membership is asserted here.
+	have := map[string]bool{}
+	for _, g := range got {
+		have[g] = true
+	}
+	for _, w := range want {
+		if !have[w] {
+			t.Errorf("missing %s in %v", w, got)
+		}
+	}
+	for _, g := range got {
+		if strings.Contains(g, "alias") {
+			t.Errorf("%s names the alias, not the registry package", g)
+		}
+	}
+	// The nested alias's location is its real path under its parent, not a
+	// top-level one.
+	for _, pk := range pkgs {
+		switch pk.PURL {
+		case "pkg:npm/lodash@4.17.19":
+			if pk.Locations[0].Install != "node_modules/plain/node_modules/nested-alias" {
+				t.Errorf("nested alias Install = %q, want node_modules/plain/node_modules/nested-alias", pk.Locations[0].Install)
+			}
+		case "pkg:npm/lodash@4.17.20":
+			if pk.Locations[0].Install != "node_modules/utility-alias" {
+				t.Errorf("top-level alias Install = %q, want node_modules/utility-alias", pk.Locations[0].Install)
+			}
+		case "pkg:npm/plain@3.0.0":
+			if pk.Locations[0].Install != "" {
+				t.Errorf("plain Install = %q, want empty: the file at Path is the package itself", pk.Locations[0].Install)
+			}
+		}
+	}
+	// "npm:lodash" names a package with no version: it is a dependency the
+	// scan saw and could not place in a range, counted like any other
+	// versionless entry rather than cataloged under a made-up version.
+	if stats.SkippedNoVersion != 1 {
+		t.Errorf("SkippedNoVersion = %d, want 1 for the alias spec without a version", stats.SkippedNoVersion)
+	}
+	if stats.Components != stats.Cataloged+stats.SkippedNoVersion {
+		t.Errorf("Components (%d) != Cataloged (%d) + SkippedNoVersion (%d)", stats.Components, stats.Cataloged, stats.SkippedNoVersion)
+	}
+}
+
 // npm 6 wrote lockfileVersion 1 with a nested "dependencies" tree, and those
 // files are still in real repositories. Reading only "packages" returns zero
 // packages for them — a silent empty result, which is the defect this slice

@@ -667,7 +667,16 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 		// question for RHEL's EUS channel: counted, reported, and reaching
 		// exit 2 through --fail-on-incomplete, never folded into a clean
 		// verdict.
-		if lineage := ubuntuLineageOf(p.Version); lineage != "" {
+		//
+		// Gated on the ecosystem key, like D79's Oracle rule below, because
+		// the marker only MEANS a lineage under Canonical's convention. The
+		// version string alone was read for every ecosystem until the
+		// 2026-10-22 external review (#2) showed a Go module at
+		// `1.0.0+fips1` -- valid semver build metadata -- reported as an
+		// Ubuntu FIPS build and skipped as a coverage limit, which
+		// `--fail-on-incomplete=target` does not gate: a vulnerable package
+		// and exit 0.
+		if lineage := ubuntuLineageOf(p.Version); lineage != "" && strings.HasPrefix(p.Ecosystem, "Ubuntu:") {
 			res.Skipped = append(res.Skipped, Skipped{
 				Package: p,
 				Reason: fmt.Sprintf(
@@ -716,7 +725,14 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 		// corrupt, or the target format cannot carry it — and matching would
 		// order this build against fixes from an unknowable stream, the
 		// comparison D47 refused. Not evaluated, never guessed.
-		if p.ModuleStream == "" && rpmModuleBuild(p.Version) {
+		//
+		// Only where the version IS an RPM release: `module+el` is a
+		// Modularity marker, and the comparer the ecosystem resolved to is
+		// the authority on which versions are RPM ones (version.For). A Go
+		// pre-release spelt `1.0.0-module+el9` is a legal semver string
+		// that was skipped by this check until the 2026-10-22 external
+		// review (#2), the same way as the Ubuntu rule above.
+		if _, rpm := cmp.(version.RPM); rpm && p.ModuleStream == "" && rpmModuleBuild(p.Version) {
 			res.Skipped = append(res.Skipped, Skipped{
 				Package: p,
 				Reason: fmt.Sprintf(
@@ -845,7 +861,20 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 				if v, ok := p.ProvidesVersion[lookupName]; ok && v != "" {
 					compareVersion = v
 				}
-			case lookupName != p.Name && p.Source != nil && p.Source.Version != "":
+			case p.Source != nil && p.Source.Version != "" && lookupName == p.Source.Name:
+				// The lookup under the SOURCE identity compares the source
+				// version -- whether or not the binary happens to share
+				// the source's name. This was `lookupName != p.Name` until
+				// the 2026-10-22 external review (#3): a binary named like
+				// its source (util-linux itself, bash, any package that is
+				// its own source) took the binary branch, and with dpkg's
+				// "Source: util-linux (2.38.1-5+deb12u2)" saying the source
+				// was still short of the fix, the binary's epoch sorted it
+				// above the fix and the finding vanished -- zero findings,
+				// zero skips, exit 0. The names list above dedups a source
+				// name equal to the binary's, so when they coincide this one
+				// lookup serves both identities, and the advisory it reaches
+				// is written against the source (D41).
 				compareVersion = p.Source.Version
 			}
 			candidates, err := m.store.Lookup(p.Ecosystem, lookupName)
@@ -1011,6 +1040,18 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 							ev.Reason = fmt.Sprintf(
 								"%s (matched via apk provides %q, declared by installed package %q)",
 								ev.Reason, lookupName, p.Name)
+						} else if compareVersion != p.Version {
+							// D41/D134: the version the Reason names is the
+							// SOURCE package's, which the package line never
+							// shows. Said here for the same reason the D95
+							// note above is: a util-linux at
+							// 1:2.38.1-5+deb12u3 found below a fix at
+							// 2.38.1-5+deb12u3 reads as a contradiction unless
+							// the Evidence says which version was compared
+							// and where it came from (D10).
+							ev.Reason = fmt.Sprintf(
+								"%s (compared the source package %s's version %q recorded by the package database, not the installed binary's %q)",
+								ev.Reason, lookupName, compareVersion, p.Version)
 						}
 						seen[a.ID] = true
 						ids := identifiers(a)
@@ -1522,6 +1563,8 @@ func locationKey(p pkgmeta.Package) string {
 		b.WriteString(l.Path)
 		b.WriteString("\x00")
 		b.WriteString(l.LayerDigest)
+		b.WriteString("\x00")
+		b.WriteString(l.Install)
 	}
 	return b.String()
 }

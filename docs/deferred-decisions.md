@@ -12,6 +12,37 @@ Read alongside the Architecture section of [the design doc](DESIGN.md).
 
 ## Deferred work
 
+### NVD ratings withdrawn before D136 are still in the published artifact — one reconciliation build
+
+**When: the next build someone can watch.** D136 (2026-10-22) made a CVE that NVD returns
+without a score withdraw its seeded rating. It cannot reach a rating NVD withdrew *before*
+that: a nightly window re-requests only CVEs modified since the seed's checkpoint, and a CVE
+rejected in September is not modified again, so its CVSS 9.8 rides forward under every
+artifact until something asks NVD about it. How many there are is not known — nothing offline
+can tell a withdrawn score from a never-withdrawn one — and the first measurement is the run
+that fixes it.
+
+**The remedy.** One build with `NVD_SINCE_DAYS=120` — the API's maximum window, which reaches
+behind the 2026-08-14 start of the seed chain — re-returns every CVE modified since and
+withdraws the stale ones. The runnable path exists: `.github/workflows/db-backfill.yml`
+(`since_days=120`, `until_days=0`) runs `db build --seed <published> --ratings-only` with
+exactly those variables and pushes through the same guard. Its progress line prints
+`N returned without a score (rating withdrawn)` and the build prints `NVD: N stored rating(s)
+withdrawn` — its zero too, so a run that found nothing stale is a measurement rather than a
+silence; `db push` admits the drop by exactly that number (`RatingWithdrawals`) and refuses
+anything larger, so the run cannot be confused with a lost seed. A ratings-only build
+(`--ratings-only`, D66) is enough: the advisories are the seed's either way. Cost: a 120-day NVD
+window at the keyless pace, tens of minutes, with D58's retries; the 2026-10-22 rerun survived
+five `INTERNAL_ERROR` pages that way.
+
+**Revisit trigger.** The run itself; it is not expected to be needed twice. A nightly that
+runs with NVD disabled carries the seed's checkpoint forward untouched, and when NVD is next
+enabled the resume path asks for everything since that checkpoint in chained ≤120-day windows
+(`ResumeFrom`; `resume_test.go` asserts three windows for a 250-day gap), so any gap is
+re-requested whole and the withdrawals land then. What the code cannot reach is a seed whose
+recorded checkpoint is later than the ratings it actually holds — the hand-bootstrapped shape
+D60 guards the count of — and that would need this run again, once.
+
 ### ~~The published database lost 352,000 NVD ratings and will not recover them on its own~~ — recovered in full, 2026-08-14 (D65, D66)
 
 **Closed.** The artifact holds **357,678** ratings against `:v7`'s 355,030 — the recoverable
@@ -2024,6 +2055,17 @@ product_id verbatim and the result reads as a build, keeps anything else as befo
 counted, and never lets a split build's range cross to Leap. The sibling bare leaf and the
 `upstream` qualifier this entry proposed as name sources were measured and found absent: 0 of
 the 16,736 purls carry `upstream`, 147 (the qemu builds) have a bare leaf in the document.
+
+**A CSAF document changed after the archive was assembled but before the file's
+`Last-Modified`.** D135 downloads the archive first and cuts the delta at the GET's own
+`Last-Modified`, which closes the race the 2026-10-22 review reproduced (an archive rebuilt
+between a pre-flight HEAD and the GET). The window that remains is upstream's own: a document
+written after the tarball was assembled and before the file's mtime is in neither the archive
+nor the delta until the next rebuild — a day for SUSE, two for Red Hat — exactly D129's
+pre-existing lag. And when the archive copy is the newer one *and* converts to nothing (a
+correction to not-affected served stale from a cache), the delta's record stands until the next
+build: the inverse of the D129 hole, reachable only through a stale cache in front of the feed.
+`ArchiveNewerThanDelta` on a nightly's progress line is the signal that the second path fired.
 
 **Atomic database replacement on Windows.** `db update` builds into a temporary file and
 renames over the live database, so a concurrent scan never sees a partial write. On
