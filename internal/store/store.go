@@ -151,6 +151,11 @@ type Writer interface {
 	// (CVE, Source) so re-putting the same source replaces rather than
 	// duplicates.
 	PutRating(r advisory.Rating) error
+	// WithdrawRating removes one authority's opinion about a CVE -- the
+	// (CVE, Source) key PutRating writes -- and reports whether there was
+	// one to remove (D136). Other sources' ratings on the CVE are untouched;
+	// a CVE with nothing stored is a no-op, not an error.
+	WithdrawRating(cve, source string) (bool, error)
 	// PutEnrichment stores one authority's prose about a CVE, keyed on (CVE,
 	// Source) exactly like PutRating, for the same replace-not-duplicate
 	// reason.
@@ -351,6 +356,16 @@ type Provenance struct {
 	// reports quarter-old data as fresh.
 	DataAsOf time.Time `json:"data_as_of"`
 	Records  int       `json:"records"`
+	// Withdrawn is how many of THIS run's rating removals found a stored
+	// rating to remove (D136): an annotator said the CVE no longer carries
+	// its rating and one was there, so the count went down on the source's
+	// word. It is the tolerance `db push` allows a source's count to drop
+	// by against the published artifact, which otherwise refuses any drop.
+	// Never carried forward from a seed -- it describes one build's
+	// removals, and a tolerance that accumulated would excuse losses nobody
+	// reported. Zero for advisory providers and for a run that withdrew
+	// nothing.
+	Withdrawn int `json:"withdrawn,omitempty"`
 	// Ecosystems is what this provider actually covers (D20): the keys it
 	// fetched, expanded to the release-qualified ones a fetched family
 	// contains.

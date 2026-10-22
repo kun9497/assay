@@ -116,7 +116,14 @@ type Meta struct {
 	// every later delta builds on.
 	RatingCount  int
 	RatingCounts map[string]int
-	Advisories   *AdvisoryCoverage
+	// RatingWithdrawals is, per rating source, how many stored ratings the
+	// build that produced this database removed on the source's own word
+	// (store.Provenance.Withdrawn, D136). Read by the publish guard as the
+	// drop it tolerates in that source's count; it describes the candidate
+	// only, so it is derived from the database and never written as an
+	// annotation on the published artifact.
+	RatingWithdrawals map[string]int
+	Advisories        *AdvisoryCoverage
 }
 
 // AdvisoryCoverage separates stored record counts from declared coverage.

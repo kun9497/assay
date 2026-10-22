@@ -356,6 +356,22 @@ func (b *Bolt) PutRating(r advisory.Rating) error {
 
 // DeleteRatings removes a snapshot source before reloading it in a build's
 // temporary database. Upserts alone cannot notice withdrawn KEV/EPSS rows.
+// WithdrawRating implements Writer. The exact key, not a prefix scan:
+// "CVE-2026-1" + sep + source must not reach "CVE-2026-10"'s row.
+func (b *Bolt) WithdrawRating(cve, source string) (bool, error) {
+	key := []byte(cve + keySep + source)
+	existed := false
+	err := b.db.Update(func(tx *bolt.Tx) error {
+		bk := tx.Bucket(bucketRatings)
+		if bk.Get(key) == nil {
+			return nil
+		}
+		existed = true
+		return bk.Delete(key)
+	})
+	return existed, err
+}
+
 func (b *Bolt) DeleteRatings(source string) error {
 	return b.db.Update(func(tx *bolt.Tx) error {
 		c := tx.Bucket(bucketRatings).Cursor()

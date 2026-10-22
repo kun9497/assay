@@ -220,6 +220,12 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 		// annotator that does not run this time keeps the seed's window, one
 		// that does run merges with it instead of replacing it.
 		maps.Copy(meta.Ratings, seedMeta.Ratings)
+		for name, p := range meta.Ratings {
+			// As in the seeded-build copy below: the seed's removals are
+			// not this build's tolerance (D136).
+			p.Withdrawn = 0
+			meta.Ratings[name] = p
+		}
 		for name := range perishableRatingSources {
 			if err := w.DeleteRatings(name); err != nil {
 				w.Close()
@@ -446,6 +452,10 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 			if perishableRatingSources[name] {
 				continue
 			}
+			// The seed's Withdrawn described ITS build's removals; carried
+			// forward it would be a tolerance for losses this build has no
+			// word about (D136).
+			p.Withdrawn = 0
 			meta.Ratings[name] = p
 		}
 	}
@@ -474,8 +484,21 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 		}
 		fmt.Fprintf(stderr, "annotating with %s…\n", a.Name())
 		started := time.Now()
-		batch := ratingBatch{w: w}
-		prov, err := a.Annotate(ctx, func(r advisory.Rating) error { return batch.add(r) })
+		batch := ratingBatch{w: w, source: a.Name()}
+		var prov store.Provenance
+		var err error
+		if wa, ok := a.(provider.WithdrawingAnnotator); ok {
+			// D136: a source that can say "this CVE no longer carries my
+			// rating" is given the means to. The batch removes only that
+			// source's key and counts the removals that found something,
+			// which becomes Provenance.Withdrawn below -- the one drop in
+			// this source's count `db push` will accept.
+			prov, err = wa.AnnotateWithdrawing(ctx,
+				func(r advisory.Rating) error { return batch.add(r) },
+				func(cve string) error { return batch.withdraw(cve) })
+		} else {
+			prov, err = a.Annotate(ctx, func(r advisory.Rating) error { return batch.add(r) })
+		}
 		if ferr := batch.flush(); ferr != nil && err == nil {
 			err = ferr
 		}
@@ -489,7 +512,16 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 			reportTimings(stderr, timings, buildStarted)
 			return 2
 		}
-		meta.Ratings[a.Name()] = mergeRatingCoverage(meta.Ratings[a.Name()], prov)
+		merged := mergeRatingCoverage(meta.Ratings[a.Name()], prov)
+		// This run's removals, whatever the seed's entry said (its Withdrawn
+		// was zeroed when copied, and mergeRatingCoverage starts from the
+		// fetched side anyway): the field means one build's removals and
+		// must not accumulate.
+		merged.Withdrawn = batch.withdrawn
+		meta.Ratings[a.Name()] = merged
+		if batch.withdrawn > 0 {
+			fmt.Fprintf(stderr, "%s: %d stored rating(s) withdrawn on the source's word (D136)\n", a.Name(), batch.withdrawn)
+		}
 	}
 
 	// Enrichers run last, and a failing one does NOT fail the build.
@@ -1458,6 +1490,10 @@ const putBatchSize = 1000
 type ratingBatch struct {
 	w   store.Writer
 	buf []advisory.Rating
+	// source is the annotator's name, the only Source a withdrawal may
+	// remove (D136); withdrawn counts removals that found a stored rating.
+	source    string
+	withdrawn int
 }
 
 const ratingBatchSize = 10000
@@ -1466,6 +1502,25 @@ func (b *ratingBatch) add(r advisory.Rating) error {
 	b.buf = append(b.buf, r)
 	if len(b.buf) >= ratingBatchSize {
 		return b.flush()
+	}
+	return nil
+}
+
+// withdraw removes the batch's source's rating for cve, after flushing the
+// puts queued before it so the two keep the order the source stated them
+// in. One transaction per withdrawal: a delta window names a few hundred
+// CVEs without a score on an ordinary night, which is seconds, not the
+// eleven minutes that made puts batch in the first place.
+func (b *ratingBatch) withdraw(cve string) error {
+	if err := b.flush(); err != nil {
+		return err
+	}
+	existed, err := b.w.WithdrawRating(cve, b.source)
+	if err != nil {
+		return err
+	}
+	if existed {
+		b.withdrawn++
 	}
 	return nil
 }

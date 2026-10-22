@@ -966,6 +966,62 @@ func TestPutRating_RoundTrips(t *testing.T) {
 
 // A CVE nobody rated returns nothing and no error. "We have no rating" is a
 // normal answer, not a failure - the matcher asks this for every finding.
+// WithdrawRating removes ONE authority's opinion about a CVE and reports
+// whether there was one to remove -- the count the publish guard tolerates
+// is of ratings that existed, not of withdrawals asked for. The other
+// authority's rating on the same CVE is not its to touch (D136).
+func TestWithdrawRating_RemovesOneSourceAndReportsWhetherItExisted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v.db")
+	w, err := Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	for _, r := range []advisory.Rating{
+		{CVE: "CVE-2026-1", Source: "NVD"},
+		{CVE: "CVE-2026-1", Source: "KISA"},
+		{CVE: "CVE-2026-10", Source: "NVD"}, // a longer id sharing the prefix
+	} {
+		if err := w.PutRating(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	existed, err := w.WithdrawRating("CVE-2026-1", "NVD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !existed {
+		t.Error("WithdrawRating reported nothing removed for a rating that was there")
+	}
+	again, err := w.WithdrawRating("CVE-2026-1", "NVD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again {
+		t.Error("a second withdrawal of the same rating reported a removal")
+	}
+	rs, err := w.RatingsFor("CVE-2026-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rs) != 1 || rs[0].Source != "KISA" {
+		t.Errorf("RatingsFor(CVE-2026-1) = %+v, want only KISA's", rs)
+	}
+	if rs, err := w.RatingsFor("CVE-2026-10"); err != nil || len(rs) != 1 {
+		t.Errorf("RatingsFor(CVE-2026-10) = %+v, %v; a prefix-sharing CVE was touched", rs, err)
+	}
+	if err := w.SetMeta(Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := w.Meta()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.RatingCounts["NVD"] != 1 || m.RatingCounts["KISA"] != 1 {
+		t.Errorf("RatingCounts = %v, want NVD 1 / KISA 1 after the withdrawal", m.RatingCounts)
+	}
+}
+
 func TestRatingsFor_UnknownCVEIsEmptyNotAnError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v.db")
 	w, _ := Create(path)

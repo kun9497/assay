@@ -517,6 +517,17 @@ func artifactMetaFromDB(path string) (dbartifact.Meta, error) {
 	for name, n := range m.RatingCounts {
 		ratingCounts[name] = n
 	}
+	// D136: what this build removed on each source's word, the only drop
+	// the guard below will excuse.
+	var withdrawals map[string]int
+	for name, p := range m.Ratings {
+		if p.Withdrawn > 0 {
+			if withdrawals == nil {
+				withdrawals = map[string]int{}
+			}
+			withdrawals[name] = p.Withdrawn
+		}
+	}
 	renamed, err := renamedKeys(m.Providers)
 	if err != nil {
 		return dbartifact.Meta{}, err
@@ -525,7 +536,8 @@ func artifactMetaFromDB(path string) (dbartifact.Meta, error) {
 	return dbartifact.Meta{
 		SchemaVersion: m.Schema, BuiltAt: m.BuiltAt, DataAsOf: asOf, DataAsOfSource: source,
 		RatingsSince: ratingBound(m), RatingsSinceKnown: ratingBoundKnown(m), RatingCount: totalRatings(m), RatingCounts: ratingCounts,
-		Advisories: &dbartifact.AdvisoryCoverage{Total: total, Counts: coveredCounts, Ecosystems: m.Ecosystems, Providers: sortedKeys(m.Providers), Renamed: renamed},
+		RatingWithdrawals: withdrawals,
+		Advisories:        &dbartifact.AdvisoryCoverage{Total: total, Counts: coveredCounts, Ecosystems: m.Ecosystems, Providers: sortedKeys(m.Providers), Renamed: renamed},
 	}, nil
 }
 
@@ -570,7 +582,17 @@ func ratingCountRegression(cur, incoming dbartifact.Meta) string {
 			// Current snapshots may legitimately shrink.
 			continue
 		}
-		if after < before {
+		// D136: a drop is excused exactly as far as the build withdrew
+		// ratings on the source's own word (a Rejected CVE's score is gone
+		// and NVD said so), and no further. Losing the source entirely is
+		// refused whatever the withdrawals say -- NVD withdrawing every
+		// rating it ever published is not a thing that happens, and a count
+		// of zero is the loudest case this guard exists for.
+		withdrawn := incoming.RatingWithdrawals[name]
+		if after == 0 || after < before-withdrawn {
+			if withdrawn > 0 {
+				return fmt.Sprintf("the published artifact holds %d rating(s) and this one holds %d from %s (%d withdrawn on the source's word, which does not cover the difference)", before, after, name, withdrawn)
+			}
 			return fmt.Sprintf("the published artifact holds %d rating(s) and this one holds %d from %s", before, after, name)
 		}
 	}

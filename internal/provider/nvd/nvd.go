@@ -301,7 +301,20 @@ func windowLabel(since, until time.Time) string {
 // Requests are made one at a time, in order, never in parallel: NVD's rate
 // limit is per source IP, so concurrency would not buy throughput and would
 // risk a block.
+// Annotate is AnnotateWithdrawing with no one to tell about withdrawn
+// scores -- the shape provider.Annotator requires. dbcmd calls the other.
 func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) error) (store.Provenance, error) {
+	return p.AnnotateWithdrawing(ctx, emit, func(string) error { return nil })
+}
+
+// AnnotateWithdrawing implements provider.WithdrawingAnnotator (D136): a CVE
+// the API returns with no CVSS metrics at all -- Rejected, or reset to
+// Awaiting Analysis -- is NVD stating that it carries no score now, and
+// withdraw is called with its id so a rating seeded from an earlier
+// artifact does not outlive NVD's own withdrawal of it (2026-10-22 external
+// review, #5). Only records the API actually returned are withdrawn; a CVE
+// outside the window is not mentioned and keeps whatever it had.
+func (p *Provider) AnnotateWithdrawing(ctx context.Context, emit func(advisory.Rating) error, withdraw func(cve string) error) (store.Provenance, error) {
 	until := nowUTC()
 	// A slice with an explicit end asks for a range that closed in the past.
 	// A future or zero end stays "now": clamping to now rather than refusing
@@ -377,6 +390,7 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 	if !since.IsZero() {
 		windows = int((until.Sub(since) + maxWindow - 1) / maxWindow)
 	}
+	withdrawn := 0
 	fmt.Fprintf(p.progress, nlFmt("nvd: requesting %s in %d window(s) of at most 120 days -- %s"),
 		prov.Window, windows, origin)
 	for start := since; ; {
@@ -384,10 +398,11 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 		if !start.IsZero() && until.Sub(start) > maxWindow {
 			end = start.Add(maxWindow)
 		}
-		part, err := p.annotateWindow(ctx, emit, start, end)
+		part, unscored, err := p.annotateWindow(ctx, emit, withdraw, start, end)
 		if err != nil {
 			return store.Provenance{}, err
 		}
+		withdrawn += unscored
 		prov.Records += part.Records
 		if prov.DataAsOf.IsZero() || (!part.DataAsOf.IsZero() && part.DataAsOf.Before(prov.DataAsOf)) {
 			prov.DataAsOf = part.DataAsOf
@@ -400,6 +415,11 @@ func (p *Provider) Annotate(ctx context.Context, emit func(advisory.Rating) erro
 		}
 		start = end // NVD endpoints are inclusive; repeating the boundary is safe.
 	}
+	// Said once per sync, because the store's own count of what it removed
+	// (Provenance.Withdrawn, set by the caller) is the number that matters
+	// and this is how to reconcile it: a CVE returned without a score may
+	// never have had one stored.
+	fmt.Fprintf(p.progress, nlFmt("nvd: %d returned without a score (rating withdrawn)"), withdrawn)
 	return prov, nil
 }
 
@@ -429,8 +449,10 @@ func (p *Provider) ResumeFrom(seed store.Provenance) error {
 	return nil
 }
 
-func (p *Provider) annotateWindow(ctx context.Context, emit func(advisory.Rating) error, since, until time.Time) (store.Provenance, error) {
-	var startIndex, total, records int
+// annotateWindow syncs one API window. The int is how many returned records
+// carried no score and were withdrawn (D136).
+func (p *Provider) annotateWindow(ctx context.Context, emit func(advisory.Rating) error, withdraw func(cve string) error, since, until time.Time) (store.Provenance, int, error) {
+	var startIndex, total, records, unscored int
 	var asOf time.Time
 	first := true
 	// A do-while shape: the total is unknown before the first response, so
@@ -446,7 +468,7 @@ func (p *Provider) annotateWindow(ctx context.Context, emit func(advisory.Rating
 		// entirely when the cancellation is already known at the top of the
 		// loop, rather than discovering it one HTTP call later.
 		if err := ctx.Err(); err != nil {
-			return store.Provenance{}, err
+			return store.Provenance{}, 0, err
 		}
 		if !first {
 			// Paced between requests, not just checked between them: a
@@ -456,14 +478,14 @@ func (p *Provider) annotateWindow(ctx context.Context, emit func(advisory.Rating
 			// can substitute a recording stub and assert pacing actually
 			// happens without spending the real 6.5s to prove it.
 			if err := sleep(ctx, p.pause); err != nil {
-				return store.Provenance{}, err
+				return store.Provenance{}, 0, err
 			}
 		}
 		first = false
 
 		page, pageAsOf, err := p.fetchPageRetrying(ctx, startIndex, since, until)
 		if err != nil {
-			return store.Provenance{}, err
+			return store.Provenance{}, 0, err
 		}
 		total = page.TotalResults
 		// The earliest page timestamp wins, mirroring OSV's "the oldest
@@ -476,10 +498,20 @@ func (p *Provider) annotateWindow(ctx context.Context, emit func(advisory.Rating
 		for _, v := range page.Vulnerabilities {
 			rating, ok := convert(v)
 			if !ok {
+				// A record with an id and no score is NVD's statement that
+				// the CVE carries none now (D136). An id-less record is
+				// nothing anyone could have stored, so there is nothing to
+				// withdraw either.
+				if v.CVE.ID != "" {
+					if err := withdraw(v.CVE.ID); err != nil {
+						return store.Provenance{}, 0, err
+					}
+					unscored++
+				}
 				continue
 			}
 			if err := emit(rating); err != nil {
-				return store.Provenance{}, err
+				return store.Provenance{}, 0, err
 			}
 			records++
 		}
@@ -497,7 +529,7 @@ func (p *Provider) annotateWindow(ctx context.Context, emit func(advisory.Rating
 		// this guards specifically against zero records with more still
 		// expected.
 		if n == 0 && startIndex < total {
-			return store.Provenance{}, fmt.Errorf(
+			return store.Provenance{}, 0, fmt.Errorf(
 				"nvd: page at startIndex %d returned zero records but totalResults is %d - refusing to loop forever",
 				startIndex, total)
 		}
@@ -520,7 +552,7 @@ func (p *Provider) annotateWindow(ctx context.Context, emit func(advisory.Rating
 		// pacing signal -- lines that stop arriving mean stalled, not slow.
 		fmt.Fprintf(p.progress, nlFmt("nvd: %d/%d records, %d rated"), startIndex, total, records)
 	}
-	return store.Provenance{Records: records, DataAsOf: asOf}, nil
+	return store.Provenance{Records: records, DataAsOf: asOf}, unscored, nil
 }
 
 // apiResponse is one page of NVD's CVE 2.0 API.
