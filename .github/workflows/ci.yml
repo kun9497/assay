@@ -70,3 +70,9 @@ jobs:
 
       - name: Build
         run: go build ./...
+      # D137: install.sh against two fake releases signed with test keys --
+      # clean install, tampered archive, rewritten assets with a stale or
+      # missing signature, an attacker's own key, no verifier on PATH, key
+      # rotation. The harness needs only openssl, python3 and tar.
+      - name: Installer harness
+        run: sh scripts/install_test.sh

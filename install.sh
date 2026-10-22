@@ -1,21 +1,49 @@
 #!/bin/sh
-# assay installer. Downloads the right prebuilt binary for this OS/arch from
-# the latest GitHub Release, verifies its SHA256 against the published
-# checksums file, and installs it.
+# assay installer. Downloads this release's prebuilt binary for your OS/arch
+# from the GitHub Release, verifies the release's checksums file against the
+# project's signing key embedded below (D137), verifies the archive's SHA256
+# against that file, and installs the one binary.
 #
-#   curl -sSfL https://raw.githubusercontent.com/kun9497/assay/main/install.sh | sh
+#   curl -sSfL https://raw.githubusercontent.com/kun9497/assay/<commit>/install.sh | sh
+#
+# The README names the commit each release was built from: pin that, not a
+# branch or a tag -- a branch moves, and so can a tag; the commit cannot.
+# This script installs the version it was published with (VERSION below);
+# `sh -s -- vX.Y.Z` installs another release, still verified against the
+# keys embedded here, so an older script cannot install a release signed by
+# a key it predates (run the installer published with that release).
 #
 # Flags (after `sh -s --`):
 #   -b <dir>   install directory (default: ./bin)
-#   <version>  a tag to pin, e.g. v0.1.0 (default: latest release)
+#   <version>  a tag to install, e.g. v0.12.0 (default: VERSION below)
 #
-# POSIX sh, no bashisms — needs curl (or wget), tar, and sha256sum (or
-# shasum). It never runs anything it downloads; it only extracts one binary.
+# Environment:
+#   ASSAY_ALLOW_UNSIGNED=1   if neither openssl nor cosign is available,
+#                            fall back to the SHA256 check alone (loudly).
+#                            Never needed on a stock Linux or macOS.
+#   ASSAY_OS / ASSAY_ARCH    override the detected platform (cross-install).
+#
+# POSIX sh, no bashisms -- needs curl (or wget), tar, sha256sum (or shasum),
+# base64, and openssl (or cosign) to verify the signature. It never runs
+# anything it downloads; it only extracts one binary.
 set -eu
 
 REPO="kun9497/assay"
 BINDIR="./bin"
-VERSION="latest"
+# Set by scripts/prepare-release.sh in the commit a release is cut from.
+VERSION="v0.11.0"
+RELEASE_BASE="${ASSAY_RELEASE_BASE:-https://github.com/${REPO}/releases/download}"
+
+# The public keys this installer trusts, PEM, one per release signing key.
+# Rotation: release N+1's script carries keys N and N+1; a later one drops N.
+# BEGIN TRUSTED KEYS
+TRUSTED_KEYS='
+-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEIJp1pXQuHML8/s3OnIas+O/upoke
+VxyV0PZvba/q+F7T/1S10tKP7JL5QUE9DXJZPcYDVWoCyvM0NfUJuNvv0Q==
+-----END PUBLIC KEY-----
+'
+# END TRUSTED KEYS
 
 usage() {
 	echo "usage: install.sh [-b <dir>] [<version>]" >&2
@@ -39,7 +67,7 @@ while [ $# -gt 0 ]; do
 done
 
 # --- detect platform ---------------------------------------------------------
-os=$(uname -s | tr '[:upper:]' '[:lower:]')
+os="${ASSAY_OS:-$(uname -s | tr '[:upper:]' '[:lower:]')}"
 case "$os" in
 linux | darwin) ;;
 *)
@@ -48,7 +76,7 @@ linux | darwin) ;;
 	;;
 esac
 
-arch=$(uname -m)
+arch="${ASSAY_ARCH:-$(uname -m)}"
 case "$arch" in
 x86_64 | amd64) arch="amd64" ;;
 aarch64 | arm64) arch="arm64" ;;
@@ -61,32 +89,18 @@ esac
 # --- download helper ---------------------------------------------------------
 if command -v curl >/dev/null 2>&1; then
 	fetch() { curl -sSfL "$1" -o "$2"; }
-	fetch_stdout() { curl -sSfL "$1"; }
 elif command -v wget >/dev/null 2>&1; then
 	fetch() { wget -qO "$2" "$1"; }
-	fetch_stdout() { wget -qO - "$1"; }
 else
 	echo "assay: need curl or wget to download" >&2
 	exit 1
 fi
 
-# --- resolve version ---------------------------------------------------------
-if [ "$VERSION" = "latest" ]; then
-	# Follow the /releases/latest redirect to read the real tag without needing jq.
-	VERSION=$(fetch_stdout "https://api.github.com/repos/${REPO}/releases/latest" |
-		grep '"tag_name"' | head -n1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
-	[ -n "$VERSION" ] || {
-		echo "assay: could not resolve the latest release — is one published yet?" >&2
-		exit 1
-	}
-fi
 # GoReleaser's archive names strip the leading 'v' from the version.
 ver_noV=$(echo "$VERSION" | sed 's/^v//')
-
-ext="tar.gz"
-archive="assay_${ver_noV}_${os}_${arch}.${ext}"
-base="https://github.com/${REPO}/releases/download/${VERSION}"
+archive="assay_${ver_noV}_${os}_${arch}.tar.gz"
 sums="assay_${ver_noV}_checksums.txt"
+base="${RELEASE_BASE}/${VERSION}"
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -94,6 +108,73 @@ trap 'rm -rf "$tmp"' EXIT
 echo "assay: downloading ${archive} (${VERSION})" >&2
 fetch "${base}/${archive}" "${tmp}/${archive}"
 fetch "${base}/${sums}" "${tmp}/${sums}"
+if ! fetch "${base}/${sums}.sig" "${tmp}/${sums}.sig" 2>/dev/null; then
+	# Refused, never warned about: every release from the first signed one
+	# onward attaches the signature, so a missing one is a stripped one.
+	echo "assay: ${sums}.sig is missing from the ${VERSION} release — refusing to install an unsigned checksums file" >&2
+	exit 1
+fi
+
+# --- verify the checksums file's signature -----------------------------------
+# cosign sign-blob writes the base64 of a DER ECDSA-P256-SHA256 signature;
+# openssl verifies exactly that once decoded, and is on every stock Linux and
+# macOS where cosign is not. Each embedded key is tried in turn.
+verified=""
+keyfiles=""
+n=0
+printf '%s\n' "$TRUSTED_KEYS" | awk -v dir="$tmp" '
+	/-----BEGIN PUBLIC KEY-----/ { n++; f = dir "/key" n ".pub" }
+	f != "" { print > f }
+	/-----END PUBLIC KEY-----/ { close(f); f = "" }
+'
+for k in "$tmp"/key*.pub; do
+	[ -f "$k" ] || continue
+	keyfiles="$keyfiles $k"
+	n=$((n + 1))
+done
+[ "$n" -gt 0 ] || {
+	echo "assay: this installer embeds no trusted key; it is not a published copy — refusing to install" >&2
+	exit 1
+}
+verify_with_openssl() {
+	base64 -d "${tmp}/${sums}.sig" >"${tmp}/sig.der" 2>/dev/null || return 1
+	for k in $keyfiles; do
+		if openssl dgst -sha256 -verify "$k" -signature "${tmp}/sig.der" "${tmp}/${sums}" >/dev/null 2>&1; then
+			verified="$(basename "$k")"
+			return 0
+		fi
+	done
+	return 1
+}
+verify_with_cosign() {
+	for k in $keyfiles; do
+		if cosign verify-blob --key "$k" --signature "${tmp}/${sums}.sig" --insecure-ignore-tlog=true "${tmp}/${sums}" >/dev/null 2>&1; then
+			verified="$(basename "$k")"
+			return 0
+		fi
+	done
+	return 1
+}
+if command -v openssl >/dev/null 2>&1; then
+	verify_with_openssl || {
+		echo "assay: signature on ${sums} does not verify against any key embedded in this installer (${VERSION}) — refusing to install" >&2
+		echo "assay:   run the installer published with the release you want; see the README" >&2
+		exit 1
+	}
+	echo "assay: signature on ${sums} verified (openssl, ${verified})" >&2
+elif command -v cosign >/dev/null 2>&1; then
+	verify_with_cosign || {
+		echo "assay: signature on ${sums} does not verify against any key embedded in this installer (${VERSION}) — refusing to install" >&2
+		echo "assay:   run the installer published with the release you want; see the README" >&2
+		exit 1
+	}
+	echo "assay: signature on ${sums} verified (cosign, ${verified})" >&2
+elif [ "${ASSAY_ALLOW_UNSIGNED:-}" = "1" ]; then
+	echo "assay: WARNING: neither openssl nor cosign is available; ${sums}.sig was NOT checked and the checksums file itself is not authenticated — continuing with the SHA256 check alone because ASSAY_ALLOW_UNSIGNED=1" >&2
+else
+	echo "assay: neither openssl nor cosign is available to verify ${sums}.sig — refusing to install (set ASSAY_ALLOW_UNSIGNED=1 to accept the sha256 check alone)" >&2
+	exit 1
+fi
 
 # --- verify checksum ---------------------------------------------------------
 expected=$(grep " ${archive}\$" "${tmp}/${sums}" | awk '{print $1}')
