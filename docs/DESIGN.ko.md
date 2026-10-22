@@ -344,9 +344,12 @@ OCI 아티팩트로 배포되며, 태그는 스키마 버전입니다 — `assay
 태그를 정확히 출력하므로, 오래된 바이너리는 잘못 해석할 데이터베이스 대신 옛 태그에 대한 깔끔한
 "찾을 수 없음"을 받습니다.
 
-- **`assay db update [--from <ref>]`** — 배포된 아티팩트를 받아옵니다. 평상시 경로입니다. 시간이
-  아니라 초 단위이고, CI가 실행해야 할 것도 이것입니다. `--from`은 기본값 대신 미러나 고정된
-  다이제스트를 가리킵니다.
+- **`assay db update [--from <ref>] [--allow-unsigned]`** — 배포된 아티팩트를 받아옵니다. 평상시
+  경로입니다. 시간이 아니라 초 단위이고, CI가 실행해야 할 것도 이것입니다. `--from`은 기본값 대신
+  미러나 고정된 다이제스트를 가리킵니다. 아티팩트의 서명은 무엇이든 쓰기 전에 바이너리에 내장된
+  키로 검증됩니다(D137): 서명 없는 아티팩트는 미러가 복사해야 할 `.sig` 태그를 내며 거부되고,
+  `--allow-unsigned`는 그래도 설치하되 데이터베이스를 미검증으로 기록하며, 서명이 있는데 검증되지
+  않으면 플래그와 무관하게 거부됩니다.
 - **`assay db build [--seed <ref>]`** — 업스트림 provider들로부터 직접 빌드합니다. 배포자의
   명령이고, `ghcr.io`를 신뢰하는 대신 독립적으로 빌드하고 싶은 사람을 위한 것이기도 합니다.
   Go, npm, PyPI, Alpine, NVD(`NVD_ENABLE=1`)를 전부 도는 전체 패스는 약 **7시간**이 걸립니다
@@ -391,12 +394,13 @@ gh workflow run db-sign.yml -f digest=sha256:…  # D137: db push 가 찍은 dig
 (`db-backfill.yml` 대신 로컬에서 돌린 backfill 슬라이스, 서명 이전의 D110 복구 seed)도 같습니다: push 한 뒤
 그 digest 로 `db-sign.yml` 을 띄우세요.
 
-**D137 두 절반 사이의 과도기.** 워크플로 셋이 `main` 에서 빌드해 pull 하므로 서명이 먼저(워크플로가 모든 push
-뒤 서명하고 자기 검사), 검증이 나중에 들어옵니다. 후반부가 머지되기 전까지는 *아무것도 서명 없는 아티팩트를
-거부하지 않습니다*: 잊은 `db-sign.yml` 디스패치나 실패한 서명 단계는 런의 빨간 자기 검사 단계로, 또는 태그를
-손으로 찾아야(`crane manifest ghcr.io/kun9497/assay-db:sha256-<digest>.sig`) 보입니다. 후반부는 현재
-`:v<schema>` 에 있는 digest 가 `.sig` 태그를 갖기 전에는 머지하면 안 됩니다 — 아니면 모든 워크플로 빌드와
-모든 고객의 `db update` 가 한꺼번에 실패합니다.
+**태그 위의 서명 없는 digest 는 장애입니다.** D137 후반부부터 `db update` 와 `db build --seed` 는 `.sig`
+태그가 없는 아티팩트를 거부합니다. 그래서 실패한 서명 단계(워크플로에서 세 번 재시도)나 손 push 뒤 잊은
+`db-sign.yml` 디스패치는 digest 가 서명될 때까지 모든 고객의 `db update` 와 다음 나이틀리의 seed 빌드를
+멈춥니다. 빨간 서명 단계나 자기 검사 단계는 결코 겉치레가 아닙니다: 런이 출력한 digest 로 `db-sign.yml` 을
+띄우고 태그가 생겼는지 확인하세요(`crane manifest ghcr.io/kun9497/assay-db:sha256-<digest>.sig`). 후반부가
+머지되기 전(2026-10-22)에는 아무것도 거부하지 않는 상태로 서명만 하루 돌아서, 어떤 바이너리가 요구하기 전에
+첫 서명된 digest 를 게시할 수 있었습니다.
 
 **첫 패스는 범위를 제한하세요. 전체 피드로 가지 마십시오.** 제한 없는 빌드는 약 7시간이고 재개
 지점이 없습니다 — `db build`는 임시 데이터베이스를 만들어 마지막에만 설치하므로, 5시간째의 실패가
@@ -864,6 +868,12 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       `NVD_SINCE_DAYS=120` 빌드 한 번이 필요(deferred-decisions)
 - [x] `--fail-on-epss=NaN`은 파싱 단계에서 거절 (2026-10-22 리뷰 #6) — 범위 검사를 통과해
       게이트를 조용히 껐었음; 스캔 전에 exit 2
+- [x] 발행된 아티팩트는 서명되고 pull 시 검증 (D137) — 모든 `db push` 뒤 digest 에 대한 cosign
+      키 기반 서명(`sha256-<digest>.sig`, 워크플로가 자기 검사; 손 push 는 `db-sign.yml`이 서명),
+      무엇이든 쓰기 전에 바이너리에 내장된 키로 stdlib ECDSA-P256 검증; 서명 없음 → 복사할 태그를
+      내며 거부, `--allow-unsigned`는 설치하되 `Unverified` 기록, 잘못된 서명은 플래그와 무관하게
+      거부, `db build --seed`는 건너뛸 수 없음; 릴리스 체크섬 서명과 설치기의 `openssl` 검증
+      (`install.sh`, README 에 커밋으로 고정)
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨

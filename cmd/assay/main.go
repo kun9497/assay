@@ -169,6 +169,10 @@ db update flags:
   --from <ref>    Pull from a different registry reference (a mirror, or a
                   pinned digest). The default derives its tag from the
                   schema version this binary reads.
+  --allow-unsigned
+                  Install an artifact that carries no signature, and record
+                  the database as unverified (D137). A signature that is
+                  present and does not verify is refused regardless.
 
 db build flags:
   --seed <ref>    Layer onto a previously published database (D-seed): its
@@ -179,7 +183,9 @@ db build flags:
                   what lets a scheduled build fit a six-hour job cap instead
                   of repeating the seven-hour full pass. A seed that cannot
                   be read fails the build rather than silently building from
-                  empty.
+                  empty. The seed's signature is verified like db update's,
+                  with no opt-out (D137): a hand-pushed seed is signed by
+                  dispatching db-sign.yml with its digest.
   --ratings-only  Skip the advisory providers entirely and carry the seed's
                   advisories forward VERBATIM (a file copy, not a rebuild),
                   re-running only the rating annotators below. Requires
@@ -501,11 +507,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 				dbUpdateEOLSource(stderr),
 				stdout, stderr)
 		case "update":
-			ref, ok := resolveUpdateRef(args, stderr)
+			ref, allowUnsigned, ok := resolveUpdateRef(args, stderr)
 			if !ok {
 				return exitError
 			}
-			return dbcmd.Pull(context.Background(), path, ref, stdout, stderr)
+			return dbcmd.Pull(context.Background(), path, ref, allowUnsigned, stdout, stderr)
 		case "status":
 			return dbcmd.Status(path, stdout, stderr)
 		case "push":
@@ -1027,30 +1033,41 @@ func dbUpdateEOLSource(stderr io.Writer) provider.EOLSource {
 // so a bug in the validation below could otherwise only be proven by a test
 // that risks doing the very thing D14 forbids.
 //
-// A missing value ("--from" with nothing after it) or an unrecognized third
-// argument (a typo'd "--form", or anything else) is an error, not a silent
-// fall-through to the public default: someone pointing --from at a mirror
-// or a pinned digest, or relying on it specifically because they are
-// air-gapped, must not be quietly redirected to ghcr.io by a missing value
-// or a typo.
-func resolveUpdateRef(args []string, stderr io.Writer) (ref string, ok bool) {
-	if len(args) <= 2 {
-		return dbcmd.Ref(dbcmd.DefaultRef), true
+// A missing value ("--from" with nothing after it, or with another flag
+// after it) or an unrecognized flag (a typo'd "--form", or anything else)
+// is an error, not a silent fall-through to the public default: someone
+// pointing --from at a mirror or a pinned digest, or relying on it
+// specifically because they are air-gapped, must not be quietly redirected
+// to ghcr.io by a missing value or a typo.
+//
+// --allow-unsigned (D137) is accepted in any position and is never implied
+// by --from: a mirror is exactly where a stripped signature comes from, so
+// pulling from one verifies like any other pull until the operator says
+// otherwise.
+func resolveUpdateRef(args []string, stderr io.Writer) (ref string, allowUnsigned bool, ok bool) {
+	ref = dbcmd.Ref(dbcmd.DefaultRef)
+	for i := 2; i < len(args); i++ {
+		switch args[i] {
+		case "--from":
+			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
+				// Derived, never spelled out. A literal tag here is a hardcoded
+				// schema version that drifts the moment SchemaVersion is bumped,
+				// and this one had: it still read :v6 after the bump to v7,
+				// telling a user to fetch a tag that 404s. dbcmd.Ref is the same
+				// function `db ref` prints and the default above.
+				fmt.Fprintf(stderr, "error: --from requires a reference, e.g. %s\n", dbcmd.Ref(dbcmd.DefaultRef))
+				return "", false, false
+			}
+			ref = args[i+1]
+			i++
+		case "--allow-unsigned":
+			allowUnsigned = true
+		default:
+			fmt.Fprintf(stderr, "error: unknown db update flag %q (want --from <ref> or --allow-unsigned)\n", args[i])
+			return "", false, false
+		}
 	}
-	if args[2] != "--from" {
-		fmt.Fprintf(stderr, "error: unknown db update flag %q (want --from <ref>)\n", args[2])
-		return "", false
-	}
-	if len(args) < 4 {
-		// Derived, never spelled out. A literal tag here is a hardcoded schema
-		// version that drifts the moment SchemaVersion is bumped, and this one
-		// had: it still read :v6 after the bump to v7, telling a user to fetch
-		// a tag that 404s. dbcmd.Ref is the same function `db ref` prints and
-		// the default this very function returns two branches up.
-		fmt.Fprintf(stderr, "error: --from requires a reference, e.g. %s\n", dbcmd.Ref(dbcmd.DefaultRef))
-		return "", false
-	}
-	return args[3], true
+	return ref, allowUnsigned, true
 }
 
 // resolveBuildSeed decides whether `db build` should layer onto a published

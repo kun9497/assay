@@ -2697,6 +2697,14 @@ func TestRun_DBBuildWithSeedFailsRatherThanBuildingFromEmpty(t *testing.T) {
 // helper is unexported across the package boundary.
 func publishSeedArtifact(t *testing.T, ref string, schema int) {
 	t.Helper()
+	publishUnsignedSeedArtifact(t, ref, schema)
+	signPublished(t, ref) // D137: what the publish workflow leaves beside every push
+}
+
+// publishUnsignedSeedArtifact is publishSeedArtifact without the signature: a hand
+// push, or a mirror that copied the image and not its .sig tag.
+func publishUnsignedSeedArtifact(t *testing.T, ref string, schema int) {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "seed.db")
 	w, err := store.Create(path)
 	if err != nil {
@@ -2931,7 +2939,7 @@ func TestWithoutRatingsOnly_LeavesSeedParsingIntact(t *testing.T) {
 func TestResolveUpdateRef(t *testing.T) {
 	t.Run("no --from uses the default, schema-derived ref", func(t *testing.T) {
 		var stderr bytes.Buffer
-		ref, ok := resolveUpdateRef([]string{"db", "update"}, &stderr)
+		ref, _, ok := resolveUpdateRef([]string{"db", "update"}, &stderr)
 		if !ok {
 			t.Fatalf("ok = false, want true (stderr: %s)", stderr.String())
 		}
@@ -2943,7 +2951,7 @@ func TestResolveUpdateRef(t *testing.T) {
 
 	t.Run("--from <ref> overrides the default", func(t *testing.T) {
 		var stderr bytes.Buffer
-		ref, ok := resolveUpdateRef([]string{"db", "update", "--from", "example.test/mirror:v6"}, &stderr)
+		ref, _, ok := resolveUpdateRef([]string{"db", "update", "--from", "example.test/mirror:v6"}, &stderr)
 		if !ok {
 			t.Fatalf("ok = false, want true (stderr: %s)", stderr.String())
 		}
@@ -2954,7 +2962,7 @@ func TestResolveUpdateRef(t *testing.T) {
 
 	t.Run("--from with no value is rejected, not a silent default", func(t *testing.T) {
 		var stderr bytes.Buffer
-		_, ok := resolveUpdateRef([]string{"db", "update", "--from"}, &stderr)
+		_, _, ok := resolveUpdateRef([]string{"db", "update", "--from"}, &stderr)
 		if ok {
 			t.Error("ok = true, want false: --from with no value must not silently resolve to the default ref")
 		}
@@ -2965,7 +2973,7 @@ func TestResolveUpdateRef(t *testing.T) {
 
 	t.Run("an unrecognized third argument is rejected, not silently ignored", func(t *testing.T) {
 		var stderr bytes.Buffer
-		_, ok := resolveUpdateRef([]string{"db", "update", "--form", "example.test/mirror:v6"}, &stderr)
+		_, _, ok := resolveUpdateRef([]string{"db", "update", "--form", "example.test/mirror:v6"}, &stderr)
 		if ok {
 			t.Error("ok = true, want false: a typo'd flag must not silently fall back to the default ref")
 		}

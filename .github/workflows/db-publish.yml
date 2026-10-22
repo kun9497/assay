@@ -246,7 +246,15 @@ jobs:
           PUSHED: ${{ steps.push.outputs.pushed }}
         # --tlog-upload=false: verification never consults Rekor, and a
         # Rekor outage must not fail a publish.
-        run: cosign sign --key env://COSIGN_PRIVATE_KEY --tlog-upload=false --yes "$PUSHED"
+        # Retried: since D137's second half, a :v<schema> digest left unsigned
+        # is an outage for every db update and the next seeded build, so a
+        # transient ghcr 5xx on the .sig PUT must not decide it.
+        run: |
+          for i in 1 2 3; do
+            cosign sign --key env://COSIGN_PRIVATE_KEY --tlog-upload=false --yes "$PUSHED" && exit 0
+            echo "::warning::cosign sign attempt $i failed"; sleep $((i * 20))
+          done
+          echo "::error::$PUSHED is pushed and UNSIGNED: every db update refuses it until db-sign.yml is dispatched with this digest"; exit 1
       - name: Self-check the signature against the committed public keys
         # Reads the same sha256-<digest>.sig tag the Go verifier reads, with
         # the same pinned cosign. A failure here is loud: the artifact is

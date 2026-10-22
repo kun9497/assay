@@ -2,6 +2,7 @@ package dbcmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,9 +12,11 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 
 	"github.com/kun9497/assay/internal/dbartifact"
+	"github.com/kun9497/assay/internal/dbcmd/trust"
 	"github.com/kun9497/assay/internal/store"
 )
 
@@ -35,7 +38,7 @@ func Ref(base string) string {
 // it: D14 is not "a scan avoids the network when it can", it is that a scan
 // cannot reach vulnerability data at all. A missing database is an exit 2
 // with instructions, never an implicit download.
-func Pull(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer) int {
+func Pull(ctx context.Context, dbPath, ref string, allowUnsigned bool, stdout, stderr io.Writer) int {
 	target, err := name.ParseReference(ref)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %q is not a valid reference: %v\n", ref, err)
@@ -72,6 +75,20 @@ func Pull(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer) int
 			fmt.Fprintln(stderr, "  or run `assay db build` to build one from source")
 		}
 		return 2
+	}
+
+	// D137: verified here, after the schema check (one more manifest fetch,
+	// still before the layer) and before anything is written or locked, so
+	// a refused artifact leaves no temp file and never touched the lock.
+	d, err := img.Digest()
+	if err != nil {
+		fmt.Fprintf(stderr, "error: digest of %s: %v\n", target, err)
+		return 2
+	}
+	keyID, unverified, code := verifyPulled(ctx, target, d, allowUnsigned, "refusing to install",
+		"a mirror must copy the signature tag too, or pass --allow-unsigned to install it unverified", stderr)
+	if code != 0 {
+		return code
 	}
 
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
@@ -118,14 +135,13 @@ func Pull(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer) int
 	// pull that died between them -- paired the new database with the old
 	// digest (2026-10-20 external review, #7). A record that cannot be
 	// written fails the pull with the previous database still in place: the
-	// caller asked for a database a scan can name.
-	d, err := img.Digest()
-	if err == nil {
-		err = setArtifactFn(tmp, store.ArtifactRecord{
-			Reference: target.String(), Digest: d.String(), PulledAt: time.Now().UTC(),
-		})
-	}
-	if err != nil {
+	// caller asked for a database a scan can name. The record also says
+	// which key verified the artifact, or that none did and the operator
+	// said so (D137), so `db status` and every report's provenance can.
+	if err := setArtifactFn(tmp, store.ArtifactRecord{
+		Reference: target.String(), Digest: d.String(), PulledAt: time.Now().UTC(),
+		SignedBy: keyID, Unverified: unverified,
+	}); err != nil {
 		os.Remove(tmp)
 		fmt.Fprintf(stderr, "error: record the pulled artifact: %v\n", err)
 		return 2
@@ -255,6 +271,20 @@ func PullSeed(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer)
 		return 2
 	}
 
+	// D137, exactly as Pull does it and at the same point, with no way to
+	// opt out: the nightly builder is this function's one caller, and a
+	// builder seeded from an unsigned database would publish -- and sign --
+	// whatever it had been fed.
+	d, err := img.Digest()
+	if err != nil {
+		fmt.Fprintf(stderr, "error: digest of %s: %v\n", target, err)
+		return 2
+	}
+	if _, _, code := verifyPulled(ctx, target, d, false, "refusing to seed from it",
+		"a mirror must copy the signature tag too; a hand-pushed artifact is signed by dispatching db-sign.yml with its digest", stderr); code != 0 {
+		return code
+	}
+
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		fmt.Fprintf(stderr, "error: create database directory: %v\n", err)
 		return 2
@@ -304,6 +334,58 @@ func PullSeed(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer)
 	}
 	return 0
 }
+
+// verifyPulled checks the signature on the artifact at target (manifest
+// digest d) against TrustedKeys and says on stderr what it found. It returns
+// the id of the key that verified, or "" with unverified set when
+// allowUnsigned excused an ABSENT signature; a non-zero code means the pull
+// stops. The three failures are told apart because each calls for a
+// different action: not signed (copy the tag, or opt out -- the hint names
+// the way out the caller has, which for a --seed input is none), a present
+// signature no trusted key verifies (never installed, flag or no flag:
+// that is the tampering the signature exists to catch, or a key this
+// binary was not built with), and a transport failure (retry, fix auth --
+// reported with the registry's own error, never as "not signed", or an
+// operator would reach for --allow-unsigned to get past a 403).
+func verifyPulled(ctx context.Context, target name.Reference, d v1.Hash, allowUnsigned bool, refusal, hint string, stderr io.Writer) (keyID string, unverified bool, code int) {
+	keyID, err := trust.Verify(ctx, target.Context(), d, TrustedKeys(),
+		remote.WithContext(ctx), remote.WithAuthFromKeychain(authn.DefaultKeychain))
+	switch {
+	case err == nil:
+		return keyID, false, 0
+	case errors.Is(err, trust.ErrNotSigned):
+		if allowUnsigned {
+			fmt.Fprintf(stderr, "WARNING: installing %s@%s UNVERIFIED (--allow-unsigned): no %s in the repository\n",
+				target, d, trust.SigTag(d))
+			return "", true, 0
+		}
+		fmt.Fprintf(stderr, "error: %s@%s is not signed (no %s in the repository) — %s\n", target, d, trust.SigTag(d), refusal)
+		fmt.Fprintf(stderr, "  %s\n", hint)
+		return "", false, 2
+	case errors.Is(err, trust.ErrNoKeyVerifies):
+		var ids []string
+		for _, k := range TrustedKeys() {
+			ids = append(ids, k.ID)
+		}
+		fmt.Fprintf(stderr, "error: the signature on %s@%s does not verify under any key this assay trusts (%s) — %s\n",
+			target, d, strings.Join(ids, ", "), refusal)
+		fmt.Fprintf(stderr, "  %v\n", err)
+		fmt.Fprintln(stderr, "  a signature that is present and wrong is never installed; if the publisher rotated its key, upgrade assay")
+		return "", false, 2
+	default:
+		fmt.Fprintf(stderr, "error: fetch signature for %s@%s: %v\n", target, d, err)
+		return "", false, 2
+	}
+}
+
+// TrustedKeys is the set of signing keys a pull verifies against (D137):
+// trust.TrustedKeys, the keys embedded in this binary. A variable so a test
+// can register the key that signed its in-process registry's artifacts --
+// the embedded keys cannot sign anything in a test, and a pull that could
+// not be tested against a signed artifact would be held by nothing. It is
+// never consulted for anything but verification, and nothing in production
+// assigns it.
+var TrustedKeys = trust.TrustedKeys
 
 // setArtifactFn is store.SetArtifactAt by default, and the seam Pull writes
 // the record through, so a test can make the write fail: nothing else can --

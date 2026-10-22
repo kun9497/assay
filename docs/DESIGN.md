@@ -358,9 +358,13 @@ without one, just slower.
 ref` prints exactly the tag a given binary reads, so an outdated binary gets a clean "not
 found" against an old tag rather than a database it would misinterpret.
 
-- **`assay db update [--from <ref>]`** — pulls the published artifact. This is the everyday
-  path: seconds, not hours, and it is what CI should run. `--from` points at a mirror or a
-  pinned digest instead of the default.
+- **`assay db update [--from <ref>] [--allow-unsigned]`** — pulls the published artifact.
+  This is the everyday path: seconds, not hours, and it is what CI should run. `--from`
+  points at a mirror or a pinned digest instead of the default. The artifact's signature is
+  verified against the keys built into the binary before anything is written (D137): an
+  unsigned artifact is refused with the `.sig` tag a mirror must copy, `--allow-unsigned`
+  installs it anyway and records the database as unverified, and a signature that is present
+  and does not verify is refused regardless.
 - **`assay db build [--seed <ref>]`** — builds from the upstream providers directly. This is
   the publisher's command, and it is also there for anyone who wants an independently built
   database rather than trusting `ghcr.io`. A full pass over Go, npm, PyPI, Alpine, and NVD
@@ -408,14 +412,15 @@ seeded build against the new tag refuses it until that has run. The same applies
 artifact pushed by hand (a backfill slice run locally rather than through `db-backfill.yml`,
 a D110 recovery seed that predates signing): push, then dispatch `db-sign.yml` with the digest.
 
-**Interim, between D137's two halves.** Signing shipped first (the workflows sign and
-self-check after every push) and verification second, because three workflows build from
-`main` and pull. Until the second half merges, *nothing refuses an unsigned artifact*: a
-forgotten `db-sign.yml` dispatch or a failed sign step is visible only as the red self-check
-step in the run, or by looking for the tag by hand (`crane manifest
-ghcr.io/kun9497/assay-db:sha256-<digest>.sig`). The second half must not merge until the
-digest currently on `:v<schema>` carries its `.sig` tag, or every workflow build and every
-customer's `db update` fails at once.
+**An unsigned digest on the tag is an outage.** Since D137's second half, `db update` and
+`db build --seed` refuse an artifact without its `.sig` tag. A failed sign step (retried
+three times in the workflow) or a forgotten `db-sign.yml` dispatch after a hand push therefore
+stops every customer's `db update` and the next nightly's seeded build until the digest is
+signed. A red sign or self-check step is never cosmetic: dispatch `db-sign.yml` with the
+digest the run printed, then confirm the tag exists (`crane manifest
+ghcr.io/kun9497/assay-db:sha256-<digest>.sig`). Before the second half merged (2026-10-22),
+signing ran for one day with nothing refusing, so the first signed digest could be published
+before any binary required it.
 
 **Bound the first pass; do not reach for the full feed.** An unbounded build is about seven
 hours and there is no resume point — `db build` assembles a temporary database and installs it
@@ -898,6 +903,13 @@ exited 0 while 24 findings went unmentioned.
       withdrawn before D136 need one `NVD_SINCE_DAYS=120` build (deferred-decisions)
 - [x] `--fail-on-epss=NaN` is refused at parse time (2026-10-22 review #6) — it had passed
       the range check and silently disabled the gate; exit 2 before any scan
+- [x] The published artifact is signed and verified on pull (D137) — cosign key-based
+      signing by digest after every `db push` (`sha256-<digest>.sig`, self-checked in the
+      workflow; `db-sign.yml` signs a hand push), stdlib ECDSA-P256 verification against keys
+      embedded in the binary before anything is written; unsigned → refused with the tag to
+      copy, `--allow-unsigned` installs and records `Unverified`, a wrong signature is
+      refused regardless, `db build --seed` has no opt-out; release checksums signed and the
+      installer verifies them with `openssl` (`install.sh`, pinned by commit in the README)
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15

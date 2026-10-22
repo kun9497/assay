@@ -69,7 +69,7 @@ func TestPull_RecordsTheArtifactInTheDatabaseItInstalled(t *testing.T) {
 
 	before := time.Now().UTC().Add(-time.Second)
 	var out, errOut bytes.Buffer
-	if code := Pull(context.Background(), dst, ref, &out, &errOut); code != 0 {
+	if code := Pull(context.Background(), dst, ref, false, &out, &errOut); code != 0 {
 		t.Fatalf("Pull = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	rec := artifactOf(t, dst)
@@ -104,7 +104,7 @@ func TestPull_TheTempDatabaseCarriesItsRecordBeforeInstall(t *testing.T) {
 	t.Cleanup(func() { renameFn = saved })
 
 	var out, errOut bytes.Buffer
-	if code := Pull(context.Background(), dst, ref, &out, &errOut); code != 2 {
+	if code := Pull(context.Background(), dst, ref, false, &out, &errOut); code != 2 {
 		t.Fatalf("Pull = %d, want 2 when the install rename fails (stderr: %s)", code, errOut.String())
 	}
 	if _, err := os.Stat(dst); !errors.Is(err, os.ErrNotExist) {
@@ -140,7 +140,7 @@ func TestPull_ARecordThatCannotBeWrittenFailsThePull(t *testing.T) {
 	t.Cleanup(func() { setArtifactFn = saved })
 
 	var out, errOut bytes.Buffer
-	if code := Pull(context.Background(), dst, published(t, store.SchemaVersion), &out, &errOut); code != 2 {
+	if code := Pull(context.Background(), dst, published(t, store.SchemaVersion), false, &out, &errOut); code != 2 {
 		t.Fatalf("Pull = %d, want 2 when the record cannot be written (stderr: %s)", code, errOut.String())
 	}
 	if !strings.Contains(errOut.String(), "record the pulled artifact") {
@@ -196,7 +196,7 @@ func TestPull_AnArtifactWhoseDatabaseIsAnotherSchemaIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
-	if code := Pull(context.Background(), dst, ref, &out, &errOut); code != 2 {
+	if code := Pull(context.Background(), dst, ref, false, &out, &errOut); code != 2 {
 		t.Fatalf("Pull of a mis-annotated artifact = %d, want 2 (stderr: %s)", code, errOut.String())
 	}
 	if !strings.Contains(errOut.String(), "not a usable database") {
@@ -217,13 +217,13 @@ func TestPull_ARefusedPullLeavesTheInstalledRecordAlone(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
 	first := published(t, store.SchemaVersion)
-	if code := Pull(context.Background(), dst, first, &out, &errOut); code != 0 {
+	if code := Pull(context.Background(), dst, first, false, &out, &errOut); code != 0 {
 		t.Fatalf("first Pull = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	_, want := digestOf(t, first)
 
 	refused := published(t, store.SchemaVersion+1)
-	if code := Pull(context.Background(), dst, refused, &out, &errOut); code != 2 {
+	if code := Pull(context.Background(), dst, refused, false, &out, &errOut); code != 2 {
 		t.Fatalf("refused Pull = %d, want 2", code)
 	}
 	if rec := artifactOf(t, dst); rec == nil || rec.Digest != want {
@@ -237,7 +237,7 @@ func TestPull_ARefusedPullLeavesTheInstalledRecordAlone(t *testing.T) {
 func TestStatus_PrintsThePulledArtifact(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	ref := published(t, store.SchemaVersion)
-	if code := Pull(context.Background(), dst, ref, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Pull(context.Background(), dst, ref, false, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("Pull = %d, want 0", code)
 	}
 	r, digest := digestOf(t, ref)
@@ -318,7 +318,7 @@ func TestUpdate_ABuiltDatabaseNamesNoArtifact(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vulnerability.db")
 	// The database being replaced was pulled: its record, and a legacy
 	// sidecar beside it, must both be gone once the build has replaced it.
-	if code := Pull(context.Background(), path, published(t, store.SchemaVersion), &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Pull(context.Background(), path, published(t, store.SchemaVersion), false, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("Pull = %d, want 0", code)
 	}
 	if artifactOf(t, path) == nil {

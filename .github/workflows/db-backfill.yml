@@ -98,7 +98,15 @@ jobs:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
           PUSHED: ${{ steps.push.outputs.pushed }}
-        run: cosign sign --key env://COSIGN_PRIVATE_KEY --tlog-upload=false --yes "$PUSHED"
+        # Retried: since D137's second half, a :v<schema> digest left unsigned
+        # is an outage for every db update and the next seeded build, so a
+        # transient ghcr 5xx on the .sig PUT must not decide it.
+        run: |
+          for i in 1 2 3; do
+            cosign sign --key env://COSIGN_PRIVATE_KEY --tlog-upload=false --yes "$PUSHED" && exit 0
+            echo "::warning::cosign sign attempt $i failed"; sleep $((i * 20))
+          done
+          echo "::error::$PUSHED is pushed and UNSIGNED: every db update refuses it until db-sign.yml is dispatched with this digest"; exit 1
       - name: Self-check the signature against the committed public keys
         env:
           PUSHED: ${{ steps.push.outputs.pushed }}

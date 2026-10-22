@@ -5872,6 +5872,85 @@ documented equivalent.
 
 ---
 
+### D137 — The published artifact is signed, and a pull verifies the signature before it writes
+
+**Decision.** The database artifact is signed with cosign's key-based mode, by digest, after
+every `db push` — `db-publish.yml` and `db-backfill.yml` sign what they pushed and self-check
+the signature in the same run, `db-sign.yml` signs any digest a human pushed by hand, and the
+key never leaves the repository's secrets (a human holds the private key only for rotation
+and for the one retro-signature of v0.10.0's release checksums). The signature is what cosign
+writes: a second tag beside the artifact, `sha256-<digest>.sig`, one layer per signature, the
+base64 DER ECDSA-P256 signature over the raw simple-signing payload in the layer's
+annotation, no transparency log (`--tlog-upload=false`). Verification is the standard
+library's (`internal/dbcmd/trust`): the public keys are embedded in the binary via `go:embed`
+under `keys/<id>.pub`, where `<id>` is the first sixteen hex characters of SHA-256 over the
+PKIX DER and a file whose name is not its key's id refuses to build; `Verify` fetches the
+`.sig` tag with the pull's own options, refuses more than sixteen layers unread, reads each
+payload through a 64 KiB cap, checks the signature over the raw bytes *before* parsing them,
+and only then requires the payload's type and digest to be the pulled manifest's. `db update`
+and `db build --seed` call it after the schema check and before anything is written or
+locked: an unsigned artifact is refused with the tag a mirror must copy; `db update
+--allow-unsigned` installs it anyway, with a `WARNING` and `Unverified: true` in the
+artifact record (so `db status` prints `signed: NO (--allow-unsigned)` and every report's
+provenance carries it); a signature that is present and verifies under no trusted key is
+refused regardless of the flag; a transport failure on the `.sig` fetch is reported as what
+it is, never as "not signed". `--seed` has no opt-out. Release checksums are signed by the
+same key (`cosign sign-blob`), the release carries a build-provenance attestation, and
+`install.sh` — pinned by commit SHA in the README, rewritten by the release job — embeds the
+same public keys and verifies the checksums signature with `openssl` (or `cosign`) before the
+SHA-256, refusing a release without one; `ASSAY_ALLOW_UNSIGNED=1` reaches the checksum alone
+only when neither verifier exists on the host.
+
+**Why.** Everything a scan concludes rests on a database that, until now, anyone able to
+write `ghcr.io/kun9497/assay-db` could replace — and the 2026-09-30 readiness review named
+"the artifact is unsigned" as the first of its six blockers for offering this as a service.
+Key-based over keyless because the measured cost of sigstore-go was two new modules, a
+`go.sum` that grew from 30 to 384 lines, a binary that grew from 7.2 to 20.0 MB, an offline
+TUF path that did not work in v1.3.0, and an identity tied to the workflow's file path; the
+key-based verifier is 143 lines on the standard library, 34 KB of binary and two
+milliseconds. Keys are embedded, not fetched, because a key fetched from the place the
+artifact came from verifies nothing a compromise of that place cannot forge. Signing shipped
+in one PR and verification in a second because three workflows build from `main` and pull:
+had both landed together, every build and every customer's `db update` would have failed
+until the first signed artifact existed. The installer is pinned by commit rather than by
+tag or branch because a branch moves and `git tag -f` moves a tag; a commit cannot.
+
+**Measured.** Spike A (key-based): 0 new dependencies, +34 KB, 143 lines, 2 ms per verify.
+Spike B (keyless): +2 modules, go.sum 30→384, 7.2→20.0 MB, 6 ms warm, TUF offline broken.
+Installer: tag URLs mutable, commit SHA immutable; api.github.com was 403 rate-limited from
+the test host, `/releases/latest` redirects fine; `openssl dgst -verify` accepts cosign's
+`sign-blob` DER signatures. The first production signature (`db-sign.yml` run 39748772150,
+digest `sha256:7300827b…9e4c6`) verified under the embedded key with `openssl`, type and
+digest bound, before the second PR was started.
+
+**Verified.** PR 1: a real cosign v2.4.3 signature as a fixture (regenerated opt-in); the
+cap stops the read (a counting transport); seventeen layers refused unread; a cancelled
+context without an option; signature before parse; RSA, P-384, two-block and CERTIFICATE
+keys refused; the key file names held against the embedded files; the installer's embedded
+keys held against `keys/*.pub`; the installer harness (twelve cases, three Linux-only: a PATH
+with no verifier refuses, `ASSAY_ALLOW_UNSIGNED=1` installs, and still refuses a tampered
+archive). Nine mutations caught, one rerun after it had broken the build instead of a test.
+PR 2, at the call sites first: an unsigned artifact refused before the temp file exists and
+the live database untouched; a signed one installed with its key recorded; a wrong key
+refused *with* `--allow-unsigned`; the opt-out installed, warned, recorded and shown by `db
+status`; a 403 on the `.sig` reported as a 403; an unsigned seed refused with no flag to
+offer; `--allow-unsigned` parsed in any position and never implied by `--from`; and the
+dispatch from `db update` held by a run()-level test that differs only in the flag. Nine
+mutations caught: each call replaced by trust, the flag excusing a wrong signature,
+`Unverified` and `SignedBy` dropped from the record, `--from` implying the flag, a transport
+failure spelled as "not signed", the check moved after the unpack, and the dispatch dropping
+the flag.
+
+**Remaining uncertainty.** Rotation has never been exercised end to end: adding `keys/<new>.pub`
+and the installer's key block, releasing, then switching the secret, is a runbook
+(`docs/DESIGN.md`), not a test. `--allow-unsigned` is recorded but not gated: a scan against
+an unverified database exits as it would against a verified one, and whether CI should be
+able to refuse that (`--fail-on-unverified-db`) is deferred until someone asks. The
+transparency log is off, so a signature's time cannot be proven independently of the
+registry; D127's artifact record carries the pull time, not the signing time.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

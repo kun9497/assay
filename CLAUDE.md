@@ -75,7 +75,12 @@ judged on the source version (D134); both CSAF providers download the archive be
 the delta and keep an archive copy newer than the delta's (D135); a CVE NVD returns without a
 score withdraws its seeded rating and `db push` tolerates exactly that drop (D136 — one
 `NVD_SINCE_DAYS=120` reconciliation build is still owed, see deferred-decisions); and
-`--fail-on-epss=NaN` is refused at parse. Findings
+`--fail-on-epss=NaN` is refused at parse. Since D137 the published artifact is signed
+(cosign, key-based, by digest after every `db push`) and `db update` / `db build --seed`
+verify the signature against keys embedded in the binary (`internal/dbcmd/trust`) before
+writing anything — unsigned is refused with the `.sig` tag a mirror must copy,
+`--allow-unsigned` installs and records it, a wrong signature is refused regardless; release
+checksums are signed and `install.sh` verifies them with `openssl`. Findings
 can be waived through a
 `.assay.yaml` ignore file (D102 — reason mandatory, expiry optional) or a producer's
 OpenVEX document (`--vex`, repeatable, D104 — not_affected/fixed suppress, a reasonless

@@ -53,7 +53,8 @@ Prebuilt binaries and checksums for every platform are attached to each
 ## Quick start
 
 ```bash
-# 1. Get the vulnerability database (seconds — pulls the published OCI artifact)
+# 1. Get the vulnerability database (seconds — pulls the published OCI artifact and
+#    verifies its signature against the key built into assay)
 assay db update
 
 # 2. Scan something

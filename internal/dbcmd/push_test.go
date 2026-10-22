@@ -200,10 +200,11 @@ func TestPushPull_RoundTripsEOLData(t *testing.T) {
 		t.Fatalf("Push = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
+	signPublished(t, ref)
 	dst := filepath.Join(t.TempDir(), "pulled.db")
 	out.Reset()
 	errOut.Reset()
-	if code := Pull(context.Background(), dst, ref, &out, &errOut); code != 0 {
+	if code := Pull(context.Background(), dst, ref, false, &out, &errOut); code != 0 {
 		t.Fatalf("Pull = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 
