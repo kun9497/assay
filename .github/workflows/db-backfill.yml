@@ -52,6 +52,21 @@ jobs:
         with:
           go-version: "1.26"
       - run: make build
+      # D137: see db-publish.yml -- cosign and the signing secret are checked
+      # before anything is pushed.
+      - uses: ./.github/actions/setup-cosign
+      - name: Pre-flight the signing key against the committed public keys (D137)
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          cosign public-key --key env://COSIGN_PRIVATE_KEY >/tmp/signing.pub
+          want=$(openssl pkey -pubin -in /tmp/signing.pub -outform DER | sha256sum | cut -c1-16)
+          for k in internal/dbcmd/trust/keys/*.pub; do
+            have=$(openssl pkey -pubin -in "$k" -outform DER | sha256sum | cut -c1-16)
+            [ "$have" = "$want" ] && { echo "signing key is $(basename "$k")"; exit 0; }
+          done
+          echo "::error::COSIGN_PRIVATE_KEY's public half ($want) matches no committed key under internal/dbcmd/trust/keys/"; exit 2
       - name: Log in to ghcr.io
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
       - name: Resolve the artifact reference
@@ -78,18 +93,20 @@ jobs:
           out=$(./bin/assay db push ${{ steps.ref.outputs.ref }} | tail -n1)
           echo "$out"
           echo "pushed=$out" >> "$GITHUB_OUTPUT"
-      - uses: ./.github/actions/setup-cosign
       - name: Sign the pushed digest (D137)
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
-        run: cosign sign --key env://COSIGN_PRIVATE_KEY --tlog-upload=false --yes "${{ steps.push.outputs.pushed }}"
+          PUSHED: ${{ steps.push.outputs.pushed }}
+        run: cosign sign --key env://COSIGN_PRIVATE_KEY --tlog-upload=false --yes "$PUSHED"
       - name: Self-check the signature against the committed public keys
+        env:
+          PUSHED: ${{ steps.push.outputs.pushed }}
         run: |
           ok=0
           for k in internal/dbcmd/trust/keys/*.pub; do
-            if cosign verify --key "$k" --insecure-ignore-tlog=true "${{ steps.push.outputs.pushed }}" >/dev/null 2>&1; then
+            if cosign verify --key "$k" --insecure-ignore-tlog=true "$PUSHED" >"/tmp/verify-$(basename "$k").log" 2>&1; then
               echo "verified under $(basename "$k")"; ok=1; break
             fi
           done
-          [ "$ok" = 1 ] || { echo "::error::the signature just written verifies under no committed key"; exit 2; }
+          [ "$ok" = 1 ] || { cat /tmp/verify-*.log; echo "::error::the signature just written verifies under no committed key"; exit 2; }

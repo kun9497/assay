@@ -77,6 +77,8 @@ render "$tmp/install-k12.sh" v9.9.2 "$tmp/key1.pub" "$tmp/key2.pub"
 
 # --- runner -------------------------------------------------------------------
 # run <case> <script> <want-exit> <want-substring> [args...]
+# The env ABSENT, when set, names a substring stderr must NOT contain, so a
+# case can tell the refusal it names from a refusal by a later guard.
 run() {
 	name=$1 script=$2 want=$3 needle=$4
 	shift 4
@@ -86,7 +88,7 @@ run() {
 	sh "$script" -b "$bin" "$@" >"$tmp/$name.out" 2>"$tmp/$name.err"
 	code=$?
 	set -e
-	if [ "$code" != "$want" ] || ! grep -q -- "$needle" "$tmp/$name.err"; then
+	if [ "$code" != "$want" ] || ! grep -q -- "$needle" "$tmp/$name.err" || { [ -n "${ABSENT:-}" ] && grep -q -- "$ABSENT" "$tmp/$name.err"; }; then
 		echo "FAIL $name: exit=$code want=$want; stderr:"; sed 's/^/    /' "$tmp/$name.err"
 		fail=1
 	else
@@ -112,14 +114,24 @@ release v9.9.1 attacker "$root/c3a" EVIL
 cp "$root/v9.9.1/assay_9.9.1_checksums.txt.sig" "$root/c3a/v9.9.1/assay_9.9.1_checksums.txt.sig"
 ASSAY_RELEASE_BASE="http://127.0.0.1:$port/c3a" run C3a "$tmp/install-k1.sh" 1 "does not verify against any key embedded"
 
-# C3a-nosig: .sig deleted
+# C3a-nosig: .sig deleted -- refused by the missing-signature guard itself,
+# not by a later one (ABSENT pins which guard fired).
 release v9.9.1 attacker "$root/c3n" EVIL
 rm "$root/c3n/v9.9.1/assay_9.9.1_checksums.txt.sig"
-ASSAY_RELEASE_BASE="http://127.0.0.1:$port/c3n" run C3a-nosig "$tmp/install-k1.sh" 1 "is missing from the v9.9.1 release"
+ABSENT="does not verify" ASSAY_RELEASE_BASE="http://127.0.0.1:$port/c3n" run C3a-nosig "$tmp/install-k1.sh" 1 "is missing from the v9.9.1 release"
+# ...and ASSAY_ALLOW_UNSIGNED does not excuse a missing signature.
+ABSENT="does not verify" ASSAY_ALLOW_UNSIGNED=1 ASSAY_RELEASE_BASE="http://127.0.0.1:$port/c3n" run C3a-nosig-allow "$tmp/install-k1.sh" 1 "is missing from the v9.9.1 release"
 
 # C3b: attacker re-signed with their own key (the embedded key never changes)
 release v9.9.1 attacker "$root/c3b" EVIL
 ASSAY_RELEASE_BASE="http://127.0.0.1:$port/c3b" run C3b "$tmp/install-k1.sh" 1 "does not verify against any key embedded"
+# ASSAY_ALLOW_UNSIGNED is scoped to "no verifier on the host": with openssl
+# present and a bad signature it changes nothing.
+ASSAY_ALLOW_UNSIGNED=1 ASSAY_RELEASE_BASE="http://127.0.0.1:$port/c3b" run C3b-allow "$tmp/install-k1.sh" 1 "does not verify against any key embedded"
+
+# C1-space: a temp dir with a space in its path still verifies a genuine release.
+mkdir -p "$tmp/sp ace"
+TMPDIR="$tmp/sp ace" run C1-space "$tmp/install-k1.sh" 0 "installed v9.9.1"
 
 # C5: neither openssl nor cosign on PATH. The narrowed PATH holds copies of
 # the tools the installer needs minus the two verifiers; copied binaries

@@ -65,7 +65,10 @@ func TestPush_PrintsTheDigestAloneOnStdoutsLastLine(t *testing.T) {
 	if code := Push(context.Background(), path, host+"/assay-db:v6", false, &out, &errOut); code != 0 {
 		t.Fatalf("Push = %d (stderr %s)", code, errOut.String())
 	}
-	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
+	// Exactly one trailing newline is removed, because the workflow's
+	// `| tail -n1` removes none: a blank line after the digest would hand
+	// `cosign sign` an empty reference (D137's review).
+	lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
 	last := lines[len(lines)-1]
 	want := regexp.MustCompile(`^` + regexp.QuoteMeta(host+"/assay-db") + `@sha256:[0-9a-f]{64}$`)
 	if !want.MatchString(last) {

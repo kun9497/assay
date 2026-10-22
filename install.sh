@@ -31,7 +31,9 @@ set -eu
 REPO="kun9497/assay"
 BINDIR="./bin"
 # Set by scripts/prepare-release.sh in the commit a release is cut from.
-VERSION="v0.11.0"
+# Releases before the first signed one carry no checksums signature and are
+# refused by this script; the README says which release that is.
+VERSION="v0.10.0"
 RELEASE_BASE="${ASSAY_RELEASE_BASE:-https://github.com/${REPO}/releases/download}"
 
 # The public keys this installer trusts, PEM, one per release signing key.
@@ -120,7 +122,6 @@ fi
 # openssl verifies exactly that once decoded, and is on every stock Linux and
 # macOS where cosign is not. Each embedded key is tried in turn.
 verified=""
-keyfiles=""
 n=0
 printf '%s\n' "$TRUSTED_KEYS" | awk -v dir="$tmp" '
 	/-----BEGIN PUBLIC KEY-----/ { n++; f = dir "/key" n ".pub" }
@@ -129,16 +130,19 @@ printf '%s\n' "$TRUSTED_KEYS" | awk -v dir="$tmp" '
 '
 for k in "$tmp"/key*.pub; do
 	[ -f "$k" ] || continue
-	keyfiles="$keyfiles $k"
 	n=$((n + 1))
 done
 [ "$n" -gt 0 ] || {
 	echo "assay: this installer embeds no trusted key; it is not a published copy — refusing to install" >&2
 	exit 1
 }
+# The key files are iterated as a quoted glob, never through a space-joined
+# list: a temp dir with a space in its path would otherwise split every
+# key path and refuse a genuine release as "does not verify".
 verify_with_openssl() {
 	base64 -d "${tmp}/${sums}.sig" >"${tmp}/sig.der" 2>/dev/null || return 1
-	for k in $keyfiles; do
+	for k in "$tmp"/key*.pub; do
+		[ -f "$k" ] || continue
 		if openssl dgst -sha256 -verify "$k" -signature "${tmp}/sig.der" "${tmp}/${sums}" >/dev/null 2>&1; then
 			verified="$(basename "$k")"
 			return 0
@@ -147,7 +151,8 @@ verify_with_openssl() {
 	return 1
 }
 verify_with_cosign() {
-	for k in $keyfiles; do
+	for k in "$tmp"/key*.pub; do
+		[ -f "$k" ] || continue
 		if cosign verify-blob --key "$k" --signature "${tmp}/${sums}.sig" --insecure-ignore-tlog=true "${tmp}/${sums}" >/dev/null 2>&1; then
 			verified="$(basename "$k")"
 			return 0

@@ -36,13 +36,23 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Check the digest's shape
+      - name: Check the inputs' shapes
         # A tag or a bare hex here would sign the wrong thing or nothing;
-        # refused before any credential is used.
+        # refused before any credential is used. Both inputs reach the
+        # shell through env, never by expression substitution into the
+        # script text (an input is dispatcher-written; the signing step
+        # holds the key).
+        env:
+          DIGEST: ${{ inputs.digest }}
+          REPOSITORY: ${{ inputs.repository }}
         run: |
-          case "${{ inputs.digest }}" in
+          case "$REPOSITORY" in
+            ghcr.io/kun9497/assay-db) ;;
+            *) echo "::error::repository must be ghcr.io/kun9497/assay-db, got '$REPOSITORY'"; exit 2 ;;
+          esac
+          case "$DIGEST" in
             sha256:[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
-            *) echo "::error::digest must be sha256:<64 hex>, got '${{ inputs.digest }}'"; exit 2 ;;
+            *) echo "::error::digest must be sha256:<64 hex>, got '$DIGEST'"; exit 2 ;;
           esac
       - name: Log in to ghcr.io
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -51,16 +61,23 @@ jobs:
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
-        run: cosign sign --key env://COSIGN_PRIVATE_KEY --tlog-upload=false --yes "${{ inputs.repository }}@${{ inputs.digest }}"
+          DIGEST: ${{ inputs.digest }}
+          REPOSITORY: ${{ inputs.repository }}
+        run: cosign sign --key env://COSIGN_PRIVATE_KEY --tlog-upload=false --yes "$REPOSITORY@$DIGEST"
       - name: Self-check against the committed public keys
         # The same tag the Go verifier reads, with the same pinned cosign;
         # a signature that does not verify under a committed key is a job
-        # failure, not a silent artifact.
+        # failure, not a silent artifact. cosign's own diagnostics are kept
+        # for the failure branch, so the log says which of "no signature",
+        # "wrong key" or "cannot reach the registry" it was.
+        env:
+          DIGEST: ${{ inputs.digest }}
+          REPOSITORY: ${{ inputs.repository }}
         run: |
           ok=0
           for k in internal/dbcmd/trust/keys/*.pub; do
-            if cosign verify --key "$k" --insecure-ignore-tlog=true "${{ inputs.repository }}@${{ inputs.digest }}" >/dev/null 2>&1; then
+            if cosign verify --key "$k" --insecure-ignore-tlog=true "$REPOSITORY@$DIGEST" >"/tmp/verify-$(basename "$k").log" 2>&1; then
               echo "verified under $(basename "$k")"; ok=1; break
             fi
           done
-          [ "$ok" = 1 ] || { echo "::error::the signature just written verifies under no committed key"; exit 2; }
+          [ "$ok" = 1 ] || { cat /tmp/verify-*.log; echo "::error::the signature just written verifies under no committed key"; exit 2; }

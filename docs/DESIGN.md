@@ -402,10 +402,20 @@ gh workflow run db-sign.yml -f digest=sha256:…  # D137: sign the digest db pus
 
 After that, the scheduled workflow keeps it current on its own — and signs what it pushes.
 The hand-pushed bootstrap is the one artifact nothing signs automatically: `db-sign.yml`
-signs any published digest with the repository's key, and the first `db update` or seeded
-build against the new tag refuses it until that has run. The same applies to any artifact
-pushed by hand (a backfill slice run locally rather than through `db-backfill.yml`, a D110
-recovery seed that predates signing): push, then dispatch `db-sign.yml` with the digest.
+signs any published digest with the repository's key, and — once D137's second half has
+landed (the verification call sites in `db update` and `db build --seed`) — the first pull or
+seeded build against the new tag refuses it until that has run. The same applies to any
+artifact pushed by hand (a backfill slice run locally rather than through `db-backfill.yml`,
+a D110 recovery seed that predates signing): push, then dispatch `db-sign.yml` with the digest.
+
+**Interim, between D137's two halves.** Signing shipped first (the workflows sign and
+self-check after every push) and verification second, because three workflows build from
+`main` and pull. Until the second half merges, *nothing refuses an unsigned artifact*: a
+forgotten `db-sign.yml` dispatch or a failed sign step is visible only as the red self-check
+step in the run, or by looking for the tag by hand (`crane manifest
+ghcr.io/kun9497/assay-db:sha256-<digest>.sig`). The second half must not merge until the
+digest currently on `:v<schema>` carries its `.sig` tag, or every workflow build and every
+customer's `db update` fails at once.
 
 **Bound the first pass; do not reach for the full feed.** An unbounded build is about seven
 hours and there is no resume point — `db build` assembles a temporary database and installs it

@@ -10,6 +10,7 @@
 package trust
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/sha256"
@@ -52,9 +53,19 @@ func KeyID(pub *ecdsa.PublicKey) string {
 // ECDSA P-256 key, the only kind the signing workflow produces (cosign
 // generate-key-pair). Anything else is refused rather than trusted.
 func ParsePublicKeyPEM(data []byte) (PublicKey, error) {
-	block, _ := pem.Decode(data)
+	block, rest := pem.Decode(data)
 	if block == nil {
 		return PublicKey{}, errors.New("not a PEM public key")
+	}
+	if block.Type != "PUBLIC KEY" {
+		return PublicKey{}, fmt.Errorf("PEM block is %q, want PUBLIC KEY", block.Type)
+	}
+	// One key per file. A second block (the natural rotation mistake:
+	// appending the new key to the old file) would be silently untrusted
+	// here while install.sh's splitter trusted it -- the two roots must not
+	// read the same bytes differently.
+	if len(bytes.TrimSpace(rest)) != 0 {
+		return PublicKey{}, errors.New("more than one PEM block; one key per file")
 	}
 	parsed, err := x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {

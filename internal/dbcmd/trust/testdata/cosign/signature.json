@@ -1,0 +1,10 @@
+{
+  "cosignVersion": "v2.4.3",
+  "digest": "sha256:830ed54052bdcbec50b16a6b687d2b6e503dfa5a8d19cd81901da2d293b0e96c",
+  "layers": [
+    {
+      "payload": "eyJjcml0aWNhbCI6eyJpZGVudGl0eSI6eyJkb2NrZXItcmVmZXJlbmNlIjoiMTI3LjAuMC4xOjU3MjY4L2Fzc2F5LWRiIn0sImltYWdlIjp7ImRvY2tlci1tYW5pZmVzdC1kaWdlc3QiOiJzaGEyNTY6ODMwZWQ1NDA1MmJkY2JlYzUwYjE2YTZiNjg3ZDJiNmU1MDNkZmE1YThkMTljZDgxOTAxZGEyZDI5M2IwZTk2YyJ9LCJ0eXBlIjoiY29zaWduIGNvbnRhaW5lciBpbWFnZSBzaWduYXR1cmUifSwib3B0aW9uYWwiOm51bGx9",
+      "signature": "MEUCIHsLujKqTSNNi/fWKtu9ktlJyXWUbkB9DW7bscFFU7HhAiEAqADqHDEjhvXQPNbJOhP5SbfR7ylVDs6ofhpYhQVUkRU="
+    }
+  ]
+}

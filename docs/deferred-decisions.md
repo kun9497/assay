@@ -1404,9 +1404,13 @@ mechanism.
 
 ---
 
-### ~~Signing and provenance for the published database artifact~~ — resolved in D137 (2026-10-22)
+### ~~Signing and provenance for the published database artifact~~ — resolved in D137 (2026-10-22; signing shipped first, verification follows in its second PR)
 
-**Closed.** The revisit trigger below fired on 2026-08-28, when the package went public and
+**Closed in two halves.** Signing (workflows, release, installer, the verifier package and
+its record fields) is the first PR; the `db update` / `db build --seed` call sites that
+*refuse* an unsigned artifact are the second, merged only once the published digest carries
+its signature — until then nothing refuses, by design (`docs/DESIGN.md`, "Interim, between
+D137's two halves"). The revisit trigger below fired on 2026-08-28, when the package went public and
 `dbcmd.DefaultRef` began trusting it by default; the 2026-10-22 readiness assessment named it
 the first gap. D137 signs the pushed artifact's digest with a project-held ECDSA P-256 key
 (cosign v2.4, key-based, no transparency log) after every `db push`, and `db update` /

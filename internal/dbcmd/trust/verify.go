@@ -29,6 +29,10 @@ const (
 	// threat model -- so a layer is never read whole before it is judged;
 	// a genuine payload is a few hundred bytes.
 	MaxPayloadBytes = 65536
+	// MaxLayers bounds how many layers a .sig manifest may carry before it
+	// is refused unread: cosign appends one per re-sign, so a handful is
+	// the honest maximum, and each layer costs a blob request.
+	MaxLayers = 16
 )
 
 var (
@@ -58,6 +62,10 @@ func SigTag(digest v1.Hash) string {
 // the first would hide the one that mattered.
 func Verify(ctx context.Context, repo name.Repository, digest v1.Hash, keys []PublicKey, opts ...remote.Option) (string, error) {
 	tag := repo.Tag(SigTag(digest))
+	// ctx reaches the registry through the options; appended last so a
+	// caller's own WithContext is the same one, and a caller that passed
+	// none still gets cancellation.
+	opts = append(opts, remote.WithContext(ctx))
 	img, err := remote.Image(tag, opts...)
 	if err != nil {
 		var terr *transport.Error
@@ -80,6 +88,10 @@ func Verify(ctx context.Context, repo name.Repository, digest v1.Hash, keys []Pu
 	}
 	if len(layers) != len(manifest.Layers) {
 		return "", fmt.Errorf("signature %s: %d layers but %d descriptors", tag, len(layers), len(manifest.Layers))
+	}
+	if len(layers) > MaxLayers {
+		return "", fmt.Errorf("%w (%s): %d layers, more than the %d a re-signed artifact can carry; refusing to read them",
+			ErrNoKeyVerifies, tag, len(layers), MaxLayers)
 	}
 
 	var reasons []string
