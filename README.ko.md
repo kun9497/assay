@@ -23,11 +23,14 @@
 
 ```bash
 # 사전 빌드 바이너리 (Linux/macOS, amd64/arm64) — PATH 위로 바로 설치
-curl -sSfL https://raw.githubusercontent.com/kun9497/assay/main/install.sh | sudo sh -s -- -b /usr/local/bin
+curl -sSfL https://raw.githubusercontent.com/kun9497/assay/05f5e2dd900101feabfa470fffd3983ebbe8d3d3/install.sh | sudo sh -s -- -b /usr/local/bin
 ```
 
-스크립트가 OS/arch에 맞는 릴리스 에셋을 골라 체크섬까지 검증합니다. `-b` 없이 실행하면
-`./bin`에 설치되며(sudo 불필요 — PATH 등록은 직접), 버전 고정은 `-s -- vX.Y.Z`입니다.
+스크립트는 프로젝트 서명 키를 내장하고 릴리스 체크섬 파일의 서명을 `openssl`(또는 `cosign`)로
+먼저 검증한 뒤 체크섬을 확인하고 OS/arch에 맞는 에셋을 고릅니다. 위 줄은 최신 릴리스가 빌드된
+커밋을 가리킵니다 — 옮겨질 수 있는 브랜치나 태그가 아니라 — 그리고 릴리스 잡이 이 줄을 갱신합니다.
+`-b` 없이 실행하면 `./bin`에 설치되며(sudo 불필요 — PATH 등록은 직접), `-s -- vX.Y.Z`는 같은 키로
+검증해 다른 릴리스를 설치합니다.
 
 <details>
 <summary>다른 설치 방법</summary>
