@@ -1,11 +1,14 @@
 # Cut a release from a pushed semver tag: cross-build every platform's binary
-# with GoReleaser and attach them, plus a checksums file, to the GitHub
-# Release. install.sh downloads those assets.
+# with GoReleaser and attach them, plus a checksums file and its signature,
+# to the GitHub Release; attest build provenance; then pin the README's
+# install one-liner to the commit the release was built from.
 #
-#   git tag v0.1.0 && git push origin v0.1.0
+#   scripts/prepare-release.sh vX.Y.Z   # sets install.sh's VERSION, commits
+#   git tag vX.Y.Z && git push origin vX.Y.Z
 #
-# The workflow needs no secrets beyond the automatic GITHUB_TOKEN — it writes
-# a Release in this same repo, nothing external.
+# Secrets: COSIGN_PRIVATE_KEY and COSIGN_PASSWORD (D137) sign the checksums
+# file with the same project key that signs the database artifact. The
+# automatic GITHUB_TOKEN writes the Release and the README pin commit.
 name: release
 
 on:
@@ -15,6 +18,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   goreleaser:
@@ -29,9 +34,40 @@ jobs:
           go-version: "1.26"
           cache: true
 
+      - uses: ./.github/actions/setup-cosign
+
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+
+      # D137: SLSA build provenance for the archives, GitHub-native. A
+      # customer verifies with `gh attestation verify <archive> -R kun9497/assay`.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+
+      # D137: the README one-liner names the COMMIT the release was built
+      # from, never a tag -- a tag can be moved and raw.githubusercontent.com
+      # re-serves the moved one; a commit SHA cannot. The tagged commit cannot
+      # contain its own SHA, so the pin lands on main as the commit after it.
+      - name: Pin the README install one-liner to this release's commit
+        if: github.ref_type == 'tag'
+        run: |
+          set -eu
+          git fetch --depth=1 origin main
+          git checkout -B main origin/main
+          for f in README.md README.ko.md; do
+            sed -i -E "s#raw\.githubusercontent\.com/kun9497/assay/[^/]+/install\.sh#raw.githubusercontent.com/kun9497/assay/${GITHUB_SHA}/install.sh#" "$f"
+          done
+          if git diff --quiet; then echo "README already pins ${GITHUB_SHA}"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "docs: pin the install one-liner to ${GITHUB_REF_NAME} (${GITHUB_SHA})"
+          git push origin main
