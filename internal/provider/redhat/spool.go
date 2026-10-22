@@ -2,6 +2,7 @@ package redhat
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -55,9 +56,10 @@ func (p *Provider) spool(ctx context.Context, url, name string) (*os.File, error
 	}()
 
 	var (
-		have  int64      // bytes on disk so far
-		total int64 = -1 // the whole archive's length, -1 until the server says
-		last  error
+		have     int64       // bytes on disk so far
+		total    int64  = -1 // the whole archive's length, -1 until the server says
+		modified string      // the Last-Modified the bytes on disk were served with, "" if none
+		last     error
 	)
 
 	for attempt := 1; attempt <= archiveAttempts; attempt++ {
@@ -68,10 +70,23 @@ func (p *Provider) spool(ctx context.Context, url, name string) (*os.File, error
 			p.retried.Add(1)
 		}
 
-		onDisk, size, rerr := p.download(ctx, url, f, have)
+		onDisk, size, lm, rerr := p.download(ctx, url, f, have, modified)
 		have = onDisk
 		if size > 0 {
 			total = size
+		}
+		if lm != "" {
+			modified = lm
+		}
+		// D135: a resumed response naming another Last-Modified is the
+		// archive rebuilt under the download. The partial bytes were
+		// discarded by download; start over rather than splice two
+		// generations, and without consulting retryable(), which classifies
+		// transport errors.
+		if errors.Is(rerr, errArchiveRegenerated) {
+			last = rerr
+			have, total, modified = 0, -1, ""
+			continue
 		}
 
 		if rerr == nil && (total < 0 || have >= total) {
@@ -118,10 +133,17 @@ func (p *Provider) spool(ctx context.Context, url, name string) (*os.File, error
 // because the two differ in the case that is easiest to get wrong: a server
 // that ignores Range answers 200 with the whole file, the partial download is
 // discarded, and a caller adding a delta would count the restarted bytes twice.
-func (p *Provider) download(ctx context.Context, url string, f *os.File, from int64) (int64, int64, error) {
+//
+// The third result is the response's Last-Modified verbatim ("" when the
+// server sent none; Red Hat's archive is named by its date, so nothing here
+// depends on the header). sameAs is the Last-Modified the bytes already on
+// disk were served with; a resumed response naming a different one is the
+// archive regenerated mid-transfer (D135) and is refused with
+// errArchiveRegenerated after the partial file is truncated.
+func (p *Provider) download(ctx context.Context, url string, f *os.File, from int64, sameAs string) (int64, int64, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return from, 0, err
+		return from, 0, "", err
 	}
 	if from > 0 {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", from))
@@ -129,10 +151,11 @@ func (p *Provider) download(ctx context.Context, url string, f *os.File, from in
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return from, 0, fmt.Errorf("redhat: fetch %s: %w", url, err)
+		return from, 0, "", fmt.Errorf("redhat: fetch %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 
+	modified := resp.Header.Get("Last-Modified")
 	var whole int64
 	switch resp.StatusCode {
 	case http.StatusOK:
@@ -143,12 +166,19 @@ func (p *Provider) download(ctx context.Context, url string, f *os.File, from in
 		// nowhere near the cause.
 		if from > 0 {
 			if err := f.Truncate(0); err != nil {
-				return 0, 0, err
+				return 0, 0, modified, err
 			}
 			from = 0
 		}
 		whole = resp.ContentLength
 	case http.StatusPartialContent:
+		if sameAs != "" && modified != "" && modified != sameAs {
+			if err := f.Truncate(0); err != nil {
+				return 0, 0, modified, err
+			}
+			return 0, 0, modified, fmt.Errorf("redhat: fetch %s: %w (%q on disk, %q served)",
+				url, errArchiveRegenerated, sameAs, modified)
+		}
 		// Resumed as asked: ContentLength describes the REMAINDER, so the
 		// whole is that plus what is already down.
 		//
@@ -164,12 +194,17 @@ func (p *Provider) download(ctx context.Context, url string, f *os.File, from in
 			whole = from + resp.ContentLength
 		}
 	default:
-		return from, 0, fmt.Errorf("redhat: fetch %s: %s", url, resp.Status)
+		return from, 0, modified, fmt.Errorf("redhat: fetch %s: %s", url, resp.Status)
 	}
 
 	if _, err := f.Seek(from, io.SeekStart); err != nil {
-		return from, whole, err
+		return from, whole, modified, err
 	}
 	n, err := io.Copy(f, resp.Body)
-	return from + n, whole, err
+	return from + n, whole, modified, err
 }
+
+// errArchiveRegenerated is a resumed response naming a different
+// Last-Modified than the bytes already on disk: the server rebuilt the
+// archive mid-transfer (D135).
+var errArchiveRegenerated = errors.New("archive regenerated during the download")

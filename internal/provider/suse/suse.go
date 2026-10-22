@@ -150,19 +150,14 @@ func New(opts Options) *Provider {
 
 func (p *Provider) Name() string { return "SUSE CSAF VEX" }
 
-// Fetch runs the delta pass first -- every document changed since the bulk
-// archive's build time, fetched individually (D129) -- then downloads the
-// archive and converts each document in it the delta did not already emit.
+// Fetch downloads the bulk archive, runs the delta pass -- every document
+// changed since the downloaded archive's own Last-Modified, fetched
+// individually (D129) -- and then walks the spooled archive, converting
+// each document the delta did not already emit a copy of at least as new.
 // Nothing is written to disk beyond the spooled archive itself, and no
 // converted document is held after it is emitted.
 func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error) (store.Provenance, error) {
 	archiveURL := p.baseURL + "/" + archiveName
-	// D12: read BEFORE spooling, so a HEAD failure fails fast rather than
-	// after downloading 445 MB.
-	asOf, err := p.archiveLastModified(ctx, archiveURL)
-	if err != nil {
-		return store.Provenance{}, err
-	}
 
 	var st stats
 	// covered accumulates the release-qualified keys actually seen, not the
@@ -170,23 +165,24 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 	// SUSE adds and retires SLES/Leap releases on its own schedule.
 	covered := map[string]bool{}
 
-	// D129: the delta runs FIRST. The archive is a snapshot; documents
-	// changed since its own Last-Modified are fetched individually and
-	// emitted now, and the walk below skips the archive's older copy of each
-	// one the delta fetched -- so a document corrected to nothing affected
-	// leaves no record at all, where emitting the delta after the walk left
-	// the archive's stale record standing (nothing newer was emitted over it).
-	// Before the 445 MB spool as well: a delta that fails fails fast.
-	superseded, err := p.deltaSince(ctx, asOf, emit, &st, covered)
-	if err != nil {
-		return store.Provenance{}, err
-	}
-
+	// D135: the archive is downloaded BEFORE the delta is consulted, and the
+	// delta's cutoff is the Last-Modified of the bytes actually downloaded.
+	// D129 had run the delta first, keyed on a pre-flight HEAD's
+	// Last-Modified, to fail fast before the 445 MB spool -- and SUSE rebuilds
+	// this archive in place under one URL, so an archive regenerated between
+	// that HEAD and the GET carried documents NEWER than the delta's copies,
+	// which the walk then dropped as superseded (2026-10-22 external review,
+	// #4): installed openssh 9.6p1-1.0 was affected per the archive and
+	// clean per the stale delta copy. Downloaded first, the archive is a
+	// snapshot every delta document is fetched after, so a delta copy is at
+	// least as new as the archive's -- and the walk below still checks that
+	// by revision date rather than assuming it.
+	//
 	// Spooled to disk first, then decompressed from there -- D64, the same
 	// trade redhat.spool documents: a 445 MB transfer held open while every
 	// record it produces is written to bbolt is the exact shape that lost a
 	// day's build on 2026-08-13 for Red Hat's archive.
-	body, err := p.spool(ctx, archiveURL)
+	body, asOf, err := p.spool(ctx, archiveURL)
 	if err != nil {
 		return store.Provenance{}, err
 	}
@@ -194,6 +190,19 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		body.Close()
 		os.Remove(body.Name())
 	}()
+
+	// D129: the delta is emitted BEFORE the walk. Documents changed since
+	// the downloaded archive's Last-Modified are fetched individually and
+	// emitted now, and the walk below skips the archive's copy of each one
+	// the delta fetched -- so a document corrected to nothing affected
+	// leaves no record at all, where emitting the delta after the walk left
+	// the archive's stale record standing (nothing newer was emitted over
+	// it). The cost D135 accepts: a delta that fails now fails after the
+	// spool rather than before it.
+	superseded, err := p.deltaSince(ctx, asOf, emit, &st, covered)
+	if err != nil {
+		return store.Provenance{}, err
+	}
 
 	tr := tar.NewReader(bzip2.NewReader(body))
 	for {
@@ -228,15 +237,26 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 			st.SkippedBadDoc++
 			continue
 		}
-		if superseded[cveOf(&d)] {
-			// D129: the delta fetched a newer copy of this document and has
-			// already emitted whatever it converted to, which may be nothing.
-			// After the decode, because the key is the document's own id,
-			// not its file name (see deltaSince); the few hundred documents
-			// this decodes only to drop are the price of a key both sides
-			// are sure to share.
-			st.ArchiveSuperseded++
-			continue
+		if deltaRevision, fetched := superseded[cveOf(&d)]; fetched {
+			// D129: the delta fetched a copy of this document and has
+			// already emitted whatever it converted to, which may be
+			// nothing. After the decode, because the key is the document's
+			// own id, not its file name (see deltaSince); the few hundred
+			// documents this decodes only to drop are the price of a key
+			// both sides are sure to share.
+			//
+			// D135: skipped only when the delta's copy is at least as new as
+			// this one. The archive was downloaded first, so that is the
+			// expected case; an archive copy that is nonetheless the newer
+			// revision (an individual document served stale from a cache)
+			// is converted and emitted after the delta's, and last write
+			// wins with the newer one. Unreadable or absent dates keep the
+			// skip: D129's rule is the one with a measured failure behind it.
+			if !revisionOf(&d).After(deltaRevision) {
+				st.ArchiveSuperseded++
+				continue
+			}
+			st.ArchiveNewerThanDelta++
 		}
 		adv, ok := convert(&d, &st)
 		if !ok {
@@ -270,28 +290,17 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 	}, nil
 }
 
-// archiveLastModified reads the archive's own HTTP Last-Modified header
-// (D12). Unlike Red Hat's dated archive_latest.txt, SUSE's bulk archive
-// keeps ONE filename forever (verified live: csaf-vex.tar.bz2, rebuilt in
-// place), so the header on the response is the only statement upstream makes
-// about when it was built. A HEAD request costs nothing extra fetched, and a
-// missing or unparseable header is fatal rather than falling back to
-// time.Now() -- a mirror serving a stale snapshot fetched today must not
-// report as fresh, the identical rule redhat.archiveDate's fatal failure
-// enforces for a name with no date in it.
-func (p *Provider) archiveLastModified(ctx context.Context, url string) (time.Time, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
-	if err != nil {
-		return time.Time{}, err
-	}
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("suse: HEAD %s: %w", url, err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return time.Time{}, fmt.Errorf("suse: HEAD %s: %s", url, resp.Status)
-	}
+// lastModifiedOf reads the archive's own HTTP Last-Modified header off the
+// response that delivered it (D12). Unlike Red Hat's dated archive_latest.txt,
+// SUSE's bulk archive keeps ONE filename forever (verified live:
+// csaf-vex.tar.bz2, rebuilt in place), so the header on the response is the
+// only statement upstream makes about when it was built. Read from the GET
+// that downloads the bytes, never from a pre-flight HEAD, because the two can
+// describe different generations of the file (D135). A missing or unparseable
+// header is fatal rather than falling back to time.Now() -- a mirror serving a
+// stale snapshot fetched today must not report as fresh, the identical rule
+// redhat.archiveDate's fatal failure enforces for a name with no date in it.
+func lastModifiedOf(resp *http.Response, url string) (time.Time, error) {
 	lm := resp.Header.Get("Last-Modified")
 	if lm == "" {
 		return time.Time{}, fmt.Errorf(
@@ -302,6 +311,17 @@ func (p *Provider) archiveLastModified(ctx context.Context, url string) (time.Ti
 		return time.Time{}, fmt.Errorf("suse: %s has an unreadable Last-Modified header %q: %w", url, lm, err)
 	}
 	return t.UTC(), nil
+}
+
+// revisionOf is the document's own revision date, zero when it carries none
+// or an unreadable one. Only ever compared between two copies of one
+// document (D135); a zero on either side keeps D129's skip.
+func revisionOf(d *document) time.Time {
+	t, err := time.Parse(time.RFC3339, d.Document.Tracking.CurrentDate)
+	if err != nil {
+		return time.Time{}
+	}
+	return t.UTC()
 }
 
 func (p *Provider) get(ctx context.Context, url string) (io.ReadCloser, error) {
@@ -342,7 +362,8 @@ func (s stats) String() string {
 			"the purl carried no version (D131, %d such ids kept as spelt, %d SLE entries not mirrored "+
 			"onto Leap because their only fix was such a build); delta: %d changed since the archive, %d fetched, %d already "+
 			"withdrawn, %d yielded a record, %d retried, %d rescued by a retry, "+
-			"%d archive documents superseded by a newer copy the delta fetched (D129)",
+			"%d archive documents superseded by a newer copy the delta fetched (D129), "+
+			"%d archive documents newer than the copy the delta fetched (kept, D135)",
 		s.Documents, s.Advisories, s.Affected, s.Unfixable,
 		s.UnfixableWontFix, s.UnfixableNotFixed, s.UnfixableUnstated, s.UnfixableBothReasons,
 		s.PlatformsUnfoldable, s.PlatformsTumbleweed,
@@ -353,5 +374,5 @@ func (s stats) String() string {
 		s.LeapNoFixReplacedWithReason, s.BareNamedByProductID, s.RecommendedNamedByNEVRSplit,
 		s.RecommendedEmptyVersionKept, s.SkippedLeapMirrorSplitBuild,
 		s.DeltaListed, s.DeltaFetched, s.DeltaGone, s.DeltaAdvisories,
-		s.DeltaRetried, s.DeltaRescued, s.ArchiveSuperseded)
+		s.DeltaRetried, s.DeltaRescued, s.ArchiveSuperseded, s.ArchiveNewerThanDelta)
 }
