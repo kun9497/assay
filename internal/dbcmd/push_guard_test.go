@@ -90,6 +90,7 @@ func seed(t *testing.T, ref string, since time.Time, ratings int) {
 	if code := Push(context.Background(), bounded(t, since, ratings), ref, false, &out, &errOut); code != 0 {
 		t.Fatalf("seeding the registry failed: %d (%s)", code, errOut.String())
 	}
+	signPublished(t, ref) // D137: a pull of it must find the signature a publish leaves
 }
 
 // A push that would narrow the published coverage is refused.
@@ -409,7 +410,8 @@ func TestPush_ASecondSeededDeltaIsStillPublishable(t *testing.T) {
 	for i, fetched := range []time.Time{day(10), day(11)} {
 		seedPath := filepath.Join(t.TempDir(), "seed.db")
 		var out, errOut bytes.Buffer
-		if code := Pull(context.Background(), seedPath, ref, &out, &errOut); code != 0 {
+		signPublished(t, ref) // D137: the real Push signs nothing; the workflow's cosign step does
+		if code := Pull(context.Background(), seedPath, ref, false, &out, &errOut); code != 0 {
 			t.Fatalf("day %d: Pull = %d (%s)", i+1, code, errOut.String())
 		}
 
@@ -456,7 +458,7 @@ func TestPush_ADeltaSeededFromTheWholeFeedStaysWhole(t *testing.T) {
 
 	seedPath := filepath.Join(t.TempDir(), "seed.db")
 	var out, errOut bytes.Buffer
-	if code := Pull(context.Background(), seedPath, ref, &out, &errOut); code != 0 {
+	if code := Pull(context.Background(), seedPath, ref, false, &out, &errOut); code != 0 {
 		t.Fatalf("Pull = %d (%s)", code, errOut.String())
 	}
 
@@ -617,10 +619,11 @@ func TestPush_NeverPublishesEnrichment(t *testing.T) {
 	}
 
 	// Pulled the way `assay db update` pulls, into a fresh path.
+	signPublished(t, ref)
 	pulled := filepath.Join(t.TempDir(), "vulnerability.db")
 	out.Reset()
 	errOut.Reset()
-	if code := Pull(context.Background(), pulled, ref, &out, &errOut); code != 0 {
+	if code := Pull(context.Background(), pulled, ref, false, &out, &errOut); code != 0 {
 		t.Fatalf("Pull = %d, want 0 (%s)", code, errOut.String())
 	}
 	db, err := store.Open(pulled)
@@ -955,10 +958,11 @@ func TestPush_StripsTheBucketEvenWhenTheMetadataClaimsNothingToStrip(t *testing.
 	if code := Push(context.Background(), path, ref, false, &out, &errOut); code != 0 {
 		t.Fatalf("Push = %d, want 0 (%s)", code, errOut.String())
 	}
+	signPublished(t, ref)
 	pulled := filepath.Join(t.TempDir(), "vulnerability.db")
 	out.Reset()
 	errOut.Reset()
-	if code := Pull(context.Background(), pulled, ref, &out, &errOut); code != 0 {
+	if code := Pull(context.Background(), pulled, ref, false, &out, &errOut); code != 0 {
 		t.Fatalf("Pull = %d, want 0 (%s)", code, errOut.String())
 	}
 	db, err := store.Open(pulled)

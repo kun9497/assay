@@ -34,6 +34,16 @@ import (
 // without duplicating this setup.
 func publishedFrom(t *testing.T, srcPath string, schema int, wrap func(http.Handler) http.Handler) string {
 	t.Helper()
+	ref := publishedUnsignedFrom(t, srcPath, schema, wrap)
+	signPublished(t, ref)
+	return ref
+}
+
+// publishedUnsignedFrom is publishedFrom without the signature: what a
+// hand push, or a mirror that copied the image and not its .sig tag,
+// leaves in a registry (D137).
+func publishedUnsignedFrom(t *testing.T, srcPath string, schema int, wrap func(http.Handler) http.Handler) string {
+	t.Helper()
 	var h http.Handler = registry.New()
 	if wrap != nil {
 		h = wrap(h)
@@ -78,7 +88,7 @@ func TestPull_LandsAUsableDatabase(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 
 	var out, errOut bytes.Buffer
-	if code := Pull(context.Background(), dst, ref, &out, &errOut); code != 0 {
+	if code := Pull(context.Background(), dst, ref, false, &out, &errOut); code != 0 {
 		t.Fatalf("Pull = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	db, err := store.Open(dst)
@@ -167,7 +177,7 @@ func TestPull_RefusesAForeignSchemaWithoutDownloading(t *testing.T) {
 			dst := filepath.Join(t.TempDir(), "vulnerability.db")
 
 			var out, errOut bytes.Buffer
-			code := Pull(context.Background(), dst, ref, &out, &errOut)
+			code := Pull(context.Background(), dst, ref, false, &out, &errOut)
 			if code != 2 {
 				t.Errorf("Pull of a foreign schema = %d, want 2 (stderr: %s)", code, errOut.String())
 			}
@@ -213,7 +223,7 @@ func TestPull_AFailedPullLeavesTheLiveDatabaseAlone(t *testing.T) {
 	ref := publishedFrom(t, garbage, store.SchemaVersion, nil)
 
 	var out, errOut bytes.Buffer
-	code := Pull(context.Background(), dst, ref, &out, &errOut)
+	code := Pull(context.Background(), dst, ref, false, &out, &errOut)
 	if code != 2 {
 		t.Errorf("Pull of a garbage artifact = %d, want 2 (stderr: %s)", code, errOut.String())
 	}
@@ -243,7 +253,7 @@ func TestPull_UnreachableRegistryExitsTwo(t *testing.T) {
 	}
 
 	var out, errOut bytes.Buffer
-	code := Pull(context.Background(), dst, "127.0.0.1:1/assay-db:v6", &out, &errOut)
+	code := Pull(context.Background(), dst, "127.0.0.1:1/assay-db:v6", false, &out, &errOut)
 	if code != 2 {
 		t.Errorf("Pull from an unreachable registry = %d, want 2", code)
 	}
@@ -297,7 +307,7 @@ func TestPull_InstallUsesReplacesRetrySchedule(t *testing.T) {
 	ref := published(t, store.SchemaVersion)
 
 	var out, errOut bytes.Buffer
-	code := Pull(context.Background(), dst, ref, &out, &errOut)
+	code := Pull(context.Background(), dst, ref, false, &out, &errOut)
 	if code != 2 {
 		t.Fatalf("Pull with a permanently failing rename = %d, want 2 (stderr: %s)", code, errOut.String())
 	}
@@ -402,7 +412,8 @@ func TestPull_AttributesTheStalestSource(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	out.Reset()
 	errOut.Reset()
-	if code := Pull(context.Background(), dst, ref, &out, &errOut); code != 0 {
+	signPublished(t, ref) // D137: the real Push signs nothing; the workflow's cosign step does
+	if code := Pull(context.Background(), dst, ref, false, &out, &errOut); code != 0 {
 		t.Fatalf("Pull = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	got := errOut.String()
@@ -422,7 +433,7 @@ func TestPull_UnattributedArtifactKeepsTheBareLine(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 
 	var out, errOut bytes.Buffer
-	if code := Pull(context.Background(), dst, ref, &out, &errOut); code != 0 {
+	if code := Pull(context.Background(), dst, ref, false, &out, &errOut); code != 0 {
 		t.Fatalf("Pull = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	got := errOut.String()
@@ -449,7 +460,7 @@ func TestPull_RefusesWhenAnotherWriterHoldsTheLock(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	code := within(t, 10*time.Second, func() int {
-		return Pull(context.Background(), dst, ref, &out, &errOut)
+		return Pull(context.Background(), dst, ref, false, &out, &errOut)
 	})
 	if code != 2 {
 		t.Fatalf("Pull while another writer holds the lock = %d, want 2 (stderr: %s)", code, errOut.String())
@@ -473,7 +484,7 @@ func TestPull_ReleasesTheLockAfterInstall(t *testing.T) {
 	ref := published(t, store.SchemaVersion)
 	dst := filepath.Join(t.TempDir(), "fresh", "sub", "vulnerability.db")
 	var out, errOut bytes.Buffer
-	if code := Pull(context.Background(), dst, ref, &out, &errOut); code != 0 {
+	if code := Pull(context.Background(), dst, ref, false, &out, &errOut); code != 0 {
 		t.Fatalf("Pull = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
 	if _, err := os.Stat(dst + ".lock"); err != nil {
@@ -503,7 +514,7 @@ func TestPull_ReleasesTheLockAfterAFailedInstall(t *testing.T) {
 	renameFn, attempts = failingRenameThatProbesTheLock(t, dst)
 
 	var out, errOut bytes.Buffer
-	if code := Pull(context.Background(), dst, ref, &out, &errOut); code != 2 {
+	if code := Pull(context.Background(), dst, ref, false, &out, &errOut); code != 2 {
 		t.Fatalf("Pull with a failing rename = %d, want 2 (stderr: %s)", code, errOut.String())
 	}
 	if *attempts == 0 {
@@ -524,7 +535,7 @@ func TestPull_ASchemaRefusalNeverReachesTheLock(t *testing.T) {
 	ref := published(t, store.SchemaVersion+1)
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 	var out, errOut bytes.Buffer
-	if code := Pull(context.Background(), dst, ref, &out, &errOut); code != 2 {
+	if code := Pull(context.Background(), dst, ref, false, &out, &errOut); code != 2 {
 		t.Fatalf("Pull of a foreign schema = %d, want 2 (stderr: %s)", code, errOut.String())
 	}
 	if !strings.Contains(errOut.String(), "but this assay reads v") {

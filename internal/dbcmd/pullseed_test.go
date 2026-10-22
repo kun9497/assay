@@ -47,6 +47,7 @@ func publishOldShapedArtifact(t *testing.T, ref string, schema int, advs []advis
 	if err := remote.Write(mustRef(t, ref), img); err != nil {
 		t.Fatal(err)
 	}
+	signPublished(t, ref)
 }
 
 // TestPullSeed_FallsBackToThePreviousSchemaWhenTheCurrentTagDoesNotExistYet
@@ -296,6 +297,7 @@ func TestPullSeed_AttributesTheStalestSource(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "seed.db")
 	out.Reset()
 	errOut.Reset()
+	signPublished(t, ref) // D137: the real Push signs nothing; the workflow's cosign step does
 	if code := PullSeed(context.Background(), dst, ref, &out, &errOut); code != 0 {
 		t.Fatalf("PullSeed = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
