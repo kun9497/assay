@@ -26,6 +26,13 @@ type ArtifactRecord struct {
 	Reference string    `json:"reference"`
 	Digest    string    `json:"digest"`
 	PulledAt  time.Time `json:"pulledAt"`
+	// SignedBy is the id of the trusted key whose signature verified the
+	// artifact before it was installed (D137); Unverified says the operator
+	// installed it with --allow-unsigned instead. Both absent on a record
+	// written before D137 and on a database built locally, which was never
+	// pulled. Never both set.
+	SignedBy   string `json:"signedBy,omitempty"`
+	Unverified bool   `json:"unverified,omitempty"`
 }
 
 // LegacyArtifactRecordPath is where a pull before D127 left its sidecar. It is

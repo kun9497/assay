@@ -257,6 +257,61 @@ func TestStatus_PrintsThePulledArtifact(t *testing.T) {
 	if strings.Contains(out.String(), "pulled:") {
 		t.Errorf("a built database claims to have been pulled:\n%s", out.String())
 	}
+	if strings.Contains(out.String(), "signed:") {
+		t.Errorf("a built database claims a signing state:\n%s", out.String())
+	}
+}
+
+// D137: the record says what verified the artifact, and `db status` prints
+// it -- the key id when a trusted key did, and NO when the operator chose
+// --allow-unsigned. A record with neither (a database pulled before D137)
+// prints no `signed:` line at all rather than a guess.
+func TestStatus_PrintsTheSigningKey(t *testing.T) {
+	path := pushable(t, time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC))
+	if err := store.SetArtifactAt(path, store.ArtifactRecord{
+		Reference: "ghcr.io/kun9497/assay-db:v14", Digest: "sha256:" + strings.Repeat("ab", 32),
+		PulledAt: time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC), SignedBy: "9b71ca8e11cf3bcf",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := Status(path, &out, &errOut); code != 0 {
+		t.Fatalf("Status = %d (stderr %s)", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "signed:     key 9b71ca8e11cf3bcf\n") {
+		t.Errorf("status does not name the signing key:\n%s", out.String())
+	}
+}
+
+func TestStatus_PrintsUnverified(t *testing.T) {
+	path := pushable(t, time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC))
+	if err := store.SetArtifactAt(path, store.ArtifactRecord{
+		Reference: "mirror.corp/assay-db:v14", Digest: "sha256:" + strings.Repeat("cd", 32),
+		PulledAt: time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC), Unverified: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := Status(path, &out, &errOut); code != 0 {
+		t.Fatalf("Status = %d (stderr %s)", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "signed:     NO (--allow-unsigned)\n") {
+		t.Errorf("status does not say the artifact was installed unverified:\n%s", out.String())
+	}
+	// And a pre-D137 record -- neither field -- prints no line.
+	if err := store.SetArtifactAt(path, store.ArtifactRecord{
+		Reference: "mirror.corp/assay-db:v14", Digest: "sha256:" + strings.Repeat("cd", 32),
+		PulledAt: time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if code := Status(path, &out, &errOut); code != 0 {
+		t.Fatalf("Status = %d", code)
+	}
+	if strings.Contains(out.String(), "signed:") {
+		t.Errorf("a record with no signing state printed one:\n%s", out.String())
+	}
 }
 
 func TestUpdate_ABuiltDatabaseNamesNoArtifact(t *testing.T) {
