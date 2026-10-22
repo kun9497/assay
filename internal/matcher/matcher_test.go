@@ -1036,6 +1036,75 @@ func TestMatch_IndirectLookupComparesTheSourceVersion(t *testing.T) {
 	}
 }
 
+// The 2026-10-22 external review's #3. The test above holds only when the
+// binary is named differently from its source: the version selection was
+// written as `lookupName != p.Name`, so a binary that SHARES its source's
+// name -- util-linux itself, bash, every package that is its own source --
+// was compared on its binary version against the source-namespace bound.
+// With dpkg's "Source: util-linux (2.38.1-5+deb12u2)" saying the source is
+// still short of the fix, the binary's epoch sorted it above the fix and
+// the finding vanished: zero findings, zero skips, exit 0.
+//
+// The rule is now about IDENTITY, not spelling: the lookup under the source
+// name compares the source version, whether or not that name is also the
+// binary's.
+func TestMatch_SameNameLookupComparesTheSourceVersion(t *testing.T) {
+	adv := advWithRange("DEBIAN-CVE-2026-2", "Debian:12", "util-linux",
+		"0", "2.38.1-5+deb12u3", advisory.RangeEcosystem)
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Debian:12\x00util-linux": {adv},
+	}}
+
+	p := pkg("util-linux", "1:2.38.1-5+deb12u3", "Debian:12")
+	p.Source = &pkgmeta.SourcePackage{Name: "util-linux", Version: "2.38.1-5+deb12u2"}
+
+	res, err := New(s).Match(pkgmeta.Target{Packages: []pkgmeta.Package{p}})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("Findings = %d, want 1: the source version 2.38.1-5+deb12u2 is inside "+
+			"[0, 2.38.1-5+deb12u3); the binary's 1:2.38.1-5+deb12u3 sorts above the fix on "+
+			"its epoch alone; got %+v (skipped %+v)", len(res.Findings), res.Findings, res.Skipped)
+	}
+	// And the boundary from the other side: a source version AT the fix is
+	// clean even though the binary version, with its epoch, would also be.
+	p.Source.Version = "2.38.1-5+deb12u3"
+	res, err = New(s).Match(pkgmeta.Target{Packages: []pkgmeta.Package{p}})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(res.Findings) != 0 || len(res.Skipped) != 0 {
+		t.Errorf("source at the fix: Findings = %+v Skipped = %+v, want none of either", res.Findings, res.Skipped)
+	}
+}
+
+// The other half of the same rule: a lookup under the BINARY name, when the
+// source is named differently, keeps the binary version. An advisory keyed
+// on the binary name with a bound the binary meets must not be re-judged on
+// a source version that does not.
+func TestMatch_BinaryNameLookupKeepsTheBinaryVersion(t *testing.T) {
+	adv := advWithRange("DEBIAN-CVE-2026-3", "Debian:12", "bsdutils",
+		"0", "1:2.38.1-5+deb12u3", advisory.RangeEcosystem)
+	s := fakeStore{byKey: map[string][]advisory.Advisory{
+		"Debian:12\x00bsdutils": {adv},
+	}}
+
+	p := pkg("bsdutils", "1:2.38.1-5+deb12u3", "Debian:12") // == the fix
+	p.Source = &pkgmeta.SourcePackage{Name: "util-linux", Version: "2.38.1-5+deb12u2"}
+
+	res, err := New(s).Match(pkgmeta.Target{Packages: []pkgmeta.Package{p}})
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if len(res.Findings) != 0 {
+		t.Errorf("Findings = %+v, want none: the binary-name lookup compares the binary version, which is at the fix", res.Findings)
+	}
+	if len(res.Skipped) != 0 {
+		t.Errorf("Skipped = %+v, want none", res.Skipped)
+	}
+}
+
 // --- D95: the apk provides bridge ---
 //
 // BellSoft's Alpaquita advisories name a Liberica JDK package

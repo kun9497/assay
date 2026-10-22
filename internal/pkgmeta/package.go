@@ -93,6 +93,13 @@ type SourcePackage struct {
 type Location struct {
 	Path        string
 	LayerDigest string // empty outside image scans
+	// Install is where the package lives relative to Path when the two
+	// differ -- an npm alias's "node_modules/utility-alias" under the
+	// package-lock.json that recorded it. The package's Name is its registry
+	// identity (what advisories are written against); this is the one place
+	// the install name survives, so --explain can still say where the
+	// aliased copy is. Empty when the file at Path is the package itself.
+	Install string
 }
 
 // SourceRPMName strips a SOURCERPM-shaped filename back to the bare source

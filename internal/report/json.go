@@ -360,6 +360,9 @@ type SourceRecord struct {
 type LocationRecord struct {
 	Path        string `json:"path"`
 	LayerDigest string `json:"layerDigest,omitempty"`
+	// Install is the install path under Path when it is not the package's
+	// own name (an npm alias); see pkgmeta.Location.Install.
+	Install string `json:"install,omitempty"`
 }
 
 type AdvisoryRecord struct {
@@ -541,7 +544,7 @@ func packageRecord(p pkgmeta.Package) PackageRecord {
 		pr.Source = &SourceRecord{Name: p.Source.Name, Version: p.Source.Version}
 	}
 	for _, l := range p.Locations {
-		pr.Locations = append(pr.Locations, LocationRecord{Path: l.Path, LayerDigest: l.LayerDigest})
+		pr.Locations = append(pr.Locations, LocationRecord{Path: l.Path, LayerDigest: l.LayerDigest, Install: l.Install})
 	}
 	return pr
 }
