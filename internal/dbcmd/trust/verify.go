@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 
 	"github.com/google/go-containerregistry/pkg/name"
@@ -68,8 +69,17 @@ func Verify(ctx context.Context, repo name.Repository, digest v1.Hash, keys []Pu
 	opts = append(opts, remote.WithContext(ctx))
 	img, err := remote.Image(tag, opts...)
 	if err != nil {
+		// Any 404 is "not signed", whatever its body says: the repository
+		// exists (the caller just fetched the artifact's manifest from it),
+		// and registries spell a missing tag differently -- MANIFEST_UNKNOWN
+		// per the spec, NOT_FOUND on Harbor, an HTML page or nothing behind a
+		// proxy. Read as a transport failure, --allow-unsigned could not reach
+		// it. 401, 403 and 5xx stay transport failures.
 		var terr *transport.Error
 		if errors.As(err, &terr) {
+			if terr.StatusCode == http.StatusNotFound {
+				return "", fmt.Errorf("%w: no %s in %s", ErrNotSigned, SigTag(digest), repo)
+			}
 			for _, e := range terr.Errors {
 				if e.Code == transport.ManifestUnknownErrorCode {
 					return "", fmt.Errorf("%w: no %s in %s", ErrNotSigned, SigTag(digest), repo)

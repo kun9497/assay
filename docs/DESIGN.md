@@ -412,14 +412,15 @@ seeded build against the new tag refuses it until that has run. The same applies
 artifact pushed by hand (a backfill slice run locally rather than through `db-backfill.yml`,
 a D110 recovery seed that predates signing): push, then dispatch `db-sign.yml` with the digest.
 
-**Interim, between D137's two halves.** Signing shipped first (the workflows sign and
-self-check after every push) and verification second, because three workflows build from
-`main` and pull. Until the second half merges, *nothing refuses an unsigned artifact*: a
-forgotten `db-sign.yml` dispatch or a failed sign step is visible only as the red self-check
-step in the run, or by looking for the tag by hand (`crane manifest
-ghcr.io/kun9497/assay-db:sha256-<digest>.sig`). The second half must not merge until the
-digest currently on `:v<schema>` carries its `.sig` tag, or every workflow build and every
-customer's `db update` fails at once.
+**An unsigned digest on the tag is an outage.** Since D137's second half, `db update` and
+`db build --seed` refuse an artifact without its `.sig` tag. A failed sign step (retried
+three times in the workflow) or a forgotten `db-sign.yml` dispatch after a hand push therefore
+stops every customer's `db update` and the next nightly's seeded build until the digest is
+signed. A red sign or self-check step is never cosmetic: dispatch `db-sign.yml` with the
+digest the run printed, then confirm the tag exists (`crane manifest
+ghcr.io/kun9497/assay-db:sha256-<digest>.sig`). Before the second half merged (2026-10-22),
+signing ran for one day with nothing refusing, so the first signed digest could be published
+before any binary required it.
 
 **Bound the first pass; do not reach for the full feed.** An unbounded build is about seven
 hours and there is no resume point — `db build` assembles a temporary database and installs it

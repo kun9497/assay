@@ -51,6 +51,9 @@ func TestPull_RefusesAnUnsignedArtifactBeforeUnpacking(t *testing.T) {
 	if _, err := os.Stat(dst + ".tmp"); !os.IsNotExist(err) {
 		t.Error("an unsigned artifact was unpacked before it was refused (temp file exists)")
 	}
+	if _, err := os.Stat(dst + ".lock"); !os.IsNotExist(err) {
+		t.Error("an unsigned artifact took the writer lock before it was refused (lock file exists)")
+	}
 	after, err := os.ReadFile(dst)
 	if err != nil {
 		t.Fatalf("the live database is gone: %v", err)
@@ -151,17 +154,78 @@ func TestPull_TransportFailureOnTheSigTagIsNotNotSigned(t *testing.T) {
 	}
 	ref := publishedFrom(t, pushable(t, time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)), store.SchemaVersion, wrap)
 	block.Store(true)
+
+	// With the flag too: --allow-unsigned excuses an absent signature, and
+	// a 403 is not evidence of absence. A CI job carrying the flag for a
+	// mirror must not have an expired token quietly downgrade every pull
+	// to unverified.
+	for _, allow := range []bool{false, true} {
+		dst := filepath.Join(t.TempDir(), "vulnerability.db")
+		var out, errOut bytes.Buffer
+		if code := Pull(context.Background(), dst, ref, allow, &out, &errOut); code != 2 {
+			t.Fatalf("allowUnsigned=%v: Pull with the signature fetch refused = %d, want 2 (stderr: %s)", allow, code, errOut.String())
+		}
+		if !strings.Contains(errOut.String(), "403") {
+			t.Errorf("allowUnsigned=%v: stderr does not carry the registry's status:\n%s", allow, errOut.String())
+		}
+		if strings.Contains(errOut.String(), "is not signed") || strings.Contains(errOut.String(), "UNVERIFIED") {
+			t.Errorf("allowUnsigned=%v: a transport failure was reported as an unsigned artifact:\n%s", allow, errOut.String())
+		}
+		if _, err := os.Stat(dst); !os.IsNotExist(err) {
+			t.Errorf("allowUnsigned=%v: a pull whose signature could not be fetched installed a database", allow)
+		}
+	}
+}
+
+// A mirror that answers the missing .sig tag with a 404 its own way (no
+// MANIFEST_UNKNOWN code: Harbor, a proxy) is a mirror without the
+// signature, so the documented way out works there too.
+func TestPull_AllowUnsignedWorksOnAMirrorWhose404CarriesNoSpecCode(t *testing.T) {
+	var block atomic.Bool
+	wrap := func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if block.Load() && strings.Contains(r.URL.Path, ".sig") {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"errors":[{"code":"NOT_FOUND","message":"artifact not found"}]}`))
+				return
+			}
+			h.ServeHTTP(w, r)
+		})
+	}
+	ref := publishedUnsignedFrom(t, pushable(t, time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)), store.SchemaVersion, wrap)
+	block.Store(true)
 	dst := filepath.Join(t.TempDir(), "vulnerability.db")
 
 	var out, errOut bytes.Buffer
-	if code := Pull(context.Background(), dst, ref, false, &out, &errOut); code != 2 {
-		t.Fatalf("Pull with the signature fetch refused = %d, want 2 (stderr: %s)", code, errOut.String())
+	if code := Pull(context.Background(), dst, ref, false, &out, &errOut); code != 2 || !strings.Contains(errOut.String(), "is not signed") {
+		t.Fatalf("without the flag: Pull = %d, want 2 with 'is not signed' (stderr: %s)", code, errOut.String())
 	}
-	if !strings.Contains(errOut.String(), "403") {
-		t.Errorf("stderr does not carry the registry's status:\n%s", errOut.String())
+	out.Reset()
+	errOut.Reset()
+	if code := Pull(context.Background(), dst, ref, true, &out, &errOut); code != 0 {
+		t.Fatalf("with --allow-unsigned: Pull = %d, want 0 (stderr: %s)", code, errOut.String())
 	}
-	if strings.Contains(errOut.String(), "is not signed") {
-		t.Errorf("a transport failure was reported as an unsigned artifact:\n%s", errOut.String())
+	if rec := artifactOf(t, dst); !rec.Unverified {
+		t.Errorf("record = %+v, want Unverified", rec)
+	}
+}
+
+// A flag left in a script after an outage does not mark a signed artifact
+// unverified: the record says what was found, not what was permitted.
+func TestPull_AllowUnsignedOnASignedArtifactRecordsTheKey(t *testing.T) {
+	ref := published(t, store.SchemaVersion)
+	dst := filepath.Join(t.TempDir(), "vulnerability.db")
+
+	var out, errOut bytes.Buffer
+	if code := Pull(context.Background(), dst, ref, true, &out, &errOut); code != 0 {
+		t.Fatalf("Pull --allow-unsigned of a signed artifact = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	rec := artifactOf(t, dst)
+	if rec.SignedBy != testSigningPublicKey().ID || rec.Unverified {
+		t.Errorf("record = %+v, want SignedBy %s and not Unverified", rec, testSigningPublicKey().ID)
+	}
+	if strings.Contains(errOut.String(), "UNVERIFIED") {
+		t.Errorf("a verified pull warned as unverified:\n%s", errOut.String())
 	}
 }
 

@@ -79,9 +79,11 @@ cost of time.
 The published artifact is signed (D137), and `db update` verifies the signature against the
 keys built into the binary before it installs anything — so a database that reaches your
 pipeline through a mirror is only installed if the mirror copied the signature too. The
-signature is a second tag beside the artifact, `sha256-<digest>.sig`; a mirror that copies
-tags by name (`crane copy`, `oras cp`, a pull-through cache) has it already, one that copies
-the artifact by digest alone does not, and `db update --from <mirror>` then stops with
+signature is a second tag beside the artifact, `sha256-<digest>.sig`. A pull-through cache
+serves it on demand, because assay asks for that tag by name. A mirror filled by copying one
+tag (`crane copy …:v9 <mirror>:v9`, `oras cp`) does not have it: copy the signature tag too
+(`crane copy ghcr.io/kun9497/assay-db:sha256-<digest>.sig <mirror>/assay-db:sha256-<digest>.sig`,
+or `crane copy --all-tags` on the repository). Without it `db update --from <mirror>` stops with
 `is not signed` and the tag name to copy. `--allow-unsigned` installs anyway, with a
 `WARNING` on stderr and `signed: NO (--allow-unsigned)` in `db status` and in every report's
 provenance; a signature that is present and does not verify is refused regardless, because

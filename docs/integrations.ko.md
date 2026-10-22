@@ -77,8 +77,10 @@ SBOM을 게이팅하십시오.
 발행된 아티팩트는 서명되어 있고(D137), `db update`는 무엇이든 설치하기 전에 바이너리에 내장된
 키로 서명을 검증합니다 — 그래서 미러를 거쳐 파이프라인에 도착한 데이터베이스는 미러가 서명도
 함께 복사했을 때만 설치됩니다. 서명은 아티팩트 옆의 두 번째 태그 `sha256-<digest>.sig`입니다.
-태그를 이름으로 복사하는 미러(`crane copy`, `oras cp`, pull-through 캐시)는 이미 갖고 있고,
-아티팩트를 digest 로만 복사하는 미러는 갖고 있지 않아서, `db update --from <mirror>`는
+pull-through 캐시는 assay 가 그 태그를 이름으로 요청하므로 필요할 때 내줍니다. 태그 하나를
+복사해 채운 미러(`crane copy …:v9 <mirror>:v9`, `oras cp`)에는 없으니 서명 태그도 복사하세요
+(`crane copy ghcr.io/kun9497/assay-db:sha256-<digest>.sig <mirror>/assay-db:sha256-<digest>.sig`,
+또는 저장소에 `crane copy --all-tags`). 그것이 없으면 `db update --from <mirror>`는
 `is not signed` 와 복사해야 할 태그 이름을 내고 멈춥니다. `--allow-unsigned`는 그래도
 설치하되 stderr 에 `WARNING`을, `db status`와 모든 리포트의 provenance 에
 `signed: NO (--allow-unsigned)`를 남깁니다. 서명이 있는데 검증되지 않으면 플래그와 무관하게

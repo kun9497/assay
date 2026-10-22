@@ -33,6 +33,14 @@ import (
 // rather than a relabeled current one.
 func publishOldShapedArtifact(t *testing.T, ref string, schema int, advs []advisory.Advisory, ratings []advisory.Rating) {
 	t.Helper()
+	publishUnsignedOldShapedArtifact(t, ref, schema, advs, ratings)
+	signPublished(t, ref)
+}
+
+// publishUnsignedOldShapedArtifact is publishOldShapedArtifact without the
+// signature (D137).
+func publishUnsignedOldShapedArtifact(t *testing.T, ref string, schema int, advs []advisory.Advisory, ratings []advisory.Rating) {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "seed.db")
 	buildOldShapedSeed(t, path, advs, ratings, schema)
 
@@ -47,7 +55,6 @@ func publishOldShapedArtifact(t *testing.T, ref string, schema int, advs []advis
 	if err := remote.Write(mustRef(t, ref), img); err != nil {
 		t.Fatal(err)
 	}
-	signPublished(t, ref)
 }
 
 // TestPullSeed_FallsBackToThePreviousSchemaWhenTheCurrentTagDoesNotExistYet
@@ -304,5 +311,33 @@ func TestPullSeed_AttributesTheStalestSource(t *testing.T) {
 	want := "upstream data as of 2023-09-25 (stalest source: amazon; per-source dates: assay db status)"
 	if !strings.Contains(errOut.String(), want) {
 		t.Errorf("stderr = %q, want it to contain %q", errOut.String(), want)
+	}
+}
+
+// The schema-bump fallback verifies the artifact it fell back to: on a new
+// schema's first night the seed comes from :v<N-1>, and an unsigned one
+// there must be refused exactly as at the current tag (D137 PR 2 review --
+// every other fallback test publishes a signed previous schema, so a
+// verification skipped on this path was held by nothing).
+func TestPullSeed_FallbackToAnUnsignedPreviousSchemaIsRefused(t *testing.T) {
+	host := registryHost(t)
+	prevRef := fmt.Sprintf("%s/assay-db:v%d", host, store.SchemaVersion-1)
+	curRef := fmt.Sprintf("%s/assay-db:v%d", host, store.SchemaVersion)
+	publishUnsignedOldShapedArtifact(t, prevRef, store.SchemaVersion-1,
+		[]advisory.Advisory{{ID: "GHSA-old-unsigned", Database: "GHSA", Source: "osv",
+			Kind:     advisory.KindVulnerability,
+			Affected: []advisory.Affected{{Ecosystem: "Go", Name: "old"}}}},
+		nil)
+
+	dst := filepath.Join(t.TempDir(), "seed.db")
+	var out, errOut bytes.Buffer
+	if code := PullSeed(context.Background(), dst, curRef, &out, &errOut); code != 2 {
+		t.Fatalf("PullSeed falling back to an unsigned previous schema = %d, want 2 (stderr: %s)", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "the previous schema") || !strings.Contains(errOut.String(), "is not signed") {
+		t.Errorf("stderr does not say it fell back and refused the unsigned seed:\n%s", errOut.String())
+	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Error("an unsigned previous-schema seed was installed")
 	}
 }

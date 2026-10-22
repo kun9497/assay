@@ -394,12 +394,13 @@ gh workflow run db-sign.yml -f digest=sha256:…  # D137: db push 가 찍은 dig
 (`db-backfill.yml` 대신 로컬에서 돌린 backfill 슬라이스, 서명 이전의 D110 복구 seed)도 같습니다: push 한 뒤
 그 digest 로 `db-sign.yml` 을 띄우세요.
 
-**D137 두 절반 사이의 과도기.** 워크플로 셋이 `main` 에서 빌드해 pull 하므로 서명이 먼저(워크플로가 모든 push
-뒤 서명하고 자기 검사), 검증이 나중에 들어옵니다. 후반부가 머지되기 전까지는 *아무것도 서명 없는 아티팩트를
-거부하지 않습니다*: 잊은 `db-sign.yml` 디스패치나 실패한 서명 단계는 런의 빨간 자기 검사 단계로, 또는 태그를
-손으로 찾아야(`crane manifest ghcr.io/kun9497/assay-db:sha256-<digest>.sig`) 보입니다. 후반부는 현재
-`:v<schema>` 에 있는 digest 가 `.sig` 태그를 갖기 전에는 머지하면 안 됩니다 — 아니면 모든 워크플로 빌드와
-모든 고객의 `db update` 가 한꺼번에 실패합니다.
+**태그 위의 서명 없는 digest 는 장애입니다.** D137 후반부부터 `db update` 와 `db build --seed` 는 `.sig`
+태그가 없는 아티팩트를 거부합니다. 그래서 실패한 서명 단계(워크플로에서 세 번 재시도)나 손 push 뒤 잊은
+`db-sign.yml` 디스패치는 digest 가 서명될 때까지 모든 고객의 `db update` 와 다음 나이틀리의 seed 빌드를
+멈춥니다. 빨간 서명 단계나 자기 검사 단계는 결코 겉치레가 아닙니다: 런이 출력한 digest 로 `db-sign.yml` 을
+띄우고 태그가 생겼는지 확인하세요(`crane manifest ghcr.io/kun9497/assay-db:sha256-<digest>.sig`). 후반부가
+머지되기 전(2026-10-22)에는 아무것도 거부하지 않는 상태로 서명만 하루 돌아서, 어떤 바이너리가 요구하기 전에
+첫 서명된 digest 를 게시할 수 있었습니다.
 
 **첫 패스는 범위를 제한하세요. 전체 피드로 가지 마십시오.** 제한 없는 빌드는 약 7시간이고 재개
 지점이 없습니다 — `db build`는 임시 데이터베이스를 만들어 마지막에만 설치하므로, 5시간째의 실패가

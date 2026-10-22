@@ -183,7 +183,9 @@ db build flags:
                   what lets a scheduled build fit a six-hour job cap instead
                   of repeating the seven-hour full pass. A seed that cannot
                   be read fails the build rather than silently building from
-                  empty.
+                  empty. The seed's signature is verified like db update's,
+                  with no opt-out (D137): a hand-pushed seed is signed by
+                  dispatching db-sign.yml with its digest.
   --ratings-only  Skip the advisory providers entirely and carry the seed's
                   advisories forward VERBATIM (a file copy, not a rebuild),
                   re-running only the rating annotators below. Requires
