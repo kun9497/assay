@@ -212,4 +212,34 @@ jobs:
         # passing gate still exits 0.
         run: exit ${{ steps.gate.outputs.exit_code || 2 }}
       - name: Publish
-        run: ./bin/assay db push ${{ steps.ref.outputs.ref }}
+        id: push
+        # db push prints `repo@sha256:…` alone on stdout: the digest the
+        # signing step below targets. Signing by digest, never by the tag
+        # -- the .sig tag is derived from the digest, and a tag races the
+        # next push.
+        run: |
+          set -o pipefail
+          out=$(./bin/assay db push ${{ steps.ref.outputs.ref }} | tail -n1)
+          echo "$out"
+          echo "pushed=$out" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup-cosign
+      - name: Sign the pushed digest (D137)
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        # --tlog-upload=false: verification never consults Rekor, and a
+        # Rekor outage must not fail a publish.
+        run: cosign sign --key env://COSIGN_PRIVATE_KEY --tlog-upload=false --yes "${{ steps.push.outputs.pushed }}"
+      - name: Self-check the signature against the committed public keys
+        # Reads the same sha256-<digest>.sig tag the Go verifier reads, with
+        # the same pinned cosign. A failure here is loud: the artifact is
+        # live but unsigned, and every db update built after D137's call
+        # sites will refuse it until db-sign.yml is dispatched.
+        run: |
+          ok=0
+          for k in internal/dbcmd/trust/keys/*.pub; do
+            if cosign verify --key "$k" --insecure-ignore-tlog=true "${{ steps.push.outputs.pushed }}" >/dev/null 2>&1; then
+              echo "verified under $(basename "$k")"; ok=1; break
+            fi
+          done
+          [ "$ok" = 1 ] || { echo "::error::the signature just written verifies under no committed key"; exit 2; }

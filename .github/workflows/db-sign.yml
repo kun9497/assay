@@ -1,0 +1,66 @@
+# Sign one already-published database digest with the project key (D137).
+#
+# The only way a signature is produced outside the two publishing workflows,
+# and the human never holds the key: the schema-bump bootstrap pushes :vN by
+# hand and then dispatches this with the digest `db push` printed; a D110
+# recovery seed that predates signing is signed here before `db build --seed`
+# will accept it; after a key rotation the current digest is re-signed here
+# with the new key.
+#
+#   gh workflow run db-sign.yml -f digest=sha256:<64 hex>
+name: sign artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      digest:
+        description: "manifest digest to sign, sha256:<64 hex> (what `db push` printed)"
+        required: true
+      repository:
+        description: "repository the digest lives in"
+        required: false
+        default: "ghcr.io/kun9497/assay-db"
+
+concurrency:
+  group: db-artifact-writer
+  queue: max
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the digest's shape
+        # A tag or a bare hex here would sign the wrong thing or nothing;
+        # refused before any credential is used.
+        run: |
+          case "${{ inputs.digest }}" in
+            sha256:[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+            *) echo "::error::digest must be sha256:<64 hex>, got '${{ inputs.digest }}'"; exit 2 ;;
+          esac
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - uses: ./.github/actions/setup-cosign
+      - name: Sign by digest
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: cosign sign --key env://COSIGN_PRIVATE_KEY --tlog-upload=false --yes "${{ inputs.repository }}@${{ inputs.digest }}"
+      - name: Self-check against the committed public keys
+        # The same tag the Go verifier reads, with the same pinned cosign;
+        # a signature that does not verify under a committed key is a job
+        # failure, not a silent artifact.
+        run: |
+          ok=0
+          for k in internal/dbcmd/trust/keys/*.pub; do
+            if cosign verify --key "$k" --insecure-ignore-tlog=true "${{ inputs.repository }}@${{ inputs.digest }}" >/dev/null 2>&1; then
+              echo "verified under $(basename "$k")"; ok=1; break
+            fi
+          done
+          [ "$ok" = 1 ] || { echo "::error::the signature just written verifies under no committed key"; exit 2; }

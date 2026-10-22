@@ -71,4 +71,25 @@ jobs:
       - name: What the slice covered
         run: ./bin/assay db status
       - name: Publish
-        run: ./bin/assay db push ${{ steps.ref.outputs.ref }}
+        id: push
+        # See db-publish.yml: the digest db push prints is what gets signed.
+        run: |
+          set -o pipefail
+          out=$(./bin/assay db push ${{ steps.ref.outputs.ref }} | tail -n1)
+          echo "$out"
+          echo "pushed=$out" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup-cosign
+      - name: Sign the pushed digest (D137)
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: cosign sign --key env://COSIGN_PRIVATE_KEY --tlog-upload=false --yes "${{ steps.push.outputs.pushed }}"
+      - name: Self-check the signature against the committed public keys
+        run: |
+          ok=0
+          for k in internal/dbcmd/trust/keys/*.pub; do
+            if cosign verify --key "$k" --insecure-ignore-tlog=true "${{ steps.push.outputs.pushed }}" >/dev/null 2>&1; then
+              echo "verified under $(basename "$k")"; ok=1; break
+            fi
+          done
+          [ "$ok" = 1 ] || { echo "::error::the signature just written verifies under no committed key"; exit 2; }
