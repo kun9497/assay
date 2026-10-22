@@ -10,9 +10,9 @@ version: 2
 
 project_name: assay
 
-before:
-  hooks:
-    - go mod tidy
+# No `before: go mod tidy` hook (D137's review of this file): a release must
+# build the committed go.mod and go.sum, the ones CI tested -- a tidy at
+# release time could ship a dependency set no test run saw.
 
 builds:
   - id: assay
@@ -50,6 +50,27 @@ checksum:
   # One SHA256SUMS file the installer verifies the downloaded archive against.
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
   algorithm: sha256
+
+# D137: the checksums file is signed with the project key -- the same key
+# that signs the database artifact (internal/dbcmd/trust/keys/). install.sh
+# verifies this signature (openssl, or cosign) before it trusts a checksum;
+# `cosign verify-blob --key <keys/*.pub> --signature <sig>
+# --insecure-ignore-tlog <checksums>` verifies it by hand. Key-based and
+# off the transparency log, like the artifact's signature.
+signs:
+  - id: checksums
+    cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sig"
+    args:
+      - sign-blob
+      - --key
+      - env://COSIGN_PRIVATE_KEY
+      - --tlog-upload=false
+      - --yes
+      - --output-signature
+      - ${signature}
+      - ${artifact}
 
 snapshot:
   version_template: "{{ incpatch .Version }}-next"

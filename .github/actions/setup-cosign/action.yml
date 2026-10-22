@@ -1,0 +1,20 @@
+# Installs the cosign CLI the signing steps use (D137). One composite so the
+# three workflows that sign (db-publish, db-backfill, db-sign) and the
+# release job pin the same version in one place.
+#
+# Pinned to the v2.4 line on purpose: cosign v3.0.0 changed `sign`'s default
+# to the protobuf bundle stored as an OCI referrer, where nothing lands at
+# the sha256-<digest>.sig tag assay's verifier reads. Moving to that layout
+# is a later decision with its own verifier; until then a v3 here would make
+# every nightly look unsigned to `db update` while `cosign verify` passed.
+name: setup-cosign
+description: Install cosign v2.4.x (the legacy .sig tag layout assay verifies)
+
+runs:
+  using: composite
+  steps:
+    - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+      with:
+        cosign-release: "v2.4.3"
+    - shell: bash
+      run: cosign version

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -49,6 +50,35 @@ func pushable(t *testing.T, dataAsOf time.Time) string {
 // The whole point of the slice: a built database becomes something a
 // registry serves. Tested against go-containerregistry's own in-memory
 // registry, so this needs no network and no credentials.
+// D137: the publishing workflows capture stdout's last line and hand it to
+// `cosign sign` as `<repo>@sha256:<digest>` -- no tag, which the .sig tag
+// layout does not want, and nothing after it. Pinned here because the
+// signing step cannot tell a changed line from an unsigned artifact until
+// the self-check fails after the push.
+func TestPush_PrintsTheDigestAloneOnStdoutsLastLine(t *testing.T) {
+	srv := httptest.NewServer(registry.New())
+	defer srv.Close()
+	u, err := url.Parse(srv.URL)
+	host := must(t, u, err).Host
+	path := pushable(t, time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC))
+	var out, errOut bytes.Buffer
+	if code := Push(context.Background(), path, host+"/assay-db:v6", false, &out, &errOut); code != 0 {
+		t.Fatalf("Push = %d (stderr %s)", code, errOut.String())
+	}
+	// Exactly one trailing newline is removed, because the workflow's
+	// `| tail -n1` removes none: a blank line after the digest would hand
+	// `cosign sign` an empty reference (D137's review).
+	lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
+	last := lines[len(lines)-1]
+	want := regexp.MustCompile(`^` + regexp.QuoteMeta(host+"/assay-db") + `@sha256:[0-9a-f]{64}$`)
+	if !want.MatchString(last) {
+		t.Errorf("stdout's last line = %q, want <repo>@sha256:<64 hex> with no tag (stdout:\n%s)", last, out.String())
+	}
+	if strings.Contains(errOut.String(), "@sha256:") {
+		t.Errorf("the digest is on stderr too, where a `| tail -n1` capture does not look:\n%s", errOut.String())
+	}
+}
+
 func TestPush_WritesAPullableArtifact(t *testing.T) {
 	srv := httptest.NewServer(registry.New())
 	defer srv.Close()

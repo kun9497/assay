@@ -85,6 +85,10 @@ type DatabaseProvenance struct {
 type ArtifactProvenance struct {
 	Reference string `json:"reference"`
 	Digest    string `json:"digest"`
+	// SignedBy / Unverified mirror store.ArtifactRecord's (D137): the key
+	// that verified the database behind this verdict, or that none did.
+	SignedBy   string `json:"signedBy,omitempty"`
+	Unverified bool   `json:"unverified,omitempty"`
 }
 
 // SourceAsOf is one source's data-as-of. Failed says the source's last run did
@@ -119,7 +123,8 @@ func NewDatabaseProvenance(m store.Meta) *DatabaseProvenance {
 		Renamed: []RenamedKey{},
 	}
 	if art := m.Artifact; art != nil {
-		d.Artifact = &ArtifactProvenance{Reference: art.Reference, Digest: art.Digest}
+		d.Artifact = &ArtifactProvenance{Reference: art.Reference, Digest: art.Digest,
+			SignedBy: art.SignedBy, Unverified: art.Unverified}
 	}
 	names := make([]string, 0, len(m.Ratings))
 	for n := range m.Ratings {

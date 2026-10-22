@@ -865,6 +865,14 @@ func Status(dbPath string, stdout, stderr io.Writer) int {
 	// built locally, which names none rather than guessing.
 	if a := m.Artifact; a != nil {
 		fmt.Fprintf(stdout, "pulled:     %s@%s at %s\n", a.Reference, a.Digest, a.PulledAt.UTC().Format(time.RFC3339))
+		// D137: what verified it. A record with neither field predates
+		// signing and prints nothing rather than a guess either way.
+		switch {
+		case a.SignedBy != "":
+			fmt.Fprintf(stdout, "signed:     key %s\n", a.SignedBy)
+		case a.Unverified:
+			fmt.Fprintln(stdout, "signed:     NO (--allow-unsigned)")
+		}
 	}
 	// What this database covers decides which packages can be evaluated at
 	// all (D20). Without it here, coverage is discoverable only by running a

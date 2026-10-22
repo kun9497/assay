@@ -1,0 +1,83 @@
+# Sign one already-published database digest with the project key (D137).
+#
+# The only way a signature is produced outside the two publishing workflows,
+# and the human never holds the key: the schema-bump bootstrap pushes :vN by
+# hand and then dispatches this with the digest `db push` printed; a D110
+# recovery seed that predates signing is signed here before `db build --seed`
+# will accept it; after a key rotation the current digest is re-signed here
+# with the new key.
+#
+#   gh workflow run db-sign.yml -f digest=sha256:<64 hex>
+name: sign artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      digest:
+        description: "manifest digest to sign, sha256:<64 hex> (what `db push` printed)"
+        required: true
+      repository:
+        description: "repository the digest lives in"
+        required: false
+        default: "ghcr.io/kun9497/assay-db"
+
+concurrency:
+  group: db-artifact-writer
+  queue: max
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the inputs' shapes
+        # A tag or a bare hex here would sign the wrong thing or nothing;
+        # refused before any credential is used. Both inputs reach the
+        # shell through env, never by expression substitution into the
+        # script text (an input is dispatcher-written; the signing step
+        # holds the key).
+        env:
+          DIGEST: ${{ inputs.digest }}
+          REPOSITORY: ${{ inputs.repository }}
+        run: |
+          case "$REPOSITORY" in
+            ghcr.io/kun9497/assay-db) ;;
+            *) echo "::error::repository must be ghcr.io/kun9497/assay-db, got '$REPOSITORY'"; exit 2 ;;
+          esac
+          case "$DIGEST" in
+            sha256:[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+            *) echo "::error::digest must be sha256:<64 hex>, got '$DIGEST'"; exit 2 ;;
+          esac
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - uses: ./.github/actions/setup-cosign
+      - name: Sign by digest
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+          DIGEST: ${{ inputs.digest }}
+          REPOSITORY: ${{ inputs.repository }}
+        run: cosign sign --key env://COSIGN_PRIVATE_KEY --tlog-upload=false --yes "$REPOSITORY@$DIGEST"
+      - name: Self-check against the committed public keys
+        # The same tag the Go verifier reads, with the same pinned cosign;
+        # a signature that does not verify under a committed key is a job
+        # failure, not a silent artifact. cosign's own diagnostics are kept
+        # for the failure branch, so the log says which of "no signature",
+        # "wrong key" or "cannot reach the registry" it was.
+        env:
+          DIGEST: ${{ inputs.digest }}
+          REPOSITORY: ${{ inputs.repository }}
+        run: |
+          ok=0
+          for k in internal/dbcmd/trust/keys/*.pub; do
+            if cosign verify --key "$k" --insecure-ignore-tlog=true "$REPOSITORY@$DIGEST" >"/tmp/verify-$(basename "$k").log" 2>&1; then
+              echo "verified under $(basename "$k")"; ok=1; break
+            fi
+          done
+          [ "$ok" = 1 ] || { cat /tmp/verify-*.log; echo "::error::the signature just written verifies under no committed key"; exit 2; }

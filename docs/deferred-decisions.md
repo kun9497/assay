@@ -1404,7 +1404,25 @@ mechanism.
 
 ---
 
-### Signing and provenance for the published database artifact
+### ~~Signing and provenance for the published database artifact~~ — resolved in D137 (2026-10-22; signing shipped first, verification follows in its second PR)
+
+**Closed in two halves.** Signing (workflows, release, installer, the verifier package and
+its record fields) is the first PR; the `db update` / `db build --seed` call sites that
+*refuse* an unsigned artifact are the second, merged only once the published digest carries
+its signature — until then nothing refuses, by design (`docs/DESIGN.md`, "Interim, between
+D137's two halves"). The revisit trigger below fired on 2026-08-28, when the package went public and
+`dbcmd.DefaultRef` began trusting it by default; the 2026-10-22 readiness assessment named it
+the first gap. D137 signs the pushed artifact's digest with a project-held ECDSA P-256 key
+(cosign v2.4, key-based, no transparency log) after every `db push`, and `db update` /
+`db build --seed` verify the `sha256-<digest>.sig` tag with the Go standard library against
+keys embedded in the binary — exit 2 on *unsigned*, *does not verify* or a transport failure,
+each a distinct message; `--allow-unsigned` is explicit and recorded. Keyless/Sigstore was
+prototyped and rejected on measurement (two new modules, a 2.8× binary, a TUF trusted root
+that does not work offline in `sigstore-go` v1.3.0, and an identity tied to the workflow's
+file path). Release binaries get the same key over their checksums and GitHub's build
+provenance; the installer embeds the keys and is pinned by commit SHA. Design:
+`docs/superpowers/specs/2026-10-22-artifact-signing-design.md`. Scan attestations (the last
+paragraph) remain undecided and keep this entry's reasoning. The original entry follows.
 
 The artifact `assay db push` publishes, and `assay db update` / `assay db build --seed` pull,
 is not signed and carries no build provenance (SLSA or otherwise).

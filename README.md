@@ -23,12 +23,17 @@ advisory data is the reason it exists rather than reusing grype.
 
 ```bash
 # Prebuilt binary (Linux/macOS, amd64/arm64) — onto your PATH
-curl -sSfL https://raw.githubusercontent.com/kun9497/assay/main/install.sh | sudo sh -s -- -b /usr/local/bin
+curl -sSfL https://raw.githubusercontent.com/kun9497/assay/6221badd9bdb65e22cc99e842803a557c721e756/install.sh | sudo sh -s -- -b /usr/local/bin
 ```
 
-The script picks the right release asset for your OS/arch and verifies its checksum.
-Without `-b` it installs to `./bin` (no sudo needed — add it to your PATH yourself);
-pin a version with `-s -- vX.Y.Z`.
+The script embeds the project's signing key and verifies the release's checksums
+signature with `openssl` (or `cosign`) before the checksum, then picks the right asset for
+your OS/arch. The line names the commit the latest release was built from — never a branch
+or a tag, which can move — and the release job updates it. Without `-b` it installs to
+`./bin` (no sudo needed — add it to your PATH yourself); `-s -- vX.Y.Z` installs another
+release, verified against the same keys. A release whose checksums file carries no
+signature is refused, never installed on the checksum alone: v0.10.0 is the first signed
+release, so anything older goes through `go install` or the release page.
 
 <details>
 <summary>Other ways to install</summary>

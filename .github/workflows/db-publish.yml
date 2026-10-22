@@ -85,6 +85,23 @@ jobs:
       # Set up before the build, so a scanner that fails to install fails
       # the job in a minute rather than after a thirty-minute build.
       - uses: ./.github/actions/setup-scanners
+      # D137: cosign and the signing secret are checked BEFORE the build,
+      # for the reason setup-scanners is: a transient in the installer or a
+      # secret rotated to a key the binary does not yet trust must fail here,
+      # not after the artifact is live and unsigned.
+      - uses: ./.github/actions/setup-cosign
+      - name: Pre-flight the signing key against the committed public keys (D137)
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          cosign public-key --key env://COSIGN_PRIVATE_KEY >/tmp/signing.pub
+          want=$(openssl pkey -pubin -in /tmp/signing.pub -outform DER | sha256sum | cut -c1-16)
+          for k in internal/dbcmd/trust/keys/*.pub; do
+            have=$(openssl pkey -pubin -in "$k" -outform DER | sha256sum | cut -c1-16)
+            [ "$have" = "$want" ] && { echo "signing key is $(basename "$k")"; exit 0; }
+          done
+          echo "::error::COSIGN_PRIVATE_KEY's public half ($want) matches no committed key under internal/dbcmd/trust/keys/"; exit 2
       - name: Log in to ghcr.io
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
       - name: Resolve the artifact reference
@@ -212,4 +229,37 @@ jobs:
         # passing gate still exits 0.
         run: exit ${{ steps.gate.outputs.exit_code || 2 }}
       - name: Publish
-        run: ./bin/assay db push ${{ steps.ref.outputs.ref }}
+        id: push
+        # db push prints `repo@sha256:…` alone on stdout: the digest the
+        # signing step below targets. Signing by digest, never by the tag
+        # -- the .sig tag is derived from the digest, and a tag races the
+        # next push.
+        run: |
+          set -o pipefail
+          out=$(./bin/assay db push ${{ steps.ref.outputs.ref }} | tail -n1)
+          echo "$out"
+          echo "pushed=$out" >> "$GITHUB_OUTPUT"
+      - name: Sign the pushed digest (D137)
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+          PUSHED: ${{ steps.push.outputs.pushed }}
+        # --tlog-upload=false: verification never consults Rekor, and a
+        # Rekor outage must not fail a publish.
+        run: cosign sign --key env://COSIGN_PRIVATE_KEY --tlog-upload=false --yes "$PUSHED"
+      - name: Self-check the signature against the committed public keys
+        # Reads the same sha256-<digest>.sig tag the Go verifier reads, with
+        # the same pinned cosign. A failure here is loud: the artifact is
+        # live but unsigned, and every db update built after D137's call
+        # sites will refuse it until db-sign.yml is dispatched. cosign's own
+        # diagnostics are kept for the failure branch.
+        env:
+          PUSHED: ${{ steps.push.outputs.pushed }}
+        run: |
+          ok=0
+          for k in internal/dbcmd/trust/keys/*.pub; do
+            if cosign verify --key "$k" --insecure-ignore-tlog=true "$PUSHED" >"/tmp/verify-$(basename "$k").log" 2>&1; then
+              echo "verified under $(basename "$k")"; ok=1; break
+            fi
+          done
+          [ "$ok" = 1 ] || { cat /tmp/verify-*.log; echo "::error::the signature just written verifies under no committed key"; exit 2; }
