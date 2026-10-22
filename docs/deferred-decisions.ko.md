@@ -21,16 +21,22 @@ CVSS 9.8 은 누군가 NVD 에 물어볼 때까지 모든 아티팩트 아래 �
 철회된 점수와 철회된 적 없는 점수를 구분할 수 없다 — 그리고 첫 측정은 그것을 고치는 바로 그 런이다.
 
 **처방.** `NVD_SINCE_DAYS=120` — API 최대 창이고 seed 체인이 시작된 2026-08-14 보다 뒤로 닿는다 — 으로
-빌드 한 번 하면 그 이후 수정된 모든 CVE 가 다시 돌아와 낡은 것이 철회된다. 진행줄에 `N returned without a
-score (rating withdrawn)` 이 찍히고 빌드는 제거한 저장 수를 찍는다; `db push` 는 정확히 그 수
+빌드 한 번 하면 그 이후 수정된 모든 CVE 가 다시 돌아와 낡은 것이 철회된다. 실행 경로는 이미 있다:
+`.github/workflows/db-backfill.yml`(`since_days=120`, `until_days=0`)이 정확히 그 변수로
+`db build --seed <published> --ratings-only` 를 돌리고 같은 게이트를 거쳐 push 한다. 진행줄에
+`N returned without a score (rating withdrawn)` 이 찍히고 빌드는 `NVD: N stored rating(s) withdrawn`
+을 — 0 일 때도 — 찍으므로, 낡은 것을 하나도 못 찾은 런도 침묵이 아니라 측정이다; `db push` 는 정확히 그 수
 (`RatingWithdrawals`)만큼의 감소를 허용하고 더 큰 감소는 거부하므로, 이 런이 잃어버린 seed 와 혼동될 수
 없다. ratings-only 빌드(`--ratings-only`, D66)면 충분하다: advisory 는 어차피 seed 의 것이다. 비용: 키
 없는 속도의 120일 NVD 창, 수십 분, D58 의 재시도 포함; 2026-10-22 재실행은 그렇게 `INTERNAL_ERROR`
 페이지 다섯 개를 넘겼다.
 
-**재검토 계기.** 그 런 자체. 그 뒤로는 나이틀리의 자기 창이 따라잡는다; 두 번째 복구는 NVD 를 끈 채
-체크포인트가 120일 넘게 뒤처질 만큼 오래 빌드가 돈 경우에만 필요하며, 그것은 D65 의 창 clamp 가 이미
-경고한다.
+**재검토 계기.** 그 런 자체이며, 두 번 필요할 것으로 보지 않는다. NVD 를 끄고 도는 나이틀리는 seed 의
+체크포인트를 손대지 않고 이월하고, 다음에 NVD 를 켜면 resume 경로가 그 체크포인트 이후 전부를 ≤120일
+창으로 이어 붙여 요청하므로(`ResumeFrom`; `resume_test.go` 가 250일 공백에 창 3개를 단언) 공백은 통째로
+다시 요청되고 철회도 그때 적용된다. 코드가 닿지 못하는 것은 기록된 체크포인트가 실제로 가진 rating 보다
+나중인 seed — D60 이 개수를 지키는 손으로 bootstrap 한 모양 — 뿐이고, 그 경우에만 이 런이 한 번 더
+필요하다.
 
 ### ~~발행된 데이터베이스가 NVD 등급 352,000건을 잃었고 스스로 회복하지 않는다~~ — 2026-08-14 전량 복구 (D65, D66)
 

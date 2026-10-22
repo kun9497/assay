@@ -24,16 +24,24 @@ that fixes it.
 
 **The remedy.** One build with `NVD_SINCE_DAYS=120` — the API's maximum window, which reaches
 behind the 2026-08-14 start of the seed chain — re-returns every CVE modified since and
-withdraws the stale ones. Its progress line prints `N returned without a score (rating
-withdrawn)` and the build prints the stored count it removed; `db push` admits the drop by
-exactly that number (`RatingWithdrawals`) and refuses anything larger, so the run cannot be
-confused with a lost seed. A ratings-only build (`--ratings-only`, D66) is enough: the
-advisories are the seed's either way. Cost: a 120-day NVD window at the keyless pace, tens of
-minutes, with D58's retries; the 2026-10-22 rerun survived five `INTERNAL_ERROR` pages that way.
+withdraws the stale ones. The runnable path exists: `.github/workflows/db-backfill.yml`
+(`since_days=120`, `until_days=0`) runs `db build --seed <published> --ratings-only` with
+exactly those variables and pushes through the same guard. Its progress line prints
+`N returned without a score (rating withdrawn)` and the build prints `NVD: N stored rating(s)
+withdrawn` — its zero too, so a run that found nothing stale is a measurement rather than a
+silence; `db push` admits the drop by exactly that number (`RatingWithdrawals`) and refuses
+anything larger, so the run cannot be confused with a lost seed. A ratings-only build
+(`--ratings-only`, D66) is enough: the advisories are the seed's either way. Cost: a 120-day NVD
+window at the keyless pace, tens of minutes, with D58's retries; the 2026-10-22 rerun survived
+five `INTERNAL_ERROR` pages that way.
 
-**Revisit trigger.** The run itself. After it, the nightly's own window keeps up; a second
-reconciliation is needed only if a build ever runs with NVD disabled long enough for its
-checkpoint to fall more than 120 days behind, which D65's window clamp already warns about.
+**Revisit trigger.** The run itself; it is not expected to be needed twice. A nightly that
+runs with NVD disabled carries the seed's checkpoint forward untouched, and when NVD is next
+enabled the resume path asks for everything since that checkpoint in chained ≤120-day windows
+(`ResumeFrom`; `resume_test.go` asserts three windows for a 250-day gap), so any gap is
+re-requested whole and the withdrawals land then. What the code cannot reach is a seed whose
+recorded checkpoint is later than the ratings it actually holds — the hand-bootstrapped shape
+D60 guards the count of — and that would need this run again, once.
 
 ### ~~The published database lost 352,000 NVD ratings and will not recover them on its own~~ — recovered in full, 2026-08-14 (D65, D66)
 

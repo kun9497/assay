@@ -5809,7 +5809,10 @@ a seed, zeroed on every seed copy including a ratings-only build's. `db push` re
 `RatingWithdrawals` on the candidate (derived from the database, never an annotation) and lets
 a source's count drop by exactly that many — and never to zero, whatever the withdrawals say.
 The progress line says `N returned without a score (rating withdrawn)`, and the build prints
-the stored count it removed.
+the stored count it removed — its zero too, so a reconciliation run that found nothing is a
+measurement and not a silence. The real provider's satisfaction of the interface is held at
+compile time (`var _ provider.WithdrawingAnnotator = (*Provider)(nil)`), because the dbcmd
+side is tested with a fake and the nvd side with a direct call, and nothing else bound them.
 
 **Why.** A seeded build carries NVD's ratings forward (D66). A delta that returned a CVE with
 `metrics={}` converted to nothing and emitted nothing, so the seed's CVSS 9.8 for it rode
@@ -5842,6 +5845,30 @@ the seed chain) re-returns every CVE modified since and withdraws the stale ones
 `withdrawn` line is the first measurement of how many there were, and the publish guard admits
 the drop by that number. Recorded in `docs/deferred-decisions.md` as the one operation this
 review leaves to run.
+
+### The branch's own review (wf_1e5a025c-6f2: three lenses, one refuter per finding — 16 found, 12 confirmed, 4 refuted)
+
+Three of the twelve were one defect: D135's walk compared `!archive.After(delta)` alone, so a
+zero *delta* date — a correction whose `current_release_date` was missing or unreadable — lost
+to any dated archive copy, and the archive's stale record came back labelled "kept": D129's
+hole through the undated side, while three comments and the decision text said the opposite.
+Fixed to skip on a zero either side, with the undated-correction case now a test in both
+providers. The rest: a SUSE 206 resume without `Last-Modified` had become fatal where the
+generation was already known from the 200 (now read as the same generation); the same-name
+D134 finding's Evidence named a version the package line never shows with no renderer
+disclosing why (the Evidence now says which source version was compared and which binary
+version was not); nothing bound `*nvd.Provider` to `provider.WithdrawingAnnotator` (a
+signature drift kept every direct call compiling and made `db build` withdraw nothing — now a
+compile-time assertion); the "stored rating(s) withdrawn" line printed only when non-zero, so
+the reconciliation's measurement could be a silence; the JSON `locations[].install` write and
+the "name equal to the folder is not an alias" guard were held by no test; the deferred entry's
+revisit trigger cited a clamp warning the resume path never emits; and `Location.Install`'s
+comment promised `--explain` something only the JSON report does. Refuted: a Red Hat resume
+hazard unreachable because the download loop breaks on the status the finding assumed it
+retried; two readings of the tolerance counting a rated-then-withdrawn CVE, which is the
+decision as written and cannot exceed the net drop on the real path; and "no runnable path"
+for the reconciliation, which `db-backfill.yml` is. Mutations after the round: 36 caught, one
+documented equivalent.
 
 ---
 

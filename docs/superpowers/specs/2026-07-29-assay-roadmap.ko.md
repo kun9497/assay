@@ -5587,7 +5587,10 @@ Rejected, 또는 Awaiting Analysis 로 되돌아간 — 를 돌려주면 철회�
 ratings-only 빌드를 포함한 모든 seed 복사에서 0 으로 만든다. `db push` 는 이것을 후보의
 `RatingWithdrawals`(데이터베이스에서 유도, 절대 annotation 이 아님)로 읽어 출처의 수가 정확히 그만큼
 줄어드는 것을 허용한다 — 철회가 뭐라 하든 0 까지는 절대 아니다. 진행줄은 `N returned without a score
-(rating withdrawn)` 을 찍고, 빌드는 제거한 저장 수를 찍는다.
+(rating withdrawn)` 을 찍고, 빌드는 제거한 저장 수를 찍는다 — 0 일 때도, 그래서 아무것도 못 찾은 복구
+런이 침묵이 아니라 측정이 된다. 실제 프로바이더가 인터페이스를 만족한다는 것은 컴파일 시점에 붙든다
+(`var _ provider.WithdrawingAnnotator = (*Provider)(nil)`): dbcmd 쪽은 fake 로, nvd 쪽은 직접 호출로
+테스트되고 둘을 묶는 것이 달리 없었기 때문이다.
 
 **이유.** seed 된 빌드는 NVD 의 rating 을 이월한다(D66). `metrics={}` 로 돌아온 CVE 를 delta 가
 아무것도 아닌 것으로 변환하고 아무것도 방출하지 않았으므로, seed 의 CVSS 9.8 이 체크포인트가 전진하는
@@ -5614,6 +5617,25 @@ flush 없이 철회, 덮어쓰기 소실.
 닿는다)으로 한 번 빌드하면 그 이후 수정된 모든 CVE 가 다시 돌아와 낡은 것이 철회된다; 그 `withdrawn`
 줄이 얼마나 있었는지의 첫 측정이고, 게시 게이트는 그 수만큼의 감소를 허용한다. 이 리뷰가 남겨 두는
 유일한 운영 작업으로 `docs/deferred-decisions.md` 에 기록했다.
+
+### 브랜치 자체의 리뷰 (wf_1e5a025c-6f2: 세 관점, 발견마다 반박자 하나 — 16 발견, 12 확인, 4 반박)
+
+열둘 중 셋은 하나의 결함이었다: D135 의 걷기가 `!archive.After(delta)` 만 비교해서, *delta* 쪽 날짜가
+0 이면 — `current_release_date` 가 없거나 읽을 수 없는 정정 — 날짜 있는 아카이브 사본 아무것에나 지고,
+아카이브의 낡은 레코드가 "kept" 라는 딱지를 달고 돌아왔다: 날짜 없는 쪽을 통한 D129 의 구멍이고, 주석
+셋과 결정 본문은 그 반대를 말하고 있었다. 어느 쪽이든 0 이면 건너뛰도록 고쳤고, 날짜 없는 정정 사례가
+이제 두 프로바이더 모두에 테스트로 있다. 나머지: `Last-Modified` 없는 SUSE 206 재개가 200 에서 이미
+세대를 알고 있는데도 치명적이 됐던 것(이제 같은 세대로 읽음); 이름이 같은 D134 finding 의 Evidence 가
+패키지 줄에 안 나오는 버전을 대면서 어느 렌더러도 이유를 밝히지 않던 것(이제 Evidence 가 어느 소스
+버전을 비교했고 어느 바이너리 버전은 아닌지 말함); `*nvd.Provider` 를 `provider.WithdrawingAnnotator`
+에 묶는 것이 없던 것(시그니처가 어긋나도 직접 호출은 전부 컴파일돼 `db build` 가 아무것도 철회하지
+않게 됨 — 이제 컴파일 시점 단언); "stored rating(s) withdrawn" 줄이 0 이 아닐 때만 찍혀 복구 런의 측정이
+침묵일 수 있던 것; JSON 의 `locations[].install` 쓰기와 "폴더와 같은 이름은 별칭이 아님" 게이트를 붙드는
+테스트가 없던 것; deferred 항목의 재검토 계기가 resume 경로가 절대 내지 않는 clamp 경고를 인용한 것;
+`Location.Install` 의 주석이 JSON 리포트만 하는 일을 `--explain` 에 약속한 것. 반박된 것: 발견이
+재시도한다고 가정한 상태에서 다운로드 루프가 멈추므로 닿을 수 없는 Red Hat 재개 위험; rating 됐다
+철회된 CVE 를 허용치가 센다는 두 가지 읽기 — 쓰인 대로의 결정이고 실제 경로에서 순감소를 넘을 수 없음;
+복구의 "실행 경로 없음" — `db-backfill.yml` 이 그것이다. 라운드 뒤 변이: 36 잡힘, 기록된 동치 1.
 
 ---
 

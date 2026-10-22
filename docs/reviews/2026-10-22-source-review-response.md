@@ -61,7 +61,29 @@ Mutation testing, one line changed at a time with the suite as the oracle, after
 | #4 | always skip; never skip; delta revision zeroed (SUSE and Red Hat); regeneration check removed (both); delta cutoff ignoring the GET | 8 caught |
 | #5 | every withdrawal counted; seed's count kept (two copy paths); guard ignoring withdrawals; guard allowing zero; artifact view dropping them; NVD never withdrawing; `db build` ignoring the interface; store always reporting existence; withdraw without flushing; override lost | 11 caught |
 
-Totals: 29 caught, 1 documented equivalent, 0 unexplained survivors.
+Totals after the first round: 29 caught, 1 documented equivalent, 0 unexplained survivors.
+
+**The branch's own adversarial review** (three lenses — correctness, test adequacy, design
+consistency — each finding handed to an independent refuter; 16 found, 12 confirmed, 4
+refuted) was folded in before this document was finalised:
+
+| Confirmed | Fix |
+|---|---|
+| D135 compared `!archive.After(delta)` alone, so an undated delta copy (missing or unreadable `current_release_date`) lost to any dated archive copy and the stale record came back "kept" — D129's hole through the undated side, contradicting the decision text (three findings, one defect) | skip on a zero date on either side; the undated-correction case is a test in both providers |
+| a SUSE 206 resume without `Last-Modified` had become fatal although the generation was known from the 200 | read as the same generation; a test with a header-less 206 |
+| the same-name D134 finding's Evidence named a version the package line never shows, and no renderer disclosed why | the Evidence now says which source version was compared and which binary version was not; asserted, and asserted absent on a binary-version comparison |
+| nothing bound `*nvd.Provider` to `provider.WithdrawingAnnotator` — a signature drift kept every direct call compiling and `db build` would withdraw nothing | compile-time assertion |
+| the "stored rating(s) withdrawn" line printed only when non-zero, so a reconciliation finding nothing was indistinguishable from the path not running | printed for a withdrawing annotator always; the zero line is asserted |
+| the JSON `locations[].install` write, and the "a `name` equal to the folder is not an alias" guard, were held by no test | both asserted through `Run` and `Parse` |
+| the deferred entry's revisit trigger cited a window-clamp warning the resume path never emits, for a gap the resume path already re-requests whole | rewritten (EN/KO) to the resume behaviour and the one shape it cannot reach |
+| `Location.Install`'s comment promised `--explain` what only the JSON report does | comment corrected |
+
+Refuted (and why): a Red Hat resume hazard that needs a retried status the download loop
+actually breaks on; two readings of the tolerance counting a CVE rated then withdrawn in one
+run, which is D136 as written and cannot exceed the net drop on the real path; and "no runnable
+path" for the reconciliation, which `.github/workflows/db-backfill.yml` is.
+
+Totals after the round: 36 caught, 1 documented equivalent, 0 unexplained survivors.
 
 ## 3. Effect on existing behaviour, and what remains uncertain
 
