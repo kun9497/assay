@@ -380,8 +380,15 @@ KISA 사이트는 공공누리 표시 없이 모든 권리를 보유하고 있�
 ```bash
 NVD_ENABLE=1 NVD_SINCE_DAYS=30 assay db build   # 27분, 측정값
 assay db status                                 # `ratings: NVD (…)`가 0이 아닌지 확인
-assay db push ghcr.io/kun9497/assay-db:v8       # 압축 약 6.8 MB
+assay db push ghcr.io/kun9497/assay-db:v8       # 압축 약 6.8 MB, repo@sha256:… 를 찍음
+gh workflow run db-sign.yml -f digest=sha256:…  # D137: db push 가 찍은 digest 에 서명
 ```
+
+그 뒤로는 예약 워크플로가 스스로 최신으로 유지하고 — push 하는 것에 서명도 합니다. 손으로 push 한
+부트스트랩은 아무것도 자동으로 서명하지 않는 유일한 아티팩트입니다: `db-sign.yml` 이 저장소의 키로 게시된
+어떤 digest 에든 서명하고, 그것이 돌기 전에는 새 태그에 대한 첫 `db update` 나 seed 빌드가 거부합니다.
+손으로 push 한 다른 아티팩트(`db-backfill.yml` 대신 로컬에서 돌린 backfill 슬라이스, 서명 이전의 D110 복구
+seed)도 같습니다: push 한 뒤 그 digest 로 `db-sign.yml` 을 띄우세요.
 
 **첫 패스는 범위를 제한하세요. 전체 피드로 가지 마십시오.** 제한 없는 빌드는 약 7시간이고 재개
 지점이 없습니다 — `db build`는 임시 데이터베이스를 만들어 마지막에만 설치하므로, 5시간째의 실패가
@@ -768,7 +775,8 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       않고, 돌지 않은 provider는 아무것도 동결하지 않으며, 다시 나타난 키는 치유된다. ghcr
       스냅샷 세 개로 측정: bullseye의 LTS가 끝나며(2026-08-31) 키는 남은 채
       `Debian:11`이 46,365개 항목 중 43,802개를 잃었고 — 08-30 digest에서 한 번 seed해서
-      복구했다. 동결된 키는 `Provenance.Frozen`을 지니고, 모든 renderer와 `db status`가
+      복구했다(D137 이후 그런 복구 seed 는 먼저 서명한다: `gh workflow run db-sign.yml -f
+      digest=…`, 아니면 `db build --seed` 가 거부한다). 동결된 키는 `Provenance.Frozen`을 지니고, 모든 renderer와 `db status`가
       이를 공개하며, 가드에는 예외가 필요 없다.
 - [x] 읽지 못한 매니페스트가 target 게이트와 모든 renderer에 닿음 (D109) — parse에
       실패한 lockfile이나 walk가 들어갈 수 없었던 subtree(#136)가 이제
