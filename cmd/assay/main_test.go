@@ -280,6 +280,35 @@ func TestParseScanArgs(t *testing.T) {
 		}
 	})
 
+	// strconv.ParseFloat accepts "NaN" and the infinities, and NaN compares
+	// false against everything -- so `v < 0 || v > 1` let it through and the
+	// `score >= threshold` gate downstream never fired: a flag the user set,
+	// with the finding printed, and exit 0 (2026-10-22 external review, #6).
+	t.Run("--fail-on-epss rejects NaN and the infinities", func(t *testing.T) {
+		for _, v := range []string{"NaN", "nan", "+Inf", "-Inf", "Infinity"} {
+			_, _, err := parseScanArgs([]string{"alpine:3.19", "--fail-on-epss=" + v})
+			if err == nil {
+				t.Errorf("--fail-on-epss=%s: err = nil, want an error - a threshold that compares false against every score silently disables the gate", v)
+				continue
+			}
+			if !strings.Contains(err.Error(), "--fail-on-epss") || !strings.Contains(err.Error(), v) {
+				t.Errorf("--fail-on-epss=%s: err = %q, want it to name the flag and the value", v, err)
+			}
+		}
+	})
+
+	// 1 is the other real boundary ("fail only on a certainty"); the NaN
+	// rejection must not be written as a range check that loses it.
+	t.Run("--fail-on-epss=1 is a valid boundary", func(t *testing.T) {
+		_, opts, err := parseScanArgs([]string{"alpine:3.19", "--fail-on-epss=1"})
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if opts.FailOnEPSS == nil || *opts.FailOnEPSS != 1 {
+			t.Errorf("opts.FailOnEPSS = %v, want 1", opts.FailOnEPSS)
+		}
+	})
+
 	// The same "the user thought they set a threshold but did not" shape
 	// setFailOn's own repeat-rejection guards against.
 	t.Run("a repeated --fail-on-epss is rejected, not silently last-wins", func(t *testing.T) {
