@@ -81,6 +81,7 @@ func Parse(r io.Reader) (pkgmeta.Target, cyclonedx.Stats, error) {
 	var stats cyclonedx.Stats
 
 	rootID := findRootPackageID(doc)
+	srcOf := sourceRPMOf(doc)
 
 	for _, p := range doc.Packages {
 		if rootID != "" && p.SPDXID == rootID {
@@ -92,7 +93,7 @@ func Parse(r io.Reader) (pkgmeta.Target, cyclonedx.Stats, error) {
 			// the denominator.
 			continue
 		}
-		catalogPackage(p, &target, &stats)
+		catalogPackage(p, srcOf[p.SPDXID], &target, &stats)
 	}
 	stats.DocumentNamespace = doc.DocumentNamespace
 	return target, stats, nil
@@ -112,13 +113,65 @@ func findRootPackageID(doc document) string {
 	return ""
 }
 
+// sourceRPMOf maps a package's SPDXID to the name of the source rpm it was
+// built from, read from the document's relationships (2026-10-22 audit, A3;
+// D143). Red Hat's own SBOMs write the D8 binary->source link this way and
+// not as a purl qualifier: the source rpm is its own package, its purl
+// carrying `arch=src`, and `SRC GENERATES BIN` joins them. SPDX defines
+// `BIN GENERATED_FROM SRC` as the same relation, and both are read. Measured
+// on Red Hat's rhel-9.6.z product SBOM (2026-10-23): 44,206 of 44,854 binary
+// rpms reachable this way, 970 carrying an `upstream` qualifier.
+//
+// Only an edge whose source end is an rpm with `arch=src` counts. A source
+// rpm also GENERATES the cargo, npm and Go packages it bundles, and a binary
+// rpm GENERATES Go and NuGet modules; catalogPackage applies the result to
+// rpm candidates alone, so none of those inherits an rpm name.
+func sourceRPMOf(doc document) map[string]string {
+	srcName := make(map[string]string)
+	for _, p := range doc.Packages {
+		for _, ref := range p.ExternalRefs {
+			if ref.ReferenceType != "purl" {
+				continue
+			}
+			parsed, err := pkgmeta.ParsePURL(ref.ReferenceLocator)
+			if err != nil || parsed.Type != "rpm" || parsed.Qualifiers["arch"] != "src" || parsed.Name == "" {
+				continue
+			}
+			srcName[p.SPDXID] = parsed.Name
+			break
+		}
+	}
+	out := make(map[string]string)
+	for _, r := range doc.Relationships {
+		var src, bin string
+		switch r.RelationshipType {
+		case "GENERATES":
+			src, bin = r.SPDXElementID, r.RelatedSPDXElement
+		case "GENERATED_FROM":
+			src, bin = r.RelatedSPDXElement, r.SPDXElementID
+		default:
+			continue
+		}
+		if name, ok := srcName[src]; ok {
+			if _, done := out[bin]; !done {
+				out[bin] = name
+			}
+		}
+	}
+	return out
+}
+
 // catalogPackage turns one SPDX package entry into zero or more
 // pkgmeta.Package values. "Zero or more" rather than "zero or one" because a
 // single SPDX package can carry several purls — Red Hat's own SBOMs emit one
 // per repository the package is published from — which resolve, dedupe, and
 // land as one entry the overwhelming majority of the time, but the shape
 // itself does not guarantee exactly one.
-func catalogPackage(p pkg, target *pkgmeta.Target, stats *cyclonedx.Stats) {
+//
+// relSource is the source rpm name sourceRPMOf found for this package, or "".
+// It is used only for an rpm candidate whose own purl named no source: an
+// explicit `upstream` qualifier is the more specific statement and wins.
+func catalogPackage(p pkg, relSource string, target *pkgmeta.Target, stats *cyclonedx.Stats) {
 	stats.Components++
 
 	var purls []string
@@ -153,6 +206,9 @@ func catalogPackage(p pkg, target *pkgmeta.Target, stats *cyclonedx.Stats) {
 		candidate, status := resolvePURL(parsed, raw)
 		switch status {
 		case statusOK:
+			if candidate.Type == "rpm" && candidate.Source == nil && relSource != "" {
+				candidate.Source = &pkgmeta.SourcePackage{Name: relSource}
+			}
 			key := tuple{candidate.Ecosystem, candidate.Name, candidate.Version}
 			if !seen[key] {
 				seen[key] = true
