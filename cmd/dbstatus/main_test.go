@@ -210,3 +210,27 @@ func TestRun_RejectsAnUnknownResult(t *testing.T) {
 		t.Errorf("run with -result maybe = %d, want 2", code)
 	}
 }
+
+// lastRun and lastSuccess are the nightly publish's alone. A db-sign run
+// (dispatched by hand to fix an unsigned digest) refreshes the artifact's
+// description -- so `signed` turns true at once -- but must not move
+// lastSuccess, or one manual success would hide a week of failed nightlies
+// from the monitor that alerts on it.
+func TestRun_OnlyDBPublishMovesTheRunFields(t *testing.T) {
+	key := trusttest.NewKey(t)
+	trustKey(t, key)
+	fixedNow(t, t0)
+	ref, _ := publish(t, key)
+	before := t0.Add(-72 * time.Hour)
+	nightly := &Run{Workflow: "db-publish", Result: "failure", FinishedAt: before, URL: "n"}
+	good := &Run{Workflow: "db-publish", Result: "success", FinishedAt: before.Add(-24 * time.Hour), URL: "g"}
+	prev := writePrev(t, Status{SchemaVersion: 1, LastRun: nightly, LastSuccess: good})
+
+	s, _ := runStatus(t, "-ref", ref, "-prev", prev, "-workflow", "db-sign", "-result", "success", "-run-url", "s")
+	if s.LastRun == nil || s.LastRun.URL != "n" || s.LastSuccess == nil || s.LastSuccess.URL != "g" {
+		t.Errorf("lastRun = %+v, lastSuccess = %+v; a db-sign run moved the nightly's fields", s.LastRun, s.LastSuccess)
+	}
+	if s.Published == nil || !s.Published.Signed {
+		t.Errorf("published = %+v, want the freshly signed artifact described", s.Published)
+	}
+}

@@ -39,7 +39,8 @@ import (
 type Status struct {
 	SchemaVersion int       `json:"schemaVersion"`
 	GeneratedAt   time.Time `json:"generatedAt"`
-	// LastRun is the most recent publish-side run, whatever its result.
+	// LastRun is the most recent nightly publish (db-publish), whatever
+	// its result. Other workflows refresh Published only.
 	LastRun *Run `json:"lastRun,omitempty"`
 	// LastSuccess is the most recent run that succeeded. A monitor alerts
 	// when it is older than a day and a half: the nightly runs every 24h.
@@ -72,6 +73,9 @@ type Artifact struct {
 	SignatureError string    `json:"signatureError,omitempty"`
 	ObservedAt     time.Time `json:"observedAt"`
 }
+
+// publishWorkflow is the one workflow whose runs set lastRun/lastSuccess.
+const publishWorkflow = "db-publish"
 
 // Seams for tests: the clock, and the keys a signature is verified against
 // (the embedded production keys cannot sign anything in a test).
@@ -126,10 +130,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 	at := now()
 	s.SchemaVersion = 1
 	s.GeneratedAt = at
-	r := &Run{Workflow: *workflow, Result: *result, FinishedAt: at, URL: *runURL}
-	s.LastRun = r
-	if *result == "success" {
-		s.LastSuccess = r
+	// The run fields are the nightly publish's alone: a db-sign dispatched
+	// by hand refreshes `published` (so a fixed signature shows at once)
+	// but must not move lastSuccess, or one manual success would hide a
+	// week of failed nightlies from a monitor alerting on it.
+	if *workflow == publishWorkflow {
+		r := &Run{Workflow: *workflow, Result: *result, FinishedAt: at, URL: *runURL}
+		s.LastRun = r
+		if *result == "success" {
+			s.LastSuccess = r
+		}
 	}
 
 	a, err := describe(context.Background(), *ref, at)

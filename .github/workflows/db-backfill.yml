@@ -118,3 +118,23 @@ jobs:
             fi
           done
           [ "$ok" = 1 ] || { cat /tmp/verify-*.log; echo "::error::the signature just written verifies under no committed key"; exit 2; }
+
+  # D138: one pinned issue per failing ops workflow, closed by the next
+  # success. always(), so it runs when the job it watches failed; a
+  # cancelled or skipped run is ignored by the script.
+  alert:
+    needs: [backfill]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Open, update or close the pinned failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RESULT: ${{ needs.backfill.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: sh scripts/ops-alert.sh db-backfill "$RESULT" "$RUN_URL"
