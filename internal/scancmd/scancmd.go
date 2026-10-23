@@ -701,6 +701,10 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 			return code
 		}
 	}
+	// D139. After the gates, so a scan they refuse prints the refusal and
+	// not a warning about the same staleness; before matching, so the
+	// warning leads the stderr a reader sees.
+	warnIfStale(m, time.Now(), stderr)
 
 	res, err := matcher.New(db).Match(inventory)
 	if err != nil {
