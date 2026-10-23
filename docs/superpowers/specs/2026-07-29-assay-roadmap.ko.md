@@ -5843,9 +5843,12 @@ coverage skip 하나를 준다. 수정 전에는 0 과 0 이었다. 탐지기 �
 
 **결정.** SPDX 리더는 카탈로그 전에 각 패키지에서 그것을 빌드한 source rpm 으로 가는 맵을 만든다. source
 쪽 끝이 `arch=src` rpm 패키지인 모든 `SRC GENERATES BIN` 과 `BIN GENERATED_FROM SRC` 관계를 읽는다. 자기
-purl 이 source 를 말하지 않는(`upstream` 한정자가 없는) rpm 후보는 그 이름을 버전 없이 `Package.Source` 로
-받는다. 이는 `upstream` 경로와 이미지 경로의 SOURCERPM 이 만드는 모양과 같다(D8, D134). 명시적인 `upstream`
-한정자가 우선한다. rpm 후보만, 그리고 `arch=src` rpm 에서만 받는다. source rpm 자체는 인벤토리 밖에 남는다(D84).
+purl 이 source 를 말하지 않는(`upstream` 한정자가 없는) rpm 후보는 SPDX 의 `upstream` 경로처럼 그 이름을 버전
+없이 `Package.Source` 로 받는다. 그러면 matcher 는 바이너리 자신의 버전을 비교하는데, 이는 이미지 경로의
+SOURCERPM 이 `Source.Version` 으로 기록하는 것과 같은 EVR 이다(D8, D134). 명시적인 `upstream` 한정자가 우선한다.
+rpm 후보만, 그리고 `arch=src` rpm 에서만 받는다. 간선은 바이너리가 source 의 release 를, 적어도 그 RHEL dist
+태그(`el9_2`)를 공유할 때만 센다. source rpm 은 자기 트리에 벤더된 테스트용 rpm 도 `GENERATES` 하는데, 그것들은
+둘 다 공유하지 않는다. source rpm 자체는 인벤토리 밖에 남는다(D84).
 
 **왜.** 2026-10-22 감사(A3)는 Red Hat 자체 SBOM 이 바이너리→source 연결을 purl 한정자가 아니라 관계로
 싣는다는 것을 찾았다. D84 는 한정자만 읽었다. 그래서 Red Hat SBOM 의 모든 바이너리 rpm 이 `Source == nil`
@@ -5856,15 +5859,24 @@ purl 이 source 를 말하지 않는(`upstream` 한정자가 없는) rpm 후보�
 **측정.** Red Hat 의 `rhel-9.6.z.json.bz2` 제품 SBOM(2026-10-23, 패키지 265,033 개): 바이너리 rpm 패키지
 44,854 개, 그중 `upstream` 한정자가 있는 것 970 개, source rpm 의 `GENERATES` 로 닿는 것 44,206 개. source rpm
 은 자기가 번들한 cargo, npm, Python, Go 패키지도 `GENERATES` 하고(cargo 간선 106,299, npm 73,748), 바이너리
-rpm 은 Go 와 NuGet 모듈을 `GENERATES` 한다. 그래서 rpm 후보만, `arch=src` rpm 에서만 이름을 받는다. 카탈로거로
-직접 파싱하면 source 가 있는 rpm 후보는 60,899 중 1,207 에서 60,256 이 되었다.
+rpm 은 Go 와 NuGet 모듈을 `GENERATES` 한다. 그래서 rpm 후보만, `arch=src` rpm 에서만 이름을 받는다. source 에서 바이너리
+rpm 으로 가는 간선 중 43,105 개가 release 를 공유하고 28 개가 dist 태그를 더 공유한다(nodejs 는
+`16.19.1-1.el9_2` 에서 `npm 8.19.3-1.16.19.1.1.el9_2` 를 빌드한다). 둘 다 공유하지 않는 1,073 개는 dnf, libdnf,
+rpm-ostree, libabigail, rpmlint 등이 벤더한 fixture(`glibc 2.17-157`, `kernel 3.10.0-514`)이며, 그렇지 않았다면
+번들한 쪽의 advisory 를 끌어왔을 것이다. 카탈로거로 직접 파싱하면, 생태계 키를 얻어 matcher 에 닿는 rpm 후보(purl
+당 하나) 33,898 개 중 source 가 있는 것이 605 에서 33,146 이 되었다. 덮지 못한 것: SBOM 에 내장된 이미지가
+`CONTAINS` 로만 닿고 `upstream` 도 `GENERATES` 간선도 없는 rpm 항목 645 개는 여전히 source 가 없다
+(`docs/deferred-decisions.md` 에 기록).
 
 **검증.** `Run` 을 통해: Red Hat 모양의 SPDX 문서(제품 루트, `arch=src` openssl, `openssl-libs` 바이너리,
 `GENERATES`)를 유일한 레코드가 `openssl` 을 가리키는 데이터베이스에 대해 스캔하면 그 레코드가 `openssl-libs`
 에 보고된다. 카탈로거에서: `GENERATES` 와 `GENERATED_FROM` 둘 다 source 를 주고, 번들된 npm 패키지는 받지
-않으며, `upstream` 한정자가 우선하고, 바이너리 rpm 인 `GENERATES` 부모는 아무것도 주지 않는다. 변이 6개 포착:
-source 를 넘기지 않는 호출 지점(`Run` 테스트가 포착), 관계 source 무시, `GENERATED_FROM` 미독해, 아무 rpm 이나
-source 로 셈, rpm 이 아닌 후보가 받음, 관계가 `upstream` 을 덮어씀.
+않으며, `upstream` 한정자가 우선하고, 바이너리 rpm 인 `GENERATES` 부모는 아무것도 주지 않으며, 벤더된 fixture 는 받지
+않고, release 는 다르지만 dist 태그가 같은 하위 패키지는 버전 없이 source 를 유지한다. `Run` 테스트는 advisory,
+바이너리, 매칭된 source 이름을 디코드한 하나의 finding 에서 잡는다. 변이 9개 포착: source 를 넘기지 않는 호출
+지점(`Run` 테스트가 포착), 관계 source 무시, `GENERATED_FROM` 미독해, 아무 rpm 이나 source 로 셈, rpm 이 아닌
+후보가 받음, 관계가 `upstream` 을 덮어씀, release 가드 끔, dist 태그 허용 제거, source 에 버전 부여. fixture 가드,
+키가 있는 후보 수, `CONTAINS` 나머지는 브랜치 리뷰(wf_b62c1d24-f0a)에서 나왔다.
 
 ---
 

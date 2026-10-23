@@ -6117,9 +6117,12 @@ and the unmatched remainder above against the dump.
 source rpm it was built from. It reads every `SRC GENERATES BIN` and `BIN GENERATED_FROM SRC`
 relationship whose source end is an rpm package with `arch=src`. An rpm candidate whose own
 purl names no source (no `upstream` qualifier) takes that name as `Package.Source`, with no
-version, the same shape the `upstream` path and the image path's SOURCERPM produce (D8, D134).
-An explicit `upstream` qualifier wins. Only rpm candidates take it, and only from an `arch=src`
-rpm. The source rpm itself stays out of the inventory (D84).
+version, as the SPDX `upstream` path does. The matcher then compares the binary's own version,
+which is the same EVR the image path's SOURCERPM records as `Source.Version` (D8, D134). An
+explicit `upstream` qualifier wins. Only rpm candidates take it, and only from an `arch=src`
+rpm. An edge counts only when the binary shares the source's release, or at least its RHEL
+dist tag (`el9_2`). A source rpm also `GENERATES` the test-data rpms vendored in its tree, and
+those share neither. The source rpm itself stays out of the inventory (D84).
 
 **Why.** The 2026-10-22 audit (A3) found that Red Hat's own SBOMs carry the binary→source link
 as a relationship, not as a purl qualifier. D84 read only the qualifier. Every binary rpm in a
@@ -6133,16 +6136,28 @@ are read.
 44,854 binary rpm packages, 970 with an `upstream` qualifier, and 44,206 reachable through a
 source rpm's `GENERATES`. A source rpm also `GENERATES` the cargo, npm, Python and Go packages it
 bundles (106,299 cargo and 73,748 npm edges), and binary rpms `GENERATES` Go and NuGet modules.
-That is why only rpm candidates take the name, and only from an `arch=src` rpm. Parsed by the
-cataloger itself, the rpm candidates with a source went from 1,207 to 60,256 of 60,899.
+That is why only rpm candidates take the name, and only from an `arch=src` rpm. Of the
+source-to-binary rpm edges, 43,105 share the release and 28 more share the dist tag (nodejs
+builds `npm 8.19.3-1.16.19.1.1.el9_2` from `16.19.1-1.el9_2`). The 1,073 that share neither are
+fixtures vendored by dnf, libdnf, rpm-ostree, libabigail, rpmlint and others (`glibc 2.17-157`,
+`kernel 3.10.0-514`), which would otherwise have drawn the bundler's advisories. Parsed by the
+cataloger itself, the rpm candidates (one per purl) that get an ecosystem key and so reach the
+matcher went from 605 to 33,146 of 33,898 with a source. Not covered: 645 rpm entries that the
+SBOM's embedded images reach only through `CONTAINS`, with no `upstream` and no `GENERATES`
+edge, still get no source (recorded in `docs/deferred-decisions.md`).
 
 **Verified.** Through `Run`: a Red Hat-shaped SPDX document (product root, `arch=src` openssl,
 `openssl-libs` binary, `GENERATES`) against a database whose only record names `openssl` reports
 that record on `openssl-libs`. At the cataloger: `GENERATES` and `GENERATED_FROM` both give the
 source; a bundled npm package gets none; an `upstream` qualifier wins; a `GENERATES` parent that
-is a binary rpm gives none. Six mutations caught: the call site passing no source (caught by the
-`Run` test), the relationship source ignored, `GENERATED_FROM` not read, any rpm counting as a
-source, non-rpm candidates taking it, and the relationship overriding `upstream`.
+is a binary rpm gives none; a vendored fixture gets none; a subpackage with its own release but
+the same dist tag keeps its source, with no version. The `Run` test holds the advisory, the
+binary and the matched source name on one decoded finding. Nine mutations caught: the call site
+passing no source (caught by the `Run` test), the relationship source ignored, `GENERATED_FROM`
+not read, any rpm counting as a source, non-rpm candidates taking it, the relationship overriding
+`upstream`, the release guard off, the dist-tag allowance removed, and the source given a version.
+The fixture guard, the keyed counts and the `CONTAINS` remainder came from the branch review
+(wf_b62c1d24-f0a).
 
 ---
 
