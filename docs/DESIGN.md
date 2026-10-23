@@ -919,6 +919,9 @@ exited 0 while 24 findings went unmentioned.
       stdout unchanged
 - [x] `db update` and `db build --seed` retry a layer download cut mid-stream, three attempts
       (D140); an artifact's own defect is not retried
+- [x] Every image scan discloses that application packages inside the image were not checked
+      (D141) — a `note:` on stderr and an `assay/inventory-scope` note-level result and
+      notification in SARIF; the D70 gap itself stays open (deferred-decisions)
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15

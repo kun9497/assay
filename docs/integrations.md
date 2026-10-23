@@ -64,7 +64,9 @@ This gate covers the image's operating-system packages. npm, Python, Java and Go
 dependencies installed inside the image are not inventoried by an image scan (D70,
 [deferred](deferred-decisions.md)), so a pass here says nothing about them — for those, gate
 the application's own lockfile or source directory (`assay scan dir:.`), its built binary or
-jar, or an SBOM of the image.
+jar, or an SBOM of the image. Every image scan says this itself (D141): a `note:` line on
+stderr, and an `assay/inventory-scope` note in SARIF, so the code-scanning tab never shows an
+empty image scan without it.
 
 The `security-events: write` permission is what lets the workflow upload to code scanning.
 

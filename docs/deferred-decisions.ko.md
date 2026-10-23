@@ -1660,12 +1660,16 @@ cataloger만 채우기 때문(`internal/pkgmeta/package.go:43`, D95); 빈 인벤
 존재하지 않는 셈이기 때문입니다. 아키텍처는 중요한 손실에 들지 않습니다: 매칭 입력이
 아니기 때문입니다(`pkgmeta.Package`에는 아키텍처 필드가 없습니다).
 
-**규모별 옵션 — 아직 아무것도 선택하지 않았고, 하나를 고르는 것은 D-결정입니다.**
+**규모별 옵션.** 앞의 둘은 구현됨(D141, D111); 공백은 뒤의 둘 중 하나를 고를 때까지 열려 있고, 그
+선택은 D-결정입니다.
 
 - **스캔 시점 공개 문구(S, 스키마 변경 없음).** 모든 이미지 스캔에서 stderr에 한 줄로 범위를
   밝힙니다 — OS 패키지와 Bitnami 마커는 읽었고 이미지 안의 애플리케이션 패키지는 읽지
   않았다고 — `Run`이 이미 찍는 `scanned … as an image` 줄 옆에(`scancmd.go:436`). 사람이
   읽기에는 정직하지만 `--output json`과 SARIF에는 보이지 않습니다.
+  **2026-10-23 D141 로 구현**, SARIF 도 포함: GitHub code scanning 은 결과만 보여주므로 note
+  수준의 `assay/inventory-scope` 결과와 알림. 공백을 밝힌 것이지 메운 것은 아니며, 메우는 것은
+  아래 선택지들입니다.
 - **JSON과 SARIF의 기계 판독 가능한 `inventoryScope`(M, 스키마 변경).** 2026-10-01에 D111로
   완료: JSON은(SARIF는 아님) 이미지 타깃에 `inventoryScope`(`osPackages`, `bitnami`,
   `applicationPackages`)를 얻었고, 이 옵션이 함께 설계하자고 제안한 대상 수준 `coverage[]`
@@ -1679,7 +1683,8 @@ cataloger만 채우기 때문(`internal/pkgmeta/package.go:43`, D95); 빈 인벤
   jar·Go-바이너리 cataloger를 위한 바이트 기반 진입점, 그리고 오늘날 어떤 대상 종류에도
   존재하지 않는 설치된 패키지용 cataloger(`node_modules/*/package.json`, `*.dist-info`).
 
-**언제 다시 볼까.** 이미지 범위에 대한 첫 스캔 시점 공개가 들어오거나, `scandiff`의 타입별
+**언제 다시 볼까.** 이미지 범위에 대한 첫 스캔 시점 공개가 들어오거나 — 2026-10-23 D141 로 들어왔고,
+그 재검토는 공개를 먼저 하고 아래의 고정 위치 탐침을 다음 결정으로 남겼다 — `scandiff`의 타입별
 grype-only 상한(`maxGrypeOnlyApp`, D117 — 2026-10-12 추가)이 걸리거나, 사용자가 이미지 스캔이 놓친
 애플리케이션 CVE를 보고할 때. 세 번째 조건 하나만으로는 D26의 실수 — 신고를 기다리는
 조건 — 를 반복하는 셈이라, 그것만이 유일한 조건이 아닙니다.

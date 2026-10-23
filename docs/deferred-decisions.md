@@ -1709,12 +1709,16 @@ cannot carry — a record its generator could not read is simply absent. Archite
 among the losses that matter: it is not a matching input (`pkgmeta.Package` has no
 architecture field).
 
-**Options, by size — none chosen; choosing one is a D-decision.**
+**Options, by size.** The first two are built (D141, D111); the gap stays open until one of the
+last two is chosen, which is a D-decision.
 
 - **A scan-time disclosure line (S, no schema change).** One stderr line on every image scan
   stating the scope — OS packages and Bitnami markers read, application packages inside the
   image not — beside the `scanned … as an image` line `Run` already prints
   (`scancmd.go:436`). Honest for a human reader; invisible to `--output json` and SARIF.
+  **Built 2026-10-23 as D141**, with SARIF covered too: a note-level `assay/inventory-scope`
+  result and notification, because GitHub code scanning shows results only. The gap is
+  disclosed, not closed; the options below are what would close it.
 - **A machine-readable `inventoryScope` in JSON and SARIF (M, schema bump).** Done 2026-10-01
   as D111: JSON (not SARIF) gained `inventoryScope` (`osPackages`, `bitnami`,
   `applicationPackages`) on image targets, alongside the target-level `coverage[]` object this
@@ -1729,7 +1733,9 @@ architecture field).
   catalogers (`node_modules/*/package.json`, `*.dist-info`) that exist for no target kind
   today.
 
-**Revisit when** the first scan-time disclosure of the image's scope lands, or the per-type
+**Revisit when** the first scan-time disclosure of the image's scope lands — it did, as D141 on
+2026-10-23, and the revisit chose disclosure first and left the fixed-location probe below as the
+next decision — or the per-type
 grype-only ceiling in `scandiff` (`maxGrypeOnlyApp`, D117 — added 2026-10-12) trips, or a user reports an
 application CVE an image scan missed. The third alone would repeat D26's mistake — a trigger
 that waits for a report — which is why it is not the only one.

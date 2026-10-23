@@ -101,7 +101,8 @@ code and the report's sha256, even when the scan ends in exit 2 before any repor
   from binaries, directories, and ten lockfile formats — pnpm and yarn berry included. Not
   from inside a container image: an image scan inventories the OS packages and Bitnami layers
   above, not the language packages installed in it (D70,
-  [deferred](docs/deferred-decisions.md)).
+  [deferred](docs/deferred-decisions.md)), and every image scan says so on stderr and in
+  SARIF (D141).
 - **Every source's rating is kept** — two databases routinely disagree about one CVE; a
   finding carries each source's band, score, and fixed version, and the gate takes the
   highest, so the report agrees with its own verdict.

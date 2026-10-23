@@ -6044,6 +6044,37 @@ of three, the seed path without the retry.
 
 ---
 
+### D141 — Every image scan discloses that application packages inside it were not checked
+
+**Decision.** When an image scan's inventory scope reports application packages as not read
+— every image scan today, and no other target kind — `Run` prints a `note:` on stderr naming
+what was not checked (npm, Python, Java, Go binaries) and what to scan instead (the lockfile,
+directory or binary, or an SBOM of the image), and the SARIF renderer adds a note-level
+result under a declared `assay/inventory-scope` rule plus a matching notification, located at
+the scanned target and fingerprinted on the rule alone, so a per-commit tag or a per-run archive
+path does not close and reopen the alert on every upload. The verdict, the exit code and stdout's table and
+JSON are unchanged.
+
+**Why.** D70's gap is silent: an image whose `node_modules` or Go binary carries a Critical
+scans to exit 0 with "No known vulnerabilities found" (measured: `tar` in `ubi8/nodejs-18`,
+GO-2026-4337 in SLE BCI 15.6). D111 put the fact in the JSON's `inventoryScope`, which a
+person reading a terminal or the GitHub security tab never sees. This is the deferral's own
+small option, shipped first because the 2026-10-22 audit ranked a loud blind spot ahead of
+closing it: the fixed-location probe that would actually find those packages is a separate
+decision. A result, not only a notification, because GitHub code scanning displays results
+and ignores notifications (the frozen-data block's reasoning, D111). Note level and not
+warning, because it describes the scan's scope on every image, not a failure.
+
+**Verified.** At the caller: an image scan's stderr carries the note with each ecosystem and
+both remedies, and stdout does not; its SARIF declares the rule, carries the note-level result
+and the notification; a directory scan carries neither, in table or SARIF. Six mutations
+caught: the stderr note removed, the note sent to stdout, the SARIF block off, the rule not
+declared, the notification dropped, the disclosure emitted for a target with no scope. The
+branch review added the result's location, the stable fingerprint and the notification's level
+to the SARIF test.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

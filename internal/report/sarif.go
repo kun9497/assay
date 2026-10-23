@@ -200,6 +200,38 @@ func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 		}
 	}
 
+	// D141: an image scan's scope, as a note-level result and a
+	// notification, the frozen-data block's shape just above — GitHub code
+	// scanning displays results only, and this is the sentence a reader of
+	// the security tab most needs before believing an empty one. Emitted
+	// only when the scan reports application packages as not read, which is
+	// every image scan today and no other target kind; the rule is declared
+	// in this same branch (D55).
+	if s := cov.InventoryScope; s != nil && s.ApplicationPackages == ScopeNotRead {
+		rules = append(rules, inventoryScopeRule())
+		msg := "This image scan read OS packages, not the application packages installed in the " +
+			"image (npm, Python, Java, Go binaries); vulnerabilities in those were not checked."
+		uri := target
+		if uri == "" {
+			uri = "image"
+		}
+		results = append(results, sarifResult{
+			RuleID:  inventoryScopeRuleID,
+			Level:   "note",
+			Message: sarifText{Text: msg},
+			Locations: []sarifLocation{{
+				PhysicalLocation: sarifPhysical{ArtifactLocation: sarifArtifact{URI: uri}},
+			}},
+			// Keyed on the rule alone, not the target: CI scans a per-commit
+			// tag or a per-run archive path, and a fingerprint on that string
+			// would close the alert and open a new one on every upload,
+			// undoing a dismissal each time. One upload category is one image
+			// pipeline, so one stable alert per category is the right count.
+			PartialFingerprints: map[string]string{fingerprintKey: hash(inventoryScopeRuleID)},
+		})
+		notes = append(notes, sarifNotification{Level: "note", Message: sarifText{Text: msg}})
+	}
+
 	run := sarifRun{
 		Tool: sarifTool{Driver: sarifDriver{
 			Name:            "assay",
@@ -250,9 +282,10 @@ func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 }
 
 const (
-	notEvaluatedRuleID = "assay/not-evaluated"
-	notReadRuleID      = "assay/not-read"
-	frozenDataRuleID   = "assay/frozen-data"
+	notEvaluatedRuleID   = "assay/not-evaluated"
+	notReadRuleID        = "assay/not-read"
+	frozenDataRuleID     = "assay/frozen-data"
+	inventoryScopeRuleID = "assay/inventory-scope"
 	// fingerprintKey names the scheme, so a later change to what a fingerprint
 	// is made of can ship as a new key rather than silently re-identifying
 	// every existing alert.
@@ -351,6 +384,27 @@ func notReadRule() sarifRule {
 		},
 		// No security-severity: this is not a security claim.
 		Properties: map[string]any{"tags": []string{"security", "not-read"}},
+	}
+}
+
+// inventoryScopeRule is D141's rule: declared whenever the assay/inventory-scope
+// result is emitted (an image scan whose application packages were not read),
+// and never otherwise.
+func inventoryScopeRule() sarifRule {
+	return sarifRule{
+		ID:               inventoryScopeRuleID,
+		Name:             "InventoryScope",
+		ShortDescription: sarifText{Text: "Application packages inside the image were not checked"},
+		FullDescription: sarifText{Text: "An image scan inventories the operating system's packages " +
+			"(apk, dpkg, rpm, pacman) and Bitnami's component markers. Packages installed on top by " +
+			"a language package manager -- node_modules, Python site-packages, jars, Go binaries -- " +
+			"are not read, so an empty result here says nothing about them (D70)."},
+		Help: &sarifHelp{
+			Text: "Scan the application's own lockfile or source directory (`assay scan dir:.`), its " +
+				"built binary or jar, or an SBOM of the image, to cover those packages.",
+		},
+		// No security-severity: this is a statement of scope, not a finding.
+		Properties: map[string]any{"tags": []string{"security", "inventory-scope"}},
 	}
 }
 

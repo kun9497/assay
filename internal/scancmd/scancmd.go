@@ -537,6 +537,18 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 			return 2
 		}
 		inventory, cat, scope, image = t, stats, &sc, rec
+		// D141. The D70 gap, said where a person reading the scan sees it:
+		// before this only the JSON's inventoryScope carried it, and the
+		// table printed "No known vulnerabilities found" over an image whose
+		// node_modules and Go binaries were never read. stderr, so stdout
+		// stays the report; a note, not a warning, because it describes the
+		// scan's scope on every image rather than anything that went wrong.
+		if sc.ApplicationPackages == report.ScopeNotRead {
+			fmt.Fprintln(stderr, "note: an image scan reads OS packages (and Bitnami markers), not application "+
+				"packages installed in the image -- npm, Python, Java and Go binaries were not checked")
+			fmt.Fprintln(stderr, "  scan the application's lockfile, directory or binary, or an SBOM of the image, "+
+				"for those (D70)")
+		}
 
 	case source.TargetGoBinary:
 		prov.Target.SHA256 = fileSHA256(path)
