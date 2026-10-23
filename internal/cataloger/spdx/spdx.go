@@ -12,6 +12,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
+	"strings"
 
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"github.com/kun9497/assay/internal/pkgmeta"
@@ -126,20 +128,44 @@ func findRootPackageID(doc document) string {
 // rpm also GENERATES the cargo, npm and Go packages it bundles, and a binary
 // rpm GENERATES Go and NuGet modules; catalogPackage applies the result to
 // rpm candidates alone, so none of those inherits an rpm name.
+//
+// And only an edge whose binary shares the source's release, or at least its
+// RHEL dist tag, counts. A source rpm also GENERATES the test-data rpms
+// vendored in its tree -- dnf, libdnf and rpm-ostree carry fixtures named
+// glibc, kernel and httpd -- and giving those the bundler's name turned every
+// dnf advisory into a finding on "glibc" (D143 review). A real subpackage is
+// built in its source's build: the same release, or for one with its own
+// versioning the same dist tag (nodejs builds npm 8.19.3-1.16.19.1.1.el9_2
+// from 16.19.1-1.el9_2). Measured on rhel-9.6.z: 43,105 edges share the
+// release, 28 more the dist tag, and the 1,073 sharing neither are fixtures.
 func sourceRPMOf(doc document) map[string]string {
-	srcName := make(map[string]string)
+	type rpmID struct{ name, release string }
+	srcs := make(map[string]rpmID)
+	bins := make(map[string]string) // SPDXID -> release of its first binary rpm purl
 	for _, p := range doc.Packages {
 		for _, ref := range p.ExternalRefs {
 			if ref.ReferenceType != "purl" {
 				continue
 			}
 			parsed, err := pkgmeta.ParsePURL(ref.ReferenceLocator)
-			if err != nil || parsed.Type != "rpm" || parsed.Qualifiers["arch"] != "src" || parsed.Name == "" {
+			if err != nil || parsed.Type != "rpm" || parsed.Name == "" {
 				continue
 			}
-			srcName[p.SPDXID] = parsed.Name
-			break
+			if parsed.Qualifiers["arch"] == "src" {
+				srcs[p.SPDXID] = rpmID{parsed.Name, rpmRelease(parsed.Version)}
+				break
+			}
+			if _, ok := bins[p.SPDXID]; !ok {
+				bins[p.SPDXID] = rpmRelease(parsed.Version)
+			}
 		}
+	}
+	builtBy := func(src rpmID, binRelease string) bool {
+		if binRelease == src.release {
+			return true
+		}
+		tag := rhelDistTag(src.release)
+		return tag != "" && tag == rhelDistTag(binRelease)
 	}
 	out := make(map[string]string)
 	for _, r := range doc.Relationships {
@@ -152,13 +178,39 @@ func sourceRPMOf(doc document) map[string]string {
 		default:
 			continue
 		}
-		if name, ok := srcName[src]; ok {
-			if _, done := out[bin]; !done {
-				out[bin] = name
-			}
+		s, ok := srcs[src]
+		if !ok {
+			continue
+		}
+		rel, isBin := bins[bin]
+		if !isBin || !builtBy(s, rel) {
+			continue
+		}
+		if _, done := out[bin]; !done {
+			out[bin] = s.name
 		}
 	}
 	return out
+}
+
+// rpmRelease is the release of an rpm version string ("[epoch:]version-
+// release"), or "" when there is none.
+func rpmRelease(v string) string {
+	if i := strings.LastIndexByte(v, '-'); i >= 0 {
+		return v[i+1:]
+	}
+	return ""
+}
+
+// rhelDistTagPattern finds a release's RHEL dist tag: `el9`, `el9_2`,
+// `el8_10`, as `.el9_2` appears inside `1.16.19.1.1.el9_2` or `18.el9_2.1`.
+var rhelDistTagPattern = regexp.MustCompile(`\.(el[0-9]+(?:_[0-9]+)*)`)
+
+func rhelDistTag(release string) string {
+	if m := rhelDistTagPattern.FindStringSubmatch(release); m != nil {
+		return m[1]
+	}
+	return ""
 }
 
 // catalogPackage turns one SPDX package entry into zero or more

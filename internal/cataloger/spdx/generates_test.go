@@ -125,3 +125,46 @@ func TestParse_A3_OnlyASourceRPMIsASource(t *testing.T) {
 		t.Errorf("openssl-libs Source = %+v, want nil: its GENERATES parent is a binary rpm, not a source", p.Source)
 	}
 }
+
+// A source rpm also GENERATES the test-data rpms vendored in its tree: dnf,
+// libdnf and rpm-ostree carry fixtures named glibc, kernel and httpd (D143
+// review). Taking the bundler's name for those turned every dnf advisory into
+// a finding on "glibc". A real subpackage is built in the same build as its
+// source, so it shares the source's release, or at least its RHEL dist tag
+// (nodejs builds npm 8.19.3-1.16.19.1.1.el9_2 from 16.19.1-1.el9_2); a
+// fixture shares neither (2.17-157, .fc25, .el7). Measured on rhel-9.6.z:
+// 43,105 edges share the release, 28 more share the dist tag, and the 1,073
+// that share neither are all vendored fixtures.
+func TestParse_A3_AVendoredFixtureDoesNotTakeTheBundlersName(t *testing.T) {
+	src := "pkg:rpm/redhat/dnf@4.14.0-9.el9?arch=src"
+	fixture := "pkg:rpm/glibc@2.17-157?arch=x86_64&epoch=0&repository_id=rhel-9-for-x86_64-baseos-rpms__9"
+	doc := rhDoc(rhPkg("SPDXRef-src", src)+","+rhPkg("SPDXRef-fx", fixture),
+		rel("SPDXRef-src", "GENERATES", "SPDXRef-fx"))
+	target, _, err := Parse(strings.NewReader(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := byName(t, target, "glibc"); p.Source != nil {
+		t.Errorf("fixture glibc Source = %+v, want nil: it shares neither dnf's release nor its dist tag", p.Source)
+	}
+}
+
+func TestParse_A3_ASubpackageWithItsOwnReleaseKeepsItsSource(t *testing.T) {
+	src := "pkg:rpm/redhat/nodejs@16.19.1-1.el9_2?arch=src&epoch=1"
+	npm := "pkg:rpm/redhat/npm@8.19.3-1.16.19.1.1.el9_2?arch=x86_64&epoch=1&repository_id=rhel-9-for-x86_64-appstream-rpms"
+	doc := rhDoc(rhPkg("SPDXRef-src", src)+","+rhPkg("SPDXRef-npm", npm),
+		rel("SPDXRef-src", "GENERATES", "SPDXRef-npm"))
+	target, _, err := Parse(strings.NewReader(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := byName(t, target, "npm")
+	if p.Source == nil || p.Source.Name != "nodejs" {
+		t.Errorf("npm Source = %+v, want nodejs: a different release with the same el9_2 dist tag is a real subpackage", p.Source)
+	}
+	// The relationship gives a name and no version: the matcher then
+	// compares the binary's own version, as for an upstream-qualified purl.
+	if p.Source != nil && p.Source.Version != "" {
+		t.Errorf("npm Source.Version = %q, want empty", p.Source.Version)
+	}
+}

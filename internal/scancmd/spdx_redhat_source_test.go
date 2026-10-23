@@ -3,9 +3,9 @@ package scancmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/kun9497/assay/internal/advisory"
@@ -68,12 +68,32 @@ func TestRun_A3_RedHatSPDXBinaryReachesItsSourceAdvisory(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run = %d\nstderr: %s", code, errOut.String())
 	}
-	// The rendered pair, not either half: "openssl" alone also matches
-	// "openssl-libs" (CLAUDE.md, substring assertions on the wrong column).
-	if !strings.Contains(out.String(), `"RHSA-2026:9001"`) {
-		t.Fatalf("the source-keyed advisory was not reported for openssl-libs:\n%s", out.String())
+	// Decoded, and the three facts held on ONE finding: the advisory, the
+	// installed binary, and the source name it was reached through. Three
+	// independent substrings could each come from a different record, and
+	// "openssl" alone also matches "openssl-libs" (CLAUDE.md, substring
+	// assertions on the wrong column).
+	var report struct {
+		Findings []struct {
+			Package struct {
+				Name   string `json:"name"`
+				Source *struct {
+					Name string `json:"name"`
+				} `json:"source"`
+			} `json:"package"`
+			MatchedName string `json:"matchedName"`
+			Advisory    struct {
+				ID string `json:"id"`
+			} `json:"advisory"`
+		} `json:"findings"`
 	}
-	if !strings.Contains(out.String(), `"name":"openssl-libs"`) && !strings.Contains(out.String(), `"name": "openssl-libs"`) {
-		t.Errorf("the finding is not on openssl-libs:\n%s", out.String())
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatalf("report is not JSON: %v\n%s", err, out.String())
 	}
+	for _, f := range report.Findings {
+		if f.Advisory.ID == "RHSA-2026:9001" && f.Package.Name == "openssl-libs" && f.MatchedName == "openssl" {
+			return
+		}
+	}
+	t.Fatalf("no finding of RHSA-2026:9001 on openssl-libs matched through its source openssl:\n%s", out.String())
 }
