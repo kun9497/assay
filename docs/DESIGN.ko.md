@@ -400,7 +400,9 @@ gh workflow run db-sign.yml -f digest=sha256:…  # D137: db push 가 찍은 dig
 멈춥니다. 빨간 서명 단계나 자기 검사 단계는 결코 겉치레가 아닙니다: 런이 출력한 digest 로 `db-sign.yml` 을
 띄우고 태그가 생겼는지 확인하세요(`crane manifest ghcr.io/kun9497/assay-db:sha256-<digest>.sig`). 후반부가
 머지되기 전(2026-10-22)에는 아무것도 거부하지 않는 상태로 서명만 하루 돌아서, 어떤 바이너리가 요구하기 전에
-첫 서명된 digest 를 게시할 수 있었습니다.
+첫 서명된 digest 를 게시할 수 있었습니다. D138 부터는 서명 단계가 실패하면 고정 이슈
+`ops: db-publish is failing`이 열리고, 고쳐질 때까지 `status.json`이 지금 digest 에 대해
+`"signed": false`를 보여줍니다.
 
 **첫 패스는 범위를 제한하세요. 전체 피드로 가지 마십시오.** 제한 없는 빌드는 약 7시간이고 재개
 지점이 없습니다 — `db build`는 임시 데이터베이스를 만들어 마지막에만 설치하므로, 5시간째의 실패가
@@ -874,6 +876,12 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       내며 거부, `--allow-unsigned`는 설치하되 `Unverified` 기록, 잘못된 서명은 플래그와 무관하게
       거부, `db build --seed`는 건너뛸 수 없음; 릴리스 체크섬 서명과 설치기의 `openssl` 검증
       (`install.sh`, README 에 커밋으로 고정)
+- [x] 실패한 운영 워크플로는 복구될 때까지 고정 이슈 하나를 열어 두고, 나이틀리는 `status.json`
+      (마지막 런, 마지막 성공, 지금 태그의 digest·날짜·서명)을 `status` 브랜치에 게시 (D138)
+- [x] 데이터베이스가 빌드된 지 7일이 넘으면 모든 스캔이 stderr 에 경고 (D139) — `BuiltAt` 기준이라
+      죽은 업스트림 피드가 영원히 경고하지 않음; exit 코드와 stdout 은 그대로
+- [x] `db update`와 `db build --seed`는 중간에 끊긴 레이어 다운로드를 세 번까지 재시도 (D140);
+      아티팩트 자체의 결함은 재시도하지 않음
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨

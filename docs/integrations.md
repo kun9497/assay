@@ -90,6 +90,24 @@ provenance; a signature that is present and does not verify is refused regardles
 that is the case the signature exists for. `db build --seed` applies the same check with no
 opt-out.
 
+**Is the published database current?** The publish job writes [`status.json`](https://raw.githubusercontent.com/kun9497/assay/status/status.json)
+after every nightly run, from the live tag rather than from the run's own log:
+
+- `lastSuccess.finishedAt`: the last nightly that published. The nightly runs every 24 hours,
+  so alert when this is older than about 36 hours.
+- `lastRun`: the most recent nightly, whatever its result.
+- `published`: what `db update` fetches right now: `digest`, `builtAt`, `dataAsOf` (with
+  `dataAsOfSource`) and `signed`/`signedBy`. `signed: false` means every `db update` is being
+  refused until the publisher signs the digest.
+
+A failing ops workflow also keeps one pinned issue open in this repository until it recovers.
+
+`db update` retries a layer download that is cut mid-stream, three attempts in all (D140).
+Request-level failures (5xx, 429, a refused connection) were already retried. Every scan prints
+a warning on stderr when its database was built more than seven days ago (D139). It is a nudge,
+not a gate, and leaves the exit code and stdout alone; `--db-max-age` remains the way to fail
+a scan on stale data.
+
 The database is orthogonal to the scan: update it once per job (or cache it), and every
 `assay scan` after that only reads it. A scan of an SBOM or a local tarball makes no network
 call at all.

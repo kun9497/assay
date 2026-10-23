@@ -5951,6 +5951,93 @@ registry; D127's artifact record carries the pull time, not the signing time.
 
 ---
 
+### D138 — A failing ops workflow pins an issue, and the nightly publishes status.json
+
+**Decision.** Five ops workflows (`db-publish`, `db-sign`, `db-backfill`, `scanner-diff`,
+`release`) end with an `alert` job that runs `scripts/ops-alert.sh` on the watched job's
+result. On a failure it comments on the open issue titled `ops: <workflow> is failing`, or
+opens one, labels it `ops-alert` and pins it. On the next success it comments which run
+recovered, unpins it and closes it. A cancelled or skipped run does nothing. The issue is found
+by its whole title, so a week of failed nightlies is one issue with seven comments.
+`db-publish` and `db-sign` also end with a `status` job: `cmd/dbstatus` reads the live tag
+(digest, schema, `builtAt`, `dataAsOf` and its source, and whether the signature verifies under
+the embedded keys) and writes `status.json`, which `scripts/publish-status.sh` commits to an
+orphan `status` branch, served at
+`https://raw.githubusercontent.com/kun9497/assay/status/status.json`. `lastRun` and
+`lastSuccess` are `db-publish`'s alone; `db-sign` refreshes only `published`. A tag that cannot
+be read keeps the previous description beside `publishedError`. `signed` is never omitted.
+
+**Why.** Nothing paged anyone: two nightlies failed unseen on 2026-08-04 and 08-05, and since
+D137 a failed sign step is an outage for every customer's `db update`. A customer had no signal
+either: `db status` shows a date, which cannot tell "publishing stopped" from "the data is that
+old". The issue reaches the maintainer through GitHub's own notifications with no secret to
+configure; the status file gives a monitor one URL and one field (`lastSuccess.finishedAt`) to
+alert on. The tag is read rather than the run's log because the tag is what `db update`
+fetches: after a failed night it is the previous artifact, and that is the truth to publish. A
+manual `db-sign` must not move `lastSuccess`, or one hand-run success would hide a week of
+failed nightlies.
+
+**Verified.** The alert script through a harness with a fake `gh` (first failure creates, labels
+and pins; a repeat comments; recovery comments, unpins and closes; cancelled, skipped and an
+unknown result; the exact-title match and the run URL), run in CI. `cmd/dbstatus` against an
+in-process registry: a signed artifact described as signed by the trusted key, a failed run
+keeping the previous `lastSuccess`, an unreadable registry keeping the previous description,
+an unsigned artifact reported `signed: false` with its reason, a `db-sign` run leaving the run
+fields alone. `publish-status.sh` run twice against a local bare origin: the first run created
+the orphan branch, the second added a commit, and the live ghcr tag was read as signed by
+`9b71ca8e11cf3bcf`. Nine mutations caught (pin dropped, cancelled alerting, recovery not
+closing, prefix title match; a failure moving `lastSuccess`, an error dropping the description,
+`signed:false` omitted, any workflow moving the run fields, the previous status ignored).
+
+**Remaining uncertainty.** The alert job cannot report a workflow that never started (a
+disabled schedule, an Actions outage); a monitor on `lastSuccess.finishedAt` is what catches
+that, and none is configured yet. GitHub allows three pinned issues; a fourth failing workflow
+is opened and notified but not pinned.
+
+### D139 — A scan warns when its database was built more than seven days ago
+
+**Decision.** After the `--db-max-age` and `--db-max-rating-age` gates and before matching,
+every scan prints `warning: this database was built N days ago (date); advisories published
+since are missing` and the command to run, on stderr, when `Meta.BuiltAt` is more than seven
+days old. Exit code and stdout are unchanged. An undated database is not warned about.
+
+**Why.** The published database is rebuilt nightly, so a week-old one means the caller's
+`db update` stopped, or the publish did, and the scan is quietly missing a week of advisories.
+Before this nothing said so unless the caller had chosen a `--db-max-age`, which has no default
+on purpose (D59). The audit proposed measuring the advisory data's age; that would fire on every
+Amazon Linux 2 and Debian 11 scan forever, because those feeds are dead upstream (the live
+artifact's `dataAsOf` was 2025-03-06 from Amazon ALAS on 2026-10-23), and a warning that always
+fires is read by nobody. `BuiltAt` answers the question this warning asks, because a pulled
+database carries the nightly's build time, not the pull's.
+
+**Verified.** At the caller: a ten-day-old database scans with exit 0, warns on stderr, and
+leaves stdout a clean JSON report; a two-day-old one is silent. The boundary: exactly seven days
+is silent, seven days and an hour warns, an undated database is silent. Four mutations caught:
+the call removed, the boundary moved, the undated check removed, the warning sent to stdout.
+
+### D140 — A layer download cut mid-stream is retried, three attempts
+
+**Decision.** `db update` and `db build --seed` unpack the database layer through
+`unpackWithRetry`: up to three attempts while the failure is an interrupted transfer (an
+unexpected EOF, a reset or closed connection, a network timeout), each re-requesting the layer
+and rewriting the temp file from empty, with a line on stderr per retry. Any other failure fails
+at once.
+
+**Why.** The audit said `db update` had no retry. That was half right: go-containerregistry
+already retries each request three times on a 5xx, a 429 or a dropped connection. What it cannot
+retry is a response body cut after the request succeeded, which is how a large layer download
+fails on a flaky link; one such cut failed a whole pull, and the nightly's seed pull with it. An
+artifact's own defect (not gzip, a digest mismatch) is not retried, because repeating it only
+triples the download.
+
+**Verified.** A registry that sends half the layer and drops the connection: once, `db update`
+succeeds on the second fetch and says so; three times, it fails after exactly three fetches and
+says how many; `db build --seed` gets the same retry; a layer of garbage is fetched once and
+not retried. Four mutations caught: nothing retried, everything retried, two attempts instead
+of three, the seed path without the retry.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes
