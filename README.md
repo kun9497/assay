@@ -23,7 +23,7 @@ advisory data is the reason it exists rather than reusing grype.
 
 ```bash
 # Prebuilt binary (Linux/macOS, amd64/arm64) — onto your PATH
-curl -sSfL https://raw.githubusercontent.com/kun9497/assay/6221badd9bdb65e22cc99e842803a557c721e756/install.sh | sudo sh -s -- -b /usr/local/bin
+curl -sSfL https://raw.githubusercontent.com/kun9497/assay/6a8889050ebf24615b1ebd277ebbbda508babfbd/install.sh | sudo sh -s -- -b /usr/local/bin
 ```
 
 The script embeds the project's signing key and verifies the release's checksums

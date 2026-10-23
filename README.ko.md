@@ -23,7 +23,7 @@
 
 ```bash
 # 사전 빌드 바이너리 (Linux/macOS, amd64/arm64) — PATH 위로 바로 설치
-curl -sSfL https://raw.githubusercontent.com/kun9497/assay/6221badd9bdb65e22cc99e842803a557c721e756/install.sh | sudo sh -s -- -b /usr/local/bin
+curl -sSfL https://raw.githubusercontent.com/kun9497/assay/6a8889050ebf24615b1ebd277ebbbda508babfbd/install.sh | sudo sh -s -- -b /usr/local/bin
 ```
 
 스크립트는 프로젝트 서명 키를 내장하고 릴리스 체크섬 파일의 서명을 `openssl`(또는 `cosign`)로
