@@ -101,7 +101,13 @@ func transientTrackerGit(err error) bool {
 			return false
 		}
 	}
-	for _, transient := range []string{"returned error: 5", "http 5", "returned error: 429", "timed out", "connection reset", "could not resolve host", "couldn't connect", "failed to connect", "remote end hung up", "early eof", "tls connection was non-properly terminated"} {
+	// The second half of this list is git reporting a response cut short:
+	// the ref listing or the pack ended before git expected it to. That is
+	// the server or the link, not the repository, and the 2026-10-06 and
+	// 2026-10-22 nightlies both died on it with the retry above unused
+	// ("expected flush after ref listing").
+	for _, transient := range []string{"returned error: 5", "http 5", "returned error: 429", "timed out", "connection reset", "could not resolve host", "couldn't connect", "failed to connect", "remote end hung up", "early eof", "tls connection was non-properly terminated",
+		"expected flush after ref listing", "transfer closed with outstanding read data", "unexpected disconnect while reading sideband packet", "protocol error: bad pack header", "was not closed cleanly"} {
 		if strings.Contains(s, transient) {
 			return true
 		}
