@@ -93,7 +93,8 @@ not_affected is skipped with a warning, latest statement wins); both apply after
 scancmd so the matcher stays pure, and every renderer shows each suppression with its
 source rather than hiding it. Installed
 Ubuntu ESM/FIPS and Oracle Ksplice/FIPS lineage packages are reported not evaluated rather
-than judged against mainline data (D53, D79). Ubuntu findings carry Canonical's own fix
+than judged against mainline data (D53, D79; all three Ubuntu FIPS spellings, `+FipsN`,
+`.fips.N` and `<digit>fipsN`, none scoped to a release, since D142). Ubuntu findings carry Canonical's own fix
 states since D85 — the CVE tracker is consulted at OSV conversion, for which `db build`
 shells out to `git` (the project's first build-time tool dependency, gated by
 `UBUNTU_TRACKER_ENABLE`; the scan path never needs it, D14). Module streams are matched via
