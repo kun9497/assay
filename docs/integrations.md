@@ -103,7 +103,7 @@ after every nightly run, from the live tag rather than from the run's own log:
 A failing ops workflow also keeps one pinned issue open in this repository until it recovers.
 
 `db update` retries a layer download that is cut mid-stream, three attempts in all (D140).
-Request-level failures (5xx, 429, a refused connection) were already retried. Every scan prints
+Request-level failures (a 5xx, a 429, a connection dropped before the response) were already retried. Every scan prints
 a warning on stderr when its database was built more than seven days ago (D139). It is a nudge,
 not a gate, and leaves the exit code and stdout alone; `--db-max-age` remains the way to fail
 a scan on stale data.

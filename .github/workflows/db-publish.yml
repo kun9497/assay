@@ -295,7 +295,7 @@ jobs:
   # success. always(), so it runs when the job it watches failed; a
   # cancelled or skipped run is ignored by the script.
   alert:
-    needs: [publish]
+    needs: [publish, status]
     if: always()
     runs-on: ubuntu-latest
     permissions:
@@ -307,6 +307,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RESULT: ${{ needs.publish.result }}
+          # The watched job's result, unless it succeeded and status.json
+          # could not be published: that is a failure too.
+          RESULT: ${{ (needs.publish.result == 'success' && needs.status.result == 'failure') && 'failure' || needs.publish.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: sh scripts/ops-alert.sh db-publish "$RESULT" "$RUN_URL"

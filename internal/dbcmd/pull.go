@@ -438,10 +438,17 @@ func unpackWithRetry(img v1.Image, tmp string, stderr io.Writer) error {
 
 // interruptedTransfer reports whether err is a transfer cut short rather
 // than a property of the artifact: the stream ended early, the peer reset
-// or closed the connection, or the network timed out.
+// or closed the connection, a network read failed, or it timed out. A
+// failed network read is matched as a *net.OpError with Op "read" rather
+// than by errno, because the errno differs by platform: a reset on Windows
+// is WSAECONNRESET (10054), which syscall.ECONNRESET does not match.
 func interruptedTransfer(err error) bool {
 	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) ||
 		errors.Is(err, syscall.EPIPE) || errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	var op *net.OpError
+	if errors.As(err, &op) && op.Op == "read" {
 		return true
 	}
 	var ne net.Error

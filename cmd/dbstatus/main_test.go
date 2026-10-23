@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,6 +33,15 @@ func publish(t *testing.T, key *ecdsa.PrivateKey) (string, string) {
 	t.Helper()
 	host := trusttest.NewRegistry(t, nil)
 	ref := host + "/assay-db:v9"
+	return ref, pushTo(t, ref, key)
+}
+
+var blockSig atomic.Bool
+
+// pushTo pushes an assay-db-shaped artifact to ref, signs it when key is
+// non-nil, and returns its digest.
+func pushTo(t *testing.T, ref string, key *ecdsa.PrivateKey) string {
+	t.Helper()
 	src := filepath.Join(t.TempDir(), "db")
 	if err := os.WriteFile(src, []byte("not read"), 0o600); err != nil {
 		t.Fatal(err)
@@ -53,7 +64,7 @@ func publish(t *testing.T, key *ecdsa.PrivateKey) (string, string) {
 	if key != nil {
 		trusttest.SignArtifact(t, key, r, d)
 	}
-	return ref, d.String()
+	return d.String()
 }
 
 func trustKey(t *testing.T, key *ecdsa.PrivateKey) {
@@ -232,5 +243,53 @@ func TestRun_OnlyDBPublishMovesTheRunFields(t *testing.T) {
 	}
 	if s.Published == nil || !s.Published.Signed {
 		t.Errorf("published = %+v, want the freshly signed artifact described", s.Published)
+	}
+}
+
+// A signature that could not be FETCHED (a 403, a 5xx after retries) says
+// nothing about whether the artifact is signed. Publishing signed:false
+// for it would announce an outage that is not happening, so the whole read
+// counts as failed: the previous description is kept beside the error.
+func TestRun_ATransientSignatureFetchKeepsThePreviousDescription(t *testing.T) {
+	key := trusttest.NewKey(t)
+	trustKey(t, key)
+	fixedNow(t, t0)
+	host := trusttest.NewRegistry(t, func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.Contains(r.URL.Path, ".sig") && r.Method == http.MethodGet && blockSig.Load() {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	})
+	ref := host + "/assay-db:v9"
+	pushTo(t, ref, key)
+	blockSig.Store(true)
+	t.Cleanup(func() { blockSig.Store(false) })
+	old := &Artifact{Reference: ref, Digest: "sha256:prev", Signed: true, SignedBy: "k", ObservedAt: t0.Add(-time.Hour)}
+	prev := writePrev(t, Status{SchemaVersion: 1, Published: old})
+
+	s, _ := runStatus(t, "-ref", ref, "-prev", prev, "-workflow", "db-publish", "-result", "success", "-run-url", "u")
+	if s.Published == nil || s.Published.Digest != "sha256:prev" || !s.Published.Signed {
+		t.Errorf("published = %+v, want the previous signed description kept", s.Published)
+	}
+	if !strings.Contains(s.PublishedError, "403") {
+		t.Errorf("publishedError = %q, want the 403 recorded", s.PublishedError)
+	}
+}
+
+// A successful read clears an error a previous run recorded, so the file
+// never shows a fresh description beside a stale complaint.
+func TestRun_ASuccessfulReadClearsThePreviousError(t *testing.T) {
+	key := trusttest.NewKey(t)
+	trustKey(t, key)
+	fixedNow(t, t0)
+	ref, digest := publish(t, key)
+	prev := writePrev(t, Status{SchemaVersion: 1, PublishedError: "GET ...: 503"})
+
+	s, _ := runStatus(t, "-ref", ref, "-prev", prev, "-workflow", "db-publish", "-result", "success", "-run-url", "u")
+	if s.PublishedError != "" || s.Published == nil || s.Published.Digest != digest {
+		t.Errorf("publishedError = %q, published = %+v; want the error cleared by the fresh read", s.PublishedError, s.Published)
 	}
 }

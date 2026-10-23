@@ -5,8 +5,8 @@
 #
 #   sh scripts/publish-status.sh <workflow> <success|failure|cancelled> <run-url>
 #
-# Run from a checkout of main by the `status` job of db-publish.yml and
-# db-sign.yml, with contents:write. The branch holds status.json and nothing
+# Run from a checkout of main by the `status` job of db-publish.yml,
+# db-sign.yml and db-backfill.yml, with contents:write. The branch holds status.json and nothing
 # else, one small commit per run; it is created on first use. The writer
 # workflows share the db-artifact-writer concurrency group, so two runs never
 # push it at once.

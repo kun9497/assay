@@ -11,9 +11,13 @@
 #          Actions tab nobody opens (two nightlies failed unseen on
 #          2026-08-04 and 08-05).
 # success: if an issue is open, say which run recovered, unpin and close it.
-# cancelled / skipped: nothing. A run cancelled by its concurrency group is
-#          not a failure, and alerting on it would teach the reader to
-#          ignore the issue.
+# cancelled: treated as a failure. A job that hits timeout-minutes reaches
+#          the alert job as `cancelled` (expressions cannot tell the two
+#          apart), and these workflows never cancel a running job through
+#          their concurrency group (cancel-in-progress: false), so a
+#          cancelled run is a hung one or one a person stopped -- a hung
+#          nightly is exactly what must not pass unseen.
+# skipped: nothing; the watched job never ran.
 #
 # One issue per workflow, found by its exact title, so a week of failed
 # nightlies is one issue with seven comments rather than seven issues.
@@ -30,8 +34,13 @@ when=$(date -u +%Y-%m-%dT%H:%MZ)
 
 case "$result" in
 success | failure) ;;
-cancelled | skipped)
-	echo "ops-alert: ${workflow} ${result}; nothing to do"
+cancelled)
+	# Reported as a failure, worded so a hand-cancel is recognisable.
+	result=failure
+	what="was cancelled or timed out"
+	;;
+skipped)
+	echo "ops-alert: ${workflow} skipped; nothing to do"
 	exit 0
 	;;
 *)
@@ -40,20 +49,26 @@ cancelled | skipped)
 	;;
 esac
 
+what="${what:-failed}"
+
 # The open issue for this workflow, matched on the whole title: a search
-# would also match "ops: db-publish-v2 is failing".
-open=$(gh issue list --label "$label" --state open --limit 100 --json number,title \
-	--jq ".[] | select(.title == \"${title}\") | .number" | head -n 1)
+# would also match "ops: db-publish-v2 is failing". Captured on its own,
+# not piped: a failed lookup must fail this script (set -e), never read as
+# "no open issue" -- that would open a duplicate on a failure night and
+# leave the old issue open and pinned on a recovery.
+found=$(gh issue list --label "$label" --state open --limit 100 --json number,title \
+	--jq ".[] | select(.title == \"${title}\") | .number")
+open=$(printf '%s\n' "$found" | head -n 1)
 
 if [ "$result" = "failure" ]; then
 	if [ -n "$open" ]; then
-		gh issue comment "$open" --body "Failed again at ${when}: ${url}"
+		gh issue comment "$open" --body "Again: ${workflow} ${what} at ${when}: ${url}"
 		echo "ops-alert: commented on #${open}"
 		exit 0
 	fi
 	# --force: create the label if it does not exist, leave it if it does.
 	gh label create "$label" --color B60205 --description "An ops workflow is failing" --force >/dev/null
-	new=$(gh issue create --title "$title" --label "$label" --body "\`${workflow}\` failed at ${when}.
+	new=$(gh issue create --title "$title" --label "$label" --body "\`${workflow}\` ${what} at ${when}.
 
 Run: ${url}
 

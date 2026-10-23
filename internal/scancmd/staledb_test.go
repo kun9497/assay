@@ -114,3 +114,33 @@ func TestStaleDBWarning_Boundary(t *testing.T) {
 		t.Errorf("an undated database was warned about: %q", buf.String())
 	}
 }
+
+// D139's central choice: the warning reads BuiltAt, never the upstream
+// data's age. A database built today over a dead feed (the live artifact's
+// dataAsOf is 2025-03-06, Amazon ALAS) is current and must not warn;
+// --db-max-age is where data age is judged.
+func TestRun_NoWarningForAFreshBuildOverOldUpstreamData(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(store.Meta{
+		BuiltAt: time.Now().Add(-time.Hour).UTC(),
+		Providers: map[string]store.Provenance{
+			"osv": {Ecosystems: []string{"Go"}, DataAsOf: time.Now().AddDate(-1, 0, 0).UTC()},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), path, goSBOM(t), Options{}, &out, &errOut); code != 0 {
+		t.Fatalf("Run = %d, want 0\nstderr: %s", code, errOut.String())
+	}
+	if strings.Contains(errOut.String(), "database was built") {
+		t.Errorf("a database built an hour ago was warned about for its year-old upstream data:\n%s", errOut.String())
+	}
+}

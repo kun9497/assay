@@ -92,7 +92,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	ref := fs.String("ref", dbcmd.Ref(dbcmd.DefaultRef), "the published tag to describe")
 	prev := fs.String("prev", "", "the previous status.json, if any")
 	out := fs.String("out", "status.json", "where to write status.json")
-	workflow := fs.String("workflow", "", "the workflow reporting (db-publish, db-sign)")
+	workflow := fs.String("workflow", "", "the workflow reporting (db-publish, db-sign, db-backfill)")
 	result := fs.String("result", "", "the run's result: success, failure or cancelled")
 	runURL := fs.String("run-url", "", "the run's URL")
 	if err := fs.Parse(args); err != nil {
@@ -190,10 +190,18 @@ func describe(ctx context.Context, ref string, at time.Time) (*Artifact, error) 
 		BuiltAt: m.BuiltAt, DataAsOf: m.DataAsOf, DataAsOfSource: m.DataAsOfSource, ObservedAt: at,
 	}
 	keyID, err := trust.Verify(ctx, r.Context(), d, trustedKeys(), opts...)
-	if err != nil {
-		a.SignatureError = err.Error()
-	} else {
+	switch {
+	case err == nil:
 		a.Signed, a.SignedBy = true, keyID
+	case errors.Is(err, trust.ErrNotSigned), errors.Is(err, trust.ErrNoKeyVerifies):
+		// A finding about the artifact: published as signed:false.
+		a.SignatureError = err.Error()
+	default:
+		// The signature could not be fetched (a 403, a 5xx after retries).
+		// That says nothing about whether the artifact is signed, and
+		// signed:false is the outage signal, so the read as a whole fails
+		// and the previous description is kept beside the error.
+		return nil, fmt.Errorf("read signature: %w", err)
 	}
 	return a, nil
 }

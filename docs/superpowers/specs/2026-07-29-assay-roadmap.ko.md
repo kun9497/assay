@@ -5711,14 +5711,17 @@ D127 의 아티팩트 기록은 pull 시각을 실을 뿐 서명 시각은 아�
 **결정.** 운영 워크플로 다섯(`db-publish`, `db-sign`, `db-backfill`, `scanner-diff`, `release`)은
 지켜보는 잡의 결과로 `scripts/ops-alert.sh` 를 돌리는 `alert` 잡으로 끝난다. 실패하면 제목이
 `ops: <workflow> is failing` 인 열린 이슈에 댓글을 달거나, 없으면 새로 열어 `ops-alert` 라벨을 붙이고
-고정한다. 다음 성공 때는 어느 런이 복구했는지 댓글을 달고 고정을 풀고 닫는다. 취소되거나 건너뛴 런은
-아무것도 하지 않는다. 이슈는 제목 전체로 찾으므로 일주일 실패한 나이틀리는 댓글 일곱 개짜리 이슈
-하나다. `db-publish` 와 `db-sign` 은 `status` 잡으로도 끝난다: `cmd/dbstatus` 가 지금 태그(digest,
+고정한다. 다음 성공 때는 어느 런이 복구했는지 댓글을 달고 고정을 풀고 닫는다. 취소된 런은 "취소 또는
+시간 초과" 로 경보한다: `timeout-minutes` 에 걸린 잡은 alert 잡에 `cancelled` 로 도착하고, 이
+워크플로들은 concurrency 그룹으로 실행 중인 잡을 취소하지 않으므로 취소는 멈춘 것이거나 사람이 한
+것이다. 건너뛴 런은 아무것도 하지 않는다. 조회가 실패하면 "열린 이슈 없음" 으로 읽지 않고 경보가
+실패한다. 이슈는 제목 전체로 찾으므로 일주일 실패한 나이틀리는 댓글 일곱 개짜리 이슈
+하나다. `db-publish`, `db-sign`, `db-backfill` 은 `status` 잡으로도 끝나고, 그 alert 잡은 이것도 지켜본다: `cmd/dbstatus` 가 지금 태그(digest,
 스키마, `builtAt`, `dataAsOf` 와 그 출처, 내장 키로 서명이 검증되는지)를 읽어 `status.json` 을 쓰고,
 `scripts/publish-status.sh` 가 그것을 orphan `status` 브랜치에 커밋한다. 주소는
 `https://raw.githubusercontent.com/kun9497/assay/status/status.json` 이다. `lastRun` 과 `lastSuccess`
-는 `db-publish` 만 움직이고, `db-sign` 은 `published` 만 갱신한다. 태그를 읽을 수 없으면 이전 설명을
-`publishedError` 옆에 남긴다. `signed` 는 절대 생략하지 않는다.
+는 `db-publish` 만 움직이고, 나머지는 `published` 만 갱신한다. 태그를 읽을 수 없거나 서명을 가져올 수
+없으면 이전 설명을 `publishedError` 옆에 남긴다; `signed: false` 는 서명이 없거나 틀릴 때만 게시한다. `signed` 는 절대 생략하지 않는다.
 
 **왜.** 아무도 호출받지 않았다: 2026-08-04 와 08-05 의 나이틀리 둘이 아무도 모르게 실패했고, D137
 이후로는 서명 단계 실패가 모든 고객의 `db update` 장애다. 고객에게도 신호가 없었다: `db status` 는 날짜

@@ -5957,15 +5957,21 @@ registry; D127's artifact record carries the pull time, not the signing time.
 `release`) end with an `alert` job that runs `scripts/ops-alert.sh` on the watched job's
 result. On a failure it comments on the open issue titled `ops: <workflow> is failing`, or
 opens one, labels it `ops-alert` and pins it. On the next success it comments which run
-recovered, unpins it and closes it. A cancelled or skipped run does nothing. The issue is found
+recovered, unpins it and closes it. A cancelled run is alerted on as "cancelled or timed out":
+a job that hits `timeout-minutes` reaches the alert job as `cancelled`, and these workflows
+never cancel a running job through their concurrency group, so a cancel is a hang or a person.
+A skipped run does nothing. A lookup that fails fails the alert rather than reading as "no
+open issue". The issue is found
 by its whole title, so a week of failed nightlies is one issue with seven comments.
-`db-publish` and `db-sign` also end with a `status` job: `cmd/dbstatus` reads the live tag
+`db-publish`, `db-sign` and `db-backfill` also end with a `status` job, and their alert job
+watches it too: `cmd/dbstatus` reads the live tag
 (digest, schema, `builtAt`, `dataAsOf` and its source, and whether the signature verifies under
 the embedded keys) and writes `status.json`, which `scripts/publish-status.sh` commits to an
 orphan `status` branch, served at
 `https://raw.githubusercontent.com/kun9497/assay/status/status.json`. `lastRun` and
-`lastSuccess` are `db-publish`'s alone; `db-sign` refreshes only `published`. A tag that cannot
-be read keeps the previous description beside `publishedError`. `signed` is never omitted.
+`lastSuccess` are `db-publish`'s alone; the others refresh only `published`. A tag that cannot
+be read, or whose signature cannot be fetched, keeps the previous description beside
+`publishedError`; `signed: false` is published only for a signature that is absent or wrong. `signed` is never omitted.
 
 **Why.** Nothing paged anyone: two nightlies failed unseen on 2026-08-04 and 08-05, and since
 D137 a failed sign step is an outage for every customer's `db update`. A customer had no signal
