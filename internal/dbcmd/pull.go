@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -109,8 +111,7 @@ func Pull(ctx context.Context, dbPath, ref string, allowUnsigned bool, stdout, s
 	// that dies halfway must not leave a truncated database where a scan
 	// will find it and report a confident, wrong, clean result.
 	tmp := dbPath + ".tmp"
-	_ = os.Remove(tmp)
-	if err := dbartifact.Unpack(img, tmp); err != nil {
+	if err := unpackWithRetry(img, tmp, stderr); err != nil {
 		os.Remove(tmp)
 		fmt.Fprintf(stderr, "error: unpack database: %v\n", err)
 		return 2
@@ -293,8 +294,7 @@ func PullSeed(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer)
 	// that dies halfway must not leave a truncated file where dbcmd.Update
 	// will find and read it next.
 	tmp := dbPath + ".tmp"
-	_ = os.Remove(tmp)
-	if err := dbartifact.Unpack(img, tmp); err != nil {
+	if err := unpackWithRetry(img, tmp, stderr); err != nil {
 		os.Remove(tmp)
 		fmt.Fprintf(stderr, "error: unpack database: %v\n", err)
 		return 2
@@ -402,3 +402,59 @@ func removeLegacySidecar(dbPath string, stderr io.Writer) {
 		fmt.Fprintf(stderr, "warning: remove the previous pull's sidecar record: %v\n", err)
 	}
 }
+
+// transferAttempts is how many times a pull downloads the database layer
+// before giving up on an interrupted transfer (D140).
+const transferAttempts = 3
+
+// unpackWithRetry is dbartifact.Unpack, attempted up to transferAttempts
+// times while the failure is an interrupted transfer (D140).
+//
+// go-containerregistry already retries each REQUEST three times on a 5xx,
+// a 429 or a dropped connection; what it cannot retry is a response body
+// cut after the request succeeded, which is how a 60 MB layer download
+// fails on a flaky link or a registry restarting mid-stream. Each attempt
+// re-requests the layer from the start and rewrites tmp from empty. Any
+// other failure -- a layer that is not gzip, a digest that does not match,
+// no database layer at all -- is the artifact's, not the link's, and fails
+// at once: retrying it would only repeat the same answer three times.
+func unpackWithRetry(img v1.Image, tmp string, stderr io.Writer) error {
+	var err error
+	for n := 1; n <= transferAttempts; n++ {
+		_ = os.Remove(tmp)
+		if err = dbartifact.Unpack(img, tmp); err == nil {
+			return nil
+		}
+		if !interruptedTransfer(err) {
+			return err
+		}
+		if n < transferAttempts {
+			fmt.Fprintf(stderr, "download interrupted (%v); retrying (%d/%d)\n", err, n+1, transferAttempts)
+			transferRetryPause(n)
+		}
+	}
+	return fmt.Errorf("after %d attempts: %w", transferAttempts, err)
+}
+
+// interruptedTransfer reports whether err is a transfer cut short rather
+// than a property of the artifact: the stream ended early, the peer reset
+// or closed the connection, a network read failed, or it timed out. A
+// failed network read is matched as a *net.OpError with Op "read" rather
+// than by errno, because the errno differs by platform: a reset on Windows
+// is WSAECONNRESET (10054), which syscall.ECONNRESET does not match.
+func interruptedTransfer(err error) bool {
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.EPIPE) || errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	var op *net.OpError
+	if errors.As(err, &op) && op.Op == "read" {
+		return true
+	}
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
+}
+
+// transferRetryPause waits before download attempt n+1 (n is the attempt
+// that failed). A variable so tests do not sleep.
+var transferRetryPause = func(n int) { time.Sleep(time.Duration(n*n) * 2 * time.Second) }

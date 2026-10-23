@@ -87,6 +87,23 @@ pull-through 캐시는 assay 가 그 태그를 이름으로 요청하므로 필�
 거부합니다 — 그것이 서명이 존재하는 이유인 경우이기 때문입니다. `db build --seed`도 같은
 검사를 하며, 건너뛸 방법은 없습니다.
 
+**발행된 데이터베이스가 최신인가?** 발행 잡은 매일 밤 실행 뒤 [`status.json`](https://raw.githubusercontent.com/kun9497/assay/status/status.json)을
+씁니다. 런 자신의 로그가 아니라 지금 태그에 걸린 것을 읽어서 씁니다:
+
+- `lastSuccess.finishedAt`: 마지막으로 발행에 성공한 나이틀리. 나이틀리는 24시간마다 돌므로
+  약 36시간보다 오래되면 경보하세요.
+- `lastRun`: 결과와 무관하게 가장 최근 나이틀리.
+- `published`: `db update`가 지금 받아 갈 것 — `digest`, `builtAt`, `dataAsOf`(`dataAsOfSource`
+  포함), `signed`/`signedBy`. `signed: false`는 발행자가 digest 에 서명할 때까지 모든
+  `db update`가 거부되고 있다는 뜻입니다.
+
+실패한 운영 워크플로는 복구될 때까지 이 저장소에 고정 이슈 하나를 열어 둡니다.
+
+`db update`는 중간에 끊긴 레이어 다운로드를 총 세 번까지 다시 시도합니다(D140). 요청 단위
+실패(5xx, 429, 응답 전에 끊긴 연결)는 원래 재시도됐습니다. 모든 스캔은 데이터베이스가 빌드된 지 7일이
+넘으면 stderr 에 경고를 냅니다(D139). 게이트가 아니라 알림이라 exit 코드와 stdout 은 그대로이고,
+오래된 데이터로 스캔을 실패시키려면 여전히 `--db-max-age`를 쓰세요.
+
 데이터베이스는 스캔과 직교합니다: 잡마다 한 번 갱신(또는 캐시)하면, 이후 모든 `assay
 scan`은 읽기만 합니다. SBOM이나 로컬 tarball 스캔은 네트워크 호출을 전혀 하지 않습니다.
 

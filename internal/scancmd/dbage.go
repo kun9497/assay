@@ -280,3 +280,38 @@ func roundAge(d time.Duration) string {
 	}
 	return d.Round(time.Minute).String()
 }
+
+// staleAfter is how old a database may be before every scan warns (D139).
+// The published database is rebuilt every night, so a week is seven missed
+// nightlies -- long past a transient failure, short enough that the
+// advisories it is missing are a week's, not a quarter's.
+const staleAfter = 7 * 24 * time.Hour
+
+// warnIfStale prints D139's warning when the database was built more than
+// staleAfter before now. It never changes the exit code and writes only to
+// stderr, so a report on stdout is byte-identical with or without it.
+//
+// Measured from BuiltAt, not from the upstream data's age, unlike D59 --
+// on purpose. The two answer different questions. --db-max-age asks "is the
+// data this scan consulted current?", and the answer for a dead upstream
+// feed (Amazon Linux 2 extras, frozen Debian 11) is "no, and it never will
+// be": a warning on that would fire on every such scan forever, and a
+// warning that always fires is read by nobody. This one asks "did this
+// database stop being refreshed?" -- the caller's `db update` stopped
+// running, or the publish did -- and BuiltAt answers it exactly, because a
+// pulled database carries the nightly's build time, not the pull's.
+//
+// An undated database is not called old: this is a nudge, not a gate, and
+// --db-max-age is where an unknown age is refused (D17's discipline).
+func warnIfStale(m store.Meta, now time.Time, stderr io.Writer) {
+	if m.BuiltAt.IsZero() {
+		return
+	}
+	age := now.Sub(m.BuiltAt)
+	if age <= staleAfter {
+		return
+	}
+	fmt.Fprintf(stderr, "warning: this database was built %d days ago (%s); advisories published since are missing\n",
+		int(age.Hours()/24), m.BuiltAt.Format("2006-01-02"))
+	fmt.Fprintln(stderr, "  run `assay db update`, or set --db-max-age to fail a scan on stale data instead")
+}

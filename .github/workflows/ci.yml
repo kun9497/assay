@@ -76,3 +76,5 @@ jobs:
       # rotation. The harness needs only openssl, python3 and tar.
       - name: Installer harness
         run: sh scripts/install_test.sh
+      - name: Ops-alert harness (D138)
+        run: sh scripts/ops_alert_test.sh

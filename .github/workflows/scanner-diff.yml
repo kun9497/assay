@@ -164,3 +164,23 @@ jobs:
 
       - name: Fail the job on a breach or an untrustworthy target
         run: exit ${{ steps.diff.outputs.exit_code }}
+
+  # D138: one pinned issue per failing ops workflow, closed by the next
+  # success. always(), so it runs when the job it watches failed; a
+  # cancelled or skipped run is ignored by the script.
+  alert:
+    needs: [diff]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Open, update or close the pinned failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RESULT: ${{ needs.diff.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: sh scripts/ops-alert.sh scanner-diff "$RESULT" "$RUN_URL"

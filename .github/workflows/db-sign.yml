@@ -89,3 +89,44 @@ jobs:
             fi
           done
           [ "$ok" = 1 ] || { cat /tmp/verify-*.log; echo "::error::the signature just written verifies under no committed key"; exit 2; }
+
+  # D138: status.json on the `status` branch, from the live tag, after every
+  # run -- success or failure, so lastSuccess ages visibly when nights fail.
+  status:
+    needs: [sign]
+    if: always() && needs.sign.result != 'skipped'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: Publish status.json
+        env:
+          RESULT: ${{ needs.sign.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: sh scripts/publish-status.sh db-sign "$RESULT" "$RUN_URL"
+
+  # D138: one pinned issue per failing ops workflow, closed by the next
+  # success. always(), so it runs when the job it watches failed; a
+  # cancelled or skipped run is ignored by the script.
+  alert:
+    needs: [sign, status]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Open, update or close the pinned failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          # The watched job's result, unless it succeeded and status.json
+          # could not be published: that is a failure too.
+          RESULT: ${{ (needs.sign.result == 'success' && needs.status.result == 'failure') && 'failure' || needs.sign.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: sh scripts/ops-alert.sh db-sign "$RESULT" "$RUN_URL"

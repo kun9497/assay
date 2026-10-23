@@ -71,3 +71,23 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "docs: pin the install one-liner to ${GITHUB_REF_NAME} (${GITHUB_SHA})"
           git push origin main
+
+  # D138: one pinned issue per failing ops workflow, closed by the next
+  # success. always(), so it runs when the job it watches failed; a
+  # cancelled or skipped run is ignored by the script.
+  alert:
+    needs: [goreleaser]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Open, update or close the pinned failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RESULT: ${{ needs.goreleaser.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: sh scripts/ops-alert.sh release "$RESULT" "$RUN_URL"

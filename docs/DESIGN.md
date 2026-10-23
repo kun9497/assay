@@ -420,7 +420,8 @@ signed. A red sign or self-check step is never cosmetic: dispatch `db-sign.yml` 
 digest the run printed, then confirm the tag exists (`crane manifest
 ghcr.io/kun9497/assay-db:sha256-<digest>.sig`). Before the second half merged (2026-10-22),
 signing ran for one day with nothing refusing, so the first signed digest could be published
-before any binary required it.
+before any binary required it. Since D138 a failed sign step opens the pinned `ops: db-publish is failing`
+issue, and `status.json` shows `"signed": false` for the live digest until it is fixed.
 
 **Bound the first pass; do not reach for the full feed.** An unbounded build is about seven
 hours and there is no resume point — `db build` assembles a temporary database and installs it
@@ -910,6 +911,14 @@ exited 0 while 24 findings went unmentioned.
       copy, `--allow-unsigned` installs and records `Unverified`, a wrong signature is
       refused regardless, `db build --seed` has no opt-out; release checksums signed and the
       installer verifies them with `openssl` (`install.sh`, pinned by commit in the README)
+- [x] A failing ops workflow keeps one pinned issue open until it recovers, and the nightly
+      publishes `status.json` (last run, last success, the live tag's digest, dates and
+      signature) to the `status` branch (D138)
+- [x] Every scan warns on stderr when its database was built more than seven days ago (D139) —
+      measured from `BuiltAt`, so a dead upstream feed does not warn forever; exit code and
+      stdout unchanged
+- [x] `db update` and `db build --seed` retry a layer download cut mid-stream, three attempts
+      (D140); an artifact's own defect is not retried
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15

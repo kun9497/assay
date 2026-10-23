@@ -80,7 +80,10 @@ score withdraws its seeded rating and `db push` tolerates exactly that drop (D13
 verify the signature against keys embedded in the binary (`internal/dbcmd/trust`) before
 writing anything — unsigned is refused with the `.sig` tag a mirror must copy,
 `--allow-unsigned` installs and records it, a wrong signature is refused regardless; release
-checksums are signed and `install.sh` verifies them with `openssl`. Findings
+checksums are signed and `install.sh` verifies them with `openssl`. Since D138 every ops
+workflow keeps one pinned issue open while it fails (`scripts/ops-alert.sh`) and the nightly
+publishes `status.json` to the `status` branch (`cmd/dbstatus`); since D139 a scan warns when its
+database was built over seven days ago; since D140 a layer download cut mid-stream is retried. Findings
 can be waived through a
 `.assay.yaml` ignore file (D102 — reason mandatory, expiry optional) or a producer's
 OpenVEX document (`--vex`, repeatable, D104 — not_affected/fixed suppress, a reasonless
