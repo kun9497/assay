@@ -62,7 +62,9 @@ NVD/EPSS/KEV를 다루려면 `--db-max-rating-age`를 따로 넘기십시오 —
 의존성은 이미지 스캔이 인벤토리화하지 않으므로(D70, [미룸](deferred-decisions.ko.md)),
 여기서 통과해도 그것들에 대해서는 아무것도 말해주지 않습니다 — 그런 경우에는 애플리케이션
 자체의 락파일이나 소스 디렉터리(`assay scan dir:.`), 빌드된 바이너리나 jar, 혹은 이미지의
-SBOM을 게이팅하십시오.
+SBOM을 게이팅하십시오. 모든 이미지 스캔은 이것을 스스로 밝힙니다(D141): stderr 의 `note:` 줄과
+SARIF 의 `assay/inventory-scope` 노트가 있어, 코드 스캐닝 탭에 이 문장 없는 빈 이미지 스캔이
+보이는 일은 없습니다.
 
 코드 스캐닝 업로드를 가능하게 하는 것은 `security-events: write` 권한입니다.
 

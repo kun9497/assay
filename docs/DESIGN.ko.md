@@ -882,6 +882,8 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       죽은 업스트림 피드가 영원히 경고하지 않음; exit 코드와 stdout 은 그대로
 - [x] `db update`와 `db build --seed`는 중간에 끊긴 레이어 다운로드를 세 번까지 재시도 (D140);
       아티팩트 자체의 결함은 재시도하지 않음
+- [x] 모든 이미지 스캔이 이미지 안의 애플리케이션 패키지를 검사하지 않았음을 밝힘 (D141) — stderr 의
+      `note:` 와 SARIF 의 `assay/inventory-scope` note 결과·알림; D70 공백 자체는 열린 채(deferred-decisions)
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨

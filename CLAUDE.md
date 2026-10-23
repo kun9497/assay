@@ -83,7 +83,9 @@ writing anything — unsigned is refused with the `.sig` tag a mirror must copy,
 checksums are signed and `install.sh` verifies them with `openssl`. Since D138 every ops
 workflow keeps one pinned issue open while it fails (`scripts/ops-alert.sh`) and the nightly
 publishes `status.json` to the `status` branch (`cmd/dbstatus`); since D139 a scan warns when its
-database was built over seven days ago; since D140 a layer download cut mid-stream is retried. Findings
+database was built over seven days ago; since D140 a layer download cut mid-stream is retried; since D141 every image scan says on
+stderr and in SARIF (`assay/inventory-scope`) that application packages inside the image were
+not checked. Findings
 can be waived through a
 `.assay.yaml` ignore file (D102 — reason mandatory, expiry optional) or a producer's
 OpenVEX document (`--vex`, repeatable, D104 — not_affected/fixed suppress, a reasonless

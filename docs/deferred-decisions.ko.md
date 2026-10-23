@@ -1666,6 +1666,9 @@ cataloger만 채우기 때문(`internal/pkgmeta/package.go:43`, D95); 빈 인벤
   밝힙니다 — OS 패키지와 Bitnami 마커는 읽었고 이미지 안의 애플리케이션 패키지는 읽지
   않았다고 — `Run`이 이미 찍는 `scanned … as an image` 줄 옆에(`scancmd.go:436`). 사람이
   읽기에는 정직하지만 `--output json`과 SARIF에는 보이지 않습니다.
+  **2026-10-23 D141 로 구현**, SARIF 도 포함: GitHub code scanning 은 결과만 보여주므로 note
+  수준의 `assay/inventory-scope` 결과와 알림. 공백을 밝힌 것이지 메운 것은 아니며, 메우는 것은
+  아래 선택지들입니다.
 - **JSON과 SARIF의 기계 판독 가능한 `inventoryScope`(M, 스키마 변경).** 2026-10-01에 D111로
   완료: JSON은(SARIF는 아님) 이미지 타깃에 `inventoryScope`(`osPackages`, `bitnami`,
   `applicationPackages`)를 얻었고, 이 옵션이 함께 설계하자고 제안한 대상 수준 `coverage[]`
