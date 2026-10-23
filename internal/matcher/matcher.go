@@ -439,16 +439,20 @@ func ubuntuLineageOf(version string) string {
 // would match neither and report every FIPS package clean — the exact silent
 // miss this detector exists to prevent.
 //
-// Three FIPS spellings, measured across every version in the Ubuntu OSV dump
-// of 2026-10-23 (95.2M version strings): `+Fips1` (22.04 onwards), `.fips.N`
-// (16.04, 18.04 and 20.04: 1.1.1f-1ubuntu2.fips.20) and `<digit>fipsN` with no
-// separator (1.0.3-2fips3). The last two were missed until the 2026-10-22
+// Three FIPS spellings, measured across every version occurrence in the Ubuntu
+// OSV dump of 2026-10-23 (95.2M occurrences), none of them tied to a release:
+// `+FipsN` (22.04 userspace, and 20.04's own FIPS kernels: 5.4.0-1124.134+fips1),
+// `.fips.N` (16.04 to 20.04 userspace, and a few 22.04 builds:
+// 1.1.1f-1ubuntu2.fips.20, 1:8.9p1-3ubuntu1.fips.0~ppa3) and `<digit>fipsN`
+// with no separator (1.0.3-2fips3). Do not scope an alternative to a release:
+// each spans more than one. The last two were missed until the 2026-10-22
 // audit (A1), and dpkg orders `fips` above the empty string, so a missed
 // `.fips.12` build compared NEWER than the mainline fix and reported clean.
-// Adding them matched 4,658 more versions in FIPS ecosystems and none in the
-// 53.7M mainline or 34.4M Pro (ESM) versions. A FIPS kernel's version carries
-// no marker at all (4.4.0-1021.26 under linux-fips); that is the package name's
-// lineage, not the version's, and outside what this detector reads.
+// Adding them matched 4,658 more occurrences (135 distinct versions) in FIPS
+// ecosystems and none in the 53.7M mainline or 34.4M Pro (ESM) ones. What
+// stays unmatched in FIPS ecosystems is kernels whose version carries no
+// marker (4.4.0-1021.26 under linux-fips; the lineage is in the package name,
+// which this detector does not read) and libkcapi's 16.04 ~ppa builds.
 var ubuntuLineageMarker = regexp.MustCompile(`(?i)[~+](esm|fips)[0-9]|\.fips\.[0-9]|[0-9]fips[0-9]`)
 
 // oracleLineageOf names the Oracle Linux lineage a package version was built

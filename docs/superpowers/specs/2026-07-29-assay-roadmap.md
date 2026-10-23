@@ -6075,10 +6075,11 @@ to the SARIF test.
 
 ### D142 — Ubuntu's older FIPS builds are recognised as a lineage
 
-**Decision.** D53's Ubuntu lineage detector matches three FIPS spellings, not one:
-`+Fips1` (22.04 onwards, as before), `.fips.N` (16.04, 18.04, 20.04:
-`1.1.1f-1ubuntu2.fips.20`, `1.1.1-1ubuntu2.fips.2.1~18.04.23.4`) and `<digit>fipsN` with no
-separator (`1.0.3-2fips3`). The dot form requires a digit after it. ESM spellings are
+**Decision.** D53's Ubuntu lineage detector matches three FIPS spellings, not one, none
+of them tied to a release: `+FipsN` (as before: 22.04 userspace and 20.04's FIPS kernels),
+`.fips.N` (16.04 to 20.04 userspace and a few 22.04 builds: `1.1.1f-1ubuntu2.fips.20`,
+`1.1.1-1ubuntu2.fips.2.1~18.04.23.4`, `1:8.9p1-3ubuntu1.fips.0~ppa3`) and `<digit>fipsN` with
+no separator (`1.0.3-2fips3`). Each spans more than one release, so none is scoped to one. The dot form requires a digit after it. ESM spellings are
 unchanged. D133's scoping still applies: the detector runs only on `Ubuntu:` keys.
 
 **Why.** The 2026-10-22 audit (A1) found a 20.04 FIPS host judged against mainline. dpkg
@@ -6088,12 +6089,14 @@ vulnerable host, which is the direction D53 exists to prevent. The live OSV reco
 `UBUNTU-CVE-2024-0727` shows the dot spelling on all three releases.
 
 **Measured.** The full Ubuntu OSV dump of 2026-10-23 (792 MB, 95.2M version strings across
-every `Ubuntu*` ecosystem). The new pattern matches 4,658 more versions in FIPS ecosystems.
+every `Ubuntu*` ecosystem, counted per occurrence). The new pattern matches 4,658 more
+occurrences in FIPS ecosystems, 135 distinct version strings.
 It matches none of the 53.7M mainline versions and none of the 34.4M Pro (ESM) versions
 beyond what the old pattern already matched. After the change, no version in a FIPS ecosystem
-that mentions `fips` goes unmatched. What remains unmatched in FIPS ecosystems is kernels,
-whose versions (`4.4.0-1021.26` under `linux-fips`) carry no marker. That lineage lives in
-the package name, which this detector does not read. A few ESM spellings (`~esm` with no
+that mentions `fips` goes unmatched. What remains unmatched in FIPS ecosystems is almost all
+kernels whose versions carry no marker (`4.4.0-1021.26` under `linux-fips`, and some 20.04
+`linux-fips` builds), plus libkcapi's `0.13.0-0ubuntu1~ppa1`/`~ppa2` on 16.04. That lineage
+lives in the package name, which this detector does not read. A few ESM spellings (`~esm` with no
 digit, `+actuallyesm2`, `esm2` with no separator) also stay unmatched; they are outside A1
 and recorded here for a later look.
 
@@ -6104,6 +6107,9 @@ findings and one coverage skip naming FIPS and the installed version. Before the
 (`.fips` with no digit, `.fipsy.2`, `.nofips.3`, `.fips-2`, `.fips.beta`). Three mutations
 caught: the dot form dropped, the separator-less form dropped, and the dot form without its
 trailing digit. The last one survived the first table, which led to the `.fips.beta` row.
+The branch review (wf_eb4773e3-9be) added negatives for the digits around the separator-less
+form (`ubuntunofips3`, `1fipsy`; two more mutations caught) and corrected the release lists
+and the unmatched remainder above against the dump.
 
 ---
 
