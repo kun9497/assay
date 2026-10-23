@@ -922,6 +922,9 @@ exited 0 while 24 findings went unmentioned.
 - [x] Every image scan discloses that application packages inside the image were not checked
       (D141) — a `note:` on stderr and an `assay/inventory-scope` note-level result and
       notification in SARIF; the D70 gap itself stays open (deferred-decisions)
+- [x] Ubuntu 16.04/18.04/20.04 FIPS builds (`.fips.N`, `<digit>fipsN`) are lineage builds
+      and are skipped, not judged against mainline (D142, audit A1) — measured over the full
+      Ubuntu OSV dump: +4,658 FIPS versions, 0 mainline or Pro versions
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15

@@ -884,6 +884,8 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       아티팩트 자체의 결함은 재시도하지 않음
 - [x] 모든 이미지 스캔이 이미지 안의 애플리케이션 패키지를 검사하지 않았음을 밝힘 (D141) — stderr 의
       `note:` 와 SARIF 의 `assay/inventory-scope` note 결과·알림; D70 공백 자체는 열린 채(deferred-decisions)
+- [x] Ubuntu 16.04/18.04/20.04 FIPS 빌드(`.fips.N`, `<숫자>fipsN`)는 lineage 빌드로 건너뛰고 mainline 으로
+      판정하지 않음 (D142, 감사 A1) — Ubuntu OSV 전체 덤프 측정: FIPS 버전 +4,658, mainline·Pro 0
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨

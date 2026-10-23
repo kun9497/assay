@@ -6073,6 +6073,38 @@ declared, the notification dropped, the disclosure emitted for a target with no 
 branch review added the result's location, the stable fingerprint and the notification's level
 to the SARIF test.
 
+### D142 — Ubuntu's older FIPS builds are recognised as a lineage
+
+**Decision.** D53's Ubuntu lineage detector matches three FIPS spellings, not one:
+`+Fips1` (22.04 onwards, as before), `.fips.N` (16.04, 18.04, 20.04:
+`1.1.1f-1ubuntu2.fips.20`, `1.1.1-1ubuntu2.fips.2.1~18.04.23.4`) and `<digit>fipsN` with no
+separator (`1.0.3-2fips3`). The dot form requires a digit after it. ESM spellings are
+unchanged. D133's scoping still applies: the detector runs only on `Ubuntu:` keys.
+
+**Why.** The 2026-10-22 audit (A1) found a 20.04 FIPS host judged against mainline. dpkg
+orders `fips` above the empty string, so `1.1.1f-1ubuntu2.fips.12` compares newer than the
+mainline fix `1.1.1f-1ubuntu2.18`. The result was 0 findings and 0 skips, a clean report on a
+vulnerable host, which is the direction D53 exists to prevent. The live OSV record
+`UBUNTU-CVE-2024-0727` shows the dot spelling on all three releases.
+
+**Measured.** The full Ubuntu OSV dump of 2026-10-23 (792 MB, 95.2M version strings across
+every `Ubuntu*` ecosystem). The new pattern matches 4,658 more versions in FIPS ecosystems.
+It matches none of the 53.7M mainline versions and none of the 34.4M Pro (ESM) versions
+beyond what the old pattern already matched. After the change, no version in a FIPS ecosystem
+that mentions `fips` goes unmatched. What remains unmatched in FIPS ecosystems is kernels,
+whose versions (`4.4.0-1021.26` under `linux-fips`) carry no marker. That lineage lives in
+the package name, which this detector does not read. A few ESM spellings (`~esm` with no
+digit, `+actuallyesm2`, `esm2` with no separator) also stay unmatched; they are outside A1
+and recorded here for a later look.
+
+**Verified.** At the caller: the audit's exact 20.04 host (`libssl1.1`
+`1.1.1f-1ubuntu2.fips.12`, source `openssl`, against a mainline fix at `…2.18`) gives 0
+findings and one coverage skip naming FIPS and the installed version. Before the fix it was
+0 and 0. The detector table covers every live spelling plus adversarial negatives
+(`.fips` with no digit, `.fipsy.2`, `.nofips.3`, `.fips-2`, `.fips.beta`). Three mutations
+caught: the dot form dropped, the separator-less form dropped, and the dot form without its
+trailing digit. The last one survived the first table, which led to the `.fips.beta` row.
+
 ---
 
 ## 3. Architecture
