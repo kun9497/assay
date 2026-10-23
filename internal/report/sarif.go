@@ -222,8 +222,12 @@ func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 			Locations: []sarifLocation{{
 				PhysicalLocation: sarifPhysical{ArtifactLocation: sarifArtifact{URI: uri}},
 			}},
-			// One alert per target, stable across runs.
-			PartialFingerprints: map[string]string{fingerprintKey: hash(inventoryScopeRuleID, uri)},
+			// Keyed on the rule alone, not the target: CI scans a per-commit
+			// tag or a per-run archive path, and a fingerprint on that string
+			// would close the alert and open a new one on every upload,
+			// undoing a dismissal each time. One upload category is one image
+			// pipeline, so one stable alert per category is the right count.
+			PartialFingerprints: map[string]string{fingerprintKey: hash(inventoryScopeRuleID)},
 		})
 		notes = append(notes, sarifNotification{Level: "note", Message: sarifText{Text: msg}})
 	}
@@ -383,8 +387,9 @@ func notReadRule() sarifRule {
 	}
 }
 
-// frozenDataRule is D111's rule, mirroring notReadRule: declared whenever at
-// least one assay/frozen-data result is emitted, and never otherwise.
+// inventoryScopeRule is D141's rule: declared whenever the assay/inventory-scope
+// result is emitted (an image scan whose application packages were not read),
+// and never otherwise.
 func inventoryScopeRule() sarifRule {
 	return sarifRule{
 		ID:               inventoryScopeRuleID,
@@ -403,6 +408,8 @@ func inventoryScopeRule() sarifRule {
 	}
 }
 
+// frozenDataRule is D111's rule, mirroring notReadRule: declared whenever at
+// least one assay/frozen-data result is emitted, and never otherwise.
 func frozenDataRule() sarifRule {
 	return sarifRule{
 		ID:               frozenDataRuleID,

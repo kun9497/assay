@@ -3,6 +3,8 @@ package scancmd
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -49,12 +51,19 @@ func TestRun_D141_ImageScanSARIFCarriesTheScopeResult(t *testing.T) {
 				} `json:"driver"`
 			} `json:"tool"`
 			Results []struct {
-				RuleID  string `json:"ruleId"`
-				Level   string `json:"level"`
-				Message struct{ Text string } `json:"message"`
+				RuleID    string                `json:"ruleId"`
+				Level     string                `json:"level"`
+				Message   struct{ Text string } `json:"message"`
+				Locations []struct {
+					PhysicalLocation struct {
+						ArtifactLocation struct{ URI string } `json:"artifactLocation"`
+					} `json:"physicalLocation"`
+				} `json:"locations"`
+				Fingerprints map[string]string `json:"partialFingerprints"`
 			} `json:"results"`
 			Invocations []struct {
 				Notes []struct {
+					Level   string                `json:"level"`
 					Message struct{ Text string } `json:"message"`
 				} `json:"toolExecutionNotifications"`
 			} `json:"invocations"`
@@ -78,6 +87,16 @@ func TestRun_D141_ImageScanSARIFCarriesTheScopeResult(t *testing.T) {
 			if res.Level != "note" || !strings.Contains(res.Message.Text, "application packages") {
 				t.Errorf("scope result = %+v, want a note naming application packages", res)
 			}
+			// GitHub code scanning does not display a result with no
+			// location, which is the reason D141 emits a result at all.
+			if len(res.Locations) != 1 || !strings.HasPrefix(res.Locations[0].PhysicalLocation.ArtifactLocation.URI, "docker-archive:") {
+				t.Errorf("scope result locations = %+v, want the scanned target", res.Locations)
+			}
+			// The fingerprint is the rule's alone, so a per-commit tag or a
+			// per-run archive path does not reopen the alert on every upload.
+			if got, want := res.Fingerprints["assay/pkg-advisory/v1"], scopeFingerprint(); got != want {
+				t.Errorf("scope fingerprint = %q, want %q (keyed on the rule alone)", got, want)
+			}
 		}
 	}
 	if !found {
@@ -85,7 +104,12 @@ func TestRun_D141_ImageScanSARIFCarriesTheScopeResult(t *testing.T) {
 	}
 	noted := false
 	for _, n := range r.Invocations[0].Notes {
-		noted = noted || strings.Contains(n.Message.Text, "application packages")
+		if strings.Contains(n.Message.Text, "application packages") {
+			noted = true
+			if n.Level != "note" {
+				t.Errorf("scope notification level = %q, want note: it describes scope, not a failure", n.Level)
+			}
+		}
 	}
 	if !noted {
 		t.Error("no inventory-scope notification")
@@ -106,4 +130,11 @@ func TestRun_D141_NoDisclosureOutsideAnImage(t *testing.T) {
 			t.Errorf("output %q: a directory scan disclosed an image scope\nstdout: %s\nstderr: %s", output, out.String(), errOut.String())
 		}
 	}
+}
+
+// scopeFingerprint is what report.hash computes for the one-part key
+// (the rule ID alone): SHA-256 of the rule ID, hex.
+func scopeFingerprint() string {
+	sum := sha256.Sum256([]byte("assay/inventory-scope"))
+	return hex.EncodeToString(sum[:])
 }

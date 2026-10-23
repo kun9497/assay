@@ -5789,8 +5789,9 @@ seed pull 을 실패시켰다. 아티팩트 자체의 결함(gzip 아님, digest
 **결정.** 이미지 스캔의 인벤토리 범위가 애플리케이션 패키지를 읽지 않았다고 보고하면 — 오늘의 모든
 이미지 스캔이고 다른 대상 종류는 아니다 — `Run` 은 stderr 에 검사하지 않은 것(npm, Python, Java, Go
 바이너리)과 대신 스캔할 것(락파일, 디렉터리, 바이너리, 또는 이미지의 SBOM)을 적은 `note:` 를 찍고,
-SARIF 렌더러는 선언된 `assay/inventory-scope` 규칙 아래 note 수준 결과 하나와 같은 알림을 더한다. 위치와
-fingerprint 는 스캔한 대상이다. 판정, exit 코드, stdout 의 표와 JSON 은 그대로다.
+SARIF 렌더러는 선언된 `assay/inventory-scope` 규칙 아래 note 수준 결과 하나와 같은 알림을 더한다. 위치는
+스캔한 대상이고 fingerprint 는 규칙 하나에만 걸어, 커밋마다 바뀌는 태그나 런마다 바뀌는 아카이브 경로가
+업로드마다 알림을 닫았다 다시 열지 않게 한다. 판정, exit 코드, stdout 의 표와 JSON 은 그대로다.
 
 **왜.** D70 의 공백은 조용하다: `node_modules` 나 Go 바이너리에 Critical 이 있는 이미지가 exit 0 과
 "No known vulnerabilities found" 로 끝난다(측정: `ubi8/nodejs-18` 의 `tar`, SLE BCI 15.6 의
@@ -5804,7 +5805,8 @@ GO-2026-4337). D111 은 그 사실을 JSON 의 `inventoryScope` 에 넣었지만
 **검증.** 호출자에서: 이미지 스캔의 stderr 에 각 생태계와 두 처방을 담은 note 가 있고 stdout 에는
 없다; 그 SARIF 는 규칙을 선언하고 note 수준 결과와 알림을 싣는다; 디렉터리 스캔은 표에서도 SARIF
 에서도 둘 다 없다. 변이 6개 포착: stderr note 제거, note 를 stdout 으로, SARIF 블록 끔, 규칙 미선언,
-알림 누락, 범위가 없는 대상에도 공개.
+알림 누락, 범위가 없는 대상에도 공개. 브랜치 리뷰가 결과의 위치, 안정된 fingerprint, 알림 수준을
+SARIF 테스트에 더했다.
 
 ---
 
