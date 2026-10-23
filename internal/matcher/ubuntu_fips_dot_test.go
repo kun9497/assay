@@ -81,6 +81,9 @@ func TestUbuntuLineageOf_FIPSDotSpelling(t *testing.T) {
 		{"1.1.1f-1ubuntu2.fipsy.2", ""},
 		{"2.0-1ubuntu1.nofips.3", ""},
 		{"1.0-1ubuntu1.fips-2", ""},
+		// The trailing digit is required: without it a word segment such as
+		// `.fips.beta` would mark an ordinary build as a lineage one.
+		{"2.0-1ubuntu1.fips.beta", ""},
 	} {
 		if got := ubuntuLineageOf(tt.version); got != tt.want {
 			t.Errorf("ubuntuLineageOf(%q) = %q, want %q", tt.version, got, tt.want)
