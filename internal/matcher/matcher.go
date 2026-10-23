@@ -438,7 +438,18 @@ func ubuntuLineageOf(version string) string {
 // string and `FIPS-updates` in an ecosystem key, so a case-sensitive `fips`
 // would match neither and report every FIPS package clean — the exact silent
 // miss this detector exists to prevent.
-var ubuntuLineageMarker = regexp.MustCompile(`(?i)[~+](esm|fips)[0-9]`)
+//
+// Three FIPS spellings, measured across every version in the Ubuntu OSV dump
+// of 2026-10-23 (95.2M version strings): `+Fips1` (22.04 onwards), `.fips.N`
+// (16.04, 18.04 and 20.04: 1.1.1f-1ubuntu2.fips.20) and `<digit>fipsN` with no
+// separator (1.0.3-2fips3). The last two were missed until the 2026-10-22
+// audit (A1), and dpkg orders `fips` above the empty string, so a missed
+// `.fips.12` build compared NEWER than the mainline fix and reported clean.
+// Adding them matched 4,658 more versions in FIPS ecosystems and none in the
+// 53.7M mainline or 34.4M Pro (ESM) versions. A FIPS kernel's version carries
+// no marker at all (4.4.0-1021.26 under linux-fips); that is the package name's
+// lineage, not the version's, and outside what this detector reads.
+var ubuntuLineageMarker = regexp.MustCompile(`(?i)[~+](esm|fips)[0-9]|\.fips\.[0-9]|[0-9]fips[0-9]`)
 
 // oracleLineageOf names the Oracle Linux lineage a package version was built
 // for, or "" for a mainline build (D79) — Ubuntu's rule (D53) with Oracle's
