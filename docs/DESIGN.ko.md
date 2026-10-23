@@ -887,6 +887,8 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] `.fips.N` 또는 `<숫자>fipsN` 로 쓴 Ubuntu FIPS 빌드(16.04–20.04 userspace, 22.04 일부)는 lineage
       빌드로 건너뛰고 mainline 으로 판정하지 않음 (D142, 감사 A1) — Ubuntu OSV 전체 덤프 측정: FIPS 출현
       +4,658, mainline·Pro 0
+- [x] SPDX SBOM 의 바이너리 rpm 은 purl 에 `upstream` 이 없으면 `GENERATES` / `GENERATED_FROM` 관계에서 source
+      rpm 을 얻음 (D143, 감사 A3) — Red Hat 의 rhel-9.6.z SBOM: source 가 있는 rpm 패키지 1,207 → 60,899 중 60,256
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨

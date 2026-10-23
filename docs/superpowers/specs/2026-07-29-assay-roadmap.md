@@ -6111,6 +6111,39 @@ The branch review (wf_eb4773e3-9be) added negatives for the digits around the se
 form (`ubuntunofips3`, `1fipsy`; two more mutations caught) and corrected the release lists
 and the unmatched remainder above against the dump.
 
+### D143 — An SPDX binary rpm takes its source from the document's relationships
+
+**Decision.** The SPDX reader builds, before cataloging, a map from each package to the
+source rpm it was built from. It reads every `SRC GENERATES BIN` and `BIN GENERATED_FROM SRC`
+relationship whose source end is an rpm package with `arch=src`. An rpm candidate whose own
+purl names no source (no `upstream` qualifier) takes that name as `Package.Source`, with no
+version, the same shape the `upstream` path and the image path's SOURCERPM produce (D8, D134).
+An explicit `upstream` qualifier wins. Only rpm candidates take it, and only from an `arch=src`
+rpm. The source rpm itself stays out of the inventory (D84).
+
+**Why.** The 2026-10-22 audit (A3) found that Red Hat's own SBOMs carry the binary→source link
+as a relationship, not as a purl qualifier. D84 read only the qualifier. Every binary rpm in a
+Red Hat SBOM therefore had `Source == nil`, and Red Hat's advisories, written against the source
+name, were unreachable. A vendor SBOM of an image reported `openssl-libs`, `krb5-libs` and
+`glibc-common` clean where the image scan of the same content found them. The audit described
+the edge as `GENERATED_FROM`. Red Hat's product SBOM uses the inverse, `GENERATES`, so both
+are read.
+
+**Measured.** Red Hat's `rhel-9.6.z.json.bz2` product SBOM (2026-10-23, 265,033 packages):
+44,854 binary rpm packages, 970 with an `upstream` qualifier, and 44,206 reachable through a
+source rpm's `GENERATES`. A source rpm also `GENERATES` the cargo, npm, Python and Go packages it
+bundles (106,299 cargo and 73,748 npm edges), and binary rpms `GENERATES` Go and NuGet modules.
+That is why only rpm candidates take the name, and only from an `arch=src` rpm. Parsed by the
+cataloger itself, the rpm candidates with a source went from 1,207 to 60,256 of 60,899.
+
+**Verified.** Through `Run`: a Red Hat-shaped SPDX document (product root, `arch=src` openssl,
+`openssl-libs` binary, `GENERATES`) against a database whose only record names `openssl` reports
+that record on `openssl-libs`. At the cataloger: `GENERATES` and `GENERATED_FROM` both give the
+source; a bundled npm package gets none; an `upstream` qualifier wins; a `GENERATES` parent that
+is a binary rpm gives none. Six mutations caught: the call site passing no source (caught by the
+`Run` test), the relationship source ignored, `GENERATED_FROM` not read, any rpm counting as a
+source, non-rpm candidates taking it, and the relationship overriding `upstream`.
+
 ---
 
 ## 3. Architecture
