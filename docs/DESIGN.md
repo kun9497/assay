@@ -926,6 +926,10 @@ exited 0 while 24 findings went unmentioned.
       22.04 builds) are lineage builds and are skipped, not judged against mainline (D142,
       audit A1) — measured over the full Ubuntu OSV dump: +4,658 FIPS occurrences, 0 mainline
       or Pro
+- [x] A binary rpm in an SPDX SBOM takes its source rpm from a `GENERATES` / `GENERATED_FROM`
+      relationship when its purl carries no `upstream` and shares the source's release or RHEL
+      dist tag (D143, audit A3) — Red Hat's own rhel-9.6.z SBOM: keyed rpm candidates with a
+      source 605 → 33,146 of 33,898
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15

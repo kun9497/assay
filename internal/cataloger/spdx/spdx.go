@@ -12,6 +12,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
+	"strings"
 
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"github.com/kun9497/assay/internal/pkgmeta"
@@ -81,6 +83,7 @@ func Parse(r io.Reader) (pkgmeta.Target, cyclonedx.Stats, error) {
 	var stats cyclonedx.Stats
 
 	rootID := findRootPackageID(doc)
+	srcOf := sourceRPMOf(doc)
 
 	for _, p := range doc.Packages {
 		if rootID != "" && p.SPDXID == rootID {
@@ -92,7 +95,7 @@ func Parse(r io.Reader) (pkgmeta.Target, cyclonedx.Stats, error) {
 			// the denominator.
 			continue
 		}
-		catalogPackage(p, &target, &stats)
+		catalogPackage(p, srcOf[p.SPDXID], &target, &stats)
 	}
 	stats.DocumentNamespace = doc.DocumentNamespace
 	return target, stats, nil
@@ -112,13 +115,115 @@ func findRootPackageID(doc document) string {
 	return ""
 }
 
+// sourceRPMOf maps a package's SPDXID to the name of the source rpm it was
+// built from, read from the document's relationships (2026-10-22 audit, A3;
+// D143). Red Hat's own SBOMs write the D8 binary->source link this way and
+// not as a purl qualifier: the source rpm is its own package, its purl
+// carrying `arch=src`, and `SRC GENERATES BIN` joins them. SPDX defines
+// `BIN GENERATED_FROM SRC` as the same relation, and both are read. Measured
+// on Red Hat's rhel-9.6.z product SBOM (2026-10-23): 44,206 of 44,854 binary
+// rpms reachable this way, 970 carrying an `upstream` qualifier.
+//
+// Only an edge whose source end is an rpm with `arch=src` counts. A source
+// rpm also GENERATES the cargo, npm and Go packages it bundles, and a binary
+// rpm GENERATES Go and NuGet modules; catalogPackage applies the result to
+// rpm candidates alone, so none of those inherits an rpm name.
+//
+// And only an edge whose binary shares the source's release, or at least its
+// RHEL dist tag, counts. A source rpm also GENERATES the test-data rpms
+// vendored in its tree -- dnf, libdnf and rpm-ostree carry fixtures named
+// glibc, kernel and httpd -- and giving those the bundler's name turned every
+// dnf advisory into a finding on "glibc" (D143 review). A real subpackage is
+// built in its source's build: the same release, or for one with its own
+// versioning the same dist tag (nodejs builds npm 8.19.3-1.16.19.1.1.el9_2
+// from 16.19.1-1.el9_2). Measured on rhel-9.6.z: 43,105 edges share the
+// release, 28 more the dist tag, and the 1,073 sharing neither are fixtures.
+func sourceRPMOf(doc document) map[string]string {
+	type rpmID struct{ name, release string }
+	srcs := make(map[string]rpmID)
+	bins := make(map[string]string) // SPDXID -> release of its first binary rpm purl
+	for _, p := range doc.Packages {
+		for _, ref := range p.ExternalRefs {
+			if ref.ReferenceType != "purl" {
+				continue
+			}
+			parsed, err := pkgmeta.ParsePURL(ref.ReferenceLocator)
+			if err != nil || parsed.Type != "rpm" || parsed.Name == "" {
+				continue
+			}
+			if parsed.Qualifiers["arch"] == "src" {
+				srcs[p.SPDXID] = rpmID{parsed.Name, rpmRelease(parsed.Version)}
+				break
+			}
+			if _, ok := bins[p.SPDXID]; !ok {
+				bins[p.SPDXID] = rpmRelease(parsed.Version)
+			}
+		}
+	}
+	builtBy := func(src rpmID, binRelease string) bool {
+		if binRelease == src.release {
+			return true
+		}
+		tag := rhelDistTag(src.release)
+		return tag != "" && tag == rhelDistTag(binRelease)
+	}
+	out := make(map[string]string)
+	for _, r := range doc.Relationships {
+		var src, bin string
+		switch r.RelationshipType {
+		case "GENERATES":
+			src, bin = r.SPDXElementID, r.RelatedSPDXElement
+		case "GENERATED_FROM":
+			src, bin = r.RelatedSPDXElement, r.SPDXElementID
+		default:
+			continue
+		}
+		s, ok := srcs[src]
+		if !ok {
+			continue
+		}
+		rel, isBin := bins[bin]
+		if !isBin || !builtBy(s, rel) {
+			continue
+		}
+		if _, done := out[bin]; !done {
+			out[bin] = s.name
+		}
+	}
+	return out
+}
+
+// rpmRelease is the release of an rpm version string ("[epoch:]version-
+// release"), or "" when there is none.
+func rpmRelease(v string) string {
+	if i := strings.LastIndexByte(v, '-'); i >= 0 {
+		return v[i+1:]
+	}
+	return ""
+}
+
+// rhelDistTagPattern finds a release's RHEL dist tag: `el9`, `el9_2`,
+// `el8_10`, as `.el9_2` appears inside `1.16.19.1.1.el9_2` or `18.el9_2.1`.
+var rhelDistTagPattern = regexp.MustCompile(`\.(el[0-9]+(?:_[0-9]+)*)`)
+
+func rhelDistTag(release string) string {
+	if m := rhelDistTagPattern.FindStringSubmatch(release); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
 // catalogPackage turns one SPDX package entry into zero or more
 // pkgmeta.Package values. "Zero or more" rather than "zero or one" because a
 // single SPDX package can carry several purls — Red Hat's own SBOMs emit one
 // per repository the package is published from — which resolve, dedupe, and
 // land as one entry the overwhelming majority of the time, but the shape
 // itself does not guarantee exactly one.
-func catalogPackage(p pkg, target *pkgmeta.Target, stats *cyclonedx.Stats) {
+//
+// relSource is the source rpm name sourceRPMOf found for this package, or "".
+// It is used only for an rpm candidate whose own purl named no source: an
+// explicit `upstream` qualifier is the more specific statement and wins.
+func catalogPackage(p pkg, relSource string, target *pkgmeta.Target, stats *cyclonedx.Stats) {
 	stats.Components++
 
 	var purls []string
@@ -153,6 +258,9 @@ func catalogPackage(p pkg, target *pkgmeta.Target, stats *cyclonedx.Stats) {
 		candidate, status := resolvePURL(parsed, raw)
 		switch status {
 		case statusOK:
+			if candidate.Type == "rpm" && candidate.Source == nil && relSource != "" {
+				candidate.Source = &pkgmeta.SourcePackage{Name: relSource}
+			}
 			key := tuple{candidate.Ecosystem, candidate.Name, candidate.Version}
 			if !seen[key] {
 				seen[key] = true
