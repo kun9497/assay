@@ -23,7 +23,8 @@ Result: **18 confirmed, 2 contested (one refuter each way), 0 refuted, 16 P4 rep
 without verification.** The zero refutations say more about the finders' own bar than about
 the refuters: finders were told to make the tests disprove a hypothesis before filing it.
 
-**Status (2026-10-26).** A1 is fixed as D142, A2 as D144, A3 as D143, A8 and A17 as D145.
+**Status (2026-10-26).** A1 is fixed as D142, A2 as D144, A3 as D143, A8 and A17 as D145. Of gap 5, the SUSE live-feed test runs in CI (its own job, held by
+`internal/ciguard`).
 
 ## 1. Confirmed findings, by the order they should be fixed
 
