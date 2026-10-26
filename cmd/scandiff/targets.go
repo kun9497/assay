@@ -46,6 +46,17 @@ type Target struct {
 	// comment history: a boolean here would let the count grow without
 	// limit once any not-evaluated packages were expected at all).
 	MaxNotEvaluated int `json:"maxNotEvaluated,omitempty"`
+	// MaxIncompleteChecks and MaxTargetIncomplete are A17's ceilings on the
+	// two incompleteness counters of assay's summary (2026-10-22 audit), exact
+	// like MaxNotEvaluated and for its reason: omitted means "must be 0", and
+	// a nonzero value is the count a target's current run reports on purpose.
+	// Before them the gate read notEvaluated alone, so a candidate whose
+	// advisory bounds stopped parsing -- every check incomplete, no finding --
+	// was judged only by the finding floors, which a target with a low or zero
+	// minFindings does not hold. Regression floors, not ceilings: the
+	// candidate database is what makes a bound unreadable.
+	MaxIncompleteChecks int `json:"maxIncompleteChecks,omitempty"`
+	MaxTargetIncomplete int `json:"maxTargetIncomplete,omitempty"`
 	// MinComponents floors assay's summary.components -- how much of the
 	// image the scan actually cataloged. It exists for targets whose
 	// EXPECTED finding count is zero (cleanstart): there, minFindings 0 and

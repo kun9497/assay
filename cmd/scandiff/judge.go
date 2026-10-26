@@ -94,6 +94,24 @@ func judge(t Target, agree, findings, notEvaluated, components int) []breach {
 	return out
 }
 
+// judgeIncomplete is A17's pair of floors on assay's own incompleteness
+// counters, which judge never saw: it is handed notEvaluated alone, and a
+// candidate whose advisory bounds stopped parsing moves incompleteChecks
+// instead -- every affected check reported incomplete, no finding, nothing
+// in notEvaluated. Both are regression floors (Ceiling false) for
+// maxNotEvaluated's reason: the candidate database is what makes a bound
+// unreadable, so -regressions-only must still judge them.
+func judgeIncomplete(t Target, s assaySummary) []breach {
+	var out []breach
+	if s.IncompleteChecks > t.MaxIncompleteChecks {
+		out = append(out, breach{t.Name, "maxIncompleteChecks", fmt.Sprintf("<=%d", t.MaxIncompleteChecks), s.IncompleteChecks, false})
+	}
+	if s.TargetIncomplete > t.MaxTargetIncomplete {
+		out = append(out, breach{t.Name, "maxTargetIncomplete", fmt.Sprintf("<=%d", t.MaxTargetIncomplete), s.TargetIncomplete, false})
+	}
+	return out
+}
+
 // judgeTrivy is judge's D105 counterpart for the optional trivy comparison.
 // It is a separate function rather than a parameterized call into judge:
 // there is no notEvaluated counterpart (trivy carries no such concept), and

@@ -893,6 +893,10 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] Oracle Linux: 두 ELSA 가 한 CVE 에 대해 고친 비-kernel 패키지를 버리지 않고 자기 트레인의
       가장 낮은 fix 에 맞춰 판정 (D144, 감사 A2) — 실제 아카이브: 그룹 9,090개를 구간으로,
       레코드 9,893 → 10,518; kernel 계열은 D74 의 버림을 유지
+- [x] 차등의 floor 가 az2023 과 wolfi 를 지키고 불완전 카운터를 읽음 (D145, 감사 A8/A17) — 0 이던
+      `minAgree` / `minFindings` 를 2026-10-26 capture 의 85% 로 다시 시딩하되, grype 나 trivy 자신의
+      피드를 따르는 floor 는 10-13 이후 모든 야간 capture 가 통과하도록 낮춤(wolfi `minAgree 9`,
+      trivy 정보용); 타깃별 `maxIncompleteChecks` / `maxTargetIncomplete`, 생략 = 0, 야간 게이트도 판정
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨
@@ -1292,7 +1296,8 @@ SUSE에서는 `--fail-on-unfixable`이 동작하지만 `=wont-fix`는 SUSE가 �
 **야간 발행은 push하기 전에 같은 floor를 지킵니다 (D114).** `db build`와 `db push`
 사이에서 `db-publish.yml`은 `ASSAY_DB_DIR`을 후보로 향하게 하고 같은 타깃과 floor
 파일로 `scandiff -regressions-only`를 실행합니다: `minAgree`, `minFindings`,
-`minComponents`, `maxNotEvaluated` 또는 커밋된 trivy 하한 위반, 혹은 `ERROR` 판정은
+`minComponents`, `maxNotEvaluated`, `maxIncompleteChecks`, `maxTargetIncomplete`(D145)
+또는 커밋된 trivy 하한 위반, 혹은 `ERROR` 판정은
 job을 실패시키고 아무것도 push되지 않습니다 — 다음 야간이 마지막으로 정상이었던
 아티팩트에서 시드해 다시 시도합니다. exit 2로 끝난 assay 스캔은 먼저 한 번 다시
 실행됩니다(2026-10-06 개정, 레지스트리의 `BLOB_UNKNOWN` 일시적 오류가 멀쩡한 후보를

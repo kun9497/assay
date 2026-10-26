@@ -118,18 +118,22 @@
     "name": "az2023",
     "tag": "amazonlinux:2023",
     "ref": "mirror.gcr.io/library/amazonlinux@sha256:181f98c48832fe926f8ca3b6ffeafcce128e96e77b93d08fbe9a9bc9403ce284",
-    "minAgree": 0,
-    "minFindings": 0,
-    "maxFindings": 124,
-    "trivy": {},
+    "minAgree": 90,
+    "minFindings": 104,
+    "maxFindings": 246,
+    "trivy": {
+      "minAgree": 90,
+      "minFindings": 90,
+      "maxFindings": 244
+    },
     "minComponents": 90
   },
   {
     "name": "wolfi",
     "tag": "wolfi-base:latest",
     "ref": "cgr.dev/chainguard/wolfi-base@sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72",
-    "minAgree": 0,
-    "minFindings": 0,
+    "minAgree": 9,
+    "minFindings": 32,
     "maxFindings": 148,
     "trivy": {},
     "minComponents": 12
@@ -249,7 +253,8 @@
       "minAgree": 419,
       "minFindings": 422,
       "maxFindings": 994
-    }
+    },
+    "maxIncompleteChecks": 1
   },
   {
     "name": "cleanstart-postgres",

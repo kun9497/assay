@@ -195,6 +195,7 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 		// this ceiling too.
 		measured := judge(t, agree, len(aSet), notEvaluated, adoc.Summary.Components)
 		measured = append(measured, judgeGrypeOnlyApp(t, grypeOnlyAppCounts(gdoc, aSet, gSet))...)
+		measured = append(measured, judgeIncomplete(t, adoc.Summary)...)
 		breaches, info := demoteCeilings(measured, *regressionsOnly)
 		printInfo(stderr, info)
 		r := row{
