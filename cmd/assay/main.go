@@ -382,6 +382,14 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
+// withScanTimeout is the seam scan's --timeout deadline is built through
+// (D112), the swappable-package-variable idiom stdoutIsTerminalFunc uses. A
+// test that wants an expired deadline cannot get one from a real 1ns timer
+// reliably: on a Windows runner the scan of a one-package image finished
+// before that timer fired. Production never reassigns this; only
+// TestRun_ScanTimeoutReachesRealExitCode does.
+var withScanTimeout = context.WithTimeout
+
 // run holds the real entry point so it stays testable — main only translates
 // the result into a process exit code.
 func run(args []string, stdout, stderr io.Writer) int {
@@ -436,7 +444,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		ctx := context.Background()
 		if opts.Timeout > 0 {
 			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
+			ctx, cancel = withScanTimeout(ctx, opts.Timeout)
 			defer cancel()
 		}
 		return scan(ctx, target, opts, stdout, stderr)
