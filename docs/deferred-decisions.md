@@ -1791,6 +1791,25 @@ supplied target — one the operator running `assay` did not type themselves —
 
 ---
 
+### Source for rpms an SPDX SBOM reaches only through CONTAINS
+
+A Red Hat SPDX SBOM that embeds container images lists some of their rpms reachable only by
+`IMAGE CONTAINS BIN`: no `upstream` qualifier, and no `GENERATES` or `GENERATED_FROM` edge.
+D143 gives them no source, so a Red Hat advisory keyed on the source name does not reach
+them. Measured on `rhel-9.6.z.json.bz2`: 645 such rpm entries (glibc-common, libnghttp2,
+sssd-krb5, nspr, keyutils-libs among them), 185 of which have a same-NEVR twin elsewhere in the
+document whose source D143 did resolve.
+
+**Why deferred.** Borrowing a twin's source is an inference across two package entries the
+SBOM does not link, and a wrong twin is a wrong source. A rule good enough to ship needs
+Red Hat's per-image SBOMs, which this measurement did not cover, rather than the product SBOM's
+embedded images alone.
+
+**Revisit when** a Red Hat per-image SBOM is measured, or a user reports a finding the image
+scan gives and the image's SBOM does not.
+
+---
+
 ### Scanning every platform of a multi-platform image in one run
 
 `--platform all`, as some scanners offer: resolve every platform an index carries and

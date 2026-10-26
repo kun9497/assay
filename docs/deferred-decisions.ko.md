@@ -1740,6 +1740,23 @@ operator 본인이 직접 입력하지 않은 첫 번째 외부 공급 타깃이
 
 ---
 
+### SPDX SBOM 이 CONTAINS 로만 닿는 rpm 의 source
+
+컨테이너 이미지를 내장한 Red Hat SPDX SBOM 은 그 rpm 일부를 `IMAGE CONTAINS BIN` 로만 닿게 둔다: `upstream`
+한정자도 없고 `GENERATES` 나 `GENERATED_FROM` 간선도 없다. D143 은 그들에게 source 를 주지 않으므로, source
+이름으로 키가 걸린 Red Hat advisory 가 닿지 않는다. `rhel-9.6.z.json.bz2` 측정: 그런 rpm 항목 645 개(glibc-common,
+libnghttp2, sssd-krb5, nspr, keyutils-libs 등). 그중 185 개는 문서 다른 곳에 D143 이 source 를 풀어낸, NEVR 이
+같은 쌍둥이가 있다.
+
+**보류 이유.** 쌍둥이의 source 를 빌려오는 것은 SBOM 이 연결하지 않은 두 패키지 항목에 걸친 추론이고, 틀린
+쌍둥이는 틀린 source 다. 내보낼 만한 규칙에는 이번 측정이 덮지 않은 Red Hat 의 이미지별 SBOM 이 필요하다.
+제품 SBOM 에 내장된 이미지만으로는 부족하다.
+
+**다시 볼 때.** Red Hat 의 이미지별 SBOM 을 측정했을 때, 또는 이미지 스캔은 내는 finding 을 그 이미지의 SBOM 은
+내지 않는다는 사용자 보고가 들어올 때.
+
+---
+
 ### 멀티 플랫폼 이미지의 모든 플랫폼을 한 번에 스캔하기
 
 일부 스캐너가 제공하는 `--platform all`: 인덱스가 담은 모든 플랫폼을 해석해 각각 보고합니다.
