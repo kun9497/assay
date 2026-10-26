@@ -1069,6 +1069,14 @@ narrower than it looked: train-aware matching (or keeping the earliest fix) for 
 kernel-and-kin remainder, which only pays off on host/rootfs scans — container images ship
 no kernel. Conservative direction meanwhile (no wrong-train match), unchanged.
 
+**D144 (2026-10-26) took everything outside the kernel family.** A non-kernel group with
+several fixes is no longer dropped: its fixes are cut into `epoch:version` trains and each
+record carries a window per train it is the lowest fix of (9,663 groups on the 2026-10-26
+archive, openssh, glibc and 389-ds-base among them). What stays dropped is the kernel family:
+`kernel*`, and any group with a UEK build among its fixes, which is how bpftool, perf and
+python-perf are caught (178,531 groups). The same windows would serve UEK's trains, but they
+change a verdict on every Oracle kernel a host scan reads, so they wait for the trigger below.
+
 **Revisit trigger:** a host/rootfs scan user appears — the kernel-train remainder is the
 only part left. The module-stream slice of the remainder went to MODULARITYLABEL matching
 when it started (D80; Oracle's stream attachment lands in D81), which is the second trigger

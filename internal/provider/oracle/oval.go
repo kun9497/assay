@@ -204,7 +204,7 @@ type stats struct {
 	UnrecognizedSeverity  int // a severity word outside IMPORTANT/MODERATE/LOW/CRITICAL (e.g. "N/A")
 	NoMajorContext        int // a package-fix criterion with no platform guard above it anywhere in the tree
 	SkippedLineageFixes   int // a fixed EVR carrying a Ksplice or FIPS lineage marker, dropped before ambiguity grouping (D79)
-	AmbiguousGroups       int // distinct (CVE-or-ELSA, major, package, stream) groups with 2+ fixed EVRs (D81 adds stream)
+	AmbiguousGroups       int // distinct (CVE-or-ELSA, major, package, stream) groups with 2+ fixed EVRs that are still dropped: kernel family or unorderable (D81 adds stream, D144 narrows)
 	SkippedAmbiguousFixes int // individual Affected entries dropped because of an AmbiguousGroups hit
 	WindowedGroups        int // non-kernel groups with 2+ fixed EVRs kept as per-train windows instead (D144)
 	ConflictingWindows    int // entries whose CVE groups gave different windows, kept at their own fix (D144)
