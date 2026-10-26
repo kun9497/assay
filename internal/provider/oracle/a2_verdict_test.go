@@ -266,3 +266,38 @@ func eventsEqual(a, b []advisory.Event) bool {
 	}
 	return true
 }
+
+// The RHEL-compatible kernel carries no "uek" in its release, so only the
+// kernel* prefix keeps it under the drop D144 leaves the kernel family.
+func TestA2_RHCKKernelKeepsTheDrop(t *testing.T) {
+	doc := twoFixes("kernel", "CVE-2024-26900", "0:5.14.0-427.13.1.el9_4", "0:5.14.0-503.11.1.el9_5")
+	var st stats
+	defs, _, err := parseOVAL(strings.NewReader(doc), &st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if advs := normalize(defs, &st); len(advs) != 0 {
+		t.Errorf("normalize = %+v, want nothing: a kernel group is still dropped", advs)
+	}
+	if st.AmbiguousGroups != 1 || st.WindowedGroups != 0 {
+		t.Errorf("AmbiguousGroups = %d, WindowedGroups = %d, want 1 and 0", st.AmbiguousGroups, st.WindowedGroups)
+	}
+}
+
+// A group holding an EVR the RPM comparer refuses cannot be cut into
+// ordered trains; it is dropped as D74 dropped it rather than windowed in
+// whatever order a failed comparison happens to leave.
+func TestA2_UnorderableGroupKeepsTheDrop(t *testing.T) {
+	doc := twoFixes("openssh", "CVE-2024-6387", "0:8.7p1-38.0.2 el9", "0:8.7p1-38.0.2.el9_4.1")
+	var st stats
+	defs, _, err := parseOVAL(strings.NewReader(doc), &st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if advs := normalize(defs, &st); len(advs) != 0 {
+		t.Errorf("normalize = %+v, want nothing", advs)
+	}
+	if st.AmbiguousGroups != 1 {
+		t.Errorf("AmbiguousGroups = %d, want 1", st.AmbiguousGroups)
+	}
+}
