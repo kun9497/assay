@@ -1,0 +1,6 @@
+jobs:
+  t:
+    steps:
+      - run: go test -tags upstreamvectors ./pkg/covered/ -v
+      - run: go test -tags upstreamvectors ./pkg/filtered/ -run TestOne
+      - run: go test ./pkg/missing/

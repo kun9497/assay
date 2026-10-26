@@ -11,9 +11,11 @@ package ciguard
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -24,11 +26,10 @@ const repoRoot = "../.."
 // taggedPackages returns every package directory (slash-separated, relative to
 // the repository root, "./"-prefixed and "/"-suffixed the way ci.yml spells
 // them) holding a test file whose build constraint names tag.
-func taggedPackages(t *testing.T, tag string) []string {
-	t.Helper()
+func taggedPackages(root, tag string) ([]string, error) {
 	seen := map[string]bool{}
 	constraint := regexp.MustCompile(`^//go:build\s+(.*)$`)
-	err := filepath.WalkDir(repoRoot, func(path string, d os.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -53,7 +54,7 @@ func taggedPackages(t *testing.T, tag string) []string {
 			if m := constraint.FindStringSubmatch(line); m != nil {
 				for _, w := range regexp.MustCompile(`[A-Za-z0-9_.]+`).FindAllString(m[1], -1) {
 					if w == tag {
-						rel, _ := filepath.Rel(repoRoot, filepath.Dir(path))
+						rel, _ := filepath.Rel(root, filepath.Dir(path))
 						seen["./"+filepath.ToSlash(rel)+"/"] = true
 					}
 				}
@@ -65,32 +66,31 @@ func taggedPackages(t *testing.T, tag string) []string {
 		}
 		return sc.Err()
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	var out []string
 	for p := range seen {
 		out = append(out, p)
 	}
 	sort.Strings(out)
-	return out
+	return out, err
 }
 
-// taggedRuns returns, for every `go test` command line in the workflow files
-// that passes -tags naming tag, the package arguments it names, and fails the
-// test outright on a -run filter: the version-vector step once ran with
-// `-run <one test>` and silently excluded every replay added after it.
-func taggedRuns(t *testing.T, tag string) map[string]bool {
-	t.Helper()
-	files, err := filepath.Glob(filepath.Join(repoRoot, ".github", "workflows", "*.yml"))
-	if err != nil || len(files) == 0 {
-		t.Fatalf("no workflow files found (err=%v)", err)
+// taggedRuns returns, for every `go test` command line in root's workflow
+// files that passes -tags naming tag, the package arguments it names, and
+// separately every such line filtered by -run: the version-vector step once
+// ran with `-run <one test>` and silently excluded every replay added after it.
+func taggedRuns(root, tag string) (covered map[string]bool, filtered []string, err error) {
+	files, err := filepath.Glob(filepath.Join(root, ".github", "workflows", "*.yml"))
+	if err != nil {
+		return nil, nil, err
 	}
-	covered := map[string]bool{}
+	if len(files) == 0 {
+		return nil, nil, fmt.Errorf("no workflow files under %s", root)
+	}
+	covered = map[string]bool{}
 	for _, wf := range files {
 		b, err := os.ReadFile(wf)
 		if err != nil {
-			t.Fatal(err)
+			return nil, nil, err
 		}
 		for _, line := range strings.Split(string(b), "\n") {
 			fields := strings.Fields(line)
@@ -104,7 +104,7 @@ func taggedRuns(t *testing.T, tag string) map[string]bool {
 			}
 			for j, a := range args {
 				if a == "-run" || strings.HasPrefix(a, "-run=") {
-					t.Errorf("%s: %q filters a tagged run with -run; a test added later would never execute", filepath.Base(wf), strings.TrimSpace(line))
+					filtered = append(filtered, filepath.Base(wf)+": "+strings.TrimSpace(line))
 				}
 				if strings.HasPrefix(a, "./") && (j == 0 || args[j-1] != "-tags") {
 					p := a
@@ -116,7 +116,7 @@ func taggedRuns(t *testing.T, tag string) map[string]bool {
 			}
 		}
 	}
-	return covered
+	return covered, filtered, nil
 }
 
 func indexOf(xs []string, s string) int {
@@ -160,15 +160,55 @@ func coveredBy(pkg string, covered map[string]bool) bool {
 	return false
 }
 
-func TestEveryUpstreamVectorsPackageRunsInCI(t *testing.T) {
-	pkgs := taggedPackages(t, "upstreamvectors")
-	if len(pkgs) == 0 {
-		t.Fatal("found no upstreamvectors-tagged test files; the walk is broken, not the repository")
+// problems is the whole check over one repository root: every tagged package
+// no workflow runs with the tag, then every tagged run narrowed by -run.
+func problems(root, tag string) ([]string, error) {
+	pkgs, err := taggedPackages(root, tag)
+	if err != nil {
+		return nil, err
 	}
-	covered := taggedRuns(t, "upstreamvectors")
+	if len(pkgs) == 0 {
+		return nil, fmt.Errorf("found no %s-tagged test files under %s; the walk is broken, not the repository", tag, root)
+	}
+	covered, filtered, err := taggedRuns(root, tag)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
 	for _, p := range pkgs {
 		if !coveredBy(p, covered) {
-			t.Errorf("%s has upstreamvectors-tagged tests but no workflow runs `go test -tags upstreamvectors %s`", p, p)
+			out = append(out, p+" has "+tag+"-tagged tests but no workflow runs `go test -tags "+tag+" "+p+"`")
 		}
+	}
+	for _, l := range filtered {
+		out = append(out, l+" filters a tagged run with -run; a test added later would never execute")
+	}
+	return out, nil
+}
+
+func TestEveryUpstreamVectorsPackageRunsInCI(t *testing.T) {
+	got, err := problems(repoRoot, "upstreamvectors")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range got {
+		t.Error(p)
+	}
+}
+
+// The check against a repository it must reject. Without this the guard is
+// held only by the real ci.yml happening to be right: break problems() so it
+// reports nothing and the test above stays green.
+func TestGuardRejectsAMissingStepAndARunFilter(t *testing.T) {
+	got, err := problems(filepath.Join("testdata", "repo"), "upstreamvectors")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"./pkg/missing/ has upstreamvectors-tagged tests but no workflow runs `go test -tags upstreamvectors ./pkg/missing/`",
+		"ci.yml: - run: go test -tags upstreamvectors ./pkg/filtered/ -run TestOne filters a tagged run with -run; a test added later would never execute",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("problems = %q\nwant       %q", got, want)
 	}
 }
