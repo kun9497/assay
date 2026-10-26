@@ -1278,8 +1278,8 @@ func TestRun_Usage_MentionsRegressionsOnly(t *testing.T) {
 	for _, want := range []string{
 		"-capture <dir> [-trivy <bin>] [-regressions-only]",
 		"-offline <dir> [-regressions-only]",
-		"skips the ceilings, maxFindings, trivy.maxFindings and",
-		"maxGrypeOnlyApp (D117)",
+		"skips the ceilings, maxFindings, trivy.maxFindings,",
+		"maxGrypeOnlyApp (D117) and maxAssayOnlyFixed (D146)",
 	} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Errorf("stderr = %q, want the usage to contain %q", stderr.String(), want)

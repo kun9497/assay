@@ -41,10 +41,10 @@ Usage:
   -regressions-only (either mode) is the nightly publish gate's mode (D114):
       it skips the ceilings, maxFindings, trivy.maxFindings,
       maxGrypeOnlyApp (D117) and maxAssayOnlyFixed (D146), and prints any
-      that would have breached as an
-      "info:" line instead. A ceiling measures upstream growth, which must
-      never stop a new database from shipping; every other floor, and every
-      ERROR, is judged exactly as without it.
+      that would have breached as an "info:" line instead. A ceiling
+      measures upstream growth, which must never stop a new database from
+      shipping; every other floor, and every ERROR, is judged exactly as
+      without it.
 
 Exit codes:
   0  every target held its floors
