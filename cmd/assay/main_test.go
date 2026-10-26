@@ -1087,7 +1087,14 @@ func TestRun_ScanTimeoutReachesRealExitCode(t *testing.T) {
 					// Already past: Done before the scan's first check, on any clock.
 					return context.WithDeadline(ctx, time.Unix(0, 0))
 				}
-				return orig(ctx, d)
+				// The production value, held here because the expiring rows
+				// never call it: a seam that ignored d would leave every row
+				// green, the 10m rows exiting 0 with or without a deadline.
+				got, cancel := orig(ctx, d)
+				if dl, ok := got.Deadline(); !ok || time.Until(dl) < d-time.Minute {
+					t.Errorf("withScanTimeout(%v) gave deadline %v (set: %v), want about %v from now", d, dl, ok, d)
+				}
+				return got, cancel
 			}
 			args := append([]string{"scan", target}, tc.flags...)
 			var stdout, stderr bytes.Buffer

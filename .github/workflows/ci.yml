@@ -106,8 +106,11 @@ jobs:
       - name: Test
         run: go test ./...
 
-      # The tests that use the per-platform unreadable_dir_*_test.go helpers
-      # skip, rather than pass, when the runner cannot stage a locked directory.
+      # Every test that stages a locked directory through the per-platform
+      # unreadable_dir_*_test.go helper (makeUnreadable): the dirscan walk, the
+      # scancmd exit-code test and the four D109 tests, whose fixture table has
+      # an unreadable-subtree row. They skip, rather than pass, when the runner
+      # cannot stage the lock.
       # `go test ./...` prints ok either way, so a skip here would be this leg
       # reporting coverage of the one thing it was added for without running
       # it. Re-run them verbosely and fail on any SKIP.
@@ -115,13 +118,13 @@ jobs:
         shell: bash
         run: |
           go test -count=1 -v \
-            -run 'TestWalk_AnUnreadableSubdirectoryIsReportedAndDoesNotAbortTheWalk|TestRun_AnUnreadableSubdirectoryReachesTheExitCode|TestRun_PnpmLocalVersusGitSkipsReachTheTargetGateDifferently' \
+            -run 'TestWalk_AnUnreadableSubdirectoryIsReportedAndDoesNotAbortTheWalk|TestRun_AnUnreadableSubdirectoryReachesTheExitCode|TestRun_D109_' \
             ./internal/cataloger/dirscan/ ./internal/scancmd/ | tee platform.log
           if grep -q -- '--- SKIP' platform.log; then
             echo "a platform-specific test skipped; it did not run on this runner"
             exit 1
           fi
-          test "$(grep -c -- '^--- PASS: Test' platform.log)" -eq 3
+          test "$(grep -c -- '^--- PASS: Test' platform.log)" -eq 6
 
       - name: Build
         run: go build ./...
