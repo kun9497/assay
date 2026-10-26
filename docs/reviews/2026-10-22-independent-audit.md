@@ -24,7 +24,7 @@ without verification.** The zero refutations say more about the finders' own bar
 the refuters: finders were told to make the tests disprove a hypothesis before filing it.
 
 **Status (2026-10-26).** A1 is fixed as D142, A2 as D144, A3 as D143, A8 and A17 as D145. Of gap 5, the SUSE live-feed test runs in CI (its own job, held by
-`internal/ciguard`).
+`internal/ciguard`), and the suite runs on windows-latest and macos-latest.
 
 ## 1. Confirmed findings, by the order they should be fixed
 
