@@ -1057,10 +1057,11 @@ MODULARITYLABEL 미룸입니다. 진짜로 열려 있는 질문은 보였던 것
 매칭 없음)은 그대로입니다.
 
 **D144(2026-10-26)가 kernel 계열 밖의 전부를 가져갔습니다.** fix 가 여럿인 비-kernel 그룹은 더
-이상 버리지 않습니다: 그 fix 들을 `epoch:version` 트레인으로 나누고, 각 레코드는 자신이 가장 낮은
-fix 인 트레인마다 구간을 하나씩 담습니다(2026-10-26 아카이브에서 그룹 9,663개, openssh, glibc,
-389-ds-base 포함). 여전히 버리는 것은 kernel 계열입니다: `kernel*`, 그리고 fix 중에 UEK 빌드가 있는
-그룹 — bpftool, perf, python-perf 가 이렇게 걸립니다(그룹 178,531개). 같은 구간이 UEK 의
+이상 버리지 않습니다: 그 fix 들을 트레인(`epoch:version` 과 release 의 앞자리 숫자)으로 나누고, 각
+레코드는 자신이 가장 낮은 fix 인 트레인마다 구간을 하나씩 담습니다(2026-10-26 아카이브에서 그룹
+9,090개, openssh, glibc, 389-ds-base 포함). 여전히 버리는 것은 kernel 계열입니다: `kernel*`, kernel
+자체의 소스에서 빌드되는 일곱 이름(bpftool, perf, python-perf, python3-perf, libperf, rtla, rv), 그리고
+fix 중에 UEK 빌드가 있는 그룹(그룹 179,104개). 같은 구간이 UEK 의
 트레인에도 통하겠지만, host 스캔이 읽는 모든 Oracle kernel 의 판정을 바꾸므로 아래 계기를
 기다립니다.
 

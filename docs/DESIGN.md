@@ -931,8 +931,8 @@ exited 0 while 24 findings went unmentioned.
       dist tag (D143, audit A3) — Red Hat's own rhel-9.6.z SBOM: keyed rpm candidates with a
       source 605 → 33,146 of 33,898
 - [x] Oracle Linux: a non-kernel package two ELSAs fix for one CVE is held to its own train's
-      lowest fix instead of being dropped (D144, audit A2) — live archive: 9,663 groups
-      windowed, records 9,893 → 10,504; the kernel family keeps D74's drop
+      lowest fix instead of being dropped (D144, audit A2) — live archive: 9,090 groups
+      windowed, records 9,893 → 10,518; the kernel family keeps D74's drop
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15

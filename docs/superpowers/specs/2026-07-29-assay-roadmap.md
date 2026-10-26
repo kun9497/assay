@@ -6165,17 +6165,20 @@ The fixture guard, the keyed counts and the `CONTAINS` remainder came from the b
 
 **Decision.** D74's guard groups every fixed EVR by (CVE, major, package, stream) and dropped
 every contributor of a group holding more than one. That drop now applies only to the kernel
-family: a package named `kernel*`, or a group with a UEK build among its fixes (bpftool, perf
-and python-perf are built from kernel-uek and mix its train with the RHEL kernel's). Every
-other multi-fix group is cut into trains, one per `epoch:version`, and a train's boundary is
-its lowest fix. A record gets one window per train in which its own fix is that lowest one.
-The lowest train's window opens at `0`, and every other train's opens at its own
-`epoch:version` with no release, which rpm orders below every release of that version. A
-record whose fix sits above a lower fix of the same train in another definition is superseded
-and emits nothing for that package. A record's entry sits in one group per CVE it names and
-carries one event list. When those groups give it different windows, it keeps its own
-statement, `[0, its fix)`, which contains every group's window. A group holding an EVR the RPM
-comparer refuses is dropped as before.
+family: a package named `kernel*`, the seven packages Oracle builds from a kernel's own source
+(bpftool, perf, python-perf, python3-perf, libperf, rtla, rv), and any group with a UEK build
+among its fixes. Every other multi-fix group is cut into trains. A train is the
+`epoch:version` plus the release's leading number, because a RHEL z-stream branch keeps the
+version and moves the release (glibc `2.34-60.0.3.el9_2.7` for 9.2.z, `2.34-83.0.1.el9_3.7` for
+9.3). A train's boundary is its lowest fix, and a record gets one window per train in which its
+own fix is that lowest one. The lowest train's window opens at `0`. Every other train's opens
+at the coarsest boundary that separates it from the train below: its `epoch:version` when that
+changed, else its release branch (`0:2.34-83`). rpm orders either below every build it names.
+A record whose fix sits above a lower fix of the same train in another surviving definition is
+superseded and emits nothing for that package. A record's entry sits in one group per CVE it
+names. A dropped group outranks a windowed one, and when its windowed groups give it different
+windows it keeps its own statement, `[0, its fix)`, which contains every group's window. A
+group holding an EVR the RPM comparer refuses is dropped as before.
 
 **Why.** The 2026-10-22 audit (A2) found the drop reaching ordinary packages: openssh's
 CVE-2024-6387, glibc's CVE-2023-4911 and 389-ds-base's CVE-2025-2487 had no Oracle record at
@@ -6185,40 +6188,45 @@ all. Two fixes for one CVE are usually not a tie. Oracle's own early regreSSHion
 `2.6.1-8.el9_6` (9.6) are two trains. Keeping the highest fix, as the audit proposed, would
 tell a host that installed Oracle's July 2024 openssh build to upgrade. Keeping the lowest
 would call an unfixed 2.6.1 build fixed. Windows hold each host to its own train's fix. The
-user chose this rule, and its non-kernel scope, on 2026-10-26.
+user chose this rule, and its non-kernel scope, on 2026-10-26. The kernel-source names and the
+release-branch train came from the branch review (wf_38126279-80d): the RHEL kernel has one
+version per major (5.14.0 on OL9), so a version-only train had made 611.49.1 the boundary for
+an unfixed 5.14.0-687.x perf in 573 groups.
 
 **Measured.** Oracle's live archive (2026-10-26, 10,452 definitions): 188,194 groups with two
-or more fixes; 178,531 kernel-family groups still dropped; 9,663 windowed. By shape, over the
-9,090 groups outside the kernel prefix and its three UEK-built names (1,564 packages): the
-same version with only the release differing, 5,164; version and minor dist tag both
-differing, 1,046; version differing under one tag, 2,365 (dotnet-*, olcne 1.1/1.2,
-container-tools); epoch differing, 515 (qemu/libvirt, 10 for RHEL against 15 for Oracle's
-KVM). The comparer refused 0 of their EVRs. Records went from 9,893 to 10,504 and affected
-entries from 95,896 to 103,564; dropped entries from 23,634 to 14,556; 1,410 entries were
-superseded and 1,934 kept at their own fix. ELSA-2024-12468 (openssh), ELSA-2023-12850 and
+or more fixes; 179,104 kernel-family groups still dropped; 9,090 windowed, across 1,564
+packages. By shape: the same version with only the release differing, 5,164; version and minor
+dist tag both differing, 1,046; version differing under one tag, 2,365 (dotnet-*, olcne
+1.1/1.2, container-tools); epoch differing, 515 (qemu/libvirt, 10 for RHEL against 15 for
+Oracle's KVM). The comparer refused none of their EVRs. Records went from 9,893 to 10,518 and
+affected entries from 95,896 to 104,009; dropped entries from 23,634 to 14,889; 632 entries
+were superseded and 1,825 kept at their own fix. ELSA-2024-12468 (openssh), ELSA-2023-12850 and
 ELSA-2023-5453 (glibc), ELSA-2025-4491 and ELSA-2025-7395 (389-ds-base) now have records;
 ELSA-2024-4312 has none, superseded by ELSA-2024-12468. The scanner-diff `ol9` image (pinned
-digest) gave 59 Oracle findings before and after: a current image is above every fix this
-adds.
+digest) gave the same 59 Oracle findings before and after: a current image is above every fix
+this adds. No older Oracle image was reachable from the measuring machine, so the change was
+not seen on a real vulnerable image.
 
 **Gives up.** An unfixed build between two trains (a `2.6.0` built before the 2.6.1 fix) falls
 in neither window. A superseded ELSA's id is no longer in the database, and the finding names
 the lower fix's ELSA. A record kept at its own fix still reports to a host on another
-definition's lower fix, for every CVE it names. The kernel family is unchanged
-(`docs/deferred-decisions.md`).
+definition's lower fix, for every CVE it names: ELSA-2023-5453 does so for glibc
+`2.34-60.0.3.el9`, which is right for the three CVEs only it fixes. The kernel family is
+unchanged (`docs/deferred-decisions.md`).
 
 **Verified.** Through the store and the matcher: openssh at `38.el9` is told `38.0.2.el9`, and
 `38.0.2.el9` and `38.0.2.el9_4.1` are clean. 389-ds-base `2.5.2-8` is told `2.5.2-9.el9_5`,
-`2.5.2-9` is clean, `2.6.1-3` is told `2.6.1-8.el9_6`, `2.6.1-8` is clean. qemu-kvm at epochs
-10 and 15 is each held to its own fix. bpftool's UEK/RHEL group and the RHEL `kernel` are still
-dropped, and so is a group with an unreadable EVR. An entry whose groups disagree keeps its own
-fix. Two D74/D81 tests were rewritten to the new rule: nodejs:18 fixed twice within one stream,
-and a no-CVE definition's two branches. Fourteen mutations caught: the call site ignoring the
-windows, the kernel test off whole, without its UEK check, without its prefix check, the
-orderable check off, every window opening at 0, the highest fix as boundary, the train ignoring
-the epoch, the train keeping the release, a superseded fix given a window, a conflict keeping
-the first group's window, a conflict never detected, a superseded entry emitted, and a kernel
-group windowed instead of dropped.
+`2.5.2-9` is clean, `2.6.1-3` is told `2.6.1-8.el9_6`, `2.6.1-8` is clean. glibc
+`2.34-83.el9_3` is told `2.34-83.0.1.el9_3.7` while `2.34-60.0.3.el9_2.7` is clean. qemu-kvm at
+epochs 10 and 15 is each held to its own fix. The RHEL `kernel`, all seven kernel-source names,
+a UEK-built group and a group with an unreadable EVR are still dropped, and so is an invented
+name whose group carries a UEK build. An entry with one dropped and one windowed group is
+dropped, and the fix it would have superseded keeps its own window. An entry whose windowed
+groups disagree keeps its own fix. Two D74/D81 tests were rewritten to the new rule. Twenty
+mutations caught, among them the call site ignoring the windows, each part of the kernel
+test, the orderable check, each window-start rule, the highest fix as boundary, the train
+ignoring the epoch, ignoring or keeping the whole release, supersession, the conflict
+fallback, the drop's precedence and a dropped carrier still superseding.
 
 ---
 

@@ -891,8 +891,8 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       rpm 을 얻되 source 의 release 나 RHEL dist 태그를 공유할 때만 (D143, 감사 A3) — Red Hat 의 rhel-9.6.z SBOM:
       source 가 있는 키 있는 rpm 후보 605 → 33,898 중 33,146
 - [x] Oracle Linux: 두 ELSA 가 한 CVE 에 대해 고친 비-kernel 패키지를 버리지 않고 자기 트레인의
-      가장 낮은 fix 에 맞춰 판정 (D144, 감사 A2) — 실제 아카이브: 그룹 9,663개를 구간으로,
-      레코드 9,893 → 10,504; kernel 계열은 D74 의 버림을 유지
+      가장 낮은 fix 에 맞춰 판정 (D144, 감사 A2) — 실제 아카이브: 그룹 9,090개를 구간으로,
+      레코드 9,893 → 10,518; kernel 계열은 D74 의 버림을 유지
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨
