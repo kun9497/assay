@@ -64,8 +64,10 @@ type assayAdvisory struct {
 }
 
 type assaySummary struct {
-	NotEvaluated int `json:"notEvaluated"`
-	Findings     int `json:"findings"`
+	NotEvaluated     int `json:"notEvaluated"`
+	IncompleteChecks int `json:"incompleteChecks"`
+	TargetIncomplete int `json:"targetIncomplete"`
+	Findings         int `json:"findings"`
 	// Components backs the minComponents floor: on a target whose expected
 	// finding count is genuinely zero (cleanstart), zero findings and "the
 	// cataloger silently saw nothing" are indistinguishable through every
