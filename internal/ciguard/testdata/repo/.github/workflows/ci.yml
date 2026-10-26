@@ -4,3 +4,5 @@ jobs:
       - run: go test -tags upstreamvectors ./pkg/covered/ -v
       - run: go test -tags upstreamvectors ./pkg/filtered/ -run TestOne
       - run: go test ./pkg/missing/
+      # - run: go test -tags upstreamvectors ./pkg/commented/ -v
+      - run: go test ./pkg/compound/ && go test -tags upstreamvectors ./pkg/covered/

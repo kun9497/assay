@@ -52,7 +52,9 @@ func taggedPackages(root, tag string) ([]string, error) {
 		for sc.Scan() {
 			line := strings.TrimSpace(sc.Text())
 			if m := constraint.FindStringSubmatch(line); m != nil {
-				for _, w := range regexp.MustCompile(`[A-Za-z0-9_.]+`).FindAllString(m[1], -1) {
+				// "!tag" excludes the file from the tagged build, so it is a
+				// different word from "tag" here, not the same one.
+				for _, w := range regexp.MustCompile(`!?[A-Za-z0-9_.]+`).FindAllString(m[1], -1) {
 					if w == tag {
 						rel, _ := filepath.Rel(root, filepath.Dir(path))
 						seen["./"+filepath.ToSlash(rel)+"/"] = true
@@ -60,8 +62,12 @@ func taggedPackages(root, tag string) ([]string, error) {
 				}
 				break
 			}
+			// Past the header: no build constraint in this file. A /* */ block
+			// before the constraint would also stop here, but gofmt moves
+			// //go:build above any such block and CI fails on `gofmt -l .`, so
+			// no file that lands here has that shape.
 			if line != "" && !strings.HasPrefix(line, "//") {
-				break // past the header: no build constraint in this file
+				break
 			}
 		}
 		return sc.Err()
@@ -93,25 +99,21 @@ func taggedRuns(root, tag string) (covered map[string]bool, filtered []string, e
 			return nil, nil, err
 		}
 		for _, line := range strings.Split(string(b), "\n") {
-			fields := strings.Fields(line)
-			i := indexOf(fields, "go")
-			if i < 0 || i+1 >= len(fields) || fields[i+1] != "test" {
-				continue
-			}
-			args := fields[i+2:]
-			if !hasTag(args, tag) {
-				continue
-			}
-			for j, a := range args {
-				if a == "-run" || strings.HasPrefix(a, "-run=") {
-					filtered = append(filtered, filepath.Base(wf)+": "+strings.TrimSpace(line))
+			for _, args := range goTestCommands(line) {
+				if !hasTag(args, tag) {
+					continue
 				}
-				if strings.HasPrefix(a, "./") && (j == 0 || args[j-1] != "-tags") {
-					p := a
-					if !strings.HasSuffix(p, "/") {
-						p += "/"
+				for j, a := range args {
+					if a == "-run" || strings.HasPrefix(a, "-run=") {
+						filtered = append(filtered, filepath.Base(wf)+": "+strings.TrimSpace(line))
 					}
-					covered[p] = true
+					if strings.HasPrefix(a, "./") && (j == 0 || args[j-1] != "-tags") {
+						p := a
+						if !strings.HasSuffix(p, "/") {
+							p += "/"
+						}
+						covered[p] = true
+					}
 				}
 			}
 		}
@@ -119,13 +121,38 @@ func taggedRuns(root, tag string) (covered map[string]bool, filtered []string, e
 	return covered, filtered, nil
 }
 
-func indexOf(xs []string, s string) int {
-	for i, x := range xs {
-		if x == s {
-			return i
+// goTestCommands returns the arguments of each `go test` command on one
+// workflow line, each cut at the shell separator that ends it. Everything from
+// a `#` token on is a comment -- a step commented out to switch it off runs
+// nothing, so it must cover nothing -- and `go test ./a/ && go test -tags x
+// ./b/` is two commands, so ./a/ does not borrow the second one's tag.
+func goTestCommands(line string) [][]string {
+	fields := strings.Fields(line)
+	for i, f := range fields {
+		if strings.HasPrefix(f, "#") {
+			fields = fields[:i]
+			break
 		}
 	}
-	return -1
+	var cmds [][]string
+	for i := 0; i+1 < len(fields); i++ {
+		if fields[i] != "go" || fields[i+1] != "test" {
+			continue
+		}
+		var args []string
+		for _, a := range fields[i+2:] {
+			if a == "&&" || a == "||" || a == ";" || a == "|" {
+				break
+			}
+			end := strings.HasSuffix(a, ";")
+			args = append(args, strings.TrimSuffix(a, ";"))
+			if end {
+				break
+			}
+		}
+		cmds = append(cmds, args)
+	}
+	return cmds
 }
 
 func hasTag(args []string, tag string) bool {
@@ -201,6 +228,8 @@ func TestGuardRejectsAMissingStepAndARunFilter(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
+		"./pkg/commented/ has upstreamvectors-tagged tests but no workflow runs `go test -tags upstreamvectors ./pkg/commented/`",
+		"./pkg/compound/ has upstreamvectors-tagged tests but no workflow runs `go test -tags upstreamvectors ./pkg/compound/`",
 		"./pkg/missing/ has upstreamvectors-tagged tests but no workflow runs `go test -tags upstreamvectors ./pkg/missing/`",
 		"ci.yml: - run: go test -tags upstreamvectors ./pkg/filtered/ -run TestOne filters a tagged run with -run; a test added later would never execute",
 	}
