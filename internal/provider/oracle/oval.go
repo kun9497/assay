@@ -937,30 +937,65 @@ func dropAmbiguous(defs []resolvedDef, st *stats) (map[dropKey]bool, map[dropKey
 		st.WindowedGroups++
 	}
 
+	// An entry is dropped when ANY of its groups is: a dropped group
+	// outranks a windowed one. Decided for every entry before any window is
+	// cut, because a fix may only be superseded by a lower one whose own
+	// entry survives -- a dropped carrier carries nothing.
 	dropped := map[dropKey]bool{}
+	for di, d := range defs {
+		for major, pkgs := range d.perMajor {
+			for pkg, streams := range pkgs {
+				for stream := range streams {
+					for _, join := range joinKeysFor(d) {
+						if droppedGroup[ambKey{join, major, pkg, stream}] {
+							dropped[dropKey{di, major, pkg, stream}] = true
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+	surviving := map[ambKey]map[string]bool{}
+	for di, d := range defs {
+		for _, join := range joinKeysFor(d) {
+			for major, pkgs := range d.perMajor {
+				for pkg, streams := range pkgs {
+					for stream, evrSet := range streams {
+						if dropped[dropKey{di, major, pkg, stream}] {
+							continue
+						}
+						k := ambKey{join, major, pkg, stream}
+						if surviving[k] == nil {
+							surviving[k] = map[string]bool{}
+						}
+						for evr := range evrSet {
+							surviving[k][evr] = true
+						}
+					}
+				}
+			}
+		}
+	}
+
 	events := map[dropKey][]advisory.Event{}
 	for di, d := range defs {
 		for major, pkgs := range d.perMajor {
 			for pkg, streams := range pkgs {
 				for stream, own := range streams {
 					dk := dropKey{di, major, pkg, stream}
+					if dropped[dk] {
+						continue
+					}
 					var got []advisory.Event
 					seen, conflict := false, false
 					for _, join := range joinKeysFor(d) {
-						k := ambKey{join, major, pkg, stream}
-						if droppedGroup[k] {
-							dropped[dk] = true
-							break
-						}
-						w := windowsFor(own, evrsOf[k])
+						w := windowsFor(own, surviving[ambKey{join, major, pkg, stream}])
 						if !seen {
 							got, seen = w, true
 						} else if !sameEvents(got, w) {
 							conflict = true
 						}
-					}
-					if dropped[dk] {
-						continue
 					}
 					if conflict {
 						st.ConflictingWindows++
@@ -981,14 +1016,22 @@ func dropAmbiguous(defs []resolvedDef, st *stats) (map[dropKey]bool, map[dropKey
 	return dropped, events
 }
 
+// kernelSource names the packages outside the kernel* prefix that Oracle
+// builds from a kernel's own source (measured 2026-10-26 over every
+// multi-fix group): bpftool, perf and python-perf from kernel-uek, and those
+// plus python3-perf, libperf, rtla and rv from the RHEL kernel, whose single
+// version (5.14.0 on OL9) carries its minor-release branch in the release.
+var kernelSource = map[string]bool{
+	"bpftool": true, "perf": true, "python-perf": true, "python3-perf": true,
+	"libperf": true, "rtla": true, "rv": true,
+}
+
 // kernelFamily is the scope D144 leaves under D74's drop: every package
-// named kernel*, and any group one of whose fixes is a UEK build. Measured
-// 2026-10-26, the only packages outside the kernel* prefix that Oracle
-// builds from kernel-uek are bpftool, perf and python-perf, and their
-// groups mix a UEK train with the RHEL kernel's (5.15.0-300.el9uek beside
-// 7.4.0-503.el9_5) -- the same two-kernels-one-name hazard D74 drops for.
+// named kernel*, every kernelSource name, and any group one of whose fixes
+// is a UEK build -- the two-kernels-one-name hazard D74 drops for, and
+// kernel trains windows have not been measured against (deferred-decisions).
 func kernelFamily(pkg string, evrs map[string]bool) bool {
-	if strings.HasPrefix(pkg, "kernel") {
+	if strings.HasPrefix(pkg, "kernel") || kernelSource[pkg] {
 		return true
 	}
 	for e := range evrs {
@@ -999,8 +1042,8 @@ func kernelFamily(pkg string, evrs map[string]bool) bool {
 	return false
 }
 
-// orderable reports whether the RPM comparer reads every EVR in the set. 0
-// of the 9,090 windowed groups had one it refuses (2026-10-26); a group that
+// orderable reports whether the RPM comparer reads every EVR in the set. No
+// windowed group on the 2026-10-26 archive had one it refuses; a group that
 // does is dropped as D74 dropped it, rather than windowed out of order.
 func orderable(evrs map[string]bool) bool {
 	for e := range evrs {
@@ -1011,21 +1054,39 @@ func orderable(evrs map[string]bool) bool {
 	return true
 }
 
-// trainOf is the epoch:version an EVR belongs to; two fixes of one train
-// differ only in their release. A missing epoch is 0, as rpm reads it.
-func trainOf(evr string) string {
+// trainOf is the train an EVR belongs to: epoch:version plus the leading
+// number of its release. A RHEL z-stream branch keeps the version and moves
+// the release (glibc 2.34-60.0.3.el9_2.7 for 9.2.z, 2.34-83.0.1.el9_3.7 for
+// 9.3), so a version-only train made the older branch's fix the boundary for
+// the newer and called an unfixed 2.34-83.el9_3 fixed (D144 review). Two
+// fixes of one train differ past that leading number, as Oracle's own
+// openssh 8.7p1-38.0.2.el9 and the RHEL sync's 8.7p1-38.0.2.el9_4.1 do.
+// It returns the epoch:version too, and both double as window starts: rpm
+// orders a bare version below every release of it, and a release of just
+// "60" below every 60.x one. A missing epoch is 0, as rpm reads it; a
+// release with no leading digits keeps no release part.
+func trainOf(evr string) (ev, train string) {
 	epoch, rest := "0", evr
 	if i := strings.Index(evr, ":"); i >= 0 {
 		epoch, rest = evr[:i], evr[i+1:]
 	}
+	ver, rel := rest, ""
 	if i := strings.LastIndex(rest, "-"); i >= 0 {
-		rest = rest[:i]
+		ver, rel = rest[:i], rest[i+1:]
 	}
-	return epoch + ":" + rest
+	n := 0
+	for n < len(rel) && rel[n] >= '0' && rel[n] <= '9' {
+		n++
+	}
+	ev = epoch + ":" + ver
+	if n == 0 {
+		return ev, ev
+	}
+	return ev, ev + "-" + rel[:n]
 }
 
 // windowsFor is the event list an entry fixing own carries in a group whose
-// fixes are group (own is a subset of it). The group's fixes are cut into
+// surviving fixes are group (own is a subset of it). The group's fixes are cut into
 // trains, and each train's boundary is its LOWEST fix: two fixes of one
 // version are both fixes (Oracle's own 8.7p1-38.0.2.el9 for regreSSHion and
 // the RHEL sync's 8.7p1-38.0.2.el9_4.1), so a host on the lower one is fixed.
@@ -1034,15 +1095,19 @@ func trainOf(evr string) string {
 // not already say, and rewriting it to the lower EVR would misstate this
 // advisory's own fixed version, so it gets no window (nil when none of its
 // fixes is lowest -- the entry is superseded in this group). The lowest
-// train's window opens at 0; every other train's opens at its own
-// epoch:version with no release, which rpm orders below every release of
-// that version -- so 389-ds-base 2.6.1-3.el9_6 is held to 2.6.1-8.el9_6 and
-// 2.5.2-9.el9_5 is not. An unfixed build between two trains (a 2.6.0) falls
+// train's window opens at 0. Every other train's opens at the coarsest
+// boundary that separates it from the train below: its epoch:version when
+// that changed, else its release branch (trainOf) -- so 389-ds-base
+// 2.6.1-3.el9_6 is held to 2.6.1-8.el9_6 and 2.5.2-9.el9_5 is not, and
+// glibc 2.34-83.el9_3 is held to 2.34-83.0.1.el9_3.7 and 2.34-60.0.3.el9_2.7
+// is not. An unfixed build between two trains (a 2.6.0) falls
 // in neither window; that is the one thing this gives up, recorded in D144.
 func windowsFor(own, group map[string]bool) []advisory.Event {
 	lowest := map[string]string{}
+	evOf := map[string]string{}
 	for e := range group {
-		t := trainOf(e)
+		ev, t := trainOf(e)
+		evOf[t] = ev
 		if cur, ok := lowest[t]; !ok || rpmLess(e, cur) {
 			lowest[t] = e
 		}
@@ -1061,6 +1126,9 @@ func windowsFor(own, group map[string]bool) []advisory.Event {
 		start := "0"
 		if i > 0 {
 			start = t
+			if evOf[trains[i-1]] != evOf[t] {
+				start = evOf[t]
+			}
 		}
 		events = append(events, advisory.Event{Introduced: start}, advisory.Event{Fixed: lowest[t]})
 	}

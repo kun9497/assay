@@ -733,12 +733,12 @@ func TestParseOVAL_ModuleStreamWithADotUnescapesCorrectly(t *testing.T) {
 // CVE references at all, whose own criteria tree yields two DIFFERENT fixed
 // EVRs for the same (major, package, stream). Keyed on its own id, the
 // group still forms -- before D144 it was dropped; now its two fixes are one
-// train and the lower is the boundary. Without the fallback the definition
+// train (release branch 9) and the lower is the boundary. Without the fallback the definition
 // would sit in no group and dropAmbiguous would hand it no events at all.
 func TestParseOVAL_NoCVEDefinitionIntraDefinitionGroupStillResolved(t *testing.T) {
 	o := &ovalBuilder{}
 	branchA := o.fixCriterion("bash", "0:5.1.8-9.el9")
-	branchB := o.fixCriterion("bash", "0:5.1.8-10.el9")
+	branchB := o.fixCriterion("bash", "0:5.1.8-9.el9_2")
 	crit := o.platformCriterion(9) + fmt.Sprintf(
 		`<criteria operator="OR"><criteria operator="AND">%s</criteria><criteria operator="AND">%s</criteria></criteria>`,
 		branchA, branchB)

@@ -119,6 +119,12 @@ func TestA2_SameVersionTwoFixesTheLowerIsTheBoundary(t *testing.T) {
 			t.Errorf("%s: verdict %q, want %q", k, got[k], w)
 		}
 	}
+	var st stats
+	defs, _, _ := parseOVAL(strings.NewReader(doc), &st)
+	normalize(defs, &st)
+	if st.SupersededFixes != 1 {
+		t.Errorf("SupersededFixes = %d, want 1 (the el9_4.1 record)", st.SupersededFixes)
+	}
 }
 
 // Two trains: 389-ds-base fixed in 9.5.z at 2.5.2-9.el9_5 and in 9.6 at
@@ -299,5 +305,85 @@ func TestA2_UnorderableGroupKeepsTheDrop(t *testing.T) {
 	}
 	if st.AmbiguousGroups != 1 {
 		t.Errorf("AmbiguousGroups = %d, want 1", st.AmbiguousGroups)
+	}
+}
+
+// RHEL z-stream branches differ in the release, not the version: glibc
+// 2.34-60.x.el9_2 (9.2.z) and 2.34-83.x.el9_3 (9.3) are two trains. A
+// version-only train made the 9.2.z fix the boundary for both, so an unfixed
+// 9.3 build (2.34-83.el9_3) was judged fixed (D144 review). The train is
+// epoch:version plus the release's leading number.
+func TestA2_SameVersionTwoReleaseBranchesAreTwoTrains(t *testing.T) {
+	doc := twoFixes("glibc", "CVE-2023-4911", "0:2.34-60.0.3.el9_2.7", "0:2.34-83.0.1.el9_3.7")
+	got := verdictsOf(t, doc,
+		ol9Pkg("glibc", "2.34-60.el9_2"),
+		ol9Pkg("glibc", "2.34-60.0.3.el9_2.7"),
+		ol9Pkg("glibc", "2.34-83.el9_3"),
+		ol9Pkg("glibc", "2.34-83.0.1.el9_3.7"))
+	want := map[string]string{
+		"glibc@2.34-60.el9_2":       "0:2.34-60.0.3.el9_2.7",
+		"glibc@2.34-60.0.3.el9_2.7": "",
+		"glibc@2.34-83.el9_3":       "0:2.34-83.0.1.el9_3.7",
+		"glibc@2.34-83.0.1.el9_3.7": "",
+	}
+	for k, w := range want {
+		if got[k] != w {
+			t.Errorf("%s: verdict %q, want %q", k, got[k], w)
+		}
+	}
+}
+
+// Packages built from the RHEL kernel's source share its single version
+// (5.14.0 on OL9) and carry their branch in the release, like the kernel
+// itself; D144 leaves them under D74's drop by name, with or without a UEK
+// build in the group (573 such groups were windowed before the review).
+func TestA2_KernelSourcePackagesKeepTheDropByName(t *testing.T) {
+	for _, pkg := range []string{"perf", "python3-perf", "libperf", "rtla", "rv", "bpftool", "python-perf"} {
+		doc := twoFixes(pkg, "CVE-2026-1", "0:5.14.0-611.49.1.el9_7", "0:5.14.0-687.17.1.el9_8")
+		var st stats
+		defs, _, err := parseOVAL(strings.NewReader(doc), &st)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if advs := normalize(defs, &st); len(advs) != 0 || st.AmbiguousGroups != 1 {
+			t.Errorf("%s: %d advisories, AmbiguousGroups %d; want 0 and 1", pkg, len(advs), st.AmbiguousGroups)
+		}
+	}
+}
+
+// A dropped group outranks a windowed one for the same entry, and a fix is
+// superseded only by a lower fix whose own entry survives. ELSA-2 fixes foo
+// for CVE-A (windowed, listed first) and CVE-B, whose group holds an EVR the
+// comparer refuses: ELSA-2 is dropped. ELSA-1's fix is above ELSA-2's in the
+// same train, but with ELSA-2 gone nothing else carries CVE-A, so ELSA-1
+// keeps its own window rather than being superseded into nothing.
+func TestA2_DroppedGroupWinsAndSupersessionNeedsASurvivingCarrier(t *testing.T) {
+	o := &ovalBuilder{}
+	c1 := o.platformCriterion(9) + o.fixCriterion("foo", "0:1.0-5.1.el9")
+	c2 := o.platformCriterion(9) + o.fixCriterion("foo", "0:1.0-5.el9")
+	c3 := o.platformCriterion(9) + o.fixCriterion("foo", "0:1.0-6 el9")
+	doc := o.doc(
+		definitionXML("ELSA-2026-7201", "elsa", "foo", []cveFixture{{"CVE-2026-0001", ""}}, "LOW", c1),
+		definitionXML("ELSA-2026-7202", "elsa", "foo", []cveFixture{{"CVE-2026-0001", ""}, {"CVE-2026-0002", ""}}, "LOW", c2),
+		definitionXML("ELSA-2026-7203", "elsa", "foo", []cveFixture{{"CVE-2026-0002", ""}}, "LOW", c3))
+	var st stats
+	defs, _, err := parseOVAL(strings.NewReader(doc), &st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	advs := normalize(defs, &st)
+	if _, ok := findAdvisory(advs, "ELSA-2026-7202"); ok {
+		t.Errorf("ELSA-2026-7202 survived; one of its groups is dropped, which outranks its windowed one")
+	}
+	a, ok := findAdvisory(advs, "ELSA-2026-7201")
+	if !ok {
+		t.Fatalf("ELSA-2026-7201 missing: its only carrier was dropped, so it must keep its own window")
+	}
+	aff, _ := affectedFor(a, ol9, "foo")
+	if len(aff.Ranges) != 1 || !eventsEqual(aff.Ranges[0].Events, []advisory.Event{{Introduced: "0"}, {Fixed: "0:1.0-5.1.el9"}}) {
+		t.Errorf("ELSA-2026-7201 foo = %+v, want [0, 0:1.0-5.1.el9)", aff)
+	}
+	if st.SupersededFixes != 0 || st.SkippedAmbiguousFixes != 2 {
+		t.Errorf("SupersededFixes = %d, SkippedAmbiguousFixes = %d, want 0 and 2", st.SupersededFixes, st.SkippedAmbiguousFixes)
 	}
 }
