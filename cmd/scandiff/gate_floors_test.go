@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -107,5 +109,38 @@ func TestCommittedTargets_LosingEveryMatchBreaches(t *testing.T) {
 			t.Errorf("%s: exit = %d with every match lost, want %d (minAgree=%d minFindings=%d; stderr=%q)",
 				tg.Name, got, exitFindings, tg.MinAgree, tg.MinFindings, stderr)
 		}
+	}
+}
+
+// The two tests above build both documents from this package's own structs,
+// so a misspelled JSON tag would round-trip and stay green. These read the
+// spellings the real producers write: assay's report.Summary and the floors
+// file a human edits.
+func TestRun_IncompleteCountersReadFromAssaySpelling(t *testing.T) {
+	target := Target{Name: "inc-literal", Ref: "unused", MaxFindings: 50}
+	doc := []byte(`{"schemaVersion":8,"findings":[],"summary":{"incompleteChecks":2,"targetIncomplete":1}}`)
+	_, stderr := runOfflineGate(t, target, doc)
+	for _, want := range []string{
+		"breach: target=inc-literal floor=maxIncompleteChecks want=<=0 got=2",
+		"breach: target=inc-literal floor=maxTargetIncomplete want=<=0 got=1",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr = %q, want it to contain %q", stderr, want)
+		}
+	}
+}
+
+func TestLoadTargets_IncompleteAllowancesParse(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "targets.json")
+	body := `[{"name":"n","ref":"r","maxIncompleteChecks":3,"maxTargetIncomplete":4}]`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ts, err := loadTargets(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ts[0].MaxIncompleteChecks != 3 || ts[0].MaxTargetIncomplete != 4 {
+		t.Errorf("parsed %+v, want maxIncompleteChecks 3 and maxTargetIncomplete 4", ts[0])
 	}
 }
