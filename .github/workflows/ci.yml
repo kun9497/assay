@@ -79,6 +79,36 @@ jobs:
       - name: Ops-alert harness (D138)
         run: sh scripts/ops_alert_test.sh
 
+  # The suite on the other two platforms the binary ships for. build runs on
+  # ubuntu only, so until the 2026-10-22 audit (gap 5) the windows-tagged
+  # tests (unreadable_dir_windows_test.go) never ran in CI and macOS was never
+  # built at all, while .goreleaser.yaml publishes binaries for both. No
+  # -race: it needs cgo, and the race detector already runs on ubuntu, so
+  # this leg exists for what differs by platform -- paths, file modes, locks,
+  # terminals -- not for races.
+  other-os:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build
+        run: go build ./...
+
   # SUSE's provider against its live CSAF VEX feed, for the Red Hat step's
   # reason. A job of its own rather than a step in build: it streams a 445 MB
   # archive and parses about 11 GB of JSON (6.5 minutes measured 2026-10-26),
