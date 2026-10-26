@@ -85,10 +85,10 @@ type Target struct {
 	// "no application-type grype-only tuple is expected here".
 	MaxGrypeOnlyApp map[string]int `json:"maxGrypeOnlyApp,omitempty"`
 	// MaxAssayOnlyFixed is D146's ceiling on assay-only tuples that carry a
-	// fix: a tuple grype does not report, produced by a finding with a fixed
-	// version and a state other than not-fixed or wont-fix (the two states
-	// grype never reports, so a tuple in them is policy, not a candidate false
-	// positive). It is the 2026-10-22 audit's gap-5 ceiling, measured before
+	// fix: a tuple grype does not report, produced by a finding whose
+	// fixState is "fixed" (see assayOnlyFixed; not-fixed and wont-fix are the
+	// states grype never reports, so a tuple in them is policy, not a
+	// candidate false positive). It is the 2026-10-22 audit's gap-5 ceiling, measured before
 	// it was chosen: on twelve captures (2026-10-12 to 10-26) a ceiling of
 	// max(2x, x+25) over this count raised no alarm on any target in any
 	// week, while tripping on about 26 injected tuples where maxFindings

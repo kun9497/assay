@@ -6289,8 +6289,9 @@ zero.
 
 **Decision.** A per-target ceiling, `maxAssayOnlyFixed`, on the assay-only tuples that carry a
 fix. A tuple counts when it is in assay's set and not grype's, after the bare-ID bridge, and
-at least one finding producing it has a fix version in a state other than `not-fixed` or
-`wont-fix`. It is a ceiling, like `maxFindings`: the nightly gate prints it as `info:` and the
+at least one finding producing it has `fixState` `fixed`: the finding-level state, fixed
+when any of its ratings names a fix, not the displayed evidence, which shows only the
+rating that won on severity. It is a ceiling, like `maxFindings`: the nightly gate prints it as `info:` and the
 weekly run judges it. Each target is seeded at max(2x, x + 25) of its 2026-10-26 count;
 omitted means 0, and a test requires the key on every committed target.
 
@@ -6320,13 +6321,16 @@ asked for, saying which of today's tuples are false positives, is not done. The 
 when the count moves, not which tuple is wrong.
 
 **Verified.** Caller tests drive `run` offline on a literal assay document with seven
-findings, of which two count: the no-fix states (one of them naming a version), a finding
-with no fix version, and a tuple grype shares do not. The ceiling breaches the weekly run,
-holds at its value, and is `info:` under `-regressions-only`. The loader refuses a negative
-value. Eleven mutations caught: the call site, either no-fix state counted, the fix version
-not required, shared tuples counted, the breach not demoted, `>=` for `>`, each of the three
-JSON tags, and the loader's check. A twelfth, dropping a membership check in `aSet`, was an
-equivalent, and the check was removed.
+findings, of which two count: a fixed finding, and a fixed finding whose displayed evidence
+names no version because another of its ratings carried the fix. The no-fix states (one of
+them naming a version), `unknown`, and a tuple grype shares do not count. The branch review
+(wf_ae5d4af9-5a3) found the first version reading `evidence.fixed`, which missed that second
+case; the rule was changed, and the 2026-10-26 counts, and so the seeds, came out identical.
+The ceiling breaches the weekly run, holds at its value, and is `info:` under
+`-regressions-only`. The loader refuses a negative value. Nine mutations caught: the call
+site, every state counted, `not-fixed` counted, shared tuples counted, the breach not
+demoted, `>=` for `>`, both JSON tags, and the loader's check. A tenth, dropping a membership
+check in `aSet`, was an equivalent, and the check was removed.
 
 ---
 

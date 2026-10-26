@@ -5995,8 +5995,9 @@ mariner2 는 85% 에 있다. 나머지를 다시 시딩하려면 floor 마다 �
 ### D146 — 차등이 fix 가 있는 assay-only 튜플에 상한을 둔다
 
 **결정.** 타깃별 상한 `maxAssayOnlyFixed` 를 fix 가 있는 assay-only 튜플에 둔다. 튜플은 bare-ID
-bridge 이후 assay 의 집합에 있고 grype 의 집합에 없으며, 그것을 만든 finding 중 적어도 하나가
-`not-fixed` 나 `wont-fix` 가 아닌 상태에서 fix 버전을 가질 때 센다. `maxFindings` 처럼 상한이므로,
+bridge 이후 assay 의 집합에 있고 grype 의 집합에 없으며, 그것을 만든 finding 중 적어도 하나의
+`fixState` 가 `fixed` 일 때 센다. 이는 finding 단위 상태로, rating 중 하나라도 fix 를 가지면
+fixed 다. 심각도에서 이긴 rating 만 보여 주는 evidence 가 아니다. `maxFindings` 처럼 상한이므로,
 야간 게이트는 `info:` 로 출력하고 주간 실행이 판정한다. 각 타깃은 2026-10-26 수치의
 max(2배, x + 25) 로 시딩한다. 생략하면 0 이고, 테스트가 커밋된 모든 타깃에 키를 요구한다.
 
@@ -6022,11 +6023,14 @@ azl3 43, fedora 41, ubuntu2204 39, alpaquita, liberica21, az2023 각 16, humming
 않았다. 상한은 수가 움직일 때를 말할 뿐 어느 튜플이 틀렸는지는 말하지 않는다.
 
 **검증.** 호출자 테스트가 finding 일곱 개짜리 실제 철자 assay 문서로 `run` 을 오프라인으로 돌리고,
-그중 둘이 센다: no-fix 상태(그중 하나는 버전을 가짐), fix 버전이 없는 finding, grype 와 공유하는
-튜플은 세지 않는다. 상한은 주간 실행에서 위반하고, 그 값에서는 통과하며, `-regressions-only` 에서는
-`info:` 다. 로더는 음수 값을 거부한다. 변이 11개 포착: 호출 지점, 어느 no-fix 상태든 셈, fix 버전을
-요구하지 않음, 공유 튜플을 셈, 위반을 강등하지 않음, `>` 대신 `>=`, JSON 태그 셋 각각, 로더 검사.
-열두 번째인 `aSet` 소속 검사 제거는 등가였으므로 그 검사를 지웠다.
+그중 둘이 센다: fixed finding, 그리고 다른 rating 이 fix 를 가졌기 때문에 표시된 evidence 에 버전이
+없는 fixed finding. no-fix 상태(그중 하나는 버전을 가짐), `unknown`, grype 와 공유하는 튜플은 세지
+않는다. 브랜치 리뷰(wf_ae5d4af9-5a3)가 첫 버전이 `evidence.fixed` 를 읽어 그 두 번째 경우를 놓친다는
+것을 찾았다. 규칙을 바꿨고, 2026-10-26 수치와 따라서 시드는 똑같이 나왔다. 상한은 주간 실행에서
+위반하고, 그 값에서는 통과하며, `-regressions-only` 에서는 `info:` 다. 로더는 음수 값을 거부한다.
+변이 9개 포착: 호출 지점, 모든 상태를 셈, `not-fixed` 를 셈, 공유 튜플을 셈, 위반을 강등하지 않음,
+`>` 대신 `>=`, JSON 태그 둘, 로더 검사. 열 번째인 `aSet` 소속 검사 제거는 등가였으므로 그 검사를
+지웠다.
 
 ---
 

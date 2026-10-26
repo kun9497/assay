@@ -19,7 +19,7 @@ const assayOnlyDoc = `{"schemaVersion":8,"summary":{"components":5},"findings":[
  {"package":{"name":"pkg-wontfix"},"advisory":{"id":"CVE-2099-1003"},"fixState":"wont-fix","evidence":{}},
  {"package":{"name":"pkg-wontfix-versioned"},"advisory":{"id":"CVE-2099-1007"},"fixState":"wont-fix","evidence":{"fixed":"9.9"}},
  {"package":{"name":"pkg-nofixver"},"advisory":{"id":"CVE-2099-1004"},"fixState":"unknown","evidence":{}},
- {"package":{"name":"pkg-unknownstate"},"advisory":{"id":"CVE-2099-1005"},"fixState":"unknown","evidence":{"fixed":"3.0"}},
+ {"package":{"name":"pkg-fixed-elsewhere"},"advisory":{"id":"CVE-2099-1005"},"fixState":"fixed","evidence":{}},
  {"package":{"name":"pkg-shared"},"advisory":{"id":"CVE-2099-1006"},"fixState":"fixed","evidence":{"fixed":"2.0"}}
 ]}`
 
@@ -44,11 +44,12 @@ func runAssayOnly(t *testing.T, target Target, extra ...string) (int, string) {
 	return got, stderr.String()
 }
 
-// Two of the seven findings count: pkg-fixed and pkg-unknownstate (a fix
-// version and a state that is not one of the two no-fix states). Not the
-// no-fix states grype never reports -- even one that names a version, which
-// is what holds the state check apart from the version check -- not a
-// finding with no fix version, not the tuple grype shares.
+// Two of the seven findings count, both with fixState "fixed": pkg-fixed,
+// and pkg-fixed-elsewhere, whose displayed evidence names no version because
+// the record that won on severity had none while another of its ratings did
+// (review wf_ae5d4af9-5a3; Finding.FixState reads every rating, Evidence only
+// the winner). Not the no-fix states grype never reports, even one carrying a
+// version; not "unknown"; not the tuple grype shares.
 func TestRun_AssayOnlyFixedCountsOnlyUnsharedTuplesWithAFix(t *testing.T) {
 	target := Target{Name: "ao-count", Ref: "unused", MaxFindings: 50, MaxAssayOnlyFixed: 1}
 	got, stderr := runAssayOnly(t, target)
