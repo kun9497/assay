@@ -6230,6 +6230,49 @@ fallback, the drop's precedence and a dropped carrier still superseding.
 
 ---
 
+### D145 — The differential's floors hold az2023 and wolfi, and read the incompleteness counters
+
+**Decision.** Two holes in the gate's floors, both from the 2026-10-22 audit. (A8) `az2023` and
+`wolfi` carried `minAgree 0` / `minFindings 0` from the 2026-08-28 seeding. They are re-seeded
+at D93's 85% / 2x from the 2026-10-26 weekly capture: az2023 `minAgree 90`, `minFindings 104`,
+`maxFindings 246`, trivy 103 / 103 / 244; wolfi `minAgree 29`, `minFindings 32` (its ceiling
+stays 148), trivy 28 / 28 / 68. Wolfi's floors come from its native tuples only, 38 of which 35
+agree. The bare-ID bridge adds tuples from grype's GHSA coverage and has swung with it (agree
+12 to 67 on 2026-10-13), so a floor on the bridged count would trip when grype's aliases move,
+not when assay's matches do. (A17) scandiff read `summary.notEvaluated` alone. It now also
+reads `incompleteChecks` and `targetIncomplete` and holds each against an exact per-target
+allowance, `maxIncompleteChecks` and `maxTargetIncomplete`, where omitted means 0, the shape
+of `maxNotEvaluated`. Both are regression floors, so the nightly gate judges them.
+`bitnami-legacy-pg` gets `maxIncompleteChecks 1`: Bitnami's json-c record has a bound,
+`0.15-20200726.0`, that its semver comparer refuses.
+
+**Why.** A candidate that lost every Amazon Linux 2023 or Wolfi match passed the D114 gate and
+the weekly run with `ok`, the D90 shape the gate exists for. A candidate whose advisory bounds
+stopped parsing reports every affected check incomplete and no finding; of what the gate read,
+only the finding counts moved, and a target with a low floor does not hold those.
+
+**Measured.** The 2026-10-26 weekly capture: az2023 123 assay tuples, 108 grype, 107 agreeing,
+trivy 122 / 122; wolfi 71 / 113 / 68, of them 38 / 35 native, trivy 34 / 34. az2023 had stood
+at 107 since 2026-10-13 and rose to 123 on 2026-10-25, one under its old ceiling of 124. Every
+target's `incompleteChecks` and `targetIncomplete` is 0 except bitnami-legacy-pg's one. The
+capture replays with exit 0 against the new file, with and without `-regressions-only`.
+
+**Gives up.** The other targets' floors were seeded earlier and sit well under 85% of today's
+counts (debian12 `minAgree` 143 against 242): they catch losing every match, not losing a
+third. The floors file still accepts unknown keys, so a misspelled floor is silently absent.
+
+**Verified.** A test loads the committed floors file and judges every target against a
+document that still catalogs the image but holds no finding; each must breach, except
+cleanstart-postgres, whose honest count is zero and whose floor is `minComponents`. It failed on
+az2023 and wolfi before the re-seed. Caller tests drive `run` offline under
+`-regressions-only` with each counter at and over its allowance, and read both counters and
+both allowances from their literal JSON spellings. Thirteen mutations caught: the call site,
+either comparison made inclusive, the wrong counter or allowance in either comparison, either
+breach demoted to a ceiling, each of the four JSON tags, and each target's floors returned to
+zero.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

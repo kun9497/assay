@@ -933,6 +933,10 @@ exited 0 while 24 findings went unmentioned.
 - [x] Oracle Linux: a non-kernel package two ELSAs fix for one CVE is held to its own train's
       lowest fix instead of being dropped (D144, audit A2) — live archive: 9,090 groups
       windowed, records 9,893 → 10,518; the kernel family keeps D74's drop
+- [x] The differential's floors hold az2023 and wolfi and read the incompleteness counters
+      (D145, audit A8/A17) — both re-seeded from zero at 85% / 2x (wolfi from its native
+      tuples, not the bridged count); `maxIncompleteChecks` / `maxTargetIncomplete` per
+      target, omitted = 0, judged by the nightly gate too
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15
@@ -1348,7 +1352,8 @@ the matcher is wrong.
 **The nightly publish holds the same floors before it pushes (D114).** Between `db build`
 and `db push`, `db-publish.yml` points `ASSAY_DB_DIR` at the candidate and runs
 `scandiff -regressions-only` over the same targets and floors file: a `minAgree`,
-`minFindings`, `minComponents`, `maxNotEvaluated` or committed trivy-minimum breach, or an
+`minFindings`, `minComponents`, `maxNotEvaluated`, `maxIncompleteChecks`,
+`maxTargetIncomplete` (D145) or committed trivy-minimum breach, or an
 `ERROR` verdict, fails the job and nothing is pushed — the next nightly seeds from the last
 good artifact and tries again. An assay scan that exits 2 is re-run once first (revision of
 2026-10-06, after a registry `BLOB_UNKNOWN` transient refused a sound candidate): a target

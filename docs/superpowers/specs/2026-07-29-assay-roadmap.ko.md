@@ -5943,6 +5943,46 @@ ELSA-2023-12850 과 ELSA-2023-5453(glibc), ELSA-2025-4491 과 ELSA-2025-7395(389
 
 ---
 
+### D145 — 차등의 floor 가 az2023 과 wolfi 를 지키고, 불완전 카운터를 읽는다
+
+**결정.** 게이트 floor 의 구멍 둘, 둘 다 2026-10-22 감사에서 나왔다. (A8) `az2023` 과 `wolfi` 는
+2026-08-28 시딩 때의 `minAgree 0` / `minFindings 0` 을 그대로 갖고 있었다. 2026-10-26 주간
+capture 로 D93 의 85% / 2배 규칙에 따라 다시 시딩한다: az2023 `minAgree 90`, `minFindings 104`,
+`maxFindings 246`, trivy 103 / 103 / 244; wolfi `minAgree 29`, `minFindings 32`(ceiling 은 148
+유지), trivy 28 / 28 / 68. wolfi 의 floor 는 native 튜플만으로 정한다. 38개 중 35개가 일치한다.
+bare-ID bridge 는 grype 의 GHSA 커버리지에서 튜플을 더하고 그에 따라 흔들려 왔으므로(2026-10-13 에
+agree 12 에서 67), bridge 를 포함한 수에 floor 를 걸면 assay 의 매칭이 아니라 grype 의 alias 가
+움직일 때 걸린다. (A17) scandiff 는 `summary.notEvaluated` 만 읽었다. 이제 `incompleteChecks` 와
+`targetIncomplete` 도 읽고, 각각을 타깃별 정확한 허용치 `maxIncompleteChecks` 와
+`maxTargetIncomplete` 에 맞춰 판정한다. 생략하면 0 이며, `maxNotEvaluated` 와 같은 모양이다. 둘 다
+회귀 floor 이므로 야간 게이트가 판정한다. `bitnami-legacy-pg` 는 `maxIncompleteChecks 1` 을 받는다:
+Bitnami 의 json-c 레코드에 semver comparer 가 거부하는 경계 `0.15-20200726.0` 이 있다.
+
+**이유.** Amazon Linux 2023 이나 Wolfi 매칭을 전부 잃은 후보가 D114 게이트와 주간 실행을 `ok` 로
+통과했다. 게이트가 존재하는 이유인 D90 모양이다. advisory 경계 파싱이 멈춘 후보는 영향받은 검사를
+모두 incomplete 로, finding 없이 보고한다. 게이트가 읽던 것 중에는 finding 수만 움직였고, floor 가
+낮은 타깃은 그것을 지키지 못한다.
+
+**측정.** 2026-10-26 주간 capture: az2023 assay 튜플 123, grype 108, 일치 107, trivy 122 / 122;
+wolfi 71 / 113 / 68, 그중 native 38 / 35, trivy 34 / 34. az2023 은 2026-10-13 부터 107 이었다가
+2026-10-25 에 123 으로 올라, 이전 ceiling 124 에 하나 못 미쳤다. 모든 타깃의 `incompleteChecks` 와
+`targetIncomplete` 는 bitnami-legacy-pg 의 1 을 빼면 0 이다. 그 capture 를 새 파일로 재생하면
+`-regressions-only` 유무와 관계없이 exit 0 이다.
+
+**포기하는 것.** 다른 타깃의 floor 는 더 일찍 시딩되어 오늘 수치의 85% 보다 한참 아래에 있다
+(debian12 `minAgree` 143 대 242). 매칭을 전부 잃는 것은 잡지만 3분의 1 을 잃는 것은 잡지 못한다.
+floor 파일은 여전히 모르는 키를 받아들이므로, 철자가 틀린 floor 는 조용히 없는 것이 된다.
+
+**검증.** 테스트가 커밋된 floor 파일을 읽고, 이미지를 여전히 카탈로그하지만 finding 이 없는 문서로
+모든 타깃을 판정한다. 각 타깃은 위반해야 한다. 단 cleanstart-postgres 는 정직한 수가 0 이고 floor 가
+`minComponents` 이므로 예외다. 재시딩 전에는 az2023 과 wolfi 에서 실패했다. 호출자 테스트는
+`-regressions-only` 오프라인으로 `run` 을 돌려 각 카운터를 허용치와 같게, 그리고 넘게 두고, 두
+카운터와 두 허용치를 실제 JSON 철자로 읽는다. 변이 13개 포착: 호출 지점, 어느 쪽 비교든 포함
+비교로 바꾸기, 어느 쪽 비교든 틀린 카운터나 허용치, 어느 쪽 위반이든 ceiling 으로 강등, JSON 태그
+네 개 각각, 각 타깃의 floor 를 0 으로 되돌리기.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모
