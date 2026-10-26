@@ -352,19 +352,17 @@ func compareSets(a, g map[tuple]struct{}) (agree, onlyAssay, onlyGrype int) {
 // statements on ubi8n18 are 4,884 of its 5,387 assay-only tuples), not a
 // candidate false positive; counting them would bury the signal. A tuple's
 // ids are recomputed through assayTuples on the one finding, so this cannot
-// drift from how aSet was built. Called after bridgeBareIDs: a bridged tuple
-// is in both sets and never counts.
-func assayOnlyFixed(adoc assayDocument, aSet, gSet map[tuple]struct{}) int {
+// drift from how assayTuples built aSet, and every tuple it yields is in aSet
+// already. Called after bridgeBareIDs: a bridged tuple is in gSet too and
+// never counts.
+func assayOnlyFixed(adoc assayDocument, gSet map[tuple]struct{}) int {
 	counted := map[tuple]bool{}
 	for _, f := range adoc.Findings {
 		if f.Evidence.Fixed == "" || f.FixState == "not-fixed" || f.FixState == "wont-fix" {
 			continue
 		}
 		for tp := range assayTuples(assayDocument{Findings: []assayFinding{f}}) {
-			if _, shared := gSet[tp]; shared {
-				continue
-			}
-			if _, ok := aSet[tp]; ok {
+			if _, shared := gSet[tp]; !shared {
 				counted[tp] = true
 			}
 		}
