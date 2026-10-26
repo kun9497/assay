@@ -78,3 +78,22 @@ jobs:
         run: sh scripts/install_test.sh
       - name: Ops-alert harness (D138)
         run: sh scripts/ops_alert_test.sh
+
+  # SUSE's provider against its live CSAF VEX feed, for the Red Hat step's
+  # reason. A job of its own rather than a step in build: it streams a 445 MB
+  # archive and parses about 11 GB of JSON (6.5 minutes measured 2026-10-26),
+  # which would nearly double every PR's wait in series. It had no CI step at
+  # all until the 2026-10-22 audit (gap 5) found it counted as coverage and
+  # never run; internal/ciguard now fails when a tagged package has no step.
+  suse-feed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: SUSE CSAF VEX feed
+        run: go test -tags upstreamvectors ./internal/provider/suse/ -v -timeout 30m
