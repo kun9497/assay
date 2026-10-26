@@ -6285,6 +6285,51 @@ zero.
 
 ---
 
+### D146 — The differential bounds assay-only tuples that carry a fix
+
+**Decision.** A per-target ceiling, `maxAssayOnlyFixed`, on the assay-only tuples that carry a
+fix. A tuple counts when it is in assay's set and not grype's, after the bare-ID bridge, and
+at least one finding producing it has a fix version in a state other than `not-fixed` or
+`wont-fix`. It is a ceiling, like `maxFindings`: the nightly gate prints it as `info:` and the
+weekly run judges it. Each target is seeded at max(2x, x + 25) of its 2026-10-26 count;
+omitted means 0, and a test requires the key on every committed target.
+
+**Why.** The 2026-10-22 audit (gap 5) asked for an assay-only ceiling. Those tuples are the
+false-positive candidates that ship to customers, and nothing bounded them: an FP regression
+must reach 30% to 100% of a target's findings before `maxFindings` trips (debian12 +102,
+ubuntu2204 +187, ubi8n18 +4,425). The user asked for whichever option tested out, so all of
+them were measured on twelve captures: the nightly gate runs of 2026-10-12 to 10-25 and the
+10-26 weekly. Counting every assay-only tuple at 2x raised 20 alarms over six weekly
+intervals across the 25 targets, and max(2x, x + 10) raised 9. All of them were benign
+upstream batches grype had not yet picked up (BellSoft's on alpaquita and liberica21,
+Amazon's on az2023). An allowlist of known tuples saw new tuples on 142 of 630 target-days.
+Counting only tuples that carry a fix, at max(2x, x + 25), raised none, weekly or over any
+pair of days. It trips at about 26 injected tuples on most targets, and at 504 on ubi8n18,
+where 4,884 of the 5,387 assay-only tuples are Red Hat `not-fixed` and `wont-fix` statements
+grype never reports. Those states are policy, not candidate false positives, and counting
+them would bury the signal.
+
+**Measured.** The 2026-10-26 counts: ubi8n18 503, leap156 189 (grype carries no Leap 15.6
+data), mariner2 53, azl3 43, fedora 41, ubuntu2204 39, alpaquita, liberica21 and az2023 16
+each, hummingbird 7, and 0 to 2 on the rest. Seeded ceilings run from 25 to 1,006. All twelve
+captures replay with the same verdicts as before, with and without `-regressions-only`.
+
+**Gives up.** A false-positive regression confined to the no-fix states is not bounded here;
+`maxFindings` still bounds it, at its coarser threshold. The classification the audit also
+asked for, saying which of today's tuples are false positives, is not done. The ceiling says
+when the count moves, not which tuple is wrong.
+
+**Verified.** Caller tests drive `run` offline on a literal assay document with seven
+findings, of which two count: the no-fix states (one of them naming a version), a finding
+with no fix version, and a tuple grype shares do not. The ceiling breaches the weekly run,
+holds at its value, and is `info:` under `-regressions-only`. The loader refuses a negative
+value. Eleven mutations caught: the call site, either no-fix state counted, the fix version
+not required, shared tuples counted, the breach not demoted, `>=` for `>`, each of the three
+JSON tags, and the loader's check. A twelfth, dropping a membership check in `aSet`, was an
+equivalent, and the check was removed.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

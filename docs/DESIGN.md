@@ -939,6 +939,10 @@ exited 0 while 24 findings went unmentioned.
       nightly capture since 10-13 holds (wolfi `minAgree 9`, trivy informational);
       `maxIncompleteChecks` / `maxTargetIncomplete` per target, omitted = 0, judged by the
       nightly gate too
+- [x] The differential bounds assay-only tuples that carry a fix (D146, audit gap 5) —
+      `maxAssayOnlyFixed` per target at max(2x, x+25), a ceiling the weekly run judges;
+      no-fix states left out (Red Hat's 4,884 on ubi8n18); chosen over an all-tuple
+      count and an allowlist by replaying twelve captures (0 false alarms)
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15
