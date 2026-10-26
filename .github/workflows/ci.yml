@@ -106,6 +106,23 @@ jobs:
       - name: Test
         run: go test ./...
 
+      # The tests that use the per-platform unreadable_dir_*_test.go helpers
+      # skip, rather than pass, when the runner cannot stage a locked directory.
+      # `go test ./...` prints ok either way, so a skip here would be this leg
+      # reporting coverage of the one thing it was added for without running
+      # it. Re-run them verbosely and fail on any SKIP.
+      - name: Platform-specific tests ran, not skipped
+        shell: bash
+        run: |
+          go test -count=1 -v \
+            -run 'TestWalk_AnUnreadableSubdirectoryIsReportedAndDoesNotAbortTheWalk|TestRun_AnUnreadableSubdirectoryReachesTheExitCode|TestRun_PnpmLocalVersusGitSkipsReachTheTargetGateDifferently' \
+            ./internal/cataloger/dirscan/ ./internal/scancmd/ | tee platform.log
+          if grep -q -- '--- SKIP' platform.log; then
+            echo "a platform-specific test skipped; it did not run on this runner"
+            exit 1
+          fi
+          test "$(grep -c -- '^--- PASS: Test' platform.log)" -eq 3
+
       - name: Build
         run: go build ./...
 
