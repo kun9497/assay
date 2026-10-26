@@ -387,3 +387,19 @@ func TestA2_DroppedGroupWinsAndSupersessionNeedsASurvivingCarrier(t *testing.T) 
 		t.Errorf("SupersededFixes = %d, SkippedAmbiguousFixes = %d, want 0 and 2", st.SupersededFixes, st.SkippedAmbiguousFixes)
 	}
 }
+
+// Every name measured so far that Oracle builds from kernel-uek is in
+// kernelSource, so the UEK check is the guard for the next one: a package
+// under a name this file does not list, whose group carries a UEK build, is
+// still kept off the windows. The name is invented for that reason.
+func TestA2_AnUnlistedUEKBuiltNameKeepsTheDrop(t *testing.T) {
+	doc := twoFixes("uek-newtool", "CVE-2026-2", "0:5.15.0-300.163.18.7.el9uek", "0:6.12.0-100.1.1.el9uek")
+	var st stats
+	defs, _, err := parseOVAL(strings.NewReader(doc), &st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if advs := normalize(defs, &st); len(advs) != 0 || st.AmbiguousGroups != 1 {
+		t.Errorf("%d advisories, AmbiguousGroups %d; want 0 and 1", len(advs), st.AmbiguousGroups)
+	}
+}
