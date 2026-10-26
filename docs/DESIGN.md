@@ -934,9 +934,11 @@ exited 0 while 24 findings went unmentioned.
       lowest fix instead of being dropped (D144, audit A2) — live archive: 9,090 groups
       windowed, records 9,893 → 10,518; the kernel family keeps D74's drop
 - [x] The differential's floors hold az2023 and wolfi and read the incompleteness counters
-      (D145, audit A8/A17) — both re-seeded from zero at 85% / 2x (wolfi from its native
-      tuples, not the bridged count); `maxIncompleteChecks` / `maxTargetIncomplete` per
-      target, omitted = 0, judged by the nightly gate too
+      (D145, audit A8/A17) — their zero `minAgree` / `minFindings` re-seeded at 85% of the
+      2026-10-26 capture, cut where a floor tracks grype's or trivy's own feed so every
+      nightly capture since 10-13 holds (wolfi `minAgree 9`, trivy informational);
+      `maxIncompleteChecks` / `maxTargetIncomplete` per target, omitted = 0, judged by the
+      nightly gate too
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15

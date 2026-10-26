@@ -122,8 +122,8 @@
     "minFindings": 104,
     "maxFindings": 246,
     "trivy": {
-      "minAgree": 103,
-      "minFindings": 103,
+      "minAgree": 90,
+      "minFindings": 90,
       "maxFindings": 244
     },
     "minComponents": 90
@@ -132,14 +132,10 @@
     "name": "wolfi",
     "tag": "wolfi-base:latest",
     "ref": "cgr.dev/chainguard/wolfi-base@sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72",
-    "minAgree": 29,
+    "minAgree": 9,
     "minFindings": 32,
     "maxFindings": 148,
-    "trivy": {
-      "minAgree": 28,
-      "minFindings": 28,
-      "maxFindings": 68
-    },
+    "trivy": {},
     "minComponents": 12
   },
   {

@@ -57,8 +57,8 @@ ceiling (`maxGrypeOnlyApp`) bounds the grype-only tuples on application package 
 the in-image language packages an image scan does not read (D70) — so that gap shows up in
 the weekly run instead of being judged `ok`. Since D145 the gate also holds
 `incompleteChecks` and `targetIncomplete` (`maxIncompleteChecks` / `maxTargetIncomplete`,
-omitted = 0), and az2023/wolfi carry real floors (wolfi's from native tuples, since the
-bridge moves with grype). Since D118 a registry image scan reads
+omitted = 0), and az2023/wolfi carry real floors, cut where a floor tracks grype's or
+trivy's own feed (wolfi's trivy collapsed 33 to 1 for a night). Since D118 a registry image scan reads
 credentials — `ASSAY_REGISTRY_AUTH_*` first, then the docker login, then podman's — and
 never prints one; before it, the scan path was anonymous-only. Since D119 `--platform` picks an
 image's platform with containerd's normalisation and compatibility order on every image path,

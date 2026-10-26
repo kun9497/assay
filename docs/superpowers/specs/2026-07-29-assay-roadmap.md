@@ -6234,12 +6234,17 @@ fallback, the drop's precedence and a dropped carrier still superseding.
 
 **Decision.** Two holes in the gate's floors, both from the 2026-10-22 audit. (A8) `az2023` and
 `wolfi` carried `minAgree 0` / `minFindings 0` from the 2026-08-28 seeding. They are re-seeded
-at D93's 85% / 2x from the 2026-10-26 weekly capture: az2023 `minAgree 90`, `minFindings 104`,
-`maxFindings 246`, trivy 103 / 103 / 244; wolfi `minAgree 29`, `minFindings 32` (its ceiling
-stays 148), trivy 28 / 28 / 68. Wolfi's floors come from its native tuples only, 38 of which 35
-agree. The bare-ID bridge adds tuples from grype's GHSA coverage and has swung with it (agree
-12 to 67 on 2026-10-13), so a floor on the bridged count would trip when grype's aliases move,
-not when assay's matches do. (A17) scandiff read `summary.notEvaluated` alone. It now also
+from the 2026-10-26 weekly capture at D93's 85% / 2x, except where a floor measures grype's
+or trivy's own database more than assay's candidate: those are cut to hold every nightly
+capture since 2026-10-12, because the nightly gate judges them and a bad day in another
+scanner's feed must not withhold the publish. az2023: `minAgree 90`, `minFindings 104`,
+`maxFindings 246`, trivy 90 / 90 / 244 (trivy's count stood at 106 from 2026-10-13 to 10-24 and
+read 122 only on 10-25). wolfi: `minFindings 32`, from its native tuples (38) because the
+bare-ID bridge adds tuples from grype's GHSA coverage and moves with it; `minAgree 9`, 85% of
+the native agreement of 11 measured on 2026-10-12, when grype's Wolfi data was half its later
+size (35 since 10-13); its ceiling stays 148; its trivy block stays informational, because
+trivy's own Wolfi count fell from 33 to 1 for one night on 2026-10-12 against the same image
+digest. (A17) scandiff read `summary.notEvaluated` alone. It now also
 reads `incompleteChecks` and `targetIncomplete` and holds each against an exact per-target
 allowance, `maxIncompleteChecks` and `maxTargetIncomplete`, where omitted means 0, the shape
 of `maxNotEvaluated`. Both are regression floors, so the nightly gate judges them.
@@ -6255,11 +6260,18 @@ only the finding counts moved, and a target with a low floor does not hold those
 trivy 122 / 122; wolfi 71 / 113 / 68, of them 38 / 35 native, trivy 34 / 34. az2023 had stood
 at 107 since 2026-10-13 and rose to 123 on 2026-10-25, one under its old ceiling of 124. Every
 target's `incompleteChecks` and `targetIncomplete` is 0 except bitnami-legacy-pg's one. The
-capture replays with exit 0 against the new file, with and without `-regressions-only`.
+capture replays with exit 0 against the new file, with and without `-regressions-only`, and so
+do the gate's own captures from ten nightlies, 2026-10-13 to 10-25. The 2026-10-12 nightly would
+breach az2023, all four of its floors at 83: assay, grype and trivy read 83 that night, before
+Amazon's 2026-10-13 advisories reached all three, so that is the data itself, which the floor is
+meant to hold.
 
-**Gives up.** The other targets' floors were seeded earlier and sit well under 85% of today's
-counts (debian12 `minAgree` 143 against 242): they catch losing every match, not losing a
-third. The floors file still accepts unknown keys, so a misspelled floor is silently absent.
+**Gives up.** wolfi's `minAgree` catches losing nearly every agreed match, not a quarter of
+them, and no trivy floor guards Wolfi. Several other targets' floors were seeded months ago and
+sit well under 85% of today's counts (debian12 `minAgree` 143 against 242, ubi9 350 against
+634), while debian11 and mariner2 are at 85%; a re-seed of the rest needs the same per-floor
+look at which scanner moves it. The floors file still accepts unknown keys, so a misspelled
+floor is silently absent.
 
 **Verified.** A test loads the committed floors file and judges every target against a
 document that still catalogs the image but holds no finding; each must breach, except
