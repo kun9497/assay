@@ -1036,6 +1036,14 @@ func writeD112Image(t *testing.T, path string) {
 // The rows that scan clean are what make the 1ns rows mean something: the
 // same image, with no flag or a generous one, exits 0, so an exit 2 can only
 // be the deadline.
+//
+// The 1ns rows expire through the withScanTimeout seam rather than a real
+// 1ns timer. A real one is a race the scan usually loses: on a Windows runner
+// the timer and the monotonic clock move in coarse ticks, and this one-package
+// image scanned clean before the deadline fired (first windows-latest run,
+// 2026-10-26). The seam records the duration it was handed, so the wiring --
+// flag parsed, duration passed, deadline on the context scan receives -- is
+// still what is held.
 func TestRun_ScanTimeoutReachesRealExitCode(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("ASSAY_DB_DIR", dir)
@@ -1059,22 +1067,44 @@ func TestRun_ScanTimeoutReachesRealExitCode(t *testing.T) {
 		name    string
 		flags   []string
 		want    int
-		timeout string // the duration the message must name, when one is expected
+		handed  time.Duration // what withScanTimeout must receive; 0 = never called
+		timeout string        // the duration the message must name, when one is expected
 	}{
-		{"no --timeout: the scan behaves as it did before the flag", nil, exitOK, ""},
-		{"a generous --timeout= changes nothing", []string{"--timeout=10m"}, exitOK, ""},
-		{"a generous --timeout, space form, changes nothing", []string{"--timeout", "10m"}, exitOK, ""},
-		{"--timeout=1ns expires before the walk", []string{"--timeout=1ns"}, exitError, "1ns"},
-		{"--timeout 1ns, space form, expires too", []string{"--timeout", "1ns"}, exitError, "1ns"},
+		{"no --timeout: the scan behaves as it did before the flag", nil, exitOK, 0, ""},
+		{"a generous --timeout= changes nothing", []string{"--timeout=10m"}, exitOK, 10 * time.Minute, ""},
+		{"a generous --timeout, space form, changes nothing", []string{"--timeout", "10m"}, exitOK, 10 * time.Minute, ""},
+		{"--timeout=1ns expires before the walk", []string{"--timeout=1ns"}, exitError, time.Nanosecond, "1ns"},
+		{"--timeout 1ns, space form, expires too", []string{"--timeout", "1ns"}, exitError, time.Nanosecond, "1ns"},
 	}
+	orig := withScanTimeout
+	t.Cleanup(func() { withScanTimeout = orig })
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			var handed time.Duration
+			withScanTimeout = func(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+				handed = d
+				if tc.timeout != "" {
+					// Already past: Done before the scan's first check, on any clock.
+					return context.WithDeadline(ctx, time.Unix(0, 0))
+				}
+				// The production value, held here because the expiring rows
+				// never call it: a seam that ignored d would leave every row
+				// green, the 10m rows exiting 0 with or without a deadline.
+				got, cancel := orig(ctx, d)
+				if dl, ok := got.Deadline(); !ok || time.Until(dl) < d-time.Minute {
+					t.Errorf("withScanTimeout(%v) gave deadline %v (set: %v), want about %v from now", d, dl, ok, d)
+				}
+				return got, cancel
+			}
 			args := append([]string{"scan", target}, tc.flags...)
 			var stdout, stderr bytes.Buffer
 			code := run(args, &stdout, &stderr)
 			if code != tc.want {
 				t.Fatalf("run(%v) = %d, want %d\nstdout:\n%s\nstderr:\n%s",
 					args, code, tc.want, stdout.String(), stderr.String())
+			}
+			if handed != tc.handed {
+				t.Errorf("withScanTimeout was handed %v, want %v", handed, tc.handed)
 			}
 			if tc.timeout == "" {
 				return

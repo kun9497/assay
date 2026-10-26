@@ -79,6 +79,56 @@ jobs:
       - name: Ops-alert harness (D138)
         run: sh scripts/ops_alert_test.sh
 
+  # The suite on the other two platforms the binary ships for. build runs on
+  # ubuntu only, so until the 2026-10-22 audit (gap 5) the windows-tagged
+  # tests (unreadable_dir_windows_test.go) never ran in CI and macOS was never
+  # built at all, while .goreleaser.yaml publishes binaries for both. No
+  # -race: it needs cgo, and the race detector already runs on ubuntu, so
+  # this leg exists for what differs by platform -- paths, file modes, locks,
+  # terminals -- not for races.
+  other-os:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+      # Every test that stages a locked directory through the per-platform
+      # unreadable_dir_*_test.go helper (makeUnreadable): the dirscan walk, the
+      # scancmd exit-code test and the four D109 tests, whose fixture table has
+      # an unreadable-subtree row. They skip, rather than pass, when the runner
+      # cannot stage the lock.
+      # `go test ./...` prints ok either way, so a skip here would be this leg
+      # reporting coverage of the one thing it was added for without running
+      # it. Re-run them verbosely and fail on any SKIP.
+      - name: Platform-specific tests ran, not skipped
+        shell: bash
+        run: |
+          go test -count=1 -v \
+            -run 'TestWalk_AnUnreadableSubdirectoryIsReportedAndDoesNotAbortTheWalk|TestRun_AnUnreadableSubdirectoryReachesTheExitCode|TestRun_D109_' \
+            ./internal/cataloger/dirscan/ ./internal/scancmd/ | tee platform.log
+          if grep -q -- '--- SKIP' platform.log; then
+            echo "a platform-specific test skipped; it did not run on this runner"
+            exit 1
+          fi
+          test "$(grep -c -- '^--- PASS: Test' platform.log)" -eq 6
+
+      - name: Build
+        run: go build ./...
+
   # SUSE's provider against its live CSAF VEX feed, for the Red Hat step's
   # reason. A job of its own rather than a step in build: it streams a 445 MB
   # archive and parses about 11 GB of JSON (6.5 minutes measured 2026-10-26),

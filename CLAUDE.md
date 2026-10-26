@@ -153,7 +153,9 @@ call the underlying `go` commands directly. CI (`.github/workflows/ci.yml`) runs
 gofmt-check → vet → test -race → build on Go 1.26; a non-empty `gofmt -l .` fails the build.
 Tests behind the `upstreamvectors` tag (comparer oracles, the Red Hat and SUSE live feeds)
 run only there, each package named in its own step; `internal/ciguard` fails when a tagged
-package has no step or a tagged run is narrowed by `-run`.
+package has no step or a tagged run is narrowed by `-run`. An `other-os` leg runs vet, test and
+build on windows-latest and macos-latest (no `-race`) and fails if the unreadable-directory
+tests skip there instead of running.
 
 **`make test` fails on a machine without a C toolchain**: `-race` requires cgo, and Go
 defaults `CGO_ENABLED` to 0 when it finds no C compiler. Fall back to `go test ./...`
