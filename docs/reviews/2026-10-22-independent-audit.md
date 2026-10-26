@@ -23,7 +23,7 @@ Result: **18 confirmed, 2 contested (one refuter each way), 0 refuted, 16 P4 rep
 without verification.** The zero refutations say more about the finders' own bar than about
 the refuters: finders were told to make the tests disprove a hypothesis before filing it.
 
-**Status (2026-10-23).** A1 is fixed as D142, A3 as D143.
+**Status (2026-10-26).** A1 is fixed as D142, A2 as D144, A3 as D143.
 
 ## 1. Confirmed findings, by the order they should be fixed
 

@@ -647,13 +647,13 @@ func TestParseOVAL_ModuleStreamAmbiguityRecoveredAcrossDefinitions(t *testing.T)
 	}
 }
 
-// TestParseOVAL_ModuleStreamCollisionWithinOneStreamStillDropped proves
-// D74's original ambiguity rule still applies WITHIN one stream: two
-// definitions both gate nodejs:18 (same CVE, major and package), at
-// different fixed EVRs -- an actual disagreement about what nodejs:18 is
-// fixed at, which D81 must still catch and drop, exactly as the
-// stream-blind guard did before this slice.
-func TestParseOVAL_ModuleStreamCollisionWithinOneStreamStillDropped(t *testing.T) {
+// TestParseOVAL_ModuleStreamTwoFixesWithinOneStreamAreWindowed: two
+// definitions both gate nodejs:18 (same CVE, major and package) at
+// different fixed EVRs. D74 and D81 dropped both; D144 windows a non-kernel
+// group instead, still within the one stream: 18.20.1 and 18.20.2 are two
+// trains, so each definition keeps a window of its own, the higher opening
+// at its own version.
+func TestParseOVAL_ModuleStreamTwoFixesWithinOneStreamAreWindowed(t *testing.T) {
 	o := &ovalBuilder{}
 	critA := o.platformCriterion(9) + o.moduleGateCriterion("nodejs", "18") + o.fixCriterion("nodejs", "1:18.20.1-1.module+el9+1+aaaaaaaa")
 	critB := o.platformCriterion(9) + o.moduleGateCriterion("nodejs", "18") + o.fixCriterion("nodejs", "1:18.20.2-1.module+el9+2+bbbbbbbb")
@@ -670,17 +670,22 @@ func TestParseOVAL_ModuleStreamCollisionWithinOneStreamStillDropped(t *testing.T
 	}
 	advs := normalize(defs, &st)
 
-	if _, ok := findAdvisory(advs, "ELSA-2026-9201"); ok {
-		t.Errorf("ELSA-2026-9201 survived; both nodejs:18 fixes disagree and must be dropped")
+	for id, want := range map[string][]advisory.Event{
+		"ELSA-2026-9201": {{Introduced: "0"}, {Fixed: "1:18.20.1-1.module+el9+1+aaaaaaaa"}},
+		"ELSA-2026-9202": {{Introduced: "1:18.20.2"}, {Fixed: "1:18.20.2-1.module+el9+2+bbbbbbbb"}},
+	} {
+		a, ok := findAdvisory(advs, id)
+		if !ok {
+			t.Errorf("%s missing", id)
+			continue
+		}
+		aff, ok := affectedFor(a, "Oracle Linux:9", "nodejs")
+		if !ok || aff.ModuleStream != "nodejs:18" || len(aff.Ranges) != 1 || !eventsEqual(aff.Ranges[0].Events, want) {
+			t.Errorf("%s nodejs = %+v, want stream nodejs:18 and events %+v", id, aff, want)
+		}
 	}
-	if _, ok := findAdvisory(advs, "ELSA-2026-9202"); ok {
-		t.Errorf("ELSA-2026-9202 survived; both nodejs:18 fixes disagree and must be dropped")
-	}
-	if st.AmbiguousGroups != 1 {
-		t.Errorf("AmbiguousGroups = %d, want 1", st.AmbiguousGroups)
-	}
-	if st.SkippedAmbiguousFixes != 2 {
-		t.Errorf("SkippedAmbiguousFixes = %d, want 2 (one dropped from each contributing definition)", st.SkippedAmbiguousFixes)
+	if st.AmbiguousGroups != 0 || st.WindowedGroups != 1 {
+		t.Errorf("AmbiguousGroups = %d, WindowedGroups = %d, want 0 and 1", st.AmbiguousGroups, st.WindowedGroups)
 	}
 }
 
@@ -723,21 +728,17 @@ func TestParseOVAL_ModuleStreamWithADotUnescapesCorrectly(t *testing.T) {
 	}
 }
 
-// TestParseOVAL_NoCVEDefinitionIntraDefinitionAmbiguityStillCaught is the
+// TestParseOVAL_NoCVEDefinitionIntraDefinitionGroupStillResolved is the
 // caller-first proof for joinKeysFor's no-CVE fallback: a definition with NO
 // CVE references at all, whose own criteria tree yields two DIFFERENT fixed
-// EVRs for the same (major, package, stream) -- the exact self-contradiction
-// dropAmbiguous exists to catch, and joinKeysFor's own doc comment names as
-// the reason the fallback returns []string{d.id} rather than an empty set:
-// "two branches of ITS OWN criteria tree naming the same package at two
-// different EVRs under one major" must still be dropped, even with nothing
-// but the definition's own id to key on. TestParseOVAL_NoCVERefsStillEmits
-// above is the well-behaved half (one fix, no ambiguity at all); this is the
-// unheld other half.
-func TestParseOVAL_NoCVEDefinitionIntraDefinitionAmbiguityStillCaught(t *testing.T) {
+// EVRs for the same (major, package, stream). Keyed on its own id, the
+// group still forms -- before D144 it was dropped; now its two fixes are one
+// train (release branch 9) and the lower is the boundary. Without the fallback the definition
+// would sit in no group and dropAmbiguous would hand it no events at all.
+func TestParseOVAL_NoCVEDefinitionIntraDefinitionGroupStillResolved(t *testing.T) {
 	o := &ovalBuilder{}
 	branchA := o.fixCriterion("bash", "0:5.1.8-9.el9")
-	branchB := o.fixCriterion("bash", "0:5.1.8-10.el9")
+	branchB := o.fixCriterion("bash", "0:5.1.8-9.el9_2")
 	crit := o.platformCriterion(9) + fmt.Sprintf(
 		`<criteria operator="OR"><criteria operator="AND">%s</criteria><criteria operator="AND">%s</criteria></criteria>`,
 		branchA, branchB)
@@ -749,16 +750,17 @@ func TestParseOVAL_NoCVEDefinitionIntraDefinitionAmbiguityStillCaught(t *testing
 		t.Fatalf("parseOVAL: %v", err)
 	}
 	advs := normalize(defs, &st)
-	if _, ok := findAdvisory(advs, "ELSA-2026-0007"); ok {
-		t.Errorf("ELSA-2026-0007 survived; its own two branches disagree on bash's fixed EVR and " +
-			"must be dropped even with no CVE to key on")
+	a, ok := findAdvisory(advs, "ELSA-2026-0007")
+	if !ok {
+		t.Fatalf("ELSA-2026-0007 missing: %+v", advs)
 	}
-	if st.AmbiguousGroups != 1 {
-		t.Errorf("AmbiguousGroups = %d, want 1", st.AmbiguousGroups)
+	aff, ok := affectedFor(a, "Oracle Linux:9", "bash")
+	want := []advisory.Event{{Introduced: "0"}, {Fixed: "0:5.1.8-9.el9"}}
+	if !ok || len(aff.Ranges) != 1 || !eventsEqual(aff.Ranges[0].Events, want) {
+		t.Errorf("bash = %+v, want %+v", aff, want)
 	}
-	if st.SkippedAmbiguousFixes != 1 {
-		t.Errorf("SkippedAmbiguousFixes = %d, want 1 -- one (definition, major, package, stream) "+
-			"quadruple dropped, not one per branch (both branches belong to the same definition)", st.SkippedAmbiguousFixes)
+	if st.WindowedGroups != 1 {
+		t.Errorf("WindowedGroups = %d, want 1", st.WindowedGroups)
 	}
 }
 

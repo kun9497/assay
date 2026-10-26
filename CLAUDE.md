@@ -18,7 +18,8 @@ local only because `db push` strips it, D29); `assay db update` pulls the publis
 artifact (D28) rather than rebuilding. More providers are on by default and carried by
 the artifact: Red Hat CSAF VEX (D47–D52 — fix states with reasons, `--fail-on-unfixable`
 and `=wont-fix`), Amazon ALAS core plus AL2 extras (D73, D78), Oracle ELSA OVAL (D74,
-Ksplice/FIPS lineage-filtered since D79), Fedora Bodhi (D75), Photon's flat-JSON CVE metadata (D96), Arch's AVG tracker (D97, with
+Ksplice/FIPS lineage-filtered since D79; since D144 a non-kernel package two ELSAs fix for one
+CVE is held to its own train's lowest fix rather than dropped), Fedora Bodhi (D75), Photon's flat-JSON CVE metadata (D96), Arch's AVG tracker (D97, with
 its own pacman comparer and cataloger), SUSE CSAF VEX (D77, whose
 no-fix entries are 99.96% reason-unstated — the inverse of Red Hat; its delta pass reads
 the year-prefixed layout SUSE moved to on 2026-10-15, D122, and since D129 runs before the

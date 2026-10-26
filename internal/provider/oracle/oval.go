@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/version"
 )
 
 // This file is assay's first OVAL parser (D74). OVAL 5.11 splits one
@@ -203,8 +204,11 @@ type stats struct {
 	UnrecognizedSeverity  int // a severity word outside IMPORTANT/MODERATE/LOW/CRITICAL (e.g. "N/A")
 	NoMajorContext        int // a package-fix criterion with no platform guard above it anywhere in the tree
 	SkippedLineageFixes   int // a fixed EVR carrying a Ksplice or FIPS lineage marker, dropped before ambiguity grouping (D79)
-	AmbiguousGroups       int // distinct (CVE-or-ELSA, major, package, stream) groups with 2+ fixed EVRs (D81 adds stream)
+	AmbiguousGroups       int // distinct (CVE-or-ELSA, major, package, stream) groups with 2+ fixed EVRs that are still dropped: kernel family or unorderable (D81 adds stream, D144 narrows)
 	SkippedAmbiguousFixes int // individual Affected entries dropped because of an AmbiguousGroups hit
+	WindowedGroups        int // non-kernel groups with 2+ fixed EVRs kept as per-train windows instead (D144)
+	ConflictingWindows    int // entries whose CVE groups gave different windows, kept at their own fix (D144)
+	SupersededFixes       int // entries whose every fix has a lower fix of the same train in another definition (D144)
 	Advisories            int // advisory.Advisory records emitted
 	Affected              int // Affected entries emitted across all of them
 
@@ -223,8 +227,10 @@ func (s stats) String() string {
 			"%d advisories carried an unrecognized severity word; "+
 			"%d package-fix criteria had no platform guard above them (skipped); "+
 			"%d lineage (ksplice/fips) fixed versions dropped (D79); "+
-			"UEK/module-train guard: %d ambiguous (CVE, major, package, stream) group(s), "+
+			"kernel-train guard: %d ambiguous (CVE, major, package, stream) group(s), "+
 			"%d affected entr(y/ies) dropped for it; "+
+			"D144: %d multi-fix group(s) windowed by train, %d entr(y/ies) superseded by a lower fix "+
+			"of the same train, %d kept at their own fix because their groups disagreed; "+
 			"module streams (D81): %d gated fix(es) kept across %d distinct stream(s), "+
 			"%d module-tagged fixed version(s) stored stream-less for lack of a resolvable gate, "+
 			"%d gate(s) where comment and structural extraction disagreed (structural kept), "+
@@ -233,6 +239,7 @@ func (s stats) String() string {
 		s.SkippedNoID, s.SkippedNoPackages, s.UnrecognizedSeverity, s.NoMajorContext,
 		s.SkippedLineageFixes,
 		s.AmbiguousGroups, s.SkippedAmbiguousFixes,
+		s.WindowedGroups, s.SupersededFixes, s.ConflictingWindows,
 		s.ModuleGatedFixesKept, s.DistinctModuleStreams,
 		s.UngatedModuleFixes, s.ModuleGateExtractionDisagreements, s.ModuleGateUnresolved)
 }
@@ -875,18 +882,29 @@ func joinKeysFor(d resolvedDef) []string {
 	return []string{d.id}
 }
 
-// dropAmbiguous finds every (join key, major, package, stream) that resolves
-// to more than one distinct fixed EVR across the whole corpus, and returns
-// which (definition, major, package, stream) quadruples contributed to one
-// -- every contributor is dropped, not just the second one seen, because
-// arrival order says nothing about which train (or, D81, which module
-// stream) a real host is on (D25's "never resolve a tie by arrival order",
-// applied here to a tie this provider cannot break at all rather than one
-// D25 breaks by score).
-func dropAmbiguous(defs []resolvedDef, st *stats) map[dropKey]bool {
+// dropAmbiguous resolves every (join key, major, package, stream) group that
+// carries more than one distinct fixed EVR across the whole corpus. It
+// returns the (definition, major, package, stream) entries that must not be
+// emitted, and the event list every other entry is emitted with.
+//
+// D74 dropped every contributor of every such group: arrival order says
+// nothing about which kernel train a real host is on (D25's "never resolve
+// a tie by arrival order", applied to a tie this provider cannot break).
+// That still holds for the kernel family (kernelFamily), and it is still
+// done there. D144 (2026-10-22 audit, A2) found the drop reaching 9,090
+// non-kernel groups across 1,564 packages on the 2026-10-26 archive --
+// openssh's CVE-2024-6387, glibc's CVE-2023-4911 -- whose fixes are not a
+// tie at all: the EVRs order, and they fall into trains (trainOf). Those
+// groups are windowed instead (windowsFor).
+//
+// An entry sits in one group per CVE of its definition, and its Affected
+// entry can carry only one event list. When its groups give it different
+// windows, it keeps its own statement, [0, its own fix): that contains
+// every group's window, so no CVE it names loses its finding. Counted as
+// ConflictingWindows.
+func dropAmbiguous(defs []resolvedDef, st *stats) (map[dropKey]bool, map[dropKey][]advisory.Event) {
 	evrsOf := map[ambKey]map[string]bool{}
-	contributorsOf := map[ambKey]map[int]bool{}
-	for di, d := range defs {
+	for _, d := range defs {
 		for _, join := range joinKeysFor(d) {
 			for major, pkgs := range d.perMajor {
 				for pkg, streams := range pkgs {
@@ -898,27 +916,241 @@ func dropAmbiguous(defs []resolvedDef, st *stats) map[dropKey]bool {
 						for evr := range evrSet {
 							evrsOf[k][evr] = true
 						}
-						if contributorsOf[k] == nil {
-							contributorsOf[k] = map[int]bool{}
-						}
-						contributorsOf[k][di] = true
 					}
 				}
 			}
 		}
 	}
 
-	dropped := map[dropKey]bool{}
+	// Each multi-EVR group is classified once: dropped (kernel family, or
+	// an EVR the comparer refuses) or windowed.
+	droppedGroup := map[ambKey]bool{}
 	for k, evrSet := range evrsOf {
 		if len(evrSet) <= 1 {
 			continue
 		}
-		st.AmbiguousGroups++
-		for di := range contributorsOf[k] {
-			dropped[dropKey{di, k.major, k.pkg, k.stream}] = true
+		if kernelFamily(k.pkg, evrSet) || !orderable(evrSet) {
+			droppedGroup[k] = true
+			st.AmbiguousGroups++
+			continue
+		}
+		st.WindowedGroups++
+	}
+
+	// An entry is dropped when ANY of its groups is: a dropped group
+	// outranks a windowed one. Decided for every entry before any window is
+	// cut, because a fix may only be superseded by a lower one whose own
+	// entry survives -- a dropped carrier carries nothing.
+	dropped := map[dropKey]bool{}
+	for di, d := range defs {
+		for major, pkgs := range d.perMajor {
+			for pkg, streams := range pkgs {
+				for stream := range streams {
+					for _, join := range joinKeysFor(d) {
+						if droppedGroup[ambKey{join, major, pkg, stream}] {
+							dropped[dropKey{di, major, pkg, stream}] = true
+							break
+						}
+					}
+				}
+			}
 		}
 	}
-	return dropped
+	surviving := map[ambKey]map[string]bool{}
+	for di, d := range defs {
+		for _, join := range joinKeysFor(d) {
+			for major, pkgs := range d.perMajor {
+				for pkg, streams := range pkgs {
+					for stream, evrSet := range streams {
+						if dropped[dropKey{di, major, pkg, stream}] {
+							continue
+						}
+						k := ambKey{join, major, pkg, stream}
+						if surviving[k] == nil {
+							surviving[k] = map[string]bool{}
+						}
+						for evr := range evrSet {
+							surviving[k][evr] = true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	events := map[dropKey][]advisory.Event{}
+	for di, d := range defs {
+		for major, pkgs := range d.perMajor {
+			for pkg, streams := range pkgs {
+				for stream, own := range streams {
+					dk := dropKey{di, major, pkg, stream}
+					if dropped[dk] {
+						continue
+					}
+					var got []advisory.Event
+					seen, conflict := false, false
+					for _, join := range joinKeysFor(d) {
+						w := windowsFor(own, surviving[ambKey{join, major, pkg, stream}])
+						if !seen {
+							got, seen = w, true
+						} else if !sameEvents(got, w) {
+							conflict = true
+						}
+					}
+					if conflict {
+						st.ConflictingWindows++
+						got = windowsFor(own, own)
+					}
+					if got == nil {
+						// Superseded in every group it sits in: each of its
+						// fixes has a lower one of the same train in another
+						// definition, which carries the window.
+						st.SupersededFixes++
+						continue
+					}
+					events[dk] = got
+				}
+			}
+		}
+	}
+	return dropped, events
+}
+
+// kernelSource names the packages outside the kernel* prefix that Oracle
+// builds from a kernel's own source (measured 2026-10-26 over every
+// multi-fix group): bpftool, perf and python-perf from kernel-uek, and those
+// plus python3-perf, libperf, rtla and rv from the RHEL kernel, whose single
+// version (5.14.0 on OL9) carries its minor-release branch in the release.
+var kernelSource = map[string]bool{
+	"bpftool": true, "perf": true, "python-perf": true, "python3-perf": true,
+	"libperf": true, "rtla": true, "rv": true,
+}
+
+// kernelFamily is the scope D144 leaves under D74's drop: every package
+// named kernel*, every kernelSource name, and any group one of whose fixes
+// is a UEK build -- the two-kernels-one-name hazard D74 drops for, and
+// kernel trains windows have not been measured against (deferred-decisions).
+func kernelFamily(pkg string, evrs map[string]bool) bool {
+	if strings.HasPrefix(pkg, "kernel") || kernelSource[pkg] {
+		return true
+	}
+	for e := range evrs {
+		if strings.Contains(e, "uek") {
+			return true
+		}
+	}
+	return false
+}
+
+// orderable reports whether the RPM comparer reads every EVR in the set. No
+// windowed group on the 2026-10-26 archive had one it refuses; a group that
+// does is dropped as D74 dropped it, rather than windowed out of order.
+func orderable(evrs map[string]bool) bool {
+	for e := range evrs {
+		if _, err := (version.RPM{}).Compare(e, e); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// trainOf is the train an EVR belongs to: epoch:version plus the leading
+// number of its release. A RHEL z-stream branch keeps the version and moves
+// the release (glibc 2.34-60.0.3.el9_2.7 for 9.2.z, 2.34-83.0.1.el9_3.7 for
+// 9.3), so a version-only train made the older branch's fix the boundary for
+// the newer and called an unfixed 2.34-83.el9_3 fixed (D144 review). Two
+// fixes of one train differ past that leading number, as Oracle's own
+// openssh 8.7p1-38.0.2.el9 and the RHEL sync's 8.7p1-38.0.2.el9_4.1 do.
+// It returns the epoch:version too, and both double as window starts: rpm
+// orders a bare version below every release of it, and a release of just
+// "60" below every 60.x one. A missing epoch is 0, as rpm reads it; a
+// release with no leading digits keeps no release part.
+func trainOf(evr string) (ev, train string) {
+	epoch, rest := "0", evr
+	if i := strings.Index(evr, ":"); i >= 0 {
+		epoch, rest = evr[:i], evr[i+1:]
+	}
+	ver, rel := rest, ""
+	if i := strings.LastIndex(rest, "-"); i >= 0 {
+		ver, rel = rest[:i], rest[i+1:]
+	}
+	n := 0
+	for n < len(rel) && rel[n] >= '0' && rel[n] <= '9' {
+		n++
+	}
+	ev = epoch + ":" + ver
+	if n == 0 {
+		return ev, ev
+	}
+	return ev, ev + "-" + rel[:n]
+}
+
+// windowsFor is the event list an entry fixing own carries in a group whose
+// surviving fixes are group (own is a subset of it). The group's fixes are cut into
+// trains, and each train's boundary is its LOWEST fix: two fixes of one
+// version are both fixes (Oracle's own 8.7p1-38.0.2.el9 for regreSSHion and
+// the RHEL sync's 8.7p1-38.0.2.el9_4.1), so a host on the lower one is fixed.
+// The entry gets one window per train in which one of its own fixes IS the
+// lowest; a fix above its train's lowest says nothing the lower record does
+// not already say, and rewriting it to the lower EVR would misstate this
+// advisory's own fixed version, so it gets no window (nil when none of its
+// fixes is lowest -- the entry is superseded in this group). The lowest
+// train's window opens at 0. Every other train's opens at the coarsest
+// boundary that separates it from the train below: its epoch:version when
+// that changed, else its release branch (trainOf) -- so 389-ds-base
+// 2.6.1-3.el9_6 is held to 2.6.1-8.el9_6 and 2.5.2-9.el9_5 is not, and
+// glibc 2.34-83.el9_3 is held to 2.34-83.0.1.el9_3.7 and 2.34-60.0.3.el9_2.7
+// is not. An unfixed build between two trains (a 2.6.0) falls
+// in neither window; that is the one thing this gives up, recorded in D144.
+func windowsFor(own, group map[string]bool) []advisory.Event {
+	lowest := map[string]string{}
+	evOf := map[string]string{}
+	for e := range group {
+		ev, t := trainOf(e)
+		evOf[t] = ev
+		if cur, ok := lowest[t]; !ok || rpmLess(e, cur) {
+			lowest[t] = e
+		}
+	}
+	trains := make([]string, 0, len(lowest))
+	for t := range lowest {
+		trains = append(trains, t)
+	}
+	sort.Slice(trains, func(i, j int) bool { return rpmLess(lowest[trains[i]], lowest[trains[j]]) })
+
+	var events []advisory.Event
+	for i, t := range trains {
+		if !own[lowest[t]] {
+			continue
+		}
+		start := "0"
+		if i > 0 {
+			start = t
+			if evOf[trains[i-1]] != evOf[t] {
+				start = evOf[t]
+			}
+		}
+		events = append(events, advisory.Event{Introduced: start}, advisory.Event{Fixed: lowest[t]})
+	}
+	return events
+}
+
+// rpmLess orders two EVRs orderable has already accepted.
+func rpmLess(a, b string) bool {
+	c, _ := (version.RPM{}).Compare(a, b)
+	return c < 0
+}
+
+func sameEvents(a, b []advisory.Event) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // normalize turns every resolved definition into advisory.Advisory records,
@@ -932,7 +1164,7 @@ func dropAmbiguous(defs []resolvedDef, st *stats) map[dropKey]bool {
 // measured mixing that way) -- each carries its own ModuleStream, the shape
 // Red Hat's csaf.go already emits for the identical reason (D80).
 func normalize(defs []resolvedDef, st *stats) []advisory.Advisory {
-	dropped := dropAmbiguous(defs, st)
+	dropped, eventsOf := dropAmbiguous(defs, st)
 	streamsSeen := map[string]bool{}
 
 	var out []advisory.Advisory
@@ -965,26 +1197,22 @@ func normalize(defs []resolvedDef, st *stats) []advisory.Advisory {
 						st.SkippedAmbiguousFixes++
 						continue
 					}
-					evrSet := streamsOf[stream]
-					// dropAmbiguous already removed every (def, major, pkg,
-					// stream) whose evrSet had more than one member (whether
-					// that ambiguity came from this definition alone or from
-					// another one sharing a CVE), so exactly one is left to
-					// take here.
-					var evr string
-					for e := range evrSet {
-						evr = e
-						break
+					// dropAmbiguous gave every surviving entry its events:
+					// [0, fix) for a single fix, one window per train when
+					// its group carried several (D144).
+					events, ok := eventsOf[dropKey{di, major, name, stream}]
+					if !ok {
+						continue // superseded, counted by dropAmbiguous
 					}
+					// The module-build check below reads one fix; every fix
+					// of one entry is under one stream, so any will do.
+					evr := events[1].Fixed
 					aff := advisory.Affected{
 						Ecosystem: "Oracle Linux:" + strconv.Itoa(major),
 						Name:      name,
 						Ranges: []advisory.Range{{
-							Type: advisory.RangeEcosystem,
-							Events: []advisory.Event{
-								{Introduced: "0"},
-								{Fixed: evr},
-							},
+							Type:   advisory.RangeEcosystem,
+							Events: events,
 						}},
 					}
 					if stream != "" {
