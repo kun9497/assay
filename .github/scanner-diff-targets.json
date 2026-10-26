@@ -6,6 +6,7 @@
     "minAgree": 8,
     "minFindings": 8,
     "maxFindings": 25,
+    "maxAssayOnlyFixed": 25,
     "trivy": {
       "minAgree": 8,
       "minFindings": 8,
@@ -19,6 +20,7 @@
     "minAgree": 143,
     "minFindings": 147,
     "maxFindings": 348,
+    "maxAssayOnlyFixed": 25,
     "trivy": {
       "minAgree": 147,
       "minFindings": 149,
@@ -32,6 +34,7 @@
     "minAgree": 81,
     "minFindings": 81,
     "maxFindings": 410,
+    "maxAssayOnlyFixed": 78,
     "trivy": {
       "minAgree": 32,
       "minFindings": 32,
@@ -45,6 +48,7 @@
     "minAgree": 917,
     "minFindings": 4746,
     "maxFindings": 11168,
+    "maxAssayOnlyFixed": 1006,
     "trivy": {
       "minAgree": 4386,
       "minFindings": 4437,
@@ -61,6 +65,7 @@
     "minAgree": 350,
     "minFindings": 359,
     "maxFindings": 846,
+    "maxAssayOnlyFixed": 26,
     "trivy": {
       "minAgree": 311,
       "minFindings": 338,
@@ -74,6 +79,7 @@
     "minAgree": 273,
     "minFindings": 275,
     "maxFindings": 648,
+    "maxAssayOnlyFixed": 27,
     "trivy": {
       "minAgree": 277,
       "minFindings": 277,
@@ -87,6 +93,7 @@
     "minAgree": 90,
     "minFindings": 90,
     "maxFindings": 442,
+    "maxAssayOnlyFixed": 26,
     "trivy": {
       "minAgree": 79,
       "minFindings": 79,
@@ -100,6 +107,7 @@
     "minAgree": 31,
     "minFindings": 33,
     "maxFindings": 322,
+    "maxAssayOnlyFixed": 25,
     "trivy": {
       "minAgree": 34,
       "minFindings": 34,
@@ -112,7 +120,8 @@
     "ref": "mirror.gcr.io/library/fedora@sha256:6c75d5bf57cb0fa5aa4b92c6a83c86c791644496d9ac230de7711f5b8ec3b898",
     "minAgree": 50,
     "minFindings": 47,
-    "maxFindings": 262
+    "maxFindings": 262,
+    "maxAssayOnlyFixed": 82
   },
   {
     "name": "az2023",
@@ -121,6 +130,7 @@
     "minAgree": 90,
     "minFindings": 104,
     "maxFindings": 246,
+    "maxAssayOnlyFixed": 41,
     "trivy": {
       "minAgree": 90,
       "minFindings": 90,
@@ -135,6 +145,7 @@
     "minAgree": 9,
     "minFindings": 32,
     "maxFindings": 148,
+    "maxAssayOnlyFixed": 25,
     "trivy": {},
     "minComponents": 12
   },
@@ -145,6 +156,7 @@
     "minAgree": 0,
     "minFindings": 100,
     "maxFindings": 500,
+    "maxAssayOnlyFixed": 378,
     "trivy": {}
   },
   {
@@ -154,6 +166,7 @@
     "minAgree": 15,
     "minFindings": 102,
     "maxFindings": 880,
+    "maxAssayOnlyFixed": 25,
     "trivy": {
       "minAgree": 154,
       "minFindings": 159,
@@ -170,6 +183,7 @@
     "minAgree": 112,
     "minFindings": 168,
     "maxFindings": 396,
+    "maxAssayOnlyFixed": 106,
     "trivy": {
       "minAgree": 155,
       "minFindings": 157,
@@ -183,6 +197,7 @@
     "minAgree": 215,
     "minFindings": 235,
     "maxFindings": 554,
+    "maxAssayOnlyFixed": 86,
     "trivy": {
       "minAgree": 235,
       "minFindings": 235,
@@ -195,7 +210,8 @@
     "ref": "mirror.gcr.io/bellsoft/alpaquita-linux-base@sha256:d0bf46cb446f36eccacad2604d858537e4455ee2b663729c1f588ca6bb5eca33",
     "minAgree": 1,
     "minFindings": 1,
-    "maxFindings": 138
+    "maxFindings": 138,
+    "maxAssayOnlyFixed": 41
   },
   {
     "name": "liberica21",
@@ -203,7 +219,8 @@
     "ref": "mirror.gcr.io/bellsoft/liberica-runtime-container@sha256:70963584a7d778c7f3470b92bdef477f50fe3baba3a4cd388654a2b9c8f0e031",
     "minAgree": 1,
     "minFindings": 1,
-    "maxFindings": 122
+    "maxFindings": 122,
+    "maxAssayOnlyFixed": 41
   },
   {
     "name": "photon4",
@@ -212,6 +229,7 @@
     "minAgree": 18,
     "minFindings": 18,
     "maxFindings": 44,
+    "maxAssayOnlyFixed": 25,
     "trivy": {
       "minAgree": 18,
       "minFindings": 18,
@@ -224,7 +242,8 @@
     "ref": "mirror.gcr.io/library/photon@sha256:ab4b68e15c8ff6b9c79ba525f696260f772c711761d576dd53bf43c351c9a504",
     "minAgree": 5,
     "minFindings": 5,
-    "maxFindings": 74
+    "maxFindings": 74,
+    "maxAssayOnlyFixed": 25
   },
   {
     "name": "archlinux",
@@ -232,7 +251,8 @@
     "ref": "mirror.gcr.io/library/archlinux@sha256:b860afd5823683f7ea389ba5f00d812f4fe55f6f286dea329d2abeefa535e309",
     "minAgree": 7,
     "minFindings": 9,
-    "maxFindings": 44
+    "maxFindings": 44,
+    "maxAssayOnlyFixed": 25
   },
   {
     "name": "hummingbird",
@@ -240,7 +260,8 @@
     "ref": "quay.io/hummingbird/nginx@sha256:6c6c6e7fd1cb655a6ff9066f04adef078b4b6ba3adf91dbd9a52ce71f83d6f18",
     "minAgree": 2,
     "minFindings": 2,
-    "maxFindings": 142
+    "maxFindings": 142,
+    "maxAssayOnlyFixed": 32
   },
   {
     "name": "bitnami-legacy-pg",
@@ -249,6 +270,7 @@
     "minAgree": 412,
     "minFindings": 422,
     "maxFindings": 994,
+    "maxAssayOnlyFixed": 26,
     "trivy": {
       "minAgree": 419,
       "minFindings": 422,
@@ -263,6 +285,7 @@
     "minAgree": 0,
     "minFindings": 0,
     "maxFindings": 25,
+    "maxAssayOnlyFixed": 25,
     "minComponents": 40,
     "maxGrypeOnlyApp": {
       "go-module": 2
@@ -275,6 +298,7 @@
     "minAgree": 179,
     "minFindings": 183,
     "maxFindings": 432,
+    "maxAssayOnlyFixed": 25,
     "trivy": {
       "minAgree": 180,
       "minFindings": 233,
@@ -289,6 +313,7 @@
     "minAgree": 14,
     "minFindings": 14,
     "maxFindings": 34,
+    "maxAssayOnlyFixed": 25,
     "trivy": {
       "minAgree": 14,
       "minFindings": 14,
