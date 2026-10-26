@@ -108,7 +108,7 @@ func taggedRuns(root, tag string) (covered map[string]bool, filtered []string, e
 				}
 				if strings.HasPrefix(a, "./") && (j == 0 || args[j-1] != "-tags") {
 					p := a
-					if !strings.HasSuffix(p, "/") && !strings.HasSuffix(p, "...") {
+					if !strings.HasSuffix(p, "/") {
 						p += "/"
 					}
 					covered[p] = true
@@ -148,16 +148,12 @@ func hasTag(args []string, tag string) bool {
 	return false
 }
 
+// coveredBy matches a package to a tagged run's argument exactly. A `./...`
+// pattern is deliberately not understood: every tagged step names its
+// package, and a pattern would only make the guard report a covered package
+// as missing -- loud, not silent.
 func coveredBy(pkg string, covered map[string]bool) bool {
-	if covered[pkg] {
-		return true
-	}
-	for c := range covered {
-		if strings.HasSuffix(c, "/...") && strings.HasPrefix(pkg, strings.TrimSuffix(c, "...")) {
-			return true
-		}
-	}
-	return false
+	return covered[pkg]
 }
 
 // problems is the whole check over one repository root: every tagged package
