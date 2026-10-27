@@ -6320,6 +6320,73 @@ rather sometimes advertise a fix that turns out to be paywalled than emit that f
 
 ---
 
+### D153 — 이미지의 rpm source 조회는 SRPM 의 EVR 을 비교하며, epoch 는 main 패키지의 것을 쓴다
+
+**결정.** 이미지의 rpmdb 에서 읽은 패키지의 `Source.Version` 은 바이너리가 아니라 source rpm 의 EVR
+을 담는다. version-release 는 SOURCERPM 파일 이름의 것이다. 파일 이름에는 epoch 가 없으므로, epoch 는
+다음 중 존재하는 첫 번째에서 얻는다:
+1. source 와 같은 이름으로 설치된 패키지: spec 의 main 패키지이며, spec 최상위 Epoch 를 가진다.
+2. 같은 SOURCERPM 에서 나왔고 version-release 가 SRPM 의 것인 설치된 패키지들 중 가장 흔한 epoch.
+   동률이면 낮은 쪽이다. spec 의 버전을 유지하는 하위 패키지는 그 Epoch 도 유지하고, 자기만의 Epoch
+   를 가진 것(mod_ssl 의 `Epoch: 1`)은 표에서 밀린다.
+3. 이전처럼 바이너리 자신의 epoch.
+
+파싱되지 않는 SOURCERPM 은 바이너리의 EVR 을 그대로 둔다. `rpmdb.ResolveSourceVersions` 가 데이터베이스
+전체를 읽은 뒤 이를 한 번 수행하며, `catalogFromImage` 가 세 백엔드 모두에 대해 호출한다. 매처는
+바뀌지 않는다: source 이름으로 한 조회는 이미 `Source.Version` 을 비교한다(D41). VEX 는 자신의 source
+비교, 즉 SRPM 버전과 바이너리의 epoch 를 유지하며, 이는 보고하는 쪽으로 기운다.
+
+**이유.** 2026-10-22 감사(A4): `toPackage` 는 `Source.Version` 을 바이너리의 EVR 로 설정했다. D143 은
+이를 통제로 의존했고, D152 가 SPDX 에 대해 이를 바로잡았다. 실제 이미지에서는 세 가지 모양이 틀린다:
+- httpd `2.4.62` 에서 빌드된 mod_ssl `1:2.4.62` 는 httpd 의 모든 fix 보다 높게 정렬된다: source 키
+  피드(Rocky 의 OSV, Fedora 의 Bodhi)에서 조용한 거짓 음성이다.
+- perl 의 하위 패키지는 epoch 0 에서 자기 버전을 가지고 perl 은 epoch 4 이므로, `1.80-484` 는 perl 의
+  모든 fix 보다 낮게 정렬되어 결코 해소되지 않는다.
+- npm `1:8.19.3` 이 nodejs 의 fix 와 비교된다.
+
+사용자는 대안들과 비교한 측정을 보고 규칙을 골랐다. epoch 없는 SRPM 버전은 epoch 가 있는 모든 패키지를
+영구 오탐으로 만들었다. 바이너리의 epoch 는 mod_ssl 의 미탐과 perl 의 오탐을 모두 남겼다. main 패키지가
+없을 때 조회를 "평가 안 됨"으로 바꾸면 이미지마다 수십 개의 불완전 검사가 늘었다. sibling 대체는 데이터
+로 검증한 뒤 나온 사용자의 두 번째 판단이었다.
+
+**측정.** 실제 이미지 19개, `catalogImage` 위의 오버레이로(2026-10-27):
+- 기반 대상은 거의 영향이 없고, ubi8/nodejs-18 에서 영향받는 패키지는 5개다.
+- ubi9/perl-532 의 perl 하위 패키지 92개는 반대 epoch 모양을 가진다.
+- Fedora 와 UBI9 의 httpd 이미지에서 mod_ssl 은 바이너리 epoch 모양을 가진다.
+- main 패키지가 설치된 SRPM 338개 중 338개에서 sibling 규칙이 main 패키지의 epoch 와 일치했다. 대신
+  가장 낮은 sibling epoch 를 취하면 perl 이 틀렸는데, perl-doc 이 epoch 0 이기 때문이다.
+
+공개된 데이터베이스로 스캔한 전후:
+- ubi9/perl-532: 발견 8,731 → 8,389. perl 을 통한 perl-* 발견 282개와 nodejs 를 통한 npm 발견 60개가
+  사라졌고, 추가된 것은 없다.
+- ubi8/nodejs-18: 6,764 → 6,718. npm 40개, perl-Errno 와 perl-IO 6개가 사라졌고, 추가된 것은 없다.
+- ubi9/httpd-24: 변화 없음. Red Hat 의 피드가 mod_ssl 을 직접 이름으로 올리므로 미탐이 가려졌다.
+- Fedora httpd 이미지는 nightly 가 가져오지 않는 Fedora 42 이므로, mod_ssl 의 Fedora 미탐은 데이터로
+  보이지 않고 테스트로 고정된다.
+
+**포기하는 것.** SRPM 의 version-release 에서 main 패키지도 sibling 도 설치되어 있지 않으면, 이미지의
+어떤 것도 source 의 epoch 를 밝히지 않는다. 바이너리의 것을 쓰며, 그보다 높은 source epoch 는 여전히
+fix 보다 낮게 읽힌다: 오탐이며 테스트로 고정되어 있다. SBOM 경로는 여기서 바뀌지 않는다: upstream
+한정자가 붙은 purl 은 여전히 바이너리의 EVR 을 주고, D152 가 SPDX 관계를 다룬다.
+
+**범위 밖, 위험 요소로 기록.** Azure Linux 의 OVAL 은 모든 fix 에 epoch `0:` 를 쓰고 Photon 의 피드는
+epoch 를 쓰지 않는다. 따라서 실제 epoch 를 가진 설치 패키지는 fix 보다 낮게 비교되지 않을 수 있다. 이는
+실제 이미지에서 검증하고 따로 결정할 일이다.
+
+**검증.** `Run` 을 통해, ndb rpmdb 를 가진 docker-archive 이미지(fixture 빌더가 이제 EPOCH 를 쓴다)로
+source 키 레코드에 대해:
+- mod_ssl 은 httpd 의 fix 를 통해 발견된다;
+- perl-B 와 npm 은 source 의 고쳐진 빌드에서 깨끗하다;
+- httpd-core 와 httpd-filesystem 은 있고 httpd 는 없어도 mod_ssl 은 여전히 발견된다;
+- perl-interpreter 는 있고 perl 은 없어도 perl-IO 는 깨끗하다;
+- 둘 다 없으면 남은 오탐이 고정된다.
+
+단위 테스트는 파싱되지 않는 SOURCERPM, Source 가 없는 패키지, 타이브레이크를 다룬다. 변이 테스트는 첫
+규칙에 대해, 이어서 sibling 대체에 대해 수행했다: 변이 열두 개 중 열 개는 직접 잡혔고, 하나는 테스트를
+강화한 뒤 잡혔으며, 하나는 등가(이름별 처음 본 epoch 대 마지막 본 epoch)이고 코드가 그렇게 말한다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

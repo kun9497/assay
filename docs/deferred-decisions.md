@@ -2091,6 +2091,14 @@ Support is decided per language rather than promised as a category.
 
 Not deferred decisions — traps to handle when the relevant code is written.
 
+**Azure Linux and Photon feeds carry no usable epoch (found 2026-10-27, to be verified).**
+Azure Linux's OVAL writes every fixed version with epoch `0:`, including packages whose spec
+has an Epoch (perl's is 4), and Photon's feed writes no epoch at all (nginx's spec has
+Epoch: 1). An installed binary that does carry its epoch then sorts above every such fix,
+whichever name the lookup uses: a silent false negative. Found by the A4 investigation; to be
+measured on real Azure Linux and Photon images before a fix (comparing version-release only
+for those ecosystems is the obvious candidate) is decided.
+
 **~~SUSE's bare product purl mis-splits a name that ends in a version-like segment.~~ —
 resolved in D126 (2026-10-21, the same day it was found).** SUSE's generator emits the bare
 product `libwmf-0_2-7` as `pkg:rpm/suse/libwmf@0_2-7`, so `packageOf` keyed its

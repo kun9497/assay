@@ -6649,6 +6649,80 @@ Mutation testing:
 
 ---
 
+### D153 — An image's rpm source lookup compares the SRPM's EVR, with the main package's epoch
+
+**Decision.** For a package read from an image's rpmdb, `Source.Version` holds the source rpm's
+EVR, not the binary's. The version-release is the SOURCERPM filename's. The filename carries no
+epoch, so the epoch comes from the first of these that exists:
+1. The installed package named like the source: the spec's main package, which carries the
+   spec's top-level Epoch.
+2. The most common epoch, the lower on a tie, among the installed packages from the same
+   SOURCERPM whose version-release is the SRPM's. A subpackage that keeps the spec's version
+   keeps its Epoch, and one with an Epoch of its own (mod_ssl's `Epoch: 1`) is outvoted.
+3. The binary's own epoch, as before.
+
+A SOURCERPM that does not parse leaves the binary's EVR. `rpmdb.ResolveSourceVersions` does this
+once the whole database has been read, called from `catalogFromImage` for all three backends.
+The matcher is unchanged: a lookup under the source's name already compares `Source.Version`
+(D41). VEX keeps its own source comparison, the SRPM version with the binary's epoch, which errs
+toward reporting.
+
+**Why.** The 2026-10-22 audit (A4): `toPackage` set `Source.Version` to the binary's EVR. D143
+then relied on that as a control, which D152 corrected for SPDX. Three shapes are wrong on real
+images:
+- mod_ssl `1:2.4.62` built from httpd `2.4.62` sorts above every httpd fix: a silent false
+  negative on source-keyed feeds (Rocky's OSV, Fedora's Bodhi).
+- perl's subpackages carry their own versions at epoch 0 while perl is at epoch 4, so `1.80-484`
+  sorts below every perl fix and never clears.
+- npm `1:8.19.3` is compared with nodejs fixes.
+
+The user chose the rule from a measurement against the alternatives. The SRPM version with no
+epoch made a permanent false positive of every epoch'd package. The binary's epoch left both the
+mod_ssl miss and the perl false positives. Turning the lookup into "not evaluated" without a
+main package added tens of incomplete checks per image. The sibling fallback was the user's
+second call, after it was validated on the data.
+
+**Measured.** 19 real images, by an overlay over `catalogImage` (2026-10-27):
+- The base targets are almost untouched; ubi8/nodejs-18 has 5 affected packages.
+- 92 perl subpackages on ubi9/perl-532 have the reverse epoch shape.
+- mod_ssl has the binary-epoch shape on Fedora's and UBI9's httpd images.
+- The sibling rule matched the main package's epoch in 338 of 338 SRPMs where the main package
+  was installed. Taking the lowest sibling epoch instead got perl wrong, because perl-doc is
+  epoch 0.
+
+Scanned with the published database, before and after:
+- ubi9/perl-532: 8,731 → 8,389 findings. 282 perl-* findings through perl and 60 npm findings
+  through nodejs are gone, and none were added.
+- ubi8/nodejs-18: 6,764 → 6,718. npm 40, perl-Errno and perl-IO 6 gone, none added.
+- ubi9/httpd-24: unchanged. Red Hat's feed names mod_ssl itself, which masked the miss.
+- The Fedora httpd image is Fedora 42, which the nightly does not fetch, so mod_ssl's Fedora
+  miss is held by the test rather than shown on data.
+
+**Gives up.** With neither the main package nor a sibling at the SRPM's version-release
+installed, nothing on the image states the source's epoch. The binary's is used, and a source
+epoch above it still reads as below the fix: a false positive, pinned by a test. SBOM paths are
+not changed here: an upstream-qualified purl still gives the binary's EVR, and D152 covers
+SPDX relationships.
+
+**Not in scope, recorded as a hazard.** Azure Linux's OVAL writes epoch `0:` for every fix and
+Photon's feed writes none. An installed package with a real epoch may therefore never compare
+below a fix. That is to be verified on real images and decided separately.
+
+**Verified.** Through `Run` on a docker-archive image with an ndb rpmdb, whose fixture builder
+now writes EPOCH, against source-keyed records:
+- mod_ssl is found through httpd's fix;
+- perl-B and npm are clean at their sources' fixed builds;
+- with httpd-core and httpd-filesystem but no httpd, mod_ssl is still found;
+- with perl-interpreter but no perl, perl-IO is clean;
+- with neither, the residual false positive is pinned.
+
+Unit tests cover the unparsable SOURCERPM, a package with no Source, and the tie-break.
+Mutation testing ran on the first rule and then on the sibling fallback: twelve mutations, ten
+caught directly, one caught after its test was strengthened, and one equivalent (first-seen
+against last-seen epoch per name), which the code says so.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

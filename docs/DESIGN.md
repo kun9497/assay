@@ -1023,6 +1023,9 @@ exited 0 while 24 findings went unmentioned.
       D91, audit A5) — every SP with an LTSS track (12 SP5 4,895, 15 SP6 2,469 …): 14,731 SLE
       entries on the live archive now carry the LTSS fix, as vunnel's CSAF parser does; Leap
       keys are unchanged (`leapView`)
+- [x] An image's rpm source lookup compares the SRPM's EVR, with the main package's epoch
+      (D153, audit A4) — else the most common epoch among siblings at the SRPM version, else
+      the binary's; ubi9/perl-532 −342 and ubi8/nodejs-18 −46 false positives, none added
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15
