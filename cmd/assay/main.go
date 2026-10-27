@@ -1,4 +1,5 @@
-// Command assay is an SBOM-driven vulnerability scanner.
+// Command assay is a vulnerability scanner for container images, SBOMs, binaries
+// and source trees.
 //
 // See https://github.com/kun9497/assay for design notes and roadmap.
 package main
@@ -52,19 +53,28 @@ const (
 	exitError    = 2 // could not complete
 )
 
-const usage = `assay — SBOM-driven vulnerability scanner
+const usage = `assay — vulnerability scanner for container images, SBOMs, binaries and source trees
 
 Usage:
   assay <command> [arguments]
 
 Commands:
-  scan <target>   Scan a CycloneDX SBOM, an image reference, a docker-archive:
-                  tarball, an oci-dir: layout, a Go binary, or a directory
-                  containing a go.mod (Go, npm, PyPI, Alpine). What a bare
+  scan <target>   Scan a container image (a registry reference, a
+                  docker-archive: tarball or an oci-dir: layout), an SBOM
+                  (CycloneDX, or SPDX 2.2/2.3 JSON), a Go binary, a Java
+                  jar, or a directory. A directory is read from the
+                  lockfiles it holds - go.mod, package-lock.json,
+                  npm-shrinkwrap.json, yarn.lock, pnpm-lock.yaml,
+                  poetry.lock, Pipfile.lock, uv.lock, Cargo.lock,
+                  Gemfile.lock, composer.lock, packages.lock.json - and
+                  the jars in it, without running any package manager; a
+                  go.mod names what the module requires, not what a build
+                  would link (scan the binary for that). An image is
+                  checked for its OS packages; application packages inside
+                  it are not read, and the scan says so (D70). What a bare
                   path names is decided by its content; prefix it with
                   sbom:, file:, or dir: to say which it is when that would
-                  be ambiguous. A directory is read from its go.mod alone -
-                  what the module requires, not what a build would link.
+                  be ambiguous.
   db update       Download the published vulnerability database
   db build        Build the vulnerability database from its upstream sources
   db status       Show what is in the database and how current it is

@@ -137,8 +137,10 @@ assay scan alpine:3.19
 docker save alpine:3.19 -o alpine.tar && assay scan docker-archive:alpine.tar
 skopeo copy docker://alpine:3.19 oci:layout && assay scan oci-dir:layout
 
-# Scan a CycloneDX SBOM (Go, npm, PyPI, Alpine)
+# Scan an SBOM (CycloneDX, or SPDX 2.2/2.3 JSON), a Go binary, or a source tree
 assay scan sbom.cdx.json
+assay scan ./bin/app
+assay scan ./my-project
 ```
 
 `assay db update`, `assay db build` and `assay db push` are the only three commands that
@@ -155,14 +157,16 @@ assay scan alpine:3.19                # a registry reference
 assay scan docker-archive:app.tar     # a `docker save` tarball
 assay scan oci-dir:./layout           # an OCI layout directory
 assay scan sbom.cdx.json              # a CycloneDX SBOM
+assay scan sbom.spdx.json             # an SPDX 2.2/2.3 JSON SBOM
 assay scan ./bin/assay                # a Go binary
-assay scan ./my-project               # a directory with a go.mod
+assay scan ./my-project               # a directory: its lockfiles and jars
 assay scan ./app.jar                  # a Java archive (identity from pom.properties)
 ```
 
 A bare path is classified by **content**: a directory if it is one, a Go binary if
-`debug/buildinfo` can read it, a CycloneDX document if it has a top-level `bomFormat`. A file
-that is none of those is an error naming all three, never a silent guess. Anything that is
+`debug/buildinfo` can read it, a jar if it opens as a zip archive, a CycloneDX document if it
+has a top-level `bomFormat`, an SPDX one if it has a top-level `spdxVersion`. A file that is
+none of those is an error naming all five, never a silent guess. Anything that is
 not a path at all is a registry reference.
 
 The prefixes `file:`, `dir:` and `sbom:` override the sniff, alongside `docker-archive:` and

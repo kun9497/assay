@@ -982,6 +982,25 @@ func TestUsage_DocumentsRegistryAuthEnvironment(t *testing.T) {
 	}
 }
 
+// TestUsage_NamesWhatAScanReads holds the help to what scan accepts today.
+// The 2026-10-22 audit found it still saying "go.mod alone" and "Go, npm,
+// PyPI, Alpine" months after SPDX (D84), the lockfile readers (D61-D63,
+// D103) and jars had shipped; and an image scan's missing application
+// packages (D70, D141) belong in the help, not only on stderr.
+func TestUsage_NamesWhatAScanReads(t *testing.T) {
+	for _, want := range []string{"CycloneDX", "SPDX 2.2/2.3", "docker-archive:", "oci-dir:",
+		"Go binary", "jar", "pnpm", "Cargo.lock", "application packages", "(D70)"} {
+		if !strings.Contains(usage, want) {
+			t.Errorf("usage does not name %q", want)
+		}
+	}
+	for _, stale := range []string{"go.mod alone", "(Go, npm, PyPI, Alpine)", "SBOM-driven"} {
+		if strings.Contains(usage, stale) {
+			t.Errorf("usage still says %q", stale)
+		}
+	}
+}
+
 // writeD112Image writes a one-layer Alpine 3.19 docker-archive with one apk
 // package, built in-process (never pkg/v1/daemon), so a scan of it reaches
 // the layer walk with no network at any point.

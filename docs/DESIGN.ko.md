@@ -133,8 +133,10 @@ assay scan alpine:3.19
 docker save alpine:3.19 -o alpine.tar && assay scan docker-archive:alpine.tar
 skopeo copy docker://alpine:3.19 oci:layout && assay scan oci-dir:layout
 
-# CycloneDX SBOM 스캔 (Go, npm, PyPI, Alpine)
+# SBOM(CycloneDX, 또는 SPDX 2.2/2.3 JSON), Go 바이너리, 소스 트리 스캔
 assay scan sbom.cdx.json
+assay scan ./bin/app
+assay scan ./my-project
 ```
 
 데이터베이스 쪽에서 네트워크를 건드리는 명령은 `assay db update`, `assay db build`,
@@ -151,14 +153,16 @@ assay scan alpine:3.19                # 레지스트리 참조
 assay scan docker-archive:app.tar     # `docker save` 타르볼
 assay scan oci-dir:./layout           # OCI 레이아웃 디렉터리
 assay scan sbom.cdx.json              # CycloneDX SBOM
+assay scan sbom.spdx.json             # SPDX 2.2/2.3 JSON SBOM
 assay scan ./bin/assay                # Go 바이너리
-assay scan ./my-project               # go.mod이 있는 디렉터리
+assay scan ./my-project               # 디렉터리: 그 안의 lockfile과 jar
 assay scan ./app.jar                  # Java 아카이브(신원은 pom.properties에서)
 ```
 
 접두사 없는 경로는 **내용으로** 분류합니다. 디렉터리면 디렉터리, `debug/buildinfo`가 읽을 수
-있으면 Go 바이너리, 최상위에 `bomFormat` 키가 있으면 CycloneDX 문서입니다. 셋 중 무엇도 아닌
-파일은 셋을 모두 이름 붙인 오류이지 조용한 추측이 아닙니다. 애초에 경로가 아니면 레지스트리
+있으면 Go 바이너리, zip 아카이브로 열리면 jar, 최상위에 `bomFormat` 키가 있으면 CycloneDX
+문서, 최상위에 `spdxVersion` 키가 있으면 SPDX 문서입니다. 다섯 중 무엇도 아닌 파일은 다섯을
+모두 이름 붙인 오류이지 조용한 추측이 아닙니다. 애초에 경로가 아니면 레지스트리
 참조입니다.
 
 `file:`, `dir:`, `sbom:` 접두사가 감지를 재정의합니다 — 기존 `docker-archive:`, `oci-dir:`와
