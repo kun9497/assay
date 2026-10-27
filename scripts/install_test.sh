@@ -25,6 +25,13 @@ for k in key1 key2 attacker; do
 	openssl ec -in "$tmp/$k.pem" -pubout -out "$tmp/$k.pub" 2>/dev/null
 done
 
+# --- portable helpers ---------------------------------------------------------
+# The harness runs on Linux and on macOS CI, so it uses neither GNU-only
+# flags (base64 -w0, sha256sum --text) nor anything macOS lacks.
+sha256() {
+	if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | awk '{print $1}'
+}
+
 # --- fake releases ------------------------------------------------------------
 # release <tag> <key> <dir> [label]: archive + GoReleaser-format checksums +
 # base64 DER signature, the shape cosign sign-blob writes.
@@ -37,9 +44,9 @@ release() {
 	printf '#!/bin/sh\necho "assay %s (%s build)"\n' "$tag" "$label" >"$work/assay"
 	chmod +x "$work/assay"
 	(cd "$work" && tar -czf "$dir/$tag/assay_${ver}_${os}_${arch}.tar.gz" assay)
-	(cd "$dir/$tag" && sha256sum --text "assay_${ver}_${os}_${arch}.tar.gz" | sed 's/ \*/  /' >"assay_${ver}_checksums.txt")
+	printf '%s  %s\n' "$(sha256 "$dir/$tag/assay_${ver}_${os}_${arch}.tar.gz")" "assay_${ver}_${os}_${arch}.tar.gz" >"$dir/$tag/assay_${ver}_checksums.txt"
 	openssl dgst -sha256 -sign "$tmp/$key.pem" -out "$tmp/sig-$tag-$label.der" "$dir/$tag/assay_${ver}_checksums.txt"
-	base64 -w0 "$tmp/sig-$tag-$label.der" >"$dir/$tag/assay_${ver}_checksums.txt.sig"
+	base64 <"$tmp/sig-$tag-$label.der" | tr -d '\n' >"$dir/$tag/assay_${ver}_checksums.txt.sig"
 }
 root="$tmp/releases"
 release v9.9.1 key1 "$root"
@@ -160,6 +167,22 @@ esac
 run C6-new-script "$tmp/install-k12.sh" 0 "installed v9.9.2"
 run C6-old-script "$tmp/install-k1.sh" 1 "does not verify against any key embedded" v9.9.2
 run C6-new-script-old-release "$tmp/install-k12.sh" 0 "installed v9.9.1" v9.9.1
+
+# C8: a base64 with Apple's argument parser (text_cmds bintrans.c): -d, and
+# input only on stdin -- a positional file is a usage error (exit 64). The
+# installer must verify through it, as it must on a real Mac (2026-10-27
+# review, item 2). macOS CI runs the whole harness against the real one.
+applebin="$tmp/applebin"
+mkdir -p "$applebin"
+realb64=$(command -v base64)
+{
+	echo '#!/bin/sh'
+	echo 'if [ "$#" -ne 1 ] || [ "$1" != "-d" ]; then echo "base64: positional input file (Apple parser)" >&2; exit 64; fi'
+	echo "exec '$realb64' -d"
+} >"$applebin/base64"
+chmod +x "$applebin/base64"
+PATH="$applebin:$PATH" run C8-apple-base64 "$tmp/install-k1.sh" 0 "installed v9.9.1"
+PATH="$applebin:$PATH" ASSAY_RELEASE_BASE="http://127.0.0.1:$port/c3b" run C8-apple-base64-attacker "$tmp/install-k1.sh" 1 "does not verify against any key embedded"
 
 # C7: no latest lookup -- the script never contacts anything but the release base
 grep -q "api.github.com" "$INSTALL_SH" && { echo "FAIL C7: install.sh still calls api.github.com"; fail=1; } || echo "ok   C7 (no api.github.com call)"
