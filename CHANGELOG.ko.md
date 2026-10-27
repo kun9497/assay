@@ -16,13 +16,16 @@
 - 나이틀리가 `status.json`(다이제스트, `builtAt`, `dataAsOf`, 서명 상태, 마지막 성공)을
   `status` 브랜치에 게시합니다. 실패 중인 운영 워크플로는 복구될 때까지 고정된 GitHub 이슈 하나를
   열어 둡니다. (D138)
-
+- `assay db status --output json`이 테이블과 같은 사실을 자체 `schemaVersion`(1)을 가진
+  JSON 문서 하나로 씁니다. (D147)
 - `SECURITY.md`(GitHub를 통한 비공개 제보), `CONTRIBUTING.md`, 이 변경 이력, 그리고 각 기계 판독용
   출력에서 `schemaVersion` 상향이 무엇을 뜻하는지 밝히는
   [`docs/compatibility.ko.md`](docs/compatibility.ko.md). 보고서 스키마 15부터는 JSON 보고서를 바꾸는
   모든 변경이 `schemaVersion`을 올립니다.
 
 ### Changed
+- `db status`, `db ref`, `db build --seed <ref>`가 받지 않는 인자를 무시하지 않고 거부합니다
+  (exit 2). (D147)
 - `assay help`와 설계 문서가 스캔이 읽는 모든 타깃 종류와 락파일을 명시하고, DESIGN.ko.md의 범위
   절은 스캔이 다루지 않는 것을 나열합니다.
 - CI 회귀 게이트: `az2023`과 `wolfi`에 실제 하한이 생겼고, 게이트가 `incompleteChecks`와

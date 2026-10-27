@@ -6334,6 +6334,40 @@ check in `aSet`, was an equivalent, and the check was removed.
 
 ---
 
+### D147 — `db status` speaks JSON, and `db` refuses what it does not take
+
+**Decision.** `assay db status --output json` (or `--output=json`) writes one JSON document
+with its own `schemaVersion` (1): path, schema, build time, the pulled artifact and its
+signature state (`verified` with the key, `unverified`, or `unrecorded`), covered ecosystems,
+databases, EOL coverage, and one entry per provider, rating source and enrichment source,
+each with its date, count and source. Frozen keys, renames and closed topics sit on their
+provider. `--output table` is the default and unchanged. Every `db` subcommand now refuses an
+argument it does not take, with exit 2 and the argument named: `db status` anything but
+`--output table|json`, `db ref` anything, and `db build --seed <ref>` anything after the
+reference.
+
+**Why.** The 2026-10-22 audit listed both as cheap items before a first customer. A monitor
+had no machine-readable way to ask the database's age short of parsing the table, and `db`
+ignored unknown flags: `db status --output json` printed the table, exit 0, so the monitor's
+parser failed on output it could not have expected, and `db build --seed <ref> --rating-only`
+(a typo) built without the flag it meant.
+
+**Rules the document keeps.** The table's: counts come from the stored buckets, not from a
+source's self-report; a source that ran and produced nothing keeps its row with `records` 0;
+an unknown date is left out, never zero; lists are sorted and never null, so one database
+gives one byte sequence. A refusal (no database, another schema) is the table's, on stderr,
+with nothing on stdout. `docs/compatibility.md` lists it as a contract, and a test holds its
+row to the constant.
+
+**Verified.** Caller tests drive `run()`: `--output json` gives one document with schema and
+coverage; no flag, `--output table` and `--output=table` give the table; six refusals (an
+unknown flag, an unknown format, a missing value, a trailing argument, `db ref extra`, a
+trailing argument to `db build --seed`, refused before any pull) exit 2 with stdout empty.
+`TestStatusJSON_TheWholeDocument` pins the document byte for byte on a fixture holding every
+section.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

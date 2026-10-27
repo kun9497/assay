@@ -12,6 +12,7 @@
 | `report` | `assay scan --output json` | `schemaVersion` | 14 |
 | `provenance sidecar` | `--provenance <path>`가 쓰는 파일(D120) | `schemaVersion` | 1 |
 | `status.json` | 배포 데이터베이스의 상태, `status` 브랜치(D138) | `schemaVersion` | 1 |
+| `db status` | `assay db status --output json`(D147) | `schemaVersion` | 1 |
 | `database` | 로컬 저장소와 OCI 태그 `ghcr.io/kun9497/assay-db:vN` | 태그 `vN`, `db status`의 `schema:` | 9 |
 
 테스트가 이 표를 코드의 상수에 묶어 두므로, 버전이 올라도 표가 뒤처질 수 없습니다.
@@ -47,9 +48,9 @@
   `provenance.database.artifact.signedBy` / `unverified`(D137, v0.11.0, 스키마 14). 모두
   선택적입니다. 위의 규칙, 즉 모든 변경에 증가는 스키마 15부터 적용됩니다.
 
-## provenance sidecar와 status.json
+## provenance sidecar, status.json, `db status`
 
-둘 다 자기 `schemaVersion`을 가지고 리포트와 같은 규칙을 따릅니다. 두 가지를 덧붙입니다.
+셋 다 자기 `schemaVersion`을 가지고 리포트와 같은 규칙을 따릅니다. 두 가지를 덧붙입니다.
 
 - sidecar는 리포트의 `provenance` 객체를 담습니다. 그 객체는 sidecar가 아니라 리포트의
   `schemaVersion`에 따라 바뀌므로, 두 숫자를 모두 읽으십시오.

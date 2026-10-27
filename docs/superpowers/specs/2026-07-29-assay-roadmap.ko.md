@@ -6034,6 +6034,35 @@ azl3 43, fedora 41, ubuntu2204 39, alpaquita, liberica21, az2023 각 16, humming
 
 ---
 
+### D147 — `db status` 가 JSON 을 말하고, `db` 는 받지 않는 인자를 거부한다
+
+**결정.** `assay db status --output json`(또는 `--output=json`)은 자체 `schemaVersion`(1)을 가진
+JSON 문서 하나를 쓴다: 경로, 스키마, 빌드 시각, 받은 아티팩트와 그 서명 상태(키와 함께 `verified`,
+`unverified`, `unrecorded`), 다루는 ecosystem, database, EOL 범위, 그리고 provider, 등급 소스, 보강
+소스마다 날짜, 수, 출처를 담은 항목 하나씩. 동결 키, 이름 변경, 닫힌 토픽은 해당 provider 에 붙는다.
+`--output table` 이 기본이고 바뀌지 않았다. 이제 모든 `db` 하위 명령이 받지 않는 인자를 exit 2 와
+그 인자의 이름으로 거부한다: `db status` 는 `--output table|json` 외의 것, `db ref` 는 무엇이든,
+`db build --seed <ref>` 는 참조 뒤의 무엇이든.
+
+**이유.** 2026-10-22 감사가 둘 다 첫 고객 전의 싼 항목으로 꼽았다. 모니터가 데이터베이스의 나이를
+테이블을 파싱하지 않고 물을 방법이 없었고, `db` 는 모르는 플래그를 무시했다: `db status --output json`
+은 테이블을 exit 0 으로 출력했으므로 모니터의 파서는 예상할 수 없던 출력에서 실패했고,
+`db build --seed <ref> --rating-only`(오타)는 의도한 플래그 없이 빌드했다.
+
+**문서가 지키는 규칙.** 테이블의 것: 수는 소스의 자기 보고가 아니라 저장된 버킷에서 나오고, 실행했지만
+아무것도 만들지 못한 소스는 `records` 0 으로 행을 유지하며, 모르는 날짜는 0 이 아니라 생략되고, 목록은
+정렬되며 null 이 아니므로 한 데이터베이스는 한 바이트열을 낸다. 거부(데이터베이스 없음, 다른 스키마)는
+테이블과 같이 stderr 로 하고 stdout 에는 아무것도 쓰지 않는다. `docs/compatibility.md` 가 이것을
+계약으로 나열하고, 테스트가 그 행을 상수에 묶는다.
+
+**검증.** 호출자 테스트가 `run()` 을 돌린다: `--output json` 은 스키마와 범위를 담은 문서 하나를 내고,
+플래그 없음, `--output table`, `--output=table` 은 테이블을 낸다. 여섯 거부(모르는 플래그, 모르는 형식,
+빠진 값, 뒤따르는 인자, `db ref extra`, 어떤 pull 보다 먼저 거부되는 `db build --seed` 뒤의 인자)는
+stdout 이 빈 채로 exit 2 다. `TestStatusJSON_TheWholeDocument` 가 모든 절을 담은 픽스처에서 문서를
+바이트 단위로 고정한다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모
