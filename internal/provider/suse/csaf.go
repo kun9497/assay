@@ -567,6 +567,20 @@ const (
 // using the other spelling must be handled by data already flowing through
 // this code, not rediscovered the hard way. TestFixStateFor and
 // TestConvert_RemediationNoneAvailable exercise it directly.
+// fixStateOf is fixStateFor without the counting: the state a no-fix range
+// carries for these remediation categories. D149's leapView builds the
+// range a Leap pass sees without emitting it, so it must not count it.
+func fixStateOf(cats map[string]bool) advisory.FixState {
+	switch {
+	case cats[remedyNoFixPlanned]:
+		return advisory.FixStateWontFix
+	case cats[remedyNoneAvailable]:
+		return advisory.FixStateNotFixed
+	default:
+		return advisory.FixStateUnknown
+	}
+}
+
 func fixStateFor(cats map[string]bool, st *stats) advisory.FixState {
 	never, pending := cats[remedyNoFixPlanned], cats[remedyNoneAvailable]
 	if never && pending {
@@ -654,6 +668,18 @@ type stats struct {
 	// for are the OPPOSITE case -- no mainline entry to shadow them, so
 	// they are kept and never touch this counter at all.
 	SkippedLTSSShadowedByMainline int
+	// LTSSFixReplacedMainlineNoFix is D149's exception to that tie-break:
+	// the mainline entry for the key was only a known_affected (no fix) --
+	// the EOL'd product SUSE keeps beside its LTSS twin after general
+	// support ends -- and the LTSS entry carries a fix, so the fix is kept
+	// in place of "affected at every version". Per LTSS entry kept, like
+	// SkippedLTSSShadowedByMainline, which it is carved out of.
+	LTSSFixReplacedMainlineNoFix int
+	// LTSSFixReplacedWithReason is the subset of keys whose replaced no-fix
+	// entry carried a stated fix-state reason (no_fix_planned on the EOL'd
+	// product, usually) that the replacement dropped, as D128 counts its
+	// own.
+	LTSSFixReplacedWithReason int
 
 	// MirroredToLeap and SkippedLeapNativeWins are D108's mirror pass firing.
 	// MirroredToLeap counts affected entries emitted onto an openSUSE Leap key
@@ -802,6 +828,14 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 	// array never matters: a mainline entry appearing after its LTSS twin
 	// in the JSON still wins.
 	mainline := map[productKey]bool{}
+	// mainlineFixed marks the keys a mainline entry gave a fixed version.
+	// D149: an LTSS fix is shadowed only by one of these; a mainline
+	// entry that says only "affected, no fix" yields to it instead.
+	mainlineFixed := map[productKey]bool{}
+	// ltssOverNoFix marks the keys D149 gave an LTSS fix in place of a
+	// mainline no-fix entry, so the stated reason that entry carried can
+	// be counted once the remediations are read.
+	ltssOverNoFix := map[productKey]bool{}
 	// leapNotAffected marks every openSUSE Leap key a known_not_affected
 	// entry names (D125). Nothing is stored from it; it only tells the D108
 	// mirror pass below that SUSE has already judged the package on that
@@ -906,6 +940,9 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 			}
 			store(k, version, true)
 			mainline[k] = true
+			if version != "" {
+				mainlineFixed[k] = true
+			}
 		}
 		for _, id := range v.ProductStatus.KnownAffected {
 			plat, _, _ := strings.Cut(id, ":")
@@ -928,6 +965,19 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 		// be).
 		for _, p := range pendingLTSS {
 			if mainline[p.key] {
+				// D149: after general support ends SUSE keeps the EOL'd
+				// product in known_affected beside the LTSS fix. A mainline
+				// entry with no fix of its own does not shadow that fix; the
+				// fix replaces it, or the "affected at every version" range
+				// would still match the fixed LTSS build. LTSS versions
+				// continue mainline numbering (D91), so the comparison holds.
+				if p.isFixed && p.version != "" && !mainlineFixed[p.key] {
+					delete(unfixed, p.key)
+					store(p.key, p.version, true)
+					ltssOverNoFix[p.key] = true
+					st.LTSSFixReplacedMainlineNoFix++
+					continue
+				}
 				st.SkippedLTSSShadowedByMainline++
 				continue
 			}
@@ -1017,6 +1067,12 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 		Aliases:  []string{cve},
 	}
 	for _, k := range order {
+		// The category test is intent, not behaviour: remedy holds only these two
+		// categories (the remediation loop skips the rest), so dropping it is an
+		// equivalent mutation (verified 2026-10-27).
+		if ltssOverNoFix[k] && (remedy[k][remedyNoFixPlanned] || remedy[k][remedyNoneAvailable]) {
+			st.LTSSFixReplacedWithReason++
+		}
 		a := advisory.Affected{Ecosystem: k.eco, Name: k.pkg}
 		if vs := fixed[k]; len(vs) > 0 {
 			for _, v := range sortedKeys(vs) {
@@ -1057,6 +1113,25 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 			native[productKey{eco: a.Ecosystem, pkg: a.Name}] = i
 		}
 	}
+	// leapView is the SLE entry as the Leap passes below see it. For a key
+	// D149 gave an LTSS fix in place of a mainline no-fix, that is the entry
+	// as it was before D149: the no-fix range alone (every LTSS entry was
+	// shadowed then, and the mainline side named no fix). D149 is an SLE-key
+	// change only. Leap never ships an LTSS build, so crossing one would
+	// advertise a fix Leap cannot install, and would lift D125's decline
+	// over SUSE's own Leap known_not_affected -- a new false positive on
+	// every Leap image with the package (branch review wf_18101bb4-1e1).
+	leapView := func(a *advisory.Affected) (ranges []advisory.Range, noFix bool) {
+		k := productKey{eco: a.Ecosystem, pkg: a.Name}
+		if ltssOverNoFix[k] {
+			return []advisory.Range{{
+				Type:     advisory.RangeEcosystem,
+				Events:   []advisory.Event{{Introduced: "0"}},
+				FixState: fixStateOf(remedy[k]),
+			}}, true
+		}
+		return a.Ranges, unfixed[k]
+	}
 	var mirrors []advisory.Affected
 	for i := range adv.Affected {
 		a := &adv.Affected[i]
@@ -1064,6 +1139,7 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 		if !ok {
 			continue
 		}
+		sleRanges, sleNoFix := leapView(a)
 		if ni, ok := native[productKey{eco: leap, pkg: a.Name}]; ok {
 			// D128: native-wins yields in exactly one shape -- the native Leap
 			// entry is a bare known_affected (no fix, nothing else) while this
@@ -1096,7 +1172,7 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 			// partition of the mirrorable entries (SkippedLeapMirrorSplitBuild
 			// is the no-native path's alone; D131's review found the first
 			// draft counting such an entry under both).
-			crossable := fixedRangesOf(withoutSplitBuilds(a.Ranges, splitBuild[sk]))
+			crossable := fixedRangesOf(withoutSplitBuilds(sleRanges, splitBuild[sk]))
 			if unfixed[nk] && len(fixed[nk]) == 0 && len(crossable) > 0 {
 				nat := &adv.Affected[ni]
 				nat.Ranges = crossable
@@ -1130,8 +1206,7 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 		// are what this declines. Checked after native-wins so a key the
 		// document lists as both affected and not affected keeps its native
 		// affected entry and is counted there.
-		if unfixed[productKey{eco: a.Ecosystem, pkg: a.Name}] &&
-			leapNotAffected[productKey{eco: leap, pkg: a.Name}] {
+		if sleNoFix && leapNotAffected[productKey{eco: leap, pkg: a.Name}] {
 			st.SkippedLeapNotAffected++
 			continue
 		}
@@ -1139,7 +1214,7 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 		// entry with nothing else to offer is not mirrored at all and
 		// counted; one that also carries a codestream fix or a no-fix range
 		// mirrors those alone.
-		rs := withoutSplitBuilds(a.Ranges, splitBuild[productKey{eco: a.Ecosystem, pkg: a.Name}])
+		rs := withoutSplitBuilds(sleRanges, splitBuild[productKey{eco: a.Ecosystem, pkg: a.Name}])
 		if len(rs) == 0 {
 			st.SkippedLeapMirrorSplitBuild++
 			continue

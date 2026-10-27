@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- SLES service packs past general support (12 SP5, 15 SP4–SP6 and others with an LTSS
+  track): when SUSE lists the mainline product as affected with no fix and the SP-LTSS
+  product as fixed, the LTSS fix is kept. Before, the fix was dropped, and an LTSS image with
+  the fix installed scanned "affected, no fix available" (14,731 entries on the 2026-10-27
+  archive). openSUSE Leap results are unchanged. A database change: it reaches `db update`
+  with the nightly after merge. (D149, revises D91)
 - In SPDX SBOMs, a binary rpm linked to its source by a `GENERATES` / `GENERATED_FROM`
   relationship is judged on the source's version under the source's name. Before, npm was
   compared with nodejs fixes (a false positive on Red Hat's CVE-2023-23920 for the fixed
