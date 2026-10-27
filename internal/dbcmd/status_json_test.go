@@ -266,6 +266,9 @@ func TestStatusJSON_AnEmptyDatabaseHasEmptyLists(t *testing.T) {
 		t.Fatalf("StatusJSON = %d (stderr %s)", code, errOut.String())
 	}
 	s := out.String()
+	if strings.Contains(s, `"builtAt"`) {
+		t.Errorf("an unknown build time is printed rather than left out:\n%s", s)
+	}
 	for _, want := range []string{`"ecosystems": []`, `"databases": []`, `"providers": []`,
 		`"ratingSources": []`, `"enrichmentSources": []`, `"eol": {
     "releases": 0,
@@ -274,5 +277,34 @@ func TestStatusJSON_AnEmptyDatabaseHasEmptyLists(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Errorf("document does not contain %s:\n%s", want, s)
 		}
+	}
+}
+
+// TestStatusJSON_AnUnknownFreezeDateIsLeftOut: carry-forward freezes a key
+// at the seed's DataAsOf, which osv leaves zero when any ecosystem had no
+// date (osv/fetch.go). The document leaves the date out rather than
+// printing year 1, the rule every date in it follows.
+func TestStatusJSON_AnUnknownFreezeDateIsLeftOut(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(store.Meta{BuiltAt: time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC),
+		Providers: map[string]store.Provenance{"osv": {Ecosystems: []string{"Debian:11"},
+			Frozen: map[string]time.Time{"Debian:11": {}},
+			Closed: map[string]time.Time{"topic": {}}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := StatusJSON(path, &out, &errOut); code != 0 {
+		t.Fatalf("StatusJSON = %d (stderr %s)", code, errOut.String())
+	}
+	s := out.String()
+	if strings.Contains(s, "0001-01-01") || !strings.Contains(s, `"key": "Debian:11"`) || !strings.Contains(s, `"topic": "topic"`) {
+		t.Errorf("an unknown date is printed, or its entry dropped:\n%s", s)
 	}
 }

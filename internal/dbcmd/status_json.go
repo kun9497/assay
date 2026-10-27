@@ -17,16 +17,18 @@ const statusSchemaVersion = 1
 
 // statusDocument is `db status --output json`: the same facts the table
 // prints, as data. It keeps the table's rules -- counts derived from the
-// stored buckets rather than self-reported, a source that ran and produced
-// nothing kept as a row (records 0) rather than dropped, an unknown date
-// left out rather than zero -- and spells as words the states the table
-// spells as words. Lists are sorted and never null, so two runs over one
+// stored buckets rather than self-reported for rating and enrichment
+// sources (a provider's records is its own report for the run, as in the
+// table, and leaves out records carried forward from a seed, D110), a
+// source that ran and produced nothing kept as a row (records 0) rather
+// than dropped -- and spells as words the states the table spells as
+// words. Every date that is unknown is left out, never written as year 1. Lists are sorted and never null, so two runs over one
 // database are byte-identical.
 type statusDocument struct {
 	SchemaVersion     int                      `json:"schemaVersion"`
 	Path              string                   `json:"path"`
 	Schema            int                      `json:"schema"`
-	BuiltAt           time.Time                `json:"builtAt"`
+	BuiltAt           *time.Time               `json:"builtAt,omitempty"`
 	Artifact          *statusArtifact          `json:"artifact,omitempty"`
 	Ecosystems        []string                 `json:"ecosystems"`
 	Databases         []string                 `json:"databases"`
@@ -37,9 +39,9 @@ type statusDocument struct {
 }
 
 type statusArtifact struct {
-	Reference string    `json:"reference"`
-	Digest    string    `json:"digest"`
-	PulledAt  time.Time `json:"pulledAt"`
+	Reference string     `json:"reference"`
+	Digest    string     `json:"digest"`
+	PulledAt  *time.Time `json:"pulledAt,omitempty"`
 	// Signature is "verified" (a trusted key verified it, SignedBy names
 	// which), "unverified" (installed with --allow-unsigned), or
 	// "unrecorded" (pulled before D137 recorded either).
@@ -65,13 +67,13 @@ type statusProvider struct {
 }
 
 type statusFrozen struct {
-	Key   string    `json:"key"`
-	Since time.Time `json:"since"`
+	Key   string     `json:"key"`
+	Since *time.Time `json:"since,omitempty"`
 }
 
 type statusClosed struct {
-	Topic        string    `json:"topic"`
-	LastAdvisory time.Time `json:"lastAdvisory"`
+	Topic        string     `json:"topic"`
+	LastAdvisory *time.Time `json:"lastAdvisory,omitempty"`
 }
 
 type statusRename struct {
@@ -147,7 +149,7 @@ func statusDocumentOf(dbPath string, m store.Meta) statusDocument {
 		SchemaVersion:     statusSchemaVersion,
 		Path:              dbPath,
 		Schema:            m.Schema,
-		BuiltAt:           m.BuiltAt.UTC(),
+		BuiltAt:           dateOrNil(m.BuiltAt),
 		Ecosystems:        sortedOrEmpty(m.Ecosystems),
 		Databases:         sortedOrEmpty(m.Databases),
 		Providers:         []statusProvider{},
@@ -155,7 +157,7 @@ func statusDocumentOf(dbPath string, m store.Meta) statusDocument {
 		EnrichmentSources: []statusEnrichmentSource{},
 	}
 	if a := m.Artifact; a != nil {
-		art := statusArtifact{Reference: a.Reference, Digest: a.Digest, PulledAt: a.PulledAt.UTC(), Signature: "unrecorded"}
+		art := statusArtifact{Reference: a.Reference, Digest: a.Digest, PulledAt: dateOrNil(a.PulledAt), Signature: "unrecorded"}
 		switch {
 		case a.SignedBy != "":
 			art.Signature, art.SignedBy = "verified", a.SignedBy
@@ -179,10 +181,10 @@ func statusDocumentOf(dbPath string, m store.Meta) statusDocument {
 		sp := statusProvider{Name: name, DataAsOf: dateOrNil(p.DataAsOf), Records: p.Records,
 			Source: p.Source, Ecosystems: sortedOrEmpty(p.Ecosystems)}
 		for _, k := range sortedKeys(p.Frozen) {
-			sp.Frozen = append(sp.Frozen, statusFrozen{Key: k, Since: p.Frozen[k].UTC()})
+			sp.Frozen = append(sp.Frozen, statusFrozen{Key: k, Since: dateOrNil(p.Frozen[k])})
 		}
 		for _, k := range sortedKeys(p.Closed) {
-			sp.Closed = append(sp.Closed, statusClosed{Topic: k, LastAdvisory: p.Closed[k].UTC()})
+			sp.Closed = append(sp.Closed, statusClosed{Topic: k, LastAdvisory: dateOrNil(p.Closed[k])})
 		}
 		for _, k := range sortedKeys(p.Renamed) {
 			sp.Renamed = append(sp.Renamed, statusRename{From: k, To: p.Renamed[k]})

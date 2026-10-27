@@ -6344,7 +6344,7 @@ each with its date, count and source. Frozen keys, renames and closed topics sit
 provider. `--output table` is the default and unchanged. Every `db` subcommand now refuses an
 argument it does not take, with exit 2 and the argument named: `db status` anything but
 `--output table|json`, `db ref` anything, and `db build --seed <ref>` anything after the
-reference.
+reference other than `--ratings-only` (which `db-backfill.yml` passes there).
 
 **Why.** The 2026-10-22 audit listed both as cheap items before a first customer. A monitor
 had no machine-readable way to ask the database's age short of parsing the table, and `db`
@@ -6352,17 +6352,21 @@ ignored unknown flags: `db status --output json` printed the table, exit 0, so t
 parser failed on output it could not have expected, and `db build --seed <ref> --rating-only`
 (a typo) built without the flag it meant.
 
-**Rules the document keeps.** The table's: counts come from the stored buckets, not from a
-source's self-report; a source that ran and produced nothing keeps its row with `records` 0;
-an unknown date is left out, never zero; lists are sorted and never null, so one database
-gives one byte sequence. A refusal (no database, another schema) is the table's, on stderr,
+**Rules the document keeps.** The table's: a rating or enrichment source's count comes from
+the stored bucket, not its self-report, and one that ran and produced nothing keeps its row
+with `records` 0; a provider's `records` is its own report for the run, as in the table, so
+records carried forward from a seed (D110) are in no provider's count. Every unknown date is
+left out, never written as year 1 (a freeze date can be unknown: osv leaves its `DataAsOf`
+zero when any ecosystem had none, and carry-forward freezes at it). Lists are sorted and
+never null, so one database gives one byte sequence. A refusal (no database, another schema) is the table's, on stderr,
 with nothing on stdout. `docs/compatibility.md` lists it as a contract, and a test holds its
 row to the constant.
 
 **Verified.** Caller tests drive `run()`: `--output json` gives one document with schema and
 coverage; no flag, `--output table` and `--output=table` give the table; six refusals (an
 unknown flag, an unknown format, a missing value, a trailing argument, `db ref extra`, a
-trailing argument to `db build --seed`, refused before any pull) exit 2 with stdout empty.
+trailing argument to `db build --seed`, refused before any pull) exit 2 with stdout empty;
+`--output=json` gives the document too.
 `TestStatusJSON_TheWholeDocument` pins the document byte for byte on a fixture holding every
 section.
 

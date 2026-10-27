@@ -35,6 +35,13 @@ func TestRun_DBStatusOutputJSON(t *testing.T) {
 	if doc.SchemaVersion != 1 || doc.Schema != store.SchemaVersion || !slices.Equal(doc.Ecosystems, []string{"Go"}) {
 		t.Errorf("document = %+v, want schemaVersion 1, schema %d, ecosystems [Go]", doc, store.SchemaVersion)
 	}
+	stdout.Reset()
+	if code := run([]string{"db", "status", "--output=json"}, &stdout, &stderr); code != exitOK || !strings.HasPrefix(stdout.String(), "{") {
+		t.Errorf("db status --output=json = %d, want the JSON document:\n%s", code, stdout.String())
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
+		t.Fatalf("--output=json stdout is not one JSON document: %v", err)
+	}
 	if strings.Contains(stdout.String(), "PROVIDER") {
 		t.Errorf("the JSON output carries the table:\n%s", stdout.String())
 	}
