@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-27
+
 ### Added
 - 이미지 스캔이 이제 stderr와 SARIF(규칙 `assay/inventory-scope`, note 수준)로, 이미지 안의
   애플리케이션 패키지(npm, Python, Java, Go 바이너리)는 검사하지 않았다는 점을 알려 주고,
@@ -225,7 +227,8 @@
   여덟 개 언어 생태계를 다룹니다. CI에 종료 코드 0, 1, 2를 줍니다. 출력은 표, JSON, SARIF입니다.
   **(보고서 schemaVersion 8; 저장소 스키마 9)** (결정 기록 D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.11.0...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.12.0...main
+[0.12.0]: https://github.com/kun9497/assay/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/kun9497/assay/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/kun9497/assay/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/kun9497/assay/compare/v0.8.0...v0.9.0

@@ -33,4 +33,4 @@ grep -q "^\$DefaultVersion = '$1'$" "$here/install.ps1" || {
 	echo "prepare-release: install.ps1's \$DefaultVersion line was not updated" >&2
 	exit 1
 }
-echo "install.sh and install.ps1 now install $1 by default; commit, tag $1, push the tag." >&2
+echo "install.sh and install.ps1 now install $1 by default; commit and push, wait for CI, then tag $1 and push the tag." >&2

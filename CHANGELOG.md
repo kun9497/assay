@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-27
+
 ### Added
 - An image scan now tells you, on stderr and in SARIF (rule `assay/inventory-scope`, note
   level), that application packages inside the image (npm, Python, Java, Go binaries) were
@@ -238,7 +240,8 @@ All notable changes to this project are documented here. The format follows
   ecosystems. Gives CI an exit code of 0, 1 or 2. Output as table, JSON or SARIF.
   **(report schemaVersion 8; store schema 9)** (decision log D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.11.0...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.12.0...main
+[0.12.0]: https://github.com/kun9497/assay/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/kun9497/assay/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/kun9497/assay/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/kun9497/assay/compare/v0.8.0...v0.9.0
