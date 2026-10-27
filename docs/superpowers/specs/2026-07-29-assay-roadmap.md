@@ -6750,6 +6750,81 @@ unparsable and nil guards, and the SRPM version-release ignored.
 
 ---
 
+### D154 — At the same version a close sorts before an open; a window that opens and closes at one version is judged on its own
+
+**Decision.** `InRange` still sorts a range's events and walks them, as OSV's reference
+algorithm does, with two changes:
+1. **Degenerate windows come out first.** A window is the run of events from one `introduced`
+   to the next, in file order. Its close is the first `fixed` or `last_affected` in that run.
+   When the close compares equal to the open, the pair is taken out of the walk:
+   - an empty window `[X,X)` (`introduced` = `fixed`) holds nothing;
+   - a single-version window `[X,X]` (`introduced` = `last_affected`) holds X. It is
+     consulted only when the walk found nothing, so a version inside a wider window keeps
+     that window's evidence.
+
+   The introduced sentinel `"0"` is negative infinity, not the version 0, and never opens a
+   degenerate window. PEP 440 compares it equal to `"0.0"`.
+2. **At the same version a close sorts before an open.** The rank is by event kind, so the
+   comparator stays a strict weak ordering.
+
+`splitDegenerate` and the tie rule in `sortEvents` live in `internal/version/rangeeval.go`.
+The matcher is unchanged.
+
+**Why.** The 2026-10-22 audit (A7): `sortEvents` ordered by version only, and a tie between
+one window's close and another's open fell to file order. With the later window listed first
+(`introduced 2.0, fixed 3.0, introduced 1.0, fixed 2.0`), its open sorted before the earlier
+window's close. The close shut the window just opened, so every version inside it was judged
+clean with empty Evidence, while the same events in order returned affected. OSV does not
+require sorted events.
+
+The obvious fix, a close before an open at a tie, breaks degenerate windows. Ordered close
+first, `[X,X)` and `[X,X]` both open at X and never close: a false positive on every version
+from X up. Ranking each tie by which window its events belong to fixes both shapes. But two
+degenerate windows at the same version then form a cycle, and that is not a valid sort order.
+Bitnami's liferay repeats one `[X,X]` dozens of times in a range. Taking the degenerate
+windows out first leaves only ties between different windows, which the kind rank orders
+correctly. The user chose this over pairing windows in file order without sorting (wrong when
+a close precedes its own open, which OSV allows) and over recording the defect as a hazard
+only.
+
+**Measured.** On the published database (2026-10-27), 14,641,480 non-git ranges:
+- Cross-window ties: 76 (Bitnami 75, PyPI 1), every one already listed in order. The defect
+  had no live instance; it is a latent miss on valid input.
+- Degenerate windows: 1,906. These are 229 empty ones (Bitnami 224, crates.io 5) and 1,677
+  single-version ones (Bitnami 1,657, Packagist 20).
+
+A whole-database differential judged each of the 536 ranges holding any tie at every one of
+its own bounds, on main and on this change. Of 2,892 judgments, none changed its verdict or
+its error. 255 results that were not affected changed only the evidence fields left over from
+the walk, which nothing reads on a miss.
+
+**Gives up.** Which close belongs to which open is read from file order. On a malformed
+window, with two closes before the next `introduced` or a close below its own open, the
+pairing is a guess. The code says so. Under both mutations that change the pairing, the
+differential still showed no verdict change.
+
+**Verified.**
+- `TestInRange_A7_ATieAcrossWindowsDoesNotDependOnFileOrder` covers `fixed` and
+  `last_affected`, each listed in reverse and in order, and a point window at a close. These
+  cases were red before the change.
+- `TestInRange_A7_DegenerateWindowsKeepTheirMeaning` covers the empty window, the point
+  window, the repeated point window, Bitnami discourse's empty newest window, an empty window
+  over a close, and a point window inside a wider one.
+- `TestInRange_A7_TheSentinelNeverOpensADegenerateWindow` was written red against the first
+  implementation.
+
+Eleven mutations were run:
+- Caught: tie rule removed, tie rule reversed, the split not applied, the points never
+  consulted, the sentinel not excluded, the split blind to `last_affected`, a point holding
+  below X, a point overriding the walk's evidence, and an empty window kept as a point.
+- Survived: looking past the next `introduced`, and pairing every later close. Both are
+  equivalent on well-formed windows and documented in `splitDegenerate`.
+
+A twelfth mutation removed the validation pass before the split. It was an equivalent,
+because `sortEvents` validates the same bounds, so the pass was deleted.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- A version range whose later window is listed before an earlier one that closes where the
+  later one opens (`introduced 2.0, fixed 3.0, introduced 1.0, fixed 2.0`) judged every
+  version in the later window clean. A close now sorts before an open at the same version,
+  and a window that opens and closes at one version is judged on its own. No record in the
+  published database had the shape; every verdict over its 536 tied ranges is unchanged.
+  (D154, audit A7)
 - Image scans of rpm distros compare a source-keyed advisory against the source rpm's
   version, not the binary's. Before, a subpackage with its own version or epoch was judged
   in the wrong namespace: perl's subpackages and npm never cleared their source's fix
