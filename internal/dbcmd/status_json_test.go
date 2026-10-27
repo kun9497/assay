@@ -31,7 +31,10 @@ func statusJSONFixture(t *testing.T, artifact *store.ArtifactRecord) string {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.PutRatings([]advisory.Rating{{CVE: "CVE-2026-1", Source: "NVD"}, {CVE: "CVE-2026-2", Source: "NVD"}}); err != nil {
+	if err := w.PutRatings([]advisory.Rating{{CVE: "CVE-2026-1", Source: "NVD"}, {CVE: "CVE-2026-2", Source: "NVD"},
+		// A source with stored ratings and no self-report: the table still gives
+		// it a row, with no date and no source.
+		{CVE: "CVE-2026-3", Source: "GHSA"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.PutEnrichment(advisory.Enrichment{CVE: "CVE-2026-1", Source: "KISA", Title: "t"}); err != nil {
@@ -161,6 +164,10 @@ func TestStatusJSON_TheWholeDocument(t *testing.T) {
       "source": "https://epss.test/"
     },
     {
+      "name": "GHSA",
+      "records": 1
+    },
+    {
       "name": "NVD",
       "dataAsOf": "2026-10-19T00:00:00Z",
       "records": 2,
@@ -236,5 +243,36 @@ func TestStatusJSON_WithoutDatabase(t *testing.T) {
 	}
 	if out.Len() != 0 {
 		t.Errorf("the error path wrote to stdout: %q", out.String())
+	}
+}
+
+// TestStatusJSON_AnEmptyDatabaseHasEmptyLists: a database with no providers
+// or sources still gives arrays, never null, so a consumer can range over
+// every list without a nil check -- and an absent date is left out.
+func TestStatusJSON_AnEmptyDatabaseHasEmptyLists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	w, err := store.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetMeta(store.Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := StatusJSON(path, &out, &errOut); code != 0 {
+		t.Fatalf("StatusJSON = %d (stderr %s)", code, errOut.String())
+	}
+	s := out.String()
+	for _, want := range []string{`"ecosystems": []`, `"databases": []`, `"providers": []`,
+		`"ratingSources": []`, `"enrichmentSources": []`, `"eol": {
+    "releases": 0,
+    "distros": 0
+  }`} {
+		if !strings.Contains(s, want) {
+			t.Errorf("document does not contain %s:\n%s", want, s)
+		}
 	}
 }
