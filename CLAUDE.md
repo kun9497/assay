@@ -88,7 +88,9 @@ score withdraws its seeded rating and `db push` tolerates exactly that drop (D13
 verify the signature against keys embedded in the binary (`internal/dbcmd/trust`) before
 writing anything — unsigned is refused with the `.sig` tag a mirror must copy,
 `--allow-unsigned` installs and records it, a wrong signature is refused regardless; release
-checksums are signed and `install.sh` verifies them with `openssl`. Since D138 every ops
+checksums are signed and `install.sh` verifies them with `openssl` (`install.ps1`, D148, with
+.NET on Windows PowerShell 5.1 and 7 -- ASCII only, because 5.1 reads a BOM-less script in the
+system code page). Since D138 every ops
 workflow keeps one pinned issue open while it fails (`scripts/ops-alert.sh`) and the nightly
 publishes `status.json` to the `status` branch (`cmd/dbstatus`); since D139 a scan warns when its
 database was built over seven days ago; since D140 a layer download cut mid-stream is retried; since D141 every image scan says on

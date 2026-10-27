@@ -64,7 +64,7 @@ jobs:
           git fetch --depth=1 origin main
           git checkout -B main origin/main
           for f in README.md README.ko.md; do
-            sed -i -E "s#raw\.githubusercontent\.com/kun9497/assay/[^/]+/install\.sh#raw.githubusercontent.com/kun9497/assay/${GITHUB_SHA}/install.sh#" "$f"
+            sed -i -E "s#raw\.githubusercontent\.com/kun9497/assay/[^/]+/install\.(sh|ps1)#raw.githubusercontent.com/kun9497/assay/${GITHUB_SHA}/install.\1#g" "$f"
           done
           if git diff --quiet; then echo "README already pins ${GITHUB_SHA}"; exit 0; fi
           git config user.name "github-actions[bot]"

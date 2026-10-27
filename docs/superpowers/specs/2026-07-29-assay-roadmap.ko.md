@@ -6067,6 +6067,41 @@ stdout 이 빈 채로 exit 2 다. `--output=json` 도 문서를 낸다. `TestSta
 
 ---
 
+### D148 — install.sh 와 같은 방식으로 검증하는 Windows 설치 스크립트
+
+**결정.** `install.ps1` 은 Windows PowerShell 5.1 이나 PowerShell 7 에서
+`irm <고정 커밋>/install.ps1 | iex` 로 실행하며, `install.sh` 와 같은 검사를 거친 뒤 릴리스의
+`assay.exe` 를 설치한다. 체크섬 파일의 서명을 스크립트에 내장된 키로 검증하고, `.sig` 가 없으면
+거부하며, zip 은 체크섬 파일의 해당 줄과 일치해야 한다. .NET 만으로 검증하므로 먼저 설치할 것이
+없고 서명 없이 진행하는 대체 경로도 없다. `%LOCALAPPDATA%\Programs\assay` 에 설치하고, PATH 를
+직접 고치지 않고 사용자 PATH 에 추가하는 명령을 출력한다. 옵션은 파일로 실행할 때는 매개변수에서,
+파이프로 넘길 때는 `ASSAY_INSTALL_DIR` / `ASSAY_VERSION` 에서 온다. 거부는 `exit` 가 아니라
+종료 오류이므로, 파이프 설치가 거부되어도 호출한 창은 열린 채로 남는다.
+`scripts/prepare-release.sh` 가 `install.sh` 의 `VERSION` 과 함께 `$DefaultVersion` 을 정하고,
+릴리스 잡이 README 의 두 줄을 릴리스 커밋에 고정한다.
+
+**이유.** 2026-10-22 감사가 "설치 스크립트에 Windows 경로가 없다"를 꼽았다. 릴리스는 v0.1.0 부터
+`windows_amd64` 와 `windows_arm64` zip 을 실어 왔으므로, Windows 사용자가 검증된 방법으로 설치하는
+길은 손으로 하는 것뿐이었다: Windows 에 없는 cosign, 또는 `go install`. `install.sh` 에 Git Bash
+분기를 두는 편이 더 작은 변경이었지만, 이미 openssl 이 있는 Git Bash 를 가진 사용자에게만 도움이
+된다. 사용자가 PowerShell 스크립트를 골랐다.
+
+**스크립트가 맞추는 제약.** Windows PowerShell 5.1 의 .NET 은 SubjectPublicKeyInfo 도 DER 서명도
+읽지 못한다. 그래서 키는 26바이트 헤더를 확인한 뒤 P-256 의 고정된 91바이트 SPKI 배치에서 꺼내
+CNG 공개 blob 으로 들여오고, cosign 의 DER `SEQUENCE { r, s }` 는 손으로 64바이트 r||s 형태로
+바꾸며, 그 밖의 것은 거부한다. 5.1 은 바이트 순서 표시가 없는 스크립트를 시스템 코드 페이지(작성한
+기계에서는 cp949)로 읽으므로 스크립트는 ASCII 만 쓴다.
+
+**검증.** `scripts/install_test.ps1` 은 `install_test.sh` 의 짝이다. 테스트 키로 서명한 가짜
+릴리스를 서빙하고, 두 에디션 모두에서 열세 경우를 돌린다: 설치된 바이트까지 확인하는 정상 설치,
+변조된 zip, 낡은 서명을 둔 채 다시 쓴 에셋, 자체 가드가 거부하는 삭제된 서명, 공격자 키, DER 이 아닌
+서명, 서명된 체크섬 파일에서 빠진 아카이브, 공백이 든 임시 경로, 양방향 키 교체, 키 없는 사본, 거부가
+세션을 살려 두는 파이프 형태, 그리고 `api.github.com` 호출 없음. CI 는 windows-latest 에서 이것을
+돌리며, 어느 에디션이든 없으면 실패한다. 실제 v0.11.0 릴리스에 손으로 돌리자, 스크립트가 운영 키로
+cosign 서명을 검증하고 5.1 과 7 모두에서 `assay.exe` 를 설치했다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

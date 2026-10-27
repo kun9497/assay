@@ -22,7 +22,7 @@ advisory data is the reason it exists rather than reusing grype.
 ## Install
 
 ```bash
-# Prebuilt binary (Linux/macOS, amd64/arm64) — onto your PATH
+# Prebuilt binary (Linux/macOS, amd64/arm64) — onto your PATH; Windows below
 curl -sSfL https://raw.githubusercontent.com/kun9497/assay/6a8889050ebf24615b1ebd277ebbbda508babfbd/install.sh | sudo sh -s -- -b /usr/local/bin
 ```
 
@@ -34,6 +34,17 @@ or a tag, which can move — and the release job updates it. Without `-b` it ins
 release, verified against the same keys. A release whose checksums file carries no
 signature is refused, never installed on the checksum alone: v0.10.0 is the first signed
 release, so anything older goes through `go install` or the release page.
+
+On Windows (from v0.12.0, the first release that ships it), in PowerShell 5.1 or 7:
+
+```powershell
+irm https://raw.githubusercontent.com/kun9497/assay/6a8889050ebf24615b1ebd277ebbbda508babfbd/install.ps1 | iex
+```
+
+`install.ps1` verifies the same signature with .NET, so it needs nothing installed first, and
+installs `assay.exe` to `%LOCALAPPDATA%\Programs\assay` (`$env:ASSAY_INSTALL_DIR` changes
+it, `$env:ASSAY_VERSION` picks another release), then prints the command that puts it on
+your PATH.
 
 <details>
 <summary>Other ways to install</summary>

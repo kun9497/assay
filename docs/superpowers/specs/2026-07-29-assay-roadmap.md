@@ -6372,6 +6372,45 @@ section.
 
 ---
 
+### D148 — A Windows installer, verified the way install.sh is
+
+**Decision.** `install.ps1`, run as `irm <pinned commit>/install.ps1 | iex` in Windows
+PowerShell 5.1 or PowerShell 7, installs a release's `assay.exe` after the same checks
+`install.sh` makes. The checksums file's signature is verified against the keys embedded in the
+script, a missing `.sig` is refused, and the zip must match its line in the checksums file.
+It verifies with .NET alone, so nothing is installed first and there is no unsigned fallback.
+It installs to `%LOCALAPPDATA%\Programs\assay` and prints the command that adds that to the
+user's PATH rather than editing PATH itself. Options come from parameters when it is run as a
+file, and from `ASSAY_INSTALL_DIR` / `ASSAY_VERSION` when piped. A refusal is a terminating
+error, never `exit`, so a piped install that refuses leaves the caller's window open.
+`scripts/prepare-release.sh` sets its `$DefaultVersion` beside `install.sh`'s `VERSION`, and
+the release job pins both README lines to the release commit.
+
+**Why.** The 2026-10-22 audit listed "the installer has no Windows path". Releases have shipped
+`windows_amd64` and `windows_arm64` zips since v0.1.0, so a Windows user's only verified path
+was by hand: cosign, which Windows does not have, or `go install`. A Git Bash branch in
+`install.sh` was the smaller change, but it would help only users who already have Git Bash
+with openssl. The user chose the PowerShell script.
+
+**Constraints the script meets.** Windows PowerShell 5.1's .NET cannot read a
+SubjectPublicKeyInfo or a DER signature. So the key is taken from P-256's fixed 91-byte SPKI
+layout, after its 26-byte header is checked, and imported as a CNG public blob. cosign's DER
+`SEQUENCE { r, s }` is converted to the 64-byte r||s form by hand, and anything else is a
+refusal. The script is ASCII only, because 5.1 reads a script without a byte-order mark in
+the system code page (cp949 on the machine it was written on).
+
+**Verified.** `scripts/install_test.ps1` is the counterpart of `install_test.sh`. It serves
+fake releases signed with test keys and runs thirteen cases under both editions: a clean
+install with the installed bytes checked; a tampered zip; rewritten assets with a stale
+signature; a deleted signature, refused by its own guard; an attacker's key; a signature
+that is not DER; an archive missing from a signed checksums file; a temp path with a space;
+key rotation both ways; a keyless copy; the piped form, where a refusal leaves the session
+alive; and no `api.github.com` call. CI runs it on windows-latest and fails if either
+edition is missing. Run by hand against the real v0.11.0 release, the script verified its
+cosign signature with the production key and installed `assay.exe` under 5.1 and 7.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

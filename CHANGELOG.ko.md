@@ -18,6 +18,8 @@
   열어 둡니다. (D138)
 - `assay db status --output json`이 테이블과 같은 사실을 자체 `schemaVersion`(1)을 가진
   JSON 문서 하나로 씁니다. (D147)
+- `install.ps1`: PowerShell 5.1과 7용 Windows 설치 스크립트로, `assay.exe`를 설치하기 전에 릴리스
+  체크섬 서명을 내장 키로 검증합니다. (D148)
 - `SECURITY.md`(GitHub를 통한 비공개 제보), `CONTRIBUTING.md`, 이 변경 이력, 그리고 각 기계 판독용
   출력에서 `schemaVersion` 상향이 무엇을 뜻하는지 밝히는
   [`docs/compatibility.ko.md`](docs/compatibility.ko.md). 보고서 스키마 15부터는 JSON 보고서를 바꾸는

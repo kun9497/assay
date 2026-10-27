@@ -5,11 +5,12 @@
 #   git commit -am "chore: prepare v0.12.0" && git tag v0.12.0 && git push origin main v0.12.0
 #
 # The installer published with a release installs that release by default
-# (install.sh's VERSION), and the script is fetched by the commit the tag
-# points at -- which cannot contain its own SHA, so VERSION is set here, in
-# the commit before the tag, and release.yml pins the README one-liner to
-# that commit afterwards. The harness (scripts/install_test.sh) runs in CI on
-# this commit, so a wrong VERSION fails before the tag is pushed.
+# (install.sh's VERSION, install.ps1's $DefaultVersion), and the script is
+# fetched by the commit the tag points at -- which cannot contain its own
+# SHA, so both are set here, in the commit before the tag, and release.yml
+# pins the README one-liners to that commit afterwards. The harnesses
+# (scripts/install_test.sh, scripts/install_test.ps1) run in CI on this
+# commit, so a wrong version fails before the tag is pushed.
 set -eu
 case "${1:-}" in
 v[0-9]*.[0-9]*.[0-9]*) ;;
@@ -24,4 +25,9 @@ grep -q "^VERSION=\"$1\"$" "$here/install.sh" || {
 	echo "prepare-release: install.sh's VERSION line was not updated" >&2
 	exit 1
 }
-echo "install.sh now installs $1 by default; commit, tag $1, push the tag." >&2
+sed -i.bak "s/^\$DefaultVersion = 'v[^']*'$/\$DefaultVersion = '$1'/" "$here/install.ps1" && rm -f "$here/install.ps1.bak"
+grep -q "^\$DefaultVersion = '$1'$" "$here/install.ps1" || {
+	echo "prepare-release: install.ps1's \$DefaultVersion line was not updated" >&2
+	exit 1
+}
+echo "install.sh and install.ps1 now install $1 by default; commit, tag $1, push the tag." >&2
