@@ -72,8 +72,38 @@ carries the full design and the reasoning behind each decision.
 vulnerability database, and matching the two. In the anchore ecosystem those are three
 separate projects — `syft`, `vunnel` + `grype-db`, and `grype`.
 
-**This is a personal project, built to learn how a vulnerability scanner works by building
-one end to end.** Existing scanners are excellent and battle-tested; use them in production.
+**What a scan does not cover.** Read this before relying on a clean result. Each limit is
+deliberate and recorded with what would change it; a scan says on stderr, and in its report,
+when one of them applied.
+
+- **Application packages inside an image** (D70). An image scan checks the operating-system
+  packages (and Bitnami's `/opt/bitnami` markers), not npm, Python, Java or Go-binary packages
+  installed in the image. Scan the application's lockfile, directory or binary, or an SBOM
+  of the image, for those. [Recorded here](deferred-decisions.md#application-packages-inside-container-images).
+- **Releases the upstream stopped publishing** (D110). Debian 11 has been frozen since
+  2026-08-19: the last advisories are kept rather than dropped, findings on it are marked,
+  and new CVEs reach it only if the upstream still publishes them.
+- **Vendor lineages.** Ubuntu Pro (ESM/FIPS) and Oracle Ksplice/FIPS builds are reported as
+  not evaluated rather than judged against mainline data (D53, D79, D142). RHEL hosts on
+  EUS/AUS/TUS/E4S are checked against mainline errata, which over-alarms in most measured
+  cases and under-alarms in about 1.3%; a stderr note says so (D47).
+- **KISA's Korean notices are not in the published database** (D29). KISA's terms permit
+  scanning with the data, not redistributing it, so they appear only in a database built
+  with `assay db build`, and even then they only describe findings, never add them.
+- **No CPE matching** (D27). Matching is by package identity (purl or ecosystem, name and
+  version). Software with no package-manager identity is not matched; NVD contributes
+  ratings, not matches.
+- **One platform per run, and no Docker daemon source** (D119). A multi-platform image is
+  scanned for the host's platform or the one `--platform` names; an image that exists only
+  in a local daemon is scanned after `docker save`, as `docker-archive:`.
+- **OS packages in an SBOM need their distro release.** A CycloneDX operating-system
+  component, a `distro=` purl qualifier or Red Hat's `repository_id` is enough; without any,
+  they are listed as not evaluated.
+- **Eight language ecosystems**: Go, npm, PyPI, crates.io, Maven, RubyGems, NuGet and
+  Packagist. A component of any other type in an SBOM is counted in the report as an
+  unsupported ecosystem.
+- **Malicious-package reports** (`MAL-*`) are not ingested (D15). Use a supply-chain malware
+  tool for that class.
 
 It started out aimed at Korean advisory data — KISA/KNVD as a first-class provider. The
 first investigation said that was not viable; it had measured the wrong board. KNVD's own

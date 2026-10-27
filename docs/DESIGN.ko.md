@@ -69,8 +69,36 @@ this result cannot be trusted").
 그리고 둘의 매칭. anchore 생태계에서는 이것이 `syft`, `vunnel` + `grype-db`, `grype`라는 세
 개의 별도 프로젝트입니다.
 
-**개인 프로젝트이고, 취약점 스캐너가 어떻게 동작하는지를 끝에서 끝까지 직접 만들어보며 배우려고
-시작했습니다.** 기존 스캐너들은 훌륭하고 충분히 검증되어 있습니다. 프로덕션에서는 그것들을 쓰십시오.
+**스캔이 다루지 않는 것.** 깨끗한 결과에 기대기 전에 읽어 주십시오. 각 한계는 의도된 것이며
+무엇이 그 결정을 바꿀지와 함께 기록되어 있습니다. 그중 하나가 적용되면 스캔이 stderr와 리포트에서
+그렇다고 말합니다.
+
+- **이미지 안의 애플리케이션 패키지**(D70). 이미지 스캔은 운영체제 패키지(와 Bitnami의
+  `/opt/bitnami` 마커)를 검사하며, 이미지에 설치된 npm, Python, Java, Go 바이너리 패키지는 검사하지
+  않습니다. 그것들은 애플리케이션의 lockfile, 디렉터리, 바이너리, 또는 이미지의 SBOM을 스캔하십시오.
+  [기록](deferred-decisions.md#application-packages-inside-container-images).
+- **업스트림이 게시를 멈춘 릴리스**(D110). Debian 11은 2026-08-19부터 동결되어 있습니다. 마지막
+  권고는 버리지 않고 유지하며, 그 위의 finding에는 표시가 붙고, 새 CVE는 업스트림이 여전히 게시할
+  때만 들어옵니다.
+- **벤더 계보.** Ubuntu Pro(ESM/FIPS)와 Oracle Ksplice/FIPS 빌드는 메인라인 데이터로 판정하지 않고
+  평가되지 않음으로 보고합니다(D53, D79, D142). EUS/AUS/TUS/E4S의 RHEL 호스트는 메인라인 errata로
+  검사하며, 측정한 경우의 대부분에서 과경보하고 약 1.3%에서 미경보합니다. stderr 안내가 그렇다고
+  말합니다(D47).
+- **KISA 한국어 공지는 배포 데이터베이스에 없습니다**(D29). KISA의 이용 조건은 그 데이터로 스캔하는
+  것은 허용하되 재배포는 허용하지 않으므로, `assay db build`로 만든 데이터베이스에만 나타나고, 그때도
+  finding을 설명할 뿐 새로 만들지 않습니다.
+- **CPE 매칭 없음**(D27). 매칭은 패키지 신원(purl 또는 ecosystem, 이름, 버전)으로 합니다. 패키지
+  관리자 신원이 없는 소프트웨어는 매칭되지 않으며, NVD는 매칭이 아니라 등급을 보탭니다.
+- **실행당 플랫폼 하나, Docker 데몬 소스 없음**(D119). 멀티 플랫폼 이미지는 호스트의 플랫폼이나
+  `--platform`이 지정한 것으로 스캔합니다. 로컬 데몬에만 있는 이미지는 `docker save` 후
+  `docker-archive:`로 스캔합니다.
+- **SBOM의 OS 패키지에는 배포판 릴리스가 필요합니다.** CycloneDX operating-system 컴포넌트,
+  `distro=` purl qualifier, Red Hat의 `repository_id` 중 하나면 충분합니다. 하나도 없으면 평가되지
+  않음으로 나열됩니다.
+- **언어 ecosystem 여덟 개**: Go, npm, PyPI, crates.io, Maven, RubyGems, NuGet, Packagist. SBOM의
+  다른 유형의 컴포넌트는 리포트에 지원하지 않는 ecosystem으로 집계됩니다.
+- **악성 패키지 보고**(`MAL-*`)는 수집하지 않습니다(D15). 그 부류는 공급망 악성코드 도구를
+  쓰십시오.
 
 출발점은 국내 취약점 데이터였습니다 — KISA/KNVD를 일급 provider로 삼는 것. 첫 조사는 성립하지
 않는다고 했지만, 틀린 게시판을 잰 결과였습니다. KNVD 자체 공개는 국내 상용 소프트웨어 173건이고,
