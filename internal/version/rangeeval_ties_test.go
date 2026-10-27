@@ -119,6 +119,14 @@ func TestInRange_A7_DegenerateWindowsKeepTheirMeaning(t *testing.T) {
 		{v: "2026.1.0", want: false},
 		{v: "2026.2.0", want: false},
 	})
+	// A single-version window inside a wider one: the verdict is the same
+	// either way, and the evidence names the wider window, whose fix is the
+	// upgrade that clears the finding.
+	checkTies(t, "single-version window inside a wider window", rng(advisory.RangeSemver,
+		intro("1.0.0"), fixed("3.0.0"), intro("2.0.0"), lastAff("2.0.0")), []tieCase{
+		{v: "2.0.0", want: true, introduced: "1.0.0", closedAt: "3.0.0"},
+		{v: "3.0.0", want: false},
+	})
 	// An empty window listed before the window that closes where it opens.
 	checkTies(t, "empty window over a close", rng(advisory.RangeSemver,
 		intro("2.0.0"), fixed("2.0.0"), intro("1.0.0"), fixed("2.0.0")), []tieCase{

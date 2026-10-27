@@ -132,9 +132,6 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 	// judged on its own (A7, D154): the sort orders a close before an open at
 	// the same version, which is what two windows meeting at a version need,
 	// and would turn [X,X) and [X,X] into windows that never close.
-	if err := validateBounds(c, r.Events); err != nil {
-		return false, Evidence{}, err
-	}
 	walked, points := splitDegenerate(c, r.Events)
 	events, err := sortEvents(c, walked)
 	if err != nil {
@@ -245,9 +242,14 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 // the same answer. Taking them out is what lets sortEvents put a close before
 // an open at the same version without reopening them.
 //
-// Bounds must already be validated: a Compare error here is not expected,
-// and an event pair that cannot be compared is left to the walk, which
-// reports it, rather than guessed at.
+// A pair that cannot be compared is left in the walk rather than guessed
+// at, and sortEvents then refuses the range with the advisory named as the
+// cause; a pair taken out was readable by construction.
+//
+// Only a window with one close, at or above its open, is well-formed. On
+// anything else -- two closes before the next introduced, or a close below
+// its open -- which close pairs with the open is a guess, and the published
+// database held no tied range of that shape on 2026-10-27.
 func splitDegenerate(c Comparer, in []advisory.Event) (walk []advisory.Event, points []string) {
 	drop := make([]bool, len(in))
 	for i, e := range in {
@@ -301,13 +303,28 @@ func eventVersion(e advisory.Event) string {
 // sortEvents orders events by the version each carries, with the introduced
 // sentinel first and, at the same version, a close before an open.
 //
-// Every bound is validated before sorting so the comparator cannot fail
-// (validateBounds).
+// Every bound is validated before sorting so the comparator cannot fail. A
+// comparator that swallowed errors would silently produce an arbitrary order,
+// and an arbitrary order here is a wrong verdict with no error attached —
+// strictly worse than refusing to evaluate the range.
 func sortEvents(c Comparer, in []advisory.Event) ([]advisory.Event, error) {
-	if err := validateBounds(c, in); err != nil {
-		return nil, err
-	}
 	out := append([]advisory.Event(nil), in...)
+	for _, e := range out {
+		ver := eventVersion(e)
+		if ver == "" || ver == introducedSentinel {
+			continue
+		}
+		if _, err := c.Compare(ver, ver); err != nil {
+			// D35: say whose data is at fault. This is the advisory's own
+			// bound, and nothing the person running the scan can act on —
+			// the opposite of the walk's failures below, which are always the
+			// installed version. Both used to render as "not evaluated" with
+			// the cause left to be worked out from which operand the wrapped
+			// error happened to name.
+			return nil, withCause(CauseAdvisoryData,
+				fmt.Errorf("the advisory's range bound %q could not be read: %w", ver, err))
+		}
+	}
 	sort.SliceStable(out, func(i, j int) bool {
 		vi, vj := eventVersion(out[i]), eventVersion(out[j])
 		// Events carrying no bound at all — a bare `limit`, or a malformed
@@ -350,30 +367,6 @@ func sortEvents(c Comparer, in []advisory.Event) ([]advisory.Event, error) {
 // closesWindow reports whether an event is a fixed or last_affected bound.
 func closesWindow(e advisory.Event) bool {
 	return e.Introduced == "" && (e.Fixed != "" || e.LastAffected != "")
-}
-
-// validateBounds reads every bound once before any comparison that would
-// discard its error. A comparator that swallowed errors would silently produce
-// an arbitrary order, and an arbitrary order here is a wrong verdict with no
-// error attached — strictly worse than refusing to evaluate the range.
-func validateBounds(c Comparer, in []advisory.Event) error {
-	for _, e := range in {
-		ver := eventVersion(e)
-		if ver == "" || ver == introducedSentinel {
-			continue
-		}
-		if _, err := c.Compare(ver, ver); err != nil {
-			// D35: say whose data is at fault. This is the advisory's own
-			// bound, and nothing the person running the scan can act on —
-			// the opposite of the walk's failures below, which are always the
-			// installed version. Both used to render as "not evaluated" with
-			// the cause left to be worked out from which operand the wrapped
-			// error happened to name.
-			return withCause(CauseAdvisoryData,
-				fmt.Errorf("the advisory's range bound %q could not be read: %w", ver, err))
-		}
-	}
-	return nil
 }
 
 // unreadablePackageVersion names the installed version as the cause, which by
