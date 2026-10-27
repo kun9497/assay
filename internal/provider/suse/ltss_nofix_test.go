@@ -132,3 +132,26 @@ func TestConvert_D149_OnlyARealVersionCountsAsAFix(t *testing.T) {
 		}
 	})
 }
+
+// An SLE known_not_affected entry is never stored (D125 reads that bucket
+// for Leap keys only), so it does not compete with an LTSS fix: the fix is
+// kept, as it was before D149, with nothing shadowed or replaced.
+// vunnel's CSAF parser instead lets a plain "not affected" outrank the LTSS
+// fix; this test records that assay does not, rather than leaving it
+// implicit.
+func TestConvert_D149_SLENotAffectedDoesNotCompete(t *testing.T) {
+	sp6, ltss := "SUSE Linux Enterprise Server 15 SP6", "SUSE Linux Enterprise Server 15 SP6-LTSS"
+	d := buildDocWith(t, "CVE-2026-0154", []string{sp6, ltss},
+		map[string]string{
+			"php8":                      "pkg:rpm/suse/php8@?upstream=php8.src.rpm",
+			"php8-8.2.35-150600.3.39.1": "pkg:rpm/suse/php8@8.2.35-150600.3.39.1?upstream=php8-8.2.35-150600.3.39.1.src.rpm",
+		},
+		[]string{ltss + ":php8-8.2.35-150600.3.39.1"}, nil, []string{sp6 + ":php8"}, nil)
+	var st stats
+	adv, _ := convert(d, &st)
+	a := affectedByName(adv)["SLES:15.SP6/php8"]
+	if len(a.Ranges) != 1 || len(a.Ranges[0].Events) != 2 || st.LTSSFixReplacedMainlineNoFix != 0 || st.SkippedLTSSShadowedByMainline != 0 {
+		t.Errorf("ranges %+v, replaced %d, shadowed %d; want the LTSS fix alone, 0 and 0",
+			a.Ranges, st.LTSSFixReplacedMainlineNoFix, st.SkippedLTSSShadowedByMainline)
+	}
+}
