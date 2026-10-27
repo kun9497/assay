@@ -6382,7 +6382,11 @@ It verifies with .NET alone, so nothing is installed first and there is no unsig
 It installs to `%LOCALAPPDATA%\Programs\assay` and prints the command that adds that to the
 user's PATH rather than editing PATH itself. Options come from parameters when it is run as a
 file, and from `ASSAY_INSTALL_DIR` / `ASSAY_VERSION` when piped. A refusal is a terminating
-error, never `exit`, so a piped install that refuses leaves the caller's window open.
+error, never `exit`, so a piped install that refuses leaves the caller's window open. The
+whole script is one script block invoked with its own arguments, because `iex` runs text in
+the caller's scope: a top-level `param()` would overwrite the caller's `$Version` and leave
+the script's functions in their session. TLS 1.2 is added to the process's protocol list only
+where that list is pinned below it, and the list is put back afterwards.
 `scripts/prepare-release.sh` sets its `$DefaultVersion` beside `install.sh`'s `VERSION`, and
 the release job pins both README lines to the release commit.
 
@@ -6395,19 +6399,38 @@ with openssl. The user chose the PowerShell script.
 **Constraints the script meets.** Windows PowerShell 5.1's .NET cannot read a
 SubjectPublicKeyInfo or a DER signature. So the key is taken from P-256's fixed 91-byte SPKI
 layout, after its 26-byte header is checked, and imported as a CNG public blob. cosign's DER
-`SEQUENCE { r, s }` is converted to the 64-byte r||s form by hand, and anything else is a
-refusal. The script is ASCII only, because 5.1 reads a script without a byte-order mark in
-the system code page (cp949 on the machine it was written on).
+`SEQUENCE { r, s }` is converted to the 64-byte r||s form by hand, accepting only canonical
+DER, the encoding openssl and .NET's own reader accept: no negative integer, no redundant
+leading zero, no bytes after `s`. Anything else is a refusal. The script is ASCII only,
+because 5.1 reads a script without a byte-order mark in the system code page (cp949 on the
+machine it was written on).
 
 **Verified.** `scripts/install_test.ps1` is the counterpart of `install_test.sh`. It serves
-fake releases signed with test keys and runs fifteen cases under both editions: a clean
-install with the installed bytes checked; a tampered zip; rewritten assets with a stale
-signature; a deleted signature, refused by its own guard; an attacker's key; a signature
-that is not DER, and a genuine one with a byte added inside its DER; an archive missing from a signed checksums file; a temp path with a space;
-key rotation both ways; a version that is not a release tag; a keyless copy; the piped form, where a refusal leaves the session
-alive; and no `api.github.com` call. CI runs it on windows-latest and fails if either
-edition is missing. Run by hand against the real v0.11.0 release, the script verified its
-cosign signature with the production key and installed `assay.exe` under 5.1 and 7.
+fake releases signed with test keys and runs every case under both editions:
+- a clean install, with the installed bytes checked;
+- a tampered zip;
+- rewritten assets with a stale signature;
+- a deleted signature, refused by its own guard;
+- an attacker's key;
+- a signature that is not DER;
+- the genuine signature padded inside its DER, and re-encoded with a redundant zero;
+- an archive missing from a signed checksums file;
+- a temp path with a space;
+- key rotation, both ways;
+- a version that is not a release tag;
+- a keyless copy;
+- the piped form, where the caller's variables, function table and TLS setting must come
+  out unchanged and a refusal leaves the session alive;
+- `install.sh` and `install.ps1` defaulting to the same release;
+- no `api.github.com` call.
+
+CI runs it on windows-latest and fails if either edition is missing. Twelve mutations
+were run against `install.ps1`. P6, the SPKI header check, is an equivalent for every key
+the script carries, and the code says so. The rest are caught, two of them only after the
+padded-DER case and the review's cases were added. Run by hand against the real v0.11.0
+release, the script verified its cosign signature with the production key and installed
+`assay.exe` under 5.1 and 7. After the canonical-DER change, its own functions verified the
+same signature again under both editions.
 
 ---
 

@@ -1010,7 +1010,7 @@ exited 0 while 24 findings went unmentioned.
       byte for byte; `db status`, `db ref` and `db build --seed` refuse extras with exit 2
 - [x] A Windows installer, verified the way install.sh is (D148) — `install.ps1` for
       PowerShell 5.1 and 7, the checksums signature checked with .NET against the embedded
-      keys; its harness runs fifteen attack cases under both editions on windows-latest
+      keys; its harness runs every attack case under both editions on windows-latest
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15

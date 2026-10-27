@@ -167,6 +167,31 @@ try {
     [IO.File]::WriteAllText($sigPath, [Convert]::ToBase64String($padded))
     Run-Case C3d $k1 1 'does not verify against any key embedded' -Env @{ ASSAY_RELEASE_BASE = "$base/c3d" }
 
+    # C3e: the genuine r and s re-encoded with a redundant leading zero on s.
+    # openssl (install.sh) and .NET's own DER reader refuse it; so must this.
+    Copy-Item -Recurse (Join-Path $root 'v9.9.1') (Join-Path $root 'c3e\v9.9.1')
+    $sigPath = Join-Path $root 'c3e\v9.9.1\assay_9.9.1_checksums.txt.sig'
+    $der = [Convert]::FromBase64String([IO.File]::ReadAllText($sigPath))
+    $rLen = $der[3]; $sAt = 4 + $rLen; $sLen = $der[$sAt + 1]
+    $r = $der[2..(3 + $rLen)]
+    $s = [byte[]](@(0x02, ($sLen + 1), 0x00) + $der[($sAt + 2)..($sAt + 1 + $sLen)])
+    $body = [byte[]]($r + $s)
+    [IO.File]::WriteAllText($sigPath, [Convert]::ToBase64String([byte[]](@(0x30, $body.Length) + $body)))
+    Run-Case C3e $k1 1 'does not verify against any key embedded' -Env @{ ASSAY_RELEASE_BASE = "$base/c3e" }
+
+    # C3f: r encoded as a negative INTEGER -- a valid signature whose r has
+    # its high bit set, with the 0x00 pad DER requires dropped. Re-signed
+    # until r needs the pad, so the case does not depend on one draw.
+    Copy-Item -Recurse (Join-Path $root 'v9.9.1') (Join-Path $root 'c3f\v9.9.1')
+    $sumsF = Join-Path $root 'c3f\v9.9.1\assay_9.9.1_checksums.txt'
+    do {
+        $der = $keys['key1'].SignData([IO.File]::ReadAllBytes($sumsF), [Security.Cryptography.HashAlgorithmName]::SHA256,
+            [Security.Cryptography.DSASignatureFormat]::Rfc3279DerSequence)
+    } until ($der[3] -eq 33)
+    $body = [byte[]](@(0x02, 32) + $der[5..($der.Length - 1)])
+    [IO.File]::WriteAllText("$sumsF.sig", [Convert]::ToBase64String([byte[]](@(0x30, $body.Length) + $body)))
+    Run-Case C3f $k1 1 'does not verify against any key embedded' -Env @{ ASSAY_RELEASE_BASE = "$base/c3f" }
+
     # C4: the archive is missing from a genuinely signed checksums file
     Copy-Item -Recurse (Join-Path $root 'v9.9.1') (Join-Path $root 'c4\v9.9.1')
     $sumsPath = Join-Path $root 'c4\v9.9.1\assay_9.9.1_checksums.txt'
@@ -196,15 +221,31 @@ try {
     foreach ($sh in $shells) {
         $edition = [IO.Path]::GetFileNameWithoutExtension($sh)
         $bin = Join-Path $tmp "bin-C9-$edition"
-        $cmd = "`$env:ASSAY_INSTALL_DIR='$bin'; `$env:ASSAY_RELEASE_BASE='$base'; `$env:ASSAY_ARCH='$arch'; " +
+        # The caller's own variables, its TLS setting and its function table
+        # must come out as they went in: iex runs the script in the caller's
+        # scope, so anything the installer leaves there is the caller's now.
+        $cmd = "`$Version='mine'; `$BinDir='mine'; `$Repo='mine'; `$tls0=[int][Net.ServicePointManager]::SecurityProtocol; " +
+            "`$env:ASSAY_INSTALL_DIR='$bin'; `$env:ASSAY_RELEASE_BASE='$base'; `$env:ASSAY_ARCH='$arch'; " +
             "Get-Content -Raw '$k1' | Invoke-Expression; 'after-good'; " +
-            "`$env:ASSAY_RELEASE_BASE='$base/c3b'; try { Get-Content -Raw '$k1' | Invoke-Expression } catch { 'caught: ' + `$_ }; 'session-alive'"
+            "`$env:ASSAY_RELEASE_BASE='$base/c3b'; try { Get-Content -Raw '$k1' | Invoke-Expression } catch { 'caught: ' + `$_ }; 'session-alive'; " +
+            "'leaks=[' + (@(`$Version, `$BinDir, `$Repo) -join ',') + '|' + (@(Get-Variable DefaultVersion, TrustedKeys -ErrorAction SilentlyContinue).Count) + '|' + " +
+            "(@(Get-Command Install-Assay, Get-AssayVerifier, ConvertFrom-AssayDerSignature, Write-AssayNote -ErrorAction SilentlyContinue).Count) + '|' + " +
+            "([int][Net.ServicePointManager]::SecurityProtocol -eq `$tls0) + ']'"
         $out = & $sh -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command $cmd 2>&1 | Out-String
         $exe = Join-Path $bin 'assay.exe'
-        if (-not (Test-Path $exe) -or -not $out.Contains('after-good') -or -not $out.Contains('does not verify') -or -not $out.Contains('session-alive')) {
+        if (-not (Test-Path $exe) -or -not $out.Contains('after-good') -or -not $out.Contains('does not verify') -or
+            -not $out.Contains('session-alive') -or -not $out.Contains('leaks=[mine,mine,mine|0|0|True]')) {
             Write-Host "FAIL C9 [$edition]:"; Write-Host ($out -replace '(?m)^', '    '); $fail = $true
         } else { Write-Host "ok   C9 [$edition] (piped install, refusal leaves the session)" }
     }
+
+    # C11: install.sh and install.ps1 install the same release by default.
+    # Render replaces $DefaultVersion in every other case, so this is the
+    # only check on the committed value; prepare-release.sh sets both.
+    $shVersion = [regex]::Match([IO.File]::ReadAllText((Join-Path $repo 'install.sh')), '(?m)^VERSION="(v[^"]+)"$').Groups[1].Value
+    $psVersion = [regex]::Match([IO.File]::ReadAllText($installer), "(?m)^\`$DefaultVersion = '(v[^']+)'$").Groups[1].Value
+    if (-not $shVersion -or $shVersion -ne $psVersion) { Write-Host "FAIL C11: install.sh VERSION '$shVersion', install.ps1 `$DefaultVersion '$psVersion'"; $fail = $true }
+    else { Write-Host "ok   C11 (both installers default to $psVersion)" }
 
     # C7: the installer contacts nothing but the release base
     if ([IO.File]::ReadAllText($installer).Contains('api.github.com')) { Write-Host 'FAIL C7: install.ps1 calls api.github.com'; $fail = $true }

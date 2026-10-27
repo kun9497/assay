@@ -961,7 +961,7 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       `db ref`, `db build --seed` 가 남는 인자를 exit 2 로 거부
 - [x] install.sh 와 같은 방식으로 검증하는 Windows 설치 스크립트 (D148) — PowerShell 5.1 과 7 용
       `install.ps1`, 체크섬 서명을 .NET 으로 내장 키에 대해 검증; 하네스가 windows-latest 에서 두
-      에디션 모두로 공격 경우 열다섯을 돌림
+      에디션 모두로 모든 공격 경우를 돌림
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨

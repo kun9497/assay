@@ -24,8 +24,16 @@
 # refusal is a terminating error, never `exit`, so a piped install that
 # refuses does not close the caller's PowerShell window.
 #
+# The whole script is one script block invoked with the script's own
+# arguments: `iex` runs text in the caller's scope, so a top-level param()
+# or assignment would overwrite the caller's $Version or $BinDir and leave
+# these functions defined in their session. Inside the block they are
+# local. Its lines are not indented, because the release tooling and the
+# harness find $DefaultVersion and the key block at the start of a line.
+#
 # ASCII only: Windows PowerShell 5.1 reads a script without a byte-order
 # mark in the system code page.
+& {
 param(
     [string]$BinDir = $env:ASSAY_INSTALL_DIR,
     [string]$Version = $env:ASSAY_VERSION
@@ -64,8 +72,13 @@ function ConvertFrom-AssayDerSignature([byte[]]$Der) {
         $i += 2
         $end = $i + $len
         if ($len -lt 1 -or $len -gt 33 -or $end -gt $Der.Length) { return $null }
+        # Canonical DER only, the encoding openssl (install.sh) and .NET's
+        # own reader accept: not negative, and a leading zero only where the
+        # next byte needs it.
+        if (($Der[$i] -band 0x80) -ne 0) { return $null }
+        if ($len -gt 1 -and $Der[$i] -eq 0 -and ($Der[$i + 1] -band 0x80) -eq 0) { return $null }
         $start = $i
-        while ($start -lt ($end - 1) -and $Der[$start] -eq 0) { $start++ }
+        if ($Der[$start] -eq 0 -and $len -gt 1) { $start++ }
         $n = $end - $start
         if ($n -gt 32) { return $null }
         [Array]::Copy($Der, $start, $out, ($half * 32) + 32 - $n, $n)
@@ -120,7 +133,6 @@ function Install-Assay([string]$BinDir, [string]$Version) {
     $pems = [regex]::Matches($TrustedKeys, '-----BEGIN PUBLIC KEY-----[\s\S]*?-----END PUBLIC KEY-----') | ForEach-Object { $_.Value }
     if (-not $pems) { throw 'assay: this installer embeds no trusted key; it is not a published copy -- refusing to install' }
 
-    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     $releaseBase = $env:ASSAY_RELEASE_BASE
     if (-not $releaseBase) { $releaseBase = "https://github.com/$Repo/releases/download" }
     # GoReleaser's archive names strip the leading 'v' from the version.
@@ -129,6 +141,13 @@ function Install-Assay([string]$BinDir, [string]$Version) {
     $sums = "assay_${ver}_checksums.txt"
     $base = "$releaseBase/$Version"
 
+    # TLS 1.2 is added only where the process pins an older list; the
+    # system default (0) already negotiates 1.2 or 1.3 and must stay the
+    # default. Process-wide, so it is put back afterwards either way.
+    $tls = [Net.ServicePointManager]::SecurityProtocol
+    if ([int]$tls -ne 0 -and ($tls -band [Net.SecurityProtocolType]::Tls12) -eq 0) {
+        [Net.ServicePointManager]::SecurityProtocol = $tls -bor [Net.SecurityProtocolType]::Tls12
+    }
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ('assay-install-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $tmp | Out-Null
     try {
@@ -188,6 +207,7 @@ function Install-Assay([string]$BinDir, [string]$Version) {
         New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
         Copy-Item -LiteralPath $exe -Destination (Join-Path $BinDir 'assay.exe') -Force
     } finally {
+        [Net.ServicePointManager]::SecurityProtocol = $tls
         Remove-Item -Recurse -Force -LiteralPath $tmp -ErrorAction SilentlyContinue
     }
 
@@ -204,3 +224,4 @@ function Install-Assay([string]$BinDir, [string]$Version) {
 }
 
 Install-Assay -BinDir $BinDir -Version $Version
+} @args
