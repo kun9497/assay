@@ -215,3 +215,49 @@ func TestVerify_AContextEndedMidFetchIsUnreadable(t *testing.T) {
 		t.Fatalf("err = %v, want ErrSignatureUnreadable", err)
 	}
 }
+
+// A registry error is a transport failure whatever its body says: a 503
+// whose text happens to read like ggcr's digest check is still unreadable.
+func TestVerify_ARegistryErrorQuotingADigestCheckIsUnreadable(t *testing.T) {
+	var path atomic.Value
+	host := trusttest.NewRegistry(t, func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if p, _ := path.Load().(string); r.Method == http.MethodGet && r.URL.Path == p {
+				http.Error(w, "error verifying Digest; does not match expected size", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	})
+	ref, d := trusttest.PushArtifact(t, host, "assay-db", "v14")
+	key := trusttest.NewKey(t)
+	trusttest.SignArtifact(t, key, ref, d)
+	path.Store("/v2/assay-db/blobs/" + sigLayerDigests(t, ref.Context(), d)[0].String())
+	_, err := Verify(context.Background(), ref.Context(), d, []PublicKey{keyOf(t, key)})
+	if !errors.Is(err, ErrSignatureUnreadable) {
+		t.Fatalf("err = %v, want ErrSignatureUnreadable", err)
+	}
+}
+
+// A blob served with a Content-Length other than the descriptor's size was
+// sent and is wrong, like a digest mismatch: invalid.
+func TestVerify_ABlobOfTheWrongSizeIsInvalid(t *testing.T) {
+	var path atomic.Value
+	host := trusttest.NewRegistry(t, func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if p, _ := path.Load().(string); r.Method == http.MethodGet && r.URL.Path == p {
+				_, _ = w.Write([]byte(`{"critical":{}}`))
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	})
+	ref, d := trusttest.PushArtifact(t, host, "assay-db", "v14")
+	key := trusttest.NewKey(t)
+	trusttest.SignArtifact(t, key, ref, d)
+	path.Store("/v2/assay-db/blobs/" + sigLayerDigests(t, ref.Context(), d)[0].String())
+	_, err := Verify(context.Background(), ref.Context(), d, []PublicKey{keyOf(t, key)})
+	if !errors.Is(err, ErrNoKeyVerifies) || errors.Is(err, ErrSignatureUnreadable) {
+		t.Fatalf("err = %v, want ErrNoKeyVerifies", err)
+	}
+}

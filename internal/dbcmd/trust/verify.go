@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"strings"
 
@@ -200,24 +199,33 @@ func verifyLayer(layer v1.Layer, annotations map[string]string, digest v1.Hash, 
 	return keyID, nil
 }
 
-// readFailure classifies a payload read error. Only a failure to fetch the
-// bytes -- the registry refusing or erroring (a transport.Error, after the
-// client's retries), the network, a stream cut short, a cancelled context
-// -- leaves the layer unchecked (errPayloadUnread). Anything else came from
-// bytes that did arrive, such as a blob that does not match its digest, and
-// is a wrong signature, not an unknown one.
+// readFailure classifies a payload read error. The layer is invalid only
+// when ggcr checked bytes the registry did send and they were wrong: a blob
+// that does not hash to its digest, or a size that is not the descriptor's.
+// Every other read error -- the registry refusing or erroring (after the
+// client's retries), the network, a stream cut short over HTTP/1 or reset
+// over HTTP/2, a cancelled context, or a failure of a kind not listed --
+// leaves the layer unchecked (errPayloadUnread). Defaulting to unread is
+// the safe side: an unread layer still refuses the install, and only keeps
+// a status page from announcing a signature outage it did not observe.
 //
-// The net.Error and context clauses overlap on the path tests can stage: a
-// fetch cut off by its context arrives as a *url.Error, which is a net.Error
-// and wraps context.Canceled, so dropping either clause alone is an
-// equivalent mutation (verified 2026-10-27); dropping both is caught. Both
-// stay, because a context error need not come wrapped in a url.Error.
+// A typed transport error is decided first, so a registry whose error body
+// happens to contain ggcr's wording is still a transport failure. ggcr's
+// checks are recognised by their messages because their types are in its
+// internal package; TestVerify_ABlobThatDoesNotMatchItsDigestIsInvalid
+// fails if an upgrade changes the wording.
 func readFailure(err error) error {
 	var terr *transport.Error
-	var nerr net.Error
-	if errors.As(err, &terr) || errors.As(err, &nerr) || errors.Is(err, io.ErrUnexpectedEOF) ||
-		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if errors.As(err, &terr) || !contentMismatch(err) {
 		return fmt.Errorf("read payload: %w: %w", errPayloadUnread, err)
 	}
 	return fmt.Errorf("read payload: %w", err)
+}
+
+// contentMismatch reports whether err is one of ggcr's checks of received
+// bytes (internal/verify: "error verifying Digest|Size|size|<algo> checksum";
+// remote/fetcher.go: a Content-Length that "does not match expected size").
+func contentMismatch(err error) bool {
+	s := err.Error()
+	return strings.Contains(s, "error verifying ") || strings.Contains(s, "does not match expected size")
 }
