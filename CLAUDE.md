@@ -81,8 +81,8 @@ is cataloged under its registry identity (D132); Ubuntu lineage and RPM module-b
 apply only to their own ecosystems (D133); a binary that shares its source's name is still
 judged on the source version (D134); both CSAF providers download the archive before consulting
 the delta and keep an archive copy newer than the delta's (D135); a CVE NVD returns without a
-score withdraws its seeded rating and `db push` tolerates exactly that drop (D136 — one
-`NVD_SINCE_DAYS=120` reconciliation build is still owed, see deferred-decisions); and
+score withdraws its seeded rating and `db push` tolerates exactly that drop (D136 — the one
+`NVD_SINCE_DAYS=120` reconciliation build ran 2026-10-27 and withdrew 90 stale ratings); and
 `--fail-on-epss=NaN` is refused at parse. Since D137 the published artifact is signed
 (cosign, key-based, by digest after every `db push`) and `db update` / `db build --seed`
 verify the signature against keys embedded in the binary (`internal/dbcmd/trust`) before

@@ -12,7 +12,14 @@ Read alongside the Architecture section of [the design doc](DESIGN.md).
 
 ## Deferred work
 
-### NVD ratings withdrawn before D136 are still in the published artifact — one reconciliation build
+### ~~NVD ratings withdrawn before D136 are still in the published artifact — one reconciliation build~~ — resolved 2026-10-27
+
+**Resolved 2026-10-27.** The reconciliation build ran as `db-backfill.yml` (`since_days=120`,
+`until_days=0`), run 40448217168. NVD returned 11,050 CVEs without a score in the window, and
+**90** stored ratings were withdrawn (`NVD: 90 stored rating(s) withdrawn on the source's word
+(D136)`). `db push` admitted exactly that drop, and the artifact
+(`sha256:b0920583c562…`) was signed and self-verified under `9b71ca8e11cf3bcf`; ratings now NVD
+391,806, EPSS 395,492, KEV 1,758. The entry below is kept as the record of why it was owed.
 
 **When: the next build someone can watch.** D136 (2026-10-22) made a CVE that NVD returns
 without a score withdraw its seeded rating. It cannot reach a rating NVD withdrew *before*
