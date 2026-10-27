@@ -1419,6 +1419,8 @@ C/C++는 신뢰할 만한 것을 남기지 않습니다. 지원 여부는 카테
 이슈와 PR을 환영합니다. 기능을 제안하기 전에
 [`docs/deferred-decisions.ko.md`](deferred-decisions.ko.md)를 확인해 주십시오 — 눈에 띄는
 빈틈은 대체로 의도된 것이고, 무엇이 그 결정을 바꿀 수 있는지가 적혀 있습니다.
+변경에 필요한 것은 [CONTRIBUTING.ko.md](../CONTRIBUTING.ko.md)에, 취약점을 비공개로 알리는
+방법은 [SECURITY.ko.md](../SECURITY.ko.md)에 있습니다.
 
 ## 고지
 

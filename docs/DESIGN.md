@@ -1482,6 +1482,8 @@ since been built and are kept there as resolved, with the decision that closed e
 Issues and PRs are welcome. Before proposing a feature, check
 [`docs/deferred-decisions.md`](deferred-decisions.md) — the obvious gaps are mostly
 deliberate, and it records what would change the decision.
+[CONTRIBUTING.md](../CONTRIBUTING.md) has what a change needs, and
+[SECURITY.md](../SECURITY.md) how to report a vulnerability privately.
 
 ## Disclaimer
 

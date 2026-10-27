@@ -268,6 +268,11 @@ confident answer about a scan that did not finish.
 The table colors severity on a real terminal only (D107: TTY + `NO_COLOR` empty + Windows
 VT actually enabled) — piped output is byte-identical, so the discipline survives colors.
 
+**Every change to the JSON report bumps `schemaVersion`** — an added optional field
+included, from schema 15 on (`docs/compatibility.md`, which tests hold to the constant).
+A bump updates that page's table and gets a CHANGELOG entry saying whether it is additive
+or breaking.
+
 **`run(args, stdout, stderr) int` is the testable seam** — `main()` only translates its
 return into `os.Exit`. New commands go in the `run` switch and take writers, never touching
 `os.Stdout` or `os.Exit` directly.
@@ -286,7 +291,8 @@ where false negatives originate.
 ## Documentation is bilingual
 
 Every document ships as a pair: `X.md` (English) and `X.ko.md` (Korean). Currently
-`README`, `docs/DESIGN`, `docs/deferred-decisions`, and the roadmap spec.
+`README`, `docs/DESIGN`, `docs/deferred-decisions`, `docs/compatibility`, `CHANGELOG`,
+`SECURITY`, `CONTRIBUTING`, and the roadmap spec.
 
 **English is canonical.** Decisions are written there first; the Korean version follows.
 When they disagree, English is correct and the Korean copy is stale.
