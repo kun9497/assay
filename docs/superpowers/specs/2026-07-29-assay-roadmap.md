@@ -6420,14 +6420,17 @@ fake releases signed with test keys and runs every case under both editions:
 - a version that is not a release tag;
 - a keyless copy;
 - the piped form, where the caller's variables, function table and TLS setting must come
-  out unchanged and a refusal leaves the session alive;
+  out unchanged and a refusal leaves the session alive, and a caller pinned to an old TLS
+  list gets it back;
 - `install.sh` and `install.ps1` defaulting to the same release;
 - no `api.github.com` call.
 
-CI runs it on windows-latest and fails if either edition is missing. Twelve mutations
-were run against `install.ps1`. P6, the SPKI header check, is an equivalent for every key
-the script carries, and the code says so. The rest are caught, two of them only after the
-padded-DER case and the review's cases were added. Run by hand against the real v0.11.0
+CI runs it on windows-latest and fails if either edition is missing. Nineteen mutations
+were run against `install.ps1` in two rounds. Two are equivalents, and the code says so: P6,
+the SPKI header check, for every key the script carries; and Q5, adding TLS 1.2
+unconditionally, which given the restore differs only during the script's own downloads.
+The rest are caught, four of them only after cases were added for them (padded DER, a
+redundant zero whatever the draw, the TLS restore). Run by hand against the real v0.11.0
 release, the script verified its cosign signature with the production key and installed
 `assay.exe` under 5.1 and 7. After the canonical-DER change, its own functions verified the
 same signature again under both editions.
