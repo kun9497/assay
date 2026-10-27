@@ -157,3 +157,74 @@ func TestInRange_A7_TheSentinelNeverOpensADegenerateWindow(t *testing.T) {
 		}
 	}
 }
+
+// Branch review wf_6ce5dff7-2de: a window taken out because its bounds
+// compare equal is not necessarily empty or one version. Bitnami's equality
+// is not transitive -- a bare "1.0.0" equals every revision of it, while
+// "1.0.0-1" sorts below "1.0.0-3" -- so [1.0.0, 1.0.0-3) holds 1.0.0-1.
+// Judging the taken-out window as "equal to its close" dropped that version
+// (a miss) and matched 1.0.0-1 against [1.0.0-3, 1.0.0] (a false positive).
+// The window is judged on both of its bounds instead.
+func TestInRange_A7_ATakenOutWindowIsJudgedOnBothBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		r                    advisory.Range
+		want                 bool
+		introduced, closedAt string
+		lastAffected         bool
+	}{
+		{"fixed above a bare open", rng(advisory.RangeEcosystem, intro("1.0.0"), fixed("1.0.0-3")), true, "1.0.0", "1.0.0-3", false},
+		{"last_affected above a bare open", rng(advisory.RangeEcosystem, intro("1.0.0"), lastAff("1.0.0-3")), true, "1.0.0", "1.0.0-3", true},
+		{"open above the version", rng(advisory.RangeEcosystem, intro("1.0.0-3"), lastAff("1.0.0")), false, "", "", false},
+	} {
+		got, ev, err := InRange(Bitnami{}, "1.0.0-1", tc.r)
+		if err != nil {
+			t.Fatalf("%s: error %v", tc.name, err)
+		}
+		if got != tc.want {
+			t.Errorf("%s: InRange(1.0.0-1) = %v, want %v", tc.name, got, tc.want)
+			continue
+		}
+		closed := ev.Fixed
+		if tc.lastAffected {
+			closed = ev.LastAffected
+		}
+		if tc.want && (ev.Introduced != tc.introduced || closed != tc.closedAt) {
+			t.Errorf("%s: evidence = introduced %q fixed %q last_affected %q, want [%s, %s]",
+				tc.name, ev.Introduced, ev.Fixed, ev.LastAffected, tc.introduced, tc.closedAt)
+		}
+	}
+}
+
+// The evidence for a taken-out window names the advisory's own bounds. Two
+// spellings of one version -- build metadata here -- must not be collapsed
+// into the close's (D10).
+func TestInRange_A7_ATakenOutWindowKeepsTheAdvisorysSpelling(t *testing.T) {
+	got, ev, err := InRange(SemVer{}, "1.0.0", rng(advisory.RangeSemver, intro("1.0.0+a"), lastAff("1.0.0+b")))
+	if err != nil || !got {
+		t.Fatalf("InRange = %v, %v; want true, nil", got, err)
+	}
+	if ev.Introduced != "1.0.0+a" || ev.LastAffected != "1.0.0+b" {
+		t.Errorf("evidence = introduced %q last_affected %q, want 1.0.0+a / 1.0.0+b", ev.Introduced, ev.LastAffected)
+	}
+}
+
+// An installed version that cannot be read is an error naming the target
+// (D9, D35), whether the range's only windows are taken out or walked: no
+// window may turn it into "not affected". Main reached the error through the
+// walk; with every window taken out, nothing else compares the version.
+func TestInRange_A7_AnUnreadableVersionErrorsWhenEveryWindowIsTakenOut(t *testing.T) {
+	for name, r := range map[string]advisory.Range{
+		"single-version": rng(advisory.RangeSemver, intro("1.0.0"), lastAff("1.0.0")),
+		"empty":          rng(advisory.RangeSemver, intro("1.0.0"), fixed("1.0.0")),
+	} {
+		got, _, err := InRange(SemVer{}, "not-a-version", r)
+		if err == nil {
+			t.Errorf("%s: InRange(not-a-version) = %v, nil; want an error", name, got)
+			continue
+		}
+		if CauseOf(err) != CauseTargetVersion {
+			t.Errorf("%s: cause = %v, want CauseTargetVersion: %v", name, CauseOf(err), err)
+		}
+	}
+}

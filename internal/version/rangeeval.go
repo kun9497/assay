@@ -132,7 +132,7 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 	// judged on its own (A7, D154): the sort orders a close before an open at
 	// the same version, which is what two windows meeting at a version need,
 	// and would turn [X,X) and [X,X] into windows that never close.
-	walked, points := splitDegenerate(c, r.Events)
+	walked, taken := splitDegenerate(c, r.Events)
 	events, err := sortEvents(c, walked)
 	if err != nil {
 		return false, Evidence{}, err
@@ -204,21 +204,42 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 		}
 	}
 
-	// The windows taken out above. An empty one [X,X) holds nothing; a
-	// single-version one [X,X] holds X. Consulted only when the walk found
-	// nothing, so a version inside an ordinary window keeps that window's
-	// evidence.
-	for _, x := range points {
+	// The windows taken out above, each judged on both of its own bounds.
+	// Bounds that compare equal usually make [X,X) empty and [X,X] one
+	// version, but not under every comparer: Bitnami's bare "1.0.0" equals
+	// every revision of it while "1.0.0-1" sorts below "1.0.0-3", so
+	// [1.0.0, 1.0.0-3) holds 1.0.0-1 (branch review wf_6ce5dff7-2de).
+	// Consulted only when the walk found nothing, so a version inside an
+	// ordinary window keeps that window's evidence; and when every window was
+	// taken out, this is what still compares v, so an unreadable installed
+	// version is an error here as it was in the walk.
+	for _, w := range taken {
 		if inside {
 			break
 		}
-		cmp, err := c.Compare(v, x)
+		ge, err := atLeast(c, v, w.open)
 		if err != nil {
-			return false, Evidence{}, unreadablePackageVersion(v, "last_affected", x, err)
+			return false, Evidence{}, err
 		}
-		if cmp == 0 {
+		if !ge {
+			continue
+		}
+		cmp, err := c.Compare(v, w.close)
+		if err != nil {
+			bound := "fixed"
+			if w.inclusive {
+				bound = "last_affected"
+			}
+			return false, Evidence{}, unreadablePackageVersion(v, bound, w.close, err)
+		}
+		if cmp < 0 || (w.inclusive && cmp == 0) {
 			inside = true
-			ev.Introduced, ev.Fixed, ev.LastAffected = x, "", x
+			ev.Introduced, ev.Fixed, ev.LastAffected = w.open, "", ""
+			if w.inclusive {
+				ev.LastAffected = w.close
+			} else {
+				ev.Fixed = w.close
+			}
 		}
 	}
 
@@ -228,10 +249,17 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 	return inside, ev, nil
 }
 
-// splitDegenerate takes out every window that closes at the version it opens
-// at, and returns the events left to walk and the versions of the
-// single-version windows ([X,X], introduced equal to last_affected). Empty
-// windows ([X,X), introduced equal to fixed) are dropped outright.
+// takenWindow is one window splitDegenerate took out of the walk, with the
+// advisory's own spelling of both bounds.
+type takenWindow struct {
+	open, close string
+	inclusive   bool // closed by last_affected rather than fixed
+}
+
+// splitDegenerate takes out every window whose close compares equal to its
+// open -- an empty [X,X) or a single-version [X,X] under a comparer whose
+// equality is transitive -- and returns the events left to walk and the
+// windows taken out, which InRange judges on their own bounds.
 //
 // A window is the run of events from one introduced to the next, in file
 // order, and its close is the first fixed or last_affected in that run --
@@ -250,7 +278,7 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 // anything else -- two closes before the next introduced, or a close below
 // its open -- which close pairs with the open is a guess, and the published
 // database held no tied range of that shape on 2026-10-27.
-func splitDegenerate(c Comparer, in []advisory.Event) (walk []advisory.Event, points []string) {
+func splitDegenerate(c Comparer, in []advisory.Event) (walk []advisory.Event, taken []takenWindow) {
 	drop := make([]bool, len(in))
 	for i, e := range in {
 		// The sentinel is negative infinity, not the version "0": PEP 440
@@ -271,9 +299,7 @@ func splitDegenerate(c Comparer, in []advisory.Event) (walk []advisory.Event, po
 			}
 			if cmp, err := c.Compare(e.Introduced, closeAt); err == nil && cmp == 0 {
 				drop[i], drop[j] = true, true
-				if in[j].Fixed == "" {
-					points = append(points, closeAt)
-				}
+				taken = append(taken, takenWindow{open: e.Introduced, close: closeAt, inclusive: in[j].Fixed == ""})
 			}
 			break
 		}
@@ -283,7 +309,7 @@ func splitDegenerate(c Comparer, in []advisory.Event) (walk []advisory.Event, po
 			walk = append(walk, e)
 		}
 	}
-	return walk, points
+	return walk, taken
 }
 
 // eventVersion returns whichever bound an event carries, or "" for an event
