@@ -253,9 +253,9 @@ func isSourcePURL(p pkgmeta.PURL) bool {
 // no binary carries.
 //
 // The source version is Source.Version, falling back to the binary's own
-// (D8's "empty means same as the binary"), except on rpm, where Source.Version
-// is the binary's EVR and the SRPM's own version is read off its file name
-// instead (rpmSourceVersions). An rpm document writes the epoch as a
+// (D8's "empty means same as the binary"), except on rpm, where the SRPM's own
+// version is read off its file name instead (rpmSourceVersions), the same way
+// for an image's package and an SBOM's (see there for why not Source.Version). An rpm document writes the epoch as a
 // qualifier, so it is joined to the version before comparing and left out of
 // the subset check.
 func sourcePatternMatches(doc pkgmeta.PURL, s subject) (matched, versionless bool) {
