@@ -228,3 +228,16 @@ func TestInRange_A7_AnUnreadableVersionErrorsWhenEveryWindowIsTakenOut(t *testin
 		}
 	}
 }
+
+// A taken-out window the sentinel opens compares the installed version only
+// against its close -- atLeast answers the sentinel without comparing -- so
+// that is where an unreadable version must surface.
+func TestInRange_A7_AnUnreadableVersionErrorsAtASentinelWindowsClose(t *testing.T) {
+	got, _, err := InRange(PEP440{}, "not a version!", rng(advisory.RangeEcosystem, intro("0"), fixed("0.0")))
+	if err == nil {
+		t.Fatalf("InRange = %v, nil; want an error", got)
+	}
+	if CauseOf(err) != CauseTargetVersion {
+		t.Errorf("cause = %v, want CauseTargetVersion: %v", CauseOf(err), err)
+	}
+}
