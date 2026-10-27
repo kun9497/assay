@@ -171,8 +171,14 @@ try {
     # openssl (install.sh) and .NET's own DER reader refuse it; so must this.
     Copy-Item -Recurse (Join-Path $root 'v9.9.1') (Join-Path $root 'c3e\v9.9.1')
     $sigPath = Join-Path $root 'c3e\v9.9.1\assay_9.9.1_checksums.txt.sig'
-    $der = [Convert]::FromBase64String([IO.File]::ReadAllText($sigPath))
-    $rLen = $der[3]; $sAt = 4 + $rLen; $sLen = $der[$sAt + 1]
+    # Re-signed until s carries no pad of its own, so the added zero makes
+    # it 33 bytes -- a length the parser accepts -- and only the
+    # redundant-zero rule can refuse it, whatever the draw.
+    do {
+        $der = $keys['key1'].SignData([IO.File]::ReadAllBytes(($sigPath -replace '\.sig$', '')), [Security.Cryptography.HashAlgorithmName]::SHA256,
+            [Security.Cryptography.DSASignatureFormat]::Rfc3279DerSequence)
+        $rLen = $der[3]; $sAt = 4 + $rLen; $sLen = $der[$sAt + 1]
+    } until ($sLen -eq 32)
     $r = $der[2..(3 + $rLen)]
     $s = [byte[]](@(0x02, ($sLen + 1), 0x00) + $der[($sAt + 2)..($sAt + 1 + $sLen)])
     $body = [byte[]]($r + $s)
@@ -237,6 +243,22 @@ try {
             -not $out.Contains('session-alive') -or -not $out.Contains('leaks=[mine,mine,mine|0|0|True]')) {
             Write-Host "FAIL C9 [$edition]:"; Write-Host ($out -replace '(?m)^', '    '); $fail = $true
         } else { Write-Host "ok   C9 [$edition] (piped install, refusal leaves the session)" }
+    }
+
+    # C9b: a caller whose process pins an old protocol list (here TLS 1.1)
+    # gets TLS 1.2 added for the install and its own list back afterwards.
+    # C9 cannot see this: there the list is SystemDefault, which the
+    # installer leaves alone.
+    foreach ($sh in $shells) {
+        $edition = [IO.Path]::GetFileNameWithoutExtension($sh)
+        $bin = Join-Path $tmp "bin-C9b-$edition"
+        $cmd = "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls11; " +
+            "`$env:ASSAY_INSTALL_DIR='$bin'; `$env:ASSAY_RELEASE_BASE='$base'; `$env:ASSAY_ARCH='$arch'; " +
+            "Get-Content -Raw '$k1' | Invoke-Expression; 'tls=[' + [Net.ServicePointManager]::SecurityProtocol + ']'"
+        $out = & $sh -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command $cmd 2>&1 | Out-String
+        if (-not (Test-Path (Join-Path $bin 'assay.exe')) -or -not $out.Contains('tls=[Tls11]')) {
+            Write-Host "FAIL C9b [$edition]:"; Write-Host ($out -replace '(?m)^', '    '); $fail = $true
+        } else { Write-Host "ok   C9b [$edition] (a pinned TLS list is restored)" }
     }
 
     # C11: install.sh and install.ps1 install the same release by default.

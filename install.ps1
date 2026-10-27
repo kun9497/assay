@@ -143,7 +143,9 @@ function Install-Assay([string]$BinDir, [string]$Version) {
 
     # TLS 1.2 is added only where the process pins an older list; the
     # system default (0) already negotiates 1.2 or 1.3 and must stay the
-    # default. Process-wide, so it is put back afterwards either way.
+    # default. Process-wide, so it is put back afterwards either way. (With
+    # the restore, adding 1.2 unconditionally would differ only during this
+    # script's own downloads -- an equivalent under mutation, not a gap.)
     $tls = [Net.ServicePointManager]::SecurityProtocol
     if ([int]$tls -ne 0 -and ($tls -band [Net.SecurityProtocolType]::Tls12) -eq 0) {
         [Net.ServicePointManager]::SecurityProtocol = $tls -bor [Net.SecurityProtocolType]::Tls12
