@@ -34,10 +34,16 @@ func bounded(t *testing.T, since time.Time, ratings int) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < ratings; i++ {
-		if err := w.PutRating(advisory.Rating{CVE: fmt.Sprintf("CVE-2026-%d", i), Source: "NVD"}); err != nil {
-			t.Fatal(err)
-		}
+	// One transaction for all of them. PutRating per rating is one bbolt
+	// commit and one fsync each, and on a Windows runner 7,249 of those took
+	// most of the package's ten-minute budget (2026-10-27: main and a PR
+	// both timed out inside this helper).
+	rs := make([]advisory.Rating, ratings)
+	for i := range rs {
+		rs[i] = advisory.Rating{CVE: fmt.Sprintf("CVE-2026-%d", i), Source: "NVD"}
+	}
+	if err := w.PutRatings(rs); err != nil {
+		t.Fatal(err)
 	}
 	if err := w.SetMeta(store.Meta{
 		BuiltAt:   time.Date(2026, 8, 4, 6, 0, 0, 0, time.UTC),
