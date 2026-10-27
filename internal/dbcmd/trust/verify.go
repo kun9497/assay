@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 
@@ -45,6 +46,18 @@ var (
 	// ErrNoKeyVerifies: a signature tag exists and no layer of it verifies
 	// under any trusted key with a payload that binds the pulled digest.
 	ErrNoKeyVerifies = errors.New("no signature verified under a trusted key")
+	// ErrSignatureUnreadable: a signature tag exists, no layer verified,
+	// and at least one layer's payload could not be fetched -- so whether
+	// the artifact is validly signed is not known. Neither ErrNotSigned
+	// (the tag is there) nor ErrNoKeyVerifies (an unread layer was never
+	// checked): a caller treats it as the transport failure it is, which
+	// keeps --allow-unsigned out of reach and a status page from
+	// publishing signed:false over a registry hiccup.
+	ErrSignatureUnreadable = errors.New("signature could not be read")
+
+	// errPayloadUnread marks a verifyLayer failure that happened before
+	// anything was checked: the payload never arrived.
+	errPayloadUnread = errors.New("payload not read")
 )
 
 // SigTag is cosign's tag for a digest's signature.
@@ -60,7 +73,9 @@ func SigTag(digest v1.Hash) string {
 // PayloadType, and names digest as the signed manifest. The first layer to
 // pass accepts; on total failure the error lists every layer's reason,
 // because cosign appends a layer on re-sign and a diagnostic that stopped at
-// the first would hide the one that mattered.
+// the first would hide the one that mattered. That failure is
+// ErrSignatureUnreadable when some layer's payload could not be fetched
+// (that layer might have verified), else ErrNoKeyVerifies.
 func Verify(ctx context.Context, repo name.Repository, digest v1.Hash, keys []PublicKey, opts ...remote.Option) (string, error) {
 	tag := repo.Tag(SigTag(digest))
 	// ctx reaches the registry through the options; appended last so a
@@ -105,15 +120,22 @@ func Verify(ctx context.Context, repo name.Repository, digest v1.Hash, keys []Pu
 	}
 
 	var reasons []string
+	unread := false
 	for i, layer := range layers {
 		id, err := verifyLayer(layer, manifest.Layers[i].Annotations, digest, keys)
 		if err == nil {
 			return id, nil
 		}
+		if errors.Is(err, errPayloadUnread) {
+			unread = true
+		}
 		reasons = append(reasons, fmt.Sprintf("layer %d: %v", i, err))
 	}
 	if len(reasons) == 0 {
 		reasons = append(reasons, "no layers")
+	}
+	if unread {
+		return "", fmt.Errorf("%w (%s): %s", ErrSignatureUnreadable, tag, strings.Join(reasons, "; "))
 	}
 	return "", fmt.Errorf("%w (%s): %s", ErrNoKeyVerifies, tag, strings.Join(reasons, "; "))
 }
@@ -141,12 +163,12 @@ func verifyLayer(layer v1.Layer, annotations map[string]string, digest v1.Hash, 
 	}
 	rc, err := layer.Compressed()
 	if err != nil {
-		return "", fmt.Errorf("read payload: %w", err)
+		return "", readFailure(err)
 	}
 	defer rc.Close()
 	raw, err := io.ReadAll(io.LimitReader(rc, MaxPayloadBytes+1))
 	if err != nil {
-		return "", fmt.Errorf("read payload: %w", err)
+		return "", readFailure(err)
 	}
 	if len(raw) > MaxPayloadBytes {
 		return "", fmt.Errorf("payload exceeds the %d-byte cap", MaxPayloadBytes)
@@ -176,4 +198,20 @@ func verifyLayer(layer v1.Layer, annotations map[string]string, digest v1.Hash, 
 		return "", fmt.Errorf("signed digest %s is not the pulled digest %s", p.Critical.Image.Digest, digest)
 	}
 	return keyID, nil
+}
+
+// readFailure classifies a payload read error. Only a failure to fetch the
+// bytes -- the registry refusing or erroring (a transport.Error, after the
+// client's retries), the network, a stream cut short, a cancelled context
+// -- leaves the layer unchecked (errPayloadUnread). Anything else came from
+// bytes that did arrive, such as a blob that does not match its digest, and
+// is a wrong signature, not an unknown one.
+func readFailure(err error) error {
+	var terr *transport.Error
+	var nerr net.Error
+	if errors.As(err, &terr) || errors.As(err, &nerr) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("read payload: %w: %w", errPayloadUnread, err)
+	}
+	return fmt.Errorf("read payload: %w", err)
 }
