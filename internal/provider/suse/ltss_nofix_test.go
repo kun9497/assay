@@ -155,3 +155,51 @@ func TestConvert_D149_SLENotAffectedDoesNotCompete(t *testing.T) {
 			a.Ranges, st.LTSSFixReplacedMainlineNoFix, st.SkippedLTSSShadowedByMainline)
 	}
 }
+
+// D149 is an SLE-key change only. Leap never ships an LTSS build, so the
+// Leap passes (D108 mirror, D125, D128) see the SLE entry as it was before:
+// no fix. The branch review (wf_18101bb4-1e1) found the replaced key
+// mirroring the LTSS fix onto Leap 15.6 over SUSE's own known_not_affected
+// there -- a new false positive on every Leap 15.6 image with the package.
+func TestConvert_D149_LeapStillSeesTheMainlineNoFix(t *testing.T) {
+	sp6, ltss, leap := "SUSE Linux Enterprise Server 15 SP6", "SUSE Linux Enterprise Server 15 SP6-LTSS", "openSUSE Leap 15.6"
+	pkgs := map[string]string{
+		"libtiff6":                    "pkg:rpm/suse/libtiff6@?upstream=tiff.src.rpm",
+		"libtiff6-4.5.0-150600.3.9.1": "pkg:rpm/suse/libtiff6@4.5.0-150600.3.9.1?upstream=tiff-4.5.0-150600.3.9.1.src.rpm",
+	}
+	t.Run("Leap not-affected still declines the mirror (D125)", func(t *testing.T) {
+		d := buildDocWith(t, "CVE-2025-61144", []string{sp6, ltss, leap}, pkgs,
+			[]string{ltss + ":libtiff6-4.5.0-150600.3.9.1"}, []string{sp6 + ":libtiff6"}, []string{leap + ":libtiff6"}, nil)
+		var st stats
+		adv, _ := convert(d, &st)
+		if a, ok := affectedByName(adv)["openSUSE Leap:15.6/libtiff6"]; ok {
+			t.Errorf("Leap 15.6 libtiff6 = %+v, want no entry: SUSE says it is not affected there", a)
+		}
+		if st.SkippedLeapNotAffected != 1 {
+			t.Errorf("SkippedLeapNotAffected = %d, want 1", st.SkippedLeapNotAffected)
+		}
+		if s := affectedByName(adv)["SLES:15.SP6/libtiff6"]; len(s.Ranges) != 1 || len(s.Ranges[0].Events) != 2 {
+			t.Errorf("SLE key = %+v, want the LTSS fix", s.Ranges)
+		}
+	})
+	t.Run("the mirror carries the no-fix, not the LTSS build (D108)", func(t *testing.T) {
+		d := buildDocWith(t, "CVE-2025-61145", []string{sp6, ltss, leap}, pkgs,
+			[]string{ltss + ":libtiff6-4.5.0-150600.3.9.1"}, []string{sp6 + ":libtiff6"}, nil, nil)
+		var st stats
+		adv, _ := convert(d, &st)
+		a := affectedByName(adv)["openSUSE Leap:15.6/libtiff6"]
+		if len(a.Ranges) != 1 || len(a.Ranges[0].Events) != 1 {
+			t.Errorf("Leap 15.6 libtiff6 = %+v, want the mirrored no-fix range", a.Ranges)
+		}
+	})
+	t.Run("a native Leap no-fix is not given the LTSS build (D128)", func(t *testing.T) {
+		d := buildDocWith(t, "CVE-2025-61146", []string{sp6, ltss, leap}, pkgs,
+			[]string{ltss + ":libtiff6-4.5.0-150600.3.9.1"}, []string{sp6 + ":libtiff6", leap + ":libtiff6"}, nil, nil)
+		var st stats
+		adv, _ := convert(d, &st)
+		a := affectedByName(adv)["openSUSE Leap:15.6/libtiff6"]
+		if len(a.Ranges) != 1 || len(a.Ranges[0].Events) != 1 || st.LeapNoFixReplacedBySLEFix != 0 {
+			t.Errorf("Leap 15.6 libtiff6 = %+v (D128 %d), want its own no-fix range kept", a.Ranges, st.LeapNoFixReplacedBySLEFix)
+		}
+	})
+}
