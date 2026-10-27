@@ -155,6 +155,18 @@ try {
     [IO.File]::WriteAllText((Join-Path $root 'c3c\v9.9.1\assay_9.9.1_checksums.txt.sig'), [Convert]::ToBase64String([byte[]](1..70)))
     Run-Case C3c $k1 1 'does not verify against any key embedded' -Env @{ ASSAY_RELEASE_BASE = "$base/c3c" }
 
+    # C3d: the genuine signature with a byte after s inside its SEQUENCE.
+    # r and s still verify, so only the encoding check refuses it: the
+    # installer accepts exactly the DER cosign writes, nothing looser.
+    Copy-Item -Recurse (Join-Path $root 'v9.9.1') (Join-Path $root 'c3d\v9.9.1')
+    $sigPath = Join-Path $root 'c3d\v9.9.1\assay_9.9.1_checksums.txt.sig'
+    $der = [Convert]::FromBase64String([IO.File]::ReadAllText($sigPath))
+    $padded = New-Object byte[] ($der.Length + 1)
+    [Array]::Copy($der, $padded, $der.Length)
+    $padded[1] = [byte]($der[1] + 1)
+    [IO.File]::WriteAllText($sigPath, [Convert]::ToBase64String($padded))
+    Run-Case C3d $k1 1 'does not verify against any key embedded' -Env @{ ASSAY_RELEASE_BASE = "$base/c3d" }
+
     # C4: the archive is missing from a genuinely signed checksums file
     Copy-Item -Recurse (Join-Path $root 'v9.9.1') (Join-Path $root 'c4\v9.9.1')
     $sumsPath = Join-Path $root 'c4\v9.9.1\assay_9.9.1_checksums.txt'

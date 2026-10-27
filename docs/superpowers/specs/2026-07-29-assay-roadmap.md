@@ -6400,11 +6400,11 @@ refusal. The script is ASCII only, because 5.1 reads a script without a byte-ord
 the system code page (cp949 on the machine it was written on).
 
 **Verified.** `scripts/install_test.ps1` is the counterpart of `install_test.sh`. It serves
-fake releases signed with test keys and runs thirteen cases under both editions: a clean
+fake releases signed with test keys and runs fifteen cases under both editions: a clean
 install with the installed bytes checked; a tampered zip; rewritten assets with a stale
 signature; a deleted signature, refused by its own guard; an attacker's key; a signature
-that is not DER; an archive missing from a signed checksums file; a temp path with a space;
-key rotation both ways; a keyless copy; the piped form, where a refusal leaves the session
+that is not DER, and a genuine one with a byte added inside its DER; an archive missing from a signed checksums file; a temp path with a space;
+key rotation both ways; a version that is not a release tag; a keyless copy; the piped form, where a refusal leaves the session
 alive; and no `api.github.com` call. CI runs it on windows-latest and fails if either
 edition is missing. Run by hand against the real v0.11.0 release, the script verified its
 cosign signature with the production key and installed `assay.exe` under 5.1 and 7.

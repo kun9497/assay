@@ -85,6 +85,9 @@ function Get-AssayVerifier([string]$Pem) {
     $header = '3059301306072a8648ce3d020106082a8648ce3d030107034200'
     if ($spki.Length -ne 91) { return $null }
     $got = -join ($spki[0..25] | ForEach-Object { $_.ToString('x2') })
+    # Equivalent under mutation for every key this script carries (all are
+    # P-256, and no other curve's SPKI is 91 bytes with the point at 26);
+    # kept so a wrong key added to the block is refused, not misread.
     if ($got -ne $header -or $spki[26] -ne 0x04) { return $null }
     $blob = New-Object byte[] 72
     [Array]::Copy([BitConverter]::GetBytes([uint32]0x31534345), 0, $blob, 0, 4) # BCRYPT_ECDSA_PUBLIC_P256_MAGIC
