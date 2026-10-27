@@ -6579,47 +6579,56 @@ was added.
 
 **Decision.** D91's tie-break keeps a mainline entry over its LTSS twin for the same release and
 package only when the mainline entry carries a fixed version. When the mainline side says only
-"affected", the LTSS fix replaces that range. This covers a `known_affected` entry, or a
-`recommended` entry with no version to compare, which `store` already reads as affected. The
+"affected", the LTSS fix replaces that range on the SLE key. This covers a `known_affected` entry,
+or a `recommended` entry with no version to compare, which `store` already reads as affected. The
 key then carries the fix and no "affected at every version" range beside it, which would still
 match the fixed build. An LTSS entry with no version of its own is still shadowed. An SLE
 `known_not_affected` is still not stored (D125 reads that bucket for Leap only), so it neither
 competes with nor blocks an LTSS fix, as before. A replaced no-fix range's stated reason
-(no_fix_planned on the EOL'd product, usually) goes with it, counted as D128 counts its own.
-Two counters print on the sync line: `LTSSFixReplacedMainlineNoFix` and
+(usually no_fix_planned on the EOL'd product) goes with it, and the drop is counted as D128
+counts its own. Two counters print on the sync line: `LTSSFixReplacedMainlineNoFix` and
 `LTSSFixReplacedWithReason`.
 
-**Why.** The 2026-10-22 audit (A5). After SLES 15 SP6 left general support, SUSE's documents
-keep the EOL'd product in `known_affected` beside the SP6-LTSS recommended fix. D91 had assumed
-the shadow case was fix against fix. In this shape it dropped the only fix, so an SP6-LTSS
-image with `php8-8.2.35-150600.3.39.1` (the fix) installed was reported "affected, no fix
+**SLE keys only.** Leap never ships an LTSS build. The Leap passes (the D108 mirror, D125 and
+D128) therefore read a replaced key through `leapView`, which gives the entry as it was before
+this decision: the mainline no-fix range with its stated reason. The first version let the LTSS
+fix cross. That lifted D125's decline over SUSE's own Leap `known_not_affected` and flagged every
+Leap image with the package (branch review wf_18101bb4-1e1, cve-2025-61144's libtiff6 shape).
+
+**Why.** The 2026-10-22 audit (A5). When a service pack leaves general support, SUSE's documents
+keep the EOL'd product in `known_affected` beside the SP-LTSS recommended fix. D91 had assumed the
+shadow case was fix against fix. In this shape it dropped the only fix, so an LTSS image with
+the fix installed (`php8-8.2.35-150600.3.39.1` on 15 SP6) was reported "affected, no fix
 available". The audit found 167 such shapes in the 400 most recent documents. D91 cited grype's
 vunnel as using the identical rule. That is vunnel's legacy OVAL path, now off by default. Its
 CSAF parser (default since 2026-09-23, `_borrow_ltss_fixes_into_plain`, vunnel `3dd80d6`)
-does what this decision does: a plain no-fix, declared won't-fix included, is overwritten by the
-LTSS fix, and a plain real fix wins. It differs in one place: a plain "not affected" outranks
-the LTSS fix there, while assay does not store SLE not-affected at all (pinned by
+does what this decision does on the SLE side: a plain no-fix, declared won't-fix included, is
+overwritten by the LTSS fix, and a plain real fix wins. One difference: a plain "not affected"
+outranks the LTSS fix there, while assay does not store SLE not-affected at all (pinned by
 `TestConvert_D149_SLENotAffectedDoesNotCompete`).
 
-**Measured.** SUSE's live CSAF archive and delta on 2026-10-27, 72,934 documents, converted
-with and without this change:
+**Measured.** SUSE's live CSAF archive and delta on 2026-10-27, 72,934 documents, converted with
+and without this change:
 - 14,731 mainline no-fix entries now carry their LTSS twin's fix, 5 of them with a stated reason
-  dropped;
-- D91's shadow counter fell by exactly that number, from 583,925 to 569,194;
-- entries with no fix available fell from 765,479 to 750,613 (−14,866), the extra 135 being
-  Leap keys whose D128 replacement now finds an SLE fix;
-- ranges with a fix rose by 21,369, the difference reaching Leap keys through the D108 mirror.
+  dropped. By key: SLES 12 SP5 4,895, 15 SP5 2,822, 15 SP6 2,469, 15 SP4 2,124, 12 SP4 1,477,
+  12 SP2 619, 15 SP1 143, 15 SP3 119, 15 SP2 61, and 1 each on 11 SP1 and 12 SP3. It is every
+  service pack with an LTSS track, not SP6 alone.
+- D91's shadow counter fell by exactly that number, from 583,925 to 569,194.
+- Entries with no fix available fell by exactly that number too, from 765,479 to 750,748, and
+  ranges with a fix rose by it.
+- Every Leap counter (D108 mirrored, native-wins, D125, D128) is identical with and without the
+  change.
 
-**Gives up.** A Leap 15.6 key, or a non-LTSS SP6 host, now reads "fixed in" an LTSS build that
-its own channel does not ship. The verdict does not change: the installed build is below the
-fix, as it was below "every version". Only the claim of a fix being available does, the same
-trade vunnel's README states ("We would rather sometimes advertise a fix that turns out to be
-paywalled than emit that false negative").
+**Gives up.** A host on the same service pack without an LTSS subscription now reads "fixed in"
+an LTSS build its channel does not ship. The verdict does not change: its installed build is
+below that fix, as it was below "every version". Only the claim that a fix is available
+changes. vunnel's README states the same trade: "We would rather sometimes advertise a fix
+that turns out to be paywalled than emit that false negative." Leap is not affected by this.
 
 **Verified.** Through `convert`, with the archive's own shapes:
 - a mainline `known_affected` beside an LTSS fix gives exactly one fixed range;
 - with `no_fix_planned` on the mainline side, the dropped reason is counted and no won't-fix
-  remains;
+  remains on the SLE key;
 - LTSS and mainline both no-fix stays shadowed;
 - a versionless mainline `recommended` yields;
 - a versionless LTSS `recommended` does not replace;
@@ -6627,8 +6636,16 @@ paywalled than emit that false negative").
 - D91's own test (a mainline fix shadows the LTSS one) still holds;
 - the progress line names both counters.
 
-Nine mutations: eight caught. The ninth drops the reason-category test, an equivalent because
-`remedy` holds only those two categories; the code says so.
+On the Leap side, for a replaced key:
+- a Leap `known_not_affected` still declines the mirror;
+- the mirror carries the no-fix range, with the mainline's won't-fix;
+- a native Leap no-fix is not given the LTSS build.
+
+Mutation testing:
+- Against the SLE rule, nine mutations: eight caught, and one, dropping the reason-category
+  test, is an equivalent because `remedy` holds only those two categories. The code says so.
+- Against `leapView`, six: five caught, and the sixth broke the build and is the same path as
+  the second.
 
 ---
 

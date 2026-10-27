@@ -971,8 +971,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       버전이 아니라 nodejs 버전으로 판정; Red Hat 실제 CVE-2023-23920 이 더 이상 수정된 npm 을
       걸지 않음
 - [x] LTSS 수정이 mainline 의 수정 없음 항목에 가려지지 않고 그것을 대체 (D149, D91 수정, 감사
-      A5) — 일반 지원이 끝난 SLES 15 SP6: 실제 아카이브에서 14,731 개 항목이 이제 LTSS 수정을
-      가짐, vunnel 의 CSAF 파서와 같음
+      A5) — LTSS 트랙이 있는 모든 SP(12 SP5 4,895, 15 SP6 2,469 …): 실제 아카이브에서 SLE 항목
+      14,731 개가 이제 LTSS 수정을 가짐, vunnel 의 CSAF 파서와 같음; Leap 키는 그대로
+      (`leapView`)
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨

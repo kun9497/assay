@@ -8,10 +8,11 @@
 ## [Unreleased]
 
 ### Fixed
-- 일반 지원이 끝난 SLES 15 SP6: SUSE가 mainline 제품을 수정 없는 영향받음으로, SP6-LTSS를 수정됨으로
-  적을 때 LTSS 수정을 유지합니다. 이전에는 그 수정이 버려져, 수정이 설치된 LTSS 이미지가 "영향받음,
-  수정 없음"으로 스캔되었습니다(2026-10-27 아카이브에서 14,731개 항목). 데이터베이스 쪽 변경이라 병합
-  뒤의 야간 빌드부터 `db update`로 전달됩니다. (D149, D91 수정)
+- 일반 지원이 끝난 SLES 서비스 팩(12 SP5, 15 SP4–SP6 등 LTSS 트랙이 있는 것): SUSE가 mainline 제품을
+  수정 없는 영향받음으로, SP-LTSS 제품을 수정됨으로 적을 때 LTSS 수정을 유지합니다. 이전에는 그 수정이
+  버려져, 수정이 설치된 LTSS 이미지가 "영향받음, 수정 없음"으로 스캔되었습니다(2026-10-27 아카이브에서
+  14,731개 항목). openSUSE Leap 결과는 바뀌지 않습니다. 데이터베이스 쪽 변경이라 병합 뒤의 야간
+  빌드부터 `db update`로 전달됩니다. (D149, D91 수정)
 - SPDX SBOM에서 `GENERATES` / `GENERATED_FROM` 관계로 source에 연결된 바이너리 rpm은 source
   이름으로 조회할 때 source의 버전으로 판정됩니다. 이전에는 npm을 nodejs의 수정 버전과 비교해
   (Red Hat CVE-2023-23920에서 수정된 npm에 대한 오탐), Fedora mod_ssl의 epoch이 httpd 수정을
