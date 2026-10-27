@@ -317,6 +317,11 @@ func isPubkey(h header) bool {
 // comes from the SRPM. A SOURCERPM that does not parse leaves the binary's
 // EVR in place.
 func ResolveSourceVersions(pkgs []pkgmeta.Package) {
+	// First seen per name. Packages sharing a name come from one spec
+	// (multilib pairs, several kernels) and so share its epoch: keeping the
+	// first rather than the last is an equivalent mutation on any real
+	// rpmdb (verified 2026-10-27), kept only so the result never depends on
+	// which copy came last.
 	epochOf := make(map[string]string, len(pkgs))
 	for _, p := range pkgs {
 		if _, seen := epochOf[p.Name]; !seen {

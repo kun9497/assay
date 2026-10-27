@@ -12,7 +12,7 @@ import (
 func TestResolveSourceVersions_UnparsableSourceRPMKeepsTheBinaryEVR(t *testing.T) {
 	pkgs := []pkgmeta.Package{
 		{Name: "odd", Version: "2:1.0-1", Upstream: "not-a-source-rpm", Source: &pkgmeta.SourcePackage{Name: "odd", Version: "2:1.0-1"}},
-		{Name: "bare", Version: "1.0-1"},
+		{Name: "bare", Version: "1.0-1", Upstream: "bare-1.0-1.src.rpm"},
 	}
 	ResolveSourceVersions(pkgs)
 	if got := pkgs[0].Source.Version; got != "2:1.0-1" {
