@@ -72,8 +72,38 @@ carries the full design and the reasoning behind each decision.
 vulnerability database, and matching the two. In the anchore ecosystem those are three
 separate projects — `syft`, `vunnel` + `grype-db`, and `grype`.
 
-**This is a personal project, built to learn how a vulnerability scanner works by building
-one end to end.** Existing scanners are excellent and battle-tested; use them in production.
+**What a scan does not cover.** Read this before relying on a clean result. Each limit is
+deliberate and recorded with what would change it. Some are announced by the scan they
+affect (the first three below); the rest hold for every scan and are stated only here.
+
+- **Application packages inside an image** (D70). An image scan checks the operating-system
+  packages (and Bitnami's `/opt/bitnami` markers), not npm, Python, Java or Go-binary packages
+  installed in the image. Scan the application's lockfile, directory or binary, or an SBOM
+  of the image, for those. [Recorded here](deferred-decisions.md#application-packages-inside-container-images).
+- **Releases the upstream stopped publishing** (D110). Debian 11 has been frozen since
+  2026-08-19: the last advisories are kept rather than dropped, findings on it are marked,
+  and new CVEs reach it only if the upstream still publishes them.
+- **Vendor lineages.** Ubuntu Pro (ESM/FIPS) and Oracle Ksplice/FIPS builds are reported as
+  not evaluated rather than judged against mainline data (D53, D79, D142). RHEL hosts on
+  EUS/AUS/TUS/E4S are checked against mainline errata, which over-alarms in most measured
+  cases and under-alarms in about 1.3%; a stderr note says so (D47).
+- **KISA's Korean notices are not in the published database** (D29). KISA's terms permit
+  scanning with the data, not redistributing it, so they appear only in a database built
+  with `assay db build`, and even then they only describe findings, never add them.
+- **No CPE matching** (D27). Matching is by package identity (purl or ecosystem, name and
+  version). Software with no package-manager identity is not matched; NVD contributes
+  ratings, not matches.
+- **One platform per run, and no Docker daemon source** (D119). A multi-platform image is
+  scanned for the host's platform or the one `--platform` names; an image that exists only
+  in a local daemon is scanned after `docker save`, as `docker-archive:`.
+- **OS packages in an SBOM need their distro release.** A CycloneDX operating-system
+  component, a `distro=` purl qualifier or Red Hat's `repository_id` is enough; without any,
+  they are listed as not evaluated.
+- **Eight language ecosystems**: Go, npm, PyPI, crates.io, Maven, RubyGems, NuGet and
+  Packagist. A component of any other type in an SBOM is counted in the report as an
+  unsupported ecosystem.
+- **Malicious-package reports** (`MAL-*`) are not ingested (D15). Use a supply-chain malware
+  tool for that class.
 
 It started out aimed at Korean advisory data — KISA/KNVD as a first-class provider. The
 first investigation said that was not viable; it had measured the wrong board. KNVD's own
@@ -137,8 +167,10 @@ assay scan alpine:3.19
 docker save alpine:3.19 -o alpine.tar && assay scan docker-archive:alpine.tar
 skopeo copy docker://alpine:3.19 oci:layout && assay scan oci-dir:layout
 
-# Scan a CycloneDX SBOM (Go, npm, PyPI, Alpine)
+# Scan an SBOM (CycloneDX, or SPDX 2.2/2.3 JSON), a Go binary, or a source tree
 assay scan sbom.cdx.json
+assay scan ./bin/app
+assay scan ./my-project
 ```
 
 `assay db update`, `assay db build` and `assay db push` are the only three commands that
@@ -155,14 +187,17 @@ assay scan alpine:3.19                # a registry reference
 assay scan docker-archive:app.tar     # a `docker save` tarball
 assay scan oci-dir:./layout           # an OCI layout directory
 assay scan sbom.cdx.json              # a CycloneDX SBOM
+assay scan sbom.spdx.json             # an SPDX 2.2/2.3 JSON SBOM
 assay scan ./bin/assay                # a Go binary
-assay scan ./my-project               # a directory with a go.mod
+assay scan ./my-project               # a directory: its lockfiles and jars
 assay scan ./app.jar                  # a Java archive (identity from pom.properties)
 ```
 
 A bare path is classified by **content**: a directory if it is one, a Go binary if
-`debug/buildinfo` can read it, a CycloneDX document if it has a top-level `bomFormat`. A file
-that is none of those is an error naming all three, never a silent guess. Anything that is
+`debug/buildinfo` can read it, a jar if it is a zip archive named `.jar`/`.war` or holding a
+`META-INF/` entry, a CycloneDX document if it has a top-level `bomFormat`, an SPDX one if it
+has a top-level `spdxVersion`. A file that is none of those is an error naming the four file
+kinds and the prefixes that override them, never a silent guess. Anything that is
 not a path at all is a registry reference.
 
 The prefixes `file:`, `dir:` and `sbom:` override the sniff, alongside `docker-archive:` and
@@ -181,7 +216,7 @@ vulnerability database holds 159 advisories against.
 
 A **directory** scan reads every lockfile it finds — `go.mod`, `package-lock.json`,
 `npm-shrinkwrap.json`, `yarn.lock` (v1), `poetry.lock`, `Pipfile.lock`, `uv.lock`, `Cargo.lock`,
-`Gemfile.lock`, `composer.lock` and `packages.lock.json` — with the standard library and no
+`Gemfile.lock`, `composer.lock` and `packages.lock.json`, plus `requirements.txt` — with the standard library and no
 `go`, `npm`, `pip`, `uv` or `cargo` invocation, so it works offline and needs no toolchain.
 
 Every `*.jar`/`*.war` found in the tree is read too — identity from its `pom.properties`
@@ -190,10 +225,11 @@ never guessed from its filename.
 
 It walks subdirectories, so a `frontend/package-lock.json` is found, skipping `node_modules`,
 `vendor` and `.git` and stopping at six levels down. **Every manifest it recognizes but does
-not read is named, with the reason** — `requirements.txt` is not a lockfile (`Django>=3.2` is
-a constraint, not a version, and matching a range against advisory ranges would quietly
-answer "not vulnerable" for anything unpinned), and a lockfile that fails to parse says so
-rather than disappearing.
+not read is named, with the reason**, and so is every line it cannot use: `requirements.txt`
+is read only for lines that pin exactly one version (D38), because `Django>=3.2` is a
+constraint, not a version, and matching a range against advisory ranges would quietly answer
+"not vulnerable" for anything unpinned. A lockfile that fails to parse says so rather than
+disappearing.
 
 `pnpm-lock.yaml` and yarn berry lockfiles are read since D103 (they were recognized and
 refused by name from D61, when reading them would have cost a YAML dependency — D102's
@@ -330,9 +366,32 @@ run `assay db update` rather than silently fetching or silently reporting nothin
 
 Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v9` component
 is the schema version — a schema change rebuilds into a new directory rather than migrating
-in place. Note that `ASSAY_DB_DIR` carries no such component, so a CI cache keyed on that
-path survives an upgrade that should have invalidated it. Rebuild after upgrading, or key
-the cache on the assay version.
+in place. `ASSAY_DB_DIR` carries no such component, so a CI cache keyed on that path alone
+survives an upgrade that changed the schema. Nothing is misread when it does: a binary that
+meets a database of another schema exits 2 and says to run `assay db update`. But the cache
+then fails every run until it expires. Key it on `assay db ref` instead, which prints the
+tag for the schema the installed binary reads, plus the day, so the cache follows both the
+schema and the nightly publish:
+
+```yaml
+- name: Name the database cache
+  id: assaydb
+  shell: bash
+  run: |
+    echo "ref=$(assay db ref)" >> "$GITHUB_OUTPUT"   # e.g. ghcr.io/kun9497/assay-db:v9
+    echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+- uses: actions/cache@v4
+  id: dbcache
+  with:
+    path: ${{ runner.temp }}/assay-db
+    key: assay-db-${{ steps.assaydb.outputs.ref }}-${{ steps.assaydb.outputs.day }}
+- if: steps.dbcache.outputs.cache-hit != 'true'
+  run: assay db update
+  env:
+    ASSAY_DB_DIR: ${{ runner.temp }}/assay-db
+```
+
+Set the same `ASSAY_DB_DIR` on the scan step.
 
 A build over Go, npm, PyPI, and Alpine produces **64 MB on disk holding 32,050
 advisories** — measured from an actual `db build`, not estimated. Getting there downloads
@@ -1426,6 +1485,8 @@ since been built and are kept there as resolved, with the decision that closed e
 Issues and PRs are welcome. Before proposing a feature, check
 [`docs/deferred-decisions.md`](deferred-decisions.md) — the obvious gaps are mostly
 deliberate, and it records what would change the decision.
+[CONTRIBUTING.md](../CONTRIBUTING.md) has what a change needs, and
+[SECURITY.md](../SECURITY.md) how to report a vulnerability privately.
 
 ## Disclaimer
 

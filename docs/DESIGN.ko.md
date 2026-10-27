@@ -69,8 +69,36 @@ this result cannot be trusted").
 그리고 둘의 매칭. anchore 생태계에서는 이것이 `syft`, `vunnel` + `grype-db`, `grype`라는 세
 개의 별도 프로젝트입니다.
 
-**개인 프로젝트이고, 취약점 스캐너가 어떻게 동작하는지를 끝에서 끝까지 직접 만들어보며 배우려고
-시작했습니다.** 기존 스캐너들은 훌륭하고 충분히 검증되어 있습니다. 프로덕션에서는 그것들을 쓰십시오.
+**스캔이 다루지 않는 것.** 깨끗한 결과에 기대기 전에 읽어 주십시오. 각 한계는 의도된 것이며
+무엇이 그 결정을 바꿀지와 함께 기록되어 있습니다. 일부는 영향을 받는 스캔이 직접 알립니다(아래
+처음 셋). 나머지는 모든 스캔에 해당하며 여기에만 적혀 있습니다.
+
+- **이미지 안의 애플리케이션 패키지**(D70). 이미지 스캔은 운영체제 패키지(와 Bitnami의
+  `/opt/bitnami` 마커)를 검사하며, 이미지에 설치된 npm, Python, Java, Go 바이너리 패키지는 검사하지
+  않습니다. 그것들은 애플리케이션의 lockfile, 디렉터리, 바이너리, 또는 이미지의 SBOM을 스캔하십시오.
+  [기록](deferred-decisions.ko.md#컨테이너-이미지-안의-애플리케이션-패키지).
+- **업스트림이 게시를 멈춘 릴리스**(D110). Debian 11은 2026-08-19부터 동결되어 있습니다. 마지막
+  권고는 버리지 않고 유지하며, 그 위의 finding에는 표시가 붙고, 새 CVE는 업스트림이 여전히 게시할
+  때만 들어옵니다.
+- **벤더 계보.** Ubuntu Pro(ESM/FIPS)와 Oracle Ksplice/FIPS 빌드는 메인라인 데이터로 판정하지 않고
+  평가되지 않음으로 보고합니다(D53, D79, D142). EUS/AUS/TUS/E4S의 RHEL 호스트는 메인라인 errata로
+  검사하며, 측정한 경우의 대부분에서 과경보하고 약 1.3%에서 미경보합니다. stderr 안내가 그렇다고
+  말합니다(D47).
+- **KISA 한국어 공지는 배포 데이터베이스에 없습니다**(D29). KISA의 이용 조건은 그 데이터로 스캔하는
+  것은 허용하되 재배포는 허용하지 않으므로, `assay db build`로 만든 데이터베이스에만 나타나고, 그때도
+  finding을 설명할 뿐 새로 만들지 않습니다.
+- **CPE 매칭 없음**(D27). 매칭은 패키지 신원(purl 또는 ecosystem, 이름, 버전)으로 합니다. 패키지
+  관리자 신원이 없는 소프트웨어는 매칭되지 않으며, NVD는 매칭이 아니라 등급을 보탭니다.
+- **실행당 플랫폼 하나, Docker 데몬 소스 없음**(D119). 멀티 플랫폼 이미지는 호스트의 플랫폼이나
+  `--platform`이 지정한 것으로 스캔합니다. 로컬 데몬에만 있는 이미지는 `docker save` 후
+  `docker-archive:`로 스캔합니다.
+- **SBOM의 OS 패키지에는 배포판 릴리스가 필요합니다.** CycloneDX operating-system 컴포넌트,
+  `distro=` purl qualifier, Red Hat의 `repository_id` 중 하나면 충분합니다. 하나도 없으면 평가되지
+  않음으로 나열됩니다.
+- **언어 ecosystem 여덟 개**: Go, npm, PyPI, crates.io, Maven, RubyGems, NuGet, Packagist. SBOM의
+  다른 유형의 컴포넌트는 리포트에 지원하지 않는 ecosystem으로 집계됩니다.
+- **악성 패키지 보고**(`MAL-*`)는 수집하지 않습니다(D15). 그 부류는 공급망 악성코드 도구를
+  쓰십시오.
 
 출발점은 국내 취약점 데이터였습니다 — KISA/KNVD를 일급 provider로 삼는 것. 첫 조사는 성립하지
 않는다고 했지만, 틀린 게시판을 잰 결과였습니다. KNVD 자체 공개는 국내 상용 소프트웨어 173건이고,
@@ -133,8 +161,10 @@ assay scan alpine:3.19
 docker save alpine:3.19 -o alpine.tar && assay scan docker-archive:alpine.tar
 skopeo copy docker://alpine:3.19 oci:layout && assay scan oci-dir:layout
 
-# CycloneDX SBOM 스캔 (Go, npm, PyPI, Alpine)
+# SBOM(CycloneDX, 또는 SPDX 2.2/2.3 JSON), Go 바이너리, 소스 트리 스캔
 assay scan sbom.cdx.json
+assay scan ./bin/app
+assay scan ./my-project
 ```
 
 데이터베이스 쪽에서 네트워크를 건드리는 명령은 `assay db update`, `assay db build`,
@@ -151,14 +181,17 @@ assay scan alpine:3.19                # 레지스트리 참조
 assay scan docker-archive:app.tar     # `docker save` 타르볼
 assay scan oci-dir:./layout           # OCI 레이아웃 디렉터리
 assay scan sbom.cdx.json              # CycloneDX SBOM
+assay scan sbom.spdx.json             # SPDX 2.2/2.3 JSON SBOM
 assay scan ./bin/assay                # Go 바이너리
-assay scan ./my-project               # go.mod이 있는 디렉터리
+assay scan ./my-project               # 디렉터리: 그 안의 lockfile과 jar
 assay scan ./app.jar                  # Java 아카이브(신원은 pom.properties에서)
 ```
 
 접두사 없는 경로는 **내용으로** 분류합니다. 디렉터리면 디렉터리, `debug/buildinfo`가 읽을 수
-있으면 Go 바이너리, 최상위에 `bomFormat` 키가 있으면 CycloneDX 문서입니다. 셋 중 무엇도 아닌
-파일은 셋을 모두 이름 붙인 오류이지 조용한 추측이 아닙니다. 애초에 경로가 아니면 레지스트리
+있으면 Go 바이너리, 이름이 `.jar`/`.war`이거나 `META-INF/` 항목을 가진 zip 아카이브면 jar,
+최상위에 `bomFormat` 키가 있으면 CycloneDX 문서, 최상위에 `spdxVersion` 키가 있으면 SPDX
+문서입니다. 무엇도 아닌 파일은 네 가지 파일 종류와 그것을 재정의하는 접두사를 이름 붙인
+오류이지 조용한 추측이 아닙니다. 애초에 경로가 아니면 레지스트리
 참조입니다.
 
 `file:`, `dir:`, `sbom:` 접두사가 감지를 재정의합니다 — 기존 `docker-archive:`, `oci-dir:`와
@@ -185,9 +218,10 @@ assay scan ./app.jar                  # Java 아카이브(신원은 pom.properti
 
 하위 디렉터리도 훑으므로 `frontend/package-lock.json`도 찾습니다. `node_modules`, `vendor`,
 `.git`은 건너뛰고 여섯 단계까지만 내려갑니다. **인식했지만 읽지 않은 매니페스트는 이유와 함께
-이름을 밝힙니다** — `requirements.txt`는 락파일이 아니고(`Django>=3.2`는 버전이 아니라 제약이며,
-범위를 권고의 범위에 맞추면 고정되지 않은 것에 조용히 "취약하지 않음"이라고 답하게 됩니다),
-파싱에 실패한 락파일도 사라지지 않고 그 사실을 말합니다.
+이름을 밝히며**, 쓸 수 없는 줄도 마찬가지입니다. `requirements.txt`는 정확히 한 버전을 고정한
+줄만 읽습니다(D38). `Django>=3.2`는 버전이 아니라 제약이며, 범위를 권고의 범위에 맞추면 고정되지
+않은 것에 조용히 "취약하지 않음"이라고 답하게 되기 때문입니다. 파싱에 실패한 락파일도 사라지지
+않고 그 사실을 말합니다.
 
 `pnpm-lock.yaml`과 yarn berry 락파일은 D103부터 읽습니다(D61 때는 인식하고 이름을 부르며
 거부했습니다. 당시 읽으려면 YAML 의존성이 들었을 텐데, D102의 yaml.v3 승격이 그 비용을
@@ -316,10 +350,32 @@ D110 동결 날짜), 인식된 릴리스의 이름을 대거나 인식되지 않
 | Linux | `~/.cache/assay/db/v9/` |
 
 CI 캐시나 에어갭 환경에서는 `ASSAY_DB_DIR`로 재정의합니다. 경로의 `v9`는 스키마 버전입니다 —
-스키마가 바뀌면 제자리에서 마이그레이션하는 대신 새 디렉터리에 다시 빌드합니다. 다만
-`ASSAY_DB_DIR`에는 그 성분이 없으므로, 그 경로를 키로 삼은 CI 캐시는 무효화되었어야 할
-업그레이드를 넘어 살아남습니다. 업그레이드 후에는 다시 빌드하거나 캐시 키에 assay 버전을
-넣으십시오.
+스키마가 바뀌면 제자리에서 마이그레이션하는 대신 새 디렉터리에 다시 빌드합니다.
+`ASSAY_DB_DIR`에는 그 성분이 없으므로, 그 경로만 키로 삼은 CI 캐시는 스키마가 바뀐 업그레이드를
+넘어 살아남습니다. 그래도 잘못 읽히는 것은 없습니다. 다른 스키마의 데이터베이스를 만난 바이너리는
+exit 2로 끝나며 `assay db update`를 실행하라고 알립니다. 다만 그 캐시는 만료될 때까지 매 실행을
+실패시킵니다. 대신 `assay db ref`로 키를 만드십시오. 이 명령은 설치된 바이너리가 읽는 스키마의
+태그를 출력합니다. 여기에 날짜를 더하면 캐시가 스키마와 야간 배포를 함께 따라갑니다:
+
+```yaml
+- name: Name the database cache
+  id: assaydb
+  shell: bash
+  run: |
+    echo "ref=$(assay db ref)" >> "$GITHUB_OUTPUT"   # e.g. ghcr.io/kun9497/assay-db:v9
+    echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+- uses: actions/cache@v4
+  id: dbcache
+  with:
+    path: ${{ runner.temp }}/assay-db
+    key: assay-db-${{ steps.assaydb.outputs.ref }}-${{ steps.assaydb.outputs.day }}
+- if: steps.dbcache.outputs.cache-hit != 'true'
+  run: assay db update
+  env:
+    ASSAY_DB_DIR: ${{ runner.temp }}/assay-db
+```
+
+스캔 단계에도 같은 `ASSAY_DB_DIR`을 지정하십시오.
 
 Go, npm, PyPI, Alpine으로 빌드하면 **디스크 64 MB에 권고 32,050건**이 담깁니다 — 추정치가
 아니라 실제 `db build`를 돌려 측정한 값입니다. 여기까지 오는 데 약 248 MB를 내려받습니다.
@@ -1366,6 +1422,8 @@ C/C++는 신뢰할 만한 것을 남기지 않습니다. 지원 여부는 카테
 이슈와 PR을 환영합니다. 기능을 제안하기 전에
 [`docs/deferred-decisions.ko.md`](deferred-decisions.ko.md)를 확인해 주십시오 — 눈에 띄는
 빈틈은 대체로 의도된 것이고, 무엇이 그 결정을 바꿀 수 있는지가 적혀 있습니다.
+변경에 필요한 것은 [CONTRIBUTING.ko.md](../CONTRIBUTING.ko.md)에, 취약점을 비공개로 알리는
+방법은 [SECURITY.ko.md](../SECURITY.ko.md)에 있습니다.
 
 ## 고지
 

@@ -74,6 +74,10 @@ type Artifact struct {
 	ObservedAt     time.Time `json:"observedAt"`
 }
 
+// statusSchemaVersion is status.json's contract version; docs/compatibility.md
+// states what a bump means.
+const statusSchemaVersion = 1
+
 // publishWorkflow is the one workflow whose runs set lastRun/lastSuccess.
 const publishWorkflow = "db-publish"
 
@@ -128,7 +132,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	at := now()
-	s.SchemaVersion = 1
+	s.SchemaVersion = statusSchemaVersion
 	s.GeneratedAt = at
 	// The run fields are the nightly publish's alone: a db-sign dispatched
 	// by hand refreshes `published` (so a fixed signature shows at once)

@@ -143,7 +143,10 @@ cannot be trusted — with `2` outranking `1` outranking `0`.
 - **[docs/comparison.md](docs/comparison.md)** — how assay compares to grype (measured,
   weekly) and trivy (spec-level), and where each tool's policy deliberately differs.
 - **[docs/superpowers/specs/2026-07-29-assay-roadmap.md](docs/superpowers/specs/2026-07-29-assay-roadmap.md)**
-  — the reference design, every decision recorded as `D1`…`D107` with its reasoning.
+  — the reference design, every decision recorded as `D1`…`D146` with its reasoning.
+- **[docs/compatibility.md](docs/compatibility.md)** — what a consumer of the JSON, SARIF and
+  database outputs can rely on across releases, and what a `schemaVersion` bump means.
+- **[CHANGELOG.md](CHANGELOG.md)** — what changed in each release.
 
 Every document ships bilingually (`X.md` / `X.ko.md`); English is canonical.
 
@@ -151,8 +154,8 @@ Every document ships bilingually (`X.md` / `X.ko.md`); English is canonical.
 
 `make build` (CGO_ENABLED=0), `make test` (`-race`, needs a C toolchain — fall back to
 `go test ./...` without one), `make lint`, `make fmt`. CI runs gofmt-check → vet →
-test-race → build on Go 1.26. See [docs/DESIGN.md](docs/DESIGN.md) for the architecture
-constraints a change must stay inside.
+test-race → build on Go 1.26. [CONTRIBUTING.md](CONTRIBUTING.md) has what a change needs;
+report a security problem privately, as [SECURITY.md](SECURITY.md) describes.
 
 ## Disclaimer
 

@@ -139,7 +139,11 @@ assay scan alpine:3.19 --fail-on high
 - **[docs/comparison.md](docs/comparison.md)** — grype(주간 실측)·trivy(스펙 수준)와의
   비교, 그리고 각 도구의 정책이 의도적으로 갈리는 지점. ([한국어](docs/comparison.ko.md))
 - **[docs/superpowers/specs/2026-07-29-assay-roadmap.md](docs/superpowers/specs/2026-07-29-assay-roadmap.md)**
-  — 레퍼런스 설계, 모든 결정을 `D1`…`D107`로 근거와 함께 기록.
+  — 레퍼런스 설계, 모든 결정을 `D1`…`D146`로 근거와 함께 기록.
+- **[docs/compatibility.md](docs/compatibility.md)** — JSON, SARIF, 데이터베이스 출력을 쓰는
+  쪽이 릴리스를 넘어 기댈 수 있는 것과 `schemaVersion` 증가가 뜻하는 것.
+  ([한국어](docs/compatibility.ko.md))
+- **[CHANGELOG.md](CHANGELOG.md)** — 릴리스마다 바뀐 것. ([한국어](CHANGELOG.ko.md))
 
 모든 문서는 `X.md` / `X.ko.md` 짝으로 배포되며, 영어가 정본입니다.
 
@@ -147,8 +151,8 @@ assay scan alpine:3.19 --fail-on high
 
 `make build`(CGO_ENABLED=0), `make test`(`-race`, C 툴체인 필요 — 없으면
 `go test ./...`로 대체), `make lint`, `make fmt`. CI는 Go 1.26에서 gofmt-check → vet →
-test-race → build를 돕니다. 변경이 지켜야 할 아키텍처 제약은
-[docs/DESIGN.md](docs/DESIGN.md)를 보세요.
+test-race → build를 돕니다. 변경에 필요한 것은 [CONTRIBUTING.ko.md](CONTRIBUTING.ko.md)에
+있습니다. 보안 문제는 [SECURITY.ko.md](SECURITY.ko.md)에 적힌 대로 비공개로 알려 주십시오.
 
 ## 고지
 
