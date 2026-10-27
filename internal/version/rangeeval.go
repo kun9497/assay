@@ -264,11 +264,11 @@ type takenWindow struct {
 // A window is the run of events from one introduced to the next, in file
 // order, and its close is the first fixed or last_affected in that run --
 // file order is the only thing that says which close belongs to which open.
-// The published database held 1,906 such windows on 2026-10-27 (Bitnami's
-// liferay repeats one [X,X] dozens of times in a range), and none of them
-// changes its verdict here: walked in file order, open-then-close at X gave
-// the same answer. Taking them out is what lets sortEvents put a close before
-// an open at the same version without reopening them.
+// By this rule the published database held 888 such windows on 2026-10-27:
+// 244 empty (Bitnami 239, fifteen of them spelled differently, such as
+// golang's 1.24.0-0 / 1.24.0; crates.io 5) and 644 single-version (Bitnami
+// 624, Packagist 20). Taking them out is what lets sortEvents put a close
+// before an open at the same version without reopening them.
 //
 // A pair that cannot be compared is left in the walk rather than guessed
 // at, and sortEvents then refuses the range with the advisory named as the
@@ -276,8 +276,11 @@ type takenWindow struct {
 //
 // Only a window with one close, at or above its open, is well-formed. On
 // anything else -- two closes before the next introduced, or a close below
-// its open -- which close pairs with the open is a guess, and the published
-// database held no tied range of that shape on 2026-10-27.
+// its open -- which close pairs with the open is a guess. The published
+// database held both on 2026-10-27 (392 closes below their open, 380 of them
+// Alpine; 123 windows with two or more closes, Alpine 100 and PyPI 23), and
+// no judgment at any bound of a tied range changed against the walk before
+// A7.
 func splitDegenerate(c Comparer, in []advisory.Event) (walk []advisory.Event, taken []takenWindow) {
 	drop := make([]bool, len(in))
 	for i, e := range in {
@@ -383,8 +386,11 @@ func sortEvents(c Comparer, in []advisory.Event) ([]advisory.Event, error) {
 		// the later window first opened it and shut it again at X, and every
 		// version inside it was clean. A window that opens and closes at the
 		// same X never gets here: splitDegenerate took it out. Ranking by kind
-		// keeps this a strict weak ordering, which a rule that looked at which
-		// window each event belongs to would not be.
+		// keeps this a strict weak ordering whenever the comparer's equality
+		// is transitive, which a rule that looked at which window each event
+		// belongs to would not be. Bitnami's equality is not (a bare core
+		// equals every revision of it), and no tie rule restores an order
+		// that the comparer itself does not have; that was so before A7.
 		return closesWindow(out[i]) && !closesWindow(out[j])
 	})
 	return out, nil
