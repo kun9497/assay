@@ -17,13 +17,16 @@ All notable changes to this project are documented here. The format follows
 - The nightly publishes `status.json` (digest, `builtAt`, `dataAsOf`, signature state,
   last success) to the `status` branch. A failing ops workflow keeps one pinned GitHub issue
   open until it recovers. (D138)
-
+- `assay db status --output json` writes the same facts as the table as one JSON
+  document with its own `schemaVersion` (1). (D147)
 - `SECURITY.md` (private reporting through GitHub), `CONTRIBUTING.md`, this changelog, and
   [`docs/compatibility.md`](docs/compatibility.md), which states what a `schemaVersion` bump
   means for each machine-readable output. From report schema 15 on, every change to the
   JSON report bumps `schemaVersion`.
 
 ### Changed
+- `db status`, `db ref` and `db build --seed <ref>` refuse an argument they do not take
+  (exit 2) instead of ignoring it. (D147)
 - `assay help` and the design document name every target kind and lockfile a scan reads,
   and DESIGN.md's scope section lists what a scan does not cover.
 - CI regression gate: `az2023` and `wolfi` now have real floors, and the gate also checks

@@ -79,6 +79,7 @@ Commands:
   db update       Download the published vulnerability database
   db build        Build the vulnerability database from its upstream sources
   db status       Show what is in the database and how current it is
+                  (--output json for a machine-readable document)
   db push <ref>   Publish the built database as an OCI artifact (builders only).
                   Refuses to narrow the published coverage; --force overrides.
   db ref          Print the registry tag this binary's schema reads (CI only)
@@ -532,6 +533,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 			}
 			return dbcmd.Pull(context.Background(), path, ref, allowUnsigned, stdout, stderr)
 		case "status":
+			format, ok := resolveStatusFormat(args, stderr)
+			if !ok {
+				return exitError
+			}
+			if format == "json" {
+				return dbcmd.StatusJSON(path, stdout, stderr)
+			}
 			return dbcmd.Status(path, stdout, stderr)
 		case "push":
 			ref, force, ok := resolvePushRef(args, stderr)
@@ -540,6 +548,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 			}
 			return dbcmd.Push(context.Background(), path, ref, force, stdout, stderr)
 		case "ref":
+			if len(args) > 2 {
+				fmt.Fprintf(stderr, "error: unexpected argument %q: db ref takes none\n", args[2])
+				return exitError
+			}
 			// Prints to stdout: it is a result a CI workflow captures to tag
 			// what `db push` publishes, not a diagnostic. Reading it from the
 			// binary rather than duplicating the tag as a literal in the
@@ -1113,7 +1125,44 @@ func resolveBuildSeed(args []string, stderr io.Writer) (ref string, has, ok bool
 		fmt.Fprintf(stderr, "error: --seed requires a reference, e.g. %s\n", dbcmd.Ref(dbcmd.DefaultRef))
 		return "", false, false
 	}
+	if len(args) > 4 {
+		fmt.Fprintf(stderr, "error: unexpected argument %q: db build takes --seed <ref> and --ratings-only\n", args[4])
+		return "", false, false
+	}
 	return args[3], true, true
+}
+
+// resolveStatusFormat reads `db status`'s only flag, --output table|json
+// (or --output=json). Anything else is refused by name: before this, `db
+// status` ignored every argument, so a monitor asking for --output json got
+// the table and had no way to tell (2026-10-22 audit).
+func resolveStatusFormat(args []string, stderr io.Writer) (format string, ok bool) {
+	format = "table"
+	rest := args[2:]
+	for i := 0; i < len(rest); i++ {
+		a := rest[i]
+		var v string
+		switch {
+		case a == "--output":
+			if i+1 >= len(rest) {
+				fmt.Fprintln(stderr, "error: --output requires a format (table or json)")
+				return "", false
+			}
+			i++
+			v = rest[i]
+		case strings.HasPrefix(a, "--output="):
+			v = strings.TrimPrefix(a, "--output=")
+		default:
+			fmt.Fprintf(stderr, "error: unexpected argument %q: db status takes --output table|json\n", a)
+			return "", false
+		}
+		if v != "table" && v != "json" {
+			fmt.Fprintf(stderr, "error: --output: %q is not a db status format (table or json)\n", v)
+			return "", false
+		}
+		format = v
+	}
+	return format, true
 }
 
 // resolveRatingsOnly reports whether `--ratings-only` (D66) was given

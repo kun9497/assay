@@ -60,7 +60,9 @@ the weekly run instead of being judged `ok`. Since D145 the gate also holds
 omitted = 0), and az2023/wolfi carry real floors, cut where a floor tracks grype's or
 trivy's own feed (wolfi's trivy collapsed 33 to 1 for a night). Since D146 a per-target
 `maxAssayOnlyFixed` ceiling bounds the assay-only tuples that carry a fix -- the
-false-positive candidates -- leaving out the no-fix states grype never reports. Since D118 a registry image scan reads
+false-positive candidates -- leaving out the no-fix states grype never reports. Since D147
+`db status --output json` writes the status as one versioned document, and every `db`
+subcommand refuses an argument it does not take. Since D118 a registry image scan reads
 credentials — `ASSAY_REGISTRY_AUTH_*` first, then the docker login, then podman's — and
 never prints one; before it, the scan path was anonymous-only. Since D119 `--platform` picks an
 image's platform with containerd's normalisation and compatibility order on every image path,

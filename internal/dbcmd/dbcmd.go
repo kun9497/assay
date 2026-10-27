@@ -7,7 +7,6 @@ package dbcmd
 import (
 	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -833,22 +832,8 @@ func replace(src, dst string) error {
 // where --db-max-age and --db-max-rating-age (D59, D113) read the same
 // Provenance this prints, scoped to the keys the scan actually uses.
 func Status(dbPath string, stdout, stderr io.Writer) int {
-	db, err := store.Open(dbPath)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrSchemaMismatch) ||
-			errors.Is(err, store.ErrIncomplete) {
-			fmt.Fprintf(stderr, "error: %v\n", err)
-			fmt.Fprintln(stderr, "run `assay db update` to download it, or `assay db build` to build it from source")
-			return 2
-		}
-		fmt.Fprintf(stderr, "error: open database: %v\n", err)
-		return 2
-	}
-	defer db.Close()
-
-	m, err := db.Meta()
-	if err != nil {
-		fmt.Fprintf(stderr, "error: read metadata: %v\n", err)
+	m, ok := readStatusMeta(dbPath, stderr)
+	if !ok {
 		return 2
 	}
 

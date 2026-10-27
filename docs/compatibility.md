@@ -12,6 +12,7 @@ with a version bump, a **Breaking** entry in the [changelog](../CHANGELOG.md), a
 | `report` | `assay scan --output json` | `schemaVersion` | 14 |
 | `provenance sidecar` | the file `--provenance <path>` writes (D120) | `schemaVersion` | 1 |
 | `status.json` | the published database's status, on the `status` branch (D138) | `schemaVersion` | 1 |
+| `db status` | `assay db status --output json` (D147) | `schemaVersion` | 1 |
 | `database` | the local store and the OCI tag `ghcr.io/kun9497/assay-db:vN` | tag `vN`, `db status` `schema:` | 9 |
 
 Tests hold this table to the constants in the code, so it cannot fall behind a bump.
@@ -49,9 +50,9 @@ it relied on:
   v0.11.0, schema 14). Each is optional. The rule above, a bump for every change, applies
   from schema 15 on.
 
-## The provenance sidecar and status.json
+## The provenance sidecar, status.json and `db status`
 
-Both follow the report's rules with their own `schemaVersion`. Two notes:
+All three follow the report's rules with their own `schemaVersion`. Two notes:
 
 - The sidecar embeds the report's `provenance` object. That object changes under the
   report's `schemaVersion`, not the sidecar's, so read both numbers.

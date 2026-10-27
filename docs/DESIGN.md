@@ -157,7 +157,7 @@ assay db update
 # They are on by default (D37) and stripped from anything published (D29).
 assay db build --seed "$(assay db ref)"
 
-# What is in the database, and how current is it
+# What is in the database, and how current is it (--output json for a monitor)
 assay db status
 
 # Scan a container image from a registry
@@ -1002,6 +1002,9 @@ exited 0 while 24 findings went unmentioned.
       `maxAssayOnlyFixed` per target at max(2x, x+25), a ceiling the weekly run judges;
       no-fix states left out (Red Hat's 4,884 on ubi8n18); chosen over an all-tuple
       count and an allowlist by replaying twelve captures (0 false alarms)
+- [x] `db status --output json`, and `db` refuses arguments it does not take (D147) —
+      one document with its own `schemaVersion`, the table's derived-count rules, held
+      byte for byte; `db status`, `db ref` and `db build --seed` refuse extras with exit 2
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15

@@ -151,7 +151,7 @@ assay db update
 # 기본으로 켜져 있고(D37), 배포되는 것에서는 벗겨집니다(D29).
 assay db build --seed "$(assay db ref)"
 
-# 데이터베이스에 무엇이 들어 있고 얼마나 최신인지
+# 데이터베이스에 무엇이 들어 있고 얼마나 최신인지 (모니터에는 --output json)
 assay db status
 
 # 레지스트리에서 컨테이너 이미지 스캔
@@ -956,6 +956,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] 차등이 fix 가 있는 assay-only 튜플에 상한을 둠 (D146, 감사 gap 5) — 타깃별
       `maxAssayOnlyFixed` 를 max(2배, x+25) 로, 주간 실행이 판정하는 상한; no-fix 상태 제외(ubi8n18 의
       Red Hat 4,884); 전체 튜플 수와 허용 목록 대신 열두 capture 재생으로 선택(오경보 0)
+- [x] `db status --output json`, 그리고 `db` 가 받지 않는 인자를 거부 (D147) — 자체
+      `schemaVersion` 을 가진 문서 하나, 테이블의 파생 수 규칙, 바이트 단위로 고정; `db status`,
+      `db ref`, `db build --seed` 가 남는 인자를 exit 2 로 거부
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨
