@@ -301,3 +301,53 @@ func isPubkey(h header) bool {
 	_, hasArch := h.str(tagArch)
 	return !hasArch
 }
+
+// ResolveSourceVersions sets each package's Source.Version to its source
+// rpm's EVR, once the whole database has been read (2026-10-22 audit A4).
+// toPackage can only give it the BINARY's EVR, which is wrong whenever a
+// subpackage's version or epoch is not its SRPM's: mod_ssl 1:2.4.62 from
+// httpd 2.4.62 hid every httpd fix, perl-B 1.80 from perl 4:5.32.1 never
+// cleared one, npm 1:8.19.3 was compared with nodejs fixes.
+//
+// The version-release is the SOURCERPM filename's. The filename carries no
+// epoch, so the epoch is that of the installed package named like the source
+// -- the spec's main package, which carries the spec's top-level Epoch. When
+// no such package is installed nothing on the image states the source's
+// epoch, and the binary's own is used, as before; the version-release still
+// comes from the SRPM. A SOURCERPM that does not parse leaves the binary's
+// EVR in place.
+func ResolveSourceVersions(pkgs []pkgmeta.Package) {
+	epochOf := make(map[string]string, len(pkgs))
+	for _, p := range pkgs {
+		if _, seen := epochOf[p.Name]; !seen {
+			epochOf[p.Name] = epochPart(p.Version)
+		}
+	}
+	for i := range pkgs {
+		p := &pkgs[i]
+		if p.Source == nil {
+			continue
+		}
+		vr := pkgmeta.SourceRPMVersion(p.Upstream)
+		if vr == "" {
+			continue
+		}
+		e, installed := epochOf[p.Source.Name]
+		if !installed {
+			e = epochPart(p.Version)
+		}
+		if e != "" {
+			vr = e + ":" + vr
+		}
+		p.Source.Version = vr
+	}
+}
+
+// epochPart is the epoch of an evr()-shaped version, "" when it has none
+// (evr writes the epoch only when non-zero).
+func epochPart(v string) string {
+	if i := strings.IndexByte(v, ':'); i > 0 {
+		return v[:i]
+	}
+	return ""
+}

@@ -1515,6 +1515,10 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 		if err != nil {
 			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
 		}
+		// A4: a source lookup compares the SRPM's EVR, which needs the whole
+		// database (the source's epoch is its installed main package's), so it
+		// is set here, once, for all three backends.
+		rpmdb.ResolveSourceVersions(res.Packages)
 		pkgs, diffID, skippedRecords = res.Packages, f.DiffID, len(res.Skipped)
 	case len(pacmanFiles) > 0:
 		// D97. One desc file per package, parsed in sorted order for the

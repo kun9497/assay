@@ -633,6 +633,7 @@ type ndbFixtureEntry struct {
 	pkgidx                 uint32
 	name, version, release string
 	sourcerpm              string
+	epoch                  int32 // 0 writes no EPOCH tag, as rpm does for an epoch-less package
 }
 
 // buildNDBFixture hand-assembles a complete, well-formed ndb (openSUSE/SLES
@@ -676,7 +677,7 @@ func buildNDBFixture(t *testing.T, nextpkgidx uint32, entries []ndbFixtureEntry)
 	blkoff := uint32(slotnpages * pageSize / blkSize)
 	slotOff := slotStart * slotSize
 	for _, e := range entries {
-		rpmHeader := buildRPMHeaderBlobFixture(e.name, e.version, e.release, e.sourcerpm)
+		rpmHeader := buildRPMHeaderBlobFixtureEpoch(e.name, e.version, e.release, e.sourcerpm, e.epoch)
 		blkcnt := uint32((blobHead + len(rpmHeader) + blobTail + blkSize - 1) / blkSize)
 		total := int(blkcnt) * blkSize
 
@@ -709,6 +710,13 @@ func buildNDBFixture(t *testing.T, nextpkgidx uint32, entries []ndbFixtureEntry)
 // rpm's own, stable ones (NAME=1000, VERSION=1001, RELEASE=1002,
 // SOURCERPM=1044); type 6 is STRING.
 func buildRPMHeaderBlobFixture(name, version, release, sourcerpm string) []byte {
+	return buildRPMHeaderBlobFixtureEpoch(name, version, release, sourcerpm, 0)
+}
+
+// buildRPMHeaderBlobFixtureEpoch is buildRPMHeaderBlobFixture with an EPOCH
+// tag (1003, INT32, type 4) when epoch is non-zero. The integer goes first in
+// the data store, so it sits at offset 0, aligned as rpm aligns INT32 data.
+func buildRPMHeaderBlobFixtureEpoch(name, version, release, sourcerpm string, epoch int32) []byte {
 	type field struct {
 		tag uint32
 		s   string
@@ -718,19 +726,23 @@ func buildRPMHeaderBlobFixture(name, version, release, sourcerpm string) []byte 
 		fields = append(fields, field{1044, sourcerpm})
 	}
 	var data []byte
-	type idx struct{ tag, offset uint32 }
+	type idx struct{ tag, typ, offset uint32 }
 	var idxs []idx
+	const typeInt32, typeString = 4, 6
+	if epoch != 0 {
+		idxs = append(idxs, idx{tag: 1003, typ: typeInt32, offset: 0})
+		data = binary.BigEndian.AppendUint32(data, uint32(epoch))
+	}
 	for _, f := range fields {
-		idxs = append(idxs, idx{tag: f.tag, offset: uint32(len(data))})
+		idxs = append(idxs, idx{tag: f.tag, typ: typeString, offset: uint32(len(data))})
 		data = append(data, f.s...)
 		data = append(data, 0) // NUL terminator, as a byte, never as an escape (CLAUDE.md)
 	}
 	buf := binary.BigEndian.AppendUint32(nil, uint32(len(idxs)))
 	buf = binary.BigEndian.AppendUint32(buf, uint32(len(data)))
-	const typeString = 6
 	for _, e := range idxs {
 		buf = binary.BigEndian.AppendUint32(buf, e.tag)
-		buf = binary.BigEndian.AppendUint32(buf, typeString)
+		buf = binary.BigEndian.AppendUint32(buf, e.typ)
 		buf = binary.BigEndian.AppendUint32(buf, e.offset)
 		buf = binary.BigEndian.AppendUint32(buf, 1) // count
 	}
