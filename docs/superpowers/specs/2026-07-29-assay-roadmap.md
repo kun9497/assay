@@ -3539,6 +3539,9 @@ carry (a research candidate).
 
 ### D91 — LTSS is the same release after the lights went out
 
+*Revised by D149: a mainline entry shadows its LTSS twin only when it carries a fix. The
+vunnel rule cited below is its legacy OVAL path; its current CSAF parser borrows the LTSS fix.*
+
 **Decision.** `SUSE Linux Enterprise Server <N>[ SP<M>]-LTSS` folds onto the same key as
 its bare form — and ONLY that shape: Teradata, Extended Security, HPC-LTSS and the other
 26 LTSS-family variants stay refused, which is why the regex anchor is load-bearing (an
@@ -6569,6 +6572,63 @@ fixed builds, and one finding on the builds before the fix. At the cataloger:
 The reviewer's three probes, written to pass on the bad behaviour, now fail on it. Six
 mutations, all caught; the sixth (a bare `1:` from a versionless source) only after its case
 was added.
+
+---
+
+### D149 — An LTSS fix replaces a mainline no-fix instead of being shadowed by it (revises D91)
+
+**Decision.** D91's tie-break keeps a mainline entry over its LTSS twin for the same release and
+package only when the mainline entry carries a fixed version. When the mainline side says only
+"affected", the LTSS fix replaces that range. This covers a `known_affected` entry, or a
+`recommended` entry with no version to compare, which `store` already reads as affected. The
+key then carries the fix and no "affected at every version" range beside it, which would still
+match the fixed build. An LTSS entry with no version of its own is still shadowed. An SLE
+`known_not_affected` is still not stored (D125 reads that bucket for Leap only), so it neither
+competes with nor blocks an LTSS fix, as before. A replaced no-fix range's stated reason
+(no_fix_planned on the EOL'd product, usually) goes with it, counted as D128 counts its own.
+Two counters print on the sync line: `LTSSFixReplacedMainlineNoFix` and
+`LTSSFixReplacedWithReason`.
+
+**Why.** The 2026-10-22 audit (A5). After SLES 15 SP6 left general support, SUSE's documents
+keep the EOL'd product in `known_affected` beside the SP6-LTSS recommended fix. D91 had assumed
+the shadow case was fix against fix. In this shape it dropped the only fix, so an SP6-LTSS
+image with `php8-8.2.35-150600.3.39.1` (the fix) installed was reported "affected, no fix
+available". The audit found 167 such shapes in the 400 most recent documents. D91 cited grype's
+vunnel as using the identical rule. That is vunnel's legacy OVAL path, now off by default. Its
+CSAF parser (default since 2026-09-23, `_borrow_ltss_fixes_into_plain`, vunnel `3dd80d6`)
+does what this decision does: a plain no-fix, declared won't-fix included, is overwritten by the
+LTSS fix, and a plain real fix wins. It differs in one place: a plain "not affected" outranks
+the LTSS fix there, while assay does not store SLE not-affected at all (pinned by
+`TestConvert_D149_SLENotAffectedDoesNotCompete`).
+
+**Measured.** SUSE's live CSAF archive and delta on 2026-10-27, 72,934 documents, converted
+with and without this change:
+- 14,731 mainline no-fix entries now carry their LTSS twin's fix, 5 of them with a stated reason
+  dropped;
+- D91's shadow counter fell by exactly that number, from 583,925 to 569,194;
+- entries with no fix available fell from 765,479 to 750,613 (−14,866), the extra 135 being
+  Leap keys whose D128 replacement now finds an SLE fix;
+- ranges with a fix rose by 21,369, the difference reaching Leap keys through the D108 mirror.
+
+**Gives up.** A Leap 15.6 key, or a non-LTSS SP6 host, now reads "fixed in" an LTSS build that
+its own channel does not ship. The verdict does not change: the installed build is below the
+fix, as it was below "every version". Only the claim of a fix being available does, the same
+trade vunnel's README states ("We would rather sometimes advertise a fix that turns out to be
+paywalled than emit that false negative").
+
+**Verified.** Through `convert`, with the archive's own shapes:
+- a mainline `known_affected` beside an LTSS fix gives exactly one fixed range;
+- with `no_fix_planned` on the mainline side, the dropped reason is counted and no won't-fix
+  remains;
+- LTSS and mainline both no-fix stays shadowed;
+- a versionless mainline `recommended` yields;
+- a versionless LTSS `recommended` does not replace;
+- an SLE `known_not_affected` neither competes nor blocks;
+- D91's own test (a mainline fix shadows the LTSS one) still holds;
+- the progress line names both counters.
+
+Nine mutations: eight caught. The ninth drops the reason-category test, an equivalent because
+`remedy` holds only those two categories; the code says so.
 
 ---
 

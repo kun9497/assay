@@ -3339,6 +3339,9 @@ post-EOL LTSS 채널을 거쳐 나가는 SLES SP6 fix(연구 후보입니다).
 
 ### D91 — LTSS는 불이 꺼진 뒤에도 같은 릴리스다
 
+*D149 로 개정: mainline 항목은 fix 를 가질 때만 LTSS 쌍을 가린다. 아래에 인용한 vunnel 규칙은
+레거시 OVAL 경로이며, 현재의 CSAF 파서는 LTSS fix 를 빌려 온다.*
+
 **결정.** `SUSE Linux Enterprise Server <N>[ SP<M>]-LTSS`는 자신의 맨 형태와 같은
 키로 접힙니다 — 그리고 '오직' 그 모양만입니다: Teradata, Extended Security, HPC-LTSS와
 그 밖의 LTSS 계열 변종 26개는 계속 거부됩니다, 그래서 정규식 앵커가 핵심을
@@ -6245,6 +6248,58 @@ Red Hat 의 실제 문서(testdata, sha256 `9f6b64f0…`)로: 고쳐진 빌드�
 
 리뷰어의 프로브 셋은 나쁜 동작에서 통과하도록 쓰였으나 이제 그 동작에서 실패한다. 변이 여섯 개가
 모두 잡혔고, 여섯째(버전 없는 source 의 맨 `1:`)는 그 경우를 더한 뒤에야 잡혔다.
+
+---
+
+### D149 — LTSS fix 는 mainline 의 no-fix 에 가려지지 않고 그것을 대체한다 (D91 개정)
+
+**결정.** D91 의 타이브레이크는 같은 릴리스와 패키지에 대해 mainline 항목이 fixed 버전을 가진 경우에만
+LTSS 쌍보다 mainline 항목을 유지한다. mainline 쪽이 "affected" 만 말하면 LTSS fix 가 그 범위를
+대체한다. 여기에는 `known_affected` 항목, 또는 비교할 버전이 없는 `recommended` 항목이 포함되며,
+`store` 는 후자를 이미 affected 로 읽는다. 그러면 키는 fix 를 담고, 고쳐진 빌드에도 여전히 맞을
+"모든 버전에서 affected" 범위는 그 옆에 남지 않는다. 자기 버전이 없는 LTSS 항목은 여전히 가려진다.
+SLE `known_not_affected` 는 여전히 저장되지 않으므로(D125 는 그 버킷을 Leap 용으로만 읽는다) 이전처럼
+LTSS fix 와 경쟁하지도 막지도 않는다. 대체된 no-fix 범위가 밝힌 이유(보통 EOL 된 제품의
+no_fix_planned)는 범위와 함께 사라지며, D128 이 자기 것을 세는 방식대로 센다. sync 줄에 카운터 둘이
+출력된다: `LTSSFixReplacedMainlineNoFix` 와 `LTSSFixReplacedWithReason`.
+
+**이유.** 2026-10-22 감사(A5). SLES 15 SP6 이 일반 지원을 벗어난 뒤에도 SUSE 의 문서는 EOL 된 제품을
+SP6-LTSS recommended fix 옆의 `known_affected` 에 둔다. D91 은 가려지는 경우가 fix 대 fix 라고
+가정했다. 이 모양에서는 유일한 fix 가 버려졌고, 그래서 `php8-8.2.35-150600.3.39.1`(fix)이 설치된
+SP6-LTSS 이미지가 "affected, no fix available" 로 보고되었다. 감사는 가장 최근 문서 400개에서 그런
+모양 167개를 찾았다. D91 은 grype 의 vunnel 이 동일한 규칙을 쓴다고 인용했다. 그것은 vunnel 의 레거시
+OVAL 경로이며 지금은 기본적으로 꺼져 있다. vunnel 의 CSAF 파서(2026-09-23 부터 기본,
+`_borrow_ltss_fixes_into_plain`, vunnel `3dd80d6`)는 이 결정과 같은 일을 한다: plain 의 no-fix 는,
+won't-fix 로 선언된 것까지 포함해, LTSS fix 로 덮어써지고, plain 의 진짜 fix 가 이긴다. 한 곳이
+다르다: 거기서는 plain 의 "not affected" 가 LTSS fix 보다 우선하지만, assay 는 SLE not-affected 를
+아예 저장하지 않는다(`TestConvert_D149_SLENotAffectedDoesNotCompete` 로 고정).
+
+**측정.** 2026-10-27 의 SUSE 라이브 CSAF 아카이브와 delta, 문서 72,934개를 이 변경이 있을 때와 없을 때
+변환했다:
+- mainline no-fix 항목 14,731개가 이제 LTSS 쌍의 fix 를 갖고, 그중 5개는 밝혀진 이유가 사라졌다;
+- D91 의 shadow 카운터는 정확히 그 수만큼, 583,925 에서 569,194 로 줄었다;
+- fix 가 없는 항목은 765,479 에서 750,613 으로 줄었다(−14,866). 늘어난 135는 D128 의 대체가 이제 SLE
+  fix 를 찾는 Leap 키다;
+- fix 가 있는 범위는 21,369 늘었고, 그 차이는 D108 mirror 를 통해 Leap 키에 닿는다.
+
+**포기하는 것.** Leap 15.6 키나 non-LTSS SP6 호스트는 이제 자기 채널이 배포하지 않는 LTSS 빌드에서
+"fixed in" 이라고 읽는다. 판정은 바뀌지 않는다: 설치된 빌드는 "모든 버전"보다 낮았던 것처럼 fix 보다
+낮다. 바뀌는 것은 fix 가 이용 가능하다는 주장뿐이며, vunnel 의 README 가 밝히는 같은 거래다 ("We would
+rather sometimes advertise a fix that turns out to be paywalled than emit that false negative" —
+유료 장벽 뒤에 있는 것으로 드러날 fix 를 가끔 알리는 편이 그 거짓 음성을 내는 것보다 낫다).
+
+**검증.** `convert` 를 통해, 아카이브 자신의 모양으로:
+- LTSS fix 옆의 mainline `known_affected` 는 정확히 하나의 fixed 범위를 낸다;
+- mainline 쪽에 `no_fix_planned` 가 있으면, 버려진 이유가 카운트되고 won't-fix 는 남지 않는다;
+- LTSS 와 mainline 이 모두 no-fix 이면 여전히 가려진다;
+- 버전 없는 mainline `recommended` 는 양보한다;
+- 버전 없는 LTSS `recommended` 는 대체하지 않는다;
+- SLE `known_not_affected` 는 경쟁하지도 막지도 않는다;
+- D91 자신의 테스트(mainline fix 가 LTSS fix 를 가린다)는 여전히 성립한다;
+- 진행 줄이 두 카운터를 모두 이름으로 보여 준다.
+
+변이 아홉 개 중 여덟이 잡혔다. 아홉째는 reason-category 검사를 제거하는 것으로, `remedy` 가 그 두
+범주만 담으므로 등가이며 코드가 그렇게 말한다.
 
 ---
 

@@ -1019,6 +1019,9 @@ exited 0 while 24 findings went unmentioned.
 - [x] An SPDX source relationship keeps the source's EVR (D152, revises D143) — npm from
       nodejs is judged on nodejs's version, not its own; Red Hat's real CVE-2023-23920 no
       longer flags the fixed npm
+- [x] An LTSS fix replaces a mainline no-fix instead of being shadowed by it (D149, revises
+      D91, audit A5) — SLES 15 SP6 after general support: 14,731 entries on the live archive
+      now carry the LTSS fix, as vunnel's CSAF parser does
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15
