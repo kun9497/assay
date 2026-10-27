@@ -962,6 +962,14 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] install.sh 와 같은 방식으로 검증하는 Windows 설치 스크립트 (D148) — PowerShell 5.1 과 7 용
       `install.ps1`, 체크섬 서명을 .NET 으로 내장 키에 대해 검증; 하네스가 windows-latest 에서 두
       에디션 모두로 모든 공격 경우를 돌림
+- [x] 읽지 못한 서명은 실패한 서명이 아님 (D150, 2026-10-27 리뷰) — 페이로드 blob 의 403/404/503
+      은 dbstatus 의 이전 기술을 유지하고 `db update` 에서 "검증되지 않음"이 아님; 다른 레이어는
+      계속 시도
+- [x] install.sh 가 서명을 stdin 으로 base64 에 넘김 (D151) — Apple base64 는 위치 인자 파일을
+      받지 않음; 셸 하네스가 이제 CI 에서 실제 Mac 으로 돈다
+- [x] SPDX source 관계가 source 의 EVR 을 유지 (D152, D143 수정) — nodejs 에서 나온 npm 은 자기
+      버전이 아니라 nodejs 버전으로 판정; Red Hat 실제 CVE-2023-23920 이 더 이상 수정된 npm 을
+      걸지 않음
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨

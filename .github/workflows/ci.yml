@@ -130,6 +130,15 @@ jobs:
       # both Windows PowerShell 5.1 and PowerShell 7 -- the counterpart of the
       # install.sh harness the build job runs. CI=true makes a missing edition
       # a failure rather than a note.
+      # install.sh on a real Mac: Apple's base64, LibreSSL's openssl,
+      # shasum, BSD tar. The Linux run cannot see these (the 2026-10-27
+      # review found install.sh failing every genuine release on macOS
+      # because Apple's base64 takes no positional file), so the harness
+      # runs here too, C5's PATH narrowing included.
+      - name: Installer harness (install.sh, macOS)
+        if: runner.os == 'macOS'
+        run: sh scripts/install_test.sh
+
       - name: Installer harness (install.ps1)
         if: runner.os == 'Windows'
         shell: pwsh

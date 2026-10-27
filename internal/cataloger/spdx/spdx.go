@@ -138,8 +138,21 @@ func findRootPackageID(doc document) string {
 // versioning the same dist tag (nodejs builds npm 8.19.3-1.16.19.1.1.el9_2
 // from 16.19.1-1.el9_2). Measured on rhel-9.6.z: 43,105 edges share the
 // release, 28 more the dist tag, and the 1,073 sharing neither are fixtures.
-func sourceRPMOf(doc document) map[string]string {
-	type rpmID struct{ name, release string }
+//
+// The source keeps its EVR, from its own purl (EVROf: the epoch only when
+// the purl names one). The matcher compares a lookup under the source's name
+// against the source's version (D41), and a subpackage's version is often
+// not its source's: npm 1:8.19.3-1.16.19.1.1.el9_2 from nodejs
+// 1:16.19.1-1.el9_2, mod_ssl 1:2.4.62-1.fc40 from httpd 2.4.62-1.fc40. With
+// the name alone, npm 8 was compared with a nodejs 16 fix and a fixed npm
+// was reported vulnerable, and mod_ssl's epoch hid an httpd fix (2026-10-27
+// review). A source purl with no version gives none, so the binary's own
+// version is compared, as before: it can pair (its release and that of a
+// binary whose version carries none are both ""), and EVROf's empty-version
+// guard is what keeps its epoch qualifier from becoming a bare "1:"
+// (TestParse_ASourceWithNoVersionGivesNoEVR).
+func sourceRPMOf(doc document) map[string]pkgmeta.SourcePackage {
+	type rpmID struct{ name, evr, release string }
 	srcs := make(map[string]rpmID)
 	bins := make(map[string]string) // SPDXID -> release of its first binary rpm purl
 	for _, p := range doc.Packages {
@@ -152,7 +165,7 @@ func sourceRPMOf(doc document) map[string]string {
 				continue
 			}
 			if parsed.Qualifiers["arch"] == "src" {
-				srcs[p.SPDXID] = rpmID{parsed.Name, rpmRelease(parsed.Version)}
+				srcs[p.SPDXID] = rpmID{parsed.Name, pkgmeta.EVROf(parsed), rpmRelease(parsed.Version)}
 				break
 			}
 			if _, ok := bins[p.SPDXID]; !ok {
@@ -167,7 +180,7 @@ func sourceRPMOf(doc document) map[string]string {
 		tag := rhelDistTag(src.release)
 		return tag != "" && tag == rhelDistTag(binRelease)
 	}
-	out := make(map[string]string)
+	out := make(map[string]pkgmeta.SourcePackage)
 	for _, r := range doc.Relationships {
 		var src, bin string
 		switch r.RelationshipType {
@@ -187,7 +200,7 @@ func sourceRPMOf(doc document) map[string]string {
 			continue
 		}
 		if _, done := out[bin]; !done {
-			out[bin] = s.name
+			out[bin] = pkgmeta.SourcePackage{Name: s.name, Version: s.evr}
 		}
 	}
 	return out
@@ -220,10 +233,11 @@ func rhelDistTag(release string) string {
 // land as one entry the overwhelming majority of the time, but the shape
 // itself does not guarantee exactly one.
 //
-// relSource is the source rpm name sourceRPMOf found for this package, or "".
-// It is used only for an rpm candidate whose own purl named no source: an
-// explicit `upstream` qualifier is the more specific statement and wins.
-func catalogPackage(p pkg, relSource string, target *pkgmeta.Target, stats *cyclonedx.Stats) {
+// relSource is the source rpm sourceRPMOf found for this package, or the
+// zero value. It is used only for an rpm candidate whose own purl named no
+// source: an explicit `upstream` qualifier is the more specific statement
+// and wins, and keeps its own name-only Source.
+func catalogPackage(p pkg, relSource pkgmeta.SourcePackage, target *pkgmeta.Target, stats *cyclonedx.Stats) {
 	stats.Components++
 
 	var purls []string
@@ -258,8 +272,9 @@ func catalogPackage(p pkg, relSource string, target *pkgmeta.Target, stats *cycl
 		candidate, status := resolvePURL(parsed, raw)
 		switch status {
 		case statusOK:
-			if candidate.Type == "rpm" && candidate.Source == nil && relSource != "" {
-				candidate.Source = &pkgmeta.SourcePackage{Name: relSource}
+			if candidate.Type == "rpm" && candidate.Source == nil && relSource.Name != "" {
+				src := relSource
+				candidate.Source = &src
 			}
 			key := tuple{candidate.Ecosystem, candidate.Name, candidate.Version}
 			if !seen[key] {

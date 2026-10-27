@@ -140,7 +140,10 @@ done
 # list: a temp dir with a space in its path would otherwise split every
 # key path and refuse a genuine release as "does not verify".
 verify_with_openssl() {
-	base64 -d "${tmp}/${sums}.sig" >"${tmp}/sig.der" 2>/dev/null || return 1
+	# On stdin, never as an argument: Apple's base64 takes its input only
+	# from stdin (or -i), and a positional file is a usage error there, so
+	# a genuine release failed to verify on every Mac (2026-10-27 review).
+	base64 -d <"${tmp}/${sums}.sig" >"${tmp}/sig.der" 2>/dev/null || return 1
 	for k in "$tmp"/key*.pub; do
 		[ -f "$k" ] || continue
 		if openssl dgst -sha256 -verify "$k" -signature "${tmp}/sig.der" "${tmp}/${sums}" >/dev/null 2>&1; then

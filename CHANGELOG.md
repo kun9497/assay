@@ -7,6 +7,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- In SPDX SBOMs, a binary rpm linked to its source by a `GENERATES` / `GENERATED_FROM`
+  relationship is judged on the source's version under the source's name. Before, npm was
+  compared with nodejs fixes (a false positive on Red Hat's CVE-2023-23920 for the fixed
+  npm) and Fedora's mod_ssl epoch could hide an httpd fix. (D152, revises D143)
+- `install.sh` verifies signatures on macOS: it no longer passes base64 a file argument,
+  which Apple's base64 rejects, so every genuine release was refused there. (D151)
+- A signature payload that cannot be downloaded (403, 404, 503) is reported as a fetch
+  failure, not as a signature that does not verify: `db update` says so and still refuses,
+  and the published `status.json` keeps its last observation instead of showing
+  `signed: false`. (D150)
+
 ## [0.12.0] - 2026-10-27
 
 ### Added

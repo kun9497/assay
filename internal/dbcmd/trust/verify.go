@@ -45,6 +45,18 @@ var (
 	// ErrNoKeyVerifies: a signature tag exists and no layer of it verifies
 	// under any trusted key with a payload that binds the pulled digest.
 	ErrNoKeyVerifies = errors.New("no signature verified under a trusted key")
+	// ErrSignatureUnreadable: a signature tag exists, no layer verified,
+	// and at least one layer's payload could not be fetched -- so whether
+	// the artifact is validly signed is not known. Neither ErrNotSigned
+	// (the tag is there) nor ErrNoKeyVerifies (an unread layer was never
+	// checked): a caller treats it as the transport failure it is, which
+	// keeps --allow-unsigned out of reach and a status page from
+	// publishing signed:false over a registry hiccup.
+	ErrSignatureUnreadable = errors.New("signature could not be read")
+
+	// errPayloadUnread marks a verifyLayer failure that happened before
+	// anything was checked: the payload never arrived.
+	errPayloadUnread = errors.New("payload not read")
 )
 
 // SigTag is cosign's tag for a digest's signature.
@@ -60,7 +72,9 @@ func SigTag(digest v1.Hash) string {
 // PayloadType, and names digest as the signed manifest. The first layer to
 // pass accepts; on total failure the error lists every layer's reason,
 // because cosign appends a layer on re-sign and a diagnostic that stopped at
-// the first would hide the one that mattered.
+// the first would hide the one that mattered. That failure is
+// ErrSignatureUnreadable when some layer's payload could not be fetched
+// (that layer might have verified), else ErrNoKeyVerifies.
 func Verify(ctx context.Context, repo name.Repository, digest v1.Hash, keys []PublicKey, opts ...remote.Option) (string, error) {
 	tag := repo.Tag(SigTag(digest))
 	// ctx reaches the registry through the options; appended last so a
@@ -105,15 +119,22 @@ func Verify(ctx context.Context, repo name.Repository, digest v1.Hash, keys []Pu
 	}
 
 	var reasons []string
+	unread := false
 	for i, layer := range layers {
 		id, err := verifyLayer(layer, manifest.Layers[i].Annotations, digest, keys)
 		if err == nil {
 			return id, nil
 		}
+		if errors.Is(err, errPayloadUnread) {
+			unread = true
+		}
 		reasons = append(reasons, fmt.Sprintf("layer %d: %v", i, err))
 	}
 	if len(reasons) == 0 {
 		reasons = append(reasons, "no layers")
+	}
+	if unread {
+		return "", fmt.Errorf("%w (%s): %s", ErrSignatureUnreadable, tag, strings.Join(reasons, "; "))
 	}
 	return "", fmt.Errorf("%w (%s): %s", ErrNoKeyVerifies, tag, strings.Join(reasons, "; "))
 }
@@ -141,12 +162,12 @@ func verifyLayer(layer v1.Layer, annotations map[string]string, digest v1.Hash, 
 	}
 	rc, err := layer.Compressed()
 	if err != nil {
-		return "", fmt.Errorf("read payload: %w", err)
+		return "", readFailure(err)
 	}
 	defer rc.Close()
 	raw, err := io.ReadAll(io.LimitReader(rc, MaxPayloadBytes+1))
 	if err != nil {
-		return "", fmt.Errorf("read payload: %w", err)
+		return "", readFailure(err)
 	}
 	if len(raw) > MaxPayloadBytes {
 		return "", fmt.Errorf("payload exceeds the %d-byte cap", MaxPayloadBytes)
@@ -176,4 +197,35 @@ func verifyLayer(layer v1.Layer, annotations map[string]string, digest v1.Hash, 
 		return "", fmt.Errorf("signed digest %s is not the pulled digest %s", p.Critical.Image.Digest, digest)
 	}
 	return keyID, nil
+}
+
+// readFailure classifies a payload read error. The layer is invalid only
+// when ggcr checked bytes the registry did send and they were wrong: a blob
+// that does not hash to its digest, or a size that is not the descriptor's.
+// Every other read error -- the registry refusing or erroring (after the
+// client's retries), the network, a stream cut short over HTTP/1 or reset
+// over HTTP/2, a cancelled context, or a failure of a kind not listed --
+// leaves the layer unchecked (errPayloadUnread). Defaulting to unread is
+// the safe side: an unread layer still refuses the install, and only keeps
+// a status page from announcing a signature outage it did not observe.
+//
+// A typed transport error is decided first, so a registry whose error body
+// happens to contain ggcr's wording is still a transport failure. ggcr's
+// checks are recognised by their messages because their types are in its
+// internal package; TestVerify_ABlobThatDoesNotMatchItsDigestIsInvalid
+// fails if an upgrade changes the wording.
+func readFailure(err error) error {
+	var terr *transport.Error
+	if errors.As(err, &terr) || !contentMismatch(err) {
+		return fmt.Errorf("read payload: %w: %w", errPayloadUnread, err)
+	}
+	return fmt.Errorf("read payload: %w", err)
+}
+
+// contentMismatch reports whether err is one of ggcr's checks of received
+// bytes (internal/verify: "error verifying Digest|Size|size|<algo> checksum";
+// remote/fetcher.go: a Content-Length that "does not match expected size").
+func contentMismatch(err error) bool {
+	s := err.Error()
+	return strings.Contains(s, "error verifying ") || strings.Contains(s, "does not match expected size")
 }

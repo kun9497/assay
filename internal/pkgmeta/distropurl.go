@@ -141,17 +141,27 @@ func ResolveDistroPURL(p PURL, componentVersion, docEcosystem string, hasDocDist
 	if version == "" {
 		version = componentVersion
 	} else if p.Type == "rpm" || p.Type == "deb" {
-		// The purl's own @version is version-release WITHOUT the epoch —
-		// evr()'s shape (rpmdb/header.go) omits it the same way when zero —
-		// and Qualifiers["epoch"] carries it separately, written only when
-		// present and non-zero. Prepending it here, in that same condition,
-		// is what makes the two sides comparable.
-		if epoch, ok := p.Qualifiers["epoch"]; ok && epoch != "" && epoch != "0" {
-			version = epoch + ":" + version
-		}
+		version = EVROf(p)
 	}
 	res.Version = version
 	return res
+}
+
+// EVROf is an rpm or deb purl's version with its epoch: the purl's own
+// @version is version-release WITHOUT the epoch -- evr()'s shape
+// (rpmdb/header.go) omits it the same way when zero -- and
+// Qualifiers["epoch"] carries it separately, written only when present and
+// non-zero. Prepending it in that same condition is what makes the two
+// sides comparable. A purl that names no epoch gets none: an epoch is never
+// borrowed from another package. "" when the purl has no version.
+func EVROf(p PURL) string {
+	if p.Version == "" {
+		return ""
+	}
+	if epoch, ok := p.Qualifiers["epoch"]; ok && epoch != "" && epoch != "0" {
+		return epoch + ":" + p.Version
+	}
+	return p.Version
 }
 
 // isPubkeyPURL mirrors rpmdb's isPubkey (header.go): a gpg-pubkey row is a
