@@ -206,6 +206,12 @@ func verifyLayer(layer v1.Layer, annotations map[string]string, digest v1.Hash, 
 // -- leaves the layer unchecked (errPayloadUnread). Anything else came from
 // bytes that did arrive, such as a blob that does not match its digest, and
 // is a wrong signature, not an unknown one.
+//
+// The net.Error and context clauses overlap on the path tests can stage: a
+// fetch cut off by its context arrives as a *url.Error, which is a net.Error
+// and wraps context.Canceled, so dropping either clause alone is an
+// equivalent mutation (verified 2026-10-27); dropping both is caught. Both
+// stay, because a context error need not come wrapped in a url.Error.
 func readFailure(err error) error {
 	var terr *transport.Error
 	var nerr net.Error

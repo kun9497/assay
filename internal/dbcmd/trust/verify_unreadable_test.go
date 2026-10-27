@@ -188,3 +188,30 @@ func TestVerify_APayloadStreamCutShortIsUnreadable(t *testing.T) {
 		t.Fatalf("err = %v, want ErrSignatureUnreadable", err)
 	}
 }
+
+// The caller's context ends while a payload is being fetched (dbstatus's
+// own deadline, say): nothing was checked, so unreadable.
+func TestVerify_AContextEndedMidFetchIsUnreadable(t *testing.T) {
+	var path atomic.Value
+	reached := make(chan struct{}, 1)
+	host := trusttest.NewRegistry(t, func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if p, _ := path.Load().(string); r.Method == http.MethodGet && r.URL.Path == p {
+				reached <- struct{}{}
+				<-r.Context().Done()
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	})
+	ref, d := trusttest.PushArtifact(t, host, "assay-db", "v14")
+	key := trusttest.NewKey(t)
+	trusttest.SignArtifact(t, key, ref, d)
+	path.Store("/v2/assay-db/blobs/" + sigLayerDigests(t, ref.Context(), d)[0].String())
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { <-reached; cancel() }()
+	_, err := Verify(ctx, ref.Context(), d, []PublicKey{keyOf(t, key)})
+	if !errors.Is(err, ErrSignatureUnreadable) || errors.Is(err, ErrNoKeyVerifies) {
+		t.Fatalf("err = %v, want ErrSignatureUnreadable", err)
+	}
+}
