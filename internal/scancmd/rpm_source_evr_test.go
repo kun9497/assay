@@ -108,13 +108,34 @@ func TestRun_A4_SourceLookupComparesTheSRPMsEVR(t *testing.T) {
 	}
 }
 
-// Without an installed package named like the source there is nothing on
-// the image that states the source's epoch, and the binary's own is used:
-// the version-release still comes from the SRPM. This pins the residual the
-// measurement found (perl-IO on ubi8/nodejs-18, where only perl-interpreter
-// is installed): a source epoch above the binary's still reads as below the
-// fix. It was a false positive before the change too.
-func TestRun_A4_WithoutTheSameNamePackageTheBinaryEpochIsUsed(t *testing.T) {
+// Without an installed package named like the source, the epoch is the
+// one most common among its siblings built at the SRPM's own
+// version-release, which carry the spec's top-level Epoch (on 19 measured
+// images this matched the main package's epoch in 338 of 338 SRPMs where
+// that package was present). mod_ssl's explicit Epoch: 1 is outvoted by
+// httpd-core and httpd-filesystem; perl-IO's own version is skipped and
+// perl-interpreter's 4 is taken -- the false positive the measurement found
+// on ubi8/nodejs-18 is gone.
+func TestRun_A4_WithoutTheSameNamePackageTheSiblingsEpochIsUsed(t *testing.T) {
+	db := a4DB(t, map[string]string{"httpd": "2.4.63-1.el9", "perl": "4:5.32.1-484.el9_8"})
+	got := a4Scan(t, db, []ndbFixtureEntry{
+		{name: "httpd-core", version: "2.4.62", release: "1.el9", sourcerpm: "httpd-2.4.62-1.el9.src.rpm"},
+		{name: "httpd-filesystem", version: "2.4.62", release: "1.el9", sourcerpm: "httpd-2.4.62-1.el9.src.rpm"},
+		{name: "mod_ssl", version: "2.4.62", release: "1.el9", sourcerpm: "httpd-2.4.62-1.el9.src.rpm", epoch: 1},
+		{name: "perl-interpreter", version: "5.32.1", release: "484.el9_8", sourcerpm: "perl-5.32.1-484.el9_8.src.rpm", epoch: 4},
+		{name: "perl-IO", version: "1.43", release: "484.el9_8", sourcerpm: "perl-5.32.1-484.el9_8.src.rpm"},
+	})
+	if want := []string{"httpd-core", "httpd-filesystem", "mod_ssl"}; !slices.Equal(got, want) {
+		t.Errorf("packages with findings = %v, want %v: mod_ssl found through httpd-core's epoch, perl-IO clean through perl-interpreter's", got, want)
+	}
+}
+
+// With neither the same-name package nor a sibling at the SRPM's
+// version-release installed, nothing on the image states the source's epoch
+// and the binary's own is used, as before A4; the version-release still
+// comes from the SRPM. A source epoch above the binary's then still reads as
+// below the fix: the one residual false positive, pinned.
+func TestRun_A4_WithNoMainPackageAndNoSiblingTheBinaryEpochIsUsed(t *testing.T) {
 	db := a4DB(t, map[string]string{"perl": "4:5.32.1-484.el9_8"})
 	got := a4Scan(t, db, []ndbFixtureEntry{
 		{name: "perl-IO", version: "1.43", release: "484.el9_8", sourcerpm: "perl-5.32.1-484.el9_8.src.rpm"},
@@ -122,12 +143,10 @@ func TestRun_A4_WithoutTheSameNamePackageTheBinaryEpochIsUsed(t *testing.T) {
 	if want := []string{"perl-IO"}; !slices.Equal(got, want) {
 		t.Errorf("packages with findings = %v, want %v (the documented residual)", got, want)
 	}
-	// And with the binary's own epoch matching the source's, the SRPM
-	// version-release is what decides: fixed.
 	got = a4Scan(t, db, []ndbFixtureEntry{
-		{name: "perl-interpreter", version: "5.32.1", release: "484.el9_8", sourcerpm: "perl-5.32.1-484.el9_8.src.rpm", epoch: 4},
+		{name: "perl-Fake", version: "5.32.1", release: "484.el9_8", sourcerpm: "perl-5.32.1-484.el9_8.src.rpm", epoch: 4},
 	})
 	if len(got) != 0 {
-		t.Errorf("packages with findings = %v, want none", got)
+		t.Errorf("packages with findings = %v, want none: the binary's own epoch and the SRPM's version-release reach the fix", got)
 	}
 }

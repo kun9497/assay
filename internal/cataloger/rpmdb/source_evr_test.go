@@ -22,3 +22,18 @@ func TestResolveSourceVersions_UnparsableSourceRPMKeepsTheBinaryEVR(t *testing.T
 		t.Errorf("a package with no Source was given one: %+v", pkgs[1].Source)
 	}
 }
+
+// A tie between sibling epochs takes the lower: "" (no epoch) and "0" read
+// as zero, so a tie between none and 2 is none. Unreachable from the image
+// test's fixtures, which are all decided by a majority.
+func TestMostCommonEpoch_TieTakesTheLower(t *testing.T) {
+	if e, ok := mostCommonEpoch(map[string]int{"2": 1, "": 1}); !ok || e != "" {
+		t.Errorf("tie between none and 2 = %q, %v; want none", e, ok)
+	}
+	if e, ok := mostCommonEpoch(map[string]int{"10": 2, "9": 2}); !ok || e != "9" {
+		t.Errorf("tie between 9 and 10 = %q; want 9 (numeric, not lexical)", e)
+	}
+	if _, ok := mostCommonEpoch(nil); ok {
+		t.Error("no siblings reported an epoch")
+	}
+}

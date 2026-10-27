@@ -24,6 +24,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/kun9497/assay/internal/pkgmeta"
@@ -310,12 +311,19 @@ func isPubkey(h header) bool {
 // cleared one, npm 1:8.19.3 was compared with nodejs fixes.
 //
 // The version-release is the SOURCERPM filename's. The filename carries no
-// epoch, so the epoch is that of the installed package named like the source
-// -- the spec's main package, which carries the spec's top-level Epoch. When
-// no such package is installed nothing on the image states the source's
-// epoch, and the binary's own is used, as before; the version-release still
-// comes from the SRPM. A SOURCERPM that does not parse leaves the binary's
-// EVR in place.
+// epoch, so the epoch is, in order:
+//   - that of the installed package named like the source: the spec's main
+//     package, which carries the spec's top-level Epoch;
+//   - else the most common one (the lower on a tie) among the installed
+//     packages from the same SOURCERPM whose version-release is the SRPM's:
+//     a subpackage that keeps the spec's version keeps its Epoch too, and a
+//     subpackage with an Epoch of its own (mod_ssl's 1) is outvoted. On 19
+//     real images (2026-10-27) this matched the main package's epoch in 338
+//     of 338 SRPMs where the main package was installed; the lowest instead
+//     of the most common got perl wrong (perl-doc is epoch 0);
+//   - else the binary's own, as before A4.
+//
+// A SOURCERPM that does not parse leaves the binary's EVR in place.
 func ResolveSourceVersions(pkgs []pkgmeta.Package) {
 	// First seen per name. Packages sharing a name come from one spec
 	// (multilib pairs, several kernels) and so share its epoch: keeping the
@@ -323,10 +331,19 @@ func ResolveSourceVersions(pkgs []pkgmeta.Package) {
 	// rpmdb (verified 2026-10-27), kept only so the result never depends on
 	// which copy came last.
 	epochOf := make(map[string]string, len(pkgs))
+	siblings := make(map[string]map[string]int) // SOURCERPM -> epoch -> count
 	for _, p := range pkgs {
 		if _, seen := epochOf[p.Name]; !seen {
 			epochOf[p.Name] = epochPart(p.Version)
 		}
+		vr := pkgmeta.SourceRPMVersion(p.Upstream)
+		if vr == "" || strings.TrimPrefix(p.Version, epochPart(p.Version)+":") != vr {
+			continue
+		}
+		if siblings[p.Upstream] == nil {
+			siblings[p.Upstream] = map[string]int{}
+		}
+		siblings[p.Upstream][epochPart(p.Version)]++
 	}
 	for i := range pkgs {
 		p := &pkgs[i]
@@ -337,8 +354,11 @@ func ResolveSourceVersions(pkgs []pkgmeta.Package) {
 		if vr == "" {
 			continue
 		}
-		e, installed := epochOf[p.Source.Name]
-		if !installed {
+		e, ok := epochOf[p.Source.Name]
+		if !ok {
+			e, ok = mostCommonEpoch(siblings[p.Upstream])
+		}
+		if !ok {
 			e = epochPart(p.Version)
 		}
 		if e != "" {
@@ -346,6 +366,24 @@ func ResolveSourceVersions(pkgs []pkgmeta.Package) {
 		}
 		p.Source.Version = vr
 	}
+}
+
+// mostCommonEpoch is the epoch counted most often, the numerically lower on
+// a tie ("" is 0), or false when there is none.
+func mostCommonEpoch(counts map[string]int) (string, bool) {
+	best, bestN, found := "", 0, false
+	for e, n := range counts {
+		if !found || n > bestN || (n == bestN && epochLess(e, best)) {
+			best, bestN, found = e, n, true
+		}
+	}
+	return best, found
+}
+
+func epochLess(a, b string) bool {
+	ai, _ := strconv.Atoi(a)
+	bi, _ := strconv.Atoi(b)
+	return ai < bi
 }
 
 // epochPart is the epoch of an evr()-shaped version, "" when it has none
