@@ -6325,13 +6325,19 @@ rather sometimes advertise a fix that turns out to be paywalled than emit that f
 **결정.** 이미지의 rpmdb 에서 읽은 패키지의 `Source.Version` 은 바이너리가 아니라 source rpm 의 EVR
 을 담는다. version-release 는 SOURCERPM 파일 이름의 것이다. 파일 이름에는 epoch 가 없으므로, epoch 는
 다음 중 존재하는 첫 번째에서 얻는다:
-1. source 와 같은 이름으로 설치된 패키지: spec 의 main 패키지이며, spec 최상위 Epoch 를 가진다.
+1. source 와 같은 이름으로 설치되었고 같은 SOURCERPM 에서 빌드된 패키지: spec 의 main 패키지이며,
+   spec 최상위 Epoch 를 가진다.
 2. 같은 SOURCERPM 에서 나왔고 version-release 가 SRPM 의 것인 설치된 패키지들 중 가장 흔한 epoch.
    동률이면 낮은 쪽이다. spec 의 버전을 유지하는 하위 패키지는 그 Epoch 도 유지하고, 자기만의 Epoch
    를 가진 것(mod_ssl 의 `Epoch: 1`)은 표에서 밀린다.
-3. 이전처럼 바이너리 자신의 epoch.
+3. 다른 빌드에서 나온, source 와 같은 이름의 패키지(부분 업데이트). 2단계 뒤에 오므로, 두 빌드 사이의
+   Epoch 상승이 새 빌드에 옛 epoch 를 빌려줄 수 없다.
+4. 이전처럼 바이너리 자신의 epoch.
 
-파싱되지 않는 SOURCERPM 은 바이너리의 EVR 을 그대로 둔다. `rpmdb.ResolveSourceVersions` 가 데이터베이스
+Azure Linux 키(CBL-Mariner 포함)와 Photon 키에서는 source 버전이 epoch 를 아예 갖지 않는다. 이들의
+피드는 쓸 만한 epoch 를 적지 않는다: Azure 는 모든 fix 에 `0:` 를 쓰고 Photon 은 아무것도 쓰지 않는다.
+source 쪽에 epoch 가 있으면 perl-Errno 와 perl 자신이 모든 fix 보다 높게 정렬될 것이다. 파싱되지 않는
+SOURCERPM 은 바이너리의 EVR 을 그대로 둔다. `rpmdb.ResolveSourceVersions` 가 데이터베이스
 전체를 읽은 뒤 이를 한 번 수행하며, `catalogFromImage` 가 세 백엔드 모두에 대해 호출한다. 매처는
 바뀌지 않는다: source 이름으로 한 조회는 이미 `Source.Version` 을 비교한다(D41). VEX 는 자신의 source
 비교, 즉 SRPM 버전과 바이너리의 epoch 를 유지하며, 이는 보고하는 쪽으로 기운다.
@@ -6354,7 +6360,9 @@ rather sometimes advertise a fix that turns out to be paywalled than emit that f
 - ubi9/perl-532 의 perl 하위 패키지 92개는 반대 epoch 모양을 가진다.
 - Fedora 와 UBI9 의 httpd 이미지에서 mod_ssl 은 바이너리 epoch 모양을 가진다.
 - main 패키지가 설치된 SRPM 338개 중 338개에서 sibling 규칙이 main 패키지의 epoch 와 일치했다. 대신
-  가장 낮은 sibling epoch 를 취하면 perl 이 틀렸는데, perl-doc 이 epoch 0 이기 때문이다.
+  가장 낮은 sibling epoch 를 취하면 perl 이 틀렸는데, perl-doc 이 epoch 0 이기 때문이다. 대신 하위
+  패키지별로(각 하위 패키지를 자기 SRPM 의 main 패키지와) 확인하면 표결은 710건 중 710건에서
+  일치했다.
 
 공개된 데이터베이스로 스캔한 전후:
 - ubi9/perl-532: 발견 8,731 → 8,389. perl 을 통한 perl-* 발견 282개와 nodejs 를 통한 npm 발견 60개가
@@ -6370,8 +6378,10 @@ fix 보다 낮게 읽힌다: 오탐이며 테스트로 고정되어 있다. SBOM
 한정자가 붙은 purl 은 여전히 바이너리의 EVR 을 주고, D152 가 SPDX 관계를 다룬다.
 
 **범위 밖, 위험 요소로 기록.** Azure Linux 의 OVAL 은 모든 fix 에 epoch `0:` 를 쓰고 Photon 의 피드는
-epoch 를 쓰지 않는다. 따라서 실제 epoch 를 가진 설치 패키지는 fix 보다 낮게 비교되지 않을 수 있다. 이는
-실제 이미지에서 검증하고 따로 결정할 일이다.
+epoch 를 쓰지 않는다. 조회가 source 를 거치는 패키지(이름이 source 의 것이거나 하위 패키지인 경우)에
+대해서는 이 결정이 해당 키에서 epoch 를 버리며, 이는 그 피드들에 맞다. 자기만의 이름으로 조회되는
+바이너리는 여전히 자신의 epoch 를 비교하므로 fix 보다 낮게 정렬되지 않을 수 있다. 이는 실제 이미지에서
+검증하고 따로 결정할 일로 남는다.
 
 **검증.** `Run` 을 통해, ndb rpmdb 를 가진 docker-archive 이미지(fixture 빌더가 이제 EPOCH 를 쓴다)로
 source 키 레코드에 대해:
@@ -6381,9 +6391,23 @@ source 키 레코드에 대해:
 - perl-interpreter 는 있고 perl 은 없어도 perl-IO 는 깨끗하다;
 - 둘 다 없으면 남은 오탐이 고정된다.
 
-단위 테스트는 파싱되지 않는 SOURCERPM, Source 가 없는 패키지, 타이브레이크를 다룬다. 변이 테스트는 첫
-규칙에 대해, 이어서 sibling 대체에 대해 수행했다: 변이 열두 개 중 열 개는 직접 잡혔고, 하나는 테스트를
-강화한 뒤 잡혔으며, 하나는 등가(이름별 처음 본 epoch 대 마지막 본 epoch)이고 코드가 그렇게 말한다.
+단위 테스트가 다루는 것:
+- 단계들이 서로 다른 답을 내는 경우의 각 단계;
+- 가장 낮은 epoch 보다 가장 흔한 epoch;
+- 타이브레이크;
+- Azure Linux 와 Photon 키의 epoch 없음;
+- 파싱되지 않는 SOURCERPM;
+- Source 가 없는 패키지.
+
+브랜치 리뷰(wf_8d3f5559-cf7)는 이미지 fixture 가 모든 단계에서 같은 답을 내고 있음을 발견했다. 규칙
+1 을 지워도 스위트가 green 이었고, 적어 둔 변이 집계는 sibling 단계보다 앞선 것이었다. 동작 결함도
+두 가지 찾았다:
+- 규칙 1 이 빌드를 가로질러 이름으로 일치했다;
+- Azure Linux 에서 perl 의 epoch 가 모든 하위 패키지에 닿았다.
+
+둘 다 고쳤고 변이 표를 처음부터 다시 돌렸다: 변이 열네 개, 모두 잡혔다. 각 단계의 제거 또는 순서
+변경, 가장 낮은 epoch 를 취하는 표결, 높은 쪽을 취하는 타이브레이크, version-release 필터, epoch 없는
+두 접두사, 호출 지점, 파싱 불가 및 nil 가드, 무시된 SRPM version-release 를 다룬다.
 
 ---
 

@@ -2037,8 +2037,10 @@ Go가 먼저입니다. 표준 라이브러리 `debug/buildinfo`가 모듈 목록
 Linux 의 OVAL 은 spec 에 Epoch 가 있는 패키지(perl 은 4)까지 포함해 모든 수정 버전을 epoch `0:` 으로 쓰고,
 Photon 의 피드는 epoch 를 전혀 쓰지 않습니다(nginx 의 spec 은 Epoch: 1). 그러면 epoch 를 실제로 가진
 설치된 바이너리는 조회에 어느 이름을 쓰든 그런 수정보다 항상 높게 정렬됩니다: 조용한 미탐입니다. A4
-조사에서 발견했고, 수정(그 ecosystem 들에서는 version-release 만 비교하는 것이 유력한 후보)을 정하기
-전에 실제 Azure Linux 와 Photon 이미지에서 측정할 예정입니다.
+조사에서 발견했습니다. D153 이 이 키들에서 source 버전의 epoch 를 이미 빼므로, source 를 통해 조회되는
+모든 패키지(서브패키지, 또는 source 와 이름이 같은 패키지)는 해결되었습니다. 남은 것은 자기 이름으로
+조회되면서 epoch 를 가진 바이너리입니다. 수정(그 ecosystem 들에서는 version-release 만 비교하는 것이
+유력한 후보)을 정하기 전에 실제 Azure Linux 와 Photon 이미지에서 측정할 예정입니다.
 
 **~~SUSE의 bare product purl은 버전 비슷한 조각으로 끝나는 이름을 잘못 쪼갭니다.~~ — D126으로
 해결(2026-10-21, 발견한 그날).** SUSE의 생성기는 bare product `libwmf-0_2-7`을

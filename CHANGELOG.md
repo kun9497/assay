@@ -12,7 +12,8 @@ All notable changes to this project are documented here. The format follows
   version, not the binary's. Before, a subpackage with its own version or epoch was judged
   in the wrong namespace: perl's subpackages and npm never cleared their source's fix
   (−342 false positives on ubi9/perl-532, −46 on ubi8/nodejs-18), and mod_ssl's epoch could
-  hide an httpd fix on source-keyed feeds. (D153, audit A4)
+  hide an httpd fix on source-keyed feeds. On Azure Linux and Photon, whose feeds carry no
+  usable epoch, the source version carries none. (D153, audit A4)
 - SLES service packs past general support (12 SP5, 15 SP4–SP6 and others with an LTSS
   track): when SUSE lists the mainline product as affected with no fix and the SP-LTSS
   product as fixed, the LTSS fix is kept. Before, the fix was dropped, and an LTSS image with

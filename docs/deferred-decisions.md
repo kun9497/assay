@@ -2095,9 +2095,12 @@ Not deferred decisions — traps to handle when the relevant code is written.
 Azure Linux's OVAL writes every fixed version with epoch `0:`, including packages whose spec
 has an Epoch (perl's is 4), and Photon's feed writes no epoch at all (nginx's spec has
 Epoch: 1). An installed binary that does carry its epoch then sorts above every such fix,
-whichever name the lookup uses: a silent false negative. Found by the A4 investigation; to be
-measured on real Azure Linux and Photon images before a fix (comparing version-release only
-for those ecosystems is the obvious candidate) is decided.
+whichever name the lookup uses: a silent false negative. Found by the A4 investigation. D153 already
+drops the epoch from the source version on these keys, which covers every package looked up
+through its source (a subpackage, or a package named like its source). What remains is a
+binary looked up under a name of its own that carries an epoch. That is to be measured on
+real Azure Linux and Photon images before a fix (comparing version-release only for those
+ecosystems is the obvious candidate) is decided.
 
 **~~SUSE's bare product purl mis-splits a name that ends in a version-like segment.~~ —
 resolved in D126 (2026-10-21, the same day it was found).** SUSE's generator emits the bare

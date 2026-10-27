@@ -6654,14 +6654,19 @@ Mutation testing:
 **Decision.** For a package read from an image's rpmdb, `Source.Version` holds the source rpm's
 EVR, not the binary's. The version-release is the SOURCERPM filename's. The filename carries no
 epoch, so the epoch comes from the first of these that exists:
-1. The installed package named like the source: the spec's main package, which carries the
-   spec's top-level Epoch.
+1. The installed package named like the source and built from the same SOURCERPM: the spec's
+   main package, which carries the spec's top-level Epoch.
 2. The most common epoch, the lower on a tie, among the installed packages from the same
    SOURCERPM whose version-release is the SRPM's. A subpackage that keeps the spec's version
    keeps its Epoch, and one with an Epoch of its own (mod_ssl's `Epoch: 1`) is outvoted.
-3. The binary's own epoch, as before.
+3. The package named like the source from another build (a partial update). It comes after
+   step 2, so an Epoch bump between the two builds cannot lend the new build the old epoch.
+4. The binary's own epoch, as before.
 
-A SOURCERPM that does not parse leaves the binary's EVR. `rpmdb.ResolveSourceVersions` does this
+For Azure Linux keys (CBL-Mariner's included) and Photon keys, the source version carries no
+epoch at all. Their feeds write none that can be used: Azure writes `0:` on every fix and
+Photon writes nothing. An epoch on the source side would otherwise sort perl-Errno, and perl
+itself, above every fix. A SOURCERPM that does not parse leaves the binary's EVR. `rpmdb.ResolveSourceVersions` does this
 once the whole database has been read, called from `catalogFromImage` for all three backends.
 The matcher is unchanged: a lookup under the source's name already compares `Source.Version`
 (D41). VEX keeps its own source comparison, the SRPM version with the binary's epoch, which errs
@@ -6688,7 +6693,8 @@ second call, after it was validated on the data.
 - mod_ssl has the binary-epoch shape on Fedora's and UBI9's httpd images.
 - The sibling rule matched the main package's epoch in 338 of 338 SRPMs where the main package
   was installed. Taking the lowest sibling epoch instead got perl wrong, because perl-doc is
-  epoch 0.
+  epoch 0. Checked per subpackage instead (each subpackage, against its own SRPM's main
+package), the vote matched in 710 of 710 cases.
 
 Scanned with the published database, before and after:
 - ubi9/perl-532: 8,731 → 8,389 findings. 282 perl-* findings through perl and 60 npm findings
@@ -6705,8 +6711,11 @@ not changed here: an upstream-qualified purl still gives the binary's EVR, and D
 SPDX relationships.
 
 **Not in scope, recorded as a hazard.** Azure Linux's OVAL writes epoch `0:` for every fix and
-Photon's feed writes none. An installed package with a real epoch may therefore never compare
-below a fix. That is to be verified on real images and decided separately.
+Photon's feed writes none. For a package whose lookup goes through its source (its name is the
+source's, or it is a subpackage), this decision drops the epoch on those keys, which is
+correct for those feeds. A binary looked up under a name of its own still compares its own
+epoch, and may never sort below a fix. That remains to be verified on real images and decided
+separately.
 
 **Verified.** Through `Run` on a docker-archive image with an ndb rpmdb, whose fixture builder
 now writes EPOCH, against source-keyed records:
@@ -6716,10 +6725,24 @@ now writes EPOCH, against source-keyed records:
 - with perl-interpreter but no perl, perl-IO is clean;
 - with neither, the residual false positive is pinned.
 
-Unit tests cover the unparsable SOURCERPM, a package with no Source, and the tie-break.
-Mutation testing ran on the first rule and then on the sibling fallback: twelve mutations, ten
-caught directly, one caught after its test was strengthened, and one equivalent (first-seen
-against last-seen epoch per name), which the code says so.
+Unit tests hold:
+- each step of the order, where the steps disagree;
+- the most common epoch over the lowest;
+- the tie-break;
+- no epoch on Azure Linux and Photon keys;
+- an unparsable SOURCERPM;
+- a package with no Source.
+
+The branch review (wf_8d3f5559-cf7) found the image fixtures agreeing on every step. Rule 1
+could be deleted with the suite green, and the stated mutation tally predated the sibling
+step. It also found two behaviour defects:
+- rule 1 matched by name across builds;
+- on Azure Linux, perl's epoch reached every subpackage.
+
+Both are fixed, and the mutation table was re-run from scratch: fourteen mutations, all
+caught. They cover each step removed or reordered, the vote taking the lowest, the tie taking
+the higher, the version-release filter, both epochless prefixes, the call site, the
+unparsable and nil guards, and the SRPM version-release ignored.
 
 ---
 
