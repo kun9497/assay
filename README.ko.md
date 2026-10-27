@@ -22,7 +22,7 @@
 ## 설치
 
 ```bash
-# 사전 빌드 바이너리 (Linux/macOS, amd64/arm64) — PATH 위로 바로 설치
+# 사전 빌드 바이너리 (Linux/macOS, amd64/arm64) — PATH 위로 바로 설치; Windows는 아래
 curl -sSfL https://raw.githubusercontent.com/kun9497/assay/6a8889050ebf24615b1ebd277ebbbda508babfbd/install.sh | sudo sh -s -- -b /usr/local/bin
 ```
 
@@ -33,6 +33,16 @@ curl -sSfL https://raw.githubusercontent.com/kun9497/assay/6a8889050ebf24615b1eb
 검증해 다른 릴리스를 설치합니다. 체크섬 파일에 서명이 없는 릴리스는 체크섬만으로 설치하지 않고
 거부합니다: v0.10.0 이 첫 서명 릴리스이므로 그보다 오래된 것은 `go install` 이나 릴리스 페이지로
 설치하세요.
+
+Windows에서는(이 스크립트를 처음 싣는 v0.12.0부터) PowerShell 5.1이나 7에서:
+
+```powershell
+irm https://raw.githubusercontent.com/kun9497/assay/6a8889050ebf24615b1ebd277ebbbda508babfbd/install.ps1 | iex
+```
+
+`install.ps1`은 같은 서명을 .NET으로 검증하므로 먼저 설치할 것이 없고, `assay.exe`를
+`%LOCALAPPDATA%\Programs\assay`에 설치합니다(`$env:ASSAY_INSTALL_DIR`로 바꾸고,
+`$env:ASSAY_VERSION`으로 다른 릴리스를 고릅니다). 그다음 PATH에 넣는 명령을 출력합니다.
 
 <details>
 <summary>다른 설치 방법</summary>

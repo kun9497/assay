@@ -52,8 +52,9 @@ is rebuilt nightly for the schema the latest release reads.
 ## Verifying what you download
 
 - **Release binaries**: each release's `assay_<version>_checksums.txt` is signed (the
-  `.sig` beside it), and `install.sh` verifies the signature against the keys it embeds
-  before it checks a checksum. v0.10.0 is the first signed release.
+  `.sig` beside it), and `install.sh` (and `install.ps1` on Windows) verifies the signature
+  against the keys it embeds before it checks a checksum. v0.10.0 is the first signed
+  release.
 - **The database**: `assay db update` verifies the artifact's cosign signature against keys
   built into the binary before writing anything, and refuses an unsigned artifact unless
   `--allow-unsigned` is passed (which `db status` then records). The public keys are in

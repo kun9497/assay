@@ -19,6 +19,8 @@ All notable changes to this project are documented here. The format follows
   open until it recovers. (D138)
 - `assay db status --output json` writes the same facts as the table as one JSON
   document with its own `schemaVersion` (1). (D147)
+- `install.ps1`: a Windows installer for PowerShell 5.1 and 7 that verifies the release's
+  checksums signature against the embedded keys before installing `assay.exe`. (D148)
 - `SECURITY.md` (private reporting through GitHub), `CONTRIBUTING.md`, this changelog, and
   [`docs/compatibility.md`](docs/compatibility.md), which states what a `schemaVersion` bump
   means for each machine-readable output. From report schema 15 on, every change to the

@@ -126,6 +126,15 @@ jobs:
           fi
           test "$(grep -c -- '^--- PASS: Test' platform.log)" -eq 6
 
+      # D148: install.ps1 against fake releases signed with test keys, under
+      # both Windows PowerShell 5.1 and PowerShell 7 -- the counterpart of the
+      # install.sh harness the build job runs. CI=true makes a missing edition
+      # a failure rather than a note.
+      - name: Installer harness (install.ps1)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/install_test.ps1
+
       - name: Build
         run: go build ./...
 

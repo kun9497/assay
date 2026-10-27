@@ -133,6 +133,9 @@ non-goals. They share almost no code with vulnerability matching.
 
 ## Install
 
+The signed installers (`install.sh`, and `install.ps1` on Windows, D148) are in the
+[README](../README.md#install). With Go:
+
 ```bash
 go install github.com/kun9497/assay/cmd/assay@latest
 ```
@@ -1005,6 +1008,9 @@ exited 0 while 24 findings went unmentioned.
 - [x] `db status --output json`, and `db` refuses arguments it does not take (D147) —
       one document with its own `schemaVersion`, the table's derived-count rules, held
       byte for byte; `db status`, `db ref` and `db build --seed` refuse extras with exit 2
+- [x] A Windows installer, verified the way install.sh is (D148) — `install.ps1` for
+      PowerShell 5.1 and 7, the checksums signature checked with .NET against the embedded
+      keys; its harness runs every attack case under both editions on windows-latest
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15

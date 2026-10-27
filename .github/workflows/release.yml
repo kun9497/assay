@@ -3,7 +3,10 @@
 # to the GitHub Release; attest build provenance; then pin the README's
 # install one-liner to the commit the release was built from.
 #
-#   scripts/prepare-release.sh vX.Y.Z   # sets install.sh's VERSION, commits
+#   sh scripts/prepare-release.sh vX.Y.Z   # sets install.sh's VERSION and
+#                                          # install.ps1's $DefaultVersion
+#   git commit -am "chore: prepare vX.Y.Z" && git push origin main
+#   # wait for CI on that commit (the installer harnesses check the two agree)
 #   git tag vX.Y.Z && git push origin vX.Y.Z
 #
 # Secrets: COSIGN_PRIVATE_KEY and COSIGN_PASSWORD (D137) sign the checksums
@@ -64,7 +67,7 @@ jobs:
           git fetch --depth=1 origin main
           git checkout -B main origin/main
           for f in README.md README.ko.md; do
-            sed -i -E "s#raw\.githubusercontent\.com/kun9497/assay/[^/]+/install\.sh#raw.githubusercontent.com/kun9497/assay/${GITHUB_SHA}/install.sh#" "$f"
+            sed -i -E "s#raw\.githubusercontent\.com/kun9497/assay/[^/]+/install\.(sh|ps1)#raw.githubusercontent.com/kun9497/assay/${GITHUB_SHA}/install.\1#g" "$f"
           done
           if git diff --quiet; then echo "README already pins ${GITHUB_SHA}"; exit 0; fi
           git config user.name "github-actions[bot]"
