@@ -284,9 +284,10 @@ type takenWindow struct {
 func splitDegenerate(c Comparer, in []advisory.Event) (walk []advisory.Event, taken []takenWindow) {
 	drop := make([]bool, len(in))
 	for i, e := range in {
-		// The sentinel is negative infinity, not the version "0": PEP 440
-		// compares it equal to "0.0", and a window it opens is never empty.
-		if e.Introduced == "" || e.Introduced == introducedSentinel {
+		// A window the sentinel opens may be taken out too (PEP 440 compares
+		// "0" equal to "0.0"): it is judged with atLeast like any other, and
+		// atLeast reads the sentinel as negative infinity.
+		if e.Introduced == "" {
 			continue
 		}
 		for j := i + 1; j < len(in); j++ {
