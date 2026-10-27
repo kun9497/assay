@@ -127,7 +127,16 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 	// algorithm sorts before walking. An advisory that lists a later window
 	// first is well-formed, and walking it in file order returns "not
 	// vulnerable" with no error — a silent miss on valid input.
-	events, err := sortEvents(c, r.Events)
+	//
+	// A window that closes at the version it opens at is taken out first and
+	// judged on its own (A7, D154): the sort orders a close before an open at
+	// the same version, which is what two windows meeting at a version need,
+	// and would turn [X,X) and [X,X] into windows that never close.
+	if err := validateBounds(c, r.Events); err != nil {
+		return false, Evidence{}, err
+	}
+	walked, points := splitDegenerate(c, r.Events)
+	events, err := sortEvents(c, walked)
 	if err != nil {
 		return false, Evidence{}, err
 	}
@@ -198,10 +207,81 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 		}
 	}
 
+	// The windows taken out above. An empty one [X,X) holds nothing; a
+	// single-version one [X,X] holds X. Consulted only when the walk found
+	// nothing, so a version inside an ordinary window keeps that window's
+	// evidence.
+	for _, x := range points {
+		if inside {
+			break
+		}
+		cmp, err := c.Compare(v, x)
+		if err != nil {
+			return false, Evidence{}, unreadablePackageVersion(v, "last_affected", x, err)
+		}
+		if cmp == 0 {
+			inside = true
+			ev.Introduced, ev.Fixed, ev.LastAffected = x, "", x
+		}
+	}
+
 	if inside {
 		ev.Reason = describe(v, ev)
 	}
 	return inside, ev, nil
+}
+
+// splitDegenerate takes out every window that closes at the version it opens
+// at, and returns the events left to walk and the versions of the
+// single-version windows ([X,X], introduced equal to last_affected). Empty
+// windows ([X,X), introduced equal to fixed) are dropped outright.
+//
+// A window is the run of events from one introduced to the next, in file
+// order, and its close is the first fixed or last_affected in that run --
+// file order is the only thing that says which close belongs to which open.
+// The published database held 1,906 such windows on 2026-10-27 (Bitnami's
+// liferay repeats one [X,X] dozens of times in a range), and none of them
+// changes its verdict here: walked in file order, open-then-close at X gave
+// the same answer. Taking them out is what lets sortEvents put a close before
+// an open at the same version without reopening them.
+//
+// Bounds must already be validated: a Compare error here is not expected,
+// and an event pair that cannot be compared is left to the walk, which
+// reports it, rather than guessed at.
+func splitDegenerate(c Comparer, in []advisory.Event) (walk []advisory.Event, points []string) {
+	drop := make([]bool, len(in))
+	for i, e := range in {
+		// The sentinel is negative infinity, not the version "0": PEP 440
+		// compares it equal to "0.0", and a window it opens is never empty.
+		if e.Introduced == "" || e.Introduced == introducedSentinel {
+			continue
+		}
+		for j := i + 1; j < len(in); j++ {
+			if in[j].Introduced != "" {
+				break
+			}
+			closeAt := in[j].Fixed
+			if closeAt == "" {
+				closeAt = in[j].LastAffected
+			}
+			if closeAt == "" {
+				continue
+			}
+			if cmp, err := c.Compare(e.Introduced, closeAt); err == nil && cmp == 0 {
+				drop[i], drop[j] = true, true
+				if in[j].Fixed == "" {
+					points = append(points, closeAt)
+				}
+			}
+			break
+		}
+	}
+	for i, e := range in {
+		if !drop[i] {
+			walk = append(walk, e)
+		}
+	}
+	return walk, points
 }
 
 // eventVersion returns whichever bound an event carries, or "" for an event
@@ -219,30 +299,15 @@ func eventVersion(e advisory.Event) string {
 }
 
 // sortEvents orders events by the version each carries, with the introduced
-// sentinel first.
+// sentinel first and, at the same version, a close before an open.
 //
-// Every bound is validated before sorting so the comparator cannot fail. A
-// comparator that swallowed errors would silently produce an arbitrary order,
-// and an arbitrary order here is a wrong verdict with no error attached —
-// strictly worse than refusing to evaluate the range.
+// Every bound is validated before sorting so the comparator cannot fail
+// (validateBounds).
 func sortEvents(c Comparer, in []advisory.Event) ([]advisory.Event, error) {
-	out := append([]advisory.Event(nil), in...)
-	for _, e := range out {
-		ver := eventVersion(e)
-		if ver == "" || ver == introducedSentinel {
-			continue
-		}
-		if _, err := c.Compare(ver, ver); err != nil {
-			// D35: say whose data is at fault. This is the advisory's own
-			// bound, and nothing the person running the scan can act on —
-			// the opposite of the walk's failures below, which are always the
-			// installed version. Both used to render as "not evaluated" with
-			// the cause left to be worked out from which operand the wrapped
-			// error happened to name.
-			return nil, withCause(CauseAdvisoryData,
-				fmt.Errorf("the advisory's range bound %q could not be read: %w", ver, err))
-		}
+	if err := validateBounds(c, in); err != nil {
+		return nil, err
 	}
+	out := append([]advisory.Event(nil), in...)
 	sort.SliceStable(out, func(i, j int) bool {
 		vi, vj := eventVersion(out[i]), eventVersion(out[j])
 		// Events carrying no bound at all — a bare `limit`, or a malformed
@@ -266,9 +331,49 @@ func sortEvents(c Comparer, in []advisory.Event) ([]advisory.Event, error) {
 		}
 		// Cannot fail: every non-empty, non-sentinel bound was validated above.
 		cmp, _ := c.Compare(vi, vj)
-		return cmp < 0
+		if cmp != 0 {
+			return cmp < 0
+		}
+		// A7 (D154): at the same version a close goes before an open. Two
+		// windows meeting at X -- one fixed or last_affected at X, the next
+		// introduced at X -- were ordered by file order, so a range listing
+		// the later window first opened it and shut it again at X, and every
+		// version inside it was clean. A window that opens and closes at the
+		// same X never gets here: splitDegenerate took it out. Ranking by kind
+		// keeps this a strict weak ordering, which a rule that looked at which
+		// window each event belongs to would not be.
+		return closesWindow(out[i]) && !closesWindow(out[j])
 	})
 	return out, nil
+}
+
+// closesWindow reports whether an event is a fixed or last_affected bound.
+func closesWindow(e advisory.Event) bool {
+	return e.Introduced == "" && (e.Fixed != "" || e.LastAffected != "")
+}
+
+// validateBounds reads every bound once before any comparison that would
+// discard its error. A comparator that swallowed errors would silently produce
+// an arbitrary order, and an arbitrary order here is a wrong verdict with no
+// error attached — strictly worse than refusing to evaluate the range.
+func validateBounds(c Comparer, in []advisory.Event) error {
+	for _, e := range in {
+		ver := eventVersion(e)
+		if ver == "" || ver == introducedSentinel {
+			continue
+		}
+		if _, err := c.Compare(ver, ver); err != nil {
+			// D35: say whose data is at fault. This is the advisory's own
+			// bound, and nothing the person running the scan can act on —
+			// the opposite of the walk's failures below, which are always the
+			// installed version. Both used to render as "not evaluated" with
+			// the cause left to be worked out from which operand the wrapped
+			// error happened to name.
+			return withCause(CauseAdvisoryData,
+				fmt.Errorf("the advisory's range bound %q could not be read: %w", ver, err))
+		}
+	}
+	return nil
 }
 
 // unreadablePackageVersion names the installed version as the cause, which by
