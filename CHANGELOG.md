@@ -47,7 +47,9 @@ All notable changes to this project are documented here. The format follows
   `openssl-libs`. Before, they reported clean. (D143)
 - On Oracle Linux, a non-kernel package that two ELSAs fix for the same CVE is now held to
   the lowest fix of its own release train instead of being dropped. openssh CVE-2024-6387,
-  glibc CVE-2023-4911 and 389-ds-base CVE-2025-2487 are matched again. (D144)
+  glibc CVE-2023-4911 and 389-ds-base CVE-2025-2487 are now matched; no release had matched
+  them since Oracle Linux support landed (D74). A database change: it reached `db update`
+  with the 2026-10-26 nightly, for v0.11.0 binaries too. (D144)
 - `db update` and `db build --seed` retry a database layer download that is cut off
   mid-stream, up to three attempts. (D140)
 - When building a database, the `git fetch` of the Ubuntu CVE tracker now retries a response
