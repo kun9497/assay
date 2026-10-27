@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-27
+
 ### Added
 - 이미지 스캔이 이제 stderr와 SARIF(규칙 `assay/inventory-scope`, note 수준)로, 이미지 안의
   애플리케이션 패키지(npm, Python, Java, Go 바이너리)는 검사하지 않았다는 점을 알려 주고,
@@ -44,7 +46,9 @@
   보고했습니다. (D143)
 - Oracle Linux에서, 같은 CVE를 두 ELSA가 고치는 비커널 패키지는 이제 버려지지 않고 자기 릴리스
   트레인의 가장 낮은 수정 버전으로 판정됩니다. openssh CVE-2024-6387, glibc CVE-2023-4911,
-  389-ds-base CVE-2025-2487이 다시 매칭됩니다. (D144)
+  389-ds-base CVE-2025-2487이 이제 매칭됩니다. Oracle Linux 지원(D74) 이후 어느 릴리스도 이들을
+  매칭하지 못했습니다. 데이터베이스 쪽 변경이라 2026-10-26 야간 빌드부터 `db update`로 v0.11.0
+  바이너리에도 전달됩니다. (D144)
 - `db update`와 `db build --seed`가 스트림 중간에 끊긴 데이터베이스 레이어 다운로드를 최대 세 번까지
   재시도합니다. (D140)
 - 데이터베이스를 빌드할 때 Ubuntu CVE 트래커의 `git fetch`가 중간에 잘린 응답을 재시도합니다.
@@ -225,7 +229,8 @@
   여덟 개 언어 생태계를 다룹니다. CI에 종료 코드 0, 1, 2를 줍니다. 출력은 표, JSON, SARIF입니다.
   **(보고서 schemaVersion 8; 저장소 스키마 9)** (결정 기록 D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.11.0...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.12.0...main
+[0.12.0]: https://github.com/kun9497/assay/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/kun9497/assay/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/kun9497/assay/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/kun9497/assay/compare/v0.8.0...v0.9.0

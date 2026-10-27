@@ -33,7 +33,7 @@ BINDIR="./bin"
 # Set by scripts/prepare-release.sh in the commit a release is cut from.
 # Releases before the first signed one carry no checksums signature and are
 # refused by this script; the README says which release that is.
-VERSION="v0.11.0"
+VERSION="v0.12.0"
 RELEASE_BASE="${ASSAY_RELEASE_BASE:-https://github.com/${REPO}/releases/download}"
 
 # The public keys this installer trusts, PEM, one per release signing key.

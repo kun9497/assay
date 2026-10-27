@@ -40,7 +40,7 @@ param(
 )
 
 # Set by scripts/prepare-release.sh in the commit a release is cut from.
-$DefaultVersion = 'v0.11.0'
+$DefaultVersion = 'v0.12.0'
 $Repo = 'kun9497/assay'
 
 # The public keys this installer trusts, PEM, one per release signing key.
