@@ -106,8 +106,10 @@ func TestParse_A3_UpstreamQualifierWinsOverTheRelationship(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p := byName(t, target, "openssl-libs"); p.Source == nil || p.Source.Name != "openssl-fips" {
-		t.Errorf("openssl-libs Source = %+v, want openssl-fips from its own upstream qualifier", p.Source)
+	// Name only, as an upstream qualifier gives: the relationship's source
+	// EVR belongs to the relationship's source (openssl), not to this one.
+	if p := byName(t, target, "openssl-libs"); p.Source == nil || p.Source.Name != "openssl-fips" || p.Source.Version != "" {
+		t.Errorf("openssl-libs Source = %+v, want openssl-fips, no version, from its own upstream qualifier", p.Source)
 	}
 }
 
@@ -162,9 +164,59 @@ func TestParse_A3_ASubpackageWithItsOwnReleaseKeepsItsSource(t *testing.T) {
 	if p.Source == nil || p.Source.Name != "nodejs" {
 		t.Errorf("npm Source = %+v, want nodejs: a different release with the same el9_2 dist tag is a real subpackage", p.Source)
 	}
-	// The relationship gives a name and no version: the matcher then
-	// compares the binary's own version, as for an upstream-qualified purl.
-	if p.Source != nil && p.Source.Version != "" {
-		t.Errorf("npm Source.Version = %q, want empty", p.Source.Version)
+	// The relationship carries the source's EVR, epoch included from the
+	// source purl's own qualifier. D143 kept the name only, and the matcher
+	// then compared npm's 8.19.3 against nodejs fixes (2026-10-27 review).
+	if p.Source == nil || p.Source.Version != "1:16.19.1-1.el9_2" {
+		t.Errorf("npm Source = %+v, want version 1:16.19.1-1.el9_2", p.Source)
+	}
+}
+
+// The source's epoch is the source purl's alone: none when it names none
+// or names 0, never borrowed from the binary's (mod_ssl carries epoch 1,
+// httpd none), and no version at all when the source purl has none.
+func TestParse_SourceEVRComesFromTheSourcePURLOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name, src, want string
+	}{
+		{"no epoch qualifier", "pkg:rpm/fedora/httpd@2.4.62-1.fc40?arch=src&distro=fedora-40", "2.4.62-1.fc40"},
+		{"epoch 0", "pkg:rpm/fedora/httpd@2.4.62-1.fc40?arch=src&epoch=0&distro=fedora-40", "2.4.62-1.fc40"},
+		{"epoch 2", "pkg:rpm/fedora/httpd@2.4.62-1.fc40?arch=src&epoch=2&distro=fedora-40", "2:2.4.62-1.fc40"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bin := "pkg:rpm/fedora/mod_ssl@2.4.62-1.fc40?arch=x86_64&epoch=1&distro=fedora-40"
+			doc := rhDoc(rhPkg("SPDXRef-src", tc.src)+","+rhPkg("SPDXRef-bin", bin),
+				rel("SPDXRef-bin", "GENERATED_FROM", "SPDXRef-src"))
+			target, _, err := Parse(strings.NewReader(doc))
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := byName(t, target, "mod_ssl")
+			if p.Source == nil || p.Source.Name != "httpd" || p.Source.Version != tc.want {
+				t.Errorf("mod_ssl Source = %+v, want httpd %s", p.Source, tc.want)
+			}
+			if p.Version != "1:2.4.62-1.fc40" {
+				t.Errorf("mod_ssl Version = %q, want its own 1:2.4.62-1.fc40", p.Version)
+			}
+		})
+	}
+}
+
+// A source purl with no version and a binary whose version has no release
+// still pair (both releases are empty), and the source then has no EVR to
+// give: Source.Version stays empty -- never a bare "1:" from the epoch
+// qualifier alone -- and the binary's own version is compared.
+func TestParse_ASourceWithNoVersionGivesNoEVR(t *testing.T) {
+	src := "pkg:rpm/fedora/foo?arch=src&epoch=1&distro=fedora-40"
+	bin := "pkg:rpm/fedora/foo-libs@1.0?arch=x86_64&distro=fedora-40"
+	doc := rhDoc(rhPkg("SPDXRef-src", src)+","+rhPkg("SPDXRef-bin", bin),
+		rel("SPDXRef-src", "GENERATES", "SPDXRef-bin"))
+	target, _, err := Parse(strings.NewReader(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := byName(t, target, "foo-libs")
+	if p.Source == nil || p.Source.Name != "foo" || p.Source.Version != "" {
+		t.Errorf("foo-libs Source = %+v, want foo with no version", p.Source)
 	}
 }
