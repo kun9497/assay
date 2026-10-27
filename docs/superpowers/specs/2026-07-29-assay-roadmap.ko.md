@@ -6381,9 +6381,10 @@ fix 보다 낮게 읽힌다: 오탐이며 테스트로 고정되어 있다. SBOM
 epoch 를 쓰지 않는다. 조회가 source 를 거치는 패키지(이름이 source 의 것이거나 하위 패키지인 경우)에
 대해서는 이 결정이 해당 키에서 epoch 를 버리며, 이는 그 피드들에 맞다. 자기만의 이름으로 조회되는
 바이너리는 여전히 자신의 epoch 를 비교하므로 fix 보다 낮게 정렬되지 않을 수 있다. 같은 날 공개
-데이터베이스, 실제 base 이미지, Photon 의 모든 spec 에서 측정했고 그런 바이너리는 없었다. Azure Linux 는
-source 패키지 이름만 쓰고, 피드에 이름이 오르는 epoch 를 가진 유일한 Photon spec 인 nginx 는 서브패키지를
-nginx 자신의 advisory 에 함께 적으며, source 조회가 거기에 닿는다. 두 모양 모두 `Run` 을 통해 지키고,
+데이터베이스, 실제 base 이미지, Photon 3.0·4.0·5.0 의 모든 spec 에서 측정했고 그런 바이너리는 없었다.
+Azure Linux 는 source 패키지 이름만 쓴다. 피드에 이름이 오르는 epoch 를 가진 Photon spec 두 개 가운데
+ImageMagick 은 자기 source 이름으로만 오르고, nginx 는 서브패키지를 nginx 자신의 advisory 에 함께 적으며
+source 조회가 거기에 닿는다. 두 모양 모두 `Run` 을 통해 지키고,
 수치와 다시 볼 조건은 `docs/deferred-decisions.md` 에 둔다.
 
 **검증.** `Run` 을 통해, ndb rpmdb 를 가진 docker-archive 이미지(fixture 빌더가 이제 EPOCH 를 쓴다)로

@@ -6715,9 +6715,10 @@ Photon's feed writes none. For a package whose lookup goes through its source (i
 source's, or it is a subpackage), this decision drops the epoch on those keys, which is
 correct for those feeds. A binary looked up under a name of its own still compares its own
 epoch, and may never sort below a fix. Measured the same day on the published database, the
-real base images and every Photon spec: no such binary was found. Azure Linux names source
-packages only, and the one epoch'd Photon spec named in the feed, nginx, lists its subpackages
-in nginx's own advisories, which the source lookup reaches. Both shapes are held through `Run`;
+real base images and every Photon 3.0, 4.0 and 5.0 spec: no such binary was found. Azure
+Linux names source packages only. Of the two epoch'd Photon specs named in the feed,
+ImageMagick is named only as its own source, and nginx lists its subpackages in nginx's own
+advisories, which the source lookup reaches. Both shapes are held through `Run`;
 `docs/deferred-decisions.md` keeps the numbers and the revisit trigger.
 
 **Verified.** Through `Run` on a docker-archive image with an ndb rpmdb, whose fixture builder

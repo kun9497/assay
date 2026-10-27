@@ -2044,8 +2044,10 @@ epoch 를 빼므로, source 를 통해 조회되는 패키지는 모두 version-
 - Azure Linux 2 와 3 은 source 패키지 이름만 씁니다(439 개와 465 개). 그래서 서브패키지는 source 를
   통해서만 닿습니다. base 이미지에서 epoch 를 가진 바이너리는 ca-certificates 에서 빌드된
   ca-certificates-base, -shared, -tools 뿐입니다.
-- Photon 은 서브패키지 이름도 씁니다(5 에서 674 개). 하지만 Photon 5.0 spec 1,864 개와 4.0 spec 1,034 개
-  가운데 0 이 아닌 Epoch 를 가지면서 피드에 이름이 오르는 것은 5.0 의 nginx 하나뿐입니다. 자기 이름으로
+- Photon 은 서브패키지 이름도 씁니다(5 에서 674 개). Photon 5.0 spec 파일 1,864 개, 4.0 의 1,034 개,
+  3.0 의 920 개 가운데 0 이 아닌 Epoch 를 가지면서 피드에 이름이 오르는 것은 두 개입니다. 3.0 의
+  ImageMagick(Epoch 1)은 자기 이름, 곧 source 의 이름으로만 올라 있어서 source 조회가 epoch 없이
+  판정합니다. 다른 하나는 5.0 의 nginx(Epoch 1, 두 버전 계열)입니다. 자기 이름으로
   오른 서브패키지 여섯 개(nginx-mod-njs 등)는 nginx 의 advisory 23 개에 nginx 와 같은 수정 버전으로 정확히
   함께 나옵니다. 자기 이름 조회는 epoch 때문에 빗나가지만, source 조회가 같은 advisory 에 닿고, matcher 는
   맞았을 때만 advisory 를 본 것으로 표시합니다. Photon base 이미지에는 epoch 를 가진 패키지가 없습니다.
@@ -2053,7 +2055,8 @@ epoch 를 빼므로, source 를 통해 조회되는 패키지는 모두 version-
 `TestRun_D153_PhotonEpochSubpackageFoundThroughItsSource` 와
 `TestRun_D153_AzureLinuxEpochSubpackageFoundThroughItsSource` 가 두 모양을 `Run` 을 통해 지킵니다.
 변이 여섯 개가 모두 잡혔습니다: 호출 지점, 두 접두사 각각, 규칙, source 버전, 그리고 advisory 를 처음
-이름으로만 판정하는 것.
+이름으로만 판정하는 것. 단위 테스트가 Azure Linux 와 Photon 의 모든 릴리스를 나열하므로, 한 릴리스로
+좁힌 접두사도 잡힙니다(리뷰 wf_d60bfbd2-23b).
 
 **다시 볼 조건:** Photon 이나 Azure Linux 레코드가 source 의 레코드에 없는 CVE 를 epoch 를 가진
 서브패키지 이름으로 쓸 때, 또는 이 키들의 패키지가 파싱되는 SOURCERPM 없이 들어올 때. 그때는 이
