@@ -201,3 +201,22 @@ func TestParse_SourceEVRComesFromTheSourcePURLOnly(t *testing.T) {
 		})
 	}
 }
+
+// A source purl with no version and a binary whose version has no release
+// still pair (both releases are empty), and the source then has no EVR to
+// give: Source.Version stays empty -- never a bare "1:" from the epoch
+// qualifier alone -- and the binary's own version is compared.
+func TestParse_ASourceWithNoVersionGivesNoEVR(t *testing.T) {
+	src := "pkg:rpm/fedora/foo?arch=src&epoch=1&distro=fedora-40"
+	bin := "pkg:rpm/fedora/foo-libs@1.0?arch=x86_64&distro=fedora-40"
+	doc := rhDoc(rhPkg("SPDXRef-src", src)+","+rhPkg("SPDXRef-bin", bin),
+		rel("SPDXRef-src", "GENERATES", "SPDXRef-bin"))
+	target, _, err := Parse(strings.NewReader(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := byName(t, target, "foo-libs")
+	if p.Source == nil || p.Source.Name != "foo" || p.Source.Version != "" {
+		t.Errorf("foo-libs Source = %+v, want foo with no version", p.Source)
+	}
+}
