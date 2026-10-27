@@ -989,7 +989,7 @@ func TestUsage_DocumentsRegistryAuthEnvironment(t *testing.T) {
 // packages (D70, D141) belong in the help, not only on stderr.
 func TestUsage_NamesWhatAScanReads(t *testing.T) {
 	for _, want := range []string{"CycloneDX", "SPDX 2.2/2.3", "docker-archive:", "oci-dir:",
-		"Go binary", "jar", "pnpm", "Cargo.lock", "application packages", "(D70)"} {
+		"Go binary", "jar", "pnpm", "requirements.txt", "Cargo.lock", "application packages", "(D70)"} {
 		if !strings.Contains(usage, want) {
 			t.Errorf("usage does not name %q", want)
 		}

@@ -73,8 +73,8 @@ vulnerability database, and matching the two. In the anchore ecosystem those are
 separate projects — `syft`, `vunnel` + `grype-db`, and `grype`.
 
 **What a scan does not cover.** Read this before relying on a clean result. Each limit is
-deliberate and recorded with what would change it; a scan says on stderr, and in its report,
-when one of them applied.
+deliberate and recorded with what would change it. Some are announced by the scan they
+affect (the first three below); the rest hold for every scan and are stated only here.
 
 - **Application packages inside an image** (D70). An image scan checks the operating-system
   packages (and Bitnami's `/opt/bitnami` markers), not npm, Python, Java or Go-binary packages
@@ -194,9 +194,10 @@ assay scan ./app.jar                  # a Java archive (identity from pom.proper
 ```
 
 A bare path is classified by **content**: a directory if it is one, a Go binary if
-`debug/buildinfo` can read it, a jar if it opens as a zip archive, a CycloneDX document if it
-has a top-level `bomFormat`, an SPDX one if it has a top-level `spdxVersion`. A file that is
-none of those is an error naming all five, never a silent guess. Anything that is
+`debug/buildinfo` can read it, a jar if it is a zip archive named `.jar`/`.war` or holding a
+`META-INF/` entry, a CycloneDX document if it has a top-level `bomFormat`, an SPDX one if it
+has a top-level `spdxVersion`. A file that is none of those is an error naming the four file
+kinds and the prefixes that override them, never a silent guess. Anything that is
 not a path at all is a registry reference.
 
 The prefixes `file:`, `dir:` and `sbom:` override the sniff, alongside `docker-archive:` and
@@ -215,7 +216,7 @@ vulnerability database holds 159 advisories against.
 
 A **directory** scan reads every lockfile it finds — `go.mod`, `package-lock.json`,
 `npm-shrinkwrap.json`, `yarn.lock` (v1), `poetry.lock`, `Pipfile.lock`, `uv.lock`, `Cargo.lock`,
-`Gemfile.lock`, `composer.lock` and `packages.lock.json` — with the standard library and no
+`Gemfile.lock`, `composer.lock` and `packages.lock.json`, plus `requirements.txt` — with the standard library and no
 `go`, `npm`, `pip`, `uv` or `cargo` invocation, so it works offline and needs no toolchain.
 
 Every `*.jar`/`*.war` found in the tree is read too — identity from its `pom.properties`
@@ -224,10 +225,11 @@ never guessed from its filename.
 
 It walks subdirectories, so a `frontend/package-lock.json` is found, skipping `node_modules`,
 `vendor` and `.git` and stopping at six levels down. **Every manifest it recognizes but does
-not read is named, with the reason** — `requirements.txt` is not a lockfile (`Django>=3.2` is
-a constraint, not a version, and matching a range against advisory ranges would quietly
-answer "not vulnerable" for anything unpinned), and a lockfile that fails to parse says so
-rather than disappearing.
+not read is named, with the reason**, and so is every line it cannot use: `requirements.txt`
+is read only for lines that pin exactly one version (D38), because `Django>=3.2` is a
+constraint, not a version, and matching a range against advisory ranges would quietly answer
+"not vulnerable" for anything unpinned. A lockfile that fails to parse says so rather than
+disappearing.
 
 `pnpm-lock.yaml` and yarn berry lockfiles are read since D103 (they were recognized and
 refused by name from D61, when reading them would have cost a YAML dependency — D102's
@@ -374,6 +376,7 @@ schema and the nightly publish:
 ```yaml
 - name: Name the database cache
   id: assaydb
+  shell: bash
   run: |
     echo "ref=$(assay db ref)" >> "$GITHUB_OUTPUT"   # e.g. ghcr.io/kun9497/assay-db:v9
     echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"

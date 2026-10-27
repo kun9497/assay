@@ -42,10 +42,10 @@
   틀렸습니다.
 - v0.10.0부터 이미지 OS 패키지의 `purl`이 채워집니다(D121). 이전에는 비어 있었습니다. 그 릴리스의
   14로의 증가는 `provenance` 때문이었습니다.
-- 다섯 필드가 증가 없이 더해졌습니다. `matchedViaProvides`(D95), `crossMappedFrom`(D108), finding의
-  `frozenSince`(D110), `locations[].install`(v0.11.0), `provenance.database.artifact.signedBy` /
-  `unverified`(D137, v0.11.0). 모두 선택적이거나 추가적입니다. 위의 규칙, 즉 모든 변경에 증가는
-  스키마 15부터 적용됩니다.
+- 세 추가가 증가 없이 릴리스되어, 같은 `schemaVersion`의 두 릴리스가 서로 다릅니다.
+  `crossMappedFrom`(D108, v0.5.0, 스키마 10), 그리고 `locations[].install`과
+  `provenance.database.artifact.signedBy` / `unverified`(D137, v0.11.0, 스키마 14). 모두
+  선택적입니다. 위의 규칙, 즉 모든 변경에 증가는 스키마 15부터 적용됩니다.
 
 ## provenance sidecar와 status.json
 

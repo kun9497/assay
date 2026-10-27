@@ -43,10 +43,11 @@ it relied on:
   changed meaning, which was wrong for this one.
 - v0.10.0 started filling `purl` on an image's OS packages (D121), where it had been empty.
   The bump to 14 that release was made for `provenance`.
-- Five fields were added without a bump: `matchedViaProvides` (D95), `crossMappedFrom`
-  (D108), a finding's `frozenSince` (D110), `locations[].install` (v0.11.0), and
-  `provenance.database.artifact.signedBy` / `unverified` (D137, v0.11.0). Each is optional
-  or additive. The rule above, a bump for every change, applies from schema 15 on.
+- Three additions reached a release without a bump, so two releases with the same
+  `schemaVersion` differ: `crossMappedFrom` (D108, v0.5.0, schema 10), and
+  `locations[].install` and `provenance.database.artifact.signedBy` / `unverified` (D137,
+  v0.11.0, schema 14). Each is optional. The rule above, a bump for every change, applies
+  from schema 15 on.
 
 ## The provenance sidecar and status.json
 

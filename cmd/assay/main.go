@@ -65,7 +65,8 @@ Commands:
                   jar, or a directory. A directory is read from the
                   lockfiles it holds - go.mod, package-lock.json,
                   npm-shrinkwrap.json, yarn.lock, pnpm-lock.yaml,
-                  poetry.lock, Pipfile.lock, uv.lock, Cargo.lock,
+                  poetry.lock, Pipfile.lock, uv.lock, requirements.txt
+                  (its exactly pinned lines), Cargo.lock,
                   Gemfile.lock, composer.lock, packages.lock.json - and
                   the jars in it, without running any package manager; a
                   go.mod names what the module requires, not what a build

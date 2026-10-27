@@ -70,13 +70,13 @@ this result cannot be trusted").
 개의 별도 프로젝트입니다.
 
 **스캔이 다루지 않는 것.** 깨끗한 결과에 기대기 전에 읽어 주십시오. 각 한계는 의도된 것이며
-무엇이 그 결정을 바꿀지와 함께 기록되어 있습니다. 그중 하나가 적용되면 스캔이 stderr와 리포트에서
-그렇다고 말합니다.
+무엇이 그 결정을 바꿀지와 함께 기록되어 있습니다. 일부는 영향을 받는 스캔이 직접 알립니다(아래
+처음 셋). 나머지는 모든 스캔에 해당하며 여기에만 적혀 있습니다.
 
 - **이미지 안의 애플리케이션 패키지**(D70). 이미지 스캔은 운영체제 패키지(와 Bitnami의
   `/opt/bitnami` 마커)를 검사하며, 이미지에 설치된 npm, Python, Java, Go 바이너리 패키지는 검사하지
   않습니다. 그것들은 애플리케이션의 lockfile, 디렉터리, 바이너리, 또는 이미지의 SBOM을 스캔하십시오.
-  [기록](deferred-decisions.md#application-packages-inside-container-images).
+  [기록](deferred-decisions.ko.md#컨테이너-이미지-안의-애플리케이션-패키지).
 - **업스트림이 게시를 멈춘 릴리스**(D110). Debian 11은 2026-08-19부터 동결되어 있습니다. 마지막
   권고는 버리지 않고 유지하며, 그 위의 finding에는 표시가 붙고, 새 CVE는 업스트림이 여전히 게시할
   때만 들어옵니다.
@@ -188,9 +188,10 @@ assay scan ./app.jar                  # Java 아카이브(신원은 pom.properti
 ```
 
 접두사 없는 경로는 **내용으로** 분류합니다. 디렉터리면 디렉터리, `debug/buildinfo`가 읽을 수
-있으면 Go 바이너리, zip 아카이브로 열리면 jar, 최상위에 `bomFormat` 키가 있으면 CycloneDX
-문서, 최상위에 `spdxVersion` 키가 있으면 SPDX 문서입니다. 다섯 중 무엇도 아닌 파일은 다섯을
-모두 이름 붙인 오류이지 조용한 추측이 아닙니다. 애초에 경로가 아니면 레지스트리
+있으면 Go 바이너리, 이름이 `.jar`/`.war`이거나 `META-INF/` 항목을 가진 zip 아카이브면 jar,
+최상위에 `bomFormat` 키가 있으면 CycloneDX 문서, 최상위에 `spdxVersion` 키가 있으면 SPDX
+문서입니다. 무엇도 아닌 파일은 네 가지 파일 종류와 그것을 재정의하는 접두사를 이름 붙인
+오류이지 조용한 추측이 아닙니다. 애초에 경로가 아니면 레지스트리
 참조입니다.
 
 `file:`, `dir:`, `sbom:` 접두사가 감지를 재정의합니다 — 기존 `docker-archive:`, `oci-dir:`와
@@ -217,9 +218,10 @@ assay scan ./app.jar                  # Java 아카이브(신원은 pom.properti
 
 하위 디렉터리도 훑으므로 `frontend/package-lock.json`도 찾습니다. `node_modules`, `vendor`,
 `.git`은 건너뛰고 여섯 단계까지만 내려갑니다. **인식했지만 읽지 않은 매니페스트는 이유와 함께
-이름을 밝힙니다** — `requirements.txt`는 락파일이 아니고(`Django>=3.2`는 버전이 아니라 제약이며,
-범위를 권고의 범위에 맞추면 고정되지 않은 것에 조용히 "취약하지 않음"이라고 답하게 됩니다),
-파싱에 실패한 락파일도 사라지지 않고 그 사실을 말합니다.
+이름을 밝히며**, 쓸 수 없는 줄도 마찬가지입니다. `requirements.txt`는 정확히 한 버전을 고정한
+줄만 읽습니다(D38). `Django>=3.2`는 버전이 아니라 제약이며, 범위를 권고의 범위에 맞추면 고정되지
+않은 것에 조용히 "취약하지 않음"이라고 답하게 되기 때문입니다. 파싱에 실패한 락파일도 사라지지
+않고 그 사실을 말합니다.
 
 `pnpm-lock.yaml`과 yarn berry 락파일은 D103부터 읽습니다(D61 때는 인식하고 이름을 부르며
 거부했습니다. 당시 읽으려면 YAML 의존성이 들었을 텐데, D102의 yaml.v3 승격이 그 비용을
@@ -358,6 +360,7 @@ exit 2로 끝나며 `assay db update`를 실행하라고 알립니다. 다만 �
 ```yaml
 - name: Name the database cache
   id: assaydb
+  shell: bash
   run: |
     echo "ref=$(assay db ref)" >> "$GITHUB_OUTPUT"   # e.g. ghcr.io/kun9497/assay-db:v9
     echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
