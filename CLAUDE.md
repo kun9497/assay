@@ -114,7 +114,10 @@ through the same `Distro.Ecosystem()` the image path uses — in CycloneDX and, 
 SPDX 2.2/2.3 JSON, including Red Hat's own published SBOMs (repository_id/rpmmod
 spellings; since D143 a binary rpm takes its source from a `GENERATES`/`GENERATED_FROM` edge to
 an `arch=src` package when its purl names none and it shares the source's release or RHEL
-dist tag). Not built: pep440 leniency (see
+dist tag, and since D152 the source's EVR from that purl, so a subpackage is judged on its
+source's version under the source's name). Since D150 a signature payload that could not
+be fetched is `ErrSignatureUnreadable`, not `ErrNoKeyVerifies`; since D151 `install.sh` reads
+the signature through base64's stdin and its harness runs on macOS CI. Not built: pep440 leniency (see
 `docs/DESIGN.md` and `docs/deferred-decisions.md`).
 
 **Check what exists before assuming — this paragraph has been wrong six times.** It claimed

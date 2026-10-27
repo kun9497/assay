@@ -7,6 +7,17 @@
 
 ## [Unreleased]
 
+### Fixed
+- SPDX SBOM에서 `GENERATES` / `GENERATED_FROM` 관계로 source에 연결된 바이너리 rpm은 source
+  이름으로 조회할 때 source의 버전으로 판정됩니다. 이전에는 npm을 nodejs의 수정 버전과 비교해
+  (Red Hat CVE-2023-23920에서 수정된 npm에 대한 오탐), Fedora mod_ssl의 epoch이 httpd 수정을
+  가릴 수 있었습니다. (D152, D143 수정)
+- `install.sh`가 macOS에서 서명을 검증합니다. Apple base64가 거부하는 파일 인자를 더 이상 넘기지
+  않으므로, 그곳에서 모든 정상 릴리스가 거부되던 문제가 사라졌습니다. (D151)
+- 내려받지 못한 서명 페이로드(403, 404, 503)는 검증되지 않는 서명이 아니라 가져오기 실패로
+  보고됩니다. `db update`는 그렇게 알리고 여전히 거부하며, 배포되는 `status.json`은
+  `signed: false`를 표시하지 않고 마지막 관측을 유지합니다. (D150)
+
 ## [0.12.0] - 2026-10-27
 
 ### Added

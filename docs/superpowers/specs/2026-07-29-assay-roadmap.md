@@ -6113,6 +6113,9 @@ and the unmatched remainder above against the dump.
 
 ### D143 — An SPDX binary rpm takes its source from the document's relationships
 
+*Revised by D152: the source now keeps its EVR. The "with no version" premise below was
+audit finding A4, not a control.*
+
 **Decision.** The SPDX reader builds, before cataloging, a map from each package to the
 source rpm it was built from. It reads every `SRC GENERATES BIN` and `BIN GENERATED_FROM SRC`
 relationship whose source end is an rpm package with `arch=src`. An rpm candidate whose own
@@ -6434,6 +6437,131 @@ redundant zero whatever the draw, the TLS restore). Run by hand against the real
 release, the script verified its cosign signature with the production key and installed
 `assay.exe` under 5.1 and 7. After the canonical-DER change, its own functions verified the
 same signature again under both editions.
+
+---
+
+### D150 — A signature that could not be read is not a signature that failed
+
+**Decision.** `trust.Verify` tells three outcomes apart instead of two. A layer whose payload
+could not be fetched is unread. That covers a registry error after the client's retries (403,
+404, 503), a network error, a stream cut short, and a cancelled or expired context. A layer
+whose payload arrived but fails a check is invalid: no annotation, no key verifies, wrong
+payload type or digest, a blob that does not match its own digest, over the size cap. The
+layers are still tried in order, and any one that verifies accepts. When none verifies and at
+least one was unread, the result is the new `ErrSignatureUnreadable`, never `ErrNoKeyVerifies`.
+Both callers already treat any other error as a transport failure. `db update` refuses with the
+registry's own error, `--allow-unsigned` cannot reach it, and it does not say the signature is
+wrong. `cmd/dbstatus` keeps the previous description and records `publishedError`.
+
+**Why.** The 2026-10-27 source review (item 3) found every `verifyLayer` error filed as "no
+key verifies", including a payload blob the registry refused. The manifest case was handled,
+and D138's test covered it; the blob case was not. On a 403, 404 or 503 for the blob, `dbstatus`
+replaced a signed observation with `signed:false` and a fresh `observedAt`, which is the
+outage signal D138 exists to raise. It also emptied `publishedError`. `db update` told the
+operator the signature did not verify under any trusted key. Nothing unsigned was ever
+installed, so this was a classification and reporting defect, not a verification bypass.
+
+**Verified.** Callers first. Through `dbstatus`'s `run`, a signed artifact whose signature blob
+answers 403, 404 or 503 keeps the previous signed description and records the registry's text.
+Through `Pull`, the same 403 is refused with and without `--allow-unsigned`, carries the
+registry's text, and says neither "does not verify" nor "not signed". At `Verify`: each status
+is unreadable; an unreadable layer beside a genuine one still accepts, in either order; an
+invalid readable layer beside an unreadable one is unreadable, both reasons named; a blob whose
+bytes do not match its digest stays invalid; a stream cut mid-body and a context ended mid-fetch
+are unreadable. The reviewer's own probe (`status_blob_independent_test.go`), which failed three
+of four subtests before, passes all four. Nine mutations, seven caught directly. The `net.Error`
+clause and the context clause each survive alone, because a cancelled fetch is a `*url.Error`
+that is both, and are caught together. The code says so.
+
+---
+
+### D151 — install.sh feeds the signature to base64 on stdin, and runs on a real Mac in CI
+
+**Decision.** `install.sh` decodes the checksums signature with `base64 -d <file`, not
+`base64 -d file`. The shell installer harness now runs on the macOS CI leg against the real
+tools: Apple's base64, LibreSSL's openssl, shasum and BSD tar. It is portable, with no
+`base64 -w0` and no `sha256sum --text`. Each case that sets environment variables runs in a
+subshell and records a failure in a file. A new case, C8, puts a base64 with Apple's argument
+parser first on `PATH` on every platform. Through it a genuine release installs and an
+attacker's signature is still refused.
+
+**Why.** The 2026-10-27 source review (item 2): Apple's base64 (text_cmds `bintrans.c`) takes
+input only on stdin or `-i`, and a positional file is a usage error. On every Mac a genuinely
+signed release failed to decode, was reported as "does not verify", and was refused. The review
+showed it with a shim and Apple's source, not on a Mac. The harness was GNU-only too. Its first
+run on a real Mac installed the genuine release with the fixed installer (C1) and then failed
+nine cases on the harness itself. macOS's `/bin/sh` is bash 3.2 in POSIX mode, where
+`VAR=x f` before a shell function keeps the assignment after `f` returns. POSIX leaves that
+unspecified, and dash does not keep it. So `ABSENT`, `ASSAY_RELEASE_BASE` and
+`ASSAY_ALLOW_UNSIGNED` leaked from one case into the next.
+
+**Verified.** C8 fails on the unchanged installer and passes after the fix, on Windows Git Bash
+and in CI. On macOS-latest the whole harness passes after the subshell change: clean install,
+tampered archive, stale, deleted and attacker signatures, a space in the temp path, no verifier
+on `PATH` (refused, and with `ASSAY_ALLOW_UNSIGNED=1` the SHA-256-only path), key rotation, and
+C8. The signature check is not weakened. No case installs without a verified signature unless
+`ASSAY_ALLOW_UNSIGNED=1` is set and no verifier exists, as before.
+
+---
+
+### D152 — An SPDX source relationship keeps the source's EVR (revises D143)
+
+**Decision.** A binary rpm that takes its source from a `GENERATES` / `GENERATED_FROM` edge
+(D143) takes the source's EVR too. The EVR is the source purl's own `@version` with its `epoch`
+qualifier prefixed when present and non-zero. That is the rule binary rpm purls already used,
+now shared as `pkgmeta.EVROf`. The epoch is never borrowed from the binary or guessed, and a
+source purl with no epoch qualifier gives none. The matcher is unchanged. It already compares
+a lookup under the source's name against `Source.Version` when there is one (D41), and against
+the binary's own version otherwise. Everything else D143 decided stands:
+- which edges count;
+- that an explicit `upstream` qualifier wins, still name-only;
+- that only rpm candidates take a source;
+- the binary-name, source-name and versioned-provides lookups.
+
+**Why.** D143 kept the name and dropped the version, on the premise that the image path's
+SOURCERPM records the same EVR. That premise is audit finding A4: rpmdb fills `Source.Version`
+with the binary's EVR, which is a defect, not a control. A subpackage's version is often not
+its source's, so with the name alone a source-name lookup compared across namespaces. The
+2026-10-27 source review (item 1) showed it both ways:
+- **A false positive, on real data.** In Red Hat's CSAF document for CVE-2023-23920, converted
+  by this provider, nodejs is fixed at `1:16.19.1-1.el9_2` and npm at
+  `1:8.19.3-1.16.19.1.1.el9_2`. An SPDX npm built from that nodejs reported one Medium finding
+  through nodejs, because npm's 8.19.3 was compared with nodejs's 16.19.1 fix.
+- **A false negative, synthetic.** Fedora's mod_ssl carries epoch 1 and its source httpd none.
+  `1:2.4.62-1.fc40` sorted above an httpd fix of `2.4.63-1.fc40`, and the scan returned exit 0
+  with nothing incomplete.
+
+**The namespace question.** The source EVR is right only if a record under the source's name
+describes the source's versions. Fedora Bodhi's fixed versions are source NVRs (D75). Red
+Hat's fixed lists name binary rpms with an arch as well as the `.src`, so a record under a name
+can come from the binary of that name. In the real CVE-2023-23920 document, every
+same-platform pair of a `.src` and the binary sharing its name carries the same EVR (7 of 7,
+once module-stream builds are set apart). That is one rpmbuild, and D80 keeps module entries
+off non-modular packages. The source EVR is therefore the right counter for a lookup under the
+source's name.
+
+**Not in scope: A4.** The image path still records the binary's EVR as `Source.Version`
+(`rpmdb/header.go`), because SOURCERPM is a filename with no epoch. Correcting it needs the
+epoch from elsewhere, or a decision not to guess it. That is a separate change with its own
+measurement over real images. This decision fixes only what the SPDX document states
+explicitly.
+
+**Verified.** Through `Run`:
+- the fixed npm builds report nothing (exit 0);
+- npm built from a nodejs short of the fix is reached through nodejs on the source's EVR
+  (exit 1);
+- mod_ssl from httpd is reached through httpd (exit 1).
+
+With Red Hat's real document (testdata, sha256 `9f6b64f0…`): no finding and no skip on the
+fixed builds, and one finding on the builds before the fix. At the cataloger:
+- the D143 test that required an empty source version now requires `1:16.19.1-1.el9_2`;
+- the source epoch is the source purl's only (none, 0 and 2, never the binary's 1);
+- an `upstream` qualifier still wins, name-only;
+- a versionless source gives no EVR.
+
+The reviewer's three probes, written to pass on the bad behaviour, now fail on it. Six
+mutations, all caught; the sixth (a bare `1:` from a versionless source) only after its case
+was added.
 
 ---
 

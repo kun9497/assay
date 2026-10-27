@@ -1011,6 +1011,14 @@ exited 0 while 24 findings went unmentioned.
 - [x] A Windows installer, verified the way install.sh is (D148) — `install.ps1` for
       PowerShell 5.1 and 7, the checksums signature checked with .NET against the embedded
       keys; its harness runs every attack case under both editions on windows-latest
+- [x] A signature that could not be read is not a signature that failed (D150, 2026-10-27
+      review) — a payload blob 403/404/503 keeps dbstatus's previous description and is not
+      "does not verify" in `db update`; other layers are still tried
+- [x] install.sh feeds the signature to base64 on stdin (D151) — Apple's base64 takes no
+      positional file; the shell harness now runs on a real Mac in CI
+- [x] An SPDX source relationship keeps the source's EVR (D152, revises D143) — npm from
+      nodejs is judged on nodejs's version, not its own; Red Hat's real CVE-2023-23920 no
+      longer flags the fixed npm
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15
