@@ -1053,6 +1053,9 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 		Aliases:  []string{cve},
 	}
 	for _, k := range order {
+		// The category test is intent, not behaviour: remedy holds only these two
+		// categories (the remediation loop skips the rest), so dropping it is an
+		// equivalent mutation (verified 2026-10-27).
 		if ltssOverNoFix[k] && (remedy[k][remedyNoFixPlanned] || remedy[k][remedyNoneAvailable]) {
 			st.LTSSFixReplacedWithReason++
 		}
