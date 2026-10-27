@@ -1,6 +1,7 @@
 package trust
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -132,12 +133,14 @@ func TestVerify_AnInvalidLayerBesideAnUnreadableOneIsUnreadable(t *testing.T) {
 // A blob the registry serves but whose bytes do not match the manifest's
 // digest was read: it is wrong, not unknown, and stays ErrNoKeyVerifies.
 func TestVerify_ABlobThatDoesNotMatchItsDigestIsInvalid(t *testing.T) {
-	var served atomic.Value
+	// The same number of bytes as the real payload, so the size checks pass
+	// and only the digest check can refuse it.
+	var served, size atomic.Value
 	host := trusttest.NewRegistry(t, func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if p, _ := served.Load().(string); r.Method == http.MethodGet && r.URL.Path == p {
 				w.Header().Set("Content-Type", "application/octet-stream")
-				_, _ = w.Write([]byte(`{"critical":{"type":"tampered"}}`))
+				_, _ = w.Write(bytes.Repeat([]byte("x"), size.Load().(int)))
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -146,8 +149,17 @@ func TestVerify_ABlobThatDoesNotMatchItsDigestIsInvalid(t *testing.T) {
 	ref, d := trusttest.PushArtifact(t, host, "assay-db", "v14")
 	key := trusttest.NewKey(t)
 	trusttest.SignArtifact(t, key, ref, d)
-	served.Store("/v2/assay-db/blobs/" + sigLayerDigests(t, ref.Context(), d)[0].String())
-	_, err := Verify(context.Background(), ref.Context(), d, []PublicKey{keyOf(t, key)})
+	img, err := remote.Image(ref.Context().Tag(SigTag(d)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := img.Manifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	size.Store(int(m.Layers[0].Size))
+	served.Store("/v2/assay-db/blobs/" + m.Layers[0].Digest.String())
+	_, err = Verify(context.Background(), ref.Context(), d, []PublicKey{keyOf(t, key)})
 	if !errors.Is(err, ErrNoKeyVerifies) || errors.Is(err, ErrSignatureUnreadable) {
 		t.Fatalf("err = %v, want ErrNoKeyVerifies", err)
 	}
