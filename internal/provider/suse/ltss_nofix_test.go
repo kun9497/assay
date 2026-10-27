@@ -3,6 +3,8 @@ package suse
 import (
 	"strings"
 	"testing"
+
+	"github.com/kun9497/assay/internal/advisory"
 )
 
 // D149: after SLES 15 SP6 left general support, SUSE's documents keep the
@@ -190,6 +192,17 @@ func TestConvert_D149_LeapStillSeesTheMainlineNoFix(t *testing.T) {
 		a := affectedByName(adv)["openSUSE Leap:15.6/libtiff6"]
 		if len(a.Ranges) != 1 || len(a.Ranges[0].Events) != 1 {
 			t.Errorf("Leap 15.6 libtiff6 = %+v, want the mirrored no-fix range", a.Ranges)
+		}
+	})
+	t.Run("the mirrored no-fix keeps the mainline's stated reason", func(t *testing.T) {
+		d := buildDocWith(t, "CVE-2025-61147", []string{sp6, ltss, leap}, pkgs,
+			[]string{ltss + ":libtiff6-4.5.0-150600.3.9.1"}, []string{sp6 + ":libtiff6"}, nil,
+			[]map[string]any{{"category": "no_fix_planned", "product_ids": []string{sp6 + ":libtiff6"}}})
+		var st stats
+		adv, _ := convert(d, &st)
+		a := affectedByName(adv)["openSUSE Leap:15.6/libtiff6"]
+		if len(a.Ranges) != 1 || a.Ranges[0].FixState != advisory.FixStateWontFix {
+			t.Errorf("Leap 15.6 libtiff6 = %+v, want the no-fix range with won't-fix, as before D149", a.Ranges)
 		}
 	})
 	t.Run("a native Leap no-fix is not given the LTSS build (D128)", func(t *testing.T) {
