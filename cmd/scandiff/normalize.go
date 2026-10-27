@@ -40,6 +40,8 @@ type assayFinding struct {
 	Package  assayPackage  `json:"package"`
 	Advisory assayAdvisory `json:"advisory"`
 	Ratings  []assayRating `json:"ratings"`
+	// FixState is read by assayOnlyFixed (D146) alone.
+	FixState string `json:"fixState"`
 }
 
 // assayRating is read for its advisoryId alone. Annotation sources (NVD,
@@ -336,6 +338,34 @@ func compareSets(a, g map[tuple]struct{}) (agree, onlyAssay, onlyGrype int) {
 		}
 	}
 	return agree, onlyAssay, onlyGrype
+}
+
+// assayOnlyFixed counts D146's tuples: in assay's set, not in gSet, and
+// produced by at least one finding whose fixState is "fixed". That is the
+// report's finding-level state (matcher's Finding.FixState): fixed when any of
+// the finding's ratings names a fix, which is why evidence.fixed is not read
+// here -- it shows only the rating that won on severity, and a finding whose
+// winner had no fix while another rating did would be missed (review
+// wf_ae5d4af9-5a3). The other states are left out: not-fixed and wont-fix are
+// the ones grype never reports, so a tuple there is a difference of policy
+// (Red Hat's statements are 4,884 of ubi8n18's 5,387 assay-only tuples), not a
+// candidate false positive, and unknown carries no fix to be wrong about. A
+// tuple's ids are recomputed through assayTuples on the one finding, so this
+// cannot drift from how aSet was built. Called after bridgeBareIDs: a bridged
+// tuple is in gSet too and never counts.
+func assayOnlyFixed(adoc assayDocument, gSet map[tuple]struct{}) int {
+	counted := map[tuple]bool{}
+	for _, f := range adoc.Findings {
+		if f.FixState != "fixed" {
+			continue
+		}
+		for tp := range assayTuples(assayDocument{Findings: []assayFinding{f}}) {
+			if _, shared := gSet[tp]; !shared {
+				counted[tp] = true
+			}
+		}
+	}
+	return len(counted)
 }
 
 // bridgeBareIDs is the third instance of one lesson: when a tool cannot

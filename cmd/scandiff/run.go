@@ -39,11 +39,12 @@ Usage:
       without a network call.
 
   -regressions-only (either mode) is the nightly publish gate's mode (D114):
-      it skips the ceilings, maxFindings, trivy.maxFindings and
-      maxGrypeOnlyApp (D117), and prints any that would have breached as an
-      "info:" line instead. A ceiling measures upstream growth, which must
-      never stop a new database from shipping; every other floor, and every
-      ERROR, is judged exactly as without it.
+      it skips the ceilings, maxFindings, trivy.maxFindings,
+      maxGrypeOnlyApp (D117) and maxAssayOnlyFixed (D146), and prints any
+      that would have breached as an "info:" line instead. A ceiling
+      measures upstream growth, which must never stop a new database from
+      shipping; every other floor, and every ERROR, is judged exactly as
+      without it.
 
 Exit codes:
   0  every target held its floors
@@ -114,7 +115,7 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 	// regressionsOnly is D114's publish-gate mode, valid live or offline.
 	// Off by default so the weekly differential keeps judging every floor;
 	// see demoteCeilings for which floors it skips and why only those.
-	regressionsOnly := fs.Bool("regressions-only", false, "judge every floor except the ceilings (maxFindings, trivy.maxFindings, maxGrypeOnlyApp), which print as info")
+	regressionsOnly := fs.Bool("regressions-only", false, "judge every floor except the ceilings (maxFindings, trivy.maxFindings, maxGrypeOnlyApp, maxAssayOnlyFixed), which print as info")
 
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
@@ -196,6 +197,7 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 		measured := judge(t, agree, len(aSet), notEvaluated, adoc.Summary.Components)
 		measured = append(measured, judgeGrypeOnlyApp(t, grypeOnlyAppCounts(gdoc, aSet, gSet))...)
 		measured = append(measured, judgeIncomplete(t, adoc.Summary)...)
+		measured = append(measured, judgeAssayOnlyFixed(t, assayOnlyFixed(adoc, gSet))...)
 		breaches, info := demoteCeilings(measured, *regressionsOnly)
 		printInfo(stderr, info)
 		r := row{

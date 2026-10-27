@@ -19,7 +19,8 @@
 탐색자의 기준을 말한다: 탐색자는 가설을 올리기 전에 테스트로 반증을 시도하라는 지시를 받았다.
 
 **상태 (2026-10-26).** A1 은 D142 로, A2 는 D144 로, A3 는 D143 으로, A8 과 A17 은 D145 로 고쳐졌다. gap 5 중 SUSE 실데이터 테스트는 CI 에서 돈다(별도 job,
-`internal/ciguard` 가 지킴), 전체 테스트가 windows-latest 와 macos-latest 에서도 돈다.
+`internal/ciguard` 가 지킴), 전체 테스트가 windows-latest 와 macos-latest 에서도 돈다. assay-only 상한은 D146 이다.
+gap 5 는 튜플별 오탐 분류를 빼고 닫혔다.
 
 ## 1. 확인된 발견, 고쳐야 할 순서로
 

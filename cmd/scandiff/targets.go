@@ -84,6 +84,16 @@ type Target struct {
 	// zero (see judgeGrypeOnlyApp). Absent on most targets, which is exactly
 	// "no application-type grype-only tuple is expected here".
 	MaxGrypeOnlyApp map[string]int `json:"maxGrypeOnlyApp,omitempty"`
+	// MaxAssayOnlyFixed is D146's ceiling on assay-only tuples that carry a
+	// fix: a tuple grype does not report, produced by a finding whose
+	// fixState is "fixed" (see assayOnlyFixed; not-fixed and wont-fix are the
+	// states grype never reports, so a tuple in them is policy, not a
+	// candidate false positive). It is the 2026-10-22 audit's gap-5 ceiling, measured before
+	// it was chosen: on twelve captures (2026-10-12 to 10-26) a ceiling of
+	// max(2x, x+25) over this count raised no alarm on any target in any
+	// week, while tripping on about 26 injected tuples where maxFindings
+	// needs 100 to 400. Omitted means 0; every committed target names it.
+	MaxAssayOnlyFixed int `json:"maxAssayOnlyFixed,omitempty"`
 }
 
 // TrivyFloors is the trivy counterpart to Target's own MinAgree/MinFindings/
@@ -147,6 +157,9 @@ func loadTargets(path string) ([]Target, error) {
 		seen[t.Name] = true
 		if t.Ref == "" {
 			return nil, fmt.Errorf("targets file %s: target %q has no ref", path, t.Name)
+		}
+		if t.MaxAssayOnlyFixed < 0 {
+			return nil, fmt.Errorf("targets file %s: target %q: maxAssayOnlyFixed is negative (%d)", path, t.Name, t.MaxAssayOnlyFixed)
 		}
 		if err := validateGrypeOnlyApp(t.MaxGrypeOnlyApp); err != nil {
 			return nil, fmt.Errorf("targets file %s: target %q: %w", path, t.Name, err)

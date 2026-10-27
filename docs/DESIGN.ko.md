@@ -897,6 +897,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       `minAgree` / `minFindings` 를 2026-10-26 capture 의 85% 로 다시 시딩하되, grype 나 trivy 자신의
       피드를 따르는 floor 는 10-13 이후 모든 야간 capture 가 통과하도록 낮춤(wolfi `minAgree 9`,
       trivy 정보용); 타깃별 `maxIncompleteChecks` / `maxTargetIncomplete`, 생략 = 0, 야간 게이트도 판정
+- [x] 차등이 fix 가 있는 assay-only 튜플에 상한을 둠 (D146, 감사 gap 5) — 타깃별
+      `maxAssayOnlyFixed` 를 max(2배, x+25) 로, 주간 실행이 판정하는 상한; no-fix 상태 제외(ubi8n18 의
+      Red Hat 4,884); 전체 튜플 수와 허용 목록 대신 열두 capture 재생으로 선택(오경보 0)
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨

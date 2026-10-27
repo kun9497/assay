@@ -112,6 +112,19 @@ func judgeIncomplete(t Target, s assaySummary) []breach {
 	return out
 }
 
+// judgeAssayOnlyFixed is D146's ceiling on assayOnlyFixed's count. A
+// ceiling (Ceiling true) for maxFindings' reason: the count grows when an
+// upstream publishes advisories grype has not picked up yet (alpaquita and
+// liberica21's BELL batch, az2023's ALAS batch, 2026-10), which the candidate
+// database cannot cause, so -regressions-only demotes it and the weekly run
+// judges it.
+func judgeAssayOnlyFixed(t Target, n int) []breach {
+	if n > t.MaxAssayOnlyFixed {
+		return []breach{{t.Name, "maxAssayOnlyFixed", fmt.Sprintf("<=%d", t.MaxAssayOnlyFixed), n, true}}
+	}
+	return nil
+}
+
 // judgeTrivy is judge's D105 counterpart for the optional trivy comparison.
 // It is a separate function rather than a parameterized call into judge:
 // there is no notEvaluated counterpart (trivy carries no such concept), and

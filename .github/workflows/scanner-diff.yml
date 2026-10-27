@@ -13,7 +13,8 @@
 # regression floors before `db push`, so a D90-class corruption that moves
 # these targets stops short of the tag. This run remains the check that the
 # PUBLIC artifact, pulled anonymously the way a user pulls it, still holds
-# those floors -- and the only place the ceilings (maxFindings) are judged,
+# those floors -- and the only place the ceilings (maxFindings,
+# trivy.maxFindings, maxGrypeOnlyApp, maxAssayOnlyFixed) are judged,
 # because the gate skips them: a ceiling measures upstream growth, which a
 # human re-bands here, by hand, on Monday.
 name: scanner differential
