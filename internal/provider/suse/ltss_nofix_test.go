@@ -98,3 +98,37 @@ func TestStatsString_ReportsD149(t *testing.T) {
 		t.Errorf("stats.String() = %q, want it to contain %q", got, want)
 	}
 }
+
+// A mainline recommended entry with no version to compare says "affected"
+// as much as a known_affected does (store's fallback), so it yields to an
+// LTSS fix the same way. And an LTSS recommended entry with no version is
+// no fix to give: it is shadowed, not counted as a replacement.
+func TestConvert_D149_OnlyARealVersionCountsAsAFix(t *testing.T) {
+	sp6, ltss := "SUSE Linux Enterprise Server 15 SP6", "SUSE Linux Enterprise Server 15 SP6-LTSS"
+	t.Run("mainline recommended with no version yields", func(t *testing.T) {
+		d := buildDoc(t, "CVE-2026-0152", []string{sp6, ltss},
+			map[string]string{
+				"php8":                      "pkg:rpm/suse/php8@?upstream=php8.src.rpm",
+				"php8-8.2.35-150600.3.39.1": "pkg:rpm/suse/php8@8.2.35-150600.3.39.1?upstream=php8-8.2.35-150600.3.39.1.src.rpm",
+			},
+			[]string{sp6 + ":php8", ltss + ":php8-8.2.35-150600.3.39.1"}, nil, nil)
+		var st stats
+		adv, _ := convert(d, &st)
+		a := affectedByName(adv)["SLES:15.SP6/php8"]
+		if len(a.Ranges) != 1 || len(a.Ranges[0].Events) != 2 || st.LTSSFixReplacedMainlineNoFix != 1 {
+			t.Errorf("ranges %+v, replaced %d; want the LTSS fix alone and 1", a.Ranges, st.LTSSFixReplacedMainlineNoFix)
+		}
+	})
+	t.Run("LTSS recommended with no version is shadowed", func(t *testing.T) {
+		d := buildDoc(t, "CVE-2026-0153", []string{sp6, ltss},
+			map[string]string{"php8": "pkg:rpm/suse/php8@?upstream=php8.src.rpm"},
+			[]string{ltss + ":php8"}, []string{sp6 + ":php8"}, nil)
+		var st stats
+		adv, _ := convert(d, &st)
+		a := affectedByName(adv)["SLES:15.SP6/php8"]
+		if len(a.Ranges) != 1 || len(a.Ranges[0].Events) != 1 || st.LTSSFixReplacedMainlineNoFix != 0 || st.SkippedLTSSShadowedByMainline != 1 {
+			t.Errorf("ranges %+v, replaced %d, shadowed %d; want the no-fix range, 0 and 1",
+				a.Ranges, st.LTSSFixReplacedMainlineNoFix, st.SkippedLTSSShadowedByMainline)
+		}
+	})
+}
