@@ -84,7 +84,7 @@ variables in a subshell, records failures in a file, and gained C8. CI runs it o
 Files: `install.sh`, `scripts/install_test.sh`, `.github/workflows/ci.yml`.
 
 **Native macOS.** The first macOS run installed the genuine release with the fixed installer
-(C1). It then failed nine cases on the harness: macOS's `/bin/sh` (bash 3.2, POSIX mode) keeps
+(C1). It then failed eight cases on the harness: macOS's `/bin/sh` (bash 3.2, POSIX mode) keeps
 `VAR=x` written before a shell function after the call, so one case's variables leaked into the
 next. POSIX leaves this unspecified, and dash does not keep it. With subshells the whole harness
 passes on macOS-latest: genuine install, tampered archive, stale, deleted and foreign
@@ -99,9 +99,13 @@ observation time, an empty `publishedError`.
 **Cause.** `Verify` turned every `verifyLayer` error, a failed blob fetch included, into
 `ErrNoKeyVerifies`.
 
-**Fix.** A payload read that fails in transport (a registry error after retries, a network
-error, a stream cut short, a cancelled or expired context) marks the layer unread. Other layers
-are still tried, and any one that verifies accepts. With none verified and one unread, `Verify`
+**Fix.** A layer is invalid only when ggcr reports the bytes it received as wrong (digest,
+size, content length) or a check on readable bytes fails. Every other payload read error marks
+the layer unread: a registry error after retries (decided first, whatever its body says), a
+network error, a stream cut short over HTTP/1 or reset over HTTP/2, a cancelled context, or a
+kind not foreseen. The first version listed the transport errors instead, and the branch review
+found an HTTP/2 stream reset still filed as invalid. Other layers are still tried, and any one
+that verifies accepts. With none verified and one unread, `Verify`
 returns `ErrSignatureUnreadable`, which `db update` and `dbstatus` already handle as a transport
 failure. A blob whose bytes do not match its digest is still invalid. Files:
 `internal/dbcmd/trust/verify.go`.
@@ -120,11 +124,18 @@ failure. A blob whose bytes do not match its digest is still invalid. Files:
   - each status is unreadable;
   - an unreadable layer beside a genuine one, in either order, still accepts;
   - an invalid layer beside an unreadable one is unreadable;
-  - a digest-mismatched blob is invalid;
-  - a cut stream and a context ended mid-fetch are unreadable.
+  - a digest-mismatched blob of the payload's own length, and a blob of the wrong length, are
+    invalid;
+  - a cut stream, a context ended mid-fetch, and a registry error quoting ggcr's wording are
+    unreadable.
+- `internal/dbcmd/trust/readfailure_h2_test.go`: an HTTP/2 stream reset mid-payload is unread
+  (failed on the first version of the fix).
 - The reviewer's probe now passes 4 of 4 (1 of 4 before).
-- Mutation testing: 9 mutations. The `net.Error` and context clauses are mutual equivalents
-  (each survives alone and is caught together); this is documented in the code.
+- Mutation testing, two rounds:
+  - against the first version, nine: seven caught, and two mutual equivalents in clauses since
+    removed;
+  - against the inverted rule, four, all caught, one only after the digest case was given the
+    payload's own length.
 
 ## Validation
 
@@ -140,7 +151,8 @@ Run on Windows 11, Go 1.26, `GOFLAGS=-mod=readonly`, at the branch head:
   - the trust probe passes 4 of 4 (1 of 4 on `0d09e22`);
   - the three SPDX probes, which assert the old behaviour, now fail on it.
 - Mutation testing (main loop, committed baseline, one mutation at a time):
-  - trust: 9 run, 7 caught directly, and the remaining two are mutual equivalents caught together;
+  - trust: 9 against the first version (7 caught, 2 mutual equivalents since removed), 4 against
+    the final rule (all caught);
   - SPDX: 6 of 6;
   - shell harness: C8 fails on the unchanged installer.
 - **Found while validating:** the Windows CI leg timed out (10 minutes) in

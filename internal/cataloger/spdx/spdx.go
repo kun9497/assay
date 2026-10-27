@@ -146,8 +146,11 @@ func findRootPackageID(doc document) string {
 // 1:16.19.1-1.el9_2, mod_ssl 1:2.4.62-1.fc40 from httpd 2.4.62-1.fc40. With
 // the name alone, npm 8 was compared with a nodejs 16 fix and a fixed npm
 // was reported vulnerable, and mod_ssl's epoch hid an httpd fix (2026-10-27
-// review). (A source purl with no version never gets here: builtBy needs its
-// release.)
+// review). A source purl with no version gives none, so the binary's own
+// version is compared, as before: it can pair (its release and that of a
+// binary whose version carries none are both ""), and EVROf's empty-version
+// guard is what keeps its epoch qualifier from becoming a bare "1:"
+// (TestParse_ASourceWithNoVersionGivesNoEVR).
 func sourceRPMOf(doc document) map[string]pkgmeta.SourcePackage {
 	type rpmID struct{ name, evr, release string }
 	srcs := make(map[string]rpmID)

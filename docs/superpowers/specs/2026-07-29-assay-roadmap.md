@@ -6442,11 +6442,12 @@ same signature again under both editions.
 
 ### D150 — A signature that could not be read is not a signature that failed
 
-**Decision.** `trust.Verify` tells three outcomes apart instead of two. A layer whose payload
-could not be fetched is unread. That covers a registry error after the client's retries (403,
-404, 503), a network error, a stream cut short, and a cancelled or expired context. A layer
-whose payload arrived but fails a check is invalid: no annotation, no key verifies, wrong
-payload type or digest, a blob that does not match its own digest, over the size cap. The
+**Decision.** `trust.Verify` tells three outcomes apart instead of two. A layer is invalid
+only when what it carries was read and is wrong: no annotation, no key verifies, wrong payload
+type or digest, over the size cap, or a blob that ggcr reports does not match its digest or
+size. Every other failure to read the payload leaves the layer unread: a registry error after
+the client's retries (403, 404, 503), a network error, a stream cut short over HTTP/1 or reset
+over HTTP/2, a cancelled context, or an error of a kind not foreseen. The
 layers are still tried in order, and any one that verifies accepts. When none verifies and at
 least one was unread, the result is the new `ErrSignatureUnreadable`, never `ErrNoKeyVerifies`.
 Both callers already treat any other error as a transport failure. `db update` refuses with the
@@ -6467,11 +6468,17 @@ Through `Pull`, the same 403 is refused with and without `--allow-unsigned`, car
 registry's text, and says neither "does not verify" nor "not signed". At `Verify`: each status
 is unreadable; an unreadable layer beside a genuine one still accepts, in either order; an
 invalid readable layer beside an unreadable one is unreadable, both reasons named; a blob whose
-bytes do not match its digest stays invalid; a stream cut mid-body and a context ended mid-fetch
-are unreadable. The reviewer's own probe (`status_blob_independent_test.go`), which failed three
-of four subtests before, passes all four. Nine mutations, seven caught directly. The `net.Error`
-clause and the context clause each survive alone, because a cancelled fetch is a `*url.Error`
-that is both, and are caught together. The code says so.
+bytes do not match its digest, or whose length is not the descriptor's, stays invalid; a stream
+cut mid-body, an HTTP/2 stream reset, a context ended mid-fetch, and a registry error whose body
+quotes ggcr's own wording are unreadable. The reviewer's own probe
+(`status_blob_independent_test.go`), which failed three of four subtests before, passes all
+four. The first version listed the transport errors it treated as unread, and the branch review
+(wf_724fb3e1-bb3) found an HTTP/2 stream reset, which is none of them, still filed as invalid.
+So the rule was inverted to "invalid only on ggcr's checks of the bytes it was sent". ggcr's
+check types are internal, so they are recognised by their messages, and a test fails if an
+upgrade changes the wording. Mutation testing ran twice. The first version got nine: seven
+caught and two mutual equivalents, in clauses since removed. The inverted rule got four, all
+caught, one only after the digest case was given the payload's own length.
 
 ---
 
@@ -6490,7 +6497,7 @@ input only on stdin or `-i`, and a positional file is a usage error. On every Ma
 signed release failed to decode, was reported as "does not verify", and was refused. The review
 showed it with a shim and Apple's source, not on a Mac. The harness was GNU-only too. Its first
 run on a real Mac installed the genuine release with the fixed installer (C1) and then failed
-nine cases on the harness itself. macOS's `/bin/sh` is bash 3.2 in POSIX mode, where
+eight cases on the harness itself. macOS's `/bin/sh` is bash 3.2 in POSIX mode, where
 `VAR=x f` before a shell function keeps the assignment after `f` returns. POSIX leaves that
 unspecified, and dash does not keep it. So `ABSENT`, `ASSAY_RELEASE_BASE` and
 `ASSAY_ALLOW_UNSIGNED` leaked from one case into the next.
