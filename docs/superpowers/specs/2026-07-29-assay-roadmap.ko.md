@@ -6420,15 +6420,13 @@ source 키 레코드에 대해:
 **결정.** `InRange` 는 OSV 의 기준 알고리즘처럼 range 의 이벤트를 정렬하고 따라가되, 두 가지가 바뀐다:
 1. **퇴화 window 를 먼저 꺼낸다.** window 는 한 `introduced` 에서 다음 `introduced` 까지의, 파일 순서
    그대로의 이벤트 구간이다. 그 close 는 구간의 첫 `fixed` 또는 `last_affected` 다. close 가 open 과
-   같게 비교되면 그 쌍은 순회에서 빠진다:
-   - 빈 window `[X,X)` (`introduced` = `fixed`) 는 아무것도 담지 않는다;
-   - 단일 버전 window `[X,X]` (`introduced` = `last_affected`) 는 X 를 담는다. 순회가 아무것도
-     찾지 못했을 때만 참조하므로, 더 넓은 window 안의 버전은 그 window 의 증거를 유지한다.
-
-   introduced 센티넬 `"0"` 은 버전 0 이 아니라 음의 무한대이며 퇴화 window 를 열지 않는다. PEP 440 은
-   이를 `"0.0"` 과 같다고 비교한다.
-2. **같은 버전에서는 close 가 open 보다 먼저 정렬된다.** 순위는 이벤트 종류로 매기므로 비교자는 엄격한
-   약순서(strict weak ordering)를 유지한다.
+   같게 비교되면 그 쌍은 순회에서 빠지고, window 는 자기 두 경계로 판정된다. open 이상이어야 하고
+   (`atLeast` 이므로 센티넬은 계속 음의 무한대다), `fixed` close 라면 그 미만, `last_affected` close
+   라면 그 이하여야 한다. 비교자의 동등이 추이적이면 `[X,X)` 는 아무것도 담지 않고 `[X,X]` 는 X 를
+   담는다. 꺼낸 window 는 순회가 아무것도 찾지 못했을 때만 참조하므로, 더 넓은 window 안의 버전은 그
+   window 의 증거를 유지한다. Evidence 는 두 경계를 advisory 가 적은 표기 그대로 보여 준다.
+2. **같은 버전에서는 close 가 open 보다 먼저 정렬된다.** 순위는 이벤트 종류로 매기므로, 비교자의 동등이
+   추이적인 한 비교자는 엄격한 약순서(strict weak ordering)를 유지한다.
 
 `splitDegenerate` 와 `sortEvents` 의 동률 규칙은 `internal/version/rangeeval.go` 에 있다. 매처는
 바뀌지 않는다.
@@ -6442,42 +6440,71 @@ window 를 닫아 버려서, 그 안의 모든 버전이 빈 Evidence 와 함께
 동률에서 close 를 먼저 두는 단순한 수정은 퇴화 window 를 깨뜨린다. close 를 먼저 두면 `[X,X)` 와
 `[X,X]` 모두 X 에서 열리고 닫히지 않는다: X 이상의 모든 버전에서 오탐이다. 동률마다 이벤트가 속한
 window 로 순위를 매기면 두 모양이 모두 고쳐진다. 그러나 같은 버전의 퇴화 window 가 둘이면 순환이
-생기고, 이는 유효한 정렬 순서가 아니다. Bitnami 의 liferay 는 하나의 range 안에서 같은 `[X,X]` 를
-수십 번 반복한다. 퇴화 window 를 먼저 꺼내면 서로 다른 window 사이의 동률만 남고, 이는 종류 순위가
-올바르게 정렬한다. 사용자는 이 방식을 골랐고, 정렬 없이 파일 순서로 window 를 짝짓는 방식(close 가
-자기 open 보다 앞서는 경우를 OSV 가 허용하므로 틀린다)과 위험 요소로만 기록하는 방식은 택하지 않았다.
+생기고, 이는 유효한 정렬 순서가 아니다. 퇴화 window 를 먼저 꺼내면 서로 다른 window 사이의 동률만
+남고, 이는 종류 순위가 정렬한다. 사용자는 이 방식을 골랐고, 정렬 없이 파일 순서로 window 를 짝짓는
+방식(close 가 자기 open 보다 앞서는 경우를 OSV 가 허용하므로 틀린다)과 위험 요소로만 기록하는 방식은
+택하지 않았다.
 
-**측정.** 공개된 데이터베이스(2026-10-27)의 git 이 아닌 range 14,641,480개:
-- window 를 가로지르는 동률: 76개(Bitnami 75, PyPI 1), 모두 이미 순서대로 적혀 있었다. 이 결함에는
-  실제 사례가 없었다. 유효한 입력에서의 잠재적 미탐이다.
-- 퇴화 window: 1,906개. 빈 window 229개(Bitnami 224, crates.io 5)와 단일 버전 window 1,677개
-  (Bitnami 1,657, Packagist 20)다.
+첫 버전은 꺼낸 window 를 close 와의 동등만으로 판정했다. 브랜치 리뷰(wf_6ce5dff7-2de)가 이것이
+Bitnami 의 비교자 아래에서 틀림을 보였다. 그 비교자에서는 맨 `1.0.0` 이 그 모든 revision 과 같고
+`1.0.0-1` 은 `1.0.0-3` 보다 낮게 정렬된다. `[1.0.0, 1.0.0-3)` 은 `1.0.0-1` 을 담는데 첫 버전은 이를
+버렸다: 새로운 잠재적 미탐이다. 또한 `[1.0.0-3, 1.0.0]` 에 `1.0.0-1` 을 맞추어 오탐을 냈다. 두 경계를
+모두 판정하면 이 둘이 고쳐진다. 증거에 advisory 의 표기를 유지하고, range 의 모든 window 가 꺼내졌을
+때 읽을 수 없는 설치 버전을 오류로 드러내는 효과도 있다. 둘 다 첫 버전에서 잃었던 것이다.
 
-데이터베이스 전체에 대한 차분 검사가, 동률을 하나라도 가진 range 536개를 각자의 모든 경계에서 main
-과 이 변경으로 판정했다. 2,892개의 판정 중 verdict 나 오류가 바뀐 것은 없었다. affected 가 아니던
-결과 255개는 순회에서 남은 증거 필드만 바뀌었고, 미탐일 때는 아무도 이를 읽지 않는다.
+**측정.** 공개된 데이터베이스(2026-10-27)의 git 이 아닌 range 14,641,480개.
 
-**포기하는 것.** 어느 close 가 어느 open 에 속하는지는 파일 순서에서 읽는다. 잘못 만들어진 window,
-즉 다음 `introduced` 전에 close 가 둘이거나 close 가 자기 open 보다 낮은 경우에는 짝짓기가 추측이다.
-코드에 그렇게 적혀 있다. 짝짓기를 바꾸는 두 변이 아래에서도 차분 검사는 verdict 변화를 보이지 않았다.
+코드 자체의 규칙(비교자 동등)으로는 888개의 window 가 꺼내진다:
+- 빈 window 244개: Bitnami 239(그중 열다섯 개는 golang 의 `1.24.0-0` / `1.24.0` 처럼 표기가 다르다),
+  crates.io 5.
+- 단일 버전 window 644개: Bitnami 624, Packagist 20.
 
-**검증.**
-- `TestInRange_A7_ATieAcrossWindowsDoesNotDependOnFileOrder` 는 `fixed` 와 `last_affected` 를 각각
-  역순과 순서대로 적은 경우, 그리고 close 에 있는 점 window 를 다룬다. 이 케이스들은 변경 전에 red
-  였다.
-- `TestInRange_A7_DegenerateWindowsKeepTheirMeaning` 은 빈 window, 점 window, 반복된 점 window,
-  Bitnami discourse 의 빈 최신 window, close 위의 빈 window, 더 넓은 window 안의 점 window 를 다룬다.
-- `TestInRange_A7_TheSentinelNeverOpensADegenerateWindow` 는 첫 구현에 대해 red 로 작성되었다.
+분리 뒤에 서로 다른 window 사이에 남는 동률은 74개(Bitnami 73, PyPI 1)이고, 모두 순서대로 적혀 있다.
+이 결함에는 실제 사례가 없었다. 유효한 입력에서의 잠재적 미탐이다. 문자열 동일성으로 센 조사는
+Bitnami 의 liferay 레코드에서 `last_affected` 동률 49,170개도 센다. 이는 반복된 퇴화 window 사이의
+동률이고, 분리가 이를 꺼낸다.
 
-변이는 열한 개를 돌렸다:
-- 잡힌 것: 동률 규칙 제거, 동률 규칙 뒤집기, 분리를 적용하지 않음, 점을 전혀 참조하지 않음, 센티넬을
-  제외하지 않음, 분리가 `last_affected` 를 보지 못함, 점이 X 미만을 담음, 점이 순회의 증거를 덮어씀,
-  빈 window 를 점으로 유지함.
-- 살아남은 것: 다음 `introduced` 너머를 봄, 이후의 모든 close 와 짝지음. 둘 다 올바르게 만들어진
-  window 에서는 동등하며 `splitDegenerate` 에 적혀 있다.
+데이터베이스 전체에 대한 차분 검사에서 어떤 verdict 도 어떤 오류도 바뀌지 않았다. 동률을 하나라도
+가진 range 536개를 각자의 모든 경계에서 main 과 이 변경으로 판정했고, 판정은 모두 2,892개다.
+동률이 없는 range 는 꺼내지는 것도 순위가 매겨지는 동률도 없으므로 이 변경이 건드릴 수 없다.
+affected 가 아니던 결과 255개는 순회에서 남은 증거 필드만 바뀌었고, 미탐일 때는 아무도 이를 읽지
+않는다.
 
-열두 번째 변이는 분리 앞의 검증 단계를 제거했다. `sortEvents` 가 같은 경계를 검증하므로 동등한
-변이였고, 그 단계를 삭제했다.
+**포기하는 것.** 어느 close 가 어느 open 에 속하는지는 파일 순서에서 읽는다. 잘못 만들어진 window 에서는
+짝짓기가 추측이다. 공개된 데이터베이스에 그런 window 가 있다: 자기 open 보다 낮은 close 392개(Alpine
+380)와 close 가 둘 이상인 window 123개(Alpine 100, PyPI 23)다. 짝짓기를 바꾸는 두 변이 아래에서도 차분
+검사는 verdict 변화를 보이지 않았다. 또한 Bitnami 의 비교자는 동등이 추이적이지 않아서 어떤 동률
+규칙도 그 이벤트에 일관된 순서를 줄 수 없다. 이는 이 변경 전에도 그랬다.
+
+**검증.** `internal/version/rangeeval_ties_test.go` 에서:
+- **window 를 가로지르는 동률** 은 `fixed` 와 `last_affected` 각각, 그리고 close 에 있는 점 window 를
+  다룬다. 모두 역순과 순서대로 적은 경우가 있다. 역순으로 적은 케이스는 변경 전에 red 였다.
+- **퇴화 window 가 의미를 유지한다:** 빈 window, 점 window, 반복된 점 window, Bitnami discourse 의 빈
+  최신 window, close 위의 빈 window, 더 넓은 window 안의 점 window.
+- **센티넬로 열린 window:** PEP 440 센티넬 window `[0, 0.0)` 은 여전히 `0.dev0` 을 담는다.
+- **꺼낸 window 는 두 경계로 판정된다.** Bitnami 의 비교자 아래에서.
+- **증거가 advisory 의 표기를 유지한다.**
+- **읽을 수 없는 설치 버전은 대상을 이름으로 적은 오류다.** 모든 window 가 꺼내졌을 때, 그리고 센티넬로
+  열린 window 의 close 에서.
+
+최종 코드에 대해 변이 열다섯 개를 돌렸다. 열두 개가 잡혔다:
+- 동률 규칙 제거, 또는 뒤집기;
+- 분리를 적용하지 않음;
+- 꺼낸 window 를 전혀 판정하지 않음;
+- 분리가 `last_affected` 를 보지 못함;
+- open 경계를 참조하지 않음;
+- 꺼낸 window 가 순회를 덮어씀;
+- 꺼낸 모든 window 를 포함으로 만들거나, 하나도 그렇게 하지 않음;
+- 두 비교 오류 중 어느 쪽이든 삼킴;
+- 증거가 open 을 close 의 표기로 적음;
+- 포함 플래그를 뒤집음.
+
+살아남은 둘은 올바르게 만들어진 window 에서 동등하며 `splitDegenerate` 에 적혀 있다: 다음 `introduced`
+너머를 봄, 이후의 모든 close 와 짝지음. 차분 검사는 어느 쪽에서도 verdict 변화를 보이지 않는다.
+
+이전의 두 부분은 동등한 것으로 판명되어 제거했다:
+- 분리에서 센티넬을 제외하는 것: `atLeast` 가 이미 센티넬을 음의 무한대로 읽기 때문이다;
+- 분리 앞의 검증 단계: `sortEvents` 가 같은 경계를 검증하기 때문이다.
 
 ---
 
