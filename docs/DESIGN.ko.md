@@ -974,6 +974,10 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       A5) — LTSS 트랙이 있는 모든 SP(12 SP5 4,895, 15 SP6 2,469 …): 실제 아카이브에서 SLE 항목
       14,731 개가 이제 LTSS 수정을 가짐, vunnel 의 CSAF 파서와 같음; Leap 키는 그대로
       (`leapView`)
+- [x] 이미지의 rpm source 조회가 SRPM 의 EVR 을 주 패키지의 epoch 와 함께 비교 (D153, 감사 A4) —
+      없으면 SRPM 버전의 형제들 중 가장 흔한 epoch, 다음은 다른 빌드의 같은 이름 패키지, 그것도 없으면
+      바이너리의 것; Azure Linux 와 Photon 키에는 epoch 없음; ubi9/perl-532 오탐
+      −342, ubi8/nodejs-18 −46, 추가 없음
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨

@@ -24,6 +24,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/kun9497/assay/internal/pkgmeta"
@@ -300,4 +301,126 @@ func isPubkey(h header) bool {
 	// indistinguishable by name alone, and dropping a real package is silent.
 	_, hasArch := h.str(tagArch)
 	return !hasArch
+}
+
+// ResolveSourceVersions sets each package's Source.Version to its source
+// rpm's EVR, once the whole database has been read (2026-10-22 audit A4).
+// toPackage can only give it the BINARY's EVR, which is wrong whenever a
+// subpackage's version or epoch is not its SRPM's: mod_ssl 1:2.4.62 from
+// httpd 2.4.62 hid every httpd fix, perl-B 1.80 from perl 4:5.32.1 never
+// cleared one, npm 1:8.19.3 was compared with nodejs fixes.
+//
+// The version-release is the SOURCERPM filename's. The filename carries no
+// epoch, so the epoch is, in order:
+//  1. that of the installed package named like the source and built from the
+//     same SOURCERPM: the spec's main package, which carries the spec's
+//     top-level Epoch;
+//  2. else the most common one (the lower on a tie) among the installed
+//     packages from the same SOURCERPM whose version-release is the SRPM's:
+//     a subpackage that keeps the spec's version keeps its Epoch too, and a
+//     subpackage with an Epoch of its own (mod_ssl's 1) is outvoted. On 19
+//     real images (2026-10-27) this matched the main package's epoch for
+//     710 of 710 subpackages where the main package was installed; the
+//     lowest instead of the most common got perl wrong (perl-doc is 0);
+//  3. else that of the package named like the source from another build (a
+//     partial update), which step 2 must outrank: an Epoch bump between the
+//     two builds would otherwise lend the new build the old one's epoch;
+//  4. else the binary's own, as before A4.
+//
+// Azure Linux (CBL-Mariner's keys included) and Photon write no usable
+// epoch in their fixed versions -- Azure always 0:, Photon none -- so for
+// their keys the source version carries none at all: perl's 4 would sort
+// perl-Errno, and perl itself, above every fix (branch review
+// wf_8d3f5559-cf7).
+//
+// A SOURCERPM that does not parse leaves the binary's EVR in place.
+func ResolveSourceVersions(pkgs []pkgmeta.Package) {
+	// First seen per key. Packages sharing a name come from one spec
+	// (multilib pairs, several kernels) and so share its epoch: keeping the
+	// first rather than the last is an equivalent mutation on any real
+	// rpmdb (verified 2026-10-27), kept only so the result never depends on
+	// which copy came last.
+	type build struct{ name, srpm string }
+	epochOfBuild := make(map[build]string, len(pkgs))
+	epochOfName := make(map[string]string, len(pkgs))
+	siblings := make(map[string]map[string]int) // SOURCERPM -> epoch -> count
+	for _, p := range pkgs {
+		e := epochPart(p.Version)
+		if _, seen := epochOfName[p.Name]; !seen {
+			epochOfName[p.Name] = e
+		}
+		if _, seen := epochOfBuild[build{p.Name, p.Upstream}]; !seen {
+			epochOfBuild[build{p.Name, p.Upstream}] = e
+		}
+		vr := pkgmeta.SourceRPMVersion(p.Upstream)
+		if vr == "" || strings.TrimPrefix(p.Version, e+":") != vr {
+			continue
+		}
+		if siblings[p.Upstream] == nil {
+			siblings[p.Upstream] = map[string]int{}
+		}
+		siblings[p.Upstream][e]++
+	}
+	for i := range pkgs {
+		p := &pkgs[i]
+		if p.Source == nil {
+			continue
+		}
+		vr := pkgmeta.SourceRPMVersion(p.Upstream)
+		if vr == "" {
+			continue
+		}
+		if epochlessFeed(p.Ecosystem) {
+			p.Source.Version = vr
+			continue
+		}
+		e, ok := epochOfBuild[build{p.Source.Name, p.Upstream}]
+		if !ok {
+			e, ok = mostCommonEpoch(siblings[p.Upstream])
+		}
+		if !ok {
+			e, ok = epochOfName[p.Source.Name]
+		}
+		if !ok {
+			e = epochPart(p.Version)
+		}
+		if e != "" {
+			vr = e + ":" + vr
+		}
+		p.Source.Version = vr
+	}
+}
+
+// epochlessFeed reports whether an ecosystem key's advisories write no
+// usable epoch: Azure Linux's OVAL (CBL-Mariner's "Azure Linux:2" too)
+// always writes 0:, Photon's feed none (deferred-decisions, known hazards).
+func epochlessFeed(eco string) bool {
+	return strings.HasPrefix(eco, "Azure Linux:") || strings.HasPrefix(eco, "Photon OS:")
+}
+
+// mostCommonEpoch is the epoch counted most often, the numerically lower on
+// a tie ("" is 0), or false when there is none.
+func mostCommonEpoch(counts map[string]int) (string, bool) {
+	best, bestN, found := "", 0, false
+	for e, n := range counts {
+		if !found || n > bestN || (n == bestN && epochLess(e, best)) {
+			best, bestN, found = e, n, true
+		}
+	}
+	return best, found
+}
+
+func epochLess(a, b string) bool {
+	ai, _ := strconv.Atoi(a)
+	bi, _ := strconv.Atoi(b)
+	return ai < bi
+}
+
+// epochPart is the epoch of an evr()-shaped version, "" when it has none
+// (evr writes the epoch only when non-zero).
+func epochPart(v string) string {
+	if i := strings.IndexByte(v, ':'); i > 0 {
+		return v[:i]
+	}
+	return ""
 }

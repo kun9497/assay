@@ -8,6 +8,11 @@
 ## [Unreleased]
 
 ### Fixed
+- rpm 배포판 이미지 스캔이 source 기준 advisory 를 바이너리가 아니라 source rpm 의 버전과 비교합니다.
+  이전에는 자기 버전이나 epoch 를 가진 서브패키지가 다른 네임스페이스에서 판정되어, perl 의 서브패키지와
+  npm 이 source 의 수정을 결코 통과하지 못했고(ubi9/perl-532 오탐 −342, ubi8/nodejs-18 −46), mod_ssl
+  의 epoch 가 source 기준 피드에서 httpd 수정을 가릴 수 있었습니다. 쓸 수 있는 epoch 가 피드에 없는
+  Azure Linux 와 Photon 에서는 source 버전에 epoch 를 붙이지 않습니다. (D153, 감사 A4)
 - 일반 지원이 끝난 SLES 서비스 팩(12 SP5, 15 SP4–SP6 등 LTSS 트랙이 있는 것): SUSE가 mainline 제품을
   수정 없는 영향받음으로, SP-LTSS 제품을 수정됨으로 적을 때 LTSS 수정을 유지합니다. 이전에는 그 수정이
   버려져, 수정이 설치된 LTSS 이미지가 "영향받음, 수정 없음"으로 스캔되었습니다(2026-10-27 아카이브에서

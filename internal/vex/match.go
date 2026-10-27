@@ -253,9 +253,9 @@ func isSourcePURL(p pkgmeta.PURL) bool {
 // no binary carries.
 //
 // The source version is Source.Version, falling back to the binary's own
-// (D8's "empty means same as the binary"), except on rpm, where Source.Version
-// is the binary's EVR and the SRPM's own version is read off its file name
-// instead (rpmSourceVersions). An rpm document writes the epoch as a
+// (D8's "empty means same as the binary"), except on rpm, where the SRPM's own
+// version is read off its file name instead (rpmSourceVersions), the same way
+// for an image's package and an SBOM's (see there for why not Source.Version). An rpm document writes the epoch as a
 // qualifier, so it is joined to the version before comparing and left out of
 // the subset check.
 func sourcePatternMatches(doc pkgmeta.PURL, s subject) (matched, versionless bool) {
@@ -296,11 +296,13 @@ func sourcePatternMatches(doc pkgmeta.PURL, s subject) (matched, versionless boo
 //
 // The SRPM's version-release comes from its file name — Package.Upstream as
 // the rpmdb cataloger records SOURCERPM, else the purl's upstream qualifier
-// (an SBOM's package) — and not from Source.Version, which the rpm catalogers
-// set to the binary's own EVR because the matcher compares source-keyed
-// advisories at it. The two differ whenever a binary is versioned apart from
-// its source: device-mapper-libs 1.02.181 is built from lvm2 2.03.14, and
-// Red Hat's statement names lvm2@2.03.14-15.el8_10?arch=src.
+// (an SBOM's package) — and not from Source.Version, so an image's package
+// and an SBOM's are compared the same way. (Since A4 an image's rpmdb gives
+// Source.Version the SRPM's EVR with the main package's epoch; an SBOM's
+// upstream-qualified package still carries the binary's.) The binary and
+// source versions differ whenever a binary is versioned apart from its
+// source: device-mapper-libs 1.02.181 is built from lvm2 2.03.14, and Red
+// Hat's statement names lvm2@2.03.14-15.el8_10?arch=src.
 //
 // The file name carries no epoch, so the document's epoch is compared with
 // the binary's, a missing one on either side reading as 0 (syft writes
