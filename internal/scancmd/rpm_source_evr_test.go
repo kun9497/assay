@@ -48,14 +48,14 @@ func a4DB(t *testing.T, fixed map[string]string) string {
 
 // a4Scan scans an image holding these rpm packages and returns the names of
 // the packages with a finding.
-func a4Scan(t *testing.T, db string, entries []ndbFixtureEntry) []string {
+func a4Scan(t *testing.T, db, osRelease string, entries []ndbFixtureEntry) []string {
 	t.Helper()
 	for i := range entries {
 		entries[i].pkgidx = uint32(i + 1)
 	}
 	tarPath := filepath.Join(t.TempDir(), "image.tar")
 	writeImageTar(t, tarPath, map[string]string{
-		osReleasePath:                      osReleaseRHEL9,
+		osReleasePath:                      osRelease,
 		"usr/lib/sysimage/rpm/Packages.db": string(buildNDBFixture(t, uint32(len(entries)+1), entries)),
 	})
 	var out, errOut bytes.Buffer
@@ -95,7 +95,7 @@ func TestRun_A4_SourceLookupComparesTheSRPMsEVR(t *testing.T) {
 		"perl":   "4:5.32.1-484.el9_8",
 		"nodejs": "1:16.19.1-1.el9_2",
 	})
-	got := a4Scan(t, db, []ndbFixtureEntry{
+	got := a4Scan(t, db, osReleaseRHEL9, []ndbFixtureEntry{
 		{name: "httpd", version: "2.4.62", release: "1.el9", sourcerpm: "httpd-2.4.62-1.el9.src.rpm"},
 		{name: "mod_ssl", version: "2.4.62", release: "1.el9", sourcerpm: "httpd-2.4.62-1.el9.src.rpm", epoch: 1},
 		{name: "perl", version: "5.32.1", release: "484.el9_8", sourcerpm: "perl-5.32.1-484.el9_8.src.rpm", epoch: 4},
@@ -118,7 +118,7 @@ func TestRun_A4_SourceLookupComparesTheSRPMsEVR(t *testing.T) {
 // on ubi8/nodejs-18 is gone.
 func TestRun_A4_WithoutTheSameNamePackageTheSiblingsEpochIsUsed(t *testing.T) {
 	db := a4DB(t, map[string]string{"httpd": "2.4.63-1.el9", "perl": "4:5.32.1-484.el9_8"})
-	got := a4Scan(t, db, []ndbFixtureEntry{
+	got := a4Scan(t, db, osReleaseRHEL9, []ndbFixtureEntry{
 		{name: "httpd-core", version: "2.4.62", release: "1.el9", sourcerpm: "httpd-2.4.62-1.el9.src.rpm"},
 		{name: "httpd-filesystem", version: "2.4.62", release: "1.el9", sourcerpm: "httpd-2.4.62-1.el9.src.rpm"},
 		{name: "mod_ssl", version: "2.4.62", release: "1.el9", sourcerpm: "httpd-2.4.62-1.el9.src.rpm", epoch: 1},
@@ -137,13 +137,13 @@ func TestRun_A4_WithoutTheSameNamePackageTheSiblingsEpochIsUsed(t *testing.T) {
 // below the fix: the one residual false positive, pinned.
 func TestRun_A4_WithNoMainPackageAndNoSiblingTheBinaryEpochIsUsed(t *testing.T) {
 	db := a4DB(t, map[string]string{"perl": "4:5.32.1-484.el9_8"})
-	got := a4Scan(t, db, []ndbFixtureEntry{
+	got := a4Scan(t, db, osReleaseRHEL9, []ndbFixtureEntry{
 		{name: "perl-IO", version: "1.43", release: "484.el9_8", sourcerpm: "perl-5.32.1-484.el9_8.src.rpm"},
 	})
 	if want := []string{"perl-IO"}; !slices.Equal(got, want) {
 		t.Errorf("packages with findings = %v, want %v (the documented residual)", got, want)
 	}
-	got = a4Scan(t, db, []ndbFixtureEntry{
+	got = a4Scan(t, db, osReleaseRHEL9, []ndbFixtureEntry{
 		{name: "perl-Fake", version: "5.32.1", release: "484.el9_8", sourcerpm: "perl-5.32.1-484.el9_8.src.rpm", epoch: 4},
 	})
 	if len(got) != 0 {
