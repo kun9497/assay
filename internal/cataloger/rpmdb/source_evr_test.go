@@ -119,8 +119,10 @@ func TestResolveSourceVersions_EpochOrder(t *testing.T) {
 // perl's 4 must not reach perl-Errno, and perl itself, whose lookup is the
 // same one, compares 5.38.2-507 against 0:5.38.2-509 (branch review
 // wf_8d3f5559-cf7: A4 had spread perl's epoch to every subpackage there).
+// Every release of each family is listed, so a prefix narrowed to one
+// release fails here (review wf_d60bfbd2-23b).
 func TestResolveSourceVersions_EpochlessFeedsGetNoEpoch(t *testing.T) {
-	for _, eco := range []string{"Azure Linux:3", "Azure Linux:2", "Photon OS:5"} {
+	for _, eco := range []string{"Azure Linux:3", "Azure Linux:2", "Photon OS:5", "Photon OS:4", "Photon OS:3"} {
 		got := sourceVersions(t, []pkgmeta.Package{
 			src("perl", "4:5.38.2-507.azl3", "perl-5.38.2-507.azl3.src.rpm", eco),
 			src("perl-Errno", "1.37-507.azl3", "perl-5.38.2-507.azl3.src.rpm", eco),

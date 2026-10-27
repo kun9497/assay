@@ -2033,14 +2033,34 @@ Go가 먼저입니다. 표준 라이브러리 `debug/buildinfo`가 모듈 목록
 
 미룬 결정이 아니라, 해당 코드를 쓸 때 처리해야 할 덫입니다.
 
-**Azure Linux 와 Photon 피드에는 쓸 수 있는 epoch 가 없습니다(2026-10-27 발견, 검증 예정).** Azure
-Linux 의 OVAL 은 spec 에 Epoch 가 있는 패키지(perl 은 4)까지 포함해 모든 수정 버전을 epoch `0:` 으로 쓰고,
-Photon 의 피드는 epoch 를 전혀 쓰지 않습니다(nginx 의 spec 은 Epoch: 1). 그러면 epoch 를 실제로 가진
-설치된 바이너리는 조회에 어느 이름을 쓰든 그런 수정보다 항상 높게 정렬됩니다: 조용한 미탐입니다. A4
-조사에서 발견했습니다. D153 이 이 키들에서 source 버전의 epoch 를 이미 빼므로, source 를 통해 조회되는
-모든 패키지(서브패키지, 또는 source 와 이름이 같은 패키지)는 해결되었습니다. 남은 것은 자기 이름으로
-조회되면서 epoch 를 가진 바이너리입니다. 수정(그 ecosystem 들에서는 version-release 만 비교하는 것이
-유력한 후보)을 정하기 전에 실제 Azure Linux 와 Photon 이미지에서 측정할 예정입니다.
+**~~Azure Linux 와 Photon 피드에는 쓸 수 있는 epoch 가 없습니다~~ — D153 으로 해결, 2026-10-27 측정
+(같은 날 발견).** Azure Linux 의 OVAL 은 spec 에 Epoch 가 있는 패키지(perl 은 4)까지 포함해 모든 수정
+버전을 epoch `0:` 으로 쓰고, Photon 의 피드는 epoch 를 전혀 쓰지 않습니다(nginx 의 spec 은 Epoch: 1).
+epoch 를 가진 설치된 바이너리는 그런 수정보다 항상 높게 정렬됩니다. D153 이 이 키들에서 source 버전의
+epoch 를 빼므로, source 를 통해 조회되는 패키지는 모두 version-release 만으로 판정됩니다.
+
+남아 있던 경우는 자기 이름으로 조회되면서 epoch 를 가진 바이너리였습니다. 공개 데이터베이스, 실제 base
+이미지, 그리고 Photon 의 모든 spec 에서 측정했고, 그런 경우는 하나도 없었습니다:
+- Azure Linux 2 와 3 은 source 패키지 이름만 씁니다(439 개와 465 개). 그래서 서브패키지는 source 를
+  통해서만 닿습니다. base 이미지에서 epoch 를 가진 바이너리는 ca-certificates 에서 빌드된
+  ca-certificates-base, -shared, -tools 뿐입니다.
+- Photon 은 서브패키지 이름도 씁니다(5 에서 674 개). Photon 5.0 spec 파일 1,864 개, 4.0 의 1,034 개,
+  3.0 의 920 개 가운데 0 이 아닌 Epoch 를 가지면서 피드에 이름이 오르는 것은 두 개입니다. 3.0 의
+  ImageMagick(Epoch 1)은 자기 이름, 곧 source 의 이름으로만 올라 있어서 source 조회가 epoch 없이
+  판정합니다. 다른 하나는 5.0 의 nginx(Epoch 1, 두 버전 계열)입니다. 자기 이름으로
+  오른 서브패키지 여섯 개(nginx-mod-njs 등)는 nginx 의 advisory 23 개에 nginx 와 같은 수정 버전으로 정확히
+  함께 나옵니다. 자기 이름 조회는 epoch 때문에 빗나가지만, source 조회가 같은 advisory 에 닿고, matcher 는
+  맞았을 때만 advisory 를 본 것으로 표시합니다. Photon base 이미지에는 epoch 를 가진 패키지가 없습니다.
+
+`TestRun_D153_PhotonEpochSubpackageFoundThroughItsSource` 와
+`TestRun_D153_AzureLinuxEpochSubpackageFoundThroughItsSource` 가 두 모양을 `Run` 을 통해 지킵니다.
+변이 여섯 개가 모두 잡혔습니다: 호출 지점, 두 접두사 각각, 규칙, source 버전, 그리고 advisory 를 처음
+이름으로만 판정하는 것. 단위 테스트가 Azure Linux 와 Photon 의 모든 릴리스를 나열하므로, 한 릴리스로
+좁힌 접두사도 잡힙니다(리뷰 wf_d60bfbd2-23b).
+
+**다시 볼 조건:** Photon 이나 Azure Linux 레코드가 source 의 레코드에 없는 CVE 를 epoch 를 가진
+서브패키지 이름으로 쓸 때, 또는 이 키들의 패키지가 파싱되는 SOURCERPM 없이 들어올 때. 그때는 이
+ecosystem 들에서 version-release 만 비교하는 것이 후보입니다.
 
 **~~SUSE의 bare product purl은 버전 비슷한 조각으로 끝나는 이름을 잘못 쪼갭니다.~~ — D126으로
 해결(2026-10-21, 발견한 그날).** SUSE의 생성기는 bare product `libwmf-0_2-7`을

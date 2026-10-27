@@ -2091,16 +2091,37 @@ Support is decided per language rather than promised as a category.
 
 Not deferred decisions — traps to handle when the relevant code is written.
 
-**Azure Linux and Photon feeds carry no usable epoch (found 2026-10-27, to be verified).**
-Azure Linux's OVAL writes every fixed version with epoch `0:`, including packages whose spec
-has an Epoch (perl's is 4), and Photon's feed writes no epoch at all (nginx's spec has
-Epoch: 1). An installed binary that does carry its epoch then sorts above every such fix,
-whichever name the lookup uses: a silent false negative. Found by the A4 investigation. D153 already
-drops the epoch from the source version on these keys, which covers every package looked up
-through its source (a subpackage, or a package named like its source). What remains is a
-binary looked up under a name of its own that carries an epoch. That is to be measured on
-real Azure Linux and Photon images before a fix (comparing version-release only for those
-ecosystems is the obvious candidate) is decided.
+**~~Azure Linux and Photon feeds carry no usable epoch~~ — resolved by D153, measured
+2026-10-27 (found the same day).** Azure Linux's OVAL writes every fixed version with epoch
+`0:`, including packages whose spec has an Epoch (perl's is 4), and Photon's feed writes no
+epoch at all (nginx's spec has Epoch: 1). An installed binary that carries its epoch sorts
+above every such fix. D153 drops the epoch from the source version on these keys, so every
+package looked up through its source is judged on version-release alone.
+
+The case left open was a binary looked up under a name of its own that carries an epoch. It
+was measured on the published database, the real base images and every Photon spec, and none
+was found:
+- Azure Linux 2 and 3 name source packages only (439 and 465 names), so a subpackage reaches
+  them only through its source. On the base images the only epoch'd binaries are
+  ca-certificates-base, -shared and -tools, built from ca-certificates.
+- Photon names subpackages too (674 names on 5). Of 1,864 Photon 5.0 spec files, 1,034 on
+  4.0 and 920 on 3.0, two carry a nonzero Epoch and have a name in the feed. 3.0's ImageMagick
+  (Epoch 1) is named only under its own name, which is its source's, so the source lookup
+  judges it without the epoch. 5.0's nginx (Epoch 1, in two version trains) is the other. Its
+  six subpackages listed under their own names (nginx-mod-njs among them) appear in exactly
+  nginx's 23 advisories at nginx's fixed versions. Their own-name lookup misses on the epoch;
+  the source lookup reaches the same advisory, and the matcher marks an advisory seen only on
+  a hit. The Photon base images carry no epoch'd package.
+
+`TestRun_D153_PhotonEpochSubpackageFoundThroughItsSource` and
+`TestRun_D153_AzureLinuxEpochSubpackageFoundThroughItsSource` hold both shapes through `Run`.
+Six mutations were all caught: the call site, each prefix, the rule, the source version, and an
+advisory judged under the first name only. The unit test lists every Azure Linux and Photon
+release, so a prefix narrowed to one release is caught as well (review wf_d60bfbd2-23b).
+
+**Revisit when** a Photon or Azure Linux record names an epoch'd subpackage for a CVE its
+source's record does not carry, or a package on these keys arrives without a parsable
+SOURCERPM. Comparing version-release only for these ecosystems would then be the candidate.
 
 **~~SUSE's bare product purl mis-splits a name that ends in a version-like segment.~~ —
 resolved in D126 (2026-10-21, the same day it was found).** SUSE's generator emits the bare
