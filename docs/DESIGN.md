@@ -334,9 +334,31 @@ run `assay db update` rather than silently fetching or silently reporting nothin
 
 Override with `ASSAY_DB_DIR` for CI caching or air-gapped environments. The `v9` component
 is the schema version — a schema change rebuilds into a new directory rather than migrating
-in place. Note that `ASSAY_DB_DIR` carries no such component, so a CI cache keyed on that
-path survives an upgrade that should have invalidated it. Rebuild after upgrading, or key
-the cache on the assay version.
+in place. `ASSAY_DB_DIR` carries no such component, so a CI cache keyed on that path alone
+survives an upgrade that changed the schema. Nothing is misread when it does: a binary that
+meets a database of another schema exits 2 and says to run `assay db update`. But the cache
+then fails every run until it expires. Key it on `assay db ref` instead, which prints the
+tag for the schema the installed binary reads, plus the day, so the cache follows both the
+schema and the nightly publish:
+
+```yaml
+- name: Name the database cache
+  id: assaydb
+  run: |
+    echo "ref=$(assay db ref)" >> "$GITHUB_OUTPUT"   # e.g. ghcr.io/kun9497/assay-db:v9
+    echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+- uses: actions/cache@v4
+  id: dbcache
+  with:
+    path: ${{ runner.temp }}/assay-db
+    key: assay-db-${{ steps.assaydb.outputs.ref }}-${{ steps.assaydb.outputs.day }}
+- if: steps.dbcache.outputs.cache-hit != 'true'
+  run: assay db update
+  env:
+    ASSAY_DB_DIR: ${{ runner.temp }}/assay-db
+```
+
+Set the same `ASSAY_DB_DIR` on the scan step.
 
 A build over Go, npm, PyPI, and Alpine produces **64 MB on disk holding 32,050
 advisories** — measured from an actual `db build`, not estimated. Getting there downloads

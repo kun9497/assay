@@ -320,10 +320,31 @@ D110 동결 날짜), 인식된 릴리스의 이름을 대거나 인식되지 않
 | Linux | `~/.cache/assay/db/v9/` |
 
 CI 캐시나 에어갭 환경에서는 `ASSAY_DB_DIR`로 재정의합니다. 경로의 `v9`는 스키마 버전입니다 —
-스키마가 바뀌면 제자리에서 마이그레이션하는 대신 새 디렉터리에 다시 빌드합니다. 다만
-`ASSAY_DB_DIR`에는 그 성분이 없으므로, 그 경로를 키로 삼은 CI 캐시는 무효화되었어야 할
-업그레이드를 넘어 살아남습니다. 업그레이드 후에는 다시 빌드하거나 캐시 키에 assay 버전을
-넣으십시오.
+스키마가 바뀌면 제자리에서 마이그레이션하는 대신 새 디렉터리에 다시 빌드합니다.
+`ASSAY_DB_DIR`에는 그 성분이 없으므로, 그 경로만 키로 삼은 CI 캐시는 스키마가 바뀐 업그레이드를
+넘어 살아남습니다. 그래도 잘못 읽히는 것은 없습니다. 다른 스키마의 데이터베이스를 만난 바이너리는
+exit 2로 끝나며 `assay db update`를 실행하라고 알립니다. 다만 그 캐시는 만료될 때까지 매 실행을
+실패시킵니다. 대신 `assay db ref`로 키를 만드십시오. 이 명령은 설치된 바이너리가 읽는 스키마의
+태그를 출력합니다. 여기에 날짜를 더하면 캐시가 스키마와 야간 배포를 함께 따라갑니다:
+
+```yaml
+- name: Name the database cache
+  id: assaydb
+  run: |
+    echo "ref=$(assay db ref)" >> "$GITHUB_OUTPUT"   # e.g. ghcr.io/kun9497/assay-db:v9
+    echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+- uses: actions/cache@v4
+  id: dbcache
+  with:
+    path: ${{ runner.temp }}/assay-db
+    key: assay-db-${{ steps.assaydb.outputs.ref }}-${{ steps.assaydb.outputs.day }}
+- if: steps.dbcache.outputs.cache-hit != 'true'
+  run: assay db update
+  env:
+    ASSAY_DB_DIR: ${{ runner.temp }}/assay-db
+```
+
+스캔 단계에도 같은 `ASSAY_DB_DIR`을 지정하십시오.
 
 Go, npm, PyPI, Alpine으로 빌드하면 **디스크 64 MB에 권고 32,050건**이 담깁니다 — 추정치가
 아니라 실제 `db build`를 돌려 측정한 값입니다. 여기까지 오는 데 약 248 MB를 내려받습니다.
