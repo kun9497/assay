@@ -1027,6 +1027,10 @@ exited 0 while 24 findings went unmentioned.
       (D153, audit A4) — else the most common epoch among siblings at the SRPM version, else
       the same-name package of another build, else the binary's; no epoch on Azure Linux and
       Photon keys; ubi9/perl-532 −342 and ubi8/nodejs-18 −46 false positives, none added
+- [x] At the same version a close sorts before an open, and a window that opens and closes
+      at one version is judged on its own (D154, audit A7) — a range listing a later window
+      first no longer shuts it at the version the earlier one closes; 2,892 judgments over
+      every tied range in the published database unchanged
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15

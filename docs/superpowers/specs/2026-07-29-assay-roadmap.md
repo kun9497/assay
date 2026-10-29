@@ -6750,6 +6750,112 @@ unparsable and nil guards, and the SRPM version-release ignored.
 
 ---
 
+### D154 — At the same version a close sorts before an open; a window that opens and closes at one version is judged on its own
+
+**Decision.** `InRange` still sorts a range's events and walks them, as OSV's reference
+algorithm does, with two changes:
+1. **Degenerate windows come out first.** A window is the run of events from one `introduced`
+   to the next, in file order, and its close is the first `fixed` or `last_affected` in that
+   run. When the close compares equal to the open, the pair is taken out of the walk and the
+   window is judged on both of its own bounds: at or above the open (`atLeast`, so the
+   sentinel stays negative infinity), and below a `fixed` close or at or below a
+   `last_affected` one. Under a comparer whose equality is transitive, that makes `[X,X)` hold
+   nothing and `[X,X]` hold X. A taken-out window is consulted only when the walk found
+   nothing, so a version inside a wider window keeps that window's evidence. Evidence names
+   the advisory's own spelling of both bounds.
+2. **At the same version a close sorts before an open.** The rank is by event kind, which
+   keeps the comparator a strict weak ordering whenever the comparer's equality is
+   transitive.
+
+`splitDegenerate` and the tie rule in `sortEvents` live in `internal/version/rangeeval.go`.
+The matcher is unchanged.
+
+**Why.** The 2026-10-22 audit (A7): `sortEvents` ordered by version only, and a tie between
+one window's close and another's open fell to file order. With the later window listed first
+(`introduced 2.0, fixed 3.0, introduced 1.0, fixed 2.0`), its open sorted before the earlier
+window's close. The close shut the window just opened, so every version inside it was judged
+clean with empty Evidence, while the same events in order returned affected. OSV does not
+require sorted events.
+
+The obvious fix, a close before an open at a tie, breaks degenerate windows. Ordered close
+first, `[X,X)` and `[X,X]` both open at X and never close: a false positive on every version
+from X up. Ranking each tie by which window its events belong to fixes both shapes. But two
+degenerate windows at the same version then form a cycle, and that is not a valid sort order.
+Taking the degenerate windows out first leaves only ties between different windows, which the
+kind rank orders. The user chose this over pairing windows in file order without sorting
+(wrong when a close precedes its own open, which OSV allows) and over recording the defect as
+a hazard only.
+
+The first version judged a taken-out window by equality with its close alone. The branch
+review (wf_6ce5dff7-2de) showed that this is wrong under Bitnami's comparer, whose bare
+`1.0.0` equals every revision of it while `1.0.0-1` sorts below `1.0.0-3`. `[1.0.0, 1.0.0-3)`
+holds `1.0.0-1`, and the first version dropped it: a new latent miss. It also matched
+`1.0.0-1` against `[1.0.0-3, 1.0.0]`, a false positive. Judging both bounds fixes these. It
+also keeps the advisory's spelling in the evidence, and surfaces an unreadable installed
+version as an error when every window of a range is taken out. Both were lost in the first
+version.
+
+**Measured.** On the published database (2026-10-27), 14,641,480 non-git ranges.
+
+By the code's own rule (comparer equality), 888 windows are taken out:
+- 244 empty: Bitnami 239, fifteen of them spelled differently, such as golang's
+  `1.24.0-0` / `1.24.0`; crates.io 5.
+- 644 single-version: Bitnami 624, Packagist 20.
+
+Ties between different windows after the split: 74 (Bitnami 73, PyPI 1), every one listed in
+order. The defect had no live instance; it is a latent miss on valid input. A survey by string
+identity also counts 49,170 `last_affected` ties in Bitnami's liferay records. Those are ties
+between repeated degenerate windows, and the split takes them out.
+
+A whole-database differential found no change in any verdict or any error. It judged each of
+the 536 ranges that hold any tie at every one of its own bounds, on main and on this change,
+2,892 judgments in all. The change cannot touch a range without a tie, because nothing is
+taken out and no tie is ranked. 255 results that were not affected changed only the evidence
+fields left over from the walk, which nothing reads on a miss.
+
+**Gives up.** Which close belongs to which open is read from file order. On a malformed
+window the pairing is a guess. The published database has such windows: 392 closes below
+their own open (Alpine 380) and 123 windows with two or more closes (Alpine 100, PyPI 23).
+Under both mutations that change the pairing, the differential still showed no change in any
+verdict. Bitnami's comparer also has non-transitive equality, so no tie rule gives its events
+a consistent order. That was so before this change.
+
+**Verified.** In `internal/version/rangeeval_ties_test.go`:
+- **The cross-window tie** for `fixed`, for `last_affected`, and for a point window at a
+  close. Each is listed both in reverse and in order. The reverse-listed cases were red before
+  the change.
+- **Degenerate windows keep their meaning:** an empty window, a point window, a repeated point
+  window, Bitnami discourse's empty newest window, an empty window over a close, and a point
+  window inside a wider one.
+- **Sentinel-opened windows:** the PEP 440 sentinel window `[0, 0.0)` still holds `0.dev0`.
+- **Taken-out windows are judged on both bounds**, under Bitnami's comparer.
+- **The evidence keeps the advisory's spelling.**
+- **An unreadable installed version is an error naming the target** when every window is
+  taken out, and at a sentinel-opened window's close.
+
+Fifteen mutations against the final code. Twelve were caught:
+- the tie rule removed, or reversed;
+- the split not applied;
+- the taken-out windows never judged;
+- the split blind to `last_affected`;
+- the open bound not consulted;
+- taken-out windows overriding the walk;
+- every taken-out window made inclusive, or none;
+- either comparison error swallowed;
+- the evidence spelling its open as its close;
+- the inclusive flag inverted.
+
+Two survivors are equivalent on well-formed windows and documented in `splitDegenerate`:
+looking past the next `introduced`, and pairing every later close. The differential shows no
+change in any verdict under either.
+
+Two earlier parts were removed as equivalents:
+- the sentinel's exclusion from the split, because `atLeast` already reads it as negative
+  infinity;
+- a validation pass before the split, because `sortEvents` validates the same bounds.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

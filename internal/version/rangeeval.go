@@ -127,7 +127,13 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 	// algorithm sorts before walking. An advisory that lists a later window
 	// first is well-formed, and walking it in file order returns "not
 	// vulnerable" with no error — a silent miss on valid input.
-	events, err := sortEvents(c, r.Events)
+	//
+	// A window that closes at the version it opens at is taken out first and
+	// judged on its own (A7, D154): the sort orders a close before an open at
+	// the same version, which is what two windows meeting at a version need,
+	// and would turn [X,X) and [X,X] into windows that never close.
+	walked, taken := splitDegenerate(c, r.Events)
+	events, err := sortEvents(c, walked)
 	if err != nil {
 		return false, Evidence{}, err
 	}
@@ -198,10 +204,116 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 		}
 	}
 
+	// The windows taken out above, each judged on both of its own bounds.
+	// Bounds that compare equal usually make [X,X) empty and [X,X] one
+	// version, but not under every comparer: Bitnami's bare "1.0.0" equals
+	// every revision of it while "1.0.0-1" sorts below "1.0.0-3", so
+	// [1.0.0, 1.0.0-3) holds 1.0.0-1 (branch review wf_6ce5dff7-2de).
+	// Consulted only when the walk found nothing, so a version inside an
+	// ordinary window keeps that window's evidence; and when every window was
+	// taken out, this is what still compares v, so an unreadable installed
+	// version is an error here as it was in the walk.
+	for _, w := range taken {
+		if inside {
+			break
+		}
+		ge, err := atLeast(c, v, w.open)
+		if err != nil {
+			return false, Evidence{}, err
+		}
+		if !ge {
+			continue
+		}
+		cmp, err := c.Compare(v, w.close)
+		if err != nil {
+			bound := "fixed"
+			if w.inclusive {
+				bound = "last_affected"
+			}
+			return false, Evidence{}, unreadablePackageVersion(v, bound, w.close, err)
+		}
+		if cmp < 0 || (w.inclusive && cmp == 0) {
+			inside = true
+			ev.Introduced, ev.Fixed, ev.LastAffected = w.open, "", ""
+			if w.inclusive {
+				ev.LastAffected = w.close
+			} else {
+				ev.Fixed = w.close
+			}
+		}
+	}
+
 	if inside {
 		ev.Reason = describe(v, ev)
 	}
 	return inside, ev, nil
+}
+
+// takenWindow is one window splitDegenerate took out of the walk, with the
+// advisory's own spelling of both bounds.
+type takenWindow struct {
+	open, close string
+	inclusive   bool // closed by last_affected rather than fixed
+}
+
+// splitDegenerate takes out every window whose close compares equal to its
+// open -- an empty [X,X) or a single-version [X,X] under a comparer whose
+// equality is transitive -- and returns the events left to walk and the
+// windows taken out, which InRange judges on their own bounds.
+//
+// A window is the run of events from one introduced to the next, in file
+// order, and its close is the first fixed or last_affected in that run --
+// file order is the only thing that says which close belongs to which open.
+// By this rule the published database held 888 such windows on 2026-10-27:
+// 244 empty (Bitnami 239, fifteen of them spelled differently, such as
+// golang's 1.24.0-0 / 1.24.0; crates.io 5) and 644 single-version (Bitnami
+// 624, Packagist 20). Taking them out is what lets sortEvents put a close
+// before an open at the same version without reopening them.
+//
+// A pair that cannot be compared is left in the walk rather than guessed
+// at, and sortEvents then refuses the range with the advisory named as the
+// cause; a pair taken out was readable by construction.
+//
+// Only a window with one close, at or above its open, is well-formed. On
+// anything else -- two closes before the next introduced, or a close below
+// its open -- which close pairs with the open is a guess. The published
+// database held both on 2026-10-27 (392 closes below their open, 380 of them
+// Alpine; 123 windows with two or more closes, Alpine 100 and PyPI 23), and
+// no judgment at any bound of a tied range changed against the walk before
+// A7.
+func splitDegenerate(c Comparer, in []advisory.Event) (walk []advisory.Event, taken []takenWindow) {
+	drop := make([]bool, len(in))
+	for i, e := range in {
+		// A window the sentinel opens may be taken out too (PEP 440 compares
+		// "0" equal to "0.0"): it is judged with atLeast like any other, and
+		// atLeast reads the sentinel as negative infinity.
+		if e.Introduced == "" {
+			continue
+		}
+		for j := i + 1; j < len(in); j++ {
+			if in[j].Introduced != "" {
+				break
+			}
+			closeAt := in[j].Fixed
+			if closeAt == "" {
+				closeAt = in[j].LastAffected
+			}
+			if closeAt == "" {
+				continue
+			}
+			if cmp, err := c.Compare(e.Introduced, closeAt); err == nil && cmp == 0 {
+				drop[i], drop[j] = true, true
+				taken = append(taken, takenWindow{open: e.Introduced, close: closeAt, inclusive: in[j].Fixed == ""})
+			}
+			break
+		}
+	}
+	for i, e := range in {
+		if !drop[i] {
+			walk = append(walk, e)
+		}
+	}
+	return walk, taken
 }
 
 // eventVersion returns whichever bound an event carries, or "" for an event
@@ -219,7 +331,7 @@ func eventVersion(e advisory.Event) string {
 }
 
 // sortEvents orders events by the version each carries, with the introduced
-// sentinel first.
+// sentinel first and, at the same version, a close before an open.
 //
 // Every bound is validated before sorting so the comparator cannot fail. A
 // comparator that swallowed errors would silently produce an arbitrary order,
@@ -266,9 +378,28 @@ func sortEvents(c Comparer, in []advisory.Event) ([]advisory.Event, error) {
 		}
 		// Cannot fail: every non-empty, non-sentinel bound was validated above.
 		cmp, _ := c.Compare(vi, vj)
-		return cmp < 0
+		if cmp != 0 {
+			return cmp < 0
+		}
+		// A7 (D154): at the same version a close goes before an open. Two
+		// windows meeting at X -- one fixed or last_affected at X, the next
+		// introduced at X -- were ordered by file order, so a range listing
+		// the later window first opened it and shut it again at X, and every
+		// version inside it was clean. A window that opens and closes at the
+		// same X never gets here: splitDegenerate took it out. Ranking by kind
+		// keeps this a strict weak ordering whenever the comparer's equality
+		// is transitive, which a rule that looked at which window each event
+		// belongs to would not be. Bitnami's equality is not (a bare core
+		// equals every revision of it), and no tie rule restores an order
+		// that the comparer itself does not have; that was so before A7.
+		return closesWindow(out[i]) && !closesWindow(out[j])
 	})
 	return out, nil
+}
+
+// closesWindow reports whether an event is a fixed or last_affected bound.
+func closesWindow(e advisory.Event) bool {
+	return e.Introduced == "" && (e.Fixed != "" || e.LastAffected != "")
 }
 
 // unreadablePackageVersion names the installed version as the cause, which by
