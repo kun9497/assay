@@ -376,8 +376,13 @@ func resolvePURL(p pkgmeta.PURL, raw string) (pkgmeta.Package, purlStatus) {
 			}
 			name = p.Namespace + sep + p.Name
 		}
+		version := p.Version
+		if p.Type == "gem" {
+			// The same call cyclonedx.go makes (A6, D155).
+			version = pkgmeta.InstalledGemVersion(version, p.Qualifiers["platform"])
+		}
 		return pkgmeta.Package{
-			Name: name, Version: p.Version, Type: p.Type, Ecosystem: eco,
+			Name: name, Version: version, Type: p.Type, Ecosystem: eco,
 			PURL: raw, Locations: loc,
 		}, statusOK
 	}

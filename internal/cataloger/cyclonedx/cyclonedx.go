@@ -174,6 +174,9 @@ func catalogOne(c component, distroEcosystem string, target *pkgmeta.Target, sta
 		if version == "" {
 			version = c.Version
 		}
+		if p.Type == "gem" {
+			version = pkgmeta.InstalledGemVersion(version, p.Qualifiers["platform"])
+		}
 	}
 	if version == "" {
 		// Nothing for a comparer to place inside a range. Counting it as
