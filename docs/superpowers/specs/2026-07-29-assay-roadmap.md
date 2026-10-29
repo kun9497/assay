@@ -6856,6 +6856,83 @@ Two earlier parts were removed as equivalents:
 
 ---
 
+### D155 — A gem's platform is not part of its version
+
+**Decision.** An installed gem is compared on its version alone, without the platform a native
+build carries. The PURL keeps the input's own spelling.
+- **Gemfile.lock** follows bundler's own grammar (`lockfile_parser.rb`, `NAME_VERSION`). The
+  version is the text up to the first hyphen, and the platform is the rest. `specLine` returns
+  both. The version goes to `Package.Version`, and the whole locked text goes into the purl.
+- **SBOMs**, CycloneDX and SPDX alike, run a `pkg:gem` version through
+  `pkgmeta.InstalledGemVersion`. It drops the suffix after the first hyphen in two cases: the
+  purl's own `platform` qualifier names that suffix, or `Gem::Platform` would read an
+  operating system in it. The test is Ruby's own `Gem::Platform#initialize` patterns: linux,
+  darwin, mingw, mswin, java, freebsd, wasi and the rest. A hyphenated prerelease
+  (`3.0.0-rc1`) names none, so it is left alone and still sorts below its release.
+- The `Gem` comparer is unchanged.
+
+**Why.** The 2026-10-22 audit (A6): `specLine` kept `nokogiri (1.13.8-x86_64-linux)`'s
+platform in the version, on the reasoning that the comparer owns equivalence (D9). The Gem
+comparer follows `Gem::Version`, which rewrites a hyphen to `.pre.`. `1.13.8-arm64-darwin`
+therefore sorted as a prerelease below 1.13.8, and the underscore in `x86_64` made the version
+unreadable. So:
+- an advisory introduced at the installed version found nothing;
+- one fixed at it was a false positive;
+- every x86_64 build was reported not evaluated.
+
+syft writes the same text into an SBOM's version and purl, so SBOM scans had the same defect.
+
+The platform is not a version, by RubyGems' own definition. `Gem::Version` turns any hyphen
+into `.pre.`, so a real gem version never holds one, and bundler splits there. That makes the
+lockfile split exact.
+
+Stripping in the comparer instead, as grype does with a CPU-name list, was rejected.
+Advisories spell prereleases with a hyphen too: 13 of 78,698 RubyGems bounds on 2026-10-27,
+such as `7.0.0-rc3` and `1.4.0-beta.1`. And the comparer would be cleaning its input, which
+D9 keeps it from doing. The user chose the lockfile-and-SBOM scope over the lockfile alone and
+over the comparer.
+
+The purl keeps the platform for D121's reason: a VEX statement written against a syft SBOM
+names that purl.
+
+**Measured.** rails/rails's own `Gemfile.lock`, scanned with the published database on main
+and with this change:
+- 130 incomplete checks became 0.
+- 102 findings became 126:
+  - 26 new findings on the x86_64 builds that had not been evaluated (nokogiri 20, sqlite3 6);
+  - 2 false positives gone (nokogiri 1.19.1 on aarch64 and arm64, against GHSA-wx95-c6cv-8532's
+    fix at 1.19.1).
+- Nothing else changed.
+
+**Gives up.** An SBOM gem version whose suffix names no platform `Gem::Platform` knows, and
+whose purl carries no `platform` qualifier, keeps the suffix. Gem::Platform's own patterns are
+unanchored where Ruby's are, so `1.0.0-javascript` reads as java, as it does in Ruby. A gem
+inside a container image is still not read at all (D70).
+
+**Verified.**
+- **The lockfile through `Run`:** `TestRun_A6_GemfileLockPlatformIsNotPartOfTheVersion`
+  covers an advisory introduced at the installed version, one fixed at it, an x86_64 build,
+  and a prerelease.
+- **CycloneDX and SPDX through `Run`:** `TestRun_A6_SBOMGemPlatformIsNotPartOfTheVersion`
+  covers the same shapes, plus a platform known only through the purl's qualifier.
+- **Lockfile parsing:** `TestSpecLine` and `TestParse_NativeGemVersionAndPURL` hold the
+  version and the purl.
+- **The helper's branches:** `TestInstalledGemVersion` covers the ones the scans do not reach.
+
+Fourteen mutations were run, and all were caught after one test was added (the lockfile purl
+dropping its platform had survived):
+- the lockfile keeping the platform;
+- the purl dropping it;
+- either SBOM call removed, or its qualifier dropped;
+- no OS recognised, or every suffix treated as one;
+- linux or darwin missing;
+- the qualifier ignored;
+- an empty core accepted;
+- the legacy bare-OS form unread;
+- the CPU read as the OS.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes
