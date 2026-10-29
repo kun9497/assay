@@ -200,3 +200,21 @@ func TestParse_EcosystemAndPURL(t *testing.T) {
 		t.Errorf("PURL = %q, want pkg:gem/serde-fixture@1.0.196", p.PURL)
 	}
 }
+
+// A native gem's version loses its platform (A6, D155) but its purl keeps
+// the lockfile's spelling, which is what syft writes: a VEX statement written
+// against a syft SBOM names that purl, and must still reach this package.
+func TestParse_NativeGemVersionAndPURL(t *testing.T) {
+	path := write(t, "GEM\n  remote: https://rubygems.org/\n  specs:\n    nokogiri (1.13.8-x86_64-linux)\n")
+
+	pkgs, _, err := Parse(path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(pkgs) != 1 {
+		t.Fatalf("packages = %+v, want one", pkgs)
+	}
+	if p := pkgs[0]; p.Version != "1.13.8" || p.PURL != "pkg:gem/nokogiri@1.13.8-x86_64-linux" {
+		t.Errorf("Version, PURL = %q, %q; want 1.13.8, pkg:gem/nokogiri@1.13.8-x86_64-linux", p.Version, p.PURL)
+	}
+}
