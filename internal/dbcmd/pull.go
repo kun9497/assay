@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,6 +50,7 @@ func Pull(ctx context.Context, dbPath, ref string, allowUnsigned bool, stdout, s
 	fmt.Fprintf(stderr, "fetching %s…\n", target)
 	img, err := remote.Image(target,
 		remote.WithContext(ctx),
+		remote.WithTransport(bodyTransport{remote.DefaultTransport}),
 		remote.WithAuthFromKeychain(authn.DefaultKeychain))
 	if err != nil {
 		fmt.Fprintf(stderr, "error: fetch %s: %v\n", target, err)
@@ -111,7 +113,7 @@ func Pull(ctx context.Context, dbPath, ref string, allowUnsigned bool, stdout, s
 	// that dies halfway must not leave a truncated database where a scan
 	// will find it and report a confident, wrong, clean result.
 	tmp := dbPath + ".tmp"
-	if err := unpackWithRetry(img, tmp, stderr); err != nil {
+	if err := unpackWithRetry(ctx, img, tmp, stderr); err != nil {
 		os.Remove(tmp)
 		fmt.Fprintf(stderr, "error: unpack database: %v\n", err)
 		return 2
@@ -226,6 +228,7 @@ func PullSeed(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer)
 	fmt.Fprintf(stderr, "fetching %s…\n", target)
 	img, fetchErr := remote.Image(target,
 		remote.WithContext(ctx),
+		remote.WithTransport(bodyTransport{remote.DefaultTransport}),
 		remote.WithAuthFromKeychain(authn.DefaultKeychain))
 	if fetchErr != nil && strings.Contains(fetchErr.Error(), "MANIFEST_UNKNOWN") {
 		// D60's own bootstrap case, one door over: the tag moves on a schema
@@ -238,6 +241,7 @@ func PullSeed(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer)
 			target = prev
 			img, fetchErr = remote.Image(target,
 				remote.WithContext(ctx),
+				remote.WithTransport(bodyTransport{remote.DefaultTransport}),
 				remote.WithAuthFromKeychain(authn.DefaultKeychain))
 		}
 	}
@@ -294,7 +298,7 @@ func PullSeed(ctx context.Context, dbPath, ref string, stdout, stderr io.Writer)
 	// that dies halfway must not leave a truncated file where dbcmd.Update
 	// will find and read it next.
 	tmp := dbPath + ".tmp"
-	if err := unpackWithRetry(img, tmp, stderr); err != nil {
+	if err := unpackWithRetry(ctx, img, tmp, stderr); err != nil {
 		os.Remove(tmp)
 		fmt.Fprintf(stderr, "error: unpack database: %v\n", err)
 		return 2
@@ -417,15 +421,17 @@ const transferAttempts = 3
 // re-requests the layer from the start and rewrites tmp from empty. Any
 // other failure -- a layer that is not gzip, a digest that does not match,
 // no database layer at all -- is the artifact's, not the link's, and fails
-// at once: retrying it would only repeat the same answer three times.
-func unpackWithRetry(img v1.Image, tmp string, stderr io.Writer) error {
+// at once: retrying it would only repeat the same answer three times. So
+// does a pull whose context is done -- cancelled, or past --timeout -- whose
+// read error is the context's, not the link's.
+func unpackWithRetry(ctx context.Context, img v1.Image, tmp string, stderr io.Writer) error {
 	var err error
 	for n := 1; n <= transferAttempts; n++ {
 		_ = os.Remove(tmp)
 		if err = dbartifact.Unpack(img, tmp); err == nil {
 			return nil
 		}
-		if !interruptedTransfer(err) {
+		if ctx.Err() != nil || !interruptedTransfer(err) {
 			return err
 		}
 		if n < transferAttempts {
@@ -443,6 +449,10 @@ func unpackWithRetry(img v1.Image, tmp string, stderr io.Writer) error {
 // than by errno, because the errno differs by platform: a reset on Windows
 // is WSAECONNRESET (10054), which syscall.ECONNRESET does not match.
 func interruptedTransfer(err error) bool {
+	var body *bodyReadError
+	if errors.As(err, &body) {
+		return true
+	}
 	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) ||
 		errors.Is(err, syscall.EPIPE) || errors.Is(err, net.ErrClosed) {
 		return true
@@ -454,6 +464,42 @@ func interruptedTransfer(err error) bool {
 	var ne net.Error
 	return errors.As(err, &ne) && ne.Timeout()
 }
+
+// bodyTransport marks every error read from a registry response body as a
+// bodyReadError (QA 2026-10-30). An HTTP/2 registry that resets the stream
+// mid-body fails the read with "stream error: ...; INTERNAL_ERROR", an
+// unexported net/http type that none of the checks above could name, so D140
+// retried a cut HTTP/1 body and not a reset HTTP/2 one. Tagging where the
+// bytes come from, rather than matching each protocol's error, keeps the
+// artifact's own failures out: go-containerregistry checks the digest and
+// the size above this reader, and gzip reads its header and checksum above
+// it, so a digest mismatch or a layer that is not gzip is never tagged.
+type bodyTransport struct{ next http.RoundTripper }
+
+func (b bodyTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	resp, err := b.next.RoundTrip(r)
+	if err == nil && resp.Body != nil {
+		resp.Body = taggedBody{resp.Body}
+	}
+	return resp, err
+}
+
+type taggedBody struct{ io.ReadCloser }
+
+func (b taggedBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil && err != io.EOF {
+		err = &bodyReadError{err}
+	}
+	return n, err
+}
+
+// bodyReadError is a read from a response body that failed. It unwraps, so
+// a context's error inside one is still the context's.
+type bodyReadError struct{ err error }
+
+func (e *bodyReadError) Error() string { return e.err.Error() }
+func (e *bodyReadError) Unwrap() error { return e.err }
 
 // transferRetryPause waits before download attempt n+1 (n is the attempt
 // that failed). A variable so tests do not sleep.
