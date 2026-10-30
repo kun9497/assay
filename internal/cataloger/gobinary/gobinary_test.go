@@ -838,3 +838,39 @@ func readFileString(t *testing.T, path string) string {
 	}
 	return string(b)
 }
+
+// 2026-10-22 audit A12: a binary built with a non-default GOEXPERIMENT carries
+// the experiments in its toolchain version -- the linker appends "-X:<list>"
+// to a release version (cmd/link/internal/ld/main.go; "go1.26.7-X:fieldtrack"
+// on a real build) -- and the normaliser took the suffix for a semver
+// prerelease. stdlib was cataloged as "1.26.7-X:fieldtrack", which the comparer
+// refuses, so every stdlib advisory became a skip. An experiment does not
+// change which stdlib release was linked: the binary is the same toolchain
+// version as one built without it.
+func TestParse_A12_AGOEXPERIMENTDoesNotChangeTheStdlibVersion(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go is not on PATH; this test needs a toolchain to build its fixture")
+	}
+	build := func(env ...string) pkgmeta.Package {
+		t.Helper()
+		dir := t.TempDir()
+		writeModule(t, dir, "module example.test/app\n\ngo 1.26\n", "package main\n\nfunc main() {}\n")
+		tgt, _, err := Parse(runGoBuild(t, dir, ".", "-buildvcs=false", env...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return find(t, tgt, "stdlib")
+	}
+	plain := build()
+	experimental := build("GOEXPERIMENT=fieldtrack")
+	if experimental.Version != plain.Version {
+		t.Errorf("stdlib version with GOEXPERIMENT=fieldtrack = %q, want %q, the same toolchain's", experimental.Version, plain.Version)
+	}
+	cmp, ok := version.For("Go")
+	if !ok {
+		t.Fatal("no Go comparer")
+	}
+	if _, err := cmp.Compare(experimental.Version, "999.0.0"); err != nil {
+		t.Errorf("Compare(%q) = %v, want comparable", experimental.Version, err)
+	}
+}
