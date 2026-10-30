@@ -12,7 +12,11 @@ type entry struct {
 	name, body string
 	link       string // non-empty makes this a link entry, as tar carries it
 	hardlink   bool   // a hardlink rather than a symlink; targets resolve differently
+	typ        byte   // a non-file, non-link entry (TypeDir, TypeFifo, ...); 0 is a regular file
 }
+
+// node is an entry of type typ with no content: a directory, device or FIFO.
+func node(name string, typ byte) entry { return entry{name: name, typ: typ} }
 
 func sym(name, target string) entry { return entry{name: name, link: target} }
 
@@ -54,8 +58,18 @@ func layerOfOrdered(t *testing.T, diffID string, files ...entry) Layer {
 			}
 			continue
 		}
+		if e.typ != 0 && e.typ != tar.TypeReg && e.typ != tar.TypeCont {
+			if err := tw.WriteHeader(&tar.Header{Name: e.name, Mode: 0o755, Typeflag: e.typ}); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		typ := byte(tar.TypeReg)
+		if e.typ != 0 {
+			typ = e.typ
+		}
 		if err := tw.WriteHeader(&tar.Header{
-			Name: e.name, Mode: 0o644, Size: int64(len(e.body)), Typeflag: tar.TypeReg,
+			Name: e.name, Mode: 0o644, Size: int64(len(e.body)), Typeflag: typ,
 		}); err != nil {
 			t.Fatal(err)
 		}

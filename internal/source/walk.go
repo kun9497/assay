@@ -135,6 +135,18 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 		var layerDeleted, layerOpaque []whiteout
 
 		err := readLayer(ctx, l, func(name string, h *tar.Header, r io.Reader) error {
+			// An entry anywhere under a wanted path -- a file, a directory, a
+			// whiteout or opaque marker inside it -- makes that path a
+			// directory in this layer, and a directory is not the file the
+			// query wants: the query ends here, unanswered, so no lower
+			// layer's deleted copy answers it (audit A10). A file turned into
+			// a directory writes "<name>/" and maybe "<name>/.wh..wh..opq",
+			// never ".wh.<name>", so the whiteout rules do not see it.
+			for k, q := range qs {
+				if !done[k] && i <= q.top && strings.HasPrefix(name, q.path+"/") && !hiddenFrom(q.path, i, q.top, deleted, opaque) {
+					done[k] = true
+				}
+			}
 			dir, base := path.Split(name)
 			switch {
 			case base == whiteoutOpaque:
@@ -187,7 +199,7 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 					next = append(next, query{path: target, want: q.want, top: top, dir: dir})
 				}
 				return nil
-			case tar.TypeReg:
+			case tar.TypeReg, tar.TypeGNUSparse, tar.TypeCont:
 				b, err := img.readEntry(name, r)
 				if err != nil {
 					return err
@@ -197,8 +209,16 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 					out[qs[k].want] = FileFromLayer{Data: b, DiffID: l.DiffID}
 				}
 				return nil
+			default:
+				// A directory, device or FIFO at the wanted path: this layer
+				// has something there that is not a file, so the path holds
+				// no file to read, and a lower layer's copy is shadowed
+				// (A10). The query ends unanswered, as for an absent file.
+				for _, k := range hits {
+					done[k] = true
+				}
+				return nil
 			}
-			return nil
 		})
 		if err != nil {
 			return nil, fmt.Errorf("read layer %s: %w", l.DiffID, err)
@@ -261,6 +281,23 @@ func isDeleted(name string, deleted map[string]bool) bool {
 	return false
 }
 
+// shadowAncestors records, as found, every directory strictly below root that
+// name sits under: an entry at "root/x/y" in this layer makes "root/x" a
+// directory here, so a lower layer's regular file "root/x" is shadowed and
+// must not be returned (audit A10). A file turned into a directory carries no
+// ".wh.<name>", so the whiteout rules never see it. Recorded whatever the
+// entry is -- a file, a directory, a whiteout or opaque marker -- because each
+// proves the directory exists in this layer; a whiteout that hides the
+// directory itself also hides the lower file, so marking it is never wrong.
+func shadowAncestors(found map[string]bool, name, root string) {
+	if !strings.HasPrefix(name, root+"/") {
+		return
+	}
+	for p := path.Dir(name); p != root && p != "." && p != "/"; p = path.Dir(p) {
+		found[p] = true
+	}
+}
+
 func underAnyOpaque(name string, dirs []string) bool {
 	for _, d := range dirs {
 		if d == "." {
@@ -320,9 +357,9 @@ func readLayer(ctx context.Context, l Layer, visit func(name string, h *tar.Head
 		if err != nil {
 			return err
 		}
-		if h.Typeflag == tar.TypeDir {
-			continue
-		}
+		// Directory entries are visited too: a directory at a wanted path, or
+		// at a file's place in a lower layer, shadows that file (A10). Every
+		// visitor reads only TypeReg entries as file content.
 		if err := visit(normaliseEntry(h.Name), h, tr); err != nil {
 			return err
 		}
