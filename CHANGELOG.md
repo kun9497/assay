@@ -13,8 +13,10 @@ All notable changes to this project are documented here. The format follows
   NVD's v2 table (Low/Medium/High, no Critical), where it was `unknown`. v2 is used only
   when nothing else in the same record scores. Findings that were unknown can now carry a
   band and trip `--fail-on`. The JSON report's `schemaVersion` is 15 (additive): a rating
-  banded this way carries `"cvssV2": true`, and `--explain` marks it `(CVSS v2)`. (D156,
-  audit A14)
+  banded this way carries `"cvssV2": true`, and `--explain` marks it `(CVSS v2)`. A
+  finding's ratings now rank by band before score, so a v2 High never outranks another
+  source's Critical, and SARIF's `security-severity` stays inside the finding's band.
+  (D156, audit A14)
 
 ### Fixed
 - `--fail-on-eol` no longer goes red a day early. A release counted as end of life from the

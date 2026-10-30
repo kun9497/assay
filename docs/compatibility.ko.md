@@ -48,7 +48,8 @@
   `provenance.database.artifact.signedBy` / `unverified`(D137, v0.11.0, 스키마 14). 모두
   선택적입니다. 위의 규칙, 즉 모든 변경에 증가는 스키마 15부터 적용됩니다.
 - 스키마 15(추가형)는 `ratings[].cvssV2`를 더했습니다. 평가의 등급이 NVD 의 CVSS v2 fallback 에서
-  왔을 때 true 입니다(D156). v3 나 v4 벡터가 없어 전에는 `unknown` 이던 평가가 이제 등급을 가지므로,
+  왔을 때 true 입니다(D156). 점수를 낼 수 있는 항목이 CVSS v2 기본 벡터뿐이라 전에는 `unknown` 이던 평가가
+  이제 등급을 가지므로,
   `--fail-on` 이 전에 걸리지 않던 곳에서 걸릴 수 있습니다.
 
 ## provenance sidecar, status.json, `db status`

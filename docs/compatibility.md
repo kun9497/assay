@@ -50,8 +50,8 @@ it relied on:
   v0.11.0, schema 14). Each is optional. The rule above, a bump for every change, applies
   from schema 15 on.
 - Schema 15 (additive) added `ratings[].cvssV2`, true when a rating's band came from NVD's
-  CVSS v2 fallback (D156). Ratings that carry no v3 or v4 vector, rated `unknown` before,
-  now carry a band, so `--fail-on` can trip where it did not.
+  CVSS v2 fallback (D156). A rating whose only scorable entry is a CVSS v2 base vector,
+  rated `unknown` before, now carries a band, so `--fail-on` can trip where it did not.
 
 ## The provenance sidecar, status.json and `db status`
 

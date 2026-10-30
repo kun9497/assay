@@ -12,7 +12,9 @@
   `unknown` 이던 것에서 v2 기본 점수로 NVD 의 v2 등급표(Low/Medium/High, Critical 없음)에 따라 등급을
   매깁니다. v2 는 같은 레코드에 점수를 낼 다른 것이 없을 때만 씁니다. unknown 이던 발견이 이제 등급을
   가질 수 있어 `--fail-on` 에 걸릴 수 있습니다. JSON 보고서의 `schemaVersion` 은 15(추가형)이며, 이렇게
-  등급을 받은 평가에는 `"cvssV2": true` 가 붙고 `--explain` 은 `(CVSS v2)` 로 표시합니다. (D156, 감사 A14)
+  등급을 받은 평가에는 `"cvssV2": true` 가 붙고 `--explain` 은 `(CVSS v2)` 로 표시합니다. 발견의 평가는 이제
+  점수보다 등급을 먼저 비교하므로 v2 High 가 다른 출처의 Critical 을 이기지 못하고, SARIF 의
+  `security-severity` 는 발견의 등급 안에 머뭅니다. (D156, 감사 A14)
 
 ### Fixed
 - `--fail-on-eol` 이 더 이상 하루 일찍 빨간불이 되지 않습니다. 릴리스가 EOLFrom 날의 첫 순간(그 날 KST
