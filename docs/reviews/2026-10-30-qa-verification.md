@@ -1,5 +1,7 @@
 # QA 2026-10-30 — verification and fixes
 
+English canonical · [한국어](2026-10-30-qa-verification.ko.md)
+
 This document answers the QA report of 2026-10-30. The report is at
 `qa-2026-10-30/qa-report.md` and `qa-report.ko.md` in the QA workspace, with evidence in the
 same folder. Every claim here comes from a command run on 2026-10-30 against the commits named
