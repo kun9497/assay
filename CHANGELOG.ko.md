@@ -10,8 +10,9 @@
 ### Changed
 - Canonical 의 Ubuntu CVE tracker 가 tuple 하나 없이 파싱되거나, fix state 없는 Ubuntu range 어디에도 fix state
   를 stamp 하지 못하면 `db build` 가 실패하고, Ubuntu fix state 없이 일부러 빌드하려면
-  `UBUNTU_TRACKER_ENABLE=0` 을 설정하라고 알려 줍니다. `db push` 는 공개된 artifact 의 Ubuntu fix state 의
-  80% 미만을 가진 후보를 거부합니다(`--force` 로 넘길 수 있음). 이전에는 파싱을 멈춘 tracker 가 Ubuntu 의
+  `UBUNTU_TRACKER_ENABLE=0` 을 설정하라고 알려 줍니다. `db push` 는 어느 Ubuntu 릴리스든 공개된 fix state 의
+  80% 미만만 가진 후보를 거부합니다. 건수는 DB 에서 셉니다(`--force` 로 넘길 수 있음). 이전에는 파싱을 멈춘
+  tracker 가 Ubuntu 의
   wont-fix 와 not-fixed state 를 모두 잃은 artifact 를 공개해도(2026-10-29 기준 2,094,636 건) 아무것도
   실패하지 않았습니다. (D157, D85 개정, 감사 A15)
 

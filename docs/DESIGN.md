@@ -1035,9 +1035,10 @@ exited 0 while 24 findings went unmentioned.
       grammar, SBOM purls when Gem::Platform names an os or the purl's qualifier says so; the
       purl keeps the platform for VEX; rails/rails's Gemfile.lock: 130 incomplete checks → 0,
       26 findings on x86_64 builds no longer missed, 2 false positives gone
-- [x] An empty Ubuntu tracker fails the build and a shrinking one fails the publish (D157,
-      revises D85, audit A15) — zero tuples or zero stamps stop `db build` before the archive
-      is fetched; `db push` refuses under 80% of the published count (2,094,636 on 10-29)
+- [x] An empty Ubuntu tracker fails the build and a release losing its fix states fails the
+      publish (D157, revises D85, audit A15) — zero tuples stop `db build` before the archive is
+      fetched and zero stamps after it; `db push` refuses any Ubuntu key under 80% of its
+      published fix states, counted from the database so a D110 carry passes
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15

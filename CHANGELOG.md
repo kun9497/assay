@@ -10,10 +10,11 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 - `db build` fails when Canonical's Ubuntu CVE tracker parses to no tuple, or stamps no fix
   state on any fix-less Ubuntu range, and says to set `UBUNTU_TRACKER_ENABLE=0` to build
-  without Ubuntu fix states on purpose. `db push` refuses a candidate holding under 80% of
-  the published artifact's Ubuntu fix states (`--force` overrides). Before, a tracker that
-  stopped parsing published an artifact with every Ubuntu wont-fix and not-fixed state
-  gone (2,094,636 on 2026-10-29) and nothing failed. (D157, revises D85, audit A15)
+  without Ubuntu fix states on purpose. `db push` refuses a candidate in which any Ubuntu
+  release holds under 80% of its published fix states, counted from the database
+  (`--force` overrides). Before, a tracker that stopped parsing published an artifact with
+  every Ubuntu wont-fix and not-fixed state gone (2,094,636 on 2026-10-29) and nothing
+  failed. (D157, revises D85, audit A15)
 
 ### Fixed
 - `--fail-on-eol` no longer goes red a day early. A release counted as end of life from the

@@ -122,8 +122,8 @@ SRPM's version-release with the main package's epoch, and no epoch on Azure Linu
 keys). Since D154 a range's close sorts before an open at the same version, and a window
 that opens and closes at one version is judged on its own. Since D155 a gem's platform
 (`1.13.8-x86_64-linux`) is not part of its version, in a Gemfile.lock or an SBOM purl. Since D157
-an Ubuntu tracker that parses to nothing fails `db build`, and `db push` refuses under 80% of the
-published Ubuntu fix-state count. Since D150 a signature payload that could not
+an Ubuntu tracker that parses to nothing fails `db build`, and `db push` refuses a candidate in
+which any Ubuntu release holds under 80% of its published fix states. Since D150 a signature payload that could not
 be fetched is `ErrSignatureUnreadable`, not `ErrNoKeyVerifies`; since D151 `install.sh` reads
 the signature through base64's stdin and its harness runs on macOS CI. Not built: pep440 leniency (see
 `docs/DESIGN.md` and `docs/deferred-decisions.md`).
