@@ -53,6 +53,8 @@ func scoreV2(vector string) (float64, Band, bool) {
 	case score >= 7.0:
 		return score, High, true
 	case score >= 4.0:
+		// No v2 vector scores 3.9 (all 729 base vectors computed), so this
+		// edge is held from above only: moving it to 3.9 changes no answer.
 		return score, Medium, true
 	default:
 		return score, Low, true

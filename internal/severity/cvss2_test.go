@@ -27,6 +27,15 @@ func TestScoreV2(t *testing.T) {
 		{"AV:L/AC:L/Au:N/C:P/I:N/A:N", 2.1, Low},
 		{"AV:L/AC:M/Au:N/C:N/I:N/A:P", 1.9, Low},
 		{"AV:N/AC:L/Au:N/C:N/I:N/A:N", 0.0, Low},
+		// The bands' edges: 6.9 is the highest Medium and 4.0 the lowest. No
+		// v2 vector scores 3.9 (all 729 computed), so the Low/Medium edge is
+		// held from above only.
+		{"AV:L/AC:M/Au:N/C:C/I:C/A:C", 6.9, Medium},
+		{"AV:L/AC:H/Au:N/C:N/I:N/A:C", 4.0, Medium},
+		// Every weight in use: adjacent network, multiple authentication.
+		{"AV:A/AC:L/Au:N/C:P/I:P/A:P", 5.8, Medium},
+		{"AV:A/AC:M/Au:N/C:C/I:C/A:C", 7.9, High},
+		{"AV:N/AC:L/Au:M/C:P/I:P/A:P", 5.8, Medium},
 	} {
 		score, band, ok := scoreV2(tc.vector)
 		if !ok || score != tc.score || band != tc.band {

@@ -81,3 +81,20 @@ func TestMatch_D156_V3BeatsV2InTheSameRating(t *testing.T) {
 		}
 	}
 }
+
+// An advisory's own CVSS v2 vector -- OSV defines a CVSS_V2 severity type, and
+// a record carrying only that was unknown too -- is banded the same way, and
+// its own rating says so.
+func TestMatch_D156_AnAdvisorysOwnV2VectorBandsItsRating(t *testing.T) {
+	a := advWithRange("GHSA-d156-0003", "PyPI", "django", "0", "3.2.13", advisory.RangeEcosystem)
+	a.Severity = []advisory.Severity{{Type: "CVSS_V2", Score: "AV:N/AC:M/Au:N/C:P/I:P/A:P"}}
+	s := fakeStore{byKey: map[string][]advisory.Advisory{key("PyPI", "django"): {a}}}
+	res, err := New(s).Match(djangoTarget())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := res.Findings[0]
+	if f.Severity != severity.Medium || f.Score != 6.8 || len(f.Ratings) != 1 || !f.Ratings[0].FromCVSSv2 {
+		t.Errorf("finding = %v %.1f, ratings %+v; want medium 6.8 with its one rating marked from CVSS v2", f.Severity, f.Score, f.Ratings)
+	}
+}
