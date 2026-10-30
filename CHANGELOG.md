@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Security
+- The jobs that hold the signing key run nothing pinned by a tag alone. The nightly
+  publish installs grype from its release tarball checked against a committed sha256
+  (it ran `curl get.anchore.io/grype | sh`), and the trivy and goreleaser actions are
+  pinned by commit. (audit A18)
 - Builds are held to go.mod's `toolchain` line, now `go1.26.10`. v0.12.0 was built with
   go1.26.9, which carries GO-2026-6809 (crypto/x509, fixed in go1.26.10).
   `scripts/check-go-toolchain.sh` fails a release or CI build below the floor. Each

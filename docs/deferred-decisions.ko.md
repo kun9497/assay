@@ -1382,6 +1382,23 @@ build`는 이제 배포자의 명령입니다. 여전히 업스트림 provider�
 
 ### ~~배포된 데이터베이스 아티팩트의 서명과 출처 증명~~ — D137 에서 해결 (2026-10-22; 서명이 먼저, 검증은 둘째 PR 에서)
 
+**키 옆에서 도는 것 (감사 A18, 2026-10-30).** 서명을 넣은 뒤에도, 키를 가진 job 은 태그 이상으로 고정되지
+않은 서드파티 코드를 실행하고 있었습니다. nightly publish job 은 cosign 키와 `packages: write` 를 가진 채
+grype 를 `curl https://get.anchore.io/grype | sh` 로, trivy 를 `aquasecurity/setup-trivy@v0.3.1` 로
+설치했습니다. 릴리스 job 은 움직이는 메이저 태그인 `goreleaser/goreleaser-action@v6` 로 checksum 에
+서명했습니다. 이제는 다음과 같습니다.
+- grype 는 릴리스 tarball 을 받아, 버전 옆에 커밋된 sha256 으로 확인합니다(`setup-scanners` 의
+  `grype-sha256` 입력).
+- 두 서드파티 action 은 커밋으로 고정합니다.
+- cosign 설치기는 이미 그렇게 되어 있었습니다.
+
+남은 두 가지는 각자 다시 볼 조건이 있습니다.
+- **GitHub 자체의 `actions/*`** 는 태그 고정으로 둡니다. SHA 고정을 최신으로 유지해 줄 도구를 저장소에
+  들이거나, GitHub 의 태그가 움직인 사례가 나오면 다시 봅니다.
+- **게이트 job 과 서명 job 은 하나로 둡니다.** 나누면 비교 스캐너를 키에서 완전히 떼어 놓을 수 있지만,
+  1-2 GB 후보 DB 가 job 경계를 넘어야 합니다. 게이트가 돌리는 스캐너가 오염된 사례가 나오거나, DB 를 artifact
+  로 싸게 올릴 수 있게 되면 다시 봅니다.
+
 **두 절반으로 닫힘.** 서명(워크플로, 릴리스, 설치기, 검증기 패키지와 기록 필드)이 첫 PR 이고, 서명 없는
 아티팩트를 *거부하는* `db update` / `db build --seed` 호출 지점은 둘째 PR 로, 게시된 digest 가 서명을 가진 뒤
 머지했다(PR #181). 그 뒤로 태그 위의 서명 없는 digest 는 장애이며, 복구 방법은 `docs/DESIGN.md` 의 "태그 위의

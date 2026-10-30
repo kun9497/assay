@@ -8,6 +8,9 @@
 ## [Unreleased]
 
 ### Security
+- 서명 키를 가진 job 이 태그만으로 고정된 코드를 더 이상 실행하지 않습니다. nightly publish 는 grype 를
+  릴리스 tarball 로 받아 커밋된 sha256 으로 확인하고(이전에는 `curl get.anchore.io/grype | sh`), trivy 와
+  goreleaser action 은 커밋으로 고정합니다. (감사 A18)
 - 빌드는 go.mod 의 `toolchain` 줄을 하한으로 지킵니다. 지금은 `go1.26.10` 입니다. v0.12.0 은
   go1.26.9 로 빌드되었고, go1.26.9 에는 GO-2026-6809 (crypto/x509, go1.26.10 에서 수정)가 있습니다.
   `scripts/check-go-toolchain.sh` 는 하한보다 낮은 릴리스나 CI 빌드를 실패시킵니다. GoReleaser 의
