@@ -3343,6 +3343,10 @@ D80's refusal doing exactly its job. debian:12 SPDX scans keyed, with the one
 
 ### D85 — Ubuntu fix states, from the tracker Canonical actually maintains
 
+> **Revised by D157 (2026-10-30):** a tracker that parses to no tuple, or stamps no fix
+> state, now fails the build, and `db push` refuses a candidate below 80% of the published
+> count. The "degrade rather than fail" choice below is superseded.
+
 **Decision.** Ubuntu findings stop reporting `unknown` fix state. The OSV Ubuntu export
 cannot say it — "needed" and "ignored" are byte-identical there (a fix-less range, nothing
 more) — so the OSV provider consults Canonical's ubuntu-cve-tracker at conversion time and
@@ -6960,6 +6964,69 @@ dropping its platform, which had survived. The mutations were:
 - the CPU read as the OS;
 - any CPU accepted;
 - CycloneDX stripping before its fallback.
+
+---
+
+### D157 — An empty Ubuntu tracker fails the build, and a shrinking one fails the publish (revises D85)
+
+**Decision.** Canonical's CVE tracker is now held to a floor in two places.
+1. **Build.** `db build` fails when the tracker clone parses to zero tuples. The check runs
+   before the Ubuntu archive is fetched. The build also fails when the tracker loads tuples
+   but stamps no fix state on any of the fix-less Ubuntu ranges it was asked about. Both
+   errors name the counts and `UBUNTU_TRACKER_ENABLE=0`, the switch that builds without
+   Ubuntu fix states on purpose.
+2. **Publish.** The stamped count rides on the osv provider's provenance
+   (`Provenance.UbuntuFixStates`) and on the artifact (annotation
+   `dev.assay.ubuntu-fix-states`). `db push` refuses a candidate whose count has fallen
+   below 80% of the published artifact's. `--force` overrides it, as it does for every
+   other coverage regression. An artifact published before the annotation has no count and
+   is not compared.
+
+**Why.** The 2026-10-22 audit (A15). D85 let a tracker that parsed to nothing build on,
+because the unconditional progress line made a zero visible in the log. Nobody reads the
+log of a green nightly. A tracker that Canonical restructures would publish an artifact
+with every Ubuntu wont-fix and not-fixed state turned to `unknown` and nothing failing.
+On the 2026-10-29 nightly that would have been 2,094,636 ranges, 86% of them wont-fix.
+
+The build check catches a total loss, and it fails before the 601 MB archive download.
+A partial loss still stamps something, for example `active/` moved while `retired/`
+stays. Only a comparison with the published count sees that, hence the publish floor.
+
+80% is chosen because the tracker moves on its own: 2,070,238 states on 2026-10-27,
+2,094,636 two days later. Losing one release's states is a drop of a quarter or more. The
+user chose both halves over the build check alone (blind to a partial loss), over an
+absolute floor (a number to re-band by hand), and over surfacing the counts without gating.
+
+**Gives up.** A nightly stops when Canonical restructures the tracker; that is the
+intended behaviour. `UBUNTU_TRACKER_ENABLE=0` still builds, and it still says so on
+stderr. Its artifact carries a zero count, so publishing it over a stamped one needs
+`--force`. The first nightly after this lands compares against an artifact without the
+annotation and is not held; the one after it is.
+
+**Verified.**
+- `TestFetch_D157_ATrackerThatParsesToNothingFailsTheBuild` drives `Provider.Fetch`
+  against a real git clone in two shapes: a moved layout and a respelled header. Both must
+  fail, without fetching the archive.
+- `TestFetch_D157_ATrackerThatStampsNothingFailsTheBuild` covers a tracker whose keys meet
+  no archive range.
+- `TestFetch_D157_ProvenanceCarriesTheStampedCount`.
+- `TestPush_D157_RefusesToLoseUbuntuFixStates` publishes to a live in-memory registry.
+  The candidates hold none of the states, most of them, one under the floor, exactly the
+  floor, normal churn, and more.
+- An artifact without the annotation is not compared.
+
+Eleven mutations were all caught:
+- the guard removed;
+- the floor moved to 70% or 81%;
+- the annotation not written, or not read;
+- the coverage flag never set;
+- the count not summed;
+- either build check removed;
+- the denominator never counted;
+- the provenance count not set.
+
+The zero-tuple check first survived, because the zero-stamp check fails the same build
+later. The test now also requires that the archive was never fetched.
 
 ---
 

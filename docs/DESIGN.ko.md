@@ -985,6 +985,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       purl 은 Gem::Platform 이 OS 를 읽어 내거나 purl 의 qualifier 가 말할 때; purl 은 VEX 를 위해 플랫폼을
       유지; rails/rails 의 Gemfile.lock: 불완전 검사 130 → 0, x86_64 빌드에서 놓치던 발견 26 건, 오탐 2 건
       제거
+- [x] 빈 Ubuntu tracker 는 빌드를, 줄어든 tracker 는 publish 를 실패시킴 (D157, D85 개정, 감사 A15) —
+      tuple 0 개나 stamp 0 개면 `db build` 가 아카이브를 받기 전에 멈추고, `db push` 는 공개된 건수의
+      80% 미만을 거부 (10-29 기준 2,094,636)
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨

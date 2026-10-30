@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+### Changed
+- Canonical 의 Ubuntu CVE tracker 가 tuple 하나 없이 파싱되거나, fix state 없는 Ubuntu range 어디에도 fix state
+  를 stamp 하지 못하면 `db build` 가 실패하고, Ubuntu fix state 없이 일부러 빌드하려면
+  `UBUNTU_TRACKER_ENABLE=0` 을 설정하라고 알려 줍니다. `db push` 는 공개된 artifact 의 Ubuntu fix state 의
+  80% 미만을 가진 후보를 거부합니다(`--force` 로 넘길 수 있음). 이전에는 파싱을 멈춘 tracker 가 Ubuntu 의
+  wont-fix 와 not-fixed state 를 모두 잃은 artifact 를 공개해도(2026-10-29 기준 2,094,636 건) 아무것도
+  실패하지 않았습니다. (D157, D85 개정, 감사 A15)
+
 ### Fixed
 - `--fail-on-eol` 이 더 이상 하루 일찍 빨간불이 되지 않습니다. 릴리스가 EOLFrom 날의 첫 순간(그 날 KST
   09:00)부터 end of life 로 계산되었는데, D87 은 그 날을 아직 EOL 이 아니라고 약속합니다. 이제 다음 날부터
