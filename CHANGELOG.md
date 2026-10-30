@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- An Alpine edge image (`VERSION_ID=3.25.0_alpha20260805`) is reported as not evaluated
+  instead of being judged against stable Alpine 3.25's advisories. OSV publishes no edge
+  ecosystem. (audit A11)
+- A Go binary built with a non-default `GOEXPERIMENT` (`go1.26.7-X:fieldtrack`) catalogs
+  stdlib at its release version. Before, the experiment list read as a prerelease no
+  comparison accepts, and every stdlib advisory was skipped. (audit A12)
+- When a record links two findings for one package, the merged finding's disclosure of an
+  apk provides join and of a mirrored advisory's origin follows the displayed record.
+  (audit A13, D10)
 - `--fail-on-eol` no longer goes red a day early. A release counted as end of life from the
   first instant of the day EOLFrom names (09:00 KST on that day), while D87 promises that day
   is not yet EOL; it is now EOL from the day after. Extended support likewise now covers the
