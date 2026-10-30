@@ -39,6 +39,12 @@ func TestDistroEcosystem_Unsupported(t *testing.T) {
 	}{
 		{"edge has no OSV ecosystem", Distro{ID: "alpine", VersionID: "edge"}},
 		{"edge as syft spells it", Distro{ID: "alpine", VersionID: "3.21_alpha20240807"}},
+		// What edge's os-release really writes (A11): an X.Y.0 with the
+		// snapshot after it. The 3.21 row above never occurs on a real image.
+		{"edge as os-release writes it", Distro{ID: "alpine", VersionID: "3.21.0_alpha20240807"}},
+		{"edge on 2026-10-30", Distro{ID: "alpine", VersionID: "3.25.0_alpha20260805"}},
+		{"a fourth component", Distro{ID: "alpine", VersionID: "3.19.9.1"}},
+		{"a lettered patch", Distro{ID: "alpine", VersionID: "3.19.9a"}},
 		{"no version at all", Distro{ID: "alpine", VersionID: ""}},
 		{"major only", Distro{ID: "alpine", VersionID: "3"}},
 		{"trailing dot", Distro{ID: "alpine", VersionID: "3."}},
