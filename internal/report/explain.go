@@ -294,6 +294,10 @@ func ratingLine(r matcher.Rating) string {
 	}
 	line := fmt.Sprintf("  %-6s %-24s %-16s fixed %s",
 		r.Database, r.AdvisoryID, formatSeverity(r.Severity, r.Score), fixed)
+	if r.FromCVSSv2 {
+		// D156: the band rests on the older metric NVD never replaced.
+		line += "  (CVSS v2)"
+	}
 	if r.URL != "" {
 		line += "  " + r.URL
 	}

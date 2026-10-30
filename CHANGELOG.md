@@ -15,8 +15,57 @@ All notable changes to this project are documented here. The format follows
   (`--force` overrides). Before, a tracker that stopped parsing published an artifact with
   every Ubuntu wont-fix and not-fixed state gone (2,094,636 on 2026-10-29) and nothing
   failed. (D157, revises D85, audit A15)
+- A rating that carries only a CVSS v2 vector -- NVD's for every CVE it never re-scored,
+  72,405 of its ratings in the 2026-10-27 database -- is banded from the v2 base score on
+  NVD's v2 table (Low/Medium/High, no Critical), where it was `unknown`. v2 is used only
+  when nothing else in the same record scores. Findings that were unknown can now carry a
+  band and trip `--fail-on`. The JSON report's `schemaVersion` is 15 (additive): a rating
+  banded this way carries `"cvssV2": true`, and `--explain` marks it `(CVSS v2)`. A
+  finding's ratings now rank by band before score, so a v2 High never outranks another
+  source's Critical, and SARIF's `security-severity` stays inside the finding's band.
+  (D156, audit A14)
+### Security
+- The jobs that hold the signing key run nothing pinned by a tag alone. The nightly
+  publish installs grype from its release tarball checked against a committed sha256
+  (it ran `curl get.anchore.io/grype | sh`), and the trivy and goreleaser actions are
+  pinned by commit. (audit A18)
+- Builds are held to go.mod's `toolchain` line, now `go1.26.10`. v0.12.0 was built with
+  go1.26.9, which carries GO-2026-6809 (crypto/x509, fixed in go1.26.10).
+  `scripts/check-go-toolchain.sh` fails a release or CI build below the floor. Each
+  GoReleaser build scans its own binary with govulncheck (`scripts/release-vulncheck.sh`)
+  before anything is published. (QA 2026-10-30)
 
 ### Fixed
+- SARIF output reports components the cataloger could not use -- no version, no purl, an
+  unsupported ecosystem -- as `assay/not-evaluated` results with their counts. Before, GitHub
+  code scanning showed a clean scan where the table said they were not evaluated.
+  (D158, audit A16)
+- An image layer that replaces a package database, `os-release` or a dpkg/pacman/Bitnami
+  record with a directory, device or FIFO now hides the lower layer's file, as the running
+  container sees it. Before, the deleted file was still read, and the scan reported an
+  inventory the image does not have. A file turned into a directory writes no `.wh.`
+  marker, so the whiteout rules never caught it. (audit A10)
+- A line over 64 KiB in a Gemfile.lock, Cargo.lock, uv.lock, requirements.txt or a jar's
+  pom.properties no longer hides every package after it. The readers stopped at the line
+  without an error, and the scan reported the rest as the whole file: exit 0, nothing
+  incomplete. (QA 2026-10-30)
+- A single-version or empty window is judged on its own when the range lists both opens
+  before both closes (`[introduced 1, introduced 3, last_affected 1, last_affected 3]`), which
+  had been read as `[1, 3]`. (QA 2026-10-30, revises D154)
+- `db update` and `db build --seed` retry an HTTP/2 stream reset mid-download, as they
+  already retried a cut HTTP/1 body. A pull that was cancelled or ran past `--timeout` is no
+  longer retried. (QA 2026-10-30, revises D140)
+- A VEX statement naming the outer index of a nested image index applies to the image
+  selected through it, on registry and `oci-dir:` targets alike. (QA 2026-10-30, revises D121)
+- An Alpine edge image (`VERSION_ID=3.25.0_alpha20260805`) is reported as not evaluated
+  instead of being judged against stable Alpine 3.25's advisories. OSV publishes no edge
+  ecosystem. (audit A11)
+- A Go binary built with a non-default `GOEXPERIMENT` (`go1.26.7-X:fieldtrack`) catalogs
+  stdlib at its release version. Before, the experiment list read as a prerelease no
+  comparison accepts, and every stdlib advisory was skipped. (audit A12)
+- When a record links two findings for one package, the merged finding's disclosure of an
+  apk provides join and of a mirrored advisory's origin follows the displayed record.
+  (audit A13, D10)
 - `--fail-on-eol` no longer goes red a day early. A release counted as end of life from the
   first instant of the day EOLFrom names (09:00 KST on that day), while D87 promises that day
   is not yet EOL; it is now EOL from the day after. Extended support likewise now covers the

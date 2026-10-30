@@ -121,6 +121,21 @@ var vendorSeverityWords = map[string]struct {
 // Unknown. That is a different claim from None — "we could not tell" versus
 // "rated zero" — and D17 turns on the difference.
 func Highest(vectors []string) (Band, float64) {
+	band, score, _ := HighestDetail(vectors)
+	return band, score
+}
+
+// HighestDetail is Highest, and also says whether the answer came from a
+// CVSS v2 vector (D156).
+//
+// v2 is a fallback, never a peer. It bands the record only when nothing else
+// in it scores -- no v3, no v4, no vendor word -- which is how NVD itself
+// presents a CVE it never re-scored (72,405 of its 391,806 ratings in the
+// published database of 2026-10-27, all from before 2016 but 215). Taking v2
+// into the max instead would raise 2,272 ratings that carry both, on the
+// strength of the older, coarser metric. Of still refuses a v2 vector, so no
+// other caller can put one beside v3 by accident.
+func HighestDetail(vectors []string) (Band, float64, bool) {
 	best, bestScore := Unknown, 0.0
 	for _, v := range vectors {
 		band, score, err := Of(v)
@@ -131,7 +146,20 @@ func Highest(vectors []string) (Band, float64) {
 			best, bestScore = band, score
 		}
 	}
-	return best, bestScore
+	if best != Unknown {
+		return best, bestScore, false
+	}
+	fromV2 := false
+	for _, v := range vectors {
+		score, band, ok := scoreV2(v)
+		if !ok {
+			continue
+		}
+		if !fromV2 || score > bestScore {
+			best, bestScore, fromV2 = band, score, true
+		}
+	}
+	return best, bestScore, fromV2
 }
 
 // Band is a severity class. The ordering is None < Low < Medium < High <

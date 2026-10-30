@@ -395,7 +395,7 @@ func (w v1Index) ImageIndex(h v1.Hash) (indexReader, error) {
 func imageFromIndex(idx indexReader, what string, parent v1.Hash, want v1.Platform, explicit bool) (v1.Image, PlatformChoice, error) {
 	var cands []candidate
 	var skipped []unreadable
-	if err := collectCandidates(idx, what, parent, 0, &cands, &skipped); err != nil {
+	if err := collectCandidates(idx, what, parent, nil, 0, &cands, &skipped); err != nil {
 		return nil, PlatformChoice{}, err
 	}
 	plats := make([]v1.Platform, len(cands))
@@ -441,6 +441,9 @@ func imageFromIndex(idx indexReader, what string, parent v1.Hash, want v1.Platfo
 	if c.parent.Hex != "" {
 		choice.IndexDigest = c.parent.String()
 	}
+	for _, h := range c.outer {
+		choice.OuterIndexDigests = append(choice.OuterIndexDigests, h.String())
+	}
 	return img, choice, nil
 }
 
@@ -451,7 +454,11 @@ type candidate struct {
 	// parent is the digest of the index that listed it; zero for a layout's
 	// index.json.
 	parent v1.Hash
-	idx    indexReader
+	// outer is every index above parent the walk came through, outermost
+	// first: the path from the index that was asked for to this image, and
+	// nothing beside it.
+	outer []v1.Hash
+	idx   indexReader
 	// img is set when the image was already read to learn its platform.
 	img v1.Image
 }
@@ -490,7 +497,7 @@ const maxIndexDepth = 4
 // whose descriptor carries only a ref-name annotation. The first is walked;
 // the second is judged by its image's config. Both used to fail with "it
 // offers " and an empty list — an error naming nothing.
-func collectCandidates(idx indexReader, what string, parent v1.Hash, depth int, out *[]candidate, skipped *[]unreadable) error {
+func collectCandidates(idx indexReader, what string, parent v1.Hash, outer []v1.Hash, depth int, out *[]candidate, skipped *[]unreadable) error {
 	if depth >= maxIndexDepth {
 		return fmt.Errorf("%s nests indexes more than %d deep", what, maxIndexDepth)
 	}
@@ -504,7 +511,13 @@ func collectCandidates(idx indexReader, what string, parent v1.Hash, depth int, 
 			if err != nil {
 				return err
 			}
-			if err := collectCandidates(child, what, d.Digest, depth+1, out, skipped); err != nil {
+			// The child's chain is this one plus this index, copied so two
+			// siblings never share a backing array.
+			chain := append([]v1.Hash(nil), outer...)
+			if parent.Hex != "" {
+				chain = append(chain, parent)
+			}
+			if err := collectCandidates(child, what, d.Digest, chain, depth+1, out, skipped); err != nil {
 				return err
 			}
 			continue
@@ -545,7 +558,7 @@ func collectCandidates(idx indexReader, what string, parent v1.Hash, depth int, 
 			}
 			*out = append(*out, candidate{
 				plat:   normalizePlatform(v1.Platform{OS: cf.OS, Architecture: cf.Architecture, Variant: cf.Variant}),
-				digest: d.Digest, parent: parent, idx: idx, img: img,
+				digest: d.Digest, parent: parent, outer: outer, idx: idx, img: img,
 			})
 			continue
 		}
@@ -558,7 +571,7 @@ func collectCandidates(idx indexReader, what string, parent v1.Hash, depth int, 
 		}
 		*out = append(*out, candidate{
 			plat:   normalizePlatform(*p),
-			digest: d.Digest, parent: parent, idx: idx,
+			digest: d.Digest, parent: parent, outer: outer, idx: idx,
 		})
 	}
 	return nil

@@ -14,7 +14,6 @@ package jar
 
 import (
 	"archive/zip"
-	"bufio"
 	"bytes"
 	"fmt"
 	"io"
@@ -303,13 +302,15 @@ func isNestedArchive(name string) bool {
 // spaces before "=" trimmed (Maven's own writer does not emit these, but
 // nothing about the format forbids them, and a strict parser here would
 // refuse a file the JVM's own java.util.Properties reads without complaint).
-// bufio.Scanner's default split function strips a trailing "\r", so CRLF line
-// endings are handled without any separate case.
+// A trailing "\r" is stripped from each line, so CRLF line endings are
+// handled without any separate case.
 func parseProperties(data []byte) map[string]string {
 	props := make(map[string]string)
-	sc := bufio.NewScanner(bytes.NewReader(data))
-	for sc.Scan() {
-		line := sc.Text()
+	// Split in memory: a bufio.Scanner stops at a line over 64 KiB and drops
+	// every key after it, the QA 2026-10-30 defect in gemlock. data is
+	// already capped by readEntryCapped.
+	for raw := range bytes.Lines(data) {
+		line := strings.TrimSuffix(strings.TrimSuffix(string(raw), "\n"), "\r")
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue

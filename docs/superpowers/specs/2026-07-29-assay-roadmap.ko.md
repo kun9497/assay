@@ -4935,6 +4935,21 @@ Storage 5에서는 영향 없음"이 "어디서도 영향 없음"이 됩니다 �
 기록되어 있습니다. 네임스페이스 별칭(Rocky 이미지의 `redhat`, Chainguard의 `wolfi`): 벤더가
 자기 빌드에 대해 한 문장은 재빌드에 대한 문장이 아닙니다.
 
+**개정 (QA 2026-10-30).** 중첩된 index 의 바깥 index 를 지목하는 문장이 적용되지 않았습니다.
+index 순회가 이미지를 나열한 index 만 남겨서 바깥 digest 가 버려졌습니다. 그 digest 가 digest 로 된
+레지스트리 참조가 가리키는 것이고 `buildx imagetools` 가 출력하는 것입니다.
+
+이제 각 후보는 요청받은 index 에서 자신의 부모까지의 경로에서 부모 위에 있는 모든 index 를 바깥쪽부터
+싣고, 자식마다 복사됩니다. `PlatformChoice.OuterIndexDigests` 가 이를 보고하고 VEX 대상이 이를
+매칭합니다. 형제 index, 다른 platform 의 이미지, `oci-dir:` 레이아웃 자신의 `index.json` 은 경로에
+없습니다. JSON `image` 레코드는 그대로입니다(schema 변경 없음). 이 체인은 VEX 범위에만 쓰입니다.
+
+`Run` 을 통해, `oci-dir:` 레이아웃(platform 이 없는 descriptor)과 digest 및 tag 로 지정한
+레지스트리(platform 이 있는 descriptor)에서 검증했습니다:
+- **적용.** 바깥 index, 안쪽 index, 또는 manifest 를 지목하는 문장.
+- **적용 안 됨.** 형제 index, 다른 platform 의 manifest, 또는 무관한 digest 를 지목하는 문장.
+- **뮤테이션.** 일곱 개, 모두 포착.
+
 ---
 
 ### D122 — SUSE의 CSAF VEX 피드는 연도 접두사를 쓴다: delta 단계는 새 경로를, 새 경로만 읽는다
@@ -5799,6 +5814,26 @@ seed pull 을 실패시켰다. 아티팩트 자체의 결함(gzip 아님, digest
 `db build --seed` 도 같은 재시도를 받는다; 쓰레기 레이어는 한 번만 가져오고 재시도하지 않는다. 변이 4개
 포착: 아무것도 재시도 안 함, 전부 재시도, 세 번 대신 두 번, seed 경로에서 재시도 누락.
 
+**개정 (QA 2026-10-30).** HTTP/2 레지스트리가 본문 도중에 스트림을 리셋하면 재시도되지 않았습니다.
+읽기는 net/http 의 비공개 스트림 오류(`stream error: ...; INTERNAL_ERROR; received from peer`)로
+실패하는데, 위의 어떤 검사에도 걸리지 않았습니다. 그래서 Pull 과 PullSeed 는 첫 GET 에서 실패했고, 수동으로
+다시 돌리면 성공했습니다.
+
+이제 레지스트리 transport 가 모든 응답 본문을 감싸고, 거기서 읽은 오류는 재시도되는 `bodyReadError` 가
+됩니다. 태깅은 각 프로토콜의 오류 문구가 아니라 바이트가 오는 곳을 기준으로 하며, 그래서 아티팩트 자체의
+결함이 걸리지 않습니다. go-containerregistry 는 그 reader 위에서 digest 와 크기를 검사하고 gzip 은 그 위에서
+헤더와 체크섬을 읽으므로, 깨진 레이어는 태깅되지 않고 여전히 첫 가져오기에서 실패합니다. context 가 끝난
+pull — 취소나 `--timeout` 으로 — 은 재시도하지 않습니다. 이전에는 deadline 이 네트워크 타임아웃으로 읽혀,
+성공할 수 없는 context 로 재시도되었습니다.
+
+TLS HTTP/2 테스트 레지스트리에서 검증했습니다:
+- **리셋된 스트림.** 한 번 재시도하고, Pull 과 PullSeed 모두 설치됩니다.
+- **세 번의 리셋.** 정확히 세 번 가져온 뒤 이전 데이터베이스는 바이트 단위로 동일하고 임시 파일이
+  남지 않습니다.
+- **대조군.** 깨진 레이어, 취소된 pull, deadline 을 넘긴 pull 은 각각 한 번만 가져오고 재시도하지
+  않습니다.
+- **뮤테이션.** 여섯 개, 모두 포착.
+
 ---
 
 ### D141 — 모든 이미지 스캔은 그 안의 애플리케이션 패키지를 검사하지 않았음을 밝힌다
@@ -6520,6 +6555,39 @@ affected 가 아니던 결과 255개는 순회에서 남은 증거 필드만 바
 - 분리에서 센티넬을 제외하는 것: `atLeast` 가 이미 센티넬을 음의 무한대로 읽기 때문이다;
 - 분리 앞의 검증 단계: `sortEvents` 가 같은 경계를 검증하기 때문이다.
 
+**개정 (QA 2026-10-30).** 범위가 두 open 을 두 close 보다 먼저 나열하면 — `[introduced 1,
+introduced 3, last_affected 1, last_affected 3]` — 파일 순서 단계 이후에도 한 버전짜리 window 가 순회에
+남았습니다. 어느 open 도 다음 `introduced` 전에 자기 close 를 갖지 못했고, 정렬은 이 범위를 `[1, 3]` 으로
+읽어 2.0.0 이 영향받는 것으로 나왔습니다(다른 순서에서는 4.0.0). OSV 는 이벤트를 정렬하라고 권장만 합니다.
+
+파일 순서 단계 뒤에, `pairByVersion` 이 남은 이벤트를 버전 순으로 훑으며 각 버전 X 바로 아래에 window 가
+열려 있는지 추적합니다:
+- **X 아래에 열린 window 가 없다.** X 의 close 는 X 의 open 만 끝낼 수 있으므로, X 의 open 마다 close 를
+  하나씩 가져가고 그 쌍은 따로 판정합니다.
+- **X 아래에 열린 window 가 있다.** close 하나는 그것을 끝내도록 순회에 남기며, 이는 만나는 window 에 대한
+  이 결정의 동률 규칙 그대로입니다. 그 너머의 close 만 짝지어집니다.
+
+이 단계는 파일 순서가 이미 짝지은 것을 바꾸지 않고, 만나는 window 의 증거도 그대로입니다.
+
+검증:
+- **모든 순서.** 네 이벤트짜리 범위 여섯 개의 24가지 순서 전부가 같은 verdict 를 냅니다. 범위는 한 버전짜리
+  window 둘, 빈 window 와 실제 window, 빈 window 둘, 닫힌 window 위의 빈 window, 그리고 대조군 둘입니다.
+- **`Run` 을 통해.** 2.0.0, 3.0.0, 4.0.0 의 SBOM 스캔은 open 우선 순서와 정렬된 순서 모두에서 3.0.0 만
+  찾습니다.
+- **발행된 데이터베이스.** 2026-10-27 기준 동률 범위 536개가 2,892개 경계에서 판정되었습니다. 출력은
+  전후로 바이트 단위로 동일했습니다.
+- **뮤테이션.** 일곱 개, 모두 포착:
+  - 호출 제거;
+  - 예약 제거;
+  - 상태를 설정하지 않음, 또는 항상 설정;
+  - 하나짜리 그룹;
+  - 정렬하지 않은 순회;
+  - 아무 close 나 가져감.
+
+한 가지 한계가 남습니다. 서로 만나는 두 window 안에서 파일이 [X,X) 를 자기 window 로 나열하면, X 아래
+버전의 증거는 [open, X) 가 아니라 [open, 마지막 close) 를 적습니다. D154 이후로 그래 왔고, verdict 는
+같습니다.
+
 ---
 
 ### D155 — gem 의 platform 은 버전의 일부가 아니다
@@ -6608,6 +6676,101 @@ java 로 읽힌다. 컨테이너 이미지 안의 gem 은 여전히 전혀 읽�
 
 ---
 
+### D156 — CVSS v2 만 있는 rating 은 v2 base score 로 band 를 매기며, fallback 으로만 쓴다
+
+**결정.** `severity.HighestDetail` 은 레코드의 vector 를 예전처럼 채점하여 CVSS v3, v4 와 벤더 표기 중
+가장 높은 것을 취한다. 그중 아무것도 채점되지 않을 때만 CVSS v2 로 fallback 한다. 이 경우 v2 base
+vector 마다 명세 자신의 공식(§3.2.1)으로 점수를 계산하고, NVD 의 v2 표로 band 를 매긴다:
+
+| Band | v2 base score |
+|---|---|
+| Low | 0.0–3.9 |
+| Medium | 4.0–6.9 |
+| High | 7.0–10.0 |
+
+v2 에는 Critical band 가 없고, 0.0 은 거기서 None 이 아니라 Low 다.
+
+v2 vector 는 NVD 가 저장하는 모양 그대로만 읽는다: 여섯 base metric 이 순서대로, 대문자로, 앞뒤에
+아무것도 없이. 그 외는 채점할 수 없는 채로 둔다. `severity.Of` 는 여전히 v2 vector 를 거부하므로,
+어떤 호출자도 v2 를 v3 옆에 두고 max 를 취할 수 없다. 이렇게 band 가 매겨진 rating 은 그렇다고
+밝힌다: `matcher.Rating.FromCVSSv2`, JSON 보고서의 `ratings[].cvssV2`(schema 15, additive), 그리고
+`--explain` 줄의 `(CVSS v2)` 다(D10).
+
+scorer 밖의 두 가지 결과:
+- **band 가 점수보다 앞선다.** finding 의 rating 은 band 로 먼저, 점수로 그다음에 순위를 매긴다
+  (`matcher.beats`). 다른 모든 scorer 에서는 두 순서가 일치한다. v2 에서는 일치하지 않는데, v2 에서
+  10.0 은 High 이고 v3 나 벤더 표기에서 9.0 은 Critical 이기 때문이다.
+- **SARIF 는 band 안에 머문다.** `security-severity` 는 finding 의 band 상단을 넘지 않으므로, High 는
+  많아야 8.9 로 쓰인다. GitHub code scanning 은 8.9 를 넘는 값을 critical 로 읽는다.
+
+**이유.** 2026-10-22 감사(A14). NVD 는 한 번도 다시 채점하지 않은 CVE 에 v2 vector 만 달아 둔다. vector
+는 저장되어 있었지만(D13) 아무것도 이를 채점하지 않았고, 그래서 finding 은 `unknown` 으로 남았다:
+rating 이 있는 것으로 세어지면서 band 는 없는 것이다.
+
+공개된 데이터베이스(2026-10-27)에서 NVD rating 391,806개 중 72,405개가 v2 만 있다. 215개를 뺀 전부가
+CVE ID 연도 기준 2016 년 이전의 CVE 다. fallback 이 있으면 high 29,227,
+medium 37,895, low 5,283 으로 band 가 매겨진다.
+
+D17 과 충돌하지 않는다. D17 은 *없는* severity 를 강제로 채우는 것을 금하는데, v2 점수는 NVD 가 실제로
+발표한 것이다.
+
+v2 를 peer 가 아니라 fallback 으로 두는 이유는, 단순한 max 가 둘 다 가진 NVD rating 2,272개를 더 오래되고
+더 거친 metric 을 근거로 끌어올리기 때문이다. 출처 사이에서는 D25 의 highest-wins 규칙이 여전히
+적용되며, band 를 기준으로 한다. 사용자는 v2 를 unknown 으로 두는 방식과 max 에 넣는 방식 대신
+fallback 을 골랐다.
+
+첫 버전은 finding 의 rating 을 점수만으로 순위 매겼고, 그때까지 모든 finding 이 그렇게 순위가 매겨졌다.
+그 순위에서는 NVD v2 High 10.0 이 다른 출처의 v3 Critical 9.8 보다 앞섰고, finding 은 high 로 내려갔으며,
+`--fail-on critical` 이 더는 작동하지 않았다. 브랜치 리뷰(wf_11dec29e-171)가 이를 SARIF 불일치,
+`-0.0` 점수와 함께 찾아냈다.
+
+**측정.** 그 rating 들에 든 서로 다른 v2 vector 311개 전부를 교차 검증했다: 각각을 자기 CVE 하나에 대해
+채점하고, NVD API 가 그 CVE 에 발표한 base score 와 severity 에 견주었다. 311개 모두 점수와 band 가
+일치하며, 차이는 0개다.
+
+**포기하는 것.** temporal 또는 environmental metric 이 뒤에 붙은 v2 vector 는 base 만으로 채점하지 않고
+거부한다. NVD 는 base vector 를 저장하므로 그런 것은 보이지 않았다. v2 로 매긴 band 는 같은 CVE 의 이후
+v3 band 보다 높을 수 있다. rating 이 v2 에서 왔다고 밝히며, finding 의 다른 rating 은 바뀌지 않는다.
+
+**검증.**
+- **매처.** `TestMatch_D156_*` 는 v2 만 있는 NVD annotation 이 finding 의 band 를 매기는 경우, 같은
+  rating 안에서 v3 가 더 높은 v2 를 이기는 경우, advisory 자신의 v2 vector 가 자기 rating 의 band 를
+  매기는 경우를 다룬다. memo 도 확인한다: 캐시 hit 이 v2 출처를 유지한다.
+- **severity 패키지.** 알려진 v2 base score 21개로, band 경계 6.9, 7.0, 4.0 과 모든 metric 가중치를
+  포함하며, impact 가 없는 vector 의 +0 도 다룬다. 잘못된 vector 는 거부한다. metric 이름이 틀린 것과, 값은 모두 그 자리에서 유효한데 순서가
+  어긋난 것이 그 안에 든다. fallback 의 규칙도 다룬다: v3 와 벤더 표기가 이기고, 채점할 수 없는 vector
+  는 fallback 을 막지 않으며, v2 vector 둘 중 높은 것이 어느 순서로든 이긴다.
+- **band 가 점수보다 앞선다.** v3 Critical 9.8 이 v2 High 10.0 을 이기고, 벤더 Critical 이 v2 High 9.3 을
+  이긴다. v2 Low 는 같은 0.0 의 v3 None 을 이기며, 어느 database 이름이 먼저 정렬되든 마찬가지다.
+- **보고서.** JSON 은 v2 rating 에만 `cvssV2` 를 싣고, `--explain` 은 그 줄에만 표시한다. SARIF 는
+  9.3 또는 10.0 의 High 를 8.9 로 쓰고, 7.5, Critical, Medium 은 그대로 둔다.
+
+변이 열일곱 개를 돌렸고 열여섯 개가 잡혔다:
+- fallback 을 제거하거나 v2 를 peer 로 만듦;
+- 가장 높은 것 대신 첫 v2 를 취함;
+- 플래그를 한 번도 세우지 않음;
+- f(Impact) 없음;
+- High 가 6.9 에서 시작함;
+- 뒤따르는 metric 을 받아들임;
+- metric 이름을 확인하지 않음;
+- AV:A 가중치를 바꿈;
+- 반올림 대신 버림;
+- 레코드 자신의 rating, annotation, 또는 캐시 hit 에서 플래그를 잃음;
+- JSON 필드를 빠뜨리거나 explain 표시를 빠뜨림;
+- `Of` 가 v2 를 채점함.
+
+살아남은 변이는 Medium 의 하한을 3.9 로 옮기는 것이다. 이는 동등하다: 어떤 v2 base vector 도 3.9 로
+채점되지 않으며(729개 전부를 계산했다), 코드에 그렇게 적혀 있다.
+
+리뷰의 수정에 대해 변이 일곱 개를 더 돌렸고 모두 잡혔다:
+- band 우선 순위를 제거함;
+- SARIF 상한을 제거하거나 9.0 으로 설정함;
+- -0 을 되살림;
+- High 의 경계를 배타적으로 만듦;
+- 마지막 v2 를 취하거나 첫 v2 를 취함.
+
+---
+
 ### D157 — 비어 있는 Ubuntu tracker 는 빌드를 실패시키고, 줄어든 tracker 는 publish 를 실패시킨다 (D85 개정)
 
 **결정.** Canonical 의 CVE tracker 는 두 곳에서 지킨다.
@@ -6685,6 +6848,40 @@ release 가 하룻밤에 state 의 5분의 1 넘게 정말로 잃는 경우, 예
 - fix 없는 range 만 보는 gate 제거;
 - stamp 검사에서 not-fixed 를 뺌;
 - 분모를 세지 않음.
+
+---
+
+### D158 — SARIF 는 cataloger 가 읽지 못한 것을 말한다
+
+**결정.** SARIF 출력은 0 이 아닌 cataloger 카운터마다 `assay/not-evaluated` 결과를 하나씩, 그 개수와
+함께 표의 표현 그대로 싣는다. 카운터는 세 가지다:
+- 비교할 버전이 없음(`warning`);
+- 쓸 수 있는 purl 이 없음(`warning`);
+- 지원하지 않는 ecosystem(`note`).
+
+각각 notification 도 하나씩 갖는다. D55/D109 의 꼴이다. level 은 D36 의 구분을 따른다. 앞의 둘은 호출자가
+고칠 수 있으므로 `targetIncomplete` 에 들어간다. 세 번째는 assay 자신의 coverage 다. 이 규칙은 matcher 도
+무언가를 건너뛰었는지와 상관없이 한 번만 선언한다. 결과의 위치는 스캔한 대상이고, fingerprint 는 개수가
+아니라 건너뛴 종류이므로, 숫자가 움직여도 alert 는 하나로 남는다.
+
+**이유.** 2026-10-22 감사(A16). SARIF 의 평가 안 됨 결과는 matcher 가 건너뛴 것에서만 나왔다.
+cataloger 가 패키지로 만들지 못한 component 는 결과를 하나도 만들지 않았고, 그래서 표가 "N not
+evaluated" 라고 말하고 JSON 이 그 수를 세는 동안 GitHub code scanning 은 깨끗한 스캔을 보여 주었다.
+code scanning 은 결과만 읽는다. D55 가 이미 한 번 배운 것이다.
+
+사용자는 지금은 집계 결과를, 나중에 component 별 결과를 택했다. component 별 결과는 약 스무 개의 모든
+cataloger 가 건너뛴 것의 이름을 들고 있어야 한다. 이는 자체 스키마 문제가 딸린 cataloger 횡단 변경이다.
+`docs/deferred-decisions.md` 에 기록했다.
+
+**검증.** `TestRun_D158_SARIFCarriesComponentsTheCatalogerCouldNotRead` 는 종류마다 component 를 하나씩
+가진 CycloneDX SBOM 을 `Run` 에 통과시킨다. 결과가 정확히 세 개인지, 그 level 과 문구, 그리고 선언된
+규칙을 확인한다. 보고서 수준의 테스트는 두 종류의 skip 이 함께 있을 때 규칙이 한 번만 선언됨을 지킨다.
+
+변이 여덟 개를 돌렸고, 모두 잡혔다. 변이는 다음과 같다:
+- 호출 제거;
+- 규칙을 선언하지 않거나 두 번 선언함;
+- 카운터를 하나씩 버림;
+- level 을 각각 맞바꿈.
 
 ---
 

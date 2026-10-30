@@ -1653,16 +1653,17 @@ func TestMatch_FindingWithNoSeverityVectorsIsUnknown(t *testing.T) {
 }
 
 // D17 again, but the common real shape: a record that DOES carry a severity
-// entry, just not one severity.Of can score — a bare CVSS_V2 vector, which
-// severity.Of does not understand (it dispatches on "CVSS:3." / "CVSS:4."
-// prefixes only). The zero-entries case above never exercises this path, and
-// it is the one that matters most: a coercion bug here is invisible, because
-// None sits inside the --fail-on ordering and is not counted by
-// Summary.UnknownSeverity, so --fail-on-unknown would not see it either.
+// entry, just not one anything can score. This was a bare CVSS_V2 vector
+// until D156 taught severity to fall back to v2; a v2 vector with temporal
+// metrics appended is still refused, so it stands in. The zero-entries case
+// above never exercises this path, and it is the one that matters most: a
+// coercion bug here is invisible, because None sits inside the --fail-on
+// ordering and is not counted by Summary.UnknownSeverity, so
+// --fail-on-unknown would not see it either.
 func TestMatch_UnscorableSeverityVectorIsUnknownNotNone(t *testing.T) {
 	adv := advWithRange("GHSA-v2only", "Go", "z", "0", "2.0.0", advisory.RangeSemver)
 	adv.Severity = []advisory.Severity{
-		{Type: "CVSS_V2", Score: "AV:N/AC:L/Au:N/C:P/I:P/A:P"},
+		{Type: "CVSS_V2", Score: "AV:N/AC:L/Au:N/C:P/I:P/A:P/E:F/RL:OF/RC:C"},
 	}
 	s := fakeStore{byKey: map[string][]advisory.Advisory{"Go\x00z": {adv}}}
 

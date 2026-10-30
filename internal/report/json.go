@@ -48,7 +48,9 @@ import (
 // byte-identical documents with different exit codes, an expired ignore rule
 // was indistinguishable from no ignore file, and nothing named the tool, the
 // database or the input's content — the report could not say why two runs
-// differed).
+// differed), and to 15 when RatingRecord gained `cvssV2` (D156: a band NVD's
+// CVSS v2 fallback produced says so, so a reader can tell a rating that rests
+// on the older metric from one that does not).
 // Two earlier additions should have bumped it and did not — `ratings` (D25)
 // and RatingRecord.URL (D27) both changed the shape while this constant
 // stayed at 1 — so version 1 in the wild denotes three different documents.
@@ -56,7 +58,7 @@ import (
 // what it does mean is that a consumer reading 2 or later can rely on every
 // field below being present, which is the guarantee the constant exists to
 // give.
-const schemaVersion = 14
+const schemaVersion = 15
 
 // Document is the stable shape of `assay scan --output json` (design goal
 // #3). It carries what Table shows plus what Table cannot: the full
@@ -341,6 +343,11 @@ type RatingRecord struct {
 	KEV            bool    `json:"kev,omitempty"`
 	KEVDateAdded   string  `json:"kevDateAdded,omitempty"`
 	KEVRansomware  string  `json:"kevRansomware,omitempty"`
+	// CVSSv2 says Severity and Score came from a CVSS v2 vector, the
+	// fallback D156 uses only when nothing else in the record scores.
+	// omitempty for the EPSS/KEV fields' reason: false on almost every
+	// rating, and printing it on each would be a column of noise.
+	CVSSv2 bool `json:"cvssV2,omitempty"`
 }
 
 type PackageRecord struct {
@@ -491,6 +498,7 @@ func findingRecord(f matcher.Finding) FindingRecord {
 			KEV:            r.KEV,
 			KEVDateAdded:   r.KEVDateAdded,
 			KEVRansomware:  r.KEVRansomware,
+			CVSSv2:         r.FromCVSSv2,
 		})
 	}
 	// Same reasoning as ratings above: an empty result encodes as

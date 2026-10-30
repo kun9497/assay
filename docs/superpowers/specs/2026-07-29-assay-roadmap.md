@@ -5089,6 +5089,24 @@ anywhere" — recorded as a hazard in deferred-decisions. Namespace aliases (`re
 Rocky image, `wolfi` for Chainguard): a vendor's statement about its build is not a
 statement about a rebuild.
 
+**Revised (QA 2026-10-30).** A statement naming the outer index of a nested one did not apply.
+The index walk kept only the index that listed the image, so the outer digest was dropped.
+That is the digest a registry reference by digest names, and the one `buildx imagetools`
+prints.
+
+Each candidate now carries every index above its parent on the path from the index that was
+asked for, outermost first, copied per child. `PlatformChoice.OuterIndexDigests` reports them
+and the VEX target matches them. A sibling index, an image for another platform and an
+`oci-dir:` layout's own `index.json` are not on the path. The JSON `image` record is unchanged
+(no schema bump); the chain is used for VEX scope only.
+
+Verified through `Run`, for an `oci-dir:` layout (descriptors without platforms) and for a
+registry by digest and by tag (descriptors with platforms):
+- **Applied.** Statements naming the outer index, the inner index or the manifest.
+- **Not applied.** Statements naming the sibling index, the other platform's manifest or an
+  unrelated digest.
+- **Mutation.** Seven mutations, all caught.
+
 ---
 
 ### D122 — SUSE's CSAF VEX feed is year-prefixed: the delta pass reads the new path, and only the new path
@@ -6062,6 +6080,27 @@ says how many; `db build --seed` gets the same retry; a layer of garbage is fetc
 not retried. Four mutations caught: nothing retried, everything retried, two attempts instead
 of three, the seed path without the retry.
 
+**Revised (QA 2026-10-30).** An HTTP/2 registry that resets the stream mid-body was not
+retried. The read fails with net/http's unexported stream error (`stream error: ...;
+INTERNAL_ERROR; received from peer`), which matched none of the checks above. Pull and PullSeed
+then failed on the first GET, while a second manual run succeeded.
+
+The registry transport now wraps every response body, and an error read from one is a
+`bodyReadError`, which is retried. Tagging is by where the bytes come from, not by each
+protocol's error text, and that is what keeps the artifact's own defects out. go-containerregistry
+checks the digest and the size above that reader, and gzip reads its header and checksum above
+it, so a corrupt layer is never tagged and still fails on the first fetch. A pull whose context
+is done, by cancellation or `--timeout`, is not retried. Before this, a deadline read as a
+network timeout and was retried into a context that could not succeed.
+
+Verified over a TLS HTTP/2 test registry:
+- **A reset stream.** Retried once; Pull and PullSeed both install.
+- **Three resets.** Exactly three fetches, after which the previous database is byte-identical
+  and no temp file is left.
+- **The controls.** A corrupt layer, a cancelled pull and a pull past its deadline are each
+  fetched once and not retried.
+- **Mutation.** Six mutations, all caught.
+
 ---
 
 ### D141 — Every image scan discloses that application packages inside it were not checked
@@ -6871,6 +6910,42 @@ Two earlier parts were removed as equivalents:
   infinity;
 - a validation pass before the split, because `sortEvents` validates the same bounds.
 
+**Revised (QA 2026-10-30).** File order still left a single-version window in the walk when
+the range listed both opens before both closes: `[introduced 1, introduced 3, last_affected 1,
+last_affected 3]`. Neither open had its close before the next `introduced`, the sort read the
+range as `[1, 3]`, and 2.0.0 was affected (4.0.0 in another order). OSV only recommends
+sorted events.
+
+After the file-order pass, `pairByVersion` walks the remaining events in version order and
+tracks whether a window is open just below each version X:
+- **No window open below X.** A close at X can end only an open at X, so each open at X takes
+  one, and the pair is judged on its own.
+- **A window open below X.** One close is left in the walk to end it, which is this
+  decision's tie rule for windows that meet, unchanged. Only the closes beyond it pair.
+
+The pass changes nothing that file order already paired, and the evidence for windows that
+meet is unchanged.
+
+Verified:
+- **Every ordering.** All 24 orderings of six four-event ranges give the same verdicts. The
+  ranges are two single-version windows, an empty and a real window, two empty windows, an
+  empty window above a closed one, and the two controls.
+- **Through `Run`.** An SBOM scan of 2.0.0, 3.0.0 and 4.0.0 finds 3.0.0 alone, opens-first
+  and in order.
+- **The published database.** Of 2026-10-27, 536 tied ranges were judged at 2,892 bounds. The
+  output was byte-identical before and after.
+- **Mutation.** Seven mutations, all caught:
+  - the call removed;
+  - the reservation removed;
+  - the state never set, or always set;
+  - groups of one;
+  - the walk unsorted;
+  - any close taken.
+
+One limit remains. Where a file lists [X,X) as its own window inside two windows that meet, the
+evidence for a version below X names [open, final close) rather than [open, X). That has been
+so since D154; the verdict is the same.
+
 ---
 
 ### D155 — A gem's platform is not part of its version
@@ -6968,6 +7043,108 @@ dropping its platform, which had survived. The mutations were:
 
 ---
 
+### D156 — A CVSS v2-only rating is banded from the v2 base score, as a fallback only
+
+**Decision.** `severity.HighestDetail` scores a record's vectors as before, taking the
+highest of its CVSS v3, v4 and vendor words. Only when none of them scores does it fall
+back to CVSS v2. In that case it computes each v2 base vector's score with the
+specification's own formula (§3.2.1) and bands it on NVD's v2 table:
+
+| Band | v2 base score |
+|---|---|
+| Low | 0.0–3.9 |
+| Medium | 4.0–6.9 |
+| High | 7.0–10.0 |
+
+v2 has no Critical band, and 0.0 is Low there, not None.
+
+A v2 vector is read only as NVD stores it: the six base metrics in order, upper-case,
+nothing before or after. Anything else stays unscorable. `severity.Of` still refuses a v2
+vector, so no caller can put one beside v3 in a max. A rating banded this way says so:
+`matcher.Rating.FromCVSSv2`, the JSON report's `ratings[].cvssV2` (schema 15, additive),
+and `(CVSS v2)` on its `--explain` line (D10).
+
+Two consequences outside the scorer:
+- **Bands outrank scores.** A finding's ratings rank by band first and score second
+  (`matcher.beats`). For every other scorer the two orders agree. v2's do not, because 10.0
+  is High in v2 and 9.0 is Critical under v3 or a vendor word.
+- **SARIF stays in the band.** `security-severity` never goes above the top of the finding's
+  band, so a High is written as at most 8.9. GitHub code scanning reads anything above 8.9
+  as critical.
+
+**Why.** The 2026-10-22 audit (A14). NVD rates a CVE it has never re-scored with a v2
+vector only. The vector was stored (D13), but nothing scored it, so the finding stayed
+`unknown`: counted as rated, banded as nothing.
+
+On the published database (2026-10-27), 72,405 of 391,806 NVD ratings are v2-only. All but
+215 of them are CVEs from before 2016, by CVE ID year. With the fallback they band as high
+29,227, medium 37,895 and low 5,283.
+
+D17 is not in tension with this. It forbids coercing an *absent* severity, and a v2 score
+is one NVD actually published.
+
+v2 is a fallback and not a peer because a plain max would raise 2,272 NVD ratings that
+carry both, on the strength of the older and coarser metric. Across sources D25's
+highest-wins rule still applies, on bands. The user chose the fallback over keeping v2 as
+unknown, and over taking it into the max.
+
+The first version ranked a finding's ratings by score alone, as every finding had been
+ranked until then. Under that ranking an NVD v2 High of 10.0 outranked another source's v3
+Critical of 9.8, the finding dropped to high, and `--fail-on critical` stopped firing. The
+branch review (wf_11dec29e-171) found it, together with the SARIF mismatch and a `-0.0`
+score.
+
+**Measured.** All 311 distinct v2 vectors among those ratings were cross-checked: each was
+scored for one of its CVEs and compared with the base score and severity NVD's API
+publishes for that CVE. All 311 agree, score and band, with 0 differences.
+
+**Gives up.** A v2 vector with temporal or environmental metrics appended is refused rather
+than scored on its base alone; NVD stores the base vector, so none was seen. A band from v2
+can be higher than the same CVE's later v3 band would have been. The rating says it came
+from v2, and the finding's other ratings are unchanged.
+
+**Verified.**
+- **The matcher.** `TestMatch_D156_*` covers a v2-only NVD annotation banding the finding,
+  v3 beating a higher v2 in the same rating, and an advisory's own v2 vector banding its own
+  rating. The memo is checked too: a cache hit keeps the v2 origin.
+- **The severity package.** 21 known v2 base scores, including the band edges 6.9, 7.0 and
+  4.0 and every metric weight, plus +0 for a vector with no impact. Malformed vectors are refused, among them a misnamed metric and
+  one out of order with every value valid where it sits. The fallback's rules are covered:
+  v3 and vendor words win, unscorable vectors do not block it, and the higher of two v2
+  vectors wins in either order.
+- **Bands outrank scores.** A v3 Critical of 9.8 beats a v2 High of 10.0, and a vendor
+  Critical beats a v2 High of 9.3. A v2 Low beats a v3 None at the same 0.0, whichever
+  database name sorts first.
+- **The report.** JSON carries `cvssV2` on the v2 rating only, and `--explain` marks that
+  line only. SARIF writes a High of 9.3 or 10.0 as 8.9, and leaves 7.5, a Critical and a
+  Medium as they are.
+
+Seventeen mutations were run and sixteen caught:
+- the fallback removed, or v2 made a peer;
+- the first v2 taken instead of the highest;
+- the flag never set;
+- no f(Impact);
+- High starting at 6.9;
+- trailing metrics accepted;
+- metric names unchecked;
+- the AV:A weight changed;
+- rounding truncated;
+- the flag lost on a record's own rating, on an annotation, or on a cache hit;
+- the JSON field dropped, or the explain mark dropped;
+- `Of` scoring v2.
+
+The survivor moves Medium's lower edge to 3.9. It is an equivalent: no v2 base vector
+scores 3.9 (all 729 computed), and the code says so.
+
+Seven more mutations were run on the review's fixes, and all were caught:
+- the band-first ranking removed;
+- the SARIF cap removed, or set to 9.0;
+- -0 restored;
+- High's edge made exclusive;
+- the last v2 taken, or the first.
+
+---
+
 ### D157 — An empty Ubuntu tracker fails the build, and a release losing its fix states fails the publish (revises D85)
 
 **Decision.** Canonical's CVE tracker is held in two places.
@@ -7051,6 +7228,43 @@ Seventeen mutations were run, and all were caught:
 - the fix-less gate removed;
 - not-fixed left out of the stamp check;
 - the denominator never counted.
+
+---
+
+### D158 — SARIF says what the cataloger could not read
+
+**Decision.** SARIF output carries one `assay/not-evaluated` result for each nonzero
+cataloger counter, with its count, in the table's own words. The three counters are:
+- no version to compare (`warning`);
+- no usable purl (`warning`);
+- an unsupported ecosystem (`note`).
+
+Each also gets a notification, the D55/D109 shape. The level follows D36's split. The first
+two count toward `targetIncomplete`, because the caller can fix them. The third is assay's
+own coverage. The rule is declared once whether or not the matcher also skipped something.
+A result's location is the scanned target, and its fingerprint is the kind of skip, not the
+count, so the alert stays one alert while the number moves.
+
+**Why.** The 2026-10-22 audit (A16). SARIF's not-evaluated results came only from the
+matcher's skips. A component the cataloger could not turn into a package produced none, so
+GitHub code scanning showed a clean scan where the table said "N not evaluated" and the
+JSON counted them. Code scanning reads only results; D55 learned that once.
+
+The user chose aggregate results now and per-component results later. Per-component results
+need every cataloger, about twenty of them, to keep the names of what it skipped. That is a
+cross-cataloger change with its own schema question. It is recorded in
+`docs/deferred-decisions.md`.
+
+**Verified.** `TestRun_D158_SARIFCarriesComponentsTheCatalogerCouldNotRead` runs a CycloneDX
+SBOM with one component of each kind through `Run`. It checks exactly three results, their
+levels and texts, and the declared rule. A report-level test holds the rule to one
+declaration when both kinds of skip are present.
+
+Eight mutations were all caught:
+- the call removed;
+- the rule left undeclared, or declared twice;
+- each counter dropped;
+- each level swapped.
 
 ---
 
