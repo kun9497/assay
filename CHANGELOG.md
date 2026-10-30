@@ -19,6 +19,10 @@ All notable changes to this project are documented here. The format follows
   before anything is published. (QA 2026-10-30)
 
 ### Fixed
+- SARIF output reports components the cataloger could not use -- no version, no purl, an
+  unsupported ecosystem -- as `assay/not-evaluated` results with their counts. Before, GitHub
+  code scanning showed a clean scan where the table said they were not evaluated.
+  (D158, audit A16)
 - An image layer that replaces a package database, `os-release` or a dpkg/pacman/Bitnami
   record with a directory, device or FIFO now hides the lower layer's file, as the running
   container sees it. Before, the deleted file was still read, and the scan reported an

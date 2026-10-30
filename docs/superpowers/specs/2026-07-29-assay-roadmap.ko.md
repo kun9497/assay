@@ -6672,6 +6672,40 @@ java 로 읽힌다. 컨테이너 이미지 안의 gem 은 여전히 전혀 읽�
 
 ---
 
+### D158 — SARIF 는 cataloger 가 읽지 못한 것을 말한다
+
+**결정.** SARIF 출력은 0 이 아닌 cataloger 카운터마다 `assay/not-evaluated` 결과를 하나씩, 그 개수와
+함께 표의 표현 그대로 싣는다. 카운터는 세 가지다:
+- 비교할 버전이 없음(`warning`);
+- 쓸 수 있는 purl 이 없음(`warning`);
+- 지원하지 않는 ecosystem(`note`).
+
+각각 notification 도 하나씩 갖는다. D55/D109 의 꼴이다. level 은 D36 의 구분을 따른다. 앞의 둘은 호출자가
+고칠 수 있으므로 `targetIncomplete` 에 들어간다. 세 번째는 assay 자신의 coverage 다. 이 규칙은 matcher 도
+무언가를 건너뛰었는지와 상관없이 한 번만 선언한다. 결과의 위치는 스캔한 대상이고, fingerprint 는 개수가
+아니라 건너뛴 종류이므로, 숫자가 움직여도 alert 는 하나로 남는다.
+
+**이유.** 2026-10-22 감사(A16). SARIF 의 평가 안 됨 결과는 matcher 가 건너뛴 것에서만 나왔다.
+cataloger 가 패키지로 만들지 못한 component 는 결과를 하나도 만들지 않았고, 그래서 표가 "N not
+evaluated" 라고 말하고 JSON 이 그 수를 세는 동안 GitHub code scanning 은 깨끗한 스캔을 보여 주었다.
+code scanning 은 결과만 읽는다. D55 가 이미 한 번 배운 것이다.
+
+사용자는 지금은 집계 결과를, 나중에 component 별 결과를 택했다. component 별 결과는 약 스무 개의 모든
+cataloger 가 건너뛴 것의 이름을 들고 있어야 한다. 이는 자체 스키마 문제가 딸린 cataloger 횡단 변경이다.
+`docs/deferred-decisions.md` 에 기록했다.
+
+**검증.** `TestRun_D158_SARIFCarriesComponentsTheCatalogerCouldNotRead` 는 종류마다 component 를 하나씩
+가진 CycloneDX SBOM 을 `Run` 에 통과시킨다. 결과가 정확히 세 개인지, 그 level 과 문구, 그리고 선언된
+규칙을 확인한다. 보고서 수준의 테스트는 두 종류의 skip 이 함께 있을 때 규칙이 한 번만 선언됨을 지킨다.
+
+변이 여덟 개를 돌렸고, 모두 잡혔다. 변이는 다음과 같다:
+- 호출 제거;
+- 규칙을 선언하지 않거나 두 번 선언함;
+- 카운터를 하나씩 버림;
+- level 을 각각 맞바꿈.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모

@@ -1031,6 +1031,9 @@ exited 0 while 24 findings went unmentioned.
       at one version is judged on its own (D154, audit A7) — a range listing a later window
       first no longer shuts it at the version the earlier one closes; 2,892 judgments over
       every tied range in the published database unchanged
+- [x] SARIF says what the cataloger could not read (D158, audit A16) — one
+      `assay/not-evaluated` result per nonzero counter (no version, no purl: warning;
+      unsupported ecosystem: note), where code scanning had shown a clean scan
 - [x] QA 2026-10-30 fixes:
       - a line over 64 KiB no longer truncates a lockfile;
       - an opens-first range keeps its single-version windows (revises D154);

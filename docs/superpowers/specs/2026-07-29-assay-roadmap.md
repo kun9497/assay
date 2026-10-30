@@ -7038,6 +7038,43 @@ dropping its platform, which had survived. The mutations were:
 
 ---
 
+### D158 — SARIF says what the cataloger could not read
+
+**Decision.** SARIF output carries one `assay/not-evaluated` result for each nonzero
+cataloger counter, with its count, in the table's own words. The three counters are:
+- no version to compare (`warning`);
+- no usable purl (`warning`);
+- an unsupported ecosystem (`note`).
+
+Each also gets a notification, the D55/D109 shape. The level follows D36's split. The first
+two count toward `targetIncomplete`, because the caller can fix them. The third is assay's
+own coverage. The rule is declared once whether or not the matcher also skipped something.
+A result's location is the scanned target, and its fingerprint is the kind of skip, not the
+count, so the alert stays one alert while the number moves.
+
+**Why.** The 2026-10-22 audit (A16). SARIF's not-evaluated results came only from the
+matcher's skips. A component the cataloger could not turn into a package produced none, so
+GitHub code scanning showed a clean scan where the table said "N not evaluated" and the
+JSON counted them. Code scanning reads only results; D55 learned that once.
+
+The user chose aggregate results now and per-component results later. Per-component results
+need every cataloger, about twenty of them, to keep the names of what it skipped. That is a
+cross-cataloger change with its own schema question. It is recorded in
+`docs/deferred-decisions.md`.
+
+**Verified.** `TestRun_D158_SARIFCarriesComponentsTheCatalogerCouldNotRead` runs a CycloneDX
+SBOM with one component of each kind through `Run`. It checks exactly three results, their
+levels and texts, and the declared rule. A report-level test holds the rule to one
+declaration when both kinds of skip are present.
+
+Eight mutations were all caught:
+- the call removed;
+- the rule left undeclared, or declared twice;
+- each counter dropped;
+- each level swapped.
+
+---
+
 ## 3. Architecture
 
 ### Measured data volumes

@@ -553,3 +553,25 @@ func TestSARIF_RuleHelpMarkdownCarriesTheHelpText(t *testing.T) {
 		t.Errorf("Help.Markdown = %q, want a fenced block", r.Help.Markdown)
 	}
 }
+
+// D158: with both the matcher's skips and the cataloger's, the not-evaluated
+// rule is declared once. A rule id repeated in driver.rules is invalid SARIF,
+// the D55 lesson from the other side.
+func TestSARIF_D158_NotEvaluatedRuleIsDeclaredOnce(t *testing.T) {
+	res := matcher.Result{Skipped: []matcher.Skipped{
+		{Package: pkgmeta.Package{Name: "a"}, Reason: "no comparer", Cause: matcher.SkipCoverage},
+	}}
+	run := run0(t, sarifOf(t, res, cyclonedx.Stats{Components: 3, Cataloged: 1, SkippedNoVersion: 1, SkippedNoPURL: 1}))
+	n := 0
+	for _, r := range rulesOf(t, run) {
+		if r["id"] == "assay/not-evaluated" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("assay/not-evaluated declared %d times, want once", n)
+	}
+	if got := len(resultsOf(t, run)); got != 3 {
+		t.Errorf("results = %d, want 3: the matcher's skip and one per cataloger counter", got)
+	}
+}

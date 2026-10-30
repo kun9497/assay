@@ -18,6 +18,9 @@
   (`scripts/release-vulncheck.sh`). (QA 2026-10-30)
 
 ### Fixed
+- SARIF 출력이 카탈로거가 쓰지 못한 구성요소(버전 없음, purl 없음, 미지원 생태계)를 건수와 함께
+  `assay/not-evaluated` 결과로 보고합니다. 이전에는 표가 평가되지 않았다고 말하는데도 GitHub code scanning
+  에는 깨끗한 스캔으로 보였습니다. (D158, 감사 A16)
 - 이미지 레이어가 패키지 데이터베이스, `os-release`, dpkg/pacman/Bitnami 레코드를 디렉터리, 장치, FIFO 로
   바꾸면, 실행 중인 컨테이너가 보는 대로 아래 레이어의 파일이 가려집니다. 이전에는 지워진 파일이 그대로
   읽혀 이미지에 없는 인벤토리가 보고되었습니다. 파일을 디렉터리로 바꾸면 `.wh.` 마커가 생기지 않아 whiteout
