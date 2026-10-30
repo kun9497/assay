@@ -284,6 +284,15 @@ func TestInRange_QA1030_AWindowsCloseNeedNotFollowItsOpen(t *testing.T) {
 			{v: "2.5.0", want: true, introduced: "2.0.0", closedAt: "3.0.0"},
 			{v: "3.0.0", want: false},
 		}},
+		// Two empty windows: left in the walk, the second one's close sorts
+		// before its open and the window never closes, so 3.0.0 and above
+		// read affected.
+		{"two empty windows", []advisory.Event{intro("1.0.0"), intro("3.0.0"), fixed("1.0.0"), fixed("3.0.0")}, []tieCase{
+			{v: "1.0.0", want: false},
+			{v: "2.0.0", want: false},
+			{v: "3.0.0", want: false},
+			{v: "4.0.0", want: false},
+		}},
 		// The controls: windows that meet, and a single-version window
 		// where a wider one closes, keep D154's verdicts in every order.
 		// Their evidence is not checked: where the file lists [2,2) as a
