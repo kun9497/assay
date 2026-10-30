@@ -8,6 +8,9 @@
 ## [Unreleased]
 
 ### Fixed
+- SARIF 출력이 카탈로거가 쓰지 못한 구성요소(버전 없음, purl 없음, 미지원 생태계)를 건수와 함께
+  `assay/not-evaluated` 결과로 보고합니다. 이전에는 표가 평가되지 않았다고 말하는데도 GitHub code scanning
+  에는 깨끗한 스캔으로 보였습니다. (D158, 감사 A16)
 - `--fail-on-eol` 이 더 이상 하루 일찍 빨간불이 되지 않습니다. 릴리스가 EOLFrom 날의 첫 순간(그 날 KST
   09:00)부터 end of life 로 계산되었는데, D87 은 그 날을 아직 EOL 이 아니라고 약속합니다. 이제 다음 날부터
   EOL 입니다. 연장 지원도 마찬가지로 EOESFrom 날 전체를 덮습니다. 날짜는 UTC 입니다. 같은 비교를 하던

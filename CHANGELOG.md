@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- SARIF output reports components the cataloger could not use -- no version, no purl, an
+  unsupported ecosystem -- as `assay/not-evaluated` results with their counts. Before, GitHub
+  code scanning showed a clean scan where the table said they were not evaluated.
+  (D158, audit A16)
 - `--fail-on-eol` no longer goes red a day early. A release counted as end of life from the
   first instant of the day EOLFrom names (09:00 KST on that day), while D87 promises that day
   is not yet EOL; it is now EOL from the day after. Extended support likewise now covers the

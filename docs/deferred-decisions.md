@@ -12,6 +12,17 @@ Read alongside the Architecture section of [the design doc](DESIGN.md).
 
 ## Deferred work
 
+### Per-component SARIF results for cataloger skips
+
+D158 puts one aggregate `assay/not-evaluated` result per cataloger counter into SARIF:
+"3 package(s) with no version to compare". It does not name the components. A result per
+skipped component, with its name, path and reason, needs every cataloger to keep what it
+skipped rather than count it. That means about twenty catalogers, a `cyclonedx.Stats` field,
+and a JSON schema bump if the report carries the list too.
+
+**Revisit when** a user asks which component was skipped, or when a cataloger already keeps
+the identities for another reason.
+
 ### ~~NVD ratings withdrawn before D136 are still in the published artifact — one reconciliation build~~ — resolved 2026-10-27
 
 **Resolved 2026-10-27.** The reconciliation build ran as `db-backfill.yml` (`since_days=120`,
