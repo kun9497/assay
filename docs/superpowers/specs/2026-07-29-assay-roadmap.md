@@ -3439,6 +3439,16 @@ release, an old database with no EOL table each print WHY there is no answer and
 false-trip. Live: debian:11 draws the line and exit 1; debian:12 draws the maintained
 fact and exit 0; rockylinux:9 draws nothing.
 
+**Corrected 2026-10-30 (audit A9).** The code did not keep the exclusive boundary this entry
+promises. `now.After(EOLFrom at 00:00 UTC)` is true from the first instant of the EOLFrom day,
+so `--fail-on-eol` went red a whole day early: from 09:00 KST on the day itself. The one
+boundary test pinned exactly midnight, the single instant the comparison got right. Extended
+support had the mirror defect: the EOESFrom day itself read as unmaintained. A release is now
+EOL from the first instant of the day after EOLFrom, and extended support covers the whole
+EOESFrom day; days are UTC, the calendar the dates are written in. Tests drive `Run` at 00:00
+plus one nanosecond, at noon, at the last instant of the day and at the next midnight. Seven
+mutations of the two comparisons were all caught.
+
 ---
 
 ### D88 — Wolfi and Chainguard: one feed, two keys, and the first release-less distro

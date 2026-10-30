@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- `--fail-on-eol` no longer goes red a day early. A release counted as end of life from the
+  first instant of the day EOLFrom names (09:00 KST on that day), while D87 promises that day
+  is not yet EOL; it is now EOL from the day after. Extended support likewise now covers the
+  whole EOESFrom day. Days are UTC. (audit A9, D87)
 - A native gem's platform (`nokogiri (1.13.8-x86_64-linux)` in a Gemfile.lock, or the same
   text in a syft SBOM's gem version) is no longer read as part of its version. Before, every
   comparison against an x86_64 build was an incomplete check, and other builds sorted as
