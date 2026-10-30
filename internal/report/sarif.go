@@ -113,6 +113,47 @@ func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 		}
 	}
 
+	// D158 (audit A16): what the cataloger could not turn into packages at
+	// all -- no purl, no version, an ecosystem assay does not cover. The table
+	// counts these as not evaluated; SARIF had no result for them, so code
+	// scanning showed a clean scan. One aggregate result per nonzero counter,
+	// with its count, on the not-evaluated rule (declared here if the
+	// matcher's skips above did not already), and a notification each.
+	// Per-component results need the catalogers to keep the skipped
+	// components' names; deferred (deferred-decisions).
+	//
+	// warning for what the target can fix (no purl, no version: both count
+	// toward targetIncomplete, D36), note for assay's own coverage.
+	if skips := catalogSkips(cat); len(skips) > 0 {
+		if len(res.Skipped) == 0 {
+			rules = append(rules, notEvaluatedRule())
+		}
+		uri := target
+		if uri == "" {
+			uri = "sbom"
+		}
+		for _, k := range skips {
+			results = append(results, sarifResult{
+				RuleID:  notEvaluatedRuleID,
+				Level:   k.level,
+				Message: sarifText{Text: k.text},
+				Locations: []sarifLocation{{
+					PhysicalLocation: sarifPhysical{ArtifactLocation: sarifArtifact{URI: uri}},
+				}},
+				// Keyed on the kind alone, not the count: the alert is "this
+				// target has components without a version", and should stay
+				// one alert while the number moves.
+				PartialFingerprints: map[string]string{
+					fingerprintKey: hash(notEvaluatedRuleID, "catalog", k.kind),
+				},
+			})
+			notes = append(notes, sarifNotification{
+				Level:   k.level,
+				Message: sarifText{Text: k.text},
+			})
+		}
+	}
+
 	// D109: one result per manifest the scan found and could not read, on the
 	// not-evaluated block's own shape just above - a result AND a
 	// notification, for the same reason (GitHub reads only the first).
@@ -747,4 +788,27 @@ func securitySeverity(band severity.Band, score float64) float64 {
 		return 8.9
 	}
 	return score
+}
+
+type catalogSkip struct {
+	kind, level, text string
+}
+
+// catalogSkips is D158's one entry per nonzero cataloger counter, worded as
+// the table words them.
+func catalogSkips(cat cyclonedx.Stats) []catalogSkip {
+	var out []catalogSkip
+	if cat.SkippedNoVersion > 0 {
+		out = append(out, catalogSkip{"no-version", "warning",
+			fmt.Sprintf("%d package(s) with no version to compare were not evaluated", cat.SkippedNoVersion)})
+	}
+	if cat.SkippedNoPURL > 0 {
+		out = append(out, catalogSkip{"no-purl", "warning",
+			fmt.Sprintf("%d component(s) without a usable purl were not evaluated", cat.SkippedNoPURL)})
+	}
+	if cat.SkippedUnsupportedEcosystem > 0 {
+		out = append(out, catalogSkip{"unsupported-ecosystem", "note",
+			fmt.Sprintf("%d package(s) in an unsupported ecosystem were not evaluated", cat.SkippedUnsupportedEcosystem)})
+	}
+	return out
 }

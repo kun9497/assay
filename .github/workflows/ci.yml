@@ -19,6 +19,11 @@ jobs:
           go-version: '1.26'
           cache: true
 
+      # QA 2026-10-30: the same floor the release holds, so a PR that lowers
+      # go.mod's toolchain line, or a runner below it, fails here first.
+      - name: Hold the toolchain to go.mod's floor
+        run: sh scripts/check-go-toolchain.sh
+
       - name: Verify formatting
         run: |
           unformatted=$(gofmt -l .)

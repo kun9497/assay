@@ -32,6 +32,13 @@ builds:
       - -X main.date={{.Date}}
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
+    # QA 2026-10-30: every binary is scanned for known Go vulnerabilities as
+    # it is built, before anything is archived, signed or published. A
+    # finding fails the hook, and the hook fails the release.
+    hooks:
+      post:
+        - cmd: sh scripts/release-vulncheck.sh "{{ .Path }}"
+          output: true
 
 archives:
   - id: assay

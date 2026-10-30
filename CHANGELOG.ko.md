@@ -15,8 +15,42 @@
   등급을 받은 평가에는 `"cvssV2": true` 가 붙고 `--explain` 은 `(CVSS v2)` 로 표시합니다. 발견의 평가는 이제
   점수보다 등급을 먼저 비교하므로 v2 High 가 다른 출처의 Critical 을 이기지 못하고, SARIF 의
   `security-severity` 는 발견의 등급 안에 머뭅니다. (D156, 감사 A14)
+### Security
+- 서명 키를 가진 job 이 태그만으로 고정된 코드를 더 이상 실행하지 않습니다. nightly publish 는 grype 를
+  릴리스 tarball 로 받아 커밋된 sha256 으로 확인하고(이전에는 `curl get.anchore.io/grype | sh`), trivy 와
+  goreleaser action 은 커밋으로 고정합니다. (감사 A18)
+- 빌드는 go.mod 의 `toolchain` 줄을 하한으로 지킵니다. 지금은 `go1.26.10` 입니다. v0.12.0 은
+  go1.26.9 로 빌드되었고, go1.26.9 에는 GO-2026-6809 (crypto/x509, go1.26.10 에서 수정)가 있습니다.
+  `scripts/check-go-toolchain.sh` 는 하한보다 낮은 릴리스나 CI 빌드를 실패시킵니다. GoReleaser 의
+  각 빌드는 무엇이든 게시하기 전에 자기 바이너리를 govulncheck 로 검사합니다
+  (`scripts/release-vulncheck.sh`). (QA 2026-10-30)
 
 ### Fixed
+- SARIF 출력이 카탈로거가 쓰지 못한 구성요소(버전 없음, purl 없음, 미지원 생태계)를 건수와 함께
+  `assay/not-evaluated` 결과로 보고합니다. 이전에는 표가 평가되지 않았다고 말하는데도 GitHub code scanning
+  에는 깨끗한 스캔으로 보였습니다. (D158, 감사 A16)
+- 이미지 레이어가 패키지 데이터베이스, `os-release`, dpkg/pacman/Bitnami 레코드를 디렉터리, 장치, FIFO 로
+  바꾸면, 실행 중인 컨테이너가 보는 대로 아래 레이어의 파일이 가려집니다. 이전에는 지워진 파일이 그대로
+  읽혀 이미지에 없는 인벤토리가 보고되었습니다. 파일을 디렉터리로 바꾸면 `.wh.` 마커가 생기지 않아 whiteout
+  규칙이 이를 잡지 못했습니다. (감사 A10)
+- Gemfile.lock, Cargo.lock, uv.lock, requirements.txt 나 jar 의 pom.properties 에 64 KiB 가 넘는 줄이
+  있어도 그 뒤의 패키지가 더는 사라지지 않습니다. 읽기 코드가 그 줄에서 오류 없이 멈추고, 스캔은 남은
+  부분을 파일 전체로 보고했습니다(exit 0, 미완료 없음). (QA 2026-10-30)
+- 범위가 open 두 개를 close 두 개보다 먼저 나열해도
+  (`[introduced 1, introduced 3, last_affected 1, last_affected 3]`) 단일 버전 window 와 빈 window 를
+  따로 판정합니다. 전에는 `[1, 3]` 으로 읽었습니다. (QA 2026-10-30, D154 개정)
+- `db update` 와 `db build --seed` 는 HTTP/1 본문이 끊긴 경우처럼 다운로드 중 HTTP/2 스트림 리셋도
+  재시도합니다. 취소되었거나 `--timeout` 을 넘긴 pull 은 더는 재시도하지 않습니다.
+  (QA 2026-10-30, D140 개정)
+- 중첩된 이미지 인덱스의 바깥 인덱스를 지목한 VEX 문장이 그 인덱스를 거쳐 선택된 이미지에
+  적용됩니다. 레지스트리 대상과 `oci-dir:` 대상 모두 그렇습니다. (QA 2026-10-30, D121 개정)
+- Alpine edge 이미지(`VERSION_ID=3.25.0_alpha20260805`)를 안정판 Alpine 3.25 의 advisory 로 판정하지 않고
+  평가되지 않음으로 보고합니다. OSV 에는 edge 생태계가 없습니다. (감사 A11)
+- 기본값이 아닌 `GOEXPERIMENT` 로 빌드한 Go 바이너리(`go1.26.7-X:fieldtrack`)의 stdlib 을 릴리스 버전으로
+  카탈로그합니다. 이전에는 experiment 목록이 어떤 비교도 받아들이지 않는 prerelease 로 읽혀 stdlib advisory
+  가 모두 건너뛰어졌습니다. (감사 A12)
+- 한 패키지의 두 발견을 잇는 레코드로 발견이 합쳐질 때, apk provides 조인과 미러된 advisory 의 출처 표시가
+  표시되는 레코드를 따라갑니다. (감사 A13, D10)
 - `--fail-on-eol` 이 더 이상 하루 일찍 빨간불이 되지 않습니다. 릴리스가 EOLFrom 날의 첫 순간(그 날 KST
   09:00)부터 end of life 로 계산되었는데, D87 은 그 날을 아직 EOL 이 아니라고 약속합니다. 이제 다음 날부터
   EOL 입니다. 연장 지원도 마찬가지로 EOESFrom 날 전체를 덮습니다. 날짜는 UTC 입니다. 같은 비교를 하던

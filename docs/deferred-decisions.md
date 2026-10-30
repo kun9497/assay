@@ -12,6 +12,17 @@ Read alongside the Architecture section of [the design doc](DESIGN.md).
 
 ## Deferred work
 
+### Per-component SARIF results for cataloger skips
+
+D158 puts one aggregate `assay/not-evaluated` result per cataloger counter into SARIF:
+"3 package(s) with no version to compare". It does not name the components. A result per
+skipped component, with its name, path and reason, needs every cataloger to keep what it
+skipped rather than count it. That means about twenty catalogers, a `cyclonedx.Stats` field,
+and a JSON schema bump if the report carries the list too.
+
+**Revisit when** a user asks which component was skipped, or when a cataloger already keeps
+the identities for another reason.
+
 ### ~~NVD ratings withdrawn before D136 are still in the published artifact — one reconciliation build~~ — resolved 2026-10-27
 
 **Resolved 2026-10-27.** The reconciliation build ran as `db-backfill.yml` (`since_days=120`,
@@ -1421,6 +1432,25 @@ mechanism.
 ---
 
 ### ~~Signing and provenance for the published database artifact~~ — resolved in D137 (2026-10-22; signing shipped first, verification follows in its second PR)
+
+**What runs beside the key (audit A18, 2026-10-30).** Signing left the jobs that hold the
+key running third-party code pinned by nothing firmer than a tag. The nightly publish job
+holds the cosign key and `packages: write`, and it installed grype with
+`curl https://get.anchore.io/grype | sh` and trivy through `aquasecurity/setup-trivy@v0.3.1`.
+The release job signed checksums with `goreleaser/goreleaser-action@v6`, a moving major tag.
+Now:
+- grype is the release tarball checked against a sha256 committed beside its version
+  (`setup-scanners`' `grype-sha256` input);
+- both third-party actions are pinned by commit;
+- cosign's installer already was.
+
+Two things are left, each with its own trigger:
+- **GitHub's own `actions/*`** stay tag-pinned. Revisit when the repository gains a tool that
+  keeps SHA pins current, or if GitHub's tags are ever shown to move.
+- **The gate job and the signing job stay one job.** Splitting them would keep the comparison
+  scanners away from the key entirely, but the 1-2 GB candidate would have to cross a job
+  boundary. Revisit if a scanner the gate runs is ever found compromised, or when the
+  database fits an artifact upload cheaply.
 
 **Closed in two halves.** Signing (workflows, release, installer, the verifier package and
 its record fields) is the first PR; the `db update` / `db build --seed` call sites that

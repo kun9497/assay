@@ -4931,6 +4931,21 @@ Storage 5에서는 영향 없음"이 "어디서도 영향 없음"이 됩니다 �
 기록되어 있습니다. 네임스페이스 별칭(Rocky 이미지의 `redhat`, Chainguard의 `wolfi`): 벤더가
 자기 빌드에 대해 한 문장은 재빌드에 대한 문장이 아닙니다.
 
+**개정 (QA 2026-10-30).** 중첩된 index 의 바깥 index 를 지목하는 문장이 적용되지 않았습니다.
+index 순회가 이미지를 나열한 index 만 남겨서 바깥 digest 가 버려졌습니다. 그 digest 가 digest 로 된
+레지스트리 참조가 가리키는 것이고 `buildx imagetools` 가 출력하는 것입니다.
+
+이제 각 후보는 요청받은 index 에서 자신의 부모까지의 경로에서 부모 위에 있는 모든 index 를 바깥쪽부터
+싣고, 자식마다 복사됩니다. `PlatformChoice.OuterIndexDigests` 가 이를 보고하고 VEX 대상이 이를
+매칭합니다. 형제 index, 다른 platform 의 이미지, `oci-dir:` 레이아웃 자신의 `index.json` 은 경로에
+없습니다. JSON `image` 레코드는 그대로입니다(schema 변경 없음). 이 체인은 VEX 범위에만 쓰입니다.
+
+`Run` 을 통해, `oci-dir:` 레이아웃(platform 이 없는 descriptor)과 digest 및 tag 로 지정한
+레지스트리(platform 이 있는 descriptor)에서 검증했습니다:
+- **적용.** 바깥 index, 안쪽 index, 또는 manifest 를 지목하는 문장.
+- **적용 안 됨.** 형제 index, 다른 platform 의 manifest, 또는 무관한 digest 를 지목하는 문장.
+- **뮤테이션.** 일곱 개, 모두 포착.
+
 ---
 
 ### D122 — SUSE의 CSAF VEX 피드는 연도 접두사를 쓴다: delta 단계는 새 경로를, 새 경로만 읽는다
@@ -5795,6 +5810,26 @@ seed pull 을 실패시켰다. 아티팩트 자체의 결함(gzip 아님, digest
 `db build --seed` 도 같은 재시도를 받는다; 쓰레기 레이어는 한 번만 가져오고 재시도하지 않는다. 변이 4개
 포착: 아무것도 재시도 안 함, 전부 재시도, 세 번 대신 두 번, seed 경로에서 재시도 누락.
 
+**개정 (QA 2026-10-30).** HTTP/2 레지스트리가 본문 도중에 스트림을 리셋하면 재시도되지 않았습니다.
+읽기는 net/http 의 비공개 스트림 오류(`stream error: ...; INTERNAL_ERROR; received from peer`)로
+실패하는데, 위의 어떤 검사에도 걸리지 않았습니다. 그래서 Pull 과 PullSeed 는 첫 GET 에서 실패했고, 수동으로
+다시 돌리면 성공했습니다.
+
+이제 레지스트리 transport 가 모든 응답 본문을 감싸고, 거기서 읽은 오류는 재시도되는 `bodyReadError` 가
+됩니다. 태깅은 각 프로토콜의 오류 문구가 아니라 바이트가 오는 곳을 기준으로 하며, 그래서 아티팩트 자체의
+결함이 걸리지 않습니다. go-containerregistry 는 그 reader 위에서 digest 와 크기를 검사하고 gzip 은 그 위에서
+헤더와 체크섬을 읽으므로, 깨진 레이어는 태깅되지 않고 여전히 첫 가져오기에서 실패합니다. context 가 끝난
+pull — 취소나 `--timeout` 으로 — 은 재시도하지 않습니다. 이전에는 deadline 이 네트워크 타임아웃으로 읽혀,
+성공할 수 없는 context 로 재시도되었습니다.
+
+TLS HTTP/2 테스트 레지스트리에서 검증했습니다:
+- **리셋된 스트림.** 한 번 재시도하고, Pull 과 PullSeed 모두 설치됩니다.
+- **세 번의 리셋.** 정확히 세 번 가져온 뒤 이전 데이터베이스는 바이트 단위로 동일하고 임시 파일이
+  남지 않습니다.
+- **대조군.** 깨진 레이어, 취소된 pull, deadline 을 넘긴 pull 은 각각 한 번만 가져오고 재시도하지
+  않습니다.
+- **뮤테이션.** 여섯 개, 모두 포착.
+
 ---
 
 ### D141 — 모든 이미지 스캔은 그 안의 애플리케이션 패키지를 검사하지 않았음을 밝힌다
@@ -6516,6 +6551,39 @@ affected 가 아니던 결과 255개는 순회에서 남은 증거 필드만 바
 - 분리에서 센티넬을 제외하는 것: `atLeast` 가 이미 센티넬을 음의 무한대로 읽기 때문이다;
 - 분리 앞의 검증 단계: `sortEvents` 가 같은 경계를 검증하기 때문이다.
 
+**개정 (QA 2026-10-30).** 범위가 두 open 을 두 close 보다 먼저 나열하면 — `[introduced 1,
+introduced 3, last_affected 1, last_affected 3]` — 파일 순서 단계 이후에도 한 버전짜리 window 가 순회에
+남았습니다. 어느 open 도 다음 `introduced` 전에 자기 close 를 갖지 못했고, 정렬은 이 범위를 `[1, 3]` 으로
+읽어 2.0.0 이 영향받는 것으로 나왔습니다(다른 순서에서는 4.0.0). OSV 는 이벤트를 정렬하라고 권장만 합니다.
+
+파일 순서 단계 뒤에, `pairByVersion` 이 남은 이벤트를 버전 순으로 훑으며 각 버전 X 바로 아래에 window 가
+열려 있는지 추적합니다:
+- **X 아래에 열린 window 가 없다.** X 의 close 는 X 의 open 만 끝낼 수 있으므로, X 의 open 마다 close 를
+  하나씩 가져가고 그 쌍은 따로 판정합니다.
+- **X 아래에 열린 window 가 있다.** close 하나는 그것을 끝내도록 순회에 남기며, 이는 만나는 window 에 대한
+  이 결정의 동률 규칙 그대로입니다. 그 너머의 close 만 짝지어집니다.
+
+이 단계는 파일 순서가 이미 짝지은 것을 바꾸지 않고, 만나는 window 의 증거도 그대로입니다.
+
+검증:
+- **모든 순서.** 네 이벤트짜리 범위 여섯 개의 24가지 순서 전부가 같은 verdict 를 냅니다. 범위는 한 버전짜리
+  window 둘, 빈 window 와 실제 window, 빈 window 둘, 닫힌 window 위의 빈 window, 그리고 대조군 둘입니다.
+- **`Run` 을 통해.** 2.0.0, 3.0.0, 4.0.0 의 SBOM 스캔은 open 우선 순서와 정렬된 순서 모두에서 3.0.0 만
+  찾습니다.
+- **발행된 데이터베이스.** 2026-10-27 기준 동률 범위 536개가 2,892개 경계에서 판정되었습니다. 출력은
+  전후로 바이트 단위로 동일했습니다.
+- **뮤테이션.** 일곱 개, 모두 포착:
+  - 호출 제거;
+  - 예약 제거;
+  - 상태를 설정하지 않음, 또는 항상 설정;
+  - 하나짜리 그룹;
+  - 정렬하지 않은 순회;
+  - 아무 close 나 가져감.
+
+한 가지 한계가 남습니다. 서로 만나는 두 window 안에서 파일이 [X,X) 를 자기 window 로 나열하면, X 아래
+버전의 증거는 [open, X) 가 아니라 [open, 마지막 close) 를 적습니다. D154 이후로 그래 왔고, verdict 는
+같습니다.
+
 ---
 
 ### D155 — gem 의 platform 은 버전의 일부가 아니다
@@ -6696,6 +6764,40 @@ v3 band 보다 높을 수 있다. rating 이 v2 에서 왔다고 밝히며, find
 - -0 을 되살림;
 - High 의 경계를 배타적으로 만듦;
 - 마지막 v2 를 취하거나 첫 v2 를 취함.
+
+---
+
+### D158 — SARIF 는 cataloger 가 읽지 못한 것을 말한다
+
+**결정.** SARIF 출력은 0 이 아닌 cataloger 카운터마다 `assay/not-evaluated` 결과를 하나씩, 그 개수와
+함께 표의 표현 그대로 싣는다. 카운터는 세 가지다:
+- 비교할 버전이 없음(`warning`);
+- 쓸 수 있는 purl 이 없음(`warning`);
+- 지원하지 않는 ecosystem(`note`).
+
+각각 notification 도 하나씩 갖는다. D55/D109 의 꼴이다. level 은 D36 의 구분을 따른다. 앞의 둘은 호출자가
+고칠 수 있으므로 `targetIncomplete` 에 들어간다. 세 번째는 assay 자신의 coverage 다. 이 규칙은 matcher 도
+무언가를 건너뛰었는지와 상관없이 한 번만 선언한다. 결과의 위치는 스캔한 대상이고, fingerprint 는 개수가
+아니라 건너뛴 종류이므로, 숫자가 움직여도 alert 는 하나로 남는다.
+
+**이유.** 2026-10-22 감사(A16). SARIF 의 평가 안 됨 결과는 matcher 가 건너뛴 것에서만 나왔다.
+cataloger 가 패키지로 만들지 못한 component 는 결과를 하나도 만들지 않았고, 그래서 표가 "N not
+evaluated" 라고 말하고 JSON 이 그 수를 세는 동안 GitHub code scanning 은 깨끗한 스캔을 보여 주었다.
+code scanning 은 결과만 읽는다. D55 가 이미 한 번 배운 것이다.
+
+사용자는 지금은 집계 결과를, 나중에 component 별 결과를 택했다. component 별 결과는 약 스무 개의 모든
+cataloger 가 건너뛴 것의 이름을 들고 있어야 한다. 이는 자체 스키마 문제가 딸린 cataloger 횡단 변경이다.
+`docs/deferred-decisions.md` 에 기록했다.
+
+**검증.** `TestRun_D158_SARIFCarriesComponentsTheCatalogerCouldNotRead` 는 종류마다 component 를 하나씩
+가진 CycloneDX SBOM 을 `Run` 에 통과시킨다. 결과가 정확히 세 개인지, 그 level 과 문구, 그리고 선언된
+규칙을 확인한다. 보고서 수준의 테스트는 두 종류의 skip 이 함께 있을 때 규칙이 한 번만 선언됨을 지킨다.
+
+변이 여덟 개를 돌렸고, 모두 잡혔다. 변이는 다음과 같다:
+- 호출 제거;
+- 규칙을 선언하지 않거나 두 번 선언함;
+- 카운터를 하나씩 버림;
+- level 을 각각 맞바꿈.
 
 ---
 

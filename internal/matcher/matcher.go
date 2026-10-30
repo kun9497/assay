@@ -1357,8 +1357,17 @@ func absorb(findings []Finding, group map[string]int, dst, src int) {
 	d.Ratings = append(d.Ratings, s.Ratings...)
 	d.Identifiers = append(d.Identifiers, s.Identifiers...)
 	if beats(winnerOf(*s), winnerOf(*d)) {
+		// Every field that describes the displayed record moves with it, as
+		// in Match's own beats() swap: without the join and mirror fields the
+		// finding named one record and described another's (audit A13, D10).
+		// FrozenSince cannot differ between two groups of one package today
+		// (the swap in Match says why), so no test can tell its line from its
+		// absence; it is carried for the same pairing.
 		d.Advisory, d.Evidence = s.Advisory, s.Evidence
 		d.MatchedName = s.MatchedName
+		d.MatchedViaProvides = s.MatchedViaProvides
+		d.CrossMappedFrom = s.CrossMappedFrom
+		d.FrozenSince = s.FrozenSince
 		d.Severity, d.Score = s.Severity, s.Score
 	}
 	s.Ratings = nil

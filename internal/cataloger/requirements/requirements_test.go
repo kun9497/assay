@@ -113,12 +113,11 @@ func TestLogicalLines_CommentsFollowPip(t *testing.T) {
 		"",
 		"   ",
 	}, "\n"))
-	f, err := os.Open(p)
+	data, err := os.ReadFile(p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
-	got := logicalLines(f)
+	got := logicalLines(data)
 	want := []string{
 		"Django==3.2.12",
 		// No whitespace before '#', so it is part of the requirement, not a
@@ -141,9 +140,8 @@ func TestLogicalLines_CommentsFollowPip(t *testing.T) {
 // requirements into one.
 func TestLogicalLines_ContinuationBeforeComment(t *testing.T) {
 	p := write(t, "Django==\\\n3.2.12\nflask==2.0.0\n")
-	f, _ := os.Open(p)
-	defer f.Close()
-	got := logicalLines(f)
+	data, _ := os.ReadFile(p)
+	got := logicalLines(data)
 	if len(got) != 2 || got[0] != "Django==3.2.12" {
 		t.Errorf("logicalLines = %q, want the continued line joined into one requirement", got)
 	}
@@ -153,9 +151,8 @@ func TestLogicalLines_ContinuationBeforeComment(t *testing.T) {
 // its code point rather than typed, for the reason the production code says.
 func TestLogicalLines_BOMIsNotPartOfTheName(t *testing.T) {
 	p := write(t, string(rune(0xFEFF))+"Django==3.2.12\n")
-	f, _ := os.Open(p)
-	defer f.Close()
-	got := logicalLines(f)
+	data, _ := os.ReadFile(p)
+	got := logicalLines(data)
 	if len(got) != 1 || got[0] != "Django==3.2.12" {
 		t.Errorf("logicalLines = %q, want the BOM stripped from the first line", got)
 	}
