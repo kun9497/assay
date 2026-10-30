@@ -6516,10 +6516,11 @@ affected 가 아니던 결과 255개는 순회에서 남은 증거 필드만 바
   하이픈까지의 텍스트이고 나머지가 platform 이다. `specLine` 은 둘 다 반환한다. 버전은
   `Package.Version` 으로 가고, 잠긴 텍스트 전체는 purl 에 들어간다.
 - **SBOM** 은 CycloneDX 든 SPDX 든 `pkg:gem` 버전을 `pkgmeta.InstalledGemVersion` 에 통과시킨다. 이
-  함수는 두 경우에 첫 하이픈 뒤의 접미사를 버린다: purl 자신의 `platform` 한정자가 그 접미사를
-  가리키거나, `Gem::Platform` 이 그 안에서 운영체제를 읽어 내는 경우다. 판정은 Ruby 자신의
-  `Gem::Platform#initialize` 패턴을 따른다: linux, darwin, mingw, mswin, java, freebsd, wasi 와 나머지.
-  하이픈이 든 prerelease(`3.0.0-rc1`)는 어느 것도 가리키지 않으므로 그대로 두며, 여전히 자기 release
+  함수는 접미사 전체가 platform 일 때만 첫 하이픈 뒤의 접미사를 버린다. purl 자신의 `platform` 한정자가
+  그 접미사를 가리키거나, RubyGems 가 적는 CPU 뒤에 Ruby 자신의 `Gem::Platform#initialize` 패턴이
+  인식하는 운영체제가 따르거나(linux, darwin, mingw, mswin, java, freebsd, wasi 와 나머지), 운영체제만
+  단독으로 쓴 경우(예전의 `java` 형식)다. 하이픈이 든 prerelease 는, 뒤에 platform 이 따르더라도
+  platform 이 아니다(`3.0.0-rc1`, `3.0.0-rc1-arm64-darwin`). 적힌 그대로 두며, 여전히 자기 release
   보다 낮게 정렬된다.
 - `Gem` 비교자는 바뀌지 않는다.
 
@@ -6529,7 +6530,7 @@ affected 가 아니던 결과 255개는 순회에서 남은 증거 필드만 바
 `x86_64` 의 밑줄 때문에 버전은 읽을 수 없게 되었다. 결과는 다음과 같다:
 - 설치된 버전에서 도입된 advisory 는 아무것도 찾지 못했다;
 - 설치된 버전에서 고쳐진 advisory 는 오탐이었다;
-- 모든 x86_64 빌드가 평가 안 됨으로 보고되었다.
+- x86_64 빌드에 대한 모든 비교가 불완전 검사였다.
 
 syft 는 같은 텍스트를 SBOM 의 version 과 purl 에 적으므로, SBOM 스캔에도 같은 결함이 있었다.
 
@@ -6537,8 +6538,8 @@ platform 은 RubyGems 자신의 정의상 버전이 아니다. `Gem::Version` �
 실제 gem 버전에는 하이픈이 들어 있지 않고, bundler 도 거기서 가른다. 그래서 lockfile 의 분리는 정확하다.
 
 grype 이 CPU 이름 목록으로 하듯 비교자에서 떼어 내는 방식은 택하지 않았다. advisory 도 prerelease 를
-하이픈으로 적는다: 2026-10-27 의 RubyGems 경계 78,698개 중 13개이며, `7.0.0-rc3` 과 `1.4.0-beta.1`
-같은 것이다. 또한 비교자가 자기 입력을 정리하게 되는데, D9 는 이를 막는다. 사용자는 비교자도, lockfile
+하이픈으로 적는다: 2026-10-27 의 공개된 데이터베이스에 든 RubyGems 버전 문자열 78,698개 중 범위 경계
+10개이며, `7.0.0-rc3` 과 `1.4.0-beta.1` 같은 것이다. 또한 비교자가 자기 입력을 정리하게 되는데, D9 는 이를 막는다. 사용자는 비교자도, lockfile
 만도 아닌 lockfile 과 SBOM 의 범위를 골랐다.
 
 purl 이 platform 을 유지하는 이유는 D121 과 같다: syft SBOM 에 맞추어 쓴 VEX 문장은 그 purl 을
@@ -6547,26 +6548,38 @@ purl 이 platform 을 유지하는 이유는 D121 과 같다: syft SBOM 에 맞�
 **측정.** rails/rails 의 `Gemfile.lock` 을 공개된 데이터베이스로, main 과 이 변경에서 각각 스캔했다:
 - 불완전 검사 130개가 0개가 되었다.
 - 발견 102개가 126개가 되었다:
-  - 평가되지 않았던 x86_64 빌드에서 새 발견 26개(nokogiri 20, sqlite3 6);
+  - 모든 검사가 불완전했던 x86_64 빌드에서 새 발견 26개(nokogiri 20,
+    sqlite3 6);
   - 오탐 2개가 사라졌다(aarch64 와 arm64 의 nokogiri 1.19.1, GHSA-wx95-c6cv-8532 의 fix 가 1.19.1
     이다).
 - 그 외에는 아무것도 바뀌지 않았다.
 
-**포기하는 것.** 접미사가 `Gem::Platform` 이 아는 어떤 platform 도 가리키지 않고 purl 에 `platform`
-한정자도 없는 SBOM gem 버전은 접미사를 유지한다. Gem::Platform 자신의 패턴은 Ruby 의 것이 고정되지 않은
-곳에서 고정되지 않으므로, `1.0.0-javascript` 는 Ruby 에서처럼 java 로 읽힌다. 컨테이너 이미지 안의 gem
-은 여전히 전혀 읽지 않는다(D70).
+**포기하는 것.** purl 에 `platform` 한정자가 없고 접미사가 알려진 CPU 뒤에 `Gem::Platform` 이 인식하는
+OS 가 따르는 꼴이 아니면, SBOM gem 버전은 접미사를 유지한다. 목록에 없는 CPU 도 버전으로 남는다. Ruby 의
+`java` 패턴 `^java` 에는 끝 고정이 없고 Go 패턴도 그것을 유지하므로, `1.0.0-javascript` 는 Ruby 에서처럼
+java 로 읽힌다. 컨테이너 이미지 안의 gem 은 여전히 전혀 읽지 않는다(D70).
 
 **검증.**
 - **`Run` 을 통한 lockfile:** `TestRun_A6_GemfileLockPlatformIsNotPartOfTheVersion` 은 설치된 버전에서
   도입된 advisory, 그 버전에서 고쳐진 advisory, x86_64 빌드, prerelease 를 다룬다.
 - **`Run` 을 통한 CycloneDX 와 SPDX:** `TestRun_A6_SBOMGemPlatformIsNotPartOfTheVersion` 은 같은
   모양에 더해 purl 의 한정자로만 알려진 platform 을 다룬다.
+  `TestRun_A6_CycloneDXVersionFallbackLosesThePlatform` 은 버전이 없는 purl 을 지키며, 그 버전은
+  component 에서 온다.
 - **lockfile 파싱:** `TestSpecLine` 과 `TestParse_NativeGemVersionAndPURL` 이 버전과 purl 을 지킨다.
 - **헬퍼의 분기:** `TestInstalledGemVersion` 이 스캔이 닿지 않는 분기를 다룬다.
 
-변이 열네 개를 돌렸고, 테스트 하나를 추가한 뒤 모두 잡혔다(lockfile purl 이 platform 을 버리는 변이가
-살아남았었다):
+브랜치 리뷰(wf_257e6542-a9a)가 문제 네 가지를 찾았다:
+- platform 이 뒤따르는 prerelease 가 prerelease 를 잃었다(`1.0.0-rc1-arm64-darwin` 이 `1.0.0` 으로
+  읽혔다). 이제 알려진 CPU 를 요구해 막는다;
+- CycloneDX fallback 에 테스트가 없었다;
+- 여기서 "평가 안 됨"이라 부른 보고 범주는 실제로는 불완전 검사였다;
+- advisory 경계의 개수 표기가 잘못되어 있었다.
+
+네 가지 모두 고쳤다.
+
+변이 열여섯 개를 돌렸고, 모두 잡혔다. lockfile purl 이 platform 을 버리는 변이가 살아남았기에 테스트
+하나를 추가했다. 변이는 다음과 같다:
 - lockfile 이 platform 을 유지함;
 - purl 이 platform 을 버림;
 - 두 SBOM 호출 중 어느 쪽이든 제거하거나, 그 한정자를 버림;
@@ -6575,7 +6588,9 @@ purl 이 platform 을 유지하는 이유는 D121 과 같다: syft SBOM 에 맞�
 - 한정자를 무시함;
 - 빈 core 를 받아들임;
 - 예전의 OS 만 쓴 형식을 읽지 않음;
-- CPU 를 OS 로 읽음.
+- CPU 를 OS 로 읽음;
+- 어떤 CPU 든 받아들임;
+- CycloneDX 가 fallback 보다 먼저 접미사를 뗌.
 
 ---
 
