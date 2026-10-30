@@ -6624,12 +6624,19 @@ v2 vector 는 NVD 가 저장하는 모양 그대로만 읽는다: 여섯 base me
 밝힌다: `matcher.Rating.FromCVSSv2`, JSON 보고서의 `ratings[].cvssV2`(schema 15, additive), 그리고
 `--explain` 줄의 `(CVSS v2)` 다(D10).
 
+scorer 밖의 두 가지 결과:
+- **band 가 점수보다 앞선다.** finding 의 rating 은 band 로 먼저, 점수로 그다음에 순위를 매긴다
+  (`matcher.beats`). 다른 모든 scorer 에서는 두 순서가 일치한다. v2 에서는 일치하지 않는데, v2 에서
+  10.0 은 High 이고 v3 나 벤더 표기에서 9.0 은 Critical 이기 때문이다.
+- **SARIF 는 band 안에 머문다.** `security-severity` 는 finding 의 band 상단을 넘지 않으므로, High 는
+  많아야 8.9 로 쓰인다. GitHub code scanning 은 8.9 를 넘는 값을 critical 로 읽는다.
+
 **이유.** 2026-10-22 감사(A14). NVD 는 한 번도 다시 채점하지 않은 CVE 에 v2 vector 만 달아 둔다. vector
 는 저장되어 있었지만(D13) 아무것도 이를 채점하지 않았고, 그래서 finding 은 `unknown` 으로 남았다:
 rating 이 있는 것으로 세어지면서 band 는 없는 것이다.
 
-공개된 데이터베이스(2026-10-27)에서 NVD rating 391,806개 중 72,405개가 v2 만 있으며, 그 CVE 를 rating
-하는 다른 출처는 없다. 215개를 뺀 전부가 2016 년 이전의 것이다. fallback 이 있으면 high 29,227,
+공개된 데이터베이스(2026-10-27)에서 NVD rating 391,806개 중 72,405개가 v2 만 있다. 215개를 뺀 전부가
+CVE ID 연도 기준 2016 년 이전의 CVE 다. fallback 이 있으면 high 29,227,
 medium 37,895, low 5,283 으로 band 가 매겨진다.
 
 D17 과 충돌하지 않는다. D17 은 *없는* severity 를 강제로 채우는 것을 금하는데, v2 점수는 NVD 가 실제로
@@ -6637,8 +6644,13 @@ D17 과 충돌하지 않는다. D17 은 *없는* severity 를 강제로 채우�
 
 v2 를 peer 가 아니라 fallback 으로 두는 이유는, 단순한 max 가 둘 다 가진 NVD rating 2,272개를 더 오래되고
 더 거친 metric 을 근거로 끌어올리기 때문이다. 출처 사이에서는 D25 의 highest-wins 규칙이 여전히
-적용되며, 어느 두 출처 사이에서와 같다. 사용자는 v2 를 unknown 으로 두는 방식과 max 에 넣는 방식 대신
+적용되며, band 를 기준으로 한다. 사용자는 v2 를 unknown 으로 두는 방식과 max 에 넣는 방식 대신
 fallback 을 골랐다.
+
+첫 버전은 finding 의 rating 을 점수만으로 순위 매겼고, 그때까지 모든 finding 이 그렇게 순위가 매겨졌다.
+그 순위에서는 NVD v2 High 10.0 이 다른 출처의 v3 Critical 9.8 보다 앞섰고, finding 은 high 로 내려갔으며,
+`--fail-on critical` 이 더는 작동하지 않았다. 브랜치 리뷰(wf_11dec29e-171)가 이를 SARIF 불일치,
+`-0.0` 점수와 함께 찾아냈다.
 
 **측정.** 그 rating 들에 든 서로 다른 v2 vector 311개 전부를 교차 검증했다: 각각을 자기 CVE 하나에 대해
 채점하고, NVD API 가 그 CVE 에 발표한 base score 와 severity 에 견주었다. 311개 모두 점수와 band 가
@@ -6652,11 +6664,14 @@ v3 band 보다 높을 수 있다. rating 이 v2 에서 왔다고 밝히며, find
 - **매처.** `TestMatch_D156_*` 는 v2 만 있는 NVD annotation 이 finding 의 band 를 매기는 경우, 같은
   rating 안에서 v3 가 더 높은 v2 를 이기는 경우, advisory 자신의 v2 vector 가 자기 rating 의 band 를
   매기는 경우를 다룬다. memo 도 확인한다: 캐시 hit 이 v2 출처를 유지한다.
-- **severity 패키지.** 알려진 v2 base score 22개로, band 경계 6.9 와 4.0, 그리고 모든 metric 가중치를
-  포함한다. 잘못된 vector 는 거부한다. metric 이름이 틀린 것과, 값은 모두 그 자리에서 유효한데 순서가
+- **severity 패키지.** 알려진 v2 base score 21개로, band 경계 6.9, 7.0, 4.0 과 모든 metric 가중치를
+  포함하며, impact 가 없는 vector 의 +0 도 다룬다. 잘못된 vector 는 거부한다. metric 이름이 틀린 것과, 값은 모두 그 자리에서 유효한데 순서가
   어긋난 것이 그 안에 든다. fallback 의 규칙도 다룬다: v3 와 벤더 표기가 이기고, 채점할 수 없는 vector
-  는 fallback 을 막지 않으며, v2 vector 둘 중 높은 것이 이긴다.
-- **보고서.** JSON 은 v2 rating 에만 `cvssV2` 를 싣고, `--explain` 은 그 줄에만 표시한다.
+  는 fallback 을 막지 않으며, v2 vector 둘 중 높은 것이 어느 순서로든 이긴다.
+- **band 가 점수보다 앞선다.** v3 Critical 9.8 이 v2 High 10.0 을 이기고, 벤더 Critical 이 v2 High 9.3 을
+  이긴다. v2 Low 는 같은 0.0 의 v3 None 을 이기며, 어느 database 이름이 먼저 정렬되든 마찬가지다.
+- **보고서.** JSON 은 v2 rating 에만 `cvssV2` 를 싣고, `--explain` 은 그 줄에만 표시한다. SARIF 는
+  9.3 또는 10.0 의 High 를 8.9 로 쓰고, 7.5, Critical, Medium 은 그대로 둔다.
 
 변이 열일곱 개를 돌렸고 열여섯 개가 잡혔다:
 - fallback 을 제거하거나 v2 를 peer 로 만듦;
@@ -6674,6 +6689,13 @@ v3 band 보다 높을 수 있다. rating 이 v2 에서 왔다고 밝히며, find
 
 살아남은 변이는 Medium 의 하한을 3.9 로 옮기는 것이다. 이는 동등하다: 어떤 v2 base vector 도 3.9 로
 채점되지 않으며(729개 전부를 계산했다), 코드에 그렇게 적혀 있다.
+
+리뷰의 수정에 대해 변이 일곱 개를 더 돌렸고 모두 잡혔다:
+- band 우선 순위를 제거함;
+- SARIF 상한을 제거하거나 9.0 으로 설정함;
+- -0 을 되살림;
+- High 의 경계를 배타적으로 만듦;
+- 마지막 v2 를 취하거나 첫 v2 를 취함.
 
 ---
 
