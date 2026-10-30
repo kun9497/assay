@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- An image layer that replaces a package database, `os-release` or a dpkg/pacman/Bitnami
+  record with a directory, device or FIFO now hides the lower layer's file, as the running
+  container sees it. Before, the deleted file was still read, and the scan reported an
+  inventory the image does not have. A file turned into a directory writes no `.wh.`
+  marker, so the whiteout rules never caught it. (audit A10)
 - `--fail-on-eol` no longer goes red a day early. A release counted as end of life from the
   first instant of the day EOLFrom names (09:00 KST on that day), while D87 promises that day
   is not yet EOL; it is now EOL from the day after. Extended support likewise now covers the
