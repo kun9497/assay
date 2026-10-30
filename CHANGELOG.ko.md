@@ -12,9 +12,8 @@
   를 stamp 하지 못하면 `db build` 가 실패하고, Ubuntu fix state 없이 일부러 빌드하려면
   `UBUNTU_TRACKER_ENABLE=0` 을 설정하라고 알려 줍니다. `db push` 는 어느 Ubuntu 릴리스든 공개된 fix state 의
   80% 미만만 가진 후보를 거부합니다. 건수는 DB 에서 셉니다(`--force` 로 넘길 수 있음). 이전에는 파싱을 멈춘
-  tracker 가 Ubuntu 의
-  wont-fix 와 not-fixed state 를 모두 잃은 artifact 를 공개해도(2026-10-29 기준 2,094,636 건) 아무것도
-  실패하지 않았습니다. (D157, D85 개정, 감사 A15)
+  tracker 가 Ubuntu 의 wont-fix 와 not-fixed state 를 모두 잃은 artifact 를 공개해도(2026-10-29 기준
+  2,094,636 건) 아무것도 실패하지 않았습니다. (D157, D85 개정, 감사 A15)
 
 ### Fixed
 - `--fail-on-eol` 이 더 이상 하루 일찍 빨간불이 되지 않습니다. 릴리스가 EOLFrom 날의 첫 순간(그 날 KST
