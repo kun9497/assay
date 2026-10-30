@@ -102,18 +102,23 @@ func TestWalkers_A10_OnlyThePathItselfIsShadowed(t *testing.T) {
 // reads its target as of that layer, so a directory that replaced the target
 // in a LATER layer does not shadow it for the hardlink.
 func TestFiles_A10_AShadowAboveAHardlinksLayerDoesNotHideItsTarget(t *testing.T) {
-	img := imageOf(
-		layerOfOrdered(t, "sha256:base",
-			entry{name: "usr/lib/os-release", body: "ID=alpine"},
-			hard("etc/os-release", "usr/lib/os-release"),
-		),
-		layerOfOrdered(t, "sha256:top", node("usr/lib/os-release/", tar.TypeDir)),
-	)
-	got, err := img.Files(context.Background(), []string{"etc/os-release"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got["etc/os-release"].Data) != "ID=alpine" {
-		t.Errorf("Files(etc/os-release) = %q, want the hardlink's own ID=alpine", got["etc/os-release"].Data)
+	for name, upper := range map[string][]entry{
+		"directory at the path":        {node("usr/lib/os-release/", tar.TypeDir)},
+		"directory implied by a child": {{name: "usr/lib/os-release/x", body: "child"}},
+	} {
+		img := imageOf(
+			layerOfOrdered(t, "sha256:base",
+				entry{name: "usr/lib/os-release", body: "ID=alpine"},
+				hard("etc/os-release", "usr/lib/os-release"),
+			),
+			layerOfOrdered(t, "sha256:top", upper...),
+		)
+		got, err := img.Files(context.Background(), []string{"etc/os-release"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got["etc/os-release"].Data) != "ID=alpine" {
+			t.Errorf("%s: Files(etc/os-release) = %q, want the hardlink's own ID=alpine", name, got["etc/os-release"].Data)
+		}
 	}
 }

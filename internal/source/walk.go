@@ -141,9 +141,12 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 			// query wants: the query ends here, unanswered, so no lower
 			// layer's deleted copy answers it (audit A10). A file turned into
 			// a directory writes "<name>/" and maybe "<name>/.wh..wh..opq",
-			// never ".wh.<name>", so the whiteout rules do not see it.
+			// never ".wh.<name>", so the whiteout rules do not see it. Whether
+			// the path is itself hidden from this layer does not matter: the
+			// marker that hides it here hides it from every lower layer too,
+			// so ending the query gives the same answer.
 			for k, q := range qs {
-				if !done[k] && i <= q.top && strings.HasPrefix(name, q.path+"/") && !hiddenFrom(q.path, i, q.top, deleted, opaque) {
+				if !done[k] && i <= q.top && strings.HasPrefix(name, q.path+"/") {
 					done[k] = true
 				}
 			}
