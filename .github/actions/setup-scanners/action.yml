@@ -20,6 +20,14 @@ inputs:
   grype-version:
     description: grype release to install
     default: v0.116.1
+  # The sha256 of that release's linux_amd64 tarball, from its own
+  # grype_<version>_checksums.txt, committed beside the version so a bump
+  # changes both in one edit (audit A18). This job runs next to the cosign
+  # signing key and packages: write (db-publish.yml), so the binary it runs
+  # is the one these bytes name, not whatever an install script serves today.
+  grype-sha256:
+    description: sha256 of grype_<version>_linux_amd64.tar.gz
+    default: 0122df7b655981abe547ad3d2190d65551dac6a2bfc80b4dc2a989b5d0587458
   # Same pinning reasoning as grype above. Spelled here rather than implied by
   # whatever the runner image happens to carry; bump deliberately, in the
   # same commit as a re-seed of any trivy floor.
@@ -34,8 +42,18 @@ runs:
       shell: bash
       env:
         GRYPE_VERSION: ${{ inputs.grype-version }}
+        GRYPE_SHA256: ${{ inputs.grype-sha256 }}
+      # The release tarball, checked against the committed sha256 before it is
+      # unpacked -- not `curl get.anchore.io | sh`, which ran an unpinned
+      # script beside the signing key (audit A18).
       run: |
-        curl -sSfL https://get.anchore.io/grype | sh -s -- -b ./bin "$GRYPE_VERSION"
+        set -euo pipefail
+        v="${GRYPE_VERSION#v}"
+        tgz="grype_${v}_linux_amd64.tar.gz"
+        curl -sSfL -o "$RUNNER_TEMP/$tgz" "https://github.com/anchore/grype/releases/download/${GRYPE_VERSION}/${tgz}"
+        echo "${GRYPE_SHA256}  $RUNNER_TEMP/$tgz" | sha256sum -c -
+        mkdir -p ./bin
+        tar -xzf "$RUNNER_TEMP/$tgz" -C ./bin grype
         ./bin/grype version
 
     - name: Update grype's vulnerability database
@@ -48,7 +66,9 @@ runs:
     # version", no message past curl -s), while the action authenticates
     # with the workflow's own token and caches the binary.
     - name: Install trivy ${{ inputs.trivy-version }}
-      uses: aquasecurity/setup-trivy@v0.3.1
+      # Pinned by commit, not by tag: a tag can be moved under this job,
+      # which runs next to the signing key (audit A18).
+      uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
       with:
         version: ${{ inputs.trivy-version }}
     - name: Symlink trivy into ./bin

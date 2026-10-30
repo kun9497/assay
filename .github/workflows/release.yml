@@ -37,9 +37,19 @@ jobs:
           go-version: "1.26"
           cache: true
 
+      # QA 2026-10-30: go-version "1.26" takes whichever patch release the
+      # runner has, and v0.12.0 got go1.26.9, which carries GO-2026-6809.
+      # go.mod's toolchain line is the floor; this fails a build below it.
+      # Each binary is then scanned by GoReleaser's post-build hook
+      # (scripts/release-vulncheck.sh) before anything is published.
+      - name: Hold the toolchain to go.mod's floor
+        run: sh scripts/check-go-toolchain.sh
+
       - uses: ./.github/actions/setup-cosign
 
-      - uses: goreleaser/goreleaser-action@v6
+      # Pinned by commit (v6 is a moving major tag): this job signs the
+      # release checksums (audit A18).
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
         with:
           version: "~> v2"
           args: release --clean
