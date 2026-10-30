@@ -283,10 +283,37 @@ type takenWindow struct {
 // A7.
 func splitDegenerate(c Comparer, in []advisory.Event) (walk []advisory.Event, taken []takenWindow) {
 	drop := make([]bool, len(in))
+	closeOf := func(e advisory.Event) string {
+		if e.Introduced != "" {
+			return ""
+		}
+		if e.Fixed != "" {
+			return e.Fixed
+		}
+		return e.LastAffected
+	}
+	take := func(i, j int) bool {
+		if drop[j] {
+			return false
+		}
+		closeAt := closeOf(in[j])
+		if closeAt == "" {
+			return false
+		}
+		if cmp, err := c.Compare(in[i].Introduced, closeAt); err != nil || cmp != 0 {
+			return false
+		}
+		drop[i], drop[j] = true, true
+		taken = append(taken, takenWindow{open: in[i].Introduced, close: closeAt, inclusive: in[j].Fixed == ""})
+		return true
+	}
+	// First the window as file order writes it: the first close after an
+	// open, before the next introduced.
+	//
+	// A window the sentinel opens may be taken out too (PEP 440 compares
+	// "0" equal to "0.0"): it is judged with atLeast like any other, and
+	// atLeast reads the sentinel as negative infinity.
 	for i, e := range in {
-		// A window the sentinel opens may be taken out too (PEP 440 compares
-		// "0" equal to "0.0"): it is judged with atLeast like any other, and
-		// atLeast reads the sentinel as negative infinity.
 		if e.Introduced == "" {
 			continue
 		}
@@ -294,26 +321,102 @@ func splitDegenerate(c Comparer, in []advisory.Event) (walk []advisory.Event, ta
 			if in[j].Introduced != "" {
 				break
 			}
-			closeAt := in[j].Fixed
-			if closeAt == "" {
-				closeAt = in[j].LastAffected
+			if closeOf(in[j]) != "" {
+				take(i, j)
+				break
 			}
-			if closeAt == "" {
-				continue
-			}
-			if cmp, err := c.Compare(e.Introduced, closeAt); err == nil && cmp == 0 {
-				drop[i], drop[j] = true, true
-				taken = append(taken, takenWindow{open: e.Introduced, close: closeAt, inclusive: in[j].Fixed == ""})
-			}
-			break
 		}
 	}
+	pairByVersion(c, in, drop, take)
 	for i, e := range in {
 		if !drop[i] {
 			walk = append(walk, e)
 		}
 	}
 	return walk, taken
+}
+
+// pairByVersion takes out, in version order, the windows file order did not
+// pair (QA 2026-10-30). OSV only recommends sorted events, and pairing by file
+// order alone left [introduced 1, introduced 3, last_affected 1,
+// last_affected 3] in the walk, which the sort read as [1, 3]: 2.0.0 was
+// affected, and 4.0.0 in another order.
+//
+// At each version X, with the opens and closes still in the walk there, a
+// close has to end something. If no window is open just below X, a close at X
+// can end only an open at X, so each such open takes one: the empty [X,X) or
+// the one version [X,X]. If a window is open below X, one close is left in the
+// walk to end it -- which is D154's tie rule for two windows that meet at X,
+// unchanged, evidence and all -- and only the closes beyond it take opens.
+// Without that reservation the outer window would close at X in one order of
+// the events and run on in another.
+//
+// Ties are grouped by comparing neighbours in sorted order, so under
+// Bitnami's equality, which is not transitive, a group can chain two
+// versions that do not compare equal; take still compares each pair it takes
+// out. A range with an unreadable bound is left alone: sortEvents refuses it
+// with the advisory named.
+func pairByVersion(c Comparer, in []advisory.Event, drop []bool, take func(i, j int) bool) {
+	var idx []int
+	for i, e := range in {
+		v := eventVersion(e)
+		if v == "" || drop[i] {
+			continue
+		}
+		if v != introducedSentinel {
+			if _, err := c.Compare(v, v); err != nil {
+				return
+			}
+		}
+		idx = append(idx, i)
+	}
+	sort.SliceStable(idx, func(a, b int) bool { return eventLess(c, in[idx[a]], in[idx[b]]) })
+
+	sameVersion := func(a, b advisory.Event) bool {
+		va, vb := eventVersion(a), eventVersion(b)
+		if va == introducedSentinel || vb == introducedSentinel {
+			return va == vb
+		}
+		cmp, _ := c.Compare(va, vb) // both validated above
+		return cmp == 0
+	}
+
+	inside := false // whether a window is open just below the current group
+	for start := 0; start < len(idx); {
+		end := start + 1
+		for end < len(idx) && sameVersion(in[idx[end-1]], in[idx[end]]) {
+			end++
+		}
+		group := idx[start:end]
+		var closes []int
+		for _, i := range group {
+			if closesWindow(in[i]) {
+				closes = append(closes, i)
+			}
+		}
+		reserve := 0
+		if inside {
+			reserve = 1
+		}
+		for _, i := range group {
+			if in[i].Introduced == "" || drop[i] {
+				continue
+			}
+			for k := reserve; k < len(closes); k++ {
+				if take(i, closes[k]) {
+					break
+				}
+			}
+		}
+		// The state just above X: sorted, a group's closes come before its
+		// opens, so the last event still in the walk decides it.
+		for _, i := range group {
+			if !drop[i] {
+				inside = in[i].Introduced != ""
+			}
+		}
+		start = end
+	}
 }
 
 // eventVersion returns whichever bound an event carries, or "" for an event
@@ -355,46 +458,50 @@ func sortEvents(c Comparer, in []advisory.Event) ([]advisory.Event, error) {
 				fmt.Errorf("the advisory's range bound %q could not be read: %w", ver, err))
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		vi, vj := eventVersion(out[i]), eventVersion(out[j])
-		// Events carrying no bound at all — a bare `limit`, or a malformed
-		// empty event — are parked at the end. They must not reach Compare:
-		// it would error, the error would be discarded, and every such event
-		// would report as equal to everything. That is a violated strict weak
-		// ordering, which can leave the whole slice unsorted and silently
-		// undo the sort this function exists to perform.
-		if vi == "" || vj == "" {
-			return vi != "" && vj == ""
-		}
-		// The sentinel is negative infinity, so it sorts before everything.
-		// Decided by string identity rather than by Compare, because PEP 440
-		// parses "0" as a real version that would otherwise sort above 0.dev0
-		// and 0a1 — reintroducing the bug the sentinel exists to prevent.
-		if vi == introducedSentinel {
-			return vj != introducedSentinel
-		}
-		if vj == introducedSentinel {
-			return false
-		}
-		// Cannot fail: every non-empty, non-sentinel bound was validated above.
-		cmp, _ := c.Compare(vi, vj)
-		if cmp != 0 {
-			return cmp < 0
-		}
-		// A7 (D154): at the same version a close goes before an open. Two
-		// windows meeting at X -- one fixed or last_affected at X, the next
-		// introduced at X -- were ordered by file order, so a range listing
-		// the later window first opened it and shut it again at X, and every
-		// version inside it was clean. A window that opens and closes at the
-		// same X never gets here: splitDegenerate took it out. Ranking by kind
-		// keeps this a strict weak ordering whenever the comparer's equality
-		// is transitive, which a rule that looked at which window each event
-		// belongs to would not be. Bitnami's equality is not (a bare core
-		// equals every revision of it), and no tie rule restores an order
-		// that the comparer itself does not have; that was so before A7.
-		return closesWindow(out[i]) && !closesWindow(out[j])
-	})
+	sort.SliceStable(out, func(i, j int) bool { return eventLess(c, out[i], out[j]) })
 	return out, nil
+}
+
+// eventLess is sortEvents' order. Every non-empty, non-sentinel bound must
+// already have been validated: it cannot report a comparison error.
+func eventLess(c Comparer, a, b advisory.Event) bool {
+	vi, vj := eventVersion(a), eventVersion(b)
+	// Events carrying no bound at all — a bare `limit`, or a malformed
+	// empty event — are parked at the end. They must not reach Compare:
+	// it would error, the error would be discarded, and every such event
+	// would report as equal to everything. That is a violated strict weak
+	// ordering, which can leave the whole slice unsorted and silently
+	// undo the sort this function exists to perform.
+	if vi == "" || vj == "" {
+		return vi != "" && vj == ""
+	}
+	// The sentinel is negative infinity, so it sorts before everything.
+	// Decided by string identity rather than by Compare, because PEP 440
+	// parses "0" as a real version that would otherwise sort above 0.dev0
+	// and 0a1 — reintroducing the bug the sentinel exists to prevent.
+	if vi == introducedSentinel {
+		return vj != introducedSentinel
+	}
+	if vj == introducedSentinel {
+		return false
+	}
+	// Cannot fail: the caller validated every non-empty, non-sentinel bound.
+	cmp, _ := c.Compare(vi, vj)
+	if cmp != 0 {
+		return cmp < 0
+	}
+	// A7 (D154): at the same version a close goes before an open. Two
+	// windows meeting at X -- one fixed or last_affected at X, the next
+	// introduced at X -- were ordered by file order, so a range listing
+	// the later window first opened it and shut it again at X, and every
+	// version inside it was clean. A window that opens and closes at the
+	// same X never gets here: splitDegenerate took it out. Ranking by kind
+	// keeps this a strict weak ordering whenever the comparer's equality
+	// is transitive, which a rule that looked at which window each event
+	// belongs to would not be. Bitnami's equality is not (a bare core
+	// equals every revision of it), and no tie rule restores an order
+	// that the comparer itself does not have; that was so before A7.
+	return closesWindow(a) && !closesWindow(b)
 }
 
 // closesWindow reports whether an event is a fixed or last_affected bound.
