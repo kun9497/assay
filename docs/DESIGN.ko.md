@@ -981,6 +981,13 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] 같은 버전에서는 닫는 이벤트가 여는 이벤트보다 먼저 정렬되고, 한 버전에서 열리고 닫히는 창은 따로
       판정 (D154, 감사 A7) — 뒤 창을 먼저 적은 range 가 앞 창이 닫히는 버전에서 그 창을 닫아 버리지
       않음; 공개 데이터베이스의 동률 range 전체에 대한 판정 2,892 건이 그대로
+- [x] QA 2026-10-30 수정:
+      - 64 KiB 가 넘는 줄이 lockfile 을 더는 잘라 먹지 않음;
+      - open 이 먼저 나열된 범위도 단일 버전 window 를 유지함 (D154 개정);
+      - pull 도중 HTTP/2 스트림 리셋을 재시도함 (D140 개정);
+      - 바깥 인덱스를 지목한 VEX 가 적용됨 (D121 개정);
+      - 빌드는 go.mod 의 toolchain 하한을 지키고, 릴리스 바이너리마다 게시 전에 govulncheck 로
+        검사함.
 - [x] gem 의 플랫폼은 버전의 일부가 아님 (D155, 감사 A6) — Gemfile.lock 은 bundler 의 문법대로, SBOM
       purl 은 Gem::Platform 이 OS 를 읽어 내거나 purl 의 qualifier 가 말할 때; purl 은 VEX 를 위해 플랫폼을
       유지; rails/rails 의 Gemfile.lock: 불완전 검사 130 → 0, x86_64 빌드에서 놓치던 발견 26 건, 오탐 2 건

@@ -7,7 +7,25 @@
 
 ## [Unreleased]
 
+### Security
+- 빌드는 go.mod 의 `toolchain` 줄을 하한으로 지킵니다. 지금은 `go1.26.10` 입니다. v0.12.0 은
+  go1.26.9 로 빌드되었고, go1.26.9 에는 GO-2026-6809 (crypto/x509, go1.26.10 에서 수정)가 있습니다.
+  `scripts/check-go-toolchain.sh` 는 하한보다 낮은 릴리스나 CI 빌드를 실패시킵니다. GoReleaser 의
+  각 빌드는 무엇이든 게시하기 전에 자기 바이너리를 govulncheck 로 검사합니다
+  (`scripts/release-vulncheck.sh`). (QA 2026-10-30)
+
 ### Fixed
+- Gemfile.lock, Cargo.lock, uv.lock, requirements.txt 나 jar 의 pom.properties 에 64 KiB 가 넘는 줄이
+  있어도 그 뒤의 패키지가 더는 사라지지 않습니다. 읽기 코드가 그 줄에서 오류 없이 멈추고, 스캔은 남은
+  부분을 파일 전체로 보고했습니다(exit 0, 미완료 없음). (QA 2026-10-30)
+- 범위가 open 두 개를 close 두 개보다 먼저 나열해도
+  (`[introduced 1, introduced 3, last_affected 1, last_affected 3]`) 단일 버전 window 와 빈 window 를
+  따로 판정합니다. 전에는 `[1, 3]` 으로 읽었습니다. (QA 2026-10-30, D154 개정)
+- `db update` 와 `db build --seed` 는 HTTP/1 본문이 끊긴 경우처럼 다운로드 중 HTTP/2 스트림 리셋도
+  재시도합니다. 취소되었거나 `--timeout` 을 넘긴 pull 은 더는 재시도하지 않습니다.
+  (QA 2026-10-30, D140 개정)
+- 중첩된 이미지 인덱스의 바깥 인덱스를 지목한 VEX 문장이 그 인덱스를 거쳐 선택된 이미지에
+  적용됩니다. 레지스트리 대상과 `oci-dir:` 대상 모두 그렇습니다. (QA 2026-10-30, D121 개정)
 - Alpine edge 이미지(`VERSION_ID=3.25.0_alpha20260805`)를 안정판 Alpine 3.25 의 advisory 로 판정하지 않고
   평가되지 않음으로 보고합니다. OSV 에는 edge 생태계가 없습니다. (감사 A11)
 - 기본값이 아닌 `GOEXPERIMENT` 로 빌드한 Go 바이너리(`go1.26.7-X:fieldtrack`)의 stdlib 을 릴리스 버전으로
