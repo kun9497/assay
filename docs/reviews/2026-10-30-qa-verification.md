@@ -19,7 +19,7 @@ Each QA defect was reproduced at `650bedb` before it was fixed (section 3). D157
 Ubuntu provider and `db push`; none of the defects below involves either, and the fix branch
 shares no Go file with #209.
 
-**The fix.** Branch `fix/qa-1030`, local only: not pushed, no PR. Eleven commits on `650bedb`:
+**The fix.** Branch `fix/qa-1030`, local only: not pushed, no PR. Commits on `650bedb`:
 
 | Commit | Item |
 |---|---|
