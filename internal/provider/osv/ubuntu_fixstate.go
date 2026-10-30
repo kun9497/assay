@@ -194,16 +194,11 @@ func parseUbuntuTrackerFile(data []byte, tracker *ubuntuTracker, st *stats) bool
 // parseUbuntuTracker walks active/ and retired/ under dir as ONE namespace
 // (D85's brief: a CVE migrates between the two as it ages out of support,
 // and a lookup must resolve identically from either). Either directory
-// missing entirely is tolerated rather than fatal -- a shallow clone still
-// under its first sync, or a future reorganisation of the tracker's own
-// layout, should degrade to "fewer tuples loaded" rather than fail the whole
-// database build; the archive-yielded-zero guard pattern used elsewhere
-// (Fetch's own eco == "Alpine" check) is deliberately NOT copied here
-// because zero tuples is not silent the way zero Alpine records would be --
-// db status's coverage line says nothing about Ubuntu fix-state at all
-// today, and the progress line this parse prints (loadUbuntuTracker) is
-// unconditional, so a walk that found nothing is visible in the build log
-// either way.
+// missing entirely is tolerated here, so one of the two can be absent; the
+// tracker yielding no tuple at all is refused by loadUbuntuTracker (D157).
+// D85 had declined that guard on the grounds that the progress line made a
+// zero visible in the build log; nobody reads the log of a green nightly,
+// and the artifact it publishes loses every Ubuntu fix state.
 func parseUbuntuTracker(dir string, st *stats) (*ubuntuTracker, error) {
 	tracker := newUbuntuTracker()
 	for _, sub := range []string{"active", "retired"} {
@@ -329,6 +324,9 @@ func stampUbuntuFixState(aff *advisory.Affected, cve string, tracker *ubuntuTrac
 		rng := &aff.Ranges[i]
 		if !rangeIsFixless(*rng) {
 			continue
+		}
+		if st != nil {
+			st.UbuntuFixless++
 		}
 		entry, found := tracker.lookup(cve, aff.Name, release)
 		if !found {

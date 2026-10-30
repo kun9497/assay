@@ -375,6 +375,18 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 	// enabled prints an honest all-zero line rather than staying silent,
 	// which is indistinguishable from "this counter does not exist".
 	fmt.Fprintln(p.progress, "osv: "+st.String())
+	if tracker != nil {
+		// D157: tuples that stamp nothing are the same loss as no tuples,
+		// one step later -- the tracker read, its keys no longer meeting
+		// the archive's (a codename table gone stale, a CVE id respelled).
+		stamped := st.UbuntuStampedWontFix + st.UbuntuStampedNotFixed
+		if st.UbuntuFixless > 0 && stamped == 0 {
+			return store.Provenance{}, fmt.Errorf("ubuntu tracker: %d tuple(s) loaded but stamped no fix state on "+
+				"any of %d fix-less Ubuntu range(s); set UBUNTU_TRACKER_ENABLE=0 to build without Ubuntu fix states",
+				st.UbuntuTuplesLoaded, st.UbuntuFixless)
+		}
+		prov.UbuntuFixStates = stamped
+	}
 	return prov, nil
 }
 

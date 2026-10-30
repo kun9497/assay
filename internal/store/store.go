@@ -366,6 +366,12 @@ type Provenance struct {
 	// reported. Zero for advisory providers and for a run that withdrew
 	// nothing.
 	Withdrawn int `json:"withdrawn,omitempty"`
+	// UbuntuFixStates is how many fix-less Ubuntu ranges this build stamped
+	// wont-fix or not-fixed from Canonical's CVE tracker (D85, D157). The
+	// publish guard holds it against the published artifact's, because a
+	// tracker that stopped parsing yields fewer states and no other signal.
+	// Zero when Ubuntu was not fetched or the tracker was disabled.
+	UbuntuFixStates int `json:"ubuntu_fix_states,omitempty"`
 	// Ecosystems is what this provider actually covers (D20): the keys it
 	// fetched, expanded to the release-qualified ones a fetched family
 	// contains.

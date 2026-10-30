@@ -648,6 +648,7 @@ type stats struct {
 	UbuntuUnknownCodename int // stanza lines naming a codename outside ubuntuCodenameRelease
 	UbuntuStampedWontFix  int // fix-less ranges stamped wont-fix from an `ignored` tuple
 	UbuntuStampedNotFixed int // fix-less ranges stamped not-fixed from needed/needs-triage/pending/deferred
+	UbuntuFixless         int // fix-less Ubuntu ranges the tracker was asked about (D157's denominator)
 
 	// EchoNotAffectedSentinel is D92's own count: Echo ranges whose sole
 	// Fixed event was the bare string "1" and were dropped at conversion
