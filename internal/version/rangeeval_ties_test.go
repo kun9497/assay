@@ -241,3 +241,117 @@ func TestInRange_A7_AnUnreadableVersionErrorsAtASentinelWindowsClose(t *testing.
 		t.Errorf("cause = %v, want CauseTargetVersion: %v", CauseOf(err), err)
 	}
 }
+
+// permutations returns every ordering of events, the input first.
+func permutations(events []advisory.Event) [][]advisory.Event {
+	if len(events) <= 1 {
+		return [][]advisory.Event{append([]advisory.Event(nil), events...)}
+	}
+	var out [][]advisory.Event
+	for i := range events {
+		rest := append(append([]advisory.Event(nil), events[:i]...), events[i+1:]...)
+		for _, p := range permutations(rest) {
+			out = append(out, append([]advisory.Event{events[i]}, p...))
+		}
+	}
+	return out
+}
+
+// QA 2026-10-30: splitDegenerate paired an open only with the first close
+// after it, before the next introduced, in file order. Listing both opens
+// before both closes -- [introduced 1, introduced 3, last_affected 1,
+// last_affected 3] -- took neither single-version window out, the sort put
+// last_affected 1 before introduced 1, and the walk read [1, 3]: 2.0.0 was
+// affected, and 4.0.0 too in another order. OSV recommends sorted events and
+// does not require them, so every ordering of the same events must give the
+// same verdicts and the same evidence.
+func TestInRange_QA1030_AWindowsCloseNeedNotFollowItsOpen(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		events []advisory.Event
+		cases  []tieCase
+	}{
+		{"two single-version windows", []advisory.Event{intro("1.0.0"), intro("3.0.0"), lastAff("1.0.0"), lastAff("3.0.0")}, []tieCase{
+			{v: "1.0.0", want: true, introduced: "1.0.0", closedAt: "1.0.0", closedByLastAffected: true},
+			{v: "3.0.0", want: true, introduced: "3.0.0", closedAt: "3.0.0", closedByLastAffected: true},
+			{v: "2.0.0", want: false},
+			{v: "4.0.0", want: false},
+			{v: "0.5.0", want: false},
+		}},
+		{"an empty window and a real one", []advisory.Event{intro("1.0.0"), intro("2.0.0"), fixed("1.0.0"), fixed("3.0.0")}, []tieCase{
+			{v: "1.5.0", want: false},
+			{v: "1.0.0", want: false},
+			{v: "2.5.0", want: true, introduced: "2.0.0", closedAt: "3.0.0"},
+			{v: "3.0.0", want: false},
+		}},
+		// Two empty windows: left in the walk, the second one's close sorts
+		// before its open and the window never closes, so 3.0.0 and above
+		// read affected.
+		{"two empty windows", []advisory.Event{intro("1.0.0"), intro("3.0.0"), fixed("1.0.0"), fixed("3.0.0")}, []tieCase{
+			{v: "1.0.0", want: false},
+			{v: "2.0.0", want: false},
+			{v: "3.0.0", want: false},
+			{v: "4.0.0", want: false},
+		}},
+		// A window that has closed below the empty one: the state just below
+		// 3.0.0 is outside, so the close at 3.0.0 has nothing to end but the
+		// open at 3.0.0.
+		{"a closed window below an empty one", []advisory.Event{intro("1.0.0"), intro("3.0.0"), fixed("2.0.0"), fixed("3.0.0")}, []tieCase{
+			{v: "1.5.0", want: true, introduced: "1.0.0", closedAt: "2.0.0"},
+			{v: "2.0.0", want: false},
+			{v: "3.0.0", want: false},
+			{v: "4.0.0", want: false},
+		}},
+		// The controls: windows that meet, and a single-version window
+		// where a wider one closes, keep D154's verdicts in every order.
+		// Their evidence is not checked: where the file lists [2,2) as a
+		// window of its own, D154 takes it out and names [1,3) for 1.5.0,
+		// and [1,2) otherwise. Both are windows the advisory implies.
+		{"windows that meet", []advisory.Event{intro("1.0.0"), fixed("2.0.0"), intro("2.0.0"), fixed("3.0.0")}, []tieCase{
+			{v: "1.5.0", want: true},
+			{v: "2.0.0", want: true},
+			{v: "2.5.0", want: true},
+			{v: "3.0.0", want: false},
+			{v: "0.9.0", want: false},
+		}},
+		{"a single-version window where a wider one closes", []advisory.Event{intro("1.0.0"), lastAff("2.0.0"), intro("2.0.0"), lastAff("2.0.0")}, []tieCase{
+			{v: "1.5.0", want: true},
+			{v: "2.0.0", want: true},
+			{v: "2.0.1", want: false},
+		}},
+	} {
+		for _, p := range permutations(tc.events) {
+			cases := tc.cases
+			name := tc.name + " " + describeEvents(p)
+			// Evidence is checked where a case names its window.
+			for _, c := range cases {
+				if c.want && c.introduced == "" {
+					got, _, err := InRange(SemVer{}, c.v, rng(advisory.RangeSemver, p...))
+					if err != nil || !got {
+						t.Errorf("%s: InRange(%q) = %v, %v; want true", name, c.v, got, err)
+					}
+					continue
+				}
+				checkTies(t, name, rng(advisory.RangeSemver, p...), []tieCase{c})
+			}
+		}
+	}
+}
+
+func describeEvents(events []advisory.Event) string {
+	s := "["
+	for i, e := range events {
+		if i > 0 {
+			s += " "
+		}
+		switch {
+		case e.Introduced != "":
+			s += "i" + e.Introduced
+		case e.Fixed != "":
+			s += "f" + e.Fixed
+		default:
+			s += "la" + e.LastAffected
+		}
+	}
+	return s + "]"
+}

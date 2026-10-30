@@ -24,7 +24,6 @@
 package requirements
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -92,11 +91,10 @@ var pinnedRE = regexp.MustCompile(`^(===|==)\s*([^,\s*]+)$`)
 // difference. Lines that are not requirements at all (options, blank lines,
 // comments) are not components and are not counted.
 func Parse(path string) (pkgmeta.Target, cyclonedx.Stats, []Unusable, error) {
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return pkgmeta.Target{}, cyclonedx.Stats{}, nil, fmt.Errorf("read %s: %w", filepath.Base(path), err)
 	}
-	defer f.Close()
 
 	var (
 		target   pkgmeta.Target
@@ -104,7 +102,7 @@ func Parse(path string) (pkgmeta.Target, cyclonedx.Stats, []Unusable, error) {
 		unusable []Unusable
 	)
 
-	for _, line := range logicalLines(f) {
+	for _, line := range logicalLines(data) {
 		kind, detail := classify(line)
 		switch kind {
 		case kindIgnorable:
@@ -135,15 +133,18 @@ func Parse(path string) (pkgmeta.Target, cyclonedx.Stats, []Unusable, error) {
 // The order is load-bearing and is pip's, not a convenience. Stripping comments
 // first would let a trailing '#' comment swallow the backslash that continues
 // the line, silently gluing two requirements into one.
-func logicalLines(r *os.File) []string {
+func logicalLines(data []byte) []string {
 	var out []string
-	sc := bufio.NewScanner(r)
-	// Requirement lines are short; the default 64 KiB token is ample and a
-	// pathological file should fail loudly rather than be read in part.
+	// Split in memory rather than through bufio.Scanner. This comment used to
+	// say the Scanner's 64 KiB token would make a pathological file fail
+	// loudly; it did the opposite, because nothing read Err(), and every
+	// requirement after the long line was dropped while Parse reported
+	// success (the QA 2026-10-30 defect in gemlock and tomlblock). A trailing
+	// CR is removed, as ScanLines removes it.
 	var joined strings.Builder
 	first := true
-	for sc.Scan() {
-		raw := sc.Text()
+	for chunk := range strings.Lines(string(data)) {
+		raw := strings.TrimSuffix(strings.TrimSuffix(chunk, "\n"), "\r")
 		if first {
 			// A UTF-8 BOM is not part of the first requirement. Assembled from
 			// its code point rather than typed: writing the character itself

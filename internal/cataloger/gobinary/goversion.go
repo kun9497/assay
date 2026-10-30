@@ -30,6 +30,23 @@ import (
 // the shapes above line by line. Same reasoning as the apk comparer (D9): the
 // tidier version is where the quiet ordering bug gets in.
 func normalizeGoVersion(v string) (string, bool) {
+	// GOEXPERIMENT (audit A12). The linker appends the enabled experiments
+	// to the toolchain version: "-X:a,b" when the version has no hyphen,
+	// " X:a,b" when it has one, and always " X:" before go.dev/issue/75953
+	// (cmd/link/internal/ld/main.go). An experiment does not change which
+	// stdlib release was linked, so it is cut off here. Kept as a suffix it
+	// read as a semver prerelease ("1.26.7-X:fieldtrack") the comparer
+	// refuses, and every stdlib advisory became a skip. Only a well-formed
+	// list is cut; anything else is left for the checks below to refuse.
+	for _, marker := range []string{"-X:", " X:"} {
+		if i := strings.Index(v, marker); i > 0 {
+			if !goExperimentList(v[i+len(marker):]) {
+				return "", false
+			}
+			v = v[:i]
+			break
+		}
+	}
 	// A development toolchain — "devel go1.27-abc123 2026-01-01" — names no
 	// released version. Refusing is right: inventing 1.27.0 would claim a
 	// version that does not exist and could sit on either side of a fix.
@@ -58,6 +75,11 @@ func normalizeGoVersion(v string) (string, bool) {
 	core, pre := rest, ""
 	if i := strings.IndexByte(rest, '-'); i >= 0 {
 		core, pre = rest[:i], rest[i+1:]
+		// Only semver prerelease identifiers pass through; anything else
+		// would be cataloged as a version no comparison can read.
+		if !semverPrerelease(pre) {
+			return "", false
+		}
 	} else {
 		for _, kind := range []string{"rc", "beta", "alpha"} {
 			if i := strings.Index(rest, kind); i > 0 {
@@ -107,6 +129,46 @@ func normalizeGoVersion(v string) (string, bool) {
 }
 
 func isDigit(b byte) bool { return b >= '0' && b <= '9' }
+
+// goExperimentList reports whether s is a GOEXPERIMENT list as the linker
+// writes it: comma-separated experiment names (internal/buildcfg), each
+// lower-case letters and digits, optionally negated with "no".
+func goExperimentList(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, name := range strings.Split(s, ",") {
+		if name == "" {
+			return false
+		}
+		for i := 0; i < len(name); i++ {
+			if c := name[i]; !(c >= 'a' && c <= 'z' || isDigit(c)) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// semverPrerelease reports whether s is a dot-separated list of non-empty
+// semver prerelease identifiers ([0-9A-Za-z-]).
+func semverPrerelease(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, id := range strings.Split(s, ".") {
+		if id == "" {
+			return false
+		}
+		for i := 0; i < len(id); i++ {
+			c := id[i]
+			if !(isDigit(c) || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '-') {
+				return false
+			}
+		}
+	}
+	return true
+}
 
 func allDigits(s string) bool {
 	for i := 0; i < len(s); i++ {

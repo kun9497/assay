@@ -1031,6 +1031,13 @@ exited 0 while 24 findings went unmentioned.
       at one version is judged on its own (D154, audit A7) — a range listing a later window
       first no longer shuts it at the version the earlier one closes; 2,892 judgments over
       every tied range in the published database unchanged
+- [x] QA 2026-10-30 fixes:
+      - a line over 64 KiB no longer truncates a lockfile;
+      - an opens-first range keeps its single-version windows (revises D154);
+      - an HTTP/2 stream reset mid-pull is retried (revises D140);
+      - VEX naming an outer index applies (revises D121);
+      - builds are held to go.mod's toolchain floor, and each release binary is scanned by
+        govulncheck before publishing.
 - [x] A gem's platform is not part of its version (D155, audit A6) — Gemfile.lock by bundler's
       grammar, SBOM purls when Gem::Platform names an os or the purl's qualifier says so; the
       purl keeps the platform for VEX; rails/rails's Gemfile.lock: 130 incomplete checks → 0,

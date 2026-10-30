@@ -686,10 +686,13 @@ func (d Distro) Ecosystem() (string, error) {
 		return "", fmt.Errorf("%w: distro %q version %q is not an X.Y release",
 			ErrNoEcosystem, d.ID, d.VersionID)
 	}
-	minor, _, _ := strings.Cut(rest, ".")
-	if !allDigits(major) || !allDigits(minor) {
+	minor, patch, hasPatch := strings.Cut(rest, ".")
+	if !allDigits(major) || !allDigits(minor) || (hasPatch && !allDigits(patch)) {
 		// edge and pre-releases land here. They have no OSV ecosystem at all,
-		// so there is no key to fall back to.
+		// so there is no key to fall back to. Edge writes "X.Y.0_alphaYYYYMMDD"
+		// (alpine:edge on 2026-10-30: 3.25.0_alpha20260805), so the
+		// component after the minor is checked too: dropped unchecked, it
+		// keyed an edge image as stable Alpine X.Y (audit A11).
 		return "", fmt.Errorf("%w: distro %q version %q is not an X.Y release",
 			ErrNoEcosystem, d.ID, d.VersionID)
 	}
