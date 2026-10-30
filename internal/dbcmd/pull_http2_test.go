@@ -262,4 +262,25 @@ func TestPull_QA1030_PermanentFailuresAreNotRetried(t *testing.T) {
 		}
 		assertUntouched(t, dst, before)
 	})
+	// --timeout's deadline: its error reports Timeout() like a stalled
+	// socket's, which D140 retries, but no attempt can succeed past it.
+	t.Run("past the deadline", func(t *testing.T) {
+		noPause(t)
+		ref, gets, _ := publishHTTP2(t, h2Stall, h2Stall, h2Stall)
+		dst := filepath.Join(t.TempDir(), "vulnerability.db")
+		before := previousDB(t, dst)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		var out, errOut bytes.Buffer
+		if code := Pull(ctx, dst, ref, false, &out, &errOut); code != 2 {
+			t.Fatalf("exit %d, want 2 (stderr: %s)", code, errOut.String())
+		}
+		if got := gets.Load(); got != 1 {
+			t.Errorf("a pull past its deadline fetched the layer %d times, want 1", got)
+		}
+		if strings.Contains(errOut.String(), "retrying") {
+			t.Errorf("a pull past its deadline was retried:\n%s", errOut.String())
+		}
+		assertUntouched(t, dst, before)
+	})
 }
