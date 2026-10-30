@@ -7,6 +7,13 @@
 
 ## [Unreleased]
 
+### Changed
+- CVSS v2 벡터만 가진 평가(NVD 가 다시 채점하지 않은 모든 CVE 의 평가로, 2026-10-27 DB 에서 72,405 건)를,
+  `unknown` 이던 것에서 v2 기본 점수로 NVD 의 v2 등급표(Low/Medium/High, Critical 없음)에 따라 등급을
+  매깁니다. v2 는 같은 레코드에 점수를 낼 다른 것이 없을 때만 씁니다. unknown 이던 발견이 이제 등급을
+  가질 수 있어 `--fail-on` 에 걸릴 수 있습니다. JSON 보고서의 `schemaVersion` 은 15(추가형)이며, 이렇게
+  등급을 받은 평가에는 `"cvssV2": true` 가 붙고 `--explain` 은 `(CVSS v2)` 로 표시합니다. (D156, 감사 A14)
+
 ### Fixed
 - `--fail-on-eol` 이 더 이상 하루 일찍 빨간불이 되지 않습니다. 릴리스가 EOLFrom 날의 첫 순간(그 날 KST
   09:00)부터 end of life 로 계산되었는데, D87 은 그 날을 아직 EOL 이 아니라고 약속합니다. 이제 다음 날부터

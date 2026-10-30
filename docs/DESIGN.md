@@ -1031,6 +1031,10 @@ exited 0 while 24 findings went unmentioned.
       at one version is judged on its own (D154, audit A7) — a range listing a later window
       first no longer shuts it at the version the earlier one closes; 2,892 judgments over
       every tied range in the published database unchanged
+- [x] A CVSS v2-only rating is banded from the v2 base score, as a fallback only (D156,
+      audit A14) — NVD's v2 table, never above v3/v4/vendor words in one record; 72,405 NVD
+      ratings stop being unknown; all 311 distinct vectors agree with NVD's published scores;
+      JSON `ratings[].cvssV2` (schema 15) and `(CVSS v2)` in --explain
 - [x] A gem's platform is not part of its version (D155, audit A6) — Gemfile.lock by bundler's
       grammar, SBOM purls when Gem::Platform names an os or the purl's qualifier says so; the
       purl keeps the platform for VEX; rails/rails's Gemfile.lock: 130 incomplete checks → 0,
