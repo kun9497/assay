@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+- The jobs that hold the signing key run nothing pinned by a tag alone. The nightly
+  publish installs grype from its release tarball checked against a committed sha256
+  (it ran `curl get.anchore.io/grype | sh`), and the trivy and goreleaser actions are
+  pinned by commit. (audit A18)
+
 ### Fixed
 - `--fail-on-eol` no longer goes red a day early. A release counted as end of life from the
   first instant of the day EOLFrom names (09:00 KST on that day), while D87 promises that day

@@ -7,6 +7,11 @@
 
 ## [Unreleased]
 
+### Security
+- 서명 키를 가진 job 이 태그만으로 고정된 코드를 더 이상 실행하지 않습니다. nightly publish 는 grype 를
+  릴리스 tarball 로 받아 커밋된 sha256 으로 확인하고(이전에는 `curl get.anchore.io/grype | sh`), trivy 와
+  goreleaser action 은 커밋으로 고정합니다. (감사 A18)
+
 ### Fixed
 - `--fail-on-eol` 이 더 이상 하루 일찍 빨간불이 되지 않습니다. 릴리스가 EOLFrom 날의 첫 순간(그 날 KST
   09:00)부터 end of life 로 계산되었는데, D87 은 그 날을 아직 EOL 이 아니라고 약속합니다. 이제 다음 날부터
