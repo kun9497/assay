@@ -19,6 +19,11 @@ All notable changes to this project are documented here. The format follows
   before anything is published. (QA 2026-10-30)
 
 ### Fixed
+- An image layer that replaces a package database, `os-release` or a dpkg/pacman/Bitnami
+  record with a directory, device or FIFO now hides the lower layer's file, as the running
+  container sees it. Before, the deleted file was still read, and the scan reported an
+  inventory the image does not have. A file turned into a directory writes no `.wh.`
+  marker, so the whiteout rules never caught it. (audit A10)
 - A line over 64 KiB in a Gemfile.lock, Cargo.lock, uv.lock, requirements.txt or a jar's
   pom.properties no longer hides every package after it. The readers stopped at the line
   without an error, and the scan reported the rest as the whole file: exit 0, nothing

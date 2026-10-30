@@ -18,6 +18,10 @@
   (`scripts/release-vulncheck.sh`). (QA 2026-10-30)
 
 ### Fixed
+- 이미지 레이어가 패키지 데이터베이스, `os-release`, dpkg/pacman/Bitnami 레코드를 디렉터리, 장치, FIFO 로
+  바꾸면, 실행 중인 컨테이너가 보는 대로 아래 레이어의 파일이 가려집니다. 이전에는 지워진 파일이 그대로
+  읽혀 이미지에 없는 인벤토리가 보고되었습니다. 파일을 디렉터리로 바꾸면 `.wh.` 마커가 생기지 않아 whiteout
+  규칙이 이를 잡지 못했습니다. (감사 A10)
 - Gemfile.lock, Cargo.lock, uv.lock, requirements.txt 나 jar 의 pom.properties 에 64 KiB 가 넘는 줄이
   있어도 그 뒤의 패키지가 더는 사라지지 않습니다. 읽기 코드가 그 줄에서 오류 없이 멈추고, 스캔은 남은
   부분을 파일 전체로 보고했습니다(exit 0, 미완료 없음). (QA 2026-10-30)

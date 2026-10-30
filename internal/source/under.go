@@ -64,6 +64,7 @@ func (img *Image) FilesUnder(ctx context.Context, dir string) (map[string]FileFr
 		var layerOpaque []string
 
 		err := readLayer(ctx, l, func(name string, h *tar.Header, r io.Reader) error {
+			shadowAncestors(found, name, prefix)
 			d, base := path.Split(name)
 			switch {
 			case base == whiteoutOpaque:
@@ -96,7 +97,7 @@ func (img *Image) FilesUnder(ctx context.Context, dir string) (map[string]FileFr
 				// version the image does not ship.
 				found[name] = true
 				return nil
-			case tar.TypeReg:
+			case tar.TypeReg, tar.TypeGNUSparse, tar.TypeCont:
 				b, err := img.readEntry(name, r)
 				if err != nil {
 					return err
@@ -104,8 +105,12 @@ func (img *Image) FilesUnder(ctx context.Context, dir string) (map[string]FileFr
 				out[name] = FileFromLayer{Data: b, DiffID: l.DiffID}
 				found[name] = true
 				return nil
+			default:
+				// A directory, device or FIFO at this name: the image has no
+				// file here, and a lower layer's copy is shadowed (A10).
+				found[name] = true
+				return nil
 			}
-			return nil
 		})
 		if err != nil {
 			return nil, 0, fmt.Errorf("read layer %s: %w", l.DiffID, err)
@@ -172,6 +177,7 @@ func (img *Image) FilesNamed(ctx context.Context, dir, filename string) (map[str
 		var layerOpaque []string
 
 		err := readLayer(ctx, l, func(name string, h *tar.Header, r io.Reader) error {
+			shadowAncestors(found, name, prefix)
 			d, base := path.Split(name)
 			switch {
 			case base == whiteoutOpaque:
@@ -204,7 +210,7 @@ func (img *Image) FilesNamed(ctx context.Context, dir, filename string) (map[str
 				symlinks++
 				found[name] = true
 				return nil
-			case tar.TypeReg:
+			case tar.TypeReg, tar.TypeGNUSparse, tar.TypeCont:
 				b, err := img.readEntry(name, r)
 				if err != nil {
 					return err
@@ -212,8 +218,12 @@ func (img *Image) FilesNamed(ctx context.Context, dir, filename string) (map[str
 				out[name] = FileFromLayer{Data: b, DiffID: l.DiffID}
 				found[name] = true
 				return nil
+			default:
+				// A directory, device or FIFO at this name: the image has no
+				// file here, and a lower layer's copy is shadowed (A10).
+				found[name] = true
+				return nil
 			}
-			return nil
 		})
 		if err != nil {
 			return nil, 0, fmt.Errorf("read layer %s: %w", l.DiffID, err)
@@ -284,6 +294,7 @@ func (img *Image) FilesMatching(ctx context.Context, dir, prefix, suffix string)
 		var layerOpaque []string
 
 		err := readLayer(ctx, l, func(name string, h *tar.Header, r io.Reader) error {
+			shadowAncestors(found, name, root)
 			d, base := path.Split(name)
 			switch {
 			case base == whiteoutOpaque:
@@ -315,7 +326,7 @@ func (img *Image) FilesMatching(ctx context.Context, dir, prefix, suffix string)
 				symlinks++
 				found[name] = true
 				return nil
-			case tar.TypeReg:
+			case tar.TypeReg, tar.TypeGNUSparse, tar.TypeCont:
 				b, err := img.readEntry(name, r)
 				if err != nil {
 					return err
@@ -323,8 +334,12 @@ func (img *Image) FilesMatching(ctx context.Context, dir, prefix, suffix string)
 				out[name] = FileFromLayer{Data: b, DiffID: l.DiffID}
 				found[name] = true
 				return nil
+			default:
+				// A directory, device or FIFO at this name: the image has no
+				// file here, and a lower layer's copy is shadowed (A10).
+				found[name] = true
+				return nil
 			}
-			return nil
 		})
 		if err != nil {
 			return nil, 0, fmt.Errorf("read layer %s: %w", l.DiffID, err)
