@@ -981,6 +981,10 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] 같은 버전에서는 닫는 이벤트가 여는 이벤트보다 먼저 정렬되고, 한 버전에서 열리고 닫히는 창은 따로
       판정 (D154, 감사 A7) — 뒤 창을 먼저 적은 range 가 앞 창이 닫히는 버전에서 그 창을 닫아 버리지
       않음; 공개 데이터베이스의 동률 range 전체에 대한 판정 2,892 건이 그대로
+- [x] gem 의 플랫폼은 버전의 일부가 아님 (D155, 감사 A6) — Gemfile.lock 은 bundler 의 문법대로, SBOM
+      purl 은 Gem::Platform 이 OS 를 읽어 내거나 purl 의 qualifier 가 말할 때; purl 은 VEX 를 위해 플랫폼을
+      유지; rails/rails 의 Gemfile.lock: 불완전 검사 130 → 0, x86_64 빌드에서 놓치던 발견 26 건, 오탐 2 건
+      제거
 - [x] MinimOS와 Echo (D92) — D88 템플릿이 그대로 통함(upstream을 통한 CVE, 조인
       변경 없음); Echo는 deb comparer, 커스텀 접미사 둘, 그리고 우연히 안전한 게
       아닌 "1" not-affected sentinel을 가져옴; reg.mini.dev/nginx는 15/15로 스캔됨

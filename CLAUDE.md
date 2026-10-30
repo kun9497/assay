@@ -120,7 +120,8 @@ dist tag, and since D152 the source's EVR from that purl, so a subpackage is jud
 source's version under the source's name; since D153 an image's rpmdb does the same, the
 SRPM's version-release with the main package's epoch, and no epoch on Azure Linux or Photon
 keys). Since D154 a range's close sorts before an open at the same version, and a window
-that opens and closes at one version is judged on its own. Since D150 a signature payload that could not
+that opens and closes at one version is judged on its own. Since D155 a gem's platform
+(`1.13.8-x86_64-linux`) is not part of its version, in a Gemfile.lock or an SBOM purl. Since D150 a signature payload that could not
 be fetched is `ErrSignatureUnreadable`, not `ErrNoKeyVerifies`; since D151 `install.sh` reads
 the signature through base64's stdin and its harness runs on macOS CI. Not built: pep440 leniency (see
 `docs/DESIGN.md` and `docs/deferred-decisions.md`).

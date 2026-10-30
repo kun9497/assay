@@ -72,7 +72,7 @@ func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, error) {
 			continue
 		}
 
-		name, version, ok := specLine(line)
+		name, version, locked, ok := specLine(line)
 		if !ok {
 			// Indented correctly but not "name (version)" - malformed rather
 			// than absent. Counted, not dropped: a spec line that vanishes
@@ -105,7 +105,10 @@ func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, error) {
 			// normalization happens once, at match time
 			// (pkgmeta.NormalizeName), not duplicated here.
 			Ecosystem: "RubyGems",
-			PURL:      "pkg:gem/" + name + "@" + version,
+			// The lockfile's own spelling, platform included, which is
+			// what syft writes too: a VEX statement written against a
+			// syft SBOM names this purl (D121's reason for OS packages).
+			PURL:      "pkg:gem/" + name + "@" + locked,
 			Locations: []pkgmeta.Location{{Path: path}},
 		})
 	}
@@ -127,23 +130,30 @@ func leadingSpaces(line string) int {
 }
 
 // specLine parses a "specs:" entry already known to sit at exactly 4 spaces
-// of indent: "name (version)", optionally with a platform suffix bundler
-// appends for a native gem ("nokogiri (1.13.8-x86_64-linux)"). That suffix is
-// kept as part of the version rather than stripped - the Comparer, not this
-// cataloger, owns what counts as an equivalent version (D9).
-func specLine(line string) (name, version string, ok bool) {
+// of indent: "name (version)", optionally with the platform bundler appends
+// for a native gem ("nokogiri (1.13.8-x86_64-linux)"). It returns the
+// version alone and, as locked, the text between the parentheses.
+//
+// The platform is not part of the version (audit A6, D155). Bundler's own
+// grammar (lockfile_parser.rb, NAME_VERSION) reads the version up to the
+// first hyphen and the platform after it, and RubyGems rewrites any hyphen in
+// a real version to ".pre.", so a lockfile version never holds one. Kept in
+// the version, the platform read as a prerelease ("1.13.8.pre.arm64.pre.darwin",
+// below 1.13.8) or, with x86_64's underscore, as no version at all.
+func specLine(line string) (name, version, locked string, ok bool) {
 	trimmed := strings.TrimSpace(line)
 	if !strings.HasSuffix(trimmed, ")") {
-		return "", "", false
+		return "", "", "", false
 	}
 	open := strings.LastIndex(trimmed, " (")
 	if open < 0 {
-		return "", "", false
+		return "", "", "", false
 	}
 	name = trimmed[:open]
-	version = trimmed[open+2 : len(trimmed)-1]
+	locked = trimmed[open+2 : len(trimmed)-1]
+	version, _, _ = strings.Cut(locked, "-")
 	if name == "" || version == "" {
-		return "", "", false
+		return "", "", "", false
 	}
-	return name, version, true
+	return name, version, locked, true
 }

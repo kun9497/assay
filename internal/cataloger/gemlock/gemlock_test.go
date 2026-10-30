@@ -151,23 +151,30 @@ func TestSpecLine(t *testing.T) {
 		line        string
 		wantName    string
 		wantVersion string
+		wantLocked  string
 		ok          bool
 	}{
-		{"rails (7.0.4)", "rails", "7.0.4", true},
-		// A native gem's platform suffix is kept as part of the version -
-		// the Comparer owns what counts as equivalent, not this cataloger.
-		{"nokogiri (1.13.8-x86_64-linux)", "nokogiri", "1.13.8-x86_64-linux", true},
-		{"no-parens-here", "", "", false},
-		{"missing-close (1.0.0", "", "", false},
-		{"() ", "", "", false},
-		{" (1.0.0)", "", "", false},
-		{"name ()", "", "", false},
+		{"rails (7.0.4)", "rails", "7.0.4", "7.0.4", true},
+		// A native gem's platform is not part of its version (A6, D155):
+		// bundler reads the version up to the first hyphen. The locked text
+		// keeps it, for the purl.
+		{"nokogiri (1.13.8-x86_64-linux)", "nokogiri", "1.13.8", "1.13.8-x86_64-linux", true},
+		{"ffi (1.17.0-x86_64-linux-musl)", "ffi", "1.17.0", "1.17.0-x86_64-linux-musl", true},
+		{"jruby-openssl (0.14.2-java)", "jruby-openssl", "0.14.2", "0.14.2-java", true},
+		{"rack (3.0.0.rc1)", "rack", "3.0.0.rc1", "3.0.0.rc1", true},
+		// A platform with no version before it leaves nothing to compare.
+		{"broken (-x86_64-linux)", "", "", "", false},
+		{"no-parens-here", "", "", "", false},
+		{"missing-close (1.0.0", "", "", "", false},
+		{"() ", "", "", "", false},
+		{" (1.0.0)", "", "", "", false},
+		{"name ()", "", "", "", false},
 	}
 	for _, tc := range cases {
-		name, version, ok := specLine(tc.line)
-		if name != tc.wantName || version != tc.wantVersion || ok != tc.ok {
-			t.Errorf("specLine(%q) = %q, %q, %v; want %q, %q, %v",
-				tc.line, name, version, ok, tc.wantName, tc.wantVersion, tc.ok)
+		name, version, locked, ok := specLine(tc.line)
+		if name != tc.wantName || version != tc.wantVersion || locked != tc.wantLocked || ok != tc.ok {
+			t.Errorf("specLine(%q) = %q, %q, %q, %v; want %q, %q, %q, %v",
+				tc.line, name, version, locked, ok, tc.wantName, tc.wantVersion, tc.wantLocked, tc.ok)
 		}
 	}
 }
@@ -191,5 +198,23 @@ func TestParse_EcosystemAndPURL(t *testing.T) {
 	}
 	if p.PURL != "pkg:gem/serde-fixture@1.0.196" {
 		t.Errorf("PURL = %q, want pkg:gem/serde-fixture@1.0.196", p.PURL)
+	}
+}
+
+// A native gem's version loses its platform (A6, D155) but its purl keeps
+// the lockfile's spelling, which is what syft writes: a VEX statement written
+// against a syft SBOM names that purl, and must still reach this package.
+func TestParse_NativeGemVersionAndPURL(t *testing.T) {
+	path := write(t, "GEM\n  remote: https://rubygems.org/\n  specs:\n    nokogiri (1.13.8-x86_64-linux)\n")
+
+	pkgs, _, err := Parse(path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(pkgs) != 1 {
+		t.Fatalf("packages = %+v, want one", pkgs)
+	}
+	if p := pkgs[0]; p.Version != "1.13.8" || p.PURL != "pkg:gem/nokogiri@1.13.8-x86_64-linux" {
+		t.Errorf("Version, PURL = %q, %q; want 1.13.8, pkg:gem/nokogiri@1.13.8-x86_64-linux", p.Version, p.PURL)
 	}
 }
