@@ -7038,6 +7038,108 @@ dropping its platform, which had survived. The mutations were:
 
 ---
 
+### D156 — A CVSS v2-only rating is banded from the v2 base score, as a fallback only
+
+**Decision.** `severity.HighestDetail` scores a record's vectors as before, taking the
+highest of its CVSS v3, v4 and vendor words. Only when none of them scores does it fall
+back to CVSS v2. In that case it computes each v2 base vector's score with the
+specification's own formula (§3.2.1) and bands it on NVD's v2 table:
+
+| Band | v2 base score |
+|---|---|
+| Low | 0.0–3.9 |
+| Medium | 4.0–6.9 |
+| High | 7.0–10.0 |
+
+v2 has no Critical band, and 0.0 is Low there, not None.
+
+A v2 vector is read only as NVD stores it: the six base metrics in order, upper-case,
+nothing before or after. Anything else stays unscorable. `severity.Of` still refuses a v2
+vector, so no caller can put one beside v3 in a max. A rating banded this way says so:
+`matcher.Rating.FromCVSSv2`, the JSON report's `ratings[].cvssV2` (schema 15, additive),
+and `(CVSS v2)` on its `--explain` line (D10).
+
+Two consequences outside the scorer:
+- **Bands outrank scores.** A finding's ratings rank by band first and score second
+  (`matcher.beats`). For every other scorer the two orders agree. v2's do not, because 10.0
+  is High in v2 and 9.0 is Critical under v3 or a vendor word.
+- **SARIF stays in the band.** `security-severity` never goes above the top of the finding's
+  band, so a High is written as at most 8.9. GitHub code scanning reads anything above 8.9
+  as critical.
+
+**Why.** The 2026-10-22 audit (A14). NVD rates a CVE it has never re-scored with a v2
+vector only. The vector was stored (D13), but nothing scored it, so the finding stayed
+`unknown`: counted as rated, banded as nothing.
+
+On the published database (2026-10-27), 72,405 of 391,806 NVD ratings are v2-only. All but
+215 of them are CVEs from before 2016, by CVE ID year. With the fallback they band as high
+29,227, medium 37,895 and low 5,283.
+
+D17 is not in tension with this. It forbids coercing an *absent* severity, and a v2 score
+is one NVD actually published.
+
+v2 is a fallback and not a peer because a plain max would raise 2,272 NVD ratings that
+carry both, on the strength of the older and coarser metric. Across sources D25's
+highest-wins rule still applies, on bands. The user chose the fallback over keeping v2 as
+unknown, and over taking it into the max.
+
+The first version ranked a finding's ratings by score alone, as every finding had been
+ranked until then. Under that ranking an NVD v2 High of 10.0 outranked another source's v3
+Critical of 9.8, the finding dropped to high, and `--fail-on critical` stopped firing. The
+branch review (wf_11dec29e-171) found it, together with the SARIF mismatch and a `-0.0`
+score.
+
+**Measured.** All 311 distinct v2 vectors among those ratings were cross-checked: each was
+scored for one of its CVEs and compared with the base score and severity NVD's API
+publishes for that CVE. All 311 agree, score and band, with 0 differences.
+
+**Gives up.** A v2 vector with temporal or environmental metrics appended is refused rather
+than scored on its base alone; NVD stores the base vector, so none was seen. A band from v2
+can be higher than the same CVE's later v3 band would have been. The rating says it came
+from v2, and the finding's other ratings are unchanged.
+
+**Verified.**
+- **The matcher.** `TestMatch_D156_*` covers a v2-only NVD annotation banding the finding,
+  v3 beating a higher v2 in the same rating, and an advisory's own v2 vector banding its own
+  rating. The memo is checked too: a cache hit keeps the v2 origin.
+- **The severity package.** 21 known v2 base scores, including the band edges 6.9, 7.0 and
+  4.0 and every metric weight, plus +0 for a vector with no impact. Malformed vectors are refused, among them a misnamed metric and
+  one out of order with every value valid where it sits. The fallback's rules are covered:
+  v3 and vendor words win, unscorable vectors do not block it, and the higher of two v2
+  vectors wins in either order.
+- **Bands outrank scores.** A v3 Critical of 9.8 beats a v2 High of 10.0, and a vendor
+  Critical beats a v2 High of 9.3. A v2 Low beats a v3 None at the same 0.0, whichever
+  database name sorts first.
+- **The report.** JSON carries `cvssV2` on the v2 rating only, and `--explain` marks that
+  line only. SARIF writes a High of 9.3 or 10.0 as 8.9, and leaves 7.5, a Critical and a
+  Medium as they are.
+
+Seventeen mutations were run and sixteen caught:
+- the fallback removed, or v2 made a peer;
+- the first v2 taken instead of the highest;
+- the flag never set;
+- no f(Impact);
+- High starting at 6.9;
+- trailing metrics accepted;
+- metric names unchecked;
+- the AV:A weight changed;
+- rounding truncated;
+- the flag lost on a record's own rating, on an annotation, or on a cache hit;
+- the JSON field dropped, or the explain mark dropped;
+- `Of` scoring v2.
+
+The survivor moves Medium's lower edge to 3.9. It is an equivalent: no v2 base vector
+scores 3.9 (all 729 computed), and the code says so.
+
+Seven more mutations were run on the review's fixes, and all were caught:
+- the band-first ranking removed;
+- the SARIF cap removed, or set to 9.0;
+- -0 restored;
+- High's edge made exclusive;
+- the last v2 taken, or the first.
+
+---
+
 ### D158 — SARIF says what the cataloger could not read
 
 **Decision.** SARIF output carries one `assay/not-evaluated` result for each nonzero

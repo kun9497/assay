@@ -1,0 +1,171 @@
+package matcher
+
+import (
+	"testing"
+
+	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/severity"
+)
+
+// D156 (audit A14): NVD rates every CVE from before 2016 it never re-scored
+// with a CVSS v2 vector only -- 72,405 of 391,806 NVD ratings in the
+// published database of 2026-10-27, none of them rated by any other source.
+// The vector was stored (D13) but nothing scored v2, so the finding stayed
+// unknown: counted as rated, banded as nothing. It is now scored from the v2
+// base formula onto NVD's own v2 bands, used only when nothing else in that
+// rating scores, and the rating says it came from v2 (D10).
+func TestMatch_D156_AV2OnlyNVDRatingBandsTheFinding(t *testing.T) {
+	a := advWithRange("DSA-D156-0001", "PyPI", "django", "0", "3.2.13", advisory.RangeEcosystem)
+	a.Aliases = []string{"CVE-2014-0001"}
+	s := fakeStore{
+		byKey: map[string][]advisory.Advisory{key("PyPI", "django"): {a}},
+		ratings: map[string][]advisory.Rating{"CVE-2014-0001": {{
+			CVE: "CVE-2014-0001", Source: "NVD",
+			Severity: []advisory.Severity{{Type: "CVSS_V2", Score: "AV:N/AC:L/Au:N/C:P/I:P/A:P"}},
+		}}},
+	}
+	res, err := New(s).Match(djangoTarget())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("got %d findings, want 1", len(res.Findings))
+	}
+	f := res.Findings[0]
+	if f.Severity != severity.High || f.Score != 7.5 {
+		t.Errorf("finding = %v %.1f, want high 7.5 from NVD's v2 vector", f.Severity, f.Score)
+	}
+	var nvd *Rating
+	for i := range f.Ratings {
+		if f.Ratings[i].Database == "NVD" {
+			nvd = &f.Ratings[i]
+		}
+	}
+	if nvd == nil || nvd.Severity != severity.High || !nvd.FromCVSSv2 {
+		t.Errorf("NVD rating = %+v, want high, marked as from CVSS v2", nvd)
+	}
+	for _, r := range f.Ratings {
+		if r.Database != "NVD" && r.FromCVSSv2 {
+			t.Errorf("rating %s is marked as from CVSS v2; only NVD's is", r.Database)
+		}
+	}
+}
+
+// v2 is a fallback, never a peer: a rating that carries a v3 vector too is
+// banded by v3 alone, even where v2 scores it higher (2,272 published NVD
+// ratings would move up under a plain max).
+func TestMatch_D156_V3BeatsV2InTheSameRating(t *testing.T) {
+	a := advWithRange("DSA-D156-0002", "PyPI", "django", "0", "3.2.13", advisory.RangeEcosystem)
+	a.Aliases = []string{"CVE-2015-0002"}
+	s := fakeStore{
+		byKey: map[string][]advisory.Advisory{key("PyPI", "django"): {a}},
+		ratings: map[string][]advisory.Rating{"CVE-2015-0002": {{
+			CVE: "CVE-2015-0002", Source: "NVD",
+			Severity: []advisory.Severity{
+				{Type: "CVSS_V2", Score: "AV:N/AC:L/Au:N/C:C/I:C/A:C"},
+				{Type: "CVSS_V3", Score: "CVSS:3.1/AV:L/AC:H/PR:H/UI:R/S:U/C:L/I:N/A:N"},
+			},
+		}}},
+	}
+	res, err := New(s).Match(djangoTarget())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := res.Findings[0]
+	if f.Severity != severity.Low {
+		t.Errorf("finding = %v %.1f, want low from the v3 vector alone", f.Severity, f.Score)
+	}
+	for _, r := range f.Ratings {
+		if r.FromCVSSv2 {
+			t.Errorf("rating %s is marked as from CVSS v2, but v3 banded it", r.Database)
+		}
+	}
+}
+
+// An advisory's own CVSS v2 vector -- OSV defines a CVSS_V2 severity type, and
+// a record carrying only that was unknown too -- is banded the same way, and
+// its own rating says so.
+func TestMatch_D156_AnAdvisorysOwnV2VectorBandsItsRating(t *testing.T) {
+	a := advWithRange("GHSA-d156-0003", "PyPI", "django", "0", "3.2.13", advisory.RangeEcosystem)
+	a.Severity = []advisory.Severity{{Type: "CVSS_V2", Score: "AV:N/AC:M/Au:N/C:P/I:P/A:P"}}
+	s := fakeStore{byKey: map[string][]advisory.Advisory{key("PyPI", "django"): {a}}}
+	res, err := New(s).Match(djangoTarget())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := res.Findings[0]
+	if f.Severity != severity.Medium || f.Score != 6.8 || len(f.Ratings) != 1 || !f.Ratings[0].FromCVSSv2 {
+		t.Errorf("finding = %v %.1f, ratings %+v; want medium 6.8 with its one rating marked from CVSS v2", f.Severity, f.Score, f.Ratings)
+	}
+}
+
+// Branch review wf_11dec29e-171: beats() ranked ratings by score alone, which
+// was safe while every scorer banded through one score-to-band table. v2's
+// does not -- 10.0 is High there, and 9.0 is Critical under v3 or a vendor
+// word -- so an NVD v2-only High outscored another source's Critical and the
+// finding dropped to high: --fail-on critical stopped firing and the GHSA
+// record was shown with a band it never gave. Ratings are ranked by band
+// first now, then by score (D25: a finding is as severe as its worst band).
+func TestMatch_D156_AV2ScoreNeverOutranksAHigherBand(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		own       advisory.Severity
+		v2        string
+		wantBand  severity.Band
+		wantShown string
+	}{
+		{"v3 critical 9.8 against v2 high 10.0",
+			advisory.Severity{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"},
+			"AV:N/AC:L/Au:N/C:C/I:C/A:C", severity.Critical, "GHSA-D156-0004"},
+		{"vendor Critical 9.0 against v2 high 9.3",
+			advisory.Severity{Type: "VENDOR_WORD", Score: "Critical"},
+			"AV:N/AC:M/Au:N/C:C/I:C/A:C", severity.Critical, "GHSA-D156-0004"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := advWithRange("GHSA-D156-0004", "PyPI", "django", "0", "3.2.13", advisory.RangeEcosystem)
+			a.Aliases = []string{"CVE-2014-0004"}
+			a.Severity = []advisory.Severity{tc.own}
+			s := fakeStore{
+				byKey: map[string][]advisory.Advisory{key("PyPI", "django"): {a}},
+				ratings: map[string][]advisory.Rating{"CVE-2014-0004": {{
+					CVE: "CVE-2014-0004", Source: "NVD",
+					Severity: []advisory.Severity{{Type: "CVSS_V2", Score: tc.v2}},
+				}}},
+			}
+			res, err := New(s).Match(djangoTarget())
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := res.Findings[0]
+			if f.Severity != tc.wantBand || f.Advisory.ID != tc.wantShown {
+				t.Errorf("finding = %v %.1f shown as %s, want %v shown as %s", f.Severity, f.Score, f.Advisory.ID, tc.wantBand, tc.wantShown)
+			}
+		})
+	}
+}
+
+// v2's 0.0 is Low (NVD's v2 table), v3's 0.0 is None. With equal scores the
+// tie fell to database name, so the finding's band depended on what a source
+// was called. Band first: Low, whichever name sorts first.
+func TestMatch_D156_AV2LowBeatsAV3NoneAtTheSameScore(t *testing.T) {
+	for _, db := range []string{"AAA", "ZZZ"} {
+		a := advWithRange("REC-D156-0005", "PyPI", "django", "0", "3.2.13", advisory.RangeEcosystem)
+		a.Database = db
+		a.Aliases = []string{"CVE-2014-0005"}
+		a.Severity = []advisory.Severity{{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N"}}
+		s := fakeStore{
+			byKey: map[string][]advisory.Advisory{key("PyPI", "django"): {a}},
+			ratings: map[string][]advisory.Rating{"CVE-2014-0005": {{
+				CVE: "CVE-2014-0005", Source: "NVD",
+				Severity: []advisory.Severity{{Type: "CVSS_V2", Score: "AV:N/AC:L/Au:N/C:N/I:N/A:N"}},
+			}}},
+		}
+		res, err := New(s).Match(djangoTarget())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f := res.Findings[0]; f.Severity != severity.Low {
+			t.Errorf("database %s: finding = %v, want low (v2 0.0 is Low; v3 0.0 is None)", db, f.Severity)
+		}
+	}
+}

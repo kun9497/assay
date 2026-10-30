@@ -1031,6 +1031,10 @@ exited 0 while 24 findings went unmentioned.
       at one version is judged on its own (D154, audit A7) — a range listing a later window
       first no longer shuts it at the version the earlier one closes; 2,892 judgments over
       every tied range in the published database unchanged
+- [x] A CVSS v2-only rating is banded from the v2 base score, as a fallback only (D156,
+      audit A14) — NVD's v2 table, never above v3/v4/vendor words in one record; 72,405 NVD
+      ratings stop being unknown; all 311 distinct vectors agree with NVD's published scores;
+      JSON `ratings[].cvssV2` (schema 15) and `(CVSS v2)` in --explain
 - [x] SARIF says what the cataloger could not read (D158, audit A16) — one
       `assay/not-evaluated` result per nonzero counter (no version, no purl: warning;
       unsupported ecosystem: note), where code scanning had shown a clean scan
