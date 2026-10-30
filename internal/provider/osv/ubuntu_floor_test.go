@@ -117,15 +117,28 @@ func TestFetch_D157_ATrackerThatStampsNothingFailsTheBuild(t *testing.T) {
 	}
 }
 
-// The count the publish guard holds (D157's second half) rides on the
-// provider's provenance.
-func TestFetch_D157_ProvenanceCarriesTheStampedCount(t *testing.T) {
+// What the zero-stamp check must not refuse (branch review wf_4cdf11d7-722):
+// a tracker whose only states are not-fixed stamps them, and a build whose
+// Ubuntu ranges all carry a fix has nothing fix-less to stamp at all.
+func TestFetch_D157_ALegitimateTrackerStillBuilds(t *testing.T) {
 	requireGit(t)
-	prov, _, err := fetchUbuntuWith(t, initFixtureTrackerRepo(t))
-	if err != nil {
-		t.Fatal(err)
+	if _, progress, err := fetchUbuntuWith(t, trackerRepo(t, map[string]string{
+		"active/CVE-2026-9100": "Candidate: CVE-2026-9100\n\nPatches_x:\njammy_x: needed\n",
+	})); err != nil || !strings.Contains(progress, "1 range(s) stamped not-fixed") {
+		t.Errorf("a not-fixed-only tracker: Fetch error = %v, progress %q; want it built, one range stamped not-fixed", err, progress)
 	}
-	if prov.UbuntuFixStates != 1 {
-		t.Errorf("Provenance.UbuntuFixStates = %d, want 1 (the one jammy_x: ignored range)", prov.UbuntuFixStates)
+
+	body := zipWith(t, map[string]string{
+		"UBUNTU-CVE-2026-9100.json": `{"id":"UBUNTU-CVE-2026-9100","upstream":["CVE-2026-9100"],
+			"affected":[{"package":{"name":"x","ecosystem":"Ubuntu:22.04:LTS"},
+				"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1.0-1"}]}]}]}`,
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(body) }))
+	defer srv.Close()
+	p := New([]string{"Ubuntu"}, srv.URL).WithProgress(&strings.Builder{}).WithUbuntuTracker(true)
+	p.ubuntuTrackerURL = initFixtureTrackerRepo(t)
+	p.ubuntuSpoolDir = filepath.Join(t.TempDir(), "spool")
+	if _, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil }); err != nil {
+		t.Errorf("an archive with nothing fix-less: Fetch error = %v, want it built", err)
 	}
 }

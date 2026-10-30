@@ -16,7 +16,7 @@ func TestCoverageAnnotations_RoundTripAndRejectInvalidValues(t *testing.T) {
 	if err := os.WriteFile(path, []byte("fixture"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	want := Meta{SchemaVersion: 9, RatingCount: 3, RatingCounts: map[string]int{"NVD": 2, "KEV": 1}, Advisories: &AdvisoryCoverage{Total: 10, Counts: map[string]int{"Go": 9, "npm": 2}, Ecosystems: []string{"Go", "npm"}, Providers: []string{"osv"}}}
+	want := Meta{SchemaVersion: 9, RatingCount: 3, RatingCounts: map[string]int{"NVD": 2, "KEV": 1}, Advisories: &AdvisoryCoverage{Total: 10, Counts: map[string]int{"Go": 9, "npm": 2}, Ecosystems: []string{"Go", "npm"}, Providers: []string{"osv"}}, UbuntuFixStates: map[string]int{"Ubuntu:22.04:LTS": 7, "Ubuntu:26.04:LTS": 0}}
 	img, err := Pack(path, want)
 	if err != nil {
 		t.Fatal(err)
@@ -25,12 +25,16 @@ func TestCoverageAnnotations_RoundTripAndRejectInvalidValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got.Advisories, want.Advisories) || !reflect.DeepEqual(got.RatingCounts, want.RatingCounts) {
+	if !reflect.DeepEqual(got.Advisories, want.Advisories) || !reflect.DeepEqual(got.RatingCounts, want.RatingCounts) ||
+		!reflect.DeepEqual(got.UbuntuFixStates, want.UbuntuFixStates) {
 		t.Fatalf("metadata lost: %+v", got)
 	}
 	for _, tc := range []struct{ annotation, value string }{
 		{AnnotationAdvisories, `null`}, {AnnotationAdvisories, `{broken`}, {AnnotationAdvisories, `{"total":-1,"counts":{}}`}, {AnnotationAdvisories, `{"total":1,"counts":{"Go":2}}`},
 		{AnnotationRatingCounts, `null`}, {AnnotationRatingCounts, `{"NVD":-1}`},
+		// D157: a corrupt count must fail the check, not read as absent and
+		// let a push through unguarded.
+		{AnnotationUbuntuFixStates, `null`}, {AnnotationUbuntuFixStates, `{broken`}, {AnnotationUbuntuFixStates, `{"Ubuntu:22.04:LTS":-1}`},
 	} {
 		t.Run(tc.annotation+tc.value, func(t *testing.T) {
 			bad := mutate.Annotations(img, map[string]string{tc.annotation: tc.value}).(v1.Image)

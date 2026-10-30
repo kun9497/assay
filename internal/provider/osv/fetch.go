@@ -385,7 +385,6 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 				"any of %d fix-less Ubuntu range(s); set UBUNTU_TRACKER_ENABLE=0 to build without Ubuntu fix states",
 				st.UbuntuTuplesLoaded, st.UbuntuFixless)
 		}
-		prov.UbuntuFixStates = stamped
 	}
 	return prov, nil
 }

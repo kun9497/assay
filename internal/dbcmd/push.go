@@ -17,6 +17,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 
+	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/dbartifact"
 	"github.com/kun9497/assay/internal/store"
 )
@@ -370,7 +371,7 @@ func refuseCoverageRegression(ctx context.Context, target name.Reference, incomi
 	if err != nil {
 		return coverageCheckFailed(err, force, stderr)
 	}
-	if cur.Advisories == nil || cur.RatingCounts == nil {
+	if cur.Advisories == nil || cur.RatingCounts == nil || cur.UbuntuFixStates == nil {
 		// Existing schema tags predate these annotations. Read their bytes
 		// once so the first upgraded publisher has a real baseline too.
 		dir, err := os.MkdirTemp("", "assay-coverage-")
@@ -390,10 +391,17 @@ func refuseCoverageRegression(ctx context.Context, target name.Reference, incomi
 		// not otherwise prove ran, and the first publish after the
 		// annotations landed is exactly when a reader wants to know the
 		// baseline came from real bytes rather than a missing field.
-		fmt.Fprintf(stderr, "%s carries no advisory-coverage annotation; comparing against a baseline unpacked from its layer (%d advisories, %d rating source(s))\n",
-			compared, baseline.Advisories.Total, len(baseline.RatingCounts))
-		cur.Advisories = baseline.Advisories
-		cur.RatingCounts = baseline.RatingCounts
+		fmt.Fprintf(stderr, "%s lacks a coverage annotation; comparing against a baseline unpacked from its layer (%d advisories, %d rating source(s), %d Ubuntu key(s) with fix states)\n",
+			compared, baseline.Advisories.Total, len(baseline.RatingCounts), len(baseline.UbuntuFixStates))
+		if cur.Advisories == nil {
+			cur.Advisories = baseline.Advisories
+		}
+		if cur.RatingCounts == nil {
+			cur.RatingCounts = baseline.RatingCounts
+		}
+		if cur.UbuntuFixStates == nil {
+			cur.UbuntuFixStates = baseline.UbuntuFixStates
+		}
 	}
 
 	var why string
@@ -536,46 +544,76 @@ func artifactMetaFromDB(path string) (dbartifact.Meta, error) {
 		return dbartifact.Meta{}, err
 	}
 	asOf, source := oldestDataAsOf(m)
-	// D157: recorded whenever this database covers Ubuntu at all, so a
-	// zero -- tracker disabled or lost -- is a value the guard can hold
-	// against the published count rather than an absence it skips.
-	fixStates, fixStatesKnown := 0, false
-	for _, name := range sortedKeys(m.Providers) {
-		p := m.Providers[name]
-		fixStates += p.UbuntuFixStates
-		for _, eco := range p.Ecosystems {
-			if strings.HasPrefix(eco, "Ubuntu:") {
-				fixStatesKnown = true
-				break
-			}
-		}
+	fixStates, err := ubuntuFixStates(db, m.Ecosystems)
+	if err != nil {
+		return dbartifact.Meta{}, err
 	}
 	return dbartifact.Meta{
 		SchemaVersion: m.Schema, BuiltAt: m.BuiltAt, DataAsOf: asOf, DataAsOfSource: source,
 		RatingsSince: ratingBound(m), RatingsSinceKnown: ratingBoundKnown(m), RatingCount: totalRatings(m), RatingCounts: ratingCounts,
 		RatingWithdrawals: withdrawals,
 		Advisories:        &dbartifact.AdvisoryCoverage{Total: total, Counts: coveredCounts, Ecosystems: m.Ecosystems, Providers: sortedKeys(m.Providers), Renamed: renamed},
-		UbuntuFixStates:   fixStates, UbuntuFixStatesKnown: fixStatesKnown,
+		UbuntuFixStates:   fixStates,
 	}, nil
 }
 
-// ubuntuFixStateRegression refuses a candidate holding fewer than 80% of the
-// published artifact's Ubuntu fix states (D157). The build already fails on a
-// tracker that yields nothing; a tracker that loses part of itself -- active/
-// moved while retired/ stays -- still stamps something, and only a comparison
-// sees it. 80% because the tracker moves on its own (2,070,238 states on
-// 2026-10-27, 2,094,636 two days later) and losing one release's states is a
-// drop of a quarter or more. An artifact that predates the annotation has no
-// count to compare and is not refused for it.
+// ubuntuFixStates counts, per covered Ubuntu key, the ranges this database
+// holds with a wont-fix or not-fixed state (D157) -- read from the records,
+// not from what this build's provider reported, so a key D110 carried forward
+// from the seed counts with the fix states it carries. Every covered Ubuntu
+// key is present, at zero if it holds none; the map is never nil, so the
+// annotation is always written and a later push need not unpack this
+// artifact to learn it. A full pass over the records: 153 s for the 1.8M of
+// the 2026-10-27 database on a workstation, once per push.
+func ubuntuFixStates(db *store.Bolt, covered []string) (map[string]int, error) {
+	out := map[string]int{}
+	for _, eco := range covered {
+		if strings.HasPrefix(eco, "Ubuntu:") {
+			out[eco] = 0
+		}
+	}
+	if len(out) == 0 {
+		return out, nil
+	}
+	err := db.EachAdvisory(func(a advisory.Advisory) error {
+		for _, af := range a.Affected {
+			if _, ok := out[af.Ecosystem]; !ok {
+				continue
+			}
+			for _, r := range af.Ranges {
+				if r.FixState == advisory.FixStateWontFix || r.FixState == advisory.FixStateNotFixed {
+					out[af.Ecosystem]++
+				}
+			}
+		}
+		return nil
+	})
+	return out, err
+}
+
+// ubuntuFixStateRegression refuses a candidate in which any Ubuntu key holds
+// fewer than 80% of the published artifact's fix states for that key (D157).
+// The build already fails on a tracker that yields nothing; a tracker that
+// loses part of itself still stamps something, and only a comparison sees
+// it. Per key, because a whole-total floor misses losing most single
+// releases: on the 2026-10-27 database only 22.04 (712,232) and 20.04
+// (551,143) were a fifth of the 2,041,922 total, and a stale codename table
+// drops the newest release, the smallest (26.04: 60,628). 80% leaves room for
+// a release whose fixes land in a batch. A key the candidate lacks counts as
+// zero.
 func ubuntuFixStateRegression(cur, incoming dbartifact.Meta) string {
-	if !cur.UbuntuFixStatesKnown || cur.UbuntuFixStates == 0 {
+	var lost []string
+	for _, key := range sortedKeys(cur.UbuntuFixStates) {
+		before, after := cur.UbuntuFixStates[key], incoming.UbuntuFixStates[key]
+		if after*5 < before*4 {
+			lost = append(lost, fmt.Sprintf("%s %d -> %d", key, before, after))
+		}
+	}
+	if len(lost) == 0 {
 		return ""
 	}
-	if incoming.UbuntuFixStates*5 >= cur.UbuntuFixStates*4 {
-		return ""
-	}
-	return fmt.Sprintf("Ubuntu fix states from Canonical's tracker fall from %d to %d, below 80%% of the published count "+
-		"(a tracker that stopped parsing, or UBUNTU_TRACKER_ENABLE=0)", cur.UbuntuFixStates, incoming.UbuntuFixStates)
+	return fmt.Sprintf("Ubuntu fix states from Canonical's tracker fall below 80%% of the published count for %s "+
+		"(a tracker that stopped parsing, or UBUNTU_TRACKER_ENABLE=0)", strings.Join(lost, ", "))
 }
 
 // renamedKeys is the union of every provider's rename declaration (D115),

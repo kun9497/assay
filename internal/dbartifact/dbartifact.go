@@ -83,9 +83,9 @@ const (
 	AnnotationRatingCount  = "dev.assay.rating-count"
 	AnnotationRatingCounts = "dev.assay.rating-counts"
 	AnnotationAdvisories   = "dev.assay.advisory-coverage"
-	// AnnotationUbuntuFixStates is how many Ubuntu ranges the build stamped
-	// with a fix state from Canonical's tracker (D157), the count the
-	// publish guard holds a candidate to.
+	// AnnotationUbuntuFixStates is, per Ubuntu key, how many ranges the
+	// database holds with a fix state from Canonical's tracker (D157): the
+	// count the publish guard holds a candidate to, release by release.
 	AnnotationUbuntuFixStates = "dev.assay.ubuntu-fix-states"
 )
 
@@ -128,12 +128,12 @@ type Meta struct {
 	// annotation on the published artifact.
 	RatingWithdrawals map[string]int
 	Advisories        *AdvisoryCoverage
-	// UbuntuFixStates is how many Ubuntu ranges carry a fix state stamped
-	// from Canonical's CVE tracker (D157). Known separates a recorded zero
-	// (Ubuntu fetched, tracker disabled or empty) from an artifact that
-	// predates the annotation, which the publish guard does not compare.
-	UbuntuFixStates      int
-	UbuntuFixStatesKnown bool
+	// UbuntuFixStates is, per covered Ubuntu key, how many ranges the
+	// database holds with a wont-fix or not-fixed state (D157) -- however
+	// they came to be there, stamped by this build or carried forward from
+	// the seed (D110). Empty for a database that covers no Ubuntu key; nil
+	// only on an artifact published before the annotation existed.
+	UbuntuFixStates map[string]int
 }
 
 // AdvisoryCoverage separates stored record counts from declared coverage.
@@ -212,8 +212,12 @@ func Pack(dbPath string, m Meta) (v1.Image, error) {
 		}
 		anns[AnnotationRatingCounts] = string(data)
 	}
-	if m.UbuntuFixStatesKnown {
-		anns[AnnotationUbuntuFixStates] = strconv.Itoa(m.UbuntuFixStates)
+	if m.UbuntuFixStates != nil {
+		data, err := json.Marshal(m.UbuntuFixStates)
+		if err != nil {
+			return nil, err
+		}
+		anns[AnnotationUbuntuFixStates] = string(data)
 	}
 	annotated := mutate.Annotations(img, anns)
 	out, ok := annotated.(v1.Image)
@@ -275,11 +279,14 @@ func MetaOf(img v1.Image) (Meta, error) {
 		m.RatingCount = n
 	}
 	if raw, ok := mf.Annotations[AnnotationUbuntuFixStates]; ok {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n < 0 {
-			return Meta{}, fmt.Errorf("invalid %s annotation %q", AnnotationUbuntuFixStates, raw)
+		if err := json.Unmarshal([]byte(raw), &m.UbuntuFixStates); err != nil || m.UbuntuFixStates == nil {
+			return Meta{}, fmt.Errorf("invalid %s annotation", AnnotationUbuntuFixStates)
 		}
-		m.UbuntuFixStates, m.UbuntuFixStatesKnown = n, true
+		for _, n := range m.UbuntuFixStates {
+			if n < 0 {
+				return Meta{}, fmt.Errorf("invalid Ubuntu fix-state count %d", n)
+			}
+		}
 	}
 	if raw, ok := mf.Annotations[AnnotationRatingCounts]; ok {
 		if err := json.Unmarshal([]byte(raw), &m.RatingCounts); err != nil || m.RatingCounts == nil {
