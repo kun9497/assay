@@ -8,6 +8,13 @@
 ## [Unreleased]
 
 ### Fixed
+- Alpine edge 이미지(`VERSION_ID=3.25.0_alpha20260805`)를 안정판 Alpine 3.25 의 advisory 로 판정하지 않고
+  평가되지 않음으로 보고합니다. OSV 에는 edge 생태계가 없습니다. (감사 A11)
+- 기본값이 아닌 `GOEXPERIMENT` 로 빌드한 Go 바이너리(`go1.26.7-X:fieldtrack`)의 stdlib 을 릴리스 버전으로
+  카탈로그합니다. 이전에는 experiment 목록이 어떤 비교도 받아들이지 않는 prerelease 로 읽혀 stdlib advisory
+  가 모두 건너뛰어졌습니다. (감사 A12)
+- 한 패키지의 두 발견을 잇는 레코드로 발견이 합쳐질 때, apk provides 조인과 미러된 advisory 의 출처 표시가
+  표시되는 레코드를 따라갑니다. (감사 A13, D10)
 - `--fail-on-eol` 이 더 이상 하루 일찍 빨간불이 되지 않습니다. 릴리스가 EOLFrom 날의 첫 순간(그 날 KST
   09:00)부터 end of life 로 계산되었는데, D87 은 그 날을 아직 EOL 이 아니라고 약속합니다. 이제 다음 날부터
   EOL 입니다. 연장 지원도 마찬가지로 EOESFrom 날 전체를 덮습니다. 날짜는 UTC 입니다. 같은 비교를 하던
