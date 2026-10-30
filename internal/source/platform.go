@@ -63,6 +63,11 @@ type PlatformChoice struct {
 	// layout's own index.json, which is the layout's table of contents rather
 	// than an image index anyone pushed.
 	IndexDigest string
+	// OuterIndexDigests are the indexes above IndexDigest that the image was
+	// reached through, outermost first: for a nested index, the one that was
+	// asked for. A VEX statement naming any of them names this image
+	// (QA 2026-10-30). A sibling index is not on the path and is not here.
+	OuterIndexDigests []string
 }
 
 // HostPlatform is the platform a scan asks for when --platform is not given:

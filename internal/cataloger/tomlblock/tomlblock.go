@@ -16,7 +16,6 @@
 package tomlblock
 
 import (
-	"bufio"
 	"bytes"
 	"strings"
 )
@@ -47,9 +46,14 @@ func Scan(data []byte) []Block {
 		open, cur = false, Block{}
 	}
 
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	// Split in memory rather than through bufio.Scanner. A Scanner stops at
+	// its first line over 64 KiB, and the stop is a truncation: every block
+	// after the long line is gone, and the caller, which gets no error, counts
+	// what is left as the whole file (QA 2026-10-30: a 70 KiB comment in a
+	// Cargo.lock hid the critical package below it). The caller already holds
+	// the whole file, so there is no line too long to read.
+	for raw := range bytes.Lines(data) {
+		line := strings.TrimSpace(string(raw))
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -92,9 +96,7 @@ func Scan(data []byte) []Block {
 			}
 		}
 	}
-	// A scanner error here is a read failure on an in-memory buffer, which
-	// cannot happen for the callers - they pass a whole file already read.
-	// The last block still has to be closed.
+	// The last block has no header after it to close it.
 	closeBlock()
 
 	return blocks

@@ -465,6 +465,9 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 		// image is D119's record of which platform an image scan read; nil
 		// for every other kind, which the JSON then omits.
 		image *report.ImageRecord
+		// outerIndexes are the indexes above image's IndexDigest that the
+		// image was reached through, for VEX scope only.
+		outerIndexes []string
 	)
 
 	kind, path, err := source.Classify(target)
@@ -513,7 +516,7 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 	// image-loader syntax, not a stripped prefix), so it keeps getting target.
 	switch kind {
 	case source.TargetImage:
-		t, stats, sc, rec, creds, err := catalogImage(ctx, target, opts.Platform, stderr)
+		t, stats, sc, rec, outer, creds, err := catalogImage(ctx, target, opts.Platform, stderr)
 		// D118's source name, never a value; only a registry pull has one.
 		if source.IsRegistryReference(target) {
 			prov.Target.RegistryCredentials = credentialName(creds)
@@ -536,7 +539,7 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 			fmt.Fprintf(stderr, "error: %v\n", err)
 			return 2
 		}
-		inventory, cat, scope, image = t, stats, &sc, rec
+		inventory, cat, scope, image, outerIndexes = t, stats, &sc, rec, outer
 		// D141. The D70 gap, said where a person reading the scan sees it:
 		// before this only the JSON's inventoryScope carried it, and the
 		// table printed "No known vulnerabilities found" over an image whose
@@ -739,7 +742,7 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 	// no VEX document re-evaluates it — one suppression, one reason, and
 	// whichever mechanism ran first wins, rather than a finding silently
 	// carrying two waivers or the second one overwriting the first's reason.
-	if code := applyVEX(&res, opts.VEXFiles, vexTarget(kind, target, image, inventory.Distro), stderr, &prov.Waivers); code != 0 {
+	if code := applyVEX(&res, opts.VEXFiles, vexTarget(kind, target, image, outerIndexes, inventory.Distro), stderr, &prov.Waivers); code != 0 {
 		return code
 	}
 
@@ -1073,7 +1076,7 @@ func applyVEX(res *matcher.Result, paths []string, target vex.Target, stderr io.
 // as typed. Everything else is the zero Target, so a statement naming an
 // image is skipped in an SBOM, directory or binary scan: the scan cannot
 // know it is that image.
-func vexTarget(kind source.TargetKind, target string, image *report.ImageRecord, d *pkgmeta.Distro) vex.Target {
+func vexTarget(kind source.TargetKind, target string, image *report.ImageRecord, outer []string, d *pkgmeta.Distro) vex.Target {
 	var t vex.Target
 	if d != nil && d.ID == "ubuntu" {
 		t.UbuntuCodename = d.VersionCodename
@@ -1086,7 +1089,10 @@ func vexTarget(kind source.TargetKind, target string, image *report.ImageRecord,
 		t.Repository, t.Tag = vex.TargetFromReference(target)
 	}
 	if image != nil {
-		t.Digests = []string{image.ManifestDigest, image.IndexDigest}
+		// Every index on the path to the image, not only the one that listed
+		// it: a statement naming the outer index of a nested one was skipped
+		// (QA 2026-10-30).
+		t.Digests = append([]string{image.ManifestDigest, image.IndexDigest}, outer...)
 	}
 	return t
 }
@@ -1244,7 +1250,10 @@ func decodeSBOM(path string, r io.Reader) (pkgmeta.Target, cyclonedx.Stats, erro
 // JSON record returned for Run to hand the renderers.
 //
 // The credential source is returned too, for the provenance record (D120).
-func catalogImage(ctx context.Context, ref, platform string, stderr io.Writer) (pkgmeta.Target, cyclonedx.Stats, report.InventoryScopeRecord, *report.ImageRecord, source.CredentialSource, error) {
+//
+// outer is every index above the one that listed the image, for VEX scope
+// alone: the report's ImageRecord stays as D119 wrote it.
+func catalogImage(ctx context.Context, ref, platform string, stderr io.Writer) (_ pkgmeta.Target, _ cyclonedx.Stats, _ report.InventoryScopeRecord, _ *report.ImageRecord, outer []string, _ source.CredentialSource, _ error) {
 	img, err := source.Open(ctx, ref, platform)
 	if err != nil {
 		// A 401 or 403 on the manifest is still the D118 source that was
@@ -1255,14 +1264,14 @@ func catalogImage(ctx context.Context, ref, platform string, stderr io.Writer) (
 		if errors.As(err, &ae) {
 			creds = ae.Source
 		}
-		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, nil, creds, err
+		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, nil, nil, creds, err
 	}
 	if c := img.Credentials; c.Source != source.CredentialsNone {
 		fmt.Fprintf(stderr, "registry credentials for %s: from %s\n", c.Registry, c.Source)
 	}
 	rec := reportPlatform(ref, img.Platform, stderr)
 	t, stats, scope, err := catalogFromImage(ctx, ref, img)
-	return t, stats, scope, rec, img.Credentials.Source, err
+	return t, stats, scope, rec, img.Platform.OuterIndexDigests, img.Credentials.Source, err
 }
 
 // reportPlatform prints D119's record line and any warning for one image
