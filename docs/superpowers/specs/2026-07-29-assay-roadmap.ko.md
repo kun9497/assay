@@ -6604,6 +6604,79 @@ java 로 읽힌다. 컨테이너 이미지 안의 gem 은 여전히 전혀 읽�
 
 ---
 
+### D156 — CVSS v2 만 있는 rating 은 v2 base score 로 band 를 매기며, fallback 으로만 쓴다
+
+**결정.** `severity.HighestDetail` 은 레코드의 vector 를 예전처럼 채점하여 CVSS v3, v4 와 벤더 표기 중
+가장 높은 것을 취한다. 그중 아무것도 채점되지 않을 때만 CVSS v2 로 fallback 한다. 이 경우 v2 base
+vector 마다 명세 자신의 공식(§3.2.1)으로 점수를 계산하고, NVD 의 v2 표로 band 를 매긴다:
+
+| Band | v2 base score |
+|---|---|
+| Low | 0.0–3.9 |
+| Medium | 4.0–6.9 |
+| High | 7.0–10.0 |
+
+v2 에는 Critical band 가 없고, 0.0 은 거기서 None 이 아니라 Low 다.
+
+v2 vector 는 NVD 가 저장하는 모양 그대로만 읽는다: 여섯 base metric 이 순서대로, 대문자로, 앞뒤에
+아무것도 없이. 그 외는 채점할 수 없는 채로 둔다. `severity.Of` 는 여전히 v2 vector 를 거부하므로,
+어떤 호출자도 v2 를 v3 옆에 두고 max 를 취할 수 없다. 이렇게 band 가 매겨진 rating 은 그렇다고
+밝힌다: `matcher.Rating.FromCVSSv2`, JSON 보고서의 `ratings[].cvssV2`(schema 15, additive), 그리고
+`--explain` 줄의 `(CVSS v2)` 다(D10).
+
+**이유.** 2026-10-22 감사(A14). NVD 는 한 번도 다시 채점하지 않은 CVE 에 v2 vector 만 달아 둔다. vector
+는 저장되어 있었지만(D13) 아무것도 이를 채점하지 않았고, 그래서 finding 은 `unknown` 으로 남았다:
+rating 이 있는 것으로 세어지면서 band 는 없는 것이다.
+
+공개된 데이터베이스(2026-10-27)에서 NVD rating 391,806개 중 72,405개가 v2 만 있으며, 그 CVE 를 rating
+하는 다른 출처는 없다. 215개를 뺀 전부가 2016 년 이전의 것이다. fallback 이 있으면 high 29,227,
+medium 37,895, low 5,283 으로 band 가 매겨진다.
+
+D17 과 충돌하지 않는다. D17 은 *없는* severity 를 강제로 채우는 것을 금하는데, v2 점수는 NVD 가 실제로
+발표한 것이다.
+
+v2 를 peer 가 아니라 fallback 으로 두는 이유는, 단순한 max 가 둘 다 가진 NVD rating 2,272개를 더 오래되고
+더 거친 metric 을 근거로 끌어올리기 때문이다. 출처 사이에서는 D25 의 highest-wins 규칙이 여전히
+적용되며, 어느 두 출처 사이에서와 같다. 사용자는 v2 를 unknown 으로 두는 방식과 max 에 넣는 방식 대신
+fallback 을 골랐다.
+
+**측정.** 그 rating 들에 든 서로 다른 v2 vector 311개 전부를 교차 검증했다: 각각을 자기 CVE 하나에 대해
+채점하고, NVD API 가 그 CVE 에 발표한 base score 와 severity 에 견주었다. 311개 모두 점수와 band 가
+일치하며, 차이는 0개다.
+
+**포기하는 것.** temporal 또는 environmental metric 이 뒤에 붙은 v2 vector 는 base 만으로 채점하지 않고
+거부한다. NVD 는 base vector 를 저장하므로 그런 것은 보이지 않았다. v2 로 매긴 band 는 같은 CVE 의 이후
+v3 band 보다 높을 수 있다. rating 이 v2 에서 왔다고 밝히며, finding 의 다른 rating 은 바뀌지 않는다.
+
+**검증.**
+- **매처.** `TestMatch_D156_*` 는 v2 만 있는 NVD annotation 이 finding 의 band 를 매기는 경우, 같은
+  rating 안에서 v3 가 더 높은 v2 를 이기는 경우, advisory 자신의 v2 vector 가 자기 rating 의 band 를
+  매기는 경우를 다룬다. memo 도 확인한다: 캐시 hit 이 v2 출처를 유지한다.
+- **severity 패키지.** 알려진 v2 base score 22개로, band 경계 6.9 와 4.0, 그리고 모든 metric 가중치를
+  포함한다. 잘못된 vector 는 거부한다. metric 이름이 틀린 것과, 값은 모두 그 자리에서 유효한데 순서가
+  어긋난 것이 그 안에 든다. fallback 의 규칙도 다룬다: v3 와 벤더 표기가 이기고, 채점할 수 없는 vector
+  는 fallback 을 막지 않으며, v2 vector 둘 중 높은 것이 이긴다.
+- **보고서.** JSON 은 v2 rating 에만 `cvssV2` 를 싣고, `--explain` 은 그 줄에만 표시한다.
+
+변이 열일곱 개를 돌렸고 열여섯 개가 잡혔다:
+- fallback 을 제거하거나 v2 를 peer 로 만듦;
+- 가장 높은 것 대신 첫 v2 를 취함;
+- 플래그를 한 번도 세우지 않음;
+- f(Impact) 없음;
+- High 가 6.9 에서 시작함;
+- 뒤따르는 metric 을 받아들임;
+- metric 이름을 확인하지 않음;
+- AV:A 가중치를 바꿈;
+- 반올림 대신 버림;
+- 레코드 자신의 rating, annotation, 또는 캐시 hit 에서 플래그를 잃음;
+- JSON 필드를 빠뜨리거나 explain 표시를 빠뜨림;
+- `Of` 가 v2 를 채점함.
+
+살아남은 변이는 Medium 의 하한을 3.9 로 옮기는 것이다. 이는 동등하다: 어떤 v2 base vector 도 3.9 로
+채점되지 않으며(729개 전부를 계산했다), 코드에 그렇게 적혀 있다.
+
+---
+
 ## 3. 아키텍처
 
 ### 측정된 데이터 규모
