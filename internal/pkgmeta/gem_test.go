@@ -30,6 +30,19 @@ func TestInstalledGemVersion(t *testing.T) {
 		// Gem::Platform's own /^java-?(\d+(?:\.\d+)*)?/ has no end anchor,
 		// so Ruby reads "javascript" as the java os too; mirrored, not fixed.
 		{"1.0.0-javascript", "", "1.0.0"},
+		// A prerelease before a platform: the suffix is not a platform as a
+		// whole, so the prerelease is not lost (branch review
+		// wf_257e6542-a9a). It stays as written, below its release or
+		// unreadable, as before A6.
+		{"1.0.0-rc1-arm64-darwin", "", "1.0.0-rc1-arm64-darwin"},
+		{"1.0.0-rc1-java", "", "1.0.0-rc1-java"},
+		{"1.0.0-rc1-x86_64-linux", "", "1.0.0-rc1-x86_64-linux"},
+		{"1.0.0-beta-linux", "", "1.0.0-beta-linux"},
+		{"1.0.0-i686-linux", "", "1.0.0"},
+		{"1.0.0-armv7-linux", "", "1.0.0"},
+		{"1.0.0-ppc64le-linux", "", "1.0.0"},
+		{"1.0.0-s390x-linux", "", "1.0.0"},
+		{"1.0.0-riscv64-linux", "", "1.0.0"},
 		// Nothing before the platform leaves the version as written.
 		{"-x86_64-linux", "", "-x86_64-linux"},
 		// The purl's own qualifier is believed for any platform.

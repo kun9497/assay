@@ -182,3 +182,24 @@ func TestRun_A6_SBOMGemPlatformIsNotPartOfTheVersion(t *testing.T) {
 		}
 	}
 }
+
+// A CycloneDX component whose purl carries no version falls back to the
+// component's own version field, and that text is the lockfile's too: the
+// platform comes off after the fallback, not before it (branch review
+// wf_257e6542-a9a).
+func TestRun_A6_CycloneDXVersionFallbackLosesThePlatform(t *testing.T) {
+	doc := `{"bomFormat":"CycloneDX","specVersion":"1.5","version":1,"components":[` +
+		`{"type":"library","name":"nokogiri","version":"1.13.8-x86_64-linux","purl":"pkg:gem/nokogiri"},` +
+		`{"type":"library","name":"sqlite3","version":"1.7.0-arm64-darwin","purl":"pkg:gem/sqlite3"}]}`
+	path := filepath.Join(t.TempDir(), "s.cdx.json")
+	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := runGemScan(t, gemPlatformDB(t), path)
+	if want := []string{"nokogiri@1.13.8"}; !slices.Equal(got.found, want) {
+		t.Errorf("findings = %v, want %v", got.found, want)
+	}
+	if got.skipped != 0 {
+		t.Errorf("skipped = %d, want 0", got.skipped)
+	}
+}
