@@ -49,6 +49,8 @@ func TestScoreV2(t *testing.T) {
 		"AV:X/AC:L/Au:N/C:P/I:P/A:P",          // an undefined value
 		"av:n/ac:l/au:n/c:p/i:p/a:p",          // the spec's letters are upper-case
 		"AC:L/AV:N/Au:N/C:P/I:P/A:P",          // out of order
+		"AV:N/AC:L/Au:N/I:P/C:P/A:P",          // out of order, every value valid where it sits
+		"XV:N/AC:L/Au:N/C:P/I:P/A:P",          // a metric v2 does not have
 		"CVSS:2.0/AV:N/AC:L/Au:N/C:P/I:P/A:P", // a prefix no source writes
 		"(AV:N/AC:L/Au:N/C:P/I:P/A:P)",
 	} {
