@@ -8,6 +8,13 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
+- `db build` fails when Canonical's Ubuntu CVE tracker parses to no tuple, or stamps no fix
+  state on any fix-less Ubuntu range, and says to set `UBUNTU_TRACKER_ENABLE=0` to build
+  without Ubuntu fix states on purpose. `db push` refuses a candidate in which any Ubuntu
+  release holds under 80% of its published fix states, counted from the database
+  (`--force` overrides). Before, a tracker that stopped parsing published an artifact with
+  every Ubuntu wont-fix and not-fixed state gone (2,094,636 on 2026-10-29) and nothing
+  failed. (D157, revises D85, audit A15)
 - A rating that carries only a CVSS v2 vector -- NVD's for every CVE it never re-scored,
   72,405 of its ratings in the 2026-10-27 database -- is banded from the v2 base score on
   NVD's v2 table (Low/Medium/High, no Critical), where it was `unknown`. v2 is used only

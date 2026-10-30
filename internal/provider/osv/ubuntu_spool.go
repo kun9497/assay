@@ -269,6 +269,15 @@ func (p *Provider) loadUbuntuTracker(ctx context.Context, st *stats) (*ubuntuTra
 	}
 	fmt.Fprintf(p.progress, "ubuntu tracker (D85): %d tuple(s) loaded, %d unknown-codename line(s) "+
 		"skipped, %d file(s) unparsed\n", st.UbuntuTuplesLoaded, st.UbuntuUnknownCodename, st.UbuntuFilesUnparsed)
+	// D157: zero is never a real tracker (27,477,585 tuples on 2026-10-29).
+	// It means Canonical moved the layout or respelled the header, and
+	// building on would publish an artifact with every Ubuntu fix state
+	// gone and nothing failing.
+	if st.UbuntuTuplesLoaded == 0 {
+		return nil, fmt.Errorf("the tracker at %s parsed to 0 tuples (%d file(s) unparsed): its layout or "+
+			"format has changed; set UBUNTU_TRACKER_ENABLE=0 to build without Ubuntu fix states",
+			url, st.UbuntuFilesUnparsed)
+	}
 	return tracker, nil
 }
 

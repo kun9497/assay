@@ -3343,6 +3343,11 @@ D80's refusal doing exactly its job. debian:12 SPDX scans keyed, with the one
 
 ### D85 — Ubuntu fix states, from the tracker Canonical actually maintains
 
+> **Revised by D157 (2026-10-30):** a tracker that parses to no tuple, or stamps no fix
+> state, now fails the build, and `db push` refuses a candidate in which any Ubuntu release
+> holds under 80% of its published fix states. The "degrade rather than fail" choice below
+> is superseded.
+
 **Decision.** Ubuntu findings stop reporting `unknown` fix state. The OSV Ubuntu export
 cannot say it — "needed" and "ignored" are byte-identical there (a fix-less range, nothing
 more) — so the OSV provider consults Canonical's ubuntu-cve-tracker at conversion time and
@@ -7137,6 +7142,92 @@ Seven more mutations were run on the review's fixes, and all were caught:
 - -0 restored;
 - High's edge made exclusive;
 - the last v2 taken, or the first.
+
+---
+
+### D157 — An empty Ubuntu tracker fails the build, and a release losing its fix states fails the publish (revises D85)
+
+**Decision.** Canonical's CVE tracker is held in two places.
+1. **Build.** `db build` fails when the tracker clone parses to zero tuples, checked before
+   the Ubuntu archive is fetched. It also fails, once the archives are converted, when the
+   tracker loaded tuples but stamped no fix state on any of the fix-less Ubuntu ranges it
+   was asked about. Both errors name the counts and `UBUNTU_TRACKER_ENABLE=0`, the switch
+   that builds without Ubuntu fix states on purpose.
+2. **Publish.** `db push` counts, per covered Ubuntu key, the ranges the database holds with
+   a wont-fix or not-fixed state. It reads them from the records, so ranges D110 carried
+   forward from the seed count like ranges this build stamped. The counts ride on the
+   artifact as the annotation `dev.assay.ubuntu-fix-states`, which is always written (`{}`
+   with no Ubuntu coverage). A candidate in which any key holds less than 80% of the
+   published count for that key is refused. A key the candidate lacks counts as zero, and
+   `--force` overrides. A published artifact without the annotation is unpacked once and
+   counted, as the advisory and rating annotations already are, so the first nightly after
+   this lands is held too.
+
+**Why.** The 2026-10-22 audit (A15). D85 let a tracker that parsed to nothing build on,
+because the unconditional progress line made a zero visible in the log. Nobody reads the
+log of a green nightly. A tracker Canonical restructures would publish an artifact with
+every Ubuntu wont-fix and not-fixed state turned to `unknown` and nothing failing. On the
+2026-10-29 nightly that was 2,094,636 ranges, 86% of them wont-fix.
+
+The build check catches a total loss. A partial loss still stamps something, for example
+`active/` moved while `retired/` stays, or a codename table that has gone stale. Only a
+comparison with the published artifact sees it. That comparison is per release because a
+floor on the total misses most single releases. The 2,041,922 fix states in the 2026-10-27
+database split by key as follows:
+
+| Key | Fix states | Share |
+|---|---|---|
+| 22.04 | 712,232 | 35% |
+| 20.04 | 551,143 | 27% |
+| 24.04 | 366,109 | 18% |
+| 18.04 | 288,821 | 14% |
+| 26.04 | 60,628 | 3% |
+| 25.10 | 31,057 | 1.5% |
+| 16.04 | 30,786 | 1.5% |
+| 14.04 | 1,146 | 0.1% |
+
+Only the first two exceed a fifth of the total. A stale codename table drops the newest
+release, which is among the smallest. The 80% leaves room for a release whose fixes land
+in one batch.
+
+The count is read from the database rather than from the provider's report. The first
+version counted what this build stamped. Under D110 that refused a nightly whose carried
+release had lost nothing, and the branch review (wf_4cdf11d7-722) reproduced it. The user
+chose per-release counting from the database over a database total, which still misses
+most single releases, and over dropping the publish floor.
+
+**Gives up.** A nightly stops when Canonical restructures the tracker, which is the intended
+behaviour. `UBUNTU_TRACKER_ENABLE=0` still builds, and it still says so on stderr. Its
+artifact holds no Ubuntu fix states, so publishing it over one that does needs `--force`.
+Counting reads every record at push time: 153 s for the 1.8M records of the 2026-10-27
+database on a workstation. A release that genuinely loses more than a fifth of its states
+in one night, for example a large batch of fixes, also needs `--force`.
+
+**Verified.**
+- **Build, through `Provider.Fetch` against a real git clone:**
+  - a moved layout and a respelled header both fail, without fetching the archive;
+  - a tracker whose keys meet no range fails;
+  - a not-fixed-only tracker and an archive with nothing fix-less both build.
+- **Publish, through a live in-memory registry** (`TestPush_D157_*`):
+  - one release lost while the total barely moves, and one release under its floor: refused;
+  - exactly the floor, growth, and an added release: accepted;
+  - an artifact without the annotation is counted from its layer;
+  - a database with no Ubuntu key records an empty count;
+  - a D110 carry of a whole release publishes.
+- **The annotation:** round-trip, and refusal of a malformed or negative value.
+
+Seventeen mutations were run, and all were caught:
+- the guard removed;
+- the floor moved to 70% or 81%;
+- the annotation not written, not read, or a negative value accepted;
+- every range counted, or not-fixed left out;
+- the floor taken on the total instead of per key;
+- the baseline not unpacked for the count, or not taken from it;
+- a nil count with no Ubuntu;
+- either build check removed;
+- the fix-less gate removed;
+- not-fixed left out of the stamp check;
+- the denominator never counted.
 
 ---
 
