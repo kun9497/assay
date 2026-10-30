@@ -1,6 +1,9 @@
 package severity
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 // CVSS v2 base scores (D156), from the v2 specification's own worked
 // examples and the vectors NVD most often publishes, each a value NVD shows
@@ -31,6 +34,7 @@ func TestScoreV2(t *testing.T) {
 		// v2 vector scores 3.9 (all 729 computed), so the Low/Medium edge is
 		// held from above only.
 		{"AV:L/AC:M/Au:N/C:C/I:C/A:C", 6.9, Medium},
+		{"AV:N/AC:M/Au:S/C:P/I:C/A:N", 7.0, High}, // CVE-2015-0461 on NVD
 		{"AV:L/AC:H/Au:N/C:N/I:N/A:C", 4.0, Medium},
 		// Every weight in use: adjacent network, multiple authentication.
 		{"AV:A/AC:L/Au:N/C:P/I:P/A:P", 5.8, Medium},
@@ -78,6 +82,7 @@ func TestHighestFallsBackToV2(t *testing.T) {
 		{"a vendor word beats v2", []string{v2High, "Moderate"}, Medium, false},
 		{"an unscorable vector does not block v2", []string{"garbage", v2High}, High, true},
 		{"the higher of two v2 vectors", []string{"AV:L/AC:L/Au:N/C:P/I:N/A:N", v2High}, High, true},
+		{"the higher of two v2 vectors, listed first", []string{v2High, "AV:L/AC:L/Au:N/C:P/I:N/A:N"}, High, true},
 		{"nothing", nil, Unknown, false},
 	} {
 		band, _, fromV2 := HighestDetail(tc.vectors)
@@ -90,5 +95,16 @@ func TestHighestFallsBackToV2(t *testing.T) {
 	}
 	if _, _, err := Of(v2High); err == nil {
 		t.Error("Of(v2) scored; it must stay unscorable so v2 can only ever be a fallback")
+	}
+}
+
+// No impact scores 0, and +0, not the -0 that (negative)*0 gives: -0 prints
+// as "-0.0" in the table and in SARIF (branch review wf_11dec29e-171).
+func TestScoreV2_NoImpactIsPositiveZero(t *testing.T) {
+	for _, v := range []string{"AV:L/AC:H/Au:M/C:N/I:N/A:N", "AV:N/AC:L/Au:N/C:N/I:N/A:N"} {
+		s, b, ok := scoreV2(v)
+		if !ok || s != 0 || math.Signbit(s) || b != Low {
+			t.Errorf("scoreV2(%q) = %v (signbit %v) %v, want +0 Low", v, s, math.Signbit(s), b)
+		}
 	}
 }

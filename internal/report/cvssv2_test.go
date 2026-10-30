@@ -79,3 +79,30 @@ func TestExplain_D156_ARatingFromCVSSv2SaysSo(t *testing.T) {
 		t.Errorf("DEBIAN rating line = %q, marked though not banded by v2", debian)
 	}
 }
+
+// SARIF's security-severity is what GitHub code scanning bands on, and its
+// scale puts anything above 8.9 in critical. A CVSS v2 High reaches 10.0
+// (D156), so writing the score as it stands showed a finding assay calls high
+// as critical there (branch review wf_11dec29e-171). The value written never
+// goes above the top of the finding's own band.
+func TestSARIF_D156_SecuritySeverityStaysInTheFindingsBand(t *testing.T) {
+	for _, tc := range []struct {
+		band  severity.Band
+		score float64
+		want  string
+	}{
+		{severity.High, 9.3, "8.9"},
+		{severity.High, 10.0, "8.9"},
+		{severity.High, 7.5, "7.5"},
+		{severity.Critical, 9.8, "9.8"},
+		{severity.Medium, 6.8, "6.8"},
+	} {
+		res := matcher.Result{Findings: []matcher.Finding{
+			findingFixture("CVE-2014-9993", "zlib-fixture", tc.band, tc.score, "1.0.1", advisory.FixStateFixed),
+		}}
+		run := run0(t, sarifOf(t, res, cyclonedx.Stats{Components: 1, Cataloged: 1}))
+		if got := rulesOf(t, run)[0]["properties"].(map[string]any)["security-severity"]; got != tc.want {
+			t.Errorf("%v %.1f: security-severity = %v, want %q", tc.band, tc.score, got, tc.want)
+		}
+	}
+}

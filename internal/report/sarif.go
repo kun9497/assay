@@ -314,7 +314,7 @@ func findingRule(id string, f matcher.Finding) sarifRule {
 	// above 0.0 and has no room for "unknown"; writing 0.1 would band an
 	// unrated finding as low, which is the coercion D17 exists to forbid.
 	if f.Severity != severity.Unknown {
-		props["security-severity"] = fmt.Sprintf("%.1f", f.Score)
+		props["security-severity"] = fmt.Sprintf("%.1f", securitySeverity(f.Severity, f.Score))
 	}
 	// D86, on this bag's own reasoning: neither grype nor trivy puts KEV
 	// membership or an EPSS score in SARIF at all, and both change what a
@@ -734,4 +734,17 @@ type sarifInvocation struct {
 type sarifNotification struct {
 	Level   string    `json:"level"`
 	Message sarifText `json:"message"`
+}
+
+// securitySeverity is the score GitHub code scanning bands a finding by, held
+// inside the finding's own band. GitHub reads above 8.9 as critical, and a
+// CVSS v2 High reaches 10.0 (D156): written as it stands, a finding assay
+// bands high showed as critical there. Only High can exceed its band's top
+// today -- v2's Medium and Low end at 6.9 and 3.9 like every other scorer's
+// -- so High is the one ceiling applied.
+func securitySeverity(band severity.Band, score float64) float64 {
+	if band == severity.High && score > 8.9 {
+		return 8.9
+	}
+	return score
 }

@@ -41,13 +41,11 @@ func scoreV2(vector string) (float64, Band, bool) {
 	av, ac, au, c, in, a := w[0], w[1], w[2], w[3], w[4], w[5]
 	impact := 10.41 * (1 - (1-c)*(1-in)*(1-a))
 	exploitability := 20 * av * ac * au
-	f := 1.176
-	if impact == 0 {
-		f = 0
-	}
-	score := math.Round(((0.6*impact)+(0.4*exploitability)-1.5)*f*10) / 10
-	if score < 0 {
-		score = 0
+	// f(Impact) is 0 when there is no impact, and the score with it. Returned
+	// as +0 directly: a negative base times 0 is -0, which prints "-0.0".
+	score := 0.0
+	if impact != 0 {
+		score = math.Round(((0.6*impact)+(0.4*exploitability)-1.5)*1.176*10) / 10
 	}
 	switch {
 	case score >= 7.0:

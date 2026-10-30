@@ -355,6 +355,14 @@ func beats(cand, cur Rating) bool {
 	if candUnrated != curUnrated {
 		return curUnrated
 	}
+	// Band first, then score. Every scorer but one bands through a single
+	// score-to-band table, so for them the two orders agree. CVSS v2 does not
+	// (D156): 10.0 is High there, 9.0 is Critical under v3 or a vendor word.
+	// By score alone an NVD v2-only High outranked another source's Critical
+	// and the finding dropped a band (branch review wf_11dec29e-171).
+	if !candUnrated && cand.Severity != cur.Severity {
+		return cand.Severity > cur.Severity
+	}
 	if !candUnrated && cand.Score != cur.Score {
 		return cand.Score > cur.Score
 	}
