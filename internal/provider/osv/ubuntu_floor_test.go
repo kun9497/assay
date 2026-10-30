@@ -45,17 +45,25 @@ func trackerRepo(t *testing.T, files map[string]string) string {
 // fetchUbuntuWith runs Provider.Fetch over a one-record Ubuntu archive (a
 // fix-less range for package x on jammy) against the given tracker clone.
 func fetchUbuntuWith(t *testing.T, tracker string) (store.Provenance, string, error) {
+	prov, progress, _, err := fetchUbuntuCounting(t, tracker)
+	return prov, progress, err
+}
+
+// fetchUbuntuCounting is fetchUbuntuWith, also counting the archive requests.
+func fetchUbuntuCounting(t *testing.T, tracker string) (store.Provenance, string, int, error) {
 	t.Helper()
 	body := zipWith(t, map[string]string{
 		"UBUNTU-CVE-2026-9100.json": `{"id":"UBUNTU-CVE-2026-9100","upstream":["CVE-2026-9100"],
 			"affected":[{"package":{"name":"x","ecosystem":"Ubuntu:22.04:LTS"},
 				"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"}]}]}]}`,
 	})
+	hits := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/Ubuntu/all.zip" {
 			http.NotFound(w, r)
 			return
 		}
+		hits++
 		w.Write(body)
 	}))
 	defer srv.Close()
@@ -64,7 +72,7 @@ func fetchUbuntuWith(t *testing.T, tracker string) (store.Provenance, string, er
 	p.ubuntuTrackerURL = tracker
 	p.ubuntuSpoolDir = filepath.Join(t.TempDir(), "spool")
 	prov, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil })
-	return prov, progress.String(), err
+	return prov, progress.String(), hits, err
 }
 
 // D157 (audit A15, revising D85): a tracker clone that parses to nothing --
@@ -80,10 +88,15 @@ func TestFetch_D157_ATrackerThatParsesToNothingFailsTheBuild(t *testing.T) {
 		"layout moved":     {"data/active/CVE-2026-9100": "Candidate: CVE-2026-9100\n\nPatches_x:\njammy_x: ignored\n"},
 		"header respelled": {"active/CVE-2026-9100": "CVE-ID: CVE-2026-9100\n\nPatches_x:\njammy_x: ignored\n"},
 	} {
-		_, _, err := fetchUbuntuWith(t, trackerRepo(t, files))
+		_, _, hits, err := fetchUbuntuCounting(t, trackerRepo(t, files))
 		if err == nil {
 			t.Errorf("%s: Fetch succeeded, want the build to fail on a tracker with no tuples", name)
 			continue
+		}
+		// Before the archive, not after it: Ubuntu's is 601 MB compressed,
+		// and a tracker with nothing in it is known before any is fetched.
+		if hits != 0 {
+			t.Errorf("%s: the Ubuntu archive was fetched %d time(s) before the empty tracker failed the build", name, hits)
 		}
 		if !strings.Contains(err.Error(), "0 tuple") || !strings.Contains(err.Error(), "UBUNTU_TRACKER_ENABLE=0") {
 			t.Errorf("%s: error = %v, want it to name the zero count and UBUNTU_TRACKER_ENABLE=0", name, err)
