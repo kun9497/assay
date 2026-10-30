@@ -9,7 +9,7 @@ with a version bump, a **Breaking** entry in the [changelog](../CHANGELOG.md), a
 
 | Contract | What it is | Version field | Current |
 |---|---|---|---|
-| `report` | `assay scan --output json` | `schemaVersion` | 14 |
+| `report` | `assay scan --output json` | `schemaVersion` | 15 |
 | `provenance sidecar` | the file `--provenance <path>` writes (D120) | `schemaVersion` | 1 |
 | `status.json` | the published database's status, on the `status` branch (D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json` (D147) | `schemaVersion` | 1 |
@@ -49,6 +49,9 @@ it relied on:
   `locations[].install` and `provenance.database.artifact.signedBy` / `unverified` (D137,
   v0.11.0, schema 14). Each is optional. The rule above, a bump for every change, applies
   from schema 15 on.
+- Schema 15 (additive) added `ratings[].cvssV2`, true when a rating's band came from NVD's
+  CVSS v2 fallback (D156). Ratings that carry no v3 or v4 vector, rated `unknown` before,
+  now carry a band, so `--fail-on` can trip where it did not.
 
 ## The provenance sidecar, status.json and `db status`
 

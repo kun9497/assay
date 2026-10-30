@@ -201,6 +201,10 @@ type Rating struct {
 	AdvisoryID string
 	Severity   severity.Band
 	Score      float64
+	// FromCVSSv2 says Severity and Score came from a CVSS v2 vector, the
+	// fallback D156 uses when nothing else in this record scores. Carried so
+	// a reader can see a band rests on the older metric (D10).
+	FromCVSSv2 bool
 	// Fixed is the fixed version THIS record gives, which is why the field is
 	// on the rating and not on the finding. Taking it from the winning record
 	// would make every source appear to agree about remediation when measured
@@ -1070,12 +1074,13 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 						}
 						seen[a.ID] = true
 						ids := identifiers(a)
-						band, score := memoHighest(sevMemo, vectorsOf(a))
+						band, score, fromV2 := memoHighest(sevMemo, vectorsOf(a))
 						r := Rating{
 							Database:   a.Database,
 							AdvisoryID: a.ID,
 							Severity:   band,
 							Score:      score,
+							FromCVSSv2: fromV2,
 							Fixed:      ev.Fixed,
 							FixState:   fixStateOf(ev),
 						}
@@ -1210,12 +1215,13 @@ func (m *Matcher) annotate(f *Finding, sevMemo map[string]sevScore) error {
 			return fmt.Errorf("ratings for %s: %w", id, err)
 		}
 		for _, r := range rs {
-			band, score := memoHighest(sevMemo, vectorsOf(advisory.Advisory{Severity: r.Severity}))
+			band, score, fromV2 := memoHighest(sevMemo, vectorsOf(advisory.Advisory{Severity: r.Severity}))
 			f.Ratings = append(f.Ratings, Rating{
 				Database:          r.Source,
 				AdvisoryID:        r.CVE,
 				Severity:          band,
 				Score:             score,
+				FromCVSSv2:        fromV2,
 				URL:               r.URL,
 				NoSeverityOpinion: len(r.Severity) == 0,
 				EPSS:              r.EPSS,
@@ -1416,8 +1422,9 @@ func winnerOf(f Finding) Rating {
 // is a slice of (type, value) pairs and Highest wants the values alone.
 // sevScore caches one severity.Highest answer for memoHighest below.
 type sevScore struct {
-	band  severity.Band
-	score float64
+	band   severity.Band
+	score  float64
+	fromV2 bool // D156: the band came from a CVSS v2 vector
 }
 
 // memoHighest is severity.Highest with a per-Match cache keyed on the joined
@@ -1433,10 +1440,10 @@ type sevScore struct {
 // LISTS share a key — so any vector containing the separator bypasses the
 // cache entirely rather than risking an aliased answer. Correct-but-slower
 // on garbage input beats fast-but-possibly-wrong.
-func memoHighest(memo map[string]sevScore, vectors []string) (severity.Band, float64) {
+func memoHighest(memo map[string]sevScore, vectors []string) (severity.Band, float64, bool) {
 	for _, v := range vectors {
 		if strings.ContainsRune(v, '|') {
-			return severity.Highest(vectors)
+			return severity.HighestDetail(vectors)
 		}
 	}
 	var key string
@@ -1446,11 +1453,11 @@ func memoHighest(memo map[string]sevScore, vectors []string) (severity.Band, flo
 		key = strings.Join(vectors, "|")
 	}
 	if v, ok := memo[key]; ok {
-		return v.band, v.score
+		return v.band, v.score, v.fromV2
 	}
-	b, s := severity.Highest(vectors)
-	memo[key] = sevScore{band: b, score: s}
-	return b, s
+	b, s, v2 := severity.HighestDetail(vectors)
+	memo[key] = sevScore{band: b, score: s, fromV2: v2}
+	return b, s, v2
 }
 
 func vectorsOf(a advisory.Advisory) []string {

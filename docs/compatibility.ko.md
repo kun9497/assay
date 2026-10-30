@@ -9,7 +9,7 @@
 
 | 계약 | 무엇인가 | 버전 필드 | 현재 |
 |---|---|---|---|
-| `report` | `assay scan --output json` | `schemaVersion` | 14 |
+| `report` | `assay scan --output json` | `schemaVersion` | 15 |
 | `provenance sidecar` | `--provenance <path>`가 쓰는 파일(D120) | `schemaVersion` | 1 |
 | `status.json` | 배포 데이터베이스의 상태, `status` 브랜치(D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json`(D147) | `schemaVersion` | 1 |
@@ -47,6 +47,9 @@
   `crossMappedFrom`(D108, v0.5.0, 스키마 10), 그리고 `locations[].install`과
   `provenance.database.artifact.signedBy` / `unverified`(D137, v0.11.0, 스키마 14). 모두
   선택적입니다. 위의 규칙, 즉 모든 변경에 증가는 스키마 15부터 적용됩니다.
+- 스키마 15(추가형)는 `ratings[].cvssV2`를 더했습니다. 평가의 등급이 NVD 의 CVSS v2 fallback 에서
+  왔을 때 true 입니다(D156). v3 나 v4 벡터가 없어 전에는 `unknown` 이던 평가가 이제 등급을 가지므로,
+  `--fail-on` 이 전에 걸리지 않던 곳에서 걸릴 수 있습니다.
 
 ## provenance sidecar, status.json, `db status`
 
