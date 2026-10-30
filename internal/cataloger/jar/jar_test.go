@@ -293,7 +293,7 @@ func TestParse_EmptyOrGarbageZip(t *testing.T) {
 	})
 }
 
-// bufio.Scanner's ScanLines strips a trailing "\r", so CRLF-terminated
+// A trailing "\r" is stripped from each line, so CRLF-terminated
 // pom.properties (real Windows-built jars carry these) must parse the same
 // as LF-terminated ones, and "#" comment lines must be skipped rather than
 // misread as a malformed key=value pair.
@@ -319,6 +319,25 @@ func TestParse_PropertiesWithCRLFAndCommentsParse(t *testing.T) {
 	if stats.Cataloged != 1 || stats.SkippedNoVersion != 0 {
 		t.Errorf("stats = %+v, want 1 cataloged, 0 skipped - comments and CRLF "+
 			"must not be misread as data", stats)
+	}
+}
+
+// QA 2026-10-30: parseProperties split lines with bufio.Scanner and never
+// read Err(), so a comment line over 64 KiB stopped it and the keys after it
+// were never read. The jar was then counted as having no version and not
+// evaluated, though its pom.properties named one.
+func TestParse_PropertiesAfterALongLineAreRead(t *testing.T) {
+	body := "# " + strings.Repeat("x", 70*1024) + "\ngroupId=com.example.longline\n" +
+		"artifactId=longline-fixture\nversion=1.2.3\n"
+	path := writeZip(t, "longline.jar", []zipEntry{
+		{"META-INF/maven/com.example.longline/longline-fixture/pom.properties", []byte(body)},
+	})
+	pkgs, stats, err := Parse(path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(pkgs) != 1 || pkgs[0].Version != "1.2.3" || stats.SkippedNoVersion != 0 {
+		t.Errorf("pkgs = %+v, stats = %+v: want the one package at 1.2.3, nothing skipped", pkgs, stats)
 	}
 }
 

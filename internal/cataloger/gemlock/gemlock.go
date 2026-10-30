@@ -12,7 +12,6 @@
 package gemlock
 
 import (
-	"bufio"
 	"bytes"
 	"os"
 	"strings"
@@ -38,9 +37,12 @@ func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, error) {
 		inSpecs bool   // whether "  specs:" has been seen since the last header
 	)
 
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	for scanner.Scan() {
-		line := scanner.Text()
+	// Split in memory rather than through bufio.Scanner: a Scanner stops at
+	// its first line over 64 KiB, which drops every spec after it while Parse
+	// reports success (QA 2026-10-30). The whole file is already held. A
+	// trailing CR is removed, as ScanLines removes it.
+	for raw := range bytes.Lines(data) {
+		line := strings.TrimSuffix(strings.TrimSuffix(string(raw), "\n"), "\r")
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
