@@ -3447,7 +3447,9 @@ support had the mirror defect: the EOESFrom day itself read as unmaintained. A r
 EOL from the first instant of the day after EOLFrom, and extended support covers the whole
 EOESFrom day; days are UTC, the calendar the dates are written in. Tests drive `Run` at 00:00
 plus one nanosecond, at noon, at the last instant of the day and at the next midnight. Seven
-mutations of the two comparisons were all caught.
+mutations of the two comparisons were all caught. D110's carry-forward (`pastEOLKeys`), whose
+comment said it made the same comparison, made the same off-by-one, and keyed a release on its
+EOLFrom day as past EOL; it now begins the day after too, held by a test of the build itself.
 
 ---
 

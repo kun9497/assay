@@ -10,7 +10,9 @@
 ### Fixed
 - `--fail-on-eol` 이 더 이상 하루 일찍 빨간불이 되지 않습니다. 릴리스가 EOLFrom 날의 첫 순간(그 날 KST
   09:00)부터 end of life 로 계산되었는데, D87 은 그 날을 아직 EOL 이 아니라고 약속합니다. 이제 다음 날부터
-  EOL 입니다. 연장 지원도 마찬가지로 EOESFrom 날 전체를 덮습니다. 날짜는 UTC 입니다. (감사 A9, D87)
+  EOL 입니다. 연장 지원도 마찬가지로 EOESFrom 날 전체를 덮습니다. 날짜는 UTC 입니다. 같은 비교를 하던
+  `db build` 의 frozen 키 carry-forward(D110)도 이제 EOLFrom 다음 날부터만 EOL 이 지난 것으로 봅니다.
+  (감사 A9, D87)
 - 네이티브 gem 의 플랫폼(Gemfile.lock 의 `nokogiri (1.13.8-x86_64-linux)`, 또는 syft SBOM 의 gem 버전에
   들어간 같은 텍스트)을 더 이상 버전의 일부로 읽지 않습니다. 이전에는 x86_64 빌드에 대한 비교가 모두 불완전
   검사였고, 다른 빌드는 prerelease 로 정렬되어 설치된 버전에서 시작된 advisory 는 놓치고 그 버전에서 수정된 advisory
