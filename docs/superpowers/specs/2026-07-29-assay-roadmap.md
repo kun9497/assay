@@ -6864,11 +6864,13 @@ build carries. The PURL keeps the input's own spelling.
   version is the text up to the first hyphen, and the platform is the rest. `specLine` returns
   both. The version goes to `Package.Version`, and the whole locked text goes into the purl.
 - **SBOMs**, CycloneDX and SPDX alike, run a `pkg:gem` version through
-  `pkgmeta.InstalledGemVersion`. It drops the suffix after the first hyphen in two cases: the
-  purl's own `platform` qualifier names that suffix, or `Gem::Platform` would read an
-  operating system in it. The test is Ruby's own `Gem::Platform#initialize` patterns: linux,
-  darwin, mingw, mswin, java, freebsd, wasi and the rest. A hyphenated prerelease
-  (`3.0.0-rc1`) names none, so it is left alone and still sorts below its release.
+  `pkgmeta.InstalledGemVersion`. It drops the suffix after the first hyphen only when the
+  whole suffix is a platform. Either the purl's own `platform` qualifier names it, or it is a
+  CPU RubyGems writes followed by an operating system that Ruby's own
+  `Gem::Platform#initialize` patterns recognise (linux, darwin, mingw, mswin, java, freebsd,
+  wasi and the rest), or it is a bare operating system (the legacy `java` form). A hyphenated
+  prerelease is not a platform, even with one after it (`3.0.0-rc1`, `3.0.0-rc1-arm64-darwin`).
+  It is left as written, so it still sorts below its release.
 - The `Gem` comparer is unchanged.
 
 **Why.** The 2026-10-22 audit (A6): `specLine` kept `nokogiri (1.13.8-x86_64-linux)`'s
@@ -6878,7 +6880,7 @@ therefore sorted as a prerelease below 1.13.8, and the underscore in `x86_64` ma
 unreadable. So:
 - an advisory introduced at the installed version found nothing;
 - one fixed at it was a false positive;
-- every x86_64 build was reported not evaluated.
+- every comparison against an x86_64 build was an incomplete check.
 
 syft writes the same text into an SBOM's version and purl, so SBOM scans had the same defect.
 
@@ -6887,8 +6889,9 @@ into `.pre.`, so a real gem version never holds one, and bundler splits there. T
 lockfile split exact.
 
 Stripping in the comparer instead, as grype does with a CPU-name list, was rejected.
-Advisories spell prereleases with a hyphen too: 13 of 78,698 RubyGems bounds on 2026-10-27,
-such as `7.0.0-rc3` and `1.4.0-beta.1`. And the comparer would be cleaning its input, which
+Advisories spell prereleases with a hyphen too: 10 range bounds among the 78,698 RubyGems
+version strings in the published database of 2026-10-27, such as `7.0.0-rc3` and
+`1.4.0-beta.1`. And the comparer would be cleaning its input, which
 D9 keeps it from doing. The user chose the lockfile-and-SBOM scope over the lockfile alone and
 over the comparer.
 
@@ -6899,14 +6902,16 @@ names that purl.
 and with this change:
 - 130 incomplete checks became 0.
 - 102 findings became 126:
-  - 26 new findings on the x86_64 builds that had not been evaluated (nokogiri 20, sqlite3 6);
+  - 26 new findings on the x86_64 builds whose every check had been incomplete (nokogiri 20,
+    sqlite3 6);
   - 2 false positives gone (nokogiri 1.19.1 on aarch64 and arm64, against GHSA-wx95-c6cv-8532's
     fix at 1.19.1).
 - Nothing else changed.
 
-**Gives up.** An SBOM gem version whose suffix names no platform `Gem::Platform` knows, and
-whose purl carries no `platform` qualifier, keeps the suffix. Gem::Platform's own patterns are
-unanchored where Ruby's are, so `1.0.0-javascript` reads as java, as it does in Ruby. A gem
+**Gives up.** An SBOM gem version keeps its suffix when its purl carries no `platform`
+qualifier and the suffix is not a known CPU followed by an OS that `Gem::Platform` recognises.
+A CPU outside the list stays a version, too. Ruby's `java` pattern, `^java`, has no end anchor,
+and the Go pattern keeps that, so `1.0.0-javascript` reads as java, as it does in Ruby. A gem
 inside a container image is still not read at all (D70).
 
 **Verified.**
@@ -6915,12 +6920,23 @@ inside a container image is still not read at all (D70).
   and a prerelease.
 - **CycloneDX and SPDX through `Run`:** `TestRun_A6_SBOMGemPlatformIsNotPartOfTheVersion`
   covers the same shapes, plus a platform known only through the purl's qualifier.
+  `TestRun_A6_CycloneDXVersionFallbackLosesThePlatform` holds a purl with no version, whose
+  version comes from the component.
 - **Lockfile parsing:** `TestSpecLine` and `TestParse_NativeGemVersionAndPURL` hold the
   version and the purl.
 - **The helper's branches:** `TestInstalledGemVersion` covers the ones the scans do not reach.
 
-Fourteen mutations were run, and all were caught after one test was added (the lockfile purl
-dropping its platform had survived):
+The branch review (wf_257e6542-a9a) found four problems:
+- a prerelease followed by a platform lost its prerelease (`1.0.0-rc1-arm64-darwin` read as
+  `1.0.0`), now held by requiring a known CPU;
+- the CycloneDX fallback was untested;
+- the report category named here as "not evaluated" was really incomplete checks;
+- the advisory-bound count was mislabelled.
+
+All four are fixed.
+
+Sixteen mutations were run, and all were caught. One test was added for the lockfile purl
+dropping its platform, which had survived. The mutations were:
 - the lockfile keeping the platform;
 - the purl dropping it;
 - either SBOM call removed, or its qualifier dropped;
@@ -6929,7 +6945,9 @@ dropping its platform had survived):
 - the qualifier ignored;
 - an empty core accepted;
 - the legacy bare-OS form unread;
-- the CPU read as the OS.
+- the CPU read as the OS;
+- any CPU accepted;
+- CycloneDX stripping before its fallback.
 
 ---
 

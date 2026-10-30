@@ -22,7 +22,8 @@ import (
 //     affected;
 //   - GEM-A6-0004 fixes sqlite3 in 1.7.0, so a native sqlite3 1.7.0 is clean
 //     (an arm64-darwin build, which read as a prerelease of 1.7.0 and was a
-//     false positive, where ffi's x86_64 was not evaluated at all).
+//     false positive, where every comparison against ffi's x86_64 build
+//     failed as an incomplete check).
 func gemPlatformDB(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "vulnerability.db")
@@ -58,7 +59,7 @@ func gemPlatformDB(t *testing.T) string {
 
 type gemScan struct {
 	found   []string // name@version of every package with a finding
-	skipped int      // packages reported as not evaluated
+	skipped int      // incomplete checks (the report's "skipped" list)
 }
 
 func runGemScan(t *testing.T, db, target string) gemScan {
@@ -92,10 +93,11 @@ func runGemScan(t *testing.T, db, target string) gemScan {
 // 2026-10-22 audit A6: bundler writes a native gem's platform after its
 // version ("nokogiri (1.13.8-x86_64-linux)"), and the cataloger kept it as
 // part of the version. The Gem comparer, following Gem::Version, read the
-// hyphen as a prerelease ("1.13.8.pre.arm64.darwin", below 1.13.8) or
+// hyphen as a prerelease ("1.13.8.pre.arm64.pre.darwin", below 1.13.8) or
 // refused the underscore in x86_64 outright. So an advisory introduced at
 // the installed version found nothing, one fixed at it was a false positive,
-// and x86_64-linux gems were not evaluated at all. Bundler's own grammar
+// and every comparison against an x86_64-linux gem was an incomplete check.
+// Bundler's own grammar
 // (lockfile_parser.rb, NAME_VERSION) takes the version up to the first
 // hyphen and the platform after it; RubyGems rewrites any hyphen in a real
 // version to ".pre.", so a lockfile version never holds one.

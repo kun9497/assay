@@ -138,7 +138,7 @@ func leadingSpaces(line string) int {
 // grammar (lockfile_parser.rb, NAME_VERSION) reads the version up to the
 // first hyphen and the platform after it, and RubyGems rewrites any hyphen in
 // a real version to ".pre.", so a lockfile version never holds one. Kept in
-// the version, the platform read as a prerelease ("1.13.8.pre.arm64.darwin",
+// the version, the platform read as a prerelease ("1.13.8.pre.arm64.pre.darwin",
 // below 1.13.8) or, with x86_64's underscore, as no version at all.
 func specLine(line string) (name, version, locked string, ok bool) {
 	trimmed := strings.TrimSpace(line)
