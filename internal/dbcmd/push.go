@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -415,6 +416,8 @@ func refuseCoverageRegression(ctx context.Context, target name.Reference, incomi
 		// re-fetched whole every build and may legitimately shrink, but a
 		// source that vanishes altogether is still refused.
 		why = ratingCountRegression(cur, incoming)
+	case ubuntuFixStateRegression(cur, incoming) != "":
+		why = ubuntuFixStateRegression(cur, incoming)
 	case cur.RatingCount == 0:
 		// A published artifact with NO ratings has no coverage window to
 		// narrow, whatever its RatingsSince says. Zero means "no lower
@@ -533,12 +536,46 @@ func artifactMetaFromDB(path string) (dbartifact.Meta, error) {
 		return dbartifact.Meta{}, err
 	}
 	asOf, source := oldestDataAsOf(m)
+	// D157: recorded whenever this database covers Ubuntu at all, so a
+	// zero -- tracker disabled or lost -- is a value the guard can hold
+	// against the published count rather than an absence it skips.
+	fixStates, fixStatesKnown := 0, false
+	for _, name := range sortedKeys(m.Providers) {
+		p := m.Providers[name]
+		fixStates += p.UbuntuFixStates
+		for _, eco := range p.Ecosystems {
+			if strings.HasPrefix(eco, "Ubuntu:") {
+				fixStatesKnown = true
+				break
+			}
+		}
+	}
 	return dbartifact.Meta{
 		SchemaVersion: m.Schema, BuiltAt: m.BuiltAt, DataAsOf: asOf, DataAsOfSource: source,
 		RatingsSince: ratingBound(m), RatingsSinceKnown: ratingBoundKnown(m), RatingCount: totalRatings(m), RatingCounts: ratingCounts,
 		RatingWithdrawals: withdrawals,
 		Advisories:        &dbartifact.AdvisoryCoverage{Total: total, Counts: coveredCounts, Ecosystems: m.Ecosystems, Providers: sortedKeys(m.Providers), Renamed: renamed},
+		UbuntuFixStates:   fixStates, UbuntuFixStatesKnown: fixStatesKnown,
 	}, nil
+}
+
+// ubuntuFixStateRegression refuses a candidate holding fewer than 80% of the
+// published artifact's Ubuntu fix states (D157). The build already fails on a
+// tracker that yields nothing; a tracker that loses part of itself -- active/
+// moved while retired/ stays -- still stamps something, and only a comparison
+// sees it. 80% because the tracker moves on its own (2,070,238 states on
+// 2026-10-27, 2,094,636 two days later) and losing one release's states is a
+// drop of a quarter or more. An artifact that predates the annotation has no
+// count to compare and is not refused for it.
+func ubuntuFixStateRegression(cur, incoming dbartifact.Meta) string {
+	if !cur.UbuntuFixStatesKnown || cur.UbuntuFixStates == 0 {
+		return ""
+	}
+	if incoming.UbuntuFixStates*5 >= cur.UbuntuFixStates*4 {
+		return ""
+	}
+	return fmt.Sprintf("Ubuntu fix states from Canonical's tracker fall from %d to %d, below 80%% of the published count "+
+		"(a tracker that stopped parsing, or UBUNTU_TRACKER_ENABLE=0)", cur.UbuntuFixStates, incoming.UbuntuFixStates)
 }
 
 // renamedKeys is the union of every provider's rename declaration (D115),
