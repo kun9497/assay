@@ -293,6 +293,15 @@ func TestInRange_QA1030_AWindowsCloseNeedNotFollowItsOpen(t *testing.T) {
 			{v: "3.0.0", want: false},
 			{v: "4.0.0", want: false},
 		}},
+		// A window that has closed below the empty one: the state just below
+		// 3.0.0 is outside, so the close at 3.0.0 has nothing to end but the
+		// open at 3.0.0.
+		{"a closed window below an empty one", []advisory.Event{intro("1.0.0"), intro("3.0.0"), fixed("2.0.0"), fixed("3.0.0")}, []tieCase{
+			{v: "1.5.0", want: true, introduced: "1.0.0", closedAt: "2.0.0"},
+			{v: "2.0.0", want: false},
+			{v: "3.0.0", want: false},
+			{v: "4.0.0", want: false},
+		}},
 		// The controls: windows that meet, and a single-version window
 		// where a wider one closes, keep D154's verdicts in every order.
 		// Their evidence is not checked: where the file lists [2,2) as a
