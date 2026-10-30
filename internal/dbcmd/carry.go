@@ -105,8 +105,10 @@ func sharedKeys(providers map[string]store.Provenance) []string {
 // A row Ecosystem() rejects is skipped and counted, not guessed at. An
 // EOLFrom that is empty or does not parse leaves the row not past EOL: an
 // unpublished date is not evidence the release ended, and a live key's
-// entries are never restored. "Past" is strictly after, endoflife.date's own
-// isEol semantics, the same comparison scancmd.eolStatusFromRow makes.
+// entries are never restored. "Past" begins the day after EOLFrom (UTC),
+// endoflife.date's own isEol semantics and the same comparison
+// scancmd.eolStatusFromRow makes. Both were now.After(EOLFrom at midnight),
+// which put the EOLFrom day itself past EOL (audit A9).
 func pastEOLKeys(rows []store.EOLRelease, now time.Time) (map[string]string, int) {
 	past := map[string]string{}
 	rejected := 0
@@ -117,7 +119,7 @@ func pastEOLKeys(rows []store.EOLRelease, now time.Time) (map[string]string, int
 			continue
 		}
 		d, err := time.Parse("2006-01-02", row.EOLFrom)
-		if err != nil || !now.After(d) {
+		if err != nil || now.Before(d.AddDate(0, 0, 1)) {
 			continue
 		}
 		past[key] = row.EOLFrom
