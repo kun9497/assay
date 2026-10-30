@@ -11,8 +11,8 @@ All notable changes to this project are documented here. The format follows
 - A native gem's platform (`nokogiri (1.13.8-x86_64-linux)` in a Gemfile.lock, or the same
   text in a syft SBOM's gem version) is no longer read as part of its version. Before, every
   comparison against an x86_64 build was an incomplete check, and other builds sorted as
-  prereleases: an advisory
-  introduced at the installed version was missed and one fixed at it was a false positive.
+  prereleases: an advisory introduced at the installed version was missed and one fixed at
+  it was a false positive.
   On rails/rails's own Gemfile.lock, 130 incomplete checks became 0, 26 findings are no
   longer missed and 2 false positives are gone. The purl keeps the platform. (D155, audit A6)
 - A version range whose later window is listed before an earlier one that closes where the
