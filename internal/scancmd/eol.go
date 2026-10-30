@@ -133,11 +133,13 @@ func eolStatusFromRow(row store.EOLRelease, now time.Time) report.EOLStatus {
 		EOESFrom: row.EOESFrom, EOESLabel: row.EOESLabel,
 	}
 	if eolDate, perr := time.Parse(dateLayout, row.EOLFrom); perr == nil {
-		// Strictly after: endoflife.date's own isEol semantics are
+		// From the day after: endoflife.date's own isEol semantics are
 		// exclusive of the day EOLFrom itself names (measured against the
 		// live API 2026-08-21, which does not flip isEol until the day
-		// after eolFrom).
-		st.EOL = now.After(eolDate)
+		// after eolFrom). This was now.After(eolDate), which is true from
+		// the first nanosecond of the EOLFrom day -- a whole day early
+		// (audit A9). Days are UTC, the calendar the dates are written in.
+		st.EOL = !now.Before(eolDate.AddDate(0, 0, 1))
 	}
 	// An unparseable or empty EOLFrom leaves st.EOL false (this cycle's
 	// EOLFrom was never published, or endoflife.date's shape changed) —
@@ -145,7 +147,10 @@ func eolStatusFromRow(row store.EOLRelease, now time.Time) report.EOLStatus {
 	// applies to a missing fact, never a fabricated EOL date.
 	eoesUnexpired := false
 	if eoesDate, perr := time.Parse(dateLayout, row.EOESFrom); perr == nil {
-		eoesUnexpired = now.Before(eoesDate)
+		// Through the whole day EOESFrom names, the mirror of EOL above
+		// (audit A9: this was now.Before(eoesDate), which let the EOES day
+		// itself read as unmaintained).
+		eoesUnexpired = now.Before(eoesDate.AddDate(0, 0, 1))
 	}
 	st.StillMaintained = row.IsMaintained || eoesUnexpired
 	return st

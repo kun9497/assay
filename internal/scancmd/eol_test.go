@@ -380,3 +380,59 @@ func TestLookupEOL_NoRowMatches(t *testing.T) {
 		t.Errorf("Reason = %q, want it to name both the distro and the cycle", st.Reason)
 	}
 }
+
+// 2026-10-22 audit A9: EOL was now.After(EOLFrom at 00:00 UTC), so the
+// release went EOL from the first nanosecond of the EOLFrom day -- a full day
+// early, 09:00 KST on the day itself -- while D87 and EOLStatus.EOL promise
+// the day EOLFrom names is not yet EOL. TestRun_EOLBoundaryDayIsExclusive
+// pinned exactly midnight, the one instant the old comparison got right.
+// The whole EOLFrom day (UTC, the calendar endoflife.date's dates are in) is
+// before EOL; the next day is EOL from its first instant.
+func TestRun_A9_TheWholeEOLFromDayIsNotYetEOL(t *testing.T) {
+	db := testDBWithEOL(t, []store.EOLRelease{
+		{DistroID: "alpine", Release: "3.19", EOLFrom: "2026-01-01", EOLLabel: "Security Support"},
+	})
+	for _, tc := range []struct {
+		now  time.Time
+		code int
+	}{
+		{time.Date(2026, 1, 1, 0, 0, 0, 1, time.UTC), 0},
+		{time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC), 0},
+		{time.Date(2026, 1, 1, 23, 59, 59, 999999999, time.UTC), 0},
+		{time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), 1},
+	} {
+		pinClock(t, tc.now)
+		out, errOut, code := alpine319Image(t, db, Options{FailOnEOL: true})
+		if code != tc.code {
+			t.Errorf("Run() at %s = %d, want %d (stdout: %s, stderr: %s)", tc.now.Format(time.RFC3339Nano), code, tc.code, out, errOut)
+		}
+		if got := strings.Contains(out, "EOL: alpine 3.19"); got != (tc.code == 1) {
+			t.Errorf("at %s, EOL line printed = %v, want %v:\n%s", tc.now.Format(time.RFC3339Nano), got, tc.code == 1, out)
+		}
+	}
+}
+
+// The same off-by-one in the other direction (A9): extended support was
+// unexpired only while now was before EOESFrom's midnight, so the EOES day
+// itself already read as unmaintained. The day EOESFrom names is still
+// covered, as the day EOLFrom names is not yet EOL.
+func TestLookupEOL_A9_TheWholeEOESFromDayIsStillMaintained(t *testing.T) {
+	rows := []store.EOLRelease{{
+		DistroID: "alpine", Release: "3.18", EOLFrom: "2020-01-01",
+		EOESFrom: "2026-01-01", IsMaintained: false,
+	}}
+	distro := &pkgmeta.Distro{ID: "alpine", VersionID: "3.18.0"}
+	for _, tc := range []struct {
+		now  time.Time
+		want bool
+	}{
+		{time.Date(2025, 12, 31, 23, 59, 59, 0, time.UTC), true},
+		{time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), true},
+		{time.Date(2026, 1, 1, 23, 59, 59, 999999999, time.UTC), true},
+		{time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), false},
+	} {
+		if got := lookupEOL(distro, rows, tc.now).StillMaintained; got != tc.want {
+			t.Errorf("StillMaintained at %s = %v, want %v", tc.now.Format(time.RFC3339Nano), got, tc.want)
+		}
+	}
+}

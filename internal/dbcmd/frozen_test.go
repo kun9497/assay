@@ -545,3 +545,33 @@ func TestCarryForward_MergesAreBatched(t *testing.T) {
 		t.Errorf("stderr lacks %q:\n%s", want, logs)
 	}
 }
+
+// Audit A9, applied here as well: "past EOL" is the D87 boundary, exclusive
+// of the day EOLFrom names, and pastEOLKeys said it made scancmd's
+// comparison while making the same off-by-one (now.After(EOLFrom at 00:00
+// UTC)). On the EOLFrom day itself the key is not past EOL, so T8's erosion
+// stands as the upstream's correction; from the next midnight it is restored.
+func TestCarryForward_A9_TheEOLFromDayIsNotYetPastEOL(t *testing.T) {
+	for _, tc := range []struct {
+		now      time.Time
+		restored bool
+	}{
+		{time.Date(2026, 8, 31, 0, 0, 0, 1, time.UTC), false},
+		{time.Date(2026, 8, 31, 23, 59, 59, 999999999, time.UTC), false},
+		{time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), true},
+	} {
+		prev := carryNow
+		carryNow = func() time.Time { return tc.now }
+		dst, code, logs := buildWithEOL(t, erosionSeed(t), catalog(debian11Sep, debian12), eroded())
+		carryNow = prev
+		if code != 0 {
+			t.Fatalf("at %s: Update = %d, want 0:\n%s", tc.now.Format(time.RFC3339Nano), code, logs)
+		}
+		db, m := openOut(t, dst)
+		got := len(lookupIDs(t, db, "Debian:11", "libfoo")) > 0
+		_, frozen := m.Providers["osv"].Frozen["Debian:11"]
+		if got != tc.restored || frozen != tc.restored {
+			t.Errorf("at %s: restored = %v, frozen = %v; want both %v", tc.now.Format(time.RFC3339Nano), got, frozen, tc.restored)
+		}
+	}
+}
