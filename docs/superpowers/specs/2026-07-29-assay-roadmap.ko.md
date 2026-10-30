@@ -3129,6 +3129,10 @@ evaluated입니다 — D80의 거부가 정확히 제 할 일을 하는 것입�
 
 ### D85 — Ubuntu fix state, Canonical이 실제로 유지하는 tracker에서
 
+> **D157 로 개정됨 (2026-10-30):** 아무 tuple 도 파싱하지 못하거나 fix state 를 하나도 찍지 못하는
+> tracker 는 이제 빌드를 실패시키고, `db push` 는 게시된 개수의 80% 아래인 후보를 거부한다. 아래의
+> "실패하지 않고 저하시킨다"는 선택은 대체되었다.
+
 **결정.** Ubuntu finding이 더 이상 `unknown` fix state를 보고하지 않습니다. OSV의 Ubuntu
 export는 그것을 말할 수 없습니다 — 거기서는 "needed"와 "ignored"가 바이트 단위로
 동일합니다(fix 없는 range일 뿐, 그 이상은 없습니다) — 그래서 OSV provider가 변환 시점에
@@ -6601,6 +6605,65 @@ java 로 읽힌다. 컨테이너 이미지 안의 gem 은 여전히 전혀 읽�
 - CPU 를 OS 로 읽음;
 - 어떤 CPU 든 받아들임;
 - CycloneDX 가 fallback 보다 먼저 접미사를 뗌.
+
+---
+
+### D157 — 비어 있는 Ubuntu tracker 는 빌드를 실패시키고, 줄어든 tracker 는 publish 를 실패시킨다 (D85 개정)
+
+**결정.** Canonical 의 CVE tracker 에 이제 두 곳에서 하한을 둔다.
+1. **빌드.** tracker clone 이 tuple 을 하나도 파싱하지 못하면 `db build` 가 실패한다. 이 검사는 Ubuntu
+   archive 를 가져오기 전에 돈다. tracker 가 tuple 을 읽었지만, 조회를 요청받은 fix 없는 Ubuntu range
+   어디에도 fix state 를 찍지 못한 경우에도 빌드가 실패한다. 두 오류 모두 개수와
+   `UBUNTU_TRACKER_ENABLE=0` 을 밝힌다. 이 스위치는 Ubuntu fix state 없이 일부러 빌드하는 길이다.
+2. **Publish.** 찍힌 개수는 osv provider 의 provenance(`Provenance.UbuntuFixStates`)와 artifact
+   (annotation `dev.assay.ubuntu-fix-states`)에 실려 간다. `db push` 는 후보의 개수가 게시된 artifact
+   의 80% 아래로 떨어지면 거부한다. 다른 모든 커버리지 퇴보와 마찬가지로 `--force` 로 넘어갈 수 있다.
+   annotation 이 생기기 전에 게시된 artifact 는 개수가 없으므로 비교하지 않는다.
+
+**이유.** 2026-10-22 감사(A15). D85 는 아무것도 파싱하지 못한 tracker 도 그대로 빌드되게 두었다.
+조건 없이 찍는 진행 줄이 0 을 로그에서 보이게 해 준다는 이유였다. 초록색 nightly 의 로그는 아무도 읽지
+않는다. Canonical 이 tracker 를 개편하면, 모든 Ubuntu wont-fix 와 not-fixed state 가 `unknown` 으로 돌아간
+artifact 가 아무것도 실패하지 않은 채 게시된다. 2026-10-29 nightly 에서 이는 range 2,094,636개였고, 그중
+86% 가 wont-fix 였다.
+
+빌드 검사는 전부 잃은 경우를 잡고, 601 MB 의 archive 를 내려받기 전에 실패한다. 일부만 잃은 경우는 여전히
+무언가를 찍는다. 예를 들어 `active/` 는 옮겨 갔는데 `retired/` 는 그대로인 경우다. 이는 게시된 개수와의
+비교만이 보므로, publish 하한이 있다.
+
+80% 로 한 이유는 tracker 가 스스로 움직이기 때문이다. 2026-10-27 에는 state 가 2,070,238개였고 이틀 뒤에는
+2,094,636개였다. 한 release 의 state 를 잃으면 4분의 1 이상이 빠진다. 사용자는 빌드 검사만 두는 안(일부
+손실을 못 본다), 절대 하한(손으로 다시 맞춰야 하는 숫자), 개수를 보여 주기만 하고 gate 하지 않는 안을
+모두 마다하고 두 반쪽을 함께 골랐다.
+
+**포기하는 것.** Canonical 이 tracker 를 개편하면 nightly 가 멈춘다. 의도한 동작이다.
+`UBUNTU_TRACKER_ENABLE=0` 은 여전히 빌드되며, 여전히 stderr 에 그렇다고 말한다. 그 artifact 는 개수 0 을
+싣으므로, 찍힌 artifact 위에 게시하려면 `--force` 가 필요하다. 이 변경이 들어간 뒤의 첫 nightly 는
+annotation 이 없는 artifact 와 비교하므로 막히지 않고, 그다음 nightly 부터 막힌다.
+
+**검증.**
+- `TestFetch_D157_ATrackerThatParsesToNothingFailsTheBuild` 는 실제 git clone 에 대해
+  `Provider.Fetch` 를 두 가지 모양으로 돌린다: 옮겨진 레이아웃과 철자가 바뀐 헤더. 둘 다 실패해야 하며,
+  archive 는 가져오지 않아야 한다.
+- `TestFetch_D157_ATrackerThatStampsNothingFailsTheBuild` 는 키가 archive 의 어느 range 와도 만나지
+  않는 tracker 를 다룬다.
+- `TestFetch_D157_ProvenanceCarriesTheStampedCount`.
+- `TestPush_D157_RefusesToLoseUbuntuFixStates` 는 살아 있는 인메모리 registry 에 publish 한다. 후보는
+  state 를 하나도 갖지 않는 경우, 대부분 갖는 경우, 하한 바로 아래, 정확히 하한, 보통의 변동, 더 많은
+  경우다.
+- annotation 이 없는 artifact 는 비교하지 않는다.
+
+변이 열한 개를 돌렸고 모두 잡혔다:
+- guard 제거;
+- 하한을 70% 또는 81% 로 옮김;
+- annotation 을 쓰지 않거나 읽지 않음;
+- 커버리지 플래그를 세우지 않음;
+- 개수를 합산하지 않음;
+- 두 빌드 검사 중 어느 쪽이든 제거;
+- 분모를 세지 않음;
+- provenance 개수를 설정하지 않음.
+
+tuple 0 개 검사는 처음에 살아남았다. 0 개 stamp 검사가 같은 빌드를 나중에 실패시키기 때문이다. 이제
+테스트는 archive 를 가져오지 않았음도 요구한다.
 
 ---
 
