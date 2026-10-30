@@ -37,6 +37,20 @@ func TestNormalizeGoVersion(t *testing.T) {
 		{"go1.22beta1", "1.22.0-beta.1", true},
 		{"go1.21.5rc2", "1.21.5-rc.2", true},
 		{"go1.24.0-rc.1", "1.24.0-rc.1", true},
+		// GOEXPERIMENT (A12). The linker appends "-X:<list>" to a version with
+		// no hyphen and " X:<list>" to one that has one (and older toolchains
+		// always used the space); the list is comma-joined. Neither is part
+		// of the release.
+		{"go1.26.7-X:fieldtrack", "1.26.7", true},
+		{"go1.26.7-X:fieldtrack,boringcrypto", "1.26.7", true},
+		{"go1.21.0 X:loopvar", "1.21.0", true},
+		{"go1.25.0-rc.1 X:foo", "1.25.0-rc.1", true},
+		{"go1.26rc1-X:fieldtrack", "1.26.0-rc.1", true},
+		{"go1.26 X:boringcrypto", "1.26.0", true},
+		{"go1.26.7-X:", "", false},
+		{"go1.26.7-x:foo", "", false},
+		{"go1.26.7-X:Foo Bar", "", false},
+		{"devel go1.27-abc X:foo", "", false},
 		// Already normalized: Parse must be safe to call on a version some
 		// other path already cleaned.
 		{"1.26.4", "1.26.4", true},
