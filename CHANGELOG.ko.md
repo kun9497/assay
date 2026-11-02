@@ -8,6 +8,12 @@
 ## [Unreleased]
 
 ### Fixed
+- `db build --ratings-only --seed` 가 EOL source 가 설정되지 않았을 때(`EOL_ENABLE=0`) seed 의 end-of-life
+  카탈로그와 enrichment record 의 provenance 를 유지합니다. 전에는 새 metadata 가 그 위에 덮어써져 EOL
+  행이 사라지고, 그런 데이터베이스에서 `--fail-on-eol` 은 gate 대신 경고만 했으며, `db status` 는 enrichment
+  를 data-as-of 없이 보여줬습니다. EOL source 가 설정되면 여전히 카탈로그를 대체합니다. `EOL_ENABLE=0` 줄은
+  seed 의 카탈로그를 seed 만큼 오래된 채로 유지한다고 말합니다. (감사 2026-10-22 P4, 2026-11-02 재검증)
+
 - NVD 가 rate limit 을 넘은 클라이언트에 답하는 HTTP 403 을 429, 5xx 와 같은 유한한 일정으로 재시도합니다.
   전에는 영구 실패로 보아, 한 번 throttling 된 페이지가 몇 시간 돈 sync 를 끝냈습니다. 풀리지 않는
   403(거부된 key, 차단된 주소)은 즉시가 아니라 일정을 다 쓴 뒤 여전히 실패합니다. (감사 2026-10-22 P4,

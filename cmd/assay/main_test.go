@@ -3369,7 +3369,7 @@ func TestDBUpdateEOLSource_DefaultsOn(t *testing.T) {
 			newEOLSource = func(opts eol.Options) *eol.Provider { sawCall = true; return orig(opts) }
 			defer func() { newEOLSource = orig }()
 
-			got := dbUpdateEOLSource(io.Discard)
+			got := dbUpdateEOLSource(io.Discard, false)
 			if (got != nil) != tc.want {
 				t.Errorf("dbUpdateEOLSource() = %v, want non-nil=%v", got, tc.want)
 			}
@@ -3397,7 +3397,7 @@ func TestDBUpdateEOLSource_ConstructsWithProgress(t *testing.T) {
 	defer func() { newEOLSource = orig }()
 
 	var errOut bytes.Buffer
-	if got := dbUpdateEOLSource(&errOut); got == nil {
+	if got := dbUpdateEOLSource(&errOut, false); got == nil {
 		t.Fatal("dbUpdateEOLSource() = nil, want a constructed source (EOL_ENABLE defaults on)")
 	}
 	if gotOpts.Progress != &errOut {
@@ -3414,7 +3414,7 @@ func TestDBUpdateEOLSource_ConstructsWithProgress(t *testing.T) {
 func TestDBUpdateEOLSource_DisabledDisclosesOnStderr(t *testing.T) {
 	t.Setenv("EOL_ENABLE", "0")
 	var errOut bytes.Buffer
-	if got := dbUpdateEOLSource(&errOut); got != nil {
+	if got := dbUpdateEOLSource(&errOut, false); got != nil {
 		t.Fatalf("dbUpdateEOLSource() with EOL_ENABLE=0 = %v, want nil", got)
 	}
 	if !strings.Contains(errOut.String(), "EOL_ENABLE=0") || !strings.Contains(errOut.String(), "fail-on-eol") {
@@ -3923,5 +3923,39 @@ func TestParseScan_Platform(t *testing.T) {
 		if stdout.Len() != 0 {
 			t.Errorf("run(%v): a refused flag wrote to stdout:\n%s", args, stdout.String())
 		}
+	}
+}
+
+// Audit 2026-10-22 P4, re-verified 2026-11-02: a ratings-only build carries
+// the seed's EOL catalog when EOL_ENABLE=0 (dbcmd.Update), so the disclosure
+// must say that rather than "carries none". Driven through run() so the
+// ratingsOnly argument reaching dbUpdateEOLSource is held, not only the
+// helper's own wording -- Update's no-seed refusal fires after the argument
+// list is evaluated, so the line is printed and nothing is built.
+func TestRun_DBBuildRatingsOnlyEOLDisabledSaysTheSeedsCatalogIsCarried(t *testing.T) {
+	t.Setenv("ASSAY_DB_DIR", t.TempDir())
+	t.Setenv("EOL_ENABLE", "0")
+
+	var stdout, stderr bytes.Buffer
+	run([]string{"db", "build", "--ratings-only"}, &stdout, &stderr)
+	s := stderr.String()
+	if !strings.Contains(s, "keeps the seed's end-of-life catalog") {
+		t.Errorf("stderr does not say the seed's catalog is carried:\n%s", s)
+	}
+	if strings.Contains(s, "carries none") {
+		t.Errorf("stderr says a ratings-only build carries no EOL data, which it does:\n%s", s)
+	}
+}
+
+// The other half: an ordinary build with EOL_ENABLE=0 really does carry
+// none, and must not borrow the ratings-only wording.
+func TestDBUpdateEOLSource_DisabledOrdinaryBuildSaysNone(t *testing.T) {
+	t.Setenv("EOL_ENABLE", "0")
+	var errOut bytes.Buffer
+	if got := dbUpdateEOLSource(&errOut, false); got != nil {
+		t.Fatalf("dbUpdateEOLSource() with EOL_ENABLE=0 = %v, want nil", got)
+	}
+	if s := errOut.String(); !strings.Contains(s, "carries none") || strings.Contains(s, "seed's") {
+		t.Errorf("ordinary-build disclosure = %q, want \"carries none\" and no seed wording", s)
 	}
 }

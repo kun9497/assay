@@ -8,6 +8,13 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- `db build --ratings-only --seed` keeps the seed's end-of-life catalog, and the provenance of
+  its enrichment records, when no EOL source is configured (`EOL_ENABLE=0`). Before, the new
+  metadata was written over them: the EOL rows were lost, so `--fail-on-eol` warned instead
+  of gating on such a database, and `db status` showed the enrichment with no data-as-of.
+  A configured EOL source still replaces the catalog. The `EOL_ENABLE=0` line says the
+  seed's catalog is kept, as old as the seed. (audit 2026-10-22 P4, re-verified 2026-11-02)
+
 - NVD's HTTP 403, which is how it answers a client over its rate limit, is retried on the same
   bounded schedule as 429 and 5xx. Before, it was held permanent, and one throttled page ended
   a sync that may have run for hours. A 403 that never clears (a rejected key, a blocked

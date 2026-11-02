@@ -214,6 +214,27 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 		// must see the same coverage `db status` showed against the seed,
 		// not an empty one because no provider ran this time.
 		maps.Copy(meta.Providers, seedMeta.Providers)
+		// The file copy carried the seed's enrichment bucket and its EOL
+		// rows' only home is Meta, so a fresh Meta written by SetMeta below
+		// would keep the prose without the provenance vouching for it and
+		// drop the EOL catalog outright -- with EOL_ENABLE=0 that left
+		// --fail-on-eol warning instead of gating on the result (audit
+		// 2026-10-22 P4, re-verified 2026-11-02). Both are starting points
+		// in the way Ratings is: an enricher or EOL source that does run
+		// below replaces its entry, so the seed's survives only where this
+		// build fetched nothing to replace it with.
+		//
+		// The normal seeded build's refusal to carry Enrichment (below) is
+		// about not re-copying records; here the records are already in tmp,
+		// so leaving their provenance behind would be an under-claim, not a
+		// saving. Everything else in Meta is either derived by SetMeta from
+		// what tmp holds (Ecosystems, Databases, the two count maps, Schema),
+		// this build's own (BuiltAt), or deliberately never carried by a
+		// build (Artifact, D127). Frozen, Closed and Renamed live on each
+		// Providers entry and came across with it.
+		maps.Copy(meta.Enrichment, seedMeta.Enrichment)
+		meta.EOL = seedMeta.EOL
+		meta.EOLProvenance = seedMeta.EOLProvenance
 		// The starting point mergeRatingCoverage builds on in the annotator
 		// loop below, exactly like the existing ratings-copy block: an
 		// annotator that does not run this time keeps the seed's window, one
