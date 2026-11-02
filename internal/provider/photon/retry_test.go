@@ -278,7 +278,7 @@ func TestFetch_CancelledDuringBackoffReturnsPromptly(t *testing.T) {
 	defer srv.Close()
 
 	start := time.Now()
-	_, _, err := runFetchProgress(t, ctx, srv, threeMajors)
+	_, progress, err := runFetchProgress(t, ctx, srv, threeMajors)
 	elapsed := time.Since(start)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Fetch error = %v, want one wrapping context.Canceled", err)
@@ -288,6 +288,15 @@ func TestFetch_CancelledDuringBackoffReturnsPromptly(t *testing.T) {
 	}
 	if got := calls("3.0"); got != 1 {
 		t.Errorf("the 3.0 path saw %d request(s), want exactly 1 -- nothing is requested after the cancel", got)
+	}
+	// The request count alone cannot tell "stopped in the backoff" from
+	// "ignored the backoff's cancel and let http.Client refuse the cancelled
+	// context": both make one request. What differs is that the second
+	// announces a retry it then does not make, so the progress stream is
+	// the assertion that holds the sleepOrDone error check in place.
+	if strings.Contains(progress, "retrying") {
+		t.Errorf("progress announces a retry after the cancel; a cancelled build must stop in the backoff, not past it:%s%s",
+			string(rune(10)), progress)
 	}
 	for _, v := range []string{"4.0", "5.0"} {
 		if got := calls(v); got != 0 {
