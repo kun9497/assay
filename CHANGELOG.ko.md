@@ -8,6 +8,22 @@
 ## [Unreleased]
 
 ### Changed
+- `--db-max-age` 와 `--db-max-rating-age` 가 `=` 꼴뿐 아니라 `--timeout`, `--platform` 처럼 띄어 쓴
+  꼴(`--db-max-age 48h`)도 받습니다. `docs/integrations.md` 와 D113 은 두 플래그를
+  `--db-max-age <duration>` 으로 적는데, 그대로 베낀 그 표기가 바로 옆의 `=` 꼴은 되는 동안 exit 2 로
+  끝났습니다(QA 2026-11-02 #12). 값 없이 끝에 홀로 선 플래그는 여전히 같은 메시지로 거부하고, 띄어 쓴
+  꼴의 잘못된 값은 `=` 꼴과 같은 문구로 거부합니다.
+
+### Fixed
+- 문서와 도움말의 낡은 서술 여섯 곳(QA 2026-11-02 P3 #10, #13, #14, #15, #20): `--output sarif`
+  도움말과 `docs/DESIGN.md`, `docs/deferred-decisions.md` 는 미평가 결과가 모두 note 수준이라고
+  했지만, D109 와 D158 이후 읽지 못한 manifest 와 버전이나 purl 이 없는 컴포넌트는 warning 수준입니다;
+  README 와 `CLAUDE.md` 는 `dirscan` 이 열세 가지를 읽는 lockfile 형식을 열 가지로 셌습니다; README 와
+  `CLAUDE.md` 는 로드맵이 한참 지나친 끝 번호(`D146`, `D79`, `D36`)를 적고 있었고, 이제 끝 번호 없이
+  번호 체계만 설명합니다; `docs/deferred-decisions.md` 의 서명 항목은 PR #181(D137 의 둘째 절반)이 검증을 이미
+  내보낸 뒤에도 "검증은 둘째 PR 에서" 라고 했습니다; frozen 키 운영 절차는 `db-publish.yml` 의
+  `workflow_dispatch` 가 입력을 하나도 선언하지 않는다고 했지만 #142 이후 D110 의 `seed` 입력을
+  선언하고 있습니다(force 스위치는 여전히 없음). 한국어 사본도 함께 고쳤습니다.
 - `scandiff` 의 표가 `GRYPE` 바로 뒤에 `A_BRIDGED` 와 `G_BRIDGED` 두 열을 새로 찍습니다. bare-advisory
   bridge 가 assay 쪽 집합과 grype 쪽 집합에 각각 더한 튜플 수입니다. 2026-10-13 wolfi 에서 `ASSAY` 가
   46 에서 74 로 오르는 동안 assay 자체 튜플은 45 에서 41 로 줄었는데, grype 데이터베이스가 자라면서 grype
@@ -15,7 +31,6 @@
   쪽의 성장일 수 있어 주간 리뷰가 그 분리를 손으로 세야 했습니다. floor 와 ceiling 의 의미는 바뀌지 않고,
   `ERROR` 행은 다른 카운터처럼 `0 0` 을 찍습니다. trivy 비교는 bridge 하지 않으므로 그대로입니다.
 
-### Fixed
 - DESCRIBES 관계가 실제 패키지를 지목하는 SPDX 문서가 더 이상 그 패키지를 잃지 않습니다. 파서는
   첫 DESCRIBES 대상을 그것이 문서 루트의 가짜 패키지인지 확인하지 않고 버렸으므로, 자기가 담은
   단 하나의 버전과 purl 이 있는 패키지를 기술하는 문서(프로젝트 자체의 `tiny.spdx.json` 포함)는

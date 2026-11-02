@@ -909,8 +909,9 @@ func TestRun_ScanDBMaxRatingAgeReachesRealExitCode(t *testing.T) {
 }
 
 // TestParseScan_DBMaxRatingAge pins the new flag's parsing to --db-max-age's
-// exactly: the = form only, a positive Go duration, last one wins, and every
-// refusal names the flag — a typo must never become a scan with no gate.
+// exactly: the = form and the space form, a positive Go duration, last one
+// wins, and every refusal names the flag -- a typo must never become a scan
+// with no gate.
 func TestParseScan_DBMaxRatingAge(t *testing.T) {
 	_, opts, err := parseScanArgs([]string{"alpine:3.19", "--db-max-rating-age=48h", "--db-max-rating-age=168h"})
 	if err != nil {
@@ -932,6 +933,22 @@ func TestParseScan_DBMaxRatingAge(t *testing.T) {
 			opts.DBMaxAge, opts.DBMaxRatingAge)
 	}
 
+	// The space form too, like --timeout and --platform: docs/integrations.md
+	// and D113 write these flags `--db-max-age <duration>`, so the form a
+	// reader copies from them has to work (QA 2026-11-02 #12). The value is
+	// the next argument, and the target after it is still the target.
+	target, opts, err := parseScanArgs([]string{"--db-max-age", "48h", "alpine:3.19", "--db-max-rating-age", "168h"})
+	if err != nil {
+		t.Fatalf("parseScanArgs(space form): %v", err)
+	}
+	if target != "alpine:3.19" {
+		t.Errorf("target = %q, want alpine:3.19 -- the space form swallowed the wrong argument", target)
+	}
+	if opts.DBMaxAge != 48*time.Hour || opts.DBMaxRatingAge != 168*time.Hour {
+		t.Errorf("space form gave DBMaxAge=%v DBMaxRatingAge=%v, want 48h and 168h",
+			opts.DBMaxAge, opts.DBMaxRatingAge)
+	}
+
 	for _, tc := range []struct {
 		args []string
 		want string
@@ -939,11 +956,16 @@ func TestParseScan_DBMaxRatingAge(t *testing.T) {
 		{[]string{"x", "--db-max-rating-age=abc"}, `--db-max-rating-age: "abc" is not a duration (try 24h, 168h)`},
 		{[]string{"x", "--db-max-rating-age=0"}, `--db-max-rating-age: "0" must be positive; omit the flag to scan without the check`},
 		{[]string{"x", "--db-max-rating-age=-1h"}, `--db-max-rating-age: "-1h" must be positive`},
+		// A trailing bare flag has no next argument to read: still refused.
 		{[]string{"x", "--db-max-rating-age"}, "--db-max-rating-age needs a duration, e.g. --db-max-rating-age=168h"},
+		// The space form's value goes through the same helper and wording.
+		{[]string{"x", "--db-max-rating-age", "abc"}, `--db-max-rating-age: "abc" is not a duration (try 24h, 168h)`},
+		{[]string{"x", "--db-max-rating-age", "0"}, `--db-max-rating-age: "0" must be positive`},
 		// The shared helper must not have changed --db-max-age's own wording.
 		{[]string{"x", "--db-max-age=abc"}, `--db-max-age: "abc" is not a duration (try 24h, 168h)`},
 		{[]string{"x", "--db-max-age=0"}, `--db-max-age: "0" must be positive; omit the flag to scan without the check`},
 		{[]string{"x", "--db-max-age"}, "--db-max-age needs a duration, e.g. --db-max-age=48h"},
+		{[]string{"x", "--db-max-age", "abc"}, `--db-max-age: "abc" is not a duration (try 24h, 168h)`},
 	} {
 		if _, _, err := parseScanArgs(tc.args); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("parseScanArgs(%v) err = %v, want it to contain %q", tc.args, err, tc.want)

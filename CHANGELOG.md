@@ -8,6 +8,23 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
+- `--db-max-age` and `--db-max-rating-age` accept the space form (`--db-max-age 48h`) as well
+  as `=`, like `--timeout` and `--platform`. `docs/integrations.md` and D113 write both flags
+  as `--db-max-age <duration>`, and that copied spelling exited 2 while the `=` form beside it
+  worked (QA 2026-11-02 #12). A trailing bare flag with no value is still refused with the
+  same message, and a bad value in the space form is refused with the `=` form's wording.
+
+### Fixed
+- Six stale statements in the documentation and help text (QA 2026-11-02 P3 #10, #13, #14,
+  #15, #20): the `--output sarif` help, `docs/DESIGN.md` and `docs/deferred-decisions.md` said
+  every not-evaluated result is note-level, when since D109 and D158 a manifest not read and a
+  component with no version or purl are warning-level; the README and `CLAUDE.md` counted ten
+  lockfile formats where `dirscan` reads thirteen; the README and `CLAUDE.md` named a terminal
+  D number (`D146`, `D79`, `D36`) that the roadmap had long passed, and now describe the
+  numbering without one; the signing entry in `docs/deferred-decisions.md` said verification
+  "follows in its second PR" after PR #181 (the second half of D137) had shipped it; and the frozen-key operating
+  procedure said `db-publish.yml`'s `workflow_dispatch` declares no inputs, when it has declared
+  the D110 `seed` input since #142 (and still no force switch). Korean copies updated alongside.
 - `scandiff`'s table prints two new columns, `A_BRIDGED` and `G_BRIDGED`, right after `GRYPE`:
   how many tuples the bare-advisory bridge added into assay's set and into grype's. Measured
   2026-10-13 on wolfi, `ASSAY` rose 46 to 74 while assay's own tuples fell 45 to 41, because 33
@@ -16,7 +33,6 @@ All notable changes to this project are documented here. The format follows
   measure the split by hand. No floor or ceiling changes meaning; an `ERROR` row prints `0 0`
   like its other counters. The trivy comparison does not bridge and is unchanged.
 
-### Fixed
 - An SPDX document whose DESCRIBES relationship names a real package no longer loses that
   package. The parser dropped the first DESCRIBES target as the document-root pseudo-package
   without checking that it was one, so a document describing the one versioned, purl-bearing

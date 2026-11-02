@@ -1079,9 +1079,12 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] 출처별 평가 — finding이 모든 데이터베이스의 평가를 유지하고, 게이트는 그중 가장 높은
       것을 취함 (D25)
 - [x] 두 번째 평가 출처로서의 NVD, CVE로 조인 (D27)
-- [x] SARIF 출력(D55) — `--output sarif`. 평가하지 못한 패키지는 note 수준 결과로도, 도구
+- [x] SARIF 출력(D55) — `--output sarif`. 스캔이 평가하지 못한 것은 결과로도, 도구
       알림으로도 나갑니다. GitHub code scanning이 스펙의 `invocations[]` 채널을 무시하고,
-      부분 스캔이 온전한 것으로 읽힐 수는 없기 때문입니다
+      부분 스캔이 온전한 것으로 읽힐 수는 없기 때문입니다. assay 가 아무 판단도 내릴 수
+      없는 것(matcher 자체의 스킵, 지원하지 않는 생태계)은 note 수준, 대상 쪽에서 고칠 수
+      있는 것(버전이나 purl 이 없는 컴포넌트, D158; 읽지 못한 manifest, D109)은 warning
+      수준입니다
 
 **⑦ NVD 심각도** ✅ — assay가 OSV로 이미 매칭한 finding에 NIST가 그 CVE를 몇 점으로 보는지 붙입니다.
 
