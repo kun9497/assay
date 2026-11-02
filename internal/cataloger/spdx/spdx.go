@@ -82,17 +82,35 @@ func Parse(r io.Reader) (pkgmeta.Target, cyclonedx.Stats, error) {
 	var target pkgmeta.Target
 	var stats cyclonedx.Stats
 
-	rootID := findRootPackageID(doc)
+	described := describedPackageIDs(doc)
 	srcOf := sourceRPMOf(doc)
 
 	for _, p := range doc.Packages {
-		if rootID != "" && p.SPDXID == rootID {
-			// The document-root pseudo-package — syft 1.51's
-			// SPDXRef-DocumentRoot-*, or Red Hat's own container/product
-			// package (a pkg:oci purl). Excluded exactly like CycloneDX's
-			// operating-system component: not a package to scan, and not
-			// counted anywhere, rather than landing as a skip and inflating
-			// the denominator.
+		if described[p.SPDXID] {
+			// A DESCRIBES target is usually the document-root
+			// pseudo-package — syft 1.51's SPDXRef-DocumentRoot-* (no
+			// purl), Red Hat's own container package (a pkg:oci purl) or
+			// product package (a cpe, no purl). Those are excluded exactly
+			// like CycloneDX's operating-system component: not a package to
+			// scan, and not counted anywhere, rather than landing as a skip
+			// and inflating the denominator. But the exclusion is by what
+			// the entry IS, not by its being described (QA 2026-11-02,
+			// finding #6): a document that describes the one real package
+			// it inventories — a versioned, purl-bearing lodash or openssl
+			// — was dropped uncounted, in no skip bucket, and scanned as
+			// "no components" with exit 0. So the target is cataloged into
+			// a scratch and kept only when it yields a candidate; a
+			// pseudo-package yields none (no purl, pkg:oci, no version) and
+			// is dropped as before.
+			var scratchTarget pkgmeta.Target
+			var scratchStats cyclonedx.Stats
+			catalogPackage(p, srcOf[p.SPDXID], &scratchTarget, &scratchStats)
+			if len(scratchTarget.Packages) == 0 {
+				continue
+			}
+			target.Packages = append(target.Packages, scratchTarget.Packages...)
+			stats.Components += scratchStats.Components
+			stats.Cataloged += scratchStats.Cataloged
 			continue
 		}
 		catalogPackage(p, srcOf[p.SPDXID], &target, &stats)
@@ -101,18 +119,22 @@ func Parse(r io.Reader) (pkgmeta.Target, cyclonedx.Stats, error) {
 	return target, stats, nil
 }
 
-// findRootPackageID returns the SPDXID the document's own DESCRIBES
-// relationship points at. syft 0.84 points this at the document itself
-// (SPDXElementID == RelatedSPDXElement == doc.SPDXID), which never matches
-// any entry in doc.Packages — so on that shape there is naturally nothing to
-// exclude, with no special case needed here.
-func findRootPackageID(doc document) string {
+// describedPackageIDs returns every SPDXID the document's own DESCRIBES
+// relationships point at — every one, because SPDX lets a document describe
+// any number of packages, and reading only the first left the second
+// described package unexamined (QA 2026-11-02, finding #6). syft 0.84 points
+// DESCRIBES at the document itself (SPDXElementID == RelatedSPDXElement ==
+// doc.SPDXID), which never matches any entry in doc.Packages — so on that
+// shape there is naturally nothing to examine, with no special case needed
+// here.
+func describedPackageIDs(doc document) map[string]bool {
+	ids := make(map[string]bool)
 	for _, r := range doc.Relationships {
 		if r.RelationshipType == "DESCRIBES" && r.SPDXElementID == doc.SPDXID {
-			return r.RelatedSPDXElement
+			ids[r.RelatedSPDXElement] = true
 		}
 	}
-	return ""
+	return ids
 }
 
 // sourceRPMOf maps a package's SPDXID to the name of the source rpm it was

@@ -3125,9 +3125,21 @@ evaluated입니다 — D80의 거부가 정확히 제 할 일을 하는 것입�
 키가 잡히고, 버전 없는 ELF-note purl 하나(`distro=Debian`)는 추측하는 대신 올바르게
 거부됩니다.
 
----
+**개정 (QA 2026-11-02).** DESCRIBES 제외는 결정이 "문서가 기술하는 가짜 패키지"를 뜻한 자리에서
+"문서가 기술하는 것이면 무엇이든"으로 읽혔습니다. 파서는 문서에 앵커된 첫 DESCRIBES 를 가져와 그
+항목이 가짜 패키지인지 확인하지 않은 채 카탈로그 전에 버렸으므로, 자기가 담은 단 하나의 실제 패키지 —
+버전과 purl 이 있는 — 를 기술하는 문서(`pkg:npm` 의 lodash@4.17.20; 프로젝트 자체의
+`tiny.spdx.json`, rpm openssl 3.0.7-1.el9 하나)는 "no components" 로 스캔됐습니다: 카탈로그되지
+않고, 세어지지 않고, 어느 skip 버킷에도 없이, `--fail-on low --fail-on-incomplete` 아래 exit 0 —
+같은 문서에서 관계만 뺀 대조군은 finding 3건에 exit 1 이었습니다. DESCRIBES 둘(lodash 와 django)은
+django 만 남겼습니다. `TestParse_TinyFixture` 는 그 0 을 단언하며 "버그가 아니다"라고 적어 두었습니다.
 
-### D85 — Ubuntu fix state, Canonical이 실제로 유지하는 tracker에서
+이제 제외는 CycloneDX 쌍둥이(`c.Type == "operating-system"`)처럼 항목이 무엇인가로 판단합니다: 문서가
+지목하는 모든 DESCRIBES 대상은 임시 인벤토리에 카탈로그해 보고 후보가 나오면 남기며, 후보가 나오지
+않는 것 — purl 없음(syft 1.51 의 `SPDXRef-DocumentRoot-*`, Red Hat 의 cpe 만 있는 product 패키지),
+`pkg:oci`(Red Hat 의 container 패키지), 버전 없는 purl — 은 전처럼 세지 않고 버립니다. 첫 번째만이
+아니라 모든 DESCRIBES 대상을 검사합니다. ubi9-micro 와 syft-1.51 픽스처의 카운터는 그대로이고,
+기술된 실제 패키지는 이제 component 1, cataloged 1 입니다.
 
 > **D157 로 개정됨 (2026-10-30):** 아무 tuple 도 파싱하지 못하거나 fix state 를 하나도 찍지 못하는
 > tracker 는 이제 빌드를 실패시키고, `db push` 는 어떤 Ubuntu release 든 게시된 fix state 의 80% 아래로

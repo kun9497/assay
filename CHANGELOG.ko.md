@@ -8,6 +8,15 @@
 ## [Unreleased]
 
 ### Fixed
+- DESCRIBES 관계가 실제 패키지를 지목하는 SPDX 문서가 더 이상 그 패키지를 잃지 않습니다. 파서는
+  첫 DESCRIBES 대상을 그것이 문서 루트의 가짜 패키지인지 확인하지 않고 버렸으므로, 자기가 담은
+  단 하나의 버전과 purl 이 있는 패키지를 기술하는 문서(프로젝트 자체의 `tiny.spdx.json` 포함)는
+  "no components" 로 스캔되어 -- 카탈로그되지 않고, 세어지지 않고, 어느 skip 버킷에도 없이 --
+  `--fail-on low --fail-on-incomplete` 아래 exit 0 이었고, DESCRIBES 가 둘이면 두 번째만
+  살아남았습니다. 이제 DESCRIBES 대상은 어차피 패키지가 되지 않았을 때에만 제외되고(purl 없음,
+  `pkg:oci`, 버전 없음 -- syft 와 Red Hat 이 루트에 쓰는 모양), 첫 번째만이 아니라 모든 DESCRIBES
+  대상을 검사하며, 기술된 실제 패키지는 다른 패키지처럼 카탈로그되고 세어집니다(D84 개정).
+  ubi9-micro 와 syft-1.51 의 루트 모양은 여전히 세지 않고 버립니다.
 - `db build` 는 Photon OS 피드 파일을 일시적 실패에 대해 재시도하며, 첫 non-200 응답에 빌드 전체를
   실패시키지 않습니다. 이 provider 는 major 당 GET 을 한 번만 보냈고, 2026-10-17 야간 발행은 고정된 세
   `cve_data_photon<N>.json` URL 중 하나에 Photon CDN 이 돌려준 404 로 죽었으며 그 파일은 다음 날 밤

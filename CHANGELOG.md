@@ -8,6 +8,17 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- An SPDX document whose DESCRIBES relationship names a real package no longer loses that
+  package. The parser dropped the first DESCRIBES target as the document-root pseudo-package
+  without checking that it was one, so a document describing the one versioned, purl-bearing
+  package it inventories (the project's own `tiny.spdx.json` among them) scanned as "no
+  components" -- not cataloged, not counted, in no skip bucket -- and exited 0 under
+  `--fail-on low --fail-on-incomplete`; with two DESCRIBES only the second survived. A
+  DESCRIBES target is now excluded only when it would not have become a package anyway (no
+  purl, `pkg:oci`, no version -- the shapes syft and Red Hat write for the root), every
+  DESCRIBES target is examined rather than the first alone, and a described real package is
+  cataloged and counted like any other (D84 revised). The ubi9-micro and syft-1.51 root
+  shapes are still dropped uncounted.
 - `db build` retries a Photon OS feed file through a transient failure instead of failing the
   whole build on the first non-200. The provider made one GET per major; the 2026-10-17 nightly
   publish died on a 404 from the Photon CDN for one of the three fixed

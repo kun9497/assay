@@ -3339,9 +3339,24 @@ its 8 module packages are loudly not evaluated where the CycloneDX twin stream-m
 D80's refusal doing exactly its job. debian:12 SPDX scans keyed, with the one
 `distro=Debian` versionless ELF-note purl correctly refused rather than guessed.
 
----
+**Revised (QA 2026-11-02).** The DESCRIBES exclusion read "whatever the document describes"
+where the decision meant "the pseudo-package the document describes". The parser took the
+first DESCRIBES anchored at the document and dropped that entry before cataloging it, with
+no check that it was a pseudo-package — so a document describing the one real, versioned,
+purl-bearing package it inventories (lodash@4.17.20 under `pkg:npm`; the project's own
+`tiny.spdx.json`, one rpm openssl 3.0.7-1.el9) scanned as "no components": not cataloged,
+not counted, in no skip bucket, exit 0 under `--fail-on low --fail-on-incomplete`, where
+the same document without the relationship gave 3 findings and exit 1. Two DESCRIBES
+(lodash and django) kept only django. `TestParse_TinyFixture` had asserted the zero and
+called it "not a bug".
 
-### D85 — Ubuntu fix states, from the tracker Canonical actually maintains
+The exclusion is now by what the entry is, as the CycloneDX twin's is (`c.Type ==
+"operating-system"`): every DESCRIBES target the document names is cataloged into a scratch
+inventory and kept when that yields a candidate; one that yields none — no purl (syft 1.51's
+`SPDXRef-DocumentRoot-*`, Red Hat's cpe-only product package), `pkg:oci` (Red Hat's
+container package), or a versionless purl — is dropped uncounted, as before. Every DESCRIBES
+target is examined, not the first alone. The counters in the ubi9-micro and syft-1.51
+fixtures are unchanged, and a described real package is now one component, one cataloged.
 
 > **Revised by D157 (2026-10-30):** a tracker that parses to no tuple, or stamps no fix
 > state, now fails the build, and `db push` refuses a candidate in which any Ubuntu release

@@ -27,11 +27,14 @@ func TestParse_NotSPDX(t *testing.T) {
 
 // TestParse_TinyFixture uses a real, hand-built minimal SPDX-2.3 document
 // whose DESCRIBES relationship points directly at its one and only package,
-// rather than at a synthetic container/image root the way every OTHER
-// fixture in this file does. The exclusion rule is structural — whatever the
-// DESCRIBES relationship names, not "whatever looks like a root" — so this
-// is not a bug: a document that describes itself as being about exactly one
-// package, and says nothing else, legitimately has nothing left to catalog.
+// rather than at a synthetic container/image root the way the root-exclusion
+// fixtures below do. Until QA 2026-11-02 (finding #6) this test asserted
+// zero components and called that structural: whatever DESCRIBES named was
+// excluded, and a document describing one real package "legitimately had
+// nothing left to catalog". That was the defect, not the rule. The DESCRIBES
+// target is excluded only when it is a pseudo-package -- one that would not
+// have become a package anyway -- so a described rpm with a versioned purl
+// is cataloged like any other.
 func TestParse_TinyFixture(t *testing.T) {
 	f, err := os.Open("testdata/tiny.spdx.json")
 	if err != nil {
@@ -43,12 +46,85 @@ func TestParse_TinyFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if stats.Components != 0 {
-		t.Errorf("Components = %d, want 0: the document's one package IS the DESCRIBES target",
-			stats.Components)
+	if stats.Components != 1 || stats.Cataloged != 1 {
+		t.Errorf("Components, Cataloged = %d, %d, want 1, 1: the document's one package is the "+
+			"DESCRIBES target AND a real versioned rpm, so it is scanned", stats.Components, stats.Cataloged)
 	}
-	if len(target.Packages) != 0 {
-		t.Errorf("Packages = %+v, want none", target.Packages)
+	if len(target.Packages) != 1 || target.Packages[0].Name != "openssl" {
+		t.Fatalf("Packages = %+v, want just openssl", target.Packages)
+	}
+	if target.Packages[0].Version != "1:3.0.7-1.el9" {
+		t.Errorf("Version = %q, want %q", target.Packages[0].Version, "1:3.0.7-1.el9")
+	}
+}
+
+// TestParse_EveryDescribedRealPackageKept: a document may DESCRIBE more than
+// one package (SPDX allows any number of DESCRIBES from the document), and
+// before QA 2026-11-02 only the first was consulted -- then dropped. Both
+// described packages here are real, versioned, purl-bearing entries from
+// different ecosystems, chosen so neither name is a substring of the other,
+// and both must be cataloged and counted.
+func TestParse_EveryDescribedRealPackageKept(t *testing.T) {
+	const doc = `{"spdxVersion":"SPDX-2.3","SPDXID":"SPDXRef-DOCUMENT","packages":[
+	  {"name":"lodash","SPDXID":"SPDXRef-Package-lodash","versionInfo":"4.17.20",
+	   "externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl",
+	     "referenceLocator":"pkg:npm/lodash@4.17.20"}]},
+	  {"name":"django","SPDXID":"SPDXRef-Package-django","versionInfo":"3.2",
+	   "externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl",
+	     "referenceLocator":"pkg:pypi/django@3.2"}]}],
+	  "relationships":[
+	    {"spdxElementId":"SPDXRef-DOCUMENT","relatedSpdxElement":"SPDXRef-Package-lodash","relationshipType":"DESCRIBES"},
+	    {"spdxElementId":"SPDXRef-DOCUMENT","relatedSpdxElement":"SPDXRef-Package-django","relationshipType":"DESCRIBES"}]}`
+	target, stats, err := Parse(strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if stats.Components != 2 || stats.Cataloged != 2 {
+		t.Errorf("Components, Cataloged = %d, %d, want 2, 2: both described packages are real",
+			stats.Components, stats.Cataloged)
+	}
+	names := map[string]bool{}
+	for _, p := range target.Packages {
+		names[p.Name] = true
+	}
+	if !names["lodash"] || !names["django"] {
+		t.Fatalf("Packages = %+v, want both lodash and django", target.Packages)
+	}
+}
+
+// TestParse_PseudoRootDroppedBesideDescribedRealPackage is the control for
+// the two tests above and holds the rule on EVERY DESCRIBES target, not the
+// first alone: the first DESCRIBES names Red Hat's pkg:oci container root,
+// the second a real rpm. The root is dropped and counted nowhere -- not as
+// a component, not in SkippedUnsupportedEcosystem where pkg:oci would land
+// -- while the described rpm is cataloged. Checking only the first target
+// would keep the root's rule but never reach the rpm; checking only
+// "is it described" would drop both.
+func TestParse_PseudoRootDroppedBesideDescribedRealPackage(t *testing.T) {
+	const doc = `{"spdxVersion":"SPDX-2.3","SPDXID":"SPDXRef-DOCUMENT","packages":[
+	  {"name":"ubi9-micro-container_amd64","SPDXID":"SPDXRef-ubi9-micro-container-amd64","versionInfo":"9.4-6",
+	   "externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl",
+	     "referenceLocator":"pkg:oci/ubi-micro@sha256:213fd2a0116a76eaa274fee20c86eef4dfba9f311784e8fb7d7f5fc38b32f3ef?arch=amd64&repository_url=registry.access.redhat.com/ubi9/ubi-micro&tag=9.4-6"}]},
+	  {"name":"zlib","SPDXID":"SPDXRef-zlib","versionInfo":"1.2.11-40.el9",
+	   "externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl",
+	     "referenceLocator":"pkg:rpm/redhat/zlib@1.2.11-40.el9?arch=x86_64&repository_id=rhel-9-for-x86_64-baseos-rpms"}]}],
+	  "relationships":[
+	    {"spdxElementId":"SPDXRef-DOCUMENT","relatedSpdxElement":"SPDXRef-ubi9-micro-container-amd64","relationshipType":"DESCRIBES"},
+	    {"spdxElementId":"SPDXRef-DOCUMENT","relatedSpdxElement":"SPDXRef-zlib","relationshipType":"DESCRIBES"}]}`
+	target, stats, err := Parse(strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if stats.Components != 1 || stats.Cataloged != 1 {
+		t.Errorf("Components, Cataloged = %d, %d, want 1, 1: the pkg:oci root is not counted, "+
+			"the described rpm is", stats.Components, stats.Cataloged)
+	}
+	if stats.SkippedUnsupportedEcosystem != 0 || stats.SkippedNoPURL != 0 || stats.SkippedNoVersion != 0 {
+		t.Errorf("skip buckets = unsupported %d, nopurl %d, noversion %d, want all 0: the root is "+
+			"excluded, not skipped", stats.SkippedUnsupportedEcosystem, stats.SkippedNoPURL, stats.SkippedNoVersion)
+	}
+	if len(target.Packages) != 1 || target.Packages[0].Name != "zlib" {
+		t.Fatalf("Packages = %+v, want just zlib", target.Packages)
 	}
 }
 
