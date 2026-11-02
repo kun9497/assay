@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -75,6 +76,10 @@ func exitSiteProblems(file string, src []byte) ([]string, int, error) {
 				id, name, fallback := p[1], p[2], p[3]
 				if fallback == "" || strings.TrimLeft(strings.TrimPrefix(fallback, "-"), "0") == "" {
 					out = append(out, where+" has no nonzero fallback: an empty output becomes a bare `exit`, which returns 0")
+				} else if n, err := strconv.Atoi(fallback); err != nil || n%256 == 0 {
+					// bash exits with its argument modulo 256, so `exit 256`
+					// is `exit 0`: the fallback has to be nonzero AFTER that.
+					out = append(out, where+" has a fallback the shell exits 0 on: `exit` takes its argument modulo 256")
 				}
 				producer := -1
 				for k := 0; k < i; k++ {
@@ -153,6 +158,9 @@ func TestExitFallbackGuardRejects(t *testing.T) {
 		want  []string
 	}{
 		{"well formed", wf(producer + "      - run: exit ${{ steps.diff.outputs.exit_code || 2 }}\n"), 1, nil},
+		{"fallback 256 exits 0", wf(producer + "      - run: exit ${{ steps.diff.outputs.exit_code || 256 }}\n"), 1, []string{
+			"t.yml: job diff: `exit ${{ steps.diff.outputs.exit_code || 256 }}` has a fallback the shell exits 0 on: `exit` takes its argument modulo 256",
+		}},
 		{"no fallback", wf(producer + "      - run: exit ${{ steps.diff.outputs.exit_code }}\n"), 1, []string{
 			"t.yml: job diff: `exit ${{ steps.diff.outputs.exit_code }}` has no nonzero fallback: an empty output becomes a bare `exit`, which returns 0",
 		}},
