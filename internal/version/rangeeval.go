@@ -65,7 +65,10 @@ func AffectsVersion(c Comparer, v string, a advisory.Affected) (bool, Evidence, 
 	// ranges nor versions has no comparison to refuse. Compared with itself,
 	// not with the sentinel, because SemVer and Bitnami refuse "0" as a
 	// version. This is also D30's left-operand check, moved up from the
-	// enumerated list so both paths share it.
+	// enumerated list so both paths share it. An entry whose only ranges are
+	// GIT-typed would be refused here although InRange never compares them;
+	// that shape cannot reach a scan, because the OSV converter drops GIT
+	// ranges at ingestion (record.go), so the two are equivalent in practice.
 	if len(a.Ranges) > 0 || len(a.Versions) > 0 {
 		if _, err := c.Compare(v, v); err != nil {
 			return false, Evidence{}, nil, withCause(CauseTargetVersion,
