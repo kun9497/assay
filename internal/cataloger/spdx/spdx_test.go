@@ -207,8 +207,11 @@ func TestParse_RPMKeyedViaDistroQualifier(t *testing.T) {
 	if p.Version != "1:3.0.7-1.el9" {
 		t.Errorf("Version = %q, want %q (epoch prefixed)", p.Version, "1:3.0.7-1.el9")
 	}
-	if p.Source == nil || p.Source.Name != "openssl" {
-		t.Errorf("Source = %+v, want Name %q (from the upstream qualifier)", p.Source, "openssl")
+	if p.Source == nil || p.Source.Name != "openssl" || p.Source.Version != "3.0.7-1.el9" {
+		t.Errorf("Source = %+v, want openssl 3.0.7-1.el9 (the upstream qualifier's SRPM name and version-release)", p.Source)
+	}
+	if p.Upstream != "openssl-3.0.7-1.el9.src.rpm" {
+		t.Errorf("Upstream = %q, want the SRPM file name kept for the epoch pass", p.Upstream)
 	}
 }
 
@@ -228,8 +231,8 @@ func TestParse_DebKeyedViaDistroQualifier(t *testing.T) {
 	if p.Ecosystem != "Debian:12" {
 		t.Errorf("Ecosystem = %q, want %q", p.Ecosystem, "Debian:12")
 	}
-	if p.Source == nil || p.Source.Name != "bash" {
-		t.Errorf("Source = %+v, want Name %q (the name half of upstream=bash@5.2.15-2)", p.Source, "bash")
+	if p.Source == nil || p.Source.Name != "bash" || p.Source.Version != "5.2.15-2" {
+		t.Errorf("Source = %+v, want bash 5.2.15-2 (both halves of upstream=bash@5.2.15-2)", p.Source)
 	}
 }
 

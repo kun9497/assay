@@ -55,6 +55,26 @@ type Evidence struct {
 // take away what a readable range says. Its error is returned only when no
 // range holds v, which is the case it describes.
 func AffectsVersion(c Comparer, v string, a advisory.Affected) (bool, Evidence, []string, error) {
+	// The installed version is checked once, before any range is walked (QA
+	// 2026-11-02). An open-ended range resolves the "0" sentinel without a
+	// Compare, so an unreadable v walked straight through to "affected" with
+	// Evidence naming a comparison nobody made -- and that hit then hid the
+	// readable sibling range's refusal. D9's rule is skipped with a count, and
+	// dpkgdb emits Version "" for a stanza with no Version on exactly that
+	// promise. Only when there is something to evaluate: an entry with neither
+	// ranges nor versions has no comparison to refuse. Compared with itself,
+	// not with the sentinel, because SemVer and Bitnami refuse "0" as a
+	// version. This is also D30's left-operand check, moved up from the
+	// enumerated list so both paths share it. An entry whose only ranges are
+	// GIT-typed would be refused here although InRange never compares them;
+	// that shape cannot reach a scan, because the OSV converter drops GIT
+	// ranges at ingestion (record.go), so the two are equivalent in practice.
+	if len(a.Ranges) > 0 || len(a.Versions) > 0 {
+		if _, err := c.Compare(v, v); err != nil {
+			return false, Evidence{}, nil, withCause(CauseTargetVersion,
+				fmt.Errorf("this package's own version %q could not be read: %w", v, err))
+		}
+	}
 	var (
 		found    bool
 		best     Evidence
@@ -88,14 +108,9 @@ func AffectsVersion(c Comparer, v string, a advisory.Affected) (bool, Evidence, 
 	//
 	// The left operand is the installed version, constant across the loop, so
 	// an unreadable one really does fail every entry — skipping on that would
-	// turn a total failure into a silent clean verdict. It is checked once,
-	// here, and still aborts.
-	if _, err := c.Compare(v, v); err != nil {
-		// Same distinction as D35 draws in the ranges path: this is the
-		// installed version, not the advisory's list.
-		return false, Evidence{}, nil, withCause(CauseTargetVersion,
-			fmt.Errorf("this package's own version %q could not be read: %w", v, err))
-	}
+	// turn a total failure into a silent clean verdict. It was checked once at
+	// the top of this function, so by here it is readable.
+	//
 	// The right operand is upstream data, and 0.184% of it does not parse
 	// (2,411 of 1,309,665 entries measured). One such entry aborted the whole
 	// advisory, so a package whose own version is perfectly readable was
@@ -166,20 +181,23 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 		return false, Evidence{}, nil
 	}
 
-	// A range whose events carry no bound at all cannot be evaluated. Walking
-	// it opens no window and returns "not affected" — indistinguishable from a
-	// real miss, so the caller has no signal that anything went wrong. Malformed
-	// input must surface.
-	var actionable bool
+	// A range with no introduced event cannot be evaluated. Walking it opens
+	// no window and returns "not affected" — indistinguishable from a real
+	// miss, so the caller has no signal that anything went wrong. Malformed
+	// input must surface. The OSV schema requires an introduced event in every
+	// range, so a range of only closing bounds (QA 2026-11-02) is as malformed
+	// as one with no bound at all; before this the guard fired only on the
+	// latter and the former walked to a silent clean verdict.
+	var opens bool
 	for _, e := range r.Events {
-		if eventVersion(e) != "" {
-			actionable = true
+		if e.Introduced != "" {
+			opens = true
 			break
 		}
 	}
-	if !actionable {
+	if !opens {
 		return false, Evidence{}, fmt.Errorf(
-			"range of type %q carries no introduced, fixed, or last_affected event: %w",
+			"range of type %q carries no introduced event, so no window opens: %w",
 			r.Type, ErrInvalid)
 	}
 

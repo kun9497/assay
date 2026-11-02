@@ -1435,15 +1435,31 @@ func TestHummingbirdPackageOf(t *testing.T) {
 		// D47's bare-name convention, read off a purl with no "@" at all.
 		{"pkg:rpm/redhat/nodejs25?arch=src", "nodejs25", "", true},
 		{"pkg:rpm/redhat/opentofu1.10?arch=src", "opentofu1.10", "", true},
+		// QA 2026-11-02: the epoch rides in a qualifier, not the @version,
+		// and the installed build carries it first ("2:1.30.4-1.hum1"), so
+		// it is prefixed -- the live nginx shape (cve-2026-42533.json).
+		{"pkg:rpm/redhat/nginx@1.30.4-2.hum1?arch=x86_64&distro=hummingbird-20251124&epoch=2&repository_id=public-hummingbird-x86_64-rpms",
+			"nginx", "2:1.30.4-2.hum1", true},
+		// A zero epoch is the one rpmdb's evr() omits, so EVROf omits it
+		// too: "0:" on this side would read as a different string from
+		// the installed build on a comparer that is handed both verbatim.
+		{"pkg:rpm/redhat/freetype@2.14.3-1.2.hum1?arch=x86_64&epoch=0", "freetype", "2.14.3-1.2.hum1", true},
+		// A bare name never gains an epoch: there is no version to prefix,
+		// and "2:" alone is not "affected at every version".
+		{"pkg:rpm/redhat/nodejs25?arch=src&epoch=2", "nodejs25", "", true},
 		// Not an rpm at all -- an OCI image reference.
 		{"pkg:oci/opentofu?repository_url=registry.redhat.io/hi/opentofu", "", "", false},
 		// Not Hummingbird's namespace.
 		{"pkg:rpm/suse/xz@5.6.2-1.1", "", "", false},
+		// The namespace alone is not enough: an rpm inventory holds rpms.
+		{"pkg:deb/redhat/nginx@1.30.4-2", "", "", false},
 		{"", "", "", false},
 		// QA round 5: the FRONT anchor. A real redhat purl with anything
-		// before it must not match -- dropping the ^ on hummingbirdPurlRE
-		// survived the table until this row (every other reject fails because
-		// it lacks the substring entirely, not because of anchoring).
+		// before it must not match. The regex this row was written against
+		// is gone (the reader is pkgmeta.ParsePURL since QA 2026-11-02 #4);
+		// what holds it now is ParsePURL's own pkg: prefix cut, and a reader
+		// that searched for the substring instead would fail this row (every
+		// other reject lacks the substring entirely, not the anchoring).
 		{"junk pkg:rpm/redhat/freetype@2.14.3-1.2.hum1?arch=x86_64", "", "", false},
 	} {
 		name, version, ok := hummingbirdPackageOf(tc.purl)

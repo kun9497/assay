@@ -7,6 +7,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- `scandiff`'s table prints two new columns, `A_BRIDGED` and `G_BRIDGED`, right after `GRYPE`:
+  how many tuples the bare-advisory bridge added into assay's set and into grype's. Measured
+  2026-10-13 on wolfi, `ASSAY` rose 46 to 74 while assay's own tuples fell 45 to 41, because 33
+  grype tuples were bridged into assay's set as grype's database grew -- a `maxFindings` breach
+  on a bridged target could be the comparison tool's growth, and the weekly review had to
+  measure the split by hand. No floor or ceiling changes meaning; an `ERROR` row prints `0 0`
+  like its other counters. The trivy comparison does not bridge and is unchanged.
+
 ### Fixed
 - An SPDX document whose DESCRIBES relationship names a real package no longer loses that
   package. The parser dropped the first DESCRIBES target as the document-root pseudo-package
@@ -19,6 +28,56 @@ All notable changes to this project are documented here. The format follows
   DESCRIBES target is examined rather than the first alone, and a described real package is
   cataloged and counted like any other (D84 revised). The ubi9-micro and syft-1.51 root
   shapes are still dropped uncounted.
+- Both CSAF readers carry a leaf purl's `epoch=N` qualifier into the stored fixed version as
+  `N:version-release`, the shape the rpmdb cataloger writes for an installed build. Red Hat's
+  Hummingbird reader (D98) took the purl's `@version` alone and stopped at the `?`, so nginx
+  (epoch 2) and tomcat10/11 (epoch 1) were stored fixed at an epoch-less version that every
+  installed build sorts above, and a vulnerable build was reported clean -- 67 of the 403
+  distinct Hummingbird purls in the 160 newest live documents, on the image the weekly
+  differential scans (QA 2026-11-02 #4, P1). SUSE's reader (D77), which the Hummingbird one
+  was copied from, had the identical gap, latent because every epoch-qualified purl in its
+  archive is a Liberty Linux build the key fold refuses (#5, P3). Both now read the purl
+  through `pkgmeta.ParsePURL` and `pkgmeta.EVROf`, the rule the scan side has applied to SBOM
+  purls since D83: a zero or absent epoch stays unprefixed, an empty version never gains one,
+  and D131's split of a version-less SUSE build is unchanged. Each provider's progress line
+  counts the epoch-carrying fixed entries (`HummingbirdFixedWithEpoch`, `RecommendedWithEpoch`).
+  The published artifact's Hummingbird nginx and tomcat records stay wrong until the next
+  nightly rebuilds it.
+- An SBOM's deb and rpm packages are judged on their SOURCE version, as the image's are. Both
+  readers kept the source name from the purl's `upstream` qualifier and dropped the version --
+  deb's `util-linux@2.38.1-5+deb12u2` lost its `@` half, rpm's `httpd-2.4.62-1.fc40.src.rpm`
+  was stripped to the name -- so the matcher's source-version comparison (D41) never ran on
+  SBOM input and the binary's own version, epoch included, was compared with a source-keyed
+  fix: bsdutils `1:2.38.1-5+deb12u3` from util-linux `2.38.1-5+deb12u2` was a finding from the
+  image's dpkg status and clean from the same package's CycloneDX or SPDX, with no skip (QA
+  2026-11-02 #1). deb keeps the version half, and the CycloneDX reader fills it from
+  `syft:metadata:sourceVersion` when the purl names the source without one; rpm keeps the
+  SRPM's version-release and places its epoch by D153's rule over the whole document (the
+  main package's, else the siblings'), so mod_ssl `1:2.4.62` beside httpd is found through
+  httpd and perl-B beside perl `4:5.32.1` is not flagged. A VEX statement written against a
+  deb source version now applies to the SBOM's binaries built from it. The report's existing
+  `source.version` field is filled; no schema change.
+- `db status` reads Ubuntu LTS and SUSE service-pack releases when it prints the `covers:`
+  range. The release parser cut at `.` and required a bare number on both sides, so
+  `Ubuntu:22.04:LTS` and `SLES:15.SP7` were unparseable and sorted past every parsed release;
+  against a real database the line read `Ubuntu:23.10..26.04:LTS (11 releases)` and
+  `SLES:11..15.SP7 (21 releases)` while the database held Ubuntu 14.04:LTS through 22.04:LTS
+  and SLES 16.0/16.1 -- telling an Ubuntu 20.04 or SLES 16 operator their release was outside
+  the range (QA 2026-11-02, #9). A `:`-suffix is now dropped before the number is read and
+  `SP` is the minor, so the same database prints `Ubuntu:14.04:LTS..26.04:LTS (11 releases)`
+  and `SLES:11..16.1 (21 releases)`. Shapes that still do not parse (`edge`, `stream`,
+  `rolling`) keep the lexical fallback, and two spellings of one number order as strings so
+  the ends do not depend on sort order. `--output json` lists the keys verbatim and was
+  already right; the count never changed.
+- An installed version no comparer can read (dpkg's empty Version, `(none)`, a malformed
+  string) is now skipped with the target's cause against every advisory, open-ended ranges
+  included. Before, a `[0, )` range -- Debian's unfixed set, every CSAF no-fix entry -- resolved
+  its sentinel without comparing and reported the package AFFECTED, with evidence naming a
+  comparison nobody made, while the fixed-range advisory beside it was correctly skipped (D9,
+  D30). (QA 2026-11-02 #2)
+- A range with closing bounds but no `introduced` event is refused as malformed and lands in
+  the skipped list, instead of walking to a silent "not affected". No current provider emits
+  the shape; the OSV schema requires an `introduced` per range. (QA 2026-11-02 #3)
 - `db build` retries a Photon OS feed file through a transient failure instead of failing the
   whole build on the first non-200. The provider made one GET per major; the 2026-10-17 nightly
   publish died on a 404 from the Photon CDN for one of the three fixed

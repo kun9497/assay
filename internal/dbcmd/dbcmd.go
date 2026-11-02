@@ -1309,9 +1309,20 @@ func compareRelease(a, b string) int {
 	if am != bm {
 		return cmp.Compare(am, bm)
 	}
-	return cmp.Compare(an, bn)
+	if an != bn {
+		return cmp.Compare(an, bn)
+	}
+	// Two spellings of one number ("16" and "16.0", or a release with and
+	// without its suffix) are ordered as strings so the range's ends do not
+	// depend on which one the sort happened to visit first.
+	return strings.Compare(a, b)
 }
 
+// releaseParts reads a release as (major, minor): a number, then optionally
+// "." and either a number or "SP" and a number, then optionally ":" and a
+// suffix that names the release's kind rather than its position. Anything
+// else is unparseable and left to compareRelease's lexical fallback, which
+// keeps an unexpected key shape visible in the output rather than guessed at.
 func releaseParts(rel string) (major, minor int, ok bool) {
 	// A bare major is a release, not an unparseable string. Alpine spells its
 	// releases "v3.19" and Debian spells the modern ones "12", and requiring
@@ -1319,10 +1330,22 @@ func releaseParts(rel string) (major, minor int, ok bool) {
 	// — which printed "Debian:3.0..9" for a database that covers 3.0 through
 	// 14, telling an operator the newest four releases were missing when they
 	// were the bulk of the archive.
+	//
+	// The suffix and the service pack were the same defect twice over (QA
+	// 2026-11-02). OSV keys an Ubuntu LTS "22.04:LTS" (pkgmeta/distro.go,
+	// D53) and SUSE keys a service pack "15.SP7" (suse/csaf.go, D77); neither
+	// minor survived Atoi, so every such release fell into the fallback and
+	// sorted past the parsed ones, and the line printed "Ubuntu:23.10..
+	// 26.04:LTS" and "SLES:11..15.SP7" for a database holding 14.04:LTS and
+	// 16.1. The suffix says what kind of release it is, not where it sits,
+	// so it is dropped before the number is read; a service pack is the
+	// minor, so "15.SP7" sits between "15" and "16.0" the way SUSE orders it.
+	rel, _, _ = strings.Cut(rel, ":")
 	maj, min, found := strings.Cut(strings.TrimPrefix(rel, "v"), ".")
 	if !found {
 		min = "0"
 	}
+	min = strings.TrimPrefix(min, "SP")
 	major, err := strconv.Atoi(maj)
 	if err != nil {
 		return 0, 0, false

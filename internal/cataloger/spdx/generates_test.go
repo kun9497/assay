@@ -99,17 +99,23 @@ func TestParse_A3_BundledLanguagePackagesGetNoRPMSource(t *testing.T) {
 // An explicit `upstream` qualifier on the binary's own purl is the more
 // specific statement and wins over the relationship.
 func TestParse_A3_UpstreamQualifierWinsOverTheRelationship(t *testing.T) {
-	bin := binLibs + "&upstream=openssl-fips-3.0.7-18.el9_2.src.rpm"
+	bin := binLibs + "&upstream=openssl-fips-3.0.7-17.el9_2.src.rpm"
 	doc := rhDoc(rhPkg("SPDXRef-src", srcOpenSSL)+","+rhPkg("SPDXRef-bin", bin),
 		rel("SPDXRef-src", "GENERATES", "SPDXRef-bin"))
 	target, _, err := Parse(strings.NewReader(doc))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Name only, as an upstream qualifier gives: the relationship's source
-	// EVR belongs to the relationship's source (openssl), not to this one.
-	if p := byName(t, target, "openssl-libs"); p.Source == nil || p.Source.Name != "openssl-fips" || p.Source.Version != "" {
-		t.Errorf("openssl-libs Source = %+v, want openssl-fips, no version, from its own upstream qualifier", p.Source)
+	// The qualifier's own SRPM name and version-release (QA 2026-11-02 #1;
+	// it was name-only before): the relationship's source EVR
+	// (3.0.7-18.el9_2) belongs to the relationship's source (openssl), not
+	// to this one, so the fixture's SRPM is at -17 to tell the two apart.
+	p := byName(t, target, "openssl-libs")
+	if p.Source == nil || p.Source.Name != "openssl-fips" || p.Source.Version != "3.0.7-17.el9_2" {
+		t.Errorf("openssl-libs Source = %+v, want openssl-fips 3.0.7-17.el9_2, from its own upstream qualifier", p.Source)
+	}
+	if p.Upstream != "openssl-fips-3.0.7-17.el9_2.src.rpm" {
+		t.Errorf("openssl-libs Upstream = %q, want the qualifier's SRPM file name", p.Upstream)
 	}
 }
 
