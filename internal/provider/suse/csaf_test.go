@@ -137,6 +137,8 @@ func TestPackageOf(t *testing.T) {
 			"no '@' at all, unmeasured on this feed: a well-formed purl naming a package with no version, read as the bare shape above rather than refused"},
 		{"", "", "", false, "no purl at all (the java-1_7_0-openjdk gap, D77 research)"},
 		{"pkg:deb/debian/xz@5.6.2-1", "", "", false, "a different ecosystem's purl shape"},
+		{"pkg:rpm/redhat/xz@5.6.2-1.1", "", "", false, "an rpm in another vendor's namespace"},
+		{"pkg:deb/suse/xz@5.6.2-1", "", "", false, "SUSE's namespace on a type an rpm inventory cannot hold"},
 		{"not-a-purl-at-all", "", "", false, ""},
 	} {
 		name, ver, ok := packageOf(tc.purl)

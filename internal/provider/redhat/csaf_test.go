@@ -1451,6 +1451,8 @@ func TestHummingbirdPackageOf(t *testing.T) {
 		{"pkg:oci/opentofu?repository_url=registry.redhat.io/hi/opentofu", "", "", false},
 		// Not Hummingbird's namespace.
 		{"pkg:rpm/suse/xz@5.6.2-1.1", "", "", false},
+		// The namespace alone is not enough: an rpm inventory holds rpms.
+		{"pkg:deb/redhat/nginx@1.30.4-2", "", "", false},
 		{"", "", "", false},
 		// QA round 5: the FRONT anchor. A real redhat purl with anything
 		// before it must not match -- dropping the ^ on hummingbirdPurlRE
