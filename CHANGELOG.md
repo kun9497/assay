@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- An installed version no comparer can read (dpkg's empty Version, `(none)`, a malformed
+  string) is now skipped with the target's cause against every advisory, open-ended ranges
+  included. Before, a `[0, )` range -- Debian's unfixed set, every CSAF no-fix entry -- resolved
+  its sentinel without comparing and reported the package AFFECTED, with evidence naming a
+  comparison nobody made, while the fixed-range advisory beside it was correctly skipped (D9,
+  D30). (QA 2026-11-02 #2)
+- A range with closing bounds but no `introduced` event is refused as malformed and lands in
+  the skipped list, instead of walking to a silent "not affected". No current provider emits
+  the shape; the OSV schema requires an `introduced` per range. (QA 2026-11-02 #3)
 - `db build` retries a Photon OS feed file through a transient failure instead of failing the
   whole build on the first non-200. The provider made one GET per major; the 2026-10-17 nightly
   publish died on a 404 from the Photon CDN for one of the three fixed
