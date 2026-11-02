@@ -265,3 +265,88 @@ func TestParse_AJarPastTheFileLimitIsAFailedSkipAndTheRestIsRead(t *testing.T) {
 		t.Errorf("requirements.txt beside the oversized jar was not read: %+v", target.Packages)
 	}
 }
+
+// paddedPomProps is a valid pom.properties body padded with zero bytes to
+// exactly size: every entry parses and would be cataloged, so the only thing
+// that can stop it is the bound under test.
+func paddedPomProps(t *testing.T, groupID, artifactID, version string, size int) []byte {
+	t.Helper()
+	valid := []byte("groupId=" + groupID + "\nartifactId=" + artifactID + "\nversion=" + version + "\n")
+	if len(valid) > size {
+		t.Fatalf("pom.properties body is %d bytes, cannot pad to %d", len(valid), size)
+	}
+	return append(valid, make([]byte, size-len(valid))...)
+}
+
+// QA 2026-11-02 (#22): the jar cataloger bounded one entry at MaxFileBytes and
+// nothing bounded the sum, so an archive of many entries each under the cap
+// inflated without limit. The budget is MaxScanBytes per archive, and running
+// out of it inside a dir: scan is the same counted, Failed skip an oversized
+// archive is -- the archive's dependencies were not judged, which must reach
+// exit 2 and --fail-on-incomplete=target, never a partial inventory presented
+// as the whole one.
+//
+// Three entries of 2 KiB each under a 4 KiB budget: each is far under the
+// per-entry cap (left at its default), the first two use the budget exactly,
+// and the third is the one named. The exact reason is asserted, not a
+// substring, so the entry the budget ran out at is held too: a budget that
+// refused the second entry (a check written >= rather than >) or one that
+// charged only after the whole archive was read would name a different one.
+func TestParse_AJarPastTheInflateBudgetIsAFailedSkipAndTheRestIsRead(t *testing.T) {
+	const entrySize = 2 << 10
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, art := range []string{"first", "second", "third"} {
+		w, err := zw.Create("META-INF/maven/com.example.dirscanbudget/" + art + "/pom.properties")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(paddedPomProps(t, "com.example.dirscanbudget", art, "1.0.0", entrySize)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	root := writeTree(t, map[string]string{
+		"lib/many.jar":     buf.String(),
+		"requirements.txt": "Django==3.2.12\n",
+	})
+	prev := source.MaxScanBytes
+	source.MaxScanBytes = 2 * entrySize
+	t.Cleanup(func() { source.MaxScanBytes = prev })
+
+	target, _, found, err := Parse(root)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(found.Unread) != 1 {
+		t.Fatalf("Unread = %+v, want exactly the archive past its budget", found.Unread)
+	}
+	u := found.Unread[0]
+	if u.Path != "lib/many.jar" {
+		t.Errorf("Unread path = %q, want lib/many.jar", u.Path)
+	}
+	if !u.Failed {
+		t.Error("Failed = false; an archive whose entries outran the budget is one this scan " +
+			"saw only part of, which must reach exit 2 (AnyFailed -> scancmd)")
+	}
+	want := source.ArchiveLimitError(filepath.Join(root, "lib", "many.jar"),
+		"META-INF/maven/com.example.dirscanbudget/third/pom.properties").Error()
+	if u.Reason != want {
+		t.Errorf("Unread reason = %q, want %q", u.Reason, want)
+	}
+	var sawDjango bool
+	for _, p := range target.Packages {
+		if strings.EqualFold(p.Name, "django") && p.Version == "3.2.12" {
+			sawDjango = true
+		}
+		if strings.Contains(p.Name, "dirscanbudget") {
+			t.Errorf("a component of the archive past its budget was kept: %+v -- a partial "+
+				"inventory presented as the whole one", p)
+		}
+	}
+	if !sawDjango {
+		t.Errorf("requirements.txt beside the archive was not read: %+v", target.Packages)
+	}
+}

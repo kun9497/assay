@@ -8,6 +8,29 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- A jar's entries are bounded in total, not only one at a time. The cataloger capped each
+  entry's decompressed bytes at the 512 MiB per-file limit and nothing capped their sum, so a
+  784 KB jar of twelve deflated 64 MiB entries inflated 768 MiB, and the same shape at the
+  archive cap reaches hundreds of GiB. One `jar.Parse` now has a budget of 2 GiB -- D112's
+  per-scan figure, `source.MaxScanBytes` -- across every entry and every nested archive, charged
+  with what each read inflated; running out of it is an error naming the archive, the budget and
+  the entry it ran out at, and nothing of the archive is returned. For a `jar:` target that is
+  exit 2; for a jar inside a `dir:` scan it is the counted, failed skip an oversized archive
+  already is -- in the JSON `unread[]`, the table's count and `--fail-on-incomplete=target` --
+  never a partial inventory presented as the archive's. (QA 2026-11-02 #22)
+- On the registry path the image config is refused by its declared size before it is fetched. The
+  library reads a config blob whole and bounds the read only by the size the manifest declares,
+  the registry's own word; a manifest declaring a 256 MiB config streamed 256 MiB and allocated
+  twice that before the digest mismatch was noticed. The manifest is already in hand when the
+  config is first wanted, so every config read -- the platform check of a single image, the
+  platform of an index entry whose descriptor names none, and the diff ids every image path
+  verifies -- now refuses a declared size above 16 MiB (`source.MaxConfigBytes`, a constant: a
+  real config is kilobytes) with an error naming the declared size and the limit, and the blob is
+  never requested. (QA 2026-11-02 #24)
+- `scandiff` refuses a target whose `name` is not a plain file name -- `.`, `..`, anything with a
+  `/` or `\`, anything `filepath.Base` would shorten -- when the floors file is loaded, naming
+  the entry. The name is joined into the `-capture` path, so `"name": "../../x"` wrote its
+  captures outside the capture directory. (QA 2026-11-02 #25)
 - `db build` retries a Photon OS feed file through a transient failure instead of failing the
   whole build on the first non-200. The provider made one GET per major; the 2026-10-17 nightly
   publish died on a 404 from the Photon CDN for one of the three fixed

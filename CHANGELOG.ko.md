@@ -8,6 +8,27 @@
 ## [Unreleased]
 
 ### Fixed
+- jar 의 엔트리는 하나씩만이 아니라 합계로도 상한을 받습니다. cataloger 는 각 엔트리의 압축 해제
+  바이트를 512 MiB 파일당 한도로 막았지만 그 합계는 아무것도 막지 않았으므로, deflate 된 64 MiB
+  엔트리 열두 개를 담은 784 KB jar 가 768 MiB 를 풀어냈고, 같은 모양을 아카이브 한도까지 키우면 수백
+  GiB 에 이릅니다. 이제 `jar.Parse` 한 번에는 모든 엔트리와 모든 중첩 아카이브에 걸쳐 2 GiB 의
+  예산 -- D112 의 스캔당 수치, `source.MaxScanBytes` -- 이 있고, 각 읽기가 풀어낸 만큼 차감됩니다.
+  예산이 바닥나면 아카이브, 예산, 바닥난 엔트리를 이름으로 대는 오류이며 아카이브에서 아무것도
+  돌려주지 않습니다. `jar:` 타깃에서는 exit 2 이고, `dir:` 스캔 안의 jar 에서는 크기 초과 아카이브가
+  이미 받는 집계된 failed skip -- JSON `unread[]`, 표의 개수, `--fail-on-incomplete=target` --
+  이며, 아카이브의 것인 양 제시되는 부분 인벤토리는 결코 아닙니다. (QA 2026-11-02 #22)
+- 레지스트리 경로에서 이미지 config 는 가져오기 전에 선언된 크기로 거부됩니다. 라이브러리는 config
+  blob 을 통째로 읽고 그 읽기를 manifest 가 선언한 크기 -- 레지스트리 자신의 말 -- 로만 제한하는데,
+  256 MiB config 를 선언한 manifest 는 digest 불일치가 드러나기 전에 256 MiB 를 스트리밍하고 그 두
+  배를 할당했습니다. config 가 처음 필요한 시점에 manifest 는 이미 손에 있으므로, 모든 config 읽기
+  -- 단일 이미지의 platform 확인, descriptor 가 platform 을 대지 않는 index 항목의 platform, 모든
+  이미지 경로가 검증하는 diff id -- 가 이제 16 MiB(`source.MaxConfigBytes`, 상수: 실제 config 는
+  킬로바이트 단위) 를 넘는 선언 크기를 선언 크기와 한도를 이름으로 대는 오류로 거부하고, blob 은
+  요청되지 않습니다. (QA 2026-11-02 #24)
+- `scandiff` 는 `name` 이 평범한 파일 이름이 아닌 타깃 -- `.`, `..`, `/` 나 `\` 가 든 것,
+  `filepath.Base` 가 줄일 모든 것 -- 을 floors 파일을 읽을 때 항목을 지목하며 거부합니다. 이름은
+  `-capture` 경로에 join 되므로 `"name": "../../x"` 는 capture 디렉터리 밖에 capture 를 썼습니다.
+  (QA 2026-11-02 #25)
 - `db build` 는 Photon OS 피드 파일을 일시적 실패에 대해 재시도하며, 첫 non-200 응답에 빌드 전체를
   실패시키지 않습니다. 이 provider 는 major 당 GET 을 한 번만 보냈고, 2026-10-17 야간 발행은 고정된 세
   `cve_data_photon<N>.json` URL 중 하나에 Photon CDN 이 돌려준 404 로 죽었으며 그 파일은 다음 날 밤

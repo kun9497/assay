@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"github.com/kun9497/assay/internal/source"
 )
 
@@ -388,7 +389,7 @@ func TestParse_PackagesAreSortedNotArchiveOrder(t *testing.T) {
 	}
 }
 
-// readEntryCapped's declared-size fast path is tested directly rather than
+// readEntry's declared-size fast path is tested directly rather than
 // through Parse: reaching it through a real archive would need an actual
 // 512 MiB fixture, which is impractical for a unit test and would not
 // exercise anything the direct check does not already cover. zip.File
@@ -404,8 +405,8 @@ func TestReadEntryCapped_RefusesADeclaredSizePastTheCap(t *testing.T) {
 	f := zr.File[0]
 	f.UncompressedSize64 = uint64(source.MaxFileBytes) + 1
 
-	if _, err := readEntryCapped(f); err == nil {
-		t.Fatal("readEntryCapped did not refuse a declared size past the cap")
+	if _, err := newParser("x.jar").readEntry(f, "x.jar"); err == nil {
+		t.Fatal("readEntry did not refuse a declared size past the cap")
 	}
 }
 
@@ -429,7 +430,7 @@ func (z *zeroReader) Read(p []byte) (int, error) {
 }
 
 // TestParse_RefusesAPomPropertiesPastTheSizeCap is the caller-side proof for
-// readEntryCapped's cap that TestReadEntryCapped_RefusesADeclaredSizePastTheCap
+// readEntry's cap that TestReadEntryCapped_RefusesADeclaredSizePastTheCap
 // above deliberately does not give: that test's own comment explains why it
 // drives the helper directly rather than through Parse -- reaching the cap
 // through a real archive "would need an actual 512 MiB fixture, which is
@@ -585,7 +586,7 @@ func TestParse_RefusesAnArchivePastTheFileLimit(t *testing.T) {
 // it, because a few KiB is nowhere near 512 MiB.
 //
 // Driven through Parse first, so addComponent's call is held and not only the
-// helper; then readEntryCapped directly for the read-time check's boundary,
+// helper; then readEntry directly for the read-time check's boundary,
 // which Parse's skip count cannot tell apart from the declared-size one.
 func TestEntryCap_IsTheFileLimit(t *testing.T) {
 	const limit = 4 << 10
@@ -621,15 +622,15 @@ func TestEntryCap_IsTheFileLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readEntryCapped(zr.File[0]); err != nil {
-		t.Errorf("readEntryCapped(entry of exactly MaxFileBytes): %v, want it read", err)
+	if _, err := newParser("x.jar").readEntry(zr.File[0], "x.jar"); err != nil {
+		t.Errorf("readEntry(entry of exactly MaxFileBytes): %v, want it read", err)
 	}
-	if _, err := readEntryCapped(zr.File[1]); err == nil {
-		t.Error("readEntryCapped(entry one byte past MaxFileBytes) = nil error, want the cap")
+	if _, err := newParser("x.jar").readEntry(zr.File[1], "x.jar"); err == nil {
+		t.Error("readEntry(entry one byte past MaxFileBytes) = nil error, want the cap")
 	}
 }
 
-// The nested half of the same number. recurseIntoNested's readEntryCapped is
+// The nested half of the same number. recurseIntoNested's readEntry is
 // the only thing that bounds a jar-in-jar before zip.NewReader reads ITS
 // central directory into memory — the archive check in Parse sees only the
 // outer file on disk, and a nested archive is never on disk. So the call is
@@ -715,5 +716,162 @@ func TestNestedArchive_EntryCapIsTheFileLimit(t *testing.T) {
 					stats, tc.wantCataloged, tc.wantSkipped)
 			}
 		})
+	}
+}
+
+// lowerScanLimit lowers D112's per-scan figure, which this cataloger reads as
+// its per-archive budget (QA 2026-11-02), for one test.
+func lowerScanLimit(t *testing.T, v int64) {
+	t.Helper()
+	prev := source.MaxScanBytes
+	source.MaxScanBytes = v
+	t.Cleanup(func() { source.MaxScanBytes = prev })
+}
+
+// paddedEntry is a valid pom.properties body padded with zeros to exactly
+// size, so every entry parses and only a bound can stop it.
+func paddedEntry(groupID, artifactID string, size int) []byte {
+	body := pomProps(groupID, artifactID, "1.0.0")
+	return append(body, make([]byte, size-len(body))...)
+}
+
+// QA 2026-11-02: the per-entry cap bounded one entry and nothing bounded the
+// sum. The budget is MaxScanBytes across every entry of one Parse, and the
+// boundary is exact: entries that add up to the budget are read and
+// cataloged, one byte more is the error naming the entry that went over.
+// Each entry here is far under the per-entry cap (its default), so the sum
+// is the only thing that can refuse it -- a check against the entry alone,
+// or a budget never charged, catalogs all three in both rows.
+func TestParse_InflateBudgetIsTheSumAcrossEntries(t *testing.T) {
+	const entrySize = 2 << 10
+	entries := []zipEntry{
+		{"META-INF/maven/com.example.budget/first/pom.properties", paddedEntry("com.example.budget", "first", entrySize)},
+		{"META-INF/maven/com.example.budget/second/pom.properties", paddedEntry("com.example.budget", "second", entrySize)},
+		{"META-INF/maven/com.example.budget/third/pom.properties", paddedEntry("com.example.budget", "third", entrySize)},
+	}
+
+	t.Run("exactly the budget is read", func(t *testing.T) {
+		path := writeZip(t, "exact.jar", entries)
+		lowerScanLimit(t, 3*entrySize)
+		pkgs, stats, err := Parse(path)
+		if err != nil {
+			t.Fatalf("Parse(entries summing to exactly the budget): %v", err)
+		}
+		if len(pkgs) != 3 || stats.Cataloged != 3 {
+			t.Errorf("pkgs = %d, stats = %+v; want all three cataloged", len(pkgs), stats)
+		}
+	})
+
+	t.Run("one byte past the budget names the entry that crossed it", func(t *testing.T) {
+		path := writeZip(t, "over.jar", entries)
+		lowerScanLimit(t, 3*entrySize-1)
+		pkgs, stats, err := Parse(path)
+		if err == nil {
+			t.Fatalf("Parse = %d package(s), %+v, nil; want the budget's error", len(pkgs), stats)
+		}
+		var be *budgetError
+		if !errors.As(err, &be) {
+			t.Errorf("err = %T %v, want a *budgetError", err, err)
+		}
+		want := source.ArchiveLimitError(path, "META-INF/maven/com.example.budget/third/pom.properties").Error()
+		if err.Error() != want {
+			t.Errorf("err = %q, want %q", err, want)
+		}
+		if pkgs != nil || stats != (cyclonedx.Stats{}) {
+			t.Errorf("pkgs = %+v, stats = %+v; want nothing returned beside the error -- a partial "+
+				"inventory of the archive is the shape the error exists to refuse", pkgs, stats)
+		}
+	})
+}
+
+// A nested archive is read into memory before its own entries are, so its
+// bytes are the budget's too -- at every depth, not only the outer archive's
+// own entries. The outer carries nothing but the nested jar, so the sum here
+// is the nested archive's bytes plus the one entry read out of it; the
+// budget sits between the two, and the error names the inner entry by its
+// composite path.
+func TestParse_InflateBudgetChargesNestedArchives(t *testing.T) {
+	inner := buildZip(t, []zipEntry{
+		{"META-INF/maven/com.example.nestedbudget/inner/pom.properties", paddedEntry("com.example.nestedbudget", "inner", 1<<10)},
+	})
+	path := writeZip(t, "outer.jar", []zipEntry{{"lib/inner.jar", inner}})
+
+	t.Run("the nested archive and its entry together fit", func(t *testing.T) {
+		lowerScanLimit(t, int64(len(inner))+(1<<10))
+		pkgs, _, err := Parse(path)
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		if len(pkgs) != 1 || pkgs[0].Name != "com.example.nestedbudget:inner" {
+			t.Errorf("pkgs = %+v, want the inner component", pkgs)
+		}
+	})
+
+	t.Run("the nested archive's own bytes count", func(t *testing.T) {
+		// Room for the nested archive and all but one byte of its entry: a
+		// budget charged only at depth 0 reads the entry in full.
+		lowerScanLimit(t, int64(len(inner))+(1<<10)-1)
+		_, _, err := Parse(path)
+		want := source.ArchiveLimitError(path, "lib/inner.jar!META-INF/maven/com.example.nestedbudget/inner/pom.properties").Error()
+		if err == nil || err.Error() != want {
+			t.Errorf("err = %v, want %q", err, want)
+		}
+	})
+}
+
+// What a failed read inflated is charged too. An entry refused on its
+// declared size costs nothing -- it is never opened -- but a header that
+// lies low is opened, inflated past its declaration and refused by
+// archive/zip mid-stream; those bytes were inflated, and twelve such entries
+// are the probe's shape with a different refusal. The header is forged in
+// memory on a real entry, the way TestReadEntry_RefusesADeclaredSizePastTheCap
+// forges it high.
+func TestReadEntry_ChargesWhatAFailedReadInflated(t *testing.T) {
+	data := buildZip(t, []zipEntry{{"liar", make([]byte, 64<<10)}})
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := zr.File[0]
+	f.UncompressedSize64 = 1 << 10
+	p := newParser("x.jar")
+	const budget = 1 << 20
+	p.budget = budget
+
+	if _, err := p.readEntry(f, "x.jar"); err == nil {
+		t.Fatal("readEntry read an entry past its declared size without error")
+	}
+	// archive/zip hands back what it inflated before the read that crossed
+	// the declared size, and drops that read's own bytes; whatever reached
+	// the parser is what it holds in memory, and that is what is charged. The
+	// exact count is io.ReadAll's buffer growth, not a contract.
+	if p.budget >= budget {
+		t.Errorf("budget after the failed read = %d, want it below %d: the bytes a failed read "+
+			"inflated were not charged", p.budget, budget)
+	}
+	if p.budget < budget-(1<<10) {
+		t.Errorf("budget after the failed read = %d; more than the declared 1 KiB was charged, "+
+			"so the read ran past archive/zip's own refusal", p.budget)
+	}
+}
+
+// The read is bounded by what the budget has left, not only by the cap:
+// with a kilobyte of budget left, an entry is read a kilobyte and one byte,
+// not up to the half-gigabyte cap, before the parse learns it is over.
+func TestReadEntry_ReadsNoFurtherThanTheBudgetLeaves(t *testing.T) {
+	data := buildZip(t, []zipEntry{{"big", make([]byte, 64<<10)}})
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := newParser("x.jar")
+	p.budget = 1 << 10
+	if _, err := p.readEntry(zr.File[0], "x.jar"); err == nil {
+		t.Fatal("readEntry read a 64 KiB entry against a 1 KiB budget without error")
+	}
+	// The budget records what was read: the bound plus the one byte past it.
+	if p.budget != -1 {
+		t.Errorf("budget after the read = %d, want -1: the read must stop one byte past what "+
+			"the budget allowed, not run to the entry's end or the cap", p.budget)
 	}
 }

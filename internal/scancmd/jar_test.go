@@ -223,6 +223,50 @@ func TestRun_AJarPastTheFileLimitExitsTwoNamingTheLimit(t *testing.T) {
 	}
 }
 
+// QA 2026-11-02 (#22): a jar: target whose entries, decompressed, outrun the
+// per-archive budget is exit 2 naming the archive, the budget and the entry
+// -- the same contract an archive past the per-file limit has above. Each
+// entry here is far inside the per-entry cap (its default), so only the sum
+// can refuse the archive; the budget is lowered to exactly the first two
+// entries, so the third is the one the message names.
+func TestRun_AJarPastTheInflateBudgetExitsTwoNamingTheBudget(t *testing.T) {
+	const entrySize = 2 << 10
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, art := range []string{"first", "second", "third"} {
+		w, err := zw.Create("META-INF/maven/com.example.budgetfixture/" + art + "/pom.properties")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := []byte("groupId=com.example.budgetfixture\nartifactId=" + art + "\nversion=1.0.0\n")
+		if _, err := w.Write(append(body, make([]byte, entrySize-len(body))...)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "many.jar")
+	if err := os.WriteFile(path, buf.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lowerLimit(t, &source.MaxScanBytes, 2*entrySize)
+	want := source.ArchiveLimitError(path, "META-INF/maven/com.example.budgetfixture/third/pom.properties").Error()
+
+	db := buildMavenDB(t, "com.example.budgetfixture:first")
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), db, "jar:"+path, Options{}, &out, &errOut); code != 2 {
+		t.Fatalf("Run = %d, want 2 - an archive whose entries outran the budget is a scan that "+
+			"could not run; stdout:\n%s\nstderr:\n%s", code, out.String(), errOut.String())
+	}
+	if got := strings.Count(errOut.String(), "error: "+want); got != 1 {
+		t.Errorf("stderr carries the line %q %d time(s), want exactly once:\n%s", want, got, errOut.String())
+	}
+	if strings.Contains(out.String(), "budgetfixture") || strings.Contains(out.String(), "exceeds the") {
+		t.Errorf("stdout carries a component of, or the refusal of, an archive that was not read whole:\n%s", out.String())
+	}
+}
+
 // writePaddedJarFixture is writeJarFixture's archive plus a 2 KiB entry stored
 // uncompressed, for TestRun_AJarPastTheFileLimitExitsTwoNamingTheLimit — see
 // its comment for why the size matters.

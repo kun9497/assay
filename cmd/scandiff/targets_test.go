@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -87,6 +89,54 @@ func TestLoadTargets_MaxNotEvaluatedOmittedDefaultsToZero(t *testing.T) {
 	}
 	if targets[0].MaxNotEvaluated != 0 {
 		t.Errorf("MaxNotEvaluated = %d, want 0 when omitted from the file", targets[0].MaxNotEvaluated)
+	}
+}
+
+// QA 2026-11-02 (#25): run joins Name into the -capture path
+// (writeCapture), so a name that is not a plain file name writes outside the
+// capture directory. Each refusal names the offending entry, so a CI log
+// says which row to fix; each acceptance is a real spelling the committed
+// floors file uses or could.
+func TestLoadTargets_NameMustBeAPlainFileName(t *testing.T) {
+	refused := []struct{ label, name string }{
+		{"parent traversal", "../../x"},
+		{"parent dir", ".."},
+		{"current dir", "."},
+		{"forward slash", "a/b"},
+		{"backslash", `a\b`},
+		{"absolute", "/abs"},
+		{"trailing slash", "name/"},
+	}
+	for _, c := range refused {
+		t.Run("refuses "+c.label, func(t *testing.T) {
+			// strconv.Quote renders the name as a JSON string literal: the
+			// backslash row needs its escape doubled, and a hand-written
+			// "a\b" would be an invalid escape rather than the name.
+			path := writeFile(t, `[{"name": "fine", "ref": "example.com/a@sha256:aaa"},
+				{"name": `+strconv.Quote(c.name)+`, "ref": "example.com/x@sha256:aaa"}]`)
+			_, err := loadTargets(path)
+			if err == nil {
+				t.Fatalf("loadTargets accepted the name %q", c.name)
+			}
+			if !strings.Contains(err.Error(), fmt.Sprintf("%q", c.name)) || !strings.Contains(err.Error(), "entry 1") {
+				t.Errorf("err = %q, want it to name entry 1 and the name %q", err, c.name)
+			}
+			if !strings.Contains(err.Error(), "not a plain file name") {
+				t.Errorf("err = %q, want it to say why the name is refused", err)
+			}
+		})
+	}
+	for _, name := range []string{"alpine319", "ubi8-n18", "liberica21.jdk", "a_b"} {
+		t.Run("accepts "+name, func(t *testing.T) {
+			path := writeFile(t, `[{"name": "`+name+`", "ref": "example.com/x@sha256:aaa"}]`)
+			targets, err := loadTargets(path)
+			if err != nil {
+				t.Fatalf("loadTargets refused %q: %v", name, err)
+			}
+			if targets[0].Name != name {
+				t.Errorf("Name = %q, want %q", targets[0].Name, name)
+			}
+		})
 	}
 }
 

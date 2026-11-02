@@ -1,13 +1,16 @@
 package source
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -161,4 +164,154 @@ func TestOpen_RegistryLayerBlobRefusalIsAuthError(t *testing.T) {
 	if ae.Status != http.StatusForbidden || ae.Registry != host {
 		t.Errorf("AuthError = {Status %d, Registry %q}, want {403, %q}", ae.Status, ae.Registry, host)
 	}
+}
+
+// QA 2026-11-02 (#24): on the registry path the library reads the config blob
+// whole and bounds it only by the size the manifest declares -- the
+// registry's own word. The manifest is already in hand when the config is
+// first wanted, so a declared size past MaxConfigBytes is refused before the
+// blob is asked for: the test's registry serves the real image under a
+// manifest forged to declare a 256 MiB config, and counts requests for the
+// config blob. Without the check the library fetches the blob and fails on
+// the size mismatch -- also an error, which is why the request count is the
+// assertion that tells the two apart, not the error alone.
+func TestOpen_RegistryRefusesADeclaredOversizedConfigBeforeFetchingIt(t *testing.T) {
+	isolateEnv(t)
+	img, err := random.Image(64, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cf, err := img.ConfigFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cf = cf.DeepCopy()
+	cf.OS, cf.Architecture = "linux", runtime.GOARCH
+	if img, err = mutate.ConfigFile(img, cf); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := img.RawManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m v1.Manifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	const declared = 256 << 20
+	m.Config.Size = declared
+	forged, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forgedDigest, _, err := v1.SHA256(bytes.NewReader(forged))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mt, err := img.MediaType()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgName, err := img.ConfigName()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	inner := registry.New(registry.Logger(log.New(io.Discard, "", 0)))
+	var armed atomic.Bool
+	var configRequests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if armed.Load() && strings.Contains(r.URL.Path, "/manifests/") {
+			w.Header().Set("Content-Type", string(mt))
+			w.Header().Set("Docker-Content-Digest", forgedDigest.String())
+			w.Header().Set("Content-Length", strconv.Itoa(len(forged)))
+			if r.Method != http.MethodHead {
+				_, _ = w.Write(forged)
+			}
+			return
+		}
+		// Counted only once armed: remote.Write's own HEAD of the config,
+		// checking whether it must upload it, is not a fetch by Open.
+		if armed.Load() && strings.HasSuffix(r.URL.Path, "/blobs/"+cfgName.String()) {
+			configRequests.Add(1)
+		}
+		inner.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	host := strings.TrimPrefix(srv.URL, "http://")
+
+	ref, err := name.ParseReference(host + "/forged/config:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.Write(ref, img); err != nil {
+		t.Fatal(err)
+	}
+	armed.Store(true)
+
+	_, err = Open(context.Background(), ref.String(), "")
+	if err == nil {
+		t.Fatal("Open succeeded against a manifest declaring a 256 MiB config")
+	}
+	if want := ConfigLimitError(declared).Error(); !strings.Contains(err.Error(), want) {
+		t.Errorf("err = %q, want it to carry %q", err, want)
+	}
+	if n := configRequests.Load(); n != 0 {
+		t.Errorf("the config blob was requested %d time(s); the declared size must be refused "+
+			"before the blob is fetched, or the bound is the registry's declaration", n)
+	}
+}
+
+// fetchTrap is a fakeImage whose config must never be fetched: the test it
+// serves declares the config oversized, and a RawConfigFile call is the
+// defect itself, not a step on the way to the error.
+type fetchTrap struct {
+	fakeImage
+	t *testing.T
+}
+
+func (f fetchTrap) RawConfigFile() ([]byte, error) {
+	f.t.Fatal("RawConfigFile was called: the config was fetched before its declared size was checked")
+	return nil, nil
+}
+
+// The other two sites that read a config. configDiffIDs is on every image
+// path, so the diff-id check is where a tarball or layout meets the limit;
+// collectCandidates reads a config to judge a platform-less index entry, and
+// an oversized one is skipped and recorded, the way any unreadable entry is,
+// rather than fetched.
+func TestConfigSize_IsCheckedAtEveryConfigRead(t *testing.T) {
+	t.Run("configDiffIDs refuses before RawConfigFile", func(t *testing.T) {
+		img := fetchTrap{fakeImage: fakeImage{declaredConfig: MaxConfigBytes + 1}, t: t}
+		_, err := configDiffIDs(img, 0)
+		if want := ConfigLimitError(MaxConfigBytes + 1).Error(); err == nil || err.Error() != want {
+			t.Errorf("err = %v, want %q", err, want)
+		}
+	})
+
+	t.Run("exactly the limit is read", func(t *testing.T) {
+		ids, err := configDiffIDs(fakeImage{declaredConfig: MaxConfigBytes}, 0)
+		if err != nil || len(ids) != 0 {
+			t.Errorf("configDiffIDs(config of exactly the limit) = %v, %v; want it read", ids, err)
+		}
+	})
+
+	t.Run("collectCandidates skips and records the entry", func(t *testing.T) {
+		hex := strings.Repeat("c", 64)
+		idx := fakeIndex{
+			noPlatform: []string{hex},
+			images:     map[string]v1.Image{hex: configImage{os: "linux", arch: runtime.GOARCH, configSize: MaxConfigBytes + 1}},
+		}
+		var cands []candidate
+		var skipped []unreadable
+		if err := collectCandidates(idx, "index", v1.Hash{}, nil, 0, &cands, &skipped); err != nil {
+			t.Fatalf("collectCandidates: %v", err)
+		}
+		if len(cands) != 0 {
+			t.Errorf("candidates = %+v, want none: the entry's config was declared past the limit", cands)
+		}
+		if len(skipped) != 1 || skipped[0].digest.Hex != hex || !strings.Contains(skipped[0].err.Error(), "per-config limit") {
+			t.Errorf("skipped = %+v, want the one entry recorded with the limit's error", skipped)
+		}
+	})
 }

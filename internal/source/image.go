@@ -320,6 +320,9 @@ func checkSingle(img v1.Image, descPlat *v1.Platform, ref string, digest v1.Hash
 		Explicit:       explicit,
 		ManifestDigest: digest.String(),
 	}
+	if err := checkConfigSize(img); err != nil {
+		return PlatformChoice{}, fmt.Errorf("%s: %w", ref, err)
+	}
 	cf, err := img.ConfigFile()
 	if err != nil {
 		return PlatformChoice{}, fmt.Errorf("read image config of %s: %w", ref, err)
@@ -545,6 +548,13 @@ func collectCandidates(idx indexReader, what string, parent v1.Hash, outer []v1.
 				*skipped = append(*skipped, unreadable{d.Digest, err})
 				continue
 			}
+			// A config declared past the limit is skipped like any other
+			// unreadable entry -- recorded, so a miss still says so -- and
+			// never fetched (QA 2026-11-02).
+			if err := checkConfigSize(img); err != nil {
+				*skipped = append(*skipped, unreadable{d.Digest, err})
+				continue
+			}
 			cf, err := img.ConfigFile()
 			if err != nil {
 				if refusal(err) != nil {
@@ -573,6 +583,34 @@ func collectCandidates(idx indexReader, what string, parent v1.Hash, outer []v1.
 			plat:   normalizePlatform(*p),
 			digest: d.Digest, parent: parent, outer: outer, idx: idx,
 		})
+	}
+	return nil
+}
+
+// checkConfigSize refuses an image whose manifest declares its config larger
+// than MaxConfigBytes, before any ConfigFile or RawConfigFile call fetches it
+// (QA 2026-11-02). The library reads the config blob whole and bounds the
+// read only by that declared size, which on the registry path is whatever
+// the registry said; the manifest is already in memory when the config is
+// first wanted, so the declaration costs nothing to consult. Every site that
+// reads the config consults it: checkSingle and collectCandidates, which
+// read it to judge a platform, and configDiffIDs, which reads it for every
+// image path's diff ids -- so a tarball or layout whose manifest declares an
+// absurd size is refused the same way, though on those paths the library
+// derives the size from the bytes it already has.
+func checkConfigSize(img v1.Image) error {
+	m, err := img.Manifest()
+	if err != nil {
+		return fmt.Errorf("read manifest: %w", err)
+	}
+	return checkConfigDescriptor(m)
+}
+
+// checkConfigDescriptor is checkConfigSize's comparison on a manifest already
+// in hand, for the site that has read it for another reason.
+func checkConfigDescriptor(m *v1.Manifest) error {
+	if m.Config.Size > MaxConfigBytes {
+		return ConfigLimitError(m.Config.Size)
 	}
 	return nil
 }
