@@ -345,7 +345,12 @@ func packageOf(purl string) (name, version string, ok bool) {
 	return m[1], m[2], true
 }
 
-type packageInfo struct{ name, version string }
+// noPurl marks a leaf that exists but whose purl could not be read (D159
+// tells it apart from no leaf at all); name and version are then empty.
+type packageInfo struct {
+	name, version string
+	noPurl        bool
+}
 
 // collectPlatforms walks the product tree's "product_name" nodes -- SLES's
 // and openSUSE Leap's own platforms and modules, one node per release or
@@ -384,9 +389,11 @@ func collectPlatforms(bs []branch, st *stats) (folded map[string]string, declare
 // collectPackages walks the product tree's "product_version" nodes -- every
 // package name and package-version SUSE declared in this document,
 // platform-independent -- reading each one's structured name/version off its
-// purl (packageOf). A leaf with no readable purl is counted and left out of
-// the map, so any product_status entry that names it is a counted skip
-// rather than a guess built from the raw id string.
+// purl (packageOf). A leaf with no readable purl is counted and kept with
+// noPurl set, so any product_status entry that names it is a counted skip
+// rather than a guess built from the raw id string -- and so a bare id can
+// tell that leaf, which SUSE wrote and this reader could not read, from no
+// leaf at all (D159).
 func collectPackages(bs []branch, st *stats) map[string]packageInfo {
 	out := map[string]packageInfo{}
 	var walk func([]branch)
@@ -397,6 +404,7 @@ func collectPackages(bs []branch, st *stats) map[string]packageInfo {
 				name, version, ok := packageOf(b.Product.Helper.Purl)
 				if !ok {
 					st.SkippedNoPurl++
+					out[b.Product.ProductID] = packageInfo{noPurl: true}
 				} else {
 					out[b.Product.ProductID] = packageInfo{name: name, version: version}
 				}
@@ -457,6 +465,18 @@ const (
 // (cdparanoia-IIIalpha9.8-691.22). The leaf must still exist with a readable
 // purl: an id naming no leaf, or a leaf with no purl (the java-1_7_0-openjdk
 // gap), stays a counted skip rather than a name guessed from the raw id.
+//
+// D159 revises that sentence for a bare id with no leaf at all. SUSE leaves
+// the leaf out for a package it has shipped no build of yet, so the bare id
+// is then the document's only statement about the release: 686 of 10,737
+// known_affected ids on SLES 15 SPx / 16.x in 699 live documents sampled
+// 2026-11-02 (584 on SP7, 84 on 16.0; MozillaFirefox, kernel, apache2), each
+// the sole statement for its key, every one dropped. The name never needed
+// the leaf -- the line above takes it from the product_id -- so the absence
+// carried no information and the drop was a silent false negative. A
+// recommended id still needs its leaf (the fixed version comes from the
+// purl), and a leaf with no readable purl still skips a bare id too: that
+// leaf exists and could not be read, which is not the same statement.
 // st counts the renames only; skips are the caller's to count, for the
 // reason the remediation loop gives. The bare branch's "" version is by
 // construction: no bare caller reads it (store ignores the version when
@@ -484,7 +504,11 @@ func resolveProduct(id string, bare bool, folded map[string]string, declared map
 		return productKey{}, "", skipUnknownPlatform
 	}
 	pkg, ok := packages[comp]
-	if !ok {
+	if !ok && bare {
+		st.BareNamedWithoutLeaf++
+		return productKey{eco: key, pkg: comp}, "", skipNone
+	}
+	if !ok || pkg.noPurl {
 		return productKey{}, "", skipUnknownPackage
 	}
 	if bare {
@@ -725,6 +749,13 @@ type stats struct {
 	// collapse against that baseline is the trace that SUSE's generator
 	// changed.
 	BareNamedByProductID int
+
+	// BareNamedWithoutLeaf is D159: a bare id (the same three buckets) whose
+	// component has no product_version leaf in the document, named by its
+	// product_id where it used to be a skip. Per id, like
+	// BareNamedByProductID. Most are known_affected ids for a package SUSE
+	// has not shipped a build of on that release yet.
+	BareNamedWithoutLeaf int
 
 	// RecommendedNamedByNEVRSplit is D131's rule doing visible work: a
 	// recommended id whose leaf purl carried the whole build as its NAME

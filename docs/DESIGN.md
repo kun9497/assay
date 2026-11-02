@@ -1038,6 +1038,9 @@ exited 0 while 24 findings went unmentioned.
 - [x] SARIF says what the cataloger could not read (D158, audit A16) — one
       `assay/not-evaluated` result per nonzero counter (no version, no purl: warning;
       unsupported ecosystem: note), where code scanning had shown a clean scan
+- [x] A bare SUSE id with no leaf is named by its product_id (D159, revises D126, audit B2)
+      — 3,478 ids and 142 whole documents had been dropped in a 688-document live sample;
+      2,876 "affected, no fix" entries added, no fixed version changed
 - [x] QA 2026-10-30 fixes:
       - a line over 64 KiB no longer truncates a lockfile;
       - an opens-first range keeps its single-version windows (revises D154);

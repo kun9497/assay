@@ -34,6 +34,15 @@ All notable changes to this project are documented here. The format follows
   statement naming the purl never reached it, with no "matched nothing" warning, and the
   JSON report could not say which file a finding came from. (audit P4, re-verified
   2026-11-02)
+- SUSE: a `known_affected` (or not-affected, or no-fix remediation) id for a package with no
+  build listed in the document is stored under its product id. Before, it was skipped, and
+  when it was the document's only statement the whole document was lost. On 688 live
+  documents sampled 2026-11-02, 3,478 ids were dropped this way, and 142 documents yielded no
+  record at all. 2,876 "affected, no fix" entries are added on SLES 12 SP5 to 16.x and their
+  Leap codestreams (MozillaFirefox, kernel, terraform, apache2 among them). No fixed version
+  changes. The `db build` progress line also prints the SUSE leaves with no readable purl,
+  which were counted and never shown. A database change: it reaches `db update` with the
+  nightly after merge. (D159, revises D126, audit B2)
 
 ## [0.13.0] - 2026-11-02
 
