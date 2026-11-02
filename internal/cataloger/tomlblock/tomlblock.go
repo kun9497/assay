@@ -28,6 +28,12 @@ import (
 type Block struct {
 	Name    string
 	Version string
+	// Source is the block's own `source = ...` value: unquoted when it is a
+	// quoted scalar (Cargo.lock's "registry+https://..." / "git+https://..."),
+	// verbatim when it is anything else (uv.lock's inline table
+	// `{ git = "..." }`), whose one key the caller reads. Empty when the block
+	// has none - Cargo writes none for a path or workspace crate.
+	Source string
 }
 
 // Scan returns one Block per [[package]] table, in file order.
@@ -93,6 +99,16 @@ func Scan(data []byte) []Block {
 		if cur.Version == "" {
 			if v, ok := stringField(line, "version"); ok {
 				cur.Version = v
+				continue
+			}
+		}
+		// First assignment again, for the same reason: a dependency inline
+		// table can name a source of its own, and taking it would refuse (or
+		// admit) this package on another one's provenance. A dependency line
+		// starts with "{", so its key never compares equal to "source" anyway.
+		if cur.Source == "" {
+			if v, ok := rawField(line, "source"); ok {
+				cur.Source = v
 			}
 		}
 	}
@@ -100,6 +116,20 @@ func Scan(data []byte) []Block {
 	closeBlock()
 
 	return blocks
+}
+
+// rawField matches `key = <value>` and returns the value: unquoted when it is
+// a quoted scalar (stringField's rule), trimmed and verbatim otherwise.
+func rawField(line, key string) (string, bool) {
+	if v, ok := stringField(line, key); ok {
+		return v, true
+	}
+	eq := strings.Index(line, "=")
+	if eq < 0 || strings.TrimSpace(line[:eq]) != key {
+		return "", false
+	}
+	v := strings.TrimSpace(line[eq+1:])
+	return v, v != ""
 }
 
 // stringField matches `key = "value"` and returns the value.

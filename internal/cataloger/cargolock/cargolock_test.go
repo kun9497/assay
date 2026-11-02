@@ -18,7 +18,7 @@ func write(t *testing.T, body string) string {
 
 func names(t *testing.T, path string) map[string]string {
 	t.Helper()
-	pkgs, _, err := Parse(path)
+	pkgs, _, _, err := Parse(path)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -75,7 +75,7 @@ name = "incomplete-crate"
 version = "66.66.66"
 `)
 
-	pkgs, stats, err := Parse(path)
+	pkgs, stats, _, err := Parse(path)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -124,7 +124,7 @@ name = "a-dependency"
 version = "9.9.9"
 `)
 
-	pkgs, _, err := Parse(path)
+	pkgs, _, _, err := Parse(path)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -149,7 +149,7 @@ name = "complete"
 version = "1.0.0"
 `)
 
-	pkgs, stats, err := Parse(path)
+	pkgs, stats, _, err := Parse(path)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -183,7 +183,7 @@ version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 `)
 
-	pkgs, stats, err := Parse(path)
+	pkgs, stats, _, err := Parse(path)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -195,7 +195,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 func TestParse_EcosystemAndPURL(t *testing.T) {
 	path := write(t, "[[package]]\nname = \"serde\"\nversion = \"1.0.196\"\n")
 
-	pkgs, _, err := Parse(path)
+	pkgs, _, _, err := Parse(path)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestParse_EcosystemAndPURL(t *testing.T) {
 func TestParse_EmptyLockfileIsNotAnError(t *testing.T) {
 	path := write(t, "# no packages resolved\nversion = 3\n")
 
-	pkgs, stats, err := Parse(path)
+	pkgs, stats, _, err := Parse(path)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestParse_EmptyLockfileIsNotAnError(t *testing.T) {
 func TestParse_MissingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "absent.lock")
 
-	_, _, err := Parse(path)
+	_, _, _, err := Parse(path)
 	if err == nil {
 		t.Fatal("err = nil, want a read error")
 	}

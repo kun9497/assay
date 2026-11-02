@@ -30,7 +30,7 @@ name = "complete"
 version = "1.0.0"
 `)
 
-	pkgs, stats, err := Parse(path)
+	pkgs, stats, _, err := Parse(path)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -52,7 +52,7 @@ version = "1.0.0"
 func TestParse_EcosystemAndPURL(t *testing.T) {
 	path := write(t, "[[package]]\nname = \"anyio\"\nversion = \"4.13.0\"\n")
 
-	pkgs, _, err := Parse(path)
+	pkgs, _, _, err := Parse(path)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestParse_EcosystemAndPURL(t *testing.T) {
 func TestParse_NameIsNotNormalizedHere(t *testing.T) {
 	path := write(t, "[[package]]\nname = \"Some_Package.Name\"\nversion = \"1.0\"\n")
 
-	pkgs, _, err := Parse(path)
+	pkgs, _, _, err := Parse(path)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestParse_NameIsNotNormalizedHere(t *testing.T) {
 }
 
 func TestParse_MissingFile(t *testing.T) {
-	_, _, err := Parse(filepath.Join(t.TempDir(), "absent.lock"))
+	_, _, _, err := Parse(filepath.Join(t.TempDir(), "absent.lock"))
 	if err == nil {
 		t.Fatal("err = nil, want a read error")
 	}

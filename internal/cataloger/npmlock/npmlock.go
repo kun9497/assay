@@ -43,6 +43,11 @@ type packageEntry struct {
 	// review, #1).
 	Name    string `json:"name"`
 	Version string `json:"version"`
+	// Resolved is where npm fetched the entry from. A registry tarball is an
+	// https URL on whatever host the registry is - a private one included,
+	// which is why nothing here keys on the host - and anything else is
+	// read by ClassifySource.
+	Resolved string `json:"resolved"`
 	// Link marks a workspace entry that points at a local directory rather
 	// than a registry-resolved package - there is no published version to
 	// place inside an advisory range.
@@ -54,20 +59,86 @@ type packageEntry struct {
 // keyed the same way as the top level.
 type depEntry struct {
 	Version      string              `json:"version"`
+	Resolved     string              `json:"resolved"`
 	Dependencies map[string]depEntry `json:"dependencies"`
 }
 
+// Skipped is one entry this parser saw and declined to catalog, with why -
+// the same shape pnpmlock and yarnlock return, so dirscan names it beside the
+// count instead of leaving a reader with "1 not evaluated" and no entry.
+type Skipped struct {
+	Name   string
+	Reason string
+}
+
+// SourceClass is what a dependency spec or a resolved location says about
+// where the package came from.
+type SourceClass int
+
+const (
+	// SourceRegistry is a registry release, or nothing this reader can tell
+	// apart from one: a semver version, a range, an https tarball URL.
+	SourceRegistry SourceClass = iota
+	// SourceVCS is a git checkout or a non-registry URL.
+	SourceVCS
+	// SourceLocal is a file:/link: path inside or beside this checkout.
+	SourceLocal
+)
+
+// ClassifySource reads a spec npm (or yarn v1, which shares npm's spellings)
+// wrote for a dependency, and says whether it names something other than a
+// registry release.
+//
+// A git, VCS-shorthand or path dependency carries the version its own
+// package.json declares - the FORK's self-declared version, not a registry
+// release. Reporting it risks both a false positive (this checkout may carry
+// the fix under the old number) and a false negative (the fork may sit at a
+// "fixed" number without the fix), so callers refuse it the way pnpm's
+// causeGit and yarn berry's https: arm do.
+//
+// The prefixes are npm's own spec grammar (npm-package-arg). urlIsVCS is for
+// a field that holds a SPEC rather than a fetch location - npm 6's version,
+// yarn v1's header range - where any URL at all ("https://host/x.tgz") is a
+// non-registry dependency. A resolved field is a fetch location, where an
+// https URL is how every registry tarball is written, so it passes false.
+func ClassifySource(spec string, urlIsVCS bool) SourceClass {
+	s := strings.ToLower(strings.TrimSpace(spec))
+	for _, p := range []string{"git+", "git:", "github:", "gitlab:", "bitbucket:", "gist:"} {
+		if strings.HasPrefix(s, p) {
+			return SourceVCS
+		}
+	}
+	if strings.HasPrefix(s, "file:") || strings.HasPrefix(s, "link:") {
+		return SourceLocal
+	}
+	if urlIsVCS && strings.Contains(s, "://") {
+		return SourceVCS
+	}
+	return SourceRegistry
+}
+
+// SkipReason is the disclosure for a refused source. It names the class and
+// never the URL: a git+https spec can carry a token in its userinfo, and the
+// disclosure goes to stderr and CI logs.
+func SkipReason(c SourceClass) string {
+	if c == SourceLocal {
+		return "resolves to a local file:/link: path, not a registry release"
+	}
+	return "resolves to a git or non-registry URL; its version is the fork's own, not a registry release"
+}
+
 // Parse reads the package-lock.json at path and returns the packages it
-// resolves. path is also what every returned Package's single Location
+// resolves, alongside every entry it refused because its source is not a
+// registry. path is also what every returned Package's single Location
 // names, and what any returned error names - the caller may be scanning many
 // lockfiles in one pass, and a bare "package-lock.json" in an error would not
 // say which one.
-func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, error) {
+func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, []Skipped, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		// os.ReadFile's own error already names the full path ("open <path>:
 		// ..."), so wrapping it again here would only double it up.
-		return nil, cyclonedx.Stats{}, err
+		return nil, cyclonedx.Stats{}, nil, err
 	}
 
 	var doc lockDoc
@@ -79,26 +150,27 @@ func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, error) {
 		// format string would satisfy a naive substring check while still
 		// dropping both the actual path and the cause (CLAUDE.md's
 		// "substring assertions" note).
-		return nil, cyclonedx.Stats{}, fmt.Errorf("parse %s: %w", path, err)
+		return nil, cyclonedx.Stats{}, nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 
 	var (
-		pkgs  []pkgmeta.Package
-		stats cyclonedx.Stats
+		pkgs    []pkgmeta.Package
+		stats   cyclonedx.Stats
+		skipped []Skipped
 	)
 	switch {
 	case len(doc.Packages) > 0:
-		catalogPackages(doc.Packages, path, &pkgs, &stats)
+		catalogPackages(doc.Packages, path, &pkgs, &stats, &skipped)
 	case len(doc.Dependencies) > 0:
-		catalogDependencies(doc.Dependencies, path, &pkgs, &stats)
+		catalogDependencies(doc.Dependencies, path, &pkgs, &stats, &skipped)
 	}
-	return pkgs, stats, nil
+	return pkgs, stats, skipped, nil
 }
 
 // catalogPackages walks the v2/v3 "packages" object in sorted key order, so
 // the returned slice does not vary between runs of the same file - a map
 // range here would reach the report.
-func catalogPackages(entries map[string]packageEntry, path string, pkgs *[]pkgmeta.Package, stats *cyclonedx.Stats) {
+func catalogPackages(entries map[string]packageEntry, path string, pkgs *[]pkgmeta.Package, stats *cyclonedx.Stats, skipped *[]Skipped) {
 	for _, key := range sortedKeys(entries) {
 		e := entries[key]
 
@@ -139,6 +211,18 @@ func catalogPackages(entries map[string]packageEntry, path string, pkgs *[]pkgme
 			name = e.Name
 			loc.Install = key
 		}
+
+		// Read from resolved, not version: npm 7+ writes the fork's own
+		// package.json version into "version" for a git dependency and
+		// records where it came from only here. Counted as SkippedNoVersion,
+		// as the Link arm above is: the same "no registry release" answer
+		// this reader already gives a workspace link.
+		if c := ClassifySource(e.Resolved, false); c != SourceRegistry {
+			stats.SkippedNoVersion++
+			*skipped = append(*skipped, Skipped{Name: name, Reason: SkipReason(c)})
+			continue
+		}
+
 		*pkgs = append(*pkgs, pkgmeta.Package{
 			Name:      name,
 			Version:   e.Version,
@@ -174,14 +258,14 @@ func aliasSpec(version string) (name, ver string, ok bool) {
 // reading only the top level would silently return the direct dependencies
 // alone. Keys are sorted at every level for the same determinism reason as
 // catalogPackages.
-func catalogDependencies(entries map[string]depEntry, path string, pkgs *[]pkgmeta.Package, stats *cyclonedx.Stats) {
-	catalogDependenciesUnder("", entries, path, pkgs, stats)
+func catalogDependencies(entries map[string]depEntry, path string, pkgs *[]pkgmeta.Package, stats *cyclonedx.Stats, skipped *[]Skipped) {
+	catalogDependenciesUnder("", entries, path, pkgs, stats, skipped)
 }
 
 // catalogDependenciesUnder is catalogDependencies with the install directory
 // the tree so far resolves to ("" at the top, "node_modules/a" for a's own
 // nested dependencies), so an alias's recorded location is its real path.
-func catalogDependenciesUnder(dir string, entries map[string]depEntry, path string, pkgs *[]pkgmeta.Package, stats *cyclonedx.Stats) {
+func catalogDependenciesUnder(dir string, entries map[string]depEntry, path string, pkgs *[]pkgmeta.Package, stats *cyclonedx.Stats, skipped *[]Skipped) {
 	for _, key := range sortedKeys(entries) {
 		e := entries[key]
 		stats.Components++
@@ -198,9 +282,23 @@ func catalogDependenciesUnder(dir string, entries map[string]depEntry, path stri
 			loc.Install = install
 		}
 
-		if name == "" || version == "" {
+		// npm 6 writes a git dependency's spec into "version" itself
+		// ("git+https://...#<sha>", "github:user/repo#<sha>"), so that is
+		// read first, as a spec; "resolved", when present, as a location.
+		// Before this, the spec reached the comparer as a version and failed
+		// there under the wrong cause.
+		vc := ClassifySource(version, true)
+		if vc == SourceRegistry {
+			vc = ClassifySource(e.Resolved, false)
+		}
+
+		switch {
+		case name == "" || version == "":
 			stats.SkippedNoVersion++
-		} else {
+		case vc != SourceRegistry:
+			stats.SkippedNoVersion++
+			*skipped = append(*skipped, Skipped{Name: name, Reason: SkipReason(vc)})
+		default:
 			*pkgs = append(*pkgs, pkgmeta.Package{
 				Name:      name,
 				Version:   version,
@@ -213,7 +311,7 @@ func catalogDependenciesUnder(dir string, entries map[string]depEntry, path stri
 		}
 
 		if len(e.Dependencies) > 0 {
-			catalogDependenciesUnder(install+"/", e.Dependencies, path, pkgs, stats)
+			catalogDependenciesUnder(install+"/", e.Dependencies, path, pkgs, stats, skipped)
 		}
 	}
 }

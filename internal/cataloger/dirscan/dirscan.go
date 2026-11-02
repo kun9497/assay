@@ -229,20 +229,26 @@ func parseManifest(root string, m Manifest) ([]pkgmeta.Package, cyclonedx.Stats,
 		// One arm for both: npm-shrinkwrap.json is package-lock.json's schema
 		// under another filename, so a second case calling the same parser
 		// would be two places to keep in step for no gain.
-		pkgs, s, perr := npmlock.Parse(full)
+		pkgs, s, skipped, perr := npmlock.Parse(full)
 		if perr != nil {
 			return nil, cyclonedx.Stats{}, nil, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
 		}
 		relocate(pkgs, m.Path)
-		return pkgs, s, nil, nil
+		for _, sk := range skipped {
+			unusable = append(unusable, Unusable{Path: m.Path, Line: sk.Name, Reason: sk.Reason})
+		}
+		return pkgs, s, unusable, nil
 
 	case KindPoetryLock:
-		pkgs, s, perr := poetrylock.Parse(full)
+		pkgs, s, skipped, perr := poetrylock.Parse(full)
 		if perr != nil {
 			return nil, cyclonedx.Stats{}, nil, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
 		}
 		relocate(pkgs, m.Path)
-		return pkgs, s, nil, nil
+		for _, sk := range skipped {
+			unusable = append(unusable, Unusable{Path: m.Path, Line: sk.Name, Reason: sk.Reason})
+		}
+		return pkgs, s, unusable, nil
 
 	case KindRequirements:
 		// D38: read, but only the lines that name exactly one version. The
@@ -277,12 +283,15 @@ func parseManifest(root string, m Manifest) ([]pkgmeta.Package, cyclonedx.Stats,
 		return pkgs, s, unusable, nil
 
 	case KindCargoLock:
-		pkgs, s, perr := cargolock.Parse(full)
+		pkgs, s, skipped, perr := cargolock.Parse(full)
 		if perr != nil {
 			return nil, cyclonedx.Stats{}, nil, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
 		}
 		relocate(pkgs, m.Path)
-		return pkgs, s, nil, nil
+		for _, sk := range skipped {
+			unusable = append(unusable, Unusable{Path: m.Path, Line: sk.Name, Reason: sk.Reason})
+		}
+		return pkgs, s, unusable, nil
 
 	case KindPipfileLock:
 		pkgs, s, perr := pipfilelock.Parse(full)
@@ -293,12 +302,15 @@ func parseManifest(root string, m Manifest) ([]pkgmeta.Package, cyclonedx.Stats,
 		return pkgs, s, nil, nil
 
 	case KindUVLock:
-		pkgs, s, perr := uvlock.Parse(full)
+		pkgs, s, skipped, perr := uvlock.Parse(full)
 		if perr != nil {
 			return nil, cyclonedx.Stats{}, nil, &Unread{Path: m.Path, Reason: perr.Error(), Failed: true}
 		}
 		relocate(pkgs, m.Path)
-		return pkgs, s, nil, nil
+		for _, sk := range skipped {
+			unusable = append(unusable, Unusable{Path: m.Path, Line: sk.Name, Reason: sk.Reason})
+		}
+		return pkgs, s, unusable, nil
 
 	case KindGemfileLock:
 		pkgs, s, perr := gemlock.Parse(full)

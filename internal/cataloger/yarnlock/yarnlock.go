@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
+	"github.com/kun9497/assay/internal/cataloger/npmlock"
 	"github.com/kun9497/assay/internal/pkgmeta"
 	"gopkg.in/yaml.v3"
 )
@@ -32,17 +33,18 @@ import (
 // itself used to produce.
 var ErrUnknownDialect = errors.New("yarn.lock: neither a yarn v1 banner nor a berry __metadata block found")
 
-// Skipped is one berry lockfile entry this parser saw and declined to
-// catalog, with why. The v1 path never produces one - see Parse.
+// Skipped is one lockfile entry this parser saw and declined to catalog,
+// with why. A v1 file produces one only for a git/URL/path source - see
+// Parse.
 type Skipped struct {
 	Name   string
 	Reason string
 }
 
 // Parse reads the yarn.lock at path and returns the packages it resolves,
-// alongside every entry a berry file's parse declined to catalog (always nil
-// for a v1 file - the v1 grammar's own skips are counted into Stats only, the
-// same as before this package read berry at all). path is what every
+// alongside every entry it declined to catalog because of where it resolves
+// from (a berry protocol, or a v1 git/URL/path spec; a v1 entry with no
+// version or no name is still counted into Stats only). path is what every
 // returned Package's single Location names and what any returned error
 // names, the same as npmlock.Parse - a directory scan reads several
 // lockfiles and a bare "yarn.lock" would not say which.
@@ -57,28 +59,33 @@ func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, []Skipped, error) {
 	case dialectBerry:
 		return parseBerry(path, data)
 	case dialectV1:
-		pkgs, stats, perr := parseV1(path, data)
-		return pkgs, stats, nil, perr
+		return parseV1(path, data)
 	default:
 		return nil, cyclonedx.Stats{}, nil, fmt.Errorf("parse %s: %w", path, ErrUnknownDialect)
 	}
 }
 
-// parseV1 is the original yarn v1 line-oriented parser, unchanged in
-// behaviour from before berry was read at all - only its signature moved,
-// to make room for Parse's dialect dispatch above.
-func parseV1(path string, data []byte) ([]pkgmeta.Package, cyclonedx.Stats, error) {
+// parseV1 is the original yarn v1 line-oriented parser. Besides name and
+// version it reads where the entry resolves from - the header's own specs and
+// the `resolved` line - because a git dependency's `version` is the fork's
+// self-declared one (see npmlock.ClassifySource).
+func parseV1(path string, data []byte) ([]pkgmeta.Package, cyclonedx.Stats, []Skipped, error) {
 	var (
-		pkgs  []pkgmeta.Package
-		stats cyclonedx.Stats
+		pkgs    []pkgmeta.Package
+		stats   cyclonedx.Stats
+		skipped []Skipped
 		// open tracks whether a header has been seen, separately from whether
 		// that header yielded a name. The two are not the same: a header this
 		// parser cannot turn into a name is still an entry the file declared,
 		// and folding them into one variable makes it vanish from every
 		// counter rather than be counted as a skip.
-		open    bool
-		name    string
-		version string
+		open     bool
+		name     string
+		version  string
+		resolved string
+		// source is what the header's specs say; resolved is read after it,
+		// when the header is registry-shaped (see finalize).
+		source npmlock.SourceClass
 	)
 
 	// finalize closes the entry in name/version. Every call increments exactly
@@ -89,7 +96,37 @@ func parseV1(path string, data []byte) ([]pkgmeta.Package, cyclonedx.Stats, erro
 		if !open {
 			return
 		}
+		defer func() {
+			open, name, version, resolved, source = false, "", "", "", npmlock.SourceRegistry
+		}()
+
+		// Where the entry comes from, before anything is counted: a local
+		// file:/link: entry is not a component at all (below). The header is
+		// read first because a GitHub shorthand resolves to an ordinary
+		// https codeload tarball, which the resolved line alone cannot tell
+		// from a registry's; resolved second, because a `resolutions`
+		// override can pin a semver-shaped key to a git URL.
+		src := source
+		if src == npmlock.SourceRegistry {
+			src = npmlock.ClassifySource(resolved, false)
+		}
+		if src == npmlock.SourceLocal {
+			// Shown, not counted - berry's isLocalProtocol answer for the
+			// same file:/link: shape in the same filename, and pnpm's
+			// causeLocal (D103): nothing published behind it, and not
+			// incompleteness the target gate should trip on.
+			skipped = append(skipped, Skipped{Name: name, Reason: npmlock.SkipReason(src)})
+			return
+		}
+
 		stats.Components++
+		if src == npmlock.SourceVCS && name != "" {
+			// berry's https: arm, for v1: counted as SkippedNoVersion and
+			// named, because the version beside it is the fork's own.
+			stats.SkippedNoVersion++
+			skipped = append(skipped, Skipped{Name: name, Reason: npmlock.SkipReason(src)})
+			return
+		}
 		if name == "" || version == "" {
 			// A header with no `version` line, or one this parser could not
 			// turn into a name. Malformed, or an entry whose resolution
@@ -99,7 +136,6 @@ func parseV1(path string, data []byte) ([]pkgmeta.Package, cyclonedx.Stats, erro
 			// bucket, so both route through SkippedNoVersion, as
 			// poetrylock.go does for the same reason.
 			stats.SkippedNoVersion++
-			open, name, version = false, "", ""
 			return
 		}
 		stats.Cataloged++
@@ -114,7 +150,6 @@ func parseV1(path string, data []byte) ([]pkgmeta.Package, cyclonedx.Stats, erro
 			PURL:      "pkg:npm/" + name + "@" + version,
 			Locations: []pkgmeta.Location{{Path: path}},
 		})
-		open, name, version = false, "", ""
 	}
 
 	scanner := bufio.NewScanner(bytes.NewReader(data))
@@ -131,22 +166,65 @@ func parseV1(path string, data []byte) ([]pkgmeta.Package, cyclonedx.Stats, erro
 		if line[0] != ' ' && line[0] != '\t' && strings.HasSuffix(trimmed, ":") {
 			finalize()
 			open = true
-			name = nameFromSpecs(strings.TrimSuffix(trimmed, ":"))
+			header := strings.TrimSuffix(trimmed, ":")
+			name = nameFromSpecs(header)
+			source = sourceFromSpecs(header)
 			continue
 		}
 
-		if open && version == "" {
-			if v, ok := versionField(trimmed); ok {
+		if !open {
+			continue
+		}
+		if version == "" {
+			if v, ok := quotedField(trimmed, "version "); ok {
 				version = v
+				continue
+			}
+		}
+		if resolved == "" {
+			if v, ok := quotedField(trimmed, "resolved "); ok {
+				resolved = v
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, cyclonedx.Stats{}, fmt.Errorf("read %s: %w", path, err)
+		return nil, cyclonedx.Stats{}, nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	finalize()
 
-	return pkgs, stats, nil
+	return pkgs, stats, skipped, nil
+}
+
+// sourceFromSpecs classifies an entry header by the ranges its specs carry.
+// Every spec on one header resolves to the same entry, so any one of them
+// naming a git URL or a path makes the entry one.
+//
+// The range is everything after the FIRST '@' past index 0, not the last:
+// "x@git+ssh://git@github.com/..." carries an '@' inside its URL. Beyond
+// npm's own prefixes (npmlock.ClassifySource), a range holding a '/' is a
+// GitHub "user/repo" shorthand or a relative path: no semver range or dist-tag
+// contains one, and yarn resolves the shorthand to an https codeload URL that
+// nothing else would catch. An alias ("x@npm:lodash@^4") is a registry spec
+// and is left to nameFromSpecs.
+func sourceFromSpecs(header string) npmlock.SourceClass {
+	for _, spec := range strings.Split(header, ",") {
+		spec = strings.Trim(strings.TrimSpace(spec), `"`)
+		at := strings.Index(spec[min(1, len(spec)):], "@")
+		if at < 0 {
+			continue
+		}
+		rng := spec[at+2:]
+		if strings.HasPrefix(rng, "npm:") {
+			continue
+		}
+		if c := npmlock.ClassifySource(rng, true); c != npmlock.SourceRegistry {
+			return c
+		}
+		if strings.Contains(rng, "/") {
+			return npmlock.SourceVCS
+		}
+	}
+	return npmlock.SourceRegistry
 }
 
 // dialect is which of the two incompatible yarn.lock grammars a file is.
@@ -212,14 +290,24 @@ func nameFromSpecs(header string) string {
 		spec = spec[i+len("@npm:"):]
 	}
 
-	// Split on the LAST @, not the first. A scoped package's name begins with
-	// one ("@babel/core@^7.0.0"), so splitting on the first yields an empty
-	// name and a range that swallows the rest - the single most likely way to
-	// get this wrong, and silent, since an empty name matches no advisory.
-	at := strings.LastIndex(spec, "@")
+	// Split on the first @ PAST index 0. A scoped package's name begins with
+	// one ("@babel/core@^7.0.0"), so splitting on the very first yields an
+	// empty name and a range that swallows the rest - the single most likely
+	// way to get this wrong, and silent, since an empty name matches no
+	// advisory. Not the last @ either: a git spec's URL can carry one
+	// ("x@git+ssh://git@github.com/..."), and sourceFromSpecs refuses that
+	// entry under the name this returns. A registry range never holds an @
+	// once the alias above is unwrapped, so the two splits agree on every
+	// entry that is cataloged.
+	at := -1
+	if len(spec) > 1 {
+		if i := strings.Index(spec[1:], "@"); i >= 0 {
+			at = i + 1
+		}
+	}
 	if at <= 0 {
-		// at == 0 is a spec that is nothing but a scope marker, at == -1 a
-		// spec with no range at all. Neither names a package this parser can
+		// A spec that is nothing but a scope marker, or one with no range at
+		// all ("@scope", "lodash"). Neither names a package this parser can
 		// stand behind, so it returns empty and finalize counts the entry as
 		// a skip rather than inventing a name.
 		return ""
@@ -227,13 +315,13 @@ func nameFromSpecs(header string) string {
 	return spec[:at]
 }
 
-// versionField extracts the resolved version from a v1 `version "1.2.3"` line.
+// quotedField extracts the value from a v1 `<key> "value"` line - `version
+// "1.2.3"` or `resolved "https://..."`; key carries its trailing space.
 // Berry's unquoted `version: 1.2.3` is deliberately NOT accepted: a file
 // mixing the two is not something this parser can claim to understand, and
 // classifyDialect has already routed a berry file to parseBerry instead of
 // here by the time this runs.
-func versionField(trimmed string) (string, bool) {
-	const key = "version "
+func quotedField(trimmed, key string) (string, bool) {
 	if !strings.HasPrefix(trimmed, key) {
 		return "", false
 	}

@@ -205,9 +205,9 @@ func TestVersionField(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		got, ok := versionField(tc.in)
+		got, ok := quotedField(tc.in, "version ")
 		if got != tc.want || ok != tc.ok {
-			t.Errorf("versionField(%q) = %q, %v; want %q, %v", tc.in, got, ok, tc.want, tc.ok)
+			t.Errorf("quotedField(%q, \"version \") = %q, %v; want %q, %v", tc.in, got, ok, tc.want, tc.ok)
 		}
 	}
 }
