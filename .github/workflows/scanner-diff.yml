@@ -164,7 +164,15 @@ jobs:
           fi
 
       - name: Fail the job on a breach or an untrustworthy target
-        run: exit ${{ steps.diff.outputs.exit_code }}
+        # `|| 2` fails closed, as db-publish.yml's gate does: an empty output
+        # (a renamed `id: diff`, a mistyped output name, an `if:` on the diff
+        # step) would make this a bare `exit`, which returns 0 -- every weekly
+        # run green, and the alert job below closing the pinned failure issue
+        # on a differential that never judged. A passing run writes the
+        # string "0", which is truthy, so it still exits 0. Audit 2026-10-22
+        # P4, re-verified 2026-11-02; internal/ciguard holds every workflow to
+        # this shape.
+        run: exit ${{ steps.diff.outputs.exit_code || 2 }}
 
   # D138: one pinned issue per failing ops workflow, closed by the next
   # success. always(), so it runs when the job it watches failed; a
