@@ -123,6 +123,18 @@ func TestPackageOf(t *testing.T) {
 			"liblzma5-x86-64-v3", "5.8.1-160000.2.2", true, "a hyphenated package name that would defeat a hyphen-split heuristic"},
 		{"pkg:rpm/suse/libwmf@0_2-7?upstream=libwmf-0_2-7.src.rpm",
 			"libwmf", "0_2-7", true, "SUSE's own mis-split of the bare product libwmf-0_2-7 (D126): the helper returns what the purl says; the caller names a bare id by its product_id instead"},
+		// QA 2026-11-02: the epoch rides in a qualifier, not the @version,
+		// and the installed build carries it first ("1:1.24.1-150600.3.1"),
+		// so it is prefixed. Liberty Linux's shape today; SLES's the day it
+		// ships a package with an Epoch.
+		{"pkg:rpm/suse/pgbouncer@1.24.1-150600.3.1?arch=x86_64&epoch=1&upstream=pgbouncer-1.24.1-150600.3.1.src.rpm",
+			"pgbouncer", "1:1.24.1-150600.3.1", true, "a non-zero epoch qualifier is prefixed, as rpmdb spells the installed build"},
+		{"pkg:rpm/suse/xz@5.6.2-1.1?epoch=0&upstream=xz-5.6.2-1.1.src.rpm", "xz", "5.6.2-1.1", true,
+			"a zero epoch is the one rpmdb omits, so it is omitted here too"},
+		{"pkg:rpm/suse/kernel-coco-6.4.0-15061.9.coco15sp6.1@?epoch=1", "kernel-coco-6.4.0-15061.9.coco15sp6.1", "", true,
+			"D131's shape keeps its empty version: an epoch is never prefixed onto nothing, so the split rule still sees \"\""},
+		{"pkg:rpm/suse/xz?upstream=xz.src.rpm", "xz", "", true,
+			"no '@' at all, unmeasured on this feed: a well-formed purl naming a package with no version, read as the bare shape above rather than refused"},
 		{"", "", "", false, "no purl at all (the java-1_7_0-openjdk gap, D77 research)"},
 		{"pkg:deb/debian/xz@5.6.2-1", "", "", false, "a different ecosystem's purl shape"},
 		{"not-a-purl-at-all", "", "", false, ""},
