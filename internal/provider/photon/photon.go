@@ -262,18 +262,48 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 // freshness for a mirror serving a stale snapshot, the exact over-claim D12
 // exists to prevent) is accepted here rather than failing the build the way
 // SUSE's provider does for a hazard that measurement found to be real there.
+//
+// The fetch is retried through a transient failure (fedora.fetchPageRetrying's
+// shape, with this package's own retryable -- see retry.go for the 404
+// deviation and its reason). Each retry is announced on Progress with the
+// url, what went wrong and the attempt number, so a nightly's log shows a
+// rescued build as well as a failed one.
 func (p *Provider) fetchMajor(ctx context.Context, url string) (rows []row, when time.Time, haveHeader bool, err error) {
+	var lastErr error
+	for attempt := 1; attempt <= fetchAttempts; attempt++ {
+		if attempt > 1 {
+			if err := sleepOrDone(ctx, fetchBackoff(attempt-1)); err != nil {
+				return nil, time.Time{}, false, err
+			}
+			fmt.Fprintf(p.progress, "photon: %v; retrying (attempt %d of %d)\n", lastErr, attempt, fetchAttempts)
+		}
+		rows, when, haveHeader, status, err := p.fetchMajorOnce(ctx, url)
+		if err == nil {
+			return rows, when, haveHeader, nil
+		}
+		lastErr = err
+		if !retryable(err, status) {
+			return nil, time.Time{}, false, err
+		}
+	}
+	return nil, time.Time{}, false, fmt.Errorf("after %d attempts: %w", fetchAttempts, lastErr)
+}
+
+// fetchMajorOnce is one attempt at one major's file. It returns the HTTP
+// status alongside the error so fetchMajor can classify without parsing a
+// message; status is 0 when the request never produced a response.
+func (p *Provider) fetchMajorOnce(ctx context.Context, url string) (rows []row, when time.Time, haveHeader bool, status int, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, time.Time{}, false, err
+		return nil, time.Time{}, false, 0, err
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return nil, time.Time{}, false, fmt.Errorf("fetch %s: %w", url, err)
+		return nil, time.Time{}, false, 0, fmt.Errorf("fetch %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, time.Time{}, false, fmt.Errorf("fetch %s: %s", url, resp.Status)
+		return nil, time.Time{}, false, resp.StatusCode, fmt.Errorf("fetch %s: %s", url, resp.Status)
 	}
 
 	if lm := resp.Header.Get("Last-Modified"); lm != "" {
@@ -286,7 +316,7 @@ func (p *Provider) fetchMajor(ctx context.Context, url string) (rows []row, when
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
-		return nil, time.Time{}, false, fmt.Errorf("decode %s: %w", url, err)
+		return nil, time.Time{}, false, resp.StatusCode, fmt.Errorf("decode %s: %w", url, err)
 	}
-	return rows, when, haveHeader, nil
+	return rows, when, haveHeader, resp.StatusCode, nil
 }
