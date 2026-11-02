@@ -12,14 +12,18 @@
   않고 아무것도 waive 하지 않으며, 보고서의 provenance 에는 `ignoreFile.path: "none"` 이 기록됩니다.
   발견(discovery)은 스캔을 실행한 디렉터리를 읽으므로, 직접 작성하지 않은 checkout 을 스캔하면 그
   checkout 이 들고 있는 waiver 목록 아래서 실행됐고, 유일한 탈출구는 `ignore: []` 라고 적힌 파일이었습니다.
-  "발견" 을 뜻하던 빈 `--config` 값(`--config=`)은 이제 parse 단계에서 `none` 을 안내하는 메시지와 함께
-  거부됩니다. (QA 2026-11-02 P3 #23)
+  (QA 2026-11-02 P3 #23)
+
+### Changed
+- 빈 `--config` 값(`--config=`, `--config ""`)은 parse 단계에서 `none` 을 안내하는 메시지와 함께 거부됩니다.
+  전에는 조용히 "발견" 을 뜻했습니다. 그 자리에 비어 있는 변수를 넘기던 잡은 이제 작업 디렉터리의 `.assay.yaml`
+  아래서 스캔하는 대신 exit 2 로 끝납니다. (QA 2026-11-02 P3 #23)
 
 ### Fixed
 - `--fail-on-incomplete` / `--fail-on-incomplete=target` 판정은 exit 2 와 함께 stderr 에 개수와 발동한
   플래그 형태를 담은 `error:` 줄을 출력합니다 --
   `error: N package(s) not evaluated and M check(s) incomplete (--fail-on-incomplete)` 또는
-  `error: N package(s) or manifest(s) of the target itself not evaluated
+  `error: N package(s), check(s) or manifest(s) of the target itself could not be evaluated
   (--fail-on-incomplete=target)`. 그런 줄이 없는 유일한 exit 2 였고, 비공개 reason 으로 쓰이던 provenance
   sidecar 의 `run.error` 는 `=target` 이 발동했을 때도 `--fail-on-incomplete` 라고 적었습니다. 이제
   sidecar 는 다른 모든 exit 2 처럼 출력된 줄을 기록합니다. stdout 과 exit 코드는 그대로입니다.

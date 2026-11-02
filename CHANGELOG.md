@@ -12,14 +12,19 @@ All notable changes to this project are documented here. The format follows
   the working directory and nothing is waived, and the report's provenance records
   `ignoreFile.path: "none"`. Discovery reads the directory the scan runs from, so a scan of a
   checkout you did not author ran under whatever waiver list it carried, and the only opt-out
-  was a file saying `ignore: []`. An empty `--config` value (`--config=`), which used to mean
-  "discover", is refused at parse with a message naming `none`. (QA 2026-11-02 P3 #23)
+  was a file saying `ignore: []`. (QA 2026-11-02 P3 #23)
+
+### Changed
+- An empty `--config` value (`--config=`, `--config ""`) is refused at parse with a message
+  naming `none`; it used to mean "discover", silently. A job that passes an unset variable
+  there now exits 2 instead of scanning under whatever `.assay.yaml` the working directory
+  holds. (QA 2026-11-02 P3 #23)
 
 ### Fixed
 - The `--fail-on-incomplete` / `--fail-on-incomplete=target` verdict prints an `error:` line on
   stderr beside its exit 2, naming the counts and the flag form that fired --
   `error: N package(s) not evaluated and M check(s) incomplete (--fail-on-incomplete)` or
-  `error: N package(s) or manifest(s) of the target itself not evaluated
+  `error: N package(s), check(s) or manifest(s) of the target itself could not be evaluated
   (--fail-on-incomplete=target)`. It was the one exit 2 with no such line, and the provenance
   sidecar's `run.error` for it, written from a private reason, said `--fail-on-incomplete` even
   when `=target` had fired; the sidecar now records the printed line like every other exit 2.

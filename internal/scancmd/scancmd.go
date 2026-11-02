@@ -960,7 +960,11 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 	if flag := incompleteGate(opts, sum); flag != "" {
 		switch flag {
 		case "--fail-on-incomplete=target":
-			fmt.Fprintf(stderr, "error: %d package(s) or manifest(s) of the target itself not evaluated (%s)\n",
+			// TargetIncomplete counts every skip with the target's cause,
+			// whole packages, advisory-scoped checks and unread manifests
+			// alike (report.Summary), so the line names all three units
+			// rather than claiming a package count it does not have.
+			fmt.Fprintf(stderr, "error: %d package(s), check(s) or manifest(s) of the target itself could not be evaluated (%s)\n",
 				sum.TargetIncomplete, flag)
 		default:
 			fmt.Fprintf(stderr, "error: %d package(s) not evaluated and %d check(s) incomplete (%s)\n",
