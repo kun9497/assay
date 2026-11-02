@@ -103,6 +103,11 @@ func TestLoadTargets_NameMustBeAPlainFileName(t *testing.T) {
 		{"parent dir", ".."},
 		{"current dir", "."},
 		{"forward slash", "a/b"},
+		// The row that holds isPlainFileName's separator clause, on Linux:
+		// filepath.Base leaves "a\b" whole there, so only the explicit check
+		// refuses it. On Windows Base strips both separators and the clause
+		// is an equivalent -- a mutation dropping it survives this file on a
+		// Windows checkout and is caught on the CI runner.
 		{"backslash", `a\b`},
 		{"absolute", "/abs"},
 		{"trailing slash", "name/"},
