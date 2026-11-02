@@ -16,6 +16,19 @@
   `ERROR` 행은 다른 카운터처럼 `0 0` 을 찍습니다. trivy 비교는 bridge 하지 않으므로 그대로입니다.
 
 ### Fixed
+- 두 CSAF reader 모두 leaf purl 의 `epoch=N` qualifier 를 저장되는 fixed 버전에 `N:version-release`
+  로 실어 나릅니다 -- rpmdb 카탈로거가 설치된 빌드를 쓰는 모양입니다. Red Hat 의 Hummingbird
+  reader(D98)는 purl 의 `@version` 만 취하고 `?` 에서 멈췄으므로 nginx(epoch 2)와 tomcat10/11(epoch
+  1)은 설치된 모든 빌드가 그 위로 정렬되는 epoch 없는 버전에서 fixed 로 저장됐고, 취약한 빌드가
+  깨끗하다고 보고됐습니다 -- 최신 live 문서 160개의 Hummingbird purl 403종 중 67종, 주간 차등이
+  스캔하는 바로 그 이미지에서입니다(QA 2026-11-02 #4, P1). Hummingbird reader 가 복사해 온 SUSE 의
+  reader(D77)에도 같은 결함이 있었는데, 그 아카이브의 epoch qualifier 가 붙은 purl 은 전부 키 fold 가
+  거절하는 Liberty Linux 빌드라 잠복해 있었습니다(#5, P3). 이제 둘 다 purl 을 `pkgmeta.ParsePURL` 과
+  `pkgmeta.EVROf` 로 읽습니다 -- D83 이후 스캔 쪽이 SBOM purl 에 적용해 온 규칙입니다: 0 이거나 없는
+  epoch 는 붙지 않고, 빈 버전에는 절대 붙지 않으며, 버전 없는 SUSE 빌드를 쪼개는 D131 은 그대로입니다.
+  각 provider 의 진행 줄이 epoch 를 가진 fixed 항목을 셉니다(`HummingbirdFixedWithEpoch`,
+  `RecommendedWithEpoch`). 발행된 아티팩트의 Hummingbird nginx/tomcat 레코드는 다음 야간 빌드가
+  다시 만들 때까지 틀린 채입니다.
 - SBOM 의 deb 와 rpm 패키지가 이미지의 것처럼 SOURCE 버전으로 판정됩니다. 두 리더 모두 purl 의
   `upstream` qualifier 에서 source 이름만 남기고 버전을 버렸습니다 -- deb 의
   `util-linux@2.38.1-5+deb12u2` 는 `@` 뒤 절반을 잃었고, rpm 의 `httpd-2.4.62-1.fc40.src.rpm` 은

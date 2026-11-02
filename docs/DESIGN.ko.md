@@ -1043,7 +1043,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       막는 `Pacman{}` comparer(측정된 tensorflow `2.4.0rc4` 미탐)
 - [x] Hummingbird (D98) — Red Hat의 강화 라인이고, assay가 이미 받아오는 CSAF
       피드에서 추출함: CPE 범위, purl로 읽음(stream label이 갈라짐), 맨 rolling
-      키; 첫날 차등이 grype 전용 튜플 전부를 grype 자신의 낡은 스냅샷으로 추적함
+      키; 첫날 차등이 grype 전용 튜플 전부를 grype 자신의 낡은 스냅샷으로 추적함.
+      QA 2026-11-02 개정: purl 의 `epoch=` qualifier 가 fixed 버전에 닿음(epoch 2 의
+      nginx, epoch 1 의 tomcat 이 깨끗하다고 판정됐었음), 두 CSAF reader 모두
 - [x] Bitnami (D99) — 남의 배포판 위에 올라탄 애플리케이션 레이어: purl-type
       라우팅, 리비전을 벗겨내는 SemVer wrapper, 그리고 D84의 SPDX 리더를
       재사용하는 마커 cataloger; 첫날 차등 497/497에 agree 485, 이중 인벤토리를

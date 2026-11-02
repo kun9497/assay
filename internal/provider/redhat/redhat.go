@@ -334,6 +334,7 @@ func (s stats) String() string {
 			"%d non-mainline products, %d container images, "+
 			"%d products with no CPE, %d whole-product entries naming no package, "+
 			"%d unreadable products, %d Hummingbird components with no readable purl, "+
+			"%d Hummingbird fixed builds carrying an epoch, "+
 			"%d documents with no CVE id, "+
 			"%d unreadable documents; delta: %d changed since the archive, "+
 			"%d fetched, %d already withdrawn, %d yielded a record, "+
@@ -345,7 +346,8 @@ func (s stats) String() string {
 		s.UnfixableBothReasons, s.RemediationGrouped,
 		s.SkippedModule, s.SkippedFlatpak, s.SkippedModuleContext,
 		s.SkippedNonRHEL, s.SkippedImage,
-		s.SkippedNoCPE, s.SkippedWholeProduct, s.SkippedBadProduct, s.SkippedNoPurl, s.SkippedNoCVE, s.SkippedBadDoc,
+		s.SkippedNoCPE, s.SkippedWholeProduct, s.SkippedBadProduct, s.SkippedNoPurl,
+		s.HummingbirdFixedWithEpoch, s.SkippedNoCVE, s.SkippedBadDoc,
 		s.DeltaListed, s.DeltaFetched, s.DeltaGone, s.DeltaAdvisories,
 		s.DeltaRetried, s.DeltaRescued, s.ArchiveSuperseded, s.ArchiveNewerThanDelta)
 }

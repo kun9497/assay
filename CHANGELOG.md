@@ -17,6 +17,21 @@ All notable changes to this project are documented here. The format follows
   like its other counters. The trivy comparison does not bridge and is unchanged.
 
 ### Fixed
+- Both CSAF readers carry a leaf purl's `epoch=N` qualifier into the stored fixed version as
+  `N:version-release`, the shape the rpmdb cataloger writes for an installed build. Red Hat's
+  Hummingbird reader (D98) took the purl's `@version` alone and stopped at the `?`, so nginx
+  (epoch 2) and tomcat10/11 (epoch 1) were stored fixed at an epoch-less version that every
+  installed build sorts above, and a vulnerable build was reported clean -- 67 of the 403
+  distinct Hummingbird purls in the 160 newest live documents, on the image the weekly
+  differential scans (QA 2026-11-02 #4, P1). SUSE's reader (D77), which the Hummingbird one
+  was copied from, had the identical gap, latent because every epoch-qualified purl in its
+  archive is a Liberty Linux build the key fold refuses (#5, P3). Both now read the purl
+  through `pkgmeta.ParsePURL` and `pkgmeta.EVROf`, the rule the scan side has applied to SBOM
+  purls since D83: a zero or absent epoch stays unprefixed, an empty version never gains one,
+  and D131's split of a version-less SUSE build is unchanged. Each provider's progress line
+  counts the epoch-carrying fixed entries (`HummingbirdFixedWithEpoch`, `RecommendedWithEpoch`).
+  The published artifact's Hummingbird nginx and tomcat records stay wrong until the next
+  nightly rebuilds it.
 - An SBOM's deb and rpm packages are judged on their SOURCE version, as the image's are. Both
   readers kept the source name from the purl's `upstream` qualifier and dropped the version --
   deb's `util-linux@2.38.1-5+deb12u2` lost its `@` half, rpm's `httpd-2.4.62-1.fc40.src.rpm`

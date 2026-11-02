@@ -3147,6 +3147,22 @@ no reason** — the inverse of Red Hat, where unstated is zero. `--fail-on-unfix
 on SUSE, but `=wont-fix` catches only the 201 entries SUSE bothered to classify; the README
 says so next to the feature.
 
+**Revised (QA 2026-11-02).** `packageOf` discarded a purl's `epoch` qualifier. `purlRE` read
+`pkg:rpm/suse/<name>@<version>` and stopped at the `?`, so an `epoch=N` qualifier never reached
+the stored fixed version while the rpmdb cataloger writes the installed build `N:version-release`
+and `version.RPM` orders the epoch first — the fix sorted below every installed build. Latent on
+this feed: every one of the 10,031 epoch-qualified purls in the archive is a Liberty Linux build
+`foldKey` refuses, but it is one SLES package with an Epoch away from the P1 the same gap was
+live as on Hummingbird (D98's reader was copied from this one). `packageOf` now reads the purl
+through `pkgmeta.ParsePURL` and takes the version from `pkgmeta.EVROf`, the rule the scan side
+has applied to SBOM purls since D83: a non-zero epoch is prefixed `epoch:`, a zero or absent one
+is not (rpmdb's `evr()` omits it the same way), an empty version never gains one. A purl with no
+`@` at all, which the regex refused, reads as a bare package — unmeasured on this feed, and the
+statement D47 already reads from a Red Hat bare purl. `RecommendedWithEpoch` counts epoch-carrying
+recommended ids on a folding key on the progress line, so the day SLES ships one is visible in the
+nightly rather than in a differential. Held by `TestConvert_EpochQualifierReachesTheFixedVersion`
+and, through the real store and matcher, `TestEpoch_InstalledBuildBelowTheFixIsAffected`.
+
 ---
 
 ### D78 — AL2's extras topics, enumerated rather than hardcoded
@@ -3909,6 +3925,27 @@ line that rebuilds on fix means a current image sits at-or-above every fix, and 
 2026-08-25 snapshot still carries the pre-fix no-fix rows. assay's smaller answer is the
 correct one, verified against the feed itself. Independent review mutations 3/3 red
 (CPE→mainline key, fabricated package on missing purl, VERSION_ID fragmentation).
+
+**Revised (QA 2026-11-02).** The purl's `epoch` qualifier was discarded, and the differential
+above could not see it. `hummingbirdPurlRE` took the `@version` and stopped at the `?`, so the
+live documents' `pkg:rpm/redhat/nginx@1.30.4-2.hum1?arch=x86_64&epoch=2&…` (cve-2026-42533,
+-56434, -60005) stored the fix as `1.30.4-2.hum1`, while the rpmdb cataloger writes the installed
+build `2:1.30.4-1.hum1` (header.go's `evr()`; only Azure Linux and Photon keys drop the epoch,
+D153) and `version.RPM` orders the epoch first: `Compare("2:1.30.4-1.hum1", "1.30.4-2.hum1")`
+is 1, so every vulnerable epoch-carrying build — 67 of the 403 distinct Hummingbird purls in the
+160 newest documents, nginx* at epoch 2 and tomcat10/11 at epoch 1 — was reported clean, on
+exactly the image the weekly differential scans (quay.io/hummingbird/nginx:1.30.4). The reader
+now parses the purl with `pkgmeta.ParsePURL` and takes the version from `pkgmeta.EVROf`, the
+rule the scan side has applied to SBOM purls since D83: a non-zero epoch is prefixed `epoch:`, a
+zero or absent one is not, a bare purl keeps its empty version. `HummingbirdFixedWithEpoch`
+counts the entries on the progress line. Held by
+`TestConvert_HummingbirdEpochQualifierReachesTheFixedVersion` (the mainline entry in the same
+document, whose NEVRA spells its epoch inline, does not count) and, through the real store and
+matcher, `TestHummingbirdEpoch_InstalledBuildBelowTheFixIsAffected`: `2:1.30.4-1.hum1` is told
+the fix, `2:1.30.4-2.hum1` is clean. The published artifact's Hummingbird nginx and tomcat
+records are wrong until the next nightly rebuilds it; grype-only tuples on the `hummingbird`
+target in the weekly diff are the trace to look for. SUSE's reader, which this one was copied
+from, had the identical gap (D77's revision of the same date).
 
 ---
 
@@ -5755,6 +5792,17 @@ would land in `RecommendedEmptyVersionKept`, visible on the progress line, and k
 behaviour. Confidential Computing module builds of qemu/ovmf are still judged by the codestream
 range (pre-existing). Whether the module's builds are ever installed where assay scans is not
 known — the beneficiary is a host or VM SBOM, not a container image.
+
+**Revised (QA 2026-11-02).** `packageOf`, the purl reader this rule sits behind, moved from a
+regex to `pkgmeta.ParsePURL` + `pkgmeta.EVROf` so a purl's `epoch` qualifier reaches the fixed
+version (D77's revision of the same date). The split rule is untouched: `ParsePURL` leaves
+`pkg:rpm/suse/kernel-coco-6.4.0-15061.9.coco15sp6.1@` with the whole NEVR as its name and an
+empty version, and `EVROf` never prefixes an epoch onto an empty version, so `resolveProduct`
+sees the same `""` it always did and splits as before. A split build's version comes from the
+product_id, which carries no epoch, so it never reaches the new `RecommendedWithEpoch` counter
+either. `TestPackageOf` holds the row (`…coco15sp6.1@?epoch=1` → empty version); the D131 suite
+is unchanged and green. Left open: a split build whose purl carried a non-zero epoch would lose
+it, since the product_id has nowhere to spell one — none of the 16,736 does.
 
 ### The 2026-10-22 external review — six conditional defects, all reproduced, all fixed
 
