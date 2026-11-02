@@ -31,6 +31,34 @@ All notable changes to this project are documented here. The format follows
   times and the job then reported the artifact "pushed and UNSIGNED" about a name nothing was
   pushed under. `internal/ciguard` now holds every step that maps a step output into `env` to
   such a first-line check, and to a producer declared earlier in the same job.
+- The nightly publish's `seed` input reaches the build through `env`, not by expression
+  substitution into the script text, and is refused before anything is built unless it is
+  `ghcr.io/kun9497/assay-db@sha256:<64 hex>` or `ghcr.io/kun9497/assay-db:<tag>`, the error
+  naming both forms. Before, the dispatcher-written value was rendered into the Build step's
+  command line in a job whose later steps hold the signing key -- the rule `db-sign.yml` had
+  stated since D137 and `db-backfill.yml` followed -- and the input's description asked for "a
+  ghcr digest", which a bare `sha256:<hex>` satisfies and go-containerregistry parses as the
+  Docker Hub tag `index.docker.io/library/sha256:<hex>`, so a D110 recovery dispatched that way
+  failed an hour in. `internal/ciguard` now refuses an expression that reads an input inside
+  any workflow's `run:` block. (QA 2026-11-02 #16, #17)
+- The alert job of the publish, sign and backfill workflows reads a status job that did not
+  succeed -- failed, or cancelled by its timeout or by hand -- as a failure. Before, only
+  `failure` counted, so a watched job that passed and a status job that hung until GitHub's
+  360-minute cancellation (it had no `timeout-minutes`) reached `scripts/ops-alert.sh` as a
+  success, which closed and unpinned the failure issue although `status.json` was never
+  refreshed, while the script's own header says a cancelled job is a failure. The three status
+  jobs carry `timeout-minutes: 15`, and `internal/ciguard` holds every alert job's `RESULT`
+  expression and every status job's timeout. (QA 2026-11-02 #19)
+
+### Changed
+- The nightly publish is scheduled at `17 5 * * *` (05:17 UTC) and the weekly scanner
+  differential at `23 20 * * 0` (Sunday 20:23 UTC), off minute 0 where GitHub's queue is
+  longest: every one of the twenty nightlies from 2026-10-13 to 11-02 on `0 6 * * *` started
+  4.2 to 7.6 hours late (10:12Z to 13:38Z), and the weekly on `0 21 * * 0` 2 to 3.5 hours late
+  (22:57Z to 00:30Z), leaving the Monday review routine about fifty minutes of margin. The
+  hours are pulled forward so a run that is still late lands where the old one did; the
+  expected start windows are recorded in `docs/DESIGN.md` next to `status.json`, and the
+  weekly's comment no longer claims "Monday 06:00 KST". (QA 2026-11-02 #18)
 
 ## [0.14.0] - 2026-11-02
 
