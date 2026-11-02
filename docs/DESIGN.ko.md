@@ -735,7 +735,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] SBOM의 rpm과 deb purl (D83) — 이미지 경로가 쓰는 것과 같은 Distro.Ecosystem()으로
       키를 잡고, epoch는 자신의 qualifier에서 복원; rockylinux:9는 SBOM과 이미지가
       finding 169건으로 일치하고, 최신 syft SBOM은 더 이상
-      --fail-on-incomplete=target에 걸리지 않음
+      --fail-on-incomplete=target에 걸리지 않음; QA 2026-11-02 부터는 `upstream` qualifier 의
+      source 버전도 유지(deb 의 `@` 뒤 절반, rpm 의 SRPM version-release)하므로 SBOM 의
+      바이너리도 이미지의 것처럼 source 버전으로 판정
 - [x] SPDX 2.2/2.3 JSON (D84) — 공유 purl core가 syft와 Red Hat 벤더 SBOM을 똑같이
       읽음(repository_id, rpmmod, arch=src); rocky9는 SPDX와 CycloneDX가 동일하게
       스캔되고, Red Hat 자신의 ubi9-micro SBOM은 20/20으로 키가 잡힘
@@ -978,7 +980,8 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] 이미지의 rpm source 조회가 SRPM 의 EVR 을 주 패키지의 epoch 와 함께 비교 (D153, 감사 A4) —
       없으면 SRPM 버전의 형제들 중 가장 흔한 epoch, 다음은 다른 빌드의 같은 이름 패키지, 그것도 없으면
       바이너리의 것; Azure Linux 와 Photon 키에는 epoch 없음; ubi9/perl-532 오탐
-      −342, ubi8/nodejs-18 −46, 추가 없음
+      −342, ubi8/nodejs-18 −46, 추가 없음; QA 2026-11-02 부터 같은 패스가 SBOM 의 rpm 패키지에도
+      돌아(`decodeSBOM`) httpd 옆의 mod_ssl 이 두 리더 모두에서 httpd 를 통해 발견됨
 - [x] 같은 버전에서는 닫는 이벤트가 여는 이벤트보다 먼저 정렬되고, 한 버전에서 열리고 닫히는 창은 따로
       판정 (D154, 감사 A7) — 뒤 창을 먼저 적은 range 가 앞 창이 닫히는 버전에서 그 창을 닫아 버리지
       않음; 공개 데이터베이스의 동률 range 전체에 대한 판정 2,892 건이 그대로

@@ -768,7 +768,9 @@ exited 0 while 24 findings went unmentioned.
 - [x] rpm and deb purls from SBOMs (D83) — keyed through the same Distro.Ecosystem() the
       image path uses, epoch restored from its qualifier; a rockylinux:9 SBOM and the
       image agree at 169 findings, and modern syft SBOMs stop tripping
-      --fail-on-incomplete=target
+      --fail-on-incomplete=target; since QA 2026-11-02 the `upstream` qualifier's source
+      VERSION is kept too (deb's `@` half, rpm's SRPM version-release), so an SBOM's
+      binary is judged on its source's version as the image's is
 - [x] SPDX 2.2/2.3 JSON (D84) — the shared purl core reads syft and Red Hat vendor SBOMs
       alike (repository_id, rpmmod, arch=src); rocky9 SPDX and CycloneDX scan
       identically, and Red Hat's own ubi9-micro SBOM keys 20/20
@@ -1027,7 +1029,9 @@ exited 0 while 24 findings went unmentioned.
 - [x] An image's rpm source lookup compares the SRPM's EVR, with the main package's epoch
       (D153, audit A4) — else the most common epoch among siblings at the SRPM version, else
       the same-name package of another build, else the binary's; no epoch on Azure Linux and
-      Photon keys; ubi9/perl-532 −342 and ubi8/nodejs-18 −46 false positives, none added
+      Photon keys; ubi9/perl-532 −342 and ubi8/nodejs-18 −46 false positives, none added;
+      since QA 2026-11-02 the same pass runs over an SBOM's rpm packages (`decodeSBOM`), so
+      mod_ssl beside httpd is found through httpd on both readers
 - [x] At the same version a close sorts before an open, and a window that opens and closes
       at one version is judged on its own (D154, audit A7) — a range listing a later window
       first no longer shuts it at the version the earlier one closes; 2,892 judgments over

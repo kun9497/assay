@@ -642,9 +642,10 @@ func TestRun_TableColumnsKeepDirection(t *testing.T) {
 	if rowLine == "" {
 		t.Fatalf("no table row for target; stdout=%q", stdout.String())
 	}
-	// Positional, not presence: ASSAY GRYPE AGREE ONLY_ASSAY ONLY_GRYPE
-	// NOTEVAL. Presence alone would pass with the columns traded.
-	want := []string{"direction", "2", "3", "1", "1", "2", "0", "ok"}
+	// Positional, not presence: ASSAY GRYPE A_BRIDGED G_BRIDGED AGREE
+	// ONLY_ASSAY ONLY_GRYPE NOTEVAL. Presence alone would pass with the
+	// columns traded.
+	want := []string{"direction", "2", "3", "0", "0", "1", "1", "2", "0", "ok"}
 	if got := strings.Fields(rowLine); !slices.Equal(got, want) {
 		t.Errorf("row = %v, want %v", got, want)
 	}
@@ -1003,6 +1004,132 @@ func TestRun_Offline_BridgeRecoversABareAdvisoryJoin(t *testing.T) {
 	got := run([]string{"-targets", targetsPath, "-offline", dir}, &stdout, &stderr, noExec(t))
 	if got != exitOK {
 		t.Fatalf("exit = %d, want %d -- the bridged advisory join must satisfy minAgree (stderr=%q)", got, exitOK, stderr.String())
+	}
+}
+
+// --- the bridge split: A_BRIDGED / G_BRIDGED ---------------------------------
+//
+// Measured 2026-10-13 on wolfi: ASSAY rose 46 -> 74 while assay's own tuples
+// fell 45 -> 41, because 33 grype tuples were bridged INTO assay's set as
+// grype's database grew. A maxFindings breach on a bridged target can
+// therefore be the comparison tool's growth, not assay's, and the Monday
+// review had to measure the split by hand. The table now prints it: A_BRIDGED
+// is how many tuples the bridge added into assay's set, G_BRIDGED into grype's.
+// No floor or ceiling changes meaning -- the columns are read, not judged.
+
+// bridgeSplitHeader is the whole header line, in order. Positional, not
+// presence: a header that still names every column but in another order, or
+// one that gained the names while the rows did not gain the values, both have
+// to fail here.
+var bridgeSplitHeader = []string{"TARGET", "ASSAY", "GRYPE", "A_BRIDGED", "G_BRIDGED", "AGREE", "ONLY_ASSAY", "ONLY_GRYPE", "NOTEVAL", "VERDICT"}
+
+// headerFields returns the table's first line split into fields.
+func headerFields(t *testing.T, stdout string) []string {
+	t.Helper()
+	for line := range strings.Lines(stdout) {
+		if f := strings.Fields(line); len(f) > 0 {
+			return f
+		}
+	}
+	t.Fatalf("no table header; stdout=%q", stdout)
+	return nil
+}
+
+// TestRun_Offline_BridgeSplit_IntoAssay: grype falls back bare on
+// DSA-2026-7001 (no CVE anywhere in its match) while assay's finding names
+// that advisory in upstream beside the CVE it extracted. The bridge adds the
+// bare tuple into assay's set and nothing into grype's: A_BRIDGED 1,
+// G_BRIDGED 0. ASSAY (2) is one larger than assay's own tuple count (1) --
+// exactly the wolfi shape, now readable from the row.
+func TestRun_Offline_BridgeSplit_IntoAssay(t *testing.T) {
+	target := Target{Name: "split-into-assay", Ref: "unused-in-offline-mode", MinAgree: 1, MinFindings: 1, MaxFindings: 5}
+	targetsPath := writeTargetsFile(t, []Target{target})
+	dir := t.TempDir()
+	writeOffline(t, dir, map[string][]byte{
+		"split-into-assay.assay.json": assayDoc(0, []assayFinding{
+			{Package: assayPackage{Name: "libtiff6"}, Advisory: assayAdvisory{ID: "OSV-TIFF-1", Upstream: []string{"CVE-2026-70010", "DSA-2026-7001"}}},
+		}),
+		"split-into-assay.grype.json": grypeDoc([]grypeMatch{
+			{Artifact: grypeArtifact{Name: "libtiff6", Type: "deb"}, Vulnerability: grypeVuln{ID: "DSA-2026-7001"}},
+		}),
+	})
+
+	var stdout, stderr bytes.Buffer
+	got := run([]string{"-targets", targetsPath, "-offline", dir}, &stdout, &stderr, noExec(t))
+	if got != exitOK {
+		t.Fatalf("exit = %d, want %d (stderr=%q)", got, exitOK, stderr.String())
+	}
+	if h := headerFields(t, stdout.String()); !slices.Equal(h, bridgeSplitHeader) {
+		t.Errorf("header = %v, want %v", h, bridgeSplitHeader)
+	}
+	// TARGET ASSAY GRYPE A_BRIDGED G_BRIDGED AGREE ONLY_ASSAY ONLY_GRYPE NOTEVAL VERDICT
+	want := []string{"split-into-assay", "2", "1", "1", "0", "1", "1", "0", "0", "ok"}
+	if f := rowFields(t, stdout.String(), "split-into-assay"); !slices.Equal(f, want) {
+		t.Errorf("row = %v, want %v", f, want)
+	}
+}
+
+// TestRun_Offline_BridgeSplit_IntoGrype is the reverse direction: assay falls
+// back bare on FEDORA-2026-eeee while grype names it in advisories[] beside
+// its CVE. A_BRIDGED 0, G_BRIDGED 1 -- the two counters must not trade places,
+// which a fixture bridging one tuple each way could never show.
+func TestRun_Offline_BridgeSplit_IntoGrype(t *testing.T) {
+	target := Target{Name: "split-into-grype", Ref: "unused-in-offline-mode", MinAgree: 1, MinFindings: 1, MaxFindings: 5}
+	targetsPath := writeTargetsFile(t, []Target{target})
+	dir := t.TempDir()
+	writeOffline(t, dir, map[string][]byte{
+		"split-into-grype.assay.json": assayDoc(0, []assayFinding{
+			{Package: assayPackage{Name: "vim-data"}, Advisory: assayAdvisory{ID: "FEDORA-2026-eeee"}},
+		}),
+		"split-into-grype.grype.json": grypeDoc([]grypeMatch{
+			{Artifact: grypeArtifact{Name: "vim-data", Type: "rpm"}, Vulnerability: grypeVuln{
+				ID: "CVE-2026-70020", Advisories: []grypeAdvisory{{ID: "FEDORA-2026-eeee"}}}},
+		}),
+	})
+
+	var stdout, stderr bytes.Buffer
+	got := run([]string{"-targets", targetsPath, "-offline", dir}, &stdout, &stderr, noExec(t))
+	if got != exitOK {
+		t.Fatalf("exit = %d, want %d (stderr=%q)", got, exitOK, stderr.String())
+	}
+	want := []string{"split-into-grype", "1", "2", "0", "1", "1", "0", "1", "0", "ok"}
+	if f := rowFields(t, stdout.String(), "split-into-grype"); !slices.Equal(f, want) {
+		t.Errorf("row = %v, want %v", f, want)
+	}
+}
+
+// TestRun_Offline_BridgeSplit_NoBareIDs: both sides speak CVE for every
+// tuple, so the bridge has nothing to add and both columns read 0 -- and an
+// ERROR row prints 0 0 like every other counter rather than leaving the
+// columns out.
+func TestRun_Offline_BridgeSplit_NoBareIDs(t *testing.T) {
+	targets := []Target{
+		{Name: "split-none", Ref: "unused-in-offline-mode", MinAgree: 1, MinFindings: 1, MaxFindings: 5},
+		{Name: "split-missing", Ref: "unused-in-offline-mode"},
+	}
+	targetsPath := writeTargetsFile(t, targets)
+	dir := t.TempDir()
+	writeOffline(t, dir, map[string][]byte{
+		"split-none.assay.json": assayDoc(0, []assayFinding{
+			{Package: assayPackage{Name: "zlib"}, Advisory: assayAdvisory{ID: "OSV-Z-1", Aliases: []string{"CVE-2026-70030"}}},
+		}),
+		"split-none.grype.json": grypeDoc([]grypeMatch{
+			{Artifact: grypeArtifact{Name: "zlib", Type: "apk"}, Vulnerability: grypeVuln{ID: "CVE-2026-70030"}},
+		}),
+	})
+
+	var stdout, stderr bytes.Buffer
+	got := run([]string{"-targets", targetsPath, "-offline", dir}, &stdout, &stderr, noExec(t))
+	if got != exitError {
+		t.Fatalf("exit = %d, want %d for the target with no capture (stderr=%q)", got, exitError, stderr.String())
+	}
+	want := []string{"split-none", "1", "1", "0", "0", "1", "0", "0", "0", "ok"}
+	if f := rowFields(t, stdout.String(), "split-none"); !slices.Equal(f, want) {
+		t.Errorf("row = %v, want %v", f, want)
+	}
+	wantErr := []string{"split-missing", "0", "0", "0", "0", "0", "0", "0", "0", "ERROR"}
+	if f := rowFields(t, stdout.String(), "split-missing"); !slices.Equal(f, wantErr) {
+		t.Errorf("ERROR row = %v, want %v", f, wantErr)
 	}
 }
 
@@ -1384,7 +1511,7 @@ func TestRun_Live_AssayExitTwoOnce_RetriedAndTrusted(t *testing.T) {
 	if got != exitOK {
 		t.Fatalf("exit = %d, want %d -- a transient exit 2 followed by a clean scan is a trusted result (stderr=%q)", got, exitOK, stderr.String())
 	}
-	if f := rowFields(t, stdout.String(), "blob-flake"); f[len(f)-1] != "ok" || f[3] != "1" {
+	if f := rowFields(t, stdout.String(), "blob-flake"); f[len(f)-1] != "ok" || f[5] != "1" {
 		t.Errorf("row = %v, want verdict ok with AGREE 1 from the second attempt", f)
 	}
 	const retryLine = "retry: target=blob-flake assay scan exited 2, retrying once\n"
@@ -1743,9 +1870,9 @@ func TestRun_GrypeOnlyApp_OSTypesNeverTrip(t *testing.T) {
 	if got != exitOK {
 		t.Fatalf("exit = %d, want %d (stderr=%q)", got, exitOK, stderr.String())
 	}
-	// ONLY_GRYPE is the sixth column: the fixture must really carry seven
+	// ONLY_GRYPE is the eighth column: the fixture must really carry seven
 	// grype-only inventoried tuples, or "never trips" would hold vacuously.
-	if f := rowFields(t, stdout.String(), "app-os"); f[5] != "7" {
+	if f := rowFields(t, stdout.String(), "app-os"); f[7] != "7" {
 		t.Errorf("row = %v, want ONLY_GRYPE 7", f)
 	}
 	if stderr.Len() != 0 {
@@ -1830,7 +1957,7 @@ func TestRun_GrypeOnlyApp_CountsOnBridgedSets(t *testing.T) {
 	if strings.Contains(stderr.String(), "breach:") {
 		t.Errorf("stderr = %q, want no breach: line", stderr.String())
 	}
-	if f := rowFields(t, stdout.String(), "app-bridged"); f[5] != "0" {
+	if f := rowFields(t, stdout.String(), "app-bridged"); f[7] != "0" {
 		t.Errorf("row = %v, want ONLY_GRYPE 0", f)
 	}
 }

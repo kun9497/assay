@@ -399,6 +399,23 @@ version would break a build — and belongs with `--fail-on` in slice 4.
 **Schema version 3.** The field is part of the on-disk shape, so a database built before it
 is refused with instructions rather than read as covering nothing (D5).
 
+**Revised (QA 2026-11-02).** `db status`'s `covers:` line misread two real key spellings. It
+collapses a family's releases to `first..last (N releases)` so an operator can see whether
+the release they are about to scan is inside the range, and its release parser cut at `.`
+and required a bare number on both sides. An Ubuntu LTS key is `Ubuntu:22.04:LTS` (D53) and a
+SUSE service pack is `SLES:15.SP7` (D77), so neither minor parsed, every such release fell
+into the lexical fallback that sorts unparseable shapes last, and a real database printed
+`Ubuntu:23.10..26.04:LTS (11 releases)` and `SLES:11..15.SP7 (21 releases)` while holding
+Ubuntu 14.04:LTS through 22.04:LTS and SLES 16.0/16.1 — telling an Ubuntu 20.04 or SLES 16
+operator their release was outside it. `--output json` listed the keys verbatim and was
+right; only the table was wrong. A release is now read as a number, then optionally `.` and
+either a number or `SP` and a number, then optionally a `:`-suffix that names the release's
+kind and does not take part in the order; the lexical fallback stays for shapes that still
+do not parse (`edge`, `stream`, `rolling`), so an unexpected key remains visible rather than
+guessed at, and two spellings of one number break their tie as strings so the ends do not
+depend on sort order. The same database now prints `Ubuntu:14.04:LTS..26.04:LTS (11
+releases)` and `SLES:11..16.1 (21 releases)`; the count never changed.
+
 
 ### D21 — Verdicts: what fails a build, and what the exit code means
 
@@ -1366,6 +1383,22 @@ for data with no reading. Six mutations verified red; two survive as equivalents
 in `repair.go`: no valid apk version can contain `.r` at all, so the already-parses guard can
 never change an answer, and `Index` for `LastIndex` cannot either once the second guard
 rejects a repair that leaves a later `.r` behind.
+
+**Revised (QA 2026-11-02).** The installed-version half of this decision had a hole: the
+walk's `atLeast` resolves the `0` sentinel without a `Compare`, so an installed version no
+comparer can read -- dpkg's empty `Version`, `(none)`, a malformed string -- walked through
+every open-ended range to *affected*, with Evidence naming a comparison nobody made, and that
+hit then masked the readable sibling range's refusal. `AffectsVersion` now compares the
+installed version with itself once, before any range is walked, and refuses it with the
+target's cause (D9's skipped-with-a-count; D30's left-operand check, moved up so both paths
+share it). An entry with neither ranges nor versions is still clean without error. In the same
+pass the malformed-range guard was widened: it fired only when no event carried any bound, so a
+range of closing bounds with no `introduced` walked to a silent *not affected*; the OSV schema
+requires an `introduced` per range, and such a range is now `ErrInvalid` like the bound-less
+one. Verified at the matcher (an unreadable version against an open and a fixed advisory: two
+skips with the target's cause, no finding; a readable one is judged) and at the range (open
+only, fixed-then-open, open-then-fixed all refused; fixed-only and last_affected-only invalid;
+the open sentinel range still walks).
 
 ### D36 — Incompleteness carries a cause, and the gate can be narrowed to what you can fix
 
@@ -3318,6 +3351,31 @@ packages stream-match; older SBOMs carry nothing and D80's loud not-evaluated st
 ubi8/nodejs-18 as a syft-1.51 SBOM: module packages stream-match (5,477 findings, 2 not
 evaluated); the same image as a syft-0.84 SBOM: 8 module packages loudly not evaluated —
 the honest degradation. `--fail-on-incomplete=target` exits 0 on modern SBOMs again.
+
+**Revised (QA 2026-11-02).** "Source (D8) from the `upstream` qualifier" had kept the source's
+NAME and dropped its version, on both readers: deb's `upstream=util-linux@2.38.1-5+deb12u2`
+lost the `@` half, and rpm's `upstream=httpd-2.4.62-1.fc40.src.rpm` was stripped to `httpd`
+with `SourceRPMVersion` never called. The matcher compares a source-name lookup against
+`Source.Version` only when it has one (D41), so on SBOM input the binary's own version, epoch
+included, was compared with a source-keyed fix. Verified end to end: bsdutils
+`1:2.38.1-5+deb12u3` built from util-linux `2.38.1-5+deb12u2`, against util-linux fixed at
+`2.38.1-5+deb12u3` on Debian:12 — the image's dpkg status gave exit 1 and one finding; the same
+package as CycloneDX and as SPDX gave exit 0, no findings, no skips. The air-gapped path was the
+one that lied. Now deb keeps the version half (`ParsePURL` has decoded the epoch's colon), and
+the CycloneDX cataloger fills it from `syft:metadata:sourceVersion` when the purl named the
+source without one, never over a version the purl carries. rpm keeps the SRPM's version-release
+and the file name as `Package.Upstream`, and `decodeSBOM` runs `rpmdb.ResolveSourceVersions`
+over the whole document, so the source's epoch is placed by D153's rule for both readers (see
+D153's revision). VEX's deb source comparison (D121) reaches the source version instead of its
+binary fallback. `Source.Version` already had its place in the JSON report (`source.version`,
+omitempty), so no schema change. Held through `Run` on both readers: the bsdutils shape yields
+the finding and the same document with the source at the fix is clean; mod_ssl
+`1:2.4.62-1.fc40` beside httpd is found through httpd; perl-B at epoch 0 beside perl
+`4:5.32.1-484.el9` is clean against a perl fix at `4:5.32.1-481.el9`; a source statement at the
+source version suppresses and one at the binary's version does not. Ten mutations, nine caught
+at the caller or the cataloger; the tenth — the rpm branch setting the name without the version
+— is caught at the cataloger and is an equivalent through `Run`, because the D153 pass
+recomputes the version from `Upstream`; the code says so.
 
 ---
 
@@ -6690,6 +6748,13 @@ The reviewer's three probes, written to pass on the bad behaviour, now fail on i
 mutations, all caught; the sixth (a bare `1:` from a versionless source) only after its case
 was added.
 
+**Revised (QA 2026-11-02).** "An explicit `upstream` qualifier wins, still name-only" no longer
+holds in its second half: the qualifier's Source now carries the SRPM's version-release too, and
+its epoch is placed by D153's rule over the document (D83's and D153's revisions). It still
+wins over the relationship. `TestParse_A3_UpstreamQualifierWinsOverTheRelationship` asserts the
+qualifier's own version-release, at `-17` against the relationship source's `-18`, so the two
+cannot be confused.
+
 ---
 
 ### D149 — An LTSS fix replaces a mainline no-fix instead of being shadowed by it (revises D91)
@@ -6864,6 +6929,16 @@ Both are fixed, and the mutation table was re-run from scratch: fourteen mutatio
 caught. They cover each step removed or reordered, the vote taking the lowest, the tie taking
 the higher, the version-release filter, both epochless prefixes, the call site, the
 unparsable and nil guards, and the SRPM version-release ignored.
+
+**Revised (QA 2026-11-02).** "SBOM paths are not changed here: an upstream-qualified purl still
+gives the binary's EVR" described the defect QA finding #1 then confirmed, not a boundary. The
+SBOM catalogers now set `Source.Version` to the SRPM's version-release and keep the file name as
+`Package.Upstream`, and `decodeSBOM` runs `ResolveSourceVersions` over the whole document for
+both readers, so a syft SBOM of an image and the image itself place mod_ssl's epoch the same
+way: httpd's. The residual is this decision's own: a document holding mod_ssl and nothing else
+from its SRPM keeps the binary's epoch (step 4) and the httpd fix stays hidden, pinned by
+`TestRun_SBOMLoneRPMSubpackageKeepsItsOwnEpoch`; an SPDX `GENERATES` edge states the source's
+epoch and has no such gap (D152).
 
 ---
 

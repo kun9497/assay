@@ -376,6 +376,22 @@ provider는 둘 다 압니다 — 어떤 가족을 요청했는지, 그 아래�
 **스키마 버전 3.** 이 필드는 온디스크 형태의 일부이므로, 그 이전에 만든 데이터베이스는 "아무것도
 커버하지 않는다"로 읽히는 대신 안내와 함께 거부됩니다(D5).
 
+**개정 (QA 2026-11-02).** `db status` 의 `covers:` 줄이 실제 키 철자 두 가지를 잘못 읽었습니다. 이
+줄은 운영자가 스캔하려는 릴리스가 범위 안에 있는지 볼 수 있도록 한 가족의 릴리스를
+`first..last (N releases)` 로 접는데, 그 릴리스 파서는 `.` 에서 자른 뒤 양쪽 모두 순수한 숫자를
+요구했습니다. Ubuntu LTS 키는 `Ubuntu:22.04:LTS` (D53) 이고 SUSE 서비스 팩은 `SLES:15.SP7` (D77)
+이므로 어느 쪽도 minor 가 파싱되지 않았고, 그런 릴리스는 전부 파싱 불가 형태를 마지막에 정렬하는
+lexical fallback 으로 떨어져, 실제 데이터베이스는 Ubuntu 14.04:LTS 부터 22.04:LTS 까지와 SLES
+16.0/16.1 을 들고 있으면서도 `Ubuntu:23.10..26.04:LTS (11 releases)` 와 `SLES:11..15.SP7 (21
+releases)` 를 출력했습니다 — Ubuntu 20.04 나 SLES 16 운영자에게 그 릴리스가 범위 밖이라고 말한
+셈입니다. `--output json` 은 키를 그대로 나열해 맞았고, 테이블만 틀렸습니다. 이제 릴리스는 숫자,
+그 뒤 선택적으로 `.` 와 숫자 또는 `SP` 와 숫자, 그 뒤 선택적으로 릴리스의 종류를 이름 붙일 뿐
+순서에는 관여하지 않는 `:` 접미사로 읽습니다. 여전히 파싱되지 않는 형태(`edge`, `stream`,
+`rolling`)에는 lexical fallback 이 남아 있어 예상 밖의 키는 추측되는 대신 그대로 보이고, 한 숫자의
+두 철자는 문자열로 동률을 가르므로 양 끝이 정렬 순서에 좌우되지 않습니다. 같은 데이터베이스는
+이제 `Ubuntu:14.04:LTS..26.04:LTS (11 releases)` 와 `SLES:11..16.1 (21 releases)` 를 출력하며,
+개수는 처음부터 바뀐 적이 없습니다.
+
 
 ### D21 — 판정: 무엇이 빌드를 실패시키고, 종료 코드가 무엇을 뜻하는가
 
@@ -1262,6 +1278,19 @@ Alpine의 imagemagick 레코드 18회는 `introduced 7.0.0-0`(읽히지 않음) 
 살아남아 `repair.go`에 기록했습니다. 유효한 apk 버전은 `.r`을 포함할 수 없으므로 이미-파싱됨
 가드는 답을 바꿀 수 없고, `LastIndex` 대신 `Index`도 두 번째 가드가 뒤에 남은 `.r`을 거부하는
 이상 답을 바꿀 수 없습니다.
+
+**개정 (QA 2026-11-02).** 이 결정의 설치 버전 쪽에 구멍이 있었다. 워크의 `atLeast`는 `0` sentinel을
+`Compare` 없이 풀기 때문에, 어떤 comparer도 읽지 못하는 설치 버전 — dpkg의 빈 `Version`, `(none)`,
+잘못된 문자열 — 이 열린 범위마다 *영향 있음*으로 걸어갔고, Evidence는 아무도 하지 않은 비교를 적었으며,
+그 적중이 옆의 읽을 수 있는 범위의 거부를 가렸다. 이제 `AffectsVersion`은 범위를 걷기 전에 설치 버전을
+자기 자신과 한 번 비교해 target 원인으로 거부한다(D9의 세어서 건너뛰기; D30의 왼쪽 피연산자 검사를 두
+경로가 공유하도록 위로 올렸다). 범위도 버전 목록도 없는 항목은 여전히 오류 없이 깨끗하다. 같은 작업에서
+잘못된 범위 가드도 넓혔다. 어떤 이벤트도 경계를 싣지 않을 때만 발화했기에, 닫는 경계만 있고 `introduced`가
+없는 범위는 조용히 *영향 없음*으로 걸어갔다. OSV 스키마는 범위마다 `introduced`를 요구하므로 그런 범위는
+이제 경계 없는 범위처럼 `ErrInvalid`다. 매처에서(읽을 수 없는 버전을 열린 advisory와 fixed advisory에
+대어 target 원인의 건너뜀 둘, finding 없음; 읽을 수 있는 버전은 판정됨)와 범위에서(열린 것만, fixed 뒤
+열린 것, 열린 것 뒤 fixed 모두 거부; fixed만·last_affected만은 invalid; 열린 sentinel 범위는 여전히
+걷는다) 검증했다.
 
 ### D36 — 불완전함은 원인을 갖고, 게이트를 고칠 수 있는 것으로 좁힐 수 있다
 
@@ -3102,6 +3131,28 @@ ubi8/nodejs-18을 syft-1.51 SBOM으로: module 패키지가 stream-match됩니�
 5,477건, 2건 not evaluated); 같은 이미지를 syft-0.84 SBOM으로: module 패키지 8개가
 시끄럽게 not evaluated입니다 — 정직한 성능 저하입니다. `--fail-on-incomplete=target`은
 최신 SBOM에서는 다시 exit 0입니다.
+
+**개정 (QA 2026-11-02).** "Source(D8)는 `upstream` qualifier에서"는 두 리더 모두에서 source 의
+이름만 남기고 버전을 버리고 있었다: deb 의 `upstream=util-linux@2.38.1-5+deb12u2` 는 `@` 뒤 절반을
+잃었고, rpm 의 `upstream=httpd-2.4.62-1.fc40.src.rpm` 은 `httpd` 로 벗겨지며 `SourceRPMVersion` 은
+한 번도 불리지 않았다. 매처는 source 이름 조회를 `Source.Version` 이 있을 때만 그것과 비교하므로(D41),
+SBOM 입력에서는 바이너리 자신의 버전이 — epoch 까지 포함해 — source 키의 fix 와 비교되었다. 끝까지
+확인했다: util-linux `2.38.1-5+deb12u2` 에서 빌드된 bsdutils `1:2.38.1-5+deb12u3` 을 Debian:12 의
+util-linux fix `2.38.1-5+deb12u3` 에 대고 보면, 이미지의 dpkg status 는 exit 1 과 finding 하나를
+주었고, 같은 패키지를 CycloneDX 와 SPDX 로 넣으면 exit 0, finding 0, skip 0 이었다. 거짓말을 한 쪽은
+에어갭 경로였다. 이제 deb 는 버전 절반을 유지하고(`ParsePURL` 이 epoch 의 콜론을 이미 디코드했다),
+CycloneDX 카탈로거는 purl 이 버전 없이 source 를 지목했을 때 `syft:metadata:sourceVersion` 으로
+그것을 채우되 purl 이 가진 버전은 덮어쓰지 않는다. rpm 은 SRPM 의 version-release 를 유지하고 파일
+이름을 `Package.Upstream` 으로 남기며, `decodeSBOM` 이 문서 전체에 `rpmdb.ResolveSourceVersions`
+를 돌려 두 리더 모두에서 source 의 epoch 가 D153 의 규칙으로 놓인다(D153 의 개정 참조). VEX 의 deb
+source 비교(D121)는 바이너리 fallback 대신 source 버전에 닿는다. `Source.Version` 은 JSON 보고서에
+이미 자리가 있었으므로(`source.version`, omitempty) 스키마 변경은 없다. 두 리더에서 `Run` 을 통해
+지킨다: bsdutils 모양은 finding 을 내고 source 가 fix 에 있는 같은 문서는 깨끗하다; httpd 옆의
+mod_ssl `1:2.4.62-1.fc40` 은 httpd 를 통해 발견된다; perl `4:5.32.1-484.el9` 옆의 epoch 0 perl-B 는
+perl fix `4:5.32.1-481.el9` 에 대해 깨끗하다; source 버전의 source 문장은 억제하고 바이너리 버전의
+문장은 억제하지 않는다. 변이 열 개 중 아홉이 호출자나 카탈로거에서 잡혔고, 열째 — rpm 분기가 버전
+없이 이름만 두는 것 — 는 카탈로거에서 잡히되 `Run` 을 통해서는 등가다. D153 패스가 `Upstream` 에서
+버전을 다시 계산하기 때문이며, 코드가 그렇게 말한다.
 
 ---
 
@@ -6355,6 +6406,12 @@ Red Hat 의 실제 문서(testdata, sha256 `9f6b64f0…`)로: 고쳐진 빌드�
 리뷰어의 프로브 셋은 나쁜 동작에서 통과하도록 쓰였으나 이제 그 동작에서 실패한다. 변이 여섯 개가
 모두 잡혔고, 여섯째(버전 없는 source 의 맨 `1:`)는 그 경우를 더한 뒤에야 잡혔다.
 
+**개정 (QA 2026-11-02).** "명시적 `upstream` 한정자가 이기며 여전히 이름만"의 뒤 절반은 더 이상
+성립하지 않는다: 한정자의 Source 는 이제 SRPM 의 version-release 도 가지며, 그 epoch 는 문서 전체에
+대한 D153 의 규칙으로 놓인다(D83 과 D153 의 개정). 관계보다 이기는 것은 그대로다.
+`TestParse_A3_UpstreamQualifierWinsOverTheRelationship` 은 한정자 자신의 version-release 를 관계
+source 의 `-18` 과 구별되는 `-17` 로 단언하므로 둘이 섞일 수 없다.
+
 ---
 
 ### D149 — LTSS fix 는 mainline 의 no-fix 에 가려지지 않고 그것을 대체한다 (D91 개정)
@@ -6518,6 +6575,15 @@ source 키 레코드에 대해:
 둘 다 고쳤고 변이 표를 처음부터 다시 돌렸다: 변이 열네 개, 모두 잡혔다. 각 단계의 제거 또는 순서
 변경, 가장 낮은 epoch 를 취하는 표결, 높은 쪽을 취하는 타이브레이크, version-release 필터, epoch 없는
 두 접두사, 호출 지점, 파싱 불가 및 nil 가드, 무시된 SRPM version-release 를 다룬다.
+
+**개정 (QA 2026-11-02).** "SBOM 경로는 여기서 바뀌지 않는다: upstream 한정자가 붙은 purl 은 여전히
+바이너리의 EVR 을 준다"는 경계가 아니라 QA 발견 #1 이 확인한 결함을 적은 것이었다. SBOM 카탈로거는
+이제 `Source.Version` 을 SRPM 의 version-release 로 두고 파일 이름을 `Package.Upstream` 으로 남기며,
+`decodeSBOM` 이 두 리더 모두에서 문서 전체에 `ResolveSourceVersions` 를 돌리므로, 이미지의 syft SBOM
+과 이미지 자체가 mod_ssl 의 epoch 를 같은 방식으로 — httpd 의 것으로 — 놓는다. 남는 것은 이 결정
+자신의 것과 같다: mod_ssl 만 있고 같은 SRPM 의 다른 패키지가 없는 문서는 바이너리의 epoch 를
+유지하고(4 단계) httpd fix 는 가려진 채로 남으며, `TestRun_SBOMLoneRPMSubpackageKeepsItsOwnEpoch`
+가 이를 고정한다; SPDX `GENERATES` 간선은 source 의 epoch 를 명시하므로 이 틈이 없다(D152).
 
 ---
 
