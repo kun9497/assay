@@ -7,6 +7,39 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `--config none` runs a scan with no ignore file at all: `.assay.yaml` is not looked for in
+  the working directory and nothing is waived, and the report's provenance records
+  `ignoreFile.path: "none"`. Discovery reads the directory the scan runs from, so a scan of a
+  checkout you did not author ran under whatever waiver list it carried, and the only opt-out
+  was a file saying `ignore: []`. (QA 2026-11-02 P3 #23)
+
+### Changed
+- An empty `--config` value (`--config=`, `--config ""`) is refused at parse with a message
+  naming `none`; it used to mean "discover", silently. A job that passes an unset variable
+  there now exits 2 instead of scanning under whatever `.assay.yaml` the working directory
+  holds. (QA 2026-11-02 P3 #23)
+
+### Fixed
+- The `--fail-on-incomplete` / `--fail-on-incomplete=target` verdict prints an `error:` line on
+  stderr beside its exit 2, naming the counts and the flag form that fired --
+  `error: N package(s) not evaluated and M check(s) incomplete (--fail-on-incomplete)` or
+  `error: N package(s), check(s) or manifest(s) of the target itself could not be evaluated
+  (--fail-on-incomplete=target)`. It was the one exit 2 with no such line, and the provenance
+  sidecar's `run.error` for it, written from a private reason, said `--fail-on-incomplete` even
+  when `=target` had fired; the sidecar now records the printed line like every other exit 2.
+  stdout and the exit code are unchanged. (QA 2026-11-02 P3 #7)
+- The table's headline for a scan in which every finding was waived AND something was not
+  evaluated read "No vulnerabilities found in N package(s), but ... NOT a clean result", with the
+  Suppressed block under it listing the findings. The incomplete sentences now open with "No
+  unwaived vulnerabilities found in N package(s) (M suppressed), but ..."; a scan with no
+  waivers prints the sentences it did before. The 0.14.0 all-waived headline is unchanged for
+  a scan whose every check ran. (QA 2026-11-02 P3 #11)
+- `db update`'s hint on an unsigned artifact leads with the one benign cause: the nightly pushes
+  the tag in one step and signs it in the next, so a pull in that window (seconds, up to about a
+  minute with retries) sees "not signed" and was steered to `--allow-unsigned`. The hint now
+  says to retry in a minute if the publisher pushed moments ago, then the mirror clause, then
+  the opt-out. `db update` still makes one attempt. (QA 2026-11-02 P3 #21)
 ### Changed
 - `--db-max-age` and `--db-max-rating-age` accept the space form (`--db-max-age 48h`) as well
   as `=`, like `--timeout` and `--platform`. `docs/integrations.md` and D113 write both flags
@@ -14,7 +47,6 @@ All notable changes to this project are documented here. The format follows
   worked (QA 2026-11-02 #12). A trailing bare flag with no value is still refused with the
   same message, and a bad value in the space form is refused with the `=` form's wording.
 
-### Fixed
 - Six stale statements in the documentation and help text (QA 2026-11-02 P3 #10, #13, #14,
   #15, #20): the `--output sarif` help, `docs/DESIGN.md` and `docs/deferred-decisions.md` said
   every not-evaluated result is note-level, when since D109 and D158 a manifest not read and a

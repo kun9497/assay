@@ -3835,6 +3835,37 @@ func TestParseScanArgs_Config(t *testing.T) {
 	}
 }
 
+// QA 2026-11-02 P3 #23: `--config none` (both forms) is the opt-out from
+// .assay.yaml discovery and reaches the scan as scancmd.IgnoreNone; an EMPTY
+// value is refused at parse, naming `none`, instead of silently meaning
+// "discover" -- which `--config=` used to.
+func TestParseScanArgs_ConfigNoneAndEmpty(t *testing.T) {
+	for _, args := range [][]string{
+		{"alpine:3.19", "--config", "none"},
+		{"alpine:3.19", "--config=none"},
+	} {
+		_, opts, err := parseScanArgs(args)
+		if err != nil {
+			t.Fatalf("parseScanArgs(%v): %v", args, err)
+		}
+		if opts.IgnoreFile != scancmd.IgnoreNone {
+			t.Errorf("parseScanArgs(%v): IgnoreFile = %q, want %q", args, opts.IgnoreFile, scancmd.IgnoreNone)
+		}
+	}
+	for _, args := range [][]string{
+		{"alpine:3.19", "--config="},
+		{"alpine:3.19", "--config", ""},
+	} {
+		_, _, err := parseScanArgs(args)
+		if err == nil {
+			t.Fatalf("parseScanArgs(%v) accepted an empty --config", args)
+		}
+		if !strings.Contains(err.Error(), "--config") || !strings.Contains(err.Error(), "none") {
+			t.Errorf("parseScanArgs(%v) = %q, want the flag named and `none` offered", args, err)
+		}
+	}
+}
+
 // TestParseScanArgs_VEX holds D104's CLI contract: --vex (both forms) sets
 // opts.VEXFiles, it is REPEATABLE — each occurrence appends rather than
 // overwriting — and a bare --vex with no value is an error like every other

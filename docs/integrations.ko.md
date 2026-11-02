@@ -113,8 +113,8 @@ scan`은 읽기만 합니다. SBOM이나 로컬 tarball 스캔은 네트워크 �
 
 어떤 finding은 진짜이지만 당신의 프로젝트와는 무관합니다 — CVE가 쓰지 않는
 코드 경로에 있거나, 완화 조치를 했거나, 위험을 감수하기로 했을 수 있습니다.
-그런 것들은 저장소의 `.assay.yaml`에 넣으세요(기본으로 스캔됨;
-`--config <path>`로 다른 파일을 지정할 수 있습니다):
+그런 것들은 저장소의 `.assay.yaml`에 넣으세요(`--config <path>`로 다른 파일을
+지정할 수 있습니다):
 
 ```yaml
 ignore:
@@ -123,6 +123,12 @@ ignore:
     reason: not reachable in our build path   # 필수 — 이유 없는 waiver는 거부됨
     expires: 2026-12-31             # 선택: 이 날짜 이후로는 규칙이 waive를 멈추고 경고함
 ```
+
+`--config` 가 없으면 이 파일은 타깃이 아니라 **스캔을 실행한 작업 디렉터리**에서 찾아
+있으면 적용합니다. 그 디렉터리가 당신 것이 아닐 때(공유 러너에 넘겨진 checkout, 받은 것을
+스캔하는 서비스)는 `--config none` 을 주세요: ignore 파일을 적용하지도 찾지도 않으며,
+보고서의 provenance 에는 `ignoreFile.path: "none"` 이 기록됩니다. 빈 값(`--config=`)은
+"찾아라" 로 읽히지 않고 거부됩니다.
 
 규칙은 이름 붙인 필드 '전부'가 매칭될 때만 finding을 waive합니다(`reason`은
 필수입니다; 매칭 필드가 없는 규칙은 모든 것을 waive하게 되므로 거부됩니다).

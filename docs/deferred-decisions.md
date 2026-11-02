@@ -1835,6 +1835,15 @@ credential boundary concrete rather than moving it: a job that does not get its 
 with whatever login the host user holds. A per-job empty `DOCKER_CONFIG` was measured not to
 fall back to `~/.docker`, and the scan's stderr names the source a credential came from.
 
+**The working directory is an input too (QA 2026-11-02).** With no `--config`, a scan
+discovers `.assay.yaml` in the directory it runs from and applies its waivers -- so a service
+that scans checkouts it did not author runs under whichever ignore file the checkout carries,
+and a planted one can waive every finding. `--config none` is the opt-out: no ignore file is
+applied or looked for, and the provenance records `ignoreFile.path: "none"`. Until then the
+only opt-out was a file saying `ignore: []`, documented nowhere, and an empty `--config` value
+was read as "discover"; it is refused at parse now. The hazard stays with the deployment
+otherwise: which directory a job runs from is the runner's decision, not the scanner's.
+
 **A possible small repo-side helper.** `Classify` (`internal/source/classify.go`) already
 decides a target's kind — image, directory, Go binary, jar, or SBOM — before anything is
 opened, falling back to `os.Stat` on a bare string to tell a local path from a registry

@@ -7,6 +7,37 @@
 
 ## [Unreleased]
 
+### Added
+- `--config none` 은 ignore 파일을 전혀 쓰지 않고 스캔합니다. 작업 디렉터리에서 `.assay.yaml` 을 찾지
+  않고 아무것도 waive 하지 않으며, 보고서의 provenance 에는 `ignoreFile.path: "none"` 이 기록됩니다.
+  발견(discovery)은 스캔을 실행한 디렉터리를 읽으므로, 직접 작성하지 않은 checkout 을 스캔하면 그
+  checkout 이 들고 있는 waiver 목록 아래서 실행됐고, 유일한 탈출구는 `ignore: []` 라고 적힌 파일이었습니다.
+  (QA 2026-11-02 P3 #23)
+
+### Changed
+- 빈 `--config` 값(`--config=`, `--config ""`)은 parse 단계에서 `none` 을 안내하는 메시지와 함께 거부됩니다.
+  전에는 조용히 "발견" 을 뜻했습니다. 그 자리에 비어 있는 변수를 넘기던 잡은 이제 작업 디렉터리의 `.assay.yaml`
+  아래서 스캔하는 대신 exit 2 로 끝납니다. (QA 2026-11-02 P3 #23)
+
+### Fixed
+- `--fail-on-incomplete` / `--fail-on-incomplete=target` 판정은 exit 2 와 함께 stderr 에 개수와 발동한
+  플래그 형태를 담은 `error:` 줄을 출력합니다 --
+  `error: N package(s) not evaluated and M check(s) incomplete (--fail-on-incomplete)` 또는
+  `error: N package(s), check(s) or manifest(s) of the target itself could not be evaluated
+  (--fail-on-incomplete=target)`. 그런 줄이 없는 유일한 exit 2 였고, 비공개 reason 으로 쓰이던 provenance
+  sidecar 의 `run.error` 는 `=target` 이 발동했을 때도 `--fail-on-incomplete` 라고 적었습니다. 이제
+  sidecar 는 다른 모든 exit 2 처럼 출력된 줄을 기록합니다. stdout 과 exit 코드는 그대로입니다.
+  (QA 2026-11-02 P3 #7)
+- 모든 finding 이 waive 되고 동시에 무언가 평가되지 않은 스캔의 표 headline 이 "No vulnerabilities found
+  in N package(s), but ... NOT a clean result" 라고 적혔고, 그 아래 Suppressed 블록은 finding 을 나열했습니다.
+  incomplete 문장들은 이제 "No unwaived vulnerabilities found in N package(s) (M suppressed), but ..." 로
+  시작하며, waiver 가 없는 스캔은 전과 같은 문장을 출력합니다. 모든 검사가 끝난 스캔의 0.14.0 all-waived
+  headline 은 바뀌지 않았습니다. (QA 2026-11-02 P3 #11)
+- 서명되지 않은 artifact 에 대한 `db update` 의 안내는 하나뿐인 무해한 원인을 먼저 말합니다. 야간 발행은
+  한 단계에서 태그를 푸시하고 다음 단계에서 서명하므로, 그 사이(수 초, 재시도까지 약 1분)에 pull 하면
+  "not signed" 를 보게 되고 `--allow-unsigned` 로 안내됐습니다. 이제 publisher 가 방금 푸시했다면 1분 뒤
+  재시도하라고 먼저 말하고, 그다음 mirror 절, 마지막에 opt-out 을 말합니다. `db update` 는 여전히 한 번만
+  시도합니다. (QA 2026-11-02 P3 #21)
 ### Changed
 - `--db-max-age` 와 `--db-max-rating-age` 가 `=` 꼴뿐 아니라 `--timeout`, `--platform` 처럼 띄어 쓴
   꼴(`--db-max-age 48h`)도 받습니다. `docs/integrations.md` 와 D113 은 두 플래그를
@@ -14,7 +45,6 @@
   끝났습니다(QA 2026-11-02 #12). 값 없이 끝에 홀로 선 플래그는 여전히 같은 메시지로 거부하고, 띄어 쓴
   꼴의 잘못된 값은 `=` 꼴과 같은 문구로 거부합니다.
 
-### Fixed
 - 문서와 도움말의 낡은 서술 여섯 곳(QA 2026-11-02 P3 #10, #13, #14, #15, #20): `--output sarif`
   도움말과 `docs/DESIGN.md`, `docs/deferred-decisions.md` 는 미평가 결과가 모두 note 수준이라고
   했지만, D109 와 D158 이후 읽지 못한 manifest 와 버전이나 purl 이 없는 컴포넌트는 warning 수준입니다;

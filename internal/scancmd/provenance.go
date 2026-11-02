@@ -59,9 +59,6 @@ type recorder struct {
 	prov    *report.Provenance
 	stdout  *hashingWriter
 	stderr  *errorLineWriter
-	// reason is an exit 2's cause when no error line states it — the
-	// --fail-on-incomplete verdict, which prints none.
-	reason string
 }
 
 func newRecorder(dbPath, target string, opts Options, stdout, stderr io.Writer) *recorder {
@@ -118,12 +115,11 @@ func (r *recorder) finish(code int) int {
 // the database path; a credential file's errors name the home directory or
 // the D118 locations the environment points at; anything relative the scan
 // resolved names the working directory. stderr keeps them all — it is the
-// human channel, and the record is the one that travels.
+// human channel, and the record is the one that travels. Every exit 2 prints
+// such a line, the --fail-on-incomplete verdict included since QA 2026-11-02
+// (P3 #7), so there is no second source for the cause.
 func (r *recorder) errorText() string {
 	msg := r.stderr.first
-	if msg == "" {
-		msg = r.reason
-	}
 	if msg == "" {
 		return "exit 2"
 	}

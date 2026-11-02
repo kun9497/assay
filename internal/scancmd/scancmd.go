@@ -199,10 +199,12 @@ type Options struct {
 	// IgnoreFile is the path to a .assay.yaml ignore config, from --config.
 	// Empty means "discover .assay.yaml in the working directory, and run
 	// without one if there is none" — a project that has never written an
-	// ignore file scans exactly as before. A file that is named but cannot
-	// be read or parsed fails the scan (exit 2): a malformed waiver list is
-	// a mistake the caller wants told about, not one that silently waives
-	// nothing.
+	// ignore file scans exactly as before. IgnoreNone ("none") means no
+	// ignore file at all, discovery included; cmd/assay refuses an empty
+	// --config value at parse so that "discover" is never asked for by an
+	// accident of shell quoting. A file that is named but cannot be read or
+	// parsed fails the scan (exit 2): a malformed waiver list is a mistake
+	// the caller wants told about, not one that silently waives nothing.
 	IgnoreFile string
 	// Colorize turns on D107's ANSI severity colors in the table renderer.
 	// Set by cmd/assay, never derived here: whether stdout is a real
@@ -228,6 +230,15 @@ type Options struct {
 	// waiver is untrustworthy input, not "nothing waived".
 	VEXFiles []string
 }
+
+// IgnoreNone is the --config value that applies no ignore file at all (QA
+// 2026-11-02 P3 #23): no discovery of .assay.yaml in the working directory,
+// no file read. A scan whose working directory the operator does not control
+// (a checkout handed in by someone else, a shared runner) had no way to
+// refuse the waiver list it found there -- an empty file is a parse error,
+// so the only opt-out was a file saying `ignore: []`, documented nowhere.
+// A file literally named "none" is still reachable as `--config ./none`.
+const IgnoreNone = "none"
 
 // The two files an image cataloger reads, named as they appear as tar entries
 // (no leading slash) — which is also the form Image.Files normalises its own
@@ -937,12 +948,53 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 			return 2
 		}
 	}
-	code := verdict(opts, sum, res.Findings, eolStatus)
-	if code == 2 {
-		// The one exit 2 that prints no error line: the sidecar still says why.
-		r.reason = "evaluation incomplete (--fail-on-incomplete)"
+	// The incompleteness gates are the only verdict that reaches 2, and 2 is
+	// the code that means "could not be trusted" -- so it is said on stderr
+	// in the shape the unread-manifest branch above uses, naming the flag
+	// form that fired. Until QA 2026-11-02 (P3 #7) this was the one exit 2
+	// with no `error:` line: a CI log showed a bare exit code, and the
+	// provenance recorder carried a private reason for it that named
+	// --fail-on-incomplete even when =target had fired. The line is also
+	// what the sidecar records as run.error, through errorLineWriter, like
+	// every other exit 2 (D120).
+	if flag := incompleteGate(opts, sum); flag != "" {
+		switch flag {
+		case "--fail-on-incomplete=target":
+			// TargetIncomplete counts every skip with the target's cause,
+			// whole packages, advisory-scoped checks and unread manifests
+			// alike (report.Summary), so the line names all three units
+			// rather than claiming a package count it does not have.
+			fmt.Fprintf(stderr, "error: %d package(s), check(s) or manifest(s) of the target itself could not be evaluated (%s)\n",
+				sum.TargetIncomplete, flag)
+		default:
+			fmt.Fprintf(stderr, "error: %d package(s) not evaluated and %d check(s) incomplete (%s)\n",
+				sum.NotEvaluated, sum.IncompleteChecks, flag)
+		}
 	}
-	return code
+	return verdict(opts, sum, res.Findings, eolStatus)
+}
+
+// incompleteGate names the --fail-on-incomplete flag form that fires on sum,
+// or "" when neither does. verdict reads it for the exit code and Run for the
+// error line, so the two cannot disagree about which gate fired: the broad
+// flag is consulted first, as verdict always has, so when both are armed and
+// both fire the line names the broad one.
+func incompleteGate(opts Options, sum report.Summary) string {
+	if opts.FailOnIncomplete && (sum.NotEvaluated > 0 || sum.IncompleteChecks > 0) {
+		return "--fail-on-incomplete"
+	}
+	// D36: the same exit code for a narrower cause. Deliberately a second
+	// condition rather than a mode on the first — the two are independent
+	// questions ("did anything go unchecked" and "did MY data go unchecked"),
+	// and a pipeline may reasonably ask both.
+	//
+	// D109: a manifest the scan could not read arrives here too, through
+	// Summarize, rather than through a second AnyFailed branch beside the
+	// broad flag's - one count, read by the JSON, the table and this gate.
+	if opts.FailOnIncompleteTarget && sum.TargetIncomplete > 0 {
+		return "--fail-on-incomplete=target"
+	}
+	return ""
 }
 
 // article returns the indefinite article to pair with kind.String() so the
@@ -977,16 +1029,23 @@ func article(kind source.TargetKind) string {
 // applyIgnoreRules loads the ignore config and moves waived findings from
 // res.Findings into res.Suppressed. It is a no-op (exit 0, nothing changed)
 // when no config is named and none is discovered — a project with no
-// .assay.yaml scans exactly as before. A named-but-unreadable or malformed
-// config fails the scan at exit 2, on IgnoreFile's own reasoning: a broken
-// waiver list is a mistake to surface, not one to run past.
+// .assay.yaml scans exactly as before — and when IgnoreNone was named. A
+// named-but-unreadable or malformed config fails the scan at exit 2, on
+// IgnoreFile's own reasoning: a broken waiver list is a mistake to surface,
+// not one to run past.
 //
 // w receives the file's provenance (D120): the path as given, or the default
 // name when it was discovered — never the absolute path discovery resolved,
-// which names the working directory — its hash, and what each rule did.
+// which names the working directory — its hash, and what each rule did. With
+// IgnoreNone it records "none", not discovered, so a reader can tell "opted
+// out" from "nothing was there to discover" (which leaves it null).
 func applyIgnoreRules(res *matcher.Result, ignoreFile string, stderr io.Writer, w *report.WaiversProvenance) int {
 	path := ignoreFile
 	rec := &report.IgnoreFileProvenance{Path: ignoreFile, Rules: []report.IgnoreRuleProvenance{}}
+	if path == IgnoreNone {
+		w.IgnoreFile = rec
+		return 0
+	}
 	if path == "" {
 		// No --config: look for the default in the working directory, and
 		// run without one if there is none.
@@ -1124,18 +1183,7 @@ func vexTarget(kind source.TargetKind, target string, image *report.ImageRecord,
 }
 
 func verdict(opts Options, sum report.Summary, findings []matcher.Finding, eol report.EOLStatus) int {
-	if opts.FailOnIncomplete && (sum.NotEvaluated > 0 || sum.IncompleteChecks > 0) {
-		return 2
-	}
-	// D36: the same exit code for a narrower cause. Deliberately a second
-	// condition rather than a mode on the first — the two are independent
-	// questions ("did anything go unchecked" and "did MY data go unchecked"),
-	// and a pipeline may reasonably ask both.
-	//
-	// D109: a manifest the scan could not read arrives here too, through
-	// Summarize, rather than through a second AnyFailed branch beside the
-	// broad flag's - one count, read by the JSON, the table and this gate.
-	if opts.FailOnIncompleteTarget && sum.TargetIncomplete > 0 {
+	if incompleteGate(opts, sum) != "" {
 		return 2
 	}
 	if opts.FailOnUnknown && sum.UnknownSeverity > 0 {
