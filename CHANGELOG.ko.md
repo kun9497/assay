@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+### Changed
+- `scandiff` 의 표가 `GRYPE` 바로 뒤에 `A_BRIDGED` 와 `G_BRIDGED` 두 열을 새로 찍습니다. bare-advisory
+  bridge 가 assay 쪽 집합과 grype 쪽 집합에 각각 더한 튜플 수입니다. 2026-10-13 wolfi 에서 `ASSAY` 가
+  46 에서 74 로 오르는 동안 assay 자체 튜플은 45 에서 41 로 줄었는데, grype 데이터베이스가 자라면서 grype
+  튜플 33 개가 assay 집합으로 bridge 된 것이었습니다. bridge 되는 target 의 `maxFindings` 위반이 비교 도구
+  쪽의 성장일 수 있어 주간 리뷰가 그 분리를 손으로 세야 했습니다. floor 와 ceiling 의 의미는 바뀌지 않고,
+  `ERROR` 행은 다른 카운터처럼 `0 0` 을 찍습니다. trivy 비교는 bridge 하지 않으므로 그대로입니다.
+
 ### Fixed
 - `db status` 가 `covers:` 범위를 출력할 때 Ubuntu LTS 와 SUSE 서비스 팩 릴리스를 읽습니다. 릴리스
   파서가 `.` 에서 자른 뒤 양쪽 모두 순수한 숫자를 요구했기 때문에 `Ubuntu:22.04:LTS` 와 `SLES:15.SP7`
@@ -19,6 +27,13 @@
   `rolling`)는 lexical fallback 을 유지하고, 한 숫자의 두 철자는 문자열로 정렬되어 양 끝이 정렬
   순서에 좌우되지 않습니다. `--output json` 은 키를 그대로 나열해 이미 맞았고, 개수는 처음부터
   바뀐 적이 없습니다.
+- 어떤 comparer 도 읽지 못하는 설치 버전(dpkg 의 빈 Version, `(none)`, 잘못된 문자열)은 이제 열린 범위를
+  포함한 모든 advisory 에 대해 target 원인으로 건너뜁니다. 전에는 `[0, )` 범위(Debian 의 미수정 집합, 모든
+  CSAF no-fix 항목)가 비교 없이 sentinel 을 풀어 패키지를 AFFECTED 로 보고했고, 아무도 하지 않은 비교를 evidence
+  가 적었으며, 바로 옆의 fixed 범위 advisory 는 올바르게 건너뛰어졌습니다(D9, D30). (QA 2026-11-02 #2)
+- 닫는 경계만 있고 `introduced` 이벤트가 없는 범위는 잘못된 범위로 거부되어 건너뛴 목록에 들어갑니다. 전에는
+  조용히 "영향 없음" 으로 걸어갔습니다. 현재 어떤 provider 도 이 꼴을 내지 않으며, OSV 스키마는 범위마다
+  `introduced` 를 요구합니다. (QA 2026-11-02 #3)
 - `db build` 는 Photon OS 피드 파일을 일시적 실패에 대해 재시도하며, 첫 non-200 응답에 빌드 전체를
   실패시키지 않습니다. 이 provider 는 major 당 GET 을 한 번만 보냈고, 2026-10-17 야간 발행은 고정된 세
   `cve_data_photon<N>.json` URL 중 하나에 Photon CDN 이 돌려준 404 로 죽었으며 그 파일은 다음 날 밤

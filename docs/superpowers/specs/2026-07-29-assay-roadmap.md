@@ -1384,6 +1384,22 @@ in `repair.go`: no valid apk version can contain `.r` at all, so the already-par
 never change an answer, and `Index` for `LastIndex` cannot either once the second guard
 rejects a repair that leaves a later `.r` behind.
 
+**Revised (QA 2026-11-02).** The installed-version half of this decision had a hole: the
+walk's `atLeast` resolves the `0` sentinel without a `Compare`, so an installed version no
+comparer can read -- dpkg's empty `Version`, `(none)`, a malformed string -- walked through
+every open-ended range to *affected*, with Evidence naming a comparison nobody made, and that
+hit then masked the readable sibling range's refusal. `AffectsVersion` now compares the
+installed version with itself once, before any range is walked, and refuses it with the
+target's cause (D9's skipped-with-a-count; D30's left-operand check, moved up so both paths
+share it). An entry with neither ranges nor versions is still clean without error. In the same
+pass the malformed-range guard was widened: it fired only when no event carried any bound, so a
+range of closing bounds with no `introduced` walked to a silent *not affected*; the OSV schema
+requires an `introduced` per range, and such a range is now `ErrInvalid` like the bound-less
+one. Verified at the matcher (an unreadable version against an open and a fixed advisory: two
+skips with the target's cause, no finding; a readable one is judged) and at the range (open
+only, fixed-then-open, open-then-fixed all refused; fixed-only and last_affected-only invalid;
+the open sentinel range still walks).
+
 ### D36 — Incompleteness carries a cause, and the gate can be narrowed to what you can fix
 
 D35 put *whose data is unreadable* in the message. D36 puts it in the type, because a CI
