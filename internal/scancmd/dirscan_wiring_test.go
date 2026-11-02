@@ -578,8 +578,8 @@ func TestRun_D109_JSONCarriesUnreadAndItsCount(t *testing.T) {
 			if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
 				t.Fatalf("stdout is not one JSON document: %v\n%s", err, out.String())
 			}
-			if doc.SchemaVersion != 15 {
-				t.Errorf("schemaVersion = %d, want 15", doc.SchemaVersion)
+			if doc.SchemaVersion != 16 {
+				t.Errorf("schemaVersion = %d, want 16", doc.SchemaVersion)
 			}
 			if len(doc.Unread) != 1 || doc.Unread[0].Path != path {
 				t.Fatalf("unread = %+v, want exactly one entry for %q", doc.Unread, path)
@@ -687,7 +687,7 @@ func TestRun_D109_TableListsUnreadManifests(t *testing.T) {
 			if !strings.Contains(out.String(), "not read: "+path+" (") {
 				t.Errorf("the table does not list %q:\n%s", path, out.String())
 			}
-			if !strings.Contains(out.String(), ", 1 manifest(s) not read\n") {
+			if !strings.Contains(out.String(), ", 1 path(s) not read\n") {
 				t.Errorf("the summary line does not count the unread manifest:\n%s", out.String())
 			}
 		})

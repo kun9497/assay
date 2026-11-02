@@ -413,14 +413,15 @@ func notReadRule() sarifRule {
 	return sarifRule{
 		ID:               notReadRuleID,
 		Name:             "NotRead",
-		ShortDescription: sarifText{Text: "A manifest the scan could not read"},
-		FullDescription: sarifText{Text: "The scan found this manifest, or a directory that " +
-			"may hold manifests, and could not read it. Nothing inside it was evaluated, so " +
-			"it may hold findings this run did not see: a partial scan must not read as a " +
-			"complete one."},
+		ShortDescription: sarifText{Text: "A path the scan could not read"},
+		FullDescription: sarifText{Text: "The scan found this manifest, a directory that " +
+			"may hold manifests, or a path inside an image, and could not read it. Nothing " +
+			"inside it was evaluated, so it may hold findings this run did not see: a partial " +
+			"scan must not read as a complete one."},
 		Help: &sarifHelp{
 			Text: "The reason is on the result itself. Regenerate a lockfile that would not " +
-				"parse, or grant the scanning user access to a directory it could not enter. " +
+				"parse, grant the scanning user access to a directory it could not enter, or " +
+				"rebuild an image whose symbolic links the kernel itself would refuse to follow. " +
 				"Use --fail-on-incomplete=target to make this fail a build.",
 		},
 		// No security-severity: this is not a security claim.

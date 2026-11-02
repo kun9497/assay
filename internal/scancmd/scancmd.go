@@ -454,9 +454,11 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 	var (
 		inventory pkgmeta.Target
 		cat       cyclonedx.Stats
-		// manifests stays zero for every target that is not a directory, and
-		// its disclosure loop below is guarded on kind, so an image or SBOM
-		// scan cannot start printing directory diagnostics.
+		// manifests stays zero for every target that is neither a directory
+		// nor an image, and its disclosure loop below is guarded on kind, so
+		// an image or SBOM scan cannot start printing directory diagnostics.
+		// An image fills only Unread, with the paths its walk gave up on
+		// behind a link chain (audit 2026-10-22 P4).
 		manifests dirscan.Manifests
 		// scope is set only by the image branch (D111): what the image's
 		// inventory was read from. nil for every other kind, which the JSON
@@ -516,7 +518,7 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 	// image-loader syntax, not a stripped prefix), so it keeps getting target.
 	switch kind {
 	case source.TargetImage:
-		t, stats, sc, rec, outer, creds, err := catalogImage(ctx, target, opts.Platform, stderr)
+		t, stats, sc, rec, outer, creds, unresolved, err := catalogImage(ctx, target, opts.Platform, stderr)
 		// D118's source name, never a value; only a registry pull has one.
 		if source.IsRegistryReference(target) {
 			prov.Target.RegistryCredentials = credentialName(creds)
@@ -540,6 +542,17 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 			return 2
 		}
 		inventory, cat, scope, image, outerIndexes = t, stats, &sc, rec, outer
+		// Audit 2026-10-22 P4: a path the walk gave up on behind a link chain
+		// is the image's own incompleteness, not an absent file -- the chain
+		// may lead to the distro's identity or the real package database. It
+		// goes where D109 put a directory's unreadable manifest, so the JSON
+		// unread[], SARIF's assay/not-read, the table and
+		// --fail-on-incomplete (both scopes: a malformed image is the
+		// target's to fix, D36) all see it without a second mechanism.
+		for _, u := range unresolved {
+			manifests.Unread = append(manifests.Unread, dirscan.Unread{Path: u.Path, Reason: u.Reason, Failed: true})
+			fmt.Fprintf(stderr, "not read: %s (%s)\n", u.Path, u.Reason)
+		}
 		// D141. The D70 gap, said where a person reading the scan sees it:
 		// before this only the JSON's inventoryScope carried it, and the
 		// table printed "No known vulnerabilities found" over an image whose
@@ -899,15 +912,23 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 	// failure is a normal incomplete scan, so it is opt-in through
 	// --fail-on-incomplete rather than failing every CI job that has one bad
 	// lockfile in a large tree (D21's reasoning for that flag being opt-in).
+	//
+	// An image's unresolved paths (audit 2026-10-22 P4) take only the second
+	// case: an image has no manifests to have read, so "nothing readable" is
+	// a directory's question, and an image whose inventory could not be read
+	// at all already failed in catalogFromImage.
 	if manifests.AnyFailed() {
-		if len(manifests.Read) == 0 {
+		if kind == source.TargetDirectory && len(manifests.Read) == 0 {
 			fmt.Fprintln(stderr,
 				"error: no manifest in this directory could be read; this result cannot be trusted")
 			return 2
 		}
 		if opts.FailOnIncomplete {
-			fmt.Fprintln(stderr,
-				"error: at least one manifest could not be read (--fail-on-incomplete)")
+			what := "manifest"
+			if kind == source.TargetImage {
+				what = "image path"
+			}
+			fmt.Fprintf(stderr, "error: at least one %s could not be read (--fail-on-incomplete)\n", what)
 			return 2
 		}
 	}
@@ -1253,7 +1274,11 @@ func decodeSBOM(path string, r io.Reader) (pkgmeta.Target, cyclonedx.Stats, erro
 //
 // outer is every index above the one that listed the image, for VEX scope
 // alone: the report's ImageRecord stays as D119 wrote it.
-func catalogImage(ctx context.Context, ref, platform string, stderr io.Writer) (_ pkgmeta.Target, _ cyclonedx.Stats, _ report.InventoryScopeRecord, _ *report.ImageRecord, outer []string, _ source.CredentialSource, _ error) {
+//
+// unresolved is every path the walk gave up on behind a link chain (audit
+// 2026-10-22 P4), read after every pass catalogFromImage made, for Run to
+// disclose as incompleteness.
+func catalogImage(ctx context.Context, ref, platform string, stderr io.Writer) (_ pkgmeta.Target, _ cyclonedx.Stats, _ report.InventoryScopeRecord, _ *report.ImageRecord, outer []string, _ source.CredentialSource, unresolved []source.Unresolved, _ error) {
 	img, err := source.Open(ctx, ref, platform)
 	if err != nil {
 		// A 401 or 403 on the manifest is still the D118 source that was
@@ -1264,14 +1289,29 @@ func catalogImage(ctx context.Context, ref, platform string, stderr io.Writer) (
 		if errors.As(err, &ae) {
 			creds = ae.Source
 		}
-		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, nil, nil, creds, err
+		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, nil, nil, creds, nil, err
 	}
 	if c := img.Credentials; c.Source != source.CredentialsNone {
 		fmt.Fprintf(stderr, "registry credentials for %s: from %s\n", c.Registry, c.Source)
 	}
 	rec := reportPlatform(ref, img.Platform, stderr)
 	t, stats, scope, err := catalogFromImage(ctx, ref, img)
-	return t, stats, scope, rec, img.Platform.OuterIndexDigests, img.Credentials.Source, err
+	return t, stats, scope, rec, img.Platform.OuterIndexDigests, img.Credentials.Source, img.Unresolved(), err
+}
+
+// unresolvedNote is the clause a no-database error ends with when the walk
+// gave up on a path behind a link chain: the database may be what the chain
+// led to, and "none found" alone would send the reader looking for a file
+// that is there (audit 2026-10-22 P4). Empty when nothing was cut off.
+func unresolvedNote(img *source.Image) string {
+	var parts []string
+	for _, u := range img.Unresolved() {
+		parts = append(parts, fmt.Sprintf("not resolved: %s (%s)", u.Path, u.Reason))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "; " + strings.Join(parts, "; ")
 }
 
 // reportPlatform prints D119's record line and any warning for one image
@@ -1572,13 +1612,13 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 		if target.Distro != nil && rpmFamilies[target.Distro.ID] {
 			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, fmt.Errorf(
 				"%s reports itself as %q, an RPM distribution, but none of %v holds an rpm "+
-					"database; this result cannot be trusted",
-				ref, target.Distro.ID, rpmDBPaths())
+					"database; this result cannot be trusted%s",
+				ref, target.Distro.ID, rpmDBPaths(), unresolvedNote(img))
 		}
 		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, fmt.Errorf(
 			"no supported package database found in %s (looked for %v, %s, %s/, %s/*/desc "+
-				"and an rpm database under %v)",
-			ref, apkDBPaths, dpkgDBPath, dpkgStatusDir, pacmanLocalDir, rpmDBDirs)
+				"and an rpm database under %v)%s",
+			ref, apkDBPaths, dpkgDBPath, dpkgStatusDir, pacmanLocalDir, rpmDBDirs, unresolvedNote(img))
 	}
 	for i := range pkgs {
 		for j := range pkgs[i].Locations {

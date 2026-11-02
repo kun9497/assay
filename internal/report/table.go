@@ -390,7 +390,9 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 	// there. The JSON's summary.unreadManifests is the always-present form.
 	unreadParen := ""
 	if sum.UnreadManifests > 0 {
-		unreadParen = fmt.Sprintf(", %d manifest(s) not read", sum.UnreadManifests)
+		// "path(s)", not "manifest(s)": since the 2026-11-02 P4 fixes an
+		// image path the walk could not resolve is counted here too.
+		unreadParen = fmt.Sprintf(", %d path(s) not read", sum.UnreadManifests)
 	}
 	// D107: the one number on this line a reader's eye should land on first.
 	// Bold only, not banded by severity — this count mixes every band

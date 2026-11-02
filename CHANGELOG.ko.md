@@ -8,6 +8,17 @@
 ## [Unreleased]
 
 ### Fixed
+- 이미지 layer 하나 안에서 같은 경로의 마지막 항목을 스캔이 읽습니다. 나중 파일, 링크, 타입 변경, whiteout
+  이 앞의 것을 대체하며, tar 를 풀었을 때 디스크에 남는 것과 같습니다. 전에는 첫 항목이 이겨서, 조작된 layer
+  가 컨테이너가 실제로 쓰는 것과 다른 패키지 데이터베이스를 스캔에 보여줄 수 있었습니다. hardlink 는 여전히
+  링크가 쓰인 시점의 대상을 가리킵니다(D130). (감사 2026-10-22 P4, 2026-11-02 재검증)
+- 이미지 안의 심볼릭 링크 사슬을 Linux 자체 한도인 40개까지 따라갑니다. 전에는 7개였습니다. 그 뒤에도 링크인
+  경로나 링크 순환은 읽지 못한 것으로 보고됩니다. JSON `unread[]`, SARIF `assay/not-read`, 표의 개수에 적히고
+  target 의 불완전으로 세어 `--fail-on-incomplete` 와 `=target` 이 exit 2 가 됩니다. 전에는 없는 파일처럼
+  보여 이미지가 distro 나 패키지가 없는 것처럼 보였습니다. **JSON 보고서의 `schemaVersion` 은 16** 입니다
+  (추가형, 새 필드 없음). `unread[]` 가 이제 이미지 안의 경로도 적을 수 있고, 표의 개수는 "path(s) not read"
+  로 읽힙니다. (감사 2026-10-22 P4, 2026-11-02 재검증)
+
 - `db build --ratings-only --seed` 가 EOL source 가 설정되지 않았을 때(`EOL_ENABLE=0`) seed 의 end-of-life
   카탈로그와 enrichment record 의 provenance 를 유지합니다. 전에는 새 metadata 가 그 위에 덮어써져 EOL
   행이 사라지고, 그런 데이터베이스에서 `--fail-on-eol` 은 gate 대신 경고만 했으며, `db status` 는 enrichment
