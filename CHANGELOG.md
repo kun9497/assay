@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-02
+
 ### Changed
 - `db build` fails when Canonical's Ubuntu CVE tracker parses to no tuple, or stamps no fix
   state on any fix-less Ubuntu range, and says to set `UBUNTU_TRACKER_ENABLE=0` to build
@@ -24,6 +26,7 @@ All notable changes to this project are documented here. The format follows
   finding's ratings now rank by band before score, so a v2 High never outranks another
   source's Critical, and SARIF's `security-severity` stays inside the finding's band.
   (D156, audit A14)
+
 ### Security
 - The jobs that hold the signing key run nothing pinned by a tag alone. The nightly
   publish installs grype from its release tarball checked against a committed sha256
@@ -343,7 +346,8 @@ All notable changes to this project are documented here. The format follows
   ecosystems. Gives CI an exit code of 0, 1 or 2. Output as table, JSON or SARIF.
   **(report schemaVersion 8; store schema 9)** (decision log D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.12.0...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.13.0...main
+[0.13.0]: https://github.com/kun9497/assay/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/kun9497/assay/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/kun9497/assay/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/kun9497/assay/compare/v0.9.0...v0.10.0

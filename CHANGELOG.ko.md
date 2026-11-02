@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-02
+
 ### Changed
 - Canonical 의 Ubuntu CVE tracker 가 tuple 하나 없이 파싱되거나, fix state 없는 Ubuntu range 어디에도 fix state
   를 stamp 하지 못하면 `db build` 가 실패하고, Ubuntu fix state 없이 일부러 빌드하려면
@@ -21,6 +23,7 @@
   등급을 받은 평가에는 `"cvssV2": true` 가 붙고 `--explain` 은 `(CVSS v2)` 로 표시합니다. 발견의 평가는 이제
   점수보다 등급을 먼저 비교하므로 v2 High 가 다른 출처의 Critical 을 이기지 못하고, SARIF 의
   `security-severity` 는 발견의 등급 안에 머뭅니다. (D156, 감사 A14)
+
 ### Security
 - 서명 키를 가진 job 이 태그만으로 고정된 코드를 더 이상 실행하지 않습니다. nightly publish 는 grype 를
   릴리스 tarball 로 받아 커밋된 sha256 으로 확인하고(이전에는 `curl get.anchore.io/grype | sh`), trivy 와
@@ -314,7 +317,8 @@
   여덟 개 언어 생태계를 다룹니다. CI에 종료 코드 0, 1, 2를 줍니다. 출력은 표, JSON, SARIF입니다.
   **(보고서 schemaVersion 8; 저장소 스키마 9)** (결정 기록 D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.12.0...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.13.0...main
+[0.13.0]: https://github.com/kun9497/assay/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/kun9497/assay/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/kun9497/assay/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/kun9497/assay/compare/v0.9.0...v0.10.0
