@@ -13,8 +13,14 @@ All notable changes to this project are documented here. The format follows
   a sync that may have run for hours. A 403 that never clears (a rejected key, a blocked
   address) still fails, after the schedule rather than at once. (audit 2026-10-22 P4,
   re-verified 2026-11-02)
+- The weekly scanner differential's verdict step fails closed: `exit ${{ steps.diff.outputs.exit_code || 2 }}`,
+  as the nightly publish gate already did. An empty step output made it a bare `exit`, which
+  returns 0, so a renamed step id or a mistyped output name would have turned every weekly
+  run green and closed the pinned failure issue (D138). A ciguard test now holds every
+  workflow's `exit ${{ steps.<id>.outputs.<name> }}` to a nonzero fallback the shell does not
+  reduce to 0, with the producing step declared earlier in the same job and writing that
+  output. (audit 2026-10-22 P4, re-verified 2026-11-02)
 
-### Fixed
 - A git, URL or path dependency in `package-lock.json` (v1 and v3), yarn v1's `yarn.lock`,
   `Cargo.lock`, `poetry.lock` or `uv.lock` is no longer cataloged under the version its own
   checkout declares. That version need not be any registry release an advisory names, so the
