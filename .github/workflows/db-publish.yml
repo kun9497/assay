@@ -2,11 +2,23 @@ name: publish database
 
 on:
   schedule:
-    - cron: "0 6 * * *"
+    # A lower bound, not a start time. GitHub queues scheduled runs and
+    # starts those on minute 0 of an hour hours late: every one of the 20
+    # nightlies from 2026-10-13 to 11-02 on `0 6 * * *` began 4.2 to 7.6
+    # hours after it (10:12Z to 13:38Z). Off minute 0 (QA 2026-11-02 #18)
+    # the queue is shorter, and the hour is pulled forward so a run that is
+    # still late lands where the old one did. Expect the run between about
+    # 05:20Z and 13:00Z and read status.json's builtAt as the time it did
+    # run, not as a clock that slipped. docs/DESIGN.md records the window.
+    - cron: "17 5 * * *"
   workflow_dispatch:
     inputs:
       seed:
-        description: "Seed reference for a one-time recovery build, a ghcr digest; empty = the published tag"
+        # The FULL reference, never a bare `sha256:<hex>`: go-containerregistry
+        # parses that as the Docker Hub tag index.docker.io/library/sha256:<hex>
+        # and the D110 recovery build fails loudly on a registry it was not
+        # meant to touch. The shape is checked before anything is built.
+        description: "Seed reference for a one-time recovery build: ghcr.io/kun9497/assay-db@sha256:<64 hex> or ghcr.io/kun9497/assay-db:<tag>; empty = the published tag"
         type: string
         default: ""
 
@@ -59,6 +71,25 @@ jobs:
       TRIVY_DISABLE_VEX_NOTICE: "true"
     steps:
       - uses: actions/checkout@v4
+      - name: Check the seed input's shape (QA 2026-11-02 #16)
+        # The input is dispatcher-written and this job holds the signing key
+        # in later steps, so it reaches the shell through env, never by
+        # expression substitution into the script text (db-sign.yml's rule,
+        # which internal/ciguard now holds every workflow to), and anything
+        # but the two reference forms the D110 recovery can use is refused
+        # here, before the build or any credential. A bare `sha256:<hex>`
+        # would parse as a Docker Hub tag and fail an hour in.
+        env:
+          SEED: ${{ inputs.seed }}
+        run: |
+          [ -z "$SEED" ] && { echo "no seed input: the build seeds from the published tag"; exit 0; }
+          # One line, then the shape: grep judges lines, so a value with a
+          # newline in it would pass on its first line alone.
+          if [ "$(printf '%s' "$SEED" | wc -l | tr -d ' ')" != 0 ] \
+            || ! printf '%s\n' "$SEED" | grep -Eq '^ghcr\.io/kun9497/assay-db(@sha256:[0-9a-f]{64}|:[A-Za-z0-9_][A-Za-z0-9._-]{0,127})$'; then
+            echo "::error::seed must be ghcr.io/kun9497/assay-db@sha256:<64 hex> or ghcr.io/kun9497/assay-db:<tag>, got '$SEED'"; exit 2
+          fi
+          echo "seeding the recovery build from $SEED"
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
@@ -131,6 +162,11 @@ jobs:
           # published -- db push would refuse it, but a refused daily publish
           # is a worse way to find out than a line in this file.
           REDHAT_ENABLE: "1"
+          # Both references reach the script as data (QA 2026-11-02 #16): the
+          # input was shape-checked in the first step, and the resolved tag
+          # is a step output, held non-empty on the first line below.
+          SEED: ${{ inputs.seed }}
+          REF: ${{ steps.ref.outputs.ref }}
         # The seed fetch is the first thing that touches ghcr, so an access
         # problem surfaces here. DENIED is not a code defect and reads like
         # one: GITHUB_TOKEN can only touch packages LINKED to this repository,
@@ -139,13 +175,17 @@ jobs:
         # failures (2026-08-04, 2026-08-05) before anyone read the log, so the
         # remedy is printed next to the error rather than left to be rederived.
         run: |
+          [ -n "$REF" ] || { echo "::error::the ref step recorded no artifact reference, so there is nothing to seed from (steps.ref.outputs.ref is empty)"; exit 2; }
           set -o pipefail
-          # D110 recovery: dispatching with `seed` set to a ghcr digest (e.g.
-          # the 08-30 snapshot that still carries Debian:11) reruns tonight's
-          # build from that snapshot instead of an operator's machine -- selects the seed only, never --force.
-          if ! ./bin/assay db build --seed ${{ inputs.seed != '' && inputs.seed || steps.ref.outputs.ref }} 2>&1 | tee /tmp/build.log; then
+          # D110 recovery: dispatching with `seed` set to a full ghcr reference
+          # (`ghcr.io/kun9497/assay-db@sha256:<64 hex>`, e.g. the 08-30 snapshot
+          # that still carries Debian:11) reruns tonight's build from that
+          # snapshot instead of an operator's machine -- selects the seed only,
+          # never --force. Empty: the published tag, as every night.
+          seed="${SEED:-$REF}"
+          if ! ./bin/assay db build --seed "$seed" 2>&1 | tee /tmp/build.log; then
             if grep -q DENIED /tmp/build.log; then
-              echo "::error::GITHUB_TOKEN cannot reach ${{ steps.ref.outputs.ref }}."
+              echo "::error::GITHUB_TOKEN cannot reach $seed."
               echo "::error::Link the package to this repository once: the ghcr.io package page ->"
               echo "::error::Package settings -> Manage Actions access -> add kun9497/assay with Write."
               echo "::error::Artifacts pushed from here carry org.opencontainers.image.source and link"
@@ -292,6 +332,10 @@ jobs:
     needs: [publish]
     if: always() && needs.publish.result != 'skipped'
     runs-on: ubuntu-latest
+    # A checkout, a Go setup and one small commit: minutes. Without a cap a
+    # hang here (a stuck push to the status branch) ran to GitHub's 360
+    # minutes and reached the alert job as `cancelled` (QA 2026-11-02 #19).
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
@@ -307,7 +351,7 @@ jobs:
 
   # D138: one pinned issue per failing ops workflow, closed by the next
   # success. always(), so it runs when the job it watches failed; a
-  # cancelled or skipped run is ignored by the script.
+  # skipped run is ignored by the script and a cancelled one is a failure.
   alert:
     needs: [publish, status]
     if: always()
@@ -322,7 +366,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           # The watched job's result, unless it succeeded and status.json
-          # could not be published: that is a failure too.
-          RESULT: ${{ (needs.publish.result == 'success' && needs.status.result == 'failure') && 'failure' || needs.publish.result }}
+          # was not published: that is a failure too. `!= 'success'`, not
+          # `== 'failure'`: a status job cancelled by its timeout or by hand
+          # left status.json stale as surely as a failed one, and the old
+          # test read it as success and closed the pinned issue (QA
+          # 2026-11-02 #19). The status job is skipped only when the watched
+          # job was, and then the first conjunct is already false.
+          RESULT: ${{ (needs.publish.result == 'success' && needs.status.result != 'success') && 'failure' || needs.publish.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: sh scripts/ops-alert.sh db-publish "$RESULT" "$RUN_URL"

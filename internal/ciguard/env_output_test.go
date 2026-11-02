@@ -173,11 +173,13 @@ func TestEveryStepOutputMappedIntoEnvIsTestedNonEmpty(t *testing.T) {
 			t.Error(p)
 		}
 	}
-	// The sign and self-check steps of the two publishing workflows. Without
-	// this, a pattern matching nothing would pass every workflow.
-	for _, f := range []string{"db-publish.yml", "db-backfill.yml"} {
-		if perFile[f] != 2 {
-			t.Errorf("%s: judged %d env entries mapping a step output, want 2", f, perFile[f])
+	// The sign and self-check steps of the two publishing workflows, plus
+	// the nightly's Build step, which maps the resolved tag into REF since
+	// QA 2026-11-02 #16. Without this, a pattern matching nothing would pass
+	// every workflow.
+	for f, want := range map[string]int{"db-publish.yml": 3, "db-backfill.yml": 2} {
+		if perFile[f] != want {
+			t.Errorf("%s: judged %d env entries mapping a step output, want %d", f, perFile[f], want)
 		}
 	}
 }

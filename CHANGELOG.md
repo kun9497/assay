@@ -7,6 +7,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `--config none` runs a scan with no ignore file at all: `.assay.yaml` is not looked for in
+  the working directory and nothing is waived, and the report's provenance records
+  `ignoreFile.path: "none"`. Discovery reads the directory the scan runs from, so a scan of a
+  checkout you did not author ran under whatever waiver list it carried, and the only opt-out
+  was a file saying `ignore: []`. (QA 2026-11-02 P3 #23)
+
+### Changed
+- An empty `--config` value (`--config=`, `--config ""`) is refused at parse with a message
+  naming `none`; it used to mean "discover", silently. A job that passes an unset variable
+  there now exits 2 instead of scanning under whatever `.assay.yaml` the working directory
+  holds. (QA 2026-11-02 P3 #23)
+
 ### Fixed
 - A jar's entries are bounded in total, not only one at a time. The cataloger capped each
   entry's decompressed bytes at the 512 MiB per-file limit and nothing capped their sum, so a
@@ -31,6 +44,111 @@ All notable changes to this project are documented here. The format follows
   `/` or `\`, anything `filepath.Base` would shorten -- when the floors file is loaded, naming
   the entry. The name is joined into the `-capture` path, so `"name": "../../x"` wrote its
   captures outside the capture directory. (QA 2026-11-02 #25)
+- The `--fail-on-incomplete` / `--fail-on-incomplete=target` verdict prints an `error:` line on
+  stderr beside its exit 2, naming the counts and the flag form that fired --
+  `error: N package(s) not evaluated and M check(s) incomplete (--fail-on-incomplete)` or
+  `error: N package(s), check(s) or manifest(s) of the target itself could not be evaluated
+  (--fail-on-incomplete=target)`. It was the one exit 2 with no such line, and the provenance
+  sidecar's `run.error` for it, written from a private reason, said `--fail-on-incomplete` even
+  when `=target` had fired; the sidecar now records the printed line like every other exit 2.
+  stdout and the exit code are unchanged. (QA 2026-11-02 P3 #7)
+- The table's headline for a scan in which every finding was waived AND something was not
+  evaluated read "No vulnerabilities found in N package(s), but ... NOT a clean result", with the
+  Suppressed block under it listing the findings. The incomplete sentences now open with "No
+  unwaived vulnerabilities found in N package(s) (M suppressed), but ..."; a scan with no
+  waivers prints the sentences it did before. The 0.14.0 all-waived headline is unchanged for
+  a scan whose every check ran. (QA 2026-11-02 P3 #11)
+- `db update`'s hint on an unsigned artifact leads with the one benign cause: the nightly pushes
+  the tag in one step and signs it in the next, so a pull in that window (seconds, up to about a
+  minute with retries) sees "not signed" and was steered to `--allow-unsigned`. The hint now
+  says to retry in a minute if the publisher pushed moments ago, then the mirror clause, then
+  the opt-out. `db update` still makes one attempt. (QA 2026-11-02 P3 #21)
+### Changed
+- `--db-max-age` and `--db-max-rating-age` accept the space form (`--db-max-age 48h`) as well
+  as `=`, like `--timeout` and `--platform`. `docs/integrations.md` and D113 write both flags
+  as `--db-max-age <duration>`, and that copied spelling exited 2 while the `=` form beside it
+  worked (QA 2026-11-02 #12). A trailing bare flag with no value is still refused with the
+  same message, and a bad value in the space form is refused with the `=` form's wording.
+
+- Six stale statements in the documentation and help text (QA 2026-11-02 P3 #10, #13, #14,
+  #15, #20): the `--output sarif` help, `docs/DESIGN.md` and `docs/deferred-decisions.md` said
+  every not-evaluated result is note-level, when since D109 and D158 a manifest not read and a
+  component with no version or purl are warning-level; the README and `CLAUDE.md` counted ten
+  lockfile formats where `dirscan` reads thirteen; the README and `CLAUDE.md` named a terminal
+  D number (`D146`, `D79`, `D36`) that the roadmap had long passed, and now describe the
+  numbering without one; the signing entry in `docs/deferred-decisions.md` said verification
+  "follows in its second PR" after PR #181 (the second half of D137) had shipped it; and the frozen-key operating
+  procedure said `db-publish.yml`'s `workflow_dispatch` declares no inputs, when it has declared
+  the D110 `seed` input since #142 (and still no force switch). Korean copies updated alongside.
+- `scandiff`'s table prints two new columns, `A_BRIDGED` and `G_BRIDGED`, right after `GRYPE`:
+  how many tuples the bare-advisory bridge added into assay's set and into grype's. Measured
+  2026-10-13 on wolfi, `ASSAY` rose 46 to 74 while assay's own tuples fell 45 to 41, because 33
+  grype tuples were bridged into assay's set as grype's database grew -- a `maxFindings` breach
+  on a bridged target could be the comparison tool's growth, and the weekly review had to
+  measure the split by hand. No floor or ceiling changes meaning; an `ERROR` row prints `0 0`
+  like its other counters. The trivy comparison does not bridge and is unchanged.
+
+- An SPDX document whose DESCRIBES relationship names a real package no longer loses that
+  package. The parser dropped the first DESCRIBES target as the document-root pseudo-package
+  without checking that it was one, so a document describing the one versioned, purl-bearing
+  package it inventories (the project's own `tiny.spdx.json` among them) scanned as "no
+  components" -- not cataloged, not counted, in no skip bucket -- and exited 0 under
+  `--fail-on low --fail-on-incomplete`; with two DESCRIBES only the second survived. A
+  DESCRIBES target is now excluded only when it would not have become a package anyway (no
+  purl, `pkg:oci`, no version -- the shapes syft and Red Hat write for the root), every
+  DESCRIBES target is examined rather than the first alone, and a described real package is
+  cataloged and counted like any other (D84 revised). The ubi9-micro and syft-1.51 root
+  shapes are still dropped uncounted.
+- Both CSAF readers carry a leaf purl's `epoch=N` qualifier into the stored fixed version as
+  `N:version-release`, the shape the rpmdb cataloger writes for an installed build. Red Hat's
+  Hummingbird reader (D98) took the purl's `@version` alone and stopped at the `?`, so nginx
+  (epoch 2) and tomcat10/11 (epoch 1) were stored fixed at an epoch-less version that every
+  installed build sorts above, and a vulnerable build was reported clean -- 67 of the 403
+  distinct Hummingbird purls in the 160 newest live documents, on the image the weekly
+  differential scans (QA 2026-11-02 #4, P1). SUSE's reader (D77), which the Hummingbird one
+  was copied from, had the identical gap, latent because every epoch-qualified purl in its
+  archive is a Liberty Linux build the key fold refuses (#5, P3). Both now read the purl
+  through `pkgmeta.ParsePURL` and `pkgmeta.EVROf`, the rule the scan side has applied to SBOM
+  purls since D83: a zero or absent epoch stays unprefixed, an empty version never gains one,
+  and D131's split of a version-less SUSE build is unchanged. Each provider's progress line
+  counts the epoch-carrying fixed entries (`HummingbirdFixedWithEpoch`, `RecommendedWithEpoch`).
+  The published artifact's Hummingbird nginx and tomcat records stay wrong until the next
+  nightly rebuilds it.
+- An SBOM's deb and rpm packages are judged on their SOURCE version, as the image's are. Both
+  readers kept the source name from the purl's `upstream` qualifier and dropped the version --
+  deb's `util-linux@2.38.1-5+deb12u2` lost its `@` half, rpm's `httpd-2.4.62-1.fc40.src.rpm`
+  was stripped to the name -- so the matcher's source-version comparison (D41) never ran on
+  SBOM input and the binary's own version, epoch included, was compared with a source-keyed
+  fix: bsdutils `1:2.38.1-5+deb12u3` from util-linux `2.38.1-5+deb12u2` was a finding from the
+  image's dpkg status and clean from the same package's CycloneDX or SPDX, with no skip (QA
+  2026-11-02 #1). deb keeps the version half, and the CycloneDX reader fills it from
+  `syft:metadata:sourceVersion` when the purl names the source without one; rpm keeps the
+  SRPM's version-release and places its epoch by D153's rule over the whole document (the
+  main package's, else the siblings'), so mod_ssl `1:2.4.62` beside httpd is found through
+  httpd and perl-B beside perl `4:5.32.1` is not flagged. A VEX statement written against a
+  deb source version now applies to the SBOM's binaries built from it. The report's existing
+  `source.version` field is filled; no schema change.
+- `db status` reads Ubuntu LTS and SUSE service-pack releases when it prints the `covers:`
+  range. The release parser cut at `.` and required a bare number on both sides, so
+  `Ubuntu:22.04:LTS` and `SLES:15.SP7` were unparseable and sorted past every parsed release;
+  against a real database the line read `Ubuntu:23.10..26.04:LTS (11 releases)` and
+  `SLES:11..15.SP7 (21 releases)` while the database held Ubuntu 14.04:LTS through 22.04:LTS
+  and SLES 16.0/16.1 -- telling an Ubuntu 20.04 or SLES 16 operator their release was outside
+  the range (QA 2026-11-02, #9). A `:`-suffix is now dropped before the number is read and
+  `SP` is the minor, so the same database prints `Ubuntu:14.04:LTS..26.04:LTS (11 releases)`
+  and `SLES:11..16.1 (21 releases)`. Shapes that still do not parse (`edge`, `stream`,
+  `rolling`) keep the lexical fallback, and two spellings of one number order as strings so
+  the ends do not depend on sort order. `--output json` lists the keys verbatim and was
+  already right; the count never changed.
+- An installed version no comparer can read (dpkg's empty Version, `(none)`, a malformed
+  string) is now skipped with the target's cause against every advisory, open-ended ranges
+  included. Before, a `[0, )` range -- Debian's unfixed set, every CSAF no-fix entry -- resolved
+  its sentinel without comparing and reported the package AFFECTED, with evidence naming a
+  comparison nobody made, while the fixed-range advisory beside it was correctly skipped (D9,
+  D30). (QA 2026-11-02 #2)
+- A range with closing bounds but no `introduced` event is refused as malformed and lands in
+  the skipped list, instead of walking to a silent "not affected". No current provider emits
+  the shape; the OSV schema requires an `introduced` per range. (QA 2026-11-02 #3)
 - `db build` retries a Photon OS feed file through a transient failure instead of failing the
   whole build on the first non-200. The provider made one GET per major; the 2026-10-17 nightly
   publish died on a 404 from the Photon CDN for one of the three fixed
@@ -54,6 +172,34 @@ All notable changes to this project are documented here. The format follows
   times and the job then reported the artifact "pushed and UNSIGNED" about a name nothing was
   pushed under. `internal/ciguard` now holds every step that maps a step output into `env` to
   such a first-line check, and to a producer declared earlier in the same job.
+- The nightly publish's `seed` input reaches the build through `env`, not by expression
+  substitution into the script text, and is refused before anything is built unless it is
+  `ghcr.io/kun9497/assay-db@sha256:<64 hex>` or `ghcr.io/kun9497/assay-db:<tag>`, the error
+  naming both forms. Before, the dispatcher-written value was rendered into the Build step's
+  command line in a job whose later steps hold the signing key -- the rule `db-sign.yml` had
+  stated since D137 and `db-backfill.yml` followed -- and the input's description asked for "a
+  ghcr digest", which a bare `sha256:<hex>` satisfies and go-containerregistry parses as the
+  Docker Hub tag `index.docker.io/library/sha256:<hex>`, so a D110 recovery dispatched that way
+  failed an hour in. `internal/ciguard` now refuses an expression that reads an input inside
+  any workflow's `run:` block. (QA 2026-11-02 #16, #17)
+- The alert job of the publish, sign and backfill workflows reads a status job that did not
+  succeed -- failed, or cancelled by its timeout or by hand -- as a failure. Before, only
+  `failure` counted, so a watched job that passed and a status job that hung until GitHub's
+  360-minute cancellation (it had no `timeout-minutes`) reached `scripts/ops-alert.sh` as a
+  success, which closed and unpinned the failure issue although `status.json` was never
+  refreshed, while the script's own header says a cancelled job is a failure. The three status
+  jobs carry `timeout-minutes: 15`, and `internal/ciguard` holds every alert job's `RESULT`
+  expression and every status job's timeout. (QA 2026-11-02 #19)
+
+### Changed
+- The nightly publish is scheduled at `17 5 * * *` (05:17 UTC) and the weekly scanner
+  differential at `23 20 * * 0` (Sunday 20:23 UTC), off minute 0 where GitHub's queue is
+  longest: every one of the twenty nightlies from 2026-10-13 to 11-02 on `0 6 * * *` started
+  4.2 to 7.6 hours late (10:12Z to 13:38Z), and the weekly on `0 21 * * 0` 2 to 3.5 hours late
+  (22:57Z to 00:30Z), leaving the Monday review routine about fifty minutes of margin. The
+  hours are pulled forward so a run that is still late lands where the old one did; the
+  expected start windows are recorded in `docs/DESIGN.md` next to `status.json`, and the
+  weekly's comment no longer claims "Monday 06:00 KST". (QA 2026-11-02 #18)
 
 ## [0.14.0] - 2026-11-02
 

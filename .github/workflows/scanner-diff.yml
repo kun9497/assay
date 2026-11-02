@@ -20,9 +20,17 @@
 name: scanner differential
 
 on:
-  # 0 21 * * 0 = Sunday 21:00 UTC = Monday 06:00 KST.
+  # Sunday 20:23 UTC (Monday 05:23 KST) is a LOWER BOUND on the start, not
+  # the start: GitHub queues scheduled runs, and on minute 0 the weekly began
+  # 2 to 3.5 hours late (22:57Z to 00:30Z on `0 21 * * 0`), so the old
+  # comment's "Monday 06:00 KST" was hours wrong and the Monday review
+  # routine, which reads this run's log at 01:30 UTC, had about 50 minutes
+  # of margin on 2026-11-02. Off minute 0 (QA 2026-11-02 #18) the queue is
+  # shorter; expect the run between about 20:25Z and 00:00Z, and keep any
+  # reader of its log at least three hours after this cron. The nightly
+  # (db-publish.yml, 05:17Z) stays well before it.
   schedule:
-    - cron: "0 21 * * 0"
+    - cron: "23 20 * * 0"
   workflow_dispatch:
 
 permissions:

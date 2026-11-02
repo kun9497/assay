@@ -48,6 +48,21 @@ func TestPull_RefusesAnUnsignedArtifactBeforeUnpacking(t *testing.T) {
 	if !strings.Contains(errOut.String(), "--allow-unsigned") {
 		t.Errorf("stderr does not name the explicit way out:\n%s", errOut.String())
 	}
+	// QA 2026-11-02 P3 #21: the one benign cause comes first. The nightly
+	// pushes the tag in one step and signs it in the next, so a pull in
+	// that window sees "not signed" -- and a hint that led with the mirror
+	// clause and --allow-unsigned steered an operator who only had to wait
+	// a minute into installing unverified. Order is the point: retry, then
+	// the mirror, then the opt-out.
+	hint := errOut.String()
+	retry, mirror, allow := strings.Index(hint, "retry in a minute"), strings.Index(hint, "a mirror must copy"), strings.Index(hint, "--allow-unsigned")
+	if retry < 0 || !strings.Contains(hint, "pushed moments ago") {
+		t.Errorf("stderr does not say a just-pushed artifact's signature may still be on its way:\n%s", hint)
+	}
+	if !(retry < mirror && mirror < allow) {
+		t.Errorf("hint order: retry at %d, mirror at %d, --allow-unsigned at %d; want retry first and the opt-out last:\n%s",
+			retry, mirror, allow, hint)
+	}
 	if _, err := os.Stat(dst + ".tmp"); !os.IsNotExist(err) {
 		t.Error("an unsigned artifact was unpacked before it was refused (temp file exists)")
 	}
