@@ -7,6 +7,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- `scandiff`'s table prints two new columns, `A_BRIDGED` and `G_BRIDGED`, right after `GRYPE`:
+  how many tuples the bare-advisory bridge added into assay's set and into grype's. Measured
+  2026-10-13 on wolfi, `ASSAY` rose 46 to 74 while assay's own tuples fell 45 to 41, because 33
+  grype tuples were bridged into assay's set as grype's database grew -- a `maxFindings` breach
+  on a bridged target could be the comparison tool's growth, and the weekly review had to
+  measure the split by hand. No floor or ceiling changes meaning; an `ERROR` row prints `0 0`
+  like its other counters. The trivy comparison does not bridge and is unchanged.
+
 ### Fixed
 - `db build` retries a Photon OS feed file through a transient failure instead of failing the
   whole build on the first non-200. The provider made one GET per major; the 2026-10-17 nightly
