@@ -8,6 +8,16 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- `db build` retries a Photon OS feed file through a transient failure instead of failing the
+  whole build on the first non-200. The provider made one GET per major; the 2026-10-17 nightly
+  publish died on a 404 from the Photon CDN for one of the three fixed
+  `cve_data_photon<N>.json` URLs, and the file was back the next night. Each major is now
+  fetched up to three times with the 0.5s/1s backoff Fedora's provider uses, on 429, 5xx, a
+  connection reset or truncated body mid-download, and -- unlike Fedora, because these three
+  URLs are fixed and known-good -- 404. Other 4xx, cancellation and a decode error on an intact
+  body still fail at once; a file that is really gone fails after three attempts with the
+  attempt count in the error. Every retry is announced on the build's progress output with the
+  URL, the failure and the attempt. The Last-Modified reading is unchanged.
 - A scan run with `--fail-on-eol` warns on stderr when the database's end-of-life data was
   generated more than seven days ago, naming the date and what to run. A ratings-only build
   with `EOL_ENABLE=0` keeps its seed's catalog, as old as the seed, and the D139 warning reads
