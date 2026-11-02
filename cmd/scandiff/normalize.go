@@ -386,7 +386,18 @@ func assayOnlyFixed(adoc assayDocument, gSet map[tuple]struct{}) int {
 // emitting every advisory id on both sides -- was measured on the audit's
 // captures and rejected: it inflates ubi8n18's onlyAssay from 4531 to
 // 10152 while recovering the same dozen tuples this recovers.
-func bridgeBareIDs(adoc assayDocument, gdoc grypeDocument, aSet, gSet map[tuple]struct{}) {
+//
+// The two returned counts are how many tuples the bridge ADDED into aSet
+// (intoAssay) and into gSet (intoGrype); a tuple both sets already held is
+// not counted, since the bridge did not add it. run prints them as the
+// table's A_BRIDGED and G_BRIDGED columns so a maxFindings breach on a
+// bridged target can be read as native growth or bridged growth without a
+// hand count: measured 2026-10-13 on wolfi, ASSAY rose 46 -> 74 while
+// assay's own tuples fell 45 -> 41, because 33 grype tuples were bridged
+// into assay's set as grype's database grew. The counts are printed only --
+// no floor or ceiling reads them, and whether a ceiling should judge the
+// native count alone is a question still open.
+func bridgeBareIDs(adoc assayDocument, gdoc grypeDocument, aSet, gSet map[tuple]struct{}) (intoAssay, intoGrype int) {
 	assayNames := make(map[tuple]struct{})
 	for _, f := range adoc.Findings {
 		add := func(id string) {
@@ -427,15 +438,25 @@ func bridgeBareIDs(adoc assayDocument, gdoc grypeDocument, aSet, gSet map[tuple]
 			continue
 		}
 		if _, ok := grypeNames[t]; ok {
+			if _, had := gSet[t]; !had {
+				intoGrype++
+			}
 			gSet[t] = struct{}{}
 		}
 	}
+	// The second pass ranges over gSet AFTER the first added to it; every
+	// tuple the first pass added is already in aSet, so the "already held"
+	// check is what keeps it out of intoAssay.
 	for t := range gSet {
 		if isCVE(t.ID) {
 			continue
 		}
 		if _, ok := assayNames[t]; ok {
+			if _, had := aSet[t]; !had {
+				intoAssay++
+			}
 			aSet[t] = struct{}{}
 		}
 	}
+	return intoAssay, intoGrype
 }
