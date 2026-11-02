@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-02
+
 ### Fixed
 - 이미지 layer 하나 안에서 같은 경로의 마지막 항목을 스캔이 읽습니다. 나중 파일, 링크, 타입 변경, whiteout
   이 앞의 것을 대체하며, tar 를 풀었을 때 디스크에 남는 것과 같습니다. 전에는 첫 항목이 이겨서, 조작된 layer
@@ -384,7 +386,8 @@
   여덟 개 언어 생태계를 다룹니다. CI에 종료 코드 0, 1, 2를 줍니다. 출력은 표, JSON, SARIF입니다.
   **(보고서 schemaVersion 8; 저장소 스키마 9)** (결정 기록 D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.13.0...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.14.0...main
+[0.14.0]: https://github.com/kun9497/assay/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/kun9497/assay/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/kun9497/assay/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/kun9497/assay/compare/v0.10.0...v0.11.0

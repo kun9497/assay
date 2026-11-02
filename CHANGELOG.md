@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-02
+
 ### Fixed
 - Inside one image layer, the last entry for a path is what the scan reads -- a later file,
   link, type change or whiteout replaces an earlier one -- as tar extraction leaves it on
@@ -428,7 +430,8 @@ All notable changes to this project are documented here. The format follows
   ecosystems. Gives CI an exit code of 0, 1 or 2. Output as table, JSON or SARIF.
   **(report schemaVersion 8; store schema 9)** (decision log D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.13.0...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.14.0...main
+[0.14.0]: https://github.com/kun9497/assay/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/kun9497/assay/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/kun9497/assay/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/kun9497/assay/compare/v0.10.0...v0.11.0
