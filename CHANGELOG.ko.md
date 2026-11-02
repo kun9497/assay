@@ -16,6 +16,13 @@
   `ERROR` 행은 다른 카운터처럼 `0 0` 을 찍습니다. trivy 비교는 bridge 하지 않으므로 그대로입니다.
 
 ### Fixed
+- 어떤 comparer 도 읽지 못하는 설치 버전(dpkg 의 빈 Version, `(none)`, 잘못된 문자열)은 이제 열린 범위를
+  포함한 모든 advisory 에 대해 target 원인으로 건너뜁니다. 전에는 `[0, )` 범위(Debian 의 미수정 집합, 모든
+  CSAF no-fix 항목)가 비교 없이 sentinel 을 풀어 패키지를 AFFECTED 로 보고했고, 아무도 하지 않은 비교를 evidence
+  가 적었으며, 바로 옆의 fixed 범위 advisory 는 올바르게 건너뛰어졌습니다(D9, D30). (QA 2026-11-02 #2)
+- 닫는 경계만 있고 `introduced` 이벤트가 없는 범위는 잘못된 범위로 거부되어 건너뛴 목록에 들어갑니다. 전에는
+  조용히 "영향 없음" 으로 걸어갔습니다. 현재 어떤 provider 도 이 꼴을 내지 않으며, OSV 스키마는 범위마다
+  `introduced` 를 요구합니다. (QA 2026-11-02 #3)
 - `db build` 는 Photon OS 피드 파일을 일시적 실패에 대해 재시도하며, 첫 non-200 응답에 빌드 전체를
   실패시키지 않습니다. 이 provider 는 major 당 GET 을 한 번만 보냈고, 2026-10-17 야간 발행은 고정된 세
   `cve_data_photon<N>.json` URL 중 하나에 Photon CDN 이 돌려준 404 로 죽었으며 그 파일은 다음 날 밤
