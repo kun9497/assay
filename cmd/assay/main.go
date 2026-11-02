@@ -146,10 +146,12 @@ Scan flags (any order, before or after the target):
                         results as well as tool notifications, because a partial
                         scan must not read as a complete one (D55).
   --config <path>       Ignore rules to apply (default: .assay.yaml in the
-                        working directory, if present). Each rule waives a
-                        matching finding with a stated reason; waived findings
-                        are shown as suppressed and counted apart, never hidden,
-                        and never trip --fail-on.
+                        working directory the scan runs from, if present;
+                        --config none applies no ignore file and skips that
+                        discovery). Each rule waives a matching finding with a
+                        stated reason; waived findings are shown as suppressed
+                        and counted apart, never hidden, and never trip
+                        --fail-on.
   --vex <path>          An OpenVEX document (v0.2.0 or legacy v0.0.1) whose
                         not_affected/fixed statements suppress the findings
                         they exonerate, the same shown-and-counted way
@@ -1462,10 +1464,14 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 			if i >= len(args) {
 				return "", scancmd.Options{}, fmt.Errorf("--config requires a value")
 			}
-			opts.IgnoreFile = args[i]
+			if err := setConfig(&opts, args[i]); err != nil {
+				return "", scancmd.Options{}, err
+			}
 
 		case strings.HasPrefix(a, "--config="):
-			opts.IgnoreFile = strings.TrimPrefix(a, "--config=")
+			if err := setConfig(&opts, strings.TrimPrefix(a, "--config=")); err != nil {
+				return "", scancmd.Options{}, err
+			}
 
 		// D104. Repeatable — grype's own flag name and shape (D18) — so
 		// --vex a.json --vex b.json applies both documents, in the order
@@ -1590,6 +1596,20 @@ func setPlatform(opts *scancmd.Options, v string) error {
 		return err
 	}
 	opts.Platform = v
+	return nil
+}
+
+// setConfig stores --config's value on opts.IgnoreFile, refusing an empty
+// one. An empty value is what scancmd reads as "discover .assay.yaml in the
+// working directory" — the default — so `--config=` used to be a silent
+// no-op, and there was no spelling that turned discovery OFF (QA 2026-11-02
+// P3 #23). `none` is that spelling; the refusal names it so the person who
+// typed `--config=` meaning "no config" is told the word.
+func setConfig(opts *scancmd.Options, v string) error {
+	if v == "" {
+		return fmt.Errorf("--config requires a non-empty path (pass `--config none` to apply no ignore file)")
+	}
+	opts.IgnoreFile = v
 	return nil
 }
 

@@ -7,7 +7,34 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `--config none` runs a scan with no ignore file at all: `.assay.yaml` is not looked for in
+  the working directory and nothing is waived, and the report's provenance records
+  `ignoreFile.path: "none"`. Discovery reads the directory the scan runs from, so a scan of a
+  checkout you did not author ran under whatever waiver list it carried, and the only opt-out
+  was a file saying `ignore: []`. An empty `--config` value (`--config=`), which used to mean
+  "discover", is refused at parse with a message naming `none`. (QA 2026-11-02 P3 #23)
+
 ### Fixed
+- The `--fail-on-incomplete` / `--fail-on-incomplete=target` verdict prints an `error:` line on
+  stderr beside its exit 2, naming the counts and the flag form that fired --
+  `error: N package(s) not evaluated and M check(s) incomplete (--fail-on-incomplete)` or
+  `error: N package(s) or manifest(s) of the target itself not evaluated
+  (--fail-on-incomplete=target)`. It was the one exit 2 with no such line, and the provenance
+  sidecar's `run.error` for it, written from a private reason, said `--fail-on-incomplete` even
+  when `=target` had fired; the sidecar now records the printed line like every other exit 2.
+  stdout and the exit code are unchanged. (QA 2026-11-02 P3 #7)
+- The table's headline for a scan in which every finding was waived AND something was not
+  evaluated read "No vulnerabilities found in N package(s), but ... NOT a clean result", with the
+  Suppressed block under it listing the findings. The incomplete sentences now open with "No
+  unwaived vulnerabilities found in N package(s) (M suppressed), but ..."; a scan with no
+  waivers prints the sentences it did before. The 0.14.0 all-waived headline is unchanged for
+  a scan whose every check ran. (QA 2026-11-02 P3 #11)
+- `db update`'s hint on an unsigned artifact leads with the one benign cause: the nightly pushes
+  the tag in one step and signs it in the next, so a pull in that window (seconds, up to about a
+  minute with retries) sees "not signed" and was steered to `--allow-unsigned`. The hint now
+  says to retry in a minute if the publisher pushed moments ago, then the mirror clause, then
+  the opt-out. `db update` still makes one attempt. (QA 2026-11-02 P3 #21)
 - `db build` retries a Photon OS feed file through a transient failure instead of failing the
   whole build on the first non-200. The provider made one GET per major; the 2026-10-17 nightly
   publish died on a 404 from the Photon CDN for one of the three fixed

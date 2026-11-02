@@ -691,7 +691,9 @@ func TestRun_D120_SPDXDocumentNamespace(t *testing.T) {
 	}
 }
 
-// The one exit 2 that prints no error line still gives the sidecar a cause.
+// The --fail-on-incomplete verdict's cause reaches the sidecar the way every
+// other exit 2's does: through the error line it prints (QA 2026-11-02 P3 #7;
+// before, it printed none and the recorder carried a private reason for it).
 func TestRun_D120_IncompleteVerdictHasAnError(t *testing.T) {
 	dir := t.TempDir()
 	db := provDB(t, dir)
@@ -707,7 +709,7 @@ func TestRun_D120_IncompleteVerdictHasAnError(t *testing.T) {
 		t.Fatalf("Run = %d, want 2 (npm is not covered)", code)
 	}
 	sc := readSidecar(t, side)
-	if e := at(t, sc, "run", "error"); e != "evaluation incomplete (--fail-on-incomplete)" {
+	if e := at(t, sc, "run", "error"); e != "1 package(s) not evaluated and 0 check(s) incomplete (--fail-on-incomplete)" {
 		t.Errorf("run.error = %v", e)
 	}
 	if at(t, sc, "run", "reportSha256") == nil {

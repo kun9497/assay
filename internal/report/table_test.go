@@ -578,6 +578,59 @@ func TestTable_ComponentsTheCatalogerDroppedBreakTheCleanHeadline(t *testing.T) 
 	}
 }
 
+// QA 2026-11-02 P3 #11: every finding waived and something not evaluated.
+// The incomplete branch wins (an incomplete scan is never "clean"), but its
+// sentence must not say "No vulnerabilities found" over a Suppressed block
+// that lists one. All three incomplete sentences carry the waiver count.
+func TestTable_IncompleteHeadlineSaysWhenEveryFindingWasWaived(t *testing.T) {
+	waived := []matcher.Suppressed{{
+		Finding: matcher.Finding{
+			Package:  pkgmeta.Package{Name: "lib", Version: "1.0.0", Ecosystem: "npm"},
+			Advisory: advisory.Advisory{ID: "GHSA-waived"},
+			Severity: severity.High,
+		},
+		Reason: "accepted", Source: "ignore-file",
+	}}
+	whole := matcher.Skipped{Package: pkgmeta.Package{Name: "a", Version: "1", Ecosystem: "Alpine:v3.99"},
+		Reason: `ecosystem "Alpine:v3.99" is not in this database`}
+	partial := matcher.Skipped{Package: pkgmeta.Package{Name: "lib", Version: "1.0.0", Ecosystem: "npm"},
+		AdvisoryID: "GHSA-bound", Reason: "range bound does not parse"}
+	for _, tc := range []struct {
+		name    string
+		skipped []matcher.Skipped
+		want    string
+	}{
+		{"not checked", []matcher.Skipped{whole},
+			"No unwaived vulnerabilities found in 1 package(s) (1 suppressed), but 1 package(s) were not checked at all - this is NOT a clean result."},
+		{"check incomplete", []matcher.Skipped{partial},
+			"No unwaived vulnerabilities found in 2 package(s) (1 suppressed), but 1 check(s) could not be completed - this is NOT a clean result."},
+		{"both", []matcher.Skipped{whole, partial},
+			"No unwaived vulnerabilities found in 1 package(s) (1 suppressed), but 1 package(s) were not checked and 1 check(s) could not be completed - this is NOT a clean result."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			if _, err := Table(&buf, matcher.Result{Suppressed: waived, Skipped: tc.skipped},
+				cyclonedx.Stats{Components: 2, Cataloged: 2}, nil, EOLStatus{}, Coverage{}, false); err != nil {
+				t.Fatal(err)
+			}
+			first, _, _ := strings.Cut(buf.String(), "\n")
+			if first != tc.want {
+				t.Errorf("headline = %q\n          want %q", first, tc.want)
+			}
+		})
+	}
+	// Nothing waived: the sentences are unchanged, so a pipeline grepping
+	// the old headline is not broken by a scan that had no waivers.
+	var buf bytes.Buffer
+	if _, err := Table(&buf, matcher.Result{Skipped: []matcher.Skipped{whole}},
+		cyclonedx.Stats{Components: 2, Cataloged: 2}, nil, EOLStatus{}, Coverage{}, false); err != nil {
+		t.Fatal(err)
+	}
+	if first, _, _ := strings.Cut(buf.String(), "\n"); first != "No vulnerabilities found in 1 package(s), but 1 package(s) were not checked at all - this is NOT a clean result." {
+		t.Errorf("headline with nothing waived = %q", first)
+	}
+}
+
 // D13: the band and its score are rendered together, and Unknown must not
 // print a fabricated score. "unknown (0.0)" would read as a real rating of
 // zero — the exact coercion D17 exists to forbid — so Unknown gets no
