@@ -741,6 +741,81 @@ func TestAnnotate_DoesNotRetryAPermanentFailure(t *testing.T) {
 	}
 }
 
+// NVD answers rate limiting with 403 Forbidden, not only 429 -- its API
+// documentation names 403 as the response to a client over the rolling-window
+// limit. Treated as permanent, one throttled page ended a multi-hour sync
+// (audit 2026-10-22 P4, re-verified 2026-11-02: 403 then 200 made one request
+// and failed).
+//
+// Driven through Annotate, not retryable, so the assertion is on the sync
+// recovering: the retried page's rating is emitted and exactly one retry was
+// made.
+func TestAnnotate_RetriesARateLimit403(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		io.WriteString(w, `{"totalResults":1,"vulnerabilities":[{"cve":{"id":"CVE-2026-4031","metrics":{"cvssMetricV31":[{"cvssData":{"vectorString":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]}}}],"timestamp":"2026-11-02T00:00:00.000"}`)
+	}))
+	defer srv.Close()
+
+	var progress bytes.Buffer
+	var got []advisory.Rating
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0), Progress: &progress})
+	if _, err := p.Annotate(context.Background(), func(r advisory.Rating) error {
+		got = append(got, r)
+		return nil
+	}); err != nil {
+		t.Fatalf("Annotate failed on a throttled page: %v", err)
+	}
+	if calls != 2 {
+		t.Errorf("made %d requests, want 2 -- a 403 is NVD throttling, not a bad request", calls)
+	}
+	if len(got) != 1 || got[0].CVE != "CVE-2026-4031" {
+		t.Errorf("emitted %+v, want the retried page's one rating", got)
+	}
+	if !strings.Contains(progress.String(), "retrying in") {
+		t.Errorf("progress = %q, want the throttled retry announced", progress.String())
+	}
+}
+
+// ...and a 403 that never clears still fails, loudly, once the schedule is
+// spent. Retrying 403 also retries a 403 that is not throttling (a rejected
+// key, a blocked address), so the bound is what keeps that from hanging the
+// build: it costs the retry budget, then reports the status.
+//
+// The error is checked by its status code, not by Contains("403"): the
+// message embeds the test server's URL, and an ephemeral port such as 54031
+// would satisfy the substring with the status missing.
+func TestAnnotate_APersistent403ExhaustsTheScheduleAndFails(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	restoreWaits := retryWaits
+	retryWaits = []time.Duration{0, 0, 0}
+	defer func() { retryWaits = restoreWaits }()
+
+	p := New(Options{BaseURL: srv.URL, PageSize: 100, Pause: durPtr(0)})
+	_, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil })
+	if err == nil {
+		t.Fatal("Annotate succeeded against a permanent 403")
+	}
+	var se *httpStatusError
+	if !errors.As(err, &se) || se.code != http.StatusForbidden {
+		t.Errorf("err = %v, want the 403 itself reported", err)
+	}
+	if want := len(retryWaits) + 1; calls != want {
+		t.Errorf("made %d requests, want %d -- a 403 is retried on the same schedule as a 5xx", calls, want)
+	}
+}
+
 // Retries are bounded: a genuine outage fails the build rather than
 // hanging it.
 func TestAnnotate_GivesUpAfterTheRetryScheduleIsExhausted(t *testing.T) {
@@ -1062,6 +1137,8 @@ func TestRetryable_JudgesTheCallersContextNotTheError(t *testing.T) {
 	}{
 		{http.StatusNotFound, false},
 		{http.StatusBadRequest, false},
+		{http.StatusUnauthorized, false},
+		{http.StatusForbidden, true},
 		{http.StatusTooManyRequests, true},
 		{http.StatusServiceUnavailable, true},
 		{http.StatusInternalServerError, true},
