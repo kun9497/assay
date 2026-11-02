@@ -22,7 +22,7 @@ All notable changes to this project are documented here. The format follows
   lockfile formats where `dirscan` reads thirteen; the README and `CLAUDE.md` named a terminal
   D number (`D146`, `D79`, `D36`) that the roadmap had long passed, and now describe the
   numbering without one; the signing entry in `docs/deferred-decisions.md` said verification
-  "follows in its second PR" after PR #181 (D150) had shipped it; and the frozen-key operating
+  "follows in its second PR" after PR #181 (the second half of D137) had shipped it; and the frozen-key operating
   procedure said `db-publish.yml`'s `workflow_dispatch` declares no inputs, when it has declared
   the D110 `seed` input since #142 (and still no force switch). Korean copies updated alongside.
 - `db build` retries a Photon OS feed file through a transient failure instead of failing the

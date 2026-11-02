@@ -1431,7 +1431,7 @@ mechanism.
 
 ---
 
-### ~~Signing and provenance for the published database artifact~~ — resolved in D137 (2026-10-22; signing shipped first, verification followed in PR #181, D150)
+### ~~Signing and provenance for the published database artifact~~ — resolved in D137 (2026-10-22; signing shipped first, verification followed in PR #181, the second half of D137)
 
 **What runs beside the key (audit A18, 2026-10-30).** Signing left the jobs that hold the
 key running third-party code pinned by nothing firmer than a tag. The nightly publish job

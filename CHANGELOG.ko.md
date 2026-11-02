@@ -20,7 +20,7 @@
   했지만, D109 와 D158 이후 읽지 못한 manifest 와 버전이나 purl 이 없는 컴포넌트는 warning 수준입니다;
   README 와 `CLAUDE.md` 는 `dirscan` 이 열세 가지를 읽는 lockfile 형식을 열 가지로 셌습니다; README 와
   `CLAUDE.md` 는 로드맵이 한참 지나친 끝 번호(`D146`, `D79`, `D36`)를 적고 있었고, 이제 끝 번호 없이
-  번호 체계만 설명합니다; `docs/deferred-decisions.md` 의 서명 항목은 PR #181(D150)이 검증을 이미
+  번호 체계만 설명합니다; `docs/deferred-decisions.md` 의 서명 항목은 PR #181(D137 의 둘째 절반)이 검증을 이미
   내보낸 뒤에도 "검증은 둘째 PR 에서" 라고 했습니다; frozen 키 운영 절차는 `db-publish.yml` 의
   `workflow_dispatch` 가 입력을 하나도 선언하지 않는다고 했지만 #142 이후 D110 의 `seed` 입력을
   선언하고 있습니다(force 스위치는 여전히 없음). 한국어 사본도 함께 고쳤습니다.
