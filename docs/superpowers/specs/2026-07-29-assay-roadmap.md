@@ -5321,7 +5321,8 @@ a bare product, and its component (the leaf's `product_id`) is the rpm package n
 no version. An id from `recommended` names a shipped build, and its purl carries the name and
 the fix version, as before. The leaf must still exist with a readable purl — an id naming no
 leaf, or a leaf with no purl (the `java-1_7_0-openjdk` gap), stays a counted skip rather than
-a name guessed from the raw string. `BareNamedByProductID` counts every bare id whose purl
+a name guessed from the raw string. (Revised by D159: a bare id naming no leaf at all is named
+by its product_id.) `BareNamedByProductID` counts every bare id whose purl
 would have given a different name and is printed on the progress line — per id, before D91's
 LTSS shadowing: 70,463 on the 2026-10-19 archive (69,697 status ids, 766 remediation ids),
 which are the 11,753 distinct document-and-package pairs the survey below counts in.
@@ -7265,6 +7266,70 @@ Eight mutations were all caught:
 - the rule left undeclared, or declared twice;
 - each counter dropped;
 - each level swapped.
+
+---
+
+### D159 — A bare SUSE id with no leaf is named by its product_id (revises D126)
+
+**Decision.** A `known_affected`, `known_not_affected` or no-fix remediation id whose
+component has no `product_version` leaf in the document is named by its `product_id`, as
+D126 names every bare id, instead of being skipped. Two cases keep D126's skip:
+- a `recommended` id with no leaf, because the fixed version comes from the leaf's purl;
+- a bare id whose leaf exists but carries no readable purl (the `java-1_7_0-openjdk` gap),
+  because that leaf is one SUSE wrote and this reader could not read, not one SUSE left out.
+
+`BareNamedWithoutLeaf` counts each id named this way, per id like `BareNamedByProductID`,
+and the progress line prints it beside D126's counter. The same line now also prints
+`SkippedNoPurl`, which was counted and never shown.
+
+**Why.** The 2026-10-22 audit's contested B2, re-verified on 2026-11-02. SUSE leaves the
+leaf out for a package it has shipped no build of on that release yet. The bare id is then
+the document's only statement about the release, and D126's leaf requirement dropped it. In
+the worst case nothing in the document resolved, and the whole document was lost. D126's
+reason for the requirement was to avoid "a name guessed from the raw string". For a bare id
+that reason does not apply, because D126 already takes the name from that raw string, so
+the leaf's absence carried no information. The drop was a silent false negative of no-fix
+states on current releases, and it left only a progress-line counter behind.
+
+Measured on 688 readable documents fetched from the live feed on 2026-11-02 (the 300 most
+recently changed 2026 CVEs among them):
+
+| | before | after |
+|---|---|---|
+| ids skipped as naming no readable leaf | 3,478 | 0 |
+| ids named by product_id without a leaf | — | 3,478 |
+| documents yielding a record | 455 | 597 |
+| affected entries | 53,014 | 55,890 |
+| entries with no fix available | 13,854 | 16,730 |
+
+The 2,876 added entries are all no-fix. On SLES 15 SP4–SP7 and 12 SP5 they are mostly
+MozillaFirefox, kernel, terraform and apache2, and through D108 they mirror onto each Leap
+codestream like any SLE entry. Of the 10,737 `known_affected` ids on SLES 15 SPx and 16.x in
+the first 699-document sample, 686 named no leaf. None was a no-purl leaf, a
+`full_product_names` entry or a relationship reference. None had a recommended build of the
+same package on the same platform, so each was the only statement for its key.
+
+**Scope.** No fixed version changes: SUSE ships a fix through a `recommended` build, which
+has a leaf. The added findings are "affected, no fix" (wont-fix when a `no_fix_planned`
+remediation names the same id). D146's `maxAssayOnlyFixed` does not count them. The weekly
+`maxFindings` ceilings on leap156 (500, at 342 on 2026-11-01) and bci156 (880, at 462) are
+where growth would show. The nightly gate reports ceilings only as information. It is a
+database change: it reaches `db update` with the first nightly after merge.
+
+**Verified.**
+- `TestD159_LeaflessBareIDIsJudgedAffectedNoFix` drives the live shape through `convert`,
+  the real store and the matcher. An installed MozillaFirefox on SLES 15 SP6 is reported
+  affected with no fix, carrying the remediation's wont-fix.
+- `TestConvert_BareIDNamingNoLeafIsNamedByProductID` replaces D126's skip row and holds the
+  D108 mirror, the D125 not-affected id and the counters.
+- `TestD159_RecommendedAndNoPurlLeavesStillSkip` holds the two skips D159 keeps.
+
+Six mutations were all caught:
+- the new branch removed;
+- the no-purl skip removed;
+- the no-purl leaf left out of the map;
+- the counter not bumped;
+- each of the two counters dropped from the progress line.
 
 ---
 

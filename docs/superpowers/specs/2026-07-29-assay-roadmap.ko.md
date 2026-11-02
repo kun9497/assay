@@ -5147,7 +5147,8 @@ D108에 대해 기록한 allowlist 재검토 계기이며, 추가되기 전까�
 그 component(leaf의 `product_id`)가 곧 rpm 패키지 이름이고 버전은 없습니다. `recommended`에서 온
 id는 출하된 빌드를 가리키며, 전처럼 purl이 이름과 fix 버전을 줍니다. leaf는 여전히 읽을 수 있는
 purl과 함께 존재해야 합니다 — leaf를 가리키지 않는 id나 purl 없는 leaf(`java-1_7_0-openjdk`
-공백)는 원시 문자열에서 추측한 이름이 아니라 집계되는 skip으로 남습니다. `BareNamedByProductID`는
+공백)는 원시 문자열에서 추측한 이름이 아니라 집계되는 skip으로 남습니다. (D159가 수정: leaf를 아예 가리키지 않는 bare id는 product_id로 이름을 정합니다.)
+`BareNamedByProductID`는
 purl이 다른 이름을 줬을 bare id를 모두 세어 progress 줄에 찍습니다 — id 단위이고 D91의 LTSS
 가림 이전입니다: 2026-10-19 아카이브에서 70,463(상태 id 69,697, remediation id 766)이며, 이는
 아래 조사가 세는 단위로는 문서·패키지 쌍 11,753개입니다.
@@ -6882,6 +6883,67 @@ cataloger 가 건너뛴 것의 이름을 들고 있어야 한다. 이는 자체 
 - 규칙을 선언하지 않거나 두 번 선언함;
 - 카운터를 하나씩 버림;
 - level 을 각각 맞바꿈.
+
+---
+
+### D159 — leaf 없는 bare SUSE id 는 product_id 로 이름을 정한다 (D126 개정)
+
+**결정.** component 에 문서 안의 `product_version` leaf 가 없는 `known_affected`, `known_not_affected`,
+no-fix remediation id 는 건너뛰지 않고, D126 이 모든 bare id 를 다루듯 `product_id` 로 이름을 정한다.
+D126 의 skip 이 남는 경우는 둘이다:
+- leaf 가 없는 `recommended` id. fix 버전이 leaf 의 purl 에서 오기 때문이다;
+- leaf 는 있으나 읽을 수 있는 purl 이 없는 bare id(`java-1_7_0-openjdk` 공백). 그 leaf 는 SUSE 가 뺀
+  것이 아니라 SUSE 가 썼는데 이 reader 가 읽지 못한 것이기 때문이다.
+
+`BareNamedWithoutLeaf` 는 이렇게 이름이 정해진 id 를 `BareNamedByProductID` 처럼 id 단위로 세며,
+progress 줄이 D126 의 카운터 옆에 찍는다. 같은 줄은 이제 `SkippedNoPurl` 도 찍는다. 집계만 되고 한 번도
+보이지 않던 값이다.
+
+**이유.** 2026-10-22 감사에서 이견이 있던 B2 를 2026-11-02 에 다시 검증했다. SUSE 는 그 릴리스에 아직
+빌드를 출하하지 않은 패키지의 leaf 를 문서에서 뺀다. 그러면 bare id 가 그 릴리스에 대한 문서의 유일한
+진술이 되는데, D126 의 leaf 요구가 그것을 버렸다. 최악의 경우 문서 안의 아무것도 해석되지 않아 문서
+전체가 사라졌다. D126 이 leaf 를 요구한 이유는 "원시 문자열에서 추측한 이름"을 피하기 위해서였다.
+bare id 에는 그 이유가 해당하지 않는다. D126 이 이미 그 원시 문자열에서 이름을 가져오므로, leaf 가
+없다는 사실은 아무 정보도 담지 않았다. 이 drop 은 현재 릴리스의 no-fix state 에 대한 조용한 false
+negative 였고, 남긴 흔적은 progress 줄의 카운터뿐이었다.
+
+2026-11-02 에 live feed 에서 받은 읽을 수 있는 문서 688건(그중 2026 CVE 중 가장 최근에 바뀐 300건)으로
+측정했다:
+
+| | 전 | 후 |
+|---|---|---|
+| 읽을 수 있는 leaf 가 없다며 skip 된 id | 3,478 | 0 |
+| leaf 없이 product_id 로 이름이 정해진 id | — | 3,478 |
+| record 를 낸 문서 | 455 | 597 |
+| affected 항목 | 53,014 | 55,890 |
+| fix 없음 항목 | 13,854 | 16,730 |
+
+추가된 2,876개 항목은 모두 no-fix 다. SLES 15 SP4–SP7 과 12 SP5 에서는 대부분 MozillaFirefox, kernel,
+terraform, apache2 이고, D108 을 거쳐 다른 SLE 항목처럼 각 Leap codestream 에 미러된다. 처음 699건
+표본의 SLES 15 SPx 와 16.x `known_affected` id 10,737개 중 686개가 leaf 를 가리키지 않았다. 그중
+purl 없는 leaf, `full_product_names` 항목, relationship 참조는 하나도 없었다. 같은 platform 에서 같은
+패키지의 recommended 빌드를 가진 것도 없었으므로, 각각이 그 키의 유일한 진술이었다.
+
+**범위.** fix 버전은 바뀌지 않는다. SUSE 는 fix 를 leaf 가 있는 `recommended` 빌드로 출하한다. 추가된
+발견은 "affected, no fix" 이다(같은 id 를 가리키는 `no_fix_planned` remediation 이 있으면 wont-fix).
+D146 의 `maxAssayOnlyFixed` 는 이를 세지 않는다. 증가가 드러날 자리는 주간 `maxFindings` 상한이다:
+leap156(상한 500, 2026-11-01 기준 342)과 bci156(880, 462). nightly gate 는 상한을 정보로만 보고한다.
+데이터베이스 변경이므로, merge 후 첫 nightly 와 함께 `db update` 에 닿는다.
+
+**검증.**
+- `TestD159_LeaflessBareIDIsJudgedAffectedNoFix` 는 live 모양을 `convert`, 실제 store, matcher 로
+  통과시킨다. SLES 15 SP6 에 설치된 MozillaFirefox 는 remediation 의 wont-fix 를 단 채 fix 없이 affected 로
+  보고된다.
+- `TestConvert_BareIDNamingNoLeafIsNamedByProductID` 는 D126 의 skip 행을 대체하며 D108 미러, D125 의
+  not-affected id, 카운터를 지킨다.
+- `TestD159_RecommendedAndNoPurlLeavesStillSkip` 는 D159 가 유지하는 두 skip 을 지킨다.
+
+변이 여섯 개를 돌렸고, 모두 잡혔다. 변이는 다음과 같다:
+- 새 분기 제거;
+- no-purl skip 제거;
+- no-purl leaf 를 map 에서 뺌;
+- 카운터를 올리지 않음;
+- 두 카운터를 각각 progress 줄에서 뺌.
 
 ---
 
