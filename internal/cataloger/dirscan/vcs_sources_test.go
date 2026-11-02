@@ -83,6 +83,18 @@ func TestParse_NonRegistrySourcesAreSkippedAndNamed(t *testing.T) {
 			counted: true,
 		},
 		{
+			// A URL in a SPEC field is a tarball dependency; the same URL in
+			// a resolved field is how every registry tarball is written.
+			name: "npm v1 tarball URL version",
+			file: "package-lock.json",
+			body: `{"lockfileVersion":1,"dependencies":{
+  "sturdy-registry-pkg":{"version":"2.3.4","resolved":"https://registry.npmjs.org/sturdy-registry-pkg/-/sturdy-registry-pkg-2.3.4.tgz"},
+  "forked-vcs-pkg":{"version":"https://example.invalid/forked-vcs-pkg-4.17.20.tgz"}
+}}`,
+			skipped: "forked-vcs-pkg",
+			counted: true,
+		},
+		{
 			name: "npm v1 git resolved under a semver version",
 			file: "package-lock.json",
 			body: `{"lockfileVersion":1,"dependencies":{
@@ -106,6 +118,44 @@ sturdy-registry-pkg@^2.3.0:
 "forked-vcs-pkg@github:someone/forked-vcs-pkg#` + gitRef + `":
   version "4.17.20"
   resolved "https://codeload.github.com/someone/forked-vcs-pkg/tar.gz/` + gitRef + `"
+`,
+			skipped: "forked-vcs-pkg",
+			counted: true,
+		},
+		{
+			// GitHub's bare user/repo shorthand: no prefix in the key, and an
+			// https codeload tarball in resolved.
+			name: "yarn v1 bare user/repo key spec, codeload resolved",
+			file: "yarn.lock",
+			body: `# yarn lockfile v1
+
+
+sturdy-registry-pkg@^2.3.0:
+  version "2.3.4"
+  resolved "https://registry.yarnpkg.com/sturdy-registry-pkg/-/sturdy-registry-pkg-2.3.4.tgz#aaaa"
+
+"forked-vcs-pkg@someone/forked-vcs-pkg#` + gitRef + `":
+  version "4.17.20"
+  resolved "https://codeload.github.com/someone/forked-vcs-pkg/tar.gz/` + gitRef + `"
+`,
+			skipped: "forked-vcs-pkg",
+			counted: true,
+		},
+		{
+			// The URL carries an '@' of its own; the entry must still be
+			// named forked-vcs-pkg, not "forked-vcs-pkg@git+ssh://git".
+			name: "yarn v1 git+ssh key spec with an @ in the URL",
+			file: "yarn.lock",
+			body: `# yarn lockfile v1
+
+
+sturdy-registry-pkg@^2.3.0:
+  version "2.3.4"
+  resolved "https://registry.yarnpkg.com/sturdy-registry-pkg/-/sturdy-registry-pkg-2.3.4.tgz#aaaa"
+
+"forked-vcs-pkg@git+ssh://git@github.com/someone/forked-vcs-pkg.git#` + gitRef + `":
+  version "4.17.20"
+  resolved "git+ssh://git@github.com/someone/forked-vcs-pkg.git#` + gitRef + `"
 `,
 			skipped: "forked-vcs-pkg",
 			counted: true,
