@@ -106,7 +106,7 @@ assay scan alpine:3.19 --fail-on high
   Hummingbird, CleanStart — 여기에 Bitnami 애플리케이션 레이어까지, 세 가지 rpmdb
   백엔드(BerkeleyDB, SQLite, ndb)에 걸쳐.
 - **8개 언어 생태계** — Go, npm, PyPI, crates.io, Maven, RubyGems, NuGet, Packagist —
-  바이너리·디렉터리·열 가지 lockfile 형식에서. pnpm과 yarn berry도 포함됩니다. 컨테이너
+  바이너리·디렉터리·열세 가지 lockfile 형식에서. pnpm과 yarn berry도 포함됩니다. 컨테이너
   이미지 내부에서는 읽지 않습니다: 이미지 스캔은 위의 OS 패키지와 Bitnami 레이어만
   인벤토리화할 뿐, 그 안에 설치된 언어 패키지는 대상에 넣지 않습니다(D70,
   [미룸](docs/deferred-decisions.md)). 모든 이미지 스캔은 이를 stderr 와 SARIF 에 밝힙니다(D141).
@@ -149,7 +149,7 @@ assay scan alpine:3.19 --fail-on high
 - **[docs/comparison.md](docs/comparison.md)** — grype(주간 실측)·trivy(스펙 수준)와의
   비교, 그리고 각 도구의 정책이 의도적으로 갈리는 지점. ([한국어](docs/comparison.ko.md))
 - **[docs/superpowers/specs/2026-07-29-assay-roadmap.md](docs/superpowers/specs/2026-07-29-assay-roadmap.md)**
-  — 레퍼런스 설계, 모든 결정을 `D1`…`D146`로 근거와 함께 기록.
+  — 레퍼런스 설계, 모든 결정을 번호가 붙은 `D` 항목으로 근거와 함께 기록.
 - **[docs/compatibility.md](docs/compatibility.md)** — JSON, SARIF, 데이터베이스 출력을 쓰는
   쪽이 릴리스를 넘어 기댈 수 있는 것과 `schemaVersion` 증가가 뜻하는 것.
   ([한국어](docs/compatibility.ko.md))

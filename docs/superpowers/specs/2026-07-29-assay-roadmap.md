@@ -399,6 +399,23 @@ version would break a build — and belongs with `--fail-on` in slice 4.
 **Schema version 3.** The field is part of the on-disk shape, so a database built before it
 is refused with instructions rather than read as covering nothing (D5).
 
+**Revised (QA 2026-11-02).** `db status`'s `covers:` line misread two real key spellings. It
+collapses a family's releases to `first..last (N releases)` so an operator can see whether
+the release they are about to scan is inside the range, and its release parser cut at `.`
+and required a bare number on both sides. An Ubuntu LTS key is `Ubuntu:22.04:LTS` (D53) and a
+SUSE service pack is `SLES:15.SP7` (D77), so neither minor parsed, every such release fell
+into the lexical fallback that sorts unparseable shapes last, and a real database printed
+`Ubuntu:23.10..26.04:LTS (11 releases)` and `SLES:11..15.SP7 (21 releases)` while holding
+Ubuntu 14.04:LTS through 22.04:LTS and SLES 16.0/16.1 — telling an Ubuntu 20.04 or SLES 16
+operator their release was outside it. `--output json` listed the keys verbatim and was
+right; only the table was wrong. A release is now read as a number, then optionally `.` and
+either a number or `SP` and a number, then optionally a `:`-suffix that names the release's
+kind and does not take part in the order; the lexical fallback stays for shapes that still
+do not parse (`edge`, `stream`, `rolling`), so an unexpected key remains visible rather than
+guessed at, and two spellings of one number break their tie as strings so the ends do not
+depend on sort order. The same database now prints `Ubuntu:14.04:LTS..26.04:LTS (11
+releases)` and `SLES:11..16.1 (21 releases)`; the count never changed.
+
 
 ### D21 — Verdicts: what fails a build, and what the exit code means
 
@@ -1366,6 +1383,22 @@ for data with no reading. Six mutations verified red; two survive as equivalents
 in `repair.go`: no valid apk version can contain `.r` at all, so the already-parses guard can
 never change an answer, and `Index` for `LastIndex` cannot either once the second guard
 rejects a repair that leaves a later `.r` behind.
+
+**Revised (QA 2026-11-02).** The installed-version half of this decision had a hole: the
+walk's `atLeast` resolves the `0` sentinel without a `Compare`, so an installed version no
+comparer can read -- dpkg's empty `Version`, `(none)`, a malformed string -- walked through
+every open-ended range to *affected*, with Evidence naming a comparison nobody made, and that
+hit then masked the readable sibling range's refusal. `AffectsVersion` now compares the
+installed version with itself once, before any range is walked, and refuses it with the
+target's cause (D9's skipped-with-a-count; D30's left-operand check, moved up so both paths
+share it). An entry with neither ranges nor versions is still clean without error. In the same
+pass the malformed-range guard was widened: it fired only when no event carried any bound, so a
+range of closing bounds with no `introduced` walked to a silent *not affected*; the OSV schema
+requires an `introduced` per range, and such a range is now `ErrInvalid` like the bound-less
+one. Verified at the matcher (an unreadable version against an open and a fixed advisory: two
+skips with the target's cause, no finding; a readable one is judged) and at the range (open
+only, fixed-then-open, open-then-fixed all refused; fixed-only and last_affected-only invalid;
+the open sentinel range still walks).
 
 ### D36 — Incompleteness carries a cause, and the gate can be narrowed to what you can fix
 
@@ -3114,6 +3147,22 @@ no reason** — the inverse of Red Hat, where unstated is zero. `--fail-on-unfix
 on SUSE, but `=wont-fix` catches only the 201 entries SUSE bothered to classify; the README
 says so next to the feature.
 
+**Revised (QA 2026-11-02).** `packageOf` discarded a purl's `epoch` qualifier. `purlRE` read
+`pkg:rpm/suse/<name>@<version>` and stopped at the `?`, so an `epoch=N` qualifier never reached
+the stored fixed version while the rpmdb cataloger writes the installed build `N:version-release`
+and `version.RPM` orders the epoch first — the fix sorted below every installed build. Latent on
+this feed: every one of the 10,031 epoch-qualified purls in the archive is a Liberty Linux build
+`foldKey` refuses, but it is one SLES package with an Epoch away from the P1 the same gap was
+live as on Hummingbird (D98's reader was copied from this one). `packageOf` now reads the purl
+through `pkgmeta.ParsePURL` and takes the version from `pkgmeta.EVROf`, the rule the scan side
+has applied to SBOM purls since D83: a non-zero epoch is prefixed `epoch:`, a zero or absent one
+is not (rpmdb's `evr()` omits it the same way), an empty version never gains one. A purl with no
+`@` at all, which the regex refused, reads as a bare package — unmeasured on this feed, and the
+statement D47 already reads from a Red Hat bare purl. `RecommendedWithEpoch` counts epoch-carrying
+recommended ids on a folding key on the progress line, so the day SLES ships one is visible in the
+nightly rather than in a differential. Held by `TestConvert_EpochQualifierReachesTheFixedVersion`
+and, through the real store and matcher, `TestEpoch_InstalledBuildBelowTheFixIsAffected`.
+
 ---
 
 ### D78 — AL2's extras topics, enumerated rather than hardcoded
@@ -3303,6 +3352,31 @@ ubi8/nodejs-18 as a syft-1.51 SBOM: module packages stream-match (5,477 findings
 evaluated); the same image as a syft-0.84 SBOM: 8 module packages loudly not evaluated —
 the honest degradation. `--fail-on-incomplete=target` exits 0 on modern SBOMs again.
 
+**Revised (QA 2026-11-02).** "Source (D8) from the `upstream` qualifier" had kept the source's
+NAME and dropped its version, on both readers: deb's `upstream=util-linux@2.38.1-5+deb12u2`
+lost the `@` half, and rpm's `upstream=httpd-2.4.62-1.fc40.src.rpm` was stripped to `httpd`
+with `SourceRPMVersion` never called. The matcher compares a source-name lookup against
+`Source.Version` only when it has one (D41), so on SBOM input the binary's own version, epoch
+included, was compared with a source-keyed fix. Verified end to end: bsdutils
+`1:2.38.1-5+deb12u3` built from util-linux `2.38.1-5+deb12u2`, against util-linux fixed at
+`2.38.1-5+deb12u3` on Debian:12 — the image's dpkg status gave exit 1 and one finding; the same
+package as CycloneDX and as SPDX gave exit 0, no findings, no skips. The air-gapped path was the
+one that lied. Now deb keeps the version half (`ParsePURL` has decoded the epoch's colon), and
+the CycloneDX cataloger fills it from `syft:metadata:sourceVersion` when the purl named the
+source without one, never over a version the purl carries. rpm keeps the SRPM's version-release
+and the file name as `Package.Upstream`, and `decodeSBOM` runs `rpmdb.ResolveSourceVersions`
+over the whole document, so the source's epoch is placed by D153's rule for both readers (see
+D153's revision). VEX's deb source comparison (D121) reaches the source version instead of its
+binary fallback. `Source.Version` already had its place in the JSON report (`source.version`,
+omitempty), so no schema change. Held through `Run` on both readers: the bsdutils shape yields
+the finding and the same document with the source at the fix is clean; mod_ssl
+`1:2.4.62-1.fc40` beside httpd is found through httpd; perl-B at epoch 0 beside perl
+`4:5.32.1-484.el9` is clean against a perl fix at `4:5.32.1-481.el9`; a source statement at the
+source version suppresses and one at the binary's version does not. Ten mutations, nine caught
+at the caller or the cataloger; the tenth — the rpm branch setting the name without the version
+— is caught at the cataloger and is an equivalent through `Run`, because the D153 pass
+recomputes the version from `Upstream`; the code says so.
+
 ---
 
 ### D84 — SPDX, the format vendors actually publish
@@ -3338,6 +3412,25 @@ ubi8/nodejs-18 SPDX loses syft's modularityLabel property (SPDX has nowhere to p
 its 8 module packages are loudly not evaluated where the CycloneDX twin stream-matches —
 D80's refusal doing exactly its job. debian:12 SPDX scans keyed, with the one
 `distro=Debian` versionless ELF-note purl correctly refused rather than guessed.
+
+**Revised (QA 2026-11-02).** The DESCRIBES exclusion read "whatever the document describes"
+where the decision meant "the pseudo-package the document describes". The parser took the
+first DESCRIBES anchored at the document and dropped that entry before cataloging it, with
+no check that it was a pseudo-package — so a document describing the one real, versioned,
+purl-bearing package it inventories (lodash@4.17.20 under `pkg:npm`; the project's own
+`tiny.spdx.json`, one rpm openssl 3.0.7-1.el9) scanned as "no components": not cataloged,
+not counted, in no skip bucket, exit 0 under `--fail-on low --fail-on-incomplete`, where
+the same document without the relationship gave 3 findings and exit 1. Two DESCRIBES
+(lodash and django) kept only django. `TestParse_TinyFixture` had asserted the zero and
+called it "not a bug".
+
+The exclusion is now by what the entry is, as the CycloneDX twin's is (`c.Type ==
+"operating-system"`): every DESCRIBES target the document names is cataloged into a scratch
+inventory and kept when that yields a candidate; one that yields none — no purl (syft 1.51's
+`SPDXRef-DocumentRoot-*`, Red Hat's cpe-only product package), `pkg:oci` (Red Hat's
+container package), or a versionless purl — is dropped uncounted, as before. Every DESCRIBES
+target is examined, not the first alone. The counters in the ubi9-micro and syft-1.51
+fixtures are unchanged, and a described real package is now one component, one cataloged.
 
 ---
 
@@ -3851,6 +3944,27 @@ line that rebuilds on fix means a current image sits at-or-above every fix, and 
 2026-08-25 snapshot still carries the pre-fix no-fix rows. assay's smaller answer is the
 correct one, verified against the feed itself. Independent review mutations 3/3 red
 (CPE→mainline key, fabricated package on missing purl, VERSION_ID fragmentation).
+
+**Revised (QA 2026-11-02).** The purl's `epoch` qualifier was discarded, and the differential
+above could not see it. `hummingbirdPurlRE` took the `@version` and stopped at the `?`, so the
+live documents' `pkg:rpm/redhat/nginx@1.30.4-2.hum1?arch=x86_64&epoch=2&…` (cve-2026-42533,
+-56434, -60005) stored the fix as `1.30.4-2.hum1`, while the rpmdb cataloger writes the installed
+build `2:1.30.4-1.hum1` (header.go's `evr()`; only Azure Linux and Photon keys drop the epoch,
+D153) and `version.RPM` orders the epoch first: `Compare("2:1.30.4-1.hum1", "1.30.4-2.hum1")`
+is 1, so every vulnerable epoch-carrying build — 67 of the 403 distinct Hummingbird purls in the
+160 newest documents, nginx* at epoch 2 and tomcat10/11 at epoch 1 — was reported clean, on
+exactly the image the weekly differential scans (quay.io/hummingbird/nginx:1.30.4). The reader
+now parses the purl with `pkgmeta.ParsePURL` and takes the version from `pkgmeta.EVROf`, the
+rule the scan side has applied to SBOM purls since D83: a non-zero epoch is prefixed `epoch:`, a
+zero or absent one is not, a bare purl keeps its empty version. `HummingbirdFixedWithEpoch`
+counts the entries on the progress line. Held by
+`TestConvert_HummingbirdEpochQualifierReachesTheFixedVersion` (the mainline entry in the same
+document, whose NEVRA spells its epoch inline, does not count) and, through the real store and
+matcher, `TestHummingbirdEpoch_InstalledBuildBelowTheFixIsAffected`: `2:1.30.4-1.hum1` is told
+the fix, `2:1.30.4-2.hum1` is clean. The published artifact's Hummingbird nginx and tomcat
+records are wrong until the next nightly rebuilds it; grype-only tuples on the `hummingbird`
+target in the weekly diff are the trace to look for. SUSE's reader, which this one was copied
+from, had the identical gap (D77's revision of the same date).
 
 ---
 
@@ -5698,6 +5812,17 @@ behaviour. Confidential Computing module builds of qemu/ovmf are still judged by
 range (pre-existing). Whether the module's builds are ever installed where assay scans is not
 known — the beneficiary is a host or VM SBOM, not a container image.
 
+**Revised (QA 2026-11-02).** `packageOf`, the purl reader this rule sits behind, moved from a
+regex to `pkgmeta.ParsePURL` + `pkgmeta.EVROf` so a purl's `epoch` qualifier reaches the fixed
+version (D77's revision of the same date). The split rule is untouched: `ParsePURL` leaves
+`pkg:rpm/suse/kernel-coco-6.4.0-15061.9.coco15sp6.1@` with the whole NEVR as its name and an
+empty version, and `EVROf` never prefixes an epoch onto an empty version, so `resolveProduct`
+sees the same `""` it always did and splits as before. A split build's version comes from the
+product_id, which carries no epoch, so it never reaches the new `RecommendedWithEpoch` counter
+either. `TestPackageOf` holds the row (`…coco15sp6.1@?epoch=1` → empty version); the D131 suite
+is unchanged and green. Left open: a split build whose purl carried a non-zero epoch would lose
+it, since the product_id has nowhere to spell one — none of the 16,736 does.
+
 ### The 2026-10-22 external review — six conditional defects, all reproduced, all fixed
 
 A second external review of `0164c94` (the D131 merge) reported six defects with fixtures and
@@ -6642,6 +6767,13 @@ The reviewer's three probes, written to pass on the bad behaviour, now fail on i
 mutations, all caught; the sixth (a bare `1:` from a versionless source) only after its case
 was added.
 
+**Revised (QA 2026-11-02).** "An explicit `upstream` qualifier wins, still name-only" no longer
+holds in its second half: the qualifier's Source now carries the SRPM's version-release too, and
+its epoch is placed by D153's rule over the document (D83's and D153's revisions). It still
+wins over the relationship. `TestParse_A3_UpstreamQualifierWinsOverTheRelationship` asserts the
+qualifier's own version-release, at `-17` against the relationship source's `-18`, so the two
+cannot be confused.
+
 ---
 
 ### D149 — An LTSS fix replaces a mainline no-fix instead of being shadowed by it (revises D91)
@@ -6816,6 +6948,16 @@ Both are fixed, and the mutation table was re-run from scratch: fourteen mutatio
 caught. They cover each step removed or reordered, the vote taking the lowest, the tie taking
 the higher, the version-release filter, both epochless prefixes, the call site, the
 unparsable and nil guards, and the SRPM version-release ignored.
+
+**Revised (QA 2026-11-02).** "SBOM paths are not changed here: an upstream-qualified purl still
+gives the binary's EVR" described the defect QA finding #1 then confirmed, not a boundary. The
+SBOM catalogers now set `Source.Version` to the SRPM's version-release and keep the file name as
+`Package.Upstream`, and `decodeSBOM` runs `ResolveSourceVersions` over the whole document for
+both readers, so a syft SBOM of an image and the image itself place mod_ssl's epoch the same
+way: httpd's. The residual is this decision's own: a document holding mod_ssl and nothing else
+from its SRPM keeps the binary's epoch (step 4) and the httpd fix stays hidden, pinned by
+`TestRun_SBOMLoneRPMSubpackageKeepsItsOwnEpoch`; an SPDX `GENERATES` edge states the source's
+epoch and has no such gap (D152).
 
 ---
 

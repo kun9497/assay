@@ -84,14 +84,20 @@ var retryPause = func() { time.Sleep(5 * time.Second) }
 
 // row is one line of the summary table written to stdout.
 type row struct {
-	Target       string
-	AssayTuples  int
-	GrypeTuples  int
-	Agree        int
-	OnlyAssay    int
-	OnlyGrype    int
-	NotEvaluated int
-	Verdict      string // "ok", "BREACH", or "ERROR"
+	Target      string
+	AssayTuples int
+	GrypeTuples int
+	// BridgedIntoAssay and BridgedIntoGrype are the tuples bridgeBareIDs added
+	// to each side, already inside AssayTuples and GrypeTuples. Printed, never
+	// judged: they let a ceiling breach be read as native or bridged growth
+	// (see bridgeBareIDs).
+	BridgedIntoAssay int
+	BridgedIntoGrype int
+	Agree            int
+	OnlyAssay        int
+	OnlyGrype        int
+	NotEvaluated     int
+	Verdict          string // "ok", "BREACH", or "ERROR"
 }
 
 // run is the testable seam (mirrors cmd/assay/main.go's own run(args,
@@ -187,7 +193,7 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 
 		aSet := assayTuples(adoc)
 		gSet := grypeTuples(gdoc)
-		bridgeBareIDs(adoc, gdoc, aSet, gSet)
+		intoAssay, intoGrype := bridgeBareIDs(adoc, gdoc, aSet, gSet)
 		agree, onlyAssay, onlyGrype := compareSets(aSet, gSet)
 		notEvaluated := adoc.Summary.NotEvaluated
 
@@ -201,14 +207,16 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 		breaches, info := demoteCeilings(measured, *regressionsOnly)
 		printInfo(stderr, info)
 		r := row{
-			Target:       t.Name,
-			AssayTuples:  len(aSet),
-			GrypeTuples:  len(gSet),
-			Agree:        agree,
-			OnlyAssay:    onlyAssay,
-			OnlyGrype:    onlyGrype,
-			NotEvaluated: notEvaluated,
-			Verdict:      "ok",
+			Target:           t.Name,
+			AssayTuples:      len(aSet),
+			GrypeTuples:      len(gSet),
+			BridgedIntoAssay: intoAssay,
+			BridgedIntoGrype: intoGrype,
+			Agree:            agree,
+			OnlyAssay:        onlyAssay,
+			OnlyGrype:        onlyGrype,
+			NotEvaluated:     notEvaluated,
+			Verdict:          "ok",
 		}
 		if len(breaches) > 0 {
 			r.Verdict = "BREACH"
@@ -494,10 +502,10 @@ func writeCapture(stderr io.Writer, dir, name, kind string, data []byte) {
 // measured (D93's "still runs the rest" requirement, made visible).
 func renderTable(w io.Writer, rows []row) {
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "TARGET\tASSAY\tGRYPE\tAGREE\tONLY_ASSAY\tONLY_GRYPE\tNOTEVAL\tVERDICT")
+	fmt.Fprintln(tw, "TARGET\tASSAY\tGRYPE\tA_BRIDGED\tG_BRIDGED\tAGREE\tONLY_ASSAY\tONLY_GRYPE\tNOTEVAL\tVERDICT")
 	for _, r := range rows {
-		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%s\n",
-			r.Target, r.AssayTuples, r.GrypeTuples, r.Agree, r.OnlyAssay, r.OnlyGrype, r.NotEvaluated, r.Verdict)
+		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\n",
+			r.Target, r.AssayTuples, r.GrypeTuples, r.BridgedIntoAssay, r.BridgedIntoGrype, r.Agree, r.OnlyAssay, r.OnlyGrype, r.NotEvaluated, r.Verdict)
 	}
 	tw.Flush()
 }

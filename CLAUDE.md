@@ -10,7 +10,8 @@ the vulnerability database, and match the two. In the anchore ecosystem those ar
 separate projects (`syft`, `vunnel` + `grype-db`, `grype`). KISA/KNVD advisory data is a
 first-class provider — that is the main reason this exists rather than using grype.
 
-Slices ①–⑬ are built, and the D-numbered work has reached D79. `assay db build` builds a
+Slices ①–⑬ are built, and the D-numbered work is ongoing — the roadmap spec, not this
+sentence, holds the current highest D entry. `assay db build` builds a
 database from OSV (Go, npm, PyPI, crates.io, Maven, RubyGems, NuGet, Packagist, Alpine,
 Debian, Ubuntu, Rocky, Alma) with NVD ratings (D27, opt-in via `NVD_ENABLE`, windowed on
 both ends since D65) and KISA's Korean prose as enrichment (⑤, on by default since D37,
@@ -37,7 +38,7 @@ by it, while Leap keys still see the no-fix), and Azure
 Linux/CBL-Mariner OVAL (D106 — moved off OSV.dev after its imported snapshot proved
 frozen since 2026-03; the 2026-08-28 audit's 140 missing findings all recovered). `assay scan` reads
 SBOMs, container images (distroless via `status.d`, D54), Go binaries and directories
-(ten lockfile formats — pnpm and yarn berry read since D103 — plus jars; D61–D63,
+(thirteen lockfile formats — pnpm and yarn berry read since D103 — plus jars; D61–D63,
 D68–D70), and returns a
 verdict CI can gate on; SARIF is an output format (D55). A finding carries every source's
 rating and the gate takes the highest (D25); incompleteness carries a cause and
@@ -47,7 +48,9 @@ Amazon Linux 2/2023 (D73), Oracle Linux 5–10 (D74), Fedora (D75), SLES/openSUS
 (D77), Wolfi/Chainguard (D88), MinimOS and Echo (D92), Azure Linux/CBL-Mariner (D94), Alpaquita/BellSoft (D95, which
 added the apk `p:` provides bridge), Photon OS 3/4/5 (D96), Arch Linux (D97, the
 release-less `Arch:rolling` key), Red Hat's Hummingbird (D98, carved out of the CSAF
-feed already fetched), and CleanStart (D101, identified by an apk marker package because it
+feed already fetched; since QA 2026-11-02 both CSAF readers carry a purl's `epoch=`
+qualifier into the fixed version through `pkgmeta.EVROf` -- nginx and tomcat had been judged
+clean against an epoch-less fix), and CleanStart (D101, identified by an apk marker package because it
 ships no os-release) —
 across three rpmdb backends: BerkeleyDB, SQLite and ndb (D44, D76). Bitnami app layers
 catalog from their /opt/bitnami SPDX markers alongside the base distro (D99, dual
@@ -122,7 +125,9 @@ an `arch=src` package when its purl names none and it shares the source's releas
 dist tag, and since D152 the source's EVR from that purl, so a subpackage is judged on its
 source's version under the source's name; since D153 an image's rpmdb does the same, the
 SRPM's version-release with the main package's epoch, and no epoch on Azure Linux or Photon
-keys). Since D154 a range's close sorts before an open at the same version, and a window
+keys; since QA 2026-11-02 an SBOM's `upstream` qualifier keeps its source version too — deb's
+`@` half, rpm's SRPM version-release with D153's epoch pass run over the document — where both
+readers had kept the name alone). Since D154 a range's close sorts before an open at the same version, and a window
 that opens and closes at one version is judged on its own. Since D156 a rating with only a
 CVSS v2 vector is banded from the v2 base score on NVD's v2 table, as a fallback only. Since D155 a gem's platform
 (`1.13.8-x86_64-linux`) is not part of its version, in a Gemfile.lock or an SBOM purl. Since D157
@@ -149,7 +154,7 @@ page and the design/roadmap content moved to `docs/DESIGN.md`.)
 **Read these before proposing anything structural:**
 
 - `docs/superpowers/specs/2026-07-29-assay-roadmap.md` — the reference design. Every
-  decision is recorded as `D1`…`D36` with its reasoning. Cite the decision ID when
+  decision is recorded as a numbered `D` entry with its reasoning. Cite the decision ID when
   discussing one.
 - `docs/deferred-decisions.md` — **required before suggesting a feature.** The obvious
   gaps are either built already (Debian and RHEL support, VEX, the prebuilt artifact, age

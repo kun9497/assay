@@ -307,10 +307,10 @@ func TestRun_SPDXTargetIsRouted(t *testing.T) {
 		{id: "GHSA-spdx-routed", pkg: "spdxrouted", fixed: "2.0.0", vectors: []string{vecCritical}},
 	})
 	// No DESCRIBES relationship here on purpose: SPDX-2.3 does not require
-	// one, and this document's only package must NOT be mistaken for the
-	// document-root pseudo-package (D84) — pointing DESCRIBES at the sole
-	// real package (rather than a separate, synthetic root) would exclude
-	// it, proving nothing about routing at all.
+	// one, and this test is about routing alone. The described-package case
+	// — DESCRIBES pointing at the sole real package, which until QA
+	// 2026-11-02 excluded it as a document root — has its own caller test,
+	// TestRun_SPDXDescribedRealPackageIsScanned.
 	const doc = `{"spdxVersion":"SPDX-2.3","SPDXID":"SPDXRef-DOCUMENT","packages":[
 	  {"name":"spdxrouted","SPDXID":"SPDXRef-Package-spdxrouted","versionInfo":"1.0.0",
 	   "externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl",

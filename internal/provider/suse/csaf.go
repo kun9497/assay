@@ -32,6 +32,7 @@ import (
 	"strings"
 
 	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/pkgmeta"
 )
 
 // document is the subset of one CSAF VEX document this provider reads.
@@ -182,12 +183,14 @@ var (
 	// convert's mainline-wins pass for what happens when a document
 	// carries BOTH a bare/module entry and this one for the same package.
 	ltssSP = regexp.MustCompile(`^SUSE Linux Enterprise Server (\d+)(?: SP(\d+))?-LTSS$`)
-	// purlRE splits a product_version leaf's purl into name and version.
-	// Unlike the OSV bucket's purls (measured malformed, D77 research: every
-	// one missing the '?' before its qualifiers), CSAF's are well-formed --
-	// measured 100% across 657,984 sampled leaves.
-	purlRE = regexp.MustCompile(`^pkg:rpm/suse/([^@]+)@([^?]*)`)
 )
+
+// purlNamespace is the namespace every product_version leaf's rpm purl
+// carries ("pkg:rpm/suse/..."). Unlike the OSV bucket's purls (measured
+// malformed, D77 research: every one missing the '?' before its
+// qualifiers), CSAF's are well-formed -- measured 100% across 657,984
+// sampled leaves -- so pkgmeta.ParsePURL reads them as it reads an SBOM's.
+const purlNamespace = "suse"
 
 // foldKey folds one CSAF platform product name into this project's SLES or
 // openSUSE Leap key, or reports false for a name no pattern recognizes --
@@ -334,15 +337,26 @@ func leapMirrorKey(sleKey string) (string, bool) {
 	return leap, true
 }
 
-// packageOf splits a CSAF product_version leaf's purl into a package name
-// and version, or reports false. See the package doc comment for the
-// measured reliability of this shape.
+// packageOf reads a CSAF product_version leaf's purl into a package name and
+// version, or reports false for a purl that is not an rpm in SUSE's
+// namespace, or no purl at all. The version is pkgmeta.EVROf's: the purl's
+// @version with a non-zero "epoch" qualifier prefixed as "epoch:", the shape
+// rpmdb's evr() gives an installed build. Until QA 2026-11-02 a regex took
+// the @version alone and stopped at the '?', so an epoch-qualified purl
+// stored a fix every installed build of the package sorted above -- the
+// same defect Red Hat's Hummingbird reader had live (hummingbirdPackageOf),
+// latent here only because every one of the archive's 10,031 epoch-qualified
+// purls is a Liberty Linux build foldKey refuses. A purl with an empty or
+// absent @version keeps its empty version: EVROf never prefixes an epoch
+// onto nothing, so D131's split rule (resolveProduct) sees the same "" it
+// always did. See the package doc comment for the measured reliability of
+// the shape.
 func packageOf(purl string) (name, version string, ok bool) {
-	m := purlRE.FindStringSubmatch(purl)
-	if m == nil {
+	p, err := pkgmeta.ParsePURL(purl)
+	if err != nil || p.Type != "rpm" || p.Namespace != purlNamespace {
 		return "", "", false
 	}
-	return m[1], m[2], true
+	return p.Name, pkgmeta.EVROf(p), true
 }
 
 // noPurl marks a leaf that exists but whose purl could not be read (D159
@@ -536,6 +550,14 @@ func resolveProduct(id string, bare bool, folded map[string]string, declared map
 			return productKey{eco: key, pkg: name}, verrel, skipNone
 		}
 		st.RecommendedEmptyVersionKept++
+	}
+	// The only ':' a version from packageOf can carry is the epoch EVROf
+	// prefixed (rpm forbids the character in a version or release), and this
+	// return is reached only on a folding key, so the counter says exactly
+	// what its name does. A split build cannot reach it: its version came
+	// from the product_id, which carries no epoch.
+	if strings.Contains(pkg.version, ":") {
+		st.RecommendedWithEpoch++
 	}
 	return productKey{eco: key, pkg: pkg.name}, pkg.version, skipNone
 }
@@ -789,6 +811,17 @@ type stats struct {
 	// declines to lend for the same reason: native-wins is why it was not
 	// mirrored, and the Leap counters partition the mirrorable entries.
 	SkippedLeapMirrorSplitBuild int
+	// RecommendedWithEpoch counts recommended ids on a folding key whose
+	// leaf purl carried a non-zero "epoch" qualifier, so the fixed version
+	// was stored "epoch:version-release" the way rpmdb spells the installed
+	// build (QA 2026-11-02). Zero on the 2026-11-02 archive: every one of
+	// its 10,031 epoch-qualified purls is a Liberty Linux build foldKey
+	// refuses before this is reached. Per id, like
+	// RecommendedNamedByNEVRSplit. The day SLES ships a package with an
+	// Epoch this moves off zero -- and the day it does, the fix stored for
+	// it is the one the comparer can order, not one every installed build
+	// sorts above.
+	RecommendedWithEpoch int
 
 	// ArchiveSuperseded counts archive documents skipped because the delta
 	// pass, which runs first since D129, fetched a copy of the same document
