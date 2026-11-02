@@ -315,3 +315,50 @@ func warnIfStale(m store.Meta, now time.Time, stderr io.Writer) {
 		int(age.Hours()/24), m.BuiltAt.Format("2006-01-02"))
 	fmt.Fprintln(stderr, "  run `assay db update`, or set --db-max-age to fail a scan on stale data instead")
 }
+
+// warnIfEOLStale prints a warning when a scan gated on --fail-on-eol reads
+// end-of-life data generated more than staleAfter before now.
+//
+// warnIfStale reads BuiltAt, and for advisories that is the right clock: a
+// database built last night carries last night's advisories. The EOL catalog
+// can be older than the build that carries it -- a ratings-only build with
+// EOL_ENABLE=0 keeps its seed's catalog, as old as the seed (audit 2026-10-22
+// P4, closed 2026-11-02), and until this the build's own stderr line was the
+// only place that said so. A release whose support ended after the catalog was
+// generated is judged supported by it, which is exactly the false pass the
+// gate exists to prevent.
+//
+// Gated on the flag, like the "EOL unknown" disclosure in Run: the table's EOL
+// line is informational, and a caller who did not ask the question has nothing
+// to be misled about. endoflife.date is a live feed, so unlike the dead
+// advisory feeds D139 declined to measure, this cannot fire forever on a
+// current database. Undated EOL data is not called old (a nudge, not a gate --
+// D17's discipline, as in warnIfStale), and a database with no EOL rows at all
+// is the "EOL unknown" warning's case, not this one.
+func warnIfEOLStale(m store.Meta, failOnEOL bool, now time.Time, stderr io.Writer) {
+	if !failOnEOL || len(m.EOL) == 0 || m.EOLProvenance == nil || m.EOLProvenance.DataAsOf.IsZero() {
+		return
+	}
+	age := now.Sub(m.EOLProvenance.DataAsOf)
+	if age <= staleAfter {
+		return
+	}
+	fmt.Fprintf(stderr, "warning: this database's end-of-life data was generated %d days ago (%s); "+
+		"a release whose support ended since is judged by it\n",
+		int(age.Hours()/24), m.EOLProvenance.DataAsOf.UTC().Format("2006-01-02"))
+	// The seed clause only when the catalog is a week older than the build
+	// that carries it: a build that fetched the catalog holds one at most a
+	// day old (endoflife.date regenerates daily), so a wider gap means this
+	// build did not fetch it. A database that is simply old all over -- a
+	// pulled artifact nobody has updated -- has had D139's line already, and
+	// advice about seeds and EOL_ENABLE would be wrong for that reader. The
+	// IsZero half is for the reader: an undated build makes the subtraction
+	// negative and fails the comparison on its own (a mutation removing it
+	// survives; that is the equivalence, not a gap).
+	if !m.BuiltAt.IsZero() && m.BuiltAt.Sub(m.EOLProvenance.DataAsOf) > staleAfter {
+		fmt.Fprintln(stderr, "  run `assay db update`; a ratings-only build with EOL_ENABLE=0 keeps its "+
+			"seed's end-of-life data, so refresh the seed or build with EOL_ENABLE=1")
+		return
+	}
+	fmt.Fprintln(stderr, "  run `assay db update`")
+}

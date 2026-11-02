@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- A scan run with `--fail-on-eol` warns on stderr when the database's end-of-life data was
+  generated more than seven days ago, naming the date and what to run. A ratings-only build
+  with `EOL_ENABLE=0` keeps its seed's catalog, as old as the seed, and the D139 warning reads
+  the build time, so such a database read as current while a release whose support had ended
+  since was still judged supported. Exit code and stdout are unchanged; without the flag, and
+  for undated data, nothing is said.
 - The nightly publish and the backfill refuse to sign anything but a digest reference: the
   Publish step checks that `db push`'s last line is `<repo>@sha256:<64 hex>`, and the sign and
   self-check steps exit before calling cosign when the step output reaching them is empty.

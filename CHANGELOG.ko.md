@@ -8,6 +8,11 @@
 ## [Unreleased]
 
 ### Fixed
+- `--fail-on-eol` 로 실행한 스캔은 데이터베이스의 end-of-life 데이터가 생성된 지 7일이 넘으면 stderr 에
+  날짜와 실행할 명령을 들어 경고합니다. `EOL_ENABLE=0` 인 ratings-only 빌드는 시드의 카탈로그를 시드만큼
+  오래된 채로 물려받는데, D139 경고는 빌드 시각을 읽으므로 그런 데이터베이스가 최신으로 읽히면서 그 사이
+  지원이 끝난 릴리스는 여전히 지원 중으로 판정됐습니다. exit 코드와 stdout 은 그대로이고, 플래그가 없거나
+  데이터에 날짜가 없으면 아무 말도 하지 않습니다.
 - 야간 발행과 backfill 은 digest 참조가 아닌 것은 서명하지 않습니다. Publish 단계가 `db push` 의 마지막 줄이
   `<repo>@sha256:<64 hex>` 꼴인지 확인하고, 서명·자가 검증 단계는 넘어온 step output 이 비어 있으면 cosign
   을 부르기 전에 종료합니다. 전에는 빈 output(이름이 바뀐 step id, 잘못 적은 output 이름)에 cosign 이 세 번
