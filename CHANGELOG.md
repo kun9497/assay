@@ -8,6 +8,13 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- NVD's HTTP 403, which is how it answers a client over its rate limit, is retried on the same
+  bounded schedule as 429 and 5xx. Before, it was held permanent, and one throttled page ended
+  a sync that may have run for hours. A 403 that never clears (a rejected key, a blocked
+  address) still fails, after the schedule rather than at once. (audit 2026-10-22 P4,
+  re-verified 2026-11-02)
+
+### Fixed
 - A git, URL or path dependency in `package-lock.json` (v1 and v3), yarn v1's `yarn.lock`,
   `Cargo.lock`, `poetry.lock` or `uv.lock` is no longer cataloged under the version its own
   checkout declares. That version need not be any registry release an advisory names, so the
