@@ -12,9 +12,13 @@ import (
 )
 
 // testDBWithEOLAsOf is testDBWithEOL plus the EOL source's own provenance,
-// dated asOf -- what a seed's carried catalog looks like to a ratings-only
-// build with EOL_ENABLE=0 (dbcmd.Update, audit 2026-10-22 P4).
+// dated asOf, built just now -- what a seed's carried catalog looks like to a
+// ratings-only build with EOL_ENABLE=0 (dbcmd.Update, audit 2026-10-22 P4).
 func testDBWithEOLAsOf(t *testing.T, rows []store.EOLRelease, asOf time.Time) string {
+	return testDBWithEOLAsOfBuiltAt(t, rows, asOf, time.Now().UTC())
+}
+
+func testDBWithEOLAsOfBuiltAt(t *testing.T, rows []store.EOLRelease, asOf, builtAt time.Time) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "vulnerability.db")
 	w, err := store.Create(path)
@@ -22,7 +26,7 @@ func testDBWithEOLAsOf(t *testing.T, rows []store.EOLRelease, asOf time.Time) st
 		t.Fatalf("Create: %v", err)
 	}
 	if err := w.SetMeta(store.Meta{
-		BuiltAt:   time.Now().UTC(), // built just now: only the EOL data is old
+		BuiltAt:   builtAt,
 		Providers: map[string]store.Provenance{"osv": {Ecosystems: []string{"Alpine:v3.19", "Go", "npm", "PyPI"}}},
 		EOL:       rows,
 		EOLProvenance: &store.Provenance{
@@ -76,6 +80,38 @@ func TestRun_FailOnEOLWarnsWhenTheEOLDataIsMoreThanAWeekOld(t *testing.T) {
 	}
 	if strings.Contains(out, eolAgeWarning) {
 		t.Errorf("the warning reached stdout, which must stay a clean report:\n%s", out)
+	}
+}
+
+// A database that is old all over -- a pulled nightly nobody has updated for
+// ten days -- gets D139's line and this one, but not the seed advice: its
+// catalog is as old as its build, so no ratings-only build carried it, and
+// telling that reader about EOL_ENABLE would name a cause that did not occur.
+func TestRun_EOLAgeWarningOnAnOldBuildDoesNotBlameASeed(t *testing.T) {
+	// The real clock for both: warnIfStale judges BuiltAt against time.Now(),
+	// and the seed clause compares BuiltAt with the catalog's date, so the two
+	// have to be on one clock. The release's EOLFrom is far out so the gate
+	// itself does not trip on today's real date.
+	now := time.Now().UTC()
+	pinClock(t, now)
+	rows := []store.EOLRelease{{DistroID: "alpine", Release: "3.19", EOLFrom: "2099-01-01", EOLLabel: "Security Support"}}
+	db := testDBWithEOLAsOfBuiltAt(t, rows, now.AddDate(0, 0, -10), now.AddDate(0, 0, -10))
+
+	_, errOut, code := alpine319Image(t, db, Options{FailOnEOL: true})
+	if code != 0 {
+		t.Fatalf("Run() = %d, want 0 (stderr: %s)", code, errOut)
+	}
+	if !strings.Contains(errOut, "warning: this database was built 10 days ago") {
+		t.Errorf("D139's own warning is missing:\n%s", errOut)
+	}
+	if !strings.Contains(errOut, "end-of-life data was generated 10 days ago") {
+		t.Errorf("the end-of-life data's age is not warned about:\n%s", errOut)
+	}
+	if strings.Contains(errOut, "EOL_ENABLE") || strings.Contains(errOut, "seed") {
+		t.Errorf("an old build is told its catalog was carried from a seed:\n%s", errOut)
+	}
+	if !strings.Contains(errOut, "run `assay db update`") {
+		t.Errorf("the warning does not say what to run:\n%s", errOut)
 	}
 }
 
@@ -149,6 +185,38 @@ func TestEOLAgeWarning_Boundary(t *testing.T) {
 		warnIfEOLStale(c.m, c.flag, now, &buf)
 		if got := buf.Len() > 0; got != c.warn {
 			t.Errorf("%s: warned = %v, want %v (%q)", c.name, got, c.warn, buf.String())
+		}
+	}
+}
+
+// The seed clause appears only when the catalog is more than a week older
+// than the build that carries it; a build that fetched its own catalog holds
+// one at most a day old. An undated build cannot be judged and gets the plain
+// line.
+func TestEOLAgeWarning_SeedClause(t *testing.T) {
+	now := eolAgeToday
+	asOf := now.AddDate(0, 0, -10)
+	for _, c := range []struct {
+		name    string
+		builtAt time.Time
+		seed    bool
+	}{
+		{"built now over a ten-day-old catalog", now, true},
+		{"built eight days after the catalog", asOf.AddDate(0, 0, 8), true},
+		{"built exactly seven days after the catalog", asOf.AddDate(0, 0, 7), false},
+		{"built the day after the catalog", asOf.AddDate(0, 0, 1), false},
+		{"undated build", time.Time{}, false},
+	} {
+		var buf bytes.Buffer
+		warnIfEOLStale(store.Meta{BuiltAt: c.builtAt, EOL: eolAgeRows, EOLProvenance: &store.Provenance{DataAsOf: asOf}}, true, now, &buf)
+		if !strings.Contains(buf.String(), eolAgeWarning) {
+			t.Errorf("%s: no warning at all: %q", c.name, buf.String())
+		}
+		if got := strings.Contains(buf.String(), "EOL_ENABLE=1"); got != c.seed {
+			t.Errorf("%s: seed clause = %v, want %v (%q)", c.name, got, c.seed, buf.String())
+		}
+		if !strings.Contains(buf.String(), "run `assay db update`") {
+			t.Errorf("%s: no remedy: %q", c.name, buf.String())
 		}
 	}
 }

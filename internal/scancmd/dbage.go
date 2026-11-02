@@ -346,6 +346,16 @@ func warnIfEOLStale(m store.Meta, failOnEOL bool, now time.Time, stderr io.Write
 	fmt.Fprintf(stderr, "warning: this database's end-of-life data was generated %d days ago (%s); "+
 		"a release whose support ended since is judged by it\n",
 		int(age.Hours()/24), m.EOLProvenance.DataAsOf.UTC().Format("2006-01-02"))
-	fmt.Fprintln(stderr, "  run `assay db update`; a ratings-only build with EOL_ENABLE=0 keeps its "+
-		"seed's end-of-life data, so refresh the seed or build with EOL_ENABLE=1")
+	// The seed clause only when the catalog is a week older than the build
+	// that carries it: a build that fetched the catalog holds one at most a
+	// day old (endoflife.date regenerates daily), so a wider gap means this
+	// build did not fetch it. A database that is simply old all over -- a
+	// pulled artifact nobody has updated -- has had D139's line already, and
+	// advice about seeds and EOL_ENABLE would be wrong for that reader.
+	if !m.BuiltAt.IsZero() && m.BuiltAt.Sub(m.EOLProvenance.DataAsOf) > staleAfter {
+		fmt.Fprintln(stderr, "  run `assay db update`; a ratings-only build with EOL_ENABLE=0 keeps its "+
+			"seed's end-of-life data, so refresh the seed or build with EOL_ENABLE=1")
+		return
+	}
+	fmt.Fprintln(stderr, "  run `assay db update`")
 }
