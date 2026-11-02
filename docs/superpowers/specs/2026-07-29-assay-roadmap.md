@@ -3358,6 +3358,10 @@ container package), or a versionless purl — is dropped uncounted, as before. E
 target is examined, not the first alone. The counters in the ubi9-micro and syft-1.51
 fixtures are unchanged, and a described real package is now one component, one cataloged.
 
+---
+
+### D85 — Ubuntu fix states, from the tracker Canonical actually maintains
+
 > **Revised by D157 (2026-10-30):** a tracker that parses to no tuple, or stamps no fix
 > state, now fails the build, and `db push` refuses a candidate in which any Ubuntu release
 > holds under 80% of its published fix states. The "degrade rather than fail" choice below

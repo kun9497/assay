@@ -99,18 +99,25 @@ func Parse(r io.Reader) (pkgmeta.Target, cyclonedx.Stats, error) {
 			// it inventories — a versioned, purl-bearing lodash or openssl
 			// — was dropped uncounted, in no skip bucket, and scanned as
 			// "no components" with exit 0. So the target is cataloged into
-			// a scratch and kept only when it yields a candidate; a
-			// pseudo-package yields none (no purl, pkg:oci, no version) and
-			// is dropped as before.
+			// a scratch, and dropped uncounted only when it has one of the
+			// pseudo-package shapes: no purl, every purl pkg:oci, or a purl
+			// with no version. Anything else a document describes is a real
+			// entry and gets whatever the undescribed twin would have got: a
+			// candidate, or a counted skip (an unsupported type, a malformed
+			// purl, arch=src) that --fail-on-incomplete can see (review of
+			// #230: a dropped-when-empty rule hid those as well).
 			var scratchTarget pkgmeta.Target
 			var scratchStats cyclonedx.Stats
 			catalogPackage(p, srcOf[p.SPDXID], &scratchTarget, &scratchStats)
-			if len(scratchTarget.Packages) == 0 {
+			if len(scratchTarget.Packages) == 0 && pseudoPackageShape(p, scratchStats) {
 				continue
 			}
 			target.Packages = append(target.Packages, scratchTarget.Packages...)
 			stats.Components += scratchStats.Components
 			stats.Cataloged += scratchStats.Cataloged
+			stats.SkippedNoPURL += scratchStats.SkippedNoPURL
+			stats.SkippedNoVersion += scratchStats.SkippedNoVersion
+			stats.SkippedUnsupportedEcosystem += scratchStats.SkippedUnsupportedEcosystem
 			continue
 		}
 		catalogPackage(p, srcOf[p.SPDXID], &target, &stats)
@@ -127,6 +134,42 @@ func Parse(r io.Reader) (pkgmeta.Target, cyclonedx.Stats, error) {
 // doc.SPDXID), which never matches any entry in doc.Packages — so on that
 // shape there is naturally nothing to examine, with no special case needed
 // here.
+// pseudoPackageShape reports whether a described entry that yielded no
+// candidate is one of the document-root shapes generators write for the
+// thing the SBOM is about rather than a package in it: no purl at all
+// (syft's SPDXRef-DocumentRoot-*, Red Hat's cpe-only product package),
+// every purl pkg:oci (Red Hat's container package), or every parsed purl
+// without a version (a product named without a build). Those are excluded
+// uncounted, like CycloneDX's operating-system component. A described entry
+// of any other shape is a real package the document is about, and its
+// skip is counted the way the undescribed twin's would be.
+func pseudoPackageShape(p pkg, scratch cyclonedx.Stats) bool {
+	var purls []string
+	for _, ref := range p.ExternalRefs {
+		if ref.ReferenceType == "purl" {
+			purls = append(purls, ref.ReferenceLocator)
+		}
+	}
+	if len(purls) == 0 {
+		return true
+	}
+	allOCI := true
+	for _, raw := range purls {
+		parsed, err := pkgmeta.ParsePURL(raw)
+		if err != nil || parsed.Type != "oci" {
+			allOCI = false
+			break
+		}
+	}
+	if allOCI {
+		return true
+	}
+	// catalogPackage counts a package under SkippedNoVersion only when a
+	// purl parsed, no candidate came of any, and at least one lacked a
+	// version: the product-without-a-build shape.
+	return scratch.SkippedNoVersion == 1
+}
+
 func describedPackageIDs(doc document) map[string]bool {
 	ids := make(map[string]bool)
 	for _, r := range doc.Relationships {

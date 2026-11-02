@@ -1,6 +1,7 @@
 package spdx
 
 import (
+	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"os"
 	"strings"
 	"testing"
@@ -128,6 +129,54 @@ func TestParse_PseudoRootDroppedBesideDescribedRealPackage(t *testing.T) {
 	}
 	if len(target.Packages) != 1 || target.Packages[0].Name != "zlib" {
 		t.Fatalf("Packages = %+v, want just zlib", target.Packages)
+	}
+}
+
+// A described entry that is a REAL package of a shape this cataloger cannot
+// turn into a candidate -- an unsupported purl type, a malformed purl -- is
+// a counted skip exactly as its undescribed twin is, not an uncounted
+// exclusion (review of #230): a single-package SBOM of that shape must not
+// scan as "no components" with exit 0 under --fail-on-incomplete.
+func TestParse_DescribedRealEntryOfAnUnreadableShapeIsACountedSkip(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		purl      string
+		wantStats cyclonedx.Stats
+	}{
+		{"unsupported type", "pkg:generic/x@1.0", cyclonedx.Stats{Components: 1, SkippedUnsupportedEcosystem: 1}},
+		{"malformed purl", "not-a-purl", cyclonedx.Stats{Components: 1, SkippedNoPURL: 1}},
+		{"arch=src", "pkg:rpm/redhat/zlib@1.2.11-40.el9?arch=src", cyclonedx.Stats{Components: 1, SkippedUnsupportedEcosystem: 1}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			doc := `{"spdxVersion":"SPDX-2.3","SPDXID":"SPDXRef-DOCUMENT","packages":[
+			  {"name":"x","SPDXID":"SPDXRef-x","versionInfo":"1.0",
+			   "externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"` + c.purl + `"}]}],
+			  "relationships":[{"spdxElementId":"SPDXRef-DOCUMENT","relatedSpdxElement":"SPDXRef-x","relationshipType":"DESCRIBES"}]}`
+			target, stats, err := Parse(strings.NewReader(doc))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if len(target.Packages) != 0 {
+				t.Errorf("Packages = %+v, want none", target.Packages)
+			}
+			got := stats
+			got.DocumentNamespace = ""
+			if got != c.wantStats {
+				t.Errorf("stats = %+v, want %+v: a described real entry is counted like an undescribed one", got, c.wantStats)
+			}
+		})
+	}
+	// The control: the same entry with no purl at all is the pseudo-root
+	// shape and stays excluded, uncounted.
+	doc := `{"spdxVersion":"SPDX-2.3","SPDXID":"SPDXRef-DOCUMENT","packages":[
+	  {"name":"root","SPDXID":"SPDXRef-root","versionInfo":"1.0"}],
+	  "relationships":[{"spdxElementId":"SPDXRef-DOCUMENT","relatedSpdxElement":"SPDXRef-root","relationshipType":"DESCRIBES"}]}`
+	_, stats, err := Parse(strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if stats.Components != 0 || stats.SkippedNoPURL != 0 {
+		t.Errorf("pseudo-root stats = %+v, want nothing counted", stats)
 	}
 }
 

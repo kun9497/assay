@@ -3141,6 +3141,10 @@ django 만 남겼습니다. `TestParse_TinyFixture` 는 그 0 을 단언하며 "
 아니라 모든 DESCRIBES 대상을 검사합니다. ubi9-micro 와 syft-1.51 픽스처의 카운터는 그대로이고,
 기술된 실제 패키지는 이제 component 1, cataloged 1 입니다.
 
+---
+
+### D85 — Ubuntu fix state, Canonical이 실제로 유지하는 tracker에서
+
 > **D157 로 개정됨 (2026-10-30):** 아무 tuple 도 파싱하지 못하거나 fix state 를 하나도 찍지 못하는
 > tracker 는 이제 빌드를 실패시키고, `db push` 는 어떤 Ubuntu release 든 게시된 fix state 의 80% 아래로
 > 떨어진 후보를 거부한다. 아래의 "실패하지 않고 저하시킨다"는 선택은 대체되었다.
