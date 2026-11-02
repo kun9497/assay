@@ -204,6 +204,30 @@ func TestRun_SBOMLoneRPMSubpackageKeepsItsOwnEpoch(t *testing.T) {
 	}
 }
 
+// A language package that happens to share the SRPM's name (an npm module
+// called httpd beside the mod_ssl rpm) is not an rpm build and lends the
+// source no epoch: the pass sees the document's rpms only (review of
+// #233), so mod_ssl still keeps its own epoch and is not found. Without
+// the filter the npm package's empty epoch reached step 3 and the source
+// read 2.4.62-1.fc40, below the fix. The npm package itself is not in the
+// database's coverage, so the incompleteness gate is left off here.
+func TestRun_SBOMLanguagePackageSharingTheSRPMNameLendsNoEpoch(t *testing.T) {
+	db := vexDB(t, "Fedora:40", vexAdv{"FEDORA-2031-1", "CVE-2031-9002", "httpd", "2.4.63-1.fc40"})
+	sbom := writeSBOM(t, "cyclonedx", `{"bomFormat":"CycloneDX","specVersion":"1.5","version":1,"components":[
+ {"type":"library","name":"mod_ssl","version":"1:2.4.62-1.fc40","purl":"pkg:rpm/fedora/mod_ssl@2.4.62-1.fc40?arch=x86_64&distro=fedora-40&epoch=1&upstream=httpd-2.4.62-1.fc40.src.rpm"},
+ {"type":"library","name":"httpd","version":"1.0.0","purl":"pkg:npm/httpd@1.0.0"}]}`)
+	var out, stderr bytes.Buffer
+	Run(context.Background(), db, sbom, Options{Output: "json"}, &out, &stderr)
+	var doc report.Document
+	if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+		t.Fatalf("decode: %v stderr=%s", err, stderr.String())
+	}
+	if len(doc.Findings) != 0 {
+		t.Errorf("findings=%d, want 0: mod_ssl keeps its own epoch 1 and sorts above the fix; the npm httpd is not an rpm build (stderr=%s)",
+			len(doc.Findings), stderr.String())
+	}
+}
+
 // A source statement (D121) names the SOURCE version. With Source.Version
 // read from the purl, vex compares it against that and not against the
 // binary's own version, so the statement written against the source applies
