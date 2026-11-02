@@ -322,6 +322,13 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 				evaluated, incompleteChecks)
 		}
 
+	case len(res.Suppressed) > 0:
+		// Every finding was waived. The clean sentence below is the one a
+		// scan that found nothing prints, and a reader who reads only the
+		// headline must not take the one for the other (audit P4).
+		fmt.Fprintf(w, "No unwaived vulnerabilities found in %d package(s): %d finding(s) suppressed, listed below.\n",
+			evaluated, len(res.Suppressed))
+
 	default:
 		fmt.Fprintf(w, "No known vulnerabilities found in %d package(s).\n", evaluated)
 	}
@@ -424,15 +431,7 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 		header := fmt.Sprintf("Suppressed (%d), not counted toward the verdict:", len(res.Suppressed))
 		fmt.Fprintf(w, "\n%s\n", wrapSGR(ansiDim, header, colorize))
 		for _, s := range res.Suppressed {
-			src := s.Source
-			if src == "" {
-				// Zero value only reaches here from a Suppressed built
-				// outside applyIgnoreRules/applyVEX (a hand-built test
-				// fixture, or a future caller that forgets to set it) — a
-				// label rather than a blank keeps the line honest about not
-				// knowing, instead of implying a source that was checked.
-				src = "unspecified source"
-			}
+			src := suppressionSource(s)
 			// The ecosystem cell the active row would have had, markers and
 			// all: a waived finding still matched under a frozen or
 			// cross-mapped key, and the waiver was granted against that data.
@@ -819,4 +818,16 @@ func otherIDs(f matcher.Finding) []string {
 		out = append(out, id)
 	}
 	return out
+}
+
+// suppressionSource is the waiver mechanism a suppression names. The zero
+// value only reaches here from a Suppressed built outside
+// applyIgnoreRules/applyVEX (a hand-built test fixture, or a future caller
+// that forgets to set it) — a label rather than a blank keeps the line
+// honest about not knowing, instead of implying a source that was checked.
+func suppressionSource(s matcher.Suppressed) string {
+	if s.Source == "" {
+		return "unspecified source"
+	}
+	return s.Source
 }
