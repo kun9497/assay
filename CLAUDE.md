@@ -97,7 +97,8 @@ checksums are signed and `install.sh` verifies them with `openssl` (`install.ps1
 system code page). Since D138 every ops
 workflow keeps one pinned issue open while it fails (`scripts/ops-alert.sh`) and the nightly
 publishes `status.json` to the `status` branch (`cmd/dbstatus`); since D139 a scan warns when its
-database was built over seven days ago; since D140 a layer download cut mid-stream is retried; since D141 every image scan says on
+database was built over seven days ago (and, under `--fail-on-eol`, when its end-of-life data is
+that old); since D140 a layer download cut mid-stream is retried; since D141 every image scan says on
 stderr and in SARIF (`assay/inventory-scope`) that application packages inside the image were
 not checked. Findings
 can be waived through a

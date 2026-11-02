@@ -6060,6 +6060,18 @@ leaves stdout a clean JSON report; a two-day-old one is silent. The boundary: ex
 is silent, seven days and an hour warns, an undated database is silent. Four mutations caught:
 the call removed, the boundary moved, the undated check removed, the warning sent to stdout.
 
+**Addendum (2026-11-02).** The end-of-life catalog gets its own age. `BuiltAt` is the right
+clock for advisories, but the catalog can be older than the build that carries it: a
+ratings-only build with `EOL_ENABLE=0` keeps its seed's (the audit P4 closed the same day), and
+the build's stderr line was the only place that said so. A scan run with `--fail-on-eol` now
+warns when `Meta.EOLProvenance.DataAsOf` -- endoflife.date's own `generated_at`, D12 -- is more
+than seven days before the scan, naming the date and what to run. Gated on the flag like the
+"EOL unknown" disclosure, because only a caller gating on the catalog is misled by its age; not
+the dead-feed hazard above, because endoflife.date is live and a current database cannot warn
+forever. Undated data is not called old, and a database with no rows is the "EOL unknown" case.
+Verified at the caller (ten days old warns and exits 0 with clean JSON stdout; two days, no flag,
+no provenance are silent) and at the boundary (seven days silent, seven days and an hour warns).
+
 ### D140 — A layer download cut mid-stream is retried, three attempts
 
 **Decision.** `db update` and `db build --seed` unpack the database layer through

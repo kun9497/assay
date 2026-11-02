@@ -978,7 +978,8 @@ exited 0 while 24 findings went unmentioned.
       signature) to the `status` branch (D138)
 - [x] Every scan warns on stderr when its database was built more than seven days ago (D139) —
       measured from `BuiltAt`, so a dead upstream feed does not warn forever; exit code and
-      stdout unchanged
+      stdout unchanged. Under `--fail-on-eol`, also when the end-of-life data itself was
+      generated over seven days ago (a ratings-only build carries its seed's), 2026-11-02
 - [x] `db update` and `db build --seed` retry a layer download cut mid-stream, three attempts
       (D140); an artifact's own defect is not retried
 - [x] Every image scan discloses that application packages inside the image were not checked

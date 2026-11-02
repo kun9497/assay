@@ -733,6 +733,11 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 	// not a warning about the same staleness; before matching, so the
 	// warning leads the stderr a reader sees.
 	warnIfStale(m, time.Now(), stderr)
+	// The end-of-life catalog can be older than the build that carries it (a
+	// ratings-only build with EOL_ENABLE=0 keeps its seed's), so it has its
+	// own age, judged against clockNow(): the same "today" the D87 lookup
+	// below holds EOLFrom to.
+	warnIfEOLStale(m, opts.FailOnEOL, clockNow(), stderr)
 
 	res, err := matcher.New(db).Match(inventory)
 	if err != nil {
