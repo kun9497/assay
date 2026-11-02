@@ -92,6 +92,9 @@ jobs:
           set -o pipefail
           out=$(./bin/assay db push ${{ steps.ref.outputs.ref }} | tail -n1)
           echo "$out"
+          # See db-publish.yml: only a digest reference may reach the signer.
+          echo "$out" | grep -Eq '^[^@[:space:]]+@sha256:[0-9a-f]{64}$' \
+            || { echo "::error::db push's last line is not a digest reference: '$out'"; exit 2; }
           echo "pushed=$out" >> "$GITHUB_OUTPUT"
       - name: Sign the pushed digest (D137)
         env:
@@ -102,6 +105,9 @@ jobs:
         # is an outage for every db update and the next seeded build, so a
         # transient ghcr 5xx on the .sig PUT must not decide it.
         run: |
+          # See db-publish.yml: an empty PUSHED is a workflow defect, not an
+          # unsigned push, and is refused before cosign is asked.
+          [ -n "$PUSHED" ] || { echo "::error::the Publish step recorded no digest, so there is nothing to sign (steps.push.outputs.pushed is empty)"; exit 2; }
           for i in 1 2 3; do
             cosign sign --key env://COSIGN_PRIVATE_KEY --tlog-upload=false --yes "$PUSHED" && exit 0
             echo "::warning::cosign sign attempt $i failed"; sleep $((i * 20))
@@ -111,6 +117,7 @@ jobs:
         env:
           PUSHED: ${{ steps.push.outputs.pushed }}
         run: |
+          [ -n "$PUSHED" ] || { echo "::error::the Publish step recorded no digest, so there is nothing to verify (steps.push.outputs.pushed is empty)"; exit 2; }
           ok=0
           for k in internal/dbcmd/trust/keys/*.pub; do
             if cosign verify --key "$k" --insecure-ignore-tlog=true "$PUSHED" >"/tmp/verify-$(basename "$k").log" 2>&1; then

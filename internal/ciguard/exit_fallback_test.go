@@ -37,8 +37,9 @@ type ghWorkflow struct {
 }
 
 type ghStep struct {
-	ID  string `yaml:"id"`
-	Run string `yaml:"run"`
+	ID  string            `yaml:"id"`
+	Run string            `yaml:"run"`
+	Env map[string]string `yaml:"env"`
 }
 
 // Any `exit ${{ ... }}`, whatever is inside: a site this cannot parse as a

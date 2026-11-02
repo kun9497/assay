@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+### Fixed
+- 야간 발행과 backfill 은 digest 참조가 아닌 것은 서명하지 않습니다. Publish 단계가 `db push` 의 마지막 줄이
+  `<repo>@sha256:<64 hex>` 꼴인지 확인하고, 서명·자가 검증 단계는 넘어온 step output 이 비어 있으면 cosign
+  을 부르기 전에 종료합니다. 전에는 빈 output(이름이 바뀐 step id, 잘못 적은 output 이름)에 cosign 이 세 번
+  실패한 뒤 잡이 "pushed and UNSIGNED" 라고, 아무것도 푸시되지 않은 이름에 대해 보고했습니다.
+  `internal/ciguard` 가 이제 step output 을 `env` 로 넘기는 모든 단계에 그런 첫 줄 검사와, 같은 잡의 앞선
+  단계가 그 output 을 쓰는지를 요구합니다.
+
 ## [0.14.0] - 2026-11-02
 
 ### Fixed
