@@ -147,28 +147,34 @@ func TestExitFallbackGuardRejects(t *testing.T) {
 		return []byte("on: push\njobs:\n  diff:\n    runs-on: ubuntu-latest\n    steps:" + steps)
 	}
 	cases := []struct {
-		name string
-		src  []byte
-		want []string
+		name  string
+		src   []byte
+		sites int
+		want  []string
 	}{
-		{"well formed", wf(producer + "      - run: exit ${{ steps.diff.outputs.exit_code || 2 }}\n"), nil},
-		{"no fallback", wf(producer + "      - run: exit ${{ steps.diff.outputs.exit_code }}\n"), []string{
+		{"well formed", wf(producer + "      - run: exit ${{ steps.diff.outputs.exit_code || 2 }}\n"), 1, nil},
+		{"no fallback", wf(producer + "      - run: exit ${{ steps.diff.outputs.exit_code }}\n"), 1, []string{
 			"t.yml: job diff: `exit ${{ steps.diff.outputs.exit_code }}` has no nonzero fallback: an empty output becomes a bare `exit`, which returns 0",
 		}},
-		{"zero fallback", wf(producer + "      - run: exit ${{ steps.diff.outputs.exit_code || 0 }}\n"), []string{
+		{"zero fallback", wf(producer + "      - run: exit ${{ steps.diff.outputs.exit_code || 0 }}\n"), 1, []string{
 			"t.yml: job diff: `exit ${{ steps.diff.outputs.exit_code || 0 }}` has no nonzero fallback: an empty output becomes a bare `exit`, which returns 0",
 		}},
-		{"renamed id", wf(strings.Replace(producer, "id: diff", "id: differential", 1) + "      - run: exit ${{ steps.diff.outputs.exit_code || 2 }}\n"), []string{
+		{"renamed id", wf(strings.Replace(producer, "id: diff", "id: differential", 1) + "      - run: exit ${{ steps.diff.outputs.exit_code || 2 }}\n"), 1, []string{
 			"t.yml: job diff: `exit ${{ steps.diff.outputs.exit_code || 2 }}` names step id diff, which no earlier step in the job declares",
 		}},
-		{"misspelled output", wf(producer + "      - run: exit ${{ steps.diff.outputs.exitcode || 2 }}\n"), []string{
+		{"misspelled output", wf(producer + "      - run: exit ${{ steps.diff.outputs.exitcode || 2 }}\n"), 1, []string{
 			"t.yml: job diff: `exit ${{ steps.diff.outputs.exitcode || 2 }}` reads output exitcode, which step diff never writes to $GITHUB_OUTPUT",
 		}},
-		{"producer after the exit", wf("\n      - run: exit ${{ steps.diff.outputs.exit_code || 2 }}" + producer), []string{
+		{"producer after the exit", wf("\n      - run: exit ${{ steps.diff.outputs.exit_code || 2 }}" + producer), 1, []string{
 			"t.yml: job diff: `exit ${{ steps.diff.outputs.exit_code || 2 }}` names step id diff, which no earlier step in the job declares",
 		}},
-		{"not a step output", wf(producer + "      - run: exit ${{ env.RC }}\n"), []string{
+		{"not a step output", wf(producer + "      - run: exit ${{ env.RC }}\n"), 1, []string{
 			"t.yml: job diff: `exit ${{ env.RC }}` is not `steps.<id>.outputs.<name> || <nonzero>`",
+		}},
+		// A site the step parse never reaches -- here an action's input, the
+		// shape actions/github-script would take -- is reported, not passed.
+		{"outside a step's run", wf(producer + "      - uses: actions/github-script@v7\n        with:\n          script: exit ${{ steps.diff.outputs.exit_code }}\n"), 0, []string{
+			"t.yml: 1 `exit ${{ }}` sites in the text, 0 inside a step's run",
 		}},
 	}
 	for _, c := range cases {
@@ -177,8 +183,8 @@ func TestExitFallbackGuardRejects(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if n != 1 {
-				t.Errorf("judged %d sites, want 1", n)
+			if n != c.sites {
+				t.Errorf("judged %d sites, want %d", n, c.sites)
 			}
 			if !slices.Equal(got, c.want) {
 				t.Errorf("problems = %q\nwant       %q", got, c.want)
