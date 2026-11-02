@@ -524,7 +524,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 				dbUpdateProviders(stderr),
 				dbUpdateAnnotators(stderr),
 				dbUpdateEnrichers(stderr),
-				dbUpdateEOLSource(stderr),
+				dbUpdateEOLSource(stderr, ratingsOnly),
 				stdout, stderr)
 		case "update":
 			ref, allowUnsigned, ok := resolveUpdateRef(args, stderr)
@@ -1027,7 +1027,8 @@ func dbUpdateEnrichers(stderr io.Writer) []provider.Enricher {
 var newEOLSource = eol.New
 
 // dbUpdateEOLSource is the provider.EOLSource `db build` runs, or nil when
-// EOL_ENABLE=0.
+// EOL_ENABLE=0. ratingsOnly only changes what the EOL_ENABLE=0 line says: a
+// ratings-only build keeps its seed's catalog, an ordinary build has none.
 //
 // ON BY DEFAULT (D87), unlike NVD's and KISA's opt-in, for a mix of their
 // two reasons: cost, like EPSS/KEV (one ~2.7 MB request, not NVD's seven
@@ -1043,8 +1044,19 @@ var newEOLSource = eol.New
 // gating, see scancmd), so a build run with it off should say so plainly
 // rather than leave a reader to notice only when the flag they configured
 // never fires.
-func dbUpdateEOLSource(stderr io.Writer) provider.EOLSource {
+func dbUpdateEOLSource(stderr io.Writer, ratingsOnly bool) provider.EOLSource {
 	if !envFlag(stderr, "EOL_ENABLE", true) {
+		// A ratings-only build keeps the seed's catalog (dbcmd.Update, audit
+		// 2026-10-22 P4, re-verified 2026-11-02), so "carries none" would be
+		// false there -- and false in the direction that sends a reader
+		// looking for a gate that is in fact still armed, only as old as
+		// the seed.
+		if ratingsOnly {
+			fmt.Fprintln(stderr, "eol: EOL_ENABLE=0, skipping the end-of-life fetch — "+
+				"this ratings-only build keeps the seed's end-of-life catalog unchanged, "+
+				"and --fail-on-eol gates on that catalog as the seed last fetched it")
+			return nil
+		}
 		fmt.Fprintln(stderr, "eol: EOL_ENABLE=0, skipping end-of-life data — "+
 			"a database built this way carries none, and --fail-on-eol will warn rather than gate on it")
 		return nil
