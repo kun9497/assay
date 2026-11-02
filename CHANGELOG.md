@@ -14,6 +14,13 @@ All notable changes to this project are documented here. The format follows
   the build time, so such a database read as current while a release whose support had ended
   since was still judged supported. Exit code and stdout are unchanged; without the flag, and
   for undated data, nothing is said.
+- The nightly publish and the backfill refuse to sign anything but a digest reference: the
+  Publish step checks that `db push`'s last line is `<repo>@sha256:<64 hex>`, and the sign and
+  self-check steps exit before calling cosign when the step output reaching them is empty.
+  Before, an empty output -- a renamed step id, a mistyped output name -- made cosign fail three
+  times and the job then reported the artifact "pushed and UNSIGNED" about a name nothing was
+  pushed under. `internal/ciguard` now holds every step that maps a step output into `env` to
+  such a first-line check, and to a producer declared earlier in the same job.
 
 ## [0.14.0] - 2026-11-02
 
