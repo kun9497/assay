@@ -8,6 +8,13 @@
 ## [Unreleased]
 
 ### Fixed
+- `db build --ratings-only --seed` 가 EOL source 가 설정되지 않았을 때(`EOL_ENABLE=0`) seed 의 end-of-life
+  카탈로그와 enrichment record 의 provenance 를 유지합니다. 전에는 새 metadata 가 그 위에 덮어써져 EOL
+  행이 사라지고, 그런 데이터베이스에서 `--fail-on-eol` 은 gate 대신 경고만 했으며, `db status` 는 enrichment
+  를 data-as-of 없이 보여줬습니다. EOL source 가 설정되면 여전히 카탈로그를 대체합니다. `EOL_ENABLE=0` 줄은
+  seed 의 카탈로그를 seed 만큼 오래된 채로 유지한다고 말합니다. (감사 2026-10-22 P4, 2026-11-02 재검증)
+
+### Fixed
 - `package-lock.json`(v1, v3), yarn v1 의 `yarn.lock`, `Cargo.lock`, `poetry.lock`, `uv.lock` 의 git,
   URL, 경로 의존성이 더는 그 체크아웃이 스스로 선언한 버전으로 카탈로그되지 않습니다. 그 버전은 권고문이
   가리키는 레지스트리 릴리스와 같다는 보장이 없어, 스캔이 오탐과 조용한 미탐을 모두 낼 수 있었습니다.

@@ -8,6 +8,14 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- `db build --ratings-only --seed` keeps the seed's end-of-life catalog, and the provenance of
+  its enrichment records, when no EOL source is configured (`EOL_ENABLE=0`). Before, the new
+  metadata was written over them: the EOL rows were lost, so `--fail-on-eol` warned instead
+  of gating on such a database, and `db status` showed the enrichment with no data-as-of.
+  A configured EOL source still replaces the catalog. The `EOL_ENABLE=0` line says the
+  seed's catalog is kept, as old as the seed. (audit 2026-10-22 P4, re-verified 2026-11-02)
+
+### Fixed
 - A git, URL or path dependency in `package-lock.json` (v1 and v3), yarn v1's `yarn.lock`,
   `Cargo.lock`, `poetry.lock` or `uv.lock` is no longer cataloged under the version its own
   checkout declares. That version need not be any registry release an advisory names, so the
