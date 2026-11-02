@@ -331,6 +331,11 @@ func TestRetryable(t *testing.T) {
 		// narrowness fedora keeps; the two transport failures below are.
 		{"network failure with no status", errors.New("connection refused"), 0, false},
 		{"truncated body with a 200", io.ErrUnexpectedEOF, http.StatusOK, true},
+		// An EMPTY 200 body decodes to io.EOF, not ErrUnexpectedEOF: the server
+		// completed a response with nothing in it, which is the feed's shape
+		// changing rather than a cut transfer, so it fails the build at once.
+		// Pinned so the choice reads as deliberate.
+		{"empty 200 body", io.EOF, http.StatusOK, false},
 		{"connection reset mid-body", syscall.ECONNRESET, http.StatusOK, true},
 		{"wrapped connection reset", fmt.Errorf("decode feed: %w", syscall.ECONNRESET), http.StatusOK, true},
 		// The feed's shape changed: a finding, not a blip.
