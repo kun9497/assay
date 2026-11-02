@@ -420,6 +420,33 @@ func TestRun_TargetsFileInvalidJSON_ExitErrorWithUsage(t *testing.T) {
 	}
 }
 
+// QA 2026-11-02 (#25): a target name that escapes the capture directory is
+// refused when the targets file is loaded, before any scanner runs -- live
+// mode, with every live flag set, so the only thing standing between the
+// name and writeCapture's filepath.Join is the check. noExec fails the test
+// if a scan is attempted at all.
+func TestRun_TargetNameEscapingTheCaptureDir_ExitErrorBeforeAnyScan(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "targets.json")
+	if err := os.WriteFile(path, []byte(`[{"name": "../../escape", "ref": "example.com/x@sha256:aaa"}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	captureDir := filepath.Join(t.TempDir(), "captures")
+
+	var stdout, stderr bytes.Buffer
+	got := run([]string{"-targets", path, "-assay", "a", "-grype", "g", "-capture", captureDir},
+		&stdout, &stderr, noExec(t))
+
+	if got != exitError {
+		t.Fatalf("exit = %d, want %d (stderr=%q)", got, exitError, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), `"../../escape"`) || !strings.Contains(stderr.String(), "not a plain file name") {
+		t.Errorf("stderr = %q, want it to name the offending entry and why it is refused", stderr.String())
+	}
+	if _, err := os.Stat(captureDir); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("capture dir %s exists (err=%v); the targets file is refused before live mode sets anything up", captureDir, err)
+	}
+}
+
 func TestRun_LiveModeRequiresAssayGrypeCapture_ExitError(t *testing.T) {
 	targetsPath := writeTargetsFile(t, []Target{{Name: "x", Ref: "ref-x"}})
 

@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/pkgmeta"
 )
 
 // document is the subset of one CSAF VEX document this provider reads.
@@ -295,41 +296,51 @@ func collectCPE(bs []branch, out map[string]string) {
 	}
 }
 
-// hummingbirdPurlRE splits a Hummingbird leaf's purl into a package name and
-// version, copy-adapted from SUSE's identical-shaped purlRE (D77's proven
-// pattern, internal/provider/suse/csaf.go) rather than reused from splitNEVRA
-// — Hummingbird's product id is a STREAM LABEL ("perl-main@x86_64"), not an
-// NEVRA, and fans out to more than one real package under one label
-// ("perl-main@noarch" resolves to perl-Attribute-Handlers, not perl), so the
-// only place the real name and version live is here.
-//
-// Unlike SUSE's purls, a Hummingbird purl's version half is OPTIONAL: 533 of
-// 544 sampled carry one ("pkg:rpm/redhat/perl@5.42.2-524.hum1?arch=..."), but
-// 11 are bare names with no "@" at all
-// ("pkg:rpm/redhat/opentofu1.10?arch=src") — D47's "affected at every
-// version" convention, read here as SUSE's own packageOf reads a bare
-// component: an empty version is the statement, not missing data. The
-// version group is therefore optional in the pattern rather than assumed
-// present the way SUSE's purlRE (fed only by "recommended"/fixed entries,
-// always versioned) can assume.
-var hummingbirdPurlRE = regexp.MustCompile(`^pkg:rpm/redhat/([^@?]+)(?:@([^?]*))?`)
+// hummingbirdNamespace is the purl namespace a Hummingbird leaf's rpm purl
+// carries ("pkg:rpm/redhat/..."). A leaf in any other namespace, or of any
+// other type, is not something an rpm inventory of a Hummingbird image can
+// hold.
+const hummingbirdNamespace = "redhat"
 
 // packageInfo is one Hummingbird leaf's package name and version, read off
 // its purl rather than guessed from the product id string (SUSE's
 // packageInfo, copy-adapted).
 type packageInfo struct{ name, version string }
 
-// hummingbirdPackageOf splits a Hummingbird leaf's purl into a package name
+// hummingbirdPackageOf reads a Hummingbird leaf's purl into a package name
 // and version, or reports false — for a purl this provider does not read at
 // all (measured live: "pkg:oci/opentofu?repository_url=..." names an OCI
 // image, not an rpm, and nothing installed by rpm could ever match one) or
-// for no purl at all.
+// for no purl at all. The purl is the only place the real name and version
+// live: Hummingbird's product id is a STREAM LABEL ("perl-main@x86_64"),
+// not an NEVRA, and fans out to more than one real package under one label
+// ("perl-main@noarch" resolves to perl-Attribute-Handlers, not perl), so
+// splitNEVRA cannot be reused here (D98).
+//
+// The version is pkgmeta.EVROf's: the purl's @version with a non-zero
+// "epoch" qualifier prefixed as "epoch:", the shape rpmdb's evr() gives an
+// installed build. Until QA 2026-11-02 a regex took the @version alone and
+// stopped at the '?', so the live documents' nginx
+// ("pkg:rpm/redhat/nginx@1.30.4-2.hum1?arch=x86_64&epoch=2&...") was stored
+// fixed at "1.30.4-2.hum1" while the installed build read "2:1.30.4-1.hum1";
+// version.RPM orders the epoch first, so every vulnerable epoch-carrying
+// build (67 of 403 distinct purls in the 160 newest documents: nginx* at 2,
+// tomcat10/11 at 1) was reported clean. The scan side had applied the rule
+// to SBOM purls since D83; the feed side now reads it from the same helper
+// rather than a third spelling of it.
+//
+// The version half is OPTIONAL: 533 of 544 sampled carry one, but 11 are
+// bare names with no "@" at all ("pkg:rpm/redhat/opentofu1.10?arch=src") —
+// D47's "affected at every version" convention, read here as SUSE's own
+// packageOf reads a bare component: an empty version is the statement, not
+// missing data. ParsePURL leaves such a version "", and EVROf never prefixes
+// an epoch onto an empty version.
 func hummingbirdPackageOf(purl string) (name, version string, ok bool) {
-	m := hummingbirdPurlRE.FindStringSubmatch(purl)
-	if m == nil {
+	p, err := pkgmeta.ParsePURL(purl)
+	if err != nil || p.Type != "rpm" || p.Namespace != hummingbirdNamespace {
 		return "", "", false
 	}
-	return m[1], m[2], true
+	return p.Name, pkgmeta.EVROf(p), true
 }
 
 // collectHummingbirdPackages walks the WHOLE product tree's leaf nodes,
@@ -640,6 +651,16 @@ type stats struct {
 	// provider could not parse, and Hummingbird's component is never parsed
 	// as a string.
 	SkippedNoPurl int
+	// HummingbirdFixedWithEpoch counts fixed product_status entries on the
+	// Hummingbird key whose purl carried a non-zero "epoch" qualifier, so
+	// the fixed version was stored "epoch:version-release" (QA 2026-11-02).
+	// 67 of the 403 distinct Hummingbird purls in the 160 newest documents
+	// measured that day (nginx* at epoch 2, tomcat10/11 at epoch 1) -- the
+	// share of the feed that was reported clean while the qualifier was
+	// discarded. Per product_status entry, like every counter above; a
+	// collapse to zero while nginx is still shipped is the trace that the
+	// feed moved the epoch somewhere this reader does not look.
+	HummingbirdFixedWithEpoch int
 	// The delta pass (delta.go). Counted apart from the archive's numbers
 	// because they answer different questions: the archive's say what the
 	// snapshot held, these say how far behind it was.
@@ -757,6 +778,15 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 				fixed[k] = map[string]bool{}
 			}
 			fixed[k][evr] = true
+			// A Hummingbird evr came from hummingbirdPackageOf, where the
+			// only ':' it can carry is the epoch EVROf prefixed (rpm forbids
+			// the character in a version or release). Counted here, per
+			// product_status entry, rather than in resolveProduct, which the
+			// remediation loop calls again for the same ids. Mainline evrs
+			// always carry "epoch:" and are not what this counter watches.
+			if k.eco == hummingbirdEcosystem && strings.Contains(evr, ":") {
+				st.HummingbirdFixedWithEpoch++
+			}
 			return
 		}
 		// Either an explicit known_affected, or a fixed entry with no version

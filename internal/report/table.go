@@ -307,25 +307,36 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 		// notEvaluated, not the matcher's skip count: a component the
 		// CATALOGER dropped never reaches the matcher, so keying on matcher
 		// skips alone left the same hole open through the other door.
+		//
+		// This branch sits above the all-waived one below on purpose: an
+		// incomplete scan is never "clean", waivers or not. But its opening
+		// words then have to tell the truth about the waivers too -- "No
+		// vulnerabilities found" over a Suppressed block that lists one was
+		// the headline contradicting its own report (QA 2026-11-02 P3 #11).
+		found := fmt.Sprintf("No vulnerabilities found in %d package(s)", evaluated)
+		if len(res.Suppressed) > 0 {
+			found = fmt.Sprintf("No unwaived vulnerabilities found in %d package(s) (%d suppressed)", evaluated, len(res.Suppressed))
+		}
 		switch {
 		case incompleteChecks > 0 && notEvaluated > 0:
 			fmt.Fprintf(w,
-				"No vulnerabilities found in %d package(s), but %d package(s) were not checked and %d check(s) could not be completed - this is NOT a clean result.\n",
-				evaluated, notEvaluated, incompleteChecks)
+				"%s, but %d package(s) were not checked and %d check(s) could not be completed - this is NOT a clean result.\n",
+				found, notEvaluated, incompleteChecks)
 		case notEvaluated > 0:
 			fmt.Fprintf(w,
-				"No vulnerabilities found in %d package(s), but %d package(s) were not checked at all - this is NOT a clean result.\n",
-				evaluated, notEvaluated)
+				"%s, but %d package(s) were not checked at all - this is NOT a clean result.\n",
+				found, notEvaluated)
 		default:
 			fmt.Fprintf(w,
-				"No vulnerabilities found in %d package(s), but %d check(s) could not be completed - this is NOT a clean result.\n",
-				evaluated, incompleteChecks)
+				"%s, but %d check(s) could not be completed - this is NOT a clean result.\n",
+				found, incompleteChecks)
 		}
 
 	case len(res.Suppressed) > 0:
-		// Every finding was waived. The clean sentence below is the one a
-		// scan that found nothing prints, and a reader who reads only the
-		// headline must not take the one for the other (audit P4).
+		// Every finding was waived and every check ran. The clean sentence
+		// below is the one a scan that found nothing prints, and a reader who
+		// reads only the headline must not take the one for the other (audit
+		// P4).
 		fmt.Fprintf(w, "No unwaived vulnerabilities found in %d package(s): %d finding(s) suppressed, listed below.\n",
 			evaluated, len(res.Suppressed))
 

@@ -118,7 +118,7 @@ call at all.
 
 Some findings are real but not relevant to your project — the CVE is in a code path you do
 not use, you have a mitigation, or you have accepted the risk. Put those in a `.assay.yaml`
-in your repo (scanned by default; `--config <path>` names another):
+in your repo (`--config <path>` names another):
 
 ```yaml
 ignore:
@@ -127,6 +127,13 @@ ignore:
     reason: not reachable in our build path   # required — an unexplained waiver is refused
     expires: 2026-12-31             # optional: after this date the rule stops waiving and warns
 ```
+
+With no `--config`, the file is discovered in the **working directory the scan runs from**
+-- not in the target -- and applied if present. When that directory is not yours (a checkout
+handed to a shared runner, a service scanning what it was given), pass `--config none`: no
+ignore file is applied, nothing is looked for, and the report's provenance records
+`ignoreFile.path: "none"`. An empty value (`--config=`) is refused rather than read as
+"discover".
 
 A rule waives a finding only if EVERY field it names matches (`reason` is mandatory; a rule
 with no match field is refused because it would waive everything). Waived findings are

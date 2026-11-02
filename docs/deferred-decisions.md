@@ -518,8 +518,8 @@ exit 0, because the forced artifact is now the baseline.
 
 **The operating procedure, because no workflow can perform it.** Nothing under
 `.github/workflows` passes `--force`: `db-publish.yml` and `db-backfill.yml` both run
-`assay db push <ref>` bare, and `db-publish.yml`'s `workflow_dispatch` declares no inputs. The
-one-time transition is a MANUAL operator action. (1) Confirm the retirement is real — the key
+`assay db push <ref>` bare, and `db-publish.yml`'s `workflow_dispatch` declares only the D110
+`seed` input, never a force switch. The one-time transition is a MANUAL operator action. (1) Confirm the retirement is real — the key
 is absent from the upstream feed, not merely past an EOL date on a calendar. (2) Build a full
 local database on a machine with ghcr write access; the nightly-equivalent build takes on the
 order of an hour and more. (3) Run `assay db push <ref> --force` once. (4) The forced artifact
@@ -1443,7 +1443,7 @@ mechanism.
 
 ---
 
-### ~~Signing and provenance for the published database artifact~~ — resolved in D137 (2026-10-22; signing shipped first, verification follows in its second PR)
+### ~~Signing and provenance for the published database artifact~~ — resolved in D137 (2026-10-22; signing shipped first, verification followed in PR #181, the second half of D137)
 
 **What runs beside the key (audit A18, 2026-10-30).** Signing left the jobs that hold the
 key running third-party code pinned by nothing firmer than a tag. The nightly publish job
@@ -1835,6 +1835,15 @@ credential boundary concrete rather than moving it: a job that does not get its 
 with whatever login the host user holds. A per-job empty `DOCKER_CONFIG` was measured not to
 fall back to `~/.docker`, and the scan's stderr names the source a credential came from.
 
+**The working directory is an input too (QA 2026-11-02).** With no `--config`, a scan
+discovers `.assay.yaml` in the directory it runs from and applies its waivers -- so a service
+that scans checkouts it did not author runs under whichever ignore file the checkout carries,
+and a planted one can waive every finding. `--config none` is the opt-out: no ignore file is
+applied or looked for, and the provenance records `ignoreFile.path: "none"`. Until then the
+only opt-out was a file saying `ignore: []`, documented nowhere, and an empty `--config` value
+was read as "discover"; it is refused at parse now. The hazard stays with the deployment
+otherwise: which directory a job runs from is the runner's decision, not the scanner's.
+
 **A possible small repo-side helper.** `Classify` (`internal/source/classify.go`) already
 decides a target's kind — image, directory, Go binary, jar, or SBOM — before anything is
 opened, falling back to `os.Stat` on a bare string to tell a local path from a registry
@@ -2004,8 +2013,10 @@ a SARIF renderer is a third `Reporter` over the same data rather than a new trav
 what a location means, and what happens to a package with no finding — turned out to have a
 sharper form. GitHub code scanning does not support `invocations[]`, so the spec's own channel
 for "what this run could not do" is invisible in the consumer that matters. D55 emits skips
-there AND as note-level results, so a partial scan cannot read as a complete one. See D55 for
-why an unrated finding gets no `security-severity` and why fingerprints ignore the version.
+there AND as results, so a partial scan cannot read as a complete one — note-level for the
+matcher's own skips, and since D109 and D158 warning-level for a manifest not read and for a
+component with no version or purl, because the target can fix those. See D55 for why an
+unrated finding gets no `security-severity` and why fingerprints ignore the version.
 
 ---
 

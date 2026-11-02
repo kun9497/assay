@@ -89,8 +89,16 @@ func Pull(ctx context.Context, dbPath, ref string, allowUnsigned bool, stdout, s
 		fmt.Fprintf(stderr, "error: digest of %s: %v\n", target, err)
 		return 2
 	}
+	// The hint leads with the one benign cause (QA 2026-11-02 P3 #21): the
+	// nightly's Publish step writes the tag and the NEXT step signs it, so a
+	// pull in that window -- seconds, up to about a minute with cosign's
+	// retries -- sees a real "not signed" that cures itself. Led by the
+	// mirror clause and --allow-unsigned, the hint steered an operator who
+	// only had to wait into installing unverified. No retry loop here: the
+	// window is the publisher's, and `db update` is one attempt by design.
 	keyID, unverified, code := verifyPulled(ctx, target, d, allowUnsigned, "refusing to install",
-		"a mirror must copy the signature tag too, or pass --allow-unsigned to install it unverified", stderr)
+		"if the publisher pushed moments ago the signature may still be on its way: retry in a minute; "+
+			"otherwise a mirror must copy the signature tag too, or pass --allow-unsigned to install it unverified", stderr)
 	if code != 0 {
 		return code
 	}

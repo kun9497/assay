@@ -295,11 +295,12 @@ func sourcePatternMatches(doc pkgmeta.PURL, s subject) (matched, versionless boo
 // each with its epoch.
 //
 // The SRPM's version-release comes from its file name — Package.Upstream as
-// the rpmdb cataloger records SOURCERPM, else the purl's upstream qualifier
-// (an SBOM's package) — and not from Source.Version, so an image's package
-// and an SBOM's are compared the same way. (Since A4 an image's rpmdb gives
-// Source.Version the SRPM's EVR with the main package's epoch; an SBOM's
-// upstream-qualified package still carries the binary's.) The binary and
+// the rpmdb cataloger records SOURCERPM (and, since QA 2026-11-02 #1, as the
+// SBOM catalogers copy the purl's upstream qualifier), else the qualifier
+// itself — and not from Source.Version, so an image's package and an SBOM's
+// are compared the same way. (Since A4 both carry the SRPM's EVR with the
+// main package's epoch in Source.Version; this comparison keeps the binary's
+// epoch deliberately, see below.) The binary and
 // source versions differ whenever a binary is versioned apart from its
 // source: device-mapper-libs 1.02.181 is built from lvm2 2.03.14, and Red
 // Hat's statement names lvm2@2.03.14-15.el8_10?arch=src.
