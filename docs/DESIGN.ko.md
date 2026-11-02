@@ -988,6 +988,8 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] 카탈로거가 읽지 못한 것을 SARIF 가 말함 (D158, 감사 A16) — 0 이 아닌 카운터마다 `assay/not-evaluated`
       결과 하나(버전 없음, purl 없음: warning; 미지원 생태계: note). 전에는 code scanning 에 깨끗한 스캔으로
       보였음
+- [x] leaf 없는 bare SUSE id 는 product_id 로 이름을 정함 (D159, D126 개정, 감사 B2) — live 표본 688건에서
+      id 3,478개와 문서 142건 전체가 버려졌었음; "affected, no fix" 항목 2,876개 추가, fix 버전 변경 없음
 - [x] QA 2026-10-30 수정:
       - 64 KiB 가 넘는 줄이 lockfile 을 더는 잘라 먹지 않음;
       - open 이 먼저 나열된 범위도 단일 버전 window 를 유지함 (D154 개정);

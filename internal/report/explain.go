@@ -30,6 +30,13 @@ import (
 // Zero writes nothing at all to w: a partial or empty-but-successful report
 // for a typo'd identifier would be a quiet wrong answer, the opposite of
 // what explain mode exists for.
+//
+// A finding a waiver suppressed is explained too, after a line saying it is
+// not counted and which waiver said so. Reading Findings alone answered
+// "no finding matches" with exit 2 for a waived one (audit P4, re-verified
+// 2026-11-02), as if the identifier were mistyped, although every other
+// renderer shows the suppression with its source (D102). The line comes
+// first so nobody reads the explanation as an active finding.
 func Explain(w io.Writer, res matcher.Result, id string) (int, error) {
 	n := 0
 	for _, f := range res.Findings {
@@ -37,6 +44,18 @@ func Explain(w io.Writer, res matcher.Result, id string) (int, error) {
 			continue
 		}
 		if err := explainOne(w, f); err != nil {
+			return n, err
+		}
+		n++
+	}
+	for _, s := range res.Suppressed {
+		if !identifiesFinding(s.Finding, id) {
+			continue
+		}
+		if _, err := fmt.Fprintf(w, "suppressed: not counted toward the verdict (%s: %s)\n", suppressionSource(s), s.Reason); err != nil {
+			return n, err
+		}
+		if err := explainOne(w, s.Finding); err != nil {
 			return n, err
 		}
 		n++

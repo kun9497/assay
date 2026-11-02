@@ -43,15 +43,40 @@ type Evidence struct {
 // `introduced` and five `last_affected` events, so the window closes at the
 // first of them and only the enumerated list still names plone 3.2 and 3.3.
 // Dropping the list to dodge the parse problem would buy false negatives.
+//
+// Every range is walked, not only up to the first that holds v. Ranges are a
+// union, so v stays affected until it clears every range that holds it, and
+// the evidence names the range whose bound does that (moreClearing). Taking
+// the first hit made the advised fix depend on the producer's order: the Red
+// Hat and SUSE CSAF providers write one [0, fix) range per fixed build in
+// lexical order, and an open range listed first hid the fix entirely (audit
+// P4, re-verified 2026-11-02). For the same reason a range that cannot be
+// evaluated no longer aborts the entry when another range holds v: it cannot
+// take away what a readable range says. Its error is returned only when no
+// range holds v, which is the case it describes.
 func AffectsVersion(c Comparer, v string, a advisory.Affected) (bool, Evidence, []string, error) {
+	var (
+		found    bool
+		best     Evidence
+		rangeErr error
+	)
 	for _, r := range a.Ranges {
 		hit, ev, err := InRange(c, v, r)
 		if err != nil {
-			return false, Evidence{}, nil, err
+			if rangeErr == nil {
+				rangeErr = err
+			}
+			continue
 		}
-		if hit {
-			return true, ev, nil, nil
+		if hit && (!found || moreClearing(c, ev, best)) {
+			found, best = true, ev
 		}
+	}
+	if found {
+		return true, best, nil, nil
+	}
+	if rangeErr != nil {
+		return false, Evidence{}, nil, rangeErr
 	}
 	if len(a.Versions) == 0 {
 		return false, Evidence{}, nil, nil
@@ -94,6 +119,41 @@ func AffectsVersion(c Comparer, v string, a advisory.Affected) (bool, Evidence, 
 		}
 	}
 	return false, Evidence{}, unreadable, nil
+}
+
+// moreClearing reports whether evidence a names a bound that clears more of
+// the hitting ranges than b does. A fixed bound beats a last_affected one,
+// which beats an open window (no upgrade clears that); between two of the
+// same kind the higher bound wins, because v must reach it to clear both.
+// A tie, or a pair the comparer cannot order, keeps b, the earlier range, so
+// the choice stays deterministic. Every bound reaching here already parsed
+// in its own walk; a pair that still fails to order is left as it was rather
+// than guessed at.
+func moreClearing(c Comparer, a, b Evidence) bool {
+	rank := func(e Evidence) int {
+		switch {
+		case e.Fixed != "":
+			return 2
+		case e.LastAffected != "":
+			return 1
+		}
+		return 0
+	}
+	ra, rb := rank(a), rank(b)
+	if ra != rb {
+		return ra > rb
+	}
+	var x, y string
+	switch ra {
+	case 2:
+		x, y = a.Fixed, b.Fixed
+	case 1:
+		x, y = a.LastAffected, b.LastAffected
+	default:
+		return false
+	}
+	cmp, err := c.Compare(x, y)
+	return err == nil && cmp > 0
 }
 
 // InRange walks an OSV range's events in ascending version order, tracking
@@ -180,7 +240,7 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 			// mode is still safe (an advisory-data skip, D30), never a match.
 			cmp, err := c.Compare(v, e.Fixed)
 			if err != nil {
-				return false, Evidence{}, unreadablePackageVersion(v, "fixed", e.Fixed, err)
+				return false, Evidence{}, unreadablePackageVersion(c, v, "fixed", e.Fixed, err)
 			}
 			if inside && cmp >= 0 {
 				inside = false // exclusive upper bound
@@ -194,7 +254,7 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 		case e.LastAffected != "":
 			cmp, err := c.Compare(v, e.LastAffected)
 			if err != nil {
-				return false, Evidence{}, unreadablePackageVersion(v, "last_affected", e.LastAffected, err)
+				return false, Evidence{}, unreadablePackageVersion(c, v, "last_affected", e.LastAffected, err)
 			}
 			if inside && cmp > 0 {
 				inside = false // inclusive upper bound: equal is still affected
@@ -230,7 +290,7 @@ func InRange(c Comparer, v string, r advisory.Range) (bool, Evidence, error) {
 			if w.inclusive {
 				bound = "last_affected"
 			}
-			return false, Evidence{}, unreadablePackageVersion(v, bound, w.close, err)
+			return false, Evidence{}, unreadablePackageVersion(c, v, bound, w.close, err)
 		}
 		if cmp < 0 || (w.inclusive && cmp == 0) {
 			inside = true
@@ -509,21 +569,31 @@ func closesWindow(e advisory.Event) bool {
 	return e.Introduced == "" && (e.Fixed != "" || e.LastAffected != "")
 }
 
-// unreadablePackageVersion names the installed version as the cause, which by
-// this point it must be.
+// unreadablePackageVersion names the operand at fault in a walk comparison
+// that failed.
 //
 // sortEvents validates every bound before the walk begins, and it selects the
 // field to validate with the same introduced/fixed/last_affected precedence the
 // walk uses to select the field to compare (eventVersion mirrors InRange's
-// switch). So the bound reaching Compare here is always one that already
-// parsed, and the only operand left that can fail is v. **Those two orderings
-// have to stay identical**: give eventVersion a different precedence and an
-// unvalidated bound reaches this function, which would then blame the package
-// for the advisory's defect — the exact confusion D35 exists to remove.
+// switch). **Those two orderings have to stay identical**: give eventVersion a
+// different precedence and an unvalidated bound reaches the walk.
 //
-// The bound is still named, as context for which comparison was being made, not
-// as a suspect.
-func unreadablePackageVersion(v, role, bound string, err error) error {
+// A bound that passed that check can still fail here, so v is not
+// automatically the suspect, which this function used to assume (audit P4,
+// re-verified 2026-11-02). A bound can parse on its own and not order against
+// a number (Composer's "dev-master"), and "0" is exempt from the check
+// whatever its role, while SemVer and Bitnami cannot read it as a fixed or
+// last_affected bound. Both blamed the package, so --fail-on-incomplete=target
+// failed over upstream data the user cannot fix -- the confusion D35 exists to
+// remove, and the opposite of what D88's comment promises a fixed "0". So v is
+// checked alone: if it reads against itself, the bound is the advisory's
+// defect. The bound is named either way.
+func unreadablePackageVersion(c Comparer, v, role, bound string, err error) error {
+	if _, own := c.Compare(v, v); own == nil {
+		return withCause(CauseAdvisoryData,
+			fmt.Errorf("the advisory's %s bound %q does not order against this package's version %q: %w",
+				role, bound, v, err))
+	}
 	return withCause(CauseTargetVersion,
 		fmt.Errorf("this package's own version %q could not be read, comparing it against the advisory's %s bound %q: %w",
 			v, role, bound, err))
@@ -536,7 +606,7 @@ func atLeast(c Comparer, v, bound string) (bool, error) {
 	}
 	cmp, err := c.Compare(v, bound)
 	if err != nil {
-		return false, unreadablePackageVersion(v, "introduced", bound, err)
+		return false, unreadablePackageVersion(c, v, "introduced", bound, err)
 	}
 	return cmp >= 0, nil
 }

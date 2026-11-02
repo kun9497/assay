@@ -357,7 +357,7 @@ func (s stats) String() string {
 			"platforms seen: %d not matching the SLES/Leap key fold, %d Tumbleweed (refused, rolling); "+
 			"skipped %d entries with no colon, %d with an empty component, %d referencing Tumbleweed "+
 			"directly, %d naming an undeclared platform, %d naming a platform the key fold does not "+
-			"cover, %d naming a package with no readable purl, %d documents with no CVE id, "+
+			"cover, %d naming a package with no readable purl (%d leaves with no purl), %d documents with no CVE id, "+
 			"%d unreadable documents, %d LTSS entries shadowed by a mainline entry for the same "+
 			"release and package (D91), %d mainline no-fix entries given their LTSS twin's fix (D149, "+
 			"%d of them with a stated fix-state reason dropped); %d mirrored onto an openSUSE Leap key from its SLE "+
@@ -366,7 +366,7 @@ func (s stats) String() string {
 			"the package (D125), %d native Leap no-fix entries given their SLE twin's fix (D128, "+
 			"%d of them with a stated fix-state reason dropped); "+
 			"%d bare entries named by their product id where the purl's name "+
-			"differed (D126), %d recommended builds named by splitting their product id where "+
+			"differed (D126), %d bare entries named by their product id with no leaf in the document (D159), %d recommended builds named by splitting their product id where "+
 			"the purl carried no version (D131, %d such ids kept as spelt, %d SLE entries not mirrored "+
 			"onto Leap because their only fix was such a build); delta: %d changed since the archive, %d fetched, %d already "+
 			"withdrawn, %d yielded a record, %d retried, %d rescued by a retry, "+
@@ -376,11 +376,11 @@ func (s stats) String() string {
 		s.UnfixableWontFix, s.UnfixableNotFixed, s.UnfixableUnstated, s.UnfixableBothReasons,
 		s.PlatformsUnfoldable, s.PlatformsTumbleweed,
 		s.SkippedNoColon, s.SkippedEmptyComponent, s.SkippedTumbleweedRef,
-		s.SkippedUnknownPlatform, s.SkippedUnfoldablePlatform, s.SkippedUnknownPackage,
+		s.SkippedUnknownPlatform, s.SkippedUnfoldablePlatform, s.SkippedUnknownPackage, s.SkippedNoPurl,
 		s.SkippedNoCVE, s.SkippedBadDoc, s.SkippedLTSSShadowedByMainline,
 		s.LTSSFixReplacedMainlineNoFix, s.LTSSFixReplacedWithReason,
 		s.MirroredToLeap, s.SkippedLeapNativeWins, s.SkippedLeapNotAffected, s.LeapNoFixReplacedBySLEFix,
-		s.LeapNoFixReplacedWithReason, s.BareNamedByProductID, s.RecommendedNamedByNEVRSplit,
+		s.LeapNoFixReplacedWithReason, s.BareNamedByProductID, s.BareNamedWithoutLeaf, s.RecommendedNamedByNEVRSplit,
 		s.RecommendedEmptyVersionKept, s.SkippedLeapMirrorSplitBuild,
 		s.DeltaListed, s.DeltaFetched, s.DeltaGone, s.DeltaAdvisories,
 		s.DeltaRetried, s.DeltaRescued, s.ArchiveSuperseded, s.ArchiveNewerThanDelta)

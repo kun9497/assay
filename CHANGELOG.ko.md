@@ -18,6 +18,33 @@
   집계되지 않습니다. 대체 레지스트리나 사설 레지스트리는 그대로 카탈로그되며, `source` 가 없는 Cargo
   크레이트(워크스페이스 자신의 것)도 마찬가지입니다. `composer.lock` 은 바뀌지 않습니다. 평범한 Packagist
   패키지에도 `source.type = "git"` 을 기록하기 때문입니다. (감사 2026-10-22 P4, 2026-11-02 재확인)
+- 한 advisory 의 여러 range 가 설치된 버전을 포함하면, 발견은 그 모두를 벗어나게 하는 fix 를 적습니다. 그
+  가운데 가장 높은 fixed bound 이고, 열린 range 보다 bound 가 있는 range 를 우선합니다. range 는 합집합이라
+  패키지는 자기를 포함하는 모든 range 를 벗어나야 affected 가 아니게 됩니다. 전에는 파일에서 첫 번째 range 가
+  이겨서, 안내되는 fix 가 producer 의 순서를 따라 바뀌었습니다. Red Hat 과 SUSE CSAF provider 는 fixed build
+  하나에 range 하나를 lexical 순서로 쓰고, 열린 range 가 먼저 나오면 fix 가 아예 가려졌습니다. 판정은 바뀌지
+  않고 보이는 fix 와 `ratings[].fixed` 만 바뀝니다. bound 를 읽을 수 없는 range 가 그 뒤에서 버전을 포함하는
+  range 를 더 이상 가리지 않습니다. 이제 skip 이 아니라 발견입니다. (감사 2026-10-22 P4, 2026-11-02 재검증)
+- 설치된 버전과 순서를 매길 수 없는 advisory bound 는 패키지가 아니라 advisory 의 결함입니다. Composer 의
+  `dev-master`, 그리고 SemVer 와 Bitnami 가 읽지 못하는 fixed/last_affected `"0"` 이 여기에 해당합니다. 전에는
+  skip 이 "this package's own version could not be read" 라고 말하고 target 불완전으로 집계되어,
+  `--fail-on-incomplete=target` 이 upstream 데이터 때문에 실패했습니다. (감사 P4, 2026-11-02 재검증)
+- ignore 규칙이나 VEX statement 가 suppress 한 발견에 `--explain` 을 주면 그 발견을 설명합니다. 첫 줄에 판정에
+  세지 않는다는 것과, 어느 waiver 가 왜 그랬는지를 적습니다. 전에는 식별자를 잘못 친 것처럼
+  `no finding matches` 와 exit 2 로 답했습니다. 모든 발견이 waive 되면 표의 headline 도 깨끗한 스캔의 문장
+  대신 그렇다고 말합니다("No unwaived vulnerabilities found ... N finding(s) suppressed, listed below").
+  (감사 P4)
+- 버전이 고정된 `requirements.txt` 패키지는 다른 Python reader 의 패키지처럼 purl(`pkg:pypi/<name>@<version>`),
+  type, 파일 위치를 가집니다. 전에는 그 purl 을 지목한 VEX statement 가 "matched nothing" 경고도 없이 닿지
+  않았고, JSON 보고서는 발견이 어느 파일에서 나왔는지 말하지 못했습니다. (감사 P4, 2026-11-02 재검증)
+- SUSE: 문서에 빌드가 하나도 나열되지 않은 패키지의 `known_affected`(또는 not-affected, no-fix
+  remediation) id 를 product id 로 저장합니다. 전에는 건너뛰었고, 그것이 문서의 유일한 진술이면 문서
+  전체가 사라졌습니다. 2026-11-02 에 표본으로 뽑은 live 문서 688건에서 id 3,478개가 이렇게 버려졌고 문서
+  142건은 record 를 하나도 내지 못했습니다. SLES 12 SP5 부터 16.x 와 그 Leap codestream 에 "affected,
+  no fix" 항목 2,876개가 추가됩니다(MozillaFirefox, kernel, terraform, apache2 등). fix 버전은 바뀌지
+  않습니다. `db build` progress 줄은 읽을 수 있는 purl 이 없는 SUSE leaf 도 찍습니다. 집계만 되고 한 번도
+  보이지 않던 값입니다. 데이터베이스 변경이므로 merge 후 nightly 와 함께 `db update` 에 닿습니다.
+  (D159, D126 개정, 감사 B2)
 
 ## [0.13.0] - 2026-11-02
 

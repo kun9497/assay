@@ -19,6 +19,41 @@ All notable changes to this project are documented here. The format follows
   alternate or private registry stays cataloged, and so does a Cargo crate with no `source`
   (the workspace's own). `composer.lock` is unchanged: it records `source.type = "git"` for
   ordinary Packagist packages too. (audit 2026-10-22 P4, re-verified 2026-11-02)
+- When several ranges of one advisory hold the installed version, the finding names the fix
+  that clears all of them: the highest fixed bound among them, preferring a bounded range over
+  an open one. Ranges are a union, so a package stays affected until it clears every range
+  that holds it. Before, the first range in the file won, so the advised fix moved with the
+  producer's order. The Red Hat and SUSE CSAF providers write one range per fixed build in
+  lexical order, and an open range listed first hid the fix altogether. The verdict does not
+  change, only the fix shown and `ratings[].fixed`. A range whose bound cannot be read no
+  longer hides a later range that holds the version: that is now a finding, not a skip.
+  (audit 2026-10-22 P4, re-verified 2026-11-02)
+- An advisory bound that does not order against the installed version is the advisory's
+  fault, not the package's. This covers Composer's `dev-master`, and a fixed or last-affected
+  `"0"` that SemVer and Bitnami cannot read. Before, the skip said "this package's own
+  version could not be read" and counted as target incompleteness, so
+  `--fail-on-incomplete=target` failed over upstream data. (audit P4, re-verified
+  2026-11-02)
+- `--explain` on a finding that an ignore rule or a VEX statement suppressed explains it.
+  The first line says it is not counted toward the verdict, and by which waiver and why.
+  Before, it answered `no finding matches` with exit 2, as if the identifier were mistyped.
+  When every finding is waived, the table's headline says so ("No unwaived vulnerabilities
+  found ... N finding(s) suppressed, listed below"), instead of the sentence a clean scan
+  prints. (audit P4)
+- A pinned `requirements.txt` package carries a purl (`pkg:pypi/<name>@<version>`), a type
+  and its file's location, as every other Python reader's packages do. Before, a VEX
+  statement naming the purl never reached it, with no "matched nothing" warning, and the
+  JSON report could not say which file a finding came from. (audit P4, re-verified
+  2026-11-02)
+- SUSE: a `known_affected` (or not-affected, or no-fix remediation) id for a package with no
+  build listed in the document is stored under its product id. Before, it was skipped, and
+  when it was the document's only statement the whole document was lost. On 688 live
+  documents sampled 2026-11-02, 3,478 ids were dropped this way, and 142 documents yielded no
+  record at all. 2,876 "affected, no fix" entries are added on SLES 12 SP5 to 16.x and their
+  Leap codestreams (MozillaFirefox, kernel, terraform, apache2 among them). No fixed version
+  changes. The `db build` progress line also prints the SUSE leaves with no readable purl,
+  which were counted and never shown. A database change: it reaches `db update` with the
+  nightly after merge. (D159, revises D126, audit B2)
 
 ## [0.13.0] - 2026-11-02
 

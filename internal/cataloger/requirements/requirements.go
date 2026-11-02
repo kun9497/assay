@@ -113,10 +113,19 @@ func Parse(path string) (pkgmeta.Target, cyclonedx.Stats, []Unusable, error) {
 		case kindPinned:
 			stats.Components++
 			stats.Cataloged++
+			// Type, PURL and Location as every other Python reader sets them
+			// (pipfilelock): without the purl a VEX statement naming
+			// pkg:pypi/... never reached a requirements.txt package, and the
+			// report could not say which file a finding came from (audit P4,
+			// re-verified 2026-11-02). dirscan rewrites the path to the
+			// manifest's repo-relative one.
 			target.Packages = append(target.Packages, pkgmeta.Package{
 				Name:      detail.name,
 				Version:   detail.version,
+				Type:      "pypi",
 				Ecosystem: "PyPI",
+				PURL:      "pkg:pypi/" + detail.name + "@" + detail.version,
+				Locations: []pkgmeta.Location{{Path: path}},
 			})
 		default:
 			stats.Components++
