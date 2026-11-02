@@ -8,6 +8,12 @@
 ## [Unreleased]
 
 ### Fixed
+- `scandiff` 의 표가 `GRYPE` 바로 뒤에 `A_BRIDGED` 와 `G_BRIDGED` 두 열을 새로 찍습니다. bare-advisory
+  bridge 가 assay 쪽 집합과 grype 쪽 집합에 각각 더한 튜플 수입니다. 2026-10-13 wolfi 에서 `ASSAY` 가
+  46 에서 74 로 오르는 동안 assay 자체 튜플은 45 에서 41 로 줄었는데, grype 데이터베이스가 자라면서 grype
+  튜플 33 개가 assay 집합으로 bridge 된 것이었습니다. bridge 되는 target 의 `maxFindings` 위반이 비교 도구
+  쪽의 성장일 수 있어 주간 리뷰가 그 분리를 손으로 세야 했습니다. floor 와 ceiling 의 의미는 바뀌지 않고,
+  `ERROR` 행은 다른 카운터처럼 `0 0` 을 찍습니다. trivy 비교는 bridge 하지 않으므로 그대로입니다.
 - `--fail-on-eol` 로 실행한 스캔은 데이터베이스의 end-of-life 데이터가 생성된 지 7일이 넘으면 stderr 에
   날짜와 실행할 명령을 들어 경고합니다. `EOL_ENABLE=0` 인 ratings-only 빌드는 시드의 카탈로그를 시드만큼
   오래된 채로 물려받는데, D139 경고는 빌드 시각을 읽으므로 그런 데이터베이스가 최신으로 읽히면서 그 사이

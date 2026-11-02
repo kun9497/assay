@@ -8,6 +8,13 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- `scandiff`'s table prints two new columns, `A_BRIDGED` and `G_BRIDGED`, right after `GRYPE`:
+  how many tuples the bare-advisory bridge added into assay's set and into grype's. Measured
+  2026-10-13 on wolfi, `ASSAY` rose 46 to 74 while assay's own tuples fell 45 to 41, because 33
+  grype tuples were bridged into assay's set as grype's database grew -- a `maxFindings` breach
+  on a bridged target could be the comparison tool's growth, and the weekly review had to
+  measure the split by hand. No floor or ceiling changes meaning; an `ERROR` row prints `0 0`
+  like its other counters. The trivy comparison does not bridge and is unchanged.
 - A scan run with `--fail-on-eol` warns on stderr when the database's end-of-life data was
   generated more than seven days ago, naming the date and what to run. A ratings-only build
   with `EOL_ENABLE=0` keeps its seed's catalog, as old as the seed, and the D139 warning reads
