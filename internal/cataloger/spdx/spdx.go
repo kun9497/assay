@@ -236,7 +236,9 @@ func rhelDistTag(release string) string {
 // relSource is the source rpm sourceRPMOf found for this package, or the
 // zero value. It is used only for an rpm candidate whose own purl named no
 // source: an explicit `upstream` qualifier is the more specific statement
-// and wins, and keeps its own name-only Source.
+// and wins, and keeps its own Source -- the SRPM's name and version-release,
+// whose epoch rpmdb.ResolveSourceVersions places from the document's other
+// packages (D153, run on SBOM input by scancmd's decodeSBOM).
 func catalogPackage(p pkg, relSource pkgmeta.SourcePackage, target *pkgmeta.Target, stats *cyclonedx.Stats) {
 	stats.Components++
 
@@ -351,6 +353,7 @@ func resolvePURL(p pkgmeta.PURL, raw string) (pkgmeta.Package, purlStatus) {
 			Ecosystem:    res.Ecosystem,
 			PURL:         raw,
 			Source:       res.Source,
+			Upstream:     res.Upstream,
 			ModuleStream: res.ModuleStream,
 			Locations:    loc,
 		}, statusOK

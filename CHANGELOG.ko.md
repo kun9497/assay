@@ -16,6 +16,19 @@
   `ERROR` 행은 다른 카운터처럼 `0 0` 을 찍습니다. trivy 비교는 bridge 하지 않으므로 그대로입니다.
 
 ### Fixed
+- SBOM 의 deb 와 rpm 패키지가 이미지의 것처럼 SOURCE 버전으로 판정됩니다. 두 리더 모두 purl 의
+  `upstream` qualifier 에서 source 이름만 남기고 버전을 버렸습니다 -- deb 의
+  `util-linux@2.38.1-5+deb12u2` 는 `@` 뒤 절반을 잃었고, rpm 의 `httpd-2.4.62-1.fc40.src.rpm` 은
+  이름으로 벗겨졌습니다 -- 그래서 매처의 source 버전 비교(D41)가 SBOM 입력에서는 한 번도 돌지 않았고,
+  바이너리 자신의 버전이 epoch 까지 포함해 source 키의 fix 와 비교되었습니다: util-linux
+  `2.38.1-5+deb12u2` 에서 빌드된 bsdutils `1:2.38.1-5+deb12u3` 은 이미지의 dpkg status 에서는
+  finding 이었고 같은 패키지의 CycloneDX 나 SPDX 에서는 skip 없이 깨끗했습니다(QA 2026-11-02 #1).
+  deb 는 버전 절반을 유지하고, CycloneDX 리더는 purl 이 버전 없이 source 를 지목했을 때
+  `syft:metadata:sourceVersion` 으로 채웁니다; rpm 은 SRPM 의 version-release 를 유지하고 그 epoch
+  를 문서 전체에 대한 D153 의 규칙(main 패키지의 것, 없으면 형제들의 것)으로 놓으므로, httpd 옆의
+  mod_ssl `1:2.4.62` 는 httpd 를 통해 발견되고 perl `4:5.32.1` 옆의 perl-B 는 걸리지 않습니다. deb
+  source 버전에 대해 쓴 VEX 문장은 이제 그 source 에서 빌드된 SBOM 의 바이너리에 적용됩니다. 보고서의
+  기존 `source.version` 필드가 채워지며, 스키마 변경은 없습니다.
 - `db status` 가 `covers:` 범위를 출력할 때 Ubuntu LTS 와 SUSE 서비스 팩 릴리스를 읽습니다. 릴리스
   파서가 `.` 에서 자른 뒤 양쪽 모두 순수한 숫자를 요구했기 때문에 `Ubuntu:22.04:LTS` 와 `SLES:15.SP7`
   은 파싱 불가로 분류되어 파싱된 모든 릴리스 뒤로 정렬되었고, 실제 데이터베이스에서 이 줄은 Ubuntu

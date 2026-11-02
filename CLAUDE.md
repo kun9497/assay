@@ -122,7 +122,9 @@ an `arch=src` package when its purl names none and it shares the source's releas
 dist tag, and since D152 the source's EVR from that purl, so a subpackage is judged on its
 source's version under the source's name; since D153 an image's rpmdb does the same, the
 SRPM's version-release with the main package's epoch, and no epoch on Azure Linux or Photon
-keys). Since D154 a range's close sorts before an open at the same version, and a window
+keys; since QA 2026-11-02 an SBOM's `upstream` qualifier keeps its source version too — deb's
+`@` half, rpm's SRPM version-release with D153's epoch pass run over the document — where both
+readers had kept the name alone). Since D154 a range's close sorts before an open at the same version, and a window
 that opens and closes at one version is judged on its own. Since D156 a rating with only a
 CVSS v2 vector is banded from the v2 base score on NVD's v2 table, as a fallback only. Since D155 a gem's platform
 (`1.13.8-x86_64-linux`) is not part of its version, in a Gemfile.lock or an SBOM purl. Since D157

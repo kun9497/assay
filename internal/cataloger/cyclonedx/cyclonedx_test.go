@@ -791,9 +791,12 @@ func TestParse_ModularityLabelToModuleStream(t *testing.T) {
 	}
 }
 
-// D83: the "upstream" qualifier for rpm is a source-RPM filename, stripped
-// back to the bare name; for deb it is "name" or "name@version", and only
-// the name half is taken.
+// D83: the "upstream" qualifier for rpm is a source-RPM filename, split into
+// the bare name and the SRPM's version-release (kept as Upstream too, for
+// D153's epoch pass); for deb it is "name" or "name@version", and both
+// halves are taken. The version half was dropped on both until QA 2026-11-02
+// #1, which left the matcher comparing the binary's version with a
+// source-keyed fix.
 func TestParse_SourceFromUpstreamQualifier(t *testing.T) {
 	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
 	  {"type":"library","name":"audit-libs","version":"3.0.7-104.el9",
@@ -812,15 +815,55 @@ func TestParse_SourceFromUpstreamQualifier(t *testing.T) {
 	if !ok {
 		t.Fatal("audit-libs not cataloged")
 	}
-	if auditLibs.Source == nil || auditLibs.Source.Name != "audit" {
-		t.Errorf("audit-libs Source = %+v, want Name %q", auditLibs.Source, "audit")
+	if auditLibs.Source == nil || auditLibs.Source.Name != "audit" || auditLibs.Source.Version != "3.0.7-104.el9" {
+		t.Errorf("audit-libs Source = %+v, want audit 3.0.7-104.el9 (the SRPM's name and version-release)", auditLibs.Source)
+	}
+	if auditLibs.Upstream != "audit-3.0.7-104.el9.src.rpm" {
+		t.Errorf("audit-libs Upstream = %q, want the SRPM file name kept for the epoch pass", auditLibs.Upstream)
 	}
 	bash, ok := byName["bash"]
 	if !ok {
 		t.Fatal("bash not cataloged")
 	}
-	if bash.Source == nil || bash.Source.Name != "bash" {
-		t.Errorf("bash Source = %+v, want Name %q (the name half of \"bash@5.2.15-2\")", bash.Source, "bash")
+	if bash.Source == nil || bash.Source.Name != "bash" || bash.Source.Version != "5.2.15-2" {
+		t.Errorf("bash Source = %+v, want bash 5.2.15-2 (both halves of \"bash@5.2.15-2\")", bash.Source)
+	}
+	if bash.Upstream != "" {
+		t.Errorf("bash Upstream = %q, want none: deb's Source carries what its purl needs", bash.Upstream)
+	}
+}
+
+// QA 2026-11-02 #1. syft also writes dpkg's source version as the
+// syft:metadata:sourceVersion property. It fills the version only when the
+// purl named the source without one; a version the purl carries is never
+// overwritten; and no property invents a source the purl did not name.
+func TestParse_DebSourceVersionFromSyftProperty(t *testing.T) {
+	const bom = `{"bomFormat":"CycloneDX","specVersion":"1.5","components":[
+	  {"type":"library","name":"bsdutils","version":"1:2.38.1-5+deb12u3",
+	   "purl":"pkg:deb/debian/bsdutils@1%3A2.38.1-5%2Bdeb12u3?arch=amd64&upstream=util-linux&distro=debian-12",
+	   "properties":[{"name":"syft:metadata:sourceVersion","value":"2.38.1-5+deb12u2"}]},
+	  {"type":"library","name":"mount","version":"1:2.38.1-5+deb12u3",
+	   "purl":"pkg:deb/debian/mount@1%3A2.38.1-5%2Bdeb12u3?arch=amd64&upstream=util-linux%402.38.1-5%2Bdeb12u1&distro=debian-12",
+	   "properties":[{"name":"syft:metadata:sourceVersion","value":"2.38.1-5+deb12u2"}]},
+	  {"type":"library","name":"orphan","version":"1.0-1",
+	   "purl":"pkg:deb/debian/orphan@1.0-1?arch=amd64&distro=debian-12",
+	   "properties":[{"name":"syft:metadata:sourceVersion","value":"0.9-1"}]}]}`
+	target, _, err := Parse(strings.NewReader(bom))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	byName := map[string]pkgmeta.Package{}
+	for _, p := range target.Packages {
+		byName[p.Name] = p
+	}
+	if s := byName["bsdutils"].Source; s == nil || s.Name != "util-linux" || s.Version != "2.38.1-5+deb12u2" {
+		t.Errorf("bsdutils Source = %+v, want util-linux 2.38.1-5+deb12u2 (version from the property)", s)
+	}
+	if s := byName["mount"].Source; s == nil || s.Version != "2.38.1-5+deb12u1" {
+		t.Errorf("mount Source = %+v, want the purl's own 2.38.1-5+deb12u1 kept over the property", s)
+	}
+	if s := byName["orphan"].Source; s != nil {
+		t.Errorf("orphan Source = %+v, want nil: a version property names no source package", s)
 	}
 }
 

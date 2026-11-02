@@ -3336,6 +3336,31 @@ ubi8/nodejs-18 as a syft-1.51 SBOM: module packages stream-match (5,477 findings
 evaluated); the same image as a syft-0.84 SBOM: 8 module packages loudly not evaluated —
 the honest degradation. `--fail-on-incomplete=target` exits 0 on modern SBOMs again.
 
+**Revised (QA 2026-11-02).** "Source (D8) from the `upstream` qualifier" had kept the source's
+NAME and dropped its version, on both readers: deb's `upstream=util-linux@2.38.1-5+deb12u2`
+lost the `@` half, and rpm's `upstream=httpd-2.4.62-1.fc40.src.rpm` was stripped to `httpd`
+with `SourceRPMVersion` never called. The matcher compares a source-name lookup against
+`Source.Version` only when it has one (D41), so on SBOM input the binary's own version, epoch
+included, was compared with a source-keyed fix. Verified end to end: bsdutils
+`1:2.38.1-5+deb12u3` built from util-linux `2.38.1-5+deb12u2`, against util-linux fixed at
+`2.38.1-5+deb12u3` on Debian:12 — the image's dpkg status gave exit 1 and one finding; the same
+package as CycloneDX and as SPDX gave exit 0, no findings, no skips. The air-gapped path was the
+one that lied. Now deb keeps the version half (`ParsePURL` has decoded the epoch's colon), and
+the CycloneDX cataloger fills it from `syft:metadata:sourceVersion` when the purl named the
+source without one, never over a version the purl carries. rpm keeps the SRPM's version-release
+and the file name as `Package.Upstream`, and `decodeSBOM` runs `rpmdb.ResolveSourceVersions`
+over the whole document, so the source's epoch is placed by D153's rule for both readers (see
+D153's revision). VEX's deb source comparison (D121) reaches the source version instead of its
+binary fallback. `Source.Version` already had its place in the JSON report (`source.version`,
+omitempty), so no schema change. Held through `Run` on both readers: the bsdutils shape yields
+the finding and the same document with the source at the fix is clean; mod_ssl
+`1:2.4.62-1.fc40` beside httpd is found through httpd; perl-B at epoch 0 beside perl
+`4:5.32.1-484.el9` is clean against a perl fix at `4:5.32.1-481.el9`; a source statement at the
+source version suppresses and one at the binary's version does not. Ten mutations, nine caught
+at the caller or the cataloger; the tenth — the rpm branch setting the name without the version
+— is caught at the cataloger and is an equivalent through `Run`, because the D153 pass
+recomputes the version from `Upstream`; the code says so.
+
 ---
 
 ### D84 — SPDX, the format vendors actually publish
@@ -6675,6 +6700,13 @@ The reviewer's three probes, written to pass on the bad behaviour, now fail on i
 mutations, all caught; the sixth (a bare `1:` from a versionless source) only after its case
 was added.
 
+**Revised (QA 2026-11-02).** "An explicit `upstream` qualifier wins, still name-only" no longer
+holds in its second half: the qualifier's Source now carries the SRPM's version-release too, and
+its epoch is placed by D153's rule over the document (D83's and D153's revisions). It still
+wins over the relationship. `TestParse_A3_UpstreamQualifierWinsOverTheRelationship` asserts the
+qualifier's own version-release, at `-17` against the relationship source's `-18`, so the two
+cannot be confused.
+
 ---
 
 ### D149 — An LTSS fix replaces a mainline no-fix instead of being shadowed by it (revises D91)
@@ -6849,6 +6881,16 @@ Both are fixed, and the mutation table was re-run from scratch: fourteen mutatio
 caught. They cover each step removed or reordered, the vote taking the lowest, the tie taking
 the higher, the version-release filter, both epochless prefixes, the call site, the
 unparsable and nil guards, and the SRPM version-release ignored.
+
+**Revised (QA 2026-11-02).** "SBOM paths are not changed here: an upstream-qualified purl still
+gives the binary's EVR" described the defect QA finding #1 then confirmed, not a boundary. The
+SBOM catalogers now set `Source.Version` to the SRPM's version-release and keep the file name as
+`Package.Upstream`, and `decodeSBOM` runs `ResolveSourceVersions` over the whole document for
+both readers, so a syft SBOM of an image and the image itself place mod_ssl's epoch the same
+way: httpd's. The residual is this decision's own: a document holding mod_ssl and nothing else
+from its SRPM keeps the binary's epoch (step 4) and the httpd fix stays hidden, pinned by
+`TestRun_SBOMLoneRPMSubpackageKeepsItsOwnEpoch`; an SPDX `GENERATES` edge states the source's
+epoch and has no such gap (D152).
 
 ---
 
