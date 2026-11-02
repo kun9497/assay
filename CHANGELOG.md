@@ -7,7 +7,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- `--db-max-age` and `--db-max-rating-age` accept the space form (`--db-max-age 48h`) as well
+  as `=`, like `--timeout` and `--platform`. `docs/integrations.md` and D113 write both flags
+  as `--db-max-age <duration>`, and that copied spelling exited 2 while the `=` form beside it
+  worked (QA 2026-11-02 #12). A trailing bare flag with no value is still refused with the
+  same message, and a bad value in the space form is refused with the `=` form's wording.
+
 ### Fixed
+- Six stale statements in the documentation and help text (QA 2026-11-02 P3 #10, #13, #14,
+  #15, #20): the `--output sarif` help, `docs/DESIGN.md` and `docs/deferred-decisions.md` said
+  every not-evaluated result is note-level, when since D109 and D158 a manifest not read and a
+  component with no version or purl are warning-level; the README and `CLAUDE.md` counted ten
+  lockfile formats where `dirscan` reads thirteen; the README and `CLAUDE.md` named a terminal
+  D number (`D146`, `D79`, `D36`) that the roadmap had long passed, and now describe the
+  numbering without one; the signing entry in `docs/deferred-decisions.md` said verification
+  "follows in its second PR" after PR #181 (D150) had shipped it; and the frozen-key operating
+  procedure said `db-publish.yml`'s `workflow_dispatch` declares no inputs, when it has declared
+  the D110 `seed` input since #142 (and still no force switch). Korean copies updated alongside.
 - `db build` retries a Photon OS feed file through a transient failure instead of failing the
   whole build on the first non-200. The provider made one GET per major; the 2026-10-17 nightly
   publish died on a 404 from the Photon CDN for one of the three fixed
