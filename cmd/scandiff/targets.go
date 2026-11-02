@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // Target is one row of the committed floors file
@@ -151,6 +153,9 @@ func loadTargets(path string) ([]Target, error) {
 		if t.Name == "" {
 			return nil, fmt.Errorf("targets file %s: entry %d has no name", path, i)
 		}
+		if !isPlainFileName(t.Name) {
+			return nil, fmt.Errorf("targets file %s: entry %d has the name %q, which is not a plain file name", path, i, t.Name)
+		}
 		if seen[t.Name] {
 			return nil, fmt.Errorf("targets file %s: duplicate target name %q", path, t.Name)
 		}
@@ -166,6 +171,21 @@ func loadTargets(path string) ([]Target, error) {
 		}
 	}
 	return targets, nil
+}
+
+// isPlainFileName reports whether name can stand as one path element: not
+// "." or "..", no separator of either kind, and nothing filepath.Base would
+// strip. run joins a target's name into the -capture path (writeCapture), so
+// a name of "../../x" wrote outside the capture directory (QA 2026-11-02).
+// Both separators and the Windows volume colon are refused on every
+// platform, not only the host's, so the committed floors file is judged the
+// same on the Linux runner and on a Windows checkout; Base alone would let
+// "a\b" through on Linux, and strips "c:" on Windows only.
+func isPlainFileName(name string) bool {
+	if name == "." || name == ".." || strings.ContainsAny(name, `/\:`) {
+		return false
+	}
+	return filepath.Base(name) == name
 }
 
 // validateGrypeOnlyApp refuses a maxGrypeOnlyApp map the judge could not

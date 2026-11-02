@@ -15,6 +15,7 @@ package jar
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -68,8 +69,8 @@ const (
 // of its three required keys gets below.
 //
 // The archive itself is bounded before its central directory is read (D112's
-// 2026-10-07 revision). The cataloger's own caps — maxNestedDepth and
-// readEntryCapped's — bound what is read OUT of an archive, and nothing
+// 2026-10-07 revision). The cataloger's own caps — maxNestedDepth, readEntry's
+// per-entry cap and the parser's budget — bound what is read OUT of an archive, and nothing
 // bounded the archive: zip.NewReader (what zip.OpenReader wraps) reads the
 // whole central directory into memory, one header per entry, and a crafted
 // archive carries millions of entries in a few hundred megabytes, so the
@@ -98,15 +99,54 @@ func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, error) {
 		return nil, cyclonedx.Stats{}, fmt.Errorf("open %s: %w", path, err)
 	}
 
-	var (
-		pkgs  []pkgmeta.Package
-		stats cyclonedx.Stats
-	)
-	parseArchive(zr, path, 0, &pkgs, &stats)
+	p := newParser(path)
+	if err := p.parseArchive(zr, path, 0); err != nil {
+		// The budget ran out. Nothing of what was read is returned: a
+		// partial inventory of an archive is the silent-partial shape every
+		// other refusal here exists to avoid (D112's own reasoning for exit 2
+		// over a skip), and the caller already treats a Parse error as the
+		// whole archive unread.
+		return nil, cyclonedx.Stats{}, err
+	}
 
-	sortPackages(pkgs)
-	return pkgs, stats, nil
+	sortPackages(p.pkgs)
+	return p.pkgs, p.stats, nil
 }
+
+// parser is the state of one Parse call: what it has found, and how much it
+// may still inflate. One per Parse, never shared, so the budget is per
+// archive -- the sum across every entry and every nested archive the call
+// reads -- and two archives in one dir: scan do not spend each other's.
+type parser struct {
+	// path is the archive Parse opened, which every error names.
+	path  string
+	pkgs  []pkgmeta.Package
+	stats cyclonedx.Stats
+	// budget is the decompressed bytes this parse may still read, across
+	// every entry at every depth (QA 2026-11-02). readEntry bounds each entry
+	// at source.MaxFileBytes, and that bound alone let an archive of many
+	// entries each under it inflate without limit: twelve deflated 64 MiB
+	// entries in a 784 KB jar inflated 768 MiB, and at the archive cap the
+	// same shape reaches hundreds of GiB. The budget starts at
+	// source.MaxScanBytes -- D112's per-scan figure, which is what one target
+	// may cost -- and running out of it is an error that ends the parse, not
+	// a skip: the entries after it were not looked at, so the inventory is
+	// not the archive's.
+	budget int64
+}
+
+func newParser(path string) *parser {
+	return &parser{path: path, budget: source.MaxScanBytes}
+}
+
+// budgetError marks the one readEntry failure that ends the parse rather than
+// counting as a skip of the entry: the callers tell it from an entry's own
+// refusal by type, because an unreadable entry is that entry's problem and
+// an exhausted budget is the archive's.
+type budgetError struct{ err error }
+
+func (e *budgetError) Error() string { return e.err.Error() }
+func (e *budgetError) Unwrap() error { return e.err }
 
 // parseArchive extracts every component named directly by zr's own entries
 // (not by entries inside a nested jar it recurses into — those are that
@@ -119,14 +159,20 @@ func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, error) {
 // FINAL merged package list (item 6), not the order components are
 // discovered in, so recursion and skip accounting stay deterministic on their
 // own before that sort ever runs.
-func parseArchive(zr *zip.Reader, location string, depth int, pkgs *[]pkgmeta.Package, stats *cyclonedx.Stats) {
+//
+// The only error returned is the budget's; it stops the walk at the entry
+// that spent the last of it, at whatever depth, and is returned unwrapped
+// up to Parse.
+func (p *parser) parseArchive(zr *zip.Reader, location string, depth int) error {
 	sawPomProperties := false
 
 	for _, f := range zr.File {
 		switch {
 		case isPomProperties(f.Name):
 			sawPomProperties = true
-			addComponent(f, location, pkgs, stats)
+			if err := p.addComponent(f, location); err != nil {
+				return err
+			}
 
 		case isNestedArchive(f.Name):
 			// A nested jar that has no pom.properties of its own yet contains
@@ -134,7 +180,9 @@ func parseArchive(zr *zip.Reader, location string, depth int, pkgs *[]pkgmeta.Pa
 			// falls out naturally here, since this switch processes every
 			// entry regardless of whether this call ever sets
 			// sawPomProperties.
-			recurseIntoNested(f, location, depth, pkgs, stats)
+			if err := p.recurseIntoNested(f, location, depth); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -144,9 +192,10 @@ func parseArchive(zr *zip.Reader, location string, depth int, pkgs *[]pkgmeta.Pa
 		// is counted once here rather than vanishing: an archive that turns
 		// out to hold nothing recognizable must look different in Stats from
 		// one that was never opened.
-		stats.Components++
-		stats.SkippedNoVersion++
+		p.stats.Components++
+		p.stats.SkippedNoVersion++
 	}
+	return nil
 }
 
 // recurseIntoNested handles one zip entry that looks like a nested archive:
@@ -155,8 +204,8 @@ func parseArchive(zr *zip.Reader, location string, depth int, pkgs *[]pkgmeta.Pa
 // rather than a silent drop or a truncated read — "exceeding either [cap] is
 // a counted skip naming the entry, never silent truncation" is D70's own
 // requirement, and f.Name is what the surrounding doc comments on
-// maxNestedDepth and readEntryCapped name when explaining why a given entry
-// hit one.
+// maxNestedDepth and readEntry name when explaining why a given entry
+// hit one. The budget is the exception, and is returned.
 //
 // A successful recursion does NOT increment stats.Components for the nested
 // entry itself: parseArchive's own recursive call already accounts for
@@ -164,52 +213,61 @@ func parseArchive(zr *zip.Reader, location string, depth int, pkgs *[]pkgmeta.Pa
 // "sawPomProperties == false" skip if it turns out to hold none) — counting
 // the entry a second time here would double it against what its contents
 // already contribute.
-func recurseIntoNested(f *zip.File, location string, depth int, pkgs *[]pkgmeta.Package, stats *cyclonedx.Stats) {
+func (p *parser) recurseIntoNested(f *zip.File, location string, depth int) error {
 	if depth+1 > maxNestedDepth {
 		// f.Name is one level past maxNestedDepth from location — named in
 		// this comment rather than in Stats because cyclonedx.Stats (D70's
 		// fixed Parse signature) carries only counts, no per-entry detail;
 		// the count itself is what reaches the report.
-		stats.Components++
-		stats.SkippedNoVersion++
-		return
+		p.stats.Components++
+		p.stats.SkippedNoVersion++
+		return nil
 	}
 
-	data, err := readEntryCapped(f)
+	data, err := p.readEntry(f, location)
 	if err != nil {
+		var be *budgetError
+		if errors.As(err, &be) {
+			return err
+		}
 		// Either the size cap refused it or the entry could not be read at
 		// all (a corrupt zip stream). Either way this archive was seen and
 		// could not be examined further — the same "counted, not guessed"
 		// treatment as a nested archive with no pom.properties, because from
 		// here nothing more can be said about what it contains.
-		stats.Components++
-		stats.SkippedNoVersion++
-		return
+		p.stats.Components++
+		p.stats.SkippedNoVersion++
+		return nil
 	}
 
 	nested, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		// f.Name ends .jar or .war but is not actually a readable zip.
-		stats.Components++
-		stats.SkippedNoVersion++
-		return
+		p.stats.Components++
+		p.stats.SkippedNoVersion++
+		return nil
 	}
 
-	parseArchive(nested, location+jarLocationSeparator+f.Name, depth+1, pkgs, stats)
+	return p.parseArchive(nested, location+jarLocationSeparator+f.Name, depth+1)
 }
 
 // addComponent reads one META-INF/maven/*/*/pom.properties entry and, if it
 // carries all three required keys, appends the Maven component it names.
-func addComponent(f *zip.File, location string, pkgs *[]pkgmeta.Package, stats *cyclonedx.Stats) {
-	stats.Components++
+// Only the budget's error is returned; every other failure is a counted skip.
+func (p *parser) addComponent(f *zip.File, location string) error {
+	p.stats.Components++
 
-	data, err := readEntryCapped(f)
+	data, err := p.readEntry(f, location)
 	if err != nil {
+		var be *budgetError
+		if errors.As(err, &be) {
+			return err
+		}
 		// Unreadable or larger than the cap: the identity cannot be trusted,
 		// so this is a skip rather than a guess — the same rule a missing key
 		// gets below.
-		stats.SkippedNoVersion++
-		return
+		p.stats.SkippedNoVersion++
+		return nil
 	}
 
 	props := parseProperties(data)
@@ -220,12 +278,12 @@ func addComponent(f *zip.File, location string, pkgs *[]pkgmeta.Package, stats *
 		// D70: never partially guess an identity from two of the three keys.
 		// A pom.properties missing one is counted and skipped, not patched
 		// with a fabricated value.
-		stats.SkippedNoVersion++
-		return
+		p.stats.SkippedNoVersion++
+		return nil
 	}
 
-	stats.Cataloged++
-	*pkgs = append(*pkgs, pkgmeta.Package{
+	p.stats.Cataloged++
+	p.pkgs = append(p.pkgs, pkgmeta.Package{
 		Name:      groupID + ":" + artifactID,
 		Version:   version,
 		Type:      "maven",
@@ -233,25 +291,35 @@ func addComponent(f *zip.File, location string, pkgs *[]pkgmeta.Package, stats *
 		PURL:      "pkg:maven/" + groupID + "/" + artifactID + "@" + version,
 		Locations: []pkgmeta.Location{{Path: location}},
 	})
+	return nil
 }
 
-// readEntryCapped reads f's full decompressed content, refusing anything
-// larger than source.MaxFileBytes. A zip entry's declared and actual size are
-// both attacker-controlled — a small compressed entry can claim, or actually
-// inflate to, an enormous decompressed size (a "zip bomb").
+// readEntry reads f's full decompressed content, refusing anything larger
+// than source.MaxFileBytes and charging what it read to the parse's budget.
+// A zip entry's declared and actual size are both attacker-controlled — a
+// small compressed entry can claim, or actually inflate to, an enormous
+// decompressed size (a "zip bomb").
 //
 // The cap is the same variable the archive is checked against in Parse, not
 // a constant of equal value (D112's revision): it was 512 MiB here since D61
 // and D112 adopted that number for every file a scan reads, so two spellings
 // of it could only ever drift apart.
 //
-// The check runs twice: once against f's declared
-// UncompressedSize64 before any allocation (cheap, and enough to refuse an
-// entry that is honest about being oversized), and again while copying, in
-// case the declared size understates what actually comes out — never
-// silently truncated in either case, an oversized entry is always an error
-// the caller turns into a counted skip.
-func readEntryCapped(f *zip.File) ([]byte, error) {
+// The cap check runs twice: once against f's declared UncompressedSize64
+// before any allocation (cheap, and enough to refuse an entry that is honest
+// about being oversized), and again while copying, in case the declared size
+// understates what actually comes out — never silently truncated in either
+// case, an oversized entry is always an error the caller turns into a
+// counted skip.
+//
+// The budget is charged with the bytes actually read, refused entries
+// included: an entry the cap refuses has still been inflated up to the cap,
+// and twelve of those are the probe that found this gap. The read itself is
+// bounded by the smaller of the cap and what the budget has left, so an
+// archive with a kilobyte of budget left never inflates half a gigabyte to
+// learn it is over. location is only for the error, which names the entry
+// relative to the archive so the path is said once.
+func (p *parser) readEntry(f *zip.File, location string) ([]byte, error) {
 	limit := source.MaxFileBytes
 	if f.UncompressedSize64 > uint64(limit) {
 		return nil, fmt.Errorf("%s: declared decompressed size %d exceeds the %d byte cap",
@@ -264,16 +332,27 @@ func readEntryCapped(f *zip.File) ([]byte, error) {
 	}
 	defer rc.Close()
 
-	// io.LimitReader lets one byte past the cap through and then stops (with
-	// a plain io.EOF, indistinguishable from a genuinely short stream) rather
-	// than erroring on its own — so the length is what is checked below, not
-	// whether ReadAll returned an error. Reading limit+1 rather than
-	// exactly limit is what makes an entry whose actual output exceeds
+	// io.LimitReader lets one byte past the bound through and then stops
+	// (with a plain io.EOF, indistinguishable from a genuinely short stream)
+	// rather than erroring on its own — so the length is what is checked
+	// below, not whether ReadAll returned an error. Reading bound+1 rather
+	// than exactly bound is what makes an entry whose actual output exceeds
 	// the declared size (a lying header) still detectable instead of being
-	// silently truncated to precisely the cap.
-	data, err := io.ReadAll(io.LimitReader(rc, limit+1))
+	// silently truncated to precisely the cap, and an entry that spends
+	// exactly the budget's last byte tellable from one that goes past it.
+	bound := min(limit, p.budget)
+	data, err := io.ReadAll(io.LimitReader(rc, bound+1))
+	// Charged before the error is looked at: a read archive/zip fails
+	// mid-stream (a header that lies about its size) inflated everything up
+	// to the failure, and an entry refused on its declared size above
+	// inflated nothing, which is why that check costs nothing here.
+	p.budget -= int64(len(data))
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", f.Name, err)
+	}
+	if p.budget < 0 {
+		entry := strings.TrimPrefix(location+jarLocationSeparator+f.Name, p.path+jarLocationSeparator)
+		return nil, &budgetError{source.ArchiveLimitError(p.path, entry)}
 	}
 	if int64(len(data)) > limit {
 		return nil, fmt.Errorf("%s: decompressed size exceeds the %d byte cap", f.Name, limit)
@@ -308,7 +387,7 @@ func parseProperties(data []byte) map[string]string {
 	props := make(map[string]string)
 	// Split in memory: a bufio.Scanner stops at a line over 64 KiB and drops
 	// every key after it, the QA 2026-10-30 defect in gemlock. data is
-	// already capped by readEntryCapped.
+	// already capped by readEntry.
 	for raw := range bytes.Lines(data) {
 		line := strings.TrimSuffix(strings.TrimSuffix(string(raw), "\n"), "\r")
 		trimmed := strings.TrimSpace(line)

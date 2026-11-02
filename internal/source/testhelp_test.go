@@ -38,6 +38,9 @@ func (f fakeLayer) MediaType() (types.MediaType, error) { return types.OCILayer,
 type fakeImage struct {
 	v1.Image // embedded as an interface: only what fromV1 reads is implemented
 	layers   []fakeLayer
+	// declaredConfig is the config size the manifest declares; zero, the
+	// honest fixture, leaves it unstated as it was before the check existed.
+	declaredConfig int64
 }
 
 // The config and manifest fromV1 checks before trusting a diff id (D123):
@@ -73,7 +76,7 @@ func (f fakeImage) Manifest() (*v1.Manifest, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &v1.Manifest{Config: v1.Descriptor{Digest: d}}, nil
+	return &v1.Manifest{Config: v1.Descriptor{Digest: d, Size: f.declaredConfig}}, nil
 }
 
 // sha256Of is the real diff id of body, for fixtures whose layers are read to
@@ -146,6 +149,7 @@ type configImage struct {
 	v1.Image
 	os, arch, variant string
 	err               error
+	configSize        int64
 }
 
 func (c configImage) ConfigFile() (*v1.ConfigFile, error) {
@@ -153,4 +157,11 @@ func (c configImage) ConfigFile() (*v1.ConfigFile, error) {
 		return nil, c.err
 	}
 	return &v1.ConfigFile{OS: c.os, Architecture: c.arch, Variant: c.variant}, nil
+}
+
+// Manifest answers the config-size check made before ConfigFile is read
+// (QA 2026-11-02); configSize is what it declares, zero for a fixture that
+// does not care.
+func (c configImage) Manifest() (*v1.Manifest, error) {
+	return &v1.Manifest{Config: v1.Descriptor{Size: c.configSize}}, nil
 }

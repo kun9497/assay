@@ -4591,6 +4591,30 @@ constant of equal value, so there is one number, not two that happen to agree. T
 read by a cataloger that knows its format; an archive is opened by a library that trusts its
 index.
 
+**Revised (QA 2026-11-02).** Two reads were bounded less than the text above says. (1) **A jar
+is bounded per entry, per depth, and per archive in total.** The entry cap and the depth cap
+bounded each read; nothing bounded their sum, and a 784 KB jar of twelve deflated 64 MiB
+entries — each under the cap — inflated 768 MiB in 293 ms, the same shape reaching hundreds
+of GiB at the archive cap. One `jar.Parse` now spends a budget of `MaxScanBytes` (2 GiB, the
+per-scan figure, read as the same variable rather than a third number) across every entry and
+every nested archive, charged with what each read actually inflated, refused entries included;
+the read of an entry is bounded by the smaller of the entry cap and what the budget has left,
+so a parse with a kilobyte left never inflates half a gigabyte to learn it is over. Running out
+is `ArchiveLimitError`, naming the archive, the budget and the entry it ran out at, and the
+parse returns nothing else: for a `jar:` target that is exit 2, and for a jar in a `dir:` scan
+the counted, failed skip an oversized archive already is (D109's `unread[]`,
+`--fail-on-incomplete=target`), never a partial inventory presented as the archive's.
+`--timeout` still does not reach `jar.Parse` — "What stays out" stands — because the budget
+bounds the work directly. (2) **The image config is bounded by its declared size before it is
+fetched.** The library reads a config blob whole and bounds the read only by the size the
+manifest declares, which on the registry path is the registry's word: a manifest declaring a
+256 MiB config streamed 256 MiB and allocated 573 MiB before the digest mismatch was noticed.
+The manifest is already in memory when the config is first wanted, so every config read —
+`checkSingle`, `collectCandidates` and `configDiffIDs` — refuses a declared `Config.Size` above
+`MaxConfigBytes` (16 MiB, a constant beside the two variables: a real config is kilobytes, and
+a test declares a size past it in a forged manifest rather than lowering it) with
+`ConfigLimitError`, and never asks for the blob.
+
 ---
 
 ### D113 — Data age is judged for the keys a scan uses, a frozen key is as old as its freeze, and ratings get their own gate

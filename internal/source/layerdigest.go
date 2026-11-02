@@ -133,6 +133,11 @@ func configDiffIDs(img v1.Image, layers int) ([]v1.Hash, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read manifest: %w", err)
 	}
+	// Before RawConfigFile fetches it: the declared size is the only bound
+	// the library puts on that read (QA 2026-11-02).
+	if err := checkConfigDescriptor(m); err != nil {
+		return nil, err
+	}
 	raw, err := img.RawConfigFile()
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
