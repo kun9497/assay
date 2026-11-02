@@ -8,6 +8,10 @@
 ## [Unreleased]
 
 ### Fixed
+- NVD 가 rate limit 을 넘은 클라이언트에 답하는 HTTP 403 을 429, 5xx 와 같은 유한한 일정으로 재시도합니다.
+  전에는 영구 실패로 보아, 한 번 throttling 된 페이지가 몇 시간 돈 sync 를 끝냈습니다. 풀리지 않는
+  403(거부된 key, 차단된 주소)은 즉시가 아니라 일정을 다 쓴 뒤 여전히 실패합니다. (감사 2026-10-22 P4,
+  2026-11-02 재검증)
 - 주간 scanner differential 의 판정 step 이 fail-closed 가 됩니다. nightly publish gate 가 이미 그렇듯
   `exit ${{ steps.diff.outputs.exit_code || 2 }}` 입니다. step output 이 비면 bare `exit` 가 되어 0 을
   돌려주므로, step id 를 바꾸거나 output 이름을 잘못 치면 모든 주간 실행이 초록이 되고 고정 실패 이슈(D138)가
@@ -15,7 +19,6 @@
   0 으로 줄이지 않는 nonzero fallback 이 있고, 그 output 을 쓰는 step 이 같은 job 안에서 먼저 선언되어 있는지
   확인합니다. (감사 2026-10-22 P4, 2026-11-02 재검증)
 
-### Fixed
 - `package-lock.json`(v1, v3), yarn v1 의 `yarn.lock`, `Cargo.lock`, `poetry.lock`, `uv.lock` 의 git,
   URL, 경로 의존성이 더는 그 체크아웃이 스스로 선언한 버전으로 카탈로그되지 않습니다. 그 버전은 권고문이
   가리키는 레지스트리 릴리스와 같다는 보장이 없어, 스캔이 오탐과 조용한 미탐을 모두 낼 수 있었습니다.
