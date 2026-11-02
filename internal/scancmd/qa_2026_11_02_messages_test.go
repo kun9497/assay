@@ -42,6 +42,12 @@ func TestRun_FailOnIncompletePrintsAnErrorLineNamingTheFlagForm(t *testing.T) {
 			"error: 2 package(s) not evaluated and 0 check(s) incomplete (--fail-on-incomplete)\n"},
 		{"target", Options{Output: "json", FailOnIncompleteTarget: true},
 			"error: 1 package(s) or manifest(s) of the target itself not evaluated (--fail-on-incomplete=target)\n"},
+		// Both armed, both firing: the broad flag's line, because verdict
+		// has always consulted the broad gate first and the line must name
+		// the gate that decided. Found by mutation (swapping the order kept
+		// every exit code and changed only this line).
+		{"both", Options{Output: "json", FailOnIncomplete: true, FailOnIncompleteTarget: true},
+			"error: 2 package(s) not evaluated and 0 check(s) incomplete (--fail-on-incomplete)\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out, stderr, code := provRun(t, db, path, tc.opts)
