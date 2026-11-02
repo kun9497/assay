@@ -137,6 +137,7 @@ func catalogOne(c component, distroEcosystem string, target *pkgmeta.Target, sta
 		eco          string
 		version      string
 		source       *pkgmeta.SourcePackage
+		upstream     string
 		moduleStream string
 	)
 	switch p.Type {
@@ -162,6 +163,7 @@ func catalogOne(c component, distroEcosystem string, target *pkgmeta.Target, sta
 		eco = res.Ecosystem
 		version = res.Version
 		source = res.Source
+		upstream = res.Upstream
 		moduleStream = res.ModuleStream
 	default:
 		var ok bool
@@ -223,9 +225,24 @@ func catalogOne(c component, distroEcosystem string, target *pkgmeta.Target, sta
 		PURL:         c.PURL,
 		Locations:    []pkgmeta.Location{loc},
 		Source:       source,
+		Upstream:     upstream,
 		ModuleStream: moduleStream,
 	}
 	switch p.Type {
+	case "deb":
+		// syft writes dpkg's source version twice: in the purl's upstream
+		// qualifier ("name@version") and as the syft:metadata:sourceVersion
+		// property. The purl is read first (the shared core), and the
+		// property fills the version only when the purl named the source
+		// without one -- a producer that writes the bare name in the purl
+		// but still carries syft's property. The purl's own version is
+		// never overwritten: the two agree when both exist, and the purl is
+		// the statement SPDX readers see too.
+		if pkg.Source != nil && pkg.Source.Version == "" {
+			if v := propValue(c, "syft:metadata:sourceVersion"); v != "" {
+				pkg.Source.Version = v
+			}
+		}
 	case "apk":
 		// syft reports the origin package name only via a CycloneDX property
 		// (D8) — the shared core has no purl-qualifier equivalent to read

@@ -27,10 +27,13 @@ type Package struct {
 	Arch string
 	// Upstream is the source identity exactly as the package database spells
 	// it, where Source cannot reproduce it: rpm's SOURCERPM file name
-	// ("openssl-3.5.5-2.el9_8.src.rpm") and pacman's %BASE%, which syft
-	// writes even when it equals the name. Empty for apk and deb, whose
-	// Source already carries what their purl needs. Read only by
-	// OSPackagePURL (D121).
+	// ("openssl-3.5.5-2.el9_8.src.rpm") -- read off the rpmdb header, or
+	// off an SBOM purl's upstream qualifier, which syft writes in the same
+	// shape -- and pacman's %BASE%, which syft writes even when it equals
+	// the name. Empty for apk and deb, whose Source already carries what
+	// their purl needs. Read by OSPackagePURL (D121), by
+	// rpmdb.ResolveSourceVersions to place the source's epoch (D153), and
+	// by vex's source comparison.
 	Upstream string
 	// Source is the source package an advisory may be keyed on (D8). Distro
 	// advisories target source packages while installed packages are binary

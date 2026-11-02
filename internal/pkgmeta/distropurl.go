@@ -16,8 +16,19 @@ type DistroPURLResult struct {
 	// non-zero "epoch" qualifier (rpm/deb only), falling back to
 	// componentVersion when the purl carries no @version at all. Empty means
 	// there was nothing to place inside a comparer's range.
-	Version      string
-	Source       *SourcePackage
+	Version string
+	// Source is the source package the purl names (D8), with the source
+	// version the qualifier states: deb's "name@version" half, rpm's SRPM
+	// version-release (QA 2026-11-02 #1 -- both readers had kept the name
+	// and dropped the version, so the matcher's D41 source-version
+	// comparison never ran on SBOM input). Version is "" when the qualifier
+	// names no version, which the matcher reads as "the same as the
+	// binary's" (D8).
+	Source *SourcePackage
+	// Upstream is an rpm purl's upstream qualifier as spelled, the SRPM file
+	// name, for Package.Upstream: rpmdb.ResolveSourceVersions needs it to
+	// place the source's epoch (D153), which the file name does not carry.
+	Upstream     string
 	ModuleStream string
 	// Skip is true for a purl that must never become a package at all:
 	// gpg-pubkey, a keyring entry rather than an installed package (mirrors
@@ -60,11 +71,18 @@ func ResolveDistroPURL(p PURL, componentVersion, docEcosystem string, hasDocDist
 		}
 		res.Ecosystem = ecosystemForRPM(p, docEcosystem, hasDocDistro)
 		// D8/D83. The "upstream" qualifier is a source-RPM filename
-		// ("audit-3.0.7-104.el9.src.rpm"), stripped back to the bare name by
-		// the same core rpmdb's own cataloger uses.
+		// ("audit-3.0.7-104.el9.src.rpm"), split into the bare name and the
+		// version-release by the same core rpmdb's own cataloger uses. The
+		// version-release is the source's, not the binary's -- mod_ssl
+		// 1:2.4.62 is built from httpd 2.4.62 -- and it carries no epoch,
+		// which rpmdb.ResolveSourceVersions supplies from the document's
+		// other packages once the whole document is read (D153), as the
+		// image path does for an rpmdb. Upstream keeps the file name for
+		// that pass.
 		if upstream := p.Qualifiers["upstream"]; upstream != "" {
 			if src := SourceRPMName(upstream); src != "" {
-				res.Source = &SourcePackage{Name: src}
+				res.Source = &SourcePackage{Name: src, Version: SourceRPMVersion(upstream)}
+				res.Upstream = upstream
 			}
 		}
 		// D84. Red Hat's own SPDX SBOMs write the module label directly as a
@@ -79,12 +97,20 @@ func ResolveDistroPURL(p PURL, componentVersion, docEcosystem string, hasDocDist
 	case "deb":
 		res.Ecosystem = ecosystemForQualifiedDistro(p, docEcosystem, hasDocDistro)
 		// D8/D83. syft's "upstream" qualifier is "name" or "name@version"
-		// (percent-encoded '@'); only the name half identifies the source
-		// package.
+		// (percent-encoded '@'): the name half identifies the source package
+		// and the version half is the source version dpkg recorded in
+		// "Source: util-linux (2.38.1-5+deb12u2)", written only when it
+		// differs from the binary's (OSPackagePURL does the same). The
+		// matcher compares a lookup under the source name against that
+		// version (D41): a binNMU or an epoch on the binary side sorts the
+		// binary above a source-keyed fix the source is still short of, and
+		// with the version half dropped the finding vanished -- exit 0, no
+		// skips (QA 2026-11-02 #1). ParsePURL has percent-decoded the value,
+		// so an epoch's colon arrives intact.
 		if upstream := p.Qualifiers["upstream"]; upstream != "" {
-			srcName, _, _ := strings.Cut(upstream, "@")
+			srcName, srcVersion, _ := strings.Cut(upstream, "@")
 			if srcName != "" {
-				res.Source = &SourcePackage{Name: srcName}
+				res.Source = &SourcePackage{Name: srcName, Version: srcVersion}
 			}
 		}
 	case "apk":

@@ -1250,6 +1250,16 @@ func decodeSBOM(path string, r io.Reader) (pkgmeta.Target, cyclonedx.Stats, erro
 		if _, derr := io.Copy(io.Discard, cr); derr != nil {
 			err = fmt.Errorf("read: %w", derr)
 		}
+		// D153, on SBOM input (QA 2026-11-02 #1). An rpm purl's upstream
+		// qualifier is the SRPM file name, which carries no epoch, so the
+		// source's epoch is placed from the document's other packages --
+		// the main package's, else the siblings' -- exactly as the image
+		// path does after reading an rpmdb (catalogFromImage). Here, once
+		// for the whole document and for both readers, so an image and the
+		// SBOM syft wrote of it judge mod_ssl the same way. Packages whose
+		// Upstream is not an SRPM name (deb, apk, an SPDX GENERATES edge,
+		// every language ecosystem) are left as the cataloger set them.
+		rpmdb.ResolveSourceVersions(t.Packages)
 	}
 	if cr.n > source.MaxFileBytes {
 		return pkgmeta.Target{}, cyclonedx.Stats{}, source.FileLimitError(path)
