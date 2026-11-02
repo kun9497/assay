@@ -16,6 +16,15 @@
   `ERROR` 행은 다른 카운터처럼 `0 0` 을 찍습니다. trivy 비교는 bridge 하지 않으므로 그대로입니다.
 
 ### Fixed
+- DESCRIBES 관계가 실제 패키지를 지목하는 SPDX 문서가 더 이상 그 패키지를 잃지 않습니다. 파서는
+  첫 DESCRIBES 대상을 그것이 문서 루트의 가짜 패키지인지 확인하지 않고 버렸으므로, 자기가 담은
+  단 하나의 버전과 purl 이 있는 패키지를 기술하는 문서(프로젝트 자체의 `tiny.spdx.json` 포함)는
+  "no components" 로 스캔되어 -- 카탈로그되지 않고, 세어지지 않고, 어느 skip 버킷에도 없이 --
+  `--fail-on low --fail-on-incomplete` 아래 exit 0 이었고, DESCRIBES 가 둘이면 두 번째만
+  살아남았습니다. 이제 DESCRIBES 대상은 어차피 패키지가 되지 않았을 때에만 제외되고(purl 없음,
+  `pkg:oci`, 버전 없음 -- syft 와 Red Hat 이 루트에 쓰는 모양), 첫 번째만이 아니라 모든 DESCRIBES
+  대상을 검사하며, 기술된 실제 패키지는 다른 패키지처럼 카탈로그되고 세어집니다(D84 개정).
+  ubi9-micro 와 syft-1.51 의 루트 모양은 여전히 세지 않고 버립니다.
 - 두 CSAF reader 모두 leaf purl 의 `epoch=N` qualifier 를 저장되는 fixed 버전에 `N:version-release`
   로 실어 나릅니다 -- rpmdb 카탈로거가 설치된 빌드를 쓰는 모양입니다. Red Hat 의 Hummingbird
   reader(D98)는 purl 의 `@version` 만 취하고 `?` 에서 멈췄으므로 nginx(epoch 2)와 tomcat10/11(epoch

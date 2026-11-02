@@ -17,6 +17,17 @@ All notable changes to this project are documented here. The format follows
   like its other counters. The trivy comparison does not bridge and is unchanged.
 
 ### Fixed
+- An SPDX document whose DESCRIBES relationship names a real package no longer loses that
+  package. The parser dropped the first DESCRIBES target as the document-root pseudo-package
+  without checking that it was one, so a document describing the one versioned, purl-bearing
+  package it inventories (the project's own `tiny.spdx.json` among them) scanned as "no
+  components" -- not cataloged, not counted, in no skip bucket -- and exited 0 under
+  `--fail-on low --fail-on-incomplete`; with two DESCRIBES only the second survived. A
+  DESCRIBES target is now excluded only when it would not have become a package anyway (no
+  purl, `pkg:oci`, no version -- the shapes syft and Red Hat write for the root), every
+  DESCRIBES target is examined rather than the first alone, and a described real package is
+  cataloged and counted like any other (D84 revised). The ubi9-micro and syft-1.51 root
+  shapes are still dropped uncounted.
 - Both CSAF readers carry a leaf purl's `epoch=N` qualifier into the stored fixed version as
   `N:version-release`, the shape the rpmdb cataloger writes for an installed build. Red Hat's
   Hummingbird reader (D98) took the purl's `@version` alone and stopped at the `?`, so nginx

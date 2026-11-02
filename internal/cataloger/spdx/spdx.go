@@ -82,17 +82,42 @@ func Parse(r io.Reader) (pkgmeta.Target, cyclonedx.Stats, error) {
 	var target pkgmeta.Target
 	var stats cyclonedx.Stats
 
-	rootID := findRootPackageID(doc)
+	described := describedPackageIDs(doc)
 	srcOf := sourceRPMOf(doc)
 
 	for _, p := range doc.Packages {
-		if rootID != "" && p.SPDXID == rootID {
-			// The document-root pseudo-package — syft 1.51's
-			// SPDXRef-DocumentRoot-*, or Red Hat's own container/product
-			// package (a pkg:oci purl). Excluded exactly like CycloneDX's
-			// operating-system component: not a package to scan, and not
-			// counted anywhere, rather than landing as a skip and inflating
-			// the denominator.
+		if described[p.SPDXID] {
+			// A DESCRIBES target is usually the document-root
+			// pseudo-package — syft 1.51's SPDXRef-DocumentRoot-* (no
+			// purl), Red Hat's own container package (a pkg:oci purl) or
+			// product package (a cpe, no purl). Those are excluded exactly
+			// like CycloneDX's operating-system component: not a package to
+			// scan, and not counted anywhere, rather than landing as a skip
+			// and inflating the denominator. But the exclusion is by what
+			// the entry IS, not by its being described (QA 2026-11-02,
+			// finding #6): a document that describes the one real package
+			// it inventories — a versioned, purl-bearing lodash or openssl
+			// — was dropped uncounted, in no skip bucket, and scanned as
+			// "no components" with exit 0. So the target is cataloged into
+			// a scratch, and dropped uncounted only when it has one of the
+			// pseudo-package shapes: no purl, every purl pkg:oci, or a purl
+			// with no version. Anything else a document describes is a real
+			// entry and gets whatever the undescribed twin would have got: a
+			// candidate, or a counted skip (an unsupported type, a malformed
+			// purl, arch=src) that --fail-on-incomplete can see (review of
+			// #230: a dropped-when-empty rule hid those as well).
+			var scratchTarget pkgmeta.Target
+			var scratchStats cyclonedx.Stats
+			catalogPackage(p, srcOf[p.SPDXID], &scratchTarget, &scratchStats)
+			if len(scratchTarget.Packages) == 0 && pseudoPackageShape(p, scratchStats) {
+				continue
+			}
+			target.Packages = append(target.Packages, scratchTarget.Packages...)
+			stats.Components += scratchStats.Components
+			stats.Cataloged += scratchStats.Cataloged
+			stats.SkippedNoPURL += scratchStats.SkippedNoPURL
+			stats.SkippedNoVersion += scratchStats.SkippedNoVersion
+			stats.SkippedUnsupportedEcosystem += scratchStats.SkippedUnsupportedEcosystem
 			continue
 		}
 		catalogPackage(p, srcOf[p.SPDXID], &target, &stats)
@@ -101,18 +126,58 @@ func Parse(r io.Reader) (pkgmeta.Target, cyclonedx.Stats, error) {
 	return target, stats, nil
 }
 
-// findRootPackageID returns the SPDXID the document's own DESCRIBES
-// relationship points at. syft 0.84 points this at the document itself
-// (SPDXElementID == RelatedSPDXElement == doc.SPDXID), which never matches
-// any entry in doc.Packages — so on that shape there is naturally nothing to
-// exclude, with no special case needed here.
-func findRootPackageID(doc document) string {
-	for _, r := range doc.Relationships {
-		if r.RelationshipType == "DESCRIBES" && r.SPDXElementID == doc.SPDXID {
-			return r.RelatedSPDXElement
+// describedPackageIDs returns every SPDXID the document's own DESCRIBES
+// relationships point at — every one, because SPDX lets a document describe
+// any number of packages, and reading only the first left the second
+// described package unexamined (QA 2026-11-02, finding #6). syft 0.84 points
+// DESCRIBES at the document itself (SPDXElementID == RelatedSPDXElement ==
+// doc.SPDXID), which never matches any entry in doc.Packages — so on that
+// shape there is naturally nothing to examine, with no special case needed
+// here.
+// pseudoPackageShape reports whether a described entry that yielded no
+// candidate is one of the document-root shapes generators write for the
+// thing the SBOM is about rather than a package in it: no purl at all
+// (syft's SPDXRef-DocumentRoot-*, Red Hat's cpe-only product package),
+// every purl pkg:oci (Red Hat's container package), or every parsed purl
+// without a version (a product named without a build). Those are excluded
+// uncounted, like CycloneDX's operating-system component. A described entry
+// of any other shape is a real package the document is about, and its
+// skip is counted the way the undescribed twin's would be.
+func pseudoPackageShape(p pkg, scratch cyclonedx.Stats) bool {
+	var purls []string
+	for _, ref := range p.ExternalRefs {
+		if ref.ReferenceType == "purl" {
+			purls = append(purls, ref.ReferenceLocator)
 		}
 	}
-	return ""
+	if len(purls) == 0 {
+		return true
+	}
+	allOCI := true
+	for _, raw := range purls {
+		parsed, err := pkgmeta.ParsePURL(raw)
+		if err != nil || parsed.Type != "oci" {
+			allOCI = false
+			break
+		}
+	}
+	if allOCI {
+		return true
+	}
+	// catalogPackage counts a package under SkippedNoVersion only when a
+	// purl parsed, no candidate came of any, and at least one lacked a
+	// version: the product-without-a-build shape.
+	return scratch.SkippedNoVersion == 1
+}
+
+func describedPackageIDs(doc document) map[string]bool {
+	ids := make(map[string]bool)
+	for _, r := range doc.Relationships {
+		if r.RelationshipType == "DESCRIBES" && r.SPDXElementID == doc.SPDXID {
+			ids[r.RelatedSPDXElement] = true
+		}
+	}
+	return ids
 }
 
 // sourceRPMOf maps a package's SPDXID to the name of the source rpm it was
