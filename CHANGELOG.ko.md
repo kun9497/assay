@@ -7,6 +7,16 @@
 
 ## [Unreleased]
 
+### Fixed
+- SUSE: 문서에 빌드가 하나도 나열되지 않은 패키지의 `known_affected`(또는 not-affected, no-fix
+  remediation) id 를 product id 로 저장합니다. 전에는 건너뛰었고, 그것이 문서의 유일한 진술이면 문서
+  전체가 사라졌습니다. 2026-11-02 에 표본으로 뽑은 live 문서 688건에서 id 3,478개가 이렇게 버려졌고 문서
+  142건은 record 를 하나도 내지 못했습니다. SLES 12 SP5 부터 16.x 와 그 Leap codestream 에 "affected,
+  no fix" 항목 2,876개가 추가됩니다(MozillaFirefox, kernel, terraform, apache2 등). fix 버전은 바뀌지
+  않습니다. `db build` progress 줄은 읽을 수 있는 purl 이 없는 SUSE leaf 도 찍습니다. 집계만 되고 한 번도
+  보이지 않던 값입니다. 데이터베이스 변경이므로 merge 후 nightly 와 함께 `db update` 에 닿습니다.
+  (D159, D126 개정, 감사 B2)
+
 ## [0.13.0] - 2026-11-02
 
 ### Changed
