@@ -518,6 +518,52 @@ func TestStatusWithoutDatabase(t *testing.T) {
 	}
 }
 
+// The `covers:` line exists so an operator can see whether the release they
+// are about to scan is inside the range (D20). Against a real database it
+// printed "Ubuntu:23.10..26.04:LTS (11 releases)" and "SLES:11..15.SP7 (21
+// releases)" while the database held Ubuntu 14.04:LTS..22.04:LTS and SLES
+// 16.0/16.1 -- the release parser cut at "." and required a bare number on
+// both sides, so every ":LTS" and ".SPn" key fell into the lexical fallback
+// and was sorted past the parsed ones (QA 2026-11-02, #9). The spellings are
+// the ones pkgmeta/distro.go and suse/csaf.go actually build, and the
+// assertion goes through Status so the fix is held where the operator reads
+// it, not only in the helper.
+func TestStatus_CoversRangeReadsLTSAndServicePackReleases(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vulnerability.db")
+	p := fakeProvider{name: "osv", covers: []string{
+		"Ubuntu:14.04:LTS", "Ubuntu:16.04:LTS", "Ubuntu:18.04:LTS", "Ubuntu:20.04:LTS",
+		"Ubuntu:22.04:LTS", "Ubuntu:23.10", "Ubuntu:24.04:LTS", "Ubuntu:24.10",
+		"Ubuntu:25.04", "Ubuntu:25.10", "Ubuntu:26.04:LTS",
+		"SLES:11", "SLES:12", "SLES:12.SP1", "SLES:15", "SLES:15.SP1", "SLES:15.SP6",
+		"SLES:15.SP7", "SLES:16.0", "SLES:16.1",
+	}, advs: []advisory.Advisory{{
+		ID: "USN-9000-1", Database: "USN", Source: "osv", Kind: advisory.KindVulnerability,
+		Affected: []advisory.Affected{{Ecosystem: "Ubuntu:22.04:LTS", Name: "openssl"}},
+	}}}
+
+	var out, errOut bytes.Buffer
+	if code := Update(context.Background(), path, "", "", false, []provider.Provider{p}, nil, nil, nil, &out, &errOut); code != 0 {
+		t.Fatalf("Update = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := Status(path, &out, &errOut); code != 0 {
+		t.Fatalf("Status = %d, want 0 (stderr: %s)", code, errOut.String())
+	}
+	s := out.String()
+	// Both ends of each range are asserted together with the count, so a
+	// release that fell into the lexical fallback shows up as the wrong end
+	// rather than passing on the other one.
+	for _, want := range []string{
+		"Ubuntu:14.04:LTS..26.04:LTS (11 releases)",
+		"SLES:11..16.1 (9 releases)",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("status covers: line lacks %q:\n%s", want, s)
+		}
+	}
+}
+
 // `covers:` is the only place coverage is visible without running a scan and
 // reading why it refused, so its shape is part of the contract.
 func TestCoverageSummary(t *testing.T) {
@@ -548,6 +594,36 @@ func TestCoverageSummary(t *testing.T) {
 			name: "a single release is not a range",
 			in:   []string{"Alpine:v3.19"},
 			want: "Alpine:v3.19",
+		},
+		{
+			// An LTS key carries a ":LTS" suffix after the release number
+			// (pkgmeta/distro.go, D53). The suffix is not part of the
+			// order; cutting at "." and reading "04:LTS" as the minor made
+			// every LTS release unparseable, and the fallback sorted them
+			// past the interim ones -- "23.10..26.04:LTS" for a database
+			// that started at 14.04.
+			name: "an LTS suffix is not part of the order",
+			in:   []string{"Ubuntu:22.04:LTS", "Ubuntu:14.04:LTS", "Ubuntu:23.10", "Ubuntu:26.04:LTS", "Ubuntu:25.10"},
+			want: "Ubuntu:14.04:LTS..26.04:LTS (5 releases)",
+		},
+		{
+			// SLES spells a service pack "15.SP7" (suse/csaf.go) and the
+			// 16 line "16.0"/"16.1". A service pack is the minor: SP7 of 15
+			// sits below 16.0, not past it in the lexical fallback, which
+			// printed "11..15.SP7" for a database that held 16.1.
+			name: "a SLES service pack is a minor release",
+			in: []string{
+				"SLES:15.SP7", "SLES:16.1", "SLES:11", "SLES:15", "SLES:12.SP1",
+				"SLES:16.0", "SLES:12", "SLES:15.SP1", "SLES:15.SP6",
+			},
+			want: "SLES:11..16.1 (9 releases)",
+		},
+		{
+			// Leap's keys were already numeric on both sides; they must
+			// read the same after the SP and suffix handling.
+			name: "openSUSE Leap is unchanged",
+			in:   []string{"openSUSE Leap:15.6", "openSUSE Leap:16.0", "openSUSE Leap:15.0", "openSUSE Leap:15.3"},
+			want: "openSUSE Leap:15.0..16.0 (4 releases)",
 		},
 		{
 			// A database covering nothing is the state D20 exists to make
