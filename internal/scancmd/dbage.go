@@ -351,7 +351,10 @@ func warnIfEOLStale(m store.Meta, failOnEOL bool, now time.Time, stderr io.Write
 	// day old (endoflife.date regenerates daily), so a wider gap means this
 	// build did not fetch it. A database that is simply old all over -- a
 	// pulled artifact nobody has updated -- has had D139's line already, and
-	// advice about seeds and EOL_ENABLE would be wrong for that reader.
+	// advice about seeds and EOL_ENABLE would be wrong for that reader. The
+	// IsZero half is for the reader: an undated build makes the subtraction
+	// negative and fails the comparison on its own (a mutation removing it
+	// survives; that is the equivalence, not a gap).
 	if !m.BuiltAt.IsZero() && m.BuiltAt.Sub(m.EOLProvenance.DataAsOf) > staleAfter {
 		fmt.Fprintln(stderr, "  run `assay db update`; a ratings-only build with EOL_ENABLE=0 keeps its "+
 			"seed's end-of-life data, so refresh the seed or build with EOL_ENABLE=1")
