@@ -3087,6 +3087,28 @@ ubi8/nodejs-18을 syft-1.51 SBOM으로: module 패키지가 stream-match됩니�
 시끄럽게 not evaluated입니다 — 정직한 성능 저하입니다. `--fail-on-incomplete=target`은
 최신 SBOM에서는 다시 exit 0입니다.
 
+**개정 (QA 2026-11-02).** "Source(D8)는 `upstream` qualifier에서"는 두 리더 모두에서 source 의
+이름만 남기고 버전을 버리고 있었다: deb 의 `upstream=util-linux@2.38.1-5+deb12u2` 는 `@` 뒤 절반을
+잃었고, rpm 의 `upstream=httpd-2.4.62-1.fc40.src.rpm` 은 `httpd` 로 벗겨지며 `SourceRPMVersion` 은
+한 번도 불리지 않았다. 매처는 source 이름 조회를 `Source.Version` 이 있을 때만 그것과 비교하므로(D41),
+SBOM 입력에서는 바이너리 자신의 버전이 — epoch 까지 포함해 — source 키의 fix 와 비교되었다. 끝까지
+확인했다: util-linux `2.38.1-5+deb12u2` 에서 빌드된 bsdutils `1:2.38.1-5+deb12u3` 을 Debian:12 의
+util-linux fix `2.38.1-5+deb12u3` 에 대고 보면, 이미지의 dpkg status 는 exit 1 과 finding 하나를
+주었고, 같은 패키지를 CycloneDX 와 SPDX 로 넣으면 exit 0, finding 0, skip 0 이었다. 거짓말을 한 쪽은
+에어갭 경로였다. 이제 deb 는 버전 절반을 유지하고(`ParsePURL` 이 epoch 의 콜론을 이미 디코드했다),
+CycloneDX 카탈로거는 purl 이 버전 없이 source 를 지목했을 때 `syft:metadata:sourceVersion` 으로
+그것을 채우되 purl 이 가진 버전은 덮어쓰지 않는다. rpm 은 SRPM 의 version-release 를 유지하고 파일
+이름을 `Package.Upstream` 으로 남기며, `decodeSBOM` 이 문서 전체에 `rpmdb.ResolveSourceVersions`
+를 돌려 두 리더 모두에서 source 의 epoch 가 D153 의 규칙으로 놓인다(D153 의 개정 참조). VEX 의 deb
+source 비교(D121)는 바이너리 fallback 대신 source 버전에 닿는다. `Source.Version` 은 JSON 보고서에
+이미 자리가 있었으므로(`source.version`, omitempty) 스키마 변경은 없다. 두 리더에서 `Run` 을 통해
+지킨다: bsdutils 모양은 finding 을 내고 source 가 fix 에 있는 같은 문서는 깨끗하다; httpd 옆의
+mod_ssl `1:2.4.62-1.fc40` 은 httpd 를 통해 발견된다; perl `4:5.32.1-484.el9` 옆의 epoch 0 perl-B 는
+perl fix `4:5.32.1-481.el9` 에 대해 깨끗하다; source 버전의 source 문장은 억제하고 바이너리 버전의
+문장은 억제하지 않는다. 변이 열 개 중 아홉이 호출자나 카탈로거에서 잡혔고, 열째 — rpm 분기가 버전
+없이 이름만 두는 것 — 는 카탈로거에서 잡히되 `Run` 을 통해서는 등가다. D153 패스가 `Upstream` 에서
+버전을 다시 계산하기 때문이며, 코드가 그렇게 말한다.
+
 ---
 
 ### D84 — SPDX, 벤더가 실제로 발행하는 형식
@@ -6309,6 +6331,12 @@ Red Hat 의 실제 문서(testdata, sha256 `9f6b64f0…`)로: 고쳐진 빌드�
 리뷰어의 프로브 셋은 나쁜 동작에서 통과하도록 쓰였으나 이제 그 동작에서 실패한다. 변이 여섯 개가
 모두 잡혔고, 여섯째(버전 없는 source 의 맨 `1:`)는 그 경우를 더한 뒤에야 잡혔다.
 
+**개정 (QA 2026-11-02).** "명시적 `upstream` 한정자가 이기며 여전히 이름만"의 뒤 절반은 더 이상
+성립하지 않는다: 한정자의 Source 는 이제 SRPM 의 version-release 도 가지며, 그 epoch 는 문서 전체에
+대한 D153 의 규칙으로 놓인다(D83 과 D153 의 개정). 관계보다 이기는 것은 그대로다.
+`TestParse_A3_UpstreamQualifierWinsOverTheRelationship` 은 한정자 자신의 version-release 를 관계
+source 의 `-18` 과 구별되는 `-17` 로 단언하므로 둘이 섞일 수 없다.
+
 ---
 
 ### D149 — LTSS fix 는 mainline 의 no-fix 에 가려지지 않고 그것을 대체한다 (D91 개정)
@@ -6472,6 +6500,15 @@ source 키 레코드에 대해:
 둘 다 고쳤고 변이 표를 처음부터 다시 돌렸다: 변이 열네 개, 모두 잡혔다. 각 단계의 제거 또는 순서
 변경, 가장 낮은 epoch 를 취하는 표결, 높은 쪽을 취하는 타이브레이크, version-release 필터, epoch 없는
 두 접두사, 호출 지점, 파싱 불가 및 nil 가드, 무시된 SRPM version-release 를 다룬다.
+
+**개정 (QA 2026-11-02).** "SBOM 경로는 여기서 바뀌지 않는다: upstream 한정자가 붙은 purl 은 여전히
+바이너리의 EVR 을 준다"는 경계가 아니라 QA 발견 #1 이 확인한 결함을 적은 것이었다. SBOM 카탈로거는
+이제 `Source.Version` 을 SRPM 의 version-release 로 두고 파일 이름을 `Package.Upstream` 으로 남기며,
+`decodeSBOM` 이 두 리더 모두에서 문서 전체에 `ResolveSourceVersions` 를 돌리므로, 이미지의 syft SBOM
+과 이미지 자체가 mod_ssl 의 epoch 를 같은 방식으로 — httpd 의 것으로 — 놓는다. 남는 것은 이 결정
+자신의 것과 같다: mod_ssl 만 있고 같은 SRPM 의 다른 패키지가 없는 문서는 바이너리의 epoch 를
+유지하고(4 단계) httpd fix 는 가려진 채로 남으며, `TestRun_SBOMLoneRPMSubpackageKeepsItsOwnEpoch`
+가 이를 고정한다; SPDX `GENERATES` 간선은 source 의 epoch 를 명시하므로 이 틈이 없다(D152).
 
 ---
 

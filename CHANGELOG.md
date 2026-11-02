@@ -8,6 +8,20 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- An SBOM's deb and rpm packages are judged on their SOURCE version, as the image's are. Both
+  readers kept the source name from the purl's `upstream` qualifier and dropped the version --
+  deb's `util-linux@2.38.1-5+deb12u2` lost its `@` half, rpm's `httpd-2.4.62-1.fc40.src.rpm`
+  was stripped to the name -- so the matcher's source-version comparison (D41) never ran on
+  SBOM input and the binary's own version, epoch included, was compared with a source-keyed
+  fix: bsdutils `1:2.38.1-5+deb12u3` from util-linux `2.38.1-5+deb12u2` was a finding from the
+  image's dpkg status and clean from the same package's CycloneDX or SPDX, with no skip (QA
+  2026-11-02 #1). deb keeps the version half, and the CycloneDX reader fills it from
+  `syft:metadata:sourceVersion` when the purl names the source without one; rpm keeps the
+  SRPM's version-release and places its epoch by D153's rule over the whole document (the
+  main package's, else the siblings'), so mod_ssl `1:2.4.62` beside httpd is found through
+  httpd and perl-B beside perl `4:5.32.1` is not flagged. A VEX statement written against a
+  deb source version now applies to the SBOM's binaries built from it. The report's existing
+  `source.version` field is filled; no schema change.
 - `db build` retries a Photon OS feed file through a transient failure instead of failing the
   whole build on the first non-200. The provider made one GET per major; the 2026-10-17 nightly
   publish died on a 404 from the Photon CDN for one of the three fixed

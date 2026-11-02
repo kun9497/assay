@@ -78,7 +78,12 @@ func ResolveDistroPURL(p PURL, componentVersion, docEcosystem string, hasDocDist
 		// which rpmdb.ResolveSourceVersions supplies from the document's
 		// other packages once the whole document is read (D153), as the
 		// image path does for an rpmdb. Upstream keeps the file name for
-		// that pass.
+		// that pass, which recomputes Source.Version from it -- so through
+		// a scan, setting the version here is equivalent to leaving it
+		// empty (mutation-tested 2026-11-02). It is set anyway: Parse's
+		// other callers do not run the pass, and a cataloger that returns
+		// a Source with no version would be stating D8's "the same as the
+		// binary's", which for an rpm subpackage is false.
 		if upstream := p.Qualifiers["upstream"]; upstream != "" {
 			if src := SourceRPMName(upstream); src != "" {
 				res.Source = &SourcePackage{Name: src, Version: SourceRPMVersion(upstream)}
