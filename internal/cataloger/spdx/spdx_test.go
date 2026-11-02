@@ -94,12 +94,15 @@ func TestParse_EveryDescribedRealPackageKept(t *testing.T) {
 
 // TestParse_PseudoRootDroppedBesideDescribedRealPackage is the control for
 // the two tests above and holds the rule on EVERY DESCRIBES target, not the
-// first alone: the first DESCRIBES names Red Hat's pkg:oci container root,
-// the second a real rpm. The root is dropped and counted nowhere -- not as
-// a component, not in SkippedUnsupportedEcosystem where pkg:oci would land
-// -- while the described rpm is cataloged. Checking only the first target
-// would keep the root's rule but never reach the rpm; checking only
-// "is it described" would drop both.
+// first alone: the first DESCRIBES names a real rpm, the SECOND Red Hat's
+// pkg:oci container root -- in that order on purpose. The root is dropped
+// and counted nowhere -- not as a component, not in
+// SkippedUnsupportedEcosystem where pkg:oci would land -- while the
+// described rpm is cataloged. A real described package is kept whether or
+// not it is recognised as described, so only a pseudo-root in second place
+// can tell "every DESCRIBES target" from "the first one": reading the first
+// alone would catalog the root as an ordinary package and count it.
+// Checking only "is it described" would drop both.
 func TestParse_PseudoRootDroppedBesideDescribedRealPackage(t *testing.T) {
 	const doc = `{"spdxVersion":"SPDX-2.3","SPDXID":"SPDXRef-DOCUMENT","packages":[
 	  {"name":"ubi9-micro-container_amd64","SPDXID":"SPDXRef-ubi9-micro-container-amd64","versionInfo":"9.4-6",
@@ -109,8 +112,8 @@ func TestParse_PseudoRootDroppedBesideDescribedRealPackage(t *testing.T) {
 	   "externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl",
 	     "referenceLocator":"pkg:rpm/redhat/zlib@1.2.11-40.el9?arch=x86_64&repository_id=rhel-9-for-x86_64-baseos-rpms"}]}],
 	  "relationships":[
-	    {"spdxElementId":"SPDXRef-DOCUMENT","relatedSpdxElement":"SPDXRef-ubi9-micro-container-amd64","relationshipType":"DESCRIBES"},
-	    {"spdxElementId":"SPDXRef-DOCUMENT","relatedSpdxElement":"SPDXRef-zlib","relationshipType":"DESCRIBES"}]}`
+	    {"spdxElementId":"SPDXRef-DOCUMENT","relatedSpdxElement":"SPDXRef-zlib","relationshipType":"DESCRIBES"},
+	    {"spdxElementId":"SPDXRef-DOCUMENT","relatedSpdxElement":"SPDXRef-ubi9-micro-container-amd64","relationshipType":"DESCRIBES"}]}`
 	target, stats, err := Parse(strings.NewReader(doc))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -340,41 +343,39 @@ func TestParse_RootPseudoPackageExcluded_RHOCIShape(t *testing.T) {
 	}
 }
 
-// TestParse_UnanchoredDescribesExcludesNothing holds findRootPackageID's
+// TestParse_UnanchoredDescribesExcludesNothing holds describedPackageIDs'
 // anchor condition: the DESCRIBES relationship only names a document root
 // when it originates at the document's OWN SPDXID. Every other
 // root-exclusion fixture in this file happens to have its only DESCRIBES
 // relationship anchored there, so dropping the anchor check entirely would
 // leave them green — this fixture's DESCRIBES instead runs
-// package-to-package (bash "describing" coreutils), which is spec-legal but
-// says nothing about which package is the document root. Treating it as a
-// root anyway would silently exclude coreutils from the scan: uncounted in
-// every Stats bucket, invisible to --fail-on-incomplete.
+// package-to-package (bash "describing" a no-purl entry), which is
+// spec-legal but says nothing about which package is the document root.
+// Since QA 2026-11-02 a described REAL package is kept either way, so the
+// anchor is observable only on an entry that would not become a package:
+// described from the document it is dropped uncounted; described by another
+// package it is an ordinary no-purl skip, counted in Components and
+// SkippedNoPURL where --fail-on-incomplete can see it. Treating it as a
+// root anyway would hide that skip.
 func TestParse_UnanchoredDescribesExcludesNothing(t *testing.T) {
 	const doc = `{"spdxVersion":"SPDX-2.3","SPDXID":"SPDXRef-DOCUMENT","packages":[
 	  {"name":"bash","SPDXID":"SPDXRef-Package-bash","versionInfo":"5.2.15-2",
 	   "externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl",
 	     "referenceLocator":"pkg:deb/debian/bash@5.2.15-2?arch=amd64&distro=debian-12"}]},
-	  {"name":"coreutils","SPDXID":"SPDXRef-Package-coreutils","versionInfo":"9.1-1",
-	   "externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl",
-	     "referenceLocator":"pkg:deb/debian/coreutils@9.1-1?arch=amd64&distro=debian-12"}]}],
+	  {"name":"mystery","SPDXID":"SPDXRef-Package-mystery","versionInfo":"9.1-1"}],
 	  "relationships":[{"spdxElementId":"SPDXRef-Package-bash",
-	    "relatedSpdxElement":"SPDXRef-Package-coreutils","relationshipType":"DESCRIBES"}]}`
+	    "relatedSpdxElement":"SPDXRef-Package-mystery","relationshipType":"DESCRIBES"}]}`
 	target, stats, err := Parse(strings.NewReader(doc))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if stats.Components != 2 {
-		t.Errorf("Components = %d, want 2 — a DESCRIBES not anchored at the document's own "+
-			"SPDXID names no root, so nothing should be excluded", stats.Components)
+	if stats.Components != 2 || stats.SkippedNoPURL != 1 {
+		t.Errorf("Components, SkippedNoPURL = %d, %d, want 2, 1 — a DESCRIBES not anchored at the "+
+			"document's own SPDXID names no root, so the no-purl entry is a counted skip, not excluded",
+			stats.Components, stats.SkippedNoPURL)
 	}
-	names := map[string]bool{}
-	for _, p := range target.Packages {
-		names[p.Name] = true
-	}
-	if !names["bash"] || !names["coreutils"] {
-		t.Fatalf("Packages = %+v, want both bash and coreutils — coreutils must not be "+
-			"silently dropped as a false root", target.Packages)
+	if len(target.Packages) != 1 || target.Packages[0].Name != "bash" {
+		t.Fatalf("Packages = %+v, want just bash", target.Packages)
 	}
 }
 
