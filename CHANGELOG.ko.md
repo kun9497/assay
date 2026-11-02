@@ -16,6 +16,15 @@
   `ERROR` 행은 다른 카운터처럼 `0 0` 을 찍습니다. trivy 비교는 bridge 하지 않으므로 그대로입니다.
 
 ### Fixed
+- `db build` 는 Photon OS 피드 파일을 일시적 실패에 대해 재시도하며, 첫 non-200 응답에 빌드 전체를
+  실패시키지 않습니다. 이 provider 는 major 당 GET 을 한 번만 보냈고, 2026-10-17 야간 발행은 고정된 세
+  `cve_data_photon<N>.json` URL 중 하나에 Photon CDN 이 돌려준 404 로 죽었으며 그 파일은 다음 날 밤
+  돌아와 있었습니다. 이제 각 major 는 Fedora provider 가 쓰는 0.5s/1s backoff 로 최대 세 번 가져오며,
+  429, 5xx, 다운로드 도중의 connection reset 이나 잘린 본문, 그리고 -- 이 세 URL 은 고정되어 있고 정상임이
+  확인된 것이므로 Fedora 와 달리 -- 404 에 재시도합니다. 그 밖의 4xx, 취소, 온전한 본문의 decode 오류는
+  여전히 즉시 실패하고, 정말 사라진 파일은 세 번 시도한 뒤 시도 횟수를 오류에 담아 실패합니다. 모든
+  재시도는 빌드의 progress 출력에 URL, 실패 내용, 시도 번호와 함께 알립니다. Last-Modified 읽기는
+  바뀌지 않았습니다.
 - `--fail-on-eol` 로 실행한 스캔은 데이터베이스의 end-of-life 데이터가 생성된 지 7일이 넘으면 stderr 에
   날짜와 실행할 명령을 들어 경고합니다. `EOL_ENABLE=0` 인 ratings-only 빌드는 시드의 카탈로그를 시드만큼
   오래된 채로 물려받는데, D139 경고는 빌드 시각을 읽으므로 그런 데이터베이스가 최신으로 읽히면서 그 사이
