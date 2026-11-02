@@ -399,6 +399,23 @@ version would break a build — and belongs with `--fail-on` in slice 4.
 **Schema version 3.** The field is part of the on-disk shape, so a database built before it
 is refused with instructions rather than read as covering nothing (D5).
 
+**Revised (QA 2026-11-02).** `db status`'s `covers:` line misread two real key spellings. It
+collapses a family's releases to `first..last (N releases)` so an operator can see whether
+the release they are about to scan is inside the range, and its release parser cut at `.`
+and required a bare number on both sides. An Ubuntu LTS key is `Ubuntu:22.04:LTS` (D53) and a
+SUSE service pack is `SLES:15.SP7` (D77), so neither minor parsed, every such release fell
+into the lexical fallback that sorts unparseable shapes last, and a real database printed
+`Ubuntu:23.10..26.04:LTS (11 releases)` and `SLES:11..15.SP7 (21 releases)` while holding
+Ubuntu 14.04:LTS through 22.04:LTS and SLES 16.0/16.1 — telling an Ubuntu 20.04 or SLES 16
+operator their release was outside it. `--output json` listed the keys verbatim and was
+right; only the table was wrong. A release is now read as a number, then optionally `.` and
+either a number or `SP` and a number, then optionally a `:`-suffix that names the release's
+kind and does not take part in the order; the lexical fallback stays for shapes that still
+do not parse (`edge`, `stream`, `rolling`), so an unexpected key remains visible rather than
+guessed at, and two spellings of one number break their tie as strings so the ends do not
+depend on sort order. The same database now prints `Ubuntu:14.04:LTS..26.04:LTS (11
+releases)` and `SLES:11..16.1 (21 releases)`; the count never changed.
+
 
 ### D21 — Verdicts: what fails a build, and what the exit code means
 

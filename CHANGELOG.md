@@ -8,6 +8,18 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- `db status` reads Ubuntu LTS and SUSE service-pack releases when it prints the `covers:`
+  range. The release parser cut at `.` and required a bare number on both sides, so
+  `Ubuntu:22.04:LTS` and `SLES:15.SP7` were unparseable and sorted past every parsed release;
+  against a real database the line read `Ubuntu:23.10..26.04:LTS (11 releases)` and
+  `SLES:11..15.SP7 (21 releases)` while the database held Ubuntu 14.04:LTS through 22.04:LTS
+  and SLES 16.0/16.1 -- telling an Ubuntu 20.04 or SLES 16 operator their release was outside
+  the range (QA 2026-11-02, #9). A `:`-suffix is now dropped before the number is read and
+  `SP` is the minor, so the same database prints `Ubuntu:14.04:LTS..26.04:LTS (11 releases)`
+  and `SLES:11..16.1 (21 releases)`. Shapes that still do not parse (`edge`, `stream`,
+  `rolling`) keep the lexical fallback, and two spellings of one number order as strings so
+  the ends do not depend on sort order. `--output json` lists the keys verbatim and was
+  already right; the count never changed.
 - `db build` retries a Photon OS feed file through a transient failure instead of failing the
   whole build on the first non-200. The provider made one GET per major; the 2026-10-17 nightly
   publish died on a 404 from the Photon CDN for one of the three fixed

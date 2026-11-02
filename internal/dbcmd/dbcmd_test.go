@@ -959,6 +959,21 @@ func TestCoverageSummary_UnparseableReleaseSortsLast(t *testing.T) {
 	}
 }
 
+// Two spellings of one number ("16" and "16.0") compare equal on their parts,
+// and slices.SortFunc is not stable, so without a string tiebreak the range's
+// ends would depend on the order Meta.Ecosystems happened to list them in.
+// Both orders must render the same line.
+func TestCoverageSummary_EqualReleasesOrderDeterministically(t *testing.T) {
+	forward := coverageSummary([]string{"SLES:15", "SLES:16", "SLES:16.0"})
+	backward := coverageSummary([]string{"SLES:15", "SLES:16.0", "SLES:16"})
+	if forward != backward {
+		t.Errorf("coverageSummary depends on input order: %q vs %q", forward, backward)
+	}
+	if want := "SLES:15..16.0 (3 releases)"; forward != want {
+		t.Errorf("coverageSummary = %q, want %q", forward, want)
+	}
+}
+
 // Seeding carries the RATINGS forward -- the seven-hour half -- while
 // advisories are rebuilt from the providers every run.
 //

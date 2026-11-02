@@ -8,6 +8,17 @@
 ## [Unreleased]
 
 ### Fixed
+- `db status` 가 `covers:` 범위를 출력할 때 Ubuntu LTS 와 SUSE 서비스 팩 릴리스를 읽습니다. 릴리스
+  파서가 `.` 에서 자른 뒤 양쪽 모두 순수한 숫자를 요구했기 때문에 `Ubuntu:22.04:LTS` 와 `SLES:15.SP7`
+  은 파싱 불가로 분류되어 파싱된 모든 릴리스 뒤로 정렬되었고, 실제 데이터베이스에서 이 줄은 Ubuntu
+  14.04:LTS 부터 22.04:LTS 까지와 SLES 16.0/16.1 을 들고 있으면서도 `Ubuntu:23.10..26.04:LTS (11
+  releases)` 와 `SLES:11..15.SP7 (21 releases)` 로 읽혀 -- Ubuntu 20.04 나 SLES 16 운영자에게 그
+  릴리스가 범위 밖이라고 말했습니다 (QA 2026-11-02, #9). 이제 `:` 접미사는 숫자를 읽기 전에 떼어내고
+  `SP` 는 minor 로 읽으므로, 같은 데이터베이스는 `Ubuntu:14.04:LTS..26.04:LTS (11 releases)` 와
+  `SLES:11..16.1 (21 releases)` 를 출력합니다. 여전히 파싱되지 않는 형태(`edge`, `stream`,
+  `rolling`)는 lexical fallback 을 유지하고, 한 숫자의 두 철자는 문자열로 정렬되어 양 끝이 정렬
+  순서에 좌우되지 않습니다. `--output json` 은 키를 그대로 나열해 이미 맞았고, 개수는 처음부터
+  바뀐 적이 없습니다.
 - `db build` 는 Photon OS 피드 파일을 일시적 실패에 대해 재시도하며, 첫 non-200 응답에 빌드 전체를
   실패시키지 않습니다. 이 provider 는 major 당 GET 을 한 번만 보냈고, 2026-10-17 야간 발행은 고정된 세
   `cve_data_photon<N>.json` URL 중 하나에 Photon CDN 이 돌려준 404 로 죽었으며 그 파일은 다음 날 밤
