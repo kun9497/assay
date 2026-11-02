@@ -57,4 +57,8 @@ type Image struct {
 	// Not safe for concurrent use, like the rest of a scan's reads: one scan
 	// reads its image from one goroutine.
 	read int64
+
+	// unresolved is every path a Files call gave up on behind a link chain
+	// (audit 2026-10-22 P4), for Unresolved. On the Image for read's reason.
+	unresolved []Unresolved
 }

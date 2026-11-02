@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"path"
+	"sort"
 	"strings"
 )
 
@@ -27,21 +29,73 @@ const (
 	whiteoutOpaque = ".wh..wh..opq"
 )
 
-// maxSymlinkHops bounds link chasing. A cycle (a -> b -> a) would otherwise
-// spin, and real images do not chain more than two or three deep.
-const maxSymlinkHops = 8
+// maxSymlinks is how many links one wanted path may pass through, Linux's
+// MAXSYMLINKS: path resolution that meets a forty-first link fails with ELOOP,
+// so the container itself cannot open the path. It counts LINKS, one per hop.
+// The bound used to count resolve passes, and the final file cost a pass, so
+// the real limit was seven links and a chain one longer came back as a
+// missing file (audit 2026-10-22 P4, re-verified 2026-11-02).
+//
+// A hardlink costs a hop too, though the kernel follows none: each hop here is
+// one more pass over every layer, and counting both is what bounds the passes
+// at maxSymlinks+1 whatever the image holds. A hardlink chain is not a shape
+// a tar writer produces -- a tar hardlink names a file archived in full.
+const maxSymlinks = 40
+
+// noCeiling is query.before for every query not reached through a hardlink:
+// no position within its top layer is out of reach.
+const noCeiling = math.MaxInt
+
+// Unresolved is a wanted path the walk could not finish resolving, and why.
+// It is not an absent file: the image has a link at that path, and what the
+// link leads to was not read.
+type Unresolved struct {
+	Path   string
+	Reason string
+}
+
+// unresolvedLinks is the reason for a path still behind a link after
+// maxSymlinks of them, a cycle included.
+var unresolvedLinks = fmt.Sprintf("still a link after %d symbolic links (a cycle, or a chain Linux "+
+	"refuses with ELOOP); what it leads to was not read", maxSymlinks)
+
+// Unresolved returns every path a Files call on this image could not finish
+// resolving, sorted by path. It lives on the Image beside the read budget,
+// for the budget's reason: the Image is the scan, and every Files call the
+// scan makes -- the distro probe and Bitnami's legacy path alike -- reports
+// into it, so a path the scan gave up on is learnt here rather than from a
+// result that simply lacks the key, which is what an absent file looks like.
+func (img *Image) Unresolved() []Unresolved {
+	out := append([]Unresolved(nil), img.unresolved...)
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out
+}
+
+func (img *Image) noteUnresolved(p, reason string) {
+	for _, u := range img.unresolved {
+		if u.Path == p {
+			return
+		}
+	}
+	img.unresolved = append(img.unresolved, Unresolved{Path: p, Reason: reason})
+}
 
 // Files resolves each wanted path against the image's layers, following
 // symlinks and hardlinks.
 //
 // Layers are walked NEWEST FIRST and each path is resolved at most once, which
-// is what makes a later layer win. Whiteouts recorded on the way down apply
-// only to the layers still to be read — the spec is explicit that a whiteout
-// affects lower layers only, so one in the base layer must not hide a file a
-// later layer installed. A hardlink is the one exception to newest-wins: its
-// target is the inode of the layer that made the link, so it is resolved from
-// that layer down and a later layer's rewrite of the target's name does not
-// reach it (D130, see query).
+// is what makes a later layer win. Within ONE layer it is the LAST entry for a
+// name that counts: a tar may carry a path twice, and docker's and
+// containerd's untar and GNU tar all leave the later entry on disk, so the
+// first is what the container does not have (audit 2026-10-22 P4, re-verified
+// 2026-11-02) -- a later whiteout or a change of type included. Whiteouts
+// recorded on the way down apply only to the layers still to be read — the
+// spec is explicit that a whiteout affects lower layers only, so one in the
+// base layer must not hide a file a later layer installed. A hardlink is the
+// one exception to newest-wins: its target is the inode of the layer that made
+// the link, as it stood when the link entry was reached, so it is resolved
+// from that point down and a later rewrite of the target's name does not reach
+// it (D130, see query).
 //
 // Symlinks are not optional to handle. /etc/os-release is a regular file in
 // alpine:3.19 and a symlink to ../usr/lib/os-release in alpine:3.21,
@@ -57,7 +111,10 @@ const maxSymlinkHops = 8
 //
 // A wanted path that no layer carries is absent from the result and is not an
 // error: an image with no apk database is a real image, and what that means is
-// the caller's decision.
+// the caller's decision. A path still behind a link after maxSymlinks of them
+// is absent from the result too, but not from the image, so it is recorded for
+// Unresolved: before it was, an os-release reached through a long chain made
+// the image read as having no distro, with nothing saying resolution stopped.
 //
 // Every file copied out is bounded by MaxFileBytes and counted against the
 // image's MaxScanBytes budget, and ctx is checked between tar entries (D112):
@@ -68,18 +125,28 @@ func (img *Image) Files(ctx context.Context, want []string) (map[string]FileFrom
 	qs := make([]query, 0, len(want))
 	for _, w := range want {
 		n := normaliseEntry(w)
-		qs = append(qs, query{path: n, want: n, top: newest, dir: path.Dir(n)})
+		qs = append(qs, query{path: n, want: n, top: newest, before: noCeiling, dir: path.Dir(n)})
 	}
 
 	out := make(map[string]FileFromLayer, len(want))
-	for hop := 0; hop < maxSymlinkHops && len(qs) > 0; hop++ {
+	// Ends: a follow-up query has one more link than the query it came from,
+	// and none past maxSymlinks is queued, so there are at most maxSymlinks+1
+	// passes -- a cycle included.
+	for len(qs) > 0 {
 		next, err := img.resolvePass(ctx, qs, out)
 		if err != nil {
 			return nil, err
 		}
 		// Whatever comes back was a link; whatever came back nothing either
 		// does not exist or was answered.
-		qs = next
+		qs = qs[:0]
+		for _, q := range next {
+			if q.links > maxSymlinks {
+				img.noteUnresolved(q.want, unresolvedLinks)
+				continue
+			}
+			qs = append(qs, q)
+		}
 	}
 	return out, nil
 }
@@ -98,24 +165,60 @@ func (img *Image) Files(ctx context.Context, want []string) (map[string]FileFrom
 // database hardlinked from a scratch path that a later layer rewrote came
 // back as the rewritten database.
 //
+// before is the same rule one level down, inside layer top: the hardlink
+// entry's own position in that layer's tar. A tar hardlink names a file
+// archived EARLIER, and an extractor links to whatever is at that name when it
+// reaches the link entry, so a later entry rewriting the target in the same
+// layer -- which now wins for a plain read of the name -- does not reach the
+// inode the link holds, and neither does a later whiteout of the name. Entries
+// of layer top at or after before are invisible to the query; every query not
+// reached through a hardlink has noCeiling.
+//
 // dir is the directory the name was reached THROUGH, which is what a relative
 // symlink target resolves against: the kernel resolves it from the directory
 // of the name being opened, and for a hardlink to a relative symlink that is
 // the hardlink's directory, not the symlink entry's. For every chain without
 // a hardlink the two coincide.
+//
+// links is how many links the chain passed through to reach path.
 type query struct {
-	path string
-	want string
-	top  int
-	dir  string
+	path   string
+	want   string
+	top    int
+	before int
+	dir    string
+	links  int
 }
 
-// whiteout is one deletion marker and the layer that wrote it. A marker in
-// layer j hides a name from a read of any layer below j -- for a query that
-// may see layer j at all (q.top >= j).
+// whiteout is one deletion marker, the layer that wrote it and its position in
+// that layer's tar. A marker in layer j hides a name from a read of any layer
+// below j -- for a query that may see layer j at all (q.top >= j) and, in a
+// hardlink's own layer, only when the marker came before the link (q.before).
 type whiteout struct {
 	name  string
 	layer int
+	pos   int
+}
+
+// hitKind is what one layer last wrote at a query's path.
+type hitKind int
+
+const (
+	hitNone hitKind = iota // nothing yet: the query goes on to the layer below
+	hitFile                // a regular file: the query is answered
+	hitLink                // a symlink or hardlink: the query follows it
+	hitGone                // a directory, device, FIFO or whiteout: no file here, and lower layers are shadowed (A10)
+)
+
+// layerHit is the entry that decides a query in one layer. It is held until
+// the layer ends rather than acted on at once, because a later entry for the
+// same name in the same layer replaces it.
+type layerHit struct {
+	kind     hitKind
+	data     []byte
+	hard     bool
+	linkname string
+	pos      int
 }
 
 // resolvePass reads every layer once, newest first, answering queries whose
@@ -123,108 +226,119 @@ type whiteout struct {
 // turned out to be a link. One tar entry may answer several queries: two
 // wanted names that resolve to the same target both get it (the first
 // implementation kept only the last requester per target path).
+//
+// Within a layer nothing is decided until the layer ends: each entry for a
+// query's path replaces what an earlier entry of the same layer said about it
+// (Files). A regular file is still copied out when its entry is reached --
+// the tar is a stream -- so a file a later entry replaces has spent its bytes
+// against MaxScanBytes for nothing; the budget is generous by two orders of
+// magnitude over a real package database, and only an image that writes the
+// same database repeatedly pays it.
 func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]FileFromLayer) ([]query, error) {
 	var next []query
 	done := make([]bool, len(qs))
 	var deleted, opaque []whiteout
+	newest := len(img.Layers) - 1
 
-	for i := len(img.Layers) - 1; i >= 0; i-- {
+	for i := newest; i >= 0; i-- {
 		l := img.Layers[i]
-		// Whiteouts found in THIS layer must not affect this layer's own
-		// entries, so they are collected separately and merged after the pass.
+		// A query an upper layer's whiteout hides from this layer is hidden
+		// from every layer below it too, so it ends here, unanswered.
+		for k, q := range qs {
+			if !done[k] && i <= q.top && hiddenFrom(q, i, deleted, opaque) {
+				done[k] = true
+			}
+		}
+		// Whiteouts found in THIS layer must not hide this layer's entries
+		// through the cross-layer sets, so they are collected separately and
+		// merged after the pass. Their effect inside the layer is ordered, and
+		// taken entry by entry below.
 		var layerDeleted, layerOpaque []whiteout
+		hits := make([]layerHit, len(qs))
+		pos := -1
 
 		err := readLayer(ctx, l, func(name string, h *tar.Header, r io.Reader) error {
-			// An entry anywhere under a wanted path -- a file, a directory, a
-			// whiteout or opaque marker inside it -- makes that path a
-			// directory in this layer, and a directory is not the file the
-			// query wants: the query ends here, unanswered, so no lower
-			// layer's deleted copy answers it (audit A10). A file turned into
-			// a directory writes "<name>/" and maybe "<name>/.wh..wh..opq",
-			// never ".wh.<name>", so the whiteout rules do not see it. Whether
-			// the path is itself hidden from this layer does not matter: the
-			// marker that hides it here hides it from every lower layer too,
-			// so ending the query gives the same answer.
-			for k, q := range qs {
-				if !done[k] && i <= q.top && strings.HasPrefix(name, q.path+"/") {
-					done[k] = true
-				}
-			}
+			pos++
 			dir, base := path.Split(name)
+			marker, removed := false, ""
 			switch {
 			case base == whiteoutOpaque:
-				layerOpaque = append(layerOpaque, whiteout{path.Clean(dir), i})
-				return nil
+				layerOpaque = append(layerOpaque, whiteout{path.Clean(dir), i, pos})
+				marker = true
 			case strings.HasPrefix(base, whiteoutPrefix):
-				layerDeleted = append(layerDeleted, whiteout{path.Join(dir, strings.TrimPrefix(base, whiteoutPrefix)), i})
-				return nil
+				removed = path.Join(dir, strings.TrimPrefix(base, whiteoutPrefix))
+				layerDeleted = append(layerDeleted, whiteout{removed, i, pos})
+				marker = true
 			}
-			var hits []int
+			var data []byte
+			read := false
 			for k, q := range qs {
-				if done[k] || q.path != name || i > q.top {
+				if done[k] || i > q.top || (i == q.top && pos >= q.before) {
 					continue
 				}
-				if hiddenFrom(name, i, q.top, deleted, opaque) {
-					continue
-				}
-				hits = append(hits, k)
-			}
-			if len(hits) == 0 {
-				return nil
-			}
-			switch h.Typeflag {
-			case tar.TypeSymlink, tar.TypeLink:
-				// Record the link and stop looking for this path: a lower
-				// layer's copy is shadowed by the link that replaced it.
-				//
-				// The two kinds resolve differently, twice over. A symlink's
-				// target is relative to the link's own directory; a hardlink's
-				// is relative to the archive root -- treating a hardlink like a
-				// symlink turns "usr/lib/os-release" into "etc/usr/lib/os-release"
-				// and finds nothing. And a symlink's target is looked up from
-				// the newest layer, a hardlink's from this one down (see query).
-				hard := h.Typeflag == tar.TypeLink
-				top := len(img.Layers) - 1
-				if hard {
-					top = i
-				}
-				// Per query, not per entry: two queries can reach one symlink
-				// through different hardlinks and resolve its relative
-				// target from different directories.
-				for _, k := range hits {
-					done[k] = true
-					q := qs[k]
-					target := resolveLink(q.dir, h.Linkname, hard)
-					dir := q.dir // a hardlink keeps the directory it was reached through
-					if !hard {
-						dir = path.Dir(target)
+				switch {
+				case strings.HasPrefix(name, q.path+"/"):
+					// An entry anywhere under the path -- a file, a directory, a
+					// whiteout or opaque marker inside it -- makes the path a
+					// directory in this layer, and a directory is not the file
+					// the query wants (audit A10). A file turned into a
+					// directory writes "<name>/" and maybe
+					// "<name>/.wh..wh..opq", never ".wh.<name>", so the
+					// whiteout rules do not see it.
+					hits[k] = layerHit{kind: hitGone}
+				case removed != "" && (q.path == removed || strings.HasPrefix(q.path, removed+"/")):
+					// A whiteout AFTER this layer's own entry for the path
+					// removes that entry: docker's and containerd's untar
+					// delete the name from disk when they reach the marker (or,
+					// converting to overlay whiteouts, fail the pull), so no
+					// container has it. One BEFORE the entry is overwritten by
+					// it -- the spec's "a whiteout applies to lower layers",
+					// and the order builders emit. For the lower layers the
+					// marker is merged below, as before.
+					hits[k] = layerHit{kind: hitGone}
+				case marker:
+					// A marker is an instruction, never the file.
+				case name == q.path:
+					switch h.Typeflag {
+					case tar.TypeSymlink, tar.TypeLink:
+						hits[k] = layerHit{kind: hitLink, hard: h.Typeflag == tar.TypeLink, linkname: h.Linkname, pos: pos}
+					case tar.TypeReg, tar.TypeGNUSparse, tar.TypeCont:
+						if !read {
+							b, err := img.readEntry(name, r)
+							if err != nil {
+								return err
+							}
+							data, read = b, true
+						}
+						hits[k] = layerHit{kind: hitFile, data: data}
+					default:
+						// A directory, device or FIFO at the wanted path: this
+						// layer has something there that is not a file (A10).
+						hits[k] = layerHit{kind: hitGone}
 					}
-					next = append(next, query{path: target, want: q.want, top: top, dir: dir})
 				}
-				return nil
-			case tar.TypeReg, tar.TypeGNUSparse, tar.TypeCont:
-				b, err := img.readEntry(name, r)
-				if err != nil {
-					return err
-				}
-				for _, k := range hits {
-					done[k] = true
-					out[qs[k].want] = FileFromLayer{Data: b, DiffID: l.DiffID}
-				}
-				return nil
-			default:
-				// A directory, device or FIFO at the wanted path: this layer
-				// has something there that is not a file, so the path holds
-				// no file to read, and a lower layer's copy is shadowed
-				// (A10). The query ends unanswered, as for an absent file.
-				for _, k := range hits {
-					done[k] = true
-				}
-				return nil
 			}
+			return nil
 		})
 		if err != nil {
 			return nil, fmt.Errorf("read layer %s: %w", l.DiffID, err)
+		}
+
+		for k, hit := range hits {
+			if hit.kind == hitNone {
+				continue
+			}
+			done[k] = true
+			switch hit.kind {
+			case hitFile:
+				out[qs[k].want] = FileFromLayer{Data: hit.data, DiffID: l.DiffID}
+			case hitLink:
+				// Record the link and stop looking for this path: a lower
+				// layer's copy is shadowed by the link that replaced it.
+				next = append(next, follow(qs[k], hit, i, newest))
+			}
+			// hitGone ends the query unanswered, as for an absent file: a
+			// lower layer's copy is shadowed by what this layer put there.
 		}
 
 		deleted = append(deleted, layerDeleted...)
@@ -233,19 +347,48 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 	return next, nil
 }
 
-// hiddenFrom reports whether a whiteout hides name from a read of layer i, for
-// a query allowed to see layers up to top: the marker must sit above i (a
-// whiteout affects lower layers only) and at or below top (a hardlink made in
-// a lower layer never sees a later layer's deletions). The directory and
-// opaque rules are isDeleted's and underAnyOpaque's.
-func hiddenFrom(name string, i, top int, deleted, opaque []whiteout) bool {
+// follow turns a link found in layer i into the query for its target.
+//
+// The two kinds resolve differently, twice over. A symlink's target is
+// relative to the link's own directory; a hardlink's is relative to the
+// archive root -- treating a hardlink like a symlink turns
+// "usr/lib/os-release" into "etc/usr/lib/os-release" and finds nothing. And a
+// symlink's target is looked up from the newest layer, a hardlink's from its
+// own entry in this layer down (see query).
+//
+// Per query, not per entry: two queries can reach one symlink through
+// different hardlinks and resolve its relative target from different
+// directories.
+func follow(q query, hit layerHit, i, newest int) query {
+	top, before := newest, noCeiling
+	if hit.hard {
+		top, before = i, hit.pos
+	}
+	target := resolveLink(q.dir, hit.linkname, hit.hard)
+	dir := q.dir // a hardlink keeps the directory it was reached through
+	if !hit.hard {
+		dir = path.Dir(target)
+	}
+	return query{path: target, want: q.want, top: top, before: before, dir: dir, links: q.links + 1}
+}
+
+// hiddenFrom reports whether a whiteout hides q's path from a read of layer
+// i: the marker must sit above i (a whiteout affects lower layers only) and at
+// or below q.top (a hardlink made in a lower layer never sees a later layer's
+// deletions) -- and, in layer q.top itself, before q.before (nor a deletion
+// later in its own layer). The directory and opaque rules are isDeleted's and
+// underAnyOpaque's.
+func hiddenFrom(q query, i int, deleted, opaque []whiteout) bool {
+	reach := func(w whiteout) bool {
+		return w.layer > i && w.layer <= q.top && (w.layer < q.top || w.pos < q.before)
+	}
 	for _, d := range deleted {
-		if d.layer > i && d.layer <= top && (name == d.name || strings.HasPrefix(name, d.name+"/")) {
+		if reach(d) && (q.path == d.name || strings.HasPrefix(q.path, d.name+"/")) {
 			return true
 		}
 	}
 	for _, o := range opaque {
-		if o.layer > i && o.layer <= top && (o.name == "." || strings.HasPrefix(name, o.name+"/")) {
+		if reach(o) && (o.name == "." || strings.HasPrefix(q.path, o.name+"/")) {
 			return true
 		}
 	}
@@ -284,20 +427,23 @@ func isDeleted(name string, deleted map[string]bool) bool {
 	return false
 }
 
-// shadowAncestors records, as found, every directory strictly below root that
-// name sits under: an entry at "root/x/y" in this layer makes "root/x" a
+// shadowAncestors records, as not a file, every directory strictly below root
+// that name sits under: an entry at "root/x/y" in this layer makes "root/x" a
 // directory here, so a lower layer's regular file "root/x" is shadowed and
 // must not be returned (audit A10). A file turned into a directory carries no
 // ".wh.<name>", so the whiteout rules never see it. Recorded whatever the
 // entry is -- a file, a directory, a whiteout or opaque marker -- because each
 // proves the directory exists in this layer; a whiteout that hides the
 // directory itself also hides the lower file, so marking it is never wrong.
-func shadowAncestors(found map[string]bool, name, root string) {
+// Into the layer's own last-entry map, not the cross-layer one, so a later
+// entry of the same layer that puts a file back at "root/x" wins as any later
+// entry does (audit 2026-10-22 P4).
+func shadowAncestors(last map[string]underHit, name, root string) {
 	if !strings.HasPrefix(name, root+"/") {
 		return
 	}
 	for p := path.Dir(name); p != root && p != "." && p != "/"; p = path.Dir(p) {
-		found[p] = true
+		last[p] = underHit{kind: hitGone}
 	}
 }
 

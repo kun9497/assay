@@ -327,7 +327,11 @@ func TestFiles_FollowsSymlinkAcrossLayers(t *testing.T) {
 	}
 }
 
-// A cycle must terminate rather than spin.
+// A cycle must terminate rather than spin -- and, since audit 2026-10-22 P4,
+// say so: Linux answers open() on it with ELOOP, so the path is neither a
+// file nor absent, and a caller that saw only the missing key read the image
+// as not having the file at all. The result still holds no file; what changed
+// is that Unresolved names the path.
 func TestFiles_SymlinkCycleTerminates(t *testing.T) {
 	img := imageOf(layerOfOrdered(t, "sha256:one",
 		sym("a", "b"),
@@ -339,6 +343,9 @@ func TestFiles_SymlinkCycleTerminates(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("got %+v, want nothing: a cycle resolves to no file", got)
+	}
+	if u := img.Unresolved(); len(u) != 1 || u[0].Path != "a" || u[0].Reason != unresolvedLinks {
+		t.Errorf("Unresolved = %+v, want exactly a, for the link limit", u)
 	}
 }
 
@@ -403,10 +410,16 @@ func TestFiles_RelativeSymlinkIsJoinedToTheLinksDirectory(t *testing.T) {
 // A hardlink's Linkname is relative to the archive root, not to the link's
 // directory — the opposite of a symlink. Resolving one like the other turns
 // "usr/lib/os-release" into "etc/usr/lib/os-release" and finds nothing.
+//
+// The target is written BEFORE the link. A tar hardlink names a file archived
+// earlier, and since audit 2026-10-22 P4 the walk holds a hardlink to what
+// stood at its target when the link entry was reached, as an extractor does;
+// this fixture had the link first, a shape no tar writer emits and no
+// extractor accepts (os.Link on a name not yet there).
 func TestFiles_HardlinkTargetIsRootRelative(t *testing.T) {
 	img := imageOf(layerOfOrdered(t, "sha256:one",
-		hard("etc/os-release", "usr/lib/os-release"),
 		entry{name: "usr/lib/os-release", body: "ID=alpine"},
+		hard("etc/os-release", "usr/lib/os-release"),
 	))
 	got, err := img.Files(context.Background(), []string{"etc/os-release"})
 	if err != nil {
@@ -585,12 +598,13 @@ func TestFiles_HardlinkTargetMayBeInALowerLayer(t *testing.T) {
 // Two wanted names that resolve to one target both get their answer. The
 // first implementation keyed the pending target by path and kept only the
 // last requester, so the other came back absent -- "no such file" for a path
-// the image has.
+// the image has. The target precedes the hardlink, for the reason
+// TestFiles_HardlinkTargetIsRootRelative gives.
 func TestFiles_TwoNamesResolvingToOneTargetBothResolve(t *testing.T) {
 	img := imageOf(layerOfOrdered(t, "sha256:one",
 		sym("etc/os-release", "../usr/lib/os-release"),
-		hard("etc/os-release.copy", "usr/lib/os-release"),
 		entry{name: "usr/lib/os-release", body: "ID=alpine"},
+		hard("etc/os-release.copy", "usr/lib/os-release"),
 	))
 	got, err := img.Files(context.Background(), []string{"etc/os-release", "etc/os-release.copy"})
 	if err != nil {

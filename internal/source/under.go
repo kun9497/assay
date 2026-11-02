@@ -52,6 +52,36 @@ func (img *Image) FilesUnder(ctx context.Context, dir string) (map[string]FileFr
 		return nil, 0, fmt.Errorf("source: FilesUnder needs a directory, got %q", dir)
 	}
 
+	return img.collect(ctx, prefix, func(name string) bool {
+		// Direct children only: path.Split leaves the trailing slash on the
+		// directory half, so this rejects both a deeper file and the
+		// directory entry itself.
+		d, base := path.Split(name)
+		return path.Clean(d) == prefix && base != ""
+	})
+}
+
+// underHit is what one layer last wrote at a name collect is gathering.
+type underHit struct {
+	kind hitKind
+	data []byte
+}
+
+// collect is the walk FilesUnder, FilesNamed and FilesMatching share: every
+// regular file under root that match accepts, with the layer semantics their
+// doc comments give, and the number of links found where such a file would
+// be. One walk rather than three copies, so a rule fixed in one cannot be left
+// unfixed in the others -- they were copies, and the in-layer rule below had
+// to be added to all three.
+//
+// Within ONE layer the last entry for a name wins, for Files's reason: every
+// extractor leaves the later entry on disk (audit 2026-10-22 P4, re-verified
+// 2026-11-02). So nothing is decided until the layer ends: last holds what
+// the layer most recently wrote at each name -- a file, a link, something that
+// is not a file, or a whiteout that removed what the layer wrote before it --
+// and only then is it merged into what the upper layers already decided.
+// Across layers the newest still wins, through found.
+func (img *Image) collect(ctx context.Context, root string, match func(name string) bool) (map[string]FileFromLayer, int, error) {
 	out := map[string]FileFromLayer{}
 	found := map[string]bool{}
 	deleted := map[string]bool{}
@@ -62,26 +92,35 @@ func (img *Image) FilesUnder(ctx context.Context, dir string) (map[string]FileFr
 		l := img.Layers[i]
 		layerDeleted := map[string]bool{}
 		var layerOpaque []string
+		last := map[string]underHit{}
 
 		err := readLayer(ctx, l, func(name string, h *tar.Header, r io.Reader) error {
-			shadowAncestors(found, name, prefix)
+			shadowAncestors(last, name, root)
 			d, base := path.Split(name)
 			switch {
 			case base == whiteoutOpaque:
+				// No effect on this layer's own entries in either order: both
+				// untars clear only what lower layers put in the directory.
 				layerOpaque = append(layerOpaque, path.Clean(d))
 				return nil
 			case strings.HasPrefix(base, whiteoutPrefix):
-				layerDeleted[path.Join(d, strings.TrimPrefix(base, whiteoutPrefix))] = true
+				w := path.Join(d, strings.TrimPrefix(base, whiteoutPrefix))
+				layerDeleted[w] = true
+				// A plain whiteout AFTER this layer's own entry removes it, as
+				// the untar does when it reaches the marker (see resolvePass);
+				// one before is overwritten by the entry that follows it.
+				for n := range last {
+					if n == w || strings.HasPrefix(n, w+"/") {
+						last[n] = underHit{kind: hitGone}
+					}
+				}
 				return nil
 			}
-			// Direct children only: path.Split leaves the trailing slash on
-			// the directory half, so this rejects both a deeper file and the
-			// directory entry itself.
-			if path.Clean(d) != prefix || base == "" {
+			if !match(name) {
 				return nil
 			}
 			// Checked BEFORE found[name], so a whiteout in a newer layer still
-			// hides an older layer's copy of a stanza this pass has not seen.
+			// hides an older layer's copy of a file this pass has not seen.
 			if isDeleted(name, deleted) || underAnyOpaque(name, opaque) {
 				return nil
 			}
@@ -90,32 +129,44 @@ func (img *Image) FilesUnder(ctx context.Context, dir string) (map[string]FileFr
 			}
 			switch h.Typeflag {
 			case tar.TypeSymlink, tar.TypeLink:
-				symlinks++
-				// Marked found so a lower layer's regular file does not take
-				// its place: the link is what this image has at that path, and
+				// Recorded so a lower layer's regular file does not take its
+				// place: the link is what this image has at that path, and
 				// silently substituting a shadowed file would report a package
 				// version the image does not ship.
-				found[name] = true
-				return nil
+				last[name] = underHit{kind: hitLink}
 			case tar.TypeReg, tar.TypeGNUSparse, tar.TypeCont:
 				b, err := img.readEntry(name, r)
 				if err != nil {
 					return err
 				}
-				out[name] = FileFromLayer{Data: b, DiffID: l.DiffID}
-				found[name] = true
-				return nil
+				last[name] = underHit{kind: hitFile, data: b}
 			default:
 				// A directory, device or FIFO at this name: the image has no
 				// file here, and a lower layer's copy is shadowed (A10).
-				found[name] = true
-				return nil
+				last[name] = underHit{kind: hitGone}
 			}
+			return nil
 		})
 		if err != nil {
 			return nil, 0, fmt.Errorf("read layer %s: %w", l.DiffID, err)
 		}
 
+		for name, hit := range last {
+			// An ancestor mark for a name an upper layer already decided.
+			if found[name] {
+				continue
+			}
+			found[name] = true
+			switch hit.kind {
+			case hitFile:
+				out[name] = FileFromLayer{Data: hit.data, DiffID: l.DiffID}
+			case hitLink:
+				// Counted once per name the image ends up with a link at,
+				// not per link entry: a link a later entry replaced is not
+				// a file this scan failed to read.
+				symlinks++
+			}
+		}
 		for k := range layerDeleted {
 			deleted[k] = true
 		}
@@ -165,76 +216,15 @@ func (img *Image) FilesNamed(ctx context.Context, dir, filename string) (map[str
 		return nil, 0, fmt.Errorf("source: FilesNamed needs a filename, got %q", filename)
 	}
 
-	out := map[string]FileFromLayer{}
-	found := map[string]bool{}
-	deleted := map[string]bool{}
-	var opaque []string
-	symlinks := 0
-
-	for i := len(img.Layers) - 1; i >= 0; i-- {
-		l := img.Layers[i]
-		layerDeleted := map[string]bool{}
-		var layerOpaque []string
-
-		err := readLayer(ctx, l, func(name string, h *tar.Header, r io.Reader) error {
-			shadowAncestors(found, name, prefix)
-			d, base := path.Split(name)
-			switch {
-			case base == whiteoutOpaque:
-				layerOpaque = append(layerOpaque, path.Clean(d))
-				return nil
-			case strings.HasPrefix(base, whiteoutPrefix):
-				layerDeleted[path.Join(d, strings.TrimPrefix(base, whiteoutPrefix))] = true
-				return nil
-			}
-			// The file must be named exactly filename, AND its immediate
-			// parent directory must itself be a direct child of prefix — one
-			// level deeper than FilesUnder matches. path.Dir on the cleaned
-			// parent strips exactly the package-subdirectory component,
-			// leaving prefix on a match.
-			if base != filename {
-				return nil
-			}
-			parent := path.Clean(d)
-			if path.Dir(parent) != prefix {
-				return nil
-			}
-			if isDeleted(name, deleted) || underAnyOpaque(name, opaque) {
-				return nil
-			}
-			if found[name] {
-				return nil
-			}
-			switch h.Typeflag {
-			case tar.TypeSymlink, tar.TypeLink:
-				symlinks++
-				found[name] = true
-				return nil
-			case tar.TypeReg, tar.TypeGNUSparse, tar.TypeCont:
-				b, err := img.readEntry(name, r)
-				if err != nil {
-					return err
-				}
-				out[name] = FileFromLayer{Data: b, DiffID: l.DiffID}
-				found[name] = true
-				return nil
-			default:
-				// A directory, device or FIFO at this name: the image has no
-				// file here, and a lower layer's copy is shadowed (A10).
-				found[name] = true
-				return nil
-			}
-		})
-		if err != nil {
-			return nil, 0, fmt.Errorf("read layer %s: %w", l.DiffID, err)
-		}
-
-		for k := range layerDeleted {
-			deleted[k] = true
-		}
-		opaque = append(opaque, layerOpaque...)
-	}
-	return out, symlinks, nil
+	return img.collect(ctx, prefix, func(name string) bool {
+		// The file must be named exactly filename, AND its immediate parent
+		// directory must itself be a direct child of prefix — one level
+		// deeper than FilesUnder matches. path.Dir on the cleaned parent
+		// strips exactly the package-subdirectory component, leaving prefix
+		// on a match.
+		d, base := path.Split(name)
+		return base == filename && path.Dir(path.Clean(d)) == prefix
+	})
 }
 
 // FilesMatching returns every regular file ANYWHERE under dir whose base
@@ -282,75 +272,18 @@ func (img *Image) FilesMatching(ctx context.Context, dir, prefix, suffix string)
 		return nil, 0, fmt.Errorf("source: FilesMatching needs a prefix or a suffix, got neither")
 	}
 
-	out := map[string]FileFromLayer{}
-	found := map[string]bool{}
-	deleted := map[string]bool{}
-	var opaque []string
-	symlinks := 0
-
-	for i := len(img.Layers) - 1; i >= 0; i-- {
-		l := img.Layers[i]
-		layerDeleted := map[string]bool{}
-		var layerOpaque []string
-
-		err := readLayer(ctx, l, func(name string, h *tar.Header, r io.Reader) error {
-			shadowAncestors(found, name, root)
-			d, base := path.Split(name)
-			switch {
-			case base == whiteoutOpaque:
-				layerOpaque = append(layerOpaque, path.Clean(d))
-				return nil
-			case strings.HasPrefix(base, whiteoutPrefix):
-				layerDeleted[path.Join(d, strings.TrimPrefix(base, whiteoutPrefix))] = true
-				return nil
-			}
-			// ANY depth under root, not just a direct child: the file's
-			// parent must be root itself or a descendant of it. Compared as
-			// a path-segment prefix ("root/") rather than a bare string
-			// prefix, so "opt/bitnami2" does not falsely match "opt/bitnami".
-			parent := path.Clean(d)
-			if parent != root && !strings.HasPrefix(parent, root+"/") {
-				return nil
-			}
-			if base == "" || !strings.HasPrefix(base, prefix) || !strings.HasSuffix(base, suffix) {
-				return nil
-			}
-			if isDeleted(name, deleted) || underAnyOpaque(name, opaque) {
-				return nil
-			}
-			if found[name] {
-				return nil
-			}
-			switch h.Typeflag {
-			case tar.TypeSymlink, tar.TypeLink:
-				symlinks++
-				found[name] = true
-				return nil
-			case tar.TypeReg, tar.TypeGNUSparse, tar.TypeCont:
-				b, err := img.readEntry(name, r)
-				if err != nil {
-					return err
-				}
-				out[name] = FileFromLayer{Data: b, DiffID: l.DiffID}
-				found[name] = true
-				return nil
-			default:
-				// A directory, device or FIFO at this name: the image has no
-				// file here, and a lower layer's copy is shadowed (A10).
-				found[name] = true
-				return nil
-			}
-		})
-		if err != nil {
-			return nil, 0, fmt.Errorf("read layer %s: %w", l.DiffID, err)
+	return img.collect(ctx, root, func(name string) bool {
+		// ANY depth under root, not just a direct child: the file's parent
+		// must be root itself or a descendant of it. Compared as a
+		// path-segment prefix ("root/") rather than a bare string prefix, so
+		// "opt/bitnami2" does not falsely match "opt/bitnami".
+		d, base := path.Split(name)
+		parent := path.Clean(d)
+		if parent != root && !strings.HasPrefix(parent, root+"/") {
+			return false
 		}
-
-		for k := range layerDeleted {
-			deleted[k] = true
-		}
-		opaque = append(opaque, layerOpaque...)
-	}
-	return out, symlinks, nil
+		return base != "" && strings.HasPrefix(base, prefix) && strings.HasSuffix(base, suffix)
+	})
 }
 
 // SortedNames orders a FilesUnder result. The map's own iteration order is
