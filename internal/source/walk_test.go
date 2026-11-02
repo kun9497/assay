@@ -344,8 +344,10 @@ func TestFiles_SymlinkCycleTerminates(t *testing.T) {
 	if len(got) != 0 {
 		t.Errorf("got %+v, want nothing: a cycle resolves to no file", got)
 	}
-	if u := img.Unresolved(); len(u) != 1 || u[0].Path != "a" || u[0].Reason != unresolvedLinks {
-		t.Errorf("Unresolved = %+v, want exactly a, for the link limit", u)
+	// Reported as a cycle at the first repeated lookup (pass three), not as
+	// the link limit after forty-one passes over the image.
+	if u := img.Unresolved(); len(u) != 1 || u[0].Path != "a" || u[0].Reason != unresolvedCycle {
+		t.Errorf("Unresolved = %+v, want exactly a, for the cycle", u)
 	}
 }
 

@@ -306,14 +306,15 @@ func p4Scan(t *testing.T, db, target string, opts Options) (p4Doc, string, strin
 }
 
 // wantUnresolved asserts the report names exactly path as not read, with a
-// reason naming the link limit, and counts it as the target's incompleteness.
-func wantUnresolved(t *testing.T, doc p4Doc, stdout, path string) {
+// reason containing why (the link limit, or a cycle), and counts it as the
+// target's incompleteness.
+func wantUnresolved(t *testing.T, doc p4Doc, stdout, path, why string) {
 	t.Helper()
 	if len(doc.Unread) != 1 || doc.Unread[0].Path != path {
 		t.Fatalf("unread = %+v, want exactly %s: a chain cut off is not an absent file\n%s", doc.Unread, path, stdout)
 	}
-	if !strings.Contains(doc.Unread[0].Reason, "40 symbolic links") {
-		t.Errorf("unread reason = %q, want it to name the 40-link limit", doc.Unread[0].Reason)
+	if !strings.Contains(doc.Unread[0].Reason, why) {
+		t.Errorf("unread reason = %q, want it to say %q", doc.Unread[0].Reason, why)
 	}
 	if doc.Summary.TargetIncomplete < 1 || doc.Summary.UnreadManifests != 1 {
 		t.Errorf("summary = %+v, want the unresolved path counted (targetIncomplete >= 1, unreadManifests 1)", doc.Summary)
@@ -348,16 +349,19 @@ func TestRun_P4_OSReleaseSymlinkChainLimit(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		links []p4Entry
+		why   string
 	}{
-		{"41 links", p4Chain(osReleasePath, realOSRelease, 41)},
-		{"a 2-cycle", []p4Entry{{name: osReleasePath, link: "/etc/os-release.loop"}, {name: "etc/os-release.loop", link: "/" + osReleasePath}}},
+		{"41 links", p4Chain(osReleasePath, realOSRelease, 41), "40 symbolic links"},
+		// A cycle is told apart from the limit, and ended at its first
+		// repeated lookup rather than after forty-one passes over the image.
+		{"a 2-cycle", []p4Entry{{name: osReleasePath, link: "/etc/os-release.loop"}, {name: "etc/os-release.loop", link: "/" + osReleasePath}}, "symbolic link cycle"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			doc, out, errOut, code := p4Scan(t, db, image(tc.links...), Options{FailOnIncomplete: true})
 			if code != 2 {
 				t.Fatalf("Run = %d, want 2\nstdout: %s\nstderr: %s", code, out, errOut)
 			}
-			wantUnresolved(t, doc, out, osReleasePath)
+			wantUnresolved(t, doc, out, osReleasePath, tc.why)
 			if want := "not read: " + osReleasePath + " ("; !strings.Contains(errOut, want) {
 				t.Errorf("stderr lacks %q:\n%s", want, errOut)
 			}
@@ -382,7 +386,7 @@ func TestRun_P4_UnresolvedChainIsIncompletenessNotAbsence(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("no gate: Run = %d, want 0\nstdout: %s\nstderr: %s", code, out, errOut)
 	}
-	wantUnresolved(t, doc, out, dpkgDBPath)
+	wantUnresolved(t, doc, out, dpkgDBPath, "40 symbolic links")
 
 	for _, opts := range []Options{{FailOnIncomplete: true}, {FailOnIncompleteTarget: true}} {
 		if _, out, errOut, code := p4Scan(t, db, target, opts); code != 2 {

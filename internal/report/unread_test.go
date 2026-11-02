@@ -126,7 +126,7 @@ func TestTable_D109_NotReadBlock(t *testing.T) {
 			if !strings.HasSuffix(buf.String(), nl+line) {
 				t.Errorf("colorize=%v: the table does not end with a blank line then %q:\n%q", colorize, line, buf.String())
 			}
-			if !strings.Contains(buf.String(), ", 1 manifest(s) not read"+nl) {
+			if !strings.Contains(buf.String(), ", 1 path(s) not read"+nl) {
 				t.Errorf("colorize=%v: the summary line does not count it:\n%s", colorize, buf.String())
 			}
 		}

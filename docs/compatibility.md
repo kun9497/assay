@@ -9,7 +9,7 @@ with a version bump, a **Breaking** entry in the [changelog](../CHANGELOG.md), a
 
 | Contract | What it is | Version field | Current |
 |---|---|---|---|
-| `report` | `assay scan --output json` | `schemaVersion` | 15 |
+| `report` | `assay scan --output json` | `schemaVersion` | 16 |
 | `provenance sidecar` | the file `--provenance <path>` writes (D120) | `schemaVersion` | 1 |
 | `status.json` | the published database's status, on the `status` branch (D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json` (D147) | `schemaVersion` | 1 |
@@ -52,6 +52,11 @@ it relied on:
 - Schema 15 (additive) added `ratings[].cvssV2`, true when a rating's band came from NVD's
   CVSS v2 fallback (D156). A rating whose only scorable entry is a CVSS v2 base vector,
   rated `unknown` before, now carries a band, so `--fail-on` can trip where it did not.
+- Schema 16 (additive, no new field): `unread[]` may name a path inside an image that the
+  layer walk could not resolve (a symbolic link chain past Linux's limit of 40, or a cycle),
+  not only a manifest or directory, and `summary.unreadManifests` counts it. Its `reason`
+  says which. The table's count reads "path(s) not read", and SARIF `assay/not-read`
+  describes a path rather than a manifest.
 
 ## The provenance sidecar, status.json and `db status`
 

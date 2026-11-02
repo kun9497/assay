@@ -56,8 +56,16 @@ type Unresolved struct {
 
 // unresolvedLinks is the reason for a path still behind a link after
 // maxSymlinks of them, a cycle included.
-var unresolvedLinks = fmt.Sprintf("still a link after %d symbolic links (a cycle, or a chain Linux "+
+var unresolvedLinks = fmt.Sprintf("still a link after %d symbolic links (a chain Linux "+
 	"refuses with ELOOP); what it leads to was not read", maxSymlinks)
+
+// unresolvedCycle is the reason for a path whose links lead back to a path
+// already followed -- what Linux refuses with ELOOP at once. Told apart from
+// the length limit so a reader is not sent counting links, and ended at the
+// first repeat rather than after maxSymlinks passes, because every pass
+// reads and digest-drains every layer (D123): a two-link cycle at
+// /etc/os-release would otherwise cost forty-one full reads of the image.
+const unresolvedCycle = "a symbolic link cycle (Linux refuses it with ELOOP); what it leads to was not read"
 
 // Unresolved returns every path a Files call on this image could not finish
 // resolving, sorted by path. It lives on the Image beside the read budget,
@@ -129,9 +137,22 @@ func (img *Image) Files(ctx context.Context, want []string) (map[string]FileFrom
 	}
 
 	out := make(map[string]FileFromLayer, len(want))
+	// seen is, per wanted path, every (path, top, before) already queried
+	// for it. A follow-up that repeats one would resolve exactly as it did
+	// the first time: a cycle, ended here. top and before are part of the
+	// key because a hardlink re-queues its target under a ceiling, and the
+	// same path under a different ceiling is a different lookup.
+	type lookup struct {
+		path        string
+		top, before int
+	}
+	seen := make(map[string]map[lookup]bool, len(qs))
+	for _, q := range qs {
+		seen[q.want] = map[lookup]bool{{q.path, q.top, q.before}: true}
+	}
 	// Ends: a follow-up query has one more link than the query it came from,
 	// and none past maxSymlinks is queued, so there are at most maxSymlinks+1
-	// passes -- a cycle included.
+	// passes; a cycle ends at its first repeated lookup.
 	for len(qs) > 0 {
 		next, err := img.resolvePass(ctx, qs, out)
 		if err != nil {
@@ -145,6 +166,12 @@ func (img *Image) Files(ctx context.Context, want []string) (map[string]FileFrom
 				img.noteUnresolved(q.want, unresolvedLinks)
 				continue
 			}
+			k := lookup{q.path, q.top, q.before}
+			if seen[q.want][k] {
+				img.noteUnresolved(q.want, unresolvedCycle)
+				continue
+			}
+			seen[q.want][k] = true
 			qs = append(qs, q)
 		}
 	}

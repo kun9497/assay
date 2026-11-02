@@ -233,6 +233,9 @@ func TestFilesUnder_P4_LastEntryInALayerWins(t *testing.T) {
 			{{name: name, body: "FIRST"}, {name: dir + "/.wh.libc6"}},
 		}, "", 0},
 		{"whiteout then file", [][]entry{{{name: dir + "/.wh.libc6"}, {name: name, body: "LAST"}}}, "LAST", 0},
+		// `RUN rm -rf /var/lib/dpkg/status.d` after the file, in one layer:
+		// the marker names the directory, and the file beneath it goes too.
+		{"file then whiteout of its directory", [][]entry{{{name: name, body: "FIRST"}, {name: "var/lib/dpkg/.wh.status.d"}}}, "", 0},
 		{"file then opaque marker", [][]entry{{{name: name, body: "KEPT"}, {name: dir + "/.wh..wh..opq"}}}, "KEPT", 0},
 		{"upper layer still wins", [][]entry{{{name: name, body: "BASE"}}, {{name: name, body: "TOP"}}}, "TOP", 0},
 	} {

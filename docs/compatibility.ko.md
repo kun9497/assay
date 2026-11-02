@@ -9,7 +9,7 @@
 
 | 계약 | 무엇인가 | 버전 필드 | 현재 |
 |---|---|---|---|
-| `report` | `assay scan --output json` | `schemaVersion` | 15 |
+| `report` | `assay scan --output json` | `schemaVersion` | 16 |
 | `provenance sidecar` | `--provenance <path>`가 쓰는 파일(D120) | `schemaVersion` | 1 |
 | `status.json` | 배포 데이터베이스의 상태, `status` 브랜치(D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json`(D147) | `schemaVersion` | 1 |
@@ -51,6 +51,10 @@
   왔을 때 true 입니다(D156). 점수를 낼 수 있는 항목이 CVSS v2 기본 벡터뿐이라 전에는 `unknown` 이던 평가가
   이제 등급을 가지므로,
   `--fail-on` 이 전에 걸리지 않던 곳에서 걸릴 수 있습니다.
+- 스키마 16(추가형, 새 필드 없음): `unread[]` 가 manifest 나 디렉터리뿐 아니라, layer walk 가 끝까지
+  풀지 못한 이미지 안의 경로(Linux 한도 40을 넘는 심볼릭 링크 사슬, 또는 순환)도 적을 수 있고,
+  `summary.unreadManifests` 가 그것도 셉니다. `reason` 이 어느 쪽인지 말합니다. 표의 개수는
+  "path(s) not read" 로 읽히고, SARIF `assay/not-read` 는 manifest 가 아니라 경로를 설명합니다.
 
 ## provenance sidecar, status.json, `db status`
 
