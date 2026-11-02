@@ -1455,9 +1455,11 @@ func TestHummingbirdPackageOf(t *testing.T) {
 		{"pkg:deb/redhat/nginx@1.30.4-2", "", "", false},
 		{"", "", "", false},
 		// QA round 5: the FRONT anchor. A real redhat purl with anything
-		// before it must not match -- dropping the ^ on hummingbirdPurlRE
-		// survived the table until this row (every other reject fails because
-		// it lacks the substring entirely, not because of anchoring).
+		// before it must not match. The regex this row was written against
+		// is gone (the reader is pkgmeta.ParsePURL since QA 2026-11-02 #4);
+		// what holds it now is ParsePURL's own pkg: prefix cut, and a reader
+		// that searched for the substring instead would fail this row (every
+		// other reject lacks the substring entirely, not the anchoring).
 		{"junk pkg:rpm/redhat/freetype@2.14.3-1.2.hum1?arch=x86_64", "", "", false},
 	} {
 		name, version, ok := hummingbirdPackageOf(tc.purl)
