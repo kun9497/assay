@@ -203,6 +203,16 @@ affected-no-fix 항목 108개를 담고 있고, grype는 우리 아카이브 슬
   49→60, bitnami-legacy-pg 488→489, 나머지 모든 타깃은 바이트 단위로 동일합니다.
   무조건 enrichment는 측정 후 기각했습니다(같은 십여 건의 튜플을 회수하려고
   ubi8n18의 onlyAssay를 4,531에서 10,152로 부풀립니다).
+- **bridge는 비교 도구 자체의 성장도 `ASSAY`에 셉니다**(2026-10-13 wolfi에서 관찰: grype
+  데이터베이스가 glibc 계열 튜플 56개를 얻고 그중 33개가 bridge되어, assay 고유 튜플은 45→41로
+  줄었는데 `ASSAY`는 46→74로 올랐습니다). 따라서 assay 레코드가 GHSA upstream을 가진 bare
+  CGA/advisory id인 타깃(wolfi, alma9)의 `maxFindings` 위반은 assay가 아니라 grype의 데이터
+  성장일 수 있습니다. 2026-11-02부터 scandiff가 그 분리를 `A_BRIDGED` / `G_BRIDGED`로 찍으므로,
+  월요일 리뷰는 손으로 재는 대신 표에서 native = `ASSAY` − `A_BRIDGED`를 읽습니다. **유예:**
+  ceiling이 native 수만으로 판정해야 하는지. 오늘 `maxFindings`는 타깃당 숫자 하나라서
+  native 전용 판정은 자체 floors 의미론과 bridge되는 모든 타깃의 이력 재밴딩이 필요하기에
+  정하지 않았습니다. **재검토 트리거:** `A_BRIDGED` 증가가 native 증가를 두 주 연속 넘는
+  `maxFindings` 위반, 또는 bridge 성장만이 원인인 재밴딩.
 - **위 문단들은 수치가 흘러갔고**, 08-24 기록 그대로 남겨 둡니다: Ubuntu는 이제
   98건 일치에 assay-only 5건입니다(더 이상 집합 동등이 아니라 assay 우세; wont-fix는
   CVE 10건 기준 17/17), Debian은 171건 일치(6-구멍+1-논쟁 FP 구성은 변동 없음),

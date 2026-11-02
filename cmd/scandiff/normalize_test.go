@@ -513,7 +513,7 @@ func TestBridgeBareIDs_JoinsAcrossAdvisoryColumns(t *testing.T) {
 		{Artifact: grypeArtifact{Name: "libxml2"}, Vulnerability: grypeVuln{ID: "FEDORA-2026-bbbb"}},
 	}}
 	aSet, gSet := assayTuples(adoc), grypeTuples(gdoc)
-	bridgeBareIDs(adoc, gdoc, aSet, gSet)
+	intoAssay, intoGrype := bridgeBareIDs(adoc, gdoc, aSet, gSet)
 
 	if _, ok := gSet[tuple{Subject: "vim-data", ID: "FEDORA-2026-aaaa"}]; !ok {
 		t.Errorf("gSet = %v, want the bridge to hand grype assay's bare FEDORA-2026-aaaa tuple", gSet)
@@ -524,6 +524,42 @@ func TestBridgeBareIDs_JoinsAcrossAdvisoryColumns(t *testing.T) {
 	agree, _, _ := compareSets(aSet, gSet)
 	if agree != 2 {
 		t.Errorf("agree = %d, want 2 -- both advisories join once the bridge runs", agree)
+	}
+	if intoAssay != 1 || intoGrype != 1 {
+		t.Errorf("counts = (intoAssay %d, intoGrype %d), want (1, 1) -- one tuple added each way", intoAssay, intoGrype)
+	}
+}
+
+// TestBridgeBareIDs_CountsOnlyWhatItAdds pins the counts' direction and
+// their "added, not held" meaning, which the symmetric fixture above cannot:
+// two tuples go into assay's set, none into grype's, and a bare tuple both
+// sides already hold (grype fell back bare on DSA-2026-0003 and so did
+// assay) is bridged by neither and counted by neither. A count that read
+// "tuples the bridge touched" would say 1 for it; a count that swapped the
+// two would say (0, 2).
+func TestBridgeBareIDs_CountsOnlyWhatItAdds(t *testing.T) {
+	adoc := assayDocument{Findings: []assayFinding{
+		{Package: assayPackage{Name: "libtiff6"}, Advisory: assayAdvisory{ID: "OSV-T-1", Upstream: []string{"CVE-2026-70001", "DSA-2026-0001"}}},
+		{Package: assayPackage{Name: "libpng16"}, Advisory: assayAdvisory{ID: "OSV-P-1", Aliases: []string{"CVE-2026-70002", "DSA-2026-0002"}}},
+		{Package: assayPackage{Name: "curl"}, Advisory: assayAdvisory{ID: "DSA-2026-0003"}},
+	}}
+	gdoc := grypeDocument{Matches: []grypeMatch{
+		{Artifact: grypeArtifact{Name: "libtiff6"}, Vulnerability: grypeVuln{ID: "DSA-2026-0001"}},
+		{Artifact: grypeArtifact{Name: "libpng16"}, Vulnerability: grypeVuln{ID: "DSA-2026-0002"}},
+		{Artifact: grypeArtifact{Name: "curl"}, Vulnerability: grypeVuln{ID: "DSA-2026-0003"}},
+	}}
+	aSet, gSet := assayTuples(adoc), grypeTuples(gdoc)
+	if _, ok := aSet[tuple{Subject: "curl", ID: "DSA-2026-0003"}]; !ok {
+		t.Fatalf("aSet = %v, want the fixture to hold curl's bare tuple on both sides before the bridge", aSet)
+	}
+
+	intoAssay, intoGrype := bridgeBareIDs(adoc, gdoc, aSet, gSet)
+
+	if intoAssay != 2 || intoGrype != 0 {
+		t.Errorf("counts = (intoAssay %d, intoGrype %d), want (2, 0)", intoAssay, intoGrype)
+	}
+	if len(aSet) != 5 || len(gSet) != 3 {
+		t.Errorf("len(aSet) = %d, len(gSet) = %d, want 5 and 3 -- the counts must equal what the sets gained", len(aSet), len(gSet))
 	}
 }
 

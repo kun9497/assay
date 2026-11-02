@@ -48,7 +48,9 @@ Amazon Linux 2/2023 (D73), Oracle Linux 5–10 (D74), Fedora (D75), SLES/openSUS
 (D77), Wolfi/Chainguard (D88), MinimOS and Echo (D92), Azure Linux/CBL-Mariner (D94), Alpaquita/BellSoft (D95, which
 added the apk `p:` provides bridge), Photon OS 3/4/5 (D96), Arch Linux (D97, the
 release-less `Arch:rolling` key), Red Hat's Hummingbird (D98, carved out of the CSAF
-feed already fetched), and CleanStart (D101, identified by an apk marker package because it
+feed already fetched; since QA 2026-11-02 both CSAF readers carry a purl's `epoch=`
+qualifier into the fixed version through `pkgmeta.EVROf` -- nginx and tomcat had been judged
+clean against an epoch-less fix), and CleanStart (D101, identified by an apk marker package because it
 ships no os-release) —
 across three rpmdb backends: BerkeleyDB, SQLite and ndb (D44, D76). Bitnami app layers
 catalog from their /opt/bitnami SPDX markers alongside the base distro (D99, dual
@@ -123,7 +125,9 @@ an `arch=src` package when its purl names none and it shares the source's releas
 dist tag, and since D152 the source's EVR from that purl, so a subpackage is judged on its
 source's version under the source's name; since D153 an image's rpmdb does the same, the
 SRPM's version-release with the main package's epoch, and no epoch on Azure Linux or Photon
-keys). Since D154 a range's close sorts before an open at the same version, and a window
+keys; since QA 2026-11-02 an SBOM's `upstream` qualifier keeps its source version too — deb's
+`@` half, rpm's SRPM version-release with D153's epoch pass run over the document — where both
+readers had kept the name alone). Since D154 a range's close sorts before an open at the same version, and a window
 that opens and closes at one version is judged on its own. Since D156 a rating with only a
 CVSS v2 vector is banded from the v2 base score on NVD's v2 table, as a fallback only. Since D155 a gem's platform
 (`1.13.8-x86_64-linux`) is not part of its version, in a Gemfile.lock or an SBOM purl. Since D157

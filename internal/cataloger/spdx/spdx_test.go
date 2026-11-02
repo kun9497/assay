@@ -1,6 +1,7 @@
 package spdx
 
 import (
+	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"os"
 	"strings"
 	"testing"
@@ -27,11 +28,14 @@ func TestParse_NotSPDX(t *testing.T) {
 
 // TestParse_TinyFixture uses a real, hand-built minimal SPDX-2.3 document
 // whose DESCRIBES relationship points directly at its one and only package,
-// rather than at a synthetic container/image root the way every OTHER
-// fixture in this file does. The exclusion rule is structural — whatever the
-// DESCRIBES relationship names, not "whatever looks like a root" — so this
-// is not a bug: a document that describes itself as being about exactly one
-// package, and says nothing else, legitimately has nothing left to catalog.
+// rather than at a synthetic container/image root the way the root-exclusion
+// fixtures below do. Until QA 2026-11-02 (finding #6) this test asserted
+// zero components and called that structural: whatever DESCRIBES named was
+// excluded, and a document describing one real package "legitimately had
+// nothing left to catalog". That was the defect, not the rule. The DESCRIBES
+// target is excluded only when it is a pseudo-package -- one that would not
+// have become a package anyway -- so a described rpm with a versioned purl
+// is cataloged like any other.
 func TestParse_TinyFixture(t *testing.T) {
 	f, err := os.Open("testdata/tiny.spdx.json")
 	if err != nil {
@@ -43,12 +47,136 @@ func TestParse_TinyFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if stats.Components != 0 {
-		t.Errorf("Components = %d, want 0: the document's one package IS the DESCRIBES target",
-			stats.Components)
+	if stats.Components != 1 || stats.Cataloged != 1 {
+		t.Errorf("Components, Cataloged = %d, %d, want 1, 1: the document's one package is the "+
+			"DESCRIBES target AND a real versioned rpm, so it is scanned", stats.Components, stats.Cataloged)
 	}
-	if len(target.Packages) != 0 {
-		t.Errorf("Packages = %+v, want none", target.Packages)
+	if len(target.Packages) != 1 || target.Packages[0].Name != "openssl" {
+		t.Fatalf("Packages = %+v, want just openssl", target.Packages)
+	}
+	if target.Packages[0].Version != "1:3.0.7-1.el9" {
+		t.Errorf("Version = %q, want %q", target.Packages[0].Version, "1:3.0.7-1.el9")
+	}
+}
+
+// TestParse_EveryDescribedRealPackageKept: a document may DESCRIBE more than
+// one package (SPDX allows any number of DESCRIBES from the document), and
+// before QA 2026-11-02 only the first was consulted -- then dropped. Both
+// described packages here are real, versioned, purl-bearing entries from
+// different ecosystems, chosen so neither name is a substring of the other,
+// and both must be cataloged and counted.
+func TestParse_EveryDescribedRealPackageKept(t *testing.T) {
+	const doc = `{"spdxVersion":"SPDX-2.3","SPDXID":"SPDXRef-DOCUMENT","packages":[
+	  {"name":"lodash","SPDXID":"SPDXRef-Package-lodash","versionInfo":"4.17.20",
+	   "externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl",
+	     "referenceLocator":"pkg:npm/lodash@4.17.20"}]},
+	  {"name":"django","SPDXID":"SPDXRef-Package-django","versionInfo":"3.2",
+	   "externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl",
+	     "referenceLocator":"pkg:pypi/django@3.2"}]}],
+	  "relationships":[
+	    {"spdxElementId":"SPDXRef-DOCUMENT","relatedSpdxElement":"SPDXRef-Package-lodash","relationshipType":"DESCRIBES"},
+	    {"spdxElementId":"SPDXRef-DOCUMENT","relatedSpdxElement":"SPDXRef-Package-django","relationshipType":"DESCRIBES"}]}`
+	target, stats, err := Parse(strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if stats.Components != 2 || stats.Cataloged != 2 {
+		t.Errorf("Components, Cataloged = %d, %d, want 2, 2: both described packages are real",
+			stats.Components, stats.Cataloged)
+	}
+	names := map[string]bool{}
+	for _, p := range target.Packages {
+		names[p.Name] = true
+	}
+	if !names["lodash"] || !names["django"] {
+		t.Fatalf("Packages = %+v, want both lodash and django", target.Packages)
+	}
+}
+
+// TestParse_PseudoRootDroppedBesideDescribedRealPackage is the control for
+// the two tests above and holds the rule on EVERY DESCRIBES target, not the
+// first alone: the first DESCRIBES names a real rpm, the SECOND Red Hat's
+// pkg:oci container root -- in that order on purpose. The root is dropped
+// and counted nowhere -- not as a component, not in
+// SkippedUnsupportedEcosystem where pkg:oci would land -- while the
+// described rpm is cataloged. A real described package is kept whether or
+// not it is recognised as described, so only a pseudo-root in second place
+// can tell "every DESCRIBES target" from "the first one": reading the first
+// alone would catalog the root as an ordinary package and count it.
+// Checking only "is it described" would drop both.
+func TestParse_PseudoRootDroppedBesideDescribedRealPackage(t *testing.T) {
+	const doc = `{"spdxVersion":"SPDX-2.3","SPDXID":"SPDXRef-DOCUMENT","packages":[
+	  {"name":"ubi9-micro-container_amd64","SPDXID":"SPDXRef-ubi9-micro-container-amd64","versionInfo":"9.4-6",
+	   "externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl",
+	     "referenceLocator":"pkg:oci/ubi-micro@sha256:213fd2a0116a76eaa274fee20c86eef4dfba9f311784e8fb7d7f5fc38b32f3ef?arch=amd64&repository_url=registry.access.redhat.com/ubi9/ubi-micro&tag=9.4-6"}]},
+	  {"name":"zlib","SPDXID":"SPDXRef-zlib","versionInfo":"1.2.11-40.el9",
+	   "externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl",
+	     "referenceLocator":"pkg:rpm/redhat/zlib@1.2.11-40.el9?arch=x86_64&repository_id=rhel-9-for-x86_64-baseos-rpms"}]}],
+	  "relationships":[
+	    {"spdxElementId":"SPDXRef-DOCUMENT","relatedSpdxElement":"SPDXRef-zlib","relationshipType":"DESCRIBES"},
+	    {"spdxElementId":"SPDXRef-DOCUMENT","relatedSpdxElement":"SPDXRef-ubi9-micro-container-amd64","relationshipType":"DESCRIBES"}]}`
+	target, stats, err := Parse(strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if stats.Components != 1 || stats.Cataloged != 1 {
+		t.Errorf("Components, Cataloged = %d, %d, want 1, 1: the pkg:oci root is not counted, "+
+			"the described rpm is", stats.Components, stats.Cataloged)
+	}
+	if stats.SkippedUnsupportedEcosystem != 0 || stats.SkippedNoPURL != 0 || stats.SkippedNoVersion != 0 {
+		t.Errorf("skip buckets = unsupported %d, nopurl %d, noversion %d, want all 0: the root is "+
+			"excluded, not skipped", stats.SkippedUnsupportedEcosystem, stats.SkippedNoPURL, stats.SkippedNoVersion)
+	}
+	if len(target.Packages) != 1 || target.Packages[0].Name != "zlib" {
+		t.Fatalf("Packages = %+v, want just zlib", target.Packages)
+	}
+}
+
+// A described entry that is a REAL package of a shape this cataloger cannot
+// turn into a candidate -- an unsupported purl type, a malformed purl -- is
+// a counted skip exactly as its undescribed twin is, not an uncounted
+// exclusion (review of #230): a single-package SBOM of that shape must not
+// scan as "no components" with exit 0 under --fail-on-incomplete.
+func TestParse_DescribedRealEntryOfAnUnreadableShapeIsACountedSkip(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		purl      string
+		wantStats cyclonedx.Stats
+	}{
+		{"unsupported type", "pkg:generic/x@1.0", cyclonedx.Stats{Components: 1, SkippedUnsupportedEcosystem: 1}},
+		{"malformed purl", "not-a-purl", cyclonedx.Stats{Components: 1, SkippedNoPURL: 1}},
+		{"arch=src", "pkg:rpm/redhat/zlib@1.2.11-40.el9?arch=src", cyclonedx.Stats{Components: 1, SkippedUnsupportedEcosystem: 1}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			doc := `{"spdxVersion":"SPDX-2.3","SPDXID":"SPDXRef-DOCUMENT","packages":[
+			  {"name":"x","SPDXID":"SPDXRef-x","versionInfo":"1.0",
+			   "externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"` + c.purl + `"}]}],
+			  "relationships":[{"spdxElementId":"SPDXRef-DOCUMENT","relatedSpdxElement":"SPDXRef-x","relationshipType":"DESCRIBES"}]}`
+			target, stats, err := Parse(strings.NewReader(doc))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if len(target.Packages) != 0 {
+				t.Errorf("Packages = %+v, want none", target.Packages)
+			}
+			got := stats
+			got.DocumentNamespace = ""
+			if got != c.wantStats {
+				t.Errorf("stats = %+v, want %+v: a described real entry is counted like an undescribed one", got, c.wantStats)
+			}
+		})
+	}
+	// The control: the same entry with no purl at all is the pseudo-root
+	// shape and stays excluded, uncounted.
+	doc := `{"spdxVersion":"SPDX-2.3","SPDXID":"SPDXRef-DOCUMENT","packages":[
+	  {"name":"root","SPDXID":"SPDXRef-root","versionInfo":"1.0"}],
+	  "relationships":[{"spdxElementId":"SPDXRef-DOCUMENT","relatedSpdxElement":"SPDXRef-root","relationshipType":"DESCRIBES"}]}`
+	_, stats, err := Parse(strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if stats.Components != 0 || stats.SkippedNoPURL != 0 {
+		t.Errorf("pseudo-root stats = %+v, want nothing counted", stats)
 	}
 }
 
@@ -79,8 +207,11 @@ func TestParse_RPMKeyedViaDistroQualifier(t *testing.T) {
 	if p.Version != "1:3.0.7-1.el9" {
 		t.Errorf("Version = %q, want %q (epoch prefixed)", p.Version, "1:3.0.7-1.el9")
 	}
-	if p.Source == nil || p.Source.Name != "openssl" {
-		t.Errorf("Source = %+v, want Name %q (from the upstream qualifier)", p.Source, "openssl")
+	if p.Source == nil || p.Source.Name != "openssl" || p.Source.Version != "3.0.7-1.el9" {
+		t.Errorf("Source = %+v, want openssl 3.0.7-1.el9 (the upstream qualifier's SRPM name and version-release)", p.Source)
+	}
+	if p.Upstream != "openssl-3.0.7-1.el9.src.rpm" {
+		t.Errorf("Upstream = %q, want the SRPM file name kept for the epoch pass", p.Upstream)
 	}
 }
 
@@ -100,8 +231,8 @@ func TestParse_DebKeyedViaDistroQualifier(t *testing.T) {
 	if p.Ecosystem != "Debian:12" {
 		t.Errorf("Ecosystem = %q, want %q", p.Ecosystem, "Debian:12")
 	}
-	if p.Source == nil || p.Source.Name != "bash" {
-		t.Errorf("Source = %+v, want Name %q (the name half of upstream=bash@5.2.15-2)", p.Source, "bash")
+	if p.Source == nil || p.Source.Name != "bash" || p.Source.Version != "5.2.15-2" {
+		t.Errorf("Source = %+v, want bash 5.2.15-2 (both halves of upstream=bash@5.2.15-2)", p.Source)
 	}
 }
 
@@ -264,41 +395,39 @@ func TestParse_RootPseudoPackageExcluded_RHOCIShape(t *testing.T) {
 	}
 }
 
-// TestParse_UnanchoredDescribesExcludesNothing holds findRootPackageID's
+// TestParse_UnanchoredDescribesExcludesNothing holds describedPackageIDs'
 // anchor condition: the DESCRIBES relationship only names a document root
 // when it originates at the document's OWN SPDXID. Every other
 // root-exclusion fixture in this file happens to have its only DESCRIBES
 // relationship anchored there, so dropping the anchor check entirely would
 // leave them green — this fixture's DESCRIBES instead runs
-// package-to-package (bash "describing" coreutils), which is spec-legal but
-// says nothing about which package is the document root. Treating it as a
-// root anyway would silently exclude coreutils from the scan: uncounted in
-// every Stats bucket, invisible to --fail-on-incomplete.
+// package-to-package (bash "describing" a no-purl entry), which is
+// spec-legal but says nothing about which package is the document root.
+// Since QA 2026-11-02 a described REAL package is kept either way, so the
+// anchor is observable only on an entry that would not become a package:
+// described from the document it is dropped uncounted; described by another
+// package it is an ordinary no-purl skip, counted in Components and
+// SkippedNoPURL where --fail-on-incomplete can see it. Treating it as a
+// root anyway would hide that skip.
 func TestParse_UnanchoredDescribesExcludesNothing(t *testing.T) {
 	const doc = `{"spdxVersion":"SPDX-2.3","SPDXID":"SPDXRef-DOCUMENT","packages":[
 	  {"name":"bash","SPDXID":"SPDXRef-Package-bash","versionInfo":"5.2.15-2",
 	   "externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl",
 	     "referenceLocator":"pkg:deb/debian/bash@5.2.15-2?arch=amd64&distro=debian-12"}]},
-	  {"name":"coreutils","SPDXID":"SPDXRef-Package-coreutils","versionInfo":"9.1-1",
-	   "externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl",
-	     "referenceLocator":"pkg:deb/debian/coreutils@9.1-1?arch=amd64&distro=debian-12"}]}],
+	  {"name":"mystery","SPDXID":"SPDXRef-Package-mystery","versionInfo":"9.1-1"}],
 	  "relationships":[{"spdxElementId":"SPDXRef-Package-bash",
-	    "relatedSpdxElement":"SPDXRef-Package-coreutils","relationshipType":"DESCRIBES"}]}`
+	    "relatedSpdxElement":"SPDXRef-Package-mystery","relationshipType":"DESCRIBES"}]}`
 	target, stats, err := Parse(strings.NewReader(doc))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if stats.Components != 2 {
-		t.Errorf("Components = %d, want 2 — a DESCRIBES not anchored at the document's own "+
-			"SPDXID names no root, so nothing should be excluded", stats.Components)
+	if stats.Components != 2 || stats.SkippedNoPURL != 1 {
+		t.Errorf("Components, SkippedNoPURL = %d, %d, want 2, 1 — a DESCRIBES not anchored at the "+
+			"document's own SPDXID names no root, so the no-purl entry is a counted skip, not excluded",
+			stats.Components, stats.SkippedNoPURL)
 	}
-	names := map[string]bool{}
-	for _, p := range target.Packages {
-		names[p.Name] = true
-	}
-	if !names["bash"] || !names["coreutils"] {
-		t.Fatalf("Packages = %+v, want both bash and coreutils — coreutils must not be "+
-			"silently dropped as a false root", target.Packages)
+	if len(target.Packages) != 1 || target.Packages[0].Name != "bash" {
+		t.Fatalf("Packages = %+v, want just bash", target.Packages)
 	}
 }
 

@@ -216,6 +216,18 @@ implementation that reproduced the run's table exactly:
   `bridgeBareIDs` closes it — fedora agree 49→60, bitnami-legacy-pg 488→489, every other
   target byte-identical. Unconditional enrichment was measured and rejected (it inflates
   ubi8n18's onlyAssay from 4,531 to 10,152 for the same dozen recovered tuples).
+- **The bridge also counts the comparison tool's own growth into `ASSAY`** (seen 2026-10-13
+  on wolfi: `ASSAY` 46→74 while assay's native tuples fell 45→41, because grype's database
+  gained 56 glibc-family tuples and 33 of them bridged in). A `maxFindings` breach on a target
+  whose assay records are bare CGA/advisory ids with GHSA upstreams (wolfi, alma9) can
+  therefore be grype's data growth, not assay's. Since 2026-11-02 scandiff prints the split
+  as `A_BRIDGED` / `G_BRIDGED`, so the Monday review reads native = `ASSAY` − `A_BRIDGED` off
+  the table instead of measuring it by hand. **Deferred:** whether the ceiling should judge the
+  native count alone. Not decided, because `maxFindings` is one number per target today and a
+  native-only reading would need its own floors semantics plus a re-band of every bridged
+  target's history. **Revisit trigger:** a `maxFindings` breach whose `A_BRIDGED` growth
+  exceeds the native growth on two consecutive weekly runs, or a re-band whose only cause is
+  bridged growth.
 - **The paragraphs above have drifted numerically** and are left as the 08-24 record:
   Ubuntu is now 98 agreed with 5 assay-only (no longer set-equal — assay ahead;
   wont-fix 17/17 over 10 CVEs), Debian 171 agreed (the 6-gaps+1-arguable-FP split

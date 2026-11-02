@@ -368,7 +368,8 @@ func (s stats) String() string {
 			"%d bare entries named by their product id where the purl's name "+
 			"differed (D126), %d bare entries named by their product id with no leaf in the document (D159), %d recommended builds named by splitting their product id where "+
 			"the purl carried no version (D131, %d such ids kept as spelt, %d SLE entries not mirrored "+
-			"onto Leap because their only fix was such a build); delta: %d changed since the archive, %d fetched, %d already "+
+			"onto Leap because their only fix was such a build), %d recommended builds carrying an epoch on a "+
+			"folding key; delta: %d changed since the archive, %d fetched, %d already "+
 			"withdrawn, %d yielded a record, %d retried, %d rescued by a retry, "+
 			"%d archive documents superseded by a newer copy the delta fetched (D129), "+
 			"%d archive documents newer than the copy the delta fetched (kept, D135)",
@@ -381,7 +382,7 @@ func (s stats) String() string {
 		s.LTSSFixReplacedMainlineNoFix, s.LTSSFixReplacedWithReason,
 		s.MirroredToLeap, s.SkippedLeapNativeWins, s.SkippedLeapNotAffected, s.LeapNoFixReplacedBySLEFix,
 		s.LeapNoFixReplacedWithReason, s.BareNamedByProductID, s.BareNamedWithoutLeaf, s.RecommendedNamedByNEVRSplit,
-		s.RecommendedEmptyVersionKept, s.SkippedLeapMirrorSplitBuild,
+		s.RecommendedEmptyVersionKept, s.SkippedLeapMirrorSplitBuild, s.RecommendedWithEpoch,
 		s.DeltaListed, s.DeltaFetched, s.DeltaGone, s.DeltaAdvisories,
 		s.DeltaRetried, s.DeltaRescued, s.ArchiveSuperseded, s.ArchiveNewerThanDelta)
 }
