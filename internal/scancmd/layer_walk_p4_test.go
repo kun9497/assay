@@ -32,9 +32,11 @@ import (
 // -- or a cycle -- came back as an absent file: an image with no distro, or no
 // package database, and nothing saying resolution stopped.
 
-// p4Entry is one tar entry, in order. link makes it a symlink.
+// p4Entry is one tar entry, in order. link makes it a symlink, or a hardlink
+// with hard.
 type p4Entry struct {
 	name, body, link string
+	hard             bool
 }
 
 func p4Tar(t *testing.T, es ...p4Entry) []byte {
@@ -44,7 +46,11 @@ func p4Tar(t *testing.T, es ...p4Entry) []byte {
 	for _, e := range es {
 		h := &tar.Header{Name: e.name, Mode: 0o644, Size: int64(len(e.body)), Typeflag: tar.TypeReg}
 		if e.link != "" {
-			h = &tar.Header{Name: e.name, Mode: 0o777, Typeflag: tar.TypeSymlink, Linkname: e.link}
+			kind := byte(tar.TypeSymlink)
+			if e.hard {
+				kind = tar.TypeLink
+			}
+			h = &tar.Header{Name: e.name, Mode: 0o777, Typeflag: kind, Linkname: e.link}
 		}
 		if err := tw.WriteHeader(h); err != nil {
 			t.Fatal(err)
@@ -158,6 +164,118 @@ func TestCatalogFromImage_P4_DuplicateStatusDStanzaReadsTheLastOne(t *testing.T)
 	}
 	if len(target.Packages) != 1 || target.Packages[0].Version != "2.36-9+deb12u7" {
 		t.Fatalf("packages = %+v, want libc6 at the second stanza's 2.36-9+deb12u7", target.Packages)
+	}
+}
+
+// (A)'s other in-layer rules, each held at the cataloger that consumes the
+// walk rather than only in source's own tests (the mutation round found each
+// of these green here until a row was added for it).
+func TestCatalogFromImage_P4_InLayerOrderDecidesTheInventory(t *testing.T) {
+	stanza := func(pkg, v string) string {
+		return "Package: " + pkg + "\nStatus: install ok installed\nVersion: " + v + "\n\n"
+	}
+	libc6 := dpkgStatusDir + "/libc6"
+	zlib := p4Entry{name: dpkgStatusDir + "/zlib1g", body: stanza("zlib1g", "1:1.2.13.dfsg-1")}
+	for _, tc := range []struct {
+		name    string
+		layers  [][]p4Entry // base first
+		want    map[string]string
+		skipped int // stats.SkippedNoVersion
+		noDB    bool
+	}{
+		{
+			// A whiteout after the layer's own database removes it, and the
+			// base layer's copy beneath stays hidden.
+			name: "apk database whited out later in its own layer",
+			layers: [][]p4Entry{
+				{{name: osReleasePath, body: osReleaseAlpine319}, {name: apkDBPath, body: p4ApkVulnerable}},
+				{{name: apkDBPath, body: p4ApkPatched}, {name: "lib/apk/db/.wh.installed"}},
+			},
+			noDB: true,
+		},
+		{
+			// The hardlink holds the database as it was when the link entry
+			// was reached; the rewrite after it changes only tmp/pkgdb.
+			name: "apk database hardlinked, target rewritten after the link",
+			layers: [][]p4Entry{{
+				{name: osReleasePath, body: osReleaseAlpine319},
+				{name: "tmp/pkgdb", body: p4ApkVulnerable},
+				{name: apkDBPath, link: "tmp/pkgdb", hard: true},
+				{name: "tmp/pkgdb", body: p4ApkPatched},
+			}},
+			want: map[string]string{"busybox-binsh": "1.36.1-r05"},
+		},
+		{
+			// A whiteout of the target after the link does not reach the
+			// inode the link already holds.
+			name: "apk database hardlinked, target whited out after the link",
+			layers: [][]p4Entry{
+				{{name: osReleasePath, body: osReleaseAlpine319}, {name: "tmp/pkgdb", body: p4ApkVulnerable}},
+				{{name: apkDBPath, link: "tmp/pkgdb", hard: true}, {name: "tmp/.wh.pkgdb"}},
+			},
+			want: map[string]string{"busybox-binsh": "1.36.1-r05"},
+		},
+		{
+			name: "status.d stanza whited out later in its own layer",
+			layers: [][]p4Entry{
+				{{name: osReleasePath, body: osReleaseDebian12}, {name: libc6, body: stanza("libc6", "2.36-9")}},
+				{{name: libc6, body: stanza("libc6", "2.36-9+deb12u7")}, {name: dpkgStatusDir + "/.wh.libc6"}, zlib},
+			},
+			want: map[string]string{"zlib1g": "1:1.2.13.dfsg-1"},
+		},
+		{
+			// The image ends with a link there, which is a stanza not read:
+			// counted, not cataloged at the replaced file's version.
+			name: "status.d stanza replaced by a symlink in its own layer",
+			layers: [][]p4Entry{{
+				{name: osReleasePath, body: osReleaseDebian12},
+				{name: libc6, body: stanza("libc6", "2.36-9")},
+				{name: libc6, link: "elsewhere"},
+				zlib,
+			}},
+			want:    map[string]string{"zlib1g": "1:1.2.13.dfsg-1"},
+			skipped: 1,
+		},
+		{
+			// An entry beneath the stanza's name makes it a directory.
+			name: "status.d stanza turned into a directory later in its own layer",
+			layers: [][]p4Entry{{
+				{name: osReleasePath, body: osReleaseDebian12},
+				{name: libc6, body: stanza("libc6", "2.36-9")},
+				{name: libc6 + "/x", body: "x"},
+				zlib,
+			}},
+			want: map[string]string{"zlib1g": "1:1.2.13.dfsg-1"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var ls []source.Layer
+			for i, es := range tc.layers {
+				raw := p4Tar(t, es...)
+				ls = append(ls, source.Layer{DiffID: fmt.Sprintf("sha256:l%d", i),
+					Open: func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(raw)), nil }})
+			}
+			target, stats, _, err := catalogFromImage(context.Background(), "test-image", &source.Image{Layers: ls})
+			if tc.noDB {
+				if err == nil || !strings.Contains(err.Error(), "no supported package database found") {
+					t.Fatalf("err = %v, packages %+v; want no database: the layer removed its own", err, target.Packages)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("catalogFromImage: %v", err)
+			}
+			got := map[string]string{}
+			for _, p := range target.Packages {
+				got[p.Name] = p.Version
+			}
+			if fmt.Sprint(got) != fmt.Sprint(tc.want) {
+				t.Errorf("packages = %v, want %v", got, tc.want)
+			}
+			if stats.SkippedNoVersion != tc.skipped {
+				t.Errorf("SkippedNoVersion = %d, want %d", stats.SkippedNoVersion, tc.skipped)
+			}
+		})
 	}
 }
 
