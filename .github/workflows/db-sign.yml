@@ -96,6 +96,9 @@ jobs:
     needs: [sign]
     if: always() && needs.sign.result != 'skipped'
     runs-on: ubuntu-latest
+    # See db-publish.yml: a hang here must not run to GitHub's 360-minute
+    # cap before the alert job sees it (QA 2026-11-02 #19).
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
@@ -111,7 +114,7 @@ jobs:
 
   # D138: one pinned issue per failing ops workflow, closed by the next
   # success. always(), so it runs when the job it watches failed; a
-  # cancelled or skipped run is ignored by the script.
+  # skipped run is ignored by the script and a cancelled one is a failure.
   alert:
     needs: [sign, status]
     if: always()
@@ -126,7 +129,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           # The watched job's result, unless it succeeded and status.json
-          # could not be published: that is a failure too.
-          RESULT: ${{ (needs.sign.result == 'success' && needs.status.result == 'failure') && 'failure' || needs.sign.result }}
+          # was not published: that is a failure too. `!= 'success'`, so a
+          # status job cancelled by its timeout or by hand counts as the
+          # failure it is; see db-publish.yml (QA 2026-11-02 #19).
+          RESULT: ${{ (needs.sign.result == 'success' && needs.status.result != 'success') && 'failure' || needs.sign.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: sh scripts/ops-alert.sh db-sign "$RESULT" "$RUN_URL"

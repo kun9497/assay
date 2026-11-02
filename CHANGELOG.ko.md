@@ -38,6 +38,82 @@
   "not signed" 를 보게 되고 `--allow-unsigned` 로 안내됐습니다. 이제 publisher 가 방금 푸시했다면 1분 뒤
   재시도하라고 먼저 말하고, 그다음 mirror 절, 마지막에 opt-out 을 말합니다. `db update` 는 여전히 한 번만
   시도합니다. (QA 2026-11-02 P3 #21)
+### Changed
+- `--db-max-age` 와 `--db-max-rating-age` 가 `=` 꼴뿐 아니라 `--timeout`, `--platform` 처럼 띄어 쓴
+  꼴(`--db-max-age 48h`)도 받습니다. `docs/integrations.md` 와 D113 은 두 플래그를
+  `--db-max-age <duration>` 으로 적는데, 그대로 베낀 그 표기가 바로 옆의 `=` 꼴은 되는 동안 exit 2 로
+  끝났습니다(QA 2026-11-02 #12). 값 없이 끝에 홀로 선 플래그는 여전히 같은 메시지로 거부하고, 띄어 쓴
+  꼴의 잘못된 값은 `=` 꼴과 같은 문구로 거부합니다.
+
+- 문서와 도움말의 낡은 서술 여섯 곳(QA 2026-11-02 P3 #10, #13, #14, #15, #20): `--output sarif`
+  도움말과 `docs/DESIGN.md`, `docs/deferred-decisions.md` 는 미평가 결과가 모두 note 수준이라고
+  했지만, D109 와 D158 이후 읽지 못한 manifest 와 버전이나 purl 이 없는 컴포넌트는 warning 수준입니다;
+  README 와 `CLAUDE.md` 는 `dirscan` 이 열세 가지를 읽는 lockfile 형식을 열 가지로 셌습니다; README 와
+  `CLAUDE.md` 는 로드맵이 한참 지나친 끝 번호(`D146`, `D79`, `D36`)를 적고 있었고, 이제 끝 번호 없이
+  번호 체계만 설명합니다; `docs/deferred-decisions.md` 의 서명 항목은 PR #181(D137 의 둘째 절반)이 검증을 이미
+  내보낸 뒤에도 "검증은 둘째 PR 에서" 라고 했습니다; frozen 키 운영 절차는 `db-publish.yml` 의
+  `workflow_dispatch` 가 입력을 하나도 선언하지 않는다고 했지만 #142 이후 D110 의 `seed` 입력을
+  선언하고 있습니다(force 스위치는 여전히 없음). 한국어 사본도 함께 고쳤습니다.
+- `scandiff` 의 표가 `GRYPE` 바로 뒤에 `A_BRIDGED` 와 `G_BRIDGED` 두 열을 새로 찍습니다. bare-advisory
+  bridge 가 assay 쪽 집합과 grype 쪽 집합에 각각 더한 튜플 수입니다. 2026-10-13 wolfi 에서 `ASSAY` 가
+  46 에서 74 로 오르는 동안 assay 자체 튜플은 45 에서 41 로 줄었는데, grype 데이터베이스가 자라면서 grype
+  튜플 33 개가 assay 집합으로 bridge 된 것이었습니다. bridge 되는 target 의 `maxFindings` 위반이 비교 도구
+  쪽의 성장일 수 있어 주간 리뷰가 그 분리를 손으로 세야 했습니다. floor 와 ceiling 의 의미는 바뀌지 않고,
+  `ERROR` 행은 다른 카운터처럼 `0 0` 을 찍습니다. trivy 비교는 bridge 하지 않으므로 그대로입니다.
+
+- DESCRIBES 관계가 실제 패키지를 지목하는 SPDX 문서가 더 이상 그 패키지를 잃지 않습니다. 파서는
+  첫 DESCRIBES 대상을 그것이 문서 루트의 가짜 패키지인지 확인하지 않고 버렸으므로, 자기가 담은
+  단 하나의 버전과 purl 이 있는 패키지를 기술하는 문서(프로젝트 자체의 `tiny.spdx.json` 포함)는
+  "no components" 로 스캔되어 -- 카탈로그되지 않고, 세어지지 않고, 어느 skip 버킷에도 없이 --
+  `--fail-on low --fail-on-incomplete` 아래 exit 0 이었고, DESCRIBES 가 둘이면 두 번째만
+  살아남았습니다. 이제 DESCRIBES 대상은 어차피 패키지가 되지 않았을 때에만 제외되고(purl 없음,
+  `pkg:oci`, 버전 없음 -- syft 와 Red Hat 이 루트에 쓰는 모양), 첫 번째만이 아니라 모든 DESCRIBES
+  대상을 검사하며, 기술된 실제 패키지는 다른 패키지처럼 카탈로그되고 세어집니다(D84 개정).
+  ubi9-micro 와 syft-1.51 의 루트 모양은 여전히 세지 않고 버립니다.
+- 두 CSAF reader 모두 leaf purl 의 `epoch=N` qualifier 를 저장되는 fixed 버전에 `N:version-release`
+  로 실어 나릅니다 -- rpmdb 카탈로거가 설치된 빌드를 쓰는 모양입니다. Red Hat 의 Hummingbird
+  reader(D98)는 purl 의 `@version` 만 취하고 `?` 에서 멈췄으므로 nginx(epoch 2)와 tomcat10/11(epoch
+  1)은 설치된 모든 빌드가 그 위로 정렬되는 epoch 없는 버전에서 fixed 로 저장됐고, 취약한 빌드가
+  깨끗하다고 보고됐습니다 -- 최신 live 문서 160개의 Hummingbird purl 403종 중 67종, 주간 차등이
+  스캔하는 바로 그 이미지에서입니다(QA 2026-11-02 #4, P1). Hummingbird reader 가 복사해 온 SUSE 의
+  reader(D77)에도 같은 결함이 있었는데, 그 아카이브의 epoch qualifier 가 붙은 purl 은 전부 키 fold 가
+  거절하는 Liberty Linux 빌드라 잠복해 있었습니다(#5, P3). 이제 둘 다 purl 을 `pkgmeta.ParsePURL` 과
+  `pkgmeta.EVROf` 로 읽습니다 -- D83 이후 스캔 쪽이 SBOM purl 에 적용해 온 규칙입니다: 0 이거나 없는
+  epoch 는 붙지 않고, 빈 버전에는 절대 붙지 않으며, 버전 없는 SUSE 빌드를 쪼개는 D131 은 그대로입니다.
+  각 provider 의 진행 줄이 epoch 를 가진 fixed 항목을 셉니다(`HummingbirdFixedWithEpoch`,
+  `RecommendedWithEpoch`). 발행된 아티팩트의 Hummingbird nginx/tomcat 레코드는 다음 야간 빌드가
+  다시 만들 때까지 틀린 채입니다.
+- SBOM 의 deb 와 rpm 패키지가 이미지의 것처럼 SOURCE 버전으로 판정됩니다. 두 리더 모두 purl 의
+  `upstream` qualifier 에서 source 이름만 남기고 버전을 버렸습니다 -- deb 의
+  `util-linux@2.38.1-5+deb12u2` 는 `@` 뒤 절반을 잃었고, rpm 의 `httpd-2.4.62-1.fc40.src.rpm` 은
+  이름으로 벗겨졌습니다 -- 그래서 매처의 source 버전 비교(D41)가 SBOM 입력에서는 한 번도 돌지 않았고,
+  바이너리 자신의 버전이 epoch 까지 포함해 source 키의 fix 와 비교되었습니다: util-linux
+  `2.38.1-5+deb12u2` 에서 빌드된 bsdutils `1:2.38.1-5+deb12u3` 은 이미지의 dpkg status 에서는
+  finding 이었고 같은 패키지의 CycloneDX 나 SPDX 에서는 skip 없이 깨끗했습니다(QA 2026-11-02 #1).
+  deb 는 버전 절반을 유지하고, CycloneDX 리더는 purl 이 버전 없이 source 를 지목했을 때
+  `syft:metadata:sourceVersion` 으로 채웁니다; rpm 은 SRPM 의 version-release 를 유지하고 그 epoch
+  를 문서 전체에 대한 D153 의 규칙(main 패키지의 것, 없으면 형제들의 것)으로 놓으므로, httpd 옆의
+  mod_ssl `1:2.4.62` 는 httpd 를 통해 발견되고 perl `4:5.32.1` 옆의 perl-B 는 걸리지 않습니다. deb
+  source 버전에 대해 쓴 VEX 문장은 이제 그 source 에서 빌드된 SBOM 의 바이너리에 적용됩니다. 보고서의
+  기존 `source.version` 필드가 채워지며, 스키마 변경은 없습니다.
+- `db status` 가 `covers:` 범위를 출력할 때 Ubuntu LTS 와 SUSE 서비스 팩 릴리스를 읽습니다. 릴리스
+  파서가 `.` 에서 자른 뒤 양쪽 모두 순수한 숫자를 요구했기 때문에 `Ubuntu:22.04:LTS` 와 `SLES:15.SP7`
+  은 파싱 불가로 분류되어 파싱된 모든 릴리스 뒤로 정렬되었고, 실제 데이터베이스에서 이 줄은 Ubuntu
+  14.04:LTS 부터 22.04:LTS 까지와 SLES 16.0/16.1 을 들고 있으면서도 `Ubuntu:23.10..26.04:LTS (11
+  releases)` 와 `SLES:11..15.SP7 (21 releases)` 로 읽혀 -- Ubuntu 20.04 나 SLES 16 운영자에게 그
+  릴리스가 범위 밖이라고 말했습니다 (QA 2026-11-02, #9). 이제 `:` 접미사는 숫자를 읽기 전에 떼어내고
+  `SP` 는 minor 로 읽으므로, 같은 데이터베이스는 `Ubuntu:14.04:LTS..26.04:LTS (11 releases)` 와
+  `SLES:11..16.1 (21 releases)` 를 출력합니다. 여전히 파싱되지 않는 형태(`edge`, `stream`,
+  `rolling`)는 lexical fallback 을 유지하고, 한 숫자의 두 철자는 문자열로 정렬되어 양 끝이 정렬
+  순서에 좌우되지 않습니다. `--output json` 은 키를 그대로 나열해 이미 맞았고, 개수는 처음부터
+  바뀐 적이 없습니다.
+- 어떤 comparer 도 읽지 못하는 설치 버전(dpkg 의 빈 Version, `(none)`, 잘못된 문자열)은 이제 열린 범위를
+  포함한 모든 advisory 에 대해 target 원인으로 건너뜁니다. 전에는 `[0, )` 범위(Debian 의 미수정 집합, 모든
+  CSAF no-fix 항목)가 비교 없이 sentinel 을 풀어 패키지를 AFFECTED 로 보고했고, 아무도 하지 않은 비교를 evidence
+  가 적었으며, 바로 옆의 fixed 범위 advisory 는 올바르게 건너뛰어졌습니다(D9, D30). (QA 2026-11-02 #2)
+- 닫는 경계만 있고 `introduced` 이벤트가 없는 범위는 잘못된 범위로 거부되어 건너뛴 목록에 들어갑니다. 전에는
+  조용히 "영향 없음" 으로 걸어갔습니다. 현재 어떤 provider 도 이 꼴을 내지 않으며, OSV 스키마는 범위마다
+  `introduced` 를 요구합니다. (QA 2026-11-02 #3)
 - `db build` 는 Photon OS 피드 파일을 일시적 실패에 대해 재시도하며, 첫 non-200 응답에 빌드 전체를
   실패시키지 않습니다. 이 provider 는 major 당 GET 을 한 번만 보냈고, 2026-10-17 야간 발행은 고정된 세
   `cve_data_photon<N>.json` URL 중 하나에 Photon CDN 이 돌려준 404 로 죽었으며 그 파일은 다음 날 밤
@@ -58,6 +134,28 @@
   실패한 뒤 잡이 "pushed and UNSIGNED" 라고, 아무것도 푸시되지 않은 이름에 대해 보고했습니다.
   `internal/ciguard` 가 이제 step output 을 `env` 로 넘기는 모든 단계에 그런 첫 줄 검사와, 같은 잡의 앞선
   단계가 그 output 을 쓰는지를 요구합니다.
+- 야간 발행의 `seed` 입력은 스크립트 본문에 expression 으로 치환되는 대신 `env` 를 통해 빌드에 닿고,
+  `ghcr.io/kun9497/assay-db@sha256:<64 hex>` 또는 `ghcr.io/kun9497/assay-db:<tag>` 꼴이 아니면 무엇이든
+  빌드되기 전에 두 꼴을 들어 거부됩니다. 전에는 디스패처가 적은 값이 뒤 단계에서 서명 키를 쥐는 잡의 Build
+  명령줄에 그대로 렌더링됐고(`db-sign.yml` 이 D137 부터 명시했고 `db-backfill.yml` 이 따르던 규칙), 입력
+  설명은 "a ghcr digest" 를 요구해 맨 `sha256:<hex>` 도 만족했는데 go-containerregistry 는 그것을 Docker
+  Hub 태그 `index.docker.io/library/sha256:<hex>` 로 해석하므로 그렇게 띄운 D110 복구는 한 시간 뒤에
+  실패했습니다. `internal/ciguard` 는 이제 어떤 workflow 의 `run:` 블록에서도 입력을 읽는 expression 을
+  거부합니다. (QA 2026-11-02 #16, #17)
+- 발행·서명·backfill workflow 의 alert 잡은 성공하지 못한 status 잡 -- 실패했거나, 타임아웃이나 사람 손에
+  취소된 -- 을 실패로 읽습니다. 전에는 `failure` 만 세어서, 감시 대상 잡이 통과하고 status 잡이
+  GitHub 의 360분 취소까지 멈춰 있으면(`timeout-minutes` 가 없었음) `scripts/ops-alert.sh` 에 성공으로
+  닿아 `status.json` 이 갱신되지 않았는데도 실패 이슈를 닫고 고정을 풀었습니다. 스크립트 자신의 머리말은
+  취소를 실패라고 적고 있었습니다. 세 status 잡은 `timeout-minutes: 15` 를 갖고, `internal/ciguard` 가
+  모든 alert 잡의 `RESULT` expression 과 모든 status 잡의 타임아웃을 요구합니다. (QA 2026-11-02 #19)
+
+### Changed
+- 야간 발행은 `17 5 * * *`(05:17 UTC), 주간 scanner differential 은 `23 20 * * 0`(일요일 20:23 UTC)에
+  예약됩니다. GitHub 의 큐가 가장 긴 minute 0 을 피한 것으로, 2026-10-13 부터 11-02 까지 `0 6 * * *` 의
+  나이틀리 스무 번은 모두 4.2~7.6시간 늦게(10:12Z~13:38Z), `0 21 * * 0` 의 주간 실행은 2~3.5시간
+  늦게(22:57Z~00:30Z) 시작해 월요일 리뷰 루틴에 50분 남짓의 여유만 남겼습니다. 여전히 늦는 실행이 예전
+  자리에 떨어지도록 시를 앞당겼고, 예상 시작 구간은 `docs/DESIGN.md` 의 `status.json` 옆에 기록했으며,
+  주간 workflow 의 주석은 더 이상 "Monday 06:00 KST" 라고 하지 않습니다. (QA 2026-11-02 #18)
 
 ## [0.14.0] - 2026-11-02
 

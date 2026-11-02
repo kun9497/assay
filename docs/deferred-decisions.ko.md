@@ -203,6 +203,16 @@ affected-no-fix 항목 108개를 담고 있고, grype는 우리 아카이브 슬
   49→60, bitnami-legacy-pg 488→489, 나머지 모든 타깃은 바이트 단위로 동일합니다.
   무조건 enrichment는 측정 후 기각했습니다(같은 십여 건의 튜플을 회수하려고
   ubi8n18의 onlyAssay를 4,531에서 10,152로 부풀립니다).
+- **bridge는 비교 도구 자체의 성장도 `ASSAY`에 셉니다**(2026-10-13 wolfi에서 관찰: grype
+  데이터베이스가 glibc 계열 튜플 56개를 얻고 그중 33개가 bridge되어, assay 고유 튜플은 45→41로
+  줄었는데 `ASSAY`는 46→74로 올랐습니다). 따라서 assay 레코드가 GHSA upstream을 가진 bare
+  CGA/advisory id인 타깃(wolfi, alma9)의 `maxFindings` 위반은 assay가 아니라 grype의 데이터
+  성장일 수 있습니다. 2026-11-02부터 scandiff가 그 분리를 `A_BRIDGED` / `G_BRIDGED`로 찍으므로,
+  월요일 리뷰는 손으로 재는 대신 표에서 native = `ASSAY` − `A_BRIDGED`를 읽습니다. **유예:**
+  ceiling이 native 수만으로 판정해야 하는지. 오늘 `maxFindings`는 타깃당 숫자 하나라서
+  native 전용 판정은 자체 floors 의미론과 bridge되는 모든 타깃의 이력 재밴딩이 필요하기에
+  정하지 않았습니다. **재검토 트리거:** `A_BRIDGED` 증가가 native 증가를 두 주 연속 넘는
+  `maxFindings` 위반, 또는 bridge 성장만이 원인인 재밴딩.
 - **위 문단들은 수치가 흘러갔고**, 08-24 기록 그대로 남겨 둡니다: Ubuntu는 이제
   98건 일치에 assay-only 5건입니다(더 이상 집합 동등이 아니라 assay 우세; wont-fix는
   CVE 10건 기준 17/17), Debian은 171건 일치(6-구멍+1-논쟁 FP 구성은 변동 없음),
@@ -517,8 +527,9 @@ annotation이 생기기 전의 아티팩트라면 그 레이어를 한 번 scrat
 
 **어떤 workflow도 대신할 수 없기에 필요한 운영 절차.** `.github/workflows` 아래 어디에도
 `--force`를 넘기는 곳이 없습니다: `db-publish.yml`과 `db-backfill.yml` 둘 다 `assay db push
-<ref>`를 맨몸으로 실행하고, `db-publish.yml`의 `workflow_dispatch`는 입력을 하나도 선언하지
-않습니다. 그래서 이 한 번뿐인 전환은 **사람이 손으로 하는** 조치입니다. (1) 은퇴가 진짜인지
+<ref>`를 맨몸으로 실행하고, `db-publish.yml`의 `workflow_dispatch`는 D110의 `seed` 입력
+하나만 선언할 뿐 force 스위치는 선언하지 않습니다. 그래서 이 한 번뿐인 전환은 **사람이 손으로
+하는** 조치입니다. (1) 은퇴가 진짜인지
 확인합니다 — 달력상 EOL 날짜를 지난 것이 아니라 그 키가 실제로 상류 피드에서 사라졌는지. (2)
 ghcr 쓰기 권한이 있는 머신에서 전체 로컬 데이터베이스를 빌드합니다; nightly와 동급인 빌드는 한
 시간 이상 걸립니다. (3) `assay db push <ref> --force`를 한 번 실행합니다. (4) 그 강제 아티팩트가
@@ -1390,7 +1401,7 @@ build`는 이제 배포자의 명령입니다. 여전히 업스트림 provider�
 
 ---
 
-### ~~배포된 데이터베이스 아티팩트의 서명과 출처 증명~~ — D137 에서 해결 (2026-10-22; 서명이 먼저, 검증은 둘째 PR 에서)
+### ~~배포된 데이터베이스 아티팩트의 서명과 출처 증명~~ — D137 에서 해결 (2026-10-22; 서명이 먼저 나갔고, 검증은 D137 의 둘째 절반인 PR #181 로 뒤따라 머지됨)
 
 **키 옆에서 도는 것 (감사 A18, 2026-10-30).** 서명을 넣은 뒤에도, 키를 가진 job 은 태그 이상으로 고정되지
 않은 서드파티 코드를 실행하고 있었습니다. nightly publish job 은 cosign 키와 `packages: write` 를 가진 채
@@ -1942,9 +1953,11 @@ finding의 위치는 여전히 파일 하나인 `<dir>/go.mod`이고, 바이너�
 **2026-08-11 해결.** 매핑은 애초에 어려운 부분이 아니었고, 항목이 짚은 질문 — location이 무엇을
 뜻하는가, finding이 없는 패키지는 어떻게 되는가 — 은 더 날카로운 형태를 드러냈습니다. GitHub code
 scanning은 `invocations[]`를 지원하지 않아서, "이 실행이 못 한 것"을 위한 스펙의 채널이 정작 중요한
-소비자에서는 보이지 않습니다. D55는 스킵을 거기에도 넣고 note 수준 결과로도 내서, 부분 스캔이
-온전한 것으로 읽힐 수 없게 합니다. 미평가 finding에 `security-severity`를 안 넣는 이유와 지문이
-버전을 무시하는 이유는 D55를 보십시오.
+소비자에서는 보이지 않습니다. D55는 스킵을 거기에도 넣고 결과로도 내서, 부분 스캔이 온전한
+것으로 읽힐 수 없게 합니다 — matcher 자체의 스킵은 note 수준이고, D109 와 D158 이후 읽지 못한
+manifest 와 버전이나 purl 이 없는 컴포넌트는 대상 쪽에서 고칠 수 있으므로 warning 수준입니다.
+미평가 finding에 `security-severity`를 안 넣는 이유와 지문이 버전을 무시하는 이유는 D55를
+보십시오.
 
 ---
 

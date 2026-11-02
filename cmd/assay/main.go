@@ -141,10 +141,14 @@ Scan flags (any order, before or after the target):
                         that is not the platform asked for is refused (exit 2)
                         with this flag, and scanned with a warning without it.
   --output <format>     table (default), json, or sarif
-                        sarif is SARIF 2.1.0 for GitHub code scanning. Packages
-                        that could not be evaluated are emitted as note-level
-                        results as well as tool notifications, because a partial
-                        scan must not read as a complete one (D55).
+                        sarif is SARIF 2.1.0 for GitHub code scanning. What the
+                        scan could not evaluate is emitted as results as well as
+                        tool notifications, because a partial scan must not read
+                        as a complete one (D55): note-level where assay could
+                        make no claim (a version it cannot compare, an
+                        unsupported ecosystem), warning-level where the target
+                        can fix it (a component with no version or purl, D158;
+                        a manifest that could not be read, D109).
   --config <path>       Ignore rules to apply (default: .assay.yaml in the
                         working directory the scan runs from, if present;
                         --config none applies no ignore file and skips that
@@ -1325,7 +1329,11 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 
 		// D48. Beside --fail-on-unknown because it is the same shape of ask:
 		// a property of the finding that no severity threshold can express.
-		// D59. parseMaxAge holds the rules both age gates share.
+		// D59. parseMaxAge holds the rules both age gates share. Both
+		// spellings, like --timeout below: docs/integrations.md and D113
+		// write these flags `--db-max-age <duration>`, and until QA 2026-11-02
+		// (#12) that copied form exited 2 while the `=` form beside it
+		// worked. A trailing bare flag still has no value and is refused.
 		case strings.HasPrefix(a, "--db-max-age="):
 			d, err := parseMaxAge("--db-max-age", strings.TrimPrefix(a, "--db-max-age="))
 			if err != nil {
@@ -1334,8 +1342,16 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 			opts.DBMaxAge = d
 
 		case a == "--db-max-age":
-			return "", scancmd.Options{}, fmt.Errorf(
-				"--db-max-age needs a duration, e.g. --db-max-age=48h")
+			i++
+			if i >= len(args) {
+				return "", scancmd.Options{}, fmt.Errorf(
+					"--db-max-age needs a duration, e.g. --db-max-age=48h")
+			}
+			d, err := parseMaxAge("--db-max-age", args[i])
+			if err != nil {
+				return "", scancmd.Options{}, err
+			}
+			opts.DBMaxAge = d
 
 		// D113. Spelled and parsed exactly like --db-max-age beside it,
 		// through the same helper, so the two gates a service is told to pass
@@ -1348,12 +1364,20 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 			opts.DBMaxRatingAge = d
 
 		case a == "--db-max-rating-age":
-			return "", scancmd.Options{}, fmt.Errorf(
-				"--db-max-rating-age needs a duration, e.g. --db-max-rating-age=168h")
+			i++
+			if i >= len(args) {
+				return "", scancmd.Options{}, fmt.Errorf(
+					"--db-max-rating-age needs a duration, e.g. --db-max-rating-age=168h")
+			}
+			d, err := parseMaxAge("--db-max-rating-age", args[i])
+			if err != nil {
+				return "", scancmd.Options{}, err
+			}
+			opts.DBMaxRatingAge = d
 
-		// D112. Both spellings, where --db-max-age takes only `=`: the
-		// decision writes this flag `--timeout <duration>`, so the form a
-		// reader copies from it has to work.
+		// D112. Both spellings: the decision writes this flag
+		// `--timeout <duration>`, so the form a reader copies from it has to
+		// work.
 		case a == "--timeout":
 			i++
 			if i >= len(args) {

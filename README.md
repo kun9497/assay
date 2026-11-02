@@ -109,7 +109,7 @@ code and the report's sha256, even when the scan ends in exit 2 before any repor
   Hummingbird, and CleanStart — plus Bitnami application layers, across three rpmdb backends
   (BerkeleyDB, SQLite, ndb).
 - **8 language ecosystems** — Go, npm, PyPI, crates.io, Maven, RubyGems, NuGet, Packagist,
-  from binaries, directories, and ten lockfile formats — pnpm and yarn berry included. Not
+  from binaries, directories, and thirteen lockfile formats — pnpm and yarn berry included. Not
   from inside a container image: an image scan inventories the OS packages and Bitnami layers
   above, not the language packages installed in it (D70,
   [deferred](docs/deferred-decisions.md)), and every image scan says so on stderr and in
@@ -154,7 +154,7 @@ cannot be trusted — with `2` outranking `1` outranking `0`.
 - **[docs/comparison.md](docs/comparison.md)** — how assay compares to grype (measured,
   weekly) and trivy (spec-level), and where each tool's policy deliberately differs.
 - **[docs/superpowers/specs/2026-07-29-assay-roadmap.md](docs/superpowers/specs/2026-07-29-assay-roadmap.md)**
-  — the reference design, every decision recorded as `D1`…`D146` with its reasoning.
+  — the reference design, every decision recorded as a numbered `D` entry with its reasoning.
 - **[docs/compatibility.md](docs/compatibility.md)** — what a consumer of the JSON, SARIF and
   database outputs can rely on across releases, and what a `schemaVersion` bump means.
 - **[CHANGELOG.md](CHANGELOG.md)** — what changed in each release.

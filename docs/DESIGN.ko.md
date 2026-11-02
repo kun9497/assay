@@ -460,6 +460,19 @@ gh workflow run db-sign.yml -f digest=sha256:…  # D137: db push 가 찍은 dig
 `ops: db-publish is failing`이 열리고, 고쳐질 때까지 `status.json`이 지금 digest 에 대해
 `"signed": false`를 보여줍니다.
 
+**나이틀리가 실제로 도는 시각.** 발행은 `17 5 * * *`(05:17 UTC), 주간 scanner differential 은
+`23 20 * * 0`(일요일 20:23 UTC)에 예약되어 있고, 두 cron 모두 시작 시각이 아니라 시작의 하한입니다.
+GitHub 은 예약 실행을 큐에 넣었다가 늦게 시작하며, cron 이 정각(minute 0)에 있으면 몇 시간씩
+늦습니다. 이전 일정에서 측정하면 2026-10-13 부터 11-02 까지 `0 6 * * *` 의 나이틀리 스무 번이 모두
+4.2~7.6시간 뒤(10:12Z~13:38Z)에 시작했고, `0 21 * * 0` 의 주간 실행은 2~3.5시간 늦게(22:57Z~00:30Z)
+시작해서, 그 로그를 01:30 UTC 에 읽는 월요일 리뷰 루틴의 여유가 2026-11-02 에는 50분 남짓이었습니다.
+둘 다 2026-11-02 에 큐가 가장 긴 minute 0 을 피해 옮기고(QA #18), 여전히 늦는 실행이 예전 자리에
+떨어지도록 시(hour)를 앞당겼습니다. `status.json` 의 나이틀리 `builtAt` 과 `lastRun` 은 대략
+05:20Z~13:00Z 사이, 주간 실행의 로그는 대략 20:25Z~00:00Z 사이로 예상하십시오. cron 보다 몇 시간 뒤의
+`builtAt` 은 스케줄러 탓이지 시계가 밀린 것이 아닙니다. 주간 실행의 로그를 읽는 것(월요일 루틴은 이
+저장소 밖에 삽니다)은 주간 cron 보다 적어도 3시간 뒤에 두어야 하고, 나이틀리는 그보다 훨씬 앞에
+있습니다.
+
 **첫 패스는 범위를 제한하세요. 전체 피드로 가지 마십시오.** 제한 없는 빌드는 약 7시간이고 재개
 지점이 없습니다 — `db build`는 임시 데이터베이스를 만들어 마지막에만 설치하므로, 5시간째의 실패가
 5시간을 통째로 버립니다. 넓은 창으로 네 번 그렇게 실패한 뒤 30일 창이 27분 26초에 rating 23,433건으로
@@ -735,7 +748,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] SBOM의 rpm과 deb purl (D83) — 이미지 경로가 쓰는 것과 같은 Distro.Ecosystem()으로
       키를 잡고, epoch는 자신의 qualifier에서 복원; rockylinux:9는 SBOM과 이미지가
       finding 169건으로 일치하고, 최신 syft SBOM은 더 이상
-      --fail-on-incomplete=target에 걸리지 않음
+      --fail-on-incomplete=target에 걸리지 않음; QA 2026-11-02 부터는 `upstream` qualifier 의
+      source 버전도 유지(deb 의 `@` 뒤 절반, rpm 의 SRPM version-release)하므로 SBOM 의
+      바이너리도 이미지의 것처럼 source 버전으로 판정
 - [x] SPDX 2.2/2.3 JSON (D84) — 공유 purl core가 syft와 Red Hat 벤더 SBOM을 똑같이
       읽음(repository_id, rpmmod, arch=src); rocky9는 SPDX와 CycloneDX가 동일하게
       스캔되고, Red Hat 자신의 ubi9-micro SBOM은 20/20으로 키가 잡힘
@@ -978,7 +993,8 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] 이미지의 rpm source 조회가 SRPM 의 EVR 을 주 패키지의 epoch 와 함께 비교 (D153, 감사 A4) —
       없으면 SRPM 버전의 형제들 중 가장 흔한 epoch, 다음은 다른 빌드의 같은 이름 패키지, 그것도 없으면
       바이너리의 것; Azure Linux 와 Photon 키에는 epoch 없음; ubi9/perl-532 오탐
-      −342, ubi8/nodejs-18 −46, 추가 없음
+      −342, ubi8/nodejs-18 −46, 추가 없음; QA 2026-11-02 부터 같은 패스가 SBOM 의 rpm 패키지에도
+      돌아(`decodeSBOM`) httpd 옆의 mod_ssl 이 두 리더 모두에서 httpd 를 통해 발견됨
 - [x] 같은 버전에서는 닫는 이벤트가 여는 이벤트보다 먼저 정렬되고, 한 버전에서 열리고 닫히는 창은 따로
       판정 (D154, 감사 A7) — 뒤 창을 먼저 적은 range 가 앞 창이 닫히는 버전에서 그 창을 닫아 버리지
       않음; 공개 데이터베이스의 동률 range 전체에 대한 판정 2,892 건이 그대로
@@ -1040,7 +1056,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       막는 `Pacman{}` comparer(측정된 tensorflow `2.4.0rc4` 미탐)
 - [x] Hummingbird (D98) — Red Hat의 강화 라인이고, assay가 이미 받아오는 CSAF
       피드에서 추출함: CPE 범위, purl로 읽음(stream label이 갈라짐), 맨 rolling
-      키; 첫날 차등이 grype 전용 튜플 전부를 grype 자신의 낡은 스냅샷으로 추적함
+      키; 첫날 차등이 grype 전용 튜플 전부를 grype 자신의 낡은 스냅샷으로 추적함.
+      QA 2026-11-02 개정: purl 의 `epoch=` qualifier 가 fixed 버전에 닿음(epoch 2 의
+      nginx, epoch 1 의 tomcat 이 깨끗하다고 판정됐었음), 두 CSAF reader 모두
 - [x] Bitnami (D99) — 남의 배포판 위에 올라탄 애플리케이션 레이어: purl-type
       라우팅, 리비전을 벗겨내는 SemVer wrapper, 그리고 D84의 SPDX 리더를
       재사용하는 마커 cataloger; 첫날 차등 497/497에 agree 485, 이중 인벤토리를
@@ -1074,9 +1092,12 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] 출처별 평가 — finding이 모든 데이터베이스의 평가를 유지하고, 게이트는 그중 가장 높은
       것을 취함 (D25)
 - [x] 두 번째 평가 출처로서의 NVD, CVE로 조인 (D27)
-- [x] SARIF 출력(D55) — `--output sarif`. 평가하지 못한 패키지는 note 수준 결과로도, 도구
+- [x] SARIF 출력(D55) — `--output sarif`. 스캔이 평가하지 못한 것은 결과로도, 도구
       알림으로도 나갑니다. GitHub code scanning이 스펙의 `invocations[]` 채널을 무시하고,
-      부분 스캔이 온전한 것으로 읽힐 수는 없기 때문입니다
+      부분 스캔이 온전한 것으로 읽힐 수는 없기 때문입니다. assay 가 아무 판단도 내릴 수
+      없는 것(matcher 자체의 스킵, 지원하지 않는 생태계)은 note 수준, 대상 쪽에서 고칠 수
+      있는 것(버전이나 purl 이 없는 컴포넌트, D158; 읽지 못한 manifest, D109)은 warning
+      수준입니다
 
 **⑦ NVD 심각도** ✅ — assay가 OSV로 이미 매칭한 finding에 NIST가 그 CVE를 몇 점으로 보는지 붙입니다.
 

@@ -485,6 +485,21 @@ signing ran for one day with nothing refusing, so the first signed digest could 
 before any binary required it. Since D138 a failed sign step opens the pinned `ops: db-publish is failing`
 issue, and `status.json` shows `"signed": false` for the live digest until it is fixed.
 
+**When the nightly actually runs.** The publish is scheduled at `17 5 * * *` (05:17 UTC) and
+the weekly scanner differential at `23 20 * * 0` (Sunday 20:23 UTC), and both crons are lower
+bounds on the start, not start times: GitHub queues scheduled runs and starts them late, by
+hours when the cron sits on minute 0 of an hour. Measured on the previous schedules, every one
+of the twenty nightlies from 2026-10-13 to 11-02 on `0 6 * * *` began 4.2 to 7.6 hours after
+it (10:12Z to 13:38Z), and the weekly on `0 21 * * 0` began 2 to 3.5 hours late (22:57Z to
+00:30Z), so the Monday review routine that reads its log at 01:30 UTC had about fifty minutes
+of margin on 2026-11-02. Both were moved off minute 0, where the queue is longest, on 2026-11-02 (QA #18),
+and the hour pulled forward so a run that is still late lands where the old one
+did. Expect the nightly's `builtAt` and `lastRun` in `status.json` between about 05:20Z and
+13:00Z, and the weekly's log between about 20:25Z and 00:00Z: a `builtAt` hours after the cron
+is the scheduler, not a slipped clock. Anything that reads the weekly's log — the Monday
+routine lives outside this repository — should stay at least three hours after the weekly's
+cron, and the nightly stays well before it.
+
 **Bound the first pass; do not reach for the full feed.** An unbounded build is about seven
 hours and there is no resume point — `db build` assembles a temporary database and installs it
 only at the end, so a failure at hour five discards all five hours. Four attempts at a wide
@@ -768,7 +783,9 @@ exited 0 while 24 findings went unmentioned.
 - [x] rpm and deb purls from SBOMs (D83) — keyed through the same Distro.Ecosystem() the
       image path uses, epoch restored from its qualifier; a rockylinux:9 SBOM and the
       image agree at 169 findings, and modern syft SBOMs stop tripping
-      --fail-on-incomplete=target
+      --fail-on-incomplete=target; since QA 2026-11-02 the `upstream` qualifier's source
+      VERSION is kept too (deb's `@` half, rpm's SRPM version-release), so an SBOM's
+      binary is judged on its source's version as the image's is
 - [x] SPDX 2.2/2.3 JSON (D84) — the shared purl core reads syft and Red Hat vendor SBOMs
       alike (repository_id, rpmmod, arch=src); rocky9 SPDX and CycloneDX scan
       identically, and Red Hat's own ubi9-micro SBOM keys 20/20
@@ -1027,7 +1044,9 @@ exited 0 while 24 findings went unmentioned.
 - [x] An image's rpm source lookup compares the SRPM's EVR, with the main package's epoch
       (D153, audit A4) — else the most common epoch among siblings at the SRPM version, else
       the same-name package of another build, else the binary's; no epoch on Azure Linux and
-      Photon keys; ubi9/perl-532 −342 and ubi8/nodejs-18 −46 false positives, none added
+      Photon keys; ubi9/perl-532 −342 and ubi8/nodejs-18 −46 false positives, none added;
+      since QA 2026-11-02 the same pass runs over an SBOM's rpm packages (`decodeSBOM`), so
+      mod_ssl beside httpd is found through httpd on both readers
 - [x] At the same version a close sorts before an open, and a window that opens and closes
       at one version is judged on its own (D154, audit A7) — a range listing a later window
       first no longer shuts it at the version the earlier one closes; 2,892 judgments over
@@ -1089,7 +1108,9 @@ exited 0 while 24 findings went unmentioned.
       being aliased onto rpm (the tensorflow `2.4.0rc4` false negative, measured)
 - [x] Hummingbird (D98) — Red Hat's hardened line, extracted from the CSAF feed assay
       already fetches: CPE-scoped, purl-read (stream labels fan out), bare rolling key;
-      day-one differential traced every grype-only tuple to grype's own stale snapshot
+      day-one differential traced every grype-only tuple to grype's own stale snapshot.
+      Revised QA 2026-11-02: the purl's `epoch=` qualifier reaches the fixed version
+      (nginx epoch 2, tomcat epoch 1 had been judged clean), in both CSAF readers
 - [x] Bitnami (D99) — an app layer riding on someone else's distro: purl-type routing,
       a revision-stripping SemVer wrapper, and a marker cataloger that reuses the D84
       SPDX reader; day-one differential 497/497 with agree 485, dual inventory proven
@@ -1121,10 +1142,12 @@ exited 0 while 24 findings went unmentioned.
 - [x] Per-source ratings — a finding keeps every database's assessment, the gate takes the
       highest (D25)
 - [x] NVD as a second rating source, joined on the CVE (D27)
-- [x] SARIF output (D55) — `--output sarif`. Packages that could not be evaluated are
-      emitted as note-level results AND as tool notifications, because GitHub code scanning
-      ignores the spec's own `invocations[]` channel and a partial scan must not read as a
-      complete one
+- [x] SARIF output (D55) — `--output sarif`. What the scan could not evaluate is emitted
+      as results AND as tool notifications, because GitHub code scanning ignores the spec's
+      own `invocations[]` channel and a partial scan must not read as a complete one.
+      Note-level where assay could make no claim (the matcher's own skips, an unsupported
+      ecosystem); warning-level where the target can fix it (a component with no version or
+      purl, D158; a manifest that could not be read, D109)
 
 **⑦ NVD severity** ✅ — what NIST scores a CVE, attached to findings assay already matched
 through OSV.
