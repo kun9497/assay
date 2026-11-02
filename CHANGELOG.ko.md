@@ -16,6 +16,17 @@
   `ERROR` 행은 다른 카운터처럼 `0 0` 을 찍습니다. trivy 비교는 bridge 하지 않으므로 그대로입니다.
 
 ### Fixed
+- `db status` 가 `covers:` 범위를 출력할 때 Ubuntu LTS 와 SUSE 서비스 팩 릴리스를 읽습니다. 릴리스
+  파서가 `.` 에서 자른 뒤 양쪽 모두 순수한 숫자를 요구했기 때문에 `Ubuntu:22.04:LTS` 와 `SLES:15.SP7`
+  은 파싱 불가로 분류되어 파싱된 모든 릴리스 뒤로 정렬되었고, 실제 데이터베이스에서 이 줄은 Ubuntu
+  14.04:LTS 부터 22.04:LTS 까지와 SLES 16.0/16.1 을 들고 있으면서도 `Ubuntu:23.10..26.04:LTS (11
+  releases)` 와 `SLES:11..15.SP7 (21 releases)` 로 읽혀 -- Ubuntu 20.04 나 SLES 16 운영자에게 그
+  릴리스가 범위 밖이라고 말했습니다 (QA 2026-11-02, #9). 이제 `:` 접미사는 숫자를 읽기 전에 떼어내고
+  `SP` 는 minor 로 읽으므로, 같은 데이터베이스는 `Ubuntu:14.04:LTS..26.04:LTS (11 releases)` 와
+  `SLES:11..16.1 (21 releases)` 를 출력합니다. 여전히 파싱되지 않는 형태(`edge`, `stream`,
+  `rolling`)는 lexical fallback 을 유지하고, 한 숫자의 두 철자는 문자열로 정렬되어 양 끝이 정렬
+  순서에 좌우되지 않습니다. `--output json` 은 키를 그대로 나열해 이미 맞았고, 개수는 처음부터
+  바뀐 적이 없습니다.
 - 어떤 comparer 도 읽지 못하는 설치 버전(dpkg 의 빈 Version, `(none)`, 잘못된 문자열)은 이제 열린 범위를
   포함한 모든 advisory 에 대해 target 원인으로 건너뜁니다. 전에는 `[0, )` 범위(Debian 의 미수정 집합, 모든
   CSAF no-fix 항목)가 비교 없이 sentinel 을 풀어 패키지를 AFFECTED 로 보고했고, 아무도 하지 않은 비교를 evidence
