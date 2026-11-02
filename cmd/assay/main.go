@@ -1027,7 +1027,8 @@ func dbUpdateEnrichers(stderr io.Writer) []provider.Enricher {
 var newEOLSource = eol.New
 
 // dbUpdateEOLSource is the provider.EOLSource `db build` runs, or nil when
-// EOL_ENABLE=0.
+// EOL_ENABLE=0. ratingsOnly only changes what the EOL_ENABLE=0 line says: a
+// ratings-only build keeps its seed's catalog, an ordinary build has none.
 //
 // ON BY DEFAULT (D87), unlike NVD's and KISA's opt-in, for a mix of their
 // two reasons: cost, like EPSS/KEV (one ~2.7 MB request, not NVD's seven
