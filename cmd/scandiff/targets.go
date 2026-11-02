@@ -177,11 +177,12 @@ func loadTargets(path string) ([]Target, error) {
 // "." or "..", no separator of either kind, and nothing filepath.Base would
 // strip. run joins a target's name into the -capture path (writeCapture), so
 // a name of "../../x" wrote outside the capture directory (QA 2026-11-02).
-// Both separators are refused on every platform, not only the host's, so the
-// committed floors file is judged the same on the Linux runner and on a
-// Windows checkout; Base alone would let "a\b" through on Linux.
+// Both separators and the Windows volume colon are refused on every
+// platform, not only the host's, so the committed floors file is judged the
+// same on the Linux runner and on a Windows checkout; Base alone would let
+// "a\b" through on Linux, and strips "c:" on Windows only.
 func isPlainFileName(name string) bool {
-	if name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+	if name == "." || name == ".." || strings.ContainsAny(name, `/\:`) {
 		return false
 	}
 	return filepath.Base(name) == name

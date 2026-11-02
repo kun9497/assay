@@ -68,6 +68,9 @@ func ArchiveLimitError(path, entry string) error {
 // larger than MaxConfigBytes. The declared size is what is refused -- the blob
 // is never fetched -- so that is the number the message carries.
 func ConfigLimitError(declared int64) error {
+	if declared < 0 {
+		return fmt.Errorf("image config is declared at %d bytes, a size no registry writes; refused rather than read unbounded (D112)", declared)
+	}
 	return fmt.Errorf("image config is declared at %d bytes, past the %s per-config limit (D112)",
 		declared, formatBytes(MaxConfigBytes))
 }

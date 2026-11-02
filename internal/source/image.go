@@ -609,7 +609,11 @@ func checkConfigSize(img v1.Image) error {
 // checkConfigDescriptor is checkConfigSize's comparison on a manifest already
 // in hand, for the site that has read it for another reason.
 func checkConfigDescriptor(m *v1.Manifest) error {
-	if m.Config.Size > MaxConfigBytes {
+	// A negative size is refused too: go-containerregistry reads -1 as
+	// "unknown" and then bounds the read by the registry's Content-Length,
+	// or by nothing on a chunked response -- the one declared value that
+	// turns the cap off (review of #234).
+	if m.Config.Size < 0 || m.Config.Size > MaxConfigBytes {
 		return ConfigLimitError(m.Config.Size)
 	}
 	return nil

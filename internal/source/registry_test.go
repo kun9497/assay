@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -176,6 +177,18 @@ func TestOpen_RegistryLayerBlobRefusalIsAuthError(t *testing.T) {
 // the size mismatch -- also an error, which is why the request count is the
 // assertion that tells the two apart, not the error alone.
 func TestOpen_RegistryRefusesADeclaredOversizedConfigBeforeFetchingIt(t *testing.T) {
+	// -1 is go-containerregistry's "size unknown" sentinel, which makes it
+	// bound the read by the registry's Content-Length instead -- the one
+	// declared value that would have turned the cap off (review of #234).
+	for _, declared := range []int64{256 << 20, -1} {
+		t.Run(fmt.Sprintf("declared %d", declared), func(t *testing.T) {
+			registryRefusesDeclaredConfig(t, declared)
+		})
+	}
+}
+
+func registryRefusesDeclaredConfig(t *testing.T, declared int64) {
+	t.Helper()
 	isolateEnv(t)
 	img, err := random.Image(64, 1)
 	if err != nil {
@@ -198,7 +211,6 @@ func TestOpen_RegistryRefusesADeclaredOversizedConfigBeforeFetchingIt(t *testing
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	const declared = 256 << 20
 	m.Config.Size = declared
 	forged, err := json.Marshal(m)
 	if err != nil {
@@ -251,7 +263,7 @@ func TestOpen_RegistryRefusesADeclaredOversizedConfigBeforeFetchingIt(t *testing
 
 	_, err = Open(context.Background(), ref.String(), "")
 	if err == nil {
-		t.Fatal("Open succeeded against a manifest declaring a 256 MiB config")
+		t.Fatalf("Open succeeded against a manifest declaring a config of %d bytes", declared)
 	}
 	if want := ConfigLimitError(declared).Error(); !strings.Contains(err.Error(), want) {
 		t.Errorf("err = %q, want it to carry %q", err, want)

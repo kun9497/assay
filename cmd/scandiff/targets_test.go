@@ -110,6 +110,7 @@ func TestLoadTargets_NameMustBeAPlainFileName(t *testing.T) {
 		// Windows checkout and is caught on the CI runner.
 		{"backslash", `a\b`},
 		{"absolute", "/abs"},
+		{"windows volume", "c:x"},
 		{"trailing slash", "name/"},
 	}
 	for _, c := range refused {
