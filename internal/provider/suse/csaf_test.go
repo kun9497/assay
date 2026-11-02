@@ -1139,13 +1139,15 @@ func TestConvert_BareStatusIDIsNamedByProductID(t *testing.T) {
 	}
 }
 
-// D126 keeps the leaf requirement: a bare id naming no product_version leaf
-// is a counted skip, never a name taken from the raw string -- the same
-// refusal TestConvert_NoPurlIsCountedAndSkipped holds for a leaf with no
-// purl. Held separately because the bare path returns before the purl is
-// read, so an early return placed above the leaf lookup would store
-// "affected at every version" under whatever the id says.
-func TestConvert_BareIDNamingNoLeafIsSkipped(t *testing.T) {
+// D159 reverses D126's leaf requirement for a bare id with no leaf at all:
+// the known_affected ghost is stored under its product_id on SLES and, as
+// any SLE entry is, mirrored onto its Leap codestream (D108). The
+// known_not_affected phantom resolves too, on Leap -- nothing is stored from
+// that bucket, it only declines a mirror of the same package (D125) -- and
+// the remediation id is the same leafless id, so its reason reaches the
+// stored entry. TestD159_LeaflessBareIDIsJudgedAffectedNoFix drives the
+// verdict; this row holds what the rest of convert does with the names.
+func TestConvert_BareIDNamingNoLeafIsNamedByProductID(t *testing.T) {
 	d := buildDocWith(t, "CVE-2006-3379",
 		[]string{"SUSE Linux Enterprise Server 15 SP6", "openSUSE Leap 15.6"},
 		map[string]string{"curl": "pkg:rpm/suse/curl@?upstream=curl.src.rpm"},
@@ -1162,18 +1164,29 @@ func TestConvert_BareIDNamingNoLeafIsSkipped(t *testing.T) {
 	if !ok {
 		t.Fatal("convert dropped the document")
 	}
-	// curl natively on SLES and, via D108, mirrored onto Leap -- nothing
-	// else: ghost-1_0-0 and phantom-2_0-0 name no leaf.
+	got := map[string]advisory.FixState{}
 	for _, a := range adv.Affected {
-		if a.Name != "curl" {
-			t.Errorf("entry %s/%s: an id naming no leaf must not become an entry", a.Ecosystem, a.Name)
+		got[a.Ecosystem+"/"+a.Name] = a.Ranges[0].FixState
+	}
+	want := map[string]advisory.FixState{
+		"SLES:15.SP6/curl":               "",
+		"openSUSE Leap:15.6/curl":        "",
+		"SLES:15.SP6/ghost-1_0-0":        advisory.FixStateWontFix,
+		"openSUSE Leap:15.6/ghost-1_0-0": advisory.FixStateWontFix,
+	}
+	if len(got) != len(want) {
+		t.Errorf("entries = %v, want %v", got, want)
+	}
+	for k, v := range want {
+		// Compared as words: a stored unknown is "" or the word (advisory.FixState.String).
+		if fs, ok := got[k]; !ok || fs.String() != v.String() {
+			t.Errorf("%s: present=%v fix state %q, want present with %q", k, ok, fs, v)
 		}
 	}
-	if st.SkippedUnknownPackage != 1 {
-		t.Errorf("SkippedUnknownPackage = %d, want 1 (the known_affected ghost; the not-affected and remediation ids are uncounted by design)", st.SkippedUnknownPackage)
-	}
-	if st.BareNamedByProductID != 0 {
-		t.Errorf("BareNamedByProductID = %d, want 0: nothing resolved to rename", st.BareNamedByProductID)
+	// ghost's status id and its remediation id, and the phantom.
+	if st.SkippedUnknownPackage != 0 || st.BareNamedWithoutLeaf != 3 || st.BareNamedByProductID != 0 {
+		t.Errorf("SkippedUnknownPackage = %d, BareNamedWithoutLeaf = %d, BareNamedByProductID = %d, want 0, 3, 0",
+			st.SkippedUnknownPackage, st.BareNamedWithoutLeaf, st.BareNamedByProductID)
 	}
 }
 
@@ -1812,6 +1825,7 @@ func TestConvert_NativeLeapNoFix_TakesOnlyTheCodestreamFixOfAMixedTwin(t *testin
 func TestStatsString_ReportsRecommendedNamedByNEVRSplit(t *testing.T) {
 	got := stats{BareNamedByProductID: 4, RecommendedNamedByNEVRSplit: 7, RecommendedEmptyVersionKept: 2, SkippedLeapMirrorSplitBuild: 5}.String()
 	want := "4 bare entries named by their product id where the purl's name differed (D126), " +
+		"0 bare entries named by their product id with no leaf in the document (D159), " +
 		"7 recommended builds named by splitting their product id where the purl carried no version " +
 		"(D131, 2 such ids kept as spelt, 5 SLE entries not mirrored onto Leap because their only fix was such a build)"
 	if !strings.Contains(got, want) {
