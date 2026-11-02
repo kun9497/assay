@@ -38,12 +38,16 @@ type ghInputsWorkflow struct {
 	} `yaml:"jobs"`
 }
 
-// anyExpr matches one `${{ ... }}` expression; readsInput says whether it
-// reads a workflow_dispatch input, as `inputs.<name>` or the older
-// `github.event.inputs.<name>` spelling (the `\b` admits both).
+// anyExpr matches one `${{ ... }}` expression, non-greedily so a `}` inside
+// it (`format('{0}', ...)`) does not end the match early; readsInput says
+// whether it touches the inputs context at all -- `inputs.<name>`, the older
+// `github.event.inputs.<name>`, a bracket index `inputs['x']`, or the whole
+// context in `toJSON(inputs)`. The word, not the dotted form: every honest
+// spelling of a read names the context, and a guard that held only one
+// spelling would be stepped around by the next (review of #231).
 var (
-	anyExpr    = regexp.MustCompile(`\$\{\{[^}]*\}\}`)
-	readsInput = regexp.MustCompile(`\binputs\.[A-Za-z_][A-Za-z0-9_-]*`)
+	anyExpr    = regexp.MustCompile(`(?s)\$\{\{.*?\}\}`)
+	readsInput = regexp.MustCompile(`\binputs\b`)
 )
 
 // inputExprs returns every expression in s that reads an input.
@@ -183,6 +187,17 @@ func TestInputsInRunGuardRejects(t *testing.T) {
 		{"github.event.inputs spelling", wf("\n      - run: echo ${{ github.event.inputs.seed }}\n"), 0, []string{
 			substitutes("${{ github.event.inputs.seed }}"),
 		}},
+		// The spellings a first guard missed (review of #231): a function call
+		// whose literal holds a brace, the whole context, a bracket index.
+		{"inside format()", wf("\n      - run: echo ${{ format('{0}', inputs.since_days) }}\n"), 0, []string{
+			substitutes("${{ format('{0}', inputs.since_days) }}"),
+		}},
+		{"toJSON of the whole context", wf("\n      - run: echo ${{ toJSON(inputs) }}\n"), 0, []string{
+			substitutes("${{ toJSON(inputs) }}"),
+		}},
+		{"bracket index", wf("\n      - run: echo ${{ inputs['since_days'] }}\n"), 0, []string{
+			substitutes("${{ inputs['since_days'] }}"),
+		}},
 		{"one via env, one substituted", wf(viaEnv + "      - run: echo ${{ inputs.seed }}\n"), 1, []string{
 			substitutes("${{ inputs.seed }}"),
 		}},
@@ -196,8 +211,11 @@ func TestInputsInRunGuardRejects(t *testing.T) {
 		{"outside run and env", wf("\n      - uses: actions/github-script@v7\n        with:\n          script: console.log('${{ inputs.seed }}')\n"), 0, []string{
 			"t.yml: 1 expressions reading an input in the text, 0 inside a step's run or an env: block",
 		}},
-		// Not an input: a step output or a secret in a run block is another
-		// guard's business (exit_fallback_test.go, env_output_test.go).
+		// Not an input. A step output in an exit is exit_fallback_test.go's
+		// business; a secret in a run block is deliberately outside every
+		// guard here -- GitHub masks it in the log and a token carries no
+		// shell metacharacters, so the hazard this guard exists for (a
+		// dispatcher-typed string rendered into the script) does not arise.
 		{"a step output, not an input", wf("\n      - id: diff\n        run: echo \"exit_code=0\" >> \"$GITHUB_OUTPUT\"\n      - run: exit ${{ steps.diff.outputs.exit_code || 2 }}\n"), 0, nil},
 		{"a secret, not an input", wf("\n      - run: echo \"${{ secrets.GITHUB_TOKEN }}\" | docker login --password-stdin\n"), 0, nil},
 	}

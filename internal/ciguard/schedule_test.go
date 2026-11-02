@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -55,9 +56,7 @@ func scheduleProblems(file string, src []byte) ([]string, int, error) {
 			out = append(out, fmt.Sprintf("%s: cron %q does not have five fields", file, s.Cron))
 			continue
 		}
-		// The minute field fires on 0 when it is 0, every minute, a list
-		// starting at 0, or a step from 0.
-		if f[0] == "0" || f[0] == "*" || strings.HasPrefix(f[0], "0,") || strings.HasPrefix(f[0], "*/") {
+		if firesOnMinuteZero(f[0]) {
 			out = append(out, fmt.Sprintf("%s: cron %q fires on minute 0, where GitHub's queue starts scheduled runs hours late; pick another minute (QA 2026-11-02 #18)", file, s.Cron))
 		}
 	}
@@ -67,6 +66,26 @@ func scheduleProblems(file string, src []byte) ([]string, int, error) {
 		out = append(out, fmt.Sprintf("%s: %d cron lines in the text, %d parsed under on.schedule", file, raw, len(on.Schedule)))
 	}
 	return out, len(on.Schedule), nil
+}
+
+// firesOnMinuteZero reads a cron minute field the way GitHub's scheduler
+// does: a comma list of elements, each a value, a range `a-b` or `*`, with
+// an optional `/step`. It fires on :00 when any element is `*`, or when the
+// element's value (the low end of a range) is 0 -- `0`, `00`, `0-10`,
+// `30,0`, `0/15`, `*/15` all qualify (review of #231: a first version read
+// only four spellings and let a range or an unordered list through).
+func firesOnMinuteZero(field string) bool {
+	for _, el := range strings.Split(field, ",") {
+		el, _, _ = strings.Cut(el, "/")
+		low, _, _ := strings.Cut(el, "-")
+		if low == "*" {
+			return true
+		}
+		if n, err := strconv.Atoi(low); err == nil && n == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func TestNoScheduledWorkflowFiresOnMinuteZero(t *testing.T) {
@@ -117,6 +136,12 @@ func TestScheduleGuardRejects(t *testing.T) {
 		{"every minute", wf("* 6 * * *"), 1, []string{minuteZero("* 6 * * *")}},
 		{"a list starting at 0", wf("0,30 6 * * *"), 1, []string{minuteZero("0,30 6 * * *")}},
 		{"a step from 0", wf("*/15 6 * * *"), 1, []string{minuteZero("*/15 6 * * *")}},
+		{"a range from 0", wf("0-10 6 * * *"), 1, []string{minuteZero("0-10 6 * * *")}},
+		{"an unordered list holding 0", wf("30,0 6 * * *"), 1, []string{minuteZero("30,0 6 * * *")}},
+		{"zero spelled 00", wf("00 6 * * *"), 1, []string{minuteZero("00 6 * * *")}},
+		{"a step from 0 without the star", wf("0/15 6 * * *"), 1, []string{minuteZero("0/15 6 * * *")}},
+		{"a range not from 0", wf("5-10 6 * * *"), 1, nil},
+		{"a list without 0", wf("17,47 5 * * *"), 1, nil},
 		{"four fields", wf("17 5 * *"), 1, []string{"t.yml: cron \"17 5 * *\" does not have five fields"}},
 		{"two crons, one on the hour", []byte("on:\n  schedule:\n    - cron: \"17 5 * * *\"\n    - cron: \"0 21 * * 0\"\njobs: {}\n"), 2, []string{minuteZero("0 21 * * 0")}},
 		{"no schedule", []byte("on: push\njobs: {}\n"), 0, nil},

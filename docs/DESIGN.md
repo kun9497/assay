@@ -492,8 +492,8 @@ hours when the cron sits on minute 0 of an hour. Measured on the previous schedu
 of the twenty nightlies from 2026-10-13 to 11-02 on `0 6 * * *` began 4.2 to 7.6 hours after
 it (10:12Z to 13:38Z), and the weekly on `0 21 * * 0` began 2 to 3.5 hours late (22:57Z to
 00:30Z), so the Monday review routine that reads its log at 01:30 UTC had about fifty minutes
-of margin on 2026-11-02. Both were moved off minute 0 on 2026-11-02 (QA #18), where the queue
-is shortest, and the hour pulled forward so a run that is still late lands where the old one
+of margin on 2026-11-02. Both were moved off minute 0, where the queue is longest, on 2026-11-02 (QA #18),
+and the hour pulled forward so a run that is still late lands where the old one
 did. Expect the nightly's `builtAt` and `lastRun` in `status.json` between about 05:20Z and
 13:00Z, and the weekly's log between about 20:25Z and 00:00Z: a `builtAt` hours after the cron
 is the scheduler, not a slipped clock. Anything that reads the weekly's log — the Monday
