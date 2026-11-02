@@ -8,6 +8,21 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- Inside one image layer, the last entry for a path is what the scan reads -- a later file,
+  link, type change or whiteout replaces an earlier one -- as tar extraction leaves it on
+  disk. Before, the first entry won, so a crafted layer could show the scan a different
+  package database than the one the container runs. A hardlink still holds its target as it
+  stood when the link was written (D130). (audit 2026-10-22 P4, re-verified 2026-11-02)
+- A symbolic link chain inside an image is followed through 40 links, Linux's own limit;
+  before, through seven. A path still behind a link after that, or a link cycle, is
+  reported as not read -- in JSON `unread[]`, SARIF `assay/not-read`, the table's count, and
+  as the target's incompleteness, so `--fail-on-incomplete` and `=target` exit 2 -- where
+  before it looked like an absent file and the image like one with no distro or no
+  packages. **The JSON report's `schemaVersion` is 16** (additive, no new field): `unread[]`
+  may now name a path inside an image, and the table's count reads "path(s) not read".
+  (audit 2026-10-22 P4, re-verified 2026-11-02)
+
+### Fixed
 - A git, URL or path dependency in `package-lock.json` (v1 and v3), yarn v1's `yarn.lock`,
   `Cargo.lock`, `poetry.lock` or `uv.lock` is no longer cataloged under the version its own
   checkout declares. That version need not be any registry release an advisory names, so the
