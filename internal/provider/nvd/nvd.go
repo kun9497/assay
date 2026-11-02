@@ -205,10 +205,20 @@ var retryWaits = defaultRetryWaits
 //
 //   - The CALLER's context being cancelled or expired is the caller saying
 //     stop. Retrying it ignores ^C and outlives the deadline it was given.
-//   - A 4xx other than 429 is this code getting the request wrong. Retrying
-//     makes the same mistake more slowly. 404 in particular was the
+//   - A 4xx other than 403 and 429 is this code getting the request wrong.
+//     Retrying makes the same mistake more slowly. 404 in particular was the
 //     window-wider-than-maxWindow bug, which a retry loop would have buried
 //     under a minute of silence before reporting the same error anyway.
+//
+// 403 is the exception because it is NVD's rate-limit answer: its API
+// documentation names 403 Forbidden, not 429, as what a client over the
+// rolling-window limit receives. Held permanent, one throttled page ended a
+// multi-hour sync on its first refusal (audit 2026-10-22 P4, re-verified
+// 2026-11-02). A 403 that is not throttling -- a rejected key, a blocked
+// address -- is retried too, and that is accepted rather than told apart:
+// the response carries nothing that distinguishes the two, and the cost is
+// the bounded schedule below before the same 403 is reported, against a
+// sync lost to a pause NVD asked for.
 //
 // Everything else -- 5xx, 429, connection resets, stream errors, truncated
 // or malformed bodies -- is NVD or the network having a bad moment. A
@@ -234,7 +244,7 @@ func retryable(ctx context.Context, err error) bool {
 	}
 	var se *httpStatusError
 	if errors.As(err, &se) {
-		return se.code >= 500 || se.code == http.StatusTooManyRequests
+		return se.code >= 500 || se.code == http.StatusTooManyRequests || se.code == http.StatusForbidden
 	}
 	return true
 }

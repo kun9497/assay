@@ -247,7 +247,11 @@ func TestAnnotate_ResumeFailureDoesNotClaimCoverage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		if calls == 2 {
-			w.WriteHeader(http.StatusForbidden)
+			// 400, not 403: since 403 is retried as NVD's rate-limit answer
+			// (audit 2026-10-22 P4, re-verified 2026-11-02), a 403 here would
+			// be recovered on the third call and this would stop testing a
+			// resume that fails partway.
+			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		io.WriteString(w, `{"totalResults":0,"timestamp":"2026-09-21T00:00:00.000","vulnerabilities":[]}`)
