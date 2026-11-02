@@ -485,6 +485,21 @@ signing ran for one day with nothing refusing, so the first signed digest could 
 before any binary required it. Since D138 a failed sign step opens the pinned `ops: db-publish is failing`
 issue, and `status.json` shows `"signed": false` for the live digest until it is fixed.
 
+**When the nightly actually runs.** The publish is scheduled at `17 5 * * *` (05:17 UTC) and
+the weekly scanner differential at `23 20 * * 0` (Sunday 20:23 UTC), and both crons are lower
+bounds on the start, not start times: GitHub queues scheduled runs and starts them late, by
+hours when the cron sits on minute 0 of an hour. Measured on the previous schedules, every one
+of the twenty nightlies from 2026-10-13 to 11-02 on `0 6 * * *` began 4.2 to 7.6 hours after
+it (10:12Z to 13:38Z), and the weekly on `0 21 * * 0` began 2 to 3.5 hours late (22:57Z to
+00:30Z), so the Monday review routine that reads its log at 01:30 UTC had about fifty minutes
+of margin on 2026-11-02. Both were moved off minute 0, where the queue is longest, on 2026-11-02 (QA #18),
+and the hour pulled forward so a run that is still late lands where the old one
+did. Expect the nightly's `builtAt` and `lastRun` in `status.json` between about 05:20Z and
+13:00Z, and the weekly's log between about 20:25Z and 00:00Z: a `builtAt` hours after the cron
+is the scheduler, not a slipped clock. Anything that reads the weekly's log — the Monday
+routine lives outside this repository — should stay at least three hours after the weekly's
+cron, and the nightly stays well before it.
+
 **Bound the first pass; do not reach for the full feed.** An unbounded build is about seven
 hours and there is no resume point — `db build` assembles a temporary database and installs it
 only at the end, so a failure at hour five discards all five hours. Four attempts at a wide

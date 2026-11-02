@@ -104,6 +104,28 @@
   실패한 뒤 잡이 "pushed and UNSIGNED" 라고, 아무것도 푸시되지 않은 이름에 대해 보고했습니다.
   `internal/ciguard` 가 이제 step output 을 `env` 로 넘기는 모든 단계에 그런 첫 줄 검사와, 같은 잡의 앞선
   단계가 그 output 을 쓰는지를 요구합니다.
+- 야간 발행의 `seed` 입력은 스크립트 본문에 expression 으로 치환되는 대신 `env` 를 통해 빌드에 닿고,
+  `ghcr.io/kun9497/assay-db@sha256:<64 hex>` 또는 `ghcr.io/kun9497/assay-db:<tag>` 꼴이 아니면 무엇이든
+  빌드되기 전에 두 꼴을 들어 거부됩니다. 전에는 디스패처가 적은 값이 뒤 단계에서 서명 키를 쥐는 잡의 Build
+  명령줄에 그대로 렌더링됐고(`db-sign.yml` 이 D137 부터 명시했고 `db-backfill.yml` 이 따르던 규칙), 입력
+  설명은 "a ghcr digest" 를 요구해 맨 `sha256:<hex>` 도 만족했는데 go-containerregistry 는 그것을 Docker
+  Hub 태그 `index.docker.io/library/sha256:<hex>` 로 해석하므로 그렇게 띄운 D110 복구는 한 시간 뒤에
+  실패했습니다. `internal/ciguard` 는 이제 어떤 workflow 의 `run:` 블록에서도 입력을 읽는 expression 을
+  거부합니다. (QA 2026-11-02 #16, #17)
+- 발행·서명·backfill workflow 의 alert 잡은 성공하지 못한 status 잡 -- 실패했거나, 타임아웃이나 사람 손에
+  취소된 -- 을 실패로 읽습니다. 전에는 `failure` 만 세어서, 감시 대상 잡이 통과하고 status 잡이
+  GitHub 의 360분 취소까지 멈춰 있으면(`timeout-minutes` 가 없었음) `scripts/ops-alert.sh` 에 성공으로
+  닿아 `status.json` 이 갱신되지 않았는데도 실패 이슈를 닫고 고정을 풀었습니다. 스크립트 자신의 머리말은
+  취소를 실패라고 적고 있었습니다. 세 status 잡은 `timeout-minutes: 15` 를 갖고, `internal/ciguard` 가
+  모든 alert 잡의 `RESULT` expression 과 모든 status 잡의 타임아웃을 요구합니다. (QA 2026-11-02 #19)
+
+### Changed
+- 야간 발행은 `17 5 * * *`(05:17 UTC), 주간 scanner differential 은 `23 20 * * 0`(일요일 20:23 UTC)에
+  예약됩니다. GitHub 의 큐가 가장 긴 minute 0 을 피한 것으로, 2026-10-13 부터 11-02 까지 `0 6 * * *` 의
+  나이틀리 스무 번은 모두 4.2~7.6시간 늦게(10:12Z~13:38Z), `0 21 * * 0` 의 주간 실행은 2~3.5시간
+  늦게(22:57Z~00:30Z) 시작해 월요일 리뷰 루틴에 50분 남짓의 여유만 남겼습니다. 여전히 늦는 실행이 예전
+  자리에 떨어지도록 시를 앞당겼고, 예상 시작 구간은 `docs/DESIGN.md` 의 `status.json` 옆에 기록했으며,
+  주간 workflow 의 주석은 더 이상 "Monday 06:00 KST" 라고 하지 않습니다. (QA 2026-11-02 #18)
 
 ## [0.14.0] - 2026-11-02
 
