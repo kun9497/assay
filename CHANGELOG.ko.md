@@ -8,6 +8,16 @@
 ## [Unreleased]
 
 ### Fixed
+- `package-lock.json`(v1, v3), yarn v1 의 `yarn.lock`, `Cargo.lock`, `poetry.lock`, `uv.lock` 의 git,
+  URL, 경로 의존성이 더는 그 체크아웃이 스스로 선언한 버전으로 카탈로그되지 않습니다. 그 버전은 권고문이
+  가리키는 레지스트리 릴리스와 같다는 보장이 없어, 스캔이 오탐과 조용한 미탐을 모두 낼 수 있었습니다.
+  이제 이런 항목은 평가되지 않음으로 집계되고 stderr 에 이름이 나옵니다
+  (`not pinned: <lockfile>: <name> (<reason>)`). `pnpm-lock.yaml`, yarn berry, `Gemfile.lock`,
+  `Pipfile.lock` 이 이미 하던 방식입니다. 체크아웃 자신이 가진 소스(uv 의 `editable` 프로젝트나
+  워크스페이스 멤버, yarn v1 의 `file:`/`link:` 항목)는 pnpm 과 berry 의 로컬 항목처럼 이름만 보이고
+  집계되지 않습니다. 대체 레지스트리나 사설 레지스트리는 그대로 카탈로그되며, `source` 가 없는 Cargo
+  크레이트(워크스페이스 자신의 것)도 마찬가지입니다. `composer.lock` 은 바뀌지 않습니다. 평범한 Packagist
+  패키지에도 `source.type = "git"` 을 기록하기 때문입니다. (감사 2026-10-22 P4, 2026-11-02 재확인)
 - 한 advisory 의 여러 range 가 설치된 버전을 포함하면, 발견은 그 모두를 벗어나게 하는 fix 를 적습니다. 그
   가운데 가장 높은 fixed bound 이고, 열린 range 보다 bound 가 있는 range 를 우선합니다. range 는 합집합이라
   패키지는 자기를 포함하는 모든 range 를 벗어나야 affected 가 아니게 됩니다. 전에는 파일에서 첫 번째 range 가

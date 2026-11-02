@@ -33,7 +33,7 @@ optional = false
 [metadata]
 lock-version = "2.0"
 `)
-	pkgs, stats, err := Parse(p)
+	pkgs, stats, _, err := Parse(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ version = "1.0.0"
 name = "second"
 version = "2.0.0"
 `)
-	pkgs, _, err := Parse(p)
+	pkgs, _, _, err := Parse(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ name = "nameonly"
 name = "complete"
 version = "1.0.0"
 `)
-	pkgs, stats, err := Parse(p)
+	pkgs, stats, _, err := Parse(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,19 +115,22 @@ version = "1.0.0"
 
 // A "name" or "version" key inside a nested table such as [package.source]
 // belongs to that table, not to the package. Attributing it to the package
-// yields a wrong version, which is a silent false negative.
+// yields a wrong version, which is a silent false negative. The source is a
+// legacy package index, which stays cataloged; a git source is refused
+// outright (TestParse_NonRegistrySourceTypes).
 func TestParse_KeysInsideNestedTablesAreNotThePackages(t *testing.T) {
 	p := write(t, `[[package]]
 name = "real"
 version = "1.0.0"
 
 [package.source]
-type = "git"
-url = "https://example.com/x.git"
-reference = "main"
+type = "legacy"
+url = "https://pypi.internal.example/simple"
+reference = "internal"
 version = "9.9.9"
+name = "not-the-package"
 `)
-	pkgs, _, err := Parse(p)
+	pkgs, _, _, err := Parse(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +146,7 @@ version = "9.9.9"
 // A file that is not a poetry.lock at all must not read as "no packages".
 func TestParse_AFileWithNoPackageBlocksIsAnError(t *testing.T) {
 	p := write(t, "this is not a lockfile\n")
-	_, _, err := Parse(p)
+	_, _, _, err := Parse(p)
 	if err == nil {
 		t.Fatal("Parse returned nil error for a file with no [[package]] blocks — " +
 			"an unreadable lockfile must not read as a clean scan")
@@ -173,7 +176,7 @@ version = "1.26.5"
 [[package]]
 name = "nameonly"
 `)
-	pkgs, stats, err := Parse(p)
+	pkgs, stats, _, err := Parse(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +205,7 @@ version = "1.26.5"
 [metadata]
 lock-version = "2.0"
 `)
-	_, stats, err := Parse(p)
+	_, stats, _, err := Parse(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +230,7 @@ func TestParse_NameIsNotNormalized(t *testing.T) {
 name = "PyYAML"
 version = "6.0"
 `)
-	pkgs, _, err := Parse(p)
+	pkgs, _, _, err := Parse(p)
 	if err != nil {
 		t.Fatal(err)
 	}

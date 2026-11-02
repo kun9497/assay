@@ -51,7 +51,39 @@ import (
 type pending struct {
 	name    string
 	version string
+	// sourceType is [package.source]'s `type`, read because a git, url,
+	// file or directory source's version is the one that tree declares,
+	// not a PyPI release. legacy, supplemental, explicit and any other
+	// type poetry writes for a named package index stay registry releases.
+	sourceType string
 }
+
+// Skipped is one [[package]] block this parser saw and declined to catalog,
+// with why - the shape pnpmlock and yarnlock return, so dirscan can name it.
+type Skipped struct {
+	Name   string
+	Reason string
+}
+
+// nonRegistrySource reports whether a [package.source] type names something
+// other than a package index.
+func nonRegistrySource(typ string) bool {
+	switch typ {
+	case "git", "url", "file", "directory":
+		return true
+	}
+	return false
+}
+
+// section is which table the lines being read belong to.
+type section int
+
+const (
+	sectionNone     section = iota // preamble, [metadata], or a closed block
+	sectionPackage                 // the [[package]] table's own keys
+	sectionSource                  // its [package.source] sub-table
+	sectionSubOther                // any other [package.*] sub-table
+)
 
 func (p pending) complete() bool {
 	return p.name != "" && p.version != ""
@@ -61,19 +93,25 @@ func (p pending) complete() bool {
 // path is also what every returned Package's single Location names, and
 // what any returned error names — a caller scanning many lockfiles in one
 // pass needs to know which one failed.
-func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, error) {
+func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, []Skipped, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		// os.ReadFile's own error already names the full path ("open
 		// <path>: ..."), so wrapping it again here would only double it up.
-		return nil, cyclonedx.Stats{}, err
+		return nil, cyclonedx.Stats{}, nil, err
 	}
 
 	var (
-		pkgs      []pkgmeta.Package
-		stats     cyclonedx.Stats
-		cur       pending
-		blockOpen bool
+		pkgs    []pkgmeta.Package
+		stats   cyclonedx.Stats
+		skipped []Skipped
+		cur     pending
+		// havePkg is whether a [[package]] is waiting to be finalized. It
+		// outlives sect: [package.source] sits after the package's own keys
+		// and before the next [[package]], so the block cannot be judged
+		// until then.
+		havePkg   bool
+		sect      section
 		sawHeader bool
 	)
 
@@ -84,6 +122,21 @@ func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, error) {
 	// invariant every cataloger in this repo holds.
 	finalize := func() {
 		stats.Components++
+		if nonRegistrySource(cur.sourceType) {
+			// A git/url/file/directory dependency is a real one whose
+			// version is that tree's own, not a PyPI release - a false
+			// positive and a false negative both ride on reading it.
+			// Counted and named, as pipfilelock counts its git/path entries
+			// and gemlock its GIT/PATH sections. Counting the local types too
+			// is safe here, unlike uv.lock: poetry.lock never lists the
+			// project itself.
+			stats.SkippedNoVersion++
+			skipped = append(skipped, Skipped{
+				Name:   cur.name,
+				Reason: "resolves to a " + cur.sourceType + " source; its version is not a PyPI release",
+			})
+			return
+		}
 		if !cur.complete() {
 			// Seen but unusable, and counted rather than dropped: a block
 			// silently discarded here is indistinguishable from one that
@@ -121,36 +174,43 @@ func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, error) {
 		}
 
 		if strings.HasPrefix(line, "[") {
-			if line == "[[package]]" {
+			switch {
+			case line == "[[package]]":
 				// A new package table starts. Whatever was pending from the
 				// previous one is now complete, however that turned out —
 				// finalize it before resetting cur, or its fields would
 				// leak into the block about to start.
-				if blockOpen {
+				if havePkg {
 					finalize()
 				}
 				cur = pending{}
-				blockOpen = true
+				havePkg, sect = true, sectionPackage
 				sawHeader = true
-			} else {
-				// Any other table header — [metadata], [package.source],
-				// [[package.dependencies]] — ends the current package
-				// block. Its own keys belong to THAT table, not to the
-				// package: [package.source] carries a "version" of its own
-				// for a git/url dependency, and attributing it to the
-				// package would silently overwrite a correct version with
-				// an unrelated one.
-				if blockOpen {
+			case havePkg && line == "[package.source]":
+				sect = sectionSource
+			case havePkg && (strings.HasPrefix(line, "[package.") || strings.HasPrefix(line, "[[package.")):
+				// [package.dependencies], [package.extras] and the like:
+				// still this package's tables, so the block stays pending
+				// for a [package.source] that may follow, but their keys
+				// are not the package's. Their own "name"/"version" keys
+				// belong to THAT table, and attributing one to the package
+				// would silently overwrite a correct version with an
+				// unrelated one.
+				sect = sectionSubOther
+			default:
+				// [metadata], or anything else that is not this package's:
+				// the block ends here.
+				if havePkg {
 					finalize()
 				}
-				blockOpen = false
+				havePkg, sect = false, sectionNone
 			}
 			continue
 		}
 
-		if !blockOpen {
+		if sect != sectionPackage && sect != sectionSource {
 			// Content of some table this parser does not read — [metadata],
-			// or the body of a nested table already closed above.
+			// or a sub-table such as [package.dependencies].
 			continue
 		}
 
@@ -164,6 +224,15 @@ func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, error) {
 			// intentionally does not understand.
 			continue
 		}
+		if sect == sectionSource {
+			// Only `type` is read here. [package.source] carries url,
+			// reference and resolved_reference too, none of them the
+			// package's name or version.
+			if key == "type" {
+				cur.sourceType = value
+			}
+			continue
+		}
 		switch key {
 		case "name":
 			cur.name = value
@@ -172,9 +241,9 @@ func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, error) {
 		}
 	}
 	if serr := scanner.Err(); serr != nil {
-		return nil, cyclonedx.Stats{}, fmt.Errorf("read %s: %w", path, serr)
+		return nil, cyclonedx.Stats{}, nil, fmt.Errorf("read %s: %w", path, serr)
 	}
-	if blockOpen {
+	if havePkg {
 		// EOF with a block open — the last [[package]] in the file, which
 		// closes at end-of-file rather than at another header.
 		finalize()
@@ -186,10 +255,10 @@ func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, error) {
 		// dependencies. A file with no [[package]] header at all is not a
 		// poetry.lock, and returning it as "no packages" would report a
 		// clean scan for a file this parser never actually understood.
-		return nil, cyclonedx.Stats{}, fmt.Errorf("%s: no [[package]] blocks found", path)
+		return nil, cyclonedx.Stats{}, nil, fmt.Errorf("%s: no [[package]] blocks found", path)
 	}
 
-	return pkgs, stats, nil
+	return pkgs, stats, skipped, nil
 }
 
 // parseQuotedAssignment recognizes the one line shape this parser reads a

@@ -10,25 +10,79 @@ package uvlock
 
 import (
 	"os"
+	"strings"
 
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
 	"github.com/kun9497/assay/internal/cataloger/tomlblock"
 	"github.com/kun9497/assay/internal/pkgmeta"
 )
 
-// Parse reads the uv.lock at path and returns the packages it resolves.
-func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, error) {
+// Skipped is one [[package]] block this parser saw and declined to catalog,
+// with why - the shape pnpmlock and yarnlock return, so dirscan can name it.
+type Skipped struct {
+	Name   string
+	Reason string
+}
+
+// sourceKey returns the one key of a uv.lock inline source table
+// (`{ git = "..." }` gives "git"). uv writes exactly one key there - registry,
+// git, url, path, directory, editable or virtual - so the first is the kind.
+// Anything that is not an inline table gives "".
+func sourceKey(raw string) string {
+	inner, ok := strings.CutPrefix(raw, "{")
+	if !ok {
+		return ""
+	}
+	eq := strings.Index(inner, "=")
+	if eq < 0 {
+		return ""
+	}
+	return strings.TrimSpace(inner[:eq])
+}
+
+// Parse reads the uv.lock at path and returns the packages it resolves,
+// alongside every block it refused because it does not come from a registry.
+func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, []Skipped, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		// os.ReadFile's error already carries the full path.
-		return nil, cyclonedx.Stats{}, err
+		return nil, cyclonedx.Stats{}, nil, err
 	}
 
 	var (
-		pkgs  []pkgmeta.Package
-		stats cyclonedx.Stats
+		pkgs    []pkgmeta.Package
+		stats   cyclonedx.Stats
+		skipped []Skipped
 	)
 	for _, b := range tomlblock.Scan(data) {
+		switch sourceKey(b.Source) {
+		case "git", "url", "path", "directory":
+			// The version beside a git checkout, a URL archive or a path to
+			// another tree is the one that tree's own metadata declares, not a
+			// PyPI release: reporting it risks both a false positive and a
+			// false negative. Counted and named, as pipfilelock counts its
+			// git/path entries and pnpm its causeGit.
+			stats.Components++
+			stats.SkippedNoVersion++
+			skipped = append(skipped, Skipped{
+				Name:   b.Name,
+				Reason: "resolves to a git, URL or path source; its version is not a PyPI release",
+			})
+			continue
+		case "editable":
+			// The project itself (when it is a package) and every workspace
+			// member: uv writes all of them as editable. Shown, not counted -
+			// pnpm's causeLocal (D103) - because counting would make every
+			// healthy uv scan incomplete, the defect npmlock's root "" key
+			// once had. "virtual" (a project that is not a package) is left
+			// cataloged as before.
+			skipped = append(skipped, Skipped{
+				Name:   b.Name,
+				Reason: "an editable source in this checkout (the project or a workspace member), nothing to evaluate",
+			})
+			continue
+		}
+
 		stats.Components++
 		if b.Name == "" || b.Version == "" {
 			// Counted, then skipped: there is nothing here for a comparer to
@@ -52,5 +106,5 @@ func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, error) {
 		})
 	}
 
-	return pkgs, stats, nil
+	return pkgs, stats, skipped, nil
 }

@@ -26,7 +26,7 @@ func TestParse_V3PackagesObject(t *testing.T) {
 	    "node_modules/@scope/pkg": {"version": "2.0.0"}
 	  }
 	}`)
-	pkgs, stats, err := Parse(p)
+	pkgs, stats, _, err := Parse(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestParse_CatalogedPackageCarriesMatchableFields(t *testing.T) {
 	    "node_modules/lodash": {"version": "4.17.11"}
 	  }
 	}`)
-	pkgs, _, err := Parse(p)
+	pkgs, _, _, err := Parse(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestParse_V3AliasEntryIsNamedByItsRegistryIdentity(t *testing.T) {
 	    }
 	  }
 	}`)
-	pkgs, stats, err := Parse(p)
+	pkgs, stats, _, err := Parse(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestParse_V1AliasEntryIsNamedByItsRegistryIdentity(t *testing.T) {
 	    "broken-alias": {"version": "npm:lodash"}
 	  }
 	}`)
-	pkgs, stats, err := Parse(p)
+	pkgs, stats, _, err := Parse(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,7 @@ func TestParse_V1NestedDependencies(t *testing.T) {
 	    }
 	  }
 	}`)
-	pkgs, _, err := Parse(p)
+	pkgs, _, _, err := Parse(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +329,7 @@ func TestParse_V1DependenciesSortedAtEveryLevel(t *testing.T) {
 	    "apple": {"version": "6.0.0"}
 	  }
 	}`)
-	pkgs, _, err := Parse(p)
+	pkgs, _, _, err := Parse(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +363,7 @@ func TestParse_NestedInstallPathNamesTheInnermostPackage(t *testing.T) {
 	    "node_modules/a/node_modules/lodash": {"version": "4.17.11"}
 	  }
 	}`)
-	pkgs, _, err := Parse(p)
+	pkgs, _, _, err := Parse(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,7 +391,7 @@ func TestParse_UnmatchableEntriesAreCountedNotDropped(t *testing.T) {
 	    "node_modules/real": {"version": "1.2.3"}
 	  }
 	}`)
-	pkgs, stats, err := Parse(p)
+	pkgs, stats, _, err := Parse(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +430,7 @@ func TestParse_PackagesInSortedKeyOrder(t *testing.T) {
 	    "node_modules/banana": {"version": "4.0.0"}
 	  }
 	}`)
-	pkgs, _, err := Parse(p)
+	pkgs, _, _, err := Parse(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,7 +464,7 @@ func TestParse_PackagesObjectTakesPrecedenceOverDependencies(t *testing.T) {
 	    "lodash": {"version": "4.17.10"}
 	  }
 	}`)
-	pkgs, _, err := Parse(p)
+	pkgs, _, _, err := Parse(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,7 +481,7 @@ func TestParse_PackagesObjectTakesPrecedenceOverDependencies(t *testing.T) {
 // renders as a clean scan; an error exits 2.
 func TestParse_MalformedJSONIsAnErrorNotAnEmptyResult(t *testing.T) {
 	p := write(t, `{"lockfileVersion": 3, "packages": `)
-	_, _, err := Parse(p)
+	_, _, _, err := Parse(p)
 	if err == nil {
 		t.Fatal("Parse returned nil error on truncated JSON — an unreadable " +
 			"lockfile must not read as a clean scan")
@@ -501,7 +501,7 @@ func TestParse_MalformedJSONIsAnErrorNotAnEmptyResult(t *testing.T) {
 // the equivalent case for go.mod.
 func TestParse_MissingFileNamesThePath(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "package-lock.json") // never written
-	_, _, err := Parse(p)
+	_, _, _, err := Parse(p)
 	if err == nil {
 		t.Fatal("Parse returned nil error for a lockfile that does not exist")
 	}

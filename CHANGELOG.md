@@ -8,6 +8,17 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- A git, URL or path dependency in `package-lock.json` (v1 and v3), yarn v1's `yarn.lock`,
+  `Cargo.lock`, `poetry.lock` or `uv.lock` is no longer cataloged under the version its own
+  checkout declares. That version need not be any registry release an advisory names, so the
+  scan risked both a false positive and a silent false negative. Such an entry is now counted
+  as not evaluated and named on stderr (`not pinned: <lockfile>: <name> (<reason>)`), as
+  `pnpm-lock.yaml`, yarn berry, `Gemfile.lock` and `Pipfile.lock` already did. A source the
+  checkout itself holds -- a uv `editable` project or workspace member, a yarn v1 `file:` or
+  `link:` entry -- is named and not counted, as pnpm's and berry's local entries are. An
+  alternate or private registry stays cataloged, and so does a Cargo crate with no `source`
+  (the workspace's own). `composer.lock` is unchanged: it records `source.type = "git"` for
+  ordinary Packagist packages too. (audit 2026-10-22 P4, re-verified 2026-11-02)
 - When several ranges of one advisory hold the installed version, the finding names the fix
   that clears all of them: the highest fixed bound among them, preferring a bounded range over
   an open one. Ranges are a union, so a package stays affected until it clears every range
