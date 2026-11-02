@@ -8,6 +8,21 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- Both CSAF readers carry a leaf purl's `epoch=N` qualifier into the stored fixed version as
+  `N:version-release`, the shape the rpmdb cataloger writes for an installed build. Red Hat's
+  Hummingbird reader (D98) took the purl's `@version` alone and stopped at the `?`, so nginx
+  (epoch 2) and tomcat10/11 (epoch 1) were stored fixed at an epoch-less version that every
+  installed build sorts above, and a vulnerable build was reported clean -- 67 of the 403
+  distinct Hummingbird purls in the 160 newest live documents, on the image the weekly
+  differential scans (QA 2026-11-02 #4, P1). SUSE's reader (D77), which the Hummingbird one
+  was copied from, had the identical gap, latent because every epoch-qualified purl in its
+  archive is a Liberty Linux build the key fold refuses (#5, P3). Both now read the purl
+  through `pkgmeta.ParsePURL` and `pkgmeta.EVROf`, the rule the scan side has applied to SBOM
+  purls since D83: a zero or absent epoch stays unprefixed, an empty version never gains one,
+  and D131's split of a version-less SUSE build is unchanged. Each provider's progress line
+  counts the epoch-carrying fixed entries (`HummingbirdFixedWithEpoch`, `RecommendedWithEpoch`).
+  The published artifact's Hummingbird nginx and tomcat records stay wrong until the next
+  nightly rebuilds it.
 - `db build` retries a Photon OS feed file through a transient failure instead of failing the
   whole build on the first non-200. The provider made one GET per major; the 2026-10-17 nightly
   publish died on a 404 from the Photon CDN for one of the three fixed

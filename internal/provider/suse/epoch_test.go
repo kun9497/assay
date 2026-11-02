@@ -24,12 +24,21 @@ const (
 	epochPurl = "pkg:rpm/suse/pgbouncer@1.24.1-150600.3.1?arch=x86_64&epoch=1&upstream=pgbouncer-1.24.1-150600.3.1.src.rpm"
 )
 
+// The document also fixes an epoch-less build (the shape of every SLES
+// build today), so the counter is held to the epoch-carrying id alone and
+// not to "any recommended id with a version".
 func epochDoc(t *testing.T) *document {
 	t.Helper()
 	return buildDoc(t, "CVE-2026-61107",
 		[]string{epochPlat},
-		map[string]string{"pgbouncer-1.24.1-150600.3.1": epochPurl},
-		[]string{epochPlat + ":pgbouncer-1.24.1-150600.3.1"},
+		map[string]string{
+			"pgbouncer-1.24.1-150600.3.1":      epochPurl,
+			"libevent-2_1-7-2.1.12-150600.4.1": "pkg:rpm/suse/libevent-2_1-7@2.1.12-150600.4.1?arch=x86_64&upstream=libevent-2.1.12-150600.4.1.src.rpm",
+		},
+		[]string{
+			epochPlat + ":pgbouncer-1.24.1-150600.3.1",
+			epochPlat + ":libevent-2_1-7-2.1.12-150600.4.1",
+		},
 		nil, nil)
 }
 
@@ -59,7 +68,7 @@ func TestConvert_EpochQualifierReachesTheFixedVersion(t *testing.T) {
 			fixed, "1:1.24.1-150600.3.1")
 	}
 	if st.RecommendedWithEpoch != 1 {
-		t.Errorf("RecommendedWithEpoch = %d, want 1", st.RecommendedWithEpoch)
+		t.Errorf("RecommendedWithEpoch = %d, want 1: the epoch-less libevent build does not count", st.RecommendedWithEpoch)
 	}
 	if st.RecommendedNamedByNEVRSplit != 0 || st.RecommendedEmptyVersionKept != 0 {
 		t.Errorf("D131 counters moved (%d split, %d kept) on a purl that carries a version", st.RecommendedNamedByNEVRSplit, st.RecommendedEmptyVersionKept)

@@ -2894,6 +2894,22 @@ product id당 콜론 하나, Red Hat식 module 컨텍스트는 없음; 신선도
 `--fail-on-unfixable`은 SUSE에서도 동작하지만, `=wont-fix`는 SUSE가 굳이 분류해 둔 201건만
 잡습니다; README가 그 기능 바로 옆에서 그렇게 말합니다.
 
+**개정 (QA 2026-11-02).** `packageOf` 가 purl 의 `epoch` qualifier 를 버렸습니다. `purlRE` 는
+`pkg:rpm/suse/<name>@<version>` 을 읽고 `?` 에서 멈췄으므로 `epoch=N` qualifier 는 저장되는 fixed
+버전에 끝내 닿지 않았는데, rpmdb 카탈로거는 설치된 빌드를 `N:version-release` 로 쓰고 `version.RPM`
+은 epoch 를 먼저 비교합니다 — fix 가 설치된 모든 빌드 아래로 정렬된 것입니다. 이 피드에서는
+잠복 결함입니다: 아카이브의 epoch qualifier 가 붙은 purl 10,031개는 전부 `foldKey` 가 거절하는
+Liberty Linux 빌드입니다. 그러나 Epoch 를 가진 SLES 패키지 하나만 나오면 Hummingbird 에서 실제로
+터진 것과 같은 P1 이 됩니다(D98 의 reader 는 이것을 복사한 것입니다). 이제 `packageOf` 는 purl 을
+`pkgmeta.ParsePURL` 로 파싱하고 버전을 `pkgmeta.EVROf` 에서 받습니다 — D83 이후 스캔 쪽이 SBOM
+purl 에 적용해 온 바로 그 규칙입니다: 0 이 아닌 epoch 는 `epoch:` 로 앞에 붙고, 0 이거나 없는 epoch
+는 붙지 않으며(rpmdb 의 `evr()` 도 같은 식으로 생략합니다), 빈 버전에는 절대 붙지 않습니다. 정규식이
+거절하던 `@` 없는 purl 은 bare 패키지로 읽힙니다 — 이 피드에서 실측된 적 없는 모양이고, D47 이
+Red Hat 의 bare purl 에서 이미 읽는 것과 같은 진술입니다. `RecommendedWithEpoch` 가 fold 되는 키 위의
+epoch 를 가진 recommended id 를 진행 줄에 셉니다. SLES 가 그런 패키지를 내놓는 날 차등이 아니라
+야간 줄에서 보이도록 하기 위해서입니다. `TestConvert_EpochQualifierReachesTheFixedVersion` 과, 실제
+store 와 matcher 를 거치는 `TestEpoch_InstalledBuildBelowTheFixIsAffected` 가 지킵니다.
+
 ---
 
 ### D78 — AL2의 extras topic, 하드코딩 대신 열거
@@ -3673,6 +3689,25 @@ qualifier(`distro=hummingbird-20251124`) 모두 기존 장치를 그대로 탑�
 fix-이전의 no-fix 행을 담고 있습니다. assay의 더 작은 답이 옳은 답이고, 피드
 자체로 검증됩니다. 독립 리뷰 mutation 3개 중 3개가 red입니다(CPE→mainline 키,
 누락된 purl에 지어낸 패키지, VERSION_ID 파편화).
+
+**개정 (QA 2026-11-02).** purl 의 `epoch` qualifier 가 버려졌고, 위의 차등은 그것을 볼 수
+없었습니다. `hummingbirdPurlRE` 는 `@version` 만 취하고 `?` 에서 멈췄으므로 live 문서의
+`pkg:rpm/redhat/nginx@1.30.4-2.hum1?arch=x86_64&epoch=2&…`(cve-2026-42533, -56434, -60005)는
+fix 를 `1.30.4-2.hum1` 로 저장했는데, rpmdb 카탈로거는 설치된 빌드를 `2:1.30.4-1.hum1` 로
+씁니다(header.go 의 `evr()`; Azure Linux 와 Photon 키만 epoch 를 떼어냅니다, D153). `version.RPM`
+은 epoch 를 먼저 비교하므로 `Compare("2:1.30.4-1.hum1", "1.30.4-2.hum1")` 은 1 이고, epoch 를 가진
+취약한 빌드 전부 — 최신 문서 160개의 Hummingbird purl 403종 중 67종, epoch 2 의 nginx* 와 epoch 1
+의 tomcat10/11 — 가 깨끗하다고 보고됐습니다. 주간 차등이 스캔하는 바로 그 이미지
+(quay.io/hummingbird/nginx:1.30.4)에서입니다. 이제 reader 는 purl 을 `pkgmeta.ParsePURL` 로
+파싱하고 버전을 `pkgmeta.EVROf` 에서 받습니다 — D83 이후 스캔 쪽이 SBOM purl 에 적용해 온 규칙:
+0 이 아닌 epoch 는 `epoch:` 로 앞에 붙고, 0 이거나 없는 epoch 는 붙지 않으며, bare purl 은 빈 버전을
+유지합니다. `HummingbirdFixedWithEpoch` 가 그 항목을 진행 줄에 셉니다.
+`TestConvert_HummingbirdEpochQualifierReachesTheFixedVersion`(같은 문서의 mainline 항목은 NEVRA 안에
+epoch 를 적으므로 세지 않습니다)과, 실제 store 와 matcher 를 거치는
+`TestHummingbirdEpoch_InstalledBuildBelowTheFixIsAffected` 가 지킵니다: `2:1.30.4-1.hum1` 은 fix 를
+듣고 `2:1.30.4-2.hum1` 은 깨끗합니다. 발행된 아티팩트의 Hummingbird nginx/tomcat 레코드는 다음 야간
+빌드가 다시 만들 때까지 틀린 채입니다. 주간 diff 의 `hummingbird` 타깃에서 grype 전용 튜플이 그
+흔적입니다. 이 reader 가 복사해 온 SUSE 의 reader 에도 같은 결함이 있었습니다(같은 날짜의 D77 개정).
 
 ---
 
@@ -5487,6 +5522,17 @@ D128 경로가 쪼갬 카운터에 셈. 생존 변이 하나는 기록된 동치
 Computing 모듈의 qemu/ovmf 빌드는 여전히 codestream 범위로 판정됩니다(기존 그대로). 모듈 빌드가
 assay가 스캔하는 곳에 설치되는지는 알 수 없습니다 — 수혜자는 컨테이너 이미지가 아니라 호스트나
 VM SBOM입니다.
+
+**개정 (QA 2026-11-02).** 이 규칙 뒤에 있는 purl reader `packageOf` 가 정규식에서
+`pkgmeta.ParsePURL` + `pkgmeta.EVROf` 로 옮겨가, purl 의 `epoch` qualifier 가 fixed 버전에
+닿습니다(같은 날짜의 D77 개정). 쪼개기 규칙은 손대지 않았습니다: `ParsePURL` 은
+`pkg:rpm/suse/kernel-coco-6.4.0-15061.9.coco15sp6.1@` 를 NEVR 전체가 이름이고 버전이 빈 채로
+남기고, `EVROf` 는 빈 버전에 epoch 를 절대 붙이지 않으므로 `resolveProduct` 는 전과 똑같은 `""` 를
+보고 전처럼 쪼갭니다. 쪼갠 빌드의 버전은 product_id 에서 오고 거기엔 epoch 가 없으므로 새
+`RecommendedWithEpoch` 카운터에도 닿지 않습니다. `TestPackageOf` 가 그 행
+(`…coco15sp6.1@?epoch=1` → 빈 버전)을 지키고, D131 스위트는 그대로 green 입니다. 남은 것: purl 에
+0 이 아닌 epoch 가 붙은 쪼갠 빌드는 그것을 잃습니다 — product_id 에는 적을 자리가 없고, 16,736건
+중 하나도 그렇지 않습니다.
 
 ### 2026-10-22 외부 리뷰 — 조건부 결함 6건, 전부 재현, 전부 수정
 

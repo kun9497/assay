@@ -47,7 +47,9 @@ Amazon Linux 2/2023 (D73), Oracle Linux 5–10 (D74), Fedora (D75), SLES/openSUS
 (D77), Wolfi/Chainguard (D88), MinimOS and Echo (D92), Azure Linux/CBL-Mariner (D94), Alpaquita/BellSoft (D95, which
 added the apk `p:` provides bridge), Photon OS 3/4/5 (D96), Arch Linux (D97, the
 release-less `Arch:rolling` key), Red Hat's Hummingbird (D98, carved out of the CSAF
-feed already fetched), and CleanStart (D101, identified by an apk marker package because it
+feed already fetched; since QA 2026-11-02 both CSAF readers carry a purl's `epoch=`
+qualifier into the fixed version through `pkgmeta.EVROf` -- nginx and tomcat had been judged
+clean against an epoch-less fix), and CleanStart (D101, identified by an apk marker package because it
 ships no os-release) —
 across three rpmdb backends: BerkeleyDB, SQLite and ndb (D44, D76). Bitnami app layers
 catalog from their /opt/bitnami SPDX markers alongside the base distro (D99, dual

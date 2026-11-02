@@ -1089,7 +1089,9 @@ exited 0 while 24 findings went unmentioned.
       being aliased onto rpm (the tensorflow `2.4.0rc4` false negative, measured)
 - [x] Hummingbird (D98) — Red Hat's hardened line, extracted from the CSAF feed assay
       already fetches: CPE-scoped, purl-read (stream labels fan out), bare rolling key;
-      day-one differential traced every grype-only tuple to grype's own stale snapshot
+      day-one differential traced every grype-only tuple to grype's own stale snapshot.
+      Revised QA 2026-11-02: the purl's `epoch=` qualifier reaches the fixed version
+      (nginx epoch 2, tomcat epoch 1 had been judged clean), in both CSAF readers
 - [x] Bitnami (D99) — an app layer riding on someone else's distro: purl-type routing,
       a revision-stripping SemVer wrapper, and a marker cataloger that reuses the D84
       SPDX reader; day-one differential 497/497 with agree 485, dual inventory proven
