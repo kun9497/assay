@@ -20,6 +20,13 @@
   아래서 스캔하는 대신 exit 2 로 끝납니다. (QA 2026-11-02 P3 #23)
 
 ### Fixed
+- Ubuntu 26.10 finding 이 Canonical 의 fix state 를 갖게 됩니다. tracker 의 `stonking` 코드명이
+  `db build` 가 tracker 행을 해석하는 표에 없어서 모든 `stonking_<pkg>` 행이 unknown-codename
+  tuple 로 버려졌고, 2026-11-01 에 게시된 artifact 는 `Ubuntu:26.10` 에 fix 없는 range 16,289 개를
+  들고 있으면서 wont-fix/not-fixed state 는 0 개였습니다(`dev.assay.ubuntu-fix-states`). D157 의
+  publish guard 는 0 으로 게시된 키를 볼 수 없습니다. 이제 `resolute` 가 `26.04` 로 가듯 `stonking` 은
+  `26.10` 으로 갑니다. `tenacious`(27.04, 개발 릴리스)와 `devel` 은 의도적으로 매핑하지 않습니다.
+  (QA 2026-11-04)
 - jar 의 엔트리는 하나씩만이 아니라 합계로도 상한을 받습니다. cataloger 는 각 엔트리의 압축 해제
   바이트를 512 MiB 파일당 한도로 막았지만 그 합계는 아무것도 막지 않았으므로, deflate 된 64 MiB
   엔트리 열두 개를 담은 784 KB jar 가 768 MiB 를 풀어냈고, 같은 모양을 아카이브 한도까지 키우면 수백
