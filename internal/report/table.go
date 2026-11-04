@@ -120,6 +120,20 @@ func (s Summary) Trustworthy() bool {
 // cov is D111's per-key coverage: a block under the summary line, and the
 // '@' footnote for every frozen key whether or not a row carries the marker.
 func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirscan.Unread, eol EOLStatus, cov Coverage, colorize bool) (Summary, error) {
+	// Every write below goes through one writer that remembers the first
+	// failure, and the function returns it at the end. The headline, the
+	// summary line, the footnotes and the Suppressed and Not-evaluated blocks
+	// are written with fmt.Fprint*, whose return value nobody reads; only the
+	// findings table itself checked its write. So with stdout closed, full or
+	// read-only, a table WITH findings exited 2 and said "write report", while
+	// a clean scan, an empty document or an all-waived scan wrote nothing,
+	// returned nil, and exited 0 -- a report that never reached the pipe or
+	// the file, with no reportSha256 to prove it, read as a pass (QA
+	// 2026-11-02, reproduced on main 2026-11-04). The json and sarif
+	// renderers already failed loudly; the table was the one renderer whose
+	// missing output was silent, and it is the default one.
+	sw := &stickyWriter{w: w}
+	w = sw
 	// D87: one line, only when the target's distro release is actually EOL
 	// — Line() itself returns ok=false for both "nothing to say" (Known is
 	// false) and "current release" (Known but not EOL), so this is the only
@@ -499,7 +513,33 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 			fmt.Fprintf(w, "not read: %s (%s)\n", u.Path, u.Reason)
 		}
 	}
+	// Summary{} rather than sum, on the explicit checks' own pattern above: a
+	// summary of a report nobody received must not drive a verdict.
+	if sw.err != nil {
+		return Summary{}, sw.err
+	}
 	return sum, nil
+}
+
+// stickyWriter forwards writes to w until one fails, then keeps that error
+// and refuses the rest. Table writes its lines with fmt.Fprint*, which
+// discards the writer's error, so this is how the function learns that the
+// report did not arrive -- and once a write has failed there is nothing to
+// gain from pushing the remaining lines at a stream that is closed or full.
+type stickyWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (s *stickyWriter) Write(p []byte) (int, error) {
+	if s.err != nil {
+		return 0, s.err
+	}
+	n, err := s.w.Write(p)
+	if err != nil {
+		s.err = err
+	}
+	return n, err
 }
 
 // Summarize computes exactly the counts Table's own summary line prints,

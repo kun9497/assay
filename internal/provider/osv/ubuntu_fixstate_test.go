@@ -333,6 +333,47 @@ var wantCodenameRelease = map[string]string{
 	"plucky":   "25.04",
 	"questing": "25.10",
 	"resolute": "26.04",
+	"stonking": "26.10",
+}
+
+// TestConvert_UbuntuStonkingStampsInterim2610 is the caller-first test for
+// the 26.10 table entry: a tracker row on stonking must reach a fix-less
+// Ubuntu:26.10 range through convert(), the path fetchOne runs. Before the
+// entry existed every stonking_ row was an unknown-codename tuple, and the
+// published 2026-11-01 artifact carried Ubuntu:26.10 with 16,289 fix-less
+// ranges and 0 fix states (dev.assay.ubuntu-fix-states, QA 2026-11-04) --
+// a gap D157's publish guard cannot see, because 0 -> 0 is not a drop.
+func TestConvert_UbuntuStonkingStampsInterim2610(t *testing.T) {
+	dir := t.TempDir()
+	writeUbuntuTrackerFile(t, dir, "active", "CVE-2026-9104", "Candidate: CVE-2026-9104\n\n"+
+		"Patches_bind9:\n"+
+		"resolute_bind9: released (1:9.20.24-1ubuntu0.5)\n"+
+		"stonking_bind9: needed\n"+
+		"tenacious_bind9: needs-triage\n"+
+		"devel_bind9: needs-triage\n")
+	var st stats
+	tracker := buildUbuntuTracker(t, dir, &st)
+
+	rec := ubuntuFixlessRecord("UBUNTU-CVE-2026-9104", "CVE-2026-9104", "Ubuntu:26.10", "bind9")
+	got, ok, err := convert([]byte(rec), "Ubuntu", &st, tracker)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	if !ok {
+		t.Fatal("convert returned ok=false")
+	}
+	if fs := got.Affected[0].Ranges[0].FixState; fs != advisory.FixStateNotFixed {
+		t.Errorf("Ubuntu:26.10 FixState = %q, want %q -- stonking is 26.10 and its row must stamp",
+			fs, advisory.FixStateNotFixed)
+	}
+	if st.UbuntuStampedNotFixed != 1 {
+		t.Errorf("UbuntuStampedNotFixed = %d, want 1", st.UbuntuStampedNotFixed)
+	}
+	// tenacious (the development release after 26.10) and devel stay
+	// unknown on purpose: no image reports either as its VERSION_ID.
+	if st.UbuntuUnknownCodename != 2 {
+		t.Errorf("UbuntuUnknownCodename = %d, want 2 (tenacious, devel)", st.UbuntuUnknownCodename)
+	}
 }
 
 // TestParseUbuntuTrackerFile_CodenameReleaseTable is the caller-first proof
