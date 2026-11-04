@@ -236,6 +236,35 @@ func TestParse_SubjectDuplicateKeepsTheDroppedListingsEvidence(t *testing.T) {
 			t.Errorf("source = %+v, want openssl from the dropped listing", src)
 		}
 	})
+	t.Run("srpm and module stream", func(t *testing.T) {
+		const bare = `{"type":"library","name":"mod_ssl","version":"2.4.62-1.el9","purl":"pkg:rpm/redhat/mod_ssl@2.4.62-1.el9?arch=x86_64&distro=rhel-9.4&epoch=1"}`
+		const full = `{"type":"library","name":"mod_ssl","version":"2.4.62-1.el9","purl":"pkg:rpm/redhat/mod_ssl@2.4.62-1.el9?arch=x86_64&distro=rhel-9.4&epoch=1&upstream=httpd-2.4.62-1.el9.src.rpm",` +
+			`"properties":[{"name":"syft:metadata:modularityLabel","value":"httpd:2.4:9040020240101:abcdef"}]}`
+		target, _, err := Parse(strings.NewReader(start + `"metadata":{"component":` + full + `},"components":[` + bare + `]}`))
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		if len(target.Packages) != 1 {
+			t.Fatalf("packages = %d, want 1", len(target.Packages))
+		}
+		p := target.Packages[0]
+		if p.Upstream != "httpd-2.4.62-1.el9.src.rpm" || p.Source == nil || p.Source.Name != "httpd" {
+			t.Errorf("upstream/source = %q/%+v, want the SRPM from the dropped listing", p.Upstream, p.Source)
+		}
+		if p.ModuleStream != "httpd:2.4" {
+			t.Errorf("module stream = %q, want httpd:2.4 from the dropped listing", p.ModuleStream)
+		}
+	})
+	t.Run("an identical location is not repeated", func(t *testing.T) {
+		const lodash = `{"type":"library","name":"lodash","version":"4.17.20","purl":"pkg:npm/lodash@4.17.20"}`
+		target, _, err := Parse(strings.NewReader(start + `"metadata":{"component":` + lodash + `},"components":[` + lodash + `]}`))
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		if len(target.Packages) != 1 || len(target.Packages[0].Locations) != 1 {
+			t.Errorf("packages = %+v, want one package with its one location (\"sbom\") once", target.Packages)
+		}
+	})
 }
 
 // A distro package as the subject, or under it, is keyed by the document's
