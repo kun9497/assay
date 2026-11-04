@@ -92,8 +92,10 @@ here:
 
 ## What does not change without a major version
 
-- **Exit codes** (D11): `0` clean, `1` findings at or above a `--fail-on*` gate, `2` could
-  not run or the result cannot be trusted, with `2` outranking `1`.
+- **Exit codes** (D11): `0` no `--fail-on*` gate tripped (not "no findings": without a gate,
+  with every finding waived, or with an empty document the exit is 0 too — read `summary`), `1`
+  findings at or above a `--fail-on*` gate, `2` could not run or the result cannot be trusted,
+  with `2` outranking `1`.
 - **Stream discipline**: results on stdout, diagnostics on stderr.
 - **Flag names.** A flag's meaning can be narrowed or extended with a release note; a flag
   is not renamed or removed.

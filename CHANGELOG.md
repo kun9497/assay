@@ -39,6 +39,28 @@ All notable changes to this project are documented here. The format follows
   under the subject, stay two. A distro package as or under the subject is keyed by the
   document's operating-system component as its top-level twin is. (QA 2026-11-02 "CycloneDX
   subject", reproduced 2026-11-04; review of PR #238)
+- A table report that could not be written is exit 2. With stdout closed, full or opened
+  read-only, `--output json` and `--output sarif` already exited 2 with `error: write report`,
+  and so did a table that had findings to list; a table with nothing to list -- a clean scan,
+  an empty document, a scan whose every finding was waived -- wrote nothing, exited 0 and
+  recorded no `reportSha256`, so a job that redirected the default output to a file it could
+  not write read the absent report as a pass. Every line the table writes is now checked, and
+  the first failure is reported on stderr the way the other renderers report theirs.
+  Reproduced on main with the release binary; the fix is held through `scancmd.Run` and
+  through the CLI entry point. (QA 2026-11-04, dimension 4 #5; first seen by QA 2026-11-02)
+- `assay scan --help`, `assay scan -h`, `assay db --help`, `assay db -h` and `assay db help`
+  print the usage on stdout and exit 0, as `assay help` does. They used to be `error: unknown
+  flag` / `error: unknown db subcommand`, exit 2, with nothing on stdout. `db` answers help
+  before it locates the database, so a machine with no user cache dir (a scratch CI container,
+  `docker run` with a numeric uid and no HOME) gets the usage rather than `error: locate
+  database`, as `scan --help` already did there. (QA 2026-11-04 #7)
+- Ubuntu 26.10 findings carry Canonical's fix states. The tracker's `stonking` codename was
+  not in the table `db build` resolves tracker rows with, so every `stonking_<pkg>` row was an
+  unknown-codename tuple and the published 2026-11-01 artifact held `Ubuntu:26.10` with 16,289
+  fix-less ranges and 0 wont-fix/not-fixed states (`dev.assay.ubuntu-fix-states`). D157's
+  publish guard cannot see a key that was published at zero. `stonking` now maps to `26.10`,
+  the same way `resolute` maps to `26.04`; `tenacious` (27.04, development) and `devel` stay
+  unmapped on purpose. (QA 2026-11-04)
 - A jar's entries are bounded in total, not only one at a time. The cataloger capped each
   entry's decompressed bytes at the 512 MiB per-file limit and nothing capped their sum, so a
   784 KB jar of twelve deflated 64 MiB entries inflated 768 MiB, and the same shape at the
@@ -82,6 +104,17 @@ All notable changes to this project are documented here. The format follows
   says to retry in a minute if the publisher pushed moments ago, then the mirror clause, then
   the opt-out. `db update` still makes one attempt. (QA 2026-11-02 P3 #21)
 ### Changed
+- The documentation no longer calls exit `0` "clean". README, `docs/integrations.md`,
+  `docs/compatibility.md` and `CONTRIBUTING.md` now say what it is: no `--fail-on*` gate tripped,
+  which a scan run with no gate, a scan whose findings were all waived and an SBOM with no
+  components all satisfy; the JSON `summary` is what says what was found. The two CI examples
+  install `assay` from the commit the latest release was built from, as the README does, instead
+  of `main` (the release job now keeps all four pinned, and `internal/ciguard` fails when any of
+  the four names a branch or tag or when they disagree), and the GitLab example installs
+  `openssl`, which `install.sh` verifies the checksums signature with and the `alpine` image
+  lacks -- copied as it was, the installer refused to install. Korean copies updated alongside.
+  (QA 2026-11-04 #6, #8)
+
 - `--db-max-age` and `--db-max-rating-age` accept the space form (`--db-max-age 48h`) as well
   as `=`, like `--timeout` and `--platform`. `docs/integrations.md` and D113 write both flags
   as `--db-max-age <duration>`, and that copied spelling exited 2 while the `=` form beside it

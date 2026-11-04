@@ -36,6 +36,27 @@
   둘 다 중첩된 것도 둘로 남습니다. subject 이거나 그 아래인 배포판 패키지는 최상위 쌍둥이처럼 문서의
   operating-system component 로 키를 잡습니다. (QA 2026-11-02 "CycloneDX subject", 2026-11-04 재현;
   PR #238 리뷰)
+- 표(table) 보고서를 쓸 수 없으면 exit 2 입니다. stdout 이 닫혔거나, 가득 찼거나, 읽기 전용으로
+  열린 경우 `--output json` 과 `--output sarif` 는 이미 `error: write report` 와 함께 exit 2 였고,
+  나열할 finding 이 있는 표도 그랬습니다. 그러나 나열할 것이 없는 표 -- 깨끗한 스캔, 빈 문서,
+  모든 finding 이 waive 된 스캔 -- 는 아무것도 쓰지 않고 exit 0 으로 끝났으며 `reportSha256` 도
+  남기지 않았으므로, 기본 출력을 쓸 수 없는 파일로 리다이렉트한 잡은 도착하지 않은 보고서를
+  통과로 읽었습니다. 이제 표가 쓰는 모든 줄을 검사하고, 첫 실패를 다른 렌더러와 같은 방식으로
+  stderr 에 보고합니다. 릴리스 바이너리로 main 에서 재현했고, 수정은 `scancmd.Run` 과 CLI 진입점
+  양쪽에서 테스트로 붙잡습니다. (QA 2026-11-04, 차원 4 #5; QA 2026-11-02 에서 처음 발견)
+- `assay scan --help`, `assay scan -h`, `assay db --help`, `assay db -h`, `assay db help` 는
+  `assay help` 처럼 usage 를 stdout 에 출력하고 exit 0 입니다. 전에는 `error: unknown flag` /
+  `error: unknown db subcommand` 로 exit 2 였고 stdout 에는 아무것도 없었습니다. `db` 는 데이터베이스를
+  찾기 전에 help 에 답하므로, 사용자 캐시 디렉터리가 없는 머신(임시 CI 컨테이너, 숫자 uid 와 HOME 없이
+  실행한 `docker run`)에서도 `error: locate database` 대신 usage 를 받습니다 -- `scan --help` 는
+  거기서 이미 그렇게 답하고 있었습니다. (QA 2026-11-04 #7)
+- Ubuntu 26.10 finding 이 Canonical 의 fix state 를 갖게 됩니다. tracker 의 `stonking` 코드명이
+  `db build` 가 tracker 행을 해석하는 표에 없어서 모든 `stonking_<pkg>` 행이 unknown-codename
+  tuple 로 버려졌고, 2026-11-01 에 게시된 artifact 는 `Ubuntu:26.10` 에 fix 없는 range 16,289 개를
+  들고 있으면서 wont-fix/not-fixed state 는 0 개였습니다(`dev.assay.ubuntu-fix-states`). D157 의
+  publish guard 는 0 으로 게시된 키를 볼 수 없습니다. 이제 `resolute` 가 `26.04` 로 가듯 `stonking` 은
+  `26.10` 으로 갑니다. `tenacious`(27.04, 개발 릴리스)와 `devel` 은 의도적으로 매핑하지 않습니다.
+  (QA 2026-11-04)
 - jar 의 엔트리는 하나씩만이 아니라 합계로도 상한을 받습니다. cataloger 는 각 엔트리의 압축 해제
   바이트를 512 MiB 파일당 한도로 막았지만 그 합계는 아무것도 막지 않았으므로, deflate 된 64 MiB
   엔트리 열두 개를 담은 784 KB jar 가 768 MiB 를 풀어냈고, 같은 모양을 아카이브 한도까지 키우면 수백
@@ -76,6 +97,16 @@
   재시도하라고 먼저 말하고, 그다음 mirror 절, 마지막에 opt-out 을 말합니다. `db update` 는 여전히 한 번만
   시도합니다. (QA 2026-11-02 P3 #21)
 ### Changed
+- 문서는 더 이상 exit `0` 을 "깨끗함" 이라고 부르지 않습니다. README, `docs/integrations.md`,
+  `docs/compatibility.md`, `CONTRIBUTING.md` 는 이제 그것이 무엇인지 말합니다: 어떤 `--fail-on*`
+  게이트도 걸리지 않았다는 뜻이며, 게이트 없이 실행한 스캔, finding 이 모두 waive 된 스캔, 컴포넌트가
+  없는 SBOM 이 모두 이를 만족합니다; 무엇이 발견됐는지는 JSON `summary` 가 말합니다. 두 CI 예제는
+  README 처럼 `main` 대신 최신 릴리스를 빌드한 커밋에서 `assay` 를 설치하고(릴리스 잡이 이제 넷을 함께
+  고정하며, 넷 중 하나라도 브랜치나 태그를 가리키거나 서로 다르면 `internal/ciguard` 가 실패합니다),
+  GitLab 예제는 `install.sh` 가 checksums 서명 검증에 쓰지만 `alpine` 이미지에 없는 `openssl` 을
+  설치합니다 -- 그대로 복사하면 설치 스크립트가 설치를 거부했습니다. 한국어 사본도 함께 갱신했습니다.
+  (QA 2026-11-04 #6, #8)
+
 - `--db-max-age` 와 `--db-max-rating-age` 가 `=` 꼴뿐 아니라 `--timeout`, `--platform` 처럼 띄어 쓴
   꼴(`--db-max-age 48h`)도 받습니다. `docs/integrations.md` 와 D113 은 두 플래그를
   `--db-max-age <duration>` 으로 적는데, 그대로 베낀 그 표기가 바로 옆의 `=` 꼴은 되는 동안 exit 2 로
