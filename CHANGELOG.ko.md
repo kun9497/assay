@@ -20,6 +20,20 @@
   아래서 스캔하는 대신 exit 2 로 끝납니다. (QA 2026-11-02 P3 #23)
 
 ### Fixed
+- 표(table) 보고서를 쓸 수 없으면 exit 2 입니다. stdout 이 닫혔거나, 가득 찼거나, 읽기 전용으로
+  열린 경우 `--output json` 과 `--output sarif` 는 이미 `error: write report` 와 함께 exit 2 였고,
+  나열할 finding 이 있는 표도 그랬습니다. 그러나 나열할 것이 없는 표 -- 깨끗한 스캔, 빈 문서,
+  모든 finding 이 waive 된 스캔 -- 는 아무것도 쓰지 않고 exit 0 으로 끝났으며 `reportSha256` 도
+  남기지 않았으므로, 기본 출력을 쓸 수 없는 파일로 리다이렉트한 잡은 도착하지 않은 보고서를
+  통과로 읽었습니다. 이제 표가 쓰는 모든 줄을 검사하고, 첫 실패를 다른 렌더러와 같은 방식으로
+  stderr 에 보고합니다. 릴리스 바이너리로 main 에서 재현했고, 수정은 `scancmd.Run` 과 CLI 진입점
+  양쪽에서 테스트로 붙잡습니다. (QA 2026-11-04, 차원 4 #5; QA 2026-11-02 에서 처음 발견)
+- `assay scan --help`, `assay scan -h`, `assay db --help`, `assay db -h`, `assay db help` 는
+  `assay help` 처럼 usage 를 stdout 에 출력하고 exit 0 입니다. 전에는 `error: unknown flag` /
+  `error: unknown db subcommand` 로 exit 2 였고 stdout 에는 아무것도 없었습니다. `db` 는 데이터베이스를
+  찾기 전에 help 에 답하므로, 사용자 캐시 디렉터리가 없는 머신(임시 CI 컨테이너, 숫자 uid 와 HOME 없이
+  실행한 `docker run`)에서도 `error: locate database` 대신 usage 를 받습니다 -- `scan --help` 는
+  거기서 이미 그렇게 답하고 있었습니다. (QA 2026-11-04 #7)
 - Ubuntu 26.10 finding 이 Canonical 의 fix state 를 갖게 됩니다. tracker 의 `stonking` 코드명이
   `db build` 가 tracker 행을 해석하는 표에 없어서 모든 `stonking_<pkg>` 행이 unknown-codename
   tuple 로 버려졌고, 2026-11-01 에 게시된 artifact 는 `Ubuntu:26.10` 에 fix 없는 range 16,289 개를

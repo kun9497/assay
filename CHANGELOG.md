@@ -21,6 +21,21 @@ All notable changes to this project are documented here. The format follows
   holds. (QA 2026-11-02 P3 #23)
 
 ### Fixed
+- A table report that could not be written is exit 2. With stdout closed, full or opened
+  read-only, `--output json` and `--output sarif` already exited 2 with `error: write report`,
+  and so did a table that had findings to list; a table with nothing to list -- a clean scan,
+  an empty document, a scan whose every finding was waived -- wrote nothing, exited 0 and
+  recorded no `reportSha256`, so a job that redirected the default output to a file it could
+  not write read the absent report as a pass. Every line the table writes is now checked, and
+  the first failure is reported on stderr the way the other renderers report theirs.
+  Reproduced on main with the release binary; the fix is held through `scancmd.Run` and
+  through the CLI entry point. (QA 2026-11-04, dimension 4 #5; first seen by QA 2026-11-02)
+- `assay scan --help`, `assay scan -h`, `assay db --help`, `assay db -h` and `assay db help`
+  print the usage on stdout and exit 0, as `assay help` does. They used to be `error: unknown
+  flag` / `error: unknown db subcommand`, exit 2, with nothing on stdout. `db` answers help
+  before it locates the database, so a machine with no user cache dir (a scratch CI container,
+  `docker run` with a numeric uid and no HOME) gets the usage rather than `error: locate
+  database`, as `scan --help` already did there. (QA 2026-11-04 #7)
 - Ubuntu 26.10 findings carry Canonical's fix states. The tracker's `stonking` codename was
   not in the table `db build` resolves tracker rows with, so every `stonking_<pkg>` row was an
   unknown-codename tuple and the published 2026-11-01 artifact held `Ubuntu:26.10` with 16,289
