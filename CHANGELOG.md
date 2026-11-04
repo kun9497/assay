@@ -21,6 +21,13 @@ All notable changes to this project are documented here. The format follows
   holds. (QA 2026-11-02 P3 #23)
 
 ### Fixed
+- Ubuntu 26.10 findings carry Canonical's fix states. The tracker's `stonking` codename was
+  not in the table `db build` resolves tracker rows with, so every `stonking_<pkg>` row was an
+  unknown-codename tuple and the published 2026-11-01 artifact held `Ubuntu:26.10` with 16,289
+  fix-less ranges and 0 wont-fix/not-fixed states (`dev.assay.ubuntu-fix-states`). D157's
+  publish guard cannot see a key that was published at zero. `stonking` now maps to `26.10`,
+  the same way `resolute` maps to `26.04`; `tenacious` (27.04, development) and `devel` stay
+  unmapped on purpose. (QA 2026-11-04)
 - A jar's entries are bounded in total, not only one at a time. The cataloger capped each
   entry's decompressed bytes at the 512 MiB per-file limit and nothing capped their sum, so a
   784 KB jar of twelve deflated 64 MiB entries inflated 768 MiB, and the same shape at the
