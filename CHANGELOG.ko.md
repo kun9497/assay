@@ -29,8 +29,13 @@
   `bom.components` 다음에, SPDX 의 DESCRIBES 가 따르는 규칙으로 카탈로그됩니다: 루트 모양 -- purl
   없음(syft 의 container), `pkg:oci`, 버전 없는 purl -- 은 전처럼 세지 않고, 그 밖에는 후보 또는
   집계된 skip 이 되며, subject 아래 중첩된 components 는 최상위처럼 걷습니다. subject(또는 그 아래)와
-  `bom.components` 양쪽에 적힌 패키지는 둘이 아니라 패키지 하나, finding 하나입니다. (QA 2026-11-02
-  "CycloneDX subject", 2026-11-04 재현)
+  `bom.components` 양쪽에 적힌 패키지는 둘이 아니라 패키지 하나, finding 하나입니다: 동일성은
+  type·name·version·ecosystem 키이므로 한정자만 다른 purl 은 패키지 하나, 버전 없는 purl 이 component
+  버전 둘에 걸치면 패키지 둘이고, 버린 쪽 항목의 location 과 source 식별자는 보고되는 쪽에 남깁니다.
+  중복 제거는 subject 트리 대 `bom.components` 뿐입니다 -- 최상위에 두 번 적힌 것도, subject 아래에
+  둘 다 중첩된 것도 둘로 남습니다. subject 이거나 그 아래인 배포판 패키지는 최상위 쌍둥이처럼 문서의
+  operating-system component 로 키를 잡습니다. (QA 2026-11-02 "CycloneDX subject", 2026-11-04 재현;
+  PR #238 리뷰)
 - jar 의 엔트리는 하나씩만이 아니라 합계로도 상한을 받습니다. cataloger 는 각 엔트리의 압축 해제
   바이트를 512 MiB 파일당 한도로 막았지만 그 합계는 아무것도 막지 않았으므로, deflate 된 64 MiB
   엔트리 열두 개를 담은 784 KB jar 가 768 MiB 를 풀어냈고, 같은 모양을 아카이브 한도까지 키우면 수백

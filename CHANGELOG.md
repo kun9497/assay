@@ -32,7 +32,13 @@ All notable changes to this project are documented here. The format follows
   without a version -- stays uncounted as before; anything else is a candidate or a counted
   skip, and the subject's nested components are walked like top-level ones. A package listed
   both as subject (or under it) and in `bom.components` is one package and one finding, not
-  two. (QA 2026-11-02 "CycloneDX subject", reproduced 2026-11-04)
+  two: the identity is type, name, version and ecosystem key, so a qualifier-only purl
+  difference is one package and a bare purl at two component versions is two, and the dropped
+  listing's locations and source identity are kept on the one reported. The dedupe is the
+  subject tree against `bom.components` only -- two top-level listings, or two both nested
+  under the subject, stay two. A distro package as or under the subject is keyed by the
+  document's operating-system component as its top-level twin is. (QA 2026-11-02 "CycloneDX
+  subject", reproduced 2026-11-04; review of PR #238)
 - A jar's entries are bounded in total, not only one at a time. The cataloger capped each
   entry's decompressed bytes at the 512 MiB per-file limit and nothing capped their sum, so a
   784 KB jar of twelve deflated 64 MiB entries inflated 768 MiB, and the same shape at the

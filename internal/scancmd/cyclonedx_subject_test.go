@@ -143,7 +143,7 @@ func TestRun_CycloneDXSubjectAtFixedVersionIsEvaluatedClean(t *testing.T) {
 // container, Red Hat's pkg:oci image, a product named without a version --
 // is not a package and stays uncounted, as before: the inventory beside it
 // is exactly what is scanned, and a strict gate does not trip on the root.
-func TestRun_CycloneDXPseudoSubjectStaysUncounted(t *testing.T) {
+func TestRun_CycloneDXSubjectPseudoRootStaysUncounted(t *testing.T) {
 	for _, tc := range []struct{ name, subject string }{
 		{"no-purl-container", `{"type":"container","name":"mirror.gcr.io/library/alpine:3.19","version":"sha256:b58899f069c47216f6002a6850143dc6fae0d35eb8b0df9300bbe6327b9c2171"}`},
 		{"oci-purl", `{"type":"container","name":"demo","purl":"pkg:oci/demo@sha256:0000000000000000000000000000000000000000000000000000000000000000"}`},
@@ -162,5 +162,73 @@ func TestRun_CycloneDXPseudoSubjectStaysUncounted(t *testing.T) {
 				t.Errorf("stdout names the root subject as a package:\n%s", out)
 			}
 		})
+	}
+}
+
+// (g) A distro package as the subject, or under it, is keyed by the
+// document's operating-system component exactly as its top-level twin is.
+// The subject walk catalogs into a scratch inventory; a scratch that forgot
+// the document's distro keyed a deb purl with no distro qualifier to no
+// ecosystem at all -- a coverage skip the matcher reports, which
+// --fail-on-incomplete=target does not gate on, so the handoff's exact gate
+// exited 0 on a document that names Debian 12 and lists a Debian package.
+// With a qualifier naming another release the document still wins (one
+// document cannot disagree with itself), so the package is judged against
+// Debian 12's fix states, never silently against Debian 11's. The fixture
+// advisory carries no severity, so the gate is --fail-on-unknown (D17), as
+// the other deb SBOM tests in this package use.
+func TestRun_CycloneDXSubjectDistroPackageIsKeyedByTheDocumentDistro(t *testing.T) {
+	const debian12 = `{"type":"operating-system","name":"debian","version":"12","properties":[` +
+		`{"name":"syft:distro:id","value":"debian"},{"name":"syft:distro:versionID","value":"12"}]}`
+	db := vexDB(t, "Debian:12", vexAdv{"DEBIAN-2031-7", "CVE-2031-9007", "bsdutils", "2.38.1-6"})
+	for _, purl := range []string{
+		"pkg:deb/debian/bsdutils@2.38.1-5?arch=amd64",
+		"pkg:deb/debian/bsdutils@2.38.1-5?arch=amd64&distro=debian-11",
+	} {
+		subject := `{"type":"library","name":"bsdutils","version":"2.38.1-5","purl":"` + purl + `"}`
+		for _, tc := range []struct{ name, body string }{
+			{"subject", cdxStart + `"metadata":{"component":` + subject + `},"components":[` + debian12 + `]}`},
+			{"subject-child", cdxStart + `"metadata":{"component":{"type":"container","name":"demo","components":[` + subject + `]}},"components":[` + debian12 + `]}`},
+		} {
+			t.Run(tc.name+"/"+purl, func(t *testing.T) {
+				path := writeSBOM(t, "cyclonedx", tc.body)
+				var out, errOut bytes.Buffer
+				code := Run(context.Background(), db, path,
+					Options{Output: "json", FailOnUnknown: true, FailOnIncomplete: true, FailOnIncompleteTarget: true}, &out, &errOut)
+				var doc report.Document
+				if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+					t.Fatalf("decode report: %v\nstdout: %s\nstderr: %s", err, out.String(), errOut.String())
+				}
+				if code != 1 {
+					t.Fatalf("Run = %d, want 1: the subject's deb package must be keyed Debian:12 and matched\nstdout: %s\nstderr: %s", code, out.String(), errOut.String())
+				}
+				if ids := findingIDs(doc); len(ids) != 1 || ids[0] != "DEBIAN-2031-7" {
+					t.Errorf("findings = %v, want exactly [DEBIAN-2031-7]", ids)
+				}
+				if doc.Summary.Components != 1 || doc.Summary.Evaluated != 1 || doc.Summary.NotEvaluated != 0 {
+					t.Errorf("summary = %+v, want components/evaluated 1/1 and nothing skipped", doc.Summary)
+				}
+			})
+		}
+	}
+}
+
+// (h) A bare purl (no @version) takes its version from the component, so
+// two listings of one bare purl at two component versions are two
+// packages. Deduping on the purl string alone dropped the subject -- here
+// the vulnerable version -- because bom.components carried the same bare
+// purl at the fixed version: a silent miss, exit 0.
+func TestRun_CycloneDXSubjectBarePURLAtAnotherVersionIsNotDropped(t *testing.T) {
+	body := cdxStart + `"metadata":{"component":{"type":"library","name":"cdxsubject","version":"1.0.0","purl":"pkg:golang/example.com/cdxsubject"}},` +
+		`"components":[{"type":"library","name":"cdxsubject","version":"2.0.0","purl":"pkg:golang/example.com/cdxsubject"}]}`
+	code, doc, out := runCycloneDXSubject(t, body)
+	if code != 1 {
+		t.Fatalf("Run = %d, want 1: the subject at 1.0.0 is a second package, not a duplicate of the fixed 2.0.0 listing\nstdout: %s", code, out)
+	}
+	if ids := findingIDs(doc); len(ids) != 1 || ids[0] != "GHSA-cdx-subject" {
+		t.Errorf("findings = %v, want exactly [GHSA-cdx-subject]", ids)
+	}
+	if doc.Summary.Components != 2 || doc.Summary.Evaluated != 2 {
+		t.Errorf("summary components/evaluated = %d/%d, want 2/2", doc.Summary.Components, doc.Summary.Evaluated)
 	}
 }

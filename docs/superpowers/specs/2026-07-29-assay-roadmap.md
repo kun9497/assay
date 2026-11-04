@@ -3444,10 +3444,23 @@ rule above: a root shape — no purl (syft's container, every image SBOM syft wr
 `pkg:oci`, a purl without a version — is dropped uncounted exactly as before, so the syft
 fixture still counts four components; any other subject gets what a top-level twin would
 have got, a candidate or a counted skip. The subject's nested components are inventory and
-are walked like top-level ones, every skip counted. A package listed both as subject (or
-under it) and in `bom.components` — same purl, or same type, name, version and ecosystem
-when only a qualifier differs — is one package, one finding; two top-level listings stay
-two, as they were. `TestRun_CycloneDXSubject*` in scancmd hold the six shapes through `Run`.
+are walked like top-level ones, every skip counted, into a scratch inventory that carries the
+document's distro, so a deb, rpm, apk or alpm purl there is keyed exactly as its top-level
+twin — the document's operating-system component first, the purl's qualifier second. A
+package listed both as subject (or under it) and in `bom.components` is one package, one
+finding: the identity is the one the matcher judges — type, name, version and ecosystem key —
+not the purl string, because a purl without `@version` takes the component's version, so one
+bare purl can name two versions (deduping on the string dropped a vulnerable subject whose
+`bom.components` twin sat at the fixed version), while a qualifier-only difference (syft's
+`package-id`, two install paths) is one package. The dropped listing's locations are kept on
+the reported package (D10), and a source identity, SRPM name or module stream only it carried
+fills the kept one's (D8). The dedupe is the subject tree against what `bom.components`
+yielded and nothing else: two top-level listings, or two both nested under the subject, were
+never read as one package and stay two, so where a generator put its inventory does not change
+how many packages it holds. `TestRun_CycloneDXSubject*` in scancmd hold these shapes through
+`Run` — the subject itself, a child, a grandchild, beside a clean component, duplicated in
+both places, at the fixed version, the three root shapes, a distro package as subject, and a
+bare purl at two versions.
 
 ---
 

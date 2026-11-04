@@ -156,3 +156,107 @@ func TestParse_SubjectDuplicateOfAComponentIsOnePackage(t *testing.T) {
 		})
 	}
 }
+
+// The dedupe is subject tree against bom.components, nothing else: two
+// listings both nested under the subject stay two, as two top-level
+// listings do, so where a generator put its inventory does not change how
+// many packages it holds. A bare purl at two component versions is two
+// packages: the version comes from the component, so an equal purl string
+// does not say equal version.
+func TestParse_SubjectDedupeIsAgainstComponentsOnly(t *testing.T) {
+	const start = `{"bomFormat":"CycloneDX","specVersion":"1.5","version":1,`
+	const lodash = `{"type":"library","name":"lodash","version":"4.17.20","purl":"pkg:npm/lodash@4.17.20"}`
+	for _, tc := range []struct {
+		name     string
+		doc      string
+		wantPkgs int
+	}{
+		{
+			name:     "two listings both nested under the subject stay two",
+			doc:      start + `"metadata":{"component":{"type":"container","name":"demo","components":[` + lodash + `,` + lodash + `]}}}`,
+			wantPkgs: 2,
+		},
+		{
+			name: "bare purl at two component versions is two packages",
+			doc: start + `"metadata":{"component":{"type":"library","name":"lodash","version":"4.17.21","purl":"pkg:npm/lodash"}},` +
+				`"components":[{"type":"library","name":"lodash","version":"4.17.20","purl":"pkg:npm/lodash"}]}`,
+			wantPkgs: 2,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target, stats, err := Parse(strings.NewReader(tc.doc))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if len(target.Packages) != tc.wantPkgs {
+				t.Errorf("packages = %d (%+v), want %d", len(target.Packages), target.Packages, tc.wantPkgs)
+			}
+			if want := (Stats{Components: tc.wantPkgs, Cataloged: tc.wantPkgs}); stats != want {
+				t.Errorf("stats = %+v, want %+v", stats, want)
+			}
+		})
+	}
+}
+
+// A dropped second listing still leaves its evidence on the kept package:
+// every location the document gave the package (D10), and a source identity
+// only the dropped listing carried (D8) -- a deb purl whose upstream
+// qualifier one listing wrote and the other did not.
+func TestParse_SubjectDuplicateKeepsTheDroppedListingsEvidence(t *testing.T) {
+	const start = `{"bomFormat":"CycloneDX","specVersion":"1.5","version":1,`
+	t.Run("locations", func(t *testing.T) {
+		const a = `{"type":"library","name":"lodash","version":"4.17.20","purl":"pkg:npm/lodash@4.17.20?package-id=a","properties":[{"name":"syft:location:0:path","value":"/app/a/node_modules/lodash/package.json"}]}`
+		const b = `{"type":"library","name":"lodash","version":"4.17.20","purl":"pkg:npm/lodash@4.17.20?package-id=b","properties":[{"name":"syft:location:0:path","value":"/app/b/node_modules/lodash/package.json"}]}`
+		target, _, err := Parse(strings.NewReader(start + `"metadata":{"component":` + b + `},"components":[` + a + `]}`))
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		if len(target.Packages) != 1 {
+			t.Fatalf("packages = %d, want 1", len(target.Packages))
+		}
+		var paths []string
+		for _, l := range target.Packages[0].Locations {
+			paths = append(paths, l.Path)
+		}
+		if want := "/app/a/node_modules/lodash/package.json,/app/b/node_modules/lodash/package.json"; strings.Join(paths, ",") != want {
+			t.Errorf("locations = %v, want both listings' paths", paths)
+		}
+	})
+	t.Run("source", func(t *testing.T) {
+		const bare = `{"type":"library","name":"libssl3","version":"3.0.2-0ubuntu1.15","purl":"pkg:deb/ubuntu/libssl3@3.0.2-0ubuntu1.15?distro=ubuntu-22.04"}`
+		const withSource = `{"type":"library","name":"libssl3","version":"3.0.2-0ubuntu1.15","purl":"pkg:deb/ubuntu/libssl3@3.0.2-0ubuntu1.15?distro=ubuntu-22.04&upstream=openssl"}`
+		target, _, err := Parse(strings.NewReader(start + `"metadata":{"component":` + withSource + `},"components":[` + bare + `]}`))
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		if len(target.Packages) != 1 {
+			t.Fatalf("packages = %d, want 1", len(target.Packages))
+		}
+		if src := target.Packages[0].Source; src == nil || src.Name != "openssl" {
+			t.Errorf("source = %+v, want openssl from the dropped listing", src)
+		}
+	})
+}
+
+// A distro package as the subject, or under it, is keyed by the document's
+// operating-system component as its top-level twin is: the scratch
+// inventory the subject walk catalogs into carries the document's distro.
+func TestParse_SubjectDistroPackageIsKeyedByTheDocumentDistro(t *testing.T) {
+	const start = `{"bomFormat":"CycloneDX","specVersion":"1.5","version":1,`
+	const debian12 = `{"type":"operating-system","name":"debian","version":"12","properties":[{"name":"syft:distro:id","value":"debian"},{"name":"syft:distro:versionID","value":"12"}]}`
+	const bsdutils = `{"type":"library","name":"bsdutils","version":"2.38.1-5","purl":"pkg:deb/debian/bsdutils@2.38.1-5?arch=amd64&distro=debian-11"}`
+	for _, tc := range []struct{ name, subject string }{
+		{"subject", bsdutils},
+		{"subject-child", `{"type":"container","name":"demo","components":[` + bsdutils + `]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target, _, err := Parse(strings.NewReader(start + `"metadata":{"component":` + tc.subject + `},"components":[` + debian12 + `]}`))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if len(target.Packages) != 1 || target.Packages[0].Ecosystem != "Debian:12" {
+				t.Errorf("packages = %+v, want one keyed Debian:12 (the document's distro, not the qualifier's)", target.Packages)
+			}
+		})
+	}
+}

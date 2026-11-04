@@ -127,45 +127,68 @@ func Parse(r io.Reader) (pkgmeta.Target, Stats, error) {
 //
 // Dedupe: a generator that names the root package in its own inventory lists
 // one package twice, as subject and as component. Cataloging the subject
-// tree second, a package already present from bom.components is dropped
-// uncounted here, so the report says one package and one finding, not two.
-// A top-level duplicate of a top-level component is untouched: that was
-// never read as one package, and this change does not widen into it.
+// tree second, a package bom.components already yielded is dropped
+// uncounted here, so the report says one package and one finding, not two
+// -- and the dropped listing's evidence (its locations, a source identity
+// only it carried) is folded onto the kept one, so the report still shows
+// every place the document listed the package. The dedupe is the subject
+// tree against bom.components and nothing else: two top-level listings, or
+// two listings both nested under the subject, were never read as one
+// package and stay two, so where a generator put its inventory does not
+// change how many packages it holds.
 func catalogSubject(subject component, distroEcosystem string, target *pkgmeta.Target, stats *Stats) {
-	var scratchTarget pkgmeta.Target
+	// The dedupe base is fixed before the subject tree adds anything to
+	// target.Packages: everything bom.components yielded, and only that.
+	base := len(target.Packages)
+	// The scratch carries the document's distro: catalogOne keys a deb, rpm,
+	// apk or alpm purl from target.Distro (document first, purl qualifier
+	// second), and a scratch without it keyed the subject's distro package
+	// as if the document named no distro -- unkeyed, or to the qualifier's
+	// release while its top-level twin took the document's.
+	scratchTarget := pkgmeta.Target{Distro: target.Distro}
 	var scratchStats Stats
 	catalogOne(subject, distroEcosystem, &scratchTarget, &scratchStats)
+	// The len check is defensive only: every root shape pseudoSubjectShape
+	// accepts already implies catalogOne appended no package (no purl and a
+	// pkg:oci purl both skip before a package is built -- "oci" is not an
+	// ecosystem -- and SkippedNoVersion == 1 returns before one is built).
+	// Dropping it changes nothing; it states the intent that a subject which
+	// yielded a package is never treated as the root.
 	if len(scratchTarget.Packages) == 0 && pseudoSubjectShape(subject, scratchStats) {
 		// The document's own root: not a package, not counted, as the
 		// operating-system component is not.
 	} else {
-		mergeDeduped(scratchTarget, scratchStats, target, stats)
+		mergeDeduped(scratchTarget, scratchStats, base, target, stats)
 	}
-	catalogDeduped(subject.Components, distroEcosystem, target, stats)
+	catalogDeduped(subject.Components, distroEcosystem, base, target, stats)
 }
 
 // catalogDeduped is catalog for the subject's nested components: the same
 // depth-first walk, one scratch per component so a duplicate of a package
-// bom.components already yielded can be dropped without its counter.
-func catalogDeduped(components []component, distroEcosystem string, target *pkgmeta.Target, stats *Stats) {
+// bom.components already yielded can be dropped without its counter. base
+// is how many packages bom.components yielded; see catalogSubject.
+func catalogDeduped(components []component, distroEcosystem string, base int, target *pkgmeta.Target, stats *Stats) {
 	for _, c := range components {
-		var scratchTarget pkgmeta.Target
+		scratchTarget := pkgmeta.Target{Distro: target.Distro}
 		var scratchStats Stats
 		catalogOne(c, distroEcosystem, &scratchTarget, &scratchStats)
-		mergeDeduped(scratchTarget, scratchStats, target, stats)
-		catalogDeduped(c.Components, distroEcosystem, target, stats)
+		mergeDeduped(scratchTarget, scratchStats, base, target, stats)
+		catalogDeduped(c.Components, distroEcosystem, base, target, stats)
 	}
 }
 
 // mergeDeduped folds one component's scratch result into the inventory.
 // catalogOne yields at most one package per component, so a scratch holding
-// a package the inventory already carries is that component's second
-// listing: dropped whole, counters included, because a second Components++
-// would say the document held two packages where it held one listed twice.
-// A scratch with no package is a counted skip and merges as it is.
-func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, target *pkgmeta.Target, stats *Stats) {
+// a package that target.Packages[:base] -- what bom.components yielded --
+// already carries is that component's second listing: dropped with its
+// counters, because a second Components++ would say the document held two
+// packages where it held one listed twice, but its evidence is kept on the
+// package already there. A scratch with no package is a counted skip and
+// merges as it is.
+func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, target *pkgmeta.Target, stats *Stats) {
 	for _, p := range scratchTarget.Packages {
-		if hasPackage(target, p) {
+		if i := indexOfPackage(target.Packages[:base], p); i >= 0 {
+			keepEvidence(&target.Packages[i], p)
 			return
 		}
 	}
@@ -177,19 +200,52 @@ func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, target *pkgm
 	stats.SkippedUnsupportedEcosystem += scratchStats.SkippedUnsupportedEcosystem
 }
 
-// hasPackage reports whether the inventory already carries p: the same purl
-// verbatim, or -- because syft appends a per-document package-id qualifier
-// and two listings of one package need not spell their qualifiers alike --
-// the same type, name, version and ecosystem key. Every cataloged package
-// carries a purl (catalogOne skips those without), so the purl comparison
-// is never vacuous and the field comparison is the one that catches the
-// qualifier-only difference.
-func hasPackage(target *pkgmeta.Target, p pkgmeta.Package) bool {
-	for _, q := range target.Packages {
-		if q.PURL == p.PURL {
-			return true
-		}
+// indexOfPackage is the position in pkgs of the package p is a second
+// listing of, or -1. The identity is the one the matcher judges: type, name,
+// version and ecosystem key. It is deliberately NOT the purl string: a
+// package's type, name and ecosystem are functions of its purl, but its
+// version is not -- a purl with no @version takes component.version
+// (catalogOne, pkgmeta.ResolveDistroPURL) -- so an equal purl can name two
+// versions, and deduping on it dropped a vulnerable subject because
+// bom.components carried the same bare purl at the fixed version. A
+// qualifier-only difference (syft's per-document package-id, two install
+// paths) is the same package, which the field comparison says and a
+// verbatim purl comparison would not.
+func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package) int {
+	for i, q := range pkgs {
 		if q.Type == p.Type && q.Name == p.Name && q.Version == p.Version && q.Ecosystem == p.Ecosystem {
+			return i
+		}
+	}
+	return -1
+}
+
+// keepEvidence folds a dropped second listing onto the kept package: every
+// location the document gave the package is evidence (D10), and a source
+// identity (D8), SRPM name or module stream the kept listing lacks is taken
+// from the dropped one -- a deb purl with ?upstream= on one listing and not
+// the other must still be judged on its source. What the kept listing
+// already states is never overwritten.
+func keepEvidence(kept *pkgmeta.Package, dropped pkgmeta.Package) {
+	for _, loc := range dropped.Locations {
+		if !hasLocation(kept.Locations, loc) {
+			kept.Locations = append(kept.Locations, loc)
+		}
+	}
+	if kept.Source == nil {
+		kept.Source = dropped.Source
+	}
+	if kept.Upstream == "" {
+		kept.Upstream = dropped.Upstream
+	}
+	if kept.ModuleStream == "" {
+		kept.ModuleStream = dropped.ModuleStream
+	}
+}
+
+func hasLocation(locs []pkgmeta.Location, loc pkgmeta.Location) bool {
+	for _, l := range locs {
+		if l == loc {
 			return true
 		}
 	}
