@@ -44,9 +44,9 @@ macOS; a non-empty `gofmt -l .` fails it.
   the substring (`ALPINE-CVE-2025-46394` contains `CVE-2025-46394`).
 - **Version comparison stays per ecosystem** (D9). A comparer change comes with a
   table-driven test reviewed line by line: an ordering mistake is a silent false negative.
-- **Exit codes are a contract** (D11): `0` clean, `1` findings at or above the gate, `2`
-  could not run or cannot be trusted, and `2` outranks `1`. Results go to stdout,
-  diagnostics to stderr.
+- **Exit codes are a contract** (D11): `0` no `--fail-on*` gate tripped, `1` findings at or
+  above the gate, `2` could not run or cannot be trusted, and `2` outranks `1`. Results go
+  to stdout, diagnostics to stderr.
 - **No new dependency without a reason.** There are five direct dependencies, each chosen on
   purpose; anything that needs cgo is out, because releases are built with
   `CGO_ENABLED=0`.

@@ -139,8 +139,11 @@ code and the report's sha256, even when the scan ends in exit 2 before any repor
 
 The database is orthogonal to the scan: `assay db update` writes it, a scan only reads it,
 and a scan of an SBOM or a local tarball makes no network call at all. Exit codes are a
-contract — `0` clean, `1` findings at or above `--fail-on`, `2` could not run or the result
-cannot be trusted — with `2` outranking `1` outranking `0`.
+contract — `0` no gate tripped, `1` findings at or above `--fail-on`, `2` could not run or the
+result cannot be trusted — with `2` outranking `1` outranking `0`. `0` is not "no
+vulnerabilities": a scan run without a `--fail-on*` flag lists its findings and exits 0, and so
+does a scan whose findings were all waived, or an SBOM with no components. Read the report's
+summary, not the exit code alone.
 
 ## Documentation
 

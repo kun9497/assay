@@ -86,6 +86,17 @@ All notable changes to this project are documented here. The format follows
   says to retry in a minute if the publisher pushed moments ago, then the mirror clause, then
   the opt-out. `db update` still makes one attempt. (QA 2026-11-02 P3 #21)
 ### Changed
+- The documentation no longer calls exit `0` "clean". README, `docs/integrations.md`,
+  `docs/compatibility.md` and `CONTRIBUTING.md` now say what it is: no `--fail-on*` gate tripped,
+  which a scan run with no gate, a scan whose findings were all waived and an SBOM with no
+  components all satisfy; the JSON `summary` is what says what was found. The two CI examples
+  install `assay` from the commit the latest release was built from, as the README does, instead
+  of `main` (the release job now keeps all four pinned, and `internal/ciguard` fails when any of
+  the four names a branch or tag or when they disagree), and the GitLab example installs
+  `openssl`, which `install.sh` verifies the checksums signature with and the `alpine` image
+  lacks -- copied as it was, the installer refused to install. Korean copies updated alongside.
+  (QA 2026-11-04 #6, #8)
+
 - `--db-max-age` and `--db-max-rating-age` accept the space form (`--db-max-age 48h`) as well
   as `=`, like `--timeout` and `--platform`. `docs/integrations.md` and D113 write both flags
   as `--db-max-age <duration>`, and that copied spelling exited 2 while the `=` form beside it
