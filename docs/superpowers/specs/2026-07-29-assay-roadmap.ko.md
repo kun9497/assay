@@ -3208,6 +3208,21 @@ django 만 남겼습니다. `TestParse_TinyFixture` 는 그 0 을 단언하며 "
 아니라 모든 DESCRIBES 대상을 검사합니다. ubi9-micro 와 syft-1.51 픽스처의 카운터는 그대로이고,
 기술된 실제 패키지는 이제 component 1, cataloged 1 입니다.
 
+**개정 (QA 2026-11-04).** CycloneDX 리더에도 한 칸 옆에 같은 구멍이 있었습니다. `bom.components`
+만 걸었고, `metadata.component` — 명세가 SBOM 의 대상, 즉 라이브러리 자체의 SBOM 이라면 그
+라이브러리를 두라고 정한 자리 — 는 읽히지 않았으며, 생성기가 그 아래에 중첩한 components 도
+마찬가지였습니다. 거기에 쓴 lodash 4.17.20 은 공개 v9 아티팩트에 대해 `--fail-on low
+--fail-on-incomplete=target` 아래 component 0, finding 0, exit 0 으로 스캔됐습니다. 같은 패키지를
+`bom.components` 에 두면 CVE-2021-23337 을 포함한 finding 5건이고, `bom.components` 에 정상
+`is-number` 를 함께 두면 문서는 evaluated 1, finding 0, exit 0 을 보고했습니다. 이제 subject 는
+`bom.components` 다음에 위 규칙으로 카탈로그됩니다: 루트 모양 — purl 없음(syft 의 container, syft 가
+쓰는 모든 이미지 SBOM), `pkg:oci`, 버전 없는 purl — 은 전과 똑같이 세지 않고 버리므로 syft 픽스처는
+여전히 component 4 이고, 그 밖의 subject 는 최상위 쌍둥이가 받았을 것, 후보 또는 집계된 skip 을
+받습니다. subject 아래 중첩된 components 는 인벤토리이며 최상위처럼 걷고 모든 skip 을 셉니다. subject
+(또는 그 아래)와 `bom.components` 양쪽에 적힌 패키지 — 같은 purl 이거나, 한정자만 다를 때 같은
+type·name·version·ecosystem — 는 패키지 하나, finding 하나이고, 최상위에 두 번 적힌 것은 전처럼 둘로
+남습니다. scancmd 의 `TestRun_CycloneDXSubject*` 가 여섯 모양을 `Run` 을 통해 붙듭니다.
+
 ---
 
 ### D85 — Ubuntu fix state, Canonical이 실제로 유지하는 tracker에서

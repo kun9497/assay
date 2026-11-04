@@ -21,6 +21,18 @@ All notable changes to this project are documented here. The format follows
   holds. (QA 2026-11-02 P3 #23)
 
 ### Fixed
+- A CycloneDX document's subject is scanned. The reader walked `bom.components` only, so a
+  package written as `metadata.component` -- the slot the specification reserves for the thing
+  the SBOM is about, which for a library's own SBOM is the library -- or nested under it was
+  never cataloged: not scanned, not counted, in no skip bucket. lodash 4.17.20 written there
+  scanned as 0 components, 0 findings, exit 0 under `--fail-on low --fail-on-incomplete=target`
+  against the public database, where the same package in `bom.components` gave 5 findings
+  including CVE-2021-23337. The subject is now cataloged after `bom.components` under the rule
+  SPDX's DESCRIBES follows: a root shape -- no purl (syft's container), `pkg:oci`, a purl
+  without a version -- stays uncounted as before; anything else is a candidate or a counted
+  skip, and the subject's nested components are walked like top-level ones. A package listed
+  both as subject (or under it) and in `bom.components` is one package and one finding, not
+  two. (QA 2026-11-02 "CycloneDX subject", reproduced 2026-11-04)
 - A jar's entries are bounded in total, not only one at a time. The cataloger capped each
   entry's decompressed bytes at the 512 MiB per-file limit and nothing capped their sum, so a
   784 KB jar of twelve deflated 64 MiB entries inflated 768 MiB, and the same shape at the
