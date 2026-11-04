@@ -30,7 +30,14 @@ import (
 // esm-apps-resolute-supported.txt existing in that same tree listing (one
 // letter past questing, and the samples show real package data against it --
 // "resolute_pcre3: DNE", "resolute_openssl: released (3.0.8-1ubuntu2)" --
-// not the placeholder shape an unreleased codename would have).
+// not the placeholder shape an unreleased codename would have). stonking is
+// 26.10, added 2026-11-04 (QA): the tracker's own scripts/cve_lib.py orders
+// it right after resolute and before tenacious (the development release),
+// releases.ubuntu.com lists 26.10/, and OSV's Ubuntu:26.10 key already held
+// 16,289 fix-less ranges in the 2026-11-01 artifact -- every one of them
+// without a fix state, because its stonking_ rows were unknown-codename
+// tuples. D157's publish guard cannot see that gap: a key published at zero
+// stays at zero.
 //
 // An EOL'd interim (kinetic, lunar, mantic, ...) deliberately has no entry.
 // No image this project can evaluate reports one of those as its release --
@@ -49,6 +56,7 @@ var ubuntuCodenameRelease = map[string]string{
 	"plucky":   "25.04",
 	"questing": "25.10",
 	"resolute": "26.04",
+	"stonking": "26.10",
 }
 
 // ubuntuTrackerLineRe matches one stanza line naming a BARE mainline release
