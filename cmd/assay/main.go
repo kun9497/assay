@@ -482,17 +482,25 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "error: db requires a subcommand (update, build, status, push, ref)")
 			return exitError
 		}
+		switch args[1] {
+		case "help", "--help", "-h":
+			// Same contract as `assay help`: stdout, exit 0, stderr empty.
+			// `assay db --help` used to be "unknown db subcommand", exit 2.
+			// Answered before the database is located, not after: a request
+			// for help needs no database, and on a machine with no user
+			// cache dir (a scratch CI container, `docker run` with a numeric
+			// uid and no HOME) the lookup fails -- `scan --help` answered
+			// there while `db --help` was still exit 2 with "locate database"
+			// on stderr and nothing on stdout.
+			fmt.Fprint(stdout, usage)
+			return exitOK
+		}
 		path, err := store.DefaultPath()
 		if err != nil {
 			fmt.Fprintf(stderr, "error: locate database: %v\n", err)
 			return exitError
 		}
 		switch args[1] {
-		case "help", "--help", "-h":
-			// Same contract as `assay help`: stdout, exit 0, stderr empty.
-			// `assay db --help` used to be "unknown db subcommand", exit 2.
-			fmt.Fprint(stdout, usage)
-			return exitOK
 		case "build":
 			// Parsed independently of resolveBuildSeed below: --ratings-only
 			// is a bare boolean, not a "consume the next token" flag like

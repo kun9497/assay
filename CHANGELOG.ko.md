@@ -30,7 +30,10 @@
   양쪽에서 테스트로 붙잡습니다. (QA 2026-11-04, 차원 4 #5; QA 2026-11-02 에서 처음 발견)
 - `assay scan --help`, `assay scan -h`, `assay db --help`, `assay db -h`, `assay db help` 는
   `assay help` 처럼 usage 를 stdout 에 출력하고 exit 0 입니다. 전에는 `error: unknown flag` /
-  `error: unknown db subcommand` 로 exit 2 였고 stdout 에는 아무것도 없었습니다. (QA 2026-11-04 #7)
+  `error: unknown db subcommand` 로 exit 2 였고 stdout 에는 아무것도 없었습니다. `db` 는 데이터베이스를
+  찾기 전에 help 에 답하므로, 사용자 캐시 디렉터리가 없는 머신(임시 CI 컨테이너, 숫자 uid 와 HOME 없이
+  실행한 `docker run`)에서도 `error: locate database` 대신 usage 를 받습니다 -- `scan --help` 는
+  거기서 이미 그렇게 답하고 있었습니다. (QA 2026-11-04 #7)
 - jar 의 엔트리는 하나씩만이 아니라 합계로도 상한을 받습니다. cataloger 는 각 엔트리의 압축 해제
   바이트를 512 MiB 파일당 한도로 막았지만 그 합계는 아무것도 막지 않았으므로, deflate 된 64 MiB
   엔트리 열두 개를 담은 784 KB jar 가 768 MiB 를 풀어냈고, 같은 모양을 아카이브 한도까지 키우면 수백

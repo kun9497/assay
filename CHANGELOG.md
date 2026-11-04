@@ -32,7 +32,10 @@ All notable changes to this project are documented here. The format follows
   through the CLI entry point. (QA 2026-11-04, dimension 4 #5; first seen by QA 2026-11-02)
 - `assay scan --help`, `assay scan -h`, `assay db --help`, `assay db -h` and `assay db help`
   print the usage on stdout and exit 0, as `assay help` does. They used to be `error: unknown
-  flag` / `error: unknown db subcommand`, exit 2, with nothing on stdout. (QA 2026-11-04 #7)
+  flag` / `error: unknown db subcommand`, exit 2, with nothing on stdout. `db` answers help
+  before it locates the database, so a machine with no user cache dir (a scratch CI container,
+  `docker run` with a numeric uid and no HOME) gets the usage rather than `error: locate
+  database`, as `scan --help` already did there. (QA 2026-11-04 #7)
 - A jar's entries are bounded in total, not only one at a time. The cataloger capped each
   entry's decompressed bytes at the 512 MiB per-file limit and nothing capped their sum, so a
   784 KB jar of twelve deflated 64 MiB entries inflated 768 MiB, and the same shape at the
