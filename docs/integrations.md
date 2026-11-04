@@ -3,9 +3,12 @@
 *English · [한국어](integrations.ko.md)*
 
 `assay scan` is built to be gated on: results go to stdout, diagnostics to stderr, and the
-exit code is a contract — `0` clean, `1` a finding at or above your threshold, `2` the scan
-could not run or its result cannot be trusted, with `2` outranking `1` outranking `0`. That
-is all a pipeline needs.
+exit code is a contract — `0` no gate tripped, `1` a finding at or above your threshold, `2` the
+scan could not run or its result cannot be trusted, with `2` outranking `1` outranking `0`. That
+is all a pipeline needs for the verdict. `0` is not "no vulnerabilities", though: a scan with no
+`--fail-on*` flag lists its findings and exits 0, and so does one whose findings were all waived
+(`summary.suppressed`) or an SBOM with no components (`summary.components: 0`). A pipeline that
+also needs to see what was found, or to refuse an empty inventory, reads the JSON `summary`.
 
 Two complete, copy-pasteable examples:
 
@@ -13,6 +16,12 @@ Two complete, copy-pasteable examples:
   Security tab (SARIF), fail the build on a high-or-worse finding.
 - **[GitLab CI](ci/gitlab-ci.yml)** — scan in a job, keep the report as an artifact, fail
   the pipeline on the exit code.
+
+Both install `assay` from the commit the latest release was built from, as the README's
+one-liner does (the release job keeps all three current); a branch name there would move under
+you. The GitLab job also installs `openssl`, because `install.sh` verifies the release's
+checksums signature with it (D137) and the `alpine` image does not ship the binary — without
+it the installer refuses to install rather than skip the check.
 
 ## The pattern, in one line
 

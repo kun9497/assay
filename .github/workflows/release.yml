@@ -70,16 +70,16 @@ jobs:
       # from, never a tag -- a tag can be moved and raw.githubusercontent.com
       # re-serves the moved one; a commit SHA cannot. The tagged commit cannot
       # contain its own SHA, so the pin lands on main as the commit after it.
-      - name: Pin the README install one-liner to this release's commit
+      - name: Pin the README and CI-example install one-liners to this release's commit
         if: github.ref_type == 'tag'
         run: |
           set -eu
           git fetch --depth=1 origin main
           git checkout -B main origin/main
-          for f in README.md README.ko.md; do
+          for f in README.md README.ko.md docs/ci/github-actions.yml docs/ci/gitlab-ci.yml; do
             sed -i -E "s#raw\.githubusercontent\.com/kun9497/assay/[^/]+/install\.(sh|ps1)#raw.githubusercontent.com/kun9497/assay/${GITHUB_SHA}/install.\1#g" "$f"
           done
-          if git diff --quiet; then echo "README already pins ${GITHUB_SHA}"; exit 0; fi
+          if git diff --quiet; then echo "install one-liners already pin ${GITHUB_SHA}"; exit 0; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "docs: pin the install one-liner to ${GITHUB_REF_NAME} (${GITHUB_SHA})"

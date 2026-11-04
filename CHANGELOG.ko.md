@@ -60,6 +60,15 @@
   재시도하라고 먼저 말하고, 그다음 mirror 절, 마지막에 opt-out 을 말합니다. `db update` 는 여전히 한 번만
   시도합니다. (QA 2026-11-02 P3 #21)
 ### Changed
+- 문서는 더 이상 exit `0` 을 "깨끗함" 이라고 부르지 않습니다. README, `docs/integrations.md`,
+  `docs/compatibility.md` 는 이제 그것이 무엇인지 말합니다: 어떤 `--fail-on*` 게이트도 걸리지 않았다는
+  뜻이며, 게이트 없이 실행한 스캔, finding 이 모두 waive 된 스캔, 컴포넌트가 없는 SBOM 이 모두 이를
+  만족합니다; 무엇이 발견됐는지는 JSON `summary` 가 말합니다. 두 CI 예제는 README 처럼 `main` 대신
+  최신 릴리스를 빌드한 커밋에서 `assay` 를 설치하고(릴리스 잡이 이제 넷을 함께 고정합니다), GitLab
+  예제는 `install.sh` 가 checksums 서명 검증에 쓰지만 `alpine` 이미지에 없는 `openssl` 을 설치합니다
+  -- 그대로 복사하면 설치 스크립트가 설치를 거부했습니다. 한국어 사본도 함께 갱신했습니다.
+  (QA 2026-11-04 #6, #8)
+
 - `--db-max-age` 와 `--db-max-rating-age` 가 `=` 꼴뿐 아니라 `--timeout`, `--platform` 처럼 띄어 쓴
   꼴(`--db-max-age 48h`)도 받습니다. `docs/integrations.md` 와 D113 은 두 플래그를
   `--db-max-age <duration>` 으로 적는데, 그대로 베낀 그 표기가 바로 옆의 `=` 꼴은 되는 동안 exit 2 로
