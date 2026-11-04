@@ -21,6 +21,24 @@ All notable changes to this project are documented here. The format follows
   holds. (QA 2026-11-02 P3 #23)
 
 ### Fixed
+- A CycloneDX document's subject is scanned. The reader walked `bom.components` only, so a
+  package written as `metadata.component` -- the slot the specification reserves for the thing
+  the SBOM is about, which for a library's own SBOM is the library -- or nested under it was
+  never cataloged: not scanned, not counted, in no skip bucket. lodash 4.17.20 written there
+  scanned as 0 components, 0 findings, exit 0 under `--fail-on low --fail-on-incomplete=target`
+  against the public database, where the same package in `bom.components` gave 5 findings
+  including CVE-2021-23337. The subject is now cataloged after `bom.components` under the rule
+  SPDX's DESCRIBES follows: a root shape -- no purl (syft's container), `pkg:oci`, a purl
+  without a version -- stays uncounted as before; anything else is a candidate or a counted
+  skip, and the subject's nested components are walked like top-level ones. A package listed
+  both as subject (or under it) and in `bom.components` is one package and one finding, not
+  two: the identity is type, name, version and ecosystem key, so a qualifier-only purl
+  difference is one package and a bare purl at two component versions is two, and the dropped
+  listing's locations and source identity are kept on the one reported. The dedupe is the
+  subject tree against `bom.components` only -- two top-level listings, or two both nested
+  under the subject, stay two. A distro package as or under the subject is keyed by the
+  document's operating-system component as its top-level twin is. (QA 2026-11-02 "CycloneDX
+  subject", reproduced 2026-11-04; review of PR #238)
 - A table report that could not be written is exit 2. With stdout closed, full or opened
   read-only, `--output json` and `--output sarif` already exited 2 with `error: write report`,
   and so did a table that had findings to list; a table with nothing to list -- a clean scan,

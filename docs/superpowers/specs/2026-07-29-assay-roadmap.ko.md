@@ -3208,6 +3208,31 @@ django 만 남겼습니다. `TestParse_TinyFixture` 는 그 0 을 단언하며 "
 아니라 모든 DESCRIBES 대상을 검사합니다. ubi9-micro 와 syft-1.51 픽스처의 카운터는 그대로이고,
 기술된 실제 패키지는 이제 component 1, cataloged 1 입니다.
 
+**개정 (QA 2026-11-04).** CycloneDX 리더에도 한 칸 옆에 같은 구멍이 있었습니다. `bom.components`
+만 걸었고, `metadata.component` — 명세가 SBOM 의 대상, 즉 라이브러리 자체의 SBOM 이라면 그
+라이브러리를 두라고 정한 자리 — 는 읽히지 않았으며, 생성기가 그 아래에 중첩한 components 도
+마찬가지였습니다. 거기에 쓴 lodash 4.17.20 은 공개 v9 아티팩트에 대해 `--fail-on low
+--fail-on-incomplete=target` 아래 component 0, finding 0, exit 0 으로 스캔됐습니다. 같은 패키지를
+`bom.components` 에 두면 CVE-2021-23337 을 포함한 finding 5건이고, `bom.components` 에 정상
+`is-number` 를 함께 두면 문서는 evaluated 1, finding 0, exit 0 을 보고했습니다. 이제 subject 는
+`bom.components` 다음에 위 규칙으로 카탈로그됩니다: 루트 모양 — purl 없음(syft 의 container, syft 가
+쓰는 모든 이미지 SBOM), `pkg:oci`, 버전 없는 purl — 은 전과 똑같이 세지 않고 버리므로 syft 픽스처는
+여전히 component 4 이고, 그 밖의 subject 는 최상위 쌍둥이가 받았을 것, 후보 또는 집계된 skip 을
+받습니다. subject 아래 중첩된 components 는 인벤토리이며 최상위처럼 걷고 모든 skip 을 세되, 문서의
+distro 를 지닌 임시 인벤토리에 카탈로그하므로 거기 있는 deb·rpm·apk·alpm purl 은 최상위 쌍둥이와
+똑같이 — 문서의 operating-system component 가 먼저, purl 의 한정자가 다음 — 키를 잡습니다. subject
+(또는 그 아래)와 `bom.components` 양쪽에 적힌 패키지는 패키지 하나, finding 하나입니다: 동일성은
+matcher 가 판정하는 그것 — type·name·version·ecosystem 키 — 이지 purl 문자열이 아닙니다. `@version`
+없는 purl 은 component 의 버전을 받으므로 purl 하나가 버전 둘을 가리킬 수 있고(문자열로 중복을 제거하니
+`bom.components` 쌍둥이가 수정 버전에 있는 취약한 subject 가 버려졌습니다), 한정자만 다른 것(syft 의
+`package-id`, 설치 경로 둘)은 패키지 하나입니다. 버린 쪽 항목의 location 은 보고되는 패키지에 남기고
+(D10), 그 쪽에만 있던 source 식별자·SRPM 이름·module stream 은 남는 쪽의 빈 자리를 채웁니다(D8). 중복
+제거는 subject 트리 대 `bom.components` 가 내놓은 것뿐입니다: 최상위에 두 번 적힌 것도, subject 아래에
+둘 다 중첩된 것도 애초에 하나로 읽힌 적이 없으니 둘로 남고, 생성기가 인벤토리를 어디에 두었든 패키지
+수는 달라지지 않습니다. scancmd 의 `TestRun_CycloneDXSubject*` 가 이 모양들을 `Run` 을 통해 붙듭니다
+— subject 자체, 자식, 손자, 정상 component 옆, 양쪽에 중복, 수정 버전, 루트 모양 셋, subject 인 배포판
+패키지, 버전 둘에 걸친 bare purl.
+
 ---
 
 ### D85 — Ubuntu fix state, Canonical이 실제로 유지하는 tracker에서

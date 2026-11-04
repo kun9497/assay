@@ -20,6 +20,22 @@
   아래서 스캔하는 대신 exit 2 로 끝납니다. (QA 2026-11-02 P3 #23)
 
 ### Fixed
+- CycloneDX 문서의 subject 를 스캔합니다. 리더는 `bom.components` 만 걸었으므로
+  `metadata.component` -- 명세가 SBOM 의 대상, 즉 라이브러리 자체의 SBOM 이라면 그 라이브러리를
+  두라고 정한 자리 -- 에 적힌 패키지나 그 아래 중첩된 패키지는 카탈로그되지 않았습니다: 스캔되지
+  않고, 세어지지 않고, 어느 skip 버킷에도 없이. 거기에 쓴 lodash 4.17.20 은 공개 데이터베이스에 대해
+  `--fail-on low --fail-on-incomplete=target` 아래 component 0, finding 0, exit 0 으로 스캔됐고, 같은
+  패키지를 `bom.components` 에 두면 CVE-2021-23337 을 포함한 finding 5건이었습니다. 이제 subject 는
+  `bom.components` 다음에, SPDX 의 DESCRIBES 가 따르는 규칙으로 카탈로그됩니다: 루트 모양 -- purl
+  없음(syft 의 container), `pkg:oci`, 버전 없는 purl -- 은 전처럼 세지 않고, 그 밖에는 후보 또는
+  집계된 skip 이 되며, subject 아래 중첩된 components 는 최상위처럼 걷습니다. subject(또는 그 아래)와
+  `bom.components` 양쪽에 적힌 패키지는 둘이 아니라 패키지 하나, finding 하나입니다: 동일성은
+  type·name·version·ecosystem 키이므로 한정자만 다른 purl 은 패키지 하나, 버전 없는 purl 이 component
+  버전 둘에 걸치면 패키지 둘이고, 버린 쪽 항목의 location 과 source 식별자는 보고되는 쪽에 남깁니다.
+  중복 제거는 subject 트리 대 `bom.components` 뿐입니다 -- 최상위에 두 번 적힌 것도, subject 아래에
+  둘 다 중첩된 것도 둘로 남습니다. subject 이거나 그 아래인 배포판 패키지는 최상위 쌍둥이처럼 문서의
+  operating-system component 로 키를 잡습니다. (QA 2026-11-02 "CycloneDX subject", 2026-11-04 재현;
+  PR #238 리뷰)
 - 표(table) 보고서를 쓸 수 없으면 exit 2 입니다. stdout 이 닫혔거나, 가득 찼거나, 읽기 전용으로
   열린 경우 `--output json` 과 `--output sarif` 는 이미 `error: write report` 와 함께 exit 2 였고,
   나열할 finding 이 있는 표도 그랬습니다. 그러나 나열할 것이 없는 표 -- 깨끗한 스캔, 빈 문서,

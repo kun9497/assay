@@ -3432,6 +3432,36 @@ container package), or a versionless purl — is dropped uncounted, as before. E
 target is examined, not the first alone. The counters in the ubi9-micro and syft-1.51
 fixtures are unchanged, and a described real package is now one component, one cataloged.
 
+**Revised (QA 2026-11-04).** The CycloneDX reader had the same gap one slot over. It walked
+`bom.components` only, and `metadata.component` — the slot the specification reserves for
+the thing the SBOM is about, which for a library's own SBOM is the library — was never read,
+nor were the components a generator nests under it. lodash 4.17.20 written there scanned
+against the public v9 artifact as 0 components, 0 findings, exit 0 under `--fail-on low
+--fail-on-incomplete=target`; the same package in `bom.components` gave 5 findings including
+CVE-2021-23337; beside a clean `is-number` in `bom.components` the document reported 1
+evaluated, 0 findings, exit 0. The subject is now cataloged after `bom.components` under the
+rule above: a root shape — no purl (syft's container, every image SBOM syft writes),
+`pkg:oci`, a purl without a version — is dropped uncounted exactly as before, so the syft
+fixture still counts four components; any other subject gets what a top-level twin would
+have got, a candidate or a counted skip. The subject's nested components are inventory and
+are walked like top-level ones, every skip counted, into a scratch inventory that carries the
+document's distro, so a deb, rpm, apk or alpm purl there is keyed exactly as its top-level
+twin — the document's operating-system component first, the purl's qualifier second. A
+package listed both as subject (or under it) and in `bom.components` is one package, one
+finding: the identity is the one the matcher judges — type, name, version and ecosystem key —
+not the purl string, because a purl without `@version` takes the component's version, so one
+bare purl can name two versions (deduping on the string dropped a vulnerable subject whose
+`bom.components` twin sat at the fixed version), while a qualifier-only difference (syft's
+`package-id`, two install paths) is one package. The dropped listing's locations are kept on
+the reported package (D10), and a source identity, SRPM name or module stream only it carried
+fills the kept one's (D8). The dedupe is the subject tree against what `bom.components`
+yielded and nothing else: two top-level listings, or two both nested under the subject, were
+never read as one package and stay two, so where a generator put its inventory does not change
+how many packages it holds. `TestRun_CycloneDXSubject*` in scancmd hold these shapes through
+`Run` — the subject itself, a child, a grandchild, beside a clean component, duplicated in
+both places, at the fixed version, the three root shapes, a distro package as subject, and a
+bare purl at two versions.
+
 ---
 
 ### D85 — Ubuntu fix states, from the tracker Canonical actually maintains
