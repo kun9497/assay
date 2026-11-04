@@ -408,6 +408,12 @@ func main() {
 // TestRun_ScanTimeoutReachesRealExitCode does.
 var withScanTimeout = context.WithTimeout
 
+// errHelp is parseScanArgs's answer to `--help` / `-h`: not a parse failure,
+// so run prints the usage on stdout and exits 0 rather than reporting an
+// error. A sentinel rather than a flag on Options, because help is answered
+// before any option is acted on and Options travels into scancmd.
+var errHelp = errors.New("help requested")
+
 // run holds the real entry point so it stays testable — main only translates
 // the result into a process exit code.
 func run(args []string, stdout, stderr io.Writer) int {
@@ -433,6 +439,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		// it. Two sites emitting the identical message was one more place for
 		// them to drift apart, for no behavioural difference.
 		target, opts, err := parseScanArgs(args[1:])
+		if errors.Is(err, errHelp) {
+			fmt.Fprint(stdout, usage)
+			return exitOK
+		}
 		if err != nil {
 			fmt.Fprintf(stderr, "error: %v\n", err)
 			return exitError
@@ -478,6 +488,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return exitError
 		}
 		switch args[1] {
+		case "help", "--help", "-h":
+			// Same contract as `assay help`: stdout, exit 0, stderr empty.
+			// `assay db --help` used to be "unknown db subcommand", exit 2.
+			fmt.Fprint(stdout, usage)
+			return exitOK
 		case "build":
 			// Parsed independently of resolveBuildSeed below: --ratings-only
 			// is a bare boolean, not a "consume the next token" flag like
@@ -1540,6 +1555,15 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 			if err := setExplain(&opts, strings.TrimPrefix(a, "--explain=")); err != nil {
 				return "", scancmd.Options{}, err
 			}
+
+		case a == "--help" || a == "-h":
+			// A request for the help text, wherever it sits among the
+			// arguments, is not a scan that failed to parse: run prints the
+			// usage to stdout and exits 0, as `assay help` does. Until QA
+			// 2026-11-04 this fell through to "unknown flag" below -- exit 2,
+			// nothing on stdout -- on the one command a first-time user asks
+			// for help on.
+			return "", scancmd.Options{}, errHelp
 
 		case strings.HasPrefix(a, "-"):
 			return "", scancmd.Options{}, fmt.Errorf("unknown flag %q", a)

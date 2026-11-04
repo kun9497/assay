@@ -20,6 +20,17 @@
   아래서 스캔하는 대신 exit 2 로 끝납니다. (QA 2026-11-02 P3 #23)
 
 ### Fixed
+- 표(table) 보고서를 쓸 수 없으면 exit 2 입니다. stdout 이 닫혔거나, 가득 찼거나, 읽기 전용으로
+  열린 경우 `--output json` 과 `--output sarif` 는 이미 `error: write report` 와 함께 exit 2 였고,
+  나열할 finding 이 있는 표도 그랬습니다. 그러나 나열할 것이 없는 표 -- 깨끗한 스캔, 빈 문서,
+  모든 finding 이 waive 된 스캔 -- 는 아무것도 쓰지 않고 exit 0 으로 끝났으며 `reportSha256` 도
+  남기지 않았으므로, 기본 출력을 쓸 수 없는 파일로 리다이렉트한 잡은 도착하지 않은 보고서를
+  통과로 읽었습니다. 이제 표가 쓰는 모든 줄을 검사하고, 첫 실패를 다른 렌더러와 같은 방식으로
+  stderr 에 보고합니다. 릴리스 바이너리로 main 에서 재현했고, 수정은 `scancmd.Run` 과 CLI 진입점
+  양쪽에서 테스트로 붙잡습니다. (QA 2026-11-04, 차원 4 #5; QA 2026-11-02 에서 처음 발견)
+- `assay scan --help`, `assay scan -h`, `assay db --help`, `assay db -h`, `assay db help` 는
+  `assay help` 처럼 usage 를 stdout 에 출력하고 exit 0 입니다. 전에는 `error: unknown flag` /
+  `error: unknown db subcommand` 로 exit 2 였고 stdout 에는 아무것도 없었습니다. (QA 2026-11-04 #7)
 - jar 의 엔트리는 하나씩만이 아니라 합계로도 상한을 받습니다. cataloger 는 각 엔트리의 압축 해제
   바이트를 512 MiB 파일당 한도로 막았지만 그 합계는 아무것도 막지 않았으므로, deflate 된 64 MiB
   엔트리 열두 개를 담은 784 KB jar 가 768 MiB 를 풀어냈고, 같은 모양을 아카이브 한도까지 키우면 수백
