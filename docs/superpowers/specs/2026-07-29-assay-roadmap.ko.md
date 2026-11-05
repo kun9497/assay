@@ -7009,6 +7009,19 @@ fix state 를 담지 않으므로, 담고 있는 artifact 위에 게시하려면
 release 가 하룻밤에 state 의 5분의 1 넘게 정말로 잃는 경우, 예를 들어 대량의 수정이 들어온 경우에도
 `--force` 가 필요하다.
 
+**개정 (QA 2026-11-04).** 대량 수정 경우가 먼저 일어났다. 2026-11-03 과 11-04 nightly 가 둘 다
+`Ubuntu:26.04:LTS` 에서 거부됐다(65,507 → 45,221, 다음 날 45,977): Canonical 의 resolute 커널 SRU 가
+20,264 개 tuple 을 fix state 에서 `fixed` 로 옮겼고, stamp 비율(99.98% → 99.99%)과 tracker 자체의
+개수가 이것이 parsing 이 멈춘 tracker 가 아니라 실제 upstream 변화임을 보여줬다. 워크플로에는 그
+판단을 실어 보낼 길이 없었다 — dispatch 입력은 `seed` 뿐이었고 D110 주석은 "`--force` 는 절대" 라고
+적혀 있었다 — 그래서 운영자의 override 는 서명 키를 쥔 워크스테이션에서의 로컬 빌드와 push 를
+뜻했다. 2026-11-05 부터 `db-publish.yml` 은 boolean `force` dispatch 입력(기본값 false)을 받는다.
+Publish 단계는 이를 `env` 로 읽고 문자 그대로 `true` 일 때만 `--force` 로 바꾼다. schedule 실행에는
+입력이 없으므로 절대 force 하지 않는다. D114 게이트는 여전히 Publish 앞에서 돌고 여전히 거부한다:
+override 는 `db push` 의 개수 비교만 덮고 다른 것은 덮지 않는다. 거부가 기본 동작으로 남고, override
+는 사람이 실행의 dispatch 에 기록하는 결정이며 로그와 `status.json` 이 그것을 보여준다.
+`internal/ciguard` 는 `--force` 를 그 한 자리, 그 한 조건문 뒤에 붙들어 둔다.
+
 **검증.**
 - **빌드, 실제 git clone 에 대한 `Provider.Fetch` 로:**
   - 옮겨진 레이아웃과 철자가 바뀐 헤더는 둘 다 실패하며, archive 는 가져오지 않는다;

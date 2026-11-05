@@ -554,6 +554,9 @@ Smaller withdrawals and shrinking EPSS/KEV snapshots are allowed; losing a ratin
 or reducing NVD ratings is refused. Legacy artifacts without counts are downloaded for
 comparison. Registry read/metadata errors stop publication unless `--force` explicitly
 overrides the check. These counts detect large losses, not every semantic regression.
+The nightly workflow passes `--force` only when dispatched with its boolean `force` input
+(2026-11-05, after D157 refused two nights over a real Canonical batch); a schedule run never
+does, and the D114 regression gate runs either way.
 
 A build run with `EPSS_ENABLE=0` or `KEV_ENABLE=0` carries no key for that source at all —
 its annotator is the only writer of those rows, and neither the seeded copy nor

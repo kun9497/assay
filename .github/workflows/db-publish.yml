@@ -21,6 +21,19 @@ on:
         description: "Seed reference for a one-time recovery build: ghcr.io/kun9497/assay-db@sha256:<64 hex> or ghcr.io/kun9497/assay-db:<tag>; empty = the published tag"
         type: string
         default: ""
+      force:
+        # The one way `--force` reaches `db push` from here, and only on a
+        # dispatch: a schedule run has no inputs, so the guards hold every
+        # night. Set it after a human has read the refusal and classified it
+        # as a real upstream change -- the 2026-11-03 and 11-04 nightlies
+        # were refused by D157 because Canonical's resolute kernel SRU moved
+        # 20,264 Ubuntu:26.04:LTS tuples from a fix state to `fixed`, a
+        # narrower annotation the guard cannot tell from a tracker that
+        # stopped parsing. The D114 gate above Publish still runs and still
+        # refuses: this overrides db push's count comparisons, nothing else.
+        description: "true = pass --force to db push, overriding its coverage and Ubuntu fix-state (D157) refusals for this one run; the regression gate still holds"
+        type: boolean
+        default: false
 
 # One writer to the artifact at a time, across BOTH workflows (same group
 # name in each): on 2026-08-14 two backfill walkers raced the same slice and
@@ -181,7 +194,8 @@ jobs:
           # (`ghcr.io/kun9497/assay-db@sha256:<64 hex>`, e.g. the 08-30 snapshot
           # that still carries Debian:11) reruns tonight's build from that
           # snapshot instead of an operator's machine -- selects the seed only,
-          # never --force. Empty: the published tag, as every night.
+          # never --force (that is the `force` input, read by Publish). Empty:
+          # the published tag, as every night.
           seed="${SEED:-$REF}"
           if ! ./bin/assay db build --seed "$seed" 2>&1 | tee /tmp/build.log; then
             if grep -q DENIED /tmp/build.log; then
@@ -274,9 +288,19 @@ jobs:
         # signing step below targets. Signing by digest, never by the tag
         # -- the .sig tag is derived from the digest, and a tag races the
         # next push.
+        env:
+          # Reaches the shell as data, like SEED (QA 2026-11-02 #16): a
+          # boolean input renders as the word true or false, and a schedule
+          # run renders it empty, so only a dispatcher's literal true forces.
+          FORCE: ${{ inputs.force }}
         run: |
           set -o pipefail
-          out=$(./bin/assay db push ${{ steps.ref.outputs.ref }} | tail -n1)
+          force=""
+          if [ "$FORCE" = "true" ]; then
+            echo "::warning::publishing with --force: db push's coverage and Ubuntu fix-state (D157) refusals are overridden for this run by the dispatcher's decision; the D114 gate above still held"
+            force="--force"
+          fi
+          out=$(./bin/assay db push ${{ steps.ref.outputs.ref }} $force | tail -n1)
           echo "$out"
           # The two steps below sign and verify exactly this string. Anything
           # else here -- an empty line, a warning that happened to print last

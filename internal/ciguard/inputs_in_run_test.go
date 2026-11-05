@@ -124,7 +124,7 @@ func TestNoWorkflowRunBlockSubstitutesAnInput(t *testing.T) {
 	// The dispatchable workflows read their inputs through env: somewhere.
 	// Without this, a pattern matching nothing would pass every workflow.
 	for f, want := range map[string]int{
-		"db-publish.yml":  2, // SEED, in the shape check and in Build
+		"db-publish.yml":  3, // SEED, in the shape check and in Build; FORCE, in Publish
 		"db-sign.yml":     6, // DIGEST and REPOSITORY, in three steps
 		"db-backfill.yml": 2, // NVD_SINCE_DAYS, NVD_UNTIL_DAYS
 	} {
