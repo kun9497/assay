@@ -7412,6 +7412,21 @@ Counting reads every record at push time: 153 s for the 1.8M records of the 2026
 database on a workstation. A release that genuinely loses more than a fifth of its states
 in one night, for example a large batch of fixes, also needs `--force`.
 
+**Revised (QA 2026-11-04).** The batch case happened first. The 2026-11-03 and 11-04 nightlies
+were both refused on `Ubuntu:26.04:LTS` (65,507 → 45,221, then 45,977): Canonical's resolute
+kernel SRU moved 20,264 tuples from a fix state to `fixed`, which the stamp ratio
+(99.98% → 99.99%) and the tracker's own counts showed to be a real upstream change, not a
+tracker that stopped parsing. The workflow had no way to carry that reading — its only
+dispatch input was `seed`, and the D110 note said "never `--force`" — so an operator's
+override meant a local build and push on a workstation holding the signing key. Since
+2026-11-05 `db-publish.yml` takes a boolean `force` dispatch input, default false, which the
+Publish step reads through `env` and turns into `--force` only when it is the literal `true`;
+a schedule run has no inputs and so never forces. The D114 gate still runs and still refuses
+before Publish: the override covers `db push`'s count comparisons, nothing else. The refusal
+stays the default behaviour and the override is a decision a human records in the run's
+dispatch, which the log and `status.json` then show. `internal/ciguard` holds `--force` to
+that one site behind that one test.
+
 **Verified.**
 - **Build, through `Provider.Fetch` against a real git clone:**
   - a moved layout and a respelled header both fail, without fetching the archive;

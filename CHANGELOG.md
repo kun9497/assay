@@ -13,6 +13,14 @@ All notable changes to this project are documented here. The format follows
   `ignoreFile.path: "none"`. Discovery reads the directory the scan runs from, so a scan of a
   checkout you did not author ran under whatever waiver list it carried, and the only opt-out
   was a file saying `ignore: []`. (QA 2026-11-02 P3 #23)
+- The nightly publish takes a boolean `force` dispatch input. `true` passes `--force` to
+  `db push` for that one run, overriding its coverage and Ubuntu fix-state (D157) refusals
+  after a human has classified the refusal as a real upstream change; a schedule run has no
+  inputs and never forces, and the D114 regression gate runs and refuses either way. The
+  2026-11-03 and 11-04 nightlies were refused on `Ubuntu:26.04:LTS` over Canonical's resolute
+  kernel SRU, and the only override was a local build on a workstation holding the signing
+  key. `internal/ciguard` holds `--force` to that one site, behind the input's test.
+  (QA 2026-11-04 nightly follow-up)
 
 ### Changed
 - An empty `--config` value (`--config=`, `--config ""`) is refused at parse with a message

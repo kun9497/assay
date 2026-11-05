@@ -13,6 +13,13 @@
   발견(discovery)은 스캔을 실행한 디렉터리를 읽으므로, 직접 작성하지 않은 checkout 을 스캔하면 그
   checkout 이 들고 있는 waiver 목록 아래서 실행됐고, 유일한 탈출구는 `ignore: []` 라고 적힌 파일이었습니다.
   (QA 2026-11-02 P3 #23)
+- nightly publish 가 boolean `force` dispatch 입력을 받습니다. `true` 면 그 한 번의 실행에서 `db push`
+  에 `--force` 를 넘겨, 사람이 거부를 실제 upstream 변화로 판정한 뒤 coverage 와 Ubuntu fix-state(D157)
+  거부를 덮습니다. schedule 실행에는 입력이 없어 절대 force 하지 않고, D114 회귀 게이트는 어느 쪽이든
+  돌고 거부합니다. 2026-11-03 과 11-04 nightly 가 Canonical 의 resolute 커널 SRU 로 `Ubuntu:26.04:LTS`
+  에서 거부됐는데, 유일한 override 는 서명 키를 쥔 워크스테이션에서의 로컬 빌드였습니다.
+  `internal/ciguard` 는 `--force` 를 그 입력의 조건문 뒤 한 자리에 붙들어 둡니다.
+  (QA 2026-11-04 nightly 후속)
 
 ### Changed
 - 빈 `--config` 값(`--config=`, `--config ""`)은 parse 단계에서 `none` 을 안내하는 메시지와 함께 거부됩니다.
