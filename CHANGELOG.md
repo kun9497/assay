@@ -183,6 +183,14 @@ All notable changes to this project are documented here. The format follows
   expected start windows are recorded in `docs/DESIGN.md` next to `status.json`, and the
   weekly's comment no longer claims "Monday 06:00 KST". (QA 2026-11-02 #18)
 
+### Security
+- `github.com/klauspost/compress` is v1.20.2. The v0.15.0 release attempt of 2026-11-06 was
+  stopped by its own govulncheck hook (`scripts/release-vulncheck.sh`): GO-2026-6865
+  (CVE-2026-116591, published 2026-11-05) is reachable from the zstd reader that decodes
+  Red Hat's CSAF archive (govulncheck named seven symbols, `fse.Decompress` among them) in
+  every version before v1.20.2, where a crafted two-block frame panics the decoder. No
+  release carried the fix before this one; nothing was published from the stopped attempt.
+
 ### Fixed
 - A CycloneDX document's subject is scanned. The reader walked `bom.components` only, so a
   package written as `metadata.component` -- the slot the specification reserves for the thing
