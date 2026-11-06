@@ -159,6 +159,13 @@
   자리에 떨어지도록 시를 앞당겼고, 예상 시작 구간은 `docs/DESIGN.md` 의 `status.json` 옆에 기록했으며,
   주간 workflow 의 주석은 더 이상 "Monday 06:00 KST" 라고 하지 않습니다. (QA 2026-11-02 #18)
 
+### Security
+- `github.com/klauspost/compress` 를 v1.20.2 로 올렸습니다. 2026-11-06 의 v0.15.0 릴리스 시도는 자체
+  govulncheck 훅(`scripts/release-vulncheck.sh`)에 멈췄습니다. GO-2026-6865 (CVE-2026-116591,
+  2026-11-05 공개)가 Red Hat CSAF 아카이브를 푸는 zstd 리더에서 (govulncheck 가 심볼 7 개를 들었고
+  `fse.Decompress` 가 그중 하나) v1.20.2 이전 모든 버전에 닿아 있었고, 조작된 two-block 프레임이 디코더를 panic 시킵니다. 이전 릴리스
+  어느 것도 이 수정을 담고 있지 않았고, 멈춘 시도에서 게시된 것은 없습니다.
+
 ### Fixed
 - CycloneDX 문서의 subject 를 스캔합니다. 리더는 `bom.components` 만 걸었으므로
   `metadata.component` -- 명세가 SBOM 의 대상, 즉 라이브러리 자체의 SBOM 이라면 그 라이브러리를
