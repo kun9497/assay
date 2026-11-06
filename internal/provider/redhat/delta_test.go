@@ -1,7 +1,9 @@
 package redhat
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"runtime"
 	"strconv"
 	"strings"
@@ -301,24 +303,85 @@ func TestDelta_RefusesABadPath(t *testing.T) {
 	}
 }
 
-// An archive so stale that the delta would be a third of the corpus is an
-// error rather than an hour of one-at-a-time requests.
-func TestDelta_RefusesAnOverlargeDelta(t *testing.T) {
+// overlargeChanges lists one more document than maxDelta, all changed the day
+// after the 2026-08-05 archive the tests below serve.
+func overlargeChanges() [][2]string {
 	rows := make([][2]string, 0, maxDelta+1)
 	for i := 0; i <= maxDelta; i++ {
 		rows = append(rows, [2]string{
 			"2026/cve-2026-" + strconv.Itoa(100000-i) + ".json", "2026-08-06T00:00:00+00:00",
 		})
 	}
+	return rows
+}
+
+// An overlarge delta behind an archive older than maxArchiveAge is an archive
+// that has stopped being rebuilt: an error rather than an hour of
+// one-at-a-time requests, and not one request is made before it. The clock
+// is one second past the boundary, so this is also where the boundary is.
+func TestDelta_RefusesAnOverlargeDeltaBehindAStaleArchive(t *testing.T) {
+	rows := overlargeChanges()
 	f := &feed{
 		pointer: "csaf_vex_2026-08-05.tar.zst",
 		archive: archiveWith(t),
 		changes: changesCSV(rows...),
 	}
-	if _, _, err := fetchAll(t, serve(t, f)); err == nil {
-		t.Fatal("an overlarge delta was accepted")
-	} else if !strings.Contains(err.Error(), "stopped being rebuilt") {
-		t.Errorf("error = %v, want it to say what an overlarge delta means", err)
+	stale := time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC).Add(maxArchiveAge + time.Second)
+	_, _, err := fetchAllAt(t, serve(t, f), stale)
+	if err == nil {
+		t.Fatal("an overlarge delta behind a stale archive was accepted")
+	}
+	for _, want := range []string{"20001 documents have changed", "21 days old", "stopped being rebuilt"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %v, want it to say %q", err, want)
+		}
+	}
+	if n := f.hitsFor(rows[0][0]); n != 0 {
+		t.Errorf("the first listed document was fetched %d times before the refusal", n)
+	}
+}
+
+// QA 2026-11-06: the same delta behind an archive exactly maxArchiveAge old
+// is a regenerated corpus (Red Hat rewrote 20,514 documents on 2026-11-05
+// behind a five-day-old archive), and is fetched. The run is cancelled on the
+// first advisory the delta emits, so the test's cost is one document rather
+// than 20,001; what it holds is that the fetch BEGAN and the progress line
+// said why, where the count alone had refused.
+func TestDelta_FetchesAnOverlargeDeltaBehindAFreshArchive(t *testing.T) {
+	rows := overlargeChanges()
+	f := &feed{
+		pointer: "csaf_vex_2026-08-05.tar.zst",
+		archive: archiveWith(t),
+		changes: changesCSV(rows...),
+		// Only the first listed document is served; the rest would 404 as
+		// withdrawn, and the cancellation below means they are never asked.
+		docs: map[string]string{rows[0][0]: rhel9Doc(t, "CVE-2026-100000", "curl", "")},
+	}
+	s := serve(t, f)
+	var progress bytes.Buffer
+	p := New(Options{BaseURL: s.URL, Progress: &progress})
+	p.now = func() time.Time { return time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC).Add(maxArchiveAge) }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	emitted := 0
+	_, err := p.Fetch(ctx, func(advisory.Advisory) error {
+		emitted++
+		cancel()
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want the cancellation -- an overlarge delta behind a fresh archive must be fetched, not refused", err)
+	}
+	// The delta runs before the archive walk (D129), so the one advisory is
+	// the delta's, and the server saw the request that produced it.
+	if emitted != 1 || f.hitsFor(rows[0][0]) != 1 {
+		t.Errorf("emitted %d advisories and fetched the first listed document %d times, want 1 and 1",
+			emitted, f.hitsFor(rows[0][0]))
+	}
+	want := "redhat: 20001 documents have changed since the 2026-08-05 archive was built, past the 20000 a delta " +
+		"usually holds, but that archive is 21 days old and still being rebuilt, so they are fetched one at a time"
+	if !strings.Contains(progress.String(), want) {
+		t.Errorf("progress lacks the line saying why an overlarge delta was fetched:\n%s", progress.String())
 	}
 }
 

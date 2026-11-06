@@ -5996,6 +5996,21 @@ accepted: a delta that fails now fails after the spool, not before it. D129's pr
 intact — the delta is still emitted before the walk, and a delta copy at least as new still
 supersedes, including when it converts to nothing.
 
+**Revised (QA 2026-11-06).** The delta pass had refused more than 20,000 changed documents
+outright, on the reading that nothing but an archive that had stopped being rebuilt could
+produce that many (about three weeks of the ~900-a-day drift measured 2026-08-07). On
+2026-11-05 Red Hat regenerated its corpus — 20,514 documents changed that day, from every
+year 1999 to 2026, each with a new "Last generated version" revision — behind a 2026-11-01
+archive that Red Hat rebuilds weekly, and the 2026-11-06 publish failed on 27,679 changed
+documents with the archive five days old and healthy. The count measured what Red Hat did
+that week; the archive's age measures what the guard is about. Both providers now refuse an
+overlarge delta only when the archive is also more than 21 days old (the three weeks the
+count had stood for), and otherwise fetch it with a progress line saying how many and how old
+the archive is. The cost the count was guarding is small: the 9,341 delta documents of
+2026-11-05 took 5m18s, so even the whole corpus is under an hour, inside the publish job's
+budget. The clock is read for the feed's health only; `DataAsOf` stays the archive's own
+date (D12). Held by the stale and fresh archive cases in each provider's delta tests.
+
 **Verified.** SUSE: with a HEAD saying 00:00, a changes row at 01:00 and the archive served at
 02:00, the archive GET precedes the changes GET, the row is never fetched, openssh's fix is
 the archive's `9.6p1-1.1` and `DataAsOf` is 02:00; with the row on the cutoff and the served
