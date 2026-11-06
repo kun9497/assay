@@ -125,6 +125,31 @@ type branch struct {
 // ambiguity from 25.1% of (CVE, package, major) groups to 6.1%.
 var mainlineCPE = regexp.MustCompile(`^cpe:/[oa]:redhat:enterprise_linux:(\d+)(?:\.\d+)?(?:::.*)?$`)
 
+// elsCPE matches Extended Life-cycle Support, the phase Red Hat moves a WHOLE
+// major into after its mainline end of life -- rhel_els:6 is RHEL 6, not a
+// minor-pinned channel beside it the way rhel_eus:9.4 is (D47, revised
+// 2026-11-06).
+//
+// It is read for one reason. Red Hat's 2026-11-05 corpus regeneration
+// re-labelled the whole-product ids `red_hat_enterprise_linux_4..7` -- the
+// ids every bare no-fix statement about those releases hangs on -- from
+// enterprise_linux:N to rhel_els:N, while 8, 9 and 10 kept enterprise_linux:N.
+// Under mainlineCPE alone that moved every "affected, no fix" and "will not
+// fix" statement about RHEL 4-7 out of the feed overnight: the 2026-11-06
+// publish lost 4,085 (advisory, key) pairs under the frozen keys and 460,000
+// no-fix entries, with the live keys untouched.
+//
+// What resolves through it is the STATEMENT, not the build: a product_status
+// id under an ELS platform that carries a version is a fix that channel
+// shipped, and resolveProduct drops it (skipELSFixed) on exactly D47's
+// reasoning for EUS -- a host's channel is not readable from its filesystem,
+// so a channel's fixed version cannot be keyed to the major. Measured on the
+// regenerated documents of 2026-11-06: a fixed build under 6Server-ELS was
+// rhel_els:6 before the regeneration too, so nothing that was read before is
+// read differently now. docs/deferred-decisions.md records the ELS fixed
+// builds that stay unread and the 2029-05 trigger (RHEL 8 enters ELS).
+var elsCPE = regexp.MustCompile(`^cpe:/[oa]:redhat:rhel_els:(\d+)(?:\.\d+)?(?:::.*)?$`)
+
 // hummingbirdCPE matches Project Hummingbird, Red Hat's minimal hardened
 // container line (D98). Every document sampled from the 2026-08-27 archive
 // carries exactly one shape, "cpe:/a:redhat:hummingbird:1" — measured across
@@ -266,7 +291,9 @@ func isModule(evr string) bool {
 }
 
 // ecosystemFor maps a platform CPE to the store's ecosystem key, or reports
-// false for a product this provider does not ingest.
+// false for a product this provider does not ingest. An ELS CPE resolves to
+// the same major as the mainline one (elsCPE); whether a given id under it
+// is read is resolveProduct's call, not this function's.
 //
 // Hummingbird is checked first (D98): its CPE never matches mainlineCPE's
 // "enterprise_linux" name, so the order between the two checks does not
@@ -279,6 +306,9 @@ func ecosystemFor(cpe string) (string, bool) {
 		return hummingbirdEcosystem, true
 	}
 	m := mainlineCPE.FindStringSubmatch(cpe)
+	if m == nil {
+		m = elsCPE.FindStringSubmatch(cpe)
+	}
 	if m == nil {
 		return "", false
 	}
@@ -396,6 +426,14 @@ const (
 	skipFlatpak
 	skipModuleContext
 	skipModule
+	// skipELSFixed is a versioned product_status id under an Extended
+	// Life-cycle Support platform (elsCPE): a fix that channel shipped, not
+	// keyed to the major for the reason D47 gives EUS. The bare statements
+	// under the same platform resolve (that is what elsCPE is for), so this
+	// is distinguished from skipNonRHEL: the platform IS RHEL, and a count
+	// of "non-mainline products" that silently absorbed these would no
+	// longer mean what the nightly log has meant by it since D47.
+	skipELSFixed
 	// skipNoPurl is Hummingbird-specific (D98): the component half of a
 	// "platform:component" id resolved to a real Hummingbird platform but no
 	// leaf in the product tree carries a purl this provider reads for it —
@@ -432,7 +470,7 @@ const (
 // purl-based lookup this project already trusts for that shape (SUSE's
 // packageOf, D77) reads the real name and version instead, so Hummingbird
 // never reaches splitContext, isModule or splitNEVRA at all.
-func resolveProduct(id string, cpe map[string]string, hummingbirdPkgs map[string]packageInfo) (productKey, string, skipReason) {
+func resolveProduct(id string, isFixed bool, cpe map[string]string, hummingbirdPkgs map[string]packageInfo) (productKey, string, skipReason) {
 	plat, comp, ok := strings.Cut(id, ":")
 	if !ok {
 		// No separator means the entry names a whole product and no package.
@@ -487,6 +525,16 @@ func resolveProduct(id string, cpe map[string]string, hummingbirdPkgs map[string
 	name, evr := splitNEVRA(stripArch(comp))
 	if name == "" {
 		return productKey{}, "", skipBadProduct
+	}
+	if isFixed && evr != "" && elsCPE.MatchString(c) {
+		// A fix an ELS channel shipped. Checked after the name/EVR split so a
+		// version-less `fixed` id under ELS still becomes the no-fix
+		// statement convert reads it as on mainline, and before the module
+		// guard so an ELS build never feeds SkippedModule's documented zero.
+		// Not checked for a statement (isFixed false): a known_affected id
+		// under ELS, versioned or bare, says the release is affected, and
+		// that is exactly what elsCPE exists to keep.
+		return productKey{}, "", skipELSFixed
 	}
 	if stream == "" && isModule(evr) {
 		// D80's load-bearing zero, carried over unchanged from the rule
@@ -621,9 +669,16 @@ type stats struct {
 	// isModule's zero and SkippedModule's zero both document.
 	SkippedModuleContext int
 	SkippedNonRHEL       int
-	SkippedNoCPE         int
-	SkippedNoCVE         int
-	SkippedImage         int
+	// SkippedELSFixed is a versioned product_status id under an Extended
+	// Life-cycle Support platform (skipELSFixed): a fix that channel
+	// shipped, dropped on D47's reasoning while the bare statements under
+	// the same platform are read (elsCPE). Zero before 2026-11-06 only
+	// because ELS platforms never resolved at all; the 2026-11-06 documents
+	// carry 71 such ids in cve-2026-99999 alone.
+	SkippedELSFixed int
+	SkippedNoCPE    int
+	SkippedNoCVE    int
+	SkippedImage    int
 	// SkippedWholeProduct is an entry that names a PRODUCT and no package at
 	// all — "Red Hat Linux 6.2", "Red Hat Enterprise Linux AS (Advanced
 	// Server) version 2.1", "Red Hat Powertools 7.0". Red Hat used that form
@@ -739,10 +794,13 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 	}
 
 	add := func(id string, isFixed bool) {
-		k, evr, why := resolveProduct(id, cpe, hummingbirdPkgs)
+		k, evr, why := resolveProduct(id, isFixed, cpe, hummingbirdPkgs)
 		switch why {
 		case skipWholeProduct:
 			st.SkippedWholeProduct++
+			return
+		case skipELSFixed:
+			st.SkippedELSFixed++
 			return
 		case skipBadProduct:
 			st.SkippedBadProduct++
@@ -832,7 +890,11 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 				// no_fix_planned/none_available reason reaches a module
 				// package's range exactly as it already did for an ordinary
 				// one.
-				k, _, why := resolveProduct(id, cpe, hummingbirdPkgs)
+				// isFixed false: a remediation names the id a reason is
+				// attached to, never a build, so a versioned id under an
+				// ELS platform resolves here to the same key its bare
+				// statement did and the reason reaches that statement.
+				k, _, why := resolveProduct(id, false, cpe, hummingbirdPkgs)
 				if why != skipNone {
 					continue
 				}

@@ -1317,6 +1317,42 @@ nothing can ever look up. Do not re-derive the suffix idea; it is measured and d
 
 ---
 
+### Red Hat's ELS fixed builds — the statements are read, the fixes are not
+
+**What happened.** Red Hat's 2026-11-05 corpus regeneration labels the whole-product ids
+`red_hat_enterprise_linux_4..7` `cpe:/o:redhat:rhel_els:N` (Extended Life-cycle Support), where
+they had carried `enterprise_linux:N`. D47's revision of 2026-11-06 resolves an ELS CPE to the
+major for a **statement** — the bare `known_affected` ids every no-fix and will-not-fix record about
+RHEL 4–7 hangs on, which the 2026-11-06 publish had lost 4,085 of — and keeps dropping a versioned
+`fixed` id under an ELS platform (`6Server-ELS`, `6Server-ELS.EXTENSION`, `7Server-ELS`,
+`7Server-optional-ELS`), now counted on its own line ("fixed builds on an ELS channel").
+
+**What stays unread, measured on the live documents of 2026-11-06.** `cve-2021-3156` fixes `sudo`
+on RHEL 6 only under `6Server-ELS` (3 ids); `cve-2021-4034` `polkit` on 6 (5); `cve-2026-9999`
+`webkitgtk4` on 7 (6); `cve-2026-99999` `kernel` on 6 (19) and `kernel`/`bpftool` on 7 (26). In
+all ten documents, **no (major, package) pair carries both a mainline and an ELS fix**, so D47's
+channel-ambiguity argument has zero instances in the sample — but 26 of the 71 ELS fixed tuples in
+`cve-2026-99999` carry two fixed versions **inside one channel** (`7Server-ELS` kernel
+`0:3.10.0-1160.167.2.el7` and `1160.169.1.el7`), and `rangeeval` unions ranges, so reading them
+would judge a host at 167.2 affected until 169.1: the point-release collapse D47 measured at 25.1%
+→ 6.1% would come back inside ELS.
+
+**What it costs today.** A RHEL 6 or 7 host whose only fix is an ELS build is told "affected, no
+fix" rather than "fixed at the ELS version" — the loud direction — and never told it is clean. A
+host below the ELS build is told nothing by that document, as before the revision. Both releases
+are past mainline EOL and D110-frozen in the published artifact; under the revision Red Hat's
+statements keep arriving for them, so they read as live keys again, which is the honest state.
+
+**Revisit when** RHEL 8 enters ELS (2029-05-31). Its fixed builds will then arrive under
+`rhel_els:8` channel ids and be dropped here while the whole-product statements keep the key
+gaining records, so D110 never freezes `Red Hat:8` and it would silently stop gaining fixes. Before
+that date either the channel question above is answered (a filesystem signal for ELS entitlement,
+which the EUS measurement says does not exist in the release string) or ELS fixed builds are
+admitted for a major past its mainline EOL with the one-channel ambiguity above measured and
+accepted. Do not admit them for a live major without that measurement.
+
+---
+
 ### Replaying an rpmdb write-ahead log
 
 **Why deferred.** A `rpmdb.sqlite-wal` larger than its 32-byte header currently fails the

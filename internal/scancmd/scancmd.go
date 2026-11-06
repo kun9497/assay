@@ -901,9 +901,9 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 	if redHatFindings(res.Findings) {
 		fmt.Fprintln(stderr,
 			"note: Red Hat findings are matched against mainline RHEL errata. A host on "+
-				"Extended Update Support, AUS, TUS or E4S may have a different fixed version "+
-				"for the same CVE; the support channel is a subscription attribute and is not "+
-				"readable from the filesystem.")
+				"Extended Update Support, AUS, TUS, E4S or Extended Life-cycle Support may have a "+
+				"different fixed version for the same CVE; the support channel is a subscription "+
+				"attribute and is not readable from the filesystem.")
 	}
 	// The report already said so in prose; exiting 0 anyway would let CI read a
 	// scan that evaluated nothing as a pass (D11).
