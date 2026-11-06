@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+### Changed
+- 주간 스캐너 차등과 nightly D114 gate에 `ubi10` 타깃(`registry.access.redhat.com/ubi10/ubi`,
+  digest 고정)을 추가했습니다. D93의 85% / 2배 규칙으로 측정 실행에서 심었습니다(minAgree 326,
+  minFindings 333, maxFindings 784, maxAssayOnlyFixed 25). Red Hat의 2026-11-05 코퍼스 재생성이
+  RHEL 10의 바이너리 no-fix 진술을 소스 패키지 id로 접었는데 RHEL 10 타깃이 없어 아무도 보지 못했습니다.
+  스캔은 영향이 없었지만(전후 392건, `Package.Source`로 매칭) 다음 변화는 보이지 않았을 것입니다. trivy
+  블록은 없습니다. trivy가 RHEL 10에 아무것도 보고하지 않습니다. (QA 2026-11-06)
+
 ### Fixed
 - Red Hat 리더가 진술(`known_affected` id, 또는 버전 없는 `fixed` id)에 대해
   `cpe:/o:redhat:rhel_els:N`(Extended Life-cycle Support)을 `Red Hat:N`으로 풉니다. Red Hat의

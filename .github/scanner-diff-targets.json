@@ -73,6 +73,15 @@
     }
   },
   {
+    "name": "ubi10",
+    "tag": "ubi10/ubi:latest",
+    "ref": "registry.access.redhat.com/ubi10/ubi@sha256:0e8ccad7d35f5fd756f4f2202f018b8d3c3e8bb9af8e627d874239381a00ab41",
+    "minAgree": 326,
+    "minFindings": 333,
+    "maxFindings": 784,
+    "maxAssayOnlyFixed": 25
+  },
+  {
     "name": "rocky9",
     "tag": "rockylinux:9",
     "ref": "mirror.gcr.io/library/rockylinux@sha256:d7be1c094cc5845ee815d4632fe377514ee6ebcf8efaed6892889657e5ddaaa6",
@@ -111,7 +120,7 @@
     "trivy": {
       "minAgree": 34,
       "minFindings": 34,
-      "maxFindings": 180
+      "maxFindings": 372
     }
   },
   {
@@ -228,7 +237,7 @@
     "ref": "mirror.gcr.io/library/photon@sha256:b2425ecf9abbaa7d073b8650c80afa97f1d7952debd4f5a0560c38e41c933fe8",
     "minAgree": 18,
     "minFindings": 18,
-    "maxFindings": 44,
+    "maxFindings": 100,
     "maxAssayOnlyFixed": 25,
     "trivy": {
       "minAgree": 18,

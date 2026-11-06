@@ -57,7 +57,7 @@ ships no os-release) —
 across three rpmdb backends: BerkeleyDB, SQLite and ndb (D44, D76). Bitnami app layers
 catalog from their /opt/bitnami SPDX markers alongside the base distro (D99, dual
 inventory). A weekly digest-pinned
-scanner differential gates regressions in CI (D93: 25 targets vs grype, the last two the
+scanner differential gates regressions in CI (D93: 26 targets vs grype, the last two the
 first end-of-support ones, D114; D105 added trivy on the 18 targets trivy supports — the
 tool is `cmd/scandiff`, floors in `.github/scanner-diff-targets.json`). Since D114 the
 nightly publish runs the same tool with `-regressions-only` against the candidate before
