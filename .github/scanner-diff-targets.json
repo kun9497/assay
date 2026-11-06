@@ -73,6 +73,16 @@
     }
   },
   {
+    "name": "ubi10",
+    "tag": "ubi10/ubi:latest",
+    "ref": "registry.access.redhat.com/ubi10/ubi@sha256:0e8ccad7d35f5fd756f4f2202f018b8d3c3e8bb9af8e627d874239381a00ab41",
+    "minAgree": 1,
+    "minFindings": 1,
+    "maxFindings": 100000,
+    "maxAssayOnlyFixed": 100000,
+    "trivy": {}
+  },
+  {
     "name": "rocky9",
     "tag": "rockylinux:9",
     "ref": "mirror.gcr.io/library/rockylinux@sha256:d7be1c094cc5845ee815d4632fe377514ee6ebcf8efaed6892889657e5ddaaa6",
