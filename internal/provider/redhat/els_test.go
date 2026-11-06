@@ -48,10 +48,20 @@ func elsDoc(t *testing.T) *document {
 			// The statement this revision exists for.
 			"red_hat_enterprise_linux_6:kernel",
 			"red_hat_enterprise_linux_9:kernel",
+			// A statement whose reason arrives on a VERSIONED ELS id (below).
+			"red_hat_enterprise_linux_6:glibc",
 		},
 		[]map[string]any{
 			{"category": "no_fix_planned", "product_ids": []string{"red_hat_enterprise_linux_6:kernel"}},
 			{"category": "vendor_fix", "product_ids": []string{"7Server-ELS:webkitgtk4-0:2.48.5-1.el7_9.x86_64"}},
+			// A reason attached to a versioned id under ELS names the same
+			// (key, package) its bare statement does: the remediation loop
+			// resolves ids as statements, never as builds, so the reason
+			// reaches Red Hat:6/glibc. Not seen in the 2026-11-06 sample
+			// (every remediation naming a versioned ELS id there is
+			// vendor_fix or workaround); held so the loop's isFixed=false
+			// is a decision, not an accident.
+			{"category": "none_available", "product_ids": []string{"6Server-ELS:glibc-0:2.12-1.212.el6_10.3.x86_64"}},
 		})
 }
 
@@ -83,6 +93,11 @@ func TestConvert_ELSStatementsResolveToTheMajorAndELSFixesAreDropped(t *testing.
 	}
 	if _, ok := by["Red Hat:9/kernel"]; !ok {
 		t.Error("Red Hat:9/kernel missing: a live key's statement changed in a document that also names ELS")
+	}
+	if a, ok := by["Red Hat:6/glibc"]; !ok || len(a.Ranges) != 1 {
+		t.Errorf("Red Hat:6/glibc = %+v, want one open range", a)
+	} else if got := a.Ranges[0].FixState; got != advisory.FixStateNotFixed {
+		t.Errorf("Red Hat:6/glibc fix state = %q, want not-fixed: the none_available reason on the versioned ELS id must reach the bare statement", got)
 	}
 	if st.SkippedELSFixed != 2 {
 		t.Errorf("SkippedELSFixed = %d, want 2 (the two webkitgtk4 architectures)", st.SkippedELSFixed)
