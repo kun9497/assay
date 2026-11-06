@@ -124,7 +124,7 @@ func verdictsOf(t *testing.T, adv advisory.Advisory, pkgs ...pkgmeta.Package) ma
 	}
 	if err := w.SetMeta(store.Meta{
 		BuiltAt:   time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC),
-		Providers: map[string]store.Provenance{SourceName: {Ecosystems: []string{hummingbirdEcosystem, "Red Hat:9"}}},
+		Providers: map[string]store.Provenance{SourceName: {Ecosystems: []string{hummingbirdEcosystem, "Red Hat:6", "Red Hat:7", "Red Hat:9"}}},
 	}); err != nil {
 		t.Fatalf("SetMeta: %v", err)
 	}

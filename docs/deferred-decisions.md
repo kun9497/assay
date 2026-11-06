@@ -1317,6 +1317,52 @@ nothing can ever look up. Do not re-derive the suffix idea; it is measured and d
 
 ---
 
+### Red Hat's ELS fixed builds — the statements are read, the fixes are not
+
+**What happened.** Red Hat's 2026-11-05 corpus regeneration labels the whole-product ids
+`red_hat_enterprise_linux_4..7` `cpe:/o:redhat:rhel_els:N` (Extended Life-cycle Support), where
+they had carried `enterprise_linux:N`. D47's revision of 2026-11-06 resolves an ELS CPE to the
+major for a **statement** — the bare `known_affected` ids every no-fix and will-not-fix record about
+RHEL 4–7 hangs on, which the 2026-11-06 publish had lost 4,085 of — and keeps dropping a versioned
+`fixed` id under an ELS platform (`6Server-ELS`, `6Server-optional-ELS`, `6Server-ELS.EXTENSION`,
+`6Server-optional-ELS.EXTENSION`, `7Server-ELS`, `7Server-optional-ELS`), now counted on its own
+line ("fixed builds on an ELS channel"; one count per product_status id, so architectures multiply
+it).
+
+**What stays unread, measured on the live documents of 2026-11-06.** `cve-2021-3156` fixes `sudo`
+on RHEL 6 only under `6Server-ELS` and `6Server-optional-ELS` (3 packages, 15 ids);
+`cve-2021-4034` `polkit` on 6 (5 packages); `cve-2026-9999` `webkitgtk4` on 7 (6);
+`cve-2026-99999` `kernel` on 6 (19) and `kernel`/`bpftool` on 7 (26) — 45 ELS-only packages, 71
+(package, version) tuples, 242 ids in that one document. In all ten documents, **no (major,
+package) pair carries both a mainline and an ELS fix**, so D47's channel-ambiguity argument has zero
+instances in the sample — but 26 of the 45 ELS-fixed packages in `cve-2026-99999` (52 of the 71
+tuples) carry two fixed versions **inside one channel** (`7Server-ELS` kernel
+`0:3.10.0-1160.167.2.el7` and `1160.169.1.el7`), and `rangeeval` unions ranges, so reading them
+would judge a host at 167.2 affected until 169.1: the point-release collapse D47 measured at 25.1%
+→ 6.1% would come back inside ELS.
+
+**What it costs today, and it is the quiet direction.** An ELS-only fix yields no record for the
+major at all, so a RHEL 6 or 7 host below that build is reported **clean** for the CVE — measured:
+none of the 85 ELS-only (major, package) tuples in the sample has a bare `known_affected`
+statement for the same package, so every one of them is silent (a RHEL 7 host at
+`kernel-3.10.0-1160.160.el7` gets no finding for `cve-2026-99999`). It would read "affected, no
+fix" only where a bare statement also exists, which is 0 in the sample. This is what the reader did
+before the revision too — ELS fixed builds were never read — so it is not a regression, but it is a
+silent miss on an EOL release and the reason this entry exists rather than a line in D47. Both
+releases are past mainline EOL and were D110-frozen in the published artifact; under the revision
+Red Hat's statements keep arriving for them, so they read as live keys again, which is the honest
+state.
+
+**Revisit when** RHEL 8 enters ELS (2029-05-31). Its fixed builds will then arrive under
+`rhel_els:8` channel ids and be dropped here while the whole-product statements keep the key
+gaining records, so D110 never freezes `Red Hat:8` and it would silently stop gaining fixes. Before
+that date either the channel question above is answered (a filesystem signal for ELS entitlement,
+which the EUS measurement says does not exist in the release string) or ELS fixed builds are
+admitted for a major past its mainline EOL with the one-channel ambiguity above measured and
+accepted. Do not admit them for a live major without that measurement.
+
+---
+
 ### Replaying an rpmdb write-ahead log
 
 **Why deferred.** A `rpmdb.sqlite-wal` larger than its 32-byte header currently fails the

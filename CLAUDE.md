@@ -18,7 +18,9 @@ both ends since D65) and KISA's Korean prose as enrichment (⑤, on by default s
 local only because `db push` strips it, D29); `assay db update` pulls the published OCI
 artifact (D28) rather than rebuilding. More providers are on by default and carried by
 the artifact: Red Hat CSAF VEX (D47–D52 — fix states with reasons, `--fail-on-unfixable`
-and `=wont-fix`), Amazon ALAS core plus AL2 extras (D73, D78), Oracle ELSA OVAL (D74,
+and `=wont-fix`; since QA 2026-11-06 an ELS platform's no-fix statements resolve to the major
+and its fixed builds are counted, not keyed, because Red Hat's corpus regeneration moved every
+RHEL 4–7 whole-product id to `rhel_els:N`), Amazon ALAS core plus AL2 extras (D73, D78), Oracle ELSA OVAL (D74,
 Ksplice/FIPS lineage-filtered since D79; since D144 a non-kernel package two ELSAs fix for one
 CVE is held to its own train's lowest fix rather than dropped), Fedora Bodhi (D75), Photon's flat-JSON CVE metadata (D96), Arch's AVG tracker (D97, with
 its own pacman comparer and cataloger), SUSE CSAF VEX (D77, whose

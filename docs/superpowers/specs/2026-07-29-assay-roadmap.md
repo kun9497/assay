@@ -1904,6 +1904,31 @@ lower is a false negative, and there is no third answer available from the data.
 can name a fixed version that host's channel never shipped. That is a known, bounded divergence
 rather than a hidden one, and it belongs in the report when RHEL findings are emitted.
 
+**Revised (QA 2026-11-06).** Red Hat began regenerating its whole CSAF corpus on 2026-11-04/05
+("Last generated version", ~800 documents an hour across every year back to 1999; 29,332 of
+75,892 by 02:11Z on 11-06, still running), and the regenerated documents label the whole-product ids `red_hat_enterprise_linux_4..7` — the ids
+every bare no-fix statement about those releases hangs on — `cpe:/o:redhat:rhel_els:N` where
+they had carried `enterprise_linux:N`; 8, 9 and 10 keep `enterprise_linux:N`. Under the anchored
+mainline pattern alone that moved every "affected, no fix" and "will not fix" statement about
+RHEL 4–7 out of the feed in one night: the 2026-11-06 publish lost 4,085 (advisory, key) pairs
+under the frozen keys (Red Hat:6 1,725, Red Hat:7 1,555, Red Hat:5 774, Red Hat:4 31) and
+460,000 no-fix entries, with the live keys untouched and the D114 gate green. Extended
+Life-cycle Support is not a channel beside a release the way EUS is: it is the whole major after
+its mainline end of life. So `rhel_els:N` now resolves to `Red Hat:N` for a **statement** — a
+`known_affected` id, versioned or bare, and a `fixed` id with no version — while a versioned
+`fixed` id under an ELS platform is dropped and counted on its own (`SkippedELSFixed`, "fixed
+builds on an ELS channel" in the nightly line) on exactly the reasoning above: a host's channel is
+not readable from its filesystem, and a fix the ELS channel shipped cannot be keyed to the major.
+Measured on the regenerated documents: a fixed build under `6Server-ELS` carried `rhel_els:6`
+before the regeneration too, so nothing read before is read differently; `cve-2026-99999` alone
+carries 71 ELS-only fixed tuples (242 product_status ids) across 45 packages, 26 of those
+packages with two fixed versions in one channel, which stay unread
+and are recorded in `docs/deferred-decisions.md` with their revisit trigger (RHEL 8 enters ELS on
+2029-05-31). The alternative — carrying the vanished records forward under D110 — was built and
+rejected: it fires only on a night the key is flat, loses everything carried on the first night it
+is not, and cannot tell a re-labelled statement from a CVE the upstream withdrew. The stderr
+disclosure names ELS beside EUS, AUS, TUS and E4S.
+
 
 ### D48 — Affected with no fix is a range with no fixed event, reported always and gated only on its own flag
 

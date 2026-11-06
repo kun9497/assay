@@ -83,7 +83,8 @@ this result cannot be trusted").
 - **벤더 계보.** Ubuntu Pro(ESM/FIPS)와 Oracle Ksplice/FIPS 빌드는 메인라인 데이터로 판정하지 않고
   평가되지 않음으로 보고합니다(D53, D79, D142). EUS/AUS/TUS/E4S의 RHEL 호스트는 메인라인 errata로
   검사하며, 측정한 경우의 대부분에서 과경보하고 약 1.3%에서 미경보합니다. stderr 안내가 그렇다고
-  말합니다(D47).
+  말합니다(D47). ELS 호스트의 no-fix 진술은 읽고 ELS 전용 fixed 빌드는 읽지 않으므로, 그 호스트는 그
+  CVE에 대해 깨끗하다고 보고됩니다(D47 2026-11-06 개정. 측정은 deferred-decisions 항목에).
 - **KISA 한국어 공지는 배포 데이터베이스에 없습니다**(D29). KISA의 이용 조건은 그 데이터로 스캔하는
   것은 허용하되 재배포는 허용하지 않으므로, `assay db build`로 만든 데이터베이스에만 나타나고, 그때도
   finding을 설명할 뿐 새로 만들지 않습니다.

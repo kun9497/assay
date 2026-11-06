@@ -1761,6 +1761,27 @@ CLAUDE.md의 위임 규칙대로 메인 루프에서 쓰고 표를 한 줄씩 �
 채널이 실은 적 없는 fixed 버전을 댈 수 있습니다. 숨겨진 것이 아니라 알려지고 한정된 발산이며, RHEL
 finding이 나가기 시작하면 리포트에 들어가야 합니다.
 
+**개정 (QA 2026-11-06).** Red Hat이 2026-11-04/05에 CSAF 코퍼스 전체의 재생성을 시작했고("Last
+generated version", 1999년까지 전 연도에 걸쳐 시간당 약 800건, 11-06 02:11Z 기준 75,892건 중
+29,332건, 아직 진행 중), 재생성된 문서는 whole-product id
+`red_hat_enterprise_linux_4..7` — 그 릴리스들에 대한 모든 bare no-fix 진술이 매달리는 id — 에
+`enterprise_linux:N` 대신 `cpe:/o:redhat:rhel_els:N`을 붙입니다. 8, 9, 10은 `enterprise_linux:N`
+그대로입니다. 앵커된 메인라인 패턴만으로는 RHEL 4~7에 대한 "affected, no fix"와 "will not fix" 진술
+전부가 하룻밤에 피드 밖으로 밀려났습니다. 2026-11-06 게시는 동결 키에서 (advisory, key) 쌍 4,085건
+(Red Hat:6 1,725, Red Hat:7 1,555, Red Hat:5 774, Red Hat:4 31)과 no-fix 항목 460,000건을 잃었고,
+살아 있는 키는 그대로였으며 D114 gate는 녹색이었습니다. Extended Life-cycle Support는 EUS처럼 릴리스
+옆에 있는 채널이 아니라, 메인라인 수명 종료 뒤의 major 전체입니다. 그래서 `rhel_els:N`은 이제
+**진술** — 버전이 있든 없든 `known_affected` id, 그리고 버전 없는 `fixed` id — 에 대해 `Red Hat:N`으로
+풀리고, ELS 플랫폼 아래의 버전 있는 `fixed` id는 위와 똑같은 이유로 버리고 따로 셉니다
+(`SkippedELSFixed`, nightly 줄의 "fixed builds on an ELS channel"). 호스트의 채널은 파일시스템에서 읽을
+수 없고, ELS 채널이 실은 fix를 major에 키잉할 수 없습니다. 재생성된 문서로 측정하면 `6Server-ELS` 아래의
+fixed 빌드는 재생성 전에도 `rhel_els:6`이었으므로, 전에 읽던 것이 다르게 읽히는 일은 없습니다.
+`cve-2026-99999` 하나에만 45개 패키지에 걸쳐 ELS 전용 fixed 튜플 71건(product_status id 242건)이 있고
+그 패키지 중 26개는 한 채널 안에 fixed 버전이 둘인데, 이들은 계속 읽지 않으며 `docs/deferred-decisions.md`에 재검토 트리거(RHEL 8의 ELS 진입, 2029-05-31)와
+함께 기록했습니다. 대안 — 사라진 레코드를 D110으로 이월하기 — 은 만들어 보고 기각했습니다. 키가 flat인
+밤에만 작동하고, flat이 아닌 첫 밤에 이월한 것 전부를 잃으며, 재라벨된 진술과 상류가 철회한 CVE를 구별하지
+못합니다. stderr 공개 문구는 EUS, AUS, TUS, E4S 옆에 ELS를 함께 적습니다.
+
 
 ### D48 — fix 없는 affected는 fixed 이벤트가 없는 range이고, 항상 보고하되 자기 플래그로만 게이트한다
 

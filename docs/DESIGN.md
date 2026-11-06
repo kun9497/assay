@@ -86,7 +86,9 @@ affect (the first three below); the rest hold for every scan and are stated only
 - **Vendor lineages.** Ubuntu Pro (ESM/FIPS) and Oracle Ksplice/FIPS builds are reported as
   not evaluated rather than judged against mainline data (D53, D79, D142). RHEL hosts on
   EUS/AUS/TUS/E4S are checked against mainline errata, which over-alarms in most measured
-  cases and under-alarms in about 1.3%; a stderr note says so (D47).
+  cases and under-alarms in about 1.3%; a stderr note says so (D47). An ELS host's no-fix
+  statements are read, an ELS-only fixed build is not, so that host is reported clean for the
+  CVE (D47 revised 2026-11-06; the deferred-decisions entry has the measurement).
 - **KISA's Korean notices are not in the published database** (D29). KISA's terms permit
   scanning with the data, not redistributing it, so they appear only in a database built
   with `assay db build`, and even then they only describe findings, never add them.

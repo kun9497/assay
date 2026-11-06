@@ -52,6 +52,19 @@ func TestEcosystemFor(t *testing.T) {
 		{"cpe:/a:redhat:rhel_extras:7", "", ""},
 		{"cpe:/a:redhat:rhel_software_collections:3::el7", "", ""},
 
+		// Extended Life-cycle Support is the whole major after its mainline
+		// end of life, not a channel beside it (D47, revised 2026-11-06): Red
+		// Hat's regenerated documents hang every bare RHEL 4-7 statement on
+		// `red_hat_enterprise_linux_N` under this CPE. The anchors matter here
+		// exactly as for mainlineCPE.
+		{"cpe:/o:redhat:rhel_els:6", "Red Hat:6", "the regenerated whole-product shape"},
+		{"cpe:/o:redhat:rhel_els:7", "Red Hat:7", ""},
+		{"cpe:/o:redhat:rhel_els:7.9", "Red Hat:7", "the per-minor form, mirrored from mainlineCPE's 10.2 row; no ELS CPE measured on 2026-11-06 carries one"},
+		{"cpe:/a:redhat:rhel_els:8::appstream", "Red Hat:8", "the 'a' prefix and a repository, when RHEL 8 enters ELS in 2029"},
+		{"cpe:/o:redhat:rhel_els:7:beta", "", "a trailing component that is not a :: repository"},
+		{"xcpe:/o:redhat:rhel_els:7", "", "something before the cpe is not a cpe (front anchor)"},
+		{"cpe:/a:redhat:rhel_extras_rt_els:7", "", "a different product whose name merely ends in els (seen live, 7Server-RT-ELS)"},
+
 		// Unrelated products that share the namespace. A prefix match on
 		// "redhat" pulls in 9,118 JBoss entries alone.
 		{"cpe:/a:redhat:openstack:10::el7", "", "OpenStack is not RHEL"},
@@ -1100,7 +1113,7 @@ func TestResolveProduct(t *testing.T) {
 			"", "", "", "", skipNoPurl},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			k, evr, why := resolveProduct(tc.id, cpe, hbPkgs)
+			k, evr, why := resolveProduct(tc.id, false, cpe, hbPkgs)
 			if why != tc.wantWhy {
 				t.Fatalf("resolveProduct(%q) skipReason = %v, want %v", tc.id, why, tc.wantWhy)
 			}

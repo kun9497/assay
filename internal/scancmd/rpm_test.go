@@ -1009,6 +1009,12 @@ func TestRun_RedHatFindingsDiscloseTheMainlineCaveat(t *testing.T) {
 	if !strings.Contains(errOut.String(), "mainline RHEL errata") {
 		t.Errorf("stderr does not disclose the mainline-errata caveat:\n%s", errOut.String())
 	}
+	// D47 revised 2026-11-06: ELS is named beside the minor-pinned channels,
+	// because an ELS host's fixed builds are the ones the reader drops. The
+	// phrase occurs nowhere else on stderr.
+	if !strings.Contains(errOut.String(), "Extended Life-cycle Support") {
+		t.Errorf("stderr does not name Extended Life-cycle Support in the caveat:\n%s", errOut.String())
+	}
 	// On stderr, never stdout: `--output json | jq` has to stay clean, and the
 	// whole of D18's stream discipline rests on nothing but the report reaching
 	// stdout.

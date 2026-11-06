@@ -7,6 +7,16 @@
 
 ## [Unreleased]
 
+### Fixed
+- Red Hat 리더가 진술(`known_affected` id, 또는 버전 없는 `fixed` id)에 대해
+  `cpe:/o:redhat:rhel_els:N`(Extended Life-cycle Support)을 `Red Hat:N`으로 풉니다. Red Hat의
+  2026-11-05 코퍼스 재생성이 RHEL 4~7의 모든 bare no-fix 진술이 매달리는 whole-product id를
+  `enterprise_linux:N`에서 `rhel_els:N`으로 옮겼고, 2026-11-06 게시는 동결된 Red Hat:4~7 키에서
+  (advisory, key) 쌍 4,085건과 no-fix 항목 460,000건을 잃었으며 살아 있는 키는 그대로였습니다. ELS 플랫폼 아래의 버전 있는 `fixed` id는 D47의 이유 — 채널의 fix는
+  major에 키잉할 수 없다 — 로 계속 버리되, "non-mainline products"에 섞지 않고 따로 셉니다("fixed
+  builds on an ELS channel"). 스캔의 Red Hat 안내는 EUS, AUS, TUS, E4S 옆에 ELS를 적습니다.
+  (D47 개정; QA 2026-11-06)
+
 ## [0.15.0] - 2026-11-06
 
 ### Added

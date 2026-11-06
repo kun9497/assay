@@ -337,7 +337,7 @@ func (s stats) String() string {
 			"%d tagged both ways, %d remediations naming a product group); "+
 			"skipped %d module builds with no readable stream, %d flatpak-scoped entries, "+
 			"%d module contexts that did not parse as name:stream, "+
-			"%d non-mainline products, %d container images, "+
+			"%d non-mainline products, %d fixed builds on an ELS channel (D47), %d container images, "+
 			"%d products with no CPE, %d whole-product entries naming no package, "+
 			"%d unreadable products, %d Hummingbird components with no readable purl, "+
 			"%d Hummingbird fixed builds carrying an epoch, "+
@@ -351,7 +351,7 @@ func (s stats) String() string {
 		s.Unfixable, s.UnfixableWontFix, s.UnfixableNotFixed, s.UnfixableUnstated,
 		s.UnfixableBothReasons, s.RemediationGrouped,
 		s.SkippedModule, s.SkippedFlatpak, s.SkippedModuleContext,
-		s.SkippedNonRHEL, s.SkippedImage,
+		s.SkippedNonRHEL, s.SkippedELSFixed, s.SkippedImage,
 		s.SkippedNoCPE, s.SkippedWholeProduct, s.SkippedBadProduct, s.SkippedNoPurl,
 		s.HummingbirdFixedWithEpoch, s.SkippedNoCVE, s.SkippedBadDoc,
 		s.DeltaListed, s.DeltaFetched, s.DeltaGone, s.DeltaAdvisories,
