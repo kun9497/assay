@@ -2405,7 +2405,9 @@ EOF from the decoder — was classified permanent. The test row that should have
 used status 0, which is not how the failure arrives. Found by reading the test back, not by
 running it.
 
-**Three attempts, not more.** The delta fetches up to 20,000 documents one at a time, so a
+**Three attempts, not more.** The delta fetches every document changed since the archive one
+at a time — tens of thousands behind a fresh archive since D135's 2026-11-06 revision, which
+moved the refusal from a document count to the archive's age — so a
 feed that has genuinely gone away must fail quickly rather than turn into a slow death: at
 this backoff a total outage costs each document about a second and a half. The pauses are
 short on purpose — this is for a connection closed mid-handshake, not for a service under

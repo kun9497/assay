@@ -331,7 +331,9 @@ func TestDelta_RefusesAnOverlargeDeltaBehindAStaleArchive(t *testing.T) {
 	if err == nil {
 		t.Fatal("an overlarge delta behind a stale archive was accepted")
 	}
-	for _, want := range []string{"20001 documents have changed", "21 days old", "stopped being rebuilt"} {
+	// 21 days and a second is printed as 22 days old: the message rounds up
+	// so it never reads "21 days old, past ... 21 days" (review).
+	for _, want := range []string{"20001 documents have changed", "22 days old", "stopped being rebuilt"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error = %v, want it to say %q", err, want)
 		}
@@ -348,40 +350,56 @@ func TestDelta_RefusesAnOverlargeDeltaBehindAStaleArchive(t *testing.T) {
 // than 20,001; what it holds is that the fetch BEGAN and the progress line
 // said why, where the count alone had refused.
 func TestDelta_FetchesAnOverlargeDeltaBehindAFreshArchive(t *testing.T) {
-	rows := overlargeChanges()
-	f := &feed{
-		pointer: "csaf_vex_2026-08-05.tar.zst",
-		archive: archiveWith(t),
-		changes: changesCSV(rows...),
-		// Only the first listed document is served; the rest would 404 as
-		// withdrawn, and the cancellation below means they are never asked.
-		docs: map[string]string{rows[0][0]: rhel9Doc(t, "CVE-2026-100000", "curl", "")},
-	}
-	s := serve(t, f)
-	var progress bytes.Buffer
-	p := New(Options{BaseURL: s.URL, Progress: &progress})
-	p.now = func() time.Time { return time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC).Add(maxArchiveAge) }
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	emitted := 0
-	_, err := p.Fetch(ctx, func(advisory.Advisory) error {
-		emitted++
-		cancel()
-		return nil
-	})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("err = %v, want the cancellation -- an overlarge delta behind a fresh archive must be fetched, not refused", err)
-	}
-	// The delta runs before the archive walk (D129), so the one advisory is
-	// the delta's, and the server saw the request that produced it.
-	if emitted != 1 || f.hitsFor(rows[0][0]) != 1 {
-		t.Errorf("emitted %d advisories and fetched the first listed document %d times, want 1 and 1",
-			emitted, f.hitsFor(rows[0][0]))
-	}
-	want := "redhat: 20001 documents have changed since the 2026-08-05 archive was built, past the 20000 a delta " +
-		"usually holds, but that archive is 21 days old and still being rebuilt, so they are fetched one at a time"
-	if !strings.Contains(progress.String(), want) {
-		t.Errorf("progress lacks the line saying why an overlarge delta was fetched:\n%s", progress.String())
+	// Two clocks: the boundary itself, and the 2026-11-05 shape (a five-day
+	// -old archive), whose printed age is not the constant's 21 -- so a
+	// progress line that printed the limit instead of the age would fail.
+	for _, c := range []struct {
+		name string
+		age  time.Duration
+		days string
+	}{
+		{"exactly 21 days old", maxArchiveAge, "21 days old"},
+		{"five days old", 5 * 24 * time.Hour, "5 days old"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			rows := overlargeChanges()
+			f := &feed{
+				pointer: "csaf_vex_2026-08-05.tar.zst",
+				archive: archiveWith(t),
+				changes: changesCSV(rows...),
+				// Only the first listed document is served; the rest would
+				// 404 as withdrawn, and the cancellation below means they
+				// are never asked.
+				docs: map[string]string{rows[0][0]: rhel9Doc(t, "CVE-2026-100000", "curl", "")},
+			}
+			s := serve(t, f)
+			var progress bytes.Buffer
+			p := New(Options{BaseURL: s.URL, Progress: &progress})
+			p.now = func() time.Time { return time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC).Add(c.age) }
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			emitted := 0
+			_, err := p.Fetch(ctx, func(advisory.Advisory) error {
+				emitted++
+				cancel()
+				return nil
+			})
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("err = %v, want the cancellation -- an overlarge delta behind a fresh archive must be fetched, not refused", err)
+			}
+			// The delta runs before the archive walk (D129), so the one
+			// advisory is the delta's, and the server saw the request that
+			// produced it.
+			if emitted != 1 || f.hitsFor(rows[0][0]) != 1 {
+				t.Errorf("emitted %d advisories and fetched the first listed document %d times, want 1 and 1",
+					emitted, f.hitsFor(rows[0][0]))
+			}
+			want := "redhat: 20001 documents have changed since the 2026-08-05 archive was built, past the 20000 a delta " +
+				"usually holds, but that archive is " + c.days + " and still being rebuilt, so they are fetched one at a time"
+			if !strings.Contains(progress.String(), want) {
+				t.Errorf("progress lacks the line saying why an overlarge delta was fetched:\n%s", progress.String())
+			}
+		})
 	}
 }
 

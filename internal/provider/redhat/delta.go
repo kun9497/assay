@@ -42,6 +42,19 @@ const maxDelta = 20000
 // read as the archive having stopped being rebuilt (see maxDelta).
 const maxArchiveAge = 21 * 24 * time.Hour
 
+// ageDays is an archive's age as the messages print it: whole days, rounded
+// UP, never negative. The decision compares durations exactly, so an age of
+// 21 days and an hour is past a 21-day limit -- and truncation would have
+// printed it as "21 days old, past ... 21 days" (review of QA 2026-11-06).
+// A clock behind the archive's own date (a mirror with a future-dated name)
+// is a zero-day-old archive, not a negative one.
+func ageDays(age time.Duration) int {
+	if age <= 0 {
+		return 0
+	}
+	return int((age + 24*time.Hour - 1) / (24 * time.Hour))
+}
+
 // deltaRequestTimeout bounds ONE document fetch. The archive read gets the
 // client's hour because it is 262 MB; a single document is at most 94 MB and
 // usually a few hundred kilobytes, so a request still running after this has
@@ -105,7 +118,7 @@ func (p *Provider) deltaSince(ctx context.Context, cutoff time.Time,
 		// the archive's (DataAsOf), and what the clock measures is whether the
 		// FEED is still being maintained -- a question about today.
 		age := p.now().Sub(cutoff)
-		days := int(age / (24 * time.Hour))
+		days := ageDays(age)
 		if age > maxArchiveAge {
 			return nil, fmt.Errorf(
 				"redhat: %d documents have changed since the %s archive was built and that archive "+
