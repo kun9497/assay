@@ -10,6 +10,8 @@ package redhat
 // document cannot reach one at a time.
 
 import (
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 
@@ -72,6 +74,14 @@ func TestConvert_ELSStatementsResolveToTheMajorAndELSFixesAreDropped(t *testing.
 		t.Fatal("convert dropped a document whose RHEL 6 statements live under rhel_els:6")
 	}
 	by := affectedByName(adv)
+	// Exactly these, and nothing else: a dropped ELS build that leaked an
+	// entry of any shape (an empty key, a differently spelled one) would be
+	// invisible to the per-key lookups below.
+	gotKeys := keysOf(by)
+	sort.Strings(gotKeys)
+	if want := []string{"Red Hat:6/glibc", "Red Hat:6/kernel", "Red Hat:6/openssl098e", "Red Hat:7/openssl", "Red Hat:9/kernel"}; !slices.Equal(gotKeys, want) || len(adv.Affected) != len(want) {
+		t.Errorf("affected keys = %v (%d entries), want exactly %v", gotKeys, len(adv.Affected), want)
+	}
 
 	kernel6, ok := by["Red Hat:6/kernel"]
 	if !ok {

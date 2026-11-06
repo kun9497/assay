@@ -1292,23 +1292,29 @@ Red Hat 피드. EUS CPE를 자체 생태계 키로 수집하는 것만으로는 
 Life-cycle Support)을 붙입니다. 2026-11-06의 D47 개정은 ELS CPE를 **진술**에 대해 major로 풉니다 —
 RHEL 4~7에 대한 모든 no-fix·will-not-fix 레코드가 매달리는 bare `known_affected` id로, 2026-11-06
 게시가 그중 4,085건을 잃었습니다 — 그리고 ELS 플랫폼(`6Server-ELS`, `6Server-ELS.EXTENSION`,
-`7Server-ELS`, `7Server-optional-ELS`) 아래의 버전 있는 `fixed` id는 계속 버리되 이제 따로 셉니다
-("fixed builds on an ELS channel").
+`6Server-optional-ELS`, `6Server-optional-ELS.EXTENSION`, `7Server-ELS`, `7Server-optional-ELS`) 아래의
+버전 있는 `fixed` id는 계속 버리되 이제 따로 셉니다("fixed builds on an ELS channel". product_status id
+하나당 1이므로 아키텍처 수만큼 곱해집니다).
 
 **계속 읽지 않는 것, 2026-11-06 라이브 문서로 측정.** `cve-2021-3156`은 RHEL 6의 `sudo`를
-`6Server-ELS`에서만 고칩니다(3 id). `cve-2021-4034`는 6의 `polkit`(5), `cve-2026-9999`는 7의
-`webkitgtk4`(6), `cve-2026-99999`는 6의 `kernel`(19)과 7의 `kernel`/`bpftool`(26). 열 문서 전체에서
-**메인라인 fix와 ELS fix를 함께 가진 (major, 패키지) 쌍은 없어서** D47의 채널 모호성 논거는 표본에서
-0건이지만, `cve-2026-99999`의 ELS fixed 튜플 71건 중 26건은 **한 채널 안에** fixed 버전이 둘이고
-(`7Server-ELS` kernel `0:3.10.0-1160.167.2.el7`와 `1160.169.1.el7`), `rangeeval`은 range를 합집합으로
-보므로 이를 읽으면 167.2의 호스트를 169.1까지 affected로 판정합니다. D47이 25.1% → 6.1%로 측정한
-포인트 릴리스 붕괴가 ELS 안에서 되돌아옵니다.
+`6Server-ELS`와 `6Server-optional-ELS`에서만 고칩니다(3개 패키지, 15 id). `cve-2021-4034`는 6의
+`polkit`(5개 패키지), `cve-2026-9999`는 7의 `webkitgtk4`(6), `cve-2026-99999`는 6의 `kernel`(19)과 7의
+`kernel`/`bpftool`(26) — 그 한 문서에 ELS 전용 패키지 45개, (패키지, 버전) 튜플 71건, id 242건. 열 문서
+전체에서 **메인라인 fix와 ELS fix를 함께 가진 (major, 패키지) 쌍은 없어서** D47의 채널 모호성 논거는
+표본에서 0건이지만, `cve-2026-99999`의 ELS fixed 패키지 45개 중 26개(튜플 71건 중 52건)는 **한 채널
+안에** fixed 버전이 둘이고(`7Server-ELS` kernel `0:3.10.0-1160.167.2.el7`와 `1160.169.1.el7`),
+`rangeeval`은 range를 합집합으로 보므로 이를 읽으면 167.2의 호스트를 169.1까지 affected로 판정합니다.
+D47이 25.1% → 6.1%로 측정한 포인트 릴리스 붕괴가 ELS 안에서 되돌아옵니다.
 
-**지금의 비용.** 유일한 fix가 ELS 빌드인 RHEL 6/7 호스트는 "ELS 버전에서 고쳐짐"이 아니라 "affected, fix
-없음"을 듣습니다 — 시끄러운 쪽 — 그리고 깨끗하다고 듣는 일은 없습니다. ELS 빌드보다 낮은 호스트는 개정
-전처럼 그 문서에서 아무것도 듣지 않습니다. 두 릴리스 모두 메인라인 EOL이 지났고 게시된 아티팩트에서
-D110으로 동결돼 있는데, 개정 뒤에는 Red Hat의 진술이 계속 도착하므로 다시 살아 있는 키로 읽힙니다. 그게
-정직한 상태입니다.
+**지금의 비용, 그리고 그것은 조용한 쪽입니다.** ELS 전용 fix는 major에 대한 레코드를 전혀 만들지 않으므로,
+그 빌드보다 낮은 RHEL 6/7 호스트는 그 CVE에 대해 **깨끗하다**고 보고됩니다. 측정하면 표본의 ELS 전용
+(major, 패키지) 튜플 85건 중 같은 패키지에 bare `known_affected` 진술이 있는 것은 하나도 없어서 전부
+조용합니다(`kernel-3.10.0-1160.160.el7`의 RHEL 7 호스트는 `cve-2026-99999`에 대해 finding을 받지
+않습니다). "affected, fix 없음"으로 읽히는 것은 bare 진술도 함께 있을 때뿐이고, 표본에서는 0건입니다. 개정
+전의 리더도 똑같았으므로 — ELS fixed 빌드는 원래 읽지 않았습니다 — 회귀는 아니지만, EOL 릴리스에서의 조용한
+미탐이고, 이 항목이 D47의 한 줄이 아니라 따로 존재하는 이유입니다. 두 릴리스 모두 메인라인 EOL이 지났고
+게시된 아티팩트에서 D110으로 동결돼 있었는데, 개정 뒤에는 Red Hat의 진술이 계속 도착하므로 다시 살아 있는
+키로 읽힙니다. 그게 정직한 상태입니다.
 
 **재검토 시점:** RHEL 8이 ELS에 들어갈 때(2029-05-31). 그때 8의 fixed 빌드는 `rhel_els:8` 채널 id로
 도착해 여기서 버려지는 반면 whole-product 진술은 키에 레코드를 계속 더하므로, D110은 `Red Hat:8`을 동결하지

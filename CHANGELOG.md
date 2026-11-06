@@ -9,10 +9,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 - The Red Hat reader resolves `cpe:/o:redhat:rhel_els:N` (Extended Life-cycle Support) to
-  `Red Hat:N` for a `known_affected` statement. Red Hat's 2026-11-05 corpus regeneration moved
-  the whole-product ids every bare RHEL 4–7 no-fix statement hangs on from `enterprise_linux:N`
-  to `rhel_els:N`, and the 2026-11-06 publish lost 4,085 advisories under the frozen
-  Red Hat:4–7 keys and 460,000 no-fix entries while the live keys held. A versioned `fixed` id
+  `Red Hat:N` for a statement (a `known_affected` id, or a `fixed` id with no version). Red
+  Hat's 2026-11-05 corpus regeneration moved the whole-product ids every bare RHEL 4–7 no-fix
+  statement hangs on from `enterprise_linux:N` to `rhel_els:N`, and the 2026-11-06 publish lost
+  4,085 (advisory, key) pairs under the frozen Red Hat:4–7 keys and 460,000 no-fix entries while
+  the live keys held. A versioned `fixed` id
   under an ELS platform is still dropped, for D47's reason — a channel's fix cannot be keyed to
   the major — and is now counted on its own ("fixed builds on an ELS channel") rather than folded
   into "non-mainline products". The scan's Red Hat note names ELS beside EUS, AUS, TUS and E4S.

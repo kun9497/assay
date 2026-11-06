@@ -109,8 +109,10 @@ type branch struct {
 	} `json:"product"`
 }
 
-// mainlineCPE matches the only product family this provider ingests (D47):
-// mainline Red Hat Enterprise Linux, at any repository below it.
+// mainlineCPE matches mainline Red Hat Enterprise Linux at any repository
+// below it (D47). elsCPE, below, is the one other shape that resolves to the
+// same keys -- for statements only, see resolveProduct -- and together they
+// are the only product family this provider ingests.
 //
 // The archive carries 462 distinct CPE shapes and 903 exact keys, across
 // rhel_eus, rhel_aus, rhel_tus, rhel_e4s, per-minor variants, and unrelated
@@ -530,7 +532,13 @@ func resolveProduct(id string, isFixed bool, cpe map[string]string, hummingbirdP
 		// A fix an ELS channel shipped. Checked after the name/EVR split so a
 		// version-less `fixed` id under ELS still becomes the no-fix
 		// statement convert reads it as on mainline, and before the module
-		// guard so an ELS build never feeds SkippedModule's documented zero.
+		// guard so an ELS FIXED build never feeds SkippedModule's documented
+		// zero (a module-tagged known_affected id under ELS with no context
+		// lands there, as the same shape does on mainline; none measured).
+		// `elsCPE.MatchString(c)` could be spelt `!mainlineCPE.MatchString(c)`
+		// -- eco resolved and Hummingbird returned above, so the two cannot
+		// disagree on any reachable input -- and the positive spelling says
+		// what is being dropped.
 		// Not checked for a statement (isFixed false): a known_affected id
 		// under ELS, versioned or bare, says the release is affected, and
 		// that is exactly what elsCPE exists to keep.
@@ -674,7 +682,8 @@ type stats struct {
 	// shipped, dropped on D47's reasoning while the bare statements under
 	// the same platform are read (elsCPE). Zero before 2026-11-06 only
 	// because ELS platforms never resolved at all; the 2026-11-06 documents
-	// carry 71 such ids in cve-2026-99999 alone.
+	// carry 242 such ids (71 distinct package/version tuples) in
+	// cve-2026-99999 alone.
 	SkippedELSFixed int
 	SkippedNoCPE    int
 	SkippedNoCVE    int

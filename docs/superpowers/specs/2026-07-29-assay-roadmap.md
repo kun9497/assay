@@ -1904,9 +1904,9 @@ lower is a false negative, and there is no third answer available from the data.
 can name a fixed version that host's channel never shipped. That is a known, bounded divergence
 rather than a hidden one, and it belongs in the report when RHEL findings are emitted.
 
-**Revised (QA 2026-11-06).** Red Hat regenerated its whole CSAF corpus on 2026-11-05 ("Last
-generated version", ~1,000 documents an hour across every year back to 1999), and the
-regenerated documents label the whole-product ids `red_hat_enterprise_linux_4..7` — the ids
+**Revised (QA 2026-11-06).** Red Hat began regenerating its whole CSAF corpus on 2026-11-04/05
+("Last generated version", ~800 documents an hour across every year back to 1999; 29,332 of
+75,892 by 02:11Z on 11-06, still running), and the regenerated documents label the whole-product ids `red_hat_enterprise_linux_4..7` — the ids
 every bare no-fix statement about those releases hangs on — `cpe:/o:redhat:rhel_els:N` where
 they had carried `enterprise_linux:N`; 8, 9 and 10 keep `enterprise_linux:N`. Under the anchored
 mainline pattern alone that moved every "affected, no fix" and "will not fix" statement about
@@ -1921,7 +1921,8 @@ builds on an ELS channel" in the nightly line) on exactly the reasoning above: a
 not readable from its filesystem, and a fix the ELS channel shipped cannot be keyed to the major.
 Measured on the regenerated documents: a fixed build under `6Server-ELS` carried `rhel_els:6`
 before the regeneration too, so nothing read before is read differently; `cve-2026-99999` alone
-carries 71 ELS-only fixed builds, 26 of them two fixed versions in one channel, which stay unread
+carries 71 ELS-only fixed tuples (242 product_status ids) across 45 packages, 26 of those
+packages with two fixed versions in one channel, which stay unread
 and are recorded in `docs/deferred-decisions.md` with their revisit trigger (RHEL 8 enters ELS on
 2029-05-31). The alternative — carrying the vanished records forward under D110 — was built and
 rejected: it fires only on a night the key is flat, loses everything carried on the first night it

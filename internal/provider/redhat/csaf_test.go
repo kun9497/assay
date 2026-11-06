@@ -59,6 +59,7 @@ func TestEcosystemFor(t *testing.T) {
 		// exactly as for mainlineCPE.
 		{"cpe:/o:redhat:rhel_els:6", "Red Hat:6", "the regenerated whole-product shape"},
 		{"cpe:/o:redhat:rhel_els:7", "Red Hat:7", ""},
+		{"cpe:/o:redhat:rhel_els:7.9", "Red Hat:7", "the per-minor form, mirrored from mainlineCPE's 10.2 row; no ELS CPE measured on 2026-11-06 carries one"},
 		{"cpe:/a:redhat:rhel_els:8::appstream", "Red Hat:8", "the 'a' prefix and a repository, when RHEL 8 enters ELS in 2029"},
 		{"cpe:/o:redhat:rhel_els:7:beta", "", "a trailing component that is not a :: repository"},
 		{"xcpe:/o:redhat:rhel_els:7", "", "something before the cpe is not a cpe (front anchor)"},
