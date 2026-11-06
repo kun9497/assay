@@ -1084,7 +1084,7 @@ exited 0 while 24 findings went unmentioned.
 - [x] MinimOS and Echo (D92) — the D88 template held (CVE via upstream, no join
       changes); Echo brought a deb comparer, two custom suffixes and a "1" not-affected
       sentinel that is not safe by accident; reg.mini.dev/nginx scans 15/15
-- [x] The differential runs itself (D93) — weekly, 13 digest-pinned targets then, 25
+- [x] The differential runs itself (D93) — weekly, 13 digest-pinned targets then, 26
       today, against the published artifact, judged by committed floors (the tool now
       lives at `cmd/scandiff`, D105; stdlib-only); reading the ratings column revived two
       dead agreements (alma 0→106, oracle 0→37)
@@ -1493,7 +1493,8 @@ package created by the workflow links itself; one created by hand before that do
 Correctness is checked by **differential testing against grype and trivy** at every stage —
 since D93 on a weekly schedule, extended to trivy in D105 (`scanner-diff.yml`: 25
 digest-pinned targets, the published artifact, committed floors that trip on regression;
-18 targets also compare against trivy — the other 7 are distros trivy does not support).
+18 targets also compare against trivy — the other 8 are distros trivy does not support, or
+reports nothing for: ubi10, added 2026-11-06 after Red Hat's corpus regeneration, measured 0 trivy tuples).
 Exact agreement is not expected — the data sources differ — but a large divergence means
 the matcher is wrong.
 

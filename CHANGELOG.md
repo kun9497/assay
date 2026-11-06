@@ -7,6 +7,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- The weekly scanner differential and the nightly D114 gate gain a `ubi10` target
+  (`registry.access.redhat.com/ubi10/ubi`, digest-pinned), seeded from a measured run at D93's
+  85% / 2x (minAgree 326, minFindings 333, maxFindings 784, maxAssayOnlyFixed 25). Red Hat's
+  2026-11-05 corpus regeneration collapsed RHEL 10's binary no-fix statements into source-package
+  ids with no RHEL 10 target to notice; the scan was unaffected (392 findings before and after,
+  matched through `Package.Source`), but the next such change would have been invisible. No trivy
+  block: trivy reports nothing for RHEL 10. (QA 2026-11-06)
+
 ### Fixed
 - The Red Hat reader resolves `cpe:/o:redhat:rhel_els:N` (Extended Life-cycle Support) to
   `Red Hat:N` for a statement (a `known_affected` id, or a `fixed` id with no version). Red

@@ -6,7 +6,7 @@ documentation as read that day. The assay↔grype numbers in the parity table we
 v0.8.0, grype v0.116.1 and trivy v0.74.0 — the same digest-pinned images run through both
 scanners in the weekly differential (D93), tuple counts after the tool's normalization.
 The trivy column remains a **spec comparison** from its official documentation as of
-2026-08-27 — trivy joined the weekly differential in D105 and now runs on 18 of the 25
+2026-08-27 — trivy joined the weekly differential in D105 and now runs on 18 of the 26
 targets; per-row trivy figures below keep their original dates.*
 
 ## Structure and character
@@ -33,7 +33,7 @@ targets; per-row trivy figures below keep their original dates.*
 ## Measured parity — per family, counts from the 2026-10-12 weekly run
 
 The same digest-pinned images through both scanners, compared tuple by tuple — first
-measured 2026-08-24 over 13 targets, now 25 targets weekly with trivy alongside on 18 of
+measured 2026-08-24 over 13 targets, now 26 targets weekly with trivy alongside on 18 of
 them (D105, D114), and re-audited in full on 2026-08-28 (every one-sided tuple classified;
 the audit's record lives in deferred-decisions). The **Result** column carries the
 2026-10-12 weekly run's counts (agree / assay-only / grype-only); the **Cause** column keeps

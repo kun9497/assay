@@ -76,11 +76,10 @@
     "name": "ubi10",
     "tag": "ubi10/ubi:latest",
     "ref": "registry.access.redhat.com/ubi10/ubi@sha256:0e8ccad7d35f5fd756f4f2202f018b8d3c3e8bb9af8e627d874239381a00ab41",
-    "minAgree": 1,
-    "minFindings": 1,
-    "maxFindings": 100000,
-    "maxAssayOnlyFixed": 100000,
-    "trivy": {}
+    "minAgree": 326,
+    "minFindings": 333,
+    "maxFindings": 784,
+    "maxAssayOnlyFixed": 25
   },
   {
     "name": "rocky9",
