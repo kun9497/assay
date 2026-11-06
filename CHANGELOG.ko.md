@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-06
+
 ### Added
 - `--config none` 은 ignore 파일을 전혀 쓰지 않고 스캔합니다. 작업 디렉터리에서 `.assay.yaml` 을 찾지
   않고 아무것도 waive 하지 않으며, 보고서의 provenance 에는 `ignoreFile.path: "none"` 이 기록됩니다.
@@ -30,84 +32,6 @@
   전에는 조용히 "발견" 을 뜻했습니다. 그 자리에 비어 있는 변수를 넘기던 잡은 이제 작업 디렉터리의 `.assay.yaml`
   아래서 스캔하는 대신 exit 2 로 끝납니다. (QA 2026-11-02 P3 #23)
 
-### Fixed
-- CycloneDX 문서의 subject 를 스캔합니다. 리더는 `bom.components` 만 걸었으므로
-  `metadata.component` -- 명세가 SBOM 의 대상, 즉 라이브러리 자체의 SBOM 이라면 그 라이브러리를
-  두라고 정한 자리 -- 에 적힌 패키지나 그 아래 중첩된 패키지는 카탈로그되지 않았습니다: 스캔되지
-  않고, 세어지지 않고, 어느 skip 버킷에도 없이. 거기에 쓴 lodash 4.17.20 은 공개 데이터베이스에 대해
-  `--fail-on low --fail-on-incomplete=target` 아래 component 0, finding 0, exit 0 으로 스캔됐고, 같은
-  패키지를 `bom.components` 에 두면 CVE-2021-23337 을 포함한 finding 5건이었습니다. 이제 subject 는
-  `bom.components` 다음에, SPDX 의 DESCRIBES 가 따르는 규칙으로 카탈로그됩니다: 루트 모양 -- purl
-  없음(syft 의 container), `pkg:oci`, 버전 없는 purl -- 은 전처럼 세지 않고, 그 밖에는 후보 또는
-  집계된 skip 이 되며, subject 아래 중첩된 components 는 최상위처럼 걷습니다. subject(또는 그 아래)와
-  `bom.components` 양쪽에 적힌 패키지는 둘이 아니라 패키지 하나, finding 하나입니다: 동일성은
-  type·name·version·ecosystem 키이므로 한정자만 다른 purl 은 패키지 하나, 버전 없는 purl 이 component
-  버전 둘에 걸치면 패키지 둘이고, 버린 쪽 항목의 location 과 source 식별자는 보고되는 쪽에 남깁니다.
-  중복 제거는 subject 트리 대 `bom.components` 뿐입니다 -- 최상위에 두 번 적힌 것도, subject 아래에
-  둘 다 중첩된 것도 둘로 남습니다. subject 이거나 그 아래인 배포판 패키지는 최상위 쌍둥이처럼 문서의
-  operating-system component 로 키를 잡습니다. (QA 2026-11-02 "CycloneDX subject", 2026-11-04 재현;
-  PR #238 리뷰)
-- 표(table) 보고서를 쓸 수 없으면 exit 2 입니다. stdout 이 닫혔거나, 가득 찼거나, 읽기 전용으로
-  열린 경우 `--output json` 과 `--output sarif` 는 이미 `error: write report` 와 함께 exit 2 였고,
-  나열할 finding 이 있는 표도 그랬습니다. 그러나 나열할 것이 없는 표 -- 깨끗한 스캔, 빈 문서,
-  모든 finding 이 waive 된 스캔 -- 는 아무것도 쓰지 않고 exit 0 으로 끝났으며 `reportSha256` 도
-  남기지 않았으므로, 기본 출력을 쓸 수 없는 파일로 리다이렉트한 잡은 도착하지 않은 보고서를
-  통과로 읽었습니다. 이제 표가 쓰는 모든 줄을 검사하고, 첫 실패를 다른 렌더러와 같은 방식으로
-  stderr 에 보고합니다. 릴리스 바이너리로 main 에서 재현했고, 수정은 `scancmd.Run` 과 CLI 진입점
-  양쪽에서 테스트로 붙잡습니다. (QA 2026-11-04, 차원 4 #5; QA 2026-11-02 에서 처음 발견)
-- `assay scan --help`, `assay scan -h`, `assay db --help`, `assay db -h`, `assay db help` 는
-  `assay help` 처럼 usage 를 stdout 에 출력하고 exit 0 입니다. 전에는 `error: unknown flag` /
-  `error: unknown db subcommand` 로 exit 2 였고 stdout 에는 아무것도 없었습니다. `db` 는 데이터베이스를
-  찾기 전에 help 에 답하므로, 사용자 캐시 디렉터리가 없는 머신(임시 CI 컨테이너, 숫자 uid 와 HOME 없이
-  실행한 `docker run`)에서도 `error: locate database` 대신 usage 를 받습니다 -- `scan --help` 는
-  거기서 이미 그렇게 답하고 있었습니다. (QA 2026-11-04 #7)
-- Ubuntu 26.10 finding 이 Canonical 의 fix state 를 갖게 됩니다. tracker 의 `stonking` 코드명이
-  `db build` 가 tracker 행을 해석하는 표에 없어서 모든 `stonking_<pkg>` 행이 unknown-codename
-  tuple 로 버려졌고, 2026-11-01 에 게시된 artifact 는 `Ubuntu:26.10` 에 fix 없는 range 16,289 개를
-  들고 있으면서 wont-fix/not-fixed state 는 0 개였습니다(`dev.assay.ubuntu-fix-states`). D157 의
-  publish guard 는 0 으로 게시된 키를 볼 수 없습니다. 이제 `resolute` 가 `26.04` 로 가듯 `stonking` 은
-  `26.10` 으로 갑니다. `tenacious`(27.04, 개발 릴리스)와 `devel` 은 의도적으로 매핑하지 않습니다.
-  (QA 2026-11-04)
-- jar 의 엔트리는 하나씩만이 아니라 합계로도 상한을 받습니다. cataloger 는 각 엔트리의 압축 해제
-  바이트를 512 MiB 파일당 한도로 막았지만 그 합계는 아무것도 막지 않았으므로, deflate 된 64 MiB
-  엔트리 열두 개를 담은 784 KB jar 가 768 MiB 를 풀어냈고, 같은 모양을 아카이브 한도까지 키우면 수백
-  GiB 에 이릅니다. 이제 `jar.Parse` 한 번에는 모든 엔트리와 모든 중첩 아카이브에 걸쳐 2 GiB 의
-  예산 -- D112 의 스캔당 수치, `source.MaxScanBytes` -- 이 있고, 각 읽기가 풀어낸 만큼 차감됩니다.
-  예산이 바닥나면 아카이브, 예산, 바닥난 엔트리를 이름으로 대는 오류이며 아카이브에서 아무것도
-  돌려주지 않습니다. `jar:` 타깃에서는 exit 2 이고, `dir:` 스캔 안의 jar 에서는 크기 초과 아카이브가
-  이미 받는 집계된 failed skip -- JSON `unread[]`, 표의 개수, `--fail-on-incomplete=target` --
-  이며, 아카이브의 것인 양 제시되는 부분 인벤토리는 결코 아닙니다. (QA 2026-11-02 #22)
-- 레지스트리 경로에서 이미지 config 는 가져오기 전에 선언된 크기로 거부됩니다. 라이브러리는 config
-  blob 을 통째로 읽고 그 읽기를 manifest 가 선언한 크기 -- 레지스트리 자신의 말 -- 로만 제한하는데,
-  256 MiB config 를 선언한 manifest 는 digest 불일치가 드러나기 전에 256 MiB 를 스트리밍하고 그 두
-  배를 할당했습니다. config 가 처음 필요한 시점에 manifest 는 이미 손에 있으므로, 모든 config 읽기
-  -- 단일 이미지의 platform 확인, descriptor 가 platform 을 대지 않는 index 항목의 platform, 모든
-  이미지 경로가 검증하는 diff id -- 가 이제 16 MiB(`source.MaxConfigBytes`, 상수: 실제 config 는
-  킬로바이트 단위) 를 넘는 선언 크기를 선언 크기와 한도를 이름으로 대는 오류로 거부하고, blob 은
-  요청되지 않습니다. (QA 2026-11-02 #24)
-- `scandiff` 는 `name` 이 평범한 파일 이름이 아닌 타깃 -- `.`, `..`, `/` 나 `\` 가 든 것,
-  `filepath.Base` 가 줄일 모든 것 -- 을 floors 파일을 읽을 때 항목을 지목하며 거부합니다. 이름은
-  `-capture` 경로에 join 되므로 `"name": "../../x"` 는 capture 디렉터리 밖에 capture 를 썼습니다.
-  (QA 2026-11-02 #25)
-- `--fail-on-incomplete` / `--fail-on-incomplete=target` 판정은 exit 2 와 함께 stderr 에 개수와 발동한
-  플래그 형태를 담은 `error:` 줄을 출력합니다 --
-  `error: N package(s) not evaluated and M check(s) incomplete (--fail-on-incomplete)` 또는
-  `error: N package(s), check(s) or manifest(s) of the target itself could not be evaluated
-  (--fail-on-incomplete=target)`. 그런 줄이 없는 유일한 exit 2 였고, 비공개 reason 으로 쓰이던 provenance
-  sidecar 의 `run.error` 는 `=target` 이 발동했을 때도 `--fail-on-incomplete` 라고 적었습니다. 이제
-  sidecar 는 다른 모든 exit 2 처럼 출력된 줄을 기록합니다. stdout 과 exit 코드는 그대로입니다.
-  (QA 2026-11-02 P3 #7)
-- 모든 finding 이 waive 되고 동시에 무언가 평가되지 않은 스캔의 표 headline 이 "No vulnerabilities found
-  in N package(s), but ... NOT a clean result" 라고 적혔고, 그 아래 Suppressed 블록은 finding 을 나열했습니다.
-  incomplete 문장들은 이제 "No unwaived vulnerabilities found in N package(s) (M suppressed), but ..." 로
-  시작하며, waiver 가 없는 스캔은 전과 같은 문장을 출력합니다. 모든 검사가 끝난 스캔의 0.14.0 all-waived
-  headline 은 바뀌지 않았습니다. (QA 2026-11-02 P3 #11)
-- 서명되지 않은 artifact 에 대한 `db update` 의 안내는 하나뿐인 무해한 원인을 먼저 말합니다. 야간 발행은
-  한 단계에서 태그를 푸시하고 다음 단계에서 서명하므로, 그 사이(수 초, 재시도까지 약 1분)에 pull 하면
-  "not signed" 를 보게 되고 `--allow-unsigned` 로 안내됐습니다. 이제 publisher 가 방금 푸시했다면 1분 뒤
-  재시도하라고 먼저 말하고, 그다음 mirror 절, 마지막에 opt-out 을 말합니다. `db update` 는 여전히 한 번만
-  시도합니다. (QA 2026-11-02 P3 #21)
-### Changed
 - 문서는 더 이상 exit `0` 을 "깨끗함" 이라고 부르지 않습니다. README, `docs/integrations.md`,
   `docs/compatibility.md`, `CONTRIBUTING.md` 는 이제 그것이 무엇인지 말합니다: 어떤 `--fail-on*`
   게이트도 걸리지 않았다는 뜻이며, 게이트 없이 실행한 스캔, finding 이 모두 waive 된 스캔, 컴포넌트가
@@ -228,13 +152,90 @@
   취소를 실패라고 적고 있었습니다. 세 status 잡은 `timeout-minutes: 15` 를 갖고, `internal/ciguard` 가
   모든 alert 잡의 `RESULT` expression 과 모든 status 잡의 타임아웃을 요구합니다. (QA 2026-11-02 #19)
 
-### Changed
 - 야간 발행은 `17 5 * * *`(05:17 UTC), 주간 scanner differential 은 `23 20 * * 0`(일요일 20:23 UTC)에
   예약됩니다. GitHub 의 큐가 가장 긴 minute 0 을 피한 것으로, 2026-10-13 부터 11-02 까지 `0 6 * * *` 의
   나이틀리 스무 번은 모두 4.2~7.6시간 늦게(10:12Z~13:38Z), `0 21 * * 0` 의 주간 실행은 2~3.5시간
   늦게(22:57Z~00:30Z) 시작해 월요일 리뷰 루틴에 50분 남짓의 여유만 남겼습니다. 여전히 늦는 실행이 예전
   자리에 떨어지도록 시를 앞당겼고, 예상 시작 구간은 `docs/DESIGN.md` 의 `status.json` 옆에 기록했으며,
   주간 workflow 의 주석은 더 이상 "Monday 06:00 KST" 라고 하지 않습니다. (QA 2026-11-02 #18)
+
+### Fixed
+- CycloneDX 문서의 subject 를 스캔합니다. 리더는 `bom.components` 만 걸었으므로
+  `metadata.component` -- 명세가 SBOM 의 대상, 즉 라이브러리 자체의 SBOM 이라면 그 라이브러리를
+  두라고 정한 자리 -- 에 적힌 패키지나 그 아래 중첩된 패키지는 카탈로그되지 않았습니다: 스캔되지
+  않고, 세어지지 않고, 어느 skip 버킷에도 없이. 거기에 쓴 lodash 4.17.20 은 공개 데이터베이스에 대해
+  `--fail-on low --fail-on-incomplete=target` 아래 component 0, finding 0, exit 0 으로 스캔됐고, 같은
+  패키지를 `bom.components` 에 두면 CVE-2021-23337 을 포함한 finding 5건이었습니다. 이제 subject 는
+  `bom.components` 다음에, SPDX 의 DESCRIBES 가 따르는 규칙으로 카탈로그됩니다: 루트 모양 -- purl
+  없음(syft 의 container), `pkg:oci`, 버전 없는 purl -- 은 전처럼 세지 않고, 그 밖에는 후보 또는
+  집계된 skip 이 되며, subject 아래 중첩된 components 는 최상위처럼 걷습니다. subject(또는 그 아래)와
+  `bom.components` 양쪽에 적힌 패키지는 둘이 아니라 패키지 하나, finding 하나입니다: 동일성은
+  type·name·version·ecosystem 키이므로 한정자만 다른 purl 은 패키지 하나, 버전 없는 purl 이 component
+  버전 둘에 걸치면 패키지 둘이고, 버린 쪽 항목의 location 과 source 식별자는 보고되는 쪽에 남깁니다.
+  중복 제거는 subject 트리 대 `bom.components` 뿐입니다 -- 최상위에 두 번 적힌 것도, subject 아래에
+  둘 다 중첩된 것도 둘로 남습니다. subject 이거나 그 아래인 배포판 패키지는 최상위 쌍둥이처럼 문서의
+  operating-system component 로 키를 잡습니다. (QA 2026-11-02 "CycloneDX subject", 2026-11-04 재현;
+  PR #238 리뷰)
+- 표(table) 보고서를 쓸 수 없으면 exit 2 입니다. stdout 이 닫혔거나, 가득 찼거나, 읽기 전용으로
+  열린 경우 `--output json` 과 `--output sarif` 는 이미 `error: write report` 와 함께 exit 2 였고,
+  나열할 finding 이 있는 표도 그랬습니다. 그러나 나열할 것이 없는 표 -- 깨끗한 스캔, 빈 문서,
+  모든 finding 이 waive 된 스캔 -- 는 아무것도 쓰지 않고 exit 0 으로 끝났으며 `reportSha256` 도
+  남기지 않았으므로, 기본 출력을 쓸 수 없는 파일로 리다이렉트한 잡은 도착하지 않은 보고서를
+  통과로 읽었습니다. 이제 표가 쓰는 모든 줄을 검사하고, 첫 실패를 다른 렌더러와 같은 방식으로
+  stderr 에 보고합니다. 릴리스 바이너리로 main 에서 재현했고, 수정은 `scancmd.Run` 과 CLI 진입점
+  양쪽에서 테스트로 붙잡습니다. (QA 2026-11-04, 차원 4 #5; QA 2026-11-02 에서 처음 발견)
+- `assay scan --help`, `assay scan -h`, `assay db --help`, `assay db -h`, `assay db help` 는
+  `assay help` 처럼 usage 를 stdout 에 출력하고 exit 0 입니다. 전에는 `error: unknown flag` /
+  `error: unknown db subcommand` 로 exit 2 였고 stdout 에는 아무것도 없었습니다. `db` 는 데이터베이스를
+  찾기 전에 help 에 답하므로, 사용자 캐시 디렉터리가 없는 머신(임시 CI 컨테이너, 숫자 uid 와 HOME 없이
+  실행한 `docker run`)에서도 `error: locate database` 대신 usage 를 받습니다 -- `scan --help` 는
+  거기서 이미 그렇게 답하고 있었습니다. (QA 2026-11-04 #7)
+- Ubuntu 26.10 finding 이 Canonical 의 fix state 를 갖게 됩니다. tracker 의 `stonking` 코드명이
+  `db build` 가 tracker 행을 해석하는 표에 없어서 모든 `stonking_<pkg>` 행이 unknown-codename
+  tuple 로 버려졌고, 2026-11-01 에 게시된 artifact 는 `Ubuntu:26.10` 에 fix 없는 range 16,289 개를
+  들고 있으면서 wont-fix/not-fixed state 는 0 개였습니다(`dev.assay.ubuntu-fix-states`). D157 의
+  publish guard 는 0 으로 게시된 키를 볼 수 없습니다. 이제 `resolute` 가 `26.04` 로 가듯 `stonking` 은
+  `26.10` 으로 갑니다. `tenacious`(27.04, 개발 릴리스)와 `devel` 은 의도적으로 매핑하지 않습니다.
+  (QA 2026-11-04)
+- jar 의 엔트리는 하나씩만이 아니라 합계로도 상한을 받습니다. cataloger 는 각 엔트리의 압축 해제
+  바이트를 512 MiB 파일당 한도로 막았지만 그 합계는 아무것도 막지 않았으므로, deflate 된 64 MiB
+  엔트리 열두 개를 담은 784 KB jar 가 768 MiB 를 풀어냈고, 같은 모양을 아카이브 한도까지 키우면 수백
+  GiB 에 이릅니다. 이제 `jar.Parse` 한 번에는 모든 엔트리와 모든 중첩 아카이브에 걸쳐 2 GiB 의
+  예산 -- D112 의 스캔당 수치, `source.MaxScanBytes` -- 이 있고, 각 읽기가 풀어낸 만큼 차감됩니다.
+  예산이 바닥나면 아카이브, 예산, 바닥난 엔트리를 이름으로 대는 오류이며 아카이브에서 아무것도
+  돌려주지 않습니다. `jar:` 타깃에서는 exit 2 이고, `dir:` 스캔 안의 jar 에서는 크기 초과 아카이브가
+  이미 받는 집계된 failed skip -- JSON `unread[]`, 표의 개수, `--fail-on-incomplete=target` --
+  이며, 아카이브의 것인 양 제시되는 부분 인벤토리는 결코 아닙니다. (QA 2026-11-02 #22)
+- 레지스트리 경로에서 이미지 config 는 가져오기 전에 선언된 크기로 거부됩니다. 라이브러리는 config
+  blob 을 통째로 읽고 그 읽기를 manifest 가 선언한 크기 -- 레지스트리 자신의 말 -- 로만 제한하는데,
+  256 MiB config 를 선언한 manifest 는 digest 불일치가 드러나기 전에 256 MiB 를 스트리밍하고 그 두
+  배를 할당했습니다. config 가 처음 필요한 시점에 manifest 는 이미 손에 있으므로, 모든 config 읽기
+  -- 단일 이미지의 platform 확인, descriptor 가 platform 을 대지 않는 index 항목의 platform, 모든
+  이미지 경로가 검증하는 diff id -- 가 이제 16 MiB(`source.MaxConfigBytes`, 상수: 실제 config 는
+  킬로바이트 단위) 를 넘는 선언 크기를 선언 크기와 한도를 이름으로 대는 오류로 거부하고, blob 은
+  요청되지 않습니다. (QA 2026-11-02 #24)
+- `scandiff` 는 `name` 이 평범한 파일 이름이 아닌 타깃 -- `.`, `..`, `/` 나 `\` 가 든 것,
+  `filepath.Base` 가 줄일 모든 것 -- 을 floors 파일을 읽을 때 항목을 지목하며 거부합니다. 이름은
+  `-capture` 경로에 join 되므로 `"name": "../../x"` 는 capture 디렉터리 밖에 capture 를 썼습니다.
+  (QA 2026-11-02 #25)
+- `--fail-on-incomplete` / `--fail-on-incomplete=target` 판정은 exit 2 와 함께 stderr 에 개수와 발동한
+  플래그 형태를 담은 `error:` 줄을 출력합니다 --
+  `error: N package(s) not evaluated and M check(s) incomplete (--fail-on-incomplete)` 또는
+  `error: N package(s), check(s) or manifest(s) of the target itself could not be evaluated
+  (--fail-on-incomplete=target)`. 그런 줄이 없는 유일한 exit 2 였고, 비공개 reason 으로 쓰이던 provenance
+  sidecar 의 `run.error` 는 `=target` 이 발동했을 때도 `--fail-on-incomplete` 라고 적었습니다. 이제
+  sidecar 는 다른 모든 exit 2 처럼 출력된 줄을 기록합니다. stdout 과 exit 코드는 그대로입니다.
+  (QA 2026-11-02 P3 #7)
+- 모든 finding 이 waive 되고 동시에 무언가 평가되지 않은 스캔의 표 headline 이 "No vulnerabilities found
+  in N package(s), but ... NOT a clean result" 라고 적혔고, 그 아래 Suppressed 블록은 finding 을 나열했습니다.
+  incomplete 문장들은 이제 "No unwaived vulnerabilities found in N package(s) (M suppressed), but ..." 로
+  시작하며, waiver 가 없는 스캔은 전과 같은 문장을 출력합니다. 모든 검사가 끝난 스캔의 0.14.0 all-waived
+  headline 은 바뀌지 않았습니다. (QA 2026-11-02 P3 #11)
+- 서명되지 않은 artifact 에 대한 `db update` 의 안내는 하나뿐인 무해한 원인을 먼저 말합니다. 야간 발행은
+  한 단계에서 태그를 푸시하고 다음 단계에서 서명하므로, 그 사이(수 초, 재시도까지 약 1분)에 pull 하면
+  "not signed" 를 보게 되고 `--allow-unsigned` 로 안내됐습니다. 이제 publisher 가 방금 푸시했다면 1분 뒤
+  재시도하라고 먼저 말하고, 그다음 mirror 절, 마지막에 opt-out 을 말합니다. `db update` 는 여전히 한 번만
+  시도합니다. (QA 2026-11-02 P3 #21)
 
 ## [0.14.0] - 2026-11-02
 
@@ -615,7 +616,8 @@
   여덟 개 언어 생태계를 다룹니다. CI에 종료 코드 0, 1, 2를 줍니다. 출력은 표, JSON, SARIF입니다.
   **(보고서 schemaVersion 8; 저장소 스키마 9)** (결정 기록 D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.14.0...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.15.0...main
+[0.15.0]: https://github.com/kun9497/assay/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/kun9497/assay/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/kun9497/assay/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/kun9497/assay/compare/v0.11.0...v0.12.0

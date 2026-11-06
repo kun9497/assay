@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-06
+
 ### Added
 - `--config none` runs a scan with no ignore file at all: `.assay.yaml` is not looked for in
   the working directory and nothing is waived, and the report's provenance records
@@ -34,90 +36,6 @@ All notable changes to this project are documented here. The format follows
   there now exits 2 instead of scanning under whatever `.assay.yaml` the working directory
   holds. (QA 2026-11-02 P3 #23)
 
-### Fixed
-- A CycloneDX document's subject is scanned. The reader walked `bom.components` only, so a
-  package written as `metadata.component` -- the slot the specification reserves for the thing
-  the SBOM is about, which for a library's own SBOM is the library -- or nested under it was
-  never cataloged: not scanned, not counted, in no skip bucket. lodash 4.17.20 written there
-  scanned as 0 components, 0 findings, exit 0 under `--fail-on low --fail-on-incomplete=target`
-  against the public database, where the same package in `bom.components` gave 5 findings
-  including CVE-2021-23337. The subject is now cataloged after `bom.components` under the rule
-  SPDX's DESCRIBES follows: a root shape -- no purl (syft's container), `pkg:oci`, a purl
-  without a version -- stays uncounted as before; anything else is a candidate or a counted
-  skip, and the subject's nested components are walked like top-level ones. A package listed
-  both as subject (or under it) and in `bom.components` is one package and one finding, not
-  two: the identity is type, name, version and ecosystem key, so a qualifier-only purl
-  difference is one package and a bare purl at two component versions is two, and the dropped
-  listing's locations and source identity are kept on the one reported. The dedupe is the
-  subject tree against `bom.components` only -- two top-level listings, or two both nested
-  under the subject, stay two. A distro package as or under the subject is keyed by the
-  document's operating-system component as its top-level twin is. (QA 2026-11-02 "CycloneDX
-  subject", reproduced 2026-11-04; review of PR #238)
-- A table report that could not be written is exit 2. With stdout closed, full or opened
-  read-only, `--output json` and `--output sarif` already exited 2 with `error: write report`,
-  and so did a table that had findings to list; a table with nothing to list -- a clean scan,
-  an empty document, a scan whose every finding was waived -- wrote nothing, exited 0 and
-  recorded no `reportSha256`, so a job that redirected the default output to a file it could
-  not write read the absent report as a pass. Every line the table writes is now checked, and
-  the first failure is reported on stderr the way the other renderers report theirs.
-  Reproduced on main with the release binary; the fix is held through `scancmd.Run` and
-  through the CLI entry point. (QA 2026-11-04, dimension 4 #5; first seen by QA 2026-11-02)
-- `assay scan --help`, `assay scan -h`, `assay db --help`, `assay db -h` and `assay db help`
-  print the usage on stdout and exit 0, as `assay help` does. They used to be `error: unknown
-  flag` / `error: unknown db subcommand`, exit 2, with nothing on stdout. `db` answers help
-  before it locates the database, so a machine with no user cache dir (a scratch CI container,
-  `docker run` with a numeric uid and no HOME) gets the usage rather than `error: locate
-  database`, as `scan --help` already did there. (QA 2026-11-04 #7)
-- Ubuntu 26.10 findings carry Canonical's fix states. The tracker's `stonking` codename was
-  not in the table `db build` resolves tracker rows with, so every `stonking_<pkg>` row was an
-  unknown-codename tuple and the published 2026-11-01 artifact held `Ubuntu:26.10` with 16,289
-  fix-less ranges and 0 wont-fix/not-fixed states (`dev.assay.ubuntu-fix-states`). D157's
-  publish guard cannot see a key that was published at zero. `stonking` now maps to `26.10`,
-  the same way `resolute` maps to `26.04`; `tenacious` (27.04, development) and `devel` stay
-  unmapped on purpose. (QA 2026-11-04)
-- A jar's entries are bounded in total, not only one at a time. The cataloger capped each
-  entry's decompressed bytes at the 512 MiB per-file limit and nothing capped their sum, so a
-  784 KB jar of twelve deflated 64 MiB entries inflated 768 MiB, and the same shape at the
-  archive cap reaches hundreds of GiB. One `jar.Parse` now has a budget of 2 GiB -- D112's
-  per-scan figure, `source.MaxScanBytes` -- across every entry and every nested archive, charged
-  with what each read inflated; running out of it is an error naming the archive, the budget and
-  the entry it ran out at, and nothing of the archive is returned. For a `jar:` target that is
-  exit 2; for a jar inside a `dir:` scan it is the counted, failed skip an oversized archive
-  already is -- in the JSON `unread[]`, the table's count and `--fail-on-incomplete=target` --
-  never a partial inventory presented as the archive's. (QA 2026-11-02 #22)
-- On the registry path the image config is refused by its declared size before it is fetched. The
-  library reads a config blob whole and bounds the read only by the size the manifest declares,
-  the registry's own word; a manifest declaring a 256 MiB config streamed 256 MiB and allocated
-  twice that before the digest mismatch was noticed. The manifest is already in hand when the
-  config is first wanted, so every config read -- the platform check of a single image, the
-  platform of an index entry whose descriptor names none, and the diff ids every image path
-  verifies -- now refuses a declared size above 16 MiB (`source.MaxConfigBytes`, a constant: a
-  real config is kilobytes) with an error naming the declared size and the limit, and the blob is
-  never requested. (QA 2026-11-02 #24)
-- `scandiff` refuses a target whose `name` is not a plain file name -- `.`, `..`, anything with a
-  `/` or `\`, anything `filepath.Base` would shorten -- when the floors file is loaded, naming
-  the entry. The name is joined into the `-capture` path, so `"name": "../../x"` wrote its
-  captures outside the capture directory. (QA 2026-11-02 #25)
-- The `--fail-on-incomplete` / `--fail-on-incomplete=target` verdict prints an `error:` line on
-  stderr beside its exit 2, naming the counts and the flag form that fired --
-  `error: N package(s) not evaluated and M check(s) incomplete (--fail-on-incomplete)` or
-  `error: N package(s), check(s) or manifest(s) of the target itself could not be evaluated
-  (--fail-on-incomplete=target)`. It was the one exit 2 with no such line, and the provenance
-  sidecar's `run.error` for it, written from a private reason, said `--fail-on-incomplete` even
-  when `=target` had fired; the sidecar now records the printed line like every other exit 2.
-  stdout and the exit code are unchanged. (QA 2026-11-02 P3 #7)
-- The table's headline for a scan in which every finding was waived AND something was not
-  evaluated read "No vulnerabilities found in N package(s), but ... NOT a clean result", with the
-  Suppressed block under it listing the findings. The incomplete sentences now open with "No
-  unwaived vulnerabilities found in N package(s) (M suppressed), but ..."; a scan with no
-  waivers prints the sentences it did before. The 0.14.0 all-waived headline is unchanged for
-  a scan whose every check ran. (QA 2026-11-02 P3 #11)
-- `db update`'s hint on an unsigned artifact leads with the one benign cause: the nightly pushes
-  the tag in one step and signs it in the next, so a pull in that window (seconds, up to about a
-  minute with retries) sees "not signed" and was steered to `--allow-unsigned`. The hint now
-  says to retry in a minute if the publisher pushed moments ago, then the mirror clause, then
-  the opt-out. `db update` still makes one attempt. (QA 2026-11-02 P3 #21)
-### Changed
 - The documentation no longer calls exit `0` "clean". README, `docs/integrations.md`,
   `docs/compatibility.md` and `CONTRIBUTING.md` now say what it is: no `--fail-on*` gate tripped,
   which a scan run with no gate, a scan whose findings were all waived and an SBOM with no
@@ -256,7 +174,6 @@ All notable changes to this project are documented here. The format follows
   jobs carry `timeout-minutes: 15`, and `internal/ciguard` holds every alert job's `RESULT`
   expression and every status job's timeout. (QA 2026-11-02 #19)
 
-### Changed
 - The nightly publish is scheduled at `17 5 * * *` (05:17 UTC) and the weekly scanner
   differential at `23 20 * * 0` (Sunday 20:23 UTC), off minute 0 where GitHub's queue is
   longest: every one of the twenty nightlies from 2026-10-13 to 11-02 on `0 6 * * *` started
@@ -265,6 +182,90 @@ All notable changes to this project are documented here. The format follows
   hours are pulled forward so a run that is still late lands where the old one did; the
   expected start windows are recorded in `docs/DESIGN.md` next to `status.json`, and the
   weekly's comment no longer claims "Monday 06:00 KST". (QA 2026-11-02 #18)
+
+### Fixed
+- A CycloneDX document's subject is scanned. The reader walked `bom.components` only, so a
+  package written as `metadata.component` -- the slot the specification reserves for the thing
+  the SBOM is about, which for a library's own SBOM is the library -- or nested under it was
+  never cataloged: not scanned, not counted, in no skip bucket. lodash 4.17.20 written there
+  scanned as 0 components, 0 findings, exit 0 under `--fail-on low --fail-on-incomplete=target`
+  against the public database, where the same package in `bom.components` gave 5 findings
+  including CVE-2021-23337. The subject is now cataloged after `bom.components` under the rule
+  SPDX's DESCRIBES follows: a root shape -- no purl (syft's container), `pkg:oci`, a purl
+  without a version -- stays uncounted as before; anything else is a candidate or a counted
+  skip, and the subject's nested components are walked like top-level ones. A package listed
+  both as subject (or under it) and in `bom.components` is one package and one finding, not
+  two: the identity is type, name, version and ecosystem key, so a qualifier-only purl
+  difference is one package and a bare purl at two component versions is two, and the dropped
+  listing's locations and source identity are kept on the one reported. The dedupe is the
+  subject tree against `bom.components` only -- two top-level listings, or two both nested
+  under the subject, stay two. A distro package as or under the subject is keyed by the
+  document's operating-system component as its top-level twin is. (QA 2026-11-02 "CycloneDX
+  subject", reproduced 2026-11-04; review of PR #238)
+- A table report that could not be written is exit 2. With stdout closed, full or opened
+  read-only, `--output json` and `--output sarif` already exited 2 with `error: write report`,
+  and so did a table that had findings to list; a table with nothing to list -- a clean scan,
+  an empty document, a scan whose every finding was waived -- wrote nothing, exited 0 and
+  recorded no `reportSha256`, so a job that redirected the default output to a file it could
+  not write read the absent report as a pass. Every line the table writes is now checked, and
+  the first failure is reported on stderr the way the other renderers report theirs.
+  Reproduced on main with the release binary; the fix is held through `scancmd.Run` and
+  through the CLI entry point. (QA 2026-11-04, dimension 4 #5; first seen by QA 2026-11-02)
+- `assay scan --help`, `assay scan -h`, `assay db --help`, `assay db -h` and `assay db help`
+  print the usage on stdout and exit 0, as `assay help` does. They used to be `error: unknown
+  flag` / `error: unknown db subcommand`, exit 2, with nothing on stdout. `db` answers help
+  before it locates the database, so a machine with no user cache dir (a scratch CI container,
+  `docker run` with a numeric uid and no HOME) gets the usage rather than `error: locate
+  database`, as `scan --help` already did there. (QA 2026-11-04 #7)
+- Ubuntu 26.10 findings carry Canonical's fix states. The tracker's `stonking` codename was
+  not in the table `db build` resolves tracker rows with, so every `stonking_<pkg>` row was an
+  unknown-codename tuple and the published 2026-11-01 artifact held `Ubuntu:26.10` with 16,289
+  fix-less ranges and 0 wont-fix/not-fixed states (`dev.assay.ubuntu-fix-states`). D157's
+  publish guard cannot see a key that was published at zero. `stonking` now maps to `26.10`,
+  the same way `resolute` maps to `26.04`; `tenacious` (27.04, development) and `devel` stay
+  unmapped on purpose. (QA 2026-11-04)
+- A jar's entries are bounded in total, not only one at a time. The cataloger capped each
+  entry's decompressed bytes at the 512 MiB per-file limit and nothing capped their sum, so a
+  784 KB jar of twelve deflated 64 MiB entries inflated 768 MiB, and the same shape at the
+  archive cap reaches hundreds of GiB. One `jar.Parse` now has a budget of 2 GiB -- D112's
+  per-scan figure, `source.MaxScanBytes` -- across every entry and every nested archive, charged
+  with what each read inflated; running out of it is an error naming the archive, the budget and
+  the entry it ran out at, and nothing of the archive is returned. For a `jar:` target that is
+  exit 2; for a jar inside a `dir:` scan it is the counted, failed skip an oversized archive
+  already is -- in the JSON `unread[]`, the table's count and `--fail-on-incomplete=target` --
+  never a partial inventory presented as the archive's. (QA 2026-11-02 #22)
+- On the registry path the image config is refused by its declared size before it is fetched. The
+  library reads a config blob whole and bounds the read only by the size the manifest declares,
+  the registry's own word; a manifest declaring a 256 MiB config streamed 256 MiB and allocated
+  twice that before the digest mismatch was noticed. The manifest is already in hand when the
+  config is first wanted, so every config read -- the platform check of a single image, the
+  platform of an index entry whose descriptor names none, and the diff ids every image path
+  verifies -- now refuses a declared size above 16 MiB (`source.MaxConfigBytes`, a constant: a
+  real config is kilobytes) with an error naming the declared size and the limit, and the blob is
+  never requested. (QA 2026-11-02 #24)
+- `scandiff` refuses a target whose `name` is not a plain file name -- `.`, `..`, anything with a
+  `/` or `\`, anything `filepath.Base` would shorten -- when the floors file is loaded, naming
+  the entry. The name is joined into the `-capture` path, so `"name": "../../x"` wrote its
+  captures outside the capture directory. (QA 2026-11-02 #25)
+- The `--fail-on-incomplete` / `--fail-on-incomplete=target` verdict prints an `error:` line on
+  stderr beside its exit 2, naming the counts and the flag form that fired --
+  `error: N package(s) not evaluated and M check(s) incomplete (--fail-on-incomplete)` or
+  `error: N package(s), check(s) or manifest(s) of the target itself could not be evaluated
+  (--fail-on-incomplete=target)`. It was the one exit 2 with no such line, and the provenance
+  sidecar's `run.error` for it, written from a private reason, said `--fail-on-incomplete` even
+  when `=target` had fired; the sidecar now records the printed line like every other exit 2.
+  stdout and the exit code are unchanged. (QA 2026-11-02 P3 #7)
+- The table's headline for a scan in which every finding was waived AND something was not
+  evaluated read "No vulnerabilities found in N package(s), but ... NOT a clean result", with the
+  Suppressed block under it listing the findings. The incomplete sentences now open with "No
+  unwaived vulnerabilities found in N package(s) (M suppressed), but ..."; a scan with no
+  waivers prints the sentences it did before. The 0.14.0 all-waived headline is unchanged for
+  a scan whose every check ran. (QA 2026-11-02 P3 #11)
+- `db update`'s hint on an unsigned artifact leads with the one benign cause: the nightly pushes
+  the tag in one step and signs it in the next, so a pull in that window (seconds, up to about a
+  minute with retries) sees "not signed" and was steered to `--allow-unsigned`. The hint now
+  says to retry in a minute if the publisher pushed moments ago, then the mirror clause, then
+  the opt-out. `db update` still makes one attempt. (QA 2026-11-02 P3 #21)
 
 ## [0.14.0] - 2026-11-02
 
@@ -689,7 +690,8 @@ All notable changes to this project are documented here. The format follows
   ecosystems. Gives CI an exit code of 0, 1 or 2. Output as table, JSON or SARIF.
   **(report schemaVersion 8; store schema 9)** (decision log D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.14.0...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.15.0...main
+[0.15.0]: https://github.com/kun9497/assay/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/kun9497/assay/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/kun9497/assay/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/kun9497/assay/compare/v0.11.0...v0.12.0
