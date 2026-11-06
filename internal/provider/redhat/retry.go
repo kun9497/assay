@@ -12,7 +12,9 @@ import (
 // deltaAttempts is how many times one document fetch is tried before the build
 // fails (D58).
 //
-// Three, not more. The delta fetches up to 20,000 documents one at a time, and
+// Three, not more. The delta fetches every document changed since the
+// archive one at a time -- tens of thousands behind a fresh archive since
+// D135's 2026-11-06 revision; see maxDelta -- and
 // a feed that has genuinely gone away must fail the build quickly rather than
 // turn into a very slow death: at three attempts with the backoff below, a
 // total outage costs each document about a second and a half before it gives

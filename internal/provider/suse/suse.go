@@ -127,6 +127,9 @@ type Provider struct {
 	// Retry counters (D58), identical in role to redhat.Provider's.
 	retried atomic.Int64
 	rescued atomic.Int64
+	// now is the clock deltaSince reads the archive's age from, a field so a
+	// test can set the day -- identical in role to redhat.Provider.now.
+	now func() time.Time
 }
 
 func New(opts Options) *Provider {
@@ -145,6 +148,7 @@ func New(opts Options) *Provider {
 		// redhat.Provider's for the same reason -- the whole of it is
 		// streamed through in one request during spool.
 		client: &http.Client{Timeout: 60 * time.Minute},
+		now:    time.Now,
 	}
 }
 

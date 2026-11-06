@@ -17,14 +17,43 @@ import (
 // newest first.
 const changesFile = "changes.csv"
 
-// maxDelta bounds how many documents a delta pass will fetch one at a time.
+// maxDelta is the number of changed documents past which a delta pass asks
+// whether the archive is still being rebuilt, and maxArchiveAge is how that
+// question is answered. Past BOTH, the archive has stopped being rebuilt and
+// the build fails: fetching a third of the corpus document by document every
+// night is the wrong answer and saying so is the right one. Past the count
+// alone the documents are fetched, and the progress line says how many.
 //
 // Measured 2026-08-07 against a 2026-08-05 archive: 1,827 documents had
-// changed, so a day of drift is roughly 900. The cap is about three weeks of
-// that, and exceeding it means the archive has stopped being rebuilt rather
-// than merely lagging — at which point fetching a third of the corpus
-// document by document is the wrong answer and saying so is the right one.
+// changed, so a day of drift is roughly 900 and 20,000 is about three weeks
+// of it. Until QA 2026-11-06 the count alone refused, on the reading that
+// nothing but a stalled archive could exceed it -- and then Red Hat
+// regenerated its corpus: 20,514 documents on 2026-11-05 alone, from every
+// year 1999 to 2026, each carrying a new "Last generated version" revision,
+// 27,679 since an archive five days old that Red Hat rebuilds weekly. The
+// count measures what Red Hat did that week; the archive's age measures what
+// this guard is about, and 21 days is the three weeks the count had stood
+// for. The cost the count was guarding is real but small: the 9,341 delta
+// documents of 2026-11-05 were fetched in 5m18s, so even the whole corpus is
+// under an hour, inside the publish job's budget.
 const maxDelta = 20000
+
+// maxArchiveAge is how old the archive may be before an overlarge delta is
+// read as the archive having stopped being rebuilt (see maxDelta).
+const maxArchiveAge = 21 * 24 * time.Hour
+
+// ageDays is an archive's age as the messages print it: whole days, rounded
+// UP, never negative. The decision compares durations exactly, so an age of
+// 21 days and an hour is past a 21-day limit -- and truncation would have
+// printed it as "21 days old, past ... 21 days" (review of QA 2026-11-06).
+// A clock behind the archive's own date (a mirror with a future-dated name)
+// is a zero-day-old archive, not a negative one.
+func ageDays(age time.Duration) int {
+	if age <= 0 {
+		return 0
+	}
+	return int((age + 24*time.Hour - 1) / (24 * time.Hour))
+}
 
 // deltaRequestTimeout bounds ONE document fetch. The archive read gets the
 // client's hour because it is 262 MB; a single document is at most 94 MB and
@@ -84,10 +113,24 @@ func (p *Provider) deltaSince(ctx context.Context, cutoff time.Time,
 	}
 	st.DeltaListed = len(paths)
 	if len(paths) > maxDelta {
-		return nil, fmt.Errorf(
-			"redhat: %d documents have changed since the %s archive was built, past the %d this "+
-				"will fetch one at a time; the archive has stopped being rebuilt rather than "+
-				"merely lagging", len(paths), cutoff.Format("2006-01-02"), maxDelta)
+		// The clock is consulted here and nowhere else in this provider, and
+		// it is not the substitution D12 forbids: the data's own date stays
+		// the archive's (DataAsOf), and what the clock measures is whether the
+		// FEED is still being maintained -- a question about today.
+		age := p.now().Sub(cutoff)
+		days := ageDays(age)
+		if age > maxArchiveAge {
+			return nil, fmt.Errorf(
+				"redhat: %d documents have changed since the %s archive was built and that archive "+
+					"is %d days old, past the %d documents and %d days this will fetch one at a time; "+
+					"the archive has stopped being rebuilt rather than merely lagging",
+				len(paths), cutoff.Format("2006-01-02"), days, maxDelta, int(maxArchiveAge/(24*time.Hour)))
+		}
+		fmt.Fprintf(p.progress,
+			"redhat: %d documents have changed since the %s archive was built, past the %d a delta "+
+				"usually holds, but that archive is %d days old and still being rebuilt, so they are "+
+				"fetched one at a time (QA 2026-11-06: Red Hat regenerated its corpus)\n",
+			len(paths), cutoff.Format("2006-01-02"), maxDelta, days)
 	}
 
 	fetched := map[string]time.Time{}

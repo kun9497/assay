@@ -2405,7 +2405,9 @@ EOF from the decoder — was classified permanent. The test row that should have
 used status 0, which is not how the failure arrives. Found by reading the test back, not by
 running it.
 
-**Three attempts, not more.** The delta fetches up to 20,000 documents one at a time, so a
+**Three attempts, not more.** The delta fetches every document changed since the archive one
+at a time — tens of thousands behind a fresh archive since D135's 2026-11-06 revision, which
+moved the refusal from a document count to the archive's age — so a
 feed that has genuinely gone away must fail quickly rather than turn into a slow death: at
 this backoff a total outage costs each document about a second and a half. The pauses are
 short on purpose — this is for a connection closed mid-handshake, not for a service under
@@ -5995,6 +5997,21 @@ could (an individual document served stale from a cache in front of the feed). T
 accepted: a delta that fails now fails after the spool, not before it. D129's property is
 intact — the delta is still emitted before the walk, and a delta copy at least as new still
 supersedes, including when it converts to nothing.
+
+**Revised (QA 2026-11-06).** The delta pass had refused more than 20,000 changed documents
+outright, on the reading that nothing but an archive that had stopped being rebuilt could
+produce that many (about three weeks of the ~900-a-day drift measured 2026-08-07). On
+2026-11-05 Red Hat regenerated its corpus — 20,514 documents changed that day, from every
+year 1999 to 2026, each with a new "Last generated version" revision — behind a 2026-11-01
+archive that Red Hat rebuilds weekly, and the 2026-11-06 publish failed on 27,679 changed
+documents with the archive five days old and healthy. The count measured what Red Hat did
+that week; the archive's age measures what the guard is about. Both providers now refuse an
+overlarge delta only when the archive is also more than 21 days old (the three weeks the
+count had stood for), and otherwise fetch it with a progress line saying how many and how old
+the archive is. The cost the count was guarding is small: the 9,341 delta documents of
+2026-11-05 took 5m18s, so even the whole corpus is under an hour, inside the publish job's
+budget. The clock is read for the feed's health only; `DataAsOf` stays the archive's own
+date (D12). Held by the stale and fresh archive cases in each provider's delta tests.
 
 **Verified.** SUSE: with a HEAD saying 00:00, a changes row at 01:00 and the archive served at
 02:00, the archive GET precedes the changes GET, the row is never fetched, openssh's fix is

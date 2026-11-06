@@ -189,8 +189,18 @@ func changesCSV(rows ...[2]string) string {
 
 func fetchAll(t *testing.T, s *httptest.Server) ([]advisory.Advisory, string, error) {
 	t.Helper()
+	return fetchAllAt(t, s, time.Time{})
+}
+
+// fetchAllAt is fetchAll with the provider's clock pinned to now, which is
+// what the archive-age guard reads (QA 2026-11-06); zero keeps the real clock.
+func fetchAllAt(t *testing.T, s *httptest.Server, now time.Time) ([]advisory.Advisory, string, error) {
+	t.Helper()
 	var progress bytes.Buffer
 	p := New(Options{BaseURL: s.URL, Progress: &progress})
+	if !now.IsZero() {
+		p.now = func() time.Time { return now }
+	}
 	var got []advisory.Advisory
 	prov, err := p.Fetch(context.Background(), func(a advisory.Advisory) error {
 		got = append(got, a)

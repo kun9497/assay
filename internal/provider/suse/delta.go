@@ -18,10 +18,28 @@ import (
 // points at the level above both).
 const changesFile = "changes.csv"
 
-// maxDelta bounds how many documents a delta pass will fetch one at a time,
-// matching redhat.maxDelta's reasoning: exceeding it means the feed has
-// stopped being rebuilt rather than merely lagging.
+// maxDelta and maxArchiveAge match redhat's: past both, the archive has
+// stopped being rebuilt and the build fails; past the count alone (a
+// regenerated corpus behind a fresh archive, QA 2026-11-06) the documents are
+// fetched and the progress line says how many. See redhat.maxDelta for the
+// measurements. SUSE rebuilds its archive in place about daily (D135), so an
+// archive 21 days old is as stalled here as Red Hat's weekly one.
 const maxDelta = 20000
+
+// maxArchiveAge is how old the archive may be before an overlarge delta is
+// read as the archive having stopped being rebuilt (see maxDelta).
+const maxArchiveAge = 21 * 24 * time.Hour
+
+// ageDays is the archive's age as the messages print it -- whole days,
+// rounded up, never negative -- identical to redhat.ageDays and for its
+// reason: the decision compares durations exactly, and a truncated day
+// count would print "21 days old, past ... 21 days".
+func ageDays(age time.Duration) int {
+	if age <= 0 {
+		return 0
+	}
+	return int((age + 24*time.Hour - 1) / (24 * time.Hour))
+}
 
 // deltaRequestTimeout bounds ONE document fetch, matching redhat's.
 const deltaRequestTimeout = 3 * time.Minute
@@ -69,10 +87,24 @@ func (p *Provider) deltaSince(ctx context.Context, cutoff time.Time,
 	}
 	st.DeltaListed = len(paths)
 	if len(paths) > maxDelta {
-		return nil, fmt.Errorf(
-			"suse: %d documents have changed since the %s archive was built, past the %d this "+
-				"will fetch one at a time; the feed has stopped being rebuilt rather than merely "+
-				"lagging", len(paths), cutoff.Format("2006-01-02"), maxDelta)
+		// The one place this provider reads the clock, and not the
+		// substitution D12 forbids: DataAsOf stays the archive's own
+		// Last-Modified, and the clock answers whether the FEED is still
+		// being maintained -- matching redhat.deltaSince.
+		age := p.now().Sub(cutoff)
+		days := ageDays(age)
+		if age > maxArchiveAge {
+			return nil, fmt.Errorf(
+				"suse: %d documents have changed since the %s archive was built and that archive "+
+					"is %d days old, past the %d documents and %d days this will fetch one at a time; "+
+					"the feed has stopped being rebuilt rather than merely lagging",
+				len(paths), cutoff.Format("2006-01-02"), days, maxDelta, int(maxArchiveAge/(24*time.Hour)))
+		}
+		fmt.Fprintf(p.progress,
+			"suse: %d documents have changed since the %s archive was built, past the %d a delta "+
+				"usually holds, but that archive is %d days old and still being rebuilt, so they are "+
+				"fetched one at a time (QA 2026-11-06)\n",
+			len(paths), cutoff.Format("2006-01-02"), maxDelta, days)
 	}
 
 	fetched := map[string]time.Time{}

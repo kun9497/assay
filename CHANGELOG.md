@@ -23,6 +23,12 @@ All notable changes to this project are documented here. The format follows
   (QA 2026-11-04 nightly follow-up)
 
 ### Changed
+- The Red Hat and SUSE CSAF delta passes refuse more than 20,000 changed documents only when
+  the archive is also more than 21 days old; behind a fresher archive they are fetched, with a
+  progress line saying how many and how old the archive is. Red Hat regenerated its whole
+  corpus on 2026-11-05 (20,514 documents that day) behind a five-day-old archive, and the
+  count alone had read that as a stalled archive and failed the build. (QA 2026-11-06, D135
+  revised)
 - An empty `--config` value (`--config=`, `--config ""`) is refused at parse with a message
   naming `none`; it used to mean "discover", silently. A job that passes an unset variable
   there now exits 2 instead of scanning under whatever `.assay.yaml` the working directory

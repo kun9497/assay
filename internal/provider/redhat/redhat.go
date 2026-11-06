@@ -73,6 +73,11 @@ type Provider struct {
 	// evidence that the fix is what made it work.
 	retried atomic.Int64 // extra attempts made, across all documents
 	rescued atomic.Int64 // documents that succeeded only after a retry
+	// now is the clock deltaSince reads the archive's age from (QA
+	// 2026-11-06). A field so a test can set the day, because the question
+	// it answers -- is a 20,000-document delta a regenerated corpus behind a
+	// fresh archive, or a stalled one -- turns on how old the archive is.
+	now func() time.Time
 }
 
 func New(opts Options) *Provider {
@@ -90,6 +95,7 @@ func New(opts Options) *Provider {
 		// The archive is 262 MB compressed and 17.1 GB decompressed, and the
 		// whole of it is streamed through in one request.
 		client: &http.Client{Timeout: 60 * time.Minute},
+		now:    time.Now,
 	}
 }
 
