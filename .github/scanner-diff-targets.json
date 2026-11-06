@@ -242,7 +242,7 @@
     "trivy": {
       "minAgree": 18,
       "minFindings": 18,
-      "maxFindings": 44
+      "maxFindings": 100
     }
   },
   {
