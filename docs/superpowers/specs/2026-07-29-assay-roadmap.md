@@ -2884,6 +2884,10 @@ no lockfile): SBOM, jar and fat jar all match now.
 
 **Deferred, recorded**: jars inside container images need a whole-tree walk the Source
 interface does not expose yet — the image path still catalogs OS packages only.
+**Revised by D160 (2026-11-09):** the image path reads two fixed locations — installed npm
+packages under the global `node_modules` roots and Go binaries in the standard bin
+directories — in one layer pass; jars inside images and everything at unnamed paths stay
+unread and disclosed.
 
 ---
 
@@ -4574,6 +4578,11 @@ decision D70 defers, and `inventoryScope` states the limit without it. No gate: 
 exists for lifecycle, D59's revision will exist for data age, and a third flag for the same
 question is what D18's divergence table warns against.
 
+**Addendum (D160, 2026-11-09).** `applicationPackages` gained a fourth value, `partial`, and a
+sibling `applicationScope[]` per ecosystem (`read` / `none` / `not-read`, with the roots a probe
+reads), because the image path now reads two fixed locations and none of the three values was
+true of the half. Schema 18, breaking for a consumer switching on the three.
+
 ---
 
 ### D112 — Every byte a scan reads from a target is bounded, and a scan can be told when to stop
@@ -5012,6 +5021,12 @@ judging, because assay never reaches these packages to match them.
 OS-type grype-only tuples, and no change to the summary table's columns. When the
 ceiling trips, D70's entry is revisited; the ceiling itself decides nothing about how the
 gap is closed.
+
+**Addendum (D160, 2026-11-09).** `npm` and `go-module` are inventoried types now — the image
+probes read the global npm tree and the Go binaries in the bin directories — so a grype-only
+tuple of either is a divergence the floors judge, a ceiling on either is refused, and the
+three seeds (ubi8n18 npm 82, bci156 go-module 92, cleanstart-postgres go-module 2) are
+removed. `python` and `java-archive` stay on the judged side.
 
 ---
 
@@ -6492,6 +6507,12 @@ not read, any rpm counting as a source, non-rpm candidates taking it, the relati
 `upstream`, the release guard off, the dist-tag allowance removed, and the source given a version.
 The fixture guard, the keyed counts and the `CONTAINS` remainder came from the branch review
 (wf_b62c1d24-f0a).
+
+**Addendum (D160, 2026-11-09).** The note and the SARIF result are emitted whenever
+`applicationPackages` is not `read` — `partial` on every image today — and say what the probes
+read and where ("npm packages under usr/lib/node_modules, … and Go binaries under usr/bin, …")
+and what is still not read ("Python packages and Java packages, node_modules elsewhere and Go
+binaries elsewhere"), from one sentence builder the two renderers share.
 
 ---
 
@@ -8243,6 +8264,84 @@ Beyond that:
   apk `-rN` suffixes, semver pre-release precedence, PEP 440 `.post` / `.dev`. This is where
   false negatives originate.
 - The bbolt implementation is tested separately against a small fixture database.
+
+### D160 — An image scan reads application packages at two fixed locations (revises D70)
+
+**Decision.** An image scan runs one more pass over its layers, over ten fixed locations
+together: the installed `package.json` files under the three global `node_modules` roots
+(`usr/lib/node_modules`, `usr/local/lib/node_modules`, `opt/app-root/src/node_modules`)
+become `npm` packages — nested copies included, each at its own path, a version-less one a
+counted skip — and the ELF executables directly inside the seven standard bin directories
+(`usr/bin`, `usr/local/bin`, `bin`, `sbin`, `usr/sbin`, `usr/libexec`, `usr/local/sbin`) that
+carry Go build info become the `Go` packages the `file:` path already derives. A non-ELF
+executable is declined after its first four bytes and never read; a Go binary is read whole
+under D112's existing limits, with no new budget. Nothing else inside an image is read.
+`inventoryScope.applicationPackages` says `partial` — a fourth value beside D111's three, a
+breaking bump to schema 18 for a consumer switching on them — and a new
+`inventoryScope.applicationScope[]` says per ecosystem whether it was `read`, `none` (probed,
+nothing there) or `not-read`, with the roots a probe reads; D141's stderr note and SARIF
+result say the same sentence. In `cmd/scandiff`, `npm` and `go-module` join the inventoried
+types, so a grype-only tuple of either is a data-source divergence to judge, not D70's gap to
+ceiling; the three `maxGrypeOnlyApp` seeds they carried (ubi8n18 npm 82, bci156 go-module 92,
+cleanstart-postgres go-module 2) are gone. Design record:
+`2026-11-09-image-app-probe-design.md`.
+
+**Why now, and why these two shapes.** The 2026-11-04 QA named the gap a blocker for the
+service (§8, S-1), and on 2026-11-09 every layer of all 26 scanner-diff targets was streamed
+to see where the gap sits: every installed `package.json` on every image is under
+`usr/lib/node_modules` (ubi8/nodejs-18's 236 — npm's own bundled tree, 233 of them nested, 24
+names at two or more versions) and none anywhere else; every Go binary found sits directly in a
+bin directory (bci156's `container-suseconnect`, cleanstart's `gosu`, archlinux's `captree`)
+and none under `/opt`, `/app`, `/usr/lib*`, `/usr/share` or `/usr/local`; lockfiles 0; jars 4
+on two images with 0 grype-only java tuples; `*.dist-info` 21 across five RHEL-family images,
+all owned by the OS package manager. The same day's weekly had 89 grype-only application
+tuples on three targets — ubi8n18 npm 41, bci156 go-module 47, cleanstart 1 — and 0 of any
+other type. Two shapes account for everything measured, and both sit at paths that can be
+named in advance, which is exactly what the Source interface already offers: `FilesMatching`
+matches at any depth under a named directory and returns bytes with their layer.
+
+**Why not the whole tree.** D70's reason still holds for it. A `node_modules` or a jar at a
+path nobody named needs a walk the interface does not expose, and reading every file under
+`/` for ELF magic collides with D112's per-scan budget on a large image — the budget is
+"error, not truncation", so the application pass would cost the OS verdict. The measurement
+says the whole tree is not where the gap is. Python and Java stay out for the same measured
+reason, plus one of their own: the dist-info files found are RPM-owned, and reading them
+without the package manager's file ownership would report every RPM-installed Python module
+twice. The day a `python` or `java-archive` ceiling trips (D117) is the next increment, on the
+same primitives.
+
+**One pass, not ten.** Every pass reads each layer to EOF (D123), so ten locations probed one
+at a time would have multiplied an image's layer reads by ten; the first cut did, and the
+pass-counting test (`TestCatalogFromImage_EveryLayerPassHonoursTheContext`) caught it at 15
+passes where an Arch image took 5. `collect` therefore grew a multi-root form with the tar
+header in its match and a four-byte sniff before the read (`FilesProbed`), and the probes
+share one pass: six on an Arch image now. A declined executable costs its four bytes, which
+are not charged to the budget; `/usr/bin/bash` is not read.
+
+**What the probe does not say.** The RPM that owns a tree. ubi8n18's `node_modules` is the
+`npm` and `nodejs-nodemon` RPMs' bundled tree, and 3 of grype's 41 npm tuples are CVEs assay
+already reports under the owning RPM. A `locations[].ownedBy` field was designed and then
+deferred to a follow-up on finding that neither the rpmdb nor the dpkg cataloger reads file
+lists today (rpm's `BASENAMES`/`DIRNAMES` tags, dpkg's `info/*.list`) — not the one-field
+addition it was first described as. Until then the npm package's path says where it sits and
+the reader infers the owner.
+
+**Verified.** At the caller, through docker-archive images: the nested dependency under the
+global root is a finding at its nested path with its layer, while `esm/package.json` and a
+tree under `app/` are not packages; a linux/amd64 Go binary in `usr/bin` yields its linked
+module, while the same bytes under `/opt`, in `usr/bin/plugins/` and without the execute bit
+yield nothing; a version-less `package.json` is one `notEvaluated`; the note and the SARIF
+result name what was read and what was not; `applicationPackages` is `partial` and
+`applicationScope` carries npm read / Go none / PyPI and Maven not-read with the roots.
+`FilesProbed`: one layer open for three roots, a declined entry not returned, not charged and
+still shadowing (A10) a lower layer's file, A10 held for every root of the pass. `npminstalled`'s
+installed-package rule, skips and path order; `gobinary.ParseBytes` against `Parse`.
+`scandiff`: an npm or go-module ceiling refused as an inventoried type; grype-only tuples of
+both types never trip. **Sixteen mutations, sixteen caught** (two first needed a compilable
+mutation; one — shadowing only the first root — needed the test that reaches it).
+
+**Still open.** `ownedBy` (above). Python and Java inside images. Trees outside the three
+roots and Go binaries outside the seven directories, disclosed as not read.
 
 ---
 

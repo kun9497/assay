@@ -2657,6 +2657,9 @@ evaluated로 셉니다. 이것으로 D69가 닫지 못했던 Maven checkout 경�
 
 **미룸, 기록해 둡니다**: 컨테이너 이미지 안의 jar는 `Source` 인터페이스가 아직 노출하지 않는
 전체 트리 walk이 필요합니다 — 이미지 경로는 여전히 OS 패키지만 카탈로그합니다.
+**D160으로 개정 (2026-11-09):** 이미지 경로는 두 고정 위치 — 전역 `node_modules` 루트 아래의
+설치된 npm 패키지와 표준 bin 디렉터리의 Go 바이너리 — 를 한 레이어 패스로 읽는다. 이미지 안의 jar와
+이름 대지 않은 경로의 모든 것은 읽지 않은 채 공개된다.
 
 ---
 
@@ -4425,6 +4428,11 @@ D70이 미루는 application-inventory 결정의 절반이고, `inventoryScope`�
 데이터 age를 위해 있을 것이며, 같은 질문에 대한 세 번째 플래그는 D18의 divergence
 table이 경고하는 바로 그것이다.
 
+**추기 (D160, 2026-11-09).** `applicationPackages`에 네 번째 값 `partial`과 ecosystem별 형제
+`applicationScope[]`(`read` / `none` / `not-read`, 프로브가 읽는 루트와 함께)가 생겼다. 이미지 경로가
+이제 두 고정 위치를 읽어 세 값 어느 것도 그 절반에 대해 참이 아니기 때문이다. 스키마 18, 세 값으로
+분기하는 소비자에게는 breaking.
+
 ---
 
 ### D112 — 스캔이 타깃에서 읽는 모든 바이트에는 상한이 있고, 스캔에게 언제 멈출지 말해줄 수 있다
@@ -4848,6 +4856,11 @@ assay가 이 패키지들에 닿지 않으므로 매칭할 수도 없기 때문�
 **빠지는 것.** assay-only 튜플에 대한 상한은 없다(그것은 `maxFindings`다). OS 타입의
 grype-only 튜플에 대한 상한도 없고, 요약 표의 열도 바뀌지 않는다. 상한이 걸리면 D70의 항목을
 다시 검토하며, 상한 자체는 그 공백을 어떻게 메울지에 대해 아무것도 결정하지 않는다.
+
+**추기 (D160, 2026-11-09).** `npm`과 `go-module`은 이제 인벤토리화된 타입이다 — 이미지 프로브가 전역
+npm 트리와 bin 디렉터리의 Go 바이너리를 읽는다 — 그래서 어느 쪽의 grype 전용 튜플이든 floor가 판정하는
+차이이고, 어느 쪽에 대한 상한이든 거부되며, 세 시드(ubi8n18 npm 82, bci156 go-module 92,
+cleanstart-postgres go-module 2)는 제거됐다. `python`과 `java-archive`는 판정되는 쪽에 남는다.
 
 ---
 
@@ -6175,6 +6188,12 @@ rpm-ostree, libabigail, rpmlint 등이 벤더한 fixture(`glibc 2.17-157`, `kern
 지점(`Run` 테스트가 포착), 관계 source 무시, `GENERATED_FROM` 미독해, 아무 rpm 이나 source 로 셈, rpm 이 아닌
 후보가 받음, 관계가 `upstream` 을 덮어씀, release 가드 끔, dist 태그 허용 제거, source 에 버전 부여. fixture 가드,
 키가 있는 후보 수, `CONTAINS` 나머지는 브랜치 리뷰(wf_b62c1d24-f0a)에서 나왔다.
+
+**추기 (D160, 2026-11-09).** 노트와 SARIF 결과는 `applicationPackages`가 `read`가 아닐 때마다 —
+오늘 모든 이미지에서 `partial` — 나오며, 프로브가 무엇을 어디서 읽었는지("npm packages under
+usr/lib/node_modules, … and Go binaries under usr/bin, …")와 여전히 읽지 않는 것("Python packages and
+Java packages, node_modules elsewhere and Go binaries elsewhere")을 두 렌더러가 공유하는 한 문장
+빌더로 말한다.
 
 ---
 
@@ -7795,6 +7814,73 @@ D8이 존재하는 이유인 소스 패키지 간접 참조가 Red Hat은 발행
   접미사, semver pre-release 우선순위, PEP 440 `.post` / `.dev`를 다룹니다. **여기가 미탐의
   발원지입니다.**
 - bbolt 구현체는 작은 fixture 데이터베이스로 별도 테스트합니다.
+
+### D160 — 이미지 스캔은 두 고정 위치에서 애플리케이션 패키지를 읽는다 (D70 개정)
+
+**결정.** 이미지 스캔은 레이어 위를 한 번 더 지나가되, 열 개의 고정 위치를 한꺼번에 본다: 세 전역
+`node_modules` 루트(`usr/lib/node_modules`, `usr/local/lib/node_modules`,
+`opt/app-root/src/node_modules`) 아래의 설치된 `package.json`은 `npm` 패키지가 되고 — 중첩 사본도
+각자 자기 경로에서, 버전 없는 것은 세어지는 skip — 일곱 표준 bin 디렉터리(`usr/bin`, `usr/local/bin`,
+`bin`, `sbin`, `usr/sbin`, `usr/libexec`, `usr/local/sbin`) 바로 아래의, Go 빌드 정보를 가진 ELF 실행
+파일은 `file:` 경로가 이미 도출하는 `Go` 패키지들이 된다. ELF가 아닌 실행 파일은 처음 4바이트 뒤에
+거절되어 결코 읽히지 않고, Go 바이너리는 D112의 기존 한도 아래에서 새 예산 없이 통째로 읽힌다. 이미지
+안의 다른 것은 아무것도 읽지 않는다. `inventoryScope.applicationPackages`는 `partial`이라고 말하고 —
+D111의 세 값 옆의 네 번째 값, 그 값으로 분기하는 소비자에게는 breaking인 스키마 18 bump — 새
+`inventoryScope.applicationScope[]`가 ecosystem마다 `read`, `none`(프로브했으나 없음), `not-read` 중
+무엇인지와 프로브가 읽는 루트를 말한다. D141의 stderr 노트와 SARIF 결과가 같은 문장을 말한다.
+`cmd/scandiff`에서 `npm`과 `go-module`은 인벤토리화된 타입에 합류해, 어느 쪽이든 grype 전용 튜플은
+D70의 간극으로 ceiling할 것이 아니라 판정할 데이터 소스 차이가 된다. 그 타입이 지고 있던 세
+`maxGrypeOnlyApp` 시드(ubi8n18 npm 82, bci156 go-module 92, cleanstart-postgres go-module 2)는
+사라졌다. 설계 기록: `2026-11-09-image-app-probe-design.ko.md`.
+
+**왜 지금이고 왜 이 두 모양인가.** 2026-11-04 QA가 이 간극을 서비스의 차단 요인으로 지목했고(§8, S-1),
+2026-11-09에 scanner-diff 타깃 26개의 모든 레이어를 스트리밍해 간극이 어디 있는지 봤다: 모든 이미지의
+모든 설치된 `package.json`은 `usr/lib/node_modules` 아래에 있고(ubi8/nodejs-18의 236개 — npm 자신의
+번들 트리, 그중 233개 중첩, 두 버전 이상인 이름 24개) 다른 곳에는 없다; 발견된 모든 Go 바이너리는 bin
+디렉터리 바로 아래에 있고(bci156의 `container-suseconnect`, cleanstart의 `gosu`, archlinux의
+`captree`) `/opt`, `/app`, `/usr/lib*`, `/usr/share`, `/usr/local` 아래에는 없다; lockfile 0; jar는
+두 이미지에 4개로 grype 전용 java 튜플 0; `*.dist-info`는 RHEL 계열 다섯 이미지에 21개, 전부 OS 패키지
+관리자 소유. 같은 날의 주간 차등에는 세 타깃에 grype 전용 애플리케이션 튜플 89개가 있었고 — ubi8n18
+npm 41, bci156 go-module 47, cleanstart 1 — 다른 타입은 0이었다. 두 모양이 측정된 모든 것을
+설명하고, 둘 다 미리 이름 댈 수 있는 경로에 있다. 그것이 Source 인터페이스가 이미 주는 것이다:
+`FilesMatching`은 이름 댄 디렉터리 아래 어느 깊이든 매칭하고 바이트를 레이어와 함께 돌려준다.
+
+**왜 전체 트리가 아닌가.** 그것에 대해서는 D70의 이유가 여전히 성립한다. 아무도 이름 대지 않은 경로의
+`node_modules`나 jar는 인터페이스가 노출하지 않는 walk가 필요하고, `/` 아래 모든 파일을 ELF 매직으로
+읽는 것은 큰 이미지에서 D112의 스캔당 예산과 충돌한다 — 예산은 "잘림이 아니라 오류"라 애플리케이션
+패스가 OS 판정을 잃게 한다. 측정은 전체 트리가 간극이 있는 곳이 아니라고 말한다. Python과 Java는 같은
+측정 이유에 더해 자기 이유로도 밖에 둔다: 발견된 dist-info 파일은 RPM 소유라, 패키지 관리자의 파일
+소유권 없이 읽으면 RPM으로 설치된 모든 Python 모듈을 두 번 보고하게 된다. `python`이나
+`java-archive` ceiling이 트립하는 날(D117)이 같은 프리미티브 위의 다음 증분이다.
+
+**열 패스가 아니라 한 패스.** 모든 패스는 각 레이어를 끝까지 읽으므로(D123) 열 위치를 하나씩 프로브하면
+이미지의 레이어 읽기가 열 배가 됐을 것이다. 첫 구현이 그랬고, 패스 계수 테스트
+(`TestCatalogFromImage_EveryLayerPassHonoursTheContext`)가 Arch 이미지가 5패스 걸릴 자리에서 15패스를
+잡아냈다. 그래서 `collect`가 tar 헤더를 보는 match와 읽기 전 4바이트 스니프를 가진 다중 루트 형태
+(`FilesProbed`)를 얻었고, 프로브는 한 패스를 공유한다: 이제 Arch 이미지에서 여섯 패스. 거절된 실행
+파일은 4바이트의 비용이고 예산에 부과되지 않는다. `/usr/bin/bash`는 읽히지 않는다.
+
+**프로브가 말하지 않는 것.** 트리를 소유한 RPM. ubi8n18의 `node_modules`는 `npm`과 `nodejs-nodemon`
+RPM의 번들 트리이고, grype의 npm 튜플 41개 중 3개는 assay가 소유 RPM 이름으로 이미 보고하는 CVE다.
+`locations[].ownedBy` 필드를 설계했다가, rpmdb도 dpkg 카탈로거도 오늘 파일 목록(rpm의
+`BASENAMES`/`DIRNAMES` 태그, dpkg의 `info/*.list`)을 읽지 않는다는 것이 드러나 후속 작업으로 미뤘다 —
+처음 설명한 "필드 하나 추가"가 아니었다. 그때까지 npm 패키지의 경로가 어디 있는지를 말하고 독자가
+소유자를 추론한다.
+
+**검증.** 호출부에서, docker-archive 이미지를 통해: 전역 루트 아래의 중첩 의존성이 중첩 경로와 레이어를
+가진 finding이 되고 `esm/package.json`과 `app/` 아래 트리는 패키지가 아니다; `usr/bin`의 linux/amd64
+Go 바이너리는 링크된 모듈을 내고, 같은 바이트가 `/opt` 아래, `usr/bin/plugins/` 안, 실행 비트 없이
+있으면 아무것도 내지 않는다; 버전 없는 `package.json`은 `notEvaluated` 하나; 노트와 SARIF 결과가 읽은
+것과 읽지 않은 것을 이름으로 댄다; `applicationPackages`는 `partial`이고 `applicationScope`는 npm
+read / Go none / PyPI와 Maven not-read를 루트와 함께 싣는다. `FilesProbed`: 세 루트에 레이어 열기 한
+번, 거절된 엔트리는 돌려주지 않고 부과하지 않되 하위 레이어의 파일을 여전히 가리며(A10), A10이 패스의
+모든 루트에 대해 성립. `npminstalled`의 설치 패키지 규칙·skip·경로 순서; `gobinary.ParseBytes`를
+`Parse`와 대조. `scandiff`: npm이나 go-module ceiling은 인벤토리화된 타입으로 거부; 두 타입의 grype
+전용 튜플은 결코 트립하지 않음. **변이 열여섯, 열여섯 잡힘**(둘은 컴파일되는 변이가 먼저 필요했고,
+하나 — 첫 루트만 가리기 — 는 거기 닿는 테스트가 필요했다).
+
+**아직 열린 것.** `ownedBy`(위). 이미지 안의 Python과 Java. 세 루트 밖의 트리와 일곱 디렉터리 밖의 Go
+바이너리는 읽지 않음으로 공개된다.
 
 ---
 

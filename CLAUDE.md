@@ -63,7 +63,9 @@ tool is `cmd/scandiff`, floors in `.github/scanner-diff-targets.json`). Since D1
 nightly publish runs the same tool with `-regressions-only` against the candidate before
 `db push`, so a regression floor is held before anything reaches the tag. Since D117 a per-type
 ceiling (`maxGrypeOnlyApp`) bounds the grype-only tuples on application package types —
-the in-image language packages an image scan does not read (D70) — so that gap shows up in
+the in-image language packages an image scan does not read (D70; since D160 an image scan DOES read
+npm packages under the global `node_modules` roots and Go binaries in the standard bin directories,
+so `npm` and `go-module` are inventoried types there) — so that gap shows up in
 the weekly run instead of being judged `ok`. Since D145 the gate also holds
 `incompleteChecks` and `targetIncomplete` (`maxIncompleteChecks` / `maxTargetIncomplete`,
 omitted = 0), and az2023/wolfi carry real floors, cut where a floor tracks grype's or

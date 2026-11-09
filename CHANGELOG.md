@@ -7,7 +7,28 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- An image scan reads application packages at two fixed locations (D160, revises D70): the
+  installed `package.json` files under `usr/lib/node_modules`, `usr/local/lib/node_modules` and
+  `opt/app-root/src/node_modules` become `npm` packages (nested copies included, each at its own
+  path; a version-less one is a counted skip), and ELF executables directly in `usr/bin`,
+  `usr/local/bin`, `bin`, `sbin`, `usr/sbin`, `usr/libexec` and `usr/local/sbin` that carry Go
+  build info become the `Go` packages a `file:` scan derives. One extra layer pass for all ten
+  locations; a non-ELF executable is declined after four bytes; D112's limits apply unchanged.
+  Measured on all 26 differential targets first: nothing outside those locations, so ubi8n18's
+  41 and bci156's 47 grype-only tuples are now assay's to judge. Python, Java, and npm trees or
+  Go binaries anywhere else stay unread and disclosed.
+
 ### Changed
+- **JSON `schemaVersion` 18 — breaking for a consumer switching on
+  `inventoryScope.applicationPackages`**: the field gains a fourth value, `partial` (every image
+  scan reports it from now on; `not-read` no longer occurs there), and `inventoryScope` gains
+  `applicationScope[]` — per ecosystem `read`, `none` (probed, nothing there) or `not-read`, with
+  the `roots` a probe reads. The D141 stderr note and SARIF `assay/inventory-scope` result now
+  say what was read and where, and what was not. (D160)
+- `cmd/scandiff` treats `npm` and `go-module` as inventoried types (a grype-only tuple of
+  either is judged by the floors, a `maxGrypeOnlyApp` ceiling on either is refused), and the
+  three D117 seeds they carried are removed from `.github/scanner-diff-targets.json`. (D160)
 - `docs/operating-envelope.md` (and its Korean twin): what a scan bounds itself (D112's sizes,
   the 40-link bound, `--timeout`'s reach and that without it there is no deadline), what
   go-containerregistry v0.21.7 bounds (manifest 100 MiB, token body 64 KiB, three attempts,

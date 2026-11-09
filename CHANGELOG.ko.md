@@ -7,7 +7,25 @@
 
 ## [Unreleased]
 
+### Added
+- 이미지 스캔이 두 고정 위치에서 애플리케이션 패키지를 읽습니다(D160, D70 개정): `usr/lib/node_modules`,
+  `usr/local/lib/node_modules`, `opt/app-root/src/node_modules` 아래의 설치된 `package.json`은 `npm`
+  패키지가 되고(중첩 사본 포함, 각자 자기 경로에서; 버전 없는 것은 세어지는 skip), `usr/bin`,
+  `usr/local/bin`, `bin`, `sbin`, `usr/sbin`, `usr/libexec`, `usr/local/sbin` 바로 아래의 Go 빌드
+  정보를 가진 ELF 실행 파일은 `file:` 스캔이 도출하는 `Go` 패키지가 됩니다. 열 위치 전부에 레이어 패스
+  하나 추가; ELF가 아닌 실행 파일은 4바이트 뒤 거절; D112의 한도는 그대로. 먼저 차등 타깃 26개 전부에서
+  측정했습니다: 그 위치 밖에는 아무것도 없어 ubi8n18의 41건과 bci156의 47건 grype 전용 튜플이 이제
+  assay의 판정 대상입니다. Python, Java, 그 밖의 위치의 npm 트리나 Go 바이너리는 읽지 않고 공개됩니다.
+
 ### Changed
+- **JSON `schemaVersion` 18 — `inventoryScope.applicationPackages`로 분기하는 소비자에게 breaking**:
+  그 필드에 네 번째 값 `partial`이 생기고(이제 모든 이미지 스캔이 이 값을 보고하며 `not-read`는 더 이상
+  나오지 않음), `inventoryScope`에 `applicationScope[]`가 생깁니다 — ecosystem마다 `read`,
+  `none`(프로브했으나 없음), `not-read`와 프로브가 읽는 `roots`. D141의 stderr 노트와 SARIF
+  `assay/inventory-scope` 결과가 이제 무엇을 어디서 읽었고 무엇을 읽지 않았는지 말합니다. (D160)
+- `cmd/scandiff`가 `npm`과 `go-module`을 인벤토리화된 타입으로 다루고(어느 쪽의 grype 전용 튜플이든
+  floor가 판정, 어느 쪽에 대한 `maxGrypeOnlyApp` ceiling이든 거부), 그 타입이 지고 있던 D117 시드 셋을
+  `.github/scanner-diff-targets.json`에서 제거했습니다. (D160)
 - `docs/operating-envelope.md`(와 한국어 쌍): 스캔이 스스로 한정하는 것(D112의 크기, 40 링크 상한,
   `--timeout`의 도달 범위와 그것 없이는 데드라인이 없다는 것), go-containerregistry v0.21.7이
   한정하는 것(manifest 100 MiB, 토큰 본문 64 KiB, 3회 시도, IP 리터럴로의 리다이렉트 거부와 DNS

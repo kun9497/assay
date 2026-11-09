@@ -1904,6 +1904,20 @@ back bytes with their layer (`under.go:222`–`:223`, D99), so a probe of a fixe
 `usr/lib/node_modules`, where both npm trees above sit — needs no new primitive. What it cannot
 do is find a tree at a path nobody named, which is the whole-tree walk D70 asked for.
 
+**Revisited 2026-11-09 — the fixed-location probe shipped as D160.** New information: the
+2026-11-04 QA named this gap a blocker for the service (§8, S-1), and a probe of every layer of
+all 26 scanner-diff targets showed where it sits — every installed `package.json` under
+`usr/lib/node_modules` (ubi8n18's 236, npm's own bundled tree), every Go binary directly in a
+standard bin directory, nothing anywhere else, lockfiles 0, jars 4 with 0 grype-only tuples,
+dist-info 21 and all OS-owned. D160 reads the two shapes in one layer pass and discloses the
+rest per ecosystem. What this entry still holds open: Python and Java inside images (the
+dist-info files are RPM-owned, so reading them without file ownership would double-report OS
+packages), jars inside images, trees and binaries at unnamed paths — the whole-tree walk, with
+the D112 collision above — and `locations[].ownedBy`, deferred when the rpmdb and dpkg
+catalogers turned out to read no file lists. The service-side hybrid stays the way to cover
+what the probes do not. **Revisit when** a `python` or `java-archive` `maxGrypeOnlyApp`
+ceiling trips, or a user reports an in-image application CVE outside the probed locations.
+
 ---
 
 ### Safe handling of externally supplied targets
