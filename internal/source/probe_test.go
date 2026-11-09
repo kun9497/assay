@@ -162,3 +162,20 @@ func TestFilesProbed_RefusesTheRootAndNilHooks(t *testing.T) {
 		t.Error("a nil sniff was accepted")
 	}
 }
+
+// A10 holds for every root in the pass, not only the first: a lower layer's
+// file at usr/local/bin/x is shadowed when an upper layer makes x a directory,
+// exactly as it would be in a single-root collect of usr/local/bin.
+func TestFilesProbed_AncestorShadowingHoldsForEveryRoot(t *testing.T) {
+	img := imageOf(
+		modeLayer(t, "sha256:base", map[string]string{"usr/local/bin/x": elfBody(strings.Repeat("b", 64))}, map[string]int64{"usr/local/bin/x": 0o755}),
+		modeLayer(t, "sha256:top", map[string]string{"usr/local/bin/x/inner": "now a directory"}, nil),
+	)
+	got, _, err := img.FilesProbed(context.Background(), []string{"usr/bin", "usr/local/bin"}, probeMatch, isELFTest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["usr/local/bin/x"]; ok {
+		t.Error("usr/local/bin/x was returned: the upper layer made it a directory, so the lower file is not what the image ships (A10) -- the second root's ancestors were not shadowed")
+	}
+}
