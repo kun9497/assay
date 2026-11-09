@@ -8378,8 +8378,14 @@ the data it has. The figure is per family (alpine, debian, leap) and in total, e
 Wilson 95% interval: a perfect run over 35 labels supports "at least 0.90", not "1.0". Exit 0
 when every matcher label holds, 1 when one does not (a false positive, a false negative, a
 fixed-version mismatch, or a package the scan could not evaluate), 2 when a scan could not run
-or its output could not be read — D11's precedence. `-keep` writes each case's SBOM and scan
-output, `-offline` re-judges from them with no scan, `-out` writes a JSON report
+or its output could not be read — D11's precedence. A fixed-version mismatch counts against
+both rates (a wrong report, and the right verdict not produced), so a run that named every fix
+wrong cannot print 1.000 on the boundary the tool exists to measure; two findings for one CVE
+that disagree on the fix are a mismatch naming both, not whichever arrived first (D25). The scan
+runs with `--config none`, so a `.assay.yaml` in the working directory never turns a waiver
+into a verdict, and every case must carry the first case's database digest or the run is
+untrusted. `-keep` writes each case's SBOM, scan output and exit code, `-offline` re-judges from
+them with no scan (a kept exit 2 stays fatal), `-out` writes a JSON report
 (`schemaVersion` 1, with the database digest and tool version). Stdlib-only, `package main`
 under `cmd/`, not shipped by `make build`, `run(args, stdout, stderr, exec)` the testable seam
 — `cmd/scandiff`'s shape. It runs in the weekly `scanner-diff.yml` after the differential,

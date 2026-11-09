@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 )
@@ -160,6 +161,20 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 	for _, c := range cases {
 		var raw []byte
 		if *offlineDir != "" {
+			// A kept exit code of 2 is the fatal it was live; a capture from
+			// before .exit files were written has none and is read as before.
+			if b, err := os.ReadFile(filepath.Join(*offlineDir, c.name+".exit")); err == nil {
+				code, err := strconv.Atoi(strings.TrimSpace(string(b)))
+				if err != nil {
+					fatal[c.name] = fmt.Sprintf("offline: %s.exit: %v", c.name, err)
+					continue
+				}
+				if why := fatalExit(code); why != "" {
+					fatal[c.name] = "kept " + why
+					fmt.Fprintf(stderr, "error: case=%s %s\n", c.name, fatal[c.name])
+					continue
+				}
+			}
 			raw, err = os.ReadFile(filepath.Join(*offlineDir, c.name+".scan.json"))
 			if err != nil {
 				fatal[c.name] = fmt.Sprintf("offline: %v", err)
@@ -171,20 +186,30 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 				fmt.Fprintf(stderr, "error: write %s: %v\n", sbomPath, err)
 				return exitError
 			}
+			// --config none: a .assay.yaml in whatever directory this runs
+			// from would move a labelled finding into suppressed[], which is
+			// not read here, and a waiver would be judged as the matcher's
+			// verdict. The labels are the only thing allowed to say "clean".
 			var code int
-			raw, code, err = execScan(*assayBin, "scan", sbomPath, "--output", "json")
-			switch {
-			case err != nil:
+			raw, code, err = execScan(*assayBin, "scan", sbomPath, "--output", "json", "--config", scancmdIgnoreNone)
+			if err != nil {
 				fatal[c.name] = fmt.Sprintf("assay could not run: %v", err)
-			case code == exitError:
-				fatal[c.name] = "assay scan exited 2 (untrustworthy result)"
-			case code != exitOK && code != exitFindings:
-				fatal[c.name] = fmt.Sprintf("assay scan exited unexpected code %d", code)
+			} else if why := fatalExit(code); why != "" {
+				fatal[c.name] = why
 			}
-			if *keepDir != "" && len(raw) > 0 {
-				if err := os.WriteFile(filepath.Join(workDir, c.name+".scan.json"), raw, 0o644); err != nil {
-					fmt.Fprintf(stderr, "error: write scan output: %v\n", err)
+			if *keepDir != "" {
+				// The exit code goes beside the output: assay renders its JSON
+				// and THEN exits 2 on an untrustworthy result, so the document
+				// alone would read as trustworthy to -offline.
+				if err := os.WriteFile(filepath.Join(workDir, c.name+".exit"), []byte(fmt.Sprintf("%d\n", code)), 0o644); err != nil {
+					fmt.Fprintf(stderr, "error: write scan exit: %v\n", err)
 					return exitError
+				}
+				if len(raw) > 0 {
+					if err := os.WriteFile(filepath.Join(workDir, c.name+".scan.json"), raw, 0o644); err != nil {
+						fmt.Fprintf(stderr, "error: write scan output: %v\n", err)
+						return exitError
+					}
 				}
 			}
 			if fatal[c.name] != "" {
@@ -195,6 +220,14 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 		var doc scanDoc
 		if err := json.Unmarshal(raw, &doc); err != nil {
 			fatal[c.name] = fmt.Sprintf("malformed assay JSON: %v", err)
+			fmt.Fprintf(stderr, "error: case=%s %s\n", c.name, fatal[c.name])
+			continue
+		}
+		// Every case must have been judged against one database: a `db
+		// update` landing between two scans would attribute a label flip to
+		// the matcher. The first document's digest is the run's.
+		if d := doc.Provenance.Database.Artifact.Digest; digest != "" && d != digest {
+			fatal[c.name] = fmt.Sprintf("database digest %s differs from the run's first, %s", d, digest)
 			fmt.Fprintf(stderr, "error: case=%s %s\n", c.name, fatal[c.name])
 			continue
 		}
@@ -239,6 +272,22 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 		return exitFindings
 	}
 	return exitOK
+}
+
+// scancmdIgnoreNone is scancmd.IgnoreNone, spelled here so this package
+// stays stdlib-only and free of the scanner's own imports.
+const scancmdIgnoreNone = "none"
+
+// fatalExit says why an assay exit code makes the case's result untrustworthy,
+// or "" for the two codes that carry a verdict (0 clean, 1 findings).
+func fatalExit(code int) string {
+	switch {
+	case code == exitError:
+		return "assay scan exited 2 (untrustworthy result)"
+	case code != exitOK && code != exitFindings:
+		return fmt.Sprintf("assay scan exited unexpected code %d", code)
+	}
+	return ""
 }
 
 // scanDoc is the slice of assay's JSON report this tool reads. A local type,
@@ -320,7 +369,11 @@ func sbomFor(l Label) []byte {
 // an alias or an upstream id equals it (D3: OSV puts the CVE in upstream),
 // and it is this label's package when the package name or the matched name
 // is the label's (a binary matched through its source keeps the installed
-// name in package.name).
+// name in package.name). Every such finding is read, not the first: two
+// records for one CVE that share no id (a native Leap record beside a D108
+// cross-mapped one) arrive as two findings, and which came first is not a
+// verdict (D25). Their distinct fixed versions are joined, so a label that
+// demands one is a MISMATCH naming both, and the detail says so.
 func judge(l Label, doc *scanDoc, fatal string) result {
 	r := result{Label: l}
 	if fatal != "" {
@@ -336,6 +389,7 @@ func judge(l Label, doc *scanDoc, fatal string) result {
 		return r
 	}
 	var found bool
+	var fixes, states, frozen []string
 	for _, f := range doc.Findings {
 		if f.Package.Name != l.Name && f.MatchedName != l.Name {
 			continue
@@ -344,9 +398,11 @@ func judge(l Label, doc *scanDoc, fatal string) result {
 			continue
 		}
 		found = true
-		r.GotFixed, r.GotFixState, r.GotFrozen = f.Evidence.Fixed, f.FixState, f.FrozenSince
-		break
+		fixes = appendDistinct(fixes, f.Evidence.Fixed)
+		states = appendDistinct(states, f.FixState)
+		frozen = appendDistinct(frozen, f.FrozenSince)
 	}
+	r.GotFixed, r.GotFixState, r.GotFrozen = strings.Join(fixes, " | "), strings.Join(states, " | "), strings.Join(frozen, " | ")
 	switch {
 	case l.Expect.State == "clean" && !found:
 		r.Outcome = outTN
@@ -356,10 +412,24 @@ func judge(l Label, doc *scanDoc, fatal string) result {
 		r.Outcome, r.Detail = outFN, "not reported, label says affected"
 	case l.Expect.Fixed != "" && r.GotFixed != l.Expect.Fixed:
 		r.Outcome, r.Detail = outMismatch, fmt.Sprintf("fixed=%q, label says %q", r.GotFixed, l.Expect.Fixed)
+		if len(fixes) > 1 {
+			r.Detail += fmt.Sprintf(" (the findings for this CVE name %d different fixes)", len(fixes))
+		}
 	default:
 		r.Outcome = outTP
 	}
 	return r
+}
+
+// appendDistinct keeps the first occurrence of each value, in arrival order,
+// so a joined field reads the way the report listed it.
+func appendDistinct(xs []string, x string) []string {
+	for _, y := range xs {
+		if y == x {
+			return xs
+		}
+	}
+	return append(xs, x)
 }
 
 func namesCVE(id string, aliases, upstream []string, cve string) bool {
@@ -397,9 +467,13 @@ func metricsByFamily(rs []result) []familyMetrics {
 }
 
 // metricsOf folds outcomes into the confusion matrix. Precision is
-// TP/(TP+FP), recall TP/(TP+FN); a MISMATCH is in neither numerator -- it is
-// a wrong answer -- and is reported as its own count, as are UNEVALUATED
-// and ERROR, so the two rates never hide a label that got no verdict.
+// TP/(TP+FP+MISMATCH), recall TP/(TP+FN+MISMATCH): a MISMATCH is a finding
+// that was reported (so it counts against precision, as a wrong report) for
+// a label that was affected (so it counts against recall, as the right
+// verdict not produced), and in neither numerator -- a run that named every
+// fix wrong must not print 1.000 on the boundary this tool exists to
+// measure. UNEVALUATED and ERROR are reported as their own counts, outside
+// both rates, so a label that got no verdict is never hidden in one.
 func metricsOf(family string, rs []result) familyMetrics {
 	m := familyMetrics{Family: family, Labels: len(rs)}
 	for _, r := range rs {
@@ -420,13 +494,13 @@ func metricsOf(family string, rs []result) familyMetrics {
 			m.Errors++
 		}
 	}
-	if m.TP+m.FP > 0 {
-		m.Precision = float64(m.TP) / float64(m.TP+m.FP)
-		m.PrecisionLow95, m.PrecisionHigh95 = wilson(m.TP, m.TP+m.FP)
+	if n := m.TP + m.FP + m.Mismatch; n > 0 {
+		m.Precision = float64(m.TP) / float64(n)
+		m.PrecisionLow95, m.PrecisionHigh95 = wilson(m.TP, n)
 	}
-	if m.TP+m.FN > 0 {
-		m.Recall = float64(m.TP) / float64(m.TP+m.FN)
-		m.RecallLow95, m.RecallHigh95 = wilson(m.TP, m.TP+m.FN)
+	if n := m.TP + m.FN + m.Mismatch; n > 0 {
+		m.Recall = float64(m.TP) / float64(n)
+		m.RecallLow95, m.RecallHigh95 = wilson(m.TP, n)
 	}
 	return m
 }
@@ -440,7 +514,7 @@ func printTable(w io.Writer, results, dataClass []result, families []familyMetri
 	fmt.Fprintln(tw, "FAMILY\tLABELS\tTP\tTN\tFP\tFN\tMISMATCH\tUNEVAL\tERROR\tPRECISION (95% CI)\tRECALL (95% CI)")
 	for _, m := range append(families, total) {
 		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\t%s\n", m.Family, m.Labels, m.TP, m.TN, m.FP, m.FN, m.Mismatch, m.Unevaluated, m.Errors,
-			rate(m.TP+m.FP, m.Precision, m.PrecisionLow95, m.PrecisionHigh95), rate(m.TP+m.FN, m.Recall, m.RecallLow95, m.RecallHigh95))
+			rate(m.TP+m.FP+m.Mismatch, m.Precision, m.PrecisionLow95, m.PrecisionHigh95), rate(m.TP+m.FN+m.Mismatch, m.Recall, m.RecallLow95, m.RecallHigh95))
 	}
 	tw.Flush()
 

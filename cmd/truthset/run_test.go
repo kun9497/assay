@@ -36,7 +36,9 @@ func fakeAssay(t *testing.T, scans map[string]fakeScan) (execFunc, *[]string) {
 	t.Helper()
 	var sboms []string
 	return func(bin string, args ...string) ([]byte, int, error) {
-		if bin != "fake-assay" || len(args) != 4 || args[0] != "scan" || args[2] != "--output" || args[3] != "json" {
+		// --config none is part of the contract: a .assay.yaml in the
+		// working directory must never reach the judged scan.
+		if bin != "fake-assay" || len(args) != 6 || args[0] != "scan" || args[2] != "--output" || args[3] != "json" || args[4] != "--config" || args[5] != "none" {
 			t.Fatalf("unexpected exec: %s %v", bin, args)
 		}
 		raw, err := os.ReadFile(args[1])
@@ -198,7 +200,8 @@ func TestRun_FalseNegativeAndMismatch_Exit1(t *testing.T) {
 		}
 	}
 	// TP 1 (the no-fix label), FN 1, MISMATCH 1: recall 1/2, the mismatch in neither cell.
-	if !strings.Contains(out.String(), "alpine  4       1   1   0   1   1         0       0      1.000 (0.207-1.000)  0.500 (0.095-0.905)") {
+	// The mismatch is in both denominators: precision 1/2, recall 1/3.
+	if !strings.Contains(out.String(), "alpine  4       1   1   0   1   1         0       0      0.500 (0.095-0.905)  0.333 (0.061-0.792)") {
 		t.Errorf("table row does not carry TP 1, FN 1, MISMATCH 1:\n%s", out.String())
 	}
 }
@@ -266,7 +269,7 @@ func TestRun_MalformedJSON_ExitError(t *testing.T) {
 // A package the scan could not evaluate is neither clean nor affected.
 func TestRun_UnevaluatedPackageIsNeitherTNNorFN(t *testing.T) {
 	scans := heldScans()
-	scans[busyboxFixedPURL] = fakeScan{raw: `{"schemaVersion":18,"summary":{"components":1,"evaluated":0},"findings":[]}`}
+	scans[busyboxFixedPURL] = fakeScan{raw: `{"schemaVersion":18,"summary":{"components":1,"evaluated":0},"findings":[],"provenance":{"database":{"artifact":{"digest":"sha256:feed"}}}}`}
 	exec, _ := fakeAssay(t, scans)
 	var out, errOut bytes.Buffer
 	if code := run([]string{"-labels", writeLabels(t, heldLabels()), "-assay", "fake-assay"}, &out, &errOut, exec); code != exitFindings {
@@ -288,7 +291,7 @@ func TestRun_KeepThenOfflineAndReport(t *testing.T) {
 	if code := run([]string{"-labels", labelsPath, "-assay", "fake-assay", "-keep", keep, "-out", report}, &out, &errOut, exec); code != exitOK {
 		t.Fatalf("exit = %d\n%s", code, errOut.String())
 	}
-	for _, f := range []string{"alpine-busybox-below.cdx.json", "alpine-busybox-below.scan.json", "alpine-busybox-fixed.cdx.json", "alpine-busybox-fixed.scan.json"} {
+	for _, f := range []string{"alpine-busybox-below.cdx.json", "alpine-busybox-below.scan.json", "alpine-busybox-below.exit", "alpine-busybox-fixed.cdx.json", "alpine-busybox-fixed.scan.json", "alpine-busybox-fixed.exit"} {
 		if _, err := os.Stat(filepath.Join(keep, f)); err != nil {
 			t.Errorf("-keep did not write %s: %v", f, err)
 		}
@@ -319,7 +322,8 @@ func TestRun_KeepThenOfflineAndReport(t *testing.T) {
 		t.Errorf("recall lower bound = %.3f, want Wilson's 0.439 for 3 of 3", rep.Total.RecallLow95)
 	}
 
-	// Offline: the same verdicts from the kept outputs, no exec.
+	// Offline: the same table, byte for byte, from the kept outputs, no exec.
+	live := out.String()
 	out.Reset()
 	errOut.Reset()
 	noExec := func(bin string, args ...string) ([]byte, int, error) {
@@ -329,8 +333,92 @@ func TestRun_KeepThenOfflineAndReport(t *testing.T) {
 	if code := run([]string{"-labels", labelsPath, "-offline", keep}, &out, &errOut, noExec); code != exitOK {
 		t.Fatalf("offline exit = %d\n%s\n%s", code, out.String(), errOut.String())
 	}
-	if !strings.Contains(out.String(), "alpine  4       3   1   0   0") {
-		t.Errorf("offline table differs:\n%s", out.String())
+	if out.String() != live {
+		t.Errorf("offline table differs from the live one:\n%s\n--- live:\n%s", out.String(), live)
+	}
+}
+
+// A kept scan that exited 2 is still a fatal offline: assay renders its JSON
+// and then exits 2, so the document alone would read as trustworthy.
+func TestRun_OfflineKeepsAFatalFatal(t *testing.T) {
+	scans := heldScans()
+	scans[busyboxFixedPURL] = fakeScan{exit: 2, raw: `{"schemaVersion":18,"summary":{"components":1,"evaluated":1},"findings":[]}`}
+	exec, _ := fakeAssay(t, scans)
+	keep := filepath.Join(t.TempDir(), "keep")
+	labelsPath := writeLabels(t, heldLabels())
+	var out, errOut bytes.Buffer
+	if code := run([]string{"-labels", labelsPath, "-assay", "fake-assay", "-keep", keep}, &out, &errOut, exec); code != exitError {
+		t.Fatalf("live exit = %d, want 2", code)
+	}
+	out.Reset()
+	errOut.Reset()
+	noExec := func(bin string, args ...string) ([]byte, int, error) {
+		t.Fatalf("offline run executed %s %v", bin, args)
+		return nil, 0, nil
+	}
+	if code := run([]string{"-labels", labelsPath, "-offline", keep}, &out, &errOut, noExec); code != exitError {
+		t.Fatalf("offline exit = %d, want 2: the kept exit code was 2\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "ERROR       alpine-busybox-fixed/CVE-2024-58251 -- kept assay scan exited 2 (untrustworthy result)") {
+		t.Errorf("stdout:\n%s", out.String())
+	}
+}
+
+// Two findings for one CVE that disagree on the fix are not resolved by
+// arrival order (D25): the row is a MISMATCH naming both.
+func TestRun_TwoFindingsForOneCVEDisagree_Mismatch(t *testing.T) {
+	scans := heldScans()
+	// Three findings, two distinct fixes: the third repeats the second's, and
+	// the joined field must not repeat it.
+	scans[busyboxPURL] = fakeScan{findings: append(scans[busyboxPURL].findings,
+		fakeFinding{name: "busybox", id: "OTHER-2024-58251", aliases: []string{"CVE-2024-58251"}, fixed: "1.36.1-r23", fixState: "fixed"},
+		fakeFinding{name: "busybox", id: "THIRD-2024-58251", aliases: []string{"CVE-2024-58251"}, fixed: "1.36.1-r23", fixState: "fixed"})}
+	exec, _ := fakeAssay(t, scans)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"-labels", writeLabels(t, heldLabels()), "-assay", "fake-assay"}, &out, &errOut, exec); code != exitFindings {
+		t.Fatalf("exit = %d, want 1\n%s", code, out.String())
+	}
+	want := `MISMATCH    alpine-busybox-below/CVE-2024-58251 -- fixed="1.36.1-r21 | 1.36.1-r23", label says "1.36.1-r21" (the findings for this CVE name 2 different fixes)`
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("stdout lacks %q:\n%s", want, out.String())
+	}
+}
+
+// Every case must be judged against one database.
+func TestRun_DatabaseDigestChangesMidRun_ExitError(t *testing.T) {
+	scans := heldScans()
+	scans[busyboxFixedPURL] = fakeScan{raw: `{"schemaVersion":18,"summary":{"components":1,"evaluated":1},"findings":[],"provenance":{"database":{"artifact":{"digest":"sha256:other"}}}}`}
+	exec, _ := fakeAssay(t, scans)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"-labels", writeLabels(t, heldLabels()), "-assay", "fake-assay"}, &out, &errOut, exec); code != exitError {
+		t.Fatalf("exit = %d, want 2\n%s", code, out.String())
+	}
+	if !strings.Contains(errOut.String(), "database digest sha256:other differs from the run's first, sha256:feed") {
+		t.Errorf("stderr:\n%s", errOut.String())
+	}
+}
+
+// The purl is read as a purl: percent-decoded, name and version exactly.
+func TestLoadLabels_PURLNameAndVersion(t *testing.T) {
+	enc := label("debian-libxml2-below", "debian", "pkg:deb/debian/libxml2@2.9.10%2Bdfsg-6.7%2Bdeb11u4?arch=amd64&distro=debian-11", "libxml2", "2.9.10+dfsg-6.7+deb11u4", "CVE-2024-25062", "affected", "2.9.10+dfsg-6.7+deb11u5")
+	if _, err := loadLabels(writeLabels(t, []Label{enc})); err != nil {
+		t.Errorf("a percent-encoded version that decodes to the label's did not load: %v", err)
+	}
+	epoch := label("debian-bind9-below", "debian", "pkg:deb/debian/bind9@1%3A9.16.50-1%2Bdeb11u2?arch=amd64&distro=debian-11", "bind9", "1:9.16.50-1+deb11u2", "CVE-2024-1737", "affected", "1:9.16.50-1+deb11u3")
+	if _, err := loadLabels(writeLabels(t, []Label{epoch})); err != nil {
+		t.Errorf("an epoch version did not load: %v", err)
+	}
+	for _, tc := range []struct{ name, purl, version, pkg, want string }{
+		{"substring version", "pkg:apk/alpine/busybox@1.36.1-r20?arch=x86_64", "1.36.1-r2", "busybox", `carrying the label's version "1.36.1-r2" (it carries "1.36.1-r20")`},
+		{"name differs", "pkg:deb/debian/libssl1.1@1.1.1n-0+deb11u5?arch=amd64", "1.1.1n-0+deb11u5", "openssl", `purl names "libssl1.1", label names "openssl"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			l := label("c", "alpine", tc.purl, tc.pkg, tc.version, "CVE-2024-0001", "clean", "")
+			_, err := loadLabels(writeLabels(t, []Label{l}))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want it to say %q", err, tc.want)
+			}
+		})
 	}
 }
 
