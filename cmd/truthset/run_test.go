@@ -26,7 +26,7 @@ type fakeScan struct {
 
 type fakeFinding struct {
 	name, id, fixed, fixState string
-	aliases                   []string
+	aliases, upstream         []string
 }
 
 // fakeAssay answers `assay scan <sbom> --output json` by reading the SBOM
@@ -68,7 +68,7 @@ func fakeAssay(t *testing.T, scans map[string]fakeScan) (execFunc, *[]string) {
 		for _, f := range sc.findings {
 			fs = append(fs, map[string]any{
 				"package":  map[string]any{"name": f.name, "version": sbom.Components[0].Version},
-				"advisory": map[string]any{"id": f.id, "aliases": f.aliases},
+				"advisory": map[string]any{"id": f.id, "aliases": f.aliases, "upstream": f.upstream},
 				"evidence": map[string]any{"fixed": f.fixed},
 				"fixState": f.fixState,
 			})
@@ -107,23 +107,27 @@ func label(id, family, purl, name, version, cve, state, fixed string) Label {
 const busyboxPURL = "pkg:apk/alpine/busybox@1.36.1-r20?arch=x86_64&distro=alpine-3.19.9"
 const busyboxFixedPURL = "pkg:apk/alpine/busybox@1.36.1-r21?arch=x86_64&distro=alpine-3.19.9"
 
+// heldLabels is deliberately out of order (the no-fix label first) so a
+// run that stopped sorting would show in the report's row order.
 func heldLabels() []Label {
 	return []Label{
+		// Affected with no fixed version demanded: held by presence alone,
+		// whatever fix the finding names.
+		label("alpine-busybox-below", "alpine", busyboxPURL, "busybox", "1.36.1-r20", "CVE-2025-60876", "affected", ""),
 		label("alpine-busybox-below", "alpine", busyboxPURL, "busybox", "1.36.1-r20", "CVE-2024-58251", "affected", "1.36.1-r21"),
 		label("alpine-busybox-below", "alpine", busyboxPURL, "busybox", "1.36.1-r20", "CVE-2025-46394", "affected", "1.36.1-r21"),
 		label("alpine-busybox-fixed", "alpine", busyboxFixedPURL, "busybox", "1.36.1-r21", "CVE-2024-58251", "clean", ""),
-		// Affected with no fixed version demanded: held by presence alone,
-		// whatever fix state the finding carries.
-		label("alpine-busybox-below", "alpine", busyboxPURL, "busybox", "1.36.1-r20", "CVE-2025-60876", "affected", ""),
 	}
 }
 
+// The third finding names its CVE through `upstream` alone (D3), with a
+// record id that shares no substring with it.
 func heldScans() map[string]fakeScan {
 	return map[string]fakeScan{
 		busyboxPURL: {findings: []fakeFinding{
 			{name: "busybox", id: "ALPINE-CVE-2024-58251", aliases: []string{"CVE-2024-58251"}, fixed: "1.36.1-r21", fixState: "fixed"},
 			{name: "busybox", id: "ALPINE-CVE-2025-46394", aliases: []string{"CVE-2025-46394"}, fixed: "1.36.1-r21", fixState: "fixed"},
-			{name: "busybox", id: "ALPINE-CVE-2025-60876", aliases: []string{"CVE-2025-60876"}, fixed: "", fixState: "unknown"},
+			{name: "busybox", id: "ALPINE-2025-0003", upstream: []string{"CVE-2025-60876"}, fixed: "1.36.1-r21", fixState: "fixed"},
 		}},
 		busyboxFixedPURL: {evaluated: 1},
 	}
@@ -172,10 +176,12 @@ func TestRun_FalsePositive_Exit1AndNamed(t *testing.T) {
 func TestRun_FalseNegativeAndMismatch_Exit1(t *testing.T) {
 	scans := heldScans()
 	scans[busyboxPURL] = fakeScan{findings: []fakeFinding{
-		// CVE-2024-58251 missing entirely; CVE-2025-46394 with the wrong fix;
-		// CVE-2025-60876 (no fix demanded) still held.
+		// CVE-2024-58251 reported only against ANOTHER package (a decoy the
+		// name filter must ignore, so the label stays FN); CVE-2025-46394
+		// with the wrong fix; CVE-2025-60876 (no fix demanded) still held.
+		{name: "busybox-extras", id: "ALPINE-CVE-2024-58251", aliases: []string{"CVE-2024-58251"}, fixed: "1.36.1-r21", fixState: "fixed"},
 		{name: "busybox", id: "ALPINE-CVE-2025-46394", aliases: []string{"CVE-2025-46394"}, fixed: "1.36.1-r22", fixState: "fixed"},
-		{name: "busybox", id: "ALPINE-CVE-2025-60876", aliases: []string{"CVE-2025-60876"}, fixed: "", fixState: "unknown"},
+		{name: "busybox", id: "ALPINE-2025-0003", upstream: []string{"CVE-2025-60876"}, fixed: "", fixState: "unknown"},
 	}}
 	exec, _ := fakeAssay(t, scans)
 	var out, errOut bytes.Buffer
@@ -204,17 +210,23 @@ func TestRun_DataClassLabelIsReportedNotJudged(t *testing.T) {
 	gap := label("debian-libarchive13-after-freeze", "debian", "pkg:deb/debian/libarchive13@3.4.3-2+deb11u5?arch=amd64&distro=debian-11&upstream=libarchive",
 		"libarchive13", "3.4.3-2+deb11u5", "CVE-2026-14164", "clean", "")
 	gap.Class, gap.Note = "data", "Debian:11 frozen before DLA-4762-1"
-	labels = append(labels, gap)
+	// A second data-class row that HOLDS: the gap it records may have
+	// closed, and the table must say so rather than stay silent.
+	closed := label("debian-libarchive13-after-freeze-below", "debian", "pkg:deb/debian/libarchive13@3.4.3-2+deb11u4?arch=amd64&distro=debian-11&upstream=libarchive",
+		"libarchive13", "3.4.3-2+deb11u4", "CVE-2026-14164", "affected", "")
+	closed.Class, closed.Note = "data", "Debian:11 frozen before DLA-4762-1"
+	labels = append(labels, gap, closed)
 	scans := heldScans()
 	scans[gap.PURL] = fakeScan{findings: []fakeFinding{{name: "libarchive13", id: "DEBIAN-CVE-2026-14164", aliases: []string{"CVE-2026-14164"}, fixState: "unknown"}}}
+	scans[closed.PURL] = fakeScan{findings: []fakeFinding{{name: "libarchive13", id: "DEBIAN-CVE-2026-14164", aliases: []string{"CVE-2026-14164"}, fixState: "unknown"}}}
 	exec, _ := fakeAssay(t, scans)
 	var out, errOut bytes.Buffer
 	code := run([]string{"-labels", writeLabels(t, labels), "-assay", "fake-assay"}, &out, &errOut, exec)
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0: a data-class failure is not a matcher failure\n%s", code, out.String())
 	}
-	if !strings.Contains(out.String(), "data-class labels (known data gaps, not in the metrics):\n  FP          debian-libarchive13-after-freeze/CVE-2026-14164") {
-		t.Errorf("the data-class row is not listed under its own heading:\n%s", out.String())
+	if !strings.Contains(out.String(), "data-class labels (known data gaps, not in the metrics):\n  FP          debian-libarchive13-after-freeze/CVE-2026-14164 -- reported (fixed=\"\", fixState=unknown), label says clean\n  TP          debian-libarchive13-after-freeze-below/CVE-2026-14164 -- holds -- the data gap this label records may have closed; reclassify it\n") {
+		t.Errorf("the data-class rows are not listed under their own heading, the holding one flagged:\n%s", out.String())
 	}
 	if strings.Contains(out.String(), "debian  ") {
 		t.Errorf("the data-class label leaked into the family metrics:\n%s", out.String())
@@ -233,7 +245,7 @@ func TestRun_ScanExit2_ExitErrorAndRowERROR(t *testing.T) {
 	if !strings.Contains(errOut.String(), "error: case=alpine-busybox-fixed assay scan exited 2 (untrustworthy result)") {
 		t.Errorf("stderr does not name the case and the exit:\n%s", errOut.String())
 	}
-	if !strings.Contains(out.String(), "ERROR       alpine-busybox-fixed/CVE-2024-58251") {
+	if !strings.Contains(out.String(), "ERROR       alpine-busybox-fixed/CVE-2024-58251 -- assay scan exited 2 (untrustworthy result)") {
 		t.Errorf("the label of the failed scan is not listed as ERROR:\n%s", out.String())
 	}
 }
@@ -299,6 +311,10 @@ func TestRun_KeepThenOfflineAndReport(t *testing.T) {
 	if rep.SchemaVersion != reportSchemaVersion || rep.Database != "sha256:feed" || rep.Tool != "v0.0-test" || len(rep.Families) != 1 || rep.Total.TP != 3 || rep.Total.TN != 1 || len(rep.Results) != 4 {
 		t.Errorf("report = %+v", rep)
 	}
+	// Rows are in (case, CVE) order whatever order the file had.
+	if rep.Results[0].Label.CVE != "CVE-2024-58251" || rep.Results[2].Label.CVE != "CVE-2025-60876" {
+		t.Errorf("results are not sorted by case then CVE: %s, %s, %s", rep.Results[0].Label.CVE, rep.Results[1].Label.CVE, rep.Results[2].Label.CVE)
+	}
 	if rep.Total.RecallLow95 < 0.438 || rep.Total.RecallLow95 > 0.44 {
 		t.Errorf("recall lower bound = %.3f, want Wilson's 0.439 for 3 of 3", rep.Total.RecallLow95)
 	}
@@ -318,16 +334,71 @@ func TestRun_KeepThenOfflineAndReport(t *testing.T) {
 	}
 }
 
+// Each refusal is checked with labels that would otherwise load and a fake
+// assay that would otherwise hold every label, so the refusal itself is what
+// returns 2, and its message says which one.
 func TestRun_BadArguments_ExitError(t *testing.T) {
-	for _, args := range [][]string{
-		{"-labels", filepath.Join(t.TempDir(), "missing.json")},
-		{"-keep", "a", "-offline", "b"},
-		{"extra-positional"},
+	good := writeLabels(t, heldLabels())
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"-labels", filepath.Join(t.TempDir(), "missing.json"), "-assay", "fake-assay"}, "missing.json"},
+		{[]string{"-labels", good, "-assay", "fake-assay", "-keep", t.TempDir(), "-offline", t.TempDir()}, "-keep and -offline are exclusive"},
+		{[]string{"-labels", good, "-assay", "fake-assay", "extra-positional"}, `unexpected argument "extra-positional"`},
 	} {
+		exec, _ := fakeAssay(t, heldScans())
 		var out, errOut bytes.Buffer
-		if code := run(args, &out, &errOut, func(string, ...string) ([]byte, int, error) { return nil, 0, nil }); code != exitError {
-			t.Errorf("run(%v) = %d, want 2", args, code)
+		if code := run(tc.args, &out, &errOut, exec); code != exitError {
+			t.Errorf("run(%v) = %d, want 2", tc.args, code)
 		}
+		if !strings.Contains(errOut.String(), tc.want) {
+			t.Errorf("run(%v) stderr lacks %q:\n%s", tc.args, tc.want, errOut.String())
+		}
+	}
+}
+
+// A MISMATCH alone -- every finding present, one with the wrong fix -- is a
+// failed run: the fix version is the point of the label.
+func TestRun_MismatchAlone_Exit1(t *testing.T) {
+	scans := heldScans()
+	scans[busyboxPURL].findings[0].fixed = "1.36.1-r22"
+	exec, _ := fakeAssay(t, scans)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"-labels", writeLabels(t, heldLabels()), "-assay", "fake-assay"}, &out, &errOut, exec); code != exitFindings {
+		t.Fatalf("exit = %d, want 1\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "alpine  4       2   1   0   0   1         0       0") {
+		t.Errorf("table:\n%s", out.String())
+	}
+}
+
+// Nothing reported and nothing expected: both rates are n/a, and the report
+// still writes (no NaN reaches the JSON encoder).
+func TestRun_NoPositives_RatesAreNA(t *testing.T) {
+	labels := []Label{label("alpine-busybox-fixed", "alpine", busyboxFixedPURL, "busybox", "1.36.1-r21", "CVE-2024-58251", "clean", "")}
+	exec, _ := fakeAssay(t, map[string]fakeScan{busyboxFixedPURL: {evaluated: 1}})
+	report := filepath.Join(t.TempDir(), "report.json")
+	var out, errOut bytes.Buffer
+	if code := run([]string{"-labels", writeLabels(t, labels), "-assay", "fake-assay", "-out", report}, &out, &errOut, exec); code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s\n%s", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "alpine  1       0   1   0   0   0         0       0      n/a                  n/a") {
+		t.Errorf("table:\n%s", out.String())
+	}
+	if _, err := os.Stat(report); err != nil {
+		t.Errorf("report not written: %v", err)
+	}
+}
+
+func TestLoadLabels_RefusesAnotherSchemaVersion(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "labels.json")
+	b, _ := json.Marshal(labelsFile{SchemaVersion: labelsSchemaVersion + 1, Labels: heldLabels()})
+	if err := os.WriteFile(p, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadLabels(p); err == nil || !strings.Contains(err.Error(), "this tool reads 1") {
+		t.Errorf("err = %v", err)
 	}
 }
 

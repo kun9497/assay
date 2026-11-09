@@ -92,8 +92,8 @@ type familyMetrics struct {
 }
 
 // report is the JSON -out document: a tool artifact like scandiff's
-// capture, versioned on its own so a reader can tell its shape, not a
-// contract docs/compatibility.md lists.
+// capture, versioned on its own so a reader can tell its shape; the
+// `truthset report` row of docs/compatibility.md follows this constant.
 type report struct {
 	SchemaVersion int             `json:"schemaVersion"`
 	Labels        string          `json:"labelsFile"`
