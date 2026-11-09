@@ -428,6 +428,9 @@ func judge(l Label, doc *scanDoc, fatal string) result {
 	// the expectation is known to hold at cannot confirm or refute it. Only
 	// a dated key is compared; an undated one (a database from before
 	// schema 17) is judged as before.
+	// `== 1` is intent, not behaviour: run refuses a document with more
+	// than one coverage record before it reaches judge, so `>= 1` reads
+	// the same here (an equivalent mutation, verified 2026-11-09).
 	if l.ValidFrom != "" && len(doc.Coverage) == 1 {
 		c := doc.Coverage[0]
 		// A D110-frozen key's data is as of its freeze, whatever the
