@@ -8434,10 +8434,18 @@ is: rpm's `BASENAMES`/`DIRNAMES`/`DIRINDEXES` header tags (file *i* is `DIRNAMES
 + BASENAMES[i]`) by all three backends into `Result.Files`; apk's inline `F:`/`R:` lines from
 the `installed` database already in hand; dpkg's `var/lib/dpkg/info/<pkg>[:<arch>].list` and
 pacman's `files` beside each `desc` as two more roots of the probes' own layer pass — the pass
-count stays six. Ownership is exact-file: the package that owns `usr/lib/node_modules` says
-nothing about the files under it, so an image author's globally installed module under the
-RPM-owned root stays unowned, and a `.list` for a package the inventory does not hold (removed,
-not purged) owns nothing. JSON only — `findings[].package.locations[].ownedBy`, schema 19,
+count stays six. Two rules make a match an ownership claim rather than a path coincidence.
+Exact file: the package that owns `usr/lib/node_modules` says nothing about the files under
+it, so an image author's globally installed module under the RPM-owned root stays unowned, and
+a `.list` for a package the inventory does not hold (removed, not purged) owns nothing. Layer
+order: a package manager writes a file and its database (or list) in the same layer, so a file
+in a LATER layer than the record that names it — `npm install -g npm@latest` over the npm RPM's
+tree — was put there by something else and is unowned, whatever its path says (the review's
+first finding; the location's `layerDigest` and the record's layer are both known). A deb's list
+on a merged-`/usr` system may say `/bin/foo` for the regular file the probe found at
+`usr/bin/foo`; both spellings are tried. Ownership is additive information, so nothing about it
+fails a scan: an unreadable `.list` (a line past the scanner's bound) owns nothing and the scan
+goes on, where the first draft exited 2. JSON only — `findings[].package.locations[].ownedBy`, schema 19,
 additive; the table, `--explain` and SARIF print no locations today and gain none. Nothing is
 suppressed: the npm finding and the owning RPM's finding both stay, now visibly about one file.
 The design record `2026-11-09-image-app-probe-design.md` proposed one string
@@ -8469,7 +8477,13 @@ is not does not) through `catalogFromImage`. The readers' own tables: a header w
 disagree (missing, count mismatch, index past `DIRNAMES`, negative) owns nothing; a truncated
 store is unreadable as a whole; apk's `R:` before any `F:` and a record with no `P:` own nothing;
 dpkg's `/.` is not a file; pacman's directories are not files; a dpkg list whose `:arch` no
-package carries owns nothing; a location spelled with a leading slash still matches.
+package carries owns nothing; a location spelled with a leading slash still matches. From the
+review (eight findings, eight fixed): a package.json the author's later layer replaced over
+the deb's is unowned while its sibling stays npm's; a deb list's `/bin/tool` owns the probe's
+`usr/bin/tool`; an unreadable list owns nothing and the scan still exits 0; an apk record
+whose `R:` precedes its `F:` cannot inherit the previous record's directory. Mutations after the
+review's changes: 32 judged, 30 caught, 2 documented equivalents (an unreadable list's `return`
+against nil files; `strArray`'s stated bound against the loop's own failure); 26 of 26 before them.
 
 **Gives up.** Ownership reaches the JSON only. A hardlinked or symlinked copy of an owned file is
 not the owned path and is unowned. dpkg's lists are read for every Debian-family image whether

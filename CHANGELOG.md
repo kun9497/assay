@@ -16,8 +16,10 @@ All notable changes to this project are documented here. The format follows
   npm tree under `usr/lib/node_modules` that ubi8/nodejs-18's `npm` and `nodejs-nodemon` RPMs
   bundle, and the Go binary an Arch package ships, say so, and a reader can tell the distro's
   copy — whose advisory is the OS package's — from one the image author installed. Exact-file
-  ownership only; a location no OS package lists has no `ownedBy`. **JSON `schemaVersion` 19**
-  (additive).
+  ownership, and layer order: a file in a later layer than the record that names it (an
+  `npm install -g` over the RPM's tree) is unowned. A merged-`/usr` deb list's `/bin/foo` owns
+  the probe's `usr/bin/foo`. A location no OS package lists has no `ownedBy`; an unreadable
+  list owns nothing and never fails the scan. **JSON `schemaVersion` 19** (additive).
 
 ## [0.16.0] - 2026-11-09
 

@@ -173,6 +173,9 @@ func (o *fileOwners) addList(name string, f source.FileFromLayer, osPkgs []pkgme
 	default:
 		return
 	}
+	// Both readers return nil files with an error, so falling through would
+	// record nothing either; the return states the intent (an equivalent
+	// mutation, verified 2026-11-09).
 	if err != nil {
 		return
 	}

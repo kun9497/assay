@@ -73,8 +73,9 @@
 - 스키마 19(추가형): `findings[].package.locations[].ownedBy` — 그 위치의 경로를 파일 목록에 올린 OS
   패키지의 `{name, version}`(D162). 이미지의 프로브된 애플리케이션 패키지(D160)에서 배포판 자체 패키지가
   그 파일을 설치했을 때 붙습니다: rpm의 BASENAMES/DIRNAMES, apk의 `F:`/`R:` 줄, dpkg의 `info/*.list`,
-  pacman의 `files`. 파일 단위의 정확한 소유만 보며, 어느 OS 패키지도 그 파일을 올리지 않았거나 이미지
-  밖이면 없습니다.
+  pacman의 `files`. 파일 단위의 정확한 소유이고 파일의 레이어가 레코드의 레이어보다 나중이 아닐 때만
+  붙습니다(이미지 작성자가 패키지의 파일 위에 덮어쓴 것은 소유자 없음); 어느 OS 패키지도 그 파일을
+  올리지 않았거나 이미지 밖이면 없습니다.
 
 ## provenance sidecar, status.json, `db status`
 

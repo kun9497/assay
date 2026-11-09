@@ -261,6 +261,34 @@ func TestCatalogFromImage_D162_MergedUsrListSpellingMatches(t *testing.T) {
 	assertOwners(t, target.Packages, map[string]*pkgmeta.Owner{"usr/bin/tool": {Name: "tool", Version: "1.0-1"}})
 }
 
+// The layer rule holds for the rpm source too: the database in the base
+// layer names /usr/bin/passwd, and a Go binary the author's later layer put
+// at that path is not passwd's file.
+func TestCatalogFromImage_D162_RPMOwnedPathReplacedLaterIsUnowned(t *testing.T) {
+	bin, err := os.ReadFile(buildLinuxBBoltBinary(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := os.ReadFile(bdbFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := &source.Image{Layers: []source.Layer{
+		layerWithModes(t, "sha256:rpm-base", []probeLayerEntry{
+			{name: osReleasePath, body: []byte(osReleaseRHEL8)},
+			{name: "var/lib/rpm/Packages", body: db},
+		}),
+		layerWithModes(t, "sha256:rpm-author", []probeLayerEntry{
+			{name: "usr/bin/passwd", body: bin, mode: 0o755},
+		}),
+	}}
+	target, _, _, err := catalogFromImage(context.Background(), "rpm-replaced", img)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertOwners(t, target.Packages, map[string]*pkgmeta.Owner{"usr/bin/passwd": nil})
+}
+
 func TestSpellings(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
 		{"/usr/bin/tool", "usr/bin/tool|bin/tool"},

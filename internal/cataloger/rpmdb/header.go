@@ -224,7 +224,10 @@ func (h header) strArray(tag uint32) ([]string, bool) {
 		return []string{}, true
 	}
 	// The same bound as str: a first element at or past the end of the
-	// store is not a string.
+	// store is not a string. Stated, not load-bearing -- an offset at the
+	// end leaves an empty slice whose IndexByte fails below, so `>` reads
+	// the same (an equivalent mutation, verified 2026-11-09); the bound is
+	// here so the guard is the guard, not the loop's accident.
 	if uint64(e.offset) >= uint64(len(h.data)) {
 		return nil, false
 	}

@@ -78,7 +78,9 @@ it relied on:
   OS package whose file list names the location's path (D162), present on an image's probed
   application packages (D160) when the distro's own package installed the file: rpm's
   BASENAMES/DIRNAMES, apk's `F:`/`R:` lines, dpkg's `info/*.list`, pacman's `files`.
-  Exact-file ownership only; absent when no OS package lists the file or outside an image.
+  Exact-file ownership, and only when the file's layer is not later than the record's (a file
+  the image author replaced over the package's is unowned); absent when no OS package lists
+  the file or outside an image.
 
 ## The provenance sidecar, status.json and `db status`
 
