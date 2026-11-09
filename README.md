@@ -109,11 +109,12 @@ code and the report's sha256, even when the scan ends in exit 2 before any repor
   Hummingbird, and CleanStart — plus Bitnami application layers, across three rpmdb backends
   (BerkeleyDB, SQLite, ndb).
 - **8 language ecosystems** — Go, npm, PyPI, crates.io, Maven, RubyGems, NuGet, Packagist,
-  from binaries, directories, and thirteen lockfile formats — pnpm and yarn berry included. Not
-  from inside a container image: an image scan inventories the OS packages and Bitnami layers
-  above, not the language packages installed in it (D70,
-  [deferred](docs/deferred-decisions.md)), and every image scan says so on stderr and in
-  SARIF (D141).
+  from binaries, directories, and thirteen lockfile formats — pnpm and yarn berry included.
+  Inside a container image, two fixed locations (D160): npm packages installed under the global
+  `node_modules` roots and Go binaries in the standard bin directories. Python, Java and
+  anything elsewhere in the image are not read (D70, [deferred](docs/deferred-decisions.md)),
+  and every image scan says exactly what it read and did not on stderr, in SARIF and in the
+  JSON's `inventoryScope` (D141).
 - **Releases the upstream stopped publishing stay, marked** — a key the upstream no longer
   serves is frozen (D110): its last advisories are kept, every finding on it carries
   `frozenSince`, and fixes published upstream since may be missing — the table, SARIF and

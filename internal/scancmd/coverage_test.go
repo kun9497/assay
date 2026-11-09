@@ -215,8 +215,8 @@ func TestRun_D111_FrozenKeyWithNoFindingIsDisclosedEverywhere(t *testing.T) {
 			t.Fatalf("Run = %d, want 0 (D111 discloses, it does not gate)\nstderr: %s", code, errOut)
 		}
 		doc, _ := decodeD111(t, out)
-		if doc.SchemaVersion != 17 {
-			t.Errorf("schemaVersion = %d, want 17", doc.SchemaVersion)
+		if doc.SchemaVersion != 18 {
+			t.Errorf("schemaVersion = %d, want 18", doc.SchemaVersion)
 		}
 		want := []d111Coverage{{
 			Ecosystem: "Alpine:v3.19", Packages: 1, Evaluated: 1, State: "frozen",
@@ -502,8 +502,8 @@ func TestRun_D111_InventoryScopeOnlyForImages(t *testing.T) {
 		}
 		doc, _ := decodeD111(t, out)
 		s := doc.InventoryScope
-		if s == nil || s.OSPackages != "read" || s.Bitnami != "none" || s.ApplicationPackages != "not-read" {
-			t.Errorf("inventoryScope = %+v, want read/none/not-read", s)
+		if s == nil || s.OSPackages != "read" || s.Bitnami != "none" || s.ApplicationPackages != "partial" {
+			t.Errorf("inventoryScope = %+v, want read/none/partial (D160: the probes ran, Python and Java are not read)", s)
 		}
 	})
 
@@ -520,8 +520,8 @@ func TestRun_D111_InventoryScopeOnlyForImages(t *testing.T) {
 		}
 		doc, _ := decodeD111(t, out)
 		s := doc.InventoryScope
-		if s == nil || s.OSPackages != "read" || s.Bitnami != "read" || s.ApplicationPackages != "not-read" {
-			t.Errorf("inventoryScope = %+v, want read/read/not-read", s)
+		if s == nil || s.OSPackages != "read" || s.Bitnami != "read" || s.ApplicationPackages != "partial" {
+			t.Errorf("inventoryScope = %+v, want read/read/partial", s)
 		}
 	})
 
@@ -624,9 +624,8 @@ func TestCatalogFromImage_D111_SymlinkOnlyBitnamiMarkersAreNotRead(t *testing.T)
 	if err != nil {
 		t.Fatalf("catalogFromImage: %v", err)
 	}
-	want := report.InventoryScopeRecord{OSPackages: "read", Bitnami: "not-read", ApplicationPackages: "not-read"}
-	if scope != want {
-		t.Errorf("scope = %+v, want %+v", scope, want)
+	if scope.OSPackages != report.ScopeRead || scope.Bitnami != report.ScopeNotRead || scope.ApplicationPackages != report.ScopePartial {
+		t.Errorf("scope = %+v, want read/not-read/partial", scope)
 	}
 }
 

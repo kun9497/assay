@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/kun9497/assay/internal/matcher"
@@ -32,11 +33,17 @@ const (
 	CoverageNoComparer = "no-comparer"
 )
 
-// The three values each InventoryScopeRecord field takes (D111).
+// The values each InventoryScopeRecord field takes (D111). ScopePartial is
+// D160's fourth, for applicationPackages only: the image probes read npm
+// packages under fixed roots and Go binaries in the bin directories, and
+// nothing else inside the image, so the half is neither read nor not-read.
+// A new value is a change of meaning for a consumer switching on the three,
+// which is why schema 18 is a breaking bump (docs/compatibility.md).
 const (
 	ScopeRead    = "read"
 	ScopeNone    = "none"
 	ScopeNotRead = "not-read"
+	ScopePartial = "partial"
 )
 
 // CoverageRecord is what the database could do for one ecosystem key the
@@ -95,6 +102,84 @@ type InventoryScopeRecord struct {
 	OSPackages          string `json:"osPackages"`
 	Bitnami             string `json:"bitnami"`
 	ApplicationPackages string `json:"applicationPackages"`
+	// ApplicationScope is applicationPackages per ecosystem (D160): which
+	// application inventories the image path probed, where, and what it
+	// found; and which it never reads. Present whenever applicationPackages
+	// is partial, so a consumer can tell "npm was probed at these roots and
+	// held nothing" from "Python was not looked at".
+	ApplicationScope []ApplicationScopeRecord `json:"applicationScope,omitempty"`
+}
+
+// ApplicationScopeRecord is one ecosystem's share of an image's application
+// scope (D160): State is ScopeRead (the probe ran and found content there --
+// installed package.json files, or a Go binary -- whether or not each became
+// a package; a version-less package.json is a counted skip, D36, and the
+// tree it sits in was read), ScopeNone (the probe ran and found nothing at
+// its roots) or ScopeNotRead (nothing reads this ecosystem inside an image),
+// and Roots names the fixed locations a probe reads, so "read" is never
+// mistaken for "the whole image".
+type ApplicationScopeRecord struct {
+	Ecosystem string   `json:"ecosystem"`
+	State     string   `json:"state"`
+	Roots     []string `json:"roots,omitempty"`
+}
+
+// ApplicationScopeSentence is the one wording the stderr note (D141) and the
+// SARIF inventory-scope result share for what the image probes read and did
+// not, built from the record so the two cannot drift: "npm packages under
+// usr/lib/node_modules, usr/local/lib/node_modules and opt/app-root/src/node_modules
+// and Go binaries in usr/bin, ..." on one side, "Python, Java, ..." on the
+// other. Either half is "" when the record names nothing on that side.
+func ApplicationScopeSentence(s *InventoryScopeRecord) (read, notRead string) {
+	if s == nil {
+		return "", ""
+	}
+	var reads, misses []string
+	for _, a := range s.ApplicationScope {
+		switch a.State {
+		case ScopeRead, ScopeNone:
+			what := scopeProse(a.Ecosystem)
+			if len(a.Roots) > 0 {
+				// npm trees are read at any depth under their roots; Go
+				// binaries only as direct children of their directories.
+				prep := " under "
+				if a.Ecosystem == "Go" {
+					prep = " directly in "
+				}
+				what += prep + joinAnd(a.Roots)
+			}
+			reads = append(reads, what)
+		case ScopeNotRead:
+			misses = append(misses, scopeProse(a.Ecosystem))
+		}
+	}
+	return joinAnd(reads), joinAnd(misses)
+}
+
+// scopeProse is how the sentence names an ecosystem: the record keeps the OSV
+// key (PyPI, Maven) a machine joins on, the sentence the word a reader
+// recognises, so D141's note still says "Python" and "Java".
+func scopeProse(eco string) string {
+	switch eco {
+	case "Go":
+		return "Go binaries"
+	case "PyPI":
+		return "Python packages"
+	case "Maven":
+		return "Java packages"
+	}
+	return eco + " packages"
+}
+
+// joinAnd renders a list for prose: "a", "a and b", "a, b and c".
+func joinAnd(xs []string) string {
+	switch len(xs) {
+	case 0:
+		return ""
+	case 1:
+		return xs[0]
+	}
+	return strings.Join(xs[:len(xs)-1], ", ") + " and " + xs[len(xs)-1]
 }
 
 // Coverage carries D111's target-level facts from scancmd.Run to every

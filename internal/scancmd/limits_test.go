@@ -341,6 +341,13 @@ func TestCatalogFromImage_EveryReadSiteIsBounded(t *testing.T) {
 		{"Bitnami legacy file, through the second Files call", bitnamiLegacyPath,
 			map[string]string{osReleasePath: osReleaseAlpine319, apkDBPath: apkOneRecord,
 				bitnamiLegacyPath: big}},
+		// D160: the application-probe pass reads through the same bound. An
+		// oversize EXECUTABLE is declined at its header instead (see
+		// TestRun_D160_OversizeExecutableIsDeclinedNotFatal); a package.json is
+		// read, and read under the limit.
+		{"installed package.json, through FilesProbed", "usr/lib/node_modules/x/package.json",
+			map[string]string{osReleasePath: osReleaseAlpine319, apkDBPath: apkOneRecord,
+				"usr/lib/node_modules/x/package.json": big}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			lowerLimit(t, &source.MaxFileBytes, 4<<10)
@@ -355,8 +362,10 @@ func TestCatalogFromImage_EveryReadSiteIsBounded(t *testing.T) {
 }
 
 // TestCatalogFromImage_EveryLayerPassHonoursTheContext holds the context at
-// every pass catalogFromImage makes. An Arch image takes all five (the
-// probe, status.d, pacman, the Bitnami markers, the Bitnami legacy file), and
+// every pass catalogFromImage makes. An Arch image takes all six (the
+// probe, status.d, pacman, the Bitnami markers, the Bitnami legacy file, and
+// since D160 the one application-probe pass over the npm roots and the bin
+// directories together), and
 // the layer's Open cancels the context on its k-th call: a pass that walked
 // with the scan's context stops at once, so the layer is opened exactly k
 // times. A pass handed context.Background() instead walks to the end, and the
@@ -381,7 +390,7 @@ func TestCatalogFromImage_EveryLayerPassHonoursTheContext(t *testing.T) {
 		return opens, err
 	}
 
-	const passes = 5
+	const passes = 6
 	opens, err := catalog(0)
 	if err != nil {
 		t.Fatalf("uncancelled: %v", err)

@@ -27,15 +27,18 @@ ratings joined on — and `assay scan` matches container images, Go binaries, di
 SBOMs against it. It reads a container image's operating-system packages directly, so syft is
 not in the loop for those; the weekly differential (D93) compares the findings with grype's
 tuple by tuple — the same CVEs, not just the same count — and [the comparison](comparison.md)
-classifies every family's divergence. Application packages installed inside an image are not
-inventoried: an image scan reads no `node_modules/*/package.json`, no Python `*.dist-info`, no
-jar and no Go binary in the image, and its one application inventory is Bitnami's own
-`/opt/bitnami` markers (D99). The same files are read when the target is a directory, a jar or
-a binary; inside an image they are deferred (D70 — "Application packages inside container
-images" in [`docs/deferred-decisions.md`](deferred-decisions.md)). The differential measures
-what that costs on two of its targets: on the 2026-09-27 weekly run, all 22 tuples grype
-reported on `ubi8/nodejs-18` and assay did not are npm packages under `/usr/lib/node_modules`,
-and all 33 on SLE BCI 15.6 are the Go standard library compiled into one binary.
+classifies every family's divergence. Application packages installed inside an image are read
+at two fixed locations only (D160, 2026-11-09): installed `package.json` files under the global
+`node_modules` roots become npm packages, and Go binaries directly in the standard bin
+directories become Go packages, beside Bitnami's own `/opt/bitnami` markers (D99). Python
+`*.dist-info`, jars, and npm trees or Go binaries anywhere else are not read, and the report says
+so per ecosystem in `inventoryScope.applicationScope[]` (D70 — "Application packages inside
+container images" in [`docs/deferred-decisions.md`](deferred-decisions.md) — holds the rest).
+The same files are read whole when the target is a directory, a jar or a binary. The cost that
+motivated D160 was measured on the 2026-09-27 weekly run: all 22 tuples grype reported on
+`ubi8/nodejs-18` and assay did not were npm packages under `/usr/lib/node_modules`, and all 33 on
+SLE BCI 15.6 the Go standard library compiled into one binary; on 2026-11-09 those were 41 and
+47, and the probes close both.
 
 Distro packages match through their *source* package, so an `openssl` advisory reaches the
 installed `libssl3`, and the report names both. That indirection is where distro scanners
@@ -76,10 +79,15 @@ separate projects — `syft`, `vunnel` + `grype-db`, and `grype`.
 deliberate and recorded with what would change it. Some are announced by the scan they
 affect (the first three below); the rest hold for every scan and are stated only here.
 
-- **Application packages inside an image** (D70). An image scan checks the operating-system
-  packages (and Bitnami's `/opt/bitnami` markers), not npm, Python, Java or Go-binary packages
-  installed in the image. Scan the application's lockfile, directory or binary, or an SBOM
-  of the image, for those. [Recorded here](deferred-decisions.md#application-packages-inside-container-images).
+- **Application packages inside an image** (D70, revised by D160). An image scan checks the
+  operating-system packages, Bitnami's `/opt/bitnami` markers, and two fixed locations: npm
+  packages installed under the global `node_modules` roots and Go binaries in the standard bin
+  directories. Python, Java, and npm trees or Go binaries anywhere else are not read; the
+  report's `inventoryScope.applicationScope[]` says which, and the stderr note and SARIF result
+  repeat it. Scan the application's lockfile, directory or binary, or an SBOM of the image, for
+  the rest. `dir:` scans go the other way — they prune `node_modules` (D26), because a checkout's
+  installed tree is not its declared dependencies; an image has no lockfile to prefer, so the
+  probe reads what is installed. [Recorded here](deferred-decisions.md#application-packages-inside-container-images).
 - **Releases the upstream stopped publishing** (D110). Debian 11 has been frozen since
   2026-08-19 — the date its provider's oldest archive carried when the key froze; the seed was
   built 2026-08-30, so Debian's own archive was at most eleven days fresher, and a key that
@@ -1074,6 +1082,11 @@ exited 0 while 24 findings went unmentioned.
 - [x] A bare SUSE id with no leaf is named by its product_id (D159, revises D126, audit B2)
       — 3,478 ids and 142 whole documents had been dropped in a 688-document live sample;
       2,876 "affected, no fix" entries added, no fixed version changed
+- [x] An image scan reads application packages at two fixed locations (D160, revises D70) —
+      installed `package.json` under the three global `node_modules` roots and Go binaries
+      directly in the seven standard bin directories, in one extra layer pass; `applicationPackages`
+      `partial` + `applicationScope[]` (schema 18); `npm`/`go-module` inventoried in scandiff. Measured
+      2026-11-09 on all 26 targets: nothing outside those locations.
 - [x] QA 2026-10-30 fixes:
       - a line over 64 KiB no longer truncates a lockfile;
       - an opens-first range keeps its single-version windows (revises D154);
@@ -1565,7 +1578,7 @@ enough metadata to recover a dependency list; Rust does only when built with
 `cargo-auditable`; stripped C/C++ leaves nothing reliable. Support is decided per language
 rather than promised as a category.
 
-What is still absent — application packages inside container images (D70) and pep440
+What is still absent — application packages inside container images beyond D160's two fixed-location probes (D70) and pep440
 leniency — is deliberate.
 [`docs/deferred-decisions.md`](deferred-decisions.md) records what was postponed, why,
 what should trigger revisiting it, and which groundwork is already in place; most of its

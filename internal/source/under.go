@@ -2,6 +2,7 @@ package source
 
 import (
 	"archive/tar"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -82,6 +83,39 @@ type underHit struct {
 // and only then is it merged into what the upper layers already decided.
 // Across layers the newest still wins, through found.
 func (img *Image) collect(ctx context.Context, root string, match func(name string) bool) (map[string]FileFromLayer, int, error) {
+	return img.collectWith(ctx, []string{root}, func(name string, _ *tar.Header) bool { return match(name) }, nil, nil)
+}
+
+// sniffBytes is how much of a candidate entry collectWith hands to sniff
+// before deciding to read it: four bytes, the length of the ELF magic and
+// of every other magic the image path cares about.
+const sniffBytes = 4
+
+// collectWith is collect over several roots in ONE pass, with the header in
+// the match and an optional sniff (D160): match sees the tar header so a
+// caller can select on mode and size (an executable of at least a kilobyte)
+// as well as on name, and sniff sees the entry's name and first sniffBytes
+// and says whether the rest is wanted. An entry sniff declines is not read
+// further and not kept -- /usr/bin/bash costs four bytes, not its size -- but
+// it still shadows a lower layer's copy of the name (A10): the image has a
+// file here, just not one the caller wants. The sniffed bytes of a declined
+// entry are not charged to the per-scan budget; they are bounded by
+// sniffBytes times the entries matched. Several roots in one pass because a
+// pass reads every layer to EOF (D123): the ten locations the image probes
+// read would otherwise be ten passes.
+//
+// scope, when given, names the entries that are IN the caller's locations
+// whether or not match wants them. A header-aware match can decline an
+// entry a name-only match could not -- the same name as a wanted file, but
+// a symlink, a 0644 copy, a wrapper script under the size floor -- and such
+// an entry still means "the image has something else at this name" (A10):
+// without the shadow, the lower layer's Go binary at that path would be
+// returned as the image's, cataloged, and located in a layer the image's
+// filesystem no longer shows. A declined in-scope entry is recorded hitGone
+// (not hitLink: the probes discard the link count, and a link they could
+// not follow is not a file they failed to read). The collect callers pass
+// nil, since a name-only match cannot split one name two ways.
+func (img *Image) collectWith(ctx context.Context, roots []string, match func(name string, h *tar.Header) bool, sniff func(name string, head []byte) bool, scope func(name string) bool) (map[string]FileFromLayer, int, error) {
 	out := map[string]FileFromLayer{}
 	found := map[string]bool{}
 	deleted := map[string]bool{}
@@ -95,7 +129,9 @@ func (img *Image) collect(ctx context.Context, root string, match func(name stri
 		last := map[string]underHit{}
 
 		err := readLayer(ctx, l, func(name string, h *tar.Header, r io.Reader) error {
-			shadowAncestors(last, name, root)
+			for _, root := range roots {
+				shadowAncestors(last, name, root)
+			}
 			d, base := path.Split(name)
 			switch {
 			case base == whiteoutOpaque:
@@ -116,7 +152,10 @@ func (img *Image) collect(ctx context.Context, root string, match func(name stri
 				}
 				return nil
 			}
-			if !match(name) {
+			if !match(name, h) {
+				if scope != nil && scope(name) && !found[name] && !isDeleted(name, deleted) && !underAnyOpaque(name, opaque) {
+					last[name] = underHit{kind: hitGone}
+				}
 				return nil
 			}
 			// Checked BEFORE found[name], so a whiteout in a newer layer still
@@ -135,7 +174,20 @@ func (img *Image) collect(ctx context.Context, root string, match func(name stri
 				// version the image does not ship.
 				last[name] = underHit{kind: hitLink}
 			case tar.TypeReg, tar.TypeGNUSparse, tar.TypeCont:
-				b, err := img.readEntry(name, r)
+				rd := r
+				if sniff != nil {
+					head := make([]byte, sniffBytes)
+					n, err := io.ReadFull(r, head)
+					if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+						return err
+					}
+					if !sniff(name, head[:n]) {
+						last[name] = underHit{kind: hitGone}
+						return nil
+					}
+					rd = io.MultiReader(bytes.NewReader(head[:n]), r)
+				}
+				b, err := img.readEntry(name, rd)
 				if err != nil {
 					return err
 				}
@@ -297,4 +349,47 @@ func SortedNames(m map[string]FileFromLayer) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// FilesProbed is the image probes' one pass (D160): every regular file
+// under any of roots that match accepts -- match sees the tar header, so a
+// caller can select on mode and size as well as on name -- and whose name and
+// first four bytes sniff accepts; a declined entry costs those four bytes and
+// is not read. One pass for every location, because a pass reads each layer
+// to EOF (D123) and the probes' ten locations would otherwise be ten passes.
+// Layer semantics are collect's: newest layer wins, whiteouts and opaque
+// markers hide lower layers, and ANY entry under a root at a name -- a
+// non-file, or a regular file match or sniff declines -- shadows a lower
+// layer's file there (A10): the image has something else at that path.
+//
+// Symlinks under the roots are counted as every collect caller counts them;
+// a probe that does not want them disclosed (a bin directory is mostly
+// symlinks) discards the count. D112's bounds hold for the files that ARE
+// read, exactly as in Files.
+func (img *Image) FilesProbed(ctx context.Context, roots []string, match func(name string, h *tar.Header) bool, sniff func(name string, head []byte) bool) (map[string]FileFromLayer, int, error) {
+	if len(roots) == 0 {
+		return nil, 0, fmt.Errorf("source: FilesProbed needs at least one root")
+	}
+	norm := make([]string, 0, len(roots))
+	for _, r := range roots {
+		n := normaliseEntry(r)
+		if n == "" || n == "." {
+			return nil, 0, fmt.Errorf("source: FilesProbed needs a directory, got %q", r)
+		}
+		norm = append(norm, n)
+	}
+	if match == nil || sniff == nil {
+		return nil, 0, fmt.Errorf("source: FilesProbed needs a match and a sniff")
+	}
+	inScope := func(name string) bool {
+		for _, r := range norm {
+			if strings.HasPrefix(name, r+"/") {
+				return true
+			}
+		}
+		return false
+	}
+	return img.collectWith(ctx, norm, func(name string, h *tar.Header) bool {
+		return inScope(name) && match(name, h)
+	}, sniff, inScope)
 }

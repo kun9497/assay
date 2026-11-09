@@ -161,13 +161,17 @@ type grypeArtifact struct {
 // inventoriedTypes are grype's artifact types for packages an image scan
 // inventories, so a grype-only tuple under one is a data-source divergence
 // rather than the gap D70 waits for: the OS package types assay's image
-// catalogers read (apk, deb, rpm, alpm), and bitnami, the SPDX markers
-// Bitnami images carry, which assay reads into its dual inventory (D99).
-// Every other type is an application type for D117, by exclusion rather than
-// by a list of application types: grype adding a type nobody listed must land
-// on the side that is judged (a ceiling of zero), not on the side that is
-// ignored.
-var inventoriedTypes = map[string]bool{"apk": true, "deb": true, "rpm": true, "alpm": true, "bitnami": true}
+// catalogers read (apk, deb, rpm, alpm), bitnami, the SPDX markers Bitnami
+// images carry, which assay reads into its dual inventory (D99), and since
+// D160 npm and go-module -- the installed npm trees under the fixed
+// node_modules roots and the Go binaries in the standard bin directories
+// the image probes read. Every other type is an application type for D117,
+// by exclusion rather than by a list of application types: grype adding a
+// type nobody listed must land on the side that is judged (a ceiling of
+// zero), not on the side that is ignored. python and java-archive stay on
+// the judged side: the probes do not read them, and the day their ceiling
+// trips is the day the next probe is decided.
+var inventoriedTypes = map[string]bool{"apk": true, "deb": true, "rpm": true, "alpm": true, "bitnami": true, "npm": true, "go-module": true}
 
 func isInventoriedType(typ string) bool { return inventoriedTypes[typ] }
 

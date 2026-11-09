@@ -53,9 +53,6 @@
       "minAgree": 4386,
       "minFindings": 4437,
       "maxFindings": 10440
-    },
-    "maxGrypeOnlyApp": {
-      "npm": 82
     }
   },
   {
@@ -180,9 +177,6 @@
       "minAgree": 154,
       "minFindings": 159,
       "maxFindings": 376
-    },
-    "maxGrypeOnlyApp": {
-      "go-module": 92
     }
   },
   {
@@ -260,8 +254,8 @@
     "ref": "mirror.gcr.io/library/archlinux@sha256:b860afd5823683f7ea389ba5f00d812f4fe55f6f286dea329d2abeefa535e309",
     "minAgree": 7,
     "minFindings": 9,
-    "maxFindings": 44,
-    "maxAssayOnlyFixed": 25
+    "maxFindings": 106,
+    "maxAssayOnlyFixed": 84
   },
   {
     "name": "hummingbird",
@@ -295,10 +289,7 @@
     "minFindings": 0,
     "maxFindings": 25,
     "maxAssayOnlyFixed": 25,
-    "minComponents": 40,
-    "maxGrypeOnlyApp": {
-      "go-module": 2
-    }
+    "minComponents": 40
   },
   {
     "name": "debian11",

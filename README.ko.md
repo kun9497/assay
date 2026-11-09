@@ -107,9 +107,10 @@ assay scan alpine:3.19 --fail-on high
   백엔드(BerkeleyDB, SQLite, ndb)에 걸쳐.
 - **8개 언어 생태계** — Go, npm, PyPI, crates.io, Maven, RubyGems, NuGet, Packagist —
   바이너리·디렉터리·열세 가지 lockfile 형식에서. pnpm과 yarn berry도 포함됩니다. 컨테이너
-  이미지 내부에서는 읽지 않습니다: 이미지 스캔은 위의 OS 패키지와 Bitnami 레이어만
-  인벤토리화할 뿐, 그 안에 설치된 언어 패키지는 대상에 넣지 않습니다(D70,
-  [미룸](docs/deferred-decisions.md)). 모든 이미지 스캔은 이를 stderr 와 SARIF 에 밝힙니다(D141).
+  이미지 안에서는 두 고정 위치(D160): 전역 `node_modules` 루트 아래에 설치된 npm 패키지와 표준 bin
+  디렉터리의 Go 바이너리. Python, Java, 그리고 이미지의 다른 어디에 있든 나머지는 읽지
+  않습니다(D70, [미룸](docs/deferred-decisions.md)). 모든 이미지 스캔은 무엇을 읽고 읽지 않았는지를
+  stderr, SARIF, JSON 의 `inventoryScope` 에 정확히 밝힙니다(D141).
 - **업스트림이 게시를 멈춘 릴리스는 표시된 채 남습니다** — 업스트림이 더 이상 서비스하지 않는 키는
   동결됩니다(D110): 마지막 권고가 유지되고, 그 키의 모든 finding에 `frozenSince`가 붙으며, 그 뒤
   업스트림이 낸 수정은 빠져 있을 수 있습니다 — 표, SARIF, `--explain`이 날짜 옆에 그렇게 말하고

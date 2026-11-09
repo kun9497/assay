@@ -9,7 +9,7 @@
 
 | 계약 | 무엇인가 | 버전 필드 | 현재 |
 |---|---|---|---|
-| `report` | `assay scan --output json` | `schemaVersion` | 17 |
+| `report` | `assay scan --output json` | `schemaVersion` | 18 |
 | `provenance sidecar` | `--provenance <path>`가 쓰는 파일(D120) | `schemaVersion` | 1 |
 | `status.json` | 배포 데이터베이스의 상태, `status` 브랜치(D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json`(D147) | `schemaVersion` | 1 |
@@ -25,7 +25,7 @@
 증가는 두 종류이며, 변경 이력이 어느 쪽인지 밝힙니다.
 
 - **추가(Additive)**: 필드가 더해지고, 기존 필드는 이름, 타입, 의미를 모두 유지합니다. 지금까지의
-  증가는 아래에 적은 예외를 빼면 모두 이 종류였습니다.
+  증가는 아래에 적은 예외(스키마 12, 18)를 빼면 모두 이 종류였습니다.
 - **깨짐(Breaking)**: 필드가 제거되거나, 이름이 바뀌거나, 타입이나 의미가 바뀝니다. 지금까지 필드를
   제거하거나 이름을 바꾼 적은 없습니다.
 
@@ -61,6 +61,13 @@
   `DataAsOf` 였으므로 항상 `db status` 의 `providers[].dataAsOf` 와 같았지만, 이제 그보다 뒤일 수
   있습니다(Amazon Linux 2 옆의 Amazon Linux 2023, 가장 오래된 OSV 아카이브 옆의 Debian 12). 그
   필드 이전에 빌드된 데이터베이스는 키별 날짜가 없어 값이 이전처럼 읽힙니다.
+- 스키마 18(`inventoryScope.applicationPackages`로 분기하는 소비자에게는 **breaking**, 그 외는
+  추가형): 그 필드에 네 번째 값 `partial`이 생겼습니다 — 이미지 스캔이 이제 전역 `node_modules`
+  루트 아래의 npm 패키지와 표준 bin 디렉터리의 Go 바이너리를 읽고(D160) Python, Java 등 다른
+  애플리케이션 패키지는 여전히 읽지 않습니다 — 그리고 `inventoryScope.applicationScope[]`(신규,
+  이미지 타깃만)가 ecosystem마다 `read`, `none`(프로브했으나 없음), `not-read` 중 무엇인지와 프로브가
+  읽는 `roots`를 말합니다. 이 스키마부터 모든 이미지 스캔의 `applicationPackages`는 `partial`이고
+  `not-read`는 더 이상 나오지 않습니다.
 
 ## provenance sidecar, status.json, `db status`
 
