@@ -383,7 +383,7 @@ func TestRun_NoPositives_RatesAreNA(t *testing.T) {
 	if code := run([]string{"-labels", writeLabels(t, labels), "-assay", "fake-assay", "-out", report}, &out, &errOut, exec); code != exitOK {
 		t.Fatalf("exit = %d, want 0\n%s\n%s", code, out.String(), errOut.String())
 	}
-	if !strings.Contains(out.String(), "alpine  1       0   1   0   0   0         0       0      n/a                  n/a") {
+	if !strings.Contains(out.String(), "alpine  1       0   1   0   0   0         0       0      n/a") || !strings.Contains(out.String(), "n/a\nall ") {
 		t.Errorf("table:\n%s", out.String())
 	}
 	if _, err := os.Stat(report); err != nil {
@@ -452,7 +452,7 @@ func TestLoadLabels_Refusals(t *testing.T) {
 		{"duplicate id", func(ls []Label) []Label { ls[1].ID = ls[0].ID; return ls }, "duplicate id"},
 		{"bad cve", func(ls []Label) []Label { ls[0].CVE = "GHSA-xxxx"; return ls }, "is not CVE-YYYY-NNNN"},
 		{"bad state", func(ls []Label) []Label { ls[0].Expect.State = "maybe"; return ls }, "want affected or clean"},
-		{"clean with fixed", func(ls []Label) []Label { ls[2].Expect.Fixed = "1.0"; return ls }, "a clean label names a fixed version"},
+		{"clean with fixed", func(ls []Label) []Label { ls[3].Expect.Fixed = "1.0"; return ls }, "a clean label names a fixed version"},
 		{"bad class", func(ls []Label) []Label { ls[0].Class = "guess"; return ls }, "want matcher or data"},
 		{"data without note", func(ls []Label) []Label { ls[0].Class = "data"; return ls }, "needs a note"},
 		{"purl without version", func(ls []Label) []Label { ls[0].PURL = "pkg:apk/alpine/busybox"; return ls }, "carrying the label's version"},
