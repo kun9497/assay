@@ -8413,9 +8413,31 @@ of 2026-10-28 had read the document from before the SUSE delta feed's stall (D12
 Two rules follow, both held by the labels file's validation: a label names its upstream
 statement, URL and fetch time, and a `data`-class row says which gap it records.
 
-**Gives up.** 78 labels over three families is a small set: a per-family lower bound near
-0.65–0.80 is what it supports, and it says nothing about the families it does not cover (the
-RPM distros other than Leap, every application ecosystem). Labels age: an upstream that
+**Expanded the same day: 140 labels, nine families.** 56 labels in six new families — rhel (ubi9's
+RHEL 9: sudo, glibc, libxml2 from Red Hat's security data API and RHSA CSAF), alma (ALSA errata and
+their OSV records: openssl-libs, curl, libxml2), amzn (ALAS2023: openssl-libs, curl, expat), wolfi
+(the secdb and CGA advisories: openssl, curl, glibc), npm (OSV/GHSA: minimatch, brace-expansion,
+tar) and go (OSV GO records: golang.org/x/net, x/crypto, x/text) — researched by one agent per
+family from the upstream's own statements, never from assay, and re-fetched by a second,
+adversarial agent per family (56 of 56 kept). The first live run held every verdict (0 FP, 0 FN)
+and showed 11 fixed-version MISMATCHes that were all spelling: a finding's `evidence.fixed` is the
+provider's own string — Red Hat's CSAF writes the epoch (`0:2.34-168.el9_6.19`), AlmaLinux's OSV
+only a non-zero one (`1:3.2.2-6.el9_5.1`), OSV's Go records no `v` (`0.45.0`) — and the brief had
+asked for the purl's epoch-less spelling. `expect.fixed` is spelled as the provider spells it; the
+labels file's description says so. After the respelling: 126 judged, precision and recall 1.000
+(0.937–1.000). The eight amzn labels read `PREDATES` against the 2026-11-08 artifact because that
+database's Amazon Linux 2023 key is dated 2025-03-06 by the pre-revision KeyAsOf; the first
+artifact built after D113 revised (PR #254) dates it by its own repos and judges them — the
+validFrom rule doing its job on the day it landed. Their `expect.fixed` spelling is therefore
+unverified against assay's string until that run; the Amazon provider writes a non-zero epoch the
+way AlmaLinux's OSV does (`1:3.2.2-1.amzn2023.0.2`), and the two openssl-libs labels spell it so.
+The loader reads a purl's name the way the CycloneDX reader does — a distro purl's last segment,
+every other type's namespace joined into the name, `:` for Maven — so a label can never be named
+in a way the finding's `package.name` is not.
+
+**Gives up.** 140 labels over nine families is still a small set: a per-family lower bound near
+0.5–0.8 is what it supports, and it says nothing about the families it does not cover (Fedora,
+Oracle, Azure Linux, Photon, Arch, Ubuntu, PyPI, Maven, RubyGems and the rest). Labels age: an upstream that
 revises its statement turns the run red until a human re-adjudicates — the intended failure,
 the one the differential cannot produce, and why `source.fetchedAt` is mandatory. `validFrom`
 is held against the key's own date since the same day: a label whose key `coverage[].dataAsOf`

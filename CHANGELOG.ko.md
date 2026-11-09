@@ -29,6 +29,12 @@
   쪽; 모든 라벨이 데이터베이스보다 뒤인 실행은 빈 표를 통과시키지 않고 종료 2입니다. Debian:11 matcher
   라벨은 검증에 쓰인 키 동결일 2026-08-19를 `validFrom`으로 지닙니다. `truthset report` 문서는 **스키마
   2**(추가형: `predates`와 `PREDATES` 결과). (D161)
+- `testdata/groundtruth/labels.json`이 라벨 84개에서 140개로, 패밀리 셋에서 아홉으로 늘었습니다: alpine,
+  debian, leap에 rhel, alma, amzn, wolfi, npm, go가 합류했고, 새 라벨은 모두 업스트림 자체 권고에서
+  조사해 다시 검증했습니다. `expect.fixed`는 제공자 레코드가 fix를 적는 대로 적습니다(Red Hat은 epoch
+  포함, OSV Go는 `v` 없이). 로더는 Go purl의 이름을 모듈 경로 전체로, npm 스코프를 이름의 일부로
+  읽습니다. 첫 라이브 실행: 126개 판정, 정밀도·재현율 1.000(0.937–1.000); amzn 라벨은 D113 개정 뒤
+  처음 빌드되는 데이터베이스부터 판정됩니다. (D161)
 
 ## [0.16.0] - 2026-11-09
 

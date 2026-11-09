@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "description": "Ground-truth labels for cmd/truthset (D161): one row per (installed package, CVE) whose expected verdict is the distro's own statement at source.fetchedAt. class=matcher rows feed precision/recall; class=data rows are known data gaps, reported but excluded from the metrics. Seeded 2026-11-09 from the 2026-11-04 QA boundary harness (32 cases, 84 checks, 3 families). Debian:11 matcher-class labels carry validFrom 2026-08-19, the key's D110 freeze date: the 2026-11-04 harness verified them against that frozen snapshot, so that is the earliest data they are known to hold at; the data-class rows keep 2026-10-28 and are PREDATES while the key is frozen (their DLAs came after the freeze).",
+  "description": "Ground-truth labels for cmd/truthset (D161): one row per (installed package, CVE) whose expected verdict is the distro's own statement at source.fetchedAt. class=matcher rows feed precision/recall; class=data rows are known data gaps, reported but excluded from the metrics. Seeded 2026-11-09 from the 2026-11-04 QA boundary harness (32 cases, 84 checks, 3 families). Debian:11 matcher-class labels carry validFrom 2026-08-19, the key's D110 freeze date: the 2026-11-04 harness verified them against that frozen snapshot, so that is the earliest data they are known to hold at; the data-class rows keep 2026-10-28 and are PREDATES while the key is frozen (their DLAs came after the freeze). expect.fixed is spelled as the provider's own record spells the fix, which is what a finding's evidence.fixed carries: Red Hat CSAF with the epoch (0:2.34-168.el9_6.19), AlmaLinux's OSV with a non-zero epoch only (1:3.2.2-6.el9_5.1), OSV's Go records without the v prefix (0.45.0) while the purl and the label version keep it (v0.33.0). Expanded 2026-11-09 with 56 labels in six new families (rhel, alma, amzn, wolfi, npm, go) researched from the upstreams' own advisories and adversarially re-verified; the amzn labels predate the 2026-11-08 database's Amazon Linux 2023 date (2025-03-06, D113's pre-revision KeyAsOf) and judge from the first database built after D113 revised (PR #254).",
   "labels": [
     {
       "id": "alpine-busybox-below/CVE-2024-58251",
@@ -1640,6 +1640,1098 @@
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
       "validFrom": "2026-10-28"
+    },
+    {
+      "id": "rhel-sudo-below/CVE-2025-32462",
+      "case": "rhel-sudo-below",
+      "family": "rhel",
+      "purl": "pkg:rpm/redhat/sudo@1.9.5p2-10.el9?arch=x86_64&distro=rhel-9.6&upstream=sudo-1.9.5p2-10.el9.src.rpm",
+      "name": "sudo",
+      "version": "1.9.5p2-10.el9",
+      "cve": "CVE-2025-32462",
+      "expect": {
+        "state": "affected",
+        "fixed": "0:1.9.5p2-10.el9_6.1"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "Red Hat security data API, CVE-2025-32462 affected_release: product_name \"Red Hat Enterprise Linux 9\", package \"sudo-0:1.9.5p2-10.el9_6.1\", advisory RHSA-2025:9978, release_date 2025-06-30. Confirmed by the RHSA-2025:9978 CSAF (\"sudo security update\", initial_release_date 2025-06-30T19:59:51+00:00): fixed BaseOS-9.6.0.Z.MAIN.EUS:sudo-0:1.9.5p2-10.el9_6.1.x86_64. Epoch 0, so no epoch qualifier. The below version 1.9.5p2-10.el9 is the RHEL 9.6 GA build the .1 z-stream respun; it sorts below 10.el9_6.1 in rpm ordering.",
+        "url": "https://access.redhat.com/hydra/rest/securitydata/cve/CVE-2025-32462.json",
+        "fetchedAt": "2026-11-09T09:12:44Z"
+      },
+      "validFrom": "2025-06-30"
+    },
+    {
+      "id": "rhel-sudo-fixed/CVE-2025-32462",
+      "case": "rhel-sudo-fixed",
+      "family": "rhel",
+      "purl": "pkg:rpm/redhat/sudo@1.9.5p2-10.el9_6.1?arch=x86_64&distro=rhel-9.6&upstream=sudo-1.9.5p2-10.el9_6.1.src.rpm",
+      "name": "sudo",
+      "version": "1.9.5p2-10.el9_6.1",
+      "cve": "CVE-2025-32462",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "Red Hat security data API, CVE-2025-32462 affected_release: product_name \"Red Hat Enterprise Linux 9\", package \"sudo-0:1.9.5p2-10.el9_6.1\", advisory RHSA-2025:9978, release_date 2025-06-30. Confirmed by the RHSA-2025:9978 CSAF: fixed BaseOS-9.6.0.Z.MAIN.EUS:sudo-0:1.9.5p2-10.el9_6.1.x86_64. The installed version is exactly the fixed build.",
+        "url": "https://access.redhat.com/hydra/rest/securitydata/cve/CVE-2025-32462.json",
+        "fetchedAt": "2026-11-09T09:12:44Z"
+      },
+      "validFrom": "2025-06-30"
+    },
+    {
+      "id": "rhel-glibc-below/CVE-2025-4802",
+      "case": "rhel-glibc-below",
+      "family": "rhel",
+      "purl": "pkg:rpm/redhat/glibc@2.34-168.el9_6.18?arch=x86_64&distro=rhel-9.6&upstream=glibc-2.34-168.el9_6.18.src.rpm",
+      "name": "glibc",
+      "version": "2.34-168.el9_6.18",
+      "cve": "CVE-2025-4802",
+      "expect": {
+        "state": "affected",
+        "fixed": "0:2.34-168.el9_6.19"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "Red Hat security data API, CVE-2025-4802 affected_release: product_name \"Red Hat Enterprise Linux 9\", package \"glibc-0:2.34-168.el9_6.19\", advisory RHSA-2025:8655, release_date 2025-06-09. Confirmed by the RHSA-2025:8655 CSAF (\"glibc security update\", initial_release_date 2025-06-09T09:11:34+00:00): fixed AppStream/BaseOS-9.6.0.Z.MAIN.EUS glibc-0:2.34-168.el9_6.19. Epoch 0. Below version 2.34-168.el9_6.18 = release minus one; it is also below the second CVE's fix (.20) carried on the same case.",
+        "url": "https://access.redhat.com/hydra/rest/securitydata/cve/CVE-2025-4802.json",
+        "fetchedAt": "2026-11-09T09:12:44Z"
+      },
+      "validFrom": "2025-06-09"
+    },
+    {
+      "id": "rhel-glibc-below/CVE-2025-5702",
+      "case": "rhel-glibc-below",
+      "family": "rhel",
+      "purl": "pkg:rpm/redhat/glibc@2.34-168.el9_6.18?arch=x86_64&distro=rhel-9.6&upstream=glibc-2.34-168.el9_6.18.src.rpm",
+      "name": "glibc",
+      "version": "2.34-168.el9_6.18",
+      "cve": "CVE-2025-5702",
+      "expect": {
+        "state": "affected",
+        "fixed": "0:2.34-168.el9_6.20"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "Red Hat security data API, CVE-2025-5702 affected_release: product_name \"Red Hat Enterprise Linux 9\", package \"glibc-0:2.34-168.el9_6.20\", advisory RHSA-2025:9877, release_date 2025-06-30. Confirmed by the RHSA-2025:9877 CSAF (\"glibc security update\", initial_release_date 2025-06-30T02:51:09+00:00): fixed AppStream/BaseOS-9.6.0.Z.MAIN.EUS glibc-0:2.34-168.el9_6.20. Epoch 0. Installed 2.34-168.el9_6.18 is below the fix.",
+        "url": "https://access.redhat.com/hydra/rest/securitydata/cve/CVE-2025-5702.json",
+        "fetchedAt": "2026-11-09T09:12:44Z"
+      },
+      "validFrom": "2025-06-30"
+    },
+    {
+      "id": "rhel-glibc-fixed/CVE-2025-4802",
+      "case": "rhel-glibc-fixed",
+      "family": "rhel",
+      "purl": "pkg:rpm/redhat/glibc@2.34-168.el9_6.20?arch=x86_64&distro=rhel-9.6&upstream=glibc-2.34-168.el9_6.20.src.rpm",
+      "name": "glibc",
+      "version": "2.34-168.el9_6.20",
+      "cve": "CVE-2025-4802",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "Red Hat security data API, CVE-2025-4802 affected_release: product_name \"Red Hat Enterprise Linux 9\", package \"glibc-0:2.34-168.el9_6.19\", advisory RHSA-2025:8655, release_date 2025-06-09. Installed 2.34-168.el9_6.20 (the later RHSA-2025:9877 build) sorts above the .19 fix, so RHEL 9 says fixed.",
+        "url": "https://access.redhat.com/hydra/rest/securitydata/cve/CVE-2025-4802.json",
+        "fetchedAt": "2026-11-09T09:12:44Z"
+      },
+      "validFrom": "2025-06-09"
+    },
+    {
+      "id": "rhel-glibc-fixed/CVE-2025-5702",
+      "case": "rhel-glibc-fixed",
+      "family": "rhel",
+      "purl": "pkg:rpm/redhat/glibc@2.34-168.el9_6.20?arch=x86_64&distro=rhel-9.6&upstream=glibc-2.34-168.el9_6.20.src.rpm",
+      "name": "glibc",
+      "version": "2.34-168.el9_6.20",
+      "cve": "CVE-2025-5702",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "Red Hat security data API, CVE-2025-5702 affected_release: product_name \"Red Hat Enterprise Linux 9\", package \"glibc-0:2.34-168.el9_6.20\", advisory RHSA-2025:9877, release_date 2025-06-30. Confirmed by the RHSA-2025:9877 CSAF: fixed glibc-0:2.34-168.el9_6.20 on 9.6.0.Z.MAIN.EUS. The installed version is exactly the fixed build.",
+        "url": "https://access.redhat.com/hydra/rest/securitydata/cve/CVE-2025-5702.json",
+        "fetchedAt": "2026-11-09T09:12:44Z"
+      },
+      "validFrom": "2025-06-30"
+    },
+    {
+      "id": "rhel-libxml2-below/CVE-2025-49794",
+      "case": "rhel-libxml2-below",
+      "family": "rhel",
+      "purl": "pkg:rpm/redhat/libxml2@2.9.13-9.el9_6?arch=x86_64&distro=rhel-9.6&upstream=libxml2-2.9.13-9.el9_6.src.rpm",
+      "name": "libxml2",
+      "version": "2.9.13-9.el9_6",
+      "cve": "CVE-2025-49794",
+      "expect": {
+        "state": "affected",
+        "fixed": "0:2.9.13-10.el9_6"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "Red Hat security data API, CVE-2025-49794 affected_release: product_name \"Red Hat Enterprise Linux 9\", package \"libxml2-0:2.9.13-10.el9_6\", advisory RHSA-2025:10699, release_date 2025-07-09. Confirmed by the RHSA-2025:10699 CSAF (\"libxml2 security update\", initial_release_date 2025-07-09T12:18:48+00:00; summary \"An update for libxml2 is now available for Red Hat Enterprise Linux 9\"): fixed BaseOS-9.6.0.Z.MAIN.EUS:libxml2-0:2.9.13-10.el9_6.x86_64 for CVE-2025-49794, CVE-2025-49796 and CVE-2025-6021. Epoch 0. Below version 2.9.13-9.el9_6 = release minus one.",
+        "url": "https://access.redhat.com/hydra/rest/securitydata/cve/CVE-2025-49794.json",
+        "fetchedAt": "2026-11-09T09:15:20Z"
+      },
+      "validFrom": "2025-07-09"
+    },
+    {
+      "id": "rhel-libxml2-below/CVE-2025-49796",
+      "case": "rhel-libxml2-below",
+      "family": "rhel",
+      "purl": "pkg:rpm/redhat/libxml2@2.9.13-9.el9_6?arch=x86_64&distro=rhel-9.6&upstream=libxml2-2.9.13-9.el9_6.src.rpm",
+      "name": "libxml2",
+      "version": "2.9.13-9.el9_6",
+      "cve": "CVE-2025-49796",
+      "expect": {
+        "state": "affected",
+        "fixed": "0:2.9.13-10.el9_6"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "Red Hat security data API, CVE-2025-49796 affected_release: product_name \"Red Hat Enterprise Linux 9\", package \"libxml2-0:2.9.13-10.el9_6\", advisory RHSA-2025:10699, release_date 2025-07-09. Confirmed by the RHSA-2025:10699 CSAF: fixed BaseOS-9.6.0.Z.MAIN.EUS:libxml2-0:2.9.13-10.el9_6.x86_64 for CVE-2025-49796. Epoch 0. Installed 2.9.13-9.el9_6 is below the fix.",
+        "url": "https://access.redhat.com/hydra/rest/securitydata/cve/CVE-2025-49796.json",
+        "fetchedAt": "2026-11-09T09:15:20Z"
+      },
+      "validFrom": "2025-07-09"
+    },
+    {
+      "id": "rhel-libxml2-fixed/CVE-2025-49794",
+      "case": "rhel-libxml2-fixed",
+      "family": "rhel",
+      "purl": "pkg:rpm/redhat/libxml2@2.9.13-10.el9_6?arch=x86_64&distro=rhel-9.6&upstream=libxml2-2.9.13-10.el9_6.src.rpm",
+      "name": "libxml2",
+      "version": "2.9.13-10.el9_6",
+      "cve": "CVE-2025-49794",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "Red Hat security data API, CVE-2025-49794 affected_release: product_name \"Red Hat Enterprise Linux 9\", package \"libxml2-0:2.9.13-10.el9_6\", advisory RHSA-2025:10699, release_date 2025-07-09. The installed version is exactly the fixed build.",
+        "url": "https://access.redhat.com/hydra/rest/securitydata/cve/CVE-2025-49794.json",
+        "fetchedAt": "2026-11-09T09:15:20Z"
+      },
+      "validFrom": "2025-07-09"
+    },
+    {
+      "id": "rhel-libxml2-fixed/CVE-2025-49796",
+      "case": "rhel-libxml2-fixed",
+      "family": "rhel",
+      "purl": "pkg:rpm/redhat/libxml2@2.9.13-10.el9_6?arch=x86_64&distro=rhel-9.6&upstream=libxml2-2.9.13-10.el9_6.src.rpm",
+      "name": "libxml2",
+      "version": "2.9.13-10.el9_6",
+      "cve": "CVE-2025-49796",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "Red Hat security data API, CVE-2025-49796 affected_release: product_name \"Red Hat Enterprise Linux 9\", package \"libxml2-0:2.9.13-10.el9_6\", advisory RHSA-2025:10699, release_date 2025-07-09. The installed version is exactly the fixed build.",
+        "url": "https://access.redhat.com/hydra/rest/securitydata/cve/CVE-2025-49796.json",
+        "fetchedAt": "2026-11-09T09:15:20Z"
+      },
+      "validFrom": "2025-07-09"
+    },
+    {
+      "id": "alma-openssl-libs-below/CVE-2024-12797",
+      "case": "alma-openssl-libs-below",
+      "family": "alma",
+      "purl": "pkg:rpm/almalinux/openssl-libs@3.2.2-6.el9_5?arch=x86_64&distro=almalinux-9.6&epoch=1&upstream=openssl-3.2.2-6.el9_5.src.rpm",
+      "name": "openssl-libs",
+      "version": "3.2.2-6.el9_5",
+      "cve": "CVE-2024-12797",
+      "expect": {
+        "state": "affected",
+        "fixed": "1:3.2.2-6.el9_5.1"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALSA-2025:1330 'Important: openssl security update', Release date 2025-02-12: 'openssl: RFC7250 handshakes with unauthenticated servers don't abort as expected (CVE-2024-12797)'; updated packages include x86_64 openssl-libs-3.2.2-6.el9_5.1.x86_64.rpm. OSV ALSA-2025:1330 affected openssl-libs ecosystem AlmaLinux:9 events introduced 0 / fixed '1:3.2.2-6.el9_5.1' (epoch 1 spelled as a prefix in OSV; epoch-less in the purl @version).",
+        "url": "https://errata.almalinux.org/9/ALSA-2025-1330.html",
+        "fetchedAt": "2026-11-09T09:13:33Z"
+      },
+      "validFrom": "2025-02-12"
+    },
+    {
+      "id": "alma-openssl-libs-fixed/CVE-2024-12797",
+      "case": "alma-openssl-libs-fixed",
+      "family": "alma",
+      "purl": "pkg:rpm/almalinux/openssl-libs@3.2.2-6.el9_5.1?arch=x86_64&distro=almalinux-9.6&epoch=1&upstream=openssl-3.2.2-6.el9_5.1.src.rpm",
+      "name": "openssl-libs",
+      "version": "3.2.2-6.el9_5.1",
+      "cve": "CVE-2024-12797",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALSA-2025:1330 'Important: openssl security update', Release date 2025-02-12, fixes CVE-2024-12797; updated packages include x86_64 openssl-libs-3.2.2-6.el9_5.1.x86_64.rpm. OSV ALSA-2025:1330 openssl-libs AlmaLinux:9 fixed '1:3.2.2-6.el9_5.1'.",
+        "url": "https://errata.almalinux.org/9/ALSA-2025-1330.html",
+        "fetchedAt": "2026-11-09T09:13:33Z"
+      },
+      "validFrom": "2025-02-12"
+    },
+    {
+      "id": "alma-curl-below/CVE-2025-9086",
+      "case": "alma-curl-below",
+      "family": "alma",
+      "purl": "pkg:rpm/almalinux/curl@7.76.1-35.el9_7.2?arch=x86_64&distro=almalinux-9.7&upstream=curl-7.76.1-35.el9_7.2.src.rpm",
+      "name": "curl",
+      "version": "7.76.1-35.el9_7.2",
+      "cve": "CVE-2025-9086",
+      "expect": {
+        "state": "affected",
+        "fixed": "7.76.1-35.el9_7.3"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALSA-2026:1350 'Moderate: curl security update', Release date 2026-01-29: 'curl: libcurl: Curl out of bounds read for cookie path (CVE-2025-9086)'; updated packages include x86_64 curl-7.76.1-35.el9_7.3.x86_64.rpm. OSV ALSA-2026:1350 affected curl ecosystem AlmaLinux:9 events introduced 0 / fixed '7.76.1-35.el9_7.3' (no epoch). (ALSA-2026:1350 is an AlmaLinux 9.7 errata build; the purl says 9.7.)",
+        "url": "https://errata.almalinux.org/9/ALSA-2026-1350.html",
+        "fetchedAt": "2026-11-09T09:13:33Z"
+      },
+      "validFrom": "2026-01-29"
+    },
+    {
+      "id": "alma-curl-fixed/CVE-2025-9086",
+      "case": "alma-curl-fixed",
+      "family": "alma",
+      "purl": "pkg:rpm/almalinux/curl@7.76.1-35.el9_7.3?arch=x86_64&distro=almalinux-9.7&upstream=curl-7.76.1-35.el9_7.3.src.rpm",
+      "name": "curl",
+      "version": "7.76.1-35.el9_7.3",
+      "cve": "CVE-2025-9086",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALSA-2026:1350 'Moderate: curl security update', Release date 2026-01-29, fixes CVE-2025-9086; updated packages include x86_64 curl-7.76.1-35.el9_7.3.x86_64.rpm. OSV ALSA-2026:1350 curl AlmaLinux:9 fixed '7.76.1-35.el9_7.3'. (ALSA-2026:1350 is an AlmaLinux 9.7 errata build; the purl says 9.7.)",
+        "url": "https://errata.almalinux.org/9/ALSA-2026-1350.html",
+        "fetchedAt": "2026-11-09T09:13:33Z"
+      },
+      "validFrom": "2026-01-29"
+    },
+    {
+      "id": "alma-libxml2-below/CVE-2025-49794",
+      "case": "alma-libxml2-below",
+      "family": "alma",
+      "purl": "pkg:rpm/almalinux/libxml2@2.9.13-9.el9_6?arch=x86_64&distro=almalinux-9.6&upstream=libxml2-2.9.13-9.el9_6.src.rpm",
+      "name": "libxml2",
+      "version": "2.9.13-9.el9_6",
+      "cve": "CVE-2025-49794",
+      "expect": {
+        "state": "affected",
+        "fixed": "2.9.13-10.el9_6"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALSA-2025:10699 'Important: libxml2 security update', Release date 2025-07-10: 'libxml: Heap use after free (UAF) leads to Denial of service (DoS) (CVE-2025-49794)'; updated packages include x86_64 libxml2-2.9.13-10.el9_6.x86_64.rpm. OSV ALSA-2025:10699 affected libxml2 ecosystem AlmaLinux:9 events introduced 0 / fixed '2.9.13-10.el9_6' (no epoch).",
+        "url": "https://errata.almalinux.org/9/ALSA-2025-10699.html",
+        "fetchedAt": "2026-11-09T09:13:33Z"
+      },
+      "validFrom": "2025-07-10"
+    },
+    {
+      "id": "alma-libxml2-below/CVE-2025-49796",
+      "case": "alma-libxml2-below",
+      "family": "alma",
+      "purl": "pkg:rpm/almalinux/libxml2@2.9.13-9.el9_6?arch=x86_64&distro=almalinux-9.6&upstream=libxml2-2.9.13-9.el9_6.src.rpm",
+      "name": "libxml2",
+      "version": "2.9.13-9.el9_6",
+      "cve": "CVE-2025-49796",
+      "expect": {
+        "state": "affected",
+        "fixed": "2.9.13-10.el9_6"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALSA-2025:10699 'Important: libxml2 security update', Release date 2025-07-10: 'libxml: Type confusion leads to Denial of service (DoS) (CVE-2025-49796)'; updated packages include x86_64 libxml2-2.9.13-10.el9_6.x86_64.rpm. OSV ALSA-2025:10699 affected libxml2 ecosystem AlmaLinux:9 events introduced 0 / fixed '2.9.13-10.el9_6' (no epoch).",
+        "url": "https://errata.almalinux.org/9/ALSA-2025-10699.html",
+        "fetchedAt": "2026-11-09T09:13:33Z"
+      },
+      "validFrom": "2025-07-10"
+    },
+    {
+      "id": "alma-libxml2-fixed/CVE-2025-49794",
+      "case": "alma-libxml2-fixed",
+      "family": "alma",
+      "purl": "pkg:rpm/almalinux/libxml2@2.9.13-10.el9_6?arch=x86_64&distro=almalinux-9.6&upstream=libxml2-2.9.13-10.el9_6.src.rpm",
+      "name": "libxml2",
+      "version": "2.9.13-10.el9_6",
+      "cve": "CVE-2025-49794",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALSA-2025:10699 'Important: libxml2 security update', Release date 2025-07-10, fixes CVE-2025-49794; updated packages include x86_64 libxml2-2.9.13-10.el9_6.x86_64.rpm. OSV ALSA-2025:10699 libxml2 AlmaLinux:9 fixed '2.9.13-10.el9_6'.",
+        "url": "https://errata.almalinux.org/9/ALSA-2025-10699.html",
+        "fetchedAt": "2026-11-09T09:13:33Z"
+      },
+      "validFrom": "2025-07-10"
+    },
+    {
+      "id": "alma-libxml2-fixed/CVE-2025-49796",
+      "case": "alma-libxml2-fixed",
+      "family": "alma",
+      "purl": "pkg:rpm/almalinux/libxml2@2.9.13-10.el9_6?arch=x86_64&distro=almalinux-9.6&upstream=libxml2-2.9.13-10.el9_6.src.rpm",
+      "name": "libxml2",
+      "version": "2.9.13-10.el9_6",
+      "cve": "CVE-2025-49796",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALSA-2025:10699 'Important: libxml2 security update', Release date 2025-07-10, fixes CVE-2025-49796; updated packages include x86_64 libxml2-2.9.13-10.el9_6.x86_64.rpm. OSV ALSA-2025:10699 libxml2 AlmaLinux:9 fixed '2.9.13-10.el9_6'.",
+        "url": "https://errata.almalinux.org/9/ALSA-2025-10699.html",
+        "fetchedAt": "2026-11-09T09:13:33Z"
+      },
+      "validFrom": "2025-07-10"
+    },
+    {
+      "id": "amzn-openssl-libs-below/CVE-2025-9230",
+      "case": "amzn-openssl-libs-below",
+      "family": "amzn",
+      "purl": "pkg:rpm/amzn/openssl-libs@3.2.2-1.amzn2023.0.1?arch=x86_64&distro=amzn-2023&epoch=1&upstream=openssl-3.2.2-1.amzn2023.0.1.src.rpm",
+      "name": "openssl-libs",
+      "version": "3.2.2-1.amzn2023.0.1",
+      "cve": "CVE-2025-9230",
+      "expect": {
+        "state": "affected",
+        "fixed": "1:3.2.2-1.amzn2023.0.2"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALAS2023-2025-1225 (Advisory Released Date: 2025-10-14) lists CVE-2025-9230 and CVE-2025-9231 for openssl; New Packages x86_64: openssl-libs-3.2.2-1.amzn2023.0.2.x86_64, src: openssl-3.2.2-1.amzn2023.0.2.src; 'Run dnf update openssl --releasever 2023.9.20251014 ... to update your system.' The AL2023 core repo primary.xml carries openssl-libs at epoch 1 and lists 3.2.2-1.amzn2023.0.1 as the build preceding 0.2.",
+        "url": "https://alas.aws.amazon.com/AL2023/ALAS2023-2025-1225.html",
+        "fetchedAt": "2026-11-09T09:13:06Z"
+      },
+      "validFrom": "2025-10-14"
+    },
+    {
+      "id": "amzn-openssl-libs-below/CVE-2025-9231",
+      "case": "amzn-openssl-libs-below",
+      "family": "amzn",
+      "purl": "pkg:rpm/amzn/openssl-libs@3.2.2-1.amzn2023.0.1?arch=x86_64&distro=amzn-2023&epoch=1&upstream=openssl-3.2.2-1.amzn2023.0.1.src.rpm",
+      "name": "openssl-libs",
+      "version": "3.2.2-1.amzn2023.0.1",
+      "cve": "CVE-2025-9231",
+      "expect": {
+        "state": "affected",
+        "fixed": "1:3.2.2-1.amzn2023.0.2"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALAS2023-2025-1225 (Advisory Released Date: 2025-10-14) lists CVE-2025-9230 and CVE-2025-9231 for openssl; New Packages x86_64: openssl-libs-3.2.2-1.amzn2023.0.2.x86_64, src: openssl-3.2.2-1.amzn2023.0.2.src; 'Run dnf update openssl --releasever 2023.9.20251014 ... to update your system.' The AL2023 core repo primary.xml carries openssl-libs at epoch 1 and lists 3.2.2-1.amzn2023.0.1 as the build preceding 0.2.",
+        "url": "https://alas.aws.amazon.com/AL2023/ALAS2023-2025-1225.html",
+        "fetchedAt": "2026-11-09T09:13:06Z"
+      },
+      "validFrom": "2025-10-14"
+    },
+    {
+      "id": "amzn-openssl-libs-fixed/CVE-2025-9230",
+      "case": "amzn-openssl-libs-fixed",
+      "family": "amzn",
+      "purl": "pkg:rpm/amzn/openssl-libs@3.2.2-1.amzn2023.0.2?arch=x86_64&distro=amzn-2023&epoch=1&upstream=openssl-3.2.2-1.amzn2023.0.2.src.rpm",
+      "name": "openssl-libs",
+      "version": "3.2.2-1.amzn2023.0.2",
+      "cve": "CVE-2025-9230",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALAS2023-2025-1225 (Advisory Released Date: 2025-10-14) lists CVE-2025-9230 and CVE-2025-9231 for openssl; New Packages x86_64: openssl-libs-3.2.2-1.amzn2023.0.2.x86_64, src: openssl-3.2.2-1.amzn2023.0.2.src. Installed version equals the advisory's new package.",
+        "url": "https://alas.aws.amazon.com/AL2023/ALAS2023-2025-1225.html",
+        "fetchedAt": "2026-11-09T09:13:06Z"
+      },
+      "validFrom": "2025-10-14"
+    },
+    {
+      "id": "amzn-openssl-libs-fixed/CVE-2025-9231",
+      "case": "amzn-openssl-libs-fixed",
+      "family": "amzn",
+      "purl": "pkg:rpm/amzn/openssl-libs@3.2.2-1.amzn2023.0.2?arch=x86_64&distro=amzn-2023&epoch=1&upstream=openssl-3.2.2-1.amzn2023.0.2.src.rpm",
+      "name": "openssl-libs",
+      "version": "3.2.2-1.amzn2023.0.2",
+      "cve": "CVE-2025-9231",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALAS2023-2025-1225 (Advisory Released Date: 2025-10-14) lists CVE-2025-9230 and CVE-2025-9231 for openssl; New Packages x86_64: openssl-libs-3.2.2-1.amzn2023.0.2.x86_64, src: openssl-3.2.2-1.amzn2023.0.2.src. Installed version equals the advisory's new package.",
+        "url": "https://alas.aws.amazon.com/AL2023/ALAS2023-2025-1225.html",
+        "fetchedAt": "2026-11-09T09:13:06Z"
+      },
+      "validFrom": "2025-10-14"
+    },
+    {
+      "id": "amzn-curl-below/CVE-2025-11563",
+      "case": "amzn-curl-below",
+      "family": "amzn",
+      "purl": "pkg:rpm/amzn/curl@8.11.1-4.amzn2023.0.1?arch=x86_64&distro=amzn-2023&upstream=curl-8.11.1-4.amzn2023.0.1.src.rpm",
+      "name": "curl",
+      "version": "8.11.1-4.amzn2023.0.1",
+      "cve": "CVE-2025-11563",
+      "expect": {
+        "state": "affected",
+        "fixed": "8.11.1-4.amzn2023.0.3"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALAS2023-2025-1317 (Advisory Released Date: 2025-12-08), CVE-2025-11563: 'URLs containing percent-encoded slashes (/ or \\) can trick wcurl into saving the output file outside of the current directory'; New Packages x86_64: curl-8.11.1-4.amzn2023.0.3.x86_64, src: curl-8.11.1-4.amzn2023.0.3.src; 'Run dnf update curl --releasever 2023.9.20251208 ... to update your system.' The previously shipped build is curl-8.11.1-4.amzn2023.0.1 (ALAS2023-2025-1043, 2025-06-23); the AL2023 core repo lists no 8.11.1-4.amzn2023.0.2 build. curl has epoch 0 in the repo primary.xml.",
+        "url": "https://alas.aws.amazon.com/AL2023/ALAS2023-2025-1317.html",
+        "fetchedAt": "2026-11-09T09:13:06Z"
+      },
+      "validFrom": "2025-12-08"
+    },
+    {
+      "id": "amzn-curl-fixed/CVE-2025-11563",
+      "case": "amzn-curl-fixed",
+      "family": "amzn",
+      "purl": "pkg:rpm/amzn/curl@8.11.1-4.amzn2023.0.3?arch=x86_64&distro=amzn-2023&upstream=curl-8.11.1-4.amzn2023.0.3.src.rpm",
+      "name": "curl",
+      "version": "8.11.1-4.amzn2023.0.3",
+      "cve": "CVE-2025-11563",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALAS2023-2025-1317 (Advisory Released Date: 2025-12-08), CVE-2025-11563; New Packages x86_64: curl-8.11.1-4.amzn2023.0.3.x86_64, src: curl-8.11.1-4.amzn2023.0.3.src. Installed version equals the advisory's new package.",
+        "url": "https://alas.aws.amazon.com/AL2023/ALAS2023-2025-1317.html",
+        "fetchedAt": "2026-11-09T09:13:06Z"
+      },
+      "validFrom": "2025-12-08"
+    },
+    {
+      "id": "amzn-expat-below/CVE-2026-25210",
+      "case": "amzn-expat-below",
+      "family": "amzn",
+      "purl": "pkg:rpm/amzn/expat@2.6.3-1.amzn2023.0.3?arch=x86_64&distro=amzn-2023&upstream=expat-2.6.3-1.amzn2023.0.3.src.rpm",
+      "name": "expat",
+      "version": "2.6.3-1.amzn2023.0.3",
+      "cve": "CVE-2026-25210",
+      "expect": {
+        "state": "affected",
+        "fixed": "2.6.3-1.amzn2023.0.4"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALAS2023-2026-1425 (Advisory Released Date: 2026-02-18), CVE-2026-25210: 'In libexpat before 2.7.4, the doContent function does not properly determine the buffer size bufSize because there is no integer overflow check for tag buffer reallocation.'; New Packages x86_64: expat-2.6.3-1.amzn2023.0.4.x86_64, src: expat-2.6.3-1.amzn2023.0.4.src; 'Run dnf update expat --releasever 2023.10.20260216 ... to update your system.' The previously shipped build is expat-2.6.3-1.amzn2023.0.3 (ALAS2023-2025-1196, 2025-09-29, fixing CVE-2025-59375). expat has epoch 0 in the repo primary.xml.",
+        "url": "https://alas.aws.amazon.com/AL2023/ALAS2023-2026-1425.html",
+        "fetchedAt": "2026-11-09T09:13:06Z"
+      },
+      "validFrom": "2026-02-18"
+    },
+    {
+      "id": "amzn-expat-fixed/CVE-2026-25210",
+      "case": "amzn-expat-fixed",
+      "family": "amzn",
+      "purl": "pkg:rpm/amzn/expat@2.6.3-1.amzn2023.0.4?arch=x86_64&distro=amzn-2023&upstream=expat-2.6.3-1.amzn2023.0.4.src.rpm",
+      "name": "expat",
+      "version": "2.6.3-1.amzn2023.0.4",
+      "cve": "CVE-2026-25210",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALAS2023-2026-1425 (Advisory Released Date: 2026-02-18), CVE-2026-25210; New Packages x86_64: expat-2.6.3-1.amzn2023.0.4.x86_64, src: expat-2.6.3-1.amzn2023.0.4.src. Installed version equals the advisory's new package.",
+        "url": "https://alas.aws.amazon.com/AL2023/ALAS2023-2026-1425.html",
+        "fetchedAt": "2026-11-09T09:13:06Z"
+      },
+      "validFrom": "2026-02-18"
+    },
+    {
+      "id": "wolfi-openssl-below/CVE-2025-9230",
+      "case": "wolfi-openssl-below",
+      "family": "wolfi",
+      "purl": "pkg:apk/wolfi/openssl@3.5.1-r0?arch=x86_64&distro=wolfi-20230201",
+      "name": "openssl",
+      "version": "3.5.1-r0",
+      "cve": "CVE-2025-9230",
+      "expect": {
+        "state": "affected",
+        "fixed": "3.5.4-r0"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "wolfi-dev/advisories openssl.advisories.yaml: id CGA-3w65-8r9h-75gq, aliases CVE-2025-9230, event 2025-10-06T09:09:25Z type fixed, fixed-version 3.5.4-r0. Wolfi secdb security.json openssl secfixes \"3.5.4-r0\": [CVE-2025-9230, CVE-2025-9231, CVE-2025-9232]. 3.5.4-r0 is the first -rN of 3.5.4 in secfixes; the previous upstream version the secdb lists is 3.5.1-r0.",
+        "url": "https://github.com/wolfi-dev/advisories/blob/main/openssl.advisories.yaml",
+        "fetchedAt": "2026-11-09T09:12:21Z"
+      },
+      "validFrom": "2025-10-06"
+    },
+    {
+      "id": "wolfi-openssl-below/CVE-2025-9231",
+      "case": "wolfi-openssl-below",
+      "family": "wolfi",
+      "purl": "pkg:apk/wolfi/openssl@3.5.1-r0?arch=x86_64&distro=wolfi-20230201",
+      "name": "openssl",
+      "version": "3.5.1-r0",
+      "cve": "CVE-2025-9231",
+      "expect": {
+        "state": "affected",
+        "fixed": "3.5.4-r0"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "wolfi-dev/advisories openssl.advisories.yaml: id CGA-vphj-52vf-9m66, aliases CVE-2025-9231 / GHSA-9mrx-mqmg-gwj9, event 2025-10-06T09:09:25Z type fixed, fixed-version 3.5.4-r0. Wolfi secdb openssl secfixes \"3.5.4-r0\" names CVE-2025-9231. Below = 3.5.1-r0, the previous upstream version the secdb lists (no earlier -rN of 3.5.4 in secfixes).",
+        "url": "https://github.com/wolfi-dev/advisories/blob/main/openssl.advisories.yaml",
+        "fetchedAt": "2026-11-09T09:12:21Z"
+      },
+      "validFrom": "2025-10-06"
+    },
+    {
+      "id": "wolfi-openssl-fixed/CVE-2025-9230",
+      "case": "wolfi-openssl-fixed",
+      "family": "wolfi",
+      "purl": "pkg:apk/wolfi/openssl@3.5.4-r0?arch=x86_64&distro=wolfi-20230201",
+      "name": "openssl",
+      "version": "3.5.4-r0",
+      "cve": "CVE-2025-9230",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "wolfi-dev/advisories openssl.advisories.yaml: id CGA-3w65-8r9h-75gq, aliases CVE-2025-9230, event 2025-10-06T09:09:25Z type fixed, fixed-version 3.5.4-r0. Wolfi secdb openssl secfixes \"3.5.4-r0\" names CVE-2025-9230.",
+        "url": "https://github.com/wolfi-dev/advisories/blob/main/openssl.advisories.yaml",
+        "fetchedAt": "2026-11-09T09:12:21Z"
+      },
+      "validFrom": "2025-10-06"
+    },
+    {
+      "id": "wolfi-openssl-fixed/CVE-2025-9231",
+      "case": "wolfi-openssl-fixed",
+      "family": "wolfi",
+      "purl": "pkg:apk/wolfi/openssl@3.5.4-r0?arch=x86_64&distro=wolfi-20230201",
+      "name": "openssl",
+      "version": "3.5.4-r0",
+      "cve": "CVE-2025-9231",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "wolfi-dev/advisories openssl.advisories.yaml: id CGA-vphj-52vf-9m66, aliases CVE-2025-9231 / GHSA-9mrx-mqmg-gwj9, event 2025-10-06T09:09:25Z type fixed, fixed-version 3.5.4-r0. Wolfi secdb openssl secfixes \"3.5.4-r0\" names CVE-2025-9231.",
+        "url": "https://github.com/wolfi-dev/advisories/blob/main/openssl.advisories.yaml",
+        "fetchedAt": "2026-11-09T09:12:21Z"
+      },
+      "validFrom": "2025-10-06"
+    },
+    {
+      "id": "wolfi-curl-below/CVE-2025-0167",
+      "case": "wolfi-curl-below",
+      "family": "wolfi",
+      "purl": "pkg:apk/wolfi/curl@8.11.1-r0?arch=x86_64&distro=wolfi-20230201",
+      "name": "curl",
+      "version": "8.11.1-r0",
+      "cve": "CVE-2025-0167",
+      "expect": {
+        "state": "affected",
+        "fixed": "8.12.0-r0"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "wolfi-dev/advisories curl.advisories.yaml: id CGA-gr5c-pjrp-3fmw, aliases CVE-2025-0167 / GHSA-c42g-rmxf-64ch, event 2025-02-07T12:02:09Z type fixed, fixed-version 8.12.0-r0. Wolfi secdb security.json curl secfixes \"8.12.0-r0\": [CVE-2025-0167, CVE-2025-0665, CVE-2025-0725]. No earlier -rN of 8.12.0 in secfixes; the previous upstream version the secdb lists is 8.11.1-r0 (secfixes for CVE-2024-11053).",
+        "url": "https://github.com/wolfi-dev/advisories/blob/main/curl.advisories.yaml",
+        "fetchedAt": "2026-11-09T09:12:21Z"
+      },
+      "validFrom": "2025-02-07"
+    },
+    {
+      "id": "wolfi-curl-below/CVE-2025-0725",
+      "case": "wolfi-curl-below",
+      "family": "wolfi",
+      "purl": "pkg:apk/wolfi/curl@8.11.1-r0?arch=x86_64&distro=wolfi-20230201",
+      "name": "curl",
+      "version": "8.11.1-r0",
+      "cve": "CVE-2025-0725",
+      "expect": {
+        "state": "affected",
+        "fixed": "8.12.0-r0"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "wolfi-dev/advisories curl.advisories.yaml: id CGA-378j-cghq-mmhg, aliases CVE-2025-0725 / GHSA-vvqh-cqpj-5537, event 2025-02-07T12:01:58Z type fixed, fixed-version 8.12.0-r0. Wolfi secdb curl secfixes \"8.12.0-r0\" names CVE-2025-0725. Below = 8.11.1-r0, the previous upstream version the secdb lists.",
+        "url": "https://github.com/wolfi-dev/advisories/blob/main/curl.advisories.yaml",
+        "fetchedAt": "2026-11-09T09:12:21Z"
+      },
+      "validFrom": "2025-02-07"
+    },
+    {
+      "id": "wolfi-curl-fixed/CVE-2025-0167",
+      "case": "wolfi-curl-fixed",
+      "family": "wolfi",
+      "purl": "pkg:apk/wolfi/curl@8.12.0-r0?arch=x86_64&distro=wolfi-20230201",
+      "name": "curl",
+      "version": "8.12.0-r0",
+      "cve": "CVE-2025-0167",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "wolfi-dev/advisories curl.advisories.yaml: id CGA-gr5c-pjrp-3fmw, aliases CVE-2025-0167 / GHSA-c42g-rmxf-64ch, event 2025-02-07T12:02:09Z type fixed, fixed-version 8.12.0-r0. Wolfi secdb curl secfixes \"8.12.0-r0\" names CVE-2025-0167.",
+        "url": "https://github.com/wolfi-dev/advisories/blob/main/curl.advisories.yaml",
+        "fetchedAt": "2026-11-09T09:12:21Z"
+      },
+      "validFrom": "2025-02-07"
+    },
+    {
+      "id": "wolfi-curl-fixed/CVE-2025-0725",
+      "case": "wolfi-curl-fixed",
+      "family": "wolfi",
+      "purl": "pkg:apk/wolfi/curl@8.12.0-r0?arch=x86_64&distro=wolfi-20230201",
+      "name": "curl",
+      "version": "8.12.0-r0",
+      "cve": "CVE-2025-0725",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "wolfi-dev/advisories curl.advisories.yaml: id CGA-378j-cghq-mmhg, aliases CVE-2025-0725 / GHSA-vvqh-cqpj-5537, event 2025-02-07T12:01:58Z type fixed, fixed-version 8.12.0-r0. Wolfi secdb curl secfixes \"8.12.0-r0\" names CVE-2025-0725.",
+        "url": "https://github.com/wolfi-dev/advisories/blob/main/curl.advisories.yaml",
+        "fetchedAt": "2026-11-09T09:12:21Z"
+      },
+      "validFrom": "2025-02-07"
+    },
+    {
+      "id": "wolfi-glibc-below/CVE-2025-8058",
+      "case": "wolfi-glibc-below",
+      "family": "wolfi",
+      "purl": "pkg:apk/wolfi/glibc@2.40-r6?arch=x86_64&distro=wolfi-20230201",
+      "name": "glibc",
+      "version": "2.40-r6",
+      "cve": "CVE-2025-8058",
+      "expect": {
+        "state": "affected",
+        "fixed": "2.41-r56"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "wolfi-dev/advisories glibc.advisories.yaml: id CGA-c3gc-wg62-gr48, aliases CVE-2025-8058 / GHSA-8xjp-c72j-67q8, event 2025-07-24T07:14:11Z type fixed, fixed-version 2.41-r56. Wolfi secdb security.json glibc secfixes \"2.41-r56\": [CVE-2025-8058, GHSA-8xjp-c72j-67q8]. No earlier -rN of 2.41 in secfixes; the previous upstream version the secdb lists is 2.40-r6 (secfixes for CVE-2025-0395).",
+        "url": "https://github.com/wolfi-dev/advisories/blob/main/glibc.advisories.yaml",
+        "fetchedAt": "2026-11-09T09:12:21Z"
+      },
+      "validFrom": "2025-07-24"
+    },
+    {
+      "id": "wolfi-glibc-fixed/CVE-2025-8058",
+      "case": "wolfi-glibc-fixed",
+      "family": "wolfi",
+      "purl": "pkg:apk/wolfi/glibc@2.41-r56?arch=x86_64&distro=wolfi-20230201",
+      "name": "glibc",
+      "version": "2.41-r56",
+      "cve": "CVE-2025-8058",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "wolfi-dev/advisories glibc.advisories.yaml: id CGA-c3gc-wg62-gr48, aliases CVE-2025-8058 / GHSA-8xjp-c72j-67q8, event 2025-07-24T07:14:11Z type fixed, fixed-version 2.41-r56. Wolfi secdb glibc secfixes \"2.41-r56\" names CVE-2025-8058.",
+        "url": "https://github.com/wolfi-dev/advisories/blob/main/glibc.advisories.yaml",
+        "fetchedAt": "2026-11-09T09:12:21Z"
+      },
+      "validFrom": "2025-07-24"
+    },
+    {
+      "id": "npm-minimatch-below/CVE-2026-27903",
+      "case": "npm-minimatch-below",
+      "family": "npm",
+      "purl": "pkg:npm/minimatch@9.0.6",
+      "name": "minimatch",
+      "version": "9.0.6",
+      "cve": "CVE-2026-27903",
+      "expect": {
+        "state": "affected",
+        "fixed": "9.0.7"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "GHSA-7r86-cg39-jmmj (aliases CVE-2026-27903) 'minimatch has ReDoS: matchOne() combinatorial backtracking via multiple non-adjacent GLOBSTAR segments'; affected npm minimatch range introduced 9.0.0, fixed 9.0.7 (other lines: 3.1.3, 4.2.5, 5.1.8, 6.2.2, 7.4.8, 8.0.6, 10.2.3)",
+        "url": "https://api.osv.dev/v1/vulns/GHSA-7r86-cg39-jmmj",
+        "fetchedAt": "2026-11-09T09:13:14Z"
+      },
+      "validFrom": "2026-02-26"
+    },
+    {
+      "id": "npm-minimatch-below/CVE-2026-27904",
+      "case": "npm-minimatch-below",
+      "family": "npm",
+      "purl": "pkg:npm/minimatch@9.0.6",
+      "name": "minimatch",
+      "version": "9.0.6",
+      "cve": "CVE-2026-27904",
+      "expect": {
+        "state": "affected",
+        "fixed": "9.0.7"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "GHSA-23c5-xmqv-rm74 (aliases CVE-2026-27904) 'minimatch ReDoS: nested *() extglobs generate catastrophically backtracking regular expressions'; affected npm minimatch range introduced 9.0.0, fixed 9.0.7 (other lines: 3.1.4, 4.2.5, 5.1.8, 6.2.2, 7.4.8, 8.0.6, 10.2.3)",
+        "url": "https://api.osv.dev/v1/vulns/GHSA-23c5-xmqv-rm74",
+        "fetchedAt": "2026-11-09T09:13:14Z"
+      },
+      "validFrom": "2026-02-26"
+    },
+    {
+      "id": "npm-minimatch-fixed/CVE-2026-27903",
+      "case": "npm-minimatch-fixed",
+      "family": "npm",
+      "purl": "pkg:npm/minimatch@9.0.7",
+      "name": "minimatch",
+      "version": "9.0.7",
+      "cve": "CVE-2026-27903",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "GHSA-7r86-cg39-jmmj (aliases CVE-2026-27903): affected npm minimatch range introduced 9.0.0, fixed 9.0.7 -- 9.0.7 is the fixed event, so it is outside the affected range (note: 9.0.7 is still inside a later minimatch advisory, GHSA-g3hv-75wg-m249 / CVE-2026-118764; this label judges CVE-2026-27903 only)",
+        "url": "https://api.osv.dev/v1/vulns/GHSA-7r86-cg39-jmmj",
+        "fetchedAt": "2026-11-09T09:13:14Z"
+      },
+      "validFrom": "2026-02-26"
+    },
+    {
+      "id": "npm-minimatch-fixed/CVE-2026-27904",
+      "case": "npm-minimatch-fixed",
+      "family": "npm",
+      "purl": "pkg:npm/minimatch@9.0.7",
+      "name": "minimatch",
+      "version": "9.0.7",
+      "cve": "CVE-2026-27904",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "GHSA-23c5-xmqv-rm74 (aliases CVE-2026-27904): affected npm minimatch range introduced 9.0.0, fixed 9.0.7 -- 9.0.7 is the fixed event, so it is outside the affected range (note: 9.0.7 is still inside a later minimatch advisory, GHSA-g3hv-75wg-m249 / CVE-2026-118764; this label judges CVE-2026-27904 only)",
+        "url": "https://api.osv.dev/v1/vulns/GHSA-23c5-xmqv-rm74",
+        "fetchedAt": "2026-11-09T09:13:14Z"
+      },
+      "validFrom": "2026-02-26"
+    },
+    {
+      "id": "npm-brace-expansion-below/CVE-2025-5889",
+      "case": "npm-brace-expansion-below",
+      "family": "npm",
+      "purl": "pkg:npm/brace-expansion@2.0.1",
+      "name": "brace-expansion",
+      "version": "2.0.1",
+      "cve": "CVE-2025-5889",
+      "expect": {
+        "state": "affected",
+        "fixed": "2.0.2"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "GHSA-v6h2-p8h4-qcjw (aliases CVE-2025-5889) 'brace-expansion Regular Expression Denial of Service vulnerability', details: 'juliangruber brace-expansion up to 1.1.11/2.0.1/3.0.0/4.0.0 ... function expand of the file index.js ... inefficient regular expression complexity'; affected npm brace-expansion range introduced 2.0.0, fixed 2.0.2 (other lines: 1.1.12, 3.0.1, 4.0.1)",
+        "url": "https://api.osv.dev/v1/vulns/GHSA-v6h2-p8h4-qcjw",
+        "fetchedAt": "2026-11-09T09:13:14Z"
+      },
+      "validFrom": "2025-06-09"
+    },
+    {
+      "id": "npm-brace-expansion-fixed/CVE-2025-5889",
+      "case": "npm-brace-expansion-fixed",
+      "family": "npm",
+      "purl": "pkg:npm/brace-expansion@2.0.2",
+      "name": "brace-expansion",
+      "version": "2.0.2",
+      "cve": "CVE-2025-5889",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "GHSA-v6h2-p8h4-qcjw (aliases CVE-2025-5889): affected npm brace-expansion range introduced 2.0.0, fixed 2.0.2 -- 2.0.2 is the fixed event, so it is outside the affected range (note: 2.0.2 is still inside later brace-expansion advisories such as CVE-2026-33750 fixed 2.0.3; this label judges CVE-2025-5889 only)",
+        "url": "https://api.osv.dev/v1/vulns/GHSA-v6h2-p8h4-qcjw",
+        "fetchedAt": "2026-11-09T09:13:14Z"
+      },
+      "validFrom": "2025-06-09"
+    },
+    {
+      "id": "npm-tar-below/CVE-2026-59874",
+      "case": "npm-tar-below",
+      "family": "npm",
+      "purl": "pkg:npm/tar@7.5.17",
+      "name": "tar",
+      "version": "7.5.17",
+      "cve": "CVE-2026-59874",
+      "expect": {
+        "state": "affected",
+        "fixed": "7.5.18"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "GHSA-8x88-c5mf-7j5w (aliases CVE-2026-59874) 'node-tar: Negative tar entry size causes infinite loop in archive replace'; affected npm tar range introduced 0, fixed 7.5.18",
+        "url": "https://api.osv.dev/v1/vulns/GHSA-8x88-c5mf-7j5w",
+        "fetchedAt": "2026-11-09T09:13:14Z"
+      },
+      "validFrom": "2026-07-20"
+    },
+    {
+      "id": "npm-tar-below/CVE-2026-59871",
+      "case": "npm-tar-below",
+      "family": "npm",
+      "purl": "pkg:npm/tar@7.5.17",
+      "name": "tar",
+      "version": "7.5.17",
+      "cve": "CVE-2026-59871",
+      "expect": {
+        "state": "affected",
+        "fixed": "7.5.18"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "GHSA-w8wr-v893-vjvp (aliases CVE-2026-59871) 'node-tar: Process crash via PAX numeric path type confusion'; affected npm tar range introduced 0, fixed 7.5.18",
+        "url": "https://api.osv.dev/v1/vulns/GHSA-w8wr-v893-vjvp",
+        "fetchedAt": "2026-11-09T09:13:14Z"
+      },
+      "validFrom": "2026-07-20"
+    },
+    {
+      "id": "npm-tar-fixed/CVE-2026-59874",
+      "case": "npm-tar-fixed",
+      "family": "npm",
+      "purl": "pkg:npm/tar@7.5.18",
+      "name": "tar",
+      "version": "7.5.18",
+      "cve": "CVE-2026-59874",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "GHSA-8x88-c5mf-7j5w (aliases CVE-2026-59874): affected npm tar range introduced 0, fixed 7.5.18 -- 7.5.18 is the fixed event, so it is outside the affected range (note: 7.5.18 is still inside later tar advisories, CVE-2026-59873 fixed 7.5.19 and CVE-2026-73566 fixed 7.5.21; this label judges CVE-2026-59874 only)",
+        "url": "https://api.osv.dev/v1/vulns/GHSA-8x88-c5mf-7j5w",
+        "fetchedAt": "2026-11-09T09:13:14Z"
+      },
+      "validFrom": "2026-07-20"
+    },
+    {
+      "id": "npm-tar-fixed/CVE-2026-59871",
+      "case": "npm-tar-fixed",
+      "family": "npm",
+      "purl": "pkg:npm/tar@7.5.18",
+      "name": "tar",
+      "version": "7.5.18",
+      "cve": "CVE-2026-59871",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "GHSA-w8wr-v893-vjvp (aliases CVE-2026-59871): affected npm tar range introduced 0, fixed 7.5.18 -- 7.5.18 is the fixed event, so it is outside the affected range (same later-advisory note as CVE-2026-59874; this label judges CVE-2026-59871 only)",
+        "url": "https://api.osv.dev/v1/vulns/GHSA-w8wr-v893-vjvp",
+        "fetchedAt": "2026-11-09T09:13:14Z"
+      },
+      "validFrom": "2026-07-20"
+    },
+    {
+      "id": "go-golang.org-x-net-below/CVE-2025-47911",
+      "case": "go-golang.org-x-net-below",
+      "family": "go",
+      "purl": "pkg:golang/golang.org/x/net@v0.44.0",
+      "name": "golang.org/x/net",
+      "version": "v0.44.0",
+      "cve": "CVE-2025-47911",
+      "expect": {
+        "state": "affected",
+        "fixed": "0.45.0"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "GO-2026-4440 (aliases CVE-2025-47911, GHSA-w4gw-w5jq-g9jh) 'Quadratic parsing complexity in golang.org/x/net/html': 'The html.Parse function in golang.org/x/net/html has quadratic parsing complexity ... denial of service'; affected Go golang.org/x/net range introduced 0, fixed 0.45.0",
+        "url": "https://api.osv.dev/v1/vulns/GO-2026-4440",
+        "fetchedAt": "2026-11-09T09:13:14Z"
+      },
+      "validFrom": "2026-02-05"
+    },
+    {
+      "id": "go-golang.org-x-net-below/CVE-2025-58190",
+      "case": "go-golang.org-x-net-below",
+      "family": "go",
+      "purl": "pkg:golang/golang.org/x/net@v0.44.0",
+      "name": "golang.org/x/net",
+      "version": "v0.44.0",
+      "cve": "CVE-2025-58190",
+      "expect": {
+        "state": "affected",
+        "fixed": "0.45.0"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "GO-2026-4441 (aliases CVE-2025-58190) 'Infinite parsing loop in golang.org/x/net': 'The html.Parse function in golang.org/x/net/html has an infinite parsing loop when processing certain inputs'; affected Go golang.org/x/net range introduced 0, fixed 0.45.0",
+        "url": "https://api.osv.dev/v1/vulns/GO-2026-4441",
+        "fetchedAt": "2026-11-09T09:13:14Z"
+      },
+      "validFrom": "2026-02-05"
+    },
+    {
+      "id": "go-golang.org-x-net-fixed/CVE-2025-47911",
+      "case": "go-golang.org-x-net-fixed",
+      "family": "go",
+      "purl": "pkg:golang/golang.org/x/net@v0.45.0",
+      "name": "golang.org/x/net",
+      "version": "v0.45.0",
+      "cve": "CVE-2025-47911",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "GO-2026-4440 (aliases CVE-2025-47911): affected Go golang.org/x/net range introduced 0, fixed 0.45.0 -- 0.45.0 is the fixed event, so it is outside the affected range",
+        "url": "https://api.osv.dev/v1/vulns/GO-2026-4440",
+        "fetchedAt": "2026-11-09T09:13:14Z"
+      },
+      "validFrom": "2026-02-05"
+    },
+    {
+      "id": "go-golang.org-x-net-fixed/CVE-2025-58190",
+      "case": "go-golang.org-x-net-fixed",
+      "family": "go",
+      "purl": "pkg:golang/golang.org/x/net@v0.45.0",
+      "name": "golang.org/x/net",
+      "version": "v0.45.0",
+      "cve": "CVE-2025-58190",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "GO-2026-4441 (aliases CVE-2025-58190): affected Go golang.org/x/net range introduced 0, fixed 0.45.0 -- 0.45.0 is the fixed event, so it is outside the affected range (note: v0.45.0 is still inside later x/net advisories, e.g. GO-2026-4559 introduced 0.50.0 does not reach it but GO-2026-4918 fixed 0.53.0 does; this label judges CVE-2025-58190 only)",
+        "url": "https://api.osv.dev/v1/vulns/GO-2026-4441",
+        "fetchedAt": "2026-11-09T09:13:14Z"
+      },
+      "validFrom": "2026-02-05"
+    },
+    {
+      "id": "go-golang.org-x-crypto-below/CVE-2025-58181",
+      "case": "go-golang.org-x-crypto-below",
+      "family": "go",
+      "purl": "pkg:golang/golang.org/x/crypto@v0.44.0",
+      "name": "golang.org/x/crypto",
+      "version": "v0.44.0",
+      "cve": "CVE-2025-58181",
+      "expect": {
+        "state": "affected",
+        "fixed": "0.45.0"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "GO-2025-4134 (aliases CVE-2025-58181, GHSA-j5w8-q4qc-rx2x) 'Unbounded memory consumption in golang.org/x/crypto/ssh': 'SSH servers parsing GSSAPI authentication requests do not validate the number of mechanisms specified in the request'; affected Go golang.org/x/crypto range introduced 0, fixed 0.45.0",
+        "url": "https://api.osv.dev/v1/vulns/GO-2025-4134",
+        "fetchedAt": "2026-11-09T09:13:14Z"
+      },
+      "validFrom": "2025-11-19"
+    },
+    {
+      "id": "go-golang.org-x-crypto-below/CVE-2025-47914",
+      "case": "go-golang.org-x-crypto-below",
+      "family": "go",
+      "purl": "pkg:golang/golang.org/x/crypto@v0.44.0",
+      "name": "golang.org/x/crypto",
+      "version": "v0.44.0",
+      "cve": "CVE-2025-47914",
+      "expect": {
+        "state": "affected",
+        "fixed": "0.45.0"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "GO-2025-4135 (aliases CVE-2025-47914, GHSA-f6x5-jh6r-wrfv) 'Malformed constraint may cause denial of service in golang.org/x/crypto/ssh/agent': 'SSH Agent servers do not validate the size of messages when processing new identity requests'; affected Go golang.org/x/crypto range introduced 0, fixed 0.45.0",
+        "url": "https://api.osv.dev/v1/vulns/GO-2025-4135",
+        "fetchedAt": "2026-11-09T09:13:14Z"
+      },
+      "validFrom": "2025-11-19"
+    },
+    {
+      "id": "go-golang.org-x-crypto-fixed/CVE-2025-58181",
+      "case": "go-golang.org-x-crypto-fixed",
+      "family": "go",
+      "purl": "pkg:golang/golang.org/x/crypto@v0.45.0",
+      "name": "golang.org/x/crypto",
+      "version": "v0.45.0",
+      "cve": "CVE-2025-58181",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "GO-2025-4134 (aliases CVE-2025-58181): affected Go golang.org/x/crypto range introduced 0, fixed 0.45.0 -- 0.45.0 is the fixed event, so it is outside the affected range (note: v0.45.0 is still inside later x/crypto advisories fixed 0.52.0/0.55.0/0.56.0; this label judges CVE-2025-58181 only)",
+        "url": "https://api.osv.dev/v1/vulns/GO-2025-4134",
+        "fetchedAt": "2026-11-09T09:13:14Z"
+      },
+      "validFrom": "2025-11-19"
+    },
+    {
+      "id": "go-golang.org-x-crypto-fixed/CVE-2025-47914",
+      "case": "go-golang.org-x-crypto-fixed",
+      "family": "go",
+      "purl": "pkg:golang/golang.org/x/crypto@v0.45.0",
+      "name": "golang.org/x/crypto",
+      "version": "v0.45.0",
+      "cve": "CVE-2025-47914",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "GO-2025-4135 (aliases CVE-2025-47914): affected Go golang.org/x/crypto range introduced 0, fixed 0.45.0 -- 0.45.0 is the fixed event, so it is outside the affected range",
+        "url": "https://api.osv.dev/v1/vulns/GO-2025-4135",
+        "fetchedAt": "2026-11-09T09:13:14Z"
+      },
+      "validFrom": "2025-11-19"
+    },
+    {
+      "id": "go-golang.org-x-text-below/CVE-2026-56852",
+      "case": "go-golang.org-x-text-below",
+      "family": "go",
+      "purl": "pkg:golang/golang.org/x/text@v0.38.0",
+      "name": "golang.org/x/text",
+      "version": "v0.38.0",
+      "cve": "CVE-2026-56852",
+      "expect": {
+        "state": "affected",
+        "fixed": "0.39.0"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "GO-2026-5970 (aliases CVE-2026-56852) 'Infinite loop on invalid input in golang.org/x/text': 'A norm.Iter can enter an infinite loop when handling input containing invalid UTF-8 bytes.'; affected Go golang.org/x/text range introduced 0, fixed 0.39.0",
+        "url": "https://api.osv.dev/v1/vulns/GO-2026-5970",
+        "fetchedAt": "2026-11-09T09:13:25Z"
+      },
+      "validFrom": "2026-07-14"
+    },
+    {
+      "id": "go-golang.org-x-text-fixed/CVE-2026-56852",
+      "case": "go-golang.org-x-text-fixed",
+      "family": "go",
+      "purl": "pkg:golang/golang.org/x/text@v0.39.0",
+      "name": "golang.org/x/text",
+      "version": "v0.39.0",
+      "cve": "CVE-2026-56852",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "GO-2026-5970 (aliases CVE-2026-56852): affected Go golang.org/x/text range introduced 0, fixed 0.39.0 -- 0.39.0 is the fixed event, so it is outside the affected range (note: v0.39.0 is still inside GO-2026-6629 / CVE-2026-56851 fixed 0.41.0; this label judges CVE-2026-56852 only)",
+        "url": "https://api.osv.dev/v1/vulns/GO-2026-5970",
+        "fetchedAt": "2026-11-09T09:13:25Z"
+      },
+      "validFrom": "2026-07-14"
     }
   ]
 }

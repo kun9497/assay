@@ -100,7 +100,30 @@ func purlNameVersion(purl string) (name, version string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	name, err = url.PathUnescape(rest[strings.LastIndex(rest[:at], "/")+1 : at])
+	// The name is read the way the CycloneDX reader the scan runs reads it
+	// (internal/cataloger/cyclonedx): a distro purl's name is its last
+	// segment, the namespace being the distro; every other type's namespace
+	// is part of the package's identity -- a Go module is its whole path,
+	// an npm scope is part of the name -- joined with "/", or ":" for Maven,
+	// whose advisories name "group:artifact". A label named any other way
+	// would never match the finding's package.name.
+	typ, path, ok := strings.Cut(rest[:at], "/")
+	if !ok || path == "" {
+		return "", "", fmt.Errorf("no name after the type %q", typ)
+	}
+	switch typ {
+	case "apk", "rpm", "deb", "alpm":
+		name, err = url.PathUnescape(path[strings.LastIndex(path, "/")+1:])
+	case "maven":
+		ns, n, hasNS := strings.Cut(path, "/")
+		if hasNS {
+			name, err = url.PathUnescape(ns + ":" + n)
+		} else {
+			name, err = url.PathUnescape(n)
+		}
+	default:
+		name, err = url.PathUnescape(path)
+	}
 	if err != nil {
 		return "", "", err
 	}
