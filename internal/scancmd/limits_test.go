@@ -355,8 +355,10 @@ func TestCatalogFromImage_EveryReadSiteIsBounded(t *testing.T) {
 }
 
 // TestCatalogFromImage_EveryLayerPassHonoursTheContext holds the context at
-// every pass catalogFromImage makes. An Arch image takes all five (the
-// probe, status.d, pacman, the Bitnami markers, the Bitnami legacy file), and
+// every pass catalogFromImage makes. An Arch image takes all six (the
+// probe, status.d, pacman, the Bitnami markers, the Bitnami legacy file, and
+// since D160 the one application-probe pass over the npm roots and the bin
+// directories together), and
 // the layer's Open cancels the context on its k-th call: a pass that walked
 // with the scan's context stops at once, so the layer is opened exactly k
 // times. A pass handed context.Background() instead walks to the end, and the
@@ -381,7 +383,7 @@ func TestCatalogFromImage_EveryLayerPassHonoursTheContext(t *testing.T) {
 		return opens, err
 	}
 
-	const passes = 5
+	const passes = 6
 	opens, err := catalog(0)
 	if err != nil {
 		t.Fatalf("uncancelled: %v", err)

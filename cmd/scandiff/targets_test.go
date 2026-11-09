@@ -197,13 +197,13 @@ func TestLoadTargets_TrivyBlockPopulated_FieldsParse(t *testing.T) {
 }
 
 func TestLoadTargets_MaxGrypeOnlyAppParses(t *testing.T) {
-	path := writeFile(t, `[{"name": "app", "ref": "example.com/x@sha256:aaa", "maxGrypeOnlyApp": {"npm": 82, "go-module": 0}}]`)
+	path := writeFile(t, `[{"name": "app", "ref": "example.com/x@sha256:aaa", "maxGrypeOnlyApp": {"gem": 82, "rust-crate": 0}}]`)
 	targets, err := loadTargets(path)
 	if err != nil {
 		t.Fatalf("loadTargets: %v", err)
 	}
-	if got := targets[0].MaxGrypeOnlyApp; len(got) != 2 || got["npm"] != 82 || got["go-module"] != 0 {
-		t.Errorf("MaxGrypeOnlyApp = %v, want map[go-module:0 npm:82]", got)
+	if got := targets[0].MaxGrypeOnlyApp; len(got) != 2 || got["gem"] != 82 || got["rust-crate"] != 0 {
+		t.Errorf("MaxGrypeOnlyApp = %v, want map[gem:82 rust-crate:0]", got)
 	}
 }
 
@@ -215,9 +215,14 @@ func TestLoadTargets_MaxGrypeOnlyAppRefusals(t *testing.T) {
 		name, body, want string
 	}{
 		{"OS type key", `{"rpm": 3}`, `target "refuse-me": maxGrypeOnlyApp key "rpm" is a type an image scan inventories`},
-		{"alpm is an OS type too", `{"npm": 1, "alpm": 1}`, `target "refuse-me": maxGrypeOnlyApp key "alpm" is a type an image scan inventories`},
-		{"bitnami is inventoried (D99)", `{"bitnami": 5, "npm": 1}`, `target "refuse-me": maxGrypeOnlyApp key "bitnami" is a type an image scan inventories`},
-		{"negative value", `{"npm": -1}`, `target "refuse-me": maxGrypeOnlyApp.npm is negative (-1)`},
+		{"alpm is an OS type too", `{"gem": 1, "alpm": 1}`, `target "refuse-me": maxGrypeOnlyApp key "alpm" is a type an image scan inventories`},
+		{"bitnami is inventoried (D99)", `{"bitnami": 5, "gem": 1}`, `target "refuse-me": maxGrypeOnlyApp key "bitnami" is a type an image scan inventories`},
+		// D160: the image probes read the global npm tree and the Go binaries in
+		// the bin directories, so a grype-only tuple of either type is a
+		// data-source divergence now, and a ceiling on it would never be judged.
+		{"npm is inventoried (D160)", `{"npm": 82}`, `target "refuse-me": maxGrypeOnlyApp key "npm" is a type an image scan inventories`},
+		{"go-module is inventoried (D160)", `{"go-module": 92}`, `target "refuse-me": maxGrypeOnlyApp key "go-module" is a type an image scan inventories`},
+		{"negative value", `{"gem": -1}`, `target "refuse-me": maxGrypeOnlyApp.gem is negative (-1)`},
 		{"empty key", `{"": 1}`, `target "refuse-me": maxGrypeOnlyApp has an empty type key`},
 	}
 	for _, c := range cases {

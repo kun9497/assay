@@ -248,10 +248,16 @@ func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 	// only when the scan reports application packages as not read, which is
 	// every image scan today and no other target kind; the rule is declared
 	// in this same branch (D55).
-	if s := cov.InventoryScope; s != nil && s.ApplicationPackages == ScopeNotRead {
+	if s := cov.InventoryScope; s != nil && s.ApplicationPackages != ScopeRead {
 		rules = append(rules, inventoryScopeRule())
 		msg := "This image scan read OS packages, not the application packages installed in the " +
 			"image (npm, Python, Java, Go binaries); vulnerabilities in those were not checked."
+		if read, notRead := ApplicationScopeSentence(s); read != "" {
+			// D160: the probes' half, in the record's own words, so the
+			// security tab says what WAS read and what still was not.
+			msg = "This image scan read OS packages plus " + read + "; the other application packages -- " +
+				notRead + ", node_modules elsewhere and Go binaries elsewhere -- were not checked."
+		}
 		uri := target
 		if uri == "" {
 			uri = "image"
@@ -436,11 +442,12 @@ func inventoryScopeRule() sarifRule {
 	return sarifRule{
 		ID:               inventoryScopeRuleID,
 		Name:             "InventoryScope",
-		ShortDescription: sarifText{Text: "Application packages inside the image were not checked"},
+		ShortDescription: sarifText{Text: "Application packages inside the image were not, or only partly, checked"},
 		FullDescription: sarifText{Text: "An image scan inventories the operating system's packages " +
-			"(apk, dpkg, rpm, pacman) and Bitnami's component markers. Packages installed on top by " +
-			"a language package manager -- node_modules, Python site-packages, jars, Go binaries -- " +
-			"are not read, so an empty result here says nothing about them (D70)."},
+			"(apk, dpkg, rpm, pacman), Bitnami's component markers, and since D160 two fixed locations " +
+			"for application packages: npm packages under the global node_modules roots and Go binaries " +
+			"in the standard bin directories. Python site-packages, jars, and node_modules or Go " +
+			"binaries anywhere else are not read, so an empty result says nothing about them (D70)."},
 		Help: &sarifHelp{
 			Text: "Scan the application's own lockfile or source directory (`assay scan dir:.`), its " +
 				"built binary or jar, or an SBOM of the image, to cover those packages.",

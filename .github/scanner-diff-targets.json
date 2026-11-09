@@ -53,9 +53,6 @@
       "minAgree": 4386,
       "minFindings": 4437,
       "maxFindings": 10440
-    },
-    "maxGrypeOnlyApp": {
-      "npm": 82
     }
   },
   {
@@ -180,9 +177,6 @@
       "minAgree": 154,
       "minFindings": 159,
       "maxFindings": 376
-    },
-    "maxGrypeOnlyApp": {
-      "go-module": 92
     }
   },
   {
@@ -295,10 +289,7 @@
     "minFindings": 0,
     "maxFindings": 25,
     "maxAssayOnlyFixed": 25,
-    "minComponents": 40,
-    "maxGrypeOnlyApp": {
-      "go-module": 2
-    }
+    "minComponents": 40
   },
   {
     "name": "debian11",

@@ -1806,18 +1806,18 @@ func appFixture(t *testing.T, name string, ceiling map[string]int, assayExtra []
 	return targetsPath, dir
 }
 
-// twoNpmOverOne: two grype-only npm tuples against a committed npm ceiling of
+// twoGemOverOne: two grype-only gem tuples against a committed gem ceiling of
 // 1. Read by both the weekly-mode and the -regressions-only test, so the flag
 // is the only thing that differs between their verdicts.
-func twoNpmOverOne(t *testing.T) (targetsPath, dir string) {
-	return appFixture(t, "app-npm", map[string]int{"npm": 1}, nil, []grypeMatch{
-		{Artifact: grypeArtifact{Name: "leftpad", Type: "npm"}, Vulnerability: grypeVuln{ID: "CVE-2026-72001"}},
-		{Artifact: grypeArtifact{Name: "leftpad", Type: "npm"}, Vulnerability: grypeVuln{ID: "CVE-2026-72002"}},
+func twoGemOverOne(t *testing.T) (targetsPath, dir string) {
+	return appFixture(t, "app-gem", map[string]int{"gem": 1}, nil, []grypeMatch{
+		{Artifact: grypeArtifact{Name: "leftpad", Type: "gem"}, Vulnerability: grypeVuln{ID: "CVE-2026-72001"}},
+		{Artifact: grypeArtifact{Name: "leftpad", Type: "gem"}, Vulnerability: grypeVuln{ID: "CVE-2026-72002"}},
 	})
 }
 
 func TestRun_GrypeOnlyApp_WeeklyModeBreachesNamingType(t *testing.T) {
-	targetsPath, dir := twoNpmOverOne(t)
+	targetsPath, dir := twoGemOverOne(t)
 
 	var stdout, stderr bytes.Buffer
 	got := run([]string{"-targets", targetsPath, "-offline", dir}, &stdout, &stderr, noExec(t))
@@ -1825,17 +1825,17 @@ func TestRun_GrypeOnlyApp_WeeklyModeBreachesNamingType(t *testing.T) {
 	if got != exitFindings {
 		t.Fatalf("exit = %d, want %d (stderr=%q)", got, exitFindings, stderr.String())
 	}
-	want := "breach: target=app-npm floor=maxGrypeOnlyApp.npm want=<=1 got=2"
+	want := "breach: target=app-gem floor=maxGrypeOnlyApp.gem want=<=1 got=2"
 	if !slices.Contains(stderrLines(stderr.String()), want) {
 		t.Errorf("stderr = %q, want the exact line %q", stderr.String(), want)
 	}
-	if f := rowFields(t, stdout.String(), "app-npm"); f[len(f)-1] != "BREACH" {
+	if f := rowFields(t, stdout.String(), "app-gem"); f[len(f)-1] != "BREACH" {
 		t.Errorf("row = %v, want verdict BREACH", f)
 	}
 }
 
 func TestRun_GrypeOnlyApp_RegressionsOnlyPrintsInfo(t *testing.T) {
-	targetsPath, dir := twoNpmOverOne(t)
+	targetsPath, dir := twoGemOverOne(t)
 
 	var stdout, stderr bytes.Buffer
 	got := run([]string{"-targets", targetsPath, "-offline", dir, "-regressions-only"}, &stdout, &stderr, noExec(t))
@@ -1843,24 +1843,24 @@ func TestRun_GrypeOnlyApp_RegressionsOnlyPrintsInfo(t *testing.T) {
 	if got != exitOK {
 		t.Fatalf("exit = %d, want %d -- a ceiling must not block the gate (stderr=%q)", got, exitOK, stderr.String())
 	}
-	want := "info: target=app-npm ceiling=maxGrypeOnlyApp.npm want=<=1 got=2 (not judged: -regressions-only)"
+	want := "info: target=app-gem ceiling=maxGrypeOnlyApp.gem want=<=1 got=2 (not judged: -regressions-only)"
 	if !slices.Contains(stderrLines(stderr.String()), want) {
 		t.Errorf("stderr = %q, want the exact line %q", stderr.String(), want)
 	}
 	if strings.Contains(stderr.String(), "breach:") {
 		t.Errorf("stderr = %q, want no breach: line", stderr.String())
 	}
-	if f := rowFields(t, stdout.String(), "app-npm"); f[len(f)-1] != "ok" {
+	if f := rowFields(t, stdout.String(), "app-gem"); f[len(f)-1] != "ok" {
 		t.Errorf("row = %v, want verdict ok", f)
 	}
 	assertNoInfoOnStdout(t, stdout.String())
 }
 
 // A type the map does not name has a ceiling of zero: this target carries an
-// npm allowance, and one python tuple must still trip rather than borrow
-// npm's headroom.
+// gem allowance, and one python tuple must still trip rather than borrow
+// gem's headroom.
 func TestRun_GrypeOnlyApp_UnnamedTypeHasCeilingZero(t *testing.T) {
-	targetsPath, dir := appFixture(t, "app-unnamed", map[string]int{"npm": 5}, nil, []grypeMatch{
+	targetsPath, dir := appFixture(t, "app-unnamed", map[string]int{"gem": 5}, nil, []grypeMatch{
 		{Artifact: grypeArtifact{Name: "pyyaml", Type: "python"}, Vulnerability: grypeVuln{ID: "CVE-2026-74001"}},
 	})
 
@@ -1888,6 +1888,10 @@ func TestRun_GrypeOnlyApp_OSTypesNeverTrip(t *testing.T) {
 		{Artifact: grypeArtifact{Name: "ospkg", Type: "apk"}, Vulnerability: grypeVuln{ID: "CVE-2026-75005"}},
 		{Artifact: grypeArtifact{Name: "ospkg", Type: "alpm"}, Vulnerability: grypeVuln{ID: "CVE-2026-75006"}},
 		{Artifact: grypeArtifact{Name: "postgresql", Type: "bitnami"}, Vulnerability: grypeVuln{ID: "CVE-2026-75007"}},
+		// D160: the image probes inventory the global npm tree and the Go
+		// binaries in the bin directories, so these two are divergences too.
+		{Artifact: grypeArtifact{Name: "minimatch", Type: "npm"}, Vulnerability: grypeVuln{ID: "CVE-2026-75008"}},
+		{Artifact: grypeArtifact{Name: "stdlib", Type: "go-module"}, Vulnerability: grypeVuln{ID: "CVE-2026-75009"}},
 	}
 	targetsPath, dir := appFixture(t, "app-os", nil, nil, extra)
 
@@ -1897,17 +1901,17 @@ func TestRun_GrypeOnlyApp_OSTypesNeverTrip(t *testing.T) {
 	if got != exitOK {
 		t.Fatalf("exit = %d, want %d (stderr=%q)", got, exitOK, stderr.String())
 	}
-	// ONLY_GRYPE is the eighth column: the fixture must really carry seven
+	// ONLY_GRYPE is the eighth column: the fixture must really carry nine
 	// grype-only inventoried tuples, or "never trips" would hold vacuously.
-	if f := rowFields(t, stdout.String(), "app-os"); f[7] != "7" {
-		t.Errorf("row = %v, want ONLY_GRYPE 7", f)
+	if f := rowFields(t, stdout.String(), "app-os"); f[7] != "9" {
+		t.Errorf("row = %v, want ONLY_GRYPE 9", f)
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("stderr = %q, want empty", stderr.String())
 	}
 }
 
-// A tuple assay also reports is not grype-only. Ceiling 0 and two npm matches,
+// A tuple assay also reports is not grype-only. Ceiling 0 and two gem matches,
 // one of which assay agrees on: got=1 holds that the shared one was not
 // counted (it would be got=2 if it were).
 func TestRun_GrypeOnlyApp_TupleAssayAlsoReportsIsNotCounted(t *testing.T) {
@@ -1916,8 +1920,8 @@ func TestRun_GrypeOnlyApp_TupleAssayAlsoReportsIsNotCounted(t *testing.T) {
 			{Package: assayPackage{Name: "leftpad"}, Advisory: assayAdvisory{ID: "GHSA-aaaa-bbbb-cccc", Aliases: []string{"CVE-2026-76001"}}},
 		},
 		[]grypeMatch{
-			{Artifact: grypeArtifact{Name: "leftpad", Type: "npm"}, Vulnerability: grypeVuln{ID: "CVE-2026-76001"}},
-			{Artifact: grypeArtifact{Name: "leftpad", Type: "npm"}, Vulnerability: grypeVuln{ID: "CVE-2026-76002"}},
+			{Artifact: grypeArtifact{Name: "leftpad", Type: "gem"}, Vulnerability: grypeVuln{ID: "CVE-2026-76001"}},
+			{Artifact: grypeArtifact{Name: "leftpad", Type: "gem"}, Vulnerability: grypeVuln{ID: "CVE-2026-76002"}},
 		})
 
 	var stdout, stderr bytes.Buffer
@@ -1926,7 +1930,7 @@ func TestRun_GrypeOnlyApp_TupleAssayAlsoReportsIsNotCounted(t *testing.T) {
 	if got != exitFindings {
 		t.Fatalf("exit = %d, want %d (stderr=%q)", got, exitFindings, stderr.String())
 	}
-	want := "breach: target=app-shared floor=maxGrypeOnlyApp.npm want=<=0 got=1"
+	want := "breach: target=app-shared floor=maxGrypeOnlyApp.gem want=<=0 got=1"
 	if !slices.Contains(stderrLines(stderr.String()), want) {
 		t.Errorf("stderr = %q, want the exact line %q", stderr.String(), want)
 	}
@@ -1936,8 +1940,8 @@ func TestRun_GrypeOnlyApp_TupleAssayAlsoReportsIsNotCounted(t *testing.T) {
 // each, and the breaches come out in sorted type order.
 func TestRun_GrypeOnlyApp_TupleUnderTwoTypesCountsUnderEach(t *testing.T) {
 	targetsPath, dir := appFixture(t, "app-dual", nil, nil, []grypeMatch{
-		{Artifact: grypeArtifact{Name: "dualpkg", Type: "npm"}, Vulnerability: grypeVuln{ID: "CVE-2026-77001"}},
-		{Artifact: grypeArtifact{Name: "dualpkg", Type: "go-module"}, Vulnerability: grypeVuln{ID: "CVE-2026-77001"}},
+		{Artifact: grypeArtifact{Name: "dualpkg", Type: "gem"}, Vulnerability: grypeVuln{ID: "CVE-2026-77001"}},
+		{Artifact: grypeArtifact{Name: "dualpkg", Type: "rust-crate"}, Vulnerability: grypeVuln{ID: "CVE-2026-77001"}},
 	})
 
 	var stdout, stderr bytes.Buffer
@@ -1953,8 +1957,8 @@ func TestRun_GrypeOnlyApp_TupleUnderTwoTypesCountsUnderEach(t *testing.T) {
 		}
 	}
 	want := []string{
-		"breach: target=app-dual floor=maxGrypeOnlyApp.go-module want=<=0 got=1",
-		"breach: target=app-dual floor=maxGrypeOnlyApp.npm want=<=0 got=1",
+		"breach: target=app-dual floor=maxGrypeOnlyApp.gem want=<=0 got=1",
+		"breach: target=app-dual floor=maxGrypeOnlyApp.rust-crate want=<=0 got=1",
 	}
 	if !slices.Equal(breaches, want) {
 		t.Errorf("breach lines = %q, want exactly %q", breaches, want)
@@ -1972,7 +1976,7 @@ func TestRun_GrypeOnlyApp_CountsOnBridgedSets(t *testing.T) {
 			{Package: assayPackage{Name: "lp"}, Advisory: assayAdvisory{ID: "OSV-LP-1", Aliases: []string{"CVE-2026-78001", "GHSA-qqqq-rrrr-ssss"}}},
 		},
 		[]grypeMatch{
-			{Artifact: grypeArtifact{Name: "lp", Type: "npm"}, Vulnerability: grypeVuln{ID: "GHSA-qqqq-rrrr-ssss"}},
+			{Artifact: grypeArtifact{Name: "lp", Type: "gem"}, Vulnerability: grypeVuln{ID: "GHSA-qqqq-rrrr-ssss"}},
 		})
 
 	var stdout, stderr bytes.Buffer

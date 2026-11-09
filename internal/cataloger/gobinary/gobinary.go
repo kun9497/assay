@@ -4,6 +4,7 @@
 package gobinary
 
 import (
+	"bytes"
 	"debug/buildinfo"
 	"fmt"
 
@@ -37,7 +38,36 @@ func Parse(path string) (pkgmeta.Target, cyclonedx.Stats, error) {
 		// the path in its own error.
 		return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("read Go build info: %w", err)
 	}
+	return fromBuildInfo(bi, path), cyclonedxStatsOf(bi), nil
+}
 
+// ParseBytes is Parse for a binary already in memory -- an executable read
+// out of a container image layer by the D160 probe, located at path inside
+// the image. buildinfo.Read on a bytes.Reader reads the same sections
+// ReadFile does; the whole file is in memory because the image path hands
+// bytes, not a file, and D112 already bounded them.
+func ParseBytes(data []byte, path string) (pkgmeta.Target, cyclonedx.Stats, error) {
+	bi, err := buildinfo.Read(bytes.NewReader(data))
+	if err != nil {
+		return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("read Go build info from %s: %w", path, err)
+	}
+	return fromBuildInfo(bi, path), cyclonedxStatsOf(bi), nil
+}
+
+// fromBuildInfo and cyclonedxStatsOf are Parse's body split so ParseBytes
+// shares it: one rule for what a binary's module list becomes, however the
+// bytes arrived.
+func fromBuildInfo(bi *buildinfo.BuildInfo, path string) pkgmeta.Target {
+	t, _ := inventory(bi, path)
+	return t
+}
+
+func cyclonedxStatsOf(bi *buildinfo.BuildInfo) cyclonedx.Stats {
+	_, s := inventory(bi, "")
+	return s
+}
+
+func inventory(bi *buildinfo.BuildInfo, path string) (pkgmeta.Target, cyclonedx.Stats) {
 	var (
 		pkgs  []pkgmeta.Package
 		stats cyclonedx.Stats
@@ -74,7 +104,7 @@ func Parse(path string) (pkgmeta.Target, cyclonedx.Stats, error) {
 		add(d.Path, d.Version)
 	}
 	addStdlib(&pkgs, &stats, bi.GoVersion, path)
-	return pkgmeta.Target{Packages: pkgs}, stats, nil
+	return pkgmeta.Target{Packages: pkgs}, stats
 }
 
 // stdlibName is the name the Go vulnerability database files standard-library

@@ -9,7 +9,7 @@ with a version bump, a **Breaking** entry in the [changelog](../CHANGELOG.md), a
 
 | Contract | What it is | Version field | Current |
 |---|---|---|---|
-| `report` | `assay scan --output json` | `schemaVersion` | 17 |
+| `report` | `assay scan --output json` | `schemaVersion` | 18 |
 | `provenance sidecar` | the file `--provenance <path>` writes (D120) | `schemaVersion` | 1 |
 | `status.json` | the published database's status, on the `status` branch (D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json` (D147) | `schemaVersion` | 1 |
@@ -64,6 +64,14 @@ it relied on:
   key, so it always equalled `db status` `providers[].dataAsOf`; now it can be later than that
   (Amazon Linux 2023 beside Amazon Linux 2, Debian 12 beside the stalest OSV archive). A
   database built before the field records no per-key date and the value reads as before.
+- Schema 18 (**breaking** for a consumer switching on `inventoryScope.applicationPackages`;
+  additive otherwise): that field gains a fourth value, `partial` — an image scan now reads
+  npm packages under the global `node_modules` roots and Go binaries in the standard bin
+  directories (D160) and still reads no Python, Java or other application packages — and
+  `inventoryScope.applicationScope[]` (new, image targets only) says per ecosystem whether it
+  was `read`, `none` (probed, nothing there) or `not-read`, with the `roots` a probe reads.
+  Every image scan's `applicationPackages` is `partial` from this schema on; `not-read` no
+  longer occurs for it.
 
 ## The provenance sidecar, status.json and `db status`
 

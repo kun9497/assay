@@ -570,11 +570,8 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 		// node_modules and Go binaries were never read. stderr, so stdout
 		// stays the report; a note, not a warning, because it describes the
 		// scan's scope on every image rather than anything that went wrong.
-		if sc.ApplicationPackages == report.ScopeNotRead {
-			fmt.Fprintln(stderr, "note: an image scan reads OS packages (and Bitnami markers), not application "+
-				"packages installed in the image -- npm, Python, Java and Go binaries were not checked")
-			fmt.Fprintln(stderr, "  scan the application's lockfile, directory or binary, or an SBOM of the image, "+
-				"for those (D70)")
+		if sc.ApplicationPackages != report.ScopeRead {
+			applicationScopeNote(stderr, &sc)
 		}
 
 	case source.TargetGoBinary:
@@ -1722,18 +1719,31 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 	target.Packages = append(target.Packages, bitnamiPkgs...)
 	skippedRecords += bitnamiSkipped
 
+	// D160: the two fixed-location application probes, alongside the OS and
+	// Bitnami halves for D99's reason. An installed package.json the npm
+	// probe could not turn into a package is a component whose version is
+	// unknown (D36) and is counted with the damaged headers below.
+	appPkgs, appStats, appScope, err := catalogApplicationProbes(ctx, img)
+	if err != nil {
+		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
+	}
+	target.Packages = append(target.Packages, appPkgs...)
+	skippedRecords += appStats.SkippedNoVersion
+
 	// D111. OSPackages is always read here, and that is not a shortcut: an
 	// image whose OS package database was not found, or held nothing, never
 	// reaches this line — the len(pkgs) == 0 refusal above (D43) returns an
 	// error, Run exits 2 before any renderer runs, and so "none" is a value
 	// this build's image path cannot produce for it. ApplicationPackages is
-	// not-read always: an image scan does not read the language manifests
-	// installed inside it (D70, deferred), and this field is where the
-	// document says so.
+	// partial always (D160): the npm and Go probes ran, over their fixed
+	// locations only, and Python and Java were not read -- neither "read" nor
+	// "not-read" would be true of the half, and ApplicationScope says which
+	// ecosystem is which.
 	scope := report.InventoryScopeRecord{
 		OSPackages:          report.ScopeRead,
 		Bitnami:             bitnamiScope,
-		ApplicationPackages: report.ScopeNotRead,
+		ApplicationPackages: report.ScopePartial,
+		ApplicationScope:    appScope,
 	}
 
 	// A record whose header could not be read is a package whose version we do
