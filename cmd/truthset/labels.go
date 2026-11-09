@@ -39,9 +39,10 @@ type Label struct {
 	Class  string `json:"class"`
 	Note   string `json:"note,omitempty"`
 	Source Source `json:"source"`
-	// ValidFrom is the earliest provider dataAsOf (full-date) the
-	// expectation is known to hold at; a database older than it is not
-	// evidence either way. Recorded, not yet enforced.
+	// ValidFrom is the earliest provider dataAsOf (YYYY-MM-DD) the
+	// expectation is known to hold at; a database whose data for the
+	// label's key is older is not evidence either way, and the label is
+	// listed as not judged (PREDATES) rather than failed or passed.
 	ValidFrom string `json:"validFrom,omitempty"`
 }
 
@@ -73,6 +74,10 @@ type labelsFile struct {
 }
 
 var cveShape = regexp.MustCompile(`^CVE-\d{4}-\d{4,}$`)
+
+// dateShape is validFrom's form, the same full date coverage[].dataAsOf is
+// written in, so the two compare as strings.
+var dateShape = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
 // purlNameVersion reads the name and version of a pkg: purl, percent-decoded
 // (the purl spec encodes `:`, `+` and `@` inside a version). The name is the
@@ -156,6 +161,8 @@ func loadLabels(path string) ([]Label, error) {
 			return nil, fmt.Errorf("%s: a data-class label needs a note saying which data gap it records", where)
 		case l.Source.Statement == "" || l.Source.URL == "" || l.Source.FetchedAt == "":
 			return nil, fmt.Errorf("%s: source.statement, source.url and source.fetchedAt are all required", where)
+		case l.ValidFrom != "" && !dateShape.MatchString(l.ValidFrom):
+			return nil, fmt.Errorf("%s: validFrom %q is not YYYY-MM-DD", where, l.ValidFrom)
 		}
 		if p, ok := casePURL[l.Case]; ok && p != l.PURL {
 			return nil, fmt.Errorf("%s: case %q names two purls (%s, %s); one case is one package at one version", where, l.Case, p, l.PURL)

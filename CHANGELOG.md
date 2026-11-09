@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- `cmd/truthset` holds a label's `validFrom` against the database: a label whose key's
+  `coverage[].dataAsOf` is before its `validFrom` is listed as not judged (`PREDATES`), counted
+  in the report and left out of the judged-label count, the metrics and the exit code; a scan
+  document with no coverage date judges as before. `validFrom` must be `YYYY-MM-DD`. (D161)
+
 ## [0.16.0] - 2026-11-09
 
 ### Added

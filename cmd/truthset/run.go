@@ -35,7 +35,8 @@ Exit 0: every matcher-class label held. 1: at least one did not (a false
 positive, a miss, or a fixed version that differs). 2: the run itself
 cannot be trusted -- labels did not load, a scan exited 2, or a file could
 not be written. Data-class labels (known data gaps) are printed and kept
-out of both the metrics and the exit code.
+out of both the metrics and the exit code, as is a label whose key the
+database dates before the label's validFrom (listed as not judged).
 `
 
 // execFunc is the seam between run and the real assay binary: a test
@@ -58,6 +59,11 @@ const (
 	outMismatch    = "MISMATCH"
 	outUnevaluated = "UNEVALUATED"
 	outError       = "ERROR"
+	// outPredates is a label the database cannot judge: the data for the
+	// label's key is as of a date before the label's validFrom, so neither
+	// a finding nor its absence is evidence. Listed, counted in the report,
+	// and in neither the metrics nor the exit code.
+	outPredates = "PREDATES"
 )
 
 // result is one judged label.
@@ -75,15 +81,18 @@ type result struct {
 // familyMetrics is the confusion matrix and the two rates, with intervals,
 // for the matcher-class labels of one family (or of all).
 type familyMetrics struct {
-	Family          string  `json:"family"`
-	Labels          int     `json:"labels"`
-	TP              int     `json:"tp"`
-	TN              int     `json:"tn"`
-	FP              int     `json:"fp"`
-	FN              int     `json:"fn"`
-	Mismatch        int     `json:"mismatch"`
-	Unevaluated     int     `json:"unevaluated"`
-	Errors          int     `json:"errors"`
+	Family      string `json:"family"`
+	Labels      int    `json:"labels"`
+	TP          int    `json:"tp"`
+	TN          int    `json:"tn"`
+	FP          int    `json:"fp"`
+	FN          int    `json:"fn"`
+	Mismatch    int    `json:"mismatch"`
+	Unevaluated int    `json:"unevaluated"`
+	Errors      int    `json:"errors"`
+	// Predates counts the labels the database's data predates (validFrom);
+	// they are not in Labels, which counts the labels judged.
+	Predates        int     `json:"predates"`
 	Precision       float64 `json:"precision"`
 	PrecisionLow95  float64 `json:"precisionLow95"`
 	PrecisionHigh95 float64 `json:"precisionHigh95"`
@@ -317,6 +326,13 @@ type scanDoc struct {
 		} `json:"evidence"`
 		FixState string `json:"fixState"`
 	} `json:"findings"`
+	// Coverage is the per-key data date (schema 17, D113 revised): the
+	// scan's one component maps to one key, and its dataAsOf is what
+	// validFrom is held against.
+	Coverage []struct {
+		Ecosystem string `json:"ecosystem"`
+		DataAsOf  string `json:"dataAsOf"`
+	} `json:"coverage"`
 	Provenance struct {
 		Tool struct {
 			Version string `json:"version"`
@@ -387,6 +403,18 @@ func judge(l Label, doc *scanDoc, fatal string) result {
 	if doc.Summary.Evaluated == 0 {
 		r.Outcome, r.Detail = outUnevaluated, fmt.Sprintf("the scan evaluated 0 of %d component(s)", doc.Summary.Components)
 		return r
+	}
+	// validFrom: a database whose data for the key is older than the day
+	// the expectation is known to hold at cannot confirm or refute it. Only
+	// a dated key is compared; an undated one (a database from before
+	// schema 17) is judged as before.
+	if l.ValidFrom != "" {
+		for _, c := range doc.Coverage {
+			if c.DataAsOf != "" && c.DataAsOf < l.ValidFrom {
+				r.Outcome, r.Detail = outPredates, fmt.Sprintf("%s data is as of %s, before the label's validFrom %s", c.Ecosystem, c.DataAsOf, l.ValidFrom)
+				return r
+			}
+		}
 	}
 	var found bool
 	var fixes, states, frozen []string
@@ -492,6 +520,11 @@ func metricsOf(family string, rs []result) familyMetrics {
 			m.Unevaluated++
 		case outError:
 			m.Errors++
+		case outPredates:
+			// Not judged: out of Labels, so the table's count is of labels
+			// the database could speak to.
+			m.Predates++
+			m.Labels--
 		}
 	}
 	if n := m.TP + m.FP + m.Mismatch; n > 0 {
@@ -520,7 +553,7 @@ func printTable(w io.Writer, results, dataClass []result, families []familyMetri
 
 	var failed []result
 	for _, r := range results {
-		if r.Outcome != outTP && r.Outcome != outTN {
+		if r.Outcome != outTP && r.Outcome != outTN && r.Outcome != outPredates {
 			failed = append(failed, r)
 		}
 	}
@@ -528,6 +561,19 @@ func printTable(w io.Writer, results, dataClass []result, families []familyMetri
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "labels that did not hold:")
 		for _, r := range failed {
+			fmt.Fprintf(w, "  %-11s %s -- %s\n", r.Outcome, r.Label.ID, r.Detail)
+		}
+	}
+	var predates []result
+	for _, r := range results {
+		if r.Outcome == outPredates {
+			predates = append(predates, r)
+		}
+	}
+	if len(predates) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "labels not judged (the database's data predates their validFrom):")
+		for _, r := range predates {
 			fmt.Fprintf(w, "  %-11s %s -- %s\n", r.Outcome, r.Label.ID, r.Detail)
 		}
 	}

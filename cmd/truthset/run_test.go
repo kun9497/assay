@@ -79,6 +79,7 @@ func fakeAssay(t *testing.T, scans map[string]fakeScan) (execFunc, *[]string) {
 			"schemaVersion": 18,
 			"summary":       map[string]any{"components": 1, "evaluated": evaluated, "findings": len(fs)},
 			"findings":      fs,
+			"coverage":      []map[string]any{{"ecosystem": "Alpine:v3.19", "dataAsOf": fakeDataAsOf, "state": "live"}},
 			"provenance":    map[string]any{"tool": map[string]any{"version": "v0.0-test"}, "database": map[string]any{"artifact": map[string]any{"digest": "sha256:feed"}}},
 		}
 		b, _ := json.Marshal(doc)
@@ -88,6 +89,65 @@ func fakeAssay(t *testing.T, scans map[string]fakeScan) (execFunc, *[]string) {
 		}
 		return b, exit, nil
 	}, &sboms
+}
+
+// fakeDataAsOf is the key date every fake scan reports.
+const fakeDataAsOf = "2026-11-09"
+
+// A label whose validFrom is after the database's data date is not judged:
+// listed under its own heading, out of the metrics and the exit code; one
+// at or before it is judged as usual.
+func TestRun_ValidFromAfterTheDataDate_IsNotJudged(t *testing.T) {
+	labels := heldLabels()
+	labels[3].ValidFrom = "2026-12-01" // the clean label: with no finding it would otherwise be TN
+	labels[1].ValidFrom = fakeDataAsOf // same day: judged
+	exec, _ := fakeAssay(t, heldScans())
+	report := filepath.Join(t.TempDir(), "report.json")
+	var out, errOut bytes.Buffer
+	if code := run([]string{"-labels", writeLabels(t, labels), "-assay", "fake-assay", "-out", report}, &out, &errOut, exec); code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s\n%s", code, out.String(), errOut.String())
+	}
+	// Three judged (the TN is gone), TP 3 TN 0.
+	if !strings.Contains(out.String(), "alpine  3       3   0   0   0   0         0       0      1.000 (0.439-1.000)  1.000 (0.439-1.000)") {
+		t.Errorf("table:\n%s", out.String())
+	}
+	want := "labels not judged (the database's data predates their validFrom):\n  PREDATES    alpine-busybox-fixed/CVE-2024-58251 -- Alpine:v3.19 data is as of 2026-11-09, before the label's validFrom 2026-12-01"
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("stdout lacks %q:\n%s", want, out.String())
+	}
+	if strings.Contains(out.String(), "did not hold") {
+		t.Errorf("a predating label was listed as a failure:\n%s", out.String())
+	}
+	var rep struct {
+		Total familyMetrics `json:"total"`
+	}
+	raw, err := os.ReadFile(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep.Total.Predates != 1 || rep.Total.Labels != 3 || rep.Total.TN != 0 {
+		t.Errorf("total = %+v, want predates 1, labels 3, tn 0", rep.Total)
+	}
+}
+
+// A scan document with no coverage (a database from before schema 17)
+// judges every label as before, validFrom or not.
+func TestRun_ValidFromWithoutCoverage_IsJudged(t *testing.T) {
+	labels := heldLabels()
+	labels[3].ValidFrom = "2026-12-01"
+	scans := heldScans()
+	scans[busyboxFixedPURL] = fakeScan{raw: `{"schemaVersion":16,"summary":{"components":1,"evaluated":1},"findings":[],"provenance":{"database":{"artifact":{"digest":"sha256:feed"}}}}`}
+	exec, _ := fakeAssay(t, scans)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"-labels", writeLabels(t, labels), "-assay", "fake-assay"}, &out, &errOut, exec); code != exitOK {
+		t.Fatalf("exit = %d\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "alpine  4       3   1   0   0") || strings.Contains(out.String(), "PREDATES") {
+		t.Errorf("table:\n%s", out.String())
+	}
 }
 
 func writeLabels(t *testing.T, labels []Label) string {
@@ -561,6 +621,7 @@ func TestLoadLabels_Refusals(t *testing.T) {
 		{"purl without version", func(ls []Label) []Label { ls[0].PURL = "pkg:apk/alpine/busybox"; return ls }, "carrying the label's version"},
 		{"no source", func(ls []Label) []Label { ls[0].Source.URL = ""; return ls }, "source.statement, source.url and source.fetchedAt"},
 		{"two purls in one case", func(ls []Label) []Label { ls[1].PURL = busyboxFixedPURL; ls[1].Version = "1.36.1-r21"; return ls }, "names two purls"},
+		{"validFrom not a date", func(ls []Label) []Label { ls[0].ValidFrom = "2026-11"; return ls }, "is not YYYY-MM-DD"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ls := tc.mut(append([]Label(nil), good...))

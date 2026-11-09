@@ -8418,7 +8418,11 @@ statement, URL and fetch time, and a `data`-class row says which gap it records.
 RPM distros other than Leap, every application ecosystem). Labels age: an upstream that
 revises its statement turns the run red until a human re-adjudicates — the intended failure,
 the one the differential cannot produce, and why `source.fetchedAt` is mandatory. `validFrom`
-is recorded, not yet enforced against the database's own dates (D113). An affected label with
+is held against the key's own date since the same day: a label whose key `coverage[].dataAsOf`
+(schema 17, D113 revised) is before its `validFrom` is listed as not judged — `PREDATES`, in the
+report's count, out of the judged-label count, the metrics and the exit code — because a
+database older than the day the expectation is known to hold at is evidence of nothing; a
+document with no coverage date judges as before. An affected label with
 no fix demanded is held by the finding's presence alone. The evidence line at a released-but-
 still-affected build says "no fixed version recorded" while the key holds the released build's
 range beside it; naming that build there is open.

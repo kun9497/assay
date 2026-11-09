@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+### Changed
+- `cmd/truthset`가 라벨의 `validFrom`을 데이터베이스에 대고 붙듭니다: 키의 `coverage[].dataAsOf`가
+  `validFrom`보다 앞선 라벨은 판정하지 않은 것(`PREDATES`)으로 올리고, 보고서에는 세되 판정한 라벨
+  수·지표·종료 코드에서는 뺍니다; coverage 날짜가 없는 스캔 문서는 전처럼 판정합니다. `validFrom`은
+  `YYYY-MM-DD`여야 합니다. (D161)
+
 ## [0.16.0] - 2026-11-09
 
 ### Added
