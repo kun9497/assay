@@ -358,6 +358,21 @@ func TestRun_BadArguments_ExitError(t *testing.T) {
 	}
 }
 
+// A miss alone -- one affected label with no finding, everything else held
+// -- is a failed run on its own.
+func TestRun_FalseNegativeAlone_Exit1(t *testing.T) {
+	scans := heldScans()
+	scans[busyboxPURL] = fakeScan{findings: scans[busyboxPURL].findings[1:]} // CVE-2024-58251 gone
+	exec, _ := fakeAssay(t, scans)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"-labels", writeLabels(t, heldLabels()), "-assay", "fake-assay"}, &out, &errOut, exec); code != exitFindings {
+		t.Fatalf("exit = %d, want 1\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "alpine  4       2   1   0   1   0         0       0") {
+		t.Errorf("table:\n%s", out.String())
+	}
+}
+
 // A MISMATCH alone -- every finding present, one with the wrong fix -- is a
 // failed run: the fix version is the point of the label.
 func TestRun_MismatchAlone_Exit1(t *testing.T) {
