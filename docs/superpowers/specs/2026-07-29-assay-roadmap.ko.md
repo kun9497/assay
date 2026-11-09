@@ -7944,9 +7944,25 @@ affected로 고쳤다. 시드의 읽기는 순환적이었다: 당시 데이터�
 둘 다 라벨 파일의 검증이 붙든다: 라벨은 업스트림 진술, URL, 가져온 시각을 이름 붙이고, `data` 클래스
 행은 어떤 공백을 기록하는지 말한다.
 
-**포기하는 것.** 세 패밀리 78개 라벨은 작은 집합이다: 패밀리별 하한 0.65–0.80 근처가 뒷받침되는
-전부고, 다루지 않는 패밀리(Leap 외의 RPM 배포판, 모든 애플리케이션 생태계)에 대해서는 아무 말도 하지
-않는다. 라벨은 늙는다: 진술을 고친 업스트림은 사람이 다시 판정할 때까지 실행을 빨갛게 만든다 — 의도된
+**같은 날 확장: 라벨 140개, 패밀리 아홉.** 새 패밀리 여섯에 라벨 56개 — rhel(ubi9의 RHEL 9: Red Hat
+보안 데이터 API와 RHSA CSAF에서 sudo, glibc, libxml2), alma(ALSA 에라타와 그 OSV 레코드: openssl-libs,
+curl, libxml2), amzn(ALAS2023: openssl-libs, curl, expat), wolfi(secdb와 CGA 권고: openssl, curl,
+glibc), npm(OSV/GHSA: minimatch, brace-expansion, tar), go(OSV GO 레코드: golang.org/x/net, x/crypto,
+x/text) — 를 패밀리마다 에이전트 하나가 업스트림 자체 진술에서만, assay에서는 결코 아니게 조사했고,
+패밀리마다 두 번째 반박 에이전트가 다시 가져와 검증했다(56개 중 56개 유지). 첫 라이브 실행은 모든
+판정을 지켰고(FP 0, FN 0) fix 버전 MISMATCH 11건을 보였는데 전부 표기였다: finding의 `evidence.fixed`는
+제공자 자신의 문자열이다 — Red Hat CSAF는 epoch을 적고(`0:2.34-168.el9_6.19`), AlmaLinux의 OSV는 0이
+아닌 epoch만(`1:3.2.2-6.el9_5.1`), OSV의 Go 레코드는 `v` 없이(`0.45.0`) — 지시문은 purl의 epoch 없는
+표기를 요구했었다. `expect.fixed`는 제공자가 적는 대로 적는다; 라벨 파일의 description이 그렇게
+말한다. 다시 적은 뒤: 126개 판정, 정밀도·재현율 1.000(0.937–1.000). amzn 라벨 여덟은 2026-11-08
+아티팩트에 대해 `PREDATES`로 읽히는데, 그 데이터베이스의 Amazon Linux 2023 키가 개정 전 KeyAsOf로
+2025-03-06에 매겨져 있기 때문이다; D113 개정(PR #254) 뒤 처음 빌드되는 아티팩트는 자기 저장소로 날짜를
+매겨 판정한다 — validFrom 규칙이 들어온 그날 제 일을 한 것이다. Go 모듈의 이름은 purl 경로 전체이고 npm
+스코프는 이름의 일부다; 로더의 purl 검사는 둘 다 그렇게 읽는다.
+
+**포기하는 것.** 아홉 패밀리 140개 라벨은 여전히 작은 집합이다: 패밀리별 하한 0.5–0.8 근처가
+뒷받침되는 전부고, 다루지 않는 패밀리(Fedora, Oracle, Azure Linux, Photon, Arch, Ubuntu, PyPI, Maven,
+RubyGems 등)에 대해서는 아무 말도 하지 않는다. 라벨은 늙는다: 진술을 고친 업스트림은 사람이 다시 판정할 때까지 실행을 빨갛게 만든다 — 의도된
 실패이자 차분 비교가 낼 수 없는 실패이고, `source.fetchedAt`이 필수인 이유다. `validFrom`은 같은 날부터
 키 자체의 날짜에 대고 붙든다: 키의 `coverage[].dataAsOf`(스키마 17, D113 개정)가 `validFrom`보다 앞선
 라벨은 판정하지 않은 것으로 올린다 — `PREDATES`, 보고서의 개수에는 들어가되 판정한 라벨 수·지표·종료

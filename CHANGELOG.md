@@ -30,6 +30,13 @@ All notable changes to this project are documented here. The format follows
   passing an empty table. `validFrom` must be a real `YYYY-MM-DD` date. The Debian:11 matcher
   labels carry `validFrom` 2026-08-19, the key's freeze date they were verified against. The
   `truthset report` document is **schema 2** (additive: `predates` and the `PREDATES` outcome). (D161)
+- `testdata/groundtruth/labels.json` grows from 84 to 140 labels and from three to nine families:
+  rhel, alma, amzn, wolfi, npm and go join alpine, debian and leap, every new label researched
+  from the upstream's own advisory and re-verified against it. `expect.fixed` is spelled as the
+  provider's record spells the fix (Red Hat with the epoch, OSV Go without the `v`). The loader
+  reads a Go purl's name as its whole module path and an npm scope as part of the name. First
+  live run: 126 judged, precision and recall 1.000 (0.937–1.000); the amzn labels judge from the
+  first database built after D113 revised. (D161)
 
 ## [0.16.0] - 2026-11-09
 

@@ -100,7 +100,19 @@ func purlNameVersion(purl string) (name, version string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	name, err = url.PathUnescape(rest[strings.LastIndex(rest[:at], "/")+1 : at])
+	// The name is the last path segment, except where the ecosystem's
+	// package identity spans the purl namespace: a Go module is its whole
+	// path (pkg:golang/golang.org/x/net), an npm scope is part of the name
+	// (pkg:npm/%40scope/name is @scope/name).
+	typ, path, _ := strings.Cut(rest[:at], "/")
+	switch typ {
+	case "golang":
+		name, err = url.PathUnescape(path)
+	case "npm":
+		name, err = url.PathUnescape(path)
+	default:
+		name, err = url.PathUnescape(path[strings.LastIndex(path, "/")+1:])
+	}
 	if err != nil {
 		return "", "", err
 	}

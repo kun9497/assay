@@ -537,8 +537,18 @@ func TestLoadLabels_PURLNameAndVersion(t *testing.T) {
 	if _, err := loadLabels(writeLabels(t, []Label{epoch})); err != nil {
 		t.Errorf("an epoch version did not load: %v", err)
 	}
+	// A Go module's name is its whole path; an npm scope is part of the name.
+	for _, ok := range []Label{
+		label("go-x-net-below", "go", "pkg:golang/golang.org/x/net@v0.33.0", "golang.org/x/net", "v0.33.0", "CVE-2025-22870", "affected", "v0.36.0"),
+		label("npm-scoped-below", "npm", "pkg:npm/%40babel/traverse@7.23.1", "@babel/traverse", "7.23.1", "CVE-2023-45133", "affected", "7.23.2"),
+	} {
+		if _, err := loadLabels(writeLabels(t, []Label{ok})); err != nil {
+			t.Errorf("%s did not load: %v", ok.ID, err)
+		}
+	}
 	for _, tc := range []struct{ name, purl, version, pkg, want string }{
 		{"substring version", "pkg:apk/alpine/busybox@1.36.1-r20?arch=x86_64", "1.36.1-r2", "busybox", `carrying the label's version "1.36.1-r2" (it carries "1.36.1-r20")`},
+		{"go module named by its last segment", "pkg:golang/golang.org/x/net@v0.33.0", "v0.33.0", "net", `purl names "golang.org/x/net", label names "net"`},
 		{"name differs", "pkg:deb/debian/libssl1.1@1.1.1n-0+deb11u5?arch=amd64", "1.1.1n-0+deb11u5", "openssl", `purl names "libssl1.1", label names "openssl"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -642,8 +652,8 @@ func TestCommittedLabels_LoadAndShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(labels) < 80 {
-		t.Errorf("labels = %d, want the 84 seeded from the 2026-11-04 harness or more", len(labels))
+	if len(labels) < 140 {
+		t.Errorf("labels = %d, want the 84 seeded from the 2026-11-04 harness plus the 56 of the 2026-11-09 expansion, or more", len(labels))
 	}
 	type counts struct{ pos, neg, data int }
 	by := map[string]*counts{}
@@ -662,11 +672,16 @@ func TestCommittedLabels_LoadAndShape(t *testing.T) {
 			c.neg++
 		}
 	}
-	for _, fam := range []string{"alpine", "debian", "leap"} {
+	// Every family is a boundary pair: at least one affected and one clean
+	// matcher-class label, or its precision or recall has no denominator.
+	for _, fam := range []string{"alpine", "debian", "leap", "rhel", "alma", "amzn", "wolfi", "npm", "go"} {
 		c := by[fam]
 		if c == nil || c.pos == 0 || c.neg == 0 {
 			t.Errorf("family %s: %+v, want at least one positive and one negative matcher-class label", fam, c)
 		}
+	}
+	if len(by) != 9 {
+		t.Errorf("families = %d (%v), want the nine seeded ones", len(by), by)
 	}
 	if by["debian"] == nil || by["debian"].data == 0 {
 		t.Error("the Debian 11 after-freeze rows should be data-class")

@@ -1089,7 +1089,8 @@ exited 0 while 24 findings went unmentioned.
       2026-11-09 on all 26 targets: nothing outside those locations.
 - [x] Precision and recall against committed ground truth (D161) — `cmd/truthset` scans each
       labelled package through the SBOM path against the pulled artifact and judges it against
-      `testdata/groundtruth/labels.json` (78 matcher-class + 6 data-class labels, three families),
+      `testdata/groundtruth/labels.json` (134 matcher-class + 6 data-class labels, nine families
+      since the same-day expansion),
       Wilson 95% intervals per family, exit 0/1/2; runs weekly after the differential. First run
       2026-11-09: 78/78 once one label was corrected from SUSE's own statement (CVE-2026-34182,
       "In progress" beside the released build)
