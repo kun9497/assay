@@ -1363,6 +1363,61 @@ accepted. Do not admit them for a live major without that measurement.
 
 ---
 
+### Debian 11 after LTS — a second Debian source, measured and deferred
+
+`Debian:11` is a whole-key carry (D110), frozen at 2026-08-19 — its provider's stalest archive
+date when the key froze; the seed was built 2026-08-30. OSV's Debian source, Debian's security
+tracker, dropped bullseye when LTS ended on 2026-08-31, so no rebuild brings a bullseye fix
+back; only a second source could. The 2026-11-04 QA (§8, P-6) asked that the gap be either
+disclosed or closed with a DLA-list top-up or Debian fix-state reasons. Disclosed, as of
+2026-11-09: the frozen sentence every renderer prints says fixes published since may be
+missing, README and DESIGN say so for Debian 11 by name, and `docs/integrations.md`'s operator
+section says what `--db-max-age` does to it. Closing it was measured and deferred.
+
+**Measured 2026-11-09** against the QA image (`mirror.gcr.io/library/debian@sha256:6f519a81…`,
+216 findings, 113 distinct source/CVE pairs, every one `fixState: unknown` with no fixed
+version; evidence in the QA folder's `p6-spike-2026-11-09/`):
+
+- **Debian's security tracker JSON** (88 MB) carries sid, bookworm, trixie and forky only.
+  212 of the 216 pairs exist in it, none with a bullseye row. On its own it changes nothing for
+  Debian 11; for the live keys it would supply fix-state reasons (the D85 shape, without git).
+- **Freexian's ELTS tracker JSON** (138 MB, served anonymously) has a bullseye row for all 216.
+  0 findings would disappear (no fix at or below the installed version); 13 would gain a fix
+  above it — all perl-base 5.32.1-4+deb11u6 from ELA-1856-1, an ELTS-only build a non-subscriber
+  cannot install; 81 would gain a fix-state reason (postponed 43, ignored 20, no-dsa 7,
+  not-affected 7, undetermined 4); 122 are unchanged. The seven not-affected rows (openssl ×3
+  on libssl1.1, systemd ×2, perl, zlib) are today's false positives, and **six of the seven
+  are annotations Freexian added** — Debian's own per-CVE pages carry no bullseye note for
+  them. The JSON's field names are the reverse of their contents (`nodsa` is free text,
+  `nodsa_reason` the tag), not-affected is `resolved` with `fixed_version "0"`, and
+  `repositories.bullseye` describes Freexian's archive, not Debian's suites.
+- **grype** (DB 2026-11-08, the weekly capture) is frozen at the same point: 211 matches,
+  145 not-fixed / 66 wont-fix / 0 fixed, none of the 13 ELA fixes, none of the 6 not-affected.
+- **Terms**: no licence or terms for the tracker JSON were found on the tracker, the ELTS
+  product page or the FAQ; the CSAF/VEX feed beside it is a subscription benefit (401
+  anonymously). The tracker's own index says its data "comes solely from" Debian's
+  security-tracker repository, which the six Freexian-only annotations contradict.
+
+**Why deferred.** Three reasons, any one sufficient. (1) The carry-forward interaction: a
+record new to `Debian:11` flips D110's `newUnder` to live and ends the carry, so a second
+source has to own the whole key from its first run — and 42 further bullseye rows for installed
+sources (36 CVEs, 6 TEMP ids) exist in Freexian's data that the carried key does not hold, so
+the first run would also change the key's shape; a provider that emitted bookworm or trixie
+beside bullseye would be refused by `sharedKeys`. (2) The data's terms are unknown, and D29
+stripped KISA for exactly that kind of question. (3) For a customer who is not an ELTS
+subscriber the gain is reasons, not fixes: 81 findings would read differently and 7 would
+rightly disappear, none would become actionable. The pilot's Debian 11 customers, if any, are
+told the first clause above instead.
+
+**Revisit when** a Debian 11 pilot customer is an ELTS subscriber (the 13 become installable
+fixes), or Freexian publishes terms for the JSON, or Debian 12 reaches the same cliff
+(bookworm LTS ends 2028-06-30 and the same tracker drop follows). **Groundwork:** the spike's
+join script and a dpkg comparer self-tested on 28 pairs sit in the evidence folder; D85's
+fix-state stamping seam is the place reasons would enter; `Provenance.KeyAsOf` (D113 revised)
+means a second source's date would be the key's own.
+
+---
+
 ### Replaying an rpmdb write-ahead log
 
 **Why deferred.** A `rpmdb.sqlite-wal` larger than its 32-byte header currently fails the

@@ -170,6 +170,11 @@ QA가 이름 붙인 경계입니다. 아래 모든 것은 JSON 보고서나 `ass
 아카이브의 날짜로 찍혔습니다. 그 이전에 빌드된 데이터베이스는 키별 날짜가 없어 다음 `db update`까지는
 이전처럼 읽힙니다.
 
+자기가 만들지 않은 타깃 — 다른 사람의 이미지, 체크아웃, SBOM — 에 `assay scan`을 돌리는
+서비스는 [docs/operating-envelope.ko.md](operating-envelope.ko.md)를 읽으세요: assay 가 스스로
+한정하는 것, 레지스트리 라이브러리가 한정하는 것, 배포 측이 제공해야 하는 것(egress, 자격 증명,
+프로세스 한도, kill 처리).
+
 ## 받아들인 finding waive하기
 
 어떤 finding은 진짜이지만 당신의 프로젝트와는 무관합니다 — CVE가 쓰지 않는

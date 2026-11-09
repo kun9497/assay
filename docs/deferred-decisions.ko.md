@@ -1324,6 +1324,56 @@ EUS 측정은 릴리스 문자열에는 없다고 말합니다), 메인라인 EO
 
 ---
 
+### LTS 이후의 Debian 11 — 두 번째 Debian 소스, 측정하고 미룸
+
+`Debian:11`은 통째로 carry되는 키(D110)로 2026-08-19에 동결됐다 — 키가 동결될 때 provider의 가장
+오래된 아카이브 날짜이고, seed는 2026-08-30에 빌드됐다. OSV의 Debian 소스인 Debian security
+tracker는 2026-08-31 LTS 종료와 함께 bullseye를 내렸으므로, 어떤 재빌드도 bullseye 수정을 되살리지
+못하고 두 번째 소스만이 할 수 있다. 2026-11-04 QA(§8, P-6)는 이 간극을 고지하거나 DLA 목록 top-up
+또는 Debian fix-state 사유로 닫으라고 했다. 2026-11-09 기준 고지했다: 모든 렌더러가 찍는 동결 문장이
+그 뒤 게시된 수정이 빠져 있을 수 있다고 말하고, README와 DESIGN이 Debian 11을 이름으로 대며 그렇게
+말하고, `docs/integrations.md`의 운영자 절이 `--db-max-age`가 그것에 무엇을 하는지 적는다. 닫는 것은
+측정하고 미뤘다.
+
+**2026-11-09 측정** — QA 이미지(`mirror.gcr.io/library/debian@sha256:6f519a81…`, finding 216건,
+distinct source/CVE 쌍 113개, 전부 `fixState: unknown`에 fixed 버전 없음; 증거는 QA 폴더의
+`p6-spike-2026-11-09/`):
+
+- **Debian security tracker JSON**(88 MB)은 sid, bookworm, trixie, forky만 싣는다. 216쌍 중 212쌍이
+  거기 있지만 bullseye 행은 하나도 없다. 그것만으로는 Debian 11에 아무것도 바꾸지 못한다. live 키에는
+  fix-state 사유를 줄 수 있다(git 없는 D85의 모양).
+- **Freexian ELTS tracker JSON**(138 MB, 익명으로 제공)에는 216건 전부 bullseye 행이 있다. 사라질
+  finding 0건(설치 버전 이하의 수정 없음); 설치 버전 위의 수정을 얻는 것 13건 — 전부 ELA-1856-1의
+  perl-base 5.32.1-4+deb11u6, 비구독자는 설치할 수 없는 ELTS 전용 빌드; fix-state 사유를 얻는 것
+  81건(postponed 43, ignored 20, no-dsa 7, not-affected 7, undetermined 4); 변함없는 것 122건.
+  not-affected 행 7건(libssl1.1의 openssl ×3, systemd ×2, perl, zlib)이 오늘의 오탐이고, **7건 중
+  6건은 Freexian이 덧붙인 주석**이다 — Debian 자신의 CVE별 페이지에는 그 bullseye 메모가 없다. JSON의
+  필드 이름은 내용과 반대이고(`nodsa`가 자유 텍스트, `nodsa_reason`이 태그), not-affected는
+  `resolved`에 `fixed_version "0"`이며, `repositories.bullseye`는 Debian의 suite가 아니라 Freexian의
+  아카이브를 설명한다.
+- **grype**(DB 2026-11-08, 주간 캡처)는 같은 지점에서 동결돼 있다: 211 매치, not-fixed 145 /
+  wont-fix 66 / fixed 0, ELA 수정 13건과 not-affected 6건을 하나도 모른다.
+- **약관**: tracker JSON의 라이선스나 약관은 tracker, ELTS 제품 페이지, FAQ 어디서도 찾지 못했다. 옆의
+  CSAF/VEX 피드는 구독 혜택이다(익명 401). tracker 자신의 색인은 데이터가 Debian의 security-tracker
+  저장소에서 "solely" 온다고 하는데, Freexian 전용 주석 6건이 그것과 모순된다.
+
+**왜 미루는가.** 세 가지 이유 중 하나면 충분하다. (1) carry-forward 상호작용: `Debian:11`에 새로운
+레코드는 D110의 `newUnder`를 live로 뒤집어 carry를 끝내므로 두 번째 소스는 첫 실행부터 키 전체를
+소유해야 한다 — 그리고 carry된 키가 갖지 않은, 설치된 소스에 대한 bullseye 행 42개(CVE 36 + TEMP id
+6)가 Freexian 데이터에 더 있어 첫 실행이 키의 모양도 바꾼다. bullseye 옆에 bookworm이나 trixie를
+함께 내는 provider는 `sharedKeys`가 거부한다. (2) 데이터의 약관을 모르고, D29는 바로 그런 질문
+때문에 KISA를 뺐다. (3) ELTS 구독자가 아닌 고객에게 얻는 것은 수정이 아니라 사유다: 81건이 다르게
+읽히고 7건이 마땅히 사라지지만, 조치 가능해지는 것은 없다. 파일럿에 Debian 11 고객이 있다면 위의 첫
+조항을 대신 고지한다.
+
+**언제 다시 볼까.** Debian 11 파일럿 고객이 ELTS 구독자일 때(13건이 설치 가능한 수정이 된다), 또는
+Freexian이 JSON의 약관을 공개할 때, 또는 Debian 12가 같은 절벽에 이를 때(bookworm LTS는 2028-06-30에
+끝나고 같은 tracker 하차가 뒤따른다). **미리 해 둔 것:** 스파이크의 조인 스크립트와 28쌍으로 자체
+검증한 dpkg 비교기가 증거 폴더에 있다. D85의 fix-state 스탬프 지점이 사유가 들어올 자리다.
+`Provenance.KeyAsOf`(D113 revised)로 두 번째 소스의 날짜는 키 자신의 것이 된다.
+
+---
+
 ### rpmdb write-ahead log 재생
 
 **왜 미뤘나.** 32바이트 헤더보다 큰 `rpmdb.sqlite-wal`은 현재 스캔을 실패시킵니다(D45). 대신
