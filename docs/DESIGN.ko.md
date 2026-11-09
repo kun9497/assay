@@ -1033,6 +1033,10 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       세 패밀리)에 대고 판정; 패밀리별 Wilson 95% 구간, 종료 0/1/2; 주간 차분 비교 다음에 실행. 첫 실행
       2026-11-09: 라벨 하나를 SUSE 자체 진술(CVE-2026-34182, 출시 빌드 옆의 "In progress")로 고친 뒤
       78/78
+- [x] 프로브된 위치가 그 파일을 소유한 OS 패키지를 이름 붙임 (D162) — `locations[].ownedBy`
+      `{name, version}`, rpm의 BASENAMES/DIRNAMES/DIRINDEXES(세 백엔드 모두), apk의 `F:`/`R:` 줄, dpkg의
+      `info/*.list`, pacman의 `files`에서; 뒤의 둘은 프로브 자체의 레이어 패스에서; 파일 단위의 정확한
+      소유; 스키마 19(추가형)
 - [x] QA 2026-10-30 수정:
       - 64 KiB 가 넘는 줄이 lockfile 을 더는 잘라 먹지 않음;
       - open 이 먼저 나열된 범위도 단일 버전 window 를 유지함 (D154 개정);

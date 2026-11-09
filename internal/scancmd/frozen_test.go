@@ -108,7 +108,7 @@ func TestRun_D110_JSONCarriesFrozenSinceOnlyOnTheFrozenKey(t *testing.T) {
 	}
 	// frozenSince itself was additive and omitempty, the D108 crossMappedFrom
 	// precedent, and bumped nothing; 12 is D111's coverage[], which is not.
-	if doc.SchemaVersion != 18 {
+	if doc.SchemaVersion != 19 {
 		t.Errorf("schemaVersion = %d, want 18", doc.SchemaVersion)
 	}
 	seen := map[string]bool{}

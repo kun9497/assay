@@ -111,7 +111,9 @@ stderr and in SARIF (`assay/inventory-scope`) which application packages inside 
 read and which were not — since D160 the probes read npm packages under the global
 `node_modules` roots and Go binaries directly in the standard bin directories (one extra layer
 pass; `inventoryScope.applicationPackages` is `partial`, schema 18; `npm` and `go-module` are
-inventoried types in the differential), and Python, Java and anything elsewhere stay unread. Findings
+inventoried types in the differential; since D162 each probed location names the OS package
+whose file list owns it, `locations[].ownedBy`, schema 19 — rpm header tags, apk `F:`/`R:`,
+dpkg `info/*.list`, pacman `files`), and Python, Java and anything elsewhere stay unread. Findings
 can be waived through a
 `.assay.yaml` ignore file (D102 — reason mandatory, expiry optional) or a producer's
 OpenVEX document (`--vex`, repeatable, D104 — not_affected/fixed suppress, a reasonless

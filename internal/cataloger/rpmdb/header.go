@@ -21,6 +21,7 @@
 package rpmdb
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -51,7 +52,20 @@ const (
 	// 0 of 1,049 across five real images, with the tag present on exactly
 	// the 13 packages whose RELEASE carries a module build marker.
 	tagModularityLabel = 5096
+	// The three tags that spell a package's file list (D162): file i is
+	// DIRNAMES[DIRINDEXES[i]] + BASENAMES[i]. DIRINDEXES is an INT32 array
+	// as long as BASENAMES; DIRNAMES carries a trailing slash. Read into
+	// Result.Files, never onto the package: the image path consults them
+	// for the probed application packages' locations only.
+	tagDirIndexes = 1116
+	tagBaseNames  = 1117
+	tagDirNames   = 1118
 )
+
+// maxFilesPerHeader bounds a file list the way headerLimits bound the header:
+// the largest real package measured carries a few thousand files, and a
+// count field that claims more than a million is damage, not a package.
+const maxFilesPerHeader = 1 << 20
 
 // RPM header data types. Four of the ten are enough for a NEVRA; the rest
 // (NULL, CHAR, INT8, INT16, INT64, BIN) appear in real headers but never on a
@@ -196,6 +210,76 @@ func (h header) i32(tag uint32) (int32, bool) {
 		return 0, false
 	}
 	return int32(binary.BigEndian.Uint32(h.data[e.offset : e.offset+4])), true
+}
+
+// strArray reads a whole STRING_ARRAY tag: count NUL-terminated strings laid
+// end to end. The same truncation rule as str: an element that runs off the
+// data store makes the whole array unreadable rather than short.
+func (h header) strArray(tag uint32) ([]string, bool) {
+	e, ok := h.find(tag)
+	if !ok || e.typ != typeStringArray || e.count > maxFilesPerHeader {
+		return nil, false
+	}
+	if uint64(e.offset) > uint64(len(h.data)) {
+		return nil, false
+	}
+	rest := h.data[e.offset:]
+	out := make([]string, 0, e.count)
+	for i := uint32(0); i < e.count; i++ {
+		j := bytes.IndexByte(rest, 0)
+		if j < 0 {
+			return nil, false
+		}
+		out = append(out, string(rest[:j]))
+		rest = rest[j+1:]
+	}
+	return out, true
+}
+
+// i32Array reads a whole INT32 tag.
+func (h header) i32Array(tag uint32) ([]int32, bool) {
+	e, ok := h.find(tag)
+	if !ok || e.typ != typeInt32 || e.count > maxFilesPerHeader {
+		return nil, false
+	}
+	if uint64(e.offset)+4*uint64(e.count) > uint64(len(h.data)) {
+		return nil, false
+	}
+	out := make([]int32, 0, e.count)
+	for i := uint32(0); i < e.count; i++ {
+		off := e.offset + 4*i
+		out = append(out, int32(binary.BigEndian.Uint32(h.data[off:off+4])))
+	}
+	return out, true
+}
+
+// files is the header's file list (D162), or nil when the package ships no
+// files or the three tags do not agree with each other: a BASENAMES without
+// its DIRINDEXES, or an index past DIRNAMES, is a header this build does not
+// trust for ownership, and ownership is additive information -- a location
+// without an owner is still located -- so nothing is skipped or counted.
+func files(h header) []string {
+	bases, ok := h.strArray(tagBaseNames)
+	if !ok || len(bases) == 0 {
+		return nil
+	}
+	dirs, ok := h.strArray(tagDirNames)
+	if !ok {
+		return nil
+	}
+	idx, ok := h.i32Array(tagDirIndexes)
+	if !ok || len(idx) != len(bases) {
+		return nil
+	}
+	out := make([]string, 0, len(bases))
+	for i, b := range bases {
+		d := idx[i]
+		if d < 0 || int(d) >= len(dirs) {
+			return nil
+		}
+		out = append(out, dirs[d]+b)
+	}
+	return out
 }
 
 // toPackage turns one header into a normalized package.

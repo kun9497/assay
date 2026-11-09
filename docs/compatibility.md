@@ -9,7 +9,7 @@ with a version bump, a **Breaking** entry in the [changelog](../CHANGELOG.md), a
 
 | Contract | What it is | Version field | Current |
 |---|---|---|---|
-| `report` | `assay scan --output json` | `schemaVersion` | 18 |
+| `report` | `assay scan --output json` | `schemaVersion` | 19 |
 | `provenance sidecar` | the file `--provenance <path>` writes (D120) | `schemaVersion` | 1 |
 | `status.json` | the published database's status, on the `status` branch (D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json` (D147) | `schemaVersion` | 1 |
@@ -74,6 +74,11 @@ it relied on:
   was `read`, `none` (probed, nothing there) or `not-read`, with the `roots` a probe reads.
   Every image scan's `applicationPackages` is `partial` from this schema on; `not-read` no
   longer occurs for it.
+- Schema 19 (additive): `findings[].package.locations[].ownedBy` — `{name, version}` of the
+  OS package whose file list names the location's path (D162), present on an image's probed
+  application packages (D160) when the distro's own package installed the file: rpm's
+  BASENAMES/DIRNAMES, apk's `F:`/`R:` lines, dpkg's `info/*.list`, pacman's `files`.
+  Exact-file ownership only; absent when no OS package lists the file or outside an image.
 
 ## The provenance sidecar, status.json and `db status`
 

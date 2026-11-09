@@ -60,6 +60,22 @@ const maxPagesWalked = 1 << 22
 type Result struct {
 	Packages []pkgmeta.Package
 	Skipped  []string
+	// Files maps every path the database's packages own (as rpm spells it,
+	// with the leading slash) to the index in Packages of the package that
+	// owns it (D162). Built from BASENAMES/DIRNAMES/DIRINDEXES by every
+	// backend; a header whose three tags do not agree contributes nothing.
+	// Nil when no package listed a file.
+	Files map[string]int
+}
+
+// own records h's file list as owned by the package at idx.
+func (r *Result) own(h header, idx int) {
+	for _, f := range files(h) {
+		if r.Files == nil {
+			r.Files = map[string]int{}
+		}
+		r.Files[f] = idx
+	}
 }
 
 // ReadSQLite reads an rpmdb.sqlite and returns the packages it holds.
@@ -141,6 +157,7 @@ func ReadSQLite(db []byte, walSize int64, ecosystem, path string) (Result, error
 			return nil
 		}
 		out.Packages = append(out.Packages, p)
+		out.own(h, len(out.Packages)-1)
 		return nil
 	})
 	if err != nil {
