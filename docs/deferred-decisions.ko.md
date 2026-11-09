@@ -1840,6 +1840,16 @@ D112는 스캔이 이미 손에 쥔 타깃에서 읽는 것에 상한을 둡니�
 **언제 다시 볼까.** 이 정책을 실어 나를 서비스 wrapper가 생기거나, `assay`를 돌리는
 operator 본인이 직접 입력하지 않은 첫 번째 외부 공급 타깃이 받아들여질 때.
 
+**2026-11-09에 다시 봄** (QA 2026-11-04, P-5 "운영 경계"). wrapper가 만들어지고 있으므로 그것이
+실어 나를 정책을 한 곳에 적었다: docs/integrations.md의 "직접 만들지 않은 타깃에 assay 운영하기"
+— `--config none` 또는 operator 소유 경로, `summary.components == 0`의 결정, `eol` 부재를
+"EOL 미상"으로, 동결 키를 `frozenSince`와 동결이 치르는 비용과 함께, 그리고 오늘 무엇을 거부하는지와
+함께 적은 `--db-max-age` 정책. 위의 것은 아무것도 움직이지 않았다: 호스트 allow-list, 사설 대역 DNS,
+격리, 할당량, 고객별 자격증명은 배포 쪽에 남고 `TargetKind` 헬퍼는 여전히 만들지 않았다. 이 검토가
+강제한 도구 변경 하나는 다른 곳에 있었다 — provider의 가장 오래된 아카이브로 키를 판단하던 나이
+게이트가 조용한 Amazon Linux 2 extras 토픽 하나 때문에 모든 Amazon Linux 2023 스캔을 거부하고 있었다(D113
+revised).
+
 ---
 
 ### SPDX SBOM 이 CONTAINS 로만 닿는 rpm 의 source

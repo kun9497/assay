@@ -1902,6 +1902,17 @@ would sit on top of is already built for a different reason.
 **Revisit when** a service wrapper exists to carry this policy, or the first externally
 supplied target — one the operator running `assay` did not type themselves — is accepted.
 
+**Revisited 2026-11-09** (QA 2026-11-04, P-5 "operational boundary"). The wrapper is being
+built, so the policy it carries is now written in one place: docs/integrations.md, "Operating
+assay on targets you did not author" — `--config none` or an operator-owned path, the
+`summary.components == 0` decision, `eol` absent as "EOL unknown", frozen keys shown with
+`frozenSince` and what frozen costs, and the `--db-max-age` policy with what it refuses today.
+Nothing above moved: host allow-lists, private-range DNS, isolation, quotas and per-customer
+credentials stay with the deployment, and the `TargetKind` helper is still unbuilt. The one
+tool change the review forced was elsewhere — the age gate judging a key by its provider's
+oldest archive refused every Amazon Linux 2023 scan for one quiet Amazon Linux 2 extras topic
+(D113 revised).
+
 ---
 
 ### Source for rpms an SPDX SBOM reaches only through CONTAINS

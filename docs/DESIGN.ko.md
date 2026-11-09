@@ -77,9 +77,13 @@ this result cannot be trusted").
   `/opt/bitnami` 마커)를 검사하며, 이미지에 설치된 npm, Python, Java, Go 바이너리 패키지는 검사하지
   않습니다. 그것들은 애플리케이션의 lockfile, 디렉터리, 바이너리, 또는 이미지의 SBOM을 스캔하십시오.
   [기록](deferred-decisions.ko.md#컨테이너-이미지-안의-애플리케이션-패키지).
-- **업스트림이 게시를 멈춘 릴리스**(D110). Debian 11은 2026-08-19부터 동결되어 있습니다. 마지막
-  권고는 버리지 않고 유지하며, 그 위의 finding에는 표시가 붙고, 새 CVE는 업스트림이 여전히 게시할
-  때만 들어옵니다.
+- **업스트림이 게시를 멈춘 릴리스**(D110). Debian 11은 2026-08-19부터 동결되어 있습니다 — 키가 동결될
+  때 provider의 가장 오래된 아카이브가 가진 날짜이고, seed는 2026-08-30에 빌드됐으므로 Debian 자신의
+  아카이브는 많아야 열하루 더 새것이었으며, 오늘 동결되는 키는 자기 아카이브의 날짜로 찍힙니다(D113
+  revised). 마지막 권고는 버리지 않고 유지하며, 그 위의 finding에는 표시가 붙고, 새 CVE는 업스트림이
+  여전히 게시할 때만 들어오며, 그 데이터 뒤에 Debian LTS가 낸 bullseye DLA(2026-08-31까지)와 그 뒤
+  Freexian ELTS의 모든 수정은 데이터베이스에 없습니다. 표, SARIF, `--explain`이 날짜 옆에 그렇게
+  말하고, JSON은 날짜를 `frozenSince`로 싣습니다.
 - **벤더 계보.** Ubuntu Pro(ESM/FIPS)와 Oracle Ksplice/FIPS 빌드는 메인라인 데이터로 판정하지 않고
   평가되지 않음으로 보고합니다(D53, D79, D142). EUS/AUS/TUS/E4S의 RHEL 호스트는 메인라인 errata로
   검사하며, 측정한 경우의 대부분에서 과경보하고 약 1.3%에서 미경보합니다. stderr 안내가 그렇다고
@@ -839,6 +843,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       동안 `--db-max-age`는 advisory 전용 의미를 그대로 유지한다. Amazon provider의
       하한은 가장 오래된 ACTIVE 저장소다: 2년간 조용한 extras 토픽은 closed로 치고
       `db status`가 나열하며, core는 결코 closed되지 않는다. 두 플래그 모두 기본값이 없다.
+      2026-11-09부터 아카이브를 여러 개 받는 provider는 키마다 자기 날짜를 기록하고
+      (`Provenance.KeyAsOf`, D113 revised) 접기, D110의 동결 날짜, `coverage[].dataAsOf`는
+      기록된 키의 날짜를, 없으면 provider의 날짜를 읽는다.
 - [x] 스캔이 타깃에서 읽는 모든 바이트는 상한이 있다 (D112; central directory를 읽기 전에
       jar 아카이브에 상한을 두는 것은 2026-10-07 개정부터) — 이미지 레이어에서 읽는
       각 파일과 디코드되는 각 SBOM이 512 MiB 한도(D61부터 jar cataloger가 써온 한도)를

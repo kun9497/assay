@@ -114,6 +114,14 @@ code and the report's sha256, even when the scan ends in exit 2 before any repor
   above, not the language packages installed in it (D70,
   [deferred](docs/deferred-decisions.md)), and every image scan says so on stderr and in
   SARIF (D141).
+- **Releases the upstream stopped publishing stay, marked** — a key the upstream no longer
+  serves is frozen (D110): its last advisories are kept, every finding on it carries
+  `frozenSince`, and fixes published upstream since may be missing — the table, SARIF and
+  `--explain` say so beside the date, and JSON carries the date as `frozenSince`. Debian 11 is
+  frozen today (bullseye's LTS ended 2026-08-31;
+  Freexian ELTS fixes are not read), and so is every other key its upstream dropped.
+  Operating guidance for a service in
+  [docs/integrations.md](docs/integrations.md#operating-assay-on-targets-you-did-not-author).
 - **Every source's rating is kept** — two databases routinely disagree about one CVE; a
   finding carries each source's band, score, and fixed version, and the gate takes the
   highest, so the report agrees with its own verdict.

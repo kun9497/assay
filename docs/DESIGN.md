@@ -81,8 +81,13 @@ affect (the first three below); the rest hold for every scan and are stated only
   installed in the image. Scan the application's lockfile, directory or binary, or an SBOM
   of the image, for those. [Recorded here](deferred-decisions.md#application-packages-inside-container-images).
 - **Releases the upstream stopped publishing** (D110). Debian 11 has been frozen since
-  2026-08-19: the last advisories are kept rather than dropped, findings on it are marked,
-  and new CVEs reach it only if the upstream still publishes them.
+  2026-08-19 — the date its provider's oldest archive carried when the key froze; the seed was
+  built 2026-08-30, so Debian's own archive was at most eleven days fresher, and a key that
+  freezes today is dated by its own archive (D113 revised) — the last advisories are kept rather
+  than dropped, findings on it are marked, new CVEs reach it only if the upstream still publishes
+  them, and the bullseye DLAs Debian LTS issued after that data (to 2026-08-31) and every
+  Freexian ELTS fix since are not in the database. The table, SARIF and `--explain` say so beside
+  the date; JSON carries the date as `frozenSince`.
 - **Vendor lineages.** Ubuntu Pro (ESM/FIPS) and Oracle Ksplice/FIPS builds are reported as
   not evaluated rather than judged against mainline data (D53, D79, D142). RHEL hosts on
   EUS/AUS/TUS/E4S are checked against mainline errata, which over-alarms in most measured
@@ -878,7 +883,10 @@ exited 0 while 24 findings went unmentioned.
       and a new `--db-max-rating-age` gates NVD/EPSS/KEV age on request while
       `--db-max-age` keeps its advisory-only meaning. The Amazon provider's floor is the
       oldest ACTIVE repository: an extras topic silent for two years is closed and listed by
-      `db status`; core is never closed. Neither flag has a default.
+      `db status`; core is never closed. Neither flag has a default. Since 2026-11-09 a
+      provider that fetches several archives dates each key by its own (`Provenance.KeyAsOf`,
+      D113 revised): the fold, D110's freeze date and `coverage[].dataAsOf` read the key's date
+      where one was recorded, the provider's otherwise.
 - [x] Every byte a scan reads from a target is bounded (D112; jar archives bounded before
       their central directory is read since the 2026-10-07 revision) — each file read out of an
       image layer and each SBOM decoded passes through a 512 MiB limit (the jar cataloger's

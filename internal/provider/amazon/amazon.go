@@ -275,6 +275,20 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 	var closed map[string]time.Time
 	var asOf time.Time
 	haveAsOf := true
+	// keyAsOf dates each release by its own repositories (D113 revised):
+	// AL2023 by AL2023's repositories, not by the quiet AL2 extras topic
+	// (ansible2, 2025-03-06 on the 2026-11-09 artifact, under the two-year
+	// line) that set the provider's floor. Within a release the fold is the
+	// same stalest-wins: AL2023 is dated by the oldest of core, nvidia and
+	// kernel-livepatch -- the livepatch channel publishes only when a kernel
+	// CVE warrants one (2026-09-30 when measured on 2026-11-09), so a short
+	// --db-max-age can still refuse AL2023 on a livepatch-quiet week; whether
+	// an event-driven core repository should date its release is open. A
+	// release one of whose repositories carried no date is left out, so it
+	// reads as the provider's (then unknown) date rather than as its dated
+	// repositories'.
+	keyAsOf := map[string]time.Time{}
+	undatedKeys := map[string]bool{}
 	total := 0
 
 	for _, r := range repos {
@@ -322,6 +336,8 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		covered[r.Ecosystem] = true
 		if repoAsOf.IsZero() {
 			haveAsOf = false
+			undatedKeys[r.Ecosystem] = true
+			delete(keyAsOf, r.Ecosystem)
 			continue
 		}
 		// D113. A topic whose newest advisory is more than two years older
@@ -348,6 +364,17 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		if asOf.IsZero() || repoAsOf.Before(asOf) {
 			asOf = repoAsOf
 		}
+		// The same fold per release: the stalest of ITS active repositories.
+		// A closed topic left the fold above, so it dates neither the
+		// provider nor its release.
+		if !undatedKeys[r.Ecosystem] {
+			if prev, ok := keyAsOf[r.Ecosystem]; !ok || repoAsOf.Before(prev) {
+				keyAsOf[r.Ecosystem] = repoAsOf
+			}
+		}
+	}
+	if len(keyAsOf) == 0 {
+		keyAsOf = nil
 	}
 	if !haveAsOf {
 		// If any repo gave no timestamp at all, the aggregate is unknown
@@ -377,6 +404,7 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		Records:    total,
 		Ecosystems: ecos,
 		Closed:     closed,
+		KeyAsOf:    keyAsOf,
 	}, nil
 }
 

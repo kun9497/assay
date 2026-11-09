@@ -9,7 +9,7 @@
 
 | 계약 | 무엇인가 | 버전 필드 | 현재 |
 |---|---|---|---|
-| `report` | `assay scan --output json` | `schemaVersion` | 16 |
+| `report` | `assay scan --output json` | `schemaVersion` | 17 |
 | `provenance sidecar` | `--provenance <path>`가 쓰는 파일(D120) | `schemaVersion` | 1 |
 | `status.json` | 배포 데이터베이스의 상태, `status` 브랜치(D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json`(D147) | `schemaVersion` | 1 |
@@ -55,6 +55,12 @@
   풀지 못한 이미지 안의 경로(Linux 한도 40을 넘는 심볼릭 링크 사슬, 또는 순환)도 적을 수 있고,
   `summary.unreadManifests` 가 그것도 셉니다. `reason` 이 어느 쪽인지 말합니다. 표의 개수는
   "path(s) not read" 로 읽히고, SARIF `assay/not-read` 는 manifest 가 아니라 경로를 설명합니다.
+- 스키마 17(추가형, 새 필드 없음): `coverage[].dataAsOf` 는 provider 의 **그 키** 데이터가 최신이었던
+  때입니다 — provider 가 기록했으면 키 자신의 아카이브 날짜(`Provenance.KeyAsOf`, D113 revised
+  2026-11-09), 아니면 provider 의 `DataAsOf`, 통째로 동결된 키는 동결 날짜. 전에는 모든 키에 provider 의
+  `DataAsOf` 였으므로 항상 `db status` 의 `providers[].dataAsOf` 와 같았지만, 이제 그보다 뒤일 수
+  있습니다(Amazon Linux 2 옆의 Amazon Linux 2023, 가장 오래된 OSV 아카이브 옆의 Debian 12). 그
+  필드 이전에 빌드된 데이터베이스는 키별 날짜가 없어 값이 이전처럼 읽힙니다.
 
 ## provenance sidecar, status.json, `db status`
 

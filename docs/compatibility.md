@@ -9,7 +9,7 @@ with a version bump, a **Breaking** entry in the [changelog](../CHANGELOG.md), a
 
 | Contract | What it is | Version field | Current |
 |---|---|---|---|
-| `report` | `assay scan --output json` | `schemaVersion` | 16 |
+| `report` | `assay scan --output json` | `schemaVersion` | 17 |
 | `provenance sidecar` | the file `--provenance <path>` writes (D120) | `schemaVersion` | 1 |
 | `status.json` | the published database's status, on the `status` branch (D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json` (D147) | `schemaVersion` | 1 |
@@ -57,6 +57,13 @@ it relied on:
   not only a manifest or directory, and `summary.unreadManifests` counts it. Its `reason`
   says which. The table's count reads "path(s) not read", and SARIF `assay/not-read`
   describes a path rather than a manifest.
+- Schema 17 (additive, no new field): `coverage[].dataAsOf` is when the provider's data for
+  THAT KEY was current — the key's own archive date where the provider recorded one
+  (`Provenance.KeyAsOf`, D113 revised 2026-11-09), the provider's `DataAsOf` otherwise, and
+  on a whole-key frozen key its freeze date. Before, it was the provider's `DataAsOf` for every
+  key, so it always equalled `db status` `providers[].dataAsOf`; now it can be later than that
+  (Amazon Linux 2023 beside Amazon Linux 2, Debian 12 beside the stalest OSV archive). A
+  database built before the field records no per-key date and the value reads as before.
 
 ## The provenance sidecar, status.json and `db status`
 

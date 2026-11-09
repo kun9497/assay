@@ -262,6 +262,7 @@ func (p *Provider) Name() string { return SourceName }
 func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error) (store.Provenance, error) {
 	prov := store.Provenance{Source: p.baseURL}
 	allCovered := map[string]struct{}{}
+	keyAsOf := map[string]time.Time{}
 	var known int
 	// D82: one counter across every ecosystem this Fetch covers, not one per
 	// archive -- Rocky Linux and AlmaLinux are two of p.ecosystems' entries
@@ -335,6 +336,19 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		prov.Records += n
 		for e := range covered {
 			allCovered[e] = struct{}{}
+			// Each key is dated by the archive that declared it (D113
+			// revised): Debian's keys by the Debian archive's Last-Modified,
+			// not by CleanStart's stale one through the provider-wide
+			// minimum below. One archive per key, by construction -- covered
+			// is the keys familyMatches ties to THIS archive's family, so no
+			// second archive can declare the same key and there is no older-
+			// or newer-wins to decide. A key whose archive carried no date is
+			// left out, so a reader falls back to DataAsOf -- which the same
+			// undated archive turns unknown below -- rather than borrowing a
+			// dated archive's date.
+			if !asOf.IsZero() {
+				keyAsOf[e] = asOf
+			}
 		}
 		if asOf.IsZero() {
 			continue
@@ -353,6 +367,9 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 	// honest answer.
 	if known != len(p.ecosystems) {
 		prov.DataAsOf = time.Time{}
+	}
+	if len(keyAsOf) > 0 {
+		prov.KeyAsOf = keyAsOf
 	}
 	prov.Ecosystems = slices.Sorted(maps.Keys(allCovered))
 	// D115: a rename is declared only when its successor is a key this run

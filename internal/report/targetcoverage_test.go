@@ -164,6 +164,31 @@ func TestCoverageOf_TwoProvidersDeclaringOneKey(t *testing.T) {
 			},
 			wantProvider: "a", wantAsOf: "2026-09-27", wantFrozen: "2026-05-01",
 		},
+		// D113 revised (2026-11-09): the key's own archive date, where the
+		// provider recorded one, is the date the record carries -- Debian:11's
+		// coverage line had read osv's provider-wide minimum, CleanStart's.
+		"the key's own date outranks the provider's": {
+			providers: map[string]store.Provenance{
+				"a": {Ecosystems: []string{"Go", "npm"}, DataAsOf: day("2026-08-19"),
+					KeyAsOf: map[string]time.Time{"Go": day("2026-08-30"), "npm": day("2026-08-19")}},
+			},
+			wantProvider: "a", wantAsOf: "2026-08-30",
+		},
+		"a key the provider did not date on its own falls back to the provider's": {
+			providers: map[string]store.Provenance{
+				"a": {Ecosystems: []string{"Go", "npm"}, DataAsOf: day("2026-08-19"),
+					KeyAsOf: map[string]time.Time{"npm": day("2026-08-30")}},
+			},
+			wantProvider: "a", wantAsOf: "2026-08-19",
+		},
+		"two providers compare on each one's date for the key": {
+			providers: map[string]store.Provenance{
+				"a": {Ecosystems: []string{"Go"}, DataAsOf: day("2026-09-27"),
+					KeyAsOf: map[string]time.Time{"Go": day("2026-09-01")}},
+				"b": {Ecosystems: []string{"Go"}, DataAsOf: day("2026-09-10")},
+			},
+			wantProvider: "a", wantAsOf: "2026-09-01",
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := CoverageOf(inv, store.Meta{Ecosystems: []string{"Go"}, Providers: tc.providers}, nil)
@@ -251,7 +276,7 @@ func TestTable_SuppressedRowCarriesMarkersAndTheirFootnotes(t *testing.T) {
 		t.Errorf("no '~' footnote for the suppressed row's marker:\n%s", out)
 	}
 	if !strings.Contains(out, "\n@ advisory data for openSUSE Leap:15.6 includes entries carried forward since 2026-04-30: "+
-		"the upstream stopped publishing some or all of it\n") {
+		"the upstream stopped publishing some or all of it, and fixes it has published since may be missing here\n") {
 		t.Errorf("no '@' footnote for the suppressed row's marker:\n%s", out)
 	}
 }
@@ -355,7 +380,7 @@ func TestSARIF_FrozenDataResultsPerKey(t *testing.T) {
 func TestFrozenSentence_CoversEntryLevelFreezes(t *testing.T) {
 	got := frozenSentence("Debian:11", "2026-08-01")
 	want := "advisory data for Debian:11 includes entries carried forward since 2026-08-01: " +
-		"the upstream stopped publishing some or all of it"
+		"the upstream stopped publishing some or all of it, and fixes it has published since may be missing here"
 	if got != want {
 		t.Errorf("frozenSentence = %q\nwant           %q", got, want)
 	}
