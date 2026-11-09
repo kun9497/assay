@@ -114,9 +114,17 @@ type dataFloor struct {
 // and the provider's DataAsOf is that morning's while the key's data stopped
 // in August.
 //
-// A provider whose DataAsOf is zero, or whose in-scope frozen key carries a
-// zero freeze date, has no age to report and lands in unknown: either way the
-// age of the data this scan reads from it was not recorded.
+// A key the provider dated on its own (Provenance.KeyAsOf, D113 revised
+// 2026-11-09) is judged by that date rather than the provider's: the amazon
+// provider declares Amazon Linux:2 and Amazon Linux:2023 with one DataAsOf,
+// set by the finished AL2 channel, and every AL2023 image scan under a
+// freshness gate was refused for a date that was not its data's -- with the
+// remedy "run `assay db update`", which could not help.
+//
+// A provider whose DataAsOf is zero (for a key it did not date on its own),
+// or whose in-scope frozen key carries a zero freeze date, has no age to
+// report and lands in unknown: either way the age of the data this scan reads
+// from it was not recorded.
 //
 // Ratings and enrichment are deliberately NOT considered. Both are additive:
 // a stale NVD window means some findings carry no score, which the report
@@ -139,12 +147,12 @@ func oldestProvider(m store.Meta, keys []string) dataFloor {
 		if len(in) == 0 {
 			continue
 		}
-		if p.DataAsOf.IsZero() || frozenUndated(p, in) {
+		if frozenUndated(p, in) || slices.ContainsFunc(in, func(k string) bool { return keyDate(p, k).IsZero() }) {
 			f.unknown = append(f.unknown, n)
 			continue
 		}
 		for _, k := range in {
-			at, frozenKey := p.DataAsOf, ""
+			at, frozenKey := keyDate(p, k), ""
 			// Not After rather than Before: a freeze dated the same instant as
 			// the provider is still the key's own date, and naming the freeze
 			// tells the reader the thing they can act on.
@@ -157,6 +165,16 @@ func oldestProvider(m store.Meta, keys []string) dataFloor {
 		}
 	}
 	return f
+}
+
+// keyDate is when p's data for key was current: the key's own archive date
+// when the provider recorded one, the provider's DataAsOf otherwise. Zero when
+// neither was recorded.
+func keyDate(p store.Provenance, key string) time.Time {
+	if at, ok := p.KeyAsOf[key]; ok && !at.IsZero() {
+		return at
+	}
+	return p.DataAsOf
 }
 
 // frozenUndated reports whether any of keys is frozen with no freeze date.

@@ -153,7 +153,7 @@ func TestRun_D110_TableMarksTheFrozenRowAndFootnotesTheDate(t *testing.T) {
 		t.Errorf("live row carries the frozen marker: %q", liveRow)
 	}
 	want := "\n@ advisory data for npm includes entries carried forward since 2026-06-30: " +
-		"the upstream stopped publishing some or all of it\n"
+		"the upstream stopped publishing some or all of it, and fixes published since then are not in this database\n"
 	if !strings.Contains(out, want) {
 		t.Errorf("table lacks the footnote line %q:\n%s", want, out)
 	}

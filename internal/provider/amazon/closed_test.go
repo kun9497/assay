@@ -62,7 +62,7 @@ func closedFixture(t *testing.T, coreDays, topicDays int) (prov providerResult) 
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
-	prov.DataAsOf, prov.Closed, prov.Records = got.DataAsOf, got.Closed, got.Records
+	prov.DataAsOf, prov.Closed, prov.Records, prov.KeyAsOf = got.DataAsOf, got.Closed, got.Records, got.KeyAsOf
 	prov.ids, prov.progress = ids, progress.String()
 	return prov
 }
@@ -70,6 +70,7 @@ func closedFixture(t *testing.T, coreDays, topicDays int) (prov providerResult) 
 type providerResult struct {
 	DataAsOf time.Time
 	Closed   map[string]time.Time
+	KeyAsOf  map[string]time.Time
 	Records  int
 	ids      []string
 	progress string

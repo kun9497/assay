@@ -37,7 +37,7 @@ const (
 	// d111Footnote is the reworded D110 sentence (P1-5): true for an
 	// entry-level freeze as well as a whole-key one.
 	d111Footnote = "@ advisory data for Alpine:v3.19 includes entries carried forward since " +
-		d111FrozenDate + ": the upstream stopped publishing some or all of it"
+		d111FrozenDate + ": the upstream stopped publishing some or all of it, and fixes published since then are not in this database"
 )
 
 // d111Coverage mirrors report.CoverageRecord's JSON shape. Decoded into a
@@ -391,7 +391,7 @@ func TestRun_D111_FrozenCleanKeyBesideALiveFinding(t *testing.T) {
 
 	table := run(Options{})
 	footnote := "\n@ advisory data for npm includes entries carried forward since 2026-06-30: " +
-		"the upstream stopped publishing some or all of it\n"
+		"the upstream stopped publishing some or all of it, and fixes published since then are not in this database\n"
 	if !strings.Contains(table, footnote) {
 		t.Errorf("table lacks the npm footnote %q:\n%s", footnote, table)
 	}

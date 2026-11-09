@@ -165,28 +165,38 @@ func newUnder(w, seed *store.Bolt, key string) (bool, error) {
 // freezeSince is the freeze time for key: the seed's existing Frozen[key] if
 // it had one -- the FIRST night the key's data stopped arriving, carried
 // unchanged on every later night rather than refreshed (D12) -- otherwise the
-// seed provider's DataAsOf, when the data being carried was last current.
+// key's own date in the seed provider's KeyAsOf when it recorded one (D113
+// revised 2026-11-09: Debian:11 had been dated 2026-08-19 by osv's
+// provider-wide minimum, which was the CleanStart archive's Last-Modified and
+// not Debian's), otherwise the seed provider's DataAsOf, when the data being
+// carried was last current.
 func freezeSince(seedMeta store.Meta, name, key string) time.Time {
 	if p, ok := seedMeta.Providers[name]; ok && slices.Contains(p.Ecosystems, key) {
-		if since, ok := p.Frozen[key]; ok {
-			return since
-		}
-		return p.DataAsOf
+		return keyFreezeDate(p, key)
 	}
 	// The key's seed owner under another name: a provider rename between two
 	// builds. Its provenance is still the truest date there is.
 	for _, n := range sortedKeys(seedMeta.Providers) {
 		p := seedMeta.Providers[n]
 		if slices.Contains(p.Ecosystems, key) {
-			if since, ok := p.Frozen[key]; ok {
-				return since
-			}
-			return p.DataAsOf
+			return keyFreezeDate(p, key)
 		}
 	}
 	// No seed provider declared it at all. The seed's build time is an upper
 	// bound on how fresh its data can be, which errs old, never fresh.
 	return seedMeta.BuiltAt
+}
+
+// keyFreezeDate is freezeSince's per-provider half: an existing freeze first,
+// then the key's own archive date, then the provider's.
+func keyFreezeDate(p store.Provenance, key string) time.Time {
+	if since, ok := p.Frozen[key]; ok {
+		return since
+	}
+	if at, ok := p.KeyAsOf[key]; ok && !at.IsZero() {
+		return at
+	}
+	return p.DataAsOf
 }
 
 // carryForward is D110. Two rules, one read of the seed's records:

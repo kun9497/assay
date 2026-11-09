@@ -58,8 +58,10 @@ type CoverageRecord struct {
 	Evaluated int    `json:"evaluated"`
 	State     string `json:"state"`
 	// Provider is the Meta.Providers entry that declares the key, "" when
-	// none does. DataAsOf is that provider's Provenance.DataAsOf (D12) as a
-	// full-date, "" when it recorded none.
+	// none does. DataAsOf is when that provider's data for THIS key was
+	// current (D12) as a full-date -- the key's own archive date where the
+	// provider recorded one (Provenance.KeyAsOf, D113 revised), its DataAsOf
+	// otherwise -- and "" when it recorded neither.
 	Provider    string `json:"provider"`
 	DataAsOf    string `json:"dataAsOf"`
 	FrozenSince string `json:"frozenSince,omitempty"`
@@ -188,14 +190,15 @@ func DistroOf(d *pkgmeta.Distro) *DistroRecord {
 	return rec
 }
 
-// providerOf names the provider that declares key and that provider's
-// DataAsOf. The build refuses two providers declaring one key, so normally
-// there is one candidate. If a hand-built database ever has two, the one whose
-// data is OLDEST wins — a zero DataAsOf, "not recorded", counting as oldest —
-// and among equals the first by name. matcher.frozenKeys keeps the earlier
-// freeze date on the same reasoning: a disclosure that understates staleness is
-// the one that misleads (D12). Ranged over sorted names so the answer never
-// depends on map order.
+// providerOf names the provider that declares key and when its data for that
+// key was current: the key's own date where the provider recorded one
+// (Provenance.KeyAsOf), its DataAsOf otherwise. The build refuses two
+// providers declaring one key, so normally there is one candidate. If a
+// hand-built database ever has two, the one whose data is OLDEST wins — a zero
+// date, "not recorded", counting as oldest — and among equals the first by
+// name. matcher.frozenKeys keeps the earlier freeze date on the same
+// reasoning: a disclosure that understates staleness is the one that misleads
+// (D12). Ranged over sorted names so the answer never depends on map order.
 func providerOf(m store.Meta, key string) (string, string) {
 	var (
 		name  string
@@ -207,8 +210,12 @@ func providerOf(m store.Meta, key string) (string, string) {
 		if !slices.Contains(p.Ecosystems, key) {
 			continue
 		}
-		if !found || p.DataAsOf.Before(asOf) {
-			name, asOf, found = n, p.DataAsOf, true
+		at := p.DataAsOf
+		if k, ok := p.KeyAsOf[key]; ok && !k.IsZero() {
+			at = k
+		}
+		if !found || at.Before(asOf) {
+			name, asOf, found = n, at, true
 		}
 	}
 	return name, dateOnly(asOf)

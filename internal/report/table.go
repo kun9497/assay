@@ -736,9 +736,16 @@ const frozenMarker = "@"
 // under a past-EOL key. The earlier wording ("the upstream stopped publishing
 // for this release") was true only of the first, and on the second it told a
 // reader the whole key was dead while most of it was still being refreshed.
+//
+// The second clause says what frozen COSTS, not only when it began (QA
+// 2026-11-04, P-6): Debian LTS shipped 22 bullseye DLAs after the Debian:11
+// freeze and Freexian's ELTS has shipped every bullseye fix since, none of
+// which this database holds -- so a reader of "carried forward since" alone
+// took a frozen key for a complete one, and the EOL line's "still under ELTS
+// until 2031" beside it read as coverage.
 func frozenSentence(key, since string) string {
 	return fmt.Sprintf("advisory data for %s includes entries carried forward since %s: "+
-		"the upstream stopped publishing some or all of it", key, since)
+		"the upstream stopped publishing some or all of it, and fixes published since then are not in this database", key, since)
 }
 
 // ecosystemCell is the ECOSYSTEM text for one finding, with the markers the

@@ -1,0 +1,68 @@
+package amazon
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/kun9497/assay/internal/advisory"
+)
+
+// D113 revised (2026-11-09): each release is dated by its own repositories
+// (Provenance.KeyAsOf). The provider's DataAsOf stays the stalest active
+// repository -- on the 2026-11-09 artifact that is AL2's 2025-03-06 -- and
+// attributing it to Amazon Linux:2023 refused every AL2023 image scan under a
+// freshness gate for a date that was not its data's.
+func TestFetch_KeyAsOfDatesEachReleaseByItsOwnRepositories(t *testing.T) {
+	mux := http.NewServeMux()
+	mountRepo(t, mux, "/stale", []updateFixture{{
+		id: "ALAS2-2026-0002", title: "stale repo update",
+		issued: "2026-01-05 10:00:00", updated: "2026-01-06 11:00:00",
+		severity: "important",
+		pkgs:     []pkgFixture{{name: "curl", epoch: "0", version: "7.0", release: "1.amzn2"}},
+	}})
+	mountRepo(t, mux, "/fresh", []updateFixture{{
+		id: "ALAS2023-2026-0003", title: "fresh repo update",
+		issued: "2026-06-01 10:00:00", updated: "2026-06-02 11:00:00",
+		severity: "important",
+		pkgs:     []pkgFixture{{name: "openssl", epoch: "0", version: "3.0", release: "1.amzn2023"}},
+	}})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := New(Options{
+		Repos: []Repo{
+			{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/stale/mirror.list"},
+			{Ecosystem: "Amazon Linux:2023", MirrorListURL: srv.URL + "/fresh/mirror.list"},
+		},
+		ExtrasBaseURL: quietExtrasServer(t),
+	})
+	prov, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil })
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	stale := time.Date(2026, 1, 6, 11, 0, 0, 0, time.UTC)
+	fresh := time.Date(2026, 6, 2, 11, 0, 0, 0, time.UTC)
+	if !prov.DataAsOf.Equal(stale) {
+		t.Errorf("DataAsOf = %v, want the stalest repository's %v, unchanged by the revision", prov.DataAsOf, stale)
+	}
+	if got := prov.KeyAsOf["Amazon Linux:2"]; !got.Equal(stale) {
+		t.Errorf("KeyAsOf[Amazon Linux:2] = %v, want %v", got, stale)
+	}
+	if got := prov.KeyAsOf["Amazon Linux:2023"]; !got.Equal(fresh) {
+		t.Errorf("KeyAsOf[Amazon Linux:2023] = %v, want its own repository's %v, not AL2's", got, fresh)
+	}
+}
+
+// A closed extras topic (D113) dates neither the provider nor its release:
+// the fixture's AL2 core is current and its one topic three years quiet, so
+// Amazon Linux:2's own date is core's.
+func TestFetch_KeyAsOfLeavesAClosedTopicOut(t *testing.T) {
+	got := closedFixture(t, 0, 3*365)
+	if at, ok := got.KeyAsOf["Amazon Linux:2"]; !ok || !at.Equal(fetchedAt) {
+		t.Errorf("KeyAsOf[Amazon Linux:2] = %v (present %v), want core's %v -- the closed topic must not date the release",
+			at, ok, fetchedAt)
+	}
+}

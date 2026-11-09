@@ -466,6 +466,28 @@ type Provenance struct {
 	// database built before this field decodes it nil, and nil is the true
 	// answer for one — nothing was ever carried before the field existed.
 	Frozen map[string]time.Time `json:"frozen,omitempty"`
+	// KeyAsOf is DataAsOf per ecosystem key, for a provider that fetches
+	// several archives or channels whose dates genuinely differ (D113,
+	// revised 2026-11-09): osv's one archive per distro family, Amazon's one
+	// repository per release. DataAsOf stays the oldest across them -- the
+	// provider is only as fresh as its stalest source -- but that one date
+	// attributed to every key misdated two things measured on the 2026-11-09
+	// artifact. The scan-time age gate judged Amazon Linux:2023 by the
+	// finished AL2 channel's 2025-03-06 and refused every AL2023 image under
+	// --db-max-age with the remedy "run `assay db update`", which cannot
+	// help; and D110's freeze date for Debian:11, read from osv's DataAsOf,
+	// was 2026-08-19 -- the CleanStart archive's stale Last-Modified, not
+	// Debian's. A key present here is dated by the archive(s) that declared
+	// it, the oldest of them when several did; a key absent here is dated by
+	// DataAsOf as before. A key one of whose archives carried no date is
+	// left out, so it reads as the provider's (possibly unknown) date rather
+	// than as the dated archive's -- the same "unknown, not min(known)" rule
+	// DataAsOf itself follows.
+	//
+	// Additive Meta JSON with no schema bump, Frozen's precedent: nil is the
+	// true answer for a database built before the field -- no per-key date
+	// was recorded, and every reader falls back to DataAsOf.
+	KeyAsOf map[string]time.Time `json:"key_as_of,omitempty"`
 	// Closed names the channels inside this provider -- Amazon's AL2 extras
 	// topics, today the only ones -- that published nothing for so long they
 	// no longer take part in DataAsOf (D113), with each one's newest
