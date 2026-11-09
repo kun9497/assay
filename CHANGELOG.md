@@ -8,6 +8,19 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
+- `docs/operating-envelope.md` (and its Korean twin): what a scan bounds itself (D112's sizes,
+  the 40-link bound, `--timeout`'s reach and that without it there is no deadline), what
+  go-containerregistry v0.21.7 bounds (manifest 100 MiB, token body 64 KiB, three attempts,
+  redirect-to-IP-literal refused and redirect-to-DNS followed, proxy environment honoured),
+  the memory model with peak RSS marked unmeasured, the credential chain, that a kill leaves no
+  exit-2 line and no `--provenance` sidecar, what the deployment must provide, and a checklist
+  for the S-2 test report whose commands are derived, not yet run. Linked from
+  `docs/integrations.md` and `SECURITY.md`. (QA 2026-11-04 S-2)
+- The deferred-decisions entry *Debian 11 after LTS* records the 2026-11-09 measurement of a
+  second Debian source against the QA image's 216 findings (Freexian's ELTS data: 0 would
+  disappear, 13 would gain an ELTS-only fix, 81 a reason, 7 are not-affected false positives;
+  Debian's own tracker no longer carries bullseye) and why it is deferred: the D110 carry
+  interaction, unknown terms, and no actionable gain for a non-subscriber. (QA 2026-11-04 P-6)
 - The frozen-key sentence the table footnote, SARIF's `assay/frozen-data` and `--explain` share
   now says what frozen costs: "…the upstream stopped publishing some or all of it, and fixes it
   has published since may be missing here" ("may": the date shown is the freeze, which can
