@@ -104,3 +104,53 @@ func TestFetch_KeyAsOfLeavesAReleaseWithAnUndatedRepositoryOut(t *testing.T) {
 		t.Errorf("KeyAsOf[Amazon Linux:2] = %v, want it absent: one of the release's repositories carried no date", at)
 	}
 }
+
+// The order the repositories arrive in must not matter: here the release's
+// CORE repository is the undated one and a dated extras topic follows it, so
+// the release stays out of KeyAsOf even though a dated repository came last.
+func TestFetch_KeyAsOfStaysOutOnceAnyRepositoryOfTheReleaseWasUndated(t *testing.T) {
+	mux := http.NewServeMux()
+	mountExtrasCatalog(t, mux, []string{"selinux-ng"})
+	mountRepo(t, mux, "/extras/selinux-ng/latest/x86_64", []updateFixture{{
+		id: "ALAS2SELINUX-NG-2026-003", severity: "medium",
+		issued: at(2), updated: at(2),
+		pkgs: []pkgFixture{{name: "selng", epoch: "0", version: "3.7", release: "1.amzn2"}},
+	}})
+	mountRepo(t, mux, "/core-al2", []updateFixture{{
+		id: "ALAS2-2026-902", severity: "low",
+		// no issued, no updated: the core repository is the undated one
+		pkgs: []pkgFixture{{name: "corepkg", epoch: "0", version: "1.2", release: "1.amzn2"}},
+	}})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := New(Options{
+		Repos:         []Repo{{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/core-al2/mirror.list"}},
+		ExtrasBaseURL: srv.URL,
+		Now:           func() time.Time { return fetchedAt },
+	})
+	prov, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil })
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if at, ok := prov.KeyAsOf["Amazon Linux:2"]; ok {
+		t.Errorf("KeyAsOf[Amazon Linux:2] = %v, want it absent: the undated core came first and the dated topic must not re-date the release", at)
+	}
+}
+
+// Within one release the stalest active repository wins, as DataAsOf's own
+// fold does across the provider: a current core beside an extras topic 400
+// days quiet (open -- closure is at two years) dates Amazon Linux:2 by the
+// topic, because the release's data is only as fresh as its least current
+// channel.
+func TestFetch_KeyAsOfIsTheStalestActiveRepositoryOfTheRelease(t *testing.T) {
+	got := closedFixture(t, 0, 400)
+	want := daysBeforeFetch(400)
+	if at, ok := got.KeyAsOf["Amazon Linux:2"]; !ok || !at.Equal(want) {
+		t.Errorf("KeyAsOf[Amazon Linux:2] = %v (present %v), want the open topic's %v, not core's %v",
+			at, ok, want, fetchedAt)
+	}
+	if !got.DataAsOf.Equal(want) {
+		t.Errorf("DataAsOf = %v, want %v: the same topic sets the provider's floor", got.DataAsOf, want)
+	}
+}
