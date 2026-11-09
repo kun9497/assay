@@ -541,6 +541,10 @@ func TestLoadLabels_PURLNameAndVersion(t *testing.T) {
 	for _, ok := range []Label{
 		label("go-x-net-below", "go", "pkg:golang/golang.org/x/net@v0.33.0", "golang.org/x/net", "v0.33.0", "CVE-2025-22870", "affected", "v0.36.0"),
 		label("npm-scoped-below", "npm", "pkg:npm/%40babel/traverse@7.23.1", "@babel/traverse", "7.23.1", "CVE-2023-45133", "affected", "7.23.2"),
+		// Maven joins group and artifact with ":" (the name OSV publishes),
+		// every other namespaced type with "/", as the CycloneDX reader does.
+		label("maven-log4j-below", "maven", "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0", "org.apache.logging.log4j:log4j-core", "2.14.0", "CVE-2021-44228", "affected", "2.15.0"),
+		label("composer-monolog-below", "composer", "pkg:composer/monolog/monolog@1.0.0", "monolog/monolog", "1.0.0", "CVE-2024-0001", "affected", "1.0.1"),
 	} {
 		if _, err := loadLabels(writeLabels(t, []Label{ok})); err != nil {
 			t.Errorf("%s did not load: %v", ok.ID, err)
@@ -549,6 +553,8 @@ func TestLoadLabels_PURLNameAndVersion(t *testing.T) {
 	for _, tc := range []struct{ name, purl, version, pkg, want string }{
 		{"substring version", "pkg:apk/alpine/busybox@1.36.1-r20?arch=x86_64", "1.36.1-r2", "busybox", `carrying the label's version "1.36.1-r2" (it carries "1.36.1-r20")`},
 		{"go module named by its last segment", "pkg:golang/golang.org/x/net@v0.33.0", "v0.33.0", "net", `purl names "golang.org/x/net", label names "net"`},
+		{"maven named with a slash", "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0", "2.14.0", "org.apache.logging.log4j/log4j-core", `purl names "org.apache.logging.log4j:log4j-core"`},
+		{"no name after the type", "pkg:npm@1.0.0", "1.0.0", "npm", `no name after the type "npm"`},
 		{"name differs", "pkg:deb/debian/libssl1.1@1.1.1n-0+deb11u5?arch=amd64", "1.1.1n-0+deb11u5", "openssl", `purl names "libssl1.1", label names "openssl"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -674,14 +680,17 @@ func TestCommittedLabels_LoadAndShape(t *testing.T) {
 	}
 	// Every family is a boundary pair: at least one affected and one clean
 	// matcher-class label, or its precision or recall has no denominator.
-	for _, fam := range []string{"alpine", "debian", "leap", "rhel", "alma", "amzn", "wolfi", "npm", "go"} {
+	fams := []string{"alpine", "debian", "leap", "rhel", "alma", "amzn", "wolfi", "npm", "go"}
+	for _, fam := range fams {
 		c := by[fam]
 		if c == nil || c.pos == 0 || c.neg == 0 {
 			t.Errorf("family %s: %+v, want at least one positive and one negative matcher-class label", fam, c)
 		}
 	}
-	if len(by) != 9 {
-		t.Errorf("families = %d (%v), want the nine seeded ones", len(by), by)
+	// A family this list does not name is one the loop did not check: add
+	// it here, with its own boundary pair, rather than let it in unheld.
+	if len(by) != len(fams) {
+		t.Errorf("families = %d (%v), want the %d named ones", len(by), by, len(fams))
 	}
 	if by["debian"] == nil || by["debian"].data == 0 {
 		t.Error("the Debian 11 after-freeze rows should be data-class")

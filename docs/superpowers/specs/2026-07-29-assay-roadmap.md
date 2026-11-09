@@ -8428,8 +8428,12 @@ labels file's description says so. After the respelling: 126 judged, precision a
 (0.937–1.000). The eight amzn labels read `PREDATES` against the 2026-11-08 artifact because that
 database's Amazon Linux 2023 key is dated 2025-03-06 by the pre-revision KeyAsOf; the first
 artifact built after D113 revised (PR #254) dates it by its own repos and judges them — the
-validFrom rule doing its job on the day it landed. A Go module's name is its whole purl path and
-an npm scope is part of the name; the loader's purl check reads both that way.
+validFrom rule doing its job on the day it landed. Their `expect.fixed` spelling is therefore
+unverified against assay's string until that run; the Amazon provider writes a non-zero epoch the
+way AlmaLinux's OSV does (`1:3.2.2-1.amzn2023.0.2`), and the two openssl-libs labels spell it so.
+The loader reads a purl's name the way the CycloneDX reader does — a distro purl's last segment,
+every other type's namespace joined into the name, `:` for Maven — so a label can never be named
+in a way the finding's `package.name` is not.
 
 **Gives up.** 140 labels over nine families is still a small set: a per-family lower bound near
 0.5–0.8 is what it supports, and it says nothing about the families it does not cover (Fedora,

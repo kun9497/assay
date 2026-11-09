@@ -1879,7 +1879,7 @@
       "id": "alma-curl-below/CVE-2025-9086",
       "case": "alma-curl-below",
       "family": "alma",
-      "purl": "pkg:rpm/almalinux/curl@7.76.1-35.el9_7.2?arch=x86_64&distro=almalinux-9.6&upstream=curl-7.76.1-35.el9_7.2.src.rpm",
+      "purl": "pkg:rpm/almalinux/curl@7.76.1-35.el9_7.2?arch=x86_64&distro=almalinux-9.7&upstream=curl-7.76.1-35.el9_7.2.src.rpm",
       "name": "curl",
       "version": "7.76.1-35.el9_7.2",
       "cve": "CVE-2025-9086",
@@ -1889,7 +1889,7 @@
       },
       "class": "matcher",
       "source": {
-        "statement": "ALSA-2026:1350 'Moderate: curl security update', Release date 2026-01-29: 'curl: libcurl: Curl out of bounds read for cookie path (CVE-2025-9086)'; updated packages include x86_64 curl-7.76.1-35.el9_7.3.x86_64.rpm. OSV ALSA-2026:1350 affected curl ecosystem AlmaLinux:9 events introduced 0 / fixed '7.76.1-35.el9_7.3' (no epoch).",
+        "statement": "ALSA-2026:1350 'Moderate: curl security update', Release date 2026-01-29: 'curl: libcurl: Curl out of bounds read for cookie path (CVE-2025-9086)'; updated packages include x86_64 curl-7.76.1-35.el9_7.3.x86_64.rpm. OSV ALSA-2026:1350 affected curl ecosystem AlmaLinux:9 events introduced 0 / fixed '7.76.1-35.el9_7.3' (no epoch). (ALSA-2026:1350 is an AlmaLinux 9.7 errata build; the purl says 9.7.)",
         "url": "https://errata.almalinux.org/9/ALSA-2026-1350.html",
         "fetchedAt": "2026-11-09T09:13:33Z"
       },
@@ -1899,7 +1899,7 @@
       "id": "alma-curl-fixed/CVE-2025-9086",
       "case": "alma-curl-fixed",
       "family": "alma",
-      "purl": "pkg:rpm/almalinux/curl@7.76.1-35.el9_7.3?arch=x86_64&distro=almalinux-9.6&upstream=curl-7.76.1-35.el9_7.3.src.rpm",
+      "purl": "pkg:rpm/almalinux/curl@7.76.1-35.el9_7.3?arch=x86_64&distro=almalinux-9.7&upstream=curl-7.76.1-35.el9_7.3.src.rpm",
       "name": "curl",
       "version": "7.76.1-35.el9_7.3",
       "cve": "CVE-2025-9086",
@@ -1908,7 +1908,7 @@
       },
       "class": "matcher",
       "source": {
-        "statement": "ALSA-2026:1350 'Moderate: curl security update', Release date 2026-01-29, fixes CVE-2025-9086; updated packages include x86_64 curl-7.76.1-35.el9_7.3.x86_64.rpm. OSV ALSA-2026:1350 curl AlmaLinux:9 fixed '7.76.1-35.el9_7.3'.",
+        "statement": "ALSA-2026:1350 'Moderate: curl security update', Release date 2026-01-29, fixes CVE-2025-9086; updated packages include x86_64 curl-7.76.1-35.el9_7.3.x86_64.rpm. OSV ALSA-2026:1350 curl AlmaLinux:9 fixed '7.76.1-35.el9_7.3'. (ALSA-2026:1350 is an AlmaLinux 9.7 errata build; the purl says 9.7.)",
         "url": "https://errata.almalinux.org/9/ALSA-2026-1350.html",
         "fetchedAt": "2026-11-09T09:13:33Z"
       },
@@ -2002,7 +2002,7 @@
       "cve": "CVE-2025-9230",
       "expect": {
         "state": "affected",
-        "fixed": "3.2.2-1.amzn2023.0.2"
+        "fixed": "1:3.2.2-1.amzn2023.0.2"
       },
       "class": "matcher",
       "source": {
@@ -2022,7 +2022,7 @@
       "cve": "CVE-2025-9231",
       "expect": {
         "state": "affected",
-        "fixed": "3.2.2-1.amzn2023.0.2"
+        "fixed": "1:3.2.2-1.amzn2023.0.2"
       },
       "class": "matcher",
       "source": {
