@@ -1845,8 +1845,9 @@ grype-only 상한(`maxGrypeOnlyApp`, D117 — 2026-10-12 추가)이 걸리거나
 jar 4개에 grype 전용 튜플 0, dist-info 21개는 전부 OS 소유. D160은 두 모양을 한 레이어 패스로 읽고
 나머지를 ecosystem별로 공개한다. 이 항목이 여전히 열어 두는 것: 이미지 안의 Python과 Java(dist-info
 파일이 RPM 소유라 파일 소유권 없이 읽으면 OS 패키지를 두 번 보고한다), 이미지 안의 jar, 이름 대지 않은
-경로의 트리와 바이너리 — 위의 D112 충돌을 가진 전체 트리 walk — 그리고 rpmdb와 dpkg 카탈로거가 파일
-목록을 읽지 않는다는 것이 드러나 미룬 `locations[].ownedBy`. 프로브가 덮지 않는 것은 서비스 측
+경로의 트리와 바이너리 — 위의 D112 충돌을 가진 전체 트리 walk. rpmdb와 dpkg 카탈로거가 파일 목록을
+읽지 않는다는 것이 드러나 미뤘던 `locations[].ownedBy`는 같은 날 D162로 들어갔다(네 OS 데이터베이스의
+파일 목록 전부; 파일 단위의 정확한 소유). 프로브가 덮지 않는 것은 서비스 측
 하이브리드가 계속 덮는다. **언제 다시 볼까.** `python`이나 `java-archive`의 `maxGrypeOnlyApp`
 ceiling이 트립할 때, 또는 사용자가 프로브 위치 밖의 이미지 내 애플리케이션 CVE를 보고할 때.
 

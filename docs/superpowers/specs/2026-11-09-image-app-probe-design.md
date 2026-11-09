@@ -3,8 +3,9 @@
 *English · [한국어](2026-11-09-image-app-probe-design.ko.md)*
 
 Status: **approved 2026-11-09, implemented as D160** (the `ownedBy` field was deferred to a
-follow-up on finding that no OS cataloger reads file lists today; `applicationPackages` says
-`partial`; the probes share one layer pass). Decision record: roadmap D160, revising D70. Reopens the deferral "Application
+follow-up on finding that no OS cataloger reads file lists today, and landed as D162 the same
+day — `locations[].ownedBy` is `{name, version}` rather than the one string proposed below;
+`applicationPackages` says `partial`; the probes share one layer pass). Decision record: roadmap D160, revising D70. Reopens the deferral "Application
 packages inside container images" in `docs/deferred-decisions.md` on new information: the
 2026-11-04 QA's §8 item S-1 names the gap as a blocker for the service, and a 2026-11-09
 measurement of all 26 scanner-diff targets shows exactly where the gap sits.

@@ -58,7 +58,7 @@ import (
 // what it does mean is that a consumer reading 2 or later can rely on every
 // field below being present, which is the guarantee the constant exists to
 // give.
-const schemaVersion = 18
+const schemaVersion = 19
 
 // Document is the stable shape of `assay scan --output json` (design goal
 // #3). It carries what Table shows plus what Table cannot: the full
@@ -370,6 +370,16 @@ type LocationRecord struct {
 	// Install is the install path under Path when it is not the package's
 	// own name (an npm alias); see pkgmeta.Location.Install.
 	Install string `json:"install,omitempty"`
+	// OwnedBy is the OS package whose file list names Path (D162, schema
+	// 19): present on an image's probed application packages when the
+	// distro shipped the file. See pkgmeta.Location.OwnedBy.
+	OwnedBy *OwnerRecord `json:"ownedBy,omitempty"`
+}
+
+// OwnerRecord names an OS package by its database name and version.
+type OwnerRecord struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
 }
 
 type AdvisoryRecord struct {
@@ -552,7 +562,11 @@ func packageRecord(p pkgmeta.Package) PackageRecord {
 		pr.Source = &SourceRecord{Name: p.Source.Name, Version: p.Source.Version}
 	}
 	for _, l := range p.Locations {
-		pr.Locations = append(pr.Locations, LocationRecord{Path: l.Path, LayerDigest: l.LayerDigest, Install: l.Install})
+		lr := LocationRecord{Path: l.Path, LayerDigest: l.LayerDigest, Install: l.Install}
+		if l.OwnedBy != nil {
+			lr.OwnedBy = &OwnerRecord{Name: l.OwnedBy.Name, Version: l.OwnedBy.Version}
+		}
+		pr.Locations = append(pr.Locations, lr)
 	}
 	return pr
 }

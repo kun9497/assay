@@ -1093,6 +1093,10 @@ exited 0 while 24 findings went unmentioned.
       Wilson 95% intervals per family, exit 0/1/2; runs weekly after the differential. First run
       2026-11-09: 78/78 once one label was corrected from SUSE's own statement (CVE-2026-34182,
       "In progress" beside the released build)
+- [x] A probed location names the OS package that owns its file (D162) —
+      `locations[].ownedBy` `{name, version}` from rpm's BASENAMES/DIRNAMES/DIRINDEXES (all three
+      backends), apk's `F:`/`R:` lines, dpkg's `info/*.list` and pacman's `files`, the last two in
+      the probes' own layer pass; exact-file ownership; schema 19 (additive)
 - [x] QA 2026-10-30 fixes:
       - a line over 64 KiB no longer truncates a lockfile;
       - an opens-first range keeps its single-version windows (revises D154);

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/kun9497/assay/internal/cataloger/cyclonedx"
+	"github.com/kun9497/assay/internal/cataloger/dpkgdb"
 	"github.com/kun9497/assay/internal/cataloger/gobinary"
 	"github.com/kun9497/assay/internal/cataloger/npminstalled"
 	"github.com/kun9497/assay/internal/pkgmeta"
@@ -60,7 +61,11 @@ func isELF(head []byte) bool {
 // says so with ScopeNone. An installed package.json with no version is
 // counted in SkippedNoVersion (D36): a component whose version is unknown,
 // not one silently dropped.
-func catalogApplicationProbes(ctx context.Context, img *source.Image) ([]pkgmeta.Package, cyclonedx.Stats, []report.ApplicationScopeRecord, error) {
+//
+// owned is the file ownership the OS database already yielded (rpm, apk);
+// osPkgs the OS inventory, for the dpkg and pacman lists this pass reads
+// (D162). Both may be nil: the probes then locate without an owner.
+func catalogApplicationProbes(ctx context.Context, img *source.Image, owned *fileOwners, osPkgs []pkgmeta.Package) ([]pkgmeta.Package, cyclonedx.Stats, []report.ApplicationScopeRecord, error) {
 	var (
 		pkgs  []pkgmeta.Package
 		stats cyclonedx.Stats
@@ -71,13 +76,19 @@ func catalogApplicationProbes(ctx context.Context, img *source.Image) ([]pkgmeta
 	// read of every layer): package.json at any depth under the npm roots,
 	// and executables directly in the bin directories whose first bytes are
 	// ELF. A package.json is accepted at the sniff unread; a non-ELF
-	// executable is declined there and costs four bytes.
+	// executable is declined there and costs four bytes. D162 adds the two
+	// ownership roots to the same pass: dpkg's `.list` files and pacman's
+	// `files`, accepted unread like a package.json.
 	roots := append(append([]string{}, npminstalled.Roots...), goBinDirs...)
+	roots = append(roots, dpkgdb.InfoDir, pacmanLocalDir)
 	files, _, err := img.FilesProbed(ctx, roots, probeCandidate, probeSniff)
 	if err != nil {
 		return nil, cyclonedx.Stats{}, nil, fmt.Errorf("application probes: %w", err)
 	}
 
+	if owned == nil {
+		owned = newFileOwners(img)
+	}
 	npmFiles := map[string][]byte{}
 	layerOf := map[string]string{}
 	type goBin struct {
@@ -85,13 +96,17 @@ func catalogApplicationProbes(ctx context.Context, img *source.Image) ([]pkgmeta
 		file source.FileFromLayer
 	}
 	var bins []goBin
-	for p, f := range files {
-		if path.Base(p) == "package.json" {
+	for _, p := range source.SortedNames(files) {
+		f := files[p]
+		switch {
+		case isOwnershipList(p):
+			owned.addList(p, f, osPkgs)
+		case path.Base(p) == "package.json":
 			npmFiles[p] = f.Data
 			layerOf[p] = f.DiffID
-			continue
+		default:
+			bins = append(bins, goBin{p, f})
 		}
-		bins = append(bins, goBin{p, f})
 	}
 
 	npmPkgs, npmStats := npminstalled.Catalog(npmFiles)
@@ -133,6 +148,8 @@ func catalogApplicationProbes(ctx context.Context, img *source.Image) ([]pkgmeta
 	for _, eco := range applicationEcosystemsNotRead {
 		scope = append(scope, report.ApplicationScopeRecord{Ecosystem: eco, State: report.ScopeNotRead})
 	}
+	// D162: every probed location the OS inventory owns says so.
+	owned.stamp(pkgs)
 	return pkgs, stats, scope, nil
 }
 
@@ -142,6 +159,16 @@ func catalogApplicationProbes(ctx context.Context, img *source.Image) ([]pkgmeta
 // itself, so one match serves both probes; which root a name is under was
 // already decided by FilesProbed.
 func probeCandidate(name string, h *tar.Header) bool {
+	// D162: a dpkg `.list` or a pacman `files` under its root, a regular
+	// file; anything else under those roots (a `.md5sums`, a `desc`) is
+	// declined here and never read.
+	if isOwnershipList(name) {
+		switch h.Typeflag {
+		case tar.TypeReg, tar.TypeGNUSparse, tar.TypeCont:
+			return h.Size <= source.MaxFileBytes
+		}
+		return false
+	}
 	if path.Base(name) == "package.json" {
 		return underAny(name, npminstalled.Roots)
 	}
@@ -175,7 +202,7 @@ func probeCandidate(name string, h *tar.Header) bool {
 // probeSniff accepts every package.json unread and an executable only when
 // its first four bytes are the ELF magic.
 func probeSniff(name string, head []byte) bool {
-	if path.Base(name) == "package.json" {
+	if isOwnershipList(name) || path.Base(name) == "package.json" {
 		return true
 	}
 	return isELF(head)

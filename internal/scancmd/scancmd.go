@@ -1550,6 +1550,10 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 	var pkgs []pkgmeta.Package
 	var diffID string
 	var skippedRecords int
+	// owned is D162's file ownership from the database read below (rpm and
+	// apk carry their file lists inside it); dpkg's and pacman's lists are
+	// files the probe pass reads, so they join inside catalogApplicationProbes.
+	owned := newFileOwners(img)
 	switch {
 	case hasAPK:
 		p, err := apkdb.Parse(bytes.NewReader(apkFound.Data), ecosystem)
@@ -1557,6 +1561,11 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, fmt.Errorf("parse %s: %w", apkPath, err)
 		}
 		pkgs, diffID = p, apkFound.DiffID
+		// D162: the database's own F:/R: lines say which package put
+		// each file there.
+		if err := owned.fromAPK(apkFound.Data, p, apkFound.DiffID); err != nil {
+			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, fmt.Errorf("parse %s file list: %w", apkPath, err)
+		}
 	case files[dpkgDBPath].Data != nil:
 		f := files[dpkgDBPath]
 		p, err := dpkgdb.Parse(bytes.NewReader(f.Data), ecosystem)
@@ -1645,6 +1654,7 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 		// is set here, once, for all three backends.
 		rpmdb.ResolveSourceVersions(res.Packages)
 		pkgs, diffID, skippedRecords = res.Packages, f.DiffID, len(res.Skipped)
+		owned.fromRPM(res, f.DiffID) // D162: BASENAMES/DIRNAMES/DIRINDEXES
 	case len(pacmanFiles) > 0:
 		// D97. One desc file per package, parsed in sorted order for the
 		// same reason status.d's own loop above is: FilesNamed returns a
@@ -1723,7 +1733,7 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 	// Bitnami halves for D99's reason. An installed package.json the npm
 	// probe could not turn into a package is a component whose version is
 	// unknown (D36) and is counted with the damaged headers below.
-	appPkgs, appStats, appScope, err := catalogApplicationProbes(ctx, img)
+	appPkgs, appStats, appScope, err := catalogApplicationProbes(ctx, img, owned, pkgs)
 	if err != nil {
 		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
 	}

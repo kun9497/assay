@@ -1913,8 +1913,9 @@ dist-info 21 and all OS-owned. D160 reads the two shapes in one layer pass and d
 rest per ecosystem. What this entry still holds open: Python and Java inside images (the
 dist-info files are RPM-owned, so reading them without file ownership would double-report OS
 packages), jars inside images, trees and binaries at unnamed paths — the whole-tree walk, with
-the D112 collision above — and `locations[].ownedBy`, deferred when the rpmdb and dpkg
-catalogers turned out to read no file lists. The service-side hybrid stays the way to cover
+the D112 collision above. `locations[].ownedBy`, deferred when the rpmdb and dpkg catalogers
+turned out to read no file lists, landed as D162 the same day (all four OS databases' file
+lists; exact-file ownership). The service-side hybrid stays the way to cover
 what the probes do not. **Revisit when** a `python` or `java-archive` `maxGrypeOnlyApp`
 ceiling trips, or a user reports an in-image application CVE outside the probed locations.
 
