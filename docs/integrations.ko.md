@@ -119,6 +119,47 @@ pull-through 캐시는 assay 가 그 태그를 이름으로 요청하므로 필�
 데이터베이스는 스캔과 직교합니다: 잡마다 한 번 갱신(또는 캐시)하면, 이후 모든 `assay
 scan`은 읽기만 합니다. SBOM이나 로컬 tarball 스캔은 네트워크 호출을 전혀 하지 않습니다.
 
+## 직접 만들지 않은 타깃에 assay 운영하기
+
+운영자가 직접 만들지 않은 이미지나 SBOM을 스캔하는 서비스나 공용 러너를 위한 절입니다 — 2026-11-04
+QA가 이름 붙인 경계입니다. 아래 모든 것은 JSON 보고서나 `assay db status --output json`에서 읽을 수
+있고, stderr가 필요한 것은 없습니다.
+
+- **ignore 파일은 고르고, 발견하게 두지 마세요.** 모든 스캔을 `--config none`으로, 또는 운영자가
+  소유한 파일을 가리키는 `--config <path>`로 돌리세요. `--config`가 없으면 스캔은 작업 디렉터리의
+  `.assay.yaml`을 적용하므로(그 디렉터리만, 상위는 아님) 체크아웃이 자기 finding을 스스로 waive할 수
+  있습니다. provenance가 어느 쪽이었는지 기록합니다: `provenance.waivers.ignoreFile.path`가
+  `"none"`이거나, `discovered: false`와 함께 그 경로입니다.
+- **빈 인벤토리는 직접 거부하거나 표시하세요.** `summary.components == 0`은 설계상 exit 0입니다 —
+  `--fail-on*` 게이트가 없는 스캔이 그렇듯이. "읽은 것이 없음"을 "찾은 것이 없음"으로 읽어서는 안 되는
+  파이프라인은 `summary.components`를 읽고 스스로 결정합니다. assay가 대신 결정하지 않습니다.
+- **`eol`이 없으면 "EOL 미상"으로 보여 주세요.** 릴리스를 맞출 수 없을 때 — 배포판 식별 없음, 모르는
+  릴리스, end-of-life 행 없음 — 그 키는 생략됩니다. 이유는 stderr에만, 그것도 `--fail-on-eol`을 줬을
+  때만 나옵니다. `distro.recognized`가 릴리스를 알아봤는지는 말해 줍니다. `eol`이 있으면 `eolFrom`,
+  `eolLabel`, `eoesFrom`, `eoesLabel`을 그대로 보여 주세요.
+- **동결된 키는 동결된 것으로 보여 주세요.** `coverage[]`는 인벤토리가 가진 ecosystem 키마다 한
+  레코드를 두고 `state`, `provider`, `dataAsOf`(그 provider의 그 키 데이터가 최신이었던 때), 동결된
+  키에는 `frozenSince`를 싣습니다. `summary.frozenKeys`가 그 수를 세고, 그런 키의 모든 finding에
+  `frozenSince`가 붙습니다. 동결된 키의 데이터는 그 날짜에 멈췄고 그 뒤 게시된 수정은 데이터베이스에
+  없습니다 — 표의 각주가 그러듯 날짜 옆에 그렇게 적으세요. 동결 집합은 `db update`마다 한 번
+  `assay db status --output json`(`providers[].frozen[]`)에서 읽을 수 있습니다.
+- **나이 정책을 명시하고, 그것이 무엇을 거부하는지 아세요.** `--db-max-age`는 키별로 판단합니다: live
+  키는 provider의 그 키 데이터가 최신이었던 때로, 동결된 키는 동결 시점으로(D113). 2026-11-09
+  아티팩트에서 `--db-max-age=168h`는 모든 Debian 11 이미지(2026-08-19부터 동결)와 모든 Ubuntu 25.10
+  이미지(2026-10-01부터 동결)를 거부하고, 업스트림이 멈추는 어떤 키든 거부하게 됩니다. 거부 메시지는
+  키를 이름으로 대고 `db update`가 도움이 되지 않는다고 말합니다. 그러므로 지원 종료 이미지를 스캔하는
+  서비스는 동결 데이터에 대해 받아들이는 나이를 넘기거나, `--db-max-age`를 주지 않고 스캔 뒤
+  `coverage[].dataAsOf`를 키별로 판단하면서 D139의 7일 경고(와 `provenance.database.builtAt`)를
+  신선도 경보로 삼습니다. 등급 신선도를 약속한다면 `--db-max-rating-age`도 넘기세요.
+  `provenance.policy`가 두 플래그를 준 그대로 기록합니다.
+
+2026-11-09 이전에는 나이 게이트와 `coverage[].dataAsOf`가 provider당 날짜 하나를 읽었습니다. 아카이브를
+여러 개 받는 provider — OSV는 배포판 계열마다 하나, Amazon은 릴리스마다 하나 — 에서는 그것이 가장
+오래된 아카이브의 날짜였으므로, 모든 Amazon Linux 2023 스캔이 Amazon Linux 2의 끝난
+채널(2025-03-06) 때문에 `--db-max-age`에 거부됐고, Debian 11의 동결은 Debian이 아니라 CleanStart
+아카이브의 날짜로 찍혔습니다. 그 이전에 빌드된 데이터베이스는 키별 날짜가 없어 다음 `db update`까지는
+이전처럼 읽힙니다.
+
 ## 받아들인 finding waive하기
 
 어떤 finding은 진짜이지만 당신의 프로젝트와는 무관합니다 — CVE가 쓰지 않는

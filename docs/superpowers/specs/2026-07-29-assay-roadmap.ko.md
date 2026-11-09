@@ -4348,7 +4348,9 @@ seed됨)는 복원했다: "restored its entry on 43802 advisories re-emitted wit
 since 2026-08-19; 1 not re-emitted at all, left withdrawn (D16)". `Debian:11`은 seed의
 advisory 46,365개에서 46,364개로 바뀌었고, 36m25s짜리 빌드는 `--force` 없이
 `sha256:ba60414f…`로 발행됐다. 동결 날짜는 이 문단이 애초 계획했던 2026-08-30이 아니라
-seed의 osv `DataAsOf`(`freezeSince`, `internal/dbcmd/carry.go:148`)다. `Debian:11`은 그
+seed의 osv `DataAsOf`(`freezeSince`, `internal/dbcmd/carry.go:148`)다 — 그리고 2026-11-09부터는
+seed가 기록한 키 자신의 아카이브 날짜다(D113 revised: 2026-08-19는 Debian이 아니라 CleanStart
+아카이브의 `Last-Modified`였다). 기존 동결은 그대로 carry된다. `Debian:11`은 그
 실행에서 유일한 복원 줄이었다: 첫 번째 실행이 항목 190개를 복원했던 열두 개 키 중 어느
 것도 이번에는 복원 줄을 받지 못했다.
 
@@ -4471,7 +4473,7 @@ CLI는 악성 레이어가 위협 모델이 아닌, 개발자 자신의 이미�
 돌고, 이미지 안에서는 결코 돌지 않는다.
 
 **빠지는 것.** 스캔이 만드는 레이어 수나 전체 레이어 패스 수에는 상한이 없다(`Files`가
-심볼릭 링크를 최대 여덟 홉까지, 그다음 `status.d`, 그다음 Bitnami의 둘 — 최소한의
+링크를 최대 40개까지(2026-10-22 감사의 상한), 그다음 `status.d`, 그다음 Bitnami의 둘 — 최소한의
 Alpine 이미지에서 전체 패스 네 번); 그것들은 메모리가 아니라 시간을 곱하며, 시간은 이제
 `--timeout`이 제한한다. `--timeout`은 레지스트리 fetch와 레이어 순회에만 닿고 그 외에는
 닿지 않는다: SBOM·디렉터리·바이너리·jar 타깃은 컨텍스트를 참조하지 않으므로, 순회가
@@ -4585,6 +4587,31 @@ Debian 11 스캔은 provider의 신선해 보이는 날짜를 통과하는 대�
 받아들이는 나이로 게이트를 맞추면 된다; 같은 질문에 대한 세 번째 플래그는
 D18의 divergence table이 경고하는 바로 그것이고, D111은 이미 하나를
 거절했다.
+
+**빠지는 것.** 스토어의 키별 `DataAsOf`(Amazon의 core/extras 분리는 여전히 한 키에 떨어지므로
+하한을 고치지 못했을 것이다; 키들이 정말 다른 속도로 늙는 provider를 기다린다). 아티팩트
+annotation의 권장 기간. 보강 데이터의 나이(D59가 말했듯 D3의 표시용 사본).
+
+**수정 (2026-11-09).** 빠져 있던 키별 `DataAsOf`가 `Provenance.KeyAsOf`로 들어왔다. 기다리던
+provider가 둘이나 있었기 때문이다. amazon provider는 `Amazon Linux:2`와 `Amazon Linux:2023`을
+하나의 `DataAsOf`로 선언하는데, 2026-11-09 아티팩트에서 그 날짜는 2025-03-06 — AL2의 끝난
+채널들로, 2026-06-30에 끝난 릴리스의 core와 extras라 위의 2년 closure가 닿지 않는다 — 이어서
+`--db-max-age=168h` 아래 모든 AL2023 이미지 스캔이 자기 데이터의 날짜가 아닌 날짜로 거부됐고,
+처방은 도움이 될 수 없는 "run `assay db update`"였다. 그리고 osv의 `DataAsOf`는 열네 개
+아카이브의 최솟값이다: D110의 `freezeSince`가 그것을 `Debian:11`의 동결 날짜로 읽어
+2026-08-19를 기록했는데, 그것은 CleanStart 아카이브의 오래된 `Last-Modified`였고 Debian
+자신의 아카이브는 열하루 더 새것이었다. 이제 osv는 키마다 그 키를 선언한 아카이브의 날짜를
+(`familyMatches`에 의해 키당 아카이브 하나), amazon은 릴리스마다 자기 활성 저장소 중 가장 오래된
+날짜를(closed 토픽은 어느 쪽도 찍지 않고, 저장소 하나라도 날짜가 없는 릴리스는 빠진다 —
+`DataAsOf`와 같은 "min(known)이 아니라 unknown" 규칙) 기록하며, 세 독자가 기록된 키의 날짜를,
+없으면 provider의 날짜를 읽는다: 여기의 스캔 접기, D110의 `freezeSince`, D111의
+`coverage[].dataAsOf`. `DataAsOf` 자체는 그대로다 — 여전히 provider의 최솟값이라 아티팩트의
+`data-as-of` annotation과 발행 가드는 이전처럼 읽힌다. 기존 동결은 그대로 carry된다(D12). 그래서
+`Debian:11`은 2026-08-19를 유지하고 — 진실보다 열하루 오래된, 오래된 쪽으로 틀리는 날짜 — 다음에
+동결되는 키부터 자기 아카이브의 날짜로 찍힌다. 스토어 필드는 additive Meta JSON이다(Frozen의
+선례): 그 전에 빌드된 데이터베이스는 다음 빌드까지 이전처럼 읽힌다. 보고서의 `schemaVersion`은
+바뀌지 않는다: `coverage[].dataAsOf`는 타입과 의미("이 키의 데이터가 최신이었던 때")를 유지하고
+키별로 참이 될 뿐이다.
 
 ---
 

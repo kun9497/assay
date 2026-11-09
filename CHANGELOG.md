@@ -8,6 +8,17 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
+- The frozen-key sentence every renderer shares (the table footnote, SARIF's
+  `assay/frozen-data`, `--explain`) now says what frozen costs: "…the upstream stopped
+  publishing some or all of it, and fixes published since then are not in this database".
+  Debian LTS shipped bullseye DLAs after the `Debian:11` freeze and Freexian ELTS has shipped
+  every bullseye fix since; a reader of the date alone took the key for complete, and the EOL
+  line's "still under ELTS until 2031" beside it read as coverage. (QA 2026-11-04 P-6)
+- `docs/integrations.md` gains "Operating assay on targets you did not author": the
+  obligations of a service or shared runner, each tied to the report field that carries it
+  (`--config none`, `summary.components`, `eol`, `coverage[]`, `--db-max-age` and what it
+  refuses on the current artifact). The deferred entry "Safe handling of externally supplied
+  targets" records the revisit. (QA 2026-11-04 P-5)
 - The weekly scanner differential and the nightly D114 gate gain a `ubi10` target
   (`registry.access.redhat.com/ubi10/ubi`, digest-pinned), seeded from a measured run at D93's
   85% / 2x (minAgree 326, minFindings 333, maxFindings 784, maxAssayOnlyFixed 25). Red Hat's
@@ -17,6 +28,19 @@ All notable changes to this project are documented here. The format follows
   block: trivy reports nothing for RHEL 10. (QA 2026-11-06)
 
 ### Fixed
+- A key is dated by its own archive, not by its provider's oldest one. The store's
+  `Provenance` gains `KeyAsOf` (additive Meta JSON, no store schema bump): the OSV provider
+  dates each key by the archive that declared it and the Amazon provider each release by the
+  stalest of its own active repositories, and `--db-max-age`, D110's freeze date and the
+  report's `coverage[].dataAsOf` read that date where one was recorded. Before, the amazon
+  provider's one `DataAsOf` — 2025-03-06 on the 2026-11-09 artifact, set by Amazon Linux 2's
+  finished channels — refused every Amazon Linux 2023 image scan under `--db-max-age=168h`
+  with the remedy "run `assay db update`", which could not help; and `Debian:11`'s freeze was
+  dated 2026-08-19 by the CleanStart archive's `Last-Modified` rather than Debian's own. An
+  existing freeze is carried unchanged, so `Debian:11` keeps its (older, conservative) date; the
+  next key to freeze is dated by its own archive. `schemaVersion` is unchanged: `dataAsOf`
+  keeps its type and meaning and only becomes true per key. A database built before this
+  records no per-key dates and reads as before until the next `db update`. (D113 revised)
 - The Red Hat reader resolves `cpe:/o:redhat:rhel_els:N` (Extended Life-cycle Support) to
   `Red Hat:N` for a statement (a `known_affected` id, or a `fixed` id with no version). Red
   Hat's 2026-11-05 corpus regeneration moved the whole-product ids every bare RHEL 4–7 no-fix

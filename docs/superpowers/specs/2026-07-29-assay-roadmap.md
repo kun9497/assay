@@ -4498,7 +4498,10 @@ the Measured paragraph gives. The second (36651409018, 2026-09-30, on `e103a6f`,
 re-emitted without it, frozen since 2026-08-19; 1 not re-emitted at all, left withdrawn (D16)".
 `Debian:11` went from 46,365 advisories in the seed to 46,364, and the 36m25s build published
 as `sha256:ba60414f…` without `--force`. The freeze date is the seed's osv `DataAsOf`
-(`freezeSince`, `internal/dbcmd/carry.go:148`), not the 2026-08-30 this paragraph had planned.
+(`freezeSince`, `internal/dbcmd/carry.go:148`), not the 2026-08-30 this paragraph had planned —
+and since 2026-11-09 the key's own archive date where the seed recorded one (D113 revised:
+2026-08-19 was the CleanStart archive's `Last-Modified`, not Debian's), an existing freeze
+carried unchanged.
 `Debian:11` was that run's only restore line: none of the twelve keys whose 190 entries the
 first run restored got one.
 
@@ -4617,7 +4620,7 @@ reader knows which file it was reading when it stopped. The jar caps (`jar.go:37
 not help here — `jar.Parse` runs only for a `jar:` target, never inside an image.
 
 **What stays out.** No bound on the number of layers or on the number of full layer passes a
-scan makes (`Files` up to eight symlink hops, then `status.d`, then Bitnami's two — four full
+scan makes (`Files` through up to 40 links, the 2026-10-22 audit's bound, then `status.d`, then Bitnami's two — four full
 passes on a minimal Alpine image); those multiply time, which `--timeout` now bounds, not
 memory, which the two size limits bound. `--timeout` reaches the registry fetch and the layer
 walks and nothing else: an SBOM, directory, binary or jar target never consults the context,
@@ -4733,6 +4736,29 @@ warns against, and D111 already declined one.
 still land on one key, so it would not have fixed the floor; it waits for a provider whose
 keys genuinely age at different rates). A recommended duration in the artifact's
 annotations. Enrichment age (D3's display copy, as D59 said).
+
+**Revised (2026-11-09).** The per-key `DataAsOf` that stayed out is in, as
+`Provenance.KeyAsOf`, because the provider it waited for turned out to exist twice over. The
+amazon provider declares `Amazon Linux:2` and `Amazon Linux:2023` with one `DataAsOf`, and on
+the 2026-11-09 artifact that date is 2025-03-06 — AL2's finished channels, which the
+two-year closure above does not reach because they are core and extras of a release that
+ended on 2026-06-30 — so every AL2023 image scan under `--db-max-age=168h` was refused for a
+date that was not its data's, with the remedy "run `assay db update`", which could not help.
+And osv's `DataAsOf` is the minimum across its fourteen archives: D110's `freezeSince` read it
+as `Debian:11`'s freeze date and recorded 2026-08-19, the CleanStart archive's stale
+`Last-Modified`, while Debian's own archive was eleven days fresher. Now osv dates each key by
+the archive that declared it (one archive per key, by `familyMatches`), amazon each release by
+the stalest of its own active repositories (a closed topic dates neither; a release one of
+whose repositories carried no date is left out, the same "unknown, not min(known)" rule
+`DataAsOf` follows), and three readers take the key's date where one was recorded and the
+provider's otherwise: the scan's fold here, D110's `freezeSince`, and D111's
+`coverage[].dataAsOf`. `DataAsOf` itself is unchanged — still the provider's minimum, so the
+artifact's `data-as-of` annotation and the publish guard read as before. An existing freeze is
+carried unchanged (D12), so `Debian:11` keeps 2026-08-19 — eleven days older than the truth,
+which errs old — and the next key to freeze is dated by its own archive. The store field is
+additive Meta JSON (Frozen's precedent): a database built before it reads as before until the
+next build. The report's `schemaVersion` is unchanged: `coverage[].dataAsOf` keeps its type and
+meaning ("when this key's data was current") and only becomes true per key.
 
 ---
 
