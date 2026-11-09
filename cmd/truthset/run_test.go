@@ -79,6 +79,7 @@ func fakeAssay(t *testing.T, scans map[string]fakeScan) (execFunc, *[]string) {
 			"schemaVersion": 18,
 			"summary":       map[string]any{"components": 1, "evaluated": evaluated, "findings": len(fs)},
 			"findings":      fs,
+			"coverage":      []map[string]any{{"ecosystem": "Alpine:v3.19", "dataAsOf": fakeDataAsOf, "state": "live"}},
 			"provenance":    map[string]any{"tool": map[string]any{"version": "v0.0-test"}, "database": map[string]any{"artifact": map[string]any{"digest": "sha256:feed"}}},
 		}
 		b, _ := json.Marshal(doc)
@@ -88,6 +89,134 @@ func fakeAssay(t *testing.T, scans map[string]fakeScan) (execFunc, *[]string) {
 		}
 		return b, exit, nil
 	}, &sboms
+}
+
+// fakeDataAsOf is the key date every fake scan reports.
+const fakeDataAsOf = "2026-11-09"
+
+// A label whose validFrom is after the database's data date is not judged:
+// listed under its own heading, out of the metrics and the exit code; one
+// at or before it is judged as usual.
+func TestRun_ValidFromAfterTheDataDate_IsNotJudged(t *testing.T) {
+	labels := heldLabels()
+	labels[3].ValidFrom = "2026-12-01" // the clean label: with no finding it would otherwise be TN
+	labels[1].ValidFrom = fakeDataAsOf // same day: judged
+	exec, _ := fakeAssay(t, heldScans())
+	report := filepath.Join(t.TempDir(), "report.json")
+	var out, errOut bytes.Buffer
+	if code := run([]string{"-labels", writeLabels(t, labels), "-assay", "fake-assay", "-out", report}, &out, &errOut, exec); code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s\n%s", code, out.String(), errOut.String())
+	}
+	// Three judged (the TN is gone), TP 3 TN 0.
+	if !strings.Contains(out.String(), "alpine  3       3   0   0   0   0         0       0      1         1.000 (0.439-1.000)  1.000 (0.439-1.000)") {
+		t.Errorf("table:\n%s", out.String())
+	}
+	want := "labels not judged (the database's data predates their validFrom):\n  PREDATES    alpine-busybox-fixed/CVE-2024-58251 -- Alpine:v3.19 data is as of 2026-11-09, before the label's validFrom 2026-12-01"
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("stdout lacks %q:\n%s", want, out.String())
+	}
+	if strings.Contains(out.String(), "did not hold") {
+		t.Errorf("a predating label was listed as a failure:\n%s", out.String())
+	}
+	var rep struct {
+		Total familyMetrics `json:"total"`
+	}
+	raw, err := os.ReadFile(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep.Total.Predates != 1 || rep.Total.Labels != 3 || rep.Total.TN != 0 {
+		t.Errorf("total = %+v, want predates 1, labels 3, tn 0", rep.Total)
+	}
+}
+
+// A frozen key is dated by its freeze, not the provider's day: a label
+// whose validFrom is after the freeze is not judged even though the
+// provider's date is after it.
+func TestRun_ValidFrom_FrozenKeyIsDatedByItsFreeze(t *testing.T) {
+	labels := heldLabels()
+	labels[3].ValidFrom = "2026-10-28"
+	scans := heldScans()
+	scans[busyboxFixedPURL] = fakeScan{raw: `{"schemaVersion":18,"summary":{"components":1,"evaluated":1},"findings":[],"coverage":[{"ecosystem":"Alpine:v3.19","dataAsOf":"2026-11-09","state":"frozen","frozenSince":"2026-08-19"}],"provenance":{"database":{"artifact":{"digest":"sha256:feed"}}}}`}
+	exec, _ := fakeAssay(t, scans)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"-labels", writeLabels(t, labels), "-assay", "fake-assay"}, &out, &errOut, exec); code != exitOK {
+		t.Fatalf("exit = %d\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "PREDATES    alpine-busybox-fixed/CVE-2024-58251 -- Alpine:v3.19 data is as of 2026-08-19, before the label's validFrom 2026-10-28") {
+		t.Errorf("stdout:\n%s", out.String())
+	}
+	if !strings.Contains(errOut.String(), "note: 1 label(s) not judged") {
+		t.Errorf("stderr lacks the note:\n%s", errOut.String())
+	}
+}
+
+// A coverage record with no date (a key the database does not hold) dates
+// nothing: the label is judged as before.
+func TestRun_ValidFrom_UndatedCoverageIsJudged(t *testing.T) {
+	labels := heldLabels()
+	labels[3].ValidFrom = "2026-12-01"
+	scans := heldScans()
+	scans[busyboxFixedPURL] = fakeScan{raw: `{"schemaVersion":18,"summary":{"components":1,"evaluated":1},"findings":[],"coverage":[{"ecosystem":"Alpine:v3.19","dataAsOf":"","state":"not-in-database"}],"provenance":{"database":{"artifact":{"digest":"sha256:feed"}}}}`}
+	exec, _ := fakeAssay(t, scans)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"-labels", writeLabels(t, labels), "-assay", "fake-assay"}, &out, &errOut, exec); code != exitOK {
+		t.Fatalf("exit = %d\n%s", code, out.String())
+	}
+	if strings.Contains(out.String(), "labels not judged") || !strings.Contains(out.String(), "alpine  4       3   1   0   0") {
+		t.Errorf("table:\n%s", out.String())
+	}
+}
+
+// Every label predating the database is a stale database, not a clean run.
+func TestRun_ValidFrom_NothingJudgedIsExitError(t *testing.T) {
+	labels := heldLabels()
+	for i := range labels {
+		labels[i].ValidFrom = "2026-12-01"
+	}
+	exec, _ := fakeAssay(t, heldScans())
+	var out, errOut bytes.Buffer
+	if code := run([]string{"-labels", writeLabels(t, labels), "-assay", "fake-assay"}, &out, &errOut, exec); code != exitError {
+		t.Fatalf("exit = %d, want 2\n%s", code, out.String())
+	}
+	if !strings.Contains(errOut.String(), "error: no label could be judged") {
+		t.Errorf("stderr:\n%s", errOut.String())
+	}
+}
+
+// A one-component SBOM maps to one key; a document with two is not dated
+// by whichever came first.
+func TestRun_TwoCoverageKeys_ExitError(t *testing.T) {
+	scans := heldScans()
+	scans[busyboxFixedPURL] = fakeScan{raw: `{"schemaVersion":18,"summary":{"components":1,"evaluated":1},"findings":[],"coverage":[{"ecosystem":"A","dataAsOf":"2026-11-09"},{"ecosystem":"B","dataAsOf":"2026-01-01"}],"provenance":{"database":{"artifact":{"digest":"sha256:feed"}}}}`}
+	exec, _ := fakeAssay(t, scans)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"-labels", writeLabels(t, heldLabels()), "-assay", "fake-assay"}, &out, &errOut, exec); code != exitError {
+		t.Fatalf("exit = %d, want 2\n%s", code, out.String())
+	}
+	if !strings.Contains(errOut.String(), "2 coverage keys for a one-component SBOM") {
+		t.Errorf("stderr:\n%s", errOut.String())
+	}
+}
+
+// A scan document with no coverage (a database from before schema 17)
+// judges every label as before, validFrom or not.
+func TestRun_ValidFromWithoutCoverage_IsJudged(t *testing.T) {
+	labels := heldLabels()
+	labels[3].ValidFrom = "2026-12-01"
+	scans := heldScans()
+	scans[busyboxFixedPURL] = fakeScan{raw: `{"schemaVersion":16,"summary":{"components":1,"evaluated":1},"findings":[],"provenance":{"database":{"artifact":{"digest":"sha256:feed"}}}}`}
+	exec, _ := fakeAssay(t, scans)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"-labels", writeLabels(t, labels), "-assay", "fake-assay"}, &out, &errOut, exec); code != exitOK {
+		t.Fatalf("exit = %d\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "alpine  4       3   1   0   0") || strings.Contains(out.String(), "labels not judged") {
+		t.Errorf("table:\n%s", out.String())
+	}
 }
 
 func writeLabels(t *testing.T, labels []Label) string {
@@ -146,7 +275,7 @@ func TestRun_EveryLabelHeld_ExitOKAndOneScanPerCase(t *testing.T) {
 	if len(*sboms) != 2 || (*sboms)[0] != busyboxPURL || (*sboms)[1] != busyboxFixedPURL {
 		t.Errorf("scanned purls = %v, want one scan per case in case order", *sboms)
 	}
-	want := "alpine  4       3   1   0   0   0         0       0      1.000 (0.439-1.000)  1.000 (0.439-1.000)"
+	want := "alpine  4       3   1   0   0   0         0       0      0         1.000 (0.439-1.000)  1.000 (0.439-1.000)"
 	if !strings.Contains(out.String(), want) {
 		t.Errorf("table lacks the alpine row %q:\n%s", want, out.String())
 	}
@@ -201,7 +330,7 @@ func TestRun_FalseNegativeAndMismatch_Exit1(t *testing.T) {
 	}
 	// TP 1 (the no-fix label), FN 1, MISMATCH 1: recall 1/2, the mismatch in neither cell.
 	// The mismatch is in both denominators: precision 1/2, recall 1/3.
-	if !strings.Contains(out.String(), "alpine  4       1   1   0   1   1         0       0      0.500 (0.095-0.905)  0.333 (0.061-0.792)") {
+	if !strings.Contains(out.String(), "alpine  4       1   1   0   1   1         0       0      0         0.500 (0.095-0.905)  0.333 (0.061-0.792)") {
 		t.Errorf("table row does not carry TP 1, FN 1, MISMATCH 1:\n%s", out.String())
 	}
 }
@@ -486,7 +615,7 @@ func TestRun_NoPositives_RatesAreNA(t *testing.T) {
 	if code := run([]string{"-labels", writeLabels(t, labels), "-assay", "fake-assay", "-out", report}, &out, &errOut, exec); code != exitOK {
 		t.Fatalf("exit = %d, want 0\n%s\n%s", code, out.String(), errOut.String())
 	}
-	if !strings.Contains(out.String(), "alpine  1       0   1   0   0   0         0       0      n/a") || !strings.Contains(out.String(), "n/a\nall ") {
+	if !strings.Contains(out.String(), "alpine  1       0   1   0   0   0         0       0      0         n/a") || !strings.Contains(out.String(), "n/a\nall ") {
 		t.Errorf("table:\n%s", out.String())
 	}
 	if _, err := os.Stat(report); err != nil {
@@ -561,6 +690,8 @@ func TestLoadLabels_Refusals(t *testing.T) {
 		{"purl without version", func(ls []Label) []Label { ls[0].PURL = "pkg:apk/alpine/busybox"; return ls }, "carrying the label's version"},
 		{"no source", func(ls []Label) []Label { ls[0].Source.URL = ""; return ls }, "source.statement, source.url and source.fetchedAt"},
 		{"two purls in one case", func(ls []Label) []Label { ls[1].PURL = busyboxFixedPURL; ls[1].Version = "1.36.1-r21"; return ls }, "names two purls"},
+		{"validFrom not a date", func(ls []Label) []Label { ls[0].ValidFrom = "2026-11"; return ls }, "is not YYYY-MM-DD"},
+		{"validFrom an impossible day", func(ls []Label) []Label { ls[0].ValidFrom = "2026-11-31"; return ls }, "is not YYYY-MM-DD"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ls := tc.mut(append([]Label(nil), good...))

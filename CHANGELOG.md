@@ -21,6 +21,16 @@ All notable changes to this project are documented here. The format follows
   the probe's `usr/bin/foo`. A location no OS package lists has no `ownedBy`; an unreadable
   list owns nothing and never fails the scan. **JSON `schemaVersion` 19** (additive).
 
+### Changed
+- `cmd/truthset` holds a label's `validFrom` against the database: a label whose key's
+  `coverage[].dataAsOf` is before its `validFrom` is listed as not judged (`PREDATES`), counted
+  in the report and left out of the judged-label count, the metrics and the exit code; a scan
+  document with no coverage date judges as before; a frozen key (D110) is dated by its freeze, the
+  earlier of the two dates; a run in which every label predates the database exits 2 rather than
+  passing an empty table. `validFrom` must be a real `YYYY-MM-DD` date. The Debian:11 matcher
+  labels carry `validFrom` 2026-08-19, the key's freeze date they were verified against. The
+  `truthset report` document is **schema 2** (additive: `predates` and the `PREDATES` outcome). (D161)
+
 ## [0.16.0] - 2026-11-09
 
 ### Added

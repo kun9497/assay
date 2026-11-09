@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "description": "Ground-truth labels for cmd/truthset (D161): one row per (installed package, CVE) whose expected verdict is the distro's own statement at source.fetchedAt. class=matcher rows feed precision/recall; class=data rows are known data gaps, reported but excluded from the metrics. Seeded 2026-11-09 from the 2026-11-04 QA boundary harness (32 cases, 84 checks, 3 families).",
+  "description": "Ground-truth labels for cmd/truthset (D161): one row per (installed package, CVE) whose expected verdict is the distro's own statement at source.fetchedAt. class=matcher rows feed precision/recall; class=data rows are known data gaps, reported but excluded from the metrics. Seeded 2026-11-09 from the 2026-11-04 QA boundary harness (32 cases, 84 checks, 3 families). Debian:11 matcher-class labels carry validFrom 2026-08-19, the key's D110 freeze date: the 2026-11-04 harness verified them against that frozen snapshot, so that is the earliest data they are known to hold at; the data-class rows keep 2026-10-28 and are PREDATES while the key is frozen (their DLAs came after the freeze).",
   "labels": [
     {
       "id": "alpine-busybox-below/CVE-2024-58251",
@@ -406,7 +406,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-4046",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libc6-installed-TN/CVE-2026-0861",
@@ -425,7 +425,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-0861",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libc6-installed-TN/CVE-2026-0915",
@@ -444,7 +444,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-0915",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libc6-installed-TN/CVE-2025-8058",
@@ -463,7 +463,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2025-8058",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libc6-installed-TN/CVE-2025-15281",
@@ -482,7 +482,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2025-15281",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libc6-installed-TN/CVE-2025-4802",
@@ -501,7 +501,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2025-4802",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libc6-below/CVE-2026-4046",
@@ -521,7 +521,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-4046",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libc6-below/CVE-2026-0861",
@@ -541,7 +541,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-0861",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libc6-below/CVE-2026-0915",
@@ -561,7 +561,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-0915",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libc6-below/CVE-2025-8058",
@@ -581,7 +581,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2025-8058",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libc6-below/CVE-2025-15281",
@@ -601,7 +601,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2025-15281",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libc6-below/CVE-2025-4802",
@@ -620,7 +620,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2025-4802",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libkrb5-3-installed-TN/CVE-2026-40355",
@@ -639,7 +639,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-40355",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libkrb5-3-installed-TN/CVE-2026-40356",
@@ -658,7 +658,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-40356",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libkrb5-3-installed-TN/CVE-2025-3576",
@@ -677,7 +677,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2025-3576",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libkrb5-3-below/CVE-2026-40355",
@@ -697,7 +697,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-40355",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libkrb5-3-below/CVE-2026-40356",
@@ -717,7 +717,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-40356",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libkrb5-3-below/CVE-2025-3576",
@@ -736,7 +736,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2025-3576",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libgnutls30-installed-TN/CVE-2026-3833",
@@ -755,7 +755,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-3833",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libgnutls30-installed-TN/CVE-2026-5260",
@@ -774,7 +774,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-5260",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libgnutls30-installed-TN/CVE-2026-33845",
@@ -793,7 +793,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-33845",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libgnutls30-installed-TN/CVE-2026-42015",
@@ -812,7 +812,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-42015",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libgnutls30-installed-TN/CVE-2025-9820",
@@ -831,7 +831,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2025-9820",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libgnutls30-installed-TN/CVE-2025-14831",
@@ -850,7 +850,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2025-14831",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libgnutls30-below/CVE-2026-3833",
@@ -870,7 +870,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-3833",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libgnutls30-below/CVE-2026-5260",
@@ -890,7 +890,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-5260",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libgnutls30-below/CVE-2026-33845",
@@ -910,7 +910,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-33845",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libgnutls30-below/CVE-2026-42015",
@@ -930,7 +930,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-42015",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libgnutls30-below/CVE-2025-9820",
@@ -949,7 +949,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2025-9820",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libgnutls30-below/CVE-2025-14831",
@@ -968,7 +968,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2025-14831",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libssl1.1-installed-TN/CVE-2026-7383",
@@ -987,7 +987,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-7383",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libssl1.1-installed-TN/CVE-2026-9076",
@@ -1006,7 +1006,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-9076",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libssl1.1-installed-TN/CVE-2026-34180",
@@ -1025,7 +1025,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-34180",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libssl1.1-installed-TN/CVE-2026-42766",
@@ -1044,7 +1044,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-42766",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libssl1.1-installed-TN/CVE-2026-45447",
@@ -1063,7 +1063,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-45447",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libssl1.1-below/CVE-2026-7383",
@@ -1083,7 +1083,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-7383",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libssl1.1-below/CVE-2026-9076",
@@ -1103,7 +1103,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-9076",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libssl1.1-below/CVE-2026-34180",
@@ -1123,7 +1123,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-34180",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libssl1.1-below/CVE-2026-42766",
@@ -1143,7 +1143,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-42766",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "debian-libssl1.1-below/CVE-2026-45447",
@@ -1163,7 +1163,7 @@
         "url": "https://security-tracker.debian.org/tracker/CVE-2026-45447",
         "fetchedAt": "2026-11-04T00:06:59Z"
       },
-      "validFrom": "2026-10-28"
+      "validFrom": "2026-08-19"
     },
     {
       "id": "leap-glibc-below/CVE-2026-4046",
