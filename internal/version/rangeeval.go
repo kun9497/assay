@@ -93,6 +93,21 @@ func AffectsVersion(c Comparer, v string, a advisory.Affected) (bool, Evidence, 
 		}
 	}
 	if found {
+		// D163: an open range that holds v beside a fixed range v has
+		// cleared is the "released, still affected" shape -- SUSE lists a
+		// product's bare package id under known_affected beside the build it
+		// released for it when a fix is in progress (CVE-2026-34182's
+		// libopenssl3 3.1.4-150600.5.53.1 on SLE 15 SP6), and Red Hat's CSAF
+		// does the same between an errata and a reopened flaw. The verdict
+		// stays affected with the open range's own fix state (D52), but the
+		// reason names the released build the installed one is at or above,
+		// so a reader is not told "no fixed version recorded" about a
+		// package whose fix they can see they already have.
+		if best.Fixed == "" && best.LastAffected == "" {
+			if released := releasedFixBelow(c, v, a.Ranges); released != "" {
+				best.Reason = fmt.Sprintf("%s is at or above the released fix %s; the advisory still lists the package as affected, with no later fix recorded", v, released)
+			}
+		}
 		return true, best, nil, nil
 	}
 	if rangeErr != nil {
@@ -134,6 +149,35 @@ func AffectsVersion(c Comparer, v string, a advisory.Affected) (bool, Evidence, 
 		}
 	}
 	return false, Evidence{}, unreadable, nil
+}
+
+// releasedFixBelow is the highest fixed bound among ranges that v is at or
+// above -- the build the advisory released that the installed version
+// already carries -- or "" when there is none. Only fixed events count: a
+// last_affected bound says where the affected window ends, not what fixed
+// it. A bound the comparer cannot order against v is passed over, as the
+// walk that read it would have been.
+func releasedFixBelow(c Comparer, v string, ranges []advisory.Range) string {
+	var released string
+	for _, r := range ranges {
+		for _, e := range r.Events {
+			if e.Fixed == "" {
+				continue
+			}
+			cmp, err := c.Compare(v, e.Fixed)
+			if err != nil || cmp < 0 {
+				continue
+			}
+			if released == "" {
+				released = e.Fixed
+				continue
+			}
+			if higher, err := c.Compare(e.Fixed, released); err == nil && higher > 0 {
+				released = e.Fixed
+			}
+		}
+	}
+	return released
 }
 
 // moreClearing reports whether evidence a names a bound that clears more of
