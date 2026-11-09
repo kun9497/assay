@@ -8422,7 +8422,12 @@ is held against the key's own date since the same day: a label whose key `covera
 (schema 17, D113 revised) is before its `validFrom` is listed as not judged — `PREDATES`, in the
 report's count, out of the judged-label count, the metrics and the exit code — because a
 database older than the day the expectation is known to hold at is evidence of nothing; a
-document with no coverage date judges as before. An affected label with
+document with no coverage date judges as before, a frozen key is dated by its freeze (the earlier
+of the two dates, as `dbage.go` does), and a run in which every label predates the database
+exits 2 rather than passing an empty table. The Debian:11 matcher labels therefore carry
+`validFrom` 2026-08-19, the freeze they were verified against; the six data-class rows keep
+2026-10-28 and read `PREDATES` while the key is frozen, which is the gap they record. The report
+is schema 2 for the new count and outcome. An affected label with
 no fix demanded is held by the finding's presence alone. The evidence line at a released-but-
 still-affected build says "no fixed version recorded" while the key holds the released build's
 range beside it; naming that build there is open.

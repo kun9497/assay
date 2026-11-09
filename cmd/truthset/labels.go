@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // labelsSchemaVersion is the committed labels file's own contract version.
@@ -67,6 +68,14 @@ type Source struct {
 	FetchedAt string `json:"fetchedAt"`
 }
 
+// isDateOnly is validFrom's form: the full date coverage[].dataAsOf is
+// written in (time.DateOnly), parsed so an impossible day is refused too,
+// and compared as a string once it is one.
+func isDateOnly(s string) bool {
+	_, err := time.Parse(time.DateOnly, s)
+	return err == nil
+}
+
 type labelsFile struct {
 	SchemaVersion int     `json:"schemaVersion"`
 	Description   string  `json:"description,omitempty"`
@@ -74,10 +83,6 @@ type labelsFile struct {
 }
 
 var cveShape = regexp.MustCompile(`^CVE-\d{4}-\d{4,}$`)
-
-// dateShape is validFrom's form, the same full date coverage[].dataAsOf is
-// written in, so the two compare as strings.
-var dateShape = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
 // purlNameVersion reads the name and version of a pkg: purl, percent-decoded
 // (the purl spec encodes `:`, `+` and `@` inside a version). The name is the
@@ -161,7 +166,7 @@ func loadLabels(path string) ([]Label, error) {
 			return nil, fmt.Errorf("%s: a data-class label needs a note saying which data gap it records", where)
 		case l.Source.Statement == "" || l.Source.URL == "" || l.Source.FetchedAt == "":
 			return nil, fmt.Errorf("%s: source.statement, source.url and source.fetchedAt are all required", where)
-		case l.ValidFrom != "" && !dateShape.MatchString(l.ValidFrom):
+		case l.ValidFrom != "" && !isDateOnly(l.ValidFrom):
 			return nil, fmt.Errorf("%s: validFrom %q is not YYYY-MM-DD", where, l.ValidFrom)
 		}
 		if p, ok := casePURL[l.Case]; ok && p != l.PURL {

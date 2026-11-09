@@ -11,7 +11,10 @@
 - `cmd/truthset`가 라벨의 `validFrom`을 데이터베이스에 대고 붙듭니다: 키의 `coverage[].dataAsOf`가
   `validFrom`보다 앞선 라벨은 판정하지 않은 것(`PREDATES`)으로 올리고, 보고서에는 세되 판정한 라벨
   수·지표·종료 코드에서는 뺍니다; coverage 날짜가 없는 스캔 문서는 전처럼 판정합니다. `validFrom`은
-  `YYYY-MM-DD`여야 합니다. (D161)
+  `YYYY-MM-DD`여야 합니다(실재하는 날짜). 동결된 키(D110)는 동결일로 날짜를 매깁니다 — 둘 중 이른
+  쪽; 모든 라벨이 데이터베이스보다 뒤인 실행은 빈 표를 통과시키지 않고 종료 2입니다. Debian:11 matcher
+  라벨은 검증에 쓰인 키 동결일 2026-08-19를 `validFrom`으로 지닙니다. `truthset report` 문서는 **스키마
+  2**(추가형: `predates`와 `PREDATES` 결과). (D161)
 
 ## [0.16.0] - 2026-11-09
 

@@ -115,7 +115,8 @@ type report struct {
 	DataClass     []result        `json:"dataClass"`
 }
 
-const reportSchemaVersion = 1
+// 2: familyMetrics.predates and the PREDATES outcome (additive).
+const reportSchemaVersion = 2
 
 func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 	fs := flag.NewFlagSet("truthset", flag.ContinueOnError)
@@ -240,6 +241,14 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 			fmt.Fprintf(stderr, "error: case=%s %s\n", c.name, fatal[c.name])
 			continue
 		}
+		// One component, one key: a document that maps it to several keys
+		// is a shape this tool does not know how to date, so it is not
+		// trusted rather than dated by whichever record came first.
+		if len(doc.Coverage) > 1 {
+			fatal[c.name] = fmt.Sprintf("%d coverage keys for a one-component SBOM", len(doc.Coverage))
+			fmt.Fprintf(stderr, "error: case=%s %s\n", c.name, fatal[c.name])
+			continue
+		}
 		scans[c.name] = &doc
 		if digest == "" {
 			digest, tool = doc.Provenance.Database.Artifact.Digest, doc.Provenance.Tool.Version
@@ -259,6 +268,9 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 	families := metricsByFamily(results)
 	total := metricsOf("all", results)
 	printTable(stdout, results, dataClass, families, total)
+	if total.Predates > 0 {
+		fmt.Fprintf(stderr, "note: %d label(s) not judged: the database's data predates their validFrom\n", total.Predates)
+	}
 
 	if *outPath != "" {
 		rep := report{SchemaVersion: reportSchemaVersion, Labels: *labelsPath, Database: digest, Tool: tool,
@@ -275,6 +287,13 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 	}
 
 	if len(fatal) > 0 {
+		return exitError
+	}
+	// A run that judged nothing says nothing: every matcher label predates
+	// the database. That is a stale database, not a clean one -- CI must
+	// not read "found nothing" as "held" (D11).
+	if total.Labels == 0 && len(results) > 0 {
+		fmt.Fprintln(stderr, "error: no label could be judged: the database's data predates every label's validFrom")
 		return exitError
 	}
 	if total.FP+total.FN+total.Mismatch+total.Unevaluated > 0 {
@@ -330,8 +349,9 @@ type scanDoc struct {
 	// scan's one component maps to one key, and its dataAsOf is what
 	// validFrom is held against.
 	Coverage []struct {
-		Ecosystem string `json:"ecosystem"`
-		DataAsOf  string `json:"dataAsOf"`
+		Ecosystem   string `json:"ecosystem"`
+		DataAsOf    string `json:"dataAsOf"`
+		FrozenSince string `json:"frozenSince"`
 	} `json:"coverage"`
 	Provenance struct {
 		Tool struct {
@@ -408,12 +428,18 @@ func judge(l Label, doc *scanDoc, fatal string) result {
 	// the expectation is known to hold at cannot confirm or refute it. Only
 	// a dated key is compared; an undated one (a database from before
 	// schema 17) is judged as before.
-	if l.ValidFrom != "" {
-		for _, c := range doc.Coverage {
-			if c.DataAsOf != "" && c.DataAsOf < l.ValidFrom {
-				r.Outcome, r.Detail = outPredates, fmt.Sprintf("%s data is as of %s, before the label's validFrom %s", c.Ecosystem, c.DataAsOf, l.ValidFrom)
-				return r
-			}
+	if l.ValidFrom != "" && len(doc.Coverage) == 1 {
+		c := doc.Coverage[0]
+		// A D110-frozen key's data is as of its freeze, whatever the
+		// provider's own date says (dbage.go's oldestProvider makes the
+		// same correction): the earlier of the two is the key's date.
+		asOf := c.DataAsOf
+		if c.FrozenSince != "" && (asOf == "" || c.FrozenSince < asOf) {
+			asOf = c.FrozenSince
+		}
+		if asOf != "" && asOf < l.ValidFrom {
+			r.Outcome, r.Detail = outPredates, fmt.Sprintf("%s data is as of %s, before the label's validFrom %s", c.Ecosystem, asOf, l.ValidFrom)
+			return r
 		}
 	}
 	var found bool
@@ -544,9 +570,9 @@ func metricsOf(family string, rs []result) familyMetrics {
 // data-class rows with their outcome.
 func printTable(w io.Writer, results, dataClass []result, families []familyMetrics, total familyMetrics) {
 	tw := tabwriter.NewWriter(w, 0, 8, 2, ' ', 0)
-	fmt.Fprintln(tw, "FAMILY\tLABELS\tTP\tTN\tFP\tFN\tMISMATCH\tUNEVAL\tERROR\tPRECISION (95% CI)\tRECALL (95% CI)")
+	fmt.Fprintln(tw, "FAMILY\tLABELS\tTP\tTN\tFP\tFN\tMISMATCH\tUNEVAL\tERROR\tPREDATES\tPRECISION (95% CI)\tRECALL (95% CI)")
 	for _, m := range append(families, total) {
-		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\t%s\n", m.Family, m.Labels, m.TP, m.TN, m.FP, m.FN, m.Mismatch, m.Unevaluated, m.Errors,
+		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\t%s\n", m.Family, m.Labels, m.TP, m.TN, m.FP, m.FN, m.Mismatch, m.Unevaluated, m.Errors, m.Predates,
 			rate(m.TP+m.FP+m.Mismatch, m.Precision, m.PrecisionLow95, m.PrecisionHigh95), rate(m.TP+m.FN+m.Mismatch, m.Recall, m.RecallLow95, m.RecallHigh95))
 	}
 	tw.Flush()
