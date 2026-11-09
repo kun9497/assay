@@ -40,6 +40,11 @@ func IsInstalledPackageJSON(p string) bool {
 		return false
 	}
 	pkgDir := path.Dir(p)
+	if strings.HasPrefix(path.Base(pkgDir), "@") {
+		// node_modules/@types is a scope directory holding packages, not a
+		// package; a package.json directly in it is nobody's.
+		return false
+	}
 	parent := path.Dir(pkgDir)
 	if path.Base(parent) == "node_modules" {
 		return true
