@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-09
+
 ### Added
 - `cmd/truthset` (D161): precision and recall against committed ground truth. Each label in
   `testdata/groundtruth/labels.json` — a package at a version, a CVE, the expected verdict and
