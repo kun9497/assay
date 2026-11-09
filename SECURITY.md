@@ -41,7 +41,9 @@ private route above. Either is fine.
 
 Known limits are not vulnerabilities: what a scan does not cover is listed in
 [docs/DESIGN.md](docs/DESIGN.md#scope) and [docs/deferred-decisions.md](docs/deferred-decisions.md),
-and each scan says on stderr what it did not read.
+and each scan says on stderr what it did not read. What a deployment that runs `assay` on
+targets it did not author can rely on, and what it must provide itself, is in
+[docs/operating-envelope.md](docs/operating-envelope.md).
 
 ## Supported versions
 

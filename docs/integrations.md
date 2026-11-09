@@ -179,6 +179,11 @@ that was the oldest archive's date, so every Amazon Linux 2023 scan was refused 
 dated by the CleanStart archive rather than Debian's. A database built before that records no
 per-key dates and reads as before until the next `db update`.
 
+A service that runs `assay scan` on targets it did not author — other people's images,
+checkouts or SBOMs — should read [docs/operating-envelope.md](operating-envelope.md): what
+assay bounds itself, what the registry library bounds, and what the deployment (egress,
+credentials, process limits, kill handling) has to provide.
+
 ## Waiving findings you have accepted
 
 Some findings are real but not relevant to your project — the CVE is in a code path you do

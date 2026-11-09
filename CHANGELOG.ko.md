@@ -8,6 +8,17 @@
 ## [Unreleased]
 
 ### Changed
+- `docs/operating-envelope.md`(와 한국어 쌍): 스캔이 스스로 한정하는 것(D112의 크기, 40 링크 상한,
+  `--timeout`의 도달 범위와 그것 없이는 데드라인이 없다는 것), go-containerregistry v0.21.7이
+  한정하는 것(manifest 100 MiB, 토큰 본문 64 KiB, 3회 시도, IP 리터럴로의 리다이렉트 거부와 DNS
+  이름으로의 리다이렉트 추종, 프록시 환경 변수 준수), 피크 RSS를 미측정으로 표시한 메모리 모델, 자격
+  증명 체인, kill 시 exit-2 줄도 `--provenance` sidecar도 남지 않는다는 것, 배포 측이 제공해야 하는
+  것, 그리고 명령이 도출됐을 뿐 아직 실행되지 않은 S-2 테스트 리포트 체크리스트.
+  `docs/integrations.md`와 `SECURITY.md`에서 링크. (QA 2026-11-04 S-2)
+- deferred-decisions 항목 *LTS 이후의 Debian 11*이 QA 이미지 216건에 대한 두 번째 Debian 소스의
+  2026-11-09 측정(Freexian ELTS 데이터: 사라질 것 0, ELTS 전용 수정 13, 사유 81, not-affected 오탐 7;
+  Debian 자신의 tracker는 더 이상 bullseye를 싣지 않음)과 미루는 이유 — D110 carry 상호작용, 미상의
+  약관, 비구독자에게 조치 가능한 이득 없음 — 를 기록합니다. (QA 2026-11-04 P-6)
 - 표 각주, SARIF의 `assay/frozen-data`, `--explain`이 공유하는 동결 키 문장이 동결이 치르는 비용을
   말합니다: "…the upstream stopped publishing some or all of it, and fixes it has published
   since may be missing here"("may": 보이는 날짜는 동결 날짜라 데이터 자체의 날짜보다 앞설 수 있고,

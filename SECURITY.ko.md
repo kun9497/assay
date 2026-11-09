@@ -40,7 +40,8 @@ GitHub를 통해 비공개로 제보해 주십시오:
 알려진 한계는 취약점이 아닙니다. 스캔이 다루지 않는 것은
 [docs/DESIGN.ko.md](docs/DESIGN.ko.md#범위)와
 [docs/deferred-decisions.ko.md](docs/deferred-decisions.ko.md)에 나열되어 있고, 각 스캔은 읽지 않은 것을
-stderr로 알려 줍니다.
+stderr로 알려 줍니다. 자기가 만들지 않은 타깃에 `assay`를 돌리는 배포가 무엇에 기댈 수 있고 무엇을
+스스로 제공해야 하는지는 [docs/operating-envelope.ko.md](docs/operating-envelope.ko.md)에 있습니다.
 
 ## 지원 버전
 
