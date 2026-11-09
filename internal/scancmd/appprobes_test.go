@@ -246,7 +246,7 @@ func TestRun_D160_NpmTreeUnderTheGlobalRootIsRead(t *testing.T) {
 		}
 	}
 	if doc.SchemaVersion != 19 {
-		t.Errorf("schemaVersion = %d, want 18", doc.SchemaVersion)
+		t.Errorf("schemaVersion = %d, want 19", doc.SchemaVersion)
 	}
 }
 

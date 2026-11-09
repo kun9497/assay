@@ -216,7 +216,7 @@ func TestRun_D111_FrozenKeyWithNoFindingIsDisclosedEverywhere(t *testing.T) {
 		}
 		doc, _ := decodeD111(t, out)
 		if doc.SchemaVersion != 19 {
-			t.Errorf("schemaVersion = %d, want 18", doc.SchemaVersion)
+			t.Errorf("schemaVersion = %d, want 19", doc.SchemaVersion)
 		}
 		want := []d111Coverage{{
 			Ecosystem: "Alpine:v3.19", Packages: 1, Evaluated: 1, State: "frozen",

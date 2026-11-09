@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kun9497/assay/internal/pkgmeta"
@@ -188,27 +189,88 @@ func assertOwners(t *testing.T, pkgs []pkgmeta.Package, want map[string]*pkgmeta
 	}
 }
 
-// The ownership roots join the probes' one pass: still six layer opens for
-// the whole image (limits_test's count), and a list for a package the
-// inventory does not hold, or an unreadable list name, owns nothing.
-func TestFileOwners_UnknownOwnerAndLeadingSlash(t *testing.T) {
-	o := fileOwners{}
+// Unit: a list for a package the inventory does not hold, or whose :arch no
+// package carries, owns nothing; a list that does not read owns nothing and
+// fails nothing; a location spelled with a leading slash still matches.
+func TestFileOwners_UnknownOwnerUnreadableListAndLeadingSlash(t *testing.T) {
+	o := newFileOwners(nil)
 	deb := []pkgmeta.Package{{Name: "npm", Version: "1", Type: "deb", Arch: "all"}, {Name: "libc6", Version: "2", Type: "deb", Arch: "amd64"}}
-	if err := o.addList("var/lib/dpkg/info/ghost.list", []byte("/usr/bin/x\n"), deb); err != nil || len(o) != 0 {
-		t.Errorf("a list for an uninventoried package: err=%v owners=%v", err, o)
+	file := func(s string) source.FileFromLayer { return source.FileFromLayer{Data: []byte(s)} }
+	o.addList("var/lib/dpkg/info/ghost.list", file("/usr/bin/x\n"), deb)
+	o.addList("var/lib/dpkg/info/libc6:i386.list", file("/usr/bin/x\n"), deb)
+	if len(o.lists) != 0 {
+		t.Errorf("an uninventoried package or arch owns: %v", o.lists)
 	}
-	if err := o.addList("var/lib/dpkg/info/libc6:i386.list", []byte("/usr/bin/x\n"), deb); err != nil || len(o) != 0 {
-		t.Errorf("a list whose arch no package carries: err=%v owners=%v", err, o)
+	// A line past the scanner's bound: unreadable, and nothing before or
+	// after it is kept either.
+	o.addList("var/lib/dpkg/info/npm.list", file("/usr/bin/y\n/"+strings.Repeat("z", 70*1024)+"\n"), deb)
+	if len(o.lists) != 0 {
+		t.Errorf("an unreadable list owns: %d paths", len(o.lists))
 	}
-	if err := o.addList("var/lib/dpkg/info/libc6:amd64.list", []byte("/usr/bin/x\n"), deb); err != nil || o["usr/bin/x"] != (pkgmeta.Owner{Name: "libc6", Version: "2"}) {
-		t.Errorf("libc6:amd64.list: err=%v owners=%v", err, o)
-	}
+	o.addList("var/lib/dpkg/info/libc6:amd64.list", file("/usr/bin/x\n"), deb)
 	pkgs := []pkgmeta.Package{{Name: "m", Locations: []pkgmeta.Location{{Path: "/usr/bin/x"}, {Path: "usr/bin/y"}}}}
 	o.stamp(pkgs)
-	if pkgs[0].Locations[0].OwnedBy == nil || pkgs[0].Locations[0].OwnedBy.Name != "libc6" {
-		t.Errorf("a leading slash on the location must not hide the owner: %+v", pkgs[0].Locations[0])
+	if got := pkgs[0].Locations[0].OwnedBy; got == nil || *got != (pkgmeta.Owner{Name: "libc6", Version: "2"}) {
+		t.Errorf("a leading slash on the location must not hide the owner: %+v", got)
 	}
 	if pkgs[0].Locations[1].OwnedBy != nil {
 		t.Errorf("an unlisted path gained an owner: %+v", pkgs[0].Locations[1])
+	}
+}
+
+// Layer order: the npm deb's list and its package.json share the image's
+// first layer, so the file is npm's; the image author's later layer
+// replaces that package.json (an `npm install -g` over the deb's tree),
+// and the replacement is not the deb's file although its path is.
+func TestRun_D162_AFileReplacedInALaterLayerIsNotTheOSPackages(t *testing.T) {
+	tarPath := filepath.Join(t.TempDir(), "image.tar")
+	deb := []probeLayerEntry{
+		{name: osReleasePath, body: []byte(osReleaseDebianForOwners)},
+		{name: dpkgDBPath, body: []byte("Package: npm\nStatus: install ok installed\nArchitecture: all\nVersion: 9.2.0~ds1-1\n\n")},
+		{name: "var/lib/dpkg/info/npm.list", body: []byte("/usr/lib/node_modules/npm/node_modules/minimatch/package.json\n/usr/lib/node_modules/npm/node_modules/brace-expansion/package.json\n")},
+		{name: "usr/lib/node_modules/npm/node_modules/minimatch/package.json", body: []byte(`{"name":"minimatch","version":"3.0.4"}`)},
+		{name: "usr/lib/node_modules/npm/node_modules/brace-expansion/package.json", body: []byte(`{"name":"brace-expansion","version":"1.1.11"}`)},
+	}
+	author := []probeLayerEntry{
+		{name: "usr/lib/node_modules/npm/node_modules/minimatch/package.json", body: []byte(`{"name":"minimatch","version":"3.0.4"}`)},
+	}
+	writeLayeredProbeImage(t, tarPath, deb, author)
+	got := ownersInJSON(t, tarPath)
+	if v, ok := got["usr/lib/node_modules/npm/node_modules/minimatch/package.json"]; !ok || v != "" {
+		t.Errorf("the replaced file: present=%v owner=%q, want present and unowned (all: %v)", ok, v, got)
+	}
+}
+
+// Merged /usr: a deb's list says /bin/tool for the regular file the probe
+// finds at usr/bin/tool.
+func TestCatalogFromImage_D162_MergedUsrListSpellingMatches(t *testing.T) {
+	bin, err := os.ReadFile(buildLinuxBBoltBinary(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := &source.Image{Layers: []source.Layer{layerWithModes(t, "sha256:merged-usr", []probeLayerEntry{
+		{name: osReleasePath, body: []byte(osReleaseDebianForOwners)},
+		{name: dpkgDBPath, body: []byte("Package: tool\nStatus: install ok installed\nArchitecture: amd64\nVersion: 1.0-1\n\n")},
+		{name: "var/lib/dpkg/info/tool:amd64.list", body: []byte("/.\n/bin\n/bin/tool\n")},
+		{name: "usr/bin/tool", body: bin, mode: 0o755},
+	})}}
+	target, _, _, err := catalogFromImage(context.Background(), "merged-usr", img)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertOwners(t, target.Packages, map[string]*pkgmeta.Owner{"usr/bin/tool": {Name: "tool", Version: "1.0-1"}})
+}
+
+func TestSpellings(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"/usr/bin/tool", "usr/bin/tool|bin/tool"},
+		{"bin/tool", "bin/tool|usr/bin/tool"},
+		{"usr/lib64/x", "usr/lib64/x|lib64/x"},
+		{"usr/lib/node_modules/npm/package.json", "usr/lib/node_modules/npm/package.json|lib/node_modules/npm/package.json"},
+		{"opt/app/tool", "opt/app/tool"},
+	} {
+		if got := strings.Join(spellings(tc.in), "|"); got != tc.want {
+			t.Errorf("spellings(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }

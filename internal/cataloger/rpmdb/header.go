@@ -220,7 +220,12 @@ func (h header) strArray(tag uint32) ([]string, bool) {
 	if !ok || e.typ != typeStringArray || e.count > maxFilesPerHeader {
 		return nil, false
 	}
-	if uint64(e.offset) > uint64(len(h.data)) {
+	if e.count == 0 {
+		return []string{}, true
+	}
+	// The same bound as str: a first element at or past the end of the
+	// store is not a string.
+	if uint64(e.offset) >= uint64(len(h.data)) {
 		return nil, false
 	}
 	rest := h.data[e.offset:]

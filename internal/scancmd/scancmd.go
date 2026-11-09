@@ -1553,7 +1553,7 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 	// owned is D162's file ownership from the database read below (rpm and
 	// apk carry their file lists inside it); dpkg's and pacman's lists are
 	// files the probe pass reads, so they join inside catalogApplicationProbes.
-	var owned fileOwners
+	owned := newFileOwners(img)
 	switch {
 	case hasAPK:
 		p, err := apkdb.Parse(bytes.NewReader(apkFound.Data), ecosystem)
@@ -1563,7 +1563,7 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 		pkgs, diffID = p, apkFound.DiffID
 		// D162: the database's own F:/R: lines say which package put
 		// each file there.
-		if owned, err = ownersFromAPK(apkFound.Data, p); err != nil {
+		if err := owned.fromAPK(apkFound.Data, p, apkFound.DiffID); err != nil {
 			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, fmt.Errorf("parse %s file list: %w", apkPath, err)
 		}
 	case files[dpkgDBPath].Data != nil:
@@ -1654,7 +1654,7 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 		// is set here, once, for all three backends.
 		rpmdb.ResolveSourceVersions(res.Packages)
 		pkgs, diffID, skippedRecords = res.Packages, f.DiffID, len(res.Skipped)
-		owned = ownersFromRPM(res) // D162: BASENAMES/DIRNAMES/DIRINDEXES
+		owned.fromRPM(res, f.DiffID) // D162: BASENAMES/DIRNAMES/DIRINDEXES
 	case len(pacmanFiles) > 0:
 		// D97. One desc file per package, parsed in sorted order for the
 		// same reason status.d's own loop above is: FilesNamed returns a

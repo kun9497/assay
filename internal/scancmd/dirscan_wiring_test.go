@@ -579,7 +579,7 @@ func TestRun_D109_JSONCarriesUnreadAndItsCount(t *testing.T) {
 				t.Fatalf("stdout is not one JSON document: %v\n%s", err, out.String())
 			}
 			if doc.SchemaVersion != 19 {
-				t.Errorf("schemaVersion = %d, want 18", doc.SchemaVersion)
+				t.Errorf("schemaVersion = %d, want 19", doc.SchemaVersion)
 			}
 			if len(doc.Unread) != 1 || doc.Unread[0].Path != path {
 				t.Fatalf("unread = %+v, want exactly one entry for %q", doc.Unread, path)

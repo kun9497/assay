@@ -29,7 +29,10 @@ func ParseFiles(r io.Reader) (map[string]string, error) {
 		}
 		switch key[0] {
 		case 'P':
-			name = value
+			// A new record: its files start with its own F:, whatever the
+			// previous record left (two records not parted by a blank
+			// line, or an R: before any F:).
+			name, dir = value, ""
 		case 'F':
 			dir = value
 		case 'R':

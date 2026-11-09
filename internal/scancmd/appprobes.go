@@ -65,7 +65,7 @@ func isELF(head []byte) bool {
 // owned is the file ownership the OS database already yielded (rpm, apk);
 // osPkgs the OS inventory, for the dpkg and pacman lists this pass reads
 // (D162). Both may be nil: the probes then locate without an owner.
-func catalogApplicationProbes(ctx context.Context, img *source.Image, owned fileOwners, osPkgs []pkgmeta.Package) ([]pkgmeta.Package, cyclonedx.Stats, []report.ApplicationScopeRecord, error) {
+func catalogApplicationProbes(ctx context.Context, img *source.Image, owned *fileOwners, osPkgs []pkgmeta.Package) ([]pkgmeta.Package, cyclonedx.Stats, []report.ApplicationScopeRecord, error) {
 	var (
 		pkgs  []pkgmeta.Package
 		stats cyclonedx.Stats
@@ -87,7 +87,7 @@ func catalogApplicationProbes(ctx context.Context, img *source.Image, owned file
 	}
 
 	if owned == nil {
-		owned = fileOwners{}
+		owned = newFileOwners(img)
 	}
 	npmFiles := map[string][]byte{}
 	layerOf := map[string]string{}
@@ -100,9 +100,7 @@ func catalogApplicationProbes(ctx context.Context, img *source.Image, owned file
 		f := files[p]
 		switch {
 		case isOwnershipList(p):
-			if err := owned.addList(p, f.Data, osPkgs); err != nil {
-				return nil, cyclonedx.Stats{}, nil, fmt.Errorf("application probes: %w", err)
-			}
+			owned.addList(p, f, osPkgs)
 		case path.Base(p) == "package.json":
 			npmFiles[p] = f.Data
 			layerOf[p] = f.DiffID
