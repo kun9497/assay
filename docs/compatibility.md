@@ -13,6 +13,8 @@ with a version bump, a **Breaking** entry in the [changelog](../CHANGELOG.md), a
 | `provenance sidecar` | the file `--provenance <path>` writes (D120) | `schemaVersion` | 1 |
 | `status.json` | the published database's status, on the `status` branch (D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json` (D147) | `schemaVersion` | 1 |
+| `truthset labels` | `testdata/groundtruth/labels.json`, the ground-truth labels `cmd/truthset` reads (D161) | `schemaVersion` | 1 |
+| `truthset report` | the file `truthset -out <path>` writes (D161) | `schemaVersion` | 1 |
 | `database` | the local store and the OCI tag `ghcr.io/kun9497/assay-db:vN` | tag `vN`, `db status` `schema:` | 9 |
 
 Tests hold this table to the constants in the code, so it cannot fall behind a bump.

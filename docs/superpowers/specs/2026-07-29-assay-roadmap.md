@@ -8363,6 +8363,68 @@ the per-file limit is declined silently — not a package, and nothing says it i
 
 ---
 
+### D161 — Precision and recall are measured against committed ground truth (`cmd/truthset`)
+
+**Decision.** A second measuring tool beside the differential. `cmd/truthset` scans each
+labelled package the way the SBOM path scans it — a one-component CycloneDX document carrying
+the purl the image path would spell (D121) — against the pulled, signed database, and judges
+the finding against a committed label: affected with this fixed version, affected with no fix
+demanded, or clean. Labels live in `testdata/groundtruth/labels.json` (its own
+`schemaVersion`, 1), one row per (package, version, CVE), each carrying the upstream statement
+it was read from, its URL and the fetch time; a `class: matcher` row feeds precision and
+recall, a `class: data` row names a known data gap (Debian 11 frozen before a DLA, D110) and is
+judged and printed but kept out of the metrics, so the figure says what the matcher does with
+the data it has. The figure is per family (alpine, debian, leap) and in total, each with a
+Wilson 95% interval: a perfect run over 35 labels supports "at least 0.90", not "1.0". Exit 0
+when every matcher label holds, 1 when one does not (a false positive, a false negative, a
+fixed-version mismatch, or a package the scan could not evaluate), 2 when a scan could not run
+or its output could not be read — D11's precedence. A fixed-version mismatch counts against
+both rates (a wrong report, and the right verdict not produced), so a run that named every fix
+wrong cannot print 1.000 on the boundary the tool exists to measure; two findings for one CVE
+that disagree on the fix are a mismatch naming both, not whichever arrived first (D25). The scan
+runs with `--config none`, so a `.assay.yaml` in the working directory never turns a waiver
+into a verdict, and every case must carry the first case's database digest or the run is
+untrusted. `-keep` writes each case's SBOM, scan output and exit code, `-offline` re-judges from
+them with no scan (a kept exit 2 stays fatal), `-out` writes a JSON report
+(`schemaVersion` 1, with the database digest and tool version). Stdlib-only, `package main`
+under `cmd/`, not shipped by `make build`, `run(args, stdout, stderr, exec)` the testable seam
+— `cmd/scandiff`'s shape. It runs in the weekly `scanner-diff.yml` after the differential,
+against the same anonymously pulled artifact, and fails the job on exit 1 or 2.
+
+**Why.** The differential (D93) is a proxy. grype shares assay's upstreams, so a feed error
+both read is invisible to it, and its (package, CVE) tuple carries no version and no fix
+state, so the fixed-version boundary — where the comparers' false negatives originate (D9) —
+is outside what it can test. The 2026-11-04 QA ran a 32-case boundary harness by hand and
+named a committed, repeatable version of it a release condition (§8, S-3). The seed is that
+harness's 84 checks: 78 matcher-class, 6 data-class.
+
+**What the first run found.** 77 of 78 held, and the one that did not was the label, not the
+matcher. The seed had labelled Leap 15.6's `libopenssl3` 3.1.4-150600.5.53.1 clean for
+CVE-2026-34182, reading the CSAF's `vendor_fix` alone. SUSE's document (revision 29,
+2026-10-21: "more updates released, more updates marked as affected") lists the SP6-LTSS and
+SAP 15 SP6 bare package ids under `known_affected` beside that released build under
+`recommended` — ten of the document's 33 fixed products carry that shape — and the CVE page
+shows "In progress" beside the released build (bugzilla 1266344). The key therefore carries a
+fixed range and a no-fix range, the released build matches the second, and the verdict —
+affected, no complete fix recorded, mirrored onto Leap 15.6 by D108 — is SUSE's statement. The
+label was corrected to affected with no fix demanded, with that evidence. The seed's reading
+had been circular: it took the then-current database's verdict as the truth, and the database
+of 2026-10-28 had read the document from before the SUSE delta feed's stall (D122) cleared.
+Two rules follow, both held by the labels file's validation: a label names its upstream
+statement, URL and fetch time, and a `data`-class row says which gap it records.
+
+**Gives up.** 78 labels over three families is a small set: a per-family lower bound near
+0.65–0.80 is what it supports, and it says nothing about the families it does not cover (the
+RPM distros other than Leap, every application ecosystem). Labels age: an upstream that
+revises its statement turns the run red until a human re-adjudicates — the intended failure,
+the one the differential cannot produce, and why `source.fetchedAt` is mandatory. `validFrom`
+is recorded, not yet enforced against the database's own dates (D113). An affected label with
+no fix demanded is held by the finding's presence alone. The evidence line at a released-but-
+still-affected build says "no fixed version recorded" while the key holds the released build's
+range beside it; naming that build there is open.
+
+---
+
 ## 6. Benchmarking notes
 
 Design elements taken from existing tools, and what was left behind.

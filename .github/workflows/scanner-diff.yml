@@ -83,6 +83,9 @@ jobs:
       - name: Build scandiff
         run: go build -o ./bin/scandiff ./cmd/scandiff
 
+      - name: Build truthset
+        run: go build -o ./bin/truthset ./cmd/truthset
+
       # Pinned grype and trivy plus their vulnerability databases, shared with
       # db-publish.yml's gate (D114) so both judge with the same versions;
       # the pinning and caching reasoning lives with the steps, in the action.
@@ -106,6 +109,28 @@ jobs:
             -trivy ./bin/trivy \
             -capture ./scanner-diff-capture \
             > ./scanner-diff-capture/report.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      # D161: the ground-truth half the differential is not. Every label in
+      # testdata/groundtruth/labels.json is scanned through the SBOM path
+      # against the same pulled artifact and judged against the distro's own
+      # statement; the table carries Wilson intervals. Exit 1 here means a
+      # label stopped holding -- the matcher regressed, or the upstream
+      # revised its verdict and the label needs re-adjudicating -- and a
+      # human decides which; exit 2 means a scan could not run. The kept
+      # SBOMs and scan outputs land inside the differential's capture so
+      # one artifact carries both, and `truthset -offline` re-judges them.
+      - name: Measure against the ground-truth labels
+        id: truth
+        run: |
+          set +e
+          mkdir -p ./scanner-diff-capture/truthset
+          ./bin/truthset \
+            -labels testdata/groundtruth/labels.json \
+            -assay ./bin/assay \
+            -keep ./scanner-diff-capture/truthset \
+            -out ./scanner-diff-capture/truthset/report.json \
+            > ./scanner-diff-capture/truthset/report.txt
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
 
       # Captures go up whether the run held its floors or not -- a passing
@@ -149,6 +174,20 @@ jobs:
             echo "(report.txt was not produced -- the differential step did not reach it)"
             echo "===SCANDIFF-REPORT-END==="
           fi
+          # The D161 table, between its own sentinels for the same reader.
+          echo "===TRUTHSET-REPORT-BEGIN==="
+          if [ -f ./scanner-diff-capture/truthset/report.txt ]; then
+            cat ./scanner-diff-capture/truthset/report.txt
+            {
+              echo '## ground truth (truthset)'
+              echo '```'
+              cat ./scanner-diff-capture/truthset/report.txt
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "(truthset/report.txt was not produced -- the ground-truth step did not reach it)"
+          fi
+          echo "===TRUTHSET-REPORT-END==="
 
       - name: govulncheck, surfaced for the weekly review
         if: always()
@@ -181,6 +220,12 @@ jobs:
         # P4, re-verified 2026-11-02; internal/ciguard holds every workflow to
         # this shape.
         run: exit ${{ steps.diff.outputs.exit_code || 2 }}
+
+      - name: Fail the job on a ground-truth label that did not hold
+        # Same fail-closed shape as the step above (internal/ciguard holds it
+        # too). Reached only when the differential held, so a red weekly run
+        # has one cause to read, in order: floors first, labels second.
+        run: exit ${{ steps.truth.outputs.exit_code || 2 }}
 
   # D138: one pinned issue per failing ops workflow, closed by the next
   # success. always(), so it runs when the job it watches failed; a

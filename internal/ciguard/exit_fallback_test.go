@@ -130,11 +130,13 @@ func TestEveryWorkflowExitOnAStepOutputFailsClosed(t *testing.T) {
 			t.Error(p)
 		}
 	}
-	// The two sites this guard was written for. Without this, a pattern that
-	// matched nothing would pass every workflow, including a broken one.
-	for _, f := range []string{"scanner-diff.yml", "db-publish.yml"} {
-		if perFile[f] != 1 {
-			t.Errorf("%s: judged %d `exit ${{ steps... }}` sites, want 1", f, perFile[f])
+	// The sites this guard was written for, counted: without this, a pattern
+	// that matched nothing would pass every workflow, including a broken one.
+	// scanner-diff.yml carries two since D161 -- the differential's verdict
+	// and the ground-truth step's, in that order.
+	for f, want := range map[string]int{"scanner-diff.yml": 2, "db-publish.yml": 1} {
+		if perFile[f] != want {
+			t.Errorf("%s: judged %d `exit ${{ steps... }}` sites, want %d", f, perFile[f], want)
 		}
 	}
 }

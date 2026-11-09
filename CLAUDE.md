@@ -59,7 +59,10 @@ catalog from their /opt/bitnami SPDX markers alongside the base distro (D99, dua
 inventory). A weekly digest-pinned
 scanner differential gates regressions in CI (D93: 26 targets vs grype, the last two the
 first end-of-support ones, D114; D105 added trivy on the 18 targets trivy supports — the
-tool is `cmd/scandiff`, floors in `.github/scanner-diff-targets.json`). Since D114 the
+tool is `cmd/scandiff`, floors in `.github/scanner-diff-targets.json`; since D161 the same
+weekly run also measures precision and recall against committed ground truth — `cmd/truthset`,
+labels in `testdata/groundtruth/labels.json` with their upstream statement, Wilson intervals
+per family, a label that stops holding turns the run red for a human to re-adjudicate). Since D114 the
 nightly publish runs the same tool with `-regressions-only` against the candidate before
 `db push`, so a regression floor is held before anything reaches the tag. Since D117 a per-type
 ceiling (`maxGrypeOnlyApp`) bounds the grype-only tuples on application package types —
