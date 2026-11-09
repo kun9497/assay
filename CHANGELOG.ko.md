@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-09
+
 ### Added
 - `cmd/truthset`(D161): 커밋된 정답 집합에 대한 정밀도와 재현율. `testdata/groundtruth/labels.json`의
   라벨 — 어떤 버전의 패키지, CVE, 기대 판정, 그리고 읽어 온 업스트림 진술 — 하나하나를 SBOM 경로로
