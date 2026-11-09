@@ -83,7 +83,7 @@ type underHit struct {
 // and only then is it merged into what the upper layers already decided.
 // Across layers the newest still wins, through found.
 func (img *Image) collect(ctx context.Context, root string, match func(name string) bool) (map[string]FileFromLayer, int, error) {
-	return img.collectWith(ctx, []string{root}, func(name string, _ *tar.Header) bool { return match(name) }, nil)
+	return img.collectWith(ctx, []string{root}, func(name string, _ *tar.Header) bool { return match(name) }, nil, nil)
 }
 
 // sniffBytes is how much of a candidate entry collectWith hands to sniff
@@ -103,7 +103,19 @@ const sniffBytes = 4
 // sniffBytes times the entries matched. Several roots in one pass because a
 // pass reads every layer to EOF (D123): the ten locations the image probes
 // read would otherwise be ten passes.
-func (img *Image) collectWith(ctx context.Context, roots []string, match func(name string, h *tar.Header) bool, sniff func(name string, head []byte) bool) (map[string]FileFromLayer, int, error) {
+//
+// scope, when given, names the entries that are IN the caller's locations
+// whether or not match wants them. A header-aware match can decline an
+// entry a name-only match could not -- the same name as a wanted file, but
+// a symlink, a 0644 copy, a wrapper script under the size floor -- and such
+// an entry still means "the image has something else at this name" (A10):
+// without the shadow, the lower layer's Go binary at that path would be
+// returned as the image's, cataloged, and located in a layer the image's
+// filesystem no longer shows. A declined in-scope entry is recorded hitGone
+// (not hitLink: the probes discard the link count, and a link they could
+// not follow is not a file they failed to read). The collect callers pass
+// nil, since a name-only match cannot split one name two ways.
+func (img *Image) collectWith(ctx context.Context, roots []string, match func(name string, h *tar.Header) bool, sniff func(name string, head []byte) bool, scope func(name string) bool) (map[string]FileFromLayer, int, error) {
 	out := map[string]FileFromLayer{}
 	found := map[string]bool{}
 	deleted := map[string]bool{}
@@ -141,6 +153,9 @@ func (img *Image) collectWith(ctx context.Context, roots []string, match func(na
 				return nil
 			}
 			if !match(name, h) {
+				if scope != nil && scope(name) && !found[name] && !isDeleted(name, deleted) && !underAnyOpaque(name, opaque) {
+					last[name] = underHit{kind: hitGone}
+				}
 				return nil
 			}
 			// Checked BEFORE found[name], so a whiteout in a newer layer still
@@ -343,7 +358,9 @@ func SortedNames(m map[string]FileFromLayer) []string {
 // is not read. One pass for every location, because a pass reads each layer
 // to EOF (D123) and the probes' ten locations would otherwise be ten passes.
 // Layer semantics are collect's: newest layer wins, whiteouts and opaque
-// markers hide lower layers, a non-file at a name shadows a lower file (A10).
+// markers hide lower layers, and ANY entry under a root at a name -- a
+// non-file, or a regular file match or sniff declines -- shadows a lower
+// layer's file there (A10): the image has something else at that path.
 //
 // Symlinks under the roots are counted as every collect caller counts them;
 // a probe that does not want them disclosed (a bin directory is mostly
@@ -364,12 +381,15 @@ func (img *Image) FilesProbed(ctx context.Context, roots []string, match func(na
 	if match == nil || sniff == nil {
 		return nil, 0, fmt.Errorf("source: FilesProbed needs a match and a sniff")
 	}
-	return img.collectWith(ctx, norm, func(name string, h *tar.Header) bool {
+	inScope := func(name string) bool {
 		for _, r := range norm {
 			if strings.HasPrefix(name, r+"/") {
-				return match(name, h)
+				return true
 			}
 		}
 		return false
-	}, sniff)
+	}
+	return img.collectWith(ctx, norm, func(name string, h *tar.Header) bool {
+		return inScope(name) && match(name, h)
+	}, sniff, inScope)
 }

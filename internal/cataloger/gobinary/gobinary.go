@@ -38,7 +38,8 @@ func Parse(path string) (pkgmeta.Target, cyclonedx.Stats, error) {
 		// the path in its own error.
 		return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("read Go build info: %w", err)
 	}
-	return fromBuildInfo(bi, path), cyclonedxStatsOf(bi), nil
+	t, s := inventory(bi, path, true)
+	return t, s, nil
 }
 
 // ParseBytes is Parse for a binary already in memory -- an executable read
@@ -46,28 +47,31 @@ func Parse(path string) (pkgmeta.Target, cyclonedx.Stats, error) {
 // the image. buildinfo.Read on a bytes.Reader reads the same sections
 // ReadFile does; the whole file is in memory because the image path hands
 // bytes, not a file, and D112 already bounded them.
+//
+// One rule differs from Parse: a main module with no version -- "(devel)",
+// what every distro-built binary reports -- is not counted as a component
+// the scan could not evaluate. A `file:` target IS the binary, so its
+// unversioned main module is a thing the caller asked about and was not
+// told (D36). A binary found inside an image is identified by the OS
+// package that installed it, which the OS inventory already judged; the
+// probe's contribution is the binary's dependencies and toolchain, and
+// counting its unstamped main module would add one `targetIncomplete` per
+// Go binary to every image that ships one (measured: container-suseconnect,
+// gosu, captree -- all unstamped), tripping `--fail-on-incomplete=target`
+// and the nightly D114 gate for a version nobody could supply.
 func ParseBytes(data []byte, path string) (pkgmeta.Target, cyclonedx.Stats, error) {
 	bi, err := buildinfo.Read(bytes.NewReader(data))
 	if err != nil {
 		return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("read Go build info from %s: %w", path, err)
 	}
-	return fromBuildInfo(bi, path), cyclonedxStatsOf(bi), nil
+	t, s := inventory(bi, path, false)
+	return t, s, nil
 }
 
-// fromBuildInfo and cyclonedxStatsOf are Parse's body split so ParseBytes
-// shares it: one rule for what a binary's module list becomes, however the
-// bytes arrived.
-func fromBuildInfo(bi *buildinfo.BuildInfo, path string) pkgmeta.Target {
-	t, _ := inventory(bi, path)
-	return t
-}
-
-func cyclonedxStatsOf(bi *buildinfo.BuildInfo) cyclonedx.Stats {
-	_, s := inventory(bi, "")
-	return s
-}
-
-func inventory(bi *buildinfo.BuildInfo, path string) (pkgmeta.Target, cyclonedx.Stats) {
+// inventory is Parse's and ParseBytes's shared body: one rule for what a
+// binary's module list becomes, however the bytes arrived.
+// countUnversionedMain is the one place they differ (see ParseBytes).
+func inventory(bi *buildinfo.BuildInfo, path string, countUnversionedMain bool) (pkgmeta.Target, cyclonedx.Stats) {
 	var (
 		pkgs  []pkgmeta.Package
 		stats cyclonedx.Stats
@@ -92,7 +96,9 @@ func inventory(bi *buildinfo.BuildInfo, path string) (pkgmeta.Target, cyclonedx.
 		})
 	}
 
-	add(bi.Main.Path, bi.Main.Version)
+	if countUnversionedMain || !isUnversioned(bi.Main.Version) {
+		add(bi.Main.Path, bi.Main.Version)
+	}
 	for _, d := range bi.Deps {
 		// A replaced module is a different module: reporting the path that
 		// was replaced away would look up advisories against code that is

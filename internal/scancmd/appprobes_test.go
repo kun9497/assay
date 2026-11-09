@@ -117,8 +117,11 @@ func buildLinuxBBoltBinary(t *testing.T) string {
 		t.Skip("go is not on PATH; this test needs a toolchain to build its fixture")
 	}
 	dir := t.TempDir()
+	// The dependency version is read from the repo's own go.mod rather than
+	// pinned here, so a bbolt bump cannot turn this test into a permanent
+	// skip (GOPROXY=off below skips when the module is not in the cache).
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"),
-		[]byte("module example.test/probed\n\ngo 1.26\n\nrequire go.etcd.io/bbolt v1.5.0\n"), 0o600); err != nil {
+		[]byte("module example.test/probed\n\ngo 1.26\n\nrequire go.etcd.io/bbolt "+repoBBoltVersion(t)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "main.go"),
@@ -309,6 +312,12 @@ func TestRun_D160_PackageJSONWithoutAVersionIsACountedSkip(t *testing.T) {
 	if doc.Summary.Components != 2 || doc.Summary.Evaluated != 1 || doc.Summary.NotEvaluated != 1 {
 		t.Errorf("summary = %+v, want 2 components, 1 evaluated, 1 not evaluated", doc.Summary)
 	}
+	// The tree was there and was read; what it held could not be evaluated.
+	// "read", not "none" -- D36 counts the skip, the scope says the probe
+	// reached the content.
+	if state, _, ok := doc.scopeOf("npm"); !ok || state != "read" {
+		t.Errorf("applicationScope npm = %q (present %v), want read: an installed package.json is content the probe found, versionless or not", state, ok)
+	}
 	for _, f := range doc.Findings {
 		if f.Package.Name == "corepack" {
 			t.Errorf("a version-less package.json became a finding: %+v", f.Package)
@@ -326,7 +335,7 @@ func TestRun_D160_DisclosureNamesWhatWasReadAndWhatWasNot(t *testing.T) {
 		t.Fatalf("Run = %d\nstderr: %s", code, errOut.String())
 	}
 	for _, want := range []string{
-		"note: an image scan reads OS packages (and Bitnami markers) plus npm packages under usr/lib/node_modules, usr/local/lib/node_modules and opt/app-root/src/node_modules and Go binaries under usr/bin",
+		"note: an image scan reads OS packages (and Bitnami markers) plus npm packages under usr/lib/node_modules, usr/local/lib/node_modules and opt/app-root/src/node_modules and Go binaries directly in usr/bin",
 		"Python packages and Java packages, node_modules elsewhere and Go binaries elsewhere -- were not checked",
 		"(D70, D160)",
 	} {

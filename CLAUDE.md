@@ -63,9 +63,7 @@ tool is `cmd/scandiff`, floors in `.github/scanner-diff-targets.json`). Since D1
 nightly publish runs the same tool with `-regressions-only` against the candidate before
 `db push`, so a regression floor is held before anything reaches the tag. Since D117 a per-type
 ceiling (`maxGrypeOnlyApp`) bounds the grype-only tuples on application package types —
-the in-image language packages an image scan does not read (D70; since D160 an image scan DOES read
-npm packages under the global `node_modules` roots and Go binaries in the standard bin directories,
-so `npm` and `go-module` are inventoried types there) — so that gap shows up in
+the in-image language packages an image scan does not read (D70) — so that gap shows up in
 the weekly run instead of being judged `ok`. Since D145 the gate also holds
 `incompleteChecks` and `targetIncomplete` (`maxIncompleteChecks` / `maxTargetIncomplete`,
 omitted = 0), and az2023/wolfi carry real floors, cut where a floor tracks grype's or
@@ -106,8 +104,11 @@ workflow keeps one pinned issue open while it fails (`scripts/ops-alert.sh`) and
 publishes `status.json` to the `status` branch (`cmd/dbstatus`); since D139 a scan warns when its
 database was built over seven days ago (and, under `--fail-on-eol`, when its end-of-life data is
 that old); since D140 a layer download cut mid-stream is retried; since D141 every image scan says on
-stderr and in SARIF (`assay/inventory-scope`) that application packages inside the image were
-not checked. Findings
+stderr and in SARIF (`assay/inventory-scope`) which application packages inside the image were
+read and which were not — since D160 the probes read npm packages under the global
+`node_modules` roots and Go binaries directly in the standard bin directories (one extra layer
+pass; `inventoryScope.applicationPackages` is `partial`, schema 18; `npm` and `go-module` are
+inventoried types in the differential), and Python, Java and anything elsewhere stay unread. Findings
 can be waived through a
 `.assay.yaml` ignore file (D102 — reason mandatory, expiry optional) or a producer's
 OpenVEX document (`--vex`, repeatable, D104 — not_affected/fixed suppress, a reasonless

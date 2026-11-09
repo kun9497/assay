@@ -29,11 +29,12 @@ Python type.
 
 | what | where it was found | count |
 |---|---|---|
-| installed `package.json` under `usr/lib/node_modules`, `usr/local/lib/node_modules`, `opt/app-root/src/node_modules` | ubi8n18 only: 236 (npm's own tree 202, nodemon 33, corepack 1; 233 nested; 199 distinct names, 24 names at two or more versions) | 236 |
+| installed `package.json` under `usr/lib/node_modules`, `usr/local/lib/node_modules`, `opt/app-root/src/node_modules` | ubi8n18 only: 236 (npm's own tree 202, nodemon 33, corepack 1; 233 nested; 199 distinct names, 24 names at two or more paths, 22 of them at two or more versions) | 236 |
 | installed `package.json` under any other `node_modules` | none, on any of the 26 | 0 |
 | Go binaries (ELF with Go build info) directly in `usr/bin`, `usr/local/bin`, `bin`, `sbin`, `usr/sbin`, `usr/libexec`, `usr/local/sbin` | bci156 `usr/bin/container-suseconnect`; cleanstart-postgres `usr/bin/gosu`; archlinux `usr/bin/captree` | 3 |
 | Go binaries under `opt/`, `app/`, `usr/lib*`, `usr/share/`, `usr/local/` | none | 0 |
-| `*.dist-info` | ubi8n18 2, ubi9 5, ubi10 9, alma9 2, ol9 2, archlinux 1 — all owned by the OS package manager (grype's ownership-overlap rule drops them; 0 grype-only python tuples) | 21 |
+| `*.dist-info` | ubi8n18 2, ubi9 5, ubi10 9, alma9 2, ol9 2, archlinux 1 — inferred OS-owned (grype's ownership-overlap rule drops them; 0 grype-only python tuples) | 21 |
+| `*.egg-info` | ubi8n18 14, ubi9 9, ubi10 6, rocky9 1, alma9 2, ol9 2, az2023 2, amazonlinux2 3 — the same inference | 39 |
 | jars | liberica21 1, bitnami-legacy-pg 3 (0 grype-only java tuples) | 4 |
 | lockfiles of any of the thirteen formats | none | 0 |
 
@@ -106,8 +107,11 @@ ceiling trips on a python or java type, that is the next increment, on the same 
   dependency module at its version, and the Go standard library at the toolchain version, keyed
   `Go`, located at the binary's path. `gobinary.Parse` gains a bytes entry point; the `file:`
   path keeps its own.
-- A `(devel)` main version (both measured binaries) is kept as the cataloger keeps it today: the
-  module is named, its version unknown, its dependencies and stdlib judged.
+- A `(devel)` main version (two of the three measured binaries; archlinux's `captree` carries no
+  main module at all) is **not a component** for the probe — shipped rule, after the branch's
+  differential dispatch showed it adding one `targetIncomplete` per Go binary on three targets:
+  the binary is identified by the OS package that installed it, and its dependencies and stdlib
+  are what the probe contributes. The `file:` path keeps counting it (D36).
 
 **Budget.** No new limit. The probes read under `MaxFileBytes` and `MaxScanBytes` like every
 other image read, and exceeding either is exit 2 as D112 says. Measured: the largest Go binary
@@ -132,13 +136,14 @@ Java, node_modules elsewhere, Go binaries elsewhere" instead of "not checked".
 (and grype's `go-module` spelling for stdlib). The three `maxGrypeOnlyApp` seeds that exist for
 those types (ubi8n18 npm 82, bci156 go-module 92, cleanstart-postgres go-module 2) are removed
 in the same PR, and ubi8n18/bci156/cleanstart floors (`maxFindings`, `maxAssayOnlyFixed`) are
-re-seeded from a measured run per D93's 85% / 2x rule. Expected after the change, from the
-2026-11-09 capture: ubi8n18 grype-only 41 → about 3 (the RPM-owned CVEs, which grype reports
-under npm and assay under both), bci156 47 → 0, cleanstart 1 → 0.
+re-seeded only where the branch's own differential dispatch showed a breach: archlinux
+(`maxFindings` 44 → 106, `maxAssayOnlyFixed` 25 → 84 for captree's Go stdlib findings); ubi8n18,
+bci156 and cleanstart held their floors. Measured on that dispatch: ubi8n18 grype-only 41 → 0
+(the three RPM-owned CVEs now agree on both names), bci156 47 → 0, cleanstart 1 → 0.
 
 **Directory scans are not changed.** `dir:` prunes `node_modules` (D26: a checkout's installed
 tree is not its declared dependencies). The image probe reads installed trees because an image
-has no lockfile to prefer; the asymmetry is stated in DESIGN.md.
+has no lockfile to prefer; DESIGN.md's application-packages bullet states the asymmetry.
 
 ## Out of scope
 

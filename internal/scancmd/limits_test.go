@@ -341,6 +341,13 @@ func TestCatalogFromImage_EveryReadSiteIsBounded(t *testing.T) {
 		{"Bitnami legacy file, through the second Files call", bitnamiLegacyPath,
 			map[string]string{osReleasePath: osReleaseAlpine319, apkDBPath: apkOneRecord,
 				bitnamiLegacyPath: big}},
+		// D160: the application-probe pass reads through the same bound. An
+		// oversize EXECUTABLE is declined at its header instead (see
+		// TestRun_D160_OversizeExecutableIsDeclinedNotFatal); a package.json is
+		// read, and read under the limit.
+		{"installed package.json, through FilesProbed", "usr/lib/node_modules/x/package.json",
+			map[string]string{osReleasePath: osReleaseAlpine319, apkDBPath: apkOneRecord,
+				"usr/lib/node_modules/x/package.json": big}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			lowerLimit(t, &source.MaxFileBytes, 4<<10)

@@ -179,3 +179,80 @@ func TestFilesProbed_AncestorShadowingHoldsForEveryRoot(t *testing.T) {
 		t.Error("usr/local/bin/x was returned: the upper layer made it a directory, so the lower file is not what the image ships (A10) -- the second root's ancestors were not shadowed")
 	}
 }
+
+// A regular file whose HEADER the match declines -- the same bytes without
+// the execute bit, a wrapper under the size floor -- and a symlink all shadow
+// a lower layer's binary at the same name: the image has something else
+// there, and returning the lower file would catalog a program the image's
+// filesystem does not show at that path.
+func TestFilesProbed_MatchDeclinedEntryShadowsLowerLayers(t *testing.T) {
+	elf := elfBody(strings.Repeat("b", 64))
+	for _, tc := range []struct {
+		name  string
+		upper Layer
+	}{
+		{"0644 copy", modeLayer(t, "sha256:top", map[string]string{"usr/bin/tool": elf}, nil)},
+		{"wrapper under the floor", modeLayer(t, "sha256:top", map[string]string{"usr/bin/tool": "#!/bin/sh"}, map[string]int64{"usr/bin/tool": 0o755})},
+		{"symlink", layerOfOrdered(t, "sha256:top", entry{name: "usr/bin/tool", link: "tool.real"})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			img := imageOf(modeLayer(t, "sha256:base", map[string]string{"usr/bin/tool": elf}, map[string]int64{"usr/bin/tool": 0o755}), tc.upper)
+			got, links, err := img.FilesProbed(context.Background(), []string{"usr/bin"}, probeMatch, isELFTest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := got["usr/bin/tool"]; ok {
+				t.Errorf("usr/bin/tool was returned from the lower layer under a newer %s", tc.name)
+			}
+			if links != 0 {
+				t.Errorf("links = %d, want 0: a declined entry is recorded gone, not as a link the probe failed to read", links)
+			}
+		})
+	}
+	// Outside the roots a declined entry records nothing: a 0644 file at
+	// etc/tool does not shadow, because nothing under the roots is asked.
+	img := imageOf(modeLayer(t, "sha256:base", map[string]string{"usr/bin/tool": elf}, map[string]int64{"usr/bin/tool": 0o755}),
+		modeLayer(t, "sha256:top", map[string]string{"etc/tool": elf}, nil))
+	got, _, err := img.FilesProbed(context.Background(), []string{"usr/bin"}, probeMatch, isELFTest)
+	if err != nil || len(got) != 1 {
+		t.Errorf("FilesProbed = %v, %v; want the lower binary, untouched by an out-of-scope entry", namesOf(got), err)
+	}
+}
+
+// Roots are normalised like every other primitive's, and matched on a path
+// segment: "/usr/bin/" is usr/bin, and usr/binx is not under usr/bin.
+func TestFilesProbed_RootsAreNormalisedAndSegmentBounded(t *testing.T) {
+	img := imageOf(modeLayer(t, "sha256:one", map[string]string{
+		"usr/bin/tool":  elfBody(strings.Repeat("a", 64)),
+		"usr/binx/tool": elfBody(strings.Repeat("b", 64)),
+	}, map[string]int64{"usr/bin/tool": 0o755, "usr/binx/tool": 0o755}))
+	spelled, _, err := img.FilesProbed(context.Background(), []string{"/usr/bin/", "./usr/local/bin"}, probeMatch, isELFTest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, _, err := img.FilesProbed(context.Background(), []string{"usr/bin", "usr/local/bin"}, probeMatch, isELFTest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g, p := namesOf(spelled), namesOf(plain); len(g) != 1 || g[0] != "usr/bin/tool" || len(p) != 1 || p[0] != "usr/bin/tool" {
+		t.Errorf("FilesProbed(spelled) = %v, FilesProbed(plain) = %v, want usr/bin/tool alone from both (usr/binx is another directory)", g, p)
+	}
+}
+
+// An entry shorter than the sniff's four bytes is handed to sniff as it is,
+// never an error: a two-byte "{}" package.json is content, not a fault.
+func TestFilesProbed_ShortEntriesReachTheSniff(t *testing.T) {
+	img := imageOf(modeLayer(t, "sha256:one", map[string]string{
+		"usr/lib/node_modules/a/package.json": "{}",
+		"usr/lib/node_modules/b/package.json": "",
+	}, nil))
+	got, _, err := img.FilesProbed(context.Background(), []string{"usr/lib/node_modules"},
+		func(name string, _ *tar.Header) bool { return strings.HasSuffix(name, "/package.json") },
+		func(name string, head []byte) bool { return true })
+	if err != nil {
+		t.Fatalf("FilesProbed: %v", err)
+	}
+	if string(got["usr/lib/node_modules/a/package.json"].Data) != "{}" || string(got["usr/lib/node_modules/b/package.json"].Data) != "" {
+		t.Errorf("FilesProbed = %v, want both short entries with their bytes", bodiesOf(t, got))
+	}
+}

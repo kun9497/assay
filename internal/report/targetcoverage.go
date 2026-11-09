@@ -111,10 +111,13 @@ type InventoryScopeRecord struct {
 }
 
 // ApplicationScopeRecord is one ecosystem's share of an image's application
-// scope (D160): State is ScopeRead (the probe ran and found packages),
-// ScopeNone (the probe ran and found none) or ScopeNotRead (nothing reads
-// this ecosystem inside an image), and Roots names the fixed locations a
-// probe reads, so "read" is never mistaken for "the whole image".
+// scope (D160): State is ScopeRead (the probe ran and found content there --
+// installed package.json files, or a Go binary -- whether or not each became
+// a package; a version-less package.json is a counted skip, D36, and the
+// tree it sits in was read), ScopeNone (the probe ran and found nothing at
+// its roots) or ScopeNotRead (nothing reads this ecosystem inside an image),
+// and Roots names the fixed locations a probe reads, so "read" is never
+// mistaken for "the whole image".
 type ApplicationScopeRecord struct {
 	Ecosystem string   `json:"ecosystem"`
 	State     string   `json:"state"`
@@ -137,7 +140,13 @@ func ApplicationScopeSentence(s *InventoryScopeRecord) (read, notRead string) {
 		case ScopeRead, ScopeNone:
 			what := scopeProse(a.Ecosystem)
 			if len(a.Roots) > 0 {
-				what += " under " + joinAnd(a.Roots)
+				// npm trees are read at any depth under their roots; Go
+				// binaries only as direct children of their directories.
+				prep := " under "
+				if a.Ecosystem == "Go" {
+					prep = " directly in "
+				}
+				what += prep + joinAnd(a.Roots)
 			}
 			reads = append(reads, what)
 		case ScopeNotRead:

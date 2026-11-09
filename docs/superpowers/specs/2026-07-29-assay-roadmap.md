@@ -8290,11 +8290,12 @@ cleanstart-postgres go-module 2) are gone. Design record:
 service (§8, S-1), and on 2026-11-09 every layer of all 26 scanner-diff targets was streamed
 to see where the gap sits: every installed `package.json` on every image is under
 `usr/lib/node_modules` (ubi8/nodejs-18's 236 — npm's own bundled tree, 233 of them nested, 24
-names at two or more versions) and none anywhere else; every Go binary found sits directly in a
+names at two or more paths, 22 of those at two or more versions) and none anywhere else; every Go binary found sits directly in a
 bin directory (bci156's `container-suseconnect`, cleanstart's `gosu`, archlinux's `captree`)
 and none under `/opt`, `/app`, `/usr/lib*`, `/usr/share` or `/usr/local`; lockfiles 0; jars 4
-on two images with 0 grype-only java tuples; `*.dist-info` 21 across five RHEL-family images,
-all owned by the OS package manager. The same day's weekly had 89 grype-only application
+on two images with 0 grype-only java tuples; `*.dist-info` 21 across six images (20 on five
+RHEL-family images, 1 on archlinux) and `*.egg-info` 39 across eight, all inferred OS-owned
+from grype's 0 grype-only python tuples. The same day's weekly had 89 grype-only application
 tuples on three targets — ubi8n18 npm 41, bci156 go-module 47, cleanstart 1 — and 0 of any
 other type. Two shapes account for everything measured, and both sit at paths that can be
 named in advance, which is exactly what the Source interface already offers: `FilesMatching`
@@ -8317,6 +8318,22 @@ passes where an Arch image took 5. `collect` therefore grew a multi-root form wi
 header in its match and a four-byte sniff before the read (`FilesProbed`), and the probes
 share one pass: six on an Arch image now. A declined executable costs its four bytes, which
 are not charged to the budget; `/usr/bin/bash` is not read.
+
+**Three rules the branch review added.** (1) An entry under a probed root that the header
+match declines — a symlink, a `chmod -x` copy, a wrapper script under the size floor — shadows
+a lower layer's Go binary at the same name (A10), exactly as a sniff-declined one does; without
+it the lower layer's binary surfaced as the image's, located in a layer the filesystem no
+longer shows. (2) An executable larger than the per-file limit is declined at its header and
+never read: it cannot be a Go binary this scan may read, and reading it only to fail the whole
+scan would have turned a 600 MiB C++ program in `/usr/bin` into exit 2 for the image. (3) A
+binary's unversioned `(devel)` main module — what every distro-built binary reports — is not
+a component for the probe: the binary is identified by the OS package that installed it, and
+counting the module added one `targetIncomplete` per Go binary to every image that ships one
+(the branch's own differential dispatch breached `maxTargetIncomplete` on bci156, cleanstart
+and archlinux at once). A `file:` target keeps counting it (D36): there the binary IS what
+the caller asked about. The archlinux floors moved for the probe's real findings — captree's
+Go 1.26.1 standard library carries CVEs grype does not report for an alpm-owned binary —
+`maxFindings` 44 → 106 and `maxAssayOnlyFixed` 25 → 84, D93's 2× of the measured 53 and 42.
 
 **What the probe does not say.** The RPM that owns a tree. ubi8n18's `node_modules` is the
 `npm` and `nodejs-nodemon` RPMs' bundled tree, and 3 of grype's 41 npm tuples are CVEs assay
@@ -8341,7 +8358,8 @@ both types never trip. **Sixteen mutations, sixteen caught** (two first needed a
 mutation; one — shadowing only the first root — needed the test that reaches it).
 
 **Still open.** `ownedBy` (above). Python and Java inside images. Trees outside the three
-roots and Go binaries outside the seven directories, disclosed as not read.
+roots and Go binaries outside the seven directories, disclosed as not read. An executable over
+the per-file limit is declined silently — not a package, and nothing says it is a Go binary.
 
 ---
 

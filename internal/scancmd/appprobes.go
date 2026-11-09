@@ -153,6 +153,16 @@ func probeCandidate(name string, h *tar.Header) bool {
 	if h.Mode&0o111 == 0 || h.Size < minExecutableBytes {
 		return false
 	}
+	// An executable the per-file limit would refuse is declined here, before
+	// a byte of it is read: it cannot be a Go binary this scan may read, and
+	// reading it only to fail the whole scan (the OS verdict with it) would
+	// turn a 600 MiB C++ program in /usr/bin into exit 2 for the image. The
+	// decline still shadows a lower layer's file at the name (FilesProbed's
+	// scope rule), so nothing else surfaces in its place. Not disclosed as a
+	// skip: it is not a package, and nothing says it is a Go binary.
+	if h.Size > source.MaxFileBytes {
+		return false
+	}
 	d := path.Clean(path.Dir(name))
 	for _, dir := range goBinDirs {
 		if d == dir {

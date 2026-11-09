@@ -17,7 +17,10 @@ All notable changes to this project are documented here. The format follows
   locations; a non-ELF executable is declined after four bytes; D112's limits apply unchanged.
   Measured on all 26 differential targets first: nothing outside those locations, so ubi8n18's
   41 and bci156's 47 grype-only tuples are now assay's to judge. Python, Java, and npm trees or
-  Go binaries anywhere else stay unread and disclosed.
+  Go binaries anywhere else stay unread and disclosed. A binary's unstamped `(devel)` main module
+  is not a component for the probe (a `file:` scan keeps counting it, D36); an executable over
+  the per-file limit is declined at its header rather than read and failed; an entry a newer
+  layer puts at a binary's path shadows the binary below it, whatever the entry is.
 
 ### Changed
 - **JSON `schemaVersion` 18 — breaking for a consumer switching on
@@ -28,7 +31,10 @@ All notable changes to this project are documented here. The format follows
   say what was read and where, and what was not. (D160)
 - `cmd/scandiff` treats `npm` and `go-module` as inventoried types (a grype-only tuple of
   either is judged by the floors, a `maxGrypeOnlyApp` ceiling on either is refused), and the
-  three D117 seeds they carried are removed from `.github/scanner-diff-targets.json`. (D160)
+  three D117 seeds they carried are removed from `.github/scanner-diff-targets.json`. archlinux's
+  `maxFindings` 44 → 106 and `maxAssayOnlyFixed` 25 → 84: captree's Go 1.26.1 standard library
+  carries CVEs grype does not report for an alpm-owned binary (measured 53 / 42 on the branch's
+  dispatch, D93's 2×). (D160)
 - `docs/operating-envelope.md` (and its Korean twin): what a scan bounds itself (D112's sizes,
   the 40-link bound, `--timeout`'s reach and that without it there is no deadline), what
   go-containerregistry v0.21.7 bounds (manifest 100 MiB, token body 64 KiB, three attempts,

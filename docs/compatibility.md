@@ -25,7 +25,7 @@ A consumer can tell "the format I know" from "something I have not seen" by the 
 A bump is one of two kinds, and the changelog says which:
 
 - **Additive**: fields are added, and every existing field keeps its name, type and meaning.
-  Every bump so far has been of this kind, with the exception noted below.
+  Every bump so far has been of this kind, with the exceptions noted below (schemas 12 and 18).
 - **Breaking**: a field is removed or renamed, changes type, or changes meaning. None has
   removed or renamed a field to date.
 

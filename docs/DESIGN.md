@@ -27,15 +27,18 @@ ratings joined on — and `assay scan` matches container images, Go binaries, di
 SBOMs against it. It reads a container image's operating-system packages directly, so syft is
 not in the loop for those; the weekly differential (D93) compares the findings with grype's
 tuple by tuple — the same CVEs, not just the same count — and [the comparison](comparison.md)
-classifies every family's divergence. Application packages installed inside an image are not
-inventoried: an image scan reads no `node_modules/*/package.json`, no Python `*.dist-info`, no
-jar and no Go binary in the image, and its one application inventory is Bitnami's own
-`/opt/bitnami` markers (D99). The same files are read when the target is a directory, a jar or
-a binary; inside an image they are deferred (D70 — "Application packages inside container
-images" in [`docs/deferred-decisions.md`](deferred-decisions.md)). The differential measures
-what that costs on two of its targets: on the 2026-09-27 weekly run, all 22 tuples grype
-reported on `ubi8/nodejs-18` and assay did not are npm packages under `/usr/lib/node_modules`,
-and all 33 on SLE BCI 15.6 are the Go standard library compiled into one binary.
+classifies every family's divergence. Application packages installed inside an image are read
+at two fixed locations only (D160, 2026-11-09): installed `package.json` files under the global
+`node_modules` roots become npm packages, and Go binaries directly in the standard bin
+directories become Go packages, beside Bitnami's own `/opt/bitnami` markers (D99). Python
+`*.dist-info`, jars, and npm trees or Go binaries anywhere else are not read, and the report says
+so per ecosystem in `inventoryScope.applicationScope[]` (D70 — "Application packages inside
+container images" in [`docs/deferred-decisions.md`](deferred-decisions.md) — holds the rest).
+The same files are read whole when the target is a directory, a jar or a binary. The cost that
+motivated D160 was measured on the 2026-09-27 weekly run: all 22 tuples grype reported on
+`ubi8/nodejs-18` and assay did not were npm packages under `/usr/lib/node_modules`, and all 33 on
+SLE BCI 15.6 the Go standard library compiled into one binary; on 2026-11-09 those were 41 and
+47, and the probes close both.
 
 Distro packages match through their *source* package, so an `openssl` advisory reaches the
 installed `libssl3`, and the report names both. That indirection is where distro scanners
@@ -82,7 +85,9 @@ affect (the first three below); the rest hold for every scan and are stated only
   directories. Python, Java, and npm trees or Go binaries anywhere else are not read; the
   report's `inventoryScope.applicationScope[]` says which, and the stderr note and SARIF result
   repeat it. Scan the application's lockfile, directory or binary, or an SBOM of the image, for
-  the rest. [Recorded here](deferred-decisions.md#application-packages-inside-container-images).
+  the rest. `dir:` scans go the other way — they prune `node_modules` (D26), because a checkout's
+  installed tree is not its declared dependencies; an image has no lockfile to prefer, so the
+  probe reads what is installed. [Recorded here](deferred-decisions.md#application-packages-inside-container-images).
 - **Releases the upstream stopped publishing** (D110). Debian 11 has been frozen since
   2026-08-19 — the date its provider's oldest archive carried when the key froze; the seed was
   built 2026-08-30, so Debian's own archive was at most eleven days fresher, and a key that

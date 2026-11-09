@@ -16,6 +16,9 @@
   하나 추가; ELF가 아닌 실행 파일은 4바이트 뒤 거절; D112의 한도는 그대로. 먼저 차등 타깃 26개 전부에서
   측정했습니다: 그 위치 밖에는 아무것도 없어 ubi8n18의 41건과 bci156의 47건 grype 전용 튜플이 이제
   assay의 판정 대상입니다. Python, Java, 그 밖의 위치의 npm 트리나 Go 바이너리는 읽지 않고 공개됩니다.
+  바이너리의 버전 없는 `(devel)` main 모듈은 프로브에서 컴포넌트가 아니고(`file:` 스캔은 계속 셉니다,
+  D36), 파일당 한도를 넘는 실행 파일은 읽어서 실패시키는 대신 헤더에서 거절하며, 새 레이어가 바이너리의
+  경로에 둔 엔트리는 그것이 무엇이든 아래의 바이너리를 가립니다.
 
 ### Changed
 - **JSON `schemaVersion` 18 — `inventoryScope.applicationPackages`로 분기하는 소비자에게 breaking**:
@@ -25,7 +28,9 @@
   `assay/inventory-scope` 결과가 이제 무엇을 어디서 읽었고 무엇을 읽지 않았는지 말합니다. (D160)
 - `cmd/scandiff`가 `npm`과 `go-module`을 인벤토리화된 타입으로 다루고(어느 쪽의 grype 전용 튜플이든
   floor가 판정, 어느 쪽에 대한 `maxGrypeOnlyApp` ceiling이든 거부), 그 타입이 지고 있던 D117 시드 셋을
-  `.github/scanner-diff-targets.json`에서 제거했습니다. (D160)
+  `.github/scanner-diff-targets.json`에서 제거했습니다. archlinux의 `maxFindings` 44 → 106,
+  `maxAssayOnlyFixed` 25 → 84: captree의 Go 1.26.1 표준 라이브러리에 grype가 alpm 소유 바이너리에 대해
+  보고하지 않는 CVE가 있습니다(브랜치 dispatch에서 53 / 42 측정, D93의 2배). (D160)
 - `docs/operating-envelope.md`(와 한국어 쌍): 스캔이 스스로 한정하는 것(D112의 크기, 40 링크 상한,
   `--timeout`의 도달 범위와 그것 없이는 데드라인이 없다는 것), go-containerregistry v0.21.7이
   한정하는 것(manifest 100 MiB, 토큰 본문 64 KiB, 3회 시도, IP 리터럴로의 리다이렉트 거부와 DNS

@@ -26,8 +26,11 @@ func TestParseBytes_MatchesParseAndLocatesAtTheGivenPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if statsBytes != statsPath {
-		t.Errorf("stats = %+v, want Parse's %+v", statsBytes, statsPath)
+	// The one difference: the unstamped "(devel)" main module is a counted
+	// skip for a file: target and not a component for an in-image probe.
+	if statsPath.SkippedNoVersion != 1 || statsBytes.SkippedNoVersion != 0 ||
+		statsBytes.Components != statsPath.Components-1 || statsBytes.Cataloged != statsPath.Cataloged {
+		t.Errorf("stats: bytes %+v, path %+v -- want the probe's to drop exactly the unversioned main module's skip", statsBytes, statsPath)
 	}
 	if len(fromBytes.Packages) != len(fromPath.Packages) || len(fromBytes.Packages) == 0 {
 		t.Fatalf("ParseBytes yielded %d packages, Parse %d", len(fromBytes.Packages), len(fromPath.Packages))

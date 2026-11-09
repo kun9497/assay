@@ -25,11 +25,12 @@ go-module 47, cleanstart-postgres go-module 1 — 총 89건이고 lockfile·jar�
 
 | 무엇 | 어디서 발견 | 수 |
 |---|---|---|
-| `usr/lib/node_modules`, `usr/local/lib/node_modules`, `opt/app-root/src/node_modules` 아래 설치된 `package.json` | ubi8n18에만: 236(npm 자신의 트리 202, nodemon 33, corepack 1; 중첩 233; distinct 이름 199, 두 버전 이상인 이름 24) | 236 |
+| `usr/lib/node_modules`, `usr/local/lib/node_modules`, `opt/app-root/src/node_modules` 아래 설치된 `package.json` | ubi8n18에만: 236(npm 자신의 트리 202, nodemon 33, corepack 1; 중첩 233; distinct 이름 199, 두 경로 이상인 이름 24, 그중 두 버전 이상 22) | 236 |
 | 그 밖의 `node_modules` 아래 설치된 `package.json` | 26개 어디에도 없음 | 0 |
 | `usr/bin`, `usr/local/bin`, `bin`, `sbin`, `usr/sbin`, `usr/libexec`, `usr/local/sbin` 바로 아래의 Go 바이너리(Go 빌드 정보가 있는 ELF) | bci156 `usr/bin/container-suseconnect`; cleanstart-postgres `usr/bin/gosu`; archlinux `usr/bin/captree` | 3 |
 | `opt/`, `app/`, `usr/lib*`, `usr/share/`, `usr/local/` 아래의 Go 바이너리 | 없음 | 0 |
-| `*.dist-info` | ubi8n18 2, ubi9 5, ubi10 9, alma9 2, ol9 2, archlinux 1 — 전부 OS 패키지 관리자 소유(grype의 소유권 중복 규칙이 떨어뜨림; grype 전용 python 튜플 0) | 21 |
+| `*.dist-info` | ubi8n18 2, ubi9 5, ubi10 9, alma9 2, ol9 2, archlinux 1 — OS 소유로 추론(grype의 소유권 중복 규칙이 떨어뜨림; grype 전용 python 튜플 0) | 21 |
+| `*.egg-info` | ubi8n18 14, ubi9 9, ubi10 6, rocky9 1, alma9 2, ol9 2, az2023 2, amazonlinux2 3 — 같은 추론 | 39 |
 | jar | liberica21 1, bitnami-legacy-pg 3(grype 전용 java 튜플 0) | 4 |
 | 열세 형식의 lockfile | 없음 | 0 |
 
@@ -92,8 +93,10 @@ Python 모듈을 두 번 보고하게 된다. python이나 java 타입에서 `ma
 - Go 바이너리는 오늘 `assay scan file:<binary>`가 내는 것을 낸다: main 모듈, 각 의존성 모듈의 버전,
   툴체인 버전의 Go 표준 라이브러리, 키 `Go`, 위치는 바이너리 경로. `gobinary.Parse`에 바이트 진입점이
   생기고 `file:` 경로는 자기 것을 유지한다.
-- `(devel)` main 버전(측정된 두 바이너리 모두)은 카탈로거가 오늘 두는 대로 둔다: 모듈 이름은 있고 버전은
-  미상, 의존성과 stdlib은 판정.
+- `(devel)` main 버전(측정된 세 바이너리 중 둘; archlinux의 `captree`는 main 모듈이 아예 없다)은 프로브에서
+  **컴포넌트가 아니다** — 브랜치의 차등 dispatch가 세 타깃에서 Go 바이너리당 `targetIncomplete` 하나씩
+  더하는 것을 보여 준 뒤 정한 규칙: 바이너리는 그것을 설치한 OS 패키지로 식별되고, 프로브가 기여하는 것은
+  의존성과 stdlib이다. `file:` 경로는 계속 센다(D36).
 
 **예산.** 새 한도 없음. 프로브는 다른 모든 이미지 읽기처럼 `MaxFileBytes`와 `MaxScanBytes` 아래에서
 읽고, 어느 쪽이든 넘으면 D112대로 exit 2다. 측정: 가장 큰 Go 바이너리는 7 MB, ubi8n18 트리 전체는 작은
@@ -114,13 +117,14 @@ D141의 stderr 노트와 SARIF `assay/inventory-scope` 결과는 "not checked" �
 **차등(D93/D117).** `cmd/scandiff`의 `inventoriedTypes`에 `npm`과 `go-module`(stdlib에 대한 grype의
 `go-module` 철자 포함)이 들어간다. 그 타입에 존재하는 세 `maxGrypeOnlyApp` 시드(ubi8n18 npm 82, bci156
 go-module 92, cleanstart-postgres go-module 2)는 같은 PR에서 제거하고, ubi8n18/bci156/cleanstart의
-floor(`maxFindings`, `maxAssayOnlyFixed`)는 D93의 85% / 2배 규칙으로 측정 실행에서 다시 심는다.
-2026-11-09 캡처로 본 변경 뒤 기대치: ubi8n18 grype 전용 41 → 약 3(RPM 소유 CVE — grype는 npm으로, assay는
-둘 다로 보고), bci156 47 → 0, cleanstart 1 → 0.
+floor(`maxFindings`, `maxAssayOnlyFixed`)는 브랜치의 차등 dispatch가 깨진 곳에서만 다시 심었다: archlinux
+(captree의 Go stdlib finding 때문에 `maxFindings` 44 → 106, `maxAssayOnlyFixed` 25 → 84); ubi8n18,
+bci156, cleanstart는 floor를 지켰다. 그 dispatch에서 측정: ubi8n18 grype 전용 41 → 0(RPM 소유 CVE 3건이
+이제 두 이름 모두에서 일치), bci156 47 → 0, cleanstart 1 → 0.
 
 **디렉터리 스캔은 바뀌지 않는다.** `dir:`는 `node_modules`를 잘라낸다(D26: 체크아웃의 설치 트리는 선언된
-의존성이 아니다). 이미지 프로브는 설치 트리를 읽는데, 이미지에는 선호할 lockfile이 없기 때문이다. 이
-비대칭은 DESIGN.md에 적는다.
+의존성이 아니다). 이미지 프로브는 설치 트리를 읽는데, 이미지에는 선호할 lockfile이 없기 때문이다.
+DESIGN.md의 애플리케이션 패키지 불릿이 이 비대칭을 적는다.
 
 ## 범위 밖
 

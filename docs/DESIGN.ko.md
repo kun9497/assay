@@ -26,15 +26,17 @@ Fedora의 Bodhi; 그리고 SUSE의 CSAF VEX까지 — 중앙에서 빌드해 매
 거기에 매칭합니다. 컨테이너 이미지는 운영체제 패키지만 직접 읽으므로, 그 범위에서는 syft가
 필요 없습니다. 주간 차등 비교(D93)는 grype의 finding과 튜플 단위로 비교하며 — 개수만 같은
 것이 아니라 CVE 집합이 같습니다 — [비교 문서](comparison.ko.md)가 계열별 차이를 모두
-분류합니다. 이미지 안에 설치된 애플리케이션 패키지는 인벤토리화되지 않습니다: 이미지 스캔은
-이미지 안의 `node_modules/*/package.json`도, Python `*.dist-info`도, jar도, Go 바이너리도
-읽지 않으며, 유일한 애플리케이션 인벤토리는 Bitnami 자체의 `/opt/bitnami` 마커입니다(D99).
-대상이 디렉터리·jar·바이너리일 때는 같은 파일들을 읽지만, 이미지 안에서는 미룹니다(D70 —
-[`docs/deferred-decisions.ko.md`](deferred-decisions.ko.md)의 "컨테이너 이미지 안의
-애플리케이션 패키지" 항목). 그 대가는 두 대상에서 차등 비교로 측정됩니다: 2026-09-27 주간
-실행에서 grype가 `ubi8/nodejs-18`에서 보고했지만 assay는 보고하지 않은 22개 튜플은 모두
-`/usr/lib/node_modules` 아래의 npm 패키지이고, SLE BCI 15.6의 33개는 모두 하나의 바이너리에
-컴파일된 Go 표준 라이브러리입니다.
+분류합니다. 이미지 안에 설치된 애플리케이션 패키지는 두 고정 위치에서만 읽습니다(D160,
+2026-11-09): 전역 `node_modules` 루트 아래의 설치된 `package.json`은 npm 패키지가 되고, 표준 bin
+디렉터리 바로 아래의 Go 바이너리는 Go 패키지가 되며, Bitnami 자체의 `/opt/bitnami` 마커(D99)와
+나란히 놓입니다. Python `*.dist-info`, jar, 그 밖의 위치에 있는 npm 트리나 Go 바이너리는 읽지 않고,
+보고서가 `inventoryScope.applicationScope[]`에 ecosystem별로 그렇게 말합니다(D70 —
+[`docs/deferred-decisions.ko.md`](deferred-decisions.ko.md)의 "컨테이너 이미지 안의 애플리케이션
+패키지" 항목이 나머지를 쥐고 있습니다). 대상이 디렉터리·jar·바이너리일 때는 같은 파일들을 통째로
+읽습니다. D160의 동기가 된 대가는 2026-09-27 주간 실행에서 측정됐습니다: grype가 `ubi8/nodejs-18`에서
+보고했지만 assay는 보고하지 않은 22개 튜플은 모두 `/usr/lib/node_modules` 아래의 npm 패키지이고, SLE
+BCI 15.6의 33개는 모두 하나의 바이너리에 컴파일된 Go 표준 라이브러리였습니다. 2026-11-09에는 그것이
+41과 47이었고, 프로브가 둘 다 닫습니다.
 
 배포판 패키지는 **소스 패키지를 거쳐** 매칭됩니다. `openssl` 권고가 설치된 `libssl3`에
 도달하고, 리포트가 둘 다 표시합니다. distro 스캐너가 조용히 놓치는 지점이 바로 이 간접 참조입니다.
@@ -78,7 +80,9 @@ this result cannot be trusted").
   bin 디렉터리의 Go 바이너리 — 를 검사합니다. Python, Java, 그 밖의 위치에 있는 npm 트리나 Go
   바이너리는 읽지 않으며, 보고서의 `inventoryScope.applicationScope[]`가 어느 것인지 말하고 stderr
   노트와 SARIF 결과가 그것을 반복합니다. 나머지는 애플리케이션의 lockfile, 디렉터리, 바이너리, 또는
-  이미지의 SBOM을 스캔하십시오. [기록](deferred-decisions.ko.md#컨테이너-이미지-안의-애플리케이션-패키지).
+  이미지의 SBOM을 스캔하십시오. `dir:` 스캔은 반대로 갑니다 — `node_modules`를 잘라냅니다(D26). 체크아웃의
+  설치 트리는 선언된 의존성이 아니기 때문이고, 이미지에는 선호할 lockfile이 없으므로 프로브는 설치된 것을
+  읽습니다. [기록](deferred-decisions.ko.md#컨테이너-이미지-안의-애플리케이션-패키지).
 - **업스트림이 게시를 멈춘 릴리스**(D110). Debian 11은 2026-08-19부터 동결되어 있습니다 — 키가 동결될
   때 provider의 가장 오래된 아카이브가 가진 날짜이고, seed는 2026-08-30에 빌드됐으므로 Debian 자신의
   아카이브는 많아야 열하루 더 새것이었으며, 오늘 동결되는 키는 자기 아카이브의 날짜로 찍힙니다(D113
