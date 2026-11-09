@@ -66,3 +66,41 @@ func TestFetch_KeyAsOfLeavesAClosedTopicOut(t *testing.T) {
 			at, ok, fetchedAt)
 	}
 }
+
+// A release one of whose repositories carried no date is left out of KeyAsOf:
+// AL2's core is dated here and one AL2 extras topic ships an update with no
+// <issued>/<updated>, so Amazon Linux:2 reads as the provider's (unknown)
+// date rather than as core's -- the same "unknown, not min(known)" rule
+// DataAsOf follows.
+func TestFetch_KeyAsOfLeavesAReleaseWithAnUndatedRepositoryOut(t *testing.T) {
+	mux := http.NewServeMux()
+	mountExtrasCatalog(t, mux, []string{"selinux-ng"})
+	mountRepo(t, mux, "/extras/selinux-ng/latest/x86_64", []updateFixture{{
+		id: "ALAS2SELINUX-NG-2026-002", severity: "medium",
+		// no issued, no updated: an undated repository
+		pkgs: []pkgFixture{{name: "selng", epoch: "0", version: "3.6", release: "1.amzn2"}},
+	}})
+	mountRepo(t, mux, "/core-al2", []updateFixture{{
+		id: "ALAS2-2026-901", severity: "low",
+		issued: at(1), updated: at(1),
+		pkgs: []pkgFixture{{name: "corepkg", epoch: "0", version: "1.1", release: "1.amzn2"}},
+	}})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	p := New(Options{
+		Repos:         []Repo{{Ecosystem: "Amazon Linux:2", MirrorListURL: srv.URL + "/core-al2/mirror.list"}},
+		ExtrasBaseURL: srv.URL,
+		Now:           func() time.Time { return fetchedAt },
+	})
+	prov, err := p.Fetch(context.Background(), func(advisory.Advisory) error { return nil })
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if !prov.DataAsOf.IsZero() {
+		t.Errorf("DataAsOf = %v, want zero: one repository could not be dated", prov.DataAsOf)
+	}
+	if at, ok := prov.KeyAsOf["Amazon Linux:2"]; ok {
+		t.Errorf("KeyAsOf[Amazon Linux:2] = %v, want it absent: one of the release's repositories carried no date", at)
+	}
+}

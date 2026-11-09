@@ -263,7 +263,6 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 	prov := store.Provenance{Source: p.baseURL}
 	allCovered := map[string]struct{}{}
 	keyAsOf := map[string]time.Time{}
-	undatedKeys := map[string]struct{}{}
 	var known int
 	// D82: one counter across every ecosystem this Fetch covers, not one per
 	// archive -- Rocky Linux and AlmaLinux are two of p.ecosystems' entries
@@ -340,20 +339,14 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 			// Each key is dated by the archive that declared it (D113
 			// revised): Debian's keys by the Debian archive's Last-Modified,
 			// not by CleanStart's stale one through the provider-wide
-			// minimum below. A key two archives declare takes the older
-			// date; a key any archive could not date is dropped from the map
-			// altogether, so it falls back to DataAsOf -- which the same
-			// undated archive turns unknown -- rather than reading as the
-			// dated archive's.
-			if asOf.IsZero() {
-				undatedKeys[e] = struct{}{}
-				delete(keyAsOf, e)
-				continue
-			}
-			if _, undated := undatedKeys[e]; undated {
-				continue
-			}
-			if prev, ok := keyAsOf[e]; !ok || asOf.Before(prev) {
+			// minimum below. One archive per key, by construction -- covered
+			// is the keys familyMatches ties to THIS archive's family, so no
+			// second archive can declare the same key and there is no older-
+			// or newer-wins to decide. A key whose archive carried no date is
+			// left out, so a reader falls back to DataAsOf -- which the same
+			// undated archive turns unknown below -- rather than borrowing a
+			// dated archive's date.
+			if !asOf.IsZero() {
 				keyAsOf[e] = asOf
 			}
 		}
