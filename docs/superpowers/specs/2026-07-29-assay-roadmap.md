@@ -8425,6 +8425,74 @@ range beside it; naming that build there is open.
 
 ---
 
+### D162 — A probed location names the OS package that owns its file (extends D160)
+
+**Decision.** Every location of an image's probed application packages (D160) carries
+`ownedBy` — the `{name, version}` of the OS package whose file list names that path — when
+one does. The four package databases all record their files, and each is read where it already
+is: rpm's `BASENAMES`/`DIRNAMES`/`DIRINDEXES` header tags (file *i* is `DIRNAMES[DIRINDEXES[i]]
++ BASENAMES[i]`) by all three backends into `Result.Files`; apk's inline `F:`/`R:` lines from
+the `installed` database already in hand; dpkg's `var/lib/dpkg/info/<pkg>[:<arch>].list` and
+pacman's `files` beside each `desc` as two more roots of the probes' own layer pass — the pass
+count stays six. Two rules make a match an ownership claim rather than a path coincidence.
+Exact file: the package that owns `usr/lib/node_modules` says nothing about the files under
+it, so an image author's globally installed module under the RPM-owned root stays unowned, and
+a `.list` for a package the inventory does not hold (removed, not purged) owns nothing. Layer
+order: a package manager writes a file and its database (or list) in the same layer, so a file
+in a LATER layer than the record that names it — `npm install -g npm@latest` over the npm RPM's
+tree — was put there by something else and is unowned, whatever its path says (the review's
+first finding; the location's `layerDigest` and the record's layer are both known). A deb's list
+on a merged-`/usr` system may say `/bin/foo` for the regular file the probe found at
+`usr/bin/foo`; both spellings are tried. Ownership is additive information, so nothing about it
+fails a scan: an unreadable `.list` (a line past the scanner's bound) owns nothing and the scan
+goes on, where the first draft exited 2. JSON only — `findings[].package.locations[].ownedBy`, schema 19,
+additive; the table, `--explain` and SARIF print no locations today and gain none. Nothing is
+suppressed: the npm finding and the owning RPM's finding both stay, now visibly about one file.
+The design record `2026-11-09-image-app-probe-design.md` proposed one string
+(`"npm-1:8.19.4-..."`); two fields spare a consumer parsing a NEVR.
+
+**Why.** D160's probes said where a tree sits and not who put it there, and on the measured
+images the answer is mostly the distro: ubi8/nodejs-18's whole `node_modules` is the `npm` and
+`nodejs-nodemon` RPMs' bundled tree, and 3 of grype's 41 npm tuples there are CVEs assay already
+reports under the owning RPM. A reader deciding whether to act on the npm finding or the RPM's
+advisory had to infer the owner from the path. D160 deferred the field on finding that no OS
+cataloger read file lists; this is that follow-up, with all four rather than the two named.
+
+**Measured, 2026-11-09, on three differential targets with the branch build.** ubi8/nodejs-18:
+15 of 15 probed locations with findings owned — 11 by
+`npm 1:10.8.2-1.18.20.8.1.module+el8.10.0+23091+f8fc3a53`, 4 by `nodejs-nodemon
+3.0.1-1.module+el8.10.0+23091+f8fc3a53` (BerkeleyDB). bci-base:15.6: `usr/bin/container-suseconnect`
+owned by `container-suseconnect 2.5.5-150000.4.75.1` (ndb). archlinux: `usr/bin/captree` owned by
+`libcap 2.78-1` (pacman) — the binary D160's archlinux re-band was about is libcap's, not a
+standalone package's. The SQLite backend has no live target among the three; it is held by a
+generated fixture whose headers carry the tags, because the committed `rpmdb.sqlite` fixture's
+headers do not. The real BerkeleyDB fixture does: `passwd 0.80-4.el8` owns `/usr/bin/passwd`.
+
+**Verified.** Caller first, through the image path: dpkg (a `.list` names npm's bundled
+minimatch, the same package at an unlisted path has no owner, a `.md5sums` beside the list is
+never read) and apk (`F:`/`R:` lines own the Go binary at `usr/bin/tool`, a second binary is
+unowned) through `Run`'s JSON at schema 19; rpm (the BerkeleyDB fixture's passwd, a Go binary
+at `/usr/bin/passwd`) and pacman (a `files` whose `desc` is in the inventory owns, one whose desc
+is not does not) through `catalogFromImage`. The readers' own tables: a header whose three tags
+disagree (missing, count mismatch, index past `DIRNAMES`, negative) owns nothing; a truncated
+store is unreadable as a whole; apk's `R:` before any `F:` and a record with no `P:` own nothing;
+dpkg's `/.` is not a file; pacman's directories are not files; a dpkg list whose `:arch` no
+package carries owns nothing; a location spelled with a leading slash still matches. From the
+review (eight findings, eight fixed): a package.json the author's later layer replaced over
+the deb's is unowned while its sibling stays npm's; a deb list's `/bin/tool` owns the probe's
+`usr/bin/tool`; an unreadable list owns nothing and the scan still exits 0; an apk record
+whose `R:` precedes its `F:` cannot inherit the previous record's directory. Mutations after the
+review's changes: 32 judged, 30 caught, 2 documented equivalents (an unreadable list's `return`
+against nil files; `strArray`'s stated bound against the loop's own failure); 26 of 26 before them.
+
+**Gives up.** Ownership reaches the JSON only. A hardlinked or symlinked copy of an owned file is
+not the owned path and is unowned. dpkg's lists are read for every Debian-family image whether
+or not a probe found anything there (a few hundred small files in one pass). An owned file whose
+package is in the inventory under a different name than the list's (a dpkg rename mid-upgrade)
+is unowned rather than guessed.
+
+---
+
 ## 6. Benchmarking notes
 
 Design elements taken from existing tools, and what was left behind.

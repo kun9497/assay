@@ -9,7 +9,7 @@
 
 | 계약 | 무엇인가 | 버전 필드 | 현재 |
 |---|---|---|---|
-| `report` | `assay scan --output json` | `schemaVersion` | 18 |
+| `report` | `assay scan --output json` | `schemaVersion` | 19 |
 | `provenance sidecar` | `--provenance <path>`가 쓰는 파일(D120) | `schemaVersion` | 1 |
 | `status.json` | 배포 데이터베이스의 상태, `status` 브랜치(D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json`(D147) | `schemaVersion` | 1 |
@@ -70,6 +70,12 @@
   이미지 타깃만)가 ecosystem마다 `read`, `none`(프로브했으나 없음), `not-read` 중 무엇인지와 프로브가
   읽는 `roots`를 말합니다. 이 스키마부터 모든 이미지 스캔의 `applicationPackages`는 `partial`이고
   `not-read`는 더 이상 나오지 않습니다.
+- 스키마 19(추가형): `findings[].package.locations[].ownedBy` — 그 위치의 경로를 파일 목록에 올린 OS
+  패키지의 `{name, version}`(D162). 이미지의 프로브된 애플리케이션 패키지(D160)에서 배포판 자체 패키지가
+  그 파일을 설치했을 때 붙습니다: rpm의 BASENAMES/DIRNAMES, apk의 `F:`/`R:` 줄, dpkg의 `info/*.list`,
+  pacman의 `files`. 파일 단위의 정확한 소유이고 파일의 레이어가 레코드의 레이어보다 나중이 아닐 때만
+  붙습니다(이미지 작성자가 패키지의 파일 위에 덮어쓴 것은 소유자 없음); 어느 OS 패키지도 그 파일을
+  올리지 않았거나 이미지 밖이면 없습니다.
 
 ## provenance sidecar, status.json, `db status`
 

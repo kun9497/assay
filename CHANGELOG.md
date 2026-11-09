@@ -7,6 +7,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- A probed application package's location names the OS package that owns its file (D162):
+  `findings[].package.locations[].ownedBy` is `{name, version}` of the rpm, deb, apk or pacman
+  package whose file list holds the path — rpm's BASENAMES/DIRNAMES/DIRINDEXES header tags
+  (all three database backends), apk's inline `F:`/`R:` lines, dpkg's `info/*.list` and
+  pacman's `files`, the last two read in the probes' existing layer pass (no new pass). So the
+  npm tree under `usr/lib/node_modules` that ubi8/nodejs-18's `npm` and `nodejs-nodemon` RPMs
+  bundle, and the Go binary an Arch package ships, say so, and a reader can tell the distro's
+  copy — whose advisory is the OS package's — from one the image author installed. Exact-file
+  ownership, and layer order: a file in a later layer than the record that names it (an
+  `npm install -g` over the RPM's tree) is unowned. A merged-`/usr` deb list's `/bin/foo` owns
+  the probe's `usr/bin/foo`. A location no OS package lists has no `ownedBy`; an unreadable
+  list owns nothing and never fails the scan. **JSON `schemaVersion` 19** (additive).
+
 ## [0.16.0] - 2026-11-09
 
 ### Added

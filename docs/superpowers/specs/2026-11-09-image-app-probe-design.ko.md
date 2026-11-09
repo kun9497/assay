@@ -3,8 +3,9 @@
 *[English](2026-11-09-image-app-probe-design.md) · 한국어*
 
 상태: **2026-11-09 승인, D160으로 구현**(`ownedBy` 필드는 오늘 어떤 OS 카탈로거도 파일 목록을 읽지
-않는다는 것이 드러나 후속 작업으로 미룸; `applicationPackages`는 `partial`; 프로브는 레이어 패스 하나를
-공유). 결정 기록: D70을 개정하는 로드맵 D160. `docs/deferred-decisions.md`의 유보 항목 "Application packages inside container images"를
+않는다는 것이 드러나 후속 작업으로 미뤘다가 같은 날 D162로 들어감 — `locations[].ownedBy`는 아래
+제안한 문자열 하나가 아니라 `{name, version}`; `applicationPackages`는 `partial`; 프로브는 레이어 패스
+하나를 공유). 결정 기록: D70을 개정하는 로드맵 D160. `docs/deferred-decisions.md`의 유보 항목 "Application packages inside container images"를
 새 정보로 다시 연다: 2026-11-04 QA의 §8 항목 S-1이 이 간극을 서비스의 차단 요인으로 지목했고,
 2026-11-09에 scanner-diff 타깃 26개 전부를 측정해 간극이 정확히 어디에 있는지 드러났다.
 

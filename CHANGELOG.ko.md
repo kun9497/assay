@@ -7,6 +7,20 @@
 
 ## [Unreleased]
 
+### Added
+- 프로브된 애플리케이션 패키지의 위치가 그 파일을 소유한 OS 패키지를 이름 붙입니다(D162):
+  `findings[].package.locations[].ownedBy`는 그 경로를 파일 목록에 올린 rpm·deb·apk·pacman 패키지의
+  `{name, version}`입니다 — rpm의 BASENAMES/DIRNAMES/DIRINDEXES 헤더 태그(세 데이터베이스 백엔드 모두),
+  apk의 인라인 `F:`/`R:` 줄, dpkg의 `info/*.list`, pacman의 `files`. 뒤의 둘은 프로브의 기존 레이어
+  패스에서 읽습니다(새 패스 없음). 그래서 ubi8/nodejs-18의 `npm`·`nodejs-nodemon` RPM이 번들한
+  `usr/lib/node_modules` 아래 npm 트리와 Arch 패키지가 배포한 Go 바이너리는 그렇다고 말하고, 읽는
+  사람은 배포판의 사본 — 그 권고는 OS 패키지의 것 — 과 이미지 작성자가 설치한 것을 구별할 수
+  있습니다. 파일 단위의 정확한 소유와 레이어 순서를 봅니다: 자기를 이름 붙인 레코드보다 나중 레이어의
+  파일(RPM 트리 위의 `npm install -g`)은 소유자 없음입니다. merged-`/usr` deb 목록의 `/bin/foo`는
+  프로브의 `usr/bin/foo`를 소유합니다. 어느 OS 패키지도 올리지 않은 위치에는 `ownedBy`가 없고, 읽을
+  수 없는 목록은 아무것도 소유하지 않으며 스캔을 실패시키지 않습니다. **JSON `schemaVersion` 19**
+  (추가형).
+
 ## [0.16.0] - 2026-11-09
 
 ### Added

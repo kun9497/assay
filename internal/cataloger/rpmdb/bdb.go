@@ -127,6 +127,7 @@ func ReadBDB(db []byte, ecosystem, path string) (Result, error) {
 				continue
 			}
 			out.Packages = append(out.Packages, pkg)
+			out.own(h, len(out.Packages)-1)
 		}
 	}
 

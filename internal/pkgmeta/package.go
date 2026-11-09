@@ -105,6 +105,23 @@ type Location struct {
 	// table, --explain and SARIF print no locations at all today. Empty when
 	// the file at Path is the package itself.
 	Install string
+	// OwnedBy is the OS package whose file list names Path (D162): the RPM,
+	// deb, apk or pacman package that installed the file this location is.
+	// Set on an image's probed application packages only (D160) -- an npm
+	// tree or a Go binary the distro shipped -- so a reader can tell the
+	// distro's bundled copy, whose advisory is the OS package's, from one
+	// the image author installed. Exact-file ownership: an owned parent
+	// directory says nothing about the files under it. Nil when no OS
+	// package lists the file, or outside an image scan.
+	OwnedBy *Owner
+}
+
+// Owner is an OS package named as a location's owner, by its database name
+// and version (the version string the package's own record carries, epoch
+// included where the database stores one).
+type Owner struct {
+	Name    string
+	Version string
 }
 
 // SourceRPMName strips a SOURCERPM-shaped filename back to the bare source

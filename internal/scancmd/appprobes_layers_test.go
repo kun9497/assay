@@ -233,7 +233,7 @@ func TestCatalogApplicationProbes_BinariesInPathOrder(t *testing.T) {
 		{name: "usr/sbin/zeta", body: bin, mode: 0o755},
 		{name: "usr/bin/alpha", body: bin, mode: 0o755},
 	})}}
-	pkgs, _, _, err := catalogApplicationProbes(context.Background(), img)
+	pkgs, _, _, err := catalogApplicationProbes(context.Background(), img, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
