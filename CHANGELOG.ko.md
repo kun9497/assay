@@ -8,6 +8,15 @@
 ## [Unreleased]
 
 ### Added
+- `cmd/truthset`(D161): 커밋된 정답 집합에 대한 정밀도와 재현율. `testdata/groundtruth/labels.json`의
+  라벨 — 어떤 버전의 패키지, CVE, 기대 판정, 그리고 읽어 온 업스트림 진술 — 하나하나를 SBOM 경로로
+  당겨 온 데이터베이스에 대고 스캔해 판정합니다. 표는 패밀리별·전체 수치를 Wilson 95% 구간과 함께
+  내고, 이어서 성립하지 않은 라벨을 전부 보입니다. `class: data` 행(알려진 데이터 공백)은 출력하되
+  지표에서는 뺍니다. 종료 코드는 전부 성립 0, 라벨 하나라도 불성립 1, 스캔 불가 2. `-keep`, `-offline`,
+  `-out`은 `cmd/scandiff`와 같습니다. 주간 `scanner-diff.yml`이 차분 비교 다음에 실행하고 1 또는 2면
+  실패합니다. 2026-11-04 QA 하니스의 점검 84개로 시드했고, 첫 실행에서 라벨 하나를 SUSE 자체 진술로
+  고쳤습니다(CVE-2026-34182의 출시 빌드는 여전히 "In progress"). `make build`로 배포하지 않으며
+  보고서 스키마 변경은 없습니다.
 - 이미지 스캔이 두 고정 위치에서 애플리케이션 패키지를 읽습니다(D160, D70 개정): `usr/lib/node_modules`,
   `usr/local/lib/node_modules`, `opt/app-root/src/node_modules` 아래의 설치된 `package.json`은 `npm`
   패키지가 되고(중첩 사본 포함, 각자 자기 경로에서; 버전 없는 것은 세어지는 skip), `usr/bin`,

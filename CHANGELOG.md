@@ -8,6 +8,16 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- `cmd/truthset` (D161): precision and recall against committed ground truth. Each label in
+  `testdata/groundtruth/labels.json` — a package at a version, a CVE, the expected verdict and
+  the upstream statement it was read from — is scanned through the SBOM path against the pulled
+  database and judged; the table gives per-family and total figures with Wilson 95% intervals,
+  then every label that did not hold; `class: data` rows (known data gaps) are printed and kept
+  out of the metrics. Exit 0 all held, 1 a label did not hold, 2 a scan could not run. `-keep`,
+  `-offline` and `-out` as in `cmd/scandiff`. The weekly `scanner-diff.yml` runs it after the
+  differential and fails on 1 or 2. Seeded with the 2026-11-04 QA harness's 84 checks; the
+  first run corrected one label from SUSE's own statement (CVE-2026-34182's released build is
+  still "In progress"). Not shipped by `make build`; no report schema change.
 - An image scan reads application packages at two fixed locations (D160, revises D70): the
   installed `package.json` files under `usr/lib/node_modules`, `usr/local/lib/node_modules` and
   `opt/app-root/src/node_modules` become `npm` packages (nested copies included, each at its own

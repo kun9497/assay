@@ -1,0 +1,1645 @@
+{
+  "schemaVersion": 1,
+  "description": "Ground-truth labels for cmd/truthset (D161): one row per (installed package, CVE) whose expected verdict is the distro's own statement at source.fetchedAt. class=matcher rows feed precision/recall; class=data rows are known data gaps, reported but excluded from the metrics. Seeded 2026-11-09 from the 2026-11-04 QA boundary harness (32 cases, 84 checks, 3 families).",
+  "labels": [
+    {
+      "id": "alpine-busybox-below/CVE-2024-58251",
+      "case": "alpine-busybox-below",
+      "family": "alpine",
+      "purl": "pkg:apk/alpine/busybox@1.36.1-r20?arch=x86_64&distro=alpine-3.19.9",
+      "name": "busybox",
+      "version": "1.36.1-r20",
+      "cve": "CVE-2024-58251",
+      "expect": {
+        "state": "affected",
+        "fixed": "1.36.1-r21"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "secdb busybox secfixes 1.36.1-r21",
+        "url": "https://secdb.alpinelinux.org/v3.19/main.json",
+        "fetchedAt": "2026-11-04T00:00:54Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "alpine-busybox-below/CVE-2025-46394",
+      "case": "alpine-busybox-below",
+      "family": "alpine",
+      "purl": "pkg:apk/alpine/busybox@1.36.1-r20?arch=x86_64&distro=alpine-3.19.9",
+      "name": "busybox",
+      "version": "1.36.1-r20",
+      "cve": "CVE-2025-46394",
+      "expect": {
+        "state": "affected",
+        "fixed": "1.36.1-r21"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "secdb busybox secfixes 1.36.1-r21",
+        "url": "https://secdb.alpinelinux.org/v3.19/main.json",
+        "fetchedAt": "2026-11-04T00:00:54Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "alpine-busybox-fixed/CVE-2024-58251",
+      "case": "alpine-busybox-fixed",
+      "family": "alpine",
+      "purl": "pkg:apk/alpine/busybox@1.36.1-r21?arch=x86_64&distro=alpine-3.19.9",
+      "name": "busybox",
+      "version": "1.36.1-r21",
+      "cve": "CVE-2024-58251",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "secdb busybox secfixes 1.36.1-r21",
+        "url": "https://secdb.alpinelinux.org/v3.19/main.json",
+        "fetchedAt": "2026-11-04T00:00:54Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "alpine-busybox-fixed/CVE-2025-46394",
+      "case": "alpine-busybox-fixed",
+      "family": "alpine",
+      "purl": "pkg:apk/alpine/busybox@1.36.1-r21?arch=x86_64&distro=alpine-3.19.9",
+      "name": "busybox",
+      "version": "1.36.1-r21",
+      "cve": "CVE-2025-46394",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "secdb busybox secfixes 1.36.1-r21",
+        "url": "https://secdb.alpinelinux.org/v3.19/main.json",
+        "fetchedAt": "2026-11-04T00:00:54Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "alpine-musl-below/CVE-2026-40200",
+      "case": "alpine-musl-below",
+      "family": "alpine",
+      "purl": "pkg:apk/alpine/musl@1.2.4_git20230717-r5?arch=x86_64&distro=alpine-3.19.9",
+      "name": "musl",
+      "version": "1.2.4_git20230717-r5",
+      "cve": "CVE-2026-40200",
+      "expect": {
+        "state": "affected",
+        "fixed": "1.2.4_git20230717-r6"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "secdb musl secfixes r6; r5 fixes CVE-2025-26519 (true negative at r5)",
+        "url": "https://secdb.alpinelinux.org/v3.19/main.json",
+        "fetchedAt": "2026-11-04T00:00:54Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "alpine-musl-below/CVE-2026-6042",
+      "case": "alpine-musl-below",
+      "family": "alpine",
+      "purl": "pkg:apk/alpine/musl@1.2.4_git20230717-r5?arch=x86_64&distro=alpine-3.19.9",
+      "name": "musl",
+      "version": "1.2.4_git20230717-r5",
+      "cve": "CVE-2026-6042",
+      "expect": {
+        "state": "affected",
+        "fixed": "1.2.4_git20230717-r6"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "secdb musl secfixes r6; r5 fixes CVE-2025-26519 (true negative at r5)",
+        "url": "https://secdb.alpinelinux.org/v3.19/main.json",
+        "fetchedAt": "2026-11-04T00:00:54Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "alpine-musl-below/CVE-2025-26519",
+      "case": "alpine-musl-below",
+      "family": "alpine",
+      "purl": "pkg:apk/alpine/musl@1.2.4_git20230717-r5?arch=x86_64&distro=alpine-3.19.9",
+      "name": "musl",
+      "version": "1.2.4_git20230717-r5",
+      "cve": "CVE-2025-26519",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "secdb musl secfixes r6; r5 fixes CVE-2025-26519 (true negative at r5)",
+        "url": "https://secdb.alpinelinux.org/v3.19/main.json",
+        "fetchedAt": "2026-11-04T00:00:54Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "alpine-musl-fixed/CVE-2026-40200",
+      "case": "alpine-musl-fixed",
+      "family": "alpine",
+      "purl": "pkg:apk/alpine/musl@1.2.4_git20230717-r6?arch=x86_64&distro=alpine-3.19.9",
+      "name": "musl",
+      "version": "1.2.4_git20230717-r6",
+      "cve": "CVE-2026-40200",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "secdb musl secfixes r6",
+        "url": "https://secdb.alpinelinux.org/v3.19/main.json",
+        "fetchedAt": "2026-11-04T00:00:54Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "alpine-musl-fixed/CVE-2026-6042",
+      "case": "alpine-musl-fixed",
+      "family": "alpine",
+      "purl": "pkg:apk/alpine/musl@1.2.4_git20230717-r6?arch=x86_64&distro=alpine-3.19.9",
+      "name": "musl",
+      "version": "1.2.4_git20230717-r6",
+      "cve": "CVE-2026-6042",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "secdb musl secfixes r6",
+        "url": "https://secdb.alpinelinux.org/v3.19/main.json",
+        "fetchedAt": "2026-11-04T00:00:54Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "alpine-musl-fixed/CVE-2025-26519",
+      "case": "alpine-musl-fixed",
+      "family": "alpine",
+      "purl": "pkg:apk/alpine/musl@1.2.4_git20230717-r6?arch=x86_64&distro=alpine-3.19.9",
+      "name": "musl",
+      "version": "1.2.4_git20230717-r6",
+      "cve": "CVE-2025-26519",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "secdb musl secfixes r6",
+        "url": "https://secdb.alpinelinux.org/v3.19/main.json",
+        "fetchedAt": "2026-11-04T00:00:54Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "alpine-musl-r4/CVE-2025-26519",
+      "case": "alpine-musl-r4",
+      "family": "alpine",
+      "purl": "pkg:apk/alpine/musl@1.2.4_git20230717-r4?arch=x86_64&distro=alpine-3.19.9",
+      "name": "musl",
+      "version": "1.2.4_git20230717-r4",
+      "cve": "CVE-2025-26519",
+      "expect": {
+        "state": "affected",
+        "fixed": "1.2.4_git20230717-r5"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "secdb musl secfixes r5 = CVE-2025-26519",
+        "url": "https://secdb.alpinelinux.org/v3.19/main.json",
+        "fetchedAt": "2026-11-04T00:00:54Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "alpine-libssl3-installed-TN/CVE-2025-9230",
+      "case": "alpine-libssl3-installed-TN",
+      "family": "alpine",
+      "purl": "pkg:apk/alpine/libssl3@3.1.8-r1?arch=x86_64&distro=alpine-3.19.9&upstream=openssl",
+      "name": "libssl3",
+      "version": "3.1.8-r1",
+      "cve": "CVE-2025-9230",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "secdb openssl secfixes 3.1.8-r1 = CVE-2025-9230/9232, 3.1.8-r0 = CVE-2024-13176 (installed in image, true negative)",
+        "url": "https://secdb.alpinelinux.org/v3.19/main.json",
+        "fetchedAt": "2026-11-04T00:00:54Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "alpine-libssl3-installed-TN/CVE-2025-9232",
+      "case": "alpine-libssl3-installed-TN",
+      "family": "alpine",
+      "purl": "pkg:apk/alpine/libssl3@3.1.8-r1?arch=x86_64&distro=alpine-3.19.9&upstream=openssl",
+      "name": "libssl3",
+      "version": "3.1.8-r1",
+      "cve": "CVE-2025-9232",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "secdb openssl secfixes 3.1.8-r1 = CVE-2025-9230/9232, 3.1.8-r0 = CVE-2024-13176 (installed in image, true negative)",
+        "url": "https://secdb.alpinelinux.org/v3.19/main.json",
+        "fetchedAt": "2026-11-04T00:00:54Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "alpine-libssl3-installed-TN/CVE-2024-13176",
+      "case": "alpine-libssl3-installed-TN",
+      "family": "alpine",
+      "purl": "pkg:apk/alpine/libssl3@3.1.8-r1?arch=x86_64&distro=alpine-3.19.9&upstream=openssl",
+      "name": "libssl3",
+      "version": "3.1.8-r1",
+      "cve": "CVE-2024-13176",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "secdb openssl secfixes 3.1.8-r1 = CVE-2025-9230/9232, 3.1.8-r0 = CVE-2024-13176 (installed in image, true negative)",
+        "url": "https://secdb.alpinelinux.org/v3.19/main.json",
+        "fetchedAt": "2026-11-04T00:00:54Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "alpine-libssl3-below/CVE-2025-9230",
+      "case": "alpine-libssl3-below",
+      "family": "alpine",
+      "purl": "pkg:apk/alpine/libssl3@3.1.8-r0?arch=x86_64&distro=alpine-3.19.9&upstream=openssl",
+      "name": "libssl3",
+      "version": "3.1.8-r0",
+      "cve": "CVE-2025-9230",
+      "expect": {
+        "state": "affected",
+        "fixed": "3.1.8-r1"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "secdb openssl secfixes 3.1.8-r1 (binary libssl3 keyed through source openssl, D8)",
+        "url": "https://secdb.alpinelinux.org/v3.19/main.json",
+        "fetchedAt": "2026-11-04T00:00:54Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "alpine-libssl3-below/CVE-2025-9232",
+      "case": "alpine-libssl3-below",
+      "family": "alpine",
+      "purl": "pkg:apk/alpine/libssl3@3.1.8-r0?arch=x86_64&distro=alpine-3.19.9&upstream=openssl",
+      "name": "libssl3",
+      "version": "3.1.8-r0",
+      "cve": "CVE-2025-9232",
+      "expect": {
+        "state": "affected",
+        "fixed": "3.1.8-r1"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "secdb openssl secfixes 3.1.8-r1 (binary libssl3 keyed through source openssl, D8)",
+        "url": "https://secdb.alpinelinux.org/v3.19/main.json",
+        "fetchedAt": "2026-11-04T00:00:54Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "alpine-libssl3-below/CVE-2024-13176",
+      "case": "alpine-libssl3-below",
+      "family": "alpine",
+      "purl": "pkg:apk/alpine/libssl3@3.1.8-r0?arch=x86_64&distro=alpine-3.19.9&upstream=openssl",
+      "name": "libssl3",
+      "version": "3.1.8-r0",
+      "cve": "CVE-2024-13176",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "secdb openssl secfixes 3.1.8-r1 (binary libssl3 keyed through source openssl, D8)",
+        "url": "https://secdb.alpinelinux.org/v3.19/main.json",
+        "fetchedAt": "2026-11-04T00:00:54Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "alpine-zlib-installed-TN/CVE-2023-45853",
+      "case": "alpine-zlib-installed-TN",
+      "family": "alpine",
+      "purl": "pkg:apk/alpine/zlib@1.3.1-r0?arch=x86_64&distro=alpine-3.19.9",
+      "name": "zlib",
+      "version": "1.3.1-r0",
+      "cve": "CVE-2023-45853",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "secdb zlib: '0' (never affected) for CVE-2023-45853/6992; 1.2.12-r2 for CVE-2022-37434",
+        "url": "https://secdb.alpinelinux.org/v3.19/main.json",
+        "fetchedAt": "2026-11-04T00:00:54Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "alpine-zlib-installed-TN/CVE-2023-6992",
+      "case": "alpine-zlib-installed-TN",
+      "family": "alpine",
+      "purl": "pkg:apk/alpine/zlib@1.3.1-r0?arch=x86_64&distro=alpine-3.19.9",
+      "name": "zlib",
+      "version": "1.3.1-r0",
+      "cve": "CVE-2023-6992",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "secdb zlib: '0' (never affected) for CVE-2023-45853/6992; 1.2.12-r2 for CVE-2022-37434",
+        "url": "https://secdb.alpinelinux.org/v3.19/main.json",
+        "fetchedAt": "2026-11-04T00:00:54Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "alpine-zlib-installed-TN/CVE-2022-37434",
+      "case": "alpine-zlib-installed-TN",
+      "family": "alpine",
+      "purl": "pkg:apk/alpine/zlib@1.3.1-r0?arch=x86_64&distro=alpine-3.19.9",
+      "name": "zlib",
+      "version": "1.3.1-r0",
+      "cve": "CVE-2022-37434",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "secdb zlib: '0' (never affected) for CVE-2023-45853/6992; 1.2.12-r2 for CVE-2022-37434",
+        "url": "https://secdb.alpinelinux.org/v3.19/main.json",
+        "fetchedAt": "2026-11-04T00:00:54Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libc6-installed-TN/CVE-2026-4046",
+      "case": "debian-libc6-installed-TN",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libc6@2.31-13+deb11u14?arch=amd64&distro=debian-11&upstream=glibc",
+      "name": "libc6",
+      "version": "2.31-13+deb11u14",
+      "cve": "CVE-2026-4046",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4621-1 (08 Jun 2026) glibc 2.31-13+deb11u14; DLA-4181-1 glibc 2.31-13+deb11u13 = CVE-2025-4802",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-4046",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libc6-installed-TN/CVE-2026-0861",
+      "case": "debian-libc6-installed-TN",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libc6@2.31-13+deb11u14?arch=amd64&distro=debian-11&upstream=glibc",
+      "name": "libc6",
+      "version": "2.31-13+deb11u14",
+      "cve": "CVE-2026-0861",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4621-1 (08 Jun 2026) glibc 2.31-13+deb11u14; DLA-4181-1 glibc 2.31-13+deb11u13 = CVE-2025-4802",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-0861",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libc6-installed-TN/CVE-2026-0915",
+      "case": "debian-libc6-installed-TN",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libc6@2.31-13+deb11u14?arch=amd64&distro=debian-11&upstream=glibc",
+      "name": "libc6",
+      "version": "2.31-13+deb11u14",
+      "cve": "CVE-2026-0915",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4621-1 (08 Jun 2026) glibc 2.31-13+deb11u14; DLA-4181-1 glibc 2.31-13+deb11u13 = CVE-2025-4802",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-0915",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libc6-installed-TN/CVE-2025-8058",
+      "case": "debian-libc6-installed-TN",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libc6@2.31-13+deb11u14?arch=amd64&distro=debian-11&upstream=glibc",
+      "name": "libc6",
+      "version": "2.31-13+deb11u14",
+      "cve": "CVE-2025-8058",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4621-1 (08 Jun 2026) glibc 2.31-13+deb11u14; DLA-4181-1 glibc 2.31-13+deb11u13 = CVE-2025-4802",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2025-8058",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libc6-installed-TN/CVE-2025-15281",
+      "case": "debian-libc6-installed-TN",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libc6@2.31-13+deb11u14?arch=amd64&distro=debian-11&upstream=glibc",
+      "name": "libc6",
+      "version": "2.31-13+deb11u14",
+      "cve": "CVE-2025-15281",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4621-1 (08 Jun 2026) glibc 2.31-13+deb11u14; DLA-4181-1 glibc 2.31-13+deb11u13 = CVE-2025-4802",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2025-15281",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libc6-installed-TN/CVE-2025-4802",
+      "case": "debian-libc6-installed-TN",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libc6@2.31-13+deb11u14?arch=amd64&distro=debian-11&upstream=glibc",
+      "name": "libc6",
+      "version": "2.31-13+deb11u14",
+      "cve": "CVE-2025-4802",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4621-1 (08 Jun 2026) glibc 2.31-13+deb11u14; DLA-4181-1 glibc 2.31-13+deb11u13 = CVE-2025-4802",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2025-4802",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libc6-below/CVE-2026-4046",
+      "case": "debian-libc6-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libc6@2.31-13+deb11u13?arch=amd64&distro=debian-11&upstream=glibc",
+      "name": "libc6",
+      "version": "2.31-13+deb11u13",
+      "cve": "CVE-2026-4046",
+      "expect": {
+        "state": "affected",
+        "fixed": "2.31-13+deb11u14"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4621-1 glibc 2.31-13+deb11u14",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-4046",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libc6-below/CVE-2026-0861",
+      "case": "debian-libc6-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libc6@2.31-13+deb11u13?arch=amd64&distro=debian-11&upstream=glibc",
+      "name": "libc6",
+      "version": "2.31-13+deb11u13",
+      "cve": "CVE-2026-0861",
+      "expect": {
+        "state": "affected",
+        "fixed": "2.31-13+deb11u14"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4621-1 glibc 2.31-13+deb11u14",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-0861",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libc6-below/CVE-2026-0915",
+      "case": "debian-libc6-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libc6@2.31-13+deb11u13?arch=amd64&distro=debian-11&upstream=glibc",
+      "name": "libc6",
+      "version": "2.31-13+deb11u13",
+      "cve": "CVE-2026-0915",
+      "expect": {
+        "state": "affected",
+        "fixed": "2.31-13+deb11u14"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4621-1 glibc 2.31-13+deb11u14",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-0915",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libc6-below/CVE-2025-8058",
+      "case": "debian-libc6-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libc6@2.31-13+deb11u13?arch=amd64&distro=debian-11&upstream=glibc",
+      "name": "libc6",
+      "version": "2.31-13+deb11u13",
+      "cve": "CVE-2025-8058",
+      "expect": {
+        "state": "affected",
+        "fixed": "2.31-13+deb11u14"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4621-1 glibc 2.31-13+deb11u14",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2025-8058",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libc6-below/CVE-2025-15281",
+      "case": "debian-libc6-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libc6@2.31-13+deb11u13?arch=amd64&distro=debian-11&upstream=glibc",
+      "name": "libc6",
+      "version": "2.31-13+deb11u13",
+      "cve": "CVE-2025-15281",
+      "expect": {
+        "state": "affected",
+        "fixed": "2.31-13+deb11u14"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4621-1 glibc 2.31-13+deb11u14",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2025-15281",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libc6-below/CVE-2025-4802",
+      "case": "debian-libc6-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libc6@2.31-13+deb11u13?arch=amd64&distro=debian-11&upstream=glibc",
+      "name": "libc6",
+      "version": "2.31-13+deb11u13",
+      "cve": "CVE-2025-4802",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4621-1 glibc 2.31-13+deb11u14",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2025-4802",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libkrb5-3-installed-TN/CVE-2026-40355",
+      "case": "debian-libkrb5-3-installed-TN",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libkrb5-3@1.18.3-6+deb11u8?arch=amd64&distro=debian-11&upstream=krb5",
+      "name": "libkrb5-3",
+      "version": "1.18.3-6+deb11u8",
+      "cve": "CVE-2026-40355",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4603-1 (28 May 2026) krb5 1.18.3-6+deb11u8; DLA-4195-1 u7 = CVE-2025-3576",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-40355",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libkrb5-3-installed-TN/CVE-2026-40356",
+      "case": "debian-libkrb5-3-installed-TN",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libkrb5-3@1.18.3-6+deb11u8?arch=amd64&distro=debian-11&upstream=krb5",
+      "name": "libkrb5-3",
+      "version": "1.18.3-6+deb11u8",
+      "cve": "CVE-2026-40356",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4603-1 (28 May 2026) krb5 1.18.3-6+deb11u8; DLA-4195-1 u7 = CVE-2025-3576",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-40356",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libkrb5-3-installed-TN/CVE-2025-3576",
+      "case": "debian-libkrb5-3-installed-TN",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libkrb5-3@1.18.3-6+deb11u8?arch=amd64&distro=debian-11&upstream=krb5",
+      "name": "libkrb5-3",
+      "version": "1.18.3-6+deb11u8",
+      "cve": "CVE-2025-3576",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4603-1 (28 May 2026) krb5 1.18.3-6+deb11u8; DLA-4195-1 u7 = CVE-2025-3576",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2025-3576",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libkrb5-3-below/CVE-2026-40355",
+      "case": "debian-libkrb5-3-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libkrb5-3@1.18.3-6+deb11u7?arch=amd64&distro=debian-11&upstream=krb5",
+      "name": "libkrb5-3",
+      "version": "1.18.3-6+deb11u7",
+      "cve": "CVE-2026-40355",
+      "expect": {
+        "state": "affected",
+        "fixed": "1.18.3-6+deb11u8"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4603-1 krb5 1.18.3-6+deb11u8",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-40355",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libkrb5-3-below/CVE-2026-40356",
+      "case": "debian-libkrb5-3-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libkrb5-3@1.18.3-6+deb11u7?arch=amd64&distro=debian-11&upstream=krb5",
+      "name": "libkrb5-3",
+      "version": "1.18.3-6+deb11u7",
+      "cve": "CVE-2026-40356",
+      "expect": {
+        "state": "affected",
+        "fixed": "1.18.3-6+deb11u8"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4603-1 krb5 1.18.3-6+deb11u8",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-40356",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libkrb5-3-below/CVE-2025-3576",
+      "case": "debian-libkrb5-3-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libkrb5-3@1.18.3-6+deb11u7?arch=amd64&distro=debian-11&upstream=krb5",
+      "name": "libkrb5-3",
+      "version": "1.18.3-6+deb11u7",
+      "cve": "CVE-2025-3576",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4603-1 krb5 1.18.3-6+deb11u8",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2025-3576",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libgnutls30-installed-TN/CVE-2026-3833",
+      "case": "debian-libgnutls30-installed-TN",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libgnutls30@3.7.1-5+deb11u10?arch=amd64&distro=debian-11&upstream=gnutls28",
+      "name": "libgnutls30",
+      "version": "3.7.1-5+deb11u10",
+      "cve": "CVE-2026-3833",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4595-1 (22 May 2026) gnutls28 3.7.1-5+deb11u10; DLA-4492-1 u9",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-3833",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libgnutls30-installed-TN/CVE-2026-5260",
+      "case": "debian-libgnutls30-installed-TN",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libgnutls30@3.7.1-5+deb11u10?arch=amd64&distro=debian-11&upstream=gnutls28",
+      "name": "libgnutls30",
+      "version": "3.7.1-5+deb11u10",
+      "cve": "CVE-2026-5260",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4595-1 (22 May 2026) gnutls28 3.7.1-5+deb11u10; DLA-4492-1 u9",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-5260",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libgnutls30-installed-TN/CVE-2026-33845",
+      "case": "debian-libgnutls30-installed-TN",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libgnutls30@3.7.1-5+deb11u10?arch=amd64&distro=debian-11&upstream=gnutls28",
+      "name": "libgnutls30",
+      "version": "3.7.1-5+deb11u10",
+      "cve": "CVE-2026-33845",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4595-1 (22 May 2026) gnutls28 3.7.1-5+deb11u10; DLA-4492-1 u9",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-33845",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libgnutls30-installed-TN/CVE-2026-42015",
+      "case": "debian-libgnutls30-installed-TN",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libgnutls30@3.7.1-5+deb11u10?arch=amd64&distro=debian-11&upstream=gnutls28",
+      "name": "libgnutls30",
+      "version": "3.7.1-5+deb11u10",
+      "cve": "CVE-2026-42015",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4595-1 (22 May 2026) gnutls28 3.7.1-5+deb11u10; DLA-4492-1 u9",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-42015",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libgnutls30-installed-TN/CVE-2025-9820",
+      "case": "debian-libgnutls30-installed-TN",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libgnutls30@3.7.1-5+deb11u10?arch=amd64&distro=debian-11&upstream=gnutls28",
+      "name": "libgnutls30",
+      "version": "3.7.1-5+deb11u10",
+      "cve": "CVE-2025-9820",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4595-1 (22 May 2026) gnutls28 3.7.1-5+deb11u10; DLA-4492-1 u9",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2025-9820",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libgnutls30-installed-TN/CVE-2025-14831",
+      "case": "debian-libgnutls30-installed-TN",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libgnutls30@3.7.1-5+deb11u10?arch=amd64&distro=debian-11&upstream=gnutls28",
+      "name": "libgnutls30",
+      "version": "3.7.1-5+deb11u10",
+      "cve": "CVE-2025-14831",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4595-1 (22 May 2026) gnutls28 3.7.1-5+deb11u10; DLA-4492-1 u9",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2025-14831",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libgnutls30-below/CVE-2026-3833",
+      "case": "debian-libgnutls30-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libgnutls30@3.7.1-5+deb11u9?arch=amd64&distro=debian-11&upstream=gnutls28",
+      "name": "libgnutls30",
+      "version": "3.7.1-5+deb11u9",
+      "cve": "CVE-2026-3833",
+      "expect": {
+        "state": "affected",
+        "fixed": "3.7.1-5+deb11u10"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4595-1 gnutls28 3.7.1-5+deb11u10",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-3833",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libgnutls30-below/CVE-2026-5260",
+      "case": "debian-libgnutls30-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libgnutls30@3.7.1-5+deb11u9?arch=amd64&distro=debian-11&upstream=gnutls28",
+      "name": "libgnutls30",
+      "version": "3.7.1-5+deb11u9",
+      "cve": "CVE-2026-5260",
+      "expect": {
+        "state": "affected",
+        "fixed": "3.7.1-5+deb11u10"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4595-1 gnutls28 3.7.1-5+deb11u10",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-5260",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libgnutls30-below/CVE-2026-33845",
+      "case": "debian-libgnutls30-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libgnutls30@3.7.1-5+deb11u9?arch=amd64&distro=debian-11&upstream=gnutls28",
+      "name": "libgnutls30",
+      "version": "3.7.1-5+deb11u9",
+      "cve": "CVE-2026-33845",
+      "expect": {
+        "state": "affected",
+        "fixed": "3.7.1-5+deb11u10"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4595-1 gnutls28 3.7.1-5+deb11u10",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-33845",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libgnutls30-below/CVE-2026-42015",
+      "case": "debian-libgnutls30-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libgnutls30@3.7.1-5+deb11u9?arch=amd64&distro=debian-11&upstream=gnutls28",
+      "name": "libgnutls30",
+      "version": "3.7.1-5+deb11u9",
+      "cve": "CVE-2026-42015",
+      "expect": {
+        "state": "affected",
+        "fixed": "3.7.1-5+deb11u10"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4595-1 gnutls28 3.7.1-5+deb11u10",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-42015",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libgnutls30-below/CVE-2025-9820",
+      "case": "debian-libgnutls30-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libgnutls30@3.7.1-5+deb11u9?arch=amd64&distro=debian-11&upstream=gnutls28",
+      "name": "libgnutls30",
+      "version": "3.7.1-5+deb11u9",
+      "cve": "CVE-2025-9820",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4595-1 gnutls28 3.7.1-5+deb11u10",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2025-9820",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libgnutls30-below/CVE-2025-14831",
+      "case": "debian-libgnutls30-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libgnutls30@3.7.1-5+deb11u9?arch=amd64&distro=debian-11&upstream=gnutls28",
+      "name": "libgnutls30",
+      "version": "3.7.1-5+deb11u9",
+      "cve": "CVE-2025-14831",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4595-1 gnutls28 3.7.1-5+deb11u10",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2025-14831",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libssl1.1-installed-TN/CVE-2026-7383",
+      "case": "debian-libssl1.1-installed-TN",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libssl1.1@1.1.1w-0+deb11u8?arch=amd64&distro=debian-11&upstream=openssl",
+      "name": "libssl1.1",
+      "version": "1.1.1w-0+deb11u8",
+      "cve": "CVE-2026-7383",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4630-1 (15 Jun 2026) openssl 1.1.1w-0+deb11u8",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-7383",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libssl1.1-installed-TN/CVE-2026-9076",
+      "case": "debian-libssl1.1-installed-TN",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libssl1.1@1.1.1w-0+deb11u8?arch=amd64&distro=debian-11&upstream=openssl",
+      "name": "libssl1.1",
+      "version": "1.1.1w-0+deb11u8",
+      "cve": "CVE-2026-9076",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4630-1 (15 Jun 2026) openssl 1.1.1w-0+deb11u8",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-9076",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libssl1.1-installed-TN/CVE-2026-34180",
+      "case": "debian-libssl1.1-installed-TN",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libssl1.1@1.1.1w-0+deb11u8?arch=amd64&distro=debian-11&upstream=openssl",
+      "name": "libssl1.1",
+      "version": "1.1.1w-0+deb11u8",
+      "cve": "CVE-2026-34180",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4630-1 (15 Jun 2026) openssl 1.1.1w-0+deb11u8",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-34180",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libssl1.1-installed-TN/CVE-2026-42766",
+      "case": "debian-libssl1.1-installed-TN",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libssl1.1@1.1.1w-0+deb11u8?arch=amd64&distro=debian-11&upstream=openssl",
+      "name": "libssl1.1",
+      "version": "1.1.1w-0+deb11u8",
+      "cve": "CVE-2026-42766",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4630-1 (15 Jun 2026) openssl 1.1.1w-0+deb11u8",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-42766",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libssl1.1-installed-TN/CVE-2026-45447",
+      "case": "debian-libssl1.1-installed-TN",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libssl1.1@1.1.1w-0+deb11u8?arch=amd64&distro=debian-11&upstream=openssl",
+      "name": "libssl1.1",
+      "version": "1.1.1w-0+deb11u8",
+      "cve": "CVE-2026-45447",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4630-1 (15 Jun 2026) openssl 1.1.1w-0+deb11u8",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-45447",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libssl1.1-below/CVE-2026-7383",
+      "case": "debian-libssl1.1-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libssl1.1@1.1.1w-0+deb11u7?arch=amd64&distro=debian-11&upstream=openssl",
+      "name": "libssl1.1",
+      "version": "1.1.1w-0+deb11u7",
+      "cve": "CVE-2026-7383",
+      "expect": {
+        "state": "affected",
+        "fixed": "1.1.1w-0+deb11u8"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4630-1 openssl 1.1.1w-0+deb11u8",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-7383",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libssl1.1-below/CVE-2026-9076",
+      "case": "debian-libssl1.1-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libssl1.1@1.1.1w-0+deb11u7?arch=amd64&distro=debian-11&upstream=openssl",
+      "name": "libssl1.1",
+      "version": "1.1.1w-0+deb11u7",
+      "cve": "CVE-2026-9076",
+      "expect": {
+        "state": "affected",
+        "fixed": "1.1.1w-0+deb11u8"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4630-1 openssl 1.1.1w-0+deb11u8",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-9076",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libssl1.1-below/CVE-2026-34180",
+      "case": "debian-libssl1.1-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libssl1.1@1.1.1w-0+deb11u7?arch=amd64&distro=debian-11&upstream=openssl",
+      "name": "libssl1.1",
+      "version": "1.1.1w-0+deb11u7",
+      "cve": "CVE-2026-34180",
+      "expect": {
+        "state": "affected",
+        "fixed": "1.1.1w-0+deb11u8"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4630-1 openssl 1.1.1w-0+deb11u8",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-34180",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libssl1.1-below/CVE-2026-42766",
+      "case": "debian-libssl1.1-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libssl1.1@1.1.1w-0+deb11u7?arch=amd64&distro=debian-11&upstream=openssl",
+      "name": "libssl1.1",
+      "version": "1.1.1w-0+deb11u7",
+      "cve": "CVE-2026-42766",
+      "expect": {
+        "state": "affected",
+        "fixed": "1.1.1w-0+deb11u8"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4630-1 openssl 1.1.1w-0+deb11u8",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-42766",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libssl1.1-below/CVE-2026-45447",
+      "case": "debian-libssl1.1-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libssl1.1@1.1.1w-0+deb11u7?arch=amd64&distro=debian-11&upstream=openssl",
+      "name": "libssl1.1",
+      "version": "1.1.1w-0+deb11u7",
+      "cve": "CVE-2026-45447",
+      "expect": {
+        "state": "affected",
+        "fixed": "1.1.1w-0+deb11u8"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "DLA-4630-1 openssl 1.1.1w-0+deb11u8",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-45447",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "leap-glibc-below/CVE-2026-4046",
+      "case": "leap-glibc-below",
+      "family": "leap",
+      "purl": "pkg:rpm/opensuse/glibc@2.38-150600.14.48.1?arch=x86_64&distro=opensuse-leap-15.6&upstream=glibc-2.38-150600.14.48.1.src.rpm",
+      "name": "glibc",
+      "version": "2.38-150600.14.48.1",
+      "cve": "CVE-2026-4046",
+      "expect": {
+        "state": "affected",
+        "fixed": "2.38-150600.14.49.1"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "cve-2026-4046.json: SLES 15 SP6-LTSS recommended glibc-2.38-150600.14.49.1",
+        "url": "https://www.suse.com/security/cve/CVE-2026-4046.html",
+        "fetchedAt": "2026-11-04T00:09:06Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "leap-glibc-fixed/CVE-2026-4046",
+      "case": "leap-glibc-fixed",
+      "family": "leap",
+      "purl": "pkg:rpm/opensuse/glibc@2.38-150600.14.49.1?arch=x86_64&distro=opensuse-leap-15.6&upstream=glibc-2.38-150600.14.49.1.src.rpm",
+      "name": "glibc",
+      "version": "2.38-150600.14.49.1",
+      "cve": "CVE-2026-4046",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "cve-2026-4046.json: fixed 2.38-150600.14.49.1 (5450/5928 same build per scan)",
+        "url": "https://www.suse.com/security/cve/CVE-2026-4046.html",
+        "fetchedAt": "2026-11-04T00:09:06Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "leap-glibc-fixed/CVE-2026-5450",
+      "case": "leap-glibc-fixed",
+      "family": "leap",
+      "purl": "pkg:rpm/opensuse/glibc@2.38-150600.14.49.1?arch=x86_64&distro=opensuse-leap-15.6&upstream=glibc-2.38-150600.14.49.1.src.rpm",
+      "name": "glibc",
+      "version": "2.38-150600.14.49.1",
+      "cve": "CVE-2026-5450",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "cve-2026-4046.json: fixed 2.38-150600.14.49.1 (5450/5928 same build per scan)",
+        "url": "https://www.suse.com/security/cve/CVE-2026-5450.html",
+        "fetchedAt": "2026-11-04T00:09:06Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "leap-glibc-fixed/CVE-2026-5928",
+      "case": "leap-glibc-fixed",
+      "family": "leap",
+      "purl": "pkg:rpm/opensuse/glibc@2.38-150600.14.49.1?arch=x86_64&distro=opensuse-leap-15.6&upstream=glibc-2.38-150600.14.49.1.src.rpm",
+      "name": "glibc",
+      "version": "2.38-150600.14.49.1",
+      "cve": "CVE-2026-5928",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "cve-2026-4046.json: fixed 2.38-150600.14.49.1 (5450/5928 same build per scan)",
+        "url": "https://www.suse.com/security/cve/CVE-2026-5928.html",
+        "fetchedAt": "2026-11-04T00:09:06Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "leap-libopenssl3-below/CVE-2026-34182",
+      "case": "leap-libopenssl3-below",
+      "family": "leap",
+      "purl": "pkg:rpm/opensuse/libopenssl3@3.1.4-150600.5.52.1?arch=x86_64&distro=opensuse-leap-15.6&upstream=openssl-3-3.1.4-150600.5.52.1.src.rpm",
+      "name": "libopenssl3",
+      "version": "3.1.4-150600.5.52.1",
+      "cve": "CVE-2026-34182",
+      "expect": {
+        "state": "affected",
+        "fixed": "3.1.4-150600.5.53.1"
+      },
+      "class": "matcher",
+      "note": "The key carries both a fixed range (3.1.4-150600.5.53.1, the released build) and a no-fix range (the same products' bare known_affected, see the at-released-build case); a build below the released one is judged on the fixed range and names it.",
+      "source": {
+        "statement": "cve-2026-34182.json: SLES 15 SP6-LTSS recommended libopenssl3-3.1.4-150600.5.53.1",
+        "url": "https://www.suse.com/security/cve/CVE-2026-34182.html",
+        "fetchedAt": "2026-11-04T00:09:06Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "leap-libopenssl3-at-released-build/CVE-2026-34182",
+      "case": "leap-libopenssl3-at-released-build",
+      "family": "leap",
+      "purl": "pkg:rpm/opensuse/libopenssl3@3.1.4-150600.5.53.1?arch=x86_64&distro=opensuse-leap-15.6&upstream=openssl-3-3.1.4-150600.5.53.1.src.rpm",
+      "name": "libopenssl3",
+      "version": "3.1.4-150600.5.53.1",
+      "cve": "CVE-2026-34182",
+      "expect": {
+        "state": "affected"
+      },
+      "class": "matcher",
+      "note": "SUSE released libopenssl3 3.1.4-150600.5.53.1 for SLES 15 SP6-LTSS and SAP 15 SP6 and still lists both products' bare package ids under known_affected (revision 29, 2026-10-21: 'more updates released, more updates marked as affected'; the CVE page shows 'In progress' beside the released build, bugzilla 1266344 IN_PROGRESS). The verdict at the released build is therefore affected with no complete fix recorded, mirrored onto Leap 15.6 by D108. The 2026-11-04 seed read the vendor_fix alone and labelled this build clean; the first truthset run (2026-11-09) found that label did not hold.",
+      "source": {
+        "statement": "cve-2026-34182.json revision 30 (2026-11-03): 'SUSE Linux Enterprise Server 15 SP6-LTSS:libopenssl3' in known_affected beside 'SUSE Linux Enterprise Server 15 SP6-LTSS:libopenssl3-3.1.4-150600.5.53.1' in recommended/vendor_fix; https://www.suse.com/security/cve/CVE-2026-34182.html status 'In progress' for SLES 15 SP6-LTSS",
+        "url": "https://ftp.suse.com/pub/projects/security/csaf-vex/2026/cve-2026-34182.json",
+        "fetchedAt": "2026-11-09T07:05:00Z"
+      },
+      "validFrom": "2026-11-03"
+    },
+    {
+      "id": "leap-liblzma5-below/CVE-2026-34743",
+      "case": "leap-liblzma5-below",
+      "family": "leap",
+      "purl": "pkg:rpm/opensuse/liblzma5@5.4.1-150600.3.5.1?arch=x86_64&distro=opensuse-leap-15.6&upstream=xz-5.4.1-150600.3.5.1.src.rpm",
+      "name": "liblzma5",
+      "version": "5.4.1-150600.3.5.1",
+      "cve": "CVE-2026-34743",
+      "expect": {
+        "state": "affected",
+        "fixed": "5.4.1-150600.3.6.1"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "cve-2026-34743.json: SLES 15 SP6-LTSS recommended liblzma5-5.4.1-150600.3.6.1",
+        "url": "https://www.suse.com/security/cve/CVE-2026-34743.html",
+        "fetchedAt": "2026-11-04T00:09:06Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "leap-liblzma5-fixed/CVE-2026-34743",
+      "case": "leap-liblzma5-fixed",
+      "family": "leap",
+      "purl": "pkg:rpm/opensuse/liblzma5@5.4.1-150600.3.6.1?arch=x86_64&distro=opensuse-leap-15.6&upstream=xz-5.4.1-150600.3.6.1.src.rpm",
+      "name": "liblzma5",
+      "version": "5.4.1-150600.3.6.1",
+      "cve": "CVE-2026-34743",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "cve-2026-34743.json",
+        "url": "https://www.suse.com/security/cve/CVE-2026-34743.html",
+        "fetchedAt": "2026-11-04T00:09:06Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "leap-krb5-below/CVE-2026-40355",
+      "case": "leap-krb5-below",
+      "family": "leap",
+      "purl": "pkg:rpm/opensuse/krb5@1.20.1-150600.11.18.1?arch=x86_64&distro=opensuse-leap-15.6&upstream=krb5-1.20.1-150600.11.18.1.src.rpm",
+      "name": "krb5",
+      "version": "1.20.1-150600.11.18.1",
+      "cve": "CVE-2026-40355",
+      "expect": {
+        "state": "affected",
+        "fixed": "1.20.1-150600.11.19.1"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "cve-2026-40355.json: SLES 15 SP6-LTSS recommended krb5-1.20.1-150600.11.19.1",
+        "url": "https://www.suse.com/security/cve/CVE-2026-40355.html",
+        "fetchedAt": "2026-11-04T00:09:06Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "leap-krb5-fixed/CVE-2026-40355",
+      "case": "leap-krb5-fixed",
+      "family": "leap",
+      "purl": "pkg:rpm/opensuse/krb5@1.20.1-150600.11.19.1?arch=x86_64&distro=opensuse-leap-15.6&upstream=krb5-1.20.1-150600.11.19.1.src.rpm",
+      "name": "krb5",
+      "version": "1.20.1-150600.11.19.1",
+      "cve": "CVE-2026-40355",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "cve-2026-40355.json",
+        "url": "https://www.suse.com/security/cve/CVE-2026-40355.html",
+        "fetchedAt": "2026-11-04T00:09:06Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "leap-libacl1-installed/CVE-2026-54369",
+      "case": "leap-libacl1-installed",
+      "family": "leap",
+      "purl": "pkg:rpm/opensuse/libacl1@2.2.52-4.3.1?arch=x86_64&distro=opensuse-leap-15.6&upstream=acl-2.2.52-4.3.1.src.rpm",
+      "name": "libacl1",
+      "version": "2.2.52-4.3.1",
+      "cve": "CVE-2026-54369",
+      "expect": {
+        "state": "affected",
+        "fixed": "2.4.0-150000.4.6.1"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "cve-2026-54369.json: SLES 15 SP6-LTSS recommended libacl1-2.4.0-150000.4.6.1; CVE page: openSUSE Leap 15.6 acl Affected",
+        "url": "https://www.suse.com/security/cve/CVE-2026-54369.html",
+        "fetchedAt": "2026-11-04T00:09:06Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "leap-libacl1-fixed/CVE-2026-54369",
+      "case": "leap-libacl1-fixed",
+      "family": "leap",
+      "purl": "pkg:rpm/opensuse/libacl1@2.4.0-150000.4.6.1?arch=x86_64&distro=opensuse-leap-15.6&upstream=acl-2.4.0-150000.4.6.1.src.rpm",
+      "name": "libacl1",
+      "version": "2.4.0-150000.4.6.1",
+      "cve": "CVE-2026-54369",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "cve-2026-54369.json",
+        "url": "https://www.suse.com/security/cve/CVE-2026-54369.html",
+        "fetchedAt": "2026-11-04T00:09:06Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "leap-coreutils-installed-TN/CVE-2025-5278",
+      "case": "leap-coreutils-installed-TN",
+      "family": "leap",
+      "purl": "pkg:rpm/opensuse/coreutils@8.32-150400.9.9.1?arch=x86_64&distro=opensuse-leap-15.6&upstream=coreutils-8.32-150400.9.9.1.src.rpm",
+      "name": "coreutils",
+      "version": "8.32-150400.9.9.1",
+      "cve": "CVE-2025-5278",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "cve-2025-5278.json: openSUSE Leap 15.6 recommended coreutils-8.32-150400.9.9.1 (native Leap entry)",
+        "url": "https://www.suse.com/security/cve/CVE-2025-5278.html",
+        "fetchedAt": "2026-11-04T00:09:06Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "leap-coreutils-below/CVE-2025-5278",
+      "case": "leap-coreutils-below",
+      "family": "leap",
+      "purl": "pkg:rpm/opensuse/coreutils@8.32-150400.9.8.1?arch=x86_64&distro=opensuse-leap-15.6&upstream=coreutils-8.32-150400.9.8.1.src.rpm",
+      "name": "coreutils",
+      "version": "8.32-150400.9.8.1",
+      "cve": "CVE-2025-5278",
+      "expect": {
+        "state": "affected",
+        "fixed": "8.32-150400.9.9.1"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "cve-2025-5278.json",
+        "url": "https://www.suse.com/security/cve/CVE-2025-5278.html",
+        "fetchedAt": "2026-11-04T00:09:06Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "leap-util-linux-below/CVE-2026-53613",
+      "case": "leap-util-linux-below",
+      "family": "leap",
+      "purl": "pkg:rpm/opensuse/util-linux@2.39.3-150600.4.25.1?arch=x86_64&distro=opensuse-leap-15.6&upstream=util-linux-2.39.3-150600.4.25.1.src.rpm",
+      "name": "util-linux",
+      "version": "2.39.3-150600.4.25.1",
+      "cve": "CVE-2026-53613",
+      "expect": {
+        "state": "affected",
+        "fixed": "2.39.3-150600.4.26.1"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "cve-2026-53613.json recommended 2.39.3-150600.4.26.1; cve-2026-53615.json known_affected (no fix)",
+        "url": "https://www.suse.com/security/cve/CVE-2026-53613.html",
+        "fetchedAt": "2026-11-04T00:09:06Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "leap-util-linux-below/CVE-2026-53615",
+      "case": "leap-util-linux-below",
+      "family": "leap",
+      "purl": "pkg:rpm/opensuse/util-linux@2.39.3-150600.4.25.1?arch=x86_64&distro=opensuse-leap-15.6&upstream=util-linux-2.39.3-150600.4.25.1.src.rpm",
+      "name": "util-linux",
+      "version": "2.39.3-150600.4.25.1",
+      "cve": "CVE-2026-53615",
+      "expect": {
+        "state": "affected",
+        "fixed": ""
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "cve-2026-53613.json recommended 2.39.3-150600.4.26.1; cve-2026-53615.json known_affected (no fix)",
+        "url": "https://www.suse.com/security/cve/CVE-2026-53615.html",
+        "fetchedAt": "2026-11-04T00:09:06Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "leap-util-linux-fixed/CVE-2026-53615",
+      "case": "leap-util-linux-fixed",
+      "family": "leap",
+      "purl": "pkg:rpm/opensuse/util-linux@2.39.3-150600.4.26.1?arch=x86_64&distro=opensuse-leap-15.6&upstream=util-linux-2.39.3-150600.4.26.1.src.rpm",
+      "name": "util-linux",
+      "version": "2.39.3-150600.4.26.1",
+      "cve": "CVE-2026-53615",
+      "expect": {
+        "state": "affected",
+        "fixed": ""
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "cve-2026-53613.json / cve-2026-53615.json",
+        "url": "https://www.suse.com/security/cve/CVE-2026-53615.html",
+        "fetchedAt": "2026-11-04T00:09:06Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "leap-util-linux-fixed/CVE-2026-53613",
+      "case": "leap-util-linux-fixed",
+      "family": "leap",
+      "purl": "pkg:rpm/opensuse/util-linux@2.39.3-150600.4.26.1?arch=x86_64&distro=opensuse-leap-15.6&upstream=util-linux-2.39.3-150600.4.26.1.src.rpm",
+      "name": "util-linux",
+      "version": "2.39.3-150600.4.26.1",
+      "cve": "CVE-2026-53613",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "cve-2026-53613.json / cve-2026-53615.json",
+        "url": "https://www.suse.com/security/cve/CVE-2026-53613.html",
+        "fetchedAt": "2026-11-04T00:09:06Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libarchive13-dla-after-freeze-fixed/CVE-2026-14164",
+      "case": "debian-libarchive13-dla-after-freeze-fixed",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libarchive13@3.4.3-2+deb11u5?arch=amd64&distro=debian-11&upstream=libarchive",
+      "name": "libarchive13",
+      "version": "3.4.3-2+deb11u5",
+      "cve": "CVE-2026-14164",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "data",
+      "note": "Debian:11 is a whole-key carry frozen before DLA-4762-1 (2026-08-31) shipped (D110); the fix is not in the database, so the 'fixed' build reads affected with no fix and the 'below' build has no fixed version. Expected to fail until a post-LTS Debian source lands (deferred-decisions, 'Debian 11 after LTS').",
+      "source": {
+        "statement": "DLA-4762-1 (31 Aug 2026) libarchive 3.4.3-2+deb11u5 -- published after the Debian:11 freeze (2026-08-19)",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-14164",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libarchive13-dla-after-freeze-fixed/CVE-2026-15028",
+      "case": "debian-libarchive13-dla-after-freeze-fixed",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libarchive13@3.4.3-2+deb11u5?arch=amd64&distro=debian-11&upstream=libarchive",
+      "name": "libarchive13",
+      "version": "3.4.3-2+deb11u5",
+      "cve": "CVE-2026-15028",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "data",
+      "note": "Debian:11 is a whole-key carry frozen before DLA-4762-1 (2026-08-31) shipped (D110); the fix is not in the database, so the 'fixed' build reads affected with no fix and the 'below' build has no fixed version. Expected to fail until a post-LTS Debian source lands (deferred-decisions, 'Debian 11 after LTS').",
+      "source": {
+        "statement": "DLA-4762-1 (31 Aug 2026) libarchive 3.4.3-2+deb11u5 -- published after the Debian:11 freeze (2026-08-19)",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-15028",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libarchive13-dla-after-freeze-fixed/CVE-2026-16517",
+      "case": "debian-libarchive13-dla-after-freeze-fixed",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libarchive13@3.4.3-2+deb11u5?arch=amd64&distro=debian-11&upstream=libarchive",
+      "name": "libarchive13",
+      "version": "3.4.3-2+deb11u5",
+      "cve": "CVE-2026-16517",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "data",
+      "note": "Debian:11 is a whole-key carry frozen before DLA-4762-1 (2026-08-31) shipped (D110); the fix is not in the database, so the 'fixed' build reads affected with no fix and the 'below' build has no fixed version. Expected to fail until a post-LTS Debian source lands (deferred-decisions, 'Debian 11 after LTS').",
+      "source": {
+        "statement": "DLA-4762-1 (31 Aug 2026) libarchive 3.4.3-2+deb11u5 -- published after the Debian:11 freeze (2026-08-19)",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-16517",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libarchive13-dla-after-freeze-below/CVE-2026-14164",
+      "case": "debian-libarchive13-dla-after-freeze-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libarchive13@3.4.3-2+deb11u4?arch=amd64&distro=debian-11&upstream=libarchive",
+      "name": "libarchive13",
+      "version": "3.4.3-2+deb11u4",
+      "cve": "CVE-2026-14164",
+      "expect": {
+        "state": "affected",
+        "fixed": "3.4.3-2+deb11u5"
+      },
+      "class": "data",
+      "note": "Debian:11 is a whole-key carry frozen before DLA-4762-1 (2026-08-31) shipped (D110); the fix is not in the database, so the 'fixed' build reads affected with no fix and the 'below' build has no fixed version. Expected to fail until a post-LTS Debian source lands (deferred-decisions, 'Debian 11 after LTS').",
+      "source": {
+        "statement": "DLA-4762-1 libarchive 3.4.3-2+deb11u5 -- after the freeze",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-14164",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libarchive13-dla-after-freeze-below/CVE-2026-15028",
+      "case": "debian-libarchive13-dla-after-freeze-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libarchive13@3.4.3-2+deb11u4?arch=amd64&distro=debian-11&upstream=libarchive",
+      "name": "libarchive13",
+      "version": "3.4.3-2+deb11u4",
+      "cve": "CVE-2026-15028",
+      "expect": {
+        "state": "affected",
+        "fixed": "3.4.3-2+deb11u5"
+      },
+      "class": "data",
+      "note": "Debian:11 is a whole-key carry frozen before DLA-4762-1 (2026-08-31) shipped (D110); the fix is not in the database, so the 'fixed' build reads affected with no fix and the 'below' build has no fixed version. Expected to fail until a post-LTS Debian source lands (deferred-decisions, 'Debian 11 after LTS').",
+      "source": {
+        "statement": "DLA-4762-1 libarchive 3.4.3-2+deb11u5 -- after the freeze",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-15028",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    },
+    {
+      "id": "debian-libarchive13-dla-after-freeze-below/CVE-2026-16517",
+      "case": "debian-libarchive13-dla-after-freeze-below",
+      "family": "debian",
+      "purl": "pkg:deb/debian/libarchive13@3.4.3-2+deb11u4?arch=amd64&distro=debian-11&upstream=libarchive",
+      "name": "libarchive13",
+      "version": "3.4.3-2+deb11u4",
+      "cve": "CVE-2026-16517",
+      "expect": {
+        "state": "affected",
+        "fixed": "3.4.3-2+deb11u5"
+      },
+      "class": "data",
+      "note": "Debian:11 is a whole-key carry frozen before DLA-4762-1 (2026-08-31) shipped (D110); the fix is not in the database, so the 'fixed' build reads affected with no fix and the 'below' build has no fixed version. Expected to fail until a post-LTS Debian source lands (deferred-decisions, 'Debian 11 after LTS').",
+      "source": {
+        "statement": "DLA-4762-1 libarchive 3.4.3-2+deb11u5 -- after the freeze",
+        "url": "https://security-tracker.debian.org/tracker/CVE-2026-16517",
+        "fetchedAt": "2026-11-04T00:06:59Z"
+      },
+      "validFrom": "2026-10-28"
+    }
+  ]
+}
