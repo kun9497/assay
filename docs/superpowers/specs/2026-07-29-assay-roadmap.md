@@ -4527,7 +4527,9 @@ top-level `coverage[]`, one record per key the scanned inventory holds: `ecosyst
 `packages` (how many of the inventory sit under it), `evaluated` (how many the matcher
 judged), `state` — `live`, `frozen`, `not-in-database` or `no-comparer` — `provider` (the
 `Meta.Providers` entry that declares the key), `dataAsOf` (that provider's `Provenance.DataAsOf`,
-D12) and `frozenSince` (`Provenance.Frozen[key]`, D110; omitted when the key is live). It also
+D12 — since D113's 2026-11-09 revision the key's own `Provenance.KeyAsOf[key]` where the
+provider recorded one, the provider's `DataAsOf` otherwise; schema 17) and `frozenSince`
+(`Provenance.Frozen[key]`, D110; omitted when the key is live). It also
 gains `distro` — `id`, `versionId`, `ecosystem` and `recognized` — so an `/etc/os-release` assay
 does not route (CentOS, D50) is named in the result instead of collapsing into the same
 `cause=coverage` as a routed release the database happens to lack (Fedora 42). For image
@@ -4740,25 +4742,35 @@ annotations. Enrichment age (D3's display copy, as D59 said).
 **Revised (2026-11-09).** The per-key `DataAsOf` that stayed out is in, as
 `Provenance.KeyAsOf`, because the provider it waited for turned out to exist twice over. The
 amazon provider declares `Amazon Linux:2` and `Amazon Linux:2023` with one `DataAsOf`, and on
-the 2026-11-09 artifact that date is 2025-03-06 — AL2's finished channels, which the
-two-year closure above does not reach because they are core and extras of a release that
-ended on 2026-06-30 — so every AL2023 image scan under `--db-max-age=168h` was refused for a
+the 2026-11-09 artifact that date is 2025-03-06 — one open AL2 extras topic, `ansible2`,
+twenty months quiet and so not yet closed by the two-year rule above (it will be after
+2027-03, when the next-quietest topic takes the floor; AL2's core, which never closes, was
+current within days) — so every AL2023 image scan under `--db-max-age=168h` was refused for a
 date that was not its data's, with the remedy "run `assay db update`", which could not help.
-And osv's `DataAsOf` is the minimum across its fourteen archives: D110's `freezeSince` read it
+And osv's `DataAsOf` is the minimum across its nineteen archives: D110's `freezeSince` read it
 as `Debian:11`'s freeze date and recorded 2026-08-19, the CleanStart archive's stale
-`Last-Modified`, while Debian's own archive was eleven days fresher. Now osv dates each key by
+`Last-Modified`, while Debian's own archive was at most eleven days fresher (the seed was built
+2026-08-30 and recorded no per-key date, so the exact gap is not recoverable). Now osv dates each key by
 the archive that declared it (one archive per key, by `familyMatches`), amazon each release by
 the stalest of its own active repositories (a closed topic dates neither; a release one of
 whose repositories carried no date is left out, the same "unknown, not min(known)" rule
 `DataAsOf` follows), and three readers take the key's date where one was recorded and the
 provider's otherwise: the scan's fold here, D110's `freezeSince`, and D111's
-`coverage[].dataAsOf`. `DataAsOf` itself is unchanged — still the provider's minimum, so the
-artifact's `data-as-of` annotation and the publish guard read as before. An existing freeze is
-carried unchanged (D12), so `Debian:11` keeps 2026-08-19 — eleven days older than the truth,
-which errs old — and the next key to freeze is dated by its own archive. The store field is
-additive Meta JSON (Frozen's precedent): a database built before it reads as before until the
-next build. The report's `schemaVersion` is unchanged: `coverage[].dataAsOf` keeps its type and
-meaning ("when this key's data was current") and only becomes true per key.
+`coverage[].dataAsOf`. Carry-forward writes the freeze into `KeyAsOf` for a whole-key frozen
+key as well, because the provider did not fetch it this run and a reader would otherwise date
+it by the provider's stalest live archive. `DataAsOf` itself is unchanged — still the
+provider's minimum, so the artifact's `data-as-of` annotation and the publish guard read as
+before. An existing freeze is carried unchanged (D12), so `Debian:11` keeps 2026-08-19 — up to
+eleven days older than Debian's archive was, a date that errs old — and the next key to freeze
+is dated by its own archive. The store field is additive Meta JSON (Frozen's precedent): a
+database built before it reads as before until the next build. The report's `schemaVersion`
+is 17 (additive, no new field — the Schema 16 shape): `coverage[].dataAsOf` keeps its type
+but no longer always equals `db status`'s provider date, which docs/compatibility.md's rule
+counts as a change. Open, measured but not decided: AL2023's `kernel-livepatch` repository
+is core (never closed) and publishes only when a kernel CVE warrants a livepatch — 2026-09-30
+when measured on 2026-11-09 — so it dates the release and a 168h gate still refuses AL2023
+on a livepatch-quiet week; whether an event-driven core channel should date its release is a
+decision this revision does not take.
 
 ---
 

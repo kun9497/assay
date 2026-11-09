@@ -276,7 +276,7 @@ func TestTable_SuppressedRowCarriesMarkersAndTheirFootnotes(t *testing.T) {
 		t.Errorf("no '~' footnote for the suppressed row's marker:\n%s", out)
 	}
 	if !strings.Contains(out, "\n@ advisory data for openSUSE Leap:15.6 includes entries carried forward since 2026-04-30: "+
-		"the upstream stopped publishing some or all of it, and fixes published since then are not in this database\n") {
+		"the upstream stopped publishing some or all of it, and fixes it has published since may be missing here\n") {
 		t.Errorf("no '@' footnote for the suppressed row's marker:\n%s", out)
 	}
 }
@@ -380,7 +380,7 @@ func TestSARIF_FrozenDataResultsPerKey(t *testing.T) {
 func TestFrozenSentence_CoversEntryLevelFreezes(t *testing.T) {
 	got := frozenSentence("Debian:11", "2026-08-01")
 	want := "advisory data for Debian:11 includes entries carried forward since 2026-08-01: " +
-		"the upstream stopped publishing some or all of it, and fixes published since then are not in this database"
+		"the upstream stopped publishing some or all of it, and fixes it has published since may be missing here"
 	if got != want {
 		t.Errorf("frozenSentence = %q\nwant           %q", got, want)
 	}

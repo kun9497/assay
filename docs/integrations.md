@@ -138,32 +138,44 @@ report or from `assay db status --output json`; nothing needs stderr.
   as a scan with no `--fail-on*` gate does. A pipeline that must not read "nothing read" as
   "nothing found" reads `summary.components` and decides; assay does not decide for it.
 - **Show "EOL unknown" when `eol` is absent.** The key is omitted when no release could be
-  matched — no distro identity, an unrecognised release, no end-of-life row. The reason reaches
+  matched — no distro identity, an unrecognised release, no end-of-life row — or when the
+  database carries no end-of-life data at all (`assay db status --output json` shows
+  `eol.releases: 0`; `db update` fixes that one, unlike the other three). The reason reaches
   stderr only, and only under `--fail-on-eol`; `distro.recognized` says whether the release was
   understood at all. When `eol` is present, show `eolFrom`, `eolLabel`, `eoesFrom` and
   `eoesLabel` as they are.
 - **Show frozen keys as frozen.** `coverage[]` has one record per ecosystem key the inventory
   holds, with `state`, `provider`, `dataAsOf` (when that provider's data for that key was
-  current) and, on a frozen key, `frozenSince`; `summary.frozenKeys` counts them and every
-  finding on such a key carries `frozenSince`. A frozen key's data stopped on that date and fixes
-  published since are not in the database — say that beside the date, the way the table's
-  footnote does. The frozen set is readable once per `db update` from
+  current; on a whole-key frozen key, its freeze date) and, on a frozen key, `frozenSince`;
+  `summary.frozenKeys` counts them and every finding on such a key carries `frozenSince`. A
+  frozen key's data stopped around that date and fixes the upstream has published since may be
+  missing — say that beside the date, the way the table's footnote does; the JSON document
+  carries the date alone. The frozen set is readable once per `db update` from
   `assay db status --output json` (`providers[].frozen[]`).
 - **State the age policy, and know what it refuses.** `--db-max-age` is judged per key: a live
   key by when its provider's data for it was current, a frozen key by its freeze (D113). On the
   2026-11-09 artifact `--db-max-age=168h` refuses every Debian 11 image (frozen since
-  2026-08-19) and every Ubuntu 25.10 one (frozen since 2026-10-01), and will refuse any key whose
-  upstream stops; the refusal names the key and says `db update` will not help. A service that
+  2026-08-19) and every Ubuntu 25.10 one (frozen since 2026-10-01) — both dates from that
+  publish's D110 log lines — with a refusal that names the key and says `db update` will not
+  help; it will refuse any key whose upstream stops the same way. That artifact also predates
+  per-key dates, so it refuses every Amazon Linux 2 and Amazon Linux 2023 image by the provider's
+  2025-03-06 (one quiet AL2 extras topic, `ansible2`) with the live-key refusal, which names the
+  provider and says to run `db update` — advice that only becomes true for AL2023 on the first
+  artifact built with per-key dates, and then only on a week in which AL2023's kernel-livepatch
+  channel published (it dates the release along with core and nvidia; measured 2026-09-30 on
+  2026-11-09, so a 168h gate still refuses AL2023 on a livepatch-quiet week). A service that
   scans end-of-support images therefore either passes the age it accepts for frozen data, or
-  passes no `--db-max-age` and judges `coverage[].dataAsOf` per key after the scan, treating
-  D139's seven-day warning (and `provenance.database.builtAt`) as its freshness alert. Pass
-  `--db-max-rating-age` as well if the service promises rating freshness; `provenance.policy`
-  records both flags as given.
+  passes no `--db-max-age` and judges each key after the scan by `coverage[].frozenSince` where
+  present and `coverage[].dataAsOf` otherwise — the gate's own rule — treating D139's seven-day
+  warning (and `provenance.database.builtAt`) as its freshness alert. Pass `--db-max-rating-age`
+  as well if the service promises rating freshness; `provenance.policy` records both gates in
+  Go's duration spelling (`--db-max-age=168h` is recorded as `dbMaxAge: "168h0m0s"`; an unset
+  gate is `null`).
 
 Before 2026-11-09 the age gate and `coverage[].dataAsOf` read one date per provider. For a
 provider that fetches several archives — OSV's one per distro family, Amazon's one per release —
 that was the oldest archive's date, so every Amazon Linux 2023 scan was refused under
-`--db-max-age` for Amazon Linux 2's finished channels (2025-03-06), and Debian 11's freeze was
+`--db-max-age` for one quiet Amazon Linux 2 extras topic (2025-03-06), and Debian 11's freeze was
 dated by the CleanStart archive rather than Debian's. A database built before that records no
 per-key dates and reads as before until the next `db update`.
 

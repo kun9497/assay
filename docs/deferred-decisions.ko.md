@@ -1847,7 +1847,7 @@ operator 본인이 직접 입력하지 않은 첫 번째 외부 공급 타깃이
 함께 적은 `--db-max-age` 정책. 위의 것은 아무것도 움직이지 않았다: 호스트 allow-list, 사설 대역 DNS,
 격리, 할당량, 고객별 자격증명은 배포 쪽에 남고 `TargetKind` 헬퍼는 여전히 만들지 않았다. 이 검토가
 강제한 도구 변경 하나는 다른 곳에 있었다 — provider의 가장 오래된 아카이브로 키를 판단하던 나이
-게이트가 Amazon Linux 2의 끝난 채널 때문에 모든 Amazon Linux 2023 스캔을 거부하고 있었다(D113
+게이트가 조용한 Amazon Linux 2 extras 토픽 하나 때문에 모든 Amazon Linux 2023 스캔을 거부하고 있었다(D113
 revised).
 
 ---

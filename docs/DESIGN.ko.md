@@ -78,11 +78,12 @@ this result cannot be trusted").
   않습니다. 그것들은 애플리케이션의 lockfile, 디렉터리, 바이너리, 또는 이미지의 SBOM을 스캔하십시오.
   [기록](deferred-decisions.ko.md#컨테이너-이미지-안의-애플리케이션-패키지).
 - **업스트림이 게시를 멈춘 릴리스**(D110). Debian 11은 2026-08-19부터 동결되어 있습니다 — 키가 동결될
-  때 provider의 가장 오래된 아카이브가 가진 날짜이고, Debian 자신의 아카이브는 열하루 더 새것이었으며,
-  오늘 동결되는 키는 자기 아카이브의 날짜로 찍힙니다(D113 revised). 마지막 권고는 버리지 않고 유지하며,
-  그 위의 finding에는 표시가 붙고, 새 CVE는 업스트림이 여전히 게시할 때만 들어오며, Debian LTS가 마지막
-  날들(2026-08-31까지)에 낸 bullseye DLA와 그 뒤 Freexian ELTS의 모든 수정은 데이터베이스에 없습니다.
-  모든 렌더러가 날짜 옆에 그렇게 말합니다.
+  때 provider의 가장 오래된 아카이브가 가진 날짜이고, seed는 2026-08-30에 빌드됐으므로 Debian 자신의
+  아카이브는 많아야 열하루 더 새것이었으며, 오늘 동결되는 키는 자기 아카이브의 날짜로 찍힙니다(D113
+  revised). 마지막 권고는 버리지 않고 유지하며, 그 위의 finding에는 표시가 붙고, 새 CVE는 업스트림이
+  여전히 게시할 때만 들어오며, 그 데이터 뒤에 Debian LTS가 낸 bullseye DLA(2026-08-31까지)와 그 뒤
+  Freexian ELTS의 모든 수정은 데이터베이스에 없습니다. 표, SARIF, `--explain`이 날짜 옆에 그렇게
+  말하고, JSON은 날짜를 `frozenSince`로 싣습니다.
 - **벤더 계보.** Ubuntu Pro(ESM/FIPS)와 Oracle Ksplice/FIPS 빌드는 메인라인 데이터로 판정하지 않고
   평가되지 않음으로 보고합니다(D53, D79, D142). EUS/AUS/TUS/E4S의 RHEL 호스트는 메인라인 errata로
   검사하며, 측정한 경우의 대부분에서 과경보하고 약 1.3%에서 미경보합니다. stderr 안내가 그렇다고

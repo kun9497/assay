@@ -108,8 +108,8 @@ func TestRun_D110_JSONCarriesFrozenSinceOnlyOnTheFrozenKey(t *testing.T) {
 	}
 	// frozenSince itself was additive and omitempty, the D108 crossMappedFrom
 	// precedent, and bumped nothing; 12 is D111's coverage[], which is not.
-	if doc.SchemaVersion != 16 {
-		t.Errorf("schemaVersion = %d, want 16", doc.SchemaVersion)
+	if doc.SchemaVersion != 17 {
+		t.Errorf("schemaVersion = %d, want 17", doc.SchemaVersion)
 	}
 	seen := map[string]bool{}
 	for _, f := range doc.Findings {
@@ -153,7 +153,7 @@ func TestRun_D110_TableMarksTheFrozenRowAndFootnotesTheDate(t *testing.T) {
 		t.Errorf("live row carries the frozen marker: %q", liveRow)
 	}
 	want := "\n@ advisory data for npm includes entries carried forward since 2026-06-30: " +
-		"the upstream stopped publishing some or all of it, and fixes published since then are not in this database\n"
+		"the upstream stopped publishing some or all of it, and fixes it has published since may be missing here\n"
 	if !strings.Contains(out, want) {
 		t.Errorf("table lacks the footnote line %q:\n%s", want, out)
 	}
@@ -191,7 +191,8 @@ func TestRun_D110_SARIFMessageSaysFrozenSince(t *testing.T) {
 			liveMsg = r.Message.Text
 		}
 	}
-	if !strings.Contains(frozenMsg, "advisory data for npm includes entries carried forward since 2026-06-30") {
+	if !strings.Contains(frozenMsg, " (advisory data for npm includes entries carried forward since 2026-06-30: "+
+		"the upstream stopped publishing some or all of it, and fixes it has published since may be missing here)") {
 		t.Errorf("%s message lacks the frozen sentence: %q", frozenID, frozenMsg)
 	}
 	if liveMsg == "" || strings.Contains(liveMsg, "carried forward") {
@@ -201,7 +202,8 @@ func TestRun_D110_SARIFMessageSaysFrozenSince(t *testing.T) {
 
 func TestRun_D110_ExplainPrintsTheFrozenLine(t *testing.T) {
 	out, _ := runFrozen(t, Options{Explain: frozenID})
-	want := "frozen:   advisory data for npm includes entries carried forward since 2026-06-30"
+	want := "frozen:   advisory data for npm includes entries carried forward since 2026-06-30: " +
+		"the upstream stopped publishing some or all of it, and fixes it has published since may be missing here"
 	if !strings.Contains(out, want) {
 		t.Errorf("--explain %s lacks %q:\n%s", frozenID, want, out)
 	}

@@ -1910,7 +1910,7 @@ assay on targets you did not author" — `--config none` or an operator-owned pa
 Nothing above moved: host allow-lists, private-range DNS, isolation, quotas and per-customer
 credentials stay with the deployment, and the `TargetKind` helper is still unbuilt. The one
 tool change the review forced was elsewhere — the age gate judging a key by its provider's
-oldest archive refused every Amazon Linux 2023 scan for Amazon Linux 2's finished channels
+oldest archive refused every Amazon Linux 2023 scan for one quiet Amazon Linux 2 extras topic
 (D113 revised).
 
 ---

@@ -13,7 +13,7 @@ import (
 // D113 revised (2026-11-09): each key is dated by the archive that declared
 // it (Provenance.KeyAsOf), beside the provider-wide minimum DataAsOf keeps.
 // Measured cause: Debian:11's D110 freeze was dated 2026-08-19 -- the
-// CleanStart archive's stale Last-Modified, the oldest of the fourteen
+// CleanStart archive's stale Last-Modified, the oldest of the nineteen
 // archives -- not Debian's own.
 func TestFetch_KeyAsOfDatesEachKeyByItsOwnArchive(t *testing.T) {
 	goArchive := zipWith(t, map[string]string{

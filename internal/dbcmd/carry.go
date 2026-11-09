@@ -188,7 +188,10 @@ func freezeSince(seedMeta store.Meta, name, key string) time.Time {
 }
 
 // keyFreezeDate is freezeSince's per-provider half: an existing freeze first,
-// then the key's own archive date, then the provider's.
+// then the key's own archive date, then the provider's. The IsZero guard on
+// KeyAsOf is belt and braces -- no provider writes a zero entry (osv and
+// amazon skip an undated archive instead), so a mutation dropping it survives
+// as a true equivalent, not a gap.
 func keyFreezeDate(p store.Provenance, key string) time.Time {
 	if since, ok := p.Frozen[key]; ok {
 		return since
@@ -471,6 +474,23 @@ func carryForward(seedPath, label string, w *store.Bolt, running map[string]stor
 		prov.Ecosystems = ecos
 		running[name] = prov
 		since := setFrozen(name, key)
+		// The carried key is dated by its freeze, in KeyAsOf as well as in
+		// Frozen: the provider did not fetch it this run, so this run's
+		// KeyAsOf has no entry for it, and a reader falling back to the
+		// provider's DataAsOf would date the key by the provider's stalest
+		// LIVE archive -- older than the freeze when one archive lags (the
+		// CleanStart shape), so the age gate would refuse the key by a date
+		// that is not its own and with the live-key remedy. The entry-level
+		// loop below leaves KeyAsOf alone: those keys are live and the
+		// provider dated them itself.
+		prov = running[name]
+		keyAsOf := make(map[string]time.Time, len(prov.KeyAsOf)+1)
+		for k, v := range prov.KeyAsOf {
+			keyAsOf[k] = v
+		}
+		keyAsOf[key] = since
+		prov.KeyAsOf = keyAsOf
+		running[name] = prov
 		line := fmt.Sprintf("%s emitted nothing for %s; carried %d advisories from seed %s, frozen since %s",
 			name, key, wholeN[key], label, since.Format("2006-01-02"))
 		if n := wholeWithdrawn[key]; n > 0 {

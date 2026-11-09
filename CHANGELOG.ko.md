@@ -8,9 +8,10 @@
 ## [Unreleased]
 
 ### Changed
-- 모든 렌더러가 공유하는 동결 키 문장(표 각주, SARIF의 `assay/frozen-data`, `--explain`)이 동결이
-  치르는 비용을 말합니다: "…the upstream stopped publishing some or all of it, and fixes
-  published since then are not in this database". Debian LTS는 `Debian:11` 동결 뒤에도 bullseye
+- 표 각주, SARIF의 `assay/frozen-data`, `--explain`이 공유하는 동결 키 문장이 동결이 치르는 비용을
+  말합니다: "…the upstream stopped publishing some or all of it, and fixes it has published
+  since may be missing here"("may": 보이는 날짜는 동결 날짜라 데이터 자체의 날짜보다 앞설 수 있고,
+  entry 수준 동결은 업스트림이 여전히 서비스하는 키 위에 있습니다). Debian LTS는 `Debian:11` 동결 뒤에도 bullseye
   DLA를 냈고 Freexian ELTS는 그 뒤 모든 bullseye 수정을 냈습니다. 날짜만 읽은 독자는 키를 완전한
   것으로 받아들였고, 옆의 EOL 줄 "still under ELTS until 2031"은 커버리지처럼 읽혔습니다.
   (QA 2026-11-04 P-6)
@@ -29,15 +30,18 @@
 - 키는 provider의 가장 오래된 아카이브가 아니라 자기 아카이브의 날짜로 찍힙니다. 스토어의
   `Provenance`에 `KeyAsOf`가 생겼고(additive Meta JSON, 스토어 스키마 bump 없음), OSV provider는
   키마다 그 키를 선언한 아카이브의 날짜를, Amazon provider는 릴리스마다 자기 활성 저장소 중 가장
-  오래된 날짜를 기록하며, `--db-max-age`, D110의 동결 날짜, 보고서의 `coverage[].dataAsOf`가
-  기록된 그 날짜를 읽습니다. 그 전에는 amazon provider의 단일 `DataAsOf` — 2026-11-09 아티팩트에서
-  Amazon Linux 2의 끝난 채널이 정한 2025-03-06 — 가 `--db-max-age=168h` 아래 모든 Amazon Linux
+  오래된 날짜를, carry-forward는 통째로 동결된 키에 동결 날짜를 기록하며, `--db-max-age`, D110의
+  동결 날짜, 보고서의 `coverage[].dataAsOf`가 기록된 그 날짜를 읽습니다. 그 전에는 amazon provider의
+  단일 `DataAsOf` — 2026-11-09 아티팩트에서 조용한 Amazon Linux 2 extras 토픽 하나가 정한
+  2025-03-06 — 가 `--db-max-age=168h` 아래 모든 Amazon Linux
   2023 이미지 스캔을 거부하면서 도움이 될 수 없는 "run `assay db update`"를 처방했고,
   `Debian:11`의 동결은 Debian이 아니라 CleanStart 아카이브의 `Last-Modified`인 2026-08-19로
   찍혔습니다. 기존 동결은 그대로 carry되므로 `Debian:11`은 (더 오래된, 보수적인) 날짜를 유지하고,
-  다음에 동결되는 키부터 자기 아카이브의 날짜로 찍힙니다. `schemaVersion`은 바뀌지 않습니다:
-  `dataAsOf`는 타입과 의미를 유지하고 키별로 참이 될 뿐입니다. 그 전에 빌드된 데이터베이스는 키별
-  날짜가 없어 다음 `db update`까지 이전처럼 읽힙니다. (D113 revised)
+  다음에 동결되는 키부터 자기 아카이브의 날짜로 찍힙니다. **JSON 보고서의 `schemaVersion`은 17**입니다
+  (추가형, 새 필드 없음): `coverage[].dataAsOf`는 타입을 유지하지만 더는 항상 `db status`의 provider
+  날짜와 같지 않습니다. 그 전에 빌드된 데이터베이스는 키별 날짜가 없어 다음 `db update`까지 이전처럼
+  읽힙니다. 그 뒤 AL2023은 core, nvidia, kernel-livepatch 저장소 중 가장 오래된 날짜로 찍히므로 짧은
+  게이트는 livepatch가 조용한 주에 여전히 거부할 수 있습니다. (D113 revised)
 - Red Hat 리더가 진술(`known_affected` id, 또는 버전 없는 `fixed` id)에 대해
   `cpe:/o:redhat:rhel_els:N`(Extended Life-cycle Support)을 `Red Hat:N`으로 풉니다. Red Hat의
   2026-11-05 코퍼스 재생성이 RHEL 4~7의 모든 bare no-fix 진술이 매달리는 whole-product id를

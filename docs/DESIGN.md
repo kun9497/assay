@@ -81,12 +81,13 @@ affect (the first three below); the rest hold for every scan and are stated only
   installed in the image. Scan the application's lockfile, directory or binary, or an SBOM
   of the image, for those. [Recorded here](deferred-decisions.md#application-packages-inside-container-images).
 - **Releases the upstream stopped publishing** (D110). Debian 11 has been frozen since
-  2026-08-19 — the date its provider's oldest archive carried when the key froze; Debian's own
-  archive was eleven days fresher, and a key that freezes today is dated by its own archive
-  (D113 revised) — the last advisories are kept rather than dropped, findings on it are marked,
-  new CVEs reach it only if the upstream still publishes them, and the bullseye DLAs Debian LTS
-  issued in its last days (to 2026-08-31) and every Freexian ELTS fix since are not in the
-  database. Every renderer says so beside the date.
+  2026-08-19 — the date its provider's oldest archive carried when the key froze; the seed was
+  built 2026-08-30, so Debian's own archive was at most eleven days fresher, and a key that
+  freezes today is dated by its own archive (D113 revised) — the last advisories are kept rather
+  than dropped, findings on it are marked, new CVEs reach it only if the upstream still publishes
+  them, and the bullseye DLAs Debian LTS issued after that data (to 2026-08-31) and every
+  Freexian ELTS fix since are not in the database. The table, SARIF and `--explain` say so beside
+  the date; JSON carries the date as `frozenSince`.
 - **Vendor lineages.** Ubuntu Pro (ESM/FIPS) and Oracle Ksplice/FIPS builds are reported as
   not evaluated rather than judged against mainline data (D53, D79, D142). RHEL hosts on
   EUS/AUS/TUS/E4S are checked against mainline errata, which over-alarms in most measured

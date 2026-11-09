@@ -134,29 +134,39 @@ QA가 이름 붙인 경계입니다. 아래 모든 것은 JSON 보고서나 `ass
   `--fail-on*` 게이트가 없는 스캔이 그렇듯이. "읽은 것이 없음"을 "찾은 것이 없음"으로 읽어서는 안 되는
   파이프라인은 `summary.components`를 읽고 스스로 결정합니다. assay가 대신 결정하지 않습니다.
 - **`eol`이 없으면 "EOL 미상"으로 보여 주세요.** 릴리스를 맞출 수 없을 때 — 배포판 식별 없음, 모르는
-  릴리스, end-of-life 행 없음 — 그 키는 생략됩니다. 이유는 stderr에만, 그것도 `--fail-on-eol`을 줬을
+  릴리스, end-of-life 행 없음 — 또는 데이터베이스에 end-of-life 데이터가 전혀 없을 때(`assay db status
+  --output json`의 `eol.releases`가 0; 이 경우만 `db update`로 해결됩니다) 그 키는 생략됩니다. 이유는
+  stderr에만, 그것도 `--fail-on-eol`을 줬을
   때만 나옵니다. `distro.recognized`가 릴리스를 알아봤는지는 말해 줍니다. `eol`이 있으면 `eolFrom`,
   `eolLabel`, `eoesFrom`, `eoesLabel`을 그대로 보여 주세요.
 - **동결된 키는 동결된 것으로 보여 주세요.** `coverage[]`는 인벤토리가 가진 ecosystem 키마다 한
-  레코드를 두고 `state`, `provider`, `dataAsOf`(그 provider의 그 키 데이터가 최신이었던 때), 동결된
-  키에는 `frozenSince`를 싣습니다. `summary.frozenKeys`가 그 수를 세고, 그런 키의 모든 finding에
-  `frozenSince`가 붙습니다. 동결된 키의 데이터는 그 날짜에 멈췄고 그 뒤 게시된 수정은 데이터베이스에
-  없습니다 — 표의 각주가 그러듯 날짜 옆에 그렇게 적으세요. 동결 집합은 `db update`마다 한 번
+  레코드를 두고 `state`, `provider`, `dataAsOf`(그 provider의 그 키 데이터가 최신이었던 때; 통째로
+  동결된 키는 동결 날짜), 동결된 키에는 `frozenSince`를 싣습니다. `summary.frozenKeys`가 그 수를 세고,
+  그런 키의 모든 finding에 `frozenSince`가 붙습니다. 동결된 키의 데이터는 그 날짜 무렵에 멈췄고 그 뒤
+  업스트림이 게시한 수정은 빠져 있을 수 있습니다 — 표의 각주가 그러듯 날짜 옆에 그렇게 적으세요. JSON
+  문서는 날짜만 싣습니다. 동결 집합은 `db update`마다 한 번
   `assay db status --output json`(`providers[].frozen[]`)에서 읽을 수 있습니다.
 - **나이 정책을 명시하고, 그것이 무엇을 거부하는지 아세요.** `--db-max-age`는 키별로 판단합니다: live
   키는 provider의 그 키 데이터가 최신이었던 때로, 동결된 키는 동결 시점으로(D113). 2026-11-09
   아티팩트에서 `--db-max-age=168h`는 모든 Debian 11 이미지(2026-08-19부터 동결)와 모든 Ubuntu 25.10
-  이미지(2026-10-01부터 동결)를 거부하고, 업스트림이 멈추는 어떤 키든 거부하게 됩니다. 거부 메시지는
-  키를 이름으로 대고 `db update`가 도움이 되지 않는다고 말합니다. 그러므로 지원 종료 이미지를 스캔하는
-  서비스는 동결 데이터에 대해 받아들이는 나이를 넘기거나, `--db-max-age`를 주지 않고 스캔 뒤
-  `coverage[].dataAsOf`를 키별로 판단하면서 D139의 7일 경고(와 `provenance.database.builtAt`)를
-  신선도 경보로 삼습니다. 등급 신선도를 약속한다면 `--db-max-rating-age`도 넘기세요.
-  `provenance.policy`가 두 플래그를 준 그대로 기록합니다.
+  이미지(2026-10-01부터 동결)를 거부합니다 — 두 날짜 모두 그 발행의 D110 로그 줄에서 — 거부 메시지는
+  키를 이름으로 대고 `db update`가 도움이 되지 않는다고 말하며, 업스트림이 멈추는 어떤 키든 같은 식으로
+  거부하게 됩니다. 그 아티팩트는 키별 날짜 이전에 빌드된 것이기도 해서, 모든 Amazon Linux 2와 Amazon
+  Linux 2023 이미지를 provider의 2025-03-06(조용한 AL2 extras 토픽 하나, `ansible2`)으로 live 키
+  거부 메시지 — provider를 이름으로 대고 `db update`를 돌리라고 함 — 로 거부합니다. 그 조언은 키별 날짜로
+  빌드된 첫 아티팩트부터, 그것도 AL2023의 kernel-livepatch 채널이 게시한 주에만 참이 됩니다(core,
+  nvidia와 함께 릴리스를 찍으며, 2026-11-09 측정 시 2026-09-30이라 livepatch가 조용한 주에는 168h
+  게이트가 AL2023을 여전히 거부합니다). 그러므로 지원 종료 이미지를 스캔하는 서비스는 동결 데이터에
+  대해 받아들이는 나이를 넘기거나, `--db-max-age`를 주지 않고 스캔 뒤 키마다 `coverage[].frozenSince`가
+  있으면 그것으로, 없으면 `coverage[].dataAsOf`로 — 게이트 자신의 규칙 — 판단하면서 D139의 7일 경고(와
+  `provenance.database.builtAt`)를 신선도 경보로 삼습니다. 등급 신선도를 약속한다면
+  `--db-max-rating-age`도 넘기세요. `provenance.policy`가 두 게이트를 Go duration 표기로
+  기록합니다(`--db-max-age=168h`는 `dbMaxAge: "168h0m0s"`, 설정하지 않은 게이트는 `null`).
 
 2026-11-09 이전에는 나이 게이트와 `coverage[].dataAsOf`가 provider당 날짜 하나를 읽었습니다. 아카이브를
 여러 개 받는 provider — OSV는 배포판 계열마다 하나, Amazon은 릴리스마다 하나 — 에서는 그것이 가장
-오래된 아카이브의 날짜였으므로, 모든 Amazon Linux 2023 스캔이 Amazon Linux 2의 끝난
-채널(2025-03-06) 때문에 `--db-max-age`에 거부됐고, Debian 11의 동결은 Debian이 아니라 CleanStart
+오래된 아카이브의 날짜였으므로, 모든 Amazon Linux 2023 스캔이 조용한 Amazon Linux 2 extras 토픽
+하나(2025-03-06) 때문에 `--db-max-age`에 거부됐고, Debian 11의 동결은 Debian이 아니라 CleanStart
 아카이브의 날짜로 찍혔습니다. 그 이전에 빌드된 데이터베이스는 키별 날짜가 없어 다음 `db update`까지는
 이전처럼 읽힙니다.
 

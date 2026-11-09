@@ -12,7 +12,8 @@ import (
 
 // D113 revised (2026-11-09): each release is dated by its own repositories
 // (Provenance.KeyAsOf). The provider's DataAsOf stays the stalest active
-// repository -- on the 2026-11-09 artifact that is AL2's 2025-03-06 -- and
+// repository -- on the 2026-11-09 artifact that is one quiet AL2 extras
+// topic's 2025-03-06 -- and
 // attributing it to Amazon Linux:2023 refused every AL2023 image scan under a
 // freshness gate for a date that was not its data's.
 func TestFetch_KeyAsOfDatesEachReleaseByItsOwnRepositories(t *testing.T) {

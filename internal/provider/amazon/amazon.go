@@ -276,7 +276,14 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 	var asOf time.Time
 	haveAsOf := true
 	// keyAsOf dates each release by its own repositories (D113 revised):
-	// AL2023's core by AL2023's core, not by AL2's finished channels. A
+	// AL2023 by AL2023's repositories, not by the quiet AL2 extras topic
+	// (ansible2, 2025-03-06 on the 2026-11-09 artifact, under the two-year
+	// line) that set the provider's floor. Within a release the fold is the
+	// same stalest-wins: AL2023 is dated by the oldest of core, nvidia and
+	// kernel-livepatch -- the livepatch channel publishes only when a kernel
+	// CVE warrants one (2026-09-30 when measured on 2026-11-09), so a short
+	// --db-max-age can still refuse AL2023 on a livepatch-quiet week; whether
+	// an event-driven core repository should date its release is open. A
 	// release one of whose repositories carried no date is left out, so it
 	// reads as the provider's (then unknown) date rather than as its dated
 	// repositories'.

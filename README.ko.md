@@ -110,6 +110,13 @@ assay scan alpine:3.19 --fail-on high
   이미지 내부에서는 읽지 않습니다: 이미지 스캔은 위의 OS 패키지와 Bitnami 레이어만
   인벤토리화할 뿐, 그 안에 설치된 언어 패키지는 대상에 넣지 않습니다(D70,
   [미룸](docs/deferred-decisions.md)). 모든 이미지 스캔은 이를 stderr 와 SARIF 에 밝힙니다(D141).
+- **업스트림이 게시를 멈춘 릴리스는 표시된 채 남습니다** — 업스트림이 더 이상 서비스하지 않는 키는
+  동결됩니다(D110): 마지막 권고가 유지되고, 그 키의 모든 finding에 `frozenSince`가 붙으며, 그 뒤
+  업스트림이 낸 수정은 빠져 있을 수 있습니다 — 표, SARIF, `--explain`이 날짜 옆에 그렇게 말하고
+  JSON은 날짜를 `frozenSince`로 싣습니다. Debian 11이 오늘 동결 상태이고(bullseye LTS는
+  2026-08-31 종료; Freexian ELTS 수정은 읽지 않음), 업스트림이 내린 다른 모든 키도 그렇습니다.
+  서비스를 위한 운영 지침은
+  [docs/integrations.ko.md](docs/integrations.ko.md#직접-만들지-않은-타깃에-assay-운영하기)에.
 - **모든 소스의 등급을 보존** — 두 데이터베이스가 한 CVE를 두고 흔히 엇갈립니다. finding은
   각 소스의 밴드·점수·수정 버전을 모두 담고 게이트는 그 최고치를 취하므로, 리포트가 자기
   판정과 어긋나지 않습니다.

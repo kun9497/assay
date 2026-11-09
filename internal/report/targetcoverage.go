@@ -211,6 +211,9 @@ func providerOf(m store.Meta, key string) (string, string) {
 			continue
 		}
 		at := p.DataAsOf
+		// The IsZero guard is belt and braces: no provider writes a zero
+		// KeyAsOf entry (an undated archive is skipped, not recorded), so a
+		// mutation dropping it is a true equivalent.
 		if k, ok := p.KeyAsOf[key]; ok && !k.IsZero() {
 			at = k
 		}

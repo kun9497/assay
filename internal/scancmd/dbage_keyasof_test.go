@@ -13,7 +13,8 @@ import (
 // (Provenance.KeyAsOf) is judged by that date, not by the provider's. The
 // case that forced it is the published artifact's own: the amazon provider
 // declares Amazon Linux:2 and Amazon Linux:2023 with one DataAsOf, and that
-// date is set by AL2's finished channels (2025-03-06 on sha256:ddd969bc), so
+// date is set by one quiet AL2 extras topic (ansible2, 2025-03-06 on
+// sha256:ddd969bc, twenty months silent and under the two-year closure), so
 // every AL2023 image scan under --db-max-age=168h was refused for a date that
 // was not its data's -- with the remedy "run `assay db update`", which could
 // not help. Caller first (CLAUDE.md): Run, through the real image path.
@@ -140,5 +141,51 @@ func TestRun_D113Revised_UnknownIsPerKey(t *testing.T) {
 	}
 	if want := "error: --db-max-age given, but " + amazonProvider + " did not record when its data was current"; !strings.Contains(errOut, want) {
 		t.Errorf("stderr does not carry the unknown-age refusal\nwant: %s\ngot:\n%s", want, errOut)
+	}
+}
+
+// A whole-key frozen key as carry-forward now stores it: Frozen[key] and
+// KeyAsOf[key] both hold the freeze, while the provider's DataAsOf is older
+// still (its stalest LIVE archive, the CleanStart shape). The gate must judge
+// the key by its freeze and name it -- before KeyAsOf, the provider's older
+// date won the min and the refusal was the live-key one with the live-key
+// remedy, for a key `db update` cannot refresh.
+func TestRun_D113Revised_ACarriedKeyIsJudgedByItsFreezeNotTheProvidersStalestArchive(t *testing.T) {
+	since := daysAgo(100)
+	db := d113DB(t, store.Meta{Providers: map[string]store.Provenance{
+		"osv": {
+			Ecosystems: []string{"Alpine:v3.19"},
+			DataAsOf:   daysAgo(200),
+			KeyAsOf:    map[string]time.Time{"Alpine:v3.19": since},
+			Frozen:     map[string]time.Time{"Alpine:v3.19": since},
+		},
+	}})
+	out, errOut, code := scanImage(t, db, alpine319Files(), Options{DBMaxAge: 24 * time.Hour, Output: "json"})
+	if code != 2 {
+		t.Fatalf("Run = %d, want 2\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+	want := "error: vulnerability data for Alpine:v3.19 is 100 days old (osv, frozen since " + ymd(since) + ")"
+	if !strings.Contains(errOut, want) {
+		t.Errorf("stderr does not judge the carried key by its freeze\nwant: %s\ngot:\n%s", want, errOut)
+	}
+	if strings.Contains(errOut, "200 days old") {
+		t.Errorf("stderr judged the frozen key by the provider's stalest live archive:\n%s", errOut)
+	}
+
+	// Without the gate, coverage[] dates the frozen key by its freeze too.
+	out, _, code = scanImage(t, db, alpine319Files(), Options{Output: "json"})
+	if code == 2 {
+		t.Fatalf("Run without the gate = 2: %s", out)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		t.Fatalf("stdout is not one JSON document: %v", err)
+	}
+	var recs []d111Coverage
+	if err := json.Unmarshal(raw["coverage"], &recs); err != nil || len(recs) != 1 {
+		t.Fatalf("coverage = %s (%v), want one record", raw["coverage"], err)
+	}
+	if recs[0].DataAsOf != ymd(since) || recs[0].FrozenSince != ymd(since) {
+		t.Errorf("coverage[0] = %+v, want dataAsOf and frozenSince both %s", recs[0], ymd(since))
 	}
 }

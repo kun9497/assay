@@ -58,7 +58,7 @@ import (
 // what it does mean is that a consumer reading 2 or later can rely on every
 // field below being present, which is the guarantee the constant exists to
 // give.
-const schemaVersion = 16
+const schemaVersion = 17
 
 // Document is the stable shape of `assay scan --output json` (design goal
 // #3). It carries what Table shows plus what Table cannot: the full
@@ -576,8 +576,9 @@ func ratingFixState(r matcher.Rating) string {
 }
 
 // frozenDate renders Finding.FrozenSince as a full-date, or "" for a live key
-// so omitempty drops it. A date, not a timestamp: the freeze time is a
-// provider's DataAsOf, and the day is what a reader weighs (D110).
+// so omitempty drops it. A date, not a timestamp: the freeze time is a key's
+// upstream date (its provider's KeyAsOf, or DataAsOf), and the day is what a
+// reader weighs (D110).
 func frozenDate(f matcher.Finding) string {
 	return dateOnly(f.FrozenSince)
 }

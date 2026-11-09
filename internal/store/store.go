@@ -458,9 +458,11 @@ type Provenance struct {
 	// records it still publishes under a past-EOL key. A database must not
 	// lose coverage it once had just because the source went quiet -- EOL
 	// images still run. The value is when that key's data was last
-	// current: the seed provider's DataAsOf the first night the key went
-	// missing, carried unchanged on every later night rather than refreshed
-	// (D12 — a frozen key must not read as fresher than its data).
+	// current: the seed's date for that key the first night it went missing
+	// -- its KeyAsOf where the seed recorded one, the seed provider's
+	// DataAsOf otherwise (dbcmd's keyFreezeDate) -- carried unchanged on
+	// every later night rather than refreshed (D12 — a frozen key must not
+	// read as fresher than its data).
 	//
 	// Additive Meta JSON with no schema bump, the D87 EOL precedent: a
 	// database built before this field decodes it nil, and nil is the true

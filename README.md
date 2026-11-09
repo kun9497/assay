@@ -116,8 +116,9 @@ code and the report's sha256, even when the scan ends in exit 2 before any repor
   SARIF (D141).
 - **Releases the upstream stopped publishing stay, marked** — a key the upstream no longer
   serves is frozen (D110): its last advisories are kept, every finding on it carries
-  `frozenSince`, and fixes published upstream since are not in the database — the report says
-  so wherever it shows the date. Debian 11 is frozen today (bullseye's LTS ended 2026-08-31;
+  `frozenSince`, and fixes published upstream since may be missing — the table, SARIF and
+  `--explain` say so beside the date, and JSON carries the date as `frozenSince`. Debian 11 is
+  frozen today (bullseye's LTS ended 2026-08-31;
   Freexian ELTS fixes are not read), and so is every other key its upstream dropped.
   Operating guidance for a service in
   [docs/integrations.md](docs/integrations.md#operating-assay-on-targets-you-did-not-author).
