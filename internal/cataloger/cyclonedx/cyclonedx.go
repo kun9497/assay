@@ -136,6 +136,18 @@ func catalogSubject(subject component, ctx osContext, target *pkgmeta.Target, st
 	// The dedupe base is fixed before the subject tree adds anything to
 	// target.Packages: everything bom.components yielded, and only that.
 	base := len(target.Packages)
+	// Which identities the document keys to more than one distro release,
+	// across bom.components AND the whole subject tree: an unkeyed listing
+	// beside such an identity belongs to none of them provably, whichever
+	// side the keyed listings sit on (PR #270 review, mirror case: one
+	// unkeyed listing at the top and the two keyed ones under the subject
+	// merged into whichever came first). A dry run catalogs the subject tree
+	// into a throwaway target with the contexts the real walk will use.
+	dry := pkgmeta.Target{Packages: append([]pkgmeta.Package{}, target.Packages[:base]...)}
+	var dryStats Stats
+	catalogOne(subject, ctx, &dry, &dryStats)
+	catalog(subject.Components, childContext(subject, ctx), &dry, &dryStats)
+	keyed := keyedReleases(dry.Packages)
 	// The subject is keyed in the document's top-level context, as its
 	// top-level twin would be; its children in theirs (contextFor).
 	scratchTarget := pkgmeta.Target{}
@@ -151,22 +163,22 @@ func catalogSubject(subject component, ctx osContext, target *pkgmeta.Target, st
 		// The document's own root: not a package, not counted, as the
 		// operating-system component is not.
 	} else {
-		mergeDeduped(scratchTarget, scratchStats, base, target, stats)
+		mergeDeduped(scratchTarget, scratchStats, base, keyed, target, stats)
 	}
-	catalogDeduped(subject.Components, childContext(subject, ctx), base, target, stats)
+	catalogDeduped(subject.Components, childContext(subject, ctx), base, keyed, target, stats)
 }
 
 // catalogDeduped is catalog for the subject's nested components: the same
 // depth-first walk, one scratch per component so a duplicate of a package
 // bom.components already yielded can be dropped without its counter. base
 // is how many packages bom.components yielded; see catalogSubject.
-func catalogDeduped(components []component, ctx osContext, base int, target *pkgmeta.Target, stats *Stats) {
+func catalogDeduped(components []component, ctx osContext, base int, keyed map[string]int, target *pkgmeta.Target, stats *Stats) {
 	for _, c := range components {
 		scratchTarget := pkgmeta.Target{}
 		var scratchStats Stats
 		catalogOne(c, ctx, &scratchTarget, &scratchStats)
-		mergeDeduped(scratchTarget, scratchStats, base, target, stats)
-		catalogDeduped(c.Components, childContext(c, ctx), base, target, stats)
+		mergeDeduped(scratchTarget, scratchStats, base, keyed, target, stats)
+		catalogDeduped(c.Components, childContext(c, ctx), base, keyed, target, stats)
 	}
 }
 
@@ -178,9 +190,9 @@ func catalogDeduped(components []component, ctx osContext, base int, target *pkg
 // packages where it held one listed twice, but its evidence is kept on the
 // package already there. A scratch with no package is a counted skip and
 // merges as it is.
-func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, target *pkgmeta.Target, stats *Stats) {
+func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, keyed map[string]int, target *pkgmeta.Target, stats *Stats) {
 	for _, p := range scratchTarget.Packages {
-		if i := indexOfPackage(target.Packages[:base], p); i >= 0 {
+		if i := indexOfPackage(target.Packages[:base], p, keyed); i >= 0 {
 			keepEvidence(&target.Packages[i], p)
 			return
 		}
@@ -204,7 +216,7 @@ func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, ta
 // qualifier-only difference (syft's per-document package-id, two install
 // paths) is the same package, which the field comparison says and a
 // verbatim purl comparison would not.
-func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package) int {
+func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package, keyed map[string]int) int {
 	for i, q := range pkgs {
 		if q.Type == p.Type && q.Name == p.Name && q.Version == p.Version && q.Ecosystem == p.Ecosystem {
 			return i
@@ -221,6 +233,9 @@ func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package) int {
 	// release's findings -- the other release's when the document listed
 	// them the other way round (PR #270 review). It stays its own package,
 	// unkeyed and reported not evaluated.
+	if keyed[identity(p)] > 1 {
+		return -1
+	}
 	match := -1
 	for i, q := range pkgs {
 		if q.Type == p.Type && q.Name == p.Name && q.Version == p.Version && (q.Ecosystem == "" || p.Ecosystem == "") {
@@ -231,6 +246,33 @@ func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package) int {
 		}
 	}
 	return match
+}
+
+// identity is a package's type, name and version: what an unkeyed listing
+// and its keyed twins share.
+func identity(p pkgmeta.Package) string {
+	return p.Type + "\x00" + p.Name + "\x00" + p.Version
+}
+
+// keyedReleases counts, per identity, the distinct ecosystem keys pkgs give
+// it; an unkeyed listing counts for none.
+func keyedReleases(pkgs []pkgmeta.Package) map[string]int {
+	seen := map[string]map[string]bool{}
+	for _, p := range pkgs {
+		if p.Ecosystem == "" {
+			continue
+		}
+		id := identity(p)
+		if seen[id] == nil {
+			seen[id] = map[string]bool{}
+		}
+		seen[id][p.Ecosystem] = true
+	}
+	out := make(map[string]int, len(seen))
+	for id, ecos := range seen {
+		out[id] = len(ecos)
+	}
+	return out
 }
 
 // keepEvidence folds a dropped second listing onto the kept package: every
@@ -532,10 +574,13 @@ func contextFor(siblings []component, inherited osContext) osContext {
 // OS declared among the children is nearer still and comes first
 // (contextFor).
 func childContext(parent component, inherited osContext) osContext {
+	// Only an OS that resolves to an ecosystem key overrides what the
+	// children inherit: one with no version, or a name no key is built for
+	// ("linux"), would leave them a distro with no key -- unkeyed, and with
+	// the purl qualifier fallback switched off (PR #270 review).
 	if d := distroOf(parent); d != nil {
-		inherited = osContext{distro: d}
 		if eco, err := d.Ecosystem(); err == nil {
-			inherited.ecosystem = eco
+			inherited = osContext{distro: d, ecosystem: eco}
 		}
 	}
 	return contextFor(parent.Components, inherited)

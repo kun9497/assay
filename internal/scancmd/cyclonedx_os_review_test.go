@@ -108,6 +108,37 @@ func TestRun_PR270_AmbiguousTwinAndOSParent(t *testing.T) {
 			t.Errorf("ambiguous twin: findings = %v, want each release's own", got)
 		}
 	}
+	// The mirror case: the unkeyed listing at the top, the two keyed ones
+	// under the subject. Still ambiguous, in either order.
+	for _, order := range [][2]string{{bb319, bb320}, {bb320, bb319}} {
+		code, doc := run(start + `"components":[` + child + `],` + subject(order[0]+`,`+order[1]))
+		got := seen(doc)
+		if code != 2 || doc.Summary.NotEvaluated != 1 || doc.Summary.Components != 3 {
+			t.Errorf("mirror ambiguous twin: exit=%d notEvaluated=%d components=%d, want 2, 1, 3", code, doc.Summary.NotEvaluated, doc.Summary.Components)
+		}
+		for id, v := range got {
+			if strings.Contains(v, "/child/") {
+				t.Errorf("mirror ambiguous twin: the unkeyed listing's path is on %s: %s", id, v)
+			}
+		}
+	}
+	// An OS parent that resolves to no key (no version; a name no key is
+	// built for) does not override what its children inherit or their purl
+	// qualifier.
+	t.Run("an OS parent with no key leaves the qualifier", func(t *testing.T) {
+		q := `{"type":"library","name":"busybox","version":"1.36.1-r20","purl":"pkg:apk/alpine/busybox@1.36.1-r20?arch=x86_64&distro=alpine-3.19"}`
+		code, doc := run(start + `"components":[],"metadata":{"component":{"type":"operating-system","name":"alpine","components":[` + q + `]}}}`)
+		if got := seen(doc); code != 0 || len(got) != 1 || !strings.HasPrefix(got["ALPINE319-CVE-2024-58251"], "Alpine:v3.19 ") {
+			t.Errorf("exit=%d findings=%v, want ALPINE319 on Alpine:v3.19", code, got)
+		}
+	})
+	t.Run("an OS parent with no key leaves the inherited context", func(t *testing.T) {
+		bare := `{"type":"library","name":"busybox","version":"1.36.1-r20","purl":"pkg:apk/alpine/busybox@1.36.1-r20?arch=x86_64"}`
+		code, doc := run(start + `"components":[` + os319 + `],"metadata":{"component":{"type":"operating-system","name":"linux","components":[` + bare + `]}}}`)
+		if got := seen(doc); code != 0 || len(got) != 1 || !strings.HasPrefix(got["ALPINE319-CVE-2024-58251"], "Alpine:v3.19 ") {
+			t.Errorf("exit=%d findings=%v, want ALPINE319 on Alpine:v3.19", code, got)
+		}
+	})
 	t.Run("one keyed twin is that package", func(t *testing.T) {
 		code, doc := run(start + `"components":[` + bb319 + `],` + subject(os319+`,`+os320+`,`+child))
 		got := seen(doc)
