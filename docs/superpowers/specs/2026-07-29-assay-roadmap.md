@@ -8500,7 +8500,11 @@ Alpine 3.19 and to 3.20 at the top plus an unkeyed busybox under a subject decla
 had attached the third listing's install path to whichever release came first -- 3.19 one way
 round, 3.20 the other, exit 0. That listing now stays its own package, unkeyed, not evaluated
 (exit 2 under `--fail-on-incomplete`), its path on no finding; with one keyed twin it is that
-package, as before.
+package, as before. A second review round found the mirror case -- the unkeyed listing at the top
+and the two keyed ones under the subject -- still merging into whichever came first: the check now
+counts the releases an identity is keyed to across the whole document (a dry run of the subject
+tree), not only the top level. And an OS parent that resolves to no key (no version, or `linux`)
+no longer overrides what its children inherit or switches off their purl qualifier.
 
 **Gives up.** Two OS components that describe the same distro and release count as one; two that
 differ only in a field other than ID and VERSION_ID are not told apart. A document that declares
