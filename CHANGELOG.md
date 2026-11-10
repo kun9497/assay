@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **JSON `schemaVersion` 21** (additive): `skipped[].cves` lists the CVEs a skipped advisory names,
+  so a skip whose `advisoryId` is an ALAS or GHSA id can be tied to a CVE. `cmd/truthset` no longer
+  counts a label as a true negative when the scan skipped the comparison that would decide it
+  (its CVE named by a skip, a whole-package skip, or a skip it cannot identify): such a label is
+  UNEVALUATED, and an affected label whose demanded fix lies past such a skip is FIX-UNKNOWN.
+  Truthset report schema 3. (D161 revised, QA 2026-11-10)
+
 ## [0.17.0] - 2026-11-10
 
 ### Added

@@ -14,7 +14,7 @@
 | `status.json` | 배포 데이터베이스의 상태, `status` 브랜치(D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json`(D147) | `schemaVersion` | 1 |
 | `truthset labels` | `cmd/truthset`가 읽는 정답 라벨 `testdata/groundtruth/labels.json`(D161) | `schemaVersion` | 1 |
-| `truthset report` | `truthset -out <path>`가 쓰는 파일(D161) | `schemaVersion` | 2 |
+| `truthset report` | `truthset -out <path>`가 쓰는 파일(D161) | `schemaVersion` | 3 |
 | `database` | 로컬 저장소와 OCI 태그 `ghcr.io/kun9497/assay-db:vN` | 태그 `vN`, `db status`의 `schema:` | 9 |
 
 테스트가 이 표를 코드의 상수에 묶어 두므로, 버전이 올라도 표가 뒤처질 수 없습니다.

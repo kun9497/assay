@@ -22,6 +22,8 @@ type fakeScan struct {
 	exit      int
 	evaluated int
 	raw       string // when set, returned verbatim (malformed JSON tests)
+	// skipped are the report's skipped records (QA 2026-11-10).
+	skipped []map[string]any
 }
 
 type fakeFinding struct {
@@ -86,6 +88,7 @@ func fakeAssay(t *testing.T, scans map[string]fakeScan) (execFunc, *[]string) {
 			"schemaVersion": 18,
 			"summary":       map[string]any{"components": 1, "evaluated": evaluated, "findings": len(fs)},
 			"findings":      fs,
+			"skipped":       sc.skipped,
 			"coverage":      []map[string]any{{"ecosystem": "Alpine:v3.19", "dataAsOf": fakeDataAsOf, "state": "live"}},
 			"provenance":    map[string]any{"tool": map[string]any{"version": "v0.0-test"}, "database": map[string]any{"artifact": map[string]any{"digest": "sha256:feed"}}},
 		}

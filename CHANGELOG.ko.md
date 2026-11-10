@@ -7,6 +7,13 @@
 
 ## [Unreleased]
 
+### Changed
+- **JSON `schemaVersion` 21**(추가형): `skipped[].cves`가 건너뛴 권고가 이름 붙인 CVE를 나열해, `advisoryId`가
+  ALAS나 GHSA id인 skip도 CVE와 이을 수 있습니다. `cmd/truthset`은 판정을 결정할 비교를 스캔이 건너뛴 라벨(그
+  CVE를 이름 붙인 skip, 패키지 전체 skip, 식별할 수 없는 skip)을 더 이상 참음성으로 세지 않습니다: 그런 라벨은
+  UNEVALUATED이고, 요구한 fix가 그런 skip 너머인 affected 라벨은 FIX-UNKNOWN입니다. truthset 보고서 스키마
+  3. (D161 개정, QA 2026-11-10)
+
 ## [0.17.0] - 2026-11-10
 
 ### Added

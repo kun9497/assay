@@ -121,7 +121,9 @@ type report struct {
 }
 
 // 2: familyMetrics.predates and the PREDATES outcome (additive).
-const reportSchemaVersion = 2
+// 3: the FIX-UNKNOWN outcome, counted in unevaluated (QA 2026-11-10): a new
+// value in results[].outcome, so a consumer switching on it must learn it.
+const reportSchemaVersion = 3
 
 func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 	fs := flag.NewFlagSet("truthset", flag.ContinueOnError)
