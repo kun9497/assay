@@ -54,8 +54,6 @@ would mean shipping a different tool inside the same binary.
 
 Each decision records the reasoning, because the reasoning is what makes it revisable.
 
----
-
 ### D1 — OSV is the normalization target
 
 Advisories are stored in OSV shape: `affected[].ranges[]` carrying `introduced` / `fixed`
@@ -73,15 +71,11 @@ Reading grype's prebuilt database instead was rejected: its schema is anchore's 
 contract and changes across major versions, and — decisively — **a schema we do not own
 cannot accept our own sources.** KISA rules it out.
 
----
-
 ### D2 — Provider abstraction from day one
 
 Because KNVD data will not arrive in OSV format, some collection and normalization is
 unavoidable. A `Provider` interface makes OSV a near-passthrough implementation and KISA a
 second one, without committing to hand-rolling every upstream feed.
-
----
 
 ### D3 — KISA is enrichment first, not a matching source
 
@@ -99,8 +93,6 @@ purl, and no package name — CPE-style *product* matching rather than package m
 is also a poor fit for the current targets: container images and source trees do not
 contain 한컴오피스. Deferred, with the promotion path recorded.
 
----
-
 ### D4 — bbolt for local storage
 
 The access pattern is a point lookup by `(ecosystem, name)`, repeated once per package.
@@ -116,15 +108,11 @@ mode anyway. trivy made the same call for the same access pattern.
 
 `Store` is a small interface, so this is reversible if the reasoning turns out wrong.
 
----
-
 ### D5 — Schema version in the path
 
 `<cache>/assay/db/v9/vulnerability.db`. A schema change means rebuilding into a new
 directory rather than writing migration code. Migration code is a liability for a project
 with one user.
-
----
 
 ### D6 — Distro packages key on their release
 
@@ -132,14 +120,10 @@ Ecosystem keys are `Alpine:v3.19`, not `Alpine`. The fixed version of a package 
 release, so the release is part of the lookup key. This matches how OSV partitions distro
 data.
 
----
-
 ### D7 — The distro belongs to the target, not the package
 
 An *image* is Alpine 3.19; its packages are not. `Target.Distro` is read from
 `/etc/os-release` once and applies to every OS package inside.
-
----
 
 ### D8 — `Package.Source` carries the source package
 
@@ -163,8 +147,6 @@ being deferrable to later distro work.
 Population is per-cataloger: dpkg exposes `Source:` in `/var/lib/dpkg/status`, apk exposes
 `o:` (origin) in `/lib/apk/db/installed`.
 
----
-
 ### D9 — Version comparison stays per-ecosystem
 
 Debian epochs, RPM release ordering, semver pre-release precedence, and Maven ordering
@@ -174,14 +156,10 @@ genuinely disagree. A shared `compareVersions` is the specific bug this design a
 sometimes malformed, and silently treating an unparseable version as "not vulnerable" is a
 miss. Errors surface as skipped packages with a count, never as clean results.
 
----
-
 ### D10 — `Finding` carries `Evidence`
 
 Explainability is goal #1. If evidence is not in the type it ends up in log lines, which
 means it effectively does not exist.
-
----
 
 ### D11 — Exit code precedence is contract
 
@@ -192,8 +170,6 @@ means it effectively does not exist.
 An untrustworthy result outranks the content of the result. Exit codes are a CLI contract —
 changing this later breaks other people's CI, so it is fixed now even though the enforcement
 that needs it is deferred.
-
----
 
 ### D12 — Freshness is measured from upstream data, not local build time
 
@@ -208,15 +184,11 @@ so this must be right from the first build.
 Age *enforcement* is deferred; the metadata that makes it possible is not, because adding
 it later means rebuilding the database.
 
----
-
 ### D13 — Providers store upstream records losslessly; derived values are computed at query time
 
 Severity bands, for instance, are derived from stored CVSS vectors rather than baked in at
 build time. This removes most future "we did not store the field we now need, rebuild the
 database" situations. Storage size is not a constraint at this scale.
-
----
 
 ### D14 — A scan never fetches vulnerability data
 
@@ -239,8 +211,6 @@ What the narrowed rule still guarantees:
 - **Only the target is fetched, and only when the target is remote.** That is visible in the
   argument the user typed: `alpine:3.19` reaches out, `docker-archive:alpine.tar` does not.
 
----
-
 ### D15 — Malicious-package reports are excluded, but `Advisory.Kind` is not
 
 OSV carries `MAL-*` records — reports that a package *is* malware, rather than that it
@@ -262,8 +232,6 @@ database. Providers set it; the current filter drops everything that is not
 with no server-side filtering, so `db update` still downloads ~244 MB for slice 1 and
 discards most of it after parsing.
 
----
-
 ### D16 — Withdrawn advisories are filtered at ingestion
 
 OSV records carry an optional `withdrawn` timestamp marking a retracted advisory. In the
@@ -273,8 +241,6 @@ false positives.
 
 Providers drop them at ingestion rather than the matcher skipping them at query time, so a
 withdrawn advisory cannot leak through a code path that forgets to check.
-
----
 
 ### D17 — "Unknown" is a first-class severity band
 
@@ -311,8 +277,6 @@ stored and banded at query time rather than banded at build time.
 **The 50% figure may not be permanent.** Records without a CVSS vector frequently alias a
 CVE that NVD does score. Joining NVD severity as an enrichment source — the same mechanism
 as KISA (D3) — could fill much of the gap. Recorded as a possibility, not a plan.
-
----
 
 ### D18 — CLI flag names follow grype where the semantics match
 
@@ -383,8 +347,6 @@ the linked module count from 9 to 27 and packages from 46 to 114, and it is the 
 necessary of the four sources: an image already present locally can be handed over with
 `docker save`, which the tarball source reads.
 
----
-
 ### D20 — The database records which ecosystems it covers
 
 `Meta` carries the set of ecosystem keys the providers report having fetched, and a package
@@ -454,7 +416,6 @@ guessed at, and two spellings of one number break their tie as strings so the en
 depend on sort order. The same database now prints `Ubuntu:14.04:LTS..26.04:LTS (11
 releases)` and `SLES:11..16.1 (21 releases)`; the count never changed.
 
----
 
 ### D21 — Verdicts: what fails a build, and what the exit code means
 
@@ -504,8 +465,6 @@ whole database it is 74.9%, and per ecosystem: Alpine 98.9%, npm 89.7%, PyPI 75.
 container scan therefore has almost no unknowns, so `--fail-on-unknown` is far less noisy
 there than D17's framing suggests — and correspondingly more useful.
 
----
-
 ### D22 — Target classification: sniff the content, and let the user override
 
 `assay scan ./bin/assay` is a path that exists, and until now an existing path meant an
@@ -529,8 +488,6 @@ to explain than "guessed unless you say otherwise".
 
 The classifier returns what it decided, and the scan reports it, so a wrong guess is visible
 in the output rather than inferred from a confusing error.
-
----
 
 ### D23 — A directory scan reads `go.mod`, and does not shell out to `go`
 
@@ -558,8 +515,6 @@ and the report recommends scanning the built binary when one exists, because tha
 inventory of the thing that actually ships. Getting a build list without a toolchain means
 reimplementing minimal version selection over the module cache, which is a different project.
 
----
-
 ### D24 — The Go toolchain is a package named `stdlib`
 
 The live database holds **159 advisories against `stdlib`** in the Go ecosystem, with
@@ -577,8 +532,6 @@ and that is where a quiet ordering bug would live.
 Directory scans do not get this. `go.mod`'s `go` directive is a language-version floor, not
 the toolchain that will build it, and treating it as one would report a version nothing was
 ever built with.
-
----
 
 ### D25 — A finding carries every source's rating, not one winner
 
@@ -676,8 +629,6 @@ reasons slice 5 records. The mechanism works today with the sources already in h
 accepts a new one without redesign, which is the point of building it this way rather than
 special-casing two names.
 
----
-
 ### D26 — A directory scan reads every lockfile it finds, and names the ones it did not
 
 D23 settled what a directory scan reads *for Go*. It did not settle what happens to a
@@ -746,8 +697,6 @@ decision — see *Disclosing the deliberate directory-scan prunes* in
 that something is missing without telling them what to do; `requirements.txt (not read: not a
 lockfile)` tells them which tree is unevaluated and why. Explainability is goal #1 and it
 applies to what was *not* checked as much as to what was.
-
----
 
 ### D27 — NVD is a rating source, joined on the CVE, and never a matching source
 
@@ -931,8 +880,6 @@ prevent.
 reaches them under any design. That is not a gap to close later; it is the honest ceiling on
 this decision, and it showed up as one of the three findings in the binary scan above.
 
----
-
 ### D28 — The database is built centrally and published as an OCI artifact
 
 One machine builds the database on a schedule and publishes it to `ghcr.io/kun9497/assay-db`;
@@ -996,8 +943,6 @@ path. Ratings carry no such hazard — `PutRating` overwrites by key, so a stale
 for a CVE this run's providers also rate is replaced outright, and one this run's providers
 did not touch (an annotator that did not run this cycle) still shows its last real value
 instead of `unknown`, which is what `db status`'s `COVERED` column is for (D20, D27).
-
----
 
 ### D29 — Enrichment is built locally, and `db push` strips it before publishing
 
@@ -1081,8 +1026,6 @@ added no sixth branch. A **seventh** route would raise the question again, and t
 time is more likely to be that the enrichment must not share a file with the published data
 at all (see *Splitting KISA data into a separate artifact*, `docs/deferred-decisions.md`).
 
----
-
 ### D30 — An unreadable entry in `affected[].versions` is skipped and counted, not fatal
 
 `AffectsVersion` walks an advisory's ranges first and falls back to its enumerated
@@ -1129,8 +1072,6 @@ range fixes at 0.5.3_git20241203-r0 — but some corrects a range this walk cann
 PYSEC-2009-17 carries one `introduced` and five `last_affected` events, so the window closes
 at the first and only the enumerated list still names plone 3.2 and 3.3. Trading a loud miss
 for a silent one is the one thing this package exists to prevent.
-
----
 
 ### D31 — An apk letter may carry a numeric patch level, and it follows apk-tools 2.x
 
@@ -1209,8 +1150,6 @@ harness reads only three-field comparison lines, so apk-tools master's validity 
 (`!0.1a1`) are skipped. The deliberate divergence from 3.x is therefore invisible to the
 strongest test this package has, and rests on the reasoning above rather than on that replay.
 
----
-
 ### D32 — A bare short semver core is a shorthand, padded with zeros
 
 `parseSemVer` pads a core of one or two identifiers to three — but only when the string
@@ -1270,8 +1209,6 @@ Six mutations verified red: dropping the padding, dropping the bare-form guard, 
 sentinel guard, padding with `1` instead of `0`, padding only two-identifier cores, and
 letting a four-identifier core through.
 
----
-
 ### D33 — The narrowest KISA notice wins, and its breadth is disclosed
 
 Enrichment is keyed `(CVE, Source)` and every KISA record carries the same source, so a CVE
@@ -1326,8 +1263,6 @@ populating `Claims`. The report fixture sets `Claims` to a value that appears no
 it, because an int left at its zero value lets a renderer that never reads the field produce
 byte-identical output.
 
----
-
 ### D34 — A leading zero in a semver core is normalized away, not refused
 
 A core identifier with a leading zero is accepted and trimmed: `19.03.0` compares equal to
@@ -1378,8 +1313,6 @@ reference to follow for it.
 Five mutations verified red: refusing leading zeros again, accepting without normalizing,
 dropping the padded-core guard, trimming an all-zero identifier down to nothing, and allowing
 leading zeros in pre-release identifiers.
-
----
 
 ### D35 — Name whose data is unreadable, and repair one documented typo at ingestion
 
@@ -1467,8 +1400,6 @@ skips with the target's cause, no finding; a readable one is judged) and at the 
 only, fixed-then-open, open-then-fixed all refused; fixed-only and last_affected-only invalid;
 the open sentinel range still walks).
 
----
-
 ### D36 — Incompleteness carries a cause, and the gate can be narrowed to what you can fix
 
 D35 put *whose data is unreadable* in the message. D36 puts it in the type, because a CI
@@ -1530,8 +1461,6 @@ error, which the matcher's conservative default made invisible. It is now held b
 `CauseOf` in the `version` package directly, since that answer is that package's contract
 regardless of what any caller defaults to.
 
----
-
 ### D37 — KISA enrichment is on by default, and the publish workflow turns it off
 
 D29 made `KISA_ENABLE` opt-in and gave a reason: the data may not be redistributed, so an
@@ -1571,8 +1500,6 @@ not before.
 Seven mutations verified red: KISA back to opt-in, NVD flipped to default-on, `"0"` no longer
 disabling, case sensitivity dropped, whitespace not trimmed, an unrecognised value disabling
 instead of defaulting, and the warning removed.
-
----
 
 ### D38 — `requirements.txt` is read, and only the lines that name one version become packages
 
@@ -1649,7 +1576,6 @@ rather than a component, unusable lines counted but not named, options counted a
 requirements.txt returned to unread, cataloger skips dropped from the target scope, an
 unsupported ecosystem added to it, and the disclosure removed.
 
----
 
 ### D39 — There is no upstream vector file for semver or PEP 440, and the hand tables are stronger than the corpora that exist
 
@@ -1702,7 +1628,6 @@ check transitivity, which a table of independent pairs does not.
 The README line calling these two "the weakest point of the three" is corrected: the weakness
 was an untested assumption about the tables, and testing it is what this decision did.
 
----
 
 ### D40 — The Debian comparer is a transliteration of dpkg, checked against dpkg
 
@@ -1741,8 +1666,6 @@ shapes, and the Policy chain over all 66 pairs with transitivity and antisymmetr
 `1.0-2-3` is valid under the last-hyphen split, and `+b1` sorts BELOW `+deb11u1` because `b`
 ranks 98 and `d` ranks 100.
 
----
-
 ### D41 — The version compared is the one belonging to the name that reached the advisory
 
 D8's comment said indirect matching needed no version adjustment, "because an Alpine binary
@@ -1767,8 +1690,6 @@ So the matcher compares `Source.Version` when the advisory was reached through t
 name, and `Version` otherwise. An empty `Source.Version` means "the same as the binary
 version" — what `dpkg-gencontrol` omits the field to say, and what apk's origin always implies
 — so Alpine reaches exactly the answer it did before.
-
----
 
 ### D42 — Debian only; Ubuntu needs its own decision
 
@@ -1816,8 +1737,6 @@ on the THIRD word of `Status` and nothing else, which is how syft drops
 scanning for a bare word. An absent `Status` means installed, because every package in a
 distroless image is in that state.
 
----
-
 ### D43 — RHEL-family targets are inventoried and refused, not matched
 
 An image whose `/etc/os-release` names an RPM-family distro has its package list read and
@@ -1860,7 +1779,6 @@ package set and **no record whatsoever for CVE-2024-6387**. Neither changes this
 (RHEL 8/9/10 still route to Red Hat's own CSAF feed, not to either rebuild's OSV export) — but
 see D71 and D72, where both distros later got their own routing to their own archives instead.
 
----
 
 ### D44 — The rpmdb is read by hand, not by dependency
 
@@ -1892,7 +1810,6 @@ it, and there was no SUSE advisory provider for it to serve. The first half of t
 stopped holding — D76 reads it — while the second half (still no SUSE advisory provider) has
 not changed.
 
----
 
 ### D45 — A write-ahead log or a damaged page is a hard error, and the guard reads the file, not the header
 
@@ -1927,7 +1844,6 @@ Each guard added under this decision must be verified by making the failure real
 with an actual non-empty WAL, a fixture with an actually corrupted page — and confirming the
 suite goes red before the guard lands.
 
----
 
 ### D46 — RPM version comparison is its own comparer, and an absent epoch is zero on both sides
 
@@ -1950,7 +1866,6 @@ Written in the main loop with the table reviewed line by line, per CLAUDE.md's d
 rules: a subtle ordering bug here is a silent false negative, which is the exact failure the
 per-ecosystem design exists to prevent.
 
----
 
 ### D47 — The Red Hat ecosystem key is the mainline major, because that is the only one a scan can derive
 
@@ -2014,7 +1929,6 @@ rejected: it fires only on a night the key is flat, loses everything carried on 
 is not, and cannot tell a re-labelled statement from a CVE the upstream withdrew. The stderr
 disclosure names ELS beside EUS, AUS, TUS and E4S.
 
----
 
 ### D48 — Affected with no fix is a range with no fixed event, reported always and gated only on its own flag
 
@@ -2056,7 +1970,6 @@ a gate that is off protects nothing.
 **Not reporting them was never an option.** That is the OSV export this provider exists to
 replace.
 
----
 
 ### D49 — The VEX archive is read as zstd, which costs no dependency
 
@@ -2117,7 +2030,6 @@ They are `known_affected` entries from Red Hat's pre-2005 releases — `Red Hat 
 name a **product and no package at all**. A category, not a failure. One counter serving two
 causes produced an alarming number that was wrong and would have been believed.
 
----
 
 ### D50 — Only `rhel` is matched against Red Hat's errata
 
@@ -2151,7 +2063,6 @@ tells them apart.
 decision, not a permanent judgement: the moment AlmaLinux's own feed is ingested under
 an `AlmaLinux:N` key, an `almalinux` ID routes there and nothing here changes.
 
----
 
 ### D51 — The published artifact carries the Red Hat data, and `REDHAT_ENABLE` defaults on
 
@@ -2194,7 +2105,6 @@ are both ready picks at RANDOM, so watching for cancellation only inside it made
 probabilistic: the test asserting otherwise failed three runs in ten, and checking `ctx.Err()`
 at the top of the loop made it 12 for 12.
 
----
 
 ### D52 — A range carries why it has no fix, and the gate can be narrowed to "never"
 
@@ -2283,8 +2193,6 @@ and no `product_groups` block to resolve one against. Implementing an expansion 
 exercises would ship an untested path; `stats.RemediationGrouped` makes a feed that started
 using it visible instead, and the affected packages would degrade to `unknown` rather than to a
 wrong answer.
-
----
 
 ### D53 — Ubuntu is keyed on its mainline release, and a lineage build is skipped rather than judged
 
@@ -2382,8 +2290,6 @@ ambiguity never arises for them. Holding D1 — every provider normalizes into O
 gives assay a problem neither had. grype carries exactly one Ubuntu channel, `esm`, and excludes
 FIPS and Realtime deliberately as separate compliance products.
 
----
-
 ### D54 — A distroless dpkg database is a directory, and the layer walk learned to enumerate one
 
 **Decision.** `Image.FilesUnder(dir)` returns every regular file directly inside a directory,
@@ -2422,8 +2328,6 @@ anything ships, and preferring the file leaves the existing path untouched.
 DIRECTORY COMPONENT of the path is not followed. If some image made `var/lib/dpkg` itself a
 link, this would find nothing and the scan would refuse with its "no supported package
 database" error rather than report clean.
-
----
 
 ### D55 — SARIF puts the skips where the consumer will see them, not only where the spec says
 
@@ -2468,8 +2372,6 @@ command, where "libssl3 is affected by an openssl advisory" is otherwise unverif
 **Hand-rolled structs rather than a SARIF library.** The format is large, this uses a corner of
 it, and a third direct dependency is a real decision this does not justify.
 
----
-
 ### D56 — `db build` says where it spent its time
 
 **Decision.** Every provider, annotator and enricher is timed, and `db build` prints a summary
@@ -2498,8 +2400,6 @@ the whole story. The row is omitted when there is nothing in it, because "everyt
 on every build trains the reader to stop seeing the line.
 
 **To stderr**, with every other diagnostic: the database path on stdout is what a script reads.
-
----
 
 ### D58 — A transient delta fetch is retried; a permanent one still fails the build
 
@@ -4267,8 +4167,6 @@ the working directory and runs without one if there is none, so a project that h
 written one scans exactly as before. Independent review: 5/5 core guards delete-goes-red
 (no-apply, reasonless-accept, expiry-ignored, table-hidden, sarif-active-mismarked).
 
----
-
 ### D103 — pnpm and yarn berry: the two lockfiles refused by name are read
 
 **Decision.** `pnpm-lock.yaml` (lockfileVersion 5.4, 6.0 and 9.0, dispatched by RANGE on
@@ -4307,8 +4205,6 @@ Independent review: 8/8 mutations red (packages discarded, berry-as-v1, name-fro
 v5 suffix uncut, git-as-registry, local-counted, later-documents-dropped, dedupe-by-name),
 each caught by a caller-level or table test.
 
----
-
 ### D104 — OpenVEX input: a producer's exoneration, applied with assay's discipline
 
 **Decision.** A repeatable `--vex <path>` reads OpenVEX documents — both v0.2.0 and the
@@ -4341,8 +4237,6 @@ one-directional subset, subpath ignored); a non-purl `@id` matches only by exact
 an unparseable document purl warns and never becomes a wildcard. Independent review: 8/8
 mutations red — the eighth (blanking `Source`) survived until a caller-level anchor on
 the table's per-line source label was added, the round doing exactly what it exists for.
-
----
 
 ### D105 — trivy joins the weekly differential, and the tool stops lying about its name
 
@@ -4377,8 +4271,6 @@ per version+week. Independent review: 5/5 mutations red — one first attempt wa
 no-op that "survived" until re-applied properly, the check-your-mutation-mutates trap
 CLAUDE.md records, not a coverage gap.
 
----
-
 ### D106 — Azure Linux moves off a dead feed: OVAL direct, like the scanners that were right
 
 **Decision.** Azure Linux/CBL-Mariner leaves the OSV.dev ecosystem dump (where D94 put
@@ -4410,8 +4302,6 @@ recovered — 83 under the exact package name, 57 under the source name the D8 b
 resolves at scan time, 0 absent. Independent review: 5/5 mutations red (bound-kind
 confusion, retraction kept, CVE moved off Aliases, NotFixed unstamped, provider
 defaulted off).
-
----
 
 ### D107 — severity colors: the demo's look becomes the product's truth
 
@@ -5568,9 +5458,6 @@ computed from the manifest's own bytes, so there it has nothing outside to disag
 **What stays out.** Whatever names the top digest is the root of trust: the reference the user
 typed, a layout's `index.json`, or an archive's own manifest. Signature verification (cosign
 and the like) is a separate decision.
-
----
-
 ### D124 — An image reference that does not parse still scopes its statement, to no target
 
 **Decision.** D121's rule — a statement that names an image applies only to that image — now
@@ -6085,8 +5972,6 @@ and the per-package tests each decision names). Mutations across the six: 29 cau
 documented equivalent (the explicit `math.IsNaN` beside the inside-the-range check). The
 response document is `docs/reviews/2026-10-22-source-review-response.md`.
 
----
-
 ### D132 — An npm alias is cataloged under its registry identity; the install path is kept beside it
 
 **Decision.** `npmlock` reads the v2/v3 entry's own `name` field and, when it differs from the
@@ -6115,8 +6000,6 @@ regular, v3 alias and v1 alias each one finding and exit 1 with purl `pkg:npm/lo
 Mutations caught: ignoring the v3 name, dropping `Install`, ignoring the v1 spec, splitting on
 the first `@`, and the location key ignoring `Install`.
 
----
-
 ### D133 — A lineage or module-build skip applies only where its version convention holds
 
 **Decision.** D53's Ubuntu detector (`+fipsN`, `+esmN`, `~esmN`) runs only on `Ubuntu:` keys,
@@ -6139,8 +6022,6 @@ the convention that coined it.
 — Ubuntu 22.04 `+esm1` still the ESM skip, Rocky 9 `module+el9` with no stream still the
 module skip — held. Through `Run` with a clean sibling: Evaluated 2, one finding, exit 1.
 Mutations caught: each gate removed.
-
----
 
 ### D134 — The lookup under the source identity compares the source version, whatever the binary is called
 
@@ -6165,8 +6046,6 @@ the source is at the fix; `bsdutils` under its own name keeps the binary version
 advisory keyed on the binary name at its fix stays clean); the D95 provides test holds.
 Through `Run` and the dpkg catalog: both `bsdutils` and `util-linux` one finding, exit 1.
 Mutations caught: the old inequality restored, and the source version applied unconditionally.
-
----
 
 ### D135 — The archive is downloaded before the delta is consulted, and an archive copy newer than the delta's is kept
 
@@ -6228,8 +6107,6 @@ pre-existing window D129 had, a day at most. When the archive copy is the newer 
 converts to nothing, the delta's record stands until the next build (the inverse of the
 D129 hole, reachable only through a stale cache). A non-zero `ArchiveNewerThanDelta` on a
 nightly is the signal to look.
-
----
 
 ### D136 — A rating the source withdraws is removed, and the publish guard tolerates exactly that many
 
@@ -6436,8 +6313,6 @@ disabled schedule, an Actions outage); a monitor on `lastSuccess.finishedAt` is 
 that, and none is configured yet. GitHub allows three pinned issues; a fourth failing workflow
 is opened and notified but not pinned.
 
----
-
 ### D139 — A scan warns when its database was built more than seven days ago
 
 **Decision.** After the `--db-max-age` and `--db-max-rating-age` gates and before matching,
@@ -6470,8 +6345,6 @@ the dead-feed hazard above, because endoflife.date is live and a current databas
 forever. Undated data is not called old, and a database with no rows is the "EOL unknown" case.
 Verified at the caller (ten days old warns and exits 0 with clean JSON stdout; two days, no flag,
 no provenance are silent) and at the boundary (seven days silent, seven days and an hour warns).
-
----
 
 ### D140 — A layer download cut mid-stream is retried, three attempts
 
@@ -6546,8 +6419,6 @@ declared, the notification dropped, the disclosure emitted for a target with no 
 branch review added the result's location, the stable fingerprint and the notification's level
 to the SARIF test.
 
----
-
 ### D142 — Ubuntu's older FIPS builds are recognised as a lineage
 
 **Decision.** D53's Ubuntu lineage detector matches three FIPS spellings, not one, none
@@ -6585,8 +6456,6 @@ trailing digit. The last one survived the first table, which led to the `.fips.b
 The branch review (wf_eb4773e3-9be) added negatives for the digits around the separator-less
 form (`ubuntunofips3`, `1fipsy`; two more mutations caught) and corrected the release lists
 and the unmatched remainder above against the dump.
-
----
 
 ### D143 — An SPDX binary rpm takes its source from the document's relationships
 
@@ -8396,8 +8265,6 @@ Beyond that:
   false negatives originate.
 - The bbolt implementation is tested separately against a small fixture database.
 
----
-
 ### D160 — An image scan reads application packages at two fixed locations (revises D70)
 
 **Decision.** An image scan runs one more pass over its layers, over ten fixed locations
@@ -8638,9 +8505,6 @@ package, as before.
 **Gives up.** Two OS components that describe the same distro and release count as one; two that
 differ only in a field other than ID and VERSION_ID are not told apart. A document that declares
 its OS only on some unrelated branch gives no context to packages elsewhere.
-
----
-
 ### D167 — The differential floors each probed ecosystem's application packages (`minApplicationPackages`)
 
 **Decision.** A target in `.github/scanner-diff-targets.json` may name `minApplicationPackages`, a
