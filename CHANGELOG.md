@@ -22,6 +22,12 @@ All notable changes to this project are documented here. The format follows
   list owns nothing and never fails the scan. **JSON `schemaVersion` 19** (additive).
 
 ### Changed
+- A finding on an installed build that is at or above a fix the advisory released, while the
+  advisory's open range still lists the package as affected (SUSE's "released, In progress"
+  shape, Red Hat's erratum-then-reopened one), reads in its evidence "`<v>` is at or above the
+  released fix `<X>`; the advisory still lists the package as affected, with no later fix
+  recorded" instead of "with no fixed version recorded". Verdict, `evidence.fixed` and fix
+  state are unchanged; no schema change. (D163)
 - `cmd/truthset` holds a label's `validFrom` against the database: a label whose key's
   `coverage[].dataAsOf` is before its `validFrom` is listed as not judged (`PREDATES`), counted
   in the report and left out of the judged-label count, the metrics and the exit code; a scan

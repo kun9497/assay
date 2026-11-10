@@ -22,6 +22,11 @@
   (추가형).
 
 ### Changed
+- 권고가 출시한 fix 이상인 빌드가 설치돼 있는데 권고의 열린 범위가 여전히 그 패키지를 affected로
+  올려 두는 경우(SUSE의 "출시, In progress" 모양, Red Hat의 에라타 뒤 다시 열린 결함), finding의
+  evidence는 "with no fixed version recorded" 대신 "`<v>` is at or above the released fix `<X>`; the
+  advisory still lists the package as affected, with no later fix recorded"로 읽힙니다. 판정·
+  `evidence.fixed`·fix 상태는 그대로이고 스키마 변경은 없습니다. (D163)
 - `cmd/truthset`가 라벨의 `validFrom`을 데이터베이스에 대고 붙듭니다: 키의 `coverage[].dataAsOf`가
   `validFrom`보다 앞선 라벨은 판정하지 않은 것(`PREDATES`)으로 올리고, 보고서에는 세되 판정한 라벨
   수·지표·종료 코드에서는 뺍니다; coverage 날짜가 없는 스캔 문서는 전처럼 판정합니다. `validFrom`은
