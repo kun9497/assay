@@ -240,6 +240,9 @@ func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package, keyed map[string]
 	for i, q := range pkgs {
 		if q.Type == p.Type && q.Name == p.Name && q.Version == p.Version && (q.Ecosystem == "" || p.Ecosystem == "") {
 			if match >= 0 {
+				// Two releases are refused above (keyed); two top-level
+				// listings keyed to ONE release are judged alike whichever
+				// takes the evidence, so a mutation of this line survives.
 				return -1
 			}
 			match = i
