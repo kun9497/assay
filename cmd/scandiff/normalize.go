@@ -34,6 +34,15 @@ type assayDocument struct {
 	SchemaVersion int            `json:"schemaVersion"`
 	Findings      []assayFinding `json:"findings"`
 	Summary       assaySummary   `json:"summary"`
+	// Coverage is read for minApplicationPackages (D167) alone: one row per
+	// ecosystem key the inventory holds (D111), with how many packages sit
+	// under it.
+	Coverage []assayCoverage `json:"coverage"`
+}
+
+type assayCoverage struct {
+	Ecosystem string `json:"ecosystem"`
+	Packages  int    `json:"packages"`
 }
 
 type assayFinding struct {

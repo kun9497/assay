@@ -7,6 +7,11 @@
 
 ## [Unreleased]
 
+### Added
+- 스캐너 차등 비교가 프로브된 생태계별 애플리케이션 패키지에 하한을 둡니다: `coverage[].packages`에 거는
+  `minApplicationPackages`(`npm`, `Go`)로, 주간 실행과 야간 `-regressions-only` 게이트가 똑같이 판정합니다.
+  `ubi8n18` npm 118, Go 대상 셋은 1. 전에는 npm과 Go 패키지를 모두 잃은 후보가 두 모드를 통과했습니다. (D167; QA 2026-11-10)
+
 ### Fixed
 - 위 레이어가 실제 `/lib64`를 지우고 `/usr/lib`로 다시 링크해도, 옛 `/lib64` 파일을 소유한 패키지가 독립된
   `/usr/lib` 사본의 소유자가 되지 않습니다: 최상위 링크는 그 링크보다 오래되지 않은 소유 기록에만 경로 철자를
