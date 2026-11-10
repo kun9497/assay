@@ -79,6 +79,13 @@ func (img *Image) Unresolved() []Unresolved {
 	return out
 }
 
+// NoteUnresolved records a path a caller of the image's read primitives
+// looked for and could not resolve inside the image -- a link that leads
+// nowhere, or out of the image -- with the reason. It joins the walk's own
+// unresolved paths, which the scan reports as unread (D109 / audit P4), so
+// --fail-on-incomplete sees it without a second mechanism.
+func (img *Image) NoteUnresolved(p, reason string) { img.noteUnresolved(p, reason) }
+
 func (img *Image) noteUnresolved(p, reason string) {
 	for _, u := range img.unresolved {
 		if u.Path == p {

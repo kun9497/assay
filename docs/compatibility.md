@@ -9,7 +9,7 @@ with a version bump, a **Breaking** entry in the [changelog](../CHANGELOG.md), a
 
 | Contract | What it is | Version field | Current |
 |---|---|---|---|
-| `report` | `assay scan --output json` | `schemaVersion` | 21 |
+| `report` | `assay scan --output json` | `schemaVersion` | 22 |
 | `provenance sidecar` | the file `--provenance <path>` writes (D120) | `schemaVersion` | 1 |
 | `status.json` | the published database's status, on the `status` branch (D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json` (D147) | `schemaVersion` | 1 |
@@ -91,6 +91,14 @@ it relied on:
   id, aliases, upstream and, for distro-authored records, related), deduplicated and sorted, so a
   consumer holding a CVE can tell whether a skip leaves it unjudged when `advisoryId` is an ALAS or
   GHSA id. Omitted for a whole-package skip or an advisory that names no CVE. (QA 2026-11-10)
+- Schema 22 (**breaking** for a consumer switching on `inventoryScope.applicationScope[].state`;
+  additive otherwise): an entry's `state` gains `partial` -- npm only: a candidate under the npm
+  roots was a link that did not resolve (or a linked scope directory), and its path is in
+  `unread[]` with the reason. Before, a per-ecosystem state was `read`, `none` or `not-read`, and
+  such an image read `none`; a consumer that took `none` as "no npm packages" was told the wrong
+  thing then and is told `partial` now. Linked packages that do resolve are `read` and their
+  findings appear at the logical path under the root. Schema 21 is
+  `skipped[].cves`, merged first. (D160 revised)
 
 ## The provenance sidecar, status.json and `db status`
 
