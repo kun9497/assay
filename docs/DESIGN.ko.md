@@ -1039,6 +1039,8 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       소유; 스키마 19(추가형)
 - [x] CycloneDX의 배포판 패키지는 자기 가지에 선언된 OS로 키를 정함 (D166, D83 개정) — 형제, 없으면
       위쪽의 가장 가까운 모호하지 않은 OS, 서로 다른 둘이 나란히면 없음; 대안은 purl qualifier; QA 2026-11-10
+- [x] 차등 비교가 프로브된 생태계별 애플리케이션 패키지에 하한을 둠 (D167) — `coverage[].packages`에
+      거는 `minApplicationPackages`, 두 모드의 회귀 하한; QA 2026-11-10
 - [x] finding의 JSON이 레코드의 related 식별자를 실음 (D164) — `advisory.related`, 스키마 20; ALAS·
       Bodhi·OVAL finding이 고치는 CVE; truthset이 그것과 rating으로 이음
 - [x] 권고가 여전히 affected라 부르는 출시 빌드 위의 finding은 그 빌드를 이름 붙임 (D163) — 열린 범위가

@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- The scanner differential floors each probed ecosystem's application packages:
+  `minApplicationPackages` (`npm`, `Go`) on `coverage[].packages`, judged by the weekly run and
+  the nightly `-regressions-only` gate alike. `ubi8n18` npm 118, three Go targets 1. Before it, a
+  candidate that lost every npm and Go package passed both modes. (D167; QA 2026-11-10)
+
 ### Fixed
 - CycloneDX: an operating-system component keys its own children (Alpine as `metadata.component`
   with busybox under it no longer reads Debian findings when a Debian is declared at the top), and an
@@ -18,6 +24,13 @@ All notable changes to this project are documented here. The format follows
   under the subject no longer keys busybox to `Debian:11` (51 false findings on the public DB).
   Two different OS side by side give no context; a purl's `distro` qualifier then identifies the
   package, and without one it is reported not evaluated. (D166, revises D83; QA 2026-11-10)
+- An upper layer that deletes a real `/lib64` and relinks it to `/usr/lib` no longer lends the
+  package that owned the old `/lib64` files to the independent `/usr/lib` copy: a top-level link
+  spells an owner path only for an ownership record no older than the link. (D162 revised; PR #267 review)
+- An image whose `/lib` and `/usr/lib` (or `/bin` and `/usr/bin`) are separate directories no
+  longer reports an OS package that owns a file under one as the owner of the other's independent
+  copy: `locations[].ownedBy` spells a path only through the image's own top-level
+  directory links into `usr/` (including Fedora's and Arch's `sbin -> usr/bin`). (D162 revised, QA 2026-11-10)
 
 ## [0.17.0] - 2026-11-10
 

@@ -81,7 +81,7 @@ func catalogApplicationProbes(ctx context.Context, img *source.Image, owned *fil
 	// `files`, accepted unread like a package.json.
 	roots := append(append([]string{}, npminstalled.Roots...), goBinDirs...)
 	roots = append(roots, dpkgdb.InfoDir, pacmanLocalDir)
-	files, _, err := img.FilesProbed(ctx, roots, probeCandidate, probeSniff)
+	files, links, err := img.FilesProbedLinks(ctx, roots, mergedUsrDirs, probeCandidate, probeSniff)
 	if err != nil {
 		return nil, cyclonedx.Stats{}, nil, fmt.Errorf("application probes: %w", err)
 	}
@@ -89,6 +89,12 @@ func catalogApplicationProbes(ctx context.Context, img *source.Image, owned *fil
 	if owned == nil {
 		owned = newFileOwners(img)
 	}
+	// D162, revised by the 2026-11-10 QA: a path is spelled through this
+	// image's own top-level directory links (bin -> usr/bin on a merged-/usr
+	// Debian, sbin -> usr/bin on Fedora and Arch, lib64 -> usr/lib), never
+	// through a table that assumes them. The same pass recorded those links
+	// (mergedUsrDirs are its exact names), so this costs no extra read.
+	owned.links = topLevelLinks(links, owned.layerOf)
 	npmFiles := map[string][]byte{}
 	layerOf := map[string]string{}
 	type goBin struct {

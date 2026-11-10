@@ -8505,6 +8505,39 @@ package, as before.
 **Gives up.** Two OS components that describe the same distro and release count as one; two that
 differ only in a field other than ID and VERSION_ID are not told apart. A document that declares
 its OS only on some unrelated branch gives no context to packages elsewhere.
+### D167 — The differential floors each probed ecosystem's application packages (`minApplicationPackages`)
+
+**Decision.** A target in `.github/scanner-diff-targets.json` may name `minApplicationPackages`, a
+floor per probed ecosystem (`npm`, `Go`) on the candidate's `coverage[].packages` under that key.
+Go counts the package entries the probed binaries yield (each binary's `stdlib` included, a module
+in two binaries twice), not the binaries; a key absent from `coverage` counts 0. It is a regression floor,
+judged by the weekly run and by the nightly `-regressions-only` gate alike. A key outside the probed
+ecosystems, and a floor below 1, are refused when the file loads. Committed: `ubi8n18` npm 118;
+`bci156`, `archlinux` and `cleanstart-postgres` Go 1. No CVE count is pinned.
+
+**Why.** QA 2026-11-10 removed every npm and Go package from four weekly captures (2026-11-09) and
+both modes still said `ok`. The finding floors are dominated by OS packages: `ubi8n18` lost 236 of
+525 components but only 53 of 7,025 findings, and `minComponents` is set on one target. D160's
+probes could stop producing packages and nothing in the gate would notice.
+
+**The numbers.** `ubi8n18`'s capture holds 236 npm packages. The floor is half of that, 118: low
+enough that the npm tree's own churn under a digest-pinned image never reaches it, and high enough
+that losing the probe, a root, or the nested copies trips it. The three Go targets hold 1, 3 and 3
+Go package entries. Their floor is presence, 1: a Go count that small has no meaningful half, and what the floor
+guards is the Go probe running at all. To re-measure, read `coverage[]` from a weekly capture's
+`<target>.assay.json` (the `scanner-diff-*` artifact):
+
+```bash
+python -c "import json,sys; d=json.load(open(sys.argv[1])); print({c['ecosystem']: c['packages'] for c in d['coverage'] if c['ecosystem'] in ('npm','Go')})" ubi8n18.assay.json
+```
+
+**Verified.** On the 2026-11-09 weekly capture: the four originals hold every floor in both modes,
+and all 26 targets stay `ok` in both; each removal variant breaches `minApplicationPackages.<eco>`
+with exit 1 in both modes, where the v0.17.0 `scandiff` said `ok`. 8/8 mutations caught.
+
+**Gives up.** A partial loss above the floor (ubi8n18 down to 118 npm packages) is not caught by
+this floor; the finding floors and D117's ceiling see some of it. A floor is re-cut by hand when a
+target's digest moves.
 
 ---
 
@@ -8595,6 +8628,16 @@ holds. The trigger to reopen is an AL2 scan whose `coverage[].dataAsOf` is set b
 ---
 
 ### D162 — A probed location names the OS package that owns its file (extends D160)
+
+*Revised 2026-11-10 (QA): an owner path is spelled only through the image's own top-level directory
+links (bin -> usr/bin, Fedora's and Arch's sbin -> usr/bin, lib64 -> usr/lib), each resolved from /
+the way the kernel resolves it, instead of a twin table assumed for every image. Before, it was tried on every image, so on an
+image whose /lib and /usr/lib are two directories an APK owning only lib/... was named the owner of
+the independent usr/lib/... copy. The probe pass observes the top-level bin/sbin/lib* entries
+itself (no extra pass); the exact path is still tried first and the layer-order rule is unchanged.
+A link spells a twin only for an ownership record no older than the layer that made the link: an
+upper layer that deletes a real lib64 and relinks it to usr/lib leaves the older record's lib64/...
+paths naming the deleted directory's files, not the independent usr/lib/... copy (PR #267 review).*
 
 **Decision.** Every location of an image's probed application packages (D160) carries
 `ownedBy` — the `{name, version}` of the OS package whose file list names that path — when

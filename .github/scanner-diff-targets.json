@@ -49,6 +49,7 @@
     "minFindings": 4746,
     "maxFindings": 11168,
     "maxAssayOnlyFixed": 1006,
+    "minApplicationPackages": {"npm": 118},
     "trivy": {
       "minAgree": 4386,
       "minFindings": 4437,
@@ -173,6 +174,7 @@
     "minFindings": 102,
     "maxFindings": 880,
     "maxAssayOnlyFixed": 25,
+    "minApplicationPackages": {"Go": 1},
     "trivy": {
       "minAgree": 154,
       "minFindings": 159,
@@ -255,7 +257,8 @@
     "minAgree": 7,
     "minFindings": 9,
     "maxFindings": 106,
-    "maxAssayOnlyFixed": 84
+    "maxAssayOnlyFixed": 84,
+    "minApplicationPackages": {"Go": 1}
   },
   {
     "name": "hummingbird",
@@ -289,6 +292,7 @@
     "minFindings": 0,
     "maxFindings": 25,
     "maxAssayOnlyFixed": 25,
+    "minApplicationPackages": {"Go": 1},
     "minComponents": 40
   },
   {

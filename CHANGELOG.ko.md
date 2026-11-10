@@ -7,6 +7,11 @@
 
 ## [Unreleased]
 
+### Added
+- 스캐너 차등 비교가 프로브된 생태계별 애플리케이션 패키지에 하한을 둡니다: `coverage[].packages`에 거는
+  `minApplicationPackages`(`npm`, `Go`)로, 주간 실행과 야간 `-regressions-only` 게이트가 똑같이 판정합니다.
+  `ubi8n18` npm 118, Go 대상 셋은 1. 전에는 npm과 Go 패키지를 모두 잃은 후보가 두 모드를 통과했습니다. (D167; QA 2026-11-10)
+
 ### Fixed
 - CycloneDX: operating-system 컴포넌트가 자기 자식의 키를 정합니다(최상위에 Debian이 선언되어도
   `metadata.component`인 Alpine 아래 busybox가 Debian finding을 내지 않습니다). 키 없는 나열은 키 있는 쌍둥이가
@@ -16,6 +21,12 @@
   최상위에 Debian, subject 아래에 Alpine이 있는 문서가 더 이상 busybox를 `Debian:11`로 키를 정하지 않습니다(공개
   DB에서 오탐 51건). 서로 다른 OS 둘이 나란히 있으면 문맥이 없고, 그때는 purl의 `distro` qualifier가 패키지를
   식별하며, 그것도 없으면 미평가로 보고합니다. (D166, D83 개정; QA 2026-11-10)
+- 위 레이어가 실제 `/lib64`를 지우고 `/usr/lib`로 다시 링크해도, 옛 `/lib64` 파일을 소유한 패키지가 독립된
+  `/usr/lib` 사본의 소유자가 되지 않습니다: 최상위 링크는 그 링크보다 오래되지 않은 소유 기록에만 경로 철자를
+  줍니다. (D162 개정; PR #267 리뷰)
+- `/lib`와 `/usr/lib`(또는 `/bin`과 `/usr/bin`)가 분리된 이미지에서, 한쪽 아래 파일을 소유한 OS 패키지를
+  다른 쪽의 독립 사본 소유자로 보고하지 않습니다: `locations[].ownedBy`는 이미지 자체의 최상위 디렉터리가
+  `usr/` 안으로 거는 링크(Fedora·Arch의 `sbin -> usr/bin` 포함)를 통해서만 경로를 바꿔 적습니다. (D162 개정, QA 2026-11-10)
 
 ## [0.17.0] - 2026-11-10
 
