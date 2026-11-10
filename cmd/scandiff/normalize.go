@@ -45,12 +45,14 @@ type assayFinding struct {
 }
 
 // assayRating is read for its advisoryId alone. Annotation sources (NVD,
-// EPSS, KEV) attach to a finding BY CVE, so their advisoryId IS the CVE --
-// and for AlmaLinux and Oracle Linux it is the only place the document
-// spells one at all: ALSA/ELSA records carry their CVE link in the OSV
-// `related` field (D71), which AdvisoryRecord does not expose, while the
-// annotations that attach through it do. The first seeding run measured
-// agree=0 on both ecosystems for exactly this reason.
+// EPSS, KEV) attach to a finding BY CVE, so their advisoryId IS the CVE.
+// Before schema 20 it was the only place the document spelled one for a
+// record whose CVE link lives in `related` (ALSA/RLSA/ALBA/ALEA/CGA through
+// OSV, D71; ALAS, ELSA and Bodhi through their own providers): the first
+// seeding run measured agree=0 on Alma and Oracle for exactly that reason.
+// Schema 20 (D164) renders `related` itself, read below; the ratings stay
+// read for a document from before it, and for a database built without the
+// annotation that would otherwise be the only spelling.
 type assayRating struct {
 	AdvisoryID string `json:"advisoryId"`
 }
@@ -63,6 +65,11 @@ type assayAdvisory struct {
 	ID       string   `json:"id"`
 	Aliases  []string `json:"aliases"`
 	Upstream []string `json:"upstream"`
+	// Related (schema 20, D164) is read for CVE tuples only. bridgeBareIDs
+	// does not read it: a CGA record's related ids would bridge grype's
+	// GHSA tuples into the ASSAY column, which maxFindings judges, and
+	// whether to widen the bridge is a floors decision, not this one.
+	Related []string `json:"related"`
 }
 
 type assaySummary struct {
@@ -94,7 +101,7 @@ func assayTuples(doc assayDocument) map[tuple]struct{} {
 		for _, r := range f.Ratings {
 			ratingIDs = append(ratingIDs, r.AdvisoryID)
 		}
-		ids := collectCVEs(f.Advisory.ID, f.Advisory.Aliases, f.Advisory.Upstream, ratingIDs)
+		ids := collectCVEs(f.Advisory.ID, f.Advisory.Aliases, f.Advisory.Upstream, f.Advisory.Related, ratingIDs)
 		if len(ids) == 0 {
 			ids = []string{f.Advisory.ID}
 		}

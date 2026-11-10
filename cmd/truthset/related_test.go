@@ -21,6 +21,10 @@ func TestRun_ALASFindingJoinsItsCVE(t *testing.T) {
 	}{
 		{"related (schema 20)", fakeFinding{name: "openssl-libs", id: "ALAS2023-2025-1225", related: []string{"CVE-2025-9231", "CVE-2025-9230"}, fixed: "1:3.2.2-1.amzn2023.0.2", fixState: "fixed"}, exitOK, "amzn    1       1   0   0   0"},
 		{"ratings only (before schema 20)", fakeFinding{name: "openssl-libs", id: "ALAS2023-2025-1225", ratingIDs: []string{"ALAS2023-2025-1225", "CVE-2025-9230"}, fixed: "1:3.2.2-1.amzn2023.0.2", fixState: "fixed"}, exitOK, "amzn    1       1   0   0   0"},
+		// related names a CVE, just not this one, and a rating carries this
+		// one: the ratings are a last resort, not a union, so the finding
+		// does not answer for a CVE its own record does not name.
+		{"related names another CVE, a rating names this one", fakeFinding{name: "openssl-libs", id: "ALAS2023-2025-1225", related: []string{"CVE-2025-9231"}, ratingIDs: []string{"CVE-2025-9230"}, fixed: "1:3.2.2-1.amzn2023.0.2", fixState: "fixed"}, exitFindings, "FN          amzn-openssl-libs-below/CVE-2025-9230"},
 		{"neither", fakeFinding{name: "openssl-libs", id: "ALAS2023-2025-1225", ratingIDs: []string{"ALAS2023-2025-1225"}, fixed: "1:3.2.2-1.amzn2023.0.2", fixState: "fixed"}, exitFindings, "FN          amzn-openssl-libs-below/CVE-2025-9230"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
