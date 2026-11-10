@@ -194,9 +194,9 @@ func probeCandidate(name string, h *tar.Header) bool {
 		return underAny(name, npminstalled.Roots)
 	}
 	// A package directory that is a symlink -- usr/lib/node_modules/x, or
-	// a scoped @s/x -- is recorded for resolveNpmLinks; nothing is read
-	// from it here.
-	if h.Typeflag == tar.TypeSymlink && underAny(name, npminstalled.Roots) && isPackageDir(name) {
+	// a scoped @s/x -- or a scope directory that is one is recorded for
+	// resolveNpmLinks; nothing is read from it here.
+	if h.Typeflag == tar.TypeSymlink && underAny(name, npminstalled.Roots) && (isPackageDir(name) || isScopeDir(name)) {
 		return true
 	}
 	switch h.Typeflag {
@@ -241,9 +241,15 @@ func probeSniff(name string, head []byte) bool {
 func isPackageDir(name string) bool {
 	parent := path.Dir(name)
 	if path.Base(parent) == "node_modules" {
-		return true
+		return !strings.HasPrefix(path.Base(name), "@")
 	}
 	return strings.HasPrefix(path.Base(parent), "@") && path.Base(path.Dir(parent)) == "node_modules"
+}
+
+// isScopeDir reports whether name is a scope directory (@scope) directly
+// under node_modules: a directory of packages, not a package.
+func isScopeDir(name string) bool {
+	return strings.HasPrefix(path.Base(name), "@") && path.Base(path.Dir(name)) == "node_modules"
 }
 
 // resolveNpmLinks reads, for every link the probe pass found at an npm
@@ -259,6 +265,7 @@ func isPackageDir(name string) bool {
 func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]source.Link, files map[string][]byte, layerOf map[string]string) int {
 	type cand struct{ logical, read, link string }
 	var cands []cand
+	unresolved := 0
 	names := make([]string, 0, len(links))
 	for n := range links {
 		names = append(names, n)
@@ -268,6 +275,12 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 		l := links[n]
 		switch {
 		case !underAny(n, npminstalled.Roots):
+		case !l.Hard && isScopeDir(n):
+			// A linked scope holds any number of packages; reading them
+			// means walking the link's target, which a probe does not do
+			// (D160's unit is one install candidate). Unread, not none.
+			unresolved++
+			img.NoteUnresolved(n, fmt.Sprintf("npm scope directory is a link to %q; the packages behind it are not read", l.Target))
 		case path.Base(n) == "package.json":
 			cands = append(cands, cand{logical: n, read: n, link: l.Target})
 		case !l.Hard && isPackageDir(n):
@@ -280,7 +293,7 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 		}
 	}
 	if len(cands) == 0 {
-		return 0
+		return unresolved
 	}
 	want := make([]string, 0, len(cands))
 	for _, c := range cands {
@@ -291,9 +304,8 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 		for _, c := range cands {
 			img.NoteUnresolved(c.logical, fmt.Sprintf("npm package link to %q could not be read: %v", c.link, err))
 		}
-		return len(cands)
+		return unresolved + len(cands)
 	}
-	unresolved := 0
 	for _, c := range cands {
 		f, ok := got[c.read]
 		if !ok {
