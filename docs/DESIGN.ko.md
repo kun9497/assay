@@ -1040,6 +1040,8 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] `components`와 subject에 함께 나열된 패키지는 명시된 소스 버전을 지킴 (D165) — 어느 기록이 먼저든;
       서로 어긋나는 두 소스 버전이나 소스 이름은 어느 쪽으로도 판정하지 않고, 둘을 이름 붙인 target 원인 skip
       하나로 남김(엄격 모드에서 종료 2); QA 2026-11-10
+- [x] 차등 비교가 프로브된 생태계별 애플리케이션 패키지에 하한을 둠 (D167) — `coverage[].packages`에
+      거는 `minApplicationPackages`, 두 모드의 회귀 하한; QA 2026-11-10
 - [x] finding의 JSON이 레코드의 related 식별자를 실음 (D164) — `advisory.related`, 스키마 20; ALAS·
       Bodhi·OVAL finding이 고치는 CVE; truthset이 그것과 rating으로 이음
 - [x] 권고가 여전히 affected라 부르는 출시 빌드 위의 finding은 그 빌드를 이름 붙임 (D163) — 열린 범위가

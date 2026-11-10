@@ -7,6 +7,11 @@
 
 ## [Unreleased]
 
+### Added
+- 스캐너 차등 비교가 프로브된 생태계별 애플리케이션 패키지에 하한을 둡니다: `coverage[].packages`에 거는
+  `minApplicationPackages`(`npm`, `Go`)로, 주간 실행과 야간 `-regressions-only` 게이트가 똑같이 판정합니다.
+  `ubi8n18` npm 118, Go 대상 셋은 1. 전에는 npm과 Go 패키지를 모두 잃은 후보가 두 모드를 통과했습니다. (D167; QA 2026-11-10)
+
 ### Fixed
 - CycloneDX 문서에 두 번 나열된 패키지의 소스 버전 둘이 철자만 다르면(Debian의 `2.31-13+deb11u13`과
   `0:2.31-13+deb11u13`) 판정합니다: 버전을 문자열이 아니라 생태계 자체의 순서로 비교합니다. (D165 개정; PR #269 리뷰)

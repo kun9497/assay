@@ -1101,6 +1101,8 @@ exited 0 while 24 findings went unmentioned.
 - [x] A package listed in both `components` and the subject keeps its stated source version (D165)
       — whichever listing comes first; two stated versions or source names that contradict are judged
       on neither, as one target-cause skip naming both (exit 2 under the strict gate); QA 2026-11-10
+- [x] The differential floors each probed ecosystem's application packages (D167) —
+      `minApplicationPackages` on `coverage[].packages`, a regression floor in both modes; QA 2026-11-10
 - [x] A finding's JSON carries the record's related ids (D164) — `advisory.related`, schema 20;
       the CVE an ALAS / Bodhi / OVAL finding fixes; truthset joins through it and the ratings
 - [x] A finding on a released build the advisory still calls affected names that build (D163) —
