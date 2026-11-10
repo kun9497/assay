@@ -7983,10 +7983,14 @@ finding이 있다는 것만으로 성립한다. 출시됐으나 여전히 affect
 
 ### D163 — 권고가 여전히 affected라 부르는 출시 빌드 위의 finding은 그 빌드를 이름 붙인다
 
-**결정.** 설치 버전을 붙드는 범위가 열린 범위(fixed도 last_affected도 없는)이고 같은 항목의 fixed
-범위 하나를 설치 버전이 이미 넘어섰다면, finding의 evidence reason은 "with no fixed version recorded"
-대신 "`<v>` is at or above the released fix `<X>`; the advisory still lists the package as affected,
-with no later fix recorded"로 읽힌다 — `X`는 그런 fixed 경계 중 가장 높은 것. 다른 것은 바뀌지 않는다:
+**결정.** 설치 버전을 붙드는 창이 열린 `[0, ∞)` 창이고 같은 항목이 설치 버전이 이미 넘어선 단일 `[0, X)`
+창을 지닐 때 — CSAF 제공자가 쓰는 모양, 출시 빌드마다 창 하나에 그 옆 `known_affected`에 남은 bare id —
+finding의 evidence reason은 "with no fixed version recorded" 대신 "`<v>` is at or above the released fix
+`<X>`; the advisory also lists the package as affected at every version, with no fix recorded for
+that"로 읽힌다 — `X`는 그런 fix 중 가장 높은 것. 그 모양 밖은 다시 쓰지 않는다: 0보다 위에서 열리는 열린
+창은 다른 릴리스 계열의 것(여러 갈래 OSV 레코드)이고, fix `0`은 D88의 비해당 sentinel, `[X, X)`는 빈 창,
+다른 모양의 범위는 순회가 거부했을 수 있는 것이다(PR #264 리뷰가 첫 초안에서 넷 다 "released fix"로
+읽히는 것을 찾았다). 다른 것은 바뀌지 않는다:
 판정은 여전히 affected, `evidence.fixed`는 여전히 비어 있고, fix 상태는 여전히 열린 범위 자신의
 것(D52)이며, JSON 필드는 추가되지 않는다. 권고가 아직 제공하는 fix보다 아래인 버전은 전처럼 그 fix를
 듣고, `last_affected` 경계는 출시된 fix가 아니다. `version.AffectsVersion`의 범위 순회 뒤에 구현했으므로
@@ -8005,7 +8009,7 @@ fix에 대해 기록된 fix가 없다는 말을 들었다. Red Hat의 CSAF도 �
 fix를 이름 붙이고 상태는 fixed; 그 빌드에서는 이유가 출시 빌드를 이름 붙이고 상태는 unknown 유지)와
 `AffectsVersion`에서(그 빌드와 그 위; 열린 범위 단독, 버전 위에 아직 있는 fix, 버전 아래의 `last_affected`는
 모두 옛 문장 유지; 나중 fix 아래의 버전은 더 오래된 출시 빌드에 대해 다시 쓰이지 않음; 여러 개를 넘어섰으면
-가장 높은 것이 이름 붙음). 돌연변이: 여섯, 여섯 잡힘 — 열린-범위-전용 가드는 거기 닿는 테스트(나중 fix 아래의 버전)가
+가장 높은 것이 이름 붙음; 리뷰의 CSAF 아닌 모양 넷은 순회 자체의 문장 유지). 돌연변이: 여섯, 여섯 잡힘 — 열린-범위-전용 가드는 거기 닿는 테스트(나중 fix 아래의 버전)가
 먼저 필요했고, `last_affected`를 fix로 세는 것은 옛 문장 표가 잡는다.
 
 **포기하는 것.** 출시 빌드는 필드가 아니라 이유 문장에 있다: 데이터로 원하는 소비자는 `--explain`으로 키

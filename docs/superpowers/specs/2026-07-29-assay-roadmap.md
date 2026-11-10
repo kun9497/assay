@@ -8458,11 +8458,16 @@ range beside it; D163 names that build there.
 
 ### D163 — A finding on a released build the advisory still calls affected names that build
 
-**Decision.** When an open range (no fixed or last_affected bound) is the range that holds the
-installed version and a fixed range of the same entry is one the installed version has cleared,
+**Decision.** When the window that holds the installed version is an open `[0, ∞)` one and the
+same entry carries single `[0, X)` windows the installed version has cleared — the shape a CSAF
+provider writes, one window per shipped build beside the bare id still under `known_affected` —
 the finding's evidence reason reads "`<v>` is at or above the released fix `<X>`; the advisory
-still lists the package as affected, with no later fix recorded" — `X` the highest such fixed
-bound — instead of "with no fixed version recorded". Nothing else changes: the verdict is still
+also lists the package as affected at every version, with no fix recorded for that" — `X` the
+highest such fix — instead of "with no fixed version recorded". Nothing outside that shape is
+rewritten: an open window that opens above 0 belongs to another release line (a multi-branch OSV
+record), a fix of `0` is D88's never-affected sentinel, `[X, X)` is an empty window, and a range of
+any other shape is one the walk may have refused (PR #264's review found all four reading "released
+fix" in the first draft). Nothing else changes: the verdict is still
 affected, `evidence.fixed` is still empty, the fix state is still the open range's own (D52), no
 JSON field is added. A version below a fix the advisory still offers is told about that fix, as
 before; a `last_affected` bound is not a released fix. Implemented in `version.AffectsVersion`
@@ -8484,7 +8489,8 @@ the fixed range still names the fix with state fixed; at it the reason names the
 and the state stays unknown) and at `AffectsVersion` (at and above the build; an open range
 alone, a fix still above the version and a `last_affected` below it all keep the old sentence; a
 version below a later fix is not rewritten about an older released build; the highest cleared
-fix of several is the one named). Mutations: six, six caught — the open-range-only guard first
+fix of several is the one named; the review's four non-CSAF shapes keep the walk's own sentence).
+Mutations: six, six caught — the open-range-only guard first
 needed the test that reaches it (a version below a later fix), and `last_affected` counted as a
 fix is caught by the old-sentence table.
 

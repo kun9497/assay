@@ -93,19 +93,20 @@ func AffectsVersion(c Comparer, v string, a advisory.Affected) (bool, Evidence, 
 		}
 	}
 	if found {
-		// D163: an open range that holds v beside a fixed range v has
-		// cleared is the "released, still affected" shape -- SUSE lists a
-		// product's bare package id under known_affected beside the build it
-		// released for it when a fix is in progress (CVE-2026-34182's
-		// libopenssl3 3.1.4-150600.5.53.1 on SLE 15 SP6), and Red Hat's CSAF
-		// does the same between an errata and a reopened flaw. The verdict
-		// stays affected with the open range's own fix state (D52), but the
-		// reason names the released build the installed one is at or above,
-		// so a reader is not told "no fixed version recorded" about a
-		// package whose fix they can see they already have.
-		if best.Fixed == "" && best.LastAffected == "" {
+		// D163: the "released, still affected" shape a CSAF provider writes
+		// -- one [0, fix) window per build it shipped, and beside them an
+		// open [0, inf) window because the product's bare package id is
+		// still under known_affected (SUSE's SLES 15 SP6-LTSS and SAP 15 SP6
+		// libopenssl3 for CVE-2026-34182, mirrored to Leap 15.6 by D108).
+		// The verdict and the open window's fix state (D52) stand; the
+		// reason names the shipped build the installed one has, so the
+		// reader is not told no fix exists about a fix they can see they
+		// already have. Only that shape: an open window that opens above 0
+		// is another release line's (a multi-branch OSV record), and its
+		// own lower bound is the honest sentence.
+		if best.Fixed == "" && best.LastAffected == "" && best.Introduced == introducedSentinel {
 			if released := releasedFixBelow(c, v, a.Ranges); released != "" {
-				best.Reason = fmt.Sprintf("%s is at or above the released fix %s; the advisory still lists the package as affected, with no later fix recorded", v, released)
+				best.Reason = describeReleased(v, released)
 			}
 		}
 		return true, best, nil, nil
@@ -151,33 +152,46 @@ func AffectsVersion(c Comparer, v string, a advisory.Affected) (bool, Evidence, 
 	return false, Evidence{}, unreadable, nil
 }
 
-// releasedFixBelow is the highest fixed bound among ranges that v is at or
-// above -- the build the advisory released that the installed version
-// already carries -- or "" when there is none. Only fixed events count: a
-// last_affected bound says where the affected window ends, not what fixed
-// it. A bound the comparer cannot order against v is passed over, as the
-// walk that read it would have been.
+// releasedFixBelow is the highest fix among the entry's single [0, fix)
+// windows that v is at or above -- the build the advisory shipped that the
+// installed version already carries -- or "" when there is none. Only that
+// window shape counts, because it is the one a CSAF provider writes per
+// shipped build: a window opening above 0 belongs to another release line,
+// a last_affected bound says where a window ends rather than what fixed it,
+// a fix of "0" is a never-affected sentinel (D88) rather than a release, and
+// a range with any other shape is one the walk may have refused as
+// malformed. A bound the comparer cannot order against v is passed over.
 func releasedFixBelow(c Comparer, v string, ranges []advisory.Range) string {
 	var released string
 	for _, r := range ranges {
-		for _, e := range r.Events {
-			if e.Fixed == "" {
-				continue
-			}
-			cmp, err := c.Compare(v, e.Fixed)
-			if err != nil || cmp < 0 {
-				continue
-			}
-			if released == "" {
-				released = e.Fixed
-				continue
-			}
-			if higher, err := c.Compare(e.Fixed, released); err == nil && higher > 0 {
-				released = e.Fixed
-			}
+		if len(r.Events) != 2 || r.Events[0].Introduced != introducedSentinel {
+			continue
+		}
+		fix := r.Events[1].Fixed
+		if fix == "" || fix == introducedSentinel || r.Events[1].Introduced != "" || r.Events[1].LastAffected != "" {
+			continue
+		}
+		cmp, err := c.Compare(v, fix)
+		if err != nil || cmp < 0 {
+			continue
+		}
+		if released == "" {
+			released = fix
+			continue
+		}
+		if higher, err := c.Compare(fix, released); err == nil && higher > 0 {
+			released = fix
 		}
 	}
 	return released
+}
+
+// describeReleased is describe's sentence for D163's shape, beside it so
+// the two wordings are read together. "No fix recorded for that" is about
+// the open window that holds v, not a claim about every entry the
+// advisory carries.
+func describeReleased(v, released string) string {
+	return fmt.Sprintf("%s is at or above the released fix %s; the advisory also lists the package as affected at every version, with no fix recorded for that", v, released)
 }
 
 // moreClearing reports whether evidence a names a bound that clears more of

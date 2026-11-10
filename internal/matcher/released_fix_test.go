@@ -31,7 +31,7 @@ func TestMatch_D163_ReleasedBuildStillAffectedNamesTheReleasedFix(t *testing.T) 
 		wantState                      advisory.FixState
 	}{
 		{"3.1.4-150600.5.52.1", "3.1.4-150600.5.53.1", "below the fix 3.1.4-150600.5.53.1", advisory.FixStateFixed},
-		{"3.1.4-150600.5.53.1", "", "is at or above the released fix 3.1.4-150600.5.53.1; the advisory still lists the package as affected, with no later fix recorded", advisory.FixStateUnknown},
+		{"3.1.4-150600.5.53.1", "", "is at or above the released fix 3.1.4-150600.5.53.1; the advisory also lists the package as affected at every version, with no fix recorded for that", advisory.FixStateUnknown},
 	} {
 		res, err := New(s).Match(pkgmeta.Target{
 			Distro:   &pkgmeta.Distro{ID: "opensuse-leap", VersionID: "15.6"},
