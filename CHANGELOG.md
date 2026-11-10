@@ -22,6 +22,9 @@ All notable changes to this project are documented here. The format follows
   Truthset report schema 3. (D161 revised, QA 2026-11-10)
 
 ### Fixed
+- `truthset -offline` sets an unproven capture aside before the run-wide database check: a stale
+  capture sorting first no longer fixes the run's database and fails every proven case with a
+  digest mismatch (exit 2). (D161 revised; PR #268 review, round 2)
 - Linked npm installs, per the PR #271 review: a link's `..` is applied after the links before it;
   only an installed package's manifest link is a candidate (a dangling `examples/package.json` no
   longer makes a scan incomplete); a target counts as already read only when it was inventoried as

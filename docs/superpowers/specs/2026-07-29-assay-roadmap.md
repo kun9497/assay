@@ -8410,7 +8410,10 @@ UNEVALUATED, exit 1, live and `-offline` alike. An `-offline` capture is held to
 label generates: the capture's `provenance.target.sha256` (D120) must equal the digest of that SBOM,
 else every label of the case is UNEVALUATED with the reason -- a capture chosen by case name alone
 judged a clean label at v1.0.0 TN against a v2.0.0 capture, where the live scan says FP (PR #268
-review). A capture that records no target digest cannot be proven and is treated the same way.*
+review). A capture that records no target digest cannot be proven and is treated the same way. Such a
+capture is set aside before the run-wide database check, so it neither fixes the database the run
+is held to nor is held to it (review round 2: a stale capture sorting first had turned every proven
+case into a digest mismatch, exit 2).*
 
 **Decision.** A second measuring tool beside the differential. `cmd/truthset` scans each
 labelled package the way the SBOM path scans it — a one-component CycloneDX document carrying
