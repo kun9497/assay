@@ -8451,8 +8451,60 @@ exits 2 rather than passing an empty table. The Debian:11 matcher labels therefo
 2026-10-28 and read `PREDATES` while the key is frozen, which is the gap they record. The report
 is schema 2 for the new count and outcome. An affected label with
 no fix demanded is held by the finding's presence alone. The evidence line at a released-but-
-still-affected build says "no fixed version recorded" while the key holds the released build's
-range beside it; naming that build there is open.
+still-affected build said "no fixed version recorded" while the key held the released build's
+range beside it; D163 names that build there.
+
+---
+
+### D163 — A finding on a released build the advisory still calls affected names that build
+
+**Decision.** When the window that holds the installed version is an open `[0, ∞)` one and the
+same entry carries single `[0, X)` windows the installed version has cleared — the shape a CSAF
+provider writes, one window per shipped build beside the bare id still under `known_affected` —
+the finding's evidence reason reads "`<v>` is at or above the released fix `<X>`; the advisory
+also lists the package as affected at every version, with no fix recorded for that" — `X` the
+highest such fix — instead of "with no fixed version recorded". Nothing outside that shape is
+rewritten: an open window that opens above 0 belongs to another release line (a multi-branch OSV
+record), a fix of `0` is D88's never-affected sentinel, `[X, X)` is an empty window, and a range of
+any other shape is one the walk may have refused (PR #264's review found all four reading "released
+fix" in the first draft). Nothing else changes: the verdict is still
+affected, `evidence.fixed` is still empty, the fix state is still the open range's own (D52), no
+JSON field is added. A version below a fix the advisory still offers is told about that fix, as
+before; a `last_affected` bound is not a released fix. Implemented in `version.AffectsVersion`
+after the range walk, so every provider's data and every caller — table, JSON, SARIF,
+`--explain` — reads the same sentence.
+
+**Why.** D161's first run (2026-11-09) corrected a label on exactly this shape: SUSE lists SLES 15
+SP6-LTSS's and SAP 15 SP6's bare `libopenssl3` under `known_affected` beside the build it released
+for CVE-2026-34182, `3.1.4-150600.5.53.1`, while its CVE page says "In progress" (bugzilla
+1266344) — ten of that document's 33 fixed products carry the shape. The key therefore holds a
+fixed range and an open one, and at the released build only the open one holds. The verdict was
+right and the reason was misleading: a reader with `5.53.1` installed was told no fix was
+recorded about a package whose fix they could see they had. Red Hat's CSAF produces the same
+shape between an erratum and a reopened flaw. The user chose, on 2026-11-10, to change the words
+and not the verdict: the distro's "still affected" is its statement, and assay reports it.
+
+**Verified.** At the caller through `Match` (Leap 15.6 `libopenssl3`: below the released build
+the fixed range still names the fix with state fixed; at it the reason names the released build
+and the state stays unknown) and at `AffectsVersion` (at and above the build; an open range
+alone, a fix still above the version and a `last_affected` below it all keep the old sentence; a
+version below a later fix is not rewritten about an older released build; the highest cleared
+fix of several is the one named; the review's four non-CSAF shapes keep the walk's own sentence).
+Mutations: six, six caught — the open-range-only guard first
+needed the test that reaches it (a version below a later fix), and `last_affected` counted as a
+fix is caught by the old-sentence table.
+
+**Gives up.** The released build is in the reason text, not a field: a consumer that wants it as
+data reads the key's own ranges through `--explain`, or waits for a `releasedFix` field, which
+would be a schema bump this change did not need. "Released" is the fixed range's word for the
+build; whether the distro has since withdrawn it is not knowable from the data.
+
+**Also closed on 2026-11-10, no change: livepatch dating.** The question held open on
+2026-11-09 — whether Amazon Linux 2's livepatch topic should take part in dating its key at all
+(D113 revised) — closes without a change: KeyAsOf now dates each release by its own repositories,
+the livepatch topic no longer drags AL2023's date, and D100's measurement that every livepatch
+advisory names a `kernel-livepatch-<version>` package (so none can match a mainline kernel) still
+holds. The trigger to reopen is an AL2 scan whose `coverage[].dataAsOf` is set by that topic.
 
 ---
 

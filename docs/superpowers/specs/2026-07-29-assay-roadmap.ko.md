@@ -7976,8 +7976,51 @@ RubyGems 등)에 대해서는 아무 말도 하지 않는다. 라벨은 늙는�
 6행은 2026-10-28을 유지해 키가 동결된 동안 `PREDATES`로 읽힌다 — 그것이 그 행들이 기록하는 공백이다.
 보고서는 새 개수와 결과를 위해 스키마 2다. fix를 요구하지 않는 affected 라벨은
 finding이 있다는 것만으로 성립한다. 출시됐으나 여전히 affected인 빌드의 evidence 줄은 키가 출시
-빌드의 범위를 옆에 들고 있는데도 "no fixed version recorded"라고 말한다; 거기에 그 빌드를 이름 붙이는
-일은 열려 있다.
+빌드의 범위를 옆에 들고 있는데도 "no fixed version recorded"라고 말했다; D163이 거기에 그 빌드를 이름
+붙인다.
+
+---
+
+### D163 — 권고가 여전히 affected라 부르는 출시 빌드 위의 finding은 그 빌드를 이름 붙인다
+
+**결정.** 설치 버전을 붙드는 창이 열린 `[0, ∞)` 창이고 같은 항목이 설치 버전이 이미 넘어선 단일 `[0, X)`
+창을 지닐 때 — CSAF 제공자가 쓰는 모양, 출시 빌드마다 창 하나에 그 옆 `known_affected`에 남은 bare id —
+finding의 evidence reason은 "with no fixed version recorded" 대신 "`<v>` is at or above the released fix
+`<X>`; the advisory also lists the package as affected at every version, with no fix recorded for
+that"로 읽힌다 — `X`는 그런 fix 중 가장 높은 것. 그 모양 밖은 다시 쓰지 않는다: 0보다 위에서 열리는 열린
+창은 다른 릴리스 계열의 것(여러 갈래 OSV 레코드)이고, fix `0`은 D88의 비해당 sentinel, `[X, X)`는 빈 창,
+다른 모양의 범위는 순회가 거부했을 수 있는 것이다(PR #264 리뷰가 첫 초안에서 넷 다 "released fix"로
+읽히는 것을 찾았다). 다른 것은 바뀌지 않는다:
+판정은 여전히 affected, `evidence.fixed`는 여전히 비어 있고, fix 상태는 여전히 열린 범위 자신의
+것(D52)이며, JSON 필드는 추가되지 않는다. 권고가 아직 제공하는 fix보다 아래인 버전은 전처럼 그 fix를
+듣고, `last_affected` 경계는 출시된 fix가 아니다. `version.AffectsVersion`의 범위 순회 뒤에 구현했으므로
+모든 제공자의 데이터와 모든 호출자 — 표, JSON, SARIF, `--explain` — 가 같은 문장을 읽는다.
+
+**왜.** D161의 첫 실행(2026-11-09)은 정확히 이 모양의 라벨을 고쳤다: SUSE는 CVE-2026-34182에 대해 SLES 15
+SP6-LTSS와 SAP 15 SP6의 bare `libopenssl3`를 그것을 위해 출시한 빌드 `3.1.4-150600.5.53.1` 옆에
+`known_affected`로 올려 두고 CVE 페이지는 "In progress"(bugzilla 1266344)라 말한다 — 그 문서의 fix된
+제품 33개 중 10개가 이 모양이다. 그래서 키는 fixed 범위와 열린 범위를 함께 들고, 출시 빌드에서는 열린
+쪽만 맞는다. 판정은 옳았고 이유는 오해를 불렀다: `5.53.1`을 설치한 독자는 자기가 이미 가진 것이 보이는
+fix에 대해 기록된 fix가 없다는 말을 들었다. Red Hat의 CSAF도 에라타와 다시 열린 결함 사이에 같은 모양을
+낸다. 사용자는 2026-11-10에 판정이 아니라 말을 바꾸기로 했다: 배포판의 "여전히 affected"는 배포판의
+진술이고, assay는 그것을 보고한다.
+
+**검증.** 호출자에서 `Match`를 통해(Leap 15.6 `libopenssl3`: 출시 빌드 아래에서는 fixed 범위가 여전히
+fix를 이름 붙이고 상태는 fixed; 그 빌드에서는 이유가 출시 빌드를 이름 붙이고 상태는 unknown 유지)와
+`AffectsVersion`에서(그 빌드와 그 위; 열린 범위 단독, 버전 위에 아직 있는 fix, 버전 아래의 `last_affected`는
+모두 옛 문장 유지; 나중 fix 아래의 버전은 더 오래된 출시 빌드에 대해 다시 쓰이지 않음; 여러 개를 넘어섰으면
+가장 높은 것이 이름 붙음; 리뷰의 CSAF 아닌 모양 넷은 순회 자체의 문장 유지). 돌연변이: 여섯, 여섯 잡힘 — 열린-범위-전용 가드는 거기 닿는 테스트(나중 fix 아래의 버전)가
+먼저 필요했고, `last_affected`를 fix로 세는 것은 옛 문장 표가 잡는다.
+
+**포기하는 것.** 출시 빌드는 필드가 아니라 이유 문장에 있다: 데이터로 원하는 소비자는 `--explain`으로 키
+자체의 범위를 읽거나, 이 변경에는 필요 없던 스키마 bump인 `releasedFix` 필드를 기다린다. "출시"는 fixed
+범위가 그 빌드를 부르는 말이다; 배포판이 그 뒤 철회했는지는 데이터로 알 수 없다.
+
+**2026-11-10에 함께 종결, 변경 없음: livepatch 날짜 매기기.** 2026-11-09에 열어 둔 질문 — Amazon Linux 2의
+livepatch 토픽이 키 날짜 매기기에 참여해야 하는가(D113 개정) — 는 변경 없이 닫힌다: KeyAsOf는 이제 각
+릴리스를 자기 저장소로 매기고, livepatch 토픽은 더 이상 AL2023의 날짜를 끌어내리지 않으며, 모든 livepatch
+권고가 `kernel-livepatch-<version>` 패키지를 이름 붙인다(그래서 어느 것도 메인라인 커널에 맞을 수 없다)는
+D100의 측정은 여전히 성립한다. 다시 열 트리거는 `coverage[].dataAsOf`가 그 토픽으로 정해지는 AL2 스캔이다.
 
 ---
 

@@ -1037,6 +1037,10 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       `{name, version}`, rpm의 BASENAMES/DIRNAMES/DIRINDEXES(세 백엔드 모두), apk의 `F:`/`R:` 줄, dpkg의
       `info/*.list`, pacman의 `files`에서; 뒤의 둘은 프로브 자체의 레이어 패스에서; 파일 단위의 정확한
       소유; 스키마 19(추가형)
+- [x] 권고가 여전히 affected라 부르는 출시 빌드 위의 finding은 그 빌드를 이름 붙임 (D163) — 열린 범위가
+      fixed 범위를 넘어선 버전을 붙들 때 evidence reason이 "is at or above the released fix X; the advisory
+      also lists the package as affected at every version, with no fix recorded for that"로 읽힘; 판정·fixed·fix 상태 불변,
+      스키마 변경 없음
 - [x] QA 2026-10-30 수정:
       - 64 KiB 가 넘는 줄이 lockfile 을 더는 잘라 먹지 않음;
       - open 이 먼저 나열된 범위도 단일 버전 window 를 유지함 (D154 개정);
