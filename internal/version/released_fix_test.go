@@ -92,6 +92,24 @@ func TestAffectsVersion_D163_NoReleasedFixKeepsTheOldReason(t *testing.T) {
 	}
 }
 
+// A version below a fix the advisory still offers is told about that fix,
+// not about an older released build it has cleared: the rewrite applies to
+// an open range only.
+func TestAffectsVersion_D163_BelowALaterFixIsNotRewritten(t *testing.T) {
+	a := advisory.Affected{Ecosystem: "x", Name: "p", Ranges: []advisory.Range{
+		{Type: advisory.RangeEcosystem, Events: []advisory.Event{{Introduced: "0"}, {Fixed: "1.0-1"}}},
+		{Type: advisory.RangeEcosystem, Events: []advisory.Event{{Introduced: "0"}, {Fixed: "1.0-9"}}},
+		{Type: advisory.RangeEcosystem, Events: []advisory.Event{{Introduced: "0"}}},
+	}}
+	hit, ev, _, err := AffectsVersion(RPM{}, "1.0-5", a)
+	if err != nil || !hit {
+		t.Fatalf("hit=%v err=%v", hit, err)
+	}
+	if ev.Fixed != "1.0-9" || !strings.Contains(ev.Reason, "below the fix 1.0-9") || strings.Contains(ev.Reason, "released") {
+		t.Errorf("Fixed = %q, Reason = %q", ev.Fixed, ev.Reason)
+	}
+}
+
 // Two released builds: the highest the installed version has cleared is named.
 func TestReleasedFixBelow_HighestClearedWins(t *testing.T) {
 	ranges := []advisory.Range{
