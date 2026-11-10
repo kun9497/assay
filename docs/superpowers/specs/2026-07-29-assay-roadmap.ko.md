@@ -7918,6 +7918,17 @@ Go 바이너리라고 말해 주는 것도 없다.
 
 ### D161 — 정밀도와 재현율을 커밋된 정답 집합에 대고 측정한다 (`cmd/truthset`)
 
+*2026-11-10 개정(QA): 스캔이 건너뛴 비교가 라벨의 CVE를 판정하지 못한 채 남길 수 있다. 라벨의 패키지에 그 CVE를
+이름 붙인 skip(권고 id로, 또는 보고서 스키마 21부터 `skipped[].cves`로), 패키지 전체 skip, 또는 보고서가
+식별하지 못하는 skip(`cves`가 없는 CVE 아닌 id — 스키마 21 이전 캡처처럼)이 있으면 그 라벨은 UNEVALUATED다.
+다른 CVE만 이름 붙인 skip은 아무것도 바꾸지 않는다. CVE를 입증하는 finding은 판정을 지키고(TP, 또는 clean
+라벨이면 FP), 그런 skip 너머로 라벨이 요구하는 fix는 FIX-UNKNOWN으로 UNEVALUATED와 함께 센다. PREDATES가
+여전히 먼저다. truthset 보고서 스키마 3(새 `outcome` 값). QA 캡처는 TN·종료 0이었고, 이제 실시간과 `-offline`
+모두 UNEVALUATED·종료 1이다. `-offline` 캡처는 그 케이스 라벨이 생성하는 SBOM에 묶인다: 캡처의
+`provenance.target.sha256`(D120)이 그 SBOM의 digest와 같아야 하며, 아니면 그 케이스의 모든 라벨은 사유와 함께
+UNEVALUATED다 — 케이스 이름만으로 고른 캡처가, 실시간 스캔이 FP라고 하는 v1.0.0 clean 라벨을 v2.0.0 캡처에 대고
+TN으로 판정했다(PR #268 리뷰). 대상 digest를 기록하지 않은 캡처는 입증할 수 없으므로 같게 다룬다.*
+
 **결정.** 차분 비교 옆에 두 번째 측정 도구를 둔다. `cmd/truthset`은 라벨이 붙은 패키지 하나하나를
 SBOM 경로가 스캔하는 방식 그대로 — 이미지 경로가 쓰는 purl(D121)을 실은 컴포넌트 하나짜리 CycloneDX
 문서 — 당겨 온 서명된 데이터베이스에 대고 스캔하고, 그 finding을 커밋된 라벨에 대고 판정한다: 이 fix

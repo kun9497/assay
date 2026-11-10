@@ -1,0 +1,1 @@
+{"bomFormat":"CycloneDX","components":[{"name":"example.com/partial","purl":"pkg:golang/example.com/partial@v1.0.0","type":"library","version":"v1.0.0"}],"specVersion":"1.6","version":1}

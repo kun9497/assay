@@ -14,7 +14,7 @@
 | `status.json` | 배포 데이터베이스의 상태, `status` 브랜치(D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json`(D147) | `schemaVersion` | 1 |
 | `truthset labels` | `cmd/truthset`가 읽는 정답 라벨 `testdata/groundtruth/labels.json`(D161) | `schemaVersion` | 1 |
-| `truthset report` | `truthset -out <path>`가 쓰는 파일(D161) | `schemaVersion` | 2 |
+| `truthset report` | `truthset -out <path>`가 쓰는 파일(D161) | `schemaVersion` | 3 |
 | `database` | 로컬 저장소와 OCI 태그 `ghcr.io/kun9497/assay-db:vN` | 태그 `vN`, `db status`의 `schema:` | 9 |
 
 테스트가 이 표를 코드의 상수에 묶어 두므로, 버전이 올라도 표가 뒤처질 수 없습니다.
@@ -81,12 +81,16 @@
   OVAL, 그리고 배포판 작성 OSV 레코드(Rocky RLSA, AlmaLinux ALSA/ALBA/ALEA, Chainguard CGA). 표와
   `--explain`은 늘 읽었지만 JSON은 아니었으므로, 스키마 20 전에는 그런 finding이 `ratings[].advisoryId`를
   통해서만, 그것도 주석 소스가 매겼을 때만 CVE에 닿았습니다. (D164)
+- 스키마 21(추가형): `skipped[].cves` — 건너뛴 권고가 이름 붙인 CVE 식별자(id, aliases, upstream, 배포판 작성
+  레코드는 related까지)를 중복 없이 정렬한 것입니다. `advisoryId`가 ALAS나 GHSA id일 때도 CVE를 든 소비자가 그
+  skip이 그 CVE를 판정하지 못한 채 남기는지 알 수 있습니다. 패키지 전체 skip이나 CVE가 없는 권고는 생략합니다.
+  (QA 2026-11-10)
 - 스키마 22(`inventoryScope.applicationScope[].state`로 분기하는 소비자에게는 **호환 불가**, 그 밖에는
   추가형): 항목의 `state`에 `partial`이 생깁니다 — npm 전용: npm 루트 아래의 후보가 해석되지 않는 링크(또는
   링크된 스코프 디렉터리)였고, 그 경로가 사유와 함께 `unread[]`에 있습니다. 전에는 생태계별 상태가 `read`,
   `none`, `not-read`였고 그런 이미지는 `none`으로 읽혔습니다; `none`을 "npm 패키지 없음"으로 받던 소비자는 그때
   틀린 말을 들었고 이제 `partial`을 듣습니다. 해석되는 링크된 패키지는 `read`이고 그 finding은 루트 아래 논리
-  경로에 나옵니다. 스키마 21은 `skipped[].cves` 변경이며, 두 번호는 병합 순서대로 매깁니다. (D160 개정)
+  경로에 나옵니다. 스키마 21은 먼저 병합된 `skipped[].cves`입니다. (D160 개정)
 
 ## provenance sidecar, status.json, `db status`
 

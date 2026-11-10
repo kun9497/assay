@@ -14,7 +14,7 @@ with a version bump, a **Breaking** entry in the [changelog](../CHANGELOG.md), a
 | `status.json` | the published database's status, on the `status` branch (D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json` (D147) | `schemaVersion` | 1 |
 | `truthset labels` | `testdata/groundtruth/labels.json`, the ground-truth labels `cmd/truthset` reads (D161) | `schemaVersion` | 1 |
-| `truthset report` | the file `truthset -out <path>` writes (D161) | `schemaVersion` | 2 |
+| `truthset report` | the file `truthset -out <path>` writes (D161) | `schemaVersion` | 3 |
 | `database` | the local store and the OCI tag `ghcr.io/kun9497/assay-db:vN` | tag `vN`, `db status` `schema:` | 9 |
 
 Tests hold this table to the constants in the code, so it cannot fall behind a bump.
@@ -87,14 +87,18 @@ it relied on:
   ALSA/ALBA/ALEA, Chainguard CGA). The table and `--explain` always read it, the JSON did not, so
   before schema 20 such a finding reached its CVE only through `ratings[].advisoryId`, and only
   when an annotation source had rated it. (D164)
+- Schema 21 (additive): `skipped[].cves` — the CVE identifiers the skipped advisory names (its
+  id, aliases, upstream and, for distro-authored records, related), deduplicated and sorted, so a
+  consumer holding a CVE can tell whether a skip leaves it unjudged when `advisoryId` is an ALAS or
+  GHSA id. Omitted for a whole-package skip or an advisory that names no CVE. (QA 2026-11-10)
 - Schema 22 (**breaking** for a consumer switching on `inventoryScope.applicationScope[].state`;
   additive otherwise): an entry's `state` gains `partial` -- npm only: a candidate under the npm
   roots was a link that did not resolve (or a linked scope directory), and its path is in
   `unread[]` with the reason. Before, a per-ecosystem state was `read`, `none` or `not-read`, and
   such an image read `none`; a consumer that took `none` as "no npm packages" was told the wrong
   thing then and is told `partial` now. Linked packages that do resolve are `read` and their
-  findings appear at the logical path under the root. Schema 21 is the truthset-side
-  `skipped[].cves` change; the two are numbered in the order they merge. (D160 revised)
+  findings appear at the logical path under the root. Schema 21 is
+  `skipped[].cves`, merged first. (D160 revised)
 
 ## The provenance sidecar, status.json and `db status`
 
