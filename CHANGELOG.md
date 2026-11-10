@@ -22,6 +22,13 @@ All notable changes to this project are documented here. The format follows
   Truthset report schema 3. (D161 revised, QA 2026-11-10)
 
 ### Fixed
+- Linked npm installs, per the PR #271 review: a link's `..` is applied after the links before it;
+  only an installed package's manifest link is a candidate (a dangling `examples/package.json` no
+  longer makes a scan incomplete); a target counts as already read only when it was inventoried as
+  an installed package (lodash linked into another package's resources is read again); an upper
+  layer that replaces an OS-owned manifest with a link is unowned; and a global `node_modules` root
+  that is itself a link is listed unread with npm `partial` (was: 0 findings, npm `none`, exit 0).
+  (D160 revised)
 - An npm package installed through a link under the global `node_modules` roots is read: a
   `package.json` that is a symlink or hardlink, and a package directory (`x` or `@s/x`) that is a
   symlink, each yield the package at its logical path (were: 0 findings, exit 0, npm `none`). A

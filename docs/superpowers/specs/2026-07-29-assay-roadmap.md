@@ -8286,7 +8286,16 @@ unrecorded link) and a linked scope directory (`@s -> ...`, which would need a w
 `applicationScope` entry is `partial` rather than `none`. An error reading the image during this
 step (the budget, the deadline, a layer) fails the scan with exit 2, as the probe pass's own errors
 do. Links in bin directories are not npm candidates. Before, all three link shapes read 0 findings, exit 0, npm `none` on an image where
-the same package as a regular file was 4 findings.*
+the same package as a regular file was 4 findings. Five corrections from the PR #271 review: a
+target's `..` is applied after the links before it, the way the kernel walks it (`/lib64/../qa-pkg`
+through `lib64 -> usr/lib` is `usr/qa-pkg`); a link at a `package.json` is a candidate only where
+a regular file would be an installed package (`npminstalled.IsInstalledPackageJSON`), so a dangling
+`examples/package.json` changes nothing; a target is "already read" only when the probe
+inventoried it as an installed package, so lodash linked into another package's resources is still
+lodash; the logical path's layer for D162 is the later of the link's and the bytes', so an upper
+layer that replaces an OS-owned manifest with a link to its own file is unowned, as a copy is (a
+hardlink's bytes are already its creating layer's, D130); and a global root that is itself a link
+is recorded unread with the reason and npm `partial`, its packages not enumerated.*
 
 **Decision.** An image scan runs one more pass over its layers, over ten fixed locations
 together: the installed `package.json` files under the three global `node_modules` roots
