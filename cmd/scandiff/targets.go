@@ -99,7 +99,8 @@ type Target struct {
 	// MinApplicationPackages is D167's per-ecosystem floor on the
 	// application packages an image scan's probes inventoried (D160): the
 	// candidate's coverage[].packages for that ecosystem key ("npm", "Go" --
-	// Go counts modules, not binaries), a key absent from coverage counting
+	// Go counts the package entries the probed binaries yield, each binary's
+	// stdlib included, not the binaries), a key absent from coverage counting
 	// 0. QA 2026-11-10 removed every npm and Go package from four captures
 	// and the gate still said ok in both modes: the finding floors are
 	// dominated by OS packages (ubi8n18 lost 236 of 525 components and 53 of

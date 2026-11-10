@@ -8460,7 +8460,8 @@ range beside it; D163 names that build there.
 
 **Decision.** A target in `.github/scanner-diff-targets.json` may name `minApplicationPackages`, a
 floor per probed ecosystem (`npm`, `Go`) on the candidate's `coverage[].packages` under that key.
-Go counts modules, not binaries; a key absent from `coverage` counts 0. It is a regression floor,
+Go counts the package entries the probed binaries yield (each binary's `stdlib` included, a module
+in two binaries twice), not the binaries; a key absent from `coverage` counts 0. It is a regression floor,
 judged by the weekly run and by the nightly `-regressions-only` gate alike. A key outside the probed
 ecosystems, and a floor below 1, are refused when the file loads. Committed: `ubi8n18` npm 118;
 `bci156`, `archlinux` and `cleanstart-postgres` Go 1. No CVE count is pinned.
@@ -8473,7 +8474,7 @@ probes could stop producing packages and nothing in the gate would notice.
 **The numbers.** `ubi8n18`'s capture holds 236 npm packages. The floor is half of that, 118: low
 enough that the npm tree's own churn under a digest-pinned image never reaches it, and high enough
 that losing the probe, a root, or the nested copies trips it. The three Go targets hold 1, 3 and 3
-modules. Their floor is presence, 1: a Go count that small has no meaningful half, and what the floor
+Go package entries. Their floor is presence, 1: a Go count that small has no meaningful half, and what the floor
 guards is the Go probe running at all. To re-measure, read `coverage[]` from a weekly capture's
 `<target>.assay.json` (the `scanner-diff-*` artifact):
 
