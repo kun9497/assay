@@ -124,3 +124,28 @@ func TestRun_QA1110_LinkedNpmPackages(t *testing.T) {
 		})
 	}
 }
+
+// The partial state through every renderer, not only JSON: an unresolved
+// npm link must not read as "npm held nothing" on stderr, in the table or in
+// SARIF, and the candidate's path is named as unread in each.
+func TestRun_QA1110_UnresolvedNpmLinkInEveryRenderer(t *testing.T) {
+	const cand = "usr/lib/node_modules/minimatch/package.json"
+	const partial = "(some behind links that did not resolve, listed unread)"
+	tarPath := filepath.Join(t.TempDir(), "image.tar")
+	writeLayeredProbeImage(t, tarPath, append(alpineLayer(),
+		probeLayerEntry{name: cand, link: "/nowhere/package.json"}))
+	for _, output := range []string{"table", "sarif"} {
+		var out, errOut bytes.Buffer
+		Run(context.Background(), probeDB(t), "docker-archive:"+tarPath, Options{Output: output}, &out, &errOut)
+		all := out.String() + errOut.String()
+		if !strings.Contains(all, "usr/lib/node_modules"+" "+partial) && !strings.Contains(all, "opt/app-root/src/node_modules "+partial) {
+			t.Errorf("%s: no partial npm wording %q:\n%s", output, partial, all)
+		}
+		if !strings.Contains(all, cand) {
+			t.Errorf("%s: the unresolved candidate %s is not named:\n%s", output, cand, all)
+		}
+		if output == "sarif" && !strings.Contains(out.String(), `"assay/not-read"`) {
+			t.Errorf("sarif: no assay/not-read result:\n%s", out.String())
+		}
+	}
+}

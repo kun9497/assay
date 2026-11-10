@@ -245,8 +245,8 @@ func TestRun_D160_NpmTreeUnderTheGlobalRootIsRead(t *testing.T) {
 			t.Errorf("applicationScope %s = %q (present %v), want not-read", eco, state, ok)
 		}
 	}
-	if doc.SchemaVersion != 20 {
-		t.Errorf("schemaVersion = %d, want 20", doc.SchemaVersion)
+	if doc.SchemaVersion != 22 {
+		t.Errorf("schemaVersion = %d, want 22", doc.SchemaVersion)
 	}
 }
 

@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- An npm package installed through a link under the global `node_modules` roots is read: a
+  `package.json` that is a symlink or hardlink, and a package directory (`x` or `@s/x`) that is a
+  symlink, each yield the package at its logical path (were: 0 findings, exit 0, npm `none`). A
+  candidate that does not resolve, and a linked scope directory, are listed in `unread[]` with the
+  reason, so `--fail-on-incomplete=target` exits 2, and the npm `applicationScope` state is the
+  new `partial` -- schema 22, breaking for a consumer switching on that state. A directory link's
+  target is not walked. (D160 revised; QA 2026-11-10)
+
+### Fixed
 - An image whose `/lib` and `/usr/lib` (or `/bin` and `/usr/bin`) are separate directories no
   longer reports an OS package that owns a file under one as the owner of the other's independent
   copy: `locations[].ownedBy` spells a path only through the image's own top-level

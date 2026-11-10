@@ -1098,6 +1098,9 @@ exited 0 while 24 findings went unmentioned.
       `locations[].ownedBy` `{name, version}` from rpm's BASENAMES/DIRNAMES/DIRINDEXES (all three
       backends), apk's `F:`/`R:` lines, dpkg's `info/*.list` and pacman's `files`, the last two in
       the probes' own layer pass; exact-file ownership; schema 19 (additive)
+- [x] An npm package installed through a link is read at its logical path (D160 revised) — a
+      linked `package.json` or package directory, one `package.json` each, its target not walked;
+      an unresolved candidate is unread and npm `partial`; schema 22; QA 2026-11-10
 - [x] A finding's JSON carries the record's related ids (D164) — `advisory.related`, schema 20;
       the CVE an ALAS / Bodhi / OVAL finding fixes; truthset joins through it and the ratings
 - [x] A finding on a released build the advisory still calls affected names that build (D163) —

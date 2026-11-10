@@ -275,6 +275,10 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 		l := links[n]
 		switch {
 		case !underAny(n, npminstalled.Roots):
+			// Equivalent today, kept as the statement of scope: probeCandidate
+			// admits npm links only under the roots, and the pass's other
+			// links are the top-level layout names (bin, lib), which match no
+			// arm below. A mutation removing this case survives for that reason.
 		case !l.Hard && isScopeDir(n):
 			// A linked scope holds any number of packages; reading them
 			// means walking the link's target, which a probe does not do

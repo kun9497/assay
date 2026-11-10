@@ -9,7 +9,7 @@
 
 | 계약 | 무엇인가 | 버전 필드 | 현재 |
 |---|---|---|---|
-| `report` | `assay scan --output json` | `schemaVersion` | 20 |
+| `report` | `assay scan --output json` | `schemaVersion` | 22 |
 | `provenance sidecar` | `--provenance <path>`가 쓰는 파일(D120) | `schemaVersion` | 1 |
 | `status.json` | 배포 데이터베이스의 상태, `status` 브랜치(D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json`(D147) | `schemaVersion` | 1 |
@@ -81,6 +81,12 @@
   OVAL, 그리고 배포판 작성 OSV 레코드(Rocky RLSA, AlmaLinux ALSA/ALBA/ALEA, Chainguard CGA). 표와
   `--explain`은 늘 읽었지만 JSON은 아니었으므로, 스키마 20 전에는 그런 finding이 `ratings[].advisoryId`를
   통해서만, 그것도 주석 소스가 매겼을 때만 CVE에 닿았습니다. (D164)
+- 스키마 22(`inventoryScope.applicationScope[].state`로 분기하는 소비자에게는 **호환 불가**, 그 밖에는
+  추가형): 항목의 `state`에 `partial`이 생깁니다 — npm 전용: npm 루트 아래의 후보가 해석되지 않는 링크(또는
+  링크된 스코프 디렉터리)였고, 그 경로가 사유와 함께 `unread[]`에 있습니다. 전에는 생태계별 상태가 `read`,
+  `none`, `not-read`였고 그런 이미지는 `none`으로 읽혔습니다; `none`을 "npm 패키지 없음"으로 받던 소비자는 그때
+  틀린 말을 들었고 이제 `partial`을 듣습니다. 해석되는 링크된 패키지는 `read`이고 그 finding은 루트 아래 논리
+  경로에 나옵니다. 스키마 21은 `skipped[].cves` 변경이며, 두 번호는 병합 순서대로 매깁니다. (D160 개정)
 
 ## provenance sidecar, status.json, `db status`
 

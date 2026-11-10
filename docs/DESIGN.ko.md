@@ -1037,6 +1037,9 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       `{name, version}`, rpm의 BASENAMES/DIRNAMES/DIRINDEXES(세 백엔드 모두), apk의 `F:`/`R:` 줄, dpkg의
       `info/*.list`, pacman의 `files`에서; 뒤의 둘은 프로브 자체의 레이어 패스에서; 파일 단위의 정확한
       소유; 스키마 19(추가형)
+- [x] 링크를 통해 설치된 npm 패키지를 논리 경로에서 읽음 (D160 개정) — 링크된 `package.json`이나 패키지
+      디렉터리에서 `package.json` 하나씩, 대상은 걷지 않음; 해석되지 않는 후보는 unread, npm은 `partial`;
+      스키마 22; QA 2026-11-10
 - [x] finding의 JSON이 레코드의 related 식별자를 실음 (D164) — `advisory.related`, 스키마 20; ALAS·
       Bodhi·OVAL finding이 고치는 CVE; truthset이 그것과 rating으로 이음
 - [x] 권고가 여전히 affected라 부르는 출시 빌드 위의 finding은 그 빌드를 이름 붙임 (D163) — 열린 범위가
