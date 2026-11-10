@@ -7985,11 +7985,17 @@ finding이 있다는 것만으로 성립한다. 출시됐으나 여전히 affect
 
 **결정.** `findings[].advisory.related`는 레코드 자체의 `related` 식별자이고, 비어 있으면 생략한다 — 스키마
 20, 추가형. `cmd/truthset`은 라벨의 CVE를 레코드 id, `aliases`, `upstream`, `related`, 그리고 모든
-rating의 `advisoryId`로 잇는다. 그래서 스키마 20 이전 문서도 이어진다.
+`related`로 잇고, 레코드가 CVE를 하나도 이름 붙이지 않을 때만 rating의 `advisoryId`로 물러선다
+-- 그래서 스키마 20 이전 문서도 주석 소스가 그 CVE를 매겼다면 이어지고, 다른 CVE에 대한 주석이 finding을
+그 CVE의 것으로 만들지 못한다. `cmd/scandiff`도 `related`로 CVE 튜플을 만든다(bare-id 브리지는 그대로:
+넓히면 `maxFindings`가 판정하는 열이 움직인다).
 
-**왜.** Amazon ALAS, Fedora Bodhi, Oracle OVAL 레코드는 고치는 CVE를 `Related`에만 적는다(D71: 셋 다
-`aliases`나 `upstream` 필드가 없다). 매처는 그것으로 묶고 `--explain`은 그것을 출력하지만 JSON은 그러지
-않았다. 그래서 JSON 소비자는 그런 finding의 CVE에 `ratings[].advisoryId`로만 닿을 수 있었다. D161이
+**왜.** 여러 레코드 계열이 고치는 CVE를 `Related`에만 적는다: 자체 제공자를 통한 Amazon ALAS, Fedora
+Bodhi, Oracle OVAL, 그리고 `osv`가 `related`를 보존하는 배포판 작성 OSV 레코드 -- Rocky RLSA, AlmaLinux
+ALSA/ALBA/ALEA, Chainguard CGA(D71) -- 로, 이들의 `aliases`와 `upstream`은 비어 있다. 매처는 그것으로
+권고를 조회하고(묶지는 않는다: `identifiers`는 ID와 aliases를 읽는다) `--explain`은 그것을 출력하지만
+JSON은 그러지 않았다. 그래서 JSON 소비자는 그런 finding의 CVE에 `ratings[].advisoryId`로만, 그것도
+주석 소스(NVD는 opt-in, EPSS, KEV)가 그 CVE를 등급 매겼을 때만 닿을 수 있었다. D161이
 2026-11-10에 이를 찾았다. amzn 라벨이 처음 판정된 밤이다(D113 개정 뒤 처음 빌드된 아티팩트). affected
 amzn 라벨 넷이 FN으로 읽혔지만 assay는 모두 보고했다 — CVE-2025-9230/9231에 대해 `ALAS2023-2025-1225`를
 fix `1:3.2.2-1.amzn2023.0.2`로. 주간 truthset 단계는 2026-11-15부터 실패했을 것이다. 사용자는 두 해결을
@@ -7997,8 +8003,8 @@ fix `1:3.2.2-1.amzn2023.0.2`로. 주간 truthset 단계는 2026-11-15부터 실�
 
 **검증.** `TestJSON_AdvisoryCarriesRelated`(ALAS finding이 두 CVE를 출력하고, `related`가 없는 레코드는
 생략); `TestRun_ALASFindingJoinsItsCVE`(related만, ratings만, 둘 다 없으면 여전히 FN). 2026-11-09 나이틀리에
-대고 라이브: 스키마 20 빌드로 134개 판정, FP 0, FN 0, 스키마 19 빌드로도 ratings 연결을 통해 같은 결과.
-돌연변이 4/4.
+대고 라이브: 스키마 20 빌드로 134개 판정, FP 0, FN 0, 스키마 19 빌드로도 ratings 연결을 통해 같은 결과(거기 amzn CVE는 모두 NVD 등급이 있다). 리뷰 뒤
+돌연변이 5/5(truthset의 최후 수단 규칙, scandiff의 related 튜플).
 
 **포기하는 것.** 표와 SARIF는 바뀌지 않는다. 스키마 19에 고정된 소비자는 선택 필드 하나를 더 본다.
 

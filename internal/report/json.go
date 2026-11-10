@@ -386,12 +386,15 @@ type AdvisoryRecord struct {
 	ID       string   `json:"id"`
 	Aliases  []string `json:"aliases,omitempty"`
 	Upstream []string `json:"upstream,omitempty"`
-	// Related is the record's own `related` identifiers (schema 20): the one
-	// place Amazon ALAS, Fedora Bodhi and Oracle OVAL records carry the CVE
-	// they fix, since none has an aliases or upstream field (D71). The
-	// matcher and --explain always read it; before schema 20 the JSON did
-	// not, so a consumer could join those findings to a CVE only through
-	// ratings[].advisoryId.
+	// Related is the record's own `related` identifiers (schema 20, D164):
+	// where the CVE a finding fixes is named when the record leaves aliases
+	// and upstream empty -- Amazon ALAS, Fedora Bodhi and Oracle OVAL through
+	// their own providers, and the distro-authored OSV records osv keeps
+	// related for (Rocky RLSA, AlmaLinux ALSA/ALBA/ALEA, Chainguard CGA,
+	// D71). The matcher looks advisories up through it and --explain prints
+	// it; before schema 20 the JSON did not, so a consumer could join those
+	// findings to a CVE only through ratings[].advisoryId, and only when an
+	// annotation source (NVD, EPSS, KEV) had rated the CVE.
 	Related []string `json:"related,omitempty"`
 	Summary string   `json:"summary,omitempty"`
 }

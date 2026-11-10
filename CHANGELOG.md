@@ -9,10 +9,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 - **JSON `schemaVersion` 20** (additive): `findings[].advisory.related` carries the record's own
-  related ids — where Amazon ALAS, Fedora Bodhi and Oracle OVAL records name the CVE they fix.
-  Before, the JSON reached those CVEs only through `ratings[].advisoryId`. `cmd/truthset` joins a
-  label's CVE through `related` and the ratings' ids too, which closes four false misses on the
-  Amazon Linux 2023 labels. (D164)
+  related ids — where Amazon ALAS, Fedora Bodhi, Oracle OVAL and the distro-authored OSV records
+  (Rocky, AlmaLinux, Chainguard) name the CVE they fix. Before, the JSON reached those CVEs only
+  through `ratings[].advisoryId`, when an annotation source had rated them. `cmd/truthset` joins a
+  label's CVE through `related` (the ratings only as a last resort), which closes four false misses
+  on the Amazon Linux 2023 labels, and `cmd/scandiff` forms CVE tuples from it. (D164)
 - A probed application package's location names the OS package that owns its file (D162):
   `findings[].package.locations[].ownedBy` is `{name, version}` of the rpm, deb, apk or pacman
   package whose file list holds the path — rpm's BASENAMES/DIRNAMES/DIRINDEXES header tags

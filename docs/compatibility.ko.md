@@ -76,10 +76,11 @@
   pacman의 `files`. 파일 단위의 정확한 소유이고 파일의 레이어가 레코드의 레이어보다 나중이 아닐 때만
   붙습니다(이미지 작성자가 패키지의 파일 위에 덮어쓴 것은 소유자 없음); 어느 OS 패키지도 그 파일을
   올리지 않았거나 이미지 밖이면 없습니다.
-- 스키마 20(추가형): `findings[].advisory.related` — 레코드 자체의 `related` 식별자. Amazon ALAS, Fedora
-  Bodhi, Oracle OVAL 레코드에서는 finding이 고치는 CVE가 이름 붙는 곳입니다(셋 다 `aliases`나
-  `upstream` 필드가 없음). 표와 `--explain`은 늘 읽었지만 JSON은 아니었으므로, 스키마 20 전에는 그런
-  finding이 `ratings[].advisoryId`를 통해서만 CVE에 닿았습니다.
+- 스키마 20(추가형): `findings[].advisory.related` — 레코드 자체의 `related` 식별자. `aliases`와
+  `upstream`이 비어 있을 때 finding이 고치는 CVE가 이름 붙는 곳입니다: Amazon ALAS, Fedora Bodhi, Oracle
+  OVAL, 그리고 배포판 작성 OSV 레코드(Rocky RLSA, AlmaLinux ALSA/ALBA/ALEA, Chainguard CGA). 표와
+  `--explain`은 늘 읽었지만 JSON은 아니었으므로, 스키마 20 전에는 그런 finding이 `ratings[].advisoryId`를
+  통해서만, 그것도 주석 소스가 매겼을 때만 CVE에 닿았습니다. (D164)
 
 ## provenance sidecar, status.json, `db status`
 

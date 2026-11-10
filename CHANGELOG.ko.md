@@ -9,9 +9,11 @@
 
 ### Added
 - **JSON `schemaVersion` 20**(추가형): `findings[].advisory.related`가 레코드 자체의 related 식별자를
-  싣습니다 — Amazon ALAS, Fedora Bodhi, Oracle OVAL 레코드가 고치는 CVE를 적는 곳입니다. 전에는 JSON이
-  그 CVE에 `ratings[].advisoryId`로만 닿았습니다. `cmd/truthset`도 `related`와 rating의 id로 라벨의
-  CVE를 이어, Amazon Linux 2023 라벨의 거짓 미탐 네 건을 해결합니다. (D164)
+  싣습니다 — Amazon ALAS, Fedora Bodhi, Oracle OVAL, 배포판 작성 OSV 레코드(Rocky, AlmaLinux,
+  Chainguard)가 고치는 CVE를 적는 곳입니다. 전에는 JSON이 그 CVE에 `ratings[].advisoryId`로만, 주석
+  소스가 매겼을 때만 닿았습니다. `cmd/truthset`은 `related`로 라벨의 CVE를 잇고(rating은 최후 수단),
+  Amazon Linux 2023 라벨의 거짓 미탐 네 건을 해결하며, `cmd/scandiff`도 그것으로 CVE 튜플을 만듭니다.
+  (D164)
 - 프로브된 애플리케이션 패키지의 위치가 그 파일을 소유한 OS 패키지를 이름 붙입니다(D162):
   `findings[].package.locations[].ownedBy`는 그 경로를 파일 목록에 올린 rpm·deb·apk·pacman 패키지의
   `{name, version}`입니다 — rpm의 BASENAMES/DIRNAMES/DIRINDEXES 헤더 태그(세 데이터베이스 백엔드 모두),
