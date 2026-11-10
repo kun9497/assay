@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-10
+
 ### Added
 - **JSON `schemaVersion` 20** (additive): `findings[].advisory.related` carries the record's own
   related ids — where Amazon ALAS, Fedora Bodhi, Oracle OVAL and the distro-authored OSV records

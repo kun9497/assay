@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-10
+
 ### Added
 - **JSON `schemaVersion` 20**(추가형): `findings[].advisory.related`가 레코드 자체의 related 식별자를
   싣습니다 — Amazon ALAS, Fedora Bodhi, Oracle OVAL, 배포판 작성 OSV 레코드(Rocky, AlmaLinux,
