@@ -81,7 +81,7 @@ func catalogApplicationProbes(ctx context.Context, img *source.Image, owned *fil
 	// `files`, accepted unread like a package.json.
 	roots := append(append([]string{}, npminstalled.Roots...), goBinDirs...)
 	roots = append(roots, dpkgdb.InfoDir, pacmanLocalDir)
-	files, _, err := img.FilesProbed(ctx, roots, probeCandidate, probeSniff)
+	files, links, err := img.FilesProbedLinks(ctx, roots, mergedUsrDirs, probeCandidate, probeSniff)
 	if err != nil {
 		return nil, cyclonedx.Stats{}, nil, fmt.Errorf("application probes: %w", err)
 	}
@@ -89,6 +89,12 @@ func catalogApplicationProbes(ctx context.Context, img *source.Image, owned *fil
 	if owned == nil {
 		owned = newFileOwners(img)
 	}
+	// D162, revised by the 2026-11-10 QA: the merged-/usr twin spelling is
+	// only true where this image makes it true -- a top-level `bin` (and
+	// the rest) that is a symlink to its usr/ counterpart. The same pass saw
+	// those entries (mergedUsrDirs are its exact names), so this costs no
+	// extra layer read.
+	owned.merged = mergedUsrIn(links)
 	npmFiles := map[string][]byte{}
 	layerOf := map[string]string{}
 	type goBin struct {
@@ -159,6 +165,13 @@ func catalogApplicationProbes(ctx context.Context, img *source.Image, owned *fil
 // itself, so one match serves both probes; which root a name is under was
 // already decided by FilesProbed.
 func probeCandidate(name string, h *tar.Header) bool {
+	// A top-level merged-/usr directory name is observed only for its link
+	// (mergedUsrIn): nothing is read from it here.
+	for _, d := range mergedUsrDirs {
+		if name == d {
+			return h.Typeflag == tar.TypeSymlink
+		}
+	}
 	// D162: a dpkg `.list` or a pacman `files` under its root, a regular
 	// file; anything else under those roots (a `.md5sums`, a `desc`) is
 	// declined here and never read.

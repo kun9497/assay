@@ -58,6 +58,12 @@ type fileOwners struct {
 
 	lists map[string]listOwner // dpkg and pacman: path (no leading slash) -> owner
 
+	// merged holds the top-level directories this image really makes
+	// symlinks into usr/ (mergedUsrIn). Only those get the twin spelling:
+	// an image whose /lib and /usr/lib are two directories has two files,
+	// and a package that owns one does not own the other (QA 2026-11-10).
+	merged map[string]bool
+
 	// Built once, on the first list: the inventory by the names a list's
 	// filename or location spells.
 	debByName  map[string]pkgmeta.Package // "name" and "name:arch"
@@ -190,12 +196,33 @@ func (o *fileOwners) addList(name string, f source.FileFromLayer, osPkgs []pkgme
 // the probe found at usr/bin/foo (rpm records the canonical usr/ path).
 var mergedUsrDirs = []string{"bin", "sbin", "lib", "lib32", "lib64", "libx32"}
 
+// mergedUsrIn reads, from the final link entries a probe pass found, which
+// of mergedUsrDirs the image makes a symlink to its usr/ counterpart --
+// "usr/bin", "/usr/bin" or "./usr/bin" for bin. A hardlink, a link
+// elsewhere, or a real directory is not merged.
+func mergedUsrIn(links map[string]source.Link) map[string]bool {
+	out := map[string]bool{}
+	for _, d := range mergedUsrDirs {
+		l, ok := links[d]
+		if !ok || l.Hard {
+			continue
+		}
+		if path.Clean(strings.TrimPrefix(l.Target, "/")) == "usr/"+d {
+			out[d] = true
+		}
+	}
+	return out
+}
+
 // spellings is the path as given plus its merged-/usr twin, without a
-// leading slash.
-func spellings(p string) []string {
+// leading slash, for the directories merged says this image merges.
+func spellings(p string, merged map[string]bool) []string {
 	p = strings.TrimPrefix(p, "/")
 	out := []string{p}
 	for _, d := range mergedUsrDirs {
+		if !merged[d] {
+			continue
+		}
 		switch {
 		case strings.HasPrefix(p, "usr/"+d+"/"):
 			out = append(out, strings.TrimPrefix(p, "usr/"))
@@ -212,7 +239,7 @@ func spellings(p string) []string {
 // than the package manager that wrote the record.
 func (o *fileOwners) lookup(p string, diffID string) (pkgmeta.Owner, bool) {
 	fileLayer := o.layerOf(diffID)
-	for _, s := range spellings(p) {
+	for _, s := range spellings(p, o.merged) {
 		if o.rpm != nil && o.rpmLayer >= fileLayer {
 			if i, ok := o.rpm.Files["/"+s]; ok {
 				pkg := o.rpm.Packages[i]

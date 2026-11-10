@@ -248,7 +248,10 @@ func TestCatalogFromImage_D162_MergedUsrListSpellingMatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A real merged-/usr image: bin is a symlink to usr/bin (QA 2026-11-10:
+	// the twin spelling holds only where the image makes it true).
 	img := &source.Image{Layers: []source.Layer{layerWithModes(t, "sha256:merged-usr", []probeLayerEntry{
+		{name: "bin", link: "usr/bin"},
 		{name: osReleasePath, body: []byte(osReleaseDebianForOwners)},
 		{name: dpkgDBPath, body: []byte("Package: tool\nStatus: install ok installed\nArchitecture: amd64\nVersion: 1.0-1\n\n")},
 		{name: "var/lib/dpkg/info/tool:amd64.list", body: []byte("/.\n/bin\n/bin/tool\n")},
@@ -297,8 +300,70 @@ func TestSpellings(t *testing.T) {
 		{"usr/lib/node_modules/npm/package.json", "usr/lib/node_modules/npm/package.json|lib/node_modules/npm/package.json"},
 		{"opt/app/tool", "opt/app/tool"},
 	} {
-		if got := strings.Join(spellings(tc.in), "|"); got != tc.want {
+		if got := strings.Join(spellings(tc.in, allMerged), "|"); got != tc.want {
 			t.Errorf("spellings(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+// allMerged is every mergedUsrDirs entry marked merged, for spellings' table.
+var allMerged = map[string]bool{"bin": true, "sbin": true, "lib": true, "lib32": true, "lib64": true, "libx32": true}
+
+// QA 2026-11-10: /lib and /usr/lib are two directories. The APK that owns
+// lib/node_modules/minimatch/package.json does not own the independent copy at
+// usr/lib/..., which the probe reads -- the twin spelling applies only when
+// lib is a symlink to usr/lib. The same image with that link owns it.
+func TestRun_QA1110_SplitUsrDoesNotLendTheOwner(t *testing.T) {
+	apk := "P:qa-owner\nV:1.0-r0\nA:x86_64\nF:lib/node_modules/minimatch\nR:package.json\n\n"
+	pkg := []byte(`{"name":"minimatch","version":"3.0.4"}`)
+	for _, tc := range []struct {
+		name  string
+		link  bool
+		owner string
+	}{
+		{"split /lib and /usr/lib", false, ""},
+		{"lib -> usr/lib", true, "qa-owner 1.0-r0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			entries := []probeLayerEntry{
+				{name: osReleasePath, body: []byte(osReleaseAlpine319)},
+				{name: apkDBPath, body: []byte(apk)},
+				{name: "usr/lib/node_modules/minimatch/package.json", body: pkg},
+			}
+			if tc.link {
+				entries = append([]probeLayerEntry{{name: "lib", link: "usr/lib"}}, entries...)
+			} else {
+				entries = append(entries, probeLayerEntry{name: "lib/node_modules/minimatch/package.json", body: pkg})
+			}
+			tarPath := filepath.Join(t.TempDir(), "image.tar")
+			writeLayeredProbeImage(t, tarPath, entries)
+			got := ownersInJSON(t, tarPath)
+			if v, ok := got["usr/lib/node_modules/minimatch/package.json"]; !ok || v != tc.owner {
+				t.Errorf("usr/lib minimatch: present=%v owner=%q, want %q (all: %v)", ok, v, tc.owner, got)
+			}
+		})
+	}
+}
+
+// mergedUsrIn reads only a symlink into the usr/ counterpart.
+func TestMergedUsrIn(t *testing.T) {
+	got := mergedUsrIn(map[string]source.Link{
+		"bin":   {Target: "usr/bin"},
+		"sbin":  {Target: "/usr/sbin"},
+		"lib":   {Target: "./usr/lib"},
+		"lib64": {Target: "usr/lib"},               // elsewhere: not lib64's twin
+		"lib32": {Target: "usr/lib32", Hard: true}, // a hardlink is not a directory link
+	})
+	want := map[string]bool{"bin": true, "sbin": true, "lib": true}
+	if len(got) != len(want) {
+		t.Fatalf("mergedUsrIn = %v, want %v", got, want)
+	}
+	for d := range want {
+		if !got[d] {
+			t.Errorf("mergedUsrIn lacks %s: %v", d, got)
+		}
+	}
+	if s := strings.Join(spellings("usr/lib64/x", got), "|"); s != "usr/lib64/x" {
+		t.Errorf("spellings with lib64 unmerged = %q", s)
 	}
 }
