@@ -9,12 +9,12 @@
 
 | 계약 | 무엇인가 | 버전 필드 | 현재 |
 |---|---|---|---|
-| `report` | `assay scan --output json` | `schemaVersion` | 20 |
+| `report` | `assay scan --output json` | `schemaVersion` | 21 |
 | `provenance sidecar` | `--provenance <path>`가 쓰는 파일(D120) | `schemaVersion` | 1 |
 | `status.json` | 배포 데이터베이스의 상태, `status` 브랜치(D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json`(D147) | `schemaVersion` | 1 |
 | `truthset labels` | `cmd/truthset`가 읽는 정답 라벨 `testdata/groundtruth/labels.json`(D161) | `schemaVersion` | 1 |
-| `truthset report` | `truthset -out <path>`가 쓰는 파일(D161) | `schemaVersion` | 2 |
+| `truthset report` | `truthset -out <path>`가 쓰는 파일(D161) | `schemaVersion` | 3 |
 | `database` | 로컬 저장소와 OCI 태그 `ghcr.io/kun9497/assay-db:vN` | 태그 `vN`, `db status`의 `schema:` | 9 |
 
 테스트가 이 표를 코드의 상수에 묶어 두므로, 버전이 올라도 표가 뒤처질 수 없습니다.
@@ -81,6 +81,10 @@
   OVAL, 그리고 배포판 작성 OSV 레코드(Rocky RLSA, AlmaLinux ALSA/ALBA/ALEA, Chainguard CGA). 표와
   `--explain`은 늘 읽었지만 JSON은 아니었으므로, 스키마 20 전에는 그런 finding이 `ratings[].advisoryId`를
   통해서만, 그것도 주석 소스가 매겼을 때만 CVE에 닿았습니다. (D164)
+- 스키마 21(추가형): `skipped[].cves` — 건너뛴 권고가 이름 붙인 CVE 식별자(id, aliases, upstream, 배포판 작성
+  레코드는 related까지)를 중복 없이 정렬한 것입니다. `advisoryId`가 ALAS나 GHSA id일 때도 CVE를 든 소비자가 그
+  skip이 그 CVE를 판정하지 못한 채 남기는지 알 수 있습니다. 패키지 전체 skip이나 CVE가 없는 권고는 생략합니다.
+  (QA 2026-11-10)
 
 ## provenance sidecar, status.json, `db status`
 

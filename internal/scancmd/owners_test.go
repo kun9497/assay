@@ -45,8 +45,8 @@ func ownersInJSON(t *testing.T, tarPath string) map[string]string {
 	if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
 		t.Fatalf("JSON: %v\n%s", err, out.String())
 	}
-	if doc.SchemaVersion != 20 {
-		t.Errorf("schemaVersion = %d, want 20 (ownedBy is a schema change)", doc.SchemaVersion)
+	if doc.SchemaVersion != 21 {
+		t.Errorf("schemaVersion = %d, want 21 (ownedBy is a schema change)", doc.SchemaVersion)
 	}
 	got := map[string]string{}
 	for _, f := range doc.Findings {
