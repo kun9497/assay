@@ -8593,6 +8593,16 @@ holds. The trigger to reopen is an AL2 scan whose `coverage[].dataAsOf` is set b
 
 ### D162 — A probed location names the OS package that owns its file (extends D160)
 
+*Revised 2026-11-10 (QA): an owner path is spelled only through the image's own top-level directory
+links (bin -> usr/bin, Fedora's and Arch's sbin -> usr/bin, lib64 -> usr/lib), each resolved from /
+the way the kernel resolves it, instead of a twin table assumed for every image. Before, it was tried on every image, so on an
+image whose /lib and /usr/lib are two directories an APK owning only lib/... was named the owner of
+the independent usr/lib/... copy. The probe pass observes the top-level bin/sbin/lib* entries
+itself (no extra pass); the exact path is still tried first and the layer-order rule is unchanged.
+A link spells a twin only for an ownership record no older than the layer that made the link: an
+upper layer that deletes a real lib64 and relinks it to usr/lib leaves the older record's lib64/...
+paths naming the deleted directory's files, not the independent usr/lib/... copy (PR #267 review).*
+
 **Decision.** Every location of an image's probed application packages (D160) carries
 `ownedBy` — the `{name, version}` of the OS package whose file list names that path — when
 one does. The four package databases all record their files, and each is read where it already

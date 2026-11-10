@@ -26,6 +26,13 @@ All notable changes to this project are documented here. The format follows
   `provenance.target.sha256`): a capture of another target, or one recording no target, leaves the
   case's labels UNEVALUATED instead of judging them -- a v2.0.0 capture had judged a v1.0.0 clean
   label TN. (D161 revised; PR #268 review)
+- An upper layer that deletes a real `/lib64` and relinks it to `/usr/lib` no longer lends the
+  package that owned the old `/lib64` files to the independent `/usr/lib` copy: a top-level link
+  spells an owner path only for an ownership record no older than the link. (D162 revised; PR #267 review)
+- An image whose `/lib` and `/usr/lib` (or `/bin` and `/usr/bin`) are separate directories no
+  longer reports an OS package that owns a file under one as the owner of the other's independent
+  copy: `locations[].ownedBy` spells a path only through the image's own top-level
+  directory links into `usr/` (including Fedora's and Arch's `sbin -> usr/bin`). (D162 revised, QA 2026-11-10)
 
 ## [0.17.0] - 2026-11-10
 
