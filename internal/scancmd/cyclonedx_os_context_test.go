@@ -87,6 +87,8 @@ func TestRun_QA1110_OSContextIsTheBranchs(t *testing.T) {
 			map[string]string{"ALPINE-CVE-2024-58251": "Alpine:v3.19"}},
 		{"OS above, package nested deeper inherits it", start + `"components":[` + alpine + `,{"type":"application","name":"app","purl":"pkg:generic/app@1","version":"1","components":[` + busybox + `]}]}`,
 			map[string]string{"ALPINE-CVE-2024-58251": "Alpine:v3.19"}},
+		{"OS and package inside a top-level branch", start + `"components":[{"type":"application","name":"app","purl":"pkg:generic/app@1","version":"1","components":[` + alpine + `,` + busybox + `]}]}`,
+			map[string]string{"ALPINE-CVE-2024-58251": "Alpine:v3.19"}},
 		{"Debian at the top, Alpine under the subject", start + `"components":[` + debian + `,` + libc6 + `],"metadata":{"component":{"type":"container","name":"demo","components":[` + alpine + `,` + busybox + `]}}}`,
 			map[string]string{"ALPINE-CVE-2024-58251": "Alpine:v3.19", "DEBIAN-CVE-2026-4046": "Debian:11"}},
 	} {
