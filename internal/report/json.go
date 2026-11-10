@@ -58,7 +58,7 @@ import (
 // what it does mean is that a consumer reading 2 or later can rely on every
 // field below being present, which is the guarantee the constant exists to
 // give.
-const schemaVersion = 20
+const schemaVersion = 21
 
 // Document is the stable shape of `assay scan --output json` (design goal
 // #3). It carries what Table shows plus what Table cannot: the full
@@ -432,7 +432,11 @@ type SuppressedRecord struct {
 type SkippedRecord struct {
 	Package    PackageRecord `json:"package"`
 	AdvisoryID string        `json:"advisoryId,omitempty"`
-	Reason     string        `json:"reason"`
+	// CVEs (schema 21) are the CVE identifiers the skipped advisory names,
+	// so a consumer holding a CVE can tell whether this skip leaves it
+	// unjudged when advisoryId is an ALAS or GHSA id (matcher.Skipped.CVEs).
+	CVEs   []string `json:"cves,omitempty"`
+	Reason string   `json:"reason"`
 	// Cause is whose data made this incomplete (D36): "target" for the artifact
 	// being scanned, "advisory" for the vulnerability record, "coverage" for an
 	// ecosystem this database or this build does not handle. A CI policy that
@@ -485,6 +489,7 @@ func JSON(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirscan
 		doc.Skipped = append(doc.Skipped, SkippedRecord{
 			Package:    packageRecord(s.Package),
 			AdvisoryID: s.AdvisoryID,
+			CVEs:       s.CVEs,
 			Reason:     s.Reason,
 			Cause:      s.Cause,
 		})

@@ -8365,6 +8365,19 @@ the per-file limit is declined silently — not a package, and nothing says it i
 
 ### D161 — Precision and recall are measured against committed ground truth (`cmd/truthset`)
 
+*Revised 2026-11-10 (QA): a comparison the scan skipped can leave a label's CVE unjudged. A label is
+UNEVALUATED when its package has a skip that names its CVE (by advisory id or, since report schema
+21, `skipped[].cves`), a whole-package skip, or a skip the report cannot identify (a non-CVE id with
+no `cves`, as in a capture from before schema 21); a skip naming other CVEs only changes nothing.
+A finding that proves the CVE keeps its verdict (TP, or FP for a clean label); a fix the label
+demands past such a skip is FIX-UNKNOWN, counted with UNEVALUATED. PREDATES still comes first.
+Truthset report schema 3 (a new `outcome` value). The QA's capture read TN, exit 0; it now reads
+UNEVALUATED, exit 1, live and `-offline` alike. An `-offline` capture is held to the SBOM its case's
+label generates: the capture's `provenance.target.sha256` (D120) must equal the digest of that SBOM,
+else every label of the case is UNEVALUATED with the reason -- a capture chosen by case name alone
+judged a clean label at v1.0.0 TN against a v2.0.0 capture, where the live scan says FP (PR #268
+review). A capture that records no target digest cannot be proven and is treated the same way.*
+
 **Decision.** A second measuring tool beside the differential. `cmd/truthset` scans each
 labelled package the way the SBOM path scans it — a one-component CycloneDX document carrying
 the purl the image path would spell (D121) — against the pulled, signed database, and judges
@@ -8622,6 +8635,16 @@ holds. The trigger to reopen is an AL2 scan whose `coverage[].dataAsOf` is set b
 ---
 
 ### D162 — A probed location names the OS package that owns its file (extends D160)
+
+*Revised 2026-11-10 (QA): an owner path is spelled only through the image's own top-level directory
+links (bin -> usr/bin, Fedora's and Arch's sbin -> usr/bin, lib64 -> usr/lib), each resolved from /
+the way the kernel resolves it, instead of a twin table assumed for every image. Before, it was tried on every image, so on an
+image whose /lib and /usr/lib are two directories an APK owning only lib/... was named the owner of
+the independent usr/lib/... copy. The probe pass observes the top-level bin/sbin/lib* entries
+itself (no extra pass); the exact path is still tried first and the layer-order rule is unchanged.
+A link spells a twin only for an ownership record no older than the layer that made the link: an
+upper layer that deletes a real lib64 and relinks it to usr/lib leaves the older record's lib64/...
+paths naming the deleted directory's files, not the independent usr/lib/... copy (PR #267 review).*
 
 **Decision.** Every location of an image's probed application packages (D160) carries
 `ownedBy` — the `{name, version}` of the OS package whose file list names that path — when

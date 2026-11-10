@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 20,
+  "findings": [
+    {
+      "package": {
+        "name": "example.com/partial",
+        "version": "v1.0.0",
+        "ecosystem": "Go",
+        "purl": "pkg:golang/example.com/partial@v1.0.0",
+        "locations": [
+          {
+            "path": "sbom"
+          }
+        ]
+      },
+      "matchedName": "example.com/partial",
+      "matchedViaProvides": false,
+      "advisory": {
+        "id": "CVE-2031-9101"
+      },
+      "severity": "critical",
+      "score": 9.8,
+      "evidence": {
+        "rangeType": "SEMVER",
+        "introduced": "0",
+        "fixed": "2.0.0",
+        "reason": "v1.0.0 is at or above any earlier version and below the fix 2.0.0"
+      },
+      "ratings": [
+        {
+          "database": "CVE",
+          "advisoryId": "CVE-2031-9101",
+          "severity": "critical",
+          "score": 9.8,
+          "fixed": "2.0.0",
+          "url": "",
+          "fixState": "fixed"
+        }
+      ],
+      "unfixable": false,
+      "fixState": "fixed",
+      "enrichment": []
+    }
+  ],
+  "skipped": [
+    {
+      "package": {
+        "name": "example.com/partial",
+        "version": "v1.0.0",
+        "ecosystem": "Go",
+        "purl": "pkg:golang/example.com/partial@v1.0.0",
+        "locations": [
+          {
+            "path": "sbom"
+          }
+        ]
+      },
+      "advisoryId": "CVE-2031-9100",
+      "reason": "the advisory's range bound \"not-a-version\" could not be read: semver \"not\": core needs exactly three identifiers: invalid version",
+      "cause": "advisory"
+    }
+  ],
+  "suppressed": [],
+  "unread": [],
+  "summary": {
+    "components": 1,
+    "evaluated": 1,
+    "notEvaluated": 0,
+    "incompleteChecks": 1,
+    "targetIncomplete": 0,
+    "unreadManifests": 0,
+    "findings": 1,
+    "suppressed": 0,
+    "unknownSeverity": 0,
+    "unfixable": 0,
+    "wontFix": 0,
+    "knownExploited": 0,
+    "frozenKeys": 0
+  },
+  "coverage": [
+    {
+      "ecosystem": "Go",
+      "packages": 1,
+      "evaluated": 1,
+      "state": "live",
+      "provider": "osv",
+      "dataAsOf": ""
+    }
+  ],
+  "provenance": {
+    "tool": {
+      "name": "assay",
+      "version": "0.17.0",
+      "commit": "7c53c2159ee04dc8e9cbb453312f274f08c425de",
+      "buildDate": "2026-11-10T01:11:32Z",
+      "dev": false
+    },
+    "database": {
+      "schema": 9,
+      "builtAt": "",
+      "ratings": [],
+      "frozen": [],
+      "renamed": []
+    },
+    "target": {
+      "argument": "partial.cdx.json",
+      "kind": "sbom",
+      "sha256": "acf53e541a39a4c443a78885df0a78397377fc88865f9ec59d9fa72f3558132d"
+    },
+    "policy": {
+      "failOn": null,
+      "failOnUnknown": false,
+      "failOnIncomplete": false,
+      "failOnIncompleteTarget": false,
+      "failOnUnfixable": false,
+      "failOnUnfixableWontFix": false,
+      "failOnKev": false,
+      "failOnEpss": null,
+      "failOnEol": false,
+      "dbMaxAge": null,
+      "dbMaxRatingAge": null,
+      "timeout": null,
+      "platform": {
+        "given": false
+      }
+    },
+    "waivers": {
+      "ignoreFile": {
+        "path": "none",
+        "discovered": false,
+        "rules": []
+      },
+      "vex": []
+    }
+  }
+}
