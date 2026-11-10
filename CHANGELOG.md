@@ -15,6 +15,12 @@ All notable changes to this project are documented here. The format follows
   UNEVALUATED, and an affected label whose demanded fix lies past such a skip is FIX-UNKNOWN.
   Truthset report schema 3. (D161 revised, QA 2026-11-10)
 
+### Fixed
+- `truthset -offline` holds each capture to the SBOM its case's label generates (the capture's
+  `provenance.target.sha256`): a capture of another target, or one recording no target, leaves the
+  case's labels UNEVALUATED instead of judging them -- a v2.0.0 capture had judged a v1.0.0 clean
+  label TN. (D161 revised; PR #268 review)
+
 ## [0.17.0] - 2026-11-10
 
 ### Added

@@ -8372,7 +8372,11 @@ no `cves`, as in a capture from before schema 21); a skip naming other CVEs only
 A finding that proves the CVE keeps its verdict (TP, or FP for a clean label); a fix the label
 demands past such a skip is FIX-UNKNOWN, counted with UNEVALUATED. PREDATES still comes first.
 Truthset report schema 3 (a new `outcome` value). The QA's capture read TN, exit 0; it now reads
-UNEVALUATED, exit 1, live and `-offline` alike.*
+UNEVALUATED, exit 1, live and `-offline` alike. An `-offline` capture is held to the SBOM its case's
+label generates: the capture's `provenance.target.sha256` (D120) must equal the digest of that SBOM,
+else every label of the case is UNEVALUATED with the reason -- a capture chosen by case name alone
+judged a clean label at v1.0.0 TN against a v2.0.0 capture, where the live scan says FP (PR #268
+review). A capture that records no target digest cannot be proven and is treated the same way.*
 
 **Decision.** A second measuring tool beside the differential. `cmd/truthset` scans each
 labelled package the way the SBOM path scans it — a one-component CycloneDX document carrying

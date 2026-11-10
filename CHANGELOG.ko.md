@@ -14,6 +14,11 @@
   UNEVALUATED이고, 요구한 fix가 그런 skip 너머인 affected 라벨은 FIX-UNKNOWN입니다. truthset 보고서 스키마
   3. (D161 개정, QA 2026-11-10)
 
+### Fixed
+- `truthset -offline`은 각 캡처를 그 케이스 라벨이 생성하는 SBOM에 묶습니다(캡처의
+  `provenance.target.sha256`): 다른 대상의 캡처나 대상을 기록하지 않은 캡처는 판정하지 않고 그 케이스의 라벨을
+  UNEVALUATED로 둡니다 — v2.0.0 캡처가 v1.0.0 clean 라벨을 TN으로 판정했었습니다. (D161 개정; PR #268 리뷰)
+
 ## [0.17.0] - 2026-11-10
 
 ### Added
