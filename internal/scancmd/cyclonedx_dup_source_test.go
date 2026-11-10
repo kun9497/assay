@@ -45,6 +45,7 @@ func TestRun_QA1110_DuplicateListingKeepsTheStatedSourceVersion(t *testing.T) {
 		versioned = `{"type":"library","name":"libc6","version":"2.31-13+deb11u14","purl":"pkg:deb/debian/libc6@2.31-13%2Bdeb11u14?arch=amd64&distro=debian-11&upstream=glibc%402.31-13%2Bdeb11u13"}`
 		nameOnly  = `{"type":"library","name":"libc6","version":"2.31-13+deb11u14","purl":"pkg:deb/debian/libc6@2.31-13%2Bdeb11u14?arch=amd64&distro=debian-11&upstream=glibc"}`
 		other     = `{"type":"library","name":"libc6","version":"2.31-13+deb11u14","purl":"pkg:deb/debian/libc6@2.31-13%2Bdeb11u14?arch=amd64&distro=debian-11&upstream=glibc%402.31-13%2Bdeb11u12"}`
+		eglibc    = `{"type":"library","name":"libc6","version":"2.31-13+deb11u14","purl":"pkg:deb/debian/libc6@2.31-13%2Bdeb11u14?arch=amd64&distro=debian-11&upstream=eglibc"}`
 	)
 	run := func(top, subject string) (int, report.Document) {
 		t.Helper()
@@ -81,8 +82,21 @@ func TestRun_QA1110_DuplicateListingKeepsTheStatedSourceVersion(t *testing.T) {
 				t.Fatalf("findings=%v targetIncomplete=%d skipped=%+v, want no finding and one target skip",
 					findingIDs(doc), doc.Summary.TargetIncomplete, doc.Skipped)
 			}
-			if r := doc.Skipped[0].Reason; !strings.Contains(r, "2.31-13+deb11u12 and 2.31-13+deb11u13") || doc.Skipped[0].Cause != "target" {
+			if r := doc.Skipped[0].Reason; !strings.Contains(r, "source glibc at two values, 2.31-13+deb11u12 and 2.31-13+deb11u13") || doc.Skipped[0].Cause != "target" {
 				t.Errorf("skip = %+v, want both versions, sorted, and cause target", doc.Skipped[0])
+			}
+		}
+	})
+	// Two listings naming different sources contradict each other the same
+	// way: neither is chosen by arrival order.
+	t.Run("two stated source names contradict", func(t *testing.T) {
+		for _, order := range [][2]string{{versioned, eglibc}, {eglibc, versioned}} {
+			code, doc := run(order[0], order[1])
+			if code != 2 || len(doc.Findings) != 0 || len(doc.Skipped) != 1 {
+				t.Fatalf("exit=%d findings=%v skipped=%+v, want exit 2, no finding, one skip", code, findingIDs(doc), doc.Skipped)
+			}
+			if r := doc.Skipped[0].Reason; !strings.Contains(r, "with source two values, eglibc and glibc") {
+				t.Errorf("reason = %q", r)
 			}
 		}
 	})

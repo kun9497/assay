@@ -8458,13 +8458,16 @@ range beside it; D163 names that build there.
 
 ### D165 — One package listed twice in an SBOM keeps the source version it states, and two that contradict are not judged
 
-**Decision.** When a CycloneDX document lists one package twice — in `components` and as the
-subject, or twice in either — and both listings name the same source, a source version stated by
-either listing is kept, whichever listing came first. Two stated source versions that differ are a
+**Decision.** When a CycloneDX document lists one package both in `components` and in the subject
+tree (`metadata.component` or under it — the duplicate the reader merges), what either listing
+states about the source is kept, whichever listing came first. A source named without a version
+(deb `upstream=glibc`, no `@version`) states the name only, so a version the other listing gives is
+kept. Two listings that state different source names, or the same source at two versions, are a
 contradiction the document makes: the package is judged on neither, as one target-cause skip whose
 reason names both versions (sorted, so it reads the same either way round), so
 `--fail-on-incomplete=target` exits 2 (D11). Carried on `pkgmeta.Package.Unevaluable`, which the
-matcher reports as that skip before looking up anything.
+matcher reports as that skip after its comparer and coverage checks (so a package the database
+could never judge stays a coverage skip with its remedy, D36) and before looking up anything.
 
 **Why.** QA 2026-11-10: Debian 11 `libc6 2.31-13+deb11u14` listed in `components` with
 `upstream=glibc@2.31-13+deb11u13` and as the subject with `upstream=glibc` scanned to 25 findings,
@@ -8480,9 +8483,13 @@ cause `target` naming both versions, and exit 2. Against the QA's public DB (`sh
 `public-dupe-top-detailed` 25 → 25, `public-dupe-subject-detailed` 20 → **25** with CVE-2026-4046,
 the contradiction variant 25 findings / exit 0 → 0 findings / targetIncomplete 1 / exit 2.
 
-**Gives up.** Only listings that name the same source are merged this way; two listings naming
-different sources keep the first, as before. A contradiction makes the whole package unevaluated,
-including advisories keyed on the binary name that the source version would not have changed.
+**Gives up.** Two listings of one package inside `components`, or both inside the subject tree,
+are not merged at all (as before) and are each judged on what they state. A contradiction makes the
+whole package unevaluated, including findings every reading of the document would have produced
+and advisories keyed on the binary name: without `--fail-on-incomplete` such a scan shows the skip
+and the notEvaluated count, but no finding for that package, and can exit 0. Judging both readings
+and reporting the union was considered (PR #269 review) and not taken: the requirement was that no
+reading be chosen, and a union is a reading the document does not state either.
 
 ---
 

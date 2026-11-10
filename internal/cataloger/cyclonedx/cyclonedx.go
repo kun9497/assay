@@ -232,32 +232,32 @@ func keepEvidence(kept *pkgmeta.Package, dropped pkgmeta.Package) {
 			kept.Locations = append(kept.Locations, loc)
 		}
 	}
+	// D165 (QA 2026-11-10): what either listing states about the source is
+	// evidence whichever listing came first. A source named without a version
+	// (deb `upstream=glibc`, no @version) states the name only -- the version
+	// is unstated, not "the binary's own" -- so a version the other listing
+	// gives is kept: without it libc6 2.31-13+deb11u14 from glibc
+	// 2.31-13+deb11u13 read 25 findings one way round and 20 the other. Two
+	// listings that state different source names, or the same name at two
+	// versions, contradict each other, and the package is judged on neither
+	// (Unevaluable), with a reason naming both, sorted so it reads the same
+	// either way round. Copied in every arm, so the kept package never shares
+	// a Source with the dropped one.
 	switch {
+	case dropped.Source == nil:
 	case kept.Source == nil:
-		kept.Source = dropped.Source
-	case dropped.Source != nil && dropped.Source.Name == kept.Source.Name:
-		// QA 2026-11-10: the two listings name the same source and one
-		// states its version. That version is evidence whichever listing
-		// came first -- without it the package is judged on its own
-		// version and a source-keyed advisory with a later fix reads clean
-		// (libc6 2.31-13+deb11u14 from glibc 2.31-13+deb11u13: 25 findings
-		// one way round, 20 the other). Two stated versions that differ are
-		// a contradiction the document makes, so the package is judged on
-		// neither (Unevaluable), and the reason names both.
+		src := *dropped.Source
+		kept.Source = &src
+	case dropped.Source.Name != kept.Source.Name:
+		markContradiction(kept, "source", kept.Source.Name, dropped.Source.Name)
+	default:
 		switch kv, dv := kept.Source.Version, dropped.Source.Version; {
-		case kv == "":
+		case kv == "" && dv != "":
 			src := *kept.Source
 			src.Version = dv
 			kept.Source = &src
-		case dv != "" && dv != kv && kept.Unevaluable == "":
-			// Sorted, so the reason reads the same whichever listing came
-			// first.
-			lo, hi := kv, dv
-			if hi < lo {
-				lo, hi = hi, lo
-			}
-			kept.Unevaluable = fmt.Sprintf("the SBOM lists %s %s twice with source %s at two versions, %s and %s; "+
-				"it is not judged on either", kept.Name, kept.Version, kept.Source.Name, lo, hi)
+		case dv != "" && dv != kv:
+			markContradiction(kept, "source "+kept.Source.Name+" at", kv, dv)
 		}
 	}
 	if kept.Upstream == "" {
@@ -266,6 +266,19 @@ func keepEvidence(kept *pkgmeta.Package, dropped pkgmeta.Package) {
 	if kept.ModuleStream == "" {
 		kept.ModuleStream = dropped.ModuleStream
 	}
+}
+
+// markContradiction records, once, that the document's listings of kept
+// state two different values of one thing (D165).
+func markContradiction(kept *pkgmeta.Package, what, a, b string) {
+	if kept.Unevaluable != "" {
+		return
+	}
+	if b < a {
+		a, b = b, a
+	}
+	kept.Unevaluable = fmt.Sprintf("the SBOM lists %s %s twice with %s two values, %s and %s; it is not judged on either",
+		kept.Name, kept.Version, what, a, b)
 }
 
 func hasLocation(locs []pkgmeta.Location, loc pkgmeta.Location) bool {

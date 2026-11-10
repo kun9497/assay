@@ -26,3 +26,20 @@ func TestMatch_UnevaluablePackageIsOneTargetSkip(t *testing.T) {
 		t.Errorf("skipped = %+v, want one whole-package target skip with the reason", res.Skipped)
 	}
 }
+
+// A package whose ecosystem the database does not cover stays a coverage
+// skip -- with its remedy -- even when its listings also contradicted each
+// other: --fail-on-incomplete=target must not blame the caller for a
+// package the database could never judge (D36).
+func TestMatch_UnevaluableInAnUncoveredEcosystemIsACoverageSkip(t *testing.T) {
+	s := fakeStore{covers: []string{"Go"}}
+	p := pkg("x", "1.0.0", "npm")
+	p.Unevaluable = "contradictory source versions"
+	res, err := New(s).Match(pkgmeta.Target{Packages: []pkgmeta.Package{p}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Skipped) != 1 || res.Skipped[0].Cause != SkipCoverage {
+		t.Errorf("skipped = %+v, want one coverage skip", res.Skipped)
+	}
+}
