@@ -1402,30 +1402,27 @@ func absorb(findings []Finding, group map[string]int, dst, src int) {
 // records (osv.distroAuthored's own comment explains why a global read is
 // rejected), so a language-ecosystem record's genuinely-different `related`
 // advisories never reach this field at all.
-// advisoryCVEs is the CVE-shaped subset of lookupIDs, deduplicated and
-// sorted: the CVEs a skip of this advisory leaves unjudged. Related is in
-// lookupIDs only for the distro-authored records that carry it, so a
-// language record's unrelated `related` ids never reach this list.
-func advisoryCVEs(a advisory.Advisory) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, id := range lookupIDs(a) {
-		u := strings.ToUpper(id)
-		if strings.HasPrefix(u, "CVE-") && !seen[u] {
-			seen[u] = true
-			out = append(out, u)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
 func lookupIDs(a advisory.Advisory) []string {
 	out := make([]string, 0, 1+len(a.Aliases)+len(a.Upstream)+len(a.Related))
 	out = append(out, a.ID)
 	out = append(out, a.Aliases...)
 	out = append(out, a.Upstream...)
 	return append(out, a.Related...)
+}
+
+// advisoryCVEs is the CVE-shaped subset of lookupIDs, upper-cased,
+// deduplicated and sorted: the CVEs a skip of this advisory leaves unjudged
+// (QA 2026-11-10). Related reaches lookupIDs only for the distro-authored
+// records that carry it, so a language record's unrelated `related` ids never
+// reach this list.
+func advisoryCVEs(a advisory.Advisory) []string {
+	var out []string
+	for _, id := range lookupIDs(a) {
+		if u := strings.ToUpper(id); strings.HasPrefix(u, "CVE-") {
+			out = append(out, u)
+		}
+	}
+	return dedupSorted(out)
 }
 
 // dedupSorted sorts and removes blanks and repeats. Two records describing one

@@ -24,6 +24,8 @@ type fakeScan struct {
 	raw       string // when set, returned verbatim (malformed JSON tests)
 	// skipped are the report's skipped records (QA 2026-11-10).
 	skipped []map[string]any
+	// schema is the report's schemaVersion; 0 means the current one (21).
+	schema int
 }
 
 type fakeFinding struct {
@@ -84,8 +86,12 @@ func fakeAssay(t *testing.T, scans map[string]fakeScan) (execFunc, *[]string) {
 				"ratings":  ratings,
 			})
 		}
+		schema := sc.schema
+		if schema == 0 {
+			schema = 21
+		}
 		doc := map[string]any{
-			"schemaVersion": 18,
+			"schemaVersion": schema,
 			"summary":       map[string]any{"components": 1, "evaluated": evaluated, "findings": len(fs)},
 			"findings":      fs,
 			"skipped":       sc.skipped,

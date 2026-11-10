@@ -32,7 +32,8 @@ the scan outputs a previous -keep run left (<case>.scan.json) without
 running assay, so a failing run can be read again locally.
 
 Exit 0: every matcher-class label held. 1: at least one did not (a false
-positive, a miss, or a fixed version that differs). 2: the run itself
+positive, a miss, a fixed version that differs, or a label the scan did
+not judge -- its package unevaluated, or its CVE's comparison skipped). 2: the run itself
 cannot be trusted -- labels did not load, a scan exited 2, or a file could
 not be written. Data-class labels (known data gaps) are printed and kept
 out of both the metrics and the exit code, as is a label whose key the
@@ -48,9 +49,10 @@ type execFunc func(bin string, args ...string) (out []byte, exitCode int, err er
 // MISMATCH is an affected label found with a different fixed version (a
 // finding, but the wrong one -- a false positive about the fix and a false
 // negative about the real one, counted as a failure and in neither cell);
-// UNEVALUATED is a label whose package the scan could not judge at all
-// (summary.evaluated 0), which is neither clean nor affected; ERROR is a
-// scan that did not finish.
+// UNEVALUATED is a label the scan did not judge -- its package was not
+// evaluated at all (summary.evaluated 0), or the comparison for its CVE was
+// skipped (skipFor, QA 2026-11-10) -- which is neither clean nor affected;
+// ERROR is a scan that did not finish.
 const (
 	outTP          = "TP"
 	outTN          = "TN"
@@ -494,9 +496,12 @@ func judge(l Label, doc *scanDoc, fatal string) result {
 	// other CVEs only is about them, and changes nothing here.
 	skip := skipFor(doc, l)
 	switch {
-	case skip != "" && found && l.Expect.State == "affected" && l.Expect.Fixed != "":
-		// Affected is proven by the finding; which fix the skipped
-		// comparison would have named is not.
+	case skip != "" && found && l.Expect.State == "affected" && l.Expect.Fixed != "" && r.GotFixed == l.Expect.Fixed:
+		// Affected is proven and the findings name the fix the label
+		// demands, but the skipped comparison could have named another, so
+		// the fix is not confirmed. A finding that already names a
+		// different fix is a MISMATCH whatever the skip would have added
+		// (the joined fixes could not equal the label's), and stays one.
 		r.Outcome, r.Detail = outFixUnknown, fmt.Sprintf("affected (fixed=%q), but %s, so the fixed version is undetermined", r.GotFixed, skip)
 		return r
 	case skip != "" && !found:
@@ -523,8 +528,16 @@ func judge(l Label, doc *scanDoc, fatal string) result {
 	return r
 }
 
+// skipsCVEsSchema is the report schema from which skipped[].cves exists:
+// from it on, an absent list means the skipped advisory names no CVE.
+const skipsCVEsSchema = 21
+
 // skipFor describes the scan's skip that can leave l's CVE unjudged, or ""
-// when no skip for l's package can.
+// when no skip for l's package can. A skip names the CVE by its advisory id
+// or its cves list. One that does not may still be about it when the report
+// cannot say: a whole-package skip, and, in a document from before
+// skipsCVEsSchema, any skip whose id is not the label's CVE -- an ALAS id, or
+// even another CVE whose aliases the old report did not carry.
 func skipFor(doc *scanDoc, l Label) string {
 	for _, s := range doc.Skipped {
 		if s.Package.Name != l.Name {
@@ -533,19 +546,26 @@ func skipFor(doc *scanDoc, l Label) string {
 		switch {
 		case s.AdvisoryID == "":
 			return "the scan skipped the whole package"
-		case strings.EqualFold(s.AdvisoryID, l.CVE):
+		case namesID(l.CVE, s.AdvisoryID):
 			return fmt.Sprintf("the scan skipped %s", s.AdvisoryID)
-		}
-		for _, c := range s.CVEs {
-			if strings.EqualFold(c, l.CVE) {
-				return fmt.Sprintf("the scan skipped %s, which names %s", s.AdvisoryID, l.CVE)
-			}
-		}
-		if len(s.CVEs) == 0 && !strings.HasPrefix(strings.ToUpper(s.AdvisoryID), "CVE-") {
-			return fmt.Sprintf("the scan skipped %s and the report does not say which CVEs it names", s.AdvisoryID)
+		case namesID(l.CVE, s.CVEs...):
+			return fmt.Sprintf("the scan skipped %s, which names %s", s.AdvisoryID, l.CVE)
+		case doc.SchemaVersion < skipsCVEsSchema:
+			return fmt.Sprintf("the scan skipped %s and a schema %d report does not say which CVEs it names", s.AdvisoryID, doc.SchemaVersion)
 		}
 	}
 	return ""
+}
+
+// namesID reports whether any of ids is cve, the one comparison every CVE
+// join in this tool makes -- findings and skips alike.
+func namesID(cve string, ids ...string) bool {
+	for _, id := range ids {
+		if strings.EqualFold(id, cve) {
+			return true
+		}
+	}
+	return false
 }
 
 // appendDistinct keeps the first occurrence of each value, in arrival order,
@@ -569,10 +589,10 @@ func appendDistinct(xs []string, x string) []string {
 func findingNamesCVE(id string, aliases, upstream, related []string, ratings []rating, cve string) bool {
 	own := false
 	for _, l := range [][]string{{id}, aliases, upstream, related} {
+		if namesID(cve, l...) {
+			return true
+		}
 		for _, s := range l {
-			if strings.EqualFold(s, cve) {
-				return true
-			}
 			if strings.HasPrefix(strings.ToUpper(s), "CVE-") {
 				own = true
 			}
@@ -582,7 +602,7 @@ func findingNamesCVE(id string, aliases, upstream, related []string, ratings []r
 		return false
 	}
 	for _, r := range ratings {
-		if strings.EqualFold(r.AdvisoryID, cve) {
+		if namesID(cve, r.AdvisoryID) {
 			return true
 		}
 	}

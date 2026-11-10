@@ -34,7 +34,11 @@ func TestRun_QA1110_SkippedComparisonIsNotAVerdict(t *testing.T) {
 		{"affected label, its CVE skipped", "affected", "1.0.1", fakeScan{findings: []fakeFinding{other}, skipped: []map[string]any{skip("CVE-2031-9100")}}, "UNEVALUATED", "not reported, but"},
 		// A capture from before schema 21: the skip is an ALAS-shaped id with
 		// no cves list, so it cannot be ruled out.
-		{"old capture, unidentified skip", "clean", "", fakeScan{findings: []fakeFinding{other}, skipped: []map[string]any{skip("ALAS2031-0001")}}, "UNEVALUATED", "does not say which CVEs it names"},
+		{"old capture, unidentified skip", "clean", "", fakeScan{schema: 20, findings: []fakeFinding{other}, skipped: []map[string]any{skip("ALAS2031-0001")}}, "UNEVALUATED", "does not say which CVEs it names"},
+		// Before schema 21 even another CVE's skip may alias the label's.
+		{"old capture, another CVE skipped", "clean", "", fakeScan{schema: 20, findings: []fakeFinding{other}, skipped: []map[string]any{skip("CVE-2031-0001")}}, "UNEVALUATED", "does not say which CVEs it names"},
+		// From schema 21 an absent cves list means the advisory names no CVE.
+		{"schema 21, a GHSA naming no CVE skipped", "clean", "", fakeScan{findings: []fakeFinding{other}, skipped: []map[string]any{skip("GHSA-noid-noid-noid")}}, "TN", ""},
 		{"whole-package skip", "clean", "", fakeScan{evaluated: 1, skipped: []map[string]any{skip("")}}, "UNEVALUATED", "skipped the whole package"},
 		// Controls: a skip about another CVE changes nothing.
 		{"control: skip names another CVE", "clean", "", fakeScan{findings: []fakeFinding{other}, skipped: []map[string]any{skip("GHSA-dddd-eeee-ffff", "CVE-2031-9300")}}, "TN", ""},
@@ -46,6 +50,8 @@ func TestRun_QA1110_SkippedComparisonIsNotAVerdict(t *testing.T) {
 		{"affected, proven, no fix demanded", "affected", "", fakeScan{findings: []fakeFinding{hit}, skipped: []map[string]any{skip("CVE-2031-9100")}}, "TP", ""},
 		// ...but a fix the label demands cannot be confirmed past the skip.
 		{"affected, proven, fix demanded", "affected", "1.0.1", fakeScan{findings: []fakeFinding{hit}, skipped: []map[string]any{skip("CVE-2031-9100")}}, "FIX-UNKNOWN", "so the fixed version is undetermined"},
+		// A finding naming a different fix is a mismatch, skip or not.
+		{"affected, proven, a different fix", "affected", "1.0.9", fakeScan{findings: []fakeFinding{hit}, skipped: []map[string]any{skip("CVE-2031-9100")}}, "MISMATCH", `fixed="1.0.1", label says "1.0.9"`},
 		// A confirmed false positive is not hidden by a skip.
 		{"clean label reported anyway", "clean", "", fakeScan{findings: []fakeFinding{hit}, skipped: []map[string]any{skip("CVE-2031-9100")}}, "FP", "label says clean"},
 	} {
