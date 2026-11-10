@@ -65,8 +65,12 @@ type fileOwners struct {
 	// else, so an image whose /lib and /usr/lib are two directories has two
 	// files, and a package that owns one does not own the other (QA
 	// 2026-11-10). Nil -- no link evidence, or a caller that did not run the
-	// probe pass -- means exact paths only, the safe answer.
-	links map[string]string
+	// probe pass -- means exact paths only, the safe answer. Each link keeps
+	// the layer that made it: a record written BEFORE the link existed (an
+	// upper layer that deletes a real lib64 and relinks it to usr/lib) was
+	// written through the old directory, so the link does not make its paths
+	// twins (PR #267 review).
+	links map[string]topLink
 
 	// Built once, on the first list: the inventory by the names a list's
 	// filename or location spells.
@@ -77,6 +81,20 @@ type fileOwners struct {
 type listOwner struct {
 	owner pkgmeta.Owner
 	layer int
+}
+
+// topLink is one top-level directory link: where it resolves and the layer
+// index that made it.
+type topLink struct {
+	target string
+	layer  int
+}
+
+// spelling is one way of writing a probed path. via is the layer of the
+// link that makes it equivalent to the probed path, -1 for the path itself.
+type spelling struct {
+	path string
+	via  int
 }
 
 func newFileOwners(img *source.Image) *fileOwners {
@@ -206,8 +224,8 @@ var mergedUsrDirs = []string{"bin", "sbin", "lib", "lib32", "lib64", "libx32"}
 // ("usr/bin", "/usr/bin", "./usr/bin", "../usr/bin" and "//usr/bin" all
 // mean usr/bin at /), kept only when it lands under usr/. A hardlink names
 // a file, not a directory, and is not a layout link.
-func topLevelLinks(links map[string]source.Link) map[string]string {
-	out := map[string]string{}
+func topLevelLinks(links map[string]source.Link, layerOf func(string) int) map[string]topLink {
+	out := map[string]topLink{}
 	for _, d := range mergedUsrDirs {
 		l, ok := links[d]
 		if !ok || l.Hard || l.Target == "" {
@@ -215,7 +233,7 @@ func topLevelLinks(links map[string]source.Link) map[string]string {
 		}
 		target := strings.TrimPrefix(path.Clean("/"+l.Target), "/")
 		if strings.HasPrefix(target, "usr/") && target != d {
-			out[d] = target
+			out[d] = topLink{target: target, layer: layerOf(l.DiffID)}
 		}
 	}
 	return out
@@ -224,14 +242,14 @@ func topLevelLinks(links map[string]source.Link) map[string]string {
 // spellings is the path as given plus the spellings this image's top-level
 // links make equivalent, without a leading slash: bin/x is usr/bin/x when bin
 // links there, and usr/bin/x is bin/x and sbin/x when both link to it.
-func spellings(p string, links map[string]string) []string {
+func spellings(p string, links map[string]topLink) []spelling {
 	p = strings.TrimPrefix(p, "/")
-	out := []string{p}
+	out := []spelling{{p, -1}}
 	seen := map[string]bool{p: true}
-	add := func(s string) {
+	add := func(s string, via int) {
 		if !seen[s] {
 			seen[s] = true
-			out = append(out, s)
+			out = append(out, spelling{s, via})
 		}
 	}
 	// Sorted, so the order lookup tries spellings in does not depend on map
@@ -242,12 +260,12 @@ func spellings(p string, links map[string]string) []string {
 	}
 	sort.Strings(dirs)
 	for _, d := range dirs {
-		target := links[d]
+		target := links[d].target
 		switch {
 		case strings.HasPrefix(p, d+"/"):
-			add(target + strings.TrimPrefix(p, d))
+			add(target+strings.TrimPrefix(p, d), links[d].layer)
 		case strings.HasPrefix(p, target+"/"):
-			add(d + strings.TrimPrefix(p, target))
+			add(d+strings.TrimPrefix(p, target), links[d].layer)
 		}
 	}
 	return out
@@ -256,24 +274,27 @@ func spellings(p string, links map[string]string) []string {
 // lookup resolves one location: the owner whose record names the path (or
 // its merged-/usr twin) and whose record is in the file's layer or a later
 // one. A file in a layer after the record was put there by something other
-// than the package manager that wrote the record.
+// than the package manager that wrote the record. A twin spelling counts
+// only for a record no older than the link that makes it a twin: a record
+// from before the link was written through the directory the link replaced.
 func (o *fileOwners) lookup(p string, diffID string) (pkgmeta.Owner, bool) {
 	fileLayer := o.layerOf(diffID)
-	for _, s := range spellings(p, o.links) {
-		if o.rpm != nil && o.rpmLayer >= fileLayer {
+	for _, sp := range spellings(p, o.links) {
+		s := sp.path
+		if o.rpm != nil && o.rpmLayer >= fileLayer && o.rpmLayer >= sp.via {
 			if i, ok := o.rpm.Files["/"+s]; ok {
 				pkg := o.rpm.Packages[i]
 				return pkgmeta.Owner{Name: pkg.Name, Version: pkg.Version}, true
 			}
 		}
-		if o.apkFiles != nil && o.apkLayer >= fileLayer {
+		if o.apkFiles != nil && o.apkLayer >= fileLayer && o.apkLayer >= sp.via {
 			if name, ok := o.apkFiles[s]; ok {
 				if pkg, ok := o.apkByName[name]; ok {
 					return pkgmeta.Owner{Name: pkg.Name, Version: pkg.Version}, true
 				}
 			}
 		}
-		if lo, ok := o.lists[s]; ok && lo.layer >= fileLayer {
+		if lo, ok := o.lists[s]; ok && lo.layer >= fileLayer && lo.layer >= sp.via {
 			return lo.owner, true
 		}
 	}

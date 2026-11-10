@@ -94,7 +94,7 @@ func catalogApplicationProbes(ctx context.Context, img *source.Image, owned *fil
 	// Debian, sbin -> usr/bin on Fedora and Arch, lib64 -> usr/lib), never
 	// through a table that assumes them. The same pass recorded those links
 	// (mergedUsrDirs are its exact names), so this costs no extra read.
-	owned.links = topLevelLinks(links)
+	owned.links = topLevelLinks(links, owned.layerOf)
 	npmFiles := map[string][]byte{}
 	layerOf := map[string]string{}
 	type goBin struct {

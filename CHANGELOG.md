@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- An upper layer that deletes a real `/lib64` and relinks it to `/usr/lib` no longer lends the
+  package that owned the old `/lib64` files to the independent `/usr/lib` copy: a top-level link
+  spells an owner path only for an ownership record no older than the link. (D162 revised; PR #267 review)
 - An image whose `/lib` and `/usr/lib` (or `/bin` and `/usr/bin`) are separate directories no
   longer reports an OS package that owns a file under one as the owner of the other's independent
   copy: `locations[].ownedBy` spells a path only through the image's own top-level
