@@ -3,6 +3,7 @@ package scancmd
 import (
 	"bytes"
 	"path"
+	"sort"
 	"strings"
 
 	"github.com/kun9497/assay/internal/cataloger/apkdb"
@@ -58,11 +59,14 @@ type fileOwners struct {
 
 	lists map[string]listOwner // dpkg and pacman: path (no leading slash) -> owner
 
-	// merged holds the top-level directories this image really makes
-	// symlinks into usr/ (mergedUsrIn). Only those get the twin spelling:
-	// an image whose /lib and /usr/lib are two directories has two files,
-	// and a package that owns one does not own the other (QA 2026-11-10).
-	merged map[string]bool
+	// links maps each top-level directory this image makes a symlink to the
+	// directory it resolves to (topLevelLinks): bin -> usr/bin, sbin ->
+	// usr/bin, lib64 -> usr/lib. A path is spelled through these and nothing
+	// else, so an image whose /lib and /usr/lib are two directories has two
+	// files, and a package that owns one does not own the other (QA
+	// 2026-11-10). Nil -- no link evidence, or a caller that did not run the
+	// probe pass -- means exact paths only, the safe answer.
+	links map[string]string
 
 	// Built once, on the first list: the inventory by the names a list's
 	// filename or location spells.
@@ -196,38 +200,54 @@ func (o *fileOwners) addList(name string, f source.FileFromLayer, osPkgs []pkgme
 // the probe found at usr/bin/foo (rpm records the canonical usr/ path).
 var mergedUsrDirs = []string{"bin", "sbin", "lib", "lib32", "lib64", "libx32"}
 
-// mergedUsrIn reads, from the final link entries a probe pass found, which
-// of mergedUsrDirs the image makes a symlink to its usr/ counterpart --
-// "usr/bin", "/usr/bin" or "./usr/bin" for bin. A hardlink, a link
-// elsewhere, or a real directory is not merged.
-func mergedUsrIn(links map[string]source.Link) map[string]bool {
-	out := map[string]bool{}
+// topLevelLinks reads, from the final link entries a probe pass found, the
+// directory each of mergedUsrDirs resolves to when the image makes it a
+// symlink: the target resolved from the root the way the kernel does it
+// ("usr/bin", "/usr/bin", "./usr/bin", "../usr/bin" and "//usr/bin" all
+// mean usr/bin at /), kept only when it lands under usr/. A hardlink names
+// a file, not a directory, and is not a layout link.
+func topLevelLinks(links map[string]source.Link) map[string]string {
+	out := map[string]string{}
 	for _, d := range mergedUsrDirs {
 		l, ok := links[d]
-		if !ok || l.Hard {
+		if !ok || l.Hard || l.Target == "" {
 			continue
 		}
-		if path.Clean(strings.TrimPrefix(l.Target, "/")) == "usr/"+d {
-			out[d] = true
+		target := strings.TrimPrefix(path.Clean("/"+l.Target), "/")
+		if strings.HasPrefix(target, "usr/") && target != d {
+			out[d] = target
 		}
 	}
 	return out
 }
 
-// spellings is the path as given plus its merged-/usr twin, without a
-// leading slash, for the directories merged says this image merges.
-func spellings(p string, merged map[string]bool) []string {
+// spellings is the path as given plus the spellings this image's top-level
+// links make equivalent, without a leading slash: bin/x is usr/bin/x when bin
+// links there, and usr/bin/x is bin/x and sbin/x when both link to it.
+func spellings(p string, links map[string]string) []string {
 	p = strings.TrimPrefix(p, "/")
 	out := []string{p}
-	for _, d := range mergedUsrDirs {
-		if !merged[d] {
-			continue
+	seen := map[string]bool{p: true}
+	add := func(s string) {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
 		}
+	}
+	// Sorted, so the order lookup tries spellings in does not depend on map
+	// iteration.
+	dirs := make([]string, 0, len(links))
+	for d := range links {
+		dirs = append(dirs, d)
+	}
+	sort.Strings(dirs)
+	for _, d := range dirs {
+		target := links[d]
 		switch {
-		case strings.HasPrefix(p, "usr/"+d+"/"):
-			out = append(out, strings.TrimPrefix(p, "usr/"))
 		case strings.HasPrefix(p, d+"/"):
-			out = append(out, "usr/"+p)
+			add(target + strings.TrimPrefix(p, d))
+		case strings.HasPrefix(p, target+"/"):
+			add(d + strings.TrimPrefix(p, target))
 		}
 	}
 	return out
@@ -239,7 +259,7 @@ func spellings(p string, merged map[string]bool) []string {
 // than the package manager that wrote the record.
 func (o *fileOwners) lookup(p string, diffID string) (pkgmeta.Owner, bool) {
 	fileLayer := o.layerOf(diffID)
-	for _, s := range spellings(p, o.merged) {
+	for _, s := range spellings(p, o.links) {
 		if o.rpm != nil && o.rpmLayer >= fileLayer {
 			if i, ok := o.rpm.Files["/"+s]; ok {
 				pkg := o.rpm.Packages[i]

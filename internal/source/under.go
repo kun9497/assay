@@ -97,7 +97,7 @@ type Link struct {
 // and only then is it merged into what the upper layers already decided.
 // Across layers the newest still wins, through found.
 func (img *Image) collect(ctx context.Context, root string, match func(name string) bool) (map[string]FileFromLayer, int, error) {
-	out, links, err := img.collectWith(ctx, []string{root}, func(name string, _ *tar.Header) bool { return match(name) }, nil, nil)
+	out, links, err := img.collectWith(ctx, []string{root}, func(name string, _ *tar.Header) bool { return match(name) }, nil, nil, false)
 	return out, len(links), err
 }
 
@@ -130,7 +130,10 @@ const sniffBytes = 4
 // (not hitLink: the probes discard the link count, and a link they could
 // not follow is not a file they failed to read). The collect callers pass
 // nil, since a name-only match cannot split one name two ways.
-func (img *Image) collectWith(ctx context.Context, roots []string, match func(name string, h *tar.Header) bool, sniff func(name string, head []byte) bool, scope func(name string) bool) (map[string]FileFromLayer, map[string]Link, error) {
+// keepTargets records each link's target and layer; the count-only callers
+// (FilesUnder, FilesNamed, FilesMatching) pass false and the map holds empty
+// Links, so they pay for a name per link and no more.
+func (img *Image) collectWith(ctx context.Context, roots []string, match func(name string, h *tar.Header) bool, sniff func(name string, head []byte) bool, scope func(name string) bool, keepTargets bool) (map[string]FileFromLayer, map[string]Link, error) {
 	out := map[string]FileFromLayer{}
 	found := map[string]bool{}
 	deleted := map[string]bool{}
@@ -231,7 +234,11 @@ func (img *Image) collectWith(ctx context.Context, roots []string, match func(na
 				// Recorded once per name the image ends up with a link at,
 				// not per link entry: a link a later entry replaced is not
 				// a file this scan failed to read.
-				links[name] = Link{Target: hit.linkname, Hard: hit.hard, DiffID: l.DiffID}
+				if keepTargets {
+					links[name] = Link{Target: hit.linkname, Hard: hit.hard, DiffID: l.DiffID}
+				} else {
+					links[name] = Link{}
+				}
 			}
 		}
 		for k := range layerDeleted {
@@ -387,25 +394,26 @@ func (img *Image) FilesProbed(ctx context.Context, roots []string, match func(na
 }
 
 // FilesProbedLinks is FilesProbed that also returns the link entries it
-// found as the final entry at a matched name, with their targets, instead of
-// only counting them. exact names entries outside the roots the pass also
-// considers -- a top-level `bin` or `lib`, whose link to usr/ says whether
-// the image is merged-/usr (D162) -- through the same match, at no extra
-// pass.
+// found as the final entry at a matched name, with their targets and the
+// layer that put them there, instead of only counting them. exact names
+// entries outside the roots whose final symlink the pass records -- a
+// top-level `bin` or `lib`, whose link says how the image lays out /usr
+// (D162) -- at no extra pass. An exact name is never handed to match and
+// never read: only a symlink there is recorded.
 func (img *Image) FilesProbedLinks(ctx context.Context, roots, exact []string, match func(name string, h *tar.Header) bool, sniff func(name string, head []byte) bool) (map[string]FileFromLayer, map[string]Link, error) {
 	if len(roots) == 0 {
-		return nil, nil, fmt.Errorf("source: FilesProbed needs at least one root")
+		return nil, nil, fmt.Errorf("source: a probe pass needs at least one root")
 	}
 	norm := make([]string, 0, len(roots))
 	for _, r := range roots {
 		n := normaliseEntry(r)
 		if n == "" || n == "." {
-			return nil, nil, fmt.Errorf("source: FilesProbed needs a directory, got %q", r)
+			return nil, nil, fmt.Errorf("source: a probe pass needs a directory, got %q", r)
 		}
 		norm = append(norm, n)
 	}
 	if match == nil || sniff == nil {
-		return nil, nil, fmt.Errorf("source: FilesProbed needs a match and a sniff")
+		return nil, nil, fmt.Errorf("source: a probe pass needs a match and a sniff")
 	}
 	exactSet := map[string]bool{}
 	for _, e := range exact {
@@ -423,6 +431,9 @@ func (img *Image) FilesProbedLinks(ctx context.Context, roots, exact []string, m
 		return false
 	}
 	return img.collectWith(ctx, norm, func(name string, h *tar.Header) bool {
+		if exactSet[name] {
+			return h.Typeflag == tar.TypeSymlink
+		}
 		return inScope(name) && match(name, h)
-	}, sniff, inScope)
+	}, sniff, inScope, true)
 }

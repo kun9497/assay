@@ -306,8 +306,8 @@ func TestSpellings(t *testing.T) {
 	}
 }
 
-// allMerged is every mergedUsrDirs entry marked merged, for spellings' table.
-var allMerged = map[string]bool{"bin": true, "sbin": true, "lib": true, "lib32": true, "lib64": true, "libx32": true}
+// allMerged is a merged-/usr Debian's top-level links, for spellings' table.
+var allMerged = map[string]string{"bin": "usr/bin", "sbin": "usr/sbin", "lib": "usr/lib", "lib32": "usr/lib32", "lib64": "usr/lib64", "libx32": "usr/libx32"}
 
 // QA 2026-11-10: /lib and /usr/lib are two directories. The APK that owns
 // lib/node_modules/minimatch/package.json does not own the independent copy at
@@ -345,25 +345,39 @@ func TestRun_QA1110_SplitUsrDoesNotLendTheOwner(t *testing.T) {
 	}
 }
 
-// mergedUsrIn reads only a symlink into the usr/ counterpart.
-func TestMergedUsrIn(t *testing.T) {
-	got := mergedUsrIn(map[string]source.Link{
-		"bin":   {Target: "usr/bin"},
-		"sbin":  {Target: "/usr/sbin"},
-		"lib":   {Target: "./usr/lib"},
-		"lib64": {Target: "usr/lib"},               // elsewhere: not lib64's twin
-		"lib32": {Target: "usr/lib32", Hard: true}, // a hardlink is not a directory link
+// topLevelLinks resolves a link the way the kernel does at / and keeps only
+// one that lands under usr/; spellings maps a path through those links in
+// both directions, including Fedora's and Arch's sbin -> usr/bin.
+func TestTopLevelLinks(t *testing.T) {
+	got := topLevelLinks(map[string]source.Link{
+		"bin":    {Target: "../usr/bin"},
+		"sbin":   {Target: "usr/bin"}, // Fedora 42+ and Arch
+		"lib":    {Target: "//usr/lib"},
+		"lib64":  {Target: "./usr/lib"}, // Arch
+		"lib32":  {Target: "usr/lib32", Hard: true},
+		"libx32": {Target: "opt/libx32"}, // not under usr/: not a layout link
 	})
-	want := map[string]bool{"bin": true, "sbin": true, "lib": true}
+	want := map[string]string{"bin": "usr/bin", "sbin": "usr/bin", "lib": "usr/lib", "lib64": "usr/lib"}
 	if len(got) != len(want) {
-		t.Fatalf("mergedUsrIn = %v, want %v", got, want)
+		t.Fatalf("topLevelLinks = %v, want %v", got, want)
 	}
-	for d := range want {
-		if !got[d] {
-			t.Errorf("mergedUsrIn lacks %s: %v", d, got)
+	for d, w := range want {
+		if got[d] != w {
+			t.Errorf("topLevelLinks[%s] = %q, want %q", d, got[d], w)
 		}
 	}
-	if s := strings.Join(spellings("usr/lib64/x", got), "|"); s != "usr/lib64/x" {
-		t.Errorf("spellings with lib64 unmerged = %q", s)
+	for _, tc := range []struct{ in, want string }{
+		{"sbin/tool", "sbin/tool|usr/bin/tool"},
+		{"usr/bin/tool", "usr/bin/tool|bin/tool|sbin/tool"},
+		{"lib64/ld.so", "lib64/ld.so|usr/lib/ld.so"},
+		{"usr/sbin/tool", "usr/sbin/tool"},
+		{"usr/lib32/x", "usr/lib32/x"},
+	} {
+		if s := strings.Join(spellings(tc.in, got), "|"); s != tc.want {
+			t.Errorf("spellings(%q) = %q, want %q", tc.in, s, tc.want)
+		}
+	}
+	if s := strings.Join(spellings("usr/lib/x", nil), "|"); s != "usr/lib/x" {
+		t.Errorf("spellings with no link evidence = %q, want the exact path only", s)
 	}
 }
