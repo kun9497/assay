@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/kun9497/assay/internal/report"
+	"github.com/kun9497/assay/internal/source"
 )
 
 // A scoped package whose directory is a link: @s/x under node_modules is a
@@ -32,6 +34,9 @@ func TestRun_QA1110_LinkedScopedNpmPackage(t *testing.T) {
 	}
 	if state != report.ScopeRead || len(doc.Unread) != 0 {
 		t.Errorf("npm scope = %q, unread = %v; want read with nothing unread", state, doc.Unread)
+	}
+	if n := doc.Summary.Components; n < 2 {
+		t.Errorf("components = %d, want the OS package and @s/mm", n)
 	}
 	for _, c := range []struct {
 		name string
@@ -147,5 +152,87 @@ func TestRun_QA1110_UnresolvedNpmLinkInEveryRenderer(t *testing.T) {
 		if output == "sarif" && !strings.Contains(out.String(), `"assay/not-read"`) {
 			t.Errorf("sarif: no assay/not-read result:\n%s", out.String())
 		}
+	}
+}
+
+// PR #271 review: a target already read at its own path under a root is that
+// package, not a second copy (pnpm's node_modules/x -> .pnpm/x@v/node_modules/x,
+// and a link from one root into another); a target reached through a
+// top-level layout link (lib -> usr/lib) or through another linked package
+// directory resolves as the kernel would.
+func TestRun_QA1110_LinkedNpmPackagesCountedOnceAndResolvedThroughLinks(t *testing.T) {
+	pkg := []byte(`{"name":"minimatch","version":"3.0.4"}`)
+	const pnpm = "opt/app-root/src/node_modules/.pnpm/minimatch@3.0.4/node_modules/minimatch"
+	for _, tc := range []struct {
+		name    string
+		entries []probeLayerEntry
+		want    []string
+	}{
+		{"pnpm link to a package already read", []probeLayerEntry{
+			{name: pnpm + "/package.json", body: pkg},
+			{name: "opt/app-root/src/node_modules/minimatch", link: ".pnpm/minimatch@3.0.4/node_modules/minimatch"},
+		}, []string{pnpm + "/package.json"}},
+		{"a link from one root into another", []probeLayerEntry{
+			{name: "usr/lib/node_modules/minimatch/package.json", body: pkg},
+			{name: "usr/local/lib/node_modules/minimatch", link: "/usr/lib/node_modules/minimatch"},
+		}, []string{"usr/lib/node_modules/minimatch/package.json"}},
+		{"through the top-level lib link", []probeLayerEntry{
+			{name: "lib", link: "usr/lib"},
+			{name: "usr/lib/mm/package.json", body: pkg},
+			{name: "usr/local/lib/node_modules/minimatch", link: "/lib/mm"},
+		}, []string{"usr/local/lib/node_modules/minimatch/package.json"}},
+		{"through another linked package directory", []probeLayerEntry{
+			{name: "opt/mm/package.json", body: pkg},
+			{name: "usr/lib/node_modules/b", link: "/opt/mm"},
+			{name: "usr/local/lib/node_modules/minimatch", link: "/usr/lib/node_modules/b"},
+		}, []string{"usr/lib/node_modules/b/package.json", "usr/local/lib/node_modules/minimatch/package.json"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tarPath := filepath.Join(t.TempDir(), "image.tar")
+			writeLayeredProbeImage(t, tarPath, append(alpineLayer(), tc.entries...))
+			var out, errOut bytes.Buffer
+			Run(context.Background(), probeDB(t), "docker-archive:"+tarPath, Options{Output: "json"}, &out, &errOut)
+			var doc report.Document
+			if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+				t.Fatalf("decode: %v\n%s", err, errOut.String())
+			}
+			seen := map[string]bool{}
+			for _, f := range doc.Findings {
+				if f.Package.Name == "minimatch" || f.Package.Name == "b" {
+					for _, l := range f.Package.Locations {
+						seen[l.Path] = true
+					}
+				}
+			}
+			var got []string
+			for p := range seen {
+				got = append(got, p)
+			}
+			sort.Strings(got)
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") || len(doc.Unread) != 0 {
+				t.Errorf("locations = %v, unread = %v; want %v and nothing unread", got, doc.Unread, tc.want)
+			}
+		})
+	}
+}
+
+// PR #271 review: an error reading a linked package.json -- here the
+// per-file limit (D112) -- fails the scan as the probe pass's own errors do,
+// exit 2 without any gate, rather than becoming one more unread path.
+func TestRun_QA1110_LinkedNpmReadErrorFailsTheScan(t *testing.T) {
+	old := source.MaxFileBytes
+	source.MaxFileBytes = 4096
+	defer func() { source.MaxFileBytes = old }()
+	big := []byte(`{"name":"minimatch","version":"3.0.4","description":"` + strings.Repeat("x", 8192) + `"}`)
+	tarPath := filepath.Join(t.TempDir(), "image.tar")
+	writeLayeredProbeImage(t, tarPath, append(alpineLayer(),
+		probeLayerEntry{name: "opt/mm/package.json", body: big},
+		probeLayerEntry{name: "usr/lib/node_modules/minimatch", link: "/opt/mm"}))
+	var out, errOut bytes.Buffer
+	if code := Run(context.Background(), probeDB(t), "docker-archive:"+tarPath, Options{Output: "json"}, &out, &errOut); code != 2 {
+		t.Errorf("exit = %d, want 2\nstderr: %s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "read the npm packages behind links") {
+		t.Errorf("stderr does not name the failing read:\n%s", errOut.String())
 	}
 }

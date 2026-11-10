@@ -8273,13 +8273,19 @@ Beyond that:
 path: the probe pass records the link, and the one `package.json` it leads to is read through the
 image's own resolver -- layers held to their diff ids (D123), a hardlink by the inode of the layer
 that made it (D130), an upper layer's entry shadowing a lower one (A10), the link bound and cycles
--- within the per-file budget (D112). A directory link is resolved from `/` and only
-`<target>/package.json` is read; its target is never walked, so `x -> /opt/x` adds one package
-and `/opt` stays unread. A candidate that does not resolve (a broken link, one leading out of the
-image) and a linked scope directory (`@s -> ...`, which would need a walk) are listed in
+-- within the per-file budget (D112). A directory link's target is resolved through the links
+the pass records (the npm-root links and the top-level layout links such as `lib -> usr/lib`),
+component by component; a link elsewhere in the target's path is not followed. Only
+`<target>/package.json` is read and the target is never walked, so `x -> /opt/x` adds one package
+and `/opt/x/node_modules` -- the linked package's own dependencies -- stays unread, as
+"node_modules elsewhere" in the scope sentence. A target already read at its own path under a root
+(pnpm's `node_modules/x -> .pnpm/x@v/node_modules/x`, or a link from one root into another) is that
+package and is not counted twice. A candidate that does not resolve (a broken link, or one behind an
+unrecorded link) and a linked scope directory (`@s -> ...`, which would need a walk) are listed in
 `unread[]` with the path and reason, so `--fail-on-incomplete=target` exits 2, and the npm
-`applicationScope` entry is `partial` rather than `none`. Links in bin directories are not npm
-candidates. Before, all three link shapes read 0 findings, exit 0, npm `none` on an image where
+`applicationScope` entry is `partial` rather than `none`. An error reading the image during this
+step (the budget, the deadline, a layer) fails the scan with exit 2, as the probe pass's own errors
+do. Links in bin directories are not npm candidates. Before, all three link shapes read 0 findings, exit 0, npm `none` on an image where
 the same package as a regular file was 4 findings.*
 
 **Decision.** An image scan runs one more pass over its layers, over ten fixed locations

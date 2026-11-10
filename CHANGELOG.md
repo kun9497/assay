@@ -14,9 +14,9 @@ All notable changes to this project are documented here. The format follows
   candidate that does not resolve, and a linked scope directory, are listed in `unread[]` with the
   reason, so `--fail-on-incomplete=target` exits 2, and the npm `applicationScope` state is the
   new `partial` -- schema 22, breaking for a consumer switching on that state. A directory link's
-  target is not walked. (D160 revised; QA 2026-11-10)
-
-### Fixed
+  target is not walked, so its own nested dependencies are not read; a target already read under
+  a root (pnpm's `.pnpm` layout) is counted once; an error reading a linked `package.json` fails
+  the scan. (D160 revised; QA 2026-11-10)
 - An image whose `/lib` and `/usr/lib` (or `/bin` and `/usr/bin`) are separate directories no
   longer reports an OS package that owns a file under one as the owner of the other's independent
   copy: `locations[].ownedBy` spells a path only through the image's own top-level

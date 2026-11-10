@@ -121,11 +121,14 @@ func catalogApplicationProbes(ctx context.Context, img *source.Image, owned *fil
 	// here, through the image's own resolver (layers, D123; hardlinks by the
 	// layer that made them, D130; the link bound and cycles), reading
 	// exactly one package.json per candidate -- a directory link's target
-	// is not walked (D160's unit is the logical install candidate under a
+	// is resolved through the recorded links (throughLinks) and not walked (D160's unit is the logical install candidate under a
 	// fixed root, not a new root). One that does not resolve is unread with
 	// its reason, so the strict gate sees it, and the npm scope is partial
 	// rather than none.
-	unresolvedNpm := resolveNpmLinks(ctx, img, links, npmFiles, layerOf)
+	unresolvedNpm, err := resolveNpmLinks(ctx, img, links, npmFiles, layerOf)
+	if err != nil {
+		return nil, cyclonedx.Stats{}, nil, err
+	}
 	npmPkgs, npmStats := npminstalled.Catalog(npmFiles)
 	for i := range npmPkgs {
 		for j := range npmPkgs[i].Locations {
@@ -262,7 +265,21 @@ func isScopeDir(name string) bool {
 // npm roots (bin directories, the top-level layout links) are not npm
 // candidates and are left alone. It returns how many candidates did not
 // resolve; each is recorded on the image as unread, with its reason.
-func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]source.Link, files map[string][]byte, layerOf map[string]string) int {
+//
+// A directory link's target is resolved through the links the pass recorded
+// (the npm-root links themselves and the top-level layout links such as
+// lib -> usr/lib), component by component as the kernel would; a link
+// elsewhere in the target's path was not recorded and is not followed, and
+// the candidate is then unread with that reason. A target already read at
+// its own path under a root (pnpm's node_modules/x -> .pnpm/x@v/node_modules/x)
+// is that package, not a second copy, and is skipped. Packages nested under a
+// linked directory's target are node_modules outside the roots and are not
+// read (D160 revised) -- the scope sentence's "node_modules elsewhere".
+//
+// An error reading the image (the scan's budget, its deadline, a layer) is
+// returned, as the probe pass returns it: D112's "an error, never a shorter
+// result".
+func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]source.Link, files map[string][]byte, layerOf map[string]string) (int, error) {
 	type cand struct{ logical, read, link string }
 	var cands []cand
 	unresolved := 0
@@ -292,12 +309,15 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 			if !strings.HasPrefix(dir, "/") {
 				dir = path.Join(path.Dir(n), dir)
 			}
-			dir = strings.TrimPrefix(path.Clean("/"+dir), "/")
+			dir = throughLinks(strings.TrimPrefix(path.Clean("/"+dir), "/"), links)
+			if _, read := files[dir+"/package.json"]; read {
+				continue
+			}
 			cands = append(cands, cand{logical: n + "/package.json", read: dir + "/package.json", link: l.Target})
 		}
 	}
 	if len(cands) == 0 {
-		return unresolved
+		return unresolved, nil
 	}
 	want := make([]string, 0, len(cands))
 	for _, c := range cands {
@@ -305,22 +325,49 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 	}
 	got, err := img.Files(ctx, want)
 	if err != nil {
-		for _, c := range cands {
-			img.NoteUnresolved(c.logical, fmt.Sprintf("npm package link to %q could not be read: %v", c.link, err))
-		}
-		return unresolved + len(cands)
+		return 0, fmt.Errorf("read the npm packages behind links: %w", err)
 	}
 	for _, c := range cands {
 		f, ok := got[c.read]
 		if !ok {
 			unresolved++
-			img.NoteUnresolved(c.logical, fmt.Sprintf("npm package link to %q does not resolve to a package.json inside the image", c.link))
+			img.NoteUnresolved(c.logical, fmt.Sprintf("npm package link to %q does not resolve to a package.json the probe can read (missing, or behind a link outside the npm roots and the top-level layout links)", c.link))
 			continue
 		}
 		files[c.logical] = f.Data
 		layerOf[c.logical] = f.DiffID
 	}
-	return unresolved
+	return unresolved, nil
+}
+
+// throughLinks rewrites p through the symlinks in links, leftmost component
+// first and again after every rewrite, the way the kernel walks a path: a
+// target under a linked top-level directory (lib -> usr/lib) or through
+// another linked package directory reaches the real path. Bounded like the
+// image's own resolver, so a cycle ends with the path as it stands.
+func throughLinks(p string, links map[string]source.Link) string {
+	for hops := 0; hops < 40; hops++ {
+		parts := strings.Split(p, "/")
+		rewritten := false
+		for i := 1; i <= len(parts); i++ {
+			prefix := strings.Join(parts[:i], "/")
+			l, ok := links[prefix]
+			if !ok || l.Hard || l.Target == "" {
+				continue
+			}
+			t := l.Target
+			if !strings.HasPrefix(t, "/") {
+				t = path.Join(path.Dir(prefix), t)
+			}
+			p = strings.TrimPrefix(path.Clean("/"+t+"/"+strings.Join(parts[i:], "/")), "/")
+			rewritten = true
+			break
+		}
+		if !rewritten {
+			return p
+		}
+	}
+	return p
 }
 
 // minExecutableBytes is the smallest file the Go probe considers: no ELF
