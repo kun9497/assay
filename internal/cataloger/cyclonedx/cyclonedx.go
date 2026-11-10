@@ -153,7 +153,7 @@ func catalogSubject(subject component, ctx osContext, target *pkgmeta.Target, st
 	} else {
 		mergeDeduped(scratchTarget, scratchStats, base, target, stats)
 	}
-	catalogDeduped(subject.Components, contextFor(subject.Components, ctx), base, target, stats)
+	catalogDeduped(subject.Components, childContext(subject, ctx), base, target, stats)
 }
 
 // catalogDeduped is catalog for the subject's nested components: the same
@@ -166,7 +166,7 @@ func catalogDeduped(components []component, ctx osContext, base int, target *pkg
 		var scratchStats Stats
 		catalogOne(c, ctx, &scratchTarget, &scratchStats)
 		mergeDeduped(scratchTarget, scratchStats, base, target, stats)
-		catalogDeduped(c.Components, contextFor(c.Components, ctx), base, target, stats)
+		catalogDeduped(c.Components, childContext(c, ctx), base, target, stats)
 	}
 }
 
@@ -214,13 +214,23 @@ func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package) int {
 	// package, while its top-level twin, with no OS beside it, stays
 	// unkeyed. They are still one package listed twice -- and the keyed one
 	// is the one that can be judged (PR #270 review: two packages, one of
-	// them a spurious not-evaluated, exit 2 under the strict gate).
+	// them a spurious not-evaluated, exit 2 under the strict gate). Only a
+	// unique twin is that package: an unkeyed listing beside busybox keyed
+	// to Alpine 3.19 AND busybox keyed to 3.20 belongs to neither provably,
+	// and merging it into the first one attached its install path to that
+	// release's findings -- the other release's when the document listed
+	// them the other way round (PR #270 review). It stays its own package,
+	// unkeyed and reported not evaluated.
+	match := -1
 	for i, q := range pkgs {
 		if q.Type == p.Type && q.Name == p.Name && q.Version == p.Version && (q.Ecosystem == "" || p.Ecosystem == "") {
-			return i
+			if match >= 0 {
+				return -1
+			}
+			match = i
 		}
 	}
-	return -1
+	return match
 }
 
 // keepEvidence folds a dropped second listing onto the kept package: every
@@ -281,7 +291,7 @@ func pseudoSubjectShape(subject component, scratch Stats) bool {
 func catalog(components []component, ctx osContext, target *pkgmeta.Target, stats *Stats) {
 	for _, c := range components {
 		catalogOne(c, ctx, target, stats)
-		catalog(c.Components, contextFor(c.Components, ctx), target, stats)
+		catalog(c.Components, childContext(c, ctx), target, stats)
 	}
 }
 
@@ -512,6 +522,23 @@ func contextFor(siblings []component, inherited osContext) osContext {
 		ctx.ecosystem = eco
 	}
 	return ctx
+}
+
+// childContext is the context parent's own components are keyed in. An
+// operating-system component with children declares the OS they belong to,
+// as an OS among them would (PR #270 review: metadata.component as Alpine
+// with busybox directly under it left busybox unkeyed, and keyed it to a
+// Debian declared at the top when there was one -- 51 false findings); an
+// OS declared among the children is nearer still and comes first
+// (contextFor).
+func childContext(parent component, inherited osContext) osContext {
+	if d := distroOf(parent); d != nil {
+		inherited = osContext{distro: d}
+		if eco, err := d.Ecosystem(); err == nil {
+			inherited.ecosystem = eco
+		}
+	}
+	return contextFor(parent.Components, inherited)
 }
 
 // documentDistro is the Target's distro, the one the scan reports and its
