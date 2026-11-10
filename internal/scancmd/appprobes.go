@@ -115,6 +115,17 @@ func catalogApplicationProbes(ctx context.Context, img *source.Image, owned *fil
 		}
 	}
 
+	// QA 2026-11-10: a package.json that is a link, or a package directory
+	// under node_modules that is a link, is still an installed package at
+	// that logical path. The pass recorded those links; they are resolved
+	// here, through the image's own resolver (layers, D123; hardlinks by the
+	// layer that made them, D130; the link bound and cycles), reading
+	// exactly one package.json per candidate -- a directory link's target
+	// is not walked (D160's unit is the logical install candidate under a
+	// fixed root, not a new root). One that does not resolve is unread with
+	// its reason, so the strict gate sees it, and the npm scope is partial
+	// rather than none.
+	unresolvedNpm := resolveNpmLinks(ctx, img, links, npmFiles, layerOf)
 	npmPkgs, npmStats := npminstalled.Catalog(npmFiles)
 	for i := range npmPkgs {
 		for j := range npmPkgs[i].Locations {
@@ -123,8 +134,12 @@ func catalogApplicationProbes(ctx context.Context, img *source.Image, owned *fil
 	}
 	pkgs = append(pkgs, npmPkgs...)
 	addStats(&stats, npmStats)
+	npmState := scopeState(npmStats.Components > 0)
+	if unresolvedNpm > 0 {
+		npmState = report.ScopePartial
+	}
 	scope = append(scope, report.ApplicationScopeRecord{
-		Ecosystem: "npm", State: scopeState(npmStats.Components > 0), Roots: npminstalled.Roots,
+		Ecosystem: "npm", State: npmState, Roots: npminstalled.Roots,
 	})
 
 	// Sorted, so two scans of one image list the binaries' packages in one
@@ -178,6 +193,12 @@ func probeCandidate(name string, h *tar.Header) bool {
 	if path.Base(name) == "package.json" {
 		return underAny(name, npminstalled.Roots)
 	}
+	// A package directory that is a symlink -- usr/lib/node_modules/x, or
+	// a scoped @s/x -- is recorded for resolveNpmLinks; nothing is read
+	// from it here.
+	if h.Typeflag == tar.TypeSymlink && underAny(name, npminstalled.Roots) && isPackageDir(name) {
+		return true
+	}
 	switch h.Typeflag {
 	case tar.TypeReg, tar.TypeGNUSparse, tar.TypeCont:
 	default:
@@ -212,6 +233,78 @@ func probeSniff(name string, head []byte) bool {
 		return true
 	}
 	return isELF(head)
+}
+
+// isPackageDir reports whether name is a package's own directory inside a
+// node_modules tree: its parent is node_modules, or a scope directory
+// (@scope) whose parent is.
+func isPackageDir(name string) bool {
+	parent := path.Dir(name)
+	if path.Base(parent) == "node_modules" {
+		return true
+	}
+	return strings.HasPrefix(path.Base(parent), "@") && path.Base(path.Dir(parent)) == "node_modules"
+}
+
+// resolveNpmLinks reads, for every link the probe pass found at an npm
+// candidate, the one package.json it leads to, and adds it to files under
+// its logical path -- the path under the fixed root the package is
+// installed at -- with the layer of the file actually read. A package.json
+// that is itself a link is read through the image's resolver at its own
+// path; a package directory that is a link is resolved from the root the
+// way the kernel resolves it and its package.json read. Links outside the
+// npm roots (bin directories, the top-level layout links) are not npm
+// candidates and are left alone. It returns how many candidates did not
+// resolve; each is recorded on the image as unread, with its reason.
+func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]source.Link, files map[string][]byte, layerOf map[string]string) int {
+	type cand struct{ logical, read, link string }
+	var cands []cand
+	names := make([]string, 0, len(links))
+	for n := range links {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		l := links[n]
+		switch {
+		case !underAny(n, npminstalled.Roots):
+		case path.Base(n) == "package.json":
+			cands = append(cands, cand{logical: n, read: n, link: l.Target})
+		case !l.Hard && isPackageDir(n):
+			dir := l.Target
+			if !strings.HasPrefix(dir, "/") {
+				dir = path.Join(path.Dir(n), dir)
+			}
+			dir = strings.TrimPrefix(path.Clean("/"+dir), "/")
+			cands = append(cands, cand{logical: n + "/package.json", read: dir + "/package.json", link: l.Target})
+		}
+	}
+	if len(cands) == 0 {
+		return 0
+	}
+	want := make([]string, 0, len(cands))
+	for _, c := range cands {
+		want = append(want, c.read)
+	}
+	got, err := img.Files(ctx, want)
+	if err != nil {
+		for _, c := range cands {
+			img.NoteUnresolved(c.logical, fmt.Sprintf("npm package link to %q could not be read: %v", c.link, err))
+		}
+		return len(cands)
+	}
+	unresolved := 0
+	for _, c := range cands {
+		f, ok := got[c.read]
+		if !ok {
+			unresolved++
+			img.NoteUnresolved(c.logical, fmt.Sprintf("npm package link to %q does not resolve to a package.json inside the image", c.link))
+			continue
+		}
+		files[c.logical] = f.Data
+		layerOf[c.logical] = f.DiffID
+	}
+	return unresolved
 }
 
 // minExecutableBytes is the smallest file the Go probe considers: no ELF
