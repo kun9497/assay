@@ -81,7 +81,11 @@ func catalogApplicationProbes(ctx context.Context, img *source.Image, owned *fil
 	// `files`, accepted unread like a package.json.
 	roots := append(append([]string{}, npminstalled.Roots...), goBinDirs...)
 	roots = append(roots, dpkgdb.InfoDir, pacmanLocalDir)
-	files, links, err := img.FilesProbedLinks(ctx, roots, mergedUsrDirs, probeCandidate, probeSniff)
+	// The exact names are the top-level layout links (D162) and the npm
+	// roots themselves: a root that is a symlink holds every package behind
+	// it, and the pass sees nothing under its name (PR #271 review).
+	exact := append(append([]string{}, mergedUsrDirs...), npminstalled.Roots...)
+	files, links, err := img.FilesProbedLinks(ctx, roots, exact, probeCandidate, probeSniff)
 	if err != nil {
 		return nil, cyclonedx.Stats{}, nil, fmt.Errorf("application probes: %w", err)
 	}
@@ -121,11 +125,11 @@ func catalogApplicationProbes(ctx context.Context, img *source.Image, owned *fil
 	// here, through the image's own resolver (layers, D123; hardlinks by the
 	// layer that made them, D130; the link bound and cycles), reading
 	// exactly one package.json per candidate -- a directory link's target
-	// is resolved through the recorded links (throughLinks) and not walked (D160's unit is the logical install candidate under a
+	// is resolved through the recorded links (resolveLink) and not walked (D160's unit is the logical install candidate under a
 	// fixed root, not a new root). One that does not resolve is unread with
 	// its reason, so the strict gate sees it, and the npm scope is partial
 	// rather than none.
-	unresolvedNpm, err := resolveNpmLinks(ctx, img, links, npmFiles, layerOf)
+	unresolvedNpm, err := resolveNpmLinks(ctx, img, links, npmFiles, layerOf, owned.layerOf)
 	if err != nil {
 		return nil, cyclonedx.Stats{}, nil, err
 	}
@@ -279,8 +283,11 @@ func isScopeDir(name string) bool {
 // An error reading the image (the scan's budget, its deadline, a layer) is
 // returned, as the probe pass returns it: D112's "an error, never a shorter
 // result".
-func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]source.Link, files map[string][]byte, layerOf map[string]string) (int, error) {
-	type cand struct{ logical, read, link string }
+func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]source.Link, files map[string][]byte, layerOf map[string]string, layerIndex func(string) int) (int, error) {
+	type cand struct {
+		logical, read, link string
+		linkLayer           string
+	}
 	var cands []cand
 	unresolved := 0
 	names := make([]string, 0, len(links))
@@ -291,6 +298,13 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 	for _, n := range names {
 		l := links[n]
 		switch {
+		case isNpmRoot(n):
+			// A global node_modules root that is itself a link: every
+			// package lives behind it, and enumerating them means walking
+			// the target, which D160's fixed roots do not do. Unread with
+			// the reason, so npm is partial rather than none.
+			unresolved++
+			img.NoteUnresolved(n, fmt.Sprintf("npm root is a link to %q; the packages behind it are not enumerated", l.Target))
 		case !underAny(n, npminstalled.Roots):
 			// Equivalent today, kept as the statement of scope: probeCandidate
 			// admits npm links only under the roots, and the pass's other
@@ -303,17 +317,26 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 			unresolved++
 			img.NoteUnresolved(n, fmt.Sprintf("npm scope directory is a link to %q; the packages behind it are not read", l.Target))
 		case path.Base(n) == "package.json":
-			cands = append(cands, cand{logical: n, read: n, link: l.Target})
-		case !l.Hard && isPackageDir(n):
-			dir := l.Target
-			if !strings.HasPrefix(dir, "/") {
-				dir = path.Join(path.Dir(n), dir)
+			// Only an installed package's manifest is a candidate -- the
+			// rule npminstalled.Catalog applies to regular files: a link at
+			// a package's examples/package.json is nobody's install, and
+			// its target is not this scan's to resolve (PR #271 review).
+			if npminstalled.IsInstalledPackageJSON(n) {
+				cands = append(cands, cand{logical: n, read: n, link: l.Target, linkLayer: l.DiffID})
 			}
-			dir = throughLinks(strings.TrimPrefix(path.Clean("/"+dir), "/"), links)
-			if _, read := files[dir+"/package.json"]; read {
+		case !l.Hard && isPackageDir(n):
+			read := resolveLink(path.Dir(n), l.Target, links) + "/package.json"
+			// A target the probe already inventoried as an installed package
+			// is that package, not a second copy (pnpm's
+			// node_modules/x -> .pnpm/x@v/node_modules/x). A package.json the
+			// probe merely read -- inside another package's resources, say --
+			// is no install of its own, and the link is the only one this
+			// package has (PR #271 review: lodash linked into a vendor
+			// package's resources read 0 findings).
+			if _, seen := files[read]; seen && npminstalled.IsInstalledPackageJSON(read) {
 				continue
 			}
-			cands = append(cands, cand{logical: n + "/package.json", read: dir + "/package.json", link: l.Target})
+			cands = append(cands, cand{logical: n + "/package.json", read: read, link: l.Target, linkLayer: l.DiffID})
 		}
 	}
 	if len(cands) == 0 {
@@ -335,39 +358,76 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 			continue
 		}
 		files[c.logical] = f.Data
+		// The logical path changed in whichever layer is later: the one the
+		// bytes came from, or the one that made the link. An upper layer
+		// that replaces an OS-owned manifest with a link to a file of its
+		// own has put something new at that path, and the OS package's
+		// record (D162's layer rule) no longer names it (PR #271 review).
+		// A hardlink's bytes already come from the layer that made it (D130).
 		layerOf[c.logical] = f.DiffID
+		if layerIndex(c.linkLayer) > layerIndex(f.DiffID) {
+			layerOf[c.logical] = c.linkLayer
+		}
 	}
 	return unresolved, nil
 }
 
-// throughLinks rewrites p through the symlinks in links, leftmost component
-// first and again after every rewrite, the way the kernel walks a path: a
-// target under a linked top-level directory (lib -> usr/lib) or through
-// another linked package directory reaches the real path. Bounded like the
-// image's own resolver, so a cycle ends with the path as it stands.
-func throughLinks(p string, links map[string]source.Link) string {
-	for hops := 0; hops < 40; hops++ {
-		parts := strings.Split(p, "/")
-		rewritten := false
-		for i := 1; i <= len(parts); i++ {
-			prefix := strings.Join(parts[:i], "/")
-			l, ok := links[prefix]
-			if !ok || l.Hard || l.Target == "" {
-				continue
-			}
-			t := l.Target
-			if !strings.HasPrefix(t, "/") {
-				t = path.Join(path.Dir(prefix), t)
-			}
-			p = strings.TrimPrefix(path.Clean("/"+t+"/"+strings.Join(parts[i:], "/")), "/")
-			rewritten = true
-			break
-		}
-		if !rewritten {
-			return p
+// isNpmRoot reports whether name is one of the global node_modules roots
+// itself.
+func isNpmRoot(name string) bool {
+	for _, r := range npminstalled.Roots {
+		if name == r {
+			return true
 		}
 	}
-	return p
+	return false
+}
+
+// resolveLink resolves a link's target the way the kernel walks a path:
+// from dir (the link's own directory) for a relative target, from / for an
+// absolute one, one component at a time, following any recorded symlink a
+// component names BEFORE a later ".." is applied -- so /lib64/../qa-pkg
+// through lib64 -> usr/lib is usr/qa-pkg, not qa-pkg (PR #271 review). The
+// links known are the ones the pass recorded (the npm-root links and the
+// top-level layout links); a component no recorded link names is taken as a
+// directory. Bounded like the image's own resolver, so a cycle ends.
+func resolveLink(dir, target string, links map[string]source.Link) string {
+	var cur []string
+	if !strings.HasPrefix(target, "/") {
+		for _, c := range strings.Split(dir, "/") {
+			if c != "" && c != "." {
+				cur = append(cur, c)
+			}
+		}
+	}
+	queue := strings.Split(target, "/")
+	for hops := 0; len(queue) > 0; {
+		c := queue[0]
+		queue = queue[1:]
+		switch c {
+		case "", ".":
+			continue
+		case "..":
+			if len(cur) > 0 {
+				cur = cur[:len(cur)-1]
+			}
+			continue
+		}
+		cur = append(cur, c)
+		l, ok := links[strings.Join(cur, "/")]
+		if !ok || l.Hard || l.Target == "" {
+			continue
+		}
+		if hops++; hops > 40 {
+			break
+		}
+		cur = cur[:len(cur)-1]
+		if strings.HasPrefix(l.Target, "/") {
+			cur = nil
+		}
+		queue = append(strings.Split(l.Target, "/"), queue...)
+	}
+	return strings.Join(cur, "/")
 }
 
 // minExecutableBytes is the smallest file the Go probe considers: no ELF

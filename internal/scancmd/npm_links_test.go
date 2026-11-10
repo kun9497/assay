@@ -236,3 +236,136 @@ func TestRun_QA1110_LinkedNpmReadErrorFailsTheScan(t *testing.T) {
 		t.Errorf("stderr does not name the failing read:\n%s", errOut.String())
 	}
 }
+
+// PR #271 review, end to end: each of the review's layouts against its own
+// control. Every row asserts the package's version and logical location, the
+// npm scope, unread and the strict exit -- a finding count alone can hold
+// while the wrong file is read.
+func TestRun_PR271_ReviewLayouts(t *testing.T) {
+	vuln := []byte(`{"name":"minimatch","version":"3.0.4"}`)
+	fixed := []byte(`{"name":"minimatch","version":"9.9.9"}`)
+	const at = "usr/lib/node_modules/minimatch/package.json"
+	for _, tc := range []struct {
+		name     string
+		entries  []probeLayerEntry
+		version  string // "" = no minimatch package
+		path     string
+		npm      string
+		unread   string
+		wantCode int
+	}{
+		{"linked into another package's resources", []probeLayerEntry{
+			{name: "usr/lib/node_modules/vendor/package.json", body: []byte(`{"name":"vendor","version":"1.0.0"}`)},
+			{name: "usr/lib/node_modules/vendor/resources/minimatch/package.json", body: vuln},
+			{name: "usr/lib/node_modules/minimatch", link: "vendor/resources/minimatch"},
+		}, "3.0.4", at, report.ScopeRead, "", 1},
+		{"'..' after a top-level link", []probeLayerEntry{
+			{name: "lib64", link: "usr/lib"},
+			{name: "usr/qa-pkg/package.json", body: vuln},
+			{name: "qa-pkg/package.json", body: fixed},
+			{name: "usr/lib/node_modules/minimatch", link: "/lib64/../qa-pkg"},
+		}, "3.0.4", at, report.ScopeRead, "", 1},
+		{"'..' control: the direct path", []probeLayerEntry{
+			{name: "lib64", link: "usr/lib"},
+			{name: "usr/qa-pkg/package.json", body: vuln},
+			{name: "qa-pkg/package.json", body: fixed},
+			{name: "usr/lib/node_modules/minimatch", link: "/usr/qa-pkg"},
+		}, "3.0.4", at, report.ScopeRead, "", 1},
+		{"a dangling examples/package.json is not a candidate", []probeLayerEntry{
+			{name: at, body: vuln},
+			{name: "usr/lib/node_modules/minimatch/examples/package.json", link: "/missing/example"},
+		}, "3.0.4", at, report.ScopeRead, "", 1},
+		{"a dangling installed manifest still is", []probeLayerEntry{
+			{name: at, link: "/missing/package.json"},
+		}, "", "", report.ScopePartial, at, 2},
+		{"the npm root itself is a link", []probeLayerEntry{
+			{name: "usr/lib/node_modules", link: "/opt/npm-global"},
+			{name: "opt/npm-global/minimatch/package.json", body: vuln},
+		}, "", "", report.ScopePartial, "usr/lib/node_modules", 2},
+		{"the npm root as a directory (control)", []probeLayerEntry{
+			{name: at, body: vuln},
+		}, "3.0.4", at, report.ScopeRead, "", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tarPath := filepath.Join(t.TempDir(), "image.tar")
+			writeLayeredProbeImage(t, tarPath, append(alpineLayer(), tc.entries...))
+			var out, errOut bytes.Buffer
+			code := Run(context.Background(), probeDB(t), "docker-archive:"+tarPath,
+				Options{Output: "json", FailOn: &bandLow, FailOnIncomplete: true, FailOnIncompleteTarget: true}, &out, &errOut)
+			var doc report.Document
+			if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+				t.Fatalf("decode: %v\n%s", err, errOut.String())
+			}
+			var got []string
+			for _, f := range doc.Findings {
+				if f.Package.Name == "minimatch" {
+					for _, l := range f.Package.Locations {
+						got = append(got, f.Package.Version+"@"+l.Path)
+					}
+				}
+			}
+			want := ""
+			if tc.version != "" {
+				want = tc.version + "@" + tc.path
+			}
+			if (want == "" && len(got) != 0) || (want != "" && (len(got) == 0 || got[0] != want)) {
+				t.Errorf("minimatch = %v, want %q", got, want)
+			}
+			state := ""
+			for _, a := range doc.InventoryScope.ApplicationScope {
+				if a.Ecosystem == "npm" {
+					state = a.State
+				}
+			}
+			var unread []string
+			for _, u := range doc.Unread {
+				unread = append(unread, u.Path)
+			}
+			if state != tc.npm || strings.Join(unread, ",") != tc.unread || code != tc.wantCode {
+				t.Errorf("npm=%q unread=%v exit=%d, want %q %q %d\n%s", state, unread, code, tc.npm, tc.unread, tc.wantCode, errOut.String())
+			}
+		})
+	}
+}
+
+// PR #271 review: an upper layer that replaces the OS-owned manifest with a
+// link to a file of its own has put something new at that path -- unowned,
+// as the same bytes copied there as a regular file are. A link made in the
+// record's own layer, and a hardlink (whose bytes are the layer that made
+// it, D130), keep the owner.
+func TestRun_PR271_LinkedManifestOwner(t *testing.T) {
+	apk := "P:qa-owner\nV:1.0-r0\nA:x86_64\nF:usr/lib/node_modules/minimatch\nR:package.json\n\n"
+	pkg := []byte(`{"name":"minimatch","version":"3.0.4"}`)
+	const at = "usr/lib/node_modules/minimatch/package.json"
+	base := []probeLayerEntry{
+		{name: osReleasePath, body: []byte(osReleaseAlpine319)},
+		{name: apkDBPath, body: []byte(apk)},
+		{name: "opt/src/package.json", body: pkg},
+	}
+	for _, tc := range []struct {
+		name   string
+		layers [][]probeLayerEntry
+		owner  string
+	}{
+		{"owned regular file", [][]probeLayerEntry{append(append([]probeLayerEntry{}, base...), probeLayerEntry{name: at, body: pkg})}, "qa-owner 1.0-r0"},
+		{"replaced by a link in a later layer", [][]probeLayerEntry{
+			append(append([]probeLayerEntry{}, base...), probeLayerEntry{name: at, body: pkg}),
+			{{name: "usr/lib/node_modules/minimatch/.wh.package.json"}, {name: at, link: "/opt/src/package.json"}},
+		}, ""},
+		{"replaced by a copy in a later layer (control)", [][]probeLayerEntry{
+			append(append([]probeLayerEntry{}, base...), probeLayerEntry{name: at, body: pkg}),
+			{{name: at, body: pkg}},
+		}, ""},
+		{"a link in the record's own layer", [][]probeLayerEntry{append(append([]probeLayerEntry{}, base...), probeLayerEntry{name: at, link: "/opt/src/package.json"})}, "qa-owner 1.0-r0"},
+		{"a hardlink in the record's own layer", [][]probeLayerEntry{append(append([]probeLayerEntry{}, base...), probeLayerEntry{name: at, link: "opt/src/package.json", hard: true})}, "qa-owner 1.0-r0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tarPath := filepath.Join(t.TempDir(), "image.tar")
+			writeLayeredProbeImage(t, tarPath, tc.layers...)
+			got := ownersInJSON(t, tarPath)
+			if v, ok := got[at]; !ok || v != tc.owner {
+				t.Errorf("%s: present=%v owner=%q, want %q (all: %v)", at, ok, v, tc.owner, got)
+			}
+		})
+	}
+}
