@@ -674,6 +674,15 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 			})
 			continue
 		}
+		// D165: a cataloger found the package's own evidence contradictory.
+		// One skip, the scan target's cause, and no advisory judged on a
+		// value it would have had to pick. After the coverage checks, so a
+		// package the database could never judge stays a coverage skip and
+		// keeps its `assay db update` remedy (D36).
+		if p.Unevaluable != "" {
+			res.Skipped = append(res.Skipped, Skipped{Package: p, Reason: p.Unevaluable, Cause: SkipTarget})
+			continue
+		}
 
 		// D53. The package's own version says which Ubuntu lineage built it,
 		// and this build ingests only the mainline one.

@@ -11,6 +11,7 @@ import (
 	"io"
 
 	"github.com/kun9497/assay/internal/pkgmeta"
+	"github.com/kun9497/assay/internal/version"
 )
 
 // Stats records what the cataloger could not use. Reported rather than
@@ -232,8 +233,33 @@ func keepEvidence(kept *pkgmeta.Package, dropped pkgmeta.Package) {
 			kept.Locations = append(kept.Locations, loc)
 		}
 	}
-	if kept.Source == nil {
-		kept.Source = dropped.Source
+	// D165 (QA 2026-11-10): what either listing states about the source is
+	// evidence whichever listing came first. A source named without a version
+	// (deb `upstream=glibc`, no @version) states the name only -- the version
+	// is unstated, not "the binary's own" -- so a version the other listing
+	// gives is kept: without it libc6 2.31-13+deb11u14 from glibc
+	// 2.31-13+deb11u13 read 25 findings one way round and 20 the other. Two
+	// listings that state different source names, or the same name at two
+	// versions, contradict each other, and the package is judged on neither
+	// (Unevaluable), with a reason naming both, sorted so it reads the same
+	// either way round. Copied in every arm, so the kept package never shares
+	// a Source with the dropped one.
+	switch {
+	case dropped.Source == nil:
+	case kept.Source == nil:
+		src := *dropped.Source
+		kept.Source = &src
+	case dropped.Source.Name != kept.Source.Name:
+		markContradiction(kept, "source", kept.Source.Name, dropped.Source.Name)
+	default:
+		switch kv, dv := kept.Source.Version, dropped.Source.Version; {
+		case kv == "" && dv != "":
+			src := *kept.Source
+			src.Version = dv
+			kept.Source = &src
+		case dv != "" && !sameVersion(kept.Ecosystem, kv, dv):
+			markContradiction(kept, "source "+kept.Source.Name+" at", kv, dv)
+		}
 	}
 	if kept.Upstream == "" {
 		kept.Upstream = dropped.Upstream
@@ -241,6 +267,37 @@ func keepEvidence(kept *pkgmeta.Package, dropped pkgmeta.Package) {
 	if kept.ModuleStream == "" {
 		kept.ModuleStream = dropped.ModuleStream
 	}
+}
+
+// sameVersion reports whether two spellings of a source version are one
+// version under the ecosystem's own ordering (D9): Debian's
+// 0:2.31-13+deb11u13 is 2.31-13+deb11u13, which a string comparison called
+// a contradiction and left the package unjudged (PR #269 review). A key with
+// no comparer, or a version it cannot parse, falls back to the strings
+// themselves -- two values that cannot be shown equal are not assumed to be.
+func sameVersion(ecosystem, a, b string) bool {
+	if a == b {
+		return true
+	}
+	c, ok := version.For(ecosystem)
+	if !ok {
+		return false
+	}
+	r, err := c.Compare(a, b)
+	return err == nil && r == 0
+}
+
+// markContradiction records, once, that the document's listings of kept
+// state two different values of one thing (D165).
+func markContradiction(kept *pkgmeta.Package, what, a, b string) {
+	if kept.Unevaluable != "" {
+		return
+	}
+	if b < a {
+		a, b = b, a
+	}
+	kept.Unevaluable = fmt.Sprintf("the SBOM lists %s %s twice with %s two values, %s and %s; it is not judged on either",
+		kept.Name, kept.Version, what, a, b)
 }
 
 func hasLocation(locs []pkgmeta.Location, loc pkgmeta.Location) bool {

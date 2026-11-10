@@ -86,6 +86,13 @@ type Package struct {
 	// than judged (the release marker and the tag agreed 13/13 and 0/1,049
 	// on real images, so their disagreement is the anomaly).
 	ModuleStream string
+	// Unevaluable is why this package cannot be judged at all, set by a
+	// cataloger that found contradictory evidence about it -- two listings
+	// in one SBOM stating different source versions (QA 2026-11-10). The
+	// matcher reports it as one target-cause skip with this reason and
+	// judges nothing for it, rather than picking a side (D25: never by
+	// arrival order). Empty for every ordinary package.
+	Unevaluable string
 }
 
 type SourcePackage struct {
