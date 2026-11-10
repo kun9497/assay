@@ -8483,6 +8483,12 @@ cause `target` naming both versions, and exit 2. Against the QA's public DB (`sh
 `public-dupe-top-detailed` 25 → 25, `public-dupe-subject-detailed` 20 → **25** with CVE-2026-4046,
 the contradiction variant 25 findings / exit 0 → 0 findings / targetIncomplete 1 / exit 2.
 
+**Revised (PR #269 review).** Two stated source versions are compared with the package
+ecosystem's own comparer (D9), not as strings: Debian's `2.31-13+deb11u13` and
+`0:2.31-13+deb11u13` are one version, and listing both had left libc6 unjudged (0 findings, exit 2)
+where either alone gives 25. A real epoch difference (`1:`) is still a contradiction; a key with no
+comparer, or a version the comparer cannot parse, falls back to the strings.
+
 **Gives up.** Two listings of one package inside `components`, or both inside the subject tree,
 are not merged at all (as before) and are each judged on what they state. A contradiction makes the
 whole package unevaluated, including findings every reading of the document would have produced

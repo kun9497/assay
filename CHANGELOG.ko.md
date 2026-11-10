@@ -8,6 +8,8 @@
 ## [Unreleased]
 
 ### Fixed
+- CycloneDX 문서에 두 번 나열된 패키지의 소스 버전 둘이 철자만 다르면(Debian의 `2.31-13+deb11u13`과
+  `0:2.31-13+deb11u13`) 판정합니다: 버전을 문자열이 아니라 생태계 자체의 순서로 비교합니다. (D165 개정; PR #269 리뷰)
 - CycloneDX SBOM이 `components`와 subject에 함께 나열한 패키지는 어느 기록이 먼저 오든 명시된 소스 버전을 지킵니다(Debian 11
   libc6/glibc: 한 순서 20건·반대 25건이던 것이 둘 다 25건). 서로 다른 소스 버전이나 소스 이름을 명시한 두 기록은 어느 쪽으로도
   판정하지 않고 두 버전을 이름 붙인 target 원인 skip 하나로 남기므로 `--fail-on-incomplete=target`은 종료 2입니다.

@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- A package listed twice in a CycloneDX document whose two source versions differ only in spelling
+  (Debian's `2.31-13+deb11u13` and `0:2.31-13+deb11u13`) is judged: the versions are compared with
+  the ecosystem's own ordering, not as strings. (D165 revised; PR #269 review)
 - A package a CycloneDX SBOM lists both in `components` and in its subject keeps the source
   version either listing states, whichever comes first (Debian 11 libc6/glibc: 20 findings one way round, 25 the other,
   now 25 both); two listings stating different source versions, or different source names, are judged on neither, as one
