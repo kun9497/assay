@@ -12,7 +12,17 @@
   `minApplicationPackages`(`npm`, `Go`)로, 주간 실행과 야간 `-regressions-only` 게이트가 똑같이 판정합니다.
   `ubi8n18` npm 118, Go 대상 셋은 1. 전에는 npm과 Go 패키지를 모두 잃은 후보가 두 모드를 통과했습니다. (D167; QA 2026-11-10)
 
+### Changed
+- **JSON `schemaVersion` 21**(추가형): `skipped[].cves`가 건너뛴 권고가 이름 붙인 CVE를 나열해, `advisoryId`가
+  ALAS나 GHSA id인 skip도 CVE와 이을 수 있습니다. `cmd/truthset`은 판정을 결정할 비교를 스캔이 건너뛴 라벨(그
+  CVE를 이름 붙인 skip, 패키지 전체 skip, 식별할 수 없는 skip)을 더 이상 참음성으로 세지 않습니다: 그런 라벨은
+  UNEVALUATED이고, 요구한 fix가 그런 skip 너머인 affected 라벨은 FIX-UNKNOWN입니다. truthset 보고서 스키마
+  3. (D161 개정, QA 2026-11-10)
+
 ### Fixed
+- `truthset -offline`은 각 캡처를 그 케이스 라벨이 생성하는 SBOM에 묶습니다(캡처의
+  `provenance.target.sha256`): 다른 대상의 캡처나 대상을 기록하지 않은 캡처는 판정하지 않고 그 케이스의 라벨을
+  UNEVALUATED로 둡니다 — v2.0.0 캡처가 v1.0.0 clean 라벨을 TN으로 판정했었습니다. (D161 개정; PR #268 리뷰)
 - 위 레이어가 실제 `/lib64`를 지우고 `/usr/lib`로 다시 링크해도, 옛 `/lib64` 파일을 소유한 패키지가 독립된
   `/usr/lib` 사본의 소유자가 되지 않습니다: 최상위 링크는 그 링크보다 오래되지 않은 소유 기록에만 경로 철자를
   줍니다. (D162 개정; PR #267 리뷰)

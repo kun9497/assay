@@ -13,7 +13,19 @@ All notable changes to this project are documented here. The format follows
   the nightly `-regressions-only` gate alike. `ubi8n18` npm 118, three Go targets 1. Before it, a
   candidate that lost every npm and Go package passed both modes. (D167; QA 2026-11-10)
 
+### Changed
+- **JSON `schemaVersion` 21** (additive): `skipped[].cves` lists the CVEs a skipped advisory names,
+  so a skip whose `advisoryId` is an ALAS or GHSA id can be tied to a CVE. `cmd/truthset` no longer
+  counts a label as a true negative when the scan skipped the comparison that would decide it
+  (its CVE named by a skip, a whole-package skip, or a skip it cannot identify): such a label is
+  UNEVALUATED, and an affected label whose demanded fix lies past such a skip is FIX-UNKNOWN.
+  Truthset report schema 3. (D161 revised, QA 2026-11-10)
+
 ### Fixed
+- `truthset -offline` holds each capture to the SBOM its case's label generates (the capture's
+  `provenance.target.sha256`): a capture of another target, or one recording no target, leaves the
+  case's labels UNEVALUATED instead of judging them -- a v2.0.0 capture had judged a v1.0.0 clean
+  label TN. (D161 revised; PR #268 review)
 - An upper layer that deletes a real `/lib64` and relinks it to `/usr/lib` no longer lends the
   package that owned the old `/lib64` files to the independent `/usr/lib` copy: a top-level link
   spells an owner path only for an ownership record no older than the link. (D162 revised; PR #267 review)

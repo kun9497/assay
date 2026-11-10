@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -22,6 +24,10 @@ type fakeScan struct {
 	exit      int
 	evaluated int
 	raw       string // when set, returned verbatim (malformed JSON tests)
+	// skipped are the report's skipped records (QA 2026-11-10).
+	skipped []map[string]any
+	// schema is the report's schemaVersion; 0 means the current one (21).
+	schema int
 }
 
 type fakeFinding struct {
@@ -82,12 +88,20 @@ func fakeAssay(t *testing.T, scans map[string]fakeScan) (execFunc, *[]string) {
 				"ratings":  ratings,
 			})
 		}
+		schema := sc.schema
+		if schema == 0 {
+			schema = 21
+		}
 		doc := map[string]any{
-			"schemaVersion": 18,
+			"schemaVersion": schema,
 			"summary":       map[string]any{"components": 1, "evaluated": evaluated, "findings": len(fs)},
 			"findings":      fs,
+			"skipped":       sc.skipped,
 			"coverage":      []map[string]any{{"ecosystem": "Alpine:v3.19", "dataAsOf": fakeDataAsOf, "state": "live"}},
-			"provenance":    map[string]any{"tool": map[string]any{"version": "v0.0-test"}, "database": map[string]any{"artifact": map[string]any{"digest": "sha256:feed"}}},
+			"provenance": map[string]any{"tool": map[string]any{"version": "v0.0-test"}, "database": map[string]any{"artifact": map[string]any{"digest": "sha256:feed"}},
+				// What assay records of the SBOM it read (D120), so a kept
+				// capture is provably this case's scan under -offline.
+				"target": map[string]any{"sha256": sha256Hex(raw)}},
 		}
 		b, _ := json.Marshal(doc)
 		exit := sc.exit
@@ -96,6 +110,12 @@ func fakeAssay(t *testing.T, scans map[string]fakeScan) (execFunc, *[]string) {
 		}
 		return b, exit, nil
 	}, &sboms
+}
+
+// sha256Hex is the target digest assay's provenance records for b.
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 
 // fakeDataAsOf is the key date every fake scan reports.

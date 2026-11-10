@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "labels": [
+    {
+      "id": "partial/CVE-2031-9100",
+      "case": "partial",
+      "family": "go",
+      "purl": "pkg:golang/example.com/partial@v1.0.0",
+      "name": "example.com/partial",
+      "version": "v1.0.0",
+      "cve": "CVE-2031-9100",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "Controlled reviewer fixture. The target advisory range is unreadable.",
+        "url": "https://example.com/",
+        "fetchedAt": "2026-11-10T00:00:00Z"
+      }
+    }
+  ]
+}
