@@ -254,6 +254,12 @@ func layerWithModes(t *testing.T, diffID string, entries []probeLayerEntry) sour
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 	for _, e := range entries {
+		if e.link != "" {
+			if err := tw.WriteHeader(&tar.Header{Name: e.name, Mode: 0o777, Typeflag: tar.TypeSymlink, Linkname: e.link}); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
 		if err := tw.WriteHeader(&tar.Header{Name: e.name, Mode: e.mode, Size: int64(len(e.body)), Typeflag: tar.TypeReg}); err != nil {
 			t.Fatal(err)
 		}
