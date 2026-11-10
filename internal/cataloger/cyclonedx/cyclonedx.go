@@ -11,6 +11,7 @@ import (
 	"io"
 
 	"github.com/kun9497/assay/internal/pkgmeta"
+	"github.com/kun9497/assay/internal/version"
 )
 
 // Stats records what the cataloger could not use. Reported rather than
@@ -256,7 +257,7 @@ func keepEvidence(kept *pkgmeta.Package, dropped pkgmeta.Package) {
 			src := *kept.Source
 			src.Version = dv
 			kept.Source = &src
-		case dv != "" && dv != kv:
+		case dv != "" && !sameVersion(kept.Ecosystem, kv, dv):
 			markContradiction(kept, "source "+kept.Source.Name+" at", kv, dv)
 		}
 	}
@@ -266,6 +267,24 @@ func keepEvidence(kept *pkgmeta.Package, dropped pkgmeta.Package) {
 	if kept.ModuleStream == "" {
 		kept.ModuleStream = dropped.ModuleStream
 	}
+}
+
+// sameVersion reports whether two spellings of a source version are one
+// version under the ecosystem's own ordering (D9): Debian's
+// 0:2.31-13+deb11u13 is 2.31-13+deb11u13, which a string comparison called
+// a contradiction and left the package unjudged (PR #269 review). A key with
+// no comparer, or a version it cannot parse, falls back to the strings
+// themselves -- two values that cannot be shown equal are not assumed to be.
+func sameVersion(ecosystem, a, b string) bool {
+	if a == b {
+		return true
+	}
+	c, ok := version.For(ecosystem)
+	if !ok {
+		return false
+	}
+	r, err := c.Compare(a, b)
+	return err == nil && r == 0
 }
 
 // markContradiction records, once, that the document's listings of kept
