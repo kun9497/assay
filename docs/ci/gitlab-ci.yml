@@ -17,7 +17,7 @@ assay_scan:
     - apk add --no-cache curl openssl
     # The commit the latest release was built from, as in the README (the
     # release job keeps it current) -- never a branch, which moves.
-    - curl -sSfL https://raw.githubusercontent.com/kun9497/assay/13da7fc15196033746549ad73faec1fc5cde4050/install.sh | sh -s -- -b /usr/local/bin
+    - curl -sSfL https://raw.githubusercontent.com/kun9497/assay/7c53c2159ee04dc8e9cbb453312f274f08c425de/install.sh | sh -s -- -b /usr/local/bin
     - assay --version
   script:
     # Pulls the published database from ghcr.io/kun9497/assay-db — a public
