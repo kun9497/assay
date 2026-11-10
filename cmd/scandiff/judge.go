@@ -125,6 +125,33 @@ func judgeAssayOnlyFixed(t Target, n int) []breach {
 	return nil
 }
 
+// judgeApplicationPackages is D167's floor: for each ecosystem the target
+// names, the candidate's coverage[].packages under that key must be at least
+// the floor, an absent key counting 0 -- a probe that stopped producing
+// packages removes the row rather than zeroing it. Not a ceiling: losing
+// application packages is what a broken candidate does, so -regressions-only
+// judges it. Ecosystems are judged in sorted order for byte-stable stderr.
+func judgeApplicationPackages(t Target, coverage []assayCoverage) []breach {
+	ecos := make([]string, 0, len(t.MinApplicationPackages))
+	for e := range t.MinApplicationPackages {
+		ecos = append(ecos, e)
+	}
+	sort.Strings(ecos)
+	var out []breach
+	for _, e := range ecos {
+		got := 0
+		for _, c := range coverage {
+			if c.Ecosystem == e {
+				got += c.Packages
+			}
+		}
+		if floor := t.MinApplicationPackages[e]; got < floor {
+			out = append(out, breach{t.Name, "minApplicationPackages." + e, fmt.Sprintf(">=%d", floor), got, false})
+		}
+	}
+	return out
+}
+
 // judgeTrivy is judge's D105 counterpart for the optional trivy comparison.
 // It is a separate function rather than a parameterized call into judge:
 // there is no notEvaluated counterpart (trivy carries no such concept), and

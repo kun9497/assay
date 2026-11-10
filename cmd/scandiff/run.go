@@ -44,7 +44,8 @@ Usage:
       that would have breached as an "info:" line instead. A ceiling
       measures upstream growth, which must never stop a new database from
       shipping; every other floor, and every ERROR, is judged exactly as
-      without it.
+      without it -- minApplicationPackages (D167) included, since losing
+      a probe's packages is what a broken candidate does.
 
 Exit codes:
   0  every target held its floors
@@ -204,6 +205,7 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 		measured = append(measured, judgeGrypeOnlyApp(t, grypeOnlyAppCounts(gdoc, aSet, gSet))...)
 		measured = append(measured, judgeIncomplete(t, adoc.Summary)...)
 		measured = append(measured, judgeAssayOnlyFixed(t, assayOnlyFixed(adoc, gSet))...)
+		measured = append(measured, judgeApplicationPackages(t, adoc.Coverage)...)
 		breaches, info := demoteCeilings(measured, *regressionsOnly)
 		printInfo(stderr, info)
 		r := row{
