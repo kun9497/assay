@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/kun9497/assay/internal/pkgmeta"
 )
@@ -209,6 +210,16 @@ func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package) int {
 			return i
 		}
 	}
+	// D166: an OS nested under the subject keys the subject's listing of a
+	// package, while its top-level twin, with no OS beside it, stays
+	// unkeyed. They are still one package listed twice -- and the keyed one
+	// is the one that can be judged (PR #270 review: two packages, one of
+	// them a spurious not-evaluated, exit 2 under the strict gate).
+	for i, q := range pkgs {
+		if q.Type == p.Type && q.Name == p.Name && q.Version == p.Version && (q.Ecosystem == "" || p.Ecosystem == "") {
+			return i
+		}
+	}
 	return -1
 }
 
@@ -219,6 +230,10 @@ func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package) int {
 // the other must still be judged on its source. What the kept listing
 // already states is never overwritten.
 func keepEvidence(kept *pkgmeta.Package, dropped pkgmeta.Package) {
+	// The keyed listing's key wins over an unkeyed twin's (indexOfPackage).
+	if kept.Ecosystem == "" && dropped.Ecosystem != "" {
+		kept.Ecosystem = dropped.Ecosystem
+	}
 	for _, loc := range dropped.Locations {
 		if !hasLocation(kept.Locations, loc) {
 			kept.Locations = append(kept.Locations, loc)
@@ -452,14 +467,13 @@ func propValue(c component, name string) string {
 	return ""
 }
 
-// distroFrom reads the operating-system component syft emits alongside the
-// package inventory. This is a syft extension, not part of the CycloneDX
-// specification, so an SBOM from another tool — or one with no distro at all —
-// may omit it, in which case Distro stays nil rather than being guessed.
 // osContext is the operating system a distro package is keyed by: the one
 // its branch of the document declares (contextFor). distro nil means none
 // applies -- none declared on the way down, or two different ones side by
-// side -- and the package falls back to its purl's distro qualifier (D83);
+// side at some level above it, which leaves every package beneath that level
+// without one (the branch declares two; inheriting from further up would
+// key it to an OS the branch itself contradicts) -- and the package falls
+// back to its purl's distro qualifier, or an rpm's repository_id (D83);
 // with no qualifier either it is cataloged unkeyed and the matcher reports
 // it not evaluated, with the reason, rather than keyed to a guess.
 // ecosystem is distro's key, "" when its release does not resolve (the same
@@ -486,7 +500,7 @@ func contextFor(siblings []component, inherited osContext) osContext {
 			found = d
 			continue
 		}
-		if found.ID != d.ID || found.VersionID != d.VersionID {
+		if !sameDistro(found, d) {
 			return osContext{}
 		}
 	}
@@ -502,37 +516,36 @@ func contextFor(siblings []component, inherited osContext) osContext {
 
 // documentDistro is the Target's distro, the one the scan reports and its
 // end-of-life and coverage lines read: the top-level context's when the
-// document declares one there, else the one distro every OS component in the
-// document agrees on, else none -- a document mixing two never names one of
-// them as the whole target's.
+// document declares one there, else the one the subject itself declares --
+// metadata.component as an operating system, or one OS among its own
+// children, the shape a container SBOM nests its OS in. An OS declared only
+// in some other branch keys that branch's packages and does not name the
+// whole target (PR #270 review: the report must not name a distro its
+// top-level packages were not judged against).
 func documentDistro(doc bom, top osContext) *pkgmeta.Distro {
 	if top.distro != nil {
 		return top.distro
 	}
-	var found *pkgmeta.Distro
-	var walk func([]component) bool
-	walk = func(cs []component) bool {
-		for _, c := range cs {
-			if d := distroOf(c); d != nil {
-				if found != nil && (found.ID != d.ID || found.VersionID != d.VersionID) {
-					return false
-				}
-				found = d
-			}
-			if !walk(c.Components) {
-				return false
-			}
-		}
-		return true
-	}
-	roots := doc.Components
-	if doc.Metadata.Component != nil {
-		roots = append(append([]component{}, roots...), *doc.Metadata.Component)
-	}
-	if !walk(roots) {
+	s := doc.Metadata.Component
+	if s == nil {
 		return nil
 	}
-	return found
+	if d := distroOf(*s); d != nil {
+		return d
+	}
+	return contextFor(s.Components, osContext{}).distro
+}
+
+// sameDistro reports whether two OS components declare one distro release:
+// the same ecosystem key when both resolve to one (alpine 3.19.9 and 3.19.1
+// are both Alpine:v3.19), else the same ID and VERSION_ID.
+func sameDistro(a, b *pkgmeta.Distro) bool {
+	ea, errA := a.Ecosystem()
+	eb, errB := b.Ecosystem()
+	if errA == nil && errB == nil {
+		return ea == eb
+	}
+	return strings.EqualFold(a.ID, b.ID) && a.VersionID == b.VersionID
 }
 
 // distroOf reads one operating-system component, or nil for any other

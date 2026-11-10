@@ -8466,7 +8466,15 @@ context and its children in theirs. An applicable OS still outranks a purl's `di
 (D83); with no context the qualifier identifies the package; with neither, the package is cataloged
 unkeyed and reported not evaluated with its reason — never keyed to a guess. The Target's own
 distro (what the report, the EOL line and coverage name) is the top-level context's, else the one
-distro every OS component in the document agrees on, else none.
+the subject itself declares (as `metadata.component`, or one OS among its own children), else none
+— an OS declared only in some other branch keys that branch and does not name the whole target.
+Two OS components are one declaration when they resolve to the same ecosystem key (alpine 3.19.9
+and 3.19.1 are both `Alpine:v3.19`). Two that differ side by side leave every package beneath
+that level without context: the branch declares both, so inheriting from further up would key a
+package to an OS its own branch contradicts. A package listed both at the top (unkeyed, no OS
+there) and under a subject that keys it is one package, keyed by the listing that can be judged.
+Without context, a purl's `distro` qualifier or an rpm's `repository_id` identifies a package even
+when the document declares a distro elsewhere — the qualifier fallback this decision asks for.
 
 **Why.** QA 2026-11-10: an Alpine OS component and busybox 1.36.1-r20 scanned to 2 findings at the
 top of `components`, and to **0 findings, not evaluated 1, exit 2** under
