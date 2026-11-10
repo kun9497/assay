@@ -8503,6 +8503,49 @@ range beside it; D163 names that build there.
 
 ---
 
+### D165 — One package listed twice in an SBOM keeps the source version it states, and two that contradict are not judged
+
+**Decision.** When a CycloneDX document lists one package both in `components` and in the subject
+tree (`metadata.component` or under it — the duplicate the reader merges), what either listing
+states about the source is kept, whichever listing came first. A source named without a version
+(deb `upstream=glibc`, no `@version`) states the name only, so a version the other listing gives is
+kept. Two listings that state different source names, or the same source at two versions, are a
+contradiction the document makes: the package is judged on neither, as one target-cause skip whose
+reason names both versions (sorted, so it reads the same either way round), so
+`--fail-on-incomplete=target` exits 2 (D11). Carried on `pkgmeta.Package.Unevaluable`, which the
+matcher reports as that skip after its comparer and coverage checks (so a package the database
+could never judge stays a coverage skip with its remedy, D36) and before looking up anything.
+
+**Why.** QA 2026-11-10: Debian 11 `libc6 2.31-13+deb11u14` listed in `components` with
+`upstream=glibc@2.31-13+deb11u13` and as the subject with `upstream=glibc` scanned to 25 findings,
+and the same two listings swapped to 20 — CVE-2026-4046 among the five lost — with no incomplete
+mark either way. The merge kept the first listing's source and took the second's only when the first
+had none, so a name-only source shadowed a versioned one. The rule it replaces was D25's own
+anti-pattern: a verdict that depended on arrival order. Choosing the lower version instead was
+considered and rejected — it would pick a side the document did not.
+
+**Verified.** Through `Run` with a Debian 11 store whose glibc advisory is fixed in deb11u14: both
+orders find it; two stated versions contradicting, in both orders, give no finding, one skip with
+cause `target` naming both versions, and exit 2. Against the QA's public DB (`sha256:1be2281a…`):
+`public-dupe-top-detailed` 25 → 25, `public-dupe-subject-detailed` 20 → **25** with CVE-2026-4046,
+the contradiction variant 25 findings / exit 0 → 0 findings / targetIncomplete 1 / exit 2.
+
+**Revised (PR #269 review).** Two stated source versions are compared with the package
+ecosystem's own comparer (D9), not as strings: Debian's `2.31-13+deb11u13` and
+`0:2.31-13+deb11u13` are one version, and listing both had left libc6 unjudged (0 findings, exit 2)
+where either alone gives 25. A real epoch difference (`1:`) is still a contradiction; a key with no
+comparer, or a version the comparer cannot parse, falls back to the strings.
+
+**Gives up.** Two listings of one package inside `components`, or both inside the subject tree,
+are not merged at all (as before) and are each judged on what they state. A contradiction makes the
+whole package unevaluated, including findings every reading of the document would have produced
+and advisories keyed on the binary name: without `--fail-on-incomplete` such a scan shows the skip
+and the notEvaluated count, but no finding for that package, and can exit 0. Judging both readings
+and reporting the union was considered (PR #269 review) and not taken: the requirement was that no
+reading be chosen, and a union is a reading the document does not state either.
+
+---
+
 ### D167 — The differential floors each probed ecosystem's application packages (`minApplicationPackages`)
 
 **Decision.** A target in `.github/scanner-diff-targets.json` may name `minApplicationPackages`, a

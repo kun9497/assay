@@ -1101,6 +1101,9 @@ exited 0 while 24 findings went unmentioned.
 - [x] An npm package installed through a link is read at its logical path (D160 revised) — a
       linked `package.json` or package directory, one `package.json` each, its target not walked;
       an unresolved candidate is unread and npm `partial`; schema 22; QA 2026-11-10
+- [x] A package listed in both `components` and the subject keeps its stated source version (D165)
+      — whichever listing comes first; two stated versions or source names that contradict are judged
+      on neither, as one target-cause skip naming both (exit 2 under the strict gate); QA 2026-11-10
 - [x] The differential floors each probed ecosystem's application packages (D167) —
       `minApplicationPackages` on `coverage[].packages`, a regression floor in both modes; QA 2026-11-10
 - [x] A finding's JSON carries the record's related ids (D164) — `advisory.related`, schema 20;

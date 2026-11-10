@@ -38,6 +38,13 @@ All notable changes to this project are documented here. The format follows
   target is not walked, so its own nested dependencies are not read; a target already read under
   a root (pnpm's `.pnpm` layout) is counted once; an error reading a linked `package.json` fails
   the scan. (D160 revised; QA 2026-11-10)
+- A package listed twice in a CycloneDX document whose two source versions differ only in spelling
+  (Debian's `2.31-13+deb11u13` and `0:2.31-13+deb11u13`) is judged: the versions are compared with
+  the ecosystem's own ordering, not as strings. (D165 revised; PR #269 review)
+- A package a CycloneDX SBOM lists both in `components` and in its subject keeps the source
+  version either listing states, whichever comes first (Debian 11 libc6/glibc: 20 findings one way round, 25 the other,
+  now 25 both); two listings stating different source versions, or different source names, are judged on neither, as one
+  target-cause skip naming both, so `--fail-on-incomplete=target` exits 2. (D165, QA 2026-11-10)
 - `truthset -offline` holds each capture to the SBOM its case's label generates (the capture's
   `provenance.target.sha256`): a capture of another target, or one recording no target, leaves the
   case's labels UNEVALUATED instead of judging them -- a v2.0.0 capture had judged a v1.0.0 clean
