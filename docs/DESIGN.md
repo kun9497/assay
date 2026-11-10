@@ -1098,6 +1098,8 @@ exited 0 while 24 findings went unmentioned.
       `locations[].ownedBy` `{name, version}` from rpm's BASENAMES/DIRNAMES/DIRINDEXES (all three
       backends), apk's `F:`/`R:` lines, dpkg's `info/*.list` and pacman's `files`, the last two in
       the probes' own layer pass; exact-file ownership; schema 19 (additive)
+- [x] A finding's JSON carries the record's related ids (D164) — `advisory.related`, schema 20;
+      the CVE an ALAS / Bodhi / OVAL finding fixes; truthset joins through it and the ratings
 - [x] A finding on a released build the advisory still calls affected names that build (D163) —
       the evidence reason reads "is at or above the released fix X; the advisory also lists the
       package as affected at every version, with no fix recorded for that" when an open range holds a version that has

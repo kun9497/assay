@@ -8456,6 +8456,32 @@ range beside it; D163 names that build there.
 
 ---
 
+### D164 — A finding's JSON carries the record's related ids (schema 20)
+
+**Decision.** `findings[].advisory.related` is the record's own `related` identifiers, omitted
+when empty — schema 20, additive. `cmd/truthset` joins a label's CVE through the record id,
+`aliases`, `upstream`, `related` and every rating's `advisoryId`, so a document from before
+schema 20 joins too.
+
+**Why.** Amazon ALAS, Fedora Bodhi and Oracle OVAL records name the CVE they fix only in
+`Related` (D71: none has an `aliases` or `upstream` field). The matcher groups on it and
+`--explain` prints it; the JSON did not, so a JSON consumer could reach such a finding's CVE only
+through `ratings[].advisoryId`. D161 found it on 2026-11-10, the first night the amzn labels were
+judged (the first artifact built after D113 revised): the four affected amzn labels read FN
+although assay reported every one — `ALAS2023-2025-1225` with fix `1:3.2.2-1.amzn2023.0.2` for
+CVE-2025-9230/9231 — and the weekly truthset step would have failed from 2026-11-15. The user
+asked for both fixes, each tested.
+
+**Verified.** `TestJSON_AdvisoryCarriesRelated` (an ALAS finding renders both CVEs, a record
+without `related` omits it); `TestRun_ALASFindingJoinsItsCVE` (related alone, ratings alone,
+neither = still FN). Live against the 2026-11-09 nightly: 134 judged, 0 FP, 0 FN with the
+schema-20 build, and the same with the schema-19 build through the ratings join. Mutations 4/4.
+
+**Gives up.** Nothing in the table or SARIF changes; a consumer pinned to schema 19 sees one
+more optional field.
+
+---
+
 ### D163 — A finding on a released build the advisory still calls affected names that build
 
 **Decision.** When the window that holds the installed version is an open `[0, ∞)` one and the
