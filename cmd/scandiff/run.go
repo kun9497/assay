@@ -204,6 +204,7 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 		measured = append(measured, judgeGrypeOnlyApp(t, grypeOnlyAppCounts(gdoc, aSet, gSet))...)
 		measured = append(measured, judgeIncomplete(t, adoc.Summary)...)
 		measured = append(measured, judgeAssayOnlyFixed(t, assayOnlyFixed(adoc, gSet))...)
+		measured = append(measured, judgeApplicationPackages(t, adoc.Coverage)...)
 		breaches, info := demoteCeilings(measured, *regressionsOnly)
 		printInfo(stderr, info)
 		r := row{
