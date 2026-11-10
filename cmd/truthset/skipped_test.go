@@ -39,6 +39,9 @@ func TestRun_QA1110_SkippedComparisonIsNotAVerdict(t *testing.T) {
 		// Controls: a skip about another CVE changes nothing.
 		{"control: skip names another CVE", "clean", "", fakeScan{findings: []fakeFinding{other}, skipped: []map[string]any{skip("GHSA-dddd-eeee-ffff", "CVE-2031-9300")}}, "TN", ""},
 		{"control: no skip", "clean", "", fakeScan{findings: []fakeFinding{other}}, "TN", ""},
+		// A skip that names the label's CVE but on another package of the
+		// scan is about that package, not this one.
+		{"control: the CVE skipped on another package", "clean", "", fakeScan{findings: []fakeFinding{other}, skipped: []map[string]any{{"package": map[string]any{"name": "example.com/other"}, "advisoryId": "CVE-2031-9100", "reason": "r", "cause": "advisory"}}}, "TN", ""},
 		// A finding proves the label's CVE affected: the verdict stands...
 		{"affected, proven, no fix demanded", "affected", "", fakeScan{findings: []fakeFinding{hit}, skipped: []map[string]any{skip("CVE-2031-9100")}}, "TP", ""},
 		// ...but a fix the label demands cannot be confirmed past the skip.
