@@ -67,3 +67,47 @@ func TestRun_OfflineCaptureMustBeTheCasesOwnScan(t *testing.T) {
 		})
 	}
 }
+
+// PR #268 review, round 2: an unproven capture is set aside before the
+// run-wide database check. A stale capture of another target, made against
+// another database and sorting first, neither fixes the run's database nor
+// turns the proven case into a digest mismatch: the proven case is judged,
+// the run exits 1 (the unproven labels are UNEVALUATED), and the report
+// names the proven capture's database.
+func TestRun_UnprovenCaptureDoesNotSetTheRunsDatabase(t *testing.T) {
+	a := label("a-stale", "alpine", busyboxPURL, "busybox", "1.36.1-r20", "CVE-2024-58251", "clean", "")
+	b := label("b-proven", "alpine", busyboxFixedPURL, "busybox", "1.36.1-r21", "CVE-2024-58251", "clean", "")
+	exec, _ := fakeAssay(t, heldScans())
+	keep := filepath.Join(t.TempDir(), "keep")
+	var out, errOut bytes.Buffer
+	if code := run([]string{"-labels", writeLabels(t, []Label{b}), "-assay", "fake-assay", "-keep", keep}, &out, &errOut, exec); code != exitOK {
+		t.Fatalf("keep: exit %d\n%s", code, out.String())
+	}
+	dir := t.TempDir()
+	for _, f := range []string{"b-proven.scan.json", "b-proven.exit"} {
+		bs, err := os.ReadFile(filepath.Join(keep, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, f), bs, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// a-stale: b's capture (so not a's SBOM), against another database.
+	bs, _ := os.ReadFile(filepath.Join(keep, "b-proven.scan.json"))
+	stale := strings.Replace(string(bs), "sha256:feed", "sha256:old", 1)
+	if err := os.WriteFile(filepath.Join(dir, "a-stale.scan.json"), []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report := filepath.Join(t.TempDir(), "report.json")
+	out.Reset()
+	errOut.Reset()
+	code := run([]string{"-labels", writeLabels(t, []Label{a, b}), "-offline", dir, "-out", report}, &out, &errOut, nil)
+	if code != exitFindings || !strings.Contains(out.String(), "UNEVALUATED a-stale/CVE-2024-58251") || strings.Contains(errOut.String(), "differs from the run's first") {
+		t.Errorf("exit %d, want 1 with a-stale UNEVALUATED and no digest error\n%s\n%s", code, out.String(), errOut.String())
+	}
+	rb, _ := os.ReadFile(report)
+	if !strings.Contains(string(rb), `"databaseDigest": "sha256:feed"`) {
+		t.Errorf("report does not name the proven capture's database:\n%s", rb)
+	}
+}

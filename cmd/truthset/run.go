@@ -249,6 +249,20 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 			fmt.Fprintf(stderr, "error: case=%s %s\n", c.name, fatal[c.name])
 			continue
 		}
+		// An offline capture that cannot be shown to be this case's scan is
+		// set aside BEFORE the run-wide checks: it must neither fix the
+		// database the run is held to nor be held to it (PR #268 review,
+		// round 2 -- a stale capture sorting first turned every proven case
+		// into "differs from the run's first" database, exit 2, and named its
+		// own database in the report).
+		if *offlineDir != "" {
+			if why := targetMismatch(c.label, &doc); why != "" {
+				unproven[c.name] = why
+				fmt.Fprintf(stderr, "warning: case=%s %s; its labels are not judged\n", c.name, why)
+				scans[c.name] = &doc
+				continue
+			}
+		}
 		// Every case must have been judged against one database: a `db
 		// update` landing between two scans would attribute a label flip to
 		// the matcher. The first document's digest is the run's.
@@ -264,12 +278,6 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 			fatal[c.name] = fmt.Sprintf("%d coverage keys for a one-component SBOM", len(doc.Coverage))
 			fmt.Fprintf(stderr, "error: case=%s %s\n", c.name, fatal[c.name])
 			continue
-		}
-		if *offlineDir != "" {
-			if why := targetMismatch(c.label, &doc); why != "" {
-				unproven[c.name] = why
-				fmt.Fprintf(stderr, "warning: case=%s %s; its labels are not judged\n", c.name, why)
-			}
 		}
 		scans[c.name] = &doc
 		if digest == "" {

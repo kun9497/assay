@@ -22,6 +22,9 @@ All notable changes to this project are documented here. The format follows
   Truthset report schema 3. (D161 revised, QA 2026-11-10)
 
 ### Fixed
+- `truthset -offline` sets an unproven capture aside before the run-wide database check: a stale
+  capture sorting first no longer fixes the run's database and fails every proven case with a
+  digest mismatch (exit 2). (D161 revised; PR #268 review, round 2)
 - A package listed twice in a CycloneDX document whose two source versions differ only in spelling
   (Debian's `2.31-13+deb11u13` and `0:2.31-13+deb11u13`) is judged: the versions are compared with
   the ecosystem's own ordering, not as strings. (D165 revised; PR #269 review)
