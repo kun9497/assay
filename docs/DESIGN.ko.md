@@ -1037,6 +1037,8 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       `{name, version}`, rpm의 BASENAMES/DIRNAMES/DIRINDEXES(세 백엔드 모두), apk의 `F:`/`R:` 줄, dpkg의
       `info/*.list`, pacman의 `files`에서; 뒤의 둘은 프로브 자체의 레이어 패스에서; 파일 단위의 정확한
       소유; 스키마 19(추가형)
+- [x] CycloneDX의 배포판 패키지는 자기 가지에 선언된 OS로 키를 정함 (D166, D83 개정) — 형제, 없으면
+      위쪽의 가장 가까운 모호하지 않은 OS, 서로 다른 둘이 나란히면 없음; 대안은 purl qualifier; QA 2026-11-10
 - [x] `components`와 subject에 함께 나열된 패키지는 명시된 소스 버전을 지킴 (D165) — 어느 기록이 먼저든;
       서로 어긋나는 두 소스 버전이나 소스 이름은 어느 쪽으로도 판정하지 않고, 둘을 이름 붙인 target 원인 skip
       하나로 남김(엄격 모드에서 종료 2); QA 2026-11-10

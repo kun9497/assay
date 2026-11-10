@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/kun9497/assay/internal/pkgmeta"
 	"github.com/kun9497/assay/internal/version"
@@ -83,25 +84,20 @@ func Parse(r io.Reader) (pkgmeta.Target, Stats, error) {
 	// 17), after the packages that need its release. So the whole document is
 	// read for the distro in a first pass, before packages are cataloged in a
 	// second: a single forward pass would catalog every apk package unkeyed.
-	target.Distro = distroFrom(doc.Components)
+	//
+	// QA 2026-11-10: the operating-system component is read where it sits.
+	// A distro package is keyed by the OS declared beside it -- among its own
+	// siblings -- or, failing one, by the nearest unambiguous one above it,
+	// so an OS component nested with its packages under metadata.component
+	// keys them (Alpine and busybox moved under the subject read 0 findings,
+	// not evaluated, exit 2), and one branch's OS never keys another
+	// branch's packages. See osContext.
+	top := contextFor(doc.Components, osContext{})
+	target.Distro = documentDistro(doc, top)
 
-	// The ecosystem key for a distro package needs the release, which lives on
-	// the target rather than the package (D6, D7). Resolve it once so every
-	// apk component in the second pass reuses it instead of re-deriving it.
-	var distroEcosystem string
-	if target.Distro != nil {
-		if eco, err := target.Distro.Ecosystem(); err == nil {
-			distroEcosystem = eco
-		}
-		// On error distroEcosystem stays empty and apk packages are cataloged
-		// unkeyed below, so the matcher reports them as skipped with a reason.
-		// Guessing a key here would turn "we cannot check this" into "this is
-		// clean".
-	}
-
-	catalog(doc.Components, distroEcosystem, &target, &stats)
+	catalog(doc.Components, top, &target, &stats)
 	if doc.Metadata.Component != nil {
-		catalogSubject(*doc.Metadata.Component, distroEcosystem, &target, &stats)
+		catalogSubject(*doc.Metadata.Component, top, &target, &stats)
 	}
 	stats.SerialNumber = doc.SerialNumber
 	return target, stats, nil
@@ -137,18 +133,27 @@ func Parse(r io.Reader) (pkgmeta.Target, Stats, error) {
 // two listings both nested under the subject, were never read as one
 // package and stay two, so where a generator put its inventory does not
 // change how many packages it holds.
-func catalogSubject(subject component, distroEcosystem string, target *pkgmeta.Target, stats *Stats) {
+func catalogSubject(subject component, ctx osContext, target *pkgmeta.Target, stats *Stats) {
 	// The dedupe base is fixed before the subject tree adds anything to
 	// target.Packages: everything bom.components yielded, and only that.
 	base := len(target.Packages)
-	// The scratch carries the document's distro: catalogOne keys a deb, rpm,
-	// apk or alpm purl from target.Distro (document first, purl qualifier
-	// second), and a scratch without it keyed the subject's distro package
-	// as if the document named no distro -- unkeyed, or to the qualifier's
-	// release while its top-level twin took the document's.
-	scratchTarget := pkgmeta.Target{Distro: target.Distro}
+	// Which identities the document keys to more than one distro release,
+	// across bom.components AND the whole subject tree: an unkeyed listing
+	// beside such an identity belongs to none of them provably, whichever
+	// side the keyed listings sit on (PR #270 review, mirror case: one
+	// unkeyed listing at the top and the two keyed ones under the subject
+	// merged into whichever came first). A dry run catalogs the subject tree
+	// into a throwaway target with the contexts the real walk will use.
+	dry := pkgmeta.Target{Packages: append([]pkgmeta.Package{}, target.Packages[:base]...)}
+	var dryStats Stats
+	catalogOne(subject, ctx, &dry, &dryStats)
+	catalog(subject.Components, childContext(subject, ctx), &dry, &dryStats)
+	keyed := keyedReleases(dry.Packages)
+	// The subject is keyed in the document's top-level context, as its
+	// top-level twin would be; its children in theirs (contextFor).
+	scratchTarget := pkgmeta.Target{}
 	var scratchStats Stats
-	catalogOne(subject, distroEcosystem, &scratchTarget, &scratchStats)
+	catalogOne(subject, ctx, &scratchTarget, &scratchStats)
 	// The len check is defensive only: every root shape pseudoSubjectShape
 	// accepts already implies catalogOne appended no package (no purl and a
 	// pkg:oci purl both skip before a package is built -- "oci" is not an
@@ -159,22 +164,22 @@ func catalogSubject(subject component, distroEcosystem string, target *pkgmeta.T
 		// The document's own root: not a package, not counted, as the
 		// operating-system component is not.
 	} else {
-		mergeDeduped(scratchTarget, scratchStats, base, target, stats)
+		mergeDeduped(scratchTarget, scratchStats, base, keyed, target, stats)
 	}
-	catalogDeduped(subject.Components, distroEcosystem, base, target, stats)
+	catalogDeduped(subject.Components, childContext(subject, ctx), base, keyed, target, stats)
 }
 
 // catalogDeduped is catalog for the subject's nested components: the same
 // depth-first walk, one scratch per component so a duplicate of a package
 // bom.components already yielded can be dropped without its counter. base
 // is how many packages bom.components yielded; see catalogSubject.
-func catalogDeduped(components []component, distroEcosystem string, base int, target *pkgmeta.Target, stats *Stats) {
+func catalogDeduped(components []component, ctx osContext, base int, keyed map[string]int, target *pkgmeta.Target, stats *Stats) {
 	for _, c := range components {
-		scratchTarget := pkgmeta.Target{Distro: target.Distro}
+		scratchTarget := pkgmeta.Target{}
 		var scratchStats Stats
-		catalogOne(c, distroEcosystem, &scratchTarget, &scratchStats)
-		mergeDeduped(scratchTarget, scratchStats, base, target, stats)
-		catalogDeduped(c.Components, distroEcosystem, base, target, stats)
+		catalogOne(c, ctx, &scratchTarget, &scratchStats)
+		mergeDeduped(scratchTarget, scratchStats, base, keyed, target, stats)
+		catalogDeduped(c.Components, childContext(c, ctx), base, keyed, target, stats)
 	}
 }
 
@@ -186,9 +191,9 @@ func catalogDeduped(components []component, distroEcosystem string, base int, ta
 // packages where it held one listed twice, but its evidence is kept on the
 // package already there. A scratch with no package is a counted skip and
 // merges as it is.
-func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, target *pkgmeta.Target, stats *Stats) {
+func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, keyed map[string]int, target *pkgmeta.Target, stats *Stats) {
 	for _, p := range scratchTarget.Packages {
-		if i := indexOfPackage(target.Packages[:base], p); i >= 0 {
+		if i := indexOfPackage(target.Packages[:base], p, keyed); i >= 0 {
 			keepEvidence(&target.Packages[i], p)
 			return
 		}
@@ -212,13 +217,66 @@ func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, ta
 // qualifier-only difference (syft's per-document package-id, two install
 // paths) is the same package, which the field comparison says and a
 // verbatim purl comparison would not.
-func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package) int {
+func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package, keyed map[string]int) int {
 	for i, q := range pkgs {
 		if q.Type == p.Type && q.Name == p.Name && q.Version == p.Version && q.Ecosystem == p.Ecosystem {
 			return i
 		}
 	}
-	return -1
+	// D166: an OS nested under the subject keys the subject's listing of a
+	// package, while its top-level twin, with no OS beside it, stays
+	// unkeyed. They are still one package listed twice -- and the keyed one
+	// is the one that can be judged (PR #270 review: two packages, one of
+	// them a spurious not-evaluated, exit 2 under the strict gate). Only a
+	// unique twin is that package: an unkeyed listing beside busybox keyed
+	// to Alpine 3.19 AND busybox keyed to 3.20 belongs to neither provably,
+	// and merging it into the first one attached its install path to that
+	// release's findings -- the other release's when the document listed
+	// them the other way round (PR #270 review). It stays its own package,
+	// unkeyed and reported not evaluated.
+	if keyed[identity(p)] > 1 {
+		return -1
+	}
+	match := -1
+	for i, q := range pkgs {
+		if q.Type == p.Type && q.Name == p.Name && q.Version == p.Version && (q.Ecosystem == "" || p.Ecosystem == "") {
+			if match >= 0 {
+				// Two releases are refused above (keyed); two top-level
+				// listings keyed to ONE release are judged alike whichever
+				// takes the evidence, so a mutation of this line survives.
+				return -1
+			}
+			match = i
+		}
+	}
+	return match
+}
+
+// identity is a package's type, name and version: what an unkeyed listing
+// and its keyed twins share.
+func identity(p pkgmeta.Package) string {
+	return p.Type + "\x00" + p.Name + "\x00" + p.Version
+}
+
+// keyedReleases counts, per identity, the distinct ecosystem keys pkgs give
+// it; an unkeyed listing counts for none.
+func keyedReleases(pkgs []pkgmeta.Package) map[string]int {
+	seen := map[string]map[string]bool{}
+	for _, p := range pkgs {
+		if p.Ecosystem == "" {
+			continue
+		}
+		id := identity(p)
+		if seen[id] == nil {
+			seen[id] = map[string]bool{}
+		}
+		seen[id][p.Ecosystem] = true
+	}
+	out := make(map[string]int, len(seen))
+	for id, ecos := range seen {
+		out[id] = len(ecos)
+	}
+	return out
 }
 
 // keepEvidence folds a dropped second listing onto the kept package: every
@@ -228,6 +286,10 @@ func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package) int {
 // the other must still be judged on its source. What the kept listing
 // already states is never overwritten.
 func keepEvidence(kept *pkgmeta.Package, dropped pkgmeta.Package) {
+	// The keyed listing's key wins over an unkeyed twin's (indexOfPackage).
+	if kept.Ecosystem == "" && dropped.Ecosystem != "" {
+		kept.Ecosystem = dropped.Ecosystem
+	}
 	for _, loc := range dropped.Locations {
 		if !hasLocation(kept.Locations, loc) {
 			kept.Locations = append(kept.Locations, loc)
@@ -328,14 +390,14 @@ func pseudoSubjectShape(subject component, scratch Stats) bool {
 // catalog walks components depth-first so nested ones are seen. Every path out
 // of catalogOne increments exactly one counter, which is what lets the report's
 // summary account for every component the document contained.
-func catalog(components []component, distroEcosystem string, target *pkgmeta.Target, stats *Stats) {
+func catalog(components []component, ctx osContext, target *pkgmeta.Target, stats *Stats) {
 	for _, c := range components {
-		catalogOne(c, distroEcosystem, target, stats)
-		catalog(c.Components, distroEcosystem, target, stats)
+		catalogOne(c, ctx, target, stats)
+		catalog(c.Components, childContext(c, ctx), target, stats)
 	}
 }
 
-func catalogOne(c component, distroEcosystem string, target *pkgmeta.Target, stats *Stats) {
+func catalogOne(c component, ctx osContext, target *pkgmeta.Target, stats *Stats) {
 	if c.Type == "operating-system" {
 		// Described the target in the first pass (D7); it is not a package to
 		// scan, and counting it here would inflate the component total.
@@ -381,7 +443,7 @@ func catalogOne(c component, distroEcosystem string, target *pkgmeta.Target, sta
 		// filter, and rpmmod->ModuleStream. SPDX calls the identical
 		// function, which is the point: CycloneDX and SPDX cannot judge one
 		// installed package two different ways.
-		res := pkgmeta.ResolveDistroPURL(p, c.Version, distroEcosystem, target.Distro != nil)
+		res := pkgmeta.ResolveDistroPURL(p, c.Version, ctx.ecosystem, ctx.distro != nil)
 		if res.Skip {
 			// gpg-pubkey (a keyring entry, not an installed package) or an
 			// arch=src SRPM (D84). Routed into the existing "unsupported
@@ -517,38 +579,134 @@ func propValue(c component, name string) string {
 	return ""
 }
 
-// distroFrom reads the operating-system component syft emits alongside the
-// package inventory. This is a syft extension, not part of the CycloneDX
-// specification, so an SBOM from another tool — or one with no distro at all —
-// may omit it, in which case Distro stays nil rather than being guessed.
-func distroFrom(components []component) *pkgmeta.Distro {
-	for _, c := range components {
-		if c.Type != "operating-system" {
+// osContext is the operating system a distro package is keyed by: the one
+// its branch of the document declares (contextFor). distro nil means none
+// applies -- none declared on the way down, or two different ones side by
+// side at some level above it, which leaves every package beneath that level
+// without one (the branch declares two; inheriting from further up would
+// key it to an OS the branch itself contradicts) -- and the package falls
+// back to its purl's distro qualifier, or an rpm's repository_id (D83);
+// with no qualifier either it is cataloged unkeyed and the matcher reports
+// it not evaluated, with the reason, rather than keyed to a guess.
+// ecosystem is distro's key, "" when its release does not resolve (the same
+// fall-back: unkeyed, reported, never guessed).
+type osContext struct {
+	distro    *pkgmeta.Distro
+	ecosystem string
+}
+
+// contextFor is the context of a list of sibling components: the one
+// operating system declared among them, if they declare exactly one; the
+// inherited context when they declare none; and no context when they
+// declare two different ones, because a package beside both cannot be told
+// which it belongs to. Two OS components that describe the same distro and
+// release are one declaration.
+func contextFor(siblings []component, inherited osContext) osContext {
+	var found *pkgmeta.Distro
+	for _, c := range siblings {
+		d := distroOf(c)
+		if d == nil {
 			continue
 		}
-		var d pkgmeta.Distro
-		for _, p := range c.Properties {
-			switch p.Name {
-			case "syft:distro:id":
-				d.ID = p.Value
-			case "syft:distro:versionID":
-				d.VersionID = p.Value
-			case "syft:distro:prettyName":
-				d.PrettyName = p.Value
-			}
+		if found == nil {
+			found = d
+			continue
 		}
-		// Fall back to the component's own fields: the properties are a syft
-		// extension, but name/version are spec and carry the same thing.
-		if d.ID == "" {
-			d.ID = c.Name
+		if !sameDistro(found, d) {
+			return osContext{}
 		}
-		if d.VersionID == "" {
-			d.VersionID = c.Version
-		}
-		if d.ID == "" {
-			return nil
-		}
-		return &d
 	}
-	return nil
+	if found == nil {
+		return inherited
+	}
+	ctx := osContext{distro: found}
+	if eco, err := found.Ecosystem(); err == nil {
+		ctx.ecosystem = eco
+	}
+	return ctx
+}
+
+// childContext is the context parent's own components are keyed in. An
+// operating-system component with children declares the OS they belong to,
+// as an OS among them would (PR #270 review: metadata.component as Alpine
+// with busybox directly under it left busybox unkeyed, and keyed it to a
+// Debian declared at the top when there was one -- 51 false findings); an
+// OS declared among the children is nearer still and comes first
+// (contextFor).
+func childContext(parent component, inherited osContext) osContext {
+	// Only an OS that resolves to an ecosystem key overrides what the
+	// children inherit: one with no version, or a name no key is built for
+	// ("linux"), would leave them a distro with no key -- unkeyed, and with
+	// the purl qualifier fallback switched off (PR #270 review).
+	if d := distroOf(parent); d != nil {
+		if eco, err := d.Ecosystem(); err == nil {
+			inherited = osContext{distro: d, ecosystem: eco}
+		}
+	}
+	return contextFor(parent.Components, inherited)
+}
+
+// documentDistro is the Target's distro, the one the scan reports and its
+// end-of-life and coverage lines read: the top-level context's when the
+// document declares one there, else the one the subject itself declares --
+// metadata.component as an operating system, or one OS among its own
+// children, the shape a container SBOM nests its OS in. An OS declared only
+// in some other branch keys that branch's packages and does not name the
+// whole target (PR #270 review: the report must not name a distro its
+// top-level packages were not judged against).
+func documentDistro(doc bom, top osContext) *pkgmeta.Distro {
+	if top.distro != nil {
+		return top.distro
+	}
+	s := doc.Metadata.Component
+	if s == nil {
+		return nil
+	}
+	if d := distroOf(*s); d != nil {
+		return d
+	}
+	return contextFor(s.Components, osContext{}).distro
+}
+
+// sameDistro reports whether two OS components declare one distro release:
+// the same ecosystem key when both resolve to one (alpine 3.19.9 and 3.19.1
+// are both Alpine:v3.19), else the same ID and VERSION_ID.
+func sameDistro(a, b *pkgmeta.Distro) bool {
+	ea, errA := a.Ecosystem()
+	eb, errB := b.Ecosystem()
+	if errA == nil && errB == nil {
+		return ea == eb
+	}
+	return strings.EqualFold(a.ID, b.ID) && a.VersionID == b.VersionID
+}
+
+// distroOf reads one operating-system component, or nil for any other
+// component or one that names no distro.
+func distroOf(c component) *pkgmeta.Distro {
+	if c.Type != "operating-system" {
+		return nil
+	}
+	var d pkgmeta.Distro
+	for _, p := range c.Properties {
+		switch p.Name {
+		case "syft:distro:id":
+			d.ID = p.Value
+		case "syft:distro:versionID":
+			d.VersionID = p.Value
+		case "syft:distro:prettyName":
+			d.PrettyName = p.Value
+		}
+	}
+	// Fall back to the component's own fields: the properties are a syft
+	// extension, but name/version are spec and carry the same thing.
+	if d.ID == "" {
+		d.ID = c.Name
+	}
+	if d.VersionID == "" {
+		d.VersionID = c.Version
+	}
+	if d.ID == "" {
+		return nil
+	}
+	return &d
 }
