@@ -7981,6 +7981,32 @@ finding이 있다는 것만으로 성립한다. 출시됐으나 여전히 affect
 
 ---
 
+### D166 — CycloneDX의 배포판 패키지는 자기 가지에 선언된 OS로 키를 정한다 (D83 개정)
+
+**결정.** operating-system 컴포넌트는 놓인 자리에서 읽는다. 배포판 패키지(apk, deb, rpm, alpm)는 자기
+형제들 사이에 선언된 단 하나의 OS로 키를 정하고, 거기 없으면 위쪽에서 가장 가까운 모호하지 않은 OS로 정하며,
+서로 다른 OS 컴포넌트 둘이 나란히 있으면 그 옆 패키지에는 문맥이 없다. subject(`metadata.component`)는 문서
+최상위 문맥으로, 그 자식은 자기 문맥으로 키를 정한다. 적용 가능한 OS는 여전히 purl의 `distro` qualifier보다
+우선하고(D83), 문맥이 없으면 qualifier가 패키지를 식별하며, 둘 다 없으면 키 없이 카탈로그되어 사유와 함께
+미평가로 보고된다 — 추측으로 키를 정하지 않는다. Target 자체의 배포판(보고서, EOL 줄, coverage가 이름 붙이는
+것)은 최상위 문맥의 것, 없으면 문서의 모든 OS 컴포넌트가 동의하는 하나, 그것도 없으면 없다.
+
+**왜.** QA 2026-11-10: Alpine OS 컴포넌트와 busybox 1.36.1-r20은 `components` 최상위에서 2건이었고, 둘을
+`metadata.component` 아래로 옮기면 `--fail-on-incomplete=target`에서 **0건, 미평가 1, 종료 2**였다 — 리더가
+OS를 `bom.components`에서만 찾았다. 가지를 넘는 경우를 확인하다 더 나쁜 것을 찾았다: 최상위에 Debian 11,
+subject 아래에 Alpine이 있는 문서는 busybox를 `Debian:11`로 키를 정해 공개 DB에서 **오탐 51건**을 냈다.
+
+**검증.** QA의 공개 DB(`sha256:1be2281a…`)에 대고: `public-top-os` 2 → 2; `public-subject-os` 0 / 미평가 1 /
+종료 2 → **2 / 종료 0**; Debian 최상위 + Alpine subject는 76건(busybox를 `Debian:11`로) → 27건(busybox
+`Alpine:v3.19` 2, libc6 `Debian:11` 25). `Run`을 통해: OS와 패키지가 최상위, subject 아래, OS보다 한 단계 깊은
+곳에 있으면 모두 `Alpine:v3.19`; 혼합 문서는 각 패키지를 자기 가지로; qualifier 없이 OS 둘이 나란히 있으면 finding
+없음, 미평가 1, 종료 2; 같은 것에 `distro=alpine-3.19.9`가 있으면 qualifier로 키가 정해진다.
+
+**포기하는 것.** 같은 배포판·릴리스를 기술하는 OS 컴포넌트 둘은 하나로 센다; ID와 VERSION_ID 밖의 필드로만
+다른 둘은 구별하지 않는다. 관련 없는 가지에만 OS를 선언한 문서는 다른 곳의 패키지에 문맥을 주지 않는다.
+
+---
+
 ### D164 — finding의 JSON은 레코드의 related 식별자를 싣는다 (스키마 20)
 
 **결정.** `findings[].advisory.related`는 레코드 자체의 `related` 식별자이고, 비어 있으면 생략한다 — 스키마

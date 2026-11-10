@@ -8456,6 +8456,39 @@ range beside it; D163 names that build there.
 
 ---
 
+### D166 — A CycloneDX distro package is keyed by the OS declared in its own branch (revises D83)
+
+**Decision.** The operating-system component is read where it sits. A distro package (apk, deb,
+rpm, alpm) is keyed by the one OS declared among its own siblings; with none there, by the nearest
+unambiguous one above it; and two different OS components side by side are no context at all for
+the packages beside them. The subject (`metadata.component`) is keyed in the document's top-level
+context and its children in theirs. An applicable OS still outranks a purl's `distro` qualifier
+(D83); with no context the qualifier identifies the package; with neither, the package is cataloged
+unkeyed and reported not evaluated with its reason — never keyed to a guess. The Target's own
+distro (what the report, the EOL line and coverage name) is the top-level context's, else the one
+distro every OS component in the document agrees on, else none.
+
+**Why.** QA 2026-11-10: an Alpine OS component and busybox 1.36.1-r20 scanned to 2 findings at the
+top of `components`, and to **0 findings, not evaluated 1, exit 2** under
+`--fail-on-incomplete=target` when both were moved under `metadata.component` — the reader looked
+for the OS in `bom.components` only. Checking the cross-branch case found a worse one: a document
+with Debian 11 at the top and Alpine under the subject keyed busybox to `Debian:11` and reported
+**51 false findings** on the public DB.
+
+**Verified.** Against the QA's public DB (`sha256:1be2281a…`): `public-top-os` 2 → 2;
+`public-subject-os` 0 / not evaluated 1 / exit 2 → **2 / exit 0**; Debian-top + Alpine-subject 76
+findings (busybox as `Debian:11`) → 27 (busybox `Alpine:v3.19` 2, libc6 `Debian:11` 25). Through
+`Run`: OS and package at the top, under the subject, and nested a level below the OS all key
+`Alpine:v3.19`; the mixed document keys each package to its own branch; two OS side by side with no
+qualifier → no finding, not evaluated 1, exit 2; the same with `distro=alpine-3.19.9` → keyed by the
+qualifier.
+
+**Gives up.** Two OS components that describe the same distro and release count as one; two that
+differ only in a field other than ID and VERSION_ID are not told apart. A document that declares
+its OS only on some unrelated branch gives no context to packages elsewhere.
+
+---
+
 ### D164 — A finding's JSON carries the record's related ids (schema 20)
 
 **Decision.** `findings[].advisory.related` is the record's own `related` identifiers, omitted

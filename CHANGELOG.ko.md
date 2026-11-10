@@ -7,6 +7,13 @@
 
 ## [Unreleased]
 
+### Fixed
+- CycloneDX의 배포판 패키지는 문서에서 자기 가지에 선언된 OS로 키를 정합니다: `metadata.component` 아래에
+  busybox와 함께 둔 Alpine OS 컴포넌트가 그것의 키가 되고(전: 미평가, `--fail-on-incomplete=target`에서 종료 2),
+  최상위에 Debian, subject 아래에 Alpine이 있는 문서가 더 이상 busybox를 `Debian:11`로 키를 정하지 않습니다(공개
+  DB에서 오탐 51건). 서로 다른 OS 둘이 나란히 있으면 문맥이 없고, 그때는 purl의 `distro` qualifier가 패키지를
+  식별하며, 그것도 없으면 미평가로 보고합니다. (D166, D83 개정; QA 2026-11-10)
+
 ## [0.17.0] - 2026-11-10
 
 ### Added

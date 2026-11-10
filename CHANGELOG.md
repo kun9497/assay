@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- A CycloneDX distro package is keyed by the OS declared in its own branch of the document: an
+  Alpine OS component nested with busybox under `metadata.component` keys it (was: not evaluated,
+  exit 2 under `--fail-on-incomplete=target`), and a document with Debian at the top and Alpine
+  under the subject no longer keys busybox to `Debian:11` (51 false findings on the public DB).
+  Two different OS side by side give no context; a purl's `distro` qualifier then identifies the
+  package, and without one it is reported not evaluated. (D166, revises D83; QA 2026-11-10)
+
 ## [0.17.0] - 2026-11-10
 
 ### Added
