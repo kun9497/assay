@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -176,6 +178,11 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 	cases := casesOf(labels)
 	scans := map[string]*scanDoc{}
 	fatal := map[string]string{}
+	// unproven holds, per case, why an offline capture cannot be shown to be
+	// the scan of the SBOM this case's label generates (PR #268 review): a
+	// capture is chosen by case name alone, so a v2.0.0 scan kept under the
+	// name of a v1.0.0 label judged that label TN. Its labels are not judged.
+	unproven := map[string]string{}
 	var digest, tool string
 	for _, c := range cases {
 		var raw []byte
@@ -258,6 +265,12 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 			fmt.Fprintf(stderr, "error: case=%s %s\n", c.name, fatal[c.name])
 			continue
 		}
+		if *offlineDir != "" {
+			if why := targetMismatch(c.label, &doc); why != "" {
+				unproven[c.name] = why
+				fmt.Fprintf(stderr, "warning: case=%s %s; its labels are not judged\n", c.name, why)
+			}
+		}
 		scans[c.name] = &doc
 		if digest == "" {
 			digest, tool = doc.Provenance.Database.Artifact.Digest, doc.Provenance.Tool.Version
@@ -267,6 +280,9 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 	var results, dataClass []result
 	for _, l := range labels {
 		r := judge(l, scans[l.Case], fatal[l.Case])
+		if why := unproven[l.Case]; why != "" && fatal[l.Case] == "" {
+			r = result{Label: l, Outcome: outUnevaluated, Detail: why}
+		}
 		if l.Class == "data" {
 			dataClass = append(dataClass, r)
 		} else {
@@ -390,6 +406,11 @@ type scanDoc struct {
 				Digest string `json:"digest"`
 			} `json:"artifact"`
 		} `json:"database"`
+		// Target is read for its sha256 alone: the digest of the bytes
+		// assay scanned, which -offline holds to the case's SBOM.
+		Target struct {
+			Sha256 string `json:"sha256"`
+		} `json:"target"`
 	} `json:"provenance"`
 }
 
@@ -416,6 +437,23 @@ func casesOf(labels []Label) []caseGroup {
 // scanned as: the shape the 2026-11-04 QA harness used, which keys the
 // package through the purl's distro qualifier exactly as an image scan's
 // own purl would (D121).
+// targetMismatch is "" when the capture's provenance names, as the target it
+// scanned, exactly the SBOM sbomFor writes for l -- the sha256 assay records
+// of the target's bytes (D120) -- and otherwise why the capture cannot be
+// trusted as this case's scan: a different target, or no record of one (a
+// capture from before D120, or one edited by hand).
+func targetMismatch(l Label, doc *scanDoc) string {
+	sum := sha256.Sum256(sbomFor(l))
+	want := hex.EncodeToString(sum[:])
+	switch got := strings.TrimPrefix(doc.Provenance.Target.Sha256, "sha256:"); {
+	case got == "":
+		return "the capture records no target digest, so it cannot be shown to be the scan of this case's SBOM"
+	case !strings.EqualFold(got, want):
+		return fmt.Sprintf("the capture scanned a different target (sha256 %s, this case's SBOM is %s)", got, want)
+	}
+	return ""
+}
+
 func sbomFor(l Label) []byte {
 	doc := map[string]any{
 		"bomFormat":   "CycloneDX",

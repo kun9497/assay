@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -96,7 +98,10 @@ func fakeAssay(t *testing.T, scans map[string]fakeScan) (execFunc, *[]string) {
 			"findings":      fs,
 			"skipped":       sc.skipped,
 			"coverage":      []map[string]any{{"ecosystem": "Alpine:v3.19", "dataAsOf": fakeDataAsOf, "state": "live"}},
-			"provenance":    map[string]any{"tool": map[string]any{"version": "v0.0-test"}, "database": map[string]any{"artifact": map[string]any{"digest": "sha256:feed"}}},
+			"provenance": map[string]any{"tool": map[string]any{"version": "v0.0-test"}, "database": map[string]any{"artifact": map[string]any{"digest": "sha256:feed"}},
+				// What assay records of the SBOM it read (D120), so a kept
+				// capture is provably this case's scan under -offline.
+				"target": map[string]any{"sha256": sha256Hex(raw)}},
 		}
 		b, _ := json.Marshal(doc)
 		exit := sc.exit
@@ -105,6 +110,12 @@ func fakeAssay(t *testing.T, scans map[string]fakeScan) (execFunc, *[]string) {
 		}
 		return b, exit, nil
 	}, &sboms
+}
+
+// sha256Hex is the target digest assay's provenance records for b.
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 
 // fakeDataAsOf is the key date every fake scan reports.
