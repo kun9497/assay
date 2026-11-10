@@ -8522,6 +8522,9 @@ no longer overrides what its children inherit or switches off their purl qualifi
 **Gives up.** Two OS components that describe the same distro and release count as one; two that
 differ only in a field other than ID and VERSION_ID are not told apart. A document that declares
 its OS only on some unrelated branch gives no context to packages elsewhere.
+
+---
+
 ### D165 — One package listed twice in an SBOM keeps the source version it states, and two that contradict are not judged
 
 **Decision.** When a CycloneDX document lists one package both in `components` and in the subject

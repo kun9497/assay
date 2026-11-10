@@ -8032,6 +8032,9 @@ subject 아래에 Alpine이 있는 문서는 busybox를 `Debian:11`로 키를 �
 
 **포기하는 것.** 같은 배포판·릴리스를 기술하는 OS 컴포넌트 둘은 하나로 센다; ID와 VERSION_ID 밖의 필드로만
 다른 둘은 구별하지 않는다. 관련 없는 가지에만 OS를 선언한 문서는 다른 곳의 패키지에 문맥을 주지 않는다.
+
+---
+
 ### D165 — SBOM에 두 번 나열된 패키지는 명시된 소스 버전을 지키고, 서로 어긋나면 판정하지 않는다
 
 **결정.** CycloneDX 문서가 한 패키지를 `components`와 subject 트리(`metadata.component` 또는 그 아래 —
