@@ -8012,6 +8012,9 @@ libc6가 판정되지 않았다(0건, 종료 2). 실제 epoch 차이(`1:`)는 �
 바이너리 이름 키 권고까지: `--fail-on-incomplete` 없이는 그런 스캔이 skip과 notEvaluated 개수는 보여 주지만 그
 패키지의 finding은 없고, 종료 0일 수 있다. 두 해석을 모두 판정해 합집합을 보고하는 안을 검토했지만(PR #269 리뷰)
 택하지 않았다: 요구는 어떤 해석도 고르지 않는 것이었고, 합집합도 문서가 명시하지 않은 해석이다.
+
+---
+
 ### D167 — 차등 비교는 프로브된 생태계별 애플리케이션 패키지에 하한을 둔다 (`minApplicationPackages`)
 
 **결정.** `.github/scanner-diff-targets.json`의 대상은 `minApplicationPackages`를 둘 수 있다. 프로브된 생태계

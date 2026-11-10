@@ -8496,6 +8496,9 @@ and advisories keyed on the binary name: without `--fail-on-incomplete` such a s
 and the notEvaluated count, but no finding for that package, and can exit 0. Judging both readings
 and reporting the union was considered (PR #269 review) and not taken: the requirement was that no
 reading be chosen, and a union is a reading the document does not state either.
+
+---
+
 ### D167 — The differential floors each probed ecosystem's application packages (`minApplicationPackages`)
 
 **Decision.** A target in `.github/scanner-diff-targets.json` may name `minApplicationPackages`, a
