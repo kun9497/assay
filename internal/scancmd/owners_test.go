@@ -300,14 +300,23 @@ func TestSpellings(t *testing.T) {
 		{"usr/lib/node_modules/npm/package.json", "usr/lib/node_modules/npm/package.json|lib/node_modules/npm/package.json"},
 		{"opt/app/tool", "opt/app/tool"},
 	} {
-		if got := strings.Join(spellings(tc.in, allMerged), "|"); got != tc.want {
+		if got := joinSpellings(spellings(tc.in, allMerged)); got != tc.want {
 			t.Errorf("spellings(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }
 
 // allMerged is a merged-/usr Debian's top-level links, for spellings' table.
-var allMerged = map[string]string{"bin": "usr/bin", "sbin": "usr/sbin", "lib": "usr/lib", "lib32": "usr/lib32", "lib64": "usr/lib64", "libx32": "usr/libx32"}
+var allMerged = map[string]topLink{"bin": {"usr/bin", 0}, "sbin": {"usr/sbin", 0}, "lib": {"usr/lib", 0}, "lib32": {"usr/lib32", 0}, "lib64": {"usr/lib64", 0}, "libx32": {"usr/libx32", 0}}
+
+// joinSpellings renders spellings' paths for a table assertion.
+func joinSpellings(ss []spelling) string {
+	out := make([]string, len(ss))
+	for i, s := range ss {
+		out[i] = s.path
+	}
+	return strings.Join(out, "|")
+}
 
 // QA 2026-11-10: /lib and /usr/lib are two directories. The APK that owns
 // lib/node_modules/minimatch/package.json does not own the independent copy at
@@ -356,14 +365,14 @@ func TestTopLevelLinks(t *testing.T) {
 		"lib64":  {Target: "./usr/lib"}, // Arch
 		"lib32":  {Target: "usr/lib32", Hard: true},
 		"libx32": {Target: "opt/libx32"}, // not under usr/: not a layout link
-	})
+	}, func(string) int { return 0 })
 	want := map[string]string{"bin": "usr/bin", "sbin": "usr/bin", "lib": "usr/lib", "lib64": "usr/lib"}
 	if len(got) != len(want) {
 		t.Fatalf("topLevelLinks = %v, want %v", got, want)
 	}
 	for d, w := range want {
-		if got[d] != w {
-			t.Errorf("topLevelLinks[%s] = %q, want %q", d, got[d], w)
+		if got[d].target != w {
+			t.Errorf("topLevelLinks[%s] = %q, want %q", d, got[d].target, w)
 		}
 	}
 	for _, tc := range []struct{ in, want string }{
@@ -373,11 +382,80 @@ func TestTopLevelLinks(t *testing.T) {
 		{"usr/sbin/tool", "usr/sbin/tool"},
 		{"usr/lib32/x", "usr/lib32/x"},
 	} {
-		if s := strings.Join(spellings(tc.in, got), "|"); s != tc.want {
+		if s := joinSpellings(spellings(tc.in, got)); s != tc.want {
 			t.Errorf("spellings(%q) = %q, want %q", tc.in, s, tc.want)
 		}
 	}
-	if s := strings.Join(spellings("usr/lib/x", nil), "|"); s != "usr/lib/x" {
+	if s := joinSpellings(spellings("usr/lib/x", nil)); s != "usr/lib/x" {
 		t.Errorf("spellings with no link evidence = %q, want the exact path only", s)
+	}
+}
+
+// PR #267 review: an upper layer that deletes a real lib64 directory and
+// relinks lib64 -> usr/lib does not make the package that owned the old
+// lib64/... files the owner of the independent usr/lib/... copy -- the record
+// predates the link, so it was written through the directory the link
+// replaced. The same link in the record's own layer (a merged-/usr install)
+// still lends the owner, and a split layout lends nothing.
+func TestRun_PR267_LinkNewerThanTheRecordDoesNotLendTheOwner(t *testing.T) {
+	apk := "P:qa-owner\nV:1.0-r0\nA:x86_64\nF:lib64/node_modules/minimatch\nR:package.json\n\n"
+	pkg := []byte(`{"name":"minimatch","version":"3.0.4"}`)
+	const probed = "usr/lib/node_modules/minimatch/package.json"
+	base := []probeLayerEntry{
+		{name: osReleasePath, body: []byte(osReleaseAlpine319)},
+		{name: apkDBPath, body: []byte(apk)},
+		{name: probed, body: pkg},
+	}
+	split := append(append([]probeLayerEntry{}, base...), probeLayerEntry{name: "lib64/node_modules/minimatch/package.json", body: pkg})
+	for _, tc := range []struct {
+		name   string
+		layers [][]probeLayerEntry
+		owner  string
+	}{
+		{"split lib64 and usr/lib", [][]probeLayerEntry{split}, ""},
+		{"lib64 relinked to usr/lib in a later layer", [][]probeLayerEntry{split, {{name: ".wh.lib64"}, {name: "lib64", link: "usr/lib"}}}, ""},
+		{"lib64 -> usr/lib in the record's own layer", [][]probeLayerEntry{append([]probeLayerEntry{{name: "lib64", link: "usr/lib"}}, base...)}, "qa-owner 1.0-r0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tarPath := filepath.Join(t.TempDir(), "image.tar")
+			writeLayeredProbeImage(t, tarPath, tc.layers...)
+			got := ownersInJSON(t, tarPath)
+			if v, ok := got[probed]; !ok || v != tc.owner {
+				t.Errorf("%s: present=%v owner=%q, want %q (all: %v)", probed, ok, v, tc.owner, got)
+			}
+		})
+	}
+}
+
+// The same rule for a dpkg list: Debian's merged-/usr lists say /lib64/...,
+// and a relink made after the list was written lends nothing.
+func TestRun_PR267_DpkgListOlderThanTheLinkDoesNotLendTheOwner(t *testing.T) {
+	db := "Package: libqa\nStatus: install ok installed\nArchitecture: amd64\nVersion: 1.0-1\n\n"
+	list := "/.\n/lib64/node_modules/minimatch/package.json\n"
+	pkg := []byte(`{"name":"minimatch","version":"3.0.4"}`)
+	const probed = "usr/lib/node_modules/minimatch/package.json"
+	base := []probeLayerEntry{
+		{name: osReleasePath, body: []byte(osReleaseDebianForOwners)},
+		{name: dpkgDBPath, body: []byte(db)},
+		{name: "var/lib/dpkg/info/libqa:amd64.list", body: []byte(list)},
+		{name: probed, body: pkg},
+	}
+	split := append(append([]probeLayerEntry{}, base...), probeLayerEntry{name: "lib64/node_modules/minimatch/package.json", body: pkg})
+	for _, tc := range []struct {
+		name   string
+		layers [][]probeLayerEntry
+		owner  string
+	}{
+		{"relinked in a later layer", [][]probeLayerEntry{split, {{name: ".wh.lib64"}, {name: "lib64", link: "usr/lib"}}}, ""},
+		{"linked in the list's own layer", [][]probeLayerEntry{append([]probeLayerEntry{{name: "lib64", link: "usr/lib"}}, base...)}, "libqa 1.0-1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tarPath := filepath.Join(t.TempDir(), "image.tar")
+			writeLayeredProbeImage(t, tarPath, tc.layers...)
+			got := ownersInJSON(t, tarPath)
+			if v, ok := got[probed]; !ok || v != tc.owner {
+				t.Errorf("%s: present=%v owner=%q, want %q (all: %v)", probed, ok, v, tc.owner, got)
+			}
+		})
 	}
 }

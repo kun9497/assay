@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- The scanner differential floors each probed ecosystem's application packages:
+  `minApplicationPackages` (`npm`, `Go`) on `coverage[].packages`, judged by the weekly run and
+  the nightly `-regressions-only` gate alike. `ubi8n18` npm 118, three Go targets 1. Before it, a
+  candidate that lost every npm and Go package passed both modes. (D167; QA 2026-11-10)
+
 ### Fixed
 - An npm package installed through a link under the global `node_modules` roots is read: a
   `package.json` that is a symlink or hardlink, and a package directory (`x` or `@s/x`) that is a
@@ -17,6 +23,9 @@ All notable changes to this project are documented here. The format follows
   target is not walked, so its own nested dependencies are not read; a target already read under
   a root (pnpm's `.pnpm` layout) is counted once; an error reading a linked `package.json` fails
   the scan. (D160 revised; QA 2026-11-10)
+- An upper layer that deletes a real `/lib64` and relinks it to `/usr/lib` no longer lends the
+  package that owned the old `/lib64` files to the independent `/usr/lib` copy: a top-level link
+  spells an owner path only for an ownership record no older than the link. (D162 revised; PR #267 review)
 - An image whose `/lib` and `/usr/lib` (or `/bin` and `/usr/bin`) are separate directories no
   longer reports an OS package that owns a file under one as the owner of the other's independent
   copy: `locations[].ownedBy` spells a path only through the image's own top-level
