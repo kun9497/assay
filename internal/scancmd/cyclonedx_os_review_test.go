@@ -115,6 +115,22 @@ func TestRun_PR270_AmbiguousTwinAndOSParent(t *testing.T) {
 			t.Errorf("exit=%d notEvaluated=%d components=%d findings=%v", code, doc.Summary.NotEvaluated, doc.Summary.Components, got)
 		}
 	})
+	// An OS that carries its packages, beside a different OS: the level
+	// declares two, so it gives no context, but the OS component's own
+	// children are still its -- at the top of the document and nested
+	// under the subject alike.
+	for name, body := range map[string]string{
+		"top level":     start + `"components":[` + debian + `,` + osAlp + `]}`,
+		"under subject": start + `"components":[],` + subject(debian+`,`+osAlp),
+	} {
+		t.Run("OS parent beside another OS, "+name, func(t *testing.T) {
+			code, doc := run(body)
+			got := seen(doc)
+			if code != 0 || len(got) != 1 || !strings.HasPrefix(got["ALPINE319-CVE-2024-58251"], "Alpine:v3.19 ") {
+				t.Errorf("exit=%d notEvaluated=%d findings=%v, want ALPINE319 on Alpine:v3.19 only", code, doc.Summary.NotEvaluated, got)
+			}
+		})
+	}
 	for _, top := range []string{"", debian} {
 		t.Run("OS parent, top="+top, func(t *testing.T) {
 			code, doc := run(start + `"components":[` + top + `],"metadata":{"component":` + osAlp + `}}`)
