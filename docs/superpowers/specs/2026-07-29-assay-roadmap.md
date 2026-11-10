@@ -8456,6 +8456,36 @@ range beside it; D163 names that build there.
 
 ---
 
+### D165 — One package listed twice in an SBOM keeps the source version it states, and two that contradict are not judged
+
+**Decision.** When a CycloneDX document lists one package twice — in `components` and as the
+subject, or twice in either — and both listings name the same source, a source version stated by
+either listing is kept, whichever listing came first. Two stated source versions that differ are a
+contradiction the document makes: the package is judged on neither, as one target-cause skip whose
+reason names both versions (sorted, so it reads the same either way round), so
+`--fail-on-incomplete=target` exits 2 (D11). Carried on `pkgmeta.Package.Unevaluable`, which the
+matcher reports as that skip before looking up anything.
+
+**Why.** QA 2026-11-10: Debian 11 `libc6 2.31-13+deb11u14` listed in `components` with
+`upstream=glibc@2.31-13+deb11u13` and as the subject with `upstream=glibc` scanned to 25 findings,
+and the same two listings swapped to 20 — CVE-2026-4046 among the five lost — with no incomplete
+mark either way. The merge kept the first listing's source and took the second's only when the first
+had none, so a name-only source shadowed a versioned one. The rule it replaces was D25's own
+anti-pattern: a verdict that depended on arrival order. Choosing the lower version instead was
+considered and rejected — it would pick a side the document did not.
+
+**Verified.** Through `Run` with a Debian 11 store whose glibc advisory is fixed in deb11u14: both
+orders find it; two stated versions contradicting, in both orders, give no finding, one skip with
+cause `target` naming both versions, and exit 2. Against the QA's public DB (`sha256:1be2281a…`):
+`public-dupe-top-detailed` 25 → 25, `public-dupe-subject-detailed` 20 → **25** with CVE-2026-4046,
+the contradiction variant 25 findings / exit 0 → 0 findings / targetIncomplete 1 / exit 2.
+
+**Gives up.** Only listings that name the same source are merged this way; two listings naming
+different sources keep the first, as before. A contradiction makes the whole package unevaluated,
+including advisories keyed on the binary name that the source version would not have changed.
+
+---
+
 ### D164 — A finding's JSON carries the record's related ids (schema 20)
 
 **Decision.** `findings[].advisory.related` is the record's own `related` identifiers, omitted

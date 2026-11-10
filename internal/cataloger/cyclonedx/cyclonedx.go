@@ -232,8 +232,33 @@ func keepEvidence(kept *pkgmeta.Package, dropped pkgmeta.Package) {
 			kept.Locations = append(kept.Locations, loc)
 		}
 	}
-	if kept.Source == nil {
+	switch {
+	case kept.Source == nil:
 		kept.Source = dropped.Source
+	case dropped.Source != nil && dropped.Source.Name == kept.Source.Name:
+		// QA 2026-11-10: the two listings name the same source and one
+		// states its version. That version is evidence whichever listing
+		// came first -- without it the package is judged on its own
+		// version and a source-keyed advisory with a later fix reads clean
+		// (libc6 2.31-13+deb11u14 from glibc 2.31-13+deb11u13: 25 findings
+		// one way round, 20 the other). Two stated versions that differ are
+		// a contradiction the document makes, so the package is judged on
+		// neither (Unevaluable), and the reason names both.
+		switch kv, dv := kept.Source.Version, dropped.Source.Version; {
+		case kv == "":
+			src := *kept.Source
+			src.Version = dv
+			kept.Source = &src
+		case dv != "" && dv != kv && kept.Unevaluable == "":
+			// Sorted, so the reason reads the same whichever listing came
+			// first.
+			lo, hi := kv, dv
+			if hi < lo {
+				lo, hi = hi, lo
+			}
+			kept.Unevaluable = fmt.Sprintf("the SBOM lists %s %s twice with source %s at two versions, %s and %s; "+
+				"it is not judged on either", kept.Name, kept.Version, kept.Source.Name, lo, hi)
+		}
 	}
 	if kept.Upstream == "" {
 		kept.Upstream = dropped.Upstream

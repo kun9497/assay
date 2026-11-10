@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- A package an SBOM lists twice with the same source keeps the source version either listing
+  states, whichever comes first (Debian 11 libc6/glibc: 20 findings one way round, 25 the other,
+  now 25 both); two listings stating different source versions are judged on neither, as one
+  target-cause skip naming both, so `--fail-on-incomplete=target` exits 2. (D165, QA 2026-11-10)
+
 ## [0.17.0] - 2026-11-10
 
 ### Added

@@ -647,6 +647,13 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 	}
 
 	for _, p := range t.Packages {
+		if p.Unevaluable != "" {
+			// A cataloger found the package's own evidence contradictory
+			// (pkgmeta.Package.Unevaluable): one skip, the scan target's
+			// cause, and no advisory judged on a version it had to guess.
+			res.Skipped = append(res.Skipped, Skipped{Package: p, Reason: p.Unevaluable, Cause: SkipTarget})
+			continue
+		}
 		cmp, ok := version.For(p.Ecosystem)
 		if !ok {
 			res.Skipped = append(res.Skipped, Skipped{
