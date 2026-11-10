@@ -385,7 +385,14 @@ type Skipped struct {
 	// AdvisoryID is empty when the whole package was skipped, e.g. because no
 	// comparer is registered for its ecosystem.
 	AdvisoryID string
-	Reason     string
+	// CVEs are the CVE identifiers the skipped advisory names -- its ID,
+	// aliases, upstream and (for the distro-authored records that carry it)
+	// related, deduplicated and sorted -- so a reader holding a CVE can tell
+	// whether this skip is about it when AdvisoryID is an ALAS or GHSA id
+	// (QA 2026-11-10). Empty for a whole-package skip or an advisory that
+	// names no CVE.
+	CVEs   []string
+	Reason string
 	// Cause is who the incompleteness belongs to (D36). D35 put this in the
 	// Reason text; a CI policy deciding whether to fail a build cannot match on
 	// prose, and the difference matters more than presentation: SkipTarget is
@@ -972,6 +979,7 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 								res.Skipped = append(res.Skipped, Skipped{
 									Package:    p,
 									AdvisoryID: a.ID,
+									CVEs:       advisoryCVEs(a),
 									Reason: fmt.Sprintf(
 										"advisory range names a modular RPM build %q; "+
 											"the fix stream cannot be determined from the "+
@@ -1011,6 +1019,7 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 						res.Skipped = append(res.Skipped, Skipped{
 							Package:    p,
 							AdvisoryID: a.ID,
+							CVEs:       advisoryCVEs(a),
 							Reason: fmt.Sprintf("%d of %d listed version(s) could not be compared, starting with %q",
 								len(unreadable), len(aff.Versions), unreadable[0]),
 							// The unreadable entries are the advisory's own
@@ -1043,6 +1052,7 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 							res.Skipped = append(res.Skipped, Skipped{
 								Package:    p,
 								AdvisoryID: a.ID,
+								CVEs:       advisoryCVEs(a),
 								// D35: no "comparing <version>:" prefix. The
 								// package and its version already head the
 								// rendered line, and the error now names which
@@ -1392,6 +1402,24 @@ func absorb(findings []Finding, group map[string]int, dst, src int) {
 // records (osv.distroAuthored's own comment explains why a global read is
 // rejected), so a language-ecosystem record's genuinely-different `related`
 // advisories never reach this field at all.
+// advisoryCVEs is the CVE-shaped subset of lookupIDs, deduplicated and
+// sorted: the CVEs a skip of this advisory leaves unjudged. Related is in
+// lookupIDs only for the distro-authored records that carry it, so a
+// language record's unrelated `related` ids never reach this list.
+func advisoryCVEs(a advisory.Advisory) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, id := range lookupIDs(a) {
+		u := strings.ToUpper(id)
+		if strings.HasPrefix(u, "CVE-") && !seen[u] {
+			seen[u] = true
+			out = append(out, u)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 func lookupIDs(a advisory.Advisory) []string {
 	out := make([]string, 0, 1+len(a.Aliases)+len(a.Upstream)+len(a.Related))
 	out = append(out, a.ID)

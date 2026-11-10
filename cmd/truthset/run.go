@@ -64,6 +64,11 @@ const (
 	// a finding nor its absence is evidence. Listed, counted in the report,
 	// and in neither the metrics nor the exit code.
 	outPredates = "PREDATES"
+	// outFixUnknown is an affected label whose finding proves the package
+	// is affected while a skipped comparison for the same CVE leaves the
+	// fixed version undetermined (QA 2026-11-10): the verdict holds, the
+	// fix the label demands cannot be confirmed. Counted with UNEVALUATED.
+	outFixUnknown = "FIX-UNKNOWN"
 )
 
 // result is one judged label.
@@ -356,6 +361,17 @@ type scanDoc struct {
 	// Coverage is the per-key data date (schema 17, D113 revised): the
 	// scan's one component maps to one key, and its dataAsOf is what
 	// validFrom is held against.
+	// Skipped is the scan's own record of the comparisons it could not
+	// make. A label whose CVE was among them cannot be judged clean or
+	// missed from the findings alone (QA 2026-11-10).
+	Skipped []struct {
+		Package struct {
+			Name string `json:"name"`
+		} `json:"package"`
+		AdvisoryID string `json:"advisoryId"`
+		// CVEs (schema 21) are the CVEs the skipped advisory names.
+		CVEs []string `json:"cves"`
+	} `json:"skipped"`
 	Coverage []struct {
 		Ecosystem   string `json:"ecosystem"`
 		DataAsOf    string `json:"dataAsOf"`
@@ -468,6 +484,25 @@ func judge(l Label, doc *scanDoc, fatal string) result {
 		frozen = appendDistinct(frozen, f.FrozenSince)
 	}
 	r.GotFixed, r.GotFixState, r.GotFrozen = strings.Join(fixes, " | "), strings.Join(states, " | "), strings.Join(frozen, " | ")
+	// A comparison the scan skipped for this package can leave the label's
+	// CVE unjudged. It does when the skip names the CVE, or when it cannot
+	// be told apart from one that does: a whole-package skip, or an
+	// advisory id that is not a CVE with no cves list (a capture from
+	// before schema 21, or an advisory naming no CVE). A skip that names
+	// other CVEs only is about them, and changes nothing here.
+	skip := skipFor(doc, l)
+	switch {
+	case skip != "" && found && l.Expect.State == "affected" && l.Expect.Fixed != "":
+		// Affected is proven by the finding; which fix the skipped
+		// comparison would have named is not.
+		r.Outcome, r.Detail = outFixUnknown, fmt.Sprintf("affected (fixed=%q), but %s, so the fixed version is undetermined", r.GotFixed, skip)
+		return r
+	case skip != "" && !found:
+		// Neither clean nor a miss: the comparison that would decide it
+		// did not run.
+		r.Outcome, r.Detail = outUnevaluated, fmt.Sprintf("not reported, but %s", skip)
+		return r
+	}
 	switch {
 	case l.Expect.State == "clean" && !found:
 		r.Outcome = outTN
@@ -484,6 +519,31 @@ func judge(l Label, doc *scanDoc, fatal string) result {
 		r.Outcome = outTP
 	}
 	return r
+}
+
+// skipFor describes the scan's skip that can leave l's CVE unjudged, or ""
+// when no skip for l's package can.
+func skipFor(doc *scanDoc, l Label) string {
+	for _, s := range doc.Skipped {
+		if s.Package.Name != l.Name {
+			continue
+		}
+		switch {
+		case s.AdvisoryID == "":
+			return "the scan skipped the whole package"
+		case strings.EqualFold(s.AdvisoryID, l.CVE):
+			return fmt.Sprintf("the scan skipped %s", s.AdvisoryID)
+		}
+		for _, c := range s.CVEs {
+			if strings.EqualFold(c, l.CVE) {
+				return fmt.Sprintf("the scan skipped %s, which names %s", s.AdvisoryID, l.CVE)
+			}
+		}
+		if len(s.CVEs) == 0 && !strings.HasPrefix(strings.ToUpper(s.AdvisoryID), "CVE-") {
+			return fmt.Sprintf("the scan skipped %s and the report does not say which CVEs it names", s.AdvisoryID)
+		}
+	}
+	return ""
 }
 
 // appendDistinct keeps the first occurrence of each value, in arrival order,
@@ -571,7 +631,7 @@ func metricsOf(family string, rs []result) familyMetrics {
 			m.FN++
 		case outMismatch:
 			m.Mismatch++
-		case outUnevaluated:
+		case outUnevaluated, outFixUnknown:
 			m.Unevaluated++
 		case outError:
 			m.Errors++
