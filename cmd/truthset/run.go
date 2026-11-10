@@ -339,11 +339,20 @@ type scanDoc struct {
 			ID       string   `json:"id"`
 			Aliases  []string `json:"aliases"`
 			Upstream []string `json:"upstream"`
+			// Related (schema 20) is where Amazon ALAS, Fedora Bodhi and
+			// Oracle OVAL records name their CVEs.
+			Related []string `json:"related"`
 		} `json:"advisory"`
 		Evidence struct {
 			Fixed string `json:"fixed"`
 		} `json:"evidence"`
 		FixState string `json:"fixState"`
+		// Ratings carry each database's own advisory id; NVD's and EPSS's
+		// is the CVE. Read as the join of last resort, so a document from
+		// before schema 20 still reaches an ALAS finding's CVE.
+		Ratings []struct {
+			AdvisoryID string `json:"advisoryId"`
+		} `json:"ratings"`
 	} `json:"findings"`
 	// Coverage is the per-key data date (schema 17, D113 revised): the
 	// scan's one component maps to one key, and its dataAsOf is what
@@ -451,7 +460,11 @@ func judge(l Label, doc *scanDoc, fatal string) result {
 		if f.Package.Name != l.Name && f.MatchedName != l.Name {
 			continue
 		}
-		if !namesCVE(f.Advisory.ID, f.Advisory.Aliases, f.Advisory.Upstream, l.CVE) {
+		ids := append(append(append([]string{}, f.Advisory.Aliases...), f.Advisory.Upstream...), f.Advisory.Related...)
+		for _, r := range f.Ratings {
+			ids = append(ids, r.AdvisoryID)
+		}
+		if !namesCVE(f.Advisory.ID, ids, l.CVE) {
 			continue
 		}
 		found = true
@@ -489,17 +502,15 @@ func appendDistinct(xs []string, x string) []string {
 	return append(xs, x)
 }
 
-func namesCVE(id string, aliases, upstream []string, cve string) bool {
+// namesCVE reports whether a finding is about cve: its record id, or any
+// of the other identifiers it carries -- aliases, upstream (D3), related
+// (ALAS, Bodhi, OVAL) and the ratings' advisory ids.
+func namesCVE(id string, others []string, cve string) bool {
 	if strings.EqualFold(id, cve) {
 		return true
 	}
-	for _, a := range aliases {
-		if strings.EqualFold(a, cve) {
-			return true
-		}
-	}
-	for _, u := range upstream {
-		if strings.EqualFold(u, cve) {
+	for _, o := range others {
+		if strings.EqualFold(o, cve) {
 			return true
 		}
 	}

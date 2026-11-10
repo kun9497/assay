@@ -9,7 +9,7 @@
 
 | 계약 | 무엇인가 | 버전 필드 | 현재 |
 |---|---|---|---|
-| `report` | `assay scan --output json` | `schemaVersion` | 19 |
+| `report` | `assay scan --output json` | `schemaVersion` | 20 |
 | `provenance sidecar` | `--provenance <path>`가 쓰는 파일(D120) | `schemaVersion` | 1 |
 | `status.json` | 배포 데이터베이스의 상태, `status` 브랜치(D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json`(D147) | `schemaVersion` | 1 |
@@ -76,6 +76,10 @@
   pacman의 `files`. 파일 단위의 정확한 소유이고 파일의 레이어가 레코드의 레이어보다 나중이 아닐 때만
   붙습니다(이미지 작성자가 패키지의 파일 위에 덮어쓴 것은 소유자 없음); 어느 OS 패키지도 그 파일을
   올리지 않았거나 이미지 밖이면 없습니다.
+- 스키마 20(추가형): `findings[].advisory.related` — 레코드 자체의 `related` 식별자. Amazon ALAS, Fedora
+  Bodhi, Oracle OVAL 레코드에서는 finding이 고치는 CVE가 이름 붙는 곳입니다(셋 다 `aliases`나
+  `upstream` 필드가 없음). 표와 `--explain`은 늘 읽었지만 JSON은 아니었으므로, 스키마 20 전에는 그런
+  finding이 `ratings[].advisoryId`를 통해서만 CVE에 닿았습니다.
 
 ## provenance sidecar, status.json, `db status`
 
