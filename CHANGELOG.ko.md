@@ -8,6 +8,9 @@
 ## [Unreleased]
 
 ### Fixed
+- CycloneDX: operating-system 컴포넌트가 자기 자식의 키를 정합니다(최상위에 Debian이 선언되어도
+  `metadata.component`인 Alpine 아래 busybox가 Debian finding을 내지 않습니다). 키 없는 나열은 키 있는 쌍둥이가
+  유일할 때만 합치며, 릴리스가 둘이면 먼저 온 쪽에 붙지 않고 미평가입니다. (D166 개정; PR #270 리뷰)
 - CycloneDX의 배포판 패키지는 문서에서 자기 가지에 선언된 OS로 키를 정합니다: `metadata.component` 아래에
   busybox와 함께 둔 Alpine OS 컴포넌트가 그것의 키가 되고(전: 미평가, `--fail-on-incomplete=target`에서 종료 2),
   최상위에 Debian, subject 아래에 Alpine이 있는 문서가 더 이상 busybox를 `Debian:11`로 키를 정하지 않습니다(공개

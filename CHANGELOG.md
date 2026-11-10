@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- CycloneDX: an operating-system component keys its own children (Alpine as `metadata.component`
+  with busybox under it no longer reads Debian findings when a Debian is declared at the top), and an
+  unkeyed listing merges into a keyed twin only when the twin is unique -- with two releases to
+  choose from it is not evaluated instead of joining whichever came first. (D166 revised; PR #270 review)
 - A CycloneDX distro package is keyed by the OS declared in its own branch of the document: an
   Alpine OS component nested with busybox under `metadata.component` keys it (was: not evaluated,
   exit 2 under `--fail-on-incomplete=target`), and a document with Debian at the top and Alpine

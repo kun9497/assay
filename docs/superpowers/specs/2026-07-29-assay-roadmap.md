@@ -8491,6 +8491,17 @@ findings (busybox as `Debian:11`) → 27 (busybox `Alpine:v3.19` 2, libc6 `Debia
 qualifier → no finding, not evaluated 1, exit 2; the same with `distro=alpine-3.19.9` → keyed by the
 qualifier.
 
+**Revised (PR #270 review).** Two corrections, both found on the review's own inputs. An
+operating-system component's children are keyed by it: Alpine as `metadata.component` with busybox
+directly under it read not evaluated alone and **51 Debian findings** beside a Debian declared at
+the top; it now reads Alpine 2 either way, and an OS among the children still comes first. And an
+unkeyed listing merges into a keyed twin at the top only when that twin is unique: busybox keyed to
+Alpine 3.19 and to 3.20 at the top plus an unkeyed busybox under a subject declaring both releases
+had attached the third listing's install path to whichever release came first -- 3.19 one way
+round, 3.20 the other, exit 0. That listing now stays its own package, unkeyed, not evaluated
+(exit 2 under `--fail-on-incomplete`), its path on no finding; with one keyed twin it is that
+package, as before.
+
 **Gives up.** Two OS components that describe the same distro and release count as one; two that
 differ only in a field other than ID and VERSION_ID are not told apart. A document that declares
 its OS only on some unrelated branch gives no context to packages elsewhere.
