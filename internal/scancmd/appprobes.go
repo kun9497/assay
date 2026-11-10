@@ -295,16 +295,41 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 		names = append(names, n)
 	}
 	sort.Strings(names)
+	// A root the image replaced with a link has nothing under its name: a
+	// lower layer's packages there are gone from the filesystem (a symlink
+	// over a directory carries no whiteout, so the pass did not shadow
+	// them), and so are the links it recorded there (PR #271 review).
+	var linkedRoots []string
+	for _, n := range names {
+		if isNpmRoot(n) && !links[n].Hard {
+			linkedRoots = append(linkedRoots, n)
+		}
+	}
+	for _, r := range linkedRoots {
+		for f := range files {
+			if strings.HasPrefix(f, r+"/") {
+				delete(files, f)
+				delete(layerOf, f)
+			}
+		}
+	}
 	for _, n := range names {
 		l := links[n]
+		if underAny(n, linkedRoots) {
+			continue
+		}
 		switch {
 		case isNpmRoot(n):
 			// A global node_modules root that is itself a link: every
 			// package lives behind it, and enumerating them means walking
 			// the target, which D160's fixed roots do not do. Unread with
-			// the reason, so npm is partial rather than none.
-			unresolved++
-			img.NoteUnresolved(n, fmt.Sprintf("npm root is a link to %q; the packages behind it are not enumerated", l.Target))
+			// the reason, so npm is partial rather than none -- unless the
+			// link leads to another root the pass read in full, which makes
+			// it an alias with nothing left unread.
+			if t := resolveLink(path.Dir(n), l.Target, links); l.Hard || !aliasOfReadRoot(t, links) {
+				unresolved++
+				img.NoteUnresolved(n, fmt.Sprintf("npm root is a link to %q; the packages behind it are not enumerated", l.Target))
+			}
 		case !underAny(n, npminstalled.Roots):
 			// Equivalent today, kept as the statement of scope: probeCandidate
 			// admits npm links only under the roots, and the pass's other
@@ -326,14 +351,18 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 			}
 		case !l.Hard && isPackageDir(n):
 			read := resolveLink(path.Dir(n), l.Target, links) + "/package.json"
-			// A target the probe already inventoried as an installed package
-			// is that package, not a second copy (pnpm's
-			// node_modules/x -> .pnpm/x@v/node_modules/x). A package.json the
-			// probe merely read -- inside another package's resources, say --
-			// is no install of its own, and the link is the only one this
-			// package has (PR #271 review: lodash linked into a vendor
-			// package's resources read 0 findings).
-			if _, seen := files[read]; seen && npminstalled.IsInstalledPackageJSON(read) {
+			// A target that is itself an install this pass inventories is
+			// that package, not a second copy: pnpm's
+			// node_modules/x -> .pnpm/x@v/node_modules/x, whose manifest may
+			// be a regular file or a hardlink into the store; a link from one
+			// root into another; or a link to another package directory link.
+			// Judged at the link's immediate target -- the first place it
+			// lands -- and at the end of the chain. A package.json the probe
+			// merely read -- inside another package's resources, say -- is no
+			// install of its own, and the link is the only one this package
+			// has (PR #271 review: lodash linked into a vendor package's
+			// resources read 0 findings).
+			if inventoried(resolveLinkTo(path.Dir(n), l.Target, links, false), files, links) || inventoried(strings.TrimSuffix(read, "/package.json"), files, links) {
 				continue
 			}
 			cands = append(cands, cand{logical: n + "/package.json", read: read, link: l.Target, linkLayer: l.DiffID})
@@ -372,6 +401,38 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 	return unresolved, nil
 }
 
+// inventoried reports whether dir is a package directory this pass already
+// inventories as an installed package: its manifest an installed
+// package.json read as a file or recorded as a link candidate, or the
+// directory itself a package-directory link under a root.
+func inventoried(dir string, files map[string][]byte, links map[string]source.Link) bool {
+	pj := dir + "/package.json"
+	if !npminstalled.IsInstalledPackageJSON(pj) {
+		return false
+	}
+	if _, ok := files[pj]; ok {
+		return true
+	}
+	if _, ok := links[pj]; ok {
+		return true
+	}
+	l, ok := links[dir]
+	return ok && !l.Hard && underAny(dir, npminstalled.Roots) && isPackageDir(dir)
+}
+
+// aliasOfReadRoot reports whether t, a root link's resolved target, is
+// another npm root (or a directory under one) that is not itself a link:
+// everything there was read by this pass.
+func aliasOfReadRoot(t string, links map[string]source.Link) bool {
+	for _, r := range npminstalled.Roots {
+		if t == r || strings.HasPrefix(t, r+"/") {
+			_, linked := links[r]
+			return !linked
+		}
+	}
+	return false
+}
+
 // isNpmRoot reports whether name is one of the global node_modules roots
 // itself.
 func isNpmRoot(name string) bool {
@@ -392,6 +453,12 @@ func isNpmRoot(name string) bool {
 // top-level layout links); a component no recorded link names is taken as a
 // directory. Bounded like the image's own resolver, so a cycle ends.
 func resolveLink(dir, target string, links map[string]source.Link) string {
+	return resolveLinkTo(dir, target, links, true)
+}
+
+// resolveLinkTo is resolveLink; with followFinal false, a link at the last
+// component is left unfollowed -- the place the link first lands.
+func resolveLinkTo(dir, target string, links map[string]source.Link, followFinal bool) string {
 	var cur []string
 	if !strings.HasPrefix(target, "/") {
 		for _, c := range strings.Split(dir, "/") {
@@ -414,6 +481,9 @@ func resolveLink(dir, target string, links map[string]source.Link) string {
 			continue
 		}
 		cur = append(cur, c)
+		if !followFinal && len(queue) == 0 {
+			break
+		}
 		l, ok := links[strings.Join(cur, "/")]
 		if !ok || l.Hard || l.Target == "" {
 			continue

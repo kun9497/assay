@@ -176,6 +176,11 @@ func TestRun_QA1110_LinkedNpmPackagesCountedOnceAndResolvedThroughLinks(t *testi
 			{name: "usr/lib/node_modules/minimatch/package.json", body: pkg},
 			{name: "usr/local/lib/node_modules/minimatch", link: "/usr/lib/node_modules/minimatch"},
 		}, []string{"usr/lib/node_modules/minimatch/package.json"}},
+		{"pnpm with the store's manifest hardlinked", []probeLayerEntry{
+			{name: "opt/store/minimatch/package.json", body: pkg},
+			{name: pnpm + "/package.json", link: "opt/store/minimatch/package.json", hard: true},
+			{name: "opt/app-root/src/node_modules/minimatch", link: ".pnpm/minimatch@3.0.4/node_modules/minimatch"},
+		}, []string{pnpm + "/package.json"}},
 		{"through the top-level lib link", []probeLayerEntry{
 			{name: "lib", link: "usr/lib"},
 			{name: "usr/lib/mm/package.json", body: pkg},
@@ -185,7 +190,10 @@ func TestRun_QA1110_LinkedNpmPackagesCountedOnceAndResolvedThroughLinks(t *testi
 			{name: "opt/mm/package.json", body: pkg},
 			{name: "usr/lib/node_modules/b", link: "/opt/mm"},
 			{name: "usr/local/lib/node_modules/minimatch", link: "/usr/lib/node_modules/b"},
-		}, []string{"usr/lib/node_modules/b/package.json", "usr/local/lib/node_modules/minimatch/package.json"}},
+			// Round 2 of the review: a link to another package directory link
+			// is a second name for that install, as a link into another root's
+			// real directory is -- counted once, at the link it lands on.
+		}, []string{"usr/lib/node_modules/b/package.json"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tarPath := filepath.Join(t.TempDir(), "image.tar")
@@ -282,13 +290,26 @@ func TestRun_PR271_ReviewLayouts(t *testing.T) {
 			{name: "usr/lib/node_modules", link: "/opt/npm-global"},
 			{name: "opt/npm-global/minimatch/package.json", body: vuln},
 		}, "", "", report.ScopePartial, "usr/lib/node_modules", 2},
+		{"a linked root over an older layer's directory", nil, "", "", report.ScopePartial, "usr/lib/node_modules", 2},
+		{"a root linked to another root that was read", []probeLayerEntry{
+			{name: "usr/local/lib/node_modules", link: "../../lib/node_modules"},
+			{name: at, body: vuln},
+		}, "3.0.4", at, report.ScopeRead, "", 1},
 		{"the npm root as a directory (control)", []probeLayerEntry{
 			{name: at, body: vuln},
 		}, "3.0.4", at, report.ScopeRead, "", 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tarPath := filepath.Join(t.TempDir(), "image.tar")
-			writeLayeredProbeImage(t, tarPath, append(alpineLayer(), tc.entries...))
+			layers := [][]probeLayerEntry{append(alpineLayer(), tc.entries...)}
+			if tc.entries == nil {
+				// Layer 0 installs minimatch 3.0.4 in the root directory; layer 1
+				// replaces the root with a link (no whiteout, as `rm -rf && ln -s`
+				// leaves it) to a tree holding 9.9.9. The 3.0.4 copy is gone.
+				layers = [][]probeLayerEntry{append(alpineLayer(), probeLayerEntry{name: at, body: vuln}),
+					{{name: "usr/lib/node_modules", link: "/opt/npm-global"}, {name: "opt/npm-global/minimatch/package.json", body: fixed}}}
+			}
+			writeLayeredProbeImage(t, tarPath, layers...)
 			var out, errOut bytes.Buffer
 			code := Run(context.Background(), probeDB(t), "docker-archive:"+tarPath,
 				Options{Output: "json", FailOn: &bandLow, FailOnIncomplete: true, FailOnIncompleteTarget: true}, &out, &errOut)
