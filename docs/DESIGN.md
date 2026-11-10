@@ -1098,6 +1098,9 @@ exited 0 while 24 findings went unmentioned.
       `locations[].ownedBy` `{name, version}` from rpm's BASENAMES/DIRNAMES/DIRINDEXES (all three
       backends), apk's `F:`/`R:` lines, dpkg's `info/*.list` and pacman's `files`, the last two in
       the probes' own layer pass; exact-file ownership; schema 19 (additive)
+- [x] An npm package installed through a link is read at its logical path (D160 revised) — a
+      linked `package.json` or package directory, one `package.json` each, its target not walked;
+      an unresolved candidate is unread and npm `partial`; schema 22; QA 2026-11-10
 - [x] A CycloneDX distro package is keyed by the OS declared in its own branch (D166, revises
       D83) — siblings, else the nearest unambiguous OS above, none when two differ side by side;
       the purl qualifier as the fallback; QA 2026-11-10

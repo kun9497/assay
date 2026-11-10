@@ -115,7 +115,10 @@ type InventoryScopeRecord struct {
 // installed package.json files, or a Go binary -- whether or not each became
 // a package; a version-less package.json is a counted skip, D36, and the
 // tree it sits in was read), ScopeNone (the probe ran and found nothing at
-// its roots) or ScopeNotRead (nothing reads this ecosystem inside an image),
+// its roots), ScopePartial (the probe ran and a candidate at its roots was a
+// link that did not resolve -- npm only, QA 2026-11-10; the candidate is in
+// the document's unread list) or ScopeNotRead (nothing reads this ecosystem
+// inside an image),
 // and Roots names the fixed locations a probe reads, so "read" is never
 // mistaken for "the whole image".
 type ApplicationScopeRecord struct {
@@ -137,7 +140,7 @@ func ApplicationScopeSentence(s *InventoryScopeRecord) (read, notRead string) {
 	var reads, misses []string
 	for _, a := range s.ApplicationScope {
 		switch a.State {
-		case ScopeRead, ScopeNone:
+		case ScopeRead, ScopeNone, ScopePartial:
 			what := scopeProse(a.Ecosystem)
 			if len(a.Roots) > 0 {
 				// npm trees are read at any depth under their roots; Go
@@ -147,6 +150,12 @@ func ApplicationScopeSentence(s *InventoryScopeRecord) (read, notRead string) {
 					prep = " directly in "
 				}
 				what += prep + joinAnd(a.Roots)
+			}
+			if a.State == ScopePartial {
+				// QA 2026-11-10: a candidate there was a link that did not
+				// resolve; it is listed unread, and the half must not read
+				// as complete (or, with nothing else found, as empty).
+				what += " (some behind links that did not resolve, listed unread)"
 			}
 			reads = append(reads, what)
 		case ScopeNotRead:
