@@ -96,6 +96,19 @@ type Target struct {
 	// week, while tripping on about 26 injected tuples where maxFindings
 	// needs 100 to 400. Omitted means 0; every committed target names it.
 	MaxAssayOnlyFixed int `json:"maxAssayOnlyFixed,omitempty"`
+	// MinApplicationPackages is D167's per-ecosystem floor on the
+	// application packages an image scan's probes inventoried (D160): the
+	// candidate's coverage[].packages for that ecosystem key ("npm", "Go" --
+	// Go counts the package entries the probed binaries yield, each binary's
+	// stdlib included, not the binaries), a key absent from coverage counting
+	// 0. QA 2026-11-10 removed every npm and Go package from four captures
+	// and the gate still said ok in both modes: the finding floors are
+	// dominated by OS packages (ubi8n18 lost 236 of 525 components and 53 of
+	// 7,025 findings), and minComponents is set on one target. A regression
+	// floor, judged in -regressions-only too: the candidate binary or
+	// database is what loses a probe. Omitted means no floor -- most targets
+	// hold no application package, and 0 there is the honest count.
+	MinApplicationPackages map[string]int `json:"minApplicationPackages,omitempty"`
 }
 
 // TrivyFloors is the trivy counterpart to Target's own MinAgree/MinFindings/
@@ -169,6 +182,9 @@ func loadTargets(path string) ([]Target, error) {
 		if err := validateGrypeOnlyApp(t.MaxGrypeOnlyApp); err != nil {
 			return nil, fmt.Errorf("targets file %s: target %q: %w", path, t.Name, err)
 		}
+		if err := validateApplicationPackages(t.MinApplicationPackages); err != nil {
+			return nil, fmt.Errorf("targets file %s: target %q: %w", path, t.Name, err)
+		}
 	}
 	return targets, nil
 }
@@ -186,6 +202,33 @@ func isPlainFileName(name string) bool {
 		return false
 	}
 	return filepath.Base(name) == name
+}
+
+// probedEcosystems are the coverage keys an image scan's probes produce
+// (D160). A minApplicationPackages key outside them names a count no image
+// scan reports -- a typo ("go") would hold a floor no capture can meet, or,
+// at 0, one that is never a guard -- so it is refused at load.
+var probedEcosystems = map[string]bool{"npm": true, "Go": true}
+
+// validateApplicationPackages refuses a minApplicationPackages map the judge
+// could not honour as written (D167): a key that is not a probed ecosystem,
+// and a negative or zero floor -- 0 holds nothing, and writing it down reads
+// as a guard. Keys are checked in sorted order so the error is stable.
+func validateApplicationPackages(m map[string]int) error {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		switch {
+		case !probedEcosystems[k]:
+			return fmt.Errorf("minApplicationPackages key %q is not an ecosystem an image scan probes (npm, Go)", k)
+		case m[k] <= 0:
+			return fmt.Errorf("minApplicationPackages.%s must be at least 1 (got %d); omit the key for no floor", k, m[k])
+		}
+	}
+	return nil
 }
 
 // validateGrypeOnlyApp refuses a maxGrypeOnlyApp map the judge could not

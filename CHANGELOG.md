@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- The scanner differential floors each probed ecosystem's application packages:
+  `minApplicationPackages` (`npm`, `Go`) on `coverage[].packages`, judged by the weekly run and
+  the nightly `-regressions-only` gate alike. `ubi8n18` npm 118, three Go targets 1. Before it, a
+  candidate that lost every npm and Go package passed both modes. (D167; QA 2026-11-10)
+
 ### Changed
 - **JSON `schemaVersion` 21** (additive): `skipped[].cves` lists the CVEs a skipped advisory names,
   so a skip whose `advisoryId` is an ALAS or GHSA id can be tied to a CVE. `cmd/truthset` no longer

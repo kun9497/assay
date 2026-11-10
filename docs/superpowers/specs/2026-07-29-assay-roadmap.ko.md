@@ -7992,6 +7992,38 @@ finding이 있다는 것만으로 성립한다. 출시됐으나 여전히 affect
 
 ---
 
+### D167 — 차등 비교는 프로브된 생태계별 애플리케이션 패키지에 하한을 둔다 (`minApplicationPackages`)
+
+**결정.** `.github/scanner-diff-targets.json`의 대상은 `minApplicationPackages`를 둘 수 있다. 프로브된 생태계
+(`npm`, `Go`)마다, 그 키 아래 후보의 `coverage[].packages`에 거는 하한이다. Go는 바이너리가 아니라 프로브된 바이너리가 내는 패키지 항목을 세고(바이너리마다의 `stdlib` 포함, 두 바이너리에 든
+모듈은 두 번),
+`coverage`에 없는 키는 0으로 센다. 회귀 하한이므로 주간 실행과 야간 `-regressions-only` 게이트가 똑같이 판정한다.
+프로브된 생태계 밖의 키와 1 미만의 하한은 파일을 읽을 때 거부한다. 커밋된 값: `ubi8n18` npm 118; `bci156`,
+`archlinux`, `cleanstart-postgres` Go 1. CVE 건수는 고정하지 않는다.
+
+**왜.** QA 2026-11-10은 주간 캡처 넷(2026-11-09)에서 npm과 Go 패키지를 모두 지웠는데 두 모드 모두 여전히 `ok`였다.
+finding 하한은 OS 패키지가 지배한다: `ubi8n18`은 컴포넌트 525개 중 236개를 잃었지만 finding은 7,025건 중 53건만
+잃었고, `minComponents`는 대상 하나에만 있다. D160의 프로브가 패키지를 내지 않게 되어도 게이트는 알아채지 못했다.
+
+**수치.** `ubi8n18`의 캡처에는 npm 패키지 236개가 있다. 하한은 그 절반인 118이다: 다이제스트로 고정한 이미지에서
+npm 트리 자체의 변동은 닿지 않을 만큼 낮고, 프로브나 루트, 중첩 사본을 잃으면 걸릴 만큼 높다. Go 대상 셋은 Go 패키지
+항목 1, 3, 3개다. 그 하한은 존재 여부인 1이다: 그렇게 작은 수에는 의미 있는 절반이 없고, 이 하한이 지키는 것은 Go
+프로브가 돌기는 하는가이다. 다시 재려면 주간 캡처(`scanner-diff-*` 아티팩트)의 `<target>.assay.json`에서
+`coverage[]`를 읽는다:
+
+```bash
+python -c "import json,sys; d=json.load(open(sys.argv[1])); print({c['ecosystem']: c['packages'] for c in d['coverage'] if c['ecosystem'] in ('npm','Go')})" ubi8n18.assay.json
+```
+
+**검증.** 2026-11-09 주간 캡처에서: 원본 넷은 두 모드 모두 모든 하한을 지키고, 26개 대상 모두 두 모드에서 `ok`로
+남는다; 삭제 변형은 각각 두 모드에서 `minApplicationPackages.<eco>` 위반과 종료 1이며, v0.17.0의 `scandiff`는
+`ok`였다. 변이 8/8 포착.
+
+**포기하는 것.** 하한 위의 부분 손실(ubi8n18이 npm 118개로 줄어드는 것)은 이 하한이 잡지 못한다; finding 하한과
+D117의 상한이 그 일부를 본다. 대상의 다이제스트가 바뀌면 하한은 사람이 다시 정한다.
+
+---
+
 ### D164 — finding의 JSON은 레코드의 related 식별자를 싣는다 (스키마 20)
 
 **결정.** `findings[].advisory.related`는 레코드 자체의 `related` 식별자이고, 비어 있으면 생략한다 — 스키마

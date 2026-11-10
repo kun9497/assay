@@ -1037,6 +1037,8 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       `{name, version}`, rpm의 BASENAMES/DIRNAMES/DIRINDEXES(세 백엔드 모두), apk의 `F:`/`R:` 줄, dpkg의
       `info/*.list`, pacman의 `files`에서; 뒤의 둘은 프로브 자체의 레이어 패스에서; 파일 단위의 정확한
       소유; 스키마 19(추가형)
+- [x] 차등 비교가 프로브된 생태계별 애플리케이션 패키지에 하한을 둠 (D167) — `coverage[].packages`에
+      거는 `minApplicationPackages`, 두 모드의 회귀 하한; QA 2026-11-10
 - [x] finding의 JSON이 레코드의 related 식별자를 실음 (D164) — `advisory.related`, 스키마 20; ALAS·
       Bodhi·OVAL finding이 고치는 CVE; truthset이 그것과 rating으로 이음
 - [x] 권고가 여전히 affected라 부르는 출시 빌드 위의 finding은 그 빌드를 이름 붙임 (D163) — 열린 범위가
