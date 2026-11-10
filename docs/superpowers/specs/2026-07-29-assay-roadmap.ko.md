@@ -8018,6 +8018,9 @@ subject 아래에 Alpine이 있는 문서는 busybox를 `Debian:11`로 키를 �
 
 **포기하는 것.** 같은 배포판·릴리스를 기술하는 OS 컴포넌트 둘은 하나로 센다; ID와 VERSION_ID 밖의 필드로만
 다른 둘은 구별하지 않는다. 관련 없는 가지에만 OS를 선언한 문서는 다른 곳의 패키지에 문맥을 주지 않는다.
+
+---
+
 ### D167 — 차등 비교는 프로브된 생태계별 애플리케이션 패키지에 하한을 둔다 (`minApplicationPackages`)
 
 **결정.** `.github/scanner-diff-targets.json`의 대상은 `minApplicationPackages`를 둘 수 있다. 프로브된 생태계

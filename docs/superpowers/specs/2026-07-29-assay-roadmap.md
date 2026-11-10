@@ -8505,6 +8505,9 @@ package, as before.
 **Gives up.** Two OS components that describe the same distro and release count as one; two that
 differ only in a field other than ID and VERSION_ID are not told apart. A document that declares
 its OS only on some unrelated branch gives no context to packages elsewhere.
+
+---
+
 ### D167 — The differential floors each probed ecosystem's application packages (`minApplicationPackages`)
 
 **Decision.** A target in `.github/scanner-diff-targets.json` may name `minApplicationPackages`, a
