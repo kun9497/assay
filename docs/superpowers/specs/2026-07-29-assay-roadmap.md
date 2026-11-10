@@ -8295,7 +8295,11 @@ inventoried it as an installed package, so lodash linked into another package's 
 lodash; the logical path's layer for D162 is the later of the link's and the bytes', so an upper
 layer that replaces an OS-owned manifest with a link to its own file is unowned, as a copy is (a
 hardlink's bytes are already its creating layer's, D130); and a global root that is itself a link
-is recorded unread with the reason and npm `partial`, its packages not enumerated.*
+is recorded unread with the reason and npm `partial`, its packages not enumerated. A second review
+round: a target is also already inventoried when its manifest is a link candidate (pnpm's store
+hardlinks) or its first landing place is another package-directory link (counted once); a root
+linked to another root the pass read in full is an alias with nothing unread; and a root replaced by
+a link drops the older layer's tree under its name, which is gone from the filesystem.*
 
 **Decision.** An image scan runs one more pass over its layers, over ten fixed locations
 together: the installed `package.json` files under the three global `node_modules` roots
