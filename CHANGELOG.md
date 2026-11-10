@@ -38,6 +38,16 @@ All notable changes to this project are documented here. The format follows
   target is not walked, so its own nested dependencies are not read; a target already read under
   a root (pnpm's `.pnpm` layout) is counted once; an error reading a linked `package.json` fails
   the scan. (D160 revised; QA 2026-11-10)
+- CycloneDX: an operating-system component keys its own children (Alpine as `metadata.component`
+  with busybox under it no longer reads Debian findings when a Debian is declared at the top), and an
+  unkeyed listing merges into a keyed twin only when the twin is unique -- with two releases to
+  choose from it is not evaluated instead of joining whichever came first. (D166 revised; PR #270 review)
+- A CycloneDX distro package is keyed by the OS declared in its own branch of the document: an
+  Alpine OS component nested with busybox under `metadata.component` keys it (was: not evaluated,
+  exit 2 under `--fail-on-incomplete=target`), and a document with Debian at the top and Alpine
+  under the subject no longer keys busybox to `Debian:11` (51 false findings on the public DB).
+  Two different OS side by side give no context; a purl's `distro` qualifier then identifies the
+  package, and without one it is reported not evaluated. (D166, revises D83; QA 2026-11-10)
 - A package listed twice in a CycloneDX document whose two source versions differ only in spelling
   (Debian's `2.31-13+deb11u13` and `0:2.31-13+deb11u13`) is judged: the versions are compared with
   the ecosystem's own ordering, not as strings. (D165 revised; PR #269 review)

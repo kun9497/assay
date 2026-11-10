@@ -8018,6 +8018,49 @@ finding이 있다는 것만으로 성립한다. 출시됐으나 여전히 affect
 
 ---
 
+### D166 — CycloneDX의 배포판 패키지는 자기 가지에 선언된 OS로 키를 정한다 (D83 개정)
+
+**결정.** operating-system 컴포넌트는 놓인 자리에서 읽는다. 배포판 패키지(apk, deb, rpm, alpm)는 자기
+형제들 사이에 선언된 단 하나의 OS로 키를 정하고, 거기 없으면 위쪽에서 가장 가까운 모호하지 않은 OS로 정하며,
+서로 다른 OS 컴포넌트 둘이 나란히 있으면 그 옆 패키지에는 문맥이 없다. subject(`metadata.component`)는 문서
+최상위 문맥으로, 그 자식은 자기 문맥으로 키를 정한다. 적용 가능한 OS는 여전히 purl의 `distro` qualifier보다
+우선하고(D83), 문맥이 없으면 qualifier가 패키지를 식별하며, 둘 다 없으면 키 없이 카탈로그되어 사유와 함께
+미평가로 보고된다 — 추측으로 키를 정하지 않는다. Target 자체의 배포판(보고서, EOL 줄, coverage가 이름 붙이는
+것)은 최상위 문맥의 것, 없으면 subject 자신이 선언한 것(`metadata.component` 자체로, 또는 자기 자식 중 OS
+하나로), 그것도 없으면 없다 — 다른 가지에만 선언된 OS는 그 가지의 키를 정할 뿐 대상 전체를 이름 붙이지 않는다.
+OS 컴포넌트 둘이 같은 생태계 키로 해석되면 한 선언이다(alpine 3.19.9와 3.19.1은 둘 다 `Alpine:v3.19`). 서로 다른
+둘이 나란히 있으면 그 단계 아래 모든 패키지에 문맥이 없다: 그 가지가 둘 다 선언하므로, 더 위에서 물려받으면 자기
+가지가 반박하는 OS로 키를 정하게 된다. 최상위(그곳엔 OS가 없어 키 없음)와 키를 주는 subject 아래 양쪽에 나열된
+패키지는 한 패키지이고, 판정할 수 있는 쪽의 키를 쓴다. 문맥이 없으면 문서가 다른 곳에 배포판을 선언했더라도
+purl의 `distro` qualifier나 rpm의 `repository_id`가 패키지를 식별한다 — 이 결정이 요구하는 qualifier 대안이다.
+
+**왜.** QA 2026-11-10: Alpine OS 컴포넌트와 busybox 1.36.1-r20은 `components` 최상위에서 2건이었고, 둘을
+`metadata.component` 아래로 옮기면 `--fail-on-incomplete=target`에서 **0건, 미평가 1, 종료 2**였다 — 리더가
+OS를 `bom.components`에서만 찾았다. 가지를 넘는 경우를 확인하다 더 나쁜 것을 찾았다: 최상위에 Debian 11,
+subject 아래에 Alpine이 있는 문서는 busybox를 `Debian:11`로 키를 정해 공개 DB에서 **오탐 51건**을 냈다.
+
+**검증.** QA의 공개 DB(`sha256:1be2281a…`)에 대고: `public-top-os` 2 → 2; `public-subject-os` 0 / 미평가 1 /
+종료 2 → **2 / 종료 0**; Debian 최상위 + Alpine subject는 76건(busybox를 `Debian:11`로) → 27건(busybox
+`Alpine:v3.19` 2, libc6 `Debian:11` 25). `Run`을 통해: OS와 패키지가 최상위, subject 아래, OS보다 한 단계 깊은
+곳에 있으면 모두 `Alpine:v3.19`; 혼합 문서는 각 패키지를 자기 가지로; qualifier 없이 OS 둘이 나란히 있으면 finding
+없음, 미평가 1, 종료 2; 같은 것에 `distro=alpine-3.19.9`가 있으면 qualifier로 키가 정해진다.
+
+**개정 (PR #270 리뷰).** 리뷰 입력에서 찾은 두 수정. operating-system 컴포넌트의 자식은 그 OS로 키를 정한다:
+`metadata.component`인 Alpine 바로 아래의 busybox는 단독으로는 미평가였고, 최상위에 Debian이 선언되면 **Debian
+51건**이었다; 이제 어느 쪽이든 Alpine 2건이며, 자식 사이의 OS가 여전히 먼저다. 그리고 키 없는 나열은 최상위의
+키 있는 쌍둥이가 유일할 때만 합친다: 최상위에 Alpine 3.19와 3.20으로 키가 정해진 busybox가 있고 두 릴리스를 모두
+선언한 subject 아래 키 없는 busybox가 있으면, 세 번째 나열의 설치 경로가 먼저 온 릴리스에 붙었다 — 한 순서에서는
+3.19, 반대 순서에서는 3.20, 종료 0. 이제 그 나열은 키 없는 별개 패키지로 남아 미평가(`--fail-on-incomplete`에서
+종료 2)이고 그 경로는 어떤 finding에도 붙지 않는다; 키 있는 쌍둥이가 하나면 전처럼 그 패키지다. 두 번째 리뷰에서 거울 사례 — 키 없는 나열이 최상위에,
+키 있는 둘이 subject 아래에 있는 경우 — 가 여전히 먼저 온 쪽에 합쳐지는 것을 찾았다: 이제 한 식별자가 키로 정해진
+릴리스 수를 최상위만이 아니라 문서 전체(subject 트리의 시험 카탈로그)에서 센다. 그리고 키로 해석되지 않는 OS
+부모(버전 없음, 또는 `linux`)는 자식이 물려받는 문맥을 덮어쓰거나 purl qualifier 대안을 끄지 않는다.
+
+**포기하는 것.** 같은 배포판·릴리스를 기술하는 OS 컴포넌트 둘은 하나로 센다; ID와 VERSION_ID 밖의 필드로만
+다른 둘은 구별하지 않는다. 관련 없는 가지에만 OS를 선언한 문서는 다른 곳의 패키지에 문맥을 주지 않는다.
+
+---
+
 ### D165 — SBOM에 두 번 나열된 패키지는 명시된 소스 버전을 지키고, 서로 어긋나면 판정하지 않는다
 
 **결정.** CycloneDX 문서가 한 패키지를 `components`와 subject 트리(`metadata.component` 또는 그 아래 —

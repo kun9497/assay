@@ -8503,6 +8503,62 @@ range beside it; D163 names that build there.
 
 ---
 
+### D166 — A CycloneDX distro package is keyed by the OS declared in its own branch (revises D83)
+
+**Decision.** The operating-system component is read where it sits. A distro package (apk, deb,
+rpm, alpm) is keyed by the one OS declared among its own siblings; with none there, by the nearest
+unambiguous one above it; and two different OS components side by side are no context at all for
+the packages beside them. The subject (`metadata.component`) is keyed in the document's top-level
+context and its children in theirs. An applicable OS still outranks a purl's `distro` qualifier
+(D83); with no context the qualifier identifies the package; with neither, the package is cataloged
+unkeyed and reported not evaluated with its reason — never keyed to a guess. The Target's own
+distro (what the report, the EOL line and coverage name) is the top-level context's, else the one
+the subject itself declares (as `metadata.component`, or one OS among its own children), else none
+— an OS declared only in some other branch keys that branch and does not name the whole target.
+Two OS components are one declaration when they resolve to the same ecosystem key (alpine 3.19.9
+and 3.19.1 are both `Alpine:v3.19`). Two that differ side by side leave every package beneath
+that level without context: the branch declares both, so inheriting from further up would key a
+package to an OS its own branch contradicts. A package listed both at the top (unkeyed, no OS
+there) and under a subject that keys it is one package, keyed by the listing that can be judged.
+Without context, a purl's `distro` qualifier or an rpm's `repository_id` identifies a package even
+when the document declares a distro elsewhere — the qualifier fallback this decision asks for.
+
+**Why.** QA 2026-11-10: an Alpine OS component and busybox 1.36.1-r20 scanned to 2 findings at the
+top of `components`, and to **0 findings, not evaluated 1, exit 2** under
+`--fail-on-incomplete=target` when both were moved under `metadata.component` — the reader looked
+for the OS in `bom.components` only. Checking the cross-branch case found a worse one: a document
+with Debian 11 at the top and Alpine under the subject keyed busybox to `Debian:11` and reported
+**51 false findings** on the public DB.
+
+**Verified.** Against the QA's public DB (`sha256:1be2281a…`): `public-top-os` 2 → 2;
+`public-subject-os` 0 / not evaluated 1 / exit 2 → **2 / exit 0**; Debian-top + Alpine-subject 76
+findings (busybox as `Debian:11`) → 27 (busybox `Alpine:v3.19` 2, libc6 `Debian:11` 25). Through
+`Run`: OS and package at the top, under the subject, and nested a level below the OS all key
+`Alpine:v3.19`; the mixed document keys each package to its own branch; two OS side by side with no
+qualifier → no finding, not evaluated 1, exit 2; the same with `distro=alpine-3.19.9` → keyed by the
+qualifier.
+
+**Revised (PR #270 review).** Two corrections, both found on the review's own inputs. An
+operating-system component's children are keyed by it: Alpine as `metadata.component` with busybox
+directly under it read not evaluated alone and **51 Debian findings** beside a Debian declared at
+the top; it now reads Alpine 2 either way, and an OS among the children still comes first. And an
+unkeyed listing merges into a keyed twin at the top only when that twin is unique: busybox keyed to
+Alpine 3.19 and to 3.20 at the top plus an unkeyed busybox under a subject declaring both releases
+had attached the third listing's install path to whichever release came first -- 3.19 one way
+round, 3.20 the other, exit 0. That listing now stays its own package, unkeyed, not evaluated
+(exit 2 under `--fail-on-incomplete`), its path on no finding; with one keyed twin it is that
+package, as before. A second review round found the mirror case -- the unkeyed listing at the top
+and the two keyed ones under the subject -- still merging into whichever came first: the check now
+counts the releases an identity is keyed to across the whole document (a dry run of the subject
+tree), not only the top level. And an OS parent that resolves to no key (no version, or `linux`)
+no longer overrides what its children inherit or switches off their purl qualifier.
+
+**Gives up.** Two OS components that describe the same distro and release count as one; two that
+differ only in a field other than ID and VERSION_ID are not told apart. A document that declares
+its OS only on some unrelated branch gives no context to packages elsewhere.
+
+---
+
 ### D165 — One package listed twice in an SBOM keeps the source version it states, and two that contradict are not judged
 
 **Decision.** When a CycloneDX document lists one package both in `components` and in the subject
