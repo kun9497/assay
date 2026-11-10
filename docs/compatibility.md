@@ -9,7 +9,7 @@ with a version bump, a **Breaking** entry in the [changelog](../CHANGELOG.md), a
 
 | Contract | What it is | Version field | Current |
 |---|---|---|---|
-| `report` | `assay scan --output json` | `schemaVersion` | 19 |
+| `report` | `assay scan --output json` | `schemaVersion` | 20 |
 | `provenance sidecar` | the file `--provenance <path>` writes (D120) | `schemaVersion` | 1 |
 | `status.json` | the published database's status, on the `status` branch (D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json` (D147) | `schemaVersion` | 1 |
@@ -81,6 +81,12 @@ it relied on:
   Exact-file ownership, and only when the file's layer is not later than the record's (a file
   the image author replaced over the package's is unowned); absent when no OS package lists
   the file or outside an image.
+- Schema 20 (additive): `findings[].advisory.related` — the record's own `related` identifiers,
+  where the CVE a finding fixes is named when `aliases` and `upstream` are empty: Amazon ALAS,
+  Fedora Bodhi, Oracle OVAL, and the distro-authored OSV records (Rocky RLSA, AlmaLinux
+  ALSA/ALBA/ALEA, Chainguard CGA). The table and `--explain` always read it, the JSON did not, so
+  before schema 20 such a finding reached its CVE only through `ratings[].advisoryId`, and only
+  when an annotation source had rated it. (D164)
 
 ## The provenance sidecar, status.json and `db status`
 

@@ -339,11 +339,19 @@ type scanDoc struct {
 			ID       string   `json:"id"`
 			Aliases  []string `json:"aliases"`
 			Upstream []string `json:"upstream"`
+			// Related (schema 20) is where Amazon ALAS, Fedora Bodhi and
+			// Oracle OVAL records name their CVEs.
+			Related []string `json:"related"`
 		} `json:"advisory"`
 		Evidence struct {
 			Fixed string `json:"fixed"`
 		} `json:"evidence"`
 		FixState string `json:"fixState"`
+		// Ratings carry each database's own advisory id; NVD's and EPSS's
+		// is the CVE. The join of last resort (findingNamesCVE), so a
+		// document from before schema 20 still reaches an ALAS finding's
+		// CVE when an annotation source rated it.
+		Ratings []rating `json:"ratings"`
 	} `json:"findings"`
 	// Coverage is the per-key data date (schema 17, D113 revised): the
 	// scan's one component maps to one key, and its dataAsOf is what
@@ -451,7 +459,7 @@ func judge(l Label, doc *scanDoc, fatal string) result {
 		if f.Package.Name != l.Name && f.MatchedName != l.Name {
 			continue
 		}
-		if !namesCVE(f.Advisory.ID, f.Advisory.Aliases, f.Advisory.Upstream, l.CVE) {
+		if !findingNamesCVE(f.Advisory.ID, f.Advisory.Aliases, f.Advisory.Upstream, f.Advisory.Related, f.Ratings, l.CVE) {
 			continue
 		}
 		found = true
@@ -489,21 +497,39 @@ func appendDistinct(xs []string, x string) []string {
 	return append(xs, x)
 }
 
-func namesCVE(id string, aliases, upstream []string, cve string) bool {
-	if strings.EqualFold(id, cve) {
-		return true
-	}
-	for _, a := range aliases {
-		if strings.EqualFold(a, cve) {
-			return true
+// findingNamesCVE reports whether a finding is about cve. The record's own
+// identifiers decide when any of them is a CVE: its id, aliases, upstream
+// (D3) and related (schema 20, D164). Only a finding whose own identifiers
+// name no CVE at all -- an ALAS / ELSA / Bodhi finding in a document from
+// before schema 20 -- falls back to the ratings' advisory ids, which the
+// annotation sources key by CVE. A union would let an annotation carried
+// for another CVE make this finding answer for it.
+func findingNamesCVE(id string, aliases, upstream, related []string, ratings []rating, cve string) bool {
+	own := false
+	for _, l := range [][]string{{id}, aliases, upstream, related} {
+		for _, s := range l {
+			if strings.EqualFold(s, cve) {
+				return true
+			}
+			if strings.HasPrefix(strings.ToUpper(s), "CVE-") {
+				own = true
+			}
 		}
 	}
-	for _, u := range upstream {
-		if strings.EqualFold(u, cve) {
+	if own {
+		return false
+	}
+	for _, r := range ratings {
+		if strings.EqualFold(r.AdvisoryID, cve) {
 			return true
 		}
 	}
 	return false
+}
+
+// rating is the slice of a finding's rating the CVE join reads.
+type rating struct {
+	AdvisoryID string `json:"advisoryId"`
 }
 
 func metricsByFamily(rs []result) []familyMetrics {

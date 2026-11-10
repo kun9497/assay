@@ -705,3 +705,34 @@ func TestGrypeArtifact_TypeIsRead(t *testing.T) {
 		t.Errorf("Artifact.Type = %q, want npm", got)
 	}
 }
+
+// Schema 20 (D164): an ALAS / ALSA / ELSA / Bodhi finding names its CVE in
+// advisory.related. It forms a CVE tuple even when no rating carries the
+// CVE (a database built without the annotation sources), instead of a
+// bare-id tuple that never meets grype's.
+func TestAssayTuples_ExtractsCVEFromRelated(t *testing.T) {
+	const doc = `{
+		"schemaVersion": 20,
+		"findings": [
+			{
+				"package": {"name": "openssl-libs"},
+				"advisory": {"id": "ALAS2023-2025-1225", "related": ["CVE-2025-9230", "CVE-2025-9231"]},
+				"ratings": [{"advisoryId": "ALAS2023-2025-1225"}]
+			}
+		],
+		"summary": {"findings": 1}
+	}`
+	var d assayDocument
+	if err := json.Unmarshal([]byte(doc), &d); err != nil {
+		t.Fatal(err)
+	}
+	set := assayTuples(d)
+	for _, id := range []string{"CVE-2025-9230", "CVE-2025-9231"} {
+		if _, ok := set[tuple{Subject: "openssl-libs", ID: id}]; !ok {
+			t.Errorf("assayTuples lacks %s: %v", id, set)
+		}
+	}
+	if _, bare := set[tuple{Subject: "openssl-libs", ID: "ALAS2023-2025-1225"}]; bare || len(set) != 2 {
+		t.Errorf("assayTuples = %v, want the two CVE tuples and no bare-id one", set)
+	}
+}

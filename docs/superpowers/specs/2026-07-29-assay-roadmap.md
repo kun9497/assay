@@ -8456,6 +8456,40 @@ range beside it; D163 names that build there.
 
 ---
 
+### D164 — A finding's JSON carries the record's related ids (schema 20)
+
+**Decision.** `findings[].advisory.related` is the record's own `related` identifiers, omitted
+when empty — schema 20, additive. `cmd/truthset` joins a label's CVE through the record id,
+`aliases`, `upstream` and `related`, and falls back to the ratings' `advisoryId` only when the
+record names no CVE at all -- so a document from before schema 20 joins too when an annotation
+source rated the CVE, and an annotation for another CVE cannot make a finding answer for it.
+`cmd/scandiff` forms CVE tuples from `related` as well (its bare-id bridge is unchanged, because
+widening it moves the column `maxFindings` judges).
+
+**Why.** Several record families name the CVE they fix only in `Related`: Amazon ALAS, Fedora
+Bodhi and Oracle OVAL through their own providers, and the distro-authored OSV records `osv` keeps
+`related` for -- Rocky RLSA, AlmaLinux ALSA/ALBA/ALEA, Chainguard CGA (D71) -- whose `aliases` and
+`upstream` are empty. The matcher looks advisories up through it (it does not group on it:
+`identifiers` reads ID and aliases) and `--explain` prints it; the JSON did not, so a JSON consumer
+could reach such a finding's CVE only through `ratings[].advisoryId`, and only when an annotation
+source (NVD, opt-in; EPSS; KEV) had rated that CVE. D161 found it on 2026-11-10, the first night the amzn labels were
+judged (the first artifact built after D113 revised): the four affected amzn labels read FN
+although assay reported every one — `ALAS2023-2025-1225` with fix `1:3.2.2-1.amzn2023.0.2` for
+CVE-2025-9230/9231 — and the weekly truthset step would have failed from 2026-11-15. The user
+asked for both fixes, each tested.
+
+**Verified.** `TestJSON_AdvisoryCarriesRelated` (an ALAS finding renders both CVEs, a record
+without `related` omits it); `TestRun_ALASFindingJoinsItsCVE` (related alone, ratings alone,
+neither = still FN). Live against the 2026-11-09 nightly: 134 judged, 0 FP, 0 FN with the
+schema-20 build, and the same with the schema-19 build through the ratings join (every amzn CVE
+there is NVD-rated). Mutations 5/5 after the review (truthset's last-resort rule, scandiff's
+related tuples).
+
+**Gives up.** Nothing in the table or SARIF changes; a consumer pinned to schema 19 sees one
+more optional field.
+
+---
+
 ### D163 — A finding on a released build the advisory still calls affected names that build
 
 **Decision.** When the window that holds the installed version is an open `[0, ∞)` one and the

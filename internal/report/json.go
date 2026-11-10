@@ -58,7 +58,7 @@ import (
 // what it does mean is that a consumer reading 2 or later can rely on every
 // field below being present, which is the guarantee the constant exists to
 // give.
-const schemaVersion = 19
+const schemaVersion = 20
 
 // Document is the stable shape of `assay scan --output json` (design goal
 // #3). It carries what Table shows plus what Table cannot: the full
@@ -386,7 +386,17 @@ type AdvisoryRecord struct {
 	ID       string   `json:"id"`
 	Aliases  []string `json:"aliases,omitempty"`
 	Upstream []string `json:"upstream,omitempty"`
-	Summary  string   `json:"summary,omitempty"`
+	// Related is the record's own `related` identifiers (schema 20, D164):
+	// where the CVE a finding fixes is named when the record leaves aliases
+	// and upstream empty -- Amazon ALAS, Fedora Bodhi and Oracle OVAL through
+	// their own providers, and the distro-authored OSV records osv keeps
+	// related for (Rocky RLSA, AlmaLinux ALSA/ALBA/ALEA, Chainguard CGA,
+	// D71). The matcher looks advisories up through it and --explain prints
+	// it; before schema 20 the JSON did not, so a consumer could join those
+	// findings to a CVE only through ratings[].advisoryId, and only when an
+	// annotation source (NVD, EPSS, KEV) had rated the CVE.
+	Related []string `json:"related,omitempty"`
+	Summary string   `json:"summary,omitempty"`
 }
 
 // EvidenceRecord mirrors version.Evidence field for field (D10): which range
@@ -533,6 +543,7 @@ func findingRecord(f matcher.Finding) FindingRecord {
 			ID:       f.Advisory.ID,
 			Aliases:  f.Advisory.Aliases,
 			Upstream: f.Advisory.Upstream,
+			Related:  f.Advisory.Related,
 			Summary:  f.Advisory.Summary,
 		},
 		Severity: f.Severity.String(),

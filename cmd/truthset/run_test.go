@@ -25,8 +25,10 @@ type fakeScan struct {
 }
 
 type fakeFinding struct {
-	name, id, fixed, fixState string
-	aliases, upstream         []string
+	name, id, fixed, fixState  string
+	aliases, upstream, related []string
+	// ratingIDs are the ratings' advisory ids (NVD's is the CVE).
+	ratingIDs []string
 }
 
 // fakeAssay answers `assay scan <sbom> --output json` by reading the SBOM
@@ -68,11 +70,16 @@ func fakeAssay(t *testing.T, scans map[string]fakeScan) (execFunc, *[]string) {
 		}
 		var fs []map[string]any
 		for _, f := range sc.findings {
+			var ratings []map[string]any
+			for _, r := range f.ratingIDs {
+				ratings = append(ratings, map[string]any{"advisoryId": r})
+			}
 			fs = append(fs, map[string]any{
 				"package":  map[string]any{"name": f.name, "version": sbom.Components[0].Version},
-				"advisory": map[string]any{"id": f.id, "aliases": f.aliases, "upstream": f.upstream},
+				"advisory": map[string]any{"id": f.id, "aliases": f.aliases, "upstream": f.upstream, "related": f.related},
 				"evidence": map[string]any{"fixed": f.fixed},
 				"fixState": f.fixState,
+				"ratings":  ratings,
 			})
 		}
 		doc := map[string]any{
