@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- An image whose `/lib` and `/usr/lib` (or `/bin` and `/usr/bin`) are separate directories no
+  longer reports an OS package that owns a file under one as the owner of the other's independent
+  copy: `locations[].ownedBy` tries the merged-/usr twin path only where the image makes that
+  top-level directory a symlink into `usr/`. (D162 revised, QA 2026-11-10)
+
 ## [0.17.0] - 2026-11-10
 
 ### Added

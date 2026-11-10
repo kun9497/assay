@@ -8544,6 +8544,12 @@ holds. The trigger to reopen is an AL2 scan whose `coverage[].dataAsOf` is set b
 
 ### D162 — A probed location names the OS package that owns its file (extends D160)
 
+*Revised 2026-11-10 (QA): the merged-/usr twin spelling is tried only for the top-level directories
+the image makes a symlink to their usr/ counterpart. Before, it was tried on every image, so on an
+image whose /lib and /usr/lib are two directories an APK owning only lib/... was named the owner of
+the independent usr/lib/... copy. The probe pass observes the top-level bin/sbin/lib* entries
+itself (no extra pass); the exact path is still tried first and the layer-order rule is unchanged.*
+
 **Decision.** Every location of an image's probed application packages (D160) carries
 `ownedBy` — the `{name, version}` of the OS package whose file list names that path — when
 one does. The four package databases all record their files, and each is read where it already
