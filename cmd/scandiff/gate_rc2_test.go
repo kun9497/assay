@@ -87,6 +87,19 @@ func TestRun_RC2_FailedRunOutlivesALockedSuccessCapture(t *testing.T) {
 	if code, stderr := offline(); code != exitOK {
 		t.Errorf("replay after recovery: exit=%d stderr=%q; want 0", code, stderr)
 	}
+	// A marker OLDER than the success capture is an earlier failed run
+	// whose marker a later success could not remove: the success is the
+	// later run, and the replay is clean.
+	if err := os.WriteFile(filepath.Join(dir, "t.grype.failed.json"), []byte(`{"error":"old"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(filepath.Join(dir, "t.grype.failed.json"), old, old); err != nil {
+		t.Fatal(err)
+	}
+	if code, stderr := offline(); code != exitOK {
+		t.Errorf("replay with an older marker: exit=%d stderr=%q; want 0", code, stderr)
+	}
 }
 
 // An assay capture stripped of its provenance still names its image in the
