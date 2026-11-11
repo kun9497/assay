@@ -22,6 +22,15 @@ All notable changes to this project are documented here. The format follows
   Truthset report schema 3. (D161 revised, QA 2026-11-10)
 
 ### Fixed
+- CycloneDX, per the release check of main b732cac: a document's verdict no longer varies by run
+  -- an install stating no source version takes its bare records as candidates together, and two
+  that contradict each other leave it unjudged with the reason (one SBOM had read 70 or 65
+  findings by run; now 45 with the i386 install reported, identically over 64 processes); a bare
+  listing joined by an arch-stating twin lends what it stated, not the twin's key (an unkeyed
+  aarch64 install is not evaluated in either listing order); a bare listing that contradicts its
+  one twin is its own marked listing and the install keeps its 20 findings wherever the two are
+  placed; a join keeps both listings' purl qualifiers, so a `distro=`-scoped VEX statement still
+  reaches the install. (D166 revised)
 - `scandiff`, per the release check of main b732cac: a per-tool state file (`ok` + SHA-256,
   `failed`, `unsaved`) is what a replay trusts, not the files' times -- a failed run's capture
   moved through a ZIP had replayed as a success, and a success whose capture could not be written
