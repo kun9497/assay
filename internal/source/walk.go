@@ -286,6 +286,17 @@ type layerHit struct {
 func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]FileFromLayer) ([]query, error) {
 	var next []query
 	done := make([]bool, len(qs))
+	// answered is the queries a layer decided by a file or a link. done is
+	// wider: it also marks a query the layers below some layer cannot
+	// answer -- hidden by a whiteout or an opaque marker above, its
+	// ancestor's link replaced by a directory above -- which for a path
+	// holding a ".." means only that; the component before the ".." may
+	// still be a directory in the layer that hid the rest, and the fold then
+	// proceeds (PR #290 review: `RUN rm -rf /data/marker && mkdir
+	// /data/marker` above the link's lower layer, whose opaque marker hid
+	// the lower layers, left the path unanswered where the kernel reads
+	// `/data/packages`).
+	answered := make([]bool, len(qs))
 	var deleted, opaque []whiteout
 	newest := len(img.Layers) - 1
 	// preState is, per query holding a "..", what the NEWEST layer that
@@ -386,16 +397,16 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 				}
 				if preOf[k] != nil {
 					for _, pre := range preOf[k] {
-						if preState[k][pre] != preUnknown {
+						if st := preState[k][pre]; st == preDir || st == preNotDir {
 							continue
 						}
 						switch {
 						case removed != "" && (pre == removed || strings.HasPrefix(pre, removed+"/")):
-							layerPre[k][pre] = preSay{v: preNotDir, explicit: true}
+							layerPre[k][pre] = preSay{v: preNotDir, kind: sayWhiteout}
 						case base == whiteoutOpaque:
 							if od := path.Clean(dir); od == "." || strings.HasPrefix(pre, od+"/") {
 								if _, said := layerPre[k][pre]; !said {
-									layerPre[k][pre] = preSay{v: preNotDir}
+									layerPre[k][pre] = preSay{v: preNotDir, kind: sayOpaque}
 								}
 							}
 						case marker:
@@ -404,10 +415,10 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 							if h.Typeflag == tar.TypeDir {
 								v = preDir
 							}
-							layerPre[k][pre] = preSay{v: v, explicit: true}
+							layerPre[k][pre] = preSay{v: v, kind: sayEntry}
 						case strings.HasPrefix(name, pre+"/"):
-							if s, said := layerPre[k][pre]; !said || !s.explicit {
-								layerPre[k][pre] = preSay{v: preDir}
+							if s, said := layerPre[k][pre]; !said || s.kind == sayOpaque {
+								layerPre[k][pre] = preSay{v: preImplied, kind: sayImplied}
 							}
 						}
 					}
@@ -430,8 +441,13 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 					// container has it. One BEFORE the entry is overwritten by
 					// it -- the spec's "a whiteout applies to lower layers",
 					// and the order builders emit. For the lower layers the
-					// marker is merged below, as before.
-					hits[k] = layerHit{kind: hitGone}
+					// marker is merged below, as before. For a path holding a
+					// ".." the component before it keeps its own word
+					// (layerPre): a directory this layer recreates after the
+					// marker still folds.
+					if preOf[k] == nil {
+						hits[k] = layerHit{kind: hitGone}
+					}
 				case marker:
 					// A marker is an instruction, never the file.
 				case strings.HasPrefix(q.path, name+"/"):
@@ -509,6 +525,7 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 			done[k] = true
 			switch hit.kind {
 			case hitFile:
+				answered[k] = true
 				f := FileFromLayer{Data: hit.data, DiffID: l.DiffID}
 				if qs[k].via >= 0 {
 					f.ViaDiffID = img.Layers[qs[k].via].DiffID
@@ -517,15 +534,29 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 			case hitLink:
 				// Record the link and stop looking for this path: a lower
 				// layer's copy is shadowed by the link that replaced it.
+				answered[k] = true
 				next = append(next, follow(qs[k], hit, i, newest))
 			}
 			// hitGone ends the query unanswered, as for an absent file: a
 			// lower layer's copy is shadowed by what this layer put there.
 		}
 
+		// The newest layer's word stands; an implied directory (entries
+		// beneath the name, no entry for it) is provisional: the untar
+		// creates such a path through whatever an older layer left at the
+		// name, so an older explicit entry decides -- a symlink stands and
+		// is followed, a file is no directory -- while an older deletion
+		// does not undo the newer directory (PR #290 review: an upper
+		// layer's `data/route/x` had read a lower layer's `data/route ->
+		// /srv/active/deep` as a directory and folded over it).
 		for k := range qs {
 			for pre, say := range layerPre[k] {
-				preState[k][pre] = say.v
+				switch st := preState[k][pre]; {
+				case st == preUnknown:
+					preState[k][pre] = say.v
+				case st == preImplied && say.kind == sayEntry:
+					preState[k][pre] = say.v
+				}
 			}
 		}
 		deleted = append(deleted, layerDeleted...)
@@ -543,7 +574,7 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 	// survives: a path folds once per pass, so forty-four `a/..` over one
 	// directory cost one, not forty-four.)
 	for k, q := range qs {
-		if done[k] || preOf[k] == nil {
+		if answered[k] || preOf[k] == nil {
 			continue
 		}
 		folded, ok := foldDecided(q.path, preState[k])
@@ -562,15 +593,23 @@ const (
 	preUnknown preVerdict = iota // no layer has spoken of it yet
 	preDir                       // a directory: a ".." after it folds
 	preNotDir                    // a file, a link, a deletion: the next pass decides it as an ancestor
+	preImplied                   // a directory implied by entries beneath it, unless an older layer's entry says otherwise
 )
 
-// preSay is one layer's word on a component (resolvePass): explicit when an
-// entry for the name itself or a whiteout of it said it, implied by entries
-// beneath the name otherwise.
+// preSay is one layer's word on a component (resolvePass), by what said it.
 type preSay struct {
-	v        preVerdict
-	explicit bool
+	v    preVerdict
+	kind sayKind
 }
+
+type sayKind uint8
+
+const (
+	sayEntry    sayKind = iota // an entry for the name itself: a directory, or a file or link
+	sayWhiteout                // a whiteout of the name or of an ancestor
+	sayOpaque                  // an opaque marker in the parent: the lower layers' component is hidden
+	sayImplied                 // entries beneath the name, none for it
+)
 
 // dotDotPrefixes is, for a path holding "..", the component each ".."
 // applies to, as the path folds left to right: for `a/b/../../c` the
@@ -614,7 +653,7 @@ func foldDecided(p string, state map[string]preVerdict) (string, bool) {
 				break
 			}
 		}
-		if pre != "" && state[pre] != preDir {
+		if pre != "" && state[pre] != preDir && state[pre] != preImplied {
 			break
 		}
 		p = foldFirstDotDot(p)

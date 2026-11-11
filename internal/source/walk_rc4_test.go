@@ -94,3 +94,64 @@ func TestFiles_DotDotFoldsOneComponentAtATime(t *testing.T) {
 		}
 	})
 }
+
+// PR #290 review: a component the upper layer recreates -- after a whiteout
+// of it, with an opaque marker inside it (`RUN rm -rf /data/marker && mkdir
+// /data/marker`), or as a directory over a lower layer's symlink -- is a
+// directory, and the ".." after it folds although the lower layers are
+// hidden; and entries beneath a name in a newer layer do not turn an older
+// layer's symlink there into a directory (the untar writes them through the
+// link).
+func TestFiles_DotDotOverAComponentAnUpperLayerRecreated(t *testing.T) {
+	const want = "lib/apk/db/installed"
+	lower := func(extra ...entry) Layer {
+		return layerOfOrdered(t, "sha256:lower", append([]entry{
+			entry{name: "data/packages", body: "DB"},
+			sym(want, "/data/marker/../packages"),
+		}, extra...)...)
+	}
+	for _, tc := range []struct {
+		name  string
+		lower Layer
+		upper []entry
+	}{
+		{"opaque marker inside the recreated directory", lower(node("data/marker", tar.TypeDir)), []entry{node("data/marker", tar.TypeDir), entry{name: "data/marker/.wh..wh..opq", body: ""}}},
+		{"a whiteout then the directory again", lower(node("data/marker", tar.TypeDir)), []entry{entry{name: "data/.wh.marker", body: ""}, node("data/marker", tar.TypeDir)}},
+		{"a directory over a lower symlink", lower(sym("data/marker", "/srv/elsewhere"), node("srv/elsewhere", tar.TypeDir)), []entry{node("data/marker", tar.TypeDir)}},
+		{"the whole tree recreated above", lower(node("data/marker", tar.TypeDir)), []entry{entry{name: "data/.wh..wh..opq", body: ""}, node("data/marker", tar.TypeDir), entry{name: "data/packages", body: "DB"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			img := imageOf(tc.lower, layerOfOrdered(t, "sha256:upper", tc.upper...))
+			if f, ok := filesOne(t, img, want); !ok || string(f.Data) != "DB" {
+				t.Errorf("got %q (present=%v), want DB: marker is a directory in the upper layer, so the .. folds to data/packages", f.Data, ok)
+			}
+			for _, u := range img.Unresolved() {
+				t.Errorf("unresolved %v, want none", u)
+			}
+		})
+	}
+	t.Run("a whiteout of the component with nothing recreated leads nowhere (control)", func(t *testing.T) {
+		img := imageOf(lower(node("data/marker", tar.TypeDir)), layerOfOrdered(t, "sha256:upper", entry{name: "data/.wh.marker", body: ""}))
+		if f, ok := filesOne(t, img, want); ok {
+			t.Errorf("got %q, want nothing", f.Data)
+		}
+	})
+	t.Run("entries beneath a lower symlink in a newer layer: the link stands", func(t *testing.T) {
+		img := imageOf(layerOfOrdered(t, "sha256:lower",
+			node("data/marker", tar.TypeDir), sym("data/route", "/srv/active/deep"), node("srv/active/deep", tar.TypeDir),
+			entry{name: "srv/active/packages", body: "RIGHT"}, entry{name: "data/packages", body: "WRONG"},
+			sym(want, "/data/marker/../route/../packages"),
+		), layerOfOrdered(t, "sha256:upper", entry{name: "data/route/x", body: "x"}))
+		if f, ok := filesOne(t, img, want); !ok || string(f.Data) != "RIGHT" {
+			t.Errorf("got %q (present=%v), want RIGHT: data/route/x was written through the standing link", f.Data, ok)
+		}
+	})
+	t.Run("entries beneath a name no layer has an entry for: an implied directory (control)", func(t *testing.T) {
+		img := imageOf(layerOfOrdered(t, "sha256:lower",
+			entry{name: "data/packages", body: "DB"}, sym(want, "/data/marker/../packages"),
+		), layerOfOrdered(t, "sha256:upper", entry{name: "data/marker/x", body: "x"}))
+		if f, ok := filesOne(t, img, want); !ok || string(f.Data) != "DB" {
+			t.Errorf("got %q (present=%v), want DB", f.Data, ok)
+		}
+	})
+}
