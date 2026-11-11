@@ -30,6 +30,17 @@ All notable changes to this project are documented here. The format follows
   with no argument field is identified by the digests it records (assay's image digests, grype's
   manifest/repo/image digests, trivy's `Metadata`); one recording neither is accepted with a
   warning under a pinned ref. (D167 revised)
+- Image layers and npm links, per the release check of main 42b0c09: the image's resolver follows
+  a symlink at an intermediate component of a wanted path (a package directory linked to
+  `/opt/current`, re-pointed by an upper layer, had read the old manifest; RHEL 10's
+  `var/lib/rpm` link now reaches the database under the traditional name); a regular file put
+  over a package directory hides the lower layer's manifest (4 stale findings); a linked install
+  whose manifest is itself a link through `lib64` and `..` reads the right file (all 4 findings
+  had been lost), and a re-homed relative manifest link applies its `..` after the link before
+  it; each alias of an install is located in its own layers, so an alias or re-homed root
+  re-pointed in an upper layer is unowned; every alias of a missing install is unread. A whiteout
+  after the file it names in the same layer still removes the file -- what moby's and
+  containerd's untars do, re-read 2026-11-11. (D160 revised)
 - CycloneDX, per the release check of main 42b0c09: an OS whose ecosystem keys from its ID alone
   (Wolfi, Arch) declared with no version beside its packages keys them (openssl read 0 of 84
   findings, exit 0, as a sibling of a version-less `wolfi`); two known families declared with no

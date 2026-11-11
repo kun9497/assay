@@ -195,10 +195,8 @@ func (img *Image) collectWith(ctx context.Context, roots []string, match func(na
 				}
 				return nil
 			}
-			if !match(name, h) {
-				if scope != nil && scope(name) && !found[name] && !isDeleted(name, deleted) && !underAnyOpaque(name, opaque) {
-					last[name] = underHit{kind: hitGone}
-				}
+			matched := match(name, h)
+			if !matched && !(scope != nil && scope(name)) {
 				return nil
 			}
 			// Checked BEFORE found[name], so a whiteout in a newer layer still
@@ -206,9 +204,22 @@ func (img *Image) collectWith(ctx context.Context, roots []string, match func(na
 			if isDeleted(name, deleted) || underAnyOpaque(name, opaque) {
 				return nil
 			}
+			// Whether or not the match wants it: a declined in-scope entry
+			// -- a regular file where a package directory was -- replaced
+			// what lower layers hold beneath the name just as a wanted one
+			// did (release check 2026-11-11: a file put over
+			// node_modules/lodash left the lower layer's lodash/package.json
+			// read as installed, 4 findings for a package the image does not
+			// have).
 			switch h.Typeflag {
 			case tar.TypeSymlink, tar.TypeLink, tar.TypeReg, tar.TypeGNUSparse, tar.TypeCont:
 				layerNonDir[name] = true
+			}
+			if !matched {
+				if !found[name] {
+					last[name] = underHit{kind: hitGone}
+				}
+				return nil
 			}
 			if found[name] {
 				return nil

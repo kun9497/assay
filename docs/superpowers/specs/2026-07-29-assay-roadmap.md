@@ -8317,10 +8317,34 @@ review added: every symlink under a root is recorded, so a package directory or 
 itself a link under a re-homed directory is an install at the logical path too (a hardlink's twin
 points at the physical name, D130); several links to one install are one package located at every
 name; a file or link at a name hides lower layers beneath it even when a later layer puts a
-directory back; and one link crossed twice on different remainders is not a cycle. What the
-image's own resolver (`source.Files`) still does not do is follow a link at an intermediate
-component of a queried path -- a target whose parent directory an upper layer replaced with a
-symlink is read from the lower layer's copy; recorded in `docs/deferred-decisions.md`.*
+directory back; and one link crossed twice on different remainders is not a cycle. The release
+check of 2026-11-11 (main 42b0c09) added five more. The image's own resolver (`source.Files`) now
+follows a symlink at an INTERMEDIATE component of a queried path, re-rooting the query at the
+link's target as the kernel does -- the limitation this paragraph had recorded: a package
+directory linked to `/opt/current`, with `/opt/current` itself re-pointed at `/opt/version2` by
+an upper layer, read the lower layer's old manifest (4.17.21 for 4.17.20, CVE-2021-23337 lost);
+RHEL 10's `var/lib/rpm -> ../../usr/lib/sysimage/rpm` now reaches the database under the
+traditional name too, and the two-directory probe stays for an image with no link entry. A file
+at an ancestor in an upper layer hides the lower tree (A10), and a hit by name in the SAME layer
+as an ancestor link wins, since the untar writes such an entry through the link. In the probe
+pass, an in-scope entry the match declines -- a regular file put over `node_modules/lodash` --
+replaces what lower layers hold beneath the name as a wanted one does (4 findings had remained
+for a package the image no longer has). A package-directory link whose target's `package.json` is
+itself a link is walked through the recorded links as a manifest link at the logical path is, so
+`/lib64/../qa-pkg/package.json` reads the same file from either shape (the combined shape had
+lost all 4 findings), and a re-homed relative manifest link is spelled from its physical
+directory unfolded, so `hop/../meta.json` applies the `..` after following `hop` (4.17.21 had
+been read for 4.17.20). Each alias of an install is located in the layers its own chain changed
+in, so an alias re-pointed in an upper layer sheds the OS package that owned the representative's
+path, and a re-homed root's logical links carry the root link's layer; every alias of an install
+whose target is missing is unread, not only the representative. What was NOT changed: a whiteout
+AFTER the file it names in the same layer still removes the file. The release check read the
+OCI spec's "whiteouts apply to lower layers only" as a defect; the resolver's rule (audit
+2026-10-22 P4) follows what the untars do, and both were re-read on 2026-11-11: moby's
+`go-archive` `UnpackLayer` calls `RemoveAll(originalPath)` when it reaches a `.wh.` entry, and
+containerd's `applyNaive` does the same while its overlay converter `Mknod`s the whiteout
+device and fails on an existing file. No container built from such a layer has the file; a scan
+that reported it would report a package the image does not have.*
 
 **Decision.** An image scan runs one more pass over its layers, over ten fixed locations
 together: the installed `package.json` files under the three global `node_modules` roots

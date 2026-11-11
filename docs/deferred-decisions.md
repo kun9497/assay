@@ -1937,11 +1937,13 @@ deliberately and stay open here:
 - **A link through an unrecorded link** (a target whose path crosses a symlink that is neither an
   npm-root link nor a top-level layout link) is not resolved; same disclosure as above.
 
-- **A link at an intermediate component of a resolved path** is not followed by the image's own
-  resolver (`source.Files`), which follows links only at the exact queried name: a candidate whose
-  parent directory an upper layer replaced with a symlink is read from the lower layer's copy of
-  the old path (PR #275 review, 2026-11-11). The npm probe walks the links it recorded itself;
-  the general case is a resolver change.
+- **A link at an intermediate component of a resolved path** -- RESOLVED by the release check of
+  2026-11-11 (D160 revised): `source.Files` follows a symlink at a strict ancestor of a queried
+  path, re-rooting the query at its target; a hit by name in the same layer wins. What stays
+  lexical is a `..` that follows a symlink component INSIDE a link target handed to the resolver
+  (`/lib64/../x` where `lib64` is a link the probe did not record): `path.Join` folds it before
+  `lib64` is followed. The npm probe walks its recorded links first, so the shapes the two QA
+  rounds built all read correctly; an unrecorded one of that shape reads the folded path.
 
 **Revisit when** a user reports a CVE in a package reached only through one of these shapes, or
 a scanner-diff target's npm `applicationScope` reads `partial` on a digest-pinned image — the
