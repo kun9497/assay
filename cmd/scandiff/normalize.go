@@ -44,6 +44,21 @@ type assayDocument struct {
 	// Provenance is read for the scanned target alone (D120): what an
 	// offline capture was a scan of, held to the target's pinned ref.
 	Provenance assayProvenance `json:"provenance"`
+	// Image is the report's own record of the image read (D119), the same
+	// digests provenance.target.image carries: a capture stripped of its
+	// provenance still names the image here (release check of main
+	// 5197df4: a BCI capture so stripped had passed under a CleanStart pin).
+	Image *assayImageRecord `json:"image"`
+}
+
+// digests is every digest the capture records for the image it scanned,
+// from its provenance and its top-level image record alike.
+func (d assayDocument) digests() []string {
+	out := d.Provenance.digests()
+	if d.Image != nil {
+		out = append(out, d.Image.IndexDigest, d.Image.ManifestDigest)
+	}
+	return out
 }
 
 type assayProvenance struct {
@@ -333,7 +348,9 @@ func grypeTuples(doc grypeDocument) map[tuple]struct{} {
 // nothing.
 
 type trivyDocument struct {
-	Results []trivyResult `json:"Results"`
+	// SchemaVersion is what every trivy report carries (trivyShape).
+	SchemaVersion int           `json:"SchemaVersion"`
+	Results       []trivyResult `json:"Results"`
 	// ArtifactName is the image trivy scanned, as given: an offline
 	// capture's is held to the target's pinned ref like assay's.
 	ArtifactName string `json:"ArtifactName"`

@@ -135,7 +135,7 @@ func TestRun_RC1111_OfflineCaptureIdentifiedByDigests(t *testing.T) {
 		return []byte(`{"matches":[],"source":{"type":"image","target":{` + target + `}}}`)
 	}
 	trivyWith := func(meta string) []byte {
-		return []byte(`{"Results":[]` + meta + `}`)
+		return []byte(`{"SchemaVersion":2,"Results":[]` + meta + `}`)
 	}
 	good := map[string][]byte{"t.assay.json": assayWith(`,"provenance":{"target":{"argument":"` + rcPinned + `"}}`), "t.grype.json": grypeWith(`"userInput":"` + rcPinned + `"`)}
 	pinned := Target{Name: "t", Ref: rcPinned, MinComponents: 1}

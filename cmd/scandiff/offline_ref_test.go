@@ -75,7 +75,7 @@ func TestRun_Offline_GrypeAndTrivyCapturesOfAnotherRefAreErrors(t *testing.T) {
 		return []byte(`{"matches":[],"source":{"target":{"userInput":"` + input + `"}}}`)
 	}
 	trivy := func(name string) []byte {
-		return []byte(`{"ArtifactName":"` + name + `","Results":[]}`)
+		return []byte(`{"SchemaVersion":2,"ArtifactName":"` + name + `","Results":[]}`)
 	}
 	for _, tc := range []struct {
 		name         string

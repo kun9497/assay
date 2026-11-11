@@ -44,12 +44,17 @@ func assayDoc(notEvaluated int, findings []assayFinding) []byte {
 }
 
 func grypeDoc(matches []grypeMatch) []byte {
+	// A report's matches is always an array; grype writes `[]` for nothing
+	// and `null` only in its diagnostic object (release check 2026-11-11).
+	if matches == nil {
+		matches = []grypeMatch{}
+	}
 	b, _ := json.Marshal(grypeDocument{Matches: matches})
 	return b
 }
 
 func trivyDocBytes(results []trivyResult) []byte {
-	b, _ := json.Marshal(trivyDocument{Results: results})
+	b, _ := json.Marshal(trivyDocument{SchemaVersion: 2, Results: results})
 	return b
 }
 
