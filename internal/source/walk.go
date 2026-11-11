@@ -288,20 +288,30 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 	done := make([]bool, len(qs))
 	var deleted, opaque []whiteout
 	newest := len(img.Layers) - 1
-	// dirSeen is, per query holding a "..", every directory the layers show
-	// at one of the components a ".." follows (lazyDotDot): an explicit
-	// directory entry or an entry beneath the name. A ".." folds only over
-	// a directory so shown; one whose component no layer shows is a path
-	// that leads nowhere, as the kernel's ENOENT says (release check of
-	// main b732cac: `/data/absent/../qa-db` with no `absent` anywhere had
-	// folded to `data/qa-db` and read a database the link does not reach,
-	// while the real one sat at the fallback path).
-	dirSeen := make([]map[string]bool, len(qs))
+	// preState is, per query holding a "..", what the NEWEST layer that
+	// speaks of each component a ".." follows (lazyDotDot) says it is: a
+	// directory -- an explicit directory entry, or entries beneath the name
+	// -- or not one: a file, a link, a whiteout of it or of an ancestor, an
+	// opaque marker in its parent. A ".." folds only over a directory so
+	// shown, left to right, and the folding stops at the first component
+	// that is not one (foldDecided): a link there is followed by the next
+	// pass's ancestor rule, a file or a deletion ends the path there, and a
+	// component no layer shows leads nowhere, as the kernel's ENOENT says
+	// (release check of main b732cac: `/data/absent/../qa-db` with no
+	// `absent` anywhere had folded to `data/qa-db`). Folding every ".."
+	// at once, over directories seen in ANY layer, had skipped the look at
+	// the second component (release check of main 60c512c):
+	// `/data/marker/../route/../packages` with `route` a symlink read
+	// nothing, and with `route` deleted or replaced by a file in an upper
+	// layer folded over the lower layer's directory and read a database the
+	// link no longer reaches -- BusyBox's 7 findings, one Critical, lost
+	// each way.
+	preState := make([]map[string]preVerdict, len(qs))
 	preOf := make([][]string, len(qs))
 	for k, q := range qs {
 		if strings.Contains("/"+q.path+"/", "/../") {
 			preOf[k] = dotDotPrefixes(q.path)
-			dirSeen[k] = map[string]bool{}
+			preState[k] = map[string]preVerdict{}
 		}
 	}
 	// dirAbove is, per query, every ancestor of its path an upper layer
@@ -329,6 +339,27 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 		// merged after the pass. Their effect inside the layer is ordered, and
 		// taken entry by entry below.
 		var layerDeleted, layerOpaque []whiteout
+		// layerPre is what THIS layer says about each component a ".."
+		// follows that no upper layer decided, in entry order: an entry for
+		// the name itself or a whiteout of it is explicit and replaces what
+		// came before, as the untar leaves the last; an entry beneath the
+		// name implies a directory only where nothing explicit said
+		// otherwise; an opaque marker in its parent hides the lower layers'
+		// component, not this layer's own entries. A component an upper
+		// layer's whiteout hides from this layer is decided before the layer
+		// is read: it is gone.
+		layerPre := make([]map[string]preSay, len(qs))
+		for k, q := range qs {
+			if preOf[k] == nil || done[k] || i > q.top {
+				continue
+			}
+			layerPre[k] = map[string]preSay{}
+			for _, pre := range preOf[k] {
+				if preState[k][pre] == preUnknown && hiddenPath(pre, q, i, deleted, opaque) {
+					preState[k][pre] = preNotDir
+				}
+			}
+		}
 		hits := make([]layerHit, len(qs))
 		// above is what this layer wrote at a strict ancestor of each
 		// query's path; it decides the query only when nothing in this
@@ -355,10 +386,31 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 				if done[k] || i > q.top || (i == q.top && pos >= q.before) {
 					continue
 				}
-				if preOf[k] != nil && !marker {
+				if preOf[k] != nil {
 					for _, pre := range preOf[k] {
-						if (name == pre && h.Typeflag == tar.TypeDir) || strings.HasPrefix(name, pre+"/") {
-							dirSeen[k][pre] = true
+						if preState[k][pre] != preUnknown {
+							continue
+						}
+						switch {
+						case removed != "" && (pre == removed || strings.HasPrefix(pre, removed+"/")):
+							layerPre[k][pre] = preSay{v: preNotDir, explicit: true}
+						case base == whiteoutOpaque:
+							if od := path.Clean(dir); od == "." || strings.HasPrefix(pre, od+"/") {
+								if _, said := layerPre[k][pre]; !said {
+									layerPre[k][pre] = preSay{v: preNotDir}
+								}
+							}
+						case marker:
+						case name == pre:
+							v := preNotDir
+							if h.Typeflag == tar.TypeDir {
+								v = preDir
+							}
+							layerPre[k][pre] = preSay{v: v, explicit: true}
+						case strings.HasPrefix(name, pre+"/"):
+							if s, said := layerPre[k][pre]; !said || !s.explicit {
+								layerPre[k][pre] = preSay{v: preDir}
+							}
 						}
 					}
 				}
@@ -473,28 +525,55 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 			// lower layer's copy is shadowed by what this layer put there.
 		}
 
+		for k := range qs {
+			for pre, say := range layerPre[k] {
+				if preState[k][pre] == preUnknown {
+					preState[k][pre] = say.v
+				}
+			}
+		}
 		deleted = append(deleted, layerDeleted...)
 		opaque = append(opaque, layerOpaque...)
 	}
 	// A path still holding a ".." was not decided by any entry at the
-	// component before it, in any layer: when the layers show that
-	// component as a directory the ".." is applied -- every ".." over such
-	// a directory at once, since none of them is a link to follow -- and
-	// the path looked up again (lazyDotDot); a fold is not a link hop. A
-	// component no layer shows ends the path unanswered. (A mutation
-	// counting the one re-queue as a hop survives: a path folds at most
-	// once per pass, so forty-four `a/..` cost one, not forty-four.)
+	// component before its first "..", in any layer: the leading ".."s whose
+	// components the layers decided are directories are applied, left to
+	// right -- each over a plain directory, no link to follow -- and the
+	// path looked up again (lazyDotDot); a fold is not a link hop. The
+	// folding stops at the first component that is not a directory, and the
+	// next pass looks at it as it looks at any ancestor: a link is followed,
+	// a file or a deletion ends the path. A component no layer shows ends
+	// the path unanswered. (A mutation counting a re-queue as a hop
+	// survives: a path folds once per pass, so forty-four `a/..` over one
+	// directory cost one, not forty-four.)
 	for k, q := range qs {
 		if done[k] || preOf[k] == nil {
 			continue
 		}
-		folded, ok := foldSeen(q.path, dirSeen[k])
+		folded, ok := foldDecided(q.path, preState[k])
 		if !ok {
 			continue
 		}
 		next = append(next, query{path: folded, want: q.want, top: q.top, before: q.before, dir: path.Dir(folded), links: q.links, via: q.via})
 	}
 	return next, nil
+}
+
+// preVerdict is what the layers say of a component a ".." follows.
+type preVerdict uint8
+
+const (
+	preUnknown preVerdict = iota // no layer has spoken of it yet
+	preDir                       // a directory: a ".." after it folds
+	preNotDir                    // a file, a link, a deletion: the next pass decides it as an ancestor
+)
+
+// preSay is one layer's word on a component (resolvePass): explicit when an
+// entry for the name itself or a whiteout of it said it, implied by entries
+// beneath the name otherwise.
+type preSay struct {
+	v        preVerdict
+	explicit bool
 }
 
 // dotDotPrefixes is, for a path holding "..", the component each ".."
@@ -517,10 +596,17 @@ func dotDotPrefixes(p string) []string {
 	return out
 }
 
-// foldSeen folds every ".." in p whose component the layers showed as a
-// directory (seen). It reports false when a ".." applies to a component no
-// layer shows: the path leads nowhere.
-func foldSeen(p string, seen map[string]bool) (string, bool) {
+// foldDecided folds the leading ".."s of p whose components the layers
+// decided are directories (state), left to right, and stops at the first
+// that is not. It reports the partly or wholly folded path and true when at
+// least one ".." folded -- the next pass looks at the component it stopped
+// at with the ancestor rules -- and false when the first ".." applies to a
+// component the layers do not show as a directory: one no layer shows leads
+// nowhere, and one shown as a file, a link or a deletion was decided by the
+// pass itself, as an ancestor of the path. A ".." at the root is dropped,
+// as the kernel drops it.
+func foldDecided(p string, state map[string]preVerdict) (string, bool) {
+	folded := 0
 	for strings.Contains("/"+p+"/", "/../") {
 		segs := strings.Split(p, "/")
 		pre := ""
@@ -532,10 +618,14 @@ func foldSeen(p string, seen map[string]bool) (string, bool) {
 				break
 			}
 		}
-		if pre != "" && !seen[pre] {
-			return "", false
+		if pre != "" && state[pre] != preDir {
+			break
 		}
 		p = foldFirstDotDot(p)
+		folded++
+	}
+	if folded == 0 {
+		return "", false
 	}
 	return p, true
 }
@@ -641,16 +731,23 @@ func follow(q query, hit layerHit, i, newest int) query {
 // later in its own layer). The directory and opaque rules are isDeleted's and
 // underAnyOpaque's.
 func hiddenFrom(q query, i int, deleted, opaque []whiteout) bool {
+	return hiddenPath(q.path, q, i, deleted, opaque)
+}
+
+// hiddenPath is hiddenFrom for any path read on q's behalf under q's
+// ceilings: the component a ".." follows (resolvePass's preState) is hidden
+// from a layer by the same markers that would hide the path itself.
+func hiddenPath(p string, q query, i int, deleted, opaque []whiteout) bool {
 	reach := func(w whiteout) bool {
 		return w.layer > i && w.layer <= q.top && (w.layer < q.top || w.pos < q.before)
 	}
 	for _, d := range deleted {
-		if reach(d) && (q.path == d.name || strings.HasPrefix(q.path, d.name+"/")) {
+		if reach(d) && (p == d.name || strings.HasPrefix(p, d.name+"/")) {
 			return true
 		}
 	}
 	for _, o := range opaque {
-		if reach(o) && (o.name == "." || strings.HasPrefix(q.path, o.name+"/")) {
+		if reach(o) && (o.name == "." || strings.HasPrefix(p, o.name+"/")) {
 			return true
 		}
 	}
