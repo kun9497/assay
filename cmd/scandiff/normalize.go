@@ -38,6 +38,15 @@ type assayDocument struct {
 	// ecosystem key the inventory holds (D111), with how many packages sit
 	// under it.
 	Coverage []assayCoverage `json:"coverage"`
+	// Provenance is read for the scanned target alone (D120): what an
+	// offline capture was a scan of, held to the target's pinned ref.
+	Provenance assayProvenance `json:"provenance"`
+}
+
+type assayProvenance struct {
+	Target struct {
+		Argument string `json:"argument"`
+	} `json:"target"`
 }
 
 type assayCoverage struct {

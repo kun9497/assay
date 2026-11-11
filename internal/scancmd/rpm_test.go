@@ -634,6 +634,10 @@ type ndbFixtureEntry struct {
 	name, version, release string
 	sourcerpm              string
 	epoch                  int32 // 0 writes no EPOCH tag, as rpm does for an epoch-less package
+	// header, when set, is written as the entry's rpm header verbatim (a
+	// blob carrying file-list tags, rpmHeaderWithFiles) instead of one built
+	// from the fields above.
+	header []byte
 }
 
 // buildNDBFixture hand-assembles a complete, well-formed ndb (openSUSE/SLES
@@ -677,7 +681,10 @@ func buildNDBFixture(t *testing.T, nextpkgidx uint32, entries []ndbFixtureEntry)
 	blkoff := uint32(slotnpages * pageSize / blkSize)
 	slotOff := slotStart * slotSize
 	for _, e := range entries {
-		rpmHeader := buildRPMHeaderBlobFixtureEpoch(e.name, e.version, e.release, e.sourcerpm, e.epoch)
+		rpmHeader := e.header
+		if rpmHeader == nil {
+			rpmHeader = buildRPMHeaderBlobFixtureEpoch(e.name, e.version, e.release, e.sourcerpm, e.epoch)
+		}
 		blkcnt := uint32((blobHead + len(rpmHeader) + blobTail + blkSize - 1) / blkSize)
 		total := int(blkcnt) * blkSize
 

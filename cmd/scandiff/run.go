@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 	"time"
 )
@@ -184,6 +185,23 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 			worst = exitError
 			continue
 		}
+		// An offline capture is held to the floors file's pinned ref (QA
+		// 2026-11-11): a target renamed or re-pinned in the file, with an old
+		// capture still under its name, was judged as that capture -- a BCI
+		// capture passed both modes for an Alpine digest. The capture
+		// records the argument assay scanned (D120); a digest-pinned ref
+		// must appear in it. A capture from before D120 records none and is
+		// taken as it was, since nothing can be checked. A live scan is of
+		// t.Ref by construction, so checking it too would change nothing:
+		// the !live guard states the intent, and its mutation survives.
+		if !live {
+			if why := captureMismatch(t, adoc); why != "" {
+				fmt.Fprintf(stderr, "error: target=%s %s\n", t.Name, why)
+				rows = append(rows, row{Target: t.Name, Verdict: "ERROR"})
+				worst = exitError
+				continue
+			}
+		}
 		var gdoc grypeDocument
 		if err := json.Unmarshal(grypeRaw, &gdoc); err != nil {
 			fmt.Fprintf(stderr, "error: target=%s malformed grype JSON: %v\n", t.Name, err)
@@ -355,6 +373,26 @@ func readOffline(dir string, t Target) (assayRaw, grypeRaw []byte, fatal string)
 		return nil, nil, fmt.Sprintf("read offline grype capture: %v", err)
 	}
 	return assayRaw, grypeRaw, ""
+}
+
+// captureMismatch is "" when the offline assay capture records, as the
+// target it scanned, the floors file's ref for t -- by digest when the ref
+// pins one (the argument must name "@<digest>"), by the whole string
+// otherwise -- or when it records no target at all (a capture from before
+// D120). Otherwise it says what the capture was a scan of.
+func captureMismatch(t Target, doc assayDocument) string {
+	arg := doc.Provenance.Target.Argument
+	if arg == "" {
+		return ""
+	}
+	if _, digest, ok := strings.Cut(t.Ref, "@"); ok {
+		if strings.HasSuffix(arg, "@"+digest) {
+			return ""
+		}
+	} else if arg == t.Ref {
+		return ""
+	}
+	return fmt.Sprintf("offline capture is a scan of %q, not of the target's ref %q", arg, t.Ref)
 }
 
 // trivyOutcome is trivyPhase's result: whether the target's verdict needs

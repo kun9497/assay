@@ -7,16 +7,6 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-### Fixed
-- Image npm links (QA 2026-11-11): a root linked to a directory under another root re-homes the
-  packages read there (lodash 4 findings, were 0 with exit 0); package-link chains are grouped by
-  their end and a cycle leaves every link unread (exit 2 under the strict gate); a manifest link
-  through `/lib64` (with or without `..`) reads the right file; a package directory replaced by a
-  symlink in an upper layer hides its lower-layer manifests (2 findings, were 6); a middle link
-  retargeted in an upper layer un-owns the path, and `lib64 -> lib -> usr/lib` lends the owner
-  while `/sbin/../usr/lib` does not; npm's `.bin` link is not a package (exit 0, was 2).
-  (D160, D162 revised)
-
 ### Added
 - The scanner differential floors each probed ecosystem's application packages:
   `minApplicationPackages` (`npm`, `Go`) on `coverage[].packages`, judged by the weekly run and
@@ -32,6 +22,20 @@ All notable changes to this project are documented here. The format follows
   Truthset report schema 3. (D161 revised, QA 2026-11-10)
 
 ### Fixed
+- Image npm links (QA 2026-11-11): a root linked to a directory under another root re-homes the
+  packages read there (lodash 4 findings, were 0 with exit 0); package-link chains are grouped by
+  their end and a cycle leaves every link unread (exit 2 under the strict gate); a manifest link
+  through `/lib64` (with or without `..`) reads the right file; a package directory replaced by a
+  symlink in an upper layer hides its lower-layer manifests (2 findings, were 6); a middle link
+  retargeted in an upper layer un-owns the path, and `lib64 -> lib -> usr/lib` lends the owner
+  while `/sbin/../usr/lib` does not; npm's `.bin` link is not a package (exit 0, was 2).
+  (D160, D162 revised)
+- `truthset -offline`: the run's database is the first trusted capture's, a locally built database
+  (no digest) included, so a local-database capture and a published-database capture are the same
+  ERROR in either order instead of passing as the published database's when the local one sorted
+  first. `scandiff -offline`: a capture whose recorded target is not the floors file's pinned ref
+  is an ERROR with the reason (a BCI capture had passed under a target re-pinned to Alpine).
+  (D161, D167 revised; QA 2026-11-11)
 - `truthset -offline` sets an unproven capture aside before the run-wide database check: a stale
   capture sorting first no longer fixes the run's database and fails every proven case with a
   digest mismatch (exit 2). (D161 revised; PR #268 review, round 2)

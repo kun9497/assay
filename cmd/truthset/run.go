@@ -184,6 +184,13 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 	// name of a v1.0.0 label judged that label TN. Its labels are not judged.
 	unproven := map[string]string{}
 	var digest, tool string
+	// digestKnown is set by the first document the run trusts, whatever its
+	// digest -- "" included: a scan against a locally built database records
+	// no artifact digest, and a capture of one must not be read as "no
+	// opinion" and folded into a published database's run (QA 2026-11-11:
+	// a local-DB capture sorting first let a published-DB capture set the
+	// run's digest, two TN and exit 0; the other order was exit 2).
+	digestKnown := false
 	for _, c := range cases {
 		var raw []byte
 		if *offlineDir != "" {
@@ -266,8 +273,8 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 		// Every case must have been judged against one database: a `db
 		// update` landing between two scans would attribute a label flip to
 		// the matcher. The first document's digest is the run's.
-		if d := doc.Provenance.Database.Artifact.Digest; digest != "" && d != digest {
-			fatal[c.name] = fmt.Sprintf("database digest %s differs from the run's first, %s", d, digest)
+		if d := doc.Provenance.Database.Artifact.Digest; digestKnown && d != digest {
+			fatal[c.name] = fmt.Sprintf("database digest %s differs from the run's first, %s", spellDigest(d), spellDigest(digest))
 			fmt.Fprintf(stderr, "error: case=%s %s\n", c.name, fatal[c.name])
 			continue
 		}
@@ -280,7 +287,8 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 			continue
 		}
 		scans[c.name] = &doc
-		if digest == "" {
+		if !digestKnown {
+			digestKnown = true
 			digest, tool = doc.Provenance.Database.Artifact.Digest, doc.Provenance.Tool.Version
 		}
 	}
@@ -460,6 +468,15 @@ func targetMismatch(l Label, doc *scanDoc) string {
 		return fmt.Sprintf("the capture scanned a different target (sha256 %s, this case's SBOM is %s)", got, want)
 	}
 	return ""
+}
+
+// spellDigest names a database digest in a message; a scan against a
+// locally built database records none.
+func spellDigest(d string) string {
+	if d == "" {
+		return "(none: a locally built database)"
+	}
+	return d
 }
 
 func sbomFor(l Label) []byte {
