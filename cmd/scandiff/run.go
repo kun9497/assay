@@ -191,7 +191,9 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 		// capture passed both modes for an Alpine digest. The capture
 		// records the argument assay scanned (D120); a digest-pinned ref
 		// must appear in it. A capture from before D120 records none and is
-		// taken as it was, since nothing can be checked.
+		// taken as it was, since nothing can be checked. A live scan is of
+		// t.Ref by construction, so checking it too would change nothing:
+		// the !live guard states the intent, and its mutation survives.
 		if !live {
 			if why := captureMismatch(t, adoc); why != "" {
 				fmt.Fprintf(stderr, "error: target=%s %s\n", t.Name, why)
