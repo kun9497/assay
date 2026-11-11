@@ -79,6 +79,11 @@ func TestRun_RC2_BareSourceRecordLendsToTheInstallsItAgreesWith(t *testing.T) {
 		{"with bare, arm first", []string{bare}, []string{arm, amd}},
 		{"without bare, amd first", nil, []string{amd, arm}},
 		{"without bare, arm first", nil, []string{arm, amd}},
+		// The twins at the top and the bare record under the subject: it
+		// is lent to the amd64 install it agrees with and not to arm64,
+		// which it contradicts -- not joined to the first one listed.
+		{"twins top, bare subject, amd first", []string{amd, arm}, []string{bare}},
+		{"twins top, bare subject, arm first", []string{arm, amd}, []string{bare}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := qa1111Run(t, db, rc2Doc(tc.top, tc.subject), opts)
@@ -92,11 +97,19 @@ func TestRun_RC2_BareSourceRecordLendsToTheInstallsItAgreesWith(t *testing.T) {
 	// installs are judged on their own statements -- 3 components, the
 	// amd64 finding, incomplete 1, exit 2, in either order.
 	const bareOther = `{"type":"library","name":"libc6","version":"2.31-13+deb11u14","purl":"pkg:deb/debian/libc6@2.31-13%2Bdeb11u14?upstream=glibc%401%3A2.31-13%2Bdeb11u13"}`
-	for _, subject := range [][]string{{amd, arm}, {arm, amd}} {
-		r := qa1111Run(t, db, rc2Doc([]string{bareOther}, subject), opts)
+	for _, tc := range []struct{ top, subject []string }{{[]string{bareOther}, []string{amd, arm}}, {[]string{bareOther}, []string{arm, amd}}, {[]string{amd, arm}, []string{bareOther}}, {[]string{arm, amd}, []string{bareOther}}} {
+		r := qa1111Run(t, db, rc2Doc(tc.top, tc.subject), opts)
 		if r.code != 2 || len(r.findings) != 1 || r.doc.Summary.TargetIncomplete != 1 || r.doc.Summary.Components != 3 {
-			t.Errorf("contradicting bare, order %v: exit=%d findings=%v incomplete=%d components=%d; want 2, the amd64 finding, 1, 3", subject, r.code, r.findings, r.doc.Summary.TargetIncomplete, r.doc.Summary.Components)
+			t.Errorf("contradicting bare, top %v subject %v: exit=%d findings=%v incomplete=%d components=%d; want 2, the amd64 finding, 1, 3", tc.top, tc.subject, r.code, r.findings, r.doc.Summary.TargetIncomplete, r.doc.Summary.Components)
 		}
+	}
+	// A bare record under the subject beside two twins of two RELEASES at
+	// the top belongs to neither provably (the PR #270 mirror case): its
+	// own package, not evaluated -- not lent to both.
+	const arm320 = `{"type":"library","name":"busybox","version":"1.36.1-r20","purl":"pkg:apk/alpine/busybox@1.36.1-r20?arch=aarch64&distro=alpine-3.20","properties":[{"name":"syft:location:0:path","value":"/arm320"}]}`
+	r := qa1111Run(t, db, rc2Doc([]string{rc2X86Keyed, arm320}, []string{rc2Bare}), Options{FailOnIncomplete: true})
+	if r.code != 2 || r.doc.Summary.NotEvaluated != 1 || r.doc.Summary.Components != 3 {
+		t.Errorf("two releases, bare subject: exit=%d notEvaluated=%d components=%d findings=%v; want 2, 1, 3", r.code, r.doc.Summary.NotEvaluated, r.doc.Summary.Components, r.findings)
 	}
 }
 
@@ -124,6 +137,8 @@ func TestRun_RC2_ArchScopedVEXReachesTheJoinedInstall(t *testing.T) {
 		{"with bare, arm first", []string{rc2Bare}, []string{rc2ArmKeyed, rc2X86Keyed}, 1, 1, 2, "/image/x86/lib/apk/db/installed"},
 		{"without bare, x86 first", nil, []string{rc2X86Keyed, rc2ArmKeyed}, 1, 1, 2, "/image/x86/lib/apk/db/installed"},
 		{"without bare, arm first", nil, []string{rc2ArmKeyed, rc2X86Keyed}, 1, 1, 2, "/image/x86/lib/apk/db/installed"},
+		{"twins top, bare subject, x86 first", []string{rc2X86Keyed, rc2ArmKeyed}, []string{rc2Bare}, 1, 1, 2, "/image/x86/lib/apk/db/installed"},
+		{"twins top, bare subject, arm first", []string{rc2ArmKeyed, rc2X86Keyed}, []string{rc2Bare}, 1, 1, 2, "/image/x86/lib/apk/db/installed"},
 		{"unique: bare top, keyed x86 subject", []string{rc2Bare}, []string{rc2X86Keyed}, 0, 1, 1, "/image/x86/lib/apk/db/installed"},
 		{"unique: keyed x86 top, bare subject", []string{rc2X86Keyed}, []string{rc2Bare}, 0, 1, 1, "/image/x86/lib/apk/db/installed"},
 	} {
@@ -141,7 +156,7 @@ func TestRun_RC2_ArchScopedVEXReachesTheJoinedInstall(t *testing.T) {
 			}
 			// The bare listing's own path lands on an install it agrees
 			// with (every one, when it joins none), never on neither.
-			if len(tc.top) == 1 && tc.top[0] == rc2Bare {
+			if (len(tc.top) == 1 && tc.top[0] == rc2Bare) || (len(tc.subject) == 1 && tc.subject[0] == rc2Bare) {
 				all := strings.Join(supPaths, ",")
 				for _, f := range r.findings {
 					all += "," + f

@@ -249,6 +249,21 @@ func catalogDeduped(components []component, ctx osContext, base int, d *dedupe, 
 // is its own install, and the bare listing waits for one it agrees with.
 func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, d *dedupe, target *pkgmeta.Target, stats *Stats) {
 	keyed := d.keyed
+	// own appends p as its own install. A bare listing of the identity that
+	// joined an earlier twin is evidence for an arch-stating one too.
+	own := func(p pkgmeta.Package) {
+		for _, s := range d.snaps {
+			if p.Arch != "" && s.Type == p.Type && s.Name == p.Name && s.Version == p.Version && (s.Ecosystem == "" || p.Ecosystem == "" || s.Ecosystem == p.Ecosystem) && !contradicts(p, s) {
+				keepEvidence(&p, s)
+			}
+		}
+		target.Packages = append(target.Packages, p)
+		stats.Components += scratchStats.Components
+		stats.Cataloged += scratchStats.Cataloged
+		stats.SkippedNoPURL += scratchStats.SkippedNoPURL
+		stats.SkippedNoVersion += scratchStats.SkippedNoVersion
+		stats.SkippedUnsupportedEcosystem += scratchStats.SkippedUnsupportedEcosystem
+	}
 	for _, p := range scratchTarget.Packages {
 		if p.Arch == "" {
 			if twins := archTwins(target.Packages[:base], p, keyed); len(twins) > 1 {
@@ -256,9 +271,21 @@ func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, d 
 					return
 				}
 				// It contradicts every install it could be: the
-				// document's inconsistency is reported on this listing,
-				// and the installs are judged on their own statements.
+				// document's inconsistency is reported on this listing
+				// -- keyed as its twins are, so the report says why it is
+				// not judged rather than that nothing covers it -- and the
+				// installs are judged on their own statements.
+				// The twins share one release (archTwins refuses two), and
+				// that release is this listing's too: taken from the twin
+				// directly, since the subject-tree rule withholds a key the
+				// top-level twins alone give (PR #277 review) and this
+				// listing carries it to no other package.
+				if p.Ecosystem == "" {
+					p.Ecosystem = target.Packages[twins[0]].Ecosystem
+				}
 				markSourceContradiction(&p, target.Packages[twins[0]])
+				own(p)
+				return
 			}
 		}
 		if i := indexOfPackage(target.Packages[:base], p, keyed); i >= 0 {
@@ -297,19 +324,7 @@ func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, d 
 				return
 			}
 		}
-		// Its own install. A bare listing of the identity that joined an
-		// earlier twin is evidence for this one too.
-		for _, s := range d.snaps {
-			if p.Arch != "" && s.Type == p.Type && s.Name == p.Name && s.Version == p.Version && (s.Ecosystem == "" || p.Ecosystem == "" || s.Ecosystem == p.Ecosystem) && !contradicts(p, s) {
-				keepEvidence(&p, s)
-			}
-		}
-		target.Packages = append(target.Packages, p)
-		stats.Components += scratchStats.Components
-		stats.Cataloged += scratchStats.Cataloged
-		stats.SkippedNoPURL += scratchStats.SkippedNoPURL
-		stats.SkippedNoVersion += scratchStats.SkippedNoVersion
-		stats.SkippedUnsupportedEcosystem += scratchStats.SkippedUnsupportedEcosystem
+		own(p)
 		return
 	}
 	// A scratch with no package: a counted skip.
