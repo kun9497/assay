@@ -22,6 +22,11 @@ All notable changes to this project are documented here. The format follows
   Truthset report schema 3. (D161 revised, QA 2026-11-10)
 
 ### Fixed
+- Image npm links, per the PR #275 review: a package directory or manifest that is itself a link
+  under a directory another root is linked to is read at the logical path; several links to one
+  install are one package located at every name; a package directory replaced by a symlink hides
+  its lower layers even when a later layer puts a directory back; a link crossed twice without
+  looping is not reported as a cycle. (D160 revised)
 - Image npm links (QA 2026-11-11): a root linked to a directory under another root re-homes the
   packages read there (lodash 4 findings, were 0 with exit 0); package-link chains are grouped by
   their end and a cycle leaves every link unread (exit 2 under the strict gate); a manifest link

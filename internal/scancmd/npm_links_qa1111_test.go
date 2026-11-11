@@ -73,10 +73,33 @@ func TestRun_QA1111_NpmLinksAndOwners(t *testing.T) {
 			probeLayerEntry{name: "usr/lib/node_modules/minimatch", link: "other"},
 			probeLayerEntry{name: "usr/lib/node_modules/other", link: "minimatch"},
 		)}, want{nil, nil, "", report.ScopePartial, []string{lib, "usr/lib/node_modules/other/package.json"}, 2}},
-		{"a chain of two links to one install (counted once)", [][]probeLayerEntry{base(
+		{"a chain of two links to one install (one package, both names)", [][]probeLayerEntry{base(
 			probeLayerEntry{name: "opt/mm/package.json", body: v4},
 			probeLayerEntry{name: "usr/lib/node_modules/minimatch", link: "/opt/mm"},
 			probeLayerEntry{name: "usr/local/lib/node_modules/minimatch", link: "/usr/lib/node_modules/minimatch"},
+		)}, want{[]string{"3.0.4"}, []string{lib, local}, "", report.ScopeRead, nil, 1}},
+		// PR #275 review: a link-shaped install under the alias target.
+		{"root alias: a package directory link under the target", [][]probeLayerEntry{base(
+			probeLayerEntry{name: "usr/lib/node_modules/vendor/assets/other/package.json", body: []byte(`{"name":"other","version":"1.0.0"}`)},
+			probeLayerEntry{name: "opt/mm/package.json", body: v4},
+			probeLayerEntry{name: "usr/lib/node_modules/vendor/assets/minimatch", link: "/opt/mm"},
+			probeLayerEntry{name: "usr/local/lib/node_modules", link: "/usr/lib/node_modules/vendor/assets"},
+		)}, want{[]string{"3.0.4"}, []string{local}, "", report.ScopeRead, nil, 1}},
+		{"root alias: a manifest link under the target, relative", [][]probeLayerEntry{base(
+			probeLayerEntry{name: "opt/mm/package.json", body: v4},
+			probeLayerEntry{name: "usr/lib/node_modules/vendor/assets/minimatch/package.json", link: "../../../../../../opt/mm/package.json"},
+			probeLayerEntry{name: "usr/local/lib/node_modules", link: "/usr/lib/node_modules/vendor/assets"},
+		)}, want{[]string{"3.0.4"}, []string{local}, "", report.ScopeRead, nil, 1}},
+		{"root alias: a manifest hardlink under the target", [][]probeLayerEntry{base(
+			probeLayerEntry{name: "opt/mm/package.json", body: v4},
+			probeLayerEntry{name: "usr/lib/node_modules/vendor/assets/minimatch/package.json", link: "opt/mm/package.json", hard: true},
+			probeLayerEntry{name: "usr/local/lib/node_modules", link: "/usr/lib/node_modules/vendor/assets"},
+		)}, want{[]string{"3.0.4"}, []string{local}, "", report.ScopeRead, nil, 1}},
+		// PR #275 review: one link crossed twice is not a cycle.
+		{"manifest link crossing lib64 twice", [][]probeLayerEntry{base(
+			probeLayerEntry{name: "lib64", link: "usr/lib"},
+			probeLayerEntry{name: "usr/lib/qa/package.json", body: v4},
+			probeLayerEntry{name: lib, link: "/lib64/../../lib64/qa/package.json"},
 		)}, want{[]string{"3.0.4"}, []string{lib}, "", report.ScopeRead, nil, 1}},
 		// --- item 7.1: a manifest link through a layout link, with and without ".."
 		{"manifest link with '..' after lib64", [][]probeLayerEntry{base(
@@ -95,6 +118,13 @@ func TestRun_QA1111_NpmLinksAndOwners(t *testing.T) {
 			base(probeLayerEntry{name: lib, body: v4},
 				probeLayerEntry{name: "usr/lib/node_modules/minimatch/node_modules/minimatch/package.json", body: v4}),
 			{{name: "opt/content/package.json", body: v3}, {name: "usr/lib/node_modules/minimatch", link: "/opt/content"}},
+		}, want{[]string{"3.0.3"}, []string{lib}, "", report.ScopeRead, nil, 1}},
+		// PR #275 review: a symlink in a middle layer, a directory put back
+		// above it: only the top layer's content remains.
+		{"package directory replaced by a link, then a directory again", [][]probeLayerEntry{
+			base(probeLayerEntry{name: "usr/lib/node_modules/minimatch/node_modules/minimatch/package.json", body: v4}),
+			{{name: "usr/lib/node_modules/minimatch", link: "/opt/x"}},
+			{{name: lib, body: v3}},
 		}, want{[]string{"3.0.3"}, []string{lib}, "", report.ScopeRead, nil, 1}},
 		{"nested copy in one layer is read (control)", [][]probeLayerEntry{base(
 			probeLayerEntry{name: lib, body: v4},

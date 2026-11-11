@@ -163,6 +163,10 @@ func (img *Image) collectWith(ctx context.Context, roots []string, match func(na
 		layerDeleted := map[string]bool{}
 		var layerOpaque []string
 		last := map[string]underHit{}
+		// layerNonDir is every matched name this layer wrote a file or a
+		// link at, whether or not an upper layer decided the name again
+		// (found): it still replaced what lower layers hold beneath it.
+		layerNonDir := map[string]bool{}
 
 		err := readLayer(ctx, l, func(name string, h *tar.Header, r io.Reader) error {
 			if underReplaced(name, replaced) {
@@ -201,6 +205,10 @@ func (img *Image) collectWith(ctx context.Context, roots []string, match func(na
 			// hides an older layer's copy of a file this pass has not seen.
 			if isDeleted(name, deleted) || underAnyOpaque(name, opaque) {
 				return nil
+			}
+			switch h.Typeflag {
+			case tar.TypeSymlink, tar.TypeLink, tar.TypeReg, tar.TypeGNUSparse, tar.TypeCont:
+				layerNonDir[name] = true
 			}
 			if found[name] {
 				return nil
@@ -242,6 +250,14 @@ func (img *Image) collectWith(ctx context.Context, roots []string, match func(na
 			return nil, nil, fmt.Errorf("read layer %s: %w", l.DiffID, err)
 		}
 
+		// A file or link here replaced whatever lower layers hold beneath
+		// the name, whether or not an upper layer decided the name again (a
+		// directory put back above a symlink holds only what that layer
+		// wrote; PR #275 review). Merged after the layer: it hides lower
+		// layers only.
+		for name := range layerNonDir {
+			replaced[name] = true
+		}
 		for name, hit := range last {
 			// An ancestor mark for a name an upper layer already decided.
 			if found[name] {
@@ -251,9 +267,7 @@ func (img *Image) collectWith(ctx context.Context, roots []string, match func(na
 			switch hit.kind {
 			case hitFile:
 				out[name] = FileFromLayer{Data: hit.data, DiffID: l.DiffID}
-				replaced[name] = true
 			case hitLink:
-				replaced[name] = true
 				// Recorded once per name the image ends up with a link at,
 				// not per link entry: a link a later entry replaced is not
 				// a file this scan failed to read.

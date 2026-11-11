@@ -129,7 +129,7 @@ func catalogApplicationProbes(ctx context.Context, img *source.Image, owned *fil
 	// fixed root, not a new root). One that does not resolve is unread with
 	// its reason, so the strict gate sees it, and the npm scope is partial
 	// rather than none.
-	unresolvedNpm, err := resolveNpmLinks(ctx, img, links, npmFiles, layerOf, owned.layerOf)
+	unresolvedNpm, aliases, err := resolveNpmLinks(ctx, img, links, npmFiles, layerOf, owned.layerOf)
 	if err != nil {
 		return nil, cyclonedx.Stats{}, nil, err
 	}
@@ -137,6 +137,13 @@ func catalogApplicationProbes(ctx context.Context, img *source.Image, owned *fil
 	for i := range npmPkgs {
 		for j := range npmPkgs[i].Locations {
 			npmPkgs[i].Locations[j].LayerDigest = layerOf[npmPkgs[i].Locations[j].Path]
+		}
+		// Several links to one install are one package with every name
+		// the image gives it (PR #275 review: the other names were lost).
+		for _, l := range npmPkgs[i].Locations {
+			for _, a := range aliases[l.Path] {
+				npmPkgs[i].Locations = append(npmPkgs[i].Locations, pkgmeta.Location{Path: a, LayerDigest: l.LayerDigest})
+			}
 		}
 	}
 	pkgs = append(pkgs, npmPkgs...)
@@ -200,10 +207,13 @@ func probeCandidate(name string, h *tar.Header) bool {
 	if path.Base(name) == "package.json" {
 		return underAny(name, npminstalled.Roots)
 	}
-	// A package directory that is a symlink -- usr/lib/node_modules/x, or
-	// a scoped @s/x -- or a scope directory that is one is recorded for
-	// resolveNpmLinks; nothing is read from it here.
-	if h.Typeflag == tar.TypeSymlink && underAny(name, npminstalled.Roots) && (isPackageDir(name) || isScopeDir(name)) {
+	// Every symlink under an npm root is recorded for resolveNpmLinks;
+	// nothing is read from it here. A package directory (usr/lib/
+	// node_modules/x, a scoped @s/x) or a scope directory that is a link is
+	// a candidate there; any other -- a link inside a package, one under a
+	// directory another root is linked to (PR #275 review) -- is known so
+	// it can be re-homed or followed, and costs a map entry.
+	if h.Typeflag == tar.TypeSymlink && underAny(name, npminstalled.Roots) {
 		return true
 	}
 	switch h.Typeflag {
@@ -290,7 +300,8 @@ func isScopeDir(name string) bool {
 // An error reading the image (the scan's budget, its deadline, a layer) is
 // returned, as the probe pass returns it: D112's "an error, never a shorter
 // result".
-func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]source.Link, files map[string][]byte, layerOf map[string]string, layerIndex func(string) int) (int, error) {
+func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]source.Link, files map[string][]byte, layerOf map[string]string, layerIndex func(string) int) (unresolved int, aliases map[string][]string, err error) {
+	aliases = map[string][]string{}
 	type cand struct {
 		logical, read, link string
 		// changed is every layer the logical path's meaning depends on:
@@ -299,22 +310,17 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 		changed []string
 	}
 	var cands []cand
-	unresolved := 0
-	names := make([]string, 0, len(links))
-	for n := range links {
-		names = append(names, n)
-	}
-	sort.Strings(names)
 	// A root the image replaced with a link has nothing under its name: a
 	// lower layer's packages there are gone from the filesystem (a symlink
 	// over a directory carries no whiteout, so the pass did not shadow
 	// them), and so are the links it recorded there (PR #271 review).
 	var linkedRoots []string
-	for _, n := range names {
-		if isNpmRoot(n) && !links[n].Hard {
+	for n, l := range links {
+		if isNpmRoot(n) && !l.Hard {
 			linkedRoots = append(linkedRoots, n)
 		}
 	}
+	sort.Strings(linkedRoots)
 	for _, r := range linkedRoots {
 		for f := range files {
 			if strings.HasPrefix(f, r+"/") {
@@ -323,6 +329,51 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 			}
 		}
 	}
+	// A root linked to a directory UNDER another root is an alias of what
+	// the pass already read there: its files are re-homed under the root's
+	// own name (rehomeRoot), and so are its links -- a package directory or
+	// manifest that is itself a link there is an install at the logical
+	// path too, judged below by the same arms as any other link (PR #275
+	// review: a linked install under the alias target was a silent miss).
+	// A relative target is made absolute from its physical directory, and
+	// a hardlink's logical twin points at the physical name, so the image's
+	// resolver still follows it by inode (D130).
+	rehomed := map[string]bool{} // synthesized logical links
+	aliased := map[string]bool{} // roots handled here
+	for _, r := range linkedRoots {
+		l := links[r]
+		final, followed, cyclic := resolveChain(path.Dir(r), l.Target, links)
+		if cyclic || !aliasOfReadRoot(final, links) || final == rootOf(final) {
+			continue
+		}
+		any := rehomeRoot(r, final, files, layerOf, layerIndex, append(followed, r), links)
+		for n, nl := range links {
+			if !strings.HasPrefix(n, final+"/") {
+				continue
+			}
+			logical := r + strings.TrimPrefix(n, final)
+			if !(isPackageDir(logical) || isScopeDir(logical) || npminstalled.IsInstalledPackageJSON(logical)) {
+				continue
+			}
+			any = true
+			switch {
+			case nl.Hard:
+				nl = source.Link{Target: "/" + n, DiffID: nl.DiffID}
+			case !strings.HasPrefix(nl.Target, "/"):
+				nl.Target = "/" + path.Join(path.Dir(n), nl.Target)
+			}
+			links[logical] = nl
+			rehomed[logical] = true
+		}
+		if any {
+			aliased[r] = true
+		}
+	}
+	names := make([]string, 0, len(links))
+	for n := range links {
+		names = append(names, n)
+	}
+	sort.Strings(names)
 	// A package directory link points at an install; several may point at
 	// one. Grouped by where the chain ends, so an install reached by two
 	// links is one package, and a chain that leads nowhere -- a cycle, a
@@ -338,19 +389,21 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 	var finals []string
 	for _, n := range names {
 		l := links[n]
-		if underAny(n, linkedRoots) {
+		if underAny(n, linkedRoots) && !rehomed[n] {
 			continue
 		}
 		switch {
 		case isNpmRoot(n):
 			// A global node_modules root that is itself a link. Its target
 			// is enumerated when the pass already read it -- a directory
-			// under another root, whose files are re-homed under this
-			// root's name so the install shape is judged at its logical
-			// path (QA 2026-11-11: a root linked to another root's
-			// vendor/assets read 0 of lodash's 4 findings, exit 0) -- and
-			// otherwise listed unread, so npm is partial rather than none.
-			final, followed, cyclic := resolveChain(path.Dir(n), l.Target, links)
+			// under another root, re-homed above (QA 2026-11-11: a root
+			// linked to another root's vendor/assets read 0 of lodash's 4
+			// findings, exit 0) -- and otherwise listed unread, so npm is
+			// partial rather than none.
+			if aliased[n] {
+				continue
+			}
+			final, _, cyclic := resolveChain(path.Dir(n), l.Target, links)
 			switch {
 			case l.Hard || cyclic || !aliasOfReadRoot(final, links):
 				unresolved++
@@ -359,10 +412,8 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 				// The whole of another root: every install there is
 				// already inventoried at its own path.
 			default:
-				if !rehomeRoot(n, final, files, layerOf, layerIndex, append(followed, n), links) {
-					unresolved++
-					img.NoteUnresolved(n, fmt.Sprintf("npm root is a link to %q, which holds nothing the probe read", l.Target))
-				}
+				unresolved++
+				img.NoteUnresolved(n, fmt.Sprintf("npm root is a link to %q, which holds nothing the probe read", l.Target))
 			}
 		case !underAny(n, npminstalled.Roots):
 			// Equivalent today, kept as the statement of scope: probeCandidate
@@ -440,10 +491,14 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 			return members[i].n < members[j].n
 		})
 		m := members[0]
-		cands = append(cands, cand{logical: m.n + "/package.json", read: final + "/package.json", link: m.link, changed: linkLayers(append(m.followed, m.n), links)})
+		logical := m.n + "/package.json"
+		for _, o := range members[1:] {
+			aliases[logical] = append(aliases[logical], o.n+"/package.json")
+		}
+		cands = append(cands, cand{logical: logical, read: final + "/package.json", link: m.link, changed: linkLayers(append(m.followed, m.n), links)})
 	}
 	if len(cands) == 0 {
-		return unresolved, nil
+		return unresolved, aliases, nil
 	}
 	want := make([]string, 0, len(cands))
 	for _, c := range cands {
@@ -451,7 +506,7 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 	}
 	got, err := img.Files(ctx, want)
 	if err != nil {
-		return 0, fmt.Errorf("read the npm packages behind links: %w", err)
+		return 0, nil, fmt.Errorf("read the npm packages behind links: %w", err)
 	}
 	for _, c := range cands {
 		f, ok := got[c.read]
@@ -471,7 +526,7 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 		// from the layer that made it (D130).
 		layerOf[c.logical] = newestLayer(append(c.changed, f.DiffID, f.ViaDiffID), layerIndex)
 	}
-	return unresolved, nil
+	return unresolved, aliases, nil
 }
 
 // rehomeRoot re-homes, under root (a link), every package.json the pass
@@ -596,7 +651,10 @@ func resolveChain(dir, target string, links map[string]source.Link) (final strin
 			}
 		}
 	}
-	seen := map[string]bool{}
+	// A link met twice with the same path still to walk is a cycle; met
+	// twice on different remainders it is one link crossed twice, which
+	// "/lib64/../../lib64/qa" does and Linux resolves (PR #275 review).
+	seen := map[string]string{}
 	queue := strings.Split(target, "/")
 	for len(queue) > 0 {
 		c := queue[0]
@@ -619,10 +677,11 @@ func resolveChain(dir, target string, links map[string]source.Link) (final strin
 		// A repeat is a cycle; the bound alone would also end it, so a
 		// mutation dropping the repeat check survives -- the check only
 		// spares the forty hops.
-		if seen[name] || len(followed) >= 40 {
+		rest := strings.Join(queue, "/")
+		if prev, ok := seen[name]; (ok && prev == rest) || len(followed) >= 40 {
 			return name, followed, true
 		}
-		seen[name] = true
+		seen[name] = rest
 		followed = append(followed, name)
 		cur = cur[:len(cur)-1]
 		if strings.HasPrefix(l.Target, "/") {

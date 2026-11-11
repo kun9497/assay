@@ -193,7 +193,9 @@ func TestRun_QA1110_LinkedNpmPackagesCountedOnceAndResolvedThroughLinks(t *testi
 			// Round 2 of the review: a link to another package directory link
 			// is a second name for that install, as a link into another root's
 			// real directory is -- counted once, at the link it lands on.
-		}, []string{"usr/lib/node_modules/b/package.json"}},
+			// One package, located at both names (PR #275 review: the other
+			// name was lost).
+		}, []string{"usr/lib/node_modules/b/package.json", "usr/local/lib/node_modules/minimatch/package.json"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tarPath := filepath.Join(t.TempDir(), "image.tar")

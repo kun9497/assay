@@ -8312,7 +8312,15 @@ layer's file or link at a name hides a lower layer's entries beneath it, as the 
 say (a package directory replaced by a symlink had kept its old manifest, 6 findings for 2); a
 logical path's layer is the latest of the file's, the link's and every link followed on the way
 (`source.FileFromLayer.ViaDiffID`), so a middle link retargeted in an upper layer un-owns the path;
-and npm's own dot directories (`.bin`, a link to `/usr/bin` on some images) are never packages.*
+and npm's own dot directories (`.bin`, a link to `/usr/bin` on some images) are never packages. Its
+review added: every symlink under a root is recorded, so a package directory or manifest that is
+itself a link under a re-homed directory is an install at the logical path too (a hardlink's twin
+points at the physical name, D130); several links to one install are one package located at every
+name; a file or link at a name hides lower layers beneath it even when a later layer puts a
+directory back; and one link crossed twice on different remainders is not a cycle. What the
+image's own resolver (`source.Files`) still does not do is follow a link at an intermediate
+component of a queried path -- a target whose parent directory an upper layer replaced with a
+symlink is read from the lower layer's copy; recorded in `docs/deferred-decisions.md`.*
 
 **Decision.** An image scan runs one more pass over its layers, over ten fixed locations
 together: the installed `package.json` files under the three global `node_modules` roots
