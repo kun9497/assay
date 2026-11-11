@@ -22,6 +22,15 @@ All notable changes to this project are documented here. The format follows
   Truthset report schema 3. (D161 revised, QA 2026-11-10)
 
 ### Fixed
+- CycloneDX, per the release check of main 5197df4: a release stated only for another
+  architecture no longer keys an install whose records state none (an aarch64-only Alpine 3.19
+  had keyed a separate x86_64 busybox: now 2 findings and 1 not evaluated, exit 2 under
+  `--fail-on-incomplete=any`, in either order); a bare listing beside arch-stating installs is
+  lent to every one it agrees with rather than joined to the first (the same Debian 11 SBOM had
+  read 45 findings or 25 with a contradiction by listing order; now 45 either way), takes the
+  joined install's purl so an `arch=`-scoped VEX statement reaches it (suppressed 1 in both
+  orders, was 0 or 1), and one that contradicts every install is its own marked listing. (D166
+  revised)
 - Image layers and npm roots, per the release check of main 5197df4: an explicit directory in
   an upper layer replaces a lower layer's symlink at that name, so the database behind the old
   link is no longer read (`lib/apk/db` restored as a directory had lost BusyBox's 7 findings, a
