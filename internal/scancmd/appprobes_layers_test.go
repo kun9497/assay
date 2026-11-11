@@ -47,6 +47,8 @@ type probeLayerEntry struct {
 	mode       int64
 	// hard makes link a hardlink to an archive path instead of a symlink.
 	hard bool
+	// dir makes an explicit directory entry (no body, no link).
+	dir bool
 }
 
 // writeLayeredProbeImage writes a docker-archive of several layers, lowest
@@ -59,6 +61,12 @@ func writeLayeredProbeImage(t *testing.T, path string, layers ...[]probeLayerEnt
 		var buf bytes.Buffer
 		tw := tar.NewWriter(&buf)
 		for _, e := range entries {
+			if e.dir {
+				if err := tw.WriteHeader(&tar.Header{Name: e.name + "/", Mode: 0o755, Typeflag: tar.TypeDir}); err != nil {
+					t.Fatal(err)
+				}
+				continue
+			}
 			if e.link != "" {
 				kind := byte(tar.TypeSymlink)
 				if e.hard {

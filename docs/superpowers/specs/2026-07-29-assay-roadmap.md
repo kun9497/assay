@@ -8346,6 +8346,36 @@ containerd's `applyNaive` does the same while its overlay converter `Mknod`s the
 device and fails on an existing file. No container built from such a layer has the file; a scan
 that reported it would report a package the image does not have.*
 
+*Revised again 2026-11-11 (release check of main 5197df4). Three layer rules and one root rule.
+(1) An explicit directory entry at an ancestor of a wanted path in an upper layer REPLACES a
+lower layer's symlink at that name -- the changeset rules keep an existing path under a new entry
+only when both are directories -- so the link is not followed: `lib/apk/db` a link to an old
+database below and a directory above had read the old database through the replaced link
+(BusyBox's 7 findings lost, CVE-2022-48174 Critical among them, in JSON and SARIF alike); the
+same shape on an npm package-directory link had revived a deleted package's 4 findings. A
+whiteout beside the directory reads the same; a directory over a directory still merges; an
+IMPLIED directory (entries beneath a name with no entry for the name) does not replace a link,
+since the untar creates the path through it; a hardlink keeps its layer's inode (D130).
+(2) A `..` that follows a component of a link target is applied only once that component is
+known (`source.lazyDotDot`): a symlink entry there re-roots the path (`/opt/route/../qa-db` with
+`opt/route -> /srv/nested/deep` reads `srv/nested/qa-db`, and climbs again when `deep` is itself
+a link), a file there ends it, and when no layer has an entry at it the `..` folds after the pass
+and the path is queued once more. `resolveLink` folds a `..` only against the link's own
+directory; the probe's `resolveChain` folds one only over a component it can vouch for (under a
+root, a root or root-ancestor name, a layout name) and otherwise leaves it for the resolver. This
+closes the `directory-to-manifest-relayout` shape (an npm manifest link through `/lib64/..`
+behind an unrecorded directory link) and its apk twin (`apkdb-dotdot`, 0 of 7 findings).
+(3) The pass records the strict ancestors of the npm roots as exact names, so a root whose
+parent is a link (`/usr/local/lib -> /opt/new-global`) is known to live elsewhere; such a root,
+and a root that is itself a link to a directory outside every root, is read where it physically
+is by ONE more pass over those directories (`readPhysicalRoots`) and re-homed under the root's
+own name -- the fixed path is what the scan reads, the physical directory is where it led (4
+findings, were npm `none`; a root linked outside had been listed unread, now read). A parent
+link to a missing directory leaves the root unread with the reason, so the strict gate exits 2.
+No wider search of the image: the extra pass covers only the directories the fixed paths lead
+to. (4) The same-layer whiteout order is held as above, and its semantics are now stated as a
+rule in `docs/DESIGN.md` ("Layer semantics"): a layer is read as the untars apply it.*
+
 **Decision.** An image scan runs one more pass over its layers, over ten fixed locations
 together: the installed `package.json` files under the three global `node_modules` roots
 (`usr/lib/node_modules`, `usr/local/lib/node_modules`, `opt/app-root/src/node_modules`)
