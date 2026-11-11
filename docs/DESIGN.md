@@ -1330,6 +1330,20 @@ disagree zero times.
       layer wins, a whiteout hides lower layers but not its own, an opaque marker replaces the
       directory. A symlink under it is counted rather than followed and joins the incomplete
       count
+- [x] **Layer semantics** (stated 2026-11-11, release check of main 5197df4): a layer is read
+      as the untars apply it — moby's `go-archive` and containerd's `pkg/archive`, re-read from
+      source that day — and where the OCI image-spec's prose and those implementations differ,
+      the implementations decide, because the scan describes the container that results, not
+      the archive. Concretely: across layers the newest entry wins and a whiteout hides lower
+      layers only (spec and untars agree); within ONE layer the LAST entry for a name wins, a
+      whiteout AFTER the file it names removes it (the untars `RemoveAll` the path on reaching
+      the marker; containerd's overlay converter fails the apply instead) while one BEFORE it is
+      overwritten (the spec's "whiteouts apply to lower layers only" reads the same layer as
+      keeping the file; `whiteout-before-current` 4 findings, `whiteout-after-current` 0, both
+      held by tests); a file or link at a name replaces what lower layers hold beneath it, and
+      an explicit directory entry replaces a lower symlink at the name while an implied one does
+      not; a hardlink keeps the inode of the layer that made it (D130). Verified by reading the
+      two implementations, not by running the two images under each runtime
 
 **⑫ RHEL-family inventory** ✅ — `ubi9`, `rocky:9`, `almalinux:9`, `fedora` and
 `amazonlinux:2023` are read, and **no verdict follows**. A RHEL image's packages are listed
