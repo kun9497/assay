@@ -530,7 +530,10 @@ func readCapture(dir, name, kind string, rec *runRecord) ([]byte, string) {
 		// run that could write neither record (held open) but could write
 		// its state leaves the earlier run's complete record saying ok over
 		// a state saying failed, and the record alone would replay the
-		// earlier bytes once the marker was removed (PR #289 review).
+		// earlier bytes once the marker was removed (PR #289 review). The
+		// result is compared as well as the sha for the message's sake: a
+		// failed or unsaved state carries no sha, so the sha alone would
+		// refuse it too (a mutation dropping the result check survives).
 		if fst, ferr := readState(dir, name, kind); ferr != nil {
 			return nil, fmt.Sprintf("read offline %s capture state: %v", kind, ferr)
 		} else if fst != nil && (fst.Result != captureOK || fst.SHA256 != st.SHA256) {
