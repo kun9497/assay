@@ -22,6 +22,17 @@ All notable changes to this project are documented here. The format follows
   Truthset report schema 3. (D161 revised, QA 2026-11-10)
 
 ### Fixed
+- Image layers and npm roots, per the release check of main 5197df4: an explicit directory in
+  an upper layer replaces a lower layer's symlink at that name, so the database behind the old
+  link is no longer read (`lib/apk/db` restored as a directory had lost BusyBox's 7 findings, a
+  Critical among them, in JSON and SARIF; the same shape had revived a deleted npm package); a
+  `..` after a link component is applied once the component is known (`/opt/route/../qa-db`
+  through `opt/route -> /srv/nested/deep` reads the right file, for an npm manifest and an apk
+  database alike); an npm root whose parent is a link, or that is itself a link outside every
+  root, is read where it physically is by one more pass and reported at the fixed path (4
+  findings, were npm `none` or unread); a parent link to nothing leaves the root unread with the
+  reason. The same-layer whiteout order is unchanged and its semantics are now a stated rule
+  (`docs/DESIGN.md`, "Layer semantics"). (D160 revised)
 - `scandiff`, per the release check of main 42b0c09: a grype document without a `matches` field
   (its `{"error": …}` diagnostic) is malformed, and with a nonzero exit the hard failure it is --
   101 agreements had collapsed to 0 and the gate passed; an assay document without `summary` is

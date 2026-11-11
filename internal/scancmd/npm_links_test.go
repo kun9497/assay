@@ -288,11 +288,14 @@ func TestRun_PR271_ReviewLayouts(t *testing.T) {
 		{"a dangling installed manifest still is", []probeLayerEntry{
 			{name: at, link: "/missing/package.json"},
 		}, "", "", report.ScopePartial, at, 2},
+		// Release check 2026-11-11: a root linked outside every root is read
+		// where it physically is (one more pass) and re-homed, no longer
+		// listed unread.
 		{"the npm root itself is a link", []probeLayerEntry{
 			{name: "usr/lib/node_modules", link: "/opt/npm-global"},
 			{name: "opt/npm-global/minimatch/package.json", body: vuln},
-		}, "", "", report.ScopePartial, "usr/lib/node_modules", 2},
-		{"a linked root over an older layer's directory", nil, "", "", report.ScopePartial, "usr/lib/node_modules", 2},
+		}, "3.0.4", at, report.ScopeRead, "", 1},
+		{"a linked root over an older layer's directory", nil, "", "", report.ScopeRead, "", 0},
 		{"a root linked to another root that was read", []probeLayerEntry{
 			{name: "usr/local/lib/node_modules", link: "../../lib/node_modules"},
 			{name: at, body: vuln},
