@@ -446,11 +446,6 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 		if underAny(n, linkedRoots) && !rehomed[n] {
 			continue
 		}
-		// A link under a moved root's physical directory is an install at
-		// the logical path (re-homed above), never at the physical one.
-		if underExtra(n) && !rehomed[n] {
-			continue
-		}
 		switch {
 		case isNpmRoot(n):
 			// A global node_modules root that is itself a link. Its target
@@ -475,10 +470,13 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 				img.NoteUnresolved(n, fmt.Sprintf("npm root is a link to %q, which holds nothing the probe read", l.Target))
 			}
 		case !underAny(n, npminstalled.Roots):
-			// Equivalent today, kept as the statement of scope: probeCandidate
-			// admits npm links only under the roots, and the pass's other
-			// links are the top-level layout names (bin, lib), which match no
-			// arm below. A mutation removing this case survives for that reason.
+			// The statement of scope, and load-bearing since the release
+			// check of main 5197df4: a link the second pass recorded under a
+			// moved root's PHYSICAL directory is re-homed above and is no
+			// install at its physical name (a package-directory link there
+			// would otherwise be read twice, once at each name). The pass's
+			// other links -- the layout names (bin, lib), the root
+			// ancestors -- match no arm below either.
 		case !l.Hard && isScopeDir(n):
 			// A linked scope holds any number of packages; reading them
 			// means walking the link's target, which a probe does not do
