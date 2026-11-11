@@ -24,7 +24,24 @@ func qa1111DB(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, a := range []advisory.Advisory{
+	for _, a := range qa1111Advisories() {
+		if err := w.Put(a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.SetMeta(store.Meta{Providers: map[string]store.Provenance{"osv": {Ecosystems: []string{"Alpine:v3.19", "Alpine:v3.20", "Debian:11", "npm"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
+
+// qa1111Advisories is qa1111DB's records, shared with the release-check
+// tests (rc1111DB).
+func qa1111Advisories() []advisory.Advisory {
+	return []advisory.Advisory{
 		{ID: "DEBIAN-CVE-2026-4046", Kind: advisory.KindVulnerability, Database: "DEBIAN", Upstream: []string{"CVE-2026-4046"},
 			Affected: []advisory.Affected{{Ecosystem: "Debian:11", Name: "glibc",
 				Ranges: []advisory.Range{{Type: advisory.RangeEcosystem, Events: []advisory.Event{{Introduced: "0"}, {Fixed: "2.31-13+deb11u14"}}}}}}},
@@ -37,18 +54,7 @@ func qa1111DB(t *testing.T) string {
 		{ID: "DEBIAN-CVE-2099-0001", Kind: advisory.KindVulnerability, Database: "DEBIAN", Upstream: []string{"CVE-2099-0001"},
 			Affected: []advisory.Affected{{Ecosystem: "Debian:11", Name: "busybox",
 				Ranges: []advisory.Range{{Type: advisory.RangeEcosystem, Events: []advisory.Event{{Introduced: "0"}, {Fixed: "1:9.9"}}}}}}},
-	} {
-		if err := w.Put(a); err != nil {
-			t.Fatal(err)
-		}
 	}
-	if err := w.SetMeta(store.Meta{Providers: map[string]store.Provenance{"osv": {Ecosystems: []string{"Alpine:v3.19", "Alpine:v3.20", "Debian:11", "npm"}}}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return db
 }
 
 type qa1111Scan struct {
