@@ -90,18 +90,28 @@ func TestRun_RC4_VEXScopedToAnotherReleaseDoesNotReachTheInstall(t *testing.T) {
 	only320 := vex("alpine320.vex.json", "pkg:apk/alpine/busybox@1.36.1-r20?distro=alpine-3.20")
 	only319 := vex("alpine319.vex.json", "pkg:apk/alpine/busybox@1.36.1-r20?distro=alpine-3.19")
 	onlyArch := vex("arch.vex.json", "pkg:apk/alpine/busybox@1.36.1-r20?arch=x86_64")
+	const archOnly = `{"type":"library","name":"busybox","version":"1.36.1-r20","purl":"pkg:apk/alpine/busybox@1.36.1-r20?arch=x86_64","properties":[{"name":"syft:location:0:path","value":"/image/x86/lib/apk/db/installed"}]}`
 	for _, tc := range []struct {
 		name         string
 		top, subject []string
+		// suppressed by the 3.20, the 3.19 and the arch statement
+		want320, want319, wantArch int
 	}{
-		{"typed top, 3.20 listing under the subject", []string{rc4OS319, rc2X86Keyed}, []string{rc4Bare320}},
-		{"3.20 listing top, typed under the subject", []string{rc4OS319, rc4Bare320}, []string{rc2X86Keyed}},
-		{"no second listing (control)", []string{rc4OS319, rc2X86Keyed}, nil},
+		{"typed top, 3.20 listing under the subject", []string{rc4OS319, rc2X86Keyed}, []string{rc4Bare320}, 0, 1, 1},
+		{"3.20 listing top, typed under the subject", []string{rc4OS319, rc4Bare320}, []string{rc2X86Keyed}, 0, 1, 1},
+		{"no second listing (control)", []string{rc4OS319, rc2X86Keyed}, nil, 0, 1, 1},
+		// The install states its arch and no distro; the other listing's
+		// 3.20 is not taken for it. The 3.19 statement reaches it through
+		// the release it was evaluated under.
+		{"arch-only install, 3.20 listing under the subject", []string{rc4OS319, archOnly}, []string{rc4Bare320}, 0, 1, 1},
+		// One listing, spelling 3.20 under a 3.19 document: judged on 3.19,
+		// and the statements are held to that release, not the spelling.
+		{"a single listing spelling 3.20", []string{rc4OS319, rc4Bare320}, nil, 0, 1, 0},
 	} {
 		for _, v := range []struct {
 			path       string
 			suppressed int
-		}{{only320, 0}, {only319, 1}, {onlyArch, 1}} {
+		}{{only320, tc.want320}, {only319, tc.want319}, {onlyArch, tc.wantArch}} {
 			t.Run(tc.name+" "+filepath.Base(v.path), func(t *testing.T) {
 				r := qa1111Run(t, db, rc2Doc(tc.top, tc.subject), Options{FailOn: &bandLow, FailOnUnknown: true, VEXFiles: []string{v.path}})
 				wantCode := 1
@@ -112,8 +122,8 @@ func TestRun_RC4_VEXScopedToAnotherReleaseDoesNotReachTheInstall(t *testing.T) {
 					t.Errorf("suppressed=%d findings=%v exit=%d components=%d incomplete=%d; want %d, %d finding(s), %d, 1, 0", r.doc.Summary.Suppressed, r.findings, r.code, r.doc.Summary.Components, r.doc.Summary.TargetIncomplete, v.suppressed, 1-v.suppressed, wantCode)
 				}
 				for _, f := range r.doc.Findings {
-					if p := f.Package.PURL; strings.Contains(p, "alpine-3.20") || f.Package.Ecosystem != "Alpine:v3.19" {
-						t.Errorf("finding purl %q ecosystem %q: the purl must spell the evaluated release", p, f.Package.Ecosystem)
+					if p := f.Package.PURL; (tc.subject != nil && strings.Contains(p, "alpine-3.20")) || f.Package.Ecosystem != "Alpine:v3.19" {
+						t.Errorf("finding purl %q ecosystem %q: a joined purl must spell the evaluated release", p, f.Package.Ecosystem)
 					}
 				}
 			})
