@@ -189,3 +189,99 @@ func TestRun_RC2_TrivyDiagnosticJSONIsNotAMeasurement(t *testing.T) {
 		})
 	}
 }
+
+// Release check 2026-11-11 (main b732cac): the state file, not the files'
+// times, says what a replay may trust.
+func TestRun_RC3_CaptureStateIsTheReplaysAuthority(t *testing.T) {
+	target := Target{Name: "t", Ref: "ref-t"}
+	targetsPath := writeTargetsFile(t, []Target{target})
+	dir := t.TempDir()
+	live := func(grype stub) (int, string) {
+		exec := newFakeExec(t, map[string]stub{"ref-t": {out: assayDoc(0, nil), code: 0}}, map[string]stub{"ref-t": grype})
+		var out, errOut bytes.Buffer
+		code := run([]string{"-targets", targetsPath, "-assay", "a", "-grype", "g", "-capture", dir}, &out, &errOut, exec)
+		return code, errOut.String()
+	}
+	offline := func() (int, string) {
+		var out, errOut bytes.Buffer
+		code := run([]string{"-targets", targetsPath, "-offline", dir}, &out, &errOut, noExec(t))
+		return code, errOut.String()
+	}
+	if code, stderr := live(stub{out: grypeDoc(nil), code: 0}); code != exitOK {
+		t.Fatalf("initial: exit=%d stderr=%q", code, stderr)
+	}
+	// The bytes under the good name are not the ones the state describes:
+	// a capture swapped in from another run.
+	good := filepath.Join(dir, "t.grype.json")
+	if err := os.WriteFile(good, []byte(`{"matches":[{"vulnerability":{"id":"CVE-0000-0001"},"artifact":{"name":"x","version":"1","type":"npm"}}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, stderr := offline(); code != exitError || !strings.Contains(stderr, "not the one its state describes") {
+		t.Errorf("swapped bytes: exit=%d stderr=%q; want 2, the sha mismatch named", code, stderr)
+	}
+	// A success whose capture cannot be written (the old file held open on
+	// Windows): the state says unsaved and the earlier success's bytes do
+	// not stand in for this run's, locked or not.
+	prev := writeCaptureFile
+	writeCaptureFile = func(path string, data []byte) error {
+		if filepath.Base(path) == "t.grype.json" {
+			return os.ErrPermission
+		}
+		return os.WriteFile(path, data, 0o644)
+	}
+	code, stderr := live(stub{out: grypeDoc(nil), code: 0})
+	writeCaptureFile = prev
+	if code != exitOK || !strings.Contains(stderr, "warning: write capture") {
+		t.Fatalf("write denied: exit=%d stderr=%q; want 0 with the write warning", code, stderr)
+	}
+	if code, stderr := offline(); code != exitError || !strings.Contains(stderr, "the last run unsaved") {
+		t.Errorf("replay after an unsaved success: exit=%d stderr=%q; want 2, unsaved named", code, stderr)
+	}
+	if code, stderr := live(stub{out: grypeDoc(nil), code: 0}); code != exitOK {
+		t.Fatalf("recovery: exit=%d stderr=%q", code, stderr)
+	}
+	if code, stderr := offline(); code != exitOK {
+		t.Errorf("replay after recovery: exit=%d stderr=%q; want 0", code, stderr)
+	}
+}
+
+// trivy's diagnostic may carry `"SchemaVersion": null`: not a report, so a
+// committed floor is an ERROR and an informational block a failed
+// measurement, as with no SchemaVersion at all.
+func TestRun_RC3_TrivyNullSchemaVersionIsNotAReport(t *testing.T) {
+	diag := stub{out: []byte(`{"SchemaVersion":null,"error":"scan failed"}`), code: 2}
+	for _, tc := range []struct {
+		name   string
+		floors *TrivyFloors
+		code   int
+		want   string
+	}{
+		{"committed floor", &TrivyFloors{MinAgree: 1, MinFindings: 1, MaxFindings: 100}, exitError, "trivy hard failure (exit 2)"},
+		{"informational", &TrivyFloors{}, exitOK, "measurement failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target := Target{Name: "t", Ref: "ref-t", Trivy: tc.floors}
+			targetsPath := writeTargetsFile(t, []Target{target})
+			exec := newFakeExecWithTrivy(t, map[string]stub{"ref-t": {out: assayDoc(0, nil), code: 0}}, map[string]stub{"ref-t": {out: grypeDoc(nil), code: 0}}, map[string]stub{"ref-t": diag})
+			var out, errOut bytes.Buffer
+			code := run([]string{"-targets", targetsPath, "-assay", "a", "-grype", "g", "-trivy", "tv", "-capture", t.TempDir()}, &out, &errOut, exec)
+			if code != tc.code || !strings.Contains(errOut.String(), tc.want) || strings.Contains(errOut.String(), "breach:") || strings.Contains(errOut.String(), "paste into") {
+				t.Errorf("live: exit=%d stderr=%q; want %d, %q", code, errOut.String(), tc.code, tc.want)
+			}
+			// The same object under the good name, no state (an older
+			// tool's filing): malformed by shape.
+			dir := t.TempDir()
+			for n, b := range map[string][]byte{"t.assay.json": assayDoc(0, nil), "t.grype.json": grypeDoc(nil), "t.trivy.json": diag.out} {
+				if err := os.WriteFile(filepath.Join(dir, n), b, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			out.Reset()
+			errOut.Reset()
+			code = run([]string{"-targets", targetsPath, "-offline", dir}, &out, &errOut, noExec(t))
+			if code != tc.code || !strings.Contains(errOut.String(), `"SchemaVersion" is not a number`) || strings.Contains(errOut.String(), "paste into") {
+				t.Errorf("offline: exit=%d stderr=%q; want %d and the shape named", code, errOut.String(), tc.code)
+			}
+		})
+	}
+}

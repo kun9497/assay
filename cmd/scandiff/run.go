@@ -513,6 +513,11 @@ func readCapture(dir, name, kind string) ([]byte, string) {
 	return raw, ""
 }
 
+// writeCaptureFile writes a success capture; a variable so a test can make
+// the write fail the way a reader holding the old file open on Windows does
+// (release check of main b732cac), without a platform-specific lock.
+var writeCaptureFile = func(path string, data []byte) error { return os.WriteFile(path, data, 0o644) }
+
 // captureState is what the last live run left of one tool's capture, in
 // <name>.<tool>.state.json beside it. It is the replay's authority, not the
 // files' modification times: a capture that moves through a ZIP keeps its
@@ -808,7 +813,7 @@ func writeCapture(stderr io.Writer, dir, name, kind string, data []byte, ok bool
 		writeState(stderr, dir, name, kind, captureState{Result: captureFailed, Reason: "the scan failed; its output is in " + filepath.Base(failed)})
 		return
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := writeCaptureFile(path, data); err != nil {
 		fmt.Fprintf(stderr, "warning: write capture %s: %v\n", path, err)
 		writeState(stderr, dir, name, kind, captureState{Result: captureUnsaved, Reason: "the scan succeeded but its capture could not be written: " + err.Error()})
 		return
