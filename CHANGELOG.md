@@ -22,6 +22,14 @@ All notable changes to this project are documented here. The format follows
   Truthset report schema 3. (D161 revised, QA 2026-11-10)
 
 ### Fixed
+- Image paths and npm roots, per the release check of main 60c512c: a `..` inside a link
+  target folds one component at a time, each decided by the newest layer that speaks of it
+  (`/data/marker/../route/../packages` with `route` a symlink, or deleted or replaced by a file
+  above a lower directory, now reads the database the link reaches: BusyBox's 7 findings and the
+  Critical in SARIF, were 0); an npm root whose external target is itself re-pointed above reads
+  the install it leads to (0 → 4 findings) and one whose target a file replaced reads nothing and
+  is unread with the reason (was 4 findings for a hidden copy); every name of an install under a
+  re-pointed root carries its layer. (D160 revised)
 - Image npm roots and paths, per the release check of main b732cac: a physical root is resolved
   through the links at its own ancestors (`/opt/active -> /opt/runtime` above a root linked to
   `/opt/active/node_modules` had read the stale copy: 0 → 4 findings, and 0 when the stale copy

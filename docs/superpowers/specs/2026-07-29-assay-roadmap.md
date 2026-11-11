@@ -8403,6 +8403,30 @@ an `absent` no layer has); a relative target's leading `..` still climbs the lin
 directory. (4) The one-pass re-homing of a root alias now records which physical file was
 re-homed first (`homes`), the basis of the alias rule in (2).*
 
+*Revised a fourth time 2026-11-11 (release check of main 60c512c). Three corrections to the
+revision above. (1) A `..` inside a link target folds ONE component at a time, and the layers'
+newest word on that component decides it: the resolver records, per component a `..` follows,
+what the newest layer that speaks of it says -- a directory (an explicit entry or entries beneath
+the name), or not one (a file, a link, a whiteout of it or of an ancestor, an opaque marker in
+its parent) -- folds the leading `..`s over plain directories left to right, and stops at the
+first component that is not one, which the next pass looks at as it looks at any ancestor: a
+symlink there is followed, a file or a deletion ends the path. Folding every `..` at once over
+directories seen in ANY layer had skipped the look at the second component:
+`/data/marker/../route/../packages` with `route` a symlink read nothing, and with `route` deleted
+or replaced by a file in an upper layer folded over the lower layer's directory and read a
+database the link no longer reaches -- BusyBox's 7 findings, one Critical, lost each way, and
+missing from SARIF. A fold is still no link hop: twenty-one folds between twenty-one links are
+twenty-one links. (2) The physical directory an npm root resolves to is an exact name of the
+second pass, not only its ancestors: a link an upper layer put at that name is the next hop
+(`/usr/local/lib/node_modules -> /opt/current`, `/opt/current -> /opt/release` over the lower
+layer's directory of that name), and a file there replaced the lower layer's tree -- the stale
+copy under the old name had been read in both shapes, 0 findings for the install the image has
+and 4 for one it does not; a root whose target holds nothing readable is unread with the reason,
+so the strict gate exits 2. (3) Every name an install is given under a re-pointed root is located
+in its own layer, the latest of the root link's chain and the file's: the second logical name
+had carried none, and the OS package that owned the path before the root was re-pointed above
+was reported as its owner.*
+
 **Decision.** An image scan runs one more pass over its layers, over ten fixed locations
 together: the installed `package.json` files under the three global `node_modules` roots
 (`usr/lib/node_modules`, `usr/local/lib/node_modules`, `opt/app-root/src/node_modules`)
