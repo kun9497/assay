@@ -8376,6 +8376,33 @@ No wider search of the image: the extra pass covers only the directories the fix
 to. (4) The same-layer whiteout order is held as above, and its semantics are now stated as a
 rule in `docs/DESIGN.md` ("Layer semantics"): a layer is read as the untars apply it.*
 
+*Revised a third time 2026-11-11 (release check of main b732cac). Four corrections to the root
+and `..` rules above. (1) A physical root is resolved through the links at its OWN ancestors too:
+each pass records them as exact names (so a link there is seen and the tree under the old name
+shadowed as replaced) and the roots are resolved again until the directories stand still, at most
+four passes -- `/opt/active -> /opt/runtime` above a root linked to `/opt/active/node_modules` had
+never been looked at, and the lower layer's stale copy under the old name was read as the install
+(0 findings; now 4, and 0 when the stale copy is the vulnerable one). (2) A root linked to a
+directory that CONTAINS it (`/usr/local/lib/node_modules -> /usr/local`) is read where it is: the
+cleanup of physical names leaves logical ones alone (it had deleted the re-homed install), the
+root's own link and the root ancestors under the physical directory are not installs (walking
+them had varied one image's incomplete count between 1 and 8 by map order; links are now walked
+in name order), and a physical file that is an install under another root is that one package,
+this root's name an alias. Two roots to one physical install are likewise one package with both
+names (4 findings had counted as 8). A root whose own or whose parent's chain cycles is unread
+with the reason, so the strict gate exits 2 (a parent cycle had read as npm `none`, exit 0).
+(3) A `..` inside a link target folds only over a component the layers show as a directory --
+an explicit entry or an entry beneath the name -- and every such `..` folds at once, not as a
+link hop: `/data/absent/../qa-db` with no `absent` anywhere leads nowhere, as the kernel's ENOENT
+says, and the apk scan falls back to the next database path (BusyBox's 7 findings, were 0); a
+regular file or a whiteout in its place reads the same; a present directory, explicit or
+implied, reads the preferred one. Forty-four `a/..` over one real directory and one symlink is
+one link, not forty-five (the 40th had failed the scan as too many links). The probe leaves
+every inner `..` to the resolver for the same reason (`managed/absent/../x` had read x through
+an `absent` no layer has); a relative target's leading `..` still climbs the link's own
+directory. (4) The one-pass re-homing of a root alias now records which physical file was
+re-homed first (`homes`), the basis of the alias rule in (2).*
+
 **Decision.** An image scan runs one more pass over its layers, over ten fixed locations
 together: the installed `package.json` files under the three global `node_modules` roots
 (`usr/lib/node_modules`, `usr/local/lib/node_modules`, `opt/app-root/src/node_modules`)

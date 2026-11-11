@@ -1343,7 +1343,10 @@ disagree zero times.
       held by tests); a file or link at a name replaces what lower layers hold beneath it, and
       an explicit directory entry replaces a lower symlink at the name while an implied one does
       not; a hardlink keeps the inode of the layer that made it (D130). Verified by reading the
-      two implementations, not by running the two images under each runtime
+      two implementations, not by running the two images under each runtime. A `..` inside a link
+      target applies after the component before it is looked at: a symlink there is followed
+      first, a directory the layers show (explicit or implied) is climbed, and a component no
+      layer shows leads nowhere, as the kernel's ENOENT does (release check of main b732cac)
 
 **⑫ RHEL-family inventory** ✅ — `ubi9`, `rocky:9`, `almalinux:9`, `fedora` and
 `amazonlinux:2023` are read, and **no verdict follows**. A RHEL image's packages are listed

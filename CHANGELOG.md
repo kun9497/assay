@@ -22,6 +22,15 @@ All notable changes to this project are documented here. The format follows
   Truthset report schema 3. (D161 revised, QA 2026-11-10)
 
 ### Fixed
+- Image npm roots and paths, per the release check of main b732cac: a physical root is resolved
+  through the links at its own ancestors (`/opt/active -> /opt/runtime` above a root linked to
+  `/opt/active/node_modules` had read the stale copy: 0 → 4 findings, and 0 when the stale copy
+  is the vulnerable one); a root linked to a directory containing it is read where it is, every
+  run alike (was 0 findings, or 1..8 incomplete by run); two roots to one install are one package
+  with both names (was 8 findings); a cyclic root parent is unread, exit 2 under the strict gate;
+  a `..` inside a link target folds only over a directory the layers show (`/data/absent/../qa-db`
+  with no `absent` now falls back to the next apk database: 0 → 7 findings) and never counts as a
+  link hop (44 `a/..` over one symlink no longer fail the scan). (D160 revised)
 - `scandiff`, per the release check of main 5197df4: a grype capture whose `matches` is not an
   array (`null`, in grype's diagnostic object) is malformed, live and offline; trivy's diagnostic
   JSON is a hard failure on a committed floor (ERROR, was a BREACH measured as 0) and a failed
