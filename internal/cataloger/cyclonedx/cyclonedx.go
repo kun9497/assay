@@ -149,6 +149,24 @@ func catalogSubject(subject component, ctx osContext, target *pkgmeta.Target, st
 	catalogOne(subject, ctx, &dry, &dryStats)
 	catalog(subject.Components, childContext(subject, ctx), &dry, &dryStats)
 	keyed := keyedReleases(dry.Packages)
+	// The key a merge adopts comes from the subject tree alone -- the
+	// listings that merge into the base -- never from another top-level
+	// listing, which the top-vs-top rule keeps a separate package: a keyed
+	// top-level twin must not key an unkeyed one through a third, unkeyed
+	// listing under the subject (PR #277 review).
+	for id, sk := range keyedReleases(dry.Packages[base:]) {
+		r := keyed[id]
+		if sk.n != 1 {
+			r.key = ""
+		}
+		keyed[id] = r
+	}
+	for id, r := range keyed {
+		if _, inSubject := keyedReleases(dry.Packages[base:])[id]; !inSubject {
+			r.key = ""
+			keyed[id] = r
+		}
+	}
 	// The subject is keyed in the document's top-level context, as its
 	// top-level twin would be; its children in theirs (contextFor).
 	scratchTarget := pkgmeta.Target{}
@@ -249,12 +267,19 @@ func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package, keyed map[string]
 	// release's findings -- the other release's when the document listed
 	// them the other way round (PR #270 review). It stays its own package,
 	// unkeyed and reported not evaluated.
-	if keyed[identity(p)].n > 1 {
+	if ambiguous(p, keyed) {
 		return -1
 	}
 	match := -1
 	for i, q := range pkgs {
 		if q.Type == p.Type && q.Name == p.Name && q.Version == p.Version && (q.Ecosystem == "" || p.Ecosystem == "") && sameArch(q, p) {
+			if ambiguous(q, keyed) {
+				// The kept listing states no architecture and the document
+				// keys its identity to two releases through two
+				// architectures: it belongs to neither provably (PR #277
+				// review -- the PR #270 mirror case, arch-shaped).
+				return -1
+			}
 			if match >= 0 {
 				// Two releases are refused above (keyed); two top-level
 				// listings keyed to ONE release are judged alike whichever
@@ -265,6 +290,14 @@ func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package, keyed map[string]
 		}
 	}
 	return match
+}
+
+// ambiguous reports whether the document keys p's identity to more than
+// one release. A listing that states an architecture meets only the twins
+// of that architecture; one that states none meets them all, through the
+// arch-less identity keyedReleases also counts.
+func ambiguous(p pkgmeta.Package, keyed map[string]releases) bool {
+	return keyed[identity(p)].n > 1
 }
 
 // identity is a package's type, name, version and -- when the purl states

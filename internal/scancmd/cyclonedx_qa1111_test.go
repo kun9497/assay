@@ -120,6 +120,26 @@ func TestRun_QA1111_SourceVersionsAreComparedUnderTheKeyWhicheverOrder(t *testin
 	}
 }
 
+// PR #277 review: the key a merge adopts comes from the subject tree, never
+// from a second top-level listing. Two top-level busybox listings, one
+// unkeyed (A) and one keyed to Alpine 3.19 (B), are two packages; an
+// unkeyed third under the subject (C) merges into A and must not bring B's
+// key with it: A stays not evaluated, B is the one finding.
+func TestRun_QA1111_ASiblingsKeyIsNotAdopted(t *testing.T) {
+	db := qa1111DB(t)
+	const (
+		a = `{"type":"library","name":"busybox","version":"1.36.1-r20","purl":"pkg:apk/alpine/busybox@1.36.1-r20","properties":[{"name":"syft:location:0:path","value":"/top/a"}]}`
+		b = `{"type":"library","name":"busybox","version":"1.36.1-r20","purl":"pkg:apk/alpine/busybox@1.36.1-r20?distro=alpine-3.19","properties":[{"name":"syft:location:0:path","value":"/top/b"}]}`
+		c = `{"type":"library","name":"busybox","version":"1.36.1-r20","purl":"pkg:apk/alpine/busybox@1.36.1-r20","properties":[{"name":"syft:location:0:path","value":"/subject/c"}]}`
+	)
+	for _, subject := range []string{"", c} {
+		r := qa1111Run(t, db, qa1111Start+`"components":[`+a+`,`+b+`],"metadata":{"component":{"type":"container","name":"demo","components":[`+subject+`]}}}`, Options{FailOnIncomplete: true})
+		if r.code != 2 || r.doc.Summary.NotEvaluated != 1 || len(r.findings) != 1 || r.findings["ALPINE319-CVE-2024-58251"] != "Alpine:v3.19 /top/b" {
+			t.Errorf("subject=%q: exit=%d notEvaluated=%d findings=%v; want 2, 1 and the one finding on /top/b", subject, r.code, r.doc.Summary.NotEvaluated, r.findings)
+		}
+	}
+}
+
 // Item 3: two listings of one busybox version stating different
 // architectures are two installs. The aarch64 one, unkeyed under a subject
 // declaring two Alpine releases, stays its own package (not evaluated, exit
@@ -150,6 +170,17 @@ func TestRun_QA1111_DifferentArchitecturesAreNotOneInstall(t *testing.T) {
 	r = qa1111Run(t, db, qa1111Start+`"components":[`+x86+`,`+arm+`],"metadata":{"component":{"type":"container","name":"demo","components":[`+os319+`,`+os320+`,`+child("aarch64")+`]}}}`, strict)
 	if r.code != 0 || r.doc.Summary.Components != 2 || r.doc.Summary.NotEvaluated != 0 || r.findings["ALPINE320-CVE-2025-46394"] != "Alpine:v3.20 /child/aarch64/lib/apk/db/installed,/image/arm/lib/apk/db/installed" || r.findings["ALPINE319-CVE-2024-58251"] != "Alpine:v3.19 /image/x86/lib/apk/db/installed" {
 		t.Errorf("two arches, two releases: exit=%d components=%d notEvaluated=%d findings=%v; want the aarch64 child on the aarch64 twin alone", r.code, r.doc.Summary.Components, r.doc.Summary.NotEvaluated, r.findings)
+	}
+	// The mirror of that (PR #277 review): a bare listing at the top meeting
+	// keyed twins of two architectures AND two releases under the subject
+	// belongs to neither, in either order.
+	bare := `{"type":"library","name":"busybox","version":"1.36.1-r20","purl":"pkg:apk/alpine/busybox@1.36.1-r20","properties":[{"name":"syft:location:0:path","value":"/top/bare/lib/apk/db/installed"}]}`
+	for _, order := range [][2]string{{x86, arm}, {arm, x86}} {
+		r = qa1111Run(t, db, qa1111Start+`"components":[`+bare+`],"metadata":{"component":{"type":"container","name":"demo","components":[`+order[0]+`,`+order[1]+`]}}}`, strict)
+		onFinding := strings.Contains(r.findings["ALPINE319-CVE-2024-58251"], "/top/bare") || strings.Contains(r.findings["ALPINE320-CVE-2025-46394"], "/top/bare")
+		if r.code != 2 || r.doc.Summary.Components != 3 || r.doc.Summary.NotEvaluated != 1 || onFinding {
+			t.Errorf("bare top, two arches at two releases, order %v: exit=%d components=%d notEvaluated=%d findings=%v; want 2, 3, 1 and /top/bare on no finding", order, r.code, r.doc.Summary.Components, r.doc.Summary.NotEvaluated, r.findings)
+		}
 	}
 	r = qa1111Run(t, db, doc("x86_64"), strict)
 	if r.code != 0 || r.doc.Summary.Components != 1 || r.doc.Summary.NotEvaluated != 0 || r.findings["ALPINE319-CVE-2024-58251"] != "Alpine:v3.19 /child/x86_64/lib/apk/db/installed,/image/x86/lib/apk/db/installed" {

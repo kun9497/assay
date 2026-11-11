@@ -8614,7 +8614,11 @@ libc6 listings, one keyed, read 25 findings in one order and 0 (exit 0 under `--
 the other. And the architecture a purl states is part of the dedupe identity: two listings of one
 name and version at `x86_64` and `aarch64` are two installs, the second its own not-evaluated
 package rather than a path on the first's findings; a listing stating no architecture merges with
-either.
+either -- unless the document keys its arch-less identity to two releases through two
+architectures, which is the mirror case again and is refused. The key a merge adopts comes from the
+subject tree alone, never from a second top-level listing: two top-level listings stay two
+packages, and an unkeyed third under the subject must not carry one's key to the other (PR #277
+review).
 
 **Gives up.** Two listings of one package inside `components`, or both inside the subject tree,
 are not merged at all (as before) and are each judged on what they state. A contradiction makes the
