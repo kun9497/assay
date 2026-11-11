@@ -8560,6 +8560,14 @@ counts the releases an identity is keyed to across the whole document (a dry run
 tree), not only the top level. And an OS parent that resolves to no key (no version, or `linux`)
 no longer overrides what its children inherit or switches off their purl qualifier.
 
+**Revised 2026-11-11 (QA).** An OS component naming a known distro with no release at all declares
+the family and nothing more: it keys nothing itself, it refuses an inherited context of another
+family (Alpine with no version as the subject under Debian 11 at the top read its qualified busybox
+as Debian, 51 findings), and it leaves the purl's `distro` qualifier to identify the package -- as a
+sibling of busybox it had switched the qualifier off (not evaluated). An ID this build routes nothing
+for (`linux`) declares nothing. A release no key is built from (`edge`) is the document's identity as
+before: the qualifier may not contradict it.
+
 **Gives up.** Two OS components that describe the same distro and release count as one; two that
 differ only in a field other than ID and VERSION_ID are not told apart. A document that declares
 its OS only on some unrelated branch gives no context to packages elsewhere.
@@ -8598,6 +8606,19 @@ ecosystem's own comparer (D9), not as strings: Debian's `2.31-13+deb11u13` and
 `0:2.31-13+deb11u13` are one version, and listing both had left libc6 unjudged (0 findings, exit 2)
 where either alone gives 25. A real epoch difference (`1:`) is still a contradiction; a key with no
 comparer, or a version the comparer cannot parse, falls back to the strings.
+
+**Revised 2026-11-11 (QA).** The key the document gives an identity -- known from the dry run over
+the whole document -- is adopted by both listings BEFORE their source versions are compared, so
+Debian's `0:` spelling is one version whichever listing carries the `distro` qualifier: three
+libc6 listings, one keyed, read 25 findings in one order and 0 (exit 0 under `--fail-on low`) in
+the other. And the architecture a purl states is part of the dedupe identity: two listings of one
+name and version at `x86_64` and `aarch64` are two installs, the second its own not-evaluated
+package rather than a path on the first's findings; a listing stating no architecture merges with
+either -- unless the document keys its arch-less identity to two releases through two
+architectures, which is the mirror case again and is refused. The key a merge adopts comes from the
+subject tree alone, never from a second top-level listing: two top-level listings stay two
+packages, and an unkeyed third under the subject must not carry one's key to the other (PR #277
+review).
 
 **Gives up.** Two listings of one package inside `components`, or both inside the subject tree,
 are not merged at all (as before) and are each judged on what they state. A contradiction makes the

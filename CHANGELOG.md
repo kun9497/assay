@@ -7,14 +7,6 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-### Fixed
-- `truthset -offline`: the run's database is the first trusted capture's, a locally built database
-  (no digest) included, so a local-database capture and a published-database capture are the same
-  ERROR in either order instead of passing as the published database's when the local one sorted
-  first. `scandiff -offline`: a capture whose recorded target is not the floors file's pinned ref
-  is an ERROR with the reason (a BCI capture had passed under a target re-pinned to Alpine).
-  (D161, D167 revised; QA 2026-11-11)
-
 ### Added
 - The scanner differential floors each probed ecosystem's application packages:
   `minApplicationPackages` (`npm`, `Go`) on `coverage[].packages`, judged by the weekly run and
@@ -30,6 +22,19 @@ All notable changes to this project are documented here. The format follows
   Truthset report schema 3. (D161 revised, QA 2026-11-10)
 
 ### Fixed
+- CycloneDX: three listings of one package, one keyed to Debian 11 and two stating the equivalent
+  source version as `0:…` and `…`, are judged in either order (25 findings; one order had read 0,
+  exit 0 under `--fail-on low`): the identity's key is adopted before the versions are compared.
+  Two listings stating different architectures (`arch=x86_64`, `arch=aarch64`) are two installs,
+  not one. An OS declared with no release at all (Alpine with no version, `linux`) no longer keys
+  its packages to a Debian declared at the top (51 false findings) nor switches off the purl's
+  `distro` qualifier beside it. (D165, D166 revised; QA 2026-11-11)
+- `truthset -offline`: the run's database is the first trusted capture's, a locally built database
+  (no digest) included, so a local-database capture and a published-database capture are the same
+  ERROR in either order instead of passing as the published database's when the local one sorted
+  first. `scandiff -offline`: a capture whose recorded target is not the floors file's pinned ref
+  is an ERROR with the reason (a BCI capture had passed under a target re-pinned to Alpine).
+  (D161, D167 revised; QA 2026-11-11)
 - `truthset -offline` sets an unproven capture aside before the run-wide database check: a stale
   capture sorting first no longer fixes the run's database and fails every proven case with a
   digest mismatch (exit 2). (D161 revised; PR #268 review, round 2)
