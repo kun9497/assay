@@ -8798,6 +8798,23 @@ image had passed under an Alpine pin. The policy for a capture that records neit
 digest-pinned ref it is accepted with a warning saying so (nothing in it contradicts the ref), and
 under a ref with no digest silently, since nothing could be checked.
 
+**Revised again 2026-11-11 (release check of main 5197df4).** Four edges of the above. A grype
+report's `matches` must be a JSON array: grype's diagnostic object can carry `"matches": null`,
+which had decoded to zero matches and passed the gate live and offline (`[]`, what every real
+capture with nothing to report carries, stays a valid empty result). trivy's diagnostic object is
+judged by shape too (`SchemaVersion`, which every trivy report carries): with a nonzero exit it is
+the hard failure -- on a committed floor an ERROR, exit 2, where it had been measured as 0 findings
+and reported as a BREACH; on an informational block a warning that the measurement failed, with no
+numbers to paste, where it had printed 0 as the measurement -- live and offline alike. A failed
+run's capture marker (`<name>.<tool>.failed.json`) outlives a success capture the run could not
+remove -- on Windows a reader holding the file open keeps it in place -- and a replay that finds
+the marker no older than the success capture fails as that run did; the next successful run
+removes the marker, so each replay reflects the last run (the sequence held by a test: success,
+failure under a lock, replay, unlock, replay, recovery, replay). And a capture's identity is read
+from the report's top-level `image` record as well as `provenance.target.image`: a capture
+stripped of its provenance had passed under another image's pin although its `image.indexDigest`
+named the BCI image.
+
 **Gives up.** A partial loss above the floor (ubi8n18 down to 118 npm packages) is not caught by
 this floor; the finding floors and D117's ceiling see some of it. A floor is re-cut by hand when a
 target's digest moves.

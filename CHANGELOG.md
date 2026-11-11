@@ -22,6 +22,13 @@ All notable changes to this project are documented here. The format follows
   Truthset report schema 3. (D161 revised, QA 2026-11-10)
 
 ### Fixed
+- `scandiff`, per the release check of main 5197df4: a grype capture whose `matches` is not an
+  array (`null`, in grype's diagnostic object) is malformed, live and offline; trivy's diagnostic
+  JSON is a hard failure on a committed floor (ERROR, was a BREACH measured as 0) and a failed
+  measurement on an informational block (a warning, no numbers to paste); a failed run's
+  `.failed.json` marker outlives a locked success capture and the replay fails as the run did until
+  the next successful run; the report's top-level `image` digests identify a capture whose
+  provenance is gone. (D167 revised)
 - CycloneDX, per the release check of main 5197df4: a release stated only for another
   architecture no longer keys an install whose records state none (an aarch64-only Alpine 3.19
   had keyed a separate x86_64 busybox: now 2 findings and 1 not evaluated, exit 2 under

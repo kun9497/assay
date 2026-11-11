@@ -203,7 +203,7 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 		// t.Ref by construction, so checking it too would change nothing:
 		// the !live guard states the intent, and its mutation survives.
 		if !live {
-			if why := captureMismatch(t, adoc.Provenance.Target.Argument, adoc.Provenance.digests(), "assay", stderr); why != "" {
+			if why := captureMismatch(t, adoc.Provenance.Target.Argument, adoc.digests(), "assay", stderr); why != "" {
 				fmt.Fprintf(stderr, "error: target=%s %s\n", t.Name, why)
 				rows = append(rows, row{Target: t.Name, Verdict: "ERROR"})
 				worst = exitError
@@ -414,8 +414,29 @@ func grypeShape(raw []byte) string {
 	if err := json.Unmarshal(raw, &probe); err != nil {
 		return err.Error()
 	}
-	if _, ok := probe["matches"]; !ok {
+	m, ok := probe["matches"]
+	if !ok {
 		return "no \"matches\" field: not a grype report"
+	}
+	// A report's matches is an array, empty or not; grype's diagnostic
+	// object can carry `"matches": null`, which decoded to zero matches
+	// and passed the gate (release check of main 5197df4). Every real
+	// capture with nothing to report carries `[]`.
+	if !strings.HasPrefix(strings.TrimSpace(string(m)), "[") {
+		return "\"matches\" is not an array: not a grype report"
+	}
+	return ""
+}
+
+// trivyShape is grypeShape for a trivy report: `SchemaVersion` is what every
+// `trivy image --format json` document has and its diagnostic object lacks.
+func trivyShape(raw []byte) string {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return err.Error()
+	}
+	if _, ok := probe["SchemaVersion"]; !ok {
+		return "no \"SchemaVersion\" field: not a trivy report"
 	}
 	return ""
 }
@@ -436,15 +457,37 @@ func assayShape(raw []byte) string {
 // readOffline replays a previous capture instead of scanning. This is the
 // path floor-seeding and most of this package's own tests use.
 func readOffline(dir string, t Target) (assayRaw, grypeRaw []byte, fatal string) {
-	assayRaw, err := os.ReadFile(filepath.Join(dir, t.Name+".assay.json"))
-	if err != nil {
-		return nil, nil, fmt.Sprintf("read offline assay capture: %v", err)
+	assayRaw, fatal = readCapture(dir, t.Name, "assay")
+	if fatal != "" {
+		return nil, nil, fatal
 	}
-	grypeRaw, err = os.ReadFile(filepath.Join(dir, t.Name+".grype.json"))
-	if err != nil {
-		return nil, nil, fmt.Sprintf("read offline grype capture: %v", err)
+	grypeRaw, fatal = readCapture(dir, t.Name, "grype")
+	if fatal != "" {
+		return nil, nil, fatal
 	}
 	return assayRaw, grypeRaw, ""
+}
+
+// readCapture reads <name>.<kind>.json for a replay. A <name>.<kind>.failed.json
+// beside it that is not older is the later run: that run failed, and the
+// success capture is an earlier run's that writeCapture could not remove
+// (release check of main 5197df4: on Windows a reader holding the success
+// capture open kept it in place through the failed run, and the replay
+// read it as that run's result). The replay then fails as the run did; the
+// next successful run removes the marker.
+func readCapture(dir, name, kind string) ([]byte, string) {
+	good := filepath.Join(dir, name+"."+kind+".json")
+	raw, err := os.ReadFile(good)
+	if err != nil {
+		return nil, fmt.Sprintf("read offline %s capture: %v", kind, err)
+	}
+	failed := filepath.Join(dir, name+"."+kind+".failed.json")
+	if fi, ferr := os.Stat(failed); ferr == nil {
+		if gi, gerr := os.Stat(good); gerr == nil && !fi.ModTime().Before(gi.ModTime()) {
+			return nil, fmt.Sprintf("offline %s capture %s is an earlier run's: the later run failed (%s)", kind, filepath.Base(good), filepath.Base(failed))
+		}
+	}
+	return raw, ""
 }
 
 // captureMismatch is "" when an offline capture records, as the target it
@@ -535,7 +578,7 @@ func trivyPhase(execScan execFunc, trivyBin, captureDir, offlineDir string, live
 
 	if fatal != "" {
 		if informational {
-			fmt.Fprintf(stderr, "warning: target=%s trivy (informational): %s\n", t.Name, fatal)
+			fmt.Fprintf(stderr, "warning: target=%s trivy (informational): %s; measurement failed, nothing to paste\n", t.Name, fatal)
 			return trivyOK
 		}
 		fmt.Fprintf(stderr, "error: target=%s trivy %s\n", t.Name, fatal)
@@ -547,6 +590,18 @@ func trivyPhase(execScan execFunc, trivyBin, captureDir, offlineDir string, live
 		msg := fmt.Sprintf("malformed trivy JSON: %v", err)
 		if informational {
 			fmt.Fprintf(stderr, "warning: target=%s trivy (informational): %s\n", t.Name, msg)
+			return trivyOK
+		}
+		fmt.Fprintf(stderr, "error: target=%s %s\n", t.Name, msg)
+		return trivyError
+	}
+	// Judged by shape live and offline (as grype's is in run): a
+	// diagnostic object is no measurement, so an informational target
+	// prints no numbers to paste and a committed one is an ERROR.
+	if why := trivyShape(trivyRaw); why != "" {
+		msg := "malformed trivy JSON: " + why
+		if informational {
+			fmt.Fprintf(stderr, "warning: target=%s trivy (informational): %s; measurement failed, nothing to paste\n", t.Name, msg)
 			return trivyOK
 		}
 		fmt.Fprintf(stderr, "error: target=%s %s\n", t.Name, msg)
@@ -612,6 +667,13 @@ func runTrivy(execScan execFunc, bin string, t Target) (out []byte, fatal string
 		}
 		return out, "malformed trivy JSON"
 	}
+	// JSON that is not a trivy report with a nonzero exit is the hard
+	// failure the exit says (release check of main 5197df4: the diagnostic
+	// object had been measured as 0 findings -- a BREACH on a committed
+	// floor, a measurement on an informational one).
+	if code != 0 && trivyShape(out) != "" {
+		return out, fmt.Sprintf("trivy hard failure (exit %d)", code)
+	}
 	return out, ""
 }
 
@@ -621,11 +683,7 @@ func runTrivy(execScan execFunc, bin string, t Target) (out []byte, fatal string
 // -- named by target, not silently treated as zero findings, which would
 // let a committed-floor target quietly go unjudged.
 func readOfflineTrivy(dir string, t Target) (out []byte, fatal string) {
-	out, err := os.ReadFile(filepath.Join(dir, t.Name+".trivy.json"))
-	if err != nil {
-		return nil, fmt.Sprintf("read offline trivy capture: %v", err)
-	}
-	return out, ""
+	return readCapture(dir, t.Name, "trivy")
 }
 
 // printInfo writes one line per ceiling -regressions-only did not judge. Both
@@ -651,13 +709,20 @@ func printInfo(stderr io.Writer, info []breach) {
 // it failed it live (release check 2026-11-11). The good name is removed
 // too, so a stale capture from an earlier run in the same directory does
 // not stand in for the failed one.
+//
+// A successful run removes the failed marker of an earlier one, and a failed
+// run's marker is what a replay trusts when the good name could not be
+// removed (readCapture): each replay reflects the last run.
 func writeCapture(stderr io.Writer, dir, name, kind string, data []byte, ok bool) {
 	path := filepath.Join(dir, name+"."+kind+".json")
+	failed := filepath.Join(dir, name+"."+kind+".failed.json")
 	if !ok {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			fmt.Fprintf(stderr, "warning: remove stale capture %s: %v\n", path, err)
 		}
-		path = filepath.Join(dir, name+"."+kind+".failed.json")
+		path = failed
+	} else if err := os.Remove(failed); err != nil && !os.IsNotExist(err) {
+		fmt.Fprintf(stderr, "warning: remove failed-run marker %s: %v\n", failed, err)
 	}
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		fmt.Fprintf(stderr, "warning: write capture %s: %v\n", path, err)

@@ -20,6 +20,10 @@
   3. (D161 개정, QA 2026-11-10)
 
 ### Fixed
+- main 5197df4 릴리스 점검에 따른 `scandiff`: `matches`가 배열이 아닌(진단 객체의 `null`) grype 캡처는 실시간·오프라인
+  모두 malformed입니다; trivy의 진단 JSON은 확정 하한에서 hard failure(ERROR; 0으로 측정된 BREACH였음), 정보용 블록에서는
+  측정 실패(경고, 붙여 넣을 숫자 없음)입니다; 실패한 실행의 `.failed.json` 마커가 잠긴 성공 캡처보다 오래 남아 다음 성공
+  실행까지 재판정이 그 실행처럼 실패합니다; provenance가 빠진 캡처를 보고서 최상위 `image` digest로 식별합니다. (D167 개정)
 - main 5197df4 릴리스 점검에 따른 CycloneDX: 다른 아키텍처에만 명시된 릴리스가 릴리스를 명시하지 않은 설치에 더는 키를 주지
   않습니다(aarch64에만 있는 Alpine 3.19가 별개의 x86_64 busybox에 키를 주었음: 이제 두 순서 모두 2건·미평가 1·
   `--fail-on-incomplete=any` 종료 2); 아키텍처를 명시한 설치 옆의 맨 나열은 첫 설치에 합쳐지는 대신 동의하는 모든 설치에
