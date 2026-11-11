@@ -145,8 +145,10 @@ func (img *Image) Files(ctx context.Context, want []string) (map[string]FileFrom
 	newest := len(img.Layers) - 1
 	qs := make([]query, 0, len(want))
 	for _, w := range want {
-		n := normaliseEntry(w)
-		qs = append(qs, query{path: n, want: n, top: newest, before: noCeiling, dir: path.Dir(n), via: -1})
+		// Answered under the name the caller gave, whatever its spelling;
+		// a ".." in it is applied lazily (lazyDotDot), never folded here.
+		n := normaliseLazy(w)
+		qs = append(qs, query{path: n, want: w, top: newest, before: noCeiling, dir: path.Dir(n), via: -1})
 	}
 
 	out := make(map[string]FileFromLayer, len(want))
@@ -286,6 +288,16 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 	done := make([]bool, len(qs))
 	var deleted, opaque []whiteout
 	newest := len(img.Layers) - 1
+	// dirAbove is, per query, every ancestor of its path an upper layer
+	// wrote an explicit directory entry at. The changeset rules keep an
+	// existing path under a new entry only when BOTH are directories, so a
+	// lower layer's symlink at such a name was replaced by the directory and
+	// is not followed (release check 2026-11-11: `lib/apk/db` a link to an
+	// old database below, a directory above, read the old database through
+	// the replaced link -- BusyBox's 7 findings, one Critical, lost). An
+	// implied directory (entries beneath a name with no entry for the name)
+	// does not replace a link: the untar creates the path through it.
+	dirAbove := make([]map[string]bool, len(qs))
 
 	for i := newest; i >= 0; i-- {
 		l := img.Layers[i]
@@ -373,8 +385,18 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 					// applies), and this is the resolver's half of it.
 					switch h.Typeflag {
 					case tar.TypeSymlink:
-						above[k] = layerHit{kind: hitLink, linkname: h.Linkname, pos: pos, rest: strings.TrimPrefix(q.path, name+"/")}
+						if dirAbove[k][name] {
+							// Replaced by the directory an upper layer put
+							// here: the link and what it led to are gone.
+							above[k] = layerHit{kind: hitGone}
+						} else {
+							above[k] = layerHit{kind: hitLink, linkname: h.Linkname, pos: pos, rest: strings.TrimPrefix(q.path, name+"/")}
+						}
 					case tar.TypeDir:
+						if dirAbove[k] == nil {
+							dirAbove[k] = map[string]bool{}
+						}
+						dirAbove[k][name] = true
 					default:
 						above[k] = layerHit{kind: hitGone}
 					}
@@ -431,7 +453,69 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 		deleted = append(deleted, layerDeleted...)
 		opaque = append(opaque, layerOpaque...)
 	}
+	// A path still holding a ".." was not decided by any entry at the
+	// component before it, in any layer: that component is a directory
+	// the layers imply (or name explicitly) and never a link, so the ".."
+	// is applied now and the path looked up again (lazyDotDot).
+	for k, q := range qs {
+		if !done[k] && strings.Contains("/"+q.path+"/", "/../") {
+			folded := foldFirstDotDot(q.path)
+			next = append(next, query{path: folded, want: q.want, top: q.top, before: q.before, dir: path.Dir(folded), links: q.links + 1, via: q.via})
+		}
+	}
 	return next, nil
+}
+
+// lazyDotDot is the rule for a ".." inside a link target. A target such as
+// `/opt/route/../qa-db` means, to the kernel, "enter opt/route, then go up
+// from wherever that is": when opt/route is a symlink the ".." applies to
+// its target, not to the name. Folding it lexically before opt/route was
+// looked at read `opt/qa-db` for a link that reaches `srv/nested/qa-db`
+// (release check 2026-11-11: an apk database behind such a link read 0 of
+// BusyBox's 7 findings, and a package.json behind one read nothing). So
+// resolveLink folds a ".." only against the directory the link was reached
+// through -- a real directory, since the link entry lives in it -- and
+// leaves one that follows a component of the target itself in the path. The
+// pass treats the component before it as an ancestor (resolvePass): a
+// symlink entry there re-roots the path, a file there ends it, and when no
+// layer has an entry at it the ".." is folded after the pass and the path
+// queued again, one more hop. A hardlink's target is an archive name and is
+// folded whole.
+//
+// joinLazy appends rest to base, dropping empty and "." segments and keeping
+// every "..": the shape resolvePass reads.
+func joinLazy(base, rest string) string {
+	var segs []string
+	for _, c := range strings.Split(base+"/"+rest, "/") {
+		if c != "" && c != "." {
+			segs = append(segs, c)
+		}
+	}
+	return strings.Join(segs, "/")
+}
+
+// normaliseLazy is normaliseEntry for a wanted path that may hold a "..":
+// leading slashes and "." segments go, the ".." stays for the pass.
+func normaliseLazy(name string) string {
+	return joinLazy("", name)
+}
+
+// foldFirstDotDot applies the first ".." in p to the segment before it (or
+// drops it at the root).
+func foldFirstDotDot(p string) string {
+	segs := strings.Split(p, "/")
+	for i, c := range segs {
+		if c != ".." {
+			continue
+		}
+		if i == 0 {
+			segs = segs[1:]
+		} else {
+			segs = append(segs[:i-1], segs[i+1:]...)
+		}
+		break
+	}
+	return strings.Join(segs, "/")
 }
 
 // follow turns a link found in layer i into the query for its target.
@@ -460,7 +544,10 @@ func follow(q query, hit layerHit, i, newest int) query {
 	}
 	target := resolveLink(linkDir, hit.linkname, hit.hard)
 	if hit.rest != "" {
-		target = normaliseEntry(target + "/" + hit.rest)
+		// The rest continues below the target as the kernel continues it,
+		// a ".." in it applied once the target's own components are known
+		// (lazyDotDot), not folded against a name that may be a link.
+		target = joinLazy(target, hit.rest)
 	}
 	dir := q.dir // a hardlink keeps the directory it was reached through
 	if !hit.hard {
@@ -503,11 +590,40 @@ func hiddenFrom(q query, i int, deleted, opaque []whiteout) bool {
 // just the target. A HARDLINK's Linkname is always relative to the archive
 // root instead, so joining it to any directory would invent a path that does
 // not exist.
+//
+// A ".." in a symlink's target is folded only while it still applies to dir
+// (the link's own, real directory); one that follows a component of the
+// target is kept for the pass to apply (lazyDotDot). An absolute target's
+// leading ".." is dropped at the root, as the kernel drops it.
 func resolveLink(dir, target string, hard bool) string {
-	if hard || strings.HasPrefix(target, "/") {
+	if hard {
 		return normaliseEntry(target)
 	}
-	return normaliseEntry(path.Join(dir, target))
+	var segs []string
+	if !strings.HasPrefix(target, "/") {
+		segs = strings.Split(normaliseEntry(dir), "/")
+		if len(segs) == 1 && segs[0] == "" {
+			segs = nil
+		}
+	}
+	own := 0 // components of the target itself pushed so far
+	for _, c := range strings.Split(target, "/") {
+		switch c {
+		case "", ".":
+		case "..":
+			switch {
+			case own > 0:
+				segs = append(segs, "..")
+				own++
+			case len(segs) > 0:
+				segs = segs[:len(segs)-1]
+			}
+		default:
+			segs = append(segs, c)
+			own++
+		}
+	}
+	return strings.Join(segs, "/")
 }
 
 // isDeleted reports whether a whiteout covers this path.
