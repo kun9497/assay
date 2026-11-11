@@ -8780,6 +8780,34 @@ join keeps every qualifier either listing stated (`mergePURL`, `pkgmeta.PURL.Str
 statement scoped by `distro=` reaches an install whose arch came from the other listing (the
 twin's purl had replaced the kept one whole, and the statement no longer matched).
 
+**Revised a fourth time 2026-11-11 (release check of main 60c512c).** Two corrections to the
+revision above. (1) The bare listings of an identity are weighed against each install once the
+whole document is read (`weighBareListings`), not as each install is met: a join had weighed no
+candidate at all and an own only those joined by then, and the pair named was the first two
+candidates -- one of which stated no source and so marked nothing -- so three bare listings (two
+at different source versions, one stating none) left the sourceless install judged in one
+placement (90 findings, exit 0) and unjudged in another (70, exit 2). Every install now takes
+the evidence of every bare listing it does not contradict, lent in the document's order through
+`keepEvidence`, which marks the contradiction between two of them with both values sorted in the
+reason; the installs that state a source version keep their findings, and the three placements
+agree. The pool is the listings an install joined and, since the PR #288 review, the bare listings
+under the subject that met arch-stating twins at the top (`dedupe.pooled`): lent as each was met,
+the first had given its source version to the install stating none and the next was skipped as
+contradicting what had just been lent, so the mirror placement -- installs at the top, bare
+listings under the subject -- was judged by document order with exit 0, and with one twin the
+contradiction was pinned on the second listing while the install stood; the top-level installs
+are weighed too. A pooled listing lent to no install is a package of its own, marked, as before. A
+bare listing no install could join stays a package of its own, as before. (2) The merged purl spells the INSTALL's qualifiers where the two
+listings disagree -- a bare twin's `distro=alpine-3.20` had overwritten the install's 3.19, and a
+VEX statement written for 3.20 exonerated the 3.19 install (2 findings hidden, exit 0) -- and a
+`distro=` that names another release than the one the package is keyed to is left off; a
+top-level purl written without `@version` takes the version its joined listing states, so a
+version-scoped statement still reaches the install. The VEX matcher itself holds a `distro=` to
+the finding's own ecosystem (`pkgmeta.EcosystemForDistroQualifier`), not to the spelling on the
+purl, so a single listing spelling 3.20 under a 3.19 document is judged on 3.19 and exonerated
+only by a statement for 3.19 (a D121 refinement, `internal/vex/match.go`); the purl's spelling
+decides only when the evaluation keyed the package to nothing.
+
 **Gives up.** Two listings of one package inside `components`, or both inside the subject tree,
 are not merged at all (as before) and are each judged on what they state. A contradiction makes the
 whole package unevaluated, including findings every reading of the document would have produced
