@@ -22,6 +22,11 @@ All notable changes to this project are documented here. The format follows
   Truthset report schema 3. (D161 revised, QA 2026-11-10)
 
 ### Fixed
+- `scandiff`, per the release check of main b732cac: a per-tool state file (`ok` + SHA-256,
+  `failed`, `unsaved`) is what a replay trusts, not the files' times -- a failed run's capture
+  moved through a ZIP had replayed as a success, and a success whose capture could not be written
+  over a locked file had left an earlier success standing as its own; trivy's `SchemaVersion:
+  null` diagnostic is a failure, not a measurement of 0. (D167 revised)
 - `scandiff`, per the release check of main 5197df4: a grype capture whose `matches` is not an
   array (`null`, in grype's diagnostic object) is malformed, live and offline; trivy's diagnostic
   JSON is a hard failure on a committed floor (ERROR, was a BREACH measured as 0) and a failed
