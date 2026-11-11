@@ -99,8 +99,8 @@ func TestRun_QA1111_SourceVersionsAreComparedUnderTheKeyWhicheverOrder(t *testin
 		// The same listing stating no architecture: it meets the keyed
 		// listing's release through the arch-less identity.
 		epoch0NoArch = `{"type":"library","name":"libc6","version":"2.31-13+deb11u14","purl":"pkg:deb/debian/libc6@2.31-13%2Bdeb11u14?upstream=glibc%400%3A2.31-13%2Bdeb11u13"}`
-		epoch1 = `{"type":"library","name":"libc6","version":"2.31-13+deb11u14","purl":"pkg:deb/debian/libc6@2.31-13%2Bdeb11u14?arch=amd64&upstream=glibc%401%3A2.31-13%2Bdeb11u13"}`
-		ctrl   = `{"type":"library","name":"assay-qa-inventory-control","version":"1.0.0","purl":"pkg:npm/assay-qa-inventory-control@1.0.0"}`
+		epoch1       = `{"type":"library","name":"libc6","version":"2.31-13+deb11u14","purl":"pkg:deb/debian/libc6@2.31-13%2Bdeb11u14?arch=amd64&upstream=glibc%401%3A2.31-13%2Bdeb11u13"}`
+		ctrl         = `{"type":"library","name":"assay-qa-inventory-control","version":"1.0.0","purl":"pkg:npm/assay-qa-inventory-control@1.0.0"}`
 	)
 	doc := func(subject ...string) string {
 		return qa1111Start + `"components":[` + top + `,` + ctrl + `],"metadata":{"component":{"type":"container","name":"image","components":[` + strings.Join(subject, ",") + `]}}}`
