@@ -231,6 +231,10 @@ func weighBareListings(d *dedupe, target *pkgmeta.Target) {
 	// package of its own -- the third listing of a package listed twice,
 	// or one the document keys to two releases (ambiguous), which is
 	// nobody's evidence -- as D166 has it.
+	// Walked in the document's order so the pool reads the same every
+	// run; the verdict does not depend on it (a mutation walking the map
+	// survives: lending is a union and the marked reason sorts its two
+	// values), so the order is for reading alone.
 	pool := map[string][]pkgmeta.Package{}
 	for _, i := range sortedKeys(d.snaps) {
 		s := d.snaps[i]
