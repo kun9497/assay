@@ -171,6 +171,7 @@ func catalogSubject(subject component, ctx osContext, target *pkgmeta.Target, st
 			keyed[id] = r
 		}
 	}
+	d := &dedupe{keyed: keyed, snaps: map[int]pkgmeta.Package{}, refused: map[int]pkgmeta.Package{}}
 	// The subject is keyed in the document's top-level context, as its
 	// top-level twin would be; its children in theirs (contextFor).
 	scratchTarget := pkgmeta.Target{}
@@ -186,22 +187,43 @@ func catalogSubject(subject component, ctx osContext, target *pkgmeta.Target, st
 		// The document's own root: not a package, not counted, as the
 		// operating-system component is not.
 	} else {
-		mergeDeduped(scratchTarget, scratchStats, base, keyed, target, stats)
+		mergeDeduped(scratchTarget, scratchStats, base, d, target, stats)
 	}
-	catalogDeduped(subject.Components, childContext(subject, ctx), base, keyed, target, stats)
+	catalogDeduped(subject.Components, childContext(subject, ctx), base, d, target, stats)
+	// A bare listing that refused every arch-stating twin -- each
+	// contradicted it -- and was joined by none: the document contradicts
+	// itself about it whichever install it is (D165).
+	for i, p := range d.refused {
+		if _, joined := d.snaps[i]; joined {
+			continue
+		}
+		markSourceContradiction(&target.Packages[i], p)
+	}
+}
+
+// dedupe is the state the subject walk's merges share (catalogSubject).
+type dedupe struct {
+	keyed map[string]releases
+	// snaps is, per base index, the bare listing as it was BEFORE it took
+	// an arch-stating twin's architecture: its evidence is lent to the
+	// other twins of that identity too (mergeDeduped).
+	snaps map[int]pkgmeta.Package
+	// refused is, per base index of a bare listing, the first arch-stating
+	// twin it could not be (their statements contradict).
+	refused map[int]pkgmeta.Package
 }
 
 // catalogDeduped is catalog for the subject's nested components: the same
 // depth-first walk, one scratch per component so a duplicate of a package
 // bom.components already yielded can be dropped without its counter. base
 // is how many packages bom.components yielded; see catalogSubject.
-func catalogDeduped(components []component, ctx osContext, base int, keyed map[string]releases, target *pkgmeta.Target, stats *Stats) {
+func catalogDeduped(components []component, ctx osContext, base int, d *dedupe, target *pkgmeta.Target, stats *Stats) {
 	for _, c := range components {
 		scratchTarget := pkgmeta.Target{}
 		var scratchStats Stats
 		catalogOne(c, ctx, &scratchTarget, &scratchStats)
-		mergeDeduped(scratchTarget, scratchStats, base, keyed, target, stats)
-		catalogDeduped(c.Components, childContext(c, ctx), base, keyed, target, stats)
+		mergeDeduped(scratchTarget, scratchStats, base, d, target, stats)
+		catalogDeduped(c.Components, childContext(c, ctx), base, d, target, stats)
 	}
 }
 
@@ -213,9 +235,61 @@ func catalogDeduped(components []component, ctx osContext, base int, keyed map[s
 // packages where it held one listed twice, but its evidence is kept on the
 // package already there. A scratch with no package is a counted skip and
 // merges as it is.
-func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, keyed map[string]releases, target *pkgmeta.Target, stats *Stats) {
+//
+// A listing stating no architecture beside listings stating one is evidence
+// about the name and version, not about one install: it is lent to every
+// arch-stating twin it does not contradict and counted as none of its own
+// (release check of main 5197df4: joined to whichever twin came first, it
+// made 45 findings one order and 25 with a contradiction the other, and put
+// the twin's install path on a VEX statement scoped to the other arch).
+// When it meets exactly one arch-stating twin it is that install and takes
+// its architecture AND its purl, so a VEX statement scoped by `arch=` finds
+// it; what it was before the join is kept (dedupe.snaps) and lent to any
+// later twin of the identity. A twin it contradicts is not joined: that twin
+// is its own install, and the bare listing waits for one it agrees with.
+func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, d *dedupe, target *pkgmeta.Target, stats *Stats) {
+	keyed := d.keyed
+	// own appends p as its own install. A bare listing of the identity that
+	// joined an earlier twin is evidence for an arch-stating one too.
+	own := func(p pkgmeta.Package) {
+		for _, s := range d.snaps {
+			if p.Arch != "" && s.Type == p.Type && s.Name == p.Name && s.Version == p.Version && (s.Ecosystem == "" || p.Ecosystem == "" || s.Ecosystem == p.Ecosystem) && !contradicts(p, s) {
+				keepEvidence(&p, s)
+			}
+		}
+		target.Packages = append(target.Packages, p)
+		stats.Components += scratchStats.Components
+		stats.Cataloged += scratchStats.Cataloged
+		stats.SkippedNoPURL += scratchStats.SkippedNoPURL
+		stats.SkippedNoVersion += scratchStats.SkippedNoVersion
+		stats.SkippedUnsupportedEcosystem += scratchStats.SkippedUnsupportedEcosystem
+	}
 	for _, p := range scratchTarget.Packages {
+		if p.Arch == "" {
+			if twins := archTwins(target.Packages[:base], p, keyed); len(twins) > 1 {
+				if lend(p, twins, target) {
+					return
+				}
+				// It contradicts every install it could be: the
+				// document's inconsistency is reported on this listing
+				// -- keyed as its twins are, so the report says why it is
+				// not judged rather than that nothing covers it -- and the
+				// installs are judged on their own statements.
+				// The twins share one release (archTwins refuses two), and
+				// that release is this listing's too: taken from the twin
+				// directly, since the subject-tree rule withholds a key the
+				// top-level twins alone give (PR #277 review) and this
+				// listing carries it to no other package.
+				if p.Ecosystem == "" {
+					p.Ecosystem = target.Packages[twins[0]].Ecosystem
+				}
+				markSourceContradiction(&p, target.Packages[twins[0]])
+				own(p)
+				return
+			}
+		}
 		if i := indexOfPackage(target.Packages[:base], p, keyed); i >= 0 {
+			kept := &target.Packages[i]
 			// The key the document gives this identity, known from the dry
 			// run, is adopted by both halves BEFORE their evidence is
 			// compared: a source version is one version or two only under
@@ -224,33 +298,108 @@ func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, ke
 			// called Debian's `0:` spelling a contradiction and left libc6
 			// unjudged, 25 findings one order, 0 the other (QA 2026-11-11).
 			if k := keyFor(p, keyed); k.n == 1 {
-				if target.Packages[i].Ecosystem == "" {
-					target.Packages[i].Ecosystem = k.key
+				if kept.Ecosystem == "" {
+					kept.Ecosystem = k.key
 				}
 				if p.Ecosystem == "" {
 					p.Ecosystem = k.key
 				}
 			}
-			// A listing stating no architecture that meets one stating an
-			// architecture is that install, and takes its architecture: a
-			// bare top-level busybox beside an x86_64 and an aarch64 install
-			// of one release merged both into itself, 2 installs and 4
-			// findings read as 1 and 2 (release check 2026-11-11). Which of
-			// two same-release installs it joins is the document's order;
-			// they are judged alike either way (indexOfPackage).
-			if target.Packages[i].Arch == "" {
-				target.Packages[i].Arch = p.Arch
+			if kept.Arch == "" && p.Arch != "" {
+				if contradicts(*kept, p) {
+					if _, ok := d.refused[i]; !ok {
+						d.refused[i] = p
+					}
+				} else {
+					if _, ok := d.snaps[i]; !ok {
+						d.snaps[i] = *kept
+					}
+					kept.Arch = p.Arch
+					kept.PURL = p.PURL
+					keepEvidence(kept, p)
+					return
+				}
+			} else {
+				keepEvidence(kept, p)
+				return
 			}
-			keepEvidence(&target.Packages[i], p)
-			return
 		}
+		own(p)
+		return
 	}
+	// A scratch with no package: a counted skip.
 	target.Packages = append(target.Packages, scratchTarget.Packages...)
 	stats.Components += scratchStats.Components
 	stats.Cataloged += scratchStats.Cataloged
 	stats.SkippedNoPURL += scratchStats.SkippedNoPURL
 	stats.SkippedNoVersion += scratchStats.SkippedNoVersion
 	stats.SkippedUnsupportedEcosystem += scratchStats.SkippedUnsupportedEcosystem
+}
+
+// archTwins is every listing in pkgs that states an architecture and is
+// otherwise p's identity -- p stating none -- when the document keys that
+// identity to at most one release. The twins of two releases are refused as
+// ambiguous, as indexOfPackage refuses them.
+func archTwins(pkgs []pkgmeta.Package, p pkgmeta.Package, keyed map[string]releases) []int {
+	if ambiguous(p, keyed) {
+		return nil
+	}
+	var out []int
+	for i, q := range pkgs {
+		if q.Arch != "" && q.Type == p.Type && q.Name == p.Name && q.Version == p.Version && (q.Ecosystem == "" || p.Ecosystem == "" || q.Ecosystem == p.Ecosystem) {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// lend folds the bare listing p's evidence onto every twin it does not
+// contradict and reports whether any took it; p is then counted as no
+// package of its own. When it contradicts every one it is lent to none.
+func lend(p pkgmeta.Package, twins []int, target *pkgmeta.Target) bool {
+	lent := false
+	for _, i := range twins {
+		if !contradicts(target.Packages[i], p) {
+			keepEvidence(&target.Packages[i], p)
+			lent = true
+		}
+	}
+	return lent
+}
+
+// markSourceContradiction marks kept as contradicted by other's source
+// statement (D165), naming both.
+func markSourceContradiction(kept *pkgmeta.Package, other pkgmeta.Package) {
+	if kept.Source == nil || other.Source == nil {
+		return
+	}
+	if kept.Source.Name != other.Source.Name {
+		markContradiction(kept, "source", kept.Source.Name, other.Source.Name)
+		return
+	}
+	markContradiction(kept, "source "+kept.Source.Name+" at", kept.Source.Version, other.Source.Version)
+}
+
+// contradicts reports whether two listings of one package state different
+// sources: different names, or the same name at two versions under the
+// package's own ordering -- keepEvidence's contradiction, asked before a
+// join rather than marked after one.
+func contradicts(a, b pkgmeta.Package) bool {
+	if a.Source == nil || b.Source == nil {
+		return false
+	}
+	if a.Source.Name != b.Source.Name {
+		return true
+	}
+	av, bv := a.Source.Version, b.Source.Version
+	if av == "" || bv == "" {
+		return false
+	}
+	eco := a.Ecosystem
+	if eco == "" {
+		eco = b.Ecosystem
+	}
+	return !sameVersion(eco, av, bv)
 }
 
 // indexOfPackage is the position in pkgs of the package p is a second
@@ -326,14 +475,28 @@ func ambiguous(p pkgmeta.Package, keyed map[string]releases) bool {
 // unkeyed, and the two were then compared unkeyed -- 25 findings one order,
 // 0 the other (release check 2026-11-11, the QA 2026-11-11 item 1 shape
 // with the arch left off the keyed record).
+//
+// Release check of main 5197df4: the fallback reads what records stating NO
+// architecture key the name and version to -- not what every architecture's
+// records together key theirs to, which had lent an aarch64-only Alpine 3.19
+// to an unkeyed x86_64 install (4 findings and no not-evaluated for a
+// document that keys x86_64 to nothing). A bare listing still meets every
+// architecture's keys (keyedReleases' aggregate), since it may be any of them.
 func keyFor(p pkgmeta.Package, keyed map[string]releases) releases {
-	if r, ok := keyed[identity(p)]; ok || p.Arch == "" {
+	if p.Arch == "" {
+		return keyed[identity(p)+anyArch]
+	}
+	if r, ok := keyed[identity(p)]; ok {
 		return r
 	}
 	q := p
 	q.Arch = ""
 	return keyed[identity(q)]
 }
+
+// anyArch marks keyedReleases' aggregate of an identity's keys across every
+// architecture, kept apart from the bare records' own entry.
+const anyArch = "\x00*"
 
 // identity is a package's type, name, version and -- when the purl states
 // one -- architecture: what an unkeyed listing and its keyed twins share. Two
@@ -358,9 +521,10 @@ type releases struct {
 }
 
 // keyedReleases counts, per identity, the distinct ecosystem keys pkgs give
-// it; an unkeyed listing counts for none. An identity stating an
-// architecture is counted under the arch-less identity too, so an unkeyed
-// listing that states none meets its keyed twins' releases.
+// it; an unkeyed listing counts for none. Every record is counted once more
+// under its arch-less identity's anyArch aggregate, so an unkeyed listing
+// that states no architecture meets its keyed twins' releases whatever
+// architecture they state (keyFor).
 func keyedReleases(pkgs []pkgmeta.Package) map[string]releases {
 	seen := map[string]map[string]bool{}
 	add := func(id, eco string) {
@@ -374,11 +538,9 @@ func keyedReleases(pkgs []pkgmeta.Package) map[string]releases {
 			continue
 		}
 		add(identity(p), p.Ecosystem)
-		if p.Arch != "" {
-			q := p
-			q.Arch = ""
-			add(identity(q), p.Ecosystem)
-		}
+		q := p
+		q.Arch = ""
+		add(identity(q)+anyArch, p.Ecosystem)
 	}
 	out := make(map[string]releases, len(seen))
 	for id, ecos := range seen {

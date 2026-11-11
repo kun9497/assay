@@ -115,7 +115,9 @@ func TestRun_RC1111_ArchlessKeyedRecordKeysItsArchTwins(t *testing.T) {
 // Residual: a bare top-level listing beside an x86_64 and an aarch64 install
 // of ONE release is one of them, not both: it takes the architecture of the
 // first it joins, and the other stays its own install -- 2 components and
-// both findings, as without the bare listing (were 1 and one finding).
+// both findings, as without the bare listing (were 1 and one finding). Since
+// the release check of main 5197df4 its own evidence (the /top-unknown path)
+// is lent to the other install too, so neither order loses it.
 func TestRun_RC1111_BareListingJoinsOneSameReleaseInstallNotBoth(t *testing.T) {
 	db := rc1111DB(t)
 	const (
@@ -130,8 +132,8 @@ func TestRun_RC1111_BareListingJoinsOneSameReleaseInstallNotBoth(t *testing.T) {
 			paths = append(paths, l.Path)
 		}
 	}
-	if r.code != 1 || r.doc.Summary.Components != 2 || r.doc.Summary.NotEvaluated != 0 || len(r.doc.Findings) != 2 || strings.Count(strings.Join(paths, ","), "/top-unknown") != 1 ||
+	if r.code != 1 || r.doc.Summary.Components != 2 || r.doc.Summary.NotEvaluated != 0 || len(r.doc.Findings) != 2 || strings.Count(strings.Join(paths, ","), "/top-unknown") != 2 ||
 		!strings.Contains(strings.Join(paths, ","), "/image/x86/") || !strings.Contains(strings.Join(paths, ","), "/child/aarch64/") {
-		t.Errorf("exit=%d components=%d notEvaluated=%d findings=%d paths=%v; want 1, 2, 0, 2 findings, /top-unknown on exactly one", r.code, r.doc.Summary.Components, r.doc.Summary.NotEvaluated, len(r.doc.Findings), paths)
+		t.Errorf("exit=%d components=%d notEvaluated=%d findings=%d paths=%v; want 1, 2, 0, 2 findings, /top-unknown on both", r.code, r.doc.Summary.Components, r.doc.Summary.NotEvaluated, len(r.doc.Findings), paths)
 	}
 }

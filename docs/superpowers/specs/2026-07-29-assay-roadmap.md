@@ -8713,6 +8713,26 @@ dry run's per-identity recount is gone too: it had made the subject walk quadrat
 1,000-package subject tree taking 544 ms and 490 MB where it takes 4 ms and 3.4 MB; a test holds
 the allocation count linear.
 
+**Revised again 2026-11-11 (release check of main 5197df4).** Two of the corrections above went
+too far, and one shape they created is now settled. The key an arch-stating listing falls back
+to is what records stating NO architecture key its name and version to -- not what every
+architecture's records together key theirs to: an Alpine 3.19 stated only for aarch64 had keyed
+a separate x86_64 install whose records state no release (4 findings and no not-evaluated for a
+document that keys x86_64 to nothing; now 2 ARM findings, 1 not evaluated, exit 2 under
+`--fail-on-incomplete=any`, in either order). A bare listing still meets every architecture's
+keys, since it may be any of them. And a bare listing beside listings stating an architecture is
+evidence about the name and version, not a claim about one install: beside two or more
+arch-stating twins of one release it is lent to every twin it does not contradict and counted as
+no package of its own; beside exactly one it IS that install, takes its architecture and its purl
+(so a VEX statement scoped by `arch=` reaches it -- it had kept the bare purl and missed), and
+what it stated before the join is lent to any later twin of the identity it agrees with. A twin
+it contradicts is not joined: that twin is its own install, and the bare listing waits for one it
+agrees with; one that contradicts every twin is its own listing, marked with the contradiction
+(D165), while the installs are judged on their own statements. Before this, the bare listing
+joined whichever twin came first: the same Debian 11 SBOM read 45 findings with amd64 listed
+first and 25 with a contradiction and exit 2 with arm64 first; an x86_64-scoped OpenVEX
+suppressed 1 finding in one order and 0 in the other. Now both orders read 45 and 3+1.
+
 **Gives up.** Two listings of one package inside `components`, or both inside the subject tree,
 are not merged at all (as before) and are each judged on what they state. A contradiction makes the
 whole package unevaluated, including findings every reading of the document would have produced
