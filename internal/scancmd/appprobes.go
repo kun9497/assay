@@ -616,6 +616,9 @@ func resolveChain(dir, target string, links map[string]source.Link) (final strin
 		if !ok || l.Hard || l.Target == "" {
 			continue
 		}
+		// A repeat is a cycle; the bound alone would also end it, so a
+		// mutation dropping the repeat check survives -- the check only
+		// spares the forty hops.
 		if seen[name] || len(followed) >= 40 {
 			return name, followed, true
 		}

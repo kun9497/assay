@@ -18,6 +18,8 @@ func TestIsInstalledPackageJSON(t *testing.T) {
 		{"usr/lib/node_modules/package.json", false},                   // the root itself is not a package
 		{"usr/lib/node_modules/npm/my-package.json", false},            // not package.json
 		{"usr/lib/node_modules/@types/package.json", false},            // a scope directory is not a package
+		{"usr/lib/node_modules/.bin/package.json", false},              // npm's own dot directory (QA 2026-11-11)
+		{"usr/lib/node_modules/.pnpm/x@1.0.0/node_modules/x/package.json", true},
 		{"app/node_modules/left-pad/package.json", true},               // the rule is about shape; roots are the probe's business
 	} {
 		if got := IsInstalledPackageJSON(tc.path); got != tc.want {
