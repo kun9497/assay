@@ -8413,7 +8413,11 @@ judged a clean label at v1.0.0 TN against a v2.0.0 capture, where the live scan 
 review). A capture that records no target digest cannot be proven and is treated the same way. Such a
 capture is set aside before the run-wide database check, so it neither fixes the database the run
 is held to nor is held to it (review round 2: a stale capture sorting first had turned every proven
-case into a digest mismatch, exit 2).*
+case into a digest mismatch, exit 2). The run's database is whatever the FIRST trusted capture
+recorded, an empty digest -- a locally built database -- included (QA 2026-11-11): a local-database
+capture sorting first had set no digest, so a published-database capture after it set the run's
+and both passed as the published database's; the other order was exit 2. Either order is now the
+same ERROR, and two local captures are one run.*
 
 **Decision.** A second measuring tool beside the differential. `cmd/truthset` scans each
 labelled package the way the SBOM path scans it — a one-component CycloneDX document carrying
@@ -8634,6 +8638,11 @@ python -c "import json,sys; d=json.load(open(sys.argv[1])); print({c['ecosystem'
 **Verified.** On the 2026-11-09 weekly capture: the four originals hold every floor in both modes,
 and all 26 targets stay `ok` in both; each removal variant breaches `minApplicationPackages.<eco>`
 with exit 1 in both modes, where the v0.17.0 `scandiff` said `ok`. 8/8 mutations caught.
+
+**Revised 2026-11-11 (QA).** `scandiff -offline` holds each capture to the floors file's pinned ref:
+the capture's `provenance.target.argument` (D120) must name the ref's digest, else the target is an
+ERROR with the reason -- a BCI capture kept under a target re-pinned to an Alpine digest had passed
+both modes. A capture from before D120 records no target and is taken as it was.
 
 **Gives up.** A partial loss above the floor (ubi8n18 down to 118 npm packages) is not caught by
 this floor; the finding floors and D117's ceiling see some of it. A floor is re-cut by hand when a
