@@ -360,8 +360,9 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 		// layer decides the component in that layer, before any lower one
 		// is read, so the cross-layer marker sets are not consulted for it
 		// (a check against them was built and removed as an equivalent). A
-		// component a newer layer decided is skipped at the entry: that
-		// skip is the newest-layer-wins rule.
+		// component a newer layer decided by an entry is skipped at the
+		// entry for speed alone: the merge after the layer is what keeps
+		// the newest layer's word (a mutation dropping the skip survives).
 		layerPre := make([]map[string]preSay, len(qs))
 		for k, q := range qs {
 			if preOf[k] == nil || done[k] || i > q.top {
