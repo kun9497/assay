@@ -172,7 +172,7 @@ func catalogSubject(subject component, ctx osContext, target *pkgmeta.Target, st
 			keyed[id] = r
 		}
 	}
-	d := &dedupe{keyed: keyed, snaps: map[int]pkgmeta.Package{}, refused: map[int]pkgmeta.Package{}}
+	d := &dedupe{keyed: keyed, snaps: map[int]pkgmeta.Package{}, refused: map[int]pkgmeta.Package{}, installs: map[int]pkgmeta.Package{}}
 	// The subject is keyed in the document's top-level context, as its
 	// top-level twin would be; its children in theirs (contextFor).
 	scratchTarget := pkgmeta.Target{}
@@ -202,6 +202,69 @@ func catalogSubject(subject component, ctx osContext, target *pkgmeta.Target, st
 		}
 		markSourceContradiction(&target.Packages[i], target.Packages[i], d.refused[i])
 	}
+	weighBareListings(d, target)
+}
+
+// weighBareListings lends every bare top-level listing of an identity, as
+// stated, to each install of it -- all of them together, after the whole
+// document is read, so the document's order decides nothing. An install
+// takes the evidence of every bare listing it does not contradict; when two
+// of those contradict EACH OTHER the install is left unjudged with both
+// values in the reason (D165): the document states its source two ways and
+// the install states none. Weighing as each install was met (release check
+// of main 60c512c) had judged an install that joined a bare listing before
+// the contradicting ones were read -- `[u13, u14, none]` with the sourceless
+// install last read 90 findings and exit 0, `[u13, none, u14]` 70 and exit 2
+// -- because a join weighed nothing and an own weighed only what had been
+// joined by then.
+func weighBareListings(d *dedupe, target *pkgmeta.Target) {
+	// The pool is the bare listings an install joined (snaps), as they
+	// stood before the join: a bare listing no install could join stays a
+	// package of its own -- the third listing of a package listed twice,
+	// or one the document keys to two releases (ambiguous), which is
+	// nobody's evidence -- as D166 has it.
+	pool := map[string][]pkgmeta.Package{}
+	for _, i := range sortedKeys(d.snaps) {
+		s := d.snaps[i]
+		k := bareIdentity(s)
+		pool[k] = append(pool[k], s)
+	}
+	for _, idx := range sortedKeys(d.installs) {
+		p := d.installs[idx]
+		var cands []pkgmeta.Package
+		for _, s := range pool[bareIdentity(p)] {
+			if (s.Ecosystem == "" || p.Ecosystem == "" || s.Ecosystem == p.Ecosystem) && !contradicts(p, s) {
+				cands = append(cands, s)
+			}
+		}
+		// The pair that contradicts is the pair named: any two of the
+		// candidates, not the first two (release check of main 60c512c:
+		// marked with the first and the second -- a listing with no
+		// source, which marks nothing -- the install was judged on its
+		// own version in one placement and left unjudged in another).
+		var a, b *pkgmeta.Package
+		for i := 0; i < len(cands) && a == nil; i++ {
+			for j := i + 1; j < len(cands); j++ {
+				if contradicts(cands[i], cands[j]) {
+					a, b = &cands[i], &cands[j]
+					break
+				}
+			}
+		}
+		if a != nil {
+			markSourceContradiction(&target.Packages[idx], *a, *b)
+			continue
+		}
+		for _, s := range cands {
+			keepEvidence(&target.Packages[idx], s)
+		}
+	}
+}
+
+// bareIdentity is identity without the architecture: what a bare listing
+// and an arch-stating one of one package share.
+func bareIdentity(p pkgmeta.Package) string {
+	return p.Type + "\x00" + p.Name + "\x00" + p.Version
 }
 
 // dedupe is the state the subject walk's merges share (catalogSubject).
@@ -214,6 +277,11 @@ type dedupe struct {
 	// refused is, per base index of a bare listing, the first arch-stating
 	// twin it could not be (their statements contradict).
 	refused map[int]pkgmeta.Package
+	// installs is, per index in the inventory, each arch-stating listing
+	// AS LISTED: the bare listings of its identity are weighed against it
+	// once the whole document is read (weighBareListings), not as each is
+	// met.
+	installs map[int]pkgmeta.Package
 }
 
 // catalogDeduped is catalog for the subject's nested components: the same
@@ -255,46 +323,17 @@ func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, d 
 	// own appends p as its own install. A bare listing of the identity that
 	// joined an earlier twin is evidence for an arch-stating one too.
 	own := func(p pkgmeta.Package) {
-		// Every bare listing of the identity is a candidate, in the
-		// document's order (release check of main 5197df4: a Go map walk
-		// lent whichever candidate came first and dropped the next as a
-		// contradiction, so one SBOM read 70 findings or 65 by run). Two
-		// candidates that contradict EACH OTHER leave the install unjudged
-		// with the reason: the document states its source two ways and
-		// the install states none.
-		if p.Arch != "" {
-			// Every bare listing of the identity is a candidate, judged
-			// against the install AS LISTED (release check of main 5197df4:
-			// a Go map walk lent whichever candidate came first and dropped
-			// the next as contradicting what it had just lent, so one SBOM
-			// read 70 findings or 65 by run). Two candidates that
-			// contradict EACH OTHER leave the install unjudged with the
-			// reason: the document states its source two ways and the
-			// install states none. Walked in the document's order for the
-			// reason text alone -- lending is a union, and the marked
-			// reason sorts the two values -- so a mutation walking the map
-			// survives, as does one that lends both and lets keepEvidence
-			// mark the second: both are equivalents, not gaps.
-			var cands []pkgmeta.Package
-			for _, i := range sortedKeys(d.snaps) {
-				s := d.snaps[i]
-				if s.Type == p.Type && s.Name == p.Name && s.Version == p.Version && (s.Ecosystem == "" || p.Ecosystem == "" || s.Ecosystem == p.Ecosystem) && !contradicts(p, s) {
-					cands = append(cands, s)
-				}
-			}
-			conflict := false
-			for i := 1; i < len(cands) && !conflict; i++ {
-				conflict = contradicts(cands[0], cands[i])
-			}
-			if conflict {
-				markSourceContradiction(&p, cands[0], cands[1])
-			} else {
-				for _, s := range cands {
-					keepEvidence(&p, s)
-				}
-			}
-		}
+		// An arch-stating listing's bare twins are weighed against it once
+		// the whole document is read (weighBareListings), as they are for
+		// an install that joined one (release check of main 5197df4: a Go
+		// map walk here lent whichever came first and dropped the next as
+		// a contradiction, 70 findings or 65 by run; release check of main
+		// 60c512c: weighing only what had been joined by then judged the
+		// install one placement and not another).
 		target.Packages = append(target.Packages, p)
+		if p.Arch != "" {
+			d.installs[len(target.Packages)-1] = p
+		}
 		stats.Components += scratchStats.Components
 		stats.Cataloged += scratchStats.Cataloged
 		stats.SkippedNoPURL += scratchStats.SkippedNoPURL
@@ -357,8 +396,11 @@ func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, d 
 					if _, ok := d.snaps[i]; !ok {
 						d.snaps[i] = stated
 					}
+					d.installs[i] = p
 					kept.Arch = p.Arch
-					kept.PURL = mergePURL(kept.PURL, p.PURL)
+					// The install's own qualifiers win over the bare
+					// listing's (mergePURL): kept is the install from here.
+					kept.PURL = mergePURL(p.PURL, kept.PURL, kept.Ecosystem)
 					keepEvidence(kept, p)
 					return
 				}
@@ -374,7 +416,7 @@ func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, d 
 				markSourceContradiction(&p, p, *kept)
 			default:
 				if kept.Arch != "" && p.Arch == "" {
-					kept.PURL = mergePURL(kept.PURL, p.PURL)
+					kept.PURL = mergePURL(kept.PURL, p.PURL, kept.Ecosystem)
 				}
 				keepEvidence(kept, p)
 				return
@@ -451,8 +493,20 @@ func sortedKeys(m map[int]pkgmeta.Package) []int {
 // join must not drop what one listing confirmed (release check of main
 // b732cac: the twin's purl replaced the kept one whole, and a VEX statement
 // scoped by the dropped `distro=` no longer reached the install). On a
-// qualifier both state, other's value wins, as its architecture did.
-func mergePURL(kept, other string) string {
+// qualifier both state, kept's value stands: the install is the kept
+// listing, and the other's value for the same qualifier is at best the same
+// and at worst another listing's (release check of main 60c512c: a bare
+// twin's `distro=alpine-3.20` overwrote the install's `alpine-3.19`, the
+// release the package was evaluated under, and a VEX statement written for
+// 3.20 exonerated the 3.19 install -- 2 findings hidden, exit 0). A
+// `distro=` from either side is carried only when it names the release the
+// package is keyed to (ecosystem); one naming another release is the
+// document contradicting itself and is left off, so the purl the VEX
+// matcher sees agrees with the evaluation. A version the kept purl lacks
+// (a top-level purl written without `@version`) is taken from the other,
+// which lists the same version by identity, so a version-scoped statement
+// still reaches the install.
+func mergePURL(kept, other, ecosystem string) string {
 	kp, kerr := pkgmeta.ParsePURL(kept)
 	op, oerr := pkgmeta.ParsePURL(other)
 	switch {
@@ -464,8 +518,24 @@ func mergePURL(kept, other string) string {
 	if kp.Qualifiers == nil {
 		kp.Qualifiers = map[string]string{}
 	}
+	if kp.Version == "" {
+		kp.Version = op.Version
+	}
 	for k, v := range op.Qualifiers {
-		kp.Qualifiers[k] = v
+		if _, stated := kp.Qualifiers[k]; !stated {
+			kp.Qualifiers[k] = v
+		}
+	}
+	if d, ok := kp.Qualifiers["distro"]; ok && ecosystem != "" {
+		if eco, known := pkgmeta.EcosystemForDistroQualifier(d); known && eco != ecosystem {
+			if od, ok := op.Qualifiers["distro"]; ok {
+				if oeco, known := pkgmeta.EcosystemForDistroQualifier(od); known && oeco == ecosystem {
+					kp.Qualifiers["distro"] = od
+					return kp.String()
+				}
+			}
+			delete(kp.Qualifiers, "distro")
+		}
 	}
 	return kp.String()
 }
