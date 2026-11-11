@@ -140,29 +140,43 @@ func TestRun_RC4_EveryAliasOfAnInstallIsLocatedInALayer(t *testing.T) {
 		lib   = "usr/lib/node_modules/minimatch/package.json"
 		local = "usr/local/lib/node_modules/minimatch/package.json"
 	)
-	tarPath := filepath.Join(t.TempDir(), "image.tar")
-	// Lower: an external store one root links to, and a copy at the other
-	// root's own name; upper: the other root re-pointed at the store too,
-	// so the two names are one install, the second given in the upper
-	// layer.
-	ids := writeLayeredProbeImage(t, tarPath,
-		append(alpineLayer(), probeLayerEntry{name: "opt/store/minimatch/package.json", body: v4}, probeLayerEntry{name: "usr/local/lib/node_modules", link: "/opt/store"}, probeLayerEntry{name: lib, body: v4}),
-		[]probeLayerEntry{{name: "usr/lib/node_modules", link: "/opt/store"}},
-	)
-	var out, errOut bytes.Buffer
-	code := Run(context.Background(), probeDB(t), "docker-archive:"+tarPath, Options{Output: "json", FailOn: &bandLow, FailOnUnknown: true}, &out, &errOut)
-	var doc report.Document
-	if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
-		t.Fatalf("decode: %v\n%s", err, errOut.String())
-	}
-	if code != 1 || len(doc.Findings) != 1 {
-		t.Fatalf("exit=%d findings=%d; want 1 and one finding (one install, two names)\n%s", code, len(doc.Findings), errOut.String())
-	}
-	layers := map[string]string{}
-	for _, l := range doc.Findings[0].Package.Locations {
-		layers[l.Path] = l.LayerDigest
-	}
-	if layers[local] != ids[0] || layers[lib] != ids[1] {
-		t.Errorf("layers %v; want %s at %s (the file's layer) and %s at %s (the layer that re-pointed the root)", layers, ids[0], local, ids[1], lib)
+	for _, tc := range []struct {
+		name  string
+		lower []probeLayerEntry
+		upper []probeLayerEntry
+		alias string
+	}{
+		// Lower: an external store one root links to, and a copy at the
+		// other root's own name; upper: the other root re-pointed at the
+		// store too, so the two names are one install, the second given in
+		// the upper layer.
+		{"two roots to one external store", append(alpineLayer(), probeLayerEntry{name: "opt/store/minimatch/package.json", body: v4}, probeLayerEntry{name: "usr/local/lib/node_modules", link: "/opt/store"}, probeLayerEntry{name: lib, body: v4}),
+			[]probeLayerEntry{{name: "usr/lib/node_modules", link: "/opt/store"}}, lib},
+		// Lower: an install under one root; upper: the other root
+		// re-pointed at a directory holding that root, so the install's
+		// own name is the package and the second name its alias.
+		{"a root re-pointed at a directory holding another root's install", append(alpineLayer(), probeLayerEntry{name: local, body: v4}),
+			[]probeLayerEntry{{name: "usr/lib/node_modules", link: "/usr/local/lib"}}, "usr/lib/node_modules/node_modules/minimatch/package.json"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tarPath := filepath.Join(t.TempDir(), "image.tar")
+			ids := writeLayeredProbeImage(t, tarPath, tc.lower, tc.upper)
+			var out, errOut bytes.Buffer
+			code := Run(context.Background(), probeDB(t), "docker-archive:"+tarPath, Options{Output: "json", FailOn: &bandLow, FailOnUnknown: true}, &out, &errOut)
+			var doc report.Document
+			if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+				t.Fatalf("decode: %v\n%s", err, errOut.String())
+			}
+			if code != 1 || len(doc.Findings) != 1 {
+				t.Fatalf("exit=%d findings=%d; want 1 and one finding (one install, two names)\n%s", code, len(doc.Findings), errOut.String())
+			}
+			layers := map[string]string{}
+			for _, l := range doc.Findings[0].Package.Locations {
+				layers[l.Path] = l.LayerDigest
+			}
+			if layers[local] != ids[0] || layers[tc.alias] != ids[1] {
+				t.Errorf("layers %v; want %s at %s (the file's layer) and %s at %s (the layer that re-pointed the root)", layers, ids[0], local, ids[1], tc.alias)
+			}
+		})
 	}
 }

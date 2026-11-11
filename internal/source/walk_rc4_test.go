@@ -2,6 +2,7 @@ package source
 
 import (
 	"archive/tar"
+	"strings"
 	"testing"
 )
 
@@ -56,6 +57,37 @@ func TestFiles_DotDotFoldsOneComponentAtATime(t *testing.T) {
 		img := imageOf(lower(sym("data/route", "/srv/active/deep")))
 		if _, err := img.Files(t.Context(), []string{want}); err != nil {
 			t.Fatal(err)
+		}
+		for _, u := range img.Unresolved() {
+			t.Errorf("unresolved %v, want none", u)
+		}
+	})
+	t.Run("route a symlink below, a directory above: the newest layer's word (fold)", func(t *testing.T) {
+		img := imageOf(lower(sym("data/route", "/srv/active/deep")), layerOfOrdered(t, "sha256:upper", node("data/route", tar.TypeDir)))
+		if f, ok := filesOne(t, img, want); !ok || string(f.Data) != "WRONG" {
+			t.Errorf("got %q (present=%v), want the file at data/packages: the directory above replaced the link", f.Data, ok)
+		}
+	})
+	t.Run("route a symlink, entries beneath it in the same layer: the link stands", func(t *testing.T) {
+		// A tar may carry `data/route -> ...` and then `data/route/x`: the
+		// untar writes x through the link, and route is still the link.
+		img := imageOf(lower(sym("data/route", "/srv/active/deep"), entry{name: "data/route/x", body: "x"}))
+		if f, ok := filesOne(t, img, want); !ok || string(f.Data) != "RIGHT" {
+			t.Errorf("got %q (present=%v), want RIGHT: the explicit link is not overridden by entries beneath", f.Data, ok)
+		}
+	})
+	t.Run("twenty-one folds between twenty-one links are twenty-one links, not forty-two", func(t *testing.T) {
+		// /opt/d/../l/../ repeated: d a directory (fold), l a link to the
+		// other tree (hop), whose parent holds the next d and l. After 21
+		// pairs the path stands in srv.
+		img := imageOf(layerOfOrdered(t, "sha256:one",
+			node("opt/d", tar.TypeDir), node("srv/d", tar.TypeDir), node("opt/x", tar.TypeDir), node("srv/x", tar.TypeDir),
+			sym("opt/l", "/srv/x"), sym("srv/l", "/opt/x"),
+			entry{name: "srv/packages", body: "RIGHT"}, entry{name: "opt/packages", body: "WRONG"},
+			sym(want, "/opt/"+strings.Repeat("d/../l/../", 21)+"packages"),
+		))
+		if f, ok := filesOne(t, img, want); !ok || string(f.Data) != "RIGHT" {
+			t.Errorf("got %q (present=%v), want RIGHT: 21 links are within the limit", f.Data, ok)
 		}
 		for _, u := range img.Unresolved() {
 			t.Errorf("unresolved %v, want none", u)

@@ -345,20 +345,18 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 		// came before, as the untar leaves the last; an entry beneath the
 		// name implies a directory only where nothing explicit said
 		// otherwise; an opaque marker in its parent hides the lower layers'
-		// component, not this layer's own entries. A component an upper
-		// layer's whiteout hides from this layer is decided before the layer
-		// is read: it is gone.
+		// component, not this layer's own entries. A whiteout in an upper
+		// layer decides the component in that layer, before any lower one
+		// is read, so the cross-layer marker sets are not consulted for it
+		// (a check against them was built and removed as an equivalent). A
+		// component a newer layer decided is skipped at the entry: that
+		// skip is the newest-layer-wins rule.
 		layerPre := make([]map[string]preSay, len(qs))
 		for k, q := range qs {
 			if preOf[k] == nil || done[k] || i > q.top {
 				continue
 			}
 			layerPre[k] = map[string]preSay{}
-			for _, pre := range preOf[k] {
-				if preState[k][pre] == preUnknown && hiddenPath(pre, q, i, deleted, opaque) {
-					preState[k][pre] = preNotDir
-				}
-			}
 		}
 		hits := make([]layerHit, len(qs))
 		// above is what this layer wrote at a strict ancestor of each
@@ -527,9 +525,7 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 
 		for k := range qs {
 			for pre, say := range layerPre[k] {
-				if preState[k][pre] == preUnknown {
-					preState[k][pre] = say.v
-				}
+				preState[k][pre] = say.v
 			}
 		}
 		deleted = append(deleted, layerDeleted...)
@@ -731,23 +727,16 @@ func follow(q query, hit layerHit, i, newest int) query {
 // later in its own layer). The directory and opaque rules are isDeleted's and
 // underAnyOpaque's.
 func hiddenFrom(q query, i int, deleted, opaque []whiteout) bool {
-	return hiddenPath(q.path, q, i, deleted, opaque)
-}
-
-// hiddenPath is hiddenFrom for any path read on q's behalf under q's
-// ceilings: the component a ".." follows (resolvePass's preState) is hidden
-// from a layer by the same markers that would hide the path itself.
-func hiddenPath(p string, q query, i int, deleted, opaque []whiteout) bool {
 	reach := func(w whiteout) bool {
 		return w.layer > i && w.layer <= q.top && (w.layer < q.top || w.pos < q.before)
 	}
 	for _, d := range deleted {
-		if reach(d) && (p == d.name || strings.HasPrefix(p, d.name+"/")) {
+		if reach(d) && (q.path == d.name || strings.HasPrefix(q.path, d.name+"/")) {
 			return true
 		}
 	}
 	for _, o := range opaque {
-		if reach(o) && (o.name == "." || strings.HasPrefix(p, o.name+"/")) {
+		if reach(o) && (o.name == "." || strings.HasPrefix(q.path, o.name+"/")) {
 			return true
 		}
 	}
