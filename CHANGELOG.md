@@ -30,6 +30,15 @@ All notable changes to this project are documented here. The format follows
   with no argument field is identified by the digests it records (assay's image digests, grype's
   manifest/repo/image digests, trivy's `Metadata`); one recording neither is accepted with a
   warning under a pinned ref. (D167 revised)
+- CycloneDX, per the release check of main 42b0c09: an OS whose ecosystem keys from its ID alone
+  (Wolfi, Arch) declared with no version beside its packages keys them (openssl read 0 of 84
+  findings, exit 0, as a sibling of a version-less `wolfi`); two known families declared with no
+  release refuse the context whichever was declared last (`debian 11`, `alpine`, `debian` had keyed
+  busybox to Debian: 51 findings); a keyed record stating no architecture keys its arch-stating
+  twins in either order (25 findings; one order had read 0); a bare listing beside an x86_64 and an
+  aarch64 install of one release joins one of them, not both (2 installs, 4 findings; was 1 and 2);
+  and the subject walk is linear again -- a 1,000-package SBOM parses in 4 ms and 3.4 MB where it
+  had taken 544 ms and 490 MB. (D166 revised)
 - `scandiff -offline` holds the grype (`source.target.userInput`) and trivy (`ArtifactName`)
   captures to the pinned ref as it holds assay's, so a target re-pinned with only its assay capture
   regenerated is not judged on the old image's other two; a trivy mismatch on an informational block
