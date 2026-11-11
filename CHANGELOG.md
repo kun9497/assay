@@ -22,6 +22,17 @@ All notable changes to this project are documented here. The format follows
   Truthset report schema 3. (D161 revised, QA 2026-11-10)
 
 ### Fixed
+- Image layers and npm links, per the release check of main 42b0c09: the image's resolver follows
+  a symlink at an intermediate component of a wanted path (a package directory linked to
+  `/opt/current`, re-pointed by an upper layer, had read the old manifest; RHEL 10's
+  `var/lib/rpm` link now reaches the database under the traditional name); a regular file put
+  over a package directory hides the lower layer's manifest (4 stale findings); a linked install
+  whose manifest is itself a link through `lib64` and `..` reads the right file (all 4 findings
+  had been lost), and a re-homed relative manifest link applies its `..` after the link before
+  it; each alias of an install is located in its own layers, so an alias or re-homed root
+  re-pointed in an upper layer is unowned; every alias of a missing install is unread. A whiteout
+  after the file it names in the same layer still removes the file -- what moby's and
+  containerd's untars do, re-read 2026-11-11. (D160 revised)
 - `scandiff -offline` holds the grype (`source.target.userInput`) and trivy (`ArtifactName`)
   captures to the pinned ref as it holds assay's, so a target re-pinned with only its assay capture
   regenerated is not judged on the old image's other two; a trivy mismatch on an informational block
