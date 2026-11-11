@@ -31,6 +31,11 @@ All notable changes to this project are documented here. The format follows
   a `..` inside a link target folds only over a directory the layers show (`/data/absent/../qa-db`
   with no `absent` now falls back to the next apk database: 0 → 7 findings) and never counts as a
   link hop (44 `a/..` over one symlink no longer fail the scan). (D160 revised)
+- `scandiff`, per the release check of main b732cac: a per-tool state file (`ok` + SHA-256,
+  `failed`, `unsaved`) is what a replay trusts, not the files' times -- a failed run's capture
+  moved through a ZIP had replayed as a success, and a success whose capture could not be written
+  over a locked file had left an earlier success standing as its own; trivy's `SchemaVersion:
+  null` diagnostic is a failure, not a measurement of 0. (D167 revised)
 - `scandiff`, per the release check of main 5197df4: a grype capture whose `matches` is not an
   array (`null`, in grype's diagnostic object) is malformed, live and offline; trivy's diagnostic
   JSON is a hard failure on a committed floor (ERROR, was a BREACH measured as 0) and a failed
