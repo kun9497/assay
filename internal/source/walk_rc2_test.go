@@ -75,6 +75,21 @@ func TestFiles_DotDotAfterALinkComponentIsLazy(t *testing.T) {
 			t.Errorf("got %q (present=%v), want RIGHT: opt/route leads to srv/nested/deep, whose parent holds qa-db", f.Data, ok)
 		}
 	})
+	t.Run("through a link whose target is itself a link", func(t *testing.T) {
+		// route -> deep -> /elsewhere/x; the .. climbs from /elsewhere/x,
+		// not from srv/nested/deep, so folding the rest lexically against
+		// the first target would read srv/nested/qa-db.
+		img := imageOf(layerOfOrdered(t, "sha256:one",
+			sym("opt/route", "/srv/nested/deep"),
+			sym("srv/nested/deep", "/elsewhere/x"),
+			entry{name: "srv/nested/qa-db", body: "WRONG"},
+			entry{name: "elsewhere/qa-db", body: "RIGHT"},
+			sym("lib/apk/db/installed", "/opt/route/../qa-db"),
+		))
+		if f, ok := filesOne(t, img, "lib/apk/db/installed"); !ok || string(f.Data) != "RIGHT" {
+			t.Errorf("got %q (present=%v), want RIGHT: the .. applies after deep is followed too", f.Data, ok)
+		}
+	})
 	t.Run("through a plain directory: the .. folds", func(t *testing.T) {
 		img := imageOf(layerOfOrdered(t, "sha256:one",
 			node("opt/route", tar.TypeDir),

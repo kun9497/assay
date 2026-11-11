@@ -85,6 +85,11 @@ func TestRun_RC2_LayersAndRoots(t *testing.T) {
 			probeLayerEntry{name: "opt/new-global/node_modules/minimatch/package.json", body: v4},
 			probeLayerEntry{name: "usr/local/lib", link: "/opt/new-global"},
 		)}, want{[]string{"3.0.4"}, []string{local}, "", report.ScopeRead, nil, 1}, false},
+		{"root's parent is a link; a package-directory link under the physical tree", [][]probeLayerEntry{base(
+			probeLayerEntry{name: "opt/store/package.json", body: v4},
+			probeLayerEntry{name: "opt/new-global/node_modules/minimatch", link: "/opt/store"},
+			probeLayerEntry{name: "usr/local/lib", link: "/opt/new-global"},
+		)}, want{[]string{"3.0.4"}, []string{local}, "", report.ScopeRead, nil, 1}, false},
 		{"root itself is a link outside every root", [][]probeLayerEntry{base(
 			probeLayerEntry{name: "opt/new-global/node_modules/minimatch/package.json", body: v4},
 			probeLayerEntry{name: "usr/local/lib/node_modules", link: "/opt/new-global/node_modules"},
