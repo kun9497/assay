@@ -45,6 +45,12 @@ func IsInstalledPackageJSON(p string) bool {
 		// package; a package.json directly in it is nobody's.
 		return false
 	}
+	if strings.HasPrefix(path.Base(pkgDir), ".") {
+		// npm refuses a package name that starts with a dot, and writes its
+		// own dot directories under node_modules (.bin, .package-lock.json's
+		// neighbours, pnpm's .pnpm store): none is an install.
+		return false
+	}
 	parent := path.Dir(pkgDir)
 	if path.Base(parent) == "node_modules" {
 		return true

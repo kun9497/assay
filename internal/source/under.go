@@ -101,6 +101,17 @@ func (img *Image) collect(ctx context.Context, root string, match func(name stri
 	return out, len(links), err
 }
 
+// underReplaced reports whether a strict ancestor of name is one an upper
+// layer put a file or a link at (collectWith's replaced set).
+func underReplaced(name string, replaced map[string]bool) bool {
+	for p := path.Dir(name); p != "." && p != "/" && p != ""; p = path.Dir(p) {
+		if replaced[p] {
+			return true
+		}
+	}
+	return false
+}
+
 // sniffBytes is how much of a candidate entry collectWith hands to sniff
 // before deciding to read it: four bytes, the length of the ELF magic and
 // of every other magic the image path cares about.
@@ -139,14 +150,28 @@ func (img *Image) collectWith(ctx context.Context, roots []string, match func(na
 	deleted := map[string]bool{}
 	var opaque []string
 	links := map[string]Link{}
+	// replaced is every name an upper layer ended with a file or a link at:
+	// the OCI changeset rules keep an existing path only when both it and
+	// the new entry are directories, so a lower layer's entries BENEATH
+	// such a name are gone from the filesystem without any whiteout -- a
+	// package directory an upper layer replaced with a symlink still read
+	// its old manifest as installed (QA 2026-11-11).
+	replaced := map[string]bool{}
 
 	for i := len(img.Layers) - 1; i >= 0; i-- {
 		l := img.Layers[i]
 		layerDeleted := map[string]bool{}
 		var layerOpaque []string
 		last := map[string]underHit{}
+		// layerNonDir is every matched name this layer wrote a file or a
+		// link at, whether or not an upper layer decided the name again
+		// (found): it still replaced what lower layers hold beneath it.
+		layerNonDir := map[string]bool{}
 
 		err := readLayer(ctx, l, func(name string, h *tar.Header, r io.Reader) error {
+			if underReplaced(name, replaced) {
+				return nil
+			}
 			for _, root := range roots {
 				shadowAncestors(last, name, root)
 			}
@@ -180,6 +205,10 @@ func (img *Image) collectWith(ctx context.Context, roots []string, match func(na
 			// hides an older layer's copy of a file this pass has not seen.
 			if isDeleted(name, deleted) || underAnyOpaque(name, opaque) {
 				return nil
+			}
+			switch h.Typeflag {
+			case tar.TypeSymlink, tar.TypeLink, tar.TypeReg, tar.TypeGNUSparse, tar.TypeCont:
+				layerNonDir[name] = true
 			}
 			if found[name] {
 				return nil
@@ -221,6 +250,14 @@ func (img *Image) collectWith(ctx context.Context, roots []string, match func(na
 			return nil, nil, fmt.Errorf("read layer %s: %w", l.DiffID, err)
 		}
 
+		// A file or link here replaced whatever lower layers hold beneath
+		// the name, whether or not an upper layer decided the name again (a
+		// directory put back above a symlink holds only what that layer
+		// wrote; PR #275 review). Merged after the layer: it hides lower
+		// layers only.
+		for name := range layerNonDir {
+			replaced[name] = true
+		}
 		for name, hit := range last {
 			// An ancestor mark for a name an upper layer already decided.
 			if found[name] {
