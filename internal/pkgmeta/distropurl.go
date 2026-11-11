@@ -284,6 +284,26 @@ func rhelMajorFromRepositoryID(s string) (string, bool) {
 // release to split off and fails rather than building a Distro with an empty
 // half. An empty qualifier (the common case: most purls carry no "distro" at
 // all) fails the same way.
+// EcosystemForDistroQualifier is the ecosystem key a purl's `distro=`
+// qualifier names on its own (`alpine-3.19` is Alpine:v3.19), or false when
+// the value does not parse or keys to nothing. A VEX statement scoped by
+// such a qualifier is held to the release the package was EVALUATED under,
+// not to the spelling on its purl (release check of main 60c512c: a listing
+// carrying `distro=alpine-3.20` under a document whose OS is Alpine 3.19 is
+// judged on 3.19's data, and a statement written for 3.20 must not exonerate
+// it).
+func EcosystemForDistroQualifier(q string) (string, bool) {
+	d, ok := distroFromQualifier(q)
+	if !ok {
+		return "", false
+	}
+	eco, err := d.Ecosystem()
+	if err != nil || eco == "" {
+		return "", false
+	}
+	return eco, true
+}
+
 func distroFromQualifier(s string) (Distro, bool) {
 	i := strings.LastIndexByte(s, '-')
 	if i <= 0 || i == len(s)-1 {
