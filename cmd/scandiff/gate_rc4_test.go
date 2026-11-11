@@ -224,3 +224,60 @@ func TestRun_RC4_ACaptureWithoutARecordReplaysAsBefore(t *testing.T) {
 		t.Errorf("record without the grype outcome: exit=%d stderr=%q; want 2 and the missing scan named", code, errOut.String())
 	}
 }
+
+// PR #289 review: a failed run that could write neither the record's start
+// nor its end (both held open) but could write its state file and marker
+// leaves the earlier run's complete record in place; the state file beside
+// the capture disagrees with that record, and the replay is refused even
+// after a reader removed the marker.
+func TestRun_RC4_AStateFileThatContradictsTheRecordRefusesTheReplay(t *testing.T) {
+	target := Target{Name: "t", Ref: "ref-t"}
+	targetsPath := writeTargetsFile(t, []Target{target})
+	dir := t.TempDir()
+	live := func(grype stub) (int, string) {
+		exec := newFakeExec(t, map[string]stub{"ref-t": {out: assayDoc(0, nil), code: 0}}, map[string]stub{"ref-t": grype})
+		var out, errOut bytes.Buffer
+		code := run([]string{"-targets", targetsPath, "-assay", "a", "-grype", "g", "-capture", dir}, &out, &errOut, exec)
+		return code, errOut.String()
+	}
+	offline := func() (int, string) {
+		var out, errOut bytes.Buffer
+		code := run([]string{"-targets", targetsPath, "-offline", dir}, &out, &errOut, noExec(t))
+		return code, errOut.String()
+	}
+	if code, stderr := live(stub{out: grypeDoc(nil), code: 0}); code != exitOK {
+		t.Fatalf("seed: exit=%d stderr=%q", code, stderr)
+	}
+	good := filepath.Join(dir, "t.grype.json")
+	earlier, err := os.ReadFile(good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := writeRunRecordFile
+	writeRunRecordFile = func(path string, data []byte) error { return os.ErrPermission }
+	code, stderr := live(stub{out: []byte(`{"error":"scan failed"}`), code: 2})
+	writeRunRecordFile = prev
+	if code != exitError || !strings.Contains(stderr, "warning: write run record") {
+		t.Fatalf("failed run with the record held: exit=%d stderr=%q; want 2 with the record warning", code, stderr)
+	}
+	// The earlier success capture the run could not remove is back; the
+	// marker and the failed state are the run's own.
+	if err := os.WriteFile(good, earlier, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, stderr := offline(); code != exitError {
+		t.Errorf("replay with the marker: exit=%d stderr=%q; want 2", code, stderr)
+	}
+	if err := os.Remove(filepath.Join(dir, "t.grype.failed.json")); err != nil {
+		t.Fatal(err)
+	}
+	if code, stderr := offline(); code != exitError || !strings.Contains(stderr, "state file beside it says failed") {
+		t.Errorf("replay with the marker removed: exit=%d stderr=%q; want 2, the state file's word named", code, stderr)
+	}
+	if code, stderr := live(stub{out: grypeDoc(nil), code: 0}); code != exitOK {
+		t.Fatalf("recovery: exit=%d stderr=%q", code, stderr)
+	}
+	if code, stderr := offline(); code != exitOK {
+		t.Errorf("replay after recovery: exit=%d stderr=%q; want 0", code, stderr)
+	}
+}

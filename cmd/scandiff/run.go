@@ -526,6 +526,16 @@ func readCapture(dir, name, kind string, rec *runRecord) ([]byte, string) {
 		if st.Result != captureOK {
 			return nil, fmt.Sprintf("offline %s capture %s is not this run's: the last run %s (%s)", kind, filepath.Base(good), st.Result, st.Reason)
 		}
+		// The state file beside the capture must agree with the record: a
+		// run that could write neither record (held open) but could write
+		// its state leaves the earlier run's complete record saying ok over
+		// a state saying failed, and the record alone would replay the
+		// earlier bytes once the marker was removed (PR #289 review).
+		if fst, ferr := readState(dir, name, kind); ferr != nil {
+			return nil, fmt.Sprintf("read offline %s capture state: %v", kind, ferr)
+		} else if fst != nil && (fst.Result != captureOK || fst.SHA256 != st.SHA256) {
+			return nil, fmt.Sprintf("offline %s capture %s is not this run's: run %s's record says ok but the state file beside it says %s (%s); the record is an earlier run's the last run could not replace", kind, filepath.Base(good), rec.ID, fst.Result, fst.Reason)
+		}
 		if _, ferr := os.Stat(failed); ferr == nil {
 			return nil, fmt.Sprintf("offline %s capture %s sits beside a failed-run marker run %s could not remove; remove %s after reading it", kind, filepath.Base(good), rec.ID, filepath.Base(failed))
 		}
