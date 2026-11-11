@@ -1,6 +1,9 @@
 package main
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 // cveRe matches a bare CVE identifier -- nothing else. GHSA-, ALAS2023-,
 // RLSA-, RHSA- and similar advisory IDs are deliberately NOT CVE-shaped, so
@@ -46,7 +49,23 @@ type assayDocument struct {
 type assayProvenance struct {
 	Target struct {
 		Argument string `json:"argument"`
+		// Image is the platform-resolved image the scan read (D119, D120):
+		// its digests identify the capture when the argument alone cannot.
+		Image *assayImageRecord `json:"image"`
 	} `json:"target"`
+}
+
+type assayImageRecord struct {
+	ManifestDigest string `json:"manifestDigest"`
+	IndexDigest    string `json:"indexDigest"`
+}
+
+// digests is every digest the capture records for the image it scanned.
+func (p assayProvenance) digests() []string {
+	if p.Target.Image == nil {
+		return nil
+	}
+	return []string{p.Target.Image.IndexDigest, p.Target.Image.ManifestDigest}
 }
 
 type assayCoverage struct {
@@ -156,9 +175,25 @@ type grypeDocument struct {
 	// was a scan of, held to the target's pinned ref like assay's.
 	Source struct {
 		Target struct {
-			UserInput string `json:"userInput"`
+			UserInput      string   `json:"userInput"`
+			ImageID        string   `json:"imageID"`
+			ManifestDigest string   `json:"manifestDigest"`
+			RepoDigests    []string `json:"repoDigests"`
 		} `json:"target"`
 	} `json:"source"`
+}
+
+// digests is every digest grype's capture records for the image it scanned:
+// the manifest it resolved, the repository digests it was pulled by, and
+// the config (image id).
+func (d grypeDocument) digests() []string {
+	out := []string{d.Source.Target.ManifestDigest, d.Source.Target.ImageID}
+	for _, r := range d.Source.Target.RepoDigests {
+		if _, dg, ok := strings.Cut(r, "@"); ok {
+			out = append(out, dg)
+		}
+	}
+	return out
 }
 
 type grypeMatch struct {
@@ -302,6 +337,21 @@ type trivyDocument struct {
 	// ArtifactName is the image trivy scanned, as given: an offline
 	// capture's is held to the target's pinned ref like assay's.
 	ArtifactName string `json:"ArtifactName"`
+	Metadata     struct {
+		ImageID     string   `json:"ImageID"`
+		RepoDigests []string `json:"RepoDigests"`
+	} `json:"Metadata"`
+}
+
+// digests is every digest trivy's capture records for the image it scanned.
+func (d trivyDocument) digests() []string {
+	out := []string{d.Metadata.ImageID}
+	for _, r := range d.Metadata.RepoDigests {
+		if _, dg, ok := strings.Cut(r, "@"); ok {
+			out = append(out, dg)
+		}
+	}
+	return out
 }
 
 type trivyResult struct {

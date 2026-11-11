@@ -164,9 +164,11 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 		var fatal string
 
 		if live {
-			assayRaw, grypeRaw, fatal = scanLive(execScan, *assayBin, *grypeBin, t, stderr)
-			writeCapture(stderr, *captureDir, t.Name, "assay", assayRaw)
-			writeCapture(stderr, *captureDir, t.Name, "grype", grypeRaw)
+			var assayFatal, grypeFatal string
+			assayRaw, grypeRaw, assayFatal, grypeFatal = scanLive(execScan, *assayBin, *grypeBin, t, stderr)
+			fatal = joinFatal(assayFatal, grypeFatal)
+			writeCapture(stderr, *captureDir, t.Name, "assay", assayRaw, assayFatal == "")
+			writeCapture(stderr, *captureDir, t.Name, "grype", grypeRaw, grypeFatal == "")
 		} else {
 			assayRaw, grypeRaw, fatal = readOffline(*offlineDir, t)
 		}
@@ -185,6 +187,12 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 			worst = exitError
 			continue
 		}
+		if why := assayShape(assayRaw); why != "" {
+			fmt.Fprintf(stderr, "error: target=%s malformed assay JSON: %s\n", t.Name, why)
+			rows = append(rows, row{Target: t.Name, Verdict: "ERROR"})
+			worst = exitError
+			continue
+		}
 		// An offline capture is held to the floors file's pinned ref (QA
 		// 2026-11-11): a target renamed or re-pinned in the file, with an old
 		// capture still under its name, was judged as that capture -- a BCI
@@ -195,7 +203,7 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 		// t.Ref by construction, so checking it too would change nothing:
 		// the !live guard states the intent, and its mutation survives.
 		if !live {
-			if why := captureMismatch(t, adoc.Provenance.Target.Argument, "assay"); why != "" {
+			if why := captureMismatch(t, adoc.Provenance.Target.Argument, adoc.Provenance.digests(), "assay", stderr); why != "" {
 				fmt.Fprintf(stderr, "error: target=%s %s\n", t.Name, why)
 				rows = append(rows, row{Target: t.Name, Verdict: "ERROR"})
 				worst = exitError
@@ -209,11 +217,22 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 			worst = exitError
 			continue
 		}
+		// A document that is JSON but not a grype report -- the diagnostic
+		// object grype writes when a scan fails -- decodes to zero matches,
+		// which read as 101 agreements collapsing to 0 and the gate passing
+		// (release check 2026-11-11). Judged by shape, live or offline, so a
+		// capture of such a run cannot pass offline either.
+		if why := grypeShape(grypeRaw); why != "" {
+			fmt.Fprintf(stderr, "error: target=%s malformed grype JSON: %s\n", t.Name, why)
+			rows = append(rows, row{Target: t.Name, Verdict: "ERROR"})
+			worst = exitError
+			continue
+		}
 		// The grype capture too (PR #276 review): a target re-pinned with
 		// only its assay capture regenerated would be compared against the
 		// old image's grype tuples.
 		if !live {
-			if why := captureMismatch(t, gdoc.Source.Target.UserInput, "grype"); why != "" {
+			if why := captureMismatch(t, gdoc.Source.Target.UserInput, gdoc.digests(), "grype", stderr); why != "" {
 				fmt.Fprintf(stderr, "error: target=%s %s\n", t.Name, why)
 				rows = append(rows, row{Target: t.Name, Verdict: "ERROR"})
 				worst = exitError
@@ -288,18 +307,24 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 // even if the first already failed: D93's -capture directory exists so a
 // human can re-judge a failed target locally, and that needs whatever
 // either side produced, not just the one that failed first.
-func scanLive(execScan execFunc, assayBin, grypeBin string, t Target, stderr io.Writer) (assayRaw, grypeRaw []byte, fatal string) {
-	assayRaw, assayFatal := runAssay(execScan, assayBin, t, stderr)
-	grypeRaw, grypeFatal := runGrype(execScan, grypeBin, t)
+//
+// Each side's fatal reason is returned on its own, so the capture of a
+// scan that failed can be filed apart from a good one (writeCapture).
+func scanLive(execScan execFunc, assayBin, grypeBin string, t Target, stderr io.Writer) (assayRaw, grypeRaw []byte, assayFatal, grypeFatal string) {
+	assayRaw, assayFatal = runAssay(execScan, assayBin, t, stderr)
+	grypeRaw, grypeFatal = runGrype(execScan, grypeBin, t)
+	return assayRaw, grypeRaw, assayFatal, grypeFatal
+}
+
+// joinFatal is the target's one fatal line from both scanners' reasons.
+func joinFatal(assayFatal, grypeFatal string) string {
 	switch {
 	case assayFatal != "" && grypeFatal != "":
-		fatal = assayFatal + "; " + grypeFatal
+		return assayFatal + "; " + grypeFatal
 	case assayFatal != "":
-		fatal = assayFatal
-	case grypeFatal != "":
-		fatal = grypeFatal
+		return assayFatal
 	}
-	return assayRaw, grypeRaw, fatal
+	return grypeFatal
 }
 
 // runAssay runs `assay scan <ref> --output json`. Exit 0 and 1 both mean the
@@ -369,7 +394,43 @@ func runGrype(execScan execFunc, bin string, t Target) (out []byte, fatal string
 		}
 		return out, "malformed grype JSON"
 	}
+	// JSON that is not a grype report -- the `{"error": ...}` diagnostic
+	// a failed scan writes -- with a nonzero exit is the hard failure the
+	// exit code says it is, not a scan of zero matches (release check
+	// 2026-11-11: exit 2 with a diagnostic object passed the gate at 0
+	// agreements). With exit 0 the shape is judged by run, as offline.
+	if code != 0 && grypeShape(out) != "" {
+		return out, fmt.Sprintf("grype hard failure (exit %d)", code)
+	}
 	return out, ""
+}
+
+// grypeShape is "" when raw is a grype report -- a JSON object carrying a
+// `matches` array, empty or not -- and otherwise says what is missing. The
+// field is what every grype -o json document has and no diagnostic object
+// does.
+func grypeShape(raw []byte) string {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return err.Error()
+	}
+	if _, ok := probe["matches"]; !ok {
+		return "no \"matches\" field: not a grype report"
+	}
+	return ""
+}
+
+// assayShape is grypeShape for an assay report: `summary` is what every
+// `assay scan --output json` document has.
+func assayShape(raw []byte) string {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return err.Error()
+	}
+	if _, ok := probe["summary"]; !ok {
+		return "no \"summary\" field: not an assay report"
+	}
+	return ""
 }
 
 // readOffline replays a previous capture instead of scanning. This is the
@@ -387,22 +448,54 @@ func readOffline(dir string, t Target) (assayRaw, grypeRaw []byte, fatal string)
 }
 
 // captureMismatch is "" when an offline capture records, as the target it
-// scanned (arg), the floors file's ref for t -- by digest when the ref pins
-// one (arg must name "@<digest>"), by the whole string otherwise -- or when
-// it records no target at all (an assay capture from before D120). Otherwise
-// it says what the tool's capture was a scan of.
-func captureMismatch(t Target, arg, tool string) string {
-	if arg == "" {
-		return ""
-	}
-	if _, digest, ok := strings.Cut(t.Ref, "@"); ok {
-		if strings.HasSuffix(arg, "@"+digest) {
+// scanned, the floors file's ref for t: by the argument the tool was given
+// (arg -- it must name "@<digest>" when the ref pins one, the whole string
+// otherwise) or, when the argument is absent, by a digest the tool
+// recorded of the image it read (digests: assay's index and manifest
+// digests, grype's manifest, repo and image digests, trivy's repo and image
+// digests), which a digest-pinned ref must be among. A capture whose
+// argument field was stripped but whose digests name another image passed
+// as the pinned ref's (release check 2026-11-11); now the digests decide.
+// A capture that records neither -- an assay capture from before D120, a
+// tool run on a tag with its argument lost -- cannot be checked and is
+// accepted as it was, with a warning saying so: the policy is that an
+// unidentifiable capture is replayed, not refused, because nothing in it
+// contradicts the ref. Otherwise it says what the capture was a scan of.
+func captureMismatch(t Target, arg string, digests []string, tool string, stderr io.Writer) string {
+	_, pinned, isPinned := strings.Cut(t.Ref, "@")
+	if arg != "" {
+		if isPinned {
+			if strings.HasSuffix(arg, "@"+pinned) {
+				return ""
+			}
+		} else if arg == t.Ref {
 			return ""
 		}
-	} else if arg == t.Ref {
+		return fmt.Sprintf("offline %s capture is a scan of %q, not of the target's ref %q", tool, arg, t.Ref)
+	}
+	var recorded []string
+	for _, d := range digests {
+		if d != "" {
+			recorded = append(recorded, d)
+		}
+	}
+	if !isPinned {
+		// Nothing to hold a digest to: a ref with no digest is checked by
+		// the argument alone, and with none recorded there is nothing to
+		// check -- silently, since the fixtures of this package's own
+		// tests are that shape and a warning on each would say nothing.
 		return ""
 	}
-	return fmt.Sprintf("offline %s capture is a scan of %q, not of the target's ref %q", tool, arg, t.Ref)
+	if len(recorded) == 0 {
+		fmt.Fprintf(stderr, "warning: target=%s offline %s capture records no target and no digest; accepted unchecked against the pinned ref\n", t.Name, tool)
+		return ""
+	}
+	for _, d := range recorded {
+		if d == pinned {
+			return ""
+		}
+	}
+	return fmt.Sprintf("offline %s capture records no target and its image digests %v are not the target's pinned %s", tool, recorded, pinned)
 }
 
 // trivyOutcome is trivyPhase's result: whether the target's verdict needs
@@ -435,7 +528,7 @@ func trivyPhase(execScan execFunc, trivyBin, captureDir, offlineDir string, live
 	var fatal string
 	if live {
 		trivyRaw, fatal = runTrivy(execScan, trivyBin, t)
-		writeCapture(stderr, captureDir, t.Name, "trivy", trivyRaw)
+		writeCapture(stderr, captureDir, t.Name, "trivy", trivyRaw, fatal == "")
 	} else {
 		trivyRaw, fatal = readOfflineTrivy(offlineDir, t)
 	}
@@ -461,7 +554,7 @@ func trivyPhase(execScan execFunc, trivyBin, captureDir, offlineDir string, live
 	}
 
 	if !live {
-		if why := captureMismatch(t, tdoc.ArtifactName, "trivy"); why != "" {
+		if why := captureMismatch(t, tdoc.ArtifactName, tdoc.digests(), "trivy", stderr); why != "" {
 			if informational {
 				fmt.Fprintf(stderr, "warning: target=%s trivy (informational): %s\n", t.Name, why)
 				return trivyOK
@@ -550,8 +643,22 @@ func printInfo(stderr io.Writer, info []breach) {
 // on stderr but never fails the run -- a full disk should not turn a
 // passing differential into an untrustworthy one, and the run's own
 // judgment does not depend on this file existing.
-func writeCapture(stderr io.Writer, dir, name, kind string, data []byte) {
+//
+// A scan that failed (ok false: assay exited 2 after its retry, grype or
+// trivy a hard failure) is filed as <name>.<kind>.failed.json: still there
+// for a human to read, but not under the name -offline replays, so a
+// document assay wrote beside its exit 2 cannot pass the gate offline when
+// it failed it live (release check 2026-11-11). The good name is removed
+// too, so a stale capture from an earlier run in the same directory does
+// not stand in for the failed one.
+func writeCapture(stderr io.Writer, dir, name, kind string, data []byte, ok bool) {
 	path := filepath.Join(dir, name+"."+kind+".json")
+	if !ok {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			fmt.Fprintf(stderr, "warning: remove stale capture %s: %v\n", path, err)
+		}
+		path = filepath.Join(dir, name+"."+kind+".failed.json")
+	}
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		fmt.Fprintf(stderr, "warning: write capture %s: %v\n", path, err)
 	}

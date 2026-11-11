@@ -20,6 +20,12 @@
   3. (D161 개정, QA 2026-11-10)
 
 ### Fixed
+- main 42b0c09 릴리스 점검에 따른 `scandiff`: `matches` 필드가 없는 grype 문서(`{"error": …}` 진단)는 malformed이고
+  0이 아닌 종료와 함께 오면 hard failure입니다 — 101건의 일치가 0으로 무너져도 게이트가 통과했었음; `summary`가 없는
+  assay 문서도 malformed입니다. 실패한 스캔의 캡처는 `<name>.<tool>.failed.json`으로 보관하고 정상 이름은 지우므로
+  `-offline`이 실시간 실행이 거부한 것을 승격할 수 없습니다. 인자 필드가 없는 오프라인 캡처는 기록된 digest(assay의
+  이미지 digest, grype의 manifest/repo/image digest, trivy의 `Metadata`)로 식별합니다; 둘 다 없는 캡처는 고정 ref
+  아래서 경고와 함께 받아들입니다. (D167 개정)
 - main 42b0c09 릴리스 점검에 따른 이미지 레이어와 npm 링크: 이미지 해석기가 원하는 경로의 중간 구성 요소에 있는
   심볼릭 링크를 따릅니다(`/opt/current`로 링크된 패키지 디렉터리를 위 레이어가 돌려놓으면 옛 매니페스트를 읽었음;
   RHEL 10의 `var/lib/rpm` 링크가 전통 이름으로 데이터베이스에 닿음); 패키지 디렉터리 위에 놓인 일반 파일이 하위

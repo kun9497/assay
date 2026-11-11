@@ -8731,6 +8731,23 @@ both modes. A capture from before D120 records no target and is taken as it was.
 target re-pinned with only its assay capture regenerated is not judged on the old image's other
 two (PR #276 review); a trivy mismatch on an informational block is a warning.
 
+**Revised 2026-11-11 (release check of main 42b0c09).** Three gate holes. A comparison scanner's
+diagnostic JSON is the failure its exit says: grype exiting 2 with `{"error": ...}` had decoded to
+zero matches, 101 agreements collapsing to 0 and the gate passing; a grype document is now one that
+carries a `matches` field and an assay document one that carries `summary`, judged by shape live and
+offline (`malformed … JSON: no "matches" field`), and a nonzero grype exit with any other JSON is the
+hard failure. A scan that failed -- assay still exiting 2 after its retry, grype or trivy a hard
+failure -- has its capture filed as `<name>.<tool>.failed.json`, with any good capture of that
+name from an earlier run removed, so a human can still read it but `-offline` finds nothing to
+replay: assay's well-formed document beside its exit 2 had failed the gate live and passed it from
+the capture that run wrote. And an offline capture whose argument field is absent is identified by
+the digests the tool recorded of the image it read -- assay's `provenance.target.image` index and
+manifest digests, grype's `source.target` manifest, repo and image digests, trivy's `Metadata`
+repo and image digests -- which a digest-pinned ref must be among; a stripped capture of the BCI
+image had passed under an Alpine pin. The policy for a capture that records neither: under a
+digest-pinned ref it is accepted with a warning saying so (nothing in it contradicts the ref), and
+under a ref with no digest silently, since nothing could be checked.
+
 **Gives up.** A partial loss above the floor (ubi8n18 down to 118 npm packages) is not caught by
 this floor; the finding floors and D117's ceiling see some of it. A floor is re-cut by hand when a
 target's digest moves.
