@@ -30,6 +30,12 @@ All notable changes to this project are documented here. The format follows
   the install it leads to (0 → 4 findings) and one whose target a file replaced reads nothing and
   is unread with the reason (was 4 findings for a hidden copy); every name of an install under a
   re-pointed root carries its layer. (D160 revised)
+- `scandiff`, per the release check of main 60c512c: every live run of a target writes a run
+  record (`<name>.run.json`), incomplete before its first scan and complete with every tool's
+  outcome after its last, and a replay reads it first -- a run interrupted while trivy ran no
+  longer replays its new assay and grype captures beside an earlier run's trivy capture as a pass,
+  and a failed grype run whose state file was held open no longer replays the earlier success as
+  its own; a capture without a record replays as before. (D167 revised)
 - Image npm roots and paths, per the release check of main b732cac: a physical root is resolved
   through the links at its own ancestors (`/opt/active -> /opt/runtime` above a root linked to
   `/opt/active/node_modules` had read the stale copy: 0 → 4 findings, and 0 when the stale copy
