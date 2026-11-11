@@ -481,7 +481,9 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 	// component as a directory the ".." is applied -- every ".." over such
 	// a directory at once, since none of them is a link to follow -- and
 	// the path looked up again (lazyDotDot); a fold is not a link hop. A
-	// component no layer shows ends the path unanswered.
+	// component no layer shows ends the path unanswered. (A mutation
+	// counting the one re-queue as a hop survives: a path folds at most
+	// once per pass, so forty-four `a/..` cost one, not forty-four.)
 	for k, q := range qs {
 		if done[k] || preOf[k] == nil {
 			continue

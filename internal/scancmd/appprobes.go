@@ -395,6 +395,10 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 			continue
 		}
 		any := rehomeRoot(r, final, files, layerOf, layerIndex, append(followed, r), links, underExtra, homes, aliases)
+		// Walked in name order. With the root's own link and the root
+		// ancestors skipped below, the order decides nothing any more (a
+		// mutation walking the map survives); it is kept so a future tie
+		// reads the same every run.
 		for _, n := range sortedNames(links) {
 			nl := links[n]
 			if !strings.HasPrefix(n, final+"/") || isNpmRoot(n) || isRootAncestor(n) || rehomed[n] {
