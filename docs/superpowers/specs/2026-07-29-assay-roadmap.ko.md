@@ -8167,6 +8167,19 @@ Alpine digest로 다시 고정한 대상 아래 남아 있던 BCI 캡처가 두 
 방식으로 묶이므로, assay 캡처만 다시 만든 채 다시 고정한 대상이 옛 이미지의 나머지 둘로 판정되지 않는다(PR #276
 리뷰); 정보성 블록의 trivy 불일치는 경고다.
 
+**2026-11-11 개정 (main 42b0c09 릴리스 점검).** 게이트의 구멍 셋. 비교 스캐너의 진단 JSON은 종료 코드가 말하는 실패다:
+grype가 `{"error": ...}`와 함께 종료 2를 내면 일치 0건으로 해석되어 101건의 일치가 0으로 무너져도 게이트가 통과했다;
+이제 grype 문서는 `matches` 필드를 지닌 것, assay 문서는 `summary`를 지닌 것이며 실시간·오프라인 모두 모양으로
+판정하고(`malformed … JSON: no "matches" field`), 다른 JSON과 함께 오는 0이 아닌 grype 종료는 hard failure다. 실패한
+스캔 — 재시도 후에도 종료 2인 assay, hard failure인 grype나 trivy — 의 캡처는 `<name>.<tool>.failed.json`으로 따로
+보관하고 같은 이름의 이전 정상 캡처는 지우므로, 사람은 여전히 읽을 수 있지만 `-offline`은 재생할 것을 찾지 못한다:
+종료 2 옆의 정상 모양 assay 문서가 실시간으로는 게이트에 실패하고 그 실행이 저장한 캡처로는 통과했었다. 그리고 인자
+필드가 없는 오프라인 캡처는 도구가 읽은 이미지에 대해 기록한 digest로 식별한다 — assay의 `provenance.target.image`
+index·manifest digest, grype의 `source.target` manifest·repo·image digest, trivy의 `Metadata` repo·image digest — digest로
+고정한 ref는 그중에 있어야 한다; 인자를 뺀 BCI 캡처가 Alpine 고정 아래 통과했었다. 둘 다 기록하지 않은 캡처의 정책:
+digest로 고정한 ref 아래서는 그렇다는 경고와 함께 받아들이고(캡처의 무엇도 ref와 모순되지 않으므로), digest 없는 ref
+아래서는 조용히 받아들인다(확인할 것이 없으므로).
+
 **포기하는 것.** 하한 위의 부분 손실(ubi8n18이 npm 118개로 줄어드는 것)은 이 하한이 잡지 못한다; finding 하한과
 D117의 상한이 그 일부를 본다. 대상의 다이제스트가 바뀌면 하한은 사람이 다시 정한다.
 

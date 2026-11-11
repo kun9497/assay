@@ -20,6 +20,12 @@
   3. (D161 개정, QA 2026-11-10)
 
 ### Fixed
+- main 42b0c09 릴리스 점검에 따른 `scandiff`: `matches` 필드가 없는 grype 문서(`{"error": …}` 진단)는 malformed이고
+  0이 아닌 종료와 함께 오면 hard failure입니다 — 101건의 일치가 0으로 무너져도 게이트가 통과했었음; `summary`가 없는
+  assay 문서도 malformed입니다. 실패한 스캔의 캡처는 `<name>.<tool>.failed.json`으로 보관하고 정상 이름은 지우므로
+  `-offline`이 실시간 실행이 거부한 것을 승격할 수 없습니다. 인자 필드가 없는 오프라인 캡처는 기록된 digest(assay의
+  이미지 digest, grype의 manifest/repo/image digest, trivy의 `Metadata`)로 식별합니다; 둘 다 없는 캡처는 고정 ref
+  아래서 경고와 함께 받아들입니다. (D167 개정)
 - `scandiff -offline`은 grype(`source.target.userInput`)와 trivy(`ArtifactName`) 캡처도 assay 캡처처럼 고정 ref에
   묶으므로, assay 캡처만 다시 만든 채 다시 고정한 대상이 옛 이미지의 나머지 둘로 판정되지 않습니다; 정보성 블록의
   trivy 불일치는 경고입니다. (D167 개정; PR #276 리뷰)

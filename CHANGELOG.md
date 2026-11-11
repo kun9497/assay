@@ -22,6 +22,14 @@ All notable changes to this project are documented here. The format follows
   Truthset report schema 3. (D161 revised, QA 2026-11-10)
 
 ### Fixed
+- `scandiff`, per the release check of main 42b0c09: a grype document without a `matches` field
+  (its `{"error": …}` diagnostic) is malformed, and with a nonzero exit the hard failure it is --
+  101 agreements had collapsed to 0 and the gate passed; an assay document without `summary` is
+  malformed likewise. A failed scan's capture is filed as `<name>.<tool>.failed.json` and the
+  good name removed, so `-offline` cannot promote what the live run refused. An offline capture
+  with no argument field is identified by the digests it records (assay's image digests, grype's
+  manifest/repo/image digests, trivy's `Metadata`); one recording neither is accepted with a
+  warning under a pinned ref. (D167 revised)
 - `scandiff -offline` holds the grype (`source.target.userInput`) and trivy (`ArtifactName`)
   captures to the pinned ref as it holds assay's, so a target re-pinned with only its assay capture
   regenerated is not judged on the old image's other two; a trivy mismatch on an informational block
