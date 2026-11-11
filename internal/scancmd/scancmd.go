@@ -262,12 +262,14 @@ const (
 	dpkgStatusDir = "var/lib/dpkg/status.d"
 	// apkDBPathUsrLib is where Wolfi and Chainguard images physically store
 	// the apk database (D88), behind a `lib -> usr/lib` symlink. Image.Files
-	// follows a symlink that IS the requested tar entry; it does not follow
-	// one on a DIRECTORY COMPONENT of a requested path, the same limitation
-	// rpmDBDirs' own comment below names for /var/lib/rpm on RHEL 10 and
-	// Fedora 36+. A probe of apkDBPath alone therefore finds nothing at all
-	// in these images' layers, and without apkDBPaths below, "no supported
-	// package database found" is D43's failure one distro further in.
+	// follows a symlink that IS the requested tar entry and, since the
+	// release check of 2026-11-11, one on a DIRECTORY COMPONENT of a
+	// requested path as well; until then a probe of apkDBPath alone found
+	// nothing at all in these images' layers, and without apkDBPaths below,
+	// "no supported package database found" was D43's failure one distro
+	// further in. The second spelling stays: an image that carries the
+	// database only under the physical name, with no `lib` link entry in
+	// any layer, is found by it.
 	apkDBPathUsrLib = "usr/lib/apk/db/installed"
 	// apkDBPathVarLib is where BellSoft's Alpaquita Linux and Hardened
 	// Containers images store the apk database (D95) — a real regular file
@@ -329,15 +331,16 @@ var apkDBPaths = []string{apkDBPath, apkDBPathUsrLib, apkDBPathVarLib}
 
 // rpmDBDirs are the two places an RPM database lives, newest convention first.
 //
-// BOTH are probed, and that is not belt and braces. `/var/lib/rpm` is a
-// SYMLINK on RHEL 10, CentOS Stream 10, Fedora 36+ and every openSUSE — the
-// real directory moved to /usr/lib/sysimage/rpm with Fedora's RelocateRPMToUsr
-// — and Image.Files matches exact tar entry names. It follows a symlink that IS
-// the wanted path; it does not follow one on a DIRECTORY COMPONENT of it, which
-// is the same limitation that makes distroless status.d a named error (D42).
-// So a reader that probed only the traditional path would find nothing in those
-// images' layers and, without D43's hard error below, would report a 172-package
-// image as having none.
+// BOTH are probed. `/var/lib/rpm` is a SYMLINK on RHEL 10, CentOS Stream 10,
+// Fedora 36+ and every openSUSE — the real directory moved to
+// /usr/lib/sysimage/rpm with Fedora's RelocateRPMToUsr. Image.Files matched
+// exact tar entry names and followed a symlink only when it WAS the wanted
+// path, so a reader that probed only the traditional path found nothing in
+// those images' layers and, without D43's hard error below, would have
+// reported a 172-package image as having none. Since the release check of
+// 2026-11-11 it follows a symlink on a DIRECTORY COMPONENT too
+// (TestCatalogFromImage_DirectorySymlinkIsFollowed); the physical spelling
+// stays for an image whose layers carry no link entry.
 var rpmDBDirs = []string{"usr/lib/sysimage/rpm", "var/lib/rpm"}
 
 // rpmDBFiles are the file names inside those directories, one per backend, all

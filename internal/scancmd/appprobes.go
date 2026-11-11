@@ -142,7 +142,7 @@ func catalogApplicationProbes(ctx context.Context, img *source.Image, owned *fil
 		// the image gives it (PR #275 review: the other names were lost).
 		for _, l := range npmPkgs[i].Locations {
 			for _, a := range aliases[l.Path] {
-				npmPkgs[i].Locations = append(npmPkgs[i].Locations, pkgmeta.Location{Path: a, LayerDigest: l.LayerDigest})
+				npmPkgs[i].Locations = append(npmPkgs[i].Locations, pkgmeta.Location{Path: a, LayerDigest: layerOf[a]})
 			}
 		}
 	}
@@ -302,12 +302,22 @@ func isScopeDir(name string) bool {
 // result".
 func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]source.Link, files map[string][]byte, layerOf map[string]string, layerIndex func(string) int) (unresolved int, aliases map[string][]string, err error) {
 	aliases = map[string][]string{}
+	type alias struct {
+		logical, link string
+		changed       []string
+	}
 	type cand struct {
 		logical, read, link string
 		// changed is every layer the logical path's meaning depends on:
 		// the link's own and each link followed on the way; the file's own
 		// layer joins it once the bytes are read.
 		changed []string
+		// aliases are the install's other names, each with the layers ITS
+		// own chain changed in: an alias re-pointed in an upper layer is
+		// located there, not in the representative's layer (release check
+		// 2026-11-11: the representative's layer put the OS package's
+		// ownership on a path the upper layer had re-pointed).
+		aliases []alias
 	}
 	var cands []cand
 	// A root the image replaced with a link has nothing under its name: a
@@ -360,8 +370,20 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 			case nl.Hard:
 				nl = source.Link{Target: "/" + n, DiffID: nl.DiffID}
 			case !strings.HasPrefix(nl.Target, "/"):
-				nl.Target = "/" + path.Join(path.Dir(n), nl.Target)
+				// Spelled from the physical directory UNFOLDED: a ".." in
+				// the target is applied by resolveChain after the link
+				// before it, as the kernel applies it. path.Join had folded
+				// `hop/../meta.json` to `meta.json` before `hop` (a link to
+				// another directory) was followed, and read the wrong file
+				// (release check 2026-11-11).
+				nl.Target = "/" + path.Dir(n) + "/" + nl.Target
 			}
+			// The logical link's layer is the latest of the root link's
+			// chain and the physical link's own: the root re-pointed in an
+			// upper layer changed what the logical path means, and the OS
+			// package that owned the physical manifest does not own that
+			// (release check 2026-11-11: the owner had been kept).
+			nl.DiffID = newestLayer(append(linkLayers(append(followed, r), links), nl.DiffID), layerIndex)
 			links[logical] = nl
 			rehomed[logical] = true
 		}
@@ -492,10 +514,35 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 		})
 		m := members[0]
 		logical := m.n + "/package.json"
+		c := cand{logical: logical, read: final + "/package.json", link: m.link, changed: linkLayers(append(m.followed, m.n), links)}
 		for _, o := range members[1:] {
-			aliases[logical] = append(aliases[logical], o.n+"/package.json")
+			c.aliases = append(c.aliases, alias{logical: o.n + "/package.json", link: o.link, changed: linkLayers(append(o.followed, o.n), links)})
 		}
-		cands = append(cands, cand{logical: logical, read: final + "/package.json", link: m.link, changed: linkLayers(append(m.followed, m.n), links)})
+		// The manifest at the install may itself be a link the pass
+		// recorded (it sits under a root): walked here like a manifest link
+		// at the logical path, through the links the pass knows, so a
+		// `/lib64/../x` target reads the same file either way (release
+		// check 2026-11-11: a package directory linked to a directory whose
+		// package.json was a link lost lodash's 4 findings -- the image's
+		// resolver folded the ".." before following lib64). A hardlink is
+		// read at its own name, by inode (D130).
+		if ml, ok := links[c.read]; ok && !ml.Hard {
+			mfinal, mfollowed, mcyclic := resolveChain(final, ml.Target, links)
+			if mcyclic {
+				unresolved += 1 + len(c.aliases)
+				img.NoteUnresolved(logical, fmt.Sprintf("npm package link to %q leads to a manifest link to %q that is a symbolic link cycle; nothing was read", m.link, ml.Target))
+				for _, a := range c.aliases {
+					img.NoteUnresolved(a.logical, fmt.Sprintf("npm package link to %q leads to a manifest link to %q that is a symbolic link cycle; nothing was read", a.link, ml.Target))
+				}
+				continue
+			}
+			c.read = mfinal
+			c.changed = append(c.changed, linkLayers(append(mfollowed, final+"/package.json"), links)...)
+			for i := range c.aliases {
+				c.aliases[i].changed = append(c.aliases[i].changed, linkLayers(append(mfollowed, final+"/package.json"), links)...)
+			}
+		}
+		cands = append(cands, c)
 	}
 	if len(cands) == 0 {
 		return unresolved, aliases, nil
@@ -511,11 +558,21 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 	for _, c := range cands {
 		f, ok := got[c.read]
 		if !ok {
-			unresolved++
+			// Every name of the install is unread, not only the one the
+			// probe would have read it under (release check 2026-11-11: two
+			// links to one missing target reported one unread path).
+			unresolved += 1 + len(c.aliases)
 			img.NoteUnresolved(c.logical, fmt.Sprintf("npm package link to %q does not resolve to a package.json the probe can read (missing, or behind a link outside the npm roots and the top-level layout links)", c.link))
+			for _, a := range c.aliases {
+				img.NoteUnresolved(a.logical, fmt.Sprintf("npm package link to %q does not resolve to a package.json the probe can read (missing, or behind a link outside the npm roots and the top-level layout links)", a.link))
+			}
 			continue
 		}
 		files[c.logical] = f.Data
+		for _, a := range c.aliases {
+			aliases[c.logical] = append(aliases[c.logical], a.logical)
+			layerOf[a.logical] = newestLayer(append(a.changed, f.DiffID, f.ViaDiffID), layerIndex)
+		}
 		// The logical path's meaning changed in whichever layer is latest:
 		// the one the bytes came from, the one that made the link, or one
 		// that made a link on the way (a middle link retargeted in an
