@@ -62,7 +62,7 @@ func TestRun_RC1111_ReleaselessEcosystemSiblingKeys(t *testing.T) {
 // `debian` keyed busybox to Debian (51 findings) while `debian 11`, `debian`,
 // `alpine` left it to its `distro=alpine-3.19` qualifier (2): now both orders
 // read the qualifier, and both orders leave a busybox with no qualifier not
-// evaluated.
+// evaluated. One family beside a keyed OS of another family refuses it too.
 func TestRun_RC1111_TwoFamiliesRefuseTheContextInEitherOrder(t *testing.T) {
 	db := rc1111DB(t)
 	const (
@@ -73,7 +73,9 @@ func TestRun_RC1111_TwoFamiliesRefuseTheContextInEitherOrder(t *testing.T) {
 		bare      = `{"type":"library","name":"busybox","version":"1.36.1-r20","purl":"pkg:apk/alpine/busybox@1.36.1-r20?arch=x86_64"}`
 	)
 	strict := Options{FailOn: &bandLow, FailOnUnknown: true, FailOnIncomplete: true, FailOnIncompleteTarget: true}
-	for _, order := range [][]string{{debian11, debian, alpine}, {debian11, alpine, debian}} {
+	// The last two rows: one family against a keyed OS of another, in either
+	// order -- the PR #277 rule, which no test had held on its own.
+	for _, order := range [][]string{{debian11, debian, alpine}, {debian11, alpine, debian}, {debian11, alpine}, {alpine, debian11}} {
 		doc := func(busybox string) string {
 			return qa1111Start + `"components":[` + strings.Join(order, ",") + `,` + busybox + `],"metadata":{"component":{"type":"container","name":"image"}}}`
 		}

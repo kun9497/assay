@@ -311,6 +311,11 @@ func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package, keyed map[string]
 // of that architecture; one that states none meets them all, through the
 // arch-less identity keyedReleases also counts.
 func ambiguous(p pkgmeta.Package, keyed map[string]releases) bool {
+	// keyFor's fallback is consulted here only through a listing stating
+	// an architecture no keyed twin states; the kept listing it would meet
+	// (indexOfPackage's second loop) is then arch-less and refused by its
+	// own ambiguity, so a mutation reading the arch'd identity alone here
+	// survives -- an equivalent, not a gap.
 	return keyFor(p, keyed).n > 1
 }
 
