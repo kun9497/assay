@@ -22,6 +22,16 @@ All notable changes to this project are documented here. The format follows
   Truthset report schema 3. (D161 revised, QA 2026-11-10)
 
 ### Fixed
+- CycloneDX and VEX, per the release check of main 60c512c: three bare listings of one package
+  (two at different source versions, one stating none) left an install that states no source
+  version judged in one placement and unjudged in another; every install is now weighed against
+  every bare listing it could be once the document is read, with the contradicting pair named
+  (70 findings, exit 2, in every placement; was 90 and exit 0 in one). A bare twin's
+  `distro=alpine-3.20` no longer overwrites the install's 3.19 on the merged purl, and a VEX
+  statement scoped by `distro=` is held to the release the package was evaluated under, so a
+  statement for 3.20 does not exonerate a 3.19 install (2 findings back, exit 1); a top-level
+  purl written without `@version` keeps the version its joined listing states. (D166 revised,
+  D121 refined)
 - Image npm roots and paths, per the release check of main b732cac: a physical root is resolved
   through the links at its own ancestors (`/opt/active -> /opt/runtime` above a root linked to
   `/opt/active/node_modules` had read the stale copy: 0 → 4 findings, and 0 when the stale copy
