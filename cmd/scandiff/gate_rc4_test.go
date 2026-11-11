@@ -69,7 +69,7 @@ func TestRun_RC4_InterruptedRunIsNotReplayable(t *testing.T) {
 	dir := t.TempDir()
 	live := func(trivy stub) (int, string) {
 		exec := newFakeExecWithTrivy(t, map[string]stub{"ref-t": {out: assayDoc(0, []assayFinding{{Package: assayPackage{Name: "x"}, Advisory: assayAdvisory{ID: "CVE-0000-0001"}}}), code: 0}},
-			map[string]stub{"ref-t": {out: grypeDoc(nil), code: 0}}, map[string]stub{"ref-t": trivy})
+			map[string]stub{"ref-t": {out: []byte(`{"matches":[{"vulnerability":{"id":"CVE-0000-0001"},"artifact":{"name":"x","version":"1","type":"npm"}}]}`), code: 0}}, map[string]stub{"ref-t": trivy})
 		var out, errOut bytes.Buffer
 		code := run([]string{"-targets", targetsPath, "-assay", "a", "-grype", "g", "-trivy", "y", "-capture", dir}, &out, &errOut, exec)
 		return code, errOut.String()
