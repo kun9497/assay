@@ -441,13 +441,12 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 					// container has it. One BEFORE the entry is overwritten by
 					// it -- the spec's "a whiteout applies to lower layers",
 					// and the order builders emit. For the lower layers the
-					// marker is merged below, as before. For a path holding a
-					// ".." the component before it keeps its own word
-					// (layerPre): a directory this layer recreates after the
-					// marker still folds.
-					if preOf[k] == nil {
-						hits[k] = layerHit{kind: hitGone}
-					}
+					// marker is merged below, as before. (For a path holding a
+					// ".." this ends the search, not the path: the component
+					// before the ".." keeps its own word, layerPre, and a
+					// directory this layer recreates after the marker still
+					// folds -- the fold loop asks answered, not done.)
+					hits[k] = layerHit{kind: hitGone}
 				case marker:
 					// A marker is an instruction, never the file.
 				case strings.HasPrefix(q.path, name+"/"):

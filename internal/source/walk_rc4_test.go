@@ -146,6 +146,14 @@ func TestFiles_DotDotOverAComponentAnUpperLayerRecreated(t *testing.T) {
 			t.Errorf("got %q (present=%v), want RIGHT: data/route/x was written through the standing link", f.Data, ok)
 		}
 	})
+	t.Run("a whiteout of the component below, entries beneath it above: the newer directory stands", func(t *testing.T) {
+		img := imageOf(layerOfOrdered(t, "sha256:lower",
+			entry{name: "data/.wh.marker", body: ""}, entry{name: "data/packages", body: "DB"}, sym(want, "/data/marker/../packages"),
+		), layerOfOrdered(t, "sha256:upper", entry{name: "data/marker/x", body: "x"}))
+		if f, ok := filesOne(t, img, want); !ok || string(f.Data) != "DB" {
+			t.Errorf("got %q (present=%v), want DB: the older deletion does not undo the newer directory", f.Data, ok)
+		}
+	})
 	t.Run("entries beneath a name no layer has an entry for: an implied directory (control)", func(t *testing.T) {
 		img := imageOf(layerOfOrdered(t, "sha256:lower",
 			entry{name: "data/packages", body: "DB"}, sym(want, "/data/marker/../packages"),
