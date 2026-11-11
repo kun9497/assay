@@ -39,10 +39,12 @@ func TestRun_RC4_ThreeSourceCandidatesAgreeInEveryPlacement(t *testing.T) {
 			skips = append(skips, s.Package.PURL+" "+string(s.Cause)+" "+s.Reason)
 		}
 		joined := strings.Join(skips, ";")
-		if r.code != 2 || len(r.findings) != 1 || r.doc.Summary.NotEvaluated != 1 || r.doc.Summary.TargetIncomplete != 1 || r.doc.Summary.Components != 4 ||
+		// amd64 and armhf (source deb11u13) are vulnerable, arm64 (deb11u14)
+		// fixed, i386 unjudged: two findings.
+		if r.code != 2 || len(r.doc.Findings) != 2 || r.doc.Summary.NotEvaluated != 1 || r.doc.Summary.TargetIncomplete != 1 || r.doc.Summary.Components != 4 ||
 			!strings.Contains(joined, "arch=i386") || !strings.Contains(joined, "2.31-13+deb11u13 and 2.31-13+deb11u14") {
-			t.Fatalf("placement %v: exit=%d findings=%v notEvaluated=%d incomplete=%d components=%d skipped=%v; want 2, the amd64/armhf finding, 1, 1, 4, i386 unjudged for deb11u13 and deb11u14",
-				top, r.code, r.findings, r.doc.Summary.NotEvaluated, r.doc.Summary.TargetIncomplete, r.doc.Summary.Components, skips)
+			t.Fatalf("placement %v: exit=%d findings=%d (%v) notEvaluated=%d incomplete=%d components=%d skipped=%v; want 2, the amd64 and armhf findings, 1, 1, 4, i386 unjudged for deb11u13 and deb11u14",
+				top, r.code, len(r.doc.Findings), r.findings, r.doc.Summary.NotEvaluated, r.doc.Summary.TargetIncomplete, r.doc.Summary.Components, skips)
 		}
 		sig := joined
 		for k, v := range r.findings {
@@ -62,8 +64,9 @@ func TestRun_RC4_ThreeSourceCandidatesAgreeInEveryPlacement(t *testing.T) {
 		{"three at one version", []string{rc3B13, rc3B13, rc3B13}},
 	} {
 		r := qa1111Run(t, db, rc2Doc(tc.top, subject), opts)
-		if r.code != 0 || r.doc.Summary.TargetIncomplete != 0 || r.doc.Summary.NotEvaluated != 0 || !strings.Contains(r.findings["DEBIAN-CVE-2026-4046"], "Debian:11") {
-			t.Errorf("%s: exit=%d findings=%v incomplete=%d notEvaluated=%d; want 0, the finding (i386 lent deb11u13), 0, 0", tc.name, r.code, r.findings, r.doc.Summary.TargetIncomplete, r.doc.Summary.NotEvaluated)
+		// i386 lent deb11u13 is vulnerable too: three findings.
+		if r.code != 0 || len(r.doc.Findings) != 3 || r.doc.Summary.TargetIncomplete != 0 || r.doc.Summary.NotEvaluated != 0 || !strings.Contains(r.findings["DEBIAN-CVE-2026-4046"], "Debian:11") {
+			t.Errorf("%s: exit=%d findings=%d (%v) incomplete=%d notEvaluated=%d; want 0, three (i386 lent deb11u13), 0, 0", tc.name, r.code, len(r.doc.Findings), r.findings, r.doc.Summary.TargetIncomplete, r.doc.Summary.NotEvaluated)
 		}
 	}
 }
@@ -149,5 +152,32 @@ func TestRun_RC4_JoinedPURLTakesTheVersionTheTopListingOmitted(t *testing.T) {
 	}
 	if len(r.doc.Suppressed) == 1 && !strings.Contains(r.doc.Suppressed[0].Package.PURL, "busybox@1.36.1-r20") {
 		t.Errorf("suppressed purl %q lacks the version the subject listing stated", r.doc.Suppressed[0].Package.PURL)
+	}
+}
+
+// The merged purl spells the install's own qualifiers where the two listings
+// disagree, whichever listing comes first: the bare listing's value for a
+// qualifier the install states is at best the same (60c512c: the other
+// listing's value won, which is how the 3.20 distro reached the purl).
+func TestRun_RC4_JoinedPURLSpellsTheInstallsQualifiers(t *testing.T) {
+	db := qa1111DB(t)
+	const (
+		install = `{"type":"library","name":"busybox","version":"1.36.1-r20","purl":"pkg:apk/alpine/busybox@1.36.1-r20?arch=x86_64&distro=alpine-3.19&package-id=install","properties":[{"name":"syft:location:0:path","value":"/image/x86/lib/apk/db/installed"}]}`
+		bare    = `{"type":"library","name":"busybox","version":"1.36.1-r20","purl":"pkg:apk/alpine/busybox@1.36.1-r20?distro=alpine-3.19&package-id=bare","properties":[{"name":"syft:location:0:path","value":"/top-unknown"}]}`
+	)
+	for _, tc := range []struct {
+		name         string
+		top, subject []string
+	}{
+		{"install top, bare under the subject", []string{install}, []string{bare}},
+		{"bare top, install under the subject", []string{bare}, []string{install}},
+	} {
+		r := qa1111Run(t, db, rc2Doc(tc.top, tc.subject), Options{FailOn: &bandLow, FailOnUnknown: true})
+		if len(r.doc.Findings) != 1 || r.doc.Summary.Components != 1 {
+			t.Fatalf("%s: findings=%d components=%d; want 1, 1", tc.name, len(r.doc.Findings), r.doc.Summary.Components)
+		}
+		if p := r.doc.Findings[0].Package.PURL; !strings.Contains(p, "package-id=install") || !strings.Contains(p, "arch=x86_64") || !strings.Contains(p, "distro=alpine-3.19") {
+			t.Errorf("%s: purl %q; want the install's package-id with its arch and distro", tc.name, p)
+		}
 	}
 }

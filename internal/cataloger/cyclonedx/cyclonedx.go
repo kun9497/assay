@@ -216,7 +216,15 @@ func catalogSubject(subject component, ctx osContext, target *pkgmeta.Target, st
 // the contradicting ones were read -- `[u13, u14, none]` with the sourceless
 // install last read 90 findings and exit 0, `[u13, none, u14]` 70 and exit 2
 // -- because a join weighed nothing and an own weighed only what had been
-// joined by then.
+// joined by then, and the pair it named was the first two, one of which
+// stated no source and so marked nothing.
+//
+// The lend is keepEvidence in the document's order: the first candidate
+// stating a source version is taken and a later one at another version
+// marks the contradiction, with the two values sorted in the reason, so the
+// order decides neither the verdict nor the text. (A pair search ahead of
+// the lend reaches the same answer on every input; it was built and removed
+// as an equivalent.)
 func weighBareListings(d *dedupe, target *pkgmeta.Target) {
 	// The pool is the bare listings an install joined (snaps), as they
 	// stood before the join: a bare listing no install could join stays a
@@ -236,24 +244,6 @@ func weighBareListings(d *dedupe, target *pkgmeta.Target) {
 			if (s.Ecosystem == "" || p.Ecosystem == "" || s.Ecosystem == p.Ecosystem) && !contradicts(p, s) {
 				cands = append(cands, s)
 			}
-		}
-		// The pair that contradicts is the pair named: any two of the
-		// candidates, not the first two (release check of main 60c512c:
-		// marked with the first and the second -- a listing with no
-		// source, which marks nothing -- the install was judged on its
-		// own version in one placement and left unjudged in another).
-		var a, b *pkgmeta.Package
-		for i := 0; i < len(cands) && a == nil; i++ {
-			for j := i + 1; j < len(cands); j++ {
-				if contradicts(cands[i], cands[j]) {
-					a, b = &cands[i], &cands[j]
-					break
-				}
-			}
-		}
-		if a != nil {
-			markSourceContradiction(&target.Packages[idx], *a, *b)
-			continue
 		}
 		for _, s := range cands {
 			keepEvidence(&target.Packages[idx], s)
