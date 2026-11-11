@@ -22,6 +22,13 @@ All notable changes to this project are documented here. The format follows
   Truthset report schema 3. (D161 revised, QA 2026-11-10)
 
 ### Fixed
+- `scandiff`, per the release check of main 5197df4: a grype capture whose `matches` is not an
+  array (`null`, in grype's diagnostic object) is malformed, live and offline; trivy's diagnostic
+  JSON is a hard failure on a committed floor (ERROR, was a BREACH measured as 0) and a failed
+  measurement on an informational block (a warning, no numbers to paste); a failed run's
+  `.failed.json` marker outlives a locked success capture and the replay fails as the run did until
+  the next successful run; the report's top-level `image` digests identify a capture whose
+  provenance is gone. (D167 revised)
 - Image layers and npm roots, per the release check of main 5197df4: an explicit directory in
   an upper layer replaces a lower layer's symlink at that name, so the database behind the old
   link is no longer read (`lib/apk/db` restored as a directory had lost BusyBox's 7 findings, a
