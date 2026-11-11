@@ -13,6 +13,13 @@ import (
 // is not a distro with no vulnerabilities.
 var ErrNoEcosystem = errors.New("no vulnerability ecosystem for distro")
 
+// ErrUnknownDistroID is the ErrNoEcosystem of an ID this build routes nothing
+// for -- "linux", a vendor's own name -- as opposed to a known distro whose
+// release is missing or unparseable. A CycloneDX reader tells the two apart:
+// an OS component naming a known distro with no version still says which
+// family its packages belong to (QA 2026-11-11).
+var ErrUnknownDistroID = errors.New("unknown distro id")
+
 // Distro identifies the operating system of a Target. It belongs to the target,
 // not to each package (D7): an image is Alpine 3.19; its packages are not.
 // Fields mirror /etc/os-release, which is also what syft reports.
@@ -63,6 +70,16 @@ func ubuntuEvenYearLTS(versionID string) bool {
 		return false
 	}
 	return n%2 == 0
+}
+
+// KnownDistroID reports whether id names a distro family this build routes,
+// whatever its release: the switch in Ecosystem knows it.
+func KnownDistroID(id string) bool {
+	if id == "" {
+		return false
+	}
+	_, err := (Distro{ID: id, VersionID: "0"}).Ecosystem()
+	return !errors.Is(err, ErrUnknownDistroID)
 }
 
 func (d Distro) Ecosystem() (string, error) {
@@ -678,7 +695,7 @@ func (d Distro) Ecosystem() (string, error) {
 		// "rhel" case above it.
 		return "Hummingbird", nil
 	default:
-		return "", fmt.Errorf("%w: distro %q is not supported yet", ErrNoEcosystem, d.ID)
+		return "", fmt.Errorf("%w: %w: distro %q is not supported yet", ErrNoEcosystem, ErrUnknownDistroID, d.ID)
 	}
 
 	major, rest, ok := strings.Cut(d.VersionID, ".")
