@@ -262,6 +262,10 @@ type layerHit struct {
 	hard     bool
 	linkname string
 	pos      int
+	// rest is what remains of the query's path below a symlink found at
+	// one of its ancestors ("" for a link at the path itself): the query
+	// continues at the link's target with rest appended (follow).
+	rest string
 }
 
 // resolvePass reads every layer once, newest first, answering queries whose
@@ -298,6 +302,10 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 		// taken entry by entry below.
 		var layerDeleted, layerOpaque []whiteout
 		hits := make([]layerHit, len(qs))
+		// above is what this layer wrote at a strict ancestor of each
+		// query's path; it decides the query only when nothing in this
+		// layer decided it by name (see the ancestor case below).
+		above := make([]layerHit, len(qs))
 		pos := -1
 
 		err := readLayer(ctx, l, func(name string, h *tar.Header, r io.Reader) error {
@@ -341,6 +349,35 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 					hits[k] = layerHit{kind: hitGone}
 				case marker:
 					// A marker is an instruction, never the file.
+				case strings.HasPrefix(q.path, name+"/"):
+					// An entry at a strict ANCESTOR of the path. A symlink
+					// there is where the kernel would leave this path and
+					// continue at the link's target: a package directory
+					// linked to /opt/current, with /opt/current itself
+					// re-pointed at /opt/version2 by an upper layer, read the
+					// lower layer's /opt/current/package.json -- the old
+					// version (release check 2026-11-11; the limitation
+					// deferred at PR #275). A file or device there means the
+					// path's parent is not a directory: nothing is at the
+					// path, and lower layers are shadowed (A10). A directory
+					// entry is the ordinary case and decides nothing. A
+					// hardlink cannot name a directory, so it is a file here.
+					//
+					// Held apart from a hit by name in the SAME layer, which
+					// wins: a tar that carries both `lib -> usr/lib` and
+					// `lib/apk/db/installed` is read by name as before (the
+					// untar writes the entry through the link, so the name
+					// still reaches it). The ancestor decides against lower
+					// layers only -- a link over a directory hides the
+					// directory's tree (the changeset rule collectWith
+					// applies), and this is the resolver's half of it.
+					switch h.Typeflag {
+					case tar.TypeSymlink:
+						above[k] = layerHit{kind: hitLink, linkname: h.Linkname, pos: pos, rest: strings.TrimPrefix(q.path, name+"/")}
+					case tar.TypeDir:
+					default:
+						above[k] = layerHit{kind: hitGone}
+					}
 				case name == q.path:
 					switch h.Typeflag {
 					case tar.TypeSymlink, tar.TypeLink:
@@ -368,6 +405,9 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 		}
 
 		for k, hit := range hits {
+			if hit.kind == hitNone {
+				hit = above[k]
+			}
 			if hit.kind == hitNone {
 				continue
 			}
@@ -411,7 +451,17 @@ func follow(q query, hit layerHit, i, newest int) query {
 	if hit.hard {
 		top, before = i, hit.pos
 	}
-	target := resolveLink(q.dir, hit.linkname, hit.hard)
+	linkDir := q.dir
+	if hit.rest != "" {
+		// A symlink at an ancestor resolves from that ancestor's own
+		// directory, and the rest of the path continues below its target.
+		ancestor := strings.TrimSuffix(q.path, "/"+hit.rest)
+		linkDir = path.Dir(ancestor)
+	}
+	target := resolveLink(linkDir, hit.linkname, hit.hard)
+	if hit.rest != "" {
+		target = normaliseEntry(target + "/" + hit.rest)
+	}
 	dir := q.dir // a hardlink keeps the directory it was reached through
 	if !hit.hard {
 		dir = path.Dir(target)

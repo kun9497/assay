@@ -367,12 +367,16 @@ func TestRun_RHELImageAgainstADatabaseWithoutRedHat(t *testing.T) {
 	}
 }
 
-// The claim the two-directory probe rests on, made testable: Image.Files
-// follows a symlink that IS the wanted path and does NOT follow one on a
-// directory component of it. If that ever changed, probing both directories
-// would become harmless redundancy rather than a requirement, and this test is
-// what would say so.
-func TestCatalogFromImage_DirectorySymlinkIsNotFollowed(t *testing.T) {
+// Image.Files follows a symlink that IS the wanted path and, since the
+// release check of 2026-11-11, one on a directory component of it too: RHEL
+// 10's `var/lib/rpm -> ../../usr/lib/sysimage/rpm` reaches the relocated
+// database under the traditional name. The two-directory probe stays: an
+// image whose layers carry the database only under the physical name, with
+// no link entry at all, is found by the second spelling. This test held the
+// opposite claim ("does NOT follow one on a directory component") while that
+// was the resolver's limitation; it now holds that both spellings read one
+// database.
+func TestCatalogFromImage_DirectorySymlinkIsFollowed(t *testing.T) {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 	// The real database, under the relocated directory.
@@ -406,16 +410,16 @@ func TestCatalogFromImage_DirectorySymlinkIsNotFollowed(t *testing.T) {
 		Open:   func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(raw)), nil },
 	}}}
 
-	// The traditional path resolves to nothing…
+	// The traditional path resolves through the directory link to the
+	// relocated database -- the same bytes as the physical name --
 	files, err := img.Files(context.Background(), []string{"var/lib/rpm/rpmdb.sqlite", "usr/lib/sysimage/rpm/rpmdb.sqlite"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if files["var/lib/rpm/rpmdb.sqlite"].Data != nil {
-		t.Error("Image.Files followed a symlink on a directory component; the two-directory " +
-			"probe in rpmDBDirs is documented as necessary because it does not")
+	if got := files["var/lib/rpm/rpmdb.sqlite"].Data; !bytes.Equal(got, []byte(body)) {
+		t.Errorf("Image.Files read %d bytes through the directory link var/lib/rpm, want the %d-byte database", len(got), len(body))
 	}
-	// …and the scan still finds the database, because both are probed.
+	// …and the scan finds the database once, whichever spelling it lands on.
 	target, stats, _, err := catalogFromImage(context.Background(), "test-image", img)
 	if err != nil {
 		t.Fatalf("an image whose /var/lib/rpm is a symlink was not catalogued: %v", err)
