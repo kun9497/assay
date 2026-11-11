@@ -22,6 +22,14 @@ All notable changes to this project are documented here. The format follows
   Truthset report schema 3. (D161 revised, QA 2026-11-10)
 
 ### Fixed
+- Image paths and npm roots, per the release check of main 60c512c: a `..` inside a link
+  target folds one component at a time, each decided by the newest layer that speaks of it
+  (`/data/marker/../route/../packages` with `route` a symlink, or deleted or replaced by a file
+  above a lower directory, now reads the database the link reaches: BusyBox's 7 findings and the
+  Critical in SARIF, were 0); an npm root whose external target is itself re-pointed above reads
+  the install it leads to (0 → 4 findings) and one whose target a file replaced reads nothing and
+  is unread with the reason (was 4 findings for a hidden copy); every name of an install under a
+  re-pointed root carries its layer. (D160 revised)
 - CycloneDX and VEX, per the release check of main 60c512c: three bare listings of one package
   (two at different source versions, one stating none) left an install that states no source
   version judged in one placement and unjudged in another; every install is now weighed against

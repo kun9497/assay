@@ -1346,7 +1346,10 @@ disagree zero times.
       two implementations, not by running the two images under each runtime. A `..` inside a link
       target applies after the component before it is looked at: a symlink there is followed
       first, a directory the layers show (explicit or implied) is climbed, and a component no
-      layer shows leads nowhere, as the kernel's ENOENT does (release check of main b732cac)
+      layer shows leads nowhere, as the kernel's ENOENT does (release check of main b732cac);
+      one component at a time, each decided by the newest layer that speaks of it, so a link or
+      a file an upper layer put at the second component is seen before the `..` after it applies
+      (release check of main 60c512c)
 
 **⑫ RHEL-family inventory** ✅ — `ubi9`, `rocky:9`, `almalinux:9`, `fedora` and
 `amazonlinux:2023` are read, and **no verdict follows**. A RHEL image's packages are listed

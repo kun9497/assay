@@ -706,8 +706,17 @@ func readPhysicalRoots(ctx context.Context, img *source.Image, files map[string]
 			break
 		}
 		sort.Strings(phys)
+		// The physical directory ITSELF is an exact name too, not only its
+		// ancestors: a link an upper layer put at that name is the next hop
+		// (`/usr/local/lib/node_modules -> /opt/current`, with `/opt/current
+		// -> /opt/release` above the lower layer's directory of that name),
+		// and a file there replaced the lower layer's tree, which is not
+		// the install (release check of main 60c512c: the lower layer's
+		// stale copy was read under the old name in both shapes -- 0
+		// findings for the install the image has, 4 for one it does not).
 		var exact []string
 		for _, d := range phys {
+			exact = append(exact, d)
 			for p := path.Dir(d); p != "." && p != "/" && p != ""; p = path.Dir(p) {
 				exact = append(exact, p)
 			}
@@ -782,22 +791,30 @@ func rehomeRoot(root, target string, files map[string][]byte, layerOf map[string
 		if !npminstalled.IsInstalledPackageJSON(logical) {
 			continue
 		}
+		// Every name the install is given is located in its own layer: the
+		// latest of the root link's chain and the file's (release check of
+		// main 60c512c: the second logical name carried no layer, and the
+		// OS package that owned the path before the root was re-pointed
+		// was reported as its owner).
+		layer := newestLayer(append(linkLayers(followed, links), layerOf[f]), layerIndex)
 		if npminstalled.IsInstalledPackageJSON(f) && (!physical(f) || rootOf(f) != "") {
 			// Read as an install at its own name already.
 			if logical != f {
 				aliases[f] = append(aliases[f], logical)
+				layerOf[logical] = layer
 			}
 			continue
 		}
 		if first, ok := homes[f]; ok {
 			if first != logical {
 				aliases[first] = append(aliases[first], logical)
+				layerOf[logical] = layer
 			}
 			continue
 		}
 		homes[f] = logical
 		files[logical] = files[f]
-		layerOf[logical] = newestLayer(append(linkLayers(followed, links), layerOf[f]), layerIndex)
+		layerOf[logical] = layer
 	}
 	return any
 }
