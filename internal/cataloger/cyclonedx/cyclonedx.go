@@ -149,6 +149,24 @@ func catalogSubject(subject component, ctx osContext, target *pkgmeta.Target, st
 	catalogOne(subject, ctx, &dry, &dryStats)
 	catalog(subject.Components, childContext(subject, ctx), &dry, &dryStats)
 	keyed := keyedReleases(dry.Packages)
+	// The key a merge adopts comes from the subject tree alone -- the
+	// listings that merge into the base -- never from another top-level
+	// listing, which the top-vs-top rule keeps a separate package: a keyed
+	// top-level twin must not key an unkeyed one through a third, unkeyed
+	// listing under the subject (PR #277 review).
+	for id, sk := range keyedReleases(dry.Packages[base:]) {
+		r := keyed[id]
+		if sk.n != 1 {
+			r.key = ""
+		}
+		keyed[id] = r
+	}
+	for id, r := range keyed {
+		if _, inSubject := keyedReleases(dry.Packages[base:])[id]; !inSubject {
+			r.key = ""
+			keyed[id] = r
+		}
+	}
 	// The subject is keyed in the document's top-level context, as its
 	// top-level twin would be; its children in theirs (contextFor).
 	scratchTarget := pkgmeta.Target{}
@@ -173,7 +191,7 @@ func catalogSubject(subject component, ctx osContext, target *pkgmeta.Target, st
 // depth-first walk, one scratch per component so a duplicate of a package
 // bom.components already yielded can be dropped without its counter. base
 // is how many packages bom.components yielded; see catalogSubject.
-func catalogDeduped(components []component, ctx osContext, base int, keyed map[string]int, target *pkgmeta.Target, stats *Stats) {
+func catalogDeduped(components []component, ctx osContext, base int, keyed map[string]releases, target *pkgmeta.Target, stats *Stats) {
 	for _, c := range components {
 		scratchTarget := pkgmeta.Target{}
 		var scratchStats Stats
@@ -191,9 +209,24 @@ func catalogDeduped(components []component, ctx osContext, base int, keyed map[s
 // packages where it held one listed twice, but its evidence is kept on the
 // package already there. A scratch with no package is a counted skip and
 // merges as it is.
-func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, keyed map[string]int, target *pkgmeta.Target, stats *Stats) {
+func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, keyed map[string]releases, target *pkgmeta.Target, stats *Stats) {
 	for _, p := range scratchTarget.Packages {
 		if i := indexOfPackage(target.Packages[:base], p, keyed); i >= 0 {
+			// The key the document gives this identity, known from the dry
+			// run, is adopted by both halves BEFORE their evidence is
+			// compared: a source version is one version or two only under
+			// the ecosystem's own ordering (sameVersion), and comparing it
+			// unkeyed -- because the keyed listing happened to come later --
+			// called Debian's `0:` spelling a contradiction and left libc6
+			// unjudged, 25 findings one order, 0 the other (QA 2026-11-11).
+			if k := keyed[identity(p)]; k.n == 1 {
+				if target.Packages[i].Ecosystem == "" {
+					target.Packages[i].Ecosystem = k.key
+				}
+				if p.Ecosystem == "" {
+					p.Ecosystem = k.key
+				}
+			}
 			keepEvidence(&target.Packages[i], p)
 			return
 		}
@@ -217,9 +250,9 @@ func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, ke
 // qualifier-only difference (syft's per-document package-id, two install
 // paths) is the same package, which the field comparison says and a
 // verbatim purl comparison would not.
-func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package, keyed map[string]int) int {
+func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package, keyed map[string]releases) int {
 	for i, q := range pkgs {
-		if q.Type == p.Type && q.Name == p.Name && q.Version == p.Version && q.Ecosystem == p.Ecosystem {
+		if q.Type == p.Type && q.Name == p.Name && q.Version == p.Version && q.Ecosystem == p.Ecosystem && sameArch(q, p) {
 			return i
 		}
 	}
@@ -234,12 +267,19 @@ func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package, keyed map[string]
 	// release's findings -- the other release's when the document listed
 	// them the other way round (PR #270 review). It stays its own package,
 	// unkeyed and reported not evaluated.
-	if keyed[identity(p)] > 1 {
+	if ambiguous(p, keyed) {
 		return -1
 	}
 	match := -1
 	for i, q := range pkgs {
-		if q.Type == p.Type && q.Name == p.Name && q.Version == p.Version && (q.Ecosystem == "" || p.Ecosystem == "") {
+		if q.Type == p.Type && q.Name == p.Name && q.Version == p.Version && (q.Ecosystem == "" || p.Ecosystem == "") && sameArch(q, p) {
+			if ambiguous(q, keyed) {
+				// The kept listing states no architecture and the document
+				// keys its identity to two releases through two
+				// architectures: it belongs to neither provably (PR #277
+				// review -- the PR #270 mirror case, arch-shaped).
+				return -1
+			}
 			if match >= 0 {
 				// Two releases are refused above (keyed); two top-level
 				// listings keyed to ONE release are judged alike whichever
@@ -252,29 +292,68 @@ func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package, keyed map[string]
 	return match
 }
 
-// identity is a package's type, name and version: what an unkeyed listing
-// and its keyed twins share.
+// ambiguous reports whether the document keys p's identity to more than
+// one release. A listing that states an architecture meets only the twins
+// of that architecture; one that states none meets them all, through the
+// arch-less identity keyedReleases also counts.
+func ambiguous(p pkgmeta.Package, keyed map[string]releases) bool {
+	return keyed[identity(p)].n > 1
+}
+
+// identity is a package's type, name, version and -- when the purl states
+// one -- architecture: what an unkeyed listing and its keyed twins share. Two
+// listings of one name and version that state different architectures are
+// two installs (QA 2026-11-11: an aarch64 busybox was merged into the x86_64
+// one, its path put on that finding and its own not-evaluated count lost);
+// a listing stating none is merged with either (sameArch).
 func identity(p pkgmeta.Package) string {
-	return p.Type + "\x00" + p.Name + "\x00" + p.Version
+	return p.Type + "\x00" + p.Name + "\x00" + p.Version + "\x00" + p.Arch
+}
+
+// sameArch is identity's architecture rule as a comparison.
+func sameArch(a, b pkgmeta.Package) bool {
+	return a.Arch == "" || b.Arch == "" || a.Arch == b.Arch
+}
+
+// releases is what the document keys one identity to: how many distinct
+// ecosystem keys, and the key itself when there is exactly one.
+type releases struct {
+	n   int
+	key string
 }
 
 // keyedReleases counts, per identity, the distinct ecosystem keys pkgs give
-// it; an unkeyed listing counts for none.
-func keyedReleases(pkgs []pkgmeta.Package) map[string]int {
+// it; an unkeyed listing counts for none. An identity stating an
+// architecture is counted under the arch-less identity too, so an unkeyed
+// listing that states none meets its keyed twins' releases.
+func keyedReleases(pkgs []pkgmeta.Package) map[string]releases {
 	seen := map[string]map[string]bool{}
+	add := func(id, eco string) {
+		if seen[id] == nil {
+			seen[id] = map[string]bool{}
+		}
+		seen[id][eco] = true
+	}
 	for _, p := range pkgs {
 		if p.Ecosystem == "" {
 			continue
 		}
-		id := identity(p)
-		if seen[id] == nil {
-			seen[id] = map[string]bool{}
+		add(identity(p), p.Ecosystem)
+		if p.Arch != "" {
+			q := p
+			q.Arch = ""
+			add(identity(q), p.Ecosystem)
 		}
-		seen[id][p.Ecosystem] = true
 	}
-	out := make(map[string]int, len(seen))
+	out := make(map[string]releases, len(seen))
 	for id, ecos := range seen {
-		out[id] = len(ecos)
+		r := releases{n: len(ecos)}
+		if r.n == 1 {
+			for eco := range ecos {
+				r.key = eco
+			}
+		}
+		out[id] = r
 	}
 	return out
 }
@@ -433,6 +512,7 @@ func catalogOne(c component, ctx osContext, target *pkgmeta.Target, stats *Stats
 		source       *pkgmeta.SourcePackage
 		upstream     string
 		moduleStream string
+		arch         string
 	)
 	switch p.Type {
 	case "apk", "rpm", "deb", "alpm":
@@ -459,6 +539,7 @@ func catalogOne(c component, ctx osContext, target *pkgmeta.Target, stats *Stats
 		source = res.Source
 		upstream = res.Upstream
 		moduleStream = res.ModuleStream
+		arch = p.Qualifiers["arch"]
 	default:
 		var ok bool
 		eco, ok = pkgmeta.EcosystemForPURLType(p.Type)
@@ -521,6 +602,9 @@ func catalogOne(c component, ctx osContext, target *pkgmeta.Target, stats *Stats
 		Source:       source,
 		Upstream:     upstream,
 		ModuleStream: moduleStream,
+		// The architecture the purl states (distro types only): part of the
+		// dedupe identity, nothing else here.
+		Arch: arch,
 	}
 	switch p.Type {
 	case "deb":
@@ -593,6 +677,10 @@ func propValue(c component, name string) string {
 type osContext struct {
 	distro    *pkgmeta.Distro
 	ecosystem string
+	// family is a known distro declared with no version at all (contextFor):
+	// it names the target for the report, keys nothing, and refuses an
+	// inherited context of another family.
+	family *pkgmeta.Distro
 }
 
 // contextFor is the context of a list of sibling components: the one
@@ -603,9 +691,30 @@ type osContext struct {
 // release are one declaration.
 func contextFor(siblings []component, inherited osContext) osContext {
 	var found *pkgmeta.Distro
+	// family is a known distro declared among the siblings WITHOUT a key
+	// (no version, or one no key is built from): it says which family the
+	// packages beside it belong to and no more. It keys nothing itself, but
+	// it refuses an inherited context of another family -- Debian declared
+	// at the top does not key the busybox beside a version-less Alpine --
+	// and leaves the purl's own distro qualifier to identify the package
+	// (QA 2026-11-11). An OS whose ID this build does not know ("linux")
+	// declares nothing.
+	var family *pkgmeta.Distro
 	for _, c := range siblings {
 		d := distroOf(c)
 		if d == nil {
+			continue
+		}
+		if d.VersionID == "" {
+			// No release stated at all. A known family declares the family;
+			// an unknown ID ("linux") declares nothing. Either way it is
+			// not a context that would switch the purl qualifier off. An
+			// OS that DOES state a release no key is built from ("edge")
+			// is a context as before: the document's own identity failed
+			// to resolve, and the purl may not contradict it.
+			if pkgmeta.KnownDistroID(d.ID) {
+				family = d
+			}
 			continue
 		}
 		if found == nil {
@@ -616,7 +725,18 @@ func contextFor(siblings []component, inherited osContext) osContext {
 			return osContext{}
 		}
 	}
+	if found != nil && family != nil && !strings.EqualFold(found.ID, family.ID) {
+		return osContext{}
+	}
 	if found == nil {
+		if family != nil {
+			if inherited.distro != nil && !strings.EqualFold(inherited.distro.ID, family.ID) {
+				return osContext{family: family}
+			}
+			if inherited.distro == nil {
+				inherited.family = family
+			}
+		}
 		return inherited
 	}
 	ctx := osContext{distro: found}
@@ -641,6 +761,16 @@ func childContext(parent component, inherited osContext) osContext {
 	if d := distroOf(parent); d != nil {
 		if eco, err := d.Ecosystem(); err == nil {
 			inherited = osContext{distro: d, ecosystem: eco}
+		} else if d.VersionID == "" && pkgmeta.KnownDistroID(d.ID) && inherited.distro != nil && !strings.EqualFold(inherited.distro.ID, d.ID) {
+			// A known family with no release refuses an inherited context
+			// of another family, as among siblings (contextFor): Alpine
+			// with no version as the subject, Debian 11 at the top, read
+			// its busybox as Debian -- 51 findings (QA 2026-11-11).
+			inherited = osContext{family: d}
+		} else if err != nil && d.VersionID != "" {
+			// A release no key is built from: the document's identity, as
+			// a sibling OS of that shape is (contextFor).
+			inherited = osContext{distro: d}
 		}
 	}
 	return contextFor(parent.Components, inherited)
@@ -657,6 +787,9 @@ func childContext(parent component, inherited osContext) osContext {
 func documentDistro(doc bom, top osContext) *pkgmeta.Distro {
 	if top.distro != nil {
 		return top.distro
+	}
+	if top.family != nil {
+		return top.family
 	}
 	s := doc.Metadata.Component
 	if s == nil {

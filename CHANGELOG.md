@@ -35,6 +35,13 @@ All notable changes to this project are documented here. The format follows
   retargeted in an upper layer un-owns the path, and `lib64 -> lib -> usr/lib` lends the owner
   while `/sbin/../usr/lib` does not; npm's `.bin` link is not a package (exit 0, was 2).
   (D160, D162 revised)
+- CycloneDX: three listings of one package, one keyed to Debian 11 and two stating the equivalent
+  source version as `0:…` and `…`, are judged in either order (25 findings; one order had read 0,
+  exit 0 under `--fail-on low`): the identity's key is adopted before the versions are compared.
+  Two listings stating different architectures (`arch=x86_64`, `arch=aarch64`) are two installs,
+  not one. An OS declared with no release at all (Alpine with no version, `linux`) no longer keys
+  its packages to a Debian declared at the top (51 false findings) nor switches off the purl's
+  `distro` qualifier beside it. (D165, D166 revised; QA 2026-11-11)
 - `truthset -offline`: the run's database is the first trusted capture's, a locally built database
   (no digest) included, so a local-database capture and a published-database capture are the same
   ERROR in either order instead of passing as the published database's when the local one sorted
