@@ -406,8 +406,10 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 		case !l.Hard && isPackageDir(n):
 			final, followed, cyclic := resolveChain(path.Dir(n), l.Target, links)
 			if cyclic {
+				// Named by the install the link stands for, as a missing
+				// target is, so one shape reads the same whatever failed.
 				unresolved++
-				img.NoteUnresolved(n, fmt.Sprintf("npm package link to %q is a symbolic link cycle; nothing was read", l.Target))
+				img.NoteUnresolved(n+"/package.json", fmt.Sprintf("npm package link to %q is a symbolic link cycle; nothing was read", l.Target))
 				continue
 			}
 			if _, ok := groups[final]; !ok {
