@@ -152,6 +152,13 @@ func collectCVEs(id string, lists ...[]string) []string {
 
 type grypeDocument struct {
 	Matches []grypeMatch `json:"matches"`
+	// Source is read for the scanned target alone: what an offline capture
+	// was a scan of, held to the target's pinned ref like assay's.
+	Source struct {
+		Target struct {
+			UserInput string `json:"userInput"`
+		} `json:"target"`
+	} `json:"source"`
 }
 
 type grypeMatch struct {
@@ -292,6 +299,9 @@ func grypeTuples(doc grypeDocument) map[tuple]struct{} {
 
 type trivyDocument struct {
 	Results []trivyResult `json:"Results"`
+	// ArtifactName is the image trivy scanned, as given: an offline
+	// capture's is held to the target's pinned ref like assay's.
+	ArtifactName string `json:"ArtifactName"`
 }
 
 type trivyResult struct {

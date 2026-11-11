@@ -22,6 +22,16 @@ All notable changes to this project are documented here. The format follows
   Truthset report schema 3. (D161 revised, QA 2026-11-10)
 
 ### Fixed
+- `scandiff -offline` holds the grype (`source.target.userInput`) and trivy (`ArtifactName`)
+  captures to the pinned ref as it holds assay's, so a target re-pinned with only its assay capture
+  regenerated is not judged on the old image's other two; a trivy mismatch on an informational block
+  is a warning. (D167 revised; PR #276 review)
+- `truthset -offline`: the run's database is the first trusted capture's, a locally built database
+  (no digest) included, so a local-database capture and a published-database capture are the same
+  ERROR in either order instead of passing as the published database's when the local one sorted
+  first. `scandiff -offline`: a capture whose recorded target is not the floors file's pinned ref
+  is an ERROR with the reason (a BCI capture had passed under a target re-pinned to Alpine).
+  (D161, D167 revised; QA 2026-11-11)
 - Image npm links, per the PR #275 review: a package directory or manifest that is itself a link
   under a directory another root is linked to is read at the logical path; several links to one
   install are one package located at every name; a package directory replaced by a symlink hides
