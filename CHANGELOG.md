@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- `truthset -offline`: the run's database is the first trusted capture's, a locally built database
+  (no digest) included, so a local-database capture and a published-database capture are the same
+  ERROR in either order instead of passing as the published database's when the local one sorted
+  first. `scandiff -offline`: a capture whose recorded target is not the floors file's pinned ref
+  is an ERROR with the reason (a BCI capture had passed under a target re-pinned to Alpine).
+  (D161, D167 revised; QA 2026-11-11)
+
 ### Added
 - The scanner differential floors each probed ecosystem's application packages:
   `minApplicationPackages` (`npm`, `Go`) on `coverage[].packages`, judged by the weekly run and

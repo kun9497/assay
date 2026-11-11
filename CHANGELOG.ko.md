@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+### Fixed
+- `truthset -offline`: 실행의 DB는 처음 신뢰한 캡처의 것이며 로컬 빌드 DB(digest 없음)도 포함하므로, 로컬 DB
+  캡처와 배포 DB 캡처는 어느 순서든 같은 ERROR입니다(전에는 로컬이 먼저 정렬되면 배포 DB의 결과로 통과).
+  `scandiff -offline`: 기록된 대상이 floor 파일의 고정 ref가 아닌 캡처는 사유와 함께 ERROR입니다(Alpine으로 다시
+  고정한 대상 아래의 BCI 캡처가 통과했었음). (D161, D167 개정; QA 2026-11-11)
+
 ### Added
 - 스캐너 차등 비교가 프로브된 생태계별 애플리케이션 패키지에 하한을 둡니다: `coverage[].packages`에 거는
   `minApplicationPackages`(`npm`, `Go`)로, 주간 실행과 야간 `-regressions-only` 게이트가 똑같이 판정합니다.
