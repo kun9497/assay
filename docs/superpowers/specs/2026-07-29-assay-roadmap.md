@@ -8641,6 +8641,24 @@ subject tree alone, never from a second top-level listing: two top-level listing
 packages, and an unkeyed third under the subject must not carry one's key to the other (PR #277
 review).
 
+**Revised 2026-11-11 (release check of main 42b0c09).** Four corrections to the above. An OS whose
+ecosystem keys from its ID alone -- Wolfi, Arch, the other release-less ecosystems -- declared with no
+version beside its packages is a context as a versioned OS is, not a family: `wolfi` as a sibling
+of openssl read 0 of its 84 findings, exit 0, while the same OS as openssl's parent or with a
+version read all 84. Two known families declared with no release beside one package refuse the
+context whichever was declared last: `debian 11`, `alpine`, `debian` had keyed busybox to Debian (51
+findings) while `debian 11`, `debian`, `alpine` left it to its `distro=alpine-3.19` qualifier (2);
+now both orders read the qualifier, and both leave an unqualified busybox not evaluated. The key a
+merge adopts, for a listing stating an architecture whose twins of that architecture state none,
+is what the document says of the name and version without one: the QA shape with the arch left
+off the keyed record had read 25 findings in one order and 0, incomplete 1, in the other. And a
+listing stating no architecture that joins one stating an architecture takes it, so a bare
+top-level busybox beside an x86_64 and an aarch64 install of one release joins the first and
+leaves the second its own install (2 components, 4 findings; it had absorbed both: 1 and 2). The
+dry run's per-identity recount is gone too: it had made the subject walk quadratic, a
+1,000-package subject tree taking 544 ms and 490 MB where it takes 4 ms and 3.4 MB; a test holds
+the allocation count linear.
+
 **Gives up.** Two listings of one package inside `components`, or both inside the subject tree,
 are not merged at all (as before) and are each judged on what they state. A contradiction makes the
 whole package unevaluated, including findings every reading of the document would have produced
