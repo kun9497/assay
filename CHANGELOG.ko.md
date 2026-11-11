@@ -20,6 +20,9 @@
   3. (D161 개정, QA 2026-11-10)
 
 ### Fixed
+- main b732cac 릴리스 점검에 따른 `scandiff`: 도구별 상태 파일(`ok` + SHA-256, `failed`, `unsaved`)이 재판정의 근거이지
+  파일 시각이 아닙니다 — ZIP을 거친 실패 캡처가 성공으로 재판정됐고, 잠긴 파일 위에 캡처를 쓰지 못한 성공이 이전 성공을 제
+  것으로 남겼었음; trivy의 `SchemaVersion: null` 진단은 0건 측정이 아니라 실패입니다. (D167 개정)
 - main 5197df4 릴리스 점검에 따른 `scandiff`: `matches`가 배열이 아닌(진단 객체의 `null`) grype 캡처는 실시간·오프라인
   모두 malformed입니다; trivy의 진단 JSON은 확정 하한에서 hard failure(ERROR; 0으로 측정된 BREACH였음), 정보용 블록에서는
   측정 실패(경고, 붙여 넣을 숫자 없음)입니다; 실패한 실행의 `.failed.json` 마커가 잠긴 성공 캡처보다 오래 남아 다음 성공
