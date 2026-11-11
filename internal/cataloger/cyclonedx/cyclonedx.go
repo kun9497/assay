@@ -263,16 +263,33 @@ func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, d 
 		// with the reason: the document states its source two ways and
 		// the install states none.
 		if p.Arch != "" {
-			// Lent in the document's order (sortedKeys), each one folded
-			// onto the last: two that state the source two ways are the
-			// contradiction keepEvidence marks (D165), whichever came
-			// first, since the marked reason sorts the two values. The
-			// order matters for nothing else -- lending is a union -- so a
-			// mutation walking the map survives; it is kept for the reason
-			// text and for reading.
+			// Every bare listing of the identity is a candidate, judged
+			// against the install AS LISTED (release check of main 5197df4:
+			// a Go map walk lent whichever candidate came first and dropped
+			// the next as contradicting what it had just lent, so one SBOM
+			// read 70 findings or 65 by run). Two candidates that
+			// contradict EACH OTHER leave the install unjudged with the
+			// reason: the document states its source two ways and the
+			// install states none. Walked in the document's order for the
+			// reason text alone -- lending is a union, and the marked
+			// reason sorts the two values -- so a mutation walking the map
+			// survives, as does one that lends both and lets keepEvidence
+			// mark the second: both are equivalents, not gaps.
+			var cands []pkgmeta.Package
 			for _, i := range sortedKeys(d.snaps) {
 				s := d.snaps[i]
 				if s.Type == p.Type && s.Name == p.Name && s.Version == p.Version && (s.Ecosystem == "" || p.Ecosystem == "" || s.Ecosystem == p.Ecosystem) && !contradicts(p, s) {
+					cands = append(cands, s)
+				}
+			}
+			conflict := false
+			for i := 1; i < len(cands) && !conflict; i++ {
+				conflict = contradicts(cands[0], cands[i])
+			}
+			if conflict {
+				markSourceContradiction(&p, cands[0], cands[1])
+			} else {
+				for _, s := range cands {
 					keepEvidence(&p, s)
 				}
 			}
