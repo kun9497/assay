@@ -1551,7 +1551,7 @@ the matcher is wrong.
 and `db push`, `db-publish.yml` points `ASSAY_DB_DIR` at the candidate and runs
 `scandiff -regressions-only` over the same targets and floors file: a `minAgree`,
 `minFindings`, `minComponents`, `maxNotEvaluated`, `maxIncompleteChecks`,
-`maxTargetIncomplete` (D145) or committed trivy-minimum breach, or an
+`maxTargetIncomplete` (D145), `minApplicationPackages` (D167) or committed trivy-minimum breach, or an
 `ERROR` verdict, fails the job and nothing is pushed — the next nightly seeds from the last
 good artifact and tries again. An assay scan that exits 2 is re-run once first (revision of
 2026-10-06, after a registry `BLOB_UNKNOWN` transient refused a sound candidate): a target
@@ -1568,6 +1568,18 @@ data had not degraded, so `minAgree` there is a real floor — and the same capt
 D110's surviving share trips `minAgree`, `minFindings` and `trivy.minAgree` at once.
 `amazonlinux2` measured 17 / 17 / 17 over 106 components, so `minComponents` carries most
 of that target's weight.
+
+**Re-cutting a floor when a target's digest moves.** Every floor in the file is tied to the
+pinned digest beside it, so a new digest means a new measurement, never an edit of the old
+numbers: run `scandiff` offline over that week's capture (the `scanner-diff-*` artifact, or
+`-capture` from a local run) with the target's block emptied to the informational shape, read the
+printed counts, and commit them at D93's 85% / 2x for the finding floors, max(2x, x+25) for
+`maxAssayOnlyFixed` (D146), and for `minApplicationPackages` (D167) half of the npm count and 1
+for Go — the count itself comes from `coverage[]` in `<target>.assay.json`:
+
+```bash
+python -c "import json,sys; d=json.load(open(sys.argv[1])); print({c['ecosystem']: c['packages'] for c in d['coverage'] if c['ecosystem'] in ('npm','Go')})" ubi8n18.assay.json
+```
 
 Slice ① came out set-identical on both SBOMs it was run against:
 
