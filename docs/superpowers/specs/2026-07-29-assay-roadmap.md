@@ -8416,7 +8416,14 @@ directories seen in ANY layer had skipped the look at the second component:
 or replaced by a file in an upper layer folded over the lower layer's directory and read a
 database the link no longer reaches -- BusyBox's 7 findings, one Critical, lost each way, and
 missing from SARIF. A fold is still no link hop: twenty-one folds between twenty-one links are
-twenty-one links. (2) The physical directory an npm root resolves to is an exact name of the
+twenty-one links. Two refinements from the PR #290 review: a path holding a `..` that an upper
+layer hid from the lower ones -- a whiteout or an opaque marker, or a directory put over the lower
+layer's link at the component -- still folds when that upper layer's own word on the component is
+a directory (`RUN rm -rf /data/marker && mkdir /data/marker` above the link's layer had left the
+path unanswered where the kernel reads `/data/packages`); and a directory a newer layer only
+implies (entries beneath the name, none for it) does not override an older layer's explicit entry
+at the name -- the untar writes such entries through a standing symlink, so the link is followed,
+and a file there is no directory -- while an older deletion does not undo the newer directory. (2) The physical directory an npm root resolves to is an exact name of the
 second pass, not only its ancestors: a link an upper layer put at that name is the next hop
 (`/usr/local/lib/node_modules -> /opt/current`, `/opt/current -> /opt/release` over the lower
 layer's directory of that name), and a file there replaced the lower layer's tree -- the stale
