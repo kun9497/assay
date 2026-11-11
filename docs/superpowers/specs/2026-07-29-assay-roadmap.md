@@ -8299,7 +8299,28 @@ is recorded unread with the reason and npm `partial`, its packages not enumerate
 round: a target is also already inventoried when its manifest is a link candidate (pnpm's store
 hardlinks) or its first landing place is another package-directory link (counted once); a root
 linked to another root the pass read in full is an alias with nothing unread; and a root replaced by
-a link drops the older layer's tree under its name, which is gone from the filesystem.*
+a link drops the older layer's tree under its name, which is gone from the filesystem. QA 2026-11-11, six more: a root linked to a directory UNDER another
+root re-homes what the pass already read there, so the install shape is judged at the root's own
+name (a root linked to another root's `vendor/assets` had read 0 of lodash's 4 findings, exit 0; a
+root linked to a directory of installs leaves them counted at their own paths; a root linked to a
+missing directory is unread); package-directory links are grouped by where their chain ends, a
+chain that leads nowhere -- a cycle, a missing target -- leaving every link in it unread (two links
+pointing at each other had each taken the other for an install already made); a manifest link's
+target is walked through the layout links a component at a time, as a directory link's is, so
+`/lib64/../qa-pkg/package.json` and `/lib64/qa-package/package.json` read the right file; an upper
+layer's file or link at a name hides a lower layer's entries beneath it, as the OCI changeset rules
+say (a package directory replaced by a symlink had kept its old manifest, 6 findings for 2); a
+logical path's layer is the latest of the file's, the link's and every link followed on the way
+(`source.FileFromLayer.ViaDiffID`), so a middle link retargeted in an upper layer un-owns the path;
+and npm's own dot directories (`.bin`, a link to `/usr/bin` on some images) are never packages. Its
+review added: every symlink under a root is recorded, so a package directory or manifest that is
+itself a link under a re-homed directory is an install at the logical path too (a hardlink's twin
+points at the physical name, D130); several links to one install are one package located at every
+name; a file or link at a name hides lower layers beneath it even when a later layer puts a
+directory back; and one link crossed twice on different remainders is not a cycle. What the
+image's own resolver (`source.Files`) still does not do is follow a link at an intermediate
+component of a queried path -- a target whose parent directory an upper layer replaced with a
+symlink is read from the lower layer's copy; recorded in `docs/deferred-decisions.md`.*
 
 **Decision.** An image scan runs one more pass over its layers, over ten fixed locations
 together: the installed `package.json` files under the three global `node_modules` roots
@@ -8770,7 +8791,11 @@ the independent usr/lib/... copy. The probe pass observes the top-level bin/sbin
 itself (no extra pass); the exact path is still tried first and the layer-order rule is unchanged.
 A link spells a twin only for an ownership record no older than the layer that made the link: an
 upper layer that deletes a real lib64 and relinks it to usr/lib leaves the older record's lib64/...
-paths naming the deleted directory's files, not the independent usr/lib/... copy (PR #267 review).*
+paths naming the deleted directory's files, not the independent usr/lib/... copy (PR #267 review).
+A top-level link is resolved through the other top-level links a component at a time, as the
+kernel walks it (QA 2026-11-11): `lib64 -> lib -> usr/lib` lends the owner, and `/sbin/../usr/lib`
+through `sbin -> usr/bin` is `usr/usr/lib`, not `usr/lib`, so it lends nothing to the independent
+`usr/lib` file; the link's layer is the latest on the chain.*
 
 **Decision.** Every location of an image's probed application packages (D160) carries
 `ownedBy` — the `{name, version}` of the OS package whose file list names that path — when

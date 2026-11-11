@@ -32,6 +32,19 @@ All notable changes to this project are documented here. The format follows
   first. `scandiff -offline`: a capture whose recorded target is not the floors file's pinned ref
   is an ERROR with the reason (a BCI capture had passed under a target re-pinned to Alpine).
   (D161, D167 revised; QA 2026-11-11)
+- Image npm links, per the PR #275 review: a package directory or manifest that is itself a link
+  under a directory another root is linked to is read at the logical path; several links to one
+  install are one package located at every name; a package directory replaced by a symlink hides
+  its lower layers even when a later layer puts a directory back; a link crossed twice without
+  looping is not reported as a cycle. (D160 revised)
+- Image npm links (QA 2026-11-11): a root linked to a directory under another root re-homes the
+  packages read there (lodash 4 findings, were 0 with exit 0); package-link chains are grouped by
+  their end and a cycle leaves every link unread (exit 2 under the strict gate); a manifest link
+  through `/lib64` (with or without `..`) reads the right file; a package directory replaced by a
+  symlink in an upper layer hides its lower-layer manifests (2 findings, were 6); a middle link
+  retargeted in an upper layer un-owns the path, and `lib64 -> lib -> usr/lib` lends the owner
+  while `/sbin/../usr/lib` does not; npm's `.bin` link is not a package (exit 0, was 2).
+  (D160, D162 revised)
 - CycloneDX: three listings of one package, one keyed to Debian 11 and two stating the equivalent
   source version as `0:…` and `…`, are judged in either order (25 findings; one order had read 0,
   exit 0 under `--fail-on low`): the identity's key is adopted before the versions are compared.
