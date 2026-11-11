@@ -194,6 +194,8 @@ func catalogSubject(subject component, ctx osContext, target *pkgmeta.Target, st
 	// A bare listing that refused every arch-stating twin -- each
 	// contradicted it -- and was joined by none: the document contradicts
 	// itself about it whichever install it is (D165).
+	// Each entry marks its own base listing, so the walk's order decides
+	// nothing (a mutation walking the map survives); sorted for reading.
 	for _, i := range sortedKeys(d.refused) {
 		if _, joined := d.snaps[i]; joined {
 			continue
@@ -261,21 +263,16 @@ func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, d 
 		// with the reason: the document states its source two ways and
 		// the install states none.
 		if p.Arch != "" {
-			var cands []pkgmeta.Package
+			// Lent in the document's order (sortedKeys), each one folded
+			// onto the last: two that state the source two ways are the
+			// contradiction keepEvidence marks (D165), whichever came
+			// first, since the marked reason sorts the two values. The
+			// order matters for nothing else -- lending is a union -- so a
+			// mutation walking the map survives; it is kept for the reason
+			// text and for reading.
 			for _, i := range sortedKeys(d.snaps) {
 				s := d.snaps[i]
 				if s.Type == p.Type && s.Name == p.Name && s.Version == p.Version && (s.Ecosystem == "" || p.Ecosystem == "" || s.Ecosystem == p.Ecosystem) && !contradicts(p, s) {
-					cands = append(cands, s)
-				}
-			}
-			conflict := false
-			for i := 1; i < len(cands) && !conflict; i++ {
-				conflict = contradicts(cands[0], cands[i])
-			}
-			if conflict {
-				markSourceContradiction(&p, cands[0], cands[1])
-			} else {
-				for _, s := range cands {
 					keepEvidence(&p, s)
 				}
 			}
