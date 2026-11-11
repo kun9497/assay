@@ -89,8 +89,7 @@ func TestRun_RC1111_GrypeDiagnosticJSONIsAHardFailure(t *testing.T) {
 // removed, and the replay finds nothing to promote.
 func TestRun_RC1111_FailedAssayCaptureIsNotReplayable(t *testing.T) {
 	target := Target{Name: "t", Ref: "ref-t"}
-	retryPause = func() {}
-	t.Cleanup(func() { retryPause = func() { panic("retryPause not restored") } })
+	// TestMain already stubs retryPause for the package; nothing to restore.
 	targetsPath := writeTargetsFile(t, []Target{target})
 	dir := t.TempDir()
 	// A good capture from an earlier run in the same directory.
