@@ -58,13 +58,13 @@ func TestRun_RC1111_GrypeDiagnosticJSONIsAHardFailure(t *testing.T) {
 	if code != exitError || !strings.Contains(stderr, "grype hard failure (exit 2)") {
 		t.Errorf("exit=%d stderr=%q; want 2 and a grype hard failure", code, stderr)
 	}
-	if strings.Join(captured, ",") != "t.assay.json,t.grype.failed.json" {
-		t.Errorf("captured %v; want the grype capture filed as failed", captured)
+	if strings.Join(captured, ",") != "t.assay.json,t.assay.state.json,t.grype.failed.json,t.grype.state.json" {
+		t.Errorf("captured %v; want the grype capture filed as failed, with a state file per tool", captured)
 	}
 	// Replayed offline, the failed capture is not read at all...
 	code, stderr = rcRunOffline(t, target, dir, nil)
-	if code != exitError || !strings.Contains(stderr, "read offline grype capture") {
-		t.Errorf("offline: exit=%d stderr=%q; want 2, the grype capture missing", code, stderr)
+	if code != exitError || !strings.Contains(stderr, "the last run failed") {
+		t.Errorf("offline: exit=%d stderr=%q; want 2, the failed run named", code, stderr)
 	}
 	// ...and the diagnostic object under the good name is malformed by shape.
 	code, stderr = rcRunOffline(t, target, t.TempDir(), map[string][]byte{"t.assay.json": assayDoc(0, nil), "t.grype.json": []byte(`{"error":"scan failed"}`)})
@@ -106,12 +106,12 @@ func TestRun_RC1111_FailedAssayCaptureIsNotReplayable(t *testing.T) {
 	for _, e := range entries {
 		names = append(names, e.Name())
 	}
-	if strings.Join(names, ",") != "t.assay.failed.json,t.grype.json" {
+	if strings.Join(names, ",") != "t.assay.failed.json,t.assay.state.json,t.grype.json,t.grype.state.json" {
 		t.Errorf("captured %v; want the assay capture filed as failed and the stale good one gone", names)
 	}
 	code, stderr := rcRunOffline(t, target, dir, nil)
-	if code != exitError || !strings.Contains(stderr, "read offline assay capture") {
-		t.Errorf("offline: exit=%d stderr=%q; want 2, the assay capture missing", code, stderr)
+	if code != exitError || !strings.Contains(stderr, "the last run failed") {
+		t.Errorf("offline: exit=%d stderr=%q; want 2, the failed run named", code, stderr)
 	}
 }
 

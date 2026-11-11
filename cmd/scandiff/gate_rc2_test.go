@@ -18,12 +18,19 @@ import (
 func TestRun_RC2_GrypeNullMatchesIsNotAReport(t *testing.T) {
 	target := Target{Name: "t", Ref: "ref-t", MinAgree: 1}
 	code, stderr, captured, dir := rcRunLive(t, target, stub{out: assayDoc(0, nil), code: 0}, stub{out: []byte(`{"error":"scan failed","matches":null}`), code: 2})
-	if code != exitError || !strings.Contains(stderr, "grype hard failure (exit 2)") || strings.Join(captured, ",") != "t.assay.json,t.grype.failed.json" {
+	if code != exitError || !strings.Contains(stderr, "grype hard failure (exit 2)") || strings.Join(captured, ",") != "t.assay.json,t.assay.state.json,t.grype.failed.json,t.grype.state.json" {
 		t.Errorf("live: exit=%d stderr=%q captured=%v; want 2, a hard failure, the capture filed as failed", code, stderr, captured)
 	}
-	code, stderr = rcRunOffline(t, target, dir, map[string][]byte{"t.grype.json": []byte(`{"error":"scan failed","matches":null}`)})
+	// Replayed, that directory is the failed run's: the state says so.
+	code, stderr = rcRunOffline(t, target, dir, nil)
+	if code != exitError || !strings.Contains(stderr, "the last run failed") {
+		t.Errorf("offline on the failed run's directory: exit=%d stderr=%q; want 2, the failed run named", code, stderr)
+	}
+	// The diagnostic object under the good name in a directory of its own
+	// (an older tool's filing, no state) is malformed by shape.
+	code, stderr = rcRunOffline(t, target, t.TempDir(), map[string][]byte{"t.assay.json": assayDoc(0, nil), "t.grype.json": []byte(`{"error":"scan failed","matches":null}`)})
 	if code != exitError || !strings.Contains(stderr, `"matches" is not an array`) {
-		t.Errorf("offline: exit=%d stderr=%q; want 2 and the shape named", code, stderr)
+		t.Errorf("offline shape: exit=%d stderr=%q; want 2 and the shape named", code, stderr)
 	}
 	code, stderr, _, _ = rcRunLive(t, Target{Name: "t", Ref: "ref-t"}, stub{out: assayDoc(0, nil), code: 0}, stub{out: []byte(`{"matches":[]}`), code: 0})
 	if code != exitOK {
@@ -70,7 +77,7 @@ func TestRun_RC2_FailedRunOutlivesALockedSuccessCapture(t *testing.T) {
 	if code != exitError {
 		t.Fatalf("failed run: exit=%d stderr=%q; want 2", code, stderr)
 	}
-	if code, stderr := offline(); code != exitError || !strings.Contains(stderr, "the later run failed") && !strings.Contains(stderr, "read offline grype capture") {
+	if code, stderr := offline(); code != exitError || !strings.Contains(stderr, "the last run failed") && !strings.Contains(stderr, "read offline grype capture") {
 		t.Errorf("replay after the failed run: exit=%d stderr=%q; want 2, the failed run named", code, stderr)
 	}
 	// Unlocked, the replay still reflects the failed run.
@@ -87,18 +94,24 @@ func TestRun_RC2_FailedRunOutlivesALockedSuccessCapture(t *testing.T) {
 	if code, stderr := offline(); code != exitOK {
 		t.Errorf("replay after recovery: exit=%d stderr=%q; want 0", code, stderr)
 	}
-	// A marker OLDER than the success capture is an earlier failed run
-	// whose marker a later success could not remove: the success is the
-	// later run, and the replay is clean.
-	if err := os.WriteFile(filepath.Join(dir, "t.grype.failed.json"), []byte(`{"error":"old"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	// The files' times decide nothing: the state file does. Touched to an
+	// hour ago, the replay is still clean; with the state removed and a
+	// stray marker beside the capture, the replay refuses to guess.
 	old := time.Now().Add(-time.Hour)
-	if err := os.Chtimes(filepath.Join(dir, "t.grype.failed.json"), old, old); err != nil {
-		t.Fatal(err)
+	for _, n := range []string{"t.grype.json", "t.grype.state.json"} {
+		if err := os.Chtimes(filepath.Join(dir, n), old, old); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if code, stderr := offline(); code != exitOK {
-		t.Errorf("replay with an older marker: exit=%d stderr=%q; want 0", code, stderr)
+		t.Errorf("replay with old times: exit=%d stderr=%q; want 0", code, stderr)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "t.grype.failed.json"), []byte(`{"error":"stray"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(filepath.Join(dir, "t.grype.state.json"))
+	if code, stderr := offline(); code != exitError || !strings.Contains(stderr, "no state file") {
+		t.Errorf("replay with a stray marker and no state: exit=%d stderr=%q; want 2", code, stderr)
 	}
 }
 
@@ -160,11 +173,13 @@ func TestRun_RC2_TrivyDiagnosticJSONIsNotAMeasurement(t *testing.T) {
 				t.Errorf("live: exit=%d stderr=%q stdout=%q; want %d, %q, not %q", code, errOut.String(), out.String(), tc.code, tc.want, tc.wantNot)
 			}
 			// Offline on a diagnostic capture under the good name (as an
-			// older tool would have filed it).
-			if err := os.WriteFile(filepath.Join(dir, "t.trivy.json"), diag.out, 0o644); err != nil {
-				t.Fatal(err)
+			// older tool would have filed it), in a directory of its own.
+			dir = t.TempDir()
+			for n, b := range map[string][]byte{"t.assay.json": assayDoc(0, nil), "t.grype.json": grypeDoc(nil), "t.trivy.json": diag.out} {
+				if err := os.WriteFile(filepath.Join(dir, n), b, 0o644); err != nil {
+					t.Fatal(err)
+				}
 			}
-			os.Remove(filepath.Join(dir, "t.trivy.failed.json"))
 			out.Reset()
 			errOut.Reset()
 			code = run([]string{"-targets", targetsPath, "-offline", dir}, &out, &errOut, noExec(t))
