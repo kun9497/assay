@@ -96,13 +96,16 @@ func TestRun_QA1111_SourceVersionsAreComparedUnderTheKeyWhicheverOrder(t *testin
 		top    = `{"type":"library","name":"libc6","version":"2.31-13+deb11u14","purl":"pkg:deb/debian/libc6@2.31-13%2Bdeb11u14?arch=amd64&upstream=glibc%402.31-13%2Bdeb11u13"}`
 		keyed  = `{"type":"library","name":"libc6","version":"2.31-13+deb11u14","purl":"pkg:deb/debian/libc6@2.31-13%2Bdeb11u14?arch=amd64&distro=debian-11&upstream=glibc%402.31-13%2Bdeb11u13"}`
 		epoch0 = `{"type":"library","name":"libc6","version":"2.31-13+deb11u14","purl":"pkg:deb/debian/libc6@2.31-13%2Bdeb11u14?arch=amd64&upstream=glibc%400%3A2.31-13%2Bdeb11u13"}`
+		// The same listing stating no architecture: it meets the keyed
+		// listing's release through the arch-less identity.
+		epoch0NoArch = `{"type":"library","name":"libc6","version":"2.31-13+deb11u14","purl":"pkg:deb/debian/libc6@2.31-13%2Bdeb11u14?upstream=glibc%400%3A2.31-13%2Bdeb11u13"}`
 		epoch1 = `{"type":"library","name":"libc6","version":"2.31-13+deb11u14","purl":"pkg:deb/debian/libc6@2.31-13%2Bdeb11u14?arch=amd64&upstream=glibc%401%3A2.31-13%2Bdeb11u13"}`
 		ctrl   = `{"type":"library","name":"assay-qa-inventory-control","version":"1.0.0","purl":"pkg:npm/assay-qa-inventory-control@1.0.0"}`
 	)
 	doc := func(subject ...string) string {
 		return qa1111Start + `"components":[` + top + `,` + ctrl + `],"metadata":{"component":{"type":"container","name":"image","components":[` + strings.Join(subject, ",") + `]}}}`
 	}
-	for _, order := range [][]string{{keyed, epoch0}, {epoch0, keyed}} {
+	for _, order := range [][]string{{keyed, epoch0}, {epoch0, keyed}, {keyed, epoch0NoArch}, {epoch0NoArch, keyed}} {
 		r := qa1111Run(t, db, doc(order...), Options{FailOn: &bandLow, FailOnUnknown: true})
 		if r.code != 1 || r.findings["DEBIAN-CVE-2026-4046"] != "Debian:11 sbom" || r.doc.Summary.NotEvaluated != 0 || r.doc.Summary.TargetIncomplete != 0 || r.doc.Summary.Components != 2 {
 			t.Errorf("order %v: exit=%d findings=%v notEvaluated=%d incomplete=%d components=%d, want 1, the Debian finding, 0, 0, 2",
@@ -139,6 +142,14 @@ func TestRun_QA1111_DifferentArchitecturesAreNotOneInstall(t *testing.T) {
 	r := qa1111Run(t, db, doc("aarch64"), strict)
 	if r.code != 2 || r.doc.Summary.Components != 2 || r.doc.Summary.NotEvaluated != 1 || r.findings["ALPINE319-CVE-2024-58251"] != "Alpine:v3.19 /image/x86/lib/apk/db/installed" {
 		t.Errorf("different arch: exit=%d components=%d notEvaluated=%d findings=%v; want 2, 2, 1 and the x86_64 path alone", r.code, r.doc.Summary.Components, r.doc.Summary.NotEvaluated, r.findings)
+	}
+	// Two keyed twins of different architectures, each its own release: the
+	// unkeyed aarch64 child is the aarch64 twin's second listing, keyed by
+	// it, not refused as ambiguous.
+	arm := `{"type":"library","name":"busybox","version":"1.36.1-r20","purl":"pkg:apk/alpine/busybox@1.36.1-r20?arch=aarch64&distro=alpine-3.20","properties":[{"name":"syft:location:0:path","value":"/image/arm/lib/apk/db/installed"}]}`
+	r = qa1111Run(t, db, qa1111Start+`"components":[`+x86+`,`+arm+`],"metadata":{"component":{"type":"container","name":"demo","components":[`+os319+`,`+os320+`,`+child("aarch64")+`]}}}`, strict)
+	if r.code != 0 || r.doc.Summary.Components != 2 || r.doc.Summary.NotEvaluated != 0 || r.findings["ALPINE320-CVE-2025-46394"] != "Alpine:v3.20 /child/aarch64/lib/apk/db/installed,/image/arm/lib/apk/db/installed" || r.findings["ALPINE319-CVE-2024-58251"] != "Alpine:v3.19 /image/x86/lib/apk/db/installed" {
+		t.Errorf("two arches, two releases: exit=%d components=%d notEvaluated=%d findings=%v; want the aarch64 child on the aarch64 twin alone", r.code, r.doc.Summary.Components, r.doc.Summary.NotEvaluated, r.findings)
 	}
 	r = qa1111Run(t, db, doc("x86_64"), strict)
 	if r.code != 0 || r.doc.Summary.Components != 1 || r.doc.Summary.NotEvaluated != 0 || r.findings["ALPINE319-CVE-2024-58251"] != "Alpine:v3.19 /child/x86_64/lib/apk/db/installed,/image/x86/lib/apk/db/installed" {
@@ -187,6 +198,7 @@ func TestRun_QA1111_AFamilyWithNoReleaseLeavesTheQualifier(t *testing.T) {
 		{"linux sibling with no version, qualified", "", container(`{"type":"operating-system","name":"linux"},` + q), alpine, false},
 		{"alpine sibling with no version under Debian at the top, bare child", debian, container(`{"type":"operating-system","name":"alpine"},` + bare), "", false},
 		{"alpine edge sibling wins over the qualifier (as before)", "", container(`{"type":"operating-system","name":"alpine","version":"edge"},` + q), "", false},
+		{"alpine edge parent wins over the qualifier too", "", osParent("alpine", "edge", q), "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := qa1111Run(t, db, qa1111Start+`"components":[`+tc.top+`],"metadata":{"component":`+tc.subject+`}}`, Options{FailOnIncomplete: true})

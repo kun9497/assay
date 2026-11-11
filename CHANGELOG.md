@@ -7,6 +7,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- CycloneDX: three listings of one package, one keyed to Debian 11 and two stating the equivalent
+  source version as `0:…` and `…`, are judged in either order (25 findings; one order had read 0,
+  exit 0 under `--fail-on low`): the identity's key is adopted before the versions are compared.
+  Two listings stating different architectures (`arch=x86_64`, `arch=aarch64`) are two installs,
+  not one. An OS declared with no release at all (Alpine with no version, `linux`) no longer keys
+  its packages to a Debian declared at the top (51 false findings) nor switches off the purl's
+  `distro` qualifier beside it. (D165, D166 revised; QA 2026-11-11)
+
 ### Added
 - The scanner differential floors each probed ecosystem's application packages:
   `minApplicationPackages` (`npm`, `Go`) on `coverage[].packages`, judged by the weekly run and

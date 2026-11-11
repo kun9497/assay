@@ -7,6 +7,13 @@
 
 ## [Unreleased]
 
+### Fixed
+- CycloneDX: 한 패키지의 나열 셋 중 하나만 Debian 11 키가 있고 둘이 동등한 소스 버전을 `0:…`과 `…`로 적은
+  문서를 어느 순서든 판정합니다(25건; 한 순서는 `--fail-on low`에서 0건·종료 0이었음): 버전을 비교하기 전에
+  식별자의 키를 받아들입니다. 서로 다른 아키텍처(`arch=x86_64`, `arch=aarch64`)를 적은 나열 둘은 설치 둘입니다.
+  릴리스 없이 선언된 OS(버전 없는 Alpine, `linux`)는 더 이상 최상위의 Debian으로 패키지 키를 정하지 않고(오탐
+  51건), 옆에 있는 purl의 `distro` qualifier를 끄지도 않습니다. (D165, D166 개정; QA 2026-11-11)
+
 ### Added
 - 스캐너 차등 비교가 프로브된 생태계별 애플리케이션 패키지에 하한을 둡니다: `coverage[].packages`에 거는
   `minApplicationPackages`(`npm`, `Go`)로, 주간 실행과 야간 `-regressions-only` 게이트가 똑같이 판정합니다.
