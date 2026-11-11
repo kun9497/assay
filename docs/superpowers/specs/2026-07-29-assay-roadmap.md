@@ -8835,6 +8835,23 @@ from the report's top-level `image` record as well as `provenance.target.image`:
 stripped of its provenance had passed under another image's pin although its `image.indexDigest`
 named the BCI image.
 
+**Revised a third time 2026-11-11 (release check of main b732cac).** The failed-run marker above
+was placed in time by the files' modification times, and those are not the run's: a capture that
+moved through a ZIP kept its bytes and lost its times, and replayed a failed run as a success. A
+state file is now the replay's authority -- `<name>.<tool>.state.json`, written LAST by every live
+run: `ok` with the SHA-256 of the capture's bytes, `failed` (output filed in `.failed.json`), or
+`unsaved` when the scan succeeded but its capture could not be written (the old file held open on
+Windows, so an earlier success's bytes must not stand in for this run's -- before, the marker was
+removed first and the replay read the old 528 findings as the run that had breached live). A
+replay reads the state first: `failed`/`unsaved` is that run's verdict whether or not a capture
+lies under the good name; `ok` is honoured only for bytes whose SHA-256 the state names; a capture
+with no state beside it (the weekly archive's shape) replays as before, except that a stray
+failed-run marker beside it is refused rather than placed by time. The write seam
+(`writeCaptureFile`) lets a test deny the write without a platform lock. And trivy's `SchemaVersion`
+must be a number: its diagnostic object can carry the key with `null`, which had been measured as 0
+findings (a BREACH on a committed floor, a measurement on an informational one); `[]` for grype's
+`matches` and an empty trivy report remain valid results of nothing.
+
 **Gives up.** A partial loss above the floor (ubi8n18 down to 118 npm packages) is not caught by
 this floor; the finding floors and D117's ceiling see some of it. A floor is re-cut by hand when a
 target's digest moves.

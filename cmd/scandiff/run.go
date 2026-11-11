@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -435,8 +437,14 @@ func trivyShape(raw []byte) string {
 	if err := json.Unmarshal(raw, &probe); err != nil {
 		return err.Error()
 	}
-	if _, ok := probe["SchemaVersion"]; !ok {
+	v, ok := probe["SchemaVersion"]
+	if !ok {
 		return "no \"SchemaVersion\" field: not a trivy report"
+	}
+	// A report's SchemaVersion is a number; a diagnostic object may carry
+	// the key with null (release check of main b732cac).
+	if s := strings.TrimSpace(string(v)); s == "" || s[0] < '0' || s[0] > '9' {
+		return "\"SchemaVersion\" is not a number: not a trivy report"
 	}
 	return ""
 }
@@ -477,17 +485,89 @@ func readOffline(dir string, t Target) (assayRaw, grypeRaw []byte, fatal string)
 // next successful run removes the marker.
 func readCapture(dir, name, kind string) ([]byte, string) {
 	good := filepath.Join(dir, name+"."+kind+".json")
+	st, serr := readState(dir, name, kind)
+	if serr != nil {
+		return nil, fmt.Sprintf("read offline %s capture state: %v", kind, serr)
+	}
+	if st != nil && st.Result != captureOK {
+		// The last run's own word, whether or not a capture lies under
+		// the good name.
+		return nil, fmt.Sprintf("offline %s capture %s is not this run's: the last run %s (%s)", kind, filepath.Base(good), st.Result, st.Reason)
+	}
 	raw, err := os.ReadFile(good)
 	if err != nil {
 		return nil, fmt.Sprintf("read offline %s capture: %v", kind, err)
 	}
-	failed := filepath.Join(dir, name+"."+kind+".failed.json")
-	if fi, ferr := os.Stat(failed); ferr == nil {
-		if gi, gerr := os.Stat(good); gerr == nil && !fi.ModTime().Before(gi.ModTime()) {
-			return nil, fmt.Sprintf("offline %s capture %s is an earlier run's: the later run failed (%s)", kind, filepath.Base(good), filepath.Base(failed))
+	switch {
+	case st == nil:
+		// No state beside it: a capture from before the state file, or
+		// one unpacked without it. A failed-run marker beside it then
+		// cannot be placed in time, and the capture is not trusted.
+		if _, ferr := os.Stat(filepath.Join(dir, name+"."+kind+".failed.json")); ferr == nil {
+			return nil, fmt.Sprintf("offline %s capture %s sits beside a failed-run marker and no state file says which run is later", kind, filepath.Base(good))
 		}
+		return raw, ""
+	case st.SHA256 != sha256Hex(raw):
+		return nil, fmt.Sprintf("offline %s capture %s is not the one its state describes (sha256 %s, state %s)", kind, filepath.Base(good), sha256Hex(raw), st.SHA256)
 	}
 	return raw, ""
+}
+
+// writeCaptureFile writes a success capture; a variable so a test can make
+// the write fail the way a reader holding the old file open on Windows does
+// (release check of main b732cac), without a platform-specific lock.
+var writeCaptureFile = func(path string, data []byte) error { return os.WriteFile(path, data, 0o644) }
+
+// captureState is what the last live run left of one tool's capture, in
+// <name>.<tool>.state.json beside it. It is the replay's authority, not the
+// files' modification times: a capture that moves through a ZIP keeps its
+// bytes and loses its times (release check of main b732cac: a failed run's
+// capture replayed as a success after unpacking), and a run that could not
+// write its capture at all -- the good name held open on Windows -- must
+// not leave the earlier success standing as its own. The SHA-256 ties the
+// state to the bytes it describes, so a stale good capture a run could not
+// replace is told from the one the state is about.
+type captureState struct {
+	Result string `json:"result"` // captureOK, captureFailed or captureUnsaved
+	SHA256 string `json:"sha256,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+const (
+	captureOK      = "ok"
+	captureFailed  = "failed"
+	captureUnsaved = "unsaved"
+)
+
+func statePath(dir, name, kind string) string {
+	return filepath.Join(dir, name+"."+kind+".state.json")
+}
+
+func readState(dir, name, kind string) (*captureState, error) {
+	raw, err := os.ReadFile(statePath(dir, name, kind))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var st captureState
+	if err := json.Unmarshal(raw, &st); err != nil {
+		return nil, err
+	}
+	return &st, nil
+}
+
+func writeState(stderr io.Writer, dir, name, kind string, st captureState) {
+	raw, _ := json.Marshal(st)
+	if err := os.WriteFile(statePath(dir, name, kind), raw, 0o644); err != nil {
+		fmt.Fprintf(stderr, "warning: write capture state %s: %v\n", statePath(dir, name, kind), err)
+	}
+}
+
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 
 // captureMismatch is "" when an offline capture records, as the target it
@@ -713,6 +793,13 @@ func printInfo(stderr io.Writer, info []breach) {
 // A successful run removes the failed marker of an earlier one, and a failed
 // run's marker is what a replay trusts when the good name could not be
 // removed (readCapture): each replay reflects the last run.
+//
+// The state file (captureState) is written LAST and describes what is on
+// disk: a success whose capture could not be written leaves the state
+// "unsaved", so the replay does not take an earlier success's bytes for this
+// run's; a failed run leaves "failed" whether or not the good name could be
+// removed; a success removes the failed-run marker and records the bytes'
+// SHA-256.
 func writeCapture(stderr io.Writer, dir, name, kind string, data []byte, ok bool) {
 	path := filepath.Join(dir, name+"."+kind+".json")
 	failed := filepath.Join(dir, name+"."+kind+".failed.json")
@@ -720,13 +807,21 @@ func writeCapture(stderr io.Writer, dir, name, kind string, data []byte, ok bool
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			fmt.Fprintf(stderr, "warning: remove stale capture %s: %v\n", path, err)
 		}
-		path = failed
-	} else if err := os.Remove(failed); err != nil && !os.IsNotExist(err) {
+		if err := os.WriteFile(failed, data, 0o644); err != nil {
+			fmt.Fprintf(stderr, "warning: write capture %s: %v\n", failed, err)
+		}
+		writeState(stderr, dir, name, kind, captureState{Result: captureFailed, Reason: "the scan failed; its output is in " + filepath.Base(failed)})
+		return
+	}
+	if err := writeCaptureFile(path, data); err != nil {
+		fmt.Fprintf(stderr, "warning: write capture %s: %v\n", path, err)
+		writeState(stderr, dir, name, kind, captureState{Result: captureUnsaved, Reason: "the scan succeeded but its capture could not be written: " + err.Error()})
+		return
+	}
+	if err := os.Remove(failed); err != nil && !os.IsNotExist(err) {
 		fmt.Fprintf(stderr, "warning: remove failed-run marker %s: %v\n", failed, err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		fmt.Fprintf(stderr, "warning: write capture %s: %v\n", path, err)
-	}
+	writeState(stderr, dir, name, kind, captureState{Result: captureOK, SHA256: sha256Hex(data)})
 }
 
 // renderTable writes the one thing that goes to stdout: every target's row,
