@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 )
 
@@ -19,6 +20,36 @@ var errNotPURL = errors.New("not a package URL")
 
 // ParsePURL handles the subset of the purl spec that appears in SBOMs:
 // pkg:type/namespace/name@version?qualifiers. Subpath (#…) is discarded.
+// String spells p back as a purl, qualifiers in sorted order and escaped
+// as purlEscape escapes them (OSPackagePURL's spelling). Used where two
+// listings of one install are joined and the kept purl must carry what both
+// stated (cyclonedx.mergePURL).
+func (p PURL) String() string {
+	var b strings.Builder
+	b.WriteString("pkg:" + p.Type + "/")
+	if p.Namespace != "" {
+		b.WriteString(purlEscape(p.Namespace) + "/")
+	}
+	b.WriteString(purlEscape(p.Name))
+	if p.Version != "" {
+		b.WriteString("@" + purlEscape(p.Version))
+	}
+	keys := make([]string, 0, len(p.Qualifiers))
+	for k := range p.Qualifiers {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for i, k := range keys {
+		if i == 0 {
+			b.WriteByte('?')
+		} else {
+			b.WriteByte('&')
+		}
+		b.WriteString(k + "=" + purlEscape(p.Qualifiers[k]))
+	}
+	return b.String()
+}
+
 func ParsePURL(s string) (PURL, error) {
 	rest, ok := strings.CutPrefix(s, "pkg:")
 	if !ok {

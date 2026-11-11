@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/kun9497/assay/internal/pkgmeta"
@@ -193,11 +194,13 @@ func catalogSubject(subject component, ctx osContext, target *pkgmeta.Target, st
 	// A bare listing that refused every arch-stating twin -- each
 	// contradicted it -- and was joined by none: the document contradicts
 	// itself about it whichever install it is (D165).
-	for i, p := range d.refused {
+	// Each entry marks its own base listing, so the walk's order decides
+	// nothing (a mutation walking the map survives); sorted for reading.
+	for _, i := range sortedKeys(d.refused) {
 		if _, joined := d.snaps[i]; joined {
 			continue
 		}
-		markSourceContradiction(&target.Packages[i], p)
+		markSourceContradiction(&target.Packages[i], target.Packages[i], d.refused[i])
 	}
 }
 
@@ -252,9 +255,43 @@ func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, d 
 	// own appends p as its own install. A bare listing of the identity that
 	// joined an earlier twin is evidence for an arch-stating one too.
 	own := func(p pkgmeta.Package) {
-		for _, s := range d.snaps {
-			if p.Arch != "" && s.Type == p.Type && s.Name == p.Name && s.Version == p.Version && (s.Ecosystem == "" || p.Ecosystem == "" || s.Ecosystem == p.Ecosystem) && !contradicts(p, s) {
-				keepEvidence(&p, s)
+		// Every bare listing of the identity is a candidate, in the
+		// document's order (release check of main 5197df4: a Go map walk
+		// lent whichever candidate came first and dropped the next as a
+		// contradiction, so one SBOM read 70 findings or 65 by run). Two
+		// candidates that contradict EACH OTHER leave the install unjudged
+		// with the reason: the document states its source two ways and
+		// the install states none.
+		if p.Arch != "" {
+			// Every bare listing of the identity is a candidate, judged
+			// against the install AS LISTED (release check of main 5197df4:
+			// a Go map walk lent whichever candidate came first and dropped
+			// the next as contradicting what it had just lent, so one SBOM
+			// read 70 findings or 65 by run). Two candidates that
+			// contradict EACH OTHER leave the install unjudged with the
+			// reason: the document states its source two ways and the
+			// install states none. Walked in the document's order for the
+			// reason text alone -- lending is a union, and the marked
+			// reason sorts the two values -- so a mutation walking the map
+			// survives, as does one that lends both and lets keepEvidence
+			// mark the second: both are equivalents, not gaps.
+			var cands []pkgmeta.Package
+			for _, i := range sortedKeys(d.snaps) {
+				s := d.snaps[i]
+				if s.Type == p.Type && s.Name == p.Name && s.Version == p.Version && (s.Ecosystem == "" || p.Ecosystem == "" || s.Ecosystem == p.Ecosystem) && !contradicts(p, s) {
+					cands = append(cands, s)
+				}
+			}
+			conflict := false
+			for i := 1; i < len(cands) && !conflict; i++ {
+				conflict = contradicts(cands[0], cands[i])
+			}
+			if conflict {
+				markSourceContradiction(&p, cands[0], cands[1])
+			} else {
+				for _, s := range cands {
+					keepEvidence(&p, s)
+				}
 			}
 		}
 		target.Packages = append(target.Packages, p)
@@ -283,13 +320,18 @@ func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, d 
 				if p.Ecosystem == "" {
 					p.Ecosystem = target.Packages[twins[0]].Ecosystem
 				}
-				markSourceContradiction(&p, target.Packages[twins[0]])
+				markSourceContradiction(&p, p, target.Packages[twins[0]])
 				own(p)
 				return
 			}
 		}
 		if i := indexOfPackage(target.Packages[:base], p, keyed); i >= 0 {
 			kept := &target.Packages[i]
+			// What the bare listing stated, before any key a join lends it
+			// (release check of main b732cac: a snapshot taken after the
+			// key was adopted carried that key to an install of another
+			// architecture the document keys to nothing).
+			stated := *kept
 			// The key the document gives this identity, known from the dry
 			// run, is adopted by both halves BEFORE their evidence is
 			// compared: a source version is one version or two only under
@@ -305,21 +347,35 @@ func mergeDeduped(scratchTarget pkgmeta.Target, scratchStats Stats, base int, d 
 					p.Ecosystem = k.key
 				}
 			}
-			if kept.Arch == "" && p.Arch != "" {
+			switch {
+			case kept.Arch == "" && p.Arch != "":
 				if contradicts(*kept, p) {
 					if _, ok := d.refused[i]; !ok {
 						d.refused[i] = p
 					}
 				} else {
 					if _, ok := d.snaps[i]; !ok {
-						d.snaps[i] = *kept
+						d.snaps[i] = stated
 					}
 					kept.Arch = p.Arch
-					kept.PURL = p.PURL
+					kept.PURL = mergePURL(kept.PURL, p.PURL)
 					keepEvidence(kept, p)
 					return
 				}
-			} else {
+			case kept.Arch != "" && p.Arch == "" && contradicts(*kept, p):
+				// The bare listing is not this install (release check of
+				// main b732cac: joined, it had marked the install's own
+				// evidence a contradiction and lost its 20 findings); it is
+				// its own listing, keyed as the install is and marked, and
+				// the install stands.
+				if p.Ecosystem == "" {
+					p.Ecosystem = kept.Ecosystem
+				}
+				markSourceContradiction(&p, p, *kept)
+			default:
+				if kept.Arch != "" && p.Arch == "" {
+					kept.PURL = mergePURL(kept.PURL, p.PURL)
+				}
 				keepEvidence(kept, p)
 				return
 			}
@@ -367,17 +423,51 @@ func lend(p pkgmeta.Package, twins []int, target *pkgmeta.Target) bool {
 	return lent
 }
 
-// markSourceContradiction marks kept as contradicted by other's source
-// statement (D165), naming both.
-func markSourceContradiction(kept *pkgmeta.Package, other pkgmeta.Package) {
-	if kept.Source == nil || other.Source == nil {
+// markSourceContradiction marks kept as unjudged because the document
+// states its source two ways, a's and b's (D165), naming both.
+func markSourceContradiction(kept *pkgmeta.Package, a, b pkgmeta.Package) {
+	if a.Source == nil || b.Source == nil {
 		return
 	}
-	if kept.Source.Name != other.Source.Name {
-		markContradiction(kept, "source", kept.Source.Name, other.Source.Name)
+	if a.Source.Name != b.Source.Name {
+		markContradiction(kept, "source", a.Source.Name, b.Source.Name)
 		return
 	}
-	markContradiction(kept, "source "+kept.Source.Name+" at", kept.Source.Version, other.Source.Version)
+	markContradiction(kept, "source "+a.Source.Name+" at", a.Source.Version, b.Source.Version)
+}
+
+// sortedKeys is the keys of m in order: the document's order of the base
+// listings, so a walk over snapshots reads the same every run.
+func sortedKeys(m map[int]pkgmeta.Package) []int {
+	out := make([]int, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Ints(out)
+	return out
+}
+
+// mergePURL is kept's purl carrying every qualifier other states too: a
+// join must not drop what one listing confirmed (release check of main
+// b732cac: the twin's purl replaced the kept one whole, and a VEX statement
+// scoped by the dropped `distro=` no longer reached the install). On a
+// qualifier both state, other's value wins, as its architecture did.
+func mergePURL(kept, other string) string {
+	kp, kerr := pkgmeta.ParsePURL(kept)
+	op, oerr := pkgmeta.ParsePURL(other)
+	switch {
+	case kerr != nil:
+		return other
+	case oerr != nil:
+		return kept
+	}
+	if kp.Qualifiers == nil {
+		kp.Qualifiers = map[string]string{}
+	}
+	for k, v := range op.Qualifiers {
+		kp.Qualifiers[k] = v
+	}
+	return kp.String()
 }
 
 // contradicts reports whether two listings of one package state different

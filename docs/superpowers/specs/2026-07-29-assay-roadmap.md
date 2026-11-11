@@ -8760,6 +8760,26 @@ joined whichever twin came first: the same Debian 11 SBOM read 45 findings with 
 first and 25 with a contradiction and exit 2 with arm64 first; an x86_64-scoped OpenVEX
 suppressed 1 finding in one order and 0 in the other. Now both orders read 45 and 3+1.
 
+**Revised a third time 2026-11-11 (release check of main b732cac).** The revision above walked
+its candidates in Go map order, and the rule it stated was not the rule it applied. Four
+corrections. An arch-stating install that states no source version takes the bare records of its
+identity as candidates TOGETHER, judged against the install as listed: candidates that contradict
+each other leave the install unjudged with the reason naming both versions (the document states its
+source two ways and the install states none), and only candidates that agree lend. Before, the
+first candidate the map walk reached was lent and the next dropped as contradicting it: one Debian
+11 SBOM read 70 findings in 53 of 64 runs and 65 in 11, both with nothing incomplete; now 45
+findings, the i386 install unjudged, exit 2, identically in 64 independent processes. A bare listing
+joined by an arch-stating twin lends what it STATED -- the snapshot is taken before the join gives
+it the twin's key -- so an aarch64 install the document keys to nothing stays not evaluated whether
+listed before or after the keyed x86_64 one (2 findings, 1 not evaluated, exit 2 under
+`--fail-on-incomplete=any`; one order had read 4 and 0). A bare listing that contradicts its ONE
+arch-stating twin is not that install: it is its own listing, keyed as the install is and marked
+(D165), and the install's own finding stands wherever the two are placed (the typed-top placement
+had marked the install itself and lost its 20 findings: 0, exit 0 under `--fail-on low`). And a
+join keeps every qualifier either listing stated (`mergePURL`, `pkgmeta.PURL.String`): a VEX
+statement scoped by `distro=` reaches an install whose arch came from the other listing (the
+twin's purl had replaced the kept one whole, and the statement no longer matched).
+
 **Gives up.** Two listings of one package inside `components`, or both inside the subject tree,
 are not merged at all (as before) and are each judged on what they state. A contradiction makes the
 whole package unevaluated, including findings every reading of the document would have produced
