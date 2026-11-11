@@ -17,6 +17,12 @@ import (
 type FileFromLayer struct {
 	Data   []byte
 	DiffID string
+	// ViaDiffID is the newest layer among the links Files followed to reach
+	// the file, "" when the path was a regular file at its own name. A
+	// caller that keys a path's identity by layer (D162's owner rule) needs
+	// the layer the path's meaning last changed in, which a link retargeted
+	// in an upper layer changes without touching the bytes (QA 2026-11-11).
+	ViaDiffID string
 }
 
 // Whiteout markers, from the OCI image-spec (layer.md).
@@ -140,7 +146,7 @@ func (img *Image) Files(ctx context.Context, want []string) (map[string]FileFrom
 	qs := make([]query, 0, len(want))
 	for _, w := range want {
 		n := normaliseEntry(w)
-		qs = append(qs, query{path: n, want: n, top: newest, before: noCeiling, dir: path.Dir(n)})
+		qs = append(qs, query{path: n, want: n, top: newest, before: noCeiling, dir: path.Dir(n), via: -1})
 	}
 
 	out := make(map[string]FileFromLayer, len(want))
@@ -222,6 +228,9 @@ type query struct {
 	before int
 	dir    string
 	links  int
+	// via is the newest layer index among the links followed so far, -1
+	// for none (FileFromLayer.ViaDiffID).
+	via int
 }
 
 // whiteout is one deletion marker, the layer that wrote it and its position in
@@ -365,7 +374,11 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 			done[k] = true
 			switch hit.kind {
 			case hitFile:
-				out[qs[k].want] = FileFromLayer{Data: hit.data, DiffID: l.DiffID}
+				f := FileFromLayer{Data: hit.data, DiffID: l.DiffID}
+				if qs[k].via >= 0 {
+					f.ViaDiffID = img.Layers[qs[k].via].DiffID
+				}
+				out[qs[k].want] = f
 			case hitLink:
 				// Record the link and stop looking for this path: a lower
 				// layer's copy is shadowed by the link that replaced it.
@@ -403,7 +416,11 @@ func follow(q query, hit layerHit, i, newest int) query {
 	if !hit.hard {
 		dir = path.Dir(target)
 	}
-	return query{path: target, want: q.want, top: top, before: before, dir: dir, links: q.links + 1}
+	via := q.via
+	if i > via {
+		via = i
+	}
+	return query{path: target, want: q.want, top: top, before: before, dir: dir, links: q.links + 1, via: via}
 }
 
 // hiddenFrom reports whether a whiteout hides q's path from a read of layer

@@ -231,10 +231,24 @@ func topLevelLinks(links map[string]source.Link, layerOf func(string) int) map[s
 		if !ok || l.Hard || l.Target == "" {
 			continue
 		}
-		target := strings.TrimPrefix(path.Clean("/"+l.Target), "/")
-		if strings.HasPrefix(target, "usr/") && target != d {
-			out[d] = topLink{target: target, layer: layerOf(l.DiffID)}
+		// Resolved through the other top-level links, a component at a
+		// time, as the kernel walks it: lib64 -> lib -> usr/lib reaches
+		// usr/lib, and /sbin/../usr/lib through sbin -> usr/bin is
+		// usr/usr/lib, not usr/lib (QA 2026-11-11: the fold-first spelling
+		// named an APK the owner of the independent usr/lib file, and the
+		// two-step chain lent nothing). The link's layer is the latest of
+		// every link on the way.
+		target, followed, cyclic := resolveChain("", l.Target, links)
+		if cyclic || !strings.HasPrefix(target, "usr/") || target == d {
+			continue
 		}
+		layer := layerOf(l.DiffID)
+		for _, f := range followed {
+			if i := layerOf(links[f].DiffID); i > layer {
+				layer = i
+			}
+		}
+		out[d] = topLink{target: target, layer: layer}
 	}
 	return out
 }

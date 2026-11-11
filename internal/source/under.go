@@ -101,6 +101,17 @@ func (img *Image) collect(ctx context.Context, root string, match func(name stri
 	return out, len(links), err
 }
 
+// underReplaced reports whether a strict ancestor of name is one an upper
+// layer put a file or a link at (collectWith's replaced set).
+func underReplaced(name string, replaced map[string]bool) bool {
+	for p := path.Dir(name); p != "." && p != "/" && p != ""; p = path.Dir(p) {
+		if replaced[p] {
+			return true
+		}
+	}
+	return false
+}
+
 // sniffBytes is how much of a candidate entry collectWith hands to sniff
 // before deciding to read it: four bytes, the length of the ELF magic and
 // of every other magic the image path cares about.
@@ -139,6 +150,13 @@ func (img *Image) collectWith(ctx context.Context, roots []string, match func(na
 	deleted := map[string]bool{}
 	var opaque []string
 	links := map[string]Link{}
+	// replaced is every name an upper layer ended with a file or a link at:
+	// the OCI changeset rules keep an existing path only when both it and
+	// the new entry are directories, so a lower layer's entries BENEATH
+	// such a name are gone from the filesystem without any whiteout -- a
+	// package directory an upper layer replaced with a symlink still read
+	// its old manifest as installed (QA 2026-11-11).
+	replaced := map[string]bool{}
 
 	for i := len(img.Layers) - 1; i >= 0; i-- {
 		l := img.Layers[i]
@@ -147,6 +165,9 @@ func (img *Image) collectWith(ctx context.Context, roots []string, match func(na
 		last := map[string]underHit{}
 
 		err := readLayer(ctx, l, func(name string, h *tar.Header, r io.Reader) error {
+			if underReplaced(name, replaced) {
+				return nil
+			}
 			for _, root := range roots {
 				shadowAncestors(last, name, root)
 			}
@@ -230,7 +251,9 @@ func (img *Image) collectWith(ctx context.Context, roots []string, match func(na
 			switch hit.kind {
 			case hitFile:
 				out[name] = FileFromLayer{Data: hit.data, DiffID: l.DiffID}
+				replaced[name] = true
 			case hitLink:
+				replaced[name] = true
 				// Recorded once per name the image ends up with a link at,
 				// not per link entry: a link a later entry replaced is not
 				// a file this scan failed to read.
