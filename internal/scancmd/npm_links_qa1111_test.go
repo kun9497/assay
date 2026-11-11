@@ -85,9 +85,12 @@ func TestRun_QA1111_NpmLinksAndOwners(t *testing.T) {
 			probeLayerEntry{name: "usr/lib/node_modules/vendor/assets/minimatch", link: "/opt/mm"},
 			probeLayerEntry{name: "usr/local/lib/node_modules", link: "/usr/lib/node_modules/vendor/assets"},
 		)}, want{[]string{"3.0.4"}, []string{local}, "", report.ScopeRead, nil, 1}},
+		// The relative target resolves from the PHYSICAL directory: four
+		// steps up from vendor/assets/minimatch is usr/lib, from the logical
+		// usr/local/lib/node_modules/minimatch it would be usr.
 		{"root alias: a manifest link under the target, relative", [][]probeLayerEntry{base(
-			probeLayerEntry{name: "opt/mm/package.json", body: v4},
-			probeLayerEntry{name: "usr/lib/node_modules/vendor/assets/minimatch/package.json", link: "../../../../../../opt/mm/package.json"},
+			probeLayerEntry{name: "usr/lib/store/package.json", body: v4},
+			probeLayerEntry{name: "usr/lib/node_modules/vendor/assets/minimatch/package.json", link: "../../../../store/package.json"},
 			probeLayerEntry{name: "usr/local/lib/node_modules", link: "/usr/lib/node_modules/vendor/assets"},
 		)}, want{[]string{"3.0.4"}, []string{local}, "", report.ScopeRead, nil, 1}},
 		{"root alias: a manifest hardlink under the target", [][]probeLayerEntry{base(
