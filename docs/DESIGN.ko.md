@@ -1472,8 +1472,8 @@ SUSE에서는 `--fail-on-unfixable`이 동작하지만 `=wont-fix`는 SUSE가 �
 **야간 발행은 push하기 전에 같은 floor를 지킵니다 (D114).** `db build`와 `db push`
 사이에서 `db-publish.yml`은 `ASSAY_DB_DIR`을 후보로 향하게 하고 같은 타깃과 floor
 파일로 `scandiff -regressions-only`를 실행합니다: `minAgree`, `minFindings`,
-`minComponents`, `maxNotEvaluated`, `maxIncompleteChecks`, `maxTargetIncomplete`(D145)
-또는 커밋된 trivy 하한 위반, 혹은 `ERROR` 판정은
+`minComponents`, `maxNotEvaluated`, `maxIncompleteChecks`, `maxTargetIncomplete`(D145),
+`minApplicationPackages`(D167) 또는 커밋된 trivy 하한 위반, 혹은 `ERROR` 판정은
 job을 실패시키고 아무것도 push되지 않습니다 — 다음 야간이 마지막으로 정상이었던
 아티팩트에서 시드해 다시 시도합니다. exit 2로 끝난 assay 스캔은 먼저 한 번 다시
 실행됩니다(2026-10-06 개정, 레지스트리의 `BLOB_UNKNOWN` 일시적 오류가 멀쩡한 후보를
@@ -1491,6 +1491,17 @@ v0.116.1, trivy v0.74.0)에서 D93의 85% / 2x로 나왔습니다: `debian11`은
 비율로 잘라 내면 `minAgree`, `minFindings`, `trivy.minAgree`가 한꺼번에 걸립니다.
 `amazonlinux2`는 component 106개에서 17 / 17 / 17로 측정됐으므로, 그 타깃의 무게는
 대부분 `minComponents`가 집니다.
+
+**타깃의 다이제스트가 바뀔 때 floor 다시 정하기.** 파일의 모든 floor는 옆에 고정된 다이제스트에
+묶여 있으므로, 새 다이제스트는 새 측정을 뜻하지 옛 숫자의 수정이 아닙니다: 그 주의 캡처
+(`scanner-diff-*` 아티팩트, 또는 로컬 실행의 `-capture`)에 대고 그 타깃의 블록을 정보성 모양으로
+비운 채 `scandiff`를 오프라인으로 돌려 출력된 개수를 읽고, finding floor는 D93의 85% / 2x,
+`maxAssayOnlyFixed`(D146)는 max(2x, x+25), `minApplicationPackages`(D167)는 npm 개수의 절반과
+Go 1로 커밋합니다 — 개수 자체는 `<target>.assay.json`의 `coverage[]`에서 읽습니다:
+
+```bash
+python -c "import json,sys; d=json.load(open(sys.argv[1])); print({c['ecosystem']: c['packages'] for c in d['coverage'] if c['ecosystem'] in ('npm','Go')})" ubi8n18.assay.json
+```
 
 슬라이스 ①은 대조한 두 SBOM 모두에서 집합이 정확히 일치했습니다:
 
