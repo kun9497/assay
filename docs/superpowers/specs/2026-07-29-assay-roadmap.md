@@ -8953,10 +8953,12 @@ with the reason, and a record that does not parse is an error. The state files r
 reader. A directory without a record -- a capture from before it, the weekly archive's shape --
 replays by its state files as the revision above has it. A record that cannot be written is
 reported on stderr; the directory is then not replayable as that run (an incomplete record
-refuses, no record falls back to the state files), which is the safe direction. One case stays
-open: a failed run whose body, state file AND run record are all held open leaves the earlier
-record in place; the failed-run marker it does write is then what refuses the replay, and only
-a run that could write none of the four files at all would go unnoticed.
+refuses, no record falls back to the state files), which is the safe direction. The state file
+beside a capture must agree with the record (PR #289 review): a failed run that could write
+neither record but could write its state leaves the earlier run's complete record saying ok over a
+state saying failed, and the record alone would have replayed the earlier bytes once a reader
+removed the marker. One case stays open: a run that could write none of the record, the state and
+the marker leaves the earlier run's files intact, and only such a run would go unnoticed.
 
 **Gives up.** A partial loss above the floor (ubi8n18 down to 118 npm packages) is not caught by
 this floor; the finding floors and D117's ceiling see some of it. A floor is re-cut by hand when a
