@@ -82,6 +82,7 @@ func TestFiles_DotDotAfterALinkComponentIsLazy(t *testing.T) {
 		img := imageOf(layerOfOrdered(t, "sha256:one",
 			sym("opt/route", "/srv/nested/deep"),
 			sym("srv/nested/deep", "/elsewhere/x"),
+			node("elsewhere/x", tar.TypeDir),
 			entry{name: "srv/nested/qa-db", body: "WRONG"},
 			entry{name: "elsewhere/qa-db", body: "RIGHT"},
 			sym("lib/apk/db/installed", "/opt/route/../qa-db"),
@@ -122,6 +123,7 @@ func TestFiles_DotDotAfterALinkComponentIsLazy(t *testing.T) {
 	t.Run("a wanted path given with .. is answered under the caller's spelling", func(t *testing.T) {
 		img := imageOf(layerOfOrdered(t, "sha256:one",
 			sym("opt/route", "/srv/nested/deep"),
+			node("srv/nested/deep", tar.TypeDir),
 			entry{name: "srv/nested/qa-db", body: "RIGHT"},
 		))
 		got, err := img.Files(t.Context(), []string{"opt/route/../qa-db"})

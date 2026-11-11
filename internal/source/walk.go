@@ -288,6 +288,22 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 	done := make([]bool, len(qs))
 	var deleted, opaque []whiteout
 	newest := len(img.Layers) - 1
+	// dirSeen is, per query holding a "..", every directory the layers show
+	// at one of the components a ".." follows (lazyDotDot): an explicit
+	// directory entry or an entry beneath the name. A ".." folds only over
+	// a directory so shown; one whose component no layer shows is a path
+	// that leads nowhere, as the kernel's ENOENT says (release check of
+	// main b732cac: `/data/absent/../qa-db` with no `absent` anywhere had
+	// folded to `data/qa-db` and read a database the link does not reach,
+	// while the real one sat at the fallback path).
+	dirSeen := make([]map[string]bool, len(qs))
+	preOf := make([][]string, len(qs))
+	for k, q := range qs {
+		if strings.Contains("/"+q.path+"/", "/../") {
+			preOf[k] = dotDotPrefixes(q.path)
+			dirSeen[k] = map[string]bool{}
+		}
+	}
 	// dirAbove is, per query, every ancestor of its path an upper layer
 	// wrote an explicit directory entry at. The changeset rules keep an
 	// existing path under a new entry only when BOTH are directories, so a
@@ -338,6 +354,13 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 			for k, q := range qs {
 				if done[k] || i > q.top || (i == q.top && pos >= q.before) {
 					continue
+				}
+				if preOf[k] != nil && !marker {
+					for _, pre := range preOf[k] {
+						if (name == pre && h.Typeflag == tar.TypeDir) || strings.HasPrefix(name, pre+"/") {
+							dirSeen[k][pre] = true
+						}
+					}
 				}
 				switch {
 				case strings.HasPrefix(name, q.path+"/"):
@@ -454,16 +477,67 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 		opaque = append(opaque, layerOpaque...)
 	}
 	// A path still holding a ".." was not decided by any entry at the
-	// component before it, in any layer: that component is a directory
-	// the layers imply (or name explicitly) and never a link, so the ".."
-	// is applied now and the path looked up again (lazyDotDot).
+	// component before it, in any layer: when the layers show that
+	// component as a directory the ".." is applied -- every ".." over such
+	// a directory at once, since none of them is a link to follow -- and
+	// the path looked up again (lazyDotDot); a fold is not a link hop. A
+	// component no layer shows ends the path unanswered. (A mutation
+	// counting the one re-queue as a hop survives: a path folds at most
+	// once per pass, so forty-four `a/..` cost one, not forty-four.)
 	for k, q := range qs {
-		if !done[k] && strings.Contains("/"+q.path+"/", "/../") {
-			folded := foldFirstDotDot(q.path)
-			next = append(next, query{path: folded, want: q.want, top: q.top, before: q.before, dir: path.Dir(folded), links: q.links + 1, via: q.via})
+		if done[k] || preOf[k] == nil {
+			continue
 		}
+		folded, ok := foldSeen(q.path, dirSeen[k])
+		if !ok {
+			continue
+		}
+		next = append(next, query{path: folded, want: q.want, top: q.top, before: q.before, dir: path.Dir(folded), links: q.links, via: q.via})
 	}
 	return next, nil
+}
+
+// dotDotPrefixes is, for a path holding "..", the component each ".."
+// applies to, as the path folds left to right: for `a/b/../../c` the
+// prefixes `a/b` and `a`.
+func dotDotPrefixes(p string) []string {
+	var out []string
+	for strings.Contains("/"+p+"/", "/../") {
+		segs := strings.Split(p, "/")
+		for i, c := range segs {
+			if c == ".." {
+				if i > 0 {
+					out = append(out, strings.Join(segs[:i], "/"))
+				}
+				break
+			}
+		}
+		p = foldFirstDotDot(p)
+	}
+	return out
+}
+
+// foldSeen folds every ".." in p whose component the layers showed as a
+// directory (seen). It reports false when a ".." applies to a component no
+// layer shows: the path leads nowhere.
+func foldSeen(p string, seen map[string]bool) (string, bool) {
+	for strings.Contains("/"+p+"/", "/../") {
+		segs := strings.Split(p, "/")
+		pre := ""
+		for i, c := range segs {
+			if c == ".." {
+				if i > 0 {
+					pre = strings.Join(segs[:i], "/")
+				}
+				break
+			}
+		}
+		if pre != "" && !seen[pre] {
+			return "", false
+		}
+		p = foldFirstDotDot(p)
+	}
+	return p, true
 }
 
 // lazyDotDot is the rule for a ".." inside a link target. A target such as

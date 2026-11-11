@@ -68,6 +68,7 @@ func TestRun_RC1111_NpmLinksAndOwners(t *testing.T) {
 		{"root alias: relative manifest link with '..' after a link", [][]probeLayerEntry{base(
 			probeLayerEntry{name: "usr/local/lib/node_modules", link: "/usr/lib/node_modules/vendor/assets"},
 			probeLayerEntry{name: "usr/lib/node_modules/vendor/assets/minimatch/hop", link: "/opt/build/sub"},
+			probeLayerEntry{name: "opt/build/sub", dir: true},
 			probeLayerEntry{name: "opt/build/meta.json", body: v4},
 			probeLayerEntry{name: "usr/lib/node_modules/vendor/assets/minimatch/meta.json", body: v3},
 			probeLayerEntry{name: "usr/lib/node_modules/vendor/assets/minimatch/package.json", link: "hop/../meta.json"},

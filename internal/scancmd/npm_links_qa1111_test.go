@@ -57,10 +57,12 @@ func TestRun_QA1111_NpmLinksAndOwners(t *testing.T) {
 			probeLayerEntry{name: lib, body: v4},
 			probeLayerEntry{name: "usr/local/lib/node_modules", link: "/usr/lib/node_modules"},
 		)}, want{[]string{"3.0.4"}, []string{lib}, "", report.ScopeRead, nil, 1}},
+		// Counted once, at its own path, with the root's name as its other
+		// name (release check of main b732cac: two roots to one install).
 		{"root linked to a directory of installed packages (counted at their own paths)", [][]probeLayerEntry{base(
 			probeLayerEntry{name: "usr/lib/node_modules/vendor/node_modules/minimatch/package.json", body: v4},
 			probeLayerEntry{name: "usr/local/lib/node_modules", link: "/usr/lib/node_modules/vendor/node_modules"},
-		)}, want{[]string{"3.0.4"}, []string{"usr/lib/node_modules/vendor/node_modules/minimatch/package.json"}, "", report.ScopeRead, nil, 1}},
+		)}, want{[]string{"3.0.4"}, []string{"usr/lib/node_modules/vendor/node_modules/minimatch/package.json", local}, "", report.ScopeRead, nil, 1}},
 		{"root linked to a missing directory under another root", [][]probeLayerEntry{base(
 			probeLayerEntry{name: "usr/lib/node_modules/vendor/package.json", body: []byte(`{"name":"vendor","version":"1.0.0"}`)},
 			probeLayerEntry{name: "usr/local/lib/node_modules", link: "/usr/lib/node_modules/vendor/missing"},

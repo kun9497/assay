@@ -97,7 +97,7 @@ func catalogApplicationProbes(ctx context.Context, img *source.Image, owned *fil
 	// then re-homed under the root's own name by the alias rules below. One
 	// extra pass, only for an image that moves a root, and only over the
 	// directories the fixed paths lead to: no wider search of the image.
-	extra, err := readPhysicalRoots(ctx, img, files, links, owned.layerOf)
+	extra, unreadRoots, err := readPhysicalRoots(ctx, img, files, links, owned.layerOf)
 	if err != nil {
 		return nil, cyclonedx.Stats{}, nil, fmt.Errorf("application probes: %w", err)
 	}
@@ -145,6 +145,7 @@ func catalogApplicationProbes(ctx context.Context, img *source.Image, owned *fil
 	if err != nil {
 		return nil, cyclonedx.Stats{}, nil, err
 	}
+	unresolvedNpm += unreadRoots
 	npmPkgs, npmStats := npminstalled.Catalog(npmFiles)
 	for i := range npmPkgs {
 		for j := range npmPkgs[i].Locations {
@@ -382,15 +383,25 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 	// resolver still follows it by inode (D130).
 	rehomed := map[string]bool{} // synthesized logical links
 	aliased := map[string]bool{} // roots handled here
+	// homes is, per physical file, the logical name it was re-homed under
+	// first: two roots leading to one physical install are one package
+	// with both names (release check of main b732cac: 4 findings counted
+	// as 8).
+	homes := map[string]string{}
 	for _, r := range linkedRoots {
 		l := links[r]
 		final, followed, cyclic := resolveChain(path.Dir(r), l.Target, links)
 		if cyclic || !readRoot(final) || final == rootOf(final) {
 			continue
 		}
-		any := rehomeRoot(r, final, files, layerOf, layerIndex, append(followed, r), links, underExtra)
-		for n, nl := range links {
-			if !strings.HasPrefix(n, final+"/") {
+		any := rehomeRoot(r, final, files, layerOf, layerIndex, append(followed, r), links, underExtra, homes, aliases)
+		// Walked in name order. With the root's own link and the root
+		// ancestors skipped below, the order decides nothing any more (a
+		// mutation walking the map survives); it is kept so a future tie
+		// reads the same every run.
+		for _, n := range sortedNames(links) {
+			nl := links[n]
+			if !strings.HasPrefix(n, final+"/") || isNpmRoot(n) || isRootAncestor(n) || rehomed[n] {
 				continue
 			}
 			logical := r + strings.TrimPrefix(n, final)
@@ -584,7 +595,7 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 	// installs of their own (release check 2026-11-11: the fixed path is
 	// what the scan reads; the physical directory is where it led).
 	for f := range files {
-		if underExtra(f) {
+		if underExtra(f) && rootOf(f) == "" {
 			delete(files, f)
 			delete(layerOf, f)
 		}
@@ -639,48 +650,116 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 // latest of the ancestor links', since those are what moved it. It returns
 // the physical directories read. A chain that cycles is left to the alias
 // rules, which report the root unread.
-func readPhysicalRoots(ctx context.Context, img *source.Image, files map[string]source.FileFromLayer, links map[string]source.Link, layerIndex func(string) int) (map[string]bool, error) {
-	var phys []string
-	for _, r := range npminstalled.Roots {
-		final, followed, cyclic := resolveChain("", "/"+r, links)
-		if cyclic || final == r || final == "" {
-			continue
-		}
-		if _, own := links[r]; !own {
-			// Moved by an ancestor's link: a link of the root's own, so
-			// resolveNpmLinks treats it as one (the lower tree under the
-			// root's name is gone, the alias target is re-homed).
-			links[r] = source.Link{Target: "/" + final, DiffID: newestLayer(linkLayers(followed, links), layerIndex)}
-		}
-		if rootOf(final) == "" && !strings.Contains("/"+final+"/", "/../") {
-			phys = append(phys, final)
-		}
-	}
+//
+// The chain may continue behind the physical directory's own ancestors
+// (`/opt/active -> /opt/runtime` above a root linked to
+// `/opt/active/node_modules`): each pass records those ancestors as exact
+// names, so a link there is seen and the tree beneath the old name is
+// shadowed as replaced, and the roots are resolved again until the
+// directories stand still (release check of main b732cac: the second hop
+// was never looked at, and the lower layer's stale copy under the old name
+// was read as the install). At most physicalRootPasses passes.
+//
+// A chain that cycles, or that lands on the root itself or one of its own
+// ancestors (`/usr/local/lib/node_modules -> /usr/local/lib`, whose
+// node_modules is the link again), is no directory to read: the root is
+// reported unread with the reason, so the strict gate sees it. It returns
+// the physical directories read and how many roots were so reported.
+func readPhysicalRoots(ctx context.Context, img *source.Image, files map[string]source.FileFromLayer, links map[string]source.Link, layerIndex func(string) int) (map[string]bool, int, error) {
 	extra := map[string]bool{}
-	if len(phys) == 0 {
-		return extra, nil
-	}
-	sort.Strings(phys)
-	more, moreLinks, err := img.FilesProbedLinks(ctx, phys, nil, func(name string, h *tar.Header) bool {
-		return probeCandidateUnder(name, h, phys)
-	}, probeSniff)
-	if err != nil {
-		return nil, err
-	}
-	for n, f := range more {
-		if path.Base(n) == "package.json" {
-			files[n] = f
+	unread := 0
+	// resolved is each root's physical directory after the pass before.
+	resolved := map[string]string{}
+	noted := map[string]bool{}
+	for pass := 0; pass < physicalRootPasses; pass++ {
+		var phys []string
+		changed := false
+		for _, r := range npminstalled.Roots {
+			final, followed, cyclic := resolveChain("", "/"+r, links)
+			switch {
+			case cyclic:
+				if !noted[r] {
+					noted[r] = true
+					unread++
+					img.NoteUnresolved(r, "npm root or one of its parent directories is a symbolic link cycle; the packages behind it are not enumerated")
+				}
+				continue
+			case final == r || final == "":
+				continue
+			}
+			if _, own := links[r]; !own || resolved[r] != final {
+				// Moved by an ancestor's link, or moved further by a link
+				// the pass before recorded: a link of the root's own, so
+				// resolveNpmLinks treats it as one (the lower tree under the
+				// root's name is gone, the alias target is re-homed).
+				links[r] = source.Link{Target: "/" + final, DiffID: newestLayer(linkLayers(followed, links), layerIndex)}
+			}
+			if resolved[r] != final {
+				changed = true
+			}
+			resolved[r] = final
+			if rootOf(final) == "" && !strings.Contains("/"+final+"/", "/../") && !extra[final] {
+				phys = append(phys, final)
+			}
+		}
+		if !changed || len(phys) == 0 {
+			break
+		}
+		sort.Strings(phys)
+		var exact []string
+		for _, d := range phys {
+			for p := path.Dir(d); p != "." && p != "/" && p != ""; p = path.Dir(p) {
+				exact = append(exact, p)
+			}
+		}
+		more, moreLinks, err := img.FilesProbedLinks(ctx, phys, exact, func(name string, h *tar.Header) bool {
+			return probeCandidateUnder(name, h, phys)
+		}, probeSniff)
+		if err != nil {
+			return nil, 0, err
+		}
+		for n, f := range more {
+			if path.Base(n) == "package.json" {
+				files[n] = f
+			}
+		}
+		for n, l := range moreLinks {
+			if _, ok := links[n]; !ok {
+				links[n] = l
+			}
+		}
+		for _, d := range phys {
+			extra[d] = true
 		}
 	}
-	for n, l := range moreLinks {
-		if _, ok := links[n]; !ok {
-			links[n] = l
+	return extra, unread, nil
+}
+
+// physicalRootPasses bounds the passes readPhysicalRoots makes: each follows
+// one more link above a physical directory, and a chain longer than this
+// is reported as the last directory reached.
+const physicalRootPasses = 4
+
+// sortedNames is the keys of m in order, so a walk over a map reads the
+// same every run (release check of main b732cac: a re-homing walk in map
+// order made one image's incomplete count vary between 1 and 8).
+func sortedNames[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// isRootAncestor reports whether name is a strict ancestor of an npm root.
+func isRootAncestor(name string) bool {
+	for _, a := range rootAncestors {
+		if name == a {
+			return true
 		}
 	}
-	for _, d := range phys {
-		extra[d] = true
-	}
-	return extra, nil
+	return false
 }
 
 // rehomeRoot re-homes, under root (a link), every package.json the pass
@@ -688,17 +767,35 @@ func readPhysicalRoots(ctx context.Context, img *source.Image, files map[string]
 // (npminstalled.IsInstalledPackageJSON) is judged at the logical path, and
 // one already an install at its physical path is left there, counted once.
 // It reports whether anything at all was read under target.
-func rehomeRoot(root, target string, files map[string][]byte, layerOf map[string]string, layerIndex func(string) int, followed []string, links map[string]source.Link, physical func(string) bool) bool {
+//
+// A physical file already an install under another root -- its own name
+// under a root, or re-homed there first (homes) -- is that one package, and
+// this root's name for it is an alias.
+func rehomeRoot(root, target string, files map[string][]byte, layerOf map[string]string, layerIndex func(string) int, followed []string, links map[string]source.Link, physical func(string) bool, homes map[string]string, aliases map[string][]string) bool {
 	any := false
-	for f := range files {
+	for _, f := range sortedNames(files) {
 		if !strings.HasPrefix(f, target+"/") {
 			continue
 		}
 		any = true
 		logical := root + strings.TrimPrefix(f, target)
-		if !npminstalled.IsInstalledPackageJSON(logical) || (npminstalled.IsInstalledPackageJSON(f) && !physical(f)) {
+		if !npminstalled.IsInstalledPackageJSON(logical) {
 			continue
 		}
+		if npminstalled.IsInstalledPackageJSON(f) && (!physical(f) || rootOf(f) != "") {
+			// Read as an install at its own name already.
+			if logical != f {
+				aliases[f] = append(aliases[f], logical)
+			}
+			continue
+		}
+		if first, ok := homes[f]; ok {
+			if first != logical {
+				aliases[first] = append(aliases[first], logical)
+			}
+			continue
+		}
+		homes[f] = logical
 		files[logical] = files[f]
 		layerOf[logical] = newestLayer(append(linkLayers(followed, links), layerOf[f]), layerIndex)
 	}
@@ -787,28 +884,6 @@ var rootAncestors = func() []string {
 	return out
 }()
 
-// knownDir reports whether the pass can vouch for name being a directory
-// when it recorded no link at it: a name under a root (every symlink there
-// is recorded), a root, a root ancestor or a top-level layout name (recorded
-// as exact names when links). Anything else may be a link the pass never
-// saw.
-func knownDir(name string) bool {
-	if underAny(name, npminstalled.Roots) || isNpmRoot(name) {
-		return true
-	}
-	for _, d := range mergedUsrDirs {
-		if name == d {
-			return true
-		}
-	}
-	for _, d := range rootAncestors {
-		if name == d {
-			return true
-		}
-	}
-	return false
-}
-
 // isNpmRoot reports whether name is one of the global node_modules roots
 // itself.
 func isNpmRoot(name string) bool {
@@ -850,6 +925,18 @@ func resolveChain(dir, target string, links map[string]source.Link) (final strin
 	// "/lib64/../../lib64/qa" does and Linux resolves (PR #275 review).
 	seen := map[string]string{}
 	queue := strings.Split(target, "/")
+	// own counts the target's own components pushed since the target (or
+	// a followed link's) began: a ".." before any applies to the directory
+	// the link sits in, a real directory, and climbs it; one after applies
+	// to the target's own component, which may be a link the pass never
+	// saw, so it is left in the path for the image's resolver, which
+	// applies a ".." only over a component the layers show as a directory
+	// and follows a link there first (source.Files, lazyDotDot). Folded
+	// here it skipped both: `/opt/route/../qa-package` read
+	// `opt/qa-package` before opt/route, a link, was followed (release
+	// check 2026-11-11), and `managed/absent/../x` read x through an
+	// `absent` no layer has (release check of main b732cac).
+	own := 0
 	for len(queue) > 0 {
 		c := queue[0]
 		queue = queue[1:]
@@ -857,26 +944,17 @@ func resolveChain(dir, target string, links map[string]source.Link) (final strin
 		case "", ".":
 			continue
 		case "..":
-			// Applied only to a component the pass can vouch for as a
-			// directory: one under a root (every link there is recorded),
-			// a layout or root-ancestor name (recorded when a link), or a
-			// recorded link's own parent. Any other component may be a link
-			// the pass never saw, so the ".." stays in the path for the
-			// image's resolver to apply once it has looked at the component
-			// (source.Files, lazyDotDot; release check 2026-11-11:
-			// `/opt/route/../qa-package` folded to `opt/qa-package` before
-			// opt/route, a link to srv/nested/deep, was followed).
 			switch {
-			case len(cur) == 0:
-				// The root's parent is the root.
-			case cur[len(cur)-1] != ".." && knownDir(strings.Join(cur, "/")):
+			case own == 0 && len(cur) > 0:
 				cur = cur[:len(cur)-1]
-			default:
+			case own > 0:
 				cur = append(cur, "..")
+				own++
 			}
 			continue
 		}
 		cur = append(cur, c)
+		own++
 		name := strings.Join(cur, "/")
 		l, ok := links[name]
 		if !ok || l.Hard || l.Target == "" {
@@ -895,6 +973,7 @@ func resolveChain(dir, target string, links map[string]source.Link) (final strin
 		if strings.HasPrefix(l.Target, "/") {
 			cur = nil
 		}
+		own = 0
 		queue = append(strings.Split(l.Target, "/"), queue...)
 	}
 	return strings.Join(cur, "/"), followed, false
@@ -912,6 +991,7 @@ func resolveLinkTo(dir, target string, links map[string]source.Link, followFinal
 		}
 	}
 	queue := strings.Split(target, "/")
+	own := 0 // as in resolveChain
 	for hops := 0; len(queue) > 0; {
 		c := queue[0]
 		queue = queue[1:]
@@ -920,16 +1000,16 @@ func resolveLinkTo(dir, target string, links map[string]source.Link, followFinal
 			continue
 		case "..":
 			switch {
-			case len(cur) == 0:
-				// The root's parent is the root.
-			case cur[len(cur)-1] != ".." && knownDir(strings.Join(cur, "/")):
+			case own == 0 && len(cur) > 0:
 				cur = cur[:len(cur)-1]
-			default:
+			case own > 0:
 				cur = append(cur, "..")
+				own++
 			}
 			continue
 		}
 		cur = append(cur, c)
+		own++
 		if !followFinal && len(queue) == 0 {
 			break
 		}
@@ -944,6 +1024,7 @@ func resolveLinkTo(dir, target string, links map[string]source.Link, followFinal
 		if strings.HasPrefix(l.Target, "/") {
 			cur = nil
 		}
+		own = 0
 		queue = append(strings.Split(l.Target, "/"), queue...)
 	}
 	return strings.Join(cur, "/")
