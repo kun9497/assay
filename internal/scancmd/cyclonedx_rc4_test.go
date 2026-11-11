@@ -181,3 +181,59 @@ func TestRun_RC4_JoinedPURLSpellsTheInstallsQualifiers(t *testing.T) {
 		}
 	}
 }
+
+// PR #288 review: the mirror placement -- the installs in bom.components,
+// the bare listings under the subject -- reads the same as the placement
+// above, in every order of the bare listings; and one install at the top
+// with two contradicting bare listings under the subject is the install
+// unjudged, not a listing marked while the install stands on the first.
+func TestRun_RC4_BareListingsUnderTheSubjectAreWeighedTheSameWay(t *testing.T) {
+	db := qa1111DB(t)
+	opts := Options{FailOnIncomplete: true}
+	installs := []string{rc3Amd, rc4Armhf, rc3Arm, rc3I386}
+	var first string
+	for _, subject := range [][]string{{rc3B13, rc3B14, rc4BNone}, {rc3B14, rc3B13, rc4BNone}, {rc4BNone, rc3B13, rc3B14}} {
+		r := qa1111Run(t, db, rc2Doc(installs, subject), opts)
+		var skips []string
+		for _, s := range r.doc.Skipped {
+			skips = append(skips, s.Package.PURL+" "+string(s.Cause)+" "+s.Reason)
+		}
+		joined := strings.Join(skips, ";")
+		if r.code != 2 || len(r.doc.Findings) != 2 || r.doc.Summary.NotEvaluated != 1 || r.doc.Summary.TargetIncomplete != 1 || r.doc.Summary.Components != 4 ||
+			!strings.Contains(joined, "arch=i386") || !strings.Contains(joined, "2.31-13+deb11u13 and 2.31-13+deb11u14") {
+			t.Fatalf("subject %v: exit=%d findings=%d (%v) notEvaluated=%d incomplete=%d components=%d skipped=%v; want 2, the amd64 and armhf findings, 1, 1, 4, i386 unjudged for deb11u13 and deb11u14",
+				subject, r.code, len(r.doc.Findings), r.findings, r.doc.Summary.NotEvaluated, r.doc.Summary.TargetIncomplete, r.doc.Summary.Components, skips)
+		}
+		sig := joined
+		for k, v := range r.findings {
+			sig += "|" + k + "=" + v
+		}
+		if first == "" {
+			first = sig
+		} else if sig != first {
+			t.Fatalf("subject %v differs:\n%s\n%s", subject, first, sig)
+		}
+	}
+	for _, subject := range [][]string{{rc3B13, rc3B14}, {rc3B14, rc3B13}} {
+		r := qa1111Run(t, db, rc2Doc([]string{rc3I386}, subject), opts)
+		var skips []string
+		for _, s := range r.doc.Skipped {
+			skips = append(skips, s.Package.PURL+" "+s.Reason)
+		}
+		joined := strings.Join(skips, ";")
+		if r.code != 2 || len(r.doc.Findings) != 0 || r.doc.Summary.NotEvaluated != 1 || r.doc.Summary.Components != 1 || !strings.Contains(joined, "arch=i386") || !strings.Contains(joined, "2.31-13+deb11u13 and 2.31-13+deb11u14") {
+			t.Errorf("one install, subject %v: exit=%d findings=%d notEvaluated=%d components=%d skipped=%v; want 2, none, 1, 1, the i386 install unjudged for both versions", subject, r.code, len(r.doc.Findings), r.doc.Summary.NotEvaluated, r.doc.Summary.Components, skips)
+		}
+	}
+	// Two bare listings at one version lend it (control); one that
+	// contradicts the install is its own marked listing and the install
+	// stands.
+	r := qa1111Run(t, db, rc2Doc([]string{rc3I386}, []string{rc3B13, rc3B13}), opts)
+	if r.code != 0 || len(r.doc.Findings) != 1 || r.doc.Summary.NotEvaluated != 0 || r.doc.Summary.Components != 1 {
+		t.Errorf("two listings at one version: exit=%d findings=%d notEvaluated=%d components=%d; want 0, 1 (i386 lent deb11u13), 0, 1", r.code, len(r.doc.Findings), r.doc.Summary.NotEvaluated, r.doc.Summary.Components)
+	}
+	r = qa1111Run(t, db, rc2Doc([]string{rc3Amd}, []string{rc3B14}), opts)
+	if r.code != 2 || len(r.doc.Findings) != 1 || r.doc.Summary.NotEvaluated != 1 || r.doc.Summary.Components != 2 || len(r.doc.Skipped) != 1 || strings.Contains(r.doc.Skipped[0].Package.PURL, "arch=") {
+		t.Errorf("a contradicting listing under one install: exit=%d findings=%d notEvaluated=%d components=%d skipped=%v; want 2, the amd64 finding, 1, 2, the bare listing marked", r.code, len(r.doc.Findings), r.doc.Summary.NotEvaluated, r.doc.Summary.Components, r.doc.Skipped)
+	}
+}
