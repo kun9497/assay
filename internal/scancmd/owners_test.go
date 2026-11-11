@@ -3,8 +3,10 @@ package scancmd
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -456,6 +458,107 @@ func TestRun_PR267_DpkgListOlderThanTheLinkDoesNotLendTheOwner(t *testing.T) {
 			if v, ok := got[probed]; !ok || v != tc.owner {
 				t.Errorf("%s: present=%v owner=%q, want %q (all: %v)", probed, ok, v, tc.owner, got)
 			}
+		})
+	}
+}
+
+// rpmHeaderWithFiles is buildRPMHeaderBlobFixture plus the three file-list
+// tags D162 reads (BASENAMES 1117, DIRNAMES 1118 as STRING_ARRAY type 8;
+// DIRINDEXES 1116 as INT32 type 4, aligned to 4), for files given as full
+// paths. Written here because rpmdb's own fileListHeader is in another
+// package.
+func rpmHeaderWithFiles(name, version, release string, files []string) []byte {
+	var dirs []string
+	dirAt := map[string]int32{}
+	var bases []string
+	var idx []int32
+	for _, f := range files {
+		d, b := path.Split(f)
+		if _, ok := dirAt[d]; !ok {
+			dirAt[d] = int32(len(dirs))
+			dirs = append(dirs, d)
+		}
+		bases = append(bases, b)
+		idx = append(idx, dirAt[d])
+	}
+	type entry struct{ tag, typ, offset, count uint32 }
+	var (
+		data []byte
+		idxs []entry
+	)
+	str := func(tag uint32, s string) {
+		idxs = append(idxs, entry{tag, 6, uint32(len(data)), 1})
+		data = append(data, s...)
+		data = append(data, 0)
+	}
+	strs := func(tag uint32, ss []string) {
+		idxs = append(idxs, entry{tag, 8, uint32(len(data)), uint32(len(ss))})
+		for _, s := range ss {
+			data = append(data, s...)
+			data = append(data, 0)
+		}
+	}
+	str(1000, name)
+	str(1001, version)
+	str(1002, release)
+	strs(1118, dirs)
+	strs(1117, bases)
+	for len(data)%4 != 0 {
+		data = append(data, 0)
+	}
+	idxs = append(idxs, entry{1116, 4, uint32(len(data)), uint32(len(idx))})
+	for _, n := range idx {
+		data = binary.BigEndian.AppendUint32(data, uint32(n))
+	}
+	buf := binary.BigEndian.AppendUint32(nil, uint32(len(idxs)))
+	buf = binary.BigEndian.AppendUint32(buf, uint32(len(data)))
+	for _, e := range idxs {
+		buf = binary.BigEndian.AppendUint32(buf, e.tag)
+		buf = binary.BigEndian.AppendUint32(buf, e.typ)
+		buf = binary.BigEndian.AppendUint32(buf, e.offset)
+		buf = binary.BigEndian.AppendUint32(buf, e.count)
+	}
+	return append(buf, data...)
+}
+
+// The PR #267 rule for an rpm record: a package that recorded /bin/tool
+// (an rpm built before the usr merge) owns the probed usr/bin/tool only
+// through a bin -> usr/bin link that is no newer than the record. A later
+// layer that deletes the real bin and relinks it lends nothing to the
+// independent usr/bin copy; a split layout owns the bin copy alone.
+func TestCatalogFromImage_PR267_RPMRecordOlderThanTheLinkDoesNotLendTheOwner(t *testing.T) {
+	bin, err := os.ReadFile(buildLinuxBBoltBinary(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := buildNDBFixture(t, 2, []ndbFixtureEntry{{pkgidx: 1, header: rpmHeaderWithFiles("qa-rpm", "1.0", "1", []string{"/bin/tool"})}})
+	base := []probeLayerEntry{
+		{name: osReleasePath, body: []byte(osReleaseSLES15)},
+		{name: "usr/lib/sysimage/rpm/Packages.db", body: db},
+		{name: "usr/bin/tool", body: bin, mode: 0o755},
+	}
+	split := append(append([]probeLayerEntry{}, base...), probeLayerEntry{name: "bin/tool", body: bin, mode: 0o755})
+	for _, tc := range []struct {
+		name   string
+		layers []source.Layer
+		want   map[string]*pkgmeta.Owner
+	}{
+		{"split bin and usr/bin", []source.Layer{layerWithModes(t, "sha256:l0", split)},
+			map[string]*pkgmeta.Owner{"bin/tool": {Name: "qa-rpm", Version: "1.0-1"}, "usr/bin/tool": nil}},
+		{"bin relinked to usr/bin in a later layer", []source.Layer{
+			layerWithModes(t, "sha256:l0", split),
+			layerWithModes(t, "sha256:l1", []probeLayerEntry{{name: ".wh.bin"}, {name: "bin", link: "usr/bin"}}),
+		}, map[string]*pkgmeta.Owner{"usr/bin/tool": nil}},
+		{"bin -> usr/bin in the record's own layer", []source.Layer{
+			layerWithModes(t, "sha256:l0", append([]probeLayerEntry{{name: "bin", link: "usr/bin"}}, base...)),
+		}, map[string]*pkgmeta.Owner{"usr/bin/tool": {Name: "qa-rpm", Version: "1.0-1"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target, _, _, err := catalogFromImage(context.Background(), "rpm-relink", &source.Image{Layers: tc.layers})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertOwners(t, target.Packages, tc.want)
 		})
 	}
 }

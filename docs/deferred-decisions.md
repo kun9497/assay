@@ -1919,6 +1919,30 @@ lists; exact-file ownership). The service-side hybrid stays the way to cover
 what the probes do not. **Revisit when** a `python` or `java-archive` `maxGrypeOnlyApp`
 ceiling trips, or a user reports an in-image application CVE outside the probed locations.
 
+**Revisited 2026-11-10 — links inside the probed locations (D160 revised, PRs #271 and #267).**
+The QA's follow-up found three link shapes the probe missed at its own roots: a `package.json`
+that is a symlink or hardlink, a package directory that is a symlink, and a global
+`node_modules` root that is itself a symlink. The first two are now read through the image's
+resolver at their logical path, one manifest per candidate. Three boundaries were set
+deliberately and stay open here:
+
+- **A linked package directory's own nested dependencies** (`x -> /opt/x`, then
+  `/opt/x/node_modules/*`) are not read: the target is outside every root, and walking it is the
+  whole-tree walk above with D112's collision. Disclosed as "node_modules elsewhere" in the scope
+  sentence, never as `partial`.
+- **A linked global root** (`usr/lib/node_modules -> /opt/npm-global`) and a **linked scope
+  directory** (`@s -> ...`) are not enumerated. Both are listed in `unread[]` with the reason, the
+  npm scope is `partial`, and `--fail-on-incomplete=target` exits 2 — the scan says what it did
+  not read rather than reading beyond its roots.
+- **A link through an unrecorded link** (a target whose path crosses a symlink that is neither an
+  npm-root link nor a top-level layout link) is not resolved; same disclosure as above.
+
+**Revisit when** a user reports a CVE in a package reached only through one of these shapes, or
+a scanner-diff target's npm `applicationScope` reads `partial` on a digest-pinned image — the
+nightly gate's `minApplicationPackages` floor (D167) is what would move first. Groundwork: the
+probe pass already records every link under the roots (`source.FilesProbedLinks`), so following
+one more shape is a candidate rule in `resolveNpmLinks`, not a new pass.
+
 ---
 
 ### Safe handling of externally supplied targets
