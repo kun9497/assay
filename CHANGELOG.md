@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- `scandiff -offline` holds the grype (`source.target.userInput`) and trivy (`ArtifactName`)
+  captures to the pinned ref as it holds assay's, so a target re-pinned with only its assay capture
+  regenerated is not judged on the old image's other two; a trivy mismatch on an informational block
+  is a warning. (D167 revised; PR #276 review)
 - `truthset -offline`: the run's database is the first trusted capture's, a locally built database
   (no digest) included, so a local-database capture and a published-database capture are the same
   ERROR in either order instead of passing as the published database's when the local one sorted

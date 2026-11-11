@@ -8130,7 +8130,9 @@ python -c "import json,sys; d=json.load(open(sys.argv[1])); print({c['ecosystem'
 **2026-11-11 개정 (QA).** `scandiff -offline`은 각 캡처를 floor 파일의 고정 ref에 묶는다: 캡처의
 `provenance.target.argument`(D120)가 ref의 digest를 이름 붙여야 하며, 아니면 그 대상은 사유와 함께 ERROR다 —
 Alpine digest로 다시 고정한 대상 아래 남아 있던 BCI 캡처가 두 모드를 통과했었다. D120 이전의 캡처는 대상을
-기록하지 않으므로 그대로 받아들인다.
+기록하지 않으므로 그대로 받아들인다. grype 캡처(`source.target.userInput`)와 trivy 캡처(`ArtifactName`)도 같은
+방식으로 묶이므로, assay 캡처만 다시 만든 채 다시 고정한 대상이 옛 이미지의 나머지 둘로 판정되지 않는다(PR #276
+리뷰); 정보성 블록의 trivy 불일치는 경고다.
 
 **포기하는 것.** 하한 위의 부분 손실(ubi8n18이 npm 118개로 줄어드는 것)은 이 하한이 잡지 못한다; finding 하한과
 D117의 상한이 그 일부를 본다. 대상의 다이제스트가 바뀌면 하한은 사람이 다시 정한다.

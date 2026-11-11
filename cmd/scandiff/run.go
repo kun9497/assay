@@ -195,7 +195,7 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 		// t.Ref by construction, so checking it too would change nothing:
 		// the !live guard states the intent, and its mutation survives.
 		if !live {
-			if why := captureMismatch(t, adoc); why != "" {
+			if why := captureMismatch(t, adoc.Provenance.Target.Argument, "assay"); why != "" {
 				fmt.Fprintf(stderr, "error: target=%s %s\n", t.Name, why)
 				rows = append(rows, row{Target: t.Name, Verdict: "ERROR"})
 				worst = exitError
@@ -208,6 +208,17 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 			rows = append(rows, row{Target: t.Name, Verdict: "ERROR"})
 			worst = exitError
 			continue
+		}
+		// The grype capture too (PR #276 review): a target re-pinned with
+		// only its assay capture regenerated would be compared against the
+		// old image's grype tuples.
+		if !live {
+			if why := captureMismatch(t, gdoc.Source.Target.UserInput, "grype"); why != "" {
+				fmt.Fprintf(stderr, "error: target=%s %s\n", t.Name, why)
+				rows = append(rows, row{Target: t.Name, Verdict: "ERROR"})
+				worst = exitError
+				continue
+			}
 		}
 
 		aSet := assayTuples(adoc)
@@ -375,13 +386,12 @@ func readOffline(dir string, t Target) (assayRaw, grypeRaw []byte, fatal string)
 	return assayRaw, grypeRaw, ""
 }
 
-// captureMismatch is "" when the offline assay capture records, as the
-// target it scanned, the floors file's ref for t -- by digest when the ref
-// pins one (the argument must name "@<digest>"), by the whole string
-// otherwise -- or when it records no target at all (a capture from before
-// D120). Otherwise it says what the capture was a scan of.
-func captureMismatch(t Target, doc assayDocument) string {
-	arg := doc.Provenance.Target.Argument
+// captureMismatch is "" when an offline capture records, as the target it
+// scanned (arg), the floors file's ref for t -- by digest when the ref pins
+// one (arg must name "@<digest>"), by the whole string otherwise -- or when
+// it records no target at all (an assay capture from before D120). Otherwise
+// it says what the tool's capture was a scan of.
+func captureMismatch(t Target, arg, tool string) string {
 	if arg == "" {
 		return ""
 	}
@@ -392,7 +402,7 @@ func captureMismatch(t Target, doc assayDocument) string {
 	} else if arg == t.Ref {
 		return ""
 	}
-	return fmt.Sprintf("offline capture is a scan of %q, not of the target's ref %q", arg, t.Ref)
+	return fmt.Sprintf("offline %s capture is a scan of %q, not of the target's ref %q", tool, arg, t.Ref)
 }
 
 // trivyOutcome is trivyPhase's result: whether the target's verdict needs
@@ -450,6 +460,16 @@ func trivyPhase(execScan execFunc, trivyBin, captureDir, offlineDir string, live
 		return trivyError
 	}
 
+	if !live {
+		if why := captureMismatch(t, tdoc.ArtifactName, "trivy"); why != "" {
+			if informational {
+				fmt.Fprintf(stderr, "warning: target=%s trivy (informational): %s\n", t.Name, why)
+				return trivyOK
+			}
+			fmt.Fprintf(stderr, "error: target=%s %s\n", t.Name, why)
+			return trivyError
+		}
+	}
 	tSet := trivyTuples(tdoc)
 	agree, _, _ := compareSets(aSet, tSet)
 	findings := len(tSet)

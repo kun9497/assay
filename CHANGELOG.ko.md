@@ -8,6 +8,9 @@
 ## [Unreleased]
 
 ### Fixed
+- `scandiff -offline`은 grype(`source.target.userInput`)와 trivy(`ArtifactName`) 캡처도 assay 캡처처럼 고정 ref에
+  묶으므로, assay 캡처만 다시 만든 채 다시 고정한 대상이 옛 이미지의 나머지 둘로 판정되지 않습니다; 정보성 블록의
+  trivy 불일치는 경고입니다. (D167 개정; PR #276 리뷰)
 - `truthset -offline`: 실행의 DB는 처음 신뢰한 캡처의 것이며 로컬 빌드 DB(digest 없음)도 포함하므로, 로컬 DB
   캡처와 배포 DB 캡처는 어느 순서든 같은 ERROR입니다(전에는 로컬이 먼저 정렬되면 배포 DB의 결과로 통과).
   `scandiff -offline`: 기록된 대상이 floor 파일의 고정 ref가 아닌 캡처는 사유와 함께 ERROR입니다(Alpine으로 다시

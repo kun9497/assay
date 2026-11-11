@@ -8642,7 +8642,10 @@ with exit 1 in both modes, where the v0.17.0 `scandiff` said `ok`. 8/8 mutations
 **Revised 2026-11-11 (QA).** `scandiff -offline` holds each capture to the floors file's pinned ref:
 the capture's `provenance.target.argument` (D120) must name the ref's digest, else the target is an
 ERROR with the reason -- a BCI capture kept under a target re-pinned to an Alpine digest had passed
-both modes. A capture from before D120 records no target and is taken as it was.
+both modes. A capture from before D120 records no target and is taken as it was. The grype capture
+(`source.target.userInput`) and the trivy capture (`ArtifactName`) are held the same way, so a
+target re-pinned with only its assay capture regenerated is not judged on the old image's other
+two (PR #276 review); a trivy mismatch on an informational block is a warning.
 
 **Gives up.** A partial loss above the floor (ubi8n18 down to 118 npm packages) is not caught by
 this floor; the finding floors and D117's ceiling see some of it. A floor is re-cut by hand when a
