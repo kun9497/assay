@@ -58,7 +58,7 @@ func TestRun_RC1111_GrypeDiagnosticJSONIsAHardFailure(t *testing.T) {
 	if code != exitError || !strings.Contains(stderr, "grype hard failure (exit 2)") {
 		t.Errorf("exit=%d stderr=%q; want 2 and a grype hard failure", code, stderr)
 	}
-	if strings.Join(captured, ",") != "t.assay.json,t.assay.state.json,t.grype.failed.json,t.grype.state.json" {
+	if strings.Join(captured, ",") != "t.assay.json,t.assay.state.json,t.grype.failed.json,t.grype.state.json,t.run.json" {
 		t.Errorf("captured %v; want the grype capture filed as failed, with a state file per tool", captured)
 	}
 	// Replayed offline, the failed capture is not read at all...
@@ -106,7 +106,7 @@ func TestRun_RC1111_FailedAssayCaptureIsNotReplayable(t *testing.T) {
 	for _, e := range entries {
 		names = append(names, e.Name())
 	}
-	if strings.Join(names, ",") != "t.assay.failed.json,t.assay.state.json,t.grype.json,t.grype.state.json" {
+	if strings.Join(names, ",") != "t.assay.failed.json,t.assay.state.json,t.grype.json,t.grype.state.json,t.run.json" {
 		t.Errorf("captured %v; want the assay capture filed as failed and the stale good one gone", names)
 	}
 	code, stderr := rcRunOffline(t, target, dir, nil)

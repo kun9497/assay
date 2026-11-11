@@ -18,7 +18,7 @@ import (
 func TestRun_RC2_GrypeNullMatchesIsNotAReport(t *testing.T) {
 	target := Target{Name: "t", Ref: "ref-t", MinAgree: 1}
 	code, stderr, captured, dir := rcRunLive(t, target, stub{out: assayDoc(0, nil), code: 0}, stub{out: []byte(`{"error":"scan failed","matches":null}`), code: 2})
-	if code != exitError || !strings.Contains(stderr, "grype hard failure (exit 2)") || strings.Join(captured, ",") != "t.assay.json,t.assay.state.json,t.grype.failed.json,t.grype.state.json" {
+	if code != exitError || !strings.Contains(stderr, "grype hard failure (exit 2)") || strings.Join(captured, ",") != "t.assay.json,t.assay.state.json,t.grype.failed.json,t.grype.state.json,t.run.json" {
 		t.Errorf("live: exit=%d stderr=%q captured=%v; want 2, a hard failure, the capture filed as failed", code, stderr, captured)
 	}
 	// Replayed, that directory is the failed run's: the state says so.
@@ -110,7 +110,9 @@ func TestRun_RC2_FailedRunOutlivesALockedSuccessCapture(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.Remove(filepath.Join(dir, "t.grype.state.json"))
-	if code, stderr := offline(); code != exitError || !strings.Contains(stderr, "no state file") {
+	// Named by the run record since the release check of main 60c512c (a
+	// marker the run could not remove); by the missing state before it.
+	if code, stderr := offline(); code != exitError || !strings.Contains(stderr, "failed-run marker") {
 		t.Errorf("replay with a stray marker and no state: exit=%d stderr=%q; want 2", code, stderr)
 	}
 }
@@ -216,7 +218,9 @@ func TestRun_RC3_CaptureStateIsTheReplaysAuthority(t *testing.T) {
 	if err := os.WriteFile(good, []byte(`{"matches":[{"vulnerability":{"id":"CVE-0000-0001"},"artifact":{"name":"x","version":"1","type":"npm"}}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if code, stderr := offline(); code != exitError || !strings.Contains(stderr, "not the one its state describes") {
+	// Named by the run record since the release check of main 60c512c
+	// ("not the one run <id> describes"); "its state" before it.
+	if code, stderr := offline(); code != exitError || !strings.Contains(stderr, "is not the one run ") {
 		t.Errorf("swapped bytes: exit=%d stderr=%q; want 2, the sha mismatch named", code, stderr)
 	}
 	// A success whose capture cannot be written (the old file held open on
