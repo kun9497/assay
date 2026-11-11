@@ -8790,8 +8790,14 @@ placement (90 findings, exit 0) and unjudged in another (70, exit 2). Every inst
 the evidence of every bare listing it does not contradict, lent in the document's order through
 `keepEvidence`, which marks the contradiction between two of them with both values sorted in the
 reason; the installs that state a source version keep their findings, and the three placements
-agree. The pool is the listings an install joined: a bare listing no install could join stays a
-package of its own, as before. (2) The merged purl spells the INSTALL's qualifiers where the two
+agree. The pool is the listings an install joined and, since the PR #288 review, the bare listings
+under the subject that met arch-stating twins at the top (`dedupe.pooled`): lent as each was met,
+the first had given its source version to the install stating none and the next was skipped as
+contradicting what had just been lent, so the mirror placement -- installs at the top, bare
+listings under the subject -- was judged by document order with exit 0, and with one twin the
+contradiction was pinned on the second listing while the install stood; the top-level installs
+are weighed too. A pooled listing lent to no install is a package of its own, marked, as before. A
+bare listing no install could join stays a package of its own, as before. (2) The merged purl spells the INSTALL's qualifiers where the two
 listings disagree -- a bare twin's `distro=alpine-3.20` had overwritten the install's 3.19, and a
 VEX statement written for 3.20 exonerated the 3.19 install (2 findings hidden, exit 0) -- and a
 `distro=` that names another release than the one the package is keyed to is left off; a
