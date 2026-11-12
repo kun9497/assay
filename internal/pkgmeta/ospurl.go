@@ -82,7 +82,13 @@ func OSPackagePURL(d *Distro, p Package) string {
 		return ""
 	}
 	version := p.Version
-	q := map[string]string{"distro": d.ID + "-" + d.VersionID}
+	// syft spells Debian's point release (from /etc/debian_version) where
+	// os-release carries only the major: debian-12.11, not debian-12.
+	release := d.VersionID
+	if d.PointRelease != "" {
+		release = d.PointRelease
+	}
+	q := map[string]string{"distro": d.ID + "-" + release}
 	if p.Arch != "" {
 		q["arch"] = p.Arch
 	}

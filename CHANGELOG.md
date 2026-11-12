@@ -19,6 +19,18 @@ All notable changes to this project are documented here. The format follows
   decides hand-made images only. No schema change. (D160 revised; `docs/DESIGN.md`, "Layer
   semantics")
 
+### Fixed
+- A Debian image's OS packages spell the point release in their purl, `distro=debian-12.11`,
+  read from `/etc/debian_version` as syft reads it (`supplementDebianVersion`), where they had
+  spelled os-release's bare major, `debian-12` -- the D121 promise (syft's spelling, so a VEX
+  written from the image's syft SBOM reaches the package) had been broken for Debian. With the
+  evidence in the purl, the VEX matcher's rule is the strict one again: a statement for the
+  image's own point release or its major applies, one for another point release does not --
+  v0.18.0 had accepted any point release of the major against a purl naming the major alone
+  (independent review of v0.18.0, 2026-11-12). An image without `/etc/debian_version` spells
+  the major and a point-release statement does not reach it. The ecosystem key is unchanged
+  (`Debian:12`); the report's `distro` object is unchanged; no schema change. (D121 refined)
+
 ## [0.18.0] - 2026-11-12
 
 ### Added

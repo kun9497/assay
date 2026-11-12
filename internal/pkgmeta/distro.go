@@ -37,6 +37,33 @@ type Distro struct {
 	// as well as syft's distro=ubuntu-22.04. Never part of an ecosystem key,
 	// and never written into a purl — syft writes it into none.
 	VersionCodename string
+	// PointRelease is Debian's point release from /etc/debian_version
+	// ("12.11"), which the image path reads when os-release's VERSION_ID is
+	// the bare major, because syft does (syft/linux/supplement_release.go,
+	// supplementDebianVersion) and so a VEX document written from the
+	// image's syft SBOM spells it in distro= (D121; independent review of
+	// v0.18.0, 2026-11-12). Never part of an ecosystem key -- Ecosystem keys
+	// Debian on the major -- and empty for every other distro.
+	PointRelease string
+}
+
+// debianPointRelease is the shape /etc/debian_version has on a released
+// Debian: "12.11". testing and sid write "trixie/sid", which is no point
+// release and is refused.
+var debianPointRelease = regexp.MustCompile(`^([0-9]+)\.[0-9]+$`)
+
+// DebianPointRelease is the point release /etc/debian_version states when it
+// names a point release of versionID's major ("12.11" for VERSION_ID "12"),
+// else "". A file that names another major than os-release does is refused
+// rather than trusted over it: the two files disagree, and the purl must not
+// spell a release the package was not evaluated under.
+func DebianPointRelease(content, versionID string) string {
+	v := strings.TrimSpace(content)
+	m := debianPointRelease.FindStringSubmatch(v)
+	if m == nil || (versionID != "" && m[1] != versionID) {
+		return ""
+	}
+	return v
 }
 
 // Ecosystem returns the OSV ecosystem key for this distro — "Alpine:v3.19".

@@ -8866,12 +8866,14 @@ version-scoped statement still reaches the install. An OS package must satisfy t
 `distro=` at the precision the statement specifies (D121). The evaluated key establishes the
 advisory release. A narrower qualifier also requires evidence from the installed PURL or the
 package's local OS declaration. RHEL 9.4 and 9.6 share a database, so a 9.6 statement cannot
-exempt the 9.4 installation. An installed purl that names the statement's release and nothing
-finer does not contradict it: a Debian image spells `distro=debian-12` (os-release's
-VERSION_ID is the bare major) while a VEX document produced from the image's syft SBOM spells
-`debian-12.11`, and requiring the point release on the installed side had dropped every such
-statement on every Debian image (release review of v0.18.0, a regression from v0.17.0 against
-D121); another point release, another major and an empty qualifier still refuse. Conflicting
+exempt the 9.4 installation. A statement finer than the installed evidence does not apply. The
+v0.18.0 release review had relaxed that for an installed purl naming the major alone, because a
+Debian image's purls spelled only os-release's `VERSION_ID` (`debian-12`) while a VEX document
+written from the image's syft SBOM spells `debian-12.11`, so every such statement had been
+dropped; the independent review the same day found the root cause instead: syft reads
+`/etc/debian_version` (`supplementDebianVersion`) and the image path did not. Since v0.18.1 the
+image path reads it too (`Distro.PointRelease`, D121 parity), the purl spells `debian-12.11`,
+the strict rule stands, and a statement for 12.10 does not exonerate a 12.11 image. Conflicting
 point releases leave only their shared advisory key
 available for matching. Ubuntu codenames must agree with the evaluated Ubuntu release. A
 language package matches an OS-qualified product through its explicit PURL qualifier and
