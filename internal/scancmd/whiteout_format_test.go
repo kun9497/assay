@@ -23,9 +23,14 @@ import (
 // tarball reader reports every docker-archive layer as a Docker layer whatever
 // the image's manifest said -- so an OCI-typed image (buildkit's default)
 // read exit 0 through `oci-dir:` and exit 2 through `docker-archive:` of the
-// identical bytes. The rule is now the untars' for every layer: a plain
-// whiteout after this layer's own entry removes it. Goes red when the walk
-// consults the media type again on either path.
+// identical bytes. The rule is one for every layer, and it is the OCI image
+// spec's (v0.18.1, after the independent review of 2026-11-12): a whiteout
+// hides lower layers only, so this layer's own entry before the marker
+// stands -- what syft, grype, trivy, umoci and go-containerregistry's
+// extract do, while the runtimes' production paths (moby overlay2,
+// containerd's overlay applier) refuse to apply such a layer at all. Goes
+// red when the walk consults the media type again on either path, or deletes
+// the layer's own entry again.
 func TestRun_OneImageOneVerdictWhateverArchiveDeliversIt(t *testing.T) {
 	isolateCredentials(t)
 	db := layerDigestDB(t)
@@ -37,9 +42,17 @@ func TestRun_OneImageOneVerdictWhateverArchiveDeliversIt(t *testing.T) {
 	}{
 		{
 			// The upper layer writes a patched database, then whiteouts it:
-			// the untar removes it and the base layer's copy stays hidden.
+			// the layer's own database stands and the base layer's
+			// vulnerable copy beneath stays hidden -- one package, clean.
 			name:  "database then its whiteout in one layer",
 			upper: []p4Entry{{name: apkDBPath, body: p4ApkPatched}, {name: "lib/apk/db/.wh.installed"}},
+			code:  0, want: "1 component(s) seen, 1 evaluated, 0 finding(s)",
+		},
+		{
+			// The whiteout alone: the base layer's database is hidden and
+			// nothing replaces it, so there is no database to judge.
+			name:  "whiteout alone in the upper layer",
+			upper: []p4Entry{{name: "lib/apk/db/.wh.installed"}},
 			code:  2, want: "no supported package database",
 		},
 		{

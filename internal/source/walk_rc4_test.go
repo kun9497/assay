@@ -14,7 +14,9 @@ import (
 // type its descriptor carries (release review of v0.18.0, 2026-11-12): a
 // rule keyed on the type had judged one image two ways by delivery path,
 // because the tarball reader reports every docker-archive layer as a Docker
-// layer whatever the manifest said. A whiteout after the entry removes it.
+// layer whatever the manifest said. The rule is the OCI image spec's: a
+// whiteout hides lower layers only, so this layer's own entry before the
+// marker stands (v0.18.1, after the independent review of 2026-11-12).
 func TestFiles_WhiteoutOrderDoesNotDependOnTheLayerMediaType(t *testing.T) {
 	const file = "data/db"
 	stream, err := layerOfOrdered(t, "fixture", entry{name: file, body: "DB"}, entry{name: "data/.wh.db"}).Open()
@@ -29,7 +31,7 @@ func TestFiles_WhiteoutOrderDoesNotDependOnTheLayerMediaType(t *testing.T) {
 	for _, tc := range []struct {
 		mt   types.MediaType
 		kept bool
-	}{{types.OCIUncompressedLayer, false}, {types.OCILayer, false}, {types.DockerUncompressedLayer, false}, {types.DockerLayer, false}} {
+	}{{types.OCIUncompressedLayer, true}, {types.OCILayer, true}, {types.DockerUncompressedLayer, true}, {types.DockerLayer, true}} {
 		t.Run(string(tc.mt), func(t *testing.T) {
 			v, _, _ := d123Image(t, raw, raw, tc.mt)
 			img, err := fromV1(v)
@@ -46,25 +48,31 @@ func TestFiles_WhiteoutOrderDoesNotDependOnTheLayerMediaType(t *testing.T) {
 	}
 }
 
-// A directory a layer creates and then whiteouts in the same tar is gone when
-// the untar finishes the layer, so a `..` cannot fold over it: the layer's
-// word for the component is withdrawn by the marker (walk.go, resolvePass),
-// not kept from the directory entry before it. Goes red when the marker
-// stops resetting the layer's word.
-func TestFiles_DotDotOverADirectoryTheSameLayerRemovesAfterCreating(t *testing.T) {
+// A directory a layer creates and then whiteouts in the same tar stands: the
+// marker hides lower layers only (OCI image spec), so the layer's own word
+// for the component is kept and a `..` folds over it in either order. The
+// marker still hides a LOWER layer's directory of that name (control).
+// Goes red when the marker withdraws the layer's own word again.
+func TestFiles_DotDotOverADirectoryTheSameLayerWhiteoutsAfterCreating(t *testing.T) {
 	const db = "lib/apk/db/installed"
-	img := imageOf(
-		layerOfOrdered(t, "base", entry{name: "data/packages", body: "DB"}, sym(db, "/data/marker/../packages")),
-		layerOfOrdered(t, "upper", node("data/marker", tar.TypeDir), entry{name: "data/.wh.marker"}))
-	if f, ok := filesOne(t, img, db); ok {
-		t.Fatalf("database read through a directory the layer removed again: %q", f.Data)
+	for _, upper := range [][]entry{
+		{node("data/marker", tar.TypeDir), {name: "data/.wh.marker"}},
+		{{name: "data/.wh.marker"}, node("data/marker", tar.TypeDir)},
+	} {
+		img := imageOf(
+			layerOfOrdered(t, "base", entry{name: "data/packages", body: "DB"}, sym(db, "/data/marker/../packages")),
+			layerOfOrdered(t, "upper", upper...))
+		if f, ok := filesOne(t, img, db); !ok || string(f.Data) != "DB" {
+			t.Fatalf("database = %q, present=%v; want DB through the directory this layer holds", f.Data, ok)
+		}
 	}
-	// Control: the marker before the directory is overwritten by it.
-	img = imageOf(
-		layerOfOrdered(t, "base", entry{name: "data/packages", body: "DB"}, sym(db, "/data/marker/../packages")),
-		layerOfOrdered(t, "upper", entry{name: "data/.wh.marker"}, node("data/marker", tar.TypeDir)))
-	if f, ok := filesOne(t, img, db); !ok || string(f.Data) != "DB" {
-		t.Fatalf("database = %q, present=%v; want DB through the directory the layer recreated", f.Data, ok)
+	// Control: the marker hides the lower layer's directory, and nothing in
+	// its own layer puts one back, so the fold leads nowhere.
+	img := imageOf(
+		layerOfOrdered(t, "base", node("data/marker", tar.TypeDir), entry{name: "data/packages", body: "DB"}, sym(db, "/data/marker/../packages")),
+		layerOfOrdered(t, "upper", entry{name: "data/.wh.marker"}))
+	if f, ok := filesOne(t, img, db); ok {
+		t.Fatalf("database read through a directory an upper layer whited out: %q", f.Data)
 	}
 }
 

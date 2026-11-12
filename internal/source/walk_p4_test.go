@@ -43,8 +43,8 @@ func TestFiles_P4_LastEntryInALayerWins(t *testing.T) {
 		{"file then whiteout, lower layer shadowed", [][]entry{
 			{{name: db, body: "BASE"}},
 			{{name: db, body: "FIRST"}, {name: "lib/apk/db/.wh.installed"}},
-		}, "", ""},
-		{"file then whiteout of an ancestor", [][]entry{{{name: db, body: "FIRST"}, {name: "lib/.wh.apk"}}}, "", ""},
+		}, "FIRST", "sha256:l1"},
+		{"file then whiteout of an ancestor", [][]entry{{{name: db, body: "FIRST"}, {name: "lib/.wh.apk"}}}, "FIRST", "sha256:l0"},
 		{"whiteout then file", [][]entry{{{name: "lib/apk/db/.wh.installed"}, {name: db, body: "LAST"}}}, "LAST", "sha256:l0"},
 		// Both untars clear only what LOWER layers put under an opaque
 		// directory, whatever the order.
@@ -231,11 +231,11 @@ func TestFilesUnder_P4_LastEntryInALayerWins(t *testing.T) {
 		{"file then whiteout, lower layer shadowed", [][]entry{
 			{{name: name, body: "BASE"}},
 			{{name: name, body: "FIRST"}, {name: dir + "/.wh.libc6"}},
-		}, "", 0},
+		}, "FIRST", 0},
 		{"whiteout then file", [][]entry{{{name: dir + "/.wh.libc6"}, {name: name, body: "LAST"}}}, "LAST", 0},
-		// `RUN rm -rf /var/lib/dpkg/status.d` after the file, in one layer:
-		// the marker names the directory, and the file beneath it goes too.
-		{"file then whiteout of its directory", [][]entry{{{name: name, body: "FIRST"}, {name: "var/lib/dpkg/.wh.status.d"}}}, "", 0},
+		// A whiteout of an ancestor also applies to lower layers only (OCI
+		// image spec): this layer's own file beneath it stands.
+		{"file then whiteout of its directory", [][]entry{{{name: name, body: "FIRST"}, {name: "var/lib/dpkg/.wh.status.d"}}}, "FIRST", 0},
 		{"file then opaque marker", [][]entry{{{name: name, body: "KEPT"}, {name: dir + "/.wh..wh..opq"}}}, "KEPT", 0},
 		{"upper layer still wins", [][]entry{{{name: name, body: "BASE"}}, {{name: name, body: "TOP"}}}, "TOP", 0},
 	} {
