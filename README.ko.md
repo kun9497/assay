@@ -23,7 +23,7 @@
 
 ```bash
 # 사전 빌드 바이너리 (Linux/macOS, amd64/arm64) — PATH 위로 바로 설치; Windows는 아래
-curl -sSfL https://raw.githubusercontent.com/kun9497/assay/f430fdad5ec6fd2086afe55ddb220e99f91bbfdd/install.sh | sudo sh -s -- -b /usr/local/bin
+curl -sSfL https://raw.githubusercontent.com/kun9497/assay/7712a02ba7c103c238d7b7ec95fd63472bcf78d7/install.sh | sudo sh -s -- -b /usr/local/bin
 ```
 
 스크립트는 프로젝트 서명 키를 내장하고 릴리스 체크섬 파일의 서명을 `openssl`(또는 `cosign`)로
@@ -37,7 +37,7 @@ curl -sSfL https://raw.githubusercontent.com/kun9497/assay/f430fdad5ec6fd2086afe
 Windows에서는(이 스크립트를 처음 싣는 v0.12.0부터) PowerShell 5.1이나 7에서:
 
 ```powershell
-irm https://raw.githubusercontent.com/kun9497/assay/f430fdad5ec6fd2086afe55ddb220e99f91bbfdd/install.ps1 | iex
+irm https://raw.githubusercontent.com/kun9497/assay/7712a02ba7c103c238d7b7ec95fd63472bcf78d7/install.ps1 | iex
 ```
 
 `install.ps1`은 같은 서명을 .NET으로 검증하므로 먼저 설치할 것이 없고, `assay.exe`를
