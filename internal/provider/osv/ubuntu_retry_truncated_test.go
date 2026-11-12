@@ -16,6 +16,8 @@ func TestUbuntuTrackerSync_RetriesAResponseCutShort(t *testing.T) {
 	for _, msg := range []string{
 		// The 2026-10-22 nightly, verbatim (run 39768961219).
 		"git fetch --depth 1 origin HEAD: exit status 128: fatal: expected flush after ref listing",
+		// Run 43022778806: Git timed out before the per-attempt context did.
+		"git fetch --depth 1 origin HEAD: exit status 128: fatal: unable to access 'https://git.launchpad.net/ubuntu-cve-tracker/': SSL connection timeout",
 		"exit status 128: error: RPC failed; curl 18 transfer closed with outstanding read data remaining",
 		"exit status 128: fetch-pack: unexpected disconnect while reading sideband packet",
 		"exit status 128: fatal: protocol error: bad pack header",
@@ -55,6 +57,7 @@ func TestTransientTrackerGit_PermanentStaysPermanent(t *testing.T) {
 	for _, msg := range []string{
 		"fatal: repository 'https://git.launchpad.net/x/' not found",
 		"fatal: Authentication failed for 'https://git.launchpad.net/'",
+		"fatal: SSL certificate problem: unable to get local issuer certificate",
 		"The requested URL returned error: 403",
 		"fatal: not a git repository (or any of the parent directories): .git",
 	} {

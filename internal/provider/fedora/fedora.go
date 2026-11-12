@@ -370,6 +370,9 @@ func (p *Provider) fetchPageRetrying(ctx context.Context, release string, page i
 			return resp, nil
 		}
 		lastErr = err
+		if stopped := ctx.Err(); stopped != nil {
+			return bodhiPage{}, stopped
+		}
 		if !retryable(err, status) {
 			return bodhiPage{}, err
 		}
