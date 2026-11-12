@@ -24,7 +24,8 @@ func pageBackoff(attempt int) time.Duration {
 	return time.Duration(1<<uint(attempt-1)) * 500 * time.Millisecond
 }
 
-// retryable reports whether an error is worth another attempt.
+// retryable reports whether one request may be retried while the build
+// context is still live. fetchPageRetrying checks the caller's deadline first.
 //
 // Narrower than redhat.retryable on purpose -- "honest retry ONLY on
 // 429/5xx" was the design brief for this slice, not the fuller transient-
@@ -47,14 +48,14 @@ func pageBackoff(attempt int) time.Duration {
 // A peer reset carries no challenge to miss.
 //
 // Not retried: any other 4xx (the request is wrong and will be wrong
-// again), a connection that never got a status at all (status 0 without a
-// reset), a decode error on a body that arrived intact, and context
-// cancellation/deadline.
+// again), a decode error on a body that arrived intact, and cancellation.
+// An individual HTTP request can reach client.Timeout before the build
+// deadline. Run 43123419307 lost its first page waiting for Bodhi headers.
 func retryable(err error, status int) bool {
-	if err != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+	if errors.Is(err, context.Canceled) {
 		return false
 	}
-	if err != nil && (errors.Is(err, syscall.ECONNRESET) || errors.Is(err, io.ErrUnexpectedEOF)) {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return true
 	}
 	return status == http.StatusTooManyRequests || status >= 500

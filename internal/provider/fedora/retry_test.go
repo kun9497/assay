@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -19,6 +22,9 @@ import (
 // not the fuller transient-transport-error set D58 built for Red Hat's
 // 20,000-document delta pass.
 func TestRetryable(t *testing.T) {
+	// Run 43123419307. http.Client wraps its request deadline in a url.Error.
+	const bodhiURL = "https://bodhi.fedoraproject.org/updates/?page=1&releases=F43&rows_per_page=100&status=stable&type=security"
+	timeout := &url.Error{Op: "Get", URL: bodhiURL, Err: fmt.Errorf("%w (Client.Timeout exceeded while awaiting headers)", context.DeadlineExceeded)}
 	for _, tt := range []struct {
 		name   string
 		err    error
@@ -52,7 +58,7 @@ func TestRetryable(t *testing.T) {
 		// Cancellation outranks everything, checked before the status --
 		// mirroring redhat.retryable's own ordering.
 		{"context cancelled", context.Canceled, 0, false},
-		{"deadline exceeded", context.DeadlineExceeded, 0, false},
+		{"page timeout while waiting for headers", fmt.Errorf("fedora: fetch %s: %w", bodhiURL, timeout), 0, true},
 		// Cancellation wins even alongside a status that would otherwise
 		// retry, proving the check really does run first.
 		{"cancelled with a 503 status", context.Canceled, http.StatusServiceUnavailable, false},
@@ -60,6 +66,52 @@ func TestRetryable(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := retryable(tt.err, tt.status); got != tt.want {
 				t.Errorf("retryable(%v, %d) = %v, want %v", tt.err, tt.status, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPageTimeoutRetriesOnlyWhileBuildIsLive(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		stall         int32
+		parentTimeout bool
+		wantCalls     int32
+	}{
+		{"one slow response", 1, false, 2},
+		{"every response times out", pageAttempts, false, pageAttempts},
+		{"build deadline", 1, true, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if calls.Add(1) <= tc.stall {
+					<-r.Context().Done()
+					return
+				}
+				_, _ = io.WriteString(w, `{"page":1,"pages":1,"updates":[]}`)
+			}))
+			defer srv.Close()
+			p := Provider{client: srv.Client(), baseURL: srv.URL}
+			ctx := context.Background()
+			p.client.Timeout = 300 * time.Millisecond
+			if tc.parentTimeout {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, 300*time.Millisecond)
+				defer cancel()
+				p.client.Timeout = 0
+			}
+			var st stats
+			_, err := p.fetchPageRetrying(ctx, "F43", 1, &st)
+			if calls.Load() != tc.wantCalls || st.Retried != int(tc.wantCalls-1) {
+				t.Fatalf("observed %d calls and %d retries, want %d calls", calls.Load(), st.Retried, tc.wantCalls)
+			}
+			if tc.wantCalls > tc.stall {
+				if err != nil || st.Rescued != 1 {
+					t.Fatalf("rescued=%d error=%v", st.Rescued, err)
+				}
+			} else if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("want deadline error, got %v", err)
 			}
 		})
 	}

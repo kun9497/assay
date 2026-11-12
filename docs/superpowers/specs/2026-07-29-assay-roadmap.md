@@ -3040,7 +3040,8 @@ updates, `FEDORA-` ids only so EPEL cannot fold in) under keys `Fedora:<release>
 value-per-effort, and the answer is not to skip it but to ship every weakness loud:
 
 1. **The API is slow and bot-fronted** — sequential pagination, descriptive User-Agent,
-   retries only on 429/5xx with cancellation checked first (D58's classification order).
+   and up to three attempts per page for 429/5xx, a reset or truncated transfer, or the
+   individual HTTP request timing out. A cancelled or expired build stops immediately.
 2. **CVEs come from prose** — regex over title+notes, measured ceiling 81.7%. Every update
    with no extractable CVE is COUNTED and the build log says so; the miss is never silent.
 3. **The 13-month EOL freeze** — an EOL'd release gets no new advisories, so its lower
