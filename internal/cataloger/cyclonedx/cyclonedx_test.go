@@ -36,6 +36,27 @@ func TestLocalReleaseScopeUsesThePackageBranch(t *testing.T) {
 	}
 }
 
+func TestConflictingInstalledPointReleases(t *testing.T) {
+	for _, first := range []string{"9.4", "9.6"} {
+		second := "9.4"
+		if first == second {
+			second = "9.6"
+		}
+		component := func(ver string) string {
+			return `{"type":"library","purl":"pkg:rpm/redhat/openssl@1?arch=x86_64&distro=rhel-` + ver + `"}`
+		}
+		doc := `{"bomFormat":"CycloneDX","specVersion":"1.6","components":[` + component(first) +
+			`],"metadata":{"component":{"type":"container","components":[` + component(second) + `]}}}`
+		target, _, err := Parse(strings.NewReader(doc))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(target.Packages) != 1 || !target.Packages[0].DistroContext.Mixed {
+			t.Fatalf("conflicting release claims with %s first: %+v", first, target.Packages)
+		}
+	}
+}
+
 func TestParse(t *testing.T) {
 	f, err := os.Open("testdata/small.cdx.json")
 	if err != nil {

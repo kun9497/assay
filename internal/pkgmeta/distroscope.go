@@ -9,6 +9,16 @@ type DistroScope struct {
 	Mixed     bool
 }
 
+// ForInstallation retains the local OS when an SBOM purl contradicts it.
+// Keep an installed subrelease under a broader local declaration, so later
+// duplicate records can detect conflicting point releases in either order.
+func (s DistroScope) ForInstallation(installed string) DistroScope {
+	if !s.Mixed && installed != "" && (s.Qualifier == "" || releaseIncludes(s.Qualifier, installed)) {
+		return DistroScope{Qualifier: installed}
+	}
+	return s
+}
+
 func (s DistroScope) Merge(other DistroScope) DistroScope {
 	switch {
 	case s.Mixed || other.Mixed:
