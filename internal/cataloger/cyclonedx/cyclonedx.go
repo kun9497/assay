@@ -989,7 +989,7 @@ func catalogOne(c component, ctx osContext, target *pkgmeta.Target, stats *Stats
 		Type:          p.Type,
 		Ecosystem:     eco,
 		PURL:          c.PURL,
-DistroContext: ctx.scope().ForInstallation(p.Qualifiers["distro"]),
+		DistroContext: ctx.scope().ForInstallation(p.Qualifiers["distro"]),
 		Locations:     []pkgmeta.Location{loc},
 		Source:        source,
 		Upstream:      upstream,
