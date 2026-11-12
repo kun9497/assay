@@ -755,6 +755,7 @@ func keyedReleases(pkgs []pkgmeta.Package) map[string]releases {
 // the other must still be judged on its source. What the kept listing
 // already states is never overwritten.
 func keepEvidence(kept *pkgmeta.Package, dropped pkgmeta.Package) {
+	kept.DistroContext = kept.DistroContext.Merge(dropped.DistroContext)
 	// The keyed listing's key wins over an unkeyed twin's (indexOfPackage).
 	if kept.Ecosystem == "" && dropped.Ecosystem != "" {
 		kept.Ecosystem = dropped.Ecosystem
@@ -983,15 +984,16 @@ func catalogOne(c component, ctx osContext, target *pkgmeta.Target, stats *Stats
 	}
 
 	pkg := pkgmeta.Package{
-		Name:         name,
-		Version:      version,
-		Type:         p.Type,
-		Ecosystem:    eco,
-		PURL:         c.PURL,
-		Locations:    []pkgmeta.Location{loc},
-		Source:       source,
-		Upstream:     upstream,
-		ModuleStream: moduleStream,
+		Name:          name,
+		Version:       version,
+		Type:          p.Type,
+		Ecosystem:     eco,
+		PURL:          c.PURL,
+		DistroContext: ctx.scope(),
+		Locations:     []pkgmeta.Location{loc},
+		Source:        source,
+		Upstream:      upstream,
+		ModuleStream:  moduleStream,
 		// The architecture the purl states (distro types only): part of the
 		// dedupe identity, nothing else here.
 		Arch: arch,
@@ -1065,12 +1067,23 @@ func propValue(c component, name string) string {
 // ecosystem is distro's key, "" when its release does not resolve (the same
 // fall-back: unkeyed, reported, never guessed).
 type osContext struct {
-	distro    *pkgmeta.Distro
-	ecosystem string
+	distro       *pkgmeta.Distro
+	ecosystem    string
+	mixedRelease bool
 	// family is a known distro declared with no version at all (contextFor):
 	// it names the target for the report, keys nothing, and refuses an
 	// inherited context of another family.
 	family *pkgmeta.Distro
+}
+
+func (c osContext) scope() pkgmeta.DistroScope {
+	if c.mixedRelease {
+		return pkgmeta.DistroScope{Mixed: true}
+	}
+	if c.distro == nil || c.distro.VersionID == "" {
+		return pkgmeta.DistroScope{}
+	}
+	return pkgmeta.DistroScope{Qualifier: c.distro.ID + "-" + c.distro.VersionID}
 }
 
 // contextFor is the context of a list of sibling components: the one
@@ -1081,6 +1094,7 @@ type osContext struct {
 // release are one declaration.
 func contextFor(siblings []component, inherited osContext) osContext {
 	var found *pkgmeta.Distro
+	mixedRelease := false
 	// family is a known distro declared among the siblings WITHOUT a key
 	// (no version, or one no key is built from): it says which family the
 	// packages beside it belong to and no more. It keys nothing itself, but
@@ -1128,6 +1142,9 @@ func contextFor(siblings []component, inherited osContext) osContext {
 		if !sameDistro(found, d) {
 			return osContext{}
 		}
+		if found.ID != d.ID || found.VersionID != d.VersionID {
+			mixedRelease = true
+		}
 	}
 	if found != nil && family != nil && !strings.EqualFold(found.ID, family.ID) {
 		return osContext{}
@@ -1143,7 +1160,7 @@ func contextFor(siblings []component, inherited osContext) osContext {
 		}
 		return inherited
 	}
-	ctx := osContext{distro: found}
+	ctx := osContext{distro: found, mixedRelease: mixedRelease}
 	if eco, err := found.Ecosystem(); err == nil {
 		ctx.ecosystem = eco
 	}

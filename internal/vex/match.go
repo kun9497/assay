@@ -202,7 +202,7 @@ func (lp liveProduct) matches(s subject) (matched, versionless bool, viaSource s
 		}
 	case lp.isPURL:
 		if s.ok {
-			if m, vl := purlPatternMatches(lp.purl, s.parsed, s.codename, s.pkg.Ecosystem); m {
+			if m, vl := purlPatternMatches(lp.purl, &s); m {
 				return true, vl, ""
 			}
 		}
@@ -283,7 +283,7 @@ func sourcePatternMatches(doc pkgmeta.PURL, s subject) (matched, versionless boo
 		if k == "arch" || (doc.Type == "rpm" && k == "epoch") {
 			continue
 		}
-		if !qualifierMatches(pkg, k, v, s.codename, s.pkg.Ecosystem) {
+		if !qualifierMatches(pkg, k, v, s.codename, &s.pkg) {
 			return false, false
 		}
 	}
@@ -359,7 +359,8 @@ func rpmEpoch(e string) string {
 // (syft's own ELF-note cataloger writes pkg:deb/Debian/…), and qualifiers go
 // through qualifierMatches, where an rpm epoch of 0 equals no epoch and an
 // Ubuntu package's distro also answers to the release codename.
-func purlPatternMatches(doc, pkg pkgmeta.PURL, codename, ecosystem string) (matched, versionless bool) {
+func purlPatternMatches(doc pkgmeta.PURL, s *subject) (matched, versionless bool) {
+	pkg := s.parsed
 	if doc.Type != pkg.Type || !namespaceEqual(doc.Type, doc.Namespace, pkg.Namespace) || doc.Name != pkg.Name {
 		return false, false
 	}
@@ -370,7 +371,7 @@ func purlPatternMatches(doc, pkg pkgmeta.PURL, codename, ecosystem string) (matc
 		}
 	}
 	for k, v := range doc.Qualifiers {
-		if !qualifierMatches(pkg, k, v, codename, ecosystem) {
+		if !qualifierMatches(pkg, k, v, s.codename, &s.pkg) {
 			return false, false
 		}
 	}
@@ -396,33 +397,53 @@ func namespaceEqual(typ, a, b string) bool {
 //   - Ubuntu distro: a deb purl in the ubuntu namespace also answers to
 //     distro=<VERSION_CODENAME>, Canonical's own spelling (distro=jammy).
 //
-// A `distro=` qualifier is held to the release the package was EVALUATED
-// under (ecosystem, the finding's own key) whenever the statement's value
-// keys to a release at all: a statement for Alpine 3.20 does not reach a
-// package judged on Alpine 3.19's data, whatever release a listing of it
-// spelled on its purl (release check of main 60c512c: an SBOM listing's
-// `distro=alpine-3.20` beside the install's 3.19 let a 3.20 statement hide
-// the two findings the 3.19 evaluation made). The spelling on the purl
-// decides only when the evaluation keyed the package to nothing.
-func qualifierMatches(pkg pkgmeta.PURL, k, v, codename, ecosystem string) bool {
-	if k == "distro" && ecosystem != "" {
-		if eco, known := pkgmeta.EcosystemForDistroQualifier(v); known {
-			return eco == ecosystem
+// For OS packages, the distro must agree with the evaluated database key
+// and any finer product scope. A language ecosystem carries no OS release.
+func qualifierMatches(pkg pkgmeta.PURL, k, v, codename string, installed *pkgmeta.Package) bool {
+	got, present := pkg.Qualifiers[k]
+	if k != "distro" {
+		return (present && got == v) || (pkg.Type == "rpm" && k == "epoch" && v == "0" && got == "")
+	}
+
+	if _, language := pkgmeta.EcosystemForPURLType(pkg.Type); language {
+		if !present || got != v {
+			return false
+		}
+		scope := installed.DistroContext
+		if scope.Mixed {
+			return false
+		}
+		if scope.Qualifier == "" || scope.Qualifier == v {
+			return true
+		}
+		key, known := pkgmeta.EcosystemForDistroQualifier(scope.Qualifier)
+		return known && scope.Matches(v, got, key)
+	}
+
+	if pkg.Type == "deb" && strings.EqualFold(pkg.Namespace, "ubuntu") {
+		if release, known := ubuntuReleases[v]; known {
+			// A codename must actually be supplied by this scan, either in
+			// os-release or the package's purl. A same-spelled purl alone
+			// cannot exempt a package evaluated on another release.
+			if v != codename && v != got {
+				return false
+			}
+			if installed.Ecosystem == "" {
+				return true
+			}
+			v = "ubuntu-" + release
+		} else if v == codename && codename != "" {
+			// A newly named Ubuntu release read from the image itself.
+			return installed.Ecosystem == "" || strings.HasPrefix(installed.Ecosystem, "Ubuntu:")
 		}
 	}
-	got, ok := pkg.Qualifiers[k]
-	if ok && got == v {
-		return true
+	if installed.Ecosystem == "" {
+		return present && got == v
 	}
-	if pkg.Type == "rpm" && k == "epoch" && v == "0" && (!ok || got == "") {
-		return true
-	}
-	if k == "distro" && codename != "" && v == codename &&
-		pkg.Type == "deb" && strings.EqualFold(pkg.Namespace, "ubuntu") {
-		return true
-	}
-	return false
+	return installed.DistroContext.Matches(v, got, installed.Ecosystem)
 }
+
+var ubuntuReleases = pkgmeta.UbuntuReleases()
 
 // vulnerabilityMatches tests a statement's vulnerability identity — its
 // name, @id and every alias — against EVERY member of the finding's own

@@ -8,6 +8,34 @@ import (
 	"github.com/kun9497/assay/internal/pkgmeta"
 )
 
+func TestLocalReleaseScopeUsesThePackageBranch(t *testing.T) {
+	os94 := `{"type":"operating-system","name":"rhel","version":"9.4"}`
+	os96 := `{"type":"operating-system","name":"rhel","version":"9.6"}`
+	rpm := `{"type":"library","purl":"pkg:rpm/redhat/openssl@1?distro=rhel-9.6"}`
+	for _, tc := range []struct {
+		name, components string
+		scope            pkgmeta.DistroScope
+	}{
+		{"ambiguous siblings", os94 + "," + os96 + "," + rpm, pkgmeta.DistroScope{Mixed: true}},
+		{"local fine release", os94 + "," + rpm, pkgmeta.DistroScope{Qualifier: "rhel-9.4"}},
+		{"nested override", os94 + `,{"type":"container","components":[` + os96 + "," + rpm + `]}`, pkgmeta.DistroScope{Qualifier: "rhel-9.6"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := `{"bomFormat":"CycloneDX","specVersion":"1.6","components":[` + tc.components + `]}`
+			target, _, err := Parse(strings.NewReader(doc))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(target.Packages) != 1 {
+				t.Fatalf("packages: %+v", target.Packages)
+			}
+			if got := target.Packages[0].DistroContext; got != tc.scope {
+				t.Errorf("scope = %+v, want %+v", got, tc.scope)
+			}
+		})
+	}
+}
+
 func TestParse(t *testing.T) {
 	f, err := os.Open("testdata/small.cdx.json")
 	if err != nil {

@@ -21,6 +21,9 @@ type Package struct {
 	// own — the one OSPackagePURL spells in syft's form (D121), so a VEX
 	// statement written against a syft SBOM of the image matches its scan.
 	PURL string
+	// DistroContext retains the local OS evidence separately from the (often
+	// coarser) advisory key. Only CycloneDX has nested OS declarations.
+	DistroContext DistroScope `json:"-"`
 	// Arch is the architecture the package database records (apk A:, dpkg
 	// Architecture:, rpm ARCH, pacman %ARCH%). Read only to spell the purl's
 	// "arch" qualifier (D121); never part of a lookup key.
