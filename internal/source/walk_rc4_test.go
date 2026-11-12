@@ -46,6 +46,28 @@ func TestFiles_WhiteoutOrderDoesNotDependOnTheLayerMediaType(t *testing.T) {
 	}
 }
 
+// A directory a layer creates and then whiteouts in the same tar is gone when
+// the untar finishes the layer, so a `..` cannot fold over it: the layer's
+// word for the component is withdrawn by the marker (walk.go, resolvePass),
+// not kept from the directory entry before it. Goes red when the marker
+// stops resetting the layer's word.
+func TestFiles_DotDotOverADirectoryTheSameLayerRemovesAfterCreating(t *testing.T) {
+	const db = "lib/apk/db/installed"
+	img := imageOf(
+		layerOfOrdered(t, "base", entry{name: "data/packages", body: "DB"}, sym(db, "/data/marker/../packages")),
+		layerOfOrdered(t, "upper", node("data/marker", tar.TypeDir), entry{name: "data/.wh.marker"}))
+	if f, ok := filesOne(t, img, db); ok {
+		t.Fatalf("database read through a directory the layer removed again: %q", f.Data)
+	}
+	// Control: the marker before the directory is overwritten by it.
+	img = imageOf(
+		layerOfOrdered(t, "base", entry{name: "data/packages", body: "DB"}, sym(db, "/data/marker/../packages")),
+		layerOfOrdered(t, "upper", entry{name: "data/.wh.marker"}, node("data/marker", tar.TypeDir)))
+	if f, ok := filesOne(t, img, db); !ok || string(f.Data) != "DB" {
+		t.Fatalf("database = %q, present=%v; want DB through the directory the layer recreated", f.Data, ok)
+	}
+}
+
 func TestFiles_ClimbsUseTheCurrentLayerTree(t *testing.T) {
 	const db = "lib/apk/db/installed"
 	for _, tc := range []struct {

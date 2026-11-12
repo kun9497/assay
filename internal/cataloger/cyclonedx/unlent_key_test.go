@@ -42,4 +42,20 @@ func TestUnlentBareListingIsKeyedTheSameInEveryInstallOrder(t *testing.T) {
 			t.Errorf("subject %v: reason = %q, want both source versions named", subject, u.Unevaluable)
 		}
 	}
+	// Two installs that state different source versions, both contradicting
+	// the bare listing: the reason names the lowest, in either order, not
+	// whichever install the listing met first.
+	amd12 := libc6 + "?arch=amd64&upstream=glibc%402.31-13%2Bdeb11u12"
+	for _, subject := range [][]string{{amd12, arm}, {arm, amd12}} {
+		pkgs := parseListingGroups(t, []string{bare}, subject)
+		var reason string
+		for _, p := range pkgs {
+			if p.Arch == "" {
+				reason = p.Unevaluable
+			}
+		}
+		if !strings.Contains(reason, "2.31-13+deb11u12") || strings.Contains(reason, "deb11u13") {
+			t.Errorf("subject %v: reason = %q, want the lowest source version (deb11u12) named in every order", subject, reason)
+		}
+	}
 }
