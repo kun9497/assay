@@ -8884,6 +8884,19 @@ and the notEvaluated count, but no finding for that package, and can exit 0. Jud
 and reporting the union was considered (PR #269 review) and not taken: the requirement was that no
 reading be chosen, and a union is a reading the document does not state either.
 
+**2026-11-12 revision (v0.18.1, review of the release's fix branches).** A bare listing that names
+its release is placed with that release's installs however many releases the document holds. The
+ambiguity rule -- a listing the document keys to two releases belongs to neither provably -- had
+been applied through the document's aggregate to listings that state their own `distro=`, which
+sent them down the first-match path: one name and version under Debian 11 and Debian 12 read 3
+packages and exit 0 in one order of the installs and 4 packages with a spurious not-evaluated
+listing and exit 2 under `--fail-on-incomplete=target` in the other; two Debian 12 bare listings
+beside a Debian 12 install were judged on a contradicted source in one order only; a reason named
+whichever same-release install came first. An unkeyed bare listing beside installs of two
+releases now stays unkeyed in every order (the same rule, where it belongs), where it had taken
+whichever release came first. The unlent listing's key and reason twin are taken per listing from
+the installs of its own release (the "2 and 2" reason the independent review found).
+
 ---
 
 ### D167 — The differential floors each probed ecosystem's application packages (`minApplicationPackages`)

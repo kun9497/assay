@@ -8,6 +8,13 @@
 ## [Unreleased]
 
 ### Fixed
+- CycloneDX: 판정하지 않은 맨 나열이 지니는 사유가 자기 릴리스의 설치를 듭니다 — Debian 11과 Debian 12가 같은
+  이름·버전을 나열할 때 v0.18.0은 Debian 12 설치의 소스 버전을 Debian 11 나열의 사유에 넣었습니다(2와 7의 모순을
+  "2 and 2"로). 판정·skip 수·종료 코드는 맞았고 문장만 틀렸습니다. 그리고 자기 릴리스를 적은 맨 나열은 문서에 릴리스가
+  몇 개 있든 그 릴리스의 설치들과 놓입니다: Debian 11과 Debian 12에 나열된 이름·버전 하나가 설치 순서 한쪽에선 패키지
+  3·종료 0, 다른 쪽에선 패키지 4에 가짜 미평가 나열·`--fail-on-incomplete=target` 종료 2로 읽혔고; Debian 12 설치 곁의
+  Debian 12 맨 나열 둘은 한 순서에서만 모순된 소스로 판정됐으며; 두 릴리스의 설치 곁의 키 없는 맨 나열은 이제 어느
+  순서든 키 없이 남습니다. (D166 개정; 2026-11-12 v0.18.0 독립 리뷰)
 - Debian 이미지의 OS 패키지 purl이 포인트 릴리스를 적습니다(`distro=debian-12.11`): syft가 읽는 대로
   (`supplementDebianVersion`) `/etc/debian_version`에서 읽으며, 전에는 os-release의 메이저 `debian-12`만 적어 D121의
   약속(syft와 같은 철자라서 이미지의 syft SBOM에서 쓴 VEX가 패키지에 닿는다)이 Debian에서 깨져 있었습니다. 근거가
