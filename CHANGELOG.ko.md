@@ -7,12 +7,24 @@
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-12
+
 ### Added
 - 스캐너 차등 비교가 프로브된 생태계별 애플리케이션 패키지에 하한을 둡니다: `coverage[].packages`에 거는
   `minApplicationPackages`(`npm`, `Go`)로, 주간 실행과 야간 `-regressions-only` 게이트가 똑같이 판정합니다.
   `ubi8n18` npm 118, Go 대상 셋은 1. 전에는 npm과 Go 패키지를 모두 잃은 후보가 두 모드를 통과했습니다. (D167; QA 2026-11-10)
 
 ### Changed
+- **JSON `schemaVersion` 20 → 22. Breaking** — `inventoryScope.applicationScope[].state`로 분기하는
+  소비자에게만; 그 밖의 독자에게는 추가형입니다. 스키마 21은 `skipped[].cves`를 더합니다(아래). 스키마 22는
+  `applicationScope[].state`에 `read`·`none`·`not-read` 곁의 값 `partial`을 더합니다: npm에만, 전역
+  `node_modules` 루트 아래 후보가 풀리지 않는 링크(또는 링크된 스코프 디렉터리)였을 때이며, 그 경로는 사유와
+  함께 `unread[]`에 있습니다. 상태값을 열거하는 소비자는 `partial`을 받아들여 "npm 패키지를 읽었고, 루트 아래
+  경로 하나 이상은 읽지 못했다"로 읽어야 합니다 — 그런 이미지는 전에 `none`으로 읽혔고, 그것이 틀렸습니다. 모르는
+  필드를 무시하는 독자는 바꿀 것이 없습니다. truthset 보고서는 스키마 3(D161 개정); provenance 사이드카,
+  `status.json`, `db status`, 데이터베이스 스키마(9)는 그대로라 이 릴리스에 `db update`가 필요하지는 않습니다
+  — 아래 Amazon Linux 2·SUSE 데이터 보정에는 필요하며, 그것은 2026-11-12부터 공개 `v9` 아티팩트에 들어 있습니다.
+  (`docs/compatibility.md`)
 - **JSON `schemaVersion` 21**(추가형): `skipped[].cves`가 건너뛴 권고가 이름 붙인 CVE를 나열해, `advisoryId`가
   ALAS나 GHSA id인 skip도 CVE와 이을 수 있습니다. `cmd/truthset`은 판정을 결정할 비교를 스캔이 건너뛴 라벨(그
   CVE를 이름 붙인 skip, 패키지 전체 skip, 식별할 수 없는 skip)을 더 이상 참음성으로 세지 않습니다: 그런 라벨은
@@ -20,6 +32,46 @@
   3. (D161 개정, QA 2026-11-10)
 
 ### Fixed
+- Amazon Linux 2: Mock2 extra의 rpm 4.14.3 권고(ALAS2MOCK2-2026-003, CVE-2026-103242)가 Core 이미지의
+  rpm 4.11.3에 더는 닿지 않습니다 — Mock2 범위가 0에서 시작하는 바람에 `rpm`, `python2-rpm`, `rpm-libs`,
+  `rpm-build-libs`가 잘못된 수정 버전을 단 오탐 넷이었고, Amazon은 Core rpm을 영향 없음으로 둡니다. Mock2
+  토픽의 rpm 바이너리 16개가 이제 Amazon의 x86_64·aarch64 패키지 이력이 보여 주는 하한 `4.14.3`을 지니고,
+  `4.14.3-4.amzn2.0.4` 아래의 Mock2 설치는 여전히 영향받습니다; Core, `compat-rpm-411`, 다른 extras는 자기
+  범위를 지킵니다. 데이터베이스 빌드(2026-11-12부터 공개 `v9`에 포함): 고정 amazonlinux2 이미지의 패키지·CVE
+  조합 48 → 44, 차등 상한 88. (D78 개정; QA 2026-11-12)
+- openSUSE Leap 15.6과 SLES 15 SP4–SP7의 `libopenssl3`, CVE-2026-34182: 최초 수정판은 6월 보안 업데이트
+  (SP6/Leap 15.6에서 `3.1.4-150600.5.53.1`)이지, 6월 빌드에 이미 있던 보호에 선택적 호환성 설정을 더한 11월
+  권고 업데이트(`.70.1`)가 아닙니다 — `.52.1`은 수정판 `.53.1`로 영향받고 `.53.1`과 `.70.1`은 깨끗한데, 스캔은
+  6월 빌드를 `.70.1`이 수정판인 취약으로 보고했었습니다. 보안·호환성 공지가 같은 제품·바이너리·빌드를 적은 곳에만
+  적용하며, 현재 문서의 명시적 미해결 상태는 지킵니다. 데이터베이스 빌드(2026-11-12부터 공개 `v9`에 포함).
+  (D163 개정; QA 2026-11-12)
+- `db build`: Ubuntu 트래커의 `git fetch`가 `SSL connection timeout`을 다른 일시 오류처럼 재시도하고, 응답
+  헤더가 2분 요청 제한을 넘긴 Fedora Bodhi 페이지는 빌드 자체가 살아 있는 동안 기존 페이지당 3회 한도 안에서
+  재시도합니다 — 야간 발행 셋이 연달아 이것으로 push 전에 실패했고 공개 데이터베이스는 그대로였습니다. 취소되거나
+  만료된 빌드, 인증·인증서 오류, 형식이 깨진 성공 응답은 여전히 즉시 실패합니다. (D75 개정; ops #292)
+- main 19ccdf6 릴리스 점검에 따른 VEX: 포인트 릴리스로 한정한 문장은 두 릴리스가 공유하는 데이터베이스 키가
+  아니라 패키지가 실제로 지닌 릴리스에 맞춥니다 — RHEL 9.6 문장이 9.4 설치를 더는 면제하지 않고(68건 유지)
+  Alpine 3.20 문장이 3.19 설치를 면제하지 않습니다; Ubuntu 코드네임을 쓴 `distro=`는 릴리스 표와 대조합니다;
+  CycloneDX 패키지는 문서의 자기 가지에 선언된 OS를 지키고, 한 설치에 선언된 두 포인트 릴리스는 공유 키만 남깁니다;
+  언어 패키지는 자기 purl의 명시적 한정자나 로컬 OS 근거로 OS 한정 제품에 닿고, 충돌하는 형제 OS 계열(Debian
+  12 곁의 Photon 5)은 면제를 주지 않습니다; 9.8 곁의 Oracle Linux 9는 더 구체적인 릴리스를 지킵니다. (D121
+  보완, D165 개정)
+- main 19ccdf6 릴리스 점검에 따른 CycloneDX: 구체적인 설치를 먼저 읽은 뒤 arch 없는 나열을 저울질하고, 릴리스는
+  맨 기록이 말할 때만 다른 arch에 빌려 주며(릴리스가 ppc64le에만 적힌 Alpine 문서: 2건·미평가 2·
+  `--fail-on-incomplete=any`에서 종료 2, 어느 순서든), 설치는 자기 소스 버전을 지키고 모순되는 무한정 소스는
+  따로 적으며(Debian amd64 libc6: 모순을 기록한 25건·종료 1), subject는 한 번만 카탈로그합니다. 보관된 실제 CLI
+  사례 131개 중 정확히 이 변경을 다루는 넷만 바뀌었습니다. (D166 개정)
+- main 19ccdf6 릴리스 점검에 따른 이미지 레이어와 npm 루트: 링크 대상의 `..`는 모든 조상의 보이는 종류를 안 뒤에만
+  접으므로, 상위 레이어가 지우고 자식이 다시 만든 디렉터리나 opaque whiteout을 품은 디렉터리도 계속 지나갑니다
+  (BusyBox 7건과 SARIF의 Critical, 0건이었음); OCI 레이어의 일반 whiteout은 OCI 이미지 명세대로 하위 레이어만
+  지우고 Docker 형식 레이어는 스트림 순서 삭제를 지키며 — 둘은 레이어의 media type으로 가르고 모르는 종류는 같은
+  레이어 규칙을 따릅니다; 심볼릭 링크나 하드링크로 한 매니페스트에 닿는 전역 npm 루트 둘은 두 논리 경로의 설치
+  하나이고(4건, 8건이었음) 같은 링크를 두 번 묻는 것은 순환이 아닙니다. (D160 개정; `docs/DESIGN.md` "Layer
+  semantics")
+- `scandiff`: 각 도구의 캡처 상태가 그것을 쓴 실행의 id를 지니고, 재판정은 완료된 실행 기록의 캡처만 받습니다 —
+  바이트까지 같은 보고서를 낸 두 실행이 더는 하나로 재생되지 않고, 실행 id를 지닌 상태는 자기 기록을 요구하며, 첫
+  기록을 쓰지 못한 실행은 도구를 보류로 표시해 뒤의 상태 쓰기가 중단을 드러냅니다. 실행 id 이전의 캡처(주간 보관의
+  모양)는 그대로 재생됩니다. (D167 개정)
 - main 60c512c 릴리스 점검에 따른 이미지 경로와 npm 루트: 링크 대상 안의 `..`를 구성 요소 하나씩, 각각 그것을 말하는
   가장 새로운 레이어가 결정하는 대로 접습니다(`route`가 심볼릭 링크이거나 하위 디렉터리 위에서 지워지거나 파일로 바뀐
   `/data/marker/../route/../packages`가 이제 링크가 닿는 데이터베이스를 읽음: BusyBox 7건과 SARIF의 Critical, 0건이었음);
@@ -113,10 +165,6 @@
   식별자의 키를 받아들입니다. 서로 다른 아키텍처(`arch=x86_64`, `arch=aarch64`)를 적은 나열 둘은 설치 둘입니다.
   릴리스 없이 선언된 OS(버전 없는 Alpine, `linux`)는 더 이상 최상위의 Debian으로 패키지 키를 정하지 않고(오탐
   51건), 옆에 있는 purl의 `distro` qualifier를 끄지도 않습니다. (D165, D166 개정; QA 2026-11-11)
-- `truthset -offline`: 실행의 DB는 처음 신뢰한 캡처의 것이며 로컬 빌드 DB(digest 없음)도 포함하므로, 로컬 DB
-  캡처와 배포 DB 캡처는 어느 순서든 같은 ERROR입니다(전에는 로컬이 먼저 정렬되면 배포 DB의 결과로 통과).
-  `scandiff -offline`: 기록된 대상이 floor 파일의 고정 ref가 아닌 캡처는 사유와 함께 ERROR입니다(Alpine으로 다시
-  고정한 대상 아래의 BCI 캡처가 통과했었음). (D161, D167 개정; QA 2026-11-11)
 - `truthset -offline`은 입증되지 않은 캡처를 실행 전체의 DB 검사보다 먼저 제외합니다: 먼저 정렬된 오래된
   캡처가 더 이상 실행의 DB를 정해 입증된 모든 케이스를 digest 불일치(종료 2)로 실패시키지 않습니다. (D161 개정; PR #268 리뷰 2차)
 - PR #271 리뷰에 따른 링크된 npm 설치: 링크의 `..`는 앞의 링크를 따른 뒤 적용합니다; 설치된 패키지의
@@ -154,6 +202,11 @@
 - `/lib`와 `/usr/lib`(또는 `/bin`과 `/usr/bin`)가 분리된 이미지에서, 한쪽 아래 파일을 소유한 OS 패키지를
   다른 쪽의 독립 사본 소유자로 보고하지 않습니다: `locations[].ownedBy`는 이미지 자체의 최상위 디렉터리가
   `usr/` 안으로 거는 링크(Fedora·Arch의 `sbin -> usr/bin` 포함)를 통해서만 경로를 바꿔 적습니다. (D162 개정, QA 2026-11-10)
+
+### Security
+- 릴리스 빌드는 Go 툴체인을 1.26.11(`go.mod`의 `toolchain` 줄), GO-2026-6859(`net/http`)가 고쳐진 첫
+  패치에 묶습니다; 릴리스의 빌드 후 `govulncheck` 게이트가 1.26.10 빌드에서 그것을 찾아 릴리스를 멈출 뻔했습니다.
+  더 오래된 패치 릴리스의 `go test`·`make build`도 같은 하한 검사에 실패합니다.
 
 ## [0.17.0] - 2026-11-10
 
@@ -902,7 +955,10 @@
   여덟 개 언어 생태계를 다룹니다. CI에 종료 코드 0, 1, 2를 줍니다. 출력은 표, JSON, SARIF입니다.
   **(보고서 schemaVersion 8; 저장소 스키마 9)** (결정 기록 D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.15.0...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.18.0...main
+[0.18.0]: https://github.com/kun9497/assay/compare/v0.17.0...v0.18.0
+[0.17.0]: https://github.com/kun9497/assay/compare/v0.16.0...v0.17.0
+[0.16.0]: https://github.com/kun9497/assay/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/kun9497/assay/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/kun9497/assay/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/kun9497/assay/compare/v0.12.0...v0.13.0

@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-12
+
 ### Added
 - The scanner differential floors each probed ecosystem's application packages:
   `minApplicationPackages` (`npm`, `Go`) on `coverage[].packages`, judged by the weekly run and
@@ -14,6 +16,18 @@ All notable changes to this project are documented here. The format follows
   candidate that lost every npm and Go package passed both modes. (D167; QA 2026-11-10)
 
 ### Changed
+- **JSON `schemaVersion` 20 → 22. Breaking** for a consumer that switches on
+  `inventoryScope.applicationScope[].state`; additive for every other reader. Schema 21 adds
+  `skipped[].cves` (below). Schema 22 adds the value `partial` to `applicationScope[].state`,
+  beside `read`, `none` and `not-read`: npm only, when a candidate under the global `node_modules`
+  roots was a link that did not resolve (or a linked scope directory), whose path is then in
+  `unread[]` with the reason. A consumer that enumerates the states must accept `partial` and read
+  it as "npm packages were read, and at least one path under the roots was not" -- the image it
+  describes had read `none` before, which was wrong. Ignore-unknown-fields readers need no change.
+  The truthset report is schema 3 (D161 revised); the provenance sidecar, `status.json`, `db status`
+  and the database schema (9) are unchanged, so no `db update` is owed to this release -- one is
+  owed to the Amazon Linux 2 and SUSE data corrections below, which are in the published `v9`
+  artifact since 2026-11-12. (`docs/compatibility.md`)
 - **JSON `schemaVersion` 21** (additive): `skipped[].cves` lists the CVEs a skipped advisory names,
   so a skip whose `advisoryId` is an ALAS or GHSA id can be tied to a CVE. `cmd/truthset` no longer
   counts a label as a true negative when the scan skipped the comparison that would decide it
@@ -22,6 +36,60 @@ All notable changes to this project are documented here. The format follows
   Truthset report schema 3. (D161 revised, QA 2026-11-10)
 
 ### Fixed
+- Amazon Linux 2: the Mock2 extra's rpm 4.14.3 advisory (ALAS2MOCK2-2026-003, CVE-2026-103242)
+  no longer reaches the Core image's rpm 4.11.3 -- `rpm`, `python2-rpm`, `rpm-libs` and
+  `rpm-build-libs` had been four false positives with a wrong fixed version, because the Mock2
+  range started at zero while Amazon lists Core rpm as not affected. The 16 rpm binaries of the
+  Mock2 topic now carry the `4.14.3` lower bound Amazon's x86_64 and aarch64 package histories
+  show, and a Mock2 install below `4.14.3-4.amzn2.0.4` is still affected; Core, `compat-rpm-411`
+  and the other extras keep their ranges. Database build (in the published `v9` since
+  2026-11-12): the pinned amazonlinux2 image's package/CVE pairs 48 → 44, its differential
+  ceilings 88. (D78 revised; QA 2026-11-12)
+- openSUSE Leap 15.6 and SLES 15 SP4–SP7 `libopenssl3`, CVE-2026-34182: the first fix is the
+  June security update (`3.1.4-150600.5.53.1` on SP6/Leap 15.6), not the November recommended
+  update (`.70.1`) that added an optional compatibility setting to the protection the June build
+  already had -- `.52.1` is affected with fix `.53.1`, and `.53.1` and `.70.1` are clean, where
+  the scan had reported the June build as vulnerable with `.70.1` as its fix. Applies only where
+  the security and compatibility notices name the same product, binary and build, and an explicit
+  still-affected state in the current document is kept. Database build (in the published `v9`
+  since 2026-11-12). (D163 revised; QA 2026-11-12)
+- `db build`: the Ubuntu tracker's `git fetch` retries an `SSL connection timeout` like the
+  other transient errors, and a Fedora Bodhi page whose response headers exceed the two-minute
+  request timeout is retried, up to the existing three attempts per page, while the build itself
+  is live -- three nightly publishes in a row had failed on these before anything was pushed, the
+  published database standing. A cancelled or expired build, an authentication or certificate
+  error and a malformed successful response still fail at once. (D75 revised; ops #292)
+- VEX, per the release check of main 19ccdf6: a statement scoped to a point release is held to
+  the release the package actually carries, not to the database key two releases share -- a
+  RHEL 9.6 statement no longer exonerates a 9.4 install (68 findings kept), nor an Alpine 3.20
+  one a 3.19 install; `distro=` with an Ubuntu codename is checked against the release table; a
+  CycloneDX package keeps the OS declared in its own branch of the document, and two point
+  releases declared for one install leave only their shared key to match on; a language package
+  reaches an OS-qualified product through its own explicit purl qualifier or the local OS
+  evidence, and conflicting sibling OS families (Photon 5 beside Debian 12) grant no exemption;
+  Oracle Linux 9 beside 9.8 keeps the more specific release. (D121 refined, D165 revised)
+- CycloneDX, per the release check of main 19ccdf6: the concrete installs are read before the
+  architecture-less listings are weighed, a release is lent across architectures only when the
+  bare record states it (an Alpine document whose release is stated for ppc64le alone: 2 findings,
+  2 not evaluated, exit 2 under `--fail-on-incomplete=any`, in either order), an install keeps
+  its own source version while a contradicting unqualified source is named separately (Debian
+  amd64 libc6: 25 findings with the conflict recorded, exit 1), and the subject is cataloged
+  once. Of 131 archived real-CLI cases exactly the four covering these changed. (D166 revised)
+- Image layers and npm roots, per the release check of main 19ccdf6: a `..` in a link target is
+  folded only after the visible type of every ancestor is known, so a directory an upper layer
+  deleted and a child recreated, or one holding an opaque whiteout, is still traversed (BusyBox's
+  7 findings and the Critical in SARIF, were 0); an OCI layer's plain whiteout removes lower
+  layers only, as the OCI image spec says, while a Docker-format layer keeps its stream-order
+  deletion -- the two are told apart by the layer's media type, an unknown type keeping the
+  same-layer rule; two global npm roots that reach one manifest through a symlink or a hardlink
+  are one install at both logical paths (4 findings, were 8), and asking the same link twice is
+  not a cycle. (D160 revised; `docs/DESIGN.md`, "Layer semantics")
+- `scandiff`: each tool's capture state carries the id of the run that wrote it, and a replay
+  accepts only the captures of the completed run record -- two runs that emitted byte-identical
+  reports no longer replay as one, a state with a run id requires its record, and a run whose
+  first record could not be written marks its tools pending so a later state write exposes the
+  interruption. Captures from before the run id (the weekly archive's shape) still replay.
+  (D167 revised)
 - Image paths and npm roots, per the release check of main 60c512c: a `..` inside a link
   target folds one component at a time, each decided by the newest layer that speaks of it
   (`/data/marker/../route/../packages` with `route` a symlink, or deleted or replaced by a file
@@ -155,12 +223,6 @@ All notable changes to this project are documented here. The format follows
   not one. An OS declared with no release at all (Alpine with no version, `linux`) no longer keys
   its packages to a Debian declared at the top (51 false findings) nor switches off the purl's
   `distro` qualifier beside it. (D165, D166 revised; QA 2026-11-11)
-- `truthset -offline`: the run's database is the first trusted capture's, a locally built database
-  (no digest) included, so a local-database capture and a published-database capture are the same
-  ERROR in either order instead of passing as the published database's when the local one sorted
-  first. `scandiff -offline`: a capture whose recorded target is not the floors file's pinned ref
-  is an ERROR with the reason (a BCI capture had passed under a target re-pinned to Alpine).
-  (D161, D167 revised; QA 2026-11-11)
 - `truthset -offline` sets an unproven capture aside before the run-wide database check: a stale
   capture sorting first no longer fixes the run's database and fails every proven case with a
   digest mismatch (exit 2). (D161 revised; PR #268 review, round 2)
@@ -208,6 +270,12 @@ All notable changes to this project are documented here. The format follows
   longer reports an OS package that owns a file under one as the owner of the other's independent
   copy: `locations[].ownedBy` spells a path only through the image's own top-level
   directory links into `usr/` (including Fedora's and Arch's `sbin -> usr/bin`). (D162 revised, QA 2026-11-10)
+
+### Security
+- Release builds hold the Go toolchain to 1.26.11 (`go.mod`'s `toolchain` line), the first patch
+  with GO-2026-6859 (`net/http`) fixed; the release's post-build `govulncheck` gate found it in a
+  1.26.10 build and would have stopped the release. `go test` and `make build` on an older patch
+  release fail the same floor check.
 
 ## [0.17.0] - 2026-11-10
 
@@ -1046,7 +1114,10 @@ All notable changes to this project are documented here. The format follows
   ecosystems. Gives CI an exit code of 0, 1 or 2. Output as table, JSON or SARIF.
   **(report schemaVersion 8; store schema 9)** (decision log D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.15.0...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.18.0...main
+[0.18.0]: https://github.com/kun9497/assay/compare/v0.17.0...v0.18.0
+[0.17.0]: https://github.com/kun9497/assay/compare/v0.16.0...v0.17.0
+[0.16.0]: https://github.com/kun9497/assay/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/kun9497/assay/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/kun9497/assay/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/kun9497/assay/compare/v0.12.0...v0.13.0
