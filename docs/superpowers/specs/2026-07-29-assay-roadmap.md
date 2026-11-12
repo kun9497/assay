@@ -3233,6 +3233,18 @@ SBOM naming an RPM-family package cannot reach the matcher at all — recorded i
 `2.1.7-1.amzn2.0.1` on `Amazon Linux:2` draws 17 findings across three extras namespaces,
 `ALAS2DOCKER-2026-139` (high, fixed `2.1.9-1.amzn2.0.2`) among them.
 
+**2026-11-12, Mock2 RPM.** Amazon ships RPM 4.11.3 in AL2 Core and RPM 4.14.3 in the
+Mock2 Extra under overlapping binary package names. The pinned Core image reported
+`CVE-2026-103242` on four installed 4.11.3 packages when a Mock2 range started at zero.
+Amazon identifies Core RPM as unaffected and publishes the 4.14.3 fix for Mock2 RPM.
+The DB builder now sets the lower bound of the observed Mock2 RPM 4.14.3 build family
+to `4.14.3`, the first upstream version in Amazon's x86_64 and aarch64 Mock2 RPM
+package histories. Core advisories and the separate Mock2 `compat-rpm-411` source
+keep their own ranges. Existing v9 readers apply this bound after updating their DB.
+[Amazon's product verdict](https://explore.alas.aws.amazon.com/CVE-2026-103242.html)
+· [Core advisory](https://alas.aws.amazon.com/AL2/ALAS2-2026-4076.html)
+· [Mock2 advisory](https://alas.aws.amazon.com/AL2/ALAS2MOCK2-2026-003.html)
+
 ---
 
 ### D79 — Ksplice and FIPS are lineages, not versions

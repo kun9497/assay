@@ -2149,6 +2149,84 @@
       "validFrom": "2026-02-18"
     },
     {
+      "id": "al2-core-rpm-below/CVE-2026-103242",
+      "case": "al2-core-rpm-below",
+      "family": "amzn",
+      "purl": "pkg:rpm/amzn/rpm@4.11.3-48.amzn2.0.5?arch=x86_64&distro=amzn-2&upstream=rpm-4.11.3-48.amzn2.0.5.src.rpm",
+      "name": "rpm",
+      "version": "4.11.3-48.amzn2.0.5",
+      "cve": "CVE-2026-103242",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "AWS lists rpm on Amazon Linux 2 Core as Not Affected and rpm in the Mock2 Extra as fixed by ALAS2MOCK2-2026-003. The pinned amazonlinux:2 image contains the Core rpm 4.11.3 build.",
+        "url": "https://explore.alas.aws.amazon.com/CVE-2026-103242.html",
+        "fetchedAt": "2026-11-12T02:17:30Z"
+      },
+      "validFrom": "2026-11-09"
+    },
+    {
+      "id": "al2-core-rpm-below/CVE-2026-84837",
+      "case": "al2-core-rpm-below",
+      "family": "amzn",
+      "purl": "pkg:rpm/amzn/rpm@4.11.3-48.amzn2.0.5?arch=x86_64&distro=amzn-2&upstream=rpm-4.11.3-48.amzn2.0.5.src.rpm",
+      "name": "rpm",
+      "version": "4.11.3-48.amzn2.0.5",
+      "cve": "CVE-2026-84837",
+      "expect": {
+        "state": "affected",
+        "fixed": "4.11.3-48.amzn2.0.7"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "Amazon Linux 2 Core advisory ALAS2-2026-4076 lists CVE-2026-84837 and rpm-4.11.3-48.amzn2.0.7.x86_64 as the update. The pinned amazonlinux:2 image contains the earlier Core build 4.11.3-48.amzn2.0.5.",
+        "url": "https://alas.aws.amazon.com/AL2/ALAS2-2026-4076.html",
+        "fetchedAt": "2026-11-12T02:17:30Z"
+      },
+      "validFrom": "2026-11-09"
+    },
+    {
+      "id": "al2-mock2-rpm-below/CVE-2026-103242",
+      "case": "al2-mock2-rpm-below",
+      "family": "amzn",
+      "purl": "pkg:rpm/amzn/rpm@4.14.3-4.amzn2.0.3?arch=x86_64&distro=amzn-2&upstream=rpm-4.14.3-4.amzn2.0.3.src.rpm",
+      "name": "rpm",
+      "version": "4.14.3-4.amzn2.0.3",
+      "cve": "CVE-2026-103242",
+      "expect": {
+        "state": "affected",
+        "fixed": "4.14.3-4.amzn2.0.4"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALAS2MOCK2-2026-003 lists CVE-2026-103242 and the fixed Mock2 Extra build rpm-4.14.3-4.amzn2.0.4.x86_64. The preceding advisory ALAS2MOCK2-2026-002 lists rpm-4.14.3-4.amzn2.0.3.x86_64 in that same extra.",
+        "url": "https://alas.aws.amazon.com/AL2/ALAS2MOCK2-2026-003.html",
+        "fetchedAt": "2026-11-12T02:17:30Z"
+      },
+      "validFrom": "2026-11-09"
+    },
+    {
+      "id": "al2-mock2-rpm-fixed/CVE-2026-103242",
+      "case": "al2-mock2-rpm-fixed",
+      "family": "amzn",
+      "purl": "pkg:rpm/amzn/rpm@4.14.3-4.amzn2.0.4?arch=x86_64&distro=amzn-2&upstream=rpm-4.14.3-4.amzn2.0.4.src.rpm",
+      "name": "rpm",
+      "version": "4.14.3-4.amzn2.0.4",
+      "cve": "CVE-2026-103242",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALAS2MOCK2-2026-003 identifies rpm-4.14.3-4.amzn2.0.4.x86_64 as the Mock2 Extra update for CVE-2026-103242. This label checks the fixed build itself.",
+        "url": "https://alas.aws.amazon.com/AL2/ALAS2MOCK2-2026-003.html",
+        "fetchedAt": "2026-11-12T02:17:30Z"
+      },
+      "validFrom": "2026-11-09"
+    },
+    {
       "id": "wolfi-openssl-below/CVE-2025-9230",
       "case": "wolfi-openssl-below",
       "family": "wolfi",

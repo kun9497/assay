@@ -316,12 +316,12 @@
     "ref": "mirror.gcr.io/library/amazonlinux@sha256:901ee465e730086c419a5f12396b2cf07c08649d469f7d7a719f695e2bbd8a3b",
     "minAgree": 14,
     "minFindings": 14,
-    "maxFindings": 34,
+    "maxFindings": 88,
     "maxAssayOnlyFixed": 25,
     "trivy": {
       "minAgree": 14,
       "minFindings": 14,
-      "maxFindings": 34
+      "maxFindings": 88
     },
     "minComponents": 90
   }

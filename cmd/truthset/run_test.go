@@ -685,8 +685,8 @@ func TestCommittedLabels_LoadAndShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(labels) < 140 {
-		t.Errorf("labels = %d, want the 84 seeded from the 2026-11-04 harness plus the 56 of the 2026-11-09 expansion, or more", len(labels))
+	if len(labels) < 144 {
+		t.Errorf("labels = %d, want at least 144 including the Amazon Linux 2 Core and Mock2 cases", len(labels))
 	}
 	type counts struct{ pos, neg, data int }
 	by := map[string]*counts{}
