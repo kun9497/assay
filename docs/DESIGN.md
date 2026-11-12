@@ -1348,8 +1348,10 @@ disagree zero times.
       whiteout hides lower layers only; within ONE layer the LAST entry for a name wins, and a
       plain whiteout applies to LOWER layers only — a whiteout AFTER the file it names leaves
       this layer's file standing and hides the lower layers' copies, one BEFORE it is
-      overwritten by it (`whiteout-before-current` and `whiteout-after-current` both 4
-      findings, held by tests, and both delivery paths held to one verdict); an opaque marker
+      overwritten by it (held by `whiteout_format_test.go` on both delivery paths, the
+      `layer_walk_p4_test.go` apk and status.d rows and the `npm_links_rc1111_test.go` before/after
+      rows; the review's hand-made OCI images `whiteout-before-current` and
+      `whiteout-after-current` both read lodash's 4 findings); an opaque marker
       hides lower children and keeps its enclosing directory; a child entry recreates a
       deleted directory without an explicit directory header; a file or link at a name
       replaces what lower layers hold beneath it, and an explicit directory entry replaces a

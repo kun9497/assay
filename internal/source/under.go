@@ -92,9 +92,9 @@ type Link struct {
 // Within ONE layer the last entry for a name wins, for Files's reason: every
 // extractor leaves the later entry on disk (audit 2026-10-22 P4, re-verified
 // 2026-11-02). So nothing is decided until the layer ends: last holds what
-// the layer most recently wrote at each name -- a file, a link, something that
-// is not a file, or a whiteout that removed what the layer wrote before it --
-// and only then is it merged into what the upper layers already decided.
+// the layer most recently wrote at each name -- a file, a link or something
+// that is not a file; a plain whiteout hides lower layers only and leaves the
+// layer's own entries as they are (OCI image spec) -- and only then is it merged into what the upper layers already decided.
 // Across layers the newest still wins, through found.
 func (img *Image) collect(ctx context.Context, root string, match func(name string) bool) (map[string]FileFromLayer, int, error) {
 	out, links, err := img.collectWith(ctx, []string{root}, func(name string, _ *tar.Header) bool { return match(name) }, nil, nil, false)
