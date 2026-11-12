@@ -301,18 +301,22 @@ func weighBareListings(d *dedupe, target *pkgmeta.Target, stats *Stats, original
 	// listing carried a key, and with it whether its skip was the target's
 	// (exit 2 under --fail-on-incomplete=target) or nobody's (exit 0)
 	// (release review of v0.18.0, 2026-11-12).
+	// Per listing, not per bare identity: two releases' listings of one
+	// name and version share a bare identity, and a map keyed on it had
+	// let the Debian 12 listing's twin name the Debian 11 listing's
+	// reason ("2 and 2" for a conflict of 2 and 7; independent review of
+	// v0.18.0, 2026-11-12).
 	keyOf, twinOf := identityKeys(target.Packages, d.pooled, lent)
 	for i, e := range d.pooled {
 		if lent[i] {
 			continue
 		}
 		p := e.p
-		id := bareIdentity(p)
 		if p.Ecosystem == "" {
-			p.Ecosystem = keyOf[id]
+			p.Ecosystem = keyOf[i]
 		}
 		twin := target.Packages[e.twin]
-		if j, ok := twinOf[id]; ok {
+		if j, ok := twinOf[i]; ok {
 			twin = target.Packages[j]
 		}
 		markSourceContradiction(&p, p, twin)
@@ -335,13 +339,17 @@ func weighBareListings(d *dedupe, target *pkgmeta.Target, stats *Stats, original
 	}
 }
 
-// identityKeys is, per bare identity with an unlent pooled listing, the one
-// release its arch-stating installs are keyed to (archTwins refuses two, so
-// the non-empty keys agree) and the install the listing's reason names: the
-// lowest install by source name and version among those the listing
-// contradicts, so the reason reads the same in every document order.
-func identityKeys(pkgs []pkgmeta.Package, pooled []pooledListing, lent []bool) (keyOf map[string]string, twinOf map[string]int) {
-	keyOf, twinOf = map[string]string{}, map[string]int{}
+// identityKeys is, per unlent pooled listing (indexed as pooled is), the one
+// release the arch-stating installs it could be are keyed to (archTwins
+// refuses two, so the non-empty keys agree) and the install its reason names:
+// the lowest by source name and version among those it contradicts, so the
+// reason reads the same in every document order. An install of another
+// release is not a candidate (the archTwins rule): with Debian 11 and Debian
+// 12 both listing one name and version, a map keyed on the bare identity had
+// let the Debian 12 install name the Debian 11 listing's reason -- "2 and 2"
+// for a conflict of 2 and 7 (independent review of v0.18.0, 2026-11-12).
+func identityKeys(pkgs []pkgmeta.Package, pooled []pooledListing, lent []bool) (keyOf map[int]string, twinOf map[int]int) {
+	keyOf, twinOf = map[int]string{}, map[int]int{}
 	for i, e := range pooled {
 		if lent[i] {
 			continue
@@ -351,14 +359,17 @@ func identityKeys(pkgs []pkgmeta.Package, pooled []pooledListing, lent []bool) (
 			if q.Arch == "" || bareIdentity(q) != id {
 				continue
 			}
-			if q.Ecosystem != "" && keyOf[id] == "" {
-				keyOf[id] = q.Ecosystem
+			if q.Ecosystem != "" && e.p.Ecosystem != "" && q.Ecosystem != e.p.Ecosystem {
+				continue
+			}
+			if q.Ecosystem != "" && keyOf[i] == "" {
+				keyOf[i] = q.Ecosystem
 			}
 			if !contradicts(e.p, q) {
 				continue
 			}
-			if k, ok := twinOf[id]; !ok || sourceLess(q, pkgs[k]) {
-				twinOf[id] = j
+			if k, ok := twinOf[i]; !ok || sourceLess(q, pkgs[k]) {
+				twinOf[i] = j
 			}
 		}
 	}
