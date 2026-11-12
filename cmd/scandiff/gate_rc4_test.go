@@ -254,6 +254,10 @@ func TestRun_RC4_AStateFileThatContradictsTheRecordRefusesTheReplay(t *testing.T
 		t.Fatal(err)
 	}
 	prev := writeRunRecordFile
+	firstAssayState, err := os.ReadFile(statePath(dir, "t", "assay"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	writeRunRecordFile = func(path string, data []byte) error { return os.ErrPermission }
 	code, stderr := live(stub{out: []byte(`{"error":"scan failed"}`), code: 2})
 	writeRunRecordFile = prev
@@ -269,6 +273,11 @@ func TestRun_RC4_AStateFileThatContradictsTheRecordRefusesTheReplay(t *testing.T
 		t.Errorf("replay with the marker: exit=%d stderr=%q; want 2", code, stderr)
 	}
 	if err := os.Remove(filepath.Join(dir, "t.grype.failed.json")); err != nil {
+		t.Fatal(err)
+	}
+	// Restore the first assay state too, so replay reaches the contradictory
+	// grype state instead of rejecting the newer assay run ID first.
+	if err := os.WriteFile(statePath(dir, "t", "assay"), firstAssayState, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if code, stderr := offline(); code != exitError || !strings.Contains(stderr, "state file beside it says failed") {

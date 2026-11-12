@@ -40,7 +40,8 @@ Usage:
       (and <dir>/<name>.trivy.json for a target with a trivy block) instead
       of running any scanner. Same judging path as live mode -- this is how
       floors are seeded and how tests get integration-shaped coverage
-      without a network call.
+      without a network call. Copy the entire capture directory, including
+      its run records, tool state files and any failure markers, for replay.
 
   -regressions-only (either mode) is the nightly publish gate's mode (D114):
       it skips the ceilings, maxFindings, trivy.maxFindings,
@@ -174,7 +175,16 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 		var rec *runRecord
 		if live {
 			rec = newRunRecord()
-			writeRunRecord(stderr, *captureDir, t.Name, rec)
+			if !writeRunRecord(stderr, *captureDir, t.Name, rec) {
+				// Invalidate the old generation before launching any scanner,
+				// even if the first scan never returns.
+				pending := captureState{RunID: rec.ID, Result: "pending"}
+				writeState(stderr, *captureDir, t.Name, "assay", pending)
+				writeState(stderr, *captureDir, t.Name, "grype", pending)
+				if t.Trivy != nil {
+					writeState(stderr, *captureDir, t.Name, "trivy", pending)
+				}
+			}
 		} else {
 			r, err := readRunRecord(*offlineDir, t.Name)
 			if err != nil {
@@ -202,8 +212,8 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 			var assayFatal, grypeFatal string
 			assayRaw, grypeRaw, assayFatal, grypeFatal = scanLive(execScan, *assayBin, *grypeBin, t, stderr)
 			fatal = joinFatal(assayFatal, grypeFatal)
-			rec.Tools["assay"] = writeCapture(stderr, *captureDir, t.Name, "assay", assayRaw, assayFatal == "")
-			rec.Tools["grype"] = writeCapture(stderr, *captureDir, t.Name, "grype", grypeRaw, grypeFatal == "")
+			rec.writeCapture(stderr, *captureDir, t.Name, "assay", assayRaw, assayFatal == "")
+			rec.writeCapture(stderr, *captureDir, t.Name, "grype", grypeRaw, grypeFatal == "")
 		} else {
 			assayRaw, grypeRaw, fatal = readOffline(*offlineDir, t, rec)
 		}
@@ -534,13 +544,20 @@ func readCapture(dir, name, kind string, rec *runRecord) ([]byte, string) {
 		// result is compared as well as the sha for the message's sake: a
 		// failed or unsaved state carries no sha, so the sha alone would
 		// refuse it too (a mutation dropping the result check survives).
-		if fst, ferr := readState(dir, name, kind); ferr != nil {
+		fst, ferr := readState(dir, name, kind)
+		if ferr != nil {
 			return nil, fmt.Sprintf("read offline %s capture state: %v", kind, ferr)
 		} else if fst != nil && (fst.Result != captureOK || fst.SHA256 != st.SHA256) {
 			return nil, fmt.Sprintf("offline %s capture %s is not this run's: run %s's record says ok but the state file beside it says %s (%s); the record is an earlier run's the last run could not replace", kind, filepath.Base(good), rec.ID, fst.Result, fst.Reason)
 		}
 		if _, ferr := os.Stat(failed); ferr == nil {
 			return nil, fmt.Sprintf("offline %s capture %s sits beside a failed-run marker run %s could not remove; remove %s after reading it", kind, filepath.Base(good), rec.ID, filepath.Base(failed))
+		}
+		if st.RunID != "" && (st.RunID != rec.ID || fst == nil) {
+			return nil, fmt.Sprintf("offline %s capture %s has no matching state for run %s", kind, filepath.Base(good), rec.ID)
+		}
+		if fst != nil && fst.RunID != st.RunID {
+			return nil, fmt.Sprintf("offline %s capture %s has a state from a different run than record %s", kind, filepath.Base(good), rec.ID)
 		}
 		raw, err := os.ReadFile(good)
 		if err != nil {
@@ -554,6 +571,9 @@ func readCapture(dir, name, kind string, rec *runRecord) ([]byte, string) {
 	st, serr := readState(dir, name, kind)
 	if serr != nil {
 		return nil, fmt.Sprintf("read offline %s capture state: %v", kind, serr)
+	}
+	if st != nil && st.RunID != "" {
+		return nil, fmt.Sprintf("offline %s capture %s requires the missing run record %s for run %s", kind, filepath.Base(good), filepath.Base(runRecordPath(dir, name)), st.RunID)
 	}
 	if st != nil && st.Result != captureOK {
 		// The last run's own word, whether or not a capture lies under
@@ -594,7 +614,8 @@ var writeCaptureFile = func(path string, data []byte) error { return os.WriteFil
 // state to the bytes it describes, so a stale good capture a run could not
 // replace is told from the one the state is about.
 type captureState struct {
-	Result string `json:"result"` // captureOK, captureFailed or captureUnsaved
+	RunID  string `json:"runId,omitempty"`
+	Result string `json:"result"` // pending, captureOK, captureFailed or captureUnsaved
 	SHA256 string `json:"sha256,omitempty"`
 	Reason string `json:"reason,omitempty"`
 }
@@ -621,11 +642,8 @@ func statePath(dir, name, kind string) string {
 // open on Windows left the earlier run's `ok` state beside its own failed-run
 // marker, and the replay took the earlier success for the run's result. The
 // per-tool state files remain for a reader; the record is the replay's
-// authority when it exists (readCapture), and a directory with no record --
-// a capture from before it, the weekly archive's shape -- is replayed by its
-// state files as before. A record that could not be written is reported on
-// stderr, and the directory is then not replayable as that run: an
-// incomplete record refuses, and no record falls back to the state files.
+// authority when it exists (readCapture). A state with a run ID requires its
+// matching record. Older archives without run IDs still replay by their states.
 type runRecord struct {
 	ID       string                  `json:"id"`
 	Started  string                  `json:"started"`
@@ -669,11 +687,13 @@ func readRunRecord(dir, name string) (*runRecord, error) {
 // write fail the way a held-open file on Windows does.
 var writeRunRecordFile = func(path string, data []byte) error { return os.WriteFile(path, data, 0o644) }
 
-func writeRunRecord(stderr io.Writer, dir, name string, rec *runRecord) {
+func writeRunRecord(stderr io.Writer, dir, name string, rec *runRecord) bool {
 	raw, _ := json.Marshal(rec)
 	if err := writeRunRecordFile(runRecordPath(dir, name), raw); err != nil {
 		fmt.Fprintf(stderr, "warning: write run record %s: %v (the directory is not replayable as this run)\n", runRecordPath(dir, name), err)
+		return false
 	}
+	return true
 }
 
 func readState(dir, name, kind string) (*captureState, error) {
@@ -788,7 +808,7 @@ func trivyPhase(execScan execFunc, trivyBin, captureDir, offlineDir string, live
 	var fatal string
 	if live {
 		trivyRaw, fatal = runTrivy(execScan, trivyBin, t)
-		rec.Tools["trivy"] = writeCapture(stderr, captureDir, t.Name, "trivy", trivyRaw, fatal == "")
+		rec.writeCapture(stderr, captureDir, t.Name, "trivy", trivyRaw, fatal == "")
 	} else {
 		trivyRaw, fatal = readOfflineTrivy(offlineDir, t, rec)
 	}
@@ -937,7 +957,7 @@ func printInfo(stderr io.Writer, info []breach) {
 // run's; a failed run leaves "failed" whether or not the good name could be
 // removed; a success removes the failed-run marker and records the bytes'
 // SHA-256.
-func writeCapture(stderr io.Writer, dir, name, kind string, data []byte, ok bool) captureState {
+func (rec *runRecord) writeCapture(stderr io.Writer, dir, name, kind string, data []byte, ok bool) {
 	path := filepath.Join(dir, name+"."+kind+".json")
 	failed := filepath.Join(dir, name+"."+kind+".failed.json")
 	var st captureState
@@ -961,10 +981,9 @@ func writeCapture(stderr io.Writer, dir, name, kind string, data []byte, ok bool
 		}
 		st = captureState{Result: captureOK, SHA256: sha256Hex(data)}
 	}
-	// The state file is written whatever the outcome; the run record
-	// (runRecord) carries the same state and is written by the caller.
+	st.RunID = rec.ID
 	writeState(stderr, dir, name, kind, st)
-	return st
+	rec.Tools[kind] = st
 }
 
 // renderTable writes the one thing that goes to stdout: every target's row,

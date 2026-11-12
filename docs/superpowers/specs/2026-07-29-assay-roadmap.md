@@ -8950,15 +8950,15 @@ tool's outcome and SHA-256 after its last, on every path out of the target. A re
 record first: an incomplete run, a tool the run did not record, a failed or unsaved outcome, a
 failed-run marker the run could not remove, or bytes other than the recorded ones each refuse
 with the reason, and a record that does not parse is an error. The state files remain for a
-reader. A directory without a record -- a capture from before it, the weekly archive's shape --
-replays by its state files as the revision above has it. A record that cannot be written is
-reported on stderr; the directory is then not replayable as that run (an incomplete record
-refuses, no record falls back to the state files), which is the safe direction. The state file
-beside a capture must agree with the record (PR #289 review): a failed run that could write
-neither record but could write its state leaves the earlier run's complete record saying ok over a
-state saying failed, and the record alone would have replayed the earlier bytes once a reader
-removed the marker. One case stays open: a run that could write none of the record, the state and
-the marker leaves the earlier run's files intact, and only such a run would go unnoticed.
+reader. A capture from before the record (the weekly archive's shape) still replays using its
+original states and hashes. Writing a record can fail, for example when a Windows reader holds
+the file open. This produces a warning. Each new tool state carries the run ID and requires
+the matching completed record, even when two runs produce identical bytes. If the starting
+record cannot be written, scandiff marks the participating tools pending before scanning. A
+replay during that run can then detect the interruption as soon as a state write succeeds.
+Archive the entire directory so the record, states, reports and failure markers travel together.
+A directory in which the interrupted run could leave no evidence can still look like the
+earlier run. Likewise, reports copied without any metadata can only be read as legacy reports.
 
 **Gives up.** A partial loss above the floor (ubi8n18 down to 118 npm packages) is not caught by
 this floor; the finding floors and D117's ceiling see some of it. A floor is re-cut by hand when a
