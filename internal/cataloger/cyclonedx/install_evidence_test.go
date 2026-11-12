@@ -132,3 +132,23 @@ func TestTypedCopyMatchesItsArchitectureBeforeABareTopRecord(t *testing.T) {
 		}
 	}
 }
+
+func TestTwoBareReleaseClaimsLeaveUnkeyedInstallUnevaluated(t *testing.T) {
+	const busybox = "pkg:apk/alpine/busybox@1.36.1-r20?"
+	for _, releases := range [][2]string{{"alpine-3.19", "alpine-3.20"}, {"alpine-3.20", "alpine-3.19"}} {
+		bare := []string{busybox + "distro=" + releases[0], busybox + "distro=" + releases[1]}
+		typed := []string{bare[0] + "&arch=x86_64", bare[1] + "&arch=aarch64", busybox + "arch=ppc64le"}
+		for _, groups := range [][2][]string{{bare, typed}, {typed, bare}} {
+			pkgs := parseListingGroups(t, groups[0], groups[1])
+			var unkeyed []string
+			for _, p := range pkgs {
+				if p.Ecosystem == "" {
+					unkeyed = append(unkeyed, p.Arch)
+				}
+			}
+			if len(pkgs) != 3 || len(unkeyed) != 1 || unkeyed[0] != "ppc64le" {
+				t.Errorf("releases %v: got %+v, want only ppc64le unkeyed", releases, pkgs)
+			}
+		}
+	}
+}

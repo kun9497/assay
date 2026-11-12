@@ -272,6 +272,11 @@ func weighBareListings(d *dedupe, target *pkgmeta.Target, stats *Stats, original
 		}
 		for _, i := range pool[bareIdentity(p)] {
 			s := d.pooled[i].p
+			// A bare record keyed to one of several plausible releases
+			// cannot decide the release of an unkeyed installation.
+			if p.Ecosystem == "" && s.Ecosystem != "" && ambiguous(s, d.keyed) {
+				continue
+			}
 			if (s.Ecosystem == "" || p.Ecosystem == "" || s.Ecosystem == p.Ecosystem) && !contradicts(p, s) {
 				// The install's own qualifiers win the purl; what the bare
 				// listing alone states is carried (mergePURL).
