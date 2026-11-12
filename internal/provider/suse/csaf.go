@@ -54,7 +54,10 @@ type document struct {
 			// Last-Modified (D12).
 			CurrentDate string `json:"current_release_date"`
 		} `json:"tracking"`
-		Title string `json:"title"`
+		Title      string `json:"title"`
+		References []struct {
+			URL string `json:"url"`
+		} `json:"references"`
 	} `json:"document"`
 	ProductTree struct {
 		Branches []branch `json:"branches"`
@@ -1108,6 +1111,9 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 	}
 	if len(order) == 0 {
 		return advisory.Advisory{}, false
+	}
+	if cve == "CVE-2026-34182" {
+		applyCMSFixBoundaries(d, folded, packages, fixed, unfixed, splitBuild)
 	}
 
 	adv := advisory.Advisory{

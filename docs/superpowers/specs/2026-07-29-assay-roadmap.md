@@ -9052,6 +9052,20 @@ recorded about a package whose fix they could see they had. Red Hat's CSAF produ
 shape between an erratum and a reopened flaw. The user chose, on 2026-11-10, to change the words
 and not the verdict: the distro's "still affected" is its statement, and assay reports it.
 
+**2026-11-12, CVE-2026-34182.** The June security advisory shipped
+`libopenssl3-3.1.4-150600.5.53.1` for Leap 15.6. The November recommended
+update shipped `3.1.4-150600.5.70.1` and added an optional compatibility
+setting to the protection already present in the June build. In VEX revision 32
+the outstanding affected status had cleared. Using the later recommended
+EVR as the security boundary made the default June build appear vulnerable.
+For the verified SU/RU package lines the DB records the earlier security fix
+when the current document supports that reconciliation. An explicit unresolved
+product status still follows the rule above. The package-version verdict
+assumes the vendor's default configuration.
+[June security advisory](https://www.suse.com/support/update/announcement/2026/suse-su-20262393-1/)
+· [November compatibility update](https://www.suse.com/support/update/announcement/2026/suse-ru-20265150-1/)
+· [SUSE VEX record](https://ftp.suse.com/pub/projects/security/csaf-vex/2026/cve-2026-34182.json)
+
 **Verified.** At the caller through `Match` (Leap 15.6 `libopenssl3`: below the released build
 the fixed range still names the fix with state fixed; at it the reason names the released build
 and the state stays unknown) and at `AffectsVersion` (at and above the build; an open range

@@ -1255,11 +1255,11 @@
         "fixed": "3.1.4-150600.5.53.1"
       },
       "class": "matcher",
-      "note": "The key carries both a fixed range (3.1.4-150600.5.53.1, the released build) and a no-fix range (the same products' bare known_affected, see the at-released-build case); a build below the released one is judged on the fixed range and names it.",
+      "note": "Leap 15.6 shipped this security fix in June. SUSE's November compatibility update refers back to that fix.",
       "source": {
-        "statement": "cve-2026-34182.json: SLES 15 SP6-LTSS recommended libopenssl3-3.1.4-150600.5.53.1",
-        "url": "https://www.suse.com/security/cve/CVE-2026-34182.html",
-        "fetchedAt": "2026-11-04T00:09:06Z"
+        "statement": "SUSE-SU-2026:2393-1 lists CVE-2026-34182 as fixed and supplies libopenssl3-3.1.4-150600.5.53.1 for openSUSE Leap 15.6 (x86_64).",
+        "url": "https://www.suse.com/support/update/announcement/2026/suse-su-20262393-1/",
+        "fetchedAt": "2026-11-12T04:05:48Z"
       },
       "validFrom": "2026-10-28"
     },
@@ -1272,16 +1272,36 @@
       "version": "3.1.4-150600.5.53.1",
       "cve": "CVE-2026-34182",
       "expect": {
-        "state": "affected"
+        "state": "clean"
       },
       "class": "matcher",
-      "note": "SUSE released libopenssl3 3.1.4-150600.5.53.1 for SLES 15 SP6-LTSS and SAP 15 SP6 and still lists both products' bare package ids under known_affected (revision 29, 2026-10-21: 'more updates released, more updates marked as affected'; the CVE page shows 'In progress' beside the released build, bugzilla 1266344 IN_PROGRESS). The verdict at the released build is therefore affected with no complete fix recorded, mirrored onto Leap 15.6 by D108. The 2026-11-04 seed read the vendor_fix alone and labelled this build clean; the first truthset run (2026-11-09) found that label did not hold.",
+      "note": "Default package configuration. In CSAF revision 30 the same product also had an open affected status. By revision 32 that status had cleared and the later RU explained the relationship to the June security fix.",
       "source": {
-        "statement": "cve-2026-34182.json revision 30 (2026-11-03): 'SUSE Linux Enterprise Server 15 SP6-LTSS:libopenssl3' in known_affected beside 'SUSE Linux Enterprise Server 15 SP6-LTSS:libopenssl3-3.1.4-150600.5.53.1' in recommended/vendor_fix; https://www.suse.com/security/cve/CVE-2026-34182.html status 'In progress' for SLES 15 SP6-LTSS",
-        "url": "https://ftp.suse.com/pub/projects/security/csaf-vex/2026/cve-2026-34182.json",
-        "fetchedAt": "2026-11-09T07:05:00Z"
+        "statement": "SUSE-SU-2026:2393-1 shipped the fix in this Leap build. SUSE-RU-2026:5150-1 describes an opt-in compatibility change to the protection already added by the security fix.",
+        "url": "https://www.suse.com/support/update/announcement/2026/suse-ru-20265150-1/",
+        "fetchedAt": "2026-11-12T04:05:48Z"
       },
-      "validFrom": "2026-11-03"
+      "validFrom": "2026-11-11"
+    },
+    {
+      "id": "leap-libopenssl3-at-compat-update/CVE-2026-34182",
+      "case": "leap-libopenssl3-at-compat-update",
+      "family": "leap",
+      "purl": "pkg:rpm/opensuse/libopenssl3@3.1.4-150600.5.70.1?arch=x86_64&distro=opensuse-leap-15.6&upstream=openssl-3-3.1.4-150600.5.70.1.src.rpm",
+      "name": "libopenssl3",
+      "version": "3.1.4-150600.5.70.1",
+      "cve": "CVE-2026-34182",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "note": "Default package configuration at the later compatibility update.",
+      "source": {
+        "statement": "SUSE-RU-2026:5150-1 ships libopenssl3-3.1.4-150600.5.70.1 for Leap 15.6. Its relaxation of the existing check requires explicit configuration.",
+        "url": "https://www.suse.com/support/update/announcement/2026/suse-ru-20265150-1/",
+        "fetchedAt": "2026-11-12T04:05:48Z"
+      },
+      "validFrom": "2026-11-11"
     },
     {
       "id": "leap-liblzma5-below/CVE-2026-34743",
