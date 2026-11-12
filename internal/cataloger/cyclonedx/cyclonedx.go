@@ -905,6 +905,7 @@ func catalogOne(c component, ctx osContext, target *pkgmeta.Target, stats *Stats
 		moduleStream string
 		arch         string
 	)
+	scope := ctx.scope()
 	switch p.Type {
 	case "apk", "rpm", "deb", "alpm":
 		// D83/D84/D97. The shared core (internal/pkgmeta/distropurl.go): ecosystem
@@ -915,6 +916,11 @@ func catalogOne(c component, ctx osContext, target *pkgmeta.Target, stats *Stats
 		// function, which is the point: CycloneDX and SPDX cannot judge one
 		// installed package two different ways.
 		res := pkgmeta.ResolveDistroPURL(p, c.Version, ctx.ecosystem, ctx.distro != nil)
+		if ctx.distro == nil {
+			// D165: no single native key in this branch. An explicit
+			// distro on this OS package identifies its own installation.
+			scope = pkgmeta.DistroScope{}
+		}
 		if res.Skip {
 			// gpg-pubkey (a keyring entry, not an installed package) or an
 			// arch=src SRPM (D84). Routed into the existing "unsupported
@@ -989,7 +995,7 @@ func catalogOne(c component, ctx osContext, target *pkgmeta.Target, stats *Stats
 		Type:          p.Type,
 		Ecosystem:     eco,
 		PURL:          c.PURL,
-		DistroContext: ctx.scope().ForInstallation(p.Qualifiers["distro"]),
+		DistroContext: scope.ForInstallation(p.Qualifiers["distro"]),
 		Locations:     []pkgmeta.Location{loc},
 		Source:        source,
 		Upstream:      upstream,
@@ -1080,10 +1086,14 @@ func (c osContext) scope() pkgmeta.DistroScope {
 	if c.mixedRelease {
 		return pkgmeta.DistroScope{Mixed: true}
 	}
-	if c.distro == nil || c.distro.VersionID == "" {
+	return releaseScope(c.distro)
+}
+
+func releaseScope(d *pkgmeta.Distro) pkgmeta.DistroScope {
+	if d == nil || d.VersionID == "" {
 		return pkgmeta.DistroScope{}
 	}
-	return pkgmeta.DistroScope{Qualifier: c.distro.ID + "-" + c.distro.VersionID}
+	return pkgmeta.DistroScope{Qualifier: d.ID + "-" + d.VersionID}
 }
 
 // contextFor is the context of a list of sibling components: the one
@@ -1129,7 +1139,7 @@ func contextFor(siblings []component, inherited osContext) osContext {
 					// beside Debian 11 keyed busybox to Debian, 51
 					// findings; `debian` then `alpine` read it as the
 					// qualifier said, 2).
-					return osContext{}
+					return osContext{mixedRelease: true}
 				}
 				family = d
 			}
@@ -1140,14 +1150,21 @@ func contextFor(siblings []component, inherited osContext) osContext {
 			continue
 		}
 		if !sameDistro(found, d) {
-			return osContext{}
+			// Native packages still fall back to their own PURL/key. A
+			// language package's VEX must retain the conflicting OS evidence.
+			return osContext{mixedRelease: true}
 		}
-		if found.ID != d.ID || found.VersionID != d.VersionID {
-			mixedRelease = true
+		if !mixedRelease && (found.ID != d.ID || found.VersionID != d.VersionID) {
+			next := releaseScope(d)
+			merged := releaseScope(found).Merge(next)
+			mixedRelease = merged.Mixed
+			if merged == next {
+				found = d
+			}
 		}
 	}
 	if found != nil && family != nil && !strings.EqualFold(found.ID, family.ID) {
-		return osContext{}
+		return osContext{mixedRelease: true}
 	}
 	if found == nil {
 		if family != nil {

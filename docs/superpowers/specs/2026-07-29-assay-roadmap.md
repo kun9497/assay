@@ -8840,7 +8840,9 @@ package's local OS declaration. RHEL 9.4 and 9.6 share a database, so a 9.6 stat
 exempt the 9.4 installation. Conflicting point releases leave only their shared advisory key
 available for matching. Ubuntu codenames must agree with the evaluated Ubuntu release. A
 language package matches an OS-qualified product through its explicit PURL qualifier and
-the local OS evidence when available.
+the local OS evidence when available. Conflicting sibling OS families prevent this exemption.
+Compatible descriptions of one installation, such as Oracle Linux 9 and 9.8, retain the
+more specific release when both map to the same advisory key.
 
 **Gives up.** Two listings of one package inside `components`, or both inside the subject tree,
 are not merged at all (as before) and are each judged on what they state. A contradiction makes the

@@ -23,9 +23,9 @@ func (s DistroScope) Merge(other DistroScope) DistroScope {
 	switch {
 	case s.Mixed || other.Mixed:
 		return DistroScope{Mixed: true}
-	case s.Qualifier == "":
+	case s.Qualifier == "" || releaseIncludes(s.Qualifier, other.Qualifier):
 		return other
-	case other.Qualifier == "" || s == other:
+	case other.Qualifier == "" || releaseIncludes(other.Qualifier, s.Qualifier):
 		return s
 	default:
 		return DistroScope{Mixed: true}
@@ -81,5 +81,13 @@ func releaseIsFullyKeyed(d Distro, key string) bool {
 }
 
 func releaseIncludes(broad, specific string) bool {
-	return broad == specific || strings.HasPrefix(specific, broad+".")
+	if broad == specific {
+		return true
+	}
+	if !strings.HasPrefix(specific, broad+".") {
+		return false
+	}
+	broadKey, knownBroad := EcosystemForDistroQualifier(broad)
+	specificKey, knownSpecific := EcosystemForDistroQualifier(specific)
+	return knownBroad && knownSpecific && broadKey == specificKey
 }

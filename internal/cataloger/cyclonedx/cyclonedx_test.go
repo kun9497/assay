@@ -57,6 +57,52 @@ func TestConflictingInstalledPointReleases(t *testing.T) {
 	}
 }
 
+func TestOracleMajorAndPointReleaseRetainTheDeclaredPoint(t *testing.T) {
+	component := func(version string) string {
+		return `{"type":"library","purl":"pkg:rpm/ol/attr@1?arch=x86_64&distro=ol-` + version + `"}`
+	}
+	operating := func(version string) string {
+		return `{"type":"operating-system","name":"ol","version":"` + version + `"}`
+	}
+	for _, versions := range [][2]string{{"9", "9.8"}, {"9.8", "9"}} {
+		a, b := versions[0], versions[1]
+		for _, doc := range []string{
+			`{"bomFormat":"CycloneDX","specVersion":"1.6","components":[` + component(a) +
+				`],"metadata":{"component":{"type":"container","components":[` + component(b) + `]}}}`,
+			`{"bomFormat":"CycloneDX","specVersion":"1.6","components":[` + operating(a) + "," + operating(b) + "," + component("9") + `]}`,
+		} {
+			target, _, err := Parse(strings.NewReader(doc))
+			if err != nil || len(target.Packages) != 1 {
+				t.Fatalf("parse %s: target=%+v err=%v", doc, target, err)
+			}
+			if p := target.Packages[0]; p.Ecosystem != "Oracle Linux:9" || p.DistroContext != (pkgmeta.DistroScope{Qualifier: "ol-9.8"}) {
+				t.Errorf("compatible releases %v: %+v", versions, p)
+			}
+		}
+	}
+}
+
+func TestDifferentOSFamiliesPreserveMixedScopeAndNativePURLFallback(t *testing.T) {
+	for _, versions := range [][2]string{{"5.0", "12"}, {"", ""}, {"5.0", ""}, {"", "12"}} {
+		photon := `{"type":"operating-system","name":"photon","version":"` + versions[0] + `"}`
+		debian := `{"type":"operating-system","name":"debian","version":"` + versions[1] + `"}`
+		for _, osPair := range []string{photon + "," + debian, debian + "," + photon} {
+			doc := `{"bomFormat":"CycloneDX","specVersion":"1.6","components":[` + osPair +
+				`,{"type":"library","purl":"pkg:npm/lodash@4.17.20?distro=photon-4.0"},` +
+				`{"type":"library","purl":"pkg:rpm/photon/curl@1?distro=photon-4.0"}]}`
+			target, _, err := Parse(strings.NewReader(doc))
+			if err != nil || len(target.Packages) != 2 {
+				t.Fatalf("parse %s: target=%+v err=%v", doc, target, err)
+			}
+			lang, native := target.Packages[0], target.Packages[1]
+			if !lang.DistroContext.Mixed || lang.Ecosystem != "npm" ||
+				native.Ecosystem != "Photon OS:4" || native.DistroContext.Qualifier != "photon-4.0" {
+				t.Errorf("mixed OS release scope and native fallback: %+v", target.Packages)
+			}
+		}
+	}
+}
+
 func TestParse(t *testing.T) {
 	f, err := os.Open("testdata/small.cdx.json")
 	if err != nil {
