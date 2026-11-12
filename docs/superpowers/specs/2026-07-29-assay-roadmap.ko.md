@@ -7951,8 +7951,11 @@ BusyBox 7건(Critical 1건 포함)이 사라지고 SARIF에서도 빠졌다. 접
 레이어는 순서와 무관하게 자기 항목을 보존, Docker 레이어는 스트림 순서 삭제); v0.18.0 릴리스 리뷰가 그것을 거두었다:
 go-containerregistry의 tarball 판독기는 이미지의 매니페스트가 무엇을 말하든 모든 `docker-archive:` 레이어를 Docker
 레이어로 보고하므로, OCI 종류의 이미지 하나가 같은 바이트인데 `oci-dir:`로는 종료 0, `docker-archive:`로는 종료 2로
-읽혔다. 규칙은 모든 레이어에 untar의 것이고(`docs/DESIGN.md` "레이어 의미"), 스캔 수준 테스트가 두 전달 경로를 한
-판정에 묶는다.
+읽혔다. 릴리스 리뷰는 그것을 한 규칙, untar의 것으로 만들었다; 같은 날 이어진 독립 리뷰가 untar의 삭제는 naive
+경로뿐임을 보였다 — 운영 경로(moby overlay2, containerd overlay applier)는 그런 레이어를 `EEXIST`로 거부하고
+syft·grype·trivy·umoci·go-containerregistry 추출은 모두 파일을 보존하므로, 리뷰의 OCI 레이아웃에서 assay만 패키지를
+놓쳤다. 규칙은 모든 레이어에 OCI image-spec의 것이다(`docs/DESIGN.md` "레이어 의미"): 일반 whiteout은 하위 레이어만
+가리고, 스캔 수준 테스트가 두 전달 경로를 한 판정에 묶는다.
 
 **결정.** 이미지 스캔은 레이어 위를 한 번 더 지나가되, 열 개의 고정 위치를 한꺼번에 본다: 세 전역
 `node_modules` 루트(`usr/lib/node_modules`, `usr/local/lib/node_modules`,

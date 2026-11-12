@@ -92,9 +92,9 @@ type Link struct {
 // Within ONE layer the last entry for a name wins, for Files's reason: every
 // extractor leaves the later entry on disk (audit 2026-10-22 P4, re-verified
 // 2026-11-02). So nothing is decided until the layer ends: last holds what
-// the layer most recently wrote at each name -- a file, a link, something that
-// is not a file, or a whiteout that removed what the layer wrote before it --
-// and only then is it merged into what the upper layers already decided.
+// the layer most recently wrote at each name -- a file, a link or something
+// that is not a file; a plain whiteout hides lower layers only and leaves the
+// layer's own entries as they are (OCI image spec) -- and only then is it merged into what the upper layers already decided.
 // Across layers the newest still wins, through found.
 func (img *Image) collect(ctx context.Context, root string, match func(name string) bool) (map[string]FileFromLayer, int, error) {
 	out, links, err := img.collectWith(ctx, []string{root}, func(name string, _ *tar.Header) bool { return match(name) }, nil, nil, false)
@@ -185,15 +185,10 @@ func (img *Image) collectWith(ctx context.Context, roots []string, match func(na
 			case strings.HasPrefix(base, whiteoutPrefix):
 				w := path.Join(d, strings.TrimPrefix(base, whiteoutPrefix))
 				layerDeleted[w] = true
-				// A plain whiteout AFTER this layer's own entry removes it, as
-				// the untar does when it reaches the marker (see resolvePass);
-				// one before is overwritten by the entry that follows it. The
+				// A plain whiteout applies to lower layers only (OCI image
+				// spec; see resolvePass): this layer's own entries in `last`
+				// stand whether the marker comes before or after them. The
 				// same rule for every layer, whatever its media type (fromV1).
-				for n := range last {
-					if n == w || strings.HasPrefix(n, w+"/") {
-						last[n] = underHit{kind: hitGone}
-					}
-				}
 				return nil
 			}
 			matched := match(name, h)

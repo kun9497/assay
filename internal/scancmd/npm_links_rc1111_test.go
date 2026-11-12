@@ -113,11 +113,14 @@ func TestRun_RC1111_NpmLinksAndOwners(t *testing.T) {
 			probeLayerEntry{name: "usr/lib/node_modules/minimatch", link: "/opt/not-here"},
 			probeLayerEntry{name: "usr/lib/node_modules/z-alias", link: "/opt/not-here"},
 		)}, want{nil, nil, nil, report.ScopePartial, []string{lib, alias}, 2}},
-		// --- blocker 4, held as it was: a whiteout after the file in the same layer removes it (docker's and containerd's untar)
-		{"same-layer whiteout after the file removes it", [][]probeLayerEntry{
+		// --- blocker 4 (QA 2026-11-11): a whiteout hides lower layers only (OCI image spec, held
+		// again 2026-11-12 after the independent review), so the layer's own file before the marker
+		// stands -- the QA's original expectation; rounds 1-4 had held it removed on the untars'
+		// naive paths, which the runtimes' production paths do not even apply.
+		{"same-layer whiteout after the file keeps it", [][]probeLayerEntry{
 			base(probeLayerEntry{name: lib, body: v3}),
 			{{name: lib, body: v4}, {name: "usr/lib/node_modules/minimatch/.wh.package.json"}},
-		}, want{nil, nil, nil, report.ScopeNone, nil, 0}},
+		}, want{[]string{"3.0.4"}, []string{lib}, []string{""}, report.ScopeRead, nil, 1}},
 		{"same-layer whiteout before the file is overwritten by it", [][]probeLayerEntry{
 			base(probeLayerEntry{name: lib, body: v3}),
 			{{name: "usr/lib/node_modules/minimatch/.wh.package.json"}, {name: lib, body: v4}},

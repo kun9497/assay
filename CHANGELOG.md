@@ -7,6 +7,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- Image layers: a plain whiteout applies to lower layers only, as the OCI image spec's
+  changeset rules say, on every delivery path alike -- a file written and then whited out in
+  the same layer now stands (lodash under `usr/lib/node_modules`, or a patched apk database:
+  4 findings, or the patched inventory, where v0.18.0 read none). The 2026-11-12 independent
+  review showed the untar rule v0.18.0 had held to be the runtimes' naive paths only: their
+  production paths (moby's overlay2 driver, containerd's overlay applier) refuse such a layer
+  outright, and syft, grype, trivy, umoci and go-containerregistry's extract all keep the
+  file, so assay alone had missed the package. No known builder writes that shape; the rule
+  decides hand-made images only. No schema change. (D160 revised; `docs/DESIGN.md`, "Layer
+  semantics")
+
 ### Fixed
 - CycloneDX: the reason an unjudged bare listing carries names an install of its own release
   -- with Debian 11 and Debian 12 both listing one name and version, v0.18.0 had let the

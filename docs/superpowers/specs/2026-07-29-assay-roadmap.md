@@ -8455,8 +8455,13 @@ media type (an OCI layer keeping its own entry in either order, a Docker layer d
 stream order); the release review of v0.18.0 withdrew that: go-containerregistry's tarball
 reader reports every `docker-archive:` layer as a Docker layer whatever the image's manifest
 said, so one OCI-typed image read exit 0 through `oci-dir:` and exit 2 through
-`docker-archive:` of the identical bytes. The rule is the untars' for every layer (`docs/DESIGN.md`,
-"Layer semantics"), and a scan-level test holds both delivery paths to one verdict.
+`docker-archive:` of the identical bytes. The release review made it one rule, the untars'; the
+independent review that followed the same day showed the untars' deletion to be their naive
+paths only — the production paths (moby overlay2, containerd's overlay applier) refuse such a
+layer with `EEXIST`, and syft, grype, trivy, umoci and go-containerregistry's extract all keep the
+file, so assay alone had missed a package on the review's OCI layout. The rule is the OCI image
+spec's for every layer (`docs/DESIGN.md`, "Layer semantics"): a plain whiteout hides lower layers
+only, and a scan-level test holds both delivery paths to one verdict.
 
 **Decision.** An image scan runs one more pass over its layers, over ten fixed locations
 together: the installed `package.json` files under the three global `node_modules` roots

@@ -1330,28 +1330,36 @@ disagree zero times.
       layer wins, a whiteout hides lower layers but not its own, an opaque marker replaces the
       directory. A symlink under it is counted rather than followed and joins the incomplete
       count
-- [x] **Layer semantics** (stated 2026-11-11, release check of main 5197df4; held again
-      2026-11-12, release review of v0.18.0): a layer is read as the untars apply it — moby's
-      `go-archive` and containerd's `pkg/archive`, re-read from source on 2026-11-11 — and
-      where the OCI image-spec's prose and those implementations differ, the implementations
-      decide, because the scan describes the container that results, not the archive. One
-      rule for every layer, whatever media type its descriptor carries: PR #295 had given an
-      OCI-typed layer the spec's reading (its own entry survives a whiteout after it) and a
-      Docker-typed one the untars', and go-containerregistry's tarball reader reports every
-      `docker-archive:` layer as a Docker layer whatever the manifest said, so one image read
-      exit 0 through `oci-dir:` and exit 2 through `docker-archive:` of the identical bytes.
-      Concretely: across layers the newest entry wins and a whiteout hides lower layers only
-      (spec and untars agree); within ONE layer the LAST entry for a name wins, a whiteout
-      AFTER the file it names removes it (the untars `RemoveAll` the path on reaching the
-      marker; containerd's overlay converter fails the apply instead) while one BEFORE it is
-      overwritten (`whiteout-before-current` 4 findings, `whiteout-after-current` 0, both held
-      by tests, and both delivery paths held to one verdict); an opaque marker hides lower
-      children and keeps its enclosing directory; a child entry recreates a deleted directory
-      without an explicit directory header; a file or link at a name replaces what lower layers
-      hold beneath it, and an explicit directory entry replaces a lower symlink at the name
-      while an implied one does not; a hardlink keeps the inode of the layer that made it
-      (D130). Verified by reading the two implementations, not by running the two images under
-      each runtime. A `..` inside a link
+- [x] **Layer semantics** (stated 2026-11-11, release check of main 5197df4; revised
+      2026-11-12 after the independent review of v0.18.0): a layer is read as the OCI
+      image-spec's changeset rules say (`layer.md`, "Whiteouts"), one rule for every layer
+      whatever media type its descriptor carries. The 2026-11-11 statement had read a layer as
+      the untars apply it, on moby's `go-archive` and containerd's `pkg/archive`; the review
+      found that those are the runtimes' *naive* paths, that their production paths (moby's
+      overlay2 driver, containerd's overlay applier) turn a whiteout into a `mknod` and refuse
+      the layer outright when the same tar already wrote the file (`EEXIST`), and that every
+      scanner and extractor — syft/stereoscope, grype, trivy's fanal, umoci's directory
+      backend, go-containerregistry's `mutate.Extract` — keeps the file, so the untar reading
+      made assay the one tool to miss a package the spec says is there. PR #295 had split the
+      rule by media type; go-containerregistry's tarball reader reports every `docker-archive:`
+      layer as a Docker layer whatever the manifest said, so one image read two verdicts by
+      delivery path, and the v0.18.0 release review made it one rule — the wrong one — before
+      this revision picked the spec's. Concretely: across layers the newest entry wins and a
+      whiteout hides lower layers only; within ONE layer the LAST entry for a name wins, and a
+      plain whiteout applies to LOWER layers only — a whiteout AFTER the file it names leaves
+      this layer's file standing and hides the lower layers' copies, one BEFORE it is
+      overwritten by it (held by `whiteout_format_test.go` on both delivery paths, the
+      `layer_walk_p4_test.go` apk and status.d rows and the `npm_links_rc1111_test.go` before/after
+      rows; the review's hand-made OCI images `whiteout-before-current` and
+      `whiteout-after-current` both read lodash's 4 findings); an opaque marker
+      hides lower children and keeps its enclosing directory; a child entry recreates a
+      deleted directory without an explicit directory header; a file or link at a name
+      replaces what lower layers hold beneath it, and an explicit directory entry replaces a
+      lower symlink at the name while an implied one does not; a hardlink keeps the inode of
+      the layer that made it (D130). No real builder is known to write a file and its whiteout
+      into one layer (BuildKit, docker build, Buildah, kaniko, Jib, apko and ko read for the
+      review), so the rule decides hand-made images only. Verified by reading the
+      implementations, not by running the images under each runtime. A `..` inside a link
       target applies after the component before it is looked at: a symlink there is followed
       first, a directory the layers show (explicit or implied) is climbed, and a component no
       layer shows leads nowhere, as the kernel's ENOENT does (release check of main b732cac);

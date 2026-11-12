@@ -7,6 +7,15 @@
 
 ## [Unreleased]
 
+### Changed
+- 이미지 레이어: 일반 whiteout은 OCI image-spec의 changeset 규칙대로 하위 레이어에만 적용되며, 어느 전달 경로에서든
+  같습니다 — 같은 레이어에서 쓴 뒤 whiteout된 파일이 이제 남습니다(`usr/lib/node_modules`의 lodash나 패치된 apk
+  데이터베이스: 4건 또는 패치된 인벤토리, v0.18.0은 아무것도 읽지 않았음). 2026-11-12 독립 리뷰가 v0.18.0이 지킨
+  untar 규칙은 런타임의 naive 경로뿐임을 보였습니다: 운영 경로(moby overlay2 드라이버, containerd overlay applier)는
+  그런 레이어를 아예 거부하고, syft·grype·trivy·umoci·go-containerregistry 추출은 모두 파일을 보존하므로 assay만
+  패키지를 놓쳤습니다. 그 모양을 쓰는 빌더는 알려진 것이 없어 규칙은 손으로 만든 이미지에만 작용합니다. 스키마 변경
+  없음. (D160 개정; `docs/DESIGN.md` "레이어 의미")
+
 ### Fixed
 - CycloneDX: 판정하지 않은 맨 나열이 지니는 사유가 자기 릴리스의 설치를 듭니다 — Debian 11과 Debian 12가 같은
   이름·버전을 나열할 때 v0.18.0은 Debian 12 설치의 소스 버전을 Debian 11 나열의 사유에 넣었습니다(2와 7의 모순을
