@@ -1029,7 +1029,7 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       레이어 패스 하나 추가로; `applicationPackages` `partial` + `applicationScope[]`(스키마 18);
       scandiff 에서 `npm`/`go-module` 인벤토리화. 2026-11-09 타깃 26개 전부 측정: 그 위치 밖에는 없음.
 - [x] 커밋된 정답 집합에 대한 정밀도/재현율 (D161) — `cmd/truthset`이 라벨된 패키지 하나하나를 SBOM
-      경로로 당겨 온 아티팩트에 대고 스캔해 `testdata/groundtruth/labels.json`(matcher 138 + data 6,
+      경로로 당겨 온 아티팩트에 대고 스캔해 `testdata/groundtruth/labels.json`(matcher 139 + data 6,
       같은 날 확장 뒤 아홉 패밀리)에 대고 판정; 패밀리별 Wilson 95% 구간, 종료 0/1/2; 주간 차분 비교 다음에 실행. 첫 실행
       2026-11-09: 라벨 하나를 SUSE 자체 진술(CVE-2026-34182, 출시 빌드 옆의 "In progress")로 고친 뒤
       78/78

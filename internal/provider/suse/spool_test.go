@@ -301,6 +301,11 @@ func TestFetch_ResumeWithoutLastModifiedIsNotFatal(t *testing.T) {
 
 // The spool file must not survive Fetch, whether it succeeded or failed.
 func TestFetch_SpoolIsRemoved(t *testing.T) {
+	// Other test processes can fetch SUSE archives at the same time.
+	spoolDir := t.TempDir()
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(key, spoolDir)
+	}
 	count := func() int {
 		matches, err := filepath.Glob(filepath.Join(os.TempDir(), "assay-suse-*.tar.bz2"))
 		if err != nil {
