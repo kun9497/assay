@@ -3005,6 +3005,17 @@ D74 — 이 피드는 이름으로 계보를 구분하므로 Ubuntu의 접미사
 finding 17건을 그려내고, 그중에는 `ALAS2DOCKER-2026-139`(high, fixed `2.1.9-1.amzn2.0.2`)도
 있습니다.
 
+**2026-11-12, Mock2의 RPM.** Amazon은 AL2 Core에서 RPM 4.11.3을, Mock2 Extra에서 RPM
+4.14.3을 배포하며 두 저장소가 일부 바이너리 패키지 이름을 공유합니다. Mock2 범위의 하한이
+0일 때 고정 Core 이미지에서 설치 버전이 4.11.3인 네 패키지에 `CVE-2026-103242`가
+보고됐습니다. Amazon은 Core RPM을 영향 없음으로 판정했고 Mock2 RPM용 4.14.3 수정판을
+발행했습니다. DB 빌더는 x86_64와 aarch64의 Mock2 RPM 패키지 이력에서 확인한 첫 upstream
+버전 `4.14.3`을 해당 빌드 계열의 범위 하한으로 기록합니다. Core 공지와 Mock2의 별도 소스
+패키지 `compat-rpm-411`은 각자의 범위를 사용합니다. 기존 v9 클라이언트도 DB를 갱신하면
+이 하한을 적용합니다. [Amazon 제품별 판정](https://explore.alas.aws.amazon.com/CVE-2026-103242.html)
+· [Core 공지](https://alas.aws.amazon.com/AL2/ALAS2-2026-4076.html)
+· [Mock2 공지](https://alas.aws.amazon.com/AL2/ALAS2MOCK2-2026-003.html)
+
 ---
 
 ### D79 — Ksplice와 FIPS는 버전이 아니라 계보다

@@ -457,7 +457,7 @@ func (p *Provider) fetchRepo(ctx context.Context, r Repo, emit func(advisory.Adv
 			return kept, asOf, err
 		}
 		st.Updates++
-		adv, when, ok := convertUpdate(u, r.Ecosystem, st)
+		adv, when, ok := convertUpdate(u, r, st)
 		if when.After(asOf) {
 			asOf = when
 		}

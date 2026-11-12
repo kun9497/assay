@@ -167,7 +167,7 @@ func rpmEVR(epoch, version, release string) string {
 // convertUpdate turns one <update> into an advisory.Advisory. when is the
 // update's own latestDate, returned even when ok is false so the repo's
 // freshness reading does not depend on which updates were kept.
-func convertUpdate(u xmlUpdate, ecosystem string, st *stats) (advisory.Advisory, time.Time, bool) {
+func convertUpdate(u xmlUpdate, repo Repo, st *stats) (advisory.Advisory, time.Time, bool) {
 	when := latestDate(u)
 
 	// Every core update measured is type=security, but the check stays: a
@@ -193,7 +193,7 @@ func convertUpdate(u xmlUpdate, ecosystem string, st *stats) (advisory.Advisory,
 		related = append(related, ref.ID)
 	}
 
-	affected := buildAffected(u.PkgList, ecosystem, st)
+	affected := buildAffected(u.PkgList, repo, st)
 	if len(affected) == 0 {
 		st.SkippedNoPackages++
 		return advisory.Advisory{}, when, false
@@ -245,7 +245,7 @@ func convertUpdate(u xmlUpdate, ecosystem string, st *stats) (advisory.Advisory,
 // negative, not a size optimization. The corpus is affordable either way
 // (medium cost estimate, ~4,330 advisories total) — see the research this
 // slice shipped from.
-func buildAffected(pkgs []xmlPackage, ecosystem string, st *stats) []advisory.Affected {
+func buildAffected(pkgs []xmlPackage, repo Repo, st *stats) []advisory.Affected {
 	order := make([]string, 0, len(pkgs))
 	byName := map[string]xmlPackage{}
 	for _, pk := range pkgs {
@@ -263,16 +263,37 @@ func buildAffected(pkgs []xmlPackage, ecosystem string, st *stats) []advisory.Af
 	for _, name := range order {
 		pk := byName[name]
 		affected = append(affected, advisory.Affected{
-			Ecosystem: ecosystem,
+			Ecosystem: repo.Ecosystem,
 			Name:      name,
 			Ranges: []advisory.Range{{
 				Type: advisory.RangeEcosystem,
 				Events: []advisory.Event{
-					{Introduced: "0"},
+					{Introduced: introducedVersion(repo, pk)},
 					{Fixed: rpmEVR(pk.Epoch, pk.Version, pk.Release)},
 				},
 			}},
 		})
 	}
 	return affected
+}
+
+// AL2 Core ships rpm 4.11.3. The Mock2 topic ships a separate rpm 4.14.3
+// source RPM, plus an unrelated compat-rpm-411 source. An unbounded lower
+// endpoint on the former gives Core installations the Mock2 CVEs and fix.
+// These binaries are listed in ALAS2MOCK2-2026-002 and -003. The x86_64
+// and aarch64 Mock2 primary metadata trace the 4.14.3 builds to epoch zero.
+func introducedVersion(repo Repo, pk xmlPackage) string {
+	if repo.Ecosystem != "Amazon Linux:2" || !repo.Extras || repo.Topic != "mock2" ||
+		pk.Version != "4.14.3" || (pk.Epoch != "" && pk.Epoch != "0") {
+		return "0"
+	}
+	switch pk.Name {
+	case "rpm", "rpm-libs", "rpm-build-libs", "rpm-devel", "rpm-build", "rpm-sign",
+		"python2-rpm", "python3-rpm", "rpm-plugin-selinux", "rpm-plugin-syslog",
+		"rpm-plugin-systemd-inhibit", "rpm-plugin-ima", "rpm-plugin-prioreset",
+		"rpm-debuginfo", "rpm-apidocs", "rpm-cron":
+		return "4.14.3"
+	default:
+		return "0"
+	}
 }
