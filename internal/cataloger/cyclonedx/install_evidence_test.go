@@ -96,6 +96,8 @@ func TestUnversionedInstallUsesAllOriginalBareSourceRecords(t *testing.T) {
 	for _, tc := range []struct{ top, subject []string }{
 		{[]string{bare + "13"}, []string{bare + "14", typed}},
 		{[]string{bare + "13"}, []string{typed, bare + "14"}},
+		{[]string{bare + "13", bare + "14"}, []string{typed}},
+		{[]string{bare + "14", bare + "13"}, []string{typed}},
 		{[]string{typed}, []string{bare + "13", bare + "14", bare + "15"}},
 		{[]string{typed}, []string{bare + "15", bare + "14", bare + "13"}},
 	} {

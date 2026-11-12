@@ -203,7 +203,7 @@ func catalogSubject(subject component, ctx osContext, target *pkgmeta.Target, st
 	for _, p := range deferred {
 		mergeDeduped(p, base, d, target, stats)
 	}
-	weighBareListings(d, target, stats)
+	weighBareListings(d, target, stats, all.Packages[:base])
 }
 
 // weighBareListings lends every bare top-level listing of an identity, as
@@ -222,9 +222,28 @@ func catalogSubject(subject component, ctx osContext, target *pkgmeta.Target, st
 //
 // A stable source order gives the same contradiction when more than two
 // candidates state different versions.
-func weighBareListings(d *dedupe, target *pkgmeta.Target, stats *Stats) {
+func weighBareListings(d *dedupe, target *pkgmeta.Target, stats *Stats, originalTop []pkgmeta.Package) {
 	if len(d.pooled) == 0 {
 		return
+	}
+	// A subject installation can correspond to more than one original
+	// bare top-level listing. Replacing one slot with the install must not
+	// leave its other plausible source versions outside the candidate set.
+	promoted := map[string]int{}
+	for _, e := range d.pooled {
+		if originalTop[e.twin].Arch == "" {
+			promoted[bareIdentity(e.p)] = e.twin
+		}
+	}
+	moved := map[int]bool{}
+	for i, p := range target.Packages[:len(originalTop)] {
+		if p.Arch != "" || ambiguous(p, d.keyed) {
+			continue
+		}
+		if twin, ok := promoted[bareIdentity(p)]; ok {
+			d.pooled = append(d.pooled, pooledListing{p: p, twin: twin})
+			moved[i] = true
+		}
 	}
 	pool := map[string][]int{}
 	for i, e := range d.pooled {
@@ -283,6 +302,19 @@ func weighBareListings(d *dedupe, target *pkgmeta.Target, stats *Stats) {
 		target.Packages = append(target.Packages, p)
 		stats.Components++
 		stats.Cataloged++
+	}
+	// Unlent entries have just been appended with their contradiction.
+	// Remove the old slots of the entries moved into the pool.
+	if len(moved) > 0 {
+		kept := target.Packages[:0]
+		for i, p := range target.Packages {
+			if !moved[i] {
+				kept = append(kept, p)
+			}
+		}
+		target.Packages = kept
+		stats.Components -= len(moved)
+		stats.Cataloged -= len(moved)
 	}
 }
 
