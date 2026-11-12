@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-11-12
+
 ### Changed
 - Image layers: a plain whiteout applies to lower layers only, as the OCI image spec's
   changeset rules say, on every delivery path alike -- a file written and then whited out in
@@ -1160,7 +1162,8 @@ All notable changes to this project are documented here. The format follows
   ecosystems. Gives CI an exit code of 0, 1 or 2. Output as table, JSON or SARIF.
   **(report schemaVersion 8; store schema 9)** (decision log D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.18.0...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.18.1...main
+[0.18.1]: https://github.com/kun9497/assay/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/kun9497/assay/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/kun9497/assay/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/kun9497/assay/compare/v0.15.0...v0.16.0
