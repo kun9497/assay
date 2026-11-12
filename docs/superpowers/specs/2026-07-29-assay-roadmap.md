@@ -8434,6 +8434,12 @@ in its own layer, the latest of the root link's chain and the file's: the second
 had carried none, and the OS package that owned the path before the root was re-pointed above
 was reported as its owner.*
 
+**2026-11-12 revision.** An OCI layer keeps a replacement file in either whiteout order.
+Docker layer descriptors retain stream-order deletion. A child can recreate a deleted
+directory, and an opaque directory retains its own name. Resolving `..` checks every
+ancestor before climbing. Roots reaching the same physical manifest denote one install,
+including when the manifest is a symlink or a hardlink.
+
 **Decision.** An image scan runs one more pass over its layers, over ten fixed locations
 together: the installed `package.json` files under the three global `node_modules` roots
 (`usr/lib/node_modules`, `usr/local/lib/node_modules`, `opt/app-root/src/node_modules`)

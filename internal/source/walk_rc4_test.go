@@ -2,9 +2,76 @@ package source
 
 import (
 	"archive/tar"
+	"context"
+	"io"
 	"strings"
 	"testing"
+
+	"github.com/google/go-containerregistry/pkg/v1/types"
 )
+
+func TestFiles_WhiteoutUsesLayerDescriptor(t *testing.T) {
+	const file = "data/db"
+	stream, err := layerOfOrdered(t, "fixture", entry{name: file, body: "DB"}, entry{name: "data/.wh.db"}).Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	raw, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		mt   types.MediaType
+		kept bool
+	}{{types.OCIUncompressedLayer, true}, {types.DockerUncompressedLayer, false}} {
+		t.Run(string(tc.mt), func(t *testing.T) {
+			v, _, _ := d123Image(t, raw, raw, tc.mt)
+			img, err := fromV1(v)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, exact := filesOne(t, img, file)
+			files, _, err := img.FilesUnder(context.Background(), "data")
+			_, listed := files[file]
+			if err != nil || exact != tc.kept || listed != tc.kept {
+				t.Fatalf("exact=%v listed=%v error=%v; want present=%v", exact, listed, err, tc.kept)
+			}
+		})
+	}
+}
+
+func TestFiles_ClimbsUseTheCurrentLayerTree(t *testing.T) {
+	const db = "lib/apk/db/installed"
+	for _, tc := range []struct {
+		name  string
+		upper []entry
+	}{
+		{"whiteout then child", []entry{{name: "data/.wh.marker"}, {name: "data/marker/new", body: "new"}}},
+		{"opaque directory without its own directory header", []entry{{name: "data/marker/.wh..wh..opq"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			img := imageOf(layerOfOrdered(t, "base", node("data/first", tar.TypeDir), node("data/marker", tar.TypeDir), entry{name: "data/packages", body: "DB"}, sym(db, "/data/first/../marker/../packages")), layerOfOrdered(t, "upper", tc.upper...))
+			if f, ok := filesOne(t, img, db); !ok || string(f.Data) != "DB" {
+				t.Fatalf("database = %q, present=%v", f.Data, ok)
+			}
+		})
+	}
+	t.Run("old subdirectory behind a replaced ancestor", func(t *testing.T) {
+		img := imageOf(layerOfOrdered(t, "base", node("data/first", tar.TypeDir), node("data/route/sub", tar.TypeDir), node("srv/active/deep", tar.TypeDir), sym("srv/root/sub", "/srv/active/deep"), entry{name: "srv/active/packages", body: "DB"}, entry{name: "srv/root/packages", body: "WRONG"}), layerOfOrdered(t, "upper", sym("data/route", "/srv/root"), sym(db, "/data/first/../route/sub/../packages")))
+		if f, ok := filesOne(t, img, db); !ok || string(f.Data) != "DB" {
+			t.Fatalf("database = %q, present=%v", f.Data, ok)
+		}
+	})
+}
+
+func TestFiles_RepeatedRequestForALinkIsNotACycle(t *testing.T) {
+	img := imageOf(layerOfOrdered(t, "base", entry{name: "target", body: "DB"}, hard("alias", "target")))
+	got, err := img.Files(context.Background(), []string{"alias", "alias"})
+	if err != nil || string(got["alias"].Data) != "DB" || len(img.Unresolved()) != 0 {
+		t.Fatalf("files=%v unresolved=%v error=%v", got, img.Unresolved(), err)
+	}
+}
 
 // Release check of main 60c512c: a ".." inside a link target folds one
 // component at a time. `/data/marker/../route/../packages` enters marker (a

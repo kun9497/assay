@@ -16,6 +16,9 @@ import "io"
 // introduced this package" answer quietly wrong.
 type Layer struct {
 	DiffID string
+	// Docker archives use stream-order deletion for plain whiteouts. OCI
+	// layer changesets only hide entries from lower layers.
+	dockerWhiteoutOrder bool
 	// Open returns the layer's uncompressed tar stream. It is a function rather
 	// than a reader because layers are read at most once each, in reverse
 	// order, and a registry layer should not be fetched until it is reached.

@@ -12,6 +12,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/layout"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
+	"github.com/google/go-containerregistry/pkg/v1/types"
 )
 
 // TargetKind says what a scan argument names. It exists because `assay scan X`
@@ -635,8 +636,14 @@ func fromV1(img v1.Image) (*Image, error) {
 		// than l.DiffID(), which for a local layer may be computed from the
 		// very bytes it is meant to vouch for (D123).
 		d := ids[i]
+		mt, err := l.MediaType()
+		if err != nil {
+			return nil, fmt.Errorf("read layer %d media type: %w", i, err)
+		}
+		docker := mt == types.DockerLayer || mt == types.DockerForeignLayer || mt == types.DockerUncompressedLayer
 		out.Layers = append(out.Layers, Layer{
-			DiffID: d.String(),
+			DiffID:              d.String(),
+			dockerWhiteoutOrder: docker,
 			// Every image path opens its layers here, so every path is held
 			// to its diff id (D123) -- including oci-dir and docker-archive,
 			// whose blobs the library never verifies.
