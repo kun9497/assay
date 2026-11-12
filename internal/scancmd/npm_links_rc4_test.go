@@ -152,6 +152,10 @@ func TestRun_RC4_EveryAliasOfAnInstallIsLocatedInALayer(t *testing.T) {
 		// the upper layer.
 		{"two roots to one external store", append(alpineLayer(), probeLayerEntry{name: "opt/store/minimatch/package.json", body: v4}, probeLayerEntry{name: "usr/local/lib/node_modules", link: "/opt/store"}, probeLayerEntry{name: lib, body: v4}),
 			[]probeLayerEntry{{name: "usr/lib/node_modules", link: "/opt/store"}}, lib},
+		{"one physical manifest symlink", append(alpineLayer(), probeLayerEntry{name: "opt/content", body: v4}, probeLayerEntry{name: "opt/store/minimatch/package.json", link: "/opt/content"}, probeLayerEntry{name: "usr/local/lib/node_modules", link: "/opt/store"}),
+			[]probeLayerEntry{{name: "usr/lib/node_modules", link: "/opt/store"}}, lib},
+		{"one physical manifest hardlink", append(alpineLayer(), probeLayerEntry{name: "opt/content", body: v4}, probeLayerEntry{name: "opt/store/minimatch/package.json", link: "opt/content", hard: true}, probeLayerEntry{name: "usr/local/lib/node_modules", link: "/opt/store"}),
+			[]probeLayerEntry{{name: "usr/lib/node_modules", link: "/opt/store"}}, lib},
 		// Lower: an install under one root; upper: the other root
 		// re-pointed at a directory holding that root, so the install's
 		// own name is the package and the second name its alias.
@@ -167,8 +171,8 @@ func TestRun_RC4_EveryAliasOfAnInstallIsLocatedInALayer(t *testing.T) {
 			if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
 				t.Fatalf("decode: %v\n%s", err, errOut.String())
 			}
-			if code != 1 || len(doc.Findings) != 1 {
-				t.Fatalf("exit=%d findings=%d; want 1 and one finding (one install, two names)\n%s", code, len(doc.Findings), errOut.String())
+			if code != 1 || len(doc.Findings) != 1 || len(doc.Unread) != 0 {
+				t.Fatalf("exit=%d findings=%d unread=%v; want one readable install at both names\n%s", code, len(doc.Findings), doc.Unread, errOut.String())
 			}
 			layers := map[string]string{}
 			for _, l := range doc.Findings[0].Package.Locations {

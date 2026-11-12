@@ -381,8 +381,8 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 	// A relative target is made absolute from its physical directory, and
 	// a hardlink's logical twin points at the physical name, so the image's
 	// resolver still follows it by inode (D130).
-	rehomed := map[string]bool{} // synthesized logical links
-	aliased := map[string]bool{} // roots handled here
+	rehomed := map[string]string{} // physical path of each synthesized logical link
+	aliased := map[string]bool{}   // roots handled here
 	// homes is, per physical file, the logical name it was re-homed under
 	// first: two roots leading to one physical install are one package
 	// with both names (release check of main b732cac: 4 findings counted
@@ -401,7 +401,7 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 		// reads the same every run.
 		for _, n := range sortedNames(links) {
 			nl := links[n]
-			if !strings.HasPrefix(n, final+"/") || isNpmRoot(n) || isRootAncestor(n) || rehomed[n] {
+			if !strings.HasPrefix(n, final+"/") || isNpmRoot(n) || isRootAncestor(n) || rehomed[n] != "" {
 				continue
 			}
 			logical := r + strings.TrimPrefix(n, final)
@@ -428,7 +428,7 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 			// (release check 2026-11-11: the owner had been kept).
 			nl.DiffID = newestLayer(append(linkLayers(append(followed, r), links), nl.DiffID), layerIndex)
 			links[logical] = nl
-			rehomed[logical] = true
+			rehomed[logical] = n
 		}
 		if any {
 			aliased[r] = true
@@ -454,7 +454,7 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 	var finals []string
 	for _, n := range names {
 		l := links[n]
-		if underAny(n, linkedRoots) && !rehomed[n] {
+		if underAny(n, linkedRoots) && rehomed[n] == "" {
 			continue
 		}
 		switch {
@@ -603,6 +603,26 @@ func resolveNpmLinks(ctx context.Context, img *source.Image, links map[string]so
 	if len(cands) == 0 {
 		return unresolved, aliases, nil
 	}
+	// Root aliases of the same physical manifest link are one install. Use
+	// the manifest's own physical name, not its target: distinct installs may
+	// legitimately link to one shared file. Keep each logical path's layers.
+	unique := cands[:0]
+	byPhysical := map[string]int{}
+	for _, c := range cands {
+		physical := rehomed[c.logical]
+		if physical == "" {
+			physical = c.logical
+		}
+		if idx, ok := byPhysical[physical]; ok {
+			rep := &unique[idx]
+			rep.aliases = append(rep.aliases, alias{logical: c.logical, link: c.link, changed: c.changed})
+			rep.aliases = append(rep.aliases, c.aliases...)
+			continue
+		}
+		byPhysical[physical] = len(unique)
+		unique = append(unique, c)
+	}
+	cands = unique
 	want := make([]string, 0, len(cands))
 	for _, c := range cands {
 		want = append(want, c.read)

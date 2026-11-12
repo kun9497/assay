@@ -184,12 +184,19 @@ func TestCatalogFromImage_P4_InLayerOrderDecidesTheInventory(t *testing.T) {
 		noDB    bool
 	}{
 		{
-			// A whiteout after the layer's own database removes it, and the
-			// base layer's copy beneath stays hidden.
+			// The current changeset keeps its own database over a whiteout.
 			name: "apk database whited out later in its own layer",
 			layers: [][]p4Entry{
 				{{name: osReleasePath, body: osReleaseAlpine319}, {name: apkDBPath, body: p4ApkVulnerable}},
 				{{name: apkDBPath, body: p4ApkPatched}, {name: "lib/apk/db/.wh.installed"}},
+			},
+			want: map[string]string{"busybox-binsh": "1.36.1-r15"},
+		},
+		{
+			name: "whiteout above the database without a replacement",
+			layers: [][]p4Entry{
+				{{name: osReleasePath, body: osReleaseAlpine319}, {name: apkDBPath, body: p4ApkVulnerable}},
+				{{name: "lib/apk/db/.wh.installed"}},
 			},
 			noDB: true,
 		},
@@ -221,7 +228,7 @@ func TestCatalogFromImage_P4_InLayerOrderDecidesTheInventory(t *testing.T) {
 				{{name: osReleasePath, body: osReleaseDebian12}, {name: libc6, body: stanza("libc6", "2.36-9")}},
 				{{name: libc6, body: stanza("libc6", "2.36-9+deb12u7")}, {name: dpkgStatusDir + "/.wh.libc6"}, zlib},
 			},
-			want: map[string]string{"zlib1g": "1:1.2.13.dfsg-1"},
+			want: map[string]string{"zlib1g": "1:1.2.13.dfsg-1", "libc6": "2.36-9+deb12u7"},
 		},
 		{
 			// The image ends with a link there, which is a stanza not read:

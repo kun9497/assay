@@ -109,7 +109,7 @@ func (img *Image) noteUnresolved(p, reason string) {
 // name that counts: a tar may carry a path twice, and docker's and
 // containerd's untar and GNU tar all leave the later entry on disk, so the
 // first is what the container does not have (audit 2026-10-22 P4, re-verified
-// 2026-11-02) -- a later whiteout or a change of type included. Whiteouts
+// 2026-11-02), including a change of type. Whiteouts
 // recorded on the way down apply only to the layers still to be read — the
 // spec is explicit that a whiteout affects lower layers only, so one in the
 // base layer must not hide a file a later layer installed. A hardlink is the
@@ -144,7 +144,12 @@ func (img *Image) noteUnresolved(p, reason string) {
 func (img *Image) Files(ctx context.Context, want []string) (map[string]FileFromLayer, error) {
 	newest := len(img.Layers) - 1
 	qs := make([]query, 0, len(want))
+	requested := make(map[string]bool, len(want))
 	for _, w := range want {
+		if requested[w] {
+			continue
+		}
+		requested[w] = true
 		// Answered under the name the caller gave, whatever its spelling;
 		// a ".." in it is applied lazily (lazyDotDot), never folded here.
 		n := normaliseLazy(w)
@@ -347,22 +352,11 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 		}
 		// Whiteouts found in THIS layer must not hide this layer's entries
 		// through the cross-layer sets, so they are collected separately and
-		// merged after the pass. Their effect inside the layer is ordered, and
-		// taken entry by entry below.
+		// merged after the pass.
 		var layerDeleted, layerOpaque []whiteout
-		// layerPre is what THIS layer says about each component a ".."
-		// follows that no upper layer decided, in entry order: an entry for
-		// the name itself or a whiteout of it is explicit and replaces what
-		// came before, as the untar leaves the last; an entry beneath the
-		// name implies a directory only where nothing explicit said
-		// otherwise; an opaque marker in its parent hides the lower layers'
-		// component, not this layer's own entries. A whiteout in an upper
-		// layer decides the component in that layer, before any lower one
-		// is read, so the cross-layer marker sets are not consulted for it
-		// (a check against them was built and removed as an equivalent). A
-		// component a newer layer decided by an entry is skipped at the
-		// entry for speed alone: the merge after the layer is what keeps
-		// the newest layer's word (a mutation dropping the skip survives).
+		// For each prefix, record current entries separately from markers that
+		// cut off lower layers. A changeset can both delete an old directory
+		// and recreate it with just a child entry, in either tar order.
 		layerPre := make([]map[string]preSay, len(qs))
 		for k, q := range qs {
 			if preOf[k] == nil || done[k] || i > q.top {
@@ -401,27 +395,28 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 						if st := preState[k][pre]; st == preDir || st == preNotDir {
 							continue
 						}
+						say := layerPre[k][pre]
 						switch {
 						case removed != "" && (pre == removed || strings.HasPrefix(pre, removed+"/")):
-							layerPre[k][pre] = preSay{v: preNotDir, kind: sayWhiteout}
-						case base == whiteoutOpaque:
-							if od := path.Clean(dir); od == "." || strings.HasPrefix(pre, od+"/") {
-								if _, said := layerPre[k][pre]; !said {
-									layerPre[k][pre] = preSay{v: preNotDir, kind: sayOpaque}
-								}
+							say.hidesLower = true
+							if l.dockerWhiteoutOrder {
+								say.entry = preUnknown
 							}
-						case marker:
-						case name == pre:
-							v := preNotDir
+						case base == whiteoutOpaque && (dir == "" || strings.HasPrefix(pre, dir)):
+							say.hidesLower = true
+						case !marker && name == pre:
+							say.entry = preNotDir
 							if h.Typeflag == tar.TypeDir {
-								v = preDir
+								say.entry = preDir
 							}
-							layerPre[k][pre] = preSay{v: v, kind: sayEntry}
-						case strings.HasPrefix(name, pre+"/"):
-							if s, said := layerPre[k][pre]; !said || s.kind == sayOpaque {
-								layerPre[k][pre] = preSay{v: preImplied, kind: sayImplied}
-							}
+						case strings.HasPrefix(name, pre+"/") && say.entry == preUnknown:
+							// The marker's enclosing directory exists as well. An
+							// opaque marker removes its lower children, never itself.
+							say.entry = preImplied
+						default:
+							continue
 						}
+						layerPre[k][pre] = say
 					}
 				}
 				switch {
@@ -434,19 +429,7 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 					// "<name>/.wh..wh..opq", never ".wh.<name>", so the
 					// whiteout rules do not see it.
 					hits[k] = layerHit{kind: hitGone}
-				case removed != "" && (q.path == removed || strings.HasPrefix(q.path, removed+"/")):
-					// A whiteout AFTER this layer's own entry for the path
-					// removes that entry: docker's and containerd's untar
-					// delete the name from disk when they reach the marker (or,
-					// converting to overlay whiteouts, fail the pull), so no
-					// container has it. One BEFORE the entry is overwritten by
-					// it -- the spec's "a whiteout applies to lower layers",
-					// and the order builders emit. For the lower layers the
-					// marker is merged below, as before. (For a path holding a
-					// ".." this ends the search, not the path: the component
-					// before the ".." keeps its own word, layerPre, and a
-					// directory this layer recreates after the marker still
-					// folds -- the fold loop asks answered, not done.)
+				case l.dockerWhiteoutOrder && removed != "" && (q.path == removed || strings.HasPrefix(q.path, removed+"/")):
 					hits[k] = layerHit{kind: hitGone}
 				case marker:
 					// A marker is an instruction, never the file.
@@ -551,11 +534,20 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 		// /srv/active/deep` as a directory and folded over it).
 		for k := range qs {
 			for pre, say := range layerPre[k] {
-				switch st := preState[k][pre]; {
-				case st == preUnknown:
-					preState[k][pre] = say.v
-				case st == preImplied && say.kind == sayEntry:
-					preState[k][pre] = say.v
+				// Implied directories can traverse a symlink in a lower
+				// layer. Once a whiteout hides that layer, the children
+				// create a fresh directory and the lookup is settled.
+				switch {
+				case say.entry == preDir || say.entry == preNotDir:
+					preState[k][pre] = say.entry
+				case say.hidesLower:
+					if say.entry == preImplied || preState[k][pre] == preImplied {
+						preState[k][pre] = preDir
+					} else {
+						preState[k][pre] = preNotDir
+					}
+				case say.entry == preImplied:
+					preState[k][pre] = preImplied
 				}
 			}
 		}
@@ -596,32 +588,25 @@ const (
 	preImplied                   // a directory implied by entries beneath it, unless an older layer's entry says otherwise
 )
 
-// preSay is one layer's word on a component (resolvePass), by what said it.
 type preSay struct {
-	v    preVerdict
-	kind sayKind
+	entry      preVerdict
+	hidesLower bool
 }
-
-type sayKind uint8
-
-const (
-	sayEntry    sayKind = iota // an entry for the name itself: a directory, or a file or link
-	sayWhiteout                // a whiteout of the name or of an ancestor
-	sayOpaque                  // an opaque marker in the parent: the lower layers' component is hidden
-	sayImplied                 // entries beneath the name, none for it
-)
 
 // dotDotPrefixes is, for a path holding "..", the component each ".."
 // applies to, as the path folds left to right: for `a/b/../../c` the
-// prefixes `a/b` and `a`.
+// prefixes `a/b` and `a`. Every strict ancestor is checked too: a directory
+// at an old spelling is unreachable when an ancestor has become a symlink.
 func dotDotPrefixes(p string) []string {
 	var out []string
+	seen := map[string]bool{}
 	for strings.Contains("/"+p+"/", "/../") {
 		segs := strings.Split(p, "/")
 		for i, c := range segs {
 			if c == ".." {
-				if i > 0 {
-					out = append(out, strings.Join(segs[:i], "/"))
+				for pre := strings.Join(segs[:i], "/"); pre != "." && pre != "" && !seen[pre]; pre = path.Dir(pre) {
+					seen[pre] = true
+					out = append(out, pre)
 				}
 				break
 			}
@@ -642,18 +627,19 @@ func dotDotPrefixes(p string) []string {
 // as the kernel drops it.
 func foldDecided(p string, state map[string]preVerdict) (string, bool) {
 	folded := 0
+	checked := map[string]bool{}
 	for strings.Contains("/"+p+"/", "/../") {
 		segs := strings.Split(p, "/")
-		pre := ""
 		for i, c := range segs {
-			if c == ".." {
-				if i > 0 {
-					pre = strings.Join(segs[:i], "/")
-				}
-				break
+			if c != ".." {
+				continue
 			}
-		}
-		if pre != "" && state[pre] != preDir && state[pre] != preImplied {
+			for pre := strings.Join(segs[:i], "/"); pre != "." && pre != "" && !checked[pre]; pre = path.Dir(pre) {
+				if state[pre] != preDir && state[pre] != preImplied {
+					return p, folded != 0
+				}
+				checked[pre] = true
+			}
 			break
 		}
 		p = foldFirstDotDot(p)
