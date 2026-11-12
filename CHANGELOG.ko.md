@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-11-12
+
 ### Changed
 - 이미지 레이어: 일반 whiteout은 OCI image-spec의 changeset 규칙대로 하위 레이어에만 적용되며, 어느 전달 경로에서든
   같습니다 — 같은 레이어에서 쓴 뒤 whiteout된 파일이 이제 남습니다(`usr/lib/node_modules`의 lodash나 패치된 apk
@@ -987,7 +989,8 @@
   여덟 개 언어 생태계를 다룹니다. CI에 종료 코드 0, 1, 2를 줍니다. 출력은 표, JSON, SARIF입니다.
   **(보고서 schemaVersion 8; 저장소 스키마 9)** (결정 기록 D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.18.0...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.18.1...main
+[0.18.1]: https://github.com/kun9497/assay/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/kun9497/assay/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/kun9497/assay/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/kun9497/assay/compare/v0.15.0...v0.16.0
