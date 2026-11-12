@@ -20,6 +20,17 @@ All notable changes to this project are documented here. The format follows
   semantics")
 
 ### Fixed
+- CycloneDX: the reason an unjudged bare listing carries names an install of its own release
+  -- with Debian 11 and Debian 12 both listing one name and version, v0.18.0 had let the
+  Debian 12 install's source version into the Debian 11 listing's reason ("2 and 2" for a
+  conflict of 2 and 7). The verdict, the skip count and the exit code were right; the text was
+  not. And a bare listing that names its release is placed with that release's installs however
+  many releases the document holds: one name and version listed under Debian 11 and Debian 12 had
+  read 3 packages and exit 0 in one order of its installs and 4 packages with a spurious
+  not-evaluated listing and exit 2 under `--fail-on-incomplete=target` in the other; two Debian 12
+  bare listings beside a Debian 12 install had been judged on a contradicted source in one order
+  only; an unkeyed bare listing beside installs of two releases now stays unkeyed in every order.
+  (D166 revised; independent review of v0.18.0, 2026-11-12)
 - A Debian image's OS packages spell the point release in their purl, `distro=debian-12.11`,
   read from `/etc/debian_version` as syft reads it (`supplementDebianVersion`), where they had
   spelled os-release's bare major, `debian-12` -- the D121 promise (syft's spelling, so a VEX
