@@ -69,27 +69,35 @@ func TestUnlentBareListingIsKeyedTheSameInEveryInstallOrder(t *testing.T) {
 // Goes red when the candidate installs are not held to the listing's key.
 func TestUnlentListingsOfTwoReleasesNameTheirOwnInstalls(t *testing.T) {
 	const example = "pkg:deb/debian/example@1.0"
-	bare11 := example + "?distro=debian-11&upstream=sample-source%402"
-	bare12 := example + "?distro=debian-12&upstream=sample-source%409"
-	amd11 := example + "?arch=amd64&distro=debian-11&upstream=sample-source%407"
-	arm12 := example + "?arch=arm64&distro=debian-12&upstream=sample-source%402"
-	for _, top := range [][]string{{bare11, bare12}, {bare12, bare11}} {
-		for _, subject := range [][]string{{amd11, arm12}, {arm12, amd11}} {
-			pkgs := parseListingGroups(t, top, subject)
-			reasons := map[string]string{}
-			for _, p := range pkgs {
-				if p.Arch == "" {
-					reasons[p.Ecosystem] = p.Unevaluable
+	// Two value sets: the review's (Debian 11 install 7, Debian 12 install 2)
+	// and one where the OTHER release's install sorts lowest (Debian 11
+	// install 5 below Debian 12's 7), which only the release filter decides.
+	for _, vs := range []struct{ amd11, arm12, want11, want12 string }{
+		{"7", "2", "2 and 7", "2 and 9"},
+		{"5", "7", "2 and 5", "7 and 9"},
+	} {
+		bare11 := example + "?distro=debian-11&upstream=sample-source%402"
+		bare12 := example + "?distro=debian-12&upstream=sample-source%409"
+		amd11 := example + "?arch=amd64&distro=debian-11&upstream=sample-source%40" + vs.amd11
+		arm12 := example + "?arch=arm64&distro=debian-12&upstream=sample-source%40" + vs.arm12
+		for _, top := range [][]string{{bare11, bare12}, {bare12, bare11}} {
+			for _, subject := range [][]string{{amd11, arm12}, {arm12, amd11}} {
+				pkgs := parseListingGroups(t, top, subject)
+				reasons := map[string]string{}
+				for _, p := range pkgs {
+					if p.Arch == "" {
+						reasons[p.Ecosystem] = p.Unevaluable
+					}
 				}
-			}
-			if len(pkgs) != 4 || len(reasons) != 2 {
-				t.Fatalf("top %v subject %v: got %d packages, reasons %v; want 4 and one unlent listing per release", top, subject, len(pkgs), reasons)
-			}
-			if r := reasons["Debian:11"]; !strings.Contains(r, "values, 2 and 7;") {
-				t.Errorf("top %v subject %v: Debian:11 reason = %q, want 2 and 7", top, subject, r)
-			}
-			if r := reasons["Debian:12"]; !strings.Contains(r, "values, 2 and 9;") {
-				t.Errorf("top %v subject %v: Debian:12 reason = %q, want 2 and 9", top, subject, r)
+				if len(pkgs) != 4 || len(reasons) != 2 {
+					t.Fatalf("top %v subject %v: got %d packages, reasons %v; want 4 and one unlent listing per release", top, subject, len(pkgs), reasons)
+				}
+				if r := reasons["Debian:11"]; !strings.Contains(r, "values, "+vs.want11+";") {
+					t.Errorf("installs %v top %v subject %v: Debian:11 reason = %q, want %s", vs, top, subject, r, vs.want11)
+				}
+				if r := reasons["Debian:12"]; !strings.Contains(r, "values, "+vs.want12+";") {
+					t.Errorf("installs %v top %v subject %v: Debian:12 reason = %q, want %s", vs, top, subject, r, vs.want12)
+				}
 			}
 		}
 	}
