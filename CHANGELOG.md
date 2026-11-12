@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- CycloneDX: the reason an unjudged bare listing carries names an install of its own release
+  -- with Debian 11 and Debian 12 both listing one name and version, v0.18.0 had let the
+  Debian 12 install's source version into the Debian 11 listing's reason ("2 and 2" for a
+  conflict of 2 and 7). The verdict, the skip count and the exit code were right; the text was
+  not. (D166 revised; independent review of v0.18.0, 2026-11-12)
+
 ## [0.18.0] - 2026-11-12
 
 ### Added
