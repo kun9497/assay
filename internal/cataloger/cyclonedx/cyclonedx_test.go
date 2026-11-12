@@ -8,6 +8,120 @@ import (
 	"github.com/kun9497/assay/internal/pkgmeta"
 )
 
+func TestLocalReleaseScopeUsesThePackageBranch(t *testing.T) {
+	os94 := `{"type":"operating-system","name":"rhel","version":"9.4"}`
+	os96 := `{"type":"operating-system","name":"rhel","version":"9.6"}`
+	rpm := `{"type":"library","purl":"pkg:rpm/redhat/openssl@1?distro=rhel-9.6"}`
+	for _, tc := range []struct {
+		name, components string
+		scope            pkgmeta.DistroScope
+	}{
+		{"ambiguous siblings", os94 + "," + os96 + "," + rpm, pkgmeta.DistroScope{Mixed: true}},
+		{"local fine release", os94 + "," + rpm, pkgmeta.DistroScope{Qualifier: "rhel-9.4"}},
+		{"nested override", os94 + `,{"type":"container","components":[` + os96 + "," + rpm + `]}`, pkgmeta.DistroScope{Qualifier: "rhel-9.6"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := `{"bomFormat":"CycloneDX","specVersion":"1.6","components":[` + tc.components + `]}`
+			target, _, err := Parse(strings.NewReader(doc))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(target.Packages) != 1 {
+				t.Fatalf("packages: %+v", target.Packages)
+			}
+			if got := target.Packages[0].DistroContext; got != tc.scope {
+				t.Errorf("scope = %+v, want %+v", got, tc.scope)
+			}
+		})
+	}
+}
+
+func TestConflictingInstalledPointReleases(t *testing.T) {
+	for _, first := range []string{"9.4", "9.6"} {
+		second := "9.4"
+		if first == second {
+			second = "9.6"
+		}
+		component := func(ver string) string {
+			return `{"type":"library","purl":"pkg:rpm/redhat/openssl@1?arch=x86_64&distro=rhel-` + ver + `"}`
+		}
+		doc := `{"bomFormat":"CycloneDX","specVersion":"1.6","components":[` + component(first) +
+			`],"metadata":{"component":{"type":"container","components":[` + component(second) + `]}}}`
+		target, _, err := Parse(strings.NewReader(doc))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(target.Packages) != 1 || !target.Packages[0].DistroContext.Mixed {
+			t.Fatalf("conflicting release claims with %s first: %+v", first, target.Packages)
+		}
+	}
+}
+
+func TestOracleMajorAndPointReleaseRetainTheDeclaredPoint(t *testing.T) {
+	component := func(version string) string {
+		return `{"type":"library","purl":"pkg:rpm/ol/attr@1?arch=x86_64&distro=ol-` + version + `"}`
+	}
+	operating := func(version string) string {
+		return `{"type":"operating-system","name":"ol","version":"` + version + `"}`
+	}
+	for _, versions := range [][2]string{{"9", "9.8"}, {"9.8", "9"}} {
+		a, b := versions[0], versions[1]
+		for _, doc := range []string{
+			`{"bomFormat":"CycloneDX","specVersion":"1.6","components":[` + component(a) +
+				`],"metadata":{"component":{"type":"container","components":[` + component(b) + `]}}}`,
+			`{"bomFormat":"CycloneDX","specVersion":"1.6","components":[` + operating(a) + "," + operating(b) + "," + component("9") + `]}`,
+		} {
+			target, _, err := Parse(strings.NewReader(doc))
+			if err != nil || len(target.Packages) != 1 {
+				t.Fatalf("parse %s: target=%+v err=%v", doc, target, err)
+			}
+			if p := target.Packages[0]; p.Ecosystem != "Oracle Linux:9" || p.DistroContext != (pkgmeta.DistroScope{Qualifier: "ol-9.8"}) {
+				t.Errorf("compatible releases %v: %+v", versions, p)
+			}
+		}
+	}
+}
+
+func TestDifferentOSFamiliesPreserveMixedScopeAndNativePURLFallback(t *testing.T) {
+	for _, versions := range [][2]string{{"5.0", "12"}, {"", ""}, {"5.0", ""}, {"", "12"}} {
+		photon := `{"type":"operating-system","name":"photon","version":"` + versions[0] + `"}`
+		debian := `{"type":"operating-system","name":"debian","version":"` + versions[1] + `"}`
+		for _, osPair := range []string{photon + "," + debian, debian + "," + photon} {
+			doc := `{"bomFormat":"CycloneDX","specVersion":"1.6","components":[` + osPair +
+				`,{"type":"library","purl":"pkg:npm/lodash@4.17.20?distro=photon-4.0"},` +
+				`{"type":"library","purl":"pkg:rpm/photon/curl@1?distro=photon-4.0"}]}`
+			target, _, err := Parse(strings.NewReader(doc))
+			if err != nil || len(target.Packages) != 2 {
+				t.Fatalf("parse %s: target=%+v err=%v", doc, target, err)
+			}
+			lang, native := target.Packages[0], target.Packages[1]
+			if !lang.DistroContext.Mixed || lang.Ecosystem != "npm" ||
+				native.Ecosystem != "Photon OS:4" || native.DistroContext.Qualifier != "photon-4.0" {
+				t.Errorf("mixed OS release scope and native fallback: %+v", target.Packages)
+			}
+		}
+	}
+}
+
+func TestVersionlessOSConstrainsLanguageRelease(t *testing.T) {
+	for _, tc := range []struct{ family, installed, want string }{
+		{"debian", "photon-4.0", "debian"},
+		{"photon", "photon-4.0", "photon-4.0"},
+		{"opensuse-leap", "opensuse-leap-15.6", "opensuse-leap-15.6"},
+		{"wolfi", "photon-4.0", "wolfi"},
+	} {
+		doc := `{"bomFormat":"CycloneDX","specVersion":"1.6","components":[{"type":"operating-system","name":"` +
+			tc.family + `"},{"type":"library","purl":"pkg:npm/lodash@4.17.20?distro=` + tc.installed + `"}]}`
+		target, _, err := Parse(strings.NewReader(doc))
+		if err != nil || len(target.Packages) != 1 {
+			t.Fatalf("parse %s: target=%+v err=%v", doc, target, err)
+		}
+		if p := target.Packages[0]; p.DistroContext.Qualifier != tc.want || p.Ecosystem != "npm" {
+			t.Errorf("versionless %s: %+v, want %s", tc.family, p, tc.want)
+		}
+	}
+}
+
 func TestParse(t *testing.T) {
 	f, err := os.Open("testdata/small.cdx.json")
 	if err != nil {
