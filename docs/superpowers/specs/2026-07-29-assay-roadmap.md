@@ -8833,11 +8833,14 @@ listings disagree -- a bare twin's `distro=alpine-3.20` had overwritten the inst
 VEX statement written for 3.20 exonerated the 3.19 install (2 findings hidden, exit 0) -- and a
 `distro=` that names another release than the one the package is keyed to is left off; a
 top-level purl written without `@version` takes the version its joined listing states, so a
-version-scoped statement still reaches the install. The VEX matcher itself holds a `distro=` to
-the finding's own ecosystem (`pkgmeta.EcosystemForDistroQualifier`), not to the spelling on the
-purl, so a single listing spelling 3.20 under a 3.19 document is judged on 3.19 and exonerated
-only by a statement for 3.19 (a D121 refinement, `internal/vex/match.go`); the purl's spelling
-decides only when the evaluation keyed the package to nothing.
+version-scoped statement still reaches the install. An OS package must satisfy the statement's
+`distro=` at the precision the statement specifies (D121). The evaluated key establishes the
+advisory release. A narrower qualifier also requires evidence from the installed PURL or the
+package's local OS declaration. RHEL 9.4 and 9.6 share a database, so a 9.6 statement cannot
+exempt the 9.4 installation. Conflicting point releases leave only their shared advisory key
+available for matching. Ubuntu codenames must agree with the evaluated Ubuntu release. A
+language package matches an OS-qualified product through its explicit PURL qualifier and
+the local OS evidence when available.
 
 **Gives up.** Two listings of one package inside `components`, or both inside the subject tree,
 are not merged at all (as before) and are each judged on what they state. A contradiction makes the
