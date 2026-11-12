@@ -1330,18 +1330,28 @@ disagree zero times.
       layer wins, a whiteout hides lower layers but not its own, an opaque marker replaces the
       directory. A symlink under it is counted rather than followed and joins the incomplete
       count
-- [x] **Layer semantics** (revised 2026-11-12). The layer descriptor determines how a
-      plain whiteout applies. An OCI layer retains its own entries in either tar order and
-      hides only lower layers. A Docker layer keeps the existing stream-order behavior of
-      the archive reader: a plain whiteout after a file removes it, and an entry after the
-      marker recreates it. An unrecognized media type uses the OCI rule so an ambiguous
-      input retains the same-layer inventory. An opaque marker hides lower children and
-      keeps its enclosing directory. A new child can recreate a deleted directory without
-      an explicit directory header. For ordinary entries the last entry for a name wins;
-      a file or link at a name replaces what lower layers hold beneath it, and
-      an explicit directory entry replaces a lower symlink at the name while an implied one does
-      not; a hardlink keeps the inode of the layer that made it (D130). The Docker rule describes the stream-order untar; overlay implementations may reject
-      a layer that contains both an entry and its whiteout. A `..` inside a link
+- [x] **Layer semantics** (stated 2026-11-11, release check of main 5197df4; held again
+      2026-11-12, release review of v0.18.0): a layer is read as the untars apply it — moby's
+      `go-archive` and containerd's `pkg/archive`, re-read from source on 2026-11-11 — and
+      where the OCI image-spec's prose and those implementations differ, the implementations
+      decide, because the scan describes the container that results, not the archive. One
+      rule for every layer, whatever media type its descriptor carries: PR #295 had given an
+      OCI-typed layer the spec's reading (its own entry survives a whiteout after it) and a
+      Docker-typed one the untars', and go-containerregistry's tarball reader reports every
+      `docker-archive:` layer as a Docker layer whatever the manifest said, so one image read
+      exit 0 through `oci-dir:` and exit 2 through `docker-archive:` of the identical bytes.
+      Concretely: across layers the newest entry wins and a whiteout hides lower layers only
+      (spec and untars agree); within ONE layer the LAST entry for a name wins, a whiteout
+      AFTER the file it names removes it (the untars `RemoveAll` the path on reaching the
+      marker; containerd's overlay converter fails the apply instead) while one BEFORE it is
+      overwritten (`whiteout-before-current` 4 findings, `whiteout-after-current` 0, both held
+      by tests, and both delivery paths held to one verdict); an opaque marker hides lower
+      children and keeps its enclosing directory; a child entry recreates a deleted directory
+      without an explicit directory header; a file or link at a name replaces what lower layers
+      hold beneath it, and an explicit directory entry replaces a lower symlink at the name
+      while an implied one does not; a hardlink keeps the inode of the layer that made it
+      (D130). Verified by reading the two implementations, not by running the two images under
+      each runtime. A `..` inside a link
       target applies after the component before it is looked at: a symlink there is followed
       first, a directory the layers show (explicit or implied) is climbed, and a component no
       layer shows leads nowhere, as the kernel's ENOENT does (release check of main b732cac);
