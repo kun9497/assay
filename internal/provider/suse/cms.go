@@ -72,6 +72,11 @@ func applyCMSFixBoundaries(d *document, folded map[string]string, packages map[s
 		reopened[productKey{eco: folded[platform], pkg: pkg}] = true
 		if p := packages[pkg]; p.version != "" && pkg == p.name+"-"+p.version {
 			reopened[productKey{eco: folded[platform], pkg: p.name}] = true
+		} else if name, _, ok := splitNEVR(pkg); ok {
+			// A build-shaped status can lack a usable package leaf. Its RPM
+			// name only vetoes this correction for the matching product. D126
+			// and D159 still choose how to store the original status.
+			reopened[productKey{eco: folded[platform], pkg: name}] = true
 		}
 	}
 	for _, id := range v.ProductStatus.KnownAffected {

@@ -73,6 +73,7 @@ func TestCMSCompatibilityUpdateScope(t *testing.T) {
 	const leap = "openSUSE Leap 15.6"
 	const earlier = "3.1.4-150600.5.53.1"
 	const compat = "3.1.4-150600.5.70.1"
+	const intermediate = "3.1.4-150600.5.60.1"
 	const later = "3.1.4-150600.5.71.1"
 	const secURL = "https://lists.suse.com/pipermail/sle-updates/2026-June/047322.html"
 	const ruURL = "https://www.suse.com/support/update/announcement/2026/suse-ru-20265150-1/"
@@ -91,6 +92,9 @@ func TestCMSCompatibilityUpdateScope(t *testing.T) {
 		{"historical mixed state", cve, []string{ltss}, []string{earlier}, []string{ltss + ":libopenssl3"}, refs, true, []string{earlier, ""}},
 		{"reopened", cve, []string{ltss}, []string{compat}, []string{ltss + ":libopenssl3"}, refs, true, []string{compat, ""}},
 		{"reopened build", cve, []string{ltss}, []string{compat}, []string{ltss + ":libopenssl3-" + compat}, refs, true, []string{compat}},
+		{"reopened build without leaf", cve, []string{ltss}, []string{compat}, []string{ltss + ":libopenssl3-" + intermediate}, refs, true, []string{compat}},
+		{"other package without leaf", cve, []string{ltss}, []string{compat}, []string{ltss + ":libopenssl3-32bit-" + intermediate}, refs, true, []string{earlier}},
+		{"malformed build without leaf", cve, []string{ltss}, []string{compat}, []string{ltss + ":libopenssl3-alpha-150600.5.60.1"}, refs, true, []string{earlier}},
 		{"later security build", cve, []string{ltss}, []string{later}, nil, refs, true, []string{later}},
 		{"both fixed builds", cve, []string{ltss, ltss}, []string{compat, later}, nil, refs, true, []string{compat, later}},
 		{"unverified platform", cve, []string{"SUSE Linux Enterprise Module for Containers 15 SP6"}, []string{compat}, nil, refs, true, []string{compat}},
@@ -121,6 +125,22 @@ func TestCMSCompatibilityUpdateScope(t *testing.T) {
 	entry := affectedByName(a)["openSUSE Leap:15.6/libopenssl3"]
 	if len(entry.Ranges) != 1 || len(entry.Ranges[0].Events) != 2 || entry.Ranges[0].Events[1].Fixed != compat {
 		t.Fatalf("reopened Leap range = %+v, want the original D128 fix %s", entry, compat)
+	}
+	for _, category := range []string{"no_fix_planned", "none_available"} {
+		t.Run(category+" on Leap build without leaf", func(t *testing.T) {
+			d := cmsDocument(t, cve, "libopenssl3", []string{ltss, leap}, []string{compat}, nil, refs, true)
+			v := &d.Vulnerabilities[0]
+			r := v.Remediations[0]
+			r.Category = category
+			r.ProductIDs = []string{leap + ":libopenssl3-" + intermediate}
+			v.Remediations = append(v.Remediations, r)
+			a, _ := convert(d, &stats{})
+			pkg := pkgmeta.Package{Name: "libopenssl3", Version: intermediate, Ecosystem: "openSUSE Leap:15.6"}
+			got := verdictsOf(t, a, pkg)
+			if got["openSUSE Leap:15.6/libopenssl3@"+intermediate] != compat {
+				t.Fatalf("verdicts = %v, want the original D128 fix %s", got, compat)
+			}
+		})
 	}
 }
 
