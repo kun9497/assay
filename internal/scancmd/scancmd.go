@@ -245,7 +245,11 @@ const IgnoreNone = "none"
 // keys to, so a lookup with a leading slash would just miss.
 const (
 	osReleasePath = "etc/os-release"
-	apkDBPath     = "lib/apk/db/installed"
+	// debianVersionPath holds Debian's point release ("12.11"); os-release's
+	// VERSION_ID is the bare major. Read for the purl's distro qualifier
+	// only, as syft reads it (D121; pkgmeta.Distro.PointRelease).
+	debianVersionPath = "etc/debian_version"
+	apkDBPath         = "lib/apk/db/installed"
 	// dpkgDBPath is the ordinary Debian and Ubuntu database: one file holding
 	// every stanza. Never glob status*: debian:* ships status-old holding a
 	// full duplicate of every stanza, and matching it would double the
@@ -1463,7 +1467,7 @@ func reportPlatform(ref string, c source.PlatformChoice, stderr io.Writer) *repo
 // stops at the next tar entry of whichever pass it is in, and its error comes
 // back unchanged for Run to name.
 func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgmeta.Target, cyclonedx.Stats, report.InventoryScopeRecord, error) {
-	wantPaths := append([]string{osReleasePath, dpkgDBPath}, apkDBPaths...)
+	wantPaths := append([]string{osReleasePath, debianVersionPath, dpkgDBPath}, apkDBPaths...)
 	files, err := img.Files(ctx, append(wantPaths, rpmDBPaths()...))
 	if err != nil {
 		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
@@ -1513,6 +1517,11 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 		d, err := osrelease.Parse(bytes.NewReader(f.Data))
 		if err != nil {
 			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, fmt.Errorf("parse %s: %w", osReleasePath, err)
+		}
+		if d.ID == "debian" {
+			if dv, ok := files[debianVersionPath]; ok && dv.Data != nil {
+				d.PointRelease = pkgmeta.DebianPointRelease(string(dv.Data), d.VersionID)
+			}
 		}
 		target.Distro = &d
 		if eco, err := d.Ecosystem(); err == nil {
