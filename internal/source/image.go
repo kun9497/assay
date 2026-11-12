@@ -12,7 +12,6 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/layout"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
-	"github.com/google/go-containerregistry/pkg/v1/types"
 )
 
 // TargetKind says what a scan argument names. It exists because `assay scan X`
@@ -636,14 +635,15 @@ func fromV1(img v1.Image) (*Image, error) {
 		// than l.DiffID(), which for a local layer may be computed from the
 		// very bytes it is meant to vouch for (D123).
 		d := ids[i]
-		mt, err := l.MediaType()
-		if err != nil {
-			return nil, fmt.Errorf("read layer %d media type: %w", i, err)
-		}
-		docker := mt == types.DockerLayer || mt == types.DockerForeignLayer || mt == types.DockerUncompressedLayer
+		// No rule of the walk is keyed on the layer's media type (release
+		// review of v0.18.0, 2026-11-12): go-containerregistry's tarball
+		// reader reports every docker-archive layer as a Docker layer
+		// whatever the image's manifest said, so a rule keyed on the type
+		// judged one image two ways by the path that delivered it -- the
+		// same-layer whiteout order gave `oci-dir:` the OCI spec's reading
+		// and `docker-archive:` of the identical image the untars'.
 		out.Layers = append(out.Layers, Layer{
-			DiffID:              d.String(),
-			dockerWhiteoutOrder: docker,
+			DiffID: d.String(),
 			// Every image path opens its layers here, so every path is held
 			// to its diff id (D123) -- including oci-dir and docker-archive,
 			// whose blobs the library never verifies.

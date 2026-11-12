@@ -10,7 +10,12 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/types"
 )
 
-func TestFiles_WhiteoutUsesLayerDescriptor(t *testing.T) {
+// The same-layer whiteout order is one rule for every layer, whatever media
+// type its descriptor carries (release review of v0.18.0, 2026-11-12): a
+// rule keyed on the type had judged one image two ways by delivery path,
+// because the tarball reader reports every docker-archive layer as a Docker
+// layer whatever the manifest said. A whiteout after the entry removes it.
+func TestFiles_WhiteoutOrderDoesNotDependOnTheLayerMediaType(t *testing.T) {
 	const file = "data/db"
 	stream, err := layerOfOrdered(t, "fixture", entry{name: file, body: "DB"}, entry{name: "data/.wh.db"}).Open()
 	if err != nil {
@@ -24,7 +29,7 @@ func TestFiles_WhiteoutUsesLayerDescriptor(t *testing.T) {
 	for _, tc := range []struct {
 		mt   types.MediaType
 		kept bool
-	}{{types.OCIUncompressedLayer, true}, {types.DockerUncompressedLayer, false}} {
+	}{{types.OCIUncompressedLayer, false}, {types.OCILayer, false}, {types.DockerUncompressedLayer, false}, {types.DockerLayer, false}} {
 		t.Run(string(tc.mt), func(t *testing.T) {
 			v, _, _ := d123Image(t, raw, raw, tc.mt)
 			img, err := fromV1(v)

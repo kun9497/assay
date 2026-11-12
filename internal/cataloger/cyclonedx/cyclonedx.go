@@ -294,14 +294,26 @@ func weighBareListings(d *dedupe, target *pkgmeta.Target, stats *Stats, original
 	// and that release is this listing's too: taken from the twin directly,
 	// since the subject-tree rule withholds a key the top-level twins alone
 	// give (PR #277 review) and this listing carries it to no other package.
+	// The key and the twin named in the reason are taken from ALL of the
+	// identity's installs, not from whichever install the listing happened
+	// to match first: with one install keyed and another not, the first
+	// match -- the document's order -- had decided whether the unlent
+	// listing carried a key, and with it whether its skip was the target's
+	// (exit 2 under --fail-on-incomplete=target) or nobody's (exit 0)
+	// (release review of v0.18.0, 2026-11-12).
+	keyOf, twinOf := identityKeys(target.Packages, d.pooled, lent)
 	for i, e := range d.pooled {
 		if lent[i] {
 			continue
 		}
 		p := e.p
-		twin := target.Packages[e.twin]
+		id := bareIdentity(p)
 		if p.Ecosystem == "" {
-			p.Ecosystem = twin.Ecosystem
+			p.Ecosystem = keyOf[id]
+		}
+		twin := target.Packages[e.twin]
+		if j, ok := twinOf[id]; ok {
+			twin = target.Packages[j]
 		}
 		markSourceContradiction(&p, p, twin)
 		target.Packages = append(target.Packages, p)
@@ -320,6 +332,49 @@ func weighBareListings(d *dedupe, target *pkgmeta.Target, stats *Stats, original
 		target.Packages = kept
 		stats.Components -= len(moved)
 		stats.Cataloged -= len(moved)
+	}
+}
+
+// identityKeys is, per bare identity with an unlent pooled listing, the one
+// release its arch-stating installs are keyed to (archTwins refuses two, so
+// the non-empty keys agree) and the install the listing's reason names: the
+// lowest install by source name and version among those the listing
+// contradicts, so the reason reads the same in every document order.
+func identityKeys(pkgs []pkgmeta.Package, pooled []pooledListing, lent []bool) (keyOf map[string]string, twinOf map[string]int) {
+	keyOf, twinOf = map[string]string{}, map[string]int{}
+	for i, e := range pooled {
+		if lent[i] {
+			continue
+		}
+		id := bareIdentity(e.p)
+		for j, q := range pkgs {
+			if q.Arch == "" || bareIdentity(q) != id {
+				continue
+			}
+			if q.Ecosystem != "" && keyOf[id] == "" {
+				keyOf[id] = q.Ecosystem
+			}
+			if !contradicts(e.p, q) {
+				continue
+			}
+			if k, ok := twinOf[id]; !ok || sourceLess(q, pkgs[k]) {
+				twinOf[id] = j
+			}
+		}
+	}
+	return keyOf, twinOf
+}
+
+// sourceLess orders installs by their stated source, name then version,
+// with an unstated source first.
+func sourceLess(a, b pkgmeta.Package) bool {
+	switch {
+	case a.Source == nil || b.Source == nil:
+		return a.Source == nil && b.Source != nil
+	case a.Source.Name != b.Source.Name:
+		return a.Source.Name < b.Source.Name
+	default:
+		return a.Source.Version < b.Source.Version
 	}
 }
 

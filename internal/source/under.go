@@ -185,11 +185,13 @@ func (img *Image) collectWith(ctx context.Context, roots []string, match func(na
 			case strings.HasPrefix(base, whiteoutPrefix):
 				w := path.Join(d, strings.TrimPrefix(base, whiteoutPrefix))
 				layerDeleted[w] = true
-				if l.dockerWhiteoutOrder {
-					for n := range last {
-						if n == w || strings.HasPrefix(n, w+"/") {
-							last[n] = underHit{kind: hitGone}
-						}
+				// A plain whiteout AFTER this layer's own entry removes it, as
+				// the untar does when it reaches the marker (see resolvePass);
+				// one before is overwritten by the entry that follows it. The
+				// same rule for every layer, whatever its media type (fromV1).
+				for n := range last {
+					if n == w || strings.HasPrefix(n, w+"/") {
+						last[n] = underHit{kind: hitGone}
 					}
 				}
 				return nil

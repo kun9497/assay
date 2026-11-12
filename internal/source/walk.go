@@ -398,10 +398,13 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 						say := layerPre[k][pre]
 						switch {
 						case removed != "" && (pre == removed || strings.HasPrefix(pre, removed+"/")):
+							// The marker removes what this layer put at the
+							// name before it as well (the untars RemoveAll the
+							// path on reaching the marker; "Layer semantics",
+							// docs/DESIGN.md), so the layer's word so far is
+							// withdrawn, whatever media type the layer carries.
 							say.hidesLower = true
-							if l.dockerWhiteoutOrder {
-								say.entry = preUnknown
-							}
+							say.entry = preUnknown
 						case base == whiteoutOpaque && (dir == "" || strings.HasPrefix(pre, dir)):
 							say.hidesLower = true
 						case !marker && name == pre:
@@ -429,7 +432,12 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 					// "<name>/.wh..wh..opq", never ".wh.<name>", so the
 					// whiteout rules do not see it.
 					hits[k] = layerHit{kind: hitGone}
-				case l.dockerWhiteoutOrder && removed != "" && (q.path == removed || strings.HasPrefix(q.path, removed+"/")):
+				case removed != "" && (q.path == removed || strings.HasPrefix(q.path, removed+"/")):
+					// A plain whiteout AFTER this layer's own entry removes
+					// it, as the untar does when it reaches the marker; one
+					// before is overwritten by the entry that follows it.
+					// One rule for every layer: the media type is not
+					// consulted (see fromV1).
 					hits[k] = layerHit{kind: hitGone}
 				case marker:
 					// A marker is an instruction, never the file.
