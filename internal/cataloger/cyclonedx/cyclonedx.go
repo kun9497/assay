@@ -237,7 +237,7 @@ func weighBareListings(d *dedupe, target *pkgmeta.Target, stats *Stats, original
 	}
 	moved := map[int]bool{}
 	for i, p := range target.Packages[:len(originalTop)] {
-		if p.Arch != "" || ambiguous(p, d.keyed) {
+		if p.Arch != "" || unplaceable(p, d.keyed) {
 			continue
 		}
 		if twin, ok := promoted[bareIdentity(p)]; ok {
@@ -312,7 +312,7 @@ func weighBareListings(d *dedupe, target *pkgmeta.Target, stats *Stats, original
 			continue
 		}
 		p := e.p
-		if p.Ecosystem == "" {
+		if p.Ecosystem == "" && keyOf[i] != ambiguousKey {
 			p.Ecosystem = keyOf[i]
 		}
 		twin := target.Packages[e.twin]
@@ -362,8 +362,16 @@ func identityKeys(pkgs []pkgmeta.Package, pooled []pooledListing, lent []bool) (
 			if q.Ecosystem != "" && e.p.Ecosystem != "" && q.Ecosystem != e.p.Ecosystem {
 				continue
 			}
-			if q.Ecosystem != "" && keyOf[i] == "" {
+			switch {
+			case q.Ecosystem == "":
+			case keyOf[i] == "":
 				keyOf[i] = q.Ecosystem
+			case keyOf[i] != q.Ecosystem:
+				// An unkeyed listing whose installs are keyed to two
+				// releases belongs to neither provably (the indexOfPackage
+				// rule, PR #270 review): it stays unkeyed in every order
+				// rather than taking whichever release came first.
+				keyOf[i] = ambiguousKey
 			}
 			if !contradicts(e.p, q) {
 				continue
@@ -375,6 +383,10 @@ func identityKeys(pkgs []pkgmeta.Package, pooled []pooledListing, lent []bool) (
 	}
 	return keyOf, twinOf
 }
+
+// ambiguousKey marks, in identityKeys' keyOf, an unkeyed listing whose
+// candidate installs are keyed to two releases.
+const ambiguousKey = "\x00ambiguous"
 
 // sourceLess orders installs by their stated source, name then version,
 // with an unstated source first.
@@ -465,7 +477,7 @@ func mergeDeduped(p pkgmeta.Package, base int, d *dedupe, target *pkgmeta.Target
 // identity to at most one release. The twins of two releases are refused as
 // ambiguous, as indexOfPackage refuses them.
 func archTwins(pkgs []pkgmeta.Package, p pkgmeta.Package, keyed map[string]releases) []int {
-	if ambiguous(p, keyed) {
+	if unplaceable(p, keyed) {
 		return nil
 	}
 	var out []int
@@ -628,6 +640,23 @@ func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package, keyed map[string]
 		}
 	}
 	return match
+}
+
+// unplaceable reports whether a bare listing cannot be placed with any one
+// release's installs: it states no release of its own and the document keys
+// its identity to more than one. A listing that NAMES its release
+// (`distro=debian-11`) is placed with that release's installs however many
+// releases the document holds -- archTwins and weighBareListings already
+// hold the candidates to its key. Refusing it on the document's aggregate
+// (review of the v0.18.1 branches, 2026-11-12) had sent it down
+// indexOfPackage's first-match path, so a document listing one name and
+// version under two releases read 3 packages and exit 0 in one order of its
+// installs and 4 packages with a spurious not-evaluated listing and exit 2
+// in the other; two bare listings of one release had been judged on a
+// source the document contradicts in one order only; and a reason had named
+// whichever same-release install came first.
+func unplaceable(p pkgmeta.Package, keyed map[string]releases) bool {
+	return p.Ecosystem == "" && ambiguous(p, keyed)
 }
 
 // ambiguous reports whether the document keys p's identity to more than
