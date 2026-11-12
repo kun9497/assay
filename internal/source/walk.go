@@ -431,25 +431,21 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 					// "<name>/.wh..wh..opq", never ".wh.<name>", so the
 					// whiteout rules do not see it.
 					hits[k] = layerHit{kind: hitGone}
-				case removed != "" && (q.path == removed || strings.HasPrefix(q.path, removed+"/")):
-					// A plain whiteout applies to LOWER layers only (OCI
-					// image spec, layer.md "Whiteouts": files present in the
-					// same layer as a whiteout can only be hidden by a later
-					// layer's whiteout). This layer's own entry before the
-					// marker stands, so the marker shadows lower layers only
-					// when this layer has not answered the query itself; one
-					// before the entry is overwritten by the entry that
-					// follows it. One rule for every layer: the media type is
-					// not consulted (see fromV1). Held again 2026-11-12: the
-					// untars' naive paths RemoveAll the path on reaching the
-					// marker, but the production paths (moby overlay2,
-					// containerd's overlay applier) fail the apply instead,
-					// and every scanner and extractor keeps the file.
-					if hits[k].kind == hitNone {
-						hits[k] = layerHit{kind: hitGone}
-					}
 				case marker:
-					// A marker is an instruction, never the file.
+					// A marker is an instruction, never the file. A plain
+					// whiteout applies to LOWER layers only (OCI image spec,
+					// layer.md "Whiteouts": files present in the same layer
+					// as a whiteout can only be hidden by a later layer's
+					// whiteout), so it decides nothing in its own layer: this
+					// layer's entry before it stands, one after it is written
+					// over it, and the lower layers' copies are shadowed by
+					// `deleted` (hiddenFrom) once the layer ends. One rule for
+					// every layer: the media type is not consulted (see
+					// fromV1). Revised 2026-11-12: the untars' naive paths
+					// RemoveAll the path on reaching the marker, but the
+					// production paths (moby overlay2, containerd's overlay
+					// applier) fail the apply instead, and every scanner and
+					// extractor keeps the file.
 				case strings.HasPrefix(q.path, name+"/"):
 					// An entry at a strict ANCESTOR of the path. A symlink
 					// there is where the kernel would leave this path and
