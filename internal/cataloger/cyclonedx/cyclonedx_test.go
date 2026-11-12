@@ -103,6 +103,25 @@ func TestDifferentOSFamiliesPreserveMixedScopeAndNativePURLFallback(t *testing.T
 	}
 }
 
+func TestVersionlessOSConstrainsLanguageRelease(t *testing.T) {
+	for _, tc := range []struct{ family, installed, want string }{
+		{"debian", "photon-4.0", "debian"},
+		{"photon", "photon-4.0", "photon-4.0"},
+		{"opensuse-leap", "opensuse-leap-15.6", "opensuse-leap-15.6"},
+		{"wolfi", "photon-4.0", "wolfi"},
+	} {
+		doc := `{"bomFormat":"CycloneDX","specVersion":"1.6","components":[{"type":"operating-system","name":"` +
+			tc.family + `"},{"type":"library","purl":"pkg:npm/lodash@4.17.20?distro=` + tc.installed + `"}]}`
+		target, _, err := Parse(strings.NewReader(doc))
+		if err != nil || len(target.Packages) != 1 {
+			t.Fatalf("parse %s: target=%+v err=%v", doc, target, err)
+		}
+		if p := target.Packages[0]; p.DistroContext.Qualifier != tc.want || p.Ecosystem != "npm" {
+			t.Errorf("versionless %s: %+v, want %s", tc.family, p, tc.want)
+		}
+	}
+}
+
 func TestParse(t *testing.T) {
 	f, err := os.Open("testdata/small.cdx.json")
 	if err != nil {

@@ -84,6 +84,12 @@ func releaseIncludes(broad, specific string) bool {
 	if broad == specific {
 		return true
 	}
+	// A known OS without a version establishes the family. An explicit
+	// installed release can refine it, including a hyphenated family ID.
+	if strings.HasPrefix(specific, broad+"-") && KnownDistroID(broad) {
+		d, ok := distroFromQualifier(specific)
+		return ok && d.ID == broad
+	}
 	if !strings.HasPrefix(specific, broad+".") {
 		return false
 	}

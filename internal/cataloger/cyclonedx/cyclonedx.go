@@ -1086,12 +1086,18 @@ func (c osContext) scope() pkgmeta.DistroScope {
 	if c.mixedRelease {
 		return pkgmeta.DistroScope{Mixed: true}
 	}
+	if c.distro == nil {
+		return releaseScope(c.family)
+	}
 	return releaseScope(c.distro)
 }
 
 func releaseScope(d *pkgmeta.Distro) pkgmeta.DistroScope {
-	if d == nil || d.VersionID == "" {
+	if d == nil {
 		return pkgmeta.DistroScope{}
+	}
+	if d.VersionID == "" {
+		return pkgmeta.DistroScope{Qualifier: d.ID}
 	}
 	return pkgmeta.DistroScope{Qualifier: d.ID + "-" + d.VersionID}
 }
