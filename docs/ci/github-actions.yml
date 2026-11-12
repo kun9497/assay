@@ -34,7 +34,7 @@ jobs:
       # which ubuntu-latest ships.
       - name: Install assay
         run: |
-          curl -sSfL https://raw.githubusercontent.com/kun9497/assay/7c53c2159ee04dc8e9cbb453312f274f08c425de/install.sh | sh -s -- -b /usr/local/bin
+          curl -sSfL https://raw.githubusercontent.com/kun9497/assay/f430fdad5ec6fd2086afe55ddb220e99f91bbfdd/install.sh | sh -s -- -b /usr/local/bin
           assay --version
 
       # Pulls the published OCI database from ghcr.io/kun9497/assay-db — a
