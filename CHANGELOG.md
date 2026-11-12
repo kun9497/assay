@@ -67,23 +67,34 @@ All notable changes to this project are documented here. The format follows
   releases declared for one install leave only their shared key to match on; a language package
   reaches an OS-qualified product through its own explicit purl qualifier or the local OS
   evidence, and conflicting sibling OS families (Photon 5 beside Debian 12) grant no exemption;
-  Oracle Linux 9 beside 9.8 keeps the more specific release. (D121 refined, D165 revised)
+  Oracle Linux 9 beside 9.8 keeps the more specific release. A statement whose point release
+  belongs to the release the installed purl names, with nothing finer stated on the installed
+  side, applies: a Debian image spells `distro=debian-12` and a VEX written from its syft SBOM
+  `debian-12.11`, and the release review found every such statement dropped on every Debian
+  image (a regression from v0.17.0), now matched again. (D121 refined, D165 revised)
 - CycloneDX, per the release check of main 19ccdf6: the concrete installs are read before the
   architecture-less listings are weighed, a release is lent across architectures only when the
   bare record states it (an Alpine document whose release is stated for ppc64le alone: 2 findings,
   2 not evaluated, exit 2 under `--fail-on-incomplete=any`, in either order), an install keeps
   its own source version while a contradicting unqualified source is named separately (Debian
   amd64 libc6: 25 findings with the conflict recorded, exit 1), and the subject is cataloged
-  once. Of 131 archived real-CLI cases exactly the four covering these changed. (D166 revised)
+  once. Of 131 archived real-CLI cases exactly the four covering these changed. A bare listing
+  that contradicts every install it could be is keyed to the one release those installs are
+  keyed to in every document order -- the release review found it keyed by whichever install
+  it met first, so with one install keyed and the other not its skip was the target's (exit 2
+  under `--fail-on-incomplete=target`) in one order and nobody's (exit 0) in the other. (D166
+  revised)
 - Image layers and npm roots, per the release check of main 19ccdf6: a `..` in a link target is
   folded only after the visible type of every ancestor is known, so a directory an upper layer
   deleted and a child recreated, or one holding an opaque whiteout, is still traversed (BusyBox's
-  7 findings and the Critical in SARIF, were 0); an OCI layer's plain whiteout removes lower
-  layers only, as the OCI image spec says, while a Docker-format layer keeps its stream-order
-  deletion -- the two are told apart by the layer's media type, an unknown type keeping the
-  same-layer rule; two global npm roots that reach one manifest through a symlink or a hardlink
-  are one install at both logical paths (4 findings, were 8), and asking the same link twice is
-  not a cycle. (D160 revised; `docs/DESIGN.md`, "Layer semantics")
+  7 findings and the Critical in SARIF, were 0); two global npm roots that reach one manifest
+  through a symlink or a hardlink are one install at both logical paths (4 findings, were 8),
+  and asking the same link twice is not a cycle. The same-layer whiteout order is unchanged and
+  one rule for every layer: a whiteout after the file it names in the same layer removes it, as
+  moby's and containerd's untars do, on `docker-archive:` and `oci-dir:` alike -- the release
+  review found a first cut that keyed the order on the layer's media type, which the tarball
+  reader does not preserve, so one image had read exit 0 through `oci-dir:` and exit 2 through
+  `docker-archive:`. (D160 revised; `docs/DESIGN.md`, "Layer semantics")
 - `scandiff`: each tool's capture state carries the id of the run that wrote it, and a replay
   accepts only the captures of the completed run record -- two runs that emitted byte-identical
   reports no longer replay as one, a state with a run id requires its record, and a run whose

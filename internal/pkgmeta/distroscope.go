@@ -61,7 +61,22 @@ func (s DistroScope) Matches(want, installed, ecosystem string) bool {
 			return false
 		}
 	}
-	return releaseIncludes(want, installed)
+	if releaseIncludes(want, installed) {
+		return true
+	}
+	// The installed purl names the release the statement's point release
+	// belongs to and nothing finer (`distro=debian-12` against a statement
+	// for debian-12.11): nothing contradicts the statement, so it applies.
+	// An image's OS packages spell only what os-release says -- Debian's
+	// VERSION_ID is the bare major, so every Debian image scan arrives here
+	// -- while a VEX document produced from the image's syft SBOM spells the
+	// point release; demanding the point release on the installed side had
+	// silently dropped every such statement (release review of v0.18.0,
+	// 2026-11-12, a regression from v0.17.0 against D121). An installed
+	// release that names ANOTHER point release (rhel-9.4 against rhel-9.6)
+	// still refuses above, and an empty installed qualifier still proves
+	// nothing: releaseIncludes("", want) is false.
+	return installed != "" && releaseIncludes(installed, want)
 }
 
 // A rolling database does not identify a version at all. For a versioned

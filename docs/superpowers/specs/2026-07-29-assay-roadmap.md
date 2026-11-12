@@ -8447,11 +8447,16 @@ in its own layer, the latest of the root link's chain and the file's: the second
 had carried none, and the OS package that owned the path before the root was re-pointed above
 was reported as its owner.*
 
-**2026-11-12 revision.** An OCI layer keeps a replacement file in either whiteout order.
-Docker layer descriptors retain stream-order deletion. A child can recreate a deleted
-directory, and an opaque directory retains its own name. Resolving `..` checks every
-ancestor before climbing. Roots reaching the same physical manifest denote one install,
-including when the manifest is a symlink or a hardlink.
+**2026-11-12 revision.** A child can recreate a deleted directory, and an opaque directory
+retains its own name. Resolving `..` checks every ancestor before climbing. Roots reaching the
+same physical manifest denote one install, including when the manifest is a symlink or a
+hardlink. The same day's first cut had also keyed the same-layer whiteout order on the layer's
+media type (an OCI layer keeping its own entry in either order, a Docker layer deleting in
+stream order); the release review of v0.18.0 withdrew that: go-containerregistry's tarball
+reader reports every `docker-archive:` layer as a Docker layer whatever the image's manifest
+said, so one OCI-typed image read exit 0 through `oci-dir:` and exit 2 through
+`docker-archive:` of the identical bytes. The rule is the untars' for every layer (`docs/DESIGN.md`,
+"Layer semantics"), and a scan-level test holds both delivery paths to one verdict.
 
 **Decision.** An image scan runs one more pass over its layers, over ten fixed locations
 together: the installed `package.json` files under the three global `node_modules` roots
@@ -8856,7 +8861,13 @@ version-scoped statement still reaches the install. An OS package must satisfy t
 `distro=` at the precision the statement specifies (D121). The evaluated key establishes the
 advisory release. A narrower qualifier also requires evidence from the installed PURL or the
 package's local OS declaration. RHEL 9.4 and 9.6 share a database, so a 9.6 statement cannot
-exempt the 9.4 installation. Conflicting point releases leave only their shared advisory key
+exempt the 9.4 installation. An installed purl that names the statement's release and nothing
+finer does not contradict it: a Debian image spells `distro=debian-12` (os-release's
+VERSION_ID is the bare major) while a VEX document produced from the image's syft SBOM spells
+`debian-12.11`, and requiring the point release on the installed side had dropped every such
+statement on every Debian image (release review of v0.18.0, a regression from v0.17.0 against
+D121); another point release, another major and an empty qualifier still refuse. Conflicting
+point releases leave only their shared advisory key
 available for matching. Ubuntu codenames must agree with the evaluated Ubuntu release. A
 language package matches an OS-qualified product through its explicit PURL qualifier and
 the local OS evidence when available. Conflicting sibling OS families prevent this exemption.
