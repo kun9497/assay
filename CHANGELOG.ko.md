@@ -7,6 +7,16 @@
 
 ## [Unreleased]
 
+### Fixed
+- Debian 이미지의 OS 패키지 purl이 포인트 릴리스를 적습니다(`distro=debian-12.11`): syft가 읽는 대로
+  (`supplementDebianVersion`) `/etc/debian_version`에서 읽으며, 전에는 os-release의 메이저 `debian-12`만 적어 D121의
+  약속(syft와 같은 철자라서 이미지의 syft SBOM에서 쓴 VEX가 패키지에 닿는다)이 Debian에서 깨져 있었습니다. 근거가
+  purl에 있으므로 VEX 매처 규칙은 다시 엄격합니다: 이미지 자신의 포인트 릴리스나 그 메이저의 문장은 적용되고 다른
+  포인트 릴리스의 문장은 적용되지 않습니다 — v0.18.0은 메이저만 적은 purl에 그 메이저의 어떤 포인트 릴리스 문장이든
+  적용했었습니다(2026-11-12 v0.18.0 독립 리뷰). `/etc/debian_version`이 없는 이미지는 메이저를 적고 포인트 릴리스
+  문장은 닿지 않습니다. 생태계 키(`Debian:12`)와 보고서의 `distro` 객체는 그대로이며 스키마 변경은 없습니다. (D121
+  보완)
+
 ## [0.18.0] - 2026-11-12
 
 ### Added
