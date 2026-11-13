@@ -90,6 +90,15 @@ All notable changes to this project are documented here. The format follows
   other two pass to the release normalisation, suppressing two advisories and turning exit 1 into
   0 on a document that carried no codename; the numeric `ubuntu-22.04` still applies on its own
   and `noble` is still refused. (main QA of ef0bc1a, 2026-11-13)
+- Debian's archive spelling of a point release before squeeze -- `4.0r9`, `3.1r8`, `3.0r6`, as
+  the etch Release file says -- names its release (`Debian:4.0`, `3.1`, `3.0`) in a `VERSION_ID`,
+  an SBOM's operating-system version or a purl's `distro=` qualifier, where 67e2cf6 had refused it
+  as no release at all: an SBOM naming etch as the archive does was scanned with `EOL unknown`
+  and exit 0 under `--fail-on-eol`, where ef0bc1a had reported the 2010-02-15 end of life and
+  exit 1. The revision is a point of the release (`debian-4.0` includes `debian-4.0r9`; a
+  statement for `debian-4.0r9` is a point statement); a bare `3` and sid stay refused. (main QA
+  of 67e2cf6, 2026-11-13)
+
 
 ## [0.18.1] - 2026-11-12
 

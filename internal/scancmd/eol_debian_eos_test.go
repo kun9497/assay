@@ -26,6 +26,11 @@ func TestLookupEOL_DebianTwoPartKeysReachTheirCycle(t *testing.T) {
 	}{
 		{"6.0", true, true}, {"6", true, true}, {"6.0.10", true, true},
 		{"4.0", true, true}, {"3.1", true, true},
+		// Main QA of 67e2cf6 (2026-11-13): the archive's own revision
+		// spelling reaches the cycle too; the spellings Debian never used
+		// stay unknown, never a false trip.
+		{"4.0r9", true, true}, {"3.1r8", true, true},
+		{"4.0r", false, false}, {"4.0rc1", false, false},
 		{"12", true, false}, {"12.15", true, false},
 		{"5.0", false, false}, // no row for lenny in this fixture: unknown, never a false trip
 	} {
