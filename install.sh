@@ -4,16 +4,19 @@
 # project's signing key embedded below (D137), verifies the archive's SHA256
 # against that file, and installs the one binary.
 #
-#   curl -sSfL https://raw.githubusercontent.com/kun9497/assay/<commit>/install.sh | sh
+#   curl -sSfL -o assay-install.sh https://raw.githubusercontent.com/kun9497/assay/<commit>/install.sh && sh ./assay-install.sh
+#
+# Download first, then run: piping curl into sh returns 0 on a failed
+# download, because sh reads nothing and exits clean (Linux QA of v0.18.1).
 #
 # The README names the commit each release was built from: pin that, not a
 # branch or a tag -- a branch moves, and so can a tag; the commit cannot.
 # This script installs the version it was published with (VERSION below);
-# `sh -s -- vX.Y.Z` installs another release, still verified against the
+# `sh ./assay-install.sh vX.Y.Z` installs another release, still verified against the
 # keys embedded here, so an older script cannot install a release signed by
 # a key it predates (run the installer published with that release).
 #
-# Flags (after `sh -s --`):
+# Flags:
 #   -b <dir>   install directory (default: ./bin)
 #   <version>  a tag to install, e.g. v0.12.0 (default: VERSION below)
 #

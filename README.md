@@ -23,15 +23,18 @@ advisory data is the reason it exists rather than reusing grype.
 
 ```bash
 # Prebuilt binary (Linux/macOS, amd64/arm64) — onto your PATH; Windows below
-curl -sSfL https://raw.githubusercontent.com/kun9497/assay/7712a02ba7c103c238d7b7ec95fd63472bcf78d7/install.sh | sudo sh -s -- -b /usr/local/bin
+curl -sSfL -o assay-install.sh https://raw.githubusercontent.com/kun9497/assay/7712a02ba7c103c238d7b7ec95fd63472bcf78d7/install.sh && sudo sh ./assay-install.sh -b /usr/local/bin && rm -f assay-install.sh
 ```
 
 The script embeds the project's signing key and verifies the release's checksums
 signature with `openssl` (or `cosign`) before the checksum, then picks the right asset for
 your OS/arch. The line names the commit the latest release was built from — never a branch
-or a tag, which can move — and the release job updates it. Without `-b` it installs to
-`./bin` (no sudo needed — add it to your PATH yourself); `-s -- vX.Y.Z` installs another
-release, verified against the same keys. A release whose checksums file carries no
+or a tag, which can move — and the release job updates it. The script is downloaded to a
+file first and run only if the download succeeded: piping `curl` into `sh` had returned 0 on a
+failed download, with nothing installed, because `sh` reads nothing and exits clean. Without
+`-b` it installs to `./bin` (no sudo needed — add it to your PATH yourself);
+`sh ./assay-install.sh -b /usr/local/bin vX.Y.Z` installs another release, verified against
+the same keys. A release whose checksums file carries no
 signature is refused, never installed on the checksum alone: v0.10.0 is the first signed
 release, so anything older goes through `go install` or the release page.
 
