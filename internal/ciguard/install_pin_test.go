@@ -3,6 +3,7 @@ package ciguard
 import (
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -23,6 +24,37 @@ var installPinDocs = []string{
 var installRef = regexp.MustCompile(`raw\.githubusercontent\.com/kun9497/assay/([^/]+)/install\.(sh|ps1)`)
 
 var fullSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+// pipedIntoSh is the one-liner shape the Linux QA of v0.18.1 (2026-11-13)
+// found returning 0 on a failed download: `curl ... | sh`'s exit status is
+// sh's, and sh reading nothing exits clean, so a reader's shell saw success
+// with nothing installed. The documents run the script only after it
+// downloaded (`curl -o ... && sh ...`).
+var pipedIntoSh = regexp.MustCompile(`install\.(sh|ps1)[^\n]*\|\s*(sudo\s+)?(sh|bash)\b`)
+
+// TestInstallOneLiners_RunTheScriptOnlyAfterItDownloaded holds every install
+// one-liner to the download-then-run shape: never piped into sh, and run
+// through the file the download wrote, so a failed download is the
+// command's failure.
+func TestInstallOneLiners_RunTheScriptOnlyAfterItDownloaded(t *testing.T) {
+	for _, doc := range installPinDocs {
+		b, err := os.ReadFile(repoRoot + "/" + doc)
+		if err != nil {
+			t.Fatalf("read %s: %v", doc, err)
+		}
+		if m := pipedIntoSh.FindString(string(b)); m != "" {
+			t.Errorf("%s pipes the installer into sh, which returns 0 on a failed download: %q", doc, m)
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			if !strings.Contains(line, "/install.sh") || !strings.Contains(line, "curl") {
+				continue
+			}
+			if !strings.Contains(line, "-o assay-install.sh ") || !strings.Contains(line, " && ") || !strings.Contains(line, "sh ./assay-install.sh") {
+				t.Errorf("%s: the install.sh one-liner must download to assay-install.sh and run it only after the download succeeded: %q", doc, line)
+			}
+		}
+	}
+}
 
 // TestInstallOneLiners_PinOneCommit holds the four documents a reader copies
 // an install one-liner from to the invariant the release job's sed only

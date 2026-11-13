@@ -28,6 +28,11 @@ All notable changes to this project are documented here. The format follows
   v0.18.1, the releases carrying the scope type, had let a statement for the OS component's point release suppress the
   finding and exit 0. An SBOM whose two declarations agree is unchanged. (Linux QA of v0.18.1,
   2026-11-13)
+- The Linux/macOS install one-liner in the READMEs and the CI examples downloads `install.sh`
+  to a file and runs it only if the download succeeded. Piping `curl` into `sh` had returned 0 on
+  a failed download with nothing installed -- `sh` reads nothing and exits clean, and the pipe's
+  status is `sh`'s -- so a CI step saw success. `internal/ciguard` now holds the shape. (Linux QA
+  of v0.18.1, 2026-11-13)
 
 ## [0.18.1] - 2026-11-12
 
