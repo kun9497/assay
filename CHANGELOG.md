@@ -13,8 +13,9 @@ All notable changes to this project are documented here. The format follows
   positions. The scope of a listing whose purl contradicts its local OS is Mixed from the start,
   as two contradicting listings merge to, so the join cannot keep the first purl's point release
   alone: apt listed as 12.15 at the top level and 12.14 under the subject (OS 12.15) had been
-  suppressed by a 12.15 statement, and kept the other way round, and under `--fail-on-unknown`
-  the two documents exited 0 and 1. (D121; main QA of 672fe7a, 2026-11-13)
+  suppressed by a 12.15 statement, and kept the other way round; on a fixture database holding
+  one unrated advisory the same two shapes written as 12.10/12.11 exited 0 and 1 under
+  `--fail-on-unknown`. (D121; main QA of 672fe7a, 2026-11-13)
 - CycloneDX: a bare top-level listing of one release beside the subject's install of ANOTHER
   release is judged on what it states. v0.18.1 had pooled it beside that install, found no
   install of its own release to name and fallen back to the other release's, so one name and

@@ -81,7 +81,11 @@ func (s DistroScope) Matches(want, installed, ecosystem string) bool {
 		// releases carrying this type, had let a statement for the local OS's point release
 		// exonerate the install (findings 0, exit 0) because this branch
 		// was reached before the installed purl was compared with it
-		// (Linux QA of v0.18.1, 2026-11-13).
+		// (Linux QA of v0.18.1, 2026-11-13). Since the main QA of 672fe7a the
+		// same day, ForInstallation makes that contradiction Mixed at catalog
+		// time, so a package the CycloneDX cataloger produced never reaches
+		// this guard; it holds for a scope built elsewhere, as defence in
+		// depth -- the rule lives in ForInstallation.
 		if installed != "" && !releaseIncludes(s.Qualifier, installed) && !releaseIncludes(installed, s.Qualifier) {
 			return false
 		}

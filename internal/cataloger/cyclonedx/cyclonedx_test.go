@@ -23,6 +23,7 @@ func TestLocalReleaseScopeUsesThePackageBranch(t *testing.T) {
 		// the local 9.4, which a duplicate listing merged onto it then
 		// carried alone (DistroScope.ForInstallation).
 		{"local fine release contradicted by the purl", os94 + "," + rpm, pkgmeta.DistroScope{Mixed: true}},
+		{"no purl release keeps the local OS", os94 + `,{"type":"library","purl":"pkg:rpm/redhat/openssl@1"}`, pkgmeta.DistroScope{Qualifier: "rhel-9.4"}},
 		{"nested override", os94 + `,{"type":"container","components":[` + os96 + "," + rpm + `]}`, pkgmeta.DistroScope{Qualifier: "rhel-9.6"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

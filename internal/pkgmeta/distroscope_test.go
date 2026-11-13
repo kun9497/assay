@@ -8,23 +8,21 @@ import "testing"
 func TestDistroScope_ForInstallation(t *testing.T) {
 	for _, tc := range []struct {
 		name, local, installed string
+		mixed                  bool
 		want                   DistroScope
 	}{
-		{"no local OS: the purl's release", "", "debian-12.15", DistroScope{Qualifier: "debian-12.15"}},
-		{"no purl release: the local OS", "debian-12.15", "", DistroScope{Qualifier: "debian-12.15"}},
-		{"purl refines a broad local OS", "rhel-9", "rhel-9.4", DistroScope{Qualifier: "rhel-9.4"}},
-		{"purl agrees with the local point release", "debian-12.15", "debian-12.15", DistroScope{Qualifier: "debian-12.15"}},
-		{"purl states less than the local OS: the local OS stands", "debian-12.10", "debian-12", DistroScope{Qualifier: "debian-12.10"}},
-		{"purl states another point release: mixed", "debian-12.15", "debian-12.14", DistroScope{Mixed: true}},
-		{"purl states another major: mixed", "debian-12.15", "debian-11.11", DistroScope{Mixed: true}},
-		{"purl states another family: mixed", "debian-12.15", "ubuntu-22.04", DistroScope{Mixed: true}},
-		{"already mixed stays mixed", "", "debian-12.15", DistroScope{Mixed: true}},
+		{"no local OS: the purl's release", "", "debian-12.15", false, DistroScope{Qualifier: "debian-12.15"}},
+		{"no purl release: the local OS", "debian-12.15", "", false, DistroScope{Qualifier: "debian-12.15"}},
+		{"purl refines a broad local OS", "rhel-9", "rhel-9.4", false, DistroScope{Qualifier: "rhel-9.4"}},
+		{"purl agrees with the local point release", "debian-12.15", "debian-12.15", false, DistroScope{Qualifier: "debian-12.15"}},
+		{"purl states less than the local OS: the local OS stands", "debian-12.10", "debian-12", false, DistroScope{Qualifier: "debian-12.10"}},
+		{"purl states another point release: mixed", "debian-12.15", "debian-12.14", false, DistroScope{Mixed: true}},
+		{"purl states another major: mixed", "debian-12.15", "debian-11.11", false, DistroScope{Mixed: true}},
+		{"purl states another family: mixed", "debian-12.15", "ubuntu-22.04", false, DistroScope{Mixed: true}},
+		{"already mixed stays mixed", "", "debian-12.15", true, DistroScope{Mixed: true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := DistroScope{Qualifier: tc.local}
-			if tc.name == "already mixed stays mixed" {
-				s = DistroScope{Mixed: true}
-			}
+			s := DistroScope{Qualifier: tc.local, Mixed: tc.mixed}
 			if got := s.ForInstallation(tc.installed); got != tc.want {
 				t.Errorf("ForInstallation(%q) on %+v = %+v, want %+v", tc.installed, s, got, tc.want)
 			}

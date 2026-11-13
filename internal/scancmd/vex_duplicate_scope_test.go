@@ -19,7 +19,8 @@ import (
 // release, so neither point statement exonerates it and only the shared
 // major's does, WHICHEVER position holds which purl: main had suppressed
 // CVE-2011-3374 with the 12.15 purl at the top level and kept it the other
-// way round, and under --fail-on-unknown the two documents exited 0 and 1.
+// way round; on a fixture database holding one unrated advisory the same two
+// shapes written as 12.10/12.11 exited 0 and 1 under --fail-on-unknown.
 // Every arch shape of the pair, since the dedupe treats a bare listing and
 // an arch-stating one as the same install.
 func TestRun_VEXTwoPointReleasesListedForOneInstallInEitherPosition(t *testing.T) {
