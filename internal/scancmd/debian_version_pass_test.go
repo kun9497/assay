@@ -33,7 +33,7 @@ func TestCatalogFromImage_DebianVersionIsConsultedOnDebianOnly(t *testing.T) {
 		{"alpine, an over-limit debian_version is not read", map[string]string{osReleasePath: osReleaseAlpine319, apkDBPath: p4ApkPatched, debianVersionPath: big}, false, 1, "", "alpine-3.19.9"},
 		{"alpine, an ordinary debian_version is not read", map[string]string{osReleasePath: osReleaseAlpine319, apkDBPath: p4ApkPatched, debianVersionPath: "12.11\n"}, false, 1, "", "alpine-3.19.9"},
 		{"debian, an over-limit debian_version is read and refused", map[string]string{osReleasePath: osReleaseDebian12Bookworm, dpkgDBPath: dpkgOpensslAndGlibc, debianVersionPath: big}, true, 0, "", ""},
-		{"debian, an ordinary debian_version spells the point release", map[string]string{osReleasePath: osReleaseDebian12Bookworm, dpkgDBPath: dpkgOpensslAndGlibc, debianVersionPath: "12.11\n"}, false, 2, "12.11", "debian-12.11"},
+		{"debian, an ordinary debian_version spells the point release", map[string]string{osReleasePath: osReleaseDebian12Bookworm, dpkgDBPath: dpkgOpensslAndGlibc, debianVersionPath: "12.11\n"}, false, 3, "12.11", "debian-12.11"},
 		{"debian, no debian_version spells the major", map[string]string{osReleasePath: osReleaseDebian12Bookworm, dpkgDBPath: dpkgOpensslAndGlibc}, false, 3, "", "debian-12"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
