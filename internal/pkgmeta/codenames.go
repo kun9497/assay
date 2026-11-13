@@ -27,6 +27,29 @@ func DebianReleases() map[string]string {
 	}
 }
 
+// UbuntuCodename is the Ubuntu codename a purl distro qualifier spells --
+// bare or behind the family, in any case (`jammy`, `JAMMY`, `ubuntu-jammy`)
+// -- or "" when the qualifier is not one. The VEX matcher asks it for the
+// statement's and the purl's spelling alike, so the evidence rule for a
+// codename (the scan must have seen it in os-release or in the purl) holds
+// for every spelling: the main QA of ef0bc1a (2026-11-13) had `jammy`
+// refused for want of evidence while `JAMMY` and `ubuntu-jammy` slipped past
+// the rule and were normalised to the release further on, suppressing two
+// advisories and turning exit 1 into 0 on the same document.
+func UbuntuCodename(q string) string {
+	name := strings.ToLower(q)
+	if i := strings.IndexByte(name, '-'); i > 0 {
+		if name[:i] != "ubuntu" {
+			return ""
+		}
+		name = name[i+1:]
+	}
+	if UbuntuReleases()[name] == "" {
+		return ""
+	}
+	return name
+}
+
 // CanonicalDistroQualifier spells a purl distro qualifier the way the scope
 // rules compare releases: a Debian or Ubuntu codename, bare (`bookworm`,
 // `jammy`) or behind its family (`debian-bookworm`, `ubuntu-jammy`), as the

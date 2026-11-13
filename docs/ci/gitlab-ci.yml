@@ -16,13 +16,15 @@ assay_scan:
     # the installer refuses to install rather than skip the check.
     - apk add --no-cache curl openssl
     # The commit the latest release was built from, as in the README (the
-    # release job keeps it current) -- never a branch, which moves. Download to
-    # a temporary file, then run: the job stops at a failed download, where
-    # `curl | sh` had not, and the project's own files are not touched.
-    - t=$(mktemp)
-    - trap 'rm -f "$t"' EXIT
-    - curl -sSfL -o "$t" https://raw.githubusercontent.com/kun9497/assay/7712a02ba7c103c238d7b7ec95fd63472bcf78d7/install.sh
-    - sh "$t" -b /usr/local/bin
+    # release job keeps it current) -- never a branch, which moves. One
+    # `sh -c` line: the temporary file, the download, the run and the
+    # clean-up live and die inside it, and the line's status is the
+    # install's. GitLab runs before_script and script in ONE shell, so a
+    # variable or an EXIT trap set here would reach the job's own steps:
+    # in the QA job that found this, a later step put report.txt in t and
+    # the installer's trap deleted it at exit (main QA of ef0bc1a,
+    # 2026-11-13).
+    - sh -c 't=$(mktemp) && curl -sSfL -o "$t" https://raw.githubusercontent.com/kun9497/assay/7712a02ba7c103c238d7b7ec95fd63472bcf78d7/install.sh && sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
     - assay --version
   script:
     # Pulls the published database from ghcr.io/kun9497/assay-db — a public

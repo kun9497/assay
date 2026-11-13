@@ -1585,20 +1585,20 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 		// image agree — FilesUnder returns a map, and a map's iteration order
 		// reaching the report would make every run a different document.
 		//
-		// diffID is taken from the layer the FIRST stanza came from. A
-		// distroless image's status.d is written by one COPY, so in practice
-		// every stanza shares a layer; where it does not, the per-package
-		// Location already carries the file it came from, which is the
-		// finer-grained answer a reader wants anyway.
+		// Each stanza's packages carry the layer THAT file came from. The
+		// first stanza's layer had been applied to every package below, on
+		// the reasoning that one COPY writes the whole directory -- which
+		// the distroless images do not bear out: base-files, ca-certificates,
+		// media-types, netbase and tzdata of gcr.io/distroless/static-debian12
+		// arrive in five layers, and four of them had been reported under
+		// base-files' (main QA of ef0bc1a, 2026-11-13).
 		for _, name := range source.SortedNames(statusD) {
 			f := statusD[name]
 			p, err := dpkgdb.ParseStanza(bytes.NewReader(f.Data), ecosystem, name)
 			if err != nil {
 				return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, fmt.Errorf("parse %s: %w", name, err)
 			}
-			if diffID == "" {
-				diffID = f.DiffID
-			}
+			setLayer(p, f.DiffID)
 			pkgs = append(pkgs, p...)
 		}
 		// A symlink under status.d is a stanza this build did not read, so it
@@ -1668,21 +1668,17 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 		// map, and a map's iteration order reaching the report would make
 		// every run a different document.
 		//
-		// diffID is taken from the layer the FIRST desc file came from —
-		// status.d's own reasoning applies unchanged: a pacman database is
-		// written by one image build, so in practice every desc file shares
-		// a layer; where it does not, the per-package Location already
-		// carries the file it came from, the finer-grained answer a reader
-		// wants anyway.
+		// Each desc file's package carries the layer THAT file came from --
+		// status.d's rule above, for the same reason: a pacman -S in a later
+		// layer adds its desc beside the base image's, and the first file's
+		// layer had been applied to all of them.
 		for _, name := range source.SortedNames(pacmanFiles) {
 			f := pacmanFiles[name]
 			p, err := pacmandb.ParseDesc(bytes.NewReader(f.Data), ecosystem, name)
 			if err != nil {
 				return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, fmt.Errorf("parse %s: %w", name, err)
 			}
-			if diffID == "" {
-				diffID = f.DiffID
-			}
+			setLayer(p, f.DiffID)
 			pkgs = append(pkgs, p...)
 		}
 		// A symlink under a pacman package directory is a desc file this
@@ -1713,9 +1709,14 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 				"and an rpm database under %v)%s",
 			ref, apkDBPaths, dpkgDBPath, dpkgStatusDir, pacmanLocalDir, rpmDBDirs, unresolvedNote(img))
 	}
+	// A single-file database (apk, dpkg status, rpm) came from one layer,
+	// recorded here on every package it listed; the per-file databases
+	// above have already recorded their own layer on each package.
 	for i := range pkgs {
 		for j := range pkgs[i].Locations {
-			pkgs[i].Locations[j].LayerDigest = diffID
+			if pkgs[i].Locations[j].LayerDigest == "" {
+				pkgs[i].Locations[j].LayerDigest = diffID
+			}
 		}
 	}
 	// One exact-path pass for what two halves ask for by name: Bitnami's
@@ -1798,6 +1799,16 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 		Components:       len(target.Packages) + skippedRecords,
 		SkippedNoVersion: skippedRecords,
 	}, scope, nil
+}
+
+// setLayer records diffID as the layer every location of pkgs was read from:
+// the layer the one file the packages were parsed out of belongs to.
+func setLayer(pkgs []pkgmeta.Package, diffID string) {
+	for i := range pkgs {
+		for j := range pkgs[i].Locations {
+			pkgs[i].Locations[j].LayerDigest = diffID
+		}
+	}
 }
 
 // assignOSPURLs gives each OS package an image scan cataloged the purl syft
