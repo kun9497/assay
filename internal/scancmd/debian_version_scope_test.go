@@ -35,6 +35,10 @@ func TestRun_DebianVersionUnreadableIsReportedOnDebianOnly(t *testing.T) {
 		{"alpine, debian_version a link cycle", alpineDB, alpine(cycle...), 0, ""},
 		{"alpine, debian_version an ordinary file", alpineDB, alpine(p4Entry{name: debianVersionPath, body: "12.4\n"}), 0, ""},
 		{"alpine, debian_version absent", alpineDB, alpine(), 0, ""},
+		// No os-release at all (the Distro is nil): the file is not consulted
+		// either. The packages are unkeyed, so the strict gate's exit code is
+		// not this row's subject (-1); the unread list is.
+		{"no os-release, debian_version a link cycle", alpineDB, p4Archive(t, p4Tar(t, append([]p4Entry{{name: apkDBPath, body: p4ApkPatched}}, cycle...)...)), -1, ""},
 		{"debian, debian_version a link cycle", debianDB, debian(cycle...), 2, debianVersionPath},
 		{"alpine, os-release a link cycle is still reported", alpineDB, p4Archive(t, p4Tar(t,
 			p4Entry{name: osReleasePath, link: "/etc/os-release.loop"}, p4Entry{name: "etc/os-release.loop", link: "/" + osReleasePath},
@@ -46,7 +50,7 @@ func TestRun_DebianVersionUnreadableIsReportedOnDebianOnly(t *testing.T) {
 			for _, u := range doc.Unread {
 				unread = append(unread, u.Path)
 			}
-			if code != tc.wantCode {
+			if tc.wantCode >= 0 && code != tc.wantCode {
 				t.Fatalf("Run = %d, want %d\nunread: %v\nstdout: %s\nstderr: %s", code, tc.wantCode, unread, out, errOut)
 			}
 			if tc.wantUnread == "" {
