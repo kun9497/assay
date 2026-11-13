@@ -34,6 +34,7 @@ func TestDistroQualifierScope(t *testing.T) {
 		{"local point release contradicted by the installed purl, statement the installed one", "deb", "debian", "Debian:12", "debian-12.10", "debian-12.11", "debian-12.11", false, false},
 		{"local point release contradicted by the installed purl, statement the shared major", "deb", "debian", "Debian:12", "debian-12.10", "debian-12.11", "debian-12", false, true},
 		{"local point release confirmed by the installed purl, statement that point release", "deb", "debian", "Debian:12", "debian-12.10", "debian-12.10", "debian-12.10", false, true},
+		{"local point release, installed purl the major alone, statement that point release", "deb", "debian", "Debian:12", "debian-12.10", "debian-12", "debian-12.10", false, true},
 		{"installed point release, statement its major", "deb", "debian", "Debian:12", "", "debian-12.11", "debian-12", false, true},
 		{"installed major, statement another major", "deb", "debian", "Debian:12", "", "debian-12", "debian-11.11", false, false},
 		{"RHEL installed major alone, statement point release", "rpm", "redhat", "Red Hat:9", "", "rhel-9", "rhel-9.4", false, false},
