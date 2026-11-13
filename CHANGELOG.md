@@ -90,6 +90,14 @@ All notable changes to this project are documented here. The format follows
   other two pass to the release normalisation, suppressing two advisories and turning exit 1 into
   0 on a document that carried no codename; the numeric `ubuntu-22.04` still applies on its own
   and `noble` is still refused. (main QA of ef0bc1a, 2026-11-13)
+- VEX: two listings of one Ubuntu install -- `distro=ubuntu-22.04` at the top level and
+  `distro=jammy` under `metadata.component`, or the other way round -- merge to one package whose
+  purl keeps the codename, so the codename evidence a `jammy` / `JAMMY` / `ubuntu-jammy` statement
+  needs survives the merge whichever listing came first. 67e2cf6 kept the first listing's purl:
+  with the numeric one first the codename was lost and the statement refused (2 advisories back,
+  exit 1), with the codename one first it applied (exit 0). The numeric `ubuntu-22.04` statement
+  applies in both orders; `noble` in neither; a Debian codename, which is evidence of nothing, is
+  not preferred. (main QA of 67e2cf6, 2026-11-13)
 - VEX: a CycloneDX operating-system component's `syft:distro:versionCodename` is the scan's
   codename evidence, as os-release's `VERSION_CODENAME` is on an image, so a `jammy` / `JAMMY` /
   `ubuntu-jammy` statement applies to syft's SBOM of an Ubuntu image as it does to the image.

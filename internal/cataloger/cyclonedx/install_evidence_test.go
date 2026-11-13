@@ -152,3 +152,82 @@ func TestTwoBareReleaseClaimsLeaveUnkeyedInstallUnevaluated(t *testing.T) {
 		}
 	}
 }
+
+// Main QA of 67e2cf6 (2026-11-13): one apt listed with distro=ubuntu-22.04
+// in one place and distro=jammy in the other is one install, and the
+// merged purl keeps the codename -- the evidence a codename statement
+// needs -- whichever listing came first and however the codename is
+// spelled. A codename of another release is not the same install's and is
+// not taken; a Debian codename is not evidence of anything and the kept
+// listing's spelling stands.
+func TestMergedUbuntuListingsKeepTheCodename(t *testing.T) {
+	const numeric = "pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=ubuntu-22.04"
+	for _, tc := range []struct{ top, subject, want string }{
+		{numeric, "pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=jammy", "pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=jammy"},
+		{"pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=jammy", numeric, "pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=jammy"},
+		{numeric, "pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=JAMMY", "pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=JAMMY"},
+		{numeric, "pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=ubuntu-jammy", "pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=ubuntu-jammy"},
+		{numeric, numeric, numeric},
+	} {
+		pkgs := parseListingGroups(t, []string{tc.top}, []string{tc.subject})
+		if len(pkgs) != 1 || pkgs[0].PURL != tc.want || pkgs[0].Ecosystem != "Ubuntu:22.04:LTS" {
+			t.Errorf("top %s, subject %s: got %+v, want one apt with purl %s", tc.top, tc.subject, pkgs, tc.want)
+		}
+	}
+	// noble names another release: two installs, each keyed to its own.
+	pkgs := parseListingGroups(t, []string{numeric}, []string{"pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=noble"})
+	if len(pkgs) != 2 || pkgs[0].PURL != numeric {
+		t.Errorf("noble beside ubuntu-22.04: got %+v, want two installs with the first purl unchanged", pkgs)
+	}
+	const bookworm = "pkg:deb/debian/apt@2.6.1?arch=amd64&distro=debian-12"
+	pkgs = parseListingGroups(t, []string{bookworm}, []string{"pkg:deb/debian/apt@2.6.1?arch=amd64&distro=bookworm"})
+	if len(pkgs) != 1 || pkgs[0].PURL != bookworm {
+		t.Errorf("bookworm beside debian-12: got %+v, want one apt keeping the kept spelling", pkgs)
+	}
+}
+
+// A codename of ANOTHER release beside the numeric spelling, both keyed by
+// the document's own OS (22.04): the codename is not this install's and is
+// not preferred, and a kept `noble` is the contradiction `ubuntu-24.04`
+// would be -- the merged purl names the release the package is judged on,
+// in either order (mergePURL had read the codename spelling as no release
+// at all and let it stand).
+func TestMergedUbuntuListingsRefuseAnotherReleasesCodename(t *testing.T) {
+	const (
+		start   = `{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,`
+		ubuntu  = `{"type":"operating-system","name":"ubuntu","version":"22.04","properties":[{"name":"syft:distro:id","value":"ubuntu"},{"name":"syft:distro:versionID","value":"22.04"}]}`
+		numeric = "pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=ubuntu-22.04"
+		noble   = "pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=noble"
+	)
+	listing := func(ref, purl string) string {
+		return `{"type":"library","name":"apt","version":"2.4.14","bom-ref":"` + ref + `","purl":"` + purl + `"}`
+	}
+	for _, tc := range [][2]string{{numeric, noble}, {noble, numeric}} {
+		doc := start + `"components":[` + ubuntu + `,` + listing("first", tc[0]) + `],"metadata":{"component":{"type":"container","name":"s","components":[` + listing("second", tc[1]) + `]}}}`
+		target, _, err := Parse(strings.NewReader(doc))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(target.Packages) != 1 || target.Packages[0].PURL != numeric || target.Packages[0].Ecosystem != "Ubuntu:22.04:LTS" {
+			t.Errorf("top %s, subject %s: got %+v, want one apt keyed Ubuntu:22.04:LTS with purl %s", tc[0], tc[1], target.Packages, numeric)
+		}
+	}
+}
+
+// The codename preference is for deb purls only (PR #324 review): the VEX
+// matcher reads an Ubuntu codename as release evidence for deb/ubuntu and
+// compares a language package's distro= verbatim, so which spelling the
+// merged npm purl carries decides which statement matches. A language
+// package keeps the kept listing's spelling, as before, in either order.
+func TestMergedLanguageListingsKeepTheKeptUbuntuSpelling(t *testing.T) {
+	const (
+		numeric = "pkg:npm/lodash@4.17.20?distro=ubuntu-22.04"
+		jammy   = "pkg:npm/lodash@4.17.20?distro=jammy"
+	)
+	for _, tc := range [][2]string{{numeric, jammy}, {jammy, numeric}} {
+		pkgs := parseListingGroups(t, []string{tc[0]}, []string{tc[1]})
+		if len(pkgs) != 1 || pkgs[0].PURL != tc[0] {
+			t.Errorf("top %s, subject %s: got %+v, want one lodash keeping %s", tc[0], tc[1], pkgs, tc[0])
+		}
+	}
+}
