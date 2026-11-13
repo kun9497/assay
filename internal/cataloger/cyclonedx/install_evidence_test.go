@@ -213,3 +213,21 @@ func TestMergedUbuntuListingsRefuseAnotherReleasesCodename(t *testing.T) {
 		}
 	}
 }
+
+// The codename preference is for deb purls only (PR #324 review): the VEX
+// matcher reads an Ubuntu codename as release evidence for deb/ubuntu and
+// compares a language package's distro= verbatim, so which spelling the
+// merged npm purl carries decides which statement matches. A language
+// package keeps the kept listing's spelling, as before, in either order.
+func TestMergedLanguageListingsKeepTheKeptUbuntuSpelling(t *testing.T) {
+	const (
+		numeric = "pkg:npm/lodash@4.17.20?distro=ubuntu-22.04"
+		jammy   = "pkg:npm/lodash@4.17.20?distro=jammy"
+	)
+	for _, tc := range [][2]string{{numeric, jammy}, {jammy, numeric}} {
+		pkgs := parseListingGroups(t, []string{tc[0]}, []string{tc[1]})
+		if len(pkgs) != 1 || pkgs[0].PURL != tc[0] {
+			t.Errorf("top %s, subject %s: got %+v, want one lodash keeping %s", tc[0], tc[1], pkgs, tc[0])
+		}
+	}
+}
