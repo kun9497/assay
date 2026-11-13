@@ -8,13 +8,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
-- Image scans: a package read from a per-file database -- a distroless image's
-  `var/lib/dpkg/status.d/<name>`, an Arch image's `var/lib/pacman/local/<pkg>/desc` -- carries in
-  `locations[].layerDigest` the layer its own file came from. The first file's layer had been
-  applied to every package: four of the five packages of `gcr.io/distroless/static-debian12`
-  (ca-certificates, media-types, netbase, tzdata) were reported under base-files' layer. The
-  single-file databases (apk, dpkg status, rpm) are unchanged. No schema change. (main QA of
-  ef0bc1a, 2026-11-13)
+- Debian releases before 7 are keyed the way OSV and the store spell them -- `Debian:3.0`, `3.1`,
+  `4.0`, `5.0`, `6.0` -- from a purl's codename (`distro=etch`) or a `VERSION_ID` of that shape.
+  An SBOM naming etch, lenny or squeeze had asked for `Debian:4`, `5`, `6`, which nothing holds,
+  and was not evaluated (exit 2) over a database carrying their advisories. wheezy onward stays on the
+  bare major; a bare `3` is refused as ambiguous (woody or sarge). (main QA of ef0bc1a, 2026-11-13)
 - Image scans: `etc/debian_version` (Debian's point release, D121) is asked for on a Debian
   image only, in the exact-path pass every image already makes for Bitnami's legacy marker.
   Asked for in the first pass beside os-release, it had been read, link-followed and charged to
@@ -73,6 +71,13 @@ All notable changes to this project are documented here. The format follows
   suppressed by a 12.15 statement, and kept the other way round; on a fixture database holding
   one unrated advisory the same two shapes written as 12.10/12.11 exited 0 and 1 under
   `--fail-on-unknown`. (D121; main QA of 672fe7a, 2026-11-13)
+- Image scans: a package read from a per-file database -- a distroless image's
+  `var/lib/dpkg/status.d/<name>`, an Arch image's `var/lib/pacman/local/<pkg>/desc` -- carries in
+  `locations[].layerDigest` the layer its own file came from. The first file's layer had been
+  applied to every package: four of the five packages of `gcr.io/distroless/static-debian12`
+  (ca-certificates, media-types, netbase, tzdata) were reported under base-files' layer. The
+  single-file databases (apk, dpkg status, rpm) are unchanged. No schema change. (main QA of
+  ef0bc1a, 2026-11-13)
 - CI examples (`docs/ci/github-actions.yml`, `docs/ci/gitlab-ci.yml`): the install is one `sh -c`
   line, the READMEs' shape without sudo, so its temporary file, variable and clean-up never reach
   the job's own steps. GitLab runs `before_script` and `script` in one shell, and the four-line

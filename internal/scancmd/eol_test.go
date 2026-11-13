@@ -258,6 +258,10 @@ func TestEOLCycle(t *testing.T) {
 	for eco, want := range map[string]string{
 		"Alpine:v3.19":       "3.19",
 		"Debian:12":          "12",
+		"Debian:6.0":         "6", // the two-part key's ".0" comes off: endoflife.date's cycle is "6"
+		"Debian:4.0":         "4",
+		"Debian:3.1":         "3.1", // ... except for the two releases endoflife.date names with it
+		"Debian:3.0":         "3.0",
 		"Ubuntu:22.04:LTS":   "22.04",
 		"Ubuntu:25.10":       "25.10",
 		"Red Hat:9":          "9",

@@ -8,11 +8,10 @@
 ## [Unreleased]
 
 ### Fixed
-- 이미지 스캔: 파일별 패키지 데이터베이스 — distroless 이미지의 `var/lib/dpkg/status.d/<name>`, Arch 이미지의
-  `var/lib/pacman/local/<pkg>/desc` — 에서 읽은 패키지는 `locations[].layerDigest`에 자기 파일이 온 레이어를 적습니다.
-  첫 파일의 레이어가 모든 패키지에 적용돼 `gcr.io/distroless/static-debian12`의 패키지 5개 중 4개(ca-certificates,
-  media-types, netbase, tzdata)가 base-files의 레이어로 보고됐습니다. 단일 파일 데이터베이스(apk, dpkg status, rpm)는
-  변화 없습니다. 스키마 변경 없음. (main ef0bc1a QA, 2026-11-13)
+- 7 이전 Debian 릴리스를 OSV와 저장소가 적는 대로 — `Debian:3.0`, `3.1`, `4.0`, `5.0`, `6.0` — 키합니다. purl의
+  코드네임(`distro=etch`)이나 그 모양의 `VERSION_ID`에서 그렇습니다. etch·lenny·squeeze를 적은 SBOM은 아무것도 없는
+  `Debian:4`, `5`, `6`을 조회해 advisory가 있는 DB에서도 미평가(종료 2)였습니다. wheezy 이후는 전과 같이 메이저만, 맨
+  `3`은 woody·sarge 중 하나라 거부합니다. (main ef0bc1a QA, 2026-11-13)
 - 이미지 스캔: `etc/debian_version`(Debian 포인트 릴리스, D121)을 Debian 이미지에서만, 모든 이미지가 Bitnami 레거시
   마커를 위해 이미 지나는 정확 경로 패스에서 요청합니다. os-release와 같은 첫 패스에서 요청할 때는 모든 이미지에서 읽고
   링크를 따라가고 읽기 예산에 셌습니다 — 그 이름의 파일이 파일 한도(512 MiB)를 넘는 Alpine 이미지는 패키지를 읽기 전에
@@ -55,6 +54,11 @@
   apt가 12.15 문장에 억제되고 반대 순서에선 남았으며, 미평가 advisory 한 건을 담은 소형 DB에서 같은 두 형태를 12.10/12.11로
   적으면 `--fail-on-unknown`에서 종료 0과 1로 갈렸습니다.
   (D121; main 672fe7a QA, 2026-11-13)
+- 이미지 스캔: 파일별 패키지 데이터베이스 — distroless 이미지의 `var/lib/dpkg/status.d/<name>`, Arch 이미지의
+  `var/lib/pacman/local/<pkg>/desc` — 에서 읽은 패키지는 `locations[].layerDigest`에 자기 파일이 온 레이어를 적습니다.
+  첫 파일의 레이어가 모든 패키지에 적용돼 `gcr.io/distroless/static-debian12`의 패키지 5개 중 4개(ca-certificates,
+  media-types, netbase, tzdata)가 base-files의 레이어로 보고됐습니다. 단일 파일 데이터베이스(apk, dpkg status, rpm)는
+  변화 없습니다. 스키마 변경 없음. (main ef0bc1a QA, 2026-11-13)
 - CI 예제(`docs/ci/github-actions.yml`, `docs/ci/gitlab-ci.yml`): 설치가 README와 같은 모양의 `sh -c` 한 줄(sudo 없이)이라
   임시 파일·변수·정리가 작업의 다른 단계에 닿지 않습니다. GitLab은 `before_script`와 `script`를 한 셸에서 실행하므로
   네 줄 형태의 `trap 'rm -f "$t"' EXIT`가 뒤 단계가 `t`에 넣은 `report.txt`를 지우고 설치용 임시 파일을 남겼습니다.

@@ -2,18 +2,19 @@ package pkgmeta
 
 import "strings"
 
-// DebianReleases maps Debian codenames to the release number os-release's
-// VERSION_ID carries, for the purl `distro=` qualifier (a codename, the
-// shape of the purl spec's own deb example `distro=jessie`) and os-release's
-// VERSION_CODENAME.
-// Releases before etch carried a two-part number and no advisory data this
-// store holds, so they are left out; a codename not listed is not a
-// release and is compared as written.
+// DebianReleases maps Debian codenames to the release number the store keys
+// them on (Distro.Ecosystem's Debian rule): the bare major from wheezy on,
+// OSV's two-part number before it. For the purl `distro=` qualifier (a
+// codename, the shape of the purl spec's own deb example `distro=jessie`)
+// and os-release's VERSION_CODENAME. A codename not listed is not a release
+// and is compared as written.
 func DebianReleases() map[string]string {
 	return map[string]string{
-		"etch":     "4",
-		"lenny":    "5",
-		"squeeze":  "6",
+		"woody":    "3.0",
+		"sarge":    "3.1",
+		"etch":     "4.0",
+		"lenny":    "5.0",
+		"squeeze":  "6.0",
 		"wheezy":   "7",
 		"jessie":   "8",
 		"stretch":  "9",
