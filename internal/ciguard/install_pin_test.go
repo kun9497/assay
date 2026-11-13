@@ -70,6 +70,16 @@ var (
 // GitLab job of the example was refused as the installer's leftover). A
 // document with no install line is returned whole, so the leak check still
 // reads it.
+// leakedInInstallJob is what the guard refuses in a document: the first
+// variable or EXIT trap left in the install job, "" when there is none.
+// TestInstallOneLiners_RunTheScriptOnlyAfterItDownloaded holds the shipped
+// documents to it, and TestInstallOneLiners_LeakGuardReadsTheInstallJobOnly
+// holds it to composed ones -- the shipped documents are clean, so only the
+// composed ones can show the job scoping and the EXIT-only match at work.
+func leakedInInstallJob(text string) string {
+	return leakedIntoJob.FindString(installJob(text))
+}
+
 func installJob(text string) string {
 	lines := strings.Split(text, "\n")
 	topLevel := func(line string) bool {
@@ -154,7 +164,7 @@ func TestInstallOneLiners_RunTheScriptOnlyAfterItDownloaded(t *testing.T) {
 		if m := fixedName.FindString(text); m != "" {
 			t.Errorf("%s downloads the installer to a fixed name in the working directory, which overwrites a file of that name: %q", doc, m)
 		}
-		if m := leakedIntoJob.FindString(installJob(text)); m != "" {
+		if m := leakedInInstallJob(text); m != "" {
 			t.Errorf("%s sets the installer's variable or trap in the calling shell, which GitLab shares with the job's own steps: %q", doc, strings.TrimSpace(m))
 		}
 		downloads := 0
@@ -227,7 +237,7 @@ func TestInstallOneLiners_LeakGuardReadsTheInstallJobOnly(t *testing.T) {
 		"EXIT trap after":  current + "\n" + independent,
 		"EXIT trap before": independent + "\n" + current,
 	} {
-		if m := leakedIntoJob.FindString(installJob(doc)); m != "" {
+		if m := leakedInInstallJob(doc); m != "" {
 			t.Errorf("%s: the guard refused %q outside the install job", name, strings.TrimSpace(m))
 		}
 	}
@@ -237,10 +247,10 @@ func TestInstallOneLiners_LeakGuardReadsTheInstallJobOnly(t *testing.T) {
 	if fourLine == current {
 		t.Fatalf("could not compose the four-line form from the current example")
 	}
-	if m := leakedIntoJob.FindString(installJob(fourLine)); m == "" {
+	if m := leakedInInstallJob(fourLine); m == "" {
 		t.Errorf("the four-line form inside the install job is not refused")
 	}
-	if m := leakedIntoJob.FindString(installJob(fourLine + "\n" + independent)); m == "" {
+	if m := leakedInInstallJob(fourLine + "\n" + independent); m == "" {
 		t.Errorf("the four-line form inside the install job is not refused when another job follows")
 	}
 	if got := installJob("a: 1\nb:\n  - x\n"); got != "a: 1\nb:\n  - x\n" {
